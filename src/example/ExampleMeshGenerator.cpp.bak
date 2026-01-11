@@ -1,0 +1,168 @@
+#include "example/ExampleMeshGenerator.h"
+#include <cmath>
+#include <algorithm>
+
+namespace KooRemapper {
+
+namespace {
+    constexpr double PI = 3.14159265358979323846;
+    constexpr double DEG_TO_RAD = PI / 180.0;
+    constexpr double EPSILON = 1e-10;
+}
+
+ExampleMeshGenerator::ExampleMeshGenerator()
+    : customCenterline_(nullptr), customCrossSection_(nullptr)
+{}
+
+Mesh ExampleMeshGenerator::generateFlatMesh(const ExampleMeshConfig& config) {
+    Mesh mesh;
+    mesh.setName("flat_structured_mesh");
+
+    double dx = config.lengthI / config.dimI;
+    double dy = config.lengthJ / config.dimJ;
+    double dz = config.lengthK / config.dimK;
+
+    int nodeId = config.startNodeId;
+    int elemId = config.startElementId;
+
+    // Create nodes
+    for (int k = 0; k <= config.dimK; ++k) {
+        for (int j = 0; j <= config.dimJ; ++j) {
+            for (int i = 0; i <= config.dimI; ++i) {
+                double x = i * dx;
+                double y = j * dy - config.lengthJ / 2.0;
+                double z = k * dz - config.lengthK / 2.0;
+                mesh.addNode(Node(nodeId++, x, y, z));
+            }
+        }
+    }
+
+    // Create elements
+    int nodesPerRow = config.dimI + 1;
+    int nodesPerSlice = nodesPerRow * (config.dimJ + 1);
+
+    for (int k = 0; k < config.dimK; ++k) {
+        for (int j = 0; j < config.dimJ; ++j) {
+            for (int i = 0; i < config.dimI; ++i) {
+                // Calculate base node index
+                int base = config.startNodeId + i + j * nodesPerRow + k * nodesPerSlice;
+
+                // 8 nodes of hexahedron (LS-DYNA ordering)
+                std::array<int, 8> nodes = {
+                    base,                           // 0: i, j, k
+                    base + 1,                       // 1: i+1, j, k
+                    base + 1 + nodesPerRow,         // 2: i+1, j+1, k
+                    base + nodesPerRow,             // 3: i, j+1, k
+                    base + nodesPerSlice,           // 4: i, j, k+1
+                    base + 1 + nodesPerSlice,       // 5: i+1, j, k+1
+                    base + 1 + nodesPerRow + nodesPerSlice,  // 6: i+1, j+1, k+1
+                    base + nodesPerRow + nodesPerSlice       // 7: i, j+1, k+1
+                };
+
+                Element elem(elemId++, config.partId, nodes);
+                elem.i = i;
+                elem.j = j;
+                elem.k = k;
+                elem.indexAssigned = true;
+                mesh.addElement(elem);
+            }
+        }
+    }
+
+    // Add part
+    Part part;
+    part.id = config.partId;
+    part.name = "flat_part";
+    mesh.addPart(part);
+
+    return mesh;
+}
+
+Mesh ExampleMeshGenerator::generateBentMesh(const ExampleMeshConfig& config) {
+    Mesh mesh;
+    mesh.setName("bent_structured_mesh");
+
+    int nodeId = config.startNodeId;
+    int elemId = config.startElementId;
+
+    // Create nodes at bent positions
+    for (int k = 0; k <= config.dimK; ++k) {
+        for (int j = 0; j <= config.dimJ; ++j) {
+            for (int i = 0; i <= config.dimI; ++i) {
+                Vector3D pos = computeBentPosition(i, j, k, config);
+                mesh.addNode(Node(nodeId++, pos));
+            }
+        }
+    }
+
+    // Create elements (same connectivity as flat mesh)
+    int nodesPerRow = config.dimI + 1;
+    int nodesPerSlice = nodesPerRow * (config.dimJ + 1);
+
+    for (int k = 0; k < config.dimK; ++k) {
+        for (int j = 0; j < config.dimJ; ++j) {
+            for (int i = 0; i < config.dimI; ++i) {
+                int base = config.startNodeId + i + j * nodesPerRow + k * nodesPerSlice;
+
+                std::array<int, 8> nodes = {
+                    base,
+                    base + 1,
+                    base + 1 + nodesPerRow,
+                    base + nodesPerRow,
+                    base + nodesPerSlice,
+                    base + 1 + nodesPerSlice,
+                    base + 1 + nodesPerRow + nodesPerSlice,
+                    base + nodesPerRow + nodesPerSlice
+                };
+
+                Element elem(elemId++, config.partId, nodes);
+                elem.i = i;
+                elem.j = j;
+                elem.k = k;
+                elem.indexAssigned = true;
+                mesh.addElement(elem);
+            }
+        }
+    }
+
+    // Add part
+    Part part;
+    part.id = config.partId;
+    part.name = "bent_part";
+    mesh.addPart(part);
+
+    return mesh;
+}
+
+Mesh ExampleMeshGenerator::generateFlatUnstructuredMesh(const ExampleMeshConfig& config,
+                                                         int refineFactor) {
+    // Create a refined flat mesh for testing the mapping
+    ExampleMeshConfig refinedConfig = config;
+    refinedConfig.dimI *= refineFactor;
+    refinedConfig.dimJ *= refineFactor;
+    refinedConfig.dimK *= refineFactor;
+
+    Mesh mesh = generateFlatMesh(refinedConfig);
+    mesh.setName("flat_unstructured_mesh");
+
+    return mesh;
+}
+
+Vector3D ExampleMeshGenerator::computeBentPosition(int i, int j, int k,
+                                                    const ExampleMeshConfig& config) {
+    // Parameter t along the length (0 to 1)
+    double t = static_cast<double>(i) / config.dimI;
+
+    // Local coordinates in cross-section (-0.5 to 0.5)
+    double localJ = static_cast<double>(j) / config.dimJ - 0.5;
+    double localK = static_cast<double>(k) / config.dimK - 0.5;
+
+    // Get centerline position
+    Vector3D center = getCenterlinePoint(t, config);
+
+    // Get cross-section scaling
+    auto [scaleJ, scaleK] = getCrossSectionScale(t, config);
+
+    // For WATERDROP type, use fixed coordinate system
+    // - Width (J) is always Z direction
+    // - Thickness (K) points outward from the U-curve center

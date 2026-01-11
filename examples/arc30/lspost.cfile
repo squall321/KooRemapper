@@ -1,0 +1,6 @@
+$# LS-PrePost command file created by LS-PrePost(R) 2025 R1 (v4.12.6) - 14May2025 -64bit-Window
+$# Created on Jan-11-2026 (00:50:27)
+open keyword "D:\KooRemapper\examples\arc30\arc30_remapped.k"
+Message 1
+Message 0
+new

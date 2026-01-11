@@ -1,0 +1,41 @@
+# Build directories
+build/
+cmake-build-*/
+out/
+
+# IDE files
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.sln.docstates
+
+# Compiled files
+*.obj
+*.o
+*.a
+*.lib
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test output
+*.k.bak
+*_test.k
+test_error.k
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+nul
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# NVIDIA logs
+NVIDIA Corporation/
+
