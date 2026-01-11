@@ -9,10 +9,10 @@
 namespace KooRemapper {
 
 /**
- * Strain tensor components (symmetric 3x3 tensor)
+ * Legacy strain data structure
  * Stored as: [e_xx, e_yy, e_zz, e_xy, e_yz, e_xz]
  */
-struct StrainTensor {
+struct StrainData {
     double exx = 0.0;  // Normal strain in x
     double eyy = 0.0;  // Normal strain in y
     double ezz = 0.0;  // Normal strain in z
@@ -56,8 +56,8 @@ struct StrainTensor {
  */
 struct ElementStrainData {
     int elementId;
-    StrainTensor strain;           // Average strain for element
-    std::array<StrainTensor, 8> nodeStrains;  // Strain at each node
+    StrainData strain;           // Average strain for element
+    std::array<StrainData, 8> nodeStrains;  // Strain at each node
     double jacobian;               // Element Jacobian determinant
 };
 

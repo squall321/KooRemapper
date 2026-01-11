@@ -11,7 +11,7 @@
 namespace KooRemapper {
 
 // Principal strain calculation using analytical solution for 3x3 symmetric matrix
-std::array<double, 3> StrainTensor::principal() const {
+std::array<double, 3> StrainData::principal() const {
     // Characteristic polynomial: λ³ - I1*λ² + I2*λ - I3 = 0
     // Invariants
     double I1 = exx + eyy + ezz;
@@ -108,7 +108,7 @@ bool StrainCalculator::calculateElementStrain(const Element& element, ElementStr
     const double gp = 1.0 / std::sqrt(3.0);
     const double gaussPoints[2] = {-gp, gp};
 
-    StrainTensor avgStrain;
+    StrainData avgStrain;
     int numPoints = 0;
 
     // Integrate over Gauss points
@@ -119,7 +119,7 @@ bool StrainCalculator::calculateElementStrain(const Element& element, ElementStr
                 auto F = calculateDeformationGradient(element, xi, eta, zeta);
 
                 // Calculate strain based on type
-                StrainTensor strain;
+                StrainData strain;
 
                 if (strainType_ == StrainType::ENGINEERING) {
                     // Engineering strain: e = 0.5 * (F + F^T) - I
@@ -209,7 +209,7 @@ bool StrainCalculator::calculateElementStrain(const Element& element, ElementStr
         auto F = calculateDeformationGradient(element,
             nodeCoords[n][0], nodeCoords[n][1], nodeCoords[n][2]);
 
-        StrainTensor& ns = data.nodeStrains[n];
+        StrainData& ns = data.nodeStrains[n];
 
         // Use Green-Lagrange for node strains
         double C[3][3];

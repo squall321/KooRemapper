@@ -45,6 +45,7 @@ set(CORE_SOURCES
 set(PARSER_SOURCES
     src/parser/KFileReader.cpp
     src/parser/KFileWriter.cpp
+    src/parser/DynainWriter.cpp
 )
 
 # Source files - Grid
@@ -74,6 +75,11 @@ set(EXAMPLE_SOURCES
 # Source files - Analysis
 set(ANALYSIS_SOURCES
     src/analysis/StrainCalculator.cpp
+    src/analysis/DeformationGradient.cpp
+    src/analysis/StrainTensor.cpp
+    src/analysis/StressTensor.cpp
+    src/analysis/MaterialModel.cpp
+    src/analysis/ElementAnalyzer.cpp
 )
 
 # Source files - CLI
@@ -100,6 +106,11 @@ add_library(kooremapper_lib STATIC
     ${CLI_SOURCES}
     ${UTIL_SOURCES}
 )
+
+# Define M_PI for MSVC
+if(MSVC)
+    target_compile_definitions(kooremapper_lib PRIVATE _USE_MATH_DEFINES)
+endif()
 
 # Main executable
 add_executable(KooRemapper src/main.cpp)

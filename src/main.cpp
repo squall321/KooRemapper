@@ -2,10 +2,13 @@
 #include "core/Mesh.h"
 #include "parser/KFileReader.h"
 #include "parser/KFileWriter.h"
+#include "parser/DynainWriter.h"
 #include "mapper/MeshRemapper.h"
 #include "mapper/FlatMeshGenerator.h"
 #include "example/ExampleMeshGenerator.h"
 #include "analysis/StrainCalculator.h"
+#include "analysis/ElementAnalyzer.h"
+#include "analysis/MaterialModel.h"
 #include "cli/ArgumentParser.h"
 #include "cli/ConsoleOutput.h"
 #include "util/Logger.h"
@@ -405,6 +408,133 @@ int runUnfold(const std::string& bentFile, const std::string& outputFile,
 }
 
 /**
+ * Calculate prestress from deformed configuration
+ */
+int runPrestress(const std::string& refFile, const std::string& defFile,
+                 const std::string& outputFile, 
+                 double E, double nu,
+                 StrainType strainType,
+                 bool outputCSV,
+                 const ConsoleOutput& console) {
+    Timer timer;
+
+    // Load reference mesh
+    console.info("Loading reference mesh: " + refFile);
+    KFileReader reader;
+    Mesh refMesh;
+    try {
+        refMesh = reader.readFile(refFile);
+    } catch (const std::exception& e) {
+        console.error("Failed to load reference mesh: " + std::string(e.what()));
+        return 1;
+    }
+    console.success("Loaded " + std::to_string(refMesh.getNodeCount()) + " nodes, " +
+                   std::to_string(refMesh.getElementCount()) + " elements");
+
+    // Load deformed mesh
+    console.info("Loading deformed mesh: " + defFile);
+    Mesh defMesh;
+    try {
+        defMesh = reader.readFile(defFile);
+    } catch (const std::exception& e) {
+        console.error("Failed to load deformed mesh: " + std::string(e.what()));
+        return 1;
+    }
+    console.success("Loaded " + std::to_string(defMesh.getNodeCount()) + " nodes, " +
+                   std::to_string(defMesh.getElementCount()) + " elements");
+
+    // Validate mesh pair
+    std::string validationError;
+    if (!ElementAnalyzer::validateMeshPair(refMesh, defMesh, validationError)) {
+        console.error("Mesh pair validation failed: " + validationError);
+        return 1;
+    }
+
+    // Setup analyzer
+    console.info("Analyzing strain/stress...");
+    ElementAnalyzer analyzer;
+    analyzer.setStrainType(strainType);
+
+    bool hasMaterial = (E > 0 && nu > 0 && nu < 0.5);
+    if (hasMaterial) {
+        MaterialModel material = MaterialModel::isotropicElastic(E, nu);
+        analyzer.setMaterial(material);
+        console.info("Material: E=" + std::to_string(E) + ", nu=" + std::to_string(nu));
+    } else {
+        console.info("No material specified, computing strain only");
+    }
+
+    // Run analysis with progress
+    MeshAnalysisResult results = analyzer.analyzeMesh(refMesh, defMesh, 
+        [&console](int percent) {
+            console.progressBar(percent);
+        });
+    console.clearLine();
+    console.success("Analysis completed");
+
+    // Print statistics
+    std::cout << "\n";
+    console.header("Analysis Results");
+    console.keyValue("Valid elements", std::to_string(results.validElements));
+    if (results.invalidElements > 0) {
+        console.warning("Invalid elements: " + std::to_string(results.invalidElements));
+    }
+    
+    console.keyValue("Strain type", 
+        strainType == StrainType::ENGINEERING ? "Engineering" : "Green-Lagrange");
+    console.keyValue("Min von Mises strain", std::to_string(results.minVonMisesStrain));
+    console.keyValue("Max von Mises strain", std::to_string(results.maxVonMisesStrain));
+    console.keyValue("Avg von Mises strain", std::to_string(results.avgVonMisesStrain));
+
+    if (hasMaterial) {
+        std::cout << "\n";
+        console.keyValue("Min von Mises stress", std::to_string(results.minVonMisesStress));
+        console.keyValue("Max von Mises stress", std::to_string(results.maxVonMisesStress));
+        console.keyValue("Avg von Mises stress", std::to_string(results.avgVonMisesStress));
+    }
+    std::cout << "\n";
+
+    // Write output
+    DynainWriter writer;
+    writer.setLargeDeformation(strainType == StrainType::GREEN_LAGRANGE);
+
+    if (hasMaterial) {
+        console.info("Writing dynain file: " + outputFile);
+        if (!writer.writeFile(outputFile, results, strainType, refFile, defFile)) {
+            console.error("Failed to write dynain: " + writer.getErrorMessage());
+            return 1;
+        }
+        console.success("Dynain file written successfully");
+    }
+
+    // Write CSV if requested or if no material
+    if (outputCSV || !hasMaterial) {
+        std::string csvFile = outputFile;
+        if (hasMaterial) {
+            // Change extension to .csv
+            size_t dotPos = csvFile.rfind('.');
+            if (dotPos != std::string::npos) {
+                csvFile = csvFile.substr(0, dotPos) + ".csv";
+            } else {
+                csvFile += ".csv";
+            }
+        }
+        
+        console.info("Writing CSV file: " + csvFile);
+        if (!writer.writeStrainCSV(csvFile, results)) {
+            console.error("Failed to write CSV: " + writer.getErrorMessage());
+            return 1;
+        }
+        console.success("CSV file written successfully");
+    }
+
+    timer.stop();
+    console.info("Total time: " + timer.elapsedString());
+
+    return 0;
+}
+
+/**
  * Display mesh info
  */
 int runInfo(const std::string& meshFile, const ConsoleOutput& console) {
@@ -491,6 +621,7 @@ int main(int argc, char* argv[]) {
         console.println("  unfold    Generate flat mesh from a bent structured mesh");
         console.println("  generate  Generate example meshes for testing");
         console.println("  strain    Calculate strain between two meshes");
+        console.println("  prestress Calculate prestress from deformed configuration");
         console.println("  info      Display information about a mesh file");
         console.println("  help      Show help for a command");
         console.println("  version   Show version information");
@@ -569,6 +700,26 @@ int main(int argc, char* argv[]) {
                 std::cout << "\n";
                 console.println("  The generated flat mesh can be used as a reference for mapping");
                 console.println("  detailed flat meshes back to the bent shape.");
+            } else if (helpCmd == "prestress") {
+                console.println("Usage: KooRemapper prestress [options] <ref_mesh> <def_mesh> <output>");
+                std::cout << "\n";
+                console.println("Calculate prestress from reference and deformed mesh configurations.");
+                std::cout << "\n";
+                console.println("Arguments:");
+                console.println("  ref_mesh   Reference (undeformed) mesh (k-file)");
+                console.println("  def_mesh   Deformed mesh (k-file, same topology)");
+                console.println("  output     Output file (dynain format or CSV)");
+                std::cout << "\n";
+                console.println("Options:");
+                console.println("  --E <value>      Young's modulus (required for stress)");
+                console.println("  --nu <value>     Poisson's ratio (required for stress)");
+                console.println("  --strain <type>  Strain type: engineering (default), green");
+                console.println("  --csv            Also output strain/stress CSV file");
+                std::cout << "\n";
+                console.println("Description:");
+                console.println("  Computes strain tensor from mesh deformation.");
+                console.println("  If E and nu are provided, also computes stress using Hooke's law");
+                console.println("  and outputs *INITIAL_STRESS_SOLID cards in dynain format.");
             } else {
                 console.error("Unknown command: " + helpCmd);
                 return 1;
@@ -582,6 +733,7 @@ int main(int argc, char* argv[]) {
             console.println("  unfold    Generate flat mesh from a bent structured mesh");
             console.println("  generate  Generate example meshes for testing");
             console.println("  strain    Calculate strain between two meshes");
+            console.println("  prestress Calculate prestress from deformed configuration");
             console.println("  info      Display information about a mesh file");
             console.println("  help      Show help for a command");
             console.println("  version   Show version information");
@@ -673,6 +825,48 @@ int main(int argc, char* argv[]) {
 
         printBanner(console);
         return runStrain(refFile, defFile, output, strainType, console);
+    }
+
+    // Prestress command
+    if (command == "prestress") {
+        ArgumentParser parser("KooRemapper prestress", "Calculate prestress");
+        parser.addPositional("ref_mesh", "Reference mesh (k-file)");
+        parser.addPositional("def_mesh", "Deformed mesh (k-file)");
+        parser.addPositional("output", "Output file (dynain or csv)");
+        parser.addOption("", "E", "Young's modulus", "0");
+        parser.addOption("", "nu", "Poisson's ratio", "0");
+        parser.addOption("", "strain", "Strain type: engineering, green", "engineering");
+        parser.addFlag("", "csv", "Output CSV file");
+
+        int subArgc = argc - 1;
+        char** subArgv = argv + 1;
+
+        if (!parser.parse(subArgc, subArgv)) {
+            console.error(parser.getError());
+            return 1;
+        }
+
+        std::string refFile = parser.getPositional("ref_mesh");
+        std::string defFile = parser.getPositional("def_mesh");
+        std::string output = parser.getPositional("output");
+        
+        if (refFile.empty() || defFile.empty() || output.empty()) {
+            console.error("Usage: KooRemapper prestress [options] <ref_mesh> <def_mesh> <output>");
+            return 1;
+        }
+
+        double E = parser.getDouble("E").value_or(0.0);
+        double nu = parser.getDouble("nu").value_or(0.0);
+        std::string strainTypeStr = parser.getOption("strain");
+        bool outputCSV = parser.hasFlag("csv");
+
+        StrainType strainType = StrainType::ENGINEERING;
+        if (strainTypeStr == "green" || strainTypeStr == "green-lagrange") {
+            strainType = StrainType::GREEN_LAGRANGE;
+        }
+
+        printBanner(console);
+        return runPrestress(refFile, defFile, output, E, nu, strainType, outputCSV, console);
     }
 
     // Info command
