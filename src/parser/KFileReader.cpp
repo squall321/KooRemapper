@@ -71,6 +71,16 @@ bool KFileReader::parseFile(std::ifstream& file) {
                     return false;
                 }
             }
+            else if (currentKeyword_ == "PART") {
+                if (!parsePartSection(file)) {
+                    return false;
+                }
+            }
+            else if (currentKeyword_ == "MAT_ELASTIC" || currentKeyword_ == "MAT_001") {
+                if (!parseMatElasticSection(file)) {
+                    return false;
+                }
+            }
             else if (currentKeyword_ == "END") {
                 break;  // End of file
             }
@@ -220,6 +230,159 @@ bool KFileReader::parseElementSolidSection(std::ifstream& file) {
         reportProgress(lastPos);
     }
 
+    return true;
+}
+
+bool KFileReader::parsePartSection(std::ifstream& file) {
+    std::string line;
+    std::streampos lastPos = file.tellg();
+    int dataLineCount = 0;  // Track data lines (skip comment lines)
+    
+    // *PART format:
+    // $ heading (optional comment line)
+    // pid, secid, mid, eosid, hgid, grav, adpopt, tmid
+    
+    int pid = 0, secid = 0, mid = 0;
+    
+    while (std::getline(file, line)) {
+        currentLine_++;
+        linesProcessed_++;
+        
+        // Normalize line endings
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        
+        // Skip empty lines
+        if (line.empty()) {
+            lastPos = file.tellg();
+            continue;
+        }
+        
+        // Skip comment lines (but don't count as data)
+        if (isCommentLine(line)) {
+            lastPos = file.tellg();
+            continue;
+        }
+        
+        // Check for new keyword (end of PART section)
+        if (isKeywordLine(line)) {
+            file.seekg(lastPos);
+            currentLine_--;
+            return true;
+        }
+        
+        // Parse part data (first non-comment data line)
+        try {
+            auto tokens = tokenize(line);
+            if (tokens.size() >= 3) {
+                pid = parseInt(tokens[0]);
+                secid = parseInt(tokens[1]);
+                mid = parseInt(tokens[2]);
+            }
+            else if (line.length() >= 24) {
+                // Fixed format: 8-character fields
+                pid = parseInt(line.substr(0, 8));
+                secid = parseInt(line.substr(8, 8));
+                mid = parseInt(line.substr(16, 8));
+            }
+            
+            if (pid > 0) {
+                mesh_.addPart(pid, secid, mid);
+            }
+        }
+        catch (const std::exception& e) {
+            // Non-fatal, just skip
+        }
+        
+        lastPos = file.tellg();
+        dataLineCount++;
+        
+        // Only read one data line per *PART card
+        if (dataLineCount >= 1) {
+            break;
+        }
+    }
+    
+    return true;
+}
+
+bool KFileReader::parseMatElasticSection(std::ifstream& file) {
+    std::string line;
+    std::streampos lastPos = file.tellg();
+    int dataLineCount = 0;
+    
+    // *MAT_ELASTIC format:
+    // Card 1: mid, ro, e, pr, da, db, not used, not used
+    // (mid=material ID, ro=density, e=Young's modulus, pr=Poisson's ratio)
+    
+    int mid = 0;
+    double density = 0, E = 0, nu = 0;
+    
+    while (std::getline(file, line)) {
+        currentLine_++;
+        linesProcessed_++;
+        
+        // Normalize line endings
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        
+        // Skip empty lines
+        if (line.empty()) {
+            lastPos = file.tellg();
+            continue;
+        }
+        
+        // Skip comment lines
+        if (isCommentLine(line)) {
+            lastPos = file.tellg();
+            continue;
+        }
+        
+        // Check for new keyword
+        if (isKeywordLine(line)) {
+            file.seekg(lastPos);
+            currentLine_--;
+            return true;
+        }
+        
+        // Parse material data (first data line contains the essential info)
+        if (dataLineCount == 0) {
+            try {
+                auto tokens = tokenize(line);
+                if (tokens.size() >= 4) {
+                    mid = parseInt(tokens[0]);
+                    density = parseDouble(tokens[1]);
+                    E = parseDouble(tokens[2]);
+                    nu = parseDouble(tokens[3]);
+                }
+                else if (line.length() >= 40) {
+                    // Fixed format: 10-character fields typically
+                    mid = parseInt(line.substr(0, 10));
+                    density = parseDouble(line.substr(10, 10));
+                    E = parseDouble(line.substr(20, 10));
+                    nu = parseDouble(line.substr(30, 10));
+                }
+                
+                if (mid > 0 && E > 0) {
+                    mesh_.addMaterial(mid, E, nu, density);
+                }
+            }
+            catch (const std::exception& e) {
+                // Non-fatal, just skip
+            }
+        }
+        
+        lastPos = file.tellg();
+        dataLineCount++;
+        
+        // Only need first data line for *MAT_ELASTIC
+        if (dataLineCount >= 1) {
+            break;
+        }
+    }
+    
     return true;
 }
 

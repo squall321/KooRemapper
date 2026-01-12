@@ -6,6 +6,9 @@
 #include "mapper/MeshRemapper.h"
 #include "mapper/FlatMeshGenerator.h"
 #include "example/ExampleMeshGenerator.h"
+#include "generator/VariableDensityConfig.h"
+#include "generator/YamlConfigReader.h"
+#include "generator/VariableDensityMeshGenerator.h"
 #include "analysis/StrainCalculator.h"
 #include "analysis/ElementAnalyzer.h"
 #include "analysis/MaterialModel.h"
@@ -430,6 +433,16 @@ int runPrestress(const std::string& refFile, const std::string& defFile,
     }
     console.success("Loaded " + std::to_string(refMesh.getNodeCount()) + " nodes, " +
                    std::to_string(refMesh.getElementCount()) + " elements");
+    
+    // Report materials found in K-file
+    if (refMesh.getMaterialCount() > 0) {
+        console.info("Found " + std::to_string(refMesh.getMaterialCount()) + " material(s) in K-file:");
+        for (const auto& [matId, mat] : refMesh.getMaterials()) {
+            console.println("  Material " + std::to_string(matId) + 
+                          ": E=" + std::to_string(mat.E) + 
+                          ", nu=" + std::to_string(mat.nu));
+        }
+    }
 
     // Load deformed mesh
     console.info("Loading deformed mesh: " + defFile);
@@ -454,12 +467,25 @@ int runPrestress(const std::string& refFile, const std::string& defFile,
     console.info("Analyzing strain/stress...");
     ElementAnalyzer analyzer;
     analyzer.setStrainType(strainType);
+    analyzer.setUsePartMaterials(true);  // Enable per-part material lookup
 
-    bool hasMaterial = (E > 0 && nu > 0 && nu < 0.5);
-    if (hasMaterial) {
+    // Check if we have materials from command line or K-file
+    bool hasCmdLineMaterial = (E > 0 && nu > 0 && nu < 0.5);
+    bool hasKFileMaterial = (refMesh.getMaterialCount() > 0);
+    bool hasMaterial = hasCmdLineMaterial || hasKFileMaterial;
+    
+    if (hasCmdLineMaterial) {
+        // Command line material overrides K-file materials completely
         MaterialModel material = MaterialModel::isotropicElastic(E, nu);
         analyzer.setMaterial(material);
-        console.info("Material: E=" + std::to_string(E) + ", nu=" + std::to_string(nu));
+        analyzer.setUsePartMaterials(false);  // Disable per-part lookup
+        console.info("Using command-line material: E=" + std::to_string(E) + ", nu=" + std::to_string(nu));
+        if (hasKFileMaterial) {
+            console.info("(K-file materials are overridden)");
+        }
+    } else if (hasKFileMaterial) {
+        analyzer.setUsePartMaterials(true);  // Enable per-part lookup
+        console.info("Using materials from K-file (per-part)");
     } else {
         console.info("No material specified, computing strain only");
     }
@@ -608,6 +634,155 @@ int runInfo(const std::string& meshFile, const ConsoleOutput& console) {
     return 0;
 }
 
+/**
+ * Generate variable density mesh from YAML config
+ */
+int runGenerateVar(const std::string& configFile, const std::string& outputFile,
+                   const std::string& refFile, bool noScale,
+                   const ConsoleOutput& console) {
+    Timer timer;
+    
+    // Read YAML config
+    console.info("Reading configuration: " + configFile);
+    YamlConfigReader yamlReader;
+    VariableDensityConfig config;
+    try {
+        config = yamlReader.readFile(configFile);
+    } catch (const std::exception& e) {
+        console.error("Failed to read config: " + std::string(e.what()));
+        return 1;
+    }
+    
+    // Validate config
+    std::string validationError;
+    if (!config.validate(validationError)) {
+        console.error("Invalid configuration: " + validationError);
+        return 1;
+    }
+    
+    console.success("Configuration loaded");
+    console.keyValue("Total I elements", std::to_string(config.getTotalElementsI()));
+    console.keyValue("J elements", std::to_string(config.elementsJ));
+    console.keyValue("K elements", std::to_string(config.elementsK));
+    console.keyValue("Total elements", std::to_string(config.getTotalElements()));
+    
+    // Determine reference dimensions
+    double refLengthI = 0, refLengthJ = 0, refLengthK = 0;
+    
+    if (!refFile.empty()) {
+        // Load from command line reference file
+        console.info("Loading reference mesh: " + refFile);
+        KFileReader reader;
+        try {
+            Mesh refMesh = reader.readFile(refFile);
+            auto [minB, maxB] = refMesh.getBoundingBox();
+            refLengthI = maxB.x - minB.x;
+            refLengthJ = maxB.y - minB.y;
+            refLengthK = maxB.z - minB.z;
+            console.success("Reference dimensions: " + 
+                std::to_string(refLengthI) + " x " +
+                std::to_string(refLengthJ) + " x " +
+                std::to_string(refLengthK));
+        } catch (const std::exception& e) {
+            console.error("Failed to load reference: " + std::string(e.what()));
+            return 1;
+        }
+    } else if (!config.reference.flatMeshFile.empty() && !noScale) {
+        // Load from config's reference file
+        console.info("Loading reference mesh: " + config.reference.flatMeshFile);
+        KFileReader reader;
+        try {
+            Mesh refMesh = reader.readFile(config.reference.flatMeshFile);
+            auto [minB, maxB] = refMesh.getBoundingBox();
+            refLengthI = maxB.x - minB.x;
+            refLengthJ = maxB.y - minB.y;
+            refLengthK = maxB.z - minB.z;
+            console.success("Reference dimensions: " + 
+                std::to_string(refLengthI) + " x " +
+                std::to_string(refLengthJ) + " x " +
+                std::to_string(refLengthK));
+        } catch (const std::exception& e) {
+            console.error("Failed to load reference: " + std::string(e.what()));
+            return 1;
+        }
+    } else if (config.reference.hasDimensions() && !noScale) {
+        // Use config's direct dimensions
+        refLengthI = config.reference.lengthI;
+        refLengthJ = config.reference.lengthJ;
+        refLengthK = config.reference.lengthK;
+        console.info("Using config dimensions: " + 
+            std::to_string(refLengthI) + " x " +
+            std::to_string(refLengthJ) + " x " +
+            std::to_string(refLengthK));
+    } else {
+        // No scaling - use zone lengths as-is
+        refLengthI = config.getTotalLength();
+        refLengthJ = 1.0;  // Default
+        refLengthK = 1.0;  // Default
+        console.info("No scaling - using zone lengths directly");
+    }
+    
+    // Generate mesh
+    console.info("Generating variable density mesh...");
+    VariableDensityMeshGenerator generator;
+    generator.setProgressCallback([&console](int percent) {
+        console.progressBar(percent);
+    });
+    
+    Mesh mesh;
+    try {
+        mesh = generator.generate(config, refLengthI, refLengthJ, refLengthK);
+    } catch (const std::exception& e) {
+        console.clearLine();
+        console.error("Generation failed: " + std::string(e.what()));
+        return 1;
+    }
+    console.clearLine();
+    console.success("Generated " + std::to_string(mesh.getNodeCount()) + " nodes, " +
+                   std::to_string(mesh.getElementCount()) + " elements");
+    
+    // Print statistics
+    const auto& stats = generator.getStats();
+    std::cout << "\n";
+    console.header("Generation Statistics");
+    console.keyValue("Scale factor", std::to_string(stats.scaleFactor));
+    std::cout << "\n";
+    console.println("Zone lengths (after scaling):");
+    console.keyValue("  Zone 1 (Dense Start)", std::to_string(stats.zone1Length) + 
+        " (" + std::to_string(config.zone1_denseStart.numElements) + " elements)");
+    console.keyValue("  Zone 2 (Increasing)", std::to_string(stats.zone2Length) +
+        " (" + std::to_string(config.zone2_increasing.numElements) + " elements)");
+    console.keyValue("  Zone 3 (Sparse)", std::to_string(stats.zone3Length) +
+        " (" + std::to_string(config.zone3_sparse.numElements) + " elements)");
+    console.keyValue("  Zone 4 (Decreasing)", std::to_string(stats.zone4Length) +
+        " (" + std::to_string(config.zone4_decreasing.numElements) + " elements)");
+    console.keyValue("  Zone 5 (Dense End)", std::to_string(stats.zone5Length) +
+        " (" + std::to_string(config.zone5_denseEnd.numElements) + " elements)");
+    std::cout << "\n";
+    console.keyValue("Total length I", std::to_string(stats.totalLengthI));
+    console.keyValue("Length J", std::to_string(stats.totalLengthJ));
+    console.keyValue("Length K", std::to_string(stats.totalLengthK));
+    std::cout << "\n";
+    console.keyValue("Dense element size", std::to_string(stats.denseElementSize));
+    console.keyValue("Sparse element size", std::to_string(stats.sparseElementSize));
+    console.keyValue("Size ratio", std::to_string(stats.sizeRatio) + ":1");
+    std::cout << "\n";
+    
+    // Write output
+    console.info("Writing output: " + outputFile);
+    KFileWriter writer;
+    if (!writer.writeFile(outputFile, mesh)) {
+        console.error("Failed to write output: " + writer.getErrorMessage());
+        return 1;
+    }
+    console.success("Output written successfully");
+    
+    timer.stop();
+    console.info("Total time: " + timer.elapsedString());
+    
+    return 0;
+}
+
 int main(int argc, char* argv[]) {
     ConsoleOutput console;
 
@@ -617,14 +792,15 @@ int main(int argc, char* argv[]) {
         console.println("Usage: KooRemapper <command> [options]");
         std::cout << "\n";
         console.println("Commands:");
-        console.println("  map       Map a flat mesh onto a bent reference mesh");
-        console.println("  unfold    Generate flat mesh from a bent structured mesh");
-        console.println("  generate  Generate example meshes for testing");
-        console.println("  strain    Calculate strain between two meshes");
-        console.println("  prestress Calculate prestress from deformed configuration");
-        console.println("  info      Display information about a mesh file");
-        console.println("  help      Show help for a command");
-        console.println("  version   Show version information");
+        console.println("  map         Map a flat mesh onto a bent reference mesh");
+        console.println("  unfold      Generate flat mesh from a bent structured mesh");
+        console.println("  generate    Generate example meshes for testing");
+        console.println("  generate-var Generate variable density mesh from YAML config");
+        console.println("  strain      Calculate strain between two meshes");
+        console.println("  prestress   Calculate prestress from deformed configuration");
+        console.println("  info        Display information about a mesh file");
+        console.println("  help        Show help for a command");
+        console.println("  version     Show version information");
         std::cout << "\n";
         console.println("Use 'KooRemapper help <command>' for more information.");
         return 1;
@@ -711,15 +887,56 @@ int main(int argc, char* argv[]) {
                 console.println("  output     Output file (dynain format or CSV)");
                 std::cout << "\n";
                 console.println("Options:");
-                console.println("  --E <value>      Young's modulus (required for stress)");
-                console.println("  --nu <value>     Poisson's ratio (required for stress)");
+                console.println("  --E <value>      Young's modulus (overrides K-file materials)");
+                console.println("  --nu <value>     Poisson's ratio (overrides K-file materials)");
                 console.println("  --strain <type>  Strain type: engineering (default), green");
                 console.println("  --csv            Also output strain/stress CSV file");
                 std::cout << "\n";
+                console.println("Material Properties:");
+                console.println("  The tool automatically reads *PART and *MAT_ELASTIC cards from");
+                console.println("  the reference K-file. Each element uses its part's material.");
+                console.println("  If --E and --nu are specified, they override K-file materials.");
+                std::cout << "\n";
                 console.println("Description:");
                 console.println("  Computes strain tensor from mesh deformation.");
-                console.println("  If E and nu are provided, also computes stress using Hooke's law");
-                console.println("  and outputs *INITIAL_STRESS_SOLID cards in dynain format.");
+                console.println("  If materials are available (from K-file or command line),");
+                console.println("  computes stress using Hooke's law and outputs *INITIAL_STRESS_SOLID");
+                console.println("  cards in dynain format.");
+            } else if (helpCmd == "generate-var") {
+                console.println("Usage: KooRemapper generate-var [options] <config.yaml> <output.k>");
+                std::cout << "\n";
+                console.println("Generate variable density flat mesh from YAML configuration.");
+                std::cout << "\n";
+                console.println("Arguments:");
+                console.println("  config.yaml  YAML configuration file");
+                console.println("  output.k     Output K-file");
+                std::cout << "\n";
+                console.println("Options:");
+                console.println("  --ref <file>   Reference flat mesh for scaling");
+                console.println("  --no-scale     Don't scale to reference (use YAML lengths as-is)");
+                std::cout << "\n";
+                console.println("YAML Format:");
+                console.println("  reference:");
+                console.println("    flat_mesh: \"ref_flat.k\"  # Reference for auto-scaling");
+                console.println("  elements_j: 50");
+                console.println("  elements_k: 10");
+                console.println("  variable_density:");
+                console.println("    zone1_dense_start:");
+                console.println("      length: 10.0");
+                console.println("      num_elements: 50");
+                console.println("    zone2_increasing:");
+                console.println("      length: 20.0");
+                console.println("      num_elements: 30");
+                console.println("      growth_type: linear  # linear, geometric, exponential");
+                console.println("    zone3_sparse:");
+                console.println("      length: 90.0");
+                console.println("      num_elements: 60");
+                console.println("    zone4_decreasing:");
+                console.println("      length: 20.0");
+                console.println("      num_elements: 30");
+                console.println("    zone5_dense_end:");
+                console.println("      length: 10.0");
+                console.println("      num_elements: 50");
             } else {
                 console.error("Unknown command: " + helpCmd);
                 return 1;
@@ -729,14 +946,15 @@ int main(int argc, char* argv[]) {
             console.println("Usage: KooRemapper <command> [options]");
             std::cout << "\n";
             console.println("Commands:");
-            console.println("  map       Map a flat mesh onto a bent reference mesh");
-            console.println("  unfold    Generate flat mesh from a bent structured mesh");
-            console.println("  generate  Generate example meshes for testing");
-            console.println("  strain    Calculate strain between two meshes");
-            console.println("  prestress Calculate prestress from deformed configuration");
-            console.println("  info      Display information about a mesh file");
-            console.println("  help      Show help for a command");
-            console.println("  version   Show version information");
+            console.println("  map         Map a flat mesh onto a bent reference mesh");
+            console.println("  unfold      Generate flat mesh from a bent structured mesh");
+            console.println("  generate    Generate example meshes for testing");
+            console.println("  generate-var Generate variable density mesh from YAML config");
+            console.println("  strain      Calculate strain between two meshes");
+            console.println("  prestress   Calculate prestress from deformed configuration");
+            console.println("  info        Display information about a mesh file");
+            console.println("  help        Show help for a command");
+            console.println("  version     Show version information");
         }
         return 0;
     }
@@ -794,6 +1012,36 @@ int main(int argc, char* argv[]) {
 
         printBanner(console);
         return runGenerate(type, prefix, dimI, dimJ, dimK, console);
+    }
+
+    // Generate-var command
+    if (command == "generate-var") {
+        ArgumentParser parser("KooRemapper generate-var", "Generate variable density mesh");
+        parser.addPositional("config", "YAML configuration file");
+        parser.addPositional("output", "Output K-file");
+        parser.addOption("", "ref", "Reference flat mesh for scaling", "");
+        parser.addFlag("", "no-scale", "Don't scale to reference");
+
+        int subArgc = argc - 1;
+        char** subArgv = argv + 1;
+
+        if (!parser.parse(subArgc, subArgv)) {
+            console.error(parser.getError());
+            return 1;
+        }
+
+        std::string configFile = parser.getPositional("config");
+        std::string outputFile = parser.getPositional("output");
+        std::string refFile = parser.getOption("ref");
+        bool noScale = parser.hasFlag("no-scale");
+
+        if (configFile.empty() || outputFile.empty()) {
+            console.error("Usage: KooRemapper generate-var [options] <config.yaml> <output.k>");
+            return 1;
+        }
+
+        printBanner(console);
+        return runGenerateVar(configFile, outputFile, refFile, noScale, console);
     }
 
     // Strain command

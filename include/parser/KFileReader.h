@@ -14,7 +14,8 @@ namespace KooRemapper {
  * Supports:
  *   - *NODE
  *   - *ELEMENT_SOLID
- *   - *PART (optional)
+ *   - *PART (with material ID mapping)
+ *   - *MAT_ELASTIC (linear elastic material)
  *   - *END
  */
 class KFileReader {
@@ -62,6 +63,8 @@ private:
     bool parseFile(std::ifstream& file);
     bool parseNodeSection(std::ifstream& file);
     bool parseElementSolidSection(std::ifstream& file);
+    bool parsePartSection(std::ifstream& file);
+    bool parseMatElasticSection(std::ifstream& file);
     void skipToNextKeyword(std::ifstream& file);
 
     // Helper methods

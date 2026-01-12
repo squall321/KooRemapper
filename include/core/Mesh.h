@@ -11,14 +11,35 @@
 namespace KooRemapper {
 
 /**
+ * Material data (linear elastic)
+ */
+struct MaterialData {
+    int id;
+    double E;       // Young's modulus
+    double nu;      // Poisson's ratio
+    double density; // Mass density (optional)
+    std::string name;
+
+    MaterialData() : id(0), E(0), nu(0), density(0) {}
+    MaterialData(int id, double E, double nu, double density = 0, const std::string& name = "")
+        : id(id), E(E), nu(nu), density(density), name(name) {}
+    
+    bool isValid() const { return E > 0 && nu > 0 && nu < 0.5; }
+};
+
+/**
  * Part definition
  */
 struct Part {
     int id;
+    int sectionId;   // Section ID (SECID)
+    int materialId;  // Material ID (MID)
     std::string name;
 
-    Part() : id(0) {}
-    Part(int id, const std::string& name = "") : id(id), name(name) {}
+    Part() : id(0), sectionId(0), materialId(0) {}
+    Part(int id, const std::string& name = "") : id(id), sectionId(0), materialId(0), name(name) {}
+    Part(int id, int secId, int matId, const std::string& name = "") 
+        : id(id), sectionId(secId), materialId(matId), name(name) {}
 };
 
 /**
@@ -47,10 +68,11 @@ struct MeshStats {
  */
 class Mesh {
 public:
-    std::map<int, Node> nodes;          // Node ID -> Node
-    std::map<int, Element> elements;    // Element ID -> Element
-    std::map<int, Part> parts;          // Part ID -> Part
-    std::string name_;                  // Mesh name
+    std::map<int, Node> nodes;              // Node ID -> Node
+    std::map<int, Element> elements;        // Element ID -> Element
+    std::map<int, Part> parts;              // Part ID -> Part
+    std::map<int, MaterialData> materials;  // Material ID -> MaterialData
+    std::string name_;                      // Mesh name
 
     // Grid dimensions (for structured meshes)
     int dimI, dimJ, dimK;
@@ -147,6 +169,37 @@ public:
     // Part operations
     void addPart(const Part& part) { parts[part.id] = part; }
     void addPart(int id, const std::string& name = "") { parts[id] = Part(id, name); }
+    void addPart(int id, int secId, int matId, const std::string& name = "") { 
+        parts[id] = Part(id, secId, matId, name); 
+    }
+    
+    // Material operations
+    void addMaterial(const MaterialData& mat) { materials[mat.id] = mat; }
+    void addMaterial(int id, double E, double nu, double density = 0) { 
+        materials[id] = MaterialData(id, E, nu, density); 
+    }
+    
+    const MaterialData* getMaterial(int id) const {
+        auto it = materials.find(id);
+        return (it != materials.end()) ? &it->second : nullptr;
+    }
+    
+    /**
+     * Get material for an element (via part -> material mapping)
+     * Returns nullptr if not found
+     */
+    const MaterialData* getElementMaterial(const Element& elem) const {
+        auto partIt = parts.find(elem.partId);
+        if (partIt == parts.end()) return nullptr;
+        
+        auto matIt = materials.find(partIt->second.materialId);
+        if (matIt == materials.end()) return nullptr;
+        
+        return &matIt->second;
+    }
+    
+    size_t getMaterialCount() const { return materials.size(); }
+    const std::map<int, MaterialData>& getMaterials() const { return materials; }
 
     // Get bounding box as pair
     std::pair<Vector3D, Vector3D> getBoundingBox() const {
@@ -211,6 +264,7 @@ public:
         nodes.clear();
         elements.clear();
         parts.clear();
+        materials.clear();
         name_.clear();
         dimI = dimJ = dimK = 0;
         gridDimensionsSet = false;

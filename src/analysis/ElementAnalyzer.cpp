@@ -8,6 +8,7 @@ namespace KooRemapper {
 ElementAnalyzer::ElementAnalyzer()
     : strainType_(StrainType::ENGINEERING)
     , numGaussPoints_(1)
+    , usePartMaterials_(true)  // Default: use part materials if available
 {}
 
 void ElementAnalyzer::setMaterial(const MaterialModel& material)
@@ -18,6 +19,28 @@ void ElementAnalyzer::setMaterial(const MaterialModel& material)
 void ElementAnalyzer::clearMaterial()
 {
     material_.reset();
+}
+
+const MaterialModel* ElementAnalyzer::getMaterialForElement(const Element& elem, const Mesh& refMesh) const
+{
+    // First, try to get material from mesh (part -> material mapping)
+    if (usePartMaterials_) {
+        const MaterialData* matData = refMesh.getElementMaterial(elem);
+        if (matData && matData->isValid()) {
+            // Create a static MaterialModel from MaterialData
+            // Note: This is a workaround - in production, we'd cache these
+            static thread_local MaterialModel cachedMaterial;
+            cachedMaterial = MaterialModel::isotropicElastic(matData->E, matData->nu);
+            return &cachedMaterial;
+        }
+    }
+    
+    // Fall back to default material
+    if (material_.has_value()) {
+        return &material_.value();
+    }
+    
+    return nullptr;
 }
 
 bool ElementAnalyzer::validateMeshPair(const Mesh& mesh1, const Mesh& mesh2, std::string& error)
@@ -68,6 +91,9 @@ ElementResult ElementAnalyzer::analyzeElement(
     result.elementId = elem.id;
     result.isValid = false;
     
+    // Get material for this element (from part or default)
+    const MaterialModel* elemMaterial = getMaterialForElement(elem, refMesh);
+    
     if (elem.type == ElementType::HEX8) {
         // Get node positions
         std::array<Vector3D, 8> refNodes, defNodes;
@@ -85,7 +111,7 @@ ElementResult ElementAnalyzer::analyzeElement(
             defNodes[i] = defNode->getEffectivePosition();
         }
         
-        return analyzeHex8(elem, refNodes, defNodes);
+        return analyzeHex8(elem, refNodes, defNodes, elemMaterial);
     }
     else if (elem.type == ElementType::TET4) {
         // Get node positions
@@ -104,7 +130,7 @@ ElementResult ElementAnalyzer::analyzeElement(
             defNodes[i] = defNode->getEffectivePosition();
         }
         
-        return analyzeTet4(elem, refNodes, defNodes);
+        return analyzeTet4(elem, refNodes, defNodes, elemMaterial);
     }
     else {
         result.errorMessage = "Unsupported element type";
@@ -115,7 +141,8 @@ ElementResult ElementAnalyzer::analyzeElement(
 ElementResult ElementAnalyzer::analyzeHex8(
     const Element& elem,
     const std::array<Vector3D, 8>& refNodes,
-    const std::array<Vector3D, 8>& defNodes)
+    const std::array<Vector3D, 8>& defNodes,
+    const MaterialModel* elemMaterial)
 {
     ElementResult result;
     result.elementId = elem.id;
@@ -164,9 +191,9 @@ ElementResult ElementAnalyzer::analyzeHex8(
         result.maxPrincipalStrain = principalStrains[0];
         result.minPrincipalStrain = principalStrains[2];
         
-        // Compute stress if material is set
-        if (material_.has_value()) {
-            result.stress = material_->computeStress(avgStrain);
+        // Compute stress if material is available
+        if (elemMaterial) {
+            result.stress = elemMaterial->computeStress(avgStrain);
             result.vonMisesStress = result.stress.vonMises();
             
             auto principalStresses = result.stress.principalStresses();
@@ -187,7 +214,8 @@ ElementResult ElementAnalyzer::analyzeHex8(
 ElementResult ElementAnalyzer::analyzeTet4(
     const Element& elem,
     const std::array<Vector3D, 4>& refNodes,
-    const std::array<Vector3D, 4>& defNodes)
+    const std::array<Vector3D, 4>& defNodes,
+    const MaterialModel* elemMaterial)
 {
     ElementResult result;
     result.elementId = elem.id;
@@ -210,9 +238,9 @@ ElementResult ElementAnalyzer::analyzeTet4(
         result.maxPrincipalStrain = principalStrains[0];
         result.minPrincipalStrain = principalStrains[2];
         
-        // Compute stress if material is set
-        if (material_.has_value()) {
-            result.stress = material_->computeStress(result.strain);
+        // Compute stress if material is available
+        if (elemMaterial) {
+            result.stress = elemMaterial->computeStress(result.strain);
             result.vonMisesStress = result.stress.vonMises();
             
             auto principalStresses = result.stress.principalStresses();
@@ -236,7 +264,14 @@ MeshAnalysisResult ElementAnalyzer::analyzeMesh(
     std::function<void(int)> progress)
 {
     MeshAnalysisResult result;
-    result.hasMaterial = material_.has_value();
+    
+    // Determine if we have any materials available
+    // Either from mesh's part->material mapping or from default material
+    bool hasAnyMaterial = material_.has_value();
+    if (usePartMaterials_ && refMesh.getMaterialCount() > 0) {
+        hasAnyMaterial = true;
+    }
+    result.hasMaterial = hasAnyMaterial;
     
     const auto& elements = refMesh.getElements();
     size_t total = elements.size();

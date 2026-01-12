@@ -72,6 +72,12 @@ set(EXAMPLE_SOURCES
     src/example/ExampleMeshGenerator.cpp
 )
 
+# Source files - Generator
+set(GENERATOR_SOURCES
+    src/generator/YamlConfigReader.cpp
+    src/generator/VariableDensityMeshGenerator.cpp
+)
+
 # Source files - Analysis
 set(ANALYSIS_SOURCES
     src/analysis/StrainCalculator.cpp
@@ -102,6 +108,7 @@ add_library(kooremapper_lib STATIC
     ${GRID_SOURCES}
     ${MAPPER_SOURCES}
     ${EXAMPLE_SOURCES}
+    ${GENERATOR_SOURCES}
     ${ANALYSIS_SOURCES}
     ${CLI_SOURCES}
     ${UTIL_SOURCES}

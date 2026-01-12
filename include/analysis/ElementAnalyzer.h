@@ -76,15 +76,21 @@ public:
     ~ElementAnalyzer() = default;
 
     /**
-     * Set material model for stress calculation
-     * If not set, only strain is computed
+     * Set default material model for stress calculation
+     * Used when element's part doesn't have a material defined
      */
     void setMaterial(const MaterialModel& material);
 
     /**
-     * Clear material (compute strain only)
+     * Clear default material (compute strain only)
      */
     void clearMaterial();
+    
+    /**
+     * Enable per-part material lookup from mesh
+     * When enabled, uses mesh's part->material mapping for each element
+     */
+    void setUsePartMaterials(bool use) { usePartMaterials_ = use; }
 
     /**
      * Set strain type (Engineering or Green-Lagrange)
@@ -130,22 +136,28 @@ public:
     static bool validateMeshPair(const Mesh& mesh1, const Mesh& mesh2, std::string& error);
 
 private:
-    std::optional<MaterialModel> material_;
+    std::optional<MaterialModel> material_;  // Default material
     StrainType strainType_;
     int numGaussPoints_;
+    bool usePartMaterials_;  // Use per-part materials from mesh
 
     // Helper methods
     ElementResult analyzeHex8(
         const Element& elem,
         const std::array<Vector3D, 8>& refNodes,
-        const std::array<Vector3D, 8>& defNodes
+        const std::array<Vector3D, 8>& defNodes,
+        const MaterialModel* elemMaterial
     );
 
     ElementResult analyzeTet4(
         const Element& elem,
         const std::array<Vector3D, 4>& refNodes,
-        const std::array<Vector3D, 4>& defNodes
+        const std::array<Vector3D, 4>& defNodes,
+        const MaterialModel* elemMaterial
     );
+    
+    // Get material for element (checks part materials first if enabled)
+    const MaterialModel* getMaterialForElement(const Element& elem, const Mesh& refMesh) const;
 
     void computeStatistics(MeshAnalysisResult& result);
 };
