@@ -6,6 +6,14 @@
 namespace KooRemapper {
 
 /**
+ * Mesh generation type
+ */
+enum class MeshGenType {
+    FLAT,    // Flat variable density mesh
+    CURVED   // Curved mesh following centerline
+};
+
+/**
  * Growth type for transition zones
  */
 enum class GrowthType {

@@ -76,6 +76,8 @@ set(EXAMPLE_SOURCES
 set(GENERATOR_SOURCES
     src/generator/YamlConfigReader.cpp
     src/generator/VariableDensityMeshGenerator.cpp
+    src/generator/CurveInterpolator.cpp
+    src/generator/CurvedMeshGenerator.cpp
 )
 
 # Source files - Analysis

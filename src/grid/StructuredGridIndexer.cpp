@@ -28,7 +28,23 @@ bool StructuredGridIndexer::assignIndices(Mesh& mesh,
         return false;
     }
 
-    // Reset all indices
+    // Check if all elements already have indices assigned
+    bool allAssigned = true;
+    for (const auto& [id, elem] : mesh.elements) {
+        if (!elem.indexAssigned || elem.i < 0 || elem.j < 0 || elem.k < 0) {
+            allAssigned = false;
+            break;
+        }
+    }
+    
+    if (allAssigned) {
+        // Use existing indices - just calculate dimensions
+        calculateDimensions(mesh);
+        mesh.setGridDimensions(dimI_, dimJ_, dimK_);
+        return true;
+    }
+
+    // Reset all indices for re-computation
     for (auto& [id, elem] : mesh.elements) {
         elem.i = elem.j = elem.k = -1;
         elem.indexAssigned = false;

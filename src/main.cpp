@@ -9,6 +9,7 @@
 #include "generator/VariableDensityConfig.h"
 #include "generator/YamlConfigReader.h"
 #include "generator/VariableDensityMeshGenerator.h"
+#include "generator/CurvedMeshGenerator.h"
 #include "analysis/StrainCalculator.h"
 #include "analysis/ElementAnalyzer.h"
 #include "analysis/MaterialModel.h"
@@ -642,29 +643,16 @@ int runGenerateVar(const std::string& configFile, const std::string& outputFile,
                    const ConsoleOutput& console) {
     Timer timer;
     
-    // Read YAML config
+    // Read YAML config (extended version)
     console.info("Reading configuration: " + configFile);
     YamlConfigReader yamlReader;
-    VariableDensityConfig config;
+    ExtendedMeshConfig extConfig;
     try {
-        config = yamlReader.readFile(configFile);
+        extConfig = yamlReader.readExtendedFile(configFile);
     } catch (const std::exception& e) {
         console.error("Failed to read config: " + std::string(e.what()));
         return 1;
     }
-    
-    // Validate config
-    std::string validationError;
-    if (!config.validate(validationError)) {
-        console.error("Invalid configuration: " + validationError);
-        return 1;
-    }
-    
-    console.success("Configuration loaded");
-    console.keyValue("Total I elements", std::to_string(config.getTotalElementsI()));
-    console.keyValue("J elements", std::to_string(config.elementsJ));
-    console.keyValue("K elements", std::to_string(config.elementsK));
-    console.keyValue("Total elements", std::to_string(config.getTotalElements()));
     
     // Determine reference dimensions
     double refLengthI = 0, refLengthJ = 0, refLengthK = 0;
@@ -687,12 +675,12 @@ int runGenerateVar(const std::string& configFile, const std::string& outputFile,
             console.error("Failed to load reference: " + std::string(e.what()));
             return 1;
         }
-    } else if (!config.reference.flatMeshFile.empty() && !noScale) {
+    } else if (!extConfig.reference.flatMeshFile.empty() && !noScale) {
         // Load from config's reference file
-        console.info("Loading reference mesh: " + config.reference.flatMeshFile);
+        console.info("Loading reference mesh: " + extConfig.reference.flatMeshFile);
         KFileReader reader;
         try {
-            Mesh refMesh = reader.readFile(config.reference.flatMeshFile);
+            Mesh refMesh = reader.readFile(extConfig.reference.flatMeshFile);
             auto [minB, maxB] = refMesh.getBoundingBox();
             refLengthI = maxB.x - minB.x;
             refLengthJ = maxB.y - minB.y;
@@ -705,68 +693,141 @@ int runGenerateVar(const std::string& configFile, const std::string& outputFile,
             console.error("Failed to load reference: " + std::string(e.what()));
             return 1;
         }
-    } else if (config.reference.hasDimensions() && !noScale) {
+    } else if (extConfig.reference.hasDimensions() && !noScale) {
         // Use config's direct dimensions
-        refLengthI = config.reference.lengthI;
-        refLengthJ = config.reference.lengthJ;
-        refLengthK = config.reference.lengthK;
+        refLengthI = extConfig.reference.lengthI;
+        refLengthJ = extConfig.reference.lengthJ;
+        refLengthK = extConfig.reference.lengthK;
         console.info("Using config dimensions: " + 
             std::to_string(refLengthI) + " x " +
             std::to_string(refLengthJ) + " x " +
             std::to_string(refLengthK));
-    } else {
-        // No scaling - use zone lengths as-is
-        refLengthI = config.getTotalLength();
-        refLengthJ = 1.0;  // Default
-        refLengthK = 1.0;  // Default
-        console.info("No scaling - using zone lengths directly");
     }
-    
-    // Generate mesh
-    console.info("Generating variable density mesh...");
-    VariableDensityMeshGenerator generator;
-    generator.setProgressCallback([&console](int percent) {
-        console.progressBar(percent);
-    });
     
     Mesh mesh;
-    try {
-        mesh = generator.generate(config, refLengthI, refLengthJ, refLengthK);
-    } catch (const std::exception& e) {
-        console.clearLine();
-        console.error("Generation failed: " + std::string(e.what()));
-        return 1;
-    }
-    console.clearLine();
-    console.success("Generated " + std::to_string(mesh.getNodeCount()) + " nodes, " +
-                   std::to_string(mesh.getElementCount()) + " elements");
     
-    // Print statistics
-    const auto& stats = generator.getStats();
-    std::cout << "\n";
-    console.header("Generation Statistics");
-    console.keyValue("Scale factor", std::to_string(stats.scaleFactor));
-    std::cout << "\n";
-    console.println("Zone lengths (after scaling):");
-    console.keyValue("  Zone 1 (Dense Start)", std::to_string(stats.zone1Length) + 
-        " (" + std::to_string(config.zone1_denseStart.numElements) + " elements)");
-    console.keyValue("  Zone 2 (Increasing)", std::to_string(stats.zone2Length) +
-        " (" + std::to_string(config.zone2_increasing.numElements) + " elements)");
-    console.keyValue("  Zone 3 (Sparse)", std::to_string(stats.zone3Length) +
-        " (" + std::to_string(config.zone3_sparse.numElements) + " elements)");
-    console.keyValue("  Zone 4 (Decreasing)", std::to_string(stats.zone4Length) +
-        " (" + std::to_string(config.zone4_decreasing.numElements) + " elements)");
-    console.keyValue("  Zone 5 (Dense End)", std::to_string(stats.zone5Length) +
-        " (" + std::to_string(config.zone5_denseEnd.numElements) + " elements)");
-    std::cout << "\n";
-    console.keyValue("Total length I", std::to_string(stats.totalLengthI));
-    console.keyValue("Length J", std::to_string(stats.totalLengthJ));
-    console.keyValue("Length K", std::to_string(stats.totalLengthK));
-    std::cout << "\n";
-    console.keyValue("Dense element size", std::to_string(stats.denseElementSize));
-    console.keyValue("Sparse element size", std::to_string(stats.sparseElementSize));
-    console.keyValue("Size ratio", std::to_string(stats.sizeRatio) + ":1");
-    std::cout << "\n";
+    // Handle based on mesh type
+    if (extConfig.isCurved()) {
+        // Curved mesh generation
+        console.info("Generating curved mesh from centerline...");
+        
+        CurvedMeshConfig& curvedConfig = extConfig.curvedConfig;
+        
+        // Validate
+        std::string validationError;
+        if (!curvedConfig.validate(validationError)) {
+            console.error("Invalid configuration: " + validationError);
+            return 1;
+        }
+        
+        console.success("Configuration loaded (CURVED)");
+        console.keyValue("Centerline points", std::to_string(curvedConfig.centerlinePoints.size()));
+        console.keyValue("Elements along curve", std::to_string(curvedConfig.elementsAlongCurve));
+        console.keyValue("Elements J (width)", std::to_string(curvedConfig.elementsWidth));
+        console.keyValue("Elements K (thickness)", std::to_string(curvedConfig.elementsThickness));
+        console.keyValue("Total elements", std::to_string(curvedConfig.getTotalElements()));
+        
+        CurvedMeshGenerator generator;
+        generator.setProgressCallback([&console](int percent) {
+            console.progressBar(percent);
+        });
+        
+        try {
+            if (refLengthI > 0) {
+                mesh = generator.generate(curvedConfig, refLengthI, refLengthJ, refLengthK);
+            } else {
+                mesh = generator.generate(curvedConfig);
+            }
+        } catch (const std::exception& e) {
+            console.clearLine();
+            console.error("Generation failed: " + std::string(e.what()));
+            return 1;
+        }
+        console.clearLine();
+        console.success("Generated " + std::to_string(mesh.getNodeCount()) + " nodes, " +
+                       std::to_string(mesh.getElementCount()) + " elements");
+        
+        // Print curved mesh statistics
+        const auto& stats = generator.getStats();
+        std::cout << "\n";
+        console.header("Curved Mesh Statistics");
+        console.keyValue("Arc length", std::to_string(stats.arcLength));
+        console.keyValue("Scale factor", std::to_string(stats.scaleFactor));
+        console.keyValue("Width", std::to_string(stats.width));
+        console.keyValue("Thickness", std::to_string(stats.thickness));
+        console.keyValue("Max curvature", std::to_string(stats.maxCurvature));
+        console.keyValue("Min radius", std::to_string(stats.minRadius));
+        std::cout << "\n";
+    } else {
+        // Flat variable density mesh generation
+        VariableDensityConfig& config = extConfig.flatConfig;
+        
+        // Validate config
+        std::string validationError;
+        if (!config.validate(validationError)) {
+            console.error("Invalid configuration: " + validationError);
+            return 1;
+        }
+        
+        console.success("Configuration loaded (FLAT)");
+        console.keyValue("Total I elements", std::to_string(config.getTotalElementsI()));
+        console.keyValue("J elements", std::to_string(config.elementsJ));
+        console.keyValue("K elements", std::to_string(config.elementsK));
+        console.keyValue("Total elements", std::to_string(config.getTotalElements()));
+        
+        if (refLengthI <= 0 && !noScale) {
+            // No reference - use zone lengths as-is
+            refLengthI = config.getTotalLength();
+            refLengthJ = 1.0;  // Default
+            refLengthK = 1.0;  // Default
+            console.info("No scaling - using zone lengths directly");
+        }
+        
+        // Generate mesh
+        console.info("Generating variable density mesh...");
+        VariableDensityMeshGenerator generator;
+        generator.setProgressCallback([&console](int percent) {
+            console.progressBar(percent);
+        });
+        
+        try {
+            mesh = generator.generate(config, refLengthI, refLengthJ, refLengthK);
+        } catch (const std::exception& e) {
+            console.clearLine();
+            console.error("Generation failed: " + std::string(e.what()));
+            return 1;
+        }
+        console.clearLine();
+        console.success("Generated " + std::to_string(mesh.getNodeCount()) + " nodes, " +
+                       std::to_string(mesh.getElementCount()) + " elements");
+        
+        // Print statistics
+        const auto& stats = generator.getStats();
+        std::cout << "\n";
+        console.header("Generation Statistics");
+        console.keyValue("Scale factor", std::to_string(stats.scaleFactor));
+        std::cout << "\n";
+        console.println("Zone lengths (after scaling):");
+        console.keyValue("  Zone 1 (Dense Start)", std::to_string(stats.zone1Length) + 
+            " (" + std::to_string(config.zone1_denseStart.numElements) + " elements)");
+        console.keyValue("  Zone 2 (Increasing)", std::to_string(stats.zone2Length) +
+            " (" + std::to_string(config.zone2_increasing.numElements) + " elements)");
+        console.keyValue("  Zone 3 (Sparse)", std::to_string(stats.zone3Length) +
+            " (" + std::to_string(config.zone3_sparse.numElements) + " elements)");
+        console.keyValue("  Zone 4 (Decreasing)", std::to_string(stats.zone4Length) +
+            " (" + std::to_string(config.zone4_decreasing.numElements) + " elements)");
+        console.keyValue("  Zone 5 (Dense End)", std::to_string(stats.zone5Length) +
+            " (" + std::to_string(config.zone5_denseEnd.numElements) + " elements)");
+        std::cout << "\n";
+        console.keyValue("Total length I", std::to_string(stats.totalLengthI));
+        console.keyValue("Length J", std::to_string(stats.totalLengthJ));
+        console.keyValue("Length K", std::to_string(stats.totalLengthK));
+        std::cout << "\n";
+        console.keyValue("Dense element size", std::to_string(stats.denseElementSize));
+        console.keyValue("Sparse element size", std::to_string(stats.sparseElementSize));
+        console.keyValue("Size ratio", std::to_string(stats.sizeRatio) + ":1");
+        std::cout << "\n";
+    }
     
     // Write output
     console.info("Writing output: " + outputFile);
@@ -905,7 +966,7 @@ int main(int argc, char* argv[]) {
             } else if (helpCmd == "generate-var") {
                 console.println("Usage: KooRemapper generate-var [options] <config.yaml> <output.k>");
                 std::cout << "\n";
-                console.println("Generate variable density flat mesh from YAML configuration.");
+                console.println("Generate mesh from YAML configuration (flat or curved).");
                 std::cout << "\n";
                 console.println("Arguments:");
                 console.println("  config.yaml  YAML configuration file");
@@ -915,7 +976,8 @@ int main(int argc, char* argv[]) {
                 console.println("  --ref <file>   Reference flat mesh for scaling");
                 console.println("  --no-scale     Don't scale to reference (use YAML lengths as-is)");
                 std::cout << "\n";
-                console.println("YAML Format:");
+                console.println("YAML Format (Flat Variable Density):");
+                console.println("  type: flat  # Optional, default is flat");
                 console.println("  reference:");
                 console.println("    flat_mesh: \"ref_flat.k\"  # Reference for auto-scaling");
                 console.println("  elements_j: 50");
@@ -924,19 +986,24 @@ int main(int argc, char* argv[]) {
                 console.println("    zone1_dense_start:");
                 console.println("      length: 10.0");
                 console.println("      num_elements: 50");
-                console.println("    zone2_increasing:");
-                console.println("      length: 20.0");
-                console.println("      num_elements: 30");
-                console.println("      growth_type: linear  # linear, geometric, exponential");
-                console.println("    zone3_sparse:");
-                console.println("      length: 90.0");
-                console.println("      num_elements: 60");
-                console.println("    zone4_decreasing:");
-                console.println("      length: 20.0");
-                console.println("      num_elements: 30");
-                console.println("    zone5_dense_end:");
-                console.println("      length: 10.0");
-                console.println("      num_elements: 50");
+                console.println("    ...");
+                std::cout << "\n";
+                console.println("YAML Format (Curved from Centerline):");
+                console.println("  type: curved");
+                console.println("  reference:");
+                console.println("    flat_mesh: \"ref_flat.k\"  # For scaling (optional)");
+                console.println("  centerline_points:");
+                console.println("    - [0, 0]");
+                console.println("    - [50, 0]");
+                console.println("    - [100, 50]");
+                console.println("    - [150, 50]");
+                console.println("  interpolation: catmull_rom  # linear, catmull_rom, bspline");
+                console.println("  cross_section:  # Only if no reference");
+                console.println("    width: 10.0");
+                console.println("    thickness: 2.0");
+                console.println("  elements_along_curve: 100");
+                console.println("  elements_j: 20");
+                console.println("  elements_k: 5");
             } else {
                 console.error("Unknown command: " + helpCmd);
                 return 1;
