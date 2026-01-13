@@ -109,13 +109,48 @@ KooRemapper map bent_mesh.k fine_flat.k mapped_result.k
 변형 전/후 메쉬로부터 응력을 계산하고 dynain 포맷으로 출력합니다.
 
 ```bash
-KooRemapper prestress -E <영률> -nu <푸아송비> <ref_mesh> <def_mesh> <output.dynain>
+KooRemapper prestress [options] <ref_mesh> <def_mesh> <output.dynain>
 ```
 
-**예제:**
+**옵션:**
+- `-E <value>`: 영률 (MPa) - K-file 물성 덮어쓰기
+- `-nu <value>`: 푸아송비 - K-file 물성 덮어쓰기
+- `--strain <type>`: 스트레인 타입 (`engineering`, `green`)
+- `--csv`: CSV 파일도 함께 출력
+
+#### 물성 정의 방법
+
+**방법 1: K-file에 정의된 물성 자동 사용 (권장)**
+
+ref_mesh K-file에 `*PART`와 `*MAT_ELASTIC`이 정의되어 있으면 자동으로 읽어옵니다.
+
 ```bash
-KooRemapper prestress -E 210000 -nu 0.3 fine_flat.k mapped_result.k prestress.dynain
+# K-file에 물성이 정의되어 있으면 -E, -nu 옵션 불필요
+KooRemapper prestress ref_with_material.k deformed.k prestress.dynain
 ```
+
+K-file 예시:
+```
+*PART
+$#     pid     secid       mid
+         1         1         1
+
+*MAT_ELASTIC
+$#     mid        ro         e        pr
+         1   7.85e-9   210000.0       0.3
+```
+
+**방법 2: 명령줄 옵션으로 물성 지정**
+
+```bash
+# 모든 요소에 동일한 물성 적용 (K-file 물성 덮어쓰기)
+KooRemapper prestress -E 210000 -nu 0.3 flat.k mapped.k prestress.dynain
+```
+
+**다중 파트 지원:**
+- 각 파트별로 다른 물성 사용 가능
+- K-file의 `*PART` → `*MAT_ELASTIC` 연결 자동 추적
+- `-E`, `-nu` 옵션 사용 시 모든 파트에 동일 물성 적용
 
 **출력:**
 ```
