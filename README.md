@@ -53,17 +53,93 @@ cd KooRemapper
 
 ## 명령어
 
-### 1. 곡선 메쉬 생성 (`generate-var`)
+### 1. 가변 메쉬 생성 (`generate-var`)
 
-YAML 설정으로 곡선 또는 가변 밀도 메쉬를 생성합니다.
+YAML 설정으로 가변 밀도 평면 메쉬 또는 곡선 메쉬를 생성합니다.
 
 ```bash
 KooRemapper generate-var <config.yaml> <output.k>
 ```
 
-**곡선 메쉬 YAML 예제:**
+#### 타입 1: 가변 밀도 평면 메쉬 (`type: flat`)
+
+요소 밀도가 영역별로 다른 평면 메쉬를 생성합니다. 밴딩 영역은 조밀하게, 평평한 영역은 성기게 설정 가능합니다.
+
+**YAML 예제 (레퍼런스 기반):**
+```yaml
+type: flat
+reference: bent_ref.k  # 이 메쉬의 크기에 자동 맞춤
+
+zones:
+  - id: 1
+    type: uniform
+    element_count: 20
+    element_size: 2.0
+
+  - id: 2
+    type: transition
+    element_count: 30
+    start_size: 2.0
+    end_size: 0.5
+
+  - id: 3
+    type: uniform
+    element_count: 80
+    element_size: 0.5  # 밴딩 영역: 조밀
+
+  - id: 4
+    type: transition
+    element_count: 30
+    start_size: 0.5
+    end_size: 2.0
+
+  - id: 5
+    type: uniform
+    element_count: 20
+    element_size: 2.0
+
+elements_j: 30
+elements_k: 10
+```
+
+**YAML 예제 (직접 크기 지정):**
+```yaml
+type: flat
+# reference 없으면 length 값 사용
+
+zones:
+  - id: 1
+    type: uniform
+    element_count: 50
+    element_size: 1.0
+    length: 50.0  # reference 없을 때만 필요
+
+elements_j: 20
+elements_k: 5
+width: 20.0      # reference 없을 때 필요
+thickness: 2.0   # reference 없을 때 필요
+```
+
+**명령어:**
+```bash
+KooRemapper generate-var vardens.yaml fine_flat.k
+```
+
+**특징:**
+- `reference` 지정 시: 총 길이/폭/두께를 레퍼런스에 자동 맞춤
+- `transition` 영역: 요소 크기가 점진적으로 변화 (자동 길이 계산)
+- 최종 스케일링으로 레퍼런스와 정확히 동일한 크기 보장
+
+---
+
+#### 타입 2: 곡선 메쉬 (`type: curved`)
+
+사용자 정의 centerline을 따라 구부러진 메쉬를 생성합니다.
+
+**YAML 예제 (레퍼런스 기반):**
 ```yaml
 type: curved
+reference: flat_ref.k  # 이 메쉬의 크기에 자동 맞춤
 
 centerline_points:
   - [0, 0]
@@ -75,14 +151,32 @@ centerline_points:
   - [120, 0]
   - [140, 0]
 
-interpolation: catmull_rom
+interpolation: catmull_rom  # linear, catmull_rom, bspline
+
+elements_along_curve: 50
+elements_j: 10
+elements_k: 4
+```
+
+**YAML 예제 (직접 크기 지정):**
+```yaml
+type: curved
+# reference 없으면 cross_section 값 사용
+
+centerline_points:
+  - [0, 0]
+  - [30, 0]
+  - [60, 20]
+  - [90, 0]
+
+interpolation: bspline
 
 cross_section:
   width: 10.0
   thickness: 2.0
 
-elements_along_curve: 50
-elements_j: 10
+elements_along_curve: 40
+elements_j: 8
 elements_k: 4
 ```
 
@@ -90,6 +184,11 @@ elements_k: 4
 ```bash
 KooRemapper generate-var curved.yaml bent_mesh.k
 ```
+
+**특징:**
+- `reference` 지정 시: 곡선 총 길이를 레퍼런스에 맞춰 스케일링
+- 보간 방법: `linear`, `catmull_rom` (모든 점 통과), `bspline` (부드러운 근사)
+- 곡선 통계 출력: 총 길이, 최대 곡률, 최소 반경
 
 ### 2. 메쉬 매핑 (`map`)
 
@@ -170,52 +269,137 @@ prestress.dynain
 
 ### 4. 메쉬 언폴딩 (`unfold`)
 
-구부러진 메쉬를 평평하게 펼칩니다.
+구부러진 정형 메쉬를 평평하게 펼칩니다. Arc-length를 기준으로 평면 메쉬를 생성합니다.
 
 ```bash
 KooRemapper unfold <bent_mesh> <output_flat>
 ```
 
+**예제:**
+```bash
+# generate-var로 만든 곡선 메쉬를 펼치기
+KooRemapper unfold bent_curved.k flat_unfolded.k
+
+# 펼친 메쉬 크기 확인
+KooRemapper info flat_unfolded.k
+```
+
+**용도:**
+- 곡선 메쉬의 평면 형태 확인
+- Arc-length 기반 평면 메쉬 생성
+- 매핑용 레퍼런스 flat 메쉬 준비
+
 ### 5. 예제 메쉬 생성 (`generate`)
 
-테스트용 예제 메쉬를 생성합니다.
+간단한 테스트용 예제 메쉬를 생성합니다 (bent/flat 쌍 생성).
 
 ```bash
 KooRemapper generate <type> <output_prefix>
 ```
 
-타입: `arc`, `scurve`, `waterdrop`, `helix`, `torus`, `twist`, `wave`
+**지원 타입:**
+- `arc`: 단순 호 (30° 벤딩)
+- `scurve`: S자 곡선
+- `waterdrop`: 물방울 형상
+- `helix`: 나선형
+- `torus`: 토러스 형상
+- `twist`: 비틀림 변형
+- `wave`: 파형
+
+**예제:**
+```bash
+# arc 예제 생성 -> test_arc_bent.k, test_arc_flat.k
+KooRemapper generate arc test_arc
+
+# 생성된 파일로 매핑 테스트
+KooRemapper map test_arc_bent.k test_arc_flat.k test_arc_mapped.k
+```
 
 ### 6. 메쉬 정보 (`info`)
+
+메쉬 파일의 기본 정보를 출력합니다.
 
 ```bash
 KooRemapper info <mesh_file>
 ```
 
+**출력 정보:**
+- 노드/요소 개수
+- 파트 개수 및 ID
+- 요소 타입 (HEX8/TET4)
+- Bounding Box (X, Y, Z 범위)
+- 정형 그리드 구조 (i, j, k 차원)
+
+**예제:**
+```bash
+KooRemapper info bent_mesh.k
+```
+
+**출력 예시:**
+```
+Mesh Information for bent_mesh.k
+=================================
+Nodes:           12,000
+Elements:        10,000
+Parts:           1
+Element Type:    HEX8
+
+Bounding Box:
+  X: [0.00, 140.23]
+  Y: [0.00, 10.00]
+  Z: [-1.00, 33.45]
+
+Structured Grid:
+  I-direction: 50 elements
+  J-direction: 10 elements
+  K-direction: 20 elements
+```
+
 ---
 
-## 전체 예제: 사용자 정의 곡선 + 응력 계산
+## 전체 워크플로우 예제
+
+### 예제 1: 곡선 형상 + 가변 밀도 메쉬 + 응력 계산
 
 ```bash
-# 1. 곡선 형상 정의 (YAML)
-# my_curve.yaml 파일 생성
+# 1. 곡선 레퍼런스 메쉬 생성 (간단한 벤딩, 거친 메쉬)
+# curved.yaml 파일 작성 (type: curved, 50 elements)
+KooRemapper generate-var curved.yaml bent_ref.k
+KooRemapper info bent_ref.k
 
-# 2. 곡선 레퍼런스 메쉬 생성
-KooRemapper generate-var my_curve.yaml bent_ref.k
+# 2. 레퍼런스를 펼쳐서 평면 형상 확인
+KooRemapper unfold bent_ref.k bent_ref_flat.k
 
-# 3. 상세 평면 메쉬 준비 (CAD 또는 스크립트)
-# fine_flat.k: arc-length x width x thickness 크기
+# 3. 가변 밀도 평면 메쉬 생성 (상세, 100만개 요소)
+# vardens.yaml 작성 (type: flat, reference: bent_ref_flat.k)
+KooRemapper generate-var vardens.yaml fine_flat.k
+KooRemapper info fine_flat.k
 
-# 4. 상세 메쉬를 곡선 형상으로 매핑
+# 4. 평면 메쉬를 곡선 형상으로 매핑
 KooRemapper map bent_ref.k fine_flat.k mapped.k
-
-# 5. 매핑 결과 확인
 KooRemapper info mapped.k
 
-# 6. 초기 응력 계산
-KooRemapper prestress -E 210000 -nu 0.3 fine_flat.k mapped.k prestress.dynain
+# 5. 초기 응력 계산 (K-file 물성 사용)
+KooRemapper prestress fine_flat.k mapped.k prestress.dynain
 
-# 7. LS-DYNA에서 *INCLUDE로 사용
+# 6. LS-DYNA 입력 파일에서 사용
+# *INCLUDE
+# prestress.dynain
+```
+
+### 예제 2: 간단한 arc 예제
+
+```bash
+# 1. 예제 메쉬 생성
+KooRemapper generate arc test_arc
+# -> test_arc_bent.k, test_arc_flat.k
+
+# 2. 매핑
+KooRemapper map test_arc_bent.k test_arc_flat.k test_arc_mapped.k
+
+# 3. 응력 계산
+KooRemapper prestress -E 210000 -nu 0.3 \
+    test_arc_flat.k test_arc_mapped.k test_arc_stress.dynain
 ```
 
 ---
