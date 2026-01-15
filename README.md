@@ -6,31 +6,59 @@ KooRemapper는 평평한(flat) 메쉬를 구부러진(bent) 구조화 메쉬에 
 
 ## 주요 기능
 
-- **메쉬 매핑**: 평평한 비정형 메쉬를 구부러진 정형 메쉬에 매핑
-- **언폴딩**: 구부러진 메쉬를 평평하게 펼친 메쉬 생성
-- **곡선 메쉬 생성**: 사용자 정의 centerline으로 곡선 메쉬 생성 (YAML)
-- **가변 밀도 메쉬**: 밀-소 영역이 다른 메쉬 생성 (YAML)
-- **Prestress 계산**: 변형에 따른 응력을 dynain 포맷으로 출력
-- **스트레인 계산**: 두 메쉬 간의 변형률 계산
+- **메쉬 매핑 (`map`)**: 디테일 플랫 → 디테일 벤트 (심플 레퍼런스 형상 따라감)
+- **레퍼런스 생성 (`generate-var`)**: 심플 벤트/플랫 레퍼런스 생성
+  - 곡선 메쉬: 사용자 정의 2D centerline 기반
+  - 가변 밀도 메쉬: 영역별 요소 밀도 제어
+- **언폴딩 (`unfold`)**: 벤트 → 플랫 (arc-length 기반)
+- **응력 계산 (`prestress`)**: 플랫 + 벤트 → dynain 초기 응력
+- **예제 생성 (`generate`)**: 테스트용 심플 메쉬 (arc, torus, helix 등)
 
 ---
 
 ## 전체 워크플로우
 
 ```
-YAML Config ──→ generate-var ──→ Bent Mesh (레퍼런스)
-                                      │
-                                      │ unfold (선택)
-                                      ▼
-Fine Flat Mesh ──────────────→ map ──→ Mapped Mesh
-(CAD에서 생성)                              │
-                                           │ prestress
-                                           ▼
-                                      dynain 파일
-                                      (초기 응력)
-                                           │
-                                           ▼
-                                      LS-DYNA 해석
+┌─────────────────────────────────────────────────────────────┐
+│ 1단계: 심플 레퍼런스 생성 (형상 정의)                        │
+└─────────────────────────────────────────────────────────────┘
+YAML Config ──→ generate-var ──→ Simple Bent (10K 요소)
+     (curved/flat)                      │
+                                        │ unfold (선택)
+                                        ▼
+                                  Simple Flat
+                                        │
+┌───────────────────────────────────────┼─────────────────────┐
+│ 2단계: 디테일 플랫 메쉬 준비           │                     │
+└───────────────────────────────────────┼─────────────────────┘
+                                        │
+       CAD/generate-var ────────────────┤
+                                        ▼
+                                 Detail Flat (1M 요소)
+                                        │
+                                        │
+┌───────────────────────────────────────┼─────────────────────┐
+│ 3단계: 매핑 (디테일 플랫 → 디테일 벤트)│                    │
+└───────────────────────────────────────┼─────────────────────┘
+                                        │
+       Simple Bent (레퍼런스) ──────────┤
+                                        │
+                                   map  │
+                                        ▼
+                                 Detail Bent (1M 요소)
+                                        │
+┌───────────────────────────────────────┼─────────────────────┐
+│ 4단계: 초기 응력 계산                  │                     │
+└───────────────────────────────────────┼─────────────────────┘
+                                        │
+       Detail Flat ──────────────────prestress
+                                        │
+                                        ▼
+                                  prestress.dynain
+                                   (초기 응력)
+                                        │
+                                        ▼
+                                  LS-DYNA 해석
 ```
 
 ---
@@ -192,16 +220,47 @@ KooRemapper generate-var curved.yaml bent_mesh.k
 
 ### 2. 메쉬 매핑 (`map`)
 
-평평한 메쉬를 구부러진 참조 메쉬에 매핑합니다.
+평평한 **디테일 메쉬**를 구부러진 **심플 레퍼런스 메쉬** 형상으로 변형시킵니다.
 
 ```bash
-KooRemapper map <bent_mesh> <flat_mesh> <output>
+KooRemapper map <bent_ref> <flat_detail> <bent_detail_output>
 ```
 
-**예제:**
+**역할:**
+- `bent_ref`: 심플 벤트 메쉬 (정형, 적은 요소) - **형상 정의 역할**
+- `flat_detail`: 디테일 플랫 메쉬 (비정형, 많은 요소) - **매핑 대상**
+- `bent_detail_output`: 디테일 벤트 메쉬 - **결과**
+
+**예제 1: generate-var 레퍼런스 사용**
 ```bash
-KooRemapper map bent_mesh.k fine_flat.k mapped_result.k
+# 1. 심플 레퍼런스 (10,000 요소)
+KooRemapper generate-var curved.yaml bent_ref.k
+
+# 2. 디테일 플랫 준비 (1,000,000 요소, CAD 또는 generate-var)
+# fine_flat.k
+
+# 3. 디테일 플랫 → 디테일 벤트 매핑
+KooRemapper map bent_ref.k fine_flat.k bent_detail.k
+# → bent_detail.k: 1,000,000 요소의 구부러진 메쉬
 ```
+
+**예제 2: 예제 메쉬 사용**
+```bash
+# 1. 심플 레퍼런스 생성
+KooRemapper generate arc simple
+# → simple_bent.k (간단한 호 형상)
+
+# 2. 디테일 플랫은 CAD에서 준비
+# detail_flat.k (복잡한 형상, TET4/HEX8 혼합 가능)
+
+# 3. 매핑
+KooRemapper map simple_bent.k detail_flat.k detail_bent.k
+```
+
+**특징:**
+- Bent 레퍼런스는 **반드시 HEX8 정형 메쉬**
+- Flat 디테일은 **HEX8 또는 TET4, 비정형 가능**
+- 크기 자동 조정: Flat의 (길이 x 폭 x 두께)가 Bent의 (arc-length x width x thickness)에 맞춰짐
 
 ### 3. 초기 응력 계산 (`prestress`)
 
@@ -361,31 +420,39 @@ Structured Grid:
 
 ### 예제 1: 곡선 형상 + 가변 밀도 메쉬 + 응력 계산
 
+**목표**: 심플 벤트 레퍼런스로 100만개 디테일 플랫 메쉬를 변형
+
 ```bash
-# 1. 곡선 레퍼런스 메쉬 생성 (간단한 벤딩, 거친 메쉬)
-# curved.yaml 파일 작성 (type: curved, 50 elements)
-KooRemapper generate-var curved.yaml bent_ref.k
-KooRemapper info bent_ref.k
+# 1. 심플 벤트 레퍼런스 생성 (10,000 요소, 형상 정의용)
+# curved.yaml 파일 작성 (type: curved, 50x10x20 = 10K 요소)
+KooRemapper generate-var curved.yaml simple_bent.k
+KooRemapper info simple_bent.k
 
-# 2. 레퍼런스를 펼쳐서 평면 형상 확인
-KooRemapper unfold bent_ref.k bent_ref_flat.k
+# 2. 심플 벤트를 펼쳐서 평면 형상 확인
+KooRemapper unfold simple_bent.k simple_flat.k
 
-# 3. 가변 밀도 평면 메쉬 생성 (상세, 100만개 요소)
-# vardens.yaml 작성 (type: flat, reference: bent_ref_flat.k)
-KooRemapper generate-var vardens.yaml fine_flat.k
-KooRemapper info fine_flat.k
+# 3. 디테일 플랫 메쉬 생성 (1,000,000 요소, 가변 밀도)
+# vardens.yaml 작성 (type: flat, reference: simple_flat.k)
+# 183x183x30 = 1M 요소
+KooRemapper generate-var vardens.yaml detail_flat.k
+KooRemapper info detail_flat.k
 
-# 4. 평면 메쉬를 곡선 형상으로 매핑
-KooRemapper map bent_ref.k fine_flat.k mapped.k
-KooRemapper info mapped.k
+# 4. 디테일 플랫 → 디테일 벤트 매핑
+KooRemapper map simple_bent.k detail_flat.k detail_bent.k
+KooRemapper info detail_bent.k
 
-# 5. 초기 응력 계산 (K-file 물성 사용)
-KooRemapper prestress fine_flat.k mapped.k prestress.dynain
+# 5. 초기 응력 계산 (K-file 물성 자동 사용)
+KooRemapper prestress detail_flat.k detail_bent.k prestress.dynain
 
 # 6. LS-DYNA 입력 파일에서 사용
 # *INCLUDE
 # prestress.dynain
 ```
+
+**결과:**
+- `simple_bent.k`: 10K 요소의 심플 레퍼런스
+- `detail_bent.k`: 1M 요소의 디테일 벤트 메쉬
+- `prestress.dynain`: 1M 요소의 초기 응력
 
 ### 예제 2: 간단한 arc 예제
 
