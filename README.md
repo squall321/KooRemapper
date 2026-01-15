@@ -20,35 +20,38 @@ KooRemapper는 평평한(flat) 메쉬를 구부러진(bent) 구조화 메쉬에 
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ 1단계: 심플 레퍼런스 생성 (형상 정의)                        │
+│ 1단계: 심플 벤트 생성 (형상 정의) - 필수                     │
 └─────────────────────────────────────────────────────────────┘
 YAML Config ──→ generate-var ──→ Simple Bent (10K 요소)
-     (curved/flat)                      │
+     (curved)                           │
+                                        │
                                         │ unfold (선택)
                                         ▼
-                                  Simple Flat
+                                  Simple Flat (크기 참조용)
                                         │
 ┌───────────────────────────────────────┼─────────────────────┐
-│ 2단계: 디테일 플랫 메쉬 준비           │                     │
+│ 2단계: 디테일 플랫 준비 - 필수         │                     │
+│  방법 A: generate-var (reference 사용)│                     │
+│  방법 B: CAD 직접 생성 (크기 대략 맞춤)│                     │
 └───────────────────────────────────────┼─────────────────────┘
                                         │
-       CAD/generate-var ────────────────┤
+       방법 A: generate-var (YAML) ─────┤
+       방법 B: CAD ─────────────────────┤
                                         ▼
                                  Detail Flat (1M 요소)
                                         │
-                                        │
 ┌───────────────────────────────────────┼─────────────────────┐
-│ 3단계: 매핑 (디테일 플랫 → 디테일 벤트)│                    │
+│ 3단계: 매핑 - 필수                     │                     │
+│  (디테일 플랫 → 디테일 벤트)          │                     │
 └───────────────────────────────────────┼─────────────────────┘
                                         │
        Simple Bent (레퍼런스) ──────────┤
-                                        │
                                    map  │
                                         ▼
                                  Detail Bent (1M 요소)
                                         │
 ┌───────────────────────────────────────┼─────────────────────┐
-│ 4단계: 초기 응력 계산                  │                     │
+│ 4단계: 초기 응력 계산 - 필수           │                     │
 └───────────────────────────────────────┼─────────────────────┘
                                         │
        Detail Flat ──────────────────prestress
@@ -59,6 +62,9 @@ YAML Config ──→ generate-var ──→ Simple Bent (10K 요소)
                                         │
                                         ▼
                                   LS-DYNA 해석
+
+필수 파일: Simple Bent + Detail Flat
+선택 파일: Simple Flat (크기 자동 맞춤 시에만)
 ```
 
 ---
@@ -423,25 +429,25 @@ Structured Grid:
 **목표**: 심플 벤트 레퍼런스로 100만개 디테일 플랫 메쉬를 변형
 
 ```bash
-# 1. 심플 벤트 레퍼런스 생성 (10,000 요소, 형상 정의용)
+# 1. 심플 벤트 레퍼런스 생성 (10,000 요소, 형상 정의용) - 필수
 # curved.yaml 파일 작성 (type: curved, 50x10x20 = 10K 요소)
 KooRemapper generate-var curved.yaml simple_bent.k
 KooRemapper info simple_bent.k
 
-# 2. 심플 벤트를 펼쳐서 평면 형상 확인
+# 2. 심플 플랫 생성 (크기 자동 맞춤용) - 선택
 KooRemapper unfold simple_bent.k simple_flat.k
 
-# 3. 디테일 플랫 메쉬 생성 (1,000,000 요소, 가변 밀도)
+# 3. 디테일 플랫 메쉬 생성 (1,000,000 요소) - 필수
 # vardens.yaml 작성 (type: flat, reference: simple_flat.k)
 # 183x183x30 = 1M 요소
 KooRemapper generate-var vardens.yaml detail_flat.k
 KooRemapper info detail_flat.k
 
-# 4. 디테일 플랫 → 디테일 벤트 매핑
+# 4. 디테일 플랫 → 디테일 벤트 매핑 - 필수
 KooRemapper map simple_bent.k detail_flat.k detail_bent.k
 KooRemapper info detail_bent.k
 
-# 5. 초기 응력 계산 (K-file 물성 자동 사용)
+# 5. 초기 응력 계산 - 필수
 KooRemapper prestress detail_flat.k detail_bent.k prestress.dynain
 
 # 6. LS-DYNA 입력 파일에서 사용
@@ -451,8 +457,28 @@ KooRemapper prestress detail_flat.k detail_bent.k prestress.dynain
 
 **결과:**
 - `simple_bent.k`: 10K 요소의 심플 레퍼런스
-- `detail_bent.k`: 1M 요소의 디테일 벤트 메쉬
+- `simple_flat.k`: (선택) 크기 참조용, 매핑에는 불필요
+- `detail_flat.k`: 1M 요소의 디테일 플랫
+- `detail_bent.k`: 1M 요소의 디테일 벤트
 - `prestress.dynain`: 1M 요소의 초기 응력
+
+### 예제 1-1: 심플 플랫 없이 진행 (CAD에서 디테일 플랫 준비)
+
+```bash
+# 1. 심플 벤트 레퍼런스 생성
+KooRemapper generate-var curved.yaml simple_bent.k
+
+# 2. CAD에서 디테일 플랫 준비 (크기 대략 맞춤)
+# detail_flat_from_cad.k (arc-length x width x thickness 크기)
+
+# 3. 매핑 (자동 크기 조정됨)
+KooRemapper map simple_bent.k detail_flat_from_cad.k detail_bent.k
+
+# 4. 응력 계산
+KooRemapper prestress detail_flat_from_cad.k detail_bent.k prestress.dynain
+```
+
+**핵심**: `map` 명령어가 자동으로 크기를 조정하므로, 심플 플랫 없이도 작동합니다.
 
 ### 예제 2: 간단한 arc 예제
 
