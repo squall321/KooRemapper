@@ -69,19 +69,78 @@ YAML Config ──→ generate-var ──→ Simple Bent (10K 요소)
 
 ---
 
-## 빌드
+## 설치 및 빌드
 
-### Windows
+### 방법 1: 소스에서 빌드 (권장)
+
+**Windows:**
 ```cmd
+# 1. 저장소 클론
+git clone https://github.com/squall321/KooRemapper.git
 cd KooRemapper
+
+# 2. 빌드
 scripts\build_windows.bat
+
+# 3. 실행파일 위치
+build\bin\Release\KooRemapper.exe
 ```
 
-### Linux / macOS
+**Linux / macOS:**
 ```bash
+# 1. 저장소 클론
+git clone https://github.com/squall321/KooRemapper.git
 cd KooRemapper
+
+# 2. 빌드
 ./scripts/build_linux.sh
+
+# 3. 실행파일 위치
+build/bin/Release/KooRemapper
 ```
+
+**필요 환경:**
+- CMake 3.15+
+- C++17 지원 컴파일러
+  - Windows: Visual Studio 2019+
+  - Linux: GCC 9+ / Clang 10+
+  - macOS: Xcode 11+
+
+### 방법 2: 실행파일만 복사 (간편)
+
+KooRemapper는 **정적 링크**로 빌드되어 외부 DLL 없이 단독 실행됩니다.
+
+**Windows:**
+```cmd
+# 빌드된 실행파일만 복사
+KooRemapper.exe → 원하는 위치
+
+# 바로 실행 가능 (DLL 불필요)
+KooRemapper.exe --help
+```
+
+**Linux / macOS:**
+```bash
+# 실행파일만 복사
+cp KooRemapper /usr/local/bin/
+
+# 또는 PATH에 추가
+export PATH=$PATH:/path/to/KooRemapper
+```
+
+### 방법 3: 다른 컴퓨터에 배포
+
+**Windows:**
+1. `build\bin\Release\KooRemapper.exe` 파일만 복사
+2. 대상 컴퓨터 아무 폴더에 붙여넣기
+3. 명령 프롬프트에서 바로 실행
+
+**Linux / macOS:**
+1. `build/bin/Release/KooRemapper` 파일만 복사
+2. 실행 권한 부여: `chmod +x KooRemapper`
+3. PATH에 추가하거나 직접 실행
+
+**주의:** 정적 링크되어 있어 런타임 의존성이 없습니다.
 
 ---
 
