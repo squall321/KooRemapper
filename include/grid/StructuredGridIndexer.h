@@ -1,11 +1,13 @@
 #pragma once
 
 #include "core/Mesh.h"
+#include "core/Vector3D.h"
 #include "grid/ConnectivityAnalyzer.h"
 #include <queue>
 #include <set>
 #include <map>
 #include <tuple>
+#include <array>
 
 namespace KooRemapper {
 
@@ -63,6 +65,14 @@ public:
     void reorderAxes(Mesh& mesh);
 
     /**
+     * Reorder nodes within each element to match LS-DYNA standard ordering
+     * based on geometry (element centroid and node positions).
+     * Standard order: bottom face CCW (n0,n1,n2,n3), top face CCW (n4,n5,n6,n7)
+     * where k-axis goes from bottom to top.
+     */
+    void reorderElementNodes(Mesh& mesh);
+
+    /**
      * Get error message
      */
     const std::string& getErrorMessage() const { return errorMessage_; }
@@ -75,6 +85,13 @@ private:
     // direction[axis] = {negative_face, positive_face}
     std::array<std::pair<int, int>, 3> axisToFace_;
 
+    // Geometry-based axis directions (normalized vectors)
+    // axisDirections_[0] = i-axis direction, etc.
+    std::array<Vector3D, 3> axisDirections_;
+
+    // Mesh pointer for geometry queries during indexing
+    const Mesh* mesh_;
+
     // Index lookup map
     std::map<std::tuple<int, int, int>, const Element*> indexedElements_;
 
@@ -84,16 +101,45 @@ private:
     int findStartCorner(const Mesh& mesh, const ConnectivityAnalyzer& connectivity);
 
     /**
-     * Determine initial axis directions from the starting corner
+     * Determine initial axis directions from the starting corner (face-based, legacy)
      */
     bool determineInitialDirections(const Mesh& mesh, int startElem,
                                     const ConnectivityAnalyzer& connectivity);
 
     /**
-     * Propagate indices using BFS
+     * Determine initial axis directions using geometry (element centroids)
+     * This method does NOT depend on LS-DYNA standard node ordering
+     */
+    bool determineInitialDirectionsGeometry(const Mesh& mesh, int startElem,
+                                            const ConnectivityAnalyzer& connectivity);
+
+    /**
+     * Propagate indices using BFS (face-based, legacy)
      */
     bool propagateIndices(Mesh& mesh, int startElem,
                          const ConnectivityAnalyzer& connectivity);
+
+    /**
+     * Propagate indices using BFS with geometry-based axis detection
+     * This method does NOT depend on LS-DYNA standard node ordering
+     */
+    bool propagateIndicesGeometry(Mesh& mesh, int startElem,
+                                  const ConnectivityAnalyzer& connectivity);
+
+    /**
+     * Calculate element centroid for geometry-based direction detection
+     */
+    Vector3D calculateElementCentroid(const Mesh& mesh, int elemId) const;
+
+    /**
+     * Determine which axis (0=i, 1=j, 2=k) a direction vector corresponds to
+     */
+    int determineAxisFromDirection(const Vector3D& direction) const;
+
+    /**
+     * Determine direction sign (+1 or -1) for a given axis
+     */
+    int determineDirectionSign(const Vector3D& direction, int axis) const;
 
     /**
      * Get axis from face index (0=i, 1=j, 2=k)

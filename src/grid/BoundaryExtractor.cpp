@@ -1,6 +1,9 @@
 #include "grid/BoundaryExtractor.h"
+#include "core/Vector3D.h"
 #include <set>
 #include <algorithm>
+#include <map>
+#include <cmath>
 
 namespace KooRemapper {
 
@@ -57,37 +60,181 @@ void BoundaryExtractor::buildNodeGrid(const Mesh& mesh) {
         }
     }
 
-    // Map element corner nodes to grid positions
-    // Each element at (i,j,k) contributes 8 nodes at corners
+    // Build element lookup by (i,j,k)
+    std::map<std::tuple<int,int,int>, const Element*> elemLookup;
     for (const auto& [id, elem] : mesh.elements) {
-        if (!elem.indexAssigned) continue;
+        if (elem.indexAssigned) {
+            elemLookup[{elem.i, elem.j, elem.k}] = &elem;
+        }
+    }
 
-        int ei = elem.i;
-        int ej = elem.j;
-        int ek = elem.k;
+    // First pass: compute element centroids for geometry-based node selection
+    std::map<std::tuple<int,int,int>, Vector3D> elemCentroids;
+    for (const auto& [id, elem] : mesh.elements) {
+        if (elem.indexAssigned) {
+            Vector3D centroid(0, 0, 0);
+            for (int n = 0; n < 8; ++n) {
+                const Node* node = mesh.getNode(elem.nodeIds[n]);
+                if (node) {
+                    centroid += node->position;
+                }
+            }
+            centroid /= 8.0;
+            elemCentroids[{elem.i, elem.j, elem.k}] = centroid;
+        }
+    }
 
-        // Node mapping for hexahedron:
-        // Local node 0 -> (i, j, k)
-        // Local node 1 -> (i+1, j, k)
-        // Local node 2 -> (i+1, j+1, k)
-        // Local node 3 -> (i, j+1, k)
-        // Local node 4 -> (i, j, k+1)
-        // Local node 5 -> (i+1, j, k+1)
-        // Local node 6 -> (i+1, j+1, k+1)
-        // Local node 7 -> (i, j+1, k+1)
+    // Build node-to-elements reverse index for O(1) lookup
+    std::map<int, std::vector<std::tuple<int,int,int>>> nodeToElems;
+    for (const auto& [id, elem] : mesh.elements) {
+        if (elem.indexAssigned) {
+            for (int n = 0; n < 8; ++n) {
+                nodeToElems[elem.nodeIds[n]].push_back({elem.i, elem.j, elem.k});
+            }
+        }
+    }
 
-        std::array<std::array<int, 3>, 8> offsets = {{
-            {0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {0, 1, 0},
-            {0, 0, 1}, {1, 0, 1}, {1, 1, 1}, {0, 1, 1}
-        }};
+    // For each grid node position (gi,gj,gk), find the correct node ID
+    for (int gi = 0; gi < ni; ++gi) {
+        for (int gj = 0; gj < nj; ++gj) {
+            for (int gk = 0; gk < nk; ++gk) {
+                // Collect adjacent elements (elements that have this grid node as a corner)
+                std::vector<const Element*> adjacentElems;
 
-        for (int n = 0; n < 8; ++n) {
-            int gi = ei + offsets[n][0];
-            int gj = ej + offsets[n][1];
-            int gk = ek + offsets[n][2];
+                for (int di = 0; di <= 1; ++di) {
+                    for (int dj = 0; dj <= 1; ++dj) {
+                        for (int dk = 0; dk <= 1; ++dk) {
+                            int ei = gi - di;
+                            int ej = gj - dj;
+                            int ek = gk - dk;
 
-            if (gi < ni && gj < nj && gk < nk) {
-                nodeGrid_[gi][gj][gk] = elem.nodeIds[n];
+                            if (ei < 0 || ej < 0 || ek < 0) continue;
+                            if (ei >= dimI_ || ej >= dimJ_ || ek >= dimK_) continue;
+
+                            auto it = elemLookup.find({ei, ej, ek});
+                            if (it != elemLookup.end()) {
+                                adjacentElems.push_back(it->second);
+                            }
+                        }
+                    }
+                }
+
+                if (adjacentElems.empty()) {
+                    continue;
+                }
+
+                // Find nodes shared by ALL adjacent elements
+                std::set<int> sharedNodes(adjacentElems[0]->nodeIds.begin(),
+                                          adjacentElems[0]->nodeIds.end());
+
+                for (size_t e = 1; e < adjacentElems.size(); ++e) {
+                    std::set<int> elemNodes(adjacentElems[e]->nodeIds.begin(),
+                                            adjacentElems[e]->nodeIds.end());
+                    std::set<int> intersection;
+                    std::set_intersection(sharedNodes.begin(), sharedNodes.end(),
+                                          elemNodes.begin(), elemNodes.end(),
+                                          std::inserter(intersection, intersection.begin()));
+                    sharedNodes = intersection;
+                }
+
+                if (sharedNodes.size() == 1) {
+                    // Perfect - exactly one shared node
+                    nodeGrid_[gi][gj][gk] = *sharedNodes.begin();
+                }
+                else if (sharedNodes.size() > 1) {
+                    // Multiple shared nodes - use COMBINED connectivity + geometry approach
+                    // First filter by connectivity, then use geometry as tiebreaker
+
+                    int expectedCount = static_cast<int>(adjacentElems.size());
+
+                    // Compute average centroid of adjacent elements
+                    Vector3D avgCentroid(0, 0, 0);
+                    for (const Element* elem : adjacentElems) {
+                        auto centIt = elemCentroids.find({elem->i, elem->j, elem->k});
+                        if (centIt != elemCentroids.end()) {
+                            avgCentroid += centIt->second;
+                        }
+                    }
+                    avgCentroid /= static_cast<double>(adjacentElems.size());
+
+                    // Determine which corner direction this grid node represents
+                    // relative to the adjacent elements
+                    // Grid node at (gi,gj,gk) corresponds to node position in each adjacent element:
+                    // - If gi == elem->i, node is at i- side (lower i bound of element)
+                    // - If gi > elem->i (i.e., gi == elem->i + 1), node is at i+ side (upper i bound)
+                    // For corner (0,0,0) with only element (0,0,0) adjacent: gi==0, elem->i==0, so i- side
+                    // For corner (dimI,dimJ,dimK) with only element (dimI-1,dimJ-1,dimK-1): gi>elem->i, so i+ side
+                    double iSign = 0, jSign = 0, kSign = 0;
+                    for (const Element* elem : adjacentElems) {
+                        // This node is at i+ side if gi > elem->i, otherwise i- side
+                        iSign += (gi > elem->i) ? 1.0 : -1.0;
+                        jSign += (gj > elem->j) ? 1.0 : -1.0;
+                        kSign += (gk > elem->k) ? 1.0 : -1.0;
+                    }
+                    // Normalize
+                    double numElems = static_cast<double>(adjacentElems.size());
+                    iSign /= numElems;
+                    jSign /= numElems;
+                    kSign /= numElems;
+
+                    int bestNode = -1;
+                    double bestScore = -1e30;
+
+                    for (int nodeId : sharedNodes) {
+                        double score = 0.0;
+
+                        // Connectivity score
+                        auto nodeIt = nodeToElems.find(nodeId);
+                        if (nodeIt != nodeToElems.end()) {
+                            int adjacentCount = 0;
+                            int totalCount = static_cast<int>(nodeIt->second.size());
+
+                            for (const auto& [ei, ej, ek] : nodeIt->second) {
+                                bool isAdjacent = false;
+                                for (const Element* adjElem : adjacentElems) {
+                                    if (adjElem->i == ei && adjElem->j == ej && adjElem->k == ek) {
+                                        isAdjacent = true;
+                                        break;
+                                    }
+                                }
+                                if (isAdjacent) {
+                                    adjacentCount++;
+                                }
+                            }
+
+                            int nonAdjacentCount = totalCount - adjacentCount;
+
+                            if (adjacentCount == expectedCount && nonAdjacentCount == 0) {
+                                score += 10000.0;
+                            } else if (adjacentCount == expectedCount) {
+                                score += 1000.0 - nonAdjacentCount * 10.0;
+                            } else {
+                                score += adjacentCount * 100.0 - nonAdjacentCount * 10.0;
+                            }
+                        }
+
+                        // Geometry score - prefer node in the expected direction
+                        const Node* node = mesh.getNode(nodeId);
+                        if (node) {
+                            Vector3D diff = node->position - avgCentroid;
+
+                            // Score based on alignment with expected corner direction
+                            // iSign > 0 means we want nodes with higher x relative to centroid
+                            score += diff.x * iSign * 0.1;
+                            score += diff.y * jSign * 0.1;
+                            score += diff.z * kSign * 0.1;
+                        }
+
+                        if (score > bestScore) {
+                            bestScore = score;
+                            bestNode = nodeId;
+                        }
+                    }
+
+                    if (bestNode > 0) {
+                        nodeGrid_[gi][gj][gk] = bestNode;
+                    }
+                }
             }
         }
     }

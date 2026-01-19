@@ -7,7 +7,7 @@
 namespace KooRemapper {
 
 MeshRemapper::MeshRemapper()
-    : bentMesh_(nullptr), flatMesh_(nullptr)
+    : bentMesh_(nullptr), flatMesh_(nullptr), flipI_(false), flipJ_(false), flipK_(false)
 {}
 
 void MeshRemapper::setBentMesh(const Mesh* mesh) {
@@ -87,8 +87,18 @@ bool MeshRemapper::step1_AnalyzeBentMesh() {
     connectivity_.buildConnectivity(tempMesh);
 
     if (!connectivity_.isStructuredGrid()) {
+        // Provide detailed diagnostic info
+        auto corners = connectivity_.findCornerElements();
+        auto edges = connectivity_.findEdgeElements();
+        auto faces = connectivity_.findFaceElements();
+        auto interior = connectivity_.findInteriorElements();
+
         errorMessage_ = "Bent mesh is not a valid structured grid: " +
-                       connectivity_.getErrorMessage();
+                       connectivity_.getErrorMessage() +
+                       " (corners=" + std::to_string(corners.size()) +
+                       ", edges=" + std::to_string(edges.size()) +
+                       ", faces=" + std::to_string(faces.size()) +
+                       ", interior=" + std::to_string(interior.size()) + ")";
         return false;
     }
 
@@ -98,6 +108,9 @@ bool MeshRemapper::step1_AnalyzeBentMesh() {
                        indexer_.getErrorMessage();
         return false;
     }
+
+    // Reorder element nodes based on geometry for consistent LS-DYNA ordering
+    indexer_.reorderElementNodes(tempMesh);
 
     // Build index lookup
     indexer_.buildIndexLookup(tempMesh);
@@ -117,16 +130,58 @@ bool MeshRemapper::step2_BuildParametricSpace() {
 
     // Re-run indexing for this mesh
     connectivity_.buildConnectivity(tempMesh);
-    indexer_.assignIndices(tempMesh, connectivity_);
+
+    if (!indexer_.assignIndices(tempMesh, connectivity_)) {
+        errorMessage_ = "Failed to build parametric mapper: indexing failed - " +
+                       indexer_.getErrorMessage();
+        return false;
+    }
+
+    // Reorder element nodes based on geometry for consistent LS-DYNA ordering
+    indexer_.reorderElementNodes(tempMesh);
+
     boundary_.extract(tempMesh);
+
+    // Check if grid dimensions are set
+    if (!tempMesh.gridDimensionsSet) {
+        errorMessage_ = "Failed to build parametric mapper: grid dimensions not set "
+                       "(dimI=" + std::to_string(tempMesh.dimI) +
+                       ", dimJ=" + std::to_string(tempMesh.dimJ) +
+                       ", dimK=" + std::to_string(tempMesh.dimK) + ")";
+        return false;
+    }
+
+    // Check corner nodes
+    auto cornerNodes = boundary_.getCornerNodes();
+    int validCorners = 0;
+    std::string cornerDebug = "";
+    for (int i = 0; i < 8; ++i) {
+        if (cornerNodes[i] != 0 && tempMesh.getNode(cornerNodes[i]) != nullptr) {
+            validCorners++;
+        }
+        cornerDebug += std::to_string(cornerNodes[i]) + " ";
+    }
+
+    if (validCorners != 8) {
+        errorMessage_ = "Failed to build parametric mapper: only " +
+                       std::to_string(validCorners) + "/8 corner nodes found "
+                       "(dims=" + std::to_string(tempMesh.dimI) + "x" +
+                       std::to_string(tempMesh.dimJ) + "x" +
+                       std::to_string(tempMesh.dimK) + ", corners=[" + cornerDebug + "])";
+        return false;
+    }
 
     // Build parametric mapper
     paramMapper_.build(tempMesh, boundary_, edgeCalc_);
 
     if (!paramMapper_.isValid()) {
-        errorMessage_ = "Failed to build parametric mapper";
+        errorMessage_ = "Failed to build parametric mapper: internal error";
         return false;
     }
+
+    // Analyze layer orientation to determine flip flags
+    // This must match FlatMeshGenerator's logic for roundtrip consistency
+    analyzeLayerOrientation();
 
     return true;
 }
@@ -186,6 +241,19 @@ bool MeshRemapper::step4_MapNodes() {
         if (flatSizeK > 0) {
             w = (flatNode.position.z - minBound.z) / flatSizeK;
             w = std::max(0.0, std::min(1.0, w));
+        }
+
+        // Apply flip to match FlatMeshGenerator's coordinate system
+        // FlatMeshGenerator flips j/k when bent mesh's radial direction goes inward
+        // We must apply the same flip here for consistent mapping
+        if (flipI_) {
+            u = 1.0 - u;
+        }
+        if (flipJ_) {
+            v = 1.0 - v;
+        }
+        if (flipK_) {
+            w = 1.0 - w;
         }
 
         // Map to bent position using edge-based interpolation
@@ -256,7 +324,12 @@ bool MeshRemapper::step5_CopyElements() {
 }
 
 bool MeshRemapper::step6_ValidateResult() {
-    // Calculate Jacobians for all elements to check for invalid mappings
+    // Calculate Jacobian statistics
+    // Note: We do NOT fix negative Jacobians here because:
+    // 1. The detail flat mesh has correct connectivity that should be preserved
+    // 2. Flipping node order would change element orientation, affecting stress calculations
+    // 3. If Jacobians are negative, it indicates a mapping direction issue that should be
+    //    fixed in the coordinate system logic, not by modifying element connectivity
     stats_.invalidElements = 0;
     stats_.minJacobian = std::numeric_limits<double>::max();
     stats_.maxJacobian = std::numeric_limits<double>::lowest();
@@ -286,7 +359,6 @@ bool MeshRemapper::step6_ValidateResult() {
         }
 
         // Calculate Jacobian at element center
-        // Using finite difference approximation
         Vector3D dxdu = (corners[1] + corners[2] + corners[5] + corners[6]) * 0.25 -
                         (corners[0] + corners[3] + corners[4] + corners[7]) * 0.25;
         Vector3D dxdv = (corners[2] + corners[3] + corners[6] + corners[7]) * 0.25 -
@@ -294,7 +366,6 @@ bool MeshRemapper::step6_ValidateResult() {
         Vector3D dxdw = (corners[4] + corners[5] + corners[6] + corners[7]) * 0.25 -
                         (corners[0] + corners[1] + corners[2] + corners[3]) * 0.25;
 
-        // Jacobian determinant = dxdu . (dxdv x dxdw)
         double jacobian = dxdu.dot(dxdv.cross(dxdw));
 
         stats_.minJacobian = std::min(stats_.minJacobian, jacobian);
@@ -310,8 +381,64 @@ bool MeshRemapper::step6_ValidateResult() {
         stats_.avgJacobian = sumJacobian / static_cast<double>(elements.size());
     }
 
-    // Mapping is valid even with some invalid elements (user can decide what to do)
     return true;
+}
+
+void MeshRemapper::fixNegativeJacobians() {
+    // Fix elements with negative Jacobian by reordering their nodes
+    // For HEX8 elements, swapping the bottom and top faces inverts the Jacobian sign
+    //
+    // This is needed because the detail flat mesh may have element ordering
+    // that produces negative Jacobians when mapped to bent geometry.
+    //
+    // Original: n0,n1,n2,n3 (bottom), n4,n5,n6,n7 (top)
+    // Fixed:    n4,n5,n6,n7 (now bottom), n0,n1,n2,n3 (now top)
+
+    auto& elements = resultMesh_.elements;
+
+    for (auto& pair : elements) {
+        Element& elem = pair.second;
+
+        if (elem.type != ElementType::HEX8) continue;
+
+        // Get corner positions
+        std::array<Vector3D, 8> corners;
+        bool valid = true;
+
+        for (int idx = 0; idx < 8; ++idx) {
+            const Node* node = resultMesh_.getNode(elem.nodeIds[idx]);
+            if (!node) {
+                valid = false;
+                break;
+            }
+            corners[idx] = node->getEffectivePosition();
+        }
+
+        if (!valid) continue;
+
+        // Calculate Jacobian
+        Vector3D dxdu = (corners[1] + corners[2] + corners[5] + corners[6]) * 0.25 -
+                        (corners[0] + corners[3] + corners[4] + corners[7]) * 0.25;
+        Vector3D dxdv = (corners[2] + corners[3] + corners[6] + corners[7]) * 0.25 -
+                        (corners[0] + corners[1] + corners[4] + corners[5]) * 0.25;
+        Vector3D dxdw = (corners[4] + corners[5] + corners[6] + corners[7]) * 0.25 -
+                        (corners[0] + corners[1] + corners[2] + corners[3]) * 0.25;
+
+        double jacobian = dxdu.dot(dxdv.cross(dxdw));
+
+        if (jacobian < 0) {
+            // Swap bottom and top faces to invert Jacobian sign
+            std::array<int, 8> oldNodes = elem.nodeIds;
+            elem.nodeIds[0] = oldNodes[4];
+            elem.nodeIds[1] = oldNodes[5];
+            elem.nodeIds[2] = oldNodes[6];
+            elem.nodeIds[3] = oldNodes[7];
+            elem.nodeIds[4] = oldNodes[0];
+            elem.nodeIds[5] = oldNodes[1];
+            elem.nodeIds[6] = oldNodes[2];
+            elem.nodeIds[7] = oldNodes[3];
+        }
+    }
 }
 
 void MeshRemapper::reportProgress(int percent) {
@@ -330,6 +457,60 @@ double MeshRemapper::getNeutralSizeJ() const {
 
 double MeshRemapper::getNeutralSizeK() const {
     return edgeCalc_.getNeutralLengthK();
+}
+
+void MeshRemapper::analyzeLayerOrientation() {
+    // This must match FlatMeshGenerator's logic exactly
+    // Analyze bent mesh corners to determine if i/j/k directions need flipping
+    //
+    // Goal: In flat mesh, outer layer (larger Y in bent mesh) should have
+    // larger coordinate value. FlatMeshGenerator applies flipJ/flipK when
+    // the bent mesh's j or k direction goes toward smaller Y (inward).
+    // We must apply the same flip here for roundtrip consistency.
+
+    flipI_ = false;
+    flipJ_ = false;
+    flipK_ = false;
+
+    const auto& corners = paramMapper_.getCorners();
+
+    // Corner 0: (i=0, j=0, k=0)
+    // Corner 1: (i=max, j=0, k=0)  - i direction
+    // Corner 3: (i=0, j=max, k=0)  - j direction
+    // Corner 4: (i=0, j=0, k=max)  - k direction
+    Vector3D c000 = corners[0];
+    Vector3D cI00 = corners[1];  // i+ direction from c000
+    Vector3D c0J0 = corners[3];  // j+ direction from c000
+    Vector3D c00K = corners[4];  // k+ direction from c000
+
+    Vector3D iDir = cI00 - c000;
+    Vector3D jDir = c0J0 - c000;
+    Vector3D kDir = c00K - c000;
+
+    // Check i direction - flip if i+ goes toward smaller X (negative X direction)
+    // FlatMeshGenerator generates flat mesh with X increasing along i direction
+    // So if bent mesh has i+ going toward smaller X, we need to flip
+    if (iDir.x < 0) {
+        flipI_ = true;
+    }
+
+    // Check j direction
+    if (std::abs(jDir.y) > std::abs(jDir.z)) {
+        // j direction is Y-dominant (radial direction)
+        // If jDir.y < 0, j+ goes toward smaller Y (inward)
+        // FlatMeshGenerator flips in this case, so we must too
+        if (jDir.y < 0) {
+            flipJ_ = true;
+        }
+    }
+
+    // Check k direction
+    if (std::abs(kDir.y) > std::abs(kDir.z)) {
+        // k direction is Y-dominant (radial direction)
+        if (kDir.y < 0) {
+            flipK_ = true;
+        }
+    }
 }
 
 } // namespace KooRemapper

@@ -2,6 +2,7 @@
 #include <cmath>
 #include <algorithm>
 #include <limits>
+#include <set>
 
 namespace KooRemapper {
 
@@ -26,6 +27,9 @@ Mesh FlatMeshGenerator::generateFlatMesh(const Mesh& bentMesh) {
 }
 
 bool FlatMeshGenerator::analyzeBentMesh(const Mesh& bentMesh) {
+    // Store original mesh for preserving element connectivity
+    originalMesh_ = bentMesh;
+
     // Make a copy for analysis (we need to modify it for indexing)
     analyzedMesh_ = bentMesh;
 
@@ -44,6 +48,11 @@ bool FlatMeshGenerator::analyzeBentMesh(const Mesh& bentMesh) {
                        indexer_.getErrorMessage();
         return false;
     }
+
+    // Reorder element nodes to match LS-DYNA standard ordering
+    // This is critical for getNodeAt() to work correctly
+    // Note: This modifies analyzedMesh_, but we preserve originalMesh_ for element connectivity
+    indexer_.reorderElementNodes(analyzedMesh_);
 
     // Build index lookup
     indexer_.buildIndexLookup(analyzedMesh_);
@@ -252,9 +261,10 @@ Mesh FlatMeshGenerator::generateMesh() {
     // This means flat mesh must use same (i,j,k) -> (x,y,z) mapping
     // that ParametricMapper expects for the bent mesh reference
 
-    // Generate nodes in same order as ExampleMeshGenerator: k -> j -> i (innermost)
-    // This ensures node ordering matches what ParametricMapper expects
-    int nodeId = 1;
+    // For correct roundtrip (bent -> unfold -> remap = bent), we must preserve
+    // the original bent mesh node IDs. The flat mesh nodes are placed at
+    // uniform grid positions, but their IDs must match the bent mesh so that
+    // when we remap, the node positions end up back where they started.
     int nodesPerRow = dimI_ + 1;
     int nodesPerSlice = nodesPerRow * (dimJ_ + 1);
 
@@ -278,81 +288,129 @@ Mesh FlatMeshGenerator::generateMesh() {
     // We use the bent mesh bounding box for Y and Z ranges to ensure
     // the parametric coordinates match exactly.
 
-    // For bent -> unfold -> remap to work correctly:
-    // - ParametricMapper uses bent mesh corners for transfinite interpolation
-    // - MeshRemapper uses: v = (y - minY) / sizeY, w = (z - minZ) / sizeZ
+    // For roundtrip consistency (bent -> unfold -> remap = bent):
+    // Flat mesh coordinates must satisfy:
+    //   u = x / flatLengthI  -> maps to i-direction (arc-length)
+    //   v = y / flatLengthJ  -> maps to j-direction
+    //   w = z / flatLengthK  -> maps to k-direction
     //
-    // CRITICAL: The flat mesh Y, Z must be derived from bent mesh CORNER nodes
-    // at i=0, NOT from the bounding box. The bounding box may include nodes
-    // at other i positions which have different Y, Z due to mesh curvature.
+    // IMPORTANT: ParametricMapper uses corners from BoundaryExtractor which follows
+    // the indexer's j,k assignment. The flat mesh Y,Z must match this assignment.
     //
-    // Bent mesh corners at i=0:
-    //   corner 0 (j=0, k=0): Y0, Z0
-    //   corner 3 (j=N, k=0): Y1, Z1
-    //   corner 4 (j=0, k=P): Y2, Z2
-    //   corner 7 (j=N, k=P): Y3, Z3
-    //
-    // Flat mesh Y, Z should interpolate between these corner values.
+    // We analyze the first cross-section to determine if j corresponds to Y or Z
+    // in the bent mesh coordinate system.
 
-    // Get corner nodes from first cross-section (i=0)
-    // These corners define the Y,Z coordinate ranges that ParametricMapper expects
-    //
-    // ParametricMapper uses:
-    //   v = (y - minY) / sizeY  -> j direction interpolation
-    //   w = (z - minZ) / sizeZ  -> k direction interpolation
-    //
-    // For bent -> unfold -> remap to return original bent mesh:
-    // - Flat mesh Y range must match bent mesh corner Y range at i=0
-    // - Flat mesh Z range must match bent mesh corner Z range at i=0
-    // - Node at grid position (i, j, k) in flat mesh must have:
-    //     v = j/dimJ -> y = minY + (j/dimJ) * sizeY
-    //     w = k/dimK -> z = minZ + (k/dimK) * sizeZ
-    //
-    // Corner mapping (bent mesh at i=0):
-    //   (j=0, k=0) -> corner00
-    //   (j=N, k=0) -> corner10
-    //   (j=0, k=P) -> corner01
-    //   (j=N, k=P) -> corner11
-
+    // Get corner nodes to analyze j,k directions
     const Node* c00 = getNodeAt(0, 0, 0);
     const Node* c10 = getNodeAt(0, dimJ_, 0);
     const Node* c01 = getNodeAt(0, 0, dimK_);
-    const Node* c11 = getNodeAt(0, dimJ_, dimK_);
 
-    Vector3D corner00 = c00 ? c00->position : Vector3D(0, -flatLengthJ_/2, -flatLengthK_/2);
-    Vector3D corner10 = c10 ? c10->position : Vector3D(0, flatLengthJ_/2, -flatLengthK_/2);
-    Vector3D corner01 = c01 ? c01->position : Vector3D(0, -flatLengthJ_/2, flatLengthK_/2);
-    Vector3D corner11 = c11 ? c11->position : Vector3D(0, flatLengthJ_/2, flatLengthK_/2);
+    // Determine which grid axis (j or k) corresponds to radial (thickness) direction
+    // In flat mesh, we want:
+    //   - Y axis: the "width" direction (typically larger, e.g., 20mm)
+    //   - Z axis: the "thickness" direction (typically smaller, e.g., radial thickness)
+    //
+    // For consistent layer mapping:
+    //   - outer layer (k=0 in bent mesh) should map to Z=0 in flat mesh
+    //   - inner layer (k=max in bent mesh) should map to Z=max in flat mesh
+    //
+    // Analyze corner positions to determine mapping
+    bool swapJK = false;
+    if (c00 && c10 && c01) {
+        Vector3D jDir = c10->position - c00->position;
+        Vector3D kDir = c01->position - c00->position;
 
-    // Compute Y range (for j direction) and Z range (for k direction)
-    // We need the min and max of all 4 corners for each axis
-    double minY = std::min({corner00.y, corner10.y, corner01.y, corner11.y});
-    double maxY = std::max({corner00.y, corner10.y, corner01.y, corner11.y});
-    double minZ = std::min({corner00.z, corner10.z, corner01.z, corner11.z});
-    double maxZ = std::max({corner00.z, corner10.z, corner01.z, corner11.z});
+        // j direction magnitude vs k direction magnitude
+        // The smaller one is likely the thickness (radial) direction
+        double jMag = jDir.magnitude();
+        double kMag = kDir.magnitude();
 
-    double sizeY = maxY - minY;
-    double sizeZ = maxZ - minZ;
+        // If j is smaller than k, j is likely thickness -> should map to Z
+        // So we swap: j -> Z, k -> Y
+        if (jMag < kMag * 0.9) {  // 10% tolerance
+            swapJK = true;
+        }
+    }
 
-    // Ensure non-zero size
-    if (sizeY < 1e-10) sizeY = flatLengthJ_;
-    if (sizeZ < 1e-10) sizeZ = flatLengthK_;
+    // Track processed nodes to avoid duplicate assignments
+    // (reorderElementNodes may cause same node to appear at multiple corners)
+    std::set<int> processedNodes;
+
+    // Layer ordering logic:
+    // We want the flat mesh Y/Z coordinates to preserve the bent mesh's
+    // "outer = larger Y" convention. This makes it intuitive for users to
+    // create detail flat meshes with consistent layer positioning.
+    //
+    // In bent mesh:
+    //   - Radial direction (typically Y-dominant): outer has larger Y
+    //   - j or k axis corresponds to radial direction
+    //
+    // We check which grid axis is radial and flip if needed so that
+    // "outer" (larger Y in bent mesh) maps to larger coordinate in flat mesh.
+    bool flipJ = false;
+    bool flipK = false;
+    if (c00 && c10 && c01) {
+        Vector3D jDir = c10->position - c00->position;
+        Vector3D kDir = c01->position - c00->position;
+
+        // Determine which direction is radial (Y-dominant)
+        // and whether it needs flipping
+        if (std::abs(jDir.y) > std::abs(jDir.z)) {
+            // j direction is Y-dominant (radial direction)
+            // If jDir.y < 0, j+ goes toward smaller Y (inward)
+            // We want larger j to map to larger Y, so flip if jDir.y < 0
+            if (jDir.y < 0) {
+                flipJ = true;
+            }
+        }
+        if (std::abs(kDir.y) > std::abs(kDir.z)) {
+            // k direction is Y-dominant (radial direction)
+            // If kDir.y < 0, k+ goes toward smaller Y (inward)
+            if (kDir.y < 0) {
+                flipK = true;
+            }
+        }
+    }
 
     for (int k = 0; k <= dimK_; ++k) {
         for (int j = 0; j <= dimJ_; ++j) {
-            // For v = j/dimJ to map correctly:
-            //   y = minY + (j/dimJ) * sizeY
-            // For w = k/dimK to map correctly:
-            //   z = minZ + (k/dimK) * sizeZ
             double jRatio = static_cast<double>(j) / dimJ_;
             double kRatio = static_cast<double>(k) / dimK_;
 
-            double y = minY + jRatio * sizeY;
-            double z = minZ + kRatio * sizeZ;
+            // Apply flip if needed to preserve outer=larger coordinate
+            if (flipJ) {
+                jRatio = 1.0 - jRatio;
+            }
+            if (flipK) {
+                kRatio = 1.0 - kRatio;
+            }
+
+            double y, z;
+            if (swapJK) {
+                // j -> Z (thickness), k -> Y (width)
+                y = kRatio * flatLengthK_;
+                z = jRatio * flatLengthJ_;
+            } else {
+                // Standard: j -> Y, k -> Z
+                y = jRatio * flatLengthJ_;
+                z = kRatio * flatLengthK_;
+            }
 
             for (int i = 0; i <= dimI_; ++i) {
+                // Get the ORIGINAL bent mesh node ID at this grid position
+                // This is critical for roundtrip correctness: bent -> unfold -> remap
+                // must return the original bent mesh positions
+                const Node* bentNode = getNodeAt(i, j, k);
+                if (!bentNode) continue;  // Skip if no node at this position
+
+                int nodeId = bentNode->id;
+
+                // Skip if already processed (avoid duplicate assignments from reorderElementNodes)
+                if (processedNodes.count(nodeId) > 0) continue;
+                processedNodes.insert(nodeId);
+
                 // X = actual arc-length position from bent mesh centerline
-                // This ensures physical correspondence: flat mesh X maps to 
+                // This ensures physical correspondence: flat mesh X maps to
                 // bent mesh arc-length position via EdgeInterpolator's arc-length
                 // based interpolation.
                 //
@@ -360,38 +418,39 @@ Mesh FlatMeshGenerator::generateMesh() {
                 //   u = x / flatLengthI = arcLengths[i] / totalArcLength
                 //   EdgeInterpolator.interpolate(u) finds arc-length position
                 //   which corresponds exactly to bent mesh node at index i
-                double x = (i < static_cast<int>(arcLengths.size())) 
-                         ? arcLengths[i] 
+                double x = (i < static_cast<int>(arcLengths.size()))
+                         ? arcLengths[i]
                          : (static_cast<double>(i) / dimI_) * flatLengthI_;
 
-                Node node(nodeId++, Vector3D(x, y, z));
+                Node node(nodeId, Vector3D(x, y, z));
                 flatMesh.addNode(node);
             }
         }
     }
 
-    // Generate elements in same order as ExampleMeshGenerator: k -> j -> i
-    int elemId = 1;
+    // Generate elements preserving ORIGINAL bent mesh element IDs and node connectivity
+    // We use indexer_.getElementAt() to find the element at each grid position (uses analyzed mesh),
+    // but then get the ORIGINAL element connectivity from originalMesh_ (before node reordering)
     for (int k = 0; k < dimK_; ++k) {
         for (int j = 0; j < dimJ_; ++j) {
             for (int i = 0; i < dimI_; ++i) {
+                // Get element at this grid position (from analyzed mesh)
+                const Element* analyzedElem = indexer_.getElementAt(i, j, k);
+                if (!analyzedElem) continue;
+
+                // Get the ORIGINAL element with same ID (before node reordering)
+                const Element* originalElem = originalMesh_.getElement(analyzedElem->id);
+                if (!originalElem) continue;
+
                 Element elem;
-                elem.id = elemId++;
-                elem.partId = 1;
+                elem.id = originalElem->id;  // Preserve original element ID
+                elem.partId = originalElem->partId;  // Preserve original part ID
                 elem.type = ElementType::HEX8;
 
-                // Calculate node IDs using the same formula as ExampleMeshGenerator
-                int base = 1 + i + j * nodesPerRow + k * nodesPerSlice;
-
-                // HEX8 node ordering matching ExampleMeshGenerator
-                elem.nodeIds[0] = base;
-                elem.nodeIds[1] = base + 1;
-                elem.nodeIds[2] = base + 1 + nodesPerRow;
-                elem.nodeIds[3] = base + nodesPerRow;
-                elem.nodeIds[4] = base + nodesPerSlice;
-                elem.nodeIds[5] = base + 1 + nodesPerSlice;
-                elem.nodeIds[6] = base + 1 + nodesPerRow + nodesPerSlice;
-                elem.nodeIds[7] = base + nodesPerRow + nodesPerSlice;
+                // Use ORIGINAL node connectivity (before reordering)
+                // This is critical: the flat mesh must have the same element-node
+                // connectivity as the original bent mesh
+                elem.nodeIds = originalElem->nodeIds;
 
                 // Assign structured indices
                 elem.i = i;
@@ -404,11 +463,18 @@ Mesh FlatMeshGenerator::generateMesh() {
         }
     }
 
-    // Add part
-    Part part;
-    part.id = 1;
-    part.name = "unfolded_part";
-    flatMesh.addPart(part);
+    // Copy parts from original bent mesh
+    for (const auto& pair : originalMesh_.getParts()) {
+        flatMesh.addPart(pair.second);
+    }
+
+    // If no parts in original mesh, add a default part
+    if (flatMesh.getParts().empty()) {
+        Part part;
+        part.id = 1;
+        part.name = "unfolded_part";
+        flatMesh.addPart(part);
+    }
 
     return flatMesh;
 }

@@ -69,8 +69,9 @@ private:
 
     std::string errorMessage_;
 
-    // Internal mesh copy for analysis
-    Mesh analyzedMesh_;
+    // Internal mesh copies
+    Mesh originalMesh_;   // Original bent mesh (preserves original element connectivity)
+    Mesh analyzedMesh_;   // Modified copy with reordered nodes for indexing
 
     /**
      * Analyze bent mesh structure

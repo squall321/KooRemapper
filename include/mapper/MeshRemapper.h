@@ -113,6 +113,17 @@ private:
     // Geometry detection
     bool detectUFoldGeometry() const;
 
+    // Layer ordering flip flags (to match FlatMeshGenerator)
+    bool flipI_;
+    bool flipJ_;
+    bool flipK_;
+
+    // Analyze bent mesh to determine if i/j/k need flipping
+    void analyzeLayerOrientation();
+
+    // Fix elements with negative Jacobian by reordering nodes (optional, disabled by default)
+    void fixNegativeJacobians();
+
     void reportProgress(int percent);
 };
 

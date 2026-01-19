@@ -46,6 +46,7 @@ struct ElementNeighbor {
     int neighborElementId;
     int throughFace;        // Local face index of this element
     int neighborFace;       // Local face index of neighbor element
+    std::array<int, 4> sharedNodes;  // Node IDs shared between the two elements (the face nodes)
 };
 
 /**
@@ -83,6 +84,12 @@ public:
      * @return Local face index of elem1, or -1 if not neighbors
      */
     int getSharedFace(int elemId1, int elemId2) const;
+
+    /**
+     * Get the shared nodes between two neighboring elements
+     * @return Array of 4 node IDs, or empty array if not neighbors
+     */
+    std::array<int, 4> getSharedNodes(int elemId1, int elemId2) const;
 
     /**
      * Find corner elements (elements with exactly 3 neighbors)

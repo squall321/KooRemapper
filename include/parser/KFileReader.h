@@ -65,7 +65,10 @@ private:
     bool parseElementSolidSection(std::ifstream& file);
     bool parsePartSection(std::ifstream& file);
     bool parseMatElasticSection(std::ifstream& file);
+    bool parseMatPlasticSection(std::ifstream& file);
+    bool parseMatRigidSection(std::ifstream& file);
     void skipToNextKeyword(std::ifstream& file);
+    void skipDataLines(std::ifstream& file, int count);
 
     // Helper methods
     bool isKeywordLine(const std::string& line) const;

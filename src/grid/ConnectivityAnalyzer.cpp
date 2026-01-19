@@ -63,9 +63,18 @@ void ConnectivityAnalyzer::findNeighbors() {
             int elem2 = facePairs[1].first;
             int face2 = facePairs[1].second;
 
-            // Add neighbor relationship
-            elementNeighbors_[elem1].push_back({elem2, face1, face2});
-            elementNeighbors_[elem2].push_back({elem1, face2, face1});
+            // Parse key back to get shared node IDs
+            std::array<int, 4> sharedNodes;
+            std::stringstream ss(key);
+            std::string token;
+            int i = 0;
+            while (std::getline(ss, token, '_') && i < 4) {
+                sharedNodes[i++] = std::stoi(token);
+            }
+
+            // Add neighbor relationship with shared node info
+            elementNeighbors_[elem1].push_back({elem2, face1, face2, sharedNodes});
+            elementNeighbors_[elem2].push_back({elem1, face2, face1, sharedNodes});
         }
         else if (facePairs.size() == 1) {
             // This is a boundary face
@@ -159,6 +168,18 @@ int ConnectivityAnalyzer::getSharedFace(int elemId1, int elemId2) const {
         }
     }
     return -1;
+}
+
+std::array<int, 4> ConnectivityAnalyzer::getSharedNodes(int elemId1, int elemId2) const {
+    auto it = elementNeighbors_.find(elemId1);
+    if (it != elementNeighbors_.end()) {
+        for (const auto& neighbor : it->second) {
+            if (neighbor.neighborElementId == elemId2) {
+                return neighbor.sharedNodes;
+            }
+        }
+    }
+    return {0, 0, 0, 0};
 }
 
 std::vector<int> ConnectivityAnalyzer::findCornerElements() const {
