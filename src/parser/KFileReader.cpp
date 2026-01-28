@@ -111,6 +111,12 @@ bool KFileReader::parseFile(std::ifstream& file) {
                     return false;
                 }
             }
+            else if (currentKeyword_ == "MAT_VISCOELASTIC" || currentKeyword_ == "MAT_VISCOELASTIC_TITLE" ||
+                     currentKeyword_ == "MAT_006" || currentKeyword_ == "MAT_006_TITLE") {
+                if (!parseMatViscoelasticSection(file)) {
+                    return false;
+                }
+            }
             else if (currentKeyword_ == "SECTION_SOLID" || currentKeyword_ == "SECTION_SOLID_TITLE") {
                 // Skip section solid for now (just consume the data lines)
                 skipDataLines(file, 2);  // Usually 2 data lines
@@ -487,6 +493,10 @@ bool KFileReader::parseMatElasticSection(std::ifstream& file) {
     std::streampos lastPos;
     int dataLineCount = 0;
 
+    // Check if this is a _TITLE variant (has an extra title line to skip)
+    bool hasTitle = (currentKeyword_.find("_TITLE") != std::string::npos);
+    bool titleSkipped = false;
+
     // *MAT_ELASTIC format:
     // Card 1: mid, ro, e, pr, da, db, not used, not used
     // (mid=material ID, ro=density, e=Young's modulus, pr=Poisson's ratio)
@@ -523,22 +533,22 @@ bool KFileReader::parseMatElasticSection(std::ifstream& file) {
             return true;
         }
 
+        // Skip title line for _TITLE variants
+        if (hasTitle && !titleSkipped) {
+            titleSkipped = true;
+            continue;
+        }
+
         // Parse material data (first data line contains the essential info)
         if (dataLineCount == 0) {
             try {
-                auto tokens = tokenize(line);
+                // LS-DYNA default: fixed format (10-character fields)
+                auto tokens = tokenizeFixed(line, 10);
                 if (tokens.size() >= 4) {
                     mid = parseInt(tokens[0]);
                     density = parseDouble(tokens[1]);
                     E = parseDouble(tokens[2]);
                     nu = parseDouble(tokens[3]);
-                }
-                else if (line.length() >= 40) {
-                    // Fixed format: 10-character fields typically
-                    mid = parseInt(line.substr(0, 10));
-                    density = parseDouble(line.substr(10, 10));
-                    E = parseDouble(line.substr(20, 10));
-                    nu = parseDouble(line.substr(30, 10));
                 }
 
                 if (mid > 0 && E > 0) {
@@ -565,6 +575,10 @@ bool KFileReader::parseMatPlasticSection(std::ifstream& file) {
     std::string line;
     std::streampos lastPos;
     int dataLineCount = 0;
+
+    // Check if this is a _TITLE variant (has an extra title line to skip)
+    bool hasTitle = (currentKeyword_.find("_TITLE") != std::string::npos);
+    bool titleSkipped = false;
 
     // *MAT_PIECEWISE_LINEAR_PLASTICITY format (4 cards):
     // Card 1: mid, ro, e, pr, sigy, etan, fail, tdel
@@ -605,22 +619,22 @@ bool KFileReader::parseMatPlasticSection(std::ifstream& file) {
             return true;
         }
 
+        // Skip title line for _TITLE variants
+        if (hasTitle && !titleSkipped) {
+            titleSkipped = true;
+            continue;
+        }
+
         // Parse first card (contains mid, ro, e, pr)
         if (dataLineCount == 0) {
             try {
-                auto tokens = tokenize(line);
+                // LS-DYNA default: fixed format (10-character fields)
+                auto tokens = tokenizeFixed(line, 10);
                 if (tokens.size() >= 4) {
                     mid = parseInt(tokens[0]);
                     density = parseDouble(tokens[1]);
                     E = parseDouble(tokens[2]);
                     nu = parseDouble(tokens[3]);
-                }
-                else if (line.length() >= 40) {
-                    // Fixed format: 10-character fields
-                    mid = parseInt(line.substr(0, 10));
-                    density = parseDouble(line.substr(10, 10));
-                    E = parseDouble(line.substr(20, 10));
-                    nu = parseDouble(line.substr(30, 10));
                 }
 
                 if (mid > 0 && E > 0) {
@@ -647,6 +661,10 @@ bool KFileReader::parseMatRigidSection(std::ifstream& file) {
     std::string line;
     std::streampos lastPos;
     int dataLineCount = 0;
+
+    // Check if this is a _TITLE variant (has an extra title line to skip)
+    bool hasTitle = (currentKeyword_.find("_TITLE") != std::string::npos);
+    bool titleSkipped = false;
 
     // *MAT_RIGID format (3 cards):
     // Card 1: mid, ro, e, pr, n, couple, m, alias
@@ -686,22 +704,22 @@ bool KFileReader::parseMatRigidSection(std::ifstream& file) {
             return true;
         }
 
+        // Skip title line for _TITLE variants
+        if (hasTitle && !titleSkipped) {
+            titleSkipped = true;
+            continue;
+        }
+
         // Parse first card (contains mid, ro, e, pr)
         if (dataLineCount == 0) {
             try {
-                auto tokens = tokenize(line);
+                // LS-DYNA default: fixed format (10-character fields)
+                auto tokens = tokenizeFixed(line, 10);
                 if (tokens.size() >= 4) {
                     mid = parseInt(tokens[0]);
                     density = parseDouble(tokens[1]);
                     E = parseDouble(tokens[2]);
                     nu = parseDouble(tokens[3]);
-                }
-                else if (line.length() >= 40) {
-                    // Fixed format: 10-character fields
-                    mid = parseInt(line.substr(0, 10));
-                    density = parseDouble(line.substr(10, 10));
-                    E = parseDouble(line.substr(20, 10));
-                    nu = parseDouble(line.substr(30, 10));
                 }
 
                 if (mid > 0 && E > 0) {
@@ -717,6 +735,99 @@ bool KFileReader::parseMatRigidSection(std::ifstream& file) {
 
         // Read all 3 data lines for MAT_RIGID
         if (dataLineCount >= 3) {
+            break;
+        }
+    }
+
+    return true;
+}
+
+bool KFileReader::parseMatViscoelasticSection(std::ifstream& file) {
+    std::string line;
+    std::streampos lastPos;
+    int dataLineCount = 0;
+
+    // Check if this is a _TITLE variant (has an extra title line to skip)
+    bool hasTitle = (currentKeyword_.find("_TITLE") != std::string::npos);
+    bool titleSkipped = false;
+
+    // *MAT_VISCOELASTIC format (1 card):
+    // Card 1: mid, ro, bulk, g0, gi, beta
+    // mid = material ID
+    // ro = density
+    // bulk = bulk modulus (K)
+    // g0 = short-time shear modulus
+    // gi = long-time shear modulus (equilibrium, t->infinity)
+    // beta = decay constant
+    //
+    // For prestress calculation, use gi (long-time/equilibrium shear modulus)
+    // Convert to E and nu:
+    //   E = 9*K*G / (3*K + G)
+    //   nu = (3*K - 2*G) / (2*(3*K + G))
+
+    int mid = 0;
+    double density = 0, bulk = 0, g0 = 0, gi = 0;
+
+    while (true) {
+        lastPos = file.tellg();
+        if (!std::getline(file, line)) break;
+
+        currentLine_++;
+        linesProcessed_++;
+
+        if (!line.empty() && line.back() == '') {
+            line.pop_back();
+        }
+
+        if (line.empty()) {
+            continue;
+        }
+
+        if (isCommentLine(line)) {
+            continue;
+        }
+
+        if (isKeywordLine(line)) {
+            file.seekg(lastPos);
+            currentLine_--;
+            return true;
+        }
+
+        // Skip title line for _TITLE variants
+        if (hasTitle && !titleSkipped) {
+            titleSkipped = true;
+            continue;
+        }
+
+        if (dataLineCount == 0) {
+            try {
+                // LS-DYNA default: fixed format (10-character fields)
+                auto tokens = tokenizeFixed(line, 10);
+                if (tokens.size() >= 5) {
+                    mid = parseInt(tokens[0]);
+                    density = parseDouble(tokens[1]);
+                    bulk = parseDouble(tokens[2]);
+                    g0 = parseDouble(tokens[3]);
+                    gi = parseDouble(tokens[4]);
+                }
+
+                if (mid > 0 && bulk > 0 && gi > 0) {
+                    // Use gi (long-time shear modulus) for equilibrium state
+                    double G = gi;
+                    double K = bulk;
+                    double E = 9.0 * K * G / (3.0 * K + G);
+                    double nu = (3.0 * K - 2.0 * G) / (2.0 * (3.0 * K + G));
+                    mesh_.addMaterial(mid, E, nu, density);
+                }
+            }
+            catch (const std::exception& e) {
+                // Non-fatal, just skip
+            }
+        }
+
+        dataLineCount++;
+
+        if (dataLineCount >= 1) {
             break;
         }
     }
@@ -827,6 +938,18 @@ std::vector<std::string> KFileReader::tokenize(const std::string& line) const {
 
     if (!token.empty()) {
         tokens.push_back(trim(token));
+    }
+
+    return tokens;
+}
+
+std::vector<std::string> KFileReader::tokenizeFixed(const std::string& line, int fieldWidth) const {
+    std::vector<std::string> tokens;
+
+    for (size_t i = 0; i < line.length(); i += fieldWidth) {
+        size_t len = std::min(static_cast<size_t>(fieldWidth), line.length() - i);
+        std::string field = line.substr(i, len);
+        tokens.push_back(trim(field));
     }
 
     return tokens;

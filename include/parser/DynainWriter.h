@@ -21,8 +21,10 @@ public:
     ~DynainWriter() = default;
 
     /**
-     * Write dynain file with initial stresses
-     * 
+     * Write dynain file with initial stresses (*INITIAL_STRESS_SOLID only)
+     *
+     * Note: Use this dynain file with the deformed mesh, not the reference mesh.
+     *
      * @param filename    Output file path
      * @param results     Element analysis results
      * @param strainType  Strain type used (for comment)
@@ -64,13 +66,6 @@ private:
     std::string errorMessage_;
     bool largeDeformation_;
 
-    void writeHeader(std::ofstream& file, 
-                    StrainType strainType,
-                    const std::string& refFile,
-                    const std::string& defFile);
-    
-    void writeStressCard(std::ofstream& file, const ElementResult& result);
-    
     std::string getCurrentDateTime();
 };
 

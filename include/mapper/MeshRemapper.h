@@ -51,9 +51,10 @@ public:
 
     /**
      * Perform the mapping operation
+     * @param useParallel Use parallel processing (default: true)
      * @return true if successful
      */
-    bool performMapping();
+    bool performMapping(bool useParallel = true);
 
     /**
      * Get the result mesh (bent unstructured)
@@ -107,8 +108,13 @@ private:
     bool step2_BuildParametricSpace();
     bool step3_AnalyzeFlatMesh();
     bool step4_MapNodes();
+    bool step4_MapNodesParallel();  // Parallel version of step4
     bool step5_CopyElements();
     bool step6_ValidateResult();
+    bool step6_ValidateResultParallel();  // Parallel version of step6
+
+    // Parallel processing flag
+    bool useParallel_;
 
     // Geometry detection
     bool detectUFoldGeometry() const;

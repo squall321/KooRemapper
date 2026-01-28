@@ -29,6 +29,14 @@ else()
     add_definitions(-DPLATFORM_LINUX)
 endif()
 
+# OpenMP support for parallel processing
+find_package(OpenMP)
+if(OpenMP_CXX_FOUND)
+    message(STATUS "OpenMP: Found (version ${OpenMP_CXX_VERSION})")
+else()
+    message(STATUS "OpenMP: Not found - parallel processing disabled")
+endif()
+
 # Include directories
 include_directories(${CMAKE_SOURCE_DIR}/include)
 
@@ -119,6 +127,12 @@ add_library(kooremapper_lib STATIC
 # Define M_PI for MSVC
 if(MSVC)
     target_compile_definitions(kooremapper_lib PRIVATE _USE_MATH_DEFINES)
+endif()
+
+# Link OpenMP to library
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(kooremapper_lib PUBLIC OpenMP::OpenMP_CXX)
+    target_compile_definitions(kooremapper_lib PUBLIC USE_OPENMP)
 endif()
 
 # Main executable

@@ -15,7 +15,10 @@ namespace KooRemapper {
  *   - *NODE
  *   - *ELEMENT_SOLID
  *   - *PART (with material ID mapping)
- *   - *MAT_ELASTIC (linear elastic material)
+ *   - *MAT_ELASTIC (001)
+ *   - *MAT_PIECEWISE_LINEAR_PLASTICITY (024)
+ *   - *MAT_RIGID (020)
+ *   - *MAT_VISCOELASTIC (006) - uses gi (long-time shear modulus)
  *   - *END
  */
 class KFileReader {
@@ -67,6 +70,7 @@ private:
     bool parseMatElasticSection(std::ifstream& file);
     bool parseMatPlasticSection(std::ifstream& file);
     bool parseMatRigidSection(std::ifstream& file);
+    bool parseMatViscoelasticSection(std::ifstream& file);
     void skipToNextKeyword(std::ifstream& file);
     void skipDataLines(std::ifstream& file, int count);
 
@@ -75,6 +79,7 @@ private:
     bool isCommentLine(const std::string& line) const;
     std::string extractKeyword(const std::string& line) const;
     std::vector<std::string> tokenize(const std::string& line) const;
+    std::vector<std::string> tokenizeFixed(const std::string& line, int fieldWidth = 10) const;
     std::string trim(const std::string& str) const;
 
     // Fixed-format parsing (LS-DYNA uses fixed column widths)

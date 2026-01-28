@@ -20,8 +20,11 @@
 #include "util/Validator.h"
 
 #include <iostream>
+#include <fstream>
 #include <memory>
 #include <limits>
+#include <sstream>
+#include <iomanip>
 
 using namespace KooRemapper;
 
@@ -41,9 +44,11 @@ void printBanner(const ConsoleOutput& console) {
 
 /**
  * Run the mapping operation
+ * @param useParallel Use parallel processing (default: true)
  */
 int runMapping(const std::string& bentFile, const std::string& flatFile,
-               const std::string& outputFile, const ConsoleOutput& console) {
+               const std::string& outputFile, const ConsoleOutput& console,
+               bool useParallel = true) {
     Timer timer;
 
     // Load bent mesh
@@ -93,7 +98,8 @@ int runMapping(const std::string& bentFile, const std::string& flatFile,
     }
 
     // Perform mapping
-    console.info("Performing mesh mapping...");
+    std::string modeStr = useParallel ? "parallel" : "single-threaded";
+    console.info("Performing mesh mapping (" + modeStr + " mode)...");
     MeshRemapper remapper;
     remapper.setBentMesh(&bentMesh);
     remapper.setFlatMesh(&flatMesh);
@@ -103,7 +109,7 @@ int runMapping(const std::string& bentFile, const std::string& flatFile,
         console.progressBar(percent);
     });
 
-    if (!remapper.performMapping()) {
+    if (!remapper.performMapping(useParallel)) {
         console.clearLine();
         console.error("Mapping failed: " + remapper.getErrorMessage());
         return 1;
@@ -435,13 +441,39 @@ int runPrestress(const std::string& refFile, const std::string& defFile,
     console.success("Loaded " + std::to_string(refMesh.getNodeCount()) + " nodes, " +
                    std::to_string(refMesh.getElementCount()) + " elements");
     
-    // Report materials found in K-file
-    if (refMesh.getMaterialCount() > 0) {
+    // Report materials found in K-file (per-part)
+    const auto& parts = refMesh.getParts();
+    const auto& materials = refMesh.getMaterials();
+
+    if (!parts.empty()) {
+        console.info("Part-Material mapping:");
+        int missingMaterialCount = 0;
+        for (const auto& [partId, part] : parts) {
+            auto matIt = materials.find(part.materialId);
+            if (matIt != materials.end()) {
+                std::ostringstream oss;
+                oss << std::scientific << std::setprecision(4);
+                oss << "  Part " << partId << " -> Material " << part.materialId
+                    << ": E=" << matIt->second.E << ", nu=" << std::fixed << std::setprecision(4) << matIt->second.nu;
+                console.println(oss.str());
+            } else {
+                console.warning("  Part " + std::to_string(partId) + " -> Material " +
+                              std::to_string(part.materialId) + ": NOT FOUND");
+                missingMaterialCount++;
+            }
+        }
+        if (missingMaterialCount > 0) {
+            console.warning(std::to_string(missingMaterialCount) + " part(s) have missing materials - stress will be 0");
+        }
+    } else if (refMesh.getMaterialCount() > 0) {
+        // No parts but have materials (unusual case)
         console.info("Found " + std::to_string(refMesh.getMaterialCount()) + " material(s) in K-file:");
-        for (const auto& [matId, mat] : refMesh.getMaterials()) {
-            console.println("  Material " + std::to_string(matId) + 
-                          ": E=" + std::to_string(mat.E) + 
-                          ", nu=" + std::to_string(mat.nu));
+        for (const auto& [matId, mat] : materials) {
+            std::ostringstream oss;
+            oss << std::scientific << std::setprecision(4);
+            oss << "  Material " << matId << ": E=" << mat.E
+                << ", nu=" << std::fixed << std::setprecision(4) << mat.nu;
+            console.println(oss.str());
         }
     }
 
@@ -515,9 +547,13 @@ int runPrestress(const std::string& refFile, const std::string& defFile,
 
     if (hasMaterial) {
         std::cout << "\n";
-        console.keyValue("Min von Mises stress", std::to_string(results.minVonMisesStress));
-        console.keyValue("Max von Mises stress", std::to_string(results.maxVonMisesStress));
-        console.keyValue("Avg von Mises stress", std::to_string(results.avgVonMisesStress));
+        std::ostringstream ossMin, ossMax, ossAvg;
+        ossMin << std::scientific << std::setprecision(6) << results.minVonMisesStress;
+        ossMax << std::scientific << std::setprecision(6) << results.maxVonMisesStress;
+        ossAvg << std::scientific << std::setprecision(6) << results.avgVonMisesStress;
+        console.keyValue("Min von Mises stress", ossMin.str());
+        console.keyValue("Max von Mises stress", ossMax.str());
+        console.keyValue("Avg von Mises stress", ossAvg.str());
     }
     std::cout << "\n";
 
@@ -532,6 +568,75 @@ int runPrestress(const std::string& refFile, const std::string& defFile,
             return 1;
         }
         console.success("Dynain file written successfully");
+
+        // Create a copy of deformed mesh with *INCLUDE for dynain
+        // The dynain contains stress-only data, meant to be used with deformed mesh
+        // Output filename: same as dynain but with .k extension
+        std::string meshOutputFile = outputFile;
+        size_t dotPos = meshOutputFile.rfind('.');
+        if (dotPos != std::string::npos) {
+            meshOutputFile = meshOutputFile.substr(0, dotPos) + ".k";
+        } else {
+            meshOutputFile += ".k";
+        }
+
+        // Get just the dynain filename (not full path) for *INCLUDE
+        std::string dynainFilename = outputFile;
+        size_t slashPos = dynainFilename.find_last_of("/\\");
+        if (slashPos != std::string::npos) {
+            dynainFilename = dynainFilename.substr(slashPos + 1);
+        }
+
+        // Read deformed mesh file and append *INCLUDE
+        std::ifstream srcFile(defFile, std::ios::binary);
+        if (!srcFile.is_open()) {
+            console.error("Failed to read deformed mesh for copy");
+            return 1;
+        }
+
+        std::ofstream dstFile(meshOutputFile, std::ios::binary);
+        if (!dstFile.is_open()) {
+            console.error("Failed to create mesh output file: " + meshOutputFile);
+            srcFile.close();
+            return 1;
+        }
+
+        // Copy original content
+        std::string line;
+        bool endFound = false;
+        while (std::getline(srcFile, line)) {
+            // Check for *END keyword
+            std::string trimmedLine = line;
+            // Remove leading whitespace
+            size_t start = trimmedLine.find_first_not_of(" \t");
+            if (start != std::string::npos) {
+                trimmedLine = trimmedLine.substr(start);
+            }
+            // Check if it's *END
+            if (trimmedLine.length() >= 4 &&
+                (trimmedLine[0] == '*') &&
+                (trimmedLine[1] == 'E' || trimmedLine[1] == 'e') &&
+                (trimmedLine[2] == 'N' || trimmedLine[2] == 'n') &&
+                (trimmedLine[3] == 'D' || trimmedLine[3] == 'd')) {
+                // Insert *INCLUDE before *END
+                dstFile << "*INCLUDE\n";
+                dstFile << dynainFilename << "\n";
+                endFound = true;
+            }
+            dstFile << line << "\n";
+        }
+
+        // If no *END found, append *INCLUDE at the end
+        if (!endFound) {
+            dstFile << "*INCLUDE\n";
+            dstFile << dynainFilename << "\n";
+            dstFile << "*END\n";
+        }
+
+        srcFile.close();
+        dstFile.close();
+
+        console.success("Deformed mesh with prestress: " + meshOutputFile);
     }
 
     // Write CSV if requested or if no material
@@ -546,7 +651,7 @@ int runPrestress(const std::string& refFile, const std::string& defFile,
                 csvFile += ".csv";
             }
         }
-        
+
         console.info("Writing CSV file: " + csvFile);
         if (!writer.writeStrainCSV(csvFile, results)) {
             console.error("Failed to write CSV: " + writer.getErrorMessage());
@@ -880,7 +985,7 @@ int main(int argc, char* argv[]) {
         if (argc > 2) {
             std::string helpCmd = argv[2];
             if (helpCmd == "map") {
-                console.println("Usage: KooRemapper map <bent_mesh> <flat_mesh> <output>");
+                console.println("Usage: KooRemapper map [--single] <bent_mesh> <flat_mesh> <output>");
                 std::cout << "\n";
                 console.println("Map a flat unstructured mesh onto a bent structured mesh.");
                 std::cout << "\n";
@@ -888,6 +993,12 @@ int main(int argc, char* argv[]) {
                 console.println("  bent_mesh   The bent structured reference mesh (k-file)");
                 console.println("  flat_mesh   The flat mesh to be mapped (k-file)");
                 console.println("  output      Output file path for the mapped mesh");
+                std::cout << "\n";
+                console.println("Options:");
+                console.println("  --single, -s  Use single-threaded mode (default: parallel)");
+                std::cout << "\n";
+                console.println("By default, parallel processing is used for faster mapping.");
+                console.println("Use --single for debugging or when OpenMP is not available.");
             } else if (helpCmd == "generate") {
                 console.println("Usage: KooRemapper generate [options] <type> <output_prefix>");
                 std::cout << "\n";
@@ -1028,12 +1139,27 @@ int main(int argc, char* argv[]) {
 
     // Map command
     if (command == "map") {
-        if (argc < 5) {
-            console.error("Usage: KooRemapper map <bent_mesh> <flat_mesh> <output>");
+        // Parse options
+        bool useParallel = true;  // Default: parallel mode
+        std::vector<std::string> positionalArgs;
+
+        for (int i = 2; i < argc; ++i) {
+            std::string arg = argv[i];
+            if (arg == "--single" || arg == "-s") {
+                useParallel = false;
+            } else if (arg[0] != '-') {
+                positionalArgs.push_back(arg);
+            }
+        }
+
+        if (positionalArgs.size() < 3) {
+            console.error("Usage: KooRemapper map [--single] <bent_mesh> <flat_mesh> <output>");
+            console.println("Options:");
+            console.println("  --single, -s  Use single-threaded mode (default: parallel)");
             return 1;
         }
         printBanner(console);
-        return runMapping(argv[2], argv[3], argv[4], console);
+        return runMapping(positionalArgs[0], positionalArgs[1], positionalArgs[2], console, useParallel);
     }
 
     // Unfold command

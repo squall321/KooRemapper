@@ -2,13 +2,19 @@
 #include "analysis/DeformationGradient.h"
 #include <limits>
 #include <algorithm>
+#include <atomic>
+
+#ifdef USE_OPENMP
+#include <omp.h>
+#endif
 
 namespace KooRemapper {
 
 ElementAnalyzer::ElementAnalyzer()
     : strainType_(StrainType::ENGINEERING)
     , numGaussPoints_(1)
-    , usePartMaterials_(true)  // Default: use part materials if available
+    , usePartMaterials_(true)   // Default: use part materials if available
+    , useParallel_(true)        // Default: parallel enabled
 {}
 
 void ElementAnalyzer::setMaterial(const MaterialModel& material)
@@ -264,7 +270,7 @@ MeshAnalysisResult ElementAnalyzer::analyzeMesh(
     std::function<void(int)> progress)
 {
     MeshAnalysisResult result;
-    
+
     // Determine if we have any materials available
     // Either from mesh's part->material mapping or from default material
     bool hasAnyMaterial = material_.has_value();
@@ -272,31 +278,71 @@ MeshAnalysisResult ElementAnalyzer::analyzeMesh(
         hasAnyMaterial = true;
     }
     result.hasMaterial = hasAnyMaterial;
-    
+
     const auto& elements = refMesh.getElements();
     size_t total = elements.size();
-    size_t processed = 0;
-    
-    result.elementResults.reserve(total);
-    
+
+    // Convert map to vector for parallel access
+    std::vector<const Element*> elemPtrs;
+    elemPtrs.reserve(total);
     for (const auto& [id, elem] : elements) {
-        ElementResult elemResult = analyzeElement(elem, refMesh, defMesh);
-        result.elementResults.push_back(elemResult);
-        
-        if (elemResult.isValid) {
-            result.validElements++;
-        } else {
-            result.invalidElements++;
+        elemPtrs.push_back(&elem);
+    }
+
+    result.elementResults.resize(total);
+
+    std::atomic<int> validCount{0};
+    std::atomic<int> invalidCount{0};
+    std::atomic<int> processed{0};
+    int totalInt = static_cast<int>(total);
+
+#ifdef USE_OPENMP
+    if (useParallel_) {
+        #pragma omp parallel for schedule(dynamic, 100)
+        for (int i = 0; i < totalInt; ++i) {
+            const Element& elem = *elemPtrs[i];
+            result.elementResults[i] = analyzeElement(elem, refMesh, defMesh);
+
+            if (result.elementResults[i].isValid) {
+                validCount++;
+            } else {
+                invalidCount++;
+            }
+
+            int p = ++processed;
+            if (progress && totalInt > 0 && (p % 1000 == 0 || p == totalInt)) {
+                #pragma omp critical
+                {
+                    progress(100 * p / totalInt);
+                }
+            }
         }
-        
-        processed++;
-        if (progress && total > 0) {
-            progress(static_cast<int>(100 * processed / total));
+    } else
+#endif
+    {
+        // Sequential processing
+        for (int i = 0; i < totalInt; ++i) {
+            const Element& elem = *elemPtrs[i];
+            result.elementResults[i] = analyzeElement(elem, refMesh, defMesh);
+
+            if (result.elementResults[i].isValid) {
+                validCount++;
+            } else {
+                invalidCount++;
+            }
+
+            processed++;
+            if (progress && totalInt > 0) {
+                progress(100 * processed / totalInt);
+            }
         }
     }
-    
+
+    result.validElements = validCount;
+    result.invalidElements = invalidCount;
+
     computeStatistics(result);
-    
+
     return result;
 }
 

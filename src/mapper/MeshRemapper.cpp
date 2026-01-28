@@ -3,11 +3,17 @@
 #include <cmath>
 #include <algorithm>
 #include <limits>
+#include <vector>
+#include <mutex>
+
+#ifdef USE_OPENMP
+#include <omp.h>
+#endif
 
 namespace KooRemapper {
 
 MeshRemapper::MeshRemapper()
-    : bentMesh_(nullptr), flatMesh_(nullptr), flipI_(false), flipJ_(false), flipK_(false)
+    : bentMesh_(nullptr), flatMesh_(nullptr), flipI_(false), flipJ_(false), flipK_(false), useParallel_(true)
 {}
 
 void MeshRemapper::setBentMesh(const Mesh* mesh) {
@@ -18,7 +24,9 @@ void MeshRemapper::setFlatMesh(const Mesh* mesh) {
     flatMesh_ = mesh;
 }
 
-bool MeshRemapper::performMapping() {
+bool MeshRemapper::performMapping(bool useParallel) {
+    useParallel_ = useParallel;
+
     auto startTime = std::chrono::high_resolution_clock::now();
 
     errorMessage_.clear();
@@ -54,10 +62,22 @@ bool MeshRemapper::performMapping() {
     }
     reportProgress(45);
 
-    // Step 4: Map nodes
+    // Step 4: Map nodes (use parallel version if enabled)
+#ifdef USE_OPENMP
+    if (useParallel_) {
+        if (!step4_MapNodesParallel()) {
+            return false;
+        }
+    } else {
+        if (!step4_MapNodes()) {
+            return false;
+        }
+    }
+#else
     if (!step4_MapNodes()) {
         return false;
     }
+#endif
     reportProgress(70);
 
     // Step 5: Copy elements
@@ -66,10 +86,22 @@ bool MeshRemapper::performMapping() {
     }
     reportProgress(85);
 
-    // Step 6: Validate result
+    // Step 6: Validate result (use parallel version if enabled)
+#ifdef USE_OPENMP
+    if (useParallel_) {
+        if (!step6_ValidateResultParallel()) {
+            return false;
+        }
+    } else {
+        if (!step6_ValidateResult()) {
+            return false;
+        }
+    }
+#else
     if (!step6_ValidateResult()) {
         return false;
     }
+#endif
     reportProgress(100);
 
     auto endTime = std::chrono::high_resolution_clock::now();
@@ -272,6 +304,83 @@ bool MeshRemapper::step4_MapNodes() {
     return true;
 }
 
+bool MeshRemapper::step4_MapNodesParallel() {
+#ifdef USE_OPENMP
+    // Create result mesh by copying structure
+    resultMesh_.clear();
+    resultMesh_.setName(flatMesh_->getName() + "_mapped");
+
+    // Get bounding box of flat mesh
+    Vector3D minBound, maxBound;
+    flatMesh_->calculateBoundingBox(minBound, maxBound);
+
+    // Use flat mesh dimensions for parametric mapping
+    double flatSizeI = maxBound.x - minBound.x;
+    double flatSizeJ = maxBound.y - minBound.y;
+    double flatSizeK = maxBound.z - minBound.z;
+
+    // Convert map to vector for parallel processing
+    const auto& nodesMap = flatMesh_->getNodes();
+    std::vector<std::pair<int, Node>> nodesList(nodesMap.begin(), nodesMap.end());
+    int nodeCount = static_cast<int>(nodesList.size());
+
+    // Pre-allocate result vector
+    std::vector<Node> mappedNodes(nodeCount);
+
+    // Parallel node mapping
+    #pragma omp parallel for schedule(dynamic, 100)
+    for (int i = 0; i < nodeCount; ++i) {
+        const Node& flatNode = nodesList[i].second;
+
+        // Convert flat position to parametric coordinates (0-1)
+        double u = 0.0, v = 0.0, w = 0.0;
+
+        if (flatSizeI > 0) {
+            u = (flatNode.position.x - minBound.x) / flatSizeI;
+            u = std::max(0.0, std::min(1.0, u));
+        }
+        if (flatSizeJ > 0) {
+            v = (flatNode.position.y - minBound.y) / flatSizeJ;
+            v = std::max(0.0, std::min(1.0, v));
+        }
+        if (flatSizeK > 0) {
+            w = (flatNode.position.z - minBound.z) / flatSizeK;
+            w = std::max(0.0, std::min(1.0, w));
+        }
+
+        // Apply flip to match FlatMeshGenerator's coordinate system
+        if (flipI_) {
+            u = 1.0 - u;
+        }
+        if (flipJ_) {
+            v = 1.0 - v;
+        }
+        if (flipK_) {
+            w = 1.0 - w;
+        }
+
+        // Map to bent position using edge-based interpolation
+        Vector3D bentPosition = paramMapper_.mapToPhysical(u, v, w);
+
+        // Store mapped node
+        Node mappedNode(flatNode.id, bentPosition);
+        mappedNode.setMappedPosition(bentPosition);
+        mappedNodes[i] = mappedNode;
+    }
+
+    // Add all nodes to result mesh (sequential, but fast)
+    for (const auto& node : mappedNodes) {
+        resultMesh_.addNode(node);
+    }
+
+    stats_.nodesProcessed = static_cast<int>(nodeCount);
+    return true;
+#else
+    // Fallback to sequential version if OpenMP not available
+    return step4_MapNodes();
+#endif
+}
+
 bool MeshRemapper::detectUFoldGeometry() const {
     // Detect U-fold by checking if start and end X coordinates of i-edges are similar
     // For U-fold, the mesh starts and ends at approximately the same X position
@@ -382,6 +491,98 @@ bool MeshRemapper::step6_ValidateResult() {
     }
 
     return true;
+}
+
+bool MeshRemapper::step6_ValidateResultParallel() {
+#ifdef USE_OPENMP
+    // Calculate Jacobian statistics using parallel reduction
+    stats_.invalidElements = 0;
+    stats_.minJacobian = std::numeric_limits<double>::max();
+    stats_.maxJacobian = std::numeric_limits<double>::lowest();
+
+    // Convert elements map to vector for parallel processing
+    const auto& elementsMap = resultMesh_.getElements();
+    std::vector<std::pair<int, Element>> elementsList(elementsMap.begin(), elementsMap.end());
+    int elemCount = static_cast<int>(elementsList.size());
+
+    // Global variables for reduction (MSVC OpenMP 2.0 doesn't support min/max reduction)
+    double globalMinJac = std::numeric_limits<double>::max();
+    double globalMaxJac = std::numeric_limits<double>::lowest();
+    double globalSumJac = 0.0;
+    int globalInvalid = 0;
+
+    #pragma omp parallel
+    {
+        // Thread-local variables
+        double threadMinJac = std::numeric_limits<double>::max();
+        double threadMaxJac = std::numeric_limits<double>::lowest();
+        double threadSumJac = 0.0;
+        int threadInvalid = 0;
+
+        #pragma omp for schedule(dynamic, 100)
+        for (int i = 0; i < elemCount; ++i) {
+            const Element& elem = elementsList[i].second;
+
+            // Get corner nodes
+            std::array<Vector3D, 8> corners;
+            bool valid = true;
+
+            for (int idx = 0; idx < 8; ++idx) {
+                const Node* node = resultMesh_.getNode(elem.nodeIds[idx]);
+                if (!node) {
+                    valid = false;
+                    break;
+                }
+                corners[idx] = node->getEffectivePosition();
+            }
+
+            if (!valid) {
+                threadInvalid++;
+                continue;
+            }
+
+            // Calculate Jacobian at element center
+            Vector3D dxdu = (corners[1] + corners[2] + corners[5] + corners[6]) * 0.25 -
+                            (corners[0] + corners[3] + corners[4] + corners[7]) * 0.25;
+            Vector3D dxdv = (corners[2] + corners[3] + corners[6] + corners[7]) * 0.25 -
+                            (corners[0] + corners[1] + corners[4] + corners[5]) * 0.25;
+            Vector3D dxdw = (corners[4] + corners[5] + corners[6] + corners[7]) * 0.25 -
+                            (corners[0] + corners[1] + corners[2] + corners[3]) * 0.25;
+
+            double jacobian = dxdu.dot(dxdv.cross(dxdw));
+
+            threadMinJac = std::min(threadMinJac, jacobian);
+            threadMaxJac = std::max(threadMaxJac, jacobian);
+            threadSumJac += jacobian;
+
+            if (jacobian <= 0) {
+                threadInvalid++;
+            }
+        }
+
+        // Manual reduction using critical section
+        #pragma omp critical
+        {
+            globalMinJac = std::min(globalMinJac, threadMinJac);
+            globalMaxJac = std::max(globalMaxJac, threadMaxJac);
+            globalSumJac += threadSumJac;
+            globalInvalid += threadInvalid;
+        }
+    }
+
+    stats_.minJacobian = globalMinJac;
+    stats_.maxJacobian = globalMaxJac;
+    stats_.invalidElements = globalInvalid;
+
+    if (!elementsMap.empty()) {
+        stats_.avgJacobian = globalSumJac / static_cast<double>(elementsMap.size());
+    }
+
+    return true;
+#else
+    // Fallback to sequential version if OpenMP not available
+    return step6_ValidateResult();
+#endif
 }
 
 void MeshRemapper::fixNegativeJacobians() {

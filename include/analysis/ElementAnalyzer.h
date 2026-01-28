@@ -103,6 +103,12 @@ public:
     void setGaussPoints(int n) { numGaussPoints_ = (n == 8) ? 8 : 1; }
 
     /**
+     * Enable/disable parallel processing (OpenMP)
+     * Default: true (parallel enabled)
+     */
+    void setParallel(bool enable) { useParallel_ = enable; }
+
+    /**
      * Analyze a single element
      * 
      * @param elem      Element definition
@@ -140,6 +146,7 @@ private:
     StrainType strainType_;
     int numGaussPoints_;
     bool usePartMaterials_;  // Use per-part materials from mesh
+    bool useParallel_;       // Use OpenMP parallel processing
 
     // Helper methods
     ElementResult analyzeHex8(
