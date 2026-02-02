@@ -29,7 +29,7 @@
 using namespace KooRemapper;
 
 // Version info
-constexpr const char* VERSION = "1.0.0";
+constexpr const char* VERSION = "1.1.0";
 
 /**
  * Display program banner
