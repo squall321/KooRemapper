@@ -1,0 +1,7 @@
+type: flat
+elements_j: 100
+elements_k: 20
+variable_density:
+  zone1_dense_start:
+    length: 200.0
+    num_elements: 200

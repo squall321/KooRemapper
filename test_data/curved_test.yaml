@@ -1,0 +1,13 @@
+type: curved
+centerline_points:
+  - [0, 0]
+  - [50, 0]
+  - [100, 30]
+  - [100, 80]
+interpolation: catmull_rom
+cross_section:
+  width: 30.0
+  thickness: 10.0
+elements_along_curve: 20
+elements_j: 5
+elements_k: 3
