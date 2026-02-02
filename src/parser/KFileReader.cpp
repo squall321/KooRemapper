@@ -266,7 +266,32 @@ bool KFileReader::parseElementSolidSection(std::ifstream& file) {
         //   Line 1: eid, pid
         //   Line 2: n1, n2, n3, n4, n5, n6, n7, n8, n9, n10
         //   For HEX8: n9=n10=0
+        //
+        // IMPORTANT: Try fixed-width format FIRST before tokenizing,
+        // because packed node IDs (no spaces) will be incorrectly parsed as 2-line format
         try {
+            // Try fixed format single line first (8-character fields)
+            // Format: eid(8) + pid(8) + n1-n8(8*8=64) = 80 chars
+            if (line.length() >= 80) {
+                int eid = parseInt(line.substr(0, 8));
+                int pid = parseInt(line.substr(8, 8));
+                std::array<int, 8> nodeIds;
+                for (int i = 0; i < 8; ++i) {
+                    nodeIds[i] = parseInt(line.substr(16 + i * 8, 8));
+                }
+
+                Element elem(eid, pid, nodeIds);
+                // Detect TET4: n5=n6=n7=n8=n4 (LS-DYNA convention)
+                if (nodeIds[4] == nodeIds[3] && nodeIds[5] == nodeIds[3] &&
+                    nodeIds[6] == nodeIds[3] && nodeIds[7] == nodeIds[3]) {
+                    elem.type = ElementType::TET4;
+                }
+                mesh_.addElement(elem);
+                elementCount++;
+                continue;  // Successfully parsed, move to next line
+            }
+
+            // Now try free format (space/comma separated)
             auto tokens = tokenize(line);
 
             // Check if this is Format 1 (single line with 10+ tokens)
@@ -374,25 +399,7 @@ bool KFileReader::parseElementSolidSection(std::ifstream& file) {
                 // This ensures we don't fall through to other parsing cases
                 continue;
             }
-            else if (line.length() >= 80) {
-                // Try fixed format single line (8-character fields)
-                // Format: eid(8) + pid(8) + n1-n8(8*8=64) = 80 chars
-                int eid = parseInt(line.substr(0, 8));
-                int pid = parseInt(line.substr(8, 8));
-                std::array<int, 8> nodeIds;
-                for (int i = 0; i < 8; ++i) {
-                    nodeIds[i] = parseInt(line.substr(16 + i * 8, 8));
-                }
-
-                Element elem(eid, pid, nodeIds);
-                // Detect TET4: n5=n6=n7=n8=n4 (LS-DYNA convention)
-                if (nodeIds[4] == nodeIds[3] && nodeIds[5] == nodeIds[3] &&
-                    nodeIds[6] == nodeIds[3] && nodeIds[7] == nodeIds[3]) {
-                    elem.type = ElementType::TET4;
-                }
-                mesh_.addElement(elem);
-                elementCount++;
-            }
+            // Note: Fixed-width format is now handled at the beginning of this try block
         }
         catch (const std::exception& e) {
             errorMessage_ = "Error parsing element at line " + std::to_string(currentLine_) +
