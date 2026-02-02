@@ -61,6 +61,7 @@ private:
     int linesProcessed_;
     long fileSize_;
     ProgressCallback progressCallback_;
+    std::vector<std::pair<int, std::string>> unsupportedMaterials_;  // (MID, keyword)
 
     // Parse methods
     bool parseFile(std::ifstream& file);
@@ -71,8 +72,11 @@ private:
     bool parseMatPlasticSection(std::ifstream& file);
     bool parseMatRigidSection(std::ifstream& file);
     bool parseMatViscoelasticSection(std::ifstream& file);
+    bool parseMatMooneyRivlinSection(std::ifstream& file);
     void skipToNextKeyword(std::ifstream& file);
     void skipDataLines(std::ifstream& file, int count);
+    bool isMaterialKeyword(const std::string& keyword) const;
+    bool isSupportedMaterial(const std::string& keyword) const;
 
     // Helper methods
     bool isKeywordLine(const std::string& line) const;

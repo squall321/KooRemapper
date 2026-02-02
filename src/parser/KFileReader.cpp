@@ -117,6 +117,13 @@ bool KFileReader::parseFile(std::ifstream& file) {
                     return false;
                 }
             }
+            else if (currentKeyword_ == "MAT_MOONEY-RIVLIN_RUBBER" ||
+                     currentKeyword_ == "MAT_MOONEY-RIVLIN_RUBBER_TITLE" ||
+                     currentKeyword_ == "MAT_027" || currentKeyword_ == "MAT_027_TITLE") {
+                if (!parseMatMooneyRivlinSection(file)) {
+                    return false;
+                }
+            }
             else if (currentKeyword_ == "SECTION_SOLID" || currentKeyword_ == "SECTION_SOLID_TITLE") {
                 // Skip section solid for now (just consume the data lines)
                 skipDataLines(file, 2);  // Usually 2 data lines
@@ -125,6 +132,27 @@ bool KFileReader::parseFile(std::ifstream& file) {
                 break;  // End of file
             }
             else {
+                // Check if this is an unsupported material
+                if (isMaterialKeyword(currentKeyword_) && !isSupportedMaterial(currentKeyword_)) {
+                    // Read MID from the next line and record
+                    std::streampos matPos = file.tellg();
+                    std::string dataLine;
+                    if (std::getline(file, dataLine)) {
+                        auto tokens = tokenize(dataLine);
+                        if (!tokens.empty()) {
+                            try {
+                                int mid = parseInt(tokens[0]);
+                                unsupportedMaterials_.push_back({mid, currentKeyword_});
+                            } catch (...) {
+                                // Failed to parse MID, just record with MID=0
+                                unsupportedMaterials_.push_back({0, currentKeyword_});
+                            }
+                        }
+                    }
+                    // Restore position and skip
+                    file.seekg(matPos);
+                    file.clear();
+                }
                 // Unknown keyword - skip until next keyword
                 // This handles *SET_SEGMENT, *DEFINE_CURVE, *BOUNDARY_*, etc.
                 skipToNextKeyword(file);
@@ -132,6 +160,41 @@ bool KFileReader::parseFile(std::ifstream& file) {
         }
 
         reportProgress(file.tellg());
+    }
+
+    // Check for unsupported materials
+    if (!unsupportedMaterials_.empty()) {
+        errorMessage_ = "Unsupported material types found:\n";
+        for (const auto& mat : unsupportedMaterials_) {
+            errorMessage_ += "  MID " + std::to_string(mat.first) + ": *" + mat.second + "\n";
+        }
+
+        // Find parts using unsupported materials
+        std::vector<int> affectedParts;
+        for (const auto& part : mesh_.getParts()) {
+            for (const auto& mat : unsupportedMaterials_) {
+                if (part.second.materialId == mat.first) {
+                    affectedParts.push_back(part.first);
+                    break;
+                }
+            }
+        }
+
+        if (!affectedParts.empty()) {
+            errorMessage_ += "\nAffected parts (will be skipped in stress calculation):\n";
+            for (int pid : affectedParts) {
+                errorMessage_ += "  PID " + std::to_string(pid);
+                const auto& part = mesh_.getParts().at(pid);
+                if (!part.name.empty()) {
+                    errorMessage_ += " (" + part.name + ")";
+                }
+                errorMessage_ += "\n";
+            }
+        }
+
+        errorMessage_ += "\nSupported materials: MAT_ELASTIC, MAT_PIECEWISE_LINEAR_PLASTICITY, "
+                        "MAT_RIGID, MAT_VISCOELASTIC, MAT_MOONEY-RIVLIN_RUBBER";
+        return false;
     }
 
     return true;
@@ -919,7 +982,8 @@ std::string KFileReader::extractKeyword(const std::string& line) const {
     std::string keyword;
     for (size_t i = 1; i < line.length(); ++i) {
         char c = line[i];
-        if (std::isalnum(c) || c == '_') {
+        // LS-DYNA keywords can contain letters, numbers, underscores, and hyphens
+        if (std::isalnum(c) || c == '_' || c == '-') {
             keyword += static_cast<char>(std::toupper(c));
         } else {
             break;
@@ -1010,6 +1074,125 @@ void KFileReader::reportProgress(std::streampos currentPos) {
         int percent = static_cast<int>((static_cast<long>(currentPos) * 100) / fileSize_);
         progressCallback_(percent);
     }
+}
+
+bool KFileReader::isMaterialKeyword(const std::string& keyword) const {
+    // Check if keyword starts with "MAT_"
+    return keyword.find("MAT_") == 0;
+}
+
+bool KFileReader::isSupportedMaterial(const std::string& keyword) const {
+    // List of supported material keywords
+    if (keyword.find("MAT_ELASTIC") == 0 || keyword.find("MAT_001") == 0) return true;
+    if (keyword.find("MAT_PIECEWISE_LINEAR_PLASTICITY") == 0 || keyword.find("MAT_024") == 0) return true;
+    if (keyword.find("MAT_RIGID") == 0 || keyword.find("MAT_020") == 0) return true;
+    if (keyword.find("MAT_VISCOELASTIC") == 0 || keyword.find("MAT_006") == 0) return true;
+    if (keyword.find("MAT_MOONEY-RIVLIN_RUBBER") == 0 || keyword.find("MAT_027") == 0) return true;
+    return false;
+}
+
+bool KFileReader::parseMatMooneyRivlinSection(std::ifstream& file) {
+    std::string line;
+    std::streampos lastPos;
+    bool foundData = false;
+    bool readTitle = false;
+    std::string matTitle;
+
+    // *MAT_MOONEY-RIVLIN_RUBBER format:
+    // Line 0 (optional): title
+    // Line 1: MID, RHO, PR, A, B, REF
+    // Line 2 (optional): SGL, SW, ST, LCID
+    //
+    // For prestress calculation, we need:
+    // - PR (Poisson's ratio)
+    // - A, B (Mooney-Rivlin constants)
+    //
+    // Equivalent linear elastic moduli:
+    // G0 = 2(A + B)  (initial shear modulus)
+    // E = 2*G0*(1 + PR)
+    // nu = PR
+
+    int mid = 0;
+    double rho = 0.0, pr = 0.0, a = 0.0, b = 0.0;
+
+    while (true) {
+        lastPos = file.tellg();
+        if (!std::getline(file, line)) break;
+
+        currentLine_++;
+        linesProcessed_++;
+
+        // Normalize line endings
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+
+        // Skip empty lines and comments
+        if (line.empty() || isCommentLine(line)) {
+            continue;
+        }
+
+        // Check for new keyword
+        if (isKeywordLine(line)) {
+            file.seekg(lastPos);
+            file.clear();
+            currentLine_--;
+            return true;
+        }
+
+        // Check if this is title line (for _TITLE variant)
+        if (currentKeyword_.find("_TITLE") != std::string::npos && !readTitle) {
+            matTitle = line;
+            readTitle = true;
+            continue;
+        }
+
+        if (!foundData) {
+            // Parse first data line using fixed-width format (10 chars per field)
+            auto tokens = tokenizeFixed(line);
+
+            // Minimum required: MID, RHO, PR, A (B and REF are optional)
+            if (tokens.size() >= 4) {
+                mid = parseInt(tokens[0]);
+                rho = parseDouble(tokens[1]);
+                pr = parseDouble(tokens[2]);
+                a = parseDouble(tokens[3]);
+                b = (tokens.size() >= 5) ? parseDouble(tokens[4]) : 0.0;
+                // ref = (tokens.size() >= 6) ? parseDouble(tokens[5]) : 0.0;  // Not needed
+
+                foundData = true;
+
+                // Calculate equivalent linear elastic properties
+                // Initial shear modulus: G0 = 2(A + B)
+                double G = 2.0 * (a + b);
+
+                // Young's modulus: E = 2*G*(1 + nu)
+                double E = 2.0 * G * (1.0 + pr);
+
+                // Create material
+                MaterialData mat;
+                mat.id = mid;
+                mat.density = rho;
+                mat.E = E;
+                mat.nu = pr;
+
+                if (!matTitle.empty()) {
+                    mat.name = matTitle;
+                } else {
+                    mat.name = "MAT_" + std::to_string(mid);
+                }
+
+                mesh_.addMaterial(mat);
+
+                // Only need first data line for *MAT_MOONEY-RIVLIN_RUBBER
+                return true;
+            }
+        }
+
+        reportProgress(file.tellg());
+    }
+
+    return true;
 }
 
 } // namespace KooRemapper
