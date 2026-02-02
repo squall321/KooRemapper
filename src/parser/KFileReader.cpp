@@ -543,15 +543,22 @@ bool KFileReader::parsePartSection(std::ifstream& file) {
             if (pid > 0) {
                 mesh_.addPart(pid, secid, mid, partTitle);
                 foundData = true;
+
+                // Reset for next part
+                readTitle = false;
+                partTitle.clear();
+                pid = 0;
+                secid = 0;
+                mid = 0;
             }
         }
         catch (const std::exception& e) {
             // Non-fatal, just skip
         }
 
-        // Only read one data line per *PART card
+        // Continue reading next part (don't break!)
         if (foundData) {
-            break;
+            foundData = false;  // Reset for next part
         }
     }
 
