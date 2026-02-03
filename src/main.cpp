@@ -1061,7 +1061,7 @@ int main(int argc, char* argv[]) {
                 console.println("Options:");
                 console.println("  --E <value>      Young's modulus (overrides K-file materials)");
                 console.println("  --nu <value>     Poisson's ratio (overrides K-file materials)");
-                console.println("  --strain <type>  Strain type: engineering (default), green");
+                console.println("  --strain <type>  Strain type: engineering, green (default)");
                 console.println("  --csv            Also output strain/stress CSV file");
                 std::cout << "\n";
                 console.println("Material Properties:");
@@ -1301,9 +1301,9 @@ int main(int argc, char* argv[]) {
         std::string strainTypeStr = parser.getOption("strain");
         bool outputCSV = parser.hasFlag("csv");
 
-        StrainType strainType = StrainType::ENGINEERING;
-        if (strainTypeStr == "green" || strainTypeStr == "green-lagrange") {
-            strainType = StrainType::GREEN_LAGRANGE;
+        StrainType strainType = StrainType::GREEN_LAGRANGE;
+        if (strainTypeStr == "engineering") {
+            strainType = StrainType::ENGINEERING;
         }
 
         printBanner(console);
