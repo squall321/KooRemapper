@@ -32,18 +32,24 @@ LS-DYNA dynain 파일로 출력한다.
 ## 3. 전체 워크플로우
 
 ```
-[1단계] 굽힘 메쉬 준비
+[1단계] 굽힘 메쉬 준비 (bent reference mesh)
    - LS-DYNA K-file (bent mesh)
    - HyperMesh 등에서 생성
+   - ★ 반드시 정규 구조 격자(structured mesh)여야 함
+     → BFS 인덱싱과 Edge 보간이 정규 HEX8 격자 구조를 전제
+     → 요소 간 (i,j,k) 방향의 규칙적 인접 관계가 필요
+   - 요소 밀도는 낮아도 됨 (형상만 정확하면 충분)
 
-[2단계] 평면 메쉬 생성
+[2단계] 평면 메쉬 생성 (flat detail mesh)
    KooRemapper generate-var config.yaml flat.k
    - YAML로 Zone별 요소 밀도 제어
    - 곡선 중심선 기반 메쉬도 가능 (Catmull-Rom, B-Spline)
+   - 구조/비구조 메쉬 모두 가능 (노드 좌표만 매핑 대상)
 
 [3단계] 매핑
    KooRemapper map bent.k flat.k remapped.k
-   - BFS로 구조 격자 인덱싱
+   - bent mesh: 구조 격자 → BFS로 (i,j,k) 인덱싱
+   - flat mesh: 노드 좌표를 bent 형상으로 변환
    - Edge 기반 arc-length 보간으로 노드 매핑
    - OpenMP 병렬 처리
 
