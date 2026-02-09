@@ -1,0 +1,9 @@
+parts:
+  - pid: 1
+    eps_x: 0.0
+    eps_y: 0.0
+    eps_z: -0.02
+
+material:
+  E: 210000.0
+  nu: 0.3

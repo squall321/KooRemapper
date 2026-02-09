@@ -1,10 +1,13 @@
 #include "core/Platform.h"
 #include "core/Mesh.h"
+#include "core/ShellMesh.h"
 #include "parser/KFileReader.h"
 #include "parser/KFileWriter.h"
 #include "parser/DynainWriter.h"
+#include "parser/ShellReader.h"
 #include "mapper/MeshRemapper.h"
 #include "mapper/FlatMeshGenerator.h"
+#include "mapper/ShellMapper.h"
 #include "example/ExampleMeshGenerator.h"
 #include "generator/VariableDensityConfig.h"
 #include "generator/YamlConfigReader.h"
@@ -15,6 +18,8 @@
 #include "analysis/MaterialModel.h"
 #include "cli/ArgumentParser.h"
 #include "cli/ConsoleOutput.h"
+#include "squeeze/SqueezeConfig.h"
+#include "squeeze/SqueezeConfigReader.h"
 #include "util/Logger.h"
 #include "util/Timer.h"
 #include "util/Validator.h"
@@ -25,6 +30,7 @@
 #include <limits>
 #include <sstream>
 #include <iomanip>
+#include <set>
 
 using namespace KooRemapper;
 
@@ -137,6 +143,118 @@ int runMapping(const std::string& bentFile, const std::string& flatFile,
     console.info("Writing output: " + outputFile);
     KFileWriter writer;
     if (!writer.writeFile(outputFile, remapper.getResult(), true)) {
+        console.error("Failed to write output: " + writer.getErrorMessage());
+        return 1;
+    }
+    console.success("Output written successfully");
+
+    timer.stop();
+    console.info("Total time: " + timer.elapsedString());
+
+    return 0;
+}
+
+/**
+ * Run shell-based mapping operation
+ */
+int runShellMapping(const std::string& bentShellFile, const std::string& flatFile,
+                    const std::string& outputFile, double thickness,
+                    const ConsoleOutput& console) {
+    Timer timer;
+
+    // Load bent shell mesh
+    console.info("Loading bent shell mesh: " + bentShellFile);
+    ShellReader shellReader;
+    ShellMesh bentShell;
+    try {
+        bentShell = shellReader.readFile(bentShellFile);
+    } catch (const std::exception& e) {
+        console.error("Failed to load bent shell mesh: " + std::string(e.what()));
+        return 1;
+    }
+    console.success("Loaded " + std::to_string(bentShell.getNodeCount()) + " nodes, " +
+                   std::to_string(bentShell.getElementCount()) + " shell elements");
+
+    // Validate
+    std::string validationError;
+    if (!bentShell.validate(validationError)) {
+        console.error("Shell mesh validation failed: " + validationError);
+        return 1;
+    }
+
+    // Load flat detail mesh
+    console.info("Loading flat detail mesh: " + flatFile);
+    KFileReader reader;
+    Mesh flatMesh;
+    try {
+        flatMesh = reader.readFile(flatFile);
+    } catch (const std::exception& e) {
+        console.error("Failed to load flat mesh: " + std::string(e.what()));
+        return 1;
+    }
+    console.success("Loaded " + std::to_string(flatMesh.getNodeCount()) + " nodes, " +
+                   std::to_string(flatMesh.getElementCount()) + " elements");
+
+    // Auto-detect thickness from flat mesh Z-range if not specified
+    if (thickness <= 0.0) {
+        auto [bbMin, bbMax] = flatMesh.getBoundingBox();
+        thickness = bbMax.z - bbMin.z;
+        if (thickness < 1e-15) {
+            // Shell detail (no Z extent) - set thickness to 0
+            thickness = 0.0;
+            console.info("Detail mesh appears to be a shell (no Z extent)");
+        } else {
+            console.info("Auto-detected thickness from Z-range: " + std::to_string(thickness));
+        }
+    } else {
+        console.info("Using specified thickness: " + std::to_string(thickness));
+    }
+
+    // Build shell mapper
+    console.info("Unfolding shell mesh and building mapper...");
+    ShellMapper mapper;
+    if (!mapper.build(bentShell)) {
+        console.error("Failed to build shell mapper: " + mapper.getErrorMessage());
+        return 1;
+    }
+
+    // Report unfolding results
+    const auto& unfolder = mapper.getUnfolder();
+    std::cout << "\n";
+    console.header("Shell Unfolding Results");
+    console.keyValue("Flat extent X", std::to_string(unfolder.getTotalLengthX()));
+    console.keyValue("Flat extent Y", std::to_string(unfolder.getTotalLengthY()));
+    console.keyValue("Max distortion", std::to_string(unfolder.getMaxDistortion() * 100.0) + "%");
+    console.keyValue("Avg distortion", std::to_string(unfolder.getAvgDistortion() * 100.0) + "%");
+
+    if (unfolder.getMaxDistortion() > 0.05) {
+        console.warning("High area distortion detected (>" + std::to_string(5.0) +
+                       "%). Surface may not be developable.");
+    }
+    std::cout << "\n";
+
+    // Perform mapping (auto-aligns flat detail BB to unfolded shell BB)
+    console.info("Mapping flat mesh onto bent shell...");
+    Mesh resultMesh;
+    if (!mapper.mapMesh(flatMesh, resultMesh, thickness)) {
+        console.error("Mapping failed: " + mapper.getErrorMessage());
+        return 1;
+    }
+
+    if (mapper.isAxesSwapped()) {
+        console.info("Auto-alignment: axes swapped (flat X<->Y) to match unfolded shell");
+    }
+
+    int unmapped = mapper.getUnmappedCount();
+    if (unmapped > 0) {
+        console.warning(std::to_string(unmapped) + " nodes could not be mapped (outside shell domain)");
+    }
+    console.success("Mapping completed: " + std::to_string(flatMesh.getNodeCount()) + " nodes mapped");
+
+    // Write output
+    console.info("Writing output: " + outputFile);
+    KFileWriter writer;
+    if (!writer.writeFile(outputFile, resultMesh, true)) {
         console.error("Failed to write output: " + writer.getErrorMessage());
         return 1;
     }
@@ -949,6 +1067,295 @@ int runGenerateVar(const std::string& configFile, const std::string& outputFile,
     return 0;
 }
 
+/**
+ * Squeeze: compress parts and generate reverse prestress for interference fit
+ */
+int runSqueeze(const std::string& meshFile, const std::string& configFile,
+               const std::string& outputPrefix, const ConsoleOutput& console) {
+    Timer timer;
+
+    // Load mesh
+    console.info("Loading mesh: " + meshFile);
+    KFileReader reader;
+    Mesh mesh;
+    try {
+        mesh = reader.readFile(meshFile);
+    } catch (const std::exception& e) {
+        console.error("Failed to load mesh: " + std::string(e.what()));
+        return 1;
+    }
+    console.success("Loaded " + std::to_string(mesh.getNodeCount()) + " nodes, " +
+                   std::to_string(mesh.getElementCount()) + " elements, " +
+                   std::to_string(mesh.getPartCount()) + " parts");
+
+    // Read squeeze config
+    console.info("Reading squeeze config: " + configFile);
+    SqueezeConfigReader configReader;
+    SqueezeConfig config;
+    try {
+        config = configReader.readFile(configFile);
+    } catch (const std::exception& e) {
+        console.error("Failed to read config: " + std::string(e.what()));
+        return 1;
+    }
+    console.success("Config: " + std::to_string(config.parts.size()) + " part(s) to squeeze");
+
+    // Determine material source
+    bool hasYamlMaterial = config.hasMaterial();
+    bool hasKFileMaterial = (mesh.getMaterialCount() > 0);
+
+    if (hasYamlMaterial) {
+        std::ostringstream oss;
+        oss << std::scientific << std::setprecision(4);
+        oss << "Using YAML material: E=" << config.E << ", nu=" << std::fixed << std::setprecision(4) << config.nu;
+        console.info(oss.str());
+    } else if (hasKFileMaterial) {
+        console.info("Using materials from K-file (per-part)");
+    } else {
+        console.error("No material specified (required for stress computation)");
+        console.info("Add 'material:' section to YAML or include *MAT_ELASTIC in K-file");
+        return 1;
+    }
+
+    // Track shared nodes
+    std::set<int> allSqueezeNodes;
+    int sharedNodeCount = 0;
+
+    // Build part config map for quick lookup
+    std::map<int, const PartSqueezeConfig*> partConfigMap;
+    for (const auto& pc : config.parts) {
+        partConfigMap[pc.pid] = &pc;
+    }
+
+    // Process each part
+    std::cout << "\n";
+    for (const auto& partConfig : config.parts) {
+        // Check part exists in mesh
+        bool partFound = false;
+        for (const auto& [eid, elem] : mesh.getElements()) {
+            if (elem.partId == partConfig.pid) {
+                partFound = true;
+                break;
+            }
+        }
+        if (!partFound) {
+            console.warning("Part " + std::to_string(partConfig.pid) + " not found in mesh, skipping");
+            continue;
+        }
+
+        // Collect nodes belonging to this part
+        std::set<int> partNodeIds;
+        for (const auto& [eid, elem] : mesh.getElements()) {
+            if (elem.partId == partConfig.pid) {
+                for (int i = 0; i < Element::NUM_NODES; ++i) {
+                    partNodeIds.insert(elem.nodeIds[i]);
+                }
+            }
+        }
+
+        // Count shared nodes
+        for (int nid : partNodeIds) {
+            if (allSqueezeNodes.count(nid) > 0) {
+                sharedNodeCount++;
+            }
+        }
+        allSqueezeNodes.insert(partNodeIds.begin(), partNodeIds.end());
+
+        // Compute bounding box center (neutral plane)
+        double minX = std::numeric_limits<double>::max();
+        double minY = std::numeric_limits<double>::max();
+        double minZ = std::numeric_limits<double>::max();
+        double maxX = std::numeric_limits<double>::lowest();
+        double maxY = std::numeric_limits<double>::lowest();
+        double maxZ = std::numeric_limits<double>::lowest();
+
+        for (int nid : partNodeIds) {
+            const auto* node = mesh.getNode(nid);
+            if (!node) continue;
+            const auto& p = node->position;
+            if (p.x < minX) minX = p.x;
+            if (p.y < minY) minY = p.y;
+            if (p.z < minZ) minZ = p.z;
+            if (p.x > maxX) maxX = p.x;
+            if (p.y > maxY) maxY = p.y;
+            if (p.z > maxZ) maxZ = p.z;
+        }
+
+        double centerX = (minX + maxX) * 0.5;
+        double centerY = (minY + maxY) * 0.5;
+        double centerZ = (minZ + maxZ) * 0.5;
+
+        // Report
+        std::ostringstream oss;
+        oss << std::fixed << std::setprecision(4);
+        oss << "Part " << partConfig.pid << ": eps = ("
+            << partConfig.eps_x << ", " << partConfig.eps_y << ", " << partConfig.eps_z << ")";
+        console.info(oss.str());
+
+        std::ostringstream oss2;
+        oss2 << std::fixed << std::setprecision(3);
+        oss2 << "  BB: [" << minX << ", " << minY << ", " << minZ << "] to ["
+             << maxX << ", " << maxY << ", " << maxZ << "]";
+        console.println(oss2.str());
+        console.println("  Center: (" + std::to_string(centerX) + ", " +
+                        std::to_string(centerY) + ", " + std::to_string(centerZ) + ")");
+        console.println("  Nodes: " + std::to_string(partNodeIds.size()));
+
+        // Squeeze nodes: position = center + (pos - center) * (1 + eps)
+        for (int nid : partNodeIds) {
+            Node* node = mesh.getNode(nid);
+            if (!node) continue;
+            const auto& p = node->position;
+
+            Vector3D newPos(
+                centerX + (p.x - centerX) * (1.0 + partConfig.eps_x),
+                centerY + (p.y - centerY) * (1.0 + partConfig.eps_y),
+                centerZ + (p.z - centerZ) * (1.0 + partConfig.eps_z)
+            );
+            node->setMappedPosition(newPos);
+        }
+    }
+
+    if (sharedNodeCount > 0) {
+        console.warning(std::to_string(sharedNodeCount) +
+                       " shared nodes detected between squeeze parts");
+    }
+
+    // Write compressed mesh
+    std::cout << "\n";
+    std::string meshOutputFile = outputPrefix + ".k";
+    console.info("Writing compressed mesh: " + meshOutputFile);
+    KFileWriter writer;
+    if (!writer.writeFile(meshOutputFile, mesh, true)) {
+        console.error("Failed to write mesh: " + writer.getErrorMessage());
+        return 1;
+    }
+    console.success("Compressed mesh written");
+
+    // Build reverse prestress (MeshAnalysisResult)
+    MeshAnalysisResult results;
+    results.hasMaterial = true;
+    results.validElements = 0;
+    results.invalidElements = 0;
+
+    for (const auto& [eid, elem] : mesh.getElements()) {
+        auto it = partConfigMap.find(elem.partId);
+        if (it == partConfigMap.end()) continue;  // Not a squeeze part
+
+        const auto& pc = *(it->second);
+
+        // Get material for this element
+        double matE = 0, matNu = 0;
+        if (hasYamlMaterial) {
+            matE = config.E;
+            matNu = config.nu;
+        } else {
+            const MaterialData* matData = mesh.getElementMaterial(elem);
+            if (matData && matData->E > 0) {
+                matE = matData->E;
+                matNu = matData->nu;
+            }
+        }
+
+        if (matE <= 0) {
+            results.invalidElements++;
+            continue;
+        }
+
+        // Reverse strain: opposite of squeeze strain
+        StrainTensor reverseStrain(-pc.eps_x, -pc.eps_y, -pc.eps_z,
+                                    0.0, 0.0, 0.0);
+
+        // Compute stress via Hooke's law
+        StressTensor stress = StressTensor::fromStrain(reverseStrain, matE, matNu);
+
+        ElementResult er;
+        er.elementId = elem.id;
+        er.stress = stress;
+        er.strain = reverseStrain;
+        er.isValid = true;
+        er.vonMisesStress = stress.vonMises();
+        er.vonMisesStrain = reverseStrain.vonMisesStrain();
+
+        results.elementResults.push_back(er);
+        results.validElements++;
+    }
+
+    // Write dynain
+    std::string dynainFile = outputPrefix + "_dynain.dat";
+    console.info("Writing dynain: " + dynainFile);
+    DynainWriter dynainWriter;
+    if (!dynainWriter.writeFile(dynainFile, results, StrainType::ENGINEERING,
+                                meshFile, "squeeze: " + configFile)) {
+        console.error("Failed to write dynain: " + dynainWriter.getErrorMessage());
+        return 1;
+    }
+    console.success("Dynain written: " + std::to_string(results.validElements) + " elements");
+
+    // Append *INCLUDE to compressed mesh
+    {
+        // Get just the dynain filename for *INCLUDE
+        std::string dynainBasename = dynainFile;
+        size_t slashPos = dynainBasename.find_last_of("/\\");
+        if (slashPos != std::string::npos) {
+            dynainBasename = dynainBasename.substr(slashPos + 1);
+        }
+
+        // Re-read the compressed mesh and insert *INCLUDE before *END
+        std::ifstream srcFile(meshOutputFile);
+        if (!srcFile.is_open()) {
+            console.error("Failed to re-read compressed mesh");
+            return 1;
+        }
+
+        std::string meshContent;
+        std::string line;
+        bool endFound = false;
+
+        while (std::getline(srcFile, line)) {
+            std::string trimmedLine = line;
+            size_t start = trimmedLine.find_first_not_of(" \t");
+            if (start != std::string::npos) {
+                trimmedLine = trimmedLine.substr(start);
+            }
+
+            if (trimmedLine.length() >= 4 &&
+                (trimmedLine[0] == '*') &&
+                (trimmedLine[1] == 'E' || trimmedLine[1] == 'e') &&
+                (trimmedLine[2] == 'N' || trimmedLine[2] == 'n') &&
+                (trimmedLine[3] == 'D' || trimmedLine[3] == 'd')) {
+                meshContent += "*INCLUDE\n";
+                meshContent += dynainBasename + "\n";
+                endFound = true;
+            }
+            meshContent += line + "\n";
+        }
+        srcFile.close();
+
+        if (!endFound) {
+            meshContent += "*INCLUDE\n";
+            meshContent += dynainBasename + "\n";
+            meshContent += "*END\n";
+        }
+
+        std::ofstream dstFile(meshOutputFile, std::ios::binary);
+        if (!dstFile.is_open()) {
+            console.error("Failed to write mesh with *INCLUDE");
+            return 1;
+        }
+        dstFile << meshContent;
+        dstFile.close();
+
+        console.success("Added *INCLUDE to: " + meshOutputFile);
+    }
+
+    timer.stop();
+    std::cout << "\n";
+    console.info("Total time: " + timer.elapsedString());
+
+    return 0;
+}
+
 int main(int argc, char* argv[]) {
     ConsoleOutput console;
 
@@ -958,7 +1365,8 @@ int main(int argc, char* argv[]) {
         console.println("Usage: KooRemapper <command> [options]");
         std::cout << "\n";
         console.println("Commands:");
-        console.println("  map         Map a flat mesh onto a bent reference mesh");
+        console.println("  map         Map a flat mesh onto a bent reference mesh (HEX8)");
+        console.println("  shellmap    Map a flat mesh using a bent shell reference (QUAD4)");
         console.println("  unfold      Generate flat mesh from a bent structured mesh");
         console.println("  generate    Generate example meshes for testing");
         console.println("  generate-var Generate variable density mesh from YAML config");
@@ -1115,6 +1523,61 @@ int main(int argc, char* argv[]) {
                 console.println("  elements_along_curve: 100");
                 console.println("  elements_j: 20");
                 console.println("  elements_k: 5");
+            } else if (helpCmd == "shellmap") {
+                console.println("Usage: KooRemapper shellmap [options] <bent_shell> <flat_detail> <output>");
+                std::cout << "\n";
+                console.println("Map a flat detail mesh onto a bent QUAD4 shell reference mesh.");
+                std::cout << "\n";
+                console.println("Arguments:");
+                console.println("  bent_shell   Bent shell reference mesh (QUAD4 elements, k-file)");
+                console.println("  flat_detail  Flat detail mesh to be mapped (solid or shell, k-file)");
+                console.println("  output       Output file path for the mapped mesh");
+                std::cout << "\n";
+                console.println("Options:");
+                console.println("  --thickness <t>  Shell thickness for Z-offset mapping");
+                console.println("                   Default: auto-detect from flat mesh Z-range");
+                std::cout << "\n";
+                console.println("Description:");
+                console.println("  Unlike 'map' (which requires a structured HEX8 reference),");
+                console.println("  'shellmap' uses an unstructured QUAD4 shell as reference.");
+                console.println("  The shell is unfolded to a flat plane (edge-length preserving),");
+                console.println("  then flat detail nodes are mapped onto the bent shell surface.");
+                std::cout << "\n";
+                console.println("  Best for: developable surfaces (single curvature, e.g. cylinders).");
+                console.println("  Non-developable surfaces will show a distortion warning.");
+            } else if (helpCmd == "squeeze") {
+                console.println("Usage: KooRemapper squeeze <mesh.k> <config.yaml> <output_prefix>");
+                std::cout << "\n";
+                console.println("Compress parts for interference fit modeling.");
+                std::cout << "\n";
+                console.println("Arguments:");
+                console.println("  mesh.k         Input mesh with multiple parts (k-file)");
+                console.println("  config.yaml    YAML config specifying per-part strain conditions");
+                console.println("  output_prefix  Output prefix (generates .k and _dynain.dat)");
+                std::cout << "\n";
+                console.println("Output:");
+                console.println("  <prefix>.k          Compressed mesh with *INCLUDE dynain");
+                console.println("  <prefix>_dynain.dat  Reverse prestress (*INITIAL_STRESS_SOLID)");
+                std::cout << "\n";
+                console.println("YAML Config Format:");
+                console.println("  parts:");
+                console.println("    - pid: 1");
+                console.println("      eps_x: 0.0");
+                console.println("      eps_y: 0.0");
+                console.println("      eps_z: -0.02      # 2% compression in Z");
+                console.println("    - pid: 3");
+                console.println("      eps_x: -0.01");
+                console.println("      eps_y: -0.01");
+                console.println("  material:              # Optional (overrides K-file)");
+                console.println("    E: 210000.0");
+                console.println("    nu: 0.3");
+                std::cout << "\n";
+                console.println("Description:");
+                console.println("  For each specified part:");
+                console.println("  1. Computes bounding box center (neutral plane)");
+                console.println("  2. Compresses nodes by specified strain relative to center");
+                console.println("  3. Generates reverse (tensile) prestress via Hooke's law");
+                console.println("  Use with LS-DYNA dynamic relaxation to model interference fits.");
             } else {
                 console.error("Unknown command: " + helpCmd);
                 return 1;
@@ -1124,12 +1587,14 @@ int main(int argc, char* argv[]) {
             console.println("Usage: KooRemapper <command> [options]");
             std::cout << "\n";
             console.println("Commands:");
-            console.println("  map         Map a flat mesh onto a bent reference mesh");
+            console.println("  map         Map a flat mesh onto a bent reference mesh (HEX8)");
+            console.println("  shellmap    Map a flat mesh using a bent shell reference (QUAD4)");
             console.println("  unfold      Generate flat mesh from a bent structured mesh");
             console.println("  generate    Generate example meshes for testing");
             console.println("  generate-var Generate variable density mesh from YAML config");
             console.println("  strain      Calculate strain between two meshes");
             console.println("  prestress   Calculate prestress from deformed configuration");
+            console.println("  squeeze     Compress parts for interference fit modeling");
             console.println("  info        Display information about a mesh file");
             console.println("  help        Show help for a command");
             console.println("  version     Show version information");
@@ -1160,6 +1625,34 @@ int main(int argc, char* argv[]) {
         }
         printBanner(console);
         return runMapping(positionalArgs[0], positionalArgs[1], positionalArgs[2], console, useParallel);
+    }
+
+    // Shell-based mapping command
+    if (command == "shellmap") {
+        double thickness = -1.0;  // Auto-detect
+        std::vector<std::string> positionalArgs;
+
+        for (int i = 2; i < argc; ++i) {
+            std::string arg = argv[i];
+            if (arg == "--thickness" && i + 1 < argc) {
+                try {
+                    thickness = std::stod(argv[++i]);
+                } catch (...) {
+                    console.error("Invalid thickness value");
+                    return 1;
+                }
+            } else if (arg[0] != '-') {
+                positionalArgs.push_back(arg);
+            }
+        }
+
+        if (positionalArgs.size() < 3) {
+            console.error("Usage: KooRemapper shellmap [--thickness <t>] <bent_shell> <flat_detail> <output>");
+            return 1;
+        }
+        printBanner(console);
+        return runShellMapping(positionalArgs[0], positionalArgs[1], positionalArgs[2],
+                              thickness, console);
     }
 
     // Unfold command
@@ -1308,6 +1801,25 @@ int main(int argc, char* argv[]) {
 
         printBanner(console);
         return runPrestress(refFile, defFile, output, E, nu, strainType, outputCSV, console);
+    }
+
+    // Squeeze command
+    if (command == "squeeze") {
+        std::vector<std::string> positionalArgs;
+
+        for (int i = 2; i < argc; ++i) {
+            std::string arg = argv[i];
+            if (arg[0] != '-') {
+                positionalArgs.push_back(arg);
+            }
+        }
+
+        if (positionalArgs.size() < 3) {
+            console.error("Usage: KooRemapper squeeze <mesh.k> <config.yaml> <output_prefix>");
+            return 1;
+        }
+        printBanner(console);
+        return runSqueeze(positionalArgs[0], positionalArgs[1], positionalArgs[2], console);
     }
 
     // Info command

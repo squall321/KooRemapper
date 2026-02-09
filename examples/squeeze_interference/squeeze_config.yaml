@@ -1,0 +1,8 @@
+# Interference fit example: squeeze inner block in X direction
+# Inner block (Part 1) is compressed 2% in X
+# After dynamic relaxation, it expands back and presses against outer frame
+parts:
+  - pid: 1
+    eps_x: -0.02
+    eps_y: 0.0
+    eps_z: 0.0

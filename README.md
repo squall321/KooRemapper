@@ -6,7 +6,8 @@ KooRemapper는 평평한(flat) 메쉬를 구부러진(bent) 구조화 메쉬에 
 
 ## 주요 기능
 
-- **메쉬 매핑 (`map`)**: 디테일 플랫 → 디테일 벤트 (심플 레퍼런스 형상 따라감)
+- **메쉬 매핑 (`map`)**: 디테일 플랫 → 디테일 벤트 (HEX8 정형 레퍼런스)
+- **쉘 기반 매핑 (`shellmap`)**: QUAD4 쉘 레퍼런스로 매핑 (비정형 가능, CAD 쉘 직접 사용)
 - **레퍼런스 생성 (`generate-var`)**: 심플 벤트/플랫 레퍼런스 생성
   - 곡선 메쉬: 사용자 정의 2D centerline 기반
   - 가변 밀도 메쉬: 영역별 요소 밀도 제어
@@ -439,7 +440,91 @@ KooRemapper generate arc test_arc
 KooRemapper map test_arc_bent.k test_arc_flat.k test_arc_mapped.k
 ```
 
-### 6. 메쉬 정보 (`info`)
+### 6. 쉘 기반 매핑 (`shellmap`)
+
+QUAD4 쉘 메쉬를 레퍼런스로 사용하여, 평평한 디테일 메쉬를 구부러진 형상으로 매핑합니다.
+
+```bash
+KooRemapper shellmap [options] <bent_shell> <flat_detail> <output>
+```
+
+**역할:**
+- `bent_shell`: 구부러진 QUAD4 쉘 메쉬 (비정형 가능)
+- `flat_detail`: 평평한 디테일 메쉬 (HEX8/TET4, 비정형 가능)
+- `output`: 매핑된 결과 메쉬
+
+**옵션:**
+- `--thickness <t>`: 쉘 두께 (기본값: flat 메쉬의 Z 범위에서 자동 감지)
+
+**동작 원리:**
+```
+┌─────────────────────────────────────────────────────────┐
+│ 1. Shell Unfold (edge-length 보존 전개)                  │
+│    Bent QUAD4 Shell ──→ Flat 2D Shell                    │
+│                                                          │
+│ 2. Auto-Alignment (자동 정렬)                            │
+│    Flat Detail BB ←→ Unfolded Shell BB                   │
+│    (축 스왑 + 크기 스케일링 자동 감지)                    │
+│                                                          │
+│ 3. Point-in-Element (요소 검색)                          │
+│    각 노드가 어느 flat shell 요소에 속하는지 탐색         │
+│                                                          │
+│ 4. Surface Interpolation (표면 보간)                     │
+│    Bent shell 위의 대응점 + 법선 방향 두께 오프셋         │
+└─────────────────────────────────────────────────────────┘
+```
+
+**`map` 명령과의 차이:**
+
+| 항목 | `map` (HEX8) | `shellmap` (QUAD4) |
+|------|-------------|-------------------|
+| 레퍼런스 메쉬 | HEX8 정형 (structured) 필수 | QUAD4 비정형 가능 |
+| 레퍼런스 생성 | `generate-var`로 HEX8 생성 | CAD/전처리기에서 쉘 메쉬 직접 생성 |
+| 두께 정보 | 레퍼런스에 포함 | `--thickness`로 지정 또는 자동 감지 |
+| 적용 대상 | 일반적인 굽힘 형상 | 판형 구조물 (폴더블 디스플레이 등) |
+
+**예제 1: 원통형 호 (arc)**
+```bash
+# 예제 파일 위치: examples/shellmap_arc/
+KooRemapper shellmap \
+    examples/shellmap_arc/arc_shell.k \
+    examples/shellmap_arc/arc_flat.k \
+    examples/shellmap_arc/arc_mapped.k
+
+# 결과 확인
+KooRemapper info examples/shellmap_arc/arc_mapped.k
+```
+
+**예제 2: S자 스플라인 곡면 (spline)**
+```bash
+# 예제 파일 위치: examples/shellmap_spline/
+KooRemapper shellmap \
+    examples/shellmap_spline/spline_shell.k \
+    examples/shellmap_spline/spline_flat.k \
+    examples/shellmap_spline/spline_mapped.k
+
+# 결과 확인
+KooRemapper info examples/shellmap_spline/spline_mapped.k
+```
+
+**예제 3: 사용자 쉘 메쉬 사용**
+```bash
+# CAD/전처리기에서 만든 bent shell + flat detail 사용
+KooRemapper shellmap my_bent_shell.k my_flat_detail.k my_mapped.k --thickness 1.0
+
+# 응력 계산까지
+KooRemapper prestress -E 210000 -nu 0.3 my_flat_detail.k my_mapped.k prestress.dynain
+```
+
+**특징:**
+- Bent 레퍼런스: QUAD4 쉘 (비정형 가능, CAD에서 쉽게 생성)
+- Flat 디테일: HEX8 또는 TET4, 비정형 가능
+- **자동 축 정렬**: flat 메쉬와 unfolded shell의 종횡비를 비교하여 축 스왑 자동 감지
+- **자동 크기 맞춤**: bounding box 스케일링으로 크기 자동 조정
+- Developable surface (단일 곡률)에서 전개 왜곡 0%
+- Non-developable surface는 왜곡 경고 출력
+
+### 7. 메쉬 정보 (`info`)
 
 메쉬 파일의 기본 정보를 출력합니다.
 
@@ -554,22 +639,108 @@ KooRemapper prestress -E 210000 -nu 0.3 \
     test_arc_flat.k test_arc_mapped.k test_arc_stress.dynain
 ```
 
+### 예제 3: shellmap으로 쉘 기반 매핑
+
+```bash
+# 1. CAD/전처리기에서 QUAD4 쉘 메쉬 준비
+#    bent_shell.k: 구부러진 형상의 QUAD4 쉘
+
+# 2. 디테일 플랫 메쉬 준비 (CAD 또는 generate-var)
+#    detail_flat.k: 평평한 HEX8 솔리드 메쉬
+
+# 3. shellmap으로 매핑 (두께 자동 감지)
+KooRemapper shellmap bent_shell.k detail_flat.k detail_bent.k
+
+# 4. 응력 계산
+KooRemapper prestress -E 210000 -nu 0.3 \
+    detail_flat.k detail_bent.k prestress.dynain
+```
+
+**핵심**: `shellmap`은 HEX8 정형 레퍼런스 없이 QUAD4 쉘만으로 매핑 가능합니다.
+
 ---
 
 ## 기술 세부사항
 
 ### 지원 요소 타입
 
-| 메쉬 역할 | HEX8 | TET4 |
-|-----------|------|------|
-| Bent (레퍼런스) | 필수 (정형) | 미지원 |
-| Flat (매핑 대상) | 지원 | 지원 |
+| 메쉬 역할 | HEX8 | TET4 | QUAD4 |
+|-----------|------|------|-------|
+| `map` Bent 레퍼런스 | 필수 (정형) | 미지원 | 미지원 |
+| `shellmap` Bent 레퍼런스 | 미지원 | 미지원 | 필수 (비정형 가능) |
+| Flat (매핑 대상) | 지원 | 지원 | - |
 
-### 매핑 알고리즘
+### 매핑 알고리즘 (`map`)
+
 1. 정형 그리드 분석: (i, j, k) 인덱스 구조 추출
 2. Edge Arc-length 계산
 3. 파라메트릭 좌표 변환: (u, v, w)
 4. Transfinite 보간
+
+### 쉘 매핑 알고리즘 (`shellmap`)
+
+1. Edge-length 보존 전개: BFS로 QUAD4 쉘을 2D 평면에 전개
+2. 자동 정렬: Flat detail ↔ Unfolded shell BB 매칭 (축 스왑/스케일 자동)
+3. Point-in-element: 2D Spatial Hash + Newton-Raphson으로 (ξ, η) 좌표 계산
+4. 표면 보간: Bilinear shape function으로 bent 위치 + **Smooth Normal** 두께 오프셋
+
+#### Smooth Normal 보간 (Phong Shading 원리)
+
+QUAD4 요소는 4개 노드로 정의되는 평면 패싯(facet)이므로, 요소 내부의 법선이 일정합니다.
+이 상태로 두께 방향 오프셋을 적용하면 요소 내부에서 곡률이 0이 되어 **굽힘 응력이 누락**됩니다.
+
+KooRemapper는 **노드 평균 법선(Node-Averaged Normal)** 을 사용하여 이 문제를 해결합니다:
+
+```text
+[평면 패싯 법선 (기존)]            [Smooth Normal (현재)]
+
+  n↑    n↑    n↑                    n↗    n↑    n↖
+  ┌─────┬─────┐                    ┌─────┬─────┐
+  │요소A │요소B │                    │요소A │요소B │
+  └─────┴─────┘                    └─────┴─────┘
+  요소 내 법선 일정                  노드에서 법선 혼합 → 연속 변화
+  → 곡률 = 0                        → 곡률 ≠ 0 → 굽힘 포착
+```
+
+**원리:**
+
+1. 각 쉘 요소의 법선을 면적 가중 평균하여 노드 법선 계산
+2. 요소 내부에서 shape function으로 노드 법선을 보간
+3. 보간된 법선 방향으로 두께 오프셋 → 요소 내에서 법선 연속 변화 → 곡률 발생
+
+이는 컴퓨터 그래픽스의 **Phong Shading**과 동일한 원리입니다.
+저해상도 메쉬(삼각형/사각형 패싯)에서도 부드러운 곡면 법선을 재현합니다.
+
+#### 굽힘 응력 포착을 위한 디테일 메쉬 구성
+
+쉘의 굽힘 응력(bending stress)을 정확히 포착하려면 디테일 솔리드 메쉬의 **두께 방향 요소 수**가 중요합니다:
+
+| 두께 방향 요소 | 포착 가능한 응력 | 비고 |
+| :---: | --- | --- |
+| 1개 | 막응력(membrane)만 | 중립면 응력만 계산, 굽힘 응력 누락 |
+| **2개 이상** | **막응력 + 굽힘 응력** | 상면/하면 응력 차이로 굽힘 포착 |
+
+```
+[1개 요소 (두께 방향)]         [2개 요소 (두께 방향)]
+
+  ┌──────────────┐              ┌──────────────┐ ← 인장 (outer)
+  │   1개 적분점   │              ├──────────────┤ ← 중립면
+  │  (중립면 응력)  │              │              │
+  └──────────────┘              └──────────────┘ ← 압축 (inner)
+
+  σ_top = σ_bottom               σ_top ≠ σ_bottom
+  (굽힘 구분 불가)               (굽힘 응력 포착)
+```
+
+**검증 결과** (30° arc, R=10, 2-layer, Green-Lagrange):
+
+| 위치 | eps_xx | sig_xx | 방향 |
+| ------ | -------- | -------- | ------ |
+| Inner (Z < 0) | -0.0057 | -1,675 MPa | 압축 |
+| Outer (Z > 0) | +0.0043 | +1,148 MPa | 인장 |
+| 이론값 (z/R) | ±0.005 | | |
+
+내부 요소의 bending strain이 이론값 z/R = 0.005와 99.9% 일치합니다.
 
 ### 응력 계산
 1. 변형 구배 텐서(F) 계산

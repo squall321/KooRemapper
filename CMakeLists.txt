@@ -47,6 +47,7 @@ set(CORE_SOURCES
     src/core/Element.cpp
     src/core/Mesh.cpp
     src/core/Platform.cpp
+    src/core/ShellMesh.cpp
 )
 
 # Source files - Parser
@@ -54,6 +55,7 @@ set(PARSER_SOURCES
     src/parser/KFileReader.cpp
     src/parser/KFileWriter.cpp
     src/parser/DynainWriter.cpp
+    src/parser/ShellReader.cpp
 )
 
 # Source files - Grid
@@ -73,6 +75,8 @@ set(MAPPER_SOURCES
     src/mapper/UnstructuredMeshAnalyzer.cpp
     src/mapper/MeshRemapper.cpp
     src/mapper/FlatMeshGenerator.cpp
+    src/mapper/ShellUnfolder.cpp
+    src/mapper/ShellMapper.cpp
 )
 
 # Source files - Example
@@ -98,6 +102,11 @@ set(ANALYSIS_SOURCES
     src/analysis/ElementAnalyzer.cpp
 )
 
+# Source files - Squeeze
+set(SQUEEZE_SOURCES
+    src/squeeze/SqueezeConfigReader.cpp
+)
+
 # Source files - CLI
 set(CLI_SOURCES
     src/cli/ArgumentParser.cpp
@@ -109,6 +118,7 @@ set(UTIL_SOURCES
     src/util/Logger.cpp
     src/util/Timer.cpp
     src/util/Validator.cpp
+    src/util/SpatialHash2D.cpp
 )
 
 # Create library
@@ -120,6 +130,7 @@ add_library(kooremapper_lib STATIC
     ${EXAMPLE_SOURCES}
     ${GENERATOR_SOURCES}
     ${ANALYSIS_SOURCES}
+    ${SQUEEZE_SOURCES}
     ${CLI_SOURCES}
     ${UTIL_SOURCES}
 )

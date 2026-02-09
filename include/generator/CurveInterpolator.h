@@ -34,6 +34,10 @@ struct Vector2D {
     Vector2D perpendicular() const { return Vector2D(-y, x); }
     
     double dot(const Vector2D& v) const { return x * v.x + y * v.y; }
+    double cross(const Vector2D& v) const { return x * v.y - y * v.x; }
+    double magnitude() const { return length(); }
+    double magnitudeSquared() const { return lengthSquared(); }
+    double distanceTo(const Vector2D& v) const { return (*this - v).length(); }
 };
 
 inline Vector2D operator*(double s, const Vector2D& v) { return v * s; }
