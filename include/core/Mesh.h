@@ -18,11 +18,12 @@ struct MaterialData {
     double E;       // Young's modulus
     double nu;      // Poisson's ratio
     double density; // Mass density (optional)
+    double sigy;    // Yield stress (MAT_024 SIGY field, 0 = not available)
     std::string name;
 
-    MaterialData() : id(0), E(0), nu(0), density(0) {}
+    MaterialData() : id(0), E(0), nu(0), density(0), sigy(0) {}
     MaterialData(int id, double E, double nu, double density = 0, const std::string& name = "")
-        : id(id), E(E), nu(nu), density(density), name(name) {}
+        : id(id), E(E), nu(nu), density(density), sigy(0), name(name) {}
     
     bool isValid() const { return E > 0 && nu > 0 && nu < 0.5; }
 };
@@ -64,6 +65,16 @@ struct MeshStats {
 };
 
 /**
+ * Shell section data (from *SECTION_SHELL)
+ */
+struct SectionShellData {
+    int id;
+    double thickness;
+    SectionShellData() : id(0), thickness(0.0) {}
+    SectionShellData(int id, double t) : id(id), thickness(t) {}
+};
+
+/**
  * Mesh class containing nodes and elements
  */
 class Mesh {
@@ -72,6 +83,7 @@ public:
     std::map<int, Element> elements;        // Element ID -> Element
     std::map<int, Part> parts;              // Part ID -> Part
     std::map<int, MaterialData> materials;  // Material ID -> MaterialData
+    std::map<int, SectionShellData> shellSections;  // Section ID -> Shell section data
     std::string name_;                      // Mesh name
 
     // Grid dimensions (for structured meshes)
@@ -156,6 +168,14 @@ public:
     size_t getNodeCount() const { return nodes.size(); }
     size_t getElementCount() const { return elements.size(); }
     size_t getPartCount() const { return parts.size(); }
+
+    // Max ID queries (std::map is sorted, rbegin gives max key)
+    int getMaxNodeId() const {
+        return nodes.empty() ? 0 : nodes.rbegin()->first;
+    }
+    int getMaxElementId() const {
+        return elements.empty() ? 0 : elements.rbegin()->first;
+    }
 
     // Accessors for collections
     const std::map<int, Node>& getNodes() const { return nodes; }

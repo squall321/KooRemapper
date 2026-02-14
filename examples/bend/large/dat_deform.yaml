@@ -1,0 +1,19 @@
+# Bend test: large model, dat file source, deform mode
+# 50x40x5 block (10,000 elements), X:0-100, Y:0-50, Z:0-2
+# 51x51 warpage grid: w = 0.5 * sin(pi*x) * sin(pi*y)
+base_model: block.k
+output: dat_deform_output
+
+material:
+  E: 210000
+  nu: 0.3
+
+dynain_embed: true
+
+operations:
+  - type: bend
+    target_pid: 1
+    plane: xy
+    mode: deform
+    source: dat
+    dat_file: warpage_50x50.dat

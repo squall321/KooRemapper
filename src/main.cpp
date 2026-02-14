@@ -20,6 +20,9 @@
 #include "cli/ConsoleOutput.h"
 #include "squeeze/SqueezeConfig.h"
 #include "squeeze/SqueezeConfigReader.h"
+#include "assembly/AssemblyConfig.h"
+#include "assembly/AssemblyConfigReader.h"
+#include "assembly/ModelAssembler.h"
 #include "util/Logger.h"
 #include "util/Timer.h"
 #include "util/Validator.h"
@@ -1282,7 +1285,7 @@ int runSqueeze(const std::string& meshFile, const std::string& configFile,
     }
 
     // Write dynain
-    std::string dynainFile = outputPrefix + "_dynain.dat";
+    std::string dynainFile = outputPrefix + ".dynain";
     console.info("Writing dynain: " + dynainFile);
     DynainWriter dynainWriter;
     if (!dynainWriter.writeFile(dynainFile, results, StrainType::ENGINEERING,
@@ -1356,6 +1359,126 @@ int runSqueeze(const std::string& meshFile, const std::string& configFile,
     return 0;
 }
 
+/**
+ * Assemble: combine operations (replace, squeeze) on a full model
+ */
+int runAssemble(const std::string& configFile, const ConsoleOutput& console) {
+    Timer timer;
+
+    // Determine config directory for relative paths
+    std::string configDir;
+    size_t slashPos = configFile.find_last_of("/\\");
+    if (slashPos != std::string::npos) {
+        configDir = configFile.substr(0, slashPos);
+    }
+
+    // 1. Read assembly config
+    console.info("Reading assembly config: " + configFile);
+    AssemblyConfigReader configReader;
+    AssemblyConfig config;
+    try {
+        config = configReader.readFile(configFile);
+    } catch (const std::exception& e) {
+        console.error("Failed to read config: " + std::string(e.what()));
+        return 1;
+    }
+    console.success("Config: " + std::to_string(config.operations.size()) + " operation(s)");
+
+    // Resolve base model path relative to config
+    std::string baseModelPath = config.baseModel;
+    if (!configDir.empty() && !baseModelPath.empty() &&
+        !(baseModelPath.size() >= 2 && baseModelPath[1] == ':') &&
+        baseModelPath[0] != '/' && baseModelPath[0] != '\\') {
+        baseModelPath = configDir + "/" + baseModelPath;
+    }
+
+    // Resolve output path
+    std::string outputPrefix = config.output;
+    if (!configDir.empty() && !outputPrefix.empty() &&
+        !(outputPrefix.size() >= 2 && outputPrefix[1] == ':') &&
+        outputPrefix[0] != '/' && outputPrefix[0] != '\\') {
+        outputPrefix = configDir + "/" + outputPrefix;
+    }
+
+    // 2. Load base model
+    console.info("Loading base model: " + baseModelPath);
+    ModelAssembler assembler;
+    assembler.setDynamicRelaxation(config.dynamicRelaxation);
+    assembler.setDynainEmbed(config.dynainEmbed);
+    if (!assembler.loadBaseModel(baseModelPath)) {
+        console.error(assembler.getErrorMessage());
+        return 1;
+    }
+    console.success("Loaded " + std::to_string(assembler.getNodeCount()) + " nodes, " +
+                   std::to_string(assembler.getElementCount()) + " elements, " +
+                   std::to_string(assembler.getPartCount()) + " parts");
+
+    // Determine material
+    double matE = config.E;
+    double matNu = config.nu;
+
+    // 3. Apply operations
+    std::cout << "\n";
+    for (size_t i = 0; i < config.operations.size(); ++i) {
+        const auto& op = config.operations[i];
+
+        console.info("Operation " + std::to_string(i + 1) + "/" +
+                    std::to_string(config.operations.size()) + ":");
+
+        bool ok = false;
+        if (op.type == AssemblyOperation::REPLACE) {
+            ok = assembler.applyReplace(op.replace, matE, matNu, configDir);
+        } else if (op.type == AssemblyOperation::SQUEEZE) {
+            ok = assembler.applySqueeze(op.squeeze, matE, matNu);
+        } else if (op.type == AssemblyOperation::RESTACK) {
+            ok = assembler.applyRestack(op.restack, matE, matNu);
+        } else if (op.type == AssemblyOperation::BEND) {
+            ok = assembler.applyBend(op.bend, matE, matNu, configDir);
+        } else if (op.type == AssemblyOperation::INDENT) {
+            ok = assembler.applyIndent(op.indent, matE, matNu);
+        } else if (op.type == AssemblyOperation::FORMSTRAIN) {
+            ok = assembler.applyFormStrain(op.formstrain);
+        }
+
+        if (!ok) {
+            console.error(assembler.getErrorMessage());
+            return 1;
+        }
+
+        // Print info messages from assembler
+        for (const auto& msg : assembler.infoMessages) {
+            console.println(msg);
+        }
+        assembler.infoMessages.clear();
+    }
+
+    // 4. Write output
+    std::cout << "\n";
+    console.info("Writing output: " + outputPrefix + ".k");
+    if (!assembler.writeOutput(outputPrefix)) {
+        console.error(assembler.getErrorMessage());
+        return 1;
+    }
+    console.success("Output written");
+
+    // Summary
+    if (assembler.getAddedNodeCount() > 0 || assembler.getAddedElementCount() > 0) {
+        console.println("  Added: " + std::to_string(assembler.getAddedNodeCount()) +
+                        " nodes, " + std::to_string(assembler.getAddedElementCount()) + " elements");
+    }
+    int dynainCount = static_cast<int>(assembler.getAccumulatedResults().size());
+    if (dynainCount > 0) {
+        std::string dynainMode = config.dynainEmbed ? " (embedded in .k)" : " (separate .dynain)";
+        console.success("Dynain: " + std::to_string(dynainCount) + " elements" + dynainMode);
+    }
+
+    timer.stop();
+    std::cout << "\n";
+    console.info("Total time: " + timer.elapsedString());
+
+    return 0;
+}
+
 int main(int argc, char* argv[]) {
     ConsoleOutput console;
 
@@ -1372,6 +1495,8 @@ int main(int argc, char* argv[]) {
         console.println("  generate-var Generate variable density mesh from YAML config");
         console.println("  strain      Calculate strain between two meshes");
         console.println("  prestress   Calculate prestress from deformed configuration");
+        console.println("  squeeze     Compress parts for interference fit modeling");
+        console.println("  assemble    Assemble model with part replace/squeeze operations");
         console.println("  info        Display information about a mesh file");
         console.println("  help        Show help for a command");
         console.println("  version     Show version information");
@@ -1578,6 +1703,46 @@ int main(int argc, char* argv[]) {
                 console.println("  2. Compresses nodes by specified strain relative to center");
                 console.println("  3. Generates reverse (tensile) prestress via Hooke's law");
                 console.println("  Use with LS-DYNA dynamic relaxation to model interference fits.");
+            } else if (helpCmd == "assemble") {
+                console.println("Usage: KooRemapper assemble <config.yaml>");
+                std::cout << "\n";
+                console.println("Assemble a full model with multiple part operations.");
+                std::cout << "\n";
+                console.println("Arguments:");
+                console.println("  config.yaml  YAML config specifying base model and operations");
+                std::cout << "\n";
+                console.println("Output:");
+                console.println("  <output>.k          Assembled model (preserves all keywords)");
+                console.println("  <output>_dynain.dat  Accumulated prestress (*INITIAL_STRESS_SOLID)");
+                std::cout << "\n";
+                console.println("YAML Config Format:");
+                console.println("  base_model: full_model.k");
+                console.println("  output: assembled_result");
+                console.println("");
+                console.println("  operations:");
+                console.println("    - type: replace              # Replace part with detail mesh");
+                console.println("      target_pid: 3");
+                console.println("      detail_flat: detail.k      # Flat detail mesh");
+                console.println("      shell_bent: shell.k        # Bent shell reference (QUAD4)");
+                console.println("      prestress: true            # Optional: compute bending prestress");
+                console.println("");
+                console.println("    - type: squeeze              # Interference fit compression");
+                console.println("      target_pid: 5");
+                console.println("      eps_x: -0.02");
+                console.println("      eps_y: 0.0");
+                console.println("      eps_z: 0.0");
+                console.println("");
+                console.println("  material:                      # Optional: global material override");
+                console.println("    E: 210000.0");
+                console.println("    nu: 0.3");
+                std::cout << "\n";
+                console.println("Description:");
+                console.println("  Processes operations sequentially on the base model:");
+                console.println("  - replace: removes target part, maps detail mesh via shellmap,");
+                console.println("    renumbers IDs, and optionally computes bending prestress");
+                console.println("  - squeeze: compresses target part nodes and generates reverse");
+                console.println("    prestress for interference fit dynamic relaxation");
+                console.println("  All non-mesh keywords (*CONTACT, *BOUNDARY, etc.) are preserved.");
             } else {
                 console.error("Unknown command: " + helpCmd);
                 return 1;
@@ -1595,6 +1760,7 @@ int main(int argc, char* argv[]) {
             console.println("  strain      Calculate strain between two meshes");
             console.println("  prestress   Calculate prestress from deformed configuration");
             console.println("  squeeze     Compress parts for interference fit modeling");
+            console.println("  assemble    Assemble model with part replace/squeeze operations");
             console.println("  info        Display information about a mesh file");
             console.println("  help        Show help for a command");
             console.println("  version     Show version information");
@@ -1820,6 +1986,16 @@ int main(int argc, char* argv[]) {
         }
         printBanner(console);
         return runSqueeze(positionalArgs[0], positionalArgs[1], positionalArgs[2], console);
+    }
+
+    // Assemble command
+    if (command == "assemble") {
+        if (argc < 3) {
+            console.error("Usage: KooRemapper assemble <config.yaml>");
+            return 1;
+        }
+        printBanner(console);
+        return runAssemble(argv[2], console);
     }
 
     // Info command

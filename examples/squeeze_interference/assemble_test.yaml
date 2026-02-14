@@ -1,0 +1,13 @@
+base_model: interference_model.k
+output: assembled_result
+
+operations:
+  - type: squeeze
+    target_pid: 1
+    eps_x: -0.02
+    eps_y: 0.0
+    eps_z: 0.0
+
+material:
+  E: 210000.0
+  nu: 0.3

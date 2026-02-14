@@ -82,8 +82,14 @@ bool KFileReader::parseFile(std::ifstream& file) {
                     return false;
                 }
             }
-            else if (currentKeyword_ == "ELEMENT_SOLID" || currentKeyword_ == "ELEMENT_SOLID_TITLE") {
+            else if (currentKeyword_ == "ELEMENT_SOLID" || currentKeyword_ == "ELEMENT_SOLID_TITLE" ||
+                     currentKeyword_ == "ELEMENT_TSHELL" || currentKeyword_ == "ELEMENT_TSHELL_TITLE") {
                 if (!parseElementSolidSection(file)) {
+                    return false;
+                }
+            }
+            else if (currentKeyword_ == "ELEMENT_SHELL" || currentKeyword_ == "ELEMENT_SHELL_TITLE") {
+                if (!parseElementShellSection(file)) {
                     return false;
                 }
             }
@@ -124,9 +130,14 @@ bool KFileReader::parseFile(std::ifstream& file) {
                     return false;
                 }
             }
-            else if (currentKeyword_ == "SECTION_SOLID" || currentKeyword_ == "SECTION_SOLID_TITLE") {
-                // Skip section solid for now (just consume the data lines)
-                skipDataLines(file, 2);  // Usually 2 data lines
+            else if (currentKeyword_ == "SECTION_SOLID" || currentKeyword_ == "SECTION_SOLID_TITLE" ||
+                     currentKeyword_ == "SECTION_TSHELL" || currentKeyword_ == "SECTION_TSHELL_TITLE") {
+                skipToNextKeyword(file);
+            }
+            else if (currentKeyword_ == "SECTION_SHELL" || currentKeyword_ == "SECTION_SHELL_TITLE") {
+                if (!parseSectionShellSection(file)) {
+                    return false;
+                }
             }
             else if (currentKeyword_ == "END") {
                 break;  // End of file
@@ -476,6 +487,181 @@ bool KFileReader::parseElementSolidSection(std::ifstream& file) {
     return true;
 }
 
+bool KFileReader::parseElementShellSection(std::ifstream& file) {
+    // Parse *ELEMENT_SHELL section
+    // Format: EID PID N1 N2 N3 N4 (4-node shell, sometimes N5-N8 on same line)
+    // Store as 8-node Element with N5-N8 = N1-N4 for compatibility
+    std::string line;
+    std::streampos lastPos;
+    int elementCount = 0;
+
+    bool hasTitle = (currentKeyword_.find("TITLE") != std::string::npos);
+
+    while (true) {
+        lastPos = file.tellg();
+        if (!std::getline(file, line)) break;
+        currentLine_++;
+        linesProcessed_++;
+
+        // Normalize line endings
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+
+        // Skip empty lines and comments
+        if (line.empty() || isCommentLine(line)) continue;
+
+        // Check for next keyword
+        if (isKeywordLine(line)) {
+            file.seekg(lastPos);
+            file.clear();
+            currentLine_--;
+            linesProcessed_--;
+            break;
+        }
+
+        // Skip title line for _TITLE variant (first data line per element is title)
+        if (hasTitle && elementCount == 0) {
+            // Title lines in ELEMENT_SHELL_TITLE appear before each element group
+            // Just check: if it doesn't start with digits, it's a title
+            auto tokens = tokenize(line);
+            if (tokens.empty()) continue;
+            bool isTitle = false;
+            try { parseInt(tokens[0]); } catch (...) { isTitle = true; }
+            if (isTitle) continue;
+        }
+
+        try {
+            // Try fixed format first (8-char fields): EID(8) PID(8) N1(8) N2(8) N3(8) N4(8) = 48 chars min
+            if (line.length() >= 48) {
+                int eid = parseInt(line.substr(0, 8));
+                int pid = parseInt(line.substr(8, 8));
+                if (eid > 0 && pid > 0) {
+                    std::array<int, 8> nodeIds;
+                    nodeIds[0] = parseInt(line.substr(16, 8));
+                    nodeIds[1] = parseInt(line.substr(24, 8));
+                    nodeIds[2] = parseInt(line.substr(32, 8));
+                    nodeIds[3] = parseInt(line.substr(40, 8));
+                    // Duplicate for 8-node compatibility
+                    nodeIds[4] = nodeIds[0];
+                    nodeIds[5] = nodeIds[1];
+                    nodeIds[6] = nodeIds[2];
+                    nodeIds[7] = nodeIds[3];
+
+                    Element elem(eid, pid, nodeIds);
+                    elem.type = ElementType::QUAD4;
+                    mesh_.addElement(elem);
+                    elementCount++;
+                    continue;
+                }
+            }
+
+            // Fallback: free format
+            auto tokens = tokenize(line);
+            if (tokens.size() >= 6) {
+                int eid = parseInt(tokens[0]);
+                int pid = parseInt(tokens[1]);
+                std::array<int, 8> nodeIds;
+                nodeIds[0] = parseInt(tokens[2]);
+                nodeIds[1] = parseInt(tokens[3]);
+                nodeIds[2] = parseInt(tokens[4]);
+                nodeIds[3] = parseInt(tokens[5]);
+                nodeIds[4] = nodeIds[0];
+                nodeIds[5] = nodeIds[1];
+                nodeIds[6] = nodeIds[2];
+                nodeIds[7] = nodeIds[3];
+
+                Element elem(eid, pid, nodeIds);
+                elem.type = ElementType::QUAD4;
+                mesh_.addElement(elem);
+                elementCount++;
+            }
+        }
+        catch (const std::exception& e) {
+            // Skip unparseable lines
+            continue;
+        }
+
+        reportProgress(file.tellg());
+    }
+
+    return true;
+}
+
+bool KFileReader::parseSectionShellSection(std::ifstream& file) {
+    // *SECTION_SHELL format (LS-DYNA):
+    // Card 1: SECID(10) ELFORM(10) SHRF(10) NIP(10) PROPT(10) QR/IRID(10) ICOMP(10) SETYP(10)
+    // Card 2: T1(10) T2(10) T3(10) T4(10) NLOC(10) MAREA(10) IDOF(10) EDGSET(10)
+    // We extract SECID from card 1 and T1 from card 2.
+    std::string line;
+    std::streampos lastPos;
+    bool hasTitle = (currentKeyword_.find("TITLE") != std::string::npos);
+
+    // Skip title line if _TITLE variant
+    if (hasTitle) {
+        while (true) {
+            lastPos = file.tellg();
+            if (!std::getline(file, line)) return true;
+            currentLine_++;
+            linesProcessed_++;
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            if (line.empty() || isCommentLine(line)) continue;
+            if (isKeywordLine(line)) { file.seekg(lastPos); currentLine_--; linesProcessed_--; return true; }
+            break; // consumed title line
+        }
+    }
+
+    // Card 1: read SECID
+    int secId = 0;
+    while (true) {
+        lastPos = file.tellg();
+        if (!std::getline(file, line)) return true;
+        currentLine_++;
+        linesProcessed_++;
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.empty() || isCommentLine(line)) continue;
+        if (isKeywordLine(line)) { file.seekg(lastPos); currentLine_--; linesProcessed_--; return true; }
+        try {
+            if (line.length() >= 10) {
+                secId = parseInt(line.substr(0, 10));
+            } else {
+                auto tokens = tokenize(line);
+                if (!tokens.empty()) secId = parseInt(tokens[0]);
+            }
+        } catch (...) {}
+        break;
+    }
+
+    // Card 2: read T1 (first field)
+    double thickness = 0.0;
+    while (true) {
+        lastPos = file.tellg();
+        if (!std::getline(file, line)) break;
+        currentLine_++;
+        linesProcessed_++;
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.empty() || isCommentLine(line)) continue;
+        if (isKeywordLine(line)) { file.seekg(lastPos); currentLine_--; linesProcessed_--; break; }
+        try {
+            if (line.length() >= 10) {
+                thickness = parseDouble(line.substr(0, 10));
+            } else {
+                auto tokens = tokenize(line);
+                if (!tokens.empty()) thickness = parseDouble(tokens[0]);
+            }
+        } catch (...) {}
+        break;
+    }
+
+    if (secId > 0 && thickness > 0) {
+        mesh_.shellSections[secId] = SectionShellData(secId, thickness);
+    }
+
+    // Skip remaining cards
+    skipToNextKeyword(file);
+    return true;
+}
+
 bool KFileReader::parsePartSection(std::ifstream& file) {
     std::string line;
     std::streampos lastPos;
@@ -662,10 +848,9 @@ bool KFileReader::parseMatPlasticSection(std::ifstream& file) {
     // Card 2: c, p, lcss, lcsr, vp, lcf, (not used), (not used)
     // Card 3: eps1, eps2, eps3, eps4, eps5, eps6, eps7, eps8
     // Card 4: es1, es2, es3, es4, es5, es6, es7, es8
-    // We only need Card 1 for basic material properties
 
     int mid = 0;
-    double density = 0, E = 0, nu = 0;
+    double density = 0, E = 0, nu = 0, sigy = 0;
 
     while (true) {
         lastPos = file.tellg();
@@ -702,7 +887,7 @@ bool KFileReader::parseMatPlasticSection(std::ifstream& file) {
             continue;
         }
 
-        // Parse first card (contains mid, ro, e, pr)
+        // Parse first card (contains mid, ro, e, pr, sigy)
         if (dataLineCount == 0) {
             try {
                 // LS-DYNA default: fixed format (10-character fields)
@@ -713,9 +898,15 @@ bool KFileReader::parseMatPlasticSection(std::ifstream& file) {
                     E = parseDouble(tokens[2]);
                     nu = parseDouble(tokens[3]);
                 }
+                if (tokens.size() >= 5) {
+                    sigy = parseDouble(tokens[4]);
+                }
 
                 if (mid > 0 && E > 0) {
                     mesh_.addMaterial(mid, E, nu, density);
+                    if (sigy > 0) {
+                        mesh_.materials[mid].sigy = sigy;
+                    }
                 }
             }
             catch (const std::exception& e) {

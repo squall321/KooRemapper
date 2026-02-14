@@ -1,0 +1,30 @@
+base_model: block_large.k
+output: star_stress_result
+
+material:
+  E: 210000.0
+  nu: 0.3
+
+operations:
+  - type: indent
+    target_pid: 1
+    plane: xy
+    direction: -z
+    depth: -0.5
+    r1: 0.3
+    r2: 0.7
+    bottom_ratio: 0.0
+    stress: true
+    shape:
+      type: spline
+      points:
+        - [10.00, 16.00]
+        - [11.47, 12.02]
+        - [15.71, 11.85]
+        - [12.38, 9.23]
+        - [13.53, 5.15]
+        - [10.00, 7.50]
+        - [6.47, 5.15]
+        - [7.62, 9.23]
+        - [4.29, 11.85]
+        - [8.53, 12.02]

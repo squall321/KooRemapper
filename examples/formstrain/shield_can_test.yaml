@@ -1,0 +1,10 @@
+# Shield can formstrain test
+# SUS304 box: 20x15x3mm, t=0.2mm
+# Expect EPS at 4 bottom-wall edges + 4 corner lines
+base_model: shield_can.k
+output: shield_can_result
+
+dynain_embed: true
+
+operations:
+  - type: formstrain

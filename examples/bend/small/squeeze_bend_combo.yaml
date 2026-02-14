@@ -1,0 +1,27 @@
+# Bend test: squeeze + bend combo (stress merge)
+# 2x2x2 block (8 elements), X:0-10, Y:0-10, Z:0-2
+# Step 1: Z방향 2% 압축 (squeeze)
+# Step 2: sin 형태 굽힘 (bend)
+# → 동일 요소의 squeeze + bend 응력이 합산되어 출력
+base_model: block.k
+output: squeeze_bend_combo_output
+
+material:
+  E: 210000
+  nu: 0.3
+
+dynain_embed: true
+
+operations:
+  - type: squeeze
+    target_pid: 1
+    eps_x: 0.0
+    eps_y: 0.0
+    eps_z: -0.02
+
+  - type: bend
+    target_pid: 1
+    plane: xy
+    mode: deform
+    source: formula
+    expression: "1.0 * sin(pi*x1/L1) * sin(pi*x2/L2)"

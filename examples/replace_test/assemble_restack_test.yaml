@@ -1,0 +1,44 @@
+# ================================================================
+# restack 예제: 두께 일치 + MID 공유
+# ================================================================
+# 원본 Part 1: Z방향 extrude, 두께 1.0 (2 layer)
+# → 3 layer로 재분할 (0.3 + 0.4 + 0.3 = 1.0, 두께 일치)
+# → Layer 1,3은 같은 재료(MID001), Layer 2는 다른 재료(MID002)
+# ================================================================
+
+base_model: restack_base.k
+output: restack_result
+
+dynamic_relaxation: true
+
+operations:
+  - type: restack
+    target_pid: 1
+    direction: auto
+    element_type: solid
+    layers:
+      # Layer 1: Steel (MID001)
+      - thickness: 0.3
+        material_card: |
+          *MAT_ELASTIC
+          $#     mid        ro         e        pr
+               MID001  7.85E-09  2.10E+05       0.3
+
+      # Layer 2: 다른 재료 (MID002)
+      - thickness: 0.4
+        material_card: |
+          *MAT_ELASTIC
+          $#     mid        ro         e        pr
+               MID002  7.85E-09  1.50E+05      0.25
+
+      # Layer 3: Layer 1과 같은 재료 → MID001 재사용
+      #   같은 MIDxxx = 같은 물성 ID 공유 (MAT 카드는 1회만 출력)
+      - thickness: 0.3
+        material_card: |
+          *MAT_ELASTIC
+          $#     mid        ro         e        pr
+               MID001  7.85E-09  2.10E+05       0.3
+
+material:
+  E: 210000.0
+  nu: 0.3

@@ -1,0 +1,21 @@
+base_model: tshell_base.k
+output: tshell_result
+
+operations:
+  # Squeeze Part 1 (TSHELL)
+  - type: squeeze
+    target_pid: 1
+    eps_x: -0.02
+    eps_y: 0.0
+    eps_z: 0.0
+
+  # Squeeze Part 2 (SHELL)
+  - type: squeeze
+    target_pid: 2
+    eps_x: 0.0
+    eps_y: -0.01
+    eps_z: 0.0
+
+material:
+  E: 210000.0
+  nu: 0.3

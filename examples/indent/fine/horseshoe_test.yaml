@@ -1,0 +1,26 @@
+base_model: block_fine.k
+output: horseshoe_result
+
+operations:
+  - type: indent
+    target_pid: 1
+    plane: xy
+    direction: -z
+    depth: 0.3
+    r1: 0.3
+    r2: 0.7
+    bottom_ratio: 0.0
+    stress: false
+    shape:
+      type: spline
+      points:
+        - [2, 9]
+        - [2, 2]
+        - [5, 1]
+        - [8, 2]
+        - [8, 9]
+        - [7, 9]
+        - [7, 3]
+        - [5, 2.2]
+        - [3, 3]
+        - [3, 9]

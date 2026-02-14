@@ -31,11 +31,20 @@ struct ElementResult {
     bool isValid;              // True if computation succeeded
     std::string errorMessage;  // Error description if !isValid
 
-    ElementResult() 
+    // Shell-specific fields
+    bool isShell;              // True if this is a shell element result
+    double shellThickness;     // Shell thickness for stress computation
+    StressTensor stressTop;    // Shell top surface stress (T=+1)
+    StressTensor stressBottom; // Shell bottom surface stress (T=-1)
+    double epsTop = 0.0;       // Shell top effective plastic strain
+    double epsBottom = 0.0;    // Shell bottom effective plastic strain
+
+    ElementResult()
         : elementId(0), vonMisesStrain(0), vonMisesStress(0)
         , maxPrincipalStrain(0), minPrincipalStrain(0)
         , maxPrincipalStress(0), minPrincipalStress(0)
-        , isValid(true) {}
+        , isValid(true), isShell(false), shellThickness(0.0)
+        , epsTop(0.0), epsBottom(0.0) {}
 };
 
 /**

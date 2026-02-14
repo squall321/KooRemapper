@@ -1,0 +1,20 @@
+base_model: block.k
+output: emboss_result
+
+operations:
+  - type: indent
+    target_pid: 1
+    plane: xy
+    direction: -z
+    depth: -0.5
+    r1: 0.5
+    r2: 1.0
+    bottom_ratio: 0.0
+    stress: false
+    shape:
+      type: polygon
+      points:
+        - [3, 3]
+        - [7, 3]
+        - [7, 7]
+        - [3, 7]

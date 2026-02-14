@@ -1,0 +1,9 @@
+# Formstrain test - compute EPS from mesh curvature
+base_model: bent_shell.k
+output: formstrain_result
+
+dynain_embed: true
+
+operations:
+  - type: formstrain
+    # target_pid omitted -> auto-detect all eligible shell parts

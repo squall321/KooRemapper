@@ -1,0 +1,28 @@
+# Shell indent test - QUAD4 shell with bending stress
+base_model: shell_plate.k
+output: shell_indent_result
+
+material:
+  E: 210000.0
+  nu: 0.3
+
+dynain_embed: true
+dynamic_relaxation: true
+
+operations:
+  - type: indent
+    target_pid: 1
+    plane: xy
+    direction: -z
+    depth: 0.3
+    r1: 1.0
+    r2: 1.0
+    stress: true
+    shell_thickness: 1.0
+    shape:
+      type: polygon
+      points:
+        - [3, 3]
+        - [7, 3]
+        - [7, 7]
+        - [3, 7]

@@ -1,0 +1,1568 @@
+================================================================
+  KooRemapper - Mesh Mapping Tool for LS-DYNA
+  사용 설명서
+================================================================
+
+목차
+----
+  1. 개요
+  2. 명령어 목록
+  3. assemble - 전체 모델 조립
+     3.1  YAML 설정 포맷
+     3.2  operation 상세 (replace/squeeze/restack/bend/indent)
+     3.3-3.18  예제 모음
+     3.19 bend 이론 상세 (곡률, 변형률, Kirchhoff 판이론)
+     3.20 indent 이론 상세 (SDF, quarter-arc, 굽힘 응력)
+     3.21 예제 파일 목록
+  4. shellmap - 쉘 기반 솔리드 매핑
+  5. squeeze - 억지끼움 초기변형
+  6. prestress - 변형 해석 + dynain 출력
+  7. map - 구조 메쉬 매핑
+  8. generate - 가변밀도 메쉬 생성
+
+
+================================================================
+1. 개요
+================================================================
+
+KooRemapper는 LS-DYNA 메쉬 전처리 도구입니다.
+디테일 메쉬 교체, 억지끼움(interference fit), 벤딩 초기응력 등을
+자동 처리하고, 결과를 *INITIAL_STRESS_SOLID dynain 파일로 출력합니다.
+
+실행:
+  KooRemapper <command> [arguments...]
+  KooRemapper help [command]
+
+
+================================================================
+2. 명령어 목록
+================================================================
+
+  assemble <config.yaml>          전체 모델 조립 (replace+squeeze+bend+indent)
+  shellmap <bent> <flat> <out>    쉘 기반 솔리드 매핑
+  squeeze <config.yaml>           억지끼움 초기변형
+  prestress <ref> <def> <out>     변형 해석 + dynain
+  map <ref> <bent> <flat> <out>   구조 메쉬 매핑
+  generate <config.yaml>          가변밀도 메쉬 생성
+  help [command]                  도움말
+
+
+================================================================
+3. assemble - 전체 모델 조립
+================================================================
+
+용도:
+  전체 LS-DYNA 모델에서 특정 파트를 디테일 메쉬로 교체하거나,
+  억지끼움/굽힘 초기변형을 적용하고, 모든 초기응력을 하나의 dynain으로
+  누적 출력합니다.
+
+사용법:
+  KooRemapper assemble <config.yaml>
+
+출력 파일:
+  <output>.k        조립된 전체 모델 (*INCLUDE dynain 포함)
+  <output>.dynain    누적 *INITIAL_STRESS_SOLID
+
+특징:
+  - *CONTACT, *BOUNDARY, *SECTION 등 모든 비파싱 키워드 보존
+  - 노드/요소 ID 자동 리넘버링 (충돌 방지)
+  - replace → squeeze → bend → indent 등 순차 처리 가능
+  - 같은 파트에 여러 operation 적용 시 응력 자동 합산
+  - 여러 파트에 대해 독립적 operation 가능
+
+----------------------------------------------------------------
+3.1 YAML 설정 포맷
+----------------------------------------------------------------
+
+  base_model: <파일경로>           # 전체 모델 .k 파일
+  output: <출력접두사>             # → .k + .dynain
+
+  operations:                     # 순차 적용할 작업 목록
+    - type: replace               # 파트 교체
+      target_pid: <정수>          # 교체할 파트 ID
+      detail_flat: <파일경로>     # 평면 디테일 메쉬 (HEX8)
+      shell_bent: <파일경로>      # 벤트 쉘 레퍼런스 (QUAD4)
+      prestress: true/false       # 벤딩 초기응력 계산 (기본: false)
+
+    - type: squeeze               # 억지끼움 초기변형
+      target_pid: <정수>          # 대상 파트 ID
+      eps_x: <실수>               # X방향 변형률 (음수=압축)
+      eps_y: <실수>               # Y방향 변형률
+      eps_z: <실수>               # Z방향 변형률
+
+    - type: bend                   # 굽힘 변형 + 초기응력
+      target_pid: <정수>          # 대상 파트 ID
+      plane: xy                   # xy | yz | zx (면내 방향)
+      mode: deform                # deform | stress
+      source: formula             # formula | dat | dat_pair
+      expression: "수식"          # source: formula 시
+      dat_file: <파일경로>        # source: dat 시
+      dat_top: <파일경로>         # source: dat_pair 시
+      dat_bottom: <파일경로>      # source: dat_pair 시
+
+    - type: restack               # 적층 재생성
+      target_pid: <정수>          # 대상 파트 ID (extrude 형상)
+      direction: auto             # auto | x | y | z (기본: auto)
+      element_type: solid         # solid | tshell | shell (기본: solid)
+      layers:
+        - thickness: <실수>       # 층 두께
+          material_card: |        # LS-DYNA 물성 카드 (MIDxxx 자리표시자)
+            *MAT_ELASTIC
+            $#     mid  ...
+                 MID001  ...
+        - thickness: <실수>
+          material_card: |
+            *MAT_xxx
+                 MID002  ...
+
+    - type: indent                 # 음각/양각 (indent/emboss)
+      target_pid: <정수>          # 대상 파트 ID
+      plane: xy                   # xy | yz | zx (면내 방향)
+      direction: -z               # +z/-z, +x/-x, +y/-y (누르는 방향)
+      depth: <실수>               # 양수=음각, 음수=양각(당김)
+      r1: <실수>                  # 급경사 필렛 폭 (punch 쪽)
+      r2: <실수>                  # 완경사 필렛 폭 (die 쪽)
+      bottom_ratio: 0.0           # 선택: 하면 변위 비율 (0~1, 기본: 0)
+      stress: false               # 선택: 굽힘 초기응력 (기본: false)
+      shape:                      # 닫힌 루프 형상
+        type: polygon             # polygon | spline
+        points:                   # 면내 좌표 [x1, x2], 최소 3개
+          - [3, 3]
+          - [7, 3]
+          - [7, 7]
+          - [3, 7]
+
+  dynamic_relaxation: true/false  # 선택: DR 키워드 자동 삽입 (기본: false)
+
+  material:                       # 선택: 전체 공통 재료
+    E: <실수>                     # 탄성계수 (Young's modulus)
+    nu: <실수>                    # 포아송비
+
+  * 파일 경로는 YAML 파일 기준 상대경로 또는 절대경로
+  * material 미지정 시 k파일 내 *MAT_ELASTIC 사용
+  * dynamic_relaxation: true 시 *CONTROL_DYNAMIC_RELAXATION,
+    *CONTROL_TERMINATION(endtim=0) 자동 삽입.
+    기존 *CONTROL_TERMINATION이 있으면 endtim=0으로 교체됨.
+
+----------------------------------------------------------------
+3.2 operation 상세
+----------------------------------------------------------------
+
+[replace]
+  기존 파트의 coarse 메쉬를 제거하고, shellmap으로 매핑된
+  디테일 메쉬를 삽입합니다.
+
+  동작:
+    1) target_pid의 요소 및 전용 노드 제거
+    2) shell_bent를 평면 전개 (edge-length preserving)
+    3) detail_flat를 전개면에 매핑 → 벤트 메쉬 생성
+    4) 노드/요소 ID 리넘버링 (maxId + offset)
+    5) 새 요소의 PID = target_pid로 설정
+    6) prestress: true 시 flat→bent Green-Lagrange 초기응력 계산
+
+  * 다른 파트와 공유되는 노드는 보존됩니다.
+  * 교체된 메쉬는 독립 노드로 삽입되므로, 파트 간 연결은
+    *CONTACT 등으로 별도 처리해야 합니다.
+
+[squeeze]
+  대상 파트의 노드를 바운딩박스 중심 기준으로 압축/팽창하고,
+  역방향 초기응력을 dynain에 추가합니다.
+
+  동작:
+    1) target_pid의 모든 노드 수집 (replace된 노드 포함)
+    2) 바운딩박스 중심(cx, cy, cz) 계산
+    3) 새 좌표: new = center + (old - center) * (1 + eps)
+    4) 역방향 응력: Hooke's law, strain = (-eps_x, -eps_y, -eps_z)
+    5) dynain에 누적
+
+  * replace 후 같은 파트에 squeeze 적용 가능
+  * 여러 방향 동시 적용 가능 (eps_x, eps_y, eps_z)
+
+[restack]
+  한 방향으로 extrude된 파트를 다층 적층 구조로 재생성합니다.
+  각 층마다 별도 물성/파트/섹션이 자동 생성됩니다.
+
+  동작:
+    1) target_pid의 요소에서 extrusion 축 자동 감지 (또는 지정)
+    2) 노드를 컬럼(extrusion 방향)으로 그룹핑
+    3) 기존 요소 제거, 중간 노드 제거
+    4) 지정된 layer 수 만큼 새 노드 plane 생성 (선형 보간)
+    5) 인접 layer는 노드 공유 (node-shared)
+    6) MIDxxx 자리표시자를 실제 겹치지 않는 ID로 치환
+    7) *MAT, *SECTION, *PART 카드 자동 생성
+    8) 두께 합 ≠ 원본 두께 시 → squeeze 초기변형 자동 적용
+
+  direction: auto (기본)
+    - 요소 centroid 분포로 가장 얇은 축을 자동 감지
+    - x, y, z 직접 지정 가능
+
+  element_type:
+    - solid (기본): *ELEMENT_SOLID + *SECTION_SOLID
+    - tshell: *ELEMENT_TSHELL + *SECTION_TSHELL
+    - shell: *ELEMENT_SHELL + *SECTION_SHELL (두께는 section에 기재)
+
+  material_card:
+    - LS-DYNA 물성 키워드를 통째로 YAML에 기입
+    - MID001, MID002 등 자리표시자 → 기존 모델과 겹치지 않는 ID로 자동 치환
+    - 같은 MIDxxx를 여러 layer에서 사용하면 같은 실제 ID로 매핑
+
+  * extrude 형상이 아닌 파트에 적용 시 에러
+  * 두께 불일치 시 dynamic_relaxation: true 권장
+
+[bend]
+  대상 파트에 굽힘(warpage/bending) 변형을 적용하고,
+  Kirchhoff 판 이론 기반 초기응력을 dynain에 추가합니다.
+
+  plane: 면내 방향
+    xy → 면내 축: x, y / 법선 축(처짐 방향): z
+    yz → 면내 축: y, z / 법선 축: x
+    zx → 면내 축: z, x / 법선 축: y
+
+  mode:
+    deform → 노드 좌표를 굽힌 형상으로 이동 + 역방향 초기응력
+             (DR 시 굽힌 상태 유지)
+    stress → 좌표 변경 없음 + 순방향 초기응력
+             (DR 시 평면 → 굽힘 변형)
+
+  source: 처짐량(w) 데이터 소스
+
+    formula (수식)
+      expression 필드에 수학 수식을 직접 지정.
+      변수: x1, x2 (면내좌표, BB min 기준)
+            L1, L2 (BB 크기), pi
+      함수: sin, cos, tan, exp, log, sqrt, abs, pow,
+            asin, acos, atan, atan2, min, max
+      예: "0.5 * sin(pi*x1/L1) * sin(pi*x2/L2)"
+
+    dat (중립면 처짐 그리드)
+      dat_file 필드에 공백 구분 2D 그리드 파일 지정.
+      행(row) = x₂ 방향 (첫 줄=x₂_max, 마지막 줄=x₂_min)
+      열(col) = x₁ 방향 (x₁_min → x₁_max)
+      값 = 법선 방향 처짐량
+      그리드 범위가 파트 바운딩박스에 자동 매핑.
+
+    dat_pair (상/하면 처짐 쌍)
+      dat_top, dat_bottom 필드에 각각 상면/하면 그리드 파일 지정.
+      중면(midplane) 기준 곡률 계산.
+      배터리 스웰링 등 상/하면 처짐이 다른 경우 사용.
+
+  동작:
+    1) plane → 면내 축(x₁, x₂), 법선 축 결정
+    2) target_pid의 노드/요소 수집, 바운딩박스 계산
+    3) 처짐 소스 준비 (formula→101×101 그리드 / dat→파일 로드)
+    4) 곡률 계산: κ₁₁, κ₂₂, κ₁₂ (유한차분)
+    5) 각 요소 중심의 굽힘 변형률: ε = -d · κ (d = 중립면 거리)
+    6) Hooke's law → 응력 (deform: 역방향 / stress: 순방향)
+    7) deform 모드: 노드 변위 적용
+       Δn = w(x₁,x₂), Δx₁ = -d·∂w/∂x₁, Δx₂ = -d·∂w/∂x₂
+
+  * squeeze + bend 같은 파트 적용 시 응력 자동 합산
+  * Kirchhoff 면내 보정으로 두꺼운 파트도 정확
+  * 변형률은 순수 굽힘 (멤브레인 변형 없음)
+
+[indent]
+  대상 파트에 임의 형상의 음각(indent) 또는 양각(emboss) 변형을
+  적용합니다. Quarter-arc 필렛 프로파일로 프레스 스탬핑 형상을
+  재현합니다.
+
+  depth:
+    양수 → 음각 (표면을 안쪽으로 누름)
+    음수 → 양각 (표면을 바깥쪽으로 당김)
+
+  r1, r2: 전이 영역 필렛 폭
+    r1 = 급경사(punch) 쪽 필렛 (바닥에서 시작)
+    r2 = 완경사(die) 쪽 필렛 (표면에서 시작)
+    전이 영역 = r1 + r2 (이 범위 밖은 변위 없음)
+    프로파일: quarter-arc (quarter-ellipse), C⁰ 연속
+
+  shape: 닫힌 루프 형상 정의
+    polygon → 다각형 (꼭짓점 연결)
+    spline  → Catmull-Rom 폐곡선 (제어점 20개/세그먼트 보간)
+    루프 내부 = 전체 깊이, 루프 외부 = 전이 후 변위 없음
+    Winding Number 알고리즘으로 볼록/오목 다각형 모두 지원
+
+  plane + direction:
+    plane=xy → 면내 축: x,y / 법선(변위) 축: z
+    direction=-z → z 최대면에서 아래로 누름
+    direction=+z → z 최소면에서 위로 누름
+
+  bottom_ratio: 하면 변위 비율
+    0.0 (기본) → 표면만 변위, 하면 고정
+    1.0 → 전체 두께 균일 변위 (리지드 이동)
+    0.5 → 하면이 표면의 50% 변위
+
+  stress: true 시
+    필렛 영역의 곡률에서 Kirchhoff 판이론 기반 굽힘 응력 계산.
+    κ = -h''(d) (프로파일 곡률), ε = -d·κ (d: 중립면 거리).
+    역방향 초기응력 → DR로 변형 유지.
+    곡률 cap: 최대 변형률 5% (singularity 방지).
+    K파일 내 *MAT_ELASTIC 또는 YAML material 섹션 사용.
+
+  동작:
+    1) plane → 면내 축, 법선 축 결정
+    2) shape points → ClosedLoop 구성 (polygon/spline)
+    3) AABB 사전 필터링 (루프 BB + r1+r2 여유)
+    4) 각 노드: signed distance → quarter-arc 변위 → through-thickness 보간
+    5) stress: true → 요소별 곡률 분해 → 굽힘 응력 → dynain 누적
+
+  * 다른 operation과 조합 가능 (squeeze + indent → 응력 합산)
+  * 음각/양각 전환은 depth 부호만 변경
+  * 복잡 형상은 spline으로 부드러운 경계 생성
+
+----------------------------------------------------------------
+3.3 예제: 단순 squeeze
+----------------------------------------------------------------
+
+# squeeze_config.yaml
+base_model: interference_model.k
+output: assembled_result
+
+operations:
+  - type: squeeze
+    target_pid: 1
+    eps_x: -0.02
+    eps_y: 0.0
+    eps_z: 0.0
+
+material:
+  E: 210000.0
+  nu: 0.3
+
+# 실행
+KooRemapper assemble squeeze_config.yaml
+
+# 결과: Part 1이 X방향 2% 압축
+#   assembled_result.k       (압축된 모델)
+#   assembled_result.dynain  (역방향 초기응력)
+
+----------------------------------------------------------------
+3.4 예제: replace + squeeze 조합
+----------------------------------------------------------------
+
+# combined_config.yaml
+base_model: full_model.k
+output: assembled_output
+
+operations:
+  # Step 1: Part 3을 디테일 메쉬로 교체
+  - type: replace
+    target_pid: 3
+    detail_flat: detail_part3_flat.k
+    shell_bent: shell_part3_bent.k
+    prestress: true
+
+  # Step 2: 교체된 Part 3을 Y방향 1% 압축
+  - type: squeeze
+    target_pid: 3
+    eps_x: 0.0
+    eps_y: -0.01
+    eps_z: 0.0
+
+  # Step 3: Part 5는 독립적으로 X방향 2% 압축
+  - type: squeeze
+    target_pid: 5
+    eps_x: -0.02
+    eps_y: 0.0
+    eps_z: 0.0
+
+material:
+  E: 210000.0
+  nu: 0.3
+
+# 실행
+KooRemapper assemble combined_config.yaml
+
+# 결과:
+#   assembled_output.k       (교체+압축된 전체 모델)
+#   assembled_output.dynain  (벤딩+squeeze 누적 초기응력)
+
+----------------------------------------------------------------
+3.5 예제: 다중 파트 교체
+----------------------------------------------------------------
+
+# multi_replace_config.yaml
+base_model: engine_block.k
+output: engine_detail
+
+operations:
+  - type: replace
+    target_pid: 10
+    detail_flat: bearing_detail_flat.k
+    shell_bent: bearing_shell.k
+    prestress: true
+
+  - type: replace
+    target_pid: 15
+    detail_flat: gasket_detail_flat.k
+    shell_bent: gasket_shell.k
+    prestress: false
+
+  - type: squeeze
+    target_pid: 10
+    eps_x: -0.005
+    eps_y: 0.0
+    eps_z: 0.0
+
+material:
+  E: 210000.0
+  nu: 0.3
+
+----------------------------------------------------------------
+3.6 예제: restack 기본 (두께 일치)
+----------------------------------------------------------------
+
+# restack_basic.yaml
+base_model: plate_model.k
+output: laminate_result
+
+operations:
+  - type: restack
+    target_pid: 1
+    direction: auto
+    element_type: solid
+    layers:
+      - thickness: 0.3
+        material_card: |
+          *MAT_ELASTIC
+          $#     mid        ro         e        pr
+               MID001  7.85E-09  2.10E+05       0.3
+      - thickness: 0.4
+        material_card: |
+          *MAT_ELASTIC
+          $#     mid        ro         e        pr
+               MID002  7.85E-09  1.50E+05      0.25
+      - thickness: 0.3
+        material_card: |
+          *MAT_ELASTIC
+          $#     mid        ro         e        pr
+               MID001  7.85E-09  2.10E+05       0.3
+
+material:
+  E: 210000.0
+  nu: 0.3
+
+# 실행
+KooRemapper assemble restack_basic.yaml
+
+# 결과:
+#   laminate_result.k  (3층 적층 모델)
+#   - Layer 1,3: 같은 MAT ID (MID001 공유)
+#   - Layer 2: 별도 MAT ID (MID002)
+
+----------------------------------------------------------------
+3.7 material_card 작성법 상세
+----------------------------------------------------------------
+
+material_card는 LS-DYNA *MAT 키워드를 통째로 YAML에 기입합니다.
+
+[기본 규칙]
+
+  1. material_card: | 뒤에 여러 줄을 그대로 입력
+     (YAML의 '|'는 literal block = 줄바꿈 보존)
+
+  2. mid 자리에 MIDxxx 자리표시자를 사용
+     예: MID001, MID002, MID099 등
+     기존 모델의 MAT ID와 겹치지 않는 번호가 자동 부여됩니다.
+
+  3. 같은 MIDxxx를 여러 layer에 쓰면 동일 MAT ID를 공유
+     → *MAT 카드는 1회만 출력되고, *PART에서 같은 mid 참조
+
+[MID 공유 예시]
+
+  layers:
+    - thickness: 0.3
+      material_card: |                    # ← MID001 (Steel)
+        *MAT_ELASTIC
+        $#     mid        ro         e        pr
+             MID001  7.85E-09  2.10E+05       0.3
+
+    - thickness: 0.1
+      material_card: |                    # ← MID002 (접착제)
+        *MAT_ELASTIC
+        $#     mid        ro         e        pr
+             MID002  1.20E-09  3.00E+03      0.35
+
+    - thickness: 0.3
+      material_card: |                    # ← MID001 재사용 (같은 Steel)
+        *MAT_ELASTIC
+        $#     mid        ro         e        pr
+             MID001  7.85E-09  2.10E+05       0.3
+
+  결과: MID001 → 실제 ID 5 (1회 출력)
+        MID002 → 실제 ID 6 (1회 출력)
+        Layer 1 *PART: mid=5
+        Layer 2 *PART: mid=6
+        Layer 3 *PART: mid=5  ← Layer 1과 같은 재료
+
+[LS-DYNA 10자리 고정폭 형식]
+
+  LS-DYNA 카드는 10자리 고정폭 형식입니다.
+  각 필드가 정확히 10칸을 차지해야 합니다:
+
+  필드:  |   mid   |    ro    |     e    |    pr    |
+  칸:    |1234567890|1234567890|1234567890|1234567890|
+  예시:  |    MID001| 7.85E-09| 2.10E+05|       0.3|
+
+[다른 MAT 타입 사용 가능]
+
+  *MAT_ELASTIC 외에도 어떤 *MAT 카드든 사용 가능합니다:
+
+    material_card: |
+      *MAT_PIECEWISE_LINEAR_PLASTICITY
+      $#     mid        ro         e        pr      sigy      etan
+           MID003  7.85E-09  2.10E+05       0.3     235.0      500
+      $#      c         p      lcss      lcsr        vp
+             0.0       0.0         0         0         0
+
+  MIDxxx 자리표시자만 mid 필드에 넣으면 됩니다.
+
+----------------------------------------------------------------
+3.8 예제: restack 두께 불일치 (자동 squeeze)
+----------------------------------------------------------------
+
+# 원본 두께: 1.0mm
+# 층 합계: 0.35+0.40+0.35 = 1.10mm (10% 초과)
+# → 메쉬를 원본 두께(1.0)에 맞춰 자동 압축
+# → 역방향 초기응력을 dynain에 출력
+# → DR 해석으로 목표 두께(1.1)로 복원
+
+base_model: plate_model.k
+output: laminate_thick
+
+dynamic_relaxation: true          # ← 두께 불일치 시 반드시 true
+
+operations:
+  - type: restack
+    target_pid: 1
+    direction: z
+    element_type: solid
+    layers:
+      - thickness: 0.35
+        material_card: |
+          *MAT_ELASTIC
+          $#     mid        ro         e        pr
+               MID001  7.85E-09  2.10E+05       0.3
+      - thickness: 0.40
+        material_card: |
+          *MAT_ELASTIC
+          $#     mid        ro         e        pr
+               MID002  7.85E-09  1.50E+05      0.25
+      - thickness: 0.35
+        material_card: |
+          *MAT_ELASTIC
+          $#     mid        ro         e        pr
+               MID001  7.85E-09  2.10E+05       0.3
+
+material:
+  E: 210000.0
+  nu: 0.3
+
+# 결과:
+#   laminate_thick.k       (원본 두께 1.0으로 압축된 모델)
+#   laminate_thick.dynain  (역방향 초기응력)
+#   → DR 해석 실행하면 각 층이 목표 두께로 팽창
+
+----------------------------------------------------------------
+3.9 예제: restack + replace 조합
+----------------------------------------------------------------
+
+# 1) Part 3을 디테일 메쉬로 교체
+# 2) 교체된 Part 3을 3층 적층으로 재분할
+
+base_model: full_model.k
+output: detailed_laminate
+
+dynamic_relaxation: true
+
+operations:
+  - type: replace
+    target_pid: 3
+    detail_flat: detail_flat.k
+    shell_bent: shell_bent.k
+    prestress: true
+
+  - type: restack
+    target_pid: 3
+    direction: auto
+    element_type: solid
+    layers:
+      - thickness: 0.2
+        material_card: |
+          *MAT_ELASTIC
+          $#     mid        ro         e        pr
+               MID001  7.85E-09  2.10E+05       0.3
+      - thickness: 0.6
+        material_card: |
+          *MAT_ELASTIC
+          $#     mid        ro         e        pr
+               MID002  7.85E-09  1.50E+05      0.25
+      - thickness: 0.2
+        material_card: |
+          *MAT_ELASTIC
+          $#     mid        ro         e        pr
+               MID001  7.85E-09  2.10E+05       0.3
+
+material:
+  E: 210000.0
+  nu: 0.3
+
+----------------------------------------------------------------
+3.10 예제: bend (formula, deform 모드)
+----------------------------------------------------------------
+
+# 수식 기반 sin 형태 굽힘 + 좌표 변형
+# → examples/bend/small/formula_deform.yaml
+
+base_model: block.k
+output: formula_deform_output
+
+material:
+  E: 210000
+  nu: 0.3
+
+dynain_embed: true
+
+operations:
+  - type: bend
+    target_pid: 1
+    plane: xy
+    mode: deform
+    source: formula
+    expression: "0.5 * sin(pi*x1/L1) * sin(pi*x2/L2)"
+
+# 실행
+KooRemapper assemble formula_deform.yaml
+
+# 결과:
+#   formula_deform_output.k    (sin 형태로 굽힌 모델 + 역방향 초기응력)
+#   DR 해석 시 굽힌 상태 유지
+
+----------------------------------------------------------------
+3.11 예제: bend (formula, stress 모드)
+----------------------------------------------------------------
+
+# 좌표 변경 없이 순방향 굽힘 응력만 부여
+# DR 해석 시 평면 → 굽힘 변형
+
+base_model: block.k
+output: formula_stress_output
+
+material:
+  E: 210000
+  nu: 0.3
+
+dynain_embed: true
+
+operations:
+  - type: bend
+    target_pid: 1
+    plane: xy
+    mode: stress
+    source: formula
+    expression: "1.0 * sin(pi*x1/L1) * sin(pi*x2/L2)"
+
+# 결과:
+#   formula_stress_output.k    (평면 형상 + 순방향 초기응력)
+#   DR 해석 시 sin 형태로 변형됨
+
+----------------------------------------------------------------
+3.12 예제: bend (dat 파일 소스)
+----------------------------------------------------------------
+
+# 측정 데이터 기반 warpage 적용
+# dat 파일: 공백 구분 2D 그리드
+
+# --- warpage.dat 형식 ---
+# 0.00  0.10  0.25  0.30     ← row 0 = y_max 줄
+# 0.05  0.20  0.40  0.35     ← ...
+# 0.00  0.10  0.20  0.25     ← row N-1 = y_min 줄
+# (값 = 법선 방향 처짐량, 단위: 모델과 동일)
+
+base_model: block.k
+output: dat_deform_output
+
+material:
+  E: 210000
+  nu: 0.3
+
+dynain_embed: true
+
+operations:
+  - type: bend
+    target_pid: 1
+    plane: xy
+    mode: deform
+    source: dat
+    dat_file: warpage.dat
+
+# 결과:
+#   dat_deform_output.k    (측정 데이터 형상으로 변형 + 역방향 초기응력)
+
+----------------------------------------------------------------
+3.13 예제: squeeze + bend 조합
+----------------------------------------------------------------
+
+# 같은 파트에 억지끼움 + 굽힘 순차 적용
+# → 요소별 응력이 자동 합산되어 출력
+
+base_model: block.k
+output: combo_output
+
+material:
+  E: 210000
+  nu: 0.3
+
+dynain_embed: true
+
+operations:
+  # Step 1: Z방향 2% 압축
+  - type: squeeze
+    target_pid: 1
+    eps_x: 0.0
+    eps_y: 0.0
+    eps_z: -0.02
+
+  # Step 2: sin 형태 굽힘
+  - type: bend
+    target_pid: 1
+    plane: xy
+    mode: deform
+    source: formula
+    expression: "0.5 * sin(pi*x1/L1) * sin(pi*x2/L2)"
+
+# 결과:
+#   combo_output.k    (압축+굽힘 모델)
+#   dynain에 요소당 1개 항목 (squeeze + bend 응력 합산)
+
+----------------------------------------------------------------
+3.14 예제: indent (polygon, 음각)
+----------------------------------------------------------------
+
+# indent_test.yaml
+base_model: block.k
+output: indent_result
+
+operations:
+  - type: indent
+    target_pid: 1
+    plane: xy
+    direction: -z
+    depth: 0.5
+    r1: 0.5
+    r2: 1.0
+    bottom_ratio: 0.0
+    shape:
+      type: polygon
+      points:
+        - [3, 3]
+        - [7, 3]
+        - [7, 7]
+        - [3, 7]
+
+# 실행
+KooRemapper assemble indent_test.yaml
+
+# 결과: 10×10 블록에 4×4 사각형 음각
+#   indent_result.k   (변형된 모델)
+#   r1=0.5, r2=1.0 → 전이영역 1.5mm, quarter-arc 필렛
+
+----------------------------------------------------------------
+3.15 예제: indent (spline, 말발굽 형상)
+----------------------------------------------------------------
+
+# horseshoe_test.yaml
+base_model: block_fine.k
+output: horseshoe_result
+
+operations:
+  - type: indent
+    target_pid: 1
+    plane: xy
+    direction: -z
+    depth: 0.3
+    r1: 0.3
+    r2: 0.7
+    bottom_ratio: 0.0
+    shape:
+      type: spline
+      points:
+        - [2, 9]
+        - [2, 2]
+        - [5, 1]
+        - [8, 2]
+        - [8, 9]
+        - [7, 9]
+        - [7, 3]
+        - [5, 2.2]
+        - [3, 3]
+        - [3, 9]
+
+# 실행
+KooRemapper assemble horseshoe_test.yaml
+
+# 결과: 0.5mm 간격 fine 메쉬에 Catmull-Rom 스플라인 말발굽 음각
+#   horseshoe_result.k   (819 노드 변위)
+#   type: spline → 제어점 사이 20개/세그먼트 보간
+
+----------------------------------------------------------------
+3.16 예제: indent (양각/emboss)
+----------------------------------------------------------------
+
+# emboss_test.yaml
+base_model: block.k
+output: emboss_result
+
+operations:
+  - type: indent
+    target_pid: 1
+    plane: xy
+    direction: -z
+    depth: -0.5
+    r1: 0.5
+    r2: 1.0
+    bottom_ratio: 0.0
+    shape:
+      type: polygon
+      points:
+        - [3, 3]
+        - [7, 3]
+        - [7, 7]
+        - [3, 7]
+
+# 실행
+KooRemapper assemble emboss_test.yaml
+
+# 결과: 동일 형상을 바깥으로 당김 (depth < 0)
+#   emboss_result.k   (음각의 정확한 거울상)
+#   depth 부호만 변경하면 음각 ↔ 양각 전환
+
+----------------------------------------------------------------
+3.17 예제: indent + 초기응력
+----------------------------------------------------------------
+
+# indent_stress_test.yaml
+base_model: block.k
+output: indent_stress_result
+
+material:
+  E: 210000.0
+  nu: 0.3
+
+operations:
+  - type: indent
+    target_pid: 1
+    plane: xy
+    direction: -z
+    depth: 0.5
+    r1: 0.5
+    r2: 1.0
+    bottom_ratio: 0.0
+    stress: true
+    shape:
+      type: polygon
+      points:
+        - [3, 3]
+        - [7, 3]
+        - [7, 7]
+        - [3, 7]
+
+# 실행
+KooRemapper assemble indent_stress_test.yaml
+
+# 결과: 음각 변형 + 필렛 영역 굽힘 초기응력
+#   indent_stress_result.k       (변형된 모델)
+#   indent_stress_result.dynain  (역방향 굽힘 응력)
+#   stress: true 시 material 필수 (YAML 또는 K파일 MAT_ELASTIC)
+#   DR 해석 시 indent 형상을 유지하는 잔류응력 역할
+
+----------------------------------------------------------------
+3.18 예제: 대규모 star emboss + 응력 (10,000 요소)
+----------------------------------------------------------------
+
+# star_stress_test.yaml
+base_model: block_large.k
+output: star_stress_result
+
+material:
+  E: 210000.0
+  nu: 0.3
+
+operations:
+  - type: indent
+    target_pid: 1
+    plane: xy
+    direction: -z
+    depth: -0.5
+    r1: 0.3
+    r2: 0.7
+    bottom_ratio: 0.0
+    stress: true
+    shape:
+      type: spline
+      points:
+        - [10.00, 16.00]
+        - [11.47, 12.02]
+        - [15.71, 11.85]
+        - [12.38, 9.23]
+        - [13.53, 5.15]
+        - [10.00, 7.50]
+        - [6.47, 5.15]
+        - [7.62, 9.23]
+        - [4.29, 11.85]
+        - [8.53, 12.02]
+
+# 실행
+KooRemapper assemble star_stress_test.yaml
+
+# 결과: 20×20×2 블록 (10,000 요소)에 5점 별 양각 + 응력
+#   star_stress_result.k       (2740 노드 변위)
+#   star_stress_result.dynain  (1144 요소 굽힘 응력)
+#   spline 별 형상의 복잡한 곡률에서 응력 정확 계산
+
+----------------------------------------------------------------
+3.19 bend 이론 상세
+----------------------------------------------------------------
+
+  이 절에서는 bend(굽힘) 변형의 수학적 기반을 상세히 설명합니다.
+
+  ■ 1. 처짐 함수 w(x1, x2)
+
+  굽힘 변형은 면내 좌표 (x1, x2)에서 법선 방향 처짐량 w를
+  정의하는 함수로 기술됩니다.
+
+  source별 처짐 함수 생성 방법:
+
+    formula: 수식을 101x101 그리드에 평가
+      w(x1, x2) = evaluate(expression)
+      변수: x1, x2 (BB min 기준 상대좌표)
+            L1, L2 (BB 크기), pi = 3.14159...
+
+    dat: 공백 구분 2D 그리드 파일을 직접 로드
+      행 0 = x2_max, 행 N-1 = x2_min (역순 y축)
+      열 0 = x1_min, 열 M-1 = x1_max
+      그리드 범위가 파트 BB에 자동 매핑
+
+    dat_pair: 상/하면 처짐 쌍
+      w_mid = (w_top + w_bottom) / 2   (곡률은 중면 기준)
+      w_node = w_bottom*(1-t) + w_top*t (t = 두께 방향 비율)
+
+
+  ■ 2. 곡률 계산 (유한차분)
+
+  처짐 그리드에서 2차 편미분을 유한차분으로 계산합니다.
+  그리드 간격을 dx1, dx2라 하면:
+
+    kappa_11[i][j] = -(w[i][j+1] - 2*w[i][j] + w[i][j-1]) / dx1^2
+
+    kappa_22[i][j] = -(w[i-1][j] - 2*w[i][j] + w[i+1][j]) / dx2^2
+
+    kappa_12[i][j] = -(w[i-1][j+1] - w[i-1][j-1]
+                       - w[i+1][j+1] + w[i+1][j-1]) / (4*dx1*dx2)
+
+  부호: kappa = -d2w/dx^2 (판이론 부호 규약).
+
+  경계 처리:
+    j=0 또는 j=M-1: 편측 차분 (forward/backward difference)
+    i=0 또는 i=N-1: 편측 차분
+
+  기울기 (Kirchhoff 면내 보정용):
+
+    dw/dx1[i][j] = (w[i][j+1] - w[i][j-1]) / (2*dx1)
+    dw/dx2[i][j] = (w[i-1][j] - w[i+1][j]) / (2*dx2)
+
+  그리드 노드에서 미리 계산 후, 임의 좌표에서는 bilinear 보간.
+
+
+  ■ 3. 굽힘 변형률 (Kirchhoff 판이론)
+
+  중립면에서 법선 방향 거리 d인 점의 변형률:
+
+    eps_11 = -d * kappa_11
+    eps_22 = -d * kappa_22
+    gamma_12 = -2 * d * kappa_12
+
+  여기서 d = n_coord - n_mid, n_mid = (n_min + n_max) / 2.
+
+  성질:
+    - 중립면(d=0): 변형률 = 0
+    - 상면(d>0)과 하면(d<0): 반대 부호 → 순수 굽힘
+    - 멤브레인 변형 없음 (법선 방향 변형률 eps_33 = 0)
+
+
+  ■ 4. 노드 변위 (deform 모드)
+
+  각 노드에 대해 3개 방향 변위를 적용합니다:
+
+    Delta_n  = w(x1, x2)                 (법선 방향 처짐)
+    Delta_x1 = -d * dw/dx1(x1, x2)       (Kirchhoff 면내 보정)
+    Delta_x2 = -d * dw/dx2(x1, x2)       (Kirchhoff 면내 보정)
+
+  면내 보정 (Delta_x1, Delta_x2)은 얇은 판에서는 미미하지만,
+  두꺼운 파트에서 정확한 굽힘 기하형상을 위해 필요합니다.
+
+  물리적 의미: 판이 굽혀질 때 상면은 인장, 하면은 압축되어
+  면내 방향으로도 미소 변위가 발생합니다.
+
+
+  ■ 5. 응력 부호 규약
+
+    deform 모드:
+      기하형상을 굽힌 후 → 역방향 응력 부여 (strain * (-1))
+      DR 시 굽힌 상태를 유지하는 잔류응력 역할
+
+    stress 모드:
+      기하형상 변경 없음 → 순방향 응력 부여 (strain 그대로)
+      DR 시 평면 → 굽힘 변형이 발생
+
+    | 모드    | 기하형상 | 응력 부호 | DR 결과        |
+    |---------|----------|-----------|----------------|
+    | deform  | 굽힘     | 역방향    | 굽힌 상태 유지 |
+    | stress  | 평면     | 순방향    | 굽힘 변형 발생 |
+
+  응력 계산 순서: 반드시 변위 적용 전에 수행.
+  변위 후에는 centroid z좌표가 이동하여 d 계산이 부정확.
+
+
+  ■ 6. Hooke's law (등방 탄성체)
+
+  bend와 indent 공통으로 사용하는 응력-변형률 관계:
+
+    Lame 파라미터:
+      lambda = E * nu / ((1+nu)*(1-2*nu))
+      mu = E / (2*(1+nu))
+
+    응력:
+      sig_ij = lambda * tr(eps) * delta_ij + 2*mu*eps_ij
+
+    여기서 tr(eps) = eps_11 + eps_22 + eps_33.
+    평면 굽힘에서 eps_33 = 0이므로:
+      tr(eps) = eps_11 + eps_22
+
+    구체적으로:
+      sig_11 = lambda*(eps_11+eps_22) + 2*mu*eps_11
+      sig_22 = lambda*(eps_11+eps_22) + 2*mu*eps_22
+      sig_33 = lambda*(eps_11+eps_22)
+      sig_12 = 2*mu*eps_12
+
+
+  ■ 7. 수치 검증 예
+
+  2x2x2 블록, formula: "0.5*sin(pi*x1/L1)*sin(pi*x2/L2)"
+  E=210000, nu=0.3
+
+  중심(x1=L1/2, x2=L2/2)에서:
+    w = 0.5 * sin(pi/2) * sin(pi/2) = 0.5
+
+    kappa_11 = (pi/L1)^2 * 0.5 * sin(pi/2) * sin(pi/2)
+    kappa_22 = (pi/L2)^2 * 0.5 * sin(pi/2) * sin(pi/2)
+
+  상면 요소(d=0.5):
+    eps_11 = -0.5 * kappa_11
+    sig = Hooke's law 적용
+
+  deform 모드 → 역방향 → DR 시 0.5mm 처짐 형상 유지.
+
+----------------------------------------------------------------
+3.20 indent 이론 상세
+----------------------------------------------------------------
+
+  이 절에서는 indent/emboss 변형의 수학적 기반을 상세히 설명합니다.
+
+  ■ 1. Signed Distance Field (부호 거리장)
+
+  indent 형상은 닫힌 루프(closed loop)로 정의되며, 메쉬의 각
+  노드에서 이 루프까지의 signed distance d를 계산하여 영역을
+  분류합니다.
+
+    d < 0          : 루프 안쪽 → flat indent (전체 깊이 적용)
+    0 <= d < r1    : r1 구간  → 하부 arc (급경사)
+    r1 <= d < r1+r2: r2 구간  → 상부 arc (완경사)
+    d >= r1+r2     : 루프 바깥 → 변위 없음
+
+  부호 규약: 안쪽 = 음수, 바깥 = 양수.
+
+  (i) 최소 거리 계산
+    루프의 각 세그먼트 (A, B)에 대해 점 P의 최근접점:
+
+      t = clamp( dot(P-A, B-A) / |B-A|^2,  0,  1 )
+      closest = A + t * (B-A)
+      dist = |P - closest|
+
+    모든 세그먼트 중 최솟값이 부호 없는 거리.
+
+  (ii) 내부/외부 판별: Winding Number
+
+    단순 cross-product 부호는 오목(concave) 다각형에서 오류.
+    Winding Number는 어떤 형상에서도 정확합니다:
+
+      wn = 0
+      for each segment (A, B):
+          if A.y <= P.y:
+              if B.y > P.y:
+                  if cross(B-A, P-A) > 0: wn++
+          else:
+              if B.y <= P.y:
+                  if cross(B-A, P-A) < 0: wn--
+
+      inside = (wn != 0)
+      signed_distance = inside ? -min_dist : +min_dist
+
+  (iii) 그래디언트 방향 (응력 계산용)
+
+    최근접 경계점 C에서 쿼리점 P 방향의 단위 벡터:
+
+      gradient = (P - C) / |P - C|     (|P-C| > 0일 때)
+
+    이 벡터는 필렛 곡률의 방향을 나타내며, 응력 텐서 분해에 사용.
+
+
+  ■ 2. Quarter-Arc 프로파일 함수 h(d)
+
+  두 개의 1/4 원호(또는 1/4 타원)로 바닥 평면과 원래 표면을
+  매끄럽게 연결합니다. 금형의 펀치 필렛(r1)과 다이 필렛(r2)에
+  대응합니다.
+
+  스케일링 팩터:
+
+      k = depth / (r1 + r2)
+
+      k = 1  : 정확한 1/4 원호 (depth = r1+r2)
+      k < 1  : 1/4 타원 (depth < r1+r2, 완만한 전이)
+      k > 1  : 급경사 타원 (depth > r1+r2, 경고)
+
+  단면도:
+
+      r2 zone (완만)    r1 zone (급경사)   flat   r1 zone     r2 zone
+    z=0  ━━━━━╲                                          ╱━━━━━━
+              ╲  r2 arc                         r2 arc  ╱
+               ╲                                       ╱
+                |  ← d=r1 접합점                      |
+               ╱                                       ╲
+              ╱   r1 arc                        r1 arc  ╲
+    z=-d ━━━╱━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╲━━━
+
+  (i) r1 구간: d in [0, r1]  — 하부 arc (바닥 → 접합점)
+
+      t = d / r1
+
+      h(d) = -depth + k * r1 * (1 - sqrt(1 - t^2))
+
+    검증:
+      h(0) = -depth                              (바닥에서 연속)
+      h(r1) = -depth + k*r1 = -depth*r2/(r1+r2)  (접합점)
+      h'(0) = 0                                  (수평 접선)
+      h'(r1) -> infinity                         (수직 접선)
+
+  (ii) r2 구간: d in [r1, r1+r2]  — 상부 arc (접합점 → 표면)
+
+      u = (r1 + r2 - d) / r2
+
+      h(d) = -k * r2 * (1 - sqrt(1 - u^2))
+
+    검증:
+      h(r1) = -k*r2 = -depth*r2/(r1+r2)          (접합점, r1과 일치)
+      h(r1+r2) = 0                                (원래 표면)
+      h'(r1) -> infinity                          (수직 접선)
+      h'(r1+r2) = 0                               (수평 접선)
+
+  (iii) 전체 요약
+
+      d < 0          :  h = -depth
+      d in [0, r1]   :  h = -depth + k*r1*(1 - sqrt(1 - (d/r1)^2))
+      d in [r1, R]   :  h = -k*r2*(1 - sqrt(1 - ((R-d)/r2)^2))
+      d >= R         :  h = 0
+
+    여기서 R = r1 + r2.
+
+  프로파일 특성:
+    - C^0 연속: 접합점(d=r1)에서 높이 일치 + 양쪽 수직 접선 방향 일치
+    - 수평 접선: d=0 (바닥)과 d=R (표면)에서 h'=0
+    - 비대칭: r1 < r2이면 하부 급경사 + 상부 완만 (일반적 스탬핑 필렛)
+    - 양각(emboss): depth < 0 → h(d) > 0 (표면을 바깥으로 당김)
+      수식 그대로 유효 (k < 0, 결과가 정확히 반전)
+
+
+  ■ 3. 두께 관통 보간 (Through-Thickness)
+
+  indent 면(표면)의 변위를 두께 방향으로 선형 보간합니다.
+
+    t_frac = (n - n_min) / (n_max - n_min)
+
+    여기서 n = 노드의 법선축 좌표, n_min/n_max = 파트 BB.
+    direction=-z 시: t_frac=1 (상면), t_frac=0 (하면).
+
+    displacement = h_surface * [bottom_ratio + (1 - bottom_ratio) * t_frac]
+
+    bottom_ratio = 0.0 (기본): 상면만 이동, 하면 고정 → 두께 변화
+    bottom_ratio = 1.0: 전체 관통 (리지드 이동) → 두께 보존
+    bottom_ratio = 0.5: 하면이 표면의 50% 이동
+
+  가정: 파트가 extrude 형상 (두께 방향 일정). 곡면 파트에서는
+  BB 기반 t_frac이 근사적입니다.
+
+
+  ■ 4. 프로파일 곡률 h''(d) (2차 도함수)
+
+  stress: true 시 필렛 영역의 굽힘 응력 계산에 사용됩니다.
+  h(d)를 d에 대해 두 번 미분한 해석적 공식입니다.
+
+  (i) r1 구간: d in [0, r1]
+
+      h'(d) = k * d / (r1 * sqrt(1 - (d/r1)^2))
+
+      h''(d) = k / (r1 * (1 - t^2)^(3/2))       (t = d/r1)
+
+    특성:
+      h''(0) = k / r1                             (최소 곡률)
+      h''(r1) -> infinity                         (접합점 특이점)
+
+  (ii) r2 구간: d in [r1, r1+r2]
+
+      h''(d) = -k / (r2 * (1 - u^2)^(3/2))       (u = (R-d)/r2)
+
+    특성:
+      h''(r1) -> -infinity                        (접합점, 반대 부호)
+      h''(R) = -k / r2                            (표면 근처 최소 곡률)
+
+  (iii) 곡률 특이점(singularity) 처리
+
+    d = r1 (r1/r2 접합점)에서 h'' -> +/-infinity.
+    실제 계산에서는 곡률을 제한하여 변형률이 물리적 한계를
+    초과하지 않도록 합니다:
+
+      strainLimit = 0.05   (5%)
+      thickness = n_max - n_min
+      h''_max = strainLimit / (thickness / 2)
+
+    변형률 eps = d_neutral * h''에서 d_neutral = thickness/2일 때
+    eps = 0.05가 최대값이 됩니다.
+
+
+  ■ 5. 굽힘 응력 계산 (Kirchhoff 판이론)
+
+  indent 필렛의 곡률에서 Kirchhoff 판이론 기반 굽힘 응력을
+  계산하는 전체 과정입니다.
+
+  (i) 그래디언트 방향 분해
+
+    필렛 곡률 h''(d)는 스칼라(1차원 값)이지만, 실제 면내
+    곡률은 2차원 텐서입니다. 그래디언트 방향 (gx, gy)로
+    분해합니다:
+
+      kappa_11 = -h''(d) * gx^2       (x방향 곡률)
+      kappa_22 = -h''(d) * gy^2       (y방향 곡률)
+      kappa_12 = -h''(d) * gx * gy    (비틀림 곡률)
+
+    여기서 (gx, gy) = 최근접 경계점 → 노드 방향의 단위벡터.
+    부호: kappa = -h''(d) (판이론 부호 규약, kappa = -d2w/dx^2).
+
+    예시: 순수 y방향 그래디언트 (gx=0, gy=1)
+      → kappa_11 = 0, kappa_22 = -h'', kappa_12 = 0
+    대각선 그래디언트 (gx=gy=1/sqrt(2))
+      → kappa_11 = kappa_22 = -h''/2, kappa_12 = -h''/2
+
+  (ii) 굽힘 변형률 (판 이론)
+
+    중립면에서 거리 d_n인 점의 변형률:
+
+      eps_11 = -d_n * kappa_11
+      eps_22 = -d_n * kappa_22
+      gamma_12 = -2 * d_n * kappa_12
+
+    여기서 d_n = n_coord - n_mid (법선축 좌표 - 중립면 좌표).
+    n_mid = (n_min + n_max) / 2.
+
+    상면 (d_n > 0)과 하면 (d_n < 0)에서 부호가 반대
+    → 판의 위아래에서 반대 방향 응력 (순수 굽힘).
+
+  (iii) 면내 좌표 → 전체 좌표 매핑
+
+    plane=xy일 때: eps_xx = eps_11, eps_yy = eps_22, eps_xy = gamma_12/2
+    plane=yz일 때: eps_yy = eps_11, eps_zz = eps_22, eps_yz = gamma_12/2
+    plane=zx일 때: eps_zz = eps_11, eps_xx = eps_22, eps_zx = gamma_12/2
+
+    법선 방향(예: eps_zz for plane=xy)은 0.
+
+  (iv) Hooke's law (등방 탄성체)
+
+    Lame 파라미터:
+      lambda = E * nu / ((1 + nu) * (1 - 2*nu))
+      mu = E / (2 * (1 + nu))
+
+    응력 텐서:
+      sig_ij = lambda * (eps_11 + eps_22 + eps_33) * delta_ij
+               + 2 * mu * eps_ij
+
+    구체적으로 (plane=xy, eps_zz=0):
+      sig_xx = lambda * (eps_xx + eps_yy) + 2*mu*eps_xx
+      sig_yy = lambda * (eps_xx + eps_yy) + 2*mu*eps_yy
+      sig_zz = lambda * (eps_xx + eps_yy)
+      sig_xy = 2 * mu * eps_xy
+
+    수치 예 (E=210000, nu=0.3):
+      lambda = 210000*0.3 / (1.3*0.4) = 121154
+      mu = 210000 / 2.6 = 80769
+
+      순수 y방향 그래디언트, 곡률 cap 적용 (h''=0.05):
+      eps_yy = -0.5 * (-0.05) = 0.025 (상면, d_n=0.5)
+      → 역방향: eps_yy = -0.025
+      sig_yy = 121154*(-0.025) + 2*80769*(-0.025) = -3029 + -4038 = -7067
+      sig_xx = sig_zz = 121154*(-0.025) = -3029
+
+  (v) 응력 부호 규약
+
+    indent는 deform(변형) 모드만 지원합니다:
+    기하형상이 indent된 상태에서 역방향 응력을 부여합니다.
+
+      reverse_strain = strain * (-1)
+      stress = fromStrain(reverse_strain, E, nu)
+
+    DR(Dynamic Relaxation) 해석 시 이 역방향 응력이
+    indent 이전 형상으로 돌아가려는 복원력으로 작용하여,
+    indent 형상이 유지됩니다.
+
+    *참고: 응력 계산은 반드시 노드 변위 적용 전에 수행.
+    변위 후에는 요소 centroid의 z좌표가 이동하여
+    d_n (중립면 거리) 계산이 부정확해집니다.
+
+
+  ■ 6. 응력 병합 (다중 operation)
+
+  같은 요소에 여러 operation (squeeze + indent, bend + indent 등)
+  이 적용되면, 각 operation의 응력이 dynain 출력 전에 합산됩니다:
+
+    merged[elementId].stress += operation_stress
+
+  writeOutput()에서 element ID별로 std::map에 누적하여
+  요소당 하나의 *INITIAL_STRESS_SOLID 항목으로 출력합니다.
+
+
+  ■ 7. Catmull-Rom 폐곡선 (Spline 형상)
+
+  shape: spline 시 제어점을 Catmull-Rom 스플라인으로 보간합니다.
+
+  N개 제어점 P_0, P_1, ..., P_{N-1} (폐곡선: P_N = P_0):
+
+    각 세그먼트 i에서 t in [0, 1]:
+
+      P(t) = 0.5 * [ (2*P_1)
+                    + (-P_0 + P_2) * t
+                    + (2*P_0 - 5*P_1 + 4*P_2 - P_3) * t^2
+                    + (-P_0 + 3*P_1 - 3*P_2 + P_3) * t^3 ]
+
+    여기서 P_0 = P_{i-1}, P_1 = P_i, P_2 = P_{i+1}, P_3 = P_{i+2}
+    (인덱스는 mod N으로 순환).
+
+  세그먼트당 20개 샘플로 이산화 → 직선 세그먼트 배열로 변환.
+  이후 signed distance 계산은 polygon과 동일한 로직을 재사용.
+
+
+  ■ 8. 성능 최적화: AABB 사전 필터
+
+    1) Loop의 bounding box + (r1+r2) 여유 → affected_bbox
+    2) affected_bbox 밖의 노드 → 즉시 skip (d >= r1+r2 보장)
+    3) 나머지 노드만 정밀 signed distance 계산
+
+  10,000 요소 모델에서 약 70-90% 노드를 skip.
+  처리 시간: 200 요소 ~4ms, 800 요소 ~17ms, 10,000 요소 ~150ms.
+
+
+  ■ 9. 수치 검증 예
+
+  10x10x2 블록 (1mm 간격), [3,3]-[7,7] 사각형 indent:
+  depth=0.5, r1=0.5, r2=1.0
+
+    k = 0.5 / (0.5 + 1.0) = 1/3
+
+  상면(z=2) 노드 검증:
+    (5, 5): d < 0 (루프 안쪽) → z = 2 - 0.5 = 1.500
+    (2.5, 5): d = 0.5 (r1 경계) → h = -0.5 + (1/3)*0.5*1 = -0.333
+              → z = 2 - 0.333 = 1.667
+    (2, 5): d = 1.0 → u = 0.5/1.0 = 0.5
+              h = -(1/3)*1.0*(1 - sqrt(1-0.25)) = -0.333*(1-0.866) = -0.045
+              → z = 2 - 0.045 = 1.955
+    (1.5, 5): d = 1.5 = r1+r2 → h = 0 → z = 2.000 (변경 없음)
+
+  중간면(z=1): 상면의 50% 변위 (t_frac = 0.5)
+  하면(z=0): 변위 없음 (bottom_ratio = 0)
+
+  양각(depth=-0.5) 검증:
+    k = -0.5 / 1.5 = -1/3
+    (5, 5): h = -(-0.5) = 0.5 → z = 2 + 0.5 = 2.500
+    indent와 정확히 반대 (음각 z + 양각 z = 2 * 원래 z)
+
+----------------------------------------------------------------
+3.21 예제 파일 목록
+----------------------------------------------------------------
+
+examples/ 디렉토리에 실행 가능한 예제가 포함되어 있습니다:
+
+[bend 예제]
+  examples/bend/small/            2×2×2 블록 (8 요소, 27 노드)
+    block.k                       입력 메쉬
+    formula_deform.yaml           수식 deform 모드
+    formula_stress.yaml           수식 stress 모드
+    dat_deform.yaml               dat 파일 deform 모드
+    squeeze_bend_combo.yaml       squeeze + bend 조합
+    warpage_3x3.dat               3×3 처짐 그리드 예시
+
+  examples/bend/large/            50×40×5 블록 (10,000 요소, 12,546 노드)
+    block.k                       입력 메쉬 (X:100, Y:50, Z:2 비대칭)
+    formula_deform.yaml           수식 deform 모드
+    dat_deform.yaml               50×50 dat 파일 deform 모드
+    squeeze_bend_combo.yaml       squeeze + bend 조합
+    warpage_50x50.dat             51×51 처짐 그리드
+    gen_block.py                  메쉬 생성 스크립트
+    gen_dat.py                    dat 파일 생성 스크립트
+
+[map 예제]
+  examples/teardrop/              눈물방울 형상
+  examples/torus/                 토러스 형상
+  examples/twist/                 비틀림 형상
+  examples/wave/                  파도 형상
+  examples/bulge/                 팽창 형상
+  examples/taper/                 테이퍼 형상
+  examples/bendtwist/             굽힘+비틀림 복합
+  examples/foldable_display/      접이식 디스플레이
+  examples/arc30/                 30도 원호
+
+[shellmap 예제]
+  examples/shellmap_arc/          원호 쉘 매핑
+  examples/shellmap_spline/       스플라인 쉘 매핑
+
+[indent 예제]
+  examples/indent/small/            10×10×2 블록 (200 요소, 363 노드)
+    block.k                         입력 메쉬 (1mm 간격)
+    indent_test.yaml                polygon 사각형 음각
+    emboss_test.yaml                polygon 사각형 양각 (depth<0)
+    indent_stress_test.yaml         음각 + 초기응력
+
+  examples/indent/fine/             10×10×2 블록 (800 요소, 1323 노드)
+    block_fine.k                    입력 메쉬 (0.5mm 간격)
+    horseshoe_test.yaml             spline 말발굽 음각
+
+  examples/indent/large/            20×20×2 블록 (10,000 요소, 13,005 노드)
+    block_large.k                   입력 메쉬 (1mm 간격)
+    star_emboss_test.yaml           spline 별 양각
+    star_stress_test.yaml           spline 별 양각 + 초기응력
+
+[assemble 예제]
+  examples/replace_test/          파트 교체 + squeeze + DR
+  examples/squeeze_interference/  억지끼움
+
+
+================================================================
+4. shellmap - 쉘 기반 솔리드 매핑
+================================================================
+
+용도:
+  평면에서 작성한 HEX8 디테일 메쉬를 QUAD4 쉘 표면 형상에
+  맞춰 매핑합니다.
+
+사용법:
+  KooRemapper shellmap <bent_shell.k> <flat_detail.k> <output.k>
+    [--thickness <값>]
+
+인자:
+  bent_shell.k     벤트 QUAD4 쉘 메쉬 (대상 표면 형상)
+  flat_detail.k    평면 HEX8 디테일 메쉬 (X=길이, Y=폭, Z=두께)
+  output.k         매핑된 솔리드 메쉬 출력
+
+옵션:
+  --thickness      두께 지정 (미지정 시 flat 메쉬 Z범위에서 자동 감지)
+
+동작:
+  1) 쉘 메쉬를 edge-length 보존하며 평면 전개
+  2) 디테일 메쉬의 XY좌표를 전개면에 매핑
+  3) Z좌표를 쉘 표면 법선 방향 두께 오프셋으로 변환
+  4) 매핑된 솔리드 메쉬 출력
+
+
+================================================================
+5. squeeze - 억지끼움 초기변형
+================================================================
+
+용도:
+  파트를 지정 변형률로 압축하고, 역방향 초기응력 dynain을 생성합니다.
+
+사용법:
+  KooRemapper squeeze <config.yaml>
+
+YAML 포맷:
+  mesh: model.k
+  output: compressed_result
+  target_pid: 1
+  eps_x: -0.02
+  eps_y: 0.0
+  eps_z: 0.0
+  material:
+    E: 210000.0
+    nu: 0.3
+
+출력:
+  <output>.k        압축된 메쉬
+  <output>.dynain    역방향 초기응력
+
+
+================================================================
+6. prestress - 변형 해석 + dynain 출력
+================================================================
+
+용도:
+  Reference 메쉬와 Deformed 메쉬를 비교하여 변형률/응력을 계산하고,
+  *INITIAL_STRESS_SOLID dynain을 출력합니다.
+
+사용법:
+  KooRemapper prestress <reference.k> <deformed.k> <output.dynain>
+    [--strain green|engineering]
+    [--E <값>] [--nu <값>]
+
+인자:
+  reference.k       변형 전 메쉬
+  deformed.k        변형 후 메쉬 (같은 토폴로지)
+  output.dynain     dynain 출력 파일
+
+옵션:
+  --strain          변형률 타입 (기본: green)
+                      green       = Green-Lagrange
+                      engineering = Engineering (small strain)
+  --E               탄성계수
+  --nu              포아송비
+  * --E/--nu 미지정 시 k파일 내 *MAT_ELASTIC에서 자동 조회
+
+
+================================================================
+7. map - 구조 메쉬 매핑
+================================================================
+
+용도:
+  HEX8 구조 메쉬의 isoparametric 매핑으로 reference 형상의
+  노드 배치를 bent 형상으로 변환합니다.
+
+사용법:
+  KooRemapper map <reference.k> <bent.k> <flat.k> <output.k>
+
+인자:
+  reference.k       구조 레퍼런스 메쉬 (structured HEX8)
+  bent.k            변형된 메쉬 (같은 토폴로지)
+  flat.k            매핑할 평면 디테일 메쉬
+  output.k          매핑된 출력 메쉬
+
+
+================================================================
+8. generate - 가변밀도 메쉬 생성
+================================================================
+
+용도:
+  YAML 설정으로 가변밀도 HEX8 구조 메쉬를 생성합니다.
+  곡선 형상(원호, 스플라인)도 지원합니다.
+
+사용법:
+  KooRemapper generate <config.yaml>
+
+YAML 포맷은 help generate 참조.
+
+
+================================================================
+  KooRemapper v1.2.0
+================================================================

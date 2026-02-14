@@ -1,0 +1,43 @@
+# ================================================================
+# restack 예제: 두께 불일치 + squeeze 자동 적용
+# ================================================================
+# 원본 Part 1: Z방향 extrude, 두께 1.0
+# → 3 layer로 재분할 (0.35 + 0.40 + 0.35 = 1.10)
+# → 두께 불일치 → 메쉬를 원본 두께(1.0)에 맞추고
+#   역방향 초기응력을 dynain에 출력 (DR로 복원)
+#
+# Layer 1,3은 MID001 공유 (같은 재료)
+# ================================================================
+
+base_model: restack_base.k
+output: restack_mismatch_result
+
+dynamic_relaxation: true
+
+operations:
+  - type: restack
+    target_pid: 1
+    direction: z
+    element_type: solid
+    layers:
+      - thickness: 0.35
+        material_card: |
+          *MAT_ELASTIC
+          $#     mid        ro         e        pr
+               MID001  7.85E-09  2.10E+05       0.3
+
+      - thickness: 0.40
+        material_card: |
+          *MAT_ELASTIC
+          $#     mid        ro         e        pr
+               MID002  7.85E-09  1.50E+05      0.25
+
+      - thickness: 0.35
+        material_card: |
+          *MAT_ELASTIC
+          $#     mid        ro         e        pr
+               MID001  7.85E-09  2.10E+05       0.3
+
+material:
+  E: 210000.0
+  nu: 0.3

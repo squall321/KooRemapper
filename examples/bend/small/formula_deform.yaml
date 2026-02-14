@@ -1,0 +1,20 @@
+# Bend test: formula source, deform mode
+# 2x2x2 block (8 elements), X:0-10, Y:0-10, Z:0-2
+# 처짐 w = 1.0 * sin(pi*x/10) * sin(pi*y/10)
+# → 노드 변형 + 역방향 초기응력 (DR 시 굽힌 상태 유지)
+base_model: block.k
+output: formula_deform_output
+
+material:
+  E: 210000
+  nu: 0.3
+
+dynain_embed: true
+
+operations:
+  - type: bend
+    target_pid: 1
+    plane: xy
+    mode: deform
+    source: formula
+    expression: "1.0 * sin(pi*x1/L1) * sin(pi*x2/L2)"

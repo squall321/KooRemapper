@@ -1,0 +1,19 @@
+base_model: base_model_3part.k
+output: assembled_combined_result
+
+operations:
+  - type: replace
+    target_pid: 1
+    detail_flat: ../../tests/test_shell_flat.k
+    shell_bent: ../../tests/test_shell_bent.k
+    prestress: true
+
+  - type: squeeze
+    target_pid: 3
+    eps_x: -0.02
+    eps_y: 0.0
+    eps_z: 0.0
+
+material:
+  E: 210000.0
+  nu: 0.3

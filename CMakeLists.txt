@@ -107,6 +107,17 @@ set(SQUEEZE_SOURCES
     src/squeeze/SqueezeConfigReader.cpp
 )
 
+# Source files - Assembly
+set(ASSEMBLY_SOURCES
+    src/assembly/AssemblyConfigReader.cpp
+    src/assembly/ModelAssembler.cpp
+    src/assembly/DeflectionGrid.cpp
+    src/assembly/FormulaEvaluator.cpp
+    src/assembly/ClosedLoop.cpp
+    src/assembly/IndentProfile.cpp
+    src/assembly/ShellCurvature.cpp
+)
+
 # Source files - CLI
 set(CLI_SOURCES
     src/cli/ArgumentParser.cpp
@@ -131,6 +142,7 @@ add_library(kooremapper_lib STATIC
     ${GENERATOR_SOURCES}
     ${ANALYSIS_SOURCES}
     ${SQUEEZE_SOURCES}
+    ${ASSEMBLY_SOURCES}
     ${CLI_SOURCES}
     ${UTIL_SOURCES}
 )

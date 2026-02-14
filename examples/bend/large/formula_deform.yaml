@@ -1,0 +1,20 @@
+# Bend test: large model, formula source, deform mode
+# 50x40x5 block (10,000 elements), X:0-100, Y:0-50, Z:0-2
+# 비대칭 모델 (가로 100mm, 세로 50mm)
+# 처짐 w = 0.5 * sin(pi*x/100) * sin(pi*y/50)
+base_model: block.k
+output: formula_deform_output
+
+material:
+  E: 210000
+  nu: 0.3
+
+dynain_embed: true
+
+operations:
+  - type: bend
+    target_pid: 1
+    plane: xy
+    mode: deform
+    source: formula
+    expression: "0.5 * sin(pi*x1/L1) * sin(pi*x2/L2)"

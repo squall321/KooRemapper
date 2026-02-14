@@ -13,7 +13,7 @@ namespace KooRemapper {
  *
  * Supports:
  *   - *NODE
- *   - *ELEMENT_SOLID
+ *   - *ELEMENT_SOLID / *ELEMENT_TSHELL / *ELEMENT_SHELL
  *   - *PART (with material ID mapping)
  *   - *MAT_ELASTIC (001)
  *   - *MAT_PIECEWISE_LINEAR_PLASTICITY (024)
@@ -67,12 +67,14 @@ private:
     bool parseFile(std::ifstream& file);
     bool parseNodeSection(std::ifstream& file);
     bool parseElementSolidSection(std::ifstream& file);
+    bool parseElementShellSection(std::ifstream& file);
     bool parsePartSection(std::ifstream& file);
     bool parseMatElasticSection(std::ifstream& file);
     bool parseMatPlasticSection(std::ifstream& file);
     bool parseMatRigidSection(std::ifstream& file);
     bool parseMatViscoelasticSection(std::ifstream& file);
     bool parseMatMooneyRivlinSection(std::ifstream& file);
+    bool parseSectionShellSection(std::ifstream& file);
     void skipToNextKeyword(std::ifstream& file);
     void skipDataLines(std::ifstream& file, int count);
     bool isMaterialKeyword(const std::string& keyword) const;

@@ -14,6 +14,7 @@ enum class ElementType {
     HEX20,      // 20-node hexahedron
     TET4,       // 4-node tetrahedron
     TET10,      // 10-node tetrahedron
+    QUAD4,      // 4-node shell (quad)
     UNKNOWN
 };
 

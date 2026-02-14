@@ -1,0 +1,19 @@
+# Bend test: dat file source, deform mode
+# 2x2x2 block (8 elements), X:0-10, Y:0-10, Z:0-2
+# 3x3 warpage grid (중심에 볼록한 처짐)
+base_model: block.k
+output: dat_deform_output
+
+material:
+  E: 210000
+  nu: 0.3
+
+dynain_embed: true
+
+operations:
+  - type: bend
+    target_pid: 1
+    plane: xy
+    mode: deform
+    source: dat
+    dat_file: warpage_3x3.dat
