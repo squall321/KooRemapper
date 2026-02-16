@@ -1,0 +1,5 @@
+base_model: shell_test.k
+output: quad8_result
+
+operations:
+  - type: quad8

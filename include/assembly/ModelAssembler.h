@@ -17,6 +17,9 @@ public:
     ModelAssembler() : maxNodeId_(0), maxElementId_(0),
                        maxPartId_(0), maxSectionId_(0), maxMaterialId_(0),
                        replacedParts_(0), squeezedParts_(0), restackedParts_(0), bentParts_(0), indentedParts_(0), formStrainParts_(0),
+                       tet10ConvertedCount_(0), hex20ConvertedCount_(0),
+                       quad8ConvertedCount_(0), tria6ConvertedCount_(0),
+                       tet10Elform_(17),
                        dynamicRelaxation_(false), dynainEmbed_(false) {}
 
     bool loadBaseModel(const std::string& filename);
@@ -28,6 +31,8 @@ public:
                    const std::string& configDir);
     bool applyIndent(const IndentOperation& op, double E, double nu);
     bool applyFormStrain(const FormStrainOperation& op);
+    bool applyTet10Convert(const Tet10ConvertOperation& op);
+    bool applyRefine(const RefineOperation& op);
     bool writeOutput(const std::string& outputPrefix);
 
     const std::vector<ElementResult>& getAccumulatedResults() const {
@@ -40,6 +45,10 @@ public:
     int getBentPartCount() const { return bentParts_; }
     int getIndentedPartCount() const { return indentedParts_; }
     int getFormStrainPartCount() const { return formStrainParts_; }
+    int getTet10ConvertedCount() const { return tet10ConvertedCount_; }
+    int getHex20ConvertedCount() const { return hex20ConvertedCount_; }
+    int getQuad8ConvertedCount() const { return quad8ConvertedCount_; }
+    int getTria6ConvertedCount() const { return tria6ConvertedCount_; }
     int getNodeCount() const { return static_cast<int>(baseMesh_.getNodeCount()); }
     int getElementCount() const { return static_cast<int>(baseMesh_.getElementCount()); }
     int getPartCount() const { return static_cast<int>(baseMesh_.getPartCount()); }
@@ -96,6 +105,24 @@ private:
     int bentParts_;
     int indentedParts_;
     int formStrainParts_;
+    int tet10ConvertedCount_;
+    int hex20ConvertedCount_;
+    int quad8ConvertedCount_;
+    int tria6ConvertedCount_;
+
+    // Quadratic element conversion data
+    std::map<int, std::array<int, 10>> tet10Elements_;  // elemId → 10-node connectivity
+    std::map<int, std::array<int, 20>> hex20Elements_;  // elemId → 20-node connectivity
+    std::map<int, std::array<int, 8>> quad8Elements_;   // elemId → 8-node connectivity
+    std::map<int, std::array<int, 6>> tria6Elements_;   // elemId → 6-node connectivity
+    std::map<std::pair<int,int>, int> edgeMidNodeMap_;   // sorted(nA,nB) → midNodeId (persists across calls)
+    std::map<int, int> solidSectionElforms_;     // SECID → target ELFORM for *SECTION_SOLID
+    std::map<int, int> shellSectionElforms_;     // SECID → target ELFORM for *SECTION_SHELL
+    int tet10Elform_;                             // legacy (unused, kept for compat)
+
+    // Refine dedup maps
+    std::map<std::tuple<int,int,int,int>, int> faceCenterNodeMap_;  // sorted 4-tuple → nodeId
+    std::map<std::pair<std::pair<int,int>, int>, int> edgeThirdNodeMap_;  // (sorted(nA,nB), idx) → nodeId
 
     std::string errorMessage_;
 
@@ -119,6 +146,11 @@ private:
     std::string formatShellElementLine(const AddedShellElement& elem) const;
     bool isKeywordLine(const std::string& line) const;
     bool isCommentLine(const std::string& line) const;
+    std::string formatTet10ElementLine(int eid, int pid, const std::array<int, 10>& nodes) const;
+    std::string formatHex20ElementLine(int eid, int pid, const std::array<int, 20>& nodes) const;
+    std::string formatQuad8ElementLine(int eid, int pid, const std::array<int, 8>& nodes) const;
+    std::string formatTria6ElementLine(int eid, int pid, const std::array<int, 6>& nodes) const;
+    int parsePartIdFromLine(const std::string& line) const;
 };
 
 } // namespace KooRemapper

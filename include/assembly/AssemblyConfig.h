@@ -72,8 +72,19 @@ struct FormStrainOperation {
     double minCurvature = 0.0;   // noise filter threshold (default=0)
 };
 
+struct Tet10ConvertOperation {
+    int targetPid = 0;        // 0 = all eligible parts
+    int elform = 0;           // 0 = auto (tet10→17, hex20→23, quad8→23, tria6→24)
+    std::string convertType = "tet10";  // tet10, hex20, quad8, tria6
+};
+
+struct RefineOperation {
+    int targetPid = 0;        // 0 = all parts
+    int ratio = 2;            // 2 or 3
+};
+
 struct AssemblyOperation {
-    enum Type { REPLACE, SQUEEZE, RESTACK, BEND, INDENT, FORMSTRAIN };
+    enum Type { REPLACE, SQUEEZE, RESTACK, BEND, INDENT, FORMSTRAIN, TET10_CONVERT, REFINE };
     Type type;
     ReplaceOperation replace;
     SqueezeOperation squeeze;
@@ -81,6 +92,8 @@ struct AssemblyOperation {
     BendOperation bend;
     IndentOperation indent;
     FormStrainOperation formstrain;
+    Tet10ConvertOperation tet10;
+    RefineOperation refine;
 };
 
 struct AssemblyConfig {

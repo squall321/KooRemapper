@@ -1,0 +1,6 @@
+base_model: two_hexes.k
+output: hex20_result
+
+operations:
+  - type: hex20
+    elform: 23

@@ -217,6 +217,20 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             op.type = AssemblyOperation::INDENT;
                         } else if (val == "formstrain") {
                             op.type = AssemblyOperation::FORMSTRAIN;
+                        } else if (val == "tet10") {
+                            op.type = AssemblyOperation::TET10_CONVERT;
+                            op.tet10.convertType = "tet10";
+                        } else if (val == "hex20") {
+                            op.type = AssemblyOperation::TET10_CONVERT;
+                            op.tet10.convertType = "hex20";
+                        } else if (val == "quad8") {
+                            op.type = AssemblyOperation::TET10_CONVERT;
+                            op.tet10.convertType = "quad8";
+                        } else if (val == "tria6") {
+                            op.type = AssemblyOperation::TET10_CONVERT;
+                            op.tet10.convertType = "tria6";
+                        } else if (val == "refine") {
+                            op.type = AssemblyOperation::REFINE;
                         } else {
                             throw std::runtime_error("Unknown operation type: " + val);
                         }
@@ -274,6 +288,10 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                                 op.indent.targetPid = pid;
                             } else if (op.type == AssemblyOperation::FORMSTRAIN) {
                                 op.formstrain.targetPid = pid;
+                            } else if (op.type == AssemblyOperation::TET10_CONVERT) {
+                                op.tet10.targetPid = pid;
+                            } else if (op.type == AssemblyOperation::REFINE) {
+                                op.refine.targetPid = pid;
                             }
                         } else if (op.type == AssemblyOperation::BEND) {
                             if (key == "plane") op.bend.plane = val;
@@ -327,6 +345,10 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                         } else if (op.type == AssemblyOperation::FORMSTRAIN) {
                             if (key == "shell_thickness") op.formstrain.shellThickness = std::stod(val);
                             else if (key == "min_curvature") op.formstrain.minCurvature = std::stod(val);
+                        } else if (op.type == AssemblyOperation::TET10_CONVERT) {
+                            if (key == "elform") op.tet10.elform = std::stoi(val);
+                        } else if (op.type == AssemblyOperation::REFINE) {
+                            if (key == "ratio") op.refine.ratio = std::stoi(val);
                         }
                     } catch (...) {}
                 }

@@ -1,0 +1,6 @@
+base_model: shell_test.k
+output: refine_quad_1to3_result
+
+operations:
+  - type: refine
+    ratio: 3

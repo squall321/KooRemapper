@@ -1352,11 +1352,16 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
     // Process raw lines
     std::ostringstream output;
 
-    enum class Section { NONE, NODE, ELEMENT };
+    enum class Section { NONE, NODE, ELEMENT, SHELL_ELEMENT };
     Section currentSection = Section::NONE;
     bool nodesInserted = false;
     bool elementsInserted = false;
+    bool shellElementsHandled = false;     // track shell element section processing
     bool skippingReplacedSection = false;  // for skipping old TERMINATION data
+    bool inSectionSolid = false;           // tracking *SECTION_SOLID for ELFORM rewrite
+    int sectionSolidDataLine = 0;          // data line counter within *SECTION_SOLID
+    bool inSectionShell = false;           // tracking *SECTION_SHELL for ELFORM rewrite
+    int sectionShellDataLine = 0;          // data line counter within *SECTION_SHELL
 
     for (size_t i = 0; i < rawLines_.size(); ++i) {
         const std::string& line = rawLines_[i];
@@ -1411,10 +1416,29 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                 continue;
             }
 
+            // Track *SECTION_SOLID for ELFORM rewriting
+            if (upper.find("*SECTION_SOLID") == 0 && upper.find("*SECTION_SOLID_") == std::string::npos) {
+                inSectionSolid = true;
+                sectionSolidDataLine = 0;
+            } else if (inSectionSolid && upper[0] == '*') {
+                inSectionSolid = false;
+            }
+
+            // Track *SECTION_SHELL for ELFORM rewriting
+            if (upper.find("*SECTION_SHELL") == 0 && upper.find("*SECTION_SHELL_") == std::string::npos) {
+                inSectionShell = true;
+                sectionShellDataLine = 0;
+            } else if (inSectionShell && upper[0] == '*') {
+                inSectionShell = false;
+            }
+
             if (upper.substr(0, 5) == "*NODE") {
                 currentSection = Section::NODE;
             } else if (upper.substr(0, 14) == "*ELEMENT_SOLID") {
                 currentSection = Section::ELEMENT;
+            } else if (upper.find("*ELEMENT_SHELL") == 0) {
+                currentSection = Section::SHELL_ELEMENT;
+                shellElementsHandled = true;
             } else if (upper.substr(0, 4) == "*END") {
                 currentSection = Section::NONE;
 
@@ -1608,9 +1632,82 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
             if (elemId > 0 && removedElementIds_.count(elemId) > 0) {
                 continue;  // Skip removed element
             }
+            // TET10 conversion: replace single-line TET4 with 2-line TET10
+            if (elemId > 0 && tet10Elements_.count(elemId)) {
+                int pid = parsePartIdFromLine(line);
+                output << formatTet10ElementLine(elemId, pid, tet10Elements_[elemId]) << "\n";
+                continue;
+            }
+            // HEX20 conversion: replace single-line HEX8 with 3-line HEX20
+            if (elemId > 0 && hex20Elements_.count(elemId)) {
+                int pid = parsePartIdFromLine(line);
+                output << formatHex20ElementLine(elemId, pid, hex20Elements_[elemId]) << "\n";
+                continue;
+            }
+            output << line << "\n";
+        }
+        else if (currentSection == Section::SHELL_ELEMENT) {
+            int elemId = parseElementIdFromLine(line);
+            if (elemId > 0 && removedElementIds_.count(elemId) > 0) {
+                continue;
+            }
+            // QUAD8 conversion: replace QUAD4 line
+            if (elemId > 0 && quad8Elements_.count(elemId)) {
+                int pid = parsePartIdFromLine(line);
+                output << formatQuad8ElementLine(elemId, pid, quad8Elements_[elemId]) << "\n";
+                continue;
+            }
+            // TRIA6 conversion: replace TRIA3 line
+            if (elemId > 0 && tria6Elements_.count(elemId)) {
+                int pid = parsePartIdFromLine(line);
+                output << formatTria6ElementLine(elemId, pid, tria6Elements_[elemId]) << "\n";
+                continue;
+            }
             output << line << "\n";
         }
         else {
+            // *SECTION_SOLID ELFORM rewrite for TET10/HEX20 conversion
+            if (inSectionSolid && !isCommentLine(line) && !line.empty() &&
+                line.find_first_not_of(" \t") != std::string::npos &&
+                !solidSectionElforms_.empty()) {
+                sectionSolidDataLine++;
+                if (sectionSolidDataLine == 1) {
+                    try {
+                        int secId = std::stoi(line.substr(0, 10));
+                        auto sit = solidSectionElforms_.find(secId);
+                        if (sit != solidSectionElforms_.end()) {
+                            std::string modified = line;
+                            if (modified.size() < 20) modified.resize(20, ' ');
+                            std::ostringstream ef;
+                            ef << std::setw(10) << sit->second;
+                            modified.replace(10, 10, ef.str());
+                            output << modified << "\n";
+                            continue;
+                        }
+                    } catch (...) {}
+                }
+            }
+            // *SECTION_SHELL ELFORM rewrite for QUAD8/TRIA6 conversion
+            if (inSectionShell && !isCommentLine(line) && !line.empty() &&
+                line.find_first_not_of(" \t") != std::string::npos &&
+                !shellSectionElforms_.empty()) {
+                sectionShellDataLine++;
+                if (sectionShellDataLine == 1) {
+                    try {
+                        int secId = std::stoi(line.substr(0, 10));
+                        auto sit = shellSectionElforms_.find(secId);
+                        if (sit != shellSectionElforms_.end()) {
+                            std::string modified = line;
+                            if (modified.size() < 20) modified.resize(20, ' ');
+                            std::ostringstream ef;
+                            ef << std::setw(10) << sit->second;
+                            modified.replace(10, 10, ef.str());
+                            output << modified << "\n";
+                            continue;
+                        }
+                    } catch (...) {}
+                }
+            }
             output << line << "\n";
         }
     }
@@ -2408,6 +2505,748 @@ bool ModelAssembler::applyFormStrain(const FormStrainOperation& op) {
     }
 
     return true;
+}
+
+bool ModelAssembler::applyTet10Convert(const Tet10ConvertOperation& op) {
+    // Build shared edge map: sorted(nA, nB) → midNodeId
+    auto getOrCreateMidNode = [&](int nA, int nB) -> int {
+        auto key = std::make_pair(std::min(nA, nB), std::max(nA, nB));
+        auto it = edgeMidNodeMap_.find(key);
+        if (it != edgeMidNodeMap_.end()) {
+            return it->second;
+        }
+        int newId = ++maxNodeId_;
+        const auto& posA = baseMesh_.nodes.at(nA).position;
+        const auto& posB = baseMesh_.nodes.at(nB).position;
+        addedNodes_.push_back({newId,
+            (posA.x + posB.x) * 0.5,
+            (posA.y + posB.y) * 0.5,
+            (posA.z + posB.z) * 0.5});
+        edgeMidNodeMap_[key] = newId;
+        return newId;
+    };
+    size_t midNodesBefore = edgeMidNodeMap_.size();
+
+    // --- TET4 → TET10 ---
+    if (op.convertType == "tet10") {
+        int elform = (op.elform > 0) ? op.elform : 17;
+
+        std::vector<std::pair<int, const Element*>> targets;
+        std::set<int> targetParts;
+        for (const auto& [eid, elem] : baseMesh_.elements) {
+            if (elem.type != ElementType::TET4) continue;
+            if (op.targetPid > 0 && elem.partId != op.targetPid) continue;
+            targets.push_back({eid, &elem});
+            targetParts.insert(elem.partId);
+        }
+        if (targets.empty()) {
+            infoMessages.push_back("  TET10: no TET4 elements found" +
+                (op.targetPid > 0 ? " in part " + std::to_string(op.targetPid) : ""));
+            return true;
+        }
+        for (const auto& [eid, elem] : targets) {
+            int n1=elem->nodeIds[0], n2=elem->nodeIds[1], n3=elem->nodeIds[2], n4=elem->nodeIds[3];
+            tet10Elements_[eid] = {n1, n2, n3, n4,
+                getOrCreateMidNode(n1,n2), getOrCreateMidNode(n2,n3), getOrCreateMidNode(n3,n1),
+                getOrCreateMidNode(n1,n4), getOrCreateMidNode(n2,n4), getOrCreateMidNode(n3,n4)};
+        }
+        for (int pid : targetParts) {
+            auto it = baseMesh_.parts.find(pid);
+            if (it != baseMesh_.parts.end() && it->second.sectionId > 0)
+                solidSectionElforms_[it->second.sectionId] = elform;
+        }
+        tet10ConvertedCount_ = static_cast<int>(targets.size());
+        infoMessages.push_back("  TET10: converted " + std::to_string(tet10ConvertedCount_) +
+            " elements, added " + std::to_string(edgeMidNodeMap_.size() - midNodesBefore) +
+            " mid-edge nodes, ELFORM -> " + std::to_string(elform));
+    }
+    // --- HEX8 → HEX20 ---
+    else if (op.convertType == "hex20") {
+        int elform = (op.elform > 0) ? op.elform : 23;
+
+        std::vector<std::pair<int, const Element*>> targets;
+        std::set<int> targetParts;
+        for (const auto& [eid, elem] : baseMesh_.elements) {
+            if (elem.type != ElementType::HEX8) continue;
+            if (op.targetPid > 0 && elem.partId != op.targetPid) continue;
+            targets.push_back({eid, &elem});
+            targetParts.insert(elem.partId);
+        }
+        if (targets.empty()) {
+            infoMessages.push_back("  HEX20: no HEX8 elements found" +
+                (op.targetPid > 0 ? " in part " + std::to_string(op.targetPid) : ""));
+            return true;
+        }
+        for (const auto& [eid, elem] : targets) {
+            const auto& n = elem->nodeIds;
+            // LS-DYNA HEX20 mid-edge node convention:
+            // Bottom face edges: N9=mid(1,2), N10=mid(2,3), N11=mid(3,4), N12=mid(4,1)
+            // Top face edges:    N13=mid(5,6), N14=mid(6,7), N15=mid(7,8), N16=mid(8,5)
+            // Vertical edges:    N17=mid(1,5), N18=mid(2,6), N19=mid(3,7), N20=mid(4,8)
+            hex20Elements_[eid] = {
+                n[0], n[1], n[2], n[3], n[4], n[5], n[6], n[7],
+                getOrCreateMidNode(n[0],n[1]), getOrCreateMidNode(n[1],n[2]),
+                getOrCreateMidNode(n[2],n[3]), getOrCreateMidNode(n[3],n[0]),
+                getOrCreateMidNode(n[4],n[5]), getOrCreateMidNode(n[5],n[6]),
+                getOrCreateMidNode(n[6],n[7]), getOrCreateMidNode(n[7],n[4]),
+                getOrCreateMidNode(n[0],n[4]), getOrCreateMidNode(n[1],n[5]),
+                getOrCreateMidNode(n[2],n[6]), getOrCreateMidNode(n[3],n[7])
+            };
+        }
+        for (int pid : targetParts) {
+            auto it = baseMesh_.parts.find(pid);
+            if (it != baseMesh_.parts.end() && it->second.sectionId > 0)
+                solidSectionElforms_[it->second.sectionId] = elform;
+        }
+        hex20ConvertedCount_ = static_cast<int>(targets.size());
+        infoMessages.push_back("  HEX20: converted " + std::to_string(hex20ConvertedCount_) +
+            " elements, added " + std::to_string(edgeMidNodeMap_.size() - midNodesBefore) +
+            " mid-edge nodes, ELFORM -> " + std::to_string(elform));
+    }
+    // --- QUAD4 → QUAD8 ---
+    else if (op.convertType == "quad8") {
+        int elform = (op.elform > 0) ? op.elform : 23;
+
+        std::vector<std::pair<int, const Element*>> targets;
+        std::set<int> targetParts;
+        for (const auto& [eid, elem] : baseMesh_.elements) {
+            if (elem.type != ElementType::QUAD4) continue;
+            // Skip TRIA3 (stored as QUAD4 with n4==n3 or n4==0)
+            if (elem.nodeIds[3] == elem.nodeIds[2] || elem.nodeIds[3] == 0) continue;
+            if (op.targetPid > 0 && elem.partId != op.targetPid) continue;
+            targets.push_back({eid, &elem});
+            targetParts.insert(elem.partId);
+        }
+        if (targets.empty()) {
+            infoMessages.push_back("  QUAD8: no QUAD4 elements found" +
+                (op.targetPid > 0 ? " in part " + std::to_string(op.targetPid) : ""));
+            return true;
+        }
+        for (const auto& [eid, elem] : targets) {
+            const auto& n = elem->nodeIds;
+            // QUAD8 mid-edge: N5=mid(1,2), N6=mid(2,3), N7=mid(3,4), N8=mid(4,1)
+            quad8Elements_[eid] = {
+                n[0], n[1], n[2], n[3],
+                getOrCreateMidNode(n[0],n[1]), getOrCreateMidNode(n[1],n[2]),
+                getOrCreateMidNode(n[2],n[3]), getOrCreateMidNode(n[3],n[0])
+            };
+        }
+        for (int pid : targetParts) {
+            auto it = baseMesh_.parts.find(pid);
+            if (it != baseMesh_.parts.end() && it->second.sectionId > 0)
+                shellSectionElforms_[it->second.sectionId] = elform;
+        }
+        quad8ConvertedCount_ = static_cast<int>(targets.size());
+        infoMessages.push_back("  QUAD8: converted " + std::to_string(quad8ConvertedCount_) +
+            " elements, added " + std::to_string(edgeMidNodeMap_.size() - midNodesBefore) +
+            " mid-edge nodes, ELFORM -> " + std::to_string(elform));
+    }
+    // --- TRIA3 → TRIA6 ---
+    else if (op.convertType == "tria6") {
+        int elform = (op.elform > 0) ? op.elform : 24;
+
+        std::vector<std::pair<int, const Element*>> targets;
+        std::set<int> targetParts;
+        for (const auto& [eid, elem] : baseMesh_.elements) {
+            if (elem.type != ElementType::QUAD4) continue;
+            // TRIA3: stored as QUAD4 with n4==n3 or n4==0
+            if (elem.nodeIds[3] != elem.nodeIds[2] && elem.nodeIds[3] != 0) continue;
+            if (op.targetPid > 0 && elem.partId != op.targetPid) continue;
+            targets.push_back({eid, &elem});
+            targetParts.insert(elem.partId);
+        }
+        if (targets.empty()) {
+            infoMessages.push_back("  TRIA6: no TRIA3 elements found" +
+                (op.targetPid > 0 ? " in part " + std::to_string(op.targetPid) : ""));
+            return true;
+        }
+        for (const auto& [eid, elem] : targets) {
+            const auto& n = elem->nodeIds;
+            // TRIA6 mid-edge: N4=mid(1,2), N5=mid(2,3), N6=mid(3,1)
+            tria6Elements_[eid] = {
+                n[0], n[1], n[2],
+                getOrCreateMidNode(n[0],n[1]), getOrCreateMidNode(n[1],n[2]),
+                getOrCreateMidNode(n[2],n[0])
+            };
+        }
+        for (int pid : targetParts) {
+            auto it = baseMesh_.parts.find(pid);
+            if (it != baseMesh_.parts.end() && it->second.sectionId > 0)
+                shellSectionElforms_[it->second.sectionId] = elform;
+        }
+        tria6ConvertedCount_ = static_cast<int>(targets.size());
+        infoMessages.push_back("  TRIA6: converted " + std::to_string(tria6ConvertedCount_) +
+            " elements, added " + std::to_string(edgeMidNodeMap_.size() - midNodesBefore) +
+            " mid-edge nodes, ELFORM -> " + std::to_string(elform));
+    }
+    else {
+        errorMessage_ = "Unknown convert type: " + op.convertType;
+        return false;
+    }
+
+    return true;
+}
+
+bool ModelAssembler::applyRefine(const RefineOperation& op) {
+    if (op.ratio != 2 && op.ratio != 3) {
+        errorMessage_ = "Refine ratio must be 2 or 3, got " + std::to_string(op.ratio);
+        return false;
+    }
+
+    // Helper: get or create edge midpoint node (reuses edgeMidNodeMap_)
+    auto getOrCreateMidNode = [&](int nA, int nB) -> int {
+        auto key = std::make_pair(std::min(nA, nB), std::max(nA, nB));
+        auto it = edgeMidNodeMap_.find(key);
+        if (it != edgeMidNodeMap_.end()) return it->second;
+        int newId = ++maxNodeId_;
+        const auto& pA = baseMesh_.nodes.at(nA).position;
+        const auto& pB = baseMesh_.nodes.at(nB).position;
+        addedNodes_.push_back({newId, (pA.x+pB.x)*0.5, (pA.y+pB.y)*0.5, (pA.z+pB.z)*0.5});
+        edgeMidNodeMap_[key] = newId;
+        return newId;
+    };
+
+    // Helper: get or create edge third-point node (idx=0: 1/3 from nA, idx=1: 2/3 from nA)
+    auto getOrCreateThirdNode = [&](int nA, int nB, int idx) -> int {
+        auto edgeKey = std::make_pair(std::min(nA, nB), std::max(nA, nB));
+        // Normalize: if nA > nB, flip idx (so third-point is always relative to sorted order)
+        int normalIdx = (nA < nB) ? idx : (1 - idx);
+        auto key = std::make_pair(edgeKey, normalIdx);
+        auto it = edgeThirdNodeMap_.find(key);
+        if (it != edgeThirdNodeMap_.end()) return it->second;
+        int newId = ++maxNodeId_;
+        const auto& pA = baseMesh_.nodes.at(nA).position;
+        const auto& pB = baseMesh_.nodes.at(nB).position;
+        double t = (idx == 0) ? (1.0/3.0) : (2.0/3.0);
+        addedNodes_.push_back({newId,
+            pA.x + t*(pB.x-pA.x), pA.y + t*(pB.y-pA.y), pA.z + t*(pB.z-pA.z)});
+        edgeThirdNodeMap_[key] = newId;
+        return newId;
+    };
+
+    // Helper: get or create face center node (for shared faces between HEX elements)
+    auto getOrCreateFaceCenter = [&](int n1, int n2, int n3, int n4) -> int {
+        std::array<int,4> arr = {n1,n2,n3,n4};
+        std::sort(arr.begin(), arr.end());
+        auto key = std::make_tuple(arr[0], arr[1], arr[2], arr[3]);
+        auto it = faceCenterNodeMap_.find(key);
+        if (it != faceCenterNodeMap_.end()) return it->second;
+        int newId = ++maxNodeId_;
+        const auto& p1 = baseMesh_.nodes.at(n1).position;
+        const auto& p2 = baseMesh_.nodes.at(n2).position;
+        const auto& p3 = baseMesh_.nodes.at(n3).position;
+        const auto& p4 = baseMesh_.nodes.at(n4).position;
+        addedNodes_.push_back({newId,
+            (p1.x+p2.x+p3.x+p4.x)*0.25, (p1.y+p2.y+p3.y+p4.y)*0.25,
+            (p1.z+p2.z+p3.z+p4.z)*0.25});
+        faceCenterNodeMap_[key] = newId;
+        return newId;
+    };
+
+    // Helper: create a unique node (no dedup needed - body centers, face interiors)
+    auto createNode = [&](double x, double y, double z) -> int {
+        int newId = ++maxNodeId_;
+        addedNodes_.push_back({newId, x, y, z});
+        return newId;
+    };
+
+    // Helper: get node position (original nodes only)
+    auto pos = [&](int nid) -> Vector3D {
+        return baseMesh_.nodes.at(nid).position;
+    };
+
+    // Helper: add a sub-hex element
+    auto addHex = [&](int pid, int n1, int n2, int n3, int n4, int n5, int n6, int n7, int n8) {
+        int eid = ++maxElementId_;
+        addedElements_.push_back({eid, pid, {n1,n2,n3,n4,n5,n6,n7,n8}, ElementType::HEX8, false});
+    };
+
+    // Helper: add a sub-tet element (stored as degenerate hex)
+    auto addTet = [&](int pid, int n1, int n2, int n3, int n4) {
+        int eid = ++maxElementId_;
+        addedElements_.push_back({eid, pid, {n1,n2,n3,n4,n4,n4,n4,n4}, ElementType::TET4, false});
+    };
+
+    // Helper: add a sub-quad shell element
+    auto addQuad = [&](int pid, int n1, int n2, int n3, int n4) {
+        int eid = ++maxElementId_;
+        addedShellElements_.push_back({eid, pid, {n1,n2,n3,n4}});
+    };
+
+    // Helper: add a sub-tri shell element (N4=N3 convention)
+    auto addTri = [&](int pid, int n1, int n2, int n3) {
+        int eid = ++maxElementId_;
+        addedShellElements_.push_back({eid, pid, {n1,n2,n3,n3}});
+    };
+
+    // Collect target elements by type
+    struct TargetElem { int eid; const Element* elem; };
+    std::vector<TargetElem> quadTargets, triTargets, hexTargets, tetTargets;
+
+    for (const auto& [eid, elem] : baseMesh_.elements) {
+        if (op.targetPid > 0 && elem.partId != op.targetPid) continue;
+        if (removedElementIds_.count(eid)) continue;
+
+        if (elem.type == ElementType::QUAD4) {
+            bool isTri = (elem.nodeIds[3] == elem.nodeIds[2] || elem.nodeIds[3] == 0);
+            if (isTri)
+                triTargets.push_back({eid, &elem});
+            else
+                quadTargets.push_back({eid, &elem});
+        } else if (elem.type == ElementType::HEX8) {
+            hexTargets.push_back({eid, &elem});
+        } else if (elem.type == ElementType::TET4) {
+            if (op.ratio == 3) continue; // TET4 1:3 not supported
+            tetTargets.push_back({eid, &elem});
+        }
+    }
+
+    int totalRefined = 0;
+    size_t nodesBefore = addedNodes_.size();
+
+    // ==================== RATIO 1:2 ====================
+    if (op.ratio == 2) {
+        // --- QUAD4 1:2 → 4 quads ---
+        for (const auto& t : quadTargets) {
+            const auto& n = t.elem->nodeIds;
+            int pid = t.elem->partId;
+            removedElementIds_.insert(t.eid);
+
+            int m01 = getOrCreateMidNode(n[0], n[1]);
+            int m12 = getOrCreateMidNode(n[1], n[2]);
+            int m23 = getOrCreateMidNode(n[2], n[3]);
+            int m30 = getOrCreateMidNode(n[3], n[0]);
+            // Face center (unique per element for shells - no shared faces)
+            auto p0 = pos(n[0]), p1 = pos(n[1]), p2 = pos(n[2]), p3 = pos(n[3]);
+            int c = createNode((p0.x+p1.x+p2.x+p3.x)*0.25,
+                               (p0.y+p1.y+p2.y+p3.y)*0.25,
+                               (p0.z+p1.z+p2.z+p3.z)*0.25);
+
+            addQuad(pid, n[0], m01, c, m30);
+            addQuad(pid, m01, n[1], m12, c);
+            addQuad(pid, c, m12, n[2], m23);
+            addQuad(pid, m30, c, m23, n[3]);
+            totalRefined++;
+        }
+
+        // --- TRIA3 1:2 → 4 tris ---
+        for (const auto& t : triTargets) {
+            const auto& n = t.elem->nodeIds;
+            int pid = t.elem->partId;
+            removedElementIds_.insert(t.eid);
+
+            int m01 = getOrCreateMidNode(n[0], n[1]);
+            int m12 = getOrCreateMidNode(n[1], n[2]);
+            int m20 = getOrCreateMidNode(n[2], n[0]);
+
+            addTri(pid, n[0], m01, m20);
+            addTri(pid, m01, n[1], m12);
+            addTri(pid, m20, m12, n[2]);
+            addTri(pid, m01, m12, m20);
+            totalRefined++;
+        }
+
+        // --- TET4 1:2 → 8 tets (Bey method, m03-m12 diagonal) ---
+        for (const auto& t : tetTargets) {
+            const auto& n = t.elem->nodeIds;
+            int pid = t.elem->partId;
+            removedElementIds_.insert(t.eid);
+
+            int m01 = getOrCreateMidNode(n[0], n[1]);
+            int m02 = getOrCreateMidNode(n[0], n[2]);
+            int m03 = getOrCreateMidNode(n[0], n[3]);
+            int m12 = getOrCreateMidNode(n[1], n[2]);
+            int m13 = getOrCreateMidNode(n[1], n[3]);
+            int m23 = getOrCreateMidNode(n[2], n[3]);
+
+            // 4 corner tets
+            addTet(pid, n[0], m01, m02, m03);
+            addTet(pid, m01, n[1], m12, m13);
+            addTet(pid, m02, m12, n[2], m23);
+            addTet(pid, m03, m13, m23, n[3]);
+            // 4 interior tets (octahedron split along m03-m12 diagonal)
+            addTet(pid, m01, m12, m02, m03);
+            addTet(pid, m01, m12, m03, m13);
+            addTet(pid, m12, m23, m03, m02);
+            addTet(pid, m12, m23, m13, m03);
+            totalRefined++;
+        }
+
+        // --- HEX8 1:2 → 8 hexes ---
+        for (const auto& t : hexTargets) {
+            const auto& n = t.elem->nodeIds;
+            int pid = t.elem->partId;
+            removedElementIds_.insert(t.eid);
+
+            // 12 edge midpoints
+            int e01 = getOrCreateMidNode(n[0], n[1]);
+            int e12 = getOrCreateMidNode(n[1], n[2]);
+            int e23 = getOrCreateMidNode(n[2], n[3]);
+            int e30 = getOrCreateMidNode(n[3], n[0]);
+            int e45 = getOrCreateMidNode(n[4], n[5]);
+            int e56 = getOrCreateMidNode(n[5], n[6]);
+            int e67 = getOrCreateMidNode(n[6], n[7]);
+            int e74 = getOrCreateMidNode(n[7], n[4]);
+            int e04 = getOrCreateMidNode(n[0], n[4]);
+            int e15 = getOrCreateMidNode(n[1], n[5]);
+            int e26 = getOrCreateMidNode(n[2], n[6]);
+            int e37 = getOrCreateMidNode(n[3], n[7]);
+
+            // 6 face centers (shared between adjacent elements)
+            int fb  = getOrCreateFaceCenter(n[0], n[1], n[2], n[3]); // bottom
+            int ft  = getOrCreateFaceCenter(n[4], n[5], n[6], n[7]); // top
+            int fim = getOrCreateFaceCenter(n[0], n[3], n[7], n[4]); // i- (x-)
+            int fip = getOrCreateFaceCenter(n[1], n[2], n[6], n[5]); // i+ (x+)
+            int fjm = getOrCreateFaceCenter(n[0], n[1], n[5], n[4]); // j- (y-)
+            int fjp = getOrCreateFaceCenter(n[3], n[2], n[6], n[7]); // j+ (y+)
+
+            // 1 body center (unique)
+            auto p0=pos(n[0]), p1=pos(n[1]), p2=pos(n[2]), p3=pos(n[3]);
+            auto p4=pos(n[4]), p5=pos(n[5]), p6=pos(n[6]), p7=pos(n[7]);
+            int bc = createNode(
+                (p0.x+p1.x+p2.x+p3.x+p4.x+p5.x+p6.x+p7.x)*0.125,
+                (p0.y+p1.y+p2.y+p3.y+p4.y+p5.y+p6.y+p7.y)*0.125,
+                (p0.z+p1.z+p2.z+p3.z+p4.z+p5.z+p6.z+p7.z)*0.125);
+
+            // 8 sub-hexes (one per corner)
+            addHex(pid, n[0], e01,  fb,  e30,  e04,  fjm,  bc,  fim);
+            addHex(pid, e01,  n[1], e12,  fb,  fjm,  e15,  fip,  bc);
+            addHex(pid, fb,   e12,  n[2], e23,  bc,  fip,  e26,  fjp);
+            addHex(pid, e30,  fb,   e23,  n[3], fim,  bc,  fjp,  e37);
+            addHex(pid, e04,  fjm,  bc,   fim,  n[4], e45,  ft,  e74);
+            addHex(pid, fjm,  e15,  fip,  bc,   e45,  n[5], e56,  ft);
+            addHex(pid, bc,   fip,  e26,  fjp,  ft,   e56,  n[6], e67);
+            addHex(pid, fim,  bc,   fjp,  e37,  e74,  ft,   e67,  n[7]);
+            totalRefined++;
+        }
+    }
+    // ==================== RATIO 1:3 ====================
+    else if (op.ratio == 3) {
+        // --- QUAD4 1:3 → 9 quads ---
+        for (const auto& t : quadTargets) {
+            const auto& n = t.elem->nodeIds;
+            int pid = t.elem->partId;
+            removedElementIds_.insert(t.eid);
+
+            // Edge third-points (shared via edgeThirdNodeMap_)
+            int t01a = getOrCreateThirdNode(n[0], n[1], 0);
+            int t01b = getOrCreateThirdNode(n[0], n[1], 1);
+            int t12a = getOrCreateThirdNode(n[1], n[2], 0);
+            int t12b = getOrCreateThirdNode(n[1], n[2], 1);
+            int t23a = getOrCreateThirdNode(n[2], n[3], 0);
+            int t23b = getOrCreateThirdNode(n[2], n[3], 1);
+            int t30a = getOrCreateThirdNode(n[3], n[0], 0);
+            int t30b = getOrCreateThirdNode(n[3], n[0], 1);
+
+            // 4 interior nodes via bilinear interpolation
+            auto p0=pos(n[0]), p1=pos(n[1]), p2=pos(n[2]), p3=pos(n[3]);
+            auto bilinear = [&](double s, double t_) -> Vector3D {
+                return Vector3D(
+                    (1-s)*(1-t_)*p0.x + s*(1-t_)*p1.x + s*t_*p2.x + (1-s)*t_*p3.x,
+                    (1-s)*(1-t_)*p0.y + s*(1-t_)*p1.y + s*t_*p2.y + (1-s)*t_*p3.y,
+                    (1-s)*(1-t_)*p0.z + s*(1-t_)*p1.z + s*t_*p2.z + (1-s)*t_*p3.z);
+            };
+            auto v00 = bilinear(1.0/3, 1.0/3);
+            auto v10 = bilinear(2.0/3, 1.0/3);
+            auto v01 = bilinear(1.0/3, 2.0/3);
+            auto v11 = bilinear(2.0/3, 2.0/3);
+            int i00 = createNode(v00.x, v00.y, v00.z);
+            int i10 = createNode(v10.x, v10.y, v10.z);
+            int i01 = createNode(v01.x, v01.y, v01.z);
+            int i11 = createNode(v11.x, v11.y, v11.z);
+
+            // 9 sub-quads (3×3 grid, row-major bottom→top)
+            addQuad(pid, n[0],  t01a, i00,  t30a);
+            addQuad(pid, t01a, t01b, i10,  i00);
+            addQuad(pid, t01b, n[1],  t12a, i10);
+            addQuad(pid, t30a, i00,  i01,  t30b);
+            addQuad(pid, i00,  i10,  i11,  i01);
+            addQuad(pid, i10,  t12a, t12b, i11);
+            addQuad(pid, t30b, i01,  t23b, n[3]);
+            addQuad(pid, i01,  i11,  t23a, t23b);
+            addQuad(pid, i11,  t12b, n[2],  t23a);
+            totalRefined++;
+        }
+
+        // --- TRIA3 1:3 → 9 tris ---
+        for (const auto& t : triTargets) {
+            const auto& n = t.elem->nodeIds;
+            int pid = t.elem->partId;
+            removedElementIds_.insert(t.eid);
+
+            // Edge third-points
+            int t01a = getOrCreateThirdNode(n[0], n[1], 0);
+            int t01b = getOrCreateThirdNode(n[0], n[1], 1);
+            int t12a = getOrCreateThirdNode(n[1], n[2], 0);
+            int t12b = getOrCreateThirdNode(n[1], n[2], 1);
+            int t20a = getOrCreateThirdNode(n[2], n[0], 0);
+            int t20b = getOrCreateThirdNode(n[2], n[0], 1);
+
+            // Centroid (unique)
+            auto p0=pos(n[0]), p1=pos(n[1]), p2=pos(n[2]);
+            int ctr = createNode((p0.x+p1.x+p2.x)/3.0,
+                                 (p0.y+p1.y+p2.y)/3.0,
+                                 (p0.z+p1.z+p2.z)/3.0);
+
+            // 3 corner tris
+            addTri(pid, n[0],  t01a, t20b);
+            addTri(pid, t01b, n[1],  t12a);
+            addTri(pid, t20a, t12b, n[2]);
+
+            // 6 inner tris (fan around centroid)
+            addTri(pid, t01a, t01b, ctr);
+            addTri(pid, t01b, t12a, ctr);
+            addTri(pid, t12a, t12b, ctr);
+            addTri(pid, t12b, t20a, ctr);
+            addTri(pid, t20a, t20b, ctr);
+            addTri(pid, t20b, t01a, ctr);
+            totalRefined++;
+        }
+
+        // --- HEX8 1:3 → 27 hexes ---
+        // Face interior dedup: canonical bilinear ensures consistent node sharing
+        // Key: (sorted_face_4tuple, canonical_sub_index) → nodeId
+        std::map<std::pair<std::tuple<int,int,int,int>,int>, int> faceInteriorMap;
+
+        // Helper: get or create face interior node with canonical dedup
+        // c0,c1,c2,c3: face corners in element's cyclic order
+        // s,t: bilinear params in element's face space (1/3 or 2/3)
+        auto getOrCreateFaceInterior = [&](int c0, int c1, int c2, int c3,
+                                            double s, double t_) -> int {
+            // Compute canonical cyclic ordering (start from min ID, go toward smaller neighbor)
+            std::array<int,4> cyclic = {c0, c1, c2, c3};
+            int minIdx = 0;
+            for (int i = 1; i < 4; ++i)
+                if (cyclic[i] < cyclic[minIdx]) minIdx = i;
+            bool forward = (cyclic[(minIdx+1)%4] < cyclic[(minIdx+3)%4]);
+            std::array<int,4> canonical;
+            for (int i = 0; i < 4; ++i)
+                canonical[i] = forward ? cyclic[(minIdx+i)%4] : cyclic[(minIdx+4-i)%4];
+
+            // Find where each element corner maps in canonical ordering
+            int elemToCan[4];
+            for (int i = 0; i < 4; ++i)
+                for (int j = 0; j < 4; ++j)
+                    if (canonical[j] == cyclic[i]) elemToCan[i] = j;
+
+            // Affine transform (s,t) from element face space to canonical face space
+            static const double cST[4][2] = {{0,0},{1,0},{1,1},{0,1}};
+            double cs = cST[elemToCan[0]][0], ct = cST[elemToCan[0]][1];
+            double a = cST[elemToCan[1]][0]-cs, d = cST[elemToCan[1]][1]-ct;
+            double b = cST[elemToCan[3]][0]-cs, e = cST[elemToCan[3]][1]-ct;
+            double sp = a*s + b*t_ + cs;
+            double tp = d*s + e*t_ + ct;
+
+            // Canonical sub-index from canonical (s',t')
+            int si = (sp > 0.4) ? 1 : 0;
+            int ti = (tp > 0.4) ? 1 : 0;
+            int subIdx = si + 2*ti;
+
+            // Dedup key
+            std::array<int,4> sortedF = canonical;
+            std::sort(sortedF.begin(), sortedF.end());
+            auto fKey = std::make_tuple(sortedF[0], sortedF[1], sortedF[2], sortedF[3]);
+            auto fullKey = std::make_pair(fKey, subIdx);
+            auto fit = faceInteriorMap.find(fullKey);
+            if (fit != faceInteriorMap.end()) return fit->second;
+
+            // Compute position from canonical bilinear (bit-exact for shared faces)
+            auto p0=pos(canonical[0]), p1=pos(canonical[1]),
+                 p2=pos(canonical[2]), p3=pos(canonical[3]);
+            double x = (1-sp)*(1-tp)*p0.x + sp*(1-tp)*p1.x + sp*tp*p2.x + (1-sp)*tp*p3.x;
+            double y = (1-sp)*(1-tp)*p0.y + sp*(1-tp)*p1.y + sp*tp*p2.y + (1-sp)*tp*p3.y;
+            double z = (1-sp)*(1-tp)*p0.z + sp*(1-tp)*p1.z + sp*tp*p2.z + (1-sp)*tp*p3.z;
+            int newId = createNode(x, y, z);
+            faceInteriorMap[fullKey] = newId;
+            return newId;
+        };
+
+        for (const auto& t : hexTargets) {
+            const auto& n = t.elem->nodeIds;
+            int pid = t.elem->partId;
+            removedElementIds_.insert(t.eid);
+
+            // Get corner positions for trilinear (body interior only)
+            Vector3D p[8];
+            for (int i = 0; i < 8; ++i) p[i] = pos(n[i]);
+
+            auto trilinear = [&](double r, double s, double t_) -> Vector3D {
+                double w[8] = {
+                    (1-r)*(1-s)*(1-t_), r*(1-s)*(1-t_), r*s*(1-t_), (1-r)*s*(1-t_),
+                    (1-r)*(1-s)*t_,     r*(1-s)*t_,     r*s*t_,     (1-r)*s*t_
+                };
+                Vector3D result(0,0,0);
+                for (int i = 0; i < 8; ++i) {
+                    result.x += w[i] * p[i].x;
+                    result.y += w[i] * p[i].y;
+                    result.z += w[i] * p[i].z;
+                }
+                return result;
+            };
+
+            // cornerMap: (ci,cj,ck) → HEX8 node index
+            static const int cornerMap[2][2][2] = {
+                {{0, 4}, {3, 7}},
+                {{1, 5}, {2, 6}}
+            };
+
+            // Build 4×4×4 grid of node IDs
+            int grid[4][4][4];
+            double thirds[4] = {0.0, 1.0/3.0, 2.0/3.0, 1.0};
+
+            for (int gi = 0; gi < 4; ++gi) {
+                for (int gj = 0; gj < 4; ++gj) {
+                    for (int gk = 0; gk < 4; ++gk) {
+                        bool iB = (gi == 0 || gi == 3);
+                        bool jB = (gj == 0 || gj == 3);
+                        bool kB = (gk == 0 || gk == 3);
+
+                        if (iB && jB && kB) {
+                            // Corner node
+                            int ci=(gi==0)?0:1, cj=(gj==0)?0:1, ck=(gk==0)?0:1;
+                            grid[gi][gj][gk] = n[cornerMap[ci][cj][ck]];
+                        }
+                        else if (iB && jB && !kB) {
+                            int ci=(gi==0)?0:1, cj=(gj==0)?0:1;
+                            grid[gi][gj][gk] = getOrCreateThirdNode(
+                                n[cornerMap[ci][cj][0]], n[cornerMap[ci][cj][1]], gk-1);
+                        }
+                        else if (iB && !jB && kB) {
+                            int ci=(gi==0)?0:1, ck=(gk==0)?0:1;
+                            grid[gi][gj][gk] = getOrCreateThirdNode(
+                                n[cornerMap[ci][0][ck]], n[cornerMap[ci][1][ck]], gj-1);
+                        }
+                        else if (!iB && jB && kB) {
+                            int cj=(gj==0)?0:1, ck=(gk==0)?0:1;
+                            grid[gi][gj][gk] = getOrCreateThirdNode(
+                                n[cornerMap[0][cj][ck]], n[cornerMap[1][cj][ck]], gi-1);
+                        }
+                        else if (iB && !jB && !kB) {
+                            // Face interior: i=const face
+                            int ci = (gi==0)?0:1;
+                            grid[gi][gj][gk] = getOrCreateFaceInterior(
+                                n[cornerMap[ci][0][0]], n[cornerMap[ci][1][0]],
+                                n[cornerMap[ci][1][1]], n[cornerMap[ci][0][1]],
+                                thirds[gj], thirds[gk]);
+                        }
+                        else if (!iB && jB && !kB) {
+                            // Face interior: j=const face
+                            int cj = (gj==0)?0:1;
+                            grid[gi][gj][gk] = getOrCreateFaceInterior(
+                                n[cornerMap[0][cj][0]], n[cornerMap[1][cj][0]],
+                                n[cornerMap[1][cj][1]], n[cornerMap[0][cj][1]],
+                                thirds[gi], thirds[gk]);
+                        }
+                        else if (!iB && !jB && kB) {
+                            // Face interior: k=const face
+                            int ck = (gk==0)?0:1;
+                            grid[gi][gj][gk] = getOrCreateFaceInterior(
+                                n[cornerMap[0][0][ck]], n[cornerMap[1][0][ck]],
+                                n[cornerMap[1][1][ck]], n[cornerMap[0][1][ck]],
+                                thirds[gi], thirds[gj]);
+                        }
+                        else {
+                            // Body interior (unique, no dedup)
+                            auto v = trilinear(thirds[gi], thirds[gj], thirds[gk]);
+                            grid[gi][gj][gk] = createNode(v.x, v.y, v.z);
+                        }
+                    }
+                }
+            }
+
+            // 3×3×3 = 27 sub-hexes
+            for (int si = 0; si < 3; ++si) {
+                for (int sj = 0; sj < 3; ++sj) {
+                    for (int sk = 0; sk < 3; ++sk) {
+                        addHex(pid,
+                            grid[si][sj][sk],     grid[si+1][sj][sk],
+                            grid[si+1][sj+1][sk], grid[si][sj+1][sk],
+                            grid[si][sj][sk+1],   grid[si+1][sj][sk+1],
+                            grid[si+1][sj+1][sk+1], grid[si][sj+1][sk+1]);
+                    }
+                }
+            }
+            totalRefined++;
+        }
+
+        // TET4 1:3 not supported - already filtered out above
+    }
+
+    if (totalRefined == 0) {
+        infoMessages.push_back("  Refine 1:" + std::to_string(op.ratio) +
+            ": no eligible elements found" +
+            (op.targetPid > 0 ? " in part " + std::to_string(op.targetPid) : ""));
+        return true;
+    }
+
+    size_t nodesAdded = addedNodes_.size() - nodesBefore;
+    infoMessages.push_back("  Refine 1:" + std::to_string(op.ratio) +
+        ": refined " + std::to_string(totalRefined) + " elements, added " +
+        std::to_string(nodesAdded) + " nodes");
+
+    return true;
+}
+
+std::string ModelAssembler::formatTet10ElementLine(int eid, int pid, const std::array<int, 10>& nodes) const {
+    std::ostringstream oss;
+    // Card 1: EID PID
+    oss << std::setw(8) << eid << std::setw(8) << pid << "\n";
+    // Card 2: N1-N10
+    for (int i = 0; i < 10; ++i) {
+        oss << std::setw(8) << nodes[i];
+    }
+    return oss.str();
+}
+
+std::string ModelAssembler::formatHex20ElementLine(int eid, int pid, const std::array<int, 20>& nodes) const {
+    std::ostringstream oss;
+    // Card 1: EID PID
+    oss << std::setw(8) << eid << std::setw(8) << pid << "\n";
+    // Card 2: N1-N10 (first 10 nodes)
+    for (int i = 0; i < 10; ++i) {
+        oss << std::setw(8) << nodes[i];
+    }
+    oss << "\n";
+    // Card 3: N11-N20 (remaining 10 nodes)
+    for (int i = 10; i < 20; ++i) {
+        oss << std::setw(8) << nodes[i];
+    }
+    return oss.str();
+}
+
+std::string ModelAssembler::formatQuad8ElementLine(int eid, int pid, const std::array<int, 8>& nodes) const {
+    std::ostringstream oss;
+    // Single line: EID PID N1-N8
+    oss << std::setw(8) << eid << std::setw(8) << pid;
+    for (int i = 0; i < 8; ++i) {
+        oss << std::setw(8) << nodes[i];
+    }
+    return oss.str();
+}
+
+std::string ModelAssembler::formatTria6ElementLine(int eid, int pid, const std::array<int, 6>& nodes) const {
+    std::ostringstream oss;
+    // Single line: EID PID N1-N6 N7(0) N8(0)
+    oss << std::setw(8) << eid << std::setw(8) << pid;
+    for (int i = 0; i < 6; ++i) {
+        oss << std::setw(8) << nodes[i];
+    }
+    oss << std::setw(8) << 0 << std::setw(8) << 0;
+    return oss.str();
+}
+
+int ModelAssembler::parsePartIdFromLine(const std::string& line) const {
+    // Extract second integer field from element line (8-char fixed width)
+    if (line.size() < 16) return -1;
+    try {
+        std::string field = line.substr(8, 8);
+        size_t start = 0;
+        while (start < field.size() && std::isspace(field[start])) start++;
+        if (start >= field.size() || !std::isdigit(field[start])) return -1;
+        return std::stoi(field.substr(start));
+    } catch (...) {
+        return -1;
+    }
 }
 
 } // namespace KooRemapper

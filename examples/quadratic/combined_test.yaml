@@ -1,0 +1,6 @@
+base_model: shell_test.k
+output: combined_result
+
+operations:
+  - type: quad8
+  - type: tria6

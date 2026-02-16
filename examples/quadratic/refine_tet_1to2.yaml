@@ -1,0 +1,6 @@
+base_model: tet_test.k
+output: refine_tet_1to2_result
+
+operations:
+  - type: refine
+    ratio: 2

@@ -1,0 +1,5 @@
+base_model: shell_test.k
+output: tria6_result
+
+operations:
+  - type: tria6

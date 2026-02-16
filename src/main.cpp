@@ -1438,6 +1438,10 @@ int runAssemble(const std::string& configFile, const ConsoleOutput& console) {
             ok = assembler.applyIndent(op.indent, matE, matNu);
         } else if (op.type == AssemblyOperation::FORMSTRAIN) {
             ok = assembler.applyFormStrain(op.formstrain);
+        } else if (op.type == AssemblyOperation::TET10_CONVERT) {
+            ok = assembler.applyTet10Convert(op.tet10);
+        } else if (op.type == AssemblyOperation::REFINE) {
+            ok = assembler.applyRefine(op.refine);
         }
 
         if (!ok) {

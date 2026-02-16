@@ -1,0 +1,6 @@
+base_model: two_tets.k
+output: tet10_result
+
+operations:
+  - type: tet10
+    elform: 17

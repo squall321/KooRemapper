@@ -1,0 +1,6 @@
+base_model: two_hexes.k
+output: refine_hex_1to3_result
+
+operations:
+  - type: refine
+    ratio: 3
