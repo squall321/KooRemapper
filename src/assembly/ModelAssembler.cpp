@@ -1363,6 +1363,7 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
     bool inSectionShell = false;           // tracking *SECTION_SHELL for ELFORM rewrite
     int sectionShellDataLine = 0;          // data line counter within *SECTION_SHELL
     bool inDowngradeElement = false;        // true while inside a multi-line element being downgraded
+    bool skipSectionSolidPeri = false;     // true when skipping SECTION_SOLID to be replaced by PERI
 
     for (size_t i = 0; i < rawLines_.size(); ++i) {
         const std::string& line = rawLines_[i];
@@ -1421,8 +1422,26 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
             if (upper.find("*SECTION_SOLID") == 0 && upper.find("*SECTION_SOLID_") == std::string::npos) {
                 inSectionSolid = true;
                 sectionSolidDataLine = 0;
+                skipSectionSolidPeri = false;
+                // Peridynamics: lookahead to check SECID and replace keyword line
+                if (!periSectionIds_.empty()) {
+                    for (size_t j = i + 1; j < rawLines_.size(); ++j) {
+                        const std::string& nxt = rawLines_[j];
+                        if (isCommentLine(nxt) || nxt.find_first_not_of(" \t") == std::string::npos) continue;
+                        if (!nxt.empty() && nxt[0] == '*') break;
+                        try {
+                            int secId = std::stoi(nxt.substr(0, 10));
+                            if (periSectionIds_.count(secId)) {
+                                skipSectionSolidPeri = true;
+                                goto continueMainLoop;  // Skip *SECTION_SOLID keyword line entirely
+                            }
+                        } catch (...) {}
+                        break;
+                    }
+                }
             } else if (inSectionSolid && upper[0] == '*') {
                 inSectionSolid = false;
+                skipSectionSolidPeri = false;
             }
 
             // Track *SECTION_SHELL for ELFORM rewriting
@@ -1606,9 +1625,9 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
             continue;
         }
 
-        // Comment/empty lines: pass through
+        // Comment/empty lines: pass through (skip if inside peri section)
         if (isCommentLine(line) || trimmed.empty()) {
-            output << line << "\n";
+            if (!skipSectionSolidPeri) output << line << "\n";
             continue;
         }
 
@@ -1705,6 +1724,16 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                 output << formatHex20ElementLine(elemId, pid, hex20Elements_[elemId]) << "\n";
                 continue;
             }
+            // Disconnect: modified element nodes (CZM/MEFEM)
+            if (elemId > 0 && modifiedElementNodes_.count(elemId)) {
+                int pid = parsePartIdFromLine(line);
+                const auto& newNodes = modifiedElementNodes_[elemId];
+                std::ostringstream oss;
+                oss << std::setw(8) << elemId << std::setw(8) << pid;
+                for (int n = 0; n < 8; ++n) oss << std::setw(8) << newNodes[n];
+                output << oss.str() << "\n";
+                continue;
+            }
             output << line << "\n";
         }
         else if (currentSection == Section::SHELL_ELEMENT) {
@@ -1754,17 +1783,32 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                 output << formatTria6ElementLine(elemId, pid, tria6Elements_[elemId]) << "\n";
                 continue;
             }
+            // Disconnect: modified shell element nodes (CZM/MEFEM)
+            if (elemId > 0 && modifiedShellElementNodes_.count(elemId)) {
+                int pid = parsePartIdFromLine(line);
+                const auto& nn = modifiedShellElementNodes_[elemId];
+                std::ostringstream oss;
+                oss << std::setw(8) << elemId << std::setw(8) << pid;
+                for (int n = 0; n < 4; ++n) oss << std::setw(8) << nn[n];
+                output << oss.str() << "\n";
+                continue;
+            }
             output << line << "\n";
         }
         else {
             // *SECTION_SOLID ELFORM rewrite for TET10/HEX20 conversion
             if (inSectionSolid && !isCommentLine(line) && !line.empty() &&
                 line.find_first_not_of(" \t") != std::string::npos &&
-                !solidSectionElforms_.empty()) {
+                (!solidSectionElforms_.empty() || !periSectionIds_.empty())) {
                 sectionSolidDataLine++;
                 if (sectionSolidDataLine == 1) {
                     try {
                         int secId = std::stoi(line.substr(0, 10));
+                        // Peridynamics: skip this section (SECTION_SOLID_PERI added via addedKeywordBlocks_)
+                        if (periSectionIds_.count(secId)) {
+                            skipSectionSolidPeri = true;
+                            continue;  // Skip data line 1
+                        }
                         auto sit = solidSectionElforms_.find(secId);
                         if (sit != solidSectionElforms_.end()) {
                             std::string modified = line;
@@ -1799,8 +1843,11 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                     } catch (...) {}
                 }
             }
-            output << line << "\n";
+            if (!skipSectionSolidPeri) {
+                output << line << "\n";
+            }
         }
+        continueMainLoop:;
     }
 
     // Write output file
@@ -3529,6 +3576,491 @@ bool ModelAssembler::applyElform(const ElformOperation& op) {
     }
 
     return true;
+}
+
+// ============================================================================
+// Disconnect operation
+// ============================================================================
+bool ModelAssembler::applyDisconnect(const DisconnectOperation& op) {
+    // --- Build active element map (baseMesh_ not-removed + addedElements_ not-removed) ---
+    struct ElemData {
+        int pid;
+        std::array<int, 8> nodeIds;
+        bool isTet;
+        bool fromAdded;   // true = from addedElements_
+        int addedIdx;     // index into addedElements_ (if fromAdded)
+    };
+    std::map<int, ElemData> activeElems;
+
+    auto isTetNodeIds = [](const std::array<int,8>& nids) -> bool {
+        return nids[4] == nids[3] && nids[5] == nids[3] &&
+               nids[6] == nids[3] && nids[7] == nids[3];
+    };
+
+    for (const auto& [eid, elem] : baseMesh_.elements) {
+        if (removedElementIds_.count(eid)) continue;
+        if (elem.type == ElementType::QUAD4) continue;
+        bool isTet = (elem.type == ElementType::TET4 || isTetNodeIds(elem.nodeIds));
+        activeElems[eid] = {elem.partId, elem.nodeIds, isTet, false, -1};
+    }
+    for (int i = 0; i < static_cast<int>(addedElements_.size()); ++i) {
+        const auto& ae = addedElements_[i];
+        if (removedElementIds_.count(ae.id)) continue;
+        if (ae.isTshell) continue;
+        bool isTet = isTetNodeIds(ae.nodeIds);
+        activeElems[ae.id] = {ae.pid, ae.nodeIds, isTet, true, i};
+    }
+
+    // Helper: get node position from baseMesh_ or addedNodes_
+    auto getNodeXYZ = [&](int nid, double& x, double& y, double& z) {
+        auto it = baseMesh_.nodes.find(nid);
+        if (it != baseMesh_.nodes.end()) {
+            x = it->second.position.x; y = it->second.position.y; z = it->second.position.z;
+            return;
+        }
+        for (const auto& an : addedNodes_) {
+            if (an.id == nid) { x = an.x; y = an.y; z = an.z; return; }
+        }
+        x = y = z = 0.0;
+    };
+
+    // Helper: get HEX8 face nodes from nodeIds array
+    auto getHexFaceNodes = [](const std::array<int,8>& nids, int faceIdx) -> std::array<int,4> {
+        auto ln = Element::getFaceLocalNodes(faceIdx);
+        return {nids[ln[0]], nids[ln[1]], nids[ln[2]], nids[ln[3]]};
+    };
+
+    // Helper: update element connectivity (baseMesh_ or addedElements_)
+    auto updateElemNodes = [&](int eid, const std::array<int,8>& newNodes) {
+        auto& ed = activeElems.at(eid);
+        ed.nodeIds = newNodes;
+        if (ed.fromAdded) {
+            addedElements_[ed.addedIdx].nodeIds = newNodes;
+        } else {
+            modifiedElementNodes_[eid] = newNodes;
+        }
+    };
+
+    // --- Shell (QUAD4) active element map ---
+    struct ShellElemData {
+        int pid;
+        std::array<int, 4> nodeIds;
+        bool fromAdded;
+        int addedIdx;
+    };
+    std::map<int, ShellElemData> activeShellElems;
+
+    for (const auto& [eid, elem] : baseMesh_.elements) {
+        if (removedElementIds_.count(eid)) continue;
+        if (elem.type != ElementType::QUAD4) continue;
+        activeShellElems[eid] = {elem.partId,
+            {elem.nodeIds[0], elem.nodeIds[1], elem.nodeIds[2], elem.nodeIds[3]},
+            false, -1};
+    }
+    for (int i = 0; i < static_cast<int>(addedShellElements_.size()); ++i) {
+        const auto& ae = addedShellElements_[i];
+        if (removedElementIds_.count(ae.id)) continue;
+        activeShellElems[ae.id] = {ae.pid, ae.nodeIds, true, i};
+    }
+
+    auto updateShellElemNodes = [&](int eid, const std::array<int,4>& newNodes) {
+        auto& sed = activeShellElems.at(eid);
+        sed.nodeIds = newNodes;
+        if (sed.fromAdded) {
+            addedShellElements_[sed.addedIdx].nodeIds = newNodes;
+        } else {
+            modifiedShellElementNodes_[eid] = newNodes;
+        }
+    };
+
+    // --- Step 1: Collect target elements ---
+    std::vector<int> targetElems;
+    for (const auto& [eid, ed] : activeElems) {
+        if (op.targetPid != 0 && ed.pid != op.targetPid) continue;
+        targetElems.push_back(eid);
+    }
+    std::vector<int> targetShellElems;
+    for (const auto& [eid, sed] : activeShellElems) {
+        if (op.targetPid != 0 && sed.pid != op.targetPid) continue;
+        targetShellElems.push_back(eid);
+    }
+
+    if (targetElems.empty() && targetShellElems.empty()) {
+        errorMessage_ = "disconnect: no elements found for target";
+        return false;
+    }
+
+    // --- Step 2: Build face adjacency ---
+    using FaceKey = std::array<int, 4>;
+    struct FaceEntry { int elemId; int faceIdx; };
+    std::map<FaceKey, std::vector<FaceEntry>> faceToElements;
+
+    auto makeFaceKey = [](const std::array<int, 4>& faceNodes) -> FaceKey {
+        FaceKey key = faceNodes;
+        std::sort(key.begin(), key.end());
+        return key;
+    };
+
+    for (int eid : targetElems) {
+        const auto& ed = activeElems.at(eid);
+        if (ed.isTet) {
+            int n[4] = {ed.nodeIds[0], ed.nodeIds[1], ed.nodeIds[2], ed.nodeIds[3]};
+            std::array<std::array<int,3>, 4> tetFaces = {{
+                {n[0], n[2], n[1]}, {n[0], n[1], n[3]},
+                {n[1], n[2], n[3]}, {n[0], n[3], n[2]}
+            }};
+            for (int f = 0; f < 4; ++f) {
+                FaceKey key = {tetFaces[f][0], tetFaces[f][1], tetFaces[f][2], tetFaces[f][2]};
+                std::sort(key.begin(), key.end());
+                faceToElements[key].push_back({eid, f});
+            }
+        } else {
+            for (int f = 0; f < Element::NUM_FACES; ++f) {
+                auto faceNodes = getHexFaceNodes(ed.nodeIds, f);
+                FaceKey key = makeFaceKey(faceNodes);
+                faceToElements[key].push_back({eid, f});
+            }
+        }
+    }
+
+    // --- Step 2b: Shell face adjacency (QUAD4 shell: all 4 nodes = face key) ---
+    // Two QUAD4 shell elements sharing all 4 nodes (coincident faces) = interface
+    struct ShellSharedFace {
+        int elem1;
+        int elem2;
+        FaceKey faceKey;  // sorted 4 node IDs
+        bool interPart;
+    };
+    std::vector<ShellSharedFace> shellSharedFaces;
+    {
+        std::map<FaceKey, std::vector<int>> shellFaceToElems;  // faceKey → [elemIds]
+        for (int eid : targetShellElems) {
+            const auto& sed = activeShellElems.at(eid);
+            FaceKey key = {sed.nodeIds[0], sed.nodeIds[1], sed.nodeIds[2], sed.nodeIds[3]};
+            std::sort(key.begin(), key.end());
+            shellFaceToElems[key].push_back(eid);
+        }
+        for (const auto& [faceKey, elems] : shellFaceToElems) {
+            if (elems.size() == 2) {
+                int pid1 = activeShellElems.at(elems[0]).pid;
+                int pid2 = activeShellElems.at(elems[1]).pid;
+                shellSharedFaces.push_back({elems[0], elems[1], faceKey, pid1 != pid2});
+            }
+        }
+    }
+
+    // --- Step 3: Identify shared solid faces ---
+    struct SharedFace {
+        int elem1, face1;
+        int elem2, face2;
+        FaceKey faceKey;
+        bool interPart;
+    };
+    std::vector<SharedFace> sharedFaces;
+
+    for (const auto& [faceKey, entries] : faceToElements) {
+        if (entries.size() == 2) {
+            int pid1 = activeElems.at(entries[0].elemId).pid;
+            int pid2 = activeElems.at(entries[1].elemId).pid;
+            sharedFaces.push_back({
+                entries[0].elemId, entries[0].faceIdx,
+                entries[1].elemId, entries[1].faceIdx,
+                faceKey, pid1 != pid2
+            });
+        }
+    }
+
+    // --- Mode dispatch ---
+    if (op.mode == "full") {
+        // ===== MODE 1: Full Disconnect (Peridynamics) =====
+        int newNodeCount = 0;
+        for (int eid : targetElems) {
+            const auto& ed = activeElems.at(eid);
+            int nodeCount = ed.isTet ? 4 : 8;
+            std::array<int, 8> newNodeIds;
+
+            for (int n = 0; n < nodeCount; ++n) {
+                int origId = ed.nodeIds[n];
+                double x, y, z;
+                getNodeXYZ(origId, x, y, z);
+                int newId = ++maxNodeId_;
+                addedNodes_.push_back({newId, x, y, z});
+                newNodeIds[n] = newId;
+                newNodeCount++;
+            }
+            if (ed.isTet) {
+                for (int n = 4; n < 8; ++n) newNodeIds[n] = newNodeIds[3];
+            }
+
+            removedElementIds_.insert(eid);
+            ElementType etype = ed.isTet ? ElementType::TET4 : ElementType::HEX8;
+            addedElements_.push_back({eid, ed.pid, newNodeIds, etype, false});
+        }
+
+        // Register sections for SECTION_SOLID_PERI conversion
+        std::set<int> seenSecIds;
+        for (int eid : targetElems) {
+            const auto& ed = activeElems.at(eid);
+            auto pit = baseMesh_.parts.find(ed.pid);
+            if (pit != baseMesh_.parts.end() && pit->second.sectionId > 0) {
+                int secId = pit->second.sectionId;
+                periSectionIds_.insert(secId);
+                if (!seenSecIds.count(secId)) {
+                    seenSecIds.insert(secId);
+                    std::ostringstream kw;
+                    kw << "$# SECTION_SOLID_PERI generated by disconnect (full)\n";
+                    kw << "$#  secid    elform\n";
+                    kw << std::setw(10) << secId << std::setw(10) << 48 << "\n";
+                    kw << "$#      dr     ptype\n";
+                    kw << "      1.01         1\n";
+                    addedKeywordBlocks_.push_back("*SECTION_SOLID_PERI\n" + kw.str());
+                }
+            }
+        }
+
+        infoMessages.push_back("  Disconnect (full): " + std::to_string(targetElems.size()) +
+                               " elements, " + std::to_string(newNodeCount) + " new nodes");
+        return true;
+    }
+    else if (op.mode == "czm" || op.mode == "mefem") {
+        // ===== MODE 2/3: Selective interface disconnect =====
+        // --- Solid inter-part faces ---
+        std::vector<SharedFace> interPartFaces;
+        for (const auto& sf : sharedFaces) {
+            if (sf.interPart) interPartFaces.push_back(sf);
+        }
+
+        // --- Shell inter-part faces ---
+        std::vector<ShellSharedFace> shellInterPartFaces;
+        for (const auto& sf : shellSharedFaces) {
+            if (sf.interPart) shellInterPartFaces.push_back(sf);
+        }
+
+        if (interPartFaces.empty() && shellInterPartFaces.empty()) {
+            errorMessage_ = "disconnect: no inter-part faces found (different PIDs sharing faces)";
+            return false;
+        }
+
+        // Collect all interface node IDs
+        std::set<int> interfaceNodeIds;
+        for (const auto& sf : interPartFaces)
+            for (int nid : sf.faceKey) interfaceNodeIds.insert(nid);
+        for (const auto& sf : shellInterPartFaces)
+            for (int nid : sf.faceKey) interfaceNodeIds.insert(nid);
+
+        // Map: nodeId → set of PIDs using it
+        std::map<int, std::set<int>> nodeToPartIds;
+
+        for (int eid : targetElems) {
+            const auto& ed = activeElems.at(eid);
+            for (int n = 0; n < 8; ++n) {
+                int nid = ed.nodeIds[n];
+                if (interfaceNodeIds.count(nid)) nodeToPartIds[nid].insert(ed.pid);
+            }
+        }
+        for (int eid : targetShellElems) {
+            const auto& sed = activeShellElems.at(eid);
+            for (int n = 0; n < 4; ++n) {
+                int nid = sed.nodeIds[n];
+                if (interfaceNodeIds.count(nid)) nodeToPartIds[nid].insert(sed.pid);
+            }
+        }
+
+        // Create duplicate nodes: lowest PID keeps original, others get copies
+        std::map<std::pair<int,int>, int> nodePartRemap;
+        int dupNodeCount = 0;
+
+        for (const auto& [nid, pids] : nodeToPartIds) {
+            if (pids.size() <= 1) continue;
+            int primaryPid = *pids.begin();
+            for (int pid : pids) {
+                if (pid == primaryPid) {
+                    nodePartRemap[{nid, pid}] = nid;
+                } else {
+                    double x, y, z;
+                    getNodeXYZ(nid, x, y, z);
+                    int newId = ++maxNodeId_;
+                    addedNodes_.push_back({newId, x, y, z});
+                    nodePartRemap[{nid, pid}] = newId;
+                    dupNodeCount++;
+                }
+            }
+        }
+
+        // Update solid element connectivity
+        for (int eid : targetElems) {
+            const auto& ed = activeElems.at(eid);
+            bool modified = false;
+            std::array<int, 8> newNodes = ed.nodeIds;
+            for (int n = 0; n < 8; ++n) {
+                int nid = ed.nodeIds[n];
+                auto it = nodePartRemap.find({nid, ed.pid});
+                if (it != nodePartRemap.end() && it->second != nid) {
+                    newNodes[n] = it->second;
+                    modified = true;
+                }
+            }
+            if (modified) updateElemNodes(eid, newNodes);
+        }
+        // Update shell element connectivity
+        for (int eid : targetShellElems) {
+            const auto& sed = activeShellElems.at(eid);
+            bool modified = false;
+            std::array<int, 4> newNodes = sed.nodeIds;
+            for (int n = 0; n < 4; ++n) {
+                int nid = sed.nodeIds[n];
+                auto it = nodePartRemap.find({nid, sed.pid});
+                if (it != nodePartRemap.end() && it->second != nid) {
+                    newNodes[n] = it->second;
+                    modified = true;
+                }
+            }
+            if (modified) updateShellElemNodes(eid, newNodes);
+        }
+
+        if (op.mode == "czm") {
+            int cohPartId = op.cohesivePartId > 0 ? op.cohesivePartId : (++maxPartId_);
+            int cohSecIdSolid = ++maxSectionId_;
+            int cohSecIdShell = (shellInterPartFaces.empty()) ? cohSecIdSolid : (++maxSectionId_);
+            int cohMatId = ++maxMaterialId_;
+            int cohElemCount = 0;
+
+            // --- Solid cohesive elements (ELFORM=19) ---
+            for (const auto& sf : interPartFaces) {
+                const auto& ed1 = activeElems.at(sf.elem1);
+                const auto& ed2 = activeElems.at(sf.elem2);
+                int pidLow  = std::min(ed1.pid, ed2.pid);
+                int pidHigh = std::max(ed1.pid, ed2.pid);
+                int elemLow = (ed1.pid == pidLow) ? sf.elem1 : sf.elem2;
+                int faceLow = (ed1.pid == pidLow) ? sf.face1 : sf.face2;
+                const auto& eLow = activeElems.at(elemLow);
+
+                std::array<int, 4> bottomFaceNodes;
+                if (!eLow.isTet) {
+                    bottomFaceNodes = getHexFaceNodes(eLow.nodeIds, faceLow);
+                } else {
+                    int n[4] = {eLow.nodeIds[0], eLow.nodeIds[1], eLow.nodeIds[2], eLow.nodeIds[3]};
+                    std::array<std::array<int,3>, 4> tetFaces = {{
+                        {n[0], n[2], n[1]}, {n[0], n[1], n[3]},
+                        {n[1], n[2], n[3]}, {n[0], n[3], n[2]}
+                    }};
+                    bottomFaceNodes = {tetFaces[faceLow][0], tetFaces[faceLow][1],
+                                       tetFaces[faceLow][2], tetFaces[faceLow][2]};
+                }
+
+                std::array<int, 8> cohNodes;
+                for (int i = 0; i < 4; ++i) {
+                    int origNid = bottomFaceNodes[i];
+                    auto itL = nodePartRemap.find({origNid, pidLow});
+                    cohNodes[i]     = (itL != nodePartRemap.end()) ? itL->second : origNid;
+                    auto itH = nodePartRemap.find({origNid, pidHigh});
+                    cohNodes[4 + i] = (itH != nodePartRemap.end()) ? itH->second : origNid;
+                }
+                int cohEid = ++maxElementId_;
+                addedElements_.push_back({cohEid, cohPartId, cohNodes, ElementType::HEX8, false});
+                cohElemCount++;
+            }
+
+            // --- Shell cohesive elements (ELFORM=19, 8-node: bottom+top QUAD4) ---
+            // For coincident QUAD4 shells from different parts:
+            // Bottom (lower PID): original 4 nodes; Top (higher PID): 4 duplicate nodes
+            for (const auto& sf : shellInterPartFaces) {
+                const auto& sed1 = activeShellElems.at(sf.elem1);
+                const auto& sed2 = activeShellElems.at(sf.elem2);
+                int pidLow  = std::min(sed1.pid, sed2.pid);
+                int pidHigh = std::max(sed1.pid, sed2.pid);
+                int elemLow = (sed1.pid == pidLow) ? sf.elem1 : sf.elem2;
+                const auto& seLow = activeShellElems.at(elemLow);
+
+                // The face key is sorted; we need the actual ordered nodes from the lower element
+                std::array<int, 8> cohNodes;
+                for (int i = 0; i < 4; ++i) {
+                    int origNid = seLow.nodeIds[i];
+                    auto itL = nodePartRemap.find({origNid, pidLow});
+                    cohNodes[i]     = (itL != nodePartRemap.end()) ? itL->second : origNid;
+                    auto itH = nodePartRemap.find({origNid, pidHigh});
+                    cohNodes[4 + i] = (itH != nodePartRemap.end()) ? itH->second : origNid;
+                }
+                int cohEid = ++maxElementId_;
+                addedElements_.push_back({cohEid, cohPartId, cohNodes, ElementType::HEX8, false});
+                cohElemCount++;
+            }
+
+            // Generate keyword blocks
+            std::ostringstream kwBlock;
+            kwBlock << "*MAT_COHESIVE_MIXED_MODE\n";
+            kwBlock << "$#     mid        ro     roflg   intfail        en        et       gic      giic\n";
+            kwBlock << std::setw(10) << cohMatId
+                    << "     0.0         0       0.0     1.0E6     1.0E6       1.0       2.0\n";
+            kwBlock << "$#      xmu         t         s       und       utd     gamma\n";
+            kwBlock << "       1.0      50.0      30.0       0.0       0.0       1.0\n";
+            if (!interPartFaces.empty()) {
+                kwBlock << "*SECTION_SOLID\n";
+                kwBlock << "$#  secid    elform\n";
+                kwBlock << std::setw(10) << cohSecIdSolid << std::setw(10) << 19 << "\n";
+            }
+            if (!shellInterPartFaces.empty() && cohSecIdShell != cohSecIdSolid) {
+                kwBlock << "*SECTION_SOLID\n";
+                kwBlock << "$#  secid    elform\n";
+                kwBlock << std::setw(10) << cohSecIdShell << std::setw(10) << 19 << "\n";
+            }
+            int usedSecId = interPartFaces.empty() ? cohSecIdShell : cohSecIdSolid;
+            kwBlock << "*PART\n";
+            kwBlock << "Cohesive interface\n";
+            kwBlock << "$#     pid     secid       mid\n";
+            kwBlock << std::setw(10) << cohPartId << std::setw(10) << usedSecId
+                    << std::setw(10) << cohMatId << "\n";
+            addedKeywordBlocks_.push_back(kwBlock.str());
+
+            int totalIfaces = static_cast<int>(interPartFaces.size() + shellInterPartFaces.size());
+            infoMessages.push_back("  Disconnect (czm): " + std::to_string(totalIfaces) +
+                                   " interface faces, " + std::to_string(dupNodeCount) +
+                                   " new nodes, " + std::to_string(cohElemCount) + " cohesive elements");
+        }
+        else {
+            // MEFEM mode
+            int setIdBase = maxPartId_ + 1000;
+            int constraintCount = 0;
+            std::ostringstream kwBlock;
+
+            for (const auto& [nid, pids] : nodeToPartIds) {
+                if (pids.size() <= 1) continue;
+                int setId = setIdBase + constraintCount;
+                kwBlock << "*SET_NODE_LIST\n";
+                kwBlock << "$#     sid\n";
+                kwBlock << std::setw(10) << setId << "\n";
+                kwBlock << "$#    nid1      nid2      nid3      nid4      nid5      nid6      nid7      nid8\n";
+
+                std::vector<int> nodeGroup;
+                for (int pid : pids) {
+                    auto it = nodePartRemap.find({nid, pid});
+                    if (it != nodePartRemap.end()) nodeGroup.push_back(it->second);
+                }
+                for (size_t i = 0; i < nodeGroup.size(); ++i) {
+                    kwBlock << std::setw(10) << nodeGroup[i];
+                    if ((i + 1) % 8 == 0 || i + 1 == nodeGroup.size()) kwBlock << "\n";
+                }
+
+                kwBlock << "*CONSTRAINED_TIED_NODES_FAILURE\n";
+                kwBlock << "$#    nsid      eppf     etype\n";
+                kwBlock << std::setw(10) << setId
+                        << std::setw(10) << std::fixed << std::setprecision(3) << op.failureStrain
+                        << std::setw(10) << 1 << "\n";
+                constraintCount++;
+            }
+
+            addedKeywordBlocks_.push_back(kwBlock.str());
+            int totalIfaces = static_cast<int>(interPartFaces.size() + shellInterPartFaces.size());
+            infoMessages.push_back("  Disconnect (mefem): " + std::to_string(totalIfaces) +
+                                   " interface faces, " + std::to_string(dupNodeCount) + " new nodes, " +
+                                   std::to_string(constraintCount) + " tied node groups");
+        }
+
+        return true;
+    }
+
+    errorMessage_ = "disconnect: unknown mode '" + op.mode + "' (use full/czm/mefem)";
+    return false;
 }
 
 int ModelAssembler::parsePartIdFromLine(const std::string& line) const {

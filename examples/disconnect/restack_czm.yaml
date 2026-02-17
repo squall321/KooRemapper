@@ -1,0 +1,25 @@
+base_model: three_layer.k
+output: restack_czm_result
+
+operations:
+  - type: restack
+    target_pid: 1
+    direction: z
+    element_type: solid
+    layers:
+      - thickness: 1.0
+        material_card: |
+          *MAT_ELASTIC
+               MAT01  7.85E-09    210000       0.3
+      - thickness: 1.0
+        material_card: |
+          *MAT_ELASTIC
+               MAT02  7.85E-09    140000       0.3
+      - thickness: 1.0
+        material_card: |
+          *MAT_ELASTIC
+               MAT03  7.85E-09     70000       0.3
+
+  - type: disconnect
+    mode: czm
+    target_pid: 0

@@ -49,6 +49,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
     bool inOperationItem = false;
     bool inLayersList = false;
     bool inLayerItem = false;
+    int layersKeyIndent = 0;   // indent of "layers:" key, used to guard layer item detection
     bool readingMaterialCard = false;
     int materialCardBaseIndent = 0;
     bool inShapeSection = false;
@@ -129,8 +130,15 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
 
         // Parse based on current section
         if (section == Section::OPERATIONS) {
+            // Exit layer context if we've dedented back to or below the layers: key level
+            if ((inLayersList || inLayerItem) && indent <= layersKeyIndent) {
+                inLayersList = false;
+                inLayerItem = false;
+            }
+
             // --- Layer list items: "      - thickness: 0.5" ---
-            if (inLayersList && trimmed[0] == '-' && trimmed.size() >= 2 && trimmed[1] == ' ') {
+            // Only match if indent is strictly greater than layers: key indent (to avoid matching next operation's "  - type:")
+            if (inLayersList && indent > layersKeyIndent && trimmed[0] == '-' && trimmed.size() >= 2 && trimmed[1] == ' ') {
                 std::string afterDash = trim(trimmed.substr(2));
                 size_t colonPos = afterDash.find(':');
                 if (colonPos != std::string::npos) {
@@ -233,6 +241,8 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             op.type = AssemblyOperation::REFINE;
                         } else if (val == "elform") {
                             op.type = AssemblyOperation::ELFORM;
+                        } else if (val == "disconnect") {
+                            op.type = AssemblyOperation::DISCONNECT;
                         } else {
                             throw std::runtime_error("Unknown operation type: " + val);
                         }
@@ -296,6 +306,8 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                                 op.refine.targetPid = pid;
                             } else if (op.type == AssemblyOperation::ELFORM) {
                                 op.elform.targetPid = pid;
+                            } else if (op.type == AssemblyOperation::DISCONNECT) {
+                                op.disconnect.targetPid = pid;
                             }
                         } else if (op.type == AssemblyOperation::BEND) {
                             if (key == "plane") op.bend.plane = val;
@@ -328,6 +340,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             else if (key == "layers") {
                                 inLayersList = true;
                                 inLayerItem = false;
+                                layersKeyIndent = indent;
                             }
                         } else if (op.type == AssemblyOperation::INDENT) {
                             if (key == "plane") op.indent.plane = val;
@@ -364,6 +377,10 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                                     op.elform.targetElform = val;
                                 }
                             }
+                        } else if (op.type == AssemblyOperation::DISCONNECT) {
+                            if (key == "mode") op.disconnect.mode = val;
+                            else if (key == "cohesive_part_id") op.disconnect.cohesivePartId = std::stoi(val);
+                            else if (key == "failure_strain") op.disconnect.failureStrain = std::stod(val);
                         }
                     } catch (...) {}
                 }

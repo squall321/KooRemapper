@@ -1,0 +1,7 @@
+base_model: two_hex.k
+output: disconnect_full_result
+
+operations:
+  - type: disconnect
+    mode: full
+    target_pid: 0

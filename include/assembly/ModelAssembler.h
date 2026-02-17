@@ -34,6 +34,7 @@ public:
     bool applyTet10Convert(const Tet10ConvertOperation& op);
     bool applyRefine(const RefineOperation& op);
     bool applyElform(const ElformOperation& op);
+    bool applyDisconnect(const DisconnectOperation& op);
     bool writeOutput(const std::string& outputPrefix);
 
     const std::vector<ElementResult>& getAccumulatedResults() const {
@@ -127,6 +128,11 @@ private:
 
     // Elform downgrade tracking
     std::set<int> downgradeElementIds_;  // Element IDs that need downgrade (quadratic→linear)
+
+    // Disconnect: element connectivity rewrite (CZM/MEFEM modes)
+    std::map<int, std::array<int,8>> modifiedElementNodes_;  // solid elemId → new nodeIds
+    std::map<int, std::array<int,4>> modifiedShellElementNodes_;  // shell elemId → new nodeIds
+    std::set<int> periSectionIds_;  // Section IDs to convert to *SECTION_SOLID_PERI
 
     std::string errorMessage_;
 

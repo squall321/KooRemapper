@@ -1,0 +1,7 @@
+base_model: two_hex_2part.k
+output: disconnect_czm_result
+
+operations:
+  - type: disconnect
+    mode: czm
+    target_pid: 0

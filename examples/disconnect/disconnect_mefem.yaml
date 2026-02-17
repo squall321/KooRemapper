@@ -1,0 +1,8 @@
+base_model: two_hex_2part.k
+output: disconnect_mefem_result
+
+operations:
+  - type: disconnect
+    mode: mefem
+    target_pid: 0
+    failure_strain: 0.085

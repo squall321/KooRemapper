@@ -88,8 +88,15 @@ struct ElformOperation {
     std::string targetElform; // ELFORM number (as string) or alias name
 };
 
+struct DisconnectOperation {
+    int targetPid = 0;           // 0 = all parts
+    std::string mode = "full";   // full | czm | mefem
+    int cohesivePartId = 0;      // CZM: cohesive part ID (0 = auto)
+    double failureStrain = 0.0;  // MEFEM: EPPF value
+};
+
 struct AssemblyOperation {
-    enum Type { REPLACE, SQUEEZE, RESTACK, BEND, INDENT, FORMSTRAIN, TET10_CONVERT, REFINE, ELFORM };
+    enum Type { REPLACE, SQUEEZE, RESTACK, BEND, INDENT, FORMSTRAIN, TET10_CONVERT, REFINE, ELFORM, DISCONNECT };
     Type type;
     ReplaceOperation replace;
     SqueezeOperation squeeze;
@@ -100,6 +107,7 @@ struct AssemblyOperation {
     Tet10ConvertOperation tet10;
     RefineOperation refine;
     ElformOperation elform;
+    DisconnectOperation disconnect;
 };
 
 struct AssemblyConfig {
