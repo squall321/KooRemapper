@@ -1,0 +1,6 @@
+base_model: elform_quad_upgraded.k
+output: elform_quad_downgraded
+
+operations:
+  - type: elform
+    target_elform: 2  # QUAD8 → QUAD4

@@ -1442,6 +1442,8 @@ int runAssemble(const std::string& configFile, const ConsoleOutput& console) {
             ok = assembler.applyTet10Convert(op.tet10);
         } else if (op.type == AssemblyOperation::REFINE) {
             ok = assembler.applyRefine(op.refine);
+        } else if (op.type == AssemblyOperation::ELFORM) {
+            ok = assembler.applyElform(op.elform);
         }
 
         if (!ok) {

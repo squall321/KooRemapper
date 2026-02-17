@@ -1,0 +1,6 @@
+base_model: simple_hex.k
+output: elform_case_a_result
+
+operations:
+  - type: elform
+    target_elform: 2  # Change from ELFORM 1 to 2 (constant stress → fully integrated)

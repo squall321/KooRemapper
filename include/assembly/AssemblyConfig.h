@@ -83,8 +83,13 @@ struct RefineOperation {
     int ratio = 2;            // 2 or 3
 };
 
+struct ElformOperation {
+    int targetPid = 0;        // 0 = all parts
+    std::string targetElform; // ELFORM number (as string) or alias name
+};
+
 struct AssemblyOperation {
-    enum Type { REPLACE, SQUEEZE, RESTACK, BEND, INDENT, FORMSTRAIN, TET10_CONVERT, REFINE };
+    enum Type { REPLACE, SQUEEZE, RESTACK, BEND, INDENT, FORMSTRAIN, TET10_CONVERT, REFINE, ELFORM };
     Type type;
     ReplaceOperation replace;
     SqueezeOperation squeeze;
@@ -94,6 +99,7 @@ struct AssemblyOperation {
     FormStrainOperation formstrain;
     Tet10ConvertOperation tet10;
     RefineOperation refine;
+    ElformOperation elform;
 };
 
 struct AssemblyConfig {

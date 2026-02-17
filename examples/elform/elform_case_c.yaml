@@ -1,0 +1,6 @@
+base_model: elform_case_b_result.k
+output: elform_case_c_result
+
+operations:
+  - type: elform
+    target_elform: 13  # TET10 → TET4 (downgrade)

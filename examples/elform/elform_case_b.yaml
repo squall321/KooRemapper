@@ -1,0 +1,6 @@
+base_model: ../../examples/tet10/two_tets.k
+output: elform_case_b_result
+
+operations:
+  - type: elform
+    target_elform: 17  # TET4 → TET10

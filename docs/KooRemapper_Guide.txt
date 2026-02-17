@@ -10,7 +10,7 @@
   3. assemble - 전체 모델 조립
      3.1  YAML 설정 포맷
      3.2  operation 상세 (replace/squeeze/restack/bend/indent/formstrain/
-          tet10/hex20/quad8/tria6/refine)
+          tet10/hex20/quad8/tria6/refine/elform)
      3.3-3.18  예제 모음
      3.19 bend 이론 상세 (곡률, 변형률, Kirchhoff 판이론)
      3.20 indent 이론 상세 (SDF, quarter-arc, 굽힘 응력)
@@ -157,6 +157,10 @@ KooRemapper는 LS-DYNA 메쉬 전처리 도구입니다.
     - type: refine                 # 요소 세분화 (subdivision)
       target_pid: <정수>          # 0 = 전체 (선택)
       ratio: 2                    # 2 또는 3 (엣지 분할 수)
+
+    - type: elform                 # ELFORM 변경 (통합)
+      target_pid: <정수>          # 0 = 전체 (선택)
+      target_elform: <정수/문자열> # ELFORM 번호 또는 별칭
 
   dynamic_relaxation: true/false  # 선택: DR 키워드 자동 삽입 (기본: false)
 
@@ -431,6 +435,70 @@ KooRemapper는 LS-DYNA 메쉬 전처리 도구입니다.
   * writeOutput 변경 불필요 (기존 removedElementIds/addedElements 메커니즘 활용)
   * 비정제 인접 파트와의 hanging node는 사용자가 별도 처리
     (*CONTACT_TIED_SURFACE_TO_SURFACE 등)
+
+[elform]
+  대상 파트의 ELFORM(요소 적분 방식)을 변경합니다.
+  같은 차수 내 변경, 1차→2차 업그레이드, 2차→1차 다운그레이드를 통합 지원합니다.
+
+  동작 모드:
+    A) 같은 차수 변경 (ELFORM만 교체)
+       예: HEX8 ELFORM 1→2, QUAD4 ELFORM 2→16
+       *SECTION_SOLID / *SECTION_SHELL의 ELFORM 값만 변경
+
+    B) 업그레이드 (1차→2차, mid-node 자동 생성)
+       예: TET4→TET10 (ELFORM 13→17), HEX8→HEX20 (ELFORM 1→23)
+       기존 tet10/hex20/quad8/tria6 operation과 동일 동작
+
+    C) 다운그레이드 (2차→1차, mid-node 제거)
+       예: TET10→TET4 (ELFORM 17→13), HEX20→HEX8 (ELFORM 23→1)
+       multi-line 요소를 single-line으로 변환, 코너 노드만 유지
+
+  target_elform: 숫자 또는 별칭(alias)으로 지정 가능
+
+  Solid ELFORM 별칭:
+    ┌────────┬────────────────────────────┬──────┬──────────┐
+    │ ELFORM │ 별칭                       │ 노드 │ 적분점   │
+    ├────────┼────────────────────────────┼──────┼──────────┤
+    │  1     │ constant_stress            │ HEX8 │ 1        │
+    │  2     │ fully_integrated           │ HEX8 │ 8        │
+    │  3     │ fully_integrated_qm        │ HEX8 │ 8        │
+    │ -1     │ fully_integrated_nodal     │ HEX8 │ 8        │
+    │ -2     │ fully_integrated_reduced   │ HEX8 │ 8        │
+    │ 13     │ tet4                       │ TET4 │ 1        │
+    │ 10     │ tet4_10pt                  │ TET4 │ 10       │
+    │ 60     │ tet4_60                    │ TET4 │ 1        │
+    │ 17     │ tet10                      │ TET10│ 4-5      │
+    │ 16     │ tet10_16                   │ TET10│ 4        │
+    │ 23     │ hex20                      │ HEX20│ 27       │
+    └────────┴────────────────────────────┴──────┴──────────┘
+
+  Shell ELFORM 별칭:
+    ┌────────┬────────────────────────────┬──────┬──────────┐
+    │ ELFORM │ 별칭                       │ 노드 │ 적분점   │
+    ├────────┼────────────────────────────┼──────┼──────────┤
+    │  2     │ belytschko_tsay            │ QUAD4│ 1        │
+    │ 16     │ fully_integrated_shell     │ QUAD4│ 4        │
+    │  1     │ hughes_liu                 │ QUAD4│ 4        │
+    │ 23     │ quad8                      │ QUAD8│ 9        │
+    │ 24     │ tria6                      │ TRIA6│ 6        │
+    └────────┴────────────────────────────┴──────┴──────────┘
+
+  YAML 예:
+    # 같은 차수 변경 (hourglass 제거)
+    - type: elform
+      target_elform: 2             # 또는 "fully_integrated"
+
+    # 특정 파트 TET4→TET10 업그레이드
+    - type: elform
+      target_pid: 3
+      target_elform: 17            # 또는 "tet10"
+
+    # 2차→1차 다운그레이드
+    - type: elform
+      target_elform: 13            # TET10 → TET4
+
+  * 기존 tet10/hex20/quad8/tria6 operation도 계속 동작 (backward-compatible)
+  * 다운그레이드 시 mid-edge 노드는 *NODE에 남지만 참조되지 않음
 
 ----------------------------------------------------------------
 3.3 예제: 단순 squeeze
@@ -1586,6 +1654,13 @@ examples/ 디렉토리에 실행 가능한 예제가 포함되어 있습니다:
     refine_hex_1to3.yaml          HEX8 1:3 세분화
     tet_test.k                    2 TET4 공유면 테스트 메쉬
     refine_tet_1to2.yaml          TET4 1:2 세분화
+
+[elform 변경 예제]
+  examples/elform/
+    simple_hex.k                  단일 HEX8 요소 (ELFORM 1)
+    elform_case_a.yaml            ELFORM 1→2 (같은 차수 변경)
+    elform_case_b.yaml            TET4→TET10 (1차→2차 업그레이드)
+    elform_case_c.yaml            TET10→TET4 (2차→1차 다운그레이드)
 
 [assemble 예제]
   examples/replace_test/          파트 교체 + squeeze + DR

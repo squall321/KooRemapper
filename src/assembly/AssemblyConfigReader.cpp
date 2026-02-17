@@ -231,6 +231,8 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             op.tet10.convertType = "tria6";
                         } else if (val == "refine") {
                             op.type = AssemblyOperation::REFINE;
+                        } else if (val == "elform") {
+                            op.type = AssemblyOperation::ELFORM;
                         } else {
                             throw std::runtime_error("Unknown operation type: " + val);
                         }
@@ -292,6 +294,8 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                                 op.tet10.targetPid = pid;
                             } else if (op.type == AssemblyOperation::REFINE) {
                                 op.refine.targetPid = pid;
+                            } else if (op.type == AssemblyOperation::ELFORM) {
+                                op.elform.targetPid = pid;
                             }
                         } else if (op.type == AssemblyOperation::BEND) {
                             if (key == "plane") op.bend.plane = val;
@@ -349,6 +353,17 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             if (key == "elform") op.tet10.elform = std::stoi(val);
                         } else if (op.type == AssemblyOperation::REFINE) {
                             if (key == "ratio") op.refine.ratio = std::stoi(val);
+                        } else if (op.type == AssemblyOperation::ELFORM) {
+                            if (key == "target_elform") {
+                                // Strip quotes if present
+                                if (val.size() >= 2 &&
+                                    ((val.front() == '"' && val.back() == '"') ||
+                                     (val.front() == '\'' && val.back() == '\''))) {
+                                    op.elform.targetElform = val.substr(1, val.size() - 2);
+                                } else {
+                                    op.elform.targetElform = val;
+                                }
+                            }
                         }
                     } catch (...) {}
                 }

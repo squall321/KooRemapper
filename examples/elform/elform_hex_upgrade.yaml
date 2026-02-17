@@ -1,0 +1,6 @@
+base_model: simple_hex.k
+output: elform_hex_upgraded
+
+operations:
+  - type: elform
+    target_elform: 23  # HEX8 → HEX20

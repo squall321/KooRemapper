@@ -1362,6 +1362,7 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
     int sectionSolidDataLine = 0;          // data line counter within *SECTION_SOLID
     bool inSectionShell = false;           // tracking *SECTION_SHELL for ELFORM rewrite
     int sectionShellDataLine = 0;          // data line counter within *SECTION_SHELL
+    bool inDowngradeElement = false;        // true while inside a multi-line element being downgraded
 
     for (size_t i = 0; i < rawLines_.size(); ++i) {
         const std::string& line = rawLines_[i];
@@ -1628,10 +1629,70 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
             output << line << "\n";
         }
         else if (currentSection == Section::ELEMENT) {
+            // Detect if this line is an element header (eid+pid, short line)
+            // vs a continuation line (node IDs, many tokens)
+            int tokenCount = 0;
+            {
+                std::istringstream iss(line);
+                std::string tok;
+                while (iss >> tok) tokenCount++;
+            }
+            bool isElementHeader = (tokenCount >= 2 && tokenCount <= 3);
+
+            // If we're inside a downgraded multi-line element, skip continuation lines
+            if (inDowngradeElement) {
+                if (isElementHeader) {
+                    // New element header → end of previous downgraded element
+                    inDowngradeElement = false;
+                    // Fall through to process this new element header
+                } else {
+                    // Continuation line of downgraded element → skip
+                    continue;
+                }
+            }
+
             int elemId = parseElementIdFromLine(line);
             if (elemId > 0 && removedElementIds_.count(elemId) > 0) {
                 continue;  // Skip removed element
             }
+
+            // Downgrade: quadratic→linear (output single-line, skip continuation)
+            if (isElementHeader && elemId > 0 && downgradeElementIds_.count(elemId)) {
+                auto eit = baseMesh_.elements.find(elemId);
+                if (eit != baseMesh_.elements.end()) {
+                    const auto& elem = eit->second;
+                    std::ostringstream oss;
+                    oss << std::setw(8) << elemId << std::setw(8) << elem.partId;
+
+                    // Determine if target is TET-type ELFORM (13/10/60)
+                    bool isTet = (elem.type == ElementType::TET4);
+                    if (!isTet) {
+                        // Check via target ELFORM in solidSectionElforms_
+                        auto pit = baseMesh_.parts.find(elem.partId);
+                        if (pit != baseMesh_.parts.end()) {
+                            auto sit = solidSectionElforms_.find(pit->second.sectionId);
+                            if (sit != solidSectionElforms_.end()) {
+                                int tgtEf = sit->second;
+                                isTet = (tgtEf == 13 || tgtEf == 10 || tgtEf == 60);
+                            }
+                        }
+                    }
+
+                    if (isTet) {
+                        // TET4: output n1-n4, then duplicate n4 for n5-n8
+                        for (int n = 0; n < 4; ++n) oss << std::setw(8) << elem.nodeIds[n];
+                        for (int n = 0; n < 4; ++n) oss << std::setw(8) << elem.nodeIds[3];
+                    } else {
+                        // HEX8/QUAD4: output first 8 node IDs
+                        for (int n = 0; n < 8; ++n) oss << std::setw(8) << elem.nodeIds[n];
+                    }
+
+                    output << oss.str() << "\n";
+                    inDowngradeElement = true;  // Skip subsequent continuation lines
+                    continue;
+                }
+            }
+
             // TET10 conversion: replace single-line TET4 with 2-line TET10
             if (elemId > 0 && tet10Elements_.count(elemId)) {
                 int pid = parsePartIdFromLine(line);
@@ -1650,6 +1711,36 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
             int elemId = parseElementIdFromLine(line);
             if (elemId > 0 && removedElementIds_.count(elemId) > 0) {
                 continue;
+            }
+            // Shell downgrade: QUAD8→QUAD4 or TRIA6→TRIA3
+            // Parse from raw line since baseMesh_ may have wrong n4 for TRIA6
+            if (elemId > 0 && downgradeElementIds_.count(elemId)) {
+                // Parse all tokens from raw line
+                std::vector<int> tokens;
+                {
+                    std::istringstream iss(line);
+                    std::string tok;
+                    while (iss >> tok) {
+                        try { tokens.push_back(std::stoi(tok)); } catch (...) { break; }
+                    }
+                }
+                if (tokens.size() >= 6) {
+                    int eid = tokens[0], pid = tokens[1];
+                    // TRIA6: 10 tokens with last 2 being 0
+                    bool isTria = (tokens.size() >= 10 && tokens[8] == 0 && tokens[9] == 0);
+                    std::ostringstream oss;
+                    oss << std::setw(8) << eid << std::setw(8) << pid;
+                    if (isTria) {
+                        // Output n1 n2 n3 n3 (TRIA3)
+                        oss << std::setw(8) << tokens[2] << std::setw(8) << tokens[3]
+                            << std::setw(8) << tokens[4] << std::setw(8) << tokens[4];
+                    } else {
+                        // Output n1 n2 n3 n4 (QUAD4)
+                        for (int n = 2; n < 6; ++n) oss << std::setw(8) << tokens[n];
+                    }
+                    output << oss.str() << "\n";
+                    continue;
+                }
             }
             // QUAD8 conversion: replace QUAD4 line
             if (elemId > 0 && quad8Elements_.count(elemId)) {
@@ -3233,6 +3324,211 @@ std::string ModelAssembler::formatTria6ElementLine(int eid, int pid, const std::
     }
     oss << std::setw(8) << 0 << std::setw(8) << 0;
     return oss.str();
+}
+
+bool ModelAssembler::applyElform(const ElformOperation& op) {
+    // ELFORM alias mapping: string → int
+    static const std::map<std::string, int> solidElformAliases = {
+        // HEX8 linear
+        {"constant_stress", 1},
+        {"fully_integrated", 2},
+        {"fully_integrated_qm", 3},
+        {"fully_integrated_nodal", -1},
+        {"fully_integrated_reduced", -2},
+        // TET4 linear
+        {"tet4", 13},
+        {"tet4_10pt", 10},
+        {"tet4_60", 60},
+        // Quadratic
+        {"tet10", 17},
+        {"tet10_16", 16},
+        {"hex20", 23}
+    };
+
+    static const std::map<std::string, int> shellElformAliases = {
+        // QUAD4 linear
+        {"belytschko_tsay", 2},
+        {"fully_integrated_shell", 16},
+        {"hughes_liu", 1},
+        // Quadratic
+        {"quad8", 23},
+        {"tria6", 24}
+    };
+
+    // Parse target_elform (may be int string or alias)
+    int targetElform = 0;
+    bool isShell = false;
+    try {
+        targetElform = std::stoi(op.targetElform);
+    } catch (...) {
+        // Try alias lookup
+        auto sit = solidElformAliases.find(op.targetElform);
+        if (sit != solidElformAliases.end()) {
+            targetElform = sit->second;
+            isShell = false;
+        } else {
+            auto hit = shellElformAliases.find(op.targetElform);
+            if (hit != shellElformAliases.end()) {
+                targetElform = hit->second;
+                isShell = true;
+            } else {
+                errorMessage_ = "Unknown ELFORM alias: " + op.targetElform;
+                return false;
+            }
+        }
+    }
+
+    // Determine element type (solid vs shell) if not inferred from alias
+    // For numeric ELFORM, we infer from value:
+    //   23 is ambiguous (HEX20 or QUAD8), default to solid unless part has shells
+    //   For now, check target part types
+    if (!isShell && targetElform > 0) {
+        // Auto-detect: check if target parts have shell elements
+        std::vector<int> targetParts;
+        if (op.targetPid == 0) {
+            for (const auto& [pid, part] : baseMesh_.parts) {
+                targetParts.push_back(pid);
+            }
+        } else {
+            targetParts.push_back(op.targetPid);
+        }
+
+        // Check if any target part has shell elements
+        for (int pid : targetParts) {
+            for (const auto& [eid, elem] : baseMesh_.elements) {
+                if (elem.partId == pid && elem.type == ElementType::QUAD4) {
+                    isShell = true;
+                    break;
+                }
+            }
+            if (isShell) break;
+        }
+    }
+
+    // Determine operation mode based on target ELFORM and base model format
+    enum class Mode { SAME_ORDER, UPGRADE, DOWNGRADE };
+    Mode mode = Mode::SAME_ORDER;
+
+    // Quadratic ELFORMs trigger upgrade
+    const std::set<int> quadraticElforms = {17, 16, 23, 24};
+    const std::set<int> linearElforms = {1, 2, 3, -1, -2, 10, 13, 60, 4, 16};
+
+    // Detect if base model has quadratic elements
+    // Solid: multi-line format (2-3 tokens per header line)
+    // Shell: QUAD8=10 tokens (eid+pid+8nodes), TRIA6=10 tokens (eid+pid+6nodes+0+0)
+    bool hasQuadraticSolid = false;
+    bool hasQuadraticShell = false;
+    bool inSolidSection = false;
+    bool inShellSection = false;
+    for (const auto& line : rawLines_) {
+        std::string trimmed = line;
+        size_t start = trimmed.find_first_not_of(" \t");
+        if (start != std::string::npos) trimmed = trimmed.substr(start);
+        else trimmed.clear();
+
+        if (trimmed.find("*ELEMENT_SOLID") == 0) {
+            inSolidSection = true; inShellSection = false;
+        } else if (trimmed.find("*ELEMENT_SHELL") == 0) {
+            inShellSection = true; inSolidSection = false;
+        } else if (!trimmed.empty() && trimmed[0] == '*') {
+            inSolidSection = false; inShellSection = false;
+        } else if ((inSolidSection || inShellSection) && !trimmed.empty() && trimmed[0] != '$') {
+            int tokenCount = 0;
+            std::istringstream iss(line);
+            std::string token;
+            while (iss >> token) tokenCount++;
+
+            if (inSolidSection && tokenCount >= 2 && tokenCount <= 3) {
+                hasQuadraticSolid = true;
+            }
+            if (inShellSection && tokenCount >= 9) {
+                // QUAD4=6 tokens, QUAD8/TRIA6=10 tokens
+                hasQuadraticShell = true;
+            }
+        }
+    }
+
+    if (quadraticElforms.count(targetElform)) {
+        mode = Mode::UPGRADE;
+    } else if (linearElforms.count(targetElform) && (hasQuadraticSolid || (isShell && hasQuadraticShell))) {
+        mode = Mode::DOWNGRADE;
+    }
+    // Otherwise mode stays SAME_ORDER
+
+    // Collect target parts and their sections
+    std::vector<int> targetParts;
+    if (op.targetPid == 0) {
+        for (const auto& [pid, part] : baseMesh_.parts) {
+            targetParts.push_back(pid);
+        }
+    } else {
+        if (baseMesh_.parts.find(op.targetPid) == baseMesh_.parts.end()) {
+            errorMessage_ = "elform: part " + std::to_string(op.targetPid) + " not found";
+            return false;
+        }
+        targetParts.push_back(op.targetPid);
+    }
+
+    // Register target ELFORM in section maps
+    for (int pid : targetParts) {
+        auto it = baseMesh_.parts.find(pid);
+        if (it != baseMesh_.parts.end() && it->second.sectionId > 0) {
+            if (isShell) {
+                shellSectionElforms_[it->second.sectionId] = targetElform;
+            } else {
+                solidSectionElforms_[it->second.sectionId] = targetElform;
+            }
+        }
+    }
+
+    // Handle different modes
+    if (mode == Mode::SAME_ORDER) {
+        // Case A: Only ELFORM change, no element connectivity change
+        infoMessages.push_back("  ELFORM: changed to " + std::to_string(targetElform) +
+                               " for " + std::to_string(targetParts.size()) + " part(s)");
+        return true;
+    }
+    else if (mode == Mode::UPGRADE) {
+        // Case B: Linear → Quadratic (reuse applyTet10Convert logic)
+        Tet10ConvertOperation convOp;
+        convOp.targetPid = op.targetPid;
+        convOp.elform = targetElform;
+
+        // Determine convert type from target ELFORM
+        if (targetElform == 17 || targetElform == 16) {
+            convOp.convertType = "tet10";
+        } else if (targetElform == 23 && !isShell) {
+            convOp.convertType = "hex20";
+        } else if (targetElform == 23 && isShell) {
+            convOp.convertType = "quad8";
+        } else if (targetElform == 24) {
+            convOp.convertType = "tria6";
+        } else {
+            errorMessage_ = "elform: unsupported upgrade ELFORM " + std::to_string(targetElform);
+            return false;
+        }
+
+        return applyTet10Convert(convOp);
+    }
+    else if (mode == Mode::DOWNGRADE) {
+        // Case C: Quadratic → Linear (mark elements for downgrade)
+        // Collect elements from target parts
+        int downgradeCount = 0;
+        for (int pid : targetParts) {
+            for (const auto& [eid, elem] : baseMesh_.elements) {
+                if (elem.partId == pid) {
+                    downgradeElementIds_.insert(eid);
+                    downgradeCount++;
+                }
+            }
+        }
+
+        infoMessages.push_back("  ELFORM: downgrade to " + std::to_string(targetElform) +
+                               " (" + std::to_string(downgradeCount) + " elements)");
+        return true;
+    }
+
+    return true;
 }
 
 int ModelAssembler::parsePartIdFromLine(const std::string& line) const {

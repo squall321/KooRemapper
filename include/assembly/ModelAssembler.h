@@ -33,6 +33,7 @@ public:
     bool applyFormStrain(const FormStrainOperation& op);
     bool applyTet10Convert(const Tet10ConvertOperation& op);
     bool applyRefine(const RefineOperation& op);
+    bool applyElform(const ElformOperation& op);
     bool writeOutput(const std::string& outputPrefix);
 
     const std::vector<ElementResult>& getAccumulatedResults() const {
@@ -123,6 +124,9 @@ private:
     // Refine dedup maps
     std::map<std::tuple<int,int,int,int>, int> faceCenterNodeMap_;  // sorted 4-tuple → nodeId
     std::map<std::pair<std::pair<int,int>, int>, int> edgeThirdNodeMap_;  // (sorted(nA,nB), idx) → nodeId
+
+    // Elform downgrade tracking
+    std::set<int> downgradeElementIds_;  // Element IDs that need downgrade (quadratic→linear)
 
     std::string errorMessage_;
 

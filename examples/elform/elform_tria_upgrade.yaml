@@ -1,0 +1,6 @@
+base_model: simple_tria.k
+output: elform_tria_upgraded
+
+operations:
+  - type: elform
+    target_elform: 24  # TRIA3 → TRIA6

@@ -1,0 +1,6 @@
+base_model: elform_hex_upgraded.k
+output: elform_hex_downgraded
+
+operations:
+  - type: elform
+    target_elform: 1  # HEX20 → HEX8
