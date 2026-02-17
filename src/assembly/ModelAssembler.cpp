@@ -1601,6 +1601,12 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                     }
                 }
 
+                // Insert IGA *INCLUDE references before *END
+                for (const auto& igaf : igaFiles_) {
+                    output << "*INCLUDE\n";
+                    output << " " << igaf.basename << "\n";
+                }
+
                 // Insert DR keywords before *END if requested
                 if (dynamicRelaxation_) {
                     if (!hasDR) {
@@ -1969,6 +1975,17 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                 return false;
             }
         }
+    }
+
+    // Write IGA .k include files
+    for (const auto& igaf : igaFiles_) {
+        std::ofstream igaOut(igaf.fullpath, std::ios::binary);
+        if (!igaOut.is_open()) {
+            errorMessage_ = "Cannot write IGA file: " + igaf.fullpath;
+            return false;
+        }
+        igaOut << igaf.content;
+        igaOut.close();
     }
 
     return true;
@@ -4075,6 +4092,400 @@ int ModelAssembler::parsePartIdFromLine(const std::string& line) const {
     } catch (...) {
         return -1;
     }
+}
+
+// ============================================================================
+// IGA helpers
+// ============================================================================
+
+int ModelAssembler::findPartMid(int pid) const {
+    // Scan rawLines_ for *PART section matching pid → extract MID (field index 2)
+    bool inPart = false;
+    bool needTitle = false;
+    for (const auto& line : rawLines_) {
+        // Detect keyword
+        if (!line.empty() && line[0] == '*') {
+            std::string upper = line;
+            for (auto& c : upper) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+            if (upper.substr(0, 5) == "*PART" && upper.find("_") == std::string::npos) {
+                inPart = true;
+                needTitle = true;
+                continue;
+            }
+            inPart = false;
+            continue;
+        }
+        if (!inPart) continue;
+        // Skip comments
+        if (!line.empty() && line[0] == '$') continue;
+        if (needTitle) {
+            // Title line: skip it
+            needTitle = false;
+            continue;
+        }
+        // Data line: tokenize space-separated (fields can be variable width)
+        std::istringstream iss(line);
+        std::vector<int> fields;
+        std::string tok;
+        while (iss >> tok) {
+            try { fields.push_back(std::stoi(tok)); } catch (...) { break; }
+        }
+        // fields: [pid, secid, mid, ...]
+        if (fields.size() >= 3 && fields[0] == pid) {
+            return fields[2];  // MID
+        }
+        inPart = false;  // Only one data line per *PART
+    }
+    return -1;  // Not found
+}
+
+std::string ModelAssembler::extractMaterialBlock(int origMid, int newMid) const {
+    // Scan rawLines_ for *MAT_* keyword blocks, find the one with origMid, copy with newMid
+    bool inMat = false;
+    bool onFirstData = false;
+    std::string result;
+    std::string header;
+
+    for (const auto& line : rawLines_) {
+        if (!line.empty() && line[0] == '*') {
+            if (inMat && !result.empty()) {
+                // End of material block - return it
+                return result;
+            }
+            inMat = false;
+            onFirstData = false;
+            result.clear();
+            header.clear();
+
+            std::string upper = line;
+            for (auto& c : upper) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+            if (upper.substr(0, 5) == "*MAT_" || upper.substr(0, 4) == "*MAT") {
+                inMat = true;
+                onFirstData = true;
+                header = line;
+                continue;
+            }
+            continue;
+        }
+        if (!inMat) continue;
+        if (!line.empty() && line[0] == '$') {
+            // Comment inside material block - include it
+            if (!result.empty()) result += line + "\n";
+            else header += "\n" + line;  // comment before first data line → append to header
+            continue;
+        }
+        if (onFirstData) {
+            // First data line - check if MID matches
+            // Try to parse first field (MID can be fixed-width or space-sep)
+            int mid = -1;
+            // Try space-sep first
+            std::istringstream iss(line);
+            std::string tok;
+            if (iss >> tok) {
+                try { mid = std::stoi(tok); } catch (...) {}
+            }
+            if (mid != origMid) {
+                inMat = false;
+                result.clear();
+                continue;
+            }
+            // Found our material!
+            result = header + "\n";
+            // Write first data line with newMid substituted
+            // Replace first field in line
+            std::string newLine = line;
+            size_t pos = 0;
+            while (pos < newLine.size() && std::isspace(newLine[pos])) pos++;
+            size_t end = pos;
+            while (end < newLine.size() && std::isdigit(newLine[end])) end++;
+            if (end > pos) {
+                std::string midStr = std::to_string(newMid);
+                // Preserve field width if possible
+                int origWidth = static_cast<int>(end - pos);
+                // Right-align in original width
+                while (static_cast<int>(midStr.size()) < origWidth) midStr = " " + midStr;
+                newLine.replace(pos, end - pos, midStr);
+            }
+            result += newLine + "\n";
+            onFirstData = false;
+            continue;
+        }
+        // Subsequent data lines - copy as-is
+        result += line + "\n";
+    }
+    // End of file with material still open
+    if (inMat && !result.empty()) {
+        return result;
+    }
+    return "";  // Not found
+}
+
+std::string ModelAssembler::generateIGAContent(
+    int newId, int newMid, int fepid,
+    double xmin, double xmax, double ymin, double ymax, double zmin, double zmax,
+    double rr, double rs, double rt,
+    int ir, int styp, double tollg,
+    int pr, int ps, int pt,
+    int nisr, int niss, int nist,
+    const std::string& matBlock) const
+{
+    std::ostringstream o;
+    o << "*KEYWORD\n";
+    o << "$ IGA solid wrapper for FE part " << fepid << "\n";
+    o << "$ Generated by KooRemapper\n";
+    o << "$---+----1----+----2----+----3----+----4----+----5----+----6----+----7----+----8\n";
+
+    // PARAMETER_LOCAL
+    o << "*PARAMETER_LOCAL\n";
+    o << "$    PRMR1      VAL1\n";
+    // Format: type+name (left, up to 8 chars), value (right-justified, 10 chars)
+    auto pI = [&](const char* name, int val) {
+        std::ostringstream pn; pn << "I" << name;
+        o << std::left << std::setw(10) << pn.str()
+          << std::right << std::setw(10) << val << "\n";
+    };
+    auto pR = [&](const char* name, double val) {
+        std::ostringstream pn; pn << "R" << name;
+        o << std::left << std::setw(10) << pn.str();
+        // Use %g-style formatting (significant digits, no trailing zeros)
+        std::ostringstream vs;
+        vs << std::setprecision(7) << val;
+        o << std::right << std::setw(10) << vs.str() << "\n";
+    };
+    pI("id",     newId);
+    pI("mid",    newMid);
+    pI("fepid",  fepid);
+    pR("xmin",   xmin);
+    pR("xmax",   xmax);
+    pR("ymin",   ymin);
+    pR("ymax",   ymax);
+    pR("zmin",   zmin);
+    pR("zmax",   zmax);
+    pR("rr",     rr);
+    pR("rs",     rs);
+    pR("rt",     rt);
+    pI("ir",     ir);
+    pI("styp",   styp);
+    pR("tollg",  tollg);
+
+    // PARAMETER_EXPRESSION_LOCAL (extended bbox)
+    o << "*PARAMETER_EXPRESSION_LOCAL\n";
+    o << "rxminn, &xmin-&rr\n";
+    o << "rxmaxx, &xmax+&rr\n";
+    o << "ryminn, &ymin-&rs\n";
+    o << "rymaxx, &ymax+&rs\n";
+    o << "rzminn, &zmin-&rt\n";
+    o << "rzmaxx, &zmax+&rt\n";
+
+    // Material block (copied with newMid)
+    if (!matBlock.empty()) {
+        o << matBlock;
+    } else {
+        o << "$ WARNING: Source material not found - fill in manually\n";
+        o << "*MAT_ELASTIC\n";
+        o << "$#     mid        ro         e        pr        da        db  not used\n";
+        o << std::setw(10) << newMid
+          << std::setw(10) << "0.0"
+          << std::setw(10) << "0.0"
+          << std::setw(10) << "0.0" << "\n";
+    }
+
+    // IGA_DEV_STABILIZATION
+    o << "*IGA_DEV_STABILIZATION\n";
+    o << "$      sid      styp                                   tollg\n";
+    o << std::setw(9) << "&id" << std::setw(9) << "&styp"
+      << std::setw(43) << "&tollg" << "\n";
+
+    // PART
+    o << "*PART\n";
+    o << "$#\n";
+    o << "IGA_Part_" << fepid << "\n";
+    o << "$#     pid     secid       mid     eosid      hgid      grav    adpopt      tmid\n";
+    o << std::setw(9) << "&id" << std::setw(9) << "&id" << std::setw(9) << "&mid" << "\n";
+
+    // SECTION_IGA_SOLID
+    o << "*SECTION_IGA_SOLID\n";
+    o << "$#   secid    elform        ir\n";
+    o << std::setw(9) << "&id" << std::setw(9) << "0" << std::setw(9) << "&ir" << "\n";
+
+    // IGA_DEV_VOLUME_XYZ
+    o << "*IGA_DEV_VOLUME_XYZ\n";
+    o << "$#     vid   patchid       pid      esid      fsid    TETMSH      MYTP\n";
+    o << std::setw(9) << "&id" << std::setw(9) << "&id"
+      << std::setw(9) << "" << std::setw(9) << "" << std::setw(9) << ""
+      << std::setw(9) << "-1" << "\n";
+    o << "$#     PID of existing FEA solid with tetmesh\n";
+    o << std::setw(9) << "&fepid" << "\n";
+    o << "$#   brid1     brid2     brid3     brid4     brid5     brid6     brid7     brid8\n";
+    o << "\n";
+
+    // IGA_SOLID
+    o << "*IGA_SOLID\n";
+    o << "$#     sid       pid      nisr      niss      nist       rid\n";
+    o << std::setw(9) << "&id" << std::setw(9) << "&id"
+      << std::setw(9) << nisr << std::setw(9) << niss << std::setw(9) << nist
+      << std::setw(9) << "&id" << "\n";
+
+    // IGA_3D_NURBS_XYZ
+    o << "*IGA_3D_NURBS_XYZ\n";
+    o << "$# patchid        nr        ns        nt        pr        ps        pt\n";
+    o << std::setw(9) << "&id"
+      << std::setw(9) << "2" << std::setw(9) << "2" << std::setw(9) << "2"
+      << std::setw(9) << pr  << std::setw(9) << ps  << std::setw(9) << pt << "\n";
+    o << "$#    unir      unis      unit\n";
+    o << std::setw(9) << "1" << std::setw(9) << "1" << std::setw(9) << "1" << "\n";
+    o << "$#            rfirst               rlast\n";
+    o << std::setw(20) << "&rxminn" << std::setw(20) << "&rxmaxx" << "\n";
+    o << "$#            sfirst               slast\n";
+    o << std::setw(20) << "&ryminn" << std::setw(20) << "&rymaxx" << "\n";
+    o << "$#            tfirst               tlast\n";
+    o << std::setw(20) << "&rzminn" << std::setw(20) << "&rzmaxx" << "\n";
+    o << "$#                 x                   y                   z                 wgt\n";
+    // 8 corner control points (2×2×2)
+    const char* xs[2] = {"&rxminn", "&rxmaxx"};
+    const char* ys[2] = {"&ryminn", "&rymaxx"};
+    const char* zs[2] = {"&rzminn", "&rzmaxx"};
+    for (int k = 0; k < 2; ++k)
+        for (int j = 0; j < 2; ++j)
+            for (int i = 0; i < 2; ++i)
+                o << std::setw(20) << xs[i] << std::setw(20) << ys[j]
+                  << std::setw(20) << zs[k] << std::setw(20) << "1.0" << "\n";
+
+    // IGA_REFINE_SOLID
+    o << "*IGA_REFINE_SOLID\n";
+    o << "$      rid      rtyp\n";
+    o << std::setw(9) << "&id" << std::setw(9) << "2" << "\n";
+    o << "$    hrtyp        rr        rs        rt\n";
+    o << std::setw(9) << "2" << std::setw(9) << "&rr" << std::setw(9) << "&rs" << std::setw(9) << "&rt" << "\n";
+    o << "$      itr       its       itt\n";
+    o << std::setw(9) << "2" << std::setw(9) << "2" << std::setw(9) << "2" << "\n";
+
+    o << "*END\n";
+    return o.str();
+}
+
+bool ModelAssembler::applyIGA(const IGAOperation& op, const std::string& outputPrefix) {
+    // Derive output basename (no directory, no extension)
+    std::string basename = outputPrefix;
+    size_t slash = basename.find_last_of("/\\");
+    if (slash != std::string::npos) basename = basename.substr(slash + 1);
+    // outputPrefix already has no extension, so basename is ready
+
+    for (const auto& tgt : op.targets) {
+        int pid = tgt.targetPid;
+
+        // 1. Compute bounding box
+        double xmin = std::numeric_limits<double>::max();
+        double xmax = -std::numeric_limits<double>::max();
+        double ymin = std::numeric_limits<double>::max();
+        double ymax = -std::numeric_limits<double>::max();
+        double zmin = std::numeric_limits<double>::max();
+        double zmax = -std::numeric_limits<double>::max();
+
+        auto nodeIds = getPartNodeIds(pid);
+        if (nodeIds.empty()) {
+            // Also check addedElements_ for this pid
+            for (const auto& ae : addedElements_) {
+                if (ae.pid != pid) continue;
+                for (int ni = 0; ni < 8; ++ni) {
+                    int nid = ae.nodeIds[ni];
+                    if (nid <= 0) continue;
+                    nodeIds.insert(nid);
+                }
+            }
+        }
+        if (nodeIds.empty()) {
+            errorMessage_ = "IGA: part " + std::to_string(pid) + " has no elements";
+            return false;
+        }
+
+        // Iterate all active nodes
+        for (int nid : nodeIds) {
+            Vector3D pos;
+            // Check modifiedNodePositions_ first
+            if (modifiedNodePositions_.count(nid)) {
+                pos = modifiedNodePositions_.at(nid);
+            } else {
+                // Check addedNodes_
+                bool found = false;
+                for (const auto& an : addedNodes_) {
+                    if (an.id == nid) { pos = {an.x, an.y, an.z}; found = true; break; }
+                }
+                if (!found) {
+                    const Node* n = baseMesh_.getNode(nid);
+                    if (!n) continue;
+                    pos = n->position;
+                }
+            }
+            if (pos.x < xmin) xmin = pos.x;
+            if (pos.x > xmax) xmax = pos.x;
+            if (pos.y < ymin) ymin = pos.y;
+            if (pos.y > ymax) ymax = pos.y;
+            if (pos.z < zmin) zmin = pos.z;
+            if (pos.z > zmax) zmax = pos.z;
+        }
+
+        // 2. Element size per axis
+        double rr = (tgt.elementSizeR > 0.0) ? tgt.elementSizeR : tgt.elementSize;
+        double rs = (tgt.elementSizeS > 0.0) ? tgt.elementSizeS : tgt.elementSize;
+        double rt = (tgt.elementSizeT > 0.0) ? tgt.elementSizeT : tgt.elementSize;
+
+        // offset = how much to expand bbox (auto = element_size per axis)
+        // We embed offset into PARAMETER_LOCAL: rr, rs, rt are also used as offsets
+        // If user specified explicit offset, we'll adjust xmin/xmax etc. directly
+        // But with PARAMETER_EXPRESSION_LOCAL (&xmin-&rr), the offset equals rr,rs,rt
+        // If user wants different offset, we pre-adjust the bbox values
+        if (tgt.offset >= 0.0) {
+            // User-specified explicit offset → modify bbox to compensate so that
+            // the PARAMETER_EXPRESSION_LOCAL (&xmin-&rr) still works correctly
+            // We do: effective xmin = xmin - offset + rr (so xmin - rr = xmin - offset)
+            xmin = xmin - tgt.offset + rr;
+            xmax = xmax + tgt.offset - rr;
+            ymin = ymin - tgt.offset + rs;
+            ymax = ymax + tgt.offset - rs;
+            zmin = zmin - tgt.offset + rt;
+            zmax = zmax + tgt.offset - rt;
+        }
+        // (if offset < 0, auto = rr/rs/rt, which is the PARAMETER_EXPRESSION_LOCAL behavior)
+
+        // 3. Allocate new IDs
+        int newId = ++maxPartId_;
+        if (newId > maxSectionId_) maxSectionId_ = newId;
+
+        // 4. Find original MID and copy material
+        int origMid = findPartMid(pid);
+        int newMid = ++maxMaterialId_;
+        std::string matBlock;
+        if (origMid > 0) {
+            matBlock = extractMaterialBlock(origMid, newMid);
+        }
+
+        // 5. Generate IGA file content
+        std::string content = generateIGAContent(
+            newId, newMid, pid,
+            xmin, xmax, ymin, ymax, zmin, zmax,
+            rr, rs, rt,
+            tgt.ir, tgt.styp, tgt.tollg,
+            tgt.pr, tgt.ps, tgt.pt,
+            tgt.nisr, tgt.niss, tgt.nist,
+            matBlock);
+
+        // 6. Build file paths
+        std::string igaBasename = basename + "_iga_p" + std::to_string(pid) + ".k";
+        std::string igaFullpath = outputPrefix + "_iga_p" + std::to_string(pid) + ".k";
+
+        igaFiles_.push_back({igaFullpath, igaBasename, content});
+        ++igaCount_;
+
+        infoMessages.push_back("  IGA: part " + std::to_string(pid) +
+            " → " + igaBasename +
+            " (id=" + std::to_string(newId) +
+            ", mid=" + std::to_string(newMid) +
+            ", bb=[" + std::to_string(xmin) + "," + std::to_string(xmax) + "]×"
+            "[" + std::to_string(ymin) + "," + std::to_string(ymax) + "]×"
+            "[" + std::to_string(zmin) + "," + std::to_string(zmax) + "])");
+    }
+    return true;
 }
 
 } // namespace KooRemapper

@@ -35,6 +35,7 @@ public:
     bool applyRefine(const RefineOperation& op);
     bool applyElform(const ElformOperation& op);
     bool applyDisconnect(const DisconnectOperation& op);
+    bool applyIGA(const IGAOperation& op, const std::string& outputPrefix);
     bool writeOutput(const std::string& outputPrefix);
 
     const std::vector<ElementResult>& getAccumulatedResults() const {
@@ -56,6 +57,7 @@ public:
     int getPartCount() const { return static_cast<int>(baseMesh_.getPartCount()); }
     int getAddedNodeCount() const { return static_cast<int>(addedNodes_.size()); }
     int getAddedElementCount() const { return static_cast<int>(addedElements_.size()); }
+    int getIGACount() const { return igaCount_; }
     void setDynamicRelaxation(bool enabled) { dynamicRelaxation_ = enabled; }
     void setDynainEmbed(bool enabled) { dynainEmbed_ = enabled; }
 
@@ -134,6 +136,11 @@ private:
     std::map<int, std::array<int,4>> modifiedShellElementNodes_;  // shell elemId → new nodeIds
     std::set<int> periSectionIds_;  // Section IDs to convert to *SECTION_SOLID_PERI
 
+    // IGA include files
+    struct IGAFile { std::string fullpath; std::string basename; std::string content; };
+    std::vector<IGAFile> igaFiles_;
+    int igaCount_ = 0;
+
     std::string errorMessage_;
 
     // Dynamic relaxation
@@ -144,6 +151,17 @@ private:
     int detectExtrusionAxis(const std::vector<const Element*>& elems) const;
     double getAxisCoord(const Vector3D& v, int axis) const;
     void setAxisCoord(double& x, double& y, double& z, int axis, double val) const;
+
+    // IGA helpers
+    int findPartMid(int pid) const;
+    std::string extractMaterialBlock(int origMid, int newMid) const;
+    std::string generateIGAContent(int newId, int newMid, int fepid,
+        double xmin, double xmax, double ymin, double ymax, double zmin, double zmax,
+        double rr, double rs, double rt,
+        int ir, int styp, double tollg,
+        int pr, int ps, int pt,
+        int nisr, int niss, int nist,
+        const std::string& matBlock) const;
 
     // Utility
     std::set<int> getPartElementIds(int pid) const;

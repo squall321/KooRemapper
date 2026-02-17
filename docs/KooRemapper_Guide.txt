@@ -10,7 +10,7 @@
   3. assemble - 전체 모델 조립
      3.1  YAML 설정 포맷
      3.2  operation 상세 (replace/squeeze/restack/bend/indent/formstrain/
-          tet10/hex20/quad8/tria6/refine/elform/disconnect)
+          tet10/hex20/quad8/tria6/refine/elform/disconnect/iga)
      3.3-3.18  예제 모음
      3.19 bend 이론 상세 (곡률, 변형률, Kirchhoff 판이론)
      3.20 indent 이론 상세 (SDF, quarter-arc, 굽힘 응력)
@@ -21,6 +21,7 @@
      3.25 formstrain 이론 상세 (이면각 곡률, 소성 변형률)
      3.26 quadratic 변환 이론 상세 (tet10/hex20/quad8/tria6)
      3.27 refine 이론 상세 (요소 세분화, 노드 공유)
+     3.28 IGA(Isogeometric Analysis) 이론 상세 (NURBS box, h-refinement)
   4. shellmap - 쉘 기반 솔리드 매핑
   5. squeeze - 억지끼움 초기변형
   6. prestress - 변형 해석 + dynain 출력
@@ -586,6 +587,85 @@ KooRemapper는 LS-DYNA 메쉬 전처리 도구입니다.
       원본 SECTION_SOLID 삭제되고 addedKeywordBlocks에 PERI 버전 추가됨.
     * restack + czm 조합이 가장 일반적인 용도.
       restack이 각 층을 별도 파트로 생성 → czm이 층간 계면에 cohesive 삽입.
+
+[iga]
+  특정 파트를 IGA(Isogeometric Analysis) 포맷으로 고도화합니다.
+  FE solid를 trivariate B-Spline NURBS box로 감싸 NURBS 기반 해석이 가능하게 합니다.
+  각 대상 파트에 대해 별도 .k 파일을 생성하고 메인 파일에 *INCLUDE를 삽입합니다.
+
+  IGA 동작 원리:
+    1. 대상 파트의 바운딩 박스(BB) 계산 (노드 좌표 min/max)
+    2. BB를 ±element_size로 확장 (PARAMETER_EXPRESSION_LOCAL 기반)
+    3. 새 PID/SECID/MID 할당 (기존 최대값 +1)
+    4. 원본 재료(MID)를 새 MID로 복사 (IGA 파일 내에만 존재)
+    5. NURBS box를 정의하는 *IGA_3D_NURBS_XYZ (2×2×2 knot spans, 8 제어점) 생성
+    6. 별도 .k 파일 작성 + 메인 출력에 *INCLUDE 삽입
+
+  ⚠ 재료 MID 복사 필수:
+    IGA 파트는 반드시 전용 MID를 사용해야 합니다.
+    동일 MID를 IGA와 비-IGA 파트에 공유하면 LS-DYNA 오류 발생.
+    KooRemapper는 자동으로 새 MID를 발급하고 원본 재료 카드를 복사합니다.
+    메인 출력 파일의 원본 MID는 절대 변경되지 않습니다.
+
+  출력 파일:
+    <output>.k             메인 파일 (기존 내용 + *INCLUDE 라인 추가)
+    <output>_iga_p{pid}.k  각 파트별 IGA 키워드 파일
+
+  YAML 파라미터:
+
+  ┌──────────────────┬──────────┬───────────────────────────────────────────────┐
+  │ 파라미터          │ 기본값   │ 설명                                          │
+  ├──────────────────┼──────────┼───────────────────────────────────────────────┤
+  │ target_pid (필수) │ -        │ 대상 FE solid 파트 ID                         │
+  │ element_size (필수)│ 1.0     │ NURBS box 복셀 크기 (rr=rs=rt 공통)           │
+  │ element_size_r   │ 0 (auto) │ r방향 크기 개별 지정 (0이면 element_size 사용) │
+  │ element_size_s   │ 0 (auto) │ s방향 크기 개별 지정                           │
+  │ element_size_t   │ 0 (auto) │ t방향 크기 개별 지정                           │
+  │ offset           │ -1 (auto)│ bbox 확장량 (-1=element_size와 동일)           │
+  │ ir               │ 0        │ 적분 규칙 (0=reduced Gauss, 1=full Gauss)     │
+  │ styp             │ 4        │ LCP stabilization type                        │
+  │ tollg            │ 1.0e-3   │ Light Control Point 임계값                    │
+  │ pr / ps / pt     │ 1        │ 각 방향 polynomial order (B-Spline 차수)       │
+  │ nisr / niss / nist│ 1       │ 각 방향 적분점 수                              │
+  └──────────────────┴──────────┴───────────────────────────────────────────────┘
+
+  YAML 예:
+    # 단일 파트 IGA (기본 설정)
+    - type: iga
+      targets:
+        - target_pid: 1
+          element_size: 0.6
+
+    # 다중 파트 + 축별 크기 개별 지정
+    - type: iga
+      targets:
+        - target_pid: 3
+          element_size: 0.6     # rr=rs=rt 기본
+          element_size_r: 1.0   # r방향만 다르게
+          ir: 1                 # full Gauss
+          pr: 2                 # 2차 polynomial
+        - target_pid: 5
+          element_size: 1.0
+
+  생성 키워드:
+    *PARAMETER_LOCAL         (id, mid, fepid, xmin~zmax, rr~rt, ir, styp, tollg)
+    *PARAMETER_EXPRESSION_LOCAL (rxminn/rxmaxx/ryminn/rymaxx/rzminn/rzmaxx)
+    *MAT_*                   (원본 재료 복사, 새 MID)
+    *IGA_DEV_STABILIZATION   (sid, styp, tollg)
+    *PART                    (IGA_Part_{fepid}, 새 PID/SECID/MID)
+    *SECTION_IGA_SOLID        (ELFORM=0)
+    *IGA_DEV_VOLUME_XYZ       (TETMSH=-1, fepid=원본 파트)
+    *IGA_SOLID                (nisr/niss/nist, rid)
+    *IGA_3D_NURBS_XYZ         (2×2×2 knot, pr/ps/pt, 8 corner control points)
+    *IGA_REFINE_SOLID         (rtyp=2, hrtyp=2, rr/rs/rt, itr=its=itt=2)
+
+  주의사항:
+    * 원본 FE solid는 메인 파일에 그대로 유지됩니다 (TETMSH=-1 임베딩).
+    * IGA 해석에는 LS-DYNA IGA 라이선스가 필요합니다.
+    * 생성된 *MAT_* 카드는 원본 재료 카드의 복사본이므로 IGA에 적합한지
+      확인하고 필요시 수정하십시오.
+    * element_size가 너무 크면 BB를 완전히 포함하지 못할 수 있습니다.
+      BB 확장 = ±element_size (기본), offset으로 명시적 설정 가능.
 
 ----------------------------------------------------------------
 3.3 예제: 단순 squeeze
@@ -2369,6 +2449,64 @@ YAML 포맷:
 
 YAML 포맷은 help generate 참조.
 
+
+================================================================
+3.28 IGA (Isogeometric Analysis) 이론 상세
+================================================================
+
+개요:
+  IGA는 FEM의 노드 기반 보간 대신 B-Spline/NURBS를 기저 함수로 사용하는
+  해석 방법입니다. 동일한 함수로 형상과 해석장을 표현하므로 형상 표현 오차가
+  없고, 고차 연속성(C^(p-1))으로 더 정확한 해를 얻을 수 있습니다.
+
+1. trivariate B-Spline NURBS box
+  IGA solid는 3D 파라메트릭 공간 (r, s, t) ∈ [0,1]³에 정의된 NURBS로
+  물리 공간 (x, y, z)를 매핑합니다:
+
+    x(r,s,t) = Σ N_i(r,s,t) · P_i · w_i / Σ N_i(r,s,t) · w_i
+
+  여기서:
+    N_i(r,s,t) = B-Spline 기저 함수 (차수 p)
+    P_i        = 제어점 좌표
+    w_i        = 가중치 (여기서는 모두 1.0, 즉 B-Spline)
+
+2. KooRemapper IGA box 구성
+  각 파트에 대해 *IGA_3D_NURBS_XYZ로 직육면체 박스를 정의:
+
+    - 2×2×2 knot spans (nr=ns=nt=2): 최소한의 박스
+    - polynomial order p=1 (기본): 선형 NURBS (= trilinear hex)
+    - h-refinement (*IGA_REFINE_SOLID rtyp=2, hrtyp=2):
+      rr/rs/rt 크기로 subdivide → element edge length ≈ element_size
+
+  8개 제어점 = 확장된 bbox 꼭짓점:
+    rxminn = xmin - rr,  rxmaxx = xmax + rr
+    ryminn = ymin - rs,  rymaxx = ymax + rs
+    rzminn = zmin - rt,  rzmaxx = zmax + rt
+
+  bbox 확장 목적: 경계 요소가 FE solid 표면 바깥에 위치해 임베딩이
+  안정적으로 이루어지고 time-step 크기를 키울 수 있습니다.
+
+3. TETMSH=-1 임베딩 (IGA_DEV_VOLUME_XYZ)
+  *IGA_DEV_VOLUME_XYZ에 TETMSH=-1을 설정하면 LS-DYNA가 지정된
+  FE solid PID(fepid)의 tetrahedral mesh를 IGA volume에 자동 임베딩합니다.
+  FE mesh는 원본 그대로 유지되고, IGA가 FE의 자유도를 제어합니다.
+
+4. LCP stabilization (*IGA_DEV_STABILIZATION)
+  Light Control Point(LCP)란 물리 공간에 지지 영역이 작은 NURBS 기저.
+  styp=4, tollg=1e-3 설정이 일반적으로 안정적입니다.
+  불안정 시 tollg를 0.01~0.1로 증가시키십시오.
+
+5. h-refinement 파라미터 (IGA_REFINE_SOLID)
+  rtyp=2 (h-refinement), hrtyp=2 (uniform):
+    itr = round(Lx / (2·rr))   (KooRemapper는 LS-DYNA 자동 계산에 맡김)
+    * itr=its=itt=2 설정 → LS-DYNA가 rr/rs/rt 기준으로 세분화
+
+6. 재료 ID 분리 원칙
+  IGA 파트의 *MAT_*은 반드시 비-IGA 파트의 MID와 달라야 합니다.
+  LS-DYNA는 MID를 통해 재료 유형을 판단하므로, 동일 MID를 공유하면
+  IGA 파트와 FE 파트 간에 재료 해석 충돌이 발생합니다.
+  KooRemapper는 applyIGA() 호출 시 ++maxMaterialId_로 새 MID를 자동 발급하고
+  원본 재료 카드를 IGA .k 파일에 복사(MID만 치환)합니다.
 
 ================================================================
   KooRemapper v1.3.0

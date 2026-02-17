@@ -1446,6 +1446,8 @@ int runAssemble(const std::string& configFile, const ConsoleOutput& console) {
             ok = assembler.applyElform(op.elform);
         } else if (op.type == AssemblyOperation::DISCONNECT) {
             ok = assembler.applyDisconnect(op.disconnect);
+        } else if (op.type == AssemblyOperation::IGA) {
+            ok = assembler.applyIGA(op.iga, outputPrefix);
         }
 
         if (!ok) {

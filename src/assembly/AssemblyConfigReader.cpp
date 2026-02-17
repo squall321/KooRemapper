@@ -50,6 +50,9 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
     bool inLayersList = false;
     bool inLayerItem = false;
     int layersKeyIndent = 0;   // indent of "layers:" key, used to guard layer item detection
+    bool inTargetsList = false;
+    bool inTargetItem = false;
+    int targetsKeyIndent = 0;  // indent of "targets:" key for IGA
     bool readingMaterialCard = false;
     int materialCardBaseIndent = 0;
     bool inShapeSection = false;
@@ -98,6 +101,8 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
         if (indent == 0) {
             inLayersList = false;
             inLayerItem = false;
+            inTargetsList = false;
+            inTargetItem = false;
             inOperationItem = false;
 
             size_t colonPos = trimmed.find(':');
@@ -134,6 +139,63 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
             if ((inLayersList || inLayerItem) && indent <= layersKeyIndent) {
                 inLayersList = false;
                 inLayerItem = false;
+            }
+
+            // Exit targets context if we've dedented back to or below the targets: key level
+            if ((inTargetsList || inTargetItem) && indent <= targetsKeyIndent) {
+                inTargetsList = false;
+                inTargetItem = false;
+            }
+
+            // --- IGA targets list items: "    - target_pid: 3" ---
+            if (inTargetsList && indent > targetsKeyIndent && trimmed[0] == '-' && trimmed.size() >= 2 && trimmed[1] == ' ') {
+                std::string afterDash = trim(trimmed.substr(2));
+                size_t colonPos = afterDash.find(':');
+                if (colonPos != std::string::npos) {
+                    std::string key = trim(afterDash.substr(0, colonPos));
+                    std::string val = trim(afterDash.substr(colonPos + 1));
+
+                    if (!config.operations.empty() &&
+                        config.operations.back().type == AssemblyOperation::IGA) {
+                        IGATargetConfig tgt;
+                        if (key == "target_pid") {
+                            try { tgt.targetPid = std::stoi(val); } catch (...) {}
+                        }
+                        config.operations.back().iga.targets.push_back(tgt);
+                        inTargetItem = true;
+                    }
+                }
+                continue;
+            }
+
+            // --- IGA target item sub-keys ---
+            if (inTargetItem && !config.operations.empty() &&
+                config.operations.back().type == AssemblyOperation::IGA &&
+                !config.operations.back().iga.targets.empty()) {
+                size_t colonPos = trimmed.find(':');
+                if (colonPos != std::string::npos) {
+                    std::string key = trim(trimmed.substr(0, colonPos));
+                    std::string val = trim(trimmed.substr(colonPos + 1));
+                    auto& tgt = config.operations.back().iga.targets.back();
+                    try {
+                        if (key == "target_pid") tgt.targetPid = std::stoi(val);
+                        else if (key == "element_size") tgt.elementSize = std::stod(val);
+                        else if (key == "element_size_r") tgt.elementSizeR = std::stod(val);
+                        else if (key == "element_size_s") tgt.elementSizeS = std::stod(val);
+                        else if (key == "element_size_t") tgt.elementSizeT = std::stod(val);
+                        else if (key == "offset") tgt.offset = std::stod(val);
+                        else if (key == "ir") tgt.ir = std::stoi(val);
+                        else if (key == "styp") tgt.styp = std::stoi(val);
+                        else if (key == "tollg") tgt.tollg = std::stod(val);
+                        else if (key == "pr") tgt.pr = std::stoi(val);
+                        else if (key == "ps") tgt.ps = std::stoi(val);
+                        else if (key == "pt") tgt.pt = std::stoi(val);
+                        else if (key == "nisr") tgt.nisr = std::stoi(val);
+                        else if (key == "niss") tgt.niss = std::stoi(val);
+                        else if (key == "nist") tgt.nist = std::stoi(val);
+                    } catch (...) {}
+                    continue;
+                }
             }
 
             // --- Layer list items: "      - thickness: 0.5" ---
@@ -202,6 +264,8 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
             if (!inPointsList && trimmed[0] == '-' && trimmed.size() >= 2 && trimmed[1] == ' ') {
                 inLayersList = false;
                 inLayerItem = false;
+                inTargetsList = false;
+                inTargetItem = false;
                 inShapeSection = false;
                 inPointsList = false;
 
@@ -243,6 +307,8 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             op.type = AssemblyOperation::ELFORM;
                         } else if (val == "disconnect") {
                             op.type = AssemblyOperation::DISCONNECT;
+                        } else if (val == "iga") {
+                            op.type = AssemblyOperation::IGA;
                         } else {
                             throw std::runtime_error("Unknown operation type: " + val);
                         }
@@ -381,6 +447,12 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             if (key == "mode") op.disconnect.mode = val;
                             else if (key == "cohesive_part_id") op.disconnect.cohesivePartId = std::stoi(val);
                             else if (key == "failure_strain") op.disconnect.failureStrain = std::stod(val);
+                        } else if (op.type == AssemblyOperation::IGA) {
+                            if (key == "targets") {
+                                inTargetsList = true;
+                                inTargetItem = false;
+                                targetsKeyIndent = indent;
+                            }
                         }
                     } catch (...) {}
                 }
@@ -456,6 +528,17 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
             }
             if (op.bend.source == "formula" && op.bend.expression.empty())
                 throw std::runtime_error("Operation " + std::to_string(i+1) + ": formula source requires expression");
+        } else if (op.type == AssemblyOperation::IGA) {
+            if (op.iga.targets.empty())
+                throw std::runtime_error("Operation " + std::to_string(i+1) + ": no targets defined for iga");
+            for (size_t j = 0; j < op.iga.targets.size(); ++j) {
+                if (op.iga.targets[j].targetPid <= 0)
+                    throw std::runtime_error("Operation " + std::to_string(i+1) +
+                        ": iga target " + std::to_string(j+1) + " missing target_pid");
+                if (op.iga.targets[j].elementSize <= 0)
+                    throw std::runtime_error("Operation " + std::to_string(i+1) +
+                        ": iga target " + std::to_string(j+1) + " element_size must be positive");
+            }
         } else if (op.type == AssemblyOperation::INDENT) {
             std::string pfx = "Operation " + std::to_string(i+1) + " (indent): ";
             if (op.indent.targetPid <= 0)

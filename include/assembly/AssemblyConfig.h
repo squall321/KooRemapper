@@ -95,8 +95,26 @@ struct DisconnectOperation {
     double failureStrain = 0.0;  // MEFEM: EPPF value
 };
 
+struct IGATargetConfig {
+    int targetPid = 0;
+    double elementSize = 1.0;    // rr=rs=rt default voxel size
+    double elementSizeR = 0.0;   // per-axis override (0 = use elementSize)
+    double elementSizeS = 0.0;
+    double elementSizeT = 0.0;
+    double offset = -1.0;        // bbox expansion (-1 = auto = element_size per axis)
+    int ir = 0;                  // integration rule (0=reduced, 1=full)
+    int styp = 4;                // LCP stabilization type
+    double tollg = 1.0e-3;       // LCP threshold
+    int pr = 1; int ps = 1; int pt = 1;       // polynomial order
+    int nisr = 1; int niss = 1; int nist = 1; // integration points per axis
+};
+
+struct IGAOperation {
+    std::vector<IGATargetConfig> targets;
+};
+
 struct AssemblyOperation {
-    enum Type { REPLACE, SQUEEZE, RESTACK, BEND, INDENT, FORMSTRAIN, TET10_CONVERT, REFINE, ELFORM, DISCONNECT };
+    enum Type { REPLACE, SQUEEZE, RESTACK, BEND, INDENT, FORMSTRAIN, TET10_CONVERT, REFINE, ELFORM, DISCONNECT, IGA };
     Type type;
     ReplaceOperation replace;
     SqueezeOperation squeeze;
@@ -108,6 +126,7 @@ struct AssemblyOperation {
     RefineOperation refine;
     ElformOperation elform;
     DisconnectOperation disconnect;
+    IGAOperation iga;
 };
 
 struct AssemblyConfig {
