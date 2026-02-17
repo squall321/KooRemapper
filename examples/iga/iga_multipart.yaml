@@ -1,0 +1,31 @@
+# iga_multipart.yaml
+# 다중 파트 IGA 업그레이드 - 파트별 복셀 크기 개별 지정 예제
+#
+# 대상: block_2x2x1.k
+#   PID 1 (하부): element_size=4.0, 균일 복셀
+#   PID 2 (상부): r/s=2.0, t=3.0 축별 복셀 크기 개별 설정
+#
+# 출력 파일:
+#   iga_multipart_result.k              메인 (원본 FE + *INCLUDE 2개)
+#   iga_multipart_result_iga_p1.k       PID 1 IGA 파일
+#   iga_multipart_result_iga_p2.k       PID 2 IGA 파일
+
+base_model: block_2x2x1.k
+output: iga_multipart_result
+
+operations:
+  - type: iga
+    targets:
+      - target_pid: 1
+        element_size: 4.0     # rr=rs=rt=4.0 균일 복셀
+        ir: 0                 # reduced Gauss (기본)
+        styp: 4               # LCP stabilization type 4 (기본)
+        tollg: 1.0e-3         # LCP threshold (기본)
+      - target_pid: 2
+        element_size: 3.0     # rt 기본값
+        element_size_r: 2.0   # r방향 더 촘촘하게
+        element_size_s: 2.0   # s방향 더 촘촘하게
+        ir: 1                 # full Gauss (정밀 적분)
+        pr: 2                 # 2차 polynomial
+        ps: 2
+        pt: 1                 # t방향은 1차 유지

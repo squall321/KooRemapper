@@ -11,7 +11,9 @@
      3.1  YAML 설정 포맷
      3.2  operation 상세 (replace/squeeze/restack/bend/indent/formstrain/
           tet10/hex20/quad8/tria6/refine/elform/disconnect/iga)
-     3.3-3.18  예제 모음
+     3.3-3.18  예제 모음 (squeeze/replace/restack/bend/indent/emboss)
+     3.18a     예제: IGA 단일 파트 업그레이드
+     3.18b     예제: IGA 다중 파트 + 축별 복셀 크기 개별 지정
      3.19 bend 이론 상세 (곡률, 변형률, Kirchhoff 판이론)
      3.20 indent 이론 상세 (SDF, quarter-arc, 굽힘 응력)
      3.21 예제 파일 목록
@@ -1278,6 +1280,73 @@ KooRemapper assemble star_stress_test.yaml
 #   spline 별 형상의 복잡한 곡률에서 응력 정확 계산
 
 ----------------------------------------------------------------
+3.18a 예제: IGA 단일 파트 업그레이드
+----------------------------------------------------------------
+
+# iga_single.yaml
+base_model: block_2x2x1.k
+output: iga_single_result
+
+operations:
+  - type: iga
+    targets:
+      - target_pid: 1
+        element_size: 4.0       # NURBS box 복셀 크기 (rr=rs=rt=4.0)
+
+# 실행
+KooRemapper assemble iga_single.yaml
+
+# 결과
+#   iga_single_result.k              원본 FE mesh + *INCLUDE 참조
+#   iga_single_result_iga_p1.k       PID 1 IGA 키워드 파일
+#     - *PARAMETER_LOCAL: id=3, mid=2, fepid=1
+#       xmin=0, xmax=20, ymin=0, ymax=10, zmin=0, zmax=5, rr=rs=rt=4.0
+#     - *MAT_ELASTIC: mid=2 (원본 mid=1 복사, IGA 전용)
+#     - *IGA_DEV_VOLUME_XYZ: TETMSH=-1, fepid=1
+#     - *IGA_3D_NURBS_XYZ: 2×2×2 knot, 8 corner control points
+#     - *IGA_REFINE_SOLID: rr=rs=rt=4.0
+
+# 원본 FE solid(PID 1)은 그대로 유지 - TETMSH=-1로 임베딩됨
+# 원본 MID=1은 메인 파일에서 불변, IGA 파일만 MID=2 사용
+
+----------------------------------------------------------------
+3.18b 예제: IGA 다중 파트 + 축별 복셀 크기 개별 지정
+----------------------------------------------------------------
+
+# iga_multipart.yaml
+base_model: block_2x2x1.k
+output: iga_multipart_result
+
+operations:
+  - type: iga
+    targets:
+      - target_pid: 1
+        element_size: 4.0       # PID 1: 균일 복셀
+        ir: 0                   # reduced Gauss (기본)
+      - target_pid: 2
+        element_size: 3.0       # rt 기본값
+        element_size_r: 2.0     # r방향 더 촘촘하게
+        element_size_s: 2.0     # s방향 더 촘촘하게
+        ir: 1                   # full Gauss (정밀 적분)
+        pr: 2                   # 2차 polynomial
+        ps: 2
+
+# 실행
+KooRemapper assemble iga_multipart.yaml
+
+# 결과
+#   iga_multipart_result.k            원본 FE + *INCLUDE 2개
+#   iga_multipart_result_iga_p1.k     PID 1: id=3, mid=2, rr=rs=rt=4.0
+#   iga_multipart_result_iga_p2.k     PID 2: id=4, mid=3, rr=rs=2.0, rt=3.0
+#
+# iga_p2.k의 *PARAMETER_LOCAL 주요 값:
+#   Rrr   2.0      Rrs   2.0      Rrt   3.0
+#   Iir     1      Ipr     2      Ips     2      Ipt     1
+#
+# 각 파트가 독립적인 ID와 재료(MID)를 가짐
+# 원본 MID=1은 양쪽 IGA 파트 모두에 공유되지 않음 (MID=2, MID=3으로 각자 복사)
+
+----------------------------------------------------------------
 3.19 bend 이론 상세
 ----------------------------------------------------------------
 
@@ -1838,6 +1907,17 @@ examples/ 디렉토리에 실행 가능한 예제가 포함되어 있습니다:
     disconnect_czm.yaml           czm 모드: 2파트 계면 cohesive
     disconnect_mefem.yaml         mefem 모드: tied + failure
     restack_czm.yaml              restack 3층 + czm 계면 삽입 (주요 용도)
+
+[iga 예제]
+  examples/iga/
+    block_2x2x1.k                 2×2×1 HEX8 2층 구조 (PID1=하부, PID2=상부)
+    iga_single.yaml               단일 파트 IGA 업그레이드 (최소 설정)
+    iga_single_result.k           메인 출력 (*INCLUDE 포함)
+    iga_single_result_iga_p1.k    PID 1 IGA 파일 (PARAMETER+MAT+IGA 키워드)
+    iga_multipart.yaml            다중 파트 + 축별 복셀 크기 개별 지정
+    iga_multipart_result.k        메인 출력 (*INCLUDE 2개)
+    iga_multipart_result_iga_p1.k PID 1 IGA 파일
+    iga_multipart_result_iga_p2.k PID 2 IGA 파일 (rr=rs=2.0, rt=3.0, p=2)
 
 [assemble 예제]
   examples/replace_test/          파트 교체 + squeeze + DR

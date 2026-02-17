@@ -1,0 +1,15 @@
+# iga_single.yaml
+# 단일 파트를 IGA로 고도화 - 최소 설정 예제
+#
+# 대상: block_2x2x1.k의 PID 1 (하부 레이어)
+# IGA box 복셀 크기: 4.0 (기본 offset = element_size)
+# IGA 파일: iga_single_result_iga_p1.k
+
+base_model: block_2x2x1.k
+output: iga_single_result
+
+operations:
+  - type: iga
+    targets:
+      - target_pid: 1
+        element_size: 4.0
