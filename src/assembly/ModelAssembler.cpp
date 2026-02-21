@@ -5882,49 +5882,40 @@ void ModelAssembler::extrudeToSolid(const std::vector<ShellElement>& surface,
         }
     }
 
+    // Determine if we need to flip winding based on offset direction
+    // For negative offset (direction vector points "inward"), flip winding
+    // Check dominant component: if largest absolute value component is negative, flip
+    double absX = std::abs(direction.x);
+    double absY = std::abs(direction.y);
+    double absZ = std::abs(direction.z);
+    double maxAbs = std::max({absX, absY, absZ});
+    bool isNegativeDirection = false;
+    if (maxAbs == absX && direction.x < 0) isNegativeDirection = true;
+    if (maxAbs == absY && direction.y < 0) isNegativeDirection = true;
+    if (maxAbs == absZ && direction.z < 0) isNegativeDirection = true;
+
     // Create solid elements
     for (const auto& shell : surface) {
-        // Check if offset direction is aligned with shell normal
-        Vector3D shellNormal = computeElementNormal(shell);
-        double alignment = shellNormal.x * direction.x +
-                          shellNormal.y * direction.y +
-                          shellNormal.z * direction.z;
-
-        // If direction is opposite to normal (alignment < 0), flip winding
-        bool flipWinding = (alignment < 0.0);
-
         for (int layer = 0; layer < numLayers; ++layer) {
             AddedElement elem;
             elem.id = ++maxElementId_;
             elem.pid = newPid;
             elem.type = ElementType::HEX8;
 
-            if (!flipWinding) {
-                // Normal case: shell is bottom, extrude upward
-                // Bottom face (layer)
-                for (int i = 0; i < 4; ++i) {
-                    int origNid = shell.nodeIds[i];
-                    elem.nodeIds[i] = bottomToTopNodes[layer][origNid];
-                }
+            // For negative direction, swap layer indices so bottom is actually below top
+            int bottomLayer = isNegativeDirection ? (layer + 1) : layer;
+            int topLayer = isNegativeDirection ? layer : (layer + 1);
 
-                // Top face (layer+1)
-                for (int i = 0; i < 4; ++i) {
-                    int origNid = shell.nodeIds[i];
-                    elem.nodeIds[i+4] = bottomToTopNodes[layer+1][origNid];
-                }
-            } else {
-                // Flipped case: shell is top, extrude downward
-                // Bottom face (layer+1): reversed winding
-                elem.nodeIds[0] = bottomToTopNodes[layer+1][shell.nodeIds[0]];
-                elem.nodeIds[1] = bottomToTopNodes[layer+1][shell.nodeIds[3]];
-                elem.nodeIds[2] = bottomToTopNodes[layer+1][shell.nodeIds[2]];
-                elem.nodeIds[3] = bottomToTopNodes[layer+1][shell.nodeIds[1]];
+            // Bottom face
+            for (int i = 0; i < 4; ++i) {
+                int origNid = shell.nodeIds[i];
+                elem.nodeIds[i] = bottomToTopNodes[bottomLayer][origNid];
+            }
 
-                // Top face (layer): reversed winding
-                elem.nodeIds[4] = bottomToTopNodes[layer][shell.nodeIds[0]];
-                elem.nodeIds[5] = bottomToTopNodes[layer][shell.nodeIds[3]];
-                elem.nodeIds[6] = bottomToTopNodes[layer][shell.nodeIds[2]];
-                elem.nodeIds[7] = bottomToTopNodes[layer][shell.nodeIds[1]];
+            // Top face
+            for (int i = 0; i < 4; ++i) {
+                int origNid = shell.nodeIds[i];
+                elem.nodeIds[i+4] = bottomToTopNodes[topLayer][origNid];
             }
 
             // Handle TRIA3 (degenerate quad)
@@ -5991,16 +5982,21 @@ void ModelAssembler::extrudeToSolid(const std::vector<ShellElement>& surface,
         }
     }
 
+    // Determine if we need to flip winding based on offset direction
+    // For negative offset (direction vector points "inward"), flip winding
+    // Check dominant component: if largest absolute value component is negative, flip
+    double absX = std::abs(direction.x);
+    double absY = std::abs(direction.y);
+    double absZ = std::abs(direction.z);
+    double maxAbs = std::max({absX, absY, absZ});
+    bool isNegativeDirection = false;
+    if (maxAbs == absX && direction.x < 0) isNegativeDirection = true;
+    if (maxAbs == absY && direction.y < 0) isNegativeDirection = true;
+    if (maxAbs == absZ && direction.z < 0) isNegativeDirection = true;
+
     // Create solid elements
     for (const auto& shell : surface) {
-        // Check if offset direction is aligned with shell normal
-        Vector3D shellNormal = computeElementNormal(shell);
-        double alignment = shellNormal.x * direction.x +
-                          shellNormal.y * direction.y +
-                          shellNormal.z * direction.z;
-
-        // If direction is opposite to normal (alignment < 0), flip winding
-        bool flipWinding = (alignment < 0.0);
+        bool flipWinding = !isNegativeDirection;  // TEST: Try opposite
 
         for (int layer = 0; layer < numLayers; ++layer) {
             AddedElement elem;
