@@ -195,7 +195,8 @@ struct OffsetOperation {
 
     // Material
     int newMid = 0;         // 0 = auto-increment
-    std::string materialCard;  // Multi-line MAT keyword
+    std::string materialCard;  // Multi-line MAT keyword (single layer or all layers)
+    std::vector<std::string> materialCards;  // Per-layer materials (if specified, overrides materialCard)
 
     // Shell-specific
     double shellThickness = 0.0;  // 0 = use thickness

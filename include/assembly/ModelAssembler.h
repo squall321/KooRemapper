@@ -276,6 +276,7 @@ private:
     void applyConnectionContact(const std::vector<ShellElement>& sourceSurface,
                                std::vector<AddedElement>& offsetElements,
                                int sourcePid, int newPid);
+    bool applyMultiMaterialOffset(const OffsetOperation& op, double E, double nu);
     bool applyDualOffsetPrestress(const OffsetOperation& op, double E, double nu);
     void calculateDualOffsetPrestress(const std::vector<AddedElement>& refElements,
                                      const std::map<int, Vector3D>& deformedPositions,

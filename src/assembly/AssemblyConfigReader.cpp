@@ -73,10 +73,13 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
     bool readingMaterialCard = false;
     bool readingCzmMaterialCard = false;
     int materialCardBaseIndent = 0;
-    enum class MaterialCardTarget { NONE, RESTACK_LAYER, OFFSET, OFFSET_CZM };
+    enum class MaterialCardTarget { NONE, RESTACK_LAYER, OFFSET, OFFSET_CZM, OFFSET_MULTI };
     MaterialCardTarget materialCardTarget = MaterialCardTarget::NONE;
     bool inShapeSection = false;
     bool inPointsList = false;
+    bool inMaterialCardsList = false;
+    int materialCardsKeyIndent = 0;
+    bool readingMaterialCardsItem = false;
 
     for (size_t li = 0; li < lines.size(); ++li) {
         const std::string& line = lines[li];
@@ -84,7 +87,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
         int indent = countIndent(line);
 
         // Multi-line material_card block reading
-        if (readingMaterialCard || readingCzmMaterialCard) {
+        if (readingMaterialCard || readingCzmMaterialCard || readingMaterialCardsItem) {
             if (trimmed.empty()) {
                 // Empty line inside block → include as blank line
                 if (!config.operations.empty()) {
@@ -98,6 +101,10 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                     } else if (materialCardTarget == MaterialCardTarget::OFFSET_CZM &&
                                config.operations.back().type == AssemblyOperation::OFFSET) {
                         config.operations.back().offset.czmMaterialCard += "\n";
+                    } else if (materialCardTarget == MaterialCardTarget::OFFSET_MULTI &&
+                               config.operations.back().type == AssemblyOperation::OFFSET &&
+                               !config.operations.back().offset.materialCards.empty()) {
+                        config.operations.back().offset.materialCards.back() += "\n";
                     }
                 }
                 continue;
@@ -126,6 +133,12 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                         auto& card = config.operations.back().offset.czmMaterialCard;
                         if (!card.empty()) card += "\n";
                         card += content;
+                    } else if (materialCardTarget == MaterialCardTarget::OFFSET_MULTI &&
+                               config.operations.back().type == AssemblyOperation::OFFSET &&
+                               !config.operations.back().offset.materialCards.empty()) {
+                        auto& card = config.operations.back().offset.materialCards.back();
+                        if (!card.empty()) card += "\n";
+                        card += content;
                     }
                 }
                 continue;
@@ -133,6 +146,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
             // Indentation decreased → end of block
             readingMaterialCard = false;
             readingCzmMaterialCard = false;
+            readingMaterialCardsItem = false;
             materialCardTarget = MaterialCardTarget::NONE;
             // Fall through to process this line normally
         }
@@ -367,8 +381,9 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                     }
                     config.operations.push_back(op);
                     inOperationItem = true;
+                    continue;
                 }
-                continue;
+                // If no colon found (e.g., "- |"), don't continue - let other logic handle it
             }
 
             // --- Indent shape points list: "        - [20, 15]" ---
@@ -623,8 +638,42 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                                     op.offset.czmMaterialCard = val;
                                 }
                             }
+                            else if (key == "material_cards") {
+                                // Array of material cards
+                                inMaterialCardsList = true;
+                                materialCardsKeyIndent = indent;
+                            }
                         }
                     } catch (...) {}
+                }
+
+                // Material cards list items: "        - |"
+                if (inMaterialCardsList && indent > materialCardsKeyIndent &&
+                    trimmed.size() >= 1 && trimmed[0] == '-' && trimmed.size() >= 2) {
+                    std::string afterDash = trim(trimmed.substr(1));
+                    if (afterDash == "|" || afterDash.empty()) {
+                        // Start new material card
+                        if (!config.operations.empty() &&
+                            config.operations.back().type == AssemblyOperation::OFFSET) {
+                            config.operations.back().offset.materialCards.push_back("");
+                            readingMaterialCardsItem = true;
+                            materialCardTarget = MaterialCardTarget::OFFSET_MULTI;
+                            materialCardBaseIndent = indent + 2;
+                            // Look ahead for actual content indentation
+                            for (size_t ahead = li + 1; ahead < lines.size(); ++ahead) {
+                                std::string aheadTrimmed = trim(lines[ahead]);
+                                if (!aheadTrimmed.empty() && aheadTrimmed[0] != '#') {
+                                    materialCardBaseIndent = countIndent(lines[ahead]);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Exit material_cards list when indent decreases
+                if (inMaterialCardsList && indent < materialCardsKeyIndent) {
+                    inMaterialCardsList = false;
                 }
             }
         }

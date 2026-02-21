@@ -5097,6 +5097,13 @@ bool ModelAssembler::applyOffset(const OffsetOperation& op, double E, double nu)
         return applyDualOffsetPrestress(op, E, nu);
     }
 
+    // Check for multi-material mode
+    bool isMultiMaterial = !op.materialCards.empty();
+    if (isMultiMaterial) {
+        std::cout << "[INFO] Multi-material mode: " << op.materialCards.size() << " layers\n";
+        return applyMultiMaterialOffset(op, E, nu);
+    }
+
     // Normal offset mode
     // 1. Validation - check if any elements exist with this PID
     bool foundPid = false;
@@ -5104,6 +5111,15 @@ bool ModelAssembler::applyOffset(const OffsetOperation& op, double E, double nu)
         if (pair.second.partId == op.sourcePid) {
             foundPid = true;
             break;
+        }
+    }
+    if (!foundPid) {
+        // Also check addedElements_
+        for (const auto& elem : addedElements_) {
+            if (elem.pid == op.sourcePid) {
+                foundPid = true;
+                break;
+            }
         }
     }
     if (!foundPid) {
@@ -6788,6 +6804,59 @@ void ModelAssembler::applyConnectionContact(
     addedKeywordBlocks_.push_back(contactHint.str());
 
     std::cout << "[INFO] Created " << origNodeToNewNode.size() << " duplicate nodes\n";
+}
+
+// ========== MULTI-MATERIAL OFFSET ==========
+
+bool ModelAssembler::applyMultiMaterialOffset(const OffsetOperation& op, double E, double nu) {
+    std::cout << "[INFO] Multi-material offset with " << op.materialCards.size() << " layers\n";
+
+    // Multi-material offset: each layer gets a different material
+    // Strategy: Create each layer sequentially with numLayers=1
+    int numLayers = static_cast<int>(op.materialCards.size());
+    double layerThickness = op.thickness / numLayers;
+
+    int previousLayerPid = op.sourcePid;  // Track previous layer's PID
+
+    for (int layerIdx = 0; layerIdx < numLayers; ++layerIdx) {
+        std::cout << "[INFO] Creating layer " << (layerIdx + 1) << "/" << numLayers << "\n";
+
+        // Create modified operation for this layer
+        OffsetOperation layerOp = op;
+        layerOp.thickness = layerThickness;
+        layerOp.numLayers = 1;
+        layerOp.materialCard = op.materialCards[layerIdx];
+        layerOp.materialCards.clear();  // Prevent recursion
+
+        // For first layer, use original source
+        // For subsequent layers, use previous layer's top surface as source
+        layerOp.sourcePid = previousLayerPid;
+
+        // Auto-assign IDs for this layer
+        if (layerIdx == 0) {
+            // First layer uses specified IDs or auto
+            layerOp.newPid = (op.newPid > 0) ? op.newPid : (++maxPartId_);
+            layerOp.newSecid = (op.newSecid > 0) ? op.newSecid : (++maxSectionId_);
+            layerOp.newMid = (op.newMid > 0) ? op.newMid : (++maxMaterialId_);
+        } else {
+            // Subsequent layers always auto-increment
+            layerOp.newPid = ++maxPartId_;
+            layerOp.newSecid = ++maxSectionId_;
+            layerOp.newMid = ++maxMaterialId_;
+        }
+
+        // Apply single-layer offset
+        bool success = applyOffset(layerOp, E, nu);
+        if (!success) {
+            return false;
+        }
+
+        // Update previous layer PID for next iteration
+        previousLayerPid = layerOp.newPid;
+    }
+
+    std::cout << "[INFO] Multi-material offset completed: " << numLayers << " layers\n";
+    return true;
 }
 
 // ========== PHASE 12: DUAL OFFSET PRESTRESS ==========
