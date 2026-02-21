@@ -1,0 +1,20 @@
+# Test: -z direction offset
+# Purpose: Test fixed -z direction (simpler than -normal)
+
+base_model: ../../examples/arc30/arc30_flat.k
+output: test_negative_z_result
+
+operations:
+  - type: offset
+    source_pid: 1
+    element_type: solid
+    thickness: 1.0
+    num_layers: 1
+    offset_direction: -z           # Fixed downward direction
+    connection_mode: tied
+    new_pid: 10
+    part_title: "Negative_Z_Test"
+    material_card: |
+      *MAT_ELASTIC
+      $#     mid        ro         e        pr
+           @MID@       2.0     12000       0.25

@@ -5441,7 +5441,30 @@ bool ModelAssembler::applyOffset(const OffsetOperation& op, double E, double nu)
 
 void ModelAssembler::extractSourceSurface(int sourcePid,
                                          std::vector<ShellElement>& surfaceShells) {
-    // Extract outer surface from solid elements
+
+    // First check if source PID has shell elements in addedShellElements_
+    bool hasShells = false;
+
+    for (const auto& shell : addedShellElements_) {
+        if (shell.pid == sourcePid) {
+            ShellElement s;
+            s.id = shell.id;
+            s.partId = shell.pid;
+            for (int i = 0; i < 4; ++i) {
+                s.nodeIds[i] = shell.nodeIds[i];
+            }
+            surfaceShells.push_back(s);
+            hasShells = true;
+        }
+    }
+
+    if (hasShells) {
+        std::cout << "[INFO] Extracted " << surfaceShells.size()
+                  << " shell elements from source\n";
+        return;
+    }
+
+    // If no shells, extract outer surface from solid elements
     std::cout << "[INFO] Extracting outer surface from solid elements\n";
 
     // Build face→element map
@@ -5845,8 +5868,14 @@ void ModelAssembler::extrudeToSolid(const std::vector<ShellElement>& surface,
 
     // Create solid elements
     for (const auto& shell : surface) {
-        // Preserve original winding from getFaceNodeIds (no flipping needed)
-        bool flipWinding = false;
+        // Check if offset direction is aligned with shell normal
+        Vector3D shellNormal = computeElementNormal(shell);
+        double alignment = shellNormal.x * direction.x +
+                          shellNormal.y * direction.y +
+                          shellNormal.z * direction.z;
+
+        // If direction is opposite to normal (alignment < 0), flip winding
+        bool flipWinding = (alignment < 0.0);
 
         for (int layer = 0; layer < numLayers; ++layer) {
             AddedElement elem;
@@ -5954,8 +5983,8 @@ void ModelAssembler::extrudeToSolid(const std::vector<ShellElement>& surface,
                           shellNormal.y * direction.y +
                           shellNormal.z * direction.z;
 
-        // Preserve original winding from getFaceNodeIds
-        bool flipWinding = false;
+        // If direction is opposite to normal (alignment < 0), flip winding
+        bool flipWinding = (alignment < 0.0);
 
         for (int layer = 0; layer < numLayers; ++layer) {
             AddedElement elem;
@@ -6065,7 +6094,26 @@ void ModelAssembler::extrudeToSolid(const std::vector<ShellElement>& surface,
 
     // Create solid elements (same as standard version)
     for (const auto& shell : surface) {
-        bool flipWinding = false;
+        // Check average per-node direction against shell normal
+        Vector3D shellNormal = computeElementNormal(shell);
+        Vector3D avgDirection(0, 0, 0);
+        int dirCount = 0;
+        for (int i = 0; i < 4; ++i) {
+            auto it = perNodeDirections.find(shell.nodeIds[i]);
+            if (it != perNodeDirections.end()) {
+                avgDirection = avgDirection + it->second;
+                dirCount++;
+            }
+        }
+        if (dirCount > 0) {
+            avgDirection = avgDirection * (1.0 / dirCount);
+        }
+        double alignment = shellNormal.x * avgDirection.x +
+                          shellNormal.y * avgDirection.y +
+                          shellNormal.z * avgDirection.z;
+
+        // If average direction is opposite to normal (alignment < 0), flip winding
+        bool flipWinding = (alignment < 0.0);
 
         for (int layer = 0; layer < numLayers; ++layer) {
             AddedElement elem;
@@ -6171,7 +6219,14 @@ void ModelAssembler::extrudeToSolid(const std::vector<ShellElement>& surface,
 
     // Create solid elements (same as standard version)
     for (const auto& shell : surface) {
-        bool flipWinding = false;
+        // Check if offset direction is aligned with shell normal
+        Vector3D shellNormal = computeElementNormal(shell);
+        double alignment = shellNormal.x * direction.x +
+                          shellNormal.y * direction.y +
+                          shellNormal.z * direction.z;
+
+        // If direction is opposite to normal (alignment < 0), flip winding
+        bool flipWinding = (alignment < 0.0);
 
         for (int layer = 0; layer < numLayers; ++layer) {
             AddedElement elem;
@@ -6281,7 +6336,26 @@ void ModelAssembler::extrudeToSolid(const std::vector<ShellElement>& surface,
 
     // Create solid elements (same as standard version)
     for (const auto& shell : surface) {
-        bool flipWinding = false;
+        // Check average per-node direction against shell normal
+        Vector3D shellNormal = computeElementNormal(shell);
+        Vector3D avgDirection(0, 0, 0);
+        int dirCount = 0;
+        for (int i = 0; i < 4; ++i) {
+            auto it = perNodeDirections.find(shell.nodeIds[i]);
+            if (it != perNodeDirections.end()) {
+                avgDirection = avgDirection + it->second;
+                dirCount++;
+            }
+        }
+        if (dirCount > 0) {
+            avgDirection = avgDirection * (1.0 / dirCount);
+        }
+        double alignment = shellNormal.x * avgDirection.x +
+                          shellNormal.y * avgDirection.y +
+                          shellNormal.z * avgDirection.z;
+
+        // If average direction is opposite to normal (alignment < 0), flip winding
+        bool flipWinding = (alignment < 0.0);
 
         for (int layer = 0; layer < numLayers; ++layer) {
             AddedElement elem;

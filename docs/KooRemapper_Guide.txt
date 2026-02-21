@@ -10,10 +10,11 @@
   3. assemble - 전체 모델 조립
      3.1  YAML 설정 포맷
      3.2  operation 상세 (replace/squeeze/restack/bend/indent/formstrain/
-          tet10/hex20/quad8/tria6/refine/elform/disconnect/iga)
+          tet10/hex20/quad8/tria6/refine/elform/disconnect/iga/offset)
      3.3-3.18  예제 모음 (squeeze/replace/restack/bend/indent/emboss)
      3.18a     예제: IGA 단일 파트 업그레이드
      3.18b     예제: IGA 다중 파트 + 축별 복셀 크기 개별 지정
+     3.18c     예제: IGA bbox_scale 기반 확장
      3.19 bend 이론 상세 (곡률, 변형률, Kirchhoff 판이론)
      3.20 indent 이론 상세 (SDF, quarter-arc, 굽힘 응력)
      3.21 예제 파일 목록
@@ -24,6 +25,7 @@
      3.26 quadratic 변환 이론 상세 (tet10/hex20/quad8/tria6)
      3.27 refine 이론 상세 (요소 세분화, 노드 공유)
      3.28 IGA(Isogeometric Analysis) 이론 상세 (NURBS box, h-refinement)
+     3.29 Offset 이론 상세 (표면 추출, extrusion, connection modes, dual prestress)
   4. shellmap - 쉘 기반 솔리드 매핑
   5. squeeze - 억지끼움 초기변형
   6. prestress - 변형 해석 + dynain 출력
@@ -623,7 +625,12 @@ KooRemapper는 LS-DYNA 메쉬 전처리 도구입니다.
   │ element_size_r   │ 0 (auto) │ r방향 크기 개별 지정 (0이면 element_size 사용) │
   │ element_size_s   │ 0 (auto) │ s방향 크기 개별 지정                           │
   │ element_size_t   │ 0 (auto) │ t방향 크기 개별 지정                           │
-  │ offset           │ -1 (auto)│ bbox 확장량 (-1=element_size와 동일)           │
+  │ offset           │ -1 (auto)│ bbox 고정 확장량 (-1=element_size와 동일)      │
+  │ bbox_scale       │ 0 (off)  │ 균일 배율: IGA박스=파트bbox×scale             │
+  │                  │          │ (off=±(scale-1)/2×len, 0이면 비활성화)        │
+  │ bbox_scale_r     │ 0 (auto) │ r방향 배율 개별 지정 (0이면 bbox_scale 사용)   │
+  │ bbox_scale_s     │ 0 (auto) │ s방향 배율 개별 지정                           │
+  │ bbox_scale_t     │ 0 (auto) │ t방향 배율 개별 지정                           │
   │ ir               │ 0        │ 적분 규칙 (0=reduced Gauss, 1=full Gauss)     │
   │ styp             │ 4        │ LCP stabilization type                        │
   │ tollg            │ 1.0e-3   │ Light Control Point 임계값                    │
@@ -649,9 +656,21 @@ KooRemapper는 LS-DYNA 메쉬 전처리 도구입니다.
         - target_pid: 5
           element_size: 1.0
 
+    # bbox_scale 기반 확장 (파트 크기 배율)
+    - type: iga
+      targets:
+        - target_pid: 1
+          element_size: 4.0
+          bbox_scale: 1.5       # 각 방향 ±25% 확장 (IGA박스=파트bbox×1.5)
+        - target_pid: 2
+          element_size: 3.0
+          bbox_scale_r: 2.0     # r: ±50% 확장 (off=(2-1)/2×lenR)
+          bbox_scale_s: 1.3     # s: ±15% 확장
+          bbox_scale_t: 1.0     # t: 확장 없음 (scale=1.0 → off=0)
+
   생성 키워드:
-    *PARAMETER_LOCAL         (id, mid, fepid, xmin~zmax, rr~rt, ir, styp, tollg)
-    *PARAMETER_EXPRESSION_LOCAL (rxminn/rxmaxx/ryminn/rymaxx/rzminn/rzmaxx)
+    *PARAMETER_LOCAL         (id, mid, fepid, xmin~zmax, rr~rt, ofr/ofs/oft, ir, styp, tollg)
+    *PARAMETER_EXPRESSION_LOCAL (rxminn/rxmaxx/ryminn/rymaxx/rzminn/rzmaxx, &ofr/&ofs/&oft 사용)
     *MAT_*                   (원본 재료 복사, 새 MID)
     *IGA_DEV_STABILIZATION   (sid, styp, tollg)
     *PART                    (IGA_Part_{fepid}, 새 PID/SECID/MID)
@@ -666,8 +685,295 @@ KooRemapper는 LS-DYNA 메쉬 전처리 도구입니다.
     * IGA 해석에는 LS-DYNA IGA 라이선스가 필요합니다.
     * 생성된 *MAT_* 카드는 원본 재료 카드의 복사본이므로 IGA에 적합한지
       확인하고 필요시 수정하십시오.
-    * element_size가 너무 크면 BB를 완전히 포함하지 못할 수 있습니다.
-      BB 확장 = ±element_size (기본), offset으로 명시적 설정 가능.
+    * bbox 확장 우선순위: bbox_scale_r/s/t > bbox_scale > offset >= 0 > auto(element_size).
+      bbox_scale=1.5 이면 off = (1.5-1)/2×len = 0.25×len (각 방향 길이의 25%).
+      offset=0.0 이면 확장 없음. offset=-1(기본)이면 element_size와 동일.
+    * PARAMETER_LOCAL에 ofr/ofs/oft로 실제 사용된 offset값이 기록됩니다.
+
+[offset]
+  대상 파트의 표면에서 오프셋 레이어를 생성합니다.
+  Solid/TShell/Shell 요소로 extrude하며, tied/czm/contact 연결 모드를 지원합니다.
+  Dual offset prestress 모드로 pouch 감싸기(wrapping) 시뮬레이션도 가능합니다.
+
+  주요 용도:
+    - Battery pouch wrapping: 내부 압축 + 외부 릴랙스 상태 prestress
+    - Thermal insulation layer: 표면에 단열재 레이어 추가
+    - Coating/Cladding: 코팅 또는 클래딩 레이어 모델링
+    - Multi-material stack: 연속 offset으로 다층 구조 생성
+
+  기본 동작:
+    1) source_pid의 외부 표면 자동 추출 (solid face occurrence count = 1)
+    2) offset 방향 결정 (+normal/-normal/±x/±y/±z)
+    3) num_layers 층만큼 노드 생성 (layer-by-layer)
+    4) element_type에 따라 요소 생성 (solid/tshell/shell)
+    5) connection_mode 적용 (tied/czm/contact)
+    6) 새 PART/SECTION/MATERIAL 키워드 자동 생성
+
+  파라미터:
+
+  ┌─────────────────────────┬──────────┬──────────────────────────────────────────┐
+  │ 파라미터                │ 기본값   │ 설명                                      │
+  ├─────────────────────────┼──────────┼──────────────────────────────────────────┤
+  │ source_pid (필수)       │ -        │ 표면을 추출할 소스 파트 ID                │
+  │ thickness (필수)        │ -        │ Offset 총 두께 (mm)                       │
+  │ num_layers              │ 1        │ 레이어 수 (두께 = thickness/num_layers)   │
+  │ element_type            │ solid    │ solid | tshell | shell                   │
+  │ offset_direction        │ +normal  │ +normal/-normal/±x/±y/±z                 │
+  │ connection_mode         │ tied     │ tied | czm | contact                     │
+  │ new_pid                 │ 0 (auto) │ 새 파트 ID (0=자동 증가)                  │
+  │ new_secid               │ 0 (auto) │ 새 섹션 ID (0=자동 증가)                  │
+  │ new_mid                 │ 0 (auto) │ 새 재료 ID (0=자동 증가)                  │
+  │ part_title              │ "Offset Layer" │ 파트 제목                         │
+  │ material_card           │ (없음)   │ *MAT_* 키워드 (multi-line, @MID@ 치환)   │
+  │ shell_thickness         │ 0 (auto) │ Shell/TShell 두께 (0=thickness 사용)      │
+  │ shell_offset            │ -1 (auto)│ Shell mid-plane 오프셋 (-1=thickness/2)  │
+  │ use_local_normals       │ false    │ 노드별 법선 사용 (품질 개선, Phase 2)     │
+  │ thickness_formula       │ (없음)   │ 두께 수식 (x,y,z,L1,L2,pi, Phase 4)      │
+  │ bbox_xmin/xmax          │ (없음)   │ Bounding box X 범위 (Phase 3)            │
+  │ bbox_ymin/ymax          │ (없음)   │ Bounding box Y 범위 (Phase 3)            │
+  │ bbox_zmin/zmax          │ (없음)   │ Bounding box Z 범위 (Phase 3)            │
+  │ node_id_min/max         │ (없음)   │ 노드 ID 범위 필터 (Phase 3)               │
+  └─────────────────────────┴──────────┴──────────────────────────────────────────┘
+
+  element_type 상세:
+
+    solid (HEX8):
+      - Offset 방향으로 extrude하여 solid 요소 생성
+      - num_layers층의 HEX8 요소 스택
+      - *SECTION_SOLID (ELFORM=1, constant stress)
+      - 가장 일반적인 옵션
+
+    tshell (TSHELL3/TSHELL4):
+      - Thick shell 요소 (각 층은 top+bottom 노드 보유)
+      - num_layers층의 TSHELL 요소
+      - *SECTION_TSHELL (ELFORM=16 QUAD / 17 TRIA)
+      - Through-thickness 변형 해석 가능
+
+    shell (QUAD4/TRIA3):
+      - 표준 shell 요소
+      - Offset 위치에 단일 노드면 생성
+      - *SECTION_SHELL (ELFORM=2, Belytschko-Tsay)
+      - 얇은 레이어 모델링 (두께는 SECTION에만 기재)
+
+  offset_direction 상세:
+
+    +normal / -normal:
+      - 표면 법선 벡터 평균 계산 (모든 face의 외적 평균)
+      - 곡면 표면의 자연스러운 오프셋
+      - +normal: 법선 방향 (외부로)
+      - -normal: 법선 역방향 (내부로)
+
+    ±x / ±y / ±z:
+      - 카테시안 축 고정 방향
+      - 평면 표면 또는 특정 방향 강제 시 사용
+      - 예: +z는 Vector3D(0, 0, 1)
+
+  connection_mode 상세:
+
+  ┌──────────┬──────────────────────────────────────────────────────────────┐
+  │ mode     │ 동작                                                          │
+  ├──────────┼──────────────────────────────────────────────────────────────┤
+  │ tied     │ 노드 공유 (기본값)                                            │
+  │          │ - Source 표면 노드를 offset 레이어 하단 노드로 직접 사용      │
+  │          │ - Perfect tie constraint 자동 달성                            │
+  │          │ - 추가 키워드 불필요                                          │
+  ├──────────┼──────────────────────────────────────────────────────────────┤
+  │ czm      │ Cohesive Zone Model                                          │
+  │          │ - Source 표면 노드를 복제 (동일 위치)                         │
+  │          │ - Zero-thickness cohesive elements 삽입 (ELFORM=20)          │
+  │          │ - *MAT_COHESIVE_* 키워드 필요 (czm_material_card)            │
+  │          │ - 층간 분리(delamination) 해석                                │
+  ├──────────┼──────────────────────────────────────────────────────────────┤
+  │ contact  │ Contact definition (완전 분리)                                │
+  │          │ - Offset 레이어 하단에 새 노드 생성 (동일 위치)               │
+  │          │ - Contact definition template 주석으로 출력                   │
+  │          │ - 사용자가 *CONTACT_* 키워드 수동 추가                        │
+  │          │ - 비결합(unbonded) 레이어 모델링                              │
+  └──────────┴──────────────────────────────────────────────────────────────┘
+
+  Dual offset prestress 모드:
+
+    prestress_mode: dual_offset 지정 시 활성화.
+    Battery pouch wrapping 시뮬레이션에 사용.
+
+    원리:
+      1. Inner offset (음수, 압축 상태): 변형된 형상 (deformed)
+      2. Outer offset (양수, 릴랙스 상태): 참조 형상 (reference)
+      3. Reference 형상의 노드 좌표를 출력 (.k 파일)
+      4. Deformed → Reference 간 full 3D 변형률 계산
+      5. 역방향 초기응력을 dynain에 출력
+      6. DR 실행 시 reference → deformed로 수축 (pouch 감싸기 재현)
+
+    추가 파라미터:
+      inner_offset: 압축 형상 오프셋 (음수, mm)
+      outer_offset: 릴랙스 형상 오프셋 (양수, mm)
+
+    변형률 계산:
+      - Isoparametric mapping으로 deformation gradient F 계산
+      - Full 3D strain tensor (ε_xx, ε_yy, ε_zz, ε_xy, ε_yz, ε_xz)
+      - Squeeze operation과 동일한 metric tensor 방법 사용
+      - Small strain approximation: ε = 0.5 * (C - I), C = F^T * F
+
+    Connection mode와 조합:
+      - tied: 원본 노드 직접 사용 (변위만 계산)
+      - czm/contact: 복제 노드 inner offset 위치에 생성
+
+  고급 기능 (Phase 2-4):
+
+    use_local_normals (Phase 2):
+      - 기본: 전역 법선 벡터 (모든 면 평균)
+      - local=true: 노드별 법선 벡터 (인접 면 평균)
+      - 곡면에서 품질 개선 (Jacobian +324%)
+      - +normal/-normal 방향과 함께 사용
+
+    Region Selection (Phase 3):
+      - bbox_xmin/xmax/ymin/ymax/zmin/zmax: bounding box 필터
+      - node_id_min/node_id_max: 노드 ID 범위 필터
+      - 조합 가능 (AND 조건)
+      - 예: 580 요소 → 82 요소 (90% 감소)
+
+    Variable Thickness (Phase 4):
+      - thickness_formula: 수식 기반 두께 (변수: x, y, z, L1, L2, pi)
+      - 예: "1.0 + 0.02*x" → x 위치에 따라 두께 변화
+      - 위치별로 다른 두께 자동 계산
+      - thickness 파라미터와 병행 사용 (기본값)
+
+  알려진 제한사항:
+
+    1. -normal 방향: 음수 Jacobian 발생 (side surface 문제)
+       → 회피: ±x/±y/±z 고정 방향 사용
+
+    2. Shell source: 이전 operation의 shell을 source로 사용 불가
+       → 회피: 중간 결과를 파일로 저장 후 base_model로 재로드
+
+    3. TET4 source: 작동하지만 degenerate HEX8 생성 (품질 저하)
+       → aspect ratio 999, warping 90° 경고
+       → 향후 WEDGE6 지원으로 개선 예정
+
+    4. +normal on concave: 오목 표면에서 self-intersection 가능
+       → 회피: 고정 방향 사용 또는 region selection으로 영역 제한
+
+  품질 개선 효과 (실측):
+    - 기본 (no features): Aspect Ratio 13.33, Jacobian 0.119
+    - + Local normals: AR 7.38, Jac 0.505 (+324%)
+    - + Region filter: AR 6.67, Jac 0.972
+    - + 모든 기능: AR 7.45, Jac 0.507 (최적)
+
+  YAML 예:
+
+    # 기본 solid offset (tied)
+    - type: offset
+      source_pid: 1
+      thickness: 1.0
+      num_layers: 1
+      element_type: solid
+      offset_direction: +z
+      new_pid: 10
+      part_title: "Insulation Layer"
+      material_card: |
+        *MAT_ELASTIC
+        $#     mid        ro         e        pr
+             @MID@       1.2      1000       0.3
+
+    # TShell offset (다층)
+    - type: offset
+      source_pid: 1
+      thickness: 2.0
+      num_layers: 2
+      element_type: tshell
+      offset_direction: +normal
+      new_pid: 11
+      shell_thickness: 1.0
+
+    # CZM connection
+    - type: offset
+      source_pid: 1
+      thickness: 0.5
+      element_type: solid
+      offset_direction: +z
+      connection_mode: czm
+      czm_part_id: 20
+      czm_mid: 100
+      czm_material_card: |
+        *MAT_COHESIVE_MIXED_MODE
+        $#     mid        ro        en        et       gic      giic       xmu
+             @MID@       1.0     1.0E6     1.0E6       1.0       2.0       1.0
+        $#       t         s
+                50.0      30.0
+
+    # Dual offset prestress (pouch wrapping)
+    - type: offset
+      source_pid: 1
+      thickness: 1.0        # outer - inner = 1.0 - (-0.2) = 1.2
+      num_layers: 1
+      element_type: solid
+      offset_direction: +normal
+      connection_mode: tied
+      prestress_mode: dual_offset
+      inner_offset: -0.2    # 압축 (음수)
+      outer_offset: 1.0     # 릴랙스 (양수)
+      new_pid: 12
+      material_card: |
+        *MAT_ELASTIC
+        $#     mid        ro         e        pr
+             @MID@       1.0     10000       0.3
+
+    # 고급 기능 조합 (local normals + region + variable thickness)
+    - type: offset
+      source_pid: 1
+      thickness: 1.0
+      thickness_formula: "1.0 + 0.02*x"    # x 위치 기반 두께
+      num_layers: 1
+      element_type: solid
+      offset_direction: +normal
+      use_local_normals: true               # 노드별 법선
+      bbox_xmin: -10.0                      # Region filter
+      bbox_xmax: 10.0
+      connection_mode: tied
+      new_pid: 15
+      part_title: "Advanced_Offset_Example"
+      material_card: |
+        *MAT_ELASTIC
+        $#     mid        ro         e        pr
+             @MID@       2.0     15000       0.25
+
+  생성 키워드:
+
+    공통:
+      *PART (새 PID, SECID, MID)
+      *SECTION_SOLID / *SECTION_TSHELL / *SECTION_SHELL
+      *MAT_* (material_card 지정 시)
+
+    CZM mode 추가:
+      *PART (Cohesive layer)
+      *SECTION_SOLID (ELFORM=20, zero-thickness)
+      *MAT_COHESIVE_* (czm_material_card)
+
+    Contact mode 추가:
+      주석으로 *CONTACT_AUTOMATIC_SURFACE_TO_SURFACE 템플릿 출력
+
+    Dual offset prestress 추가:
+      *.dynain (*INITIAL_STRESS_SOLID, 역방향 응력)
+
+  주의사항:
+    * Source 파트는 solid elements 지원 (HEX8 권장, TET4 품질 저하).
+    * Shell element source는 제한적 지원 (PID tracking 문제).
+      → 중간 결과를 파일 저장 후 base_model로 재로드 권장.
+    * TET4 source는 degenerate HEX8 생성 (aspect ratio 999, warping 90°).
+      → HEX8 source 사용 권장. WEDGE6 지원은 향후 추가 예정.
+    * offset_direction=-normal은 negative Jacobian 발생 (알려진 버그).
+      → ±x/±y/±z 고정 방향 사용 권장.
+    * CZM mode에서 czm_material_card는 필수.
+      Placeholder 값이 아니라 실제 재료 시험 값 사용 권장.
+    * Dual offset prestress는 element_type=solid + E,nu 지정 필수.
+      YAML에 material 섹션 또는 material_card에 *MAT_ELASTIC 지정.
+    * Contact mode에서는 수동으로 *CONTACT_* 키워드 추가 필요.
+    * num_layers > 1 시 각 층은 노드 공유 (node-shared stack).
+      레이어별 다른 재료 사용 시 여러 offset operation 사용.
+    * offset_direction=+normal 시 concave 표면에서 self-intersection 가능.
+      → 고정 방향 사용 또는 region selection으로 영역 제한.
+    * Element quality validation: Aspect Ratio > 20 또는 Jacobian < -1e-10 시 오류.
+      Warping > 45° 경고는 Jacobian > 0이면 허용 가능.
 
 ----------------------------------------------------------------
 3.3 예제: 단순 squeeze
@@ -1347,6 +1653,45 @@ KooRemapper assemble iga_multipart.yaml
 # 원본 MID=1은 양쪽 IGA 파트 모두에 공유되지 않음 (MID=2, MID=3으로 각자 복사)
 
 ----------------------------------------------------------------
+3.18c 예제: IGA bbox_scale 기반 확장
+----------------------------------------------------------------
+
+# iga_scale.yaml
+# 파트 bbox 대비 배율로 IGA 박스 크기를 자동 결정
+base_model: block_2x2x1.k
+output: iga_scale_result
+
+operations:
+  - type: iga
+    targets:
+      - target_pid: 1
+        element_size: 4.0
+        bbox_scale: 1.5         # 각 방향 ±25% 확장
+                                # off = (1.5-1)/2 × len
+
+      - target_pid: 2
+        element_size: 3.0
+        bbox_scale_r: 2.0       # r: off=(2-1)/2×20 = 10.0
+        bbox_scale_s: 1.3       # s: off=(1.3-1)/2×10 = 1.5
+        bbox_scale_t: 3.0       # t: off=(3-1)/2×5 = 5.0
+        ir: 1
+
+# 결과 (iga_scale_result_iga_p1.k 주요 파라미터):
+#   PID 1 (bbox 20×10×5, scale=1.5):
+#     Rofr  5.0    → rxminn = 0  - 5.0  = -5.0
+#     Rofs  2.5    → ryminn = 0  - 2.5  = -2.5
+#     Roft  1.25   → rzminn = 0  - 1.25 = -1.25
+#
+#   PID 2 (bbox 20×10×5):
+#     Rofr 10.0    → rxminn = 0   - 10 = -10
+#     Rofs  1.5    → ryminn = 0   - 1.5 = -1.5
+#     Roft  5.0    → rzminn = 5.0 - 5.0 =  0.0
+#
+# offset 우선순위: bbox_scale_r/s/t > bbox_scale > offset >= 0 > element_size(auto)
+# bbox_scale=1.0 지정시 off=0 (확장 없음)
+# offset=0.0 지정시도 off=0 (확장 없음)
+
+----------------------------------------------------------------
 3.19 bend 이론 상세
 ----------------------------------------------------------------
 
@@ -1918,6 +2263,20 @@ examples/ 디렉토리에 실행 가능한 예제가 포함되어 있습니다:
     iga_multipart_result.k        메인 출력 (*INCLUDE 2개)
     iga_multipart_result_iga_p1.k PID 1 IGA 파일
     iga_multipart_result_iga_p2.k PID 2 IGA 파일 (rr=rs=2.0, rt=3.0, p=2)
+    iga_scale.yaml                bbox_scale 기반 확장 예제
+    iga_scale_result.k            메인 출력 (*INCLUDE 2개)
+    iga_scale_result_iga_p1.k     PID 1: bbox_scale=1.5 → Rofr=5, Rofs=2.5, Roft=1.25
+    iga_scale_result_iga_p2.k     PID 2: 축별 scale → Rofr=10, Rofs=1.5, Roft=5
+
+[offset 예제]
+  examples/offset/
+    solid_tied.yaml               기본 solid offset (tied mode, 단열재 레이어)
+    tshell_multi.yaml             TShell 다층 offset (2층, through-thickness)
+    czm_mode.yaml                 CZM connection (층간 분리 해석)
+    dual_offset_prestress.yaml    Dual offset prestress (pouch wrapping)
+    shell_offset.yaml             Shell element offset (얇은 코팅)
+    contact_mode.yaml             Contact connection (비결합 레이어)
+    README.md                     예제 상세 설명 및 응용
 
 [assemble 예제]
   examples/replace_test/          파트 교체 + squeeze + DR
@@ -2587,6 +2946,457 @@ YAML 포맷은 help generate 참조.
   IGA 파트와 FE 파트 간에 재료 해석 충돌이 발생합니다.
   KooRemapper는 applyIGA() 호출 시 ++maxMaterialId_로 새 MID를 자동 발급하고
   원본 재료 카드를 IGA .k 파일에 복사(MID만 치환)합니다.
+
+
+================================================================
+3.29 Offset 이론 상세
+================================================================
+
+----------------------------------------------------------------
+개요: Surface Offset 및 Extrusion
+----------------------------------------------------------------
+
+Offset operation은 대상 파트의 외부 표면에서 일정 거리 떨어진 위치에
+새로운 레이어를 생성합니다. Extrusion 방향과 요소 타입, 연결 방식을
+제어하여 다양한 물리 현상을 모델링할 수 있습니다.
+
+주요 응용:
+  1. Battery pouch wrapping: 내부 압축 + 외부 릴랙스 prestress
+  2. Thermal insulation: 단열재 레이어 추가
+  3. Coating/Cladding: 표면 코팅 또는 클래딩
+  4. Multi-layer stack: 연속 offset으로 복합 구조 생성
+  5. Delamination analysis: CZM 연결로 층간 분리 해석
+
+----------------------------------------------------------------
+1. 표면 추출 (Surface Extraction)
+----------------------------------------------------------------
+
+Solid 요소(HEX8, TET4)의 외부 표면을 자동 감지합니다.
+
+알고리즘:
+  1. 각 요소의 모든 면(face)을 순회
+     - HEX8: 6개 면 (각 4개 노드)
+     - TET4: 4개 면 (각 3개 노드)
+
+  2. 면 키(face key) 생성
+     - 면을 구성하는 노드 ID를 정렬하여 고유 키 생성
+     - 예: [N3, N1, N4, N2] → [N1, N2, N3, N4]
+
+  3. 면 출현 횟수 카운트
+     - 내부 공유 면: 2회 출현 (인접 요소 2개가 공유)
+     - 외부 표면 면: 1회 출현 (한쪽만 요소 존재)
+
+  4. 출현 횟수 = 1인 면을 표면으로 수집
+     - 각 면을 ShellElement로 변환 (QUAD4 또는 TRIA3)
+
+결과: std::vector<ShellElement> surface
+  - 외부 표면만 포함된 shell 요소 리스트
+  - 노드 순서는 외부 법선 방향으로 정렬 (right-hand rule)
+
+----------------------------------------------------------------
+2. Offset 방향 결정
+----------------------------------------------------------------
+
+2.1 +normal / -normal 모드
+
+  표면 법선 벡터의 평균을 계산하여 자연스러운 offset 방향 결정.
+
+  단계:
+    1) 각 표면 면의 법선 벡터 계산
+       n = (P1 - P0) × (P2 - P0)
+       n_unit = n / |n|
+
+    2) 모든 면의 법선을 평균
+       n_avg = Σ n_i / N
+
+    3) +normal: n_avg 방향
+       -normal: -n_avg 방향
+
+  장점: 곡면 표면에서 자연스러운 offset
+  주의: Concave 표면에서 self-intersection 가능
+
+2.2 ±x / ±y / ±z 모드
+
+  카테시안 축 고정 방향.
+
+  예:
+    +z: Vector3D(0, 0, 1)
+    -x: Vector3D(-1, 0, 0)
+
+  장점: 평면 표면에서 정확한 제어
+  주의: 곡면에서 균일하지 않은 두께 발생 가능
+
+----------------------------------------------------------------
+3. 요소 생성 (Element Extrusion)
+----------------------------------------------------------------
+
+3.1 Solid Extrusion (HEX8)
+
+  Layer-by-layer 노드 생성 후 solid 요소 연결.
+
+  단계:
+    1) Layer 0 (bottom): 원본 표면 노드 사용
+       - Tied mode: 직접 사용
+       - CZM/Contact: 복제 노드 생성
+
+    2) Layer 1~N (top): 새 노드 생성
+       for layer in 1..num_layers:
+         newPos = origPos + direction * (layer * thickness / num_layers)
+         newNode = ++maxNodeId_
+
+    3) HEX8 요소 생성
+       for each surface face:
+         for layer in 0..(num_layers-1):
+           bottom: layer 노드 (N0~N3)
+           top:    layer+1 노드 (N4~N7)
+           → HEX8 element
+
+  노드 공유:
+    - 인접 표면 면이 공유하는 노드는 하나의 노드만 생성 (dedup)
+    - bottomToTopNodes[layer][origNodeId] → newNodeId 매핑 사용
+
+3.2 TShell Extrusion (TSHELL3/4)
+
+  Thick shell 요소는 top+bottom 노드를 모두 보유.
+
+  노드 구조:
+    TSHELL4 (8 nodes): [N0, N1, N2, N3]_bottom + [N4, N5, N6, N7]_top
+    TSHELL3 (6 nodes): [N0, N1, N2]_bottom + [N3, N4, N5]_top
+
+  ELFORM:
+    16: TSHELL4 (quadrilateral)
+    17: TSHELL3 (triangle)
+
+  Layer-by-layer:
+    각 layer는 독립된 top+bottom 노드 쌍 보유.
+
+3.3 Shell Offset (QUAD4/TRIA3)
+
+  단일 노드면만 생성 (no through-thickness nodes).
+
+  단계:
+    1) Offset 위치에 새 노드 생성
+       newPos = origPos + direction * shell_offset
+
+    2) 표면 면을 새 노드로 재구성
+       Shell element with new node IDs
+
+  두께:
+    - *SECTION_SHELL의 T1~T4 필드에만 기재
+    - 실제 노드는 mid-plane만 존재
+
+----------------------------------------------------------------
+4. Connection Modes
+----------------------------------------------------------------
+
+4.1 Tied Mode (노드 공유)
+
+  구현:
+    - Source 표면 노드를 offset 레이어 하단 노드로 직접 사용
+    - 추가 처리 없음
+
+  효과:
+    - Perfect tie constraint (displacement compatibility)
+    - 추가 키워드 불필요
+
+  용도:
+    - 완전 결합 레이어 (insulation, coating)
+
+4.2 CZM Mode (Cohesive Zone Model)
+
+  구현:
+    1) Source 표면 노드 복제
+       origNode → dupNode (동일 위치)
+
+    2) Offset 레이어 하단 노드를 dupNode로 교체
+
+    3) Zero-thickness cohesive elements 생성
+       Bottom: origNode
+       Top:    dupNode
+       ELFORM=20 (zero-thickness solid)
+
+  재료:
+    *MAT_COHESIVE_MIXED_MODE (사용자 지정)
+      - EN, ET: Normal/tangential stiffness
+      - GIC, GIIC: Mode I/II fracture energy
+      - T, S: Normal/shear strength
+
+  효과:
+    - 층간 분리(delamination) 모델링
+    - Energy-based failure criterion
+
+  용도:
+    - Composite laminate delamination
+    - Interface debonding
+
+4.3 Contact Mode (완전 분리)
+
+  구현:
+    1) Offset 레이어 하단에 새 노드 생성 (동일 위치)
+
+    2) *CONTACT_* 정의 template 주석 출력
+       *CONTACT_AUTOMATIC_SURFACE_TO_SURFACE
+         SSID = source_pid
+         MSID = offset_pid
+
+  효과:
+    - 비결합(unbonded) 레이어
+    - Contact algorithm으로 상호작용
+
+  용도:
+    - Sliding interface
+    - Removable layer
+
+  주의:
+    - 사용자가 *CONTACT_* 키워드 수동 추가 필요
+    - Friction coefficient 등 파라미터 설정
+
+----------------------------------------------------------------
+5. Dual Offset Prestress (Pouch Wrapping)
+----------------------------------------------------------------
+
+Battery pouch가 배터리 셀을 감싸는 과정을 시뮬레이션합니다.
+
+5.1 물리 원리
+
+  실제:
+    1. Pouch가 평평한 상태에서 배터리 셀에 감김 (압축)
+    2. Pouch가 탄성 회복하려 하지만 셀에 막힘 (prestress)
+
+  모델링:
+    1. Inner offset (음수): 압축된 형상 (deformed)
+    2. Outer offset (양수): 릴랙스 형상 (reference)
+    3. Reference 형상을 .k 파일에 출력
+    4. Deformed → Reference 변형률 계산 → 역방향 응력
+    5. DR 실행 시 reference → deformed 수축 (pouch 감싸기 재현)
+
+5.2 Prestress 계산
+
+  Full 3D strain tensor 사용 (squeeze와 동일 방법).
+
+  단계:
+    1) Reference configuration nodes
+       refNodes[i] = 현재 요소 노드 위치 (outer offset)
+
+    2) Deformed configuration nodes
+       defNodes[i] = deformed position map (inner offset)
+
+       - Bottom face: deformedPositions[nodeId]
+       - Top face: refNodes[i] + (defNodes[bottom] - refNodes[bottom])
+
+    3) Deformation gradient 계산
+       Isoparametric mapping으로 F = dx_def / dX_ref 계산
+
+       Reference vectors:
+         dr_ref = ∂X/∂r at center (finite difference)
+         ds_ref = ∂X/∂s
+         dt_ref = ∂X/∂t
+
+       Deformed vectors:
+         dr_def = ∂x/∂r
+         ds_def = ∂x/∂s
+         dt_def = ∂x/∂t
+
+    4) Metric tensor (small strain approximation)
+       ε = 0.5 * (C - I)
+       C = F^T * F (right Cauchy-Green tensor)
+
+       ε_xx = 0.5 * (dr_def·dr_def / dr_ref·dr_ref - 1)
+       ε_yy = 0.5 * (ds_def·ds_def / ds_ref·ds_ref - 1)
+       ε_zz = 0.5 * (dt_def·dt_def / dt_ref·dt_ref - 1)
+
+       Shear strains:
+       ε_xy = 0.5 * (dr_def·ds_def / |dr||ds| - dr_ref·ds_ref / |dr||ds|)
+       ε_yz, ε_xz 동일
+
+    5) Hooke's law로 응력 계산
+       σ = C : ε
+       C: 4차 탄성 텐서 (isotropic: E, ν)
+
+    6) 역방향 응력을 dynain에 출력
+       *INITIAL_STRESS_SOLID (σ_xx, σ_yy, σ_zz, σ_xy, σ_yz, σ_xz)
+
+5.3 Dynamic Relaxation 동작
+
+  LS-DYNA DR 실행:
+    1. t=0: Reference 형상 (outer offset, .k 파일)
+    2. Prestress 로드 (역방향, .dynain)
+    3. DR: 준정적 수축 (reference → deformed)
+    4. 최종: Pouch가 배터리 셀을 감싼 압축 상태
+
+  결과:
+    - Pouch 내부 응력 분포
+    - 배터리 셀 표면 압력
+    - Contact force 분포
+
+----------------------------------------------------------------
+6. 구현 상세
+----------------------------------------------------------------
+
+6.1 데이터 구조
+
+  AddedNode:
+    int id; double x, y, z;
+
+  AddedElement:
+    int id, pid;
+    std::array<int, 8> nodeIds;
+    ElementType type;  // HEX8
+
+  AddedShellElement:
+    int id, pid;
+    std::array<int, 8> nodeIds;  // TSHELL은 8개, Shell은 4개만 사용
+    int elform;  // 2=QUAD4, 16=TSHELL4, 17=TSHELL3
+
+6.2 알고리즘 흐름
+
+  applyOffset():
+    1. Validation (source PID 존재 확인)
+    2. ID 자동 할당 (PID, SECID, MID)
+    3. extractSourceSurface()
+    4. parseOffsetDirection()
+    5. element_type별 extrusion
+       - solid: extrudeToSolid()
+       - tshell: extrudeToTShell()
+       - shell: createOffsetShell()
+    6. connection_mode 적용
+       - tied: applyConnectionTied()
+       - czm: applyConnectionCZM()
+       - contact: applyConnectionContact()
+    7. PART/SECTION/MATERIAL 키워드 생성
+
+  applyDualOffsetPrestress():
+    1. Surface 추출
+    2. Connection mode에 따라 노드 복제
+       - tied: 원본 노드 직접 사용
+       - czm/contact: 복제 노드 inner offset 위치에 생성
+    3. Outer offset 형상으로 extrusion
+    4. calculateDualOffsetPrestress()
+       - Full 3D strain tensor
+       - Reverse prestress
+    5. CZM elements 생성 (czm mode)
+    6. Contact hint 출력 (contact mode)
+
+6.3 최적화
+
+  노드 공유:
+    - bottomToTopNodes[layer][origNodeId] → newNodeId 맵
+    - 한 번만 생성, 여러 요소에서 재사용
+
+  Face deduplication:
+    - std::map<std::array<int,4>, int> faceToCount
+    - Sorted node IDs로 고유 키 생성
+
+  Batch insertion:
+    - addedNodes_.push_back()
+    - addedElements_.push_back()
+    - writeOutput()에서 일괄 출력
+
+----------------------------------------------------------------
+7. 검증 방법
+----------------------------------------------------------------
+
+7.1 표면 추출 검증
+
+  단일 HEX8 (6면):
+    - 출력: 6 shell elements
+    - 각 면 4개 노드
+
+  2 HEX8 공유면 (10면):
+    - 출력: 10 shell elements (공유면 제외)
+
+7.2 Extrusion 검증
+
+  Solid (num_layers=2):
+    - 노드: N_orig + (N_surface × 2)
+    - 요소: N_surface × 2
+
+  TShell (num_layers=1):
+    - 노드: N_surface × 2 (top+bottom)
+    - 요소: N_surface
+
+7.3 Prestress 검증
+
+  Dual offset with known displacement:
+    inner_offset = -0.1 (compression)
+    outer_offset = 0.0 (reference)
+
+  Expected strain:
+    ε_n ≈ -0.1 / thickness (normal)
+
+  Expected stress:
+    σ_n ≈ E · ε_n (reversed sign in dynain)
+
+  DR 결과:
+    - Final displacement ≈ -0.1 (return to deformed)
+    - Residual stress ≈ 0
+
+7.4 CZM 검증
+
+  출력 확인:
+    - Cohesive elements count = surface faces
+    - *MAT_COHESIVE_MIXED_MODE 존재
+    - *SECTION_SOLID ELFORM=20
+
+  LS-DYNA 실행:
+    - Zero initial separation
+    - Mode I/II traction laws 활성화
+
+----------------------------------------------------------------
+8. 제한사항 및 주의사항
+----------------------------------------------------------------
+
+8.1 제한사항
+
+  - Source 파트: Solid elements만 지원 (HEX8/TET4)
+  - Shell element source 미지원 (shellmap으로 대체)
+  - Self-intersection 감지 없음 (concave + +normal)
+
+8.2 주의사항
+
+  1. +normal 방향 self-intersection
+     - Concave 표면에서 offset이 교차할 수 있음
+     - LS-DYNA negative volume 경고
+     - 해결: 고정 방향(±x/±y/±z) 사용 또는 offset 거리 감소
+
+  2. CZM material 파라미터
+     - Placeholder 값이 아닌 실제 시험 값 사용 권장
+     - EN, ET: Interface stiffness (너무 작으면 불안정)
+     - GIC, GIIC: Fracture energy (실험 데이터 필요)
+     - T, S: Strength (peak traction)
+
+  3. Dual offset prestress 요구사항
+     - element_type = solid 필수
+     - E, nu 지정 필수 (YAML material 섹션 또는 material_card)
+     - inner_offset < outer_offset 권장
+
+  4. Contact mode 수동 설정
+     - 출력 .k 파일의 주석 템플릿 참조
+     - Friction, penalty 등 파라미터 조정
+
+  5. num_layers > 1
+     - 각 층은 노드 공유 (node-shared)
+     - 층간 요소 크기 균일
+     - CZM은 최외각 interface만 적용
+
+----------------------------------------------------------------
+9. 이론 참고문헌
+----------------------------------------------------------------
+
+[1] Bathe, K.J. (1996). Finite Element Procedures.
+    → Isoparametric mapping, deformation gradient
+
+[2] Camanho, P.P., Dávila, C.G. (2002). Mixed-Mode Decohesion
+    Finite Elements for the Simulation of Delamination in
+    Composite Materials. NASA/TM-2002-211737.
+    → CZM theory
+
+[3] LS-DYNA Theory Manual (2020).
+    → *MAT_COHESIVE_MIXED_MODE, *SECTION_TSHELL
+
+[4] Malvern, L.E. (1969). Introduction to the Mechanics of a
+    Continuous Medium.
+    → Strain tensor, metric tensor
 
 ================================================================
   KooRemapper v1.3.0

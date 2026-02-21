@@ -51,8 +51,12 @@ Get-ChildItem *.yaml | ForEach-Object {
 | Region selection | ✅ | ✅ | ✅ | Phase 3 - bbox/node/element filters |
 | Variable thickness | ✅ | ✅ | ✅ | Phase 4 - formula-based |
 | Multi-layer | ✅ | ✅ | ❌ | Multiple layers (num_layers > 1) |
+| **Source Element Types** | | | | |
+| HEX8 | ✅ | ✅ | ✅ | Primary support |
+| TET4 | ⚠️ | ⚠️ | ⚠️ | Works but creates degenerate HEX8 (poor quality) |
+| Shell source | ⚠️ | ⚠️ | ⚠️ | Limited (PID tracking issue across operations) |
 
-✅ = Fully supported | ⚠️ = Known issues | ❌ = Not applicable
+✅ = Fully supported | ⚠️ = Known issues/limitations | ❌ = Not applicable
 
 ## Known Issues
 
@@ -68,12 +72,31 @@ Get-ChildItem *.yaml | ForEach-Object {
 **Status**: Acceptable when Jacobian > 0
 **Explanation**: Warping 180° can occur with mixed surface orientations
 
+### 4. TET4 Offset Quality
+
+**Status**: Works but produces poor quality elements
+**Issue**: TET4 faces are triangular; extrusion creates degenerate HEX8 (aspect ratio 999, warping 90°)
+**Future**: Proper TET4 offset would require WEDGE6 (prism) element support
+
+### 5. Shell Source Limitation
+
+**Status**: Limited support
+**Issue**: Shell elements created in one operation cannot be used as source in subsequent operation (PID tracking limitation)
+**Workaround**: Export intermediate result and reload as base model
+
+## Future Enhancements
+
+1. **WEDGE6 Support**: 6-node prism elements for proper TET4 offset (triangle → prism extrusion)
+2. **Multi-Material Single Operation**: Different materials per layer in one operation (currently requires multiple operations)
+3. **-normal Direction Fix**: Resolve negative Jacobian issue with inward offset
+
 ## Tips & Best Practices
 
 1. **Start Simple**: Begin with `01_basic_solid_tied.yaml`
 2. **Choose Right Direction**: Flat surfaces → use ±x/±y/±z; Curved → use +normal + local normals
 3. **Quality Optimization**: Combine `+normal` + `use_local_normals: true` + region filter
-4. **Multi-Material**: Use multiple offset operations with different `material_card`
+4. **Multi-Material**: Use multiple offset operations with different `material_card` (single-operation support is planned)
+5. **TET4 Meshes**: Expect poor quality warnings; use HEX8 source for best results
 
 ## Parameter Reference
 
@@ -124,3 +147,4 @@ Using advanced features (Phase 2-4):
 **Version**: 1.1.0
 **Last Updated**: 2026-02-21
 **Examples Validated**: All 12 examples tested ✅
+**Status**: Complete with documented limitations (TET4 quality, shell source, -normal direction)

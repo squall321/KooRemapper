@@ -1,0 +1,20 @@
+# Test: TET4 element offset
+# Purpose: Verify that TET4 elements (stored as degenerate HEX8) can be offset
+
+base_model: ../../examples/tet10/two_tets.k
+output: test_tet4_offset_result
+
+operations:
+  - type: offset
+    source_pid: 1
+    element_type: solid
+    thickness: 0.5
+    num_layers: 1
+    offset_direction: +z
+    connection_mode: tied
+    new_pid: 10
+    part_title: "TET4_Offset_Test"
+    material_card: |
+      *MAT_ELASTIC
+      $#     mid        ro         e        pr
+           @MID@  7.85E-09    210000       0.3

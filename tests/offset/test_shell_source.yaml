@@ -1,0 +1,37 @@
+# Test: Shell source offset
+# Purpose: Verify that shell elements can be used as source for offset
+
+base_model: ../../examples/arc30/arc30_flat.k
+output: test_shell_source_result
+
+operations:
+  # Step 1: Create shell surface from solid
+  - type: offset
+    source_pid: 1
+    element_type: shell
+    thickness: 0.5
+    shell_thickness: 0.1
+    num_layers: 1
+    offset_direction: +z
+    connection_mode: tied
+    new_pid: 10
+    part_title: "Shell_Surface"
+    material_card: |
+      *MAT_ELASTIC
+      $#     mid        ro         e        pr
+           @MID@       2.0     12000       0.25
+
+  # Step 2: Offset FROM the shell surface to create solid
+  - type: offset
+    source_pid: 10                 # Use shell part as source
+    element_type: solid
+    thickness: 1.0
+    num_layers: 1
+    offset_direction: +z
+    connection_mode: tied
+    new_pid: 11
+    part_title: "Solid_From_Shell"
+    material_card: |
+      *MAT_ELASTIC
+      $#     mid        ro         e        pr
+           @MID@       2.0     12000       0.25
