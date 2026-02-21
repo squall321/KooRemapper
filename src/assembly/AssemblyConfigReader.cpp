@@ -1,8 +1,10 @@
 #include "assembly/AssemblyConfigReader.h"
+#include "validation/MaterialCardValidator.h"
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
 #include <algorithm>
+#include <iostream>
 
 namespace KooRemapper {
 
@@ -12,6 +14,19 @@ std::string AssemblyConfigReader::trim(const std::string& str) {
     while (start < end && std::isspace(str[start])) start++;
     while (end > start && std::isspace(str[end - 1])) end--;
     return str.substr(start, end - start);
+}
+
+static std::string stripComment(const std::string& str) {
+    size_t pos = str.find('#');
+    if (pos != std::string::npos) {
+        // Remove everything from '#' onward, then trim
+        std::string result = str.substr(0, pos);
+        // Trim trailing whitespace before comment
+        size_t end = result.length();
+        while (end > 0 && std::isspace(result[end - 1])) end--;
+        return result.substr(0, end);
+    }
+    return str;
 }
 
 static int countIndent(const std::string& line) {
@@ -53,8 +68,13 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
     bool inTargetsList = false;
     bool inTargetItem = false;
     int targetsKeyIndent = 0;  // indent of "targets:" key for IGA
+    bool inDataBboxSection = false;
+    int dataBboxIndent = 0;    // indent of "data_bbox:" key for warpage
     bool readingMaterialCard = false;
+    bool readingCzmMaterialCard = false;
     int materialCardBaseIndent = 0;
+    enum class MaterialCardTarget { NONE, RESTACK_LAYER, OFFSET, OFFSET_CZM };
+    MaterialCardTarget materialCardTarget = MaterialCardTarget::NONE;
     bool inShapeSection = false;
     bool inPointsList = false;
 
@@ -64,13 +84,21 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
         int indent = countIndent(line);
 
         // Multi-line material_card block reading
-        if (readingMaterialCard) {
+        if (readingMaterialCard || readingCzmMaterialCard) {
             if (trimmed.empty()) {
                 // Empty line inside block → include as blank line
-                if (!config.operations.empty() &&
-                    config.operations.back().type == AssemblyOperation::RESTACK &&
-                    !config.operations.back().restack.layers.empty()) {
-                    config.operations.back().restack.layers.back().materialCard += "\n";
+                if (!config.operations.empty()) {
+                    if (materialCardTarget == MaterialCardTarget::RESTACK_LAYER &&
+                        config.operations.back().type == AssemblyOperation::RESTACK &&
+                        !config.operations.back().restack.layers.empty()) {
+                        config.operations.back().restack.layers.back().materialCard += "\n";
+                    } else if (materialCardTarget == MaterialCardTarget::OFFSET &&
+                               config.operations.back().type == AssemblyOperation::OFFSET) {
+                        config.operations.back().offset.materialCard += "\n";
+                    } else if (materialCardTarget == MaterialCardTarget::OFFSET_CZM &&
+                               config.operations.back().type == AssemblyOperation::OFFSET) {
+                        config.operations.back().offset.czmMaterialCard += "\n";
+                    }
                 }
                 continue;
             }
@@ -81,17 +109,31 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                 size_t end = content.find_last_not_of(" \t\r");
                 if (end != std::string::npos) content = content.substr(0, end + 1);
 
-                if (!config.operations.empty() &&
-                    config.operations.back().type == AssemblyOperation::RESTACK &&
-                    !config.operations.back().restack.layers.empty()) {
-                    auto& card = config.operations.back().restack.layers.back().materialCard;
-                    if (!card.empty()) card += "\n";
-                    card += content;
+                if (!config.operations.empty()) {
+                    if (materialCardTarget == MaterialCardTarget::RESTACK_LAYER &&
+                        config.operations.back().type == AssemblyOperation::RESTACK &&
+                        !config.operations.back().restack.layers.empty()) {
+                        auto& card = config.operations.back().restack.layers.back().materialCard;
+                        if (!card.empty()) card += "\n";
+                        card += content;
+                    } else if (materialCardTarget == MaterialCardTarget::OFFSET &&
+                               config.operations.back().type == AssemblyOperation::OFFSET) {
+                        auto& card = config.operations.back().offset.materialCard;
+                        if (!card.empty()) card += "\n";
+                        card += content;
+                    } else if (materialCardTarget == MaterialCardTarget::OFFSET_CZM &&
+                               config.operations.back().type == AssemblyOperation::OFFSET) {
+                        auto& card = config.operations.back().offset.czmMaterialCard;
+                        if (!card.empty()) card += "\n";
+                        card += content;
+                    }
                 }
                 continue;
             }
             // Indentation decreased → end of block
             readingMaterialCard = false;
+            readingCzmMaterialCard = false;
+            materialCardTarget = MaterialCardTarget::NONE;
             // Fall through to process this line normally
         }
 
@@ -184,6 +226,10 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                         else if (key == "element_size_s") tgt.elementSizeS = std::stod(val);
                         else if (key == "element_size_t") tgt.elementSizeT = std::stod(val);
                         else if (key == "offset") tgt.offset = std::stod(val);
+                        else if (key == "bbox_scale") tgt.bboxScale = std::stod(val);
+                        else if (key == "bbox_scale_r") tgt.bboxScaleR = std::stod(val);
+                        else if (key == "bbox_scale_s") tgt.bboxScaleS = std::stod(val);
+                        else if (key == "bbox_scale_t") tgt.bboxScaleT = std::stod(val);
                         else if (key == "ir") tgt.ir = std::stoi(val);
                         else if (key == "styp") tgt.styp = std::stoi(val);
                         else if (key == "tollg") tgt.tollg = std::stod(val);
@@ -240,6 +286,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             if (val == "|") {
                                 // Multi-line block: find indentation of first content line
                                 readingMaterialCard = true;
+                                materialCardTarget = MaterialCardTarget::RESTACK_LAYER;
                                 // Look ahead to find the indentation of the first content line
                                 materialCardBaseIndent = indent + 2; // default
                                 for (size_t ahead = li + 1; ahead < lines.size(); ++ahead) {
@@ -266,6 +313,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                 inLayerItem = false;
                 inTargetsList = false;
                 inTargetItem = false;
+                inDataBboxSection = false;
                 inShapeSection = false;
                 inPointsList = false;
 
@@ -309,6 +357,10 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             op.type = AssemblyOperation::DISCONNECT;
                         } else if (val == "iga") {
                             op.type = AssemblyOperation::IGA;
+                        } else if (val == "warpage") {
+                            op.type = AssemblyOperation::WARPAGE;
+                        } else if (val == "offset") {
+                            op.type = AssemblyOperation::OFFSET;
                         } else {
                             throw std::runtime_error("Unknown operation type: " + val);
                         }
@@ -343,12 +395,35 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                 inPointsList = false;
             }
 
+            // --- data_bbox sub-keys ---
+            if (inDataBboxSection && !config.operations.empty() &&
+                config.operations.back().type == AssemblyOperation::WARPAGE) {
+                // Check if we've left the data_bbox section
+                if (indent <= dataBboxIndent) {
+                    inDataBboxSection = false;
+                } else {
+                    size_t colonPos = trimmed.find(':');
+                    if (colonPos != std::string::npos) {
+                        std::string key = trim(trimmed.substr(0, colonPos));
+                        std::string val = trim(trimmed.substr(colonPos + 1));
+                        auto& wp = config.operations.back().warpage;
+                        try {
+                            if (key == "x_min") wp.dataBboxXmin = std::stod(val);
+                            else if (key == "x_max") wp.dataBboxXmax = std::stod(val);
+                            else if (key == "y_min") wp.dataBboxYmin = std::stod(val);
+                            else if (key == "y_max") wp.dataBboxYmax = std::stod(val);
+                        } catch (...) {}
+                    }
+                    continue;  // Skip normal processing for data_bbox sub-keys
+                }
+            }
+
             // --- Operation sub-keys ---
             if (inOperationItem && !config.operations.empty()) {
                 size_t colonPos = trimmed.find(':');
                 if (colonPos != std::string::npos) {
                     std::string key = trim(trimmed.substr(0, colonPos));
-                    std::string val = trim(trimmed.substr(colonPos + 1));
+                    std::string val = trim(stripComment(trimmed.substr(colonPos + 1)));
 
                     auto& op = config.operations.back();
                     try {
@@ -374,6 +449,13 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                                 op.elform.targetPid = pid;
                             } else if (op.type == AssemblyOperation::DISCONNECT) {
                                 op.disconnect.targetPid = pid;
+                            } else if (op.type == AssemblyOperation::WARPAGE) {
+                                op.warpage.targetPid = pid;
+                            }
+                        } else if (key == "source_pid") {
+                            int pid = std::stoi(val);
+                            if (op.type == AssemblyOperation::OFFSET) {
+                                op.offset.sourcePid = pid;
                             }
                         } else if (op.type == AssemblyOperation::BEND) {
                             if (key == "plane") op.bend.plane = val;
@@ -452,6 +534,94 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                                 inTargetsList = true;
                                 inTargetItem = false;
                                 targetsKeyIndent = indent;
+                            }
+                        } else if (op.type == AssemblyOperation::WARPAGE) {
+                            if (key == "dat_file") op.warpage.datFile = val;
+                            else if (key == "plane") op.warpage.plane = val;
+                            else if (key == "deflection_axis") op.warpage.deflectionAxis = val;
+                            else if (key == "unit") op.warpage.unit = val;
+                            else if (key == "mask_value") op.warpage.maskValue = std::stod(val);
+                            else if (key == "noise_threshold") op.warpage.noiseThreshold = std::stod(val);
+                            else if (key == "morph_factor") op.warpage.morphFactor = std::stod(val);
+                            else if (key == "mode") op.warpage.mode = val;
+                            else if (key == "finite_strain") {
+                                bool newVal = (val == "true" || val == "yes" || val == "1");
+                                std::cout << "[YAML DEBUG] finite_strain: val='" << val << "' -> " << (newVal ? "TRUE" : "FALSE") << "\n";
+                                op.warpage.useFiniteStrain = newVal;
+                            }
+                            else if (key == "outside_behavior") op.warpage.outsideBehavior = val;
+                            else if (key == "debug") op.warpage.debug = (val == "true" || val == "yes" || val == "1");
+                            else if (key == "debug_prefix") op.warpage.debugPrefix = val;
+                            else if (key == "data_bbox") {
+                                inDataBboxSection = true;
+                                dataBboxIndent = indent;
+                                op.warpage.hasDataBbox = true;
+                            }
+                        } else if (op.type == AssemblyOperation::OFFSET) {
+                            if (key == "offset_direction") op.offset.offsetDirection = val;
+                            else if (key == "thickness") op.offset.thickness = std::stod(val);
+                            else if (key == "thickness_formula") op.offset.thicknessFormula = val;
+                            else if (key == "num_layers") op.offset.numLayers = std::stoi(val);
+                            else if (key == "use_local_normals") op.offset.useLocalNormals = (val == "true" || val == "True" || val == "1");
+                            // Region selection
+                            else if (key == "bbox_xmin") { op.offset.region.useBoundingBox = true; op.offset.region.xMin = std::stod(val); }
+                            else if (key == "bbox_xmax") { op.offset.region.useBoundingBox = true; op.offset.region.xMax = std::stod(val); }
+                            else if (key == "bbox_ymin") { op.offset.region.useBoundingBox = true; op.offset.region.yMin = std::stod(val); }
+                            else if (key == "bbox_ymax") { op.offset.region.useBoundingBox = true; op.offset.region.yMax = std::stod(val); }
+                            else if (key == "bbox_zmin") { op.offset.region.useBoundingBox = true; op.offset.region.zMin = std::stod(val); }
+                            else if (key == "bbox_zmax") { op.offset.region.useBoundingBox = true; op.offset.region.zMax = std::stod(val); }
+                            else if (key == "node_id_min") op.offset.region.nodeIdMin = std::stoi(val);
+                            else if (key == "node_id_max") op.offset.region.nodeIdMax = std::stoi(val);
+                            else if (key == "element_id_min") op.offset.region.elementIdMin = std::stoi(val);
+                            else if (key == "element_id_max") op.offset.region.elementIdMax = std::stoi(val);
+                            else if (key == "element_type") op.offset.elementType = val;
+                            else if (key == "connection_mode") op.offset.connectionMode = val;
+                            else if (key == "czm_part_id") op.offset.czmPartId = std::stoi(val);
+                            else if (key == "czm_mid") op.offset.czmMid = std::stoi(val);
+                            else if (key == "prestress_mode") op.offset.prestressMode = val;
+                            else if (key == "inner_offset") op.offset.innerOffset = std::stod(val);
+                            else if (key == "outer_offset") op.offset.outerOffset = std::stod(val);
+                            else if (key == "new_pid") op.offset.newPid = std::stoi(val);
+                            else if (key == "new_secid") op.offset.newSecid = std::stoi(val);
+                            else if (key == "new_mid") op.offset.newMid = std::stoi(val);
+                            else if (key == "part_title") op.offset.partTitle = val;
+                            else if (key == "shell_thickness") op.offset.shellThickness = std::stod(val);
+                            else if (key == "shell_offset") op.offset.shellOffset = std::stod(val);
+                            else if (key == "material_card") {
+                                // Multi-line block starts
+                                readingMaterialCard = true;
+                                materialCardTarget = MaterialCardTarget::OFFSET;
+                                materialCardBaseIndent = indent + 2;
+                                for (size_t ahead = li + 1; ahead < lines.size(); ++ahead) {
+                                    std::string aheadTrimmed = trim(lines[ahead]);
+                                    if (!aheadTrimmed.empty() && aheadTrimmed[0] != '#') {
+                                        materialCardBaseIndent = countIndent(lines[ahead]);
+                                        break;
+                                    }
+                                }
+                                if (val == "|") {
+                                    op.offset.materialCard = "";
+                                } else {
+                                    op.offset.materialCard = val;
+                                }
+                            }
+                            else if (key == "czm_material_card") {
+                                // Multi-line block starts
+                                readingCzmMaterialCard = true;
+                                materialCardTarget = MaterialCardTarget::OFFSET_CZM;
+                                materialCardBaseIndent = indent + 2;
+                                for (size_t ahead = li + 1; ahead < lines.size(); ++ahead) {
+                                    std::string aheadTrimmed = trim(lines[ahead]);
+                                    if (!aheadTrimmed.empty() && aheadTrimmed[0] != '#') {
+                                        materialCardBaseIndent = countIndent(lines[ahead]);
+                                        break;
+                                    }
+                                }
+                                if (val == "|") {
+                                    op.offset.czmMaterialCard = "";
+                                } else {
+                                    op.offset.czmMaterialCard = val;
+                                }
                             }
                         }
                     } catch (...) {}
@@ -539,6 +709,104 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                     throw std::runtime_error("Operation " + std::to_string(i+1) +
                         ": iga target " + std::to_string(j+1) + " element_size must be positive");
             }
+        } else if (op.type == AssemblyOperation::WARPAGE) {
+            std::string pfx = "Operation " + std::to_string(i+1) + " (warpage): ";
+            if (op.warpage.targetPid <= 0)
+                throw std::runtime_error(pfx + "missing target_pid");
+            if (op.warpage.datFile.empty())
+                throw std::runtime_error(pfx + "missing dat_file");
+            if (op.warpage.plane != "xy" && op.warpage.plane != "yz" && op.warpage.plane != "zx")
+                throw std::runtime_error(pfx + "invalid plane '" + op.warpage.plane + "'");
+            if (op.warpage.unit != "um" && op.warpage.unit != "mm" && op.warpage.unit != "m")
+                throw std::runtime_error(pfx + "invalid unit '" + op.warpage.unit + "'");
+            if (op.warpage.morphFactor <= 0.0)
+                throw std::runtime_error(pfx + "morph_factor must be positive");
+            if (op.warpage.mode != "prestress" && op.warpage.mode != "deform")
+                throw std::runtime_error(pfx + "invalid mode '" + op.warpage.mode + "'");
+            if (op.warpage.outsideBehavior != "zero" &&
+                op.warpage.outsideBehavior != "clamp" &&
+                op.warpage.outsideBehavior != "extrapolate")
+                throw std::runtime_error(pfx + "invalid outside_behavior '" + op.warpage.outsideBehavior + "'");
+            if (op.warpage.hasDataBbox) {
+                if (op.warpage.dataBboxXmax <= op.warpage.dataBboxXmin)
+                    throw std::runtime_error(pfx + "data_bbox: x_max must be > x_min");
+                if (op.warpage.dataBboxYmax <= op.warpage.dataBboxYmin)
+                    throw std::runtime_error(pfx + "data_bbox: y_max must be > y_min");
+            }
+        } else if (op.type == AssemblyOperation::OFFSET) {
+            std::string pfx = "Operation " + std::to_string(i+1) + " (offset): ";
+
+            if (op.offset.sourcePid <= 0)
+                throw std::runtime_error(pfx + "source_pid required");
+
+            // Prestress mode validation
+            bool isDualOffset = (op.offset.prestressMode == "dual_offset");
+            if (isDualOffset) {
+                // Dual offset mode: inner/outer required
+                if (op.offset.innerOffset >= 0.0)
+                    throw std::runtime_error(pfx + "inner_offset must be < 0 (inward)");
+                if (op.offset.outerOffset <= 0.0)
+                    throw std::runtime_error(pfx + "outer_offset must be > 0 (outward)");
+                if (op.offset.innerOffset >= op.offset.outerOffset)
+                    throw std::runtime_error(pfx + "inner_offset must be < outer_offset");
+            } else {
+                // Normal mode: thickness required
+                if (op.offset.thickness <= 0.0)
+                    throw std::runtime_error(pfx + "thickness must be > 0");
+            }
+
+            if (op.offset.numLayers < 1)
+                throw std::runtime_error(pfx + "num_layers must be >= 1");
+
+            std::string etype = op.offset.elementType;
+            if (etype != "solid" && etype != "tshell" && etype != "shell")
+                throw std::runtime_error(pfx + "element_type must be solid|tshell|shell");
+
+            // Connection mode validation
+            std::string cmode = op.offset.connectionMode;
+            if (cmode != "tied" && cmode != "czm" && cmode != "contact")
+                throw std::runtime_error(pfx + "connection_mode must be tied|czm|contact");
+
+            // Material card validation
+            if (!op.offset.materialCard.empty()) {
+                MaterialCardValidator validator;
+                auto result = validator.validate(op.offset.materialCard, true);
+
+                // Print warnings
+                for (const auto& warning : result.warnings) {
+                    std::cout << "[WARNING] " << pfx << "material_card: " << warning << "\n";
+                }
+
+                // Errors are fatal
+                if (!result.errors.empty()) {
+                    std::string errMsg = pfx + "material_card validation failed:\n";
+                    for (const auto& error : result.errors) {
+                        errMsg += "  - " + error + "\n";
+                    }
+                    throw std::runtime_error(errMsg);
+                }
+            }
+
+            // CZM material card validation
+            if (cmode == "czm" && !op.offset.czmMaterialCard.empty()) {
+                MaterialCardValidator validator;
+                auto result = validator.validate(op.offset.czmMaterialCard, true);
+
+                // Print warnings
+                for (const auto& warning : result.warnings) {
+                    std::cout << "[WARNING] " << pfx << "czm_material_card: " << warning << "\n";
+                }
+
+                // Errors are fatal
+                if (!result.errors.empty()) {
+                    std::string errMsg = pfx + "czm_material_card validation failed:\n";
+                    for (const auto& error : result.errors) {
+                        errMsg += "  - " + error + "\n";
+                    }
+                    throw std::runtime_error(errMsg);
+                }
+            }
+
         } else if (op.type == AssemblyOperation::INDENT) {
             std::string pfx = "Operation " + std::to_string(i+1) + " (indent): ";
             if (op.indent.targetPid <= 0)

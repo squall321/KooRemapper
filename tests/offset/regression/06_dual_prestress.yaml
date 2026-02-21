@@ -1,0 +1,25 @@
+# Regression Test 6: Dual offset prestress mode
+# Expected: 600 HEX8 at outer position + .dynain with prestress
+base_model: ../../../examples/arc30/arc30_flat.k
+output: 06_dual_prestress
+
+E: 12000.0
+nu: 0.28
+
+operations:
+  - type: offset
+    source_pid: 1
+    thickness: 1.3              # outer - inner
+    num_layers: 1
+    element_type: solid
+    offset_direction: +z
+    connection_mode: tied
+    prestress_mode: dual_offset
+    inner_offset: -0.3          # Compressed state
+    outer_offset: 1.0           # Relaxed state
+    new_pid: 15
+    part_title: "Regression_Dual_Prestress"
+    material_card: |
+      *MAT_ELASTIC
+      $#     mid        ro         e        pr
+           @MID@       2.0     12000       0.28

@@ -1,0 +1,19 @@
+# Regression Test 7: +normal offset direction (curved surface adaptation)
+# Expected: 600 HEX8 following surface normals
+base_model: ../../../examples/arc30/arc30_flat.k
+output: 07_normal_direction
+
+operations:
+  - type: offset
+    source_pid: 1
+    thickness: 0.9
+    num_layers: 1
+    element_type: solid
+    offset_direction: +normal
+    connection_mode: tied
+    new_pid: 16
+    part_title: "Regression_Normal_Dir"
+    material_card: |
+      *MAT_ELASTIC
+      $#     mid        ro         e        pr
+           @MID@       2.0     10500       0.29

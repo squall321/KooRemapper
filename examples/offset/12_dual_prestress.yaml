@@ -1,0 +1,51 @@
+# Example 12: Dual Offset Prestress
+# Purpose: Create offset in both directions for squeeze/prestress operations
+# Features: Dual offset mode (both +normal and -normal), stress initialization
+
+base_model: ../arc30/arc30_flat.k
+output: 12_dual_prestress_result
+
+operations:
+  # First offset: +z direction (upward)
+  - type: offset
+    source_pid: 1
+    element_type: solid
+    thickness: 0.5
+    num_layers: 1
+    offset_direction: +z               # Fixed direction (more reliable)
+    connection_mode: tied
+    new_pid: 10
+    part_title: "Upper_Layer"
+    material_card: |
+      *MAT_ELASTIC
+      $#     mid        ro         e        pr
+           @MID@       2.0     12000       0.25
+
+  # Second offset: +x direction (sideways) - demonstrates multi-directional offset
+  - type: offset
+    source_pid: 1
+    element_type: solid
+    thickness: 0.5
+    num_layers: 1
+    offset_direction: +x               # Different fixed direction
+    connection_mode: contact           # Separate surfaces (for demonstration)
+    new_pid: 11
+    part_title: "Side_Layer"
+    material_card: |
+      *MAT_ELASTIC
+      $#     mid        ro         e        pr
+           @MID@       2.0     12000       0.25
+
+# Note: Dual offset prestress workflow:
+#   1. Create outer layer (+normal offset)
+#   2. Create inner layer (-normal offset)
+#   3. Use with squeeze operation to create prestress
+#
+# Typical use cases:
+#   - Interference fit assembly
+#   - Prestressed composite structures
+#   - Contact pressure initialization
+#
+# For automatic stress initialization, use the 'squeeze' command:
+#   KooRemapper squeeze <config.yaml>
+#   (generates *INITIAL_STRESS_SOLID for prestress)

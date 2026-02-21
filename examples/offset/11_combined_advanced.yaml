@@ -1,0 +1,54 @@
+# Example 11: Combined Advanced Features
+# Purpose: Use ALL advanced features simultaneously
+# Features: Local normals + Region selection + Variable thickness (Phase 2+3+4)
+
+base_model: ../arc30/arc30_flat.k
+output: 11_combined_result
+
+operations:
+  - type: offset
+    source_pid: 1
+
+    # Element configuration
+    element_type: solid
+    thickness: 1.0                     # Base thickness
+    num_layers: 1
+
+    # Direction
+    offset_direction: +normal
+
+    # ADVANCED FEATURE 1: Local Normals (Phase 2)
+    use_local_normals: true            # Per-node averaged normals
+                                       # Improves quality on curved surfaces
+
+    # ADVANCED FEATURE 2: Region Selection (Phase 3)
+    bbox_xmin: -8.0                    # Only offset center region
+    bbox_xmax: 8.0
+    bbox_ymin: -15.0
+    bbox_ymax: 15.0
+
+    # ADVANCED FEATURE 3: Variable Thickness (Phase 4)
+    thickness_formula: 1.0 + 0.02*x    # Position-dependent thickness
+
+    # Connection
+    connection_mode: tied
+
+    # New part IDs
+    new_pid: 10
+    part_title: "Combined_Advanced"
+
+    # Material card
+    material_card: |
+      *MAT_ELASTIC
+      $#     mid        ro         e        pr
+           @MID@       2.0     12000       0.25
+
+# Note: This example demonstrates the full power of the offset operation:
+#   1. Regional filtering reduces element count (580 → ~82)
+#   2. Local normals improve element quality (Jacobian +324%, Aspect -45%)
+#   3. Variable thickness provides position-dependent geometry
+#
+# Expected results:
+#   - Region filter: 580 → 82 elements
+#   - Quality: Aspect Ratio ~7.45, Jacobian ~0.507
+#   - Thickness: varies from ~0.8 to ~1.2 mm across geometry

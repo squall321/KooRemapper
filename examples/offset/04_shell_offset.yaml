@@ -1,0 +1,38 @@
+# Example 04: Shell Offset
+# Purpose: Create QUAD4 shell elements offset from solid surface
+# Features: QUAD4 shell element type, shell thickness
+
+base_model: ../arc30/arc30_flat.k
+output: 04_shell_result
+
+operations:
+  - type: offset
+    source_pid: 1
+
+    # Element configuration
+    element_type: shell                # Create QUAD4 shell elements
+    thickness: 1.0                     # Offset distance: 1.0 mm
+    shell_thickness: 0.8               # Shell element thickness: 0.8 mm
+    num_layers: 1
+
+    # Direction
+    offset_direction: +z
+
+    # Connection
+    connection_mode: tied
+
+    # New part IDs
+    new_pid: 10
+    part_title: "Shell_Offset"
+
+    # Material card
+    material_card: |
+      *MAT_ELASTIC
+      $#     mid        ro         e        pr
+           @MID@       2.0     12000       0.25
+
+# Note: Shell offset creates a shell surface at the specified offset distance.
+#       Useful for:
+#       - Creating outer skin layers
+#       - Simplified representation of thin structures
+#       - Contact surfaces

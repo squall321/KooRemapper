@@ -1,0 +1,41 @@
+# Example 05: Normal Direction Offset
+# Purpose: Offset along surface normal direction (adaptive to surface curvature)
+# Features: +normal direction, useful for curved surfaces
+
+base_model: ../arc30/arc30_flat.k
+output: 05_normal_result
+
+operations:
+  - type: offset
+    source_pid: 1
+
+    # Element configuration
+    element_type: solid
+    thickness: 1.0
+    num_layers: 1
+
+    # Direction - KEY FEATURE
+    offset_direction: +normal          # Along averaged surface normal direction
+                                       # Automatically adapts to surface curvature
+
+    # Connection
+    connection_mode: tied
+
+    # New part IDs
+    new_pid: 10
+    part_title: "Normal_Direction"
+
+    # Material card
+    material_card: |
+      *MAT_ELASTIC
+      $#     mid        ro         e        pr
+           @MID@       2.0     12000       0.25
+
+# Note: +normal vs +z:
+#   +z: Fixed global direction (all elements offset in same direction)
+#   +normal: Each element offsets along its averaged surface normal
+#            Better for curved surfaces, may cause self-intersection on concave surfaces
+#
+# Alternatives:
+#   -normal: Offset inward (opposite to surface normal)
+#   ±x, ±y, ±z: Fixed global directions

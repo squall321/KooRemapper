@@ -101,7 +101,11 @@ struct IGATargetConfig {
     double elementSizeR = 0.0;   // per-axis override (0 = use elementSize)
     double elementSizeS = 0.0;
     double elementSizeT = 0.0;
-    double offset = -1.0;        // bbox expansion (-1 = auto = element_size per axis)
+    double offset = -1.0;        // bbox expansion fixed value (-1 = auto = element_size per axis)
+    double bboxScale = 0.0;      // uniform scale multiplier (0=disabled; e.g. 1.5 = expand 25% each side)
+    double bboxScaleR = 0.0;     // per-axis scale override (0 = use bboxScale)
+    double bboxScaleS = 0.0;
+    double bboxScaleT = 0.0;
     int ir = 0;                  // integration rule (0=reduced, 1=full)
     int styp = 4;                // LCP stabilization type
     double tollg = 1.0e-3;       // LCP threshold
@@ -113,8 +117,93 @@ struct IGAOperation {
     std::vector<IGATargetConfig> targets;
 };
 
+struct WarpageOperation {
+    int targetPid = 0;
+    std::string datFile;            // 필수
+    std::string plane = "xy";       // xy | yz | zx
+    std::string deflectionAxis = "z"; // +z | -z | +x | -x | +y | -y
+    std::string unit = "um";        // um | mm | m
+    double maskValue = 9999.0;
+    double noiseThreshold = 1.0e-10;
+
+    // data_bbox (선택)
+    bool hasDataBbox = false;
+    double dataBboxXmin = 0.0;
+    double dataBboxXmax = 0.0;
+    double dataBboxYmin = 0.0;
+    double dataBboxYmax = 0.0;
+
+    std::string outsideBehavior = "zero"; // zero | clamp | extrapolate
+
+    double morphFactor = 1.0;
+    std::string mode = "prestress"; // prestress | deform
+    bool useFiniteStrain = true;    // true: von Kármán (대변형), false: Kirchhoff (소변형)
+
+    // 디버깅
+    bool debug = false;
+    std::string debugPrefix = "debug/warp";
+};
+
+struct RegionSelection {
+    // Bounding box filter
+    bool useBoundingBox = false;
+    double xMin = -1e10, xMax = 1e10;
+    double yMin = -1e10, yMax = 1e10;
+    double zMin = -1e10, zMax = 1e10;
+
+    // Node/Element set filter
+    std::vector<int> nodeIds;        // Specific node IDs
+    std::vector<int> elementIds;     // Specific element IDs
+
+    // Range specification
+    int nodeIdMin = 0, nodeIdMax = 0;     // 0 = no filter
+    int elementIdMin = 0, elementIdMax = 0;
+};
+
+struct OffsetOperation {
+    // Source
+    int sourcePid = 0;
+
+    // Region selection (optional)
+    RegionSelection region;
+
+    // Offset parameters
+    std::string offsetDirection = "+normal";  // +normal/-normal/±x/±y/±z
+    double thickness = 0.0;
+    std::string thicknessFormula = "";  // Optional formula: "1.0 + 0.1*x" (if set, overrides thickness)
+    int numLayers = 1;
+    bool useLocalNormals = false;  // true = per-node averaged normals, false = global average
+
+    // Element type
+    std::string elementType = "solid";  // solid | tshell | shell
+
+    // Connection mode
+    std::string connectionMode = "tied";  // tied | czm | contact
+    int czmPartId = 0;                    // CZM part ID (0 = auto-increment)
+    int czmMid = 0;                       // CZM material ID (0 = auto-increment)
+    std::string czmMaterialCard;          // *MAT_COHESIVE_* keyword
+
+    // Dual offset prestress mode
+    std::string prestressMode = "";       // "" | "dual_offset"
+    double innerOffset = 0.0;             // 압축된 형상 (deformed, 음수)
+    double outerOffset = 0.0;             // 릴랙스 형상 (reference, 양수)
+
+    // New part definition
+    int newPid = 0;         // 0 = auto-increment
+    int newSecid = 0;       // 0 = auto-increment
+    std::string partTitle = "Offset Layer";
+
+    // Material
+    int newMid = 0;         // 0 = auto-increment
+    std::string materialCard;  // Multi-line MAT keyword
+
+    // Shell-specific
+    double shellThickness = 0.0;  // 0 = use thickness
+    double shellOffset = -1.0;    // -1 = use thickness/2 (mid-plane)
+};
+
 struct AssemblyOperation {
-    enum Type { REPLACE, SQUEEZE, RESTACK, BEND, INDENT, FORMSTRAIN, TET10_CONVERT, REFINE, ELFORM, DISCONNECT, IGA };
+    enum Type { REPLACE, SQUEEZE, RESTACK, BEND, INDENT, FORMSTRAIN, TET10_CONVERT, REFINE, ELFORM, DISCONNECT, IGA, WARPAGE, OFFSET };
     Type type;
     ReplaceOperation replace;
     SqueezeOperation squeeze;
@@ -127,6 +216,8 @@ struct AssemblyOperation {
     ElformOperation elform;
     DisconnectOperation disconnect;
     IGAOperation iga;
+    WarpageOperation warpage;
+    OffsetOperation offset;
 };
 
 struct AssemblyConfig {

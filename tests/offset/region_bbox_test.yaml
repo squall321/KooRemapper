@@ -1,0 +1,28 @@
+# Test: Bounding Box Region Selection
+# Only offset elements within specified bbox
+
+base_model: ../../examples/arc30/arc30_flat.k
+output: region_bbox_result
+
+operations:
+  - type: offset
+    source_pid: 1
+    # Region selection: bounding box (center region only)
+    bbox_xmin: -5.0
+    bbox_xmax: 5.0
+    bbox_ymin: -10.0
+    bbox_ymax: 10.0
+    bbox_zmin: -100.0
+    bbox_zmax: 100.0
+    # Offset parameters
+    thickness: 1.0
+    num_layers: 1
+    element_type: solid
+    offset_direction: +z
+    connection_mode: tied
+    new_pid: 10
+    part_title: "BBox_Region"
+    material_card: |
+      *MAT_ELASTIC
+      $#     mid        ro         e        pr
+           @MID@       2.0     12000       0.25

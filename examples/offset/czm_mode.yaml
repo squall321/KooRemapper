@@ -1,0 +1,27 @@
+# Offset 예제 3: CZM connection mode
+# 용도: 층간 분리(delamination) 해석
+base_model: ../arc30/arc30_flat.k
+output: czm_mode_result
+
+operations:
+  - type: offset
+    source_pid: 1
+    thickness: 0.5
+    num_layers: 1
+    element_type: solid
+    offset_direction: +z
+    connection_mode: czm
+    czm_part_id: 20
+    czm_mid: 100
+    new_pid: 12
+    part_title: "CZM Offset Layer"
+    material_card: |
+      *MAT_ELASTIC
+      $#     mid        ro         e        pr
+           @MID@       1.0      2000       0.3
+    czm_material_card: |
+      *MAT_COHESIVE_MIXED_MODE
+      $#     mid        ro        en        et       gic      giic       xmu
+           @MID@       1.0     1.0E6     1.0E6       1.0       2.0       1.0
+      $#       t         s
+              50.0      30.0

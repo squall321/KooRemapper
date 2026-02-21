@@ -1,0 +1,31 @@
+# Example 01: Basic Solid Offset with Tied Connection
+# Purpose: Simplest offset operation - extrude solid elements in fixed direction
+# Features: HEX8 solid, tied connection (node sharing), single layer, fixed +z direction
+
+base_model: ../arc30/arc30_flat.k
+output: 01_basic_result
+
+operations:
+  - type: offset
+    source_pid: 1                      # Source part ID to offset
+
+    # Element configuration
+    element_type: solid                # Create HEX8 solid elements
+    thickness: 1.0                     # Offset distance: 1.0 mm
+    num_layers: 1                      # Single layer
+
+    # Direction
+    offset_direction: +z               # Fixed direction: positive Z-axis
+
+    # Connection
+    connection_mode: tied              # Tied connection (shared nodes)
+
+    # New part IDs
+    new_pid: 10                        # New part ID for offset elements
+    part_title: "Basic_Offset"         # Part title
+
+    # Material card
+    material_card: |
+      *MAT_ELASTIC
+      $#     mid        ro         e        pr
+           @MID@       2.0     12000       0.25

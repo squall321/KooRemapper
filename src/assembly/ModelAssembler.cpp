@@ -4,6 +4,7 @@
 #include "assembly/ClosedLoop.h"
 #include "assembly/IndentProfile.h"
 #include "assembly/ShellCurvature.h"
+#include "assembly/WarpageGrid.h"
 #include "parser/KFileReader.h"
 #include "parser/ShellReader.h"
 #include "parser/DynainWriter.h"
@@ -12,9 +13,12 @@
 #include "analysis/StrainTensor.h"
 #include "analysis/StressTensor.h"
 #include "analysis/MaterialModel.h"
+#include "validation/ElementQualityChecker.h"
+#include "validation/IntersectionDetector.h"
 #include <fstream>
 #include <sstream>
 #include <iomanip>
+#include <iostream>
 #include <algorithm>
 #include <limits>
 #include <cmath>
@@ -3661,7 +3665,7 @@ bool ModelAssembler::applyDisconnect(const DisconnectOperation& op) {
     // --- Shell (QUAD4) active element map ---
     struct ShellElemData {
         int pid;
-        std::array<int, 4> nodeIds;
+        std::array<int, 8> nodeIds;  // 8 for TSHELL, only 4 used for regular shells
         bool fromAdded;
         int addedIdx;
     };
@@ -3680,13 +3684,15 @@ bool ModelAssembler::applyDisconnect(const DisconnectOperation& op) {
         activeShellElems[ae.id] = {ae.pid, ae.nodeIds, true, i};
     }
 
-    auto updateShellElemNodes = [&](int eid, const std::array<int,4>& newNodes) {
+    auto updateShellElemNodes = [&](int eid, const std::array<int,8>& newNodes) {
         auto& sed = activeShellElems.at(eid);
         sed.nodeIds = newNodes;
         if (sed.fromAdded) {
             addedShellElements_[sed.addedIdx].nodeIds = newNodes;
         } else {
-            modifiedShellElementNodes_[eid] = newNodes;
+            // modifiedShellElementNodes_ expects array<int,4>, only copy first 4
+            std::array<int, 4> nodes4 = {newNodes[0], newNodes[1], newNodes[2], newNodes[3]};
+            modifiedShellElementNodes_[eid] = nodes4;
         }
     };
 
@@ -3923,7 +3929,7 @@ bool ModelAssembler::applyDisconnect(const DisconnectOperation& op) {
         for (int eid : targetShellElems) {
             const auto& sed = activeShellElems.at(eid);
             bool modified = false;
-            std::array<int, 4> newNodes = sed.nodeIds;
+            std::array<int, 8> newNodes = sed.nodeIds;
             for (int n = 0; n < 4; ++n) {
                 int nid = sed.nodeIds[n];
                 auto it = nodePartRemap.find({nid, sed.pid});
@@ -4224,6 +4230,7 @@ std::string ModelAssembler::generateIGAContent(
     int newId, int newMid, int fepid,
     double xmin, double xmax, double ymin, double ymax, double zmin, double zmax,
     double rr, double rs, double rt,
+    double offR, double offS, double offT,
     int ir, int styp, double tollg,
     int pr, int ps, int pt,
     int nisr, int niss, int nist,
@@ -4264,18 +4271,21 @@ std::string ModelAssembler::generateIGAContent(
     pR("rr",     rr);
     pR("rs",     rs);
     pR("rt",     rt);
+    pR("ofr",    offR);
+    pR("ofs",    offS);
+    pR("oft",    offT);
     pI("ir",     ir);
     pI("styp",   styp);
     pR("tollg",  tollg);
 
-    // PARAMETER_EXPRESSION_LOCAL (extended bbox)
+    // PARAMETER_EXPRESSION_LOCAL (extended bbox via separate offset params)
     o << "*PARAMETER_EXPRESSION_LOCAL\n";
-    o << "rxminn, &xmin-&rr\n";
-    o << "rxmaxx, &xmax+&rr\n";
-    o << "ryminn, &ymin-&rs\n";
-    o << "rymaxx, &ymax+&rs\n";
-    o << "rzminn, &zmin-&rt\n";
-    o << "rzmaxx, &zmax+&rt\n";
+    o << "rxminn, &xmin-&ofr\n";
+    o << "rxmaxx, &xmax+&ofr\n";
+    o << "ryminn, &ymin-&ofs\n";
+    o << "rymaxx, &ymax+&ofs\n";
+    o << "rzminn, &zmin-&oft\n";
+    o << "rzmaxx, &zmax+&oft\n";
 
     // Material block (copied with newMid)
     if (!matBlock.empty()) {
@@ -4383,15 +4393,13 @@ bool ModelAssembler::applyIGA(const IGAOperation& op, const std::string& outputP
         double zmax = -std::numeric_limits<double>::max();
 
         auto nodeIds = getPartNodeIds(pid);
-        if (nodeIds.empty()) {
-            // Also check addedElements_ for this pid
-            for (const auto& ae : addedElements_) {
-                if (ae.pid != pid) continue;
-                for (int ni = 0; ni < 8; ++ni) {
-                    int nid = ae.nodeIds[ni];
-                    if (nid <= 0) continue;
-                    nodeIds.insert(nid);
-                }
+        // Always merge addedElements_ nodes (handles post-replace/restack cases)
+        for (const auto& ae : addedElements_) {
+            if (ae.pid != pid) continue;
+            for (int ni = 0; ni < 8; ++ni) {
+                int nid = ae.nodeIds[ni];
+                if (nid <= 0) continue;
+                nodeIds.insert(nid);
             }
         }
         if (nodeIds.empty()) {
@@ -4425,28 +4433,34 @@ bool ModelAssembler::applyIGA(const IGAOperation& op, const std::string& outputP
             if (pos.z > zmax) zmax = pos.z;
         }
 
-        // 2. Element size per axis
+        // 2. Element size per axis (used for NURBS refinement)
         double rr = (tgt.elementSizeR > 0.0) ? tgt.elementSizeR : tgt.elementSize;
         double rs = (tgt.elementSizeS > 0.0) ? tgt.elementSizeS : tgt.elementSize;
         double rt = (tgt.elementSizeT > 0.0) ? tgt.elementSizeT : tgt.elementSize;
 
-        // offset = how much to expand bbox (auto = element_size per axis)
-        // We embed offset into PARAMETER_LOCAL: rr, rs, rt are also used as offsets
-        // If user specified explicit offset, we'll adjust xmin/xmax etc. directly
-        // But with PARAMETER_EXPRESSION_LOCAL (&xmin-&rr), the offset equals rr,rs,rt
-        // If user wants different offset, we pre-adjust the bbox values
-        if (tgt.offset >= 0.0) {
-            // User-specified explicit offset → modify bbox to compensate so that
-            // the PARAMETER_EXPRESSION_LOCAL (&xmin-&rr) still works correctly
-            // We do: effective xmin = xmin - offset + rr (so xmin - rr = xmin - offset)
-            xmin = xmin - tgt.offset + rr;
-            xmax = xmax + tgt.offset - rr;
-            ymin = ymin - tgt.offset + rs;
-            ymax = ymax + tgt.offset - rs;
-            zmin = zmin - tgt.offset + rt;
-            zmax = zmax + tgt.offset - rt;
-        }
-        // (if offset < 0, auto = rr/rs/rt, which is the PARAMETER_EXPRESSION_LOCAL behavior)
+        // 3. Compute bbox offset per axis (stored as separate Rofr/Rofs/Roft params)
+        // Priority: bbox_scale_r/s/t > bbox_scale > offset >= 0 > auto (element_size)
+        double lenR = xmax - xmin;
+        double lenS = ymax - ymin;
+        double lenT = zmax - zmin;
+
+        auto computeOff = [&](double scaleAxis, double len, double elemSize) -> double {
+            // Effective axis scale: per-axis > uniform scale > disabled
+            double sc = (scaleAxis > 0.0) ? scaleAxis
+                      : (tgt.bboxScale > 0.0) ? tgt.bboxScale : 0.0;
+            if (sc > 0.0) {
+                // offset = half of the extra length added by scaling
+                return (sc - 1.0) / 2.0 * len;
+            }
+            if (tgt.offset >= 0.0) {
+                return tgt.offset;       // fixed offset (uniform)
+            }
+            return elemSize;             // auto = element_size per axis
+        };
+
+        double offR = computeOff(tgt.bboxScaleR, lenR, rr);
+        double offS = computeOff(tgt.bboxScaleS, lenS, rs);
+        double offT = computeOff(tgt.bboxScaleT, lenT, rt);
 
         // 3. Allocate new IDs
         int newId = ++maxPartId_;
@@ -4465,6 +4479,7 @@ bool ModelAssembler::applyIGA(const IGAOperation& op, const std::string& outputP
             newId, newMid, pid,
             xmin, xmax, ymin, ymax, zmin, zmax,
             rr, rs, rt,
+            offR, offS, offT,
             tgt.ir, tgt.styp, tgt.tollg,
             tgt.pr, tgt.ps, tgt.pt,
             tgt.nisr, tgt.niss, tgt.nist,
@@ -4483,9 +4498,2518 @@ bool ModelAssembler::applyIGA(const IGAOperation& op, const std::string& outputP
             ", mid=" + std::to_string(newMid) +
             ", bb=[" + std::to_string(xmin) + "," + std::to_string(xmax) + "]×"
             "[" + std::to_string(ymin) + "," + std::to_string(ymax) + "]×"
-            "[" + std::to_string(zmin) + "," + std::to_string(zmax) + "])");
+            "[" + std::to_string(zmin) + "," + std::to_string(zmax) + "]"
+            ", off=[" + std::to_string(offR) + "," + std::to_string(offS) + "," + std::to_string(offT) + "])");
     }
     return true;
+}
+
+bool ModelAssembler::applyWarpage(const WarpageOperation& op, double E, double nu, const std::string& configDir) {
+    // 1. Input validation
+    if (!validateWarpageOperation(op, configDir)) {
+        return false;
+    }
+
+    // 2. Load warpage grid
+    WarpageGrid grid;
+    std::string datPath = op.datFile;
+    // If relative path, make it relative to config directory
+    if (!datPath.empty() && datPath[0] != '/' && !(datPath.size() > 1 && datPath[1] == ':')) {
+        datPath = configDir + "/" + datPath;
+    }
+
+    if (!grid.loadFromFile(datPath, op.maskValue, op.noiseThreshold)) {
+        errorMessage_ = "Failed to load warpage data: " + datPath;
+        return false;
+    }
+
+    // 3. Unit conversion coefficient
+    double unitScale = getUnitScale(op.unit);
+    std::cout << "[INFO] Warpage unit scale: " << op.unit << " → " << unitScale << " mm\n";
+
+    // 4. Collect part nodes
+    auto nodeIds = getPartNodeIds(op.targetPid);
+    // Include addedElements_ nodes
+    for (const auto& ae : addedElements_) {
+        if (ae.pid != op.targetPid) continue;
+        for (int ni = 0; ni < 8; ++ni) {
+            if (ae.nodeIds[ni] > 0) nodeIds.insert(ae.nodeIds[ni]);
+        }
+    }
+
+    if (nodeIds.empty()) {
+        errorMessage_ = "Warpage: part " + std::to_string(op.targetPid) + " has no nodes";
+        return false;
+    }
+
+    // 5. Compute part bounding box
+    double partXmin = 1e99, partXmax = -1e99;
+    double partYmin = 1e99, partYmax = -1e99;
+    double partZmin = 1e99, partZmax = -1e99;
+
+    for (int nid : nodeIds) {
+        Vector3D pos = getNodePosition(nid);
+        partXmin = std::min(partXmin, pos.x);
+        partXmax = std::max(partXmax, pos.x);
+        partYmin = std::min(partYmin, pos.y);
+        partYmax = std::max(partYmax, pos.y);
+        partZmin = std::min(partZmin, pos.z);
+        partZmax = std::max(partZmax, pos.z);
+    }
+
+    // 6. Determine data bbox
+    double dataBboxXmin, dataBboxXmax, dataBboxYmin, dataBboxYmax;
+    if (op.hasDataBbox) {
+        dataBboxXmin = op.dataBboxXmin;
+        dataBboxXmax = op.dataBboxXmax;
+        dataBboxYmin = op.dataBboxYmin;
+        dataBboxYmax = op.dataBboxYmax;
+        std::cout << "[INFO] Using user-defined data_bbox: ["
+                  << dataBboxXmin << ", " << dataBboxXmax << "] × ["
+                  << dataBboxYmin << ", " << dataBboxYmax << "]\n";
+    } else {
+        dataBboxXmin = partXmin;
+        dataBboxXmax = partXmax;
+        dataBboxYmin = partYmin;
+        dataBboxYmax = partYmax;
+        std::cout << "[INFO] Using part bbox as data_bbox (1:1 mapping)\n";
+    }
+
+    // 7. Parse coordinate axes
+    int axis1, axis2, deflAxis;
+    parseAxes(op.plane, op.deflectionAxis, axis1, axis2, deflAxis);
+
+    // 8. Compute curvatures
+    grid.computeCurvatures();
+
+    // 9. Debug export
+    if (op.debug) {
+        grid.exportDebugData(op.debugPrefix);
+    }
+
+    // 10. Mode-specific processing
+    if (op.mode == "deform") {
+        // Direct deformation: move nodes
+        for (int nid : nodeIds) {
+            Vector3D pos = getNodePosition(nid);
+
+            // Normalized coordinates
+            double u = (pos[axis1] - dataBboxXmin) / (dataBboxXmax - dataBboxXmin);
+            double v = (pos[axis2] - dataBboxYmin) / (dataBboxYmax - dataBboxYmin);
+
+            // Outside data_bbox handling
+            double w = 0.0;
+            if (u < 0 || u > 1 || v < 0 || v > 1) {
+                if (op.outsideBehavior == "clamp") {
+                    u = std::clamp(u, 0.0, 1.0);
+                    v = std::clamp(v, 0.0, 1.0);
+                    w = grid.interpolate(u, v) * unitScale * op.morphFactor;
+                } else if (op.outsideBehavior == "extrapolate") {
+                    if (!warnedExtrapolation_) {
+                        std::cerr << "[WARNING] Warpage: extrapolating outside data_bbox\n";
+                        warnedExtrapolation_ = true;
+                    }
+                    w = grid.interpolate(u, v) * unitScale * op.morphFactor;
+                } else {
+                    w = 0.0; // "zero"
+                }
+            } else {
+                w = grid.interpolate(u, v) * unitScale * op.morphFactor;
+            }
+
+            // Apply deflection
+            pos[deflAxis] += w * deflSign_;
+            modifiedNodePositions_[nid] = pos;
+        }
+
+        std::cout << "[INFO] Applied deform mode - nodes moved\n";
+
+    } else if (op.mode == "prestress") {
+        // Reverse initial stress calculation
+        calculateWarpagePrestress(op, grid,
+                                 dataBboxXmin, dataBboxXmax,
+                                 dataBboxYmin, dataBboxYmax,
+                                 unitScale, axis1, axis2, deflAxis,
+                                 E, nu);
+
+        // Transfer elementStresses_ to accumulatedResults_
+        for (const auto& [eid, stressTensor] : elementStresses_) {
+            ElementResult er;
+            er.isValid = true;
+            er.elementId = eid;
+            er.isShell = false;  // Warpage currently only supports solid elements
+
+            // Convert stress tensor to element result format
+            er.stress = stressTensor;
+            er.stressTop = stressTensor;
+            er.stressBottom = stressTensor;  // Uniform through thickness (TODO: vary with z)
+            er.vonMisesStress = stressTensor.vonMises();
+
+            accumulatedResults_.push_back(er);
+        }
+
+        std::cout << "[INFO] Applied prestress mode - initial stress generated\n";
+    }
+
+    // 11. Validation
+    validateWarpageResults(op, grid);
+
+    ++warpageParts_;
+    return true;
+}
+
+bool ModelAssembler::validateWarpageOperation(const WarpageOperation& op, const std::string& configDir) {
+    std::vector<std::string> errors;
+
+    // Required parameters
+    if (op.targetPid <= 0) {
+        errors.push_back("target_pid must be > 0");
+    }
+    if (op.datFile.empty()) {
+        errors.push_back("dat_file is required");
+    }
+
+    // plane validation
+    if (op.plane != "xy" && op.plane != "yz" && op.plane != "zx") {
+        errors.push_back("plane must be xy, yz, or zx");
+    }
+
+    // deflection_axis validation
+    std::set<std::string> validAxes = {"+x", "-x", "+y", "-y", "+z", "-z", "x", "y", "z"};
+    if (validAxes.find(op.deflectionAxis) == validAxes.end()) {
+        errors.push_back("deflection_axis must be one of: +x, -x, +y, -y, +z, -z");
+    }
+
+    // unit validation
+    std::set<std::string> validUnits = {"um", "mm", "m"};
+    if (validUnits.find(op.unit) == validUnits.end()) {
+        errors.push_back("unit must be one of: um, mm, m");
+    }
+
+    // morph_factor validation
+    if (op.morphFactor <= 0.0) {
+        errors.push_back("morph_factor must be > 0");
+    }
+    if (op.morphFactor > 10.0) {
+        std::cerr << "[WARNING] morph_factor > 10.0 may cause excessive warpage\n";
+    }
+
+    // mode validation
+    if (op.mode != "prestress" && op.mode != "deform") {
+        errors.push_back("mode must be prestress or deform");
+    }
+
+    // outside_behavior validation
+    std::set<std::string> validBehaviors = {"zero", "clamp", "extrapolate"};
+    if (validBehaviors.find(op.outsideBehavior) == validBehaviors.end()) {
+        errors.push_back("outside_behavior must be zero, clamp, or extrapolate");
+    }
+
+    // data_bbox validation
+    if (op.hasDataBbox) {
+        if (op.dataBboxXmax <= op.dataBboxXmin) {
+            errors.push_back("data_bbox: x_max must be > x_min");
+        }
+        if (op.dataBboxYmax <= op.dataBboxYmin) {
+            errors.push_back("data_bbox: y_max must be > y_min");
+        }
+    }
+
+    // Output errors
+    if (!errors.empty()) {
+        errorMessage_ = "Warpage validation failed:\n";
+        for (const auto& err : errors) {
+            errorMessage_ += "  - " + err + "\n";
+        }
+        return false;
+    }
+
+    return true;
+}
+
+void ModelAssembler::calculateWarpagePrestress(
+    const WarpageOperation& op,
+    const WarpageGrid& grid,
+    double dataBboxXmin, double dataBboxXmax,
+    double dataBboxYmin, double dataBboxYmax,
+    double unitScale,
+    int axis1, int axis2, int deflAxis,
+    double E, double nu)
+{
+    if (E <= 0) {
+        std::cerr << "[ERROR] Material E not defined for prestress mode\n";
+        return;
+    }
+
+    double factor = E / (1 - nu*nu);
+    std::cout << "[INFO] Material: E=" << E << ", nu=" << nu << "\n";
+    std::cout << "[DEBUG] useFiniteStrain = " << (op.useFiniteStrain ? "TRUE" : "FALSE") << "\n";
+
+    // Process each element
+    for (auto& [eid, elem] : baseMesh_.getElements()) {
+        if (elem.partId != op.targetPid) continue;
+
+        // Compute element centroid
+        Vector3D centroid(0, 0, 0);
+        int nodeCount = 0;
+        for (int ni = 0; ni < 8; ++ni) {
+            int nid = elem.nodeIds[ni];
+            if (nid <= 0) continue;
+            Vector3D pos = getNodePosition(nid);
+            centroid = centroid + pos;
+            nodeCount++;
+        }
+        if (nodeCount == 0) continue;
+        centroid = centroid * (1.0 / nodeCount);
+
+        // Normalized coordinates
+        double u = (centroid[axis1] - dataBboxXmin) / (dataBboxXmax - dataBboxXmin);
+        double v = (centroid[axis2] - dataBboxYmin) / (dataBboxYmax - dataBboxYmin);
+
+        if (u < 0 || u > 1 || v < 0 || v > 1) {
+            if (op.outsideBehavior != "clamp" && op.outsideBehavior != "extrapolate") {
+                continue; // zero behavior
+            }
+            if (op.outsideBehavior == "clamp") {
+                u = std::clamp(u, 0.0, 1.0);
+                v = std::clamp(v, 0.0, 1.0);
+            }
+        }
+
+        // Grid indices
+        int i = static_cast<int>(v * (grid.rows() - 1));
+        int j = static_cast<int>(u * (grid.cols() - 1));
+        i = std::clamp(i, 0, grid.rows() - 1);
+        j = std::clamp(j, 0, grid.cols() - 1);
+
+        // Curvatures in physical units
+        double physicalLenX = dataBboxXmax - dataBboxXmin;
+        double physicalLenY = dataBboxYmax - dataBboxYmin;
+
+        double scaledKappaXX = grid.getCurvatureXX(i, j) * unitScale / (physicalLenX * physicalLenX) * op.morphFactor;
+        double scaledKappaYY = grid.getCurvatureYY(i, j) * unitScale / (physicalLenY * physicalLenY) * op.morphFactor;
+        double scaledKappaXY = grid.getCurvatureXY(i, j) * unitScale / (physicalLenX * physicalLenY) * op.morphFactor;
+
+        // Distance from neutral surface
+        double thickness = getElementThickness(elem);
+        double z_neutral = thickness / 2.0;
+
+        // Strains
+        double eps_xx, eps_yy, eps_xy;
+
+        if (op.useFiniteStrain) {
+            // von Kármán plate theory: finite strain with geometric nonlinearity
+            // ε_xx = (1/2)(∂w/∂x)² - z·κ_xx
+            // ε_yy = (1/2)(∂w/∂y)² - z·κ_yy
+            // γ_xy = (∂w/∂x)(∂w/∂y) - 2z·κ_xy
+
+            double gradX = grid.getGradientX(i, j) * unitScale / physicalLenX * op.morphFactor;
+            double gradY = grid.getGradientY(i, j) * unitScale / physicalLenY * op.morphFactor;
+
+            // Debug output for first element
+            static bool firstTime = true;
+            if (firstTime && eid == 1) {
+                std::cout << "[DEBUG] Finite strain enabled\n";
+                std::cout << "[DEBUG] Element 1: gradX=" << gradX << ", gradY=" << gradY << "\n";
+                std::cout << "[DEBUG] Membrane strain: eps_mem=" << (0.5*gradX*gradX) << "\n";
+                std::cout << "[DEBUG] Bending strain: eps_bend=" << (z_neutral*scaledKappaXX*deflSign_) << "\n";
+                firstTime = false;
+            }
+
+            // Membrane strain (nonlinear) + bending strain (linear)
+            eps_xx = 0.5 * gradX * gradX - z_neutral * scaledKappaXX * deflSign_;
+            eps_yy = 0.5 * gradY * gradY - z_neutral * scaledKappaYY * deflSign_;
+            eps_xy = gradX * gradY - z_neutral * scaledKappaXY * deflSign_;
+        } else {
+            // Kirchhoff-Love plate theory: small strain (bending only)
+            // ε = z·κ
+            eps_xx = z_neutral * scaledKappaXX * deflSign_;
+            eps_yy = z_neutral * scaledKappaYY * deflSign_;
+            eps_xy = z_neutral * scaledKappaXY * deflSign_;
+        }
+
+        // Stresses (plane stress)
+        double sig_xx = factor * (eps_xx + nu * eps_yy);
+        double sig_yy = factor * (eps_yy + nu * eps_xx);
+        double sig_xy = (E / (1 + nu)) * eps_xy;
+
+        // Reverse sign
+        sig_xx = -sig_xx;
+        sig_yy = -sig_yy;
+        sig_xy = -sig_xy;
+
+        // Create stress tensor
+        StressTensor stress;
+        stress.xx = sig_xx;
+        stress.yy = sig_yy;
+        stress.zz = 0.0;  // Plane stress
+        stress.xy = sig_xy;
+        stress.yz = 0.0;
+        stress.xz = 0.0;
+
+        // Accumulate
+        if (elementStresses_.count(eid)) {
+            elementStresses_[eid] = elementStresses_[eid] + stress;
+        } else {
+            elementStresses_[eid] = stress;
+        }
+    }
+}
+
+double ModelAssembler::getUnitScale(const std::string& unit) const {
+    static const std::map<std::string, double> scaleMap = {
+        {"um", 1.0e-3},   // μm → mm
+        {"mm", 1.0},      // mm → mm
+        {"m",  1.0e3}     // m → mm
+    };
+
+    auto it = scaleMap.find(unit);
+    if (it == scaleMap.end()) {
+        std::cerr << "[WARNING] Unknown unit '" << unit << "', using um\n";
+        return 1.0e-3;
+    }
+
+    return it->second;
+}
+
+void ModelAssembler::parseAxes(const std::string& plane,
+                                const std::string& deflAxis,
+                                int& axis1, int& axis2, int& deflection) const
+{
+    // plane → axis1, axis2
+    if (plane == "xy") {
+        axis1 = 0; axis2 = 1;  // X, Y
+    } else if (plane == "yz") {
+        axis1 = 1; axis2 = 2;  // Y, Z
+    } else if (plane == "zx") {
+        axis1 = 2; axis2 = 0;  // Z, X
+    } else {
+        throw std::runtime_error("Invalid plane: " + plane);
+    }
+
+    // deflection_axis → deflection, sign
+    deflSign_ = 1.0;
+    if (deflAxis == "+z" || deflAxis == "z") {
+        deflection = 2;
+    } else if (deflAxis == "-z") {
+        deflection = 2; deflSign_ = -1.0;
+    } else if (deflAxis == "+x" || deflAxis == "x") {
+        deflection = 0;
+    } else if (deflAxis == "-x") {
+        deflection = 0; deflSign_ = -1.0;
+    } else if (deflAxis == "+y" || deflAxis == "y") {
+        deflection = 1;
+    } else if (deflAxis == "-y") {
+        deflection = 1; deflSign_ = -1.0;
+    } else {
+        throw std::runtime_error("Invalid deflection_axis: " + deflAxis);
+    }
+
+    // Validate perpendicularity
+    if (deflection == axis1 || deflection == axis2) {
+        throw std::runtime_error("deflection_axis must be perpendicular to plane");
+    }
+}
+
+double ModelAssembler::getElementThickness(const Element& elem) const {
+    // Estimate thickness from element bbox Z range
+    double zmin = 1e99, zmax = -1e99;
+    for (int i = 0; i < 8; ++i) {
+        int nid = elem.nodeIds[i];
+        if (nid <= 0) continue;
+        Vector3D pos = getNodePosition(nid);
+        zmin = std::min(zmin, pos.z);
+        zmax = std::max(zmax, pos.z);
+    }
+
+    double thickness = zmax - zmin;
+    if (thickness < 1e-6) {
+        // Shell-like thin element: use shell thickness
+        return getShellThickness(elem.partId);
+    }
+
+    return thickness;
+}
+
+void ModelAssembler::validateWarpageResults(const WarpageOperation& op, const WarpageGrid& grid) const {
+    // Curvature range check
+    auto [minK, maxK] = grid.getCurvatureRange();
+    double avgK = grid.getAverageCurvature();
+
+    std::cout << "[INFO] Warpage curvature range: [" << minK << ", " << maxK << "]\n";
+    std::cout << "[INFO] Average curvature: " << avgK << "\n";
+
+    if (std::abs(maxK) > 1e6) {
+        std::cerr << "[WARNING] Extremely high curvature detected (κ_max = " << maxK << ")\n";
+        std::cerr << "          This may indicate data issues or very sharp warpage.\n";
+    }
+
+    // Stress range check (prestress mode)
+    if (op.mode == "prestress") {
+        double maxStress = 0.0;
+        for (const auto& [eid, stress] : elementStresses_) {
+            double vonMises = stress.vonMises();
+            maxStress = std::max(maxStress, vonMises);
+        }
+
+        std::cout << "[INFO] Max von Mises prestress: " << maxStress << " MPa\n";
+    }
+
+    // Displacement range check (deform mode)
+    if (op.mode == "deform") {
+        double maxDisp = 0.0;
+        for (const auto& [nid, pos] : modifiedNodePositions_) {
+            const Node* n = baseMesh_.getNode(nid);
+            if (n) {
+                Vector3D origPos = n->position;
+                double disp = (pos - origPos).magnitude();
+                maxDisp = std::max(maxDisp, disp);
+            }
+        }
+        std::cout << "[INFO] Max node displacement: " << maxDisp << "\n";
+    }
+}
+
+void ModelAssembler::exportStressDistribution(const std::string& filename) const {
+    std::ofstream csv(filename);
+    csv << "ElementID,Centroid_X,Centroid_Y,Centroid_Z,Sigma_XX,Sigma_YY,Sigma_ZZ,VonMises\n";
+
+    for (const auto& [eid, stress] : elementStresses_) {
+        auto it = baseMesh_.getElements().find(eid);
+        if (it == baseMesh_.getElements().end()) continue;
+
+        // Compute centroid
+        Vector3D centroid(0, 0, 0);
+        int nodeCount = 0;
+        for (int ni = 0; ni < 8; ++ni) {
+            int nid = it->second.nodeIds[ni];
+            if (nid <= 0) continue;
+            Vector3D pos = getNodePosition(nid);
+            centroid = centroid + pos;
+            nodeCount++;
+        }
+        if (nodeCount > 0) {
+            centroid = centroid * (1.0 / nodeCount);
+        }
+
+        double vonMises = stress.vonMises();
+
+        csv << eid << ","
+            << centroid.x << "," << centroid.y << "," << centroid.z << ","
+            << stress.xx << "," << stress.yy << "," << stress.zz << ","
+            << vonMises << "\n";
+    }
+
+    std::cout << "[INFO] Exported stress distribution: " << filename << "\n";
+}
+
+Vector3D ModelAssembler::getNodePosition(int nid) const {
+    // Check modifiedNodePositions_ first
+    if (modifiedNodePositions_.count(nid)) {
+        return modifiedNodePositions_.at(nid);
+    }
+
+    // Check addedNodes_
+    for (const auto& an : addedNodes_) {
+        if (an.id == nid) {
+            return Vector3D(an.x, an.y, an.z);
+        }
+    }
+
+    // Base mesh
+    const Node* n = baseMesh_.getNode(nid);
+    if (n) {
+        return n->position;
+    }
+
+    return Vector3D(0, 0, 0);
+}
+
+double ModelAssembler::getShellThickness(int pid) const {
+    // Find SECID for this PID from rawLines_
+    int secid = 0;
+    for (size_t i = 0; i < rawLines_.size(); ++i) {
+        const std::string& line = rawLines_[i];
+        if (line.find("*PART") == 0) {
+            // Skip title line
+            ++i;
+            if (i >= rawLines_.size()) break;
+
+            // Data line: PID SECID ...
+            const std::string& dataLine = rawLines_[i];
+            if (dataLine.empty() || dataLine[0] == '$') continue;
+
+            std::istringstream iss(dataLine);
+            int foundPid = 0;
+            int foundSecid = 0;
+            iss >> foundPid >> foundSecid;
+
+            if (foundPid == pid) {
+                secid = foundSecid;
+                break;
+            }
+        }
+    }
+
+    if (secid == 0) return 1.0;  // Default thickness
+
+    // Find *SECTION_SHELL with this SECID
+    for (size_t i = 0; i < rawLines_.size(); ++i) {
+        const std::string& line = rawLines_[i];
+        if (line.find("*SECTION_SHELL") == 0) {
+            ++i;
+            if (i >= rawLines_.size()) break;
+
+            // Data line: SECID ELFORM SHRF NIP PROPT QR/IRID ICOMP SETYP
+            const std::string& dataLine = rawLines_[i];
+            if (dataLine.empty() || dataLine[0] == '$') continue;
+
+            std::istringstream iss(dataLine);
+            int foundSecid = 0;
+            iss >> foundSecid;
+
+            if (foundSecid == secid) {
+                // Next line: T1 T2 T3 T4 NLOC
+                ++i;
+                if (i >= rawLines_.size()) break;
+                const std::string& t_line = rawLines_[i];
+                if (t_line.empty() || t_line[0] == '$') continue;
+
+                std::istringstream tiss(t_line);
+                double t1 = 0.0;
+                tiss >> t1;
+                return t1;
+            }
+        }
+    }
+
+    return 1.0;  // Default
+}
+
+// ========== OFFSET OPERATION ==========
+
+bool ModelAssembler::applyOffset(const OffsetOperation& op, double E, double nu) {
+    std::cout << "[INFO] Applying offset operation on PID " << op.sourcePid << "\n";
+
+    // Check for dual offset mode
+    bool isDualOffset = (op.prestressMode == "dual_offset");
+    if (isDualOffset) {
+        return applyDualOffsetPrestress(op, E, nu);
+    }
+
+    // Normal offset mode
+    // 1. Validation - check if any elements exist with this PID
+    bool foundPid = false;
+    for (const auto& pair : baseMesh_.getElements()) {
+        if (pair.second.partId == op.sourcePid) {
+            foundPid = true;
+            break;
+        }
+    }
+    if (!foundPid) {
+        errorMessage_ = "Source PID " + std::to_string(op.sourcePid) + " not found";
+        return false;
+    }
+
+    // 2. Auto-assign IDs (placeholder - will implement getNextPartId later)
+    int actualPid = (op.newPid > 0) ? op.newPid : (++maxPartId_);
+    int actualSecid = (op.newSecid > 0) ? op.newSecid : (++maxSectionId_);
+    int actualMid = (op.newMid > 0) ? op.newMid : (++maxMaterialId_);
+
+    std::cout << "[INFO] New IDs: PID=" << actualPid
+              << ", SECID=" << actualSecid
+              << ", MID=" << actualMid << "\n";
+
+    // 3. Extract source surface
+    std::vector<ShellElement> sourceSurface;
+    extractSourceSurface(op.sourcePid, sourceSurface);
+
+    if (sourceSurface.empty()) {
+        errorMessage_ = "No surface elements found in source PID "
+                       + std::to_string(op.sourcePid);
+        return false;
+    }
+
+    std::cout << "[INFO] Extracted " << sourceSurface.size()
+              << " surface elements\n";
+
+    // 3.5 Apply region filtering
+    filterSurfaceByRegion(sourceSurface, op.region);
+
+    if (sourceSurface.empty()) {
+        errorMessage_ = "No surface elements remain after region filtering";
+        return false;
+    }
+
+    // 4. Parse offset direction
+    Vector3D offsetDir = parseOffsetDirection(op.offsetDirection, sourceSurface);
+    std::cout << "[INFO] Offset direction: ("
+              << offsetDir.x << ", " << offsetDir.y << ", " << offsetDir.z << ")\n";
+
+    // Check if using local normals
+    bool usingLocalNormals = op.useLocalNormals &&
+                             (op.offsetDirection == "+normal" || op.offsetDirection == "normal" ||
+                              op.offsetDirection == "-normal");
+    if (usingLocalNormals) {
+        std::cout << "[INFO] Using local normals (per-node averaged)\n";
+    }
+
+    // 5. Create offset geometry based on element type
+    std::vector<AddedElement> offsetElements;
+
+    if (op.elementType == "solid") {
+        size_t startCount = addedElements_.size();
+
+        // Check if using variable thickness
+        bool usingVariableThickness = !op.thicknessFormula.empty();
+
+        if (usingVariableThickness) {
+            // Compute per-node thickness from formula
+            std::map<int, double> perNodeThickness =
+                computePerNodeThickness(sourceSurface, op.thicknessFormula, op.thickness);
+
+            std::cout << "[INFO] Using variable thickness formula\n";
+
+            // Use variable thickness extrusion (with global or local normals)
+            if (usingLocalNormals) {
+                // Compute per-node normals
+                std::map<int, Vector3D> perNodeNormals = computePerNodeNormals(sourceSurface);
+
+                // Apply sign for -normal direction
+                if (op.offsetDirection == "-normal") {
+                    for (auto& pair : perNodeNormals) {
+                        pair.second = pair.second * -1.0;
+                    }
+                }
+
+                std::cout << "[INFO] Using local normals + variable thickness (combined)\n";
+
+                // Use COMBINED overload: both per-node directions AND per-node thickness
+                extrudeToSolid(sourceSurface, perNodeNormals, perNodeThickness,
+                              op.numLayers, actualPid, actualSecid);
+            } else {
+                // Variable thickness with global direction
+                extrudeToSolid(sourceSurface, offsetDir, perNodeThickness,
+                              op.numLayers, actualPid, actualSecid);
+            }
+
+        } else if (usingLocalNormals) {
+            // Compute per-node normals
+            std::map<int, Vector3D> perNodeNormals = computePerNodeNormals(sourceSurface);
+
+            // Apply sign for -normal direction
+            if (op.offsetDirection == "-normal") {
+                for (auto& pair : perNodeNormals) {
+                    pair.second = pair.second * -1.0;
+                }
+            }
+
+            // Use local normal extrusion
+            extrudeToSolid(sourceSurface, perNodeNormals, op.thickness,
+                          op.numLayers, actualPid, actualSecid);
+        } else {
+            // Use global direction extrusion
+            extrudeToSolid(sourceSurface, offsetDir, op.thickness,
+                          op.numLayers, actualPid, actualSecid);
+        }
+
+        // Collect newly created elements for connection mode processing
+        for (size_t i = startCount; i < addedElements_.size(); ++i) {
+            offsetElements.push_back(addedElements_[i]);
+        }
+
+    } else if (op.elementType == "tshell") {
+        double thickness = (op.shellThickness > 0) ? op.shellThickness : op.thickness;
+        extrudeToTShell(sourceSurface, offsetDir, thickness,
+                       op.numLayers, actualPid, actualSecid);
+        std::cout << "[INFO] TSHELL extrusion completed\n";
+
+    } else if (op.elementType == "shell") {
+        double thickness = (op.shellThickness > 0) ? op.shellThickness : op.thickness;
+        double offset = (op.shellOffset >= 0) ? op.shellOffset : (thickness / 2.0);
+        createOffsetShell(sourceSurface, offsetDir, offset,
+                         actualPid, actualSecid, thickness);
+        std::cout << "[INFO] Shell offset completed\n";
+
+    } else {
+        errorMessage_ = "Unknown element_type: " + op.elementType;
+        return false;
+    }
+
+    // 6. Apply connection mode (only for solid elements)
+    if (op.elementType == "solid") {
+        if (op.connectionMode == "tied") {
+            applyConnectionTied(sourceSurface, offsetElements);
+
+        } else if (op.connectionMode == "czm") {
+            // Need to update addedElements_ with modified connectivity
+            size_t startIdx = addedElements_.size() - offsetElements.size();
+            for (size_t i = 0; i < offsetElements.size(); ++i) {
+                addedElements_[startIdx + i] = offsetElements[i];
+            }
+            applyConnectionCZM(sourceSurface, offsetElements, op);
+
+            // Update again after CZM modifications
+            for (size_t i = 0; i < offsetElements.size(); ++i) {
+                addedElements_[startIdx + i] = offsetElements[i];
+            }
+
+        } else if (op.connectionMode == "contact") {
+            // Need to update addedElements_ with modified connectivity
+            size_t startIdx = addedElements_.size() - offsetElements.size();
+            for (size_t i = 0; i < offsetElements.size(); ++i) {
+                addedElements_[startIdx + i] = offsetElements[i];
+            }
+            applyConnectionContact(sourceSurface, offsetElements, op.sourcePid, actualPid);
+
+            // Update again after contact modifications
+            for (size_t i = 0; i < offsetElements.size(); ++i) {
+                addedElements_[startIdx + i] = offsetElements[i];
+            }
+        }
+    }
+
+    // 7. Create PART keyword
+    createPartKeyword(actualPid, actualSecid, actualMid, op.partTitle);
+
+    // 8. Create SECTION keyword
+    if (op.elementType == "solid") {
+        createSectionSolid(actualSecid);
+    } else if (op.elementType == "tshell") {
+        double thickness = (op.shellThickness > 0) ? op.shellThickness : op.thickness;
+        int elform = 16;  // Default TSHELL4 (user can override with ELFORM operation)
+        createSectionTShell(actualSecid, thickness, elform);
+    } else if (op.elementType == "shell") {
+        double thickness = (op.shellThickness > 0) ? op.shellThickness : op.thickness;
+        createSectionShell(actualSecid, thickness);
+    }
+
+    // 9. Insert material card
+    if (!op.materialCard.empty()) {
+        insertMaterialCard(op.materialCard, actualMid);
+    }
+
+    // Element quality check
+    if (!addedElements_.empty()) {
+        std::cout << "[INFO] Checking element quality...\n";
+        ElementQualityChecker qualityChecker;
+        ElementQualityChecker::QualitySummary summary;
+        summary.totalElements = static_cast<int>(addedElements_.size());
+
+        for (const auto& elem : addedElements_) {
+            // Get node positions
+            std::array<Vector3D, 8> nodePositions;
+            for (int i = 0; i < 8; ++i) {
+                int nid = elem.nodeIds[i];
+                bool found = false;
+
+                // Check added nodes (vector)
+                for (const auto& node : addedNodes_) {
+                    if (node.id == nid) {
+                        nodePositions[i] = Vector3D(node.x, node.y, node.z);
+                        found = true;
+                        break;
+                    }
+                }
+
+                // Check base mesh if not found
+                if (!found) {
+                    auto baseNode = baseMesh_.nodes.find(nid);
+                    if (baseNode != baseMesh_.nodes.end()) {
+                        nodePositions[i] = baseNode->second.position;
+                    }
+                }
+            }
+
+            auto metrics = qualityChecker.checkHex8(nodePositions);
+
+            if (metrics.aspectRatio > ElementQualityChecker::ASPECT_RATIO_ERROR) {
+                summary.veryPoorAspectRatio++;
+            } else if (metrics.aspectRatio > ElementQualityChecker::ASPECT_RATIO_WARN) {
+                summary.poorAspectRatio++;
+            }
+
+            if (metrics.minJacobian <= ElementQualityChecker::MIN_JACOBIAN_ERROR) {
+                summary.negativeJacobian++;
+            } else if (metrics.minJacobian < ElementQualityChecker::MIN_JACOBIAN_WARN) {
+                summary.poorJacobian++;
+            }
+
+            if (metrics.maxWarping > ElementQualityChecker::MAX_WARPING_ERROR) {
+                summary.severeWarping++;
+            } else if (metrics.maxWarping > ElementQualityChecker::MAX_WARPING_WARN) {
+                summary.poorWarping++;
+            }
+
+            summary.maxAspectRatio = std::max(summary.maxAspectRatio, metrics.aspectRatio);
+            summary.minJacobian = std::min(summary.minJacobian, metrics.minJacobian);
+            summary.maxWarping = std::max(summary.maxWarping, metrics.maxWarping);
+        }
+
+        // Report quality issues
+        if (summary.negativeJacobian > 0) {
+            std::cout << "[ERROR] " << summary.negativeJacobian << " elements with negative/zero Jacobian!\n";
+            std::cout << "        Minimum Jacobian: " << summary.minJacobian << "\n";
+        }
+
+        if (summary.veryPoorAspectRatio > 0) {
+            std::cout << "[WARNING] " << summary.veryPoorAspectRatio << " elements with aspect ratio > "
+                      << ElementQualityChecker::ASPECT_RATIO_ERROR << "\n";
+        } else if (summary.poorAspectRatio > 0) {
+            std::cout << "[WARNING] " << summary.poorAspectRatio << " elements with aspect ratio > "
+                      << ElementQualityChecker::ASPECT_RATIO_WARN << "\n";
+        }
+        if (summary.maxAspectRatio > 1.0) {
+            std::cout << "          Max aspect ratio: " << std::fixed << std::setprecision(2)
+                      << summary.maxAspectRatio << "\n";
+        }
+
+        if (summary.severeWarping > 0) {
+            std::cout << "[WARNING] " << summary.severeWarping << " elements with warping > "
+                      << ElementQualityChecker::MAX_WARPING_ERROR << "°\n";
+        } else if (summary.poorWarping > 0) {
+            std::cout << "[WARNING] " << summary.poorWarping << " elements with warping > "
+                      << ElementQualityChecker::MAX_WARPING_WARN << "°\n";
+        }
+        if (summary.maxWarping > 0.1) {
+            std::cout << "          Max warping: " << std::fixed << std::setprecision(1)
+                      << summary.maxWarping << "°\n";
+        }
+
+        if (summary.negativeJacobian == 0 && summary.poorJacobian == 0) {
+            std::cout << "[OK] All elements have acceptable Jacobian (min: "
+                      << std::fixed << std::setprecision(3) << summary.minJacobian << ")\n";
+        }
+
+        // Self-intersection check (only for +normal/-normal directions with concave surfaces)
+        if (op.offsetDirection == "+normal" || op.offsetDirection == "-normal") {
+            std::cout << "[INFO] Checking for self-intersections...\n";
+            IntersectionDetector intersectionDetector;
+
+            // Collect element geometries
+            std::vector<std::array<Vector3D, 8>> elementGeometries;
+            elementGeometries.reserve(addedElements_.size());
+
+            for (const auto& elem : addedElements_) {
+                std::array<Vector3D, 8> nodePositions;
+                for (int i = 0; i < 8; ++i) {
+                    int nid = elem.nodeIds[i];
+                    bool found = false;
+
+                    for (const auto& node : addedNodes_) {
+                        if (node.id == nid) {
+                            nodePositions[i] = Vector3D(node.x, node.y, node.z);
+                            found = true;
+                            break;
+                        }
+                    }
+
+                    if (!found) {
+                        auto baseNode = baseMesh_.nodes.find(nid);
+                        if (baseNode != baseMesh_.nodes.end()) {
+                            nodePositions[i] = baseNode->second.position;
+                        }
+                    }
+                }
+                elementGeometries.push_back(nodePositions);
+            }
+
+            // Quick check using bounding boxes
+            int potentialIntersections = intersectionDetector.countPotentialIntersections(
+                elementGeometries, op.thickness * 0.01);
+
+            if (potentialIntersections > 0) {
+                std::cout << "[WARNING] Potential self-intersections detected: "
+                          << potentialIntersections << " overlapping element pairs\n";
+                std::cout << "          This may occur with concave surfaces and +normal offset\n";
+                std::cout << "          Suggestions:\n";
+                std::cout << "            - Use fixed direction (±x/±y/±z) instead of ±normal\n";
+                std::cout << "            - Reduce offset distance (current: "
+                          << std::fixed << std::setprecision(2) << op.thickness << " mm)\n";
+                std::cout << "            - Use region selection to exclude concave areas\n";
+            } else {
+                std::cout << "[OK] No self-intersections detected\n";
+            }
+        }
+    }
+
+    std::cout << "[INFO] Offset operation completed\n";
+    return true;
+}
+
+// ========== PHASE 5: SURFACE EXTRACTION ==========
+
+void ModelAssembler::extractSourceSurface(int sourcePid,
+                                         std::vector<ShellElement>& surfaceShells) {
+    // Extract outer surface from solid elements
+    std::cout << "[INFO] Extracting outer surface from solid elements\n";
+
+    // Build face→element map
+    // Map: sorted key → (count, original winding order)
+    std::map<std::array<int,4>, std::pair<int, std::array<int,4>>> faceToElem;
+
+    // Process baseMesh elements
+    for (const auto& pair : baseMesh_.getElements()) {
+        const Element& elem = pair.second;
+        if (elem.partId != sourcePid) continue;
+
+        // Get number of faces (6 for HEX8, 4 for TET4)
+        int numFaces = (elem.nodeIds[4] == elem.nodeIds[7]) ? 4 : 6;
+
+        for (int fi = 0; fi < numFaces; ++fi) {
+            auto faceNodes = elem.getFaceNodeIds(fi);
+
+            // Store original winding order
+            std::array<int,4> originalWinding = {faceNodes[0], faceNodes[1],
+                                                  faceNodes[2], faceNodes[3]};
+
+            // Sort for canonical key
+            std::sort(faceNodes.begin(), faceNodes.end());
+            std::array<int,4> key = {faceNodes[0], faceNodes[1],
+                                     faceNodes[2], faceNodes[3]};
+
+            if (faceToElem.find(key) == faceToElem.end()) {
+                faceToElem[key] = {1, originalWinding};
+            } else {
+                faceToElem[key].first++;
+            }
+        }
+    }
+
+    // Also process addedElements_
+    for (const auto& elem : addedElements_) {
+        if (elem.pid != sourcePid) continue;
+
+        Element e;
+        e.nodeIds = elem.nodeIds;
+        e.type = elem.type;
+
+        int numFaces = (e.nodeIds[4] == e.nodeIds[7]) ? 4 : 6;
+
+        for (int fi = 0; fi < numFaces; ++fi) {
+            auto faceNodes = e.getFaceNodeIds(fi);
+
+            // Store original winding order
+            std::array<int,4> originalWinding = {faceNodes[0], faceNodes[1],
+                                                  faceNodes[2], faceNodes[3]};
+
+            std::sort(faceNodes.begin(), faceNodes.end());
+            std::array<int,4> key = {faceNodes[0], faceNodes[1],
+                                     faceNodes[2], faceNodes[3]};
+
+            if (faceToElem.find(key) == faceToElem.end()) {
+                faceToElem[key] = {1, originalWinding};
+            } else {
+                faceToElem[key].first++;
+            }
+        }
+    }
+
+    // Faces with count=1 are outer surface
+    for (const auto& mapPair : faceToElem) {
+        if (mapPair.second.first == 1) {
+            const std::array<int,4>& originalWinding = mapPair.second.second;
+            ShellElement shell;
+            shell.id = 0;  // Temporary
+            shell.partId = sourcePid;
+            // Use original winding order, not sorted key
+            shell.nodeIds[0] = originalWinding[0];
+            shell.nodeIds[1] = originalWinding[1];
+            shell.nodeIds[2] = originalWinding[2];
+            shell.nodeIds[3] = originalWinding[3];
+            surfaceShells.push_back(shell);
+        }
+    }
+
+    std::cout << "[INFO] Extracted " << surfaceShells.size()
+              << " surface faces from solid\n";
+}
+
+// ========== PHASE 6: HELPER METHODS ==========
+
+Vector3D ModelAssembler::computeElementNormal(const ShellElement& shell) {
+    Vector3D p0 = getNodePosition(shell.nodeIds[0]);
+    Vector3D p1 = getNodePosition(shell.nodeIds[1]);
+    Vector3D p2 = getNodePosition(shell.nodeIds[2]);
+
+    Vector3D v1 = p1 - p0;
+    Vector3D v2 = p2 - p0;
+    Vector3D normal = v1.cross(v2);
+
+    double len = normal.magnitude();
+    if (len > 1e-10) {
+        return normal * (1.0 / len);
+    }
+    return Vector3D(0, 0, 1);
+}
+
+Vector3D ModelAssembler::computeAverageNormal(const std::vector<ShellElement>& shells) {
+    Vector3D sum(0, 0, 0);
+    for (const auto& shell : shells) {
+        sum = sum + computeElementNormal(shell);
+    }
+    double len = sum.magnitude();
+    if (len > 1e-10) {
+        return sum * (1.0 / len);
+    }
+    return Vector3D(0, 0, 1);
+}
+
+std::map<int, Vector3D> ModelAssembler::computePerNodeNormals(const std::vector<ShellElement>& shells) {
+    // For each node, collect all adjacent shell normals and average them
+    std::map<int, std::vector<Vector3D>> nodeToNormals;
+
+    for (const auto& shell : shells) {
+        Vector3D shellNormal = computeElementNormal(shell);
+
+        // Add this shell's normal to all its nodes
+        for (int i = 0; i < 4; ++i) {
+            int nid = shell.nodeIds[i];
+            if (nid > 0) {  // Valid node ID
+                nodeToNormals[nid].push_back(shellNormal);
+            }
+        }
+    }
+
+    // Average the normals for each node
+    std::map<int, Vector3D> perNodeNormals;
+    for (const auto& pair : nodeToNormals) {
+        int nid = pair.first;
+        const std::vector<Vector3D>& normals = pair.second;
+
+        Vector3D sum(0, 0, 0);
+        for (const auto& n : normals) {
+            sum = sum + n;
+        }
+
+        double len = sum.magnitude();
+        if (len > 1e-10) {
+            perNodeNormals[nid] = sum * (1.0 / len);
+        } else {
+            perNodeNormals[nid] = Vector3D(0, 0, 1);
+        }
+    }
+
+    return perNodeNormals;
+}
+
+void ModelAssembler::filterSurfaceByRegion(std::vector<ShellElement>& surface,
+                                           const RegionSelection& region) {
+    if (!region.useBoundingBox &&
+        region.nodeIds.empty() && region.elementIds.empty() &&
+        region.nodeIdMin == 0 && region.elementIdMin == 0) {
+        // No filtering needed
+        return;
+    }
+
+    size_t originalSize = surface.size();
+    std::vector<ShellElement> filtered;
+
+    for (const auto& shell : surface) {
+        bool keep = true;
+
+        // Bounding box filter
+        if (region.useBoundingBox) {
+            // Check if shell centroid is within bounding box
+            Vector3D centroid(0, 0, 0);
+            int validNodes = 0;
+
+            for (int i = 0; i < 4; ++i) {
+                if (shell.nodeIds[i] > 0) {
+                    Vector3D pos = getNodePosition(shell.nodeIds[i]);
+                    centroid = centroid + pos;
+                    validNodes++;
+                }
+            }
+
+            if (validNodes > 0) {
+                centroid = centroid * (1.0 / validNodes);
+
+                if (centroid.x < region.xMin || centroid.x > region.xMax ||
+                    centroid.y < region.yMin || centroid.y > region.yMax ||
+                    centroid.z < region.zMin || centroid.z > region.zMax) {
+                    keep = false;
+                }
+            }
+        }
+
+        // Node ID filter
+        if (keep && !region.nodeIds.empty()) {
+            bool hasMatchingNode = false;
+            for (int i = 0; i < 4; ++i) {
+                int nid = shell.nodeIds[i];
+                if (std::find(region.nodeIds.begin(), region.nodeIds.end(), nid) != region.nodeIds.end()) {
+                    hasMatchingNode = true;
+                    break;
+                }
+            }
+            if (!hasMatchingNode) keep = false;
+        }
+
+        // Node ID range filter
+        if (keep && (region.nodeIdMin > 0 || region.nodeIdMax > 0)) {
+            bool inRange = false;
+            for (int i = 0; i < 4; ++i) {
+                int nid = shell.nodeIds[i];
+                if ((region.nodeIdMin == 0 || nid >= region.nodeIdMin) &&
+                    (region.nodeIdMax == 0 || nid <= region.nodeIdMax)) {
+                    inRange = true;
+                    break;
+                }
+            }
+            if (!inRange) keep = false;
+        }
+
+        // Element ID filter
+        if (keep && !region.elementIds.empty()) {
+            if (std::find(region.elementIds.begin(), region.elementIds.end(), shell.id) == region.elementIds.end()) {
+                keep = false;
+            }
+        }
+
+        // Element ID range filter
+        if (keep && (region.elementIdMin > 0 || region.elementIdMax > 0)) {
+            if ((region.elementIdMin > 0 && shell.id < region.elementIdMin) ||
+                (region.elementIdMax > 0 && shell.id > region.elementIdMax)) {
+                keep = false;
+            }
+        }
+
+        if (keep) {
+            filtered.push_back(shell);
+        }
+    }
+
+    surface = filtered;
+
+    if (filtered.size() != originalSize) {
+        std::cout << "[INFO] Region filter: " << originalSize << " → "
+                  << filtered.size() << " surface elements\n";
+    }
+}
+
+std::map<int, double> ModelAssembler::computePerNodeThickness(
+    const std::vector<ShellElement>& surface,
+    const std::string& formula,
+    double baseThickness) {
+
+    std::map<int, double> perNodeThickness;
+
+    if (formula.empty()) {
+        // No formula - use base thickness for all nodes
+        for (const auto& shell : surface) {
+            for (int i = 0; i < 4; ++i) {
+                int nid = shell.nodeIds[i];
+                if (nid > 0) {
+                    perNodeThickness[nid] = baseThickness;
+                }
+            }
+        }
+        return perNodeThickness;
+    }
+
+    // Evaluate formula for each unique node
+    FormulaEvaluator evaluator;
+
+    // Collect all unique node IDs
+    std::set<int> uniqueNodes;
+    for (const auto& shell : surface) {
+        for (int i = 0; i < 4; ++i) {
+            if (shell.nodeIds[i] > 0) {
+                uniqueNodes.insert(shell.nodeIds[i]);
+            }
+        }
+    }
+
+    // Evaluate thickness formula for each node position
+    for (int nid : uniqueNodes) {
+        Vector3D pos = getNodePosition(nid);
+
+        // Set variables for formula: x, y, z
+        evaluator.setVariable("x", pos.x);
+        evaluator.setVariable("y", pos.y);
+        evaluator.setVariable("z", pos.z);
+
+        try {
+            double t = evaluator.evaluate(formula);
+            if (t <= 0.0) {
+                std::cout << "[WARNING] Node " << nid << " thickness formula gave "
+                          << t << " ≤ 0, using base thickness " << baseThickness << "\n";
+                t = baseThickness;
+            }
+            perNodeThickness[nid] = t;
+        } catch (const std::exception& e) {
+            std::cout << "[ERROR] Thickness formula evaluation failed for node " << nid
+                      << ": " << e.what() << "\n";
+            perNodeThickness[nid] = baseThickness;
+        }
+    }
+
+    return perNodeThickness;
+}
+
+Vector3D ModelAssembler::parseOffsetDirection(const std::string& direction,
+                                              const std::vector<ShellElement>& surface) {
+    if (direction == "+normal" || direction == "normal") {
+        return computeAverageNormal(surface);
+    } else if (direction == "-normal") {
+        return computeAverageNormal(surface) * -1.0;
+    } else if (direction == "+x") {
+        return Vector3D(1, 0, 0);
+    } else if (direction == "-x") {
+        return Vector3D(-1, 0, 0);
+    } else if (direction == "+y") {
+        return Vector3D(0, 1, 0);
+    } else if (direction == "-y") {
+        return Vector3D(0, -1, 0);
+    } else if (direction == "+z") {
+        return Vector3D(0, 0, 1);
+    } else if (direction == "-z") {
+        return Vector3D(0, 0, -1);
+    }
+    return Vector3D(0, 0, 1);
+}
+
+bool ModelAssembler::isTria3(const ShellElement& shell) {
+    return (shell.nodeIds[2] == shell.nodeIds[3]) || (shell.nodeIds[3] == 0);
+}
+
+Vector3D ModelAssembler::computeElementCenter(const Element& elem) const {
+    Vector3D sum(0, 0, 0);
+    int count = 0;
+
+    for (int i = 0; i < 8; ++i) {
+        if (elem.nodeIds[i] > 0) {
+            sum = sum + getNodePosition(elem.nodeIds[i]);
+            count++;
+        }
+    }
+
+    if (count == 0) {
+        return Vector3D(0, 0, 0);
+    }
+
+    return sum * (1.0 / count);
+}
+
+// ========== PHASE 7: EXTRUDE TO SOLID ==========
+
+void ModelAssembler::extrudeToSolid(const std::vector<ShellElement>& surface,
+                                   const Vector3D& direction,
+                                   double thickness, int numLayers,
+                                   int newPid, int newSecid) {
+    double layerThickness = thickness / numLayers;
+
+    // Create nodes for each layer
+    std::map<int, std::vector<int>> bottomToTopNodes;  // [layerIdx][origNodeId] -> newNodeId
+
+    // Layer 0 = bottom (original surface nodes)
+    for (const auto& shell : surface) {
+        for (int i = 0; i < 4; ++i) {
+            int origNid = shell.nodeIds[i];
+            if (bottomToTopNodes[0].empty()) {
+                bottomToTopNodes[0].resize(maxNodeId_ + 10000);
+            }
+            if (bottomToTopNodes[0][origNid] == 0) {
+                bottomToTopNodes[0][origNid] = origNid;  // Use original nodes
+            }
+        }
+    }
+
+    // Create offset layers
+    for (int layer = 1; layer <= numLayers; ++layer) {
+        bottomToTopNodes[layer].resize(maxNodeId_ + 10000);
+
+        for (const auto& shell : surface) {
+            for (int i = 0; i < 4; ++i) {
+                int origNid = shell.nodeIds[i];
+
+                if (bottomToTopNodes[layer][origNid] == 0) {
+                    // Create new node
+                    int newNid = ++maxNodeId_;
+                    Vector3D origPos = getNodePosition(origNid);
+                    Vector3D newPos = origPos + direction * (layerThickness * layer);
+
+                    AddedNode an;
+                    an.id = newNid;
+                    an.x = newPos.x;
+                    an.y = newPos.y;
+                    an.z = newPos.z;
+                    addedNodes_.push_back(an);
+
+                    bottomToTopNodes[layer][origNid] = newNid;
+                }
+            }
+        }
+    }
+
+    // Create solid elements
+    for (const auto& shell : surface) {
+        // Preserve original winding from getFaceNodeIds (no flipping needed)
+        bool flipWinding = false;
+
+        for (int layer = 0; layer < numLayers; ++layer) {
+            AddedElement elem;
+            elem.id = ++maxElementId_;
+            elem.pid = newPid;
+            elem.type = ElementType::HEX8;
+
+            if (!flipWinding) {
+                // Normal case: shell is bottom, extrude upward
+                // Bottom face (layer)
+                for (int i = 0; i < 4; ++i) {
+                    int origNid = shell.nodeIds[i];
+                    elem.nodeIds[i] = bottomToTopNodes[layer][origNid];
+                }
+
+                // Top face (layer+1)
+                for (int i = 0; i < 4; ++i) {
+                    int origNid = shell.nodeIds[i];
+                    elem.nodeIds[i+4] = bottomToTopNodes[layer+1][origNid];
+                }
+            } else {
+                // Flipped case: shell is top, extrude downward
+                // Bottom face (layer+1): reversed winding
+                elem.nodeIds[0] = bottomToTopNodes[layer+1][shell.nodeIds[0]];
+                elem.nodeIds[1] = bottomToTopNodes[layer+1][shell.nodeIds[3]];
+                elem.nodeIds[2] = bottomToTopNodes[layer+1][shell.nodeIds[2]];
+                elem.nodeIds[3] = bottomToTopNodes[layer+1][shell.nodeIds[1]];
+
+                // Top face (layer): reversed winding
+                elem.nodeIds[4] = bottomToTopNodes[layer][shell.nodeIds[0]];
+                elem.nodeIds[5] = bottomToTopNodes[layer][shell.nodeIds[3]];
+                elem.nodeIds[6] = bottomToTopNodes[layer][shell.nodeIds[2]];
+                elem.nodeIds[7] = bottomToTopNodes[layer][shell.nodeIds[1]];
+            }
+
+            // Handle TRIA3 (degenerate quad)
+            if (isTria3(shell)) {
+                elem.nodeIds[3] = elem.nodeIds[2];
+                elem.nodeIds[7] = elem.nodeIds[6];
+            }
+
+            addedElements_.push_back(elem);
+        }
+    }
+
+    std::cout << "[INFO] Created " << addedElements_.size()
+              << " solid elements in " << numLayers << " layers\n";
+}
+
+// Overload for dual offset prestress (returns elements for stress calculation)
+void ModelAssembler::extrudeToSolid(const std::vector<ShellElement>& surface,
+                                   const Vector3D& direction,
+                                   double thickness, int numLayers,
+                                   int newPid, int newSecid,
+                                   std::vector<AddedElement>& outElements) {
+    double layerThickness = thickness / numLayers;
+
+    // Create nodes for each layer
+    std::map<int, std::vector<int>> bottomToTopNodes;
+
+    // Layer 0 = bottom (original surface nodes)
+    for (const auto& shell : surface) {
+        for (int i = 0; i < 4; ++i) {
+            int origNid = shell.nodeIds[i];
+            if (bottomToTopNodes[0].empty()) {
+                bottomToTopNodes[0].resize(maxNodeId_ + 10000);
+            }
+            if (bottomToTopNodes[0][origNid] == 0) {
+                bottomToTopNodes[0][origNid] = origNid;
+            }
+        }
+    }
+
+    // Create offset layers
+    for (int layer = 1; layer <= numLayers; ++layer) {
+        bottomToTopNodes[layer].resize(maxNodeId_ + 10000);
+
+        for (const auto& shell : surface) {
+            for (int i = 0; i < 4; ++i) {
+                int origNid = shell.nodeIds[i];
+
+                if (bottomToTopNodes[layer][origNid] == 0) {
+                    int newNid = ++maxNodeId_;
+                    Vector3D origPos = getNodePosition(origNid);
+                    Vector3D newPos = origPos + direction * (layerThickness * layer);
+
+                    AddedNode an;
+                    an.id = newNid;
+                    an.x = newPos.x;
+                    an.y = newPos.y;
+                    an.z = newPos.z;
+                    addedNodes_.push_back(an);
+
+                    bottomToTopNodes[layer][origNid] = newNid;
+                }
+            }
+        }
+    }
+
+    // Create solid elements
+    for (const auto& shell : surface) {
+        // Check if offset direction is aligned with shell normal
+        Vector3D shellNormal = computeElementNormal(shell);
+        double alignment = shellNormal.x * direction.x +
+                          shellNormal.y * direction.y +
+                          shellNormal.z * direction.z;
+
+        // Preserve original winding from getFaceNodeIds
+        bool flipWinding = false;
+
+        for (int layer = 0; layer < numLayers; ++layer) {
+            AddedElement elem;
+            elem.id = ++maxElementId_;
+            elem.pid = newPid;
+            elem.type = ElementType::HEX8;
+
+            if (!flipWinding) {
+                // Normal case: shell is bottom, extrude upward
+                // Bottom face (nodes 0-3): current layer
+                elem.nodeIds[0] = bottomToTopNodes[layer][shell.nodeIds[0]];
+                elem.nodeIds[1] = bottomToTopNodes[layer][shell.nodeIds[1]];
+                elem.nodeIds[2] = bottomToTopNodes[layer][shell.nodeIds[2]];
+                elem.nodeIds[3] = bottomToTopNodes[layer][shell.nodeIds[3]];
+
+                // Top face (nodes 4-7): next layer
+                elem.nodeIds[4] = bottomToTopNodes[layer+1][shell.nodeIds[0]];
+                elem.nodeIds[5] = bottomToTopNodes[layer+1][shell.nodeIds[1]];
+                elem.nodeIds[6] = bottomToTopNodes[layer+1][shell.nodeIds[2]];
+                elem.nodeIds[7] = bottomToTopNodes[layer+1][shell.nodeIds[3]];
+            } else {
+                // Flipped case: shell is top, extrude downward
+                // Bottom face (nodes 0-3): next layer, reversed winding
+                elem.nodeIds[0] = bottomToTopNodes[layer+1][shell.nodeIds[0]];
+                elem.nodeIds[1] = bottomToTopNodes[layer+1][shell.nodeIds[3]];
+                elem.nodeIds[2] = bottomToTopNodes[layer+1][shell.nodeIds[2]];
+                elem.nodeIds[3] = bottomToTopNodes[layer+1][shell.nodeIds[1]];
+
+                // Top face (nodes 4-7): current layer, reversed winding
+                elem.nodeIds[4] = bottomToTopNodes[layer][shell.nodeIds[0]];
+                elem.nodeIds[5] = bottomToTopNodes[layer][shell.nodeIds[3]];
+                elem.nodeIds[6] = bottomToTopNodes[layer][shell.nodeIds[2]];
+                elem.nodeIds[7] = bottomToTopNodes[layer][shell.nodeIds[1]];
+            }
+
+            // Handle TRIA3
+            if (isTria3(shell)) {
+                elem.nodeIds[3] = elem.nodeIds[2];
+                elem.nodeIds[7] = elem.nodeIds[6];
+            }
+
+            outElements.push_back(elem);
+        }
+    }
+
+    std::cout << "[INFO] Created " << outElements.size()
+              << " solid elements in " << numLayers << " layers\n";
+}
+
+// Overload for local normals (per-node directions)
+void ModelAssembler::extrudeToSolid(const std::vector<ShellElement>& surface,
+                                   const std::map<int, Vector3D>& perNodeDirections,
+                                   double thickness, int numLayers,
+                                   int newPid, int newSecid) {
+    double layerThickness = thickness / numLayers;
+
+    // Create nodes for each layer with per-node directions
+    std::map<int, std::vector<int>> bottomToTopNodes;  // [layerIdx][origNodeId] -> newNodeId
+
+    // Layer 0 = bottom (original surface nodes)
+    for (const auto& shell : surface) {
+        for (int i = 0; i < 4; ++i) {
+            int origNid = shell.nodeIds[i];
+            if (bottomToTopNodes[0].empty()) {
+                bottomToTopNodes[0].resize(maxNodeId_ + 10000);
+            }
+            if (bottomToTopNodes[0][origNid] == 0) {
+                bottomToTopNodes[0][origNid] = origNid;  // Use original nodes
+            }
+        }
+    }
+
+    // Create offset layers with per-node directions
+    for (int layer = 1; layer <= numLayers; ++layer) {
+        bottomToTopNodes[layer].resize(maxNodeId_ + 10000);
+
+        for (const auto& shell : surface) {
+            for (int i = 0; i < 4; ++i) {
+                int origNid = shell.nodeIds[i];
+
+                if (bottomToTopNodes[layer][origNid] == 0) {
+                    // Create new node using THIS node's local normal
+                    int newNid = ++maxNodeId_;
+                    Vector3D origPos = getNodePosition(origNid);
+
+                    // Look up the per-node direction
+                    Vector3D nodeDirection = Vector3D(0, 0, 1);  // Default
+                    auto it = perNodeDirections.find(origNid);
+                    if (it != perNodeDirections.end()) {
+                        nodeDirection = it->second;
+                    }
+
+                    Vector3D newPos = origPos + nodeDirection * (layerThickness * layer);
+
+                    AddedNode an;
+                    an.id = newNid;
+                    an.x = newPos.x;
+                    an.y = newPos.y;
+                    an.z = newPos.z;
+                    addedNodes_.push_back(an);
+
+                    bottomToTopNodes[layer][origNid] = newNid;
+                }
+            }
+        }
+    }
+
+    // Create solid elements (same as standard version)
+    for (const auto& shell : surface) {
+        bool flipWinding = false;
+
+        for (int layer = 0; layer < numLayers; ++layer) {
+            AddedElement elem;
+            elem.id = ++maxElementId_;
+            elem.pid = newPid;
+            elem.type = ElementType::HEX8;
+
+            if (!flipWinding) {
+                // Normal case
+                for (int i = 0; i < 4; ++i) {
+                    int origNid = shell.nodeIds[i];
+                    elem.nodeIds[i] = bottomToTopNodes[layer][origNid];
+                }
+
+                for (int i = 0; i < 4; ++i) {
+                    int origNid = shell.nodeIds[i];
+                    elem.nodeIds[i+4] = bottomToTopNodes[layer+1][origNid];
+                }
+            } else {
+                // Flipped case
+                elem.nodeIds[0] = bottomToTopNodes[layer+1][shell.nodeIds[0]];
+                elem.nodeIds[1] = bottomToTopNodes[layer+1][shell.nodeIds[3]];
+                elem.nodeIds[2] = bottomToTopNodes[layer+1][shell.nodeIds[2]];
+                elem.nodeIds[3] = bottomToTopNodes[layer+1][shell.nodeIds[1]];
+
+                elem.nodeIds[4] = bottomToTopNodes[layer][shell.nodeIds[0]];
+                elem.nodeIds[5] = bottomToTopNodes[layer][shell.nodeIds[3]];
+                elem.nodeIds[6] = bottomToTopNodes[layer][shell.nodeIds[2]];
+                elem.nodeIds[7] = bottomToTopNodes[layer][shell.nodeIds[1]];
+            }
+
+            // Handle TRIA3
+            if (isTria3(shell)) {
+                elem.nodeIds[3] = elem.nodeIds[2];
+                elem.nodeIds[7] = elem.nodeIds[6];
+            }
+
+            addedElements_.push_back(elem);
+        }
+    }
+
+    std::cout << "[INFO] Created " << addedElements_.size()
+              << " solid elements in " << numLayers << " layers (local normals)\n";
+}
+
+// Overload for variable thickness (per-node thickness values)
+void ModelAssembler::extrudeToSolid(const std::vector<ShellElement>& surface,
+                                   const Vector3D& direction,
+                                   const std::map<int, double>& perNodeThickness,
+                                   int numLayers,
+                                   int newPid, int newSecid) {
+
+    // Create nodes for each layer with per-node variable thickness
+    std::map<int, std::vector<int>> bottomToTopNodes;  // [layerIdx][origNodeId] -> newNodeId
+
+    // Layer 0 = bottom (original surface nodes)
+    for (const auto& shell : surface) {
+        for (int i = 0; i < 4; ++i) {
+            int origNid = shell.nodeIds[i];
+            if (bottomToTopNodes[0].empty()) {
+                bottomToTopNodes[0].resize(maxNodeId_ + 10000);
+            }
+            if (bottomToTopNodes[0][origNid] == 0) {
+                bottomToTopNodes[0][origNid] = origNid;
+            }
+        }
+    }
+
+    // Create offset layers with per-node thickness
+    for (int layer = 1; layer <= numLayers; ++layer) {
+        bottomToTopNodes[layer].resize(maxNodeId_ + 10000);
+
+        for (const auto& shell : surface) {
+            for (int i = 0; i < 4; ++i) {
+                int origNid = shell.nodeIds[i];
+
+                if (bottomToTopNodes[layer][origNid] == 0) {
+                    int newNid = ++maxNodeId_;
+                    Vector3D origPos = getNodePosition(origNid);
+
+                    // Get THIS node's thickness
+                    double nodeThickness = 1.0;  // Default
+                    auto it = perNodeThickness.find(origNid);
+                    if (it != perNodeThickness.end()) {
+                        nodeThickness = it->second;
+                    }
+
+                    double layerThickness = nodeThickness / numLayers;
+                    Vector3D newPos = origPos + direction * (layerThickness * layer);
+
+                    AddedNode an;
+                    an.id = newNid;
+                    an.x = newPos.x;
+                    an.y = newPos.y;
+                    an.z = newPos.z;
+                    addedNodes_.push_back(an);
+
+                    bottomToTopNodes[layer][origNid] = newNid;
+                }
+            }
+        }
+    }
+
+    // Create solid elements (same as standard version)
+    for (const auto& shell : surface) {
+        bool flipWinding = false;
+
+        for (int layer = 0; layer < numLayers; ++layer) {
+            AddedElement elem;
+            elem.id = ++maxElementId_;
+            elem.pid = newPid;
+            elem.type = ElementType::HEX8;
+
+            if (!flipWinding) {
+                for (int i = 0; i < 4; ++i) {
+                    int origNid = shell.nodeIds[i];
+                    elem.nodeIds[i] = bottomToTopNodes[layer][origNid];
+                }
+
+                for (int i = 0; i < 4; ++i) {
+                    int origNid = shell.nodeIds[i];
+                    elem.nodeIds[i+4] = bottomToTopNodes[layer+1][origNid];
+                }
+            } else {
+                elem.nodeIds[0] = bottomToTopNodes[layer+1][shell.nodeIds[0]];
+                elem.nodeIds[1] = bottomToTopNodes[layer+1][shell.nodeIds[3]];
+                elem.nodeIds[2] = bottomToTopNodes[layer+1][shell.nodeIds[2]];
+                elem.nodeIds[3] = bottomToTopNodes[layer+1][shell.nodeIds[1]];
+
+                elem.nodeIds[4] = bottomToTopNodes[layer][shell.nodeIds[0]];
+                elem.nodeIds[5] = bottomToTopNodes[layer][shell.nodeIds[3]];
+                elem.nodeIds[6] = bottomToTopNodes[layer][shell.nodeIds[2]];
+                elem.nodeIds[7] = bottomToTopNodes[layer][shell.nodeIds[1]];
+            }
+
+            if (isTria3(shell)) {
+                elem.nodeIds[3] = elem.nodeIds[2];
+                elem.nodeIds[7] = elem.nodeIds[6];
+            }
+
+            addedElements_.push_back(elem);
+        }
+    }
+
+    std::cout << "[INFO] Created " << addedElements_.size()
+              << " solid elements in " << numLayers << " layers (variable thickness)\n";
+}
+
+// Overload for BOTH local normals AND variable thickness
+void ModelAssembler::extrudeToSolid(const std::vector<ShellElement>& surface,
+                                   const std::map<int, Vector3D>& perNodeDirections,
+                                   const std::map<int, double>& perNodeThickness,
+                                   int numLayers,
+                                   int newPid, int newSecid) {
+
+    // Create nodes for each layer with BOTH per-node directions AND per-node thickness
+    std::map<int, std::vector<int>> bottomToTopNodes;  // [layerIdx][origNodeId] -> newNodeId
+
+    // Layer 0 = bottom (original surface nodes)
+    for (const auto& shell : surface) {
+        for (int i = 0; i < 4; ++i) {
+            int origNid = shell.nodeIds[i];
+            if (bottomToTopNodes[0].empty()) {
+                bottomToTopNodes[0].resize(maxNodeId_ + 10000);
+            }
+            if (bottomToTopNodes[0][origNid] == 0) {
+                bottomToTopNodes[0][origNid] = origNid;  // Use original nodes
+            }
+        }
+    }
+
+    // Create offset layers with per-node directions AND per-node thickness
+    for (int layer = 1; layer <= numLayers; ++layer) {
+        bottomToTopNodes[layer].resize(maxNodeId_ + 10000);
+
+        for (const auto& shell : surface) {
+            for (int i = 0; i < 4; ++i) {
+                int origNid = shell.nodeIds[i];
+
+                if (bottomToTopNodes[layer][origNid] == 0) {
+                    int newNid = ++maxNodeId_;
+                    Vector3D origPos = getNodePosition(origNid);
+
+                    // Get THIS node's direction
+                    Vector3D nodeDirection = Vector3D(0, 0, 1);  // Default
+                    auto itDir = perNodeDirections.find(origNid);
+                    if (itDir != perNodeDirections.end()) {
+                        nodeDirection = itDir->second;
+                    }
+
+                    // Get THIS node's thickness
+                    double nodeThickness = 1.0;  // Default
+                    auto itThick = perNodeThickness.find(origNid);
+                    if (itThick != perNodeThickness.end()) {
+                        nodeThickness = itThick->second;
+                    }
+
+                    double layerThickness = nodeThickness / numLayers;
+                    Vector3D newPos = origPos + nodeDirection * (layerThickness * layer);
+
+                    AddedNode an;
+                    an.id = newNid;
+                    an.x = newPos.x;
+                    an.y = newPos.y;
+                    an.z = newPos.z;
+                    addedNodes_.push_back(an);
+
+                    bottomToTopNodes[layer][origNid] = newNid;
+                }
+            }
+        }
+    }
+
+    // Create solid elements (same as standard version)
+    for (const auto& shell : surface) {
+        bool flipWinding = false;
+
+        for (int layer = 0; layer < numLayers; ++layer) {
+            AddedElement elem;
+            elem.id = ++maxElementId_;
+            elem.pid = newPid;
+            elem.type = ElementType::HEX8;
+
+            if (!flipWinding) {
+                // Normal case
+                for (int i = 0; i < 4; ++i) {
+                    int origNid = shell.nodeIds[i];
+                    elem.nodeIds[i] = bottomToTopNodes[layer][origNid];
+                }
+
+                for (int i = 0; i < 4; ++i) {
+                    int origNid = shell.nodeIds[i];
+                    elem.nodeIds[i+4] = bottomToTopNodes[layer+1][origNid];
+                }
+            } else {
+                // Flipped case
+                elem.nodeIds[0] = bottomToTopNodes[layer+1][shell.nodeIds[0]];
+                elem.nodeIds[1] = bottomToTopNodes[layer+1][shell.nodeIds[3]];
+                elem.nodeIds[2] = bottomToTopNodes[layer+1][shell.nodeIds[2]];
+                elem.nodeIds[3] = bottomToTopNodes[layer+1][shell.nodeIds[1]];
+
+                elem.nodeIds[4] = bottomToTopNodes[layer][shell.nodeIds[0]];
+                elem.nodeIds[5] = bottomToTopNodes[layer][shell.nodeIds[3]];
+                elem.nodeIds[6] = bottomToTopNodes[layer][shell.nodeIds[2]];
+                elem.nodeIds[7] = bottomToTopNodes[layer][shell.nodeIds[1]];
+            }
+
+            // Handle TRIA3
+            if (isTria3(shell)) {
+                elem.nodeIds[3] = elem.nodeIds[2];
+                elem.nodeIds[7] = elem.nodeIds[6];
+            }
+
+            addedElements_.push_back(elem);
+        }
+    }
+
+    std::cout << "[INFO] Created " << addedElements_.size()
+              << " solid elements in " << numLayers << " layers (local normals + variable thickness)\n";
+}
+
+// ========== PHASE 6: HELPER METHODS ==========
+
+std::string ModelAssembler::formatPartBlock(int pid, int secid, int mid, const std::string& title) {
+    std::ostringstream oss;
+    oss << "*PART\n";
+    oss << title << "\n";
+    oss << std::setw(10) << pid
+        << std::setw(10) << secid
+        << std::setw(10) << mid << "\n";
+    return oss.str();
+}
+
+std::string ModelAssembler::formatCzmSectionBlock(int secid) {
+    std::ostringstream oss;
+    oss << "*SECTION_SOLID\n";
+    oss << "$#   secid    elform       aet\n";
+    oss << std::setw(10) << secid
+        << std::setw(10) << 20  // ELFORM=20 (zero-thickness cohesive)
+        << "\n";
+    oss << "$ Zero-thickness cohesive - duplicate nodes at same position\n";
+    return oss.str();
+}
+
+void ModelAssembler::insertMaterialCard(const std::string& materialCard, int actualMid) {
+    std::string processed = materialCard;
+
+    std::stringstream ss;
+    ss << std::setw(10) << actualMid;
+    std::string midStr = ss.str();
+
+    size_t pos = processed.find("@MID@");
+    while (pos != std::string::npos) {
+        processed.replace(pos, 5, midStr);
+        pos = processed.find("@MID@", pos + midStr.length());
+    }
+
+    addedKeywordBlocks_.push_back(processed);
+    std::cout << "[INFO] Inserted material card with MID=" << actualMid << "\n";
+}
+
+void ModelAssembler::createPartKeyword(int pid, int secid, int mid, const std::string& title) {
+    std::ostringstream oss;
+    oss << "*PART\n";
+    oss << title << "\n";
+    oss << std::setw(10) << pid
+        << std::setw(10) << secid
+        << std::setw(10) << mid << "\n";
+    addedKeywordBlocks_.push_back(oss.str());
+}
+
+void ModelAssembler::createSectionSolid(int secid) {
+    std::ostringstream oss;
+    oss << "*SECTION_SOLID\n";
+    oss << "$#   secid    elform       aet\n";
+    oss << std::setw(10) << secid
+        << std::setw(10) << 1  // ELFORM=1 (constant stress solid)
+        << "\n";
+    addedKeywordBlocks_.push_back(oss.str());
+}
+
+void ModelAssembler::createSectionTShell(int secid, double thickness, int elform) {
+    std::ostringstream oss;
+    oss << "*SECTION_TSHELL\n";
+    oss << "$#   secid    elform      shrf       nip     propt   qr/irid     icomp     setyp\n";
+    oss << std::setw(10) << secid
+        << std::setw(10) << elform  // 16=TSHELL4, 17=TSHELL3
+        << std::setw(10) << 0.0
+        << std::setw(10) << 3
+        << "\n";
+    oss << "$#      t1        t2        t3        t4      nloc     marea      idof    edgset\n";
+    oss << std::scientific << std::setprecision(3);
+    oss << std::setw(10) << thickness
+        << std::setw(10) << thickness
+        << std::setw(10) << thickness
+        << std::setw(10) << thickness
+        << "\n";
+    addedKeywordBlocks_.push_back(oss.str());
+}
+
+void ModelAssembler::createSectionShell(int secid, double thickness) {
+    std::ostringstream oss;
+    oss << "*SECTION_SHELL\n";
+    oss << "$#   secid    elform      shrf       nip     propt   qr/irid     icomp     setyp\n";
+    oss << std::setw(10) << secid
+        << std::setw(10) << 2  // ELFORM=2 (fully integrated QUAD)
+        << std::setw(10) << 0.0
+        << std::setw(10) << 3
+        << "\n";
+    oss << "$#      t1        t2        t3        t4      nloc     marea      idof    edgset\n";
+    oss << std::scientific << std::setprecision(3);
+    oss << std::setw(10) << thickness
+        << std::setw(10) << thickness
+        << std::setw(10) << thickness
+        << std::setw(10) << thickness
+        << "\n";
+    addedKeywordBlocks_.push_back(oss.str());
+}
+
+Vector3D ModelAssembler::computeShellNormal(const ShellElement& shell) {
+    // Same as computeElementNormal
+    return computeElementNormal(shell);
+}
+
+// ========== PHASE 8: TSHELL EXTRUDE ==========
+
+void ModelAssembler::extrudeToTShell(const std::vector<ShellElement>& surface,
+                                    const Vector3D& direction,
+                                    double thickness, int numLayers,
+                                    int newPid, int newSecid) {
+    double layerThickness = thickness / numLayers;
+
+    std::cout << "[INFO] Extruding to TSHELL: " << numLayers
+              << " layers, thickness=" << layerThickness << " mm each\n";
+
+    // Create offset node layers
+    std::map<int, std::vector<int>> nodeLayerMap;
+
+    for (const auto& shell : surface) {
+        for (int nid : shell.nodeIds) {
+            if (nid <= 0) continue;
+            if (nodeLayerMap.count(nid)) continue;
+
+            Vector3D basePos = getNodePosition(nid);
+            std::vector<int> layerNodes;
+
+            for (int layer = 0; layer <= numLayers; ++layer) {
+                int newNid = ++maxNodeId_;
+                Vector3D offsetPos = basePos + direction * (layer * layerThickness);
+
+                AddedNode an;
+                an.id = newNid;
+                an.x = offsetPos.x;
+                an.y = offsetPos.y;
+                an.z = offsetPos.z;
+                addedNodes_.push_back(an);
+                layerNodes.push_back(newNid);
+            }
+
+            nodeLayerMap[nid] = layerNodes;
+        }
+    }
+
+    // Create TSHELL elements
+    for (const auto& shell : surface) {
+        bool isTria = isTria3(shell);
+
+        for (int layer = 0; layer < numLayers; ++layer) {
+            AddedShellElement tshell;
+            tshell.id = ++maxShellElementId_;
+            tshell.pid = newPid;
+            tshell.elform = isTria ? 17 : 16;  // TSHELL3 : TSHELL4
+
+            if (isTria) {
+                // TSHELL3: 6 nodes (3 bottom + 3 top)
+                tshell.nodeIds[0] = nodeLayerMap[shell.nodeIds[0]][layer];
+                tshell.nodeIds[1] = nodeLayerMap[shell.nodeIds[1]][layer];
+                tshell.nodeIds[2] = nodeLayerMap[shell.nodeIds[2]][layer];
+                tshell.nodeIds[3] = nodeLayerMap[shell.nodeIds[0]][layer+1];
+                tshell.nodeIds[4] = nodeLayerMap[shell.nodeIds[1]][layer+1];
+                tshell.nodeIds[5] = nodeLayerMap[shell.nodeIds[2]][layer+1];
+                tshell.nodeIds[6] = 0;
+                tshell.nodeIds[7] = 0;
+            } else {
+                // TSHELL4: 8 nodes (4 bottom + 4 top)
+                tshell.nodeIds[0] = nodeLayerMap[shell.nodeIds[0]][layer];
+                tshell.nodeIds[1] = nodeLayerMap[shell.nodeIds[1]][layer];
+                tshell.nodeIds[2] = nodeLayerMap[shell.nodeIds[2]][layer];
+                tshell.nodeIds[3] = nodeLayerMap[shell.nodeIds[3]][layer];
+                tshell.nodeIds[4] = nodeLayerMap[shell.nodeIds[0]][layer+1];
+                tshell.nodeIds[5] = nodeLayerMap[shell.nodeIds[1]][layer+1];
+                tshell.nodeIds[6] = nodeLayerMap[shell.nodeIds[2]][layer+1];
+                tshell.nodeIds[7] = nodeLayerMap[shell.nodeIds[3]][layer+1];
+            }
+
+            addedShellElements_.push_back(tshell);
+        }
+    }
+
+    std::cout << "[INFO] Created " << addedShellElements_.size()
+              << " TSHELL elements\n";
+}
+
+// ========== PHASE 9: SHELL OFFSET ==========
+
+void ModelAssembler::createOffsetShell(const std::vector<ShellElement>& surface,
+                                      const Vector3D& direction,
+                                      double offset,
+                                      int newPid, int newSecid,
+                                      double shellThickness) {
+    std::cout << "[INFO] Creating offset shell at distance=" << offset
+              << " mm, thickness=" << shellThickness << " mm\n";
+
+    // Create new nodes at offset position
+    std::map<int, int> oldToNewNode;
+
+    for (const auto& shell : surface) {
+        for (int nid : shell.nodeIds) {
+            if (nid <= 0) continue;
+            if (oldToNewNode.count(nid)) continue;
+
+            Vector3D basePos = getNodePosition(nid);
+            Vector3D offsetPos = basePos + direction * offset;
+
+            int newNid = ++maxNodeId_;
+            AddedNode an;
+            an.id = newNid;
+            an.x = offsetPos.x;
+            an.y = offsetPos.y;
+            an.z = offsetPos.z;
+            addedNodes_.push_back(an);
+            oldToNewNode[nid] = newNid;
+        }
+    }
+
+    // Create shell elements
+    for (const auto& shell : surface) {
+        AddedShellElement newShell;
+        newShell.id = ++maxShellElementId_;
+        newShell.pid = newPid;
+        newShell.elform = 2;  // Standard QUAD4/TRIA3
+
+        for (size_t i = 0; i < 4; ++i) {
+            if (shell.nodeIds[i] > 0) {
+                newShell.nodeIds[i] = oldToNewNode[shell.nodeIds[i]];
+            } else {
+                newShell.nodeIds[i] = 0;
+            }
+        }
+        // Initialize remaining nodes for TSHELL compatibility
+        for (size_t i = 4; i < 8; ++i) {
+            newShell.nodeIds[i] = 0;
+        }
+
+        addedShellElements_.push_back(newShell);
+    }
+
+    std::cout << "[INFO] Created " << oldToNewNode.size() << " nodes, "
+              << addedShellElements_.size() << " shell elements\n";
+}
+
+// ========== PHASE 11: CONNECTION MODES ==========
+
+void ModelAssembler::applyConnectionTied(
+    const std::vector<ShellElement>& sourceSurface,
+    const std::vector<AddedElement>& offsetElements) {
+    // Already implemented - tied mode is default behavior
+    // Source surface nodes are directly used as offset layer bottom nodes
+    std::cout << "[INFO] Connection mode: tied (node sharing)\n";
+}
+
+void ModelAssembler::applyConnectionCZM(
+    const std::vector<ShellElement>& sourceSurface,
+    std::vector<AddedElement>& offsetElements,
+    const OffsetOperation& op) {
+
+    int czmPid = op.czmPartId > 0 ? op.czmPartId : ++maxPartId_;
+    int czmSecid = czmPid;
+    int czmMid = op.czmMid > 0 ? op.czmMid : ++maxMaterialId_;
+
+    std::cout << "[INFO] Connection mode: czm (cohesive elements, PID=" << czmPid << ")\n";
+
+    // 1. Duplicate nodes for source surface
+    std::map<int, int> origNodeToDupNode;
+    for (const auto& shell : sourceSurface) {
+        for (int i = 0; i < 4; ++i) {
+            int nid = shell.nodeIds[i];
+            if (nid <= 0) continue;
+            if (origNodeToDupNode.find(nid) == origNodeToDupNode.end()) {
+                int newNid = ++maxNodeId_;
+                Vector3D pos = getNodePosition(nid);
+
+                AddedNode an;
+                an.id = newNid;
+                an.x = pos.x;
+                an.y = pos.y;
+                an.z = pos.z;
+                addedNodes_.push_back(an);
+
+                origNodeToDupNode[nid] = newNid;
+            }
+        }
+    }
+
+    // 2. Replace offset layer bottom nodes with duplicates
+    for (auto& elem : offsetElements) {
+        for (int i = 0; i < 4; ++i) {
+            if (origNodeToDupNode.find(elem.nodeIds[i]) != origNodeToDupNode.end()) {
+                elem.nodeIds[i] = origNodeToDupNode[elem.nodeIds[i]];
+            }
+        }
+    }
+
+    // 3. Create cohesive elements
+    for (const auto& shell : sourceSurface) {
+        AddedElement cohElem;
+        cohElem.id = ++maxElementId_;
+        cohElem.pid = czmPid;
+        cohElem.type = ElementType::HEX8;
+
+        // Bottom face: original nodes
+        cohElem.nodeIds[0] = shell.nodeIds[0];
+        cohElem.nodeIds[1] = shell.nodeIds[1];
+        cohElem.nodeIds[2] = shell.nodeIds[2];
+        cohElem.nodeIds[3] = shell.nodeIds[3];
+
+        // Top face: duplicate nodes
+        cohElem.nodeIds[4] = origNodeToDupNode[shell.nodeIds[0]];
+        cohElem.nodeIds[5] = origNodeToDupNode[shell.nodeIds[1]];
+        cohElem.nodeIds[6] = origNodeToDupNode[shell.nodeIds[2]];
+        cohElem.nodeIds[7] = origNodeToDupNode[shell.nodeIds[3]];
+
+        addedElements_.push_back(cohElem);
+    }
+
+    // 4. CZM keywords
+    std::string partBlock = formatPartBlock(czmPid, czmSecid, czmMid, "CZM_Layer");
+    std::string sectionBlock = formatCzmSectionBlock(czmSecid);
+    std::string materialBlock = op.czmMaterialCard;
+
+    // Replace @MID@ placeholder
+    size_t pos = 0;
+    while ((pos = materialBlock.find("@MID@", pos)) != std::string::npos) {
+        materialBlock.replace(pos, 5, std::to_string(czmMid));
+        pos += std::to_string(czmMid).length();
+    }
+
+    addedKeywordBlocks_.push_back(partBlock);
+    addedKeywordBlocks_.push_back(sectionBlock);
+    addedKeywordBlocks_.push_back(materialBlock);
+
+    std::cout << "[INFO] Created " << sourceSurface.size() << " CZM elements\n";
+}
+
+void ModelAssembler::applyConnectionContact(
+    const std::vector<ShellElement>& sourceSurface,
+    std::vector<AddedElement>& offsetElements,
+    int sourcePid, int newPid) {
+
+    std::cout << "[INFO] Connection mode: contact (separate nodes)\n";
+
+    // Duplicate nodes for offset layer bottom
+    std::map<int, int> origNodeToNewNode;
+
+    for (auto& elem : offsetElements) {
+        for (int i = 0; i < 4; ++i) {
+            int origNid = elem.nodeIds[i];
+
+            if (origNodeToNewNode.find(origNid) == origNodeToNewNode.end()) {
+                int newNid = ++maxNodeId_;
+                Vector3D pos = getNodePosition(origNid);
+
+                AddedNode an;
+                an.id = newNid;
+                an.x = pos.x;
+                an.y = pos.y;
+                an.z = pos.z;
+                addedNodes_.push_back(an);
+
+                origNodeToNewNode[origNid] = newNid;
+            }
+
+            elem.nodeIds[i] = origNodeToNewNode[origNid];
+        }
+    }
+
+    // Add contact hint
+    std::ostringstream contactHint;
+    contactHint << "$\n"
+                << "$ ==================== CONTACT DEFINITION REQUIRED ====================\n"
+                << "$ The offset layer uses connection_mode: contact\n"
+                << "$ Add contact definition manually, for example:\n"
+                << "$\n"
+                << "$ *CONTACT_AUTOMATIC_SURFACE_TO_SURFACE\n"
+                << "$ $#     cid                                                         title\n"
+                << "$       999                                          Offset_Contact_Auto\n"
+                << "$ $#    ssid      msid     sstyp     mstyp    sboxid    mboxid       spr       mpr\n"
+                << "$  " << std::setw(8) << sourcePid
+                << std::setw(10) << newPid
+                << "         2         2         0         0         0         0\n"
+                << "$ $#      fs        fd        dc        vc       vdc    penchk        bt        dt\n"
+                << "$      0.00      0.00      0.00      0.00      0.00         0      0.00  1.00E+20\n"
+                << "$ ======================================================================\n"
+                << "$\n";
+
+    addedKeywordBlocks_.push_back(contactHint.str());
+
+    std::cout << "[INFO] Created " << origNodeToNewNode.size() << " duplicate nodes\n";
+}
+
+// ========== PHASE 12: DUAL OFFSET PRESTRESS ==========
+
+bool ModelAssembler::applyDualOffsetPrestress(const OffsetOperation& op, double E, double nu) {
+    std::cout << "[INFO] Applying dual offset prestress mode\n";
+    std::cout << "[INFO] Inner offset: " << op.innerOffset
+              << " mm, Outer offset: " << op.outerOffset << " mm\n";
+
+    // 1. Validation
+    bool foundPid = false;
+    for (const auto& pair : baseMesh_.getElements()) {
+        if (pair.second.partId == op.sourcePid) {
+            foundPid = true;
+            break;
+        }
+    }
+    if (!foundPid) {
+        errorMessage_ = "Source PID " + std::to_string(op.sourcePid) + " not found";
+        return false;
+    }
+
+    // 2. Auto-assign IDs
+    int actualPid = (op.newPid > 0) ? op.newPid : (++maxPartId_);
+    int actualSecid = (op.newSecid > 0) ? op.newSecid : (++maxSectionId_);
+    int actualMid = (op.newMid > 0) ? op.newMid : (++maxMaterialId_);
+
+    // 3. Extract source surface
+    std::vector<ShellElement> sourceSurface;
+    extractSourceSurface(op.sourcePid, sourceSurface);
+
+    if (sourceSurface.empty()) {
+        errorMessage_ = "No surface elements found in source PID "
+                       + std::to_string(op.sourcePid);
+        return false;
+    }
+
+    Vector3D outwardDir = computeAverageNormal(sourceSurface);
+
+    // 4. Connection mode - create duplicate nodes at inner offset position
+    std::map<int, int> origToBottomNode;
+    std::map<int, Vector3D> deformedPositions;
+
+    if (op.connectionMode == "czm" || op.connectionMode == "contact") {
+        // Duplicate nodes at inner offset (deformed state)
+        for (const auto& shell : sourceSurface) {
+            for (int i = 0; i < 4; ++i) {
+                int origNid = shell.nodeIds[i];
+                if (origNid <= 0) continue;
+                if (origToBottomNode.find(origNid) == origToBottomNode.end()) {
+                    int newNid = ++maxNodeId_;
+                    Vector3D origPos = getNodePosition(origNid);
+                    Vector3D normal = computeShellNormal(shell);
+
+                    // Deformed position (inner offset)
+                    Vector3D innerPos = origPos + normal * op.innerOffset;
+
+                    AddedNode an;
+                    an.id = newNid;
+                    an.x = innerPos.x;
+                    an.y = innerPos.y;
+                    an.z = innerPos.z;
+                    addedNodes_.push_back(an);
+
+                    origToBottomNode[origNid] = newNid;
+                    deformedPositions[newNid] = innerPos;
+                }
+            }
+        }
+    } else {
+        // Tied: Use original nodes directly
+        for (const auto& shell : sourceSurface) {
+            for (int i = 0; i < 4; ++i) {
+                int origNid = shell.nodeIds[i];
+                if (origNid <= 0) continue;
+                if (origToBottomNode.find(origNid) == origToBottomNode.end()) {
+                    Vector3D origPos = getNodePosition(origNid);
+                    Vector3D normal = computeShellNormal(shell);
+
+                    origToBottomNode[origNid] = origNid;  // Identity
+                    deformedPositions[origNid] = origPos + normal * op.innerOffset;
+                }
+            }
+        }
+    }
+
+    // 5. Update surface to use bottom nodes
+    std::vector<ShellElement> modifiedSurface = sourceSurface;
+    for (auto& shell : modifiedSurface) {
+        for (int i = 0; i < 4; ++i) {
+            if (shell.nodeIds[i] > 0) {
+                shell.nodeIds[i] = origToBottomNode[shell.nodeIds[i]];
+            }
+        }
+    }
+
+    // 6. Extrude to reference (outer) configuration
+    std::vector<AddedElement> refElements;
+    double thickness = op.outerOffset - op.innerOffset;
+    extrudeToSolid(modifiedSurface, outwardDir, thickness,
+                   op.numLayers, actualPid, actualSecid, refElements);
+
+    // 7. Calculate prestress
+    MaterialModel mat = MaterialModel::isotropicElastic(E, nu);
+    calculateDualOffsetPrestress(refElements, deformedPositions, mat);
+
+    // 8. Add elements to accumulator
+    for (auto& elem : refElements) {
+        addedElements_.push_back(elem);
+    }
+
+    // 9. Create CZM/Contact
+    if (op.connectionMode == "czm") {
+        createCzmElementsForDualOffset(sourceSurface, origToBottomNode, op);
+    } else if (op.connectionMode == "contact") {
+        addContactHint(op.sourcePid, actualPid);
+    }
+
+    // 10. Create keywords
+    createPartKeyword(actualPid, actualSecid, actualMid, op.partTitle);
+    createSectionSolid(actualSecid);
+    if (!op.materialCard.empty()) {
+        insertMaterialCard(op.materialCard, actualMid);
+    }
+
+    std::cout << "[INFO] Dual offset prestress completed\n";
+    return true;
+}
+
+void ModelAssembler::calculateDualOffsetPrestress(
+    const std::vector<AddedElement>& refElements,
+    const std::map<int, Vector3D>& deformedPositions,
+    const MaterialModel& mat) {
+
+    std::cout << "[INFO] Calculating dual offset prestress...\n";
+
+    for (const auto& elem : refElements) {
+        // Reference (outer) positions
+        Vector3D refNodes[8];
+        for (int i = 0; i < 8; ++i) {
+            refNodes[i] = getNodePosition(elem.nodeIds[i]);
+        }
+
+        // Deformed (inner) positions
+        Vector3D defNodes[8];
+        for (int i = 0; i < 4; ++i) {
+            // Bottom face: deformed positions
+            auto it = deformedPositions.find(elem.nodeIds[i]);
+            if (it != deformedPositions.end()) {
+                defNodes[i] = it->second;
+            } else {
+                defNodes[i] = refNodes[i];  // Fallback
+            }
+        }
+        for (int i = 4; i < 8; ++i) {
+            // Top face: proportional deformation
+            int bottomIdx = i - 4;
+            Vector3D displacement = defNodes[bottomIdx] - refNodes[bottomIdx];
+            defNodes[i] = refNodes[i] + displacement;
+        }
+
+        // Full 3D strain calculation
+        // Reference configuration vectors
+        Vector3D dr_ref = (refNodes[1] - refNodes[0] + refNodes[2] - refNodes[3] +
+                          refNodes[5] - refNodes[4] + refNodes[6] - refNodes[7]) * 0.125;
+        Vector3D ds_ref = (refNodes[3] - refNodes[0] + refNodes[2] - refNodes[1] +
+                          refNodes[7] - refNodes[4] + refNodes[6] - refNodes[5]) * 0.125;
+        Vector3D dt_ref = (refNodes[4] - refNodes[0] + refNodes[5] - refNodes[1] +
+                          refNodes[6] - refNodes[2] + refNodes[7] - refNodes[3]) * 0.125;
+
+        // Deformed configuration vectors
+        Vector3D dr_def = (defNodes[1] - defNodes[0] + defNodes[2] - defNodes[3] +
+                          defNodes[5] - defNodes[4] + defNodes[6] - defNodes[7]) * 0.125;
+        Vector3D ds_def = (defNodes[3] - defNodes[0] + defNodes[2] - defNodes[1] +
+                          defNodes[7] - defNodes[4] + defNodes[6] - defNodes[5]) * 0.125;
+        Vector3D dt_def = (defNodes[4] - defNodes[0] + defNodes[5] - defNodes[1] +
+                          defNodes[6] - defNodes[2] + defNodes[7] - defNodes[3]) * 0.125;
+
+        // Metric tensor (small strain approximation)
+        double eps_xx = 0.5 * (dr_def.dot(dr_def) / dr_ref.dot(dr_ref) - 1.0);
+        double eps_yy = 0.5 * (ds_def.dot(ds_def) / ds_ref.dot(ds_ref) - 1.0);
+        double eps_zz = 0.5 * (dt_def.dot(dt_def) / dt_ref.dot(dt_ref) - 1.0);
+
+        double dr_mag = dr_ref.magnitude();
+        double ds_mag = ds_ref.magnitude();
+        double dt_mag = dt_ref.magnitude();
+
+        double eps_xy = 0.5 * (dr_def.dot(ds_def) / (dr_mag * ds_mag) -
+                               dr_ref.dot(ds_ref) / (dr_mag * ds_mag));
+        double eps_yz = 0.5 * (ds_def.dot(dt_def) / (ds_mag * dt_mag) -
+                               ds_ref.dot(dt_ref) / (ds_mag * dt_mag));
+        double eps_xz = 0.5 * (dr_def.dot(dt_def) / (dr_mag * dt_mag) -
+                               dr_ref.dot(dt_ref) / (dr_mag * dt_mag));
+
+        // Convert strain to stress
+        StrainTensor strain;
+        strain.xx = eps_xx;
+        strain.yy = eps_yy;
+        strain.zz = eps_zz;
+        strain.xy = eps_xy;
+        strain.yz = eps_yz;
+        strain.xz = eps_xz;
+        StressTensor stress = mat.computeStress(strain);
+
+        // Store result
+        ElementResult er;
+        er.isValid = true;
+        er.elementId = elem.id;
+        er.isShell = false;
+        er.stress = stress;
+        er.vonMisesStress = stress.vonMises();
+
+        accumulatedResults_.push_back(er);
+    }
+
+    std::cout << "[INFO] Prestress calculated for " << refElements.size() << " elements\n";
+}
+
+void ModelAssembler::createCzmElementsForDualOffset(
+    const std::vector<ShellElement>& sourceSurface,
+    const std::map<int, int>& origToBottomNode,
+    const OffsetOperation& op) {
+
+    int czmPid = op.czmPartId > 0 ? op.czmPartId : ++maxPartId_;
+    int czmSecid = czmPid;
+    int czmMid = ++maxMaterialId_;
+
+    std::cout << "[INFO] Creating CZM elements for dual offset (PID=" << czmPid << ")\n";
+
+    // Create cohesive elements
+    for (const auto& shell : sourceSurface) {
+        AddedElement cohElem;
+        cohElem.id = ++maxElementId_;
+        cohElem.pid = czmPid;
+        cohElem.type = ElementType::HEX8;
+
+        // Bottom face: original nodes
+        cohElem.nodeIds[0] = shell.nodeIds[0];
+        cohElem.nodeIds[1] = shell.nodeIds[1];
+        cohElem.nodeIds[2] = shell.nodeIds[2];
+        cohElem.nodeIds[3] = shell.nodeIds[3];
+
+        // Top face: duplicated nodes
+        auto it0 = origToBottomNode.find(shell.nodeIds[0]);
+        auto it1 = origToBottomNode.find(shell.nodeIds[1]);
+        auto it2 = origToBottomNode.find(shell.nodeIds[2]);
+        auto it3 = origToBottomNode.find(shell.nodeIds[3]);
+
+        cohElem.nodeIds[4] = (it0 != origToBottomNode.end()) ? it0->second : shell.nodeIds[0];
+        cohElem.nodeIds[5] = (it1 != origToBottomNode.end()) ? it1->second : shell.nodeIds[1];
+        cohElem.nodeIds[6] = (it2 != origToBottomNode.end()) ? it2->second : shell.nodeIds[2];
+        cohElem.nodeIds[7] = (it3 != origToBottomNode.end()) ? it3->second : shell.nodeIds[3];
+
+        addedElements_.push_back(cohElem);
+    }
+
+    // CZM keywords
+    std::string partBlock = formatPartBlock(czmPid, czmSecid, czmMid, "CZM_DualOffset");
+    std::string sectionBlock = formatCzmSectionBlock(czmSecid);
+    std::string materialBlock = op.czmMaterialCard;
+
+    // Replace @MID@ placeholder
+    size_t pos = 0;
+    while ((pos = materialBlock.find("@MID@", pos)) != std::string::npos) {
+        materialBlock.replace(pos, 5, std::to_string(czmMid));
+        pos += std::to_string(czmMid).length();
+    }
+
+    addedKeywordBlocks_.push_back(partBlock);
+    addedKeywordBlocks_.push_back(sectionBlock);
+    addedKeywordBlocks_.push_back(materialBlock);
+
+    std::cout << "[INFO] Created " << sourceSurface.size()
+              << " CZM elements for dual offset\n";
+}
+
+void ModelAssembler::addContactHint(int sourcePid, int offsetPid) {
+    std::ostringstream contactHint;
+    contactHint << "$\n"
+                << "$ ==================== CONTACT DEFINITION REQUIRED ====================\n"
+                << "$ Dual offset prestress with contact mode\n"
+                << "$ Add contact definition manually:\n"
+                << "$\n"
+                << "$ *CONTACT_AUTOMATIC_SURFACE_TO_SURFACE\n"
+                << "$ $#     cid                                                         title\n"
+                << "$       999                                    DualOffset_Contact_Auto\n"
+                << "$ $#    ssid      msid     sstyp     mstyp    sboxid    mboxid       spr       mpr\n"
+                << "$  " << std::setw(8) << sourcePid
+                << std::setw(10) << offsetPid
+                << "         2         2         0         0         0         0\n"
+                << "$ $#      fs        fd        dc        vc       vdc    penchk        bt        dt\n"
+                << "$      0.00      0.00      0.00      0.00      0.00         0      0.00  1.00E+20\n"
+                << "$ ======================================================================\n"
+                << "$\n";
+
+    addedKeywordBlocks_.push_back(contactHint.str());
 }
 
 } // namespace KooRemapper

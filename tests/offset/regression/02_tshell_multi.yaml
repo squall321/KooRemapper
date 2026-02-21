@@ -1,0 +1,19 @@
+# Regression Test 2: Multi-layer TSHELL offset
+# Expected: 600 faces → 1200 TSHELL elements (2 layers)
+base_model: ../../../examples/arc30/arc30_flat.k
+output: 02_tshell_multi
+
+operations:
+  - type: offset
+    source_pid: 1
+    thickness: 1.5
+    num_layers: 2
+    element_type: tshell
+    offset_direction: +z
+    connection_mode: tied
+    new_pid: 11
+    part_title: "Regression_TShell_Multi"
+    material_card: |
+      *MAT_ELASTIC
+      $#     mid        ro         e        pr
+           @MID@       1.5      9000       0.28

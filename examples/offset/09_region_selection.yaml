@@ -1,0 +1,53 @@
+# Example 09: Region Selection (Bounding Box Filter)
+# Purpose: Offset only specific regions using bounding box filter
+# Features: Phase 3 enhancement - selective offset by region
+
+base_model: ../arc30/arc30_flat.k
+output: 09_region_result
+
+operations:
+  - type: offset
+    source_pid: 1
+
+    # Element configuration
+    element_type: solid
+    thickness: 1.0
+    num_layers: 1
+
+    # Direction
+    offset_direction: +z
+
+    # Advanced Feature - KEY FEATURE
+    # Region selection: Bounding box filter
+    bbox_xmin: -8.0                    # Only offset elements with centroid
+    bbox_xmax: 8.0                     # inside this bounding box
+    bbox_ymin: -15.0                   # Result: 580 → ~82 elements (90% reduction)
+    bbox_ymax: 15.0
+    # bbox_zmin and bbox_zmax can also be specified
+
+    # Connection
+    connection_mode: tied
+
+    # New part IDs
+    new_pid: 10
+    part_title: "Region_Offset"
+
+    # Material card
+    material_card: |
+      *MAT_ELASTIC
+      $#     mid        ro         e        pr
+           @MID@       2.0     12000       0.25
+
+# Note: Region selection options:
+#   1. Bounding box (used above):
+#      bbox_xmin, bbox_xmax, bbox_ymin, bbox_ymax, bbox_zmin, bbox_zmax
+#
+#   2. Node ID range:
+#      node_id_min: 1
+#      node_id_max: 100
+#
+#   3. Element ID range:
+#      element_id_min: 1
+#      element_id_max: 200
+#
+#   All filters use AND logic (all conditions must be satisfied)

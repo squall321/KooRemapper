@@ -1,0 +1,19 @@
+# Regression Test 5: Contact connection mode
+# Expected: 600 HEX8, separate node set (no sharing)
+base_model: ../../../examples/arc30/arc30_flat.k
+output: 05_contact_mode
+
+operations:
+  - type: offset
+    source_pid: 1
+    thickness: 1.2
+    num_layers: 1
+    element_type: solid
+    offset_direction: +z
+    connection_mode: contact
+    new_pid: 14
+    part_title: "Regression_Contact_Layer"
+    material_card: |
+      *MAT_ELASTIC
+      $#     mid        ro         e        pr
+           @MID@       1.9     11000       0.26

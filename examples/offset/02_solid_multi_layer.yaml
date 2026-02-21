@@ -1,0 +1,36 @@
+# Example 02: Multi-Layer Solid Offset
+# Purpose: Create multiple layers of solid elements (useful for composite materials)
+# Features: HEX8 solid, 3 layers, -z direction (downward extrusion)
+
+base_model: ../arc30/arc30_flat.k
+output: 02_multi_layer_result
+
+operations:
+  - type: offset
+    source_pid: 1
+
+    # Element configuration
+    element_type: solid
+    thickness: 3.0                     # Total thickness: 3.0 mm
+    num_layers: 3                      # Divided into 3 layers (1.0 mm each)
+
+    # Direction
+    offset_direction: +z               # Positive Z-axis (upward)
+
+    # Connection
+    connection_mode: tied
+
+    # New part IDs
+    new_pid: 10
+    part_title: "MultiLayer_Offset"
+
+    # Material card
+    material_card: |
+      *MAT_ELASTIC
+      $#     mid        ro         e        pr
+           @MID@       2.0     12000       0.25
+
+# Note: For different materials per layer, use multiple offset operations:
+#   - Layer 1: offset from PID 1 → PID 10
+#   - Layer 2: offset from PID 10 → PID 11 (different material)
+#   - Layer 3: offset from PID 11 → PID 12 (different material)

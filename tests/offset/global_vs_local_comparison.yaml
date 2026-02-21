@@ -1,0 +1,38 @@
+# Test: Global vs Local Normal Comparison
+# This creates two offset layers to compare the difference
+
+base_model: ../../examples/arc30/arc30_flat.k
+output: comparison_result
+
+operations:
+  # Layer 1: Global normal (average)
+  - type: offset
+    source_pid: 1
+    thickness: 0.5
+    num_layers: 1
+    element_type: solid
+    offset_direction: +normal
+    use_local_normals: false  # Global average
+    connection_mode: tied
+    new_pid: 10
+    part_title: "Global_Normal_Layer"
+    material_card: |
+      *MAT_ELASTIC
+      $#     mid        ro         e        pr
+           @MID@       2.0     12000       0.25
+
+  # Layer 2: Local normal (per-node averaged)
+  - type: offset
+    source_pid: 10  # Offset from previous layer
+    thickness: 0.5
+    num_layers: 1
+    element_type: solid
+    offset_direction: +normal
+    use_local_normals: true  # Local per-node
+    connection_mode: tied
+    new_pid: 11
+    part_title: "Local_Normal_Layer"
+    material_card: |
+      *MAT_ELASTIC
+      $#     mid        ro         e        pr
+           @MID@       2.0     12000       0.25

@@ -1,0 +1,42 @@
+# Example 07: Contact Mode Connection
+# Purpose: Create separate surfaces with duplicated nodes (for contact definition)
+# Features: Contact connection mode, node duplication, no tied connection
+
+base_model: ../arc30/arc30_flat.k
+output: 07_contact_result
+
+operations:
+  - type: offset
+    source_pid: 1
+
+    # Element configuration
+    element_type: solid
+    thickness: 1.0
+    num_layers: 1
+
+    # Direction
+    offset_direction: +z
+
+    # Connection - KEY FEATURE
+    connection_mode: contact           # Duplicate nodes at interface
+                                       # Original and offset surfaces are separate
+                                       # User must define *CONTACT afterward
+
+    # New part IDs
+    new_pid: 10
+    part_title: "Contact_Offset"
+
+    # Material card
+    material_card: |
+      *MAT_ELASTIC
+      $#     mid        ro         e        pr
+           @MID@       2.0     12000       0.25
+
+# Note: Contact mode is useful for:
+#   - Surfaces that may separate during simulation
+#   - Frictional sliding interfaces
+#   - Impact/crash analysis
+#
+# After this operation, you need to add:
+#   *CONTACT_AUTOMATIC_SURFACE_TO_SURFACE
+#   with slave/master part IDs (original=1, offset=10)

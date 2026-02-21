@@ -1,0 +1,27 @@
+# Regression Test 4: CZM connection mode
+# Expected: 600 HEX8 + 600 cohesive elements (ELFORM 20)
+base_model: ../../../examples/arc30/arc30_flat.k
+output: 04_czm_mode
+
+operations:
+  - type: offset
+    source_pid: 1
+    thickness: 0.8
+    num_layers: 1
+    element_type: solid
+    offset_direction: +z
+    connection_mode: czm
+    czm_part_id: 900
+    czm_mid: 901
+    new_pid: 13
+    part_title: "Regression_CZM_Layer"
+    material_card: |
+      *MAT_ELASTIC
+      $#     mid        ro         e        pr
+           @MID@       2.0     10000       0.27
+    czm_material_card: |
+      *MAT_COHESIVE_MIXED_MODE
+      $#     mid        ro      roflg       intfail
+               901       2.0         1            0
+      $#       en       et      gnc       gtc      xmu       t       s
+              1000      500       10        10      0.3       1.0     1.0

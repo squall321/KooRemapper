@@ -1,0 +1,52 @@
+# Example 10: Variable Thickness (Formula-Based)
+# Purpose: Apply position-dependent thickness using mathematical formula
+# Features: Phase 4 enhancement - formula-based variable thickness
+
+base_model: ../arc30/arc30_flat.k
+output: 10_variable_thickness_result
+
+operations:
+  - type: offset
+    source_pid: 1
+
+    # Element configuration
+    element_type: solid
+    thickness: 1.0                     # Base thickness (fallback value)
+    num_layers: 1
+
+    # Direction
+    offset_direction: +z
+
+    # Advanced Feature - KEY FEATURE
+    thickness_formula: 1.0 + 0.02*x    # Formula for variable thickness
+                                       # Variables: x, y, z (node coordinates)
+                                       # Example: Linear variation from 0.8 to 1.2
+
+    # Connection
+    connection_mode: tied
+
+    # New part IDs
+    new_pid: 10
+    part_title: "VarThickness_Offset"
+
+    # Material card
+    material_card: |
+      *MAT_ELASTIC
+      $#     mid        ro         e        pr
+           @MID@       2.0     12000       0.25
+
+# Note: Formula examples:
+#   Linear variation:
+#     thickness_formula: 1.0 + 0.01*x
+#
+#   Radial variation:
+#     thickness_formula: 1.0 + 0.5*(1.0 - (x*x + y*y)/400.0)
+#
+#   Stepped variation:
+#     thickness_formula: (x > 0.0) ? 1.5 : 1.0
+#
+#   Complex function:
+#     thickness_formula: 1.0 + 0.2*sin(x/10.0)*cos(y/10.0)
+#
+# Supported functions: sin, cos, tan, exp, log, sqrt, abs
+# Supported operators: +, -, *, /, ^, >, <, ==, ?, :

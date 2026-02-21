@@ -1,0 +1,20 @@
+# Offset 예제 2: TShell 다층 offset
+# 용도: Through-thickness 변형 해석
+base_model: ../arc30/arc30_flat.k
+output: tshell_multi_result
+
+operations:
+  - type: offset
+    source_pid: 1
+    thickness: 2.0
+    num_layers: 2
+    element_type: tshell
+    offset_direction: +normal
+    connection_mode: tied
+    new_pid: 11
+    part_title: "TShell Multi-Layer"
+    shell_thickness: 1.0
+    material_card: |
+      *MAT_ELASTIC
+      $#     mid        ro         e        pr
+           @MID@       1.5      5000       0.35

@@ -3,7 +3,10 @@
 #include "assembly/AssemblyConfig.h"
 #include "core/Mesh.h"
 #include "core/Vector3D.h"
+#include "core/ShellElement.h"
 #include "analysis/ElementAnalyzer.h"
+#include "analysis/StressTensor.h"
+#include "analysis/MaterialModel.h"
 #include <vector>
 #include <set>
 #include <map>
@@ -14,13 +17,15 @@ namespace KooRemapper {
 
 class ModelAssembler {
 public:
-    ModelAssembler() : maxNodeId_(0), maxElementId_(0),
+    ModelAssembler() : maxNodeId_(0), maxElementId_(0), maxShellElementId_(0),
                        maxPartId_(0), maxSectionId_(0), maxMaterialId_(0),
                        replacedParts_(0), squeezedParts_(0), restackedParts_(0), bentParts_(0), indentedParts_(0), formStrainParts_(0),
                        tet10ConvertedCount_(0), hex20ConvertedCount_(0),
                        quad8ConvertedCount_(0), tria6ConvertedCount_(0),
                        tet10Elform_(17),
-                       dynamicRelaxation_(false), dynainEmbed_(false) {}
+                       warpageParts_(0),
+                       dynamicRelaxation_(false), dynainEmbed_(false),
+                       warnedExtrapolation_(false), deflSign_(1.0) {}
 
     bool loadBaseModel(const std::string& filename);
     bool applyReplace(const ReplaceOperation& op, double E, double nu,
@@ -36,6 +41,9 @@ public:
     bool applyElform(const ElformOperation& op);
     bool applyDisconnect(const DisconnectOperation& op);
     bool applyIGA(const IGAOperation& op, const std::string& outputPrefix);
+    bool applyWarpage(const WarpageOperation& op, double E, double nu,
+                      const std::string& configDir);
+    bool applyOffset(const OffsetOperation& op, double E, double nu);
     bool writeOutput(const std::string& outputPrefix);
 
     const std::vector<ElementResult>& getAccumulatedResults() const {
@@ -58,6 +66,7 @@ public:
     int getAddedNodeCount() const { return static_cast<int>(addedNodes_.size()); }
     int getAddedElementCount() const { return static_cast<int>(addedElements_.size()); }
     int getIGACount() const { return igaCount_; }
+    int getWarpagePartCount() const { return warpageParts_; }
     void setDynamicRelaxation(bool enabled) { dynamicRelaxation_ = enabled; }
     void setDynainEmbed(bool enabled) { dynainEmbed_ = enabled; }
 
@@ -74,7 +83,8 @@ private:
     };
     struct AddedShellElement {
         int id; int pid;
-        std::array<int, 4> nodeIds;
+        std::array<int, 8> nodeIds;  // 8 for TSHELL, use only 4 for regular shell
+        int elform = 2;  // Default QUAD4/TRIA3
     };
 
     // Base model
@@ -98,6 +108,7 @@ private:
     // ID management
     int maxNodeId_;
     int maxElementId_;
+    int maxShellElementId_;
     int maxPartId_;
     int maxSectionId_;
     int maxMaterialId_;
@@ -113,6 +124,14 @@ private:
     int hex20ConvertedCount_;
     int quad8ConvertedCount_;
     int tria6ConvertedCount_;
+    int warpageParts_;
+
+    // Element stresses (for bend, indent, warpage prestress modes)
+    std::map<int, StressTensor> elementStresses_;
+
+    // Warpage state
+    mutable bool warnedExtrapolation_;
+    mutable double deflSign_;
 
     // Quadratic element conversion data
     std::map<int, std::array<int, 10>> tet10Elements_;  // elemId → 10-node connectivity
@@ -158,10 +177,113 @@ private:
     std::string generateIGAContent(int newId, int newMid, int fepid,
         double xmin, double xmax, double ymin, double ymax, double zmin, double zmax,
         double rr, double rs, double rt,
+        double offR, double offS, double offT,
         int ir, int styp, double tollg,
         int pr, int ps, int pt,
         int nisr, int niss, int nist,
         const std::string& matBlock) const;
+
+    // Warpage helpers
+    bool validateWarpageOperation(const WarpageOperation& op, const std::string& configDir);
+    void calculateWarpagePrestress(const WarpageOperation& op,
+                                   const class WarpageGrid& grid,
+                                   double dataBboxXmin, double dataBboxXmax,
+                                   double dataBboxYmin, double dataBboxYmax,
+                                   double unitScale,
+                                   int axis1, int axis2, int deflAxis,
+                                   double E, double nu);
+    double getUnitScale(const std::string& unit) const;
+    void parseAxes(const std::string& plane,
+                  const std::string& deflAxis,
+                  int& axis1, int& axis2, int& deflection) const;
+    double getElementThickness(const Element& elem) const;
+    void validateWarpageResults(const WarpageOperation& op, const class WarpageGrid& grid) const;
+    void exportStressDistribution(const std::string& filename) const;
+    Vector3D getNodePosition(int nid) const;
+    double getShellThickness(int pid) const;
+
+    // Offset operation helpers
+    void extractSourceSurface(int sourcePid, std::vector<ShellElement>& surfaceShells);
+    Vector3D parseOffsetDirection(const std::string& direction,
+                                  const std::vector<ShellElement>& surface);
+    void extrudeToSolid(const std::vector<ShellElement>& surface,
+                       const Vector3D& direction,
+                       double thickness, int numLayers,
+                       int newPid, int newSecid);
+    // Overload for dual offset prestress (returns elements)
+    void extrudeToSolid(const std::vector<ShellElement>& surface,
+                       const Vector3D& direction,
+                       double thickness, int numLayers,
+                       int newPid, int newSecid,
+                       std::vector<AddedElement>& outElements);
+    // Overload for local normals (per-node directions)
+    void extrudeToSolid(const std::vector<ShellElement>& surface,
+                       const std::map<int, Vector3D>& perNodeDirections,
+                       double thickness, int numLayers,
+                       int newPid, int newSecid);
+    // Overload for variable thickness (per-node thickness + optional directions)
+    void extrudeToSolid(const std::vector<ShellElement>& surface,
+                       const Vector3D& direction,
+                       const std::map<int, double>& perNodeThickness,
+                       int numLayers,
+                       int newPid, int newSecid);
+    // Overload for BOTH local normals AND variable thickness
+    void extrudeToSolid(const std::vector<ShellElement>& surface,
+                       const std::map<int, Vector3D>& perNodeDirections,
+                       const std::map<int, double>& perNodeThickness,
+                       int numLayers,
+                       int newPid, int newSecid);
+    void extrudeToTShell(const std::vector<ShellElement>& surface,
+                        const Vector3D& direction,
+                        double thickness, int numLayers,
+                        int newPid, int newSecid);
+    void createOffsetShell(const std::vector<ShellElement>& surface,
+                          const Vector3D& direction,
+                          double offset,
+                          int newPid, int newSecid,
+                          double shellThickness);
+    Vector3D computeElementNormal(const ShellElement& shell);
+    Vector3D computeShellNormal(const ShellElement& shell);
+    Vector3D computeAverageNormal(const std::vector<ShellElement>& shells);
+    std::map<int, Vector3D> computePerNodeNormals(const std::vector<ShellElement>& shells);
+    std::map<int, double> computePerNodeThickness(const std::vector<ShellElement>& surface,
+                                                   const std::string& formula, double baseThickness);
+    void filterSurfaceByRegion(std::vector<ShellElement>& surface, const RegionSelection& region);
+    Vector3D computeFaceCentroid(const Element& elem, int faceIndex);
+    Vector3D computeElementCenter(const Element& elem) const;
+    Vector3D computeOutwardNormal(const Element& elem, int faceIndex);
+    bool isTria3(const ShellElement& shell);
+    bool isElementInverted(const Element& elem);
+    double computeJacobian(const Element& elem, double r, double s, double t);
+    int getNextPartId();
+    int getNextSectionId();
+    int getNextMaterialId();
+    void insertMaterialCard(const std::string& materialCard, int actualMid);
+    void createPartKeyword(int pid, int secid, int mid, const std::string& title);
+    void createSectionSolid(int secid);
+    void createSectionTShell(int secid, double thickness, int elform);
+    void createSectionShell(int secid, double thickness);
+    std::string formatPartBlock(int pid, int secid, int mid, const std::string& title);
+    std::string formatCzmSectionBlock(int secid);
+    std::string formatSectionBlock(int secid);
+    std::string formatTshellSectionBlock(int secid, double thickness);
+    std::string formatShellSectionBlock(int secid, double thickness);
+    void applyConnectionTied(const std::vector<ShellElement>& sourceSurface,
+                            const std::vector<AddedElement>& offsetElements);
+    void applyConnectionCZM(const std::vector<ShellElement>& sourceSurface,
+                           std::vector<AddedElement>& offsetElements,
+                           const OffsetOperation& op);
+    void applyConnectionContact(const std::vector<ShellElement>& sourceSurface,
+                               std::vector<AddedElement>& offsetElements,
+                               int sourcePid, int newPid);
+    bool applyDualOffsetPrestress(const OffsetOperation& op, double E, double nu);
+    void calculateDualOffsetPrestress(const std::vector<AddedElement>& refElements,
+                                     const std::map<int, Vector3D>& deformedPositions,
+                                     const MaterialModel& mat);
+    void createCzmElementsForDualOffset(const std::vector<ShellElement>& sourceSurface,
+                                       const std::map<int, int>& origToBottomNode,
+                                       const OffsetOperation& op);
+    void addContactHint(int sourcePid, int offsetPid);
 
     // Utility
     std::set<int> getPartElementIds(int pid) const;

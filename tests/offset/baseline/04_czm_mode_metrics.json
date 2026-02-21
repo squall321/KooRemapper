@@ -1,0 +1,10 @@
+{
+    "czm_elements":  580,
+    "k_solid_sections":  1,
+    "nodes_added":  1164,
+    "elements_added":  1160,
+    "num_layers":  1,
+    "has_dynain":  false,
+    "solid_elements":  580,
+    "has_czm_material":  true
+}
