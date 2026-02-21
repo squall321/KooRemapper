@@ -1,7 +1,7 @@
 # KooRemapper Offset Operation - Implementation Status
 
-**Date**: 2026-02-21
-**Version**: 1.1.0
+**Date**: 2026-02-22
+**Version**: 1.1.0 (Complete)
 **Focus**: Offset Operation Complete Status
 
 ---
@@ -32,7 +32,7 @@ The offset operation is **functionally complete** with all core features (Phase 
 | Multi-layer (num_layers) | ✅ | Node-shared stack |
 | Direction: ±x/±y/±z | ✅ | Fixed global directions |
 | Direction: +normal | ✅ | Adaptive surface normal |
-| Direction: -normal | ⚠️ | **Known Issue** (negative Jacobian) |
+| Direction: -normal | ✅ | **FIXED v1.1.0** (layer index swap) |
 | Connection: tied | ✅ | Node sharing |
 | Connection: czm | ✅ | Cohesive zone model |
 | Connection: contact | ✅ | Separate nodes with contact template |
@@ -79,20 +79,31 @@ The offset operation is **functionally complete** with all core features (Phase 
 
 ## Known Issues & Limitations
 
-### 1. -normal Direction Negative Jacobian ⚠️
+### 1. -normal Direction ✅ **FIXED**
 
-**Status**: Known bug
-**Symptom**: Inward offset (-normal) produces negative Jacobian
-**Root Cause**: Side surfaces (perpendicular to offset) don't flip winding correctly
-**Workaround**: Use fixed directions (-x, -y, -z) instead of -normal
-**Attempted Fix**: Modified all 5 extrudeToSolid overloads with alignment-based winding flip ❌ FAILED
-**Future**: Requires fundamental rethinking of flip logic or surface extraction
+**Status**: Fixed in v1.1.0 (2026-02-21)
+**Previous Issue**: Inward offset (-normal) produced negative Jacobian
+**Root Cause**: Bottom/top layer assignment reversed for negative directions
+**Solution**: Layer index swapping for negative directions (simple fix after complex attempts failed)
+**Implementation**: Check direction sign → swap bottom/top layer indices in node assignment
 
 **Test Results**:
-- test_negative_normal.yaml: ❌ 580 elements with negative Jacobian (min: -1.18511)
-- test_negative_z.yaml: ❌ 1200 elements with negative Jacobian (min: -1.25)
+- test_negative_normal.yaml: ✅ All elements valid (Jacobian > 0)
+- test_negative_z.yaml: ✅ All elements valid (Jacobian > 0)
+- All negative directions (-normal, -x, -y, -z) now work correctly
 
-### 2. Shell Source Limitation ⚠️
+### 2. Multi-Material Layers ✅ **IMPLEMENTED**
+
+**Status**: Implemented in v1.1.0 (2026-02-21)
+**Feature**: Different materials per layer in single offset operation
+**YAML Syntax**: `material_cards: [{MAT_1}, {MAT_2}, {MAT_3}]` array
+**Implementation**: Sequential layer creation with per-layer PID/MID auto-assignment
+**Example**: 3-layer composite (elastic/plastic/elastic) in one operation
+
+**Test Results**:
+- test_multi_material.yaml: ✅ 3 layers with 3 different materials (PID 10/11/12, MID auto-assigned)
+
+### 3. Shell Source Limitation ⚠️
 
 **Status**: Limited support
 **Issue**: Shell elements created in operation N cannot be used as source_pid in operation N+1
@@ -131,37 +142,17 @@ The offset operation is **functionally complete** with all core features (Phase 
 
 ### 1. WEDGE6 Support 🔜
 
-**Priority**: Medium
-**Benefit**: Proper TET4 offset (triangle → prism)
+**Priority**: Low (TET4 already works via degenerate HEX8)
+**Benefit**: Proper TET4 offset quality (triangle → prism vs degenerate quad)
 **Complexity**: High (new element type, node numbering, extrusion logic)
+**Current Status**: TET4 offset works but creates degenerate HEX8 (poor quality warnings acceptable)
 **Scope**:
 - Add ElementType::WEDGE6 enum
 - Implement 6-node storage as degenerate HEX8: n1,n2,n3,n3,n4,n5,n6,n6
 - Modify extractSourceSurface for triangle detection
 - Create extrudeToWedge function
 - Update quality validation for WEDGE6
-
-### 2. Multi-Material Single Operation 🔜
-
-**Priority**: Low
-**Benefit**: Different materials per layer in one operation
-**Complexity**: Medium (config array, parser, part/material management)
-**Current Workaround**: Multiple offset operations with different material_card (fully functional)
-**Scope**:
-- OffsetConfig: material_card → std::vector<std::string> materialCards
-- YAML parser: material_cards array
-- Per-layer PID/MID assignment
-- Example: Layer 1 = elastic, Layer 2 = plastic, Layer 3 = elastic
-
-### 3. -normal Direction Fix 🔜
-
-**Priority**: Medium
-**Benefit**: Reliable inward offset
-**Complexity**: High (requires algorithm redesign)
-**Investigation Needed**:
-- Why side surfaces with alignment ≈ 0 don't flip
-- Alternative winding determination (not just alignment check)
-- Consider per-face flip decision instead of per-element
+- *ELEMENT_SOLID keyword writer for WEDGE6 format
 
 ---
 
@@ -220,8 +211,9 @@ All 12 examples created, tested, and documented in `examples/offset/`:
 ### Automated Tests Created
 
 - **test_tet4_offset.yaml** - TET4 support verification ✅ (quality warnings acceptable)
-- **test_negative_normal.yaml** - -normal bug validation ❌ (confirmed bug)
-- **test_negative_z.yaml** - -z bug validation ❌ (confirmed bug)
+- **test_negative_normal.yaml** - -normal direction test ✅ (all elements valid, Jacobian > 0)
+- **test_negative_z.yaml** - -z direction test ✅ (all elements valid, Jacobian > 0)
+- **test_multi_material.yaml** - Multi-material layers ✅ (3 layers, 3 materials, PID 10/11/12)
 - **test_shell_source.yaml** - Shell source limitation ⚠️ (confirmed limitation)
 
 ### Quality Metrics (from 09_region_selection.yaml)
@@ -245,13 +237,16 @@ All 12 examples created, tested, and documented in `examples/offset/`:
 - `7e17c73` - feat: Add disconnect operation (full/czm/mefem) for conformal mesh decohesion
 - `21eaced` - feat: Add elform operation for unified ELFORM change (upgrade/downgrade/same-order)
 
-### Pending Commit
+### Latest Commits (v1.1.0 - Offset Complete)
 
-- All offset examples (12 files)
-- README.md with comprehensive documentation
-- Guide updates (Phase 2-4 features + known issues)
-- Test files for bug validation
-- This STATUS.md
+**2026-02-22**: Multi-material + -normal fix
+- Multi-material layer implementation (`material_cards` array)
+- -normal direction fix (layer index swapping)
+- AssemblyConfigReader.cpp: YAML parser for material_cards list
+- ModelAssembler.cpp: `applyMultiMaterialOffset()` function
+- test_multi_material.yaml: 3-layer composite validation
+- README.md: Updated Known Issues section (-normal FIXED)
+- STATUS.md: Complete status update with new features
 
 ---
 
@@ -260,17 +255,16 @@ All 12 examples created, tested, and documented in `examples/offset/`:
 ### For Users
 
 1. **Start with examples**: Begin with `01_basic_solid_tied.yaml` and progress to advanced
-2. **Use HEX8 sources**: Best quality; avoid TET4 if possible
-3. **Avoid -normal**: Use fixed directions (-x, -y, -z) for inward offset
+2. **Use HEX8 sources**: Best quality; avoid TET4 if possible (degenerate elements)
+3. **All directions work**: ±normal, ±x, ±y, ±z all produce valid elements (v1.1.0+)
 4. **Quality optimization**: Combine `+normal` + `use_local_normals: true` + region filter
-5. **Multi-material**: Use multiple offset operations (current workaround is robust)
+5. **Multi-material**: Use `material_cards: [{MAT_1}, {MAT_2}]` for composite layers
 
 ### For Developers
 
-1. **-normal fix**: Priority investigation needed (complex algorithm issue)
-2. **WEDGE6**: Consider for v1.2.0 (significant quality benefit for TET4 users)
-3. **Shell source**: Requires operation state refactoring (low priority, workaround exists)
-4. **Multi-material**: Nice-to-have but not essential (workaround is simple)
+1. **WEDGE6**: Consider for future release (quality benefit for TET4 users, but not blocking)
+2. **Shell source**: Requires operation state refactoring (low priority, workaround exists)
+3. **Code maintenance**: All core features complete, focus on bug fixes and optimization
 
 ---
 
@@ -286,7 +280,7 @@ The offset operation is **production-ready** with comprehensive features:
 - ⚠️ Known issues documented with workarounds
 - 🔜 Future enhancements identified
 
-**Bottom Line**: Users can confidently use offset for all supported use cases (solid/tshell/shell, tied/czm/contact, multi-layer, curved surfaces with local normals, region selection, variable thickness). Known limitations have practical workarounds.
+**Bottom Line**: Users can confidently use offset for all supported use cases (solid/tshell/shell, tied/czm/contact, multi-layer, multi-material, curved surfaces with local normals, region selection, variable thickness). All directions (±normal, ±x/y/z) work correctly. Known limitations (TET4 quality, shell source) have practical workarounds.
 
 ---
 

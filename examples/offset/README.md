@@ -60,9 +60,12 @@ Get-ChildItem *.yaml | ForEach-Object {
 
 ## Known Issues
 
-### 1. -normal Direction (Negative Jacobian)
-**Status**: Known bug
-**Workaround**: Use fixed directions (`-x`, `-y`, `-z`) instead of `-normal`
+### 1. -normal Direction ✅ **FIXED**
+
+**Status**: Fixed in v1.1.0+ (2026-02-21)
+**Solution**: Layer index swapping for negative directions
+**Previous Issue**: Negative Jacobian errors
+**Note**: All negative directions (-normal, -x, -y, -z) now work correctly
 
 ### 2. Self-Intersection with +normal
 **Status**: Expected behavior on concave surfaces
@@ -87,16 +90,18 @@ Get-ChildItem *.yaml | ForEach-Object {
 ## Future Enhancements
 
 1. **WEDGE6 Support**: 6-node prism elements for proper TET4 offset (triangle → prism extrusion)
-2. **Multi-Material Single Operation**: Different materials per layer in one operation (currently requires multiple operations)
-3. **-normal Direction Fix**: Resolve negative Jacobian issue with inward offset
+   - Current: TET4 offset works but creates degenerate HEX8 (poor quality)
+   - Future: Proper WEDGE6 would improve element quality significantly
 
 ## Tips & Best Practices
 
 1. **Start Simple**: Begin with `01_basic_solid_tied.yaml`
 2. **Choose Right Direction**: Flat surfaces → use ±x/±y/±z; Curved → use +normal + local normals
 3. **Quality Optimization**: Combine `+normal` + `use_local_normals: true` + region filter
-4. **Multi-Material**: Use multiple offset operations with different `material_card` (single-operation support is planned)
+4. **Multi-Material**: Use `material_cards` array for different materials per layer (v1.1.0+)
+   - Example: `material_cards: [{MAT_ELASTIC}, {MAT_PLASTIC}, {MAT_ELASTIC}]`
 5. **TET4 Meshes**: Expect poor quality warnings; use HEX8 source for best results
+6. **Negative Directions**: -normal, -x, -y, -z all work correctly (fixed in v1.1.0+)
 
 ## Parameter Reference
 
