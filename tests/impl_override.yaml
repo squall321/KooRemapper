@@ -1,0 +1,11 @@
+model: tests/implicit_test.k
+output: tests/implicit_override_result.k
+mode: static
+level: 2
+endtime: 1.0
+# Fine-grained overrides
+dctol: 0.0001
+ectol: 0.001
+dt0: 0.0005
+dtmax: 0.05
+nsolvr: -2

@@ -1,0 +1,12 @@
+base_model: iga_multi_test.k
+output: iga_multi_out
+
+operations:
+  - type: iga
+    targets:
+      - target_pid: 1
+        element_size: 0.5
+      - target_pid: 2
+        element_size: 1.0
+        element_size_r: 0.3
+        element_size_s: 0.3

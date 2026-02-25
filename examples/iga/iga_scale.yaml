@@ -1,0 +1,34 @@
+# iga_scale.yaml
+# bbox_scale 기반 IGA offset 예제
+#
+# 대상: block_2x2x1.k
+#   PID 1 (하부): bbox_scale=1.5 → 각 방향 +25% 확장 (균일)
+#   PID 2 (상부): 방향별 개별 scale
+#     r: bbox_scale_r=2.0 → r방향 +50% (xmin-=10, xmax+=10)
+#     s: bbox_scale_s=1.3 → s방향 +15% (ymin-=1.5, ymax+=1.5)
+#     t: bbox_scale_t=3.0 → t방향 +200% (zmin-=5.0, zmax+=5.0, off=(3-1)/2×5)
+#
+# PID 1 bbox: 20×10×5 → offset = 0.25×[20,10,5] = [5.0,2.5,1.25]
+# PID 2 bbox: 20×10×5 → offset = [0.5×20, 0.15×10, 1.0×5]/2 = [10,1.5,2.5]
+#
+# 출력 파일:
+#   iga_scale_result.k             메인 (원본 FE + *INCLUDE 2개)
+#   iga_scale_result_iga_p1.k      PID 1 IGA 파일 (균일 scale)
+#   iga_scale_result_iga_p2.k      PID 2 IGA 파일 (축별 scale)
+
+base_model: block_2x2x1.k
+output: iga_scale_result
+
+operations:
+  - type: iga
+    targets:
+      - target_pid: 1
+        element_size: 4.0
+        bbox_scale: 1.5         # 균일: IGA 박스 = 파트 bbox 각 변 × 1.5 (양측 +25%)
+
+      - target_pid: 2
+        element_size: 3.0
+        bbox_scale_r: 2.0       # r(x)방향: bbox의 50% 만큼 양측 확장
+        bbox_scale_s: 1.3       # s(y)방향: bbox의 15% 만큼 양측 확장
+        bbox_scale_t: 3.0       # t(z)방향: bbox의 100% 만큼 양측 확장
+        ir: 1

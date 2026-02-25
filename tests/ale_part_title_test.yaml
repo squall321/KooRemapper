@@ -1,0 +1,7 @@
+# Test: *PART_TITLE variant parsing
+model:  ale_part_title_model.k
+output: ale_part_title_result.k
+
+ale_parts:
+  - pid: 1
+    material: air

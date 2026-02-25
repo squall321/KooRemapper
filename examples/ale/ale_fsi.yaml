@@ -1,0 +1,13 @@
+# ale_fsi.yaml — FSI 커플링 예제
+# air + water ALE 파트 + Lagrangian FSI 커플링
+model:  explicit.k
+output: ale_fsi.k
+
+ale_parts:
+  - pid: 3
+    material: air
+  - pid: 4
+    material: water
+
+# Lagrangian 파트와 FSI 커플링
+fsi_pids: [1, 2]

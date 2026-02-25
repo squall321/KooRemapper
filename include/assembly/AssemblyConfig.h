@@ -203,8 +203,15 @@ struct OffsetOperation {
     double shellOffset = -1.0;    // -1 = use thickness/2 (mid-plane)
 };
 
+struct MatswapOperation {
+    std::string bundleFile;    // path to bundle .k file
+    std::vector<int> pids;    // specific PIDs (empty = swapAll)
+    std::vector<int> mids;    // target by MID: swap MAT+HOURGLASS only (no SECTION)
+    bool swapAll = false;     // true = swap all parts in model
+};
+
 struct AssemblyOperation {
-    enum Type { REPLACE, SQUEEZE, RESTACK, BEND, INDENT, FORMSTRAIN, TET10_CONVERT, REFINE, ELFORM, DISCONNECT, IGA, WARPAGE, OFFSET };
+    enum Type { REPLACE, SQUEEZE, RESTACK, BEND, INDENT, FORMSTRAIN, TET10_CONVERT, REFINE, ELFORM, DISCONNECT, IGA, WARPAGE, OFFSET, MATSWAP };
     Type type;
     ReplaceOperation replace;
     SqueezeOperation squeeze;
@@ -219,6 +226,7 @@ struct AssemblyOperation {
     IGAOperation iga;
     WarpageOperation warpage;
     OffsetOperation offset;
+    MatswapOperation matswap;
 };
 
 struct AssemblyConfig {

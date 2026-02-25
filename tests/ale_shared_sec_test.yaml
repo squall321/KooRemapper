@@ -1,0 +1,7 @@
+# Test shared SECID detection
+model:  ale_shared_sec_model.k
+output: ale_shared_sec_result.k
+
+ale_parts:
+  - pid: 2
+    material: air

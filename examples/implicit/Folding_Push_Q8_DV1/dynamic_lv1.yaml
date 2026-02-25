@@ -1,0 +1,10 @@
+# KooRemapper implicit - Dynamic Level 1 (공격적)
+# 동적 해석 빠른 수렴 시도. 선형 동역학 모델.
+model: Folding_Push_Q8_DV1_AdvancedRubber.k
+output: Folding_Push_Q8_DV1_AdvancedRubber_dynamic_lv1.k
+mode: dynamic
+level: 1
+endtime: 1.0
+# IMASS=1, GAMMA=0.6, BETA=0.30 (Newmark 수치 감쇠)
+# NSOLVR=12(BFGS), ILIMIT=11, MAXREF=10, DCTOL=0.005, ECTOL=0.050
+# DT0=T/100, DTMAX=T/20  ※ dtmax: 오버라이드로 주파수 기준 조정 가능

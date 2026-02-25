@@ -1,0 +1,13 @@
+# KooRemapper implicit - Dynamic Level 3 (안정 / Stable)
+# 재료 비선형 포함 동적 해석. 반복 횟수 증가, 시간 스텝 축소.
+# IMASS=1, GAMMA=0.6/BETA=0.30 (Newmark 수치 감쇠)
+# DT 기준: dtmax ≤ 1/(10*f_max)  예) 500 Hz → dtmax: 0.0002
+# Usage: KooRemapper implicit dynamic_lv3.yaml
+model: explicit.k
+output: implicit_dyn_lv3.k
+mode: dynamic
+level: 3
+endtime: 0.1          # 실제 동적 사건 시간 (s) — 모델에 맞게 수정
+# NSOLVR=12(BFGS), ILIMIT=15, MAXREF=20
+# DCTOL=0.001, ECTOL=0.010, LSTOL=0.95
+# DT0=T/1000, DTMAX=T/200

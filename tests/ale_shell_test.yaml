@@ -1,0 +1,7 @@
+# Test: shell element warning
+model:  ale_shell_model.k
+output: ale_shell_result.k
+
+ale_parts:
+  - pid: 1
+    material: air

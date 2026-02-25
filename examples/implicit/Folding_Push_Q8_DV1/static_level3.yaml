@@ -1,0 +1,9 @@
+# KooRemapper implicit - Level 3 (안정 / Stable)
+# 재료 비선형 포함 모델. 반복 횟수 증가.
+model: Folding_Push_Q8_DV1_AdvancedRubber.k
+output: Folding_Push_Q8_DV1_AdvancedRubber_static_level3.k
+mode: static
+level: 3
+endtime: 1.0
+# NSOLVR=12(BFGS), ILIMIT=15, MAXREF=20, DCTOL=0.001, ECTOL=0.010, LSTOL=0.95
+# DT0=T/1000, DTMAX=T/200

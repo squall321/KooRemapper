@@ -1,0 +1,40 @@
+# ale_full.yaml — 전체 옵션 레퍼런스
+# 모든 옵션을 명시적으로 지정한 예제
+model:  explicit.k
+output: ale_full.k
+
+# ── ALE 파트 + 물성 ──────────────────────────────────
+ale_parts:
+  - pid: 3
+    material: air         # 프리셋: air/nitrogen/argon
+  - pid: 4
+    material: water       # 프리셋: water/electrolyte/gasoline/oil/coolant/resin/tim/silicone
+  - pid: 5
+    material: tnt         # 프리셋: tnt/c4
+  # - pid: 6
+  #   material: custom_mat.k   # 커스텀 번들 파일 경로도 가능
+
+# ── FSI 커플링 대상 ──────────────────────────────────
+fsi_pids: [1, 2]
+
+# ── ALE ELFORM ────────────────────────────────────────
+elform: 11    # 11=Multi-Material ALE (권장), 12=Single Material+Void
+
+# ── *CONTROL_ALE 옵션 ────────────────────────────────
+dct:  1       # ALE advection 로직 (1=기본, -1=개선형)
+nadv: 1       # 이송 스텝 수
+meth: 2       # 이송 방법 (2=Van Leer)
+
+# ── FSI 옵션 (*CONSTRAINED_LAGRANGE_IN_SOLID) ────────
+ctype: 2      # 커플링 유형 (2=가속+속도 구속)
+direc: 1      # 커플링 방향 (1=법선)
+nquad: 2      # 적분점 수
+pfac:  0.1    # 페널티 계수
+
+# ── 폭약 기폭점 (he/c4 프리셋 사용 시) ──────────────
+detonation:
+  pid: 5
+  x: 100.0
+  y: 50.0
+  z: 0.0
+  lt: 0.0     # 기폭 시간

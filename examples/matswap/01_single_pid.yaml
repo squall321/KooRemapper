@@ -1,0 +1,13 @@
+# 01_single_pid.yaml
+# matswap 기본 예제 - 단일 PID 재료 교환
+#
+# 모델: PID=1 (Steel), PID=2 (Steel)
+# 결과: PID=1 → Rubber (MAT_181), PID=2 는 그대로 Steel
+#
+# 실행: KooRemapper matswap 01_single_pid.yaml
+
+model: two_cubes.k
+output: 01_single_result.k
+swaps:
+  - bundle: rubber.k
+    pid: 1

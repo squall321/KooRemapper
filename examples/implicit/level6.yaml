@@ -1,0 +1,17 @@
+# KooRemapper implicit - Level 6 (고강건 / High-Robust)
+# MUMPS 솔버(LSOLVR=30) + RCTOL 잔류력 체크 활성화.
+# ill-conditioned 행렬, 복잡한 contact 모델에 적합.
+# 주의: MUMPS는 메모리 사용량이 많음.
+# Usage: KooRemapper implicit level6.yaml
+model: explicit.k
+output: implicit_lv6.k
+mode: static
+level: 6
+endtime: 1.0
+# NSOLVR=-2(BFGS+LS), ILIMIT=30, MAXREF=40
+# DCTOL=0.0005, ECTOL=0.002, LSTOL=0.99
+# DT0=T/10000, DTMAX=T/2000
+# +KFAIL=8
+# +STABILIZATION: IAS=1
+# +SOLVER: LSOLVR=30 (MUMPS parallel direct)
+# +RCTOL=0.1 (residual force check)

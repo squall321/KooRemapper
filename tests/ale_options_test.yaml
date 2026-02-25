@@ -1,0 +1,24 @@
+# Test all CONTROL_ALE + FSI options + ELFORM=12
+model:  ale_test_model.k
+output: ale_options_result.k
+
+ale_parts:
+  - pid: 2
+    material: air
+  - pid: 3
+    material: water
+
+fsi_pids: [1]
+
+elform: 12
+
+# CONTROL_ALE options
+dct: -1
+nadv: 2
+meth: 3
+
+# FSI options
+ctype: 4
+direc: 2
+nquad: 3
+pfac: 0.5

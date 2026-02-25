@@ -1,0 +1,13 @@
+# modal_nvh.yaml — NVH (차음/진동) 해석 예제
+# 수백~수천 개 모드를 빠르게 추출할 때 사용
+# EIGMTH=101 (MCMS): 대량 모드 추출에 최적화
+# solver=30 (MUMPS): 대규모 모델의 강성 행렬 처리
+
+model:  explicit.k
+output: modal_nvh.k
+
+nmode:  200      # NVH 해석: 일반적으로 100~500 모드
+fmax:   5000.0   # NVH 목표 주파수 범위 (Hz)
+
+eigmth: 101      # MCMS — 수백~수천 모드에 최적
+solver: 30       # MUMPS — 대규모 모델 병렬 직접 솔버

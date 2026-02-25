@@ -1,0 +1,28 @@
+# modal_full.yaml — 전체 옵션 예제
+# 모든 옵션을 명시적으로 지정한 레퍼런스 파일
+
+model:  explicit.k
+output: modal_full.k
+
+# ── 주요 파라미터 ──────────────────────────────────
+nmode:  20       # 추출할 모드 수 (default: 10)
+fmin:   0.0      # 하한 주파수 Hz — 0이면 LFLAG=0 (제한 없음)
+fmax:   3000.0   # 상한 주파수 Hz — 0이면 RFLAG=0 (제한 없음)
+center: 0.0      # 주파수 shift 중심 Hz (default: 0.0)
+
+# ── 고유치 해석기 ──────────────────────────────────
+# EIGMTH 옵션:
+#   2   Block Shift Lanczos (기본, 범용)
+#   101 MCMS               (NVH, 수천 개 모드에 최적)
+#   102 LOBPCG             (대규모 모델, 반복법)
+#   103 Fast Lanczos       (MPP 병렬 환경)
+eigmth: 2
+
+# ── 선형 솔버 ──────────────────────────────────────
+#   7   기본 sparse direct solver (소~중형 모델)
+#   30  MUMPS parallel direct solver (대규모/접촉 모델)
+solver: 7
+
+# ── 정리 옵션 ──────────────────────────────────────
+fix_shell_elform: false  # true: ELFORM=16 → 2 자동 수정
+keep_dr_curves:   false  # true: SIDR=1 DEFINE_CURVE 유지

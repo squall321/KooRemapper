@@ -1,0 +1,21 @@
+# ale_blast.yaml — 폭발 해석 예제
+# air + TNT + 기폭점 설정
+model:  explicit.k
+output: ale_blast.k
+
+ale_parts:
+  - pid: 3
+    material: air
+  - pid: 5
+    material: tnt
+
+# Lagrangian 구조물과 FSI 커플링
+fsi_pids: [1, 2]
+
+# 폭약 기폭점
+detonation:
+  pid: 5
+  x: 100.0
+  y: 50.0
+  z: 0.0
+  lt: 0.0

@@ -1,0 +1,9 @@
+# Test case-insensitive preset names
+model:  ale_test_model.k
+output: ale_case_result.k
+
+ale_parts:
+  - pid: 2
+    material: AIR
+  - pid: 3
+    material: Water

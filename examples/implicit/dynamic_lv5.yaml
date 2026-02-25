@@ -1,0 +1,14 @@
+# KooRemapper implicit - Dynamic Level 5 (강건 / Robust)
+# Contact 있는 동적 해석, 초기 불안정 구간 돌파.
+# STABILIZATION(IAS=1): rigid body mode, singular K 방지.
+# DT 기준: dtmax ≤ 1/(10*f_max)  예) 2 kHz → dtmax: 5.0e-5
+# Usage: KooRemapper implicit dynamic_lv5.yaml
+model: explicit.k
+output: implicit_dyn_lv5.k
+mode: dynamic
+level: 5
+endtime: 0.05         # 실제 동적 사건 시간 (s) — 모델에 맞게 수정
+# NSOLVR=-2(BFGS+LS), ILIMIT=25, MAXREF=30, KFAIL=5
+# DCTOL=0.001, ECTOL=0.005, LSTOL=0.99
+# DT0=T/5000, DTMAX=T/1000
+# +STABILIZATION: IAS=1, SCALE=1.0

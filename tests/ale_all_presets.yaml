@@ -1,0 +1,40 @@
+# Test all 14 material presets
+model:  ale_all_presets_model.k
+output: ale_all_presets_result.k
+
+ale_parts:
+  - pid: 1
+    material: air
+  - pid: 2
+    material: nitrogen
+  - pid: 3
+    material: argon
+  - pid: 4
+    material: water
+  - pid: 5
+    material: electrolyte
+  - pid: 6
+    material: gasoline
+  - pid: 7
+    material: oil
+  - pid: 8
+    material: coolant
+  - pid: 9
+    material: resin
+  - pid: 10
+    material: tim
+  - pid: 11
+    material: silicone
+  - pid: 12
+    material: tnt
+  - pid: 13
+    material: c4
+  - pid: 14
+    material: vacuum
+
+detonation:
+  pid: 12
+  x: 0.5
+  y: 0.5
+  z: 0.5
+  lt: 0.0

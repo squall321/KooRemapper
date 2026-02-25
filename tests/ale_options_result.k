@@ -1,0 +1,96 @@
+*KEYWORD
+*TITLE
+ALE Test Model
+$
+*NODE
+       1  0.000000  0.000000  0.000000
+       2  1.000000  0.000000  0.000000
+       3  1.000000  1.000000  0.000000
+       4  0.000000  1.000000  0.000000
+       5  0.000000  0.000000  1.000000
+       6  1.000000  0.000000  1.000000
+       7  1.000000  1.000000  1.000000
+       8  0.000000  1.000000  1.000000
+       9  2.000000  0.000000  0.000000
+      10  2.000000  1.000000  0.000000
+      11  2.000000  0.000000  1.000000
+      12  2.000000  1.000000  1.000000
+      13  3.000000  0.000000  0.000000
+      14  3.000000  1.000000  0.000000
+      15  3.000000  0.000000  1.000000
+      16  3.000000  1.000000  1.000000
+$
+*ELEMENT_SOLID
+       1       1       1       2       3       4       5       6       7       8
+       2       2       2       9      10       3       6      11      12       7
+       3       3       9      13      14      10      11      15      16      12
+$
+*PART
+Lagrangian structure
+         1         1         1         0         0         0         0         0
+*PART
+Air domain
+         2         2         4         1         1         0         0         0
+*PART
+Water domain
+         3         2         5         2         1         0         0         0
+$
+*SECTION_SOLID
+         1         1
+*SECTION_SOLID
+         2        12
+$
+*MAT_ELASTIC
+         1  7.85E-09  2.10E+05  3.00E-01
+*MAT_ELASTIC
+         2  1.29E-12  1.01E-01  0.00E+00
+*MAT_ELASTIC
+         3  1.00E-09  2.20E+03  4.90E-01
+$
+*CONTROL_TERMINATION
+  1.000E-02         0  0.000000  0.000000  0.000000
+$
+*MAT_NULL
+$      MID        RO        PC        MU     TEROD     CEROD        YM        PR
+         4 1.293E-12  0.000000  0.000000  0.000000  0.000000  0.000000  0.000000
+*EOS_LINEAR_POLYNOMIAL
+$    EOSID        C0        C1        C2        C3        C4        C5        C6
+         1  0.000000  0.000000  0.000000  0.000000  0.400000  0.400000  0.000000
+$       E0        V0
+2.5330E-01  1.000000
+*MAT_NULL
+$      MID        RO        PC        MU     TEROD     CEROD        YM        PR
+         5 1.000E-09  0.000000 0.000E+00  0.000000  0.000000  0.000000  0.000000
+*EOS_GRUNEISEN
+$    EOSID         C        S1        S2        S3     GAMAO         A        E0
+         2 1.484E+06  1.979000  0.000000  0.000000  0.110000  0.000000  0.000000
+$       V0
+  1.000000
+*HOURGLASS
+$     HGID       IHQ        QM       IBQ        Q1        Q2    QB/VDC        QW
+         1         3 1.000E-06         0  1.500000 6.000E-02  0.100000  0.100000
+*CONTROL_ALE
+$      DCT      NADV      METH      AFAC      BFAC      CFAC      DFAC      EFAC
+        -1         2         3  0.000000  0.000000  0.000000  0.000000  0.000000
+*ALE_MULTI-MATERIAL_GROUP
+$      SID    IDTYPE
+         2         1
+         3         1
+*ALE_REFERENCE_SYSTEM_GROUP
+$    SIDSID    SIDTYP    PRTYPE     BCTRAN     BCEXP     BCROT
+         0         0         4         0         0         0
+*CONSTRAINED_LAGRANGE_IN_SOLID
+$    SLAVE    MASTER     SSTYP    MSTYP    NQUAD    CTYPE    DIREC     MCOUP
+         1         2         1         1         3         4         2         0
+$      MC      NORM  NORMTYP     DAMP        K     HMIN     HMAX     PFAC
+         0  0.000000         0  0.000000  0.000000  0.000000  0.000000  0.500000
+$   ILEAK    PLEAK  LCIDPOR     NVENT   IBLOCK
+         0  0.000000         0         0         0
+*CONSTRAINED_LAGRANGE_IN_SOLID
+$    SLAVE    MASTER     SSTYP    MSTYP    NQUAD    CTYPE    DIREC     MCOUP
+         1         3         1         1         3         4         2         0
+$      MC      NORM  NORMTYP     DAMP        K     HMIN     HMAX     PFAC
+         0  0.000000         0  0.000000  0.000000  0.000000  0.000000  0.500000
+$   ILEAK    PLEAK  LCIDPOR     NVENT   IBLOCK
+         0  0.000000         0         0         0
+*END

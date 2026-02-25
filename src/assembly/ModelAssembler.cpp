@@ -7151,4 +7151,486 @@ void ModelAssembler::addContactHint(int sourcePid, int offsetPid) {
     addedKeywordBlocks_.push_back(contactHint.str());
 }
 
+// ============================================================
+//  applyMatswap helpers (anonymous namespace - internal only)
+// ============================================================
+namespace {
+
+static std::string mw_trim(const std::string& s) {
+    size_t a = 0, b = s.size();
+    while (a < b && std::isspace((unsigned char)s[a])) ++a;
+    while (b > a && std::isspace((unsigned char)s[b-1])) --b;
+    return s.substr(a, b - a);
+}
+static std::vector<std::string> mw_tok10(const std::string& line) {
+    std::vector<std::string> v;
+    for (size_t i = 0; i < line.size(); i += 10)
+        v.push_back(mw_trim(line.substr(i, std::min((size_t)10, line.size()-i))));
+    return v;
+}
+static std::string mw_upper(std::string s) {
+    for (auto& c : s) c = (char)std::toupper((unsigned char)c);
+    return s;
+}
+static std::string mw_idType(const std::string& name) {
+    std::string u = mw_upper(name);
+    if (u.size() >= 5 && u.substr(0,5) == "SECID") return "SECID";
+    if (u.size() >= 4 && u.substr(0,4) == "HGID")  return "HGID";
+    if (u.size() >= 4 && u.substr(0,4) == "LCID")  return "LCID";
+    if (u.size() >= 3 && u.substr(0,3) == "MID")   return "MID";
+    if (u.size() >= 3 && u.substr(0,3) == "PID")   return "PID";
+    return "";
+}
+
+struct MwParam { char type; std::string name; int ivalue; };
+struct MwBundle {
+    std::vector<MwParam>    params;
+    std::vector<std::string> cards;
+    int bundlePid=0, bundleSecid=0, bundleMid=0, bundleHgid=0;
+};
+struct MwPartInfo { int pid=0,secid=0,mid=0,hgid=0,dataLine=-1; };
+
+static int mw_resolveInt(const std::string& tok, const std::vector<MwParam>& params) {
+    if (!tok.empty() && tok[0]=='&') {
+        std::string nm = mw_upper(tok.substr(1));
+        for (const auto& p : params) if (mw_upper(p.name)==nm) return p.ivalue;
+        return 0;
+    }
+    try { return std::stoi(tok); } catch(...){ return 0; }
+}
+
+static MwBundle mw_parseBundle(const std::string& path) {
+    MwBundle bnd;
+    std::ifstream f(path);
+    if (!f.is_open()) throw std::runtime_error("Cannot open bundle: " + path);
+    enum Sec { OTHER, PARAM, PART } sec = OTHER;
+    bool partTitle=false, partData=false;
+    std::string ln;
+    while (std::getline(f, ln)) {
+        if (!ln.empty() && ln.back()=='\r') ln.pop_back();
+        std::string tr = mw_trim(ln);
+        if (tr.empty()) { if (sec==OTHER) bnd.cards.push_back(ln); continue; }
+        if (tr[0]=='*') {
+            std::string up = mw_upper(tr);
+            if (up=="*PARAMETER" || up.rfind("*PARAMETER_",0)==0)
+                { sec=PARAM; continue; }
+            if (up=="*PART")
+                { sec=PART; partTitle=false; partData=false; continue; }
+            if (up=="*END") { sec=OTHER; continue; }
+            sec=OTHER;
+            bnd.cards.push_back(ln);
+            continue;
+        }
+        if (tr[0]=='$') { if (sec==OTHER) bnd.cards.push_back(ln); continue; }
+        if (sec==PARAM) {
+            auto toks = mw_tok10(ln);
+            for (size_t i=0; i+1<toks.size(); i+=2) {
+                const auto& nf = toks[i];
+                if (nf.size()<2) continue;
+                MwParam p;
+                p.type = (char)std::toupper((unsigned char)nf[0]);
+                p.name = mw_trim(nf.substr(1));
+                p.ivalue = 0;
+                if (p.name.empty()) continue;
+                try {
+                    if      (p.type=='I') p.ivalue = std::stoi(toks[i+1]);
+                    else if (p.type=='R') p.ivalue = (int)std::stod(toks[i+1]);
+                } catch(...) {}
+                bnd.params.push_back(p);
+            }
+        } else if (sec==PART) {
+            if (!partTitle) { partTitle=true; continue; }
+            if (!partData) {
+                auto toks = mw_tok10(ln);
+                if (toks.size()>=5) {
+                    bnd.bundlePid   = mw_resolveInt(toks[0], bnd.params);
+                    bnd.bundleSecid = mw_resolveInt(toks[1], bnd.params);
+                    bnd.bundleMid   = mw_resolveInt(toks[2], bnd.params);
+                    bnd.bundleHgid  = mw_resolveInt(toks[4], bnd.params);
+                }
+                partData=true;
+            }
+        } else {
+            bnd.cards.push_back(ln);
+        }
+    }
+    return bnd;
+}
+
+static int mw_scanMaxId(const std::vector<std::string>& lines, const std::string& prefix) {
+    int maxId=0;
+    bool active=false; bool hasTitle=false; bool titleDone=false;
+    for (const auto& ln : lines) {
+        std::string tr = mw_trim(ln);
+        if (tr.empty()) continue;
+        if (tr[0]=='*') {
+            std::string up = mw_upper(tr);
+            if (up.rfind(mw_upper(prefix),0)==0) {
+                active=true;
+                hasTitle=(up.find("_TITLE")!=std::string::npos);
+                titleDone=!hasTitle;
+            } else { active=false; }
+            continue;
+        }
+        if (!active||tr[0]=='$') continue;
+        if (!titleDone) { titleDone=true; continue; }
+        auto toks = mw_tok10(ln);
+        if (!toks.empty()) { try{int id=std::stoi(toks[0]);if(id>maxId)maxId=id;}catch(...){} }
+        active=false;
+    }
+    return maxId;
+}
+
+static MwPartInfo mw_getPartInfo(const std::vector<std::string>& lines, int targetPid) {
+    MwPartInfo info;
+    bool inPart=false; bool titleDone=false;
+    for (int i=0; i<(int)lines.size(); ++i) {
+        std::string tr = mw_trim(lines[i]);
+        if (tr.empty()) continue;
+        if (tr[0]=='*') {
+            std::string up=mw_upper(tr);
+            inPart=(up=="*PART"||up=="*PART_TITLE"); titleDone=false; continue;
+        }
+        if (!inPart||tr[0]=='$') continue;
+        if (!titleDone) { titleDone=true; continue; }
+        auto toks = mw_tok10(lines[i]);
+        if (toks.size()>=5) {
+            try {
+                int pid=std::stoi(toks[0]);
+                if (pid==targetPid) {
+                    info.pid=pid; info.secid=std::stoi(toks[1]);
+                    info.mid=std::stoi(toks[2]); info.hgid=std::stoi(toks[4]);
+                    info.dataLine=i; return info;
+                }
+            } catch(...) {}
+        }
+        titleDone=false; // ready for next title+data pair in same *PART block
+    }
+    return info;
+}
+
+// Check if an ID is used by any PART whose PID is NOT in excludeSet
+static bool mw_isSharedExcludeSet(const std::vector<std::string>& lines,
+                                    int fieldIdx, int targetId,
+                                    const std::set<int>& excludeSet) {
+    bool inPart=false; bool titleDone=false;
+    for (const auto& ln : lines) {
+        std::string tr = mw_trim(ln);
+        if (tr.empty()) continue;
+        if (tr[0]=='*') {
+            std::string up=mw_upper(tr);
+            inPart=(up=="*PART"||up=="*PART_TITLE"); titleDone=false; continue;
+        }
+        if (!inPart||tr[0]=='$') continue;
+        if (!titleDone) { titleDone=true; continue; }
+        auto toks = mw_tok10(ln);
+        if ((int)toks.size()>fieldIdx) {
+            try {
+                int pid=std::stoi(toks[0]);
+                if (!excludeSet.count(pid) && std::stoi(toks[fieldIdx])==targetId) return true;
+            } catch(...) {}
+        }
+        titleDone=false; // ready for next title+data pair in same *PART block
+    }
+    return false;
+}
+
+static std::vector<std::string> mw_removeBlock(const std::vector<std::string>& lines,
+                                                 const std::string& prefix, int targetId) {
+    std::vector<bool> rm(lines.size(), false);
+    for (int i=0; i<(int)lines.size(); ) {
+        std::string tr = mw_trim(lines[i]);
+        if (tr.empty()||tr[0]!='*') { ++i; continue; }
+        std::string up = mw_upper(tr);
+        if (up.rfind(mw_upper(prefix),0)!=0) { ++i; continue; }
+        bool hasTitle=(up.find("_TITLE")!=std::string::npos);
+        int titlesLeft=hasTitle?1:0; int id=-1;
+        for (int j=i+1; j<(int)lines.size(); ++j) {
+            std::string jt = mw_trim(lines[j]);
+            if (jt.empty()||jt[0]=='$') continue;
+            if (jt[0]=='*') break;
+            if (titlesLeft-->0) continue;
+            auto toks=mw_tok10(lines[j]);
+            if (!toks.empty()) { try{id=std::stoi(toks[0]);}catch(...){} }
+            break;
+        }
+        if (id!=targetId) { ++i; continue; }
+        int start=i, end=i+1;
+        while (end<(int)lines.size()) {
+            std::string et=mw_trim(lines[end]);
+            if (!et.empty()&&et[0]=='*') break;
+            ++end;
+        }
+        for (int k=start;k<end;++k) rm[k]=true;
+        i=end;
+    }
+    std::vector<std::string> out;
+    for (int i=0;i<(int)lines.size();++i) if(!rm[i]) out.push_back(lines[i]);
+    return out;
+}
+
+static std::string mw_resolveLine(const std::string& line,
+                                   const std::vector<std::pair<std::string,int>>& sortedRemap) {
+    std::string r = line;
+    for (const auto& kv : sortedRemap) {
+        std::string pat = "&" + kv.first;
+        int patLen = (int)pat.size();
+        std::string val = std::to_string(kv.second);
+        std::string repl = ((int)val.size()<=patLen)
+            ? std::string(patLen-(int)val.size(),' ')+val : val;
+        size_t pos=0;
+        while ((pos=r.find(pat,pos))!=std::string::npos) {
+            r.replace(pos,patLen,repl); pos+=repl.size();
+        }
+    }
+    return r;
+}
+
+static std::string mw_updatePartLine(const std::string& ln, int newSecid, int newMid, int newHgid) {
+    std::string r = ln;
+    while ((int)r.size()<50) r+=' ';
+    auto setF = [&](int start, int w, int v) {
+        std::string vs=std::to_string(v);
+        if ((int)vs.size()>w) vs=vs.substr(vs.size()-w);
+        r.replace(start, w, std::string(w-(int)vs.size(),' ')+vs);
+    };
+    setF(10,10,newSecid); setF(20,10,newMid); setF(40,10,newHgid);
+    return r;
+}
+
+static std::vector<int> mw_getAllPartPids(const std::vector<std::string>& lines) {
+    std::vector<int> pids;
+    bool inPart=false; bool titleDone=false;
+    for (const auto& ln : lines) {
+        std::string tr = mw_trim(ln);
+        if (tr.empty()) continue;
+        if (tr[0]=='*') {
+            std::string up=mw_upper(tr);
+            inPart=(up=="*PART"||up=="*PART_TITLE"); titleDone=false; continue;
+        }
+        if (!inPart||tr[0]=='$') continue;
+        if (!titleDone) { titleDone=true; continue; }
+        auto toks = mw_tok10(ln);
+        if (!toks.empty()) { try{ pids.push_back(std::stoi(toks[0])); }catch(...){} }
+        titleDone=false; // ready for next title+data pair in same *PART block
+    }
+    return pids;
+}
+
+// Find all PIDs whose MID field (toks[2]) is in targetMids
+static std::vector<int> mw_getPidsByMid(const std::vector<std::string>& lines,
+                                          const std::set<int>& targetMids) {
+    std::vector<int> pids;
+    bool inPart=false; bool titleDone=false;
+    for (const auto& ln : lines) {
+        std::string tr = mw_trim(ln);
+        if (tr.empty()) continue;
+        if (tr[0]=='*') {
+            std::string up=mw_upper(tr);
+            inPart=(up=="*PART"||up=="*PART_TITLE"); titleDone=false; continue;
+        }
+        if (!inPart||tr[0]=='$') continue;
+        if (!titleDone) { titleDone=true; continue; }
+        auto toks = mw_tok10(ln);
+        if (toks.size()>=3) {
+            try {
+                int pid=std::stoi(toks[0]);
+                int mid=std::stoi(toks[2]);
+                if (targetMids.count(mid)) pids.push_back(pid);
+            } catch(...) {}
+        }
+        titleDone=false;
+    }
+    return pids;
+}
+
+} // anonymous namespace (matswap helpers)
+
+// ============================================================
+//  ModelAssembler::applyMatswap
+// ============================================================
+bool ModelAssembler::applyMatswap(const MatswapOperation& op, const std::string& configDir) {
+    // 1. Resolve bundle path relative to configDir
+    std::string bundlePath = op.bundleFile;
+    if (!configDir.empty() && !bundlePath.empty() &&
+        bundlePath[0] != '/' && bundlePath[0] != '\\' &&
+        !(bundlePath.size() >= 2 && bundlePath[1] == ':')) {
+        bundlePath = configDir + "/" + bundlePath;
+    }
+
+    // 2. Parse bundle
+    MwBundle bundle;
+    try { bundle = mw_parseBundle(bundlePath); }
+    catch (const std::exception& e) {
+        errorMessage_ = std::string("matswap: ") + e.what();
+        return false;
+    }
+    infoMessages.push_back("[matswap] bundle: " + bundlePath +
+                           "  params=" + std::to_string(bundle.params.size()) +
+                           "  cards=" + std::to_string(bundle.cards.size()));
+
+    // 3. Determine target PIDs  (pid/pids/swap_all or mid/mids)
+    bool midMode = !op.mids.empty();
+    std::vector<int> targetPids;
+    if (midMode) {
+        std::set<int> targetMids(op.mids.begin(), op.mids.end());
+        targetPids = mw_getPidsByMid(rawLines_, targetMids);
+        infoMessages.push_back("[matswap] mid-mode: found " + std::to_string(targetPids.size()) +
+                               " part(s) using MID(s) specified (SECTION kept)");
+    } else if (op.swapAll) {
+        targetPids = mw_getAllPartPids(rawLines_);
+        infoMessages.push_back("[matswap] swap_all: " + std::to_string(targetPids.size()) + " parts");
+    } else {
+        targetPids = op.pids;
+    }
+    if (targetPids.empty()) {
+        errorMessage_ = "matswap: no target PIDs (specify pid/pids/mid/mids or swap_all: true)";
+        return false;
+    }
+
+    std::set<int> targetPidSet(targetPids.begin(), targetPids.end());
+
+    // 4. Get current PART info for each target PID
+    std::map<int, MwPartInfo> partInfos;
+    for (int pid : targetPids) {
+        MwPartInfo info = mw_getPartInfo(rawLines_, pid);
+        if (info.dataLine < 0) {
+            errorMessage_ = "matswap: PID " + std::to_string(pid) + " not found in model";
+            return false;
+        }
+        partInfos[pid] = info;
+        infoMessages.push_back("[matswap] PID " + std::to_string(pid) +
+                               " -> MID=" + std::to_string(info.mid) +
+                               " SECID=" + std::to_string(info.secid) +
+                               " HGID=" + std::to_string(info.hgid));
+    }
+
+    // 5. Collect unique old IDs across all targets
+    std::set<int> oldMids, oldSecids, oldHgids;
+    for (const auto& [pid, info] : partInfos) {
+        if (info.mid   > 0) oldMids.insert(info.mid);
+        if (info.secid > 0) oldSecids.insert(info.secid);
+        if (info.hgid  > 0) oldHgids.insert(info.hgid);
+    }
+
+    // 6. Scan model for max IDs
+    int maxHGID  = mw_scanMaxId(rawLines_, "*HOURGLASS");
+    int maxLCID  = mw_scanMaxId(rawLines_, "*DEFINE_CURVE");
+    int maxSECID = mw_scanMaxId(rawLines_, "*SECTION");
+    int maxMID   = mw_scanMaxId(rawLines_, "*MAT_");
+
+    // Reuse orphan MID if all target parts share a single MID that is orphaned
+    int reuseableMid = -1;
+    if (oldMids.size() == 1) {
+        int onlyMid = *oldMids.begin();
+        if (!mw_isSharedExcludeSet(rawLines_, 2, onlyMid, targetPidSet))
+            reuseableMid = onlyMid;
+    }
+
+    // 7. Build remap table
+    std::map<std::string,int> remap;
+    for (const auto& p : bundle.params) {
+        if (p.type!='I' && p.type!='R') continue;
+        std::string idt = mw_idType(p.name);
+        int newVal;
+        if      (idt=="HGID")  newVal = ++maxHGID;
+        else if (idt=="LCID")  newVal = ++maxLCID;
+        else if (idt=="SECID") newVal = ++maxSECID;
+        else if (idt=="MID")   newVal = (reuseableMid>0) ? reuseableMid : ++maxMID;
+        else if (idt=="PID")   continue;
+        else                   newVal = p.ivalue;
+        remap[p.name] = newVal;
+        infoMessages.push_back("[matswap]   &" + p.name + " (" + idt + ") " +
+                               std::to_string(p.ivalue) + " -> " + std::to_string(newVal));
+    }
+
+    // Sorted remap (longer names first to avoid prefix collisions)
+    std::vector<std::pair<std::string,int>> sortedRemap(remap.begin(), remap.end());
+    std::sort(sortedRemap.begin(), sortedRemap.end(),
+              [](const auto& a, const auto& b){ return a.first.size() > b.first.size(); });
+
+    // 8. Resolve bundle cards to concrete numbers
+    std::vector<std::string> resolvedCards;
+    for (const auto& c : bundle.cards)
+        resolvedCards.push_back(mw_resolveLine(c, sortedRemap));
+
+    // 9. Remove orphaned old keyword blocks
+    for (int mid : oldMids) {
+        if (!mw_isSharedExcludeSet(rawLines_, 2, mid, targetPidSet)) {
+            rawLines_ = mw_removeBlock(rawLines_, "*MAT_", mid);
+            infoMessages.push_back("[matswap] Removed *MAT_ MID=" + std::to_string(mid));
+        }
+    }
+    if (!midMode) {
+        // SECTION swap only for PID-based targeting
+        for (int secid : oldSecids) {
+            if (!mw_isSharedExcludeSet(rawLines_, 1, secid, targetPidSet)) {
+                rawLines_ = mw_removeBlock(rawLines_, "*SECTION", secid);
+                infoMessages.push_back("[matswap] Removed *SECTION SECID=" + std::to_string(secid));
+            }
+        }
+    }
+    for (int hgid : oldHgids) {
+        if (!mw_isSharedExcludeSet(rawLines_, 4, hgid, targetPidSet)) {
+            rawLines_ = mw_removeBlock(rawLines_, "*HOURGLASS", hgid);
+            infoMessages.push_back("[matswap] Removed *HOURGLASS HGID=" + std::to_string(hgid));
+        }
+    }
+
+    // 10. Determine new IDs from remap for PART update
+    int newSecid=-1, newMid=-1, newHgid=-1;
+    for (const auto& p : bundle.params) {
+        if (!remap.count(p.name)) continue;
+        std::string idt = mw_idType(p.name);
+        if (idt=="SECID" && newSecid<0) newSecid=remap.at(p.name);
+        if (idt=="MID"   && newMid  <0) newMid  =remap.at(p.name);
+        if (idt=="HGID"  && newHgid <0) newHgid =remap.at(p.name);
+    }
+
+    // 11. Update all target PART data lines
+    for (int pid : targetPids) {
+        MwPartInfo info2 = mw_getPartInfo(rawLines_, pid);
+        if (info2.dataLine >= 0) {
+            // mid-mode: keep original SECID
+            int appliedSecid = (!midMode && newSecid>=0) ? newSecid : info2.secid;
+            int appliedMid   = (newMid  >=0) ? newMid   : info2.mid;
+            int appliedHgid  = (newHgid >=0) ? newHgid  : info2.hgid;
+            rawLines_[info2.dataLine] = mw_updatePartLine(
+                rawLines_[info2.dataLine], appliedSecid, appliedMid, appliedHgid);
+            infoMessages.push_back("[matswap] Updated PID " + std::to_string(pid) +
+                                   " -> SECID=" + std::to_string(appliedSecid) +
+                                   " MID=" + std::to_string(appliedMid) +
+                                   " HGID=" + std::to_string(appliedHgid));
+        }
+    }
+
+    // 12. Insert resolved bundle cards before *END in rawLines_
+    //     mid-mode: filter out *SECTION_* blocks (ELFORM stays unchanged)
+    if (midMode) {
+        std::vector<std::string> filtered;
+        bool inSection = false;
+        for (const auto& c : resolvedCards) {
+            std::string up = mw_upper(mw_trim(c));
+            if (!up.empty() && up[0]=='*') inSection = (up.rfind("*SECTION",0)==0);
+            if (!inSection) filtered.push_back(c);
+        }
+        resolvedCards = std::move(filtered);
+    }
+    std::vector<std::string> newLines;
+    bool inserted = false;
+    for (const auto& ln : rawLines_) {
+        if (!inserted && mw_upper(mw_trim(ln)) == "*END") {
+            for (const auto& c : resolvedCards) newLines.push_back(c);
+            inserted = true;
+        }
+        newLines.push_back(ln);
+    }
+    if (!inserted)
+        for (const auto& c : resolvedCards) newLines.push_back(c);
+    rawLines_ = std::move(newLines);
+
+    infoMessages.push_back("[matswap] Done: " + std::to_string(targetPids.size()) + " part(s) swapped");
+    return true;
+}
+
 } // namespace KooRemapper

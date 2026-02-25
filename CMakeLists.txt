@@ -116,6 +116,7 @@ set(ASSEMBLY_SOURCES
     src/assembly/ClosedLoop.cpp
     src/assembly/IndentProfile.cpp
     src/assembly/ShellCurvature.cpp
+    src/assembly/WarpageGrid.cpp
 )
 
 # Source files - CLI
@@ -132,6 +133,13 @@ set(UTIL_SOURCES
     src/util/SpatialHash2D.cpp
 )
 
+# Source files - Validation
+set(VALIDATION_SOURCES
+    src/validation/MaterialCardValidator.cpp
+    src/validation/ElementQualityChecker.cpp
+    src/validation/IntersectionDetector.cpp
+)
+
 # Create library
 add_library(kooremapper_lib STATIC
     ${CORE_SOURCES}
@@ -145,6 +153,7 @@ add_library(kooremapper_lib STATIC
     ${ASSEMBLY_SOURCES}
     ${CLI_SOURCES}
     ${UTIL_SOURCES}
+    ${VALIDATION_SOURCES}
 )
 
 # Define M_PI for MSVC

@@ -1,0 +1,14 @@
+# KooRemapper implicit - Level 5 (강건 / Robust)
+# *CONTROL_IMPLICIT_STABILIZATION 추가.
+# Rigid body mode, singular K matrix, contact 초기 불안정 문제에 효과적.
+# Usage: KooRemapper implicit level5.yaml
+model: explicit.k
+output: implicit_lv5.k
+mode: static
+level: 5
+endtime: 1.0
+# NSOLVR=-2(BFGS+LS), ILIMIT=25, MAXREF=30
+# DCTOL=0.001, ECTOL=0.005, LSTOL=0.99
+# DT0=T/5000, DTMAX=T/1000
+# +KFAIL=5
+# +STABILIZATION: *CONTROL_IMPLICIT_STABILIZATION IAS=1, SCALE=1.0

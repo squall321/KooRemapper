@@ -1,0 +1,18 @@
+# Test blast: air + tnt + detonation
+model:  ale_test_model.k
+output: ale_blast_result.k
+
+ale_parts:
+  - pid: 2
+    material: air
+  - pid: 3
+    material: tnt
+
+fsi_pids: [1]
+
+detonation:
+  pid: 3
+  x: 2.5
+  y: 0.5
+  z: 0.5
+  lt: 0.0

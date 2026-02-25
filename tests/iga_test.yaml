@@ -1,0 +1,11 @@
+base_model: iga_test.k
+output: iga_out
+
+operations:
+  - type: iga
+    targets:
+      - target_pid: 1
+        element_size: 0.5
+        ir: 0
+        styp: 4
+        tollg: 1.0e-3

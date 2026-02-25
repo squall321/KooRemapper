@@ -1,0 +1,14 @@
+# 02_multiple_pids.yaml
+# 복수 PID 재료 교환 - 한 번에 여러 파트에 동일 재료 적용
+#
+# 모델: PID=1, PID=2 모두 Steel
+# 결과: PID=1, PID=2 모두 동일한 Rubber bundle로 교환
+#       → MAT/SECTION/HOURGLASS 카드 1세트만 삽입, 두 PART가 공유
+#
+# 실행: KooRemapper matswap 02_multiple_pids.yaml
+
+model: two_cubes.k
+output: 02_multiple_result.k
+swaps:
+  - bundle: rubber.k
+    pids: [1, 2]

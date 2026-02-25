@@ -1,0 +1,14 @@
+# 03_swap_all.yaml
+# 전체 파트 재료 교환 - 모델의 모든 PART에 동일 재료 적용
+#
+# 모델: PID=1, PID=2 모두 Steel
+# 결과: 모든 파트 → Rubber
+#       swap_all: true 는 pids 목록 지정 없이 모든 *PART 자동 검색
+#
+# 실행: KooRemapper matswap 03_swap_all.yaml
+
+model: two_cubes.k
+output: 03_swapall_result.k
+swaps:
+  - bundle: rubber.k
+    swap_all: true

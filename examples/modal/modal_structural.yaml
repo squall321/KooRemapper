@@ -1,0 +1,13 @@
+# modal_structural.yaml — 구조 진동 해석 예제
+# 구조 응답 해석, 조화 가진 해석 전처리에 사용
+# 필요한 모드만 정확히 추출 (fmin~fmax 범위 지정)
+
+model:  explicit.k
+output: modal_structural.k
+
+nmode:  20       # 구조 해석: 일반적으로 10~30 모드면 충분
+fmin:   0.0      # 강체 모드 포함 (0 Hz부터)
+fmax:   500.0    # 관심 주파수 범위 상한 (Hz)
+
+eigmth: 2        # Block Shift Lanczos — 소수 모드에 최적
+solver: 7        # 기본 sparse solver

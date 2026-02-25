@@ -1,0 +1,8 @@
+# ale_minimal.yaml — 최소 설정 예제
+# 단일 파트를 air ALE로 변환
+model:  explicit.k
+output: ale_minimal.k
+
+ale_parts:
+  - pid: 3
+    material: air

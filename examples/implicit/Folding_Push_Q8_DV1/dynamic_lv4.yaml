@@ -1,0 +1,10 @@
+# KooRemapper implicit - Dynamic Level 4 (수렴우선)
+# BFGS+line search. 강한 비선형 동역학, contact 과도 응답.
+model: Folding_Push_Q8_DV1_AdvancedRubber.k
+output: Folding_Push_Q8_DV1_AdvancedRubber_dynamic_lv4.k
+mode: dynamic
+level: 4
+endtime: 1.0
+# IMASS=1, GAMMA=0.6, BETA=0.30
+# NSOLVR=-2(BFGS+LS), ILIMIT=20, MAXREF=25, DCTOL=0.001, ECTOL=0.010, LSTOL=0.95
+# DT0=T/2000, DTMAX=T/500, +KFAIL=3

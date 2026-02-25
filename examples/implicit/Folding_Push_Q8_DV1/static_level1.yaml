@@ -1,0 +1,9 @@
+# KooRemapper implicit - Level 1 (공격적 / Aggressive)
+# 빠른 수렴 시도. 잘 구속된 선형성 높은 모델에 적합.
+model: Folding_Push_Q8_DV1_AdvancedRubber.k
+output: Folding_Push_Q8_DV1_AdvancedRubber_static_level1.k
+mode: static
+level: 1
+endtime: 1.0
+# NSOLVR=12(BFGS), ILIMIT=11, MAXREF=10, DCTOL=0.005, ECTOL=0.050
+# DT0=T/100, DTMAX=T/20

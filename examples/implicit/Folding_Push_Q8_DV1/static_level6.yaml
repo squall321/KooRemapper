@@ -1,0 +1,9 @@
+# KooRemapper implicit - Level 6 (고강건 / High-Robust)
+# MUMPS(LSOLVR=30) + RCTOL=0.1. ill-conditioned 행렬, 복잡한 contact.
+model: Folding_Push_Q8_DV1_AdvancedRubber.k
+output: Folding_Push_Q8_DV1_AdvancedRubber_static_level6.k
+mode: static
+level: 6
+endtime: 1.0
+# NSOLVR=-2(BFGS+LS), ILIMIT=30, MAXREF=40, DCTOL=0.0005, ECTOL=0.002, LSTOL=0.99, RCTOL=0.1
+# DT0=T/10000, DTMAX=T/2000, +KFAIL=8, +STABILIZATION, +MUMPS(LSOLVR=30)

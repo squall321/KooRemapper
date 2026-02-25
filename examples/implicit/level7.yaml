@@ -1,0 +1,16 @@
+# KooRemapper implicit - Level 7 (최대안정 / Max-Stable)
+# 가능한 모든 수렴 보조 기능 활성화 + 최소 시간 스텝.
+# 매우 느리지만 수렴 가능성 최대. 마지막 수단으로 사용.
+# Usage: KooRemapper implicit level7.yaml
+model: explicit.k
+output: implicit_lv7.k
+mode: static
+level: 7
+endtime: 1.0
+# NSOLVR=-2(BFGS+LS), ILIMIT=40, MAXREF=50
+# DCTOL=0.0001, ECTOL=0.001, LSTOL=0.99
+# DT0=T/50000, DTMAX=T/10000
+# +KFAIL=15
+# +STABILIZATION: IAS=1
+# +SOLVER: LSOLVR=30 (MUMPS)
+# +RCTOL=0.01 (strict residual force check)

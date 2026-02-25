@@ -1,0 +1,9 @@
+# KooRemapper implicit - Level 2 (표준 / Standard)
+# 첫 시도 권장. 대부분의 모델에 적합.
+model: Folding_Push_Q8_DV1_AdvancedRubber.k
+output: Folding_Push_Q8_DV1_AdvancedRubber_static_level2.k
+mode: static
+level: 2
+endtime: 1.0
+# NSOLVR=12(BFGS), ILIMIT=11, MAXREF=15, DCTOL=0.001, ECTOL=0.010
+# DT0=T/500, DTMAX=T/100

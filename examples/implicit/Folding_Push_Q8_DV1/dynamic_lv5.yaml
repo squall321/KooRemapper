@@ -1,0 +1,10 @@
+# KooRemapper implicit - Dynamic Level 5 (강건)
+# Contact 있는 동적 해석. STABILIZATION으로 초기 불안정 돌파.
+model: Folding_Push_Q8_DV1_AdvancedRubber.k
+output: Folding_Push_Q8_DV1_AdvancedRubber_dynamic_lv5.k
+mode: dynamic
+level: 5
+endtime: 1.0
+# IMASS=1, GAMMA=0.6, BETA=0.30
+# NSOLVR=-2(BFGS+LS), ILIMIT=25, MAXREF=30, DCTOL=0.001, ECTOL=0.005, LSTOL=0.99
+# DT0=T/5000, DTMAX=T/1000, +KFAIL=5, +STABILIZATION IAS=1

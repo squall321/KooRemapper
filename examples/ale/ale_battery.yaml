@@ -1,0 +1,14 @@
+# ale_battery.yaml — 배터리 크래시 해석 예제
+# 전해질(electrolyte) ALE + 케이스 FSI
+model:  explicit.k
+output: ale_battery.k
+
+ale_parts:
+  - pid: 10
+    material: electrolyte
+
+# 배터리 케이스/극판 등 Lagrangian 파트
+fsi_pids: [1, 2, 3]
+
+# 개선형 ALE advection
+dct: -1

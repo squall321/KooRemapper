@@ -1,0 +1,108 @@
+# =============================================================
+# KooRemapper implicit - Full Options Example
+# =============================================================
+# Convert an explicit LS-DYNA K-file to implicit solver settings.
+# Usage: KooRemapper implicit implicit_full.yaml
+# =============================================================
+
+# --- Required ---
+model: explicit.k          # Input explicit K-file
+output: implicit.k         # Output implicit K-file
+
+# --- Solver Mode ---
+# static  : Quasi-static loading (IMASS=0, GAMMA=0.5, BETA=0.25)
+# dynamic : Structural dynamics  (IMASS=1, GAMMA=0.6, BETA=0.30, numerical damping)
+mode: static
+
+# --- Convergence Level (1~8) ---
+#
+# Table 1: Nonlinear solver & convergence tolerances
+# Lv  Name           NSOLVR  ILIM  MXREF  ITOPT  KFAIL   DCTOL   ECTOL   LSTOL   RCTOL
+# --  -------------  ------  ----  -----  -----  -----  ------  ------  ------  ------
+#  1  공격적           12     11    10     11      0    0.0050  0.0500  0.90    (off)
+#  2  표준             12     11    15     11      0    0.0010  0.0100  0.90    (off)
+#  3  안정             12     15    20     11      0    0.0010  0.0100  0.95    (off)
+#  4  수렴우선         -2     20    25     11      3    0.0010  0.0100  0.95    (off)
+#  5  강건             -2     25    30     15      5    0.0010  0.0050  0.99    (off)
+#  6  고강건           -2     30    40     15      8    0.0005  0.0020  0.99    0.1
+#  7  최대안정         -2     40    50     20     15    0.0001  0.0010  0.99    0.01
+#  8  좌굴/스냅스루     7*     40    50     20     15    0.0001  0.0010  0.99    0.01
+#
+# Table 2: Time stepping & activated features  (T = endtime)
+# Lv  DT0         DTMAX       DTMIN         LSOLVR        STAB    ARC-LEN
+# --  ----------  ----------  ------------  ------------  ------  -------
+#  1  T/100       T/20        -T/1000       7 (default)   off     off
+#  2  T/500       T/100       -T/10000      7 (default)   off     off
+#  3  T/1000      T/200       -T/10000      7 (default)   off     off
+#  4  T/2000      T/500       -T/100000     7 (default)   off     off
+#  5  T/5000      T/1000      -T/100000     7 (default)   ON      off
+#  6  T/10000     T/2000      -T/100000     30 (MUMPS)    ON      off
+#  7  T/50000     T/10000     -T/1000000    30 (MUMPS)    ON      off
+#  8  T/50000     T/10000     -T/1000000    30 (MUMPS)    ON      ON (Crisfield)
+#
+# Feature notes:
+#  KFAIL    : reform tangent stiffness after N consecutive step bisections
+#  LSTOL    : line search tolerance (only active for NSOLVR=-2)
+#  RCTOL    : residual force norm (off=1e10 disabled; 0.1 or 0.01 to activate)
+#  STAB     : *CONTROL_IMPLICIT_STABILIZATION IAS=1 - artificial stiffness
+#             prevents singular K from rigid body modes / springback unloading
+#  MUMPS    : *CONTROL_IMPLICIT_SOLVER LSOLVR=30 - parallel direct solver
+#             more robust for ill-conditioned/contact-heavy stiffness matrices
+#  ARC-LEN  : *CONTROL_IMPLICIT_SOLUTION Card3 - Crisfield arc-length
+#             ARCCTL=0(generalized), ARCMTH=1, ARCDMP=2(damping off)
+#             use when load-displacement path has negative slope (snap-through/buckling)
+#  * NSOLVR=7 (Full Newton): arc-length requires NSOLVR in [6..9]
+level: 2
+
+# --- End Time ---
+# Provide if the model uses DR mode (endtim=0 in *CONTROL_TERMINATION).
+# Used as base for DT0/DTMAX/DTMIN calculations.
+# If omitted: reads from *CONTROL_TERMINATION (if endtim>0), otherwise warns and uses 1.0.
+endtime: 1.0
+
+# --- Fine-grained Overrides (optional, override level defaults) ---
+# dctol:      0.001   # Displacement convergence tolerance     (CONTROL_IMPLICIT_SOLUTION)
+# ectol:      0.010   # Energy convergence tolerance           (CONTROL_IMPLICIT_SOLUTION)
+# dt0:        0.002   # Initial timestep                       (CONTROL_IMPLICIT_GENERAL)
+# dtmax:      0.010   # Maximum timestep                       (CONTROL_IMPLICIT_AUTO)
+# nsolvr:     12      # Nonlinear solver: 12=BFGS, -2=BFGS+LS  (CONTROL_IMPLICIT_SOLUTION)
+# kfail:      3       # Step cuts before stiffness reform       (CONTROL_IMPLICIT_AUTO)
+# rctol:      1.0e10  # Residual force tolerance (1e10=off)     (CONTROL_IMPLICIT_SOLUTION)
+# lsolvr:     7       # Linear solver: 7=default, 30=MUMPS      (CONTROL_IMPLICIT_SOLVER)
+# stab:       false   # Stabilization IAS on/off override       (CONTROL_IMPLICIT_STABILIZATION)
+# stab_scale: 1.0     # Stabilization SCALE (1.0=normal, 0.001=springback)
+# arc_length: false   # Arc-length on/off override (auto-sets NSOLVR=7 if needed)
+
+# --- Cleanup Options ---
+# fix_shell_elform: false
+#   false (default): Warn about SECTION_SHELL ELFORM=16 (not supported in implicit)
+#   true:            Auto-fix ELFORM=16 -> 2 (Belytschko-Tsay, implicit compatible)
+fix_shell_elform: false
+
+# keep_dr_curves: false
+#   false (default): Remove *DEFINE_CURVE blocks where SIDR=1 (DR load curves, not needed)
+#   true:            Keep all DEFINE_CURVE blocks as-is
+keep_dr_curves: false
+
+# =============================================================
+# Pipeline: what this command does
+#
+# REMOVES (explicit-only cards):
+#   *CONTROL_DYNAMIC_RELAXATION  - DR pre-loading (not used in implicit)
+#   *CONTROL_BULK_VISCOSITY      - bulk viscosity (explicit hourglass control)
+#   *DATABASE_BINARY_D3DRLF      - DR output database (not needed)
+#   *DEFINE_CURVE (SIDR=1)       - DR load curves (unless keep_dr_curves: true)
+#
+# MODIFIES:
+#   *CONTROL_TIMESTEP            - TSSFAC=0.90, DT2MS=0.0
+#   *CONTROL_TERMINATION         - updates endtim if 'endtime' is specified
+#
+# INSERTS (before *END):
+#   *CONTROL_IMPLICIT_GENERAL    - IMFLAG=1, DT0, IMFORM=2, IGS=2    (always)
+#   *CONTROL_IMPLICIT_DYNAMICS   - IMASS, GAMMA, BETA                 (always)
+#   *CONTROL_IMPLICIT_SOLUTION   - NSOLVR, ILIMIT, MAXREF, tolerances (always)
+#     + Card 3 arc-length params  - ARCCTL, ARCMTH, ARCDMP, ...       (level 8 / arc_length:true)
+#   *CONTROL_IMPLICIT_AUTO       - IAUTO=1, ITEOPT, DTMIN/DTMAX/KFAIL (always)
+#   *CONTROL_IMPLICIT_STABILIZATION - IAS=1, SCALE                    (level 5+)
+#   *CONTROL_IMPLICIT_SOLVER     - LSOLVR=30 (MUMPS)                  (level 6+)
+# =============================================================

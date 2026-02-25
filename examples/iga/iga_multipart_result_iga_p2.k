@@ -16,16 +16,19 @@ Rzmax             10
 Rrr                2
 Rrs                2
 Rrt                3
+Rofr               2
+Rofs               2
+Roft               3
 Iir                1
 Istyp              4
 Rtollg         0.001
 *PARAMETER_EXPRESSION_LOCAL
-rxminn, &xmin-&rr
-rxmaxx, &xmax+&rr
-ryminn, &ymin-&rs
-rymaxx, &ymax+&rs
-rzminn, &zmin-&rt
-rzmaxx, &zmax+&rt
+rxminn, &xmin-&ofr
+rxmaxx, &xmax+&ofr
+ryminn, &ymin-&ofs
+rymaxx, &ymax+&ofs
+rzminn, &zmin-&oft
+rzmaxx, &zmax+&oft
 *MAT_ELASTIC
 $#     mid        ro         e        pr        da        db  not used
          3  7.85E-09    210000       0.3

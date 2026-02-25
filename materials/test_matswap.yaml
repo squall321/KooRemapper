@@ -1,0 +1,5 @@
+model: test_model.k
+output: test_matswap_result.k
+swaps:
+  - bundle: rubber.k
+    pid: 1

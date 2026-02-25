@@ -1,0 +1,9 @@
+# Test: all ALE PIDs invalid → nothing to process
+model:  ale_test_model.k
+output: ale_empty_result.k
+
+ale_parts:
+  - pid: 99
+    material: air
+  - pid: 100
+    material: water

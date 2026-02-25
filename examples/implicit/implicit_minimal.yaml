@@ -1,0 +1,7 @@
+# KooRemapper implicit - Minimal Example
+# Usage: KooRemapper implicit implicit_minimal.yaml
+model: explicit.k
+output: implicit.k
+mode: static
+level: 2
+endtime: 1.0

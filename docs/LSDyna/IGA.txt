@@ -1,0 +1,120 @@
+*INCLUDE
+iga_sld_box_Part1.k
+
+$-------------------------------------------------------------------------------
+$                             T E M P L A T E
+$                   T R I M M E D   I G A   S O L I D S
+$
+$ Generic template for trimmed IGA solids with PID-embedding option TETMSH=-1
+$ 
+$ 1. Define a single and unique ID to be used in this input file for PID, SECID,
+$    VID, SID, PATCHID, RID (e.g. ID must not be identical to other PIDs, SECIDs,
+$    ... in the model): id
+$ 2. Define material ID (same as MID of existing FE solid): mid
+$ 3. Define the PID of the existing FE solid model to be embedded: fepid
+$ 4. Define corner points of trivariate B-Spline Box (*IGA_3D_NURBS_XYZ): 
+$    xmin, xmax, ymin, ymax, zmin, zmax
+$ 5. Define desired element edge length in r-, s-, and t-direction (knot span 
+$    size of triviariate B-Spline box *IGA_3D_NURBS_XYZ): rr, rs, rt
+$ 6. Define integration rule (IR=0 reduced Gauss, IR=1 Full Gauss): ir
+$ 7. Define light control point (LCP) stabilization parameters (recommendation: 
+$    stabilization type styp=4, LCP threshold tollg=1.0e-3 may be increased in 
+$    case of instabilities)
+$     
+$ All parameters are local, i.e. only active within this input file include. 
+$ This allows using this template multiple times within the same model without
+$ the need to change parameter names) (see PARAMETER_LOCAL in the LS-DYNA 
+$ keyword users's manual VOL I).
+$ 
+$ The trivariate B-Spline Box is extended by one element in each direction
+$ to cut-off boundary elements direction -> larger time step possible
+$
+$-------------------------------------------------------------------------------
+*KEYWORD
+$-------------------------------------------------------------------------------
+ Input Start
+$-------------------------------------------------------------------------------
+*PARAMETER_LOCAL
+$    PRMR1      VAL1
+$ 1. Unique input file ID
+Iid               11
+$ 2. Material ID
+Imid               5 
+$ 3. FE Solid PID
+Ifepid             5  
+$ 4. Box corner points
+Rxmin          -25.3
+Rxmax           23.9
+Rymin          -3.74
+Rymax            1.0
+Rzmin           -8.0
+Rzmax            0.3
+$ 5. Element edge length
+Rrr              0.6
+Rrs              0.6
+Rrt              0.6
+$ 6. Integration rule
+Iir                0
+$ 7. Stabilization
+Istyp              4
+Rtollg        1.0e-3
+$-------------------------------------------------------------------------------
+$ Input End
+$-------------------------------------------------------------------------------
+$
+*PARAMETER_EXPRESSION_LOCAL
+rxminn, &xmin-&rr
+rxmaxx, &xmax+&rr
+ryminn, &ymin-&rs
+axx, &ymax+&rs
+zminn, &zmin-&rt
+rzmaxx, &zmax+&rt
+*IGA_DEV_STABILIZATION
+$      sid      styp                                   tollg
+       &id     &styp                                  &tollg
+*PART
+$#
+Nurbs-Solid_1
+$#     pid     secid       mid     eosid      hgid      grav    adpopt      tmid
+       &id       &id      &mid
+*SECTION_IGA_SOLID
+$#   secid    elform        ir
+       &id         0       &ir
+*IGA_DEV_VOLUME_XYZ
+$#     vid   patchid       pid      esid      fsid    TETMSH      MYTP
+       &id       &id                                      -1
+$#     PID of existing FEA solid with tetmesh
+    &fepid
+$#   brid1     brid2     brid3     brid4     brid5     brid6     brid7     brid8
+
+*IGA_SOLID
+$#     sid       pid      nisr      niss      nist       rid
+       &id       &id         1         1         1       &id
+*IGA_3D_NURBS_XYZ
+$# patchid        nr        ns        nt        pr        ps        pt
+       &id         2         2         2         1         1         1
+$#    unir      unis      unit
+         1         1         1          
+$#            rfirst               rlast
+              &xminn              &xmaxx
+$#            sfirst               slast
+              &yminn              &ymaxx
+$#            tfirst               tlast
+              &zminn              &zmaxx
+$#                 x                   y                   z                 wgt
+              &xminn              &yminn              &zminn                 1.0
+              &xmaxx              &yminn              &zminn                 1.0
+              &xminn              &ymaxx              &zminn                 1.0
+              &xmaxx              &ymaxx              &zminn                 1.0
+              &xminn              &yminn              &zmaxx                 1.0
+              &xmaxx              &yminn              &zmaxx                 1.0
+              &xminn              &ymaxx              &zmaxx                 1.0
+              &xmaxx              &ymaxx              &zmaxx                 1.0
+*IGA_REFINE_SOLID
+$      rid      rtyp
+       &id         2
+$    hrtyp        rr        rs        rt
+         2       &rr       &rs       &rt
+$      itr       its       itt
+         2         2         2
+*END

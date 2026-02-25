@@ -1,0 +1,15 @@
+# KooRemapper implicit - Dynamic Level 6 (고강건 / High-Robust)
+# MUMPS(LSOLVR=30) + RCTOL 잔류력 체크. 대규모·복잡 contact 동적 해석.
+# ill-conditioned 행렬, 진동·지진 등 장시간 동적 해석에 적합.
+# 주의: MUMPS는 메모리 사용량이 많음.
+# DT 기준: dtmax ≤ 1/(10*f_max)  예) 500 Hz → dtmax: 0.0002
+# Usage: KooRemapper implicit dynamic_lv6.yaml
+model: explicit.k
+output: implicit_dyn_lv6.k
+mode: dynamic
+level: 6
+endtime: 1.0          # 실제 동적 사건 시간 (s) — 모델에 맞게 수정
+# NSOLVR=-2(BFGS+LS), ILIMIT=30, MAXREF=40, KFAIL=8
+# DCTOL=0.0005, ECTOL=0.002, LSTOL=0.99, RCTOL=0.1
+# DT0=T/10000, DTMAX=T/2000
+# +STABILIZATION: IAS=1  +SOLVER: LSOLVR=30 (MUMPS)

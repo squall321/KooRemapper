@@ -1,0 +1,5 @@
+model: tests/implicit_test.k
+output: tests/implicit_lv7_result.k
+mode: static
+level: 7
+endtime: 1.0

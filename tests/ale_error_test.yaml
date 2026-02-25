@@ -1,0 +1,14 @@
+# Test error cases: PID not found, FSI/ALE overlap, HE without detonation
+model:  ale_test_model.k
+output: ale_error_result.k
+
+ale_parts:
+  - pid: 2
+    material: air
+  - pid: 99
+    material: water
+  - pid: 3
+    material: c4
+
+# FSI PID overlaps with ALE PID 2
+fsi_pids: [1, 2]

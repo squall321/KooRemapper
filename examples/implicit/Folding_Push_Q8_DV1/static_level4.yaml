@@ -1,0 +1,9 @@
+# KooRemapper implicit - Level 4 (수렴우선 / Conv-First)
+# BFGS+line search. KFAIL=3. Lv3 수렴 실패 시 시도.
+model: Folding_Push_Q8_DV1_AdvancedRubber.k
+output: Folding_Push_Q8_DV1_AdvancedRubber_static_level4.k
+mode: static
+level: 4
+endtime: 1.0
+# NSOLVR=-2(BFGS+LS), ILIMIT=20, MAXREF=25, DCTOL=0.001, ECTOL=0.010, LSTOL=0.95
+# DT0=T/2000, DTMAX=T/500, +KFAIL=3

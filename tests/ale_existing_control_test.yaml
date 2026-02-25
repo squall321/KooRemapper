@@ -1,0 +1,7 @@
+# Test: model already has CONTROL_ALE and AMMG - should replace
+model:  ale_existing_control_model.k
+output: ale_existing_control_result.k
+
+ale_parts:
+  - pid: 1
+    material: nitrogen

@@ -1,0 +1,10 @@
+# KooRemapper implicit - Dynamic Level 6 (고강건)
+# MUMPS + RCTOL. 대규모·복잡 contact 동적 해석, 장시간 진동.
+model: Folding_Push_Q8_DV1_AdvancedRubber.k
+output: Folding_Push_Q8_DV1_AdvancedRubber_dynamic_lv6.k
+mode: dynamic
+level: 6
+endtime: 1.0
+# IMASS=1, GAMMA=0.6, BETA=0.30
+# NSOLVR=-2(BFGS+LS), ILIMIT=30, MAXREF=40, DCTOL=0.0005, ECTOL=0.002, LSTOL=0.99, RCTOL=0.1
+# DT0=T/10000, DTMAX=T/2000, +KFAIL=8, +STABILIZATION, +MUMPS(LSOLVR=30)

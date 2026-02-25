@@ -1,0 +1,23 @@
+# 04_assemble_integration.yaml
+# assemble 워크플로우와 matswap 통합
+#
+# assemble YAML에서 type: matswap 을 다른 operation과 함께 사용
+# 예: restack 후 matswap, 또는 replace 후 matswap
+#
+# 이 예제는 단독 matswap만 수행 (assemble 커맨드로 실행)
+#
+# 실행: KooRemapper assemble 04_assemble_integration.yaml
+
+base_model: two_cubes.k
+output: 04_assemble_result
+
+operations:
+  # 1단계: PID=1 을 Rubber로 교환
+  - type: matswap
+    bundle: rubber.k
+    pid: 1
+
+  # 2단계: PID=2 도 같은 Rubber로 교환 (독립 operation)
+  - type: matswap
+    bundle: rubber.k
+    pid: 2

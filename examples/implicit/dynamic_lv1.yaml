@@ -1,0 +1,13 @@
+# KooRemapper implicit - Dynamic Level 1 (공격적 / Aggressive)
+# 빠른 수렴 시도. 잘 구속된 선형 동역학 모델에 적합.
+# IMASS=1, GAMMA=0.6/BETA=0.30 (Newmark 수치 감쇠)
+# DT 기준: dtmax ≤ 1/(10*f_max)  예) 100 Hz → 0.001 s
+# Usage: KooRemapper implicit dynamic_lv1.yaml
+model: explicit.k
+output: implicit_dyn_lv1.k
+mode: dynamic
+level: 1
+endtime: 0.1          # 실제 동적 사건 시간 (s) — 모델에 맞게 수정
+# NSOLVR=12(BFGS), ILIMIT=11, MAXREF=10
+# DCTOL=0.005, ECTOL=0.050
+# DT0=T/100, DTMAX=T/20

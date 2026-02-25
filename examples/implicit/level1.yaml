@@ -1,0 +1,12 @@
+# KooRemapper implicit - Level 1 (공격적 / Aggressive)
+# 빠른 수렴 시도. 발산 가능성 있지만 가장 빠름.
+# 수렴이 잘 되는 잘 구속된 선형성 높은 모델에 적합.
+# Usage: KooRemapper implicit level1.yaml
+model: explicit.k
+output: implicit_lv1.k
+mode: static
+level: 1
+endtime: 1.0
+# NSOLVR=12(BFGS), ILIMIT=11, MAXREF=10
+# DCTOL=0.005, ECTOL=0.050
+# DT0=T/100, DTMAX=T/20

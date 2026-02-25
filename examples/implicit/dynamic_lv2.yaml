@@ -1,0 +1,13 @@
+# KooRemapper implicit - Dynamic Level 2 (표준 / Standard)
+# 동적 해석 첫 시도 권장 세팅. 저~중주파 구조 응답.
+# IMASS=1, GAMMA=0.6/BETA=0.30 (Newmark 수치 감쇠)
+# DT 기준: dtmax ≤ 1/(10*f_max)  예) 100 Hz → dtmax: 0.001
+# Usage: KooRemapper implicit dynamic_lv2.yaml
+model: explicit.k
+output: implicit_dyn_lv2.k
+mode: dynamic
+level: 2
+endtime: 0.1          # 실제 동적 사건 시간 (s) — 모델에 맞게 수정
+# NSOLVR=12(BFGS), ILIMIT=11, MAXREF=15
+# DCTOL=0.001, ECTOL=0.010
+# DT0=T/500, DTMAX=T/100

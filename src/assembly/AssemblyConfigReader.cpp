@@ -375,6 +375,8 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             op.type = AssemblyOperation::WARPAGE;
                         } else if (val == "offset") {
                             op.type = AssemblyOperation::OFFSET;
+                        } else if (val == "matswap") {
+                            op.type = AssemblyOperation::MATSWAP;
                         } else {
                             throw std::runtime_error("Unknown operation type: " + val);
                         }
@@ -642,6 +644,31 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                                 // Array of material cards
                                 inMaterialCardsList = true;
                                 materialCardsKeyIndent = indent;
+                            }
+                        } else if (op.type == AssemblyOperation::MATSWAP) {
+                            auto parseIntList = [&](const std::string& raw, std::vector<int>& out) {
+                                std::string lv = raw;
+                                if (!lv.empty() && lv.front() == '[') lv = lv.substr(1);
+                                if (!lv.empty() && lv.back() == ']') lv.pop_back();
+                                std::istringstream ss(lv);
+                                std::string tok;
+                                while (std::getline(ss, tok, ',')) {
+                                    std::string t = trim(tok);
+                                    if (!t.empty()) out.push_back(std::stoi(t));
+                                }
+                            };
+                            if (key == "bundle") {
+                                op.matswap.bundleFile = val;
+                            } else if (key == "pid") {
+                                op.matswap.pids = { std::stoi(val) };
+                            } else if (key == "pids") {
+                                parseIntList(val, op.matswap.pids);
+                            } else if (key == "mid") {
+                                op.matswap.mids = { std::stoi(val) };
+                            } else if (key == "mids") {
+                                parseIntList(val, op.matswap.mids);
+                            } else if (key == "swap_all") {
+                                op.matswap.swapAll = (val == "true" || val == "yes" || val == "1");
                             }
                         }
                     } catch (...) {}

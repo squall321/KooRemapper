@@ -1,0 +1,14 @@
+# KooRemapper implicit - Dynamic Level 7 (최대안정 / Max-Stable)
+# 가능한 모든 수렴 보조 활성화 + 최소 시간 스텝. 마지막 수단.
+# MUMPS + STABILIZATION + 엄격한 RCTOL=0.01 잔류력 체크.
+# DT 기준: dtmax ≤ 1/(10*f_max)  예) 100 Hz → dtmax: 0.001
+# Usage: KooRemapper implicit dynamic_lv7.yaml
+model: explicit.k
+output: implicit_dyn_lv7.k
+mode: dynamic
+level: 7
+endtime: 1.0          # 실제 동적 사건 시간 (s) — 모델에 맞게 수정
+# NSOLVR=-2(BFGS+LS), ILIMIT=40, MAXREF=50, KFAIL=15
+# DCTOL=0.0001, ECTOL=0.001, LSTOL=0.99, RCTOL=0.01
+# DT0=T/50000, DTMAX=T/10000
+# +STABILIZATION: IAS=1  +SOLVER: LSOLVR=30 (MUMPS)

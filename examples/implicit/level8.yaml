@@ -1,0 +1,24 @@
+# KooRemapper implicit - Level 8 (좌굴/snap-through)
+# 하중-변위 곡선이 꺾이는 구간(negative slope)을 통과해야 하는 경우.
+# Arc-length(Crisfield) 방법으로 standard Newton-Raphson이 발산하는 경로도 추적 가능.
+# NSOLVR=7 (Full Newton-Raphson): arc-length는 NSOLVR=6~9 범위에서만 동작.
+#
+# 사용 예:
+#   - 좌굴 해석 (buckling, post-buckling path tracing)
+#   - 스냅스루 (snap-through: 하중 증가 없이 급격히 변형되는 구간)
+#   - 불안정 경로가 있는 비선형 구조 해석
+#
+# Usage: KooRemapper implicit level8.yaml
+model: explicit.k
+output: implicit_lv8.k
+mode: static
+level: 8
+endtime: 1.0
+# NSOLVR=7(Full Newton+arc-length), ILIMIT=40, MAXREF=50
+# DCTOL=0.0001, ECTOL=0.001, LSTOL=0.99
+# DT0=T/50000, DTMAX=T/10000
+# +KFAIL=15
+# +STABILIZATION: IAS=1
+# +SOLVER: LSOLVR=30 (MUMPS)
+# +RCTOL=0.01
+# +ARC-LENGTH: ARCCTL=0(generalized), ARCMTH=1(Crisfield), ARCDMP=2(off)

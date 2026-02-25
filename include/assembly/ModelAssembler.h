@@ -44,6 +44,7 @@ public:
     bool applyWarpage(const WarpageOperation& op, double E, double nu,
                       const std::string& configDir);
     bool applyOffset(const OffsetOperation& op, double E, double nu);
+    bool applyMatswap(const MatswapOperation& op, const std::string& configDir);
     bool writeOutput(const std::string& outputPrefix);
 
     const std::vector<ElementResult>& getAccumulatedResults() const {

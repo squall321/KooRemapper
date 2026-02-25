@@ -1,0 +1,6 @@
+base_model: test_model.k
+output: test_assemble_matswap_result.k
+operations:
+  - type: matswap
+    bundle: rubber.k
+    pid: 1

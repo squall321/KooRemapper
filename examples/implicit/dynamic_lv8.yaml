@@ -1,0 +1,15 @@
+# KooRemapper implicit - Dynamic Level 8 (좌굴/스냅스루 동적)
+# Crisfield arc-length + Full Newton(NSOLVR=7). 동적 좌굴, 스냅스루 추적.
+# 하중-변위 곡선의 음의 기울기 구간(동적 불안정)을 포착.
+# 주의: arc-length는 NSOLVR 6~9 범위 필요 → NSOLVR=7 고정.
+# Usage: KooRemapper implicit dynamic_lv8.yaml
+model: explicit.k
+output: implicit_dyn_lv8.k
+mode: dynamic
+level: 8
+endtime: 1.0          # 실제 동적 사건 시간 (s) — 모델에 맞게 수정
+# NSOLVR=7(Full Newton), ILIMIT=40, MAXREF=50, KFAIL=15
+# DCTOL=0.0001, ECTOL=0.001, LSTOL=0.99, RCTOL=0.01
+# DT0=T/50000, DTMAX=T/10000
+# +STABILIZATION: IAS=1  +SOLVER: LSOLVR=30 (MUMPS)
+# +ARC-LENGTH: ARCCTL=0(일반화), ARCMTH=1, ARCDMP=2

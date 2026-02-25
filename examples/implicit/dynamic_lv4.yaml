@@ -1,0 +1,14 @@
+# KooRemapper implicit - Dynamic Level 4 (수렴우선 / Conv-First)
+# BFGS+line search(NSOLVR=-2). 강한 비선형 동역학, contact 과도 응답.
+# KFAIL=3: 연속 3회 step bisection 후 강성 행렬 재구성.
+# DT 기준: dtmax ≤ 1/(10*f_max)  예) 1 kHz → dtmax: 0.0001
+# Usage: KooRemapper implicit dynamic_lv4.yaml
+model: explicit.k
+output: implicit_dyn_lv4.k
+mode: dynamic
+level: 4
+endtime: 0.05         # 실제 동적 사건 시간 (s) — 모델에 맞게 수정
+# NSOLVR=-2(BFGS+LS), ILIMIT=20, MAXREF=25
+# DCTOL=0.001, ECTOL=0.010, LSTOL=0.95
+# DT0=T/2000, DTMAX=T/500
+# +KFAIL=3

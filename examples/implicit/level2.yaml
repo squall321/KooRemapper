@@ -1,0 +1,12 @@
+# KooRemapper implicit - Level 2 (표준 / Standard)
+# 일반적인 implicit 해석 기본 세팅.
+# 대부분의 모델에서 첫 시도로 권장.
+# Usage: KooRemapper implicit level2.yaml
+model: explicit.k
+output: implicit_lv2.k
+mode: static
+level: 2
+endtime: 1.0
+# NSOLVR=12(BFGS), ILIMIT=11, MAXREF=15
+# DCTOL=0.001, ECTOL=0.010
+# DT0=T/500, DTMAX=T/100

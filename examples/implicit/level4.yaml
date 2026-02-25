@@ -1,0 +1,13 @@
+# KooRemapper implicit - Level 4 (수렴우선 / Conv-First)
+# NSOLVR=-2 (BFGS+line search). Lv3에서 수렴 안되면 시도.
+# KFAIL=3: 연속 3회 step bisection 후 강성 행렬 재구성.
+# Usage: KooRemapper implicit level4.yaml
+model: explicit.k
+output: implicit_lv4.k
+mode: static
+level: 4
+endtime: 1.0
+# NSOLVR=-2(BFGS+LS), ILIMIT=20, MAXREF=25
+# DCTOL=0.001, ECTOL=0.010, LSTOL=0.95
+# DT0=T/2000, DTMAX=T/500
+# +KFAIL=3
