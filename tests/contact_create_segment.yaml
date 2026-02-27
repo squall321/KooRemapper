@@ -1,0 +1,10 @@
+model: contact_test_model.k
+output: contact_create_segment_result.k
+
+contacts:
+  - action: create
+    type: automatic_surface_to_surface
+    slave:  { pid: 1, as_segment: true }
+    master: { pid: 2, as_segment: true }
+    friction: 0.15
+    title: Segment_Based

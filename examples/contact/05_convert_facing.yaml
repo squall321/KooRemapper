@@ -1,0 +1,14 @@
+# 05_convert_facing.yaml — 기존 접촉을 세그먼트로 변환 (facing 필터)
+# contact_index: 0 (Contact_1_2)을 part→segment로 변환하되,
+# facing: true로 마주보는 면만 추출한다.
+model:  model.k
+output: 05_convert_facing_result.k
+
+contacts:
+  - action: convert
+    contact_index: 0
+    slave_to: segment
+    master_to: segment
+    facing: true
+    tolerance: 0.1
+    normal_angle: 45

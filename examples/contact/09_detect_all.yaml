@@ -1,0 +1,12 @@
+# 09_detect_all.yaml — 전체 파트 간 접촉 자동 감지
+# scope: all → 모든 파트 쌍을 탐색하여 접촉을 자동 생성한다.
+model:  model.k
+output: 09_detect_all_result.k
+
+contacts:
+  - action: detect
+    scope: all
+    tolerance: 0.1
+    auto_create: true
+    contact_type: auto
+    friction: 0.15

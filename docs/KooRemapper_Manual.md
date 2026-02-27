@@ -30,8 +30,16 @@
    - 9.11 [iga](#911-iga--등기하해석-nurbs-박스-생성)
 10. [matswap — 재료 번들 교체](#10-matswap--재료-번들-교체)
 11. [implicit — Explicit→Implicit 변환](#11-implicit--explicitimplicit-변환)
-12. [수학 이론](#12-수학-이론)
-13. [출력 파일 형식](#13-출력-파일-형식)
+12. [contact — 접촉 정의 관리](#12-contact--접촉-정의-관리)
+    - 12.1 [analyze — 접촉 분석](#121-analyze--접촉-분석)
+    - 12.2 [create — 접촉 생성](#122-create--접촉-생성)
+    - 12.3 [convert — 접촉 변환](#123-convert--접촉-변환)
+    - 12.4 [modify — 접촉 수정](#124-modify--접촉-수정)
+    - 12.5 [remove — 접촉 삭제](#125-remove--접촉-삭제)
+    - 12.6 [detect — 접촉 자동 감지](#126-detect--접촉-자동-감지)
+    - 12.7 [세부 옵션 (Optional Cards A~G)](#127-세부-옵션-optional-cards-ag)
+13. [수학 이론](#13-수학-이론)
+14. [출력 파일 형식](#14-출력-파일-형식)
 
 ---
 
@@ -94,6 +102,7 @@ Commands:
   assemble       다중 오퍼레이션 통합 어셈블리
   matswap        재료 번들 교체 (MAT/SECTION/HGID/CURVE)
   implicit       Explicit K 파일 → Implicit 해석 변환
+  contact        접촉 정의 분석/생성/변환/수정/삭제/자동 감지
   info           메시 파일 정보 출력
   help           도움말
   version        버전 정보
@@ -1028,7 +1037,546 @@ endtime: 1.0          # *CONTROL_TERMINATION endtim 갱신 + DT 기준값
 
 ---
 
-## 12. 수학 이론
+## 12. contact — 접촉 정의 관리
+
+```
+KooRemapper.exe contact <config.yaml>
+```
+
+LS-DYNA 모델의 `*CONTACT_*`, `*SET_SEGMENT`, `*SET_PART`, `*SET_NODE` 키워드를 일괄 관리한다.
+하나의 YAML 설정으로 분석, 생성, 변환, 수정, 삭제, 자동 감지를 순차 실행할 수 있다.
+
+### 기본 YAML 구조
+
+```yaml
+model:  model.k                    # 입력 K-file (필수)
+output: model_contact.k            # 출력 K-file (analyze-only 시 생략 가능)
+
+contacts:
+  - action: analyze                # 첫 번째 액션
+    ...
+  - action: create                 # 두 번째 액션 (순차 실행)
+    ...
+```
+
+---
+
+### 12.1 analyze — 접촉 분석
+
+모델의 기존 접촉 정의를 리포트한다. 수정 없이 읽기 전용.
+
+```yaml
+contacts:
+  - action: analyze
+```
+
+출력 예:
+```
+--- Contacts (2) ---
+  [0] *CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_TITLE
+      Title: Contact_1_2
+      SSID=1 (SSTYP=3/Part)  MSID=2 (MSTYP=3/Part)
+      FS=0.2  FD=0.1  DC=0  VC=0  VDC=0
+  [1] *CONTACT_TIED_SURFACE_TO_SURFACE_TITLE
+      Title: Contact_2_3
+      SSID=2 (SSTYP=3/Part)  MSID=3 (MSTYP=3/Part)
+      FS=0  FD=0  DC=0  VC=0  VDC=0
+```
+
+`contact_index` 번호([0], [1], ...)를 convert/modify/remove에서 참조한다.
+
+---
+
+### 12.2 create — 접촉 생성
+
+#### 모드 1: Part ID 직접 지정 (SSTYP=3)
+
+```yaml
+contacts:
+  - action: create
+    type: automatic_surface_to_surface
+    slave:  { pid: 1 }
+    master: { pid: 2 }
+    friction: 0.3
+    soft: 2
+    title: Case_to_Board
+```
+
+#### 모드 2: 복수 PID → SET_PART 자동 생성 (SSTYP=2)
+
+```yaml
+contacts:
+  - action: create
+    type: automatic_surface_to_surface
+    slave:  { pids: [1, 2, 3] }
+    master: { pids: [4, 5] }
+```
+
+#### 모드 3: 표면 세그먼트 추출 → SET_SEGMENT (SSTYP=0)
+
+```yaml
+contacts:
+  - action: create
+    type: automatic_surface_to_surface
+    slave:  { pid: 1, as_segment: true }
+    master: { pid: 2, as_segment: true }
+```
+
+#### 모드 4: 세그먼트 추출 + facing 필터 (마주보는 면만)
+
+얇은 파트에서 전체 외곽면을 segment로 뽑으면 반대쪽 면이 tied 접촉에 포함되어 에러가 발생할 수 있다.
+`facing: true`를 추가하면 detect 알고리즘으로 **실제로 마주보는 면만** 추출한다.
+
+```yaml
+contacts:
+  - action: create
+    type: tied_surface_to_surface
+    slave:  { pid: 1, as_segment: true, facing: true }
+    master: { pid: 2, as_segment: true, facing: true }
+    tolerance: 0.05          # facing 판정 갭 허용치
+    normal_angle: 30         # 법선 각도 (작을수록 보수적)
+```
+
+| `normal_angle` | 효과 |
+|---|---|
+| `30` (보수적) | 정면 대향 면만 — 얇은 파트의 tied에 안전 |
+| `45` (기본) | 약간 기울어진 면도 포함 |
+| `80` (관대) | 복잡한 형상에서 비스듬히 닿는 면까지 포함 |
+
+> `facing: true`는 양쪽(slave, master) 모두에 지정해야 동작한다.
+
+#### 모드 5: Single Surface 자기접촉
+
+```yaml
+contacts:
+  - action: create
+    type: automatic_single_surface
+    slave:  { pids: [1, 2, 3, 4] }
+    soft: 2
+```
+
+#### create에서 사용 가능한 type 값
+
+LS-DYNA의 모든 접촉 타입을 사용할 수 있다. `type` 값은 대문자 변환 + 하이픈→언더스코어로 정규화되어 `*CONTACT_<값>` 키워드가 된다.
+
+| type (YAML) | LS-DYNA 키워드 |
+|---|---|
+| `automatic_surface_to_surface` | `*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE` |
+| `tied_surface_to_surface` | `*CONTACT_TIED_SURFACE_TO_SURFACE` |
+| `automatic_single_surface` | `*CONTACT_AUTOMATIC_SINGLE_SURFACE` |
+| `eroding_surface_to_surface` | `*CONTACT_ERODING_SURFACE_TO_SURFACE` |
+| `eroding_single_surface` | `*CONTACT_ERODING_SINGLE_SURFACE` |
+| `forming_surface_to_surface` | `*CONTACT_FORMING_SURFACE_TO_SURFACE` |
+| `forming_one_way_surface_to_surface` | `*CONTACT_FORMING_ONE_WAY_SURFACE_TO_SURFACE` |
+| `forming_nodes_to_surface` | `*CONTACT_FORMING_NODES_TO_SURFACE` |
+| `nodes_to_surface` | `*CONTACT_NODES_TO_SURFACE` |
+| `automatic_nodes_to_surface` | `*CONTACT_AUTOMATIC_NODES_TO_SURFACE` |
+| `tied_nodes_to_surface` | `*CONTACT_TIED_NODES_TO_SURFACE` |
+| `tied_shell_edge_to_surface` | `*CONTACT_TIED_SHELL_EDGE_TO_SURFACE` |
+| `automatic_surface_to_surface_mortar` | `*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_MORTAR` |
+| `tied_surface_to_surface_mortar` | `*CONTACT_TIED_SURFACE_TO_SURFACE_MORTAR` |
+| (기타 직접 입력) | `*CONTACT_<입력값>` (대문자 변환) |
+
+---
+
+### 12.3 convert — 접촉 변환
+
+기존 접촉의 SSTYP/MSTYP 방식을 변경한다.
+
+```yaml
+contacts:
+  - action: convert
+    contact_index: 0          # analyze 리포트의 인덱스
+    slave_to: segment         # part → segment로 변환
+    master_to: segment
+```
+
+변환 옵션:
+- `segment`: Part ID(SSTYP=3) → 표면 추출 → SET_SEGMENT(SSTYP=0)
+- `part`: Part ID(SSTYP=3) → SET_PART(SSTYP=2)
+
+#### facing 필터 (convert)
+
+`facing: true`를 추가하면 양쪽 파트의 마주보는 면만 segment로 변환한다.
+얇은 파트의 tied 변환에 필수.
+
+```yaml
+contacts:
+  - action: convert
+    contact_index: 0
+    slave_to: segment
+    master_to: segment
+    facing: true
+    tolerance: 0.05
+    normal_angle: 30
+```
+
+> `slave_to`와 `master_to` 모두 `segment`일 때만 facing이 동작한다 (양쪽 정보가 있어야 대향 판정 가능).
+
+---
+
+### 12.4 modify — 접촉 수정
+
+기존 접촉의 파라미터를 변경한다.
+
+```yaml
+contacts:
+  - action: modify
+    contact_index: 0
+    friction: 0.5
+    soft: 2
+    depth: 35
+    penmax: 0.5
+```
+
+모든 Card 1~3 및 Optional Card A~G 필드를 수정할 수 있다 (하단 [12.7 세부 옵션](#127-세부-옵션-optional-cards-ag) 참조).
+
+---
+
+### 12.5 remove — 접촉 삭제
+
+```yaml
+contacts:
+  - action: remove
+    contact_index: 0          # 해당 접촉 전체 블록 삭제
+```
+
+---
+
+### 12.6 detect — 접촉 자동 감지
+
+두 파트가 맞닿는 영역의 세그먼트를 **Spatial Hash Grid** 알고리즘으로 고속 검출한다.
+`auto_create: true`일 때 검출된 각 파트 쌍에 대해 SET_SEGMENT + CONTACT 카드를 자동 생성한다.
+
+#### 모드 1: 명시적 PID 지정
+
+```yaml
+contacts:
+  - action: detect
+    slave:  { pid: 1 }
+    master: { pid: 2 }
+    tolerance: 0.1
+    auto_create: true
+    contact_type: auto
+    friction: 0.20
+```
+
+#### 모드 2: 전체 파트 자동 감지 (scope: all)
+
+모든 파트 간 접촉을 한 번에 검출한다. Global Grid로 O(N) 처리.
+
+```yaml
+contacts:
+  - action: detect
+    scope: all
+    exclude: [rigid, null, air]    # 파트 이름에 포함되면 제외
+    tolerance: 0.1
+    auto_create: true
+    contact_type: auto
+    friction: 0.15
+```
+
+#### 모드 3: 키워드 기반 파트 선택
+
+파트 이름에 키워드가 포함된 파트만 대상으로 감지한다.
+
+```yaml
+contacts:
+  - action: detect
+    include: [bolt, plate, housing]   # 이름에 포함되면 대상 (target)
+    exclude: [rigid]                  # 이름에 포함되면 제외
+    tolerance: 0.05
+    auto_create: true
+    contact_type: tied
+    title_prefix: Tied
+```
+
+#### detect 전용 옵션
+
+| YAML 키 | 기본값 | 설명 |
+|---|---|---|
+| `scope` | (없음) | `all`: 모든 파트 쌍 탐색 |
+| `include` | (없음) | 대상 파트 이름 키워드 리스트 (대소문자 무시, 부분 일치) |
+| `exclude` | (없음) | 제외 파트 이름 키워드 리스트 |
+| `tolerance` | 0.1 | 접촉 간격 허용치 (gap tolerance) |
+| `normal_angle` | 45.0 | 법선 방향 허용 각도 (°). 두 면의 법선이 이 각도 이내로 마주봐야 접촉 판정 |
+| `auto_create` | false | true 시 검출된 쌍마다 SET_SEGMENT + CONTACT 자동 생성 |
+| `contact_type` | `auto` | 생성할 접촉 유형 (아래 표 참조) |
+| `title_prefix` | `Auto` | 자동 생성 접촉 제목 접두사 |
+| `skip_existing` | (없음) | 기존 접촉이 있는 PID 쌍은 건너뜀. `tied`: tied만, `all`: 모든 타입 |
+| `subtract_existing` | false | true 시 기존 tied 세그먼트를 차집합으로 제외하고 나머지만 생성 |
+
+#### skip_existing vs subtract_existing
+
+| 옵션 | 동작 | 적합한 상황 |
+|---|---|---|
+| `skip_existing: tied` | tied가 있는 쌍은 통째로 건너뜀 | 전체 접촉면이 tied인 경우 (간단, 빠름) |
+| `skip_existing: all` | 어떤 접촉이든 있으면 건너뜀 | 기존 접촉을 건드리지 않을 때 |
+| `subtract_existing: true` | tied 세그먼트만 빼고 나머지 생성 | 부분 본딩 + 나머지 슬라이딩 |
+
+```yaml
+# 예시: tied 쌍 건너뛰기
+- action: detect
+  scope: all
+  auto_create: true
+  skip_existing: tied
+
+# 예시: tied 세그먼트만 빼고 나머지 생성
+- action: detect
+  scope: all
+  auto_create: true
+  subtract_existing: true
+```
+
+#### contact_type 프리셋
+
+자주 쓰는 7개 타입은 약칭으로 간편하게 지정할 수 있다.
+약칭에 해당하지 않는 값은 그대로 대문자 변환되어 `*CONTACT_<값>` 키워드가 되므로, **LS-DYNA의 모든 접촉 타입**을 사용할 수 있다.
+
+| YAML 값 | LS-DYNA 키워드 | 용도 |
+|---|---|---|
+| `auto` (기본) | `AUTOMATIC_SURFACE_TO_SURFACE` | 범용 |
+| `tied` | `TIED_SURFACE_TO_SURFACE` | 접합 (용접/접착) |
+| `mortar` | `AUTOMATIC_SURFACE_TO_SURFACE_MORTAR` | 고정밀 |
+| `tied_mortar` | `TIED_SURFACE_TO_SURFACE_MORTAR` | 접합 + 고정밀 |
+| `single` | `AUTOMATIC_SINGLE_SURFACE` | 자기접촉 |
+| `eroding` | `ERODING_SURFACE_TO_SURFACE` | 요소 파괴 |
+| `forming` | `FORMING_SURFACE_TO_SURFACE` | 성형 해석 |
+
+커스텀 예시:
+```yaml
+contact_type: forming_one_way_surface_to_surface
+# → *CONTACT_FORMING_ONE_WAY_SURFACE_TO_SURFACE
+
+contact_type: nodes_to_surface
+# → *CONTACT_NODES_TO_SURFACE
+
+contact_type: tied_shell_edge_to_surface
+# → *CONTACT_TIED_SHELL_EDGE_TO_SURFACE
+```
+
+#### 파트 선택 동작 정리
+
+| 조건 | target (감지 대상) | counter (비교 대상) |
+|---|---|---|
+| `scope: all` | 전체 비제외 파트 | = target |
+| `include: [kw]` | 키워드 매치 파트 | 전체 비제외 파트 |
+| `slave/master` 직접 | slave PID | master PID |
+
+#### 감지 알고리즘 요약
+
+1. **표면 추출**: 각 대상 파트의 외부 면(boundary face) 추출. 내부 공유면 자동 제거
+2. **Spatial Hash Grid**: face AABB를 cellSize 격자에 multi-cell 삽입
+3. **Narrow Phase** (4단계):
+   - Stage 1: centroid 거리 < (radiusA + radiusB + gap)
+   - Stage 2: |법선 내적| > cos(normalAngle) — 절대값으로 법선 방향 비일관성 해결
+   - Stage 3: 양방향 vertex-to-plane 투영 + 투영점 범위 검사
+   - Stage 4: 최소 gap 기록
+4. **결과 그룹핑**: (pidA, pidB) 쌍별로 접촉 면 집계
+
+#### detect 콘솔 출력 예시
+
+```
+[contact] Part selection: 12 target, 25 counter (3 excluded)
+[contact] Extracted surfaces: 1847 total faces
+[contact] Detected 3 contacting pair(s):
+  PID 1 (Bolt_M8) <-> PID 5 (Housing): 23/18 segments, gap 0.000~0.080
+  PID 2 (Plate) <-> PID 5 (Housing): 142/138 segments, gap 0.010~0.095
+  PID 3 (Washer) <-> PID 5 (Housing): 12/12 segments, gap 0.000~0.002
+[contact] Created 3 contacts, 6 SET_SEGMENTs
+```
+
+---
+
+### 12.7 세부 옵션 (Optional Cards A~G)
+
+create, modify, detect(auto_create) 모든 액션에서 동일하게 사용 가능.
+YAML 키 이름은 LS-DYNA 매뉴얼 변수명과 동일 (소문자).
+
+#### Card 1 (기본)
+
+| YAML 키 | LS-DYNA 필드 | 타입 | 설명 |
+|---|---|---|---|
+| `sboxid` | SBOXID | int | Slave box ID |
+| `mboxid` | MBOXID | int | Master box ID |
+| `spr` | SPR | int | Slave 결과 출력 (0/1/2) |
+| `mpr` | MPR | int | Master 결과 출력 (0/1/2) |
+
+#### Card 2 (마찰/시간)
+
+| YAML 키 | LS-DYNA 필드 | 타입 | 설명 |
+|---|---|---|---|
+| `friction` | FS | double | 정적 마찰 계수 |
+| `fd` | FD | double | 동적 마찰 계수 |
+| `dc` | DC | double | 감쇠 전이 상수 |
+| `vc` | VC | double | 점성 마찰 계수 |
+| `vdc` | VDC | double | 점성 감쇠 계수 |
+| `penchk` | PENCHK | int | 관통 검사 (0/1/2) |
+| `bt` | BT | double | 접촉 시작 시간 |
+| `dt` | DT | double | 접촉 종료 시간 |
+
+#### Card 3 (스케일 팩터)
+
+| YAML 키 | LS-DYNA 필드 | 타입 | 설명 |
+|---|---|---|---|
+| `sfsa` | SFSA | double | Slave penalty 스케일 |
+| `sfsb` | SFSB | double | Master penalty 스케일 |
+| `sast` | SAST | double | Slave 두께 오프셋 |
+| `sbst` | SBST | double | Master 두께 오프셋 |
+| `sfsat` | SFSAT | double | Slave 접촉 두께 스케일 |
+| `sfsbt` | SFSBT | double | Master 접촉 두께 스케일 |
+| `fsf` | FSF | double | Coulomb 마찰 스케일 |
+| `vsf` | VSF | double | 점성 마찰 스케일 |
+
+#### Card A (소프트닝/깊이)
+
+| YAML 키 | LS-DYNA 필드 | 타입 | 설명 |
+|---|---|---|---|
+| `soft` | SOFT | int | 소프트 제약 (0/1/2) |
+| `sofscl` | SOFSCL | double | SOFT 스케일 팩터 |
+| `lcidab` | LCIDAB | int | 접촉 고착 Load Curve ID |
+| `maxpar` | MAXPAR | double | 최대 관통 비율 |
+| `sbopt` | SBOPT | int | 세그먼트 기반 옵션 (1~6) |
+| `depth` | DEPTH | int | 검색 깊이 (0~45) |
+| `bsort` | BSORT | int | 버킷 정렬 주기 |
+| `frcfrq` | FRCFRQ | int | 마찰력 갱신 주기 |
+
+#### Card B (두께/대칭)
+
+| YAML 키 | LS-DYNA 필드 | 타입 | 설명 |
+|---|---|---|---|
+| `penmax` | PENMAX | double | 최대 관통량 |
+| `thkopt` | THKOPT | int | 두께 옵션 (0/1/2) |
+| `shlthk` | SHLTHK | int | 셸 두께 고려 (0/1/2) |
+| `snlog` | SNLOG | int | 로그 출력 옵션 |
+| `isym` | ISYM | int | 대칭 옵션 |
+| `i2d3d` | I2D3D | int | 2D/3D 접촉 옵션 |
+| `sldthk` | SLDTHK | double | 솔리드 요소 두께 |
+| `sldstf` | SLDSTF | double | 솔리드 요소 강성 |
+
+#### Card C (간격/에지)
+
+| YAML 키 | LS-DYNA 필드 | 타입 | 설명 |
+|---|---|---|---|
+| `igap` | IGAP | int | 간격 처리 (0/1/2) |
+| `ignore` | IGNORE | int | 관통 무시 (0/1/2) |
+| `dprfac` | DPRFAC | double | 깊이 비율 팩터 |
+| `dtstif` | DTSTIF | double | 시간 스텝 강성 비율 |
+| `edgek` | EDGEK | double | 에지 보정 |
+| `flangl` | FLANGL | double | 플랜지 각도 |
+| `cid_rcf` | CID_RCF | int | 접촉력 좌표계 ID |
+
+#### Card D (타이/에지)
+
+| YAML 키 | LS-DYNA 필드 | 타입 | 설명 |
+|---|---|---|---|
+| `q2tri` | Q2TRI | int | 4각형→삼각형 분할 |
+| `dtpchk` | DTPCHK | double | 시간 스텝 관통 검사 |
+| `sfnbr` | SFNBR | double | Neighbor 검색 스케일 |
+| `fnlscl` | FNLSCL | double | 법선력 스케일 |
+| `dnlscl` | DNLSCL | double | 법선 변위 스케일 |
+| `tcso` | TCSO | int | 접촉 출력 옵션 |
+| `tiedid` | TIEDID | int | Tied 인터페이스 ID |
+| `shledg` | SHLEDG | int | 셸 에지 접촉 (0/1) |
+
+#### Card E (대칭/마찰)
+
+| YAML 키 | LS-DYNA 필드 | 타입 | 설명 |
+|---|---|---|---|
+| `sharec` | SHAREC | int | 공유 제약 |
+| `cparm8` | CPARM8 | int | 파라미터 8 |
+| `ipback` | IPBACK | int | 압력 반환 |
+| `srnde` | SRNDE | int | 라운딩 에러 |
+| `fricsf` | FRICSF | double | 마찰 스케일 팩터 |
+| `icor` | ICOR | int | 보정 옵션 |
+| `ftorq` | FTORQ | int | 마찰 토크 |
+| `region` | REGION | int | 영역 지정 |
+
+#### Card F (강성/허용차)
+
+| YAML 키 | LS-DYNA 필드 | 타입 | 설명 |
+|---|---|---|---|
+| `pstiff` | PSTIFF | int | Penalty 강성 (0/1) |
+| `ignroff` | IGNROFF | int | 오프셋 무시 |
+| `fstol` | FSTOL | double | 마찰 허용차 |
+| `d2binr` | D2BINR | int | 2진 탐색 |
+| `ssftyp` | SSFTYP | int | 세그먼트 검색 타입 |
+| `swtpr` | SWTPR | int | 스위치 출력 |
+| `tetfac` | TETFAC | double | TET 보정 팩터 |
+
+#### Card G (오프셋)
+
+| YAML 키 | LS-DYNA 필드 | 타입 | 설명 |
+|---|---|---|---|
+| `shloff` | SHLOFF | double | 셸 오프셋 |
+
+> **카드 의존성**: Card G를 지정하면 A~F가 자동 포함, Card D를 지정하면 A~C가 자동 포함 (LS-DYNA 고정폭 카드 순서 요구).
+
+#### 세부 옵션 사용 예시
+
+```yaml
+contacts:
+  # detect + 전체 옵션
+  - action: detect
+    scope: all
+    tolerance: 0.1
+    auto_create: true
+    contact_type: auto
+    friction: 0.15
+    fd: 0.10
+    soft: 2
+    sofscl: 0.1
+    depth: 35
+    sbopt: 3
+    penmax: 0.5
+    thkopt: 1
+    shlthk: 1
+    igap: 2
+    ignore: 1
+
+  # create + Card A~C
+  - action: create
+    type: automatic_surface_to_surface
+    slave:  { pid: 1 }
+    master: { pid: 2 }
+    friction: 0.3
+    soft: 2
+    sofscl: 0.1
+    depth: 35
+    penmax: 1.0
+    shlthk: 1
+    igap: 2
+
+  # modify: 기존 접촉에 옵션 추가/변경
+  - action: modify
+    contact_index: 0
+    soft: 2
+    depth: 35
+    shlthk: 1
+```
+
+---
+
+### SSTYP/MSTYP 값 참조
+
+| 값 | 의미 |
+|---|---|
+| 0 | Segment set (`*SET_SEGMENT`) |
+| 1 | Shell element set (`*SET_SHELL`) |
+| 2 | Part set (`*SET_PART`) |
+| 3 | Part ID (direct) |
+| 4 | Node set (`*SET_NODE`) |
+| 5 | All parts (entire model) |
+
+### 워크플로우
+
+1. `analyze` 액션으로 기존 접촉 현황 및 인덱스 확인
+2. `contact_index`로 convert/modify/remove 대상 지정
+3. 여러 액션을 하나의 YAML에 순서대로 나열하여 일괄 처리
+
+---
+
+## 13. 수학 이론
 
 ### 12.1 등매개변수 매핑 (map)
 
@@ -1082,7 +1630,7 @@ $$\overline{\varepsilon}^p = \frac{2}{\sqrt{3}} |\varepsilon_{max}|$$
 
 ---
 
-## 13. 출력 파일 형식
+## 14. 출력 파일 형식
 
 ### dynain 파일 (`*INITIAL_STRESS_SOLID`)
 

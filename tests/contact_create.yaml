@@ -1,0 +1,11 @@
+model: contact_test_model.k
+output: contact_create_result.k
+
+contacts:
+  - action: create
+    type: automatic_surface_to_surface
+    slave:  { pid: 1 }
+    master: { pid: 3 }
+    friction: 0.3
+    soft: 2
+    title: New_Contact_1_3

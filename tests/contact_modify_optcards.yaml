@@ -1,0 +1,13 @@
+model: contact_create_optcards_result.k
+output: contact_modify_optcards_result.k
+
+contacts:
+  - action: modify
+    contact_index: 2
+    friction: 0.50
+    soft: 1
+    depth: 5
+    shlthk: 0
+    igap: 1
+
+  - action: analyze

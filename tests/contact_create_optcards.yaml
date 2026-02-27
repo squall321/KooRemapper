@@ -1,0 +1,25 @@
+model: contact_test_model.k
+output: contact_create_optcards_result.k
+
+contacts:
+  - action: create
+    type: automatic_surface_to_surface
+    slave:  { pid: 1 }
+    master: { pid: 2 }
+    friction: 0.30
+    title: OptCard_Test
+
+    # Card A
+    soft: 2
+    sofscl: 0.1
+    maxpar: 1.025
+    sbopt: 2
+    depth: 2
+
+    # Card B
+    shlthk: 1
+    penmax: 0.0
+
+    # Card C
+    igap: 2
+    ignore: 1

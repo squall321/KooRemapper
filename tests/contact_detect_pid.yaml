@@ -1,0 +1,11 @@
+model: contact_test_model.k
+output: contact_detect_pid_result.k
+
+contacts:
+  - action: detect
+    slave:  { pid: 1 }
+    master: { pid: 2 }
+    tolerance: 0.1
+    auto_create: true
+    contact_type: auto
+    friction: 0.20

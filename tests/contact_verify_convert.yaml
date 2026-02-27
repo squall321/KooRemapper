@@ -1,0 +1,4 @@
+model: contact_convert_result.k
+
+contacts:
+  - action: analyze

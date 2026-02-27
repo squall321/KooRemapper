@@ -1,0 +1,8 @@
+# 07_remove.yaml — 접촉 삭제
+# contact_index: 1 (Contact_2_3)을 삭제한다.
+model:  model.k
+output: 07_remove_result.k
+
+contacts:
+  - action: remove
+    contact_index: 1

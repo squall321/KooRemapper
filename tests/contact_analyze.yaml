@@ -1,0 +1,4 @@
+model: contact_test_model.k
+
+contacts:
+  - action: analyze

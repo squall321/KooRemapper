@@ -1,0 +1,4 @@
+model: contact_create_optcards_result.k
+
+contacts:
+  - action: analyze

@@ -1,0 +1,13 @@
+# 10_detect_keyword.yaml — 키워드 기반 파트 선택 감지
+# include: 파트 이름에 키워드가 포함된 파트만 대상 (대소문자 무시)
+# exclude: 해당 키워드가 포함된 파트는 제외
+model:  model.k
+output: 10_detect_keyword_result.k
+
+contacts:
+  - action: detect
+    include: [Left]
+    tolerance: 0.1
+    auto_create: true
+    contact_type: tied
+    title_prefix: Tied

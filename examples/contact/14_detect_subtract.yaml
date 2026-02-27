@@ -1,0 +1,14 @@
+# 14_detect_subtract.yaml — subtract_existing: tied 세그먼트 차집합
+# PID 2↔3에서 TIED로 묶인 세그먼트를 제외하고 나머지만 일반 접촉으로 생성.
+# 이 테스트 모델에서는 전체가 tied이므로 0개 남아 skip된다.
+model:  model.k
+output: 14_detect_subtract_result.k
+
+contacts:
+  - action: detect
+    scope: all
+    tolerance: 0.1
+    auto_create: true
+    contact_type: auto
+    friction: 0.15
+    subtract_existing: true

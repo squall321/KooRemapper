@@ -1,0 +1,21 @@
+model: contact_test_model.k
+output: contact_detect_optcards_result.k
+
+contacts:
+  - action: detect
+    slave:  { pid: 1 }
+    master: { pid: 2 }
+    tolerance: 0.1
+    auto_create: true
+    contact_type: auto
+    friction: 0.15
+    fd: 0.10
+    soft: 2
+    sofscl: 0.1
+    depth: 35
+    sbopt: 3
+    penmax: 0.5
+    thkopt: 1
+    shlthk: 1
+    igap: 2
+    ignore: 1

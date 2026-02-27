@@ -1,0 +1,15 @@
+model: contact_test_model.k
+output: contact_create_pids_result.k
+
+contacts:
+  - action: create
+    type: automatic_surface_to_surface
+    slave:  { pids: [1, 2] }
+    master: { pids: [3] }
+    friction: 0.25
+
+  - action: create
+    type: automatic_single_surface
+    slave:  { pids: [1, 2, 3] }
+    soft: 2
+    title: SelfContact_All

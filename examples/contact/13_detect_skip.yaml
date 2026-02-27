@@ -1,0 +1,14 @@
+# 13_detect_skip.yaml — skip_existing: 기존 tied 쌍 건너뛰기
+# PID 2↔3은 이미 TIED가 있으므로 일반 접촉을 중복 생성하지 않는다.
+# PID 1↔2는 TIED가 아니므로 정상 생성.
+model:  model.k
+output: 13_detect_skip_result.k
+
+contacts:
+  - action: detect
+    scope: all
+    tolerance: 0.1
+    auto_create: true
+    contact_type: auto
+    friction: 0.15
+    skip_existing: tied     # tied/all

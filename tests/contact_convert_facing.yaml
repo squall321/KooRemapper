@@ -1,0 +1,12 @@
+model: contact_test_model.k
+output: contact_convert_facing_result.k
+
+contacts:
+  # Convert existing contact [0] to segment with facing filter
+  - action: convert
+    contact_index: 0
+    slave_to: segment
+    master_to: segment
+    facing: true
+    tolerance: 0.1
+    normal_angle: 45

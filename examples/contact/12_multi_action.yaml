@@ -1,0 +1,26 @@
+# 12_multi_action.yaml — 복합 워크플로우
+# 하나의 YAML에 여러 액션을 순서대로 실행한다.
+# 1) 기존 tied 접촉 삭제
+# 2) 전체 파트 자동 감지로 새 접촉 생성
+# 3) 첫 번째 기존 접촉의 마찰 수정
+model:  model.k
+output: 12_multi_action_result.k
+
+contacts:
+  # Step 1: 기존 tied 접촉(index 1) 삭제
+  - action: remove
+    contact_index: 1
+
+  # Step 2: 전체 파트 간 자동 감지 + mortar 접촉 생성
+  - action: detect
+    scope: all
+    tolerance: 0.1
+    auto_create: true
+    contact_type: mortar
+    friction: 0.2
+    soft: 2
+
+  # Step 3: 기존 접촉(index 0)의 마찰 변경
+  - action: modify
+    contact_index: 0
+    friction: 0.4

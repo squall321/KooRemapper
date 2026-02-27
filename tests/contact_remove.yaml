@@ -1,0 +1,6 @@
+model: contact_test_model.k
+output: contact_remove_result.k
+
+contacts:
+  - action: remove
+    contact_index: 1

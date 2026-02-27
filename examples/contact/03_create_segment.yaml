@@ -1,0 +1,12 @@
+# 03_create_segment.yaml — 표면 세그먼트 추출 생성 (SSTYP=0)
+# 파트의 외곽면을 SET_SEGMENT로 추출하여 접촉 생성.
+model:  model.k
+output: 03_create_segment_result.k
+
+contacts:
+  - action: create
+    type: automatic_surface_to_surface
+    slave:  { pid: 1, as_segment: true }
+    master: { pid: 2, as_segment: true }
+    friction: 0.15
+    title: Segment_Based

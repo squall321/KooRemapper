@@ -1,0 +1,13 @@
+# 04_create_facing.yaml — facing 필터로 마주보는 면만 추출
+# 얇은 파트에서 반대면이 tied에 포함되는 문제를 방지한다.
+# facing: true → detect 알고리즘으로 실제 대향면만 SET_SEGMENT에 포함.
+model:  model.k
+output: 04_create_facing_result.k
+
+contacts:
+  - action: create
+    type: tied_surface_to_surface
+    slave:  { pid: 1, as_segment: true, facing: true }
+    master: { pid: 2, as_segment: true, facing: true }
+    tolerance: 0.1
+    normal_angle: 30        # 보수적: 정면 대향만

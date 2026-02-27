@@ -1,0 +1,11 @@
+model: contact_test_model.k
+output: contact_create_facing_result.k
+
+contacts:
+  # Create with facing filter: only mutually facing segments
+  - action: create
+    type: tied_surface_to_surface
+    slave:  { pid: 1, as_segment: true, facing: true }
+    master: { pid: 2, as_segment: true, facing: true }
+    tolerance: 0.1
+    normal_angle: 45

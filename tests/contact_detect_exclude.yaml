@@ -1,0 +1,10 @@
+model: contact_test_model.k
+output: contact_detect_exclude_result.k
+
+contacts:
+  - action: detect
+    scope: all
+    exclude: [Right]
+    tolerance: 0.1
+    auto_create: true
+    contact_type: mortar

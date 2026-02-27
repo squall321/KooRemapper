@@ -1,0 +1,6 @@
+# 01_analyze.yaml — 접촉 분석 (읽기 전용)
+# 모델의 기존 접촉 정의를 리포트한다. 수정 없음.
+model: model.k
+
+contacts:
+  - action: analyze

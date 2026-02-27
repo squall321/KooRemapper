@@ -1,0 +1,8 @@
+model: contact_test_model.k
+output: contact_convert_result.k
+
+contacts:
+  - action: convert
+    contact_index: 0
+    slave_to: segment
+    master_to: segment

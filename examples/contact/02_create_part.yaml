@@ -1,0 +1,13 @@
+# 02_create_part.yaml — Part ID로 접촉 생성 (SSTYP=3)
+# PID 1 (Left) ↔ PID 3 (Right) 사이에 새 접촉을 생성한다.
+model:  model.k
+output: 02_create_part_result.k
+
+contacts:
+  - action: create
+    type: automatic_surface_to_surface
+    slave:  { pid: 1 }
+    master: { pid: 3 }
+    friction: 0.3
+    soft: 2
+    title: Left_to_Right

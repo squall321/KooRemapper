@@ -1,0 +1,12 @@
+# 06_modify.yaml — 기존 접촉 파라미터 수정
+# contact_index: 0 (Contact_1_2)의 마찰계수와 SOFT 옵션을 변경한다.
+model:  model.k
+output: 06_modify_result.k
+
+contacts:
+  - action: modify
+    contact_index: 0
+    friction: 0.5
+    soft: 2
+    depth: 35
+    shlthk: 1
