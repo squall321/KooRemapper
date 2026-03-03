@@ -1576,7 +1576,182 @@ contacts:
 
 ---
 
-## 13. 수학 이론
+## 13. optimize — 재료별 해석 최적화
+
+`optimize` 명령은 특정 재료(예: 고무)에 최적화된 LS-DYNA 컨트롤 카드를 자동으로 적용합니다.
+단독 명령어로도 사용 가능하고, `matswap` YAML에 `optimize:` 키를 추가하여 재료 교환 직후 자동 적용할 수도 있습니다.
+
+### 사용법
+
+#### 단독 명령
+
+```bash
+KooRemapper optimize config.yaml
+```
+
+**YAML 형식:**
+
+```yaml
+model: my_model.k
+output: my_model_optimized.k
+optimize: rubber          # 최적화 모드 (현재: rubber만 지원)
+pids: [2, 5, 8]          # 최적화 대상 파트 ID (재료 파트)
+tssfac: 0.67             # TSSFAC 설정값 (기본: 0.67)
+analysis_type: ""        # "explicit" / "implicit" / "" (자동 감지)
+```
+
+#### matswap 통합
+
+```yaml
+model: base_model.k
+output: swapped_model.k
+swaps:
+  - bundle: ../materials/rubber.k
+    pid: 3
+optimize: rubber          # matswap 완료 후 자동 실행
+tssfac: 0.67
+analysis_type: ""
+```
+
+---
+
+### YAML 옵션
+
+| 키 | 타입 | 기본값 | 설명 |
+|---|---|---|---|
+| `model` | string | — | 입력 K-file 경로 (단독 모드) |
+| `output` | string | — | 출력 K-file 경로 (단독 모드) |
+| `optimize` | string | — | 최적화 모드. 현재 `rubber`만 지원 |
+| `pids` | int list | — | 최적화 대상 파트 ID 목록. 접촉 카드 필터링에 사용 |
+| `tssfac` | float | `0.67` | `*CONTROL_TIMESTEP` TSSFAC 필드 값 |
+| `analysis_type` | string | `""` (자동) | `"explicit"`, `"implicit"`, `""` |
+
+---
+
+### rubber 모드 — 적용 액션
+
+#### 해석 타입 자동 감지
+
+`analysis_type`이 지정되지 않으면 모델 파일에서 `*CONTROL_IMPLICIT_*` 키워드 존재 여부로 자동 판단합니다.
+
+- `*CONTROL_IMPLICIT_*` 발견 → **implicit** 모드
+- 없음 → **explicit** 모드
+
+명시적으로 오버라이드 가능:
+
+```yaml
+analysis_type: explicit   # implicit 모델에도 explicit 설정 강제 적용
+analysis_type: implicit   # 명시적으로 implicit 지정
+```
+
+---
+
+#### 공통 적용 (explicit + implicit 모두)
+
+| 카드 | 필드 | 목표값 | 동작 |
+|---|---|---|---|
+| `*CONTROL_ACCURACY` | INN (Field 2) | `4` | 강제 수정 및 알림 |
+| `*CONTROL_ENERGY` | HGEN/RWEN/SLNTEN/RYLEN | `2/2/2/2` | 없으면 삽입, 있으면 강제 수정 |
+| `*CONTACT_*` (대상 PID 포함) | SOFT | `0` | 강제 수정 |
+| `*CONTACT_*` (대상 PID 포함) | SBOPT | `2` | 강제 수정 |
+
+**INN=4 이유**: 고무 대변형 해석에서 불변량 기반 뉴마크 적분(INN=4)은 강체 회전 오차를 제거하여 수렴 안정성을 크게 개선합니다.
+
+**CONTROL_ENERGY**: 고무 에너지 흡수/방출 정확도 향상. HGEN=2(전체 에너지 추적), RWEN=2(레일리 에너지), SLNTEN=2(슬라이딩), RYLEN=2(레일리 감쇠).
+
+**CONTACT SOFT/SBOPT**: 고무-강체 접촉에서 penalty 기반(SOFT=0) + 향상된 segment 검색(SBOPT=2)이 권장됩니다.
+
+---
+
+#### Explicit 전용 적용
+
+| 카드 | 필드 | 동작 |
+|---|---|---|
+| `*CONTROL_TIMESTEP` | TSSFAC | `tssfac` 값으로 강제 수정 (기본 0.67) |
+| `*CONTROL_TIMESTEP` | DT2MS | 양수이면 **경고** (mass scaling은 고무 동적 해석에 부적합) |
+| `*CONTROL_BULK_VISCOSITY` | Q1, Q2 | Q1≠1.5 또는 Q2≠0.06이면 **경고** |
+
+> **Implicit 모드 제외 이유**: Implicit 해석에서는 `*CONTROL_IMPLICIT_AUTO`가 시간 증분을 자동 제어하므로 TSSFAC 수정은 불필요합니다. DT2MS와 BULK_VISCOSITY도 implicit에서는 의미가 다릅니다.
+
+**TSSFAC=0.67 이유**: 고무의 높은 파속비로 인해 기본값(0.9)이 불안정. 0.67은 안전 마진을 확보합니다.
+**DT2MS 경고**: Mass scaling은 관성력을 변경하므로 고무 동적 충격 해석 결과를 왜곡할 수 있습니다.
+
+---
+
+#### 접촉 카드 필터링 (`pids` 옵션)
+
+`pids`가 지정된 경우, 해당 파트 ID가 관여하는 접촉 카드만 수정합니다.
+
+지원하는 SSTYP/MSTYP:
+- `3` (Part ID 직접 참조) — PID 직접 비교
+- `2` (`*SET_PART` 참조) — SET_PART 내용 파싱 후 PID 확인
+- `0` (`*SET_SEGMENT` 참조) — 해석 불가, **경고** 후 스킵
+
+`pids`가 없으면 **모든** 접촉 카드에 적용합니다.
+
+---
+
+### 멱등성 (Idempotency)
+
+이미 올바른 값이 설정된 필드는 수정하지 않습니다. 같은 모델에 두 번 실행해도 결과가 동일합니다.
+
+---
+
+### 출력 예시 (콘솔)
+
+```
+[optimize] Mode: rubber | Analysis: explicit (auto-detected)
+[optimize] CONTROL_ACCURACY: INN 2 -> 4
+[optimize] CONTROL_ENERGY: inserted
+[optimize] CONTROL_TIMESTEP: TSSFAC 0.9 -> 0.67
+[optimize] WARNING: DT2MS=-5e-07 (mass scaling). Verify for rubber dynamic analysis.
+[optimize] WARNING: CONTROL_BULK_VISCOSITY Q1=2.0 Q2=0.1. Recommended Q1=1.5 Q2=0.06 for rubber.
+[optimize] CONTACT Steel_Rubber: SOFT 2->0, SBOPT 1->2
+[optimize] Done: my_model_optimized.k
+```
+
+---
+
+### rubber 최적화 체크리스트
+
+| 항목 | 권장값 | 자동 적용 | 경고만 |
+|---|---|---|---|
+| `*CONTROL_ACCURACY` INN | 4 | ✓ | — |
+| `*CONTROL_ENERGY` HGEN/RWEN/SLNTEN/RYLEN | 2/2/2/2 | ✓ | — |
+| `*CONTROL_TIMESTEP` TSSFAC | 0.67 (explicit) | ✓ | — |
+| `*CONTROL_TIMESTEP` DT2MS | 0 (dynamic) | — | ✓ |
+| `*CONTROL_BULK_VISCOSITY` Q1/Q2 | 1.5/0.06 | — | ✓ |
+| 접촉 SOFT | 0 | ✓ | — |
+| 접촉 SBOPT | 2 | ✓ | — |
+| 재료 ELFORM | 13 (TET4) | — | — |
+| 재료 PR | ≤ 0.495 | — | — |
+| Hourglass IHQ | 5 (per-part) | — | — |
+
+> **ELFORM, PR, Hourglass**는 재료 번들(`materials/rubber.k`)에 포함되어야 합니다. `optimize` 명령은 번들 내용을 수정하지 않습니다.
+
+---
+
+### matswap + optimize 파이프라인
+
+```
+base_model.k
+    │
+    ▼ matswap (재료 번들 교체)
+    ├── rubber.k 번들 → PID 3에 적용
+    │   (ELFORM=13, IHQ=5, MAT_MOONEY-RIVLIN 등)
+    │
+    ▼ optimize: rubber (컨트롤 카드 최적화)
+    ├── CONTROL_ACCURACY INN=4
+    ├── CONTROL_ENERGY 삽입
+    ├── TSSFAC=0.67 (explicit)
+    └── CONTACT SOFT=0, SBOPT=2
+    │
+    ▼ swapped_model.k (완성)
+```
+
+---
+
+## 14. 수학 이론
 
 ### 12.1 등매개변수 매핑 (map)
 

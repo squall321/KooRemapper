@@ -1,0 +1,4 @@
+model:     optimize_test_model.k
+output:    stabilize_lv8_result.k
+stabilize: explicit
+level:     8

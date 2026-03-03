@@ -1,0 +1,23 @@
+base_model: warpage_test_mesh.k
+output: test1_cylindrical_finite_result.k
+
+material:
+    E: 210000.0    # Steel, MPa
+    nu: 0.3
+
+operations:
+    - type: warpage
+      target_pid: 1
+      dat_file: warpage_cylindrical.dat
+      plane: xy
+      deflection_axis: +z
+      unit: mm
+      mode: prestress
+      finite_strain: true    # von Kármán (large deformation)
+      morph_factor: 1.0
+      outside_behavior: clamp
+      debug: true
+      debug_prefix: test1_cylindrical_finite
+
+dynamic_relaxation: false
+dynain_embed: false

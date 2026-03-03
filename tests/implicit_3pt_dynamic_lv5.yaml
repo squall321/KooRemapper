@@ -1,0 +1,4 @@
+model:   3pt_bending.k
+output:  3pt_bending_dynamic_lv5.k
+mode:    dynamic
+level:   5

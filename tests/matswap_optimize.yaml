@@ -1,0 +1,7 @@
+model: optimize_test_model.k
+output: matswap_optimize_result.k
+swaps:
+  - bundle: ../materials/rubber.k
+    pid: 2
+optimize: rubber
+tssfac: 0.67

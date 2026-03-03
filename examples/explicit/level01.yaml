@@ -1,0 +1,22 @@
+# =============================================================
+# KooRemapper stabilize explicit - Level 1: 에너지 진단
+# =============================================================
+#
+# 언제 사용: 발산 원인을 아직 모를 때. 시뮬레이션을 먼저 짧게 돌려서
+#            어느 에너지 항목이 폭발하는지 확인한다.
+#
+# 적용 카드: *CONTROL_ENERGY, *CONTROL_CONTACT, *CONTROL_SHELL
+# 비용 영향: 없음 (출력 추가만)
+#
+# Level 1 핵심 규칙:
+#   호글래스 에너지 > 전체 에너지의 10%  → Level 4+ 적용
+#   접촉 에너지 이상 급증               → Level 6+ 적용
+#   총 에너지 보존 불량                 → Level 3+ (TSSFAC 감소) 적용
+#
+# Usage: KooRemapper stabilize level01.yaml
+# =============================================================
+
+model:  your_model.k
+output: your_model_lv01.k
+stabilize: explicit
+level: 1

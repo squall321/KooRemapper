@@ -1,0 +1,35 @@
+# =============================================================
+# KooRemapper stabilize explicit - Level 9: 호글래스 최강화
+# =============================================================
+#
+# 언제 사용: Lv4 (IHQ=4 FB강성) 후에도 호글래스 에너지가 높게 유지.
+#            비압축 대변형 재료(고무, 실리콘, 생체조직 등).
+#            이론적으로 가장 정확한 호글래스 처리 필요 시.
+#
+# Level 8 대비 추가:
+#   CONTROL_HOURGLASS IHQ=6 : Belytschko-Bindeman 물리 안정화
+#   CONTROL_HOURGLASS QH=1.0 : IHQ=6 전용 표준 계수 (0.1→1.0)
+#
+# IHQ=6 (Belytschko-Bindeman Assumed Strain) 상세:
+#   - 점성/강성 기반 인공 damping 대신 assumed strain field 사용.
+#   - 진정한 물리 기반 안정화. zero-energy mode가 물리적으로 제거됨.
+#   - 비압축 대변형에서 IHQ=1~5보다 훨씬 정확.
+#   - 비용: IHQ=4 대비 약 20~30% element 연산 증가.
+#
+# QH=1.0 이유:
+#   IHQ=1~5에서 QH는 인공 감쇠 "강도"를 직접 제어.
+#     → 0.15 이상이면 인공 강성 과다.
+#   IHQ=6에서 QH는 assumed strain 계수 스케일.
+#     → 1.0이 표준 완전 안정화. 높아도 불안정하지 않음.
+#     → 0.1로 놔두면 안정화가 충분히 적용되지 않을 수 있음.
+#
+# 주의: IHQ=6은 SECTION_SOLID ELFORM과 호환 확인 필요.
+#        특수 ELFORM(13, 16 등)은 자체 안정화 포함 → 중복 적용됨.
+#
+# Usage: KooRemapper stabilize level09.yaml
+# =============================================================
+
+model:  your_model.k
+output: your_model_lv09.k
+stabilize: explicit
+level: 9

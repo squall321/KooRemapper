@@ -1,0 +1,5 @@
+model:  tests/integration/3pt_bending_rubber.k
+output: tests/integration/rubber_static_lv6/input.k
+mode:   static
+level:  6
+endtime: 1.0

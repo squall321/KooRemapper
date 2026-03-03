@@ -1,0 +1,5 @@
+model:   tests/integration/3pt_bending.k
+output:  tests/integration/dynamic_lv8/input.k
+mode:    dynamic
+level:   8
+lsolvr:  7

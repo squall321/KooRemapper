@@ -1,0 +1,21 @@
+base_model: warpage_test_mesh.k
+output: test4_cylindrical_10x_finite_result.k
+
+material:
+    E: 210000.0
+    nu: 0.3
+
+operations:
+    - type: warpage
+      target_pid: 1
+      dat_file: warpage_cylindrical.dat
+      plane: xy
+      deflection_axis: +z
+      unit: mm
+      mode: prestress
+      finite_strain: true
+      morph_factor: 10.0
+      outside_behavior: clamp
+
+dynamic_relaxation: false
+dynain_embed: false

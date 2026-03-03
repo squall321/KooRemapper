@@ -1,0 +1,5 @@
+model:            optimize_test_model.k
+output:           stabilize_lv11_result.k
+stabilize:        explicit
+level:            11
+confirm_erosion:  true

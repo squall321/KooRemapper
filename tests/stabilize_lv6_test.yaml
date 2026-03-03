@@ -1,0 +1,4 @@
+model:     optimize_test_model.k
+output:    stabilize_lv6_result.k
+stabilize: explicit
+level:     6

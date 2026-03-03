@@ -1,0 +1,29 @@
+# =============================================================
+# KooRemapper stabilize explicit - Level 2: 정확도 기반
+# =============================================================
+#
+# 언제 사용: 대변형, 대회전이 있는 모델. 퇴화 요소 경고가 d3hsp에
+#            나타나는 경우. Level 1 이후 정확도 기반 확보 단계.
+#
+# Level 1 대비 추가:
+#   CONTROL_ACCURACY : OSU=1  (객관 응력 업데이트 - 대회전 오차 제거)
+#                      INN=2  (불변량 노드 번호 - 쉘/후크쉘 한정)
+#   CONTROL_SOLID    : ESORT=1 (퇴화 TET/PENTA → 더 나은 공식 자동 전환)
+#   CONTROL_SHELL    : ESORT=1 (퇴화 QUAD → TRI 자동 전환)
+#
+# OSU=1 이유:
+#   기본(OSU=0)은 응력 업데이트에 Hughes-Winget 알고리즘 사용.
+#   대회전 발생 시 강체 회전에 의한 허위 응력 발생 가능.
+#   OSU=1은 2차 Jaumann 회전 보정 → 더 정확하나 소폭 비용 증가.
+#
+# INN=2 이유:
+#   쉘 요소의 노드 번호 순서가 결과에 영향을 주는 경우 방지.
+#   내부 레이블링 방식을 불변량으로 고정 → 재현성 향상.
+#
+# Usage: KooRemapper stabilize level02.yaml
+# =============================================================
+
+model:  your_model.k
+output: your_model_lv02.k
+stabilize: explicit
+level: 2

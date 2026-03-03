@@ -1,0 +1,4 @@
+model:   tests/integration/3pt_bending.k
+output:  tests/integration/dynamic_lv5/input.k
+mode:    dynamic
+level:   5

@@ -1,0 +1,5 @@
+model: optimize_test_model.k
+output: optimize_standalone_result.k
+optimize: rubber
+pids: [2]
+tssfac: 0.67

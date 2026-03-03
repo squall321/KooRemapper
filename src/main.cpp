@@ -2032,9 +2032,12 @@ static std::string impl_generateImplicitCards(
         nsolvr, p.ilimit, p.maxref, dctol, ectol, rctolBuf, p.lstol);
 
     // Optional: arc-length Card 3 (appended to *CONTROL_IMPLICIT_SOLUTION)
+    // Card 2 must be written first (blank/defaults) so Card 3 is read at correct position.
     // ARCCTL=0 (generalized), ARCMTH=1 (Crisfield), ARCDMP=2 (off), rest=0
     if (arcl) {
         n += snprintf(buf+n, sizeof(buf)-n,
+            "$    DNORM    DIVERG     ISTIF   NLPRINT    NLNORM   D3ITCTL     CPCHK\n"
+            "         0         0         1         0         0         0         0\n"
             "$   ARCCTL    ARCDIR    ARCLEN    ARCMTH    ARCDMP    ARCPSI    ARCALF    ARCTIM\n"
             "         0         0  0.000000         1         2  0.000000  0.000000  0.000000\n");
     }
@@ -2042,7 +2045,7 @@ static std::string impl_generateImplicitCards(
     n += snprintf(buf+n, sizeof(buf)-n,
         "*CONTROL_IMPLICIT_AUTO\n"
         "$    IAUTO    ITEOPT    ITEWIN     DTMIN     DTMAX     DTEXP     KFAIL    KCYCLE\n"
-        "         1%10d         5%10.3E%10.6f       0.0%10d         0\n",
+        "         1%10d         5%10.3E%10.3E       0.0%10d         0\n",
         p.iteopt, dtmin, dtmax, kfail);
 
     // Optional: *CONTROL_IMPLICIT_STABILIZATION (level 5+)
@@ -2054,14 +2057,13 @@ static std::string impl_generateImplicitCards(
             stabScale);
     }
 
-    // Optional: *CONTROL_IMPLICIT_SOLVER (MUMPS, level 6+)
-    if (lsolvr != 7) {
-        n += snprintf(buf+n, sizeof(buf)-n,
-            "*CONTROL_IMPLICIT_SOLVER\n"
-            "$    LSOLVR    LPRINT     NEGEV     ORDER      DRCM    DRCPRM   AUTOSPC   AUTOTOL\n"
-            "%10d         0         2         0         4       0.0         1       0.0\n",
-            lsolvr);
-    }
+    // Always write *CONTROL_IMPLICIT_SOLVER to prevent LS-DYNA from falling back
+    // to the internal default (LSOLVR=2 Skyline), which can crash large models.
+    n += snprintf(buf+n, sizeof(buf)-n,
+        "*CONTROL_IMPLICIT_SOLVER\n"
+        "$    LSOLVR    LPRINT     NEGEV     ORDER      DRCM    DRCPRM   AUTOSPC   AUTOTOL\n"
+        "%10d         0         2         0         4       0.0         1       0.0\n",
+        lsolvr);
 
     return std::string(buf);
 }
@@ -3181,11 +3183,13 @@ static std::vector<ct_ContactPair> ct_detectContacting(
     }
 
     // Narrow phase
+    // faceA/faceB stored as sourceIndex (original index in facesA/facesB),
+    // NOT the infoA/infoB index — callers use these to index back into facesA/facesB.
     std::vector<ct_ContactPair> results;
     for (const auto& [i, j] : candidates) {
         double gap;
         if (ct_narrowPhaseCheck(infoA[i], infoB[j], gapTolerance, cosThresh, gap)) {
-            results.push_back({pidA, pidB, i, j, gap});
+            results.push_back({pidA, pidB, infoA[i].sourceIndex, infoB[j].sourceIndex, gap});
         }
     }
     return results;
@@ -4239,6 +4243,295 @@ int runMatswap(const std::string& modelFile, const std::string& bundleFile,
     return 0;
 }
 
+// =====================================================================
+// optimize helpers: material-specific global card optimizations
+// =====================================================================
+
+struct OptimizeConfig {
+    std::string mode;               // "rubber" (extendable later)
+    double tssfac = 0.67;          // TSSFAC default for rubber
+    std::vector<int> pids;         // target PIDs for CONTACT modification
+    std::string analysisType;      // "explicit" / "implicit" / "" (auto-detect)
+};
+
+// Check if a contact references any of the target PIDs
+static bool opt_contactInvolvesPid(const ContactDef& ct,
+                                    const std::set<int>& targetPids,
+                                    const std::vector<SetDef>& sets) {
+    auto checkSide = [&](int sid, int styp) -> bool {
+        if (styp == 3) {
+            return targetPids.count(sid) > 0;
+        } else if (styp == 2) {
+            for (const auto& s : sets) {
+                if (s.type == "PART" && s.id == sid) {
+                    for (int pid : s.ids) {
+                        if (targetPids.count(pid)) return true;
+                    }
+                }
+            }
+        }
+        return false;
+    };
+    return checkSide(ct.ssid, ct.sstyp) || checkSide(ct.msid, ct.mstyp);
+}
+
+// Find and modify a CONTROL keyword's first data line field
+// Returns: 0=not found, 1=already correct, 2=modified
+static int opt_patchControlField(std::vector<std::string>& lines,
+                                  const std::string& keyword,
+                                  int fieldPos, int fieldWidth,
+                                  const std::string& newVal) {
+    bool inBlock = false, hasTitle = false, titleDone = false;
+    for (auto& ln : lines) {
+        std::string tr = impl_trim(ln);
+        if (tr.empty()) continue;
+        if (tr[0] == '*') {
+            std::string up = impl_upper(tr);
+            inBlock = (up.rfind(keyword, 0) == 0);
+            hasTitle = (up.find("_TITLE") != std::string::npos);
+            titleDone = false;
+            continue;
+        }
+        if (!inBlock || tr[0] == '$') continue;
+        if (hasTitle && !titleDone) { titleDone = true; continue; }
+        std::string curVal;
+        if ((int)ln.size() > fieldPos) {
+            int end = std::min((int)ln.size(), fieldPos + fieldWidth);
+            curVal = impl_trim(ln.substr(fieldPos, end - fieldPos));
+        }
+        if (curVal == impl_trim(newVal)) return 1;
+        ln = impl_setField(ln, fieldPos, fieldWidth, newVal);
+        return 2;
+    }
+    return 0;
+}
+
+static bool opt_hasKeyword(const std::vector<std::string>& lines, const std::string& keyword) {
+    for (const auto& ln : lines) {
+        std::string tr = impl_trim(ln);
+        if (!tr.empty() && tr[0] == '*') {
+            if (impl_upper(tr).rfind(keyword, 0) == 0) return true;
+        }
+    }
+    return false;
+}
+
+static std::string opt_readControlField(const std::vector<std::string>& lines,
+                                         const std::string& keyword,
+                                         int fieldPos, int fieldWidth) {
+    bool inBlock = false, hasTitle = false, titleDone = false;
+    for (const auto& ln : lines) {
+        std::string tr = impl_trim(ln);
+        if (tr.empty()) continue;
+        if (tr[0] == '*') {
+            std::string up = impl_upper(tr);
+            inBlock = (up.rfind(keyword, 0) == 0);
+            hasTitle = (up.find("_TITLE") != std::string::npos);
+            titleDone = false;
+            continue;
+        }
+        if (!inBlock || tr[0] == '$') continue;
+        if (hasTitle && !titleDone) { titleDone = true; continue; }
+        if ((int)ln.size() > fieldPos) {
+            int end = std::min((int)ln.size(), fieldPos + fieldWidth);
+            return impl_trim(ln.substr(fieldPos, end - fieldPos));
+        }
+        return "";
+    }
+    return "";
+}
+
+// Detect if model uses implicit solver
+static bool opt_isImplicit(const std::vector<std::string>& lines) {
+    for (const auto& ln : lines) {
+        std::string tr = impl_trim(ln);
+        if (!tr.empty() && tr[0] == '*') {
+            if (impl_upper(tr).rfind("*CONTROL_IMPLICIT", 0) == 0) return true;
+        }
+    }
+    return false;
+}
+
+// Apply rubber optimization to lines, returns info messages
+static std::vector<std::string> opt_applyRubber(std::vector<std::string>& lines,
+                                                  const OptimizeConfig& cfg) {
+    std::vector<std::string> msgs;
+    std::set<int> targetPids(cfg.pids.begin(), cfg.pids.end());
+
+    // Determine analysis type: explicit / implicit
+    bool isImplicit;
+    if (cfg.analysisType == "implicit") {
+        isImplicit = true;
+        msgs.push_back("[optimize] Analysis type: implicit (specified)");
+    } else if (cfg.analysisType == "explicit") {
+        isImplicit = false;
+        msgs.push_back("[optimize] Analysis type: explicit (specified)");
+    } else {
+        isImplicit = opt_isImplicit(lines);
+        msgs.push_back(std::string("[optimize] Analysis type: ") +
+                       (isImplicit ? "implicit" : "explicit") + " (auto-detected)");
+    }
+
+    // 1. CONTROL_ACCURACY: INN=4 (field 1, pos 10)
+    {
+        int r = opt_patchControlField(lines, "*CONTROL_ACCURACY", 10, 10, "4");
+        if (r == 0) {
+            impl_insertBeforeEnd(lines,
+                "*CONTROL_ACCURACY\n"
+                "$      OSU       INN    PIDOSU\n"
+                "         0         4");
+            msgs.push_back("[optimize] *CONTROL_ACCURACY: INN=4 (inserted)");
+        } else if (r == 2) {
+            msgs.push_back("[optimize] *CONTROL_ACCURACY: INN=4 (modified)");
+        } else {
+            msgs.push_back("[optimize] *CONTROL_ACCURACY: INN=4 (OK)");
+        }
+    }
+
+    // 2. CONTROL_ENERGY: HGEN=2, RWEN=2, SLNTEN=2, RYLEN=2
+    {
+        if (!opt_hasKeyword(lines, "*CONTROL_ENERGY")) {
+            impl_insertBeforeEnd(lines,
+                "*CONTROL_ENERGY\n"
+                "$     HGEN      RWEN    SLNTEN     RYLEN\n"
+                "         2         2         2         2");
+            msgs.push_back("[optimize] *CONTROL_ENERGY: HGEN=2,RWEN=2,SLNTEN=2,RYLEN=2 (inserted)");
+        } else {
+            bool anyMod = false;
+            if (opt_patchControlField(lines, "*CONTROL_ENERGY", 0, 10, "2")==2) anyMod=true;
+            if (opt_patchControlField(lines, "*CONTROL_ENERGY", 10, 10, "2")==2) anyMod=true;
+            if (opt_patchControlField(lines, "*CONTROL_ENERGY", 20, 10, "2")==2) anyMod=true;
+            if (opt_patchControlField(lines, "*CONTROL_ENERGY", 30, 10, "2")==2) anyMod=true;
+            msgs.push_back(std::string("[optimize] *CONTROL_ENERGY: HGEN=2,RWEN=2,SLNTEN=2,RYLEN=2 (") +
+                           (anyMod ? "modified)" : "OK)"));
+        }
+    }
+
+    // 3. CONTROL_TIMESTEP: TSSFAC — explicit only
+    if (!isImplicit) {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%10.6f", cfg.tssfac);
+        std::string tssfacStr(buf);
+
+        if (!opt_hasKeyword(lines, "*CONTROL_TIMESTEP")) {
+            impl_insertBeforeEnd(lines,
+                "*CONTROL_TIMESTEP\n"
+                "$   DTINIT    TSSFAC      ISDO    TSLIMT     DT2MS      LCTM     ERODE     MS1ST\n"
+                "       0.0" + tssfacStr + "         0       0.0       0.0         0         0         0");
+            msgs.push_back("[optimize] *CONTROL_TIMESTEP: TSSFAC=" + impl_trim(tssfacStr) + " (inserted)");
+        } else {
+            std::string oldVal = opt_readControlField(lines, "*CONTROL_TIMESTEP", 10, 10);
+            int r = opt_patchControlField(lines, "*CONTROL_TIMESTEP", 10, 10, impl_trim(tssfacStr));
+            if (r == 2)
+                msgs.push_back("[optimize] *CONTROL_TIMESTEP: TSSFAC=" + impl_trim(tssfacStr) + " (was " + oldVal + ")");
+            else
+                msgs.push_back("[optimize] *CONTROL_TIMESTEP: TSSFAC=" + impl_trim(tssfacStr) + " (OK)");
+        }
+
+        // DT2MS warning — explicit only
+        std::string dt2ms = opt_readControlField(lines, "*CONTROL_TIMESTEP", 40, 10);
+        if (!dt2ms.empty()) {
+            double dt2msVal = 0;
+            try { dt2msVal = std::stod(dt2ms); } catch(...) {}
+            if (dt2msVal != 0.0)
+                msgs.push_back("[optimize] WARNING: DT2MS=" + dt2ms + " (dynamic impact requires DT2MS=0)");
+        }
+    } else {
+        msgs.push_back("[optimize] *CONTROL_TIMESTEP: TSSFAC skipped (implicit — use CONTROL_IMPLICIT_AUTO dt0/dtmax)");
+    }
+
+    // 4. CONTROL_BULK_VISCOSITY: warning only, explicit only
+    if (!isImplicit) {
+        if (opt_hasKeyword(lines, "*CONTROL_BULK_VISCOSITY")) {
+            std::string q1s = opt_readControlField(lines, "*CONTROL_BULK_VISCOSITY", 0, 10);
+            std::string q2s = opt_readControlField(lines, "*CONTROL_BULK_VISCOSITY", 10, 10);
+            double q1v = 1.5, q2v = 0.06;
+            try { q1v = std::stod(q1s); } catch(...) {}
+            try { q2v = std::stod(q2s); } catch(...) {}
+            if (std::abs(q1v - 1.5) < 0.01 && std::abs(q2v - 0.06) < 0.001) {
+                msgs.push_back("[optimize] *CONTROL_BULK_VISCOSITY: Q1=1.5, Q2=0.06 (OK)");
+            } else {
+                char wbuf[128];
+                snprintf(wbuf, sizeof(wbuf),
+                    "[optimize] WARNING: *CONTROL_BULK_VISCOSITY Q1=%.2f Q2=%.3f (recommended: Q1=1.5, Q2=0.06)", q1v, q2v);
+                msgs.push_back(std::string(wbuf));
+            }
+        } else {
+            msgs.push_back("[optimize] *CONTROL_BULK_VISCOSITY: not present (LS-DYNA defaults apply)");
+        }
+    } else {
+        msgs.push_back("[optimize] *CONTROL_BULK_VISCOSITY: skipped (implicit — not applicable)");
+    }
+
+    // 5. CONTACT: SOFT=0, SBOPT=2.0 for target PIDs
+    if (!targetPids.empty()) {
+        auto contacts = ct_parseContacts(lines);
+        auto sets = ct_parseSets(lines);
+        int modCount = 0;
+
+        for (const auto& ct : contacts) {
+            if (!opt_contactInvolvesPid(ct, targetPids, sets)) continue;
+
+            bool titleSkipped = !ct.hasTitle;
+            int cardNum = 0;
+            for (int i = ct.startLine + 1; i < ct.endLine; ++i) {
+                std::string dtr = impl_trim(lines[i]);
+                if (dtr.empty() || dtr[0] == '$') continue;
+                if (!titleSkipped) { titleSkipped = true; continue; }
+                if (cardNum == 3) {
+                    // Card A: SOFT(0,10) SOFSCL(10,10) LCIDAB(20,10) MAXPAR(30,10) SBOPT(40,10)
+                    bool modified = false;
+                    char buf[16];
+
+                    auto softToks = impl_tok10(lines[i]);
+                    int curSoft = 0;
+                    if (!softToks.empty()) try { curSoft = std::stoi(softToks[0]); } catch(...) {}
+                    if (curSoft != 0) {
+                        lines[i] = impl_setField(lines[i], 0, 10, "0");
+                        modified = true;
+                        snprintf(buf, sizeof(buf), "SOFT=%d->0", curSoft);
+                        msgs.push_back("[optimize] CONTACT #" + std::to_string(ct.index) + ": " + buf);
+                    }
+
+                    int curSbopt = 2;
+                    if (softToks.size() >= 5) try { curSbopt = std::stoi(softToks[4]); } catch(...) {}
+                    if (curSbopt == 1) {
+                        lines[i] = impl_setField(lines[i], 40, 10, "2");
+                        modified = true;
+                        msgs.push_back("[optimize] CONTACT #" + std::to_string(ct.index) + ": SBOPT=1->2");
+                    }
+
+                    if (modified) modCount++;
+                    break;
+                }
+                cardNum++;
+            }
+
+            if (!ct.hasCardA && ct.soft != 0) {
+                msgs.push_back("[optimize] CONTACT #" + std::to_string(ct.index) +
+                               ": no Card A found, cannot set SOFT/SBOPT");
+            }
+        }
+
+        // Warn about segment-based contacts
+        for (const auto& ct : contacts) {
+            if (ct.sstyp == 0 && ct.mstyp == 0) continue;
+            bool hasPid = false;
+            if (ct.sstyp == 3 && targetPids.count(ct.ssid)) hasPid = true;
+            if (ct.mstyp == 3 && targetPids.count(ct.msid)) hasPid = true;
+            if (!hasPid) continue;
+            if (ct.sstyp == 0 || ct.mstyp == 0)
+                msgs.push_back("[optimize] WARNING: CONTACT #" + std::to_string(ct.index) +
+                               " has SSTYP=0 side - SOFT/SBOPT not verified");
+        }
+
+        if (modCount > 0)
+            msgs.push_back("[optimize] " + std::to_string(modCount) + " contact(s) modified");
+    }
+
+    return msgs;
+}
+
 // YAML-based matswap: supports multiple swaps and swap_all
 // YAML format:
 //   model: model.k
@@ -4271,6 +4564,9 @@ int runMatswapYaml(const std::string& yamlFile, ConsoleOutput& console) {
     };
 
     std::string modelFile, outputFile;
+    std::string optimizeMode;           // "rubber" or empty
+    double optimizeTssfac = 0.67;      // default TSSFAC for optimize
+    std::string optimizeAnalysisType;  // "explicit"/"implicit"/""
     std::vector<MatswapOperation> swaps;
     bool inSwapsList = false;
     int swapsIndent = 0;
@@ -4381,6 +4677,9 @@ int runMatswapYaml(const std::string& yamlFile, ConsoleOutput& console) {
                 if (swaps.empty()) swaps.push_back(MatswapOperation{});
                 swaps.back().swapAll = (val=="true"||val=="yes"||val=="1");
             }
+            else if (key=="optimize")       optimizeMode = val;
+            else if (key=="tssfac")         { try { optimizeTssfac = std::stod(val); } catch(...) {} }
+            else if (key=="analysis_type")  optimizeAnalysisType = val;
         }
     }
 
@@ -4417,6 +4716,765 @@ int runMatswapYaml(const std::string& yamlFile, ConsoleOutput& console) {
         console.error(assembler.getErrorMessage()); return 1;
     }
     console.println("[matswap] Done -> " + outputPrefix + ".k");
+
+    // Apply optimize if specified
+    if (!optimizeMode.empty()) {
+        console.println("");
+        console.println("[optimize] Applying '" + optimizeMode + "' optimization...");
+
+        // Collect all swapped PIDs for contact modification scope
+        OptimizeConfig optCfg;
+        optCfg.mode = optimizeMode;
+        optCfg.tssfac = optimizeTssfac;
+        optCfg.analysisType = optimizeAnalysisType;
+        for (const auto& sw : swaps) {
+            for (int pid : sw.pids) optCfg.pids.push_back(pid);
+        }
+
+        // Re-read the output file, apply optimize, re-write
+        std::string outputPath = outputPrefix + ".k";
+        std::vector<std::string> lines;
+        {
+            std::ifstream fin(outputPath);
+            if (!fin.is_open()) { console.error("Cannot re-read: " + outputPath); return 1; }
+            std::string l;
+            while (std::getline(fin, l)) {
+                if (!l.empty() && l.back()=='\r') l.pop_back();
+                lines.push_back(l);
+            }
+        }
+
+        std::vector<std::string> msgs;
+        if (optCfg.mode == "rubber") {
+            msgs = opt_applyRubber(lines, optCfg);
+        } else {
+            console.error("Unknown optimize mode: " + optCfg.mode);
+            return 1;
+        }
+        for (const auto& m : msgs) console.println(m);
+
+        {
+            std::ofstream fout(outputPath);
+            if (!fout.is_open()) { console.error("Cannot write: " + outputPath); return 1; }
+            for (const auto& l : lines) fout << l << "\n";
+        }
+        console.println("[optimize] Done -> " + outputPath);
+    }
+
+    return 0;
+}
+
+// Standalone optimize command
+int runOptimize(const std::string& yamlFile, ConsoleOutput& console) {
+    // Parse YAML
+    std::ifstream f(yamlFile);
+    if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
+
+    std::string configDir;
+    size_t lastSlash = yamlFile.find_last_of("/\\");
+    if (lastSlash != std::string::npos) configDir = yamlFile.substr(0, lastSlash);
+
+    auto trim = [](const std::string& s) -> std::string {
+        size_t a=0, b=s.size();
+        while (a<b && std::isspace((unsigned char)s[a])) ++a;
+        while (b>a && std::isspace((unsigned char)s[b-1])) --b;
+        return s.substr(a,b-a);
+    };
+
+    std::string modelFile, outputFile;
+    OptimizeConfig cfg;
+    cfg.mode = "rubber";  // default
+
+    std::string ln;
+    while (std::getline(f, ln)) {
+        if (!ln.empty() && ln.back()=='\r') ln.pop_back();
+        std::string tr = trim(ln);
+        if (tr.empty() || tr[0]=='#') continue;
+        size_t cp = tr.find(':');
+        if (cp == std::string::npos) continue;
+        std::string key = trim(tr.substr(0, cp));
+        std::string val = trim(tr.substr(cp+1));
+
+        if      (key == "model")    modelFile = val;
+        else if (key == "output")   outputFile = val;
+        else if (key == "optimize")      cfg.mode = val;
+        else if (key == "tssfac")        { try { cfg.tssfac = std::stod(val); } catch(...) {} }
+        else if (key == "analysis_type") cfg.analysisType = val;
+        else if (key == "pid")           cfg.pids = { std::stoi(val) };
+        else if (key == "pids") {
+            std::string lv = val;
+            if (!lv.empty() && lv.front()=='[') lv = lv.substr(1);
+            if (!lv.empty() && lv.back()==']') lv.pop_back();
+            std::istringstream ss(lv); std::string tok;
+            while (std::getline(ss, tok, ',')) {
+                std::string t = trim(tok);
+                if (!t.empty()) try { cfg.pids.push_back(std::stoi(t)); } catch(...) {}
+            }
+        }
+    }
+
+    if (modelFile.empty())  { console.error("optimize YAML: 'model' not specified");  return 1; }
+    if (outputFile.empty()) { console.error("optimize YAML: 'output' not specified"); return 1; }
+
+    // Resolve paths relative to configDir
+    auto resolvePath = [&](const std::string& p) -> std::string {
+        if (!configDir.empty() && !p.empty() &&
+            p[0] != '/' && p[0] != '\\' &&
+            !(p.size() >= 2 && p[1] == ':')) {
+            return configDir + "/" + p;
+        }
+        return p;
+    };
+    std::string modelPath = resolvePath(modelFile);
+    std::string outputPath = resolvePath(outputFile);
+
+    console.println("[optimize] Mode   : " + cfg.mode);
+    console.println("[optimize] Model  : " + modelPath);
+    console.println("[optimize] Output : " + outputPath);
+    if (!cfg.pids.empty()) {
+        std::string pidStr;
+        for (int pid : cfg.pids) {
+            if (!pidStr.empty()) pidStr += ", ";
+            pidStr += std::to_string(pid);
+        }
+        console.println("[optimize] PIDs   : " + pidStr);
+    }
+
+    // Read model
+    std::vector<std::string> lines;
+    {
+        std::ifstream mf(modelPath);
+        if (!mf.is_open()) { console.error("Cannot open model: " + modelPath); return 1; }
+        std::string l;
+        while (std::getline(mf, l)) {
+            if (!l.empty() && l.back()=='\r') l.pop_back();
+            lines.push_back(l);
+        }
+    }
+
+    // Apply optimization
+    std::vector<std::string> msgs;
+    if (cfg.mode == "rubber") {
+        msgs = opt_applyRubber(lines, cfg);
+    } else {
+        console.error("Unknown optimize mode: " + cfg.mode);
+        return 1;
+    }
+
+    for (const auto& m : msgs) console.println(m);
+
+    // Write output
+    {
+        std::ofstream fout(outputPath);
+        if (!fout.is_open()) { console.error("Cannot write: " + outputPath); return 1; }
+        for (const auto& l : lines) fout << l << "\n";
+    }
+
+    console.println("[optimize] Done -> " + outputPath);
+    return 0;
+}
+
+// =====================================================================
+// stabilize command: explicit solver stabilization (12-level system)
+// =====================================================================
+struct StabilizeConfig {
+    std::string mode;           // "explicit"
+    int level = 0;             // 0=manual, 1-12=preset
+    bool confirmErosion = false;
+    // time step / erosion
+    double tssfac = -1;         // -1 = not set
+    int erode = -1;
+    // hourglass
+    int ihq = -1;
+    double qh = -1;
+    // accuracy
+    int osu = -1;
+    int inn = -1;
+    int esortSolid = -1;
+    int esortShell = -1;
+    // shell (irnxx: INT_MIN = not set; valid values: -1, -2)
+    int bwc = -1;
+    int miter = -1;
+    int irnxx = INT_MIN;
+    double wrpang = -1;
+    // contact global Card 1
+    int orien = -1;
+    int shlthk = -1;
+    int enmass = -1;
+    int islchk = -1;
+    // contact global Card 2
+    double xpene = -1;
+    int nsbcs = -1;
+    // contact per-contact (Card A)
+    int soft = -1;
+    int sbopt = -1;
+    int depth = -1;
+    double maxpar = -1;
+    // contact per-contact (Card C)
+    int ignore_ = -1;
+    // bulk viscosity (forced override)
+    double bulkQ1 = -1;
+    double bulkQ2 = -1;
+    // energy
+    int hgen = -1;
+    int rwen = -1;
+    int slnten = -1;
+    int rylen = -1;
+};
+
+static bool stab_hasShellElements(const std::vector<std::string>& lines) {
+    for (const auto& ln : lines) {
+        std::string tr = impl_trim(ln);
+        if (!tr.empty() && tr[0] == '*')
+            if (impl_upper(tr).rfind("*ELEMENT_SHELL", 0) == 0) return true;
+    }
+    return false;
+}
+
+// Like opt_patchControlField but can target card N (0=first data card)
+static int stab_patchControlFieldN(std::vector<std::string>& lines,
+                                    const std::string& keyword, int cardIdx,
+                                    int fieldPos, int fieldWidth,
+                                    const std::string& newVal) {
+    bool inBlock = false, hasTitle = false, titleDone = false;
+    int dataCardSeen = 0;
+    for (auto& ln : lines) {
+        std::string tr = impl_trim(ln);
+        if (tr.empty()) continue;
+        if (tr[0] == '*') {
+            std::string up = impl_upper(tr);
+            inBlock    = (up.rfind(keyword, 0) == 0);
+            hasTitle   = (up.find("_TITLE") != std::string::npos);
+            titleDone  = false;
+            dataCardSeen = 0;
+            continue;
+        }
+        if (!inBlock || tr[0] == '$') continue;
+        if (hasTitle && !titleDone) { titleDone = true; continue; }
+        if (dataCardSeen < cardIdx) { ++dataCardSeen; continue; }
+        std::string curVal;
+        if ((int)ln.size() > fieldPos) {
+            int end = std::min((int)ln.size(), fieldPos + fieldWidth);
+            curVal = impl_trim(ln.substr(fieldPos, end - fieldPos));
+        }
+        if (curVal == impl_trim(newVal)) return 1;
+        ln = impl_setField(ln, fieldPos, fieldWidth, newVal);
+        return 2;
+    }
+    return 0;
+}
+
+// If *CONTROL_CONTACT exists with only Card 1, insert a blank Card 2 after it.
+static void stab_ensureControlContactCard2(std::vector<std::string>& lines) {
+    bool inBlock = false, hasTitle = false, titleDone = false;
+    int dataCardSeen = 0, card1Idx = -1;
+    for (int i = 0; i < (int)lines.size(); ++i) {
+        std::string tr = impl_trim(lines[i]);
+        if (tr.empty()) continue;
+        if (tr[0] == '*') {
+            std::string up = impl_upper(tr);
+            bool isCC = (up.rfind("*CONTROL_CONTACT", 0) == 0);
+            if (inBlock && card1Idx >= 0 && dataCardSeen == 1) {
+                // Leaving block with only Card 1 → insert blank Card 2
+                lines.insert(lines.begin() + card1Idx + 1, "");
+                return;
+            }
+            inBlock      = isCC;
+            hasTitle     = isCC && (up.find("_TITLE") != std::string::npos);
+            titleDone    = false;
+            dataCardSeen = 0;
+            card1Idx     = -1;
+            continue;
+        }
+        if (!inBlock || tr[0] == '$') continue;
+        if (hasTitle && !titleDone) { titleDone = true; continue; }
+        if (dataCardSeen == 0) card1Idx = i;
+        else if (dataCardSeen == 1) return; // Card 2 already exists
+        ++dataCardSeen;
+    }
+    if (inBlock && card1Idx >= 0 && dataCardSeen == 1)
+        lines.insert(lines.begin() + card1Idx + 1, "");
+}
+
+static std::vector<std::string> stab_applyExplicit(
+        std::vector<std::string>& lines,
+        const StabilizeConfig& cfg) {
+    std::vector<std::string> msgs;
+    auto tag = [](const std::string& s) { return "[stabilize] " + s; };
+
+    bool hasShell = stab_hasShellElements(lines);
+    if (!hasShell) msgs.push_back(tag("Note: No *ELEMENT_SHELL — shell-specific options will be skipped"));
+
+    // ── 1. CONTROL_ENERGY ────────────────────────────────────────────
+    if (cfg.hgen >= 0 || cfg.rwen >= 0 || cfg.slnten >= 0 || cfg.rylen >= 0) {
+        int h = cfg.hgen   >= 0 ? cfg.hgen   : 2;
+        int r = cfg.rwen   >= 0 ? cfg.rwen   : 2;
+        int s = cfg.slnten >= 0 ? cfg.slnten : 2;
+        int y = cfg.rylen  >= 0 ? cfg.rylen  : 2;
+        bool anyMod = false;
+        if (!opt_hasKeyword(lines, "*CONTROL_ENERGY")) {
+            char buf[90]; snprintf(buf, sizeof(buf), "%10d%10d%10d%10d", h, r, s, y);
+            impl_insertBeforeEnd(lines,
+                "*CONTROL_ENERGY\n"
+                "$     HGEN      RWEN    SLNTEN     RYLEN\n" + std::string(buf));
+            msgs.push_back(tag("*CONTROL_ENERGY: HGEN=" + std::to_string(h) +
+                               ",RWEN=" + std::to_string(r) + ",SLNTEN=" + std::to_string(s) +
+                               ",RYLEN=" + std::to_string(y) + " (inserted)"));
+        } else {
+            if (cfg.hgen   >= 0 && opt_patchControlField(lines, "*CONTROL_ENERGY",  0, 10, std::to_string(cfg.hgen))   == 2) anyMod = true;
+            if (cfg.rwen   >= 0 && opt_patchControlField(lines, "*CONTROL_ENERGY", 10, 10, std::to_string(cfg.rwen))   == 2) anyMod = true;
+            if (cfg.slnten >= 0 && opt_patchControlField(lines, "*CONTROL_ENERGY", 20, 10, std::to_string(cfg.slnten)) == 2) anyMod = true;
+            if (cfg.rylen  >= 0 && opt_patchControlField(lines, "*CONTROL_ENERGY", 30, 10, std::to_string(cfg.rylen))  == 2) anyMod = true;
+            msgs.push_back(tag(std::string("*CONTROL_ENERGY: ") + (anyMod ? "modified" : "OK")));
+        }
+    }
+
+    // ── 2. CONTROL_ACCURACY ──────────────────────────────────────────
+    if (cfg.osu >= 0 || cfg.inn >= 0) {
+        bool anyMod = false;
+        if (!opt_hasKeyword(lines, "*CONTROL_ACCURACY")) {
+            int o = cfg.osu >= 0 ? cfg.osu : 0;
+            int n = cfg.inn >= 0 ? cfg.inn : 4;
+            char buf[90]; snprintf(buf, sizeof(buf), "%10d%10d", o, n);
+            impl_insertBeforeEnd(lines,
+                "*CONTROL_ACCURACY\n"
+                "$      OSU       INN    PIDOSU\n" + std::string(buf));
+            msgs.push_back(tag("*CONTROL_ACCURACY: OSU=" + std::to_string(o) +
+                               ",INN=" + std::to_string(n) + " (inserted)"));
+        } else {
+            if (cfg.osu >= 0 && opt_patchControlField(lines, "*CONTROL_ACCURACY",  0, 10, std::to_string(cfg.osu)) == 2) anyMod = true;
+            if (cfg.inn >= 0 && opt_patchControlField(lines, "*CONTROL_ACCURACY", 10, 10, std::to_string(cfg.inn)) == 2) anyMod = true;
+            msgs.push_back(tag(std::string("*CONTROL_ACCURACY: ") + (anyMod ? "modified" : "OK")));
+        }
+    }
+
+    // ── 3. CONTROL_SOLID (ESORT) ──────────────────────────────────────
+    if (cfg.esortSolid >= 0) {
+        int r = opt_patchControlField(lines, "*CONTROL_SOLID", 0, 10, std::to_string(cfg.esortSolid));
+        if (r == 0) {
+            char buf[90]; snprintf(buf, sizeof(buf), "%10d", cfg.esortSolid);
+            impl_insertBeforeEnd(lines,
+                "*CONTROL_SOLID\n"
+                "$    ESORT    FMATRX    NIPTETS     SWLOCL     PSFAIL       T10      ICOH     TET13\n" + std::string(buf));
+            msgs.push_back(tag("*CONTROL_SOLID: ESORT=" + std::to_string(cfg.esortSolid) + " (inserted)"));
+        } else {
+            msgs.push_back(tag(std::string("*CONTROL_SOLID: ESORT=") + std::to_string(cfg.esortSolid) +
+                               (r == 2 ? " (modified)" : " (OK)")));
+        }
+    }
+
+    // ── 4. CONTROL_SHELL (WRPANG ESORT IRNXX BWC MITER) ──────────────
+    bool needShellCard = (cfg.esortShell >= 0 || cfg.bwc >= 0 || cfg.miter >= 0 ||
+                          cfg.irnxx != INT_MIN || cfg.wrpang >= 0);
+    if (needShellCard && !hasShell) {
+        msgs.push_back(tag("*CONTROL_SHELL: skipped (no shell elements in model)"));
+    } else if (needShellCard) {
+        bool anyMod = false;
+        if (!opt_hasKeyword(lines, "*CONTROL_SHELL")) {
+            double wrp = cfg.wrpang     >= 0       ? cfg.wrpang     : 20.0;
+            int    es  = cfg.esortShell >= 0       ? cfg.esortShell : 0;
+            int    iro = cfg.irnxx      != INT_MIN ? cfg.irnxx      : -1;
+            int    bw  = cfg.bwc        >= 0       ? cfg.bwc        : 2;
+            int    mi  = cfg.miter      >= 0       ? cfg.miter      : 1;
+            char buf[90];
+            snprintf(buf, sizeof(buf), "%10.4f%10d%10d%10s%10s%10d%10d",
+                     wrp, es, iro, "", "", bw, mi);
+            impl_insertBeforeEnd(lines,
+                "*CONTROL_SHELL\n"
+                "$   WRPANG     ESORT     IRNXX    ISTUPD    THEORY       BWC     MITER      PROJ\n" +
+                std::string(buf));
+            msgs.push_back(tag("*CONTROL_SHELL: inserted"));
+        } else {
+            if (cfg.wrpang >= 0) {
+                char buf[16]; snprintf(buf, sizeof(buf), "%10.4f", cfg.wrpang);
+                if (opt_patchControlField(lines, "*CONTROL_SHELL",  0, 10, std::string(buf)) == 2) anyMod = true;
+            }
+            if (cfg.esortShell >= 0 && opt_patchControlField(lines, "*CONTROL_SHELL", 10, 10, std::to_string(cfg.esortShell)) == 2) anyMod = true;
+            if (cfg.irnxx != INT_MIN && opt_patchControlField(lines, "*CONTROL_SHELL", 20, 10, std::to_string(cfg.irnxx)) == 2) anyMod = true;
+            if (cfg.bwc   >= 0 && opt_patchControlField(lines, "*CONTROL_SHELL", 50, 10, std::to_string(cfg.bwc))   == 2) anyMod = true;
+            if (cfg.miter >= 0 && opt_patchControlField(lines, "*CONTROL_SHELL", 60, 10, std::to_string(cfg.miter)) == 2) anyMod = true;
+            msgs.push_back(tag(std::string("*CONTROL_SHELL: ") + (anyMod ? "modified" : "OK")));
+        }
+    }
+
+    // ── 5. CONTROL_TIMESTEP (TSSFAC, ERODE) ──────────────────────────
+    if (cfg.tssfac >= 0 || cfg.erode >= 0) {
+        bool anyMod = false;
+        if (!opt_hasKeyword(lines, "*CONTROL_TIMESTEP")) {
+            double ts = cfg.tssfac >= 0 ? cfg.tssfac : 0.9;
+            int    er = cfg.erode  >= 0 ? cfg.erode  : 0;
+            char buf[90];
+            snprintf(buf, sizeof(buf), "       0.0%10.6f         0       0.0       0.0         0%10d         0",
+                     ts, er);
+            impl_insertBeforeEnd(lines,
+                "*CONTROL_TIMESTEP\n"
+                "$   DTINIT    TSSFAC      ISDO    TSLIMT     DT2MS      LCTM     ERODE     MS1ST\n" +
+                std::string(buf));
+            msgs.push_back(tag("*CONTROL_TIMESTEP: inserted"));
+        } else {
+            if (cfg.tssfac >= 0) {
+                char buf[16]; snprintf(buf, sizeof(buf), "%10.6f", cfg.tssfac);
+                int r = opt_patchControlField(lines, "*CONTROL_TIMESTEP", 10, 10, std::string(buf));
+                if (r == 2) anyMod = true;
+                msgs.push_back(tag("*CONTROL_TIMESTEP: TSSFAC=" + std::to_string(cfg.tssfac) +
+                                   (r == 2 ? " (modified)" : " (OK)")));
+            }
+            if (cfg.erode >= 0) {
+                int r = opt_patchControlField(lines, "*CONTROL_TIMESTEP", 60, 10, std::to_string(cfg.erode));
+                if (r == 2) anyMod = true;
+                msgs.push_back(tag("*CONTROL_TIMESTEP: ERODE=" + std::to_string(cfg.erode) +
+                                   (r == 2 ? " (modified)" : " (OK)")));
+            }
+        }
+    }
+
+    // ── 6. CONTROL_HOURGLASS ─────────────────────────────────────────
+    if (cfg.ihq >= 0 || cfg.qh >= 0) {
+        bool anyMod = false;
+        if (!opt_hasKeyword(lines, "*CONTROL_HOURGLASS")) {
+            int    h = cfg.ihq >= 0 ? cfg.ihq : 1;
+            double q = cfg.qh  >= 0 ? cfg.qh  : 0.1;
+            char buf[90]; snprintf(buf, sizeof(buf), "%10d%10.4f", h, q);
+            impl_insertBeforeEnd(lines,
+                "*CONTROL_HOURGLASS\n"
+                "$      IHQ        QH\n" + std::string(buf));
+            msgs.push_back(tag("*CONTROL_HOURGLASS: IHQ=" + std::to_string(h) +
+                               ",QH=" + std::to_string(q) + " (inserted)"));
+        } else {
+            if (cfg.ihq >= 0 && opt_patchControlField(lines, "*CONTROL_HOURGLASS", 0, 10, std::to_string(cfg.ihq)) == 2) anyMod = true;
+            if (cfg.qh  >= 0) {
+                char buf[16]; snprintf(buf, sizeof(buf), "%10.4f", cfg.qh);
+                if (opt_patchControlField(lines, "*CONTROL_HOURGLASS", 10, 10, std::string(buf)) == 2) anyMod = true;
+            }
+            msgs.push_back(tag(std::string("*CONTROL_HOURGLASS: ") + (anyMod ? "modified" : "OK")));
+        }
+    }
+
+    // ── 7. CONTROL_CONTACT (Card 1 + Card 2) ─────────────────────────
+    bool needCC1 = (cfg.orien >= 0 || cfg.shlthk >= 0 || cfg.islchk >= 0 || cfg.enmass >= 0);
+    bool needCC2 = (cfg.nsbcs >= 0 || cfg.xpene  >= 0);
+    if (needCC1 || needCC2) {
+        bool anyMod = false;
+        if (!opt_hasKeyword(lines, "*CONTROL_CONTACT")) {
+            std::string c1(80, ' ');
+            if (cfg.islchk >= 0) c1 = impl_setField(c1, 20, 10, std::to_string(cfg.islchk));
+            if (cfg.shlthk >= 0) c1 = impl_setField(c1, 30, 10, std::to_string(cfg.shlthk));
+            if (cfg.orien  >= 0) c1 = impl_setField(c1, 60, 10, std::to_string(cfg.orien));
+            if (cfg.enmass >= 0) c1 = impl_setField(c1, 70, 10, std::to_string(cfg.enmass));
+            std::string c2(80, ' ');
+            if (cfg.nsbcs >= 0) c2 = impl_setField(c2, 20, 10, std::to_string(cfg.nsbcs));
+            if (cfg.xpene >= 0) {
+                char buf[16]; snprintf(buf, sizeof(buf), "%10.4f", cfg.xpene);
+                c2 = impl_setField(c2, 40, 10, std::string(buf));
+            }
+            impl_insertBeforeEnd(lines,
+                "*CONTROL_CONTACT\n"
+                "$    SLSFAC    RWPNAL    ISLCHK    SHLTHK    PENOPT    THKCHG     ORIEN    ENMASS\n" + c1 + "\n"
+                "$    USRSTR    USRFRC     NSBCS    INTERM     XPENE     SSTHK      ECDT   TIEDPRJ\n" + c2);
+            msgs.push_back(tag("*CONTROL_CONTACT: inserted"));
+        } else {
+            if (cfg.islchk >= 0 && opt_patchControlField(lines, "*CONTROL_CONTACT", 20, 10, std::to_string(cfg.islchk)) == 2) anyMod = true;
+            if (cfg.shlthk >= 0 && opt_patchControlField(lines, "*CONTROL_CONTACT", 30, 10, std::to_string(cfg.shlthk)) == 2) anyMod = true;
+            if (cfg.orien  >= 0 && opt_patchControlField(lines, "*CONTROL_CONTACT", 60, 10, std::to_string(cfg.orien))  == 2) anyMod = true;
+            if (cfg.enmass >= 0 && opt_patchControlField(lines, "*CONTROL_CONTACT", 70, 10, std::to_string(cfg.enmass)) == 2) anyMod = true;
+            if (needCC2) {
+                stab_ensureControlContactCard2(lines);
+                if (cfg.nsbcs >= 0 && stab_patchControlFieldN(lines, "*CONTROL_CONTACT", 1, 20, 10, std::to_string(cfg.nsbcs)) == 2) anyMod = true;
+                if (cfg.xpene >= 0) {
+                    char buf[16]; snprintf(buf, sizeof(buf), "%10.4f", cfg.xpene);
+                    if (stab_patchControlFieldN(lines, "*CONTROL_CONTACT", 1, 40, 10, std::string(buf)) == 2) anyMod = true;
+                }
+            }
+            msgs.push_back(tag(std::string("*CONTROL_CONTACT: ") + (anyMod ? "modified" : "OK")));
+        }
+    }
+
+    // ── 8. CONTROL_BULK_VISCOSITY (forced override) ────────────────────
+    if (cfg.bulkQ1 >= 0 || cfg.bulkQ2 >= 0) {
+        bool anyMod = false;
+        if (!opt_hasKeyword(lines, "*CONTROL_BULK_VISCOSITY")) {
+            double q1 = cfg.bulkQ1 >= 0 ? cfg.bulkQ1 : 1.5;
+            double q2 = cfg.bulkQ2 >= 0 ? cfg.bulkQ2 : 0.06;
+            char buf[90]; snprintf(buf, sizeof(buf), "%10.4f%10.4f", q1, q2);
+            impl_insertBeforeEnd(lines,
+                "*CONTROL_BULK_VISCOSITY\n"
+                "$       Q1        Q2\n" + std::string(buf));
+            msgs.push_back(tag("*CONTROL_BULK_VISCOSITY: Q1=" + std::to_string(q1) +
+                               ",Q2=" + std::to_string(q2) + " (inserted)"));
+        } else {
+            if (cfg.bulkQ1 >= 0) {
+                char buf[16]; snprintf(buf, sizeof(buf), "%10.4f", cfg.bulkQ1);
+                if (opt_patchControlField(lines, "*CONTROL_BULK_VISCOSITY",  0, 10, std::string(buf)) == 2) anyMod = true;
+            }
+            if (cfg.bulkQ2 >= 0) {
+                char buf[16]; snprintf(buf, sizeof(buf), "%10.4f", cfg.bulkQ2);
+                if (opt_patchControlField(lines, "*CONTROL_BULK_VISCOSITY", 10, 10, std::string(buf)) == 2) anyMod = true;
+            }
+            msgs.push_back(tag(std::string("*CONTROL_BULK_VISCOSITY: ") + (anyMod ? "modified (forced)" : "OK")));
+        }
+    }
+
+    // ── 9. Per-contact optional cards (Card A: SOFT/SBOPT/DEPTH/MAXPAR; Card C: IGNORE) ──
+    bool needPerContact = (cfg.soft >= 0 || cfg.sbopt >= 0 || cfg.depth >= 0 ||
+                           cfg.maxpar >= 0 || cfg.ignore_ >= 0);
+    if (needPerContact) {
+        auto contacts = ct_parseContacts(lines);
+        int modCount = 0;
+        for (auto& ct : contacts) {
+            ContactDef merged = ct;
+            bool changed = false;
+            if (cfg.soft   >= 0 || cfg.sbopt >= 0 || cfg.depth >= 0 || cfg.maxpar >= 0) {
+                merged.hasCardA = true;
+                if (cfg.soft   >= 0) { merged.soft   = cfg.soft;         changed = true; }
+                if (cfg.sbopt  >= 0) { merged.sbopt  = cfg.sbopt;        changed = true; }
+                if (cfg.depth  >= 0) { merged.depth  = cfg.depth;        changed = true; }
+                if (cfg.maxpar >= 0) { merged.maxpar = cfg.maxpar;       changed = true; }
+            }
+            if (cfg.ignore_ >= 0) {
+                merged.hasCardA = true;
+                merged.hasCardB = true;
+                merged.hasCardC = true;
+                merged.ignore_ = cfg.ignore_;
+                changed = true;
+            }
+            if (changed) {
+                ct_modifyOptionalCards(lines, ct, merged);
+                contacts = ct_parseContacts(lines);  // re-parse after line shift
+                modCount++;
+            }
+        }
+        if (modCount > 0)
+            msgs.push_back(tag(std::to_string(modCount) + " contact(s) updated (Card A/C options)"));
+        else if (!contacts.empty())
+            msgs.push_back(tag("Per-contact options: all contacts already up to date"));
+        else
+            msgs.push_back(tag("Per-contact options: no *CONTACT_* found in model"));
+    }
+
+    return msgs;
+}
+
+static void stab_resolveLevel(StabilizeConfig& cfg) {
+    int lv = cfg.level;
+    if (lv <= 0) return;
+
+    // Level 1+: Energy diagnostics
+    if (lv >= 1) {
+        if (cfg.hgen   < 0) cfg.hgen   = 2;
+        if (cfg.rwen   < 0) cfg.rwen   = 2;
+        if (cfg.slnten < 0) cfg.slnten = 2;
+        if (cfg.rylen  < 0) cfg.rylen  = 2;
+    }
+    // Level 2+: Accuracy
+    if (lv >= 2) {
+        if (cfg.osu        < 0) cfg.osu        = 1;
+        if (cfg.inn        < 0) cfg.inn        = 4;
+        if (cfg.esortSolid < 0) cfg.esortSolid = 1;
+        if (cfg.esortShell < 0) cfg.esortShell = 1;
+    }
+    // Level 3+: Time step 1
+    if (lv >= 3) {
+        if (cfg.tssfac < 0) cfg.tssfac = 0.80;
+    }
+    // Level 4+: Hourglass stiffness
+    if (lv >= 4) {
+        if (cfg.ihq < 0) cfg.ihq = 4;
+        if (cfg.qh  < 0) cfg.qh  = 0.10;
+    }
+    // Level 5+: Shell stabilization
+    if (lv >= 5) {
+        if (cfg.bwc   < 0)        cfg.bwc   = 1;
+        if (cfg.miter < 0)        cfg.miter = 2;
+        if (cfg.irnxx == INT_MIN) cfg.irnxx = -2;
+        if (cfg.wrpang < 0)       cfg.wrpang = 10.0;
+    }
+    // Level 6+: Contact 1st stage
+    if (lv >= 6) {
+        if (cfg.orien  < 0) cfg.orien  = 2;
+        if (cfg.shlthk < 0) cfg.shlthk = 1;
+        if (cfg.xpene  < 0) cfg.xpene  = 2.0;
+        if (cfg.islchk < 0) cfg.islchk = 2;
+        if (cfg.soft   < 0) cfg.soft   = 1;
+        if (cfg.sbopt  < 0) cfg.sbopt  = 2;
+        if (cfg.depth  < 0) cfg.depth  = 3;
+    }
+    // Level 7+: Time step 2 + Bulk viscosity forced
+    if (lv >= 7) {
+        if (cfg.tssfac < 0 || cfg.tssfac > 0.67) cfg.tssfac = 0.67;
+        if (cfg.bulkQ1 < 0) cfg.bulkQ1 = 1.5;
+        if (cfg.bulkQ2 < 0) cfg.bulkQ2 = 0.06;
+    }
+    // Level 8+: Contact 2nd stage (pinball)
+    if (lv >= 8) {
+        cfg.shlthk = 2;
+        cfg.soft   = 2;
+        cfg.sbopt  = 3;
+        cfg.depth  = 5;
+        if (cfg.nsbcs  < 0) cfg.nsbcs  = 5;
+        if (cfg.enmass < 0) cfg.enmass = 1;
+        if (cfg.ignore_ < 0) cfg.ignore_ = 1;
+        if (cfg.maxpar  < 0) cfg.maxpar  = 1.15;
+    }
+    // Level 9+: Best hourglass (Belytschko-Bindeman)
+    if (lv >= 9) {
+        cfg.ihq = 6;
+        cfg.qh  = 1.0;
+    }
+    // Level 10+: Time step 3 + reduce NSBCS
+    if (lv >= 10) {
+        if (cfg.tssfac > 0.60) cfg.tssfac = 0.60;
+        if (cfg.nsbcs  > 2)    cfg.nsbcs  = 2;
+    }
+    // Level 11+: Erosion
+    if (lv >= 11) {
+        if (cfg.erode < 0) cfg.erode = 11;
+        cfg.enmass = 2;
+        if (cfg.nsbcs  > 1)    cfg.nsbcs  = 1;
+        if (cfg.tssfac > 0.55) cfg.tssfac = 0.55;
+    }
+    // Level 12+: Maximum conservative
+    if (lv >= 12) {
+        if (cfg.tssfac > 0.50) cfg.tssfac = 0.50;
+        cfg.bulkQ1 = 2.0;
+        cfg.bulkQ2 = 0.10;
+    }
+}
+
+int runStabilize(const std::string& yamlFile, ConsoleOutput& console) {
+    std::ifstream f(yamlFile);
+    if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
+
+    std::string configDir;
+    size_t lastSlash = yamlFile.find_last_of("/\\");
+    if (lastSlash != std::string::npos) configDir = yamlFile.substr(0, lastSlash);
+
+    auto trim = [](const std::string& s) -> std::string {
+        size_t a=0, b=s.size();
+        while (a<b && std::isspace((unsigned char)s[a])) ++a;
+        while (b>a && std::isspace((unsigned char)s[b-1])) --b;
+        return s.substr(a, b-a);
+    };
+
+    std::string modelFile, outputFile;
+    StabilizeConfig cfg;
+    cfg.mode = "explicit";
+
+    std::string ln;
+    while (std::getline(f, ln)) {
+        if (!ln.empty() && ln.back()=='\r') ln.pop_back();
+        std::string tr = trim(ln);
+        if (tr.empty() || tr[0]=='#') continue;
+        size_t cp = tr.find(':');
+        if (cp == std::string::npos) continue;
+        std::string key = trim(tr.substr(0, cp));
+        std::string val = trim(tr.substr(cp+1));
+        if (val.empty()) continue;
+
+        auto parseInt  = [&](int& v)    { try { v = std::stoi(val); } catch(...) {} };
+        auto parseDbl  = [&](double& v) { try { v = std::stod(val); } catch(...) {} };
+        auto parseBool = [&](bool& v)   { v = (val=="true"||val=="yes"||val=="1"); };
+
+        if      (key == "model")           modelFile = val;
+        else if (key == "output")          outputFile = val;
+        else if (key == "stabilize")       cfg.mode = val;
+        else if (key == "level")           parseInt(cfg.level);
+        else if (key == "confirm_erosion") parseBool(cfg.confirmErosion);
+        else if (key == "tssfac")          parseDbl(cfg.tssfac);
+        else if (key == "erode")           parseInt(cfg.erode);
+        else if (key == "ihq")             parseInt(cfg.ihq);
+        else if (key == "qh")              parseDbl(cfg.qh);
+        else if (key == "osu")             parseInt(cfg.osu);
+        else if (key == "inn")             parseInt(cfg.inn);
+        else if (key == "esort_solid")     parseInt(cfg.esortSolid);
+        else if (key == "esort_shell")     parseInt(cfg.esortShell);
+        else if (key == "bwc")             parseInt(cfg.bwc);
+        else if (key == "miter")           parseInt(cfg.miter);
+        else if (key == "irnxx")           parseInt(cfg.irnxx);
+        else if (key == "wrpang")          parseDbl(cfg.wrpang);
+        else if (key == "orien")           parseInt(cfg.orien);
+        else if (key == "shlthk")          parseInt(cfg.shlthk);
+        else if (key == "enmass")          parseInt(cfg.enmass);
+        else if (key == "islchk")          parseInt(cfg.islchk);
+        else if (key == "xpene")           parseDbl(cfg.xpene);
+        else if (key == "nsbcs")           parseInt(cfg.nsbcs);
+        else if (key == "soft")            parseInt(cfg.soft);
+        else if (key == "sbopt")           parseInt(cfg.sbopt);
+        else if (key == "depth")           parseInt(cfg.depth);
+        else if (key == "maxpar")          parseDbl(cfg.maxpar);
+        else if (key == "ignore")          parseInt(cfg.ignore_);
+        else if (key == "bulk_q1")         parseDbl(cfg.bulkQ1);
+        else if (key == "bulk_q2")         parseDbl(cfg.bulkQ2);
+        else if (key == "hgen")            parseInt(cfg.hgen);
+        else if (key == "rwen")            parseInt(cfg.rwen);
+        else if (key == "slnten")          parseInt(cfg.slnten);
+        else if (key == "rylen")           parseInt(cfg.rylen);
+    }
+
+    if (modelFile.empty())  { console.error("stabilize YAML: 'model' not specified");  return 1; }
+    if (outputFile.empty()) { console.error("stabilize YAML: 'output' not specified"); return 1; }
+
+    auto resolvePath = [&](const std::string& p) -> std::string {
+        if (!configDir.empty() && !p.empty() &&
+            p[0] != '/' && p[0] != '\\' &&
+            !(p.size() >= 2 && p[1] == ':'))
+            return configDir + "/" + p;
+        return p;
+    };
+    std::string modelPath  = resolvePath(modelFile);
+    std::string outputPath = resolvePath(outputFile);
+
+    // Apply level presets (before erosion check, so erode is filled if needed)
+    stab_resolveLevel(cfg);
+
+    // Erosion confirmation
+    if (cfg.erode >= 0 && !cfg.confirmErosion) {
+        console.println("[stabilize] WARNING: ERODE=" + std::to_string(cfg.erode) +
+                        " will allow element deletion during the simulation.");
+        console.println("[stabilize] Add 'confirm_erosion: true' to YAML to skip this prompt.");
+        std::cout << "Apply ERODE? [y/N]: " << std::flush;
+        std::string answer;
+        std::getline(std::cin, answer);
+        for (auto& c : answer) c = std::tolower((unsigned char)c);
+        if (answer != "y" && answer != "yes") {
+            cfg.erode = -1;
+            console.println("[stabilize] ERODE skipped.");
+        }
+    }
+
+    console.println("[stabilize] Mode  : " + cfg.mode);
+    console.println("[stabilize] Model : " + modelPath);
+    console.println("[stabilize] Output: " + outputPath);
+    if (cfg.level > 0)
+        console.println("[stabilize] Level : " + std::to_string(cfg.level));
+
+    // Read model
+    std::vector<std::string> lines;
+    {
+        std::ifstream mf(modelPath);
+        if (!mf.is_open()) { console.error("Cannot open model: " + modelPath); return 1; }
+        std::string l;
+        while (std::getline(mf, l)) {
+            if (!l.empty() && l.back()=='\r') l.pop_back();
+            lines.push_back(l);
+        }
+    }
+
+    // Apply
+    if (cfg.mode != "explicit") {
+        console.error("Unknown stabilize mode: " + cfg.mode + " (only 'explicit' supported)");
+        return 1;
+    }
+    auto msgs = stab_applyExplicit(lines, cfg);
+    for (const auto& m : msgs) console.println(m);
+
+    // Write output
+    {
+        std::ofstream fout(outputPath);
+        if (!fout.is_open()) { console.error("Cannot write: " + outputPath); return 1; }
+        for (const auto& l : lines) fout << l << "\n";
+    }
+
+    console.println("[stabilize] Done -> " + outputPath);
     return 0;
 }
 
@@ -4457,6 +5515,8 @@ int runImplicit(const std::string& yamlFile, ConsoleOutput& console) {
         if (cp==std::string::npos) continue;
         std::string key = trimYaml(tr.substr(0,cp));
         std::string val = trimYaml(tr.substr(cp+1));
+        // strip inline comment
+        { size_t h = val.find('#'); if (h != std::string::npos) val = trimYaml(val.substr(0,h)); }
         if (val.empty()) continue;
         try {
             if      (key=="model")   modelFile  = val;
@@ -4577,6 +5637,9 @@ int runImplicit(const std::string& yamlFile, ConsoleOutput& console) {
     removeAndLog("*CONTROL_BULK_VISCOSITY");
     removeAndLog("*DATABASE_BINARY_D3DRLF");
 
+    // Remove *CONTROL_DYNAMICS — explicit quasi-static damping not applicable to implicit
+    removeAndLog("*CONTROL_DYNAMICS");
+
     // 5. DR load curves (SIDR=1) - removed by default
     if (!keepDrCurves) {
         int n = impl_removeDrCurves(lines);
@@ -4622,6 +5685,9 @@ int runImplicit(const std::string& yamlFile, ConsoleOutput& console) {
             lines = impl_removeKeyword(lines, "*CONTROL_IMPLICIT_AUTO");
             lines = impl_removeKeyword(lines, "*CONTROL_IMPLICIT_STABILIZATION");
             lines = impl_removeKeyword(lines, "*CONTROL_IMPLICIT_SOLVER");
+            lines = impl_removeKeyword(lines, "*CONTROL_IMPLICIT_BUCKLE");
+            lines = impl_removeKeyword(lines, "*CONTROL_IMPLICIT_FORMING");
+            lines = impl_removeKeyword(lines, "*CONTROL_IMPLICIT_ROTATIONAL_DYNAMICS");
         }
     }
 
@@ -4783,6 +5849,9 @@ int runModal(const std::string& yamlFile, ConsoleOutput& console) {
             lines = impl_removeKeyword(lines, "*CONTROL_IMPLICIT_STABILIZATION");
             lines = impl_removeKeyword(lines, "*CONTROL_IMPLICIT_SOLVER");
             lines = impl_removeKeyword(lines, "*CONTROL_IMPLICIT_EIGENVALUE");
+            lines = impl_removeKeyword(lines, "*CONTROL_IMPLICIT_BUCKLE");
+            lines = impl_removeKeyword(lines, "*CONTROL_IMPLICIT_FORMING");
+            lines = impl_removeKeyword(lines, "*CONTROL_IMPLICIT_ROTATIONAL_DYNAMICS");
         }
     }
 
@@ -5810,12 +6879,25 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
             }
             auto& ct = contacts[act.contactIndex];
 
-            // Helper: collect PIDs from a contact side for facing filter
-            auto collectPids = [&](int sid, int styp) -> std::vector<int> {
-                if (styp == 3) return {sid}; // direct PID
-                if (styp == 2) { // SET_PART
+            // Helper: collect face list from a contact side.
+            // Handles sstyp=3 (direct PID), sstyp=2 (SET_PART), sstyp=0 (SET_SEGMENT).
+            auto collectFaces = [&](int sid, int styp) -> std::vector<std::array<int,4>> {
+                if (styp == 3) return ct_extractSurface(mesh, sid);
+                if (styp == 2) {
                     for (const auto& s : sets)
-                        if (s.type == "PART" && s.id == sid) return s.ids;
+                        if (s.type == "PART" && s.id == sid) {
+                            std::vector<std::array<int,4>> result;
+                            for (int pid : s.ids) {
+                                auto f = ct_extractSurface(mesh, pid);
+                                result.insert(result.end(), f.begin(), f.end());
+                            }
+                            return result;
+                        }
+                }
+                if (styp == 0) {
+                    for (const auto& s : sets)
+                        if (s.type == "SEGMENT" && s.id == sid)
+                            return s.segments;
                 }
                 return {};
             };
@@ -5825,53 +6907,43 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
             if (act.convertFacing && convertBothSegment) {
                 double tol = act.detectTolerance;
                 double angle = act.detectNormalAngle;
-                auto sPids = collectPids(ct.ssid, ct.sstyp);
-                auto mPids = collectPids(ct.msid, ct.mstyp);
-                if (sPids.empty() || mPids.empty()) {
-                    console.warning("[contact] Cannot resolve PIDs for facing filter");
+                auto slaveFacesAll = collectFaces(ct.ssid, ct.sstyp);
+                auto masterFacesAll = collectFaces(ct.msid, ct.mstyp);
+                if (slaveFacesAll.empty() || masterFacesAll.empty()) {
+                    console.warning("[contact] No faces for facing filter (contact [" +
+                        std::to_string(act.contactIndex) + "] sstyp=" +
+                        std::to_string(ct.sstyp) + " mstyp=" + std::to_string(ct.mstyp) + ")");
                 } else {
-                    // Extract all surfaces from both sides
-                    std::vector<std::array<int,4>> slaveFacesAll, masterFacesAll;
-                    for (int pid : sPids) {
-                        auto f = ct_extractSurface(mesh, pid);
-                        slaveFacesAll.insert(slaveFacesAll.end(), f.begin(), f.end());
-                    }
-                    for (int pid : mPids) {
-                        auto f = ct_extractSurface(mesh, pid);
-                        masterFacesAll.insert(masterFacesAll.end(), f.begin(), f.end());
-                    }
-                    if (slaveFacesAll.empty() || masterFacesAll.empty()) {
-                        console.warning("[contact] No surfaces for facing filter");
+                    // Representative PIDs (0 for SET_SEGMENT; only used for tagging)
+                    int sPid = (ct.sstyp == 3) ? ct.ssid : 0;
+                    int mPid = (ct.mstyp == 3) ? ct.msid : 1;
+                    auto pairs = ct_detectContacting(slaveFacesAll, masterFacesAll, mesh,
+                        sPid, mPid, tol, angle);
+                    if (pairs.empty()) {
+                        console.warning("[contact] No facing segments found for contact [" +
+                            std::to_string(act.contactIndex) + "]");
                     } else {
-                        // Use first PID as representative (for ct_detectContacting)
-                        auto pairs = ct_detectContacting(slaveFacesAll, masterFacesAll, mesh,
-                            sPids.front(), mPids.front(), tol, angle);
-                        if (pairs.empty()) {
-                            console.warning("[contact] No facing segments found for contact [" +
-                                std::to_string(act.contactIndex) + "]");
-                        } else {
-                            std::set<int> sIdxSet, mIdxSet;
-                            for (const auto& p : pairs) { sIdxSet.insert(p.faceA); mIdxSet.insert(p.faceB); }
-                            std::vector<std::array<int,4>> sFaces, mFaces;
-                            for (int idx : sIdxSet) sFaces.push_back(slaveFacesAll[idx]);
-                            for (int idx : mIdxSet) mFaces.push_back(masterFacesAll[idx]);
+                        std::set<int> sIdxSet, mIdxSet;
+                        for (const auto& p : pairs) { sIdxSet.insert(p.faceA); mIdxSet.insert(p.faceB); }
+                        std::vector<std::array<int,4>> sFaces, mFaces;
+                        for (int idx : sIdxSet) sFaces.push_back(slaveFacesAll[idx]);
+                        for (int idx : mIdxSet) mFaces.push_back(masterFacesAll[idx]);
 
-                            int newSsid = nextSetId++;
-                            insertBlocks.push_back(ct_generateSetSegment(newSsid, sFaces,
-                                "Slave_facing"));
-                            int newMsid = nextSetId++;
-                            insertBlocks.push_back(ct_generateSetSegment(newMsid, mFaces,
-                                "Master_facing"));
-                            ct_modifyContactCard1(lines, ct, newSsid, newMsid, 0, 0);
-                            console.println("[contact] [" + std::to_string(act.contactIndex) +
-                                "] Facing filter: slave " + std::to_string(slaveFacesAll.size()) +
-                                " -> " + std::to_string(sFaces.size()) +
-                                ", master " + std::to_string(masterFacesAll.size()) +
-                                " -> " + std::to_string(mFaces.size()) + " segments");
-                            ct.ssid = newSsid; ct.sstyp = 0;
-                            ct.msid = newMsid; ct.mstyp = 0;
-                            modified = true;
-                        }
+                        int newSsid = nextSetId++;
+                        insertBlocks.push_back(ct_generateSetSegment(newSsid, sFaces,
+                            "Slave_facing"));
+                        int newMsid = nextSetId++;
+                        insertBlocks.push_back(ct_generateSetSegment(newMsid, mFaces,
+                            "Master_facing"));
+                        ct_modifyContactCard1(lines, ct, newSsid, newMsid, 0, 0);
+                        console.println("[contact] [" + std::to_string(act.contactIndex) +
+                            "] Facing filter: slave " + std::to_string(slaveFacesAll.size()) +
+                            " -> " + std::to_string(sFaces.size()) +
+                            ", master " + std::to_string(masterFacesAll.size()) +
+                            " -> " + std::to_string(mFaces.size()) + " segments");
+                        ct.ssid = newSsid; ct.sstyp = 0;
+                        ct.msid = newMsid; ct.mstyp = 0;
+                        modified = true;
                     }
                 }
                 continue;
@@ -6010,7 +7082,15 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
                     }
                     cn2++;
                 }
-                if (card2Modified) modFields += " Card2";
+                if (card2Modified) {
+                    modFields += " Card2";
+                } else {
+                    bool card2Requested = (act.fd>=0||act.dc>=0||act.vc>=0||act.vdc>=0||
+                                           act.penchk>=0||act.bt>=0||act.dt>=0);
+                    if (card2Requested)
+                        console.warning("[contact] [" + std::to_string(act.contactIndex) +
+                            "] Card2 not found in file — add it explicitly or the contact has only Card1");
+                }
             }
 
             // Card 3 modifications
@@ -6037,7 +7117,15 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
                     }
                     cn3++;
                 }
-                if (card3Modified) modFields += " Card3";
+                if (card3Modified) {
+                    modFields += " Card3";
+                } else {
+                    bool card3Requested = (act.sfsa>=0||act.sfsb>=0||act.sast>=0||act.sbst>=0||
+                                           act.sfsat>=0||act.sfsbt>=0||act.fsf>=0||act.vsf>=0);
+                    if (card3Requested)
+                        console.warning("[contact] [" + std::to_string(act.contactIndex) +
+                            "] Card3 not found in file — contact may only have Card1/Card2");
+                }
             }
 
             // Optional Cards A~G: merge YAML values into existing ContactDef, then replace
@@ -7258,6 +8346,85 @@ int main(int argc, char* argv[]) {
                 console.println("  *INITIAL_DETONATION             Detonation point (if he/c4)");
                 std::cout << "\n";
                 console.println("Examples: see examples/ale/");
+            } else if (helpCmd == "optimize") {
+                console.println("Usage: KooRemapper optimize <config.yaml>");
+                std::cout << "\n";
+                console.println("Apply material-specific global card optimization.");
+                console.println("Can also be used with 'optimize: rubber' inside matswap YAML.");
+                std::cout << "\n";
+                console.println("Standalone YAML Format:");
+                console.println("  model: model.k");
+                console.println("  output: optimized.k");
+                console.println("  optimize: rubber              # optimization mode");
+                console.println("  pids: [3, 5]                  # target PIDs (for contact scope)");
+                console.println("  tssfac: 0.67                  # optional, default 0.67");
+                std::cout << "\n";
+                console.println("Matswap Integration:");
+                console.println("  model: model.k");
+                console.println("  output: result.k");
+                console.println("  swaps:");
+                console.println("    - bundle: rubber.k");
+                console.println("      pid: 3");
+                console.println("  optimize: rubber              # applied after matswap");
+                console.println("  tssfac: 0.67                  # optional");
+                std::cout << "\n";
+                console.println("Rubber Mode Actions:");
+                console.println("  Forced modify + notice:");
+                console.println("    *CONTROL_ACCURACY    INN=4 (invariant node numbering)");
+                console.println("    *CONTROL_ENERGY      HGEN=2,RWEN=2,SLNTEN=2,RYLEN=2");
+                console.println("    *CONTROL_TIMESTEP    TSSFAC (default 0.67)");
+                console.println("    *CONTACT_*           SOFT=0, SBOPT=2.0 (for target PIDs)");
+                std::cout << "\n";
+                console.println("  Warning only:");
+                console.println("    *CONTROL_TIMESTEP         DT2MS != 0 warning");
+                console.println("    *CONTROL_BULK_VISCOSITY   Q1/Q2 deviation warning");
+            } else if (helpCmd == "stabilize") {
+                console.println("Usage: KooRemapper stabilize <config.yaml>");
+                std::cout << "\n";
+                console.println("Apply explicit solver stabilization measures (12-level cumulative system).");
+                console.println("Each level includes all measures from lower levels.");
+                std::cout << "\n";
+                console.println("YAML Format (level preset):");
+                console.println("  model:     model.k");
+                console.println("  output:    stabilized.k");
+                console.println("  stabilize: explicit");
+                console.println("  level:     6           # preset level 1-12");
+                std::cout << "\n";
+                console.println("YAML Format (manual — set specific options):");
+                console.println("  model:     model.k");
+                console.println("  output:    stabilized.k");
+                console.println("  stabilize: explicit");
+                console.println("  tssfac:    0.80        # *CONTROL_TIMESTEP TSSFAC");
+                console.println("  ihq:       4           # *CONTROL_HOURGLASS type");
+                console.println("  soft:      1           # *CONTACT_* Card A SOFT");
+                std::cout << "\n";
+                console.println("Level Presets:");
+                console.println("  Lv 1  Energy diagnostics: HGEN=RWEN=SLNTEN=RYLEN=2");
+                console.println("  Lv 2  Accuracy: OSU=1, INN=4, ESORT=1 (solid+shell)");
+                console.println("  Lv 3  Time step 1: TSSFAC=0.80");
+                console.println("  Lv 4  Hourglass stiffness: IHQ=4, QH=0.10");
+                console.println("  Lv 5  Shell stabilization: BWC=1, MITER=2, IRNXX=-2, WRPANG=10");
+                console.println("          (auto-skipped if no *ELEMENT_SHELL in model)");
+                console.println("  Lv 6  Contact stage 1: ORIEN=2, SHLTHK=1, XPENE=2, ISLCHK=2");
+                console.println("          per-contact: SOFT=1, SBOPT=2, DEPTH=3");
+                console.println("  Lv 7  Time step 2: TSSFAC=0.67 + BULK Q1=1.5, Q2=0.06 (forced)");
+                console.println("  Lv 8  Contact stage 2 (pinball): SOFT=2, SBOPT=3, DEPTH=5");
+                console.println("          SHLTHK=2, NSBCS=5, ENMASS=1, IGNORE=1, MAXPAR=1.15");
+                console.println("  Lv 9  Best hourglass: IHQ=6 (Belytschko-Bindeman), QH=1.0");
+                console.println("  Lv10  Time step 3: TSSFAC=0.60, NSBCS=2");
+                console.println("  Lv11  Erosion: ERODE=11, ENMASS=2, NSBCS=1, TSSFAC=0.55");
+                console.println("          (requires confirm_erosion: true or interactive y/N prompt)");
+                console.println("  Lv12  Maximum conservative: TSSFAC=0.50, Q1=2.0, Q2=0.10");
+                std::cout << "\n";
+                console.println("All YAML options (manual mode):");
+                console.println("  tssfac esort_solid esort_shell osu inn ihq qh");
+                console.println("  bwc miter irnxx wrpang");
+                console.println("  orien shlthk xpene islchk enmass nsbcs");
+                console.println("  soft sbopt depth maxpar ignore");
+                console.println("  bulk_q1 bulk_q2 erode confirm_erosion");
+                console.println("  hgen rwen slnten rylen");
+                std::cout << "\n";
+                console.println("Examples: see examples/explicit/");
             } else if (helpCmd == "contact") {
                 console.println("Usage: KooRemapper contact <config.yaml>");
                 std::cout << "\n";
@@ -7373,6 +8540,8 @@ int main(int argc, char* argv[]) {
             console.println("  modal        Convert explicit K-file to modal (natural frequency) analysis");
             console.println("  ale          Convert parts to ALE with material presets");
             console.println("  contact      Analyze, create, modify, convert contact definitions");
+            console.println("  optimize     Apply material-specific global card optimization");
+            console.println("  stabilize    Apply explicit solver stabilization (12-level system)");
             console.println("  info         Display information about a mesh file");
             console.println("  help         Show help for a command");
             console.println("  version      Show version information");
@@ -7677,6 +8846,26 @@ int main(int argc, char* argv[]) {
         }
         printBanner(console);
         return runContact(argv[2], console);
+    }
+
+    // Optimize command
+    if (command == "optimize") {
+        if (argc < 3) {
+            console.error("Usage: KooRemapper optimize <config.yaml>");
+            return 1;
+        }
+        printBanner(console);
+        return runOptimize(argv[2], console);
+    }
+
+    // Stabilize command
+    if (command == "stabilize") {
+        if (argc < 3) {
+            console.error("Usage: KooRemapper stabilize <config.yaml>");
+            return 1;
+        }
+        printBanner(console);
+        return runStabilize(argv[2], console);
     }
 
     // Info command

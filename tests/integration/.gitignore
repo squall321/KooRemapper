@@ -1,0 +1,12 @@
+# LS-DYNA binary output files
+d3plot*
+d3dump*
+d3hsp
+group_file
+messag
+spooles.res
+status.out
+stderr.txt
+stdout*
+disk.*
+NVIDIA*

@@ -1,0 +1,42 @@
+# =============================================================
+# KooRemapper stabilize explicit - Level 6: 접촉 1단계
+# =============================================================
+#
+# 언제 사용: 접촉면 진동(chattering), 부분적 침투, 이종 재료 접촉
+#            (예: 고무-강체, 폼-금속) 에서 penalty 불균형 발생 시.
+#
+# Level 5 대비 추가:
+#   CONTROL_CONTACT ORIEN=2   : 수동 정의 세그먼트 법선 자동 재정렬
+#   CONTROL_CONTACT SHLTHK=1  : 쉘 두께를 접촉 오프셋에 포함 (강체 제외)
+#   CONTROL_CONTACT XPENE=2.0 : 최대 침투 배수 4.0 → 2.0 (더 엄격)
+#   Per-contact SOFT=1        : soft constraint (이종 강성 접촉에 유리)
+#   Per-contact SBOPT=2       : 뒤틀린 세그먼트 보정 활성화
+#   Per-contact DEPTH=3       : 접촉 검색 깊이 2 → 3
+#
+# SOFT 선택:
+#   SOFT=0 (기본): 표준 penalty. 재료 bulk modulus 기반 강성.
+#                   동종 재료 간 접촉에 적합.
+#   SOFT=1 (Lv6) : Soft constraint. 노드 질량 기반 penalty 계산.
+#                   이종 재료 (강성비 크게 다를 때) 접촉에 적합.
+#   SOFT=2 (Lv8) : Pinball segment-based. 가장 강건. 대변형 접촉.
+#
+# SBOPT 선택:
+#   SBOPT=0 (기본): 표준. 수직 방향 검사만.
+#   SBOPT=2 (Lv6) : 뒤틀린 세그먼트 법선 보정 포함.
+#   SBOPT=3 (Lv8) : edge-to-edge 접촉 + 뒤틀림 보정.
+#
+# XPENE 이유:
+#   기본 4.0: 세그먼트 두께의 4배 침투까지 허용 후 제외.
+#   2.0으로 낮추면 → 침투 오탐 줄이고 접촉 감지 더 엄격.
+#
+# ORIEN=2 이유:
+#   기본(1): part input 방식 세그먼트만 법선 자동 재정렬.
+#   ORIEN=2: 수동 정의 세그먼트도 포함 → 더 강건.
+#
+# Usage: KooRemapper stabilize level06.yaml
+# =============================================================
+
+model:  your_model.k
+output: your_model_lv06.k
+stabilize: explicit
+level: 6

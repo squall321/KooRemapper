@@ -1,0 +1,7 @@
+model:      stabilize_lv6_result.k
+output:     stabilize_manual_result.k
+stabilize:  explicit
+# manual: only set IHQ and TSSFAC on top of existing lv6 result
+ihq:        6
+qh:         1.0
+tssfac:     0.60

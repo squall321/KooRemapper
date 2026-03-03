@@ -1,0 +1,22 @@
+base_model: warpage_test_mesh.k
+output: test3_gaussian_10x_small_result.k
+
+material:
+    E: 210000.0    # Steel, MPa
+    nu: 0.3
+
+operations:
+    - type: warpage
+      target_pid: 1
+      dat_file: warpage_gaussian.dat
+      plane: xy
+      deflection_axis: +z
+      unit: mm
+      mode: prestress
+      finite_strain: false   # Kirchhoff (small deformation)
+      morph_factor: 10.0     # 10x amplification!
+      outside_behavior: clamp
+      debug: false
+
+dynamic_relaxation: false
+dynain_embed: false

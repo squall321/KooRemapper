@@ -1,0 +1,42 @@
+# =============================================================
+# KooRemapper stabilize explicit - Level 8: 접촉 2단계 + 검색 강화
+# =============================================================
+#
+# 언제 사용: 대변형으로 접촉면이 크게 변형되거나 미끄러지는 경우.
+#            Lv6 soft constraint로도 접촉이 불안정한 경우.
+#            초기 침투가 있는 모델 (조립체 끼워맞춤 등).
+#
+# Level 7 대비 추가:
+#   Per-contact SOFT=2    : pinball segment-based (가장 강건한 접촉)
+#   Per-contact SBOPT=3   : edge-to-edge 접촉 + 뒤틀림 보정
+#   Per-contact DEPTH=5   : 검색 깊이 3 → 5 (두꺼운 부품 통과 방지)
+#   Per-contact IGNORE=1  : 초기 침투 → offset으로 처리
+#   Per-contact MAXPAR=1.15 : SOFT=2 침투 허용 배수 (대변형 대응)
+#   CONTROL_CONTACT SHLTHK=2 : 강체 포함 전체 쉘 두께 접촉 반영
+#   CONTROL_CONTACT ENMASS=1 : 침식 솔리드 노드 접촉 유지
+#   CONTROL_CONTACT NSBCS=5  : 버킷 검색 주기 단축 (더 자주 검색)
+#
+# SOFT=2 (Pinball) 특징:
+#   - 세그먼트 기반 침투 감지. 노드-세그먼트 방식보다 강건.
+#   - 대변형, 대슬라이딩 접촉에서 안정성 크게 향상.
+#   - MAXPAR: 세그먼트 크기의 n배 이상 침투 시 무시. 기본 1.025.
+#              대변형 시 1.15~1.25로 늘려야 접촉 손실 방지.
+#
+# IGNORE=1 이유:
+#   조립체에서 CAD 공차로 인한 초기 침투가 흔함.
+#   IGNORE=0(기본): 초기 침투 → 튀어오르는 힘 발생 → 발산.
+#   IGNORE=1: 초기 침투를 offset으로 처리 → 매끄러운 시작.
+#   IGNORE=2: 초기화 (geometry 변경) → 더 극단적.
+#
+# NSBCS=5 이유:
+#   기본값은 자동 결정 (보통 10~100 cycle). 빠른 변형이나
+#   pinball 접촉에서 검색 주기가 길면 접촉 누락 발생.
+#   5로 줄이면 더 자주 검색 → 비용 증가 but 안정성 향상.
+#
+# Usage: KooRemapper stabilize level08.yaml
+# =============================================================
+
+model:  your_model.k
+output: your_model_lv08.k
+stabilize: explicit
+level: 8

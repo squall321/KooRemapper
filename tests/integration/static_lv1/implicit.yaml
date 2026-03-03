@@ -1,0 +1,4 @@
+model:   tests/integration/3pt_bending.k
+output:  tests/integration/static_lv1/input.k
+mode:    static
+level:   1

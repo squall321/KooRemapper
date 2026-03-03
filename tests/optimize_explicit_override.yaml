@@ -1,0 +1,6 @@
+# Test: implicit model but force explicit mode via analysis_type
+model: implicit_lv5_result.k
+output: optimize_explicit_override_result.k
+optimize: rubber
+pids: [1]
+analysis_type: explicit

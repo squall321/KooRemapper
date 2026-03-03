@@ -1,0 +1,8 @@
+# matswap: 3pt bending TET4 모델에 rubber.k 재질 적용
+# Run: KooRemapper matswap tests/integration/matswap_rubber.yaml
+
+model: tests/integration/3pt_bending_tet4.k
+output: tests/integration/3pt_bending_rubber.k
+swaps:
+  - bundle: ../../materials/rubber.k
+    pid: 1

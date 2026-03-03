@@ -1,0 +1,34 @@
+# =============================================================
+# KooRemapper stabilize explicit - Level 4: 호글래스 1단계
+# =============================================================
+#
+# 언제 사용: d3plot에서 체커보드(checkerboard) 변형 패턴이 보이거나,
+#            glstat에서 hourglass energy > 전체 에너지 10% 초과 시.
+#
+# Level 3 대비 추가:
+#   CONTROL_HOURGLASS : IHQ=4 (Flanagan-Belytschko 강성 기반)
+#                       QH=0.10 (호글래스 계수 유지)
+#
+# IHQ 선택 기준:
+#   IHQ=1 : 점성 (기본). 속도 비례 감쇠. 충격 해석에 적합.
+#   IHQ=2 : FB 점성. IHQ=1과 유사하나 FB 알고리즘.
+#   IHQ=3 : FB 점성 + 정적 체적 보정. 비압축 재료 개선.
+#   IHQ=4 : FB 강성 (★Lv 4 선택). 변위 비례. 준정적/벤딩 지배.
+#   IHQ=5 : FB 강성 (고무/폼 전용). IHQ=4와 유사.
+#   IHQ=6 : BB 물리 안정화 (★Lv 9 선택). 가장 정확하나 비용 大.
+#
+# QH 선택 기준:
+#   IHQ 1~5 : 0.05~0.15 범위. 높을수록 억제↑, 인공강성↑
+#              (0.15 초과 시 instability 가능)
+#   IHQ 6~  : 1.0까지 안정. 물리 안정화이므로 QH=1.0이 표준.
+#
+# 주의: *HOURGLASS 파트별 카드가 있으면 그쪽이 우선됨.
+#        CONTROL_HOURGLASS는 글로벌 기본값만 설정.
+#
+# Usage: KooRemapper stabilize level04.yaml
+# =============================================================
+
+model:  your_model.k
+output: your_model_lv04.k
+stabilize: explicit
+level: 4

@@ -1,0 +1,5 @@
+# Test: auto-detect implicit from model with *CONTROL_IMPLICIT_*
+model: implicit_lv5_result.k
+output: optimize_implicit_result.k
+optimize: rubber
+pids: [1]

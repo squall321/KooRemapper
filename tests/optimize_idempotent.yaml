@@ -1,0 +1,4 @@
+model: optimize_standalone_result.k
+output: optimize_idempotent_result.k
+optimize: rubber
+pids: [2]

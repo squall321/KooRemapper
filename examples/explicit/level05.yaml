@@ -1,0 +1,35 @@
+# =============================================================
+# KooRemapper stabilize explicit - Level 5: 쉘 안정화
+# =============================================================
+#
+# 언제 사용: 쉘 요소 주도 모델 (박판 금속, 케이스류)에서
+#            국부 뒤틀림(warping), 소성 수렴 불량, 대회전 오류 발생 시.
+#
+# 자동 감지: *ELEMENT_SHELL 없는 모델 → 이 레벨 자동 skip
+#
+# Level 4 대비 추가:
+#   CONTROL_SHELL BWC=1    : 뒤틀린 BT 쉘에 워핑 강성 추가
+#   CONTROL_SHELL MITER=2  : 소성 반복을 full iterative로 강화
+#   CONTROL_SHELL IRNXX=-2 : 노달 파이버 증분 업데이트
+#   CONTROL_SHELL WRPANG=10: 워핑 경고 각도 20°→10° (더 엄격한 진단)
+#
+# BWC 선택:
+#   BWC=2 (기본): Belytschko-Tsay 표준. 워핑 무시.
+#   BWC=1 (Lv5) : 뒤틀린 쉘에 워핑 강성 추가 → 국부 불안정 억제.
+#
+# MITER 선택:
+#   MITER=1 (기본): 3 secant 반복. 빠르지만 대변형 소성 부정확.
+#   MITER=2 (Lv5) : Full iterative. 더 정확한 소성 반복 수렴.
+#   MITER=3       : Radial return (반복 없음). 빠르지만 덜 정확.
+#
+# IRNXX 선택:
+#   IRNXX=-1 (기본): 매 cycle 파이버 재계산. 빠르나 대회전 시 불일치.
+#   IRNXX=-2 (Lv5) : 증분 업데이트. 대변형/대회전 시 더 일관된 결과.
+#
+# Usage: KooRemapper stabilize level05.yaml
+# =============================================================
+
+model:  your_model.k
+output: your_model_lv05.k
+stabilize: explicit
+level: 5

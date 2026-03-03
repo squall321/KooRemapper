@@ -1,0 +1,6 @@
+model:  tests/integration/3pt_bending_rubber.k
+output: tests/integration/rubber_static_lv8/input.k
+mode:   static
+level:  8
+endtime: 1.0
+lsolvr: 7  # Student license: MUMPS unavailable, use Sparse Direct instead

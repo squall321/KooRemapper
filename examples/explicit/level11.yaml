@@ -1,0 +1,46 @@
+# =============================================================
+# KooRemapper stabilize explicit - Level 11: 침식 활성화
+# =============================================================
+#
+# 언제 사용: 요소가 심하게 변형되어 dt→0 (또는 음수 야코비안)으로
+#            시뮬레이션이 종료되는 경우. 파괴/관통/절단 해석.
+#
+# !! 경고: 이 레벨은 물리를 변경합니다 !!
+#    ERODE 적용 시 음수 야코비안 요소가 모델에서 제거됩니다.
+#    질량/체적이 보존되지 않습니다.
+#    결과 해석 시 glstat의 eroded mass 항목 반드시 확인.
+#
+# 이 레벨은 --confirm-erosion 플래그 없이는 interactive 확인 필요:
+#   [stabilize] Level 11: ERODE=11 → elements will be removed.
+#   Apply erosion? [y/N]
+#
+# Level 10 대비 추가:
+#   CONTROL_TIMESTEP ERODE=11 : 솔리드+쉘 요소 침식
+#   CONTROL_CONTACT ENMASS=2  : 침식된 솔리드+쉘 노드도 접촉 유지
+#   CONTROL_CONTACT NSBCS=1   : 매 cycle 버킷 검색 (침식 후 새 표면 즉시 감지)
+#   TSSFAC                    : 0.60 → 0.55
+#
+# ERODE=11 분석:
+#   ERODE는 multi-digit 플래그 (digit: solid/shell/beam):
+#     ERODE=1   : 솔리드만 침식
+#     ERODE=10  : 쉘만 침식
+#     ERODE=11  : 솔리드+쉘 침식 (일반 조립체에 적합)
+#     ERODE=111 : 솔리드+쉘+빔 모두 침식
+#
+# ENMASS=2 이유:
+#   침식 요소의 노드는 기본적으로 접촉에서 제거됨 (ENMASS=0).
+#   ENMASS=1: 솔리드 침식 노드 유지.
+#   ENMASS=2: 솔리드+쉘 침식 노드 유지 → 구멍이 생겨도 접촉 유지.
+#
+# NSBCS=1 이유:
+#   침식으로 새로운 표면이 매 step 생성됨.
+#   버킷 검색을 매 cycle 수행해야 새 표면의 접촉을 즉시 감지.
+#
+# Usage: KooRemapper stabilize level11.yaml --confirm-erosion
+# =============================================================
+
+model:  your_model.k
+output: your_model_lv11.k
+stabilize: explicit
+level: 11
+confirm_erosion: true    # interactive 프롬프트 생략. 주석 처리 시 y/N 확인 요청.
