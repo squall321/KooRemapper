@@ -31,9 +31,11 @@
 #include <fstream>
 #include <memory>
 #include <limits>
+#include <climits>
 #include <sstream>
 #include <iomanip>
 #include <set>
+#include <unordered_map>
 
 using namespace KooRemapper;
 
@@ -1782,7 +1784,7 @@ static std::string impl_trim(const std::string& s) {
 }
 static std::string impl_upper(const std::string& s) {
     std::string r = s;
-    std::transform(r.begin(), r.end(), r.begin(), ::toupper);
+    std::transform(r.begin(), r.end(), r.begin(), [](unsigned char c){ return (char)std::toupper(c); });
     return r;
 }
 static std::vector<std::string> impl_tok10(const std::string& s) {
@@ -2319,7 +2321,7 @@ static std::string ale_presetMaterial(const std::string& preset, int mid, int eo
     char buf[4096]; int n = 0;
     std::string p = impl_trim(preset);
     // normalize to lowercase for matching
-    std::transform(p.begin(), p.end(), p.begin(), ::tolower);
+    std::transform(p.begin(), p.end(), p.begin(), [](unsigned char c){ return (char)std::tolower(c); });
 
     // Gas presets: MAT_NULL + EOS_LINEAR_POLYNOMIAL
     struct GasPreset { const char* name; double rho; double gamma; double e0; };
@@ -6165,7 +6167,7 @@ int runAle(const std::string& yamlFile, ConsoleOutput& console) {
         // Determine MAT/EOS type names for console
         std::string matName, eosName;
         std::string matLower = impl_trim(entry.material);
-        std::transform(matLower.begin(), matLower.end(), matLower.begin(), ::tolower);
+        std::transform(matLower.begin(), matLower.end(), matLower.begin(), [](unsigned char c){ return (char)std::tolower(c); });
         if (matLower == "tnt" || matLower == "c4") {
             matName = "*MAT_HIGH_EXPLOSIVE_BURN"; eosName = "*EOS_JWL"; hasHe = true;
         } else if (matLower == "vacuum") {
@@ -6633,7 +6635,7 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
         if (act.action == "create") {
             std::string ctype = act.type;
             // Normalize type to uppercase with underscores
-            for (auto& c : ctype) { if (c == '-') c = '_'; c = static_cast<char>(toupper(c)); }
+            for (auto& c : ctype) { if (c == '-') c = '_'; c = static_cast<char>(toupper(static_cast<unsigned char>(c))); }
 
             int ssid = 0, msid = 0, sstyp = 0, mstyp = 0;
 
@@ -7731,7 +7733,7 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
         int endPos = -1;
         for (int i = (int)lines.size()-1; i >= 0; --i) {
             std::string up = impl_trim(lines[i]);
-            for (auto& c : up) c = static_cast<char>(toupper(c));
+            for (auto& c : up) c = static_cast<char>(toupper(static_cast<unsigned char>(c)));
             if (up == "*END") { endPos = i; break; }
         }
         if (endPos < 0) endPos = (int)lines.size();

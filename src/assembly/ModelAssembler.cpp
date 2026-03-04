@@ -1316,7 +1316,7 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
             std::string upper = rawLine;
             size_t s = upper.find_first_not_of(" \t");
             if (s != std::string::npos) upper = upper.substr(s);
-            std::transform(upper.begin(), upper.end(), upper.begin(), ::toupper);
+            std::transform(upper.begin(), upper.end(), upper.begin(), [](unsigned char c){ return (char)std::toupper(c); });
             if (upper.substr(0, 32) == "*CONTROL_DYNAMIC_RELAXATION") hasDR = true;
             if (upper.substr(0, 22) == "*CONTROL_TERMINATION") hasTermination = true;
         }
@@ -1408,7 +1408,7 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
 
             // Detect section type
             std::string upper = trimmed;
-            std::transform(upper.begin(), upper.end(), upper.begin(), ::toupper);
+            std::transform(upper.begin(), upper.end(), upper.begin(), [](unsigned char c){ return (char)std::toupper(c); });
 
             // Handle *CONTROL_TERMINATION replacement for DR
             if (dynamicRelaxation_ && hasTermination &&

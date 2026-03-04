@@ -78,13 +78,13 @@ MaterialCardValidator::ValidationResult MaterialCardValidator::validate(
 
 bool MaterialCardValidator::isKeywordLine(const std::string& line) const {
     std::string upper = line;
-    std::transform(upper.begin(), upper.end(), upper.begin(), ::toupper);
+    std::transform(upper.begin(), upper.end(), upper.begin(), [](unsigned char c){ return (char)std::toupper(c); });
     return upper.find("*MAT") != std::string::npos;
 }
 
 std::string MaterialCardValidator::extractKeyword(const std::string& line) const {
     std::string upper = line;
-    std::transform(upper.begin(), upper.end(), upper.begin(), ::toupper);
+    std::transform(upper.begin(), upper.end(), upper.begin(), [](unsigned char c){ return (char)std::toupper(c); });
 
     size_t start = upper.find("*MAT");
     if (start == std::string::npos) return "";

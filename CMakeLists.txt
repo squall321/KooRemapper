@@ -156,7 +156,7 @@ add_library(kooremapper_lib STATIC
     ${VALIDATION_SOURCES}
 )
 
-# Define M_PI for MSVC
+# Define M_PI for MSVC (apply to both lib and executable)
 if(MSVC)
     target_compile_definitions(kooremapper_lib PRIVATE _USE_MATH_DEFINES)
 endif()
@@ -170,6 +170,9 @@ endif()
 # Main executable
 add_executable(KooRemapper src/main.cpp)
 target_link_libraries(KooRemapper PRIVATE kooremapper_lib)
+if(MSVC)
+    target_compile_definitions(KooRemapper PRIVATE _USE_MATH_DEFINES)
+endif()
 
 # Install targets
 install(TARGETS KooRemapper DESTINATION bin)

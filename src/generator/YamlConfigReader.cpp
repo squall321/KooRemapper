@@ -171,7 +171,7 @@ YamlConfigReader::YamlNode YamlConfigReader::parseYaml(const std::string& conten
 
 GrowthType YamlConfigReader::parseGrowthType(const std::string& str) {
     std::string lower = str;
-    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+    std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c){ return (char)std::tolower(c); });
     
     if (lower == "geometric") return GrowthType::GEOMETRIC;
     if (lower == "exponential") return GrowthType::EXPONENTIAL;
@@ -237,7 +237,7 @@ VariableDensityConfig YamlConfigReader::nodeToConfig(const YamlNode& root) {
     if (auto* opts = root.getChild("options")) {
         if (auto* center = opts->getChild("center_at_origin")) {
             std::string val = center->asString("false");
-            std::transform(val.begin(), val.end(), val.begin(), ::tolower);
+            std::transform(val.begin(), val.end(), val.begin(), [](unsigned char c){ return (char)std::tolower(c); });
             config.centerAtOrigin = (val == "true" || val == "yes" || val == "1");
         }
     }
@@ -267,7 +267,7 @@ ExtendedMeshConfig YamlConfigReader::readExtendedString(const std::string& yamlC
 
 MeshGenType YamlConfigReader::parseMeshType(const std::string& str) {
     std::string lower = str;
-    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+    std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c){ return (char)std::tolower(c); });
     
     if (lower == "curved" || lower == "curve") {
         return MeshGenType::CURVED;
@@ -277,7 +277,7 @@ MeshGenType YamlConfigReader::parseMeshType(const std::string& str) {
 
 InterpolationType YamlConfigReader::parseInterpolationType(const std::string& str) {
     std::string lower = str;
-    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+    std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c){ return (char)std::tolower(c); });
     
     if (lower == "linear") return InterpolationType::LINEAR;
     if (lower == "bspline" || lower == "b-spline") return InterpolationType::BSPLINE;
@@ -386,7 +386,7 @@ CurvedMeshConfig YamlConfigReader::parseCurvedConfig(const YamlNode& root) {
     if (auto* opts = root.getChild("options")) {
         if (auto* center = opts->getChild("center_at_origin")) {
             std::string val = center->asString("false");
-            std::transform(val.begin(), val.end(), val.begin(), ::tolower);
+            std::transform(val.begin(), val.end(), val.begin(), [](unsigned char c){ return (char)std::tolower(c); });
             config.centerAtOrigin = (val == "true" || val == "yes" || val == "1");
         }
     }
