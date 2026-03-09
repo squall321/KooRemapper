@@ -1,0 +1,38 @@
+# contact + boundary + load 통합 파이프라인
+# 1) 인접 레이어 간 tied contact 자동 생성
+# 2) LAYER_1 하단면 전체 고정
+# 3) LAYER_2 tied 인터페이스에 z+ 압력
+
+base_model: ../load/mesh.k
+output: mesh_full.k
+
+operations:
+  - type: contact
+    actions:
+      - action: detect
+        scope: all
+        type: tied
+        auto_create: true
+        tolerance: 0.1
+        title_prefix: AUTO
+
+  - type: boundary
+    boundaries:
+      - part: 9
+        dof: all
+        direction: [0, 0, -1]
+        select: direction
+        angle: 45.0
+
+  - type: load
+    loads:
+      - part: 10
+        mode: pressure
+        value: 1.0
+        direction: [0, 0, 1]
+        select: tied
+        angle: 45.0
+        curve:
+          - [0.0, 0.0]
+          - [0.001, 1.0]
+          - [0.01, 1.0]

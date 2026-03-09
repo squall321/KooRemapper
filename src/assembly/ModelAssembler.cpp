@@ -69,6 +69,22 @@ bool ModelAssembler::loadBaseModel(const std::string& filename) {
     return true;
 }
 
+bool ModelAssembler::loadRawOnly(const std::string& filename) {
+    rawLines_.clear();
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+        errorMessage_ = "Cannot open model: " + filename;
+        return false;
+    }
+    std::string line;
+    while (std::getline(file, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        rawLines_.push_back(line);
+    }
+    file.close();
+    return true;
+}
+
 bool ModelAssembler::applyReplace(const ReplaceOperation& op, double E, double nu,
                                    const std::string& configDir) {
     // Resolve paths relative to config directory
@@ -7630,6 +7646,2477 @@ bool ModelAssembler::applyMatswap(const MatswapOperation& op, const std::string&
     rawLines_ = std::move(newLines);
 
     infoMessages.push_back("[matswap] Done: " + std::to_string(targetPids.size()) + " part(s) swapped");
+    return true;
+}
+
+// ============================================================
+//  applyMatdb helpers (anonymous namespace - internal only)
+// ============================================================
+
+// ── Minimal JSON parser ──────────────────────────────────────
+struct MdJsonValue {
+    enum Type { NUL, BOOL, NUMBER, STRING, ARRAY, OBJECT };
+    Type type = NUL;
+    double num = 0;
+    bool bval = false;
+    std::string str;
+    std::vector<MdJsonValue> arr;
+    std::vector<std::pair<std::string, MdJsonValue>> obj;
+
+    const MdJsonValue* get(const std::string& key) const {
+        if (type != OBJECT) return nullptr;
+        for (auto& p : obj) if (p.first == key) return &p.second;
+        return nullptr;
+    }
+    std::string asStr(const std::string& def = "") const { return type == STRING ? str : def; }
+    double asNum(double def = 0) const { return type == NUMBER ? num : def; }
+    int asInt(int def = 0) const { return type == NUMBER ? (int)num : def; }
+};
+
+static void md_skipWs(const std::string& s, size_t& p) {
+    while (p < s.size() && std::isspace((unsigned char)s[p])) ++p;
+}
+
+static MdJsonValue md_parseValue(const std::string& s, size_t& p);
+
+static std::string md_parseString(const std::string& s, size_t& p) {
+    if (p >= s.size() || s[p] != '"') return "";
+    ++p;
+    std::string r;
+    while (p < s.size() && s[p] != '"') {
+        if (s[p] == '\\' && p + 1 < s.size()) {
+            ++p;
+            switch (s[p]) {
+                case 'n': r += '\n'; break;
+                case 't': r += '\t'; break;
+                case '"': r += '"'; break;
+                case '\\': r += '\\'; break;
+                case '/': r += '/'; break;
+                default: r += '\\'; r += s[p]; break;
+            }
+        } else {
+            r += s[p];
+        }
+        ++p;
+    }
+    if (p < s.size()) ++p; // skip closing "
+    return r;
+}
+
+static MdJsonValue md_parseObject(const std::string& s, size_t& p) {
+    MdJsonValue v; v.type = MdJsonValue::OBJECT;
+    ++p; // skip {
+    md_skipWs(s, p);
+    while (p < s.size() && s[p] != '}') {
+        md_skipWs(s, p);
+        std::string key = md_parseString(s, p);
+        md_skipWs(s, p);
+        if (p < s.size() && s[p] == ':') ++p;
+        md_skipWs(s, p);
+        v.obj.push_back({key, md_parseValue(s, p)});
+        md_skipWs(s, p);
+        if (p < s.size() && s[p] == ',') ++p;
+    }
+    if (p < s.size()) ++p; // skip }
+    return v;
+}
+
+static MdJsonValue md_parseArray(const std::string& s, size_t& p) {
+    MdJsonValue v; v.type = MdJsonValue::ARRAY;
+    ++p; // skip [
+    md_skipWs(s, p);
+    while (p < s.size() && s[p] != ']') {
+        v.arr.push_back(md_parseValue(s, p));
+        md_skipWs(s, p);
+        if (p < s.size() && s[p] == ',') ++p;
+        md_skipWs(s, p);
+    }
+    if (p < s.size()) ++p; // skip ]
+    return v;
+}
+
+static MdJsonValue md_parseValue(const std::string& s, size_t& p) {
+    md_skipWs(s, p);
+    if (p >= s.size()) return {};
+    if (s[p] == '"') { MdJsonValue v; v.type = MdJsonValue::STRING; v.str = md_parseString(s, p); return v; }
+    if (s[p] == '{') return md_parseObject(s, p);
+    if (s[p] == '[') return md_parseArray(s, p);
+    if (s[p] == 't') { MdJsonValue v; v.type = MdJsonValue::BOOL; v.bval = true; p += std::min((size_t)4, s.size()-p); return v; }
+    if (s[p] == 'f') { MdJsonValue v; v.type = MdJsonValue::BOOL; v.bval = false; p += std::min((size_t)5, s.size()-p); return v; }
+    if (s[p] == 'n') { p += std::min((size_t)4, s.size()-p); return {}; }
+    // number (guard against unexpected characters)
+    if (s[p] != '-' && !std::isdigit((unsigned char)s[p])) { ++p; return {}; }
+    MdJsonValue v; v.type = MdJsonValue::NUMBER;
+    size_t start = p;
+    if (s[p] == '-') ++p;
+    while (p < s.size() && (std::isdigit((unsigned char)s[p]) || s[p] == '.' || s[p] == 'e' || s[p] == 'E' || s[p] == '+' || s[p] == '-')) {
+        if ((s[p] == '+' || s[p] == '-') && p > start && s[p-1] != 'e' && s[p-1] != 'E') break;
+        ++p;
+    }
+    if (p == start) return {};
+    try { v.num = std::stod(s.substr(start, p - start)); } catch (...) { return {}; }
+    return v;
+}
+
+static MdJsonValue md_parseJson(const std::string& text) {
+    size_t p = 0;
+    return md_parseValue(text, p);
+}
+
+// ── DB data structures ───────────────────────────────────────
+struct MdDbMaterial {
+    int dbMid = 0;
+    std::string name;
+    std::string tag;
+    std::string category;
+    std::string defaultMatType;
+    std::map<std::string, std::string> cardsStructural; // matType → card text
+    std::string cardThermal;
+    std::string cardThermalExpansion;
+};
+
+struct MdMaterialDatabase {
+    std::map<int, MdDbMaterial> materials;
+};
+
+static MdMaterialDatabase md_loadDatabase(const std::string& jsonPath) {
+    MdMaterialDatabase db;
+    std::ifstream f(jsonPath);
+    if (!f.is_open()) return db;
+    std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    f.close();
+
+    MdJsonValue root = md_parseJson(text);
+    auto* mats = root.get("materials");
+    if (!mats || mats->type != MdJsonValue::OBJECT) return db;
+
+    for (auto& kv : mats->obj) {
+        int mid = 0;
+        try { mid = std::stoi(kv.first); } catch (...) { continue; }
+        auto& jm = kv.second;
+        MdDbMaterial m;
+        m.dbMid = mid;
+        m.name = jm.get("name") ? jm.get("name")->asStr() : "";
+        m.tag = jm.get("tag") ? jm.get("tag")->asStr() : "";
+        m.category = jm.get("category") ? jm.get("category")->asStr() : "";
+        m.defaultMatType = jm.get("mat_type") ? jm.get("mat_type")->asStr() : "MAT_ELASTIC";
+        m.cardThermal = jm.get("card_thermal") ? jm.get("card_thermal")->asStr() : "";
+        m.cardThermalExpansion = jm.get("card_thermal_expansion") ? jm.get("card_thermal_expansion")->asStr() : "";
+        auto* cs = jm.get("cards_structural");
+        if (cs && cs->type == MdJsonValue::OBJECT) {
+            for (auto& ck : cs->obj)
+                m.cardsStructural[ck.first] = ck.second.asStr();
+        }
+        db.materials[mid] = std::move(m);
+    }
+    return db;
+}
+
+// ── MAT block scanning ──────────────────────────────────────
+struct MdMatBlock {
+    int mid = 0;
+    std::string keyword;      // e.g. "*MAT_ELASTIC_TITLE"
+    std::string titleText;    // title line (for name matching)
+    int startLine = 0;
+    int endLine = 0;
+};
+
+static std::vector<MdMatBlock> md_scanMatBlocks(const std::vector<std::string>& lines) {
+    std::vector<MdMatBlock> blocks;
+    for (int i = 0; i < (int)lines.size(); ++i) {
+        std::string t = mw_trim(lines[i]);
+        if (t.empty() || t[0] != '*') continue;
+        std::string u = mw_upper(t);
+        if (u.substr(0, 5) != "*MAT_") continue;
+        // Exclude *MAT_THERMAL_*, *MAT_ADD_*
+        if (u.find("*MAT_THERMAL_") == 0 || u.find("*MAT_ADD_") == 0) continue;
+
+        bool hasTitle = (u.find("_TITLE") != std::string::npos);
+        MdMatBlock blk;
+        blk.keyword = u;
+        blk.startLine = i;
+
+        int j = i + 1;
+        bool gotTitle = false;
+        while (j < (int)lines.size()) {
+            std::string lt = mw_trim(lines[j]);
+            if (lt.empty() || lt[0] == '$') { ++j; continue; }
+            if (lt[0] == '*') break;
+            if (hasTitle && !gotTitle) {
+                blk.titleText = lt;
+                gotTitle = true;
+                ++j;
+                continue;
+            }
+            // first data line → extract MID
+            auto toks = mw_tok10(lines[j]);
+            if (!toks.empty()) {
+                try { blk.mid = std::stoi(toks[0]); } catch (...) {}
+            }
+            // find end of block
+            int end = j + 1;
+            while (end < (int)lines.size()) {
+                std::string et = mw_trim(lines[end]);
+                if (!et.empty() && et[0] == '*') break;
+                ++end;
+            }
+            blk.endLine = end;
+            blocks.push_back(blk);
+            break;
+        }
+    }
+    return blocks;
+}
+
+// ── Matching ─────────────────────────────────────────────────
+static std::string md_lowerStr(std::string s) {
+    for (auto& c : s) c = (char)std::tolower((unsigned char)c);
+    return s;
+}
+
+static int md_autoMatchDb(const std::string& titleText, int modelMid,
+                           const MdMaterialDatabase& db) {
+    if (titleText.empty()) {
+        // try direct MID lookup
+        auto it = db.materials.find(modelMid);
+        return it != db.materials.end() ? modelMid : 0;
+    }
+    std::string tl = md_lowerStr(titleText);
+    // 1. match by name (substring, case-insensitive, longest match wins)
+    int bestMid = 0;
+    size_t bestLen = 0;
+    for (auto& kv : db.materials) {
+        if (kv.second.name.empty()) continue;
+        std::string nl = md_lowerStr(kv.second.name);
+        if (nl.size() > bestLen && tl.find(nl) != std::string::npos) {
+            bestLen = nl.size();
+            bestMid = kv.first;
+        }
+    }
+    if (bestMid > 0) return bestMid;
+    // 2. match by tag (longest match wins)
+    bestLen = 0;
+    for (auto& kv : db.materials) {
+        if (kv.second.tag.empty()) continue;
+        std::string tgl = md_lowerStr(kv.second.tag);
+        if (tgl.size() > bestLen && tl.find(tgl) != std::string::npos) {
+            bestLen = tgl.size();
+            bestMid = kv.first;
+        }
+    }
+    if (bestMid > 0) return bestMid;
+    // 3. direct MID lookup
+    auto it = db.materials.find(modelMid);
+    return it != db.materials.end() ? modelMid : 0;
+}
+
+static int md_matchRule(const MdMatBlock& blk, const MatdbMaterialRule& rule,
+                         const MdMaterialDatabase& db) {
+    if (rule.match.empty() && rule.mid <= 0) return 0;  // empty rule → no match
+    if (rule.mid > 0) {
+        if (blk.mid == rule.mid) {
+            auto it = db.materials.find(rule.mid);
+            return it != db.materials.end() ? rule.mid : 0;
+        }
+        return 0;
+    }
+    if (rule.match == "*" || rule.match == "all") {
+        return md_autoMatchDb(blk.titleText, blk.mid, db);
+    }
+    // substring match: rule.match vs titleText
+    std::string ml = md_lowerStr(rule.match);
+    std::string tl = md_lowerStr(blk.titleText);
+    if (!tl.empty() && tl.find(ml) != std::string::npos) {
+        // find DB entry with matching name/tag
+        for (auto& kv : db.materials) {
+            if (md_lowerStr(kv.second.name).find(ml) != std::string::npos ||
+                md_lowerStr(kv.second.tag).find(ml) != std::string::npos)
+                return kv.first;
+        }
+    }
+    // also try: match against DB name/tag directly (user types DB name, any title)
+    for (auto& kv : db.materials) {
+        if (md_lowerStr(kv.second.name) == ml || md_lowerStr(kv.second.tag) == ml) {
+            // verify this DB entry matches the model block (check both name and tag)
+            if (!blk.titleText.empty() &&
+                (tl.find(md_lowerStr(kv.second.name)) != std::string::npos ||
+                 tl.find(md_lowerStr(kv.second.tag)) != std::string::npos))
+                return kv.first;
+            // if no title, match by MID
+            if (blk.mid == kv.first) return kv.first;
+        }
+    }
+    return 0;
+}
+
+// ── MAT type normalization ───────────────────────────────────
+static std::string md_normalizeMatType(const std::string& input) {
+    std::string u = mw_upper(mw_trim(input));
+    if (u == "MAT_001" || u == "MAT_1") return "MAT_ELASTIC";
+    if (u == "MAT_020" || u == "MAT_20") return "MAT_RIGID";
+    if (u == "MAT_024" || u == "MAT_24") return "MAT_PIECEWISE_LINEAR_PLASTICITY";
+    if (u == "MAT_027" || u == "MAT_27") return "MAT_MOONEY-RIVLIN_RUBBER";
+    if (u == "MAT_006" || u == "MAT_6") return "MAT_VISCOELASTIC";
+    if (u == "MAT_076" || u == "MAT_76") return "MAT_GENERAL_VISCOELASTIC";
+    return u;
+}
+
+// ── Card ID substitution ─────────────────────────────────────
+static std::vector<std::string> md_splitLines(const std::string& s) {
+    std::vector<std::string> lines;
+    std::istringstream iss(s);
+    std::string ln;
+    while (std::getline(iss, ln)) lines.push_back(ln);
+    return lines;
+}
+
+static std::string md_setField(const std::string& line, int startCol, int width, int value) {
+    std::string r = line;
+    while ((int)r.size() < startCol + width) r += ' ';
+    std::string vs = std::to_string(value);
+    if ((int)vs.size() > width) vs = vs.substr(vs.size() - width);
+    std::string padded = std::string(width - (int)vs.size(), ' ') + vs;
+    r.replace(startCol, width, padded);
+    return r;
+}
+
+static std::vector<std::string> md_substituteCardMid(const std::string& cardText, int newMid) {
+    auto lines = md_splitLines(cardText);
+    bool foundKeyword = false;
+    bool hasTitle = false;
+    bool skippedTitle = false;
+
+    // Detect if _TITLE variant
+    if (!lines.empty()) {
+        std::string u = mw_upper(mw_trim(lines[0]));
+        if (u.find("_TITLE") != std::string::npos) hasTitle = true;
+    }
+
+    for (int i = 0; i < (int)lines.size(); ++i) {
+        std::string t = mw_trim(lines[i]);
+        if (!foundKeyword) {
+            if (!t.empty() && t[0] == '*') { foundKeyword = true; }
+            continue;
+        }
+        if (t.empty() || t[0] == '$') continue;
+        if (hasTitle && !skippedTitle) {
+            skippedTitle = true;
+            continue;
+        }
+        // This is the first data line — field 0 = MID (bytes 0-9)
+        lines[i] = md_setField(lines[i], 0, 10, newMid);
+        break;
+    }
+
+    // Also update $HWCOLOR MATERIAL line if present
+    for (auto& ln : lines) {
+        std::string t = mw_trim(ln);
+        if (t.substr(0, 18) == "$HWCOLOR MATERIAL " || t.substr(0, 18) == "$HWCOLOR MATERIAL\t") {
+            // Format: $HWCOLOR MATERIAL     <MID>    <COLOR>
+            // Field after "MATERIAL" at col 18, width 10
+            ln = md_setField(ln, 18, 10, newMid);
+        }
+    }
+
+    return lines;
+}
+
+static std::vector<std::string> md_substituteCardTmid(const std::string& cardText, int newTmid) {
+    auto lines = md_splitLines(cardText);
+    bool foundKeyword = false;
+    bool hasTitle = false;
+    bool skippedTitle = false;
+
+    if (!lines.empty()) {
+        std::string u = mw_upper(mw_trim(lines[0]));
+        if (u.find("_TITLE") != std::string::npos) hasTitle = true;
+    }
+
+    for (int i = 0; i < (int)lines.size(); ++i) {
+        std::string t = mw_trim(lines[i]);
+        if (!foundKeyword) {
+            if (!t.empty() && t[0] == '*') { foundKeyword = true; }
+            continue;
+        }
+        if (t.empty() || t[0] == '$') continue;
+        if (hasTitle && !skippedTitle) { skippedTitle = true; continue; }
+        // TMID = field 0 (bytes 0-9)
+        lines[i] = md_setField(lines[i], 0, 10, newTmid);
+        break;
+    }
+    return lines;
+}
+
+static std::vector<std::string> md_substituteCardPid(const std::string& cardText, int newPid) {
+    auto lines = md_splitLines(cardText);
+    bool foundKeyword = false;
+
+    for (int i = 0; i < (int)lines.size(); ++i) {
+        std::string t = mw_trim(lines[i]);
+        if (!foundKeyword) {
+            if (!t.empty() && t[0] == '*') { foundKeyword = true; }
+            continue;
+        }
+        if (t.empty() || t[0] == '$') continue;
+        // PID = field 0 (bytes 0-9)
+        lines[i] = md_setField(lines[i], 0, 10, newPid);
+        break;
+    }
+    return lines;
+}
+
+static std::string md_updatePartTmid(const std::string& partDataLine, int tmid) {
+    return md_setField(partDataLine, 70, 10, tmid);
+}
+
+// end matdb helpers
+
+// ── applyMatdb() main ────────────────────────────────────────
+bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& configDir) {
+    // infoMessages is a public member of ModelAssembler (no underscore)
+
+    // 1. Resolve database path
+    std::string dbPath = op.databasePath;
+    if (dbPath.empty()) dbPath = "materials/material_db.json";
+    if (dbPath.find('/') == std::string::npos && dbPath.find('\\') == std::string::npos) {
+        if (!configDir.empty()) dbPath = configDir + "/" + dbPath;
+    }
+
+    // 2. Load database
+    MdMaterialDatabase db = md_loadDatabase(dbPath);
+    if (db.materials.empty()) {
+        errorMessage_ = "[matdb] ERROR: Cannot load database from: " + dbPath;
+        return false;
+    }
+    infoMessages.push_back("[matdb] Loaded " + std::to_string(db.materials.size()) + " materials from DB");
+
+    // 3. Scan model *MAT blocks
+    auto matBlocks = md_scanMatBlocks(rawLines_);
+    if (matBlocks.empty()) {
+        infoMessages.push_back("[matdb] WARNING: No *MAT_ blocks found in model");
+        return true;
+    }
+    infoMessages.push_back("[matdb] Found " + std::to_string(matBlocks.size()) + " MAT blocks in model");
+
+    // 4. Match each MAT block to DB
+    struct MatchInfo {
+        int modelMid;
+        int dbMid;
+        std::string matType;
+        bool thermal;
+        int blockIdx;
+    };
+    std::vector<MatchInfo> matches;
+    std::set<int> matchedMids;
+
+    for (int bi = 0; bi < (int)matBlocks.size(); ++bi) {
+        auto& blk = matBlocks[bi];
+        int dbMid = 0;
+        std::string matType = md_normalizeMatType(op.globalMatType);
+        bool thermal = op.globalThermal;
+
+        if (!op.rules.empty()) {
+            for (auto& rule : op.rules) {
+                int m = md_matchRule(blk, rule, db);
+                if (m > 0) {
+                    dbMid = m;
+                    if (!rule.matType.empty()) matType = md_normalizeMatType(rule.matType);
+                    if (rule.thermalOverride >= 0) thermal = (rule.thermalOverride != 0);
+                    break;
+                }
+            }
+        } else {
+            dbMid = md_autoMatchDb(blk.titleText, blk.mid, db);
+        }
+
+        if (dbMid <= 0) {
+            infoMessages.push_back("[matdb] WARNING: No DB match for MID=" +
+                std::to_string(blk.mid) + " (" + blk.titleText + ")");
+            continue;
+        }
+
+        // Validate mat_type exists in DB
+        auto dit = db.materials.find(dbMid);
+        if (dit == db.materials.end()) continue;
+        if (dit->second.cardsStructural.find(matType) == dit->second.cardsStructural.end()) {
+            errorMessage_ = "[matdb] ERROR: DB MID=" + std::to_string(dbMid) +
+                " (" + dit->second.name + ") has no card for " + matType +
+                ". Available: ";
+            for (auto& ck : dit->second.cardsStructural)
+                errorMessage_ += ck.first + " ";
+            return false;
+        }
+
+        // Check thermal card availability
+        if (thermal && dit->second.cardThermal.empty()) {
+            infoMessages.push_back("[matdb] WARNING: No thermal card for DB MID=" +
+                std::to_string(dbMid) + ", skipping thermal for this material");
+            thermal = false;
+        }
+
+        matches.push_back({blk.mid, dbMid, matType, thermal, bi});
+        matchedMids.insert(blk.mid);
+    }
+
+    if (matches.empty()) {
+        infoMessages.push_back("[matdb] WARNING: No materials matched");
+        return true;
+    }
+
+    // 6. Remove old MAT blocks (mark with sentinel, reverse order)
+    // Also remove existing thermal blocks for matched MIDs
+    const std::string DEL = "\x01""DEL";
+    for (int bi = (int)matBlocks.size() - 1; bi >= 0; --bi) {
+        auto& blk = matBlocks[bi];
+        if (matchedMids.find(blk.mid) == matchedMids.end()) continue;
+        for (int li = blk.startLine; li < blk.endLine && li < (int)rawLines_.size(); ++li)
+            rawLines_[li] = DEL;
+    }
+
+    // Remove existing *MAT_THERMAL_* and *MAT_ADD_THERMAL_EXPANSION for matched MIDs
+    for (int i = 0; i < (int)rawLines_.size(); ++i) {
+        std::string t = mw_trim(rawLines_[i]);
+        if (t.empty() || t[0] != '*') continue;
+        std::string u = mw_upper(t);
+        bool isThermal = (u.find("*MAT_THERMAL_") == 0);
+        bool isExpansion = (u.find("*MAT_ADD_THERMAL_EXPANSION") == 0);
+        if (!isThermal && !isExpansion) continue;
+
+        bool hasT = (u.find("_TITLE") != std::string::npos);
+        int j = i + 1;
+        bool st = false;
+        while (j < (int)rawLines_.size()) {
+            std::string lt = mw_trim(rawLines_[j]);
+            if (lt.empty() || lt[0] == '$') { ++j; continue; }
+            if (lt[0] == '*') break;
+            if (hasT && !st) { st = true; ++j; continue; }
+            auto toks = mw_tok10(rawLines_[j]);
+            if (!toks.empty()) {
+                int id = 0;
+                try { id = std::stoi(toks[0]); } catch (...) {}
+                if (matchedMids.count(id) || isExpansion) {
+                    // thermal: id=TMID → check matchedMids directly
+                    // expansion: id=PID → resolve PID→MID
+                    bool shouldRemove = false;
+                    if (isThermal) {
+                        shouldRemove = matchedMids.count(id) > 0;
+                    } else {
+                        // expansion: id is PID, find its MID
+                        auto info = mw_getPartInfo(rawLines_, id);
+                        if (info.dataLine >= 0) {
+                            auto ptoks = mw_tok10(rawLines_[info.dataLine]);
+                            if (ptoks.size() > 2) {
+                                int pmid = 0;
+                                try { pmid = std::stoi(ptoks[2]); } catch (...) {}
+                                shouldRemove = matchedMids.count(pmid) > 0;
+                            }
+                        }
+                    }
+                    if (shouldRemove) {
+                        int end = j + 1;
+                        while (end < (int)rawLines_.size()) {
+                            std::string et = mw_trim(rawLines_[end]);
+                            if (!et.empty() && et[0] == '*') break;
+                            ++end;
+                        }
+                        for (int li = i; li < end; ++li) rawLines_[li] = DEL;
+                    }
+                }
+            }
+            break;
+        }
+    }
+
+    // 7. Build new cards to insert
+    std::vector<std::string> insertCards;
+    int structCount = 0, thermalCount = 0, expansionCount = 0;
+
+    for (auto& mi : matches) {
+        auto& dbMat = db.materials[mi.dbMid];
+
+        // Structural card
+        auto structLines = md_substituteCardMid(dbMat.cardsStructural[mi.matType], mi.modelMid);
+        for (auto& sl : structLines) insertCards.push_back(sl);
+        ++structCount;
+
+        // Thermal cards
+        if (mi.thermal) {
+            // *MAT_THERMAL_ISOTROPIC
+            if (!dbMat.cardThermal.empty()) {
+                auto thermalLines = md_substituteCardTmid(dbMat.cardThermal, mi.modelMid);
+                for (auto& tl : thermalLines) insertCards.push_back(tl);
+                ++thermalCount;
+            }
+
+            // *MAT_ADD_THERMAL_EXPANSION — one per PID
+            if (!dbMat.cardThermalExpansion.empty()) {
+                auto pids = mw_getPidsByMid(rawLines_, {mi.modelMid});
+                for (int pid : pids) {
+                    auto expLines = md_substituteCardPid(dbMat.cardThermalExpansion, pid);
+                    for (auto& el : expLines) insertCards.push_back(el);
+                    ++expansionCount;
+                }
+            }
+
+            // Update *PART TMID field
+            auto pids = mw_getPidsByMid(rawLines_, {mi.modelMid});
+            for (int pid : pids) {
+                auto info = mw_getPartInfo(rawLines_, pid);
+                if (info.dataLine >= 0)
+                    rawLines_[info.dataLine] = md_updatePartTmid(rawLines_[info.dataLine], mi.modelMid);
+            }
+        }
+    }
+
+    // 8. Remove sentinel-marked lines from deletions
+    std::vector<std::string> cleanLines;
+    cleanLines.reserve(rawLines_.size());
+    for (auto& ln : rawLines_) {
+        if (ln != DEL) cleanLines.push_back(ln);
+    }
+    rawLines_ = std::move(cleanLines);
+
+    // 9. Insert new cards before *END
+    std::vector<std::string> newLines;
+    newLines.reserve(rawLines_.size() + insertCards.size());
+    bool inserted = false;
+    for (auto& ln : rawLines_) {
+        if (!inserted) {
+            std::string u = mw_upper(mw_trim(ln));
+            if (u == "*END") {
+                for (auto& c : insertCards) newLines.push_back(c);
+                inserted = true;
+            }
+        }
+        newLines.push_back(ln);
+    }
+    if (!inserted)
+        for (auto& c : insertCards) newLines.push_back(c);
+    rawLines_ = std::move(newLines);
+
+    infoMessages.push_back("[matdb] Replaced " + std::to_string(structCount) + " structural MAT cards (" +
+        md_normalizeMatType(op.globalMatType) + ")");
+    if (thermalCount > 0)
+        infoMessages.push_back("[matdb] Inserted " + std::to_string(thermalCount) + " thermal + " +
+            std::to_string(expansionCount) + " expansion cards, TMID updated");
+
+    return true;
+}
+
+// ============================================================================
+//  applyLoad helpers
+// ============================================================================
+
+namespace {
+
+struct LdFaceInfo {
+    std::array<int,4> nodeIds;
+    double verts[4][3];
+    double normal[3];
+    double area;
+    double centroid[3];
+    int nVerts; // 3 or 4
+};
+
+static double ld_mag(const double v[3]) {
+    return std::sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
+}
+
+static double ld_dot(const double a[3], const double b[3]) {
+    return a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+}
+
+// Extract outer surface faces from baseMesh_ elements for given PID
+static std::vector<std::array<int,4>> ld_extractSurface(
+        const KooRemapper::Mesh& mesh, int pid) {
+    std::vector<std::array<int,4>> faces;
+    std::map<std::array<int,4>, std::pair<int, std::array<int,4>>> faceMap;
+
+    for (const auto& [eid, elem] : mesh.getElements()) {
+        if (elem.partId != pid) continue;
+        bool isTet = (elem.nodeIds[4] == elem.nodeIds[7] &&
+                      elem.nodeIds[4] == elem.nodeIds[6] &&
+                      elem.nodeIds[4] == elem.nodeIds[5]);
+        int numFaces = isTet ? 4 : 6;
+        for (int fi = 0; fi < numFaces; ++fi) {
+            auto fn = elem.getFaceNodeIds(fi);
+            std::array<int,4> winding = {fn[0], fn[1], fn[2], fn[3]};
+            std::array<int,4> key = winding;
+            std::sort(key.begin(), key.end());
+            auto it = faceMap.find(key);
+            if (it == faceMap.end()) faceMap[key] = {1, winding};
+            else it->second.first++;
+        }
+    }
+    for (const auto& [key, val] : faceMap) {
+        if (val.first == 1) faces.push_back(val.second);
+    }
+    return faces;
+}
+
+// Build face info with normals and areas
+static std::vector<LdFaceInfo> ld_buildFaceInfo(
+        const std::vector<std::array<int,4>>& faces,
+        const KooRemapper::Mesh& mesh) {
+    std::vector<LdFaceInfo> infos;
+    infos.reserve(faces.size());
+    for (const auto& f : faces) {
+        LdFaceInfo fi;
+        fi.nodeIds = f;
+        bool isTri = (f[3] == f[2] || f[3] == 0);
+        fi.nVerts = isTri ? 3 : 4;
+
+        bool valid = true;
+        for (int k = 0; k < fi.nVerts; ++k) {
+            const auto* nd = mesh.getNode(f[k]);
+            if (!nd) { valid = false; break; }
+            fi.verts[k][0] = nd->position.x;
+            fi.verts[k][1] = nd->position.y;
+            fi.verts[k][2] = nd->position.z;
+        }
+        if (!valid) continue;
+
+        // For triangles, copy v2 to v3
+        if (isTri) {
+            fi.verts[3][0] = fi.verts[2][0];
+            fi.verts[3][1] = fi.verts[2][1];
+            fi.verts[3][2] = fi.verts[2][2];
+        }
+
+        // Normal via cross product of diagonals (works for tri and quad)
+        double d1[3] = {fi.verts[2][0]-fi.verts[0][0], fi.verts[2][1]-fi.verts[0][1], fi.verts[2][2]-fi.verts[0][2]};
+        double d2[3] = {fi.verts[3][0]-fi.verts[1][0], fi.verts[3][1]-fi.verts[1][1], fi.verts[3][2]-fi.verts[1][2]};
+        fi.normal[0] = d1[1]*d2[2] - d1[2]*d2[1];
+        fi.normal[1] = d1[2]*d2[0] - d1[0]*d2[2];
+        fi.normal[2] = d1[0]*d2[1] - d1[1]*d2[0];
+
+        double mag = ld_mag(fi.normal);
+        fi.area = mag * 0.5;
+        if (mag > 1e-30) {
+            fi.normal[0] /= mag;
+            fi.normal[1] /= mag;
+            fi.normal[2] /= mag;
+        }
+
+        // Centroid
+        fi.centroid[0] = fi.centroid[1] = fi.centroid[2] = 0;
+        for (int k = 0; k < fi.nVerts; ++k) {
+            fi.centroid[0] += fi.verts[k][0];
+            fi.centroid[1] += fi.verts[k][1];
+            fi.centroid[2] += fi.verts[k][2];
+        }
+        fi.centroid[0] /= fi.nVerts;
+        fi.centroid[1] /= fi.nVerts;
+        fi.centroid[2] /= fi.nVerts;
+
+        infos.push_back(fi);
+    }
+    return infos;
+}
+
+// Filter faces by direction+angle tolerance
+static std::vector<int> ld_filterByDirection(
+        const std::vector<LdFaceInfo>& infos,
+        const double dir[3], double angleTolDeg) {
+    std::vector<int> indices;
+    double dirMag = ld_mag(dir);
+    if (dirMag < 1e-30) return indices;
+    double udir[3] = {dir[0]/dirMag, dir[1]/dirMag, dir[2]/dirMag};
+    double cosLimit = std::cos(angleTolDeg * 3.14159265358979323846 / 180.0);
+
+    for (int i = 0; i < (int)infos.size(); ++i) {
+        double dot = ld_dot(infos[i].normal, udir);
+        // Select faces whose normals are within angle tolerance of the direction
+        // Use absolute dot to catch both orientations
+        if (std::abs(dot) >= cosLimit) {
+            indices.push_back(i);
+        }
+    }
+    return indices;
+}
+
+// Resolve part name -> PID from rawLines
+static int ld_resolvePid(const std::vector<std::string>& rawLines,
+                          int pid, const std::string& partName) {
+    if (pid > 0) return pid;
+    if (partName.empty()) return 0;
+
+    std::string upperName = partName;
+    std::transform(upperName.begin(), upperName.end(), upperName.begin(),
+                   [](unsigned char c) { return (char)std::toupper(c); });
+
+    bool inPart = false;
+    bool needTitle = true;
+    bool titleMatched = false;
+    for (const auto& line : rawLines) {
+        if (!line.empty() && line[0] == '*') {
+            std::string up = line;
+            for (auto& c : up) c = (char)std::toupper((unsigned char)c);
+            if (up.find("*PART") == 0 && (up.size() == 5 || up[5] == '\r' || up[5] == '_')) {
+                inPart = true;
+                needTitle = true;
+                titleMatched = false;
+                continue;
+            }
+            inPart = false;
+            continue;
+        }
+        if (!inPart) continue;
+        if (!line.empty() && line[0] == '$') continue;
+        if (needTitle) {
+            std::string upperTitle = line;
+            std::transform(upperTitle.begin(), upperTitle.end(), upperTitle.begin(),
+                           [](unsigned char c) { return (char)std::toupper(c); });
+            titleMatched = (upperTitle.find(upperName) != std::string::npos);
+            needTitle = false;
+            continue;
+        }
+        // Data line
+        if (titleMatched) {
+            std::istringstream iss(line);
+            int foundPid = 0;
+            if (iss >> foundPid) return foundPid;
+        }
+        inPart = false;
+    }
+    return 0;
+}
+
+// Find max *DEFINE_CURVE ID
+static int ld_findMaxCurveId(const std::vector<std::string>& rawLines) {
+    int maxId = 0;
+    bool inCurve = false;
+    bool needData = false;
+    for (const auto& line : rawLines) {
+        if (!line.empty() && line[0] == '*') {
+            std::string up = line;
+            for (auto& c : up) c = (char)std::toupper((unsigned char)c);
+            if (up.find("*DEFINE_CURVE") == 0) {
+                inCurve = true;
+                needData = true;
+                continue;
+            }
+            inCurve = false;
+            continue;
+        }
+        if (!inCurve || !needData) continue;
+        if (!line.empty() && line[0] == '$') continue;
+        needData = false;
+        inCurve = false;
+        std::istringstream iss(line);
+        int id = 0;
+        if (iss >> id && id > maxId) maxId = id;
+    }
+    return maxId;
+}
+
+// Find max *SET_SEGMENT ID
+static int ld_findMaxSetSegmentId(const std::vector<std::string>& rawLines) {
+    int maxId = 0;
+    bool inSet = false;
+    bool needData = false;
+    for (const auto& line : rawLines) {
+        if (!line.empty() && line[0] == '*') {
+            std::string up = line;
+            for (auto& c : up) c = (char)std::toupper((unsigned char)c);
+            if (up.find("*SET_SEGMENT") == 0) {
+                inSet = true;
+                needData = true;
+                continue;
+            }
+            inSet = false;
+            continue;
+        }
+        if (!inSet || !needData) continue;
+        if (!line.empty() && line[0] == '$') continue;
+        needData = false;
+        inSet = false;
+        std::istringstream iss(line);
+        int id = 0;
+        if (iss >> id && id > maxId) maxId = id;
+    }
+    return maxId;
+}
+
+// Generate *DEFINE_CURVE card
+static std::string ld_generateDefineCurve(int lcid,
+        const std::vector<KooRemapper::LoadCurvePoint>& points) {
+    std::ostringstream ss;
+    ss << "*DEFINE_CURVE\n";
+    ss << "$#    lcid      sidr       sfa       sfo      offa      offo    dattyp     lcint\n";
+    char buf[128];
+    snprintf(buf, sizeof(buf), "%10d%10d%10s%10s%10s%10s%10d%10d",
+             lcid, 0, "1.0", "1.0", "0.0", "0.0", 0, 0);
+    ss << buf << "\n";
+    ss << "$#                a1                  o1\n";
+    for (const auto& pt : points) {
+        snprintf(buf, sizeof(buf), "%20.10E%20.10E", pt.time, pt.value);
+        ss << buf << "\n";
+    }
+    return ss.str();
+}
+
+// Generate *SET_SEGMENT_TITLE card
+static std::string ld_generateSetSegment(int setId,
+        const std::vector<std::array<int,4>>& faces,
+        const std::string& title = "") {
+    std::ostringstream ss;
+    if (title.empty())
+        ss << "*SET_SEGMENT\n";
+    else
+        ss << "*SET_SEGMENT_TITLE\n" << title << "\n";
+    ss << "$#     sid       da1       da2       da3       da4\n";
+    char buf[90];
+    snprintf(buf, sizeof(buf), "%10d  0.000000  0.000000  0.000000  0.000000", setId);
+    ss << buf << "\n";
+    ss << "$#      n1        n2        n3        n4\n";
+    for (const auto& f : faces) {
+        snprintf(buf, sizeof(buf), "%10d%10d%10d%10d", f[0], f[1], f[2], f[3]);
+        ss << buf << "\n";
+    }
+    return ss.str();
+}
+
+// Generate *LOAD_SEGMENT_SET card
+static std::string ld_generateLoadSegmentSet(int ssid, int lcid, double sf) {
+    std::ostringstream ss;
+    ss << "*LOAD_SEGMENT_SET\n";
+    ss << "$#    ssid      lcid        sf        at\n";
+    char buf[90];
+    snprintf(buf, sizeof(buf), "%10d%10d%10.4f%10.1f", ssid, lcid, sf, 0.0);
+    ss << buf << "\n";
+    return ss.str();
+}
+
+// Find tied contacts involving a PID, return their segment set IDs
+// foundPartBased: set true when contact uses SSTYP=3 (part ID, no segment set)
+static std::vector<int> ld_findTiedContactSegSets(
+        const std::vector<std::string>& rawLines,
+        int pid, int contactId, bool& foundPartBased) {
+    std::vector<int> ssids;
+    foundPartBased = false;
+    bool inContact = false;
+    bool isTied = false;
+    bool hasTitle = false;
+    bool needTitle = false;
+    int cardNum = 0;
+    int ssid=0, msid=0, sstyp=0, mstyp=0;
+    int contactCounter = 0;
+    std::string contactTitle;
+
+    auto processContact = [&]() {
+        if (!isTied) return;
+        bool matchSlave = false, matchMaster = false;
+        if (contactId > 0) {
+            if (contactCounter == contactId) { matchSlave = true; matchMaster = true; }
+        } else {
+            if (sstyp == 3 && ssid == pid) matchSlave = true;
+            if (mstyp == 3 && msid == pid) matchMaster = true;
+            // SSTYP=0: check title for PID reference (e.g. "AUTO_PID10_PID11")
+            if (!matchSlave && !matchMaster && !contactTitle.empty()) {
+                std::string pidStr = "PID" + std::to_string(pid);
+                if (contactTitle.find(pidStr) != std::string::npos) {
+                    matchSlave = true;
+                    matchMaster = true;
+                }
+            }
+        }
+        if (matchSlave) {
+            if (sstyp == 0 || sstyp == 2) ssids.push_back(ssid);
+            else if (sstyp == 3) foundPartBased = true;
+        }
+        if (matchMaster) {
+            if (mstyp == 0 || mstyp == 2) ssids.push_back(msid);
+            else if (mstyp == 3) foundPartBased = true;
+        }
+    };
+
+    for (int i = 0; i < (int)rawLines.size(); ++i) {
+        const auto& line = rawLines[i];
+        if (!line.empty() && line[0] == '*') {
+            if (inContact) processContact();
+
+            std::string up = line;
+            for (auto& c : up) c = (char)std::toupper((unsigned char)c);
+            if (up.find("*CONTACT_") == 0) {
+                inContact = true;
+                isTied = (up.find("TIED") != std::string::npos);
+                hasTitle = (up.find("_TITLE") != std::string::npos ||
+                            up.find("_ID") != std::string::npos);
+                needTitle = hasTitle;
+                cardNum = 0;
+                ssid = msid = sstyp = mstyp = 0;
+                contactCounter++;
+                contactTitle.clear();
+                continue;
+            }
+            inContact = false;
+            continue;
+        }
+        if (!inContact) continue;
+        if (!line.empty() && line[0] == '$') continue;
+        if (needTitle) {
+            contactTitle = line;
+            // Trim
+            while (!contactTitle.empty() && (contactTitle.back() == ' ' || contactTitle.back() == '\r'))
+                contactTitle.pop_back();
+            needTitle = false;
+            continue;
+        }
+        cardNum++;
+        if (cardNum == 1) {
+            auto tok = [&](int start, int len) -> int {
+                if (start >= (int)line.size()) return 0;
+                std::string s = line.substr(start, std::min(len, (int)line.size()-start));
+                try { return std::stoi(s); } catch(...) { return 0; }
+            };
+            ssid  = tok(0, 10);
+            msid  = tok(10, 10);
+            sstyp = tok(20, 10);
+            mstyp = tok(30, 10);
+        }
+    }
+    if (inContact) processContact();
+    return ssids;
+}
+
+// Parse existing segment set faces from rawLines
+static std::vector<std::array<int,4>> ld_parseSetSegmentFaces(
+        const std::vector<std::string>& rawLines, int setId) {
+    std::vector<std::array<int,4>> faces;
+    bool inSet = false;
+    bool needTitle = false;
+    bool needData = true;
+    bool foundHeader = false;
+    for (const auto& line : rawLines) {
+        if (!line.empty() && line[0] == '*') {
+            std::string up = line;
+            for (auto& c : up) c = (char)std::toupper((unsigned char)c);
+            if (up.find("*SET_SEGMENT") == 0) {
+                if (inSet && foundHeader) return faces;
+                inSet = true;
+                needTitle = (up.find("_TITLE") != std::string::npos);
+                needData = true;
+                foundHeader = false;
+                continue;
+            }
+            if (inSet && foundHeader) return faces;
+            inSet = false;
+            continue;
+        }
+        if (!inSet) continue;
+        if (!line.empty() && line[0] == '$') continue;
+        if (needTitle) { needTitle = false; continue; }
+        if (needData) {
+            std::istringstream iss(line);
+            int sid = 0;
+            if (iss >> sid && sid == setId) foundHeader = true;
+            needData = false;
+            continue;
+        }
+        if (!foundHeader) { inSet = false; continue; }
+        auto tok = [&](int start, int len) -> int {
+            if (start >= (int)line.size()) return 0;
+            std::string s = line.substr(start, std::min(len, (int)line.size()-start));
+            try { return std::stoi(s); } catch(...) { return 0; }
+        };
+        int n1 = tok(0,10), n2 = tok(10,10), n3 = tok(20,10), n4 = tok(30,10);
+        if (n1 > 0 && n2 > 0 && n3 > 0) {
+            faces.push_back({n1, n2, n3, n4});
+        }
+    }
+    return faces;
+}
+
+} // anonymous namespace
+
+// ── applyLoad() main ────────────────────────────────────────
+bool ModelAssembler::applyLoad(const LoadOperation& op) {
+    if (op.loads.empty()) {
+        std::cout << "[load] No load cases specified\n";
+        return true;
+    }
+
+    int nextSetId = ld_findMaxSetSegmentId(rawLines_) + 1;
+    int nextCurveId = ld_findMaxCurveId(rawLines_) + 1;
+    std::vector<std::string> insertBlocks;
+    int loadCount = 0;
+
+    for (int li = 0; li < (int)op.loads.size(); ++li) {
+        const auto& lc = op.loads[li];
+
+        // 1. Resolve PID
+        int pid = ld_resolvePid(rawLines_, lc.pid, lc.partName);
+        if (pid <= 0) {
+            std::cerr << "[load] ERROR: Cannot resolve part (pid=" << lc.pid
+                      << ", name=" << lc.partName << ")\n";
+            return false;
+        }
+
+        // 2. Direction vector validation
+        double dir[3] = {lc.direction[0], lc.direction[1], lc.direction[2]};
+        double dirMag = ld_mag(dir);
+        bool hasDirection = (dirMag > 1e-30);
+
+        if (lc.mode != "normal_pressure" && !hasDirection) {
+            std::cerr << "[load] ERROR: direction required for mode '" << lc.mode << "'\n";
+            return false;
+        }
+
+        // Normalize direction
+        double udir[3] = {0,0,0};
+        if (hasDirection) {
+            udir[0] = dir[0]/dirMag;
+            udir[1] = dir[1]/dirMag;
+            udir[2] = dir[2]/dirMag;
+        }
+
+        // 3. Get segments based on select mode
+        std::vector<std::array<int,4>> selectedFaces;
+        std::vector<LdFaceInfo> selectedFaceInfos;
+        int existingSetId = 0;
+
+        if (lc.select == "set") {
+            if (lc.setId <= 0) {
+                std::cerr << "[load] ERROR: set_id required for select=set\n";
+                return false;
+            }
+            existingSetId = lc.setId;
+            if (lc.mode == "force") {
+                selectedFaces = ld_parseSetSegmentFaces(rawLines_, lc.setId);
+                selectedFaceInfos = ld_buildFaceInfo(selectedFaces, baseMesh_);
+            }
+
+        } else if (lc.select == "tied") {
+            bool foundPartBased = false;
+            auto ssids = ld_findTiedContactSegSets(rawLines_, pid, lc.contactId, foundPartBased);
+            if (!ssids.empty()) {
+                for (int sid : ssids) {
+                    auto faces = ld_parseSetSegmentFaces(rawLines_, sid);
+                    selectedFaces.insert(selectedFaces.end(), faces.begin(), faces.end());
+                }
+            }
+
+            // Also scan addedKeywordBlocks_ for contacts created in same pipeline
+            if (ssids.empty() && !foundPartBased && !addedKeywordBlocks_.empty()) {
+                std::vector<std::string> extraLines;
+                for (const auto& block : addedKeywordBlocks_) {
+                    std::istringstream bss(block);
+                    std::string bline;
+                    while (std::getline(bss, bline)) extraLines.push_back(bline);
+                }
+                bool foundPartBased2 = false;
+                auto ssids2 = ld_findTiedContactSegSets(extraLines, pid, lc.contactId, foundPartBased2);
+                if (!ssids2.empty()) {
+                    for (int sid : ssids2) {
+                        auto faces = ld_parseSetSegmentFaces(extraLines, sid);
+                        std::cerr << "[load] DEBUG: segment set " << sid << " has " << faces.size() << " faces\n";
+                        selectedFaces.insert(selectedFaces.end(), faces.begin(), faces.end());
+                    }
+                } else if (foundPartBased2) {
+                    foundPartBased = true;
+                }
+                if (!ssids2.empty()) ssids.insert(ssids.end(), ssids2.begin(), ssids2.end());
+            }
+
+            if (!ssids.empty()) {
+                // Already collected faces above
+            } else if (foundPartBased) {
+                // Part-based tied (SSTYP=3): extract surface of this PID
+                selectedFaces = ld_extractSurface(baseMesh_, pid);
+            } else {
+                std::cerr << "[load] WARNING: No tied contacts found for PID=" << pid
+                          << ", extracting surface directly\n";
+                selectedFaces = ld_extractSurface(baseMesh_, pid);
+            }
+            // Apply direction+angle filter on tied segments
+            selectedFaceInfos = ld_buildFaceInfo(selectedFaces, baseMesh_);
+            if (hasDirection) {
+                auto indices = ld_filterByDirection(selectedFaceInfos, dir, lc.angle);
+                if (indices.empty()) {
+                    std::cerr << "[load] WARNING: No segments match direction filter for PID="
+                              << pid << ", skipping\n";
+                    continue;
+                }
+                std::vector<std::array<int,4>> filtered;
+                std::vector<LdFaceInfo> filteredInfos;
+                for (int idx : indices) {
+                    filtered.push_back(selectedFaces[idx]);
+                    filteredInfos.push_back(selectedFaceInfos[idx]);
+                }
+                selectedFaces = std::move(filtered);
+                selectedFaceInfos = std::move(filteredInfos);
+            }
+
+        } else {
+            // direction mode (default)
+            auto allFaces = ld_extractSurface(baseMesh_, pid);
+            if (allFaces.empty()) {
+                std::cerr << "[load] WARNING: No surface faces found for PID=" << pid << "\n";
+                continue;
+            }
+            auto allInfos = ld_buildFaceInfo(allFaces, baseMesh_);
+            if (hasDirection) {
+                auto indices = ld_filterByDirection(allInfos, dir, lc.angle);
+                if (indices.empty()) {
+                    std::cerr << "[load] WARNING: No segments match direction filter for PID="
+                              << pid << ", skipping\n";
+                    continue;
+                }
+                for (int idx : indices) {
+                    selectedFaces.push_back(allFaces[idx]);
+                    selectedFaceInfos.push_back(allInfos[idx]);
+                }
+            } else {
+                // No direction (e.g. normal_pressure) → use all surface faces
+                selectedFaces = std::move(allFaces);
+                selectedFaceInfos = std::move(allInfos);
+            }
+        }
+
+        // 4. Compute scale factor (SF)
+        double sf = lc.value;
+
+        if (lc.mode == "force") {
+            if (selectedFaceInfos.empty()) {
+                std::cerr << "[load] ERROR: No face info for force calculation (PID=" << pid << ")\n";
+                return false;
+            }
+            double totalProjArea = 0.0;
+            for (const auto& fi : selectedFaceInfos) {
+                double dot = ld_dot(fi.normal, udir);
+                totalProjArea += fi.area * std::abs(dot);
+            }
+            if (totalProjArea < 1e-30) {
+                std::cerr << "[load] ERROR: Projected area is zero for PID=" << pid << "\n";
+                return false;
+            }
+            sf = lc.value / totalProjArea;
+            std::cout << "[load] Force mode: F=" << lc.value << " N, proj_area="
+                      << totalProjArea << ", pressure=" << sf << " MPa\n";
+        }
+
+        // 5. Generate DEFINE_CURVE
+        int lcid = nextCurveId++;
+        std::vector<LoadCurvePoint> curveData = lc.curve;
+        if (curveData.empty()) {
+            curveData.push_back({0.0, 1.0});
+            curveData.push_back({1.0e10, 1.0});
+        }
+        insertBlocks.push_back(ld_generateDefineCurve(lcid, curveData));
+
+        // 6. Generate SET_SEGMENT (only if we need a new one)
+        int ssid = existingSetId;
+        if (ssid == 0) {
+            ssid = nextSetId++;
+            std::string title = "Load_PID" + std::to_string(pid) + "_" + lc.mode;
+            insertBlocks.push_back(ld_generateSetSegment(ssid, selectedFaces, title));
+        }
+
+        // 7. Generate LOAD_SEGMENT_SET
+        insertBlocks.push_back(ld_generateLoadSegmentSet(ssid, lcid, sf));
+        loadCount++;
+
+        std::cout << "[load] PID=" << pid << " mode=" << lc.mode
+                  << " select=" << lc.select
+                  << " segments=" << (existingSetId > 0 ? 0 : (int)selectedFaces.size())
+                  << " SF=" << sf << "\n";
+    }
+
+    // 8. Insert all blocks before *END
+    if (!insertBlocks.empty()) {
+        std::vector<std::string> newLines;
+        newLines.reserve(rawLines_.size() + insertBlocks.size() * 10);
+        bool inserted = false;
+        for (const auto& line : rawLines_) {
+            std::string up = line;
+            for (auto& c : up) c = (char)std::toupper((unsigned char)c);
+            while (!up.empty() && (up.back() == ' ' || up.back() == '\r')) up.pop_back();
+            if (!inserted && up == "*END") {
+                for (const auto& block : insertBlocks) {
+                    std::istringstream bs(block);
+                    std::string bline;
+                    while (std::getline(bs, bline)) {
+                        newLines.push_back(bline);
+                    }
+                }
+                inserted = true;
+            }
+            newLines.push_back(line);
+        }
+        if (!inserted) {
+            for (const auto& block : insertBlocks) {
+                std::istringstream bs(block);
+                std::string bline;
+                while (std::getline(bs, bline)) {
+                    newLines.push_back(bline);
+                }
+            }
+        }
+        rawLines_ = std::move(newLines);
+    }
+
+    infoMessages.push_back("[load] Applied " + std::to_string(loadCount) + " load case(s)");
+    return true;
+}
+
+// ============================================================================
+// Contact assemble helpers
+// ============================================================================
+namespace {
+
+struct CaFaceInfo {
+    std::array<int,4> nodeIds;
+    double verts[4][3];
+    double normal[3];
+    double area;
+    double centroid[3];
+    double radius;     // max distance from centroid to any vertex
+    int nVerts;
+    int pid;
+    int sourceIndex;   // index in original faces vector
+};
+
+struct CaCellKey {
+    int ix, iy, iz;
+    bool operator==(const CaCellKey& o) const {
+        return ix == o.ix && iy == o.iy && iz == o.iz;
+    }
+};
+
+struct CaCellKeyHash {
+    size_t operator()(const CaCellKey& k) const {
+        size_t h = size_t(k.ix) * 73856093ULL;
+        h ^= size_t(k.iy) * 19349663ULL;
+        h ^= size_t(k.iz) * 83492791ULL;
+        return h;
+    }
+};
+
+struct CaContactPair {
+    int pidA, pidB;
+    int faceA, faceB;
+    double gap;
+};
+
+// Build face info with radius/pid for contact detection
+static std::vector<CaFaceInfo> ca_buildFaceInfo(
+        const std::vector<std::array<int,4>>& faces,
+        const KooRemapper::Mesh& mesh, int pid) {
+    std::vector<CaFaceInfo> infos;
+    infos.reserve(faces.size());
+    for (int fi = 0; fi < (int)faces.size(); ++fi) {
+        const auto& f = faces[fi];
+        CaFaceInfo ci;
+        ci.nodeIds = f;
+        ci.pid = pid;
+        ci.sourceIndex = fi;
+        bool isTri = (f[3] == f[2] || f[3] == 0);
+        ci.nVerts = isTri ? 3 : 4;
+
+        bool valid = true;
+        for (int k = 0; k < ci.nVerts; ++k) {
+            const auto* nd = mesh.getNode(f[k]);
+            if (!nd) { valid = false; break; }
+            ci.verts[k][0] = nd->position.x;
+            ci.verts[k][1] = nd->position.y;
+            ci.verts[k][2] = nd->position.z;
+        }
+        if (!valid) continue;
+        if (isTri) { ci.verts[3][0]=ci.verts[2][0]; ci.verts[3][1]=ci.verts[2][1]; ci.verts[3][2]=ci.verts[2][2]; }
+
+        // Normal via diagonal cross product
+        double d1[3] = {ci.verts[2][0]-ci.verts[0][0], ci.verts[2][1]-ci.verts[0][1], ci.verts[2][2]-ci.verts[0][2]};
+        double d2[3] = {ci.verts[3][0]-ci.verts[1][0], ci.verts[3][1]-ci.verts[1][1], ci.verts[3][2]-ci.verts[1][2]};
+        ci.normal[0] = d1[1]*d2[2] - d1[2]*d2[1];
+        ci.normal[1] = d1[2]*d2[0] - d1[0]*d2[2];
+        ci.normal[2] = d1[0]*d2[1] - d1[1]*d2[0];
+        double mag = ld_mag(ci.normal);
+        ci.area = mag * 0.5;
+        if (mag > 1e-30) { ci.normal[0]/=mag; ci.normal[1]/=mag; ci.normal[2]/=mag; }
+        if (ci.area < 1e-20) continue;
+
+        // Centroid
+        ci.centroid[0]=ci.centroid[1]=ci.centroid[2]=0;
+        for (int k = 0; k < ci.nVerts; ++k) {
+            ci.centroid[0]+=ci.verts[k][0]; ci.centroid[1]+=ci.verts[k][1]; ci.centroid[2]+=ci.verts[k][2];
+        }
+        ci.centroid[0]/=ci.nVerts; ci.centroid[1]/=ci.nVerts; ci.centroid[2]/=ci.nVerts;
+
+        // Radius: max distance from centroid to any vertex
+        ci.radius = 0;
+        for (int k = 0; k < ci.nVerts; ++k) {
+            double dx = ci.verts[k][0]-ci.centroid[0];
+            double dy = ci.verts[k][1]-ci.centroid[1];
+            double dz = ci.verts[k][2]-ci.centroid[2];
+            double dist = std::sqrt(dx*dx+dy*dy+dz*dz);
+            if (dist > ci.radius) ci.radius = dist;
+        }
+        infos.push_back(ci);
+    }
+    return infos;
+}
+
+static double ca_averageFaceSize(const std::vector<CaFaceInfo>& faces) {
+    if (faces.empty()) return 1.0;
+    double sum = 0;
+    for (const auto& f : faces) sum += std::sqrt(f.area);
+    return sum / faces.size();
+}
+
+// 4-stage narrow phase check (same algorithm as ct_narrowPhaseCheck)
+static bool ca_narrowPhaseCheck(
+        const CaFaceInfo& fA, const CaFaceInfo& fB,
+        double gapTol, double cosThresh, double& gapOut) {
+    // Stage 1: centroid distance pre-filter
+    double dx=fA.centroid[0]-fB.centroid[0], dy=fA.centroid[1]-fB.centroid[1], dz=fA.centroid[2]-fB.centroid[2];
+    double centDist = std::sqrt(dx*dx+dy*dy+dz*dz);
+    if (centDist > fA.radius + fB.radius + gapTol) return false;
+
+    // Stage 2: normal parallelism
+    double absDot = std::abs(ld_dot(fA.normal, fB.normal));
+    if (absDot < cosThresh) return false;
+
+    // Stage 3: bilateral vertex-to-plane projection
+    double minGap = 1e30;
+    // A → B plane
+    for (int k = 0; k < fA.nVerts; ++k) {
+        double diff[3] = {fA.verts[k][0]-fB.centroid[0], fA.verts[k][1]-fB.centroid[1], fA.verts[k][2]-fB.centroid[2]};
+        double gap_k = std::abs(ld_dot(diff, fB.normal));
+        double dotN = ld_dot(diff, fB.normal);
+        double px = fA.verts[k][0] - fB.normal[0]*dotN;
+        double py = fA.verts[k][1] - fB.normal[1]*dotN;
+        double pz = fA.verts[k][2] - fB.normal[2]*dotN;
+        double pdx=px-fB.centroid[0], pdy=py-fB.centroid[1], pdz=pz-fB.centroid[2];
+        double projDist = std::sqrt(pdx*pdx+pdy*pdy+pdz*pdz);
+        if (projDist < fB.radius + gapTol) {
+            if (gap_k < minGap) minGap = gap_k;
+        }
+    }
+    // B → A plane
+    for (int k = 0; k < fB.nVerts; ++k) {
+        double diff[3] = {fB.verts[k][0]-fA.centroid[0], fB.verts[k][1]-fA.centroid[1], fB.verts[k][2]-fA.centroid[2]};
+        double gap_k = std::abs(ld_dot(diff, fA.normal));
+        double dotN = ld_dot(diff, fA.normal);
+        double px = fB.verts[k][0] - fA.normal[0]*dotN;
+        double py = fB.verts[k][1] - fA.normal[1]*dotN;
+        double pz = fB.verts[k][2] - fA.normal[2]*dotN;
+        double pdx=px-fA.centroid[0], pdy=py-fA.centroid[1], pdz=pz-fA.centroid[2];
+        double projDist = std::sqrt(pdx*pdx+pdy*pdy+pdz*pdz);
+        if (projDist < fA.radius + gapTol) {
+            if (gap_k < minGap) minGap = gap_k;
+        }
+    }
+    if (minGap > gapTol) return false;
+    gapOut = minGap;
+    return true;
+}
+
+// Detect contacting faces between two parts using spatial hash grid
+static std::vector<CaContactPair> ca_detectContacting(
+        const std::vector<std::array<int,4>>& facesA,
+        const std::vector<std::array<int,4>>& facesB,
+        const KooRemapper::Mesh& mesh,
+        int pidA, int pidB,
+        double gapTolerance, double normalAngleDeg) {
+    auto infoA = ca_buildFaceInfo(facesA, mesh, pidA);
+    auto infoB = ca_buildFaceInfo(facesB, mesh, pidB);
+    if (infoA.empty() || infoB.empty()) return {};
+
+    double avgSize = (ca_averageFaceSize(infoA) + ca_averageFaceSize(infoB)) * 0.5;
+    double cellSize = std::max(avgSize, gapTolerance * 2.0);
+    cellSize = std::max(cellSize, 1e-10);
+    double cosThresh = std::cos(normalAngleDeg * 3.14159265358979323846 / 180.0);
+
+    // Build grid from B (master)
+    std::unordered_map<CaCellKey, std::vector<int>, CaCellKeyHash> grid;
+    for (int j = 0; j < (int)infoB.size(); ++j) {
+        const auto& fi = infoB[j];
+        double minX=fi.verts[0][0], maxX=minX, minY=fi.verts[0][1], maxY=minY, minZ=fi.verts[0][2], maxZ=minZ;
+        for (int k=1; k<fi.nVerts; ++k) {
+            if (fi.verts[k][0]<minX) minX=fi.verts[k][0]; if (fi.verts[k][0]>maxX) maxX=fi.verts[k][0];
+            if (fi.verts[k][1]<minY) minY=fi.verts[k][1]; if (fi.verts[k][1]>maxY) maxY=fi.verts[k][1];
+            if (fi.verts[k][2]<minZ) minZ=fi.verts[k][2]; if (fi.verts[k][2]>maxZ) maxZ=fi.verts[k][2];
+        }
+        int ixMin=(int)std::floor(minX/cellSize), ixMax=(int)std::floor(maxX/cellSize);
+        int iyMin=(int)std::floor(minY/cellSize), iyMax=(int)std::floor(maxY/cellSize);
+        int izMin=(int)std::floor(minZ/cellSize), izMax=(int)std::floor(maxZ/cellSize);
+        for (int ix=ixMin; ix<=ixMax; ++ix)
+            for (int iy=iyMin; iy<=iyMax; ++iy)
+                for (int iz=izMin; iz<=izMax; ++iz)
+                    grid[{ix,iy,iz}].push_back(j);
+    }
+
+    // Query with A (slave)
+    std::set<std::pair<int,int>> candidates;
+    for (int i = 0; i < (int)infoA.size(); ++i) {
+        const auto& fi = infoA[i];
+        double minX=fi.verts[0][0], maxX=minX, minY=fi.verts[0][1], maxY=minY, minZ=fi.verts[0][2], maxZ=minZ;
+        for (int k=1; k<fi.nVerts; ++k) {
+            if (fi.verts[k][0]<minX) minX=fi.verts[k][0]; if (fi.verts[k][0]>maxX) maxX=fi.verts[k][0];
+            if (fi.verts[k][1]<minY) minY=fi.verts[k][1]; if (fi.verts[k][1]>maxY) maxY=fi.verts[k][1];
+            if (fi.verts[k][2]<minZ) minZ=fi.verts[k][2]; if (fi.verts[k][2]>maxZ) maxZ=fi.verts[k][2];
+        }
+        int ixMin=(int)std::floor(minX/cellSize)-1, ixMax=(int)std::floor(maxX/cellSize)+1;
+        int iyMin=(int)std::floor(minY/cellSize)-1, iyMax=(int)std::floor(maxY/cellSize)+1;
+        int izMin=(int)std::floor(minZ/cellSize)-1, izMax=(int)std::floor(maxZ/cellSize)+1;
+        for (int ix=ixMin; ix<=ixMax; ++ix)
+            for (int iy=iyMin; iy<=iyMax; ++iy)
+                for (int iz=izMin; iz<=izMax; ++iz) {
+                    auto it = grid.find({ix,iy,iz});
+                    if (it == grid.end()) continue;
+                    for (int j : it->second) candidates.insert({i,j});
+                }
+    }
+
+    // Narrow phase
+    std::vector<CaContactPair> results;
+    for (const auto& [i, j] : candidates) {
+        double gap;
+        if (ca_narrowPhaseCheck(infoA[i], infoB[j], gapTolerance, cosThresh, gap)) {
+            results.push_back({pidA, pidB, infoA[i].sourceIndex, infoB[j].sourceIndex, gap});
+        }
+    }
+    return results;
+}
+
+// Get LS-DYNA contact keyword from preset name
+static std::string ca_getContactKeyword(const std::string& type) {
+    std::string t = type;
+    for (auto& c : t) c = (char)std::tolower((unsigned char)c);
+    if (t == "auto" || t == "automatic" || t.empty()) return "AUTOMATIC_SURFACE_TO_SURFACE";
+    if (t == "tied") return "TIED_SURFACE_TO_SURFACE";
+    if (t == "mortar") return "AUTOMATIC_SURFACE_TO_SURFACE_MORTAR";
+    if (t == "tied_mortar") return "TIED_SURFACE_TO_SURFACE_MORTAR";
+    if (t == "single") return "AUTOMATIC_SINGLE_SURFACE";
+    if (t == "eroding") return "ERODING_SURFACE_TO_SURFACE";
+    if (t == "forming") return "FORMING_SURFACE_TO_SURFACE";
+    // Custom: uppercase as-is
+    std::string upper = type;
+    for (auto& c : upper) c = (char)std::toupper((unsigned char)c);
+    return upper;
+}
+
+// Generate *CONTACT card (Cards 1-3 only, no optional cards)
+static std::string ca_generateContact(const std::string& contactType,
+        const std::string& title,
+        int ssid, int msid, int sstyp, int mstyp,
+        double friction) {
+    std::ostringstream ss;
+    std::string kw = "*CONTACT_" + contactType;
+    if (!title.empty()) kw += "_TITLE";
+    ss << kw << "\n";
+    if (!title.empty()) ss << title << "\n";
+
+    char buf[90];
+    // Card 1
+    ss << "$#    ssid      msid     sstyp     mstyp    sboxid    mboxid       spr       mpr\n";
+    snprintf(buf, sizeof(buf), "%10d%10d%10d%10d%10d%10d%10d%10d",
+             ssid, msid, sstyp, mstyp, 0, 0, 0, 0);
+    ss << buf << "\n";
+    // Card 2
+    double fs = (friction >= 0) ? friction : 0.0;
+    ss << "$#      fs        fd        dc        vc       vdc    penchk        bt        dt\n";
+    snprintf(buf, sizeof(buf), "%10.2f%10.2f%10.2f%10.2f%10.2f%10d%10.2f%10.3E",
+             fs, 0.0, 0.0, 0.0, 0.0, 0, 0.0, 1.0e20);
+    ss << buf << "\n";
+    // Card 3
+    ss << "$#    sfsa      sfsb      sast      sbst     sfsat     sfsbt       fsf       vsf\n";
+    snprintf(buf, sizeof(buf), "%10.2f%10.2f%10.2f%10.2f%10.2f%10.2f%10.2f%10.2f",
+             1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0);
+    ss << buf << "\n";
+    return ss.str();
+}
+
+// Get all part PIDs and titles from rawLines
+static std::vector<std::pair<int, std::string>> ca_getPartList(
+        const std::vector<std::string>& rawLines) {
+    std::vector<std::pair<int, std::string>> parts;
+    for (int i = 0; i < (int)rawLines.size(); ++i) {
+        const auto& line = rawLines[i];
+        if (line.empty() || line[0] != '*') continue;
+        std::string up = line;
+        for (auto& c : up) c = (char)std::toupper((unsigned char)c);
+        if (up.find("*PART") != 0) continue;
+        if (up.find("*PART_CONTACT") == 0) continue;
+        // Find title and data lines
+        std::string title;
+        int pid = 0;
+        for (int j = i + 1; j < (int)rawLines.size() && j < i + 10; ++j) {
+            const auto& dl = rawLines[j];
+            if (dl.empty()) continue;
+            if (dl[0] == '*') break;
+            if (dl[0] == '$') continue;
+            if (title.empty()) {
+                title = dl;
+                // trim
+                size_t start = title.find_first_not_of(" \t\r\n");
+                size_t end = title.find_last_not_of(" \t\r\n");
+                if (start != std::string::npos) title = title.substr(start, end - start + 1);
+                else title.clear();
+                continue;
+            }
+            // Data line: PID is first field
+            try { pid = std::stoi(dl.substr(0, 10)); } catch(...) {}
+            break;
+        }
+        if (pid > 0) parts.push_back({pid, title});
+    }
+    return parts;
+}
+
+// Filter PIDs by include/exclude keywords (case-insensitive substring match)
+static std::vector<int> ca_filterPids(
+        const std::vector<std::pair<int, std::string>>& partList,
+        const std::vector<std::string>& includeKeys,
+        const std::vector<std::string>& excludeKeys) {
+    std::vector<int> result;
+    for (const auto& [pid, title] : partList) {
+        std::string upTitle = title;
+        for (auto& c : upTitle) c = (char)std::tolower((unsigned char)c);
+
+        // Check include (if specified, at least one must match)
+        if (!includeKeys.empty()) {
+            bool found = false;
+            for (const auto& key : includeKeys) {
+                std::string lowKey = key;
+                for (auto& c : lowKey) c = (char)std::tolower((unsigned char)c);
+                if (upTitle.find(lowKey) != std::string::npos) { found = true; break; }
+            }
+            if (!found) continue;
+        }
+        // Check exclude (if any matches, skip)
+        bool excluded = false;
+        for (const auto& key : excludeKeys) {
+            std::string lowKey = key;
+            for (auto& c : lowKey) c = (char)std::tolower((unsigned char)c);
+            if (upTitle.find(lowKey) != std::string::npos) { excluded = true; break; }
+        }
+        if (excluded) continue;
+        result.push_back(pid);
+    }
+    return result;
+}
+
+// Check if a PID pair already has a contact (lightweight rawLines scan)
+static bool ca_pairHasExistingContact(
+        const std::vector<std::string>& rawLines,
+        int pidA, int pidB, const std::string& mode) {
+    bool inContact = false;
+    bool isTied = false;
+    bool hasTitle = false;
+    bool needTitle = false;
+    int cardNum = 0;
+    int ssid=0, msid=0, sstyp=0, mstyp=0;
+
+    auto checkPair = [&]() -> bool {
+        if (!inContact) return false;
+        if (mode == "tied" && !isTied) return false;
+        // SSTYP=3: direct PID match
+        if (sstyp == 3 && mstyp == 3) {
+            if ((ssid == pidA && msid == pidB) || (ssid == pidB && msid == pidA))
+                return true;
+        }
+        return false;
+    };
+
+    for (int i = 0; i < (int)rawLines.size(); ++i) {
+        const auto& line = rawLines[i];
+        if (!line.empty() && line[0] == '*') {
+            if (inContact && checkPair()) return true;
+            std::string up = line;
+            for (auto& c : up) c = (char)std::toupper((unsigned char)c);
+            if (up.find("*CONTACT_") == 0) {
+                inContact = true;
+                isTied = (up.find("TIED") != std::string::npos);
+                hasTitle = (up.find("_TITLE") != std::string::npos || up.find("_ID") != std::string::npos);
+                needTitle = hasTitle;
+                cardNum = 0;
+                ssid = msid = sstyp = mstyp = 0;
+                continue;
+            }
+            inContact = false;
+            continue;
+        }
+        if (!inContact) continue;
+        if (!line.empty() && line[0] == '$') continue;
+        if (needTitle) { needTitle = false; continue; }
+        cardNum++;
+        if (cardNum == 1) {
+            auto tok = [&](int start, int len) -> int {
+                if (start >= (int)line.size()) return 0;
+                std::string s = line.substr(start, std::min(len, (int)line.size()-start));
+                try { return std::stoi(s); } catch(...) { return 0; }
+            };
+            ssid = tok(0, 10); msid = tok(10, 10);
+            sstyp = tok(20, 10); mstyp = tok(30, 10);
+        }
+    }
+    if (inContact && checkPair()) return true;
+    return false;
+}
+
+// Subtract tied faces from detected faces
+static std::vector<std::array<int,4>> ca_subtractFaces(
+        const std::vector<std::array<int,4>>& allFaces,
+        const std::vector<std::array<int,4>>& tiedFaces) {
+    std::set<std::array<int,4>> tiedSet;
+    for (const auto& f : tiedFaces) {
+        auto key = f; std::sort(key.begin(), key.end());
+        tiedSet.insert(key);
+    }
+    std::vector<std::array<int,4>> result;
+    for (const auto& f : allFaces) {
+        auto key = f; std::sort(key.begin(), key.end());
+        if (!tiedSet.count(key)) result.push_back(f);
+    }
+    return result;
+}
+
+} // anonymous namespace
+
+// ============================================================================
+// applyContact
+// ============================================================================
+bool ModelAssembler::applyContact(const ContactOperation& op) {
+    if (op.actions.empty()) {
+        std::cout << "[contact] No contact actions specified\n";
+        return true;
+    }
+
+    int nextSetId = ld_findMaxSetSegmentId(rawLines_) + 1;
+    std::vector<std::string> insertBlocks;
+    int contactCount = 0;
+
+    for (int ai = 0; ai < (int)op.actions.size(); ++ai) {
+        const auto& act = op.actions[ai];
+
+        if (act.action == "create") {
+            // --- CREATE ---
+            std::string contactKw = ca_getContactKeyword(act.type);
+            int ssid = 0, msid = 0, sstyp = 0, mstyp = 0;
+
+            // Resolve slave side
+            std::vector<int> slavePids;
+            if (act.slave.pid > 0) slavePids.push_back(act.slave.pid);
+            if (!act.slave.pids.empty()) slavePids = act.slave.pids;
+
+            // Resolve master side
+            std::vector<int> masterPids;
+            if (act.master.pid > 0) masterPids.push_back(act.master.pid);
+            if (!act.master.pids.empty()) masterPids = act.master.pids;
+
+            bool useFacing = (act.slave.facing && act.master.facing &&
+                              slavePids.size() == 1 && masterPids.size() == 1);
+
+            if (useFacing && act.slave.asSegment && act.master.asSegment) {
+                // Facing filter: extract surfaces, detect contacting, keep only facing faces
+                auto sFacesAll = ld_extractSurface(baseMesh_, slavePids[0]);
+                auto mFacesAll = ld_extractSurface(baseMesh_, masterPids[0]);
+                if (sFacesAll.empty() || mFacesAll.empty()) {
+                    std::cerr << "[contact] WARNING: No surface for facing filter (slave:"
+                              << slavePids[0] << " master:" << masterPids[0] << ")\n";
+                } else {
+                    auto pairs = ca_detectContacting(sFacesAll, mFacesAll, baseMesh_,
+                        slavePids[0], masterPids[0], act.tolerance, act.normalAngle);
+                    if (pairs.empty()) {
+                        std::cerr << "[contact] WARNING: No facing segments between PID "
+                                  << slavePids[0] << " and PID " << masterPids[0] << "\n";
+                    } else {
+                        std::set<int> sIdxSet, mIdxSet;
+                        for (const auto& p : pairs) { sIdxSet.insert(p.faceA); mIdxSet.insert(p.faceB); }
+                        std::vector<std::array<int,4>> sFaces, mFaces;
+                        for (int idx : sIdxSet) sFaces.push_back(sFacesAll[idx]);
+                        for (int idx : mIdxSet) mFaces.push_back(mFacesAll[idx]);
+
+                        ssid = nextSetId++;
+                        insertBlocks.push_back(ld_generateSetSegment(ssid, sFaces,
+                            "Slave_PID" + std::to_string(slavePids[0]) + "_facing"));
+                        sstyp = 0;
+                        msid = nextSetId++;
+                        insertBlocks.push_back(ld_generateSetSegment(msid, mFaces,
+                            "Master_PID" + std::to_string(masterPids[0]) + "_facing"));
+                        mstyp = 0;
+                    }
+                }
+            } else if (act.slave.asSegment || act.master.asSegment) {
+                // Extract surface for sides requesting as_segment
+                if (act.slave.asSegment && !slavePids.empty()) {
+                    std::vector<std::array<int,4>> allFaces;
+                    for (int pid : slavePids) {
+                        auto f = ld_extractSurface(baseMesh_, pid);
+                        allFaces.insert(allFaces.end(), f.begin(), f.end());
+                    }
+                    ssid = nextSetId++;
+                    insertBlocks.push_back(ld_generateSetSegment(ssid, allFaces,
+                        "Slave_PID" + std::to_string(slavePids[0])));
+                    sstyp = 0;
+                } else if (!slavePids.empty()) {
+                    ssid = slavePids[0]; sstyp = 3;
+                }
+                if (act.master.asSegment && !masterPids.empty()) {
+                    std::vector<std::array<int,4>> allFaces;
+                    for (int pid : masterPids) {
+                        auto f = ld_extractSurface(baseMesh_, pid);
+                        allFaces.insert(allFaces.end(), f.begin(), f.end());
+                    }
+                    msid = nextSetId++;
+                    insertBlocks.push_back(ld_generateSetSegment(msid, allFaces,
+                        "Master_PID" + std::to_string(masterPids[0])));
+                    mstyp = 0;
+                } else if (!masterPids.empty()) {
+                    msid = masterPids[0]; mstyp = 3;
+                }
+            } else {
+                // Direct PID reference (SSTYP=3)
+                if (!slavePids.empty()) { ssid = slavePids[0]; sstyp = 3; }
+                if (!masterPids.empty()) { msid = masterPids[0]; mstyp = 3; }
+            }
+
+            if (ssid > 0) {
+                std::string title = act.title;
+                if (title.empty() && !slavePids.empty() && !masterPids.empty()) {
+                    title = "PID" + std::to_string(slavePids[0]) + "_to_PID" + std::to_string(masterPids[0]);
+                }
+                insertBlocks.push_back(ca_generateContact(contactKw, title,
+                    ssid, msid, sstyp, mstyp, act.friction));
+                contactCount++;
+                std::cout << "[contact] Created " << contactKw
+                          << " (slave=" << ssid << " master=" << msid << ")\n";
+            }
+
+        } else if (act.action == "detect") {
+            // --- DETECT ---
+            auto partList = ca_getPartList(rawLines_);
+            std::vector<int> targetPids;
+
+            if (act.scope == "all") {
+                // All parts
+                for (const auto& [pid, title] : partList) targetPids.push_back(pid);
+            } else if (!act.includeKeys.empty() || !act.excludeKeys.empty()) {
+                targetPids = ca_filterPids(partList, act.includeKeys, act.excludeKeys);
+            } else if (act.slave.pid > 0 && act.master.pid > 0) {
+                // Explicit pair mode
+                auto sFaces = ld_extractSurface(baseMesh_, act.slave.pid);
+                auto mFaces = ld_extractSurface(baseMesh_, act.master.pid);
+                auto pairs = ca_detectContacting(sFaces, mFaces, baseMesh_,
+                    act.slave.pid, act.master.pid, act.tolerance, act.normalAngle);
+                std::cout << "[contact] Detected " << pairs.size() << " facing pairs between PID "
+                          << act.slave.pid << " and PID " << act.master.pid << "\n";
+                if (act.autoCreate && !pairs.empty()) {
+                    std::set<int> sIdxSet, mIdxSet;
+                    for (const auto& p : pairs) { sIdxSet.insert(p.faceA); mIdxSet.insert(p.faceB); }
+                    std::vector<std::array<int,4>> sf, mf;
+                    for (int idx : sIdxSet) sf.push_back(sFaces[idx]);
+                    for (int idx : mIdxSet) mf.push_back(mFaces[idx]);
+
+                    int sid1 = nextSetId++;
+                    insertBlocks.push_back(ld_generateSetSegment(sid1, sf,
+                        "Detect_Slave_PID" + std::to_string(act.slave.pid)));
+                    int sid2 = nextSetId++;
+                    insertBlocks.push_back(ld_generateSetSegment(sid2, mf,
+                        "Detect_Master_PID" + std::to_string(act.master.pid)));
+
+                    std::string contactKw = ca_getContactKeyword(act.type);
+                    std::string title = act.titlePrefix.empty() ? "" :
+                        act.titlePrefix + "_PID" + std::to_string(act.slave.pid) +
+                        "_PID" + std::to_string(act.master.pid);
+                    insertBlocks.push_back(ca_generateContact(contactKw, title,
+                        sid1, sid2, 0, 0, act.friction));
+                    contactCount++;
+                }
+                continue;
+            } else {
+                std::cerr << "[contact] ERROR: detect needs scope, include/exclude, or slave+master PIDs\n";
+                return false;
+            }
+
+            if (targetPids.size() < 2) {
+                std::cerr << "[contact] WARNING: Less than 2 parts for detection, skipping\n";
+                continue;
+            }
+
+            // Extract surfaces for all target PIDs
+            std::map<int, std::vector<std::array<int,4>>> pidFaces;
+            for (int pid : targetPids) {
+                auto faces = ld_extractSurface(baseMesh_, pid);
+                if (!faces.empty()) pidFaces[pid] = std::move(faces);
+            }
+
+            // All-pairs detection
+            int detectedPairs = 0;
+            std::vector<int> pids;
+            for (const auto& [pid, faces] : pidFaces) pids.push_back(pid);
+
+            for (int i = 0; i < (int)pids.size(); ++i) {
+                for (int j = i + 1; j < (int)pids.size(); ++j) {
+                    int pidA = pids[i], pidB = pids[j];
+
+                    // Skip existing check
+                    if (!act.skipExisting.empty()) {
+                        if (ca_pairHasExistingContact(rawLines_, pidA, pidB, act.skipExisting))
+                            continue;
+                    }
+
+                    auto pairs = ca_detectContacting(pidFaces[pidA], pidFaces[pidB],
+                        baseMesh_, pidA, pidB, act.tolerance, act.normalAngle);
+                    if (pairs.empty()) continue;
+
+                    detectedPairs++;
+                    std::set<int> sIdxSet, mIdxSet;
+                    for (const auto& p : pairs) { sIdxSet.insert(p.faceA); mIdxSet.insert(p.faceB); }
+                    std::vector<std::array<int,4>> sf, mf;
+                    for (int idx : sIdxSet) sf.push_back(pidFaces[pidA][idx]);
+                    for (int idx : mIdxSet) mf.push_back(pidFaces[pidB][idx]);
+
+                    // Subtract existing tied faces if requested
+                    if (act.subtractExisting && !sf.empty()) {
+                        // TODO: parse existing tied segment sets for this pair
+                        // For now, skip subtraction in assemble mode
+                    }
+
+                    std::cout << "[contact] Detected PID " << pidA << " <-> PID " << pidB
+                              << " (" << sf.size() << "+" << mf.size() << " segments)\n";
+
+                    if (act.autoCreate) {
+                        int sid1 = nextSetId++;
+                        insertBlocks.push_back(ld_generateSetSegment(sid1, sf,
+                            "Detect_Slave_PID" + std::to_string(pidA)));
+                        int sid2 = nextSetId++;
+                        insertBlocks.push_back(ld_generateSetSegment(sid2, mf,
+                            "Detect_Master_PID" + std::to_string(pidB)));
+
+                        std::string contactKw = ca_getContactKeyword(act.type);
+                        std::string title;
+                        if (!act.titlePrefix.empty())
+                            title = act.titlePrefix + "_PID" + std::to_string(pidA) + "_PID" + std::to_string(pidB);
+                        insertBlocks.push_back(ca_generateContact(contactKw, title,
+                            sid1, sid2, 0, 0, act.friction));
+                        contactCount++;
+                    }
+                }
+            }
+            std::cout << "[contact] Detected " << detectedPairs << " contacting pairs from "
+                      << pids.size() << " parts\n";
+
+        } else {
+            std::cerr << "[contact] ERROR: Unknown action '" << act.action
+                      << "' (assemble supports: create, detect)\n";
+            return false;
+        }
+    }
+
+    // Insert all blocks before *END
+    if (!insertBlocks.empty()) {
+        std::vector<std::string> newLines;
+        newLines.reserve(rawLines_.size() + insertBlocks.size() * 20);
+        for (const auto& line : rawLines_) {
+            std::string up = line;
+            for (auto& c : up) c = (char)std::toupper((unsigned char)c);
+            if (up.find("*END") == 0) {
+                for (const auto& block : insertBlocks) {
+                    std::istringstream bs(block);
+                    std::string bline;
+                    while (std::getline(bs, bline)) newLines.push_back(bline);
+                }
+            }
+            newLines.push_back(line);
+        }
+        rawLines_ = std::move(newLines);
+    }
+
+    infoMessages.push_back("[contact] Applied " + std::to_string(contactCount) + " contact(s)");
+    return true;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Boundary (SPC) helpers  — bc_ prefix
+// ═══════════════════════════════════════════════════════════
+namespace {
+
+// Resolve DOF preset string → 6 DOF values
+static void bc_resolveDof(const BoundaryCase& bc, int dof[6]) {
+    std::string d = bc.dof;
+    for (auto& c : d) c = (char)std::tolower((unsigned char)c);
+    if      (d == "all")     { dof[0]=1; dof[1]=1; dof[2]=1; dof[3]=1; dof[4]=1; dof[5]=1; }
+    else if (d == "xyz")     { dof[0]=1; dof[1]=1; dof[2]=1; dof[3]=0; dof[4]=0; dof[5]=0; }
+    else if (d == "x")       { dof[0]=1; dof[1]=0; dof[2]=0; dof[3]=0; dof[4]=0; dof[5]=0; }
+    else if (d == "y")       { dof[0]=0; dof[1]=1; dof[2]=0; dof[3]=0; dof[4]=0; dof[5]=0; }
+    else if (d == "z")       { dof[0]=0; dof[1]=0; dof[2]=1; dof[3]=0; dof[4]=0; dof[5]=0; }
+    else if (d == "xy")      { dof[0]=1; dof[1]=1; dof[2]=0; dof[3]=0; dof[4]=0; dof[5]=0; }
+    else if (d == "xz")      { dof[0]=1; dof[1]=0; dof[2]=1; dof[3]=0; dof[4]=0; dof[5]=0; }
+    else if (d == "yz")      { dof[0]=0; dof[1]=1; dof[2]=1; dof[3]=0; dof[4]=0; dof[5]=0; }
+    else if (d == "rx")      { dof[0]=0; dof[1]=0; dof[2]=0; dof[3]=1; dof[4]=0; dof[5]=0; }
+    else if (d == "ry")      { dof[0]=0; dof[1]=0; dof[2]=0; dof[3]=0; dof[4]=1; dof[5]=0; }
+    else if (d == "rz")      { dof[0]=0; dof[1]=0; dof[2]=0; dof[3]=0; dof[4]=0; dof[5]=1; }
+    else if (d == "custom")  { dof[0]=bc.dofx; dof[1]=bc.dofy; dof[2]=bc.dofz;
+                               dof[3]=bc.dofrx; dof[4]=bc.dofry; dof[5]=bc.dofrz; }
+    else                     { dof[0]=1; dof[1]=1; dof[2]=1; dof[3]=1; dof[4]=1; dof[5]=1; }
+}
+
+// Collect unique node IDs from face quads
+static std::vector<int> bc_collectNodes(const std::vector<std::array<int,4>>& faces) {
+    std::set<int> nodeSet;
+    for (const auto& f : faces) {
+        for (int i = 0; i < 4; ++i) {
+            if (f[i] > 0) nodeSet.insert(f[i]);
+        }
+    }
+    return std::vector<int>(nodeSet.begin(), nodeSet.end());
+}
+
+// Find max existing *SET_NODE ID in rawLines
+static int bc_findMaxSetNodeId(const std::vector<std::string>& rawLines) {
+    int maxId = 0;
+    bool inSetNode = false;
+    bool needData = true;
+    bool needTitle = false;
+    for (const auto& line : rawLines) {
+        if (!line.empty() && line[0] == '*') {
+            std::string up = line;
+            for (auto& c : up) c = (char)std::toupper((unsigned char)c);
+            if (up.find("*SET_NODE") == 0) {
+                inSetNode = true;
+                needTitle = (up.find("_TITLE") != std::string::npos);
+                needData = true;
+                continue;
+            }
+            inSetNode = false;
+            continue;
+        }
+        if (!inSetNode) continue;
+        if (!line.empty() && line[0] == '$') continue;
+        if (needTitle) { needTitle = false; continue; }
+        if (needData) {
+            std::istringstream iss(line);
+            int sid = 0;
+            if (iss >> sid && sid > maxId) maxId = sid;
+            needData = false;
+            inSetNode = false;
+            continue;
+        }
+    }
+    return maxId;
+}
+
+// Generate *SET_NODE_LIST_TITLE card
+static std::string bc_generateSetNode(int sid, const std::vector<int>& nodeIds,
+        const std::string& title = "") {
+    std::ostringstream ss;
+    if (title.empty())
+        ss << "*SET_NODE_LIST\n";
+    else
+        ss << "*SET_NODE_LIST_TITLE\n" << title << "\n";
+    char buf[90];
+    snprintf(buf, sizeof(buf), "%10d", sid);
+    ss << "$#     sid\n" << buf << "\n";
+    ss << "$#    nid1      nid2      nid3      nid4      nid5      nid6      nid7      nid8\n";
+    for (int i = 0; i < (int)nodeIds.size(); i += 8) {
+        for (int j = i; j < std::min(i + 8, (int)nodeIds.size()); ++j) {
+            snprintf(buf, sizeof(buf), "%10d", nodeIds[j]);
+            ss << buf;
+        }
+        ss << "\n";
+    }
+    return ss.str();
+}
+
+// Generate *BOUNDARY_SPC_SET card
+static std::string bc_generateSpcSet(int nsid, const int dof[6]) {
+    std::ostringstream ss;
+    ss << "*BOUNDARY_SPC_SET\n";
+    ss << "$#  NSID/NID       CID      DOFX      DOFY      DOFZ     DOFRX     DOFRY     DOFRZ\n";
+    char buf[90];
+    snprintf(buf, sizeof(buf), "%10d%10d%10d%10d%10d%10d%10d%10d",
+             nsid, 0, dof[0], dof[1], dof[2], dof[3], dof[4], dof[5]);
+    ss << buf << "\n";
+    return ss.str();
+}
+
+} // anonymous namespace
+
+// ── applyBoundary() main ────────────────────────────────────────
+bool ModelAssembler::applyBoundary(const BoundaryOperation& op) {
+    if (op.boundaries.empty()) {
+        std::cout << "[boundary] No boundary cases specified\n";
+        return true;
+    }
+
+    int maxSetNodeId = bc_findMaxSetNodeId(rawLines_);
+    int nextSetId = maxSetNodeId + 1;
+    std::vector<std::string> insertBlocks;
+    int bcCount = 0;
+
+    for (const auto& bc : op.boundaries) {
+        int pid = ld_resolvePid(rawLines_, bc.pid, bc.partName);
+        if (pid <= 0) {
+            std::cerr << "[boundary] ERROR: Cannot resolve part (pid="
+                      << bc.pid << " name='" << bc.partName << "')\n";
+            return false;
+        }
+
+        // Direction vector
+        double dir[3] = {bc.direction[0], bc.direction[1], bc.direction[2]};
+        double dirMag = ld_mag(dir);
+        bool hasDirection = (dirMag > 1e-30);
+        if (hasDirection) {
+            dir[0] /= dirMag; dir[1] /= dirMag; dir[2] /= dirMag;
+        }
+
+        std::vector<int> nodeIds;
+        int usedSetId = 0;
+
+        if (bc.select == "set") {
+            if (bc.setId <= 0) {
+                std::cerr << "[boundary] ERROR: set_id required for select=set\n";
+                return false;
+            }
+            usedSetId = bc.setId;
+
+        } else {
+            // direction mode (default)
+            auto allFaces = ld_extractSurface(baseMesh_, pid);
+            if (allFaces.empty()) {
+                std::cerr << "[boundary] WARNING: No surface faces for PID=" << pid << ", skipping\n";
+                continue;
+            }
+            std::vector<std::array<int,4>> selectedFaces;
+            if (hasDirection) {
+                auto faceInfos = ld_buildFaceInfo(allFaces, baseMesh_);
+                auto indices = ld_filterByDirection(faceInfos, dir, bc.angle);
+                if (indices.empty()) {
+                    std::cerr << "[boundary] WARNING: No faces match direction filter for PID="
+                              << pid << ", skipping\n";
+                    continue;
+                }
+                for (int idx : indices) selectedFaces.push_back(allFaces[idx]);
+            } else {
+                selectedFaces = std::move(allFaces);
+            }
+            nodeIds = bc_collectNodes(selectedFaces);
+            if (nodeIds.empty()) {
+                std::cerr << "[boundary] WARNING: No nodes collected for PID=" << pid << ", skipping\n";
+                continue;
+            }
+
+            // Generate SET_NODE
+            usedSetId = nextSetId++;
+            std::string title = "BC_PID" + std::to_string(pid) + "_" + bc.dof;
+            insertBlocks.push_back(bc_generateSetNode(usedSetId, nodeIds, title));
+        }
+
+        // Resolve DOF
+        int dof[6] = {};
+        bc_resolveDof(bc, dof);
+
+        // Generate SPC
+        insertBlocks.push_back(bc_generateSpcSet(usedSetId, dof));
+        bcCount++;
+
+        int nodeCount = bc.select == "set" ? 0 : (int)nodeIds.size();
+        std::cout << "[boundary] PID=" << pid << " dof=" << bc.dof
+                  << " select=" << bc.select << " nodes=" << nodeCount << "\n";
+    }
+
+    // Insert before *END
+    if (!insertBlocks.empty()) {
+        std::vector<std::string> newLines;
+        newLines.reserve(rawLines_.size() + insertBlocks.size() * 10);
+        for (const auto& line : rawLines_) {
+            std::string up = line;
+            for (auto& c : up) c = (char)std::toupper((unsigned char)c);
+            if (up.find("*END") == 0) {
+                for (const auto& block : insertBlocks) {
+                    std::istringstream bs(block);
+                    std::string bline;
+                    while (std::getline(bs, bline)) newLines.push_back(bline);
+                }
+            }
+            newLines.push_back(line);
+        }
+        rawLines_ = std::move(newLines);
+    }
+
+    infoMessages.push_back("[boundary] Applied " + std::to_string(bcCount) + " boundary condition(s)");
+    return true;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// RBE (Rigid Body Element) - CONSTRAINED_INTERPOLATION / CONSTRAINED_NODAL_RIGID_BODY
+// ══════════════════════════════════════════════════════════════════════════════
+
+namespace {
+
+// Find max existing *CONSTRAINED_NODAL_RIGID_BODY PID
+static int rbe_findMaxCnrbPid(const std::vector<std::string>& rawLines) {
+    int maxPid = 0;
+    bool inCnrb = false;
+    bool needTitle = false;
+    bool needData = true;
+    for (const auto& line : rawLines) {
+        if (!line.empty() && line[0] == '*') {
+            std::string up = line;
+            for (auto& c : up) c = (char)std::toupper((unsigned char)c);
+            if (up.find("*CONSTRAINED_NODAL_RIGID_BODY") == 0) {
+                inCnrb = true;
+                needTitle = (up.find("_TITLE") != std::string::npos);
+                needData = true;
+                continue;
+            }
+            inCnrb = false;
+            continue;
+        }
+        if (!inCnrb) continue;
+        if (!line.empty() && line[0] == '$') continue;
+        if (needTitle) { needTitle = false; continue; }
+        if (needData) {
+            std::istringstream iss(line);
+            int pid = 0;
+            if (iss >> pid && pid > maxPid) maxPid = pid;
+            needData = false;
+            inCnrb = false;
+        }
+    }
+    return maxPid;
+}
+
+// Find max existing *CONSTRAINED_INTERPOLATION ICID
+static int rbe_findMaxIcid(const std::vector<std::string>& rawLines) {
+    int maxIcid = 0;
+    bool inCI = false;
+    bool needData = true;
+    for (const auto& line : rawLines) {
+        if (!line.empty() && line[0] == '*') {
+            std::string up = line;
+            for (auto& c : up) c = (char)std::toupper((unsigned char)c);
+            if (up.find("*CONSTRAINED_INTERPOLATION") == 0 &&
+                up.find("SPOTWELD") == std::string::npos) {
+                inCI = true;
+                needData = true;
+                continue;
+            }
+            inCI = false;
+            continue;
+        }
+        if (!inCI) continue;
+        if (!line.empty() && line[0] == '$') continue;
+        if (needData) {
+            std::istringstream iss(line);
+            int icid = 0;
+            if (iss >> icid && icid > maxIcid) maxIcid = icid;
+            needData = false;
+            inCI = false;
+        }
+    }
+    return maxIcid;
+}
+
+// Generate *CONSTRAINED_INTERPOLATION card (RBE3)
+// Card 1: ICID, DNID, DDOF, CIDD, ITYP, IDNSW, FGM
+// Card 2 per independent node: INID, IDOF, TWGHTX (others default to TWGHTX)
+static std::string rbe_generateConstrainedInterpolation(
+        int icid, int dnid, const std::vector<int>& independentNodes) {
+    std::ostringstream ss;
+    ss << "*CONSTRAINED_INTERPOLATION\n";
+    ss << "$#    icid      dnid      ddof      cidd      ityp     idnsw       fgm\n";
+    char buf[120];
+    snprintf(buf, sizeof(buf), "%10d%10d%10d%10d%10d%10d%10d",
+             icid, dnid, 123456, 0, 0, 0, 0);
+    ss << buf << "\n";
+    ss << "$#    inid      idof    twghtx    twghty    twghtz    rwghtx    rwghty    rwghtz\n";
+    for (int nid : independentNodes) {
+        snprintf(buf, sizeof(buf), "%10d%10d%10s",
+                 nid, 123456, "1.0");
+        ss << buf << "\n";
+    }
+    return ss.str();
+}
+
+// Generate *CONSTRAINED_NODAL_RIGID_BODY_TITLE card (RBE2)
+// Card 1: PID, CID, NSID, PNODE, IPRT, DRFLAG, RRFLAG
+static std::string rbe_generateCnrb(int pid, int nsid, const std::string& title) {
+    std::ostringstream ss;
+    ss << "*CONSTRAINED_NODAL_RIGID_BODY_TITLE\n";
+    ss << title << "\n";
+    ss << "$#     pid       cid      nsid     pnode      iprt    drflag    rrflag\n";
+    char buf[120];
+    snprintf(buf, sizeof(buf), "%10d%10d%10d%10d%10d%10d%10d",
+             pid, 0, nsid, 0, 0, 0, 0);
+    ss << buf << "\n";
+    return ss.str();
+}
+
+} // anonymous namespace
+
+// ── applyRbe() main ─────────────────────────────────────────────────────────
+
+bool ModelAssembler::applyRbe(const RbeOperation& op) {
+    if (op.constraints.empty()) {
+        std::cout << "[rbe] No RBE constraints specified\n";
+        return true;
+    }
+
+    int maxSetNodeId = bc_findMaxSetNodeId(rawLines_);
+    int nextSetId = maxSetNodeId + 1;
+    int nextCnrbPid = rbe_findMaxCnrbPid(rawLines_) + 1;
+    int nextIcid = rbe_findMaxIcid(rawLines_) + 1;
+    std::vector<std::string> insertBlocks;
+    int rbeCount = 0;
+    int nodesCreated = 0;
+
+    for (const auto& rc : op.constraints) {
+        int pid = ld_resolvePid(rawLines_, rc.pid, rc.partName);
+        if (pid <= 0) {
+            std::cerr << "[rbe] ERROR: Cannot resolve part (pid="
+                      << rc.pid << " name='" << rc.partName << "')\n";
+            return false;
+        }
+
+        // Extract surface faces
+        auto allFaces = ld_extractSurface(baseMesh_, pid);
+        if (allFaces.empty()) {
+            std::cerr << "[rbe] WARNING: No surface faces for PID=" << pid << ", skipping\n";
+            continue;
+        }
+
+        // Filter by direction if needed
+        std::vector<std::array<int,4>> selectedFaces;
+        std::vector<LdFaceInfo> selectedFaceInfos;
+
+        if (rc.select == "direction") {
+            double dir[3] = {rc.direction[0], rc.direction[1], rc.direction[2]};
+            double dirMag = ld_mag(dir);
+            if (dirMag < 1e-30) {
+                std::cerr << "[rbe] ERROR: Zero direction vector for PID=" << pid << "\n";
+                return false;
+            }
+            dir[0] /= dirMag; dir[1] /= dirMag; dir[2] /= dirMag;
+
+            auto faceInfos = ld_buildFaceInfo(allFaces, baseMesh_);
+            auto indices = ld_filterByDirection(faceInfos, dir, rc.angle);
+            if (indices.empty()) {
+                std::cerr << "[rbe] WARNING: No faces match direction filter for PID="
+                          << pid << ", skipping\n";
+                continue;
+            }
+            for (int idx : indices) {
+                selectedFaces.push_back(allFaces[idx]);
+                selectedFaceInfos.push_back(faceInfos[idx]);
+            }
+        } else {
+            // select == "all"
+            selectedFaces = allFaces;
+            selectedFaceInfos = ld_buildFaceInfo(allFaces, baseMesh_);
+        }
+
+        if (rc.mode == "spider") {
+            // ── Spider mode: one centroid → one constraint ──
+            auto nodeIds = bc_collectNodes(selectedFaces);
+            if (nodeIds.empty()) continue;
+
+            // Compute centroid of all surface nodes
+            double cx = 0, cy = 0, cz = 0;
+            int validCount = 0;
+            for (int nid : nodeIds) {
+                const auto* nd = baseMesh_.getNode(nid);
+                if (!nd) continue;
+                cx += nd->position.x;
+                cy += nd->position.y;
+                cz += nd->position.z;
+                validCount++;
+            }
+            if (validCount == 0) continue;
+            cx /= validCount; cy /= validCount; cz /= validCount;
+
+            // Create centroid node
+            int centroidNid = ++maxNodeId_;
+            addedNodes_.push_back({centroidNid, cx, cy, cz});
+            nodesCreated++;
+
+            if (rc.type == "rbe3") {
+                // CONSTRAINED_INTERPOLATION: centroid=dependent, surface nodes=independent
+                insertBlocks.push_back(rbe_generateConstrainedInterpolation(
+                    nextIcid++, centroidNid, nodeIds));
+            } else {
+                // rbe2: SET_NODE (centroid + all surface nodes) + CNRB
+                std::vector<int> allNodes;
+                allNodes.push_back(centroidNid);
+                allNodes.insert(allNodes.end(), nodeIds.begin(), nodeIds.end());
+                int setId = nextSetId++;
+                std::string setTitle = "RBE2_PID" + std::to_string(pid) + "_spider";
+                insertBlocks.push_back(bc_generateSetNode(setId, allNodes, setTitle));
+                std::string cnrbTitle = "RBE2_PID" + std::to_string(pid) + "_spider";
+                insertBlocks.push_back(rbe_generateCnrb(nextCnrbPid++, setId, cnrbTitle));
+            }
+            rbeCount++;
+
+            std::cout << "[rbe] PID=" << pid << " mode=spider type=" << rc.type
+                      << " nodes=" << (int)nodeIds.size()
+                      << " centroid=(" << cx << ", " << cy << ", " << cz << ")\n";
+
+        } else {
+            // ── Face mode: per-face centroid → per-face constraint ──
+            int faceConstraints = 0;
+            for (int fi = 0; fi < (int)selectedFaceInfos.size(); ++fi) {
+                const auto& finfo = selectedFaceInfos[fi];
+                const auto& face = selectedFaces[fi];
+
+                // Create centroid node for this face
+                int centroidNid = ++maxNodeId_;
+                addedNodes_.push_back({centroidNid,
+                    finfo.centroid[0], finfo.centroid[1], finfo.centroid[2]});
+                nodesCreated++;
+
+                // Collect corner node IDs
+                std::vector<int> cornerNodes;
+                for (int k = 0; k < finfo.nVerts; ++k) {
+                    if (face[k] > 0) cornerNodes.push_back(face[k]);
+                }
+
+                if (rc.type == "rbe3") {
+                    insertBlocks.push_back(rbe_generateConstrainedInterpolation(
+                        nextIcid++, centroidNid, cornerNodes));
+                } else {
+                    // rbe2
+                    std::vector<int> allNodes;
+                    allNodes.push_back(centroidNid);
+                    allNodes.insert(allNodes.end(), cornerNodes.begin(), cornerNodes.end());
+                    int setId = nextSetId++;
+                    std::string setTitle = "RBE2_PID" + std::to_string(pid)
+                                         + "_face" + std::to_string(fi);
+                    insertBlocks.push_back(bc_generateSetNode(setId, allNodes, setTitle));
+                    insertBlocks.push_back(rbe_generateCnrb(nextCnrbPid++, setId, setTitle));
+                }
+                faceConstraints++;
+            }
+            rbeCount += faceConstraints;
+
+            std::cout << "[rbe] PID=" << pid << " mode=face type=" << rc.type
+                      << " faces=" << faceConstraints << "\n";
+        }
+    }
+
+    // Insert before *END
+    if (!insertBlocks.empty()) {
+        std::vector<std::string> newLines;
+        newLines.reserve(rawLines_.size() + insertBlocks.size() * 10);
+        for (const auto& line : rawLines_) {
+            std::string up = line;
+            for (auto& c : up) c = (char)std::toupper((unsigned char)c);
+            if (up.find("*END") == 0) {
+                for (const auto& block : insertBlocks) {
+                    std::istringstream bs(block);
+                    std::string bline;
+                    while (std::getline(bs, bline)) newLines.push_back(bline);
+                }
+            }
+            newLines.push_back(line);
+        }
+        rawLines_ = std::move(newLines);
+    }
+
+    infoMessages.push_back("[rbe] Created " + std::to_string(rbeCount)
+        + " constraint(s), " + std::to_string(nodesCreated) + " centroid node(s)");
     return true;
 }
 

@@ -1,0 +1,12 @@
+# PID=9(LAYER_1) 하단면 전체 고정
+# z- 방향 면의 노드를 수집하여 SPC 부여
+
+model: ../load/mesh.k
+output: mesh_fixed.k
+
+boundaries:
+  - part: 9
+    dof: all
+    direction: [0, 0, -1]
+    select: direction
+    angle: 45.0

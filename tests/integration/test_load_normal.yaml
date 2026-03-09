@@ -1,0 +1,9 @@
+model: test_load_model.k
+output: test_load_normal_result.k
+
+loads:
+  - part: "Block"
+    mode: normal_pressure
+    value: 2.5
+    select: direction
+    angle: 90.0

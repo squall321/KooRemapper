@@ -1,0 +1,13 @@
+# PID=9 하단면(z-)에 spider RBE2 생성
+# → 1개 centroid + SET_NODE + CNRB
+
+model: ../load/mesh.k
+output: mesh_rbe_spider_rbe2.k
+
+rbe:
+  - part: 9
+    select: direction
+    direction: [0, 0, -1]
+    angle: 45.0
+    type: rbe2
+    mode: spider

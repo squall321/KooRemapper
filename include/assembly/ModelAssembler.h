@@ -28,6 +28,7 @@ public:
                        warnedExtrapolation_(false), deflSign_(1.0) {}
 
     bool loadBaseModel(const std::string& filename);
+    bool loadRawOnly(const std::string& filename);
     bool applyReplace(const ReplaceOperation& op, double E, double nu,
                       const std::string& configDir);
     bool applySqueeze(const SqueezeOperation& op, double E, double nu);
@@ -45,6 +46,11 @@ public:
                       const std::string& configDir);
     bool applyOffset(const OffsetOperation& op, double E, double nu);
     bool applyMatswap(const MatswapOperation& op, const std::string& configDir);
+    bool applyMatdb(const MatdbOperation& op, const std::string& configDir);
+    bool applyLoad(const LoadOperation& op);
+    bool applyContact(const ContactOperation& op);
+    bool applyBoundary(const BoundaryOperation& op);
+    bool applyRbe(const RbeOperation& op);
     bool writeOutput(const std::string& outputPrefix);
 
     const std::vector<ElementResult>& getAccumulatedResults() const {

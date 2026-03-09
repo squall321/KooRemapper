@@ -1,0 +1,14 @@
+model: test_load_model.k
+output: test_load_result.k
+
+loads:
+  - part: 1
+    mode: pressure
+    value: 1.0
+    direction: [0, 0, 1]
+    select: direction
+    angle: 45.0
+    curve:
+      - [0.0, 0.0]
+      - [0.001, 1.0]
+      - [0.01, 1.0]

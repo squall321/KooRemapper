@@ -1,0 +1,17 @@
+model: mesh.k
+output: mesh_loaded.k
+
+loads:
+  # LAYER_2(PID=10)가 참여하는 tied contact를 자동 탐색
+  # → 찾은 세그먼트 중 z+ 방향 면에만 압력 부과
+  - part: 10
+    mode: pressure
+    value: 1.0
+    direction: [0, 0, 1]
+    select: tied
+    angle: 45.0
+    curve:
+      - [0.0, 0.0]
+      - [0.001, 1.0]
+      - [0.01, 1.0]
+]

@@ -21,6 +21,7 @@ Mesh KFileReader::readFile(const std::string& filename) {
     errorMessage_.clear();
     currentLine_ = 0;
     linesProcessed_ = 0;
+    i10_ = false;
 
     std::ifstream file(filename, std::ios::binary);
     if (!file.is_open()) {
@@ -74,7 +75,12 @@ bool KFileReader::parseFile(std::ifstream& file) {
             // Support both regular and _TITLE variants (e.g., *NODE, *PART_TITLE)
             // Skip metadata keywords that don't need processing
             if (currentKeyword_ == "KEYWORD" || currentKeyword_ == "TITLE") {
-                // These are file metadata, skip to next keyword
+                // Detect i10=y on *KEYWORD line (10-char integer fields)
+                std::string upLine = line;
+                for (auto& c : upLine) c = (char)std::toupper((unsigned char)c);
+                if (upLine.find("I10") != std::string::npos) {
+                    i10_ = true;
+                }
                 continue;
             }
             else if (currentKeyword_ == "NODE") {
@@ -344,25 +350,33 @@ bool KFileReader::parseElementSolidSection(std::ifstream& file) {
         // IMPORTANT: Try fixed-width format FIRST before tokenizing,
         // because packed node IDs (no spaces) will be incorrectly parsed as 2-line format
         try {
-            // Try fixed format single line first (8-character fields)
-            // Format: eid(8) + pid(8) + n1-n8(8*8=64) = 80 chars
-            if (line.length() >= 80) {
-                int eid = parseInt(line.substr(0, 8));
-                int pid = parseInt(line.substr(8, 8));
-                std::array<int, 8> nodeIds;
-                for (int i = 0; i < 8; ++i) {
-                    nodeIds[i] = parseInt(line.substr(16 + i * 8, 8));
-                }
+            // Try fixed format single line first
+            // i10=y: eid(10)+pid(10)+n1-n8(10*8) = 100 chars
+            // normal: eid(8)+pid(8)+n1-n8(8*8) = 80 chars
+            {
+                int fw = i10_ ? 10 : 8;
+                int minLen = fw * 10;  // eid + pid + 8 nodes
+                if (line.length() >= (size_t)minLen) {
+                    int eid = parseInt(line.substr(0, fw));
+                    int pid = parseInt(line.substr(fw, fw));
+                    std::array<int, 8> nodeIds;
+                    for (int i = 0; i < 8; ++i) {
+                        nodeIds[i] = parseInt(line.substr(fw * 2 + i * fw, fw));
+                    }
 
-                Element elem(eid, pid, nodeIds);
-                // Detect TET4: n5=n6=n7=n8=n4 (LS-DYNA convention)
-                if (nodeIds[4] == nodeIds[3] && nodeIds[5] == nodeIds[3] &&
-                    nodeIds[6] == nodeIds[3] && nodeIds[7] == nodeIds[3]) {
-                    elem.type = ElementType::TET4;
+                    if (eid > 0 && nodeIds[0] > 0) {
+                        Element elem(eid, pid, nodeIds);
+                        // Detect TET4: n5=n6=n7=n8=n4 (LS-DYNA convention)
+                        if (nodeIds[4] == nodeIds[3] && nodeIds[5] == nodeIds[3] &&
+                            nodeIds[6] == nodeIds[3] && nodeIds[7] == nodeIds[3]) {
+                            elem.type = ElementType::TET4;
+                        }
+                        mesh_.addElement(elem);
+                        elementCount++;
+                        continue;  // Successfully parsed, move to next line
+                    }
+                    // else: fall through to free format
                 }
-                mesh_.addElement(elem);
-                elementCount++;
-                continue;  // Successfully parsed, move to next line
             }
 
             // Now try free format (space/comma separated)
@@ -434,24 +448,31 @@ bool KFileReader::parseElementSolidSection(std::ifstream& file) {
                     continue;
                 }
 
-                // Try fixed format first (8-char fields, nodes may be packed without spaces)
-                // Node line: n1-n10 in 8-char fields = 80 chars, but we only need first 8 nodes
-                if (nodeLine.length() >= 64) {
-                    std::array<int, 8> nodeIds;
-                    for (int i = 0; i < 8; ++i) {
-                        nodeIds[i] = parseInt(nodeLine.substr(i * 8, 8));
-                    }
+                // Try fixed format first (nodes may be packed without spaces)
+                // i10=y: 10-char fields, otherwise 8-char fields
+                bool parsedNodeLine = false;
+                {
+                    int fw = i10_ ? 10 : 8;
+                    if (nodeLine.length() >= (size_t)(fw * 8)) {
+                        std::array<int, 8> nodeIds;
+                        for (int i = 0; i < 8; ++i) {
+                            nodeIds[i] = parseInt(nodeLine.substr(i * fw, fw));
+                        }
 
-                    Element elem(eid, pid, nodeIds);
-                    // Detect TET4: n5=n6=n7=n8=n4 (LS-DYNA convention)
-                    if (nodeIds[4] == nodeIds[3] && nodeIds[5] == nodeIds[3] &&
-                        nodeIds[6] == nodeIds[3] && nodeIds[7] == nodeIds[3]) {
-                        elem.type = ElementType::TET4;
+                        if (nodeIds[0] > 0) {
+                            Element elem(eid, pid, nodeIds);
+                            // Detect TET4: n5=n6=n7=n8=n4 (LS-DYNA convention)
+                            if (nodeIds[4] == nodeIds[3] && nodeIds[5] == nodeIds[3] &&
+                                nodeIds[6] == nodeIds[3] && nodeIds[7] == nodeIds[3]) {
+                                elem.type = ElementType::TET4;
+                            }
+                            mesh_.addElement(elem);
+                            elementCount++;
+                            parsedNodeLine = true;
+                        }
                     }
-                    mesh_.addElement(elem);
-                    elementCount++;
                 }
-                else {
+                if (!parsedNodeLine) {
                     // Try free format
                     auto nodeTokens = tokenize(nodeLine);
                     if (nodeTokens.size() >= 8) {

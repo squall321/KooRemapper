@@ -1,0 +1,1451 @@
+{
+  "_meta": {
+    "description": "LS-DYNA Material Database - Mechanical + Thermal",
+    "unit_system": "t / mm / s / K  →  MPa",
+    "unit_notes": {
+      "density_RHO": "t/mm³  (multiply g/cm³ × 1e-9)",
+      "youngs_modulus_E": "MPa",
+      "poissons_ratio_PR": "dimensionless",
+      "yield_stress_SIGY": "MPa",
+      "specific_heat_HC": "mJ/(t·K)  (multiply J/(kg·K) × 1e6)",
+      "thermal_conductivity_TC": "mW/(mm·K)  (numerically same as W/(m·K))",
+      "specific_heat_Cp_SI": "J/(kg·K)",
+      "thermal_conductivity_k_SI": "W/(m·K)"
+    },
+    "card_note": "card_structural contains the EXACT original LS-DYNA keyword text including $HWCOLOR/$HMNAME headers",
+    "created": "2026-03-05"
+  },
+  "materials": {
+    "1": {
+      "name": "TAPE_1620MPa",
+      "tag": "PET_HingeTape",
+      "description": "Hinge tape, PET-based stiff film",
+      "category": "polymer",
+      "mat_type": "MAT_ELASTIC",
+      "mat_type_id": 1,
+      "mechanical": {
+        "RHO": 1.1e-09,
+        "E": 1620.0,
+        "PR": 0.3902,
+        "DA": 0.0,
+        "DB": 0.0,
+        "K": 0.0,
+        "rho_g_cm3": 1.1,
+        "E_GPa": 1.62
+      },
+      "thermal": {
+        "Cp_SI": 1200,
+        "k_SI": 0.2,
+        "HC": 1200000000.0,
+        "TC": 0.2,
+        "ALPHA": 5.9e-05,
+        "ALPHA_ppm_K": 59.0
+      },
+      "card_thermal": "*MAT_THERMAL_ISOTROPIC_TITLE\nTAPE_1620MPa\n$     TMID       TRO     TGRLC    TGMULT\n         1       0.0       0.0       0.0\n$       HC        TC\n 1.200E+09      0.20",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n         1         05.9000E-05",
+      "cards_structural": {
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\n$HWCOLOR MATERIAL         1      11\nTAPE_1620MPa::CAE_Hinge-Edge_JG2_x_t_Fem::[1]\n$      MID       RHO         E        PR        DA        DB         K\n         11.1000E-09    1620.0    0.3902       0.0       0.0       0.0",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nTAPE_1620MPa\n$      MID       RHO         E        PR         N    COUPLE         M     ALIAS\n         11.1000E-09    1620.0    0.3902       0.0       0.0       0.0          \n$      CMO      CON1      CON2\n       1.0         7         7\n$       A1        A2        A3        V1        V2        V3\n       0.0       0.0       0.0       0.0       0.0       0.0"
+      }
+    },
+    "2": {
+      "name": "Mobile.STS304",
+      "tag": "STS304_Stainless",
+      "description": "STS304 stainless steel",
+      "category": "metal",
+      "mat_type": "MAT_ELASTIC",
+      "mat_type_id": 1,
+      "mechanical": {
+        "RHO": 7.9e-09,
+        "E": 190000.0,
+        "PR": 0.3,
+        "DA": 0.0,
+        "DB": 0.0,
+        "K": 0.0,
+        "rho_g_cm3": 7.9,
+        "E_GPa": 190.0
+      },
+      "thermal": {
+        "Cp_SI": 500,
+        "k_SI": 16.2,
+        "HC": 500000000.0,
+        "TC": 16.2,
+        "ALPHA": 1.73e-05,
+        "ALPHA_ppm_K": 17.3
+      },
+      "card_thermal": "*MAT_THERMAL_ISOTROPIC_TITLE\nSTS304\n$     TMID       TRO     TGRLC    TGMULT\n         2       0.0       0.0       0.0\n$       HC        TC\n 5.000E+08      16.2",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n         2         01.7300E-05",
+      "cards_structural": {
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\n$HWCOLOR MATERIAL         2      43\nMobile.STS304::CAE_Hinge-Edge_JG2_x_t_Fem::[2]\n$      MID       RHO         E        PR        DA        DB         K\n         27.9000E-09  190000.0       0.3       0.0       0.0       0.0",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nMobile.STS304\n$      MID       RHO         E        PR         N    COUPLE         M     ALIAS\n         27.9000E-09  190000.0    0.3000       0.0       0.0       0.0          \n$      CMO      CON1      CON2\n       1.0         7         7\n$       A1        A2        A3        V1        V2        V3\n       0.0       0.0       0.0       0.0       0.0       0.0",
+        "MAT_PIECEWISE_LINEAR_PLASTICITY": "*MAT_PIECEWISE_LINEAR_PLASTICITY_TITLE\nMobile.STS304\n$      MID       RHO         E        PR      SIGY      ETAN      FAIL      TDEL\n         27.9000E-09  190000.0    0.3000     215.0       0.0       0.0       0.0\n$        C         P      LCSS      LCSR        VP       LCF\n       0.0       0.0         0         0       0.0          "
+      }
+    },
+    "3": {
+      "name": "Mobile.Rigid",
+      "tag": "S45C_CarbonSteel",
+      "description": "Carbon steel (unused in current model)",
+      "category": "metal",
+      "mat_type": "MAT_ELASTIC",
+      "mat_type_id": 1,
+      "mechanical": {
+        "RHO": 7.829e-09,
+        "E": 206900.0,
+        "PR": 0.288,
+        "DA": 0.0,
+        "DB": 0.0,
+        "K": 0.0,
+        "rho_g_cm3": 7.83,
+        "E_GPa": 206.9
+      },
+      "thermal": {
+        "Cp_SI": 480,
+        "k_SI": 50.0,
+        "HC": 480000000.0,
+        "TC": 50.0,
+        "ALPHA": 1.17e-05,
+        "ALPHA_ppm_K": 11.7
+      },
+      "card_thermal": "*MAT_THERMAL_ISOTROPIC_TITLE\nMobile.Rigid\n$     TMID       TRO     TGRLC    TGMULT\n         3       0.0       0.0       0.0\n$       HC        TC\n 4.800E+08      50.0",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n         3         01.1700E-05",
+      "cards_structural": {
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\n$HWCOLOR MATERIAL         3      59\nMobile.Rigid::CAE_Hinge-Edge_JG2_x_t_Fem::[3]\n$      MID       RHO         E        PR        DA        DB         K\n         37.8290E-09  206900.0     0.288       0.0       0.0       0.0",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nMobile.Rigid\n$      MID       RHO         E        PR         N    COUPLE         M     ALIAS\n         37.8290E-09  206900.0    0.2880       0.0       0.0       0.0          \n$      CMO      CON1      CON2\n       1.0         7         7\n$       A1        A2        A3        V1        V2        V3\n       0.0       0.0       0.0       0.0       0.0       0.0",
+        "MAT_PIECEWISE_LINEAR_PLASTICITY": "*MAT_PIECEWISE_LINEAR_PLASTICITY_TITLE\nMobile.Rigid\n$      MID       RHO         E        PR      SIGY      ETAN      FAIL      TDEL\n         37.8290E-09  206900.0    0.2880     490.0       0.0       0.0       0.0\n$        C         P      LCSS      LCSR        VP       LCF\n       0.0       0.0         0         0       0.0          "
+      }
+    },
+    "4": {
+      "name": "AL7003H",
+      "tag": "AL7003H_Aluminum",
+      "description": "Aluminum 7003-H alloy",
+      "category": "metal",
+      "mat_type": "MAT_ELASTIC",
+      "mat_type_id": 1,
+      "mechanical": {
+        "RHO": 2.7e-09,
+        "E": 63100.0,
+        "PR": 0.33,
+        "DA": 0.0,
+        "DB": 0.0,
+        "K": 0.0,
+        "rho_g_cm3": 2.7,
+        "E_GPa": 63.1
+      },
+      "thermal": {
+        "Cp_SI": 890,
+        "k_SI": 155.0,
+        "HC": 890000000.0,
+        "TC": 155.0,
+        "ALPHA": 2.36e-05,
+        "ALPHA_ppm_K": 23.6
+      },
+      "card_thermal": "*MAT_THERMAL_ISOTROPIC_TITLE\nAL7003H\n$     TMID       TRO     TGRLC    TGMULT\n         4       0.0       0.0       0.0\n$       HC        TC\n 8.900E+08     155.0",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n         4         02.3600E-05",
+      "cards_structural": {
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\n$HWCOLOR MATERIAL         4      59\nAL7003H::CAE_Hinge-Edge_JG2_x_t_Fem::[4]\n$      MID       RHO         E        PR        DA        DB         K\n         42.7000E-09   63100.0      0.33       0.0       0.0       0.0",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nAL7003H\n$      MID       RHO         E        PR         N    COUPLE         M     ALIAS\n         42.7000E-09   63100.0    0.3300       0.0       0.0       0.0          \n$      CMO      CON1      CON2\n       1.0         7         7\n$       A1        A2        A3        V1        V2        V3\n       0.0       0.0       0.0       0.0       0.0       0.0",
+        "MAT_PIECEWISE_LINEAR_PLASTICITY": "*MAT_PIECEWISE_LINEAR_PLASTICITY_TITLE\nAL7003H\n$      MID       RHO         E        PR      SIGY      ETAN      FAIL      TDEL\n         42.7000E-09   63100.0    0.3300     245.0       0.0       0.0       0.0\n$        C         P      LCSS      LCSR        VP       LCF\n       0.0       0.0         0         0       0.0          "
+      }
+    },
+    "5": {
+      "name": "PC_QF1035",
+      "tag": "PC_Polycarbonate",
+      "description": "Polycarbonate",
+      "category": "polymer",
+      "mat_type": "MAT_ELASTIC",
+      "mat_type_id": 1,
+      "mechanical": {
+        "RHO": 1.18e-09,
+        "E": 2344.0,
+        "PR": 0.41,
+        "DA": 0.0,
+        "DB": 0.0,
+        "K": 0.0,
+        "rho_g_cm3": 1.18,
+        "E_GPa": 2.344
+      },
+      "thermal": {
+        "Cp_SI": 1200,
+        "k_SI": 0.2,
+        "HC": 1200000000.0,
+        "TC": 0.2,
+        "ALPHA": 6.5e-05,
+        "ALPHA_ppm_K": 65.0
+      },
+      "card_thermal": "*MAT_THERMAL_ISOTROPIC_TITLE\nPC_QF1035\n$     TMID       TRO     TGRLC    TGMULT\n         5       0.0       0.0       0.0\n$       HC        TC\n 1.200E+09      0.20",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n         5         06.5000E-05",
+      "cards_structural": {
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\n$HWCOLOR MATERIAL         5      11\nPC_QF1035::CAE_Hinge-Edge_JG2_x_t_Fem::[5]\n$      MID       RHO         E        PR        DA        DB         K\n         51.1800E-09    2344.0      0.41       0.0       0.0       0.0",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nPC_QF1035\n$      MID       RHO         E        PR         N    COUPLE         M     ALIAS\n         51.1800E-09    2344.0    0.4100       0.0       0.0       0.0          \n$      CMO      CON1      CON2\n       1.0         7         7\n$       A1        A2        A3        V1        V2        V3\n       0.0       0.0       0.0       0.0       0.0       0.0"
+      }
+    },
+    "6": {
+      "name": "Ground",
+      "tag": "Steel_Ground_MassScaled",
+      "description": "Carbon steel, mass-scaled ×1000 (rigid ground)",
+      "category": "metal",
+      "mat_type": "MAT_ELASTIC",
+      "mat_type_id": 1,
+      "flags": [
+        "mass_scaled"
+      ],
+      "mechanical": {
+        "RHO": 7.83e-06,
+        "E": 207000.0,
+        "PR": 0.288,
+        "DA": 0.0,
+        "DB": 0.0,
+        "K": 0.0,
+        "rho_g_cm3": 7830.0,
+        "rho_g_cm3_real": 7.83,
+        "E_GPa": 207.0
+      },
+      "thermal": {
+        "Cp_SI": 480,
+        "k_SI": 50.0,
+        "HC": 480000000.0,
+        "TC": 50.0,
+        "ALPHA": 1.17e-05,
+        "ALPHA_ppm_K": 11.7
+      },
+      "card_thermal": "*MAT_THERMAL_ISOTROPIC_TITLE\nGround\n$     TMID       TRO     TGRLC    TGMULT\n         6       0.0       0.0       0.0\n$       HC        TC\n 4.800E+08      50.0",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n         6         01.1700E-05",
+      "cards_structural": {
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\n$HWCOLOR MATERIAL         6      10\nGround::CAE_Hinge-Edge_JG2_x_t_Fem::[6]\n$      MID       RHO         E        PR        DA        DB         K\n         67.8300E-06  207000.0     0.288       0.0       0.0       0.0",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nGround\n$      MID       RHO         E        PR         N    COUPLE         M     ALIAS\n         67.8300E-06  207000.0    0.2880       0.0       0.0       0.0          \n$      CMO      CON1      CON2\n       1.0         7         7\n$       A1        A2        A3        V1        V2        V3\n       0.0       0.0       0.0       0.0       0.0       0.0",
+        "MAT_PIECEWISE_LINEAR_PLASTICITY": "*MAT_PIECEWISE_LINEAR_PLASTICITY_TITLE\nGround\n$      MID       RHO         E        PR      SIGY      ETAN      FAIL      TDEL\n         67.8300E-06  207000.0    0.2880     490.0       0.0       0.0       0.0\n$        C         P      LCSS      LCSR        VP       LCF\n       0.0       0.0         0         0       0.0          "
+      }
+    },
+    "7": {
+      "name": "B_PI",
+      "tag": "PI_Kapton",
+      "description": "Polyimide (Kapton-type)",
+      "category": "polymer",
+      "mat_type": "MAT_ELASTIC",
+      "mat_type_id": 1,
+      "mechanical": {
+        "RHO": 1.1e-09,
+        "E": 2412.72,
+        "PR": 0.37,
+        "DA": 0.0,
+        "DB": 0.0,
+        "K": 0.0,
+        "rho_g_cm3": 1.1,
+        "E_GPa": 2.413
+      },
+      "thermal": {
+        "Cp_SI": 1090,
+        "k_SI": 0.12,
+        "HC": 1090000000.0,
+        "TC": 0.12,
+        "ALPHA": 2e-05,
+        "ALPHA_ppm_K": 20.0
+      },
+      "card_thermal": "*MAT_THERMAL_ISOTROPIC_TITLE\nB_PI\n$     TMID       TRO     TGRLC    TGMULT\n         7       0.0       0.0       0.0\n$       HC        TC\n 1.090E+09      0.12",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n         7         02.0000E-05",
+      "cards_structural": {
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\n$HWCOLOR MATERIAL         7      31\nB_PI\n$      MID       RHO         E        PR        DA        DB         K\n         71.1000E-09   2412.72      0.37       0.0       0.0       0.0",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nB_PI\n$      MID       RHO         E        PR         N    COUPLE         M     ALIAS\n         71.1000E-09 2412.7200    0.3700       0.0       0.0       0.0          \n$      CMO      CON1      CON2\n       1.0         7         7\n$       A1        A2        A3        V1        V2        V3\n       0.0       0.0       0.0       0.0       0.0       0.0"
+      }
+    },
+    "8": {
+      "name": "POL",
+      "tag": "Polymer_LowE",
+      "description": "Generic polymer",
+      "category": "polymer",
+      "mat_type": "MAT_ELASTIC",
+      "mat_type_id": 1,
+      "mechanical": {
+        "RHO": 1.1e-09,
+        "E": 1490.0,
+        "PR": 0.37,
+        "DA": 0.0,
+        "DB": 0.0,
+        "K": 0.0,
+        "rho_g_cm3": 1.1,
+        "E_GPa": 1.49
+      },
+      "thermal": {
+        "Cp_SI": 1200,
+        "k_SI": 0.2,
+        "HC": 1200000000.0,
+        "TC": 0.2,
+        "ALPHA": 7e-05,
+        "ALPHA_ppm_K": 70.0
+      },
+      "card_thermal": "*MAT_THERMAL_ISOTROPIC_TITLE\nPOL\n$     TMID       TRO     TGRLC    TGMULT\n         8       0.0       0.0       0.0\n$       HC        TC\n 1.200E+09      0.20",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n         8         07.0000E-05",
+      "cards_structural": {
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\n$HWCOLOR MATERIAL         8      37\nPOL\n$      MID       RHO         E        PR        DA        DB         K\n         81.1000E-09    1490.0      0.37       0.0       0.0       0.0",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nPOL\n$      MID       RHO         E        PR         N    COUPLE         M     ALIAS\n         81.1000E-09    1490.0    0.3700       0.0       0.0       0.0          \n$      CMO      CON1      CON2\n       1.0         7         7\n$       A1        A2        A3        V1        V2        V3\n       0.0       0.0       0.0       0.0       0.0       0.0"
+      }
+    },
+    "9": {
+      "name": "Panel",
+      "tag": "OLED_Panel",
+      "description": "Panel material (polymer composite)",
+      "category": "polymer",
+      "mat_type": "MAT_ELASTIC",
+      "mat_type_id": 1,
+      "mechanical": {
+        "RHO": 2.23e-09,
+        "E": 2500.0,
+        "PR": 0.3,
+        "DA": 0.0,
+        "DB": 0.0,
+        "K": 0.0,
+        "rho_g_cm3": 2.23,
+        "E_GPa": 2.5
+      },
+      "thermal": {
+        "Cp_SI": 1200,
+        "k_SI": 0.2,
+        "HC": 1200000000.0,
+        "TC": 0.2,
+        "ALPHA": 5e-05,
+        "ALPHA_ppm_K": 50.0
+      },
+      "card_thermal": "*MAT_THERMAL_ISOTROPIC_TITLE\nPanel\n$     TMID       TRO     TGRLC    TGMULT\n         9       0.0       0.0       0.0\n$       HC        TC\n 1.200E+09      0.20",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n         9         05.0000E-05",
+      "cards_structural": {
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\n$HWCOLOR MATERIAL         9      13\nPanel\n$      MID       RHO         E        PR        DA        DB         K\n         92.2300E-09    2500.0       0.3       0.0       0.0       0.0",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nPanel\n$      MID       RHO         E        PR         N    COUPLE         M     ALIAS\n         92.2300E-09    2500.0    0.3000       0.0       0.0       0.0          \n$      CMO      CON1      CON2\n       1.0         7         7\n$       A1        A2        A3        V1        V2        V3\n       0.0       0.0       0.0       0.0       0.0       0.0"
+      }
+    },
+    "10": {
+      "name": "TPU",
+      "tag": "TPU_Elastomer",
+      "description": "Thermoplastic polyurethane elastomer",
+      "category": "polymer",
+      "mat_type": "MAT_ELASTIC",
+      "mat_type_id": 1,
+      "mechanical": {
+        "RHO": 1.1e-09,
+        "E": 50.0,
+        "PR": 0.37,
+        "DA": 0.0,
+        "DB": 0.0,
+        "K": 0.0,
+        "rho_g_cm3": 1.1,
+        "E_GPa": 0.05
+      },
+      "thermal": {
+        "Cp_SI": 1500,
+        "k_SI": 0.15,
+        "HC": 1500000000.0,
+        "TC": 0.15,
+        "ALPHA": 0.00015,
+        "ALPHA_ppm_K": 150.0
+      },
+      "card_thermal": "*MAT_THERMAL_ISOTROPIC_TITLE\nTPU\n$     TMID       TRO     TGRLC    TGMULT\n        10       0.0       0.0       0.0\n$       HC        TC\n 1.500E+09      0.15",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n        10         01.5000E-04",
+      "cards_structural": {
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\n$HWCOLOR MATERIAL        10      26\nTPU\n$      MID       RHO         E        PR        DA        DB         K\n        101.1000E-09      50.0      0.37       0.0       0.0       0.0",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nTPU\n$      MID       RHO         E        PR         N    COUPLE         M     ALIAS\n        101.1000E-09      50.0    0.3700       0.0       0.0       0.0          \n$      CMO      CON1      CON2\n       1.0         7         7\n$       A1        A2        A3        V1        V2        V3\n       0.0       0.0       0.0       0.0       0.0       0.0"
+      }
+    },
+    "11": {
+      "name": "CU",
+      "tag": "Cu_FPCB",
+      "description": "Copper",
+      "category": "metal",
+      "mat_type": "MAT_ELASTIC",
+      "mat_type_id": 1,
+      "mechanical": {
+        "RHO": 8.9e-09,
+        "E": 105300.0,
+        "PR": 0.31,
+        "DA": 0.0,
+        "DB": 0.0,
+        "K": 0.0,
+        "rho_g_cm3": 8.9,
+        "E_GPa": 105.3
+      },
+      "thermal": {
+        "Cp_SI": 385,
+        "k_SI": 401.0,
+        "HC": 385000000.0,
+        "TC": 401.0,
+        "ALPHA": 1.65e-05,
+        "ALPHA_ppm_K": 16.5
+      },
+      "card_thermal": "*MAT_THERMAL_ISOTROPIC_TITLE\nCU\n$     TMID       TRO     TGRLC    TGMULT\n        11       0.0       0.0       0.0\n$       HC        TC\n 3.850E+08     401.0",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n        11         01.6500E-05",
+      "cards_structural": {
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\n$HWCOLOR MATERIAL        11      59\nCU\n$      MID       RHO         E        PR        DA        DB         K\n        118.9000E-09  105300.0      0.31       0.0       0.0       0.0",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nCU\n$      MID       RHO         E        PR         N    COUPLE         M     ALIAS\n        118.9000E-09  105300.0    0.3100       0.0       0.0       0.0          \n$      CMO      CON1      CON2\n       1.0         7         7\n$       A1        A2        A3        V1        V2        V3\n       0.0       0.0       0.0       0.0       0.0       0.0",
+        "MAT_PIECEWISE_LINEAR_PLASTICITY": "*MAT_PIECEWISE_LINEAR_PLASTICITY_TITLE\nCU\n$      MID       RHO         E        PR      SIGY      ETAN      FAIL      TDEL\n        118.9000E-09  105300.0    0.3100     260.0       0.0       0.0       0.0\n$        C         P      LCSS      LCSR        VP       LCF\n       0.0       0.0         0         0       0.0          "
+      }
+    },
+    "12": {
+      "name": "PSA",
+      "tag": "PSA_Acrylic_Elastic",
+      "description": "Pressure-sensitive adhesive (acrylic)",
+      "category": "polymer",
+      "mat_type": "MAT_ELASTIC",
+      "mat_type_id": 1,
+      "mechanical": {
+        "RHO": 2e-09,
+        "E": 30.0,
+        "PR": 0.35,
+        "DA": 0.0,
+        "DB": 0.0,
+        "K": 0.0,
+        "rho_g_cm3": 2.0,
+        "E_GPa": 0.03
+      },
+      "thermal": {
+        "Cp_SI": 2000,
+        "k_SI": 0.2,
+        "HC": 2000000000.0,
+        "TC": 0.2,
+        "ALPHA": 0.0002,
+        "ALPHA_ppm_K": 200.0
+      },
+      "card_thermal": "*MAT_THERMAL_ISOTROPIC_TITLE\nPSA\n$     TMID       TRO     TGRLC    TGMULT\n        12       0.0       0.0       0.0\n$       HC        TC\n 2.000E+09      0.20",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n        12         02.0000E-04",
+      "cards_structural": {
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\n$HWCOLOR MATERIAL        12      10\nPSA\n$      MID       RHO         E        PR        DA        DB         K\n        122.0000E-09      30.0      0.35       0.0       0.0       0.0",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nPSA\n$      MID       RHO         E        PR         N    COUPLE         M     ALIAS\n        122.0000E-09      30.0    0.3500       0.0       0.0       0.0          \n$      CMO      CON1      CON2\n       1.0         7         7\n$       A1        A2        A3        V1        V2        V3\n       0.0       0.0       0.0       0.0       0.0       0.0"
+      }
+    },
+    "13": {
+      "name": "SUS",
+      "tag": "SUS_Spring_159GPa",
+      "description": "Stainless steel (SUS304-class)",
+      "category": "metal",
+      "mat_type": "MAT_ELASTIC",
+      "mat_type_id": 1,
+      "mechanical": {
+        "RHO": 7.93e-09,
+        "E": 159200.0,
+        "PR": 0.3,
+        "DA": 0.0,
+        "DB": 0.0,
+        "K": 0.0,
+        "rho_g_cm3": 7.93,
+        "E_GPa": 159.2
+      },
+      "thermal": {
+        "Cp_SI": 500,
+        "k_SI": 16.2,
+        "HC": 500000000.0,
+        "TC": 16.2,
+        "ALPHA": 1.73e-05,
+        "ALPHA_ppm_K": 17.3
+      },
+      "card_thermal": "*MAT_THERMAL_ISOTROPIC_TITLE\nSUS\n$     TMID       TRO     TGRLC    TGMULT\n        13       0.0       0.0       0.0\n$       HC        TC\n 5.000E+08      16.2",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n        13         01.7300E-05",
+      "cards_structural": {
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\n$HWCOLOR MATERIAL        13      54\nSUS\n$      MID       RHO         E        PR        DA        DB         K\n        137.9300E-09  159200.0       0.3       0.0       0.0       0.0",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nSUS\n$      MID       RHO         E        PR         N    COUPLE         M     ALIAS\n        137.9300E-09  159200.0    0.3000       0.0       0.0       0.0          \n$      CMO      CON1      CON2\n       1.0         7         7\n$       A1        A2        A3        V1        V2        V3\n       0.0       0.0       0.0       0.0       0.0       0.0",
+        "MAT_PIECEWISE_LINEAR_PLASTICITY": "*MAT_PIECEWISE_LINEAR_PLASTICITY_TITLE\nSUS\n$      MID       RHO         E        PR      SIGY      ETAN      FAIL      TDEL\n        137.9300E-09  159200.0    0.3000     700.0       0.0       0.0       0.0\n$        C         P      LCSS      LCSR        VP       LCF\n       0.0       0.0         0         0       0.0          "
+      }
+    },
+    "14": {
+      "name": "DL",
+      "tag": "DisplayLaminate_OCA",
+      "description": "Display laminate",
+      "category": "polymer",
+      "mat_type": "MAT_ELASTIC",
+      "mat_type_id": 1,
+      "mechanical": {
+        "RHO": 2e-09,
+        "E": 4111.773,
+        "PR": 0.33,
+        "DA": 0.0,
+        "DB": 0.0,
+        "K": 0.0,
+        "rho_g_cm3": 2.0,
+        "E_GPa": 4.112
+      },
+      "thermal": {
+        "Cp_SI": 1200,
+        "k_SI": 0.2,
+        "HC": 1200000000.0,
+        "TC": 0.2,
+        "ALPHA": 8e-05,
+        "ALPHA_ppm_K": 80.0
+      },
+      "card_thermal": "*MAT_THERMAL_ISOTROPIC_TITLE\nDL\n$     TMID       TRO     TGRLC    TGMULT\n        14       0.0       0.0       0.0\n$       HC        TC\n 1.200E+09      0.20",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n        14         08.0000E-05",
+      "cards_structural": {
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\n$HWCOLOR MATERIAL        14      12\nDL\n$      MID       RHO         E        PR        DA        DB         K\n        142.0000E-09  4111.773      0.33       0.0       0.0       0.0",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nDL\n$      MID       RHO         E        PR         N    COUPLE         M     ALIAS\n        142.0000E-09 4111.7730    0.3300       0.0       0.0       0.0          \n$      CMO      CON1      CON2\n       1.0         7         7\n$       A1        A2        A3        V1        V2        V3\n       0.0       0.0       0.0       0.0       0.0       0.0"
+      }
+    },
+    "15": {
+      "name": "Glass",
+      "tag": "UTG_SodaLime",
+      "description": "Ultra-thin glass (UTG), soda-lime",
+      "category": "glass",
+      "mat_type": "MAT_ELASTIC",
+      "mat_type_id": 1,
+      "mechanical": {
+        "RHO": 2e-09,
+        "E": 79000.0,
+        "PR": 0.35,
+        "DA": 0.0,
+        "DB": 0.0,
+        "K": 0.0,
+        "rho_g_cm3": 2.0,
+        "E_GPa": 79.0
+      },
+      "thermal": {
+        "Cp_SI": 840,
+        "k_SI": 1.0,
+        "HC": 840000000.0,
+        "TC": 1.0,
+        "ALPHA": 9e-06,
+        "ALPHA_ppm_K": 9.0
+      },
+      "card_thermal": "*MAT_THERMAL_ISOTROPIC_TITLE\nGlass\n$     TMID       TRO     TGRLC    TGMULT\n        15       0.0       0.0       0.0\n$       HC        TC\n 8.400E+08       1.0",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n        15         09.0000E-06",
+      "cards_structural": {
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\n$HWCOLOR MATERIAL        15       9\nGlass\n$      MID       RHO         E        PR        DA        DB         K\n        152.0000E-09   79000.0      0.35       0.0       0.0       0.0",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nGlass\n$      MID       RHO         E        PR         N    COUPLE         M     ALIAS\n        152.0000E-09   79000.0    0.3500       0.0       0.0       0.0          \n$      CMO      CON1      CON2\n       1.0         7         7\n$       A1        A2        A3        V1        V2        V3\n       0.0       0.0       0.0       0.0       0.0       0.0"
+      }
+    },
+    "16": {
+      "name": "PL",
+      "tag": "Polarizer_PVA",
+      "description": "Polarizer (PVA-based)",
+      "category": "polymer",
+      "mat_type": "MAT_ELASTIC",
+      "mat_type_id": 1,
+      "mechanical": {
+        "RHO": 2e-09,
+        "E": 4160.472,
+        "PR": 0.35,
+        "DA": 0.0,
+        "DB": 0.0,
+        "K": 0.0,
+        "rho_g_cm3": 2.0,
+        "E_GPa": 4.16
+      },
+      "thermal": {
+        "Cp_SI": 1400,
+        "k_SI": 0.2,
+        "HC": 1400000000.0,
+        "TC": 0.2,
+        "ALPHA": 6e-05,
+        "ALPHA_ppm_K": 60.0
+      },
+      "card_thermal": "*MAT_THERMAL_ISOTROPIC_TITLE\nPL\n$     TMID       TRO     TGRLC    TGMULT\n        16       0.0       0.0       0.0\n$       HC        TC\n 1.400E+09      0.20",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n        16         06.0000E-05",
+      "cards_structural": {
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\n$HWCOLOR MATERIAL        16      60\nPL\n$      MID       RHO         E        PR        DA        DB         K\n        162.0000E-09  4160.472      0.35       0.0       0.0       0.0",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nPL\n$      MID       RHO         E        PR         N    COUPLE         M     ALIAS\n        162.0000E-09 4160.4720    0.3500       0.0       0.0       0.0          \n$      CMO      CON1      CON2\n       1.0         7         7\n$       A1        A2        A3        V1        V2        V3\n       0.0       0.0       0.0       0.0       0.0       0.0"
+      }
+    },
+    "17": {
+      "name": "P-Film",
+      "tag": "ProtectiveFilm_PET",
+      "description": "Protective film",
+      "category": "polymer",
+      "mat_type": "MAT_ELASTIC",
+      "mat_type_id": 1,
+      "mechanical": {
+        "RHO": 2e-09,
+        "E": 3757.0,
+        "PR": 0.35,
+        "DA": 0.0,
+        "DB": 0.0,
+        "K": 0.0,
+        "rho_g_cm3": 2.0,
+        "E_GPa": 3.757
+      },
+      "thermal": {
+        "Cp_SI": 1200,
+        "k_SI": 0.15,
+        "HC": 1200000000.0,
+        "TC": 0.15,
+        "ALPHA": 5.9e-05,
+        "ALPHA_ppm_K": 59.0
+      },
+      "card_thermal": "*MAT_THERMAL_ISOTROPIC_TITLE\nP-Film\n$     TMID       TRO     TGRLC    TGMULT\n        17       0.0       0.0       0.0\n$       HC        TC\n 1.200E+09      0.15",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n        17         05.9000E-05",
+      "cards_structural": {
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\n$HWCOLOR MATERIAL        17      11\nP-Film\n$      MID       RHO         E        PR        DA        DB         K\n        172.0000E-09    3757.0      0.35       0.0       0.0       0.0",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nP-Film\n$      MID       RHO         E        PR         N    COUPLE         M     ALIAS\n        172.0000E-09    3757.0    0.3500       0.0       0.0       0.0          \n$      CMO      CON1      CON2\n       1.0         7         7\n$       A1        A2        A3        V1        V2        V3\n       0.0       0.0       0.0       0.0       0.0       0.0"
+      }
+    },
+    "18": {
+      "name": "AL",
+      "tag": "AL_Frame",
+      "description": "Aluminum alloy",
+      "category": "metal",
+      "mat_type": "MAT_ELASTIC",
+      "mat_type_id": 1,
+      "mechanical": {
+        "RHO": 5.43e-09,
+        "E": 63100.0,
+        "PR": 0.33,
+        "DA": 0.0,
+        "DB": 0.0,
+        "K": 0.0,
+        "rho_g_cm3": 5.43,
+        "E_GPa": 63.1
+      },
+      "thermal": {
+        "Cp_SI": 900,
+        "k_SI": 155.0,
+        "HC": 900000000.0,
+        "TC": 155.0,
+        "ALPHA": 2.3e-05,
+        "ALPHA_ppm_K": 23.0
+      },
+      "card_thermal": "*MAT_THERMAL_ISOTROPIC_TITLE\nAL\n$     TMID       TRO     TGRLC    TGMULT\n        18       0.0       0.0       0.0\n$       HC        TC\n 9.000E+08     155.0",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n        18         02.3000E-05",
+      "cards_structural": {
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\n$HWCOLOR MATERIAL        18      43\nAL\n$      MID       RHO         E        PR        DA        DB         K\n        185.4300E-09   63100.0      0.33       0.0       0.0       0.0",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nAL\n$      MID       RHO         E        PR         N    COUPLE         M     ALIAS\n        185.4300E-09   63100.0    0.3300       0.0       0.0       0.0          \n$      CMO      CON1      CON2\n       1.0         7         7\n$       A1        A2        A3        V1        V2        V3\n       0.0       0.0       0.0       0.0       0.0       0.0",
+        "MAT_PIECEWISE_LINEAR_PLASTICITY": "*MAT_PIECEWISE_LINEAR_PLASTICITY_TITLE\nAL\n$      MID       RHO         E        PR      SIGY      ETAN      FAIL      TDEL\n        185.4300E-09   63100.0    0.3300     200.0       0.0       0.0       0.0\n$        C         P      LCSS      LCSR        VP       LCF\n       0.0       0.0         0         0       0.0          "
+      }
+    },
+    "19": {
+      "name": "Ti",
+      "tag": "Ti_Lattice",
+      "description": "Commercially pure titanium",
+      "category": "metal",
+      "mat_type": "MAT_ELASTIC",
+      "mat_type_id": 1,
+      "mechanical": {
+        "RHO": 4.5e-09,
+        "E": 105000.0,
+        "PR": 0.3,
+        "DA": 0.0,
+        "DB": 0.0,
+        "K": 0.0,
+        "rho_g_cm3": 4.5,
+        "E_GPa": 105.0
+      },
+      "thermal": {
+        "Cp_SI": 520,
+        "k_SI": 21.9,
+        "HC": 520000000.0,
+        "TC": 21.9,
+        "ALPHA": 8.6e-06,
+        "ALPHA_ppm_K": 8.600000000000001
+      },
+      "card_thermal": "*MAT_THERMAL_ISOTROPIC_TITLE\nTi\n$     TMID       TRO     TGRLC    TGMULT\n        19       0.0       0.0       0.0\n$       HC        TC\n 5.200E+08      21.9",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n        19         08.6000E-06",
+      "cards_structural": {
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\n$HWCOLOR MATERIAL        19      59\nTi\n$      MID       RHO         E        PR        DA        DB         K\n        194.5000E-09  105000.0       0.3       0.0       0.0       0.0",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nTi\n$      MID       RHO         E        PR         N    COUPLE         M     ALIAS\n        194.5000E-09  105000.0    0.3000       0.0       0.0       0.0          \n$      CMO      CON1      CON2\n       1.0         7         7\n$       A1        A2        A3        V1        V2        V3\n       0.0       0.0       0.0       0.0       0.0       0.0",
+        "MAT_PIECEWISE_LINEAR_PLASTICITY": "*MAT_PIECEWISE_LINEAR_PLASTICITY_TITLE\nTi\n$      MID       RHO         E        PR      SIGY      ETAN      FAIL      TDEL\n        194.5000E-09  105000.0    0.3000     240.0       0.0       0.0       0.0\n$        C         P      LCSS      LCSR        VP       LCF\n       0.0       0.0         0         0       0.0          "
+      }
+    },
+    "20": {
+      "name": "Tape",
+      "tag": "PET_AdhesiveTape",
+      "description": "General adhesive tape (PET)",
+      "category": "polymer",
+      "mat_type": "MAT_ELASTIC",
+      "mat_type_id": 1,
+      "mechanical": {
+        "RHO": 2e-09,
+        "E": 1650.0,
+        "PR": 0.35,
+        "DA": 0.0,
+        "DB": 0.0,
+        "K": 0.0,
+        "rho_g_cm3": 2.0,
+        "E_GPa": 1.65
+      },
+      "thermal": {
+        "Cp_SI": 1200,
+        "k_SI": 0.2,
+        "HC": 1200000000.0,
+        "TC": 0.2,
+        "ALPHA": 5.9e-05,
+        "ALPHA_ppm_K": 59.0
+      },
+      "card_thermal": "*MAT_THERMAL_ISOTROPIC_TITLE\nTape\n$     TMID       TRO     TGRLC    TGMULT\n        20       0.0       0.0       0.0\n$       HC        TC\n 1.200E+09      0.20",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n        20         05.9000E-05",
+      "cards_structural": {
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\n$HWCOLOR MATERIAL        20      59\nTape\n$      MID       RHO         E        PR        DA        DB         K\n        202.0000E-09    1650.0      0.35       0.0       0.0       0.0",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nTape\n$      MID       RHO         E        PR         N    COUPLE         M     ALIAS\n        202.0000E-09    1650.0    0.3500       0.0       0.0       0.0          \n$      CMO      CON1      CON2\n       1.0         7         7\n$       A1        A2        A3        V1        V2        V3\n       0.0       0.0       0.0       0.0       0.0       0.0"
+      }
+    },
+    "21": {
+      "name": "Rigid",
+      "tag": "Rigid_SUS_FullLock",
+      "description": "Rigid body (SUS-based properties)",
+      "category": "metal",
+      "mat_type": "MAT_RIGID",
+      "mat_type_id": 20,
+      "mechanical": {
+        "RHO": 7.93e-09,
+        "E": 190000.0,
+        "PR": 0.3,
+        "CMO": 1.0,
+        "CON1": 7,
+        "CON2": 7,
+        "constraint_note": "Fully constrained (all DOF fixed)",
+        "rho_g_cm3": 7.93,
+        "E_GPa": 190.0
+      },
+      "thermal": {
+        "Cp_SI": 500,
+        "k_SI": 16.2,
+        "HC": 500000000.0,
+        "TC": 16.2,
+        "ALPHA": 1.73e-05,
+        "ALPHA_ppm_K": 17.3
+      },
+      "card_thermal": "*MAT_THERMAL_ISOTROPIC_TITLE\nRigid\n$     TMID       TRO     TGRLC    TGMULT\n        21       0.0       0.0       0.0\n$       HC        TC\n 5.000E+08      16.2",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n        21         01.7300E-05",
+      "cards_structural": {
+        "MAT_RIGID": "*MAT_RIGID_TITLE\n$HWCOLOR MATERIAL        21      11\nRigid\n$      MID       RHO         E        PR         N    COUPLE         M     ALIAS\n        217.9300E-09  190000.0       0.3       0.0       0.0       0.0          \n$      CMO      CON1      CON2\n       1.0         7         7\n$       A1        A2        A3        V1        V2        V3\n       0.0       0.0       0.0       0.0       0.0       0.0",
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nRigid\n$      MID       RHO         E        PR        DA        DB         K\n        217.9300E-09  190000.0    0.3000       0.0       0.0       0.0"
+      }
+    },
+    "22": {
+      "name": "Nail",
+      "tag": "NailAdhesive",
+      "description": "Nail adhesive",
+      "category": "polymer",
+      "mat_type": "MAT_ELASTIC",
+      "mat_type_id": 1,
+      "mechanical": {
+        "RHO": 1.3e-09,
+        "E": 3760.0,
+        "PR": 0.39,
+        "DA": 0.0,
+        "DB": 0.0,
+        "K": 0.0,
+        "rho_g_cm3": 1.3,
+        "E_GPa": 3.76
+      },
+      "thermal": {
+        "Cp_SI": 1500,
+        "k_SI": 0.2,
+        "HC": 1500000000.0,
+        "TC": 0.2,
+        "ALPHA": 8e-05,
+        "ALPHA_ppm_K": 80.0
+      },
+      "card_thermal": "*MAT_THERMAL_ISOTROPIC_TITLE\nNail\n$     TMID       TRO     TGRLC    TGMULT\n        22       0.0       0.0       0.0\n$       HC        TC\n 1.500E+09      0.20",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n        22         08.0000E-05",
+      "cards_structural": {
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\n$HWCOLOR MATERIAL        22      10\nNail\n$      MID       RHO         E        PR        DA        DB         K\n        221.3000E-09    3760.0      0.39       0.0       0.0       0.0",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nNail\n$      MID       RHO         E        PR         N    COUPLE         M     ALIAS\n        221.3000E-09    3760.0    0.3900       0.0       0.0       0.0          \n$      CMO      CON1      CON2\n       1.0         7         7\n$       A1        A2        A3        V1        V2        V3\n       0.0       0.0       0.0       0.0       0.0       0.0"
+      }
+    },
+    "38": {
+      "name": "M-Film",
+      "tag": "Ti_MetalFilm_EP",
+      "description": "Titanium alloy film (elasto-plastic, MAT_024)",
+      "category": "metal",
+      "mat_type": "MAT_PIECEWISE_LINEAR_PLASTICITY",
+      "mat_type_id": 24,
+      "mechanical": {
+        "RHO": 4.5e-09,
+        "E": 105000.0,
+        "PR": 0.3,
+        "SIGY": 411.88,
+        "ETAN": 0.0,
+        "FAIL": 0.0,
+        "rho_g_cm3": 4.5,
+        "E_GPa": 105.0
+      },
+      "plasticity": {
+        "stress_strain_curve": [
+          {
+            "eps": 0.0,
+            "sig": 411.88
+          },
+          {
+            "eps": 0.00782,
+            "sig": 1029.64
+          },
+          {
+            "eps": 0.010774,
+            "sig": 1200.0
+          }
+        ],
+        "C": 0.0,
+        "P": 0.0,
+        "LCSS": 0,
+        "note": "3-point hardening curve: yield→UTS"
+      },
+      "thermal": {
+        "Cp_SI": 520,
+        "k_SI": 21.9,
+        "HC": 520000000.0,
+        "TC": 21.9,
+        "ALPHA": 8.6e-06,
+        "ALPHA_ppm_K": 8.600000000000001
+      },
+      "card_thermal": "*MAT_THERMAL_ISOTROPIC_TITLE\nM-Film\n$     TMID       TRO     TGRLC    TGMULT\n        38       0.0       0.0       0.0\n$       HC        TC\n 5.200E+08      21.9",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n        38         08.6000E-06",
+      "cards_structural": {
+        "MAT_PIECEWISE_LINEAR_PLASTICITY": "*MAT_PIECEWISE_LINEAR_PLASTICITY\n$HMNAME MATERIAL        38M-Film\n$HWCOLOR MATERIAL        38      11\n$      MID       RHO         E        PR      SIGY      ETAN      FAIL      TDEL\n        384.5000E-09  105000.0       0.3    411.88       0.0       0.0       0.0\n$        C         P      LCSS      LCSR        VP       LCF\n       0.0       0.0         0         0       0.0          \n$     EPS1      EPS2      EPS3      EPS4      EPS5      EPS6      EPS7      EPS8\n       0.0   0.00782  0.010774       0.0       0.0       0.0       0.0       0.0\n$      ES1       ES2       ES3       ES4       ES5       ES6       ES7       ES8\n    411.88   1029.64    1200.0       0.0       0.0       0.0       0.0       0.0",
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nM-Film\n$      MID       RHO         E        PR        DA        DB         K\n        384.5000E-09  105000.0    0.3000       0.0       0.0       0.0",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nM-Film\n$      MID       RHO         E        PR         N    COUPLE         M     ALIAS\n        384.5000E-09  105000.0    0.3000       0.0       0.0       0.0          \n$      CMO      CON1      CON2\n       1.0         7         7\n$       A1        A2        A3        V1        V2        V3\n       0.0       0.0       0.0       0.0       0.0       0.0"
+      }
+    },
+    "39": {
+      "name": "PSA1515",
+      "tag": "PSA_1515_LowDensity",
+      "description": "PSA variant (1515 grade)",
+      "category": "polymer",
+      "mat_type": "MAT_ELASTIC",
+      "mat_type_id": 1,
+      "mechanical": {
+        "RHO": 9.9e-10,
+        "E": 1515.0,
+        "PR": 0.35,
+        "DA": 0.0,
+        "DB": 0.0,
+        "K": 0.0,
+        "rho_g_cm3": 0.99,
+        "E_GPa": 1.515
+      },
+      "thermal": {
+        "Cp_SI": 2000,
+        "k_SI": 0.2,
+        "HC": 2000000000.0,
+        "TC": 0.2,
+        "ALPHA": 0.0002,
+        "ALPHA_ppm_K": 200.0
+      },
+      "card_thermal": "*MAT_THERMAL_ISOTROPIC_TITLE\nPSA1515\n$     TMID       TRO     TGRLC    TGMULT\n        39       0.0       0.0       0.0\n$       HC        TC\n 2.000E+09      0.20",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n        39         02.0000E-04",
+      "cards_structural": {
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\n$HWCOLOR MATERIAL        39      31\nPSA1515\n$      MID       RHO         E        PR        DA        DB         K\n        399.9000E-10    1515.0      0.35       0.0       0.0       0.0",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nPSA1515\n$      MID       RHO         E        PR         N    COUPLE         M     ALIAS\n        399.9000E-10    1515.0    0.3500       0.0       0.0       0.0          \n$      CMO      CON1      CON2\n       1.0         7         7\n$       A1        A2        A3        V1        V2        V3\n       0.0       0.0       0.0       0.0       0.0       0.0"
+      }
+    },
+    "40": {
+      "name": "Rubber",
+      "tag": "Rubber_Linear",
+      "description": "Elastic rubber (linear approximation)",
+      "category": "rubber",
+      "mat_type": "MAT_ELASTIC",
+      "mat_type_id": 1,
+      "mechanical": {
+        "RHO": 1.3e-09,
+        "E": 50.0,
+        "PR": 0.37,
+        "DA": 0.0,
+        "DB": 0.0,
+        "K": 0.0,
+        "rho_g_cm3": 1.3,
+        "E_GPa": 0.05
+      },
+      "thermal": {
+        "Cp_SI": 2000,
+        "k_SI": 0.16,
+        "HC": 2000000000.0,
+        "TC": 0.16,
+        "ALPHA": 0.0002,
+        "ALPHA_ppm_K": 200.0
+      },
+      "card_thermal": "*MAT_THERMAL_ISOTROPIC_TITLE\nRubber\n$     TMID       TRO     TGRLC    TGMULT\n        40       0.0       0.0       0.0\n$       HC        TC\n 2.000E+09      0.16",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n        40         02.0000E-04",
+      "cards_structural": {
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\n$HWCOLOR MATERIAL        40      37\nRubber\n$      MID       RHO         E        PR        DA        DB         K\n        401.3000E-09      50.0      0.37       0.0       0.0       0.0",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nRubber\n$      MID       RHO         E        PR         N    COUPLE         M     ALIAS\n        401.3000E-09      50.0    0.3700       0.0       0.0       0.0          \n$      CMO      CON1      CON2\n       1.0         7         7\n$       A1        A2        A3        V1        V2        V3\n       0.0       0.0       0.0       0.0       0.0       0.0"
+      }
+    },
+    "41": {
+      "name": "Mobile.Epoxy.1",
+      "tag": "Epoxy_Structural",
+      "description": "Epoxy resin adhesive (density+E corrected)",
+      "category": "polymer",
+      "mat_type": "MAT_ELASTIC",
+      "mat_type_id": 1,
+      "flags": [
+        "corrected"
+      ],
+      "mechanical": {
+        "RHO": 1.3e-09,
+        "E": 3000.0,
+        "PR": 0.37,
+        "DA": 0.0,
+        "DB": 0.0,
+        "K": 0.0,
+        "rho_g_cm3": 1.3,
+        "E_GPa": 3.0
+      },
+      "thermal": {
+        "Cp_SI": 1100,
+        "k_SI": 0.2,
+        "HC": 1100000000.0,
+        "TC": 0.2,
+        "ALPHA": 5.5e-05,
+        "ALPHA_ppm_K": 55.0
+      },
+      "card_thermal": "*MAT_THERMAL_ISOTROPIC_TITLE\nMobile.Epoxy.1\n$     TMID       TRO     TGRLC    TGMULT\n        41       0.0       0.0       0.0\n$       HC        TC\n 1.100E+09      0.20",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n        41         05.5000E-05",
+      "cards_structural": {
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\n$HWCOLOR MATERIAL        41      13\nMobile.Epoxy.1\n$      MID       RHO         E        PR        DA        DB         K\n        411.3000E-09    3000.0      0.37       0.0       0.0       0.0",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nMobile.Epoxy.1\n$      MID       RHO         E        PR         N    COUPLE         M     ALIAS\n        411.3000E-09    3000.0    0.3700       0.0       0.0       0.0          \n$      CMO      CON1      CON2\n       1.0         7         7\n$       A1        A2        A3        V1        V2        V3\n       0.0       0.0       0.0       0.0       0.0       0.0"
+      }
+    },
+    "42": {
+      "name": "Peek",
+      "tag": "PEEK_Elastic",
+      "description": "PEEK (Polyether ether ketone)",
+      "category": "polymer",
+      "mat_type": "MAT_ELASTIC",
+      "mat_type_id": 1,
+      "mechanical": {
+        "RHO": 1.3e-09,
+        "E": 3760.0,
+        "PR": 0.39,
+        "DA": 0.0,
+        "DB": 0.0,
+        "K": 0.0,
+        "rho_g_cm3": 1.3,
+        "E_GPa": 3.76
+      },
+      "thermal": {
+        "Cp_SI": 1340,
+        "k_SI": 0.25,
+        "HC": 1340000000.0,
+        "TC": 0.25,
+        "ALPHA": 4.7e-05,
+        "ALPHA_ppm_K": 47.0
+      },
+      "card_thermal": "*MAT_THERMAL_ISOTROPIC_TITLE\nPeek\n$     TMID       TRO     TGRLC    TGMULT\n        42       0.0       0.0       0.0\n$       HC        TC\n 1.340E+09      0.25",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n        42         04.7000E-05",
+      "cards_structural": {
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\n$HWCOLOR MATERIAL        42      26\nPeek\n$      MID       RHO         E        PR        DA        DB         K\n        421.3000E-09    3760.0      0.39       0.0       0.0       0.0",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nPeek\n$      MID       RHO         E        PR         N    COUPLE         M     ALIAS\n        421.3000E-09    3760.0    0.3900       0.0       0.0       0.0          \n$      CMO      CON1      CON2\n       1.0         7         7\n$       A1        A2        A3        V1        V2        V3\n       0.0       0.0       0.0       0.0       0.0       0.0"
+      }
+    },
+    "43": {
+      "name": "visco",
+      "tag": "Viscoelastic_Damper",
+      "description": "Viscoelastic polymer",
+      "category": "polymer",
+      "mat_type": "MAT_VISCOELASTIC",
+      "mat_type_id": 6,
+      "mechanical": {
+        "RHO": 1.1e-09,
+        "BULK": 5000.0,
+        "G0": 5.0,
+        "GI": 0.1,
+        "BETA": 5.0,
+        "rho_g_cm3": 1.1,
+        "note": "G(t) = GI + (G0-GI)*exp(-BETA*t). Long-term G=0.1 MPa"
+      },
+      "thermal": {
+        "Cp_SI": 1500,
+        "k_SI": 0.2,
+        "HC": 1500000000.0,
+        "TC": 0.2,
+        "ALPHA": 0.0001,
+        "ALPHA_ppm_K": 100.0
+      },
+      "card_thermal": "*MAT_THERMAL_ISOTROPIC_TITLE\nvisco\n$     TMID       TRO     TGRLC    TGMULT\n        43       0.0       0.0       0.0\n$       HC        TC\n 1.500E+09      0.20",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n        43         01.0000E-04",
+      "cards_structural": {
+        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC\n$HMNAME MATERIAL        43visco\n$HWCOLOR MATERIAL        43      59\n$      MID       RHO      BULK        G0        GI      BETA\n        431.1000E-09    5000.0       5.0       0.1       5.0",
+        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nvisco (instantaneous, G0=5.0)\n$      MID       RHO         E        PR        DA        DB         K\n        431.1000E-09      15.0    0.4995       0.0       0.0       0.0",
+        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nvisco (long-term, GI=0.1)\n$      MID       RHO         E        PR        DA        DB         K\n        431.1000E-09    0.3000    0.5000       0.0       0.0       0.0",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nvisco\n$      MID       RHO         E        PR         N    COUPLE         M     ALIAS\n        431.1000E-09      15.0    0.4995       0.0       0.0       0.0          \n$      CMO      CON1      CON2\n       1.0         7         7\n$       A1        A2        A3        V1        V2        V3\n       0.0       0.0       0.0       0.0       0.0       0.0"
+      }
+    },
+    "44": {
+      "name": "CFRP",
+      "tag": "CFRP_QuasiIso",
+      "description": "Carbon fiber reinforced polymer (CF/Epoxy)",
+      "category": "composite",
+      "mat_type": "MAT_ELASTIC",
+      "mat_type_id": 1,
+      "mechanical": {
+        "RHO": 2e-09,
+        "E": 69000.0,
+        "PR": 0.33,
+        "DA": 0.0,
+        "DB": 0.0,
+        "K": 0.0,
+        "rho_g_cm3": 2.0,
+        "E_GPa": 69.0,
+        "note": "Isotropic approximation. Real CFRP is anisotropic."
+      },
+      "thermal": {
+        "Cp_SI": 800,
+        "k_SI": 5.0,
+        "HC": 800000000.0,
+        "TC": 5.0,
+        "note": "k: in-plane ~7, through-thickness ~0.7. Average ~5.0",
+        "ALPHA": 2e-06,
+        "ALPHA_ppm_K": 2.0
+      },
+      "card_thermal": "*MAT_THERMAL_ISOTROPIC_TITLE\nCFRP\n$     TMID       TRO     TGRLC    TGMULT\n        44       0.0       0.0       0.0\n$       HC        TC\n 8.000E+08       5.0",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n        44         02.0000E-06",
+      "cards_structural": {
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\n$HWCOLOR MATERIAL        44      12\nCFRP\n$      MID       RHO         E        PR        DA        DB         K\n        442.0000E-09   69000.0      0.33       0.0       0.0       0.0",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nCFRP\n$      MID       RHO         E        PR         N    COUPLE         M     ALIAS\n        442.0000E-09   69000.0    0.3300       0.0       0.0       0.0          \n$      CMO      CON1      CON2\n       1.0         7         7\n$       A1        A2        A3        V1        V2        V3\n       0.0       0.0       0.0       0.0       0.0       0.0"
+      }
+    },
+    "45": {
+      "name": "Rubber-Mooney",
+      "tag": "Rubber_MR_PCAP",
+      "description": "Mooney-Rivlin rubber (PCAP cap)",
+      "category": "rubber",
+      "mat_type": "MAT_MOONEY-RIVLIN_RUBBER",
+      "mat_type_id": 27,
+      "mechanical": {
+        "RHO": 1.2e-09,
+        "PR": 0.499,
+        "A": 60.0,
+        "B": 0.0,
+        "G_shear": 120.0,
+        "rho_g_cm3": 1.2,
+        "note": "Nearly incompressible. G = 2*(A+B) = 120 MPa"
+      },
+      "thermal": {
+        "Cp_SI": 2000,
+        "k_SI": 0.16,
+        "HC": 2000000000.0,
+        "TC": 0.16,
+        "ALPHA": 0.0002,
+        "ALPHA_ppm_K": 200.0
+      },
+      "card_thermal": "*MAT_THERMAL_ISOTROPIC_TITLE\nRubber-Mooney\n$     TMID       TRO     TGRLC    TGMULT\n        45       0.0       0.0       0.0\n$       HC        TC\n 2.000E+09      0.16",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n        45         02.0000E-04",
+      "cards_structural": {
+        "MAT_MOONEY-RIVLIN_RUBBER": "*MAT_MOONEY-RIVLIN_RUBBER\n$HMNAME MATERIAL        45Rubber-Mooney\n$HWCOLOR MATERIAL        45      11\n$      MID       RHO        PR         A         B       REF\n        451.2000E-09     0.499      60.0       0.0          \n$      SGL        SW        ST      LCID\n                                        ",
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nRubber-Mooney (linearized from Mooney-Rivlin)\n$      MID       RHO         E        PR        DA        DB         K\n        451.2000E-09     360.0    0.4990       0.0       0.0       0.0",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nRubber-Mooney\n$      MID       RHO         E        PR         N    COUPLE         M     ALIAS\n        451.2000E-09     360.0    0.4990       0.0       0.0       0.0          \n$      CMO      CON1      CON2\n       1.0         7         7\n$       A1        A2        A3        V1        V2        V3\n       0.0       0.0       0.0       0.0       0.0       0.0"
+      }
+    },
+    "46": {
+      "name": "Peek-RIGID",
+      "tag": "PEEK_Rigid_Fixture",
+      "description": "PEEK as rigid body (partial constraint)",
+      "category": "polymer",
+      "mat_type": "MAT_RIGID",
+      "mat_type_id": 20,
+      "mechanical": {
+        "RHO": 7.93e-09,
+        "E": 190000.0,
+        "PR": 0.3,
+        "CMO": 1.0,
+        "CON1": 4,
+        "CON2": 7,
+        "constraint_note": "CON1=4: z-trans + x,y-rot free. CON2=7: all rot constrained",
+        "rho_g_cm3": 7.93,
+        "E_GPa": 190.0
+      },
+      "thermal": {
+        "Cp_SI": 1340,
+        "k_SI": 0.25,
+        "HC": 1340000000.0,
+        "TC": 0.25,
+        "ALPHA": 4.7e-05,
+        "ALPHA_ppm_K": 47.0
+      },
+      "card_thermal": "*MAT_THERMAL_ISOTROPIC_TITLE\nPeek-RIGID\n$     TMID       TRO     TGRLC    TGMULT\n        46       0.0       0.0       0.0\n$       HC        TC\n 1.340E+09      0.25",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n        46         04.7000E-05",
+      "cards_structural": {
+        "MAT_RIGID": "*MAT_RIGID_TITLE\n$HWCOLOR MATERIAL        46      11\nPeek-RIGID\n$      MID       RHO         E        PR         N    COUPLE         M     ALIAS\n        467.9300E-09  190000.0       0.3       0.0       0.0       0.0          \n$      CMO      CON1      CON2\n       1.0         4         7\n$       A1        A2        A3        V1        V2        V3\n       0.0       0.0       0.0       0.0       0.0       0.0",
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nPeek-RIGID\n$      MID       RHO         E        PR        DA        DB         K\n        467.9300E-09  190000.0    0.3000       0.0       0.0       0.0"
+      }
+    },
+    "47": {
+      "name": "PSA-31.7",
+      "tag": "PSA_MR_Adhesive",
+      "description": "PSA adhesive (Mooney-Rivlin, used by PSA0/2/4/6)",
+      "category": "rubber",
+      "mat_type": "MAT_MOONEY-RIVLIN_RUBBER",
+      "mat_type_id": 27,
+      "mechanical": {
+        "RHO": 1.2e-09,
+        "PR": 0.499,
+        "A": 31.7,
+        "B": 0.0,
+        "G_shear": 63.4,
+        "rho_g_cm3": 1.2,
+        "note": "Nearly incompressible. G = 2*(A+B) = 63.4 MPa"
+      },
+      "thermal": {
+        "Cp_SI": 2000,
+        "k_SI": 0.2,
+        "HC": 2000000000.0,
+        "TC": 0.2,
+        "ALPHA": 0.0002,
+        "ALPHA_ppm_K": 200.0
+      },
+      "card_thermal": "*MAT_THERMAL_ISOTROPIC_TITLE\nPSA-31.7\n$     TMID       TRO     TGRLC    TGMULT\n        47       0.0       0.0       0.0\n$       HC        TC\n 2.000E+09      0.20",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n        47         02.0000E-04",
+      "cards_structural": {
+        "MAT_MOONEY-RIVLIN_RUBBER": "*MAT_MOONEY-RIVLIN_RUBBER\n$HMNAME MATERIAL        47PSA-31.7\n$HWCOLOR MATERIAL        47      11\n$      MID       RHO        PR         A         B       REF\n        471.2000E-09     0.499      31.7       0.0          \n$      SGL        SW        ST      LCID\n                                        ",
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nPSA-31.7 (linearized from Mooney-Rivlin)\n$      MID       RHO         E        PR        DA        DB         K\n        471.2000E-09  190.2000    0.4990       0.0       0.0       0.0",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nPSA-31.7\n$      MID       RHO         E        PR         N    COUPLE         M     ALIAS\n        471.2000E-09  190.2000    0.4990       0.0       0.0       0.0          \n$      CMO      CON1      CON2\n       1.0         7         7\n$       A1        A2        A3        V1        V2        V3\n       0.0       0.0       0.0       0.0       0.0       0.0"
+      }
+    }
+  },
+  "part_material_map": {
+    "1": {
+      "part_name": "Deco",
+      "MID": 21,
+      "TMID": 21
+    },
+    "2": {
+      "part_name": "PCAP",
+      "MID": 45,
+      "TMID": 45
+    },
+    "5": {
+      "part_name": "Lattice",
+      "MID": 19,
+      "TMID": 19
+    },
+    "16": {
+      "part_name": "PSA0",
+      "MID": 47,
+      "TMID": 47
+    },
+    "17": {
+      "part_name": "PSA2",
+      "MID": 47,
+      "TMID": 47
+    },
+    "18": {
+      "part_name": "PL",
+      "MID": 16,
+      "TMID": 16
+    },
+    "19": {
+      "part_name": "UTG",
+      "MID": 15,
+      "TMID": 15
+    },
+    "20": {
+      "part_name": "Panel",
+      "MID": 9,
+      "TMID": 9
+    },
+    "21": {
+      "part_name": "PSA4",
+      "MID": 47,
+      "TMID": 47
+    },
+    "22": {
+      "part_name": "M-Film",
+      "MID": 38,
+      "TMID": 38
+    },
+    "23": {
+      "part_name": "PSA6",
+      "MID": 47,
+      "TMID": 47
+    },
+    "100001": {
+      "part_name": "TAPE#03-HEX-2L",
+      "MID": 1,
+      "TMID": 1
+    },
+    "100002": {
+      "part_name": "SUS#05-HINGE",
+      "MID": 21,
+      "TMID": 21
+    },
+    "100003": {
+      "part_name": "SUS#03-WING-1",
+      "MID": 2,
+      "TMID": 2
+    },
+    "100005": {
+      "part_name": "TAPE#03-HEX-2L-2",
+      "MID": 1,
+      "TMID": 1
+    },
+    "100006": {
+      "part_name": "AL#03-2",
+      "MID": 21,
+      "TMID": 21
+    },
+    "100007": {
+      "part_name": "PC#03-1-PCAP",
+      "MID": 21,
+      "TMID": 21
+    },
+    "100008": {
+      "part_name": "AL#03-1",
+      "MID": 21,
+      "TMID": 21
+    },
+    "100009": {
+      "part_name": "SUS#03-WING-2",
+      "MID": 2,
+      "TMID": 2
+    },
+    "200340": {
+      "part_name": "Peek",
+      "MID": 46,
+      "TMID": 46
+    },
+    "200343": {
+      "part_name": "CFRP-Sheet",
+      "MID": 44,
+      "TMID": 44
+    },
+    "200345": {
+      "part_name": "Insert_Dust",
+      "MID": 21,
+      "TMID": 21
+    }
+  },
+  "category_index": {
+    "metal": [
+      2,
+      3,
+      4,
+      6,
+      11,
+      13,
+      18,
+      19,
+      21,
+      38,
+      46
+    ],
+    "polymer": [
+      1,
+      5,
+      7,
+      8,
+      9,
+      10,
+      12,
+      14,
+      16,
+      17,
+      20,
+      22,
+      39,
+      41,
+      42,
+      43
+    ],
+    "glass": [
+      15
+    ],
+    "composite": [
+      44
+    ],
+    "rubber": [
+      40,
+      45,
+      47
+    ],
+    "custom": []
+  },
+  "custom_materials": {
+    "_usage": "Add any custom MAT card here. card_structural is written verbatim to k-file.",
+    "_example_MID": {
+      "name": "MyMaterial",
+      "description": "User-defined material",
+      "category": "custom",
+      "mat_type": "MAT_ELASTIC",
+      "mat_type_id": 1,
+      "mechanical": {
+        "RHO": 1e-09,
+        "E": 1000.0,
+        "PR": 0.3
+      },
+      "thermal": {
+        "Cp_SI": 1000,
+        "k_SI": 0.2,
+        "HC": 1000000000.0,
+        "TC": 0.2
+      },
+      "card_structural": "*MAT_ELASTIC_TITLE\nMyMaterial\n$      MID       RHO         E        PR        DA        DB         K\n      9991.0000E-09    1000.0       0.3       0.0       0.0       0.0",
+      "card_thermal": "*MAT_THERMAL_ISOTROPIC_TITLE\nMyMaterial\n$     TMID       TRO     TGRLC    TGMULT\n       999       0.0       0.0       0.0\n$       HC        TC\n 1.000E+09      0.20"
+    }
+  },
+  "supported_mat_types": {
+    "MAT_ELASTIC": {
+      "type_id": 1,
+      "cards": 1,
+      "fields": [
+        "MID",
+        "RHO",
+        "E",
+        "PR",
+        "DA",
+        "DB",
+        "K"
+      ]
+    },
+    "MAT_RIGID": {
+      "type_id": 20,
+      "cards": 3,
+      "fields": [
+        "MID",
+        "RHO",
+        "E",
+        "PR",
+        "N",
+        "COUPLE",
+        "M",
+        "ALIAS",
+        "CMO",
+        "CON1",
+        "CON2",
+        "A1",
+        "A2",
+        "A3",
+        "V1",
+        "V2",
+        "V3"
+      ]
+    },
+    "MAT_PIECEWISE_LINEAR_PLASTICITY": {
+      "type_id": 24,
+      "cards": 4,
+      "fields": [
+        "MID",
+        "RHO",
+        "E",
+        "PR",
+        "SIGY",
+        "ETAN",
+        "FAIL",
+        "TDEL",
+        "C",
+        "P",
+        "LCSS",
+        "LCSR",
+        "VP",
+        "LCF",
+        "EPS1-8",
+        "ES1-8"
+      ]
+    },
+    "MAT_MOONEY-RIVLIN_RUBBER": {
+      "type_id": 27,
+      "cards": 2,
+      "fields": [
+        "MID",
+        "RHO",
+        "PR",
+        "A",
+        "B",
+        "REF",
+        "SGL",
+        "SW",
+        "ST",
+        "LCID"
+      ]
+    },
+    "MAT_VISCOELASTIC": {
+      "type_id": 6,
+      "cards": 1,
+      "fields": [
+        "MID",
+        "RHO",
+        "BULK",
+        "G0",
+        "GI",
+        "BETA"
+      ]
+    },
+    "MAT_ELASTIC_PLASTIC_THERMAL": {
+      "type_id": 4,
+      "cards": 2,
+      "fields": [
+        "MID",
+        "RHO",
+        "E",
+        "PR",
+        "ALPHA",
+        "SIGY",
+        "ETAN",
+        "FAIL",
+        "TDEL",
+        "C",
+        "P",
+        "LCSS",
+        "LCSR",
+        "VP",
+        "LCSIG-T"
+      ]
+    },
+    "MAT_THERMAL_ISOTROPIC": {
+      "type_id": "T01",
+      "cards": 1,
+      "fields": [
+        "TMID",
+        "TRO",
+        "TGRLC",
+        "TGMULT",
+        "HC",
+        "TC"
+      ]
+    },
+    "MAT_THERMAL_ORTHOTROPIC": {
+      "type_id": "T02",
+      "cards": 1,
+      "fields": [
+        "TMID",
+        "TRO",
+        "TGRLC",
+        "TGMULT",
+        "K1",
+        "K2",
+        "K3",
+        "CP",
+        "HLAT"
+      ]
+    },
+    "MAT_JOHNSON_COOK": {
+      "type_id": 15,
+      "cards": 2,
+      "fields": [
+        "MID",
+        "RHO",
+        "G",
+        "E",
+        "PR",
+        "DTF",
+        "VP",
+        "RATEOP",
+        "A",
+        "B",
+        "N",
+        "C",
+        "M",
+        "TM",
+        "TR",
+        "EPSO",
+        "CP",
+        "PC"
+      ]
+    },
+    "MAT_OGDEN_RUBBER": {
+      "type_id": 77,
+      "cards": 3,
+      "fields": [
+        "MID",
+        "RHO",
+        "PR",
+        "N",
+        "NV",
+        "G",
+        "SIGF",
+        "REF",
+        "MU1-8",
+        "ALPHA1-8"
+      ]
+    },
+    "MAT_BLATZ-KO_RUBBER": {
+      "type_id": 7,
+      "cards": 1,
+      "fields": [
+        "MID",
+        "RHO",
+        "G",
+        "REF"
+      ]
+    }
+  }
+}

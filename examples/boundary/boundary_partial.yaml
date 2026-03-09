@@ -1,0 +1,19 @@
+# 다중 경계조건 예제
+# PID=9 하단면: z방향만 구속 (xy 자유)
+# PID=11 상단면: xyz 병진 구속 (회전 자유)
+
+model: ../load/mesh.k
+output: mesh_partial.k
+
+boundaries:
+  - part: 9
+    dof: z
+    direction: [0, 0, -1]
+    select: direction
+    angle: 45.0
+
+  - part: 11
+    dof: xyz
+    direction: [0, 0, 1]
+    select: direction
+    angle: 45.0

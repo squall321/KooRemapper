@@ -1,0 +1,13 @@
+# PID=9 하단면(z-)에 face RBE3 생성
+# → 면마다 centroid 노드 + CONSTRAINED_INTERPOLATION
+
+model: ../load/mesh.k
+output: mesh_rbe_face.k
+
+rbe:
+  - part: 9
+    select: direction
+    direction: [0, 0, -1]
+    angle: 45.0
+    type: rbe3
+    mode: face

@@ -60,6 +60,7 @@ private:
     int currentLine_;
     int linesProcessed_;
     long fileSize_;
+    bool i10_ = false;  // i10=y flag: use 10-char integer fields
     ProgressCallback progressCallback_;
     std::vector<std::pair<int, std::string>> unsupportedMaterials_;  // (MID, keyword)
 

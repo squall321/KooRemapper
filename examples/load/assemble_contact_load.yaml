@@ -1,0 +1,27 @@
+base_model: mesh.k
+output: mesh_contact_load.k
+
+operations:
+  # 1) 인접 레이어 간 tied contact 자동 생성
+  - type: contact
+    actions:
+      - action: detect
+        scope: all
+        type: tied
+        auto_create: true
+        tolerance: 0.1
+        title_prefix: AUTO
+
+  # 2) PID=10(LAYER_2)의 tied 인터페이스에 z+ 방향 압력
+  - type: load
+    loads:
+      - part: 10
+        mode: pressure
+        value: 1.0
+        direction: [0, 0, 1]
+        select: tied
+        angle: 45.0
+        curve:
+          - [0.0, 0.0]
+          - [0.001, 1.0]
+          - [0.01, 1.0]

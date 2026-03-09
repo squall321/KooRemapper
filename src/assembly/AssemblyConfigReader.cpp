@@ -35,6 +35,12 @@ static int countIndent(const std::string& line) {
     return n;
 }
 
+static std::string stripQuotes(const std::string& s) {
+    if (s.size() >= 2 && ((s.front()=='"' && s.back()=='"') || (s.front()=='\'' && s.back()=='\'')))
+        return s.substr(1, s.size()-2);
+    return s;
+}
+
 AssemblyConfig AssemblyConfigReader::readFile(const std::string& filename) {
     std::ifstream file(filename);
     if (!file.is_open()) {
@@ -80,6 +86,25 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
     bool inMaterialCardsList = false;
     int materialCardsKeyIndent = 0;
     bool readingMaterialCardsItem = false;
+    bool inMatdbRulesList = false;
+    bool inMatdbRuleItem = false;
+    int matdbRulesKeyIndent = 0;
+    bool inLoadCasesList = false;
+    bool inLoadCaseItem = false;
+    int loadCasesKeyIndent = 0;
+    bool inLoadCurveList = false;
+    int loadCurveKeyIndent = 0;
+    bool inContactActionsList = false;
+    bool inContactActionItem = false;
+    int contactActionsKeyIndent = 0;
+    bool inContactSlave = false;
+    bool inContactMaster = false;
+    bool inBoundaryList = false;
+    bool inBoundaryItem = false;
+    int boundaryListKeyIndent = 0;
+    bool inRbeList = false;
+    bool inRbeItem = false;
+    int rbeListKeyIndent = 0;
 
     for (size_t li = 0; li < lines.size(); ++li) {
         const std::string& line = lines[li];
@@ -321,8 +346,364 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                 }
             }
 
+            // --- Matdb materials rule list items: "      - match: STS304" ---
+            if (inMatdbRulesList && indent > matdbRulesKeyIndent && trimmed[0] == '-' && trimmed.size() >= 2 && trimmed[1] == ' ') {
+                std::string afterDash = trim(trimmed.substr(2));
+                size_t colonPos = afterDash.find(':');
+                if (colonPos != std::string::npos) {
+                    std::string key = trim(afterDash.substr(0, colonPos));
+                    std::string val = trim(afterDash.substr(colonPos + 1));
+
+                    if (!config.operations.empty() &&
+                        config.operations.back().type == AssemblyOperation::MATDB) {
+                        MatdbMaterialRule rule;
+                        if (key == "match") rule.match = stripQuotes(val);
+                        else if (key == "mid") { try { rule.mid = std::stoi(val); } catch (...) {} }
+                        config.operations.back().matdb.rules.push_back(rule);
+                        inMatdbRuleItem = true;
+                    }
+                }
+                continue;
+            }
+
+            // --- Matdb rule item sub-keys ---
+            if (inMatdbRuleItem && indent > matdbRulesKeyIndent) {
+                size_t colonPos = trimmed.find(':');
+                if (colonPos != std::string::npos) {
+                    std::string key = trim(trimmed.substr(0, colonPos));
+                    std::string val = trim(trimmed.substr(colonPos + 1));
+
+                    if (!config.operations.empty() &&
+                        config.operations.back().type == AssemblyOperation::MATDB &&
+                        !config.operations.back().matdb.rules.empty()) {
+                        auto& rule = config.operations.back().matdb.rules.back();
+                        if (key == "match") rule.match = stripQuotes(val);
+                        else if (key == "mid") { try { rule.mid = std::stoi(val); } catch (...) {} }
+                        else if (key == "mat_type") rule.matType = stripQuotes(val);
+                        else if (key == "thermal") {
+                            if (val == "false" || val == "no" || val == "0") rule.thermalOverride = 0;
+                            else if (val == "true" || val == "yes" || val == "1") rule.thermalOverride = 1;
+                        }
+                    }
+                    continue;
+                }
+            }
+
+            // Exit matdb rules list when indent decreases
+            if (inMatdbRulesList && indent <= matdbRulesKeyIndent) {
+                inMatdbRulesList = false;
+                inMatdbRuleItem = false;
+            }
+
+            // --- Load cases curve points: "        - [0.0, 1.0]" ---
+            if (inLoadCurveList && indent > loadCurveKeyIndent && trimmed[0] == '-' && trimmed.size() >= 2 && trimmed[1] == ' ') {
+                std::string rest = trim(trimmed.substr(2));
+                if (!rest.empty() && rest.front() == '[' && rest.back() == ']') {
+                    rest = rest.substr(1, rest.size()-2);
+                    size_t comma = rest.find(',');
+                    if (comma != std::string::npos &&
+                        !config.operations.empty() &&
+                        config.operations.back().type == AssemblyOperation::LOAD &&
+                        !config.operations.back().load.loads.empty()) {
+                        LoadCurvePoint pt;
+                        try {
+                            pt.time = std::stod(trim(rest.substr(0, comma)));
+                            pt.value = std::stod(trim(rest.substr(comma+1)));
+                            config.operations.back().load.loads.back().curve.push_back(pt);
+                        } catch(...) {}
+                    }
+                }
+                continue;
+            }
+
+            // Exit load curve list when indent decreases
+            if (inLoadCurveList && indent <= loadCurveKeyIndent) {
+                inLoadCurveList = false;
+            }
+
+            // --- Contact actions list items: "      - action: create" ---
+            if (inContactActionsList && indent > contactActionsKeyIndent && trimmed[0] == '-' && trimmed.size() >= 2 && trimmed[1] == ' ') {
+                std::string afterDash = trim(trimmed.substr(2));
+                size_t colonPos = afterDash.find(':');
+                if (colonPos != std::string::npos &&
+                    !config.operations.empty() &&
+                    config.operations.back().type == AssemblyOperation::CONTACT) {
+                    std::string key = trim(afterDash.substr(0, colonPos));
+                    std::string val = stripQuotes(trim(afterDash.substr(colonPos + 1)));
+                    ContactAction cact;
+                    if (key == "action") cact.action = val;
+                    else if (key == "type") cact.type = val;
+                    config.operations.back().contact.actions.push_back(cact);
+                    inContactActionItem = true;
+                    inContactSlave = false;
+                    inContactMaster = false;
+                }
+                continue;
+            }
+
+            // --- Contact action item sub-keys ---
+            if (inContactActionItem && indent > contactActionsKeyIndent) {
+                size_t colonPos = trimmed.find(':');
+                if (colonPos != std::string::npos &&
+                    !config.operations.empty() &&
+                    config.operations.back().type == AssemblyOperation::CONTACT &&
+                    !config.operations.back().contact.actions.empty()) {
+                    std::string key = trim(trimmed.substr(0, colonPos));
+                    std::string val = stripQuotes(trim(trimmed.substr(colonPos + 1)));
+                    auto& cact = config.operations.back().contact.actions.back();
+
+                    // Slave/master sub-sections
+                    if (key == "slave") {
+                        inContactSlave = true; inContactMaster = false;
+                        // inline: slave: {pid: 3}  or slave with pid on same line
+                        if (!val.empty()) {
+                            try { cact.slave.pid = std::stoi(val); } catch(...) {}
+                        }
+                    } else if (key == "master") {
+                        inContactMaster = true; inContactSlave = false;
+                        if (!val.empty()) {
+                            try { cact.master.pid = std::stoi(val); } catch(...) {}
+                        }
+                    } else if (key == "pid") {
+                        if (inContactSlave) { try { cact.slave.pid = std::stoi(val); } catch(...) {} }
+                        else if (inContactMaster) { try { cact.master.pid = std::stoi(val); } catch(...) {} }
+                    } else if (key == "as_segment") {
+                        bool bval = (val == "true" || val == "yes" || val == "1");
+                        if (inContactSlave) cact.slave.asSegment = bval;
+                        else if (inContactMaster) cact.master.asSegment = bval;
+                    } else if (key == "facing") {
+                        bool bval = (val == "true" || val == "yes" || val == "1");
+                        if (inContactSlave) cact.slave.facing = bval;
+                        else if (inContactMaster) cact.master.facing = bval;
+                    } else if (key == "pids" && !val.empty() && val.front() == '[' && val.back() == ']') {
+                        std::string inner = val.substr(1, val.size()-2);
+                        std::istringstream iss(inner);
+                        std::string tok;
+                        std::vector<int>& target = inContactSlave ? cact.slave.pids : cact.master.pids;
+                        while (std::getline(iss, tok, ',')) {
+                            try { target.push_back(std::stoi(trim(tok))); } catch(...) {}
+                        }
+                    } else if (key == "action") cact.action = val;
+                    else if (key == "type" || key == "contact_type") cact.type = val;
+                    else if (key == "friction") { try { cact.friction = std::stod(val); } catch(...) {} }
+                    else if (key == "title") cact.title = val;
+                    else if (key == "title_prefix") cact.titlePrefix = val;
+                    else if (key == "scope") cact.scope = val;
+                    else if (key == "tolerance") { try { cact.tolerance = std::stod(val); } catch(...) {} }
+                    else if (key == "normal_angle") { try { cact.normalAngle = std::stod(val); } catch(...) {} }
+                    else if (key == "auto_create") cact.autoCreate = (val == "true" || val == "yes" || val == "1");
+                    else if (key == "skip_existing") cact.skipExisting = val;
+                    else if (key == "subtract_existing") cact.subtractExisting = (val == "true" || val == "yes" || val == "1");
+                    else if (key == "include" && !val.empty() && val.front() == '[' && val.back() == ']') {
+                        std::string inner = val.substr(1, val.size()-2);
+                        std::istringstream iss(inner);
+                        std::string tok;
+                        while (std::getline(iss, tok, ',')) cact.includeKeys.push_back(trim(tok));
+                    } else if (key == "exclude" && !val.empty() && val.front() == '[' && val.back() == ']') {
+                        std::string inner = val.substr(1, val.size()-2);
+                        std::istringstream iss(inner);
+                        std::string tok;
+                        while (std::getline(iss, tok, ',')) cact.excludeKeys.push_back(trim(tok));
+                    }
+                    continue;
+                }
+            }
+
+            // Exit contact actions list when indent decreases
+            if (inContactActionsList && indent <= contactActionsKeyIndent) {
+                inContactActionsList = false;
+                inContactActionItem = false;
+                inContactSlave = false;
+                inContactMaster = false;
+            }
+
+            // --- Load cases list items: "      - part: 3" ---
+            if (inLoadCasesList && !inLoadCurveList && indent > loadCasesKeyIndent && trimmed[0] == '-' && trimmed.size() >= 2 && trimmed[1] == ' ') {
+                std::string afterDash = trim(trimmed.substr(2));
+                size_t colonPos = afterDash.find(':');
+                if (colonPos != std::string::npos &&
+                    !config.operations.empty() &&
+                    config.operations.back().type == AssemblyOperation::LOAD) {
+                    std::string key = trim(afterDash.substr(0, colonPos));
+                    std::string val = stripQuotes(trim(afterDash.substr(colonPos + 1)));
+                    LoadCase lcase;
+                    if (key == "part") {
+                        try { lcase.pid = std::stoi(val); } catch(...) { lcase.partName = val; }
+                    } else if (key == "mode") lcase.mode = val;
+                    else if (key == "value") { try { lcase.value = std::stod(val); } catch(...) {} }
+                    else if (key == "select") lcase.select = val;
+                    config.operations.back().load.loads.push_back(lcase);
+                    inLoadCaseItem = true;
+                    inLoadCurveList = false;
+                }
+                continue;
+            }
+
+            // --- Load case item sub-keys ---
+            if (inLoadCaseItem && indent > loadCasesKeyIndent) {
+                size_t colonPos = trimmed.find(':');
+                if (colonPos != std::string::npos &&
+                    !config.operations.empty() &&
+                    config.operations.back().type == AssemblyOperation::LOAD &&
+                    !config.operations.back().load.loads.empty()) {
+                    std::string key = trim(trimmed.substr(0, colonPos));
+                    std::string val = stripQuotes(trim(trimmed.substr(colonPos + 1)));
+                    auto& lcase = config.operations.back().load.loads.back();
+
+                    if (key == "curve") {
+                        inLoadCurveList = true;
+                        loadCurveKeyIndent = indent;
+                    } else if (key == "direction" && !val.empty() && val.front() == '[' && val.back() == ']') {
+                        std::string inner = val.substr(1, val.size()-2);
+                        std::istringstream iss(inner);
+                        std::string tok;
+                        int di = 0;
+                        while (std::getline(iss, tok, ',') && di < 3) {
+                            try { lcase.direction[di] = std::stod(trim(tok)); } catch(...) {}
+                            di++;
+                        }
+                    } else if (key == "part") {
+                        try { lcase.pid = std::stoi(val); } catch(...) { lcase.partName = val; }
+                    } else if (key == "mode") lcase.mode = val;
+                    else if (key == "value") { try { lcase.value = std::stod(val); } catch(...) {} }
+                    else if (key == "select") lcase.select = val;
+                    else if (key == "angle") { try { lcase.angle = std::stod(val); } catch(...) {} }
+                    else if (key == "set_id") { try { lcase.setId = std::stoi(val); } catch(...) {} }
+                    else if (key == "contact_id") { try { lcase.contactId = std::stoi(val); } catch(...) {} }
+                    continue;
+                }
+            }
+
+            // Exit load cases list when indent decreases
+            if (inLoadCasesList && indent <= loadCasesKeyIndent) {
+                inLoadCasesList = false;
+                inLoadCaseItem = false;
+                inLoadCurveList = false;
+            }
+
+            // --- Boundary list items: "      - part: 3" ---
+            if (inBoundaryList && indent > boundaryListKeyIndent && trimmed[0] == '-' && trimmed.size() >= 2 && trimmed[1] == ' ') {
+                std::string afterDash = trim(trimmed.substr(2));
+                size_t colonPos = afterDash.find(':');
+                if (colonPos != std::string::npos &&
+                    !config.operations.empty() &&
+                    config.operations.back().type == AssemblyOperation::BOUNDARY) {
+                    std::string key = trim(afterDash.substr(0, colonPos));
+                    std::string val = stripQuotes(trim(afterDash.substr(colonPos + 1)));
+                    BoundaryCase bcase;
+                    if (key == "part") {
+                        try { bcase.pid = std::stoi(val); } catch(...) { bcase.partName = val; }
+                    } else if (key == "dof") bcase.dof = val;
+                    else if (key == "select") bcase.select = val;
+                    config.operations.back().boundary.boundaries.push_back(bcase);
+                    inBoundaryItem = true;
+                }
+                continue;
+            }
+
+            // --- Boundary item sub-keys ---
+            if (inBoundaryItem && indent > boundaryListKeyIndent) {
+                size_t colonPos = trimmed.find(':');
+                if (colonPos != std::string::npos &&
+                    !config.operations.empty() &&
+                    config.operations.back().type == AssemblyOperation::BOUNDARY &&
+                    !config.operations.back().boundary.boundaries.empty()) {
+                    std::string key = trim(trimmed.substr(0, colonPos));
+                    std::string val = stripQuotes(trim(trimmed.substr(colonPos + 1)));
+                    auto& bcase = config.operations.back().boundary.boundaries.back();
+
+                    if (key == "part") {
+                        try { bcase.pid = std::stoi(val); } catch(...) { bcase.partName = val; }
+                    } else if (key == "dof") bcase.dof = val;
+                    else if (key == "select") bcase.select = val;
+                    else if (key == "angle") { try { bcase.angle = std::stod(val); } catch(...) {} }
+                    else if (key == "set_id") { try { bcase.setId = std::stoi(val); } catch(...) {} }
+                    else if (key == "dofx") { try { bcase.dofx = std::stoi(val); } catch(...) {} }
+                    else if (key == "dofy") { try { bcase.dofy = std::stoi(val); } catch(...) {} }
+                    else if (key == "dofz") { try { bcase.dofz = std::stoi(val); } catch(...) {} }
+                    else if (key == "dofrx") { try { bcase.dofrx = std::stoi(val); } catch(...) {} }
+                    else if (key == "dofry") { try { bcase.dofry = std::stoi(val); } catch(...) {} }
+                    else if (key == "dofrz") { try { bcase.dofrz = std::stoi(val); } catch(...) {} }
+                    else if (key == "direction" && !val.empty() && val.front() == '[' && val.back() == ']') {
+                        std::string inner = val.substr(1, val.size()-2);
+                        std::istringstream iss(inner);
+                        std::string tok;
+                        int di = 0;
+                        while (std::getline(iss, tok, ',') && di < 3) {
+                            try { bcase.direction[di] = std::stod(trim(tok)); } catch(...) {}
+                            di++;
+                        }
+                    }
+                    continue;
+                }
+            }
+
+            // Exit boundary list when indent decreases
+            if (inBoundaryList && indent <= boundaryListKeyIndent) {
+                inBoundaryList = false;
+                inBoundaryItem = false;
+            }
+
+            // --- RBE list items: "      - part: 9" ---
+            if (inRbeList && indent > rbeListKeyIndent && trimmed[0] == '-' && trimmed.size() >= 2 && trimmed[1] == ' ') {
+                std::string afterDash = trim(trimmed.substr(2));
+                size_t colonPos = afterDash.find(':');
+                if (colonPos != std::string::npos &&
+                    !config.operations.empty() &&
+                    config.operations.back().type == AssemblyOperation::RBE) {
+                    std::string key = trim(afterDash.substr(0, colonPos));
+                    std::string val = stripQuotes(trim(afterDash.substr(colonPos + 1)));
+                    RbeCase rcase;
+                    if (key == "part") {
+                        try { rcase.pid = std::stoi(val); } catch(...) { rcase.partName = val; }
+                    } else if (key == "select") rcase.select = val;
+                    else if (key == "type") rcase.type = val;
+                    else if (key == "mode") rcase.mode = val;
+                    config.operations.back().rbe.constraints.push_back(rcase);
+                    inRbeItem = true;
+                }
+                continue;
+            }
+
+            // --- RBE item sub-keys ---
+            if (inRbeItem && indent > rbeListKeyIndent) {
+                size_t colonPos = trimmed.find(':');
+                if (colonPos != std::string::npos &&
+                    !config.operations.empty() &&
+                    config.operations.back().type == AssemblyOperation::RBE &&
+                    !config.operations.back().rbe.constraints.empty()) {
+                    std::string key = trim(trimmed.substr(0, colonPos));
+                    std::string val = stripQuotes(trim(trimmed.substr(colonPos + 1)));
+                    auto& rcase = config.operations.back().rbe.constraints.back();
+
+                    if (key == "part") {
+                        try { rcase.pid = std::stoi(val); } catch(...) { rcase.partName = val; }
+                    } else if (key == "select") rcase.select = val;
+                    else if (key == "type") rcase.type = val;
+                    else if (key == "mode") rcase.mode = val;
+                    else if (key == "angle") { try { rcase.angle = std::stod(val); } catch(...) {} }
+                    else if (key == "direction" && !val.empty() && val.front() == '[' && val.back() == ']') {
+                        std::string inner = val.substr(1, val.size()-2);
+                        std::istringstream iss(inner);
+                        std::string tok;
+                        int di = 0;
+                        while (std::getline(iss, tok, ',') && di < 3) {
+                            try { rcase.direction[di] = std::stod(trim(tok)); } catch(...) {}
+                            di++;
+                        }
+                    }
+                    continue;
+                }
+            }
+
+            // Exit RBE list when indent decreases
+            if (inRbeList && indent <= rbeListKeyIndent) {
+                inRbeList = false;
+                inRbeItem = false;
+            }
+
             // --- Operation list item start: "  - type: replace" ---
-            if (!inPointsList && trimmed[0] == '-' && trimmed.size() >= 2 && trimmed[1] == ' ') {
+            if (!inPointsList && !inMatdbRulesList && !inLoadCasesList && !inContactActionsList && !inBoundaryList && !inRbeList && trimmed[0] == '-' && trimmed.size() >= 2 && trimmed[1] == ' ') {
                 inLayersList = false;
                 inLayerItem = false;
                 inTargetsList = false;
@@ -330,6 +711,8 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                 inDataBboxSection = false;
                 inShapeSection = false;
                 inPointsList = false;
+                inMatdbRulesList = false;
+                inMatdbRuleItem = false;
 
                 std::string afterDash = trim(trimmed.substr(2));
                 size_t colonPos = afterDash.find(':');
@@ -377,6 +760,16 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             op.type = AssemblyOperation::OFFSET;
                         } else if (val == "matswap") {
                             op.type = AssemblyOperation::MATSWAP;
+                        } else if (val == "matdb") {
+                            op.type = AssemblyOperation::MATDB;
+                        } else if (val == "load") {
+                            op.type = AssemblyOperation::LOAD;
+                        } else if (val == "contact") {
+                            op.type = AssemblyOperation::CONTACT;
+                        } else if (val == "boundary") {
+                            op.type = AssemblyOperation::BOUNDARY;
+                        } else if (val == "rbe") {
+                            op.type = AssemblyOperation::RBE;
                         } else {
                             throw std::runtime_error("Unknown operation type: " + val);
                         }
@@ -669,6 +1062,37 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                                 parseIntList(val, op.matswap.mids);
                             } else if (key == "swap_all") {
                                 op.matswap.swapAll = (val == "true" || val == "yes" || val == "1");
+                            }
+                        } else if (op.type == AssemblyOperation::LOAD) {
+                            if (key == "loads") {
+                                inLoadCasesList = true;
+                                loadCasesKeyIndent = indent;
+                            }
+                        } else if (op.type == AssemblyOperation::CONTACT) {
+                            if (key == "contacts" || key == "actions") {
+                                inContactActionsList = true;
+                                contactActionsKeyIndent = indent;
+                            }
+                        } else if (op.type == AssemblyOperation::BOUNDARY) {
+                            if (key == "boundaries") {
+                                inBoundaryList = true;
+                                boundaryListKeyIndent = indent;
+                            }
+                        } else if (op.type == AssemblyOperation::RBE) {
+                            if (key == "constraints" || key == "rbe") {
+                                inRbeList = true;
+                                rbeListKeyIndent = indent;
+                            }
+                        } else if (op.type == AssemblyOperation::MATDB) {
+                            if (key == "database") {
+                                op.matdb.databasePath = val;
+                            } else if (key == "mat_type") {
+                                op.matdb.globalMatType = val;
+                            } else if (key == "thermal") {
+                                op.matdb.globalThermal = (val == "true" || val == "yes" || val == "1");
+                            } else if (key == "materials") {
+                                inMatdbRulesList = true;
+                                matdbRulesKeyIndent = indent;
                             }
                         }
                     } catch (...) {}

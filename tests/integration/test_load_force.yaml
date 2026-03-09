@@ -1,0 +1,14 @@
+model: test_load_model.k
+output: test_load_force_result.k
+
+loads:
+  - part: 1
+    mode: force
+    value: 1000.0
+    direction: [0, 0, 1]
+    select: direction
+    angle: 45.0
+    curve:
+      - [0.0, 0.0]
+      - [0.001, 1.0]
+      - [0.01, 1.0]

@@ -12,6 +12,11 @@
       "Bash(/d/KooRemapper/tests/test_multipart_swap.yaml:*)",
       "Bash(/d/KooRemapper/examples/matswap/test_multipart.yaml:*)",
       "Bash(/d/KooRemapper/examples/matswap/test_mid.yaml:*)"
+    ],
+    "additionalDirectories": [
+      "d:\\KooRemapper\\examples",
+      "d:\\KooRemapper\\examples\\boundary",
+      "d:\\KooRemapper\\.github"
     ]
   }
 }

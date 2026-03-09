@@ -210,8 +210,110 @@ struct MatswapOperation {
     bool swapAll = false;     // true = swap all parts in model
 };
 
+struct MatdbMaterialRule {
+    std::string match;        // name/tag substring, "*" = catch-all
+    int mid = 0;              // direct MID match (0 = use match string)
+    std::string matType;      // override structural card type (empty = use global)
+    int thermalOverride = -1; // -1=use global, 0=false, 1=true
+};
+
+struct MatdbOperation {
+    std::string databasePath;                  // path to material_db.json (empty = default)
+    std::string globalMatType = "MAT_ELASTIC"; // default structural card type
+    bool globalThermal = false;                // global thermal toggle
+    std::vector<MatdbMaterialRule> rules;       // per-material override rules
+};
+
+struct LoadCurvePoint {
+    double time = 0.0;
+    double value = 0.0;
+};
+
+struct LoadCase {
+    int pid = 0;                          // PID (0 = use partName)
+    std::string partName;                 // part name substring match
+
+    std::string mode = "pressure";        // force | pressure | normal_pressure
+    double value = 0.0;                   // [N] for force, [MPa] for pressure
+    double direction[3] = {0, 0, 0};      // load direction vector
+
+    std::string select = "direction";     // direction | set | tied
+    double angle = 45.0;                  // direction filter tolerance (degrees)
+    int setId = 0;                        // set mode: existing SET_SEGMENT ID
+    int contactId = 0;                    // tied mode: specific CONTACT ID (0=auto-search)
+
+    std::vector<LoadCurvePoint> curve;    // time-value pairs (optional)
+};
+
+struct LoadOperation {
+    std::vector<LoadCase> loads;
+};
+
+struct BoundaryCase {
+    int pid = 0;
+    std::string partName;
+    std::string dof = "all";           // all|xyz|x|y|z|xy|xz|yz|custom
+    int dofx=0, dofy=0, dofz=0;
+    int dofrx=0, dofry=0, dofrz=0;
+    std::string select = "direction";  // direction | set
+    double direction[3] = {0,0,0};
+    double angle = 45.0;
+    int setId = 0;                     // select=set: existing SET_NODE ID
+};
+
+struct BoundaryOperation {
+    std::vector<BoundaryCase> boundaries;
+};
+
+struct ContactSide {
+    int pid = 0;                          // single PID
+    std::vector<int> pids;                // multiple PIDs
+    bool asSegment = false;               // extract surface → SET_SEGMENT
+    bool facing = false;                  // facing filter
+};
+
+struct ContactAction {
+    std::string action;                   // create | detect
+
+    // create options
+    std::string type = "auto";            // auto|tied|mortar|tied_mortar|single|eroding|forming
+    ContactSide slave;
+    ContactSide master;
+    double friction = -1.0;               // -1 = not set
+    std::string title;
+
+    // detect options
+    std::string scope;                    // "all" or empty
+    std::vector<std::string> includeKeys; // part name include keywords
+    std::vector<std::string> excludeKeys; // part name exclude keywords
+    double tolerance = 0.1;
+    double normalAngle = 45.0;
+    bool autoCreate = false;
+    std::string titlePrefix;
+    std::string skipExisting;             // "tied" | "all" | ""
+    bool subtractExisting = false;
+};
+
+struct ContactOperation {
+    std::vector<ContactAction> actions;
+};
+
+struct RbeCase {
+    int pid = 0;
+    std::string partName;
+    std::string select = "direction";  // direction | all
+    double direction[3] = {0, 0, 0};
+    double angle = 45.0;
+    std::string type = "rbe3";         // rbe2 | rbe3
+    std::string mode = "spider";       // spider | face
+};
+
+struct RbeOperation {
+    std::vector<RbeCase> constraints;
+};
+
 struct AssemblyOperation {
-    enum Type { REPLACE, SQUEEZE, RESTACK, BEND, INDENT, FORMSTRAIN, TET10_CONVERT, REFINE, ELFORM, DISCONNECT, IGA, WARPAGE, OFFSET, MATSWAP };
+    enum Type { REPLACE, SQUEEZE, RESTACK, BEND, INDENT, FORMSTRAIN, TET10_CONVERT, REFINE, ELFORM, DISCONNECT, IGA, WARPAGE, OFFSET, MATSWAP, MATDB, LOAD, CONTACT, BOUNDARY, RBE };
     Type type;
     ReplaceOperation replace;
     SqueezeOperation squeeze;
@@ -227,6 +329,11 @@ struct AssemblyOperation {
     WarpageOperation warpage;
     OffsetOperation offset;
     MatswapOperation matswap;
+    MatdbOperation matdb;
+    LoadOperation load;
+    ContactOperation contact;
+    BoundaryOperation boundary;
+    RbeOperation rbe;
 };
 
 struct AssemblyConfig {
