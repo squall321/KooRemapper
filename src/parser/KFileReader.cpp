@@ -1064,7 +1064,7 @@ bool KFileReader::parseMatViscoelasticSection(std::ifstream& file) {
         currentLine_++;
         linesProcessed_++;
 
-        if (!line.empty() && line.back() == '') {
+        if (!line.empty() && line.back() == '\r') {
             line.pop_back();
         }
 
