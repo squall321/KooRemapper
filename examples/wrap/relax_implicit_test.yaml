@@ -1,0 +1,4 @@
+model: cylinder_wrapped.k
+output: cylinder_relaxed_impl.k
+level: 3
+mode: implicit

@@ -1,0 +1,6 @@
+model: cylinder_wrapped.k
+output: cylinder_relaxed.k
+level: 2
+mode: explicit
+drterm: 100.0
+endtime: 1.0
