@@ -770,6 +770,8 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             op.type = AssemblyOperation::BOUNDARY;
                         } else if (val == "rbe") {
                             op.type = AssemblyOperation::RBE;
+                        } else if (val == "wrap") {
+                            op.type = AssemblyOperation::WRAP;
                         } else {
                             throw std::runtime_error("Unknown operation type: " + val);
                         }
@@ -1082,6 +1084,36 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             if (key == "constraints" || key == "rbe") {
                                 inRbeList = true;
                                 rbeListKeyIndent = indent;
+                            }
+                        } else if (op.type == AssemblyOperation::WRAP) {
+                            if (key == "target_pid") {
+                                if (!val.empty() && val.front() == '[') {
+                                    // Parse bracket list [10, 11, 12]
+                                    std::string inner = val.substr(1, val.size() - 2);
+                                    std::istringstream iss(inner);
+                                    std::string tok;
+                                    while (std::getline(iss, tok, ',')) {
+                                        try { op.wrap.targetPids.push_back(std::stoi(trim(tok))); } catch (...) {}
+                                    }
+                                } else {
+                                    try { op.wrap.targetPids.push_back(std::stoi(val)); } catch (...) {}
+                                }
+                            } else if (key == "axis") {
+                                op.wrap.axis = val;
+                            } else if (key == "tension") {
+                                try { op.wrap.tension = std::stod(val); } catch (...) {}
+                            } else if (key == "center") {
+                                if (!val.empty() && val.front() == '[') {
+                                    std::string inner = val.substr(1, val.size() - 2);
+                                    size_t comma = inner.find(',');
+                                    if (comma != std::string::npos) {
+                                        try {
+                                            op.wrap.centerA = std::stod(trim(inner.substr(0, comma)));
+                                            op.wrap.centerB = std::stod(trim(inner.substr(comma + 1)));
+                                            op.wrap.autoCenter = false;
+                                        } catch (...) {}
+                                    }
+                                }
                             }
                         } else if (op.type == AssemblyOperation::MATDB) {
                             if (key == "database") {

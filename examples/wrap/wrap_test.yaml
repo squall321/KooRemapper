@@ -1,0 +1,10 @@
+model: cylinder_2layer.k
+output: cylinder_wrapped
+
+material:
+  E: 210000.0
+  nu: 0.3
+
+target_pid: [1, 2]
+axis: z
+tension: 100.0

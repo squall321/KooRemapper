@@ -10120,4 +10120,228 @@ bool ModelAssembler::applyRbe(const RbeOperation& op) {
     return true;
 }
 
+// ── applyWrap() ─────────────────────────────────────────────────────────────
+
+bool ModelAssembler::applyWrap(const WrapOperation& op, double E, double nu) {
+    if (op.targetPids.empty()) {
+        errorMessage_ = "wrap: no target PIDs specified";
+        return false;
+    }
+    if (op.tension == 0.0) {
+        errorMessage_ = "wrap: tension must be non-zero";
+        return false;
+    }
+
+    // Axis mapping
+    int axisMain, axis1, axis2;
+    if (op.axis == "x") { axisMain = 0; axis1 = 1; axis2 = 2; }
+    else if (op.axis == "y") { axisMain = 1; axis1 = 0; axis2 = 2; }
+    else { axisMain = 2; axis1 = 0; axis2 = 1; } // z default
+
+    // Build node index for addedNodes_
+    std::map<int, size_t> addedNodeIndex;
+    for (size_t i = 0; i < addedNodes_.size(); ++i)
+        addedNodeIndex[addedNodes_[i].id] = i;
+
+    auto getNodePos = [&](int nid, double& x, double& y, double& z) -> bool {
+        auto it = addedNodeIndex.find(nid);
+        if (it != addedNodeIndex.end()) {
+            x = addedNodes_[it->second].x;
+            y = addedNodes_[it->second].y;
+            z = addedNodes_[it->second].z;
+            return true;
+        }
+        const auto* node = baseMesh_.getNode(nid);
+        if (!node) return false;
+        x = node->position.x; y = node->position.y; z = node->position.z;
+        return true;
+    };
+
+    auto getCoord = [&](double x, double y, double z, int ax) -> double {
+        if (ax == 0) return x; if (ax == 1) return y; return z;
+    };
+
+    // Collect elements per PID (base + added)
+    struct LayerInfo {
+        int pid;
+        std::vector<int> elemIds;          // element IDs
+        std::vector<bool> isAdded;         // true if from addedElements_
+        std::vector<size_t> addedIdx;      // index into addedElements_ (if isAdded)
+        double avgRadius = 0.0;
+    };
+    std::vector<LayerInfo> layers(op.targetPids.size());
+    for (size_t li = 0; li < op.targetPids.size(); ++li)
+        layers[li].pid = op.targetPids[li];
+
+    // Auto-center: accumulate all node coords
+    double sumA = 0, sumB = 0;
+    int centerCount = 0;
+
+    for (auto& layer : layers) {
+        // Base mesh elements
+        for (const auto& [eid, elem] : baseMesh_.getElements()) {
+            if (elem.partId == layer.pid && removedElementIds_.count(eid) == 0) {
+                layer.elemIds.push_back(eid);
+                layer.isAdded.push_back(false);
+                layer.addedIdx.push_back(0);
+                if (op.autoCenter) {
+                    for (int i = 0; i < Element::NUM_NODES; ++i) {
+                        double x, y, z;
+                        if (getNodePos(elem.nodeIds[i], x, y, z)) {
+                            sumA += getCoord(x, y, z, axis1);
+                            sumB += getCoord(x, y, z, axis2);
+                            centerCount++;
+                        }
+                    }
+                }
+            }
+        }
+        // Added elements
+        for (size_t ai = 0; ai < addedElements_.size(); ++ai) {
+            if (addedElements_[ai].pid == layer.pid) {
+                layer.elemIds.push_back(addedElements_[ai].id);
+                layer.isAdded.push_back(true);
+                layer.addedIdx.push_back(ai);
+                if (op.autoCenter) {
+                    for (int nid : addedElements_[ai].nodeIds) {
+                        double x, y, z;
+                        if (getNodePos(nid, x, y, z)) {
+                            sumA += getCoord(x, y, z, axis1);
+                            sumB += getCoord(x, y, z, axis2);
+                            centerCount++;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    double cA = op.autoCenter ? (centerCount > 0 ? sumA / centerCount : 0.0) : op.centerA;
+    double cB = op.autoCenter ? (centerCount > 0 ? sumB / centerCount : 0.0) : op.centerB;
+
+    // Compute per-layer average radius
+    for (auto& layer : layers) {
+        double rSum = 0; int rCount = 0;
+        for (size_t ei = 0; ei < layer.elemIds.size(); ++ei) {
+            // Get element node IDs
+            const int* nodeIds;
+            int nNodes = 8;
+            if (layer.isAdded[ei]) {
+                nodeIds = addedElements_[layer.addedIdx[ei]].nodeIds.data();
+            } else {
+                const auto& elem = baseMesh_.getElements().at(layer.elemIds[ei]);
+                nodeIds = elem.nodeIds.data();
+            }
+            for (int i = 0; i < nNodes; ++i) {
+                double x, y, z;
+                if (!getNodePos(nodeIds[i], x, y, z)) continue;
+                double a = getCoord(x, y, z, axis1) - cA;
+                double b = getCoord(x, y, z, axis2) - cB;
+                rSum += std::sqrt(a*a + b*b);
+                rCount++;
+            }
+        }
+        layer.avgRadius = rCount > 0 ? rSum / rCount : 1.0;
+    }
+
+    // Validate layer ordering (inner → outer)
+    for (size_t i = 1; i < layers.size(); ++i) {
+        if (layers[i].avgRadius < layers[i-1].avgRadius) {
+            infoMessages.push_back("[wrap] WARNING: PID " + std::to_string(layers[i].pid)
+                + " (R=" + std::to_string(layers[i].avgRadius)
+                + ") has smaller radius than PID " + std::to_string(layers[i-1].pid)
+                + " (R=" + std::to_string(layers[i-1].avgRadius) + "). Check layer order.");
+        }
+    }
+
+    int N = static_cast<int>(layers.size());
+    int totalElements = 0;
+
+    // Compute stress per element
+    for (int k = 0; k < N; ++k) {
+        auto& layer = layers[k];
+        double R = layer.avgRadius;
+
+        for (size_t ei = 0; ei < layer.elemIds.size(); ++ei) {
+            const int* nodeIds;
+            int nNodes = 8;
+            if (layer.isAdded[ei]) {
+                nodeIds = addedElements_[layer.addedIdx[ei]].nodeIds.data();
+            } else {
+                const auto& elem = baseMesh_.getElements().at(layer.elemIds[ei]);
+                nodeIds = elem.nodeIds.data();
+            }
+
+            // Element centroid and radial thickness
+            double cx1 = 0, cx2 = 0;
+            double rMin = 1e30, rMax = -1e30;
+            int validN = 0;
+            for (int i = 0; i < nNodes; ++i) {
+                double x, y, z;
+                if (!getNodePos(nodeIds[i], x, y, z)) continue;
+                double a = getCoord(x, y, z, axis1) - cA;
+                double b = getCoord(x, y, z, axis2) - cB;
+                double r = std::sqrt(a*a + b*b);
+                if (r < rMin) rMin = r;
+                if (r > rMax) rMax = r;
+                cx1 += a; cx2 += b;
+                validN++;
+            }
+            if (validN == 0) continue;
+            cx1 /= validN; cx2 /= validN;
+
+            double t_elem = rMax - rMin;
+            if (t_elem < 1.0e-12) t_elem = 1.0e-6; // avoid div by zero
+
+            double theta = std::atan2(cx2, cx1);
+            double sinT = std::sin(theta), cosT = std::cos(theta);
+
+            // Hoop tension (uniform through thickness)
+            double sigma_theta = op.tension / t_elem;
+
+            // Radial compression (layer-dependent)
+            double sigma_r = -op.tension / R * static_cast<double>(N - k) / static_cast<double>(N);
+
+            // Axial = 0
+            // Transform cylindrical → Cartesian
+            // axis1-axis1, axis2-axis2, axisMain, axis1-axis2 shear
+            double s11 = sigma_theta * sinT*sinT + sigma_r * cosT*cosT;
+            double s22 = sigma_theta * cosT*cosT + sigma_r * sinT*sinT;
+            double s12 = (sigma_theta - sigma_r) * sinT * cosT;
+            double sMain = 0.0;
+
+            // Map to xx, yy, zz, xy, yz, xz
+            double sxx = 0, syy = 0, szz = 0, sxy = 0, syz = 0, sxz = 0;
+            if (axisMain == 2) { // z-axis winding
+                sxx = s11; syy = s22; szz = sMain; sxy = s12;
+            } else if (axisMain == 0) { // x-axis winding: perp = y,z
+                syy = s11; szz = s22; sxx = sMain; syz = s12;
+            } else { // y-axis winding: perp = x,z
+                sxx = s11; szz = s22; syy = sMain; sxz = s12;
+            }
+
+            StressTensor stress(sxx, syy, szz, sxy, syz, sxz);
+
+            ElementResult er;
+            er.elementId = layer.elemIds[ei];
+            er.stress = stress;
+            er.strain = StrainTensor(); // prescribed stress, no strain needed
+            er.isValid = true;
+            er.vonMisesStress = stress.vonMises();
+            er.vonMisesStrain = 0.0;
+            accumulatedResults_.push_back(er);
+            totalElements++;
+        }
+    }
+
+    std::ostringstream oss;
+    oss << "[wrap] " << N << " layers, tension=" << op.tension
+        << " N/mm, axis=" << op.axis
+        << ", center=(" << cA << "," << cB << ")"
+        << ", " << totalElements << " elements";
+    infoMessages.push_back(oss.str());
+
+    return true;
+}
+
 } // namespace KooRemapper

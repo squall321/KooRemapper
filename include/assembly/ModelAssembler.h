@@ -51,6 +51,7 @@ public:
     bool applyContact(const ContactOperation& op);
     bool applyBoundary(const BoundaryOperation& op);
     bool applyRbe(const RbeOperation& op);
+    bool applyWrap(const WrapOperation& op, double E, double nu);
     bool writeOutput(const std::string& outputPrefix);
 
     const std::vector<ElementResult>& getAccumulatedResults() const {

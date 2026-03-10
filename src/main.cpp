@@ -1466,6 +1466,8 @@ int runAssemble(const std::string& configFile, const ConsoleOutput& console) {
             ok = assembler.applyBoundary(op.boundary);
         } else if (op.type == AssemblyOperation::RBE) {
             ok = assembler.applyRbe(op.rbe);
+        } else if (op.type == AssemblyOperation::WRAP) {
+            ok = assembler.applyWrap(op.wrap, matE, matNu);
         }
 
         if (!ok) {
@@ -5455,6 +5457,76 @@ struct StandaloneYamlBase {
         else if (key == "nu") { try { matNu = std::stod(val); } catch(...) {} }
     }
 };
+
+// ── Standalone wrap ─────────────────────────────────────────────────────────
+int runWrap(const std::string& yamlFile, ConsoleOutput& console) {
+    using namespace KooRemapper;
+    StandaloneYamlBase y;
+    y.resolveFiles(yamlFile);
+
+    WrapOperation op;
+
+    std::ifstream f(yamlFile);
+    if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
+    std::string ln;
+    while (std::getline(f, ln)) {
+        std::string tr = y.trim(ln);
+        if (tr.empty() || tr[0] == '#') continue;
+        size_t cp = tr.find(':');
+        if (cp == std::string::npos) continue;
+        std::string key = y.trim(tr.substr(0, cp));
+        std::string val = y.stripQuotes(y.trim(tr.substr(cp + 1)));
+
+        y.parseCommonKey(key, val);
+
+        if (key == "target_pid") {
+            if (!val.empty() && val.front() == '[') {
+                std::string inner = val.substr(1, val.size() - 2);
+                std::istringstream iss(inner);
+                std::string tok;
+                while (std::getline(iss, tok, ',')) {
+                    try { op.targetPids.push_back(std::stoi(y.trim(tok))); } catch (...) {}
+                }
+            } else {
+                try { op.targetPids.push_back(std::stoi(val)); } catch (...) {}
+            }
+        } else if (key == "axis") {
+            op.axis = val;
+        } else if (key == "tension") {
+            try { op.tension = std::stod(val); } catch (...) {}
+        } else if (key == "center") {
+            if (!val.empty() && val.front() == '[') {
+                std::string inner = val.substr(1, val.size() - 2);
+                size_t comma = inner.find(',');
+                if (comma != std::string::npos) {
+                    try {
+                        op.centerA = std::stod(y.trim(inner.substr(0, comma)));
+                        op.centerB = std::stod(y.trim(inner.substr(comma + 1)));
+                        op.autoCenter = false;
+                    } catch (...) {}
+                }
+            }
+        }
+    }
+    f.close();
+
+    if (op.targetPids.empty()) { console.error("No target_pid specified"); return 1; }
+    if (op.tension == 0.0) { console.error("tension must be non-zero"); return 1; }
+
+    ModelAssembler assembler;
+    if (!assembler.loadBaseModel(y.resolvePath(y.modelFile))) {
+        console.error(assembler.getErrorMessage()); return 1;
+    }
+    if (!assembler.applyWrap(op, y.matE, y.matNu)) {
+        console.error(assembler.getErrorMessage()); return 1;
+    }
+    for (auto& msg : assembler.infoMessages) console.info(msg);
+    if (!assembler.writeOutput(y.getOutputPrefix())) {
+        console.error(assembler.getErrorMessage()); return 1;
+    }
+    console.success("Wrap output: " + y.getOutputPrefix() + ".k");
+    return 0;
+}
 
 // ── Standalone restack ──────────────────────────────────────────────────────
 int runRestack(const std::string& yamlFile, ConsoleOutput& console) {
@@ -9916,6 +9988,7 @@ int main(int argc, char* argv[]) {
             console.println("  iga          Embed FE part in IGA (NURBS) trivariate box");
             console.println("  warpage      Apply warpage deflection to shell/solid parts");
             console.println("  offset       Extrude surface elements to solid layer(s)");
+            console.println("  wrap         Apply winding tension prestress (hoop + radial)");
             console.println("  info         Display information about a mesh file");
             console.println("  help         Show help for a command");
             console.println("  version      Show version information");
@@ -10411,6 +10484,16 @@ int main(int argc, char* argv[]) {
         }
         printBanner(console);
         return runOffset(argv[2], console);
+    }
+
+    // Wrap command
+    if (command == "wrap") {
+        if (argc < 3) {
+            console.error("Usage: KooRemapper wrap <config.yaml>");
+            return 1;
+        }
+        printBanner(console);
+        return runWrap(argv[2], console);
     }
 
     // Unknown command

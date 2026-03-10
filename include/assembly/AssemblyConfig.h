@@ -312,8 +312,17 @@ struct RbeOperation {
     std::vector<RbeCase> constraints;
 };
 
+struct WrapOperation {
+    std::vector<int> targetPids;     // layer PIDs (inner → outer order)
+    std::string axis = "z";          // winding axis: x | y | z
+    double centerA = 0.0;            // center coord in 1st perpendicular axis
+    double centerB = 0.0;            // center coord in 2nd perpendicular axis
+    bool autoCenter = true;          // auto-detect from geometry
+    double tension = 0.0;            // wrapping tension [N/mm] (force per unit width)
+};
+
 struct AssemblyOperation {
-    enum Type { REPLACE, SQUEEZE, RESTACK, BEND, INDENT, FORMSTRAIN, TET10_CONVERT, REFINE, ELFORM, DISCONNECT, IGA, WARPAGE, OFFSET, MATSWAP, MATDB, LOAD, CONTACT, BOUNDARY, RBE };
+    enum Type { REPLACE, SQUEEZE, RESTACK, BEND, INDENT, FORMSTRAIN, TET10_CONVERT, REFINE, ELFORM, DISCONNECT, IGA, WARPAGE, OFFSET, MATSWAP, MATDB, LOAD, CONTACT, BOUNDARY, RBE, WRAP };
     Type type;
     ReplaceOperation replace;
     SqueezeOperation squeeze;
@@ -334,6 +343,7 @@ struct AssemblyOperation {
     ContactOperation contact;
     BoundaryOperation boundary;
     RbeOperation rbe;
+    WrapOperation wrap;
 };
 
 struct AssemblyConfig {
