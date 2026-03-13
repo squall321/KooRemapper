@@ -16,30 +16,61 @@
 6. [prestress — 초기 응력/변형률 계산](#6-prestress--초기-응력변형률-계산)
 7. [squeeze — 간섭 끼워맞춤](#7-squeeze--간섭-끼워맞춤)
 8. [generate / generate-var — 메시 생성](#8-generate--generate-var--메시-생성)
-9. [assemble — 통합 어셈블리 명령](#9-assemble--통합-어셈블리-명령)
-   - 9.1 [replace](#91-replace--상세-메시-교체)
-   - 9.2 [squeeze (assemble 내)](#92-squeeze-assemble-내)
-   - 9.3 [restack](#93-restack--레이어-재적층)
-   - 9.4 [bend](#94-bend--굽힘-변형--초기-응력)
-   - 9.5 [indent](#95-indent--압입--엠보싱)
-   - 9.6 [formstrain](#96-formstrain--성형-소성-변형률)
-   - 9.7 [tet10 / hex20 / quad8 / tria6](#97-tet10--hex20--quad8--tria6--2차-요소-변환)
-   - 9.8 [refine](#98-refine--메시-세분화)
-   - 9.9 [elform](#99-elform--요소-공식-변경)
-   - 9.10 [disconnect](#910-disconnect--노드-분리)
-   - 9.11 [iga](#911-iga--등기하해석-nurbs-박스-생성)
-10. [matswap — 재료 번들 교체](#10-matswap--재료-번들-교체)
-11. [implicit — Explicit→Implicit 변환](#11-implicit--explicitimplicit-변환)
-12. [contact — 접촉 정의 관리](#12-contact--접촉-정의-관리)
-    - 12.1 [analyze — 접촉 분석](#121-analyze--접촉-분석)
-    - 12.2 [create — 접촉 생성](#122-create--접촉-생성)
-    - 12.3 [convert — 접촉 변환](#123-convert--접촉-변환)
-    - 12.4 [modify — 접촉 수정](#124-modify--접촉-수정)
-    - 12.5 [remove — 접촉 삭제](#125-remove--접촉-삭제)
-    - 12.6 [detect — 접촉 자동 감지](#126-detect--접촉-자동-감지)
-    - 12.7 [세부 옵션 (Optional Cards A~G)](#127-세부-옵션-optional-cards-ag)
-13. [수학 이론](#13-수학-이론)
-14. [출력 파일 형식](#14-출력-파일-형식)
+9. [unfold — 굽힘 메시 전개](#9-unfold--굽힘-메시-전개)
+10. [strain — 변형률 계산](#10-strain--변형률-계산)
+11. [info — 메시 정보](#11-info--메시-정보)
+12. [restack — 레이어 재적층](#12-restack--레이어-재적층)
+13. [bend — 굽힘 변형 + 초기 응력](#13-bend--굽힘-변형--초기-응력)
+14. [indent — 압입/엠보싱](#14-indent--압입엠보싱)
+15. [formstrain — 성형 소성 변형률](#15-formstrain--성형-소성-변형률)
+16. [convert — 2차 요소 변환](#16-convert--2차-요소-변환)
+17. [refine — 메시 세분화](#17-refine--메시-세분화)
+18. [elform — 요소 공식 변경](#18-elform--요소-공식-변경)
+19. [disconnect — 노드 분리](#19-disconnect--노드-분리)
+20. [iga — 등기하해석 NURBS 박스 생성](#20-iga--등기하해석-nurbs-박스-생성)
+21. [warpage — 워피지 보정](#21-warpage--워피지-보정)
+22. [offset — 셸 오프셋 솔리드 생성](#22-offset--셸-오프셋-솔리드-생성)
+23. [matswap — 재료 번들 교체](#23-matswap--재료-번들-교체)
+24. [matdb — 재료 DB 교체](#24-matdb--재료-db-교체)
+25. [contact — 접촉 정의 관리](#25-contact--접촉-정의-관리)
+    - 25.1 [analyze — 접촉 분석](#251-analyze--접촉-분석)
+    - 25.2 [create — 접촉 생성](#252-create--접촉-생성)
+    - 25.3 [convert — 접촉 변환](#253-convert--접촉-변환)
+    - 25.4 [modify — 접촉 수정](#254-modify--접촉-수정)
+    - 25.5 [remove — 접촉 삭제](#255-remove--접촉-삭제)
+    - 25.6 [detect — 접촉 자동 감지](#256-detect--접촉-자동-감지)
+    - 25.7 [세부 옵션 (Optional Cards A~G)](#257-세부-옵션-optional-cards-ag)
+26. [load — 하중 적용](#26-load--하중-적용)
+27. [boundary — 경계 조건 적용](#27-boundary--경계-조건-적용)
+28. [rbe — RBE 구속 조건](#28-rbe--rbe-구속-조건)
+29. [implicit — Explicit→Implicit 변환](#29-implicit--explicitimplicit-변환)
+30. [modal — 고유진동수(모달) 해석 변환](#30-modal--고유진동수모달-해석-변환)
+31. [relax — Dynamic Relaxation 설정](#31-relax--dynamic-relaxation-설정)
+32. [explicit — 순수 Explicit 복원](#32-explicit--순수-explicit-복원)
+33. [wrap — 와인딩 인장 프리스트레스](#33-wrap--와인딩-인장-프리스트레스)
+34. [optimize — 재료별 해석 최적화](#34-optimize--재료별-해석-최적화)
+35. [ale — ALE 변환](#35-ale--ale-변환)
+36. [stabilize — Explicit 솔버 안정화](#36-stabilize--explicit-솔버-안정화)
+37. [키워드 제거(strip) 기능](#37-키워드-제거strip-기능)
+38. [assemble — 통합 어셈블리](#38-assemble--통합-어셈블리)
+    - 38.1 [replace](#381-replace--상세-메시-교체)
+    - 38.2 [squeeze (assemble 내)](#382-squeeze-assemble-내)
+    - 38.3 [restack](#383-restack--레이어-재적층)
+    - 38.4 [bend](#384-bend--굽힘-변형--초기-응력)
+    - 38.5 [indent](#385-indent--압입--엠보싱)
+    - 38.6 [formstrain](#386-formstrain--성형-소성-변형률)
+    - 38.7 [tet10 / hex20 / quad8 / tria6](#387-tet10--hex20--quad8--tria6--2차-요소-변환)
+    - 38.8 [refine](#388-refine--메시-세분화)
+    - 38.9 [elform](#389-elform--요소-공식-변경)
+    - 38.10 [disconnect](#3810-disconnect--노드-분리)
+    - 38.11 [iga](#3811-iga--등기하해석-nurbs-박스-생성)
+    - 38.12 [warpage](#3812-warpage--워피지-보정)
+    - 38.13 [offset](#3813-offset--셸-오프셋-솔리드-생성)
+    - 38.14 [matswap](#3814-matswap--재료-번들-교체)
+    - 38.15 [matdb](#3815-matdb--재료-db-교체)
+    - 38.16 [wrap](#3816-wrap--와인딩-인장-프리스트레스)
+39. [수학 이론](#39-수학-이론)
+40. [출력 파일 형식](#40-출력-파일-형식)
 
 ---
 
@@ -56,13 +87,16 @@ KooRemapper는 LS-DYNA FEA 해석을 위한 **메시 전처리 도구**입니다
 | **메시 매핑** | HEX8 등매개변수 매핑, QUAD4 셸 기반 매핑 |
 | **초기 응력** | 기준-변형 형상 간 변형률/응력 계산, dynain 출력 |
 | **간섭 조립** | 부품 압축(squeeze) + 역방향 prestress |
-| **형상 변형** | 굽힘(bend), 압입(indent), 엠보싱(emboss) |
+| **형상 변형** | 굽힘(bend), 압입(indent), 엠보싱(emboss), 워피지(warpage) |
 | **적층 구조** | 레이어별 두께·재료 재정의(restack) |
 | **성형 변형** | 이면각 기반 소성 변형률(formstrain) |
 | **메시 변환** | 2차 요소 변환(TET10/HEX20 등), 세분화(refine), ELFORM 변경 |
 | **토폴로지** | 노드 분리(disconnect), CZM·MEFEM 인터페이스 생성 |
 | **등기하해석** | FE solid → IGA NURBS box 래핑(IGA) |
+| **셸 오프셋** | 셸 표면 추출 → 솔리드 압출(offset) |
+| **재료 관리** | 재료 번들 교체(matswap), 재료 DB 교체(matdb) |
 | **메시 생성** | 변밀도 메시 생성(generate-var) |
+| **해석 설정** | Implicit/Modal/DR/ALE/Stabilize 변환 |
 
 ---
 
@@ -91,19 +125,58 @@ cmake --build build --config Release
 KooRemapper.exe <command> [options] ...
 
 Commands:
+  # 메시 처리
   map            HEX8 구조화 메시를 굽힘 참조 형상에 매핑
   shellmap       QUAD4 셸 참조 기반 상세 메시 매핑
-  unfold         굽힘 구조화 메시로부터 평면 메시 생성
+  unfold         굽힘 구조화 메시로부터 평면 메시 전개
   generate       테스트용 예제 메시 생성
   generate-var   YAML 설정 기반 변밀도 메시 생성
+
+  # 분석
   strain         두 메시 간 변형률 계산
   prestress      변형 형상 기반 초기 응력 계산 + dynain 출력
-  squeeze        간섭 끼워맞춤 초기 변형 계산
-  assemble       다중 오퍼레이션 통합 어셈블리
-  matswap        재료 번들 교체 (MAT/SECTION/HGID/CURVE)
-  implicit       Explicit K 파일 → Implicit 해석 변환
-  contact        접촉 정의 분석/생성/변환/수정/삭제/자동 감지
   info           메시 파일 정보 출력
+
+  # 형상 변형 (단독 실행)
+  squeeze        간섭 끼워맞춤 초기 변형 계산
+  restack        레이어 재적층
+  bend           굽힘 변형 + 초기 응력
+  indent         압입 / 엠보싱 변형
+  formstrain     성형 소성 변형률 계산
+  warpage        워피지(면외 변형) 보정
+  offset         셸 오프셋 솔리드 생성
+  wrap           와인딩 인장 프리스트레스
+
+  # 메시 변환
+  convert        2차 요소 변환 (TET10/HEX20/QUAD8/TRIA6)
+  refine         메시 세분화 (1:2, 1:3)
+  elform         요소 공식(ELFORM) 변경
+  disconnect     파트 간 노드 분리 (full/czm/mefem)
+  iga            등기하해석(IGA) NURBS 박스 생성
+
+  # 재료/접촉 관리
+  matswap        재료 번들 교체
+  matdb          재료 DB 교체
+  contact        접촉 정의 분석/생성/변환/수정/삭제/자동감지
+
+  # 하중/경계 조건
+  load           하중 적용
+  boundary       경계 조건 적용
+  rbe            RBE 구속 조건
+
+  # 해석 설정
+  implicit       Explicit → Implicit 해석 변환
+  modal          고유진동수(모달) 해석 변환
+  relax          Dynamic Relaxation 설정
+  explicit       순수 Explicit 복원 (모든 비-Explicit 키워드 제거)
+  optimize       재료별 해석 최적화
+  ale            ALE(Arbitrary Lagrangian-Eulerian) 변환
+  stabilize      Explicit 솔버 안정화 (12단계)
+
+  # 통합 실행
+  assemble       다중 오퍼레이션 통합 어셈블리
+
+  # 유틸리티
   help           도움말
   version        버전 정보
 ```
@@ -321,117 +394,153 @@ zones:
 
 ---
 
-## 9. assemble — 통합 어셈블리 명령
+## 9. unfold — 굽힘 메시 전개
 
-### 개요
+### 용도
+굽힘(bent) 구조화 HEX8 메시로부터 **평면(flat) 전개 메시**를 생성합니다.
+`map` 명령의 역방향 연산으로, 굽힘 구조화 메시의 호 길이(arc-length) 매개변수화를 사용하여
+평면 형상을 복원합니다.
 
-여러 오퍼레이션을 **순차적으로 적용**하는 통합 명령.
-기본 모델을 로드하고 각 오퍼레이션을 순서대로 실행하며,
-누적된 초기 응력을 단일 dynain 파일로 출력합니다.
+### 사용법
 
 ```bash
-KooRemapper.exe assemble <config.yaml>
+KooRemapper.exe unfold <bent_mesh.k> <output_flat.k>
 ```
 
-### 공통 YAML 구조
+### 파라미터
+
+| 파라미터 | 설명 |
+|----------|------|
+| `bent_mesh.k` | 굽힘 구조화 HEX8 메시 (입력) |
+| `output_flat.k` | 전개된 평면 메시 (출력) |
+
+### 동작 원리
+
+1. 입력 메시의 구조화 격자 차원(I, J, K) 자동 감지
+2. 각 축 방향으로 호 길이(arc-length) 계산
+3. 호 길이를 기반으로 평면 좌표 재매핑
+
+### 출력
+
+- `output_flat.k`: 전개된 평면 메시
+- 콘솔: 격자 차원(I, J, K) 및 평면 길이(I=호 길이, J, K) 출력
+
+### 주의사항
+- 입력 메시는 반드시 **규칙적 HEX8 구조화 메시**여야 합니다
+- 비구조화 메시에는 사용할 수 없습니다
+
+---
+
+## 10. strain — 변형률 계산
+
+### 용도
+**기준 형상(reference)**과 **변형 형상(deformed)** 메시 쌍 간의 변형률을 계산하여
+CSV 파일로 출력합니다.
+
+### 사용법
+
+```bash
+KooRemapper.exe strain <ref_mesh.k> <def_mesh.k> <output.csv> [--type engineering|green|log]
+```
+
+### 파라미터
+
+| 파라미터 | 설명 | 기본값 |
+|----------|------|--------|
+| `ref_mesh.k` | 기준 형상 메시 (입력) | — |
+| `def_mesh.k` | 변형 형상 메시 (입력) | — |
+| `output.csv` | 변형률 결과 CSV (출력) | — |
+| `--type` | 변형률 계산 방식 | `engineering` |
+
+### 변형률 유형
+
+| 유형 | 설명 |
+|------|------|
+| `engineering` | 공학 변형률 (소변형 가정) |
+| `green` | Green-Lagrange 변형률 (대변형, 비선형 항 포함) |
+| `log` | 로그 변형률 (진변형률, 대변형) |
+
+### 출력
+
+- `output.csv`: 요소별 6개 변형률 성분 (εxx, εyy, εzz, εxy, εyz, εxz)
+
+---
+
+## 11. info — 메시 정보
+
+### 용도
+LS-DYNA K-파일의 메시 정보를 분석하여 콘솔에 출력합니다.
+
+### 사용법
+
+```bash
+KooRemapper.exe info <mesh_file.k>
+```
+
+### 출력 정보
+
+| 항목 | 설명 |
+|------|------|
+| 파일명 | 입력 K-파일 이름 |
+| 노드 수 | 전체 노드 개수 |
+| 요소 수 | 전체 요소 개수 |
+| 파트 수 | 파트 개수 |
+| 바운딩 박스 | X/Y/Z 최소~최대 범위 |
+| 크기 | X/Y/Z 방향 길이 |
+| 검증 결과 | 메시 유효성 검사 |
+| 요소 품질 | Jacobian 최소/최대, 음수 Jacobian 요소 수 |
+
+---
+
+## 12. restack — 레이어 재적층
+
+### 용도
+기존 파트를 두께 방향으로 제거하고, **각기 다른 두께와 재료**를 가진 레이어 스택으로 재생성합니다.
+
+### 사용법
+
+```bash
+KooRemapper.exe restack <config.yaml>
+```
+
+### YAML 형식
 
 ```yaml
-base_model: model.k             # 기본 모델 (필수)
-output: result                  # 출력 접두어 (필수)
-
-material:                       # 전역 재료 (선택)
+model: base.k
+output: restacked
+target_pid: 1
+direction: z              # auto | x | y | z (적층 방향)
+element_type: solid       # solid | tshell | shell
+material:
   E: 210000
   nu: 0.3
-
-dynamic_relaxation: true        # *CONTROL_DYNAMIC_RELAXATION 자동 삽입
-dynain_embed: false             # true: dynain을 메인 파일에 인라인 삽입
-
-operations:
-  - type: <op_type>
-    ...
+layers:
+  - thickness: 0.3
+    material_card: |
+      *MAT_ELASTIC
+      $#     mid        ro         e        pr
+        MID001  7.85E-09    210000       0.3
+  - thickness: 0.5
+    material_card: |
+      *MAT_ELASTIC
+      $#     mid        ro         e        pr
+        MID001  2.50E-09     70000       0.33
 ```
 
-### 공통 특성
-- **원본 키워드 보존**: `*CONTACT`, `*BOUNDARY`, `*LOAD` 등 미파싱 키워드 그대로 유지
-- **응력 누적**: 동일 요소에 여러 오퍼레이션 적용 시 응력 합산(`std::map` 기반)
-- **ID 자동 관리**: 파트/섹션/노드/요소 ID 자동 발급 (충돌 방지)
+### 파라미터
 
----
-
-### 9.1 replace — 상세 메시 교체
-
-#### 용도
-모델 내 특정 파트(coarse)를 상세 메시(detail)로 교체.
-선택적으로 굽힘 초기 응력(prestress) 자동 계산.
-
-#### YAML
-
-```yaml
-- type: replace
-  target_pid: 3           # 교체 대상 파트 ID
-  detail_flat: detail.k   # 평면 상세 메시
-  shell_bent: bent.k      # 굽힘 QUAD4 셸 참조 (필수)
-  prestress: true         # 굽힘 초기 응력 계산 (기본: false)
-```
-
-#### 동작
-1. `target_pid` 파트 제거
-2. `detail_flat` 메시를 `shell_bent` 기준으로 shellmap 매핑
-3. 새 노드/요소 ID 발급 (기존 최대 ID + offset)
-4. `prestress: true` 시 평면→굽힘 변형률/응력 계산 → dynain 축적
-
-#### ID 재번호화
-- 노드: `new_id = old_id + max_node_id`
-- 요소: `new_id = old_id + max_elem_id`
-
----
-
-### 9.2 squeeze (assemble 내)
-
-#### YAML
-
-```yaml
-- type: squeeze
-  target_pid: 5
-  eps_x: -0.015
-  eps_y: -0.015
-  eps_z:  0.0
-```
-
-독립형 `squeeze` 명령과 동일 알고리즘.
-`assemble` 파이프라인 내에서 다른 오퍼레이션과 순차 결합 가능.
-
----
-
-### 9.3 restack — 레이어 재적층
-
-#### 용도
-기존 파트를 두께 방향으로 제거하고,
-**각기 다른 두께와 재료**를 가진 레이어 스택으로 재생성.
-
-#### YAML
-
-```yaml
-- type: restack
-  target_pid: 2
-  direction: z          # auto | x | y | z
-  element_type: solid   # solid | tshell | shell
-  layers:
-    - thickness: 0.3
-      material_card: |
-        *MAT_ELASTIC
-        $#     mid        ro         e        pr
-          MID001  7.85E-09    210000       0.3
-    - thickness: 0.5
-      material_card: |
-        *MAT_ELASTIC
-        $#     mid        ro         e        pr
-          MID001  2.50E-09     70000       0.33
-```
+| 파라미터 | 설명 | 기본값 |
+|----------|------|--------|
+| `model` | 입력 K-파일 | — |
+| `output` | 출력 접두어 | — |
+| `target_pid` | 대상 파트 ID | — |
+| `direction` | 적층 방향 (auto/x/y/z) | `auto` |
+| `element_type` | 요소 유형 | `solid` |
+| `layers` | 레이어 리스트 (thickness + material_card) | — |
 
 > **참고**: `MID001`, `MID002` 등의 플레이스홀더가 자동으로 실제 MID로 치환됩니다.
 
-#### 동작
+### 동작
 1. `target_pid` 파트의 요소 분석 → 두께 방향 결정
 2. 표면 메시(QUAD4) 추출
 3. 각 레이어를 누적 두께로 압출(extrude)
@@ -439,33 +548,44 @@ operations:
 
 ---
 
-### 9.4 bend — 굽힘 변형 + 초기 응력
+## 13. bend — 굽힘 변형 + 초기 응력
 
-#### 용도
-처짐 함수 w(x₁, x₂)로 기술되는 굽힘을 파트에 적용.
+### 용도
+처짐 함수 w(x₁, x₂)로 기술되는 굽힘을 파트에 적용합니다.
 변형(deform) 또는 응력(stress) 모드 선택 가능.
 
-#### YAML
+### 사용법
 
-```yaml
-- type: bend
-  target_pid: 1
-  plane: xy           # xy | yz | zx
-  mode: deform        # deform (노드 이동) | stress (응력만)
-  source: formula     # formula | dat | dat_pair
-
-  # source: formula
-  expression: "0.5 * sin(pi * x1 / L1) * sin(pi * x2 / L2)"
-
-  # source: dat
-  # dat_file: deflection.dat
-
-  # source: dat_pair
-  # dat_top: top.dat
-  # dat_bottom: bottom.dat
+```bash
+KooRemapper.exe bend <config.yaml>
 ```
 
-#### 수식 변수
+### YAML 형식
+
+```yaml
+model: base.k
+output: bent
+target_pid: 1
+plane: xy               # xy | yz | zx (굽힘 평면)
+mode: deform            # deform (노드 이동) | stress (응력만)
+source: formula         # formula | dat | dat_pair
+
+# source: formula
+expression: "0.5 * sin(pi * x1 / L1) * sin(pi * x2 / L2)"
+
+# source: dat
+# dat_file: deflection.dat
+
+# source: dat_pair
+# dat_top: top.dat
+# dat_bottom: bottom.dat
+
+material:
+  E: 210000
+  nu: 0.3
+```
+
+### 수식 변수
 
 | 변수 | 의미 |
 |------|------|
@@ -477,29 +597,19 @@ operations:
 
 지원 함수: `sin`, `cos`, `tan`, `sqrt`, `exp`, `log`, `abs`, `pow`
 
-#### 굽힘 이론
+### 굽힘 이론
 
 처짐 함수 w(x₁, x₂)로부터 **곡률**:
 
 $$\kappa_1 = -\frac{\partial^2 w}{\partial x_1^2}, \quad \kappa_2 = -\frac{\partial^2 w}{\partial x_2^2}, \quad \kappa_{12} = -\frac{\partial^2 w}{\partial x_1 \partial x_2}$$
 
-수치 미분 (유한 차분, dat 소스의 경우):
-
-$$\kappa \approx -\frac{w(x+h) - 2w(x) + w(x-h)}{h^2}$$
-
 중립면에서 거리 d인 지점의 굽힘 변형률:
 
 $$\varepsilon_{11} = d \cdot \kappa_1, \quad \varepsilon_{22} = d \cdot \kappa_2, \quad \varepsilon_{12} = d \cdot \kappa_{12}$$
 
-평면응력 가정 하 응력:
-
-$$\sigma_{11} = \frac{E}{1-\nu^2}(\varepsilon_{11} + \nu\varepsilon_{22})$$
-$$\sigma_{22} = \frac{E}{1-\nu^2}(\varepsilon_{22} + \nu\varepsilon_{11})$$
-$$\sigma_{12} = \frac{E}{1+\nu}\varepsilon_{12}$$
-
 > **주의**: 응력은 노드 변위 적용 **전에** 계산 (중립면 위치 보존).
 
-#### dat 파일 형식
+### dat 파일 형식
 
 ```
 # 행: x2_max → x2_min (위→아래), 열: x1_min → x1_max
@@ -510,128 +620,131 @@ $$\sigma_{12} = \frac{E}{1+\nu}\varepsilon_{12}$$
 
 ---
 
-### 9.5 indent — 압입 / 엠보싱
+## 14. indent — 압입/엠보싱
 
-#### 용도
+### 용도
 폐곡선 경계(다각형 또는 스플라인) 안쪽 영역에 **quarter-arc 필렛 프로파일**로
-압입(depth > 0) 또는 엠보싱(depth < 0)을 적용.
+압입(depth > 0) 또는 엠보싱(depth < 0)을 적용합니다.
 
-#### YAML
+### 사용법
 
-```yaml
-- type: indent
-  target_pid: 2
-  plane: xy
-  direction: -z
-  depth: 2.0          # 양수=압입, 음수=엠보싱
-  r1: 1.5             # 펀치 측 필렛 반경
-  r2: 1.0             # 다이 측 필렛 반경
-  bottom_ratio: 0.5   # 두께 방향 관통 비율 (0~1)
-  stress: true        # 굽힘 응력 계산 여부
-
-  shape:
-    type: polygon     # polygon | spline
-    points:
-      - [0.0, 0.0]
-      - [10.0, 0.0]
-      - [10.0, 8.0]
-      - [0.0, 8.0]
+```bash
+KooRemapper.exe indent <config.yaml>
 ```
 
-#### 압입 프로파일 h(d)
+### YAML 형식
 
-부호 있는 거리 d (경계까지의 거리; 양수=내부):
+```yaml
+model: base.k
+output: indented
+target_pid: 1
+plane: xy
+direction: -z
+depth: 2.0              # 양수=압입, 음수=엠보싱
+r1: 1.5                 # 펀치 측 필렛 반경
+r2: 1.0                 # 다이 측 필렛 반경
+bottom_ratio: 0.5       # 두께 방향 관통 비율 (0~1)
+stress: true            # 굽힘 응력 계산 여부
+shell_thickness: 1.0    # 셸 두께 (셸 요소일 때)
+
+shape:
+  type: polygon         # polygon | spline
+  points:
+    - [0.0, 0.0]
+    - [10.0, 0.0]
+    - [10.0, 8.0]
+    - [0.0, 8.0]
+
+material:
+  E: 210000
+  nu: 0.3
+```
+
+### 파라미터
+
+| 파라미터 | 설명 | 기본값 |
+|----------|------|--------|
+| `depth` | 압입 깊이 (양수=압입, 음수=엠보싱) | — |
+| `r1` | 펀치 측(내부) 필렛 반경 | — |
+| `r2` | 다이 측(외부) 필렛 반경 | — |
+| `bottom_ratio` | 두께 방향 관통 비율 | `0.5` |
+| `stress` | 굽힘 응력 계산 여부 | `false` |
+| `shell_thickness` | 셸 요소 두께 | 자동 |
+
+### 압입 프로파일
+
+부호 있는 거리 d에서의 프로파일 함수 h(d):
 
 $$k = \frac{\text{depth}}{r_1 + r_2}$$
 
-**r₁ 구역** (0 ≤ d ≤ r₁, 펀치 측 필렛):
+**r₁ 구역** (0 ≤ d ≤ r₁): $h(d) = -\text{depth} + k \cdot r_1 (1 - \sqrt{1 - (d/r_1)^2})$
 
-$$h(d) = -\text{depth} + k \cdot r_1 \left(1 - \sqrt{1 - \left(\frac{d}{r_1}\right)^2}\right)$$
+**평탄 구역** (r₁ < d ≤ D - r₂): $h(d) = -\text{depth}$
 
-$$h''(d) = \frac{k r_1 / r_1^2}{\left(1 - (d/r_1)^2\right)^{3/2}} = \frac{k/r_1}{\left(1 - (d/r_1)^2\right)^{3/2}}$$
+**r₂ 구역** (D - r₂ < d ≤ D): 역 quarter-arc 천이
 
-**평탄 구역** (r₁ < d ≤ D - r₂, D = SDF 최대값):
-
-$$h(d) = -\text{depth}, \quad h''(d) = 0$$
-
-**r₂ 구역** (D - r₂ < d ≤ D, 다이 측 필렛):
-
-$$h(d) = -\text{depth} \left[1 - k \cdot r_2 \left(\frac{1}{k} - \sqrt{1 - \left(\frac{D-d}{r_2}\right)^2}\right) / \text{depth}\right]$$
-
-**엠보싱**: depth < 0 → 위 수식의 정확한 수학적 거울상 (부호만 반전)
-
-#### 부호 있는 거리 함수 (SDF)
-
-경계 다각형에 대한 SDF는 **와인딩 넘버(Winding Number)** 방법으로 계산:
-
-$$w(\mathbf{p}) = \frac{1}{2\pi} \oint_C d\theta$$
-
-내부(w ≠ 0)이면 양수, 외부면 음수.
-SDF = 최근접 경계까지의 최소 거리 × 부호
-
-#### 굽힘 응력 (stress: true 시)
-
-구배 방향 (gₓ, gᵧ):
-
-$$\kappa_x = -h''(d) \cdot g_x^2, \quad \kappa_y = -h''(d) \cdot g_y^2, \quad \kappa_{xy} = -h''(d) \cdot g_x g_y$$
-
-> **주의**: 응력은 노드 변위 **전에** 계산.
-> h''(d)의 특이점 (d = r₁에서 발산) → `strainLimit / (thickness/2)` 로 상한 제한.
+> **주의**: 응력은 노드 변위 **전에** 계산. h''(d) 특이점 → `strainLimit / (thickness/2)` 상한 제한.
 
 ---
 
-### 9.6 formstrain — 성형 소성 변형률
+## 15. formstrain — 성형 소성 변형률
 
-#### 용도
+### 용도
 셸 메시의 **이면각(dihedral angle)**으로부터 굽힘 곡률을 계산하여
-등가 소성 변형률(EPS)을 `*INITIAL_STRESS_SHELL`로 출력.
+등가 소성 변형률(EPS)을 `*INITIAL_STRESS_SHELL`로 출력합니다.
 
-#### YAML
+### 사용법
 
-```yaml
-- type: formstrain
-  target_pid: 0          # 0 = 전체 셸 파트 자동 감지
-  shell_thickness: 0.0   # 0 = *SECTION_SHELL에서 자동
-  min_curvature: 0.001   # 잡음 필터 임계값
+```bash
+KooRemapper.exe formstrain <config.yaml>
 ```
 
-#### 이론
+### YAML 형식
+
+```yaml
+model: base.k
+output: formed
+target_pid: 0            # 0 = 전체 셸 파트 자동 감지
+shell_thickness: 0.0     # 0 = *SECTION_SHELL에서 자동
+min_curvature: 0.001     # 잡음 필터 임계값
+```
+
+### 이론
 
 인접 셸 요소 쌍의 이면각 θ, 중심 간 거리 L:
 
 $$\kappa = \frac{\theta}{L}$$
 
-두께 t인 셸의 표면 굽힘 변형률:
+등가 소성 변형률:
 
-$$\varepsilon = \frac{t}{2} \kappa$$
+$$\text{EPS} = \frac{t}{\sqrt{3} L} \theta$$
 
-등가 소성 변형률 (von Mises 기준):
-
-$$\text{EPS} = \frac{2}{\sqrt{3}} \varepsilon = \frac{t}{\sqrt{3} L} \theta$$
-
-항복응력 σᵧ (`*MAT_024` Card 1 Field 5):
-
-$$\sigma = \min(\text{EPS} \cdot E, \sigma_y)$$
-
-> **주의**: 동일 요소에 복수 이웃 곡률이 있을 경우 **최대값(max)** 적용 (합산 아님).
+> 동일 요소에 복수 이웃 곡률이 있을 경우 **최대값(max)** 적용 (합산 아님).
 
 ---
 
-### 9.7 tet10 / hex20 / quad8 / tria6 — 2차 요소 변환
+## 16. convert — 2차 요소 변환
 
-#### 용도
-1차 요소(TET4, HEX8, QUAD4, TRIA3)를 **2차 요소**로 변환.
-각 요소 엣지의 중간점 노드 자동 생성.
+### 용도
+1차 요소(TET4, HEX8, QUAD4, TRIA3)를 **2차 요소**로 변환합니다.
 
-#### YAML
+### 사용법
 
-```yaml
-- type: tet10          # tet10 | hex20 | quad8 | tria6
-  target_pid: 0        # 0 = 전체 파트
-  elform: 17           # ELFORM 지정 (0=자동)
+```bash
+KooRemapper.exe convert <config.yaml>
 ```
 
-#### 자동 ELFORM 매핑
+### YAML 형식
+
+```yaml
+model: base.k
+output: converted
+target_pid: 0            # 0 = 전체 파트
+convert_type: tet10      # tet10 | hex20 | quad8 | tria6
+elform: 0                # ELFORM 지정 (0=자동)
+```
+
+### 자동 ELFORM 매핑
 
 | convertType | 원본 요소 | 변환 요소 | 기본 ELFORM |
 |-------------|-----------|-----------|-------------|
@@ -640,30 +753,29 @@ $$\sigma = \min(\text{EPS} \cdot E, \sigma_y)$$
 | quad8 | QUAD4 | QUAD8 | 23 |
 | tria6 | TRIA3 | TRIA6 | 24 |
 
-#### 중간점 노드 생성
-
-엣지 (n₁, n₂)의 중간점:
-
-$$\mathbf{x}_{mid} = \frac{\mathbf{x}_{n_1} + \mathbf{x}_{n_2}}{2}$$
-
-공유 엣지의 중간점은 **단일 노드**로 중복 제거 (`edgeMidNodeMap_` 캐싱).
-
 ---
 
-### 9.8 refine — 메시 세분화
+## 17. refine — 메시 세분화
 
-#### 용도
-요소를 엣지 방향으로 **1:2 또는 1:3** 비율로 균일 세분화.
+### 용도
+요소를 엣지 방향으로 **1:2 또는 1:3** 비율로 균일 세분화합니다.
 
-#### YAML
+### 사용법
 
-```yaml
-- type: refine
-  target_pid: 0    # 0 = 전체
-  ratio: 2         # 2 또는 3
+```bash
+KooRemapper.exe refine <config.yaml>
 ```
 
-#### 지원 요소 유형
+### YAML 형식
+
+```yaml
+model: base.k
+output: refined
+target_pid: 0            # 0 = 전체
+ratio: 2                 # 2 또는 3
+```
+
+### 지원 요소 유형
 
 | 요소 | ratio=2 | ratio=3 |
 |------|---------|---------|
@@ -672,29 +784,29 @@ $$\mathbf{x}_{mid} = \frac{\mathbf{x}_{n_1} + \mathbf{x}_{n_2}}{2}$$
 | HEX8 | 8개 서브 헥스 | 27개 서브 헥스 |
 | TET4 | 8개 서브 테트 | — |
 
-#### HEX8 ratio=3: 면 내부 노드 중복 제거
-
-인접 요소 간 공유 면의 내부 노드는 **정규 이중선형(canonical bilinear)** 순서로
-`faceCenterNodeMap_`에서 중복 없이 공유:
-
-$$\mathbf{x}(s, t) = (1-s)(1-t)\mathbf{x}_0 + s(1-t)\mathbf{x}_1 + st\mathbf{x}_2 + (1-s)t\mathbf{x}_3$$
-
 ---
 
-### 9.9 elform — 요소 공식 변경
+## 18. elform — 요소 공식 변경
 
-#### 용도
-기존 요소의 **ELFORM** 번호를 변경 (업그레이드/다운그레이드/동일 차수).
+### 용도
+기존 요소의 **ELFORM** 번호를 변경합니다.
 
-#### YAML
+### 사용법
 
-```yaml
-- type: elform
-  target_pid: 0
-  target_elform: "17"        # 숫자 또는 별칭
+```bash
+KooRemapper.exe elform <config.yaml>
 ```
 
-#### 고체 요소 별칭
+### YAML 형식
+
+```yaml
+model: base.k
+output: modified
+target_pid: 0
+target_elform: "2"       # 숫자 또는 별칭
+```
+
+### 고체 요소 별칭
 
 | 별칭 | ELFORM | 설명 |
 |------|--------|------|
@@ -704,7 +816,7 @@ $$\mathbf{x}(s, t) = (1-s)(1-t)\mathbf{x}_0 + s(1-t)\mathbf{x}_1 + st\mathbf{x}_
 | `tet10` | 17 | 10절점 사면체 |
 | `hex20` | 23 | 20절점 헥사 |
 
-#### 셸 요소 별칭
+### 셸 요소 별칭
 
 | 별칭 | ELFORM |
 |------|--------|
@@ -716,135 +828,231 @@ $$\mathbf{x}(s, t) = (1-s)(1-t)\mathbf{x}_0 + s(1-t)\mathbf{x}_1 + st\mathbf{x}_
 
 ---
 
-### 9.10 disconnect — 노드 분리
+## 19. disconnect — 노드 분리
 
-#### 용도
-지정 파트의 경계면 노드를 **분리**하여 비연속 인터페이스 생성.
-CZM(응집 구역) 또는 MEFEM(미세균열) 모드 지원.
+### 용도
+지정 파트의 경계면 노드를 **분리**하여 비연속 인터페이스를 생성합니다.
 
-#### YAML
+### 사용법
 
-```yaml
-- type: disconnect
-  target_pid: 3          # 0 = 전체 파트
-  mode: full             # full | czm | mefem
-
-  # mode: czm 추가 설정
-  cohesive_part_id: 0    # 0 = 자동 발급
-
-  # mode: mefem 추가 설정
-  failure_strain: 0.05   # *MAT_ADD_EROSION EPPF 값
+```bash
+KooRemapper.exe disconnect <config.yaml>
 ```
 
-#### 모드별 동작
+### YAML 형식
+
+```yaml
+model: base.k
+output: disconnected
+target_pid: 1
+mode: full               # full | czm | mefem
+cohesive_part_id: 0      # CZM 모드 파트 ID (0=자동)
+failure_strain: 0.05     # CZM 파괴 변형률
+```
+
+### 모드별 동작
 
 | 모드 | 동작 | LS-DYNA 출력 |
 |------|------|-------------|
-| `full` | 경계 노드 단순 분리 | 노드 복사만 |
+| `full` | 경계 노드 단순 분리 + PERI 요소 | `*SECTION_SOLID_PERI` (ELFORM=48, DR=1.01) |
 | `czm` | 분리 면에 응집 요소 삽입 | `*ELEMENT_SOLID` (cohesive) + `*MAT_COHESIVE_*` |
 | `mefem` | 미세균열 확장 파라미터 설정 | `*MAT_ADD_EROSION` (EPPF 값) |
 
-#### 노드 분리 규칙
-- 대상 파트와 인접 파트 간 **공유 노드**만 분리
-- 대상 파트 내부 노드는 분리 안 함
-- 분리된 노드 쌍은 같은 위치의 새 노드로 대체
-
 ---
 
-### 9.11 iga — 등기하해석 NURBS 박스 생성
+## 20. iga — 등기하해석 NURBS 박스 생성
 
-#### 용도
+### 용도
 FE solid 파트를 **3D NURBS B-Spline 박스(trivariate)**로 래핑하여
-LS-DYNA IGA(Isogeometric Analysis) 해석 가능하게 변환.
-원본 FE 메시는 TETMSH=-1 임베딩으로 그대로 유지됩니다.
+LS-DYNA IGA(Isogeometric Analysis) 해석 가능하게 변환합니다.
 
-#### YAML
+### 사용법
+
+```bash
+KooRemapper.exe iga <config.yaml>
+```
+
+### YAML 형식
 
 ```yaml
-- type: iga
-  targets:
-    - target_pid: 1
-      element_size: 4.0       # NURBS 복셀 크기 (rr=rs=rt 공통, 필수)
-      element_size_r: 2.0     # r방향 개별 지정 (0=element_size 사용)
-      element_size_s: 2.0
-      element_size_t: 4.0
-      offset: -1.0            # bbox 고정 확장량 (-1=auto=element_size)
-      bbox_scale: 1.5         # 균일 배율 (IGA박스=파트bbox×1.5)
-      bbox_scale_r: 2.0       # r방향 배율 개별 지정
-      bbox_scale_s: 1.3
-      bbox_scale_t: 1.0
-      ir: 0                   # 0=reduced Gauss, 1=full Gauss
-      styp: 4                 # LCP stabilization type
-      tollg: 1.0e-3           # LCP threshold
-      pr: 1                   # r방향 polynomial order
-      ps: 1
-      pt: 1
-      nisr: 1                 # r방향 적분점 수
-      niss: 1
-      nist: 1
+model: base.k
+output: iga_result
+targets:
+  - target_pid: 1
+    element_size: 4.0       # NURBS 복셀 크기 (rr=rs=rt 공통)
+    element_size_r: 2.0     # r방향 개별 지정 (0=element_size 사용)
+    element_size_s: 2.0
+    element_size_t: 4.0
+    offset: -1.0            # bbox 확장량 (-1=auto)
+    bbox_scale: 1.5         # 균일 배율
+    bbox_scale_r: 2.0       # 축별 배율
+    bbox_scale_s: 1.3
+    bbox_scale_t: 1.0
+    ir: 0                   # 0=reduced Gauss, 1=full Gauss
+    styp: 4                 # LCP stabilization type
+    tollg: 1.0e-3           # LCP threshold
+    pr: 1                   # polynomial order (r/s/t)
+    ps: 1
+    pt: 1
+    nisr: 1                 # 적분점 수 (r/s/t)
+    niss: 1
+    nist: 1
 ```
 
-#### offset 우선순위 (높→낮)
+### offset 우선순위 (높→낮)
 
-1. `bbox_scale_r/s/t` — 축별 배율: $\text{off} = \frac{\text{scale}-1}{2} \times \text{len}$
-2. `bbox_scale` — 균일 배율 (axis scale이 0인 경우)
-3. `offset ≥ 0` — 고정값 (전 방향 동일)
+1. `bbox_scale_r/s/t` — 축별 배율
+2. `bbox_scale` — 균일 배율
+3. `offset ≥ 0` — 고정값
 4. 기본값 — element_size per axis
 
-#### bbox_scale 공식
+### 생성 파일
 
-파트 바운딩 박스 길이 $L_r, L_s, L_t$에 대해:
-
-$$\text{off}_r = \frac{\text{scale}_r - 1}{2} \times L_r$$
-
-예) `bbox_scale=1.5`, $L_r=20$ → $\text{off}_r = 0.25 \times 20 = 5.0$
-
-#### 생성 파일
-
-- 메인 출력: `<output>.k` (원본 FE 유지 + `*INCLUDE <output>_iga_p{pid}.k`)
+- 메인 출력: `<output>.k` (원본 FE 유지 + `*INCLUDE`)
 - IGA 파일: `<output>_iga_p{pid}.k` (파트별 별도)
 
-#### IGA 파일 내용
-
-```
-*PARAMETER_LOCAL          id, mid, fepid, xmin~zmax, rr~rt,
-                          ofr/ofs/oft (실제 offset), ir, styp, tollg
-*PARAMETER_EXPRESSION_LOCAL  rxminn=&xmin-&ofr, rxmaxx=&xmax+&ofr, ...
-*MAT_*                    원본 재료 복사 (새 MID)
-*IGA_DEV_STABILIZATION    LCP 안정화
-*PART                     IGA 파트 (새 PID/SECID/MID)
-*SECTION_IGA_SOLID        ELFORM=0
-*IGA_DEV_VOLUME_XYZ       TETMSH=-1 (원본 FE 임베딩)
-*IGA_SOLID                nisr/niss/nist, rid
-*IGA_3D_NURBS_XYZ         2×2×2 knot, 8개 제어점, pr/ps/pt
-*IGA_REFINE_SOLID         h-refinement (rtyp=2, rr/rs/rt 복셀 크기)
-```
-
-#### MID 격리 규칙
-
-**IGA 파트와 일반 FE 파트는 반드시 다른 MID를 사용해야 합니다.**
-동일 MID 공유 시 LS-DYNA 오류 발생.
-→ `newMid = ++maxMaterialId_` (새 MID 자동 발급 + 재료 카드 복사)
-→ 원본 MID는 메인 파일에서 절대 변경하지 않습니다.
-
-#### NURBS 이론 기초
-
-B-Spline 기저 함수 (차수 p, 매듭 벡터 Ξ = {ξ₀, ..., ξₘ}):
-
-$$N_{i,0}(\xi) = \begin{cases} 1 & \text{if } \xi_i \leq \xi < \xi_{i+1} \\ 0 & \text{otherwise} \end{cases}$$
-
-$$N_{i,p}(\xi) = \frac{\xi - \xi_i}{\xi_{i+p} - \xi_i} N_{i,p-1}(\xi) + \frac{\xi_{i+p+1} - \xi}{\xi_{i+p+1} - \xi_{i+1}} N_{i+1,p-1}(\xi)$$
-
-NURBS 곡면 (가중치 wᵢⱼₖ):
-
-$$\mathbf{S}(\xi, \eta, \zeta) = \frac{\sum_{i,j,k} N_{i,p}(\xi) N_{j,q}(\eta) N_{k,r}(\zeta) w_{ijk} \mathbf{P}_{ijk}}{\sum_{i,j,k} N_{i,p}(\xi) N_{j,q}(\eta) N_{k,r}(\zeta) w_{ijk}}$$
-
-h-refinement: 매듭 삽입으로 추가 제어점 생성 (기하 변화 없음).
-KooRemapper 생성 NURBS 박스: **2×2×2 knot + rr/rs/rt 균일 세분화**.
+> **MID 격리 규칙**: IGA 파트와 일반 FE 파트는 반드시 다른 MID를 사용해야 합니다.
 
 ---
 
-## 10. matswap — 재료 번들 교체
+## 21. warpage — 워피지 보정
+
+### 용도
+측정 데이터(.dat 파일)로부터 면외 변형(warpage)을 메시에 적용합니다.
+곡률 기반 응력 계산 또는 직접 변위 모드를 지원합니다.
+
+### 사용법
+
+```bash
+KooRemapper.exe warpage <config.yaml>
+```
+
+### YAML 형식
+
+```yaml
+model: base.k
+output: warped
+target_pid: 1
+dat_file: warpage.dat      # 변형 데이터 파일
+plane: xy                  # 투영 평면
+deflection_axis: z         # 변형 축
+unit: mm                   # 단위
+mask_value: -9999          # 무효 데이터 마커
+noise_threshold: 0.001     # 노이즈 임계값
+morph_factor: 1.0          # 변형 배율
+mode: curvature            # curvature | raw
+finite_strain: false       # 유한 변형률 사용
+outside_behavior: clamp    # 경계 외 처리
+debug: false
+debug_prefix: debug_
+data_bbox:                 # 데이터 바운딩 박스 (선택)
+  x_min: 0
+  x_max: 100
+  y_min: 0
+  y_max: 100
+material:
+  E: 210000
+  nu: 0.3
+```
+
+### 파라미터
+
+| 파라미터 | 설명 | 기본값 |
+|----------|------|--------|
+| `dat_file` | 워피지 측정 데이터 파일 | — |
+| `plane` | 투영 평면 (xy/yz/zx) | `xy` |
+| `deflection_axis` | 변형 방향 축 | `z` |
+| `mode` | curvature(곡률 응력) / raw(직접 변위) | `curvature` |
+| `morph_factor` | 변형 배율 | `1.0` |
+| `mask_value` | 무효 데이터 값 | — |
+| `noise_threshold` | 노이즈 필터 임계값 | `0.001` |
+| `finite_strain` | 유한 변형률 사용 여부 | `false` |
+| `outside_behavior` | 경계 외 처리 (clamp/zero) | `clamp` |
+| `data_bbox` | 데이터 영역 제한 | 자동 |
+
+### 동작
+1. .dat 파일에서 격자 데이터 로드
+2. 바이리니어 보간으로 각 노드 위치의 변형량 계산
+3. curvature 모드: 유한 차분으로 곡률 계산 → 굽힘 응력
+4. raw 모드: 직접 노드 변위만 적용
+
+---
+
+## 22. offset — 셸 오프셋 솔리드 생성
+
+### 용도
+셸(shell) 파트의 표면을 추출하여 지정 두께/방향으로 **솔리드 요소를 압출** 생성합니다.
+곡면 법선, 가변 두께, 영역 선택, CZM 접합을 지원합니다.
+
+### 사용법
+
+```bash
+KooRemapper.exe offset <config.yaml>
+```
+
+### YAML 형식
+
+```yaml
+model: base.k
+output: offset_result
+source_pid: 1
+offset_direction: +normal   # +normal|-normal|+x|-x|+y|-y|+z|-z
+thickness: 2.0
+thickness_formula: "1.0 + 0.01*x"   # 가변 두께 수식 (선택)
+num_layers: 1
+use_local_normals: true      # 곡면 법선 사용
+element_type: hex            # hex | tet
+connection_mode: shared      # shared | tied | czm
+new_pid: 0                   # 0=자동
+part_title: "Offset part"
+material:
+  E: 210000
+  nu: 0.3
+
+# CZM 연결 (connection_mode: czm)
+czm_part_id: 100
+czm_mid: 50
+czm_material_card: |
+  *MAT_COHESIVE_...
+
+# 재료 카드 직접 지정 (선택)
+material_card: |
+  *MAT_ELASTIC
+  ...
+
+# 영역 선택 (선택)
+bbox_xmin: 0
+bbox_xmax: 100
+bbox_ymin: 0
+bbox_ymax: 100
+bbox_zmin: 0
+bbox_zmax: 100
+node_id_min: 1
+node_id_max: 999999
+element_id_min: 1
+element_id_max: 999999
+```
+
+### 주요 파라미터
+
+| 파라미터 | 설명 | 기본값 |
+|----------|------|--------|
+| `source_pid` | 소스 파트 ID | — |
+| `offset_direction` | 압출 방향 | — |
+| `thickness` | 균일 두께 | — |
+| `thickness_formula` | 가변 두께 수식 (x,y,z 변수) | — |
+| `use_local_normals` | 곡면 노드별 법선 사용 | `false` |
+| `connection_mode` | 연결 방식 (shared/tied/czm) | `shared` |
+
+### 품질 검증
+생성된 솔리드 요소의 품질을 자동 검증합니다:
+- Aspect Ratio: warn > 10, error > 20
+- Jacobian: warn < 0.1, error < -1e-10
+- Warping: warn > 30°, error > 45°
+
+---
+
+## 23. matswap — 재료 번들 교체
 
 `*MAT_*`, `*HOURGLASS`, `*DEFINE_CURVE`, `*SECTION_*` 를 하나의 번들 파일로 묶어 특정 파트에 일괄 교체합니다.
 
@@ -884,8 +1092,6 @@ I PID1             1
 *HOURGLASS_TITLE
 Rubber_HG
     &HGID1         5    0.0500 ...
-*DEFINE_CURVE_TITLE
-...    &LCID1 ...
 *MAT_SIMPLIFIED_RUBBER/FOAM_TITLE
      &MID1 ...
 *SECTION_SOLID_TITLE
@@ -895,149 +1101,59 @@ Rubber_HG
 *END
 ```
 
-### MID 타겟 모드 (`mid:` / `mids:`)
-
-MID로 타겟 지정 시 **SECTION 교체를 건너뜁니다** (ELFORM 호환성 유지).
-MAT + HOURGLASS + DEFINE_CURVE 만 교체됩니다.
-
 ### 파라미터 이름 접두사 규칙
 
 | 접두사 | ID 종류 | 동작 |
 |--------|---------|------|
-| `HGID*` | Hourglass ID | 항상 새 ID (모델 최대+1) |
+| `HGID*` | Hourglass ID | 항상 새 ID |
 | `LCID*` | Curve ID | 항상 새 ID |
 | `SECID*` | Section ID | 항상 새 ID |
 | `MID*` | Material ID | 고아 ID 재사용 가능 |
-| `PID*` | Part ID | 무시 (PART 카드 미삽입) |
+| `PID*` | Part ID | 무시 |
 
 ---
 
-## 11. implicit — Explicit→Implicit 변환
+## 24. matdb — 재료 DB 교체
 
-Explicit LS-DYNA K 파일을 Implicit 해석 설정으로 변환합니다.
+### 용도
+JSON 재료 데이터베이스(`material_db.json`)를 기반으로 모델의 `*MAT` 카드를 일괄 교체합니다.
+파트 이름 자동 매칭 또는 직접 MID 지정을 지원합니다.
 
 ### 사용법
 
-```
-KooRemapper implicit config.yaml
+```bash
+KooRemapper.exe matdb <config.yaml>
 ```
 
-### YAML 포맷
+### YAML 형식
 
 ```yaml
-model: explicit.k
-output: implicit.k
-mode: static          # static(IMASS=0) | dynamic(IMASS=1)
-level: 2              # 1(공격적) ~ 8(좌굴/스냅스루)
-endtime: 1.0          # *CONTROL_TERMINATION endtim 갱신 + DT 기준값
+model: model.k
+output: result.k
+database: materials/material_db.json
+mat_type: MAT_024         # 구조 카드 유형 (기본)
+thermal: false            # 열 재료 삽입 여부
 
-# 세부 오버라이드 (생략 시 level 기본값)
-# dctol:      0.001   # 변위 수렴 허용치
-# ectol:      0.010   # 에너지 수렴 허용치
-# dt0:        0.002   # 초기 시간 스텝
-# dtmax:      0.010   # 최대 시간 스텝
-# nsolvr:     12      # 비선형 솔버 (12=BFGS, -2=BFGS+LS)
-# kfail:      3       # 연속 step bisection 후 강성 재구성 횟수
-# rctol:      1.0e10  # 잔류력 수렴 허용치 (1e10=비활성)
-# lsolvr:     7       # 선형 솔버 (7=기본, 30=MUMPS)
-# stab:       false   # *CONTROL_IMPLICIT_STABILIZATION on/off
-# stab_scale: 1.0     # Stabilization SCALE (1.0=일반, 0.001=스프링백)
-# arc_length: false   # Arc-length (Crisfield), 좌굴/스냅스루 전용
-
-# 정리 옵션
-# fix_shell_elform: false   # ELFORM=16 → 2 자동 수정
-# keep_dr_curves:   false   # SIDR=1 DEFINE_CURVE 유지
+materials:                # 개별 규칙 (선택)
+  - match: "steel*"       # 파트 이름 패턴 매칭
+    mat_type: MAT_ELASTIC
+  - mid: 5                # 직접 MID 지정
+    thermal: true
+  - match: "*"            # catch-all 자동 매칭
 ```
 
-### 레벨 스펙트럼
+### 매칭 규칙
+- `match`: 파트 title과 DB의 name/tag 부분 문자열 매칭 (대소문자 무시)
+- `mid`: 직접 재료 ID 지정
+- `match: "*"`: 모든 미매칭 재료에 자동 매칭 시도
 
-#### Table 1 — 비선형 솔버 & 수렴 허용치
-
-| Lv | 이름 | NSOLVR | ILIMIT | MAXREF | ITEOPT | KFAIL | DCTOL | ECTOL | LSTOL | RCTOL |
-|----|------|--------|--------|--------|--------|-------|-------|-------|-------|-------|
-| 1 | 공격적 | 12 | 11 | 10 | 11 | 0 | 0.0050 | 0.0500 | 0.90 | off |
-| 2 | 표준 | 12 | 11 | 15 | 11 | 0 | 0.0010 | 0.0100 | 0.90 | off |
-| 3 | 안정 | 12 | 15 | 20 | 11 | 0 | 0.0010 | 0.0100 | 0.95 | off |
-| 4 | 수렴우선 | -2 | 20 | 25 | 11 | 3 | 0.0010 | 0.0100 | 0.95 | off |
-| 5 | 강건 | -2 | 25 | 30 | 15 | 5 | 0.0010 | 0.0050 | 0.99 | off |
-| 6 | 고강건 | -2 | 30 | 40 | 15 | 8 | 0.0005 | 0.0020 | 0.99 | 0.1 |
-| 7 | 최대안정 | -2 | 40 | 50 | 20 | 15 | 0.0001 | 0.0010 | 0.99 | 0.01 |
-| 8 | 좌굴/스냅스루 | 7* | 40 | 50 | 20 | 15 | 0.0001 | 0.0010 | 0.99 | 0.01 |
-
-> NSOLVR=7: Full Newton — arc-length 기능은 NSOLVR 6~9 범위 필요
-
-#### Table 2 — 시간 스텝 & 활성화 기능 (T = endtime)
-
-| Lv | DT0 | DTMAX | DTMIN | LSOLVR | STAB | ARC-LENGTH |
-|----|-----|-------|-------|--------|------|------------|
-| 1 | T/100 | T/20 | −T/1000 | 7 (기본) | off | off |
-| 2 | T/500 | T/100 | −T/10000 | 7 (기본) | off | off |
-| 3 | T/1000 | T/200 | −T/10000 | 7 (기본) | off | off |
-| 4 | T/2000 | T/500 | −T/100000 | 7 (기본) | off | off |
-| 5 | T/5000 | T/1000 | −T/100000 | 7 (기본) | **ON** | off |
-| 6 | T/10000 | T/2000 | −T/100000 | **30 (MUMPS)** | ON | off |
-| 7 | T/50000 | T/10000 | −T/1000000 | 30 (MUMPS) | ON | off |
-| 8 | T/50000 | T/10000 | −T/1000000 | 30 (MUMPS) | ON | **ON (Crisfield)** |
-
-### 기능 설명
-
-| 기능 | 키워드 | 설명 |
-|------|--------|------|
-| **KFAIL** | `*CONTROL_IMPLICIT_AUTO` | N회 연속 step bisection 후 접선 강성 행렬 재구성 |
-| **LSTOL** | `*CONTROL_IMPLICIT_SOLUTION` | Line search 수렴 허용치 (NSOLVR=-2 전용) |
-| **RCTOL** | `*CONTROL_IMPLICIT_SOLUTION` | 잔류력 노름 수렴 기준 (1e10=비활성, 활성화 시 DCTOL과 AND 조건) |
-| **STAB** | `*CONTROL_IMPLICIT_STABILIZATION` | IAS=1: 인공 강성 추가. Rigid body mode, 스프링백 하중 경로, singular K 방지 |
-| **MUMPS** | `*CONTROL_IMPLICIT_SOLVER` | LSOLVR=30: 병렬 직접 솔버. ill-conditioned 행렬, 복잡한 contact 모델에 강건 |
-| **ARC-LENGTH** | `*CONTROL_IMPLICIT_SOLUTION` Card 3 | Crisfield arc-length: 하중-변위 곡선 음의 기울기 구간 추적 (좌굴, 스냅스루) |
-
-### 처리 파이프라인
-
-#### 제거 (항상)
-
-- `*CONTROL_DYNAMIC_RELAXATION` — DR 사전 하중 (implicit 불필요)
-- `*CONTROL_BULK_VISCOSITY` — 체적 점성 (explicit 전용)
-- `*DATABASE_BINARY_D3DRLF` — DR 출력 DB
-
-#### 제거 (선택적)
-
-- `*DEFINE_CURVE` (SIDR=1) — DR 하중 곡선 (`keep_dr_curves: false` 시)
-
-#### 수정
-
-- `*CONTROL_TIMESTEP` → TSSFAC=0.90, DT2MS=0.0
-- `*CONTROL_TERMINATION` → endtim 갱신 (`endtime:` 지정 시)
-
-#### 삽입 (항상)
-
-- `*CONTROL_IMPLICIT_GENERAL` — IMFLAG=1, IMFORM=2, IGS=2
-- `*CONTROL_IMPLICIT_DYNAMICS` — IMASS, GAMMA, BETA
-- `*CONTROL_IMPLICIT_SOLUTION` — NSOLVR, ILIMIT, MAXREF, 수렴 허용치
-- `*CONTROL_IMPLICIT_AUTO` — IAUTO=1, ITEOPT, DTMIN/DTMAX, KFAIL
-
-#### 삽입 (Level 5+)
-
-- `*CONTROL_IMPLICIT_STABILIZATION` — `stab: true` 또는 Level 5+
-
-#### 삽입 (Level 6+)
-
-- `*CONTROL_IMPLICIT_SOLVER` — `lsolvr: 30` (MUMPS) 또는 Level 6+
-
-#### 삽입 (Level 8)
-
-- `*CONTROL_IMPLICIT_SOLUTION` Card 3 — arc-length 파라미터 (`arc_length: true` 또는 Level 8)
-
-### mode: static vs dynamic
-
-| 파라미터 | static (준정적) | dynamic (구조동역학) |
-|----------|----------------|-------------------|
-| IMASS | 0 | 1 |
-| GAMMA | 0.5 | 0.6 |
-| BETA | 0.25 | 0.30 |
-| 비고 | Newmark 표준 | 수치 감쇠 있는 Newmark (고주파 불안정 억제) |
+### 열 재료 삽입 (`thermal: true`)
+- `*MAT_THERMAL_ISOTROPIC` + `*MAT_ADD_THERMAL_EXPANSION` 자동 삽입
+- TMID 링크 자동 연결
 
 ---
 
-## 12. contact — 접촉 정의 관리
+## 25. contact — 접촉 정의 관리
 
 ```
 KooRemapper.exe contact <config.yaml>
@@ -1049,19 +1165,19 @@ LS-DYNA 모델의 `*CONTACT_*`, `*SET_SEGMENT`, `*SET_PART`, `*SET_NODE` 키워�
 ### 기본 YAML 구조
 
 ```yaml
-model:  model.k                    # 입력 K-file (필수)
-output: model_contact.k            # 출력 K-file (analyze-only 시 생략 가능)
+model:  model.k
+output: model_contact.k
 
 contacts:
-  - action: analyze                # 첫 번째 액션
+  - action: analyze
     ...
-  - action: create                 # 두 번째 액션 (순차 실행)
+  - action: create
     ...
 ```
 
 ---
 
-### 12.1 analyze — 접촉 분석
+### 25.1 analyze — 접촉 분석
 
 모델의 기존 접촉 정의를 리포트한다. 수정 없이 읽기 전용.
 
@@ -1070,24 +1186,11 @@ contacts:
   - action: analyze
 ```
 
-출력 예:
-```
---- Contacts (2) ---
-  [0] *CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_TITLE
-      Title: Contact_1_2
-      SSID=1 (SSTYP=3/Part)  MSID=2 (MSTYP=3/Part)
-      FS=0.2  FD=0.1  DC=0  VC=0  VDC=0
-  [1] *CONTACT_TIED_SURFACE_TO_SURFACE_TITLE
-      Title: Contact_2_3
-      SSID=2 (SSTYP=3/Part)  MSID=3 (MSTYP=3/Part)
-      FS=0  FD=0  DC=0  VC=0  VDC=0
-```
-
 `contact_index` 번호([0], [1], ...)를 convert/modify/remove에서 참조한다.
 
 ---
 
-### 12.2 create — 접촉 생성
+### 25.2 create — 접촉 생성
 
 #### 모드 1: Part ID 직접 지정 (SSTYP=3)
 
@@ -1122,10 +1225,7 @@ contacts:
     master: { pid: 2, as_segment: true }
 ```
 
-#### 모드 4: 세그먼트 추출 + facing 필터 (마주보는 면만)
-
-얇은 파트에서 전체 외곽면을 segment로 뽑으면 반대쪽 면이 tied 접촉에 포함되어 에러가 발생할 수 있다.
-`facing: true`를 추가하면 detect 알고리즘으로 **실제로 마주보는 면만** 추출한다.
+#### 모드 4: 세그먼트 + facing 필터
 
 ```yaml
 contacts:
@@ -1133,17 +1233,9 @@ contacts:
     type: tied_surface_to_surface
     slave:  { pid: 1, as_segment: true, facing: true }
     master: { pid: 2, as_segment: true, facing: true }
-    tolerance: 0.05          # facing 판정 갭 허용치
-    normal_angle: 30         # 법선 각도 (작을수록 보수적)
+    tolerance: 0.05
+    normal_angle: 30
 ```
-
-| `normal_angle` | 효과 |
-|---|---|
-| `30` (보수적) | 정면 대향 면만 — 얇은 파트의 tied에 안전 |
-| `45` (기본) | 약간 기울어진 면도 포함 |
-| `80` (관대) | 복잡한 형상에서 비스듬히 닿는 면까지 포함 |
-
-> `facing: true`는 양쪽(slave, master) 모두에 지정해야 동작한다.
 
 #### 모드 5: Single Surface 자기접촉
 
@@ -1157,48 +1249,20 @@ contacts:
 
 #### create에서 사용 가능한 type 값
 
-LS-DYNA의 모든 접촉 타입을 사용할 수 있다. `type` 값은 대문자 변환 + 하이픈→언더스코어로 정규화되어 `*CONTACT_<값>` 키워드가 된다.
-
 | type (YAML) | LS-DYNA 키워드 |
 |---|---|
 | `automatic_surface_to_surface` | `*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE` |
 | `tied_surface_to_surface` | `*CONTACT_TIED_SURFACE_TO_SURFACE` |
 | `automatic_single_surface` | `*CONTACT_AUTOMATIC_SINGLE_SURFACE` |
 | `eroding_surface_to_surface` | `*CONTACT_ERODING_SURFACE_TO_SURFACE` |
-| `eroding_single_surface` | `*CONTACT_ERODING_SINGLE_SURFACE` |
 | `forming_surface_to_surface` | `*CONTACT_FORMING_SURFACE_TO_SURFACE` |
-| `forming_one_way_surface_to_surface` | `*CONTACT_FORMING_ONE_WAY_SURFACE_TO_SURFACE` |
-| `forming_nodes_to_surface` | `*CONTACT_FORMING_NODES_TO_SURFACE` |
-| `nodes_to_surface` | `*CONTACT_NODES_TO_SURFACE` |
-| `automatic_nodes_to_surface` | `*CONTACT_AUTOMATIC_NODES_TO_SURFACE` |
-| `tied_nodes_to_surface` | `*CONTACT_TIED_NODES_TO_SURFACE` |
-| `tied_shell_edge_to_surface` | `*CONTACT_TIED_SHELL_EDGE_TO_SURFACE` |
-| `automatic_surface_to_surface_mortar` | `*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_MORTAR` |
-| `tied_surface_to_surface_mortar` | `*CONTACT_TIED_SURFACE_TO_SURFACE_MORTAR` |
 | (기타 직접 입력) | `*CONTACT_<입력값>` (대문자 변환) |
 
 ---
 
-### 12.3 convert — 접촉 변환
+### 25.3 convert — 접촉 변환
 
 기존 접촉의 SSTYP/MSTYP 방식을 변경한다.
-
-```yaml
-contacts:
-  - action: convert
-    contact_index: 0          # analyze 리포트의 인덱스
-    slave_to: segment         # part → segment로 변환
-    master_to: segment
-```
-
-변환 옵션:
-- `segment`: Part ID(SSTYP=3) → 표면 추출 → SET_SEGMENT(SSTYP=0)
-- `part`: Part ID(SSTYP=3) → SET_PART(SSTYP=2)
-
-#### facing 필터 (convert)
-
-`facing: true`를 추가하면 양쪽 파트의 마주보는 면만 segment로 변환한다.
-얇은 파트의 tied 변환에 필수.
 
 ```yaml
 contacts:
@@ -1211,13 +1275,9 @@ contacts:
     normal_angle: 30
 ```
 
-> `slave_to`와 `master_to` 모두 `segment`일 때만 facing이 동작한다 (양쪽 정보가 있어야 대향 판정 가능).
-
 ---
 
-### 12.4 modify — 접촉 수정
-
-기존 접촉의 파라미터를 변경한다.
+### 25.4 modify — 접촉 수정
 
 ```yaml
 contacts:
@@ -1229,26 +1289,23 @@ contacts:
     penmax: 0.5
 ```
 
-모든 Card 1~3 및 Optional Card A~G 필드를 수정할 수 있다 (하단 [12.7 세부 옵션](#127-세부-옵션-optional-cards-ag) 참조).
-
 ---
 
-### 12.5 remove — 접촉 삭제
+### 25.5 remove — 접촉 삭제
 
 ```yaml
 contacts:
   - action: remove
-    contact_index: 0          # 해당 접촉 전체 블록 삭제
+    contact_index: 0
 ```
 
 ---
 
-### 12.6 detect — 접촉 자동 감지
+### 25.6 detect — 접촉 자동 감지
 
-두 파트가 맞닿는 영역의 세그먼트를 **Spatial Hash Grid** 알고리즘으로 고속 검출한다.
-`auto_create: true`일 때 검출된 각 파트 쌍에 대해 SET_SEGMENT + CONTACT 카드를 자동 생성한다.
+**Spatial Hash Grid** 알고리즘으로 파트 간 맞닿는 영역을 고속 검출한다.
 
-#### 모드 1: 명시적 PID 지정
+#### 명시적 PID 지정
 
 ```yaml
 contacts:
@@ -1261,341 +1318,496 @@ contacts:
     friction: 0.20
 ```
 
-#### 모드 2: 전체 파트 자동 감지 (scope: all)
-
-모든 파트 간 접촉을 한 번에 검출한다. Global Grid로 O(N) 처리.
+#### 전체 파트 자동 감지
 
 ```yaml
 contacts:
   - action: detect
     scope: all
-    exclude: [rigid, null, air]    # 파트 이름에 포함되면 제외
+    exclude: [rigid, null, air]
     tolerance: 0.1
     auto_create: true
     contact_type: auto
-    friction: 0.15
 ```
 
-#### 모드 3: 키워드 기반 파트 선택
-
-파트 이름에 키워드가 포함된 파트만 대상으로 감지한다.
+#### 키워드 기반 파트 선택
 
 ```yaml
 contacts:
   - action: detect
-    include: [bolt, plate, housing]   # 이름에 포함되면 대상 (target)
-    exclude: [rigid]                  # 이름에 포함되면 제외
+    include: [bolt, plate, housing]
+    exclude: [rigid]
     tolerance: 0.05
     auto_create: true
     contact_type: tied
-    title_prefix: Tied
-```
-
-#### detect 전용 옵션
-
-| YAML 키 | 기본값 | 설명 |
-|---|---|---|
-| `scope` | (없음) | `all`: 모든 파트 쌍 탐색 |
-| `include` | (없음) | 대상 파트 이름 키워드 리스트 (대소문자 무시, 부분 일치) |
-| `exclude` | (없음) | 제외 파트 이름 키워드 리스트 |
-| `tolerance` | 0.1 | 접촉 간격 허용치 (gap tolerance) |
-| `normal_angle` | 45.0 | 법선 방향 허용 각도 (°). 두 면의 법선이 이 각도 이내로 마주봐야 접촉 판정 |
-| `auto_create` | false | true 시 검출된 쌍마다 SET_SEGMENT + CONTACT 자동 생성 |
-| `contact_type` | `auto` | 생성할 접촉 유형 (아래 표 참조) |
-| `title_prefix` | `Auto` | 자동 생성 접촉 제목 접두사 |
-| `skip_existing` | (없음) | 기존 접촉이 있는 PID 쌍은 건너뜀. `tied`: tied만, `all`: 모든 타입 |
-| `subtract_existing` | false | true 시 기존 tied 세그먼트를 차집합으로 제외하고 나머지만 생성 |
-
-#### skip_existing vs subtract_existing
-
-| 옵션 | 동작 | 적합한 상황 |
-|---|---|---|
-| `skip_existing: tied` | tied가 있는 쌍은 통째로 건너뜀 | 전체 접촉면이 tied인 경우 (간단, 빠름) |
-| `skip_existing: all` | 어떤 접촉이든 있으면 건너뜀 | 기존 접촉을 건드리지 않을 때 |
-| `subtract_existing: true` | tied 세그먼트만 빼고 나머지 생성 | 부분 본딩 + 나머지 슬라이딩 |
-
-```yaml
-# 예시: tied 쌍 건너뛰기
-- action: detect
-  scope: all
-  auto_create: true
-  skip_existing: tied
-
-# 예시: tied 세그먼트만 빼고 나머지 생성
-- action: detect
-  scope: all
-  auto_create: true
-  subtract_existing: true
 ```
 
 #### contact_type 프리셋
 
-자주 쓰는 7개 타입은 약칭으로 간편하게 지정할 수 있다.
-약칭에 해당하지 않는 값은 그대로 대문자 변환되어 `*CONTACT_<값>` 키워드가 되므로, **LS-DYNA의 모든 접촉 타입**을 사용할 수 있다.
-
 | YAML 값 | LS-DYNA 키워드 | 용도 |
 |---|---|---|
-| `auto` (기본) | `AUTOMATIC_SURFACE_TO_SURFACE` | 범용 |
-| `tied` | `TIED_SURFACE_TO_SURFACE` | 접합 (용접/접착) |
+| `auto` | `AUTOMATIC_SURFACE_TO_SURFACE` | 범용 |
+| `tied` | `TIED_SURFACE_TO_SURFACE` | 접합 |
 | `mortar` | `AUTOMATIC_SURFACE_TO_SURFACE_MORTAR` | 고정밀 |
-| `tied_mortar` | `TIED_SURFACE_TO_SURFACE_MORTAR` | 접합 + 고정밀 |
 | `single` | `AUTOMATIC_SINGLE_SURFACE` | 자기접촉 |
 | `eroding` | `ERODING_SURFACE_TO_SURFACE` | 요소 파괴 |
 | `forming` | `FORMING_SURFACE_TO_SURFACE` | 성형 해석 |
 
-커스텀 예시:
-```yaml
-contact_type: forming_one_way_surface_to_surface
-# → *CONTACT_FORMING_ONE_WAY_SURFACE_TO_SURFACE
+#### detect 옵션
 
-contact_type: nodes_to_surface
-# → *CONTACT_NODES_TO_SURFACE
-
-contact_type: tied_shell_edge_to_surface
-# → *CONTACT_TIED_SHELL_EDGE_TO_SURFACE
-```
-
-#### 파트 선택 동작 정리
-
-| 조건 | target (감지 대상) | counter (비교 대상) |
+| 키 | 기본값 | 설명 |
 |---|---|---|
-| `scope: all` | 전체 비제외 파트 | = target |
-| `include: [kw]` | 키워드 매치 파트 | 전체 비제외 파트 |
-| `slave/master` 직접 | slave PID | master PID |
-
-#### 감지 알고리즘 요약
-
-1. **표면 추출**: 각 대상 파트의 외부 면(boundary face) 추출. 내부 공유면 자동 제거
-2. **Spatial Hash Grid**: face AABB를 cellSize 격자에 multi-cell 삽입
-3. **Narrow Phase** (4단계):
-   - Stage 1: centroid 거리 < (radiusA + radiusB + gap)
-   - Stage 2: |법선 내적| > cos(normalAngle) — 절대값으로 법선 방향 비일관성 해결
-   - Stage 3: 양방향 vertex-to-plane 투영 + 투영점 범위 검사
-   - Stage 4: 최소 gap 기록
-4. **결과 그룹핑**: (pidA, pidB) 쌍별로 접촉 면 집계
-
-#### detect 콘솔 출력 예시
-
-```
-[contact] Part selection: 12 target, 25 counter (3 excluded)
-[contact] Extracted surfaces: 1847 total faces
-[contact] Detected 3 contacting pair(s):
-  PID 1 (Bolt_M8) <-> PID 5 (Housing): 23/18 segments, gap 0.000~0.080
-  PID 2 (Plate) <-> PID 5 (Housing): 142/138 segments, gap 0.010~0.095
-  PID 3 (Washer) <-> PID 5 (Housing): 12/12 segments, gap 0.000~0.002
-[contact] Created 3 contacts, 6 SET_SEGMENTs
-```
+| `scope` | — | `all`: 모든 파트 쌍 탐색 |
+| `include` | — | 대상 파트 이름 키워드 리스트 |
+| `exclude` | — | 제외 파트 이름 키워드 리스트 |
+| `tolerance` | `0.1` | 접촉 간격 허용치 |
+| `normal_angle` | `45.0` | 법선 방향 허용 각도(°) |
+| `auto_create` | `false` | 검출 쌍마다 자동 생성 |
+| `skip_existing` | — | `tied`/`all`: 기존 접촉 쌍 건너뜀 |
+| `subtract_existing` | `false` | 기존 tied 세그먼트 차집합 제외 |
 
 ---
 
-### 12.7 세부 옵션 (Optional Cards A~G)
+### 25.7 세부 옵션 (Optional Cards A~G)
 
 create, modify, detect(auto_create) 모든 액션에서 동일하게 사용 가능.
-YAML 키 이름은 LS-DYNA 매뉴얼 변수명과 동일 (소문자).
-
-#### Card 1 (기본)
-
-| YAML 키 | LS-DYNA 필드 | 타입 | 설명 |
-|---|---|---|---|
-| `sboxid` | SBOXID | int | Slave box ID |
-| `mboxid` | MBOXID | int | Master box ID |
-| `spr` | SPR | int | Slave 결과 출력 (0/1/2) |
-| `mpr` | MPR | int | Master 결과 출력 (0/1/2) |
-
-#### Card 2 (마찰/시간)
-
-| YAML 키 | LS-DYNA 필드 | 타입 | 설명 |
-|---|---|---|---|
-| `friction` | FS | double | 정적 마찰 계수 |
-| `fd` | FD | double | 동적 마찰 계수 |
-| `dc` | DC | double | 감쇠 전이 상수 |
-| `vc` | VC | double | 점성 마찰 계수 |
-| `vdc` | VDC | double | 점성 감쇠 계수 |
-| `penchk` | PENCHK | int | 관통 검사 (0/1/2) |
-| `bt` | BT | double | 접촉 시작 시간 |
-| `dt` | DT | double | 접촉 종료 시간 |
-
-#### Card 3 (스케일 팩터)
-
-| YAML 키 | LS-DYNA 필드 | 타입 | 설명 |
-|---|---|---|---|
-| `sfsa` | SFSA | double | Slave penalty 스케일 |
-| `sfsb` | SFSB | double | Master penalty 스케일 |
-| `sast` | SAST | double | Slave 두께 오프셋 |
-| `sbst` | SBST | double | Master 두께 오프셋 |
-| `sfsat` | SFSAT | double | Slave 접촉 두께 스케일 |
-| `sfsbt` | SFSBT | double | Master 접촉 두께 스케일 |
-| `fsf` | FSF | double | Coulomb 마찰 스케일 |
-| `vsf` | VSF | double | 점성 마찰 스케일 |
 
 #### Card A (소프트닝/깊이)
 
-| YAML 키 | LS-DYNA 필드 | 타입 | 설명 |
-|---|---|---|---|
-| `soft` | SOFT | int | 소프트 제약 (0/1/2) |
-| `sofscl` | SOFSCL | double | SOFT 스케일 팩터 |
-| `lcidab` | LCIDAB | int | 접촉 고착 Load Curve ID |
-| `maxpar` | MAXPAR | double | 최대 관통 비율 |
-| `sbopt` | SBOPT | int | 세그먼트 기반 옵션 (1~6) |
-| `depth` | DEPTH | int | 검색 깊이 (0~45) |
-| `bsort` | BSORT | int | 버킷 정렬 주기 |
-| `frcfrq` | FRCFRQ | int | 마찰력 갱신 주기 |
+| 키 | 필드 | 설명 |
+|---|---|---|
+| `soft` | SOFT | 소프트 제약 (0/1/2) |
+| `sofscl` | SOFSCL | SOFT 스케일 |
+| `depth` | DEPTH | 검색 깊이 (0~45) |
+| `sbopt` | SBOPT | 세그먼트 기반 옵션 |
 
-#### Card B (두께/대칭)
+#### Card B (두께)
 
-| YAML 키 | LS-DYNA 필드 | 타입 | 설명 |
-|---|---|---|---|
-| `penmax` | PENMAX | double | 최대 관통량 |
-| `thkopt` | THKOPT | int | 두께 옵션 (0/1/2) |
-| `shlthk` | SHLTHK | int | 셸 두께 고려 (0/1/2) |
-| `snlog` | SNLOG | int | 로그 출력 옵션 |
-| `isym` | ISYM | int | 대칭 옵션 |
-| `i2d3d` | I2D3D | int | 2D/3D 접촉 옵션 |
-| `sldthk` | SLDTHK | double | 솔리드 요소 두께 |
-| `sldstf` | SLDSTF | double | 솔리드 요소 강성 |
+| 키 | 필드 | 설명 |
+|---|---|---|
+| `penmax` | PENMAX | 최대 관통량 |
+| `thkopt` | THKOPT | 두께 옵션 |
+| `shlthk` | SHLTHK | 셸 두께 고려 |
 
 #### Card C (간격/에지)
 
-| YAML 키 | LS-DYNA 필드 | 타입 | 설명 |
-|---|---|---|---|
-| `igap` | IGAP | int | 간격 처리 (0/1/2) |
-| `ignore` | IGNORE | int | 관통 무시 (0/1/2) |
-| `dprfac` | DPRFAC | double | 깊이 비율 팩터 |
-| `dtstif` | DTSTIF | double | 시간 스텝 강성 비율 |
-| `edgek` | EDGEK | double | 에지 보정 |
-| `flangl` | FLANGL | double | 플랜지 각도 |
-| `cid_rcf` | CID_RCF | int | 접촉력 좌표계 ID |
+| 키 | 필드 | 설명 |
+|---|---|---|
+| `igap` | IGAP | 간격 처리 |
+| `ignore` | IGNORE | 관통 무시 |
 
-#### Card D (타이/에지)
-
-| YAML 키 | LS-DYNA 필드 | 타입 | 설명 |
-|---|---|---|---|
-| `q2tri` | Q2TRI | int | 4각형→삼각형 분할 |
-| `dtpchk` | DTPCHK | double | 시간 스텝 관통 검사 |
-| `sfnbr` | SFNBR | double | Neighbor 검색 스케일 |
-| `fnlscl` | FNLSCL | double | 법선력 스케일 |
-| `dnlscl` | DNLSCL | double | 법선 변위 스케일 |
-| `tcso` | TCSO | int | 접촉 출력 옵션 |
-| `tiedid` | TIEDID | int | Tied 인터페이스 ID |
-| `shledg` | SHLEDG | int | 셸 에지 접촉 (0/1) |
-
-#### Card E (대칭/마찰)
-
-| YAML 키 | LS-DYNA 필드 | 타입 | 설명 |
-|---|---|---|---|
-| `sharec` | SHAREC | int | 공유 제약 |
-| `cparm8` | CPARM8 | int | 파라미터 8 |
-| `ipback` | IPBACK | int | 압력 반환 |
-| `srnde` | SRNDE | int | 라운딩 에러 |
-| `fricsf` | FRICSF | double | 마찰 스케일 팩터 |
-| `icor` | ICOR | int | 보정 옵션 |
-| `ftorq` | FTORQ | int | 마찰 토크 |
-| `region` | REGION | int | 영역 지정 |
-
-#### Card F (강성/허용차)
-
-| YAML 키 | LS-DYNA 필드 | 타입 | 설명 |
-|---|---|---|---|
-| `pstiff` | PSTIFF | int | Penalty 강성 (0/1) |
-| `ignroff` | IGNROFF | int | 오프셋 무시 |
-| `fstol` | FSTOL | double | 마찰 허용차 |
-| `d2binr` | D2BINR | int | 2진 탐색 |
-| `ssftyp` | SSFTYP | int | 세그먼트 검색 타입 |
-| `swtpr` | SWTPR | int | 스위치 출력 |
-| `tetfac` | TETFAC | double | TET 보정 팩터 |
-
-#### Card G (오프셋)
-
-| YAML 키 | LS-DYNA 필드 | 타입 | 설명 |
-|---|---|---|---|
-| `shloff` | SHLOFF | double | 셸 오프셋 |
-
-> **카드 의존성**: Card G를 지정하면 A~F가 자동 포함, Card D를 지정하면 A~C가 자동 포함 (LS-DYNA 고정폭 카드 순서 요구).
-
-#### 세부 옵션 사용 예시
-
-```yaml
-contacts:
-  # detect + 전체 옵션
-  - action: detect
-    scope: all
-    tolerance: 0.1
-    auto_create: true
-    contact_type: auto
-    friction: 0.15
-    fd: 0.10
-    soft: 2
-    sofscl: 0.1
-    depth: 35
-    sbopt: 3
-    penmax: 0.5
-    thkopt: 1
-    shlthk: 1
-    igap: 2
-    ignore: 1
-
-  # create + Card A~C
-  - action: create
-    type: automatic_surface_to_surface
-    slave:  { pid: 1 }
-    master: { pid: 2 }
-    friction: 0.3
-    soft: 2
-    sofscl: 0.1
-    depth: 35
-    penmax: 1.0
-    shlthk: 1
-    igap: 2
-
-  # modify: 기존 접촉에 옵션 추가/변경
-  - action: modify
-    contact_index: 0
-    soft: 2
-    depth: 35
-    shlthk: 1
-```
+> **카드 의존성**: Card G를 지정하면 A~F가 자동 포함 (LS-DYNA 고정폭 카드 순서 요구).
 
 ---
 
-### SSTYP/MSTYP 값 참조
+## 26. load — 하중 적용
 
-| 값 | 의미 |
-|---|---|
-| 0 | Segment set (`*SET_SEGMENT`) |
-| 1 | Shell element set (`*SET_SHELL`) |
-| 2 | Part set (`*SET_PART`) |
-| 3 | Part ID (direct) |
-| 4 | Node set (`*SET_NODE`) |
-| 5 | All parts (entire model) |
-
-### 워크플로우
-
-1. `analyze` 액션으로 기존 접촉 현황 및 인덱스 확인
-2. `contact_index`로 convert/modify/remove 대상 지정
-3. 여러 액션을 하나의 YAML에 순서대로 나열하여 일괄 처리
-
----
-
-## 13. optimize — 재료별 해석 최적화
-
-`optimize` 명령은 특정 재료(예: 고무)에 최적화된 LS-DYNA 컨트롤 카드를 자동으로 적용합니다.
-단독 명령어로도 사용 가능하고, `matswap` YAML에 `optimize:` 키를 추가하여 재료 교환 직후 자동 적용할 수도 있습니다.
+### 용도
+LS-DYNA 모델에 하중 키워드를 일괄 삽입합니다.
 
 ### 사용법
 
-#### 단독 명령
+```bash
+KooRemapper.exe load <config.yaml>
+```
+
+### YAML 형식
+
+```yaml
+model: model.k
+output: loaded.k
+loads:
+  - type: force
+    nid: 100
+    dof: 3             # 1=x, 2=y, 3=z
+    value: -1000.0
+    lcid: 0            # Load Curve ID (0=상수)
+  - type: pressure
+    pid: 1
+    value: 10.0
+  - type: gravity
+    direction: z
+    value: -9810.0
+```
+
+### 파라미터
+
+| 파라미터 | 설명 |
+|----------|------|
+| `type` | 하중 유형 (force/pressure/gravity) |
+| `nid` | 노드 ID (force) |
+| `pid` | 파트 ID (pressure) |
+| `dof` | 자유도 방향 1=x, 2=y, 3=z (force) |
+| `value` | 하중 크기 |
+| `lcid` | Load Curve ID (0=상수) |
+| `direction` | 중력 방향 (gravity) |
+
+---
+
+## 27. boundary — 경계 조건 적용
+
+### 용도
+LS-DYNA 모델에 경계 조건(구속/변위) 키워드를 삽입합니다.
+
+### 사용법
+
+```bash
+KooRemapper.exe boundary <config.yaml>
+```
+
+### YAML 형식
+
+```yaml
+model: model.k
+output: constrained.k
+boundaries:
+  - type: spc
+    nid: 100
+    dofx: 1            # 0=자유, 1=구속
+    dofy: 1
+    dofz: 1
+    dofrx: 0
+    dofry: 0
+    dofrz: 0
+  - type: prescribed_motion
+    nid: 200
+    dof: 1
+    value: 10.0
+    lcid: 1
+```
+
+### 파라미터
+
+| 파라미터 | 설명 |
+|----------|------|
+| `type` | 경계 유형 (spc/prescribed_motion) |
+| `nid` | 노드 ID |
+| `dofx~dofrz` | DOF 구속 (SPC: 0=자유, 1=구속) |
+| `dof` | 자유도 방향 (prescribed_motion) |
+| `value` | 변위값 |
+| `lcid` | Load Curve ID |
+
+---
+
+## 28. rbe — RBE 구속 조건
+
+### 용도
+RBE2(강체 연결) 또는 RBE3(분산 하중) 구속 조건을 삽입합니다.
+
+### 사용법
+
+```bash
+KooRemapper.exe rbe <config.yaml>
+```
+
+### YAML 형식
+
+```yaml
+model: model.k
+output: rbe_model.k
+rbes:
+  - type: rbe2
+    master_nid: 100
+    slave_nids: [101, 102, 103, 104]
+    dof: 123456
+  - type: rbe3
+    master_nid: 200
+    slave_nids: [201, 202, 203]
+    dof: 123
+    weights: [1.0, 1.0, 1.0]
+```
+
+### 파라미터
+
+| 파라미터 | 설명 |
+|----------|------|
+| `type` | rbe2 (강체) / rbe3 (분산) |
+| `master_nid` | 마스터 노드 ID |
+| `slave_nids` | 슬레이브 노드 ID 리스트 |
+| `dof` | 구속 자유도 (예: 123456) |
+| `weights` | 가중치 (RBE3 전용) |
+
+---
+
+## 29. implicit — Explicit→Implicit 변환
+
+Explicit LS-DYNA K 파일을 Implicit 해석 설정으로 변환합니다.
+
+### 사용법
+
+```
+KooRemapper implicit config.yaml
+```
+
+### YAML 포맷
+
+```yaml
+model: explicit.k
+output: implicit.k
+mode: static          # static(IMASS=0) | dynamic(IMASS=1)
+level: 2              # 1(공격적) ~ 8(좌굴/스냅스루)
+endtime: 1.0
+strip: false          # true: 키워드 제거만 (삽입 없음)
+
+# 세부 오버라이드 (생략 시 level 기본값)
+# dctol/ectol/dt0/dtmax/nsolvr/kfail/rctol/lsolvr/stab/stab_scale/arc_length
+# fix_shell_elform/keep_dr_curves
+```
+
+### 레벨 스펙트럼
+
+#### Table 1 — 비선형 솔버 & 수렴 허용치
+
+| Lv | 이름 | NSOLVR | ILIMIT | MAXREF | ITEOPT | KFAIL | DCTOL | ECTOL | LSTOL | RCTOL |
+|----|------|--------|--------|--------|--------|-------|-------|-------|-------|-------|
+| 1 | 공격적 | 12 | 11 | 10 | 11 | 0 | 0.0050 | 0.0500 | 0.90 | off |
+| 2 | 표준 | 12 | 11 | 15 | 11 | 0 | 0.0010 | 0.0100 | 0.90 | off |
+| 3 | 안정 | 12 | 15 | 20 | 11 | 0 | 0.0010 | 0.0100 | 0.95 | off |
+| 4 | 수렴우선 | -2 | 20 | 25 | 11 | 3 | 0.0010 | 0.0100 | 0.95 | off |
+| 5 | 강건 | -2 | 25 | 30 | 15 | 5 | 0.0010 | 0.0050 | 0.99 | off |
+| 6 | 고강건 | -2 | 30 | 40 | 15 | 8 | 0.0005 | 0.0020 | 0.99 | 0.1 |
+| 7 | 최대안정 | -2 | 40 | 50 | 20 | 15 | 0.0001 | 0.0010 | 0.99 | 0.01 |
+| 8 | 좌굴/스냅스루 | 7* | 40 | 50 | 20 | 15 | 0.0001 | 0.0010 | 0.99 | 0.01 |
+
+#### Table 2 — 시간 스텝 & 활성화 기능 (T = endtime)
+
+| Lv | DT0 | DTMAX | DTMIN | LSOLVR | STAB | ARC-LENGTH |
+|----|-----|-------|-------|--------|------|------------|
+| 1 | T/100 | T/20 | −T/1000 | 7 (기본) | off | off |
+| 2 | T/500 | T/100 | −T/10000 | 7 (기본) | off | off |
+| 3 | T/1000 | T/200 | −T/10000 | 7 (기본) | off | off |
+| 4 | T/2000 | T/500 | −T/100000 | 7 (기본) | off | off |
+| 5 | T/5000 | T/1000 | −T/100000 | 7 (기본) | **ON** | off |
+| 6 | T/10000 | T/2000 | −T/100000 | **30 (MUMPS)** | ON | off |
+| 7 | T/50000 | T/10000 | −T/1000000 | 30 (MUMPS) | ON | off |
+| 8 | T/50000 | T/10000 | −T/1000000 | 30 (MUMPS) | ON | **ON (Crisfield)** |
+
+### 처리 파이프라인
+
+#### 제거 (항상)
+- `*CONTROL_DYNAMIC_RELAXATION`
+- `*CONTROL_BULK_VISCOSITY`
+- `*DATABASE_BINARY_D3DRLF`
+
+#### 수정
+- `*CONTROL_TIMESTEP` → TSSFAC=0.90, DT2MS=0.0
+- `*CONTROL_TERMINATION` → endtim 갱신
+
+#### 삽입
+- `*CONTROL_IMPLICIT_GENERAL` / `_DYNAMICS` / `_SOLUTION` / `_AUTO`
+- Level 5+: `*CONTROL_IMPLICIT_STABILIZATION`
+- Level 6+: `*CONTROL_IMPLICIT_SOLVER` (MUMPS)
+- Level 8: Arc-length (Crisfield)
+
+### mode: static vs dynamic
+
+| 파라미터 | static (준정적) | dynamic (구조동역학) |
+|----------|----------------|-------------------|
+| IMASS | 0 | 1 |
+| GAMMA | 0.5 | 0.6 |
+| BETA | 0.25 | 0.30 |
+
+### strip 모드 (`strip: true`)
+
+`*CONTROL_IMPLICIT_*` 관련 키워드 10종을 모두 제거하고, 새 키워드는 삽입하지 않습니다.
+level/mode 파라미터 검증을 건너뜁니다.
+
+---
+
+## 30. modal — 고유진동수(모달) 해석 변환
+
+### 용도
+LS-DYNA 모델을 모달 해석(고유진동수/고유모드) 설정으로 변환합니다.
+
+### 사용법
+
+```bash
+KooRemapper.exe modal <config.yaml>
+```
+
+### YAML 형식
+
+```yaml
+model: model.k
+output: modal.k
+nmode: 10              # 추출 모드 수 (기본: 10)
+fmin: 0.0              # 최소 주파수 (Hz)
+fmax: 0.0              # 최대 주파수 (0=무제한)
+center: 0.0            # 중심 주파수 (Lanczos shift)
+eigmth: 2              # 고유치 방법
+solver: 7              # 선형 솔버
+fix_shell_elform: false
+keep_dr_curves: false
+strip: false           # true: 키워드 제거만
+```
+
+### 고유치 방법 (eigmth)
+
+| 값 | 방법 | 설명 |
+|----|------|------|
+| 2 | Lanczos | 기본, 범용 |
+| 101 | MCMS | Multi-Component Mode Synthesis |
+| 102 | LOBPCG | Locally Optimal Block PCG |
+| 103 | FastLanczos | 고속 Lanczos |
+
+### 삽입 키워드
+
+- `*CONTROL_IMPLICIT_EIGENVALUE` — nmode, fmin, fmax, center, eigmth
+- `*CONTROL_IMPLICIT_GENERAL` — IMFLAG=1
+- `*CONTROL_IMPLICIT_SOLUTION` — solver 설정
+
+### strip 모드 (`strip: true`)
+
+`*CONTROL_IMPLICIT_EIGENVALUE`, `_GENERAL`, `_SOLUTION`, `_SOLVER`를 제거합니다.
+
+---
+
+## 31. relax — Dynamic Relaxation 설정
+
+### 용도
+초기 응력이 적용된 모델을 Dynamic Relaxation으로 평형 상태까지 릴렉세이션합니다.
+
+### 사용법
+
+```bash
+KooRemapper.exe relax <config.yaml>
+```
+
+### YAML 형식
+
+```yaml
+model: wrapped_model.k
+output: relaxed_model.k
+level: 2               # 1(빠름) ~ 5(보수적), 기본=2
+mode: explicit          # explicit(IDRFLG=1) | implicit(IDRFLG=5)
+drterm: 100.0           # DR 종료 시간 (0=무한대)
+endtime: 1.0            # DR 후 실제 해석 종료 시간
+d3drlf: true            # DATABASE_BINARY_D3DRLF 출력
+fix_shell_elform: false
+strip: false            # true: 키워드 제거만
+
+# 세부 오버라이드
+# nrcyck/drtol/drfctr/tssfdr/irelal/edttl
+```
+
+### 레벨 프리셋 (5단계)
+
+| Lv | 이름 | NRCYCK | DRTOL | DRFCTR | TSSFDR | IRELAL | EDTTL |
+|----|------|--------|-------|--------|--------|--------|-------|
+| 1 | 빠름 | 500 | 0.010 | 0.990 | 0.95 | 0 | 0.04 |
+| 2 | 표준 | 250 | 0.001 | 0.995 | 0.90 | 0 | 0.04 |
+| 3 | 안정 | 100 | 0.001 | 0.998 | 0.80 | 0 | 0.04 |
+| 4 | 보수 | 50 | 1e-4 | 0.999 | 0.67 | 1 | 0.01 |
+| 5 | 최대 | 25 | 1e-5 | 0.999 | 0.50 | 1 | 0.001 |
+
+### 모드
+
+| mode | IDRFLG | 설명 |
+|------|--------|------|
+| explicit | 1 | 명시적 DR — 속도 감쇠로 운동에너지 소산 |
+| implicit | 5 | 암시적 초기화 — 암시적 솔버로 평형 도달 |
+
+### strip 모드 (`strip: true`)
+
+`*CONTROL_DYNAMIC_RELAXATION`, `*DATABASE_BINARY_D3DRLF`를 제거합니다.
+
+---
+
+## 32. explicit — 순수 Explicit 복원
+
+### 용도
+모델에서 DR + Implicit + Modal 관련 키워드를 **모두 제거**하여 순수 Explicit 설정으로 복원합니다.
+
+### 사용법
+
+```bash
+KooRemapper.exe explicit <config.yaml>
+```
+
+### YAML 형식
+
+```yaml
+model: implicit_model.k
+output: explicit_model.k
+keep_dr_curves: false    # true: SIDR=1 DEFINE_CURVE 유지
+```
+
+### 제거 대상
+
+| 키워드 | 원래 소속 |
+|--------|----------|
+| `*CONTROL_DYNAMIC_RELAXATION` | relax |
+| `*DATABASE_BINARY_D3DRLF` | relax |
+| `*CONTROL_IMPLICIT_GENERAL` | implicit |
+| `*CONTROL_IMPLICIT_DYNAMICS` | implicit |
+| `*CONTROL_IMPLICIT_SOLUTION` | implicit |
+| `*CONTROL_IMPLICIT_AUTO` | implicit |
+| `*CONTROL_IMPLICIT_STABILIZATION` | implicit |
+| `*CONTROL_IMPLICIT_SOLVER` | implicit |
+| `*CONTROL_IMPLICIT_EIGENVALUE` | modal |
+| `*CONTROL_IMPLICIT_MODAL_DYNAMIC` | modal |
+| `*CONTROL_IMPLICIT_ROTATIONAL_DYNAMICS` | modal |
+| `*CONTROL_IMPLICIT_INERTIA_RELIEF` | modal |
+| `*DEFINE_CURVE` (SIDR=1) | relax (keep_dr_curves=false 시) |
+
+---
+
+## 33. wrap — 와인딩 인장 프리스트레스
+
+### 용도
+와인딩 공정에서 발생하는 인장 프리스트레스를 시뮬레이션합니다.
+원통 좌표계 기반으로 후프(hoop) 응력과 반경 방향 압축을 계산합니다.
+
+### 사용법
+
+```bash
+KooRemapper.exe wrap <config.yaml>
+```
+
+### YAML 형식
+
+```yaml
+model: cylinder.k
+output: wrapped
+target_pid: 1
+axis: z                 # 와인딩 축 (x/y/z)
+axis_center: [0, 0]     # 축 중심 좌표 [c1, c2]
+tension: 100.0          # 와인딩 인장력 (MPa)
+material:
+  E: 210000
+  nu: 0.3
+```
+
+### 물리 모델
+
+원통 좌표계 (r, θ, z)에서:
+- **후프 응력** σ_θθ = tension (인장)
+- **반경 압축** σ_rr = -tension × (r_outer/r - 1) / ln(r_outer/r_inner)
+
+전역 좌표 변환:
+$$\sigma_{xx} = \sigma_{rr}\cos^2\theta + \sigma_{\theta\theta}\sin^2\theta$$
+$$\sigma_{yy} = \sigma_{rr}\sin^2\theta + \sigma_{\theta\theta}\cos^2\theta$$
+$$\sigma_{xy} = (\sigma_{\theta\theta} - \sigma_{rr})\sin\theta\cos\theta$$
+
+---
+
+## 34. optimize — 재료별 해석 최적화
+
+`optimize` 명령은 특정 재료(예: 고무)에 최적화된 LS-DYNA 컨트롤 카드를 자동으로 적용합니다.
+
+### 사용법
 
 ```bash
 KooRemapper optimize config.yaml
 ```
 
-**YAML 형식:**
+### YAML 형식
 
 ```yaml
 model: my_model.k
 output: my_model_optimized.k
 optimize: rubber          # 최적화 모드 (현재: rubber만 지원)
-pids: [2, 5, 8]          # 최적화 대상 파트 ID (재료 파트)
+pids: [2, 5, 8]          # 최적화 대상 파트 ID
 tssfac: 0.67             # TSSFAC 설정값 (기본: 0.67)
 analysis_type: ""        # "explicit" / "implicit" / "" (자동 감지)
 ```
@@ -1606,154 +1818,427 @@ analysis_type: ""        # "explicit" / "implicit" / "" (자동 감지)
 model: base_model.k
 output: swapped_model.k
 swaps:
-  - bundle: ../materials/rubber.k
+  - bundle: rubber.k
     pid: 3
-optimize: rubber          # matswap 완료 후 자동 실행
-tssfac: 0.67
-analysis_type: ""
+optimize: rubber
 ```
 
----
+### rubber 모드 적용
 
-### YAML 옵션
+#### 공통 (explicit + implicit)
 
-| 키 | 타입 | 기본값 | 설명 |
-|---|---|---|---|
-| `model` | string | — | 입력 K-file 경로 (단독 모드) |
-| `output` | string | — | 출력 K-file 경로 (단독 모드) |
-| `optimize` | string | — | 최적화 모드. 현재 `rubber`만 지원 |
-| `pids` | int list | — | 최적화 대상 파트 ID 목록. 접촉 카드 필터링에 사용 |
-| `tssfac` | float | `0.67` | `*CONTROL_TIMESTEP` TSSFAC 필드 값 |
-| `analysis_type` | string | `""` (자동) | `"explicit"`, `"implicit"`, `""` |
+| 카드 | 필드 | 목표값 |
+|---|---|---|
+| `*CONTROL_ACCURACY` | INN | `4` |
+| `*CONTROL_ENERGY` | HGEN/RWEN/SLNTEN/RYLEN | `2/2/2/2` |
+| `*CONTACT_*` (대상 PID) | SOFT | `0` |
+| `*CONTACT_*` (대상 PID) | SBOPT | `2` |
 
----
-
-### rubber 모드 — 적용 액션
-
-#### 해석 타입 자동 감지
-
-`analysis_type`이 지정되지 않으면 모델 파일에서 `*CONTROL_IMPLICIT_*` 키워드 존재 여부로 자동 판단합니다.
-
-- `*CONTROL_IMPLICIT_*` 발견 → **implicit** 모드
-- 없음 → **explicit** 모드
-
-명시적으로 오버라이드 가능:
-
-```yaml
-analysis_type: explicit   # implicit 모델에도 explicit 설정 강제 적용
-analysis_type: implicit   # 명시적으로 implicit 지정
-```
-
----
-
-#### 공통 적용 (explicit + implicit 모두)
-
-| 카드 | 필드 | 목표값 | 동작 |
-|---|---|---|---|
-| `*CONTROL_ACCURACY` | INN (Field 2) | `4` | 강제 수정 및 알림 |
-| `*CONTROL_ENERGY` | HGEN/RWEN/SLNTEN/RYLEN | `2/2/2/2` | 없으면 삽입, 있으면 강제 수정 |
-| `*CONTACT_*` (대상 PID 포함) | SOFT | `0` | 강제 수정 |
-| `*CONTACT_*` (대상 PID 포함) | SBOPT | `2` | 강제 수정 |
-
-**INN=4 이유**: 고무 대변형 해석에서 불변량 기반 뉴마크 적분(INN=4)은 강체 회전 오차를 제거하여 수렴 안정성을 크게 개선합니다.
-
-**CONTROL_ENERGY**: 고무 에너지 흡수/방출 정확도 향상. HGEN=2(전체 에너지 추적), RWEN=2(레일리 에너지), SLNTEN=2(슬라이딩), RYLEN=2(레일리 감쇠).
-
-**CONTACT SOFT/SBOPT**: 고무-강체 접촉에서 penalty 기반(SOFT=0) + 향상된 segment 검색(SBOPT=2)이 권장됩니다.
-
----
-
-#### Explicit 전용 적용
+#### Explicit 전용
 
 | 카드 | 필드 | 동작 |
 |---|---|---|
-| `*CONTROL_TIMESTEP` | TSSFAC | `tssfac` 값으로 강제 수정 (기본 0.67) |
-| `*CONTROL_TIMESTEP` | DT2MS | 양수이면 **경고** (mass scaling은 고무 동적 해석에 부적합) |
-| `*CONTROL_BULK_VISCOSITY` | Q1, Q2 | Q1≠1.5 또는 Q2≠0.06이면 **경고** |
+| `*CONTROL_TIMESTEP` | TSSFAC | 0.67 (강제) |
+| `*CONTROL_TIMESTEP` | DT2MS | 양수이면 경고 |
+| `*CONTROL_BULK_VISCOSITY` | Q1, Q2 | 비표준이면 경고 |
 
-> **Implicit 모드 제외 이유**: Implicit 해석에서는 `*CONTROL_IMPLICIT_AUTO`가 시간 증분을 자동 제어하므로 TSSFAC 수정은 불필요합니다. DT2MS와 BULK_VISCOSITY도 implicit에서는 의미가 다릅니다.
-
-**TSSFAC=0.67 이유**: 고무의 높은 파속비로 인해 기본값(0.9)이 불안정. 0.67은 안전 마진을 확보합니다.
-**DT2MS 경고**: Mass scaling은 관성력을 변경하므로 고무 동적 충격 해석 결과를 왜곡할 수 있습니다.
+### 멱등성
+이미 올바른 값은 수정하지 않습니다. 같은 모델에 두 번 실행해도 결과 동일.
 
 ---
 
-#### 접촉 카드 필터링 (`pids` 옵션)
+## 35. ale — ALE 변환
 
-`pids`가 지정된 경우, 해당 파트 ID가 관여하는 접촉 카드만 수정합니다.
+### 용도
+지정 solid 파트를 ALE(Arbitrary Lagrangian-Eulerian)로 변환합니다.
+14종 재료 프리셋과 커스텀 번들 파일을 지원합니다.
 
-지원하는 SSTYP/MSTYP:
-- `3` (Part ID 직접 참조) — PID 직접 비교
-- `2` (`*SET_PART` 참조) — SET_PART 내용 파싱 후 PID 확인
-- `0` (`*SET_SEGMENT` 참조) — 해석 불가, **경고** 후 스킵
+### 사용법
 
-`pids`가 없으면 **모든** 접촉 카드에 적용합니다.
-
----
-
-### 멱등성 (Idempotency)
-
-이미 올바른 값이 설정된 필드는 수정하지 않습니다. 같은 모델에 두 번 실행해도 결과가 동일합니다.
-
----
-
-### 출력 예시 (콘솔)
-
-```
-[optimize] Mode: rubber | Analysis: explicit (auto-detected)
-[optimize] CONTROL_ACCURACY: INN 2 -> 4
-[optimize] CONTROL_ENERGY: inserted
-[optimize] CONTROL_TIMESTEP: TSSFAC 0.9 -> 0.67
-[optimize] WARNING: DT2MS=-5e-07 (mass scaling). Verify for rubber dynamic analysis.
-[optimize] WARNING: CONTROL_BULK_VISCOSITY Q1=2.0 Q2=0.1. Recommended Q1=1.5 Q2=0.06 for rubber.
-[optimize] CONTACT Steel_Rubber: SOFT 2->0, SBOPT 1->2
-[optimize] Done: my_model_optimized.k
+```bash
+KooRemapper.exe ale <config.yaml>
 ```
 
----
+### YAML 형식
 
-### rubber 최적화 체크리스트
-
-| 항목 | 권장값 | 자동 적용 | 경고만 |
-|---|---|---|---|
-| `*CONTROL_ACCURACY` INN | 4 | ✓ | — |
-| `*CONTROL_ENERGY` HGEN/RWEN/SLNTEN/RYLEN | 2/2/2/2 | ✓ | — |
-| `*CONTROL_TIMESTEP` TSSFAC | 0.67 (explicit) | ✓ | — |
-| `*CONTROL_TIMESTEP` DT2MS | 0 (dynamic) | — | ✓ |
-| `*CONTROL_BULK_VISCOSITY` Q1/Q2 | 1.5/0.06 | — | ✓ |
-| 접촉 SOFT | 0 | ✓ | — |
-| 접촉 SBOPT | 2 | ✓ | — |
-| 재료 ELFORM | 13 (TET4) | — | — |
-| 재료 PR | ≤ 0.495 | — | — |
-| Hourglass IHQ | 5 (per-part) | — | — |
-
-> **ELFORM, PR, Hourglass**는 재료 번들(`materials/rubber.k`)에 포함되어야 합니다. `optimize` 명령은 번들 내용을 수정하지 않습니다.
-
----
-
-### matswap + optimize 파이프라인
-
-```
-base_model.k
-    │
-    ▼ matswap (재료 번들 교체)
-    ├── rubber.k 번들 → PID 3에 적용
-    │   (ELFORM=13, IHQ=5, MAT_MOONEY-RIVLIN 등)
-    │
-    ▼ optimize: rubber (컨트롤 카드 최적화)
-    ├── CONTROL_ACCURACY INN=4
-    ├── CONTROL_ENERGY 삽입
-    ├── TSSFAC=0.67 (explicit)
-    └── CONTACT SOFT=0, SBOPT=2
-    │
-    ▼ swapped_model.k (완성)
+```yaml
+model: model.k
+output: ale_model.k
+parts:
+  - pid: 5
+    preset: air           # 프리셋 이름 또는 bundle 경로
+    lagrangian_pids: [1, 2, 3]   # FSI 라그랑지안 파트
+  - pid: 6
+    preset: water
+    lagrangian_pids: [1]
 ```
 
+### 재료 프리셋 (14종)
+
+| 분류 | 프리셋 | MAT | EOS |
+|------|--------|-----|-----|
+| 기체 | air, nitrogen, argon | MAT_NULL | EOS_LINEAR_POLYNOMIAL |
+| 액체 | water, electrolyte, gasoline, oil, coolant, resin, tim, silicone | MAT_NULL | EOS_GRUNEISEN |
+| 폭발물 | tnt, c4 | MAT_HE_BURN | EOS_JWL |
+| 진공 | vacuum | MAT_VACUUM | — |
+
+### 자동 삽입 카드
+
+- `*SECTION_SOLID` ELFORM 변경
+- `*HOURGLASS` (IHQ=3)
+- `*CONTROL_ALE`
+- `*ALE_MULTI-MATERIAL_GROUP`
+- `*ALE_REFERENCE_SYSTEM_GROUP` (PRTYPE=4)
+- `*CONSTRAINED_LAGRANGE_IN_SOLID` (FSI)
+- `*INITIAL_DETONATION` (폭발물 전용)
+
+### 단위 체계
+t/mm/s → MPa
+
 ---
 
-## 14. 수학 이론
+## 36. stabilize — Explicit 솔버 안정화
 
-### 12.1 등매개변수 매핑 (map)
+### 용도
+Explicit 솔버의 안정성을 단계적으로 강화하는 **12단계 누적 시스템**입니다.
+
+### 사용법
+
+```bash
+KooRemapper.exe stabilize <config.yaml>
+```
+
+### YAML 형식
+
+```yaml
+model: model.k
+output: stabilized.k
+stabilize: explicit
+level: 6               # 1 ~ 12
+```
+
+### 레벨 시스템
+
+| Lv | 주요 변경 |
+|----|----------|
+| 1 | 에너지 추적 활성화 |
+| 2 | 정확도 향상 (INN=4) |
+| 3 | TSSFAC 0.80 |
+| 4 | IHQ=4 (hourglass) |
+| 5 | 셸 요소 설정 (자동 감지) |
+| 6 | 접촉 soft stage 1 |
+| 7 | TSSFAC 0.67 + bulk viscosity 강제 |
+| 8 | 핀볼 SOFT=2 + Card C IGNORE |
+| 9 | IHQ=6 Belytschko-Bindeman |
+| 10 | TSSFAC 0.60 |
+| 11 | ERODE (대화형) |
+| 12 | 최대 보수적 설정 |
+
+각 레벨은 **이전 레벨을 포함**합니다 (누적 적용).
+
+---
+
+## 37. 키워드 제거(strip) 기능
+
+### 개요
+
+`implicit`, `modal`, `relax` 명령에 `strip: true` 옵션을 추가하면,
+해당 명령이 관리하는 키워드를 **제거만** 하고 새 키워드는 삽입하지 않습니다.
+
+### 명령별 제거 범위
+
+| 명령 | strip: true 시 제거 대상 |
+|------|------------------------|
+| `implicit` | `*CONTROL_IMPLICIT_*` 10종 |
+| `modal` | `*CONTROL_IMPLICIT_EIGENVALUE`, `_GENERAL`, `_SOLUTION`, `_SOLVER` |
+| `relax` | `*CONTROL_DYNAMIC_RELAXATION`, `*DATABASE_BINARY_D3DRLF` |
+| `explicit` | 위 3개 명령의 제거 대상 전부 + SIDR=1 DEFINE_CURVE |
+
+### strip vs explicit
+
+| 구분 | strip: true | explicit 명령 |
+|------|-------------|---------------|
+| 범위 | 해당 명령 소속 키워드만 | 모든 비-Explicit 키워드 |
+| 사용법 | 각 명령의 YAML에 `strip: true` | 별도 명령 |
+| 용도 | 부분 정리 | 완전 초기화 |
+
+---
+
+## 38. assemble — 통합 어셈블리
+
+### 개요
+
+여러 오퍼레이션을 **순차적으로 적용**하는 통합 명령.
+기본 모델을 로드하고 각 오퍼레이션을 순서대로 실행하며,
+누적된 초기 응력을 단일 dynain 파일로 출력합니다.
+
+```bash
+KooRemapper.exe assemble <config.yaml>
+```
+
+### 공통 YAML 구조
+
+```yaml
+base_model: model.k
+output: result
+material:
+  E: 210000
+  nu: 0.3
+dynamic_relaxation: true
+dynain_embed: false
+
+operations:
+  - type: <op_type>
+    ...
+```
+
+### 공통 특성
+- **원본 키워드 보존**: `*CONTACT`, `*BOUNDARY`, `*LOAD` 등 미파싱 키워드 그대로 유지
+- **응력 누적**: 동일 요소에 여러 오퍼레이션 적용 시 응력 합산(`std::map` 기반)
+- **ID 자동 관리**: 파트/섹션/노드/요소 ID 자동 발급 (충돌 방지)
+
+> **참고**: 아래 각 오퍼레이션은 동일 이름의 독립 명령어(12~22장)와 동일한 알고리즘을 사용합니다.
+> assemble 내에서는 `- type: <이름>` 으로 지정하며, 여러 오퍼레이션을 순차 결합할 수 있습니다.
+
+---
+
+### 38.1 replace — 상세 메시 교체
+
+```yaml
+- type: replace
+  target_pid: 3
+  detail_flat: detail.k
+  shell_bent: bent.k
+  prestress: true
+```
+
+모델 내 특정 파트를 상세 메시로 교체. `prestress: true` 시 굽힘 초기 응력 자동 계산.
+
+---
+
+### 38.2 squeeze (assemble 내)
+
+```yaml
+- type: squeeze
+  target_pid: 5
+  eps_x: -0.015
+  eps_y: -0.015
+  eps_z:  0.0
+```
+
+독립형 `squeeze` 명령과 동일.
+
+---
+
+### 38.3 restack — 레이어 재적층
+
+```yaml
+- type: restack
+  target_pid: 2
+  direction: z
+  element_type: solid
+  layers:
+    - thickness: 0.3
+      material_card: |
+        *MAT_ELASTIC
+        ...
+    - thickness: 0.5
+      material_card: |
+        *MAT_ELASTIC
+        ...
+```
+
+→ 독립 명령 [12. restack](#12-restack--레이어-재적층) 참조
+
+---
+
+### 38.4 bend — 굽힘 변형 + 초기 응력
+
+```yaml
+- type: bend
+  target_pid: 1
+  plane: xy
+  mode: deform
+  source: formula
+  expression: "0.5 * sin(pi * x1 / L1)"
+```
+
+→ 독립 명령 [13. bend](#13-bend--굽힘-변형--초기-응력) 참조
+
+---
+
+### 38.5 indent — 압입 / 엠보싱
+
+```yaml
+- type: indent
+  target_pid: 2
+  plane: xy
+  direction: -z
+  depth: 2.0
+  r1: 1.5
+  r2: 1.0
+  stress: true
+  shape:
+    type: polygon
+    points:
+      - [0, 0]
+      - [10, 0]
+      - [10, 8]
+      - [0, 8]
+```
+
+→ 독립 명령 [14. indent](#14-indent--압입엠보싱) 참조
+
+---
+
+### 38.6 formstrain — 성형 소성 변형률
+
+```yaml
+- type: formstrain
+  target_pid: 0
+  shell_thickness: 0.0
+  min_curvature: 0.001
+```
+
+→ 독립 명령 [15. formstrain](#15-formstrain--성형-소성-변형률) 참조
+
+---
+
+### 38.7 tet10 / hex20 / quad8 / tria6 — 2차 요소 변환
+
+```yaml
+- type: tet10       # tet10 | hex20 | quad8 | tria6
+  target_pid: 0
+  elform: 17
+```
+
+→ 독립 명령 [16. convert](#16-convert--2차-요소-변환) 참조
+
+---
+
+### 38.8 refine — 메시 세분화
+
+```yaml
+- type: refine
+  target_pid: 0
+  ratio: 2
+```
+
+→ 독립 명령 [17. refine](#17-refine--메시-세분화) 참조
+
+---
+
+### 38.9 elform — 요소 공식 변경
+
+```yaml
+- type: elform
+  target_pid: 0
+  target_elform: "2"
+```
+
+→ 독립 명령 [18. elform](#18-elform--요소-공식-변경) 참조
+
+---
+
+### 38.10 disconnect — 노드 분리
+
+```yaml
+- type: disconnect
+  target_pid: 3
+  mode: full
+```
+
+→ 독립 명령 [19. disconnect](#19-disconnect--노드-분리) 참조
+
+---
+
+### 38.11 iga — 등기하해석 NURBS 박스 생성
+
+```yaml
+- type: iga
+  targets:
+    - target_pid: 1
+      element_size: 4.0
+      bbox_scale: 1.5
+```
+
+→ 독립 명령 [20. iga](#20-iga--등기하해석-nurbs-박스-생성) 참조
+
+---
+
+### 38.12 warpage — 워피지 보정
+
+```yaml
+- type: warpage
+  target_pid: 1
+  dat_file: warpage.dat
+  plane: xy
+  deflection_axis: z
+  mode: curvature
+  morph_factor: 1.0
+```
+
+→ 독립 명령 [21. warpage](#21-warpage--워피지-보정) 참조
+
+---
+
+### 38.13 offset — 셸 오프셋 솔리드 생성
+
+```yaml
+- type: offset
+  source_pid: 1
+  offset_direction: +normal
+  thickness: 2.0
+  use_local_normals: true
+  element_type: hex
+```
+
+→ 독립 명령 [22. offset](#22-offset--셸-오프셋-솔리드-생성) 참조
+
+---
+
+### 38.14 matswap — 재료 번들 교체
+
+```yaml
+- type: matswap
+  bundle: rubber.k
+  pid: 3
+```
+
+→ 독립 명령 [23. matswap](#23-matswap--재료-번들-교체) 참조
+
+---
+
+### 38.15 matdb — 재료 DB 교체
+
+```yaml
+- type: matdb
+  database: materials/material_db.json
+  mat_type: MAT_024
+  thermal: false
+```
+
+→ 독립 명령 [24. matdb](#24-matdb--재료-db-교체) 참조
+
+---
+
+### 38.16 wrap — 와인딩 인장 프리스트레스
+
+```yaml
+- type: wrap
+  target_pid: 1
+  axis: z
+  axis_center: [0, 0]
+  tension: 100.0
+```
+
+→ 독립 명령 [33. wrap](#33-wrap--와인딩-인장-프리스트레스) 참조
+
+---
+
+## 39. 수학 이론
+
+### 39.1 등매개변수 매핑 (map)
 
 HEX8 요소의 자연 좌표계 (ξ, η, ζ) ∈ [-1, 1]³:
 
@@ -1767,7 +2252,7 @@ $$\begin{pmatrix} \Delta\xi \\ \Delta\eta \\ \Delta\zeta \end{pmatrix} = \mathbf
 
 $$J_{ij} = \frac{\partial x_i}{\partial \xi_j} = \sum_{k=1}^{8} \frac{\partial N_k}{\partial \xi_j} x_{ki}$$
 
-### 12.2 선형 탄성 재료 모델
+### 39.2 선형 탄성 재료 모델
 
 라메 상수:
 
@@ -1777,7 +2262,7 @@ $$\lambda = \frac{E\nu}{(1+\nu)(1-2\nu)}, \quad \mu = G = \frac{E}{2(1+\nu)}$$
 
 $$\begin{pmatrix} \sigma_{xx} \\ \sigma_{yy} \\ \sigma_{zz} \\ \sigma_{xy} \\ \sigma_{yz} \\ \sigma_{xz} \end{pmatrix} = \begin{pmatrix} \lambda+2\mu & \lambda & \lambda & 0 & 0 & 0 \\ \lambda & \lambda+2\mu & \lambda & 0 & 0 & 0 \\ \lambda & \lambda & \lambda+2\mu & 0 & 0 & 0 \\ 0 & 0 & 0 & \mu & 0 & 0 \\ 0 & 0 & 0 & 0 & \mu & 0 \\ 0 & 0 & 0 & 0 & 0 & \mu \end{pmatrix} \begin{pmatrix} \varepsilon_{xx} \\ \varepsilon_{yy} \\ \varepsilon_{zz} \\ 2\varepsilon_{xy} \\ 2\varepsilon_{yz} \\ 2\varepsilon_{xz} \end{pmatrix}$$
 
-### 12.3 Kirchhoff 판 이론 (bend/indent)
+### 39.3 Kirchhoff 판 이론 (bend/indent)
 
 중립면에서 거리 z인 지점의 변형률:
 
@@ -1789,7 +2274,7 @@ $$D = \frac{E t^3}{12(1-\nu^2)}$$
 
 $$M_{11} = D(\kappa_{11} + \nu \kappa_{22}), \quad M_{22} = D(\kappa_{22} + \nu \kappa_{11}), \quad M_{12} = D(1-\nu)\kappa_{12}$$
 
-### 12.4 형성 변형률 이론 (formstrain)
+### 39.4 형성 변형률 이론 (formstrain)
 
 이면각 θ, 인접 셸 중심 간 거리 L:
 
@@ -1805,7 +2290,7 @@ $$\overline{\varepsilon}^p = \frac{2}{\sqrt{3}} |\varepsilon_{max}|$$
 
 ---
 
-## 14. 출력 파일 형식
+## 40. 출력 파일 형식
 
 ### dynain 파일 (`*INITIAL_STRESS_SOLID`)
 
