@@ -11,7 +11,8 @@ namespace KooRemapper {
  */
 enum class StrainType {
     ENGINEERING,      // Small strain: ε = 1/2(F + F^T) - I
-    GREEN_LAGRANGE    // Large strain: E = 1/2(F^T·F - I)
+    GREEN_LAGRANGE,   // Large strain: E = 1/2(F^T·F - I)
+    LOGARITHMIC       // True/Hencky strain: ε = ln(V)
 };
 
 /**

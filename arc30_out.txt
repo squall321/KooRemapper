@@ -1,0 +1,30 @@
+============================================================
+  KooRemapper - Mesh Mapping Tool for LS-DYNA
+  Version 1.1.0
+============================================================
+
+[INFO] Loading reference mesh: examples\arc30\arc30_flat.k
+[OK] Loaded 924 nodes, 600 elements
+[INFO] Loading deformed mesh: examples\arc30\arc30_mapped.k
+[OK] Loaded 924 nodes, 600 elements
+[INFO] Analyzing strain/stress...
+[INFO] Using command-line material: E=210000.000000, nu=0.300000
+[========================================] 100%                                                                                [OK] Analysis completed
+
+============================================================
+Analysis Results
+============================================================
+Valid elements:          600
+Strain type:             Engineering
+Min von Mises strain:    0.819603
+Max von Mises strain:    1.303218
+Avg von Mises strain:    0.972209
+
+Min von Mises stress:    1.985960e+05
+Max von Mises stress:    3.157798e+05
+Avg von Mises stress:    2.355737e+05
+
+[INFO] Writing dynain file: examples\arc30\arc30_test_prestress.dynain
+[OK] Dynain file written successfully
+[OK] Deformed mesh with prestress: examples\arc30\arc30_test_prestress.k
+[INFO] Total time: 360.77 ms

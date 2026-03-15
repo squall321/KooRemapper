@@ -100,6 +100,7 @@ SqueezeConfig SqueezeConfigReader::readString(const std::string& yamlContent) {
                         else if (key == "eps_x") part.eps_x = std::stod(val);
                         else if (key == "eps_y") part.eps_y = std::stod(val);
                         else if (key == "eps_z") part.eps_z = std::stod(val);
+                        else if (key == "swelling") part.swelling = std::stod(val);
                     } catch (...) {}
                 }
             }

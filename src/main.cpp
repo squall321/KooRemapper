@@ -1191,11 +1191,19 @@ int runSqueeze(const std::string& meshFile, const std::string& configFile,
         double centerZ = (minZ + maxZ) * 0.5;
 
         // Report
-        std::ostringstream oss;
-        oss << std::fixed << std::setprecision(4);
-        oss << "Part " << partConfig.pid << ": eps = ("
-            << partConfig.eps_x << ", " << partConfig.eps_y << ", " << partConfig.eps_z << ")";
-        console.info(oss.str());
+        if (partConfig.hasSwelling()) {
+            std::ostringstream oss;
+            oss << std::fixed << std::setprecision(4);
+            oss << "Part " << partConfig.pid << ": swelling = " << partConfig.swelling
+                << " (" << (partConfig.swelling * 100.0) << "%)";
+            console.info(oss.str());
+        } else {
+            std::ostringstream oss;
+            oss << std::fixed << std::setprecision(4);
+            oss << "Part " << partConfig.pid << ": eps = ("
+                << partConfig.eps_x << ", " << partConfig.eps_y << ", " << partConfig.eps_z << ")";
+            console.info(oss.str());
+        }
 
         std::ostringstream oss2;
         oss2 << std::fixed << std::setprecision(3);
@@ -1205,6 +1213,12 @@ int runSqueeze(const std::string& meshFile, const std::string& configFile,
         console.println("  Center: (" + std::to_string(centerX) + ", " +
                         std::to_string(centerY) + ", " + std::to_string(centerZ) + ")");
         console.println("  Nodes: " + std::to_string(partNodeIds.size()));
+
+        // Swelling parts: no node movement (thermal expansion cards inserted later)
+        if (partConfig.hasSwelling()) {
+            console.println("  Mode: thermal expansion (no node movement)");
+            continue;
+        }
 
         // Squeeze nodes: position = center + (pos - center) * (1 + eps)
         for (int nid : partNodeIds) {
@@ -1248,6 +1262,9 @@ int runSqueeze(const std::string& meshFile, const std::string& configFile,
         if (it == partConfigMap.end()) continue;  // Not a squeeze part
 
         const auto& pc = *(it->second);
+
+        // Skip swelling parts (handled via thermal expansion, not dynain)
+        if (pc.hasSwelling()) continue;
 
         // Get material for this element
         double matE = 0, matNu = 0;
@@ -1297,7 +1314,65 @@ int runSqueeze(const std::string& meshFile, const std::string& configFile,
     }
     console.success("Dynain written: " + std::to_string(results.validElements) + " elements");
 
-    // Append *INCLUDE to compressed mesh
+    // Build swelling thermal expansion cards
+    std::string swellingCards;
+    {
+        bool hasSwelling = false;
+        for (const auto& partConfig : config.parts) {
+            if (!partConfig.hasSwelling()) continue;
+            hasSwelling = true;
+
+            // Find MID for this part
+            int partMid = 0;
+            const auto& parts = mesh.getParts();
+            auto pit = parts.find(partConfig.pid);
+            if (pit != parts.end()) {
+                partMid = pit->second.materialId;
+            }
+
+            // Fallback: use PID as MID (common LS-DYNA convention)
+            if (partMid <= 0) {
+                partMid = partConfig.pid;
+                console.info("  Part " + std::to_string(partConfig.pid) +
+                            ": *PART not found, using PID as MID=" + std::to_string(partMid));
+            }
+
+            // *MAT_ADD_THERMAL_EXPANSION: CTE = swelling, will use DT=1.0
+            char buf[256];
+            swellingCards += "$\n";
+            swellingCards += "$ Swelling for Part " + std::to_string(partConfig.pid) +
+                           " (MID=" + std::to_string(partMid) + ")\n";
+            swellingCards += "$\n";
+            swellingCards += "*MAT_ADD_THERMAL_EXPANSION\n";
+            swellingCards += "$#     mid      lcid     mult     lcid2    mult2\n";
+            snprintf(buf, sizeof(buf), "%10d%10d%10.4g%10d%10.4g\n",
+                     partMid, 0, partConfig.swelling, 0, 0.0);
+            swellingCards += buf;
+
+            // Collect nodes for this part for *INITIAL_TEMPERATURE
+            std::set<int> partNodeIds;
+            for (const auto& [eid, elem] : mesh.getElements()) {
+                if (elem.partId == partConfig.pid) {
+                    for (int i = 0; i < Element::NUM_NODES; ++i) {
+                        partNodeIds.insert(elem.nodeIds[i]);
+                    }
+                }
+            }
+            swellingCards += "*INITIAL_TEMPERATURE_NODE\n";
+            swellingCards += "$#     nid      temp       loc\n";
+            for (int nid : partNodeIds) {
+                snprintf(buf, sizeof(buf), "%10d%10.4g%10d\n", nid, 1.0, 0);
+                swellingCards += buf;
+            }
+
+            console.success("Swelling cards generated for Part " +
+                          std::to_string(partConfig.pid) + ": " +
+                          std::to_string(partNodeIds.size()) + " nodes, alpha=" +
+                          std::to_string(partConfig.swelling));
+        }
+    }
+
+    // Append *INCLUDE (dynain) + swelling cards to compressed mesh
     {
         // Get just the dynain filename for *INCLUDE
         std::string dynainBasename = dynainFile;
@@ -1306,7 +1381,9 @@ int runSqueeze(const std::string& meshFile, const std::string& configFile,
             dynainBasename = dynainBasename.substr(slashPos + 1);
         }
 
-        // Re-read the compressed mesh and insert *INCLUDE before *END
+        bool hasDynain = (results.validElements > 0);
+
+        // Re-read the compressed mesh and insert before *END
         std::ifstream srcFile(meshOutputFile);
         if (!srcFile.is_open()) {
             console.error("Failed to re-read compressed mesh");
@@ -1329,8 +1406,13 @@ int runSqueeze(const std::string& meshFile, const std::string& configFile,
                 (trimmedLine[1] == 'E' || trimmedLine[1] == 'e') &&
                 (trimmedLine[2] == 'N' || trimmedLine[2] == 'n') &&
                 (trimmedLine[3] == 'D' || trimmedLine[3] == 'd')) {
-                meshContent += "*INCLUDE\n";
-                meshContent += dynainBasename + "\n";
+                if (hasDynain) {
+                    meshContent += "*INCLUDE\n";
+                    meshContent += dynainBasename + "\n";
+                }
+                if (!swellingCards.empty()) {
+                    meshContent += swellingCards;
+                }
                 endFound = true;
             }
             meshContent += line + "\n";
@@ -1338,20 +1420,30 @@ int runSqueeze(const std::string& meshFile, const std::string& configFile,
         srcFile.close();
 
         if (!endFound) {
-            meshContent += "*INCLUDE\n";
-            meshContent += dynainBasename + "\n";
+            if (hasDynain) {
+                meshContent += "*INCLUDE\n";
+                meshContent += dynainBasename + "\n";
+            }
+            if (!swellingCards.empty()) {
+                meshContent += swellingCards;
+            }
             meshContent += "*END\n";
         }
 
         std::ofstream dstFile(meshOutputFile, std::ios::binary);
         if (!dstFile.is_open()) {
-            console.error("Failed to write mesh with *INCLUDE");
+            console.error("Failed to write mesh with additions");
             return 1;
         }
         dstFile << meshContent;
         dstFile.close();
 
-        console.success("Added *INCLUDE to: " + meshOutputFile);
+        if (hasDynain) {
+            console.success("Added *INCLUDE to: " + meshOutputFile);
+        }
+        if (!swellingCards.empty()) {
+            console.success("Added thermal expansion cards to: " + meshOutputFile);
+        }
     }
 
     timer.stop();
@@ -6770,6 +6862,470 @@ static void stab_resolveLevel(StabilizeConfig& cfg) {
     }
 }
 
+// ========================================================================
+// database command — insert *DATABASE_* output control keywords
+// ========================================================================
+namespace {
+
+struct DbKeywordDef {
+    const char* name;       // e.g. "GLSTAT"
+    const char* keyword;    // e.g. "*DATABASE_GLSTAT"
+    const char* comment;    // field comment line
+    const char* role;       // short description
+    bool isBinary;          // binary database (different card format)
+};
+
+// ASCII databases (Card 1: dt, binary, lcur, ioopt)
+const DbKeywordDef DB_ASCII[] = {
+    {"glstat",  "*DATABASE_GLSTAT",  "$#      dt    binary      lcur     ioopt",
+     "Global statistics (energies, timestep, velocities)", false},
+    {"matsum",  "*DATABASE_MATSUM",  "$#      dt    binary      lcur     ioopt",
+     "Material energies per part", false},
+    {"nodout",  "*DATABASE_NODOUT",  "$#      dt    binary      lcur     ioopt",
+     "Nodal point output (disp/vel/acc at history nodes)", false},
+    {"elout",   "*DATABASE_ELOUT",   "$#      dt    binary      lcur     ioopt",
+     "Element output (stress/strain at history elements)", false},
+    {"rcforc",  "*DATABASE_RCFORC",  "$#      dt    binary      lcur     ioopt",
+     "Resultant contact interface forces", false},
+    {"sleout",  "*DATABASE_SLEOUT",  "$#      dt    binary      lcur     ioopt",
+     "Sliding interface energy", false},
+    {"spcforc", "*DATABASE_SPCFORC", "$#      dt    binary      lcur     ioopt",
+     "SPC reaction forces", false},
+    {"nodfor",  "*DATABASE_NODFOR",  "$#      dt    binary      lcur     ioopt",
+     "Nodal force groups", false},
+    {"rwforc",  "*DATABASE_RWFORC",  "$#      dt    binary      lcur     ioopt",
+     "Rigid wall forces", false},
+    {"secforc", "*DATABASE_SECFORC", "$#      dt    binary      lcur     ioopt",
+     "Cross-section forces", false},
+    {"jntforc", "*DATABASE_JNTFORC", "$#      dt    binary      lcur     ioopt",
+     "Joint forces", false},
+    {"bndout",  "*DATABASE_BNDOUT",  "$#      dt    binary      lcur     ioopt",
+     "Boundary condition output", false},
+    {"abstat",  "*DATABASE_ABSTAT",  "$#      dt    binary      lcur     ioopt",
+     "Airbag statistics", false},
+    {"swforc",  "*DATABASE_SWFORC",  "$#      dt    binary      lcur     ioopt",
+     "Spot weld/rivet forces", false},
+    {"ssstat",  "*DATABASE_SSSTAT",  "$#      dt    binary      lcur     ioopt",
+     "Subsystem statistics", false},
+    {"deforc",  "*DATABASE_DEFORC",  "$#      dt    binary      lcur     ioopt",
+     "Discrete element forces", false},
+    {"disbout", "*DATABASE_DISBOUT", "$#      dt    binary      lcur     ioopt",
+     "Displacement output (binary)", false},
+    {"ncforc",  "*DATABASE_NCFORC",  "$#      dt    binary      lcur     ioopt",
+     "Nodal contact forces", false},
+    {"tprint",  "*DATABASE_TPRINT",  "$#      dt    binary      lcur     ioopt",
+     "Thermal print interval", false},
+    {"massout", "*DATABASE_MASSOUT", "$#      dt    binary      lcur     ioopt",
+     "Added mass output", false},
+};
+const int DB_ASCII_COUNT = sizeof(DB_ASCII) / sizeof(DB_ASCII[0]);
+
+// Binary databases (Card 1: dt, lcdt, beam, npltc, psetid)
+const DbKeywordDef DB_BINARY[] = {
+    {"d3plot",  "*DATABASE_BINARY_D3PLOT",
+     "$#      dt      lcdt      beam     npltc    psetid",
+     "d3plot output (full state)", true},
+    {"d3thdt",  "*DATABASE_BINARY_D3THDT",
+     "$#      dt      lcdt      beam     npltc    psetid",
+     "d3thdt time history output", true},
+    {"d3dump",  "*DATABASE_BINARY_D3DUMP",
+     "$#      dt      lcdt      beam     npltc    psetid",
+     "Restart dump files", true},
+    {"runrsf",  "*DATABASE_BINARY_RUNRSF",
+     "$#      dt      lcdt      beam     npltc    psetid",
+     "Running restart files", true},
+    {"intfor",  "*DATABASE_BINARY_INTFOR",
+     "$#      dt      lcdt      beam     npltc    psetid",
+     "Interface force file", true},
+    {"d3drlf",  "*DATABASE_BINARY_D3DRLF",
+     "$#      dt      lcdt      beam     npltc    psetid",
+     "Dynamic relaxation output", true},
+};
+const int DB_BINARY_COUNT = sizeof(DB_BINARY) / sizeof(DB_BINARY[0]);
+
+// Preset definitions: which keywords to enable
+struct DbPreset {
+    const char* name;
+    const char* description;
+    std::vector<std::string> ascii;
+    std::vector<std::string> binary;
+    bool extentBinary;  // include *DATABASE_EXTENT_BINARY
+};
+
+std::vector<DbPreset> db_getPresets() {
+    std::vector<DbPreset> presets;
+
+    presets.push_back({"all", "Maximum output for comprehensive analysis",
+        {"glstat","matsum","nodout","elout","rcforc","sleout","spcforc","nodfor",
+         "rwforc","secforc","jntforc","bndout","abstat","swforc","ssstat","deforc",
+         "disbout","ncforc","tprint","massout"},
+        {"d3plot","d3thdt","d3dump","runrsf"},
+        true});
+
+    presets.push_back({"drop", "Drop test analysis",
+        {"glstat","matsum","nodout","elout","rcforc","sleout","spcforc","rwforc",
+         "nodfor","secforc","bndout","ncforc"},
+        {"d3plot","d3thdt","d3dump"},
+        true});
+
+    presets.push_back({"crash", "Crash / impact analysis",
+        {"glstat","matsum","nodout","elout","rcforc","sleout","spcforc","rwforc",
+         "nodfor","secforc","swforc","ncforc","abstat"},
+        {"d3plot","d3thdt","d3dump"},
+        true});
+
+    presets.push_back({"static", "Static / implicit analysis",
+        {"glstat","matsum","nodout","elout","spcforc","nodfor","bndout","secforc"},
+        {"d3plot","d3thdt"},
+        true});
+
+    presets.push_back({"thermal", "Thermal analysis",
+        {"glstat","matsum","nodout","elout","spcforc","tprint","bndout"},
+        {"d3plot","d3thdt"},
+        true});
+
+    presets.push_back({"forming", "Metal forming analysis",
+        {"glstat","matsum","nodout","elout","rcforc","sleout","spcforc","nodfor",
+         "secforc","ncforc","swforc"},
+        {"d3plot","d3thdt","d3dump"},
+        true});
+
+    presets.push_back({"modal", "Modal / eigenvalue analysis",
+        {"glstat","matsum","nodout","elout","spcforc"},
+        {"d3plot"},
+        false});
+
+    presets.push_back({"minimal", "Minimal essential output",
+        {"glstat","matsum"},
+        {"d3plot"},
+        false});
+
+    return presets;
+}
+
+std::string db_buildExtentBinary(int neiph, int neips, int maxint,
+                                  int strflg, int sigflg, int epsflg,
+                                  int rltflg, int engflg, int cmpflg) {
+    // *DATABASE_EXTENT_BINARY
+    // Card 1: neiph, neips, maxint, strflg, sigflg, epsflg, rltflg, engflg, cmpflg, ieverp
+    // Card 2: beamip, dcomp, shge, stssz, n3thdt, ialemat, nintsld, pkp_sen
+    std::stringstream ss;
+    ss << "*DATABASE_EXTENT_BINARY\n";
+    ss << "$#   neiph     neips    maxint    strflg    sigflg    epsflg    rltflg    engflg\n";
+    char buf[256];
+    snprintf(buf, sizeof(buf), "%10d%10d%10d%10d%10d%10d%10d%10d\n",
+             neiph, neips, maxint, strflg, sigflg, epsflg, rltflg, engflg);
+    ss << buf;
+    ss << "$#  cmpflg    ieverp    beamip     dcomp      shge     stssz    n3thdt   ialemat\n";
+    snprintf(buf, sizeof(buf), "%10d%10d%10d%10d%10d%10d%10d%10d\n",
+             cmpflg, 0, 0, 1, 1, 0, 0, 0);
+    ss << buf;
+    return ss.str();
+}
+
+} // anonymous namespace
+
+int runDatabase(const std::string& yamlFile, ConsoleOutput& console) {
+    // 1. Parse YAML
+    std::ifstream f(yamlFile);
+    if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
+
+    std::string configDir;
+    {
+        size_t sp = yamlFile.find_last_of("/\\");
+        if (sp != std::string::npos) configDir = yamlFile.substr(0, sp + 1);
+    }
+
+    std::string modelPath, outputPath;
+    std::string preset;
+    double dt = 0.001;       // ASCII output interval
+    double dt_plot = 0.0;    // d3plot interval (0 = use dt*10)
+    double dt_thdt = 0.0;    // d3thdt interval (0 = use dt)
+    double dt_dump = 0.0;    // d3dump interval (0 = auto)
+
+    // Individual toggles (empty = use preset)
+    std::set<std::string> enabledAscii;
+    std::set<std::string> enabledBinary;
+    bool extentBinary = false;
+    bool hasIndividual = false;
+
+    // EXTENT_BINARY settings
+    int neiph = 0, neips = 0, maxint = 3;
+    int strflg = 1, sigflg = 1, epsflg = 1, rltflg = 1, engflg = 1, cmpflg = 0;
+
+    // Parse YAML
+    std::string line;
+    enum class Section { NONE, ASCII, BINARY, EXTENT };
+    Section section = Section::NONE;
+
+    while (std::getline(f, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        std::string trimmed = line;
+        size_t s = trimmed.find_first_not_of(" \t");
+        if (s == std::string::npos) continue;
+        trimmed = trimmed.substr(s);
+        if (trimmed.empty() || trimmed[0] == '#') continue;
+
+        int indent = (int)s;
+
+        // Section detection
+        if (indent == 0) {
+            if (trimmed.find("ascii:") == 0) { section = Section::ASCII; continue; }
+            if (trimmed.find("binary:") == 0) { section = Section::BINARY; continue; }
+            if (trimmed.find("extent:") == 0) { section = Section::EXTENT; continue; }
+            section = Section::NONE;
+        }
+
+        size_t cp = trimmed.find(':');
+        if (cp == std::string::npos) continue;
+        std::string key = trimmed.substr(0, cp);
+        std::string val = trimmed.substr(cp + 1);
+        // trim val
+        size_t vs = val.find_first_not_of(" \t\"'");
+        size_t ve = val.find_last_not_of(" \t\"'");
+        if (vs != std::string::npos) val = val.substr(vs, ve - vs + 1);
+        else val = "";
+
+        if (section == Section::NONE) {
+            if (key == "model") { modelPath = val; if (!configDir.empty() && modelPath.find('/') == std::string::npos && modelPath.find('\\') == std::string::npos) modelPath = configDir + modelPath; }
+            else if (key == "output") { outputPath = val; if (!configDir.empty() && outputPath.find('/') == std::string::npos && outputPath.find('\\') == std::string::npos) outputPath = configDir + outputPath; }
+            else if (key == "preset") preset = val;
+            else if (key == "dt") try { dt = std::stod(val); } catch (...) {}
+            else if (key == "dt_plot") try { dt_plot = std::stod(val); } catch (...) {}
+            else if (key == "dt_thdt") try { dt_thdt = std::stod(val); } catch (...) {}
+            else if (key == "dt_dump") try { dt_dump = std::stod(val); } catch (...) {}
+        }
+        else if (section == Section::ASCII) {
+            // key: true/false
+            hasIndividual = true;
+            if (val == "true" || val == "1" || val == "on") {
+                enabledAscii.insert(key);
+            }
+        }
+        else if (section == Section::BINARY) {
+            hasIndividual = true;
+            if (val == "true" || val == "1" || val == "on") {
+                enabledBinary.insert(key);
+            }
+        }
+        else if (section == Section::EXTENT) {
+            extentBinary = true;
+            try {
+                if (key == "neiph") neiph = std::stoi(val);
+                else if (key == "neips") neips = std::stoi(val);
+                else if (key == "maxint") maxint = std::stoi(val);
+                else if (key == "strflg") strflg = std::stoi(val);
+                else if (key == "sigflg") sigflg = std::stoi(val);
+                else if (key == "epsflg") epsflg = std::stoi(val);
+                else if (key == "rltflg") rltflg = std::stoi(val);
+                else if (key == "engflg") engflg = std::stoi(val);
+                else if (key == "cmpflg") cmpflg = std::stoi(val);
+            } catch (...) {}
+        }
+    }
+    f.close();
+
+    if (modelPath.empty() || outputPath.empty()) {
+        console.error("model and output are required");
+        return 1;
+    }
+
+    // Apply preset if no individual toggles
+    if (!hasIndividual && !preset.empty()) {
+        auto presets = db_getPresets();
+        bool found = false;
+        for (const auto& p : presets) {
+            if (preset == p.name) {
+                for (const auto& a : p.ascii) enabledAscii.insert(a);
+                for (const auto& b : p.binary) enabledBinary.insert(b);
+                if (p.extentBinary) extentBinary = true;
+                found = true;
+                console.info("Preset: " + std::string(p.name) + " (" + p.description + ")");
+                break;
+            }
+        }
+        if (!found) {
+            console.error("Unknown preset: " + preset);
+            console.info("Available: all, drop, crash, static, thermal, forming, modal, minimal");
+            return 1;
+        }
+    } else if (!hasIndividual && preset.empty()) {
+        // Default to "all" preset
+        preset = "all";
+        auto presets = db_getPresets();
+        for (const auto& p : presets) {
+            if (preset == p.name) {
+                for (const auto& a : p.ascii) enabledAscii.insert(a);
+                for (const auto& b : p.binary) enabledBinary.insert(b);
+                if (p.extentBinary) extentBinary = true;
+                console.info("Preset: all (default — maximum output)");
+                break;
+            }
+        }
+    }
+
+    // Set default intervals
+    if (dt_plot <= 0) dt_plot = dt * 10.0;
+    if (dt_thdt <= 0) dt_thdt = dt;
+    if (dt_dump <= 0) dt_dump = dt_plot * 10.0;
+
+    // 2. Read model
+    console.info("Reading model: " + modelPath);
+    std::ifstream modelFile(modelPath);
+    if (!modelFile.is_open()) {
+        console.error("Cannot open model: " + modelPath);
+        return 1;
+    }
+
+    std::vector<std::string> rawLines;
+    {
+        std::string ln;
+        while (std::getline(modelFile, ln)) {
+            if (!ln.empty() && ln.back() == '\r') ln.pop_back();
+            rawLines.push_back(ln);
+        }
+    }
+    modelFile.close();
+
+    // 3. Scan existing DATABASE keywords
+    std::set<std::string> existingKeywords;
+    for (const auto& ln : rawLines) {
+        std::string up = ln;
+        for (auto& c : up) c = (char)toupper((unsigned char)c);
+        size_t s2 = up.find_first_not_of(" \t");
+        if (s2 != std::string::npos) up = up.substr(s2);
+        if (up.find("*DATABASE_") == 0) {
+            // Extract keyword name after *DATABASE_
+            std::string kw = up;
+            // Remove trailing whitespace
+            size_t e2 = kw.find_first_of(" \t\r\n");
+            if (e2 != std::string::npos) kw = kw.substr(0, e2);
+            existingKeywords.insert(kw);
+        }
+    }
+
+    if (!existingKeywords.empty()) {
+        console.info("Existing DATABASE keywords found: " + std::to_string(existingKeywords.size()));
+        for (const auto& kw : existingKeywords) {
+            console.println("  " + kw);
+        }
+    }
+
+    // 4. Build cards to insert
+    std::string insertBlock;
+    int insertedCount = 0;
+    int skippedCount = 0;
+
+    insertBlock += "$\n";
+    insertBlock += "$ === DATABASE OUTPUT CONTROL (auto-generated by KooRemapper) ===\n";
+    insertBlock += "$\n";
+
+    // ASCII databases
+    char buf[256];
+    for (int i = 0; i < DB_ASCII_COUNT; ++i) {
+        const auto& def = DB_ASCII[i];
+        if (enabledAscii.find(def.name) == enabledAscii.end()) continue;
+
+        // Check if already exists
+        std::string kwUp = def.keyword;
+        for (auto& c : kwUp) c = (char)toupper((unsigned char)c);
+        if (existingKeywords.count(kwUp)) {
+            console.println("  [SKIP] " + std::string(def.keyword) + " (already exists)");
+            skippedCount++;
+            continue;
+        }
+
+        insertBlock += std::string(def.keyword) + "\n";
+        insertBlock += std::string(def.comment) + "\n";
+        // Card 1: dt, binary, lcur, ioopt
+        snprintf(buf, sizeof(buf), "%10.4g%10d%10d%10d\n", dt, 0, 0, 1);
+        insertBlock += buf;
+        insertedCount++;
+    }
+
+    // Binary databases
+    for (int i = 0; i < DB_BINARY_COUNT; ++i) {
+        const auto& def = DB_BINARY[i];
+        if (enabledBinary.find(def.name) == enabledBinary.end()) continue;
+
+        std::string kwUp = def.keyword;
+        for (auto& c : kwUp) c = (char)toupper((unsigned char)c);
+        if (existingKeywords.count(kwUp)) {
+            console.println("  [SKIP] " + std::string(def.keyword) + " (already exists)");
+            skippedCount++;
+            continue;
+        }
+
+        double interval = dt;
+        if (std::string(def.name) == "d3plot") interval = dt_plot;
+        else if (std::string(def.name) == "d3thdt") interval = dt_thdt;
+        else if (std::string(def.name) == "d3dump") interval = dt_dump;
+        else if (std::string(def.name) == "runrsf") interval = dt_dump;
+        else if (std::string(def.name) == "d3drlf") interval = dt_plot;
+
+        insertBlock += std::string(def.keyword) + "\n";
+        insertBlock += std::string(def.comment) + "\n";
+        // Card 1: dt, lcdt, beam, npltc, psetid
+        snprintf(buf, sizeof(buf), "%10.4g%10d%10d%10d%10d\n",
+                 interval, 0, 0, 0, 0);
+        insertBlock += buf;
+        insertedCount++;
+    }
+
+    // EXTENT_BINARY
+    if (extentBinary) {
+        if (existingKeywords.count("*DATABASE_EXTENT_BINARY")) {
+            console.println("  [SKIP] *DATABASE_EXTENT_BINARY (already exists)");
+            skippedCount++;
+        } else {
+            insertBlock += db_buildExtentBinary(neiph, neips, maxint,
+                                                 strflg, sigflg, epsflg,
+                                                 rltflg, engflg, cmpflg);
+            insertedCount++;
+        }
+    }
+
+    insertBlock += "$\n";
+    insertBlock += "$ === END DATABASE OUTPUT CONTROL ===\n";
+    insertBlock += "$\n";
+
+    // 5. Write output — insert block before *END
+    console.info("Writing output: " + outputPath);
+    std::ofstream out(outputPath);
+    if (!out.is_open()) {
+        console.error("Cannot write: " + outputPath);
+        return 1;
+    }
+
+    bool endFound = false;
+    for (const auto& ln : rawLines) {
+        std::string up = ln;
+        for (auto& c : up) c = (char)toupper((unsigned char)c);
+        size_t s2 = up.find_first_not_of(" \t");
+        if (s2 != std::string::npos) up = up.substr(s2);
+
+        if (up.find("*END") == 0 && (up.size() == 4 || !std::isalpha(up[4]))) {
+            out << insertBlock;
+            endFound = true;
+        }
+        out << ln << "\n";
+    }
+
+    if (!endFound) {
+        out << insertBlock;
+        out << "*END\n";
+    }
+    out.close();
+
+    std::cout << "\n";
+    console.success("Inserted: " + std::to_string(insertedCount) + " keyword(s)");
+    if (skippedCount > 0) {
+        console.info("Skipped: " + std::to_string(skippedCount) + " (already exist)");
+    }
+
+    return 0;
+}
+
 int runStabilize(const std::string& yamlFile, ConsoleOutput& console) {
     std::ifstream f(yamlFile);
     if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
@@ -6979,6 +7535,7 @@ int runRelax(const std::string& yamlFile, ConsoleOutput& console) {
     int irelalOvr = -1;
     bool d3drlf = true;
     bool fixShellElform = false;
+    bool stripMode = false;
 
     auto trimYaml = [](const std::string& s) -> std::string {
         size_t a = s.find_first_not_of(" \t\r\n");
@@ -7012,13 +7569,14 @@ int runRelax(const std::string& yamlFile, ConsoleOutput& console) {
             else if (key == "edttl")   edttlOvr  = std::stod(val);
             else if (key == "d3drlf")  d3drlf = (val == "true" || val == "yes" || val == "1");
             else if (key == "fix_shell_elform") fixShellElform = (val == "true" || val == "yes" || val == "1");
+            else if (key == "strip") stripMode = (val == "true" || val == "yes" || val == "1");
         } catch (...) {}
     }
 
     if (modelFile.empty())  { console.error("relax YAML: 'model' not specified");  return 1; }
     if (outputFile.empty()) { console.error("relax YAML: 'output' not specified"); return 1; }
-    if (level < 1 || level > 5) { console.error("relax: level must be 1~5"); return 1; }
-    if (mode != "explicit" && mode != "implicit") {
+    if (!stripMode && (level < 1 || level > 5)) { console.error("relax: level must be 1~5"); return 1; }
+    if (!stripMode && mode != "explicit" && mode != "implicit") {
         console.error("relax: mode must be 'explicit' or 'implicit'"); return 1;
     }
 
@@ -7042,7 +7600,28 @@ int runRelax(const std::string& yamlFile, ConsoleOutput& console) {
         while (std::getline(mf, ln)) lines.push_back(ln);
     }
 
-    // 3. Print header
+    // 3. Strip mode: remove DR keywords and exit
+    if (stripMode) {
+        console.println("[relax] Model    : " + modelPath);
+        console.println("[relax] Output   : " + outPath);
+        console.println("[relax] Mode     : STRIP (remove DR keywords)");
+
+        auto removeAndLog = [&](const std::string& kw) {
+            size_t before = lines.size();
+            lines = impl_removeKeyword(lines, kw);
+            if (lines.size() < before) console.println("[relax] Removed  : " + kw);
+        };
+        removeAndLog("*CONTROL_DYNAMIC_RELAXATION");
+        removeAndLog("*DATABASE_BINARY_D3DRLF");
+
+        std::ofstream out(outPath);
+        if (!out.is_open()) { console.error("Cannot write output: " + outPath); return 1; }
+        for (const auto& ln : lines) out << ln << "\n";
+        console.println("[relax] Done     -> " + outPath);
+        return 0;
+    }
+
+    // 3b. Print header (normal mode)
     static const char* levelNames[5] = {"빠름", "표준", "안정", "보수", "최대"};
     struct LP { int nrcyck; double drtol, drfctr, tssfdr; int irelal; double edttl; };
     static const LP lv[5] = {
@@ -7141,6 +7720,105 @@ int runRelax(const std::string& yamlFile, ConsoleOutput& console) {
 }
 
 // =====================================================================
+// explicit command: revert to pure explicit by stripping implicit/DR/modal keywords
+// =====================================================================
+int runExplicit(const std::string& yamlFile, ConsoleOutput& console) {
+    // Parse YAML (minimal: model, output, keep_dr_curves)
+    std::ifstream f(yamlFile);
+    if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
+
+    std::string configDir;
+    size_t lastSlash = yamlFile.find_last_of("/\\");
+    if (lastSlash != std::string::npos) configDir = yamlFile.substr(0, lastSlash);
+
+    std::string modelFile, outputFile;
+    bool keepDrCurves = false;
+
+    std::string line;
+    while (std::getline(f, line)) {
+        std::string t = impl_trim(line);
+        if (t.empty() || t[0] == '#') continue;
+        size_t cp = t.find(':');
+        if (cp == std::string::npos) continue;
+        std::string key = impl_trim(t.substr(0, cp));
+        std::string val = impl_trim(t.substr(cp + 1));
+        { size_t h = val.find('#'); if (h != std::string::npos) val = impl_trim(val.substr(0, h)); }
+        if (val.empty()) continue;
+        if      (key == "model")           modelFile  = val;
+        else if (key == "output")          outputFile = val;
+        else if (key == "keep_dr_curves")  keepDrCurves = (val == "true" || val == "yes" || val == "1");
+    }
+
+    if (modelFile.empty())  { console.error("explicit YAML: 'model' not specified");  return 1; }
+    if (outputFile.empty()) { console.error("explicit YAML: 'output' not specified"); return 1; }
+
+    auto resolvePath = [&](const std::string& p) -> std::string {
+        if (!configDir.empty() && !p.empty() &&
+            p[0] != '/' && p[0] != '\\' && !(p.size() >= 2 && p[1] == ':') &&
+            p.find('/') == std::string::npos && p.find('\\') == std::string::npos)
+            return configDir + "/" + p;
+        return p;
+    };
+    std::string modelPath = resolvePath(modelFile);
+    std::string outPath   = resolvePath(outputFile);
+
+    // Read model
+    std::vector<std::string> lines;
+    {
+        std::ifstream mf(modelPath);
+        if (!mf.is_open()) { console.error("Cannot open model: " + modelPath); return 1; }
+        std::string ln;
+        while (std::getline(mf, ln)) {
+            if (!ln.empty() && ln.back() == '\r') ln.pop_back();
+            lines.push_back(ln);
+        }
+    }
+
+    console.println("[explicit] Model   : " + modelPath);
+    console.println("[explicit] Output  : " + outPath);
+    console.println("[explicit] Stripping implicit/DR/modal keywords...");
+
+    auto removeAndLog = [&](const std::string& kw) {
+        size_t before = lines.size();
+        lines = impl_removeKeyword(lines, kw);
+        if (lines.size() < before) console.println("[explicit] Removed : " + kw);
+    };
+
+    // Remove Dynamic Relaxation
+    removeAndLog("*CONTROL_DYNAMIC_RELAXATION");
+    removeAndLog("*DATABASE_BINARY_D3DRLF");
+
+    // Remove implicit cards
+    removeAndLog("*CONTROL_IMPLICIT_GENERAL");
+    removeAndLog("*CONTROL_IMPLICIT_DYNAMICS");
+    removeAndLog("*CONTROL_IMPLICIT_SOLUTION");
+    removeAndLog("*CONTROL_IMPLICIT_AUTO");
+    removeAndLog("*CONTROL_IMPLICIT_STABILIZATION");
+    removeAndLog("*CONTROL_IMPLICIT_SOLVER");
+    removeAndLog("*CONTROL_IMPLICIT_BUCKLE");
+    removeAndLog("*CONTROL_IMPLICIT_FORMING");
+    removeAndLog("*CONTROL_IMPLICIT_ROTATIONAL_DYNAMICS");
+    removeAndLog("*CONTROL_IMPLICIT_EIGENVALUE");
+
+    // Remove DR curves (SIDR=1) unless keep_dr_curves
+    if (!keepDrCurves) {
+        int n = impl_removeDrCurves(lines);
+        if (n > 0) {
+            char buf[64];
+            snprintf(buf, sizeof(buf), "[explicit] Removed : %d *DEFINE_CURVE (SIDR=1)", n);
+            console.println(buf);
+        }
+    }
+
+    // Write output
+    std::ofstream out(outPath);
+    if (!out.is_open()) { console.error("Cannot write output: " + outPath); return 1; }
+    for (const auto& ln : lines) out << ln << "\n";
+    console.println("[explicit] Done    -> " + outPath);
+    return 0;
+}
+
+// =====================================================================
 // implicit command: convert explicit K-file to implicit solver settings
 // =====================================================================
 int runImplicit(const std::string& yamlFile, ConsoleOutput& console) {
@@ -7161,6 +7839,7 @@ int runImplicit(const std::string& yamlFile, ConsoleOutput& console) {
     int nsolvrOvr = 0, kfailOvr = -1, lsolvrOvr = 0, stabOvr = -1, arcOvr = -1;
     bool fixShellElform = false;
     bool keepDrCurves   = false;
+    bool stripMode      = false;
 
     auto trimYaml = [](const std::string& s) -> std::string {
         size_t a=s.find_first_not_of(" \t\r\n");
@@ -7199,13 +7878,14 @@ int runImplicit(const std::string& yamlFile, ConsoleOutput& console) {
             else if (key=="arc_length")  arcOvr       = (val=="true"||val=="yes"||val=="1")?1:0;
             else if (key=="fix_shell_elform") fixShellElform=(val=="true"||val=="yes"||val=="1");
             else if (key=="keep_dr_curves")   keepDrCurves  =(val=="true"||val=="yes"||val=="1");
+            else if (key=="strip") stripMode=(val=="true"||val=="yes"||val=="1");
         } catch(...) {}
     }
 
     if (modelFile.empty())  { console.error("implicit YAML: 'model' not specified");  return 1; }
     if (outputFile.empty()) { console.error("implicit YAML: 'output' not specified"); return 1; }
-    if (level<1||level>8)   { console.error("implicit: level must be 1~8");           return 1; }
-    if (mode!="static"&&mode!="dynamic") {
+    if (!stripMode && (level<1||level>8))   { console.error("implicit: level must be 1~8");           return 1; }
+    if (!stripMode && mode!="static"&&mode!="dynamic") {
         console.error("implicit: mode must be 'static' or 'dynamic'"); return 1;
     }
 
@@ -7228,6 +7908,35 @@ int runImplicit(const std::string& yamlFile, ConsoleOutput& console) {
         if (!mf.is_open()) { console.error("Cannot open model: " + modelPath); return 1; }
         std::string ln;
         while (std::getline(mf, ln)) lines.push_back(ln);
+    }
+
+    // Strip mode: remove implicit keywords and exit
+    if (stripMode) {
+        console.println("[implicit] Model   : " + modelPath);
+        console.println("[implicit] Output  : " + outPath);
+        console.println("[implicit] Mode    : STRIP (remove implicit keywords)");
+
+        auto removeAndLog = [&](const std::string& kw) {
+            size_t before = lines.size();
+            lines = impl_removeKeyword(lines, kw);
+            if (lines.size() < before) console.println("[implicit] Removed : " + kw);
+        };
+        removeAndLog("*CONTROL_IMPLICIT_GENERAL");
+        removeAndLog("*CONTROL_IMPLICIT_DYNAMICS");
+        removeAndLog("*CONTROL_IMPLICIT_SOLUTION");
+        removeAndLog("*CONTROL_IMPLICIT_AUTO");
+        removeAndLog("*CONTROL_IMPLICIT_STABILIZATION");
+        removeAndLog("*CONTROL_IMPLICIT_SOLVER");
+        removeAndLog("*CONTROL_IMPLICIT_BUCKLE");
+        removeAndLog("*CONTROL_IMPLICIT_FORMING");
+        removeAndLog("*CONTROL_IMPLICIT_ROTATIONAL_DYNAMICS");
+        removeAndLog("*CONTROL_IMPLICIT_EIGENVALUE");
+
+        std::ofstream out(outPath);
+        if (!out.is_open()) { console.error("Cannot write output: " + outPath); return 1; }
+        for (const auto& ln : lines) out << ln << "\n";
+        console.println("[implicit] Done    -> " + outPath);
+        return 0;
     }
 
     // Print header
@@ -7387,6 +8096,7 @@ int runModal(const std::string& yamlFile, ConsoleOutput& console) {
     int    lsolvr  = 7;
     bool   fixElform   = false;
     bool   keepDrCurves = false;
+    bool   stripMode    = false;
 
     // Resolve configDir for relative paths
     std::string configDir;
@@ -7421,6 +8131,7 @@ int runModal(const std::string& yamlFile, ConsoleOutput& console) {
             else if (key == "solver")        lsolvr     = std::stoi(val);
             else if (key == "fix_shell_elform")  fixElform   = (val == "true");
             else if (key == "keep_dr_curves")    keepDrCurves = (val == "true");
+            else if (key == "strip")             stripMode    = (val == "true" || val == "yes" || val == "1");
         }
     }
 
@@ -7449,6 +8160,29 @@ int runModal(const std::string& yamlFile, ConsoleOutput& console) {
             if (!ln.empty() && ln.back() == '\r') ln.pop_back();
             lines.push_back(ln);
         }
+    }
+
+    // Strip mode: remove modal keywords and exit
+    if (stripMode) {
+        console.println("[modal] Model   : " + modelPath);
+        console.println("[modal] Output  : " + outPath);
+        console.println("[modal] Mode    : STRIP (remove modal keywords)");
+
+        auto removeAndLog = [&](const std::string& kw) {
+            size_t before = lines.size();
+            lines = impl_removeKeyword(lines, kw);
+            if (lines.size() < before) console.println("[modal] Removed : " + kw);
+        };
+        removeAndLog("*CONTROL_IMPLICIT_EIGENVALUE");
+        removeAndLog("*CONTROL_IMPLICIT_GENERAL");
+        removeAndLog("*CONTROL_IMPLICIT_SOLUTION");
+        removeAndLog("*CONTROL_IMPLICIT_SOLVER");
+
+        std::ofstream out(outFullPath);
+        if (!out.is_open()) { console.error("Cannot write output: " + outFullPath); return 1; }
+        for (const auto& ln : lines) out << ln << "\n";
+        console.println("[modal] Done    -> " + outPath);
+        return 0;
     }
 
     // Console header
@@ -9805,6 +10539,58 @@ int main(int argc, char* argv[]) {
                 console.println("      Shared cards (used by non-target parts) are preserved.");
                 std::cout << "\n";
                 console.println("Examples: see examples/matswap/");
+            } else if (helpCmd == "relax") {
+                console.println("Usage: KooRemapper relax <config.yaml>");
+                std::cout << "\n";
+                console.println("Set up Dynamic Relaxation for initial stress equilibrium.");
+                console.println("Inserts *CONTROL_DYNAMIC_RELAXATION with 5-level preset system.");
+                std::cout << "\n";
+                console.println("YAML Config Format:");
+                console.println("  model: wrapped_model.k");
+                console.println("  output: relaxed_model.k");
+                console.println("  level: 2               # 1(fast)~5(max conservative), default=2");
+                console.println("  mode: explicit         # explicit(IDRFLG=1) | implicit(IDRFLG=5), default=explicit");
+                console.println("  drterm: 100.0          # DR termination time (0=convergence only)");
+                console.println("  endtime: 1.0           # Post-DR analysis endtime (optional)");
+                console.println("");
+                console.println("  # Overrides (level defaults used if omitted):");
+                console.println("  nrcyck:                # Convergence check interval");
+                console.println("  drtol:                 # Convergence tolerance");
+                console.println("  drfctr:                # Velocity damping factor");
+                console.println("  tssfdr:                # DR timestep scale factor");
+                console.println("  irelal:                # Auto control (0=off, 1=Papadrakakis)");
+                console.println("  edttl:                 # Auto control convergence tolerance");
+                console.println("");
+                console.println("  d3drlf: true           # DATABASE_BINARY_D3DRLF output (default: true)");
+                console.println("  fix_shell_elform: false");
+                console.println("  strip: false           # true: only REMOVE DR keywords (no insertion)");
+                std::cout << "\n";
+                console.println("Level Presets:");
+                console.println("  Lv  Name   NRCYCK  DRTOL    DRFCTR   TSSFDR  IRELAL  EDTTL");
+                console.println("  --  -----  ------  -------  -------  ------  ------  ------");
+                console.println("   1  빠름     500    0.010    0.990    0.95    0       0.04");
+                console.println("   2  표준     250    0.001    0.995    0.90    0       0.04");
+                console.println("   3  안정     100    0.001    0.998    0.80    0       0.04");
+                console.println("   4  보수      50    0.0001   0.999    0.67    1       0.01");
+                console.println("   5  최대      25    0.00001  0.999    0.50    1       0.001");
+                std::cout << "\n";
+                console.println("Examples: see examples/wrap/relax_test.yaml");
+
+            } else if (helpCmd == "explicit") {
+                console.println("Usage: KooRemapper explicit <config.yaml>");
+                std::cout << "\n";
+                console.println("Revert a K-file to pure explicit by stripping implicit/DR/modal keywords.");
+                console.println("Removes *CONTROL_IMPLICIT_*, *CONTROL_DYNAMIC_RELAXATION, *DATABASE_BINARY_D3DRLF,");
+                console.println("and SIDR=1 load curves.");
+                std::cout << "\n";
+                console.println("YAML Config Format:");
+                console.println("  model: implicit_model.k");
+                console.println("  output: explicit_model.k");
+                console.println("  keep_dr_curves: false    # true: keep SIDR=1 DEFINE_CURVEs (default: remove)");
+                std::cout << "\n";
+                console.println("Note: implicit/modal/relax commands also support 'strip: true' for");
+                console.println("removing only their specific keywords without adding new ones.");
+
             } else if (helpCmd == "implicit") {
                 console.println("Usage: KooRemapper implicit <config.yaml>");
                 std::cout << "\n";
@@ -9834,6 +10620,7 @@ int main(int argc, char* argv[]) {
                 console.println("  # Cleanup options:");
                 console.println("  fix_shell_elform: false  # true: ELFORM=16->2 auto-fix (default: warn only)");
                 console.println("  keep_dr_curves: false    # true: keep SIDR=1 DEFINE_CURVEs (default: remove)");
+                console.println("  strip: false             # true: only REMOVE *CONTROL_IMPLICIT_* (no insertion)");
                 std::cout << "\n";
                 console.println("Level Spectrum --- Table 1: Nonlinear solver & convergence tolerances");
                 console.println("  Lv  Name           NSOLVR  ILIM  MXREF  ITOPT  KFAIL   DCTOL   ECTOL   LSTOL   RCTOL");
@@ -9912,6 +10699,7 @@ int main(int argc, char* argv[]) {
                 console.println("  solver: 7                  # Linear solver (7=default sparse, 30=MUMPS)");
                 console.println("  fix_shell_elform: false    # true: ELFORM=16->2 auto-fix (default: warn)");
                 console.println("  keep_dr_curves:  false     # true: keep SIDR=1 DEFINE_CURVEs (default: remove)");
+                console.println("  strip: false               # true: only REMOVE modal keywords (no insertion)");
                 std::cout << "\n";
                 console.println("Eigenvalue method (eigmth):");
                 console.println("  2   Block Shift Lanczos   -- general purpose (default)");
@@ -10180,6 +10968,51 @@ int main(int argc, char* argv[]) {
                 console.println("  1. Run with 'analyze' action to see contacts and indices");
                 console.println("  2. Use contact_index from report for convert/modify/remove");
                 console.println("  3. Multiple actions processed in order");
+            } else if (helpCmd == "database") {
+                console.println("Usage: KooRemapper database <config.yaml>");
+                std::cout << "\n";
+                console.println("Insert *DATABASE_* output control keywords into a K-file.");
+                console.println("Uses presets for common analysis types or individual keyword toggles.");
+                console.println("Existing keywords are detected and skipped automatically.");
+                std::cout << "\n";
+                console.println("YAML Format (preset):");
+                console.println("  model:  model.k");
+                console.println("  output: model_db.k");
+                console.println("  preset: all            # all/drop/crash/static/thermal/forming/modal/minimal");
+                console.println("  dt:     0.001          # global ASCII output interval (default 0.001)");
+                console.println("  dt_plot: 0.01          # D3PLOT interval (default 0.01)");
+                std::cout << "\n";
+                console.println("YAML Format (custom):");
+                console.println("  model:  model.k");
+                console.println("  output: model_db.k");
+                console.println("  ascii:");
+                console.println("    glstat: true");
+                console.println("    matsum: true");
+                console.println("    nodout: true");
+                console.println("    rcforc: true");
+                console.println("  binary:");
+                console.println("    d3plot: true");
+                console.println("    d3thdt: true");
+                console.println("  extent:");
+                console.println("    neiph: 6             # extra integration point history vars");
+                console.println("    strflg: 1            # strain tensor output");
+                console.println("    sigflg: 1            # stress tensor output");
+                console.println("    epsflg: 1            # effective plastic strain output");
+                std::cout << "\n";
+                console.println("Presets:");
+                console.println("  all      All 20 ASCII + D3PLOT/D3THDT/D3DUMP (comprehensive)");
+                console.println("  drop     glstat matsum rcforc nodout elout sleout jntforc d3plot");
+                console.println("  crash    glstat matsum rcforc sleout spcforc rwforc abstat d3plot d3thdt");
+                console.println("  static   glstat matsum nodout elout spcforc bndout d3plot");
+                console.println("  thermal  glstat matsum nodout elout tprint d3plot d3thdt");
+                console.println("  forming  glstat matsum rcforc sleout rwforc swforc d3plot");
+                console.println("  modal    glstat matsum nodout elout d3plot");
+                console.println("  minimal  glstat matsum d3plot");
+                std::cout << "\n";
+                console.println("ASCII keywords: glstat matsum nodout elout rcforc sleout spcforc");
+                console.println("  nodfor rwforc secforc jntforc bndout abstat swforc ssstat");
+                console.println("  deforc disbout ncforc tprint massout");
+                console.println("Binary keywords: d3plot d3thdt d3dump runrsf intfor d3drlf");
             } else {
                 console.error("Unknown command: " + helpCmd);
                 return 1;
@@ -10204,12 +11037,14 @@ int main(int argc, char* argv[]) {
             console.println("  boundary     Apply boundary conditions (SPC/rigid wall) from YAML config");
             console.println("  rbe          Create RBE constraints (RBE2/RBE3) from YAML config");
             console.println("  relax        Set up Dynamic Relaxation for initial stress equilibrium");
+            console.println("  explicit     Revert to pure explicit (strip implicit/DR/modal keywords)");
             console.println("  implicit     Convert explicit K-file to implicit solver settings");
             console.println("  modal        Convert explicit K-file to modal (natural frequency) analysis");
             console.println("  ale          Convert parts to ALE with material presets");
             console.println("  contact      Analyze, create, modify, convert contact definitions");
             console.println("  optimize     Apply material-specific global card optimization");
             console.println("  stabilize    Apply explicit solver stabilization (12-level system)");
+            console.println("  database     Insert DATABASE output control keywords");
             console.println("  restack      Extrude/restack layers from shell surface");
             console.println("  bend         Apply bending deformation + prestress");
             console.println("  indent       Apply indentation/embossing deformation + prestress");
@@ -10399,7 +11234,7 @@ int main(int argc, char* argv[]) {
         parser.addPositional("output", "Output file (dynain or csv)");
         parser.addOption("", "E", "Young's modulus", "0");
         parser.addOption("", "nu", "Poisson's ratio", "0");
-        parser.addOption("", "strain", "Strain type: engineering, green", "engineering");
+        parser.addOption("", "strain", "Strain type: engineering, green, log", "green");
         parser.addFlag("", "csv", "Output CSV file");
 
         int subArgc = argc - 1;
@@ -10413,7 +11248,7 @@ int main(int argc, char* argv[]) {
         std::string refFile = parser.getPositional("ref_mesh");
         std::string defFile = parser.getPositional("def_mesh");
         std::string output = parser.getPositional("output");
-        
+
         if (refFile.empty() || defFile.empty() || output.empty()) {
             console.error("Usage: KooRemapper prestress [options] <ref_mesh> <def_mesh> <output>");
             return 1;
@@ -10427,6 +11262,8 @@ int main(int argc, char* argv[]) {
         StrainType strainType = StrainType::GREEN_LAGRANGE;
         if (strainTypeStr == "engineering") {
             strainType = StrainType::ENGINEERING;
+        } else if (strainTypeStr == "log") {
+            strainType = StrainType::LOGARITHMIC;
         }
 
         printBanner(console);
@@ -10549,6 +11386,16 @@ int main(int argc, char* argv[]) {
         return runRelax(argv[2], console);
     }
 
+    // Explicit command (revert to pure explicit)
+    if (command == "explicit") {
+        if (argc < 3) {
+            console.error("Usage: KooRemapper explicit <config.yaml>");
+            return 1;
+        }
+        printBanner(console);
+        return runExplicit(argv[2], console);
+    }
+
     // Implicit command
     if (command == "implicit") {
         if (argc < 3) {
@@ -10607,6 +11454,16 @@ int main(int argc, char* argv[]) {
         }
         printBanner(console);
         return runStabilize(argv[2], console);
+    }
+
+    // Database command
+    if (command == "database") {
+        if (argc < 3) {
+            console.error("Usage: KooRemapper database <config.yaml>");
+            return 1;
+        }
+        printBanner(console);
+        return runDatabase(argv[2], console);
     }
 
     // Info command

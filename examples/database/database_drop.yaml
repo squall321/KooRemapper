@@ -1,0 +1,5 @@
+model: test_model.k
+output: test_model_drop.k
+preset: drop
+dt: 0.0001
+dt_plot: 0.005

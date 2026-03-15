@@ -1,0 +1,143 @@
+================================================================================
+  Material Card Summary  (Unit: t / mm / s --> MPa)
+================================================================================
+
+Total: 32 materials
+  - MAT_ELASTIC (001)          : 24
+  - MAT_RIGID (020)            :  2
+  - MAT_PIECEWISE_LINEAR (024) :  1
+  - MAT_MOONEY-RIVLIN (027)    :  2
+  - MAT_VISCOELASTIC (006)     :  1
+  - MAT_ELASTIC is a TITLE variant
+
+================================================================================
+ 1. MAT_ELASTIC  (24 materials)
+================================================================================
+ MID  Name             RHO [t/mm3]    rho[g/cm3]   E [MPa]       PR
+---- ---------------- ------------- ------------ ----------- --------
+   1  TAPE_1620MPa      1.1000E-09      1.10         1,620    0.3902
+   2  Mobile.STS304     7.9000E-09      7.90       190,000    0.30
+   3  Mobile.Rigid      7.8290E-09      7.83       206,900    0.288
+   4  AL7003H           2.7000E-09      2.70        63,100    0.33
+   5  PC_QF1035         1.1800E-09      1.18         2,344    0.41
+   6  Ground            7.8300E-06   7830.00       207,000    0.288  *mass-scaled
+   7  B_PI              1.1000E-09      1.10         2,413    0.37
+   8  POL               1.1000E-09      1.10         1,490    0.37
+   9  Panel             2.2300E-09      2.23         2,500    0.30
+  10  TPU               1.1000E-09      1.10            50    0.37
+  11  CU                8.9000E-09      8.90       105,300    0.31
+  12  PSA               2.0000E-09      2.00            30    0.35
+  13  SUS               7.9300E-09      7.93       159,200    0.30
+  14  DL                2.0000E-09      2.00         4,112    0.33
+  15  Glass             2.0000E-09      2.00        79,000    0.35
+  16  PL                2.0000E-09      2.00         4,160    0.35
+  17  P-Film            2.0000E-09      2.00         3,757    0.35
+  18  AL                5.4300E-09      5.43        63,100    0.33
+  19  Ti                4.5000E-09      4.50       105,000    0.30
+  20  Tape              2.0000E-09      2.00         1,650    0.35
+  22  Nail              1.3000E-09      1.30         3,760    0.39
+  39  PSA1515           9.9000E-10      0.99         1,515    0.35
+  40  Rubber            1.3000E-09      1.30            50    0.37
+  41  Mobile.Epoxy.1    1.3000E-09      1.30         3,000    0.37  *fixed (rho+E)
+  42  Peek              1.3000E-09      1.30         3,760    0.39
+  44  CFRP              2.0000E-09      2.00        69,000    0.33
+
+================================================================================
+ 2. MAT_RIGID  (2 materials)
+================================================================================
+ MID  Name             RHO [t/mm3]    rho[g/cm3]   E [MPa]       PR    CMO  CON1 CON2
+---- ---------------- ------------- ------------ ----------- -------- ---- ---- ----
+  21  Rigid             7.9300E-09      7.93       190,000    0.30    1.0    7    7
+  46  Peek-RIGID        7.9300E-09      7.93       190,000    0.30    1.0    4    7
+
+  * MID 21: fully constrained (CON1=7, CON2=7 --> all DOF fixed)
+  * MID 46: partially constrained (CON1=4 --> Rz free, CON2=7 --> all rot fixed)
+
+================================================================================
+ 3. MAT_PIECEWISE_LINEAR_PLASTICITY  (1 material)
+================================================================================
+ MID  Name             RHO [t/mm3]    rho[g/cm3]   E [MPa]       PR    SIGY
+---- ---------------- ------------- ------------ ----------- -------- --------
+  38  M-Film            4.5000E-09      4.50       105,000    0.30    411.88
+
+  Stress-strain curve:
+    EPS:   0.0       0.00782   0.010774
+    ES :   411.88    1029.64   1200.0
+
+================================================================================
+ 4. MAT_MOONEY-RIVLIN_RUBBER  (2 materials)
+================================================================================
+ MID  Name             RHO [t/mm3]    rho[g/cm3]      PR       A        B
+---- ---------------- ------------- ------------ -------- -------- --------
+  45  Rubber-Mooney     1.2000E-09      1.20       0.499    60.0     0.0
+  47  PSA-31.7          1.2000E-09      1.20       0.499    31.7     0.0
+
+  * Nearly incompressible (PR ~ 0.5)
+  * Shear modulus G = 2*(A+B)
+    MID 45: G = 120.0 MPa
+    MID 47: G =  63.4 MPa
+
+================================================================================
+ 5. MAT_VISCOELASTIC  (1 material)
+================================================================================
+ MID  Name             RHO [t/mm3]    rho[g/cm3]   BULK      G0       GI     BETA
+---- ---------------- ------------- ------------ ------- -------- -------- --------
+  43  visco             1.1000E-09      1.10      5000.0     5.0     0.1     5.0
+
+  * G(t) = GI + (G0-GI)*exp(-BETA*t)
+  * Long-term shear modulus: GI = 0.1 MPa (very soft)
+  * Instantaneous shear modulus: G0 = 5.0 MPa
+
+================================================================================
+ Part --> Material Mapping
+================================================================================
+ PID       Part Name                                    MID   Mat Name         Mat Type
+--------- ------------------------------------------- ----- ---------------- ----------------
+        1  Deco                                           21  Rigid            MAT_RIGID
+        2  PCAP                                           45  Rubber-Mooney    MAT_MOONEY
+        5  Lattice                                        19  Ti               MAT_ELASTIC
+       16  PSA0                                           47  PSA-31.7         MAT_MOONEY
+       17  PSA2                                           47  PSA-31.7         MAT_MOONEY
+       18  PL                                             16  PL               MAT_ELASTIC
+       19  UTG                                            15  Glass            MAT_ELASTIC
+       20  Panel                                           9  Panel            MAT_ELASTIC
+       21  PSA4                                           47  PSA-31.7         MAT_MOONEY
+       22  M-Film                                         38  M-Film           MAT_024
+       23  PSA6                                           47  PSA-31.7         MAT_MOONEY
+   100001  TAPE#03-HEX-2L                                  1  TAPE_1620MPa     MAT_ELASTIC
+   100002  SUS#05-HINGE                                   21  Rigid            MAT_RIGID
+   100003  SUS#03-WING-1                                   2  Mobile.STS304    MAT_ELASTIC
+   100005  TAPE#03-HEX-2L-2                                1  TAPE_1620MPa     MAT_ELASTIC
+   100006  AL#03-2                                        21  Rigid            MAT_RIGID
+   100007  PC#03-1-PCAP                                   21  Rigid            MAT_RIGID
+   100008  AL#03-1                                        21  Rigid            MAT_RIGID
+   100009  SUS#03-WING-2                                   2  Mobile.STS304    MAT_ELASTIC
+   200340  Peek                                           46  Peek-RIGID       MAT_RIGID
+   200343  CFRP-Sheet                                     44  CFRP             MAT_ELASTIC
+   200345  Insert_Dust                                    21  Rigid            MAT_RIGID
+
+================================================================================
+ Unused Materials (defined but no PART references)
+================================================================================
+ MID   Name             Mat Type
+----- ---------------- -------------------------
+    3  Mobile.Rigid     MAT_ELASTIC
+    4  AL7003H          MAT_ELASTIC
+    5  PC_QF1035        MAT_ELASTIC
+    6  Ground           MAT_ELASTIC  *mass-scaled
+    7  B_PI             MAT_ELASTIC
+    8  POL              MAT_ELASTIC
+   10  TPU              MAT_ELASTIC
+   11  CU               MAT_ELASTIC
+   12  PSA              MAT_ELASTIC
+   13  SUS              MAT_ELASTIC
+   14  DL               MAT_ELASTIC
+   17  P-Film           MAT_ELASTIC
+   18  AL               MAT_ELASTIC
+   20  Tape             MAT_ELASTIC
+   22  Nail             MAT_ELASTIC
+   39  PSA1515          MAT_ELASTIC
+   40  Rubber           MAT_ELASTIC
+   41  Mobile.Epoxy.1   MAT_ELASTIC  *density fixed
+   42  Peek             MAT_ELASTIC
+   43  visco            MAT_VISCOELASTIC

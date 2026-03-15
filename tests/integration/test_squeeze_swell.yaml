@@ -1,0 +1,7 @@
+parts:
+  - pid: 1
+    swelling: 0.01
+
+material:
+  E: 210000
+  nu: 0.3

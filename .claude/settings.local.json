@@ -155,7 +155,20 @@
       "Bash(/tmp/run_both.ps1:*)",
       "Bash(/tmp/run_matswap_examples.ps1:*)",
       "Bash(/tmp/final_check.ps1:*)",
-      "Bash(/tmp/check_deps2.ps1:*)"
+      "Bash(/tmp/check_deps2.ps1:*)",
+      "Bash(gh run list --limit 3)",
+      "Bash(gh run view 22838240585 --log-failed)",
+      "Read(//tmp/**)",
+      "Bash(zip -j KooRemapper-windows.zip KooRemapper-windows/KooRemapper.exe)",
+      "Bash(zip -j KooRemapper-linux.zip KooRemapper-linux/KooRemapper)",
+      "Bash(zip -j KooRemapper-macos.zip KooRemapper-macos/KooRemapper)",
+      "Bash(gh run list --limit 1)",
+      "Bash(gh run watch 22843511995 --exit-status)",
+      "Bash(rm -rf /tmp/release_artifacts)",
+      "Bash(mkdir -p /tmp/release_artifacts)",
+      "Bash(gh run download 22843511995 --dir /tmp/release_artifacts)",
+      "Bash(gh release list --limit 3)",
+      "Bash(gh release:*)"
     ]
   }
 }

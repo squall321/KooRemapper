@@ -1,0 +1,30 @@
+============================================================
+  KooRemapper - Mesh Mapping Tool for LS-DYNA
+  Version 1.1.0
+============================================================
+
+[INFO] Loading reference mesh: examples\shellmap_spline\spline_flat.k
+[OK] Loaded 170 nodes, 64 elements
+[INFO] Loading deformed mesh: examples\shellmap_spline\spline_mapped.k
+[OK] Loaded 170 nodes, 64 elements
+[INFO] Analyzing strain/stress...
+[INFO] Using command-line material: E=210000.000000, nu=0.300000
+[========================================] 100%                                                                                [OK] Analysis completed
+
+============================================================
+Analysis Results
+============================================================
+Valid elements:          64
+Strain type:             Green-Lagrange
+Min von Mises strain:    0.004852
+Max von Mises strain:    0.182577
+Avg von Mises strain:    0.050815
+
+Min von Mises stress:    1.175580e+03
+Max von Mises stress:    4.423991e+04
+Avg von Mises stress:    1.231283e+04
+
+[INFO] Writing dynain file: examples\shellmap_spline\spline_prestress_green.dynain
+[OK] Dynain file written successfully
+[OK] Deformed mesh with prestress: examples\shellmap_spline\spline_prestress_green.k
+[INFO] Total time: 160.59 ms

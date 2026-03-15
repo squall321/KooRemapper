@@ -1,0 +1,174 @@
+# ============================================================================
+#  Material Name Mapping: original_name → tag (descriptive name)
+#  Unit: CTE (ALPHA) in 1/K (same numerical value in t/mm/s system)
+# ============================================================================
+
+# --- METALS ---
+metals:
+  - MID: 1
+    original: TAPE_1620MPa
+    tag: PET_HingeTape
+    note: "PET-based hinge tape film, E=1.62 GPa"
+
+  - MID: 2
+    original: Mobile.STS304
+    tag: STS304_Stainless
+    note: "STS304 austenitic stainless steel"
+
+  - MID: 3
+    original: Mobile.Rigid
+    tag: S45C_CarbonSteel
+    note: "Carbon steel (S45C-class), unused"
+
+  - MID: 4
+    original: AL7003H
+    tag: AL7003H_Aluminum
+    note: "Aluminum 7003-H alloy, frame/bracket"
+
+  - MID: 6
+    original: Ground
+    tag: Steel_Ground_MassScaled
+    note: "Carbon steel ground, RHO x1000 mass-scaled"
+
+  - MID: 11
+    original: CU
+    tag: Cu_FPCB
+    note: "Copper layer (FPCB conductor)"
+
+  - MID: 13
+    original: SUS
+    tag: SUS_Spring_159GPa
+    note: "SUS spring steel, E=159.2 GPa"
+
+  - MID: 18
+    original: AL
+    tag: AL_Frame
+    note: "Aluminum alloy frame, rho=5.43 (weighted)"
+
+  - MID: 19
+    original: Ti
+    tag: Ti_Lattice
+    note: "Commercially pure titanium (lattice structure)"
+
+  - MID: 21
+    original: Rigid
+    tag: Rigid_SUS_FullLock
+    note: "MAT_RIGID, SUS-based, all DOF constrained"
+
+  - MID: 38
+    original: M-Film
+    tag: Ti_MetalFilm_EP
+    note: "Ti alloy elasto-plastic (MAT_024), SIGY=412 MPa"
+
+  - MID: 46
+    original: Peek-RIGID
+    tag: PEEK_Rigid_Fixture
+    note: "MAT_RIGID for PEEK fixture, partial constraint"
+
+# --- POLYMERS ---
+polymers:
+  - MID: 5
+    original: PC_QF1035
+    tag: PC_Polycarbonate
+    note: "Polycarbonate QF1035 grade"
+
+  - MID: 7
+    original: B_PI
+    tag: PI_Kapton
+    note: "Polyimide (Kapton-type) base film"
+
+  - MID: 8
+    original: POL
+    tag: Polymer_LowE
+    note: "Low-modulus polymer layer, E=1.49 GPa"
+
+  - MID: 9
+    original: Panel
+    tag: OLED_Panel
+    note: "OLED panel substrate, rho=2.23"
+
+  - MID: 10
+    original: TPU
+    tag: TPU_Elastomer
+    note: "Thermoplastic polyurethane elastomer, E=50 MPa"
+
+  - MID: 12
+    original: PSA
+    tag: PSA_Acrylic_Elastic
+    note: "Pressure-sensitive adhesive (elastic), E=30 MPa"
+
+  - MID: 14
+    original: DL
+    tag: DisplayLaminate_OCA
+    note: "Display laminate / OCA layer"
+
+  - MID: 16
+    original: PL
+    tag: Polarizer_PVA
+    note: "Polarizer film (PVA-based)"
+
+  - MID: 17
+    original: P-Film
+    tag: ProtectiveFilm_PET
+    note: "PET protective film"
+
+  - MID: 20
+    original: Tape
+    tag: PET_AdhesiveTape
+    note: "PET adhesive tape, E=1.65 GPa"
+
+  - MID: 22
+    original: Nail
+    tag: NailAdhesive
+    note: "Nail-type polymer adhesive"
+
+  - MID: 39
+    original: PSA1515
+    tag: PSA_1515_LowDensity
+    note: "PSA variant, rho=0.99 g/cm3, E=1515 MPa"
+
+  - MID: 41
+    original: Mobile.Epoxy.1
+    tag: Epoxy_Structural
+    note: "Structural epoxy adhesive, E=3 GPa (corrected)"
+
+  - MID: 42
+    original: Peek
+    tag: PEEK_Elastic
+    note: "PEEK (polyether ether ketone), E=3.76 GPa"
+
+  - MID: 43
+    original: visco
+    tag: Viscoelastic_Damper
+    note: "Viscoelastic polymer damper, G0=5 MPa → GI=0.1 MPa"
+
+# --- GLASS ---
+glass:
+  - MID: 15
+    original: Glass
+    tag: UTG_SodaLime
+    note: "Ultra-thin glass (soda-lime), E=79 GPa"
+
+# --- COMPOSITES ---
+composites:
+  - MID: 44
+    original: CFRP
+    tag: CFRP_QuasiIso
+    note: "CF/Epoxy quasi-isotropic (isotropic approx)"
+
+# --- RUBBER / HYPERELASTIC ---
+rubber:
+  - MID: 40
+    original: Rubber
+    tag: Rubber_Linear
+    note: "Linear elastic rubber approximation, E=50 MPa"
+
+  - MID: 45
+    original: Rubber-Mooney
+    tag: Rubber_MR_PCAP
+    note: "Mooney-Rivlin rubber for PCAP, G=120 MPa"
+
+  - MID: 47
+    original: PSA-31.7
+    tag: PSA_MR_Adhesive
+    note: "PSA Mooney-Rivlin (PSA0/2/4/6), G=63.4 MPa"

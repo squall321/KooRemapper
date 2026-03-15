@@ -13,6 +13,10 @@ struct PartSqueezeConfig {
     double eps_x = 0.0;  // X-direction strain (negative = compression)
     double eps_y = 0.0;  // Y-direction strain
     double eps_z = 0.0;  // Z-direction strain
+    double swelling = 0.0; // Isotropic swelling via thermal expansion (e.g., 0.01 = 1%)
+
+    bool hasSwelling() const { return swelling != 0.0; }
+    bool hasSqueeze() const { return eps_x != 0.0 || eps_y != 0.0 || eps_z != 0.0; }
 };
 
 /**

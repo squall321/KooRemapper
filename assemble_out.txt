@@ -1,0 +1,18 @@
+﻿============================================================
+  KooRemapper - Mesh Mapping Tool for LS-DYNA
+  Version 1.1.0
+============================================================
+
+[INFO] Reading assembly config: d:\KooRemapper\examples\squeeze_interference\assemble_test.yaml
+[OK] Config: 1 operation(s)
+[INFO] Loading base model: d:\KooRemapper\examples\squeeze_interference/interference_model.k
+[OK] Loaded 165 nodes, 80 elements, 2 parts
+
+[INFO] Operation 1/1:
+  Squeeze Part 1: eps = (-0.0200, 0.0000, 0.0000), 105 nodes, 48 elements
+
+[INFO] Writing output: d:\KooRemapper\examples\squeeze_interference/assembled_result.k
+[OK] Output written
+[OK] Dynain written: 48 elements
+
+[INFO] Total time: 3.75 ms

@@ -1,0 +1,5 @@
+model: test_model.k
+output: test_model_db.k
+preset: all
+dt: 0.001
+dt_plot: 0.01

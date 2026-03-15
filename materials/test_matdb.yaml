@@ -1,0 +1,5 @@
+model: test_matdb_model.k
+output: test_matdb_result.k
+database: material_db.json
+mat_type: MAT_ELASTIC
+thermal: true

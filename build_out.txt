@@ -1,0 +1,38 @@
+.NET Framework용 Microsoft (R) Build Engine 버전 16.11.6+a918ceb31
+Copyright (C) Microsoft Corporation. All rights reserved.
+
+  Checking Build System
+  Building Custom Rule D:/KooRemapper/CMakeLists.txt
+  ModelAssembler.cpp
+D:\KooRemapper\include\assembly/ModelAssembler.h(266,49): error C2535: 'std::string KooRemapper::ModelAssembler::formatCzmSectionBlock(int)': 멤버 함수를 이미 정의했거나 선언했습니다. [D:\KooRemapper\build\kooremapper_lib.vcxproj]
+D:\KooRemapper\include\assembly/ModelAssembler.h(246): message : 'KooRemapper::ModelAssembler::formatCzmSectionBlock' 선언을 참조하십시오. [D:\KooRemapper\build\kooremapper_lib.vcxproj]
+D:\KooRemapper\src\assembly\ModelAssembler.cpp(5695,20): error C2039: 'elform': 'KooRemapper::ShellElement'의 멤버가 아닙니다. [D:\KooRemapper\build\kooremapper_lib.vcxproj]
+D:\KooRemapper\include\core/ShellElement.h(22): message : 'KooRemapper::ShellElement' 선언을 참조하십시오. [D:\KooRemapper\build\kooremapper_lib.vcxproj]
+D:\KooRemapper\src\assembly\ModelAssembler.cpp(5719,49): error C2664: 'void std::vector<KooRemapper::ModelAssembler::AddedShellElement,std::allocator<KooRemapper::ModelAssembler::AddedShellElement>>::push_back(const _Ty &)': 인수 1을(를) 'KooRemapper::ShellElement'에서 'const _Ty &'(으)로 변환할 수 없습니다. [D:\KooRemapper\build\kooremapper_lib.vcxproj]
+          with
+          [
+              _Ty=KooRemapper::ModelAssembler::AddedShellElement
+          ]
+D:\KooRemapper\src\assembly\ModelAssembler.cpp(5719,49): message : 원인: 'KooRemapper::ShellElement'에서 'const _Ty'(으)로 변환할 수 없습니다. [D:\KooRemapper\build\kooremapper_lib.vcxproj]
+          with
+          [
+              _Ty=KooRemapper::ModelAssembler::AddedShellElement
+          ]
+D:\KooRemapper\src\assembly\ModelAssembler.cpp(5719,43): message : 이 변환을 수행할 수 있는 사용 가능한 사용자 정의 변환 연산자가 없거나 연산자를 호출할 수 없습니다. [D:\KooRemapper\build\kooremapper_lib.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Tools\MSVC\14.29.30133\include\vector(742,33): message : 'std::vector<KooRemapper::ModelAssembler::AddedShellElement,std::allocator<KooRemapper::ModelAssembler::AddedShellElement>>::push_back' 선언을 참조하십시오. [D:\KooRemapper\build\kooremapper_lib.vcxproj]
+D:\KooRemapper\src\assembly\ModelAssembler.cpp(5764,18): error C2039: 'elform': 'KooRemapper::ShellElement'의 멤버가 아닙니다. [D:\KooRemapper\build\kooremapper_lib.vcxproj]
+D:\KooRemapper\include\core/ShellElement.h(22): message : 'KooRemapper::ShellElement' 선언을 참조하십시오. [D:\KooRemapper\build\kooremapper_lib.vcxproj]
+D:\KooRemapper\src\assembly\ModelAssembler.cpp(5774,47): error C2664: 'void std::vector<KooRemapper::ModelAssembler::AddedShellElement,std::allocator<KooRemapper::ModelAssembler::AddedShellElement>>::push_back(const _Ty &)': 인수 1을(를) 'KooRemapper::ShellElement'에서 'const _Ty &'(으)로 변환할 수 없습니다. [D:\KooRemapper\build\kooremapper_lib.vcxproj]
+          with
+          [
+              _Ty=KooRemapper::ModelAssembler::AddedShellElement
+          ]
+D:\KooRemapper\src\assembly\ModelAssembler.cpp(5774,47): message : 원인: 'KooRemapper::ShellElement'에서 'const _Ty'(으)로 변환할 수 없습니다. [D:\KooRemapper\build\kooremapper_lib.vcxproj]
+          with
+          [
+              _Ty=KooRemapper::ModelAssembler::AddedShellElement
+          ]
+D:\KooRemapper\src\assembly\ModelAssembler.cpp(5774,39): message : 이 변환을 수행할 수 있는 사용 가능한 사용자 정의 변환 연산자가 없거나 연산자를 호출할 수 없습니다. [D:\KooRemapper\build\kooremapper_lib.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Tools\MSVC\14.29.30133\include\vector(742,33): message : 'std::vector<KooRemapper::ModelAssembler::AddedShellElement,std::allocator<KooRemapper::ModelAssembler::AddedShellElement>>::push_back' 선언을 참조하십시오. [D:\KooRemapper\build\kooremapper_lib.vcxproj]
+D:\KooRemapper\src\assembly\ModelAssembler.cpp(6123,35): error C2039: 'computeStressFromStrain': 'KooRemapper::MaterialModel'의 멤버가 아닙니다. [D:\KooRemapper\build\kooremapper_lib.vcxproj]
+D:\KooRemapper\include\analysis/MaterialModel.h(25): message : 'KooRemapper::MaterialModel' 선언을 참조하십시오. [D:\KooRemapper\build\kooremapper_lib.vcxproj]
