@@ -321,6 +321,8 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                         auto& layer = config.operations.back().restack.layers.back();
                         if (key == "thickness") {
                             try { layer.thickness = std::stod(val); } catch (...) {}
+                        } else if (key == "num_elements" || key == "nz") {
+                            try { layer.numElements = std::stoi(val); } catch (...) {}
                         } else if (key == "material_card") {
                             if (val == "|") {
                                 // Multi-line block: find indentation of first content line
@@ -933,6 +935,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                         } else if (op.type == AssemblyOperation::RESTACK) {
                             if (key == "direction") op.restack.direction = val;
                             else if (key == "element_type") op.restack.elementType = val;
+                            else if (key == "element_size") { try { op.restack.elementSize = std::stod(val); } catch (...) {} }
                             else if (key == "layers") {
                                 inLayersList = true;
                                 inLayerItem = false;

@@ -678,6 +678,19 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
     double sumThickness = 0;
     for (const auto& layer : op.layers) sumThickness += layer.thickness;
 
+    // Resolve numElements per layer (element_size auto or explicit num_elements)
+    std::vector<int> numElemsPerLayer(newLayerCount, 1);
+    for (int i = 0; i < newLayerCount; i++) {
+        int n = op.layers[i].numElements;
+        if (n > 0) {
+            numElemsPerLayer[i] = n;
+        } else if (op.elementSize > 0.0) {
+            numElemsPerLayer[i] = std::max(1, static_cast<int>(std::round(op.layers[i].thickness / op.elementSize)));
+        }
+    }
+    int totalElements = 0;
+    for (int n : numElemsPerLayer) totalElements += n;
+
     // Build MID placeholder → actual ID mapping
     std::map<std::string, int> midMapping;
     for (const auto& layer : op.layers) {
@@ -699,17 +712,34 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
     }
 
     // 8. Generate new node planes
-    // For each column: keep bottom (plane 0) and top (plane oldLayerCount)
-    // Create newLayerCount-1 intermediate nodes
+    // totalElements+1 planes for the whole column.
+    // plane boundaries: each layer boundary is at cumulative thickness fractions;
+    // within a layer with numElements=N, N-1 intermediate planes are evenly spaced.
     struct NewColumn {
-        std::vector<int> nodeIds; // newLayerCount+1 entries: plane 0..newLayerCount
+        std::vector<int> nodeIds; // totalElements+1 entries
     };
     std::vector<NewColumn> newColumns(columns.size());
+
+    // Precompute the fraction (0..1) for each of the totalElements+1 planes
+    std::vector<double> planeFrac(totalElements + 1);
+    planeFrac[0] = 0.0;
+    {
+        int planeIdx = 0;
+        double cumThick = 0.0;
+        for (int li = 0; li < newLayerCount; li++) {
+            double lt = op.layers[li].thickness;
+            int ne = numElemsPerLayer[li];
+            for (int e = 1; e <= ne; e++) {
+                planeFrac[++planeIdx] = (cumThick + lt * e / ne) / sumThickness;
+            }
+            cumThick += lt;
+        }
+    }
 
     std::set<int> bottomPlaneNodes, topPlaneNodes;
     for (int c = 0; c < static_cast<int>(columns.size()); c++) {
         auto& newCol = newColumns[c];
-        newCol.nodeIds.resize(newLayerCount + 1);
+        newCol.nodeIds.resize(totalElements + 1);
 
         int bottomNodeId = columns[c].coordAndId[0].second;
         int topNodeId = columns[c].coordAndId[nodesPerColumn - 1].second;
@@ -720,15 +750,11 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
         const auto* topNode = baseMesh_.getNode(topNodeId);
 
         newCol.nodeIds[0] = bottomNodeId;
-        newCol.nodeIds[newLayerCount] = topNodeId;
+        newCol.nodeIds[totalElements] = topNodeId;
 
-        // Create intermediate nodes
-        double cumThick = 0;
-        for (int p = 1; p < newLayerCount; p++) {
-            cumThick += op.layers[p - 1].thickness;
-            double frac = cumThick / sumThickness;
-
-            // Interpolate position
+        // Create intermediate planes
+        for (int p = 1; p < totalElements; p++) {
+            double frac = planeFrac[p];
             double nx = bottomNode->position.x + frac * (topNode->position.x - bottomNode->position.x);
             double ny = bottomNode->position.y + frac * (topNode->position.y - bottomNode->position.y);
             double nz = bottomNode->position.z + frac * (topNode->position.z - bottomNode->position.z);
@@ -827,32 +853,36 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
 
         addedKeywordBlocks_.push_back(kwBlock.str());
 
-        // Generate elements
-        for (const auto& fq : footprint) {
-            if (isShell) {
-                // Shell: 4-node element at mid-surface of this layer
-                // Use bottom plane nodes of this layer
-                AddedShellElement se;
-                se.id = ++maxElementId_;
-                se.pid = newPid;
-                for (int n = 0; n < 4; n++) {
-                    se.nodeIds[n] = newColumns[fq.colIdx[n]].nodeIds[layerIdx];
+        // Generate elements (numElemsPerLayer[layerIdx] sub-elements in thickness)
+        int planeBase = 0;
+        for (int li = 0; li < layerIdx; li++) planeBase += numElemsPerLayer[li];
+
+        for (int e = 0; e < numElemsPerLayer[layerIdx]; e++) {
+            int pBot = planeBase + e;
+            int pTop = planeBase + e + 1;
+            for (const auto& fq : footprint) {
+                if (isShell) {
+                    AddedShellElement se;
+                    se.id = ++maxElementId_;
+                    se.pid = newPid;
+                    for (int n = 0; n < 4; n++) {
+                        se.nodeIds[n] = newColumns[fq.colIdx[n]].nodeIds[pBot];
+                    }
+                    addedShellElements_.push_back(se);
+                } else {
+                    AddedElement ae;
+                    ae.id = ++maxElementId_;
+                    ae.pid = newPid;
+                    ae.type = ElementType::HEX8;
+                    ae.isTshell = isTshell;
+                    for (int n = 0; n < 4; n++) {
+                        ae.nodeIds[n]     = newColumns[fq.colIdx[n]].nodeIds[pBot];
+                        ae.nodeIds[n + 4] = newColumns[fq.colIdx[n]].nodeIds[pTop];
+                    }
+                    addedElements_.push_back(ae);
                 }
-                addedShellElements_.push_back(se);
-            } else {
-                // Solid/Tshell: 8-node element
-                AddedElement ae;
-                ae.id = ++maxElementId_;
-                ae.pid = newPid;
-                ae.type = ElementType::HEX8;
-                ae.isTshell = isTshell;
-                for (int n = 0; n < 4; n++) {
-                    ae.nodeIds[n] = newColumns[fq.colIdx[n]].nodeIds[layerIdx];      // bottom face
-                    ae.nodeIds[n + 4] = newColumns[fq.colIdx[n]].nodeIds[layerIdx + 1]; // top face
-                }
-                addedElements_.push_back(ae);
+                totalNewElems++;
             }
-            totalNewElems++;
         }
     }
 
@@ -906,7 +936,8 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
 
     std::ostringstream msg;
     msg << "  Restack Part " << op.targetPid << " (" << axisName << "-axis): "
-        << oldLayerCount << " layers -> " << newLayerCount << " layers, "
+        << oldLayerCount << " layers -> " << newLayerCount << " layers ("
+        << totalElements << " elements), "
         << footprint.size() << " elements/layer, "
         << columns.size() << " columns";
     infoMessages.push_back(msg.str());
