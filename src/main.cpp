@@ -1,4 +1,16 @@
 #include "core/Platform.h"
+#ifdef _WIN32
+#  define WIN32_LEAN_AND_MEAN
+#  define NOMINMAX
+#  include <windows.h>
+// windows.h defines ERROR, BOOL, etc. as macros — undefine to avoid conflicts
+#  ifdef ERROR
+#    undef ERROR
+#  endif
+#  ifdef BOOL
+#    undef BOOL
+#  endif
+#endif
 #include "core/Mesh.h"
 #include "core/ShellMesh.h"
 #include "parser/KFileReader.h"
@@ -40,7 +52,7 @@
 using namespace KooRemapper;
 
 // Version info
-constexpr const char* VERSION = "1.2.0";
+constexpr const char* VERSION = "1.3.0";
 
 /**
  * Display program banner
@@ -10381,6 +10393,11 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
 }
 
 int main(int argc, char* argv[]) {
+#ifdef _WIN32
+    // Set console output to UTF-8 so Korean/Unicode help text renders correctly
+    SetConsoleOutputCP(65001);
+    SetConsoleCP(65001);
+#endif
     ConsoleOutput console;
 
     // Check for subcommand

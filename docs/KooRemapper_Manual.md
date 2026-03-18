@@ -1,6 +1,6 @@
 # KooRemapper 기능 설명서
 
-> **버전 1.2.0** | LS-DYNA 메시 전처리 도구
+> **버전 1.3.0** | LS-DYNA 메시 전처리 도구
 > 빌드: `cmake --build build --config Release`
 > 실행: `KooRemapper.exe <command> [options] ...`
 
@@ -2319,6 +2319,82 @@ operations:
 
 → 독립 명령 [33. wrap](#33-wrap--와인딩-인장-프리스트레스) 참조
 
+### 39.17 generate — 메시 인라인 생성
+
+`base_model` 없이 assemble 시작 시 첫 번째 오퍼레이션으로 사용:
+
+```yaml
+# base_model 키 없음
+output: my_model
+
+operations:
+  - type: generate
+    shape: box
+    lx: 100.0   # X 길이 [mm]
+    ly:  20.0   # Y 길이 [mm]
+    lz:  10.0   # Z 길이 [mm]
+    nx: 10      # X 방향 요소 수
+    ny:  4
+    nz:  2
+    rho: 7.85e-9
+    E: 210000.0
+    nu: 0.3
+    mid: 1
+    secid: 1
+    pid: 1
+    part_title: Steel Box
+```
+
+독립 명령으로도 사용 가능: `KooRemapper generate box config.yaml`
+
+---
+
+### 39.18 update — 노드 좌표 업데이트
+
+dynain 또는 K 파일의 `*NODE` 블록에서 일치하는 NID만 좌표 갱신 (미정의 노드 유지):
+
+```yaml
+- type: update
+  dynain: results/dynain
+```
+
+→ 독립 명령으로도 사용: `KooRemapper update config.yaml`
+
+---
+
+### 39.19 control — 해석 제어 카드 삽입
+
+`*CONTROL_*` 카드를 삽입하거나 기존 카드 필드를 수정:
+
+```yaml
+- type: control
+  endtime: 0.001    # *CONTROL_TERMINATION endtim (초)
+  tssfac: 0.9       # *CONTROL_TIMESTEP tssfac
+  dt2ms: -1.0e-7    # *CONTROL_TIMESTEP dt2ms (mass scaling, 음수)
+  energy: true      # *CONTROL_ENERGY: hgen=2, rwen=2, slnten=1, rylen=1
+  ihq: 4            # *CONTROL_HOURGLASS: stiffness-based
+  qh: 0.05          # hourglass coefficient
+  q1: 1.5           # *CONTROL_BULK_VISCOSITY quadratic
+  q2: 0.06          # linear bulk viscosity
+```
+
+기존 카드가 있으면 해당 필드만 수정. 없으면 신규 삽입.
+
+---
+
+### 39.20 database — 출력 제어 카드 삽입
+
+`*DATABASE_*` 출력 키워드 일괄 삽입 (assemble 내):
+
+```yaml
+- type: database
+  preset: crash     # crash / drop / nve / all
+  dt: 0.0001        # ASCII 출력 간격 (초)
+  dt_plot: 0.001    # d3plot 출력 간격
+```
+
+→ 독립 명령 [37. database](#37-database--database-출력-제어) 참조
+
 ---
 
 ## 40. 수학 이론
@@ -2405,4 +2481,4 @@ $#  sig-xx    sig-yy    sig-zz    sig-xy    sig-yz    sig-xz
 
 ---
 
-*KooRemapper v1.2.0 | 이 문서는 모든 구현 기능을 포함합니다.*
+*KooRemapper v1.3.0 | 이 문서는 모든 구현 기능을 포함합니다.*
