@@ -765,6 +765,26 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
         }
     }
 
+    // Build colNodeXYZ lookup: nodeId → {x,y,z} for all plane nodes across all columns.
+    // Used to create independent duplicate nodes for shell layers (so shell is not
+    // topologically attached to adjacent solids and tied contacts work on both sides).
+    std::unordered_map<int, std::array<double,3>> colNodeXYZ;
+    colNodeXYZ.reserve(static_cast<int>(columns.size()) * (totalElements + 1));
+    for (int c = 0; c < static_cast<int>(columns.size()); c++) {
+        const auto* bn = baseMesh_.getNode(columns[c].coordAndId[0].second);
+        const auto* tn = baseMesh_.getNode(columns[c].coordAndId[nodesPerColumn - 1].second);
+        double bx = bn->position.x, by = bn->position.y, bz = bn->position.z;
+        double tx = tn->position.x, ty = tn->position.y, tz = tn->position.z;
+        for (int p = 0; p <= totalElements; p++) {
+            double frac = planeFrac[p];
+            colNodeXYZ[newColumns[c].nodeIds[p]] = {
+                bx + frac * (tx - bx),
+                by + frac * (ty - by),
+                bz + frac * (tz - bz)
+            };
+        }
+    }
+
     // 9. Remove old elements and intermediate (exclusive) nodes
     std::set<int> partExclusive = getPartExclusiveNodeIds(op.targetPid);
     for (const auto* elem : partElems) {
@@ -835,11 +855,12 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
             kwBlock << "*SECTION_SHELL\n";
             kwBlock << "$#  secid    elform      shrf       nip     propt\n";
             kwBlock << std::setw(10) << newSecId << "         2       1.0         2       0.0\n";
-            kwBlock << "$#     t1        t2        t3        t4\n";
+            kwBlock << "$#     t1        t2        t3        t4      nloc\n";
             kwBlock << std::setw(10) << std::fixed << std::setprecision(6) << layerDef.thickness
                     << std::setw(10) << std::fixed << std::setprecision(6) << layerDef.thickness
                     << std::setw(10) << std::fixed << std::setprecision(6) << layerDef.thickness
-                    << std::setw(10) << std::fixed << std::setprecision(6) << layerDef.thickness << "\n";
+                    << std::setw(10) << std::fixed << std::setprecision(6) << layerDef.thickness
+                    << "      -1.0\n";  // NLOC=-1: reference surface at bottom → nodes at lower solid top, shell extends upward
         } else if (isTshell) {
             kwBlock << "*SECTION_TSHELL\n";
             kwBlock << "$#  secid    elform\n";
@@ -862,6 +883,12 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
         int planeBase = 0;
         for (int li = 0; li < layerIdx; li++) planeBase += numElemsPerLayer[li];
 
+        // Shell layers use independent (duplicate) nodes at pBot so they are NOT
+        // topologically attached to the adjacent solid layer below. This ensures
+        // tied contacts work correctly on BOTH interfaces (bottom and top of shell).
+        // Map: original pBot nodeId → dup nodeId (reset per layer, shared across e)
+        std::unordered_map<int, int> shellDupMap;
+
         for (int e = 0; e < numElemsPerLayer[layerIdx]; e++) {
             int pBot = planeBase + e;
             int pTop = planeBase + e + 1;
@@ -871,7 +898,16 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
                     se.id = ++maxElementId_;
                     se.pid = newPid;
                     for (int n = 0; n < 4; n++) {
-                        se.nodeIds[n] = newColumns[fq.colIdx[n]].nodeIds[pBot];
+                        int origId = newColumns[fq.colIdx[n]].nodeIds[pBot];
+                        auto it = shellDupMap.find(origId);
+                        if (it == shellDupMap.end()) {
+                            const auto& xyz = colNodeXYZ.at(origId);
+                            int dupId = ++maxNodeId_;
+                            addedNodes_.push_back({dupId, xyz[0], xyz[1], xyz[2]});
+                            shellDupMap[origId] = dupId;
+                            it = shellDupMap.find(origId);
+                        }
+                        se.nodeIds[n] = it->second;
                     }
                     addedShellElements_.push_back(se);
                 } else {
