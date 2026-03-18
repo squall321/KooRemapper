@@ -1006,7 +1006,7 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
         ct << "$#     ssid      msid     sstyp     mstyp    sboxid    mboxid       spr       mpr\n";
         ct << std::setw(10) << slavePid
            << std::setw(10) << masterPid
-           << "         2         2         0         0         1         1\n";
+           << "         3         3         0         0         1         1\n";  // sstyp/mstyp=3: part (PID), not part set
         // Card 2 is mandatory (LS-DYNA Vol_I). All defaults (FS=FD=DC=VC=VDC=0, PENCHK=0, BT=0, DT=1e20)
         ct << "$#       fs        fd        dc        vc       vdc    penchk        bt        dt\n";
         ct << "       0.0       0.0       0.0       0.0       0.0         0       0.0  1.0000E+20\n";
