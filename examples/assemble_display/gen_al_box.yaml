@@ -1,0 +1,196 @@
+# B7_PV1 Display Stack - Explicit Drop Analysis
+# 11 layers from B7_PV1.csv | XY: ~0.5 mm | Total Z: 0.395 mm | Analysis: 3 ms
+output: al_box
+
+operations:
+  # ── 1. Generate base aluminum box ──────────────────────────────────────────
+  - type: generate
+    shape: box
+    lx: 67.0
+    ly: 145.0
+    lz: 0.395
+    nx: 134
+    ny: 290
+    nz: 11
+    rho: 2.7e-9
+    E: 70000.0
+    nu: 0.33
+    mid: 1
+    secid: 1
+    pid: 1
+    part_title: Aluminum Box
+
+  # ── 2. Restack into B7_PV1 layer stack ─────────────────────────────────────
+  - type: restack
+    target_pid: 1
+    direction: z
+    element_type: solid
+    layers:
+      # 1. PL - Polarizer Film (0.054 mm)
+      - thickness: 0.054
+        material_card: |
+          *MAT_GENERAL_VISCOELASTIC_TITLE
+          PL_ADV
+          $#     mid        ro      bulk       pcf        ef      tref         a         b
+                  19 1.350E-09 4.000E+03       0.0       0.0       0.0       0.0       0.0
+          $#    lcid        nt    bstart     tramp     lcidk       ntk   bstartk    trampk
+                   0         0       0.0       0.0         0         0       0.0       0.0
+          $#      gi     betai        ki    betaki
+           3.800E+02       0.0       0.0       0.0
+           8.000E+01 1.000E+00 8.000E+01 1.000E+00
+           1.500E+02 1.000E+01 1.700E+02 1.000E+01
+           2.000E+02 1.000E+02 3.500E+02 1.000E+02
+           2.500E+02 1.000E+03 6.000E+02 1.000E+03
+           1.300E+02 1.000E+04 4.000E+02 1.000E+04
+      # 2. PSA0 (0.035 mm)
+      - thickness: 0.035
+        material_card: |
+          *MAT_GENERAL_VISCOELASTIC_TITLE
+          PSA_ADV
+          $#     mid        ro      bulk       pcf        ef      tref         a         b
+                  14 1.100E-09 8.000E+02       0.0       0.0       0.0       0.0       0.0
+          $#    lcid        nt    bstart     tramp     lcidk       ntk   bstartk    trampk
+                   0         0       0.0       0.0         0         0       0.0       0.0
+          $#      gi     betai        ki    betaki
+           3.000E-01       0.0       0.0       0.0
+           2.000E+00 1.000E+00 5.000E+01 1.000E+00
+           5.000E+00 1.000E+01 1.000E+02 1.000E+01
+           1.500E+01 1.000E+02 2.500E+02 1.000E+02
+           4.000E+01 1.000E+03 4.500E+02 1.000E+03
+           1.000E+02 1.000E+04 3.500E+02 1.000E+04
+      # 3. FTG_F - Flexible Thin Glass Film (0.050 mm)
+      - thickness: 0.050
+        material_card: |
+          *MAT_ELASTIC_TITLE
+          FTG_F
+          $#     mid        ro         e        pr        da        db  not used
+                   2 1.350E-09 3.000E+03 3.400E-01       0.0       0.0       0.0
+      # 4. PSA1 (0.075 mm)
+      - thickness: 0.075
+        material_card: |
+          *MAT_GENERAL_VISCOELASTIC_TITLE
+          PSA_ADV
+          $#     mid        ro      bulk       pcf        ef      tref         a         b
+                  14 1.100E-09 8.000E+02       0.0       0.0       0.0       0.0       0.0
+          $#    lcid        nt    bstart     tramp     lcidk       ntk   bstartk    trampk
+                   0         0       0.0       0.0         0         0       0.0       0.0
+          $#      gi     betai        ki    betaki
+           3.000E-01       0.0       0.0       0.0
+           2.000E+00 1.000E+00 5.000E+01 1.000E+00
+           5.000E+00 1.000E+01 1.000E+02 1.000E+01
+           1.500E+01 1.000E+02 2.500E+02 1.000E+02
+           4.000E+01 1.000E+03 4.500E+02 1.000E+03
+           1.000E+02 1.000E+04 3.500E+02 1.000E+04
+      # 5. Panel - Panel Film (0.030 mm)
+      - thickness: 0.030
+        material_card: |
+          *MAT_ELASTIC_TITLE
+          Panel-F
+          $#     mid        ro         e        pr        da        db  not used
+                   4 1.420E-09 3.300E+03 2.500E-01       0.0       0.0       0.0
+      # 6. PSA4 (0.025 mm)
+      - thickness: 0.025
+        material_card: |
+          *MAT_GENERAL_VISCOELASTIC_TITLE
+          PSA_ADV
+          $#     mid        ro      bulk       pcf        ef      tref         a         b
+                  14 1.100E-09 8.000E+02       0.0       0.0       0.0       0.0       0.0
+          $#    lcid        nt    bstart     tramp     lcidk       ntk   bstartk    trampk
+                   0         0       0.0       0.0         0         0       0.0       0.0
+          $#      gi     betai        ki    betaki
+           3.000E-01       0.0       0.0       0.0
+           2.000E+00 1.000E+00 5.000E+01 1.000E+00
+           5.000E+00 1.000E+01 1.000E+02 1.000E+01
+           1.500E+01 1.000E+02 2.500E+02 1.000E+02
+           4.000E+01 1.000E+03 4.500E+02 1.000E+03
+           1.000E+02 1.000E+04 3.500E+02 1.000E+04
+      # 7. P-film - Protective Film (0.050 mm)
+      - thickness: 0.050
+        material_card: |
+          *MAT_GENERAL_VISCOELASTIC_TITLE
+          P-film_ADV
+          $#     mid        ro      bulk       pcf        ef      tref         a         b
+                  18 1.390E-09 2.400E+03       0.0       0.0       0.0       0.0       0.0
+          $#    lcid        nt    bstart     tramp     lcidk       ntk   bstartk    trampk
+                   0         0       0.0       0.0         0         0       0.0       0.0
+          $#      gi     betai        ki    betaki
+           2.200E+02       0.0       0.0       0.0
+           5.000E+01 1.000E+00 5.000E+01 1.000E+00
+           9.000E+01 1.000E+01 1.000E+02 1.000E+01
+           1.200E+02 1.000E+02 2.000E+02 1.000E+02
+           1.500E+02 1.000E+03 3.500E+02 1.000E+03
+           7.000E+01 1.000E+04 2.000E+02 1.000E+04
+      # 8. PSA5 (0.015 mm)
+      - thickness: 0.015
+        material_card: |
+          *MAT_GENERAL_VISCOELASTIC_TITLE
+          PSA_ADV
+          $#     mid        ro      bulk       pcf        ef      tref         a         b
+                  14 1.100E-09 8.000E+02       0.0       0.0       0.0       0.0       0.0
+          $#    lcid        nt    bstart     tramp     lcidk       ntk   bstartk    trampk
+                   0         0       0.0       0.0         0         0       0.0       0.0
+          $#      gi     betai        ki    betaki
+           3.000E-01       0.0       0.0       0.0
+           2.000E+00 1.000E+00 5.000E+01 1.000E+00
+           5.000E+00 1.000E+01 1.000E+02 1.000E+01
+           1.500E+01 1.000E+02 2.500E+02 1.000E+02
+           4.000E+01 1.000E+03 4.500E+02 1.000E+03
+           1.000E+02 1.000E+04 3.500E+02 1.000E+04
+      # 9. BarrierPI (0.025 mm)
+      - thickness: 0.025
+        material_card: |
+          *MAT_ELASTIC_TITLE
+          BarrierPI
+          $#     mid        ro         e        pr        da        db  not used
+                   6 1.400E-09 3.000E+03 3.400E-01       0.0       0.0       0.0
+      # 10. PSA6 (0.016 mm)
+      - thickness: 0.016
+        material_card: |
+          *MAT_GENERAL_VISCOELASTIC_TITLE
+          PSA_ADV
+          $#     mid        ro      bulk       pcf        ef      tref         a         b
+                  14 1.100E-09 8.000E+02       0.0       0.0       0.0       0.0       0.0
+          $#    lcid        nt    bstart     tramp     lcidk       ntk   bstartk    trampk
+                   0         0       0.0       0.0         0         0       0.0       0.0
+          $#      gi     betai        ki    betaki
+           3.000E-01       0.0       0.0       0.0
+           2.000E+00 1.000E+00 5.000E+01 1.000E+00
+           5.000E+00 1.000E+01 1.000E+02 1.000E+01
+           1.500E+01 1.000E+02 2.500E+02 1.000E+02
+           4.000E+01 1.000E+03 4.500E+02 1.000E+03
+           1.000E+02 1.000E+04 3.500E+02 1.000E+04
+      # 11. PSA7 (0.020 mm)
+      - thickness: 0.020
+        material_card: |
+          *MAT_GENERAL_VISCOELASTIC_TITLE
+          PSA_ADV
+          $#     mid        ro      bulk       pcf        ef      tref         a         b
+                  14 1.100E-09 8.000E+02       0.0       0.0       0.0       0.0       0.0
+          $#    lcid        nt    bstart     tramp     lcidk       ntk   bstartk    trampk
+                   0         0       0.0       0.0         0         0       0.0       0.0
+          $#      gi     betai        ki    betaki
+           3.000E-01       0.0       0.0       0.0
+           2.000E+00 1.000E+00 5.000E+01 1.000E+00
+           5.000E+00 1.000E+01 1.000E+02 1.000E+01
+           1.500E+01 1.000E+02 2.500E+02 1.000E+02
+           4.000E+01 1.000E+03 4.500E+02 1.000E+03
+           1.000E+02 1.000E+04 3.500E+02 1.000E+04
+
+  # ── 3. Solver control ──────────────────────────────────────────────────────
+  - type: control
+    endtime: 0.003          # 3 ms
+    tssfac: 0.9
+    ihq: 4                  # stiffness-based hourglass
+    qh: 0.05
+    q1: 1.5
+    q2: 0.06
+    hgen: 2
+    rwen: 2
+    slnten: 1
+    rylen: 1
+
+  # ── 4. Output database ─────────────────────────────────────────────────────
+  - type: database
+    preset: drop
+    dt: 0.0001              # 0.1 ms ASCII
+    dt_plot: 0.0003         # 0.3 ms d3plot

@@ -587,23 +587,20 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
     std::map<int, int> nodeToColumn; // nodeId → column index
     std::map<int, int> nodeToPlane;  // nodeId → plane index within column
 
+    // Use sorted-map lookup keyed by quantized perp coords: O(N log N) vs O(N²)
+    std::map<std::pair<long long, long long>, int> columnLookup;
     for (auto& ni : nodeInfos) {
-        int foundCol = -1;
-        for (int c = 0; c < static_cast<int>(columns.size()); c++) {
-            int refId = columns[c].coordAndId[0].second;
-            const auto* refNode = baseMesh_.getNode(refId);
-            if (!refNode) continue;
-            double refP1 = getAxisCoord(refNode->position, perpAxis1);
-            double refP2 = getAxisCoord(refNode->position, perpAxis2);
-            if (std::abs(ni.perpCoord1 - refP1) < perpTol &&
-                std::abs(ni.perpCoord2 - refP2) < perpTol) {
-                foundCol = c;
-                break;
-            }
-        }
-        if (foundCol < 0) {
+        long long k1 = static_cast<long long>(std::round(ni.perpCoord1 / perpTol));
+        long long k2 = static_cast<long long>(std::round(ni.perpCoord2 / perpTol));
+        auto key = std::make_pair(k1, k2);
+        auto it = columnLookup.find(key);
+        int foundCol;
+        if (it != columnLookup.end()) {
+            foundCol = it->second;
+        } else {
             foundCol = static_cast<int>(columns.size());
             columns.push_back(Column());
+            columnLookup[key] = foundCol;
         }
         columns[foundCol].coordAndId.push_back({ni.axisCoord, ni.id});
         nodeToColumn[ni.id] = foundCol;
