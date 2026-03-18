@@ -323,6 +323,8 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             try { layer.thickness = std::stod(val); } catch (...) {}
                         } else if (key == "num_elements" || key == "nz") {
                             try { layer.numElements = std::stoi(val); } catch (...) {}
+                        } else if (key == "element_type") {
+                            layer.elementType = val;
                         } else if (key == "material_card") {
                             if (val == "|") {
                                 // Multi-line block: find indentation of first content line

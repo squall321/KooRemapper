@@ -22,6 +22,7 @@ struct SqueezeOperation {
 struct RestackLayer {
     double thickness = 0.0;
     int numElements = 0;               // 0 = use parent elementSize; >0 = explicit
+    std::string elementType = "";      // "" = use parent; solid | tshell | shell
     std::string materialCard;   // raw LS-DYNA material keyword block
 };
 

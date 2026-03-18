@@ -778,14 +778,17 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
     }
 
     // 10. Generate new elements and keyword cards per layer
-    bool isShell = (op.elementType == "shell");
-    bool isTshell = (op.elementType == "tshell");
 
     std::set<int> emittedMids; // Track which MIDs have already been written
 
     int totalNewElems = 0;
     for (int layerIdx = 0; layerIdx < newLayerCount; layerIdx++) {
         const auto& layerDef = op.layers[layerIdx];
+
+        // Per-layer element type (fallback to operation-level)
+        std::string layerEtype = layerDef.elementType.empty() ? op.elementType : layerDef.elementType;
+        bool isShell  = (layerEtype == "shell");
+        bool isTshell = (layerEtype == "tshell");
 
         // Assign new PID and SECID for this layer
         int newPid = ++maxPartId_;

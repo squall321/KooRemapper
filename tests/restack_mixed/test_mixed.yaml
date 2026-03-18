@@ -1,0 +1,48 @@
+output: mixed_result
+
+operations:
+  - type: generate
+    shape: box
+    lx: 10.0
+    ly: 10.0
+    lz: 0.3
+    nx: 10
+    ny: 10
+    nz: 1
+    rho: 2.7e-9
+    E: 70000.0
+    nu: 0.33
+    mid: 1
+    secid: 1
+    pid: 1
+    part_title: Test Box
+
+  - type: restack
+    target_pid: 1
+    direction: z
+    element_type: solid
+    element_size: 0.05
+    layers:
+      - thickness: 0.1
+        element_type: tshell
+        num_elements: 2
+        material_card: |
+          *MAT_ELASTIC_TITLE
+          TShell Layer
+          $#     mid        ro         e        pr
+                   2 1.400E-09 3.000E+03 3.400E-01
+      - thickness: 0.1
+        element_type: solid
+        material_card: |
+          *MAT_ELASTIC_TITLE
+          Solid Layer
+          $#     mid        ro         e        pr
+                   3 1.350E-09 3.000E+03 3.400E-01
+      - thickness: 0.1
+        element_type: shell
+        num_elements: 1
+        material_card: |
+          *MAT_ELASTIC_TITLE
+          Shell Layer
+          $#     mid        ro         e        pr
+                   4 7.850E-09 2.100E+05 3.000E-01
