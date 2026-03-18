@@ -780,6 +780,8 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             op.type = AssemblyOperation::CONTROL;
                         } else if (val == "generate") {
                             op.type = AssemblyOperation::GENERATE;
+                        } else if (val == "fillet") {
+                            op.type = AssemblyOperation::FILLET;
                         } else {
                             throw std::runtime_error("Unknown operation type: " + val);
                         }
@@ -848,29 +850,55 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                     auto& op = config.operations.back();
                     try {
                         if (key == "target_pid") {
-                            int pid = std::stoi(val);
-                            if (op.type == AssemblyOperation::REPLACE) {
-                                op.replace.targetPid = pid;
-                            } else if (op.type == AssemblyOperation::SQUEEZE) {
-                                op.squeeze.targetPid = pid;
-                            } else if (op.type == AssemblyOperation::RESTACK) {
-                                op.restack.targetPid = pid;
-                            } else if (op.type == AssemblyOperation::BEND) {
-                                op.bend.targetPid = pid;
-                            } else if (op.type == AssemblyOperation::INDENT) {
-                                op.indent.targetPid = pid;
-                            } else if (op.type == AssemblyOperation::FORMSTRAIN) {
-                                op.formstrain.targetPid = pid;
-                            } else if (op.type == AssemblyOperation::TET10_CONVERT) {
-                                op.tet10.targetPid = pid;
-                            } else if (op.type == AssemblyOperation::REFINE) {
-                                op.refine.targetPid = pid;
-                            } else if (op.type == AssemblyOperation::ELFORM) {
-                                op.elform.targetPid = pid;
-                            } else if (op.type == AssemblyOperation::DISCONNECT) {
-                                op.disconnect.targetPid = pid;
-                            } else if (op.type == AssemblyOperation::WARPAGE) {
-                                op.warpage.targetPid = pid;
+                            // Helper lambda: set single PID on the relevant struct
+                            auto setSingle = [&](int pid) {
+                                if (op.type == AssemblyOperation::REPLACE)       op.replace.targetPid    = pid;
+                                else if (op.type == AssemblyOperation::SQUEEZE)  op.squeeze.targetPid    = pid;
+                                else if (op.type == AssemblyOperation::RESTACK)  op.restack.targetPid    = pid;
+                                else if (op.type == AssemblyOperation::BEND)     op.bend.targetPid       = pid;
+                                else if (op.type == AssemblyOperation::INDENT)   op.indent.targetPid     = pid;
+                                else if (op.type == AssemblyOperation::FORMSTRAIN) op.formstrain.targetPid = pid;
+                                else if (op.type == AssemblyOperation::TET10_CONVERT) op.tet10.targetPid  = pid;
+                                else if (op.type == AssemblyOperation::REFINE)   op.refine.targetPid     = pid;
+                                else if (op.type == AssemblyOperation::ELFORM)   op.elform.targetPid     = pid;
+                                else if (op.type == AssemblyOperation::DISCONNECT) op.disconnect.targetPid = pid;
+                                else if (op.type == AssemblyOperation::WARPAGE)  op.warpage.targetPid    = pid;
+                                else if (op.type == AssemblyOperation::FILLET)   op.fillet.targetPid     = pid;
+                            };
+                            // Helper: push to targetPids list on structs that support it
+                            auto pushMulti = [&](int pid) {
+                                if (op.type == AssemblyOperation::FORMSTRAIN)    op.formstrain.targetPids.push_back(pid);
+                                else if (op.type == AssemblyOperation::TET10_CONVERT) op.tet10.targetPids.push_back(pid);
+                                else if (op.type == AssemblyOperation::REFINE)   op.refine.targetPids.push_back(pid);
+                                else if (op.type == AssemblyOperation::ELFORM)   op.elform.targetPids.push_back(pid);
+                                else if (op.type == AssemblyOperation::WARPAGE)  op.warpage.targetPids.push_back(pid);
+                                else if (op.type == AssemblyOperation::FILLET)   op.fillet.targetPids.push_back(pid);
+                                else setSingle(pid); // ops without multi-pid: use first value
+                            };
+
+                            std::string v = val;
+                            // Normalize case for "all"
+                            std::string vl = v;
+                            for (auto& c : vl) c = (char)tolower((unsigned char)c);
+
+                            if (vl == "all") {
+                                setSingle(0);  // 0 = all
+                            } else if (!v.empty() && v.front() == '[') {
+                                // List: [1, 2, 3]
+                                std::string inner = v.substr(1, v.size() - 2);
+                                std::istringstream ss(inner);
+                                std::string tok;
+                                bool first = true;
+                                while (std::getline(ss, tok, ',')) {
+                                    size_t a = tok.find_first_not_of(" \t");
+                                    if (a == std::string::npos) continue;
+                                    int pid = std::stoi(tok.substr(a));
+                                    if (first) { setSingle(-1); first = false; } // -1 = use list
+                                    pushMulti(pid);
+                                }
+                            } else {
+                                int pid = std::stoi(v);
+                                setSingle(pid);
                             }
                         } else if (key == "source_pid") {
                             int pid = std::stoi(val);
@@ -1180,6 +1208,32 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                                 op.database.extentBinary = (val == "true" || val == "yes" || val == "1");
                             } else if (key == "neiph") {
                                 try { op.database.neiph = std::stoi(val); } catch (...) {}
+                            }
+                        } else if (op.type == AssemblyOperation::FILLET) {
+                            if (key == "target_pid") {
+                                try { op.fillet.targetPid = std::stoi(val); } catch (...) {}
+                            } else if (key == "radius") {
+                                try { op.fillet.radius = std::stod(val); } catch (...) {}
+                            } else if (key == "face") {
+                                // Single face: face: z_max
+                                op.fillet.faces.clear();
+                                op.fillet.faces.push_back(val);
+                            } else if (key == "faces") {
+                                // Inline list: faces: [z_max, z_min]
+                                op.fillet.faces.clear();
+                                std::string list = val;
+                                // Strip brackets
+                                if (!list.empty() && list.front() == '[') list = list.substr(1);
+                                if (!list.empty() && list.back()  == ']') list.pop_back();
+                                std::istringstream ss(list);
+                                std::string tok;
+                                while (std::getline(ss, tok, ',')) {
+                                    // trim
+                                    size_t a = tok.find_first_not_of(" \t");
+                                    size_t b = tok.find_last_not_of(" \t");
+                                    if (a != std::string::npos)
+                                        op.fillet.faces.push_back(tok.substr(a, b - a + 1));
+                                }
                             }
                         } else if (op.type == AssemblyOperation::MATDB) {
                             if (key == "database") {

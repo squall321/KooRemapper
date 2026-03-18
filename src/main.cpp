@@ -1695,19 +1695,59 @@ int runAssemble(const std::string& configFile, const ConsoleOutput& console) {
         } else if (op.type == AssemblyOperation::INDENT) {
             ok = assembler.applyIndent(op.indent, matE, matNu);
         } else if (op.type == AssemblyOperation::FORMSTRAIN) {
-            ok = assembler.applyFormStrain(op.formstrain);
+            if (!op.formstrain.targetPids.empty()) {
+                for (int pid : op.formstrain.targetPids) {
+                    FormStrainOperation fs = op.formstrain; fs.targetPid = pid; fs.targetPids = {};
+                    ok = assembler.applyFormStrain(fs);
+                    if (!ok) break;
+                }
+            } else {
+                ok = assembler.applyFormStrain(op.formstrain);
+            }
         } else if (op.type == AssemblyOperation::TET10_CONVERT) {
-            ok = assembler.applyTet10Convert(op.tet10);
+            if (!op.tet10.targetPids.empty()) {
+                for (int pid : op.tet10.targetPids) {
+                    Tet10ConvertOperation t = op.tet10; t.targetPid = pid; t.targetPids = {};
+                    ok = assembler.applyTet10Convert(t);
+                    if (!ok) break;
+                }
+            } else {
+                ok = assembler.applyTet10Convert(op.tet10);
+            }
         } else if (op.type == AssemblyOperation::REFINE) {
-            ok = assembler.applyRefine(op.refine);
+            if (!op.refine.targetPids.empty()) {
+                for (int pid : op.refine.targetPids) {
+                    RefineOperation r = op.refine; r.targetPid = pid; r.targetPids = {};
+                    ok = assembler.applyRefine(r);
+                    if (!ok) break;
+                }
+            } else {
+                ok = assembler.applyRefine(op.refine);
+            }
         } else if (op.type == AssemblyOperation::ELFORM) {
-            ok = assembler.applyElform(op.elform);
+            if (!op.elform.targetPids.empty()) {
+                for (int pid : op.elform.targetPids) {
+                    ElformOperation e = op.elform; e.targetPid = pid; e.targetPids = {};
+                    ok = assembler.applyElform(e);
+                    if (!ok) break;
+                }
+            } else {
+                ok = assembler.applyElform(op.elform);
+            }
         } else if (op.type == AssemblyOperation::DISCONNECT) {
             ok = assembler.applyDisconnect(op.disconnect);
         } else if (op.type == AssemblyOperation::IGA) {
             ok = assembler.applyIGA(op.iga, outputPrefix);
         } else if (op.type == AssemblyOperation::WARPAGE) {
-            ok = assembler.applyWarpage(op.warpage, matE, matNu, configDir);
+            if (!op.warpage.targetPids.empty()) {
+                for (int pid : op.warpage.targetPids) {
+                    WarpageOperation w = op.warpage; w.targetPid = pid; w.targetPids = {};
+                    ok = assembler.applyWarpage(w, matE, matNu, configDir);
+                    if (!ok) break;
+                }
+            } else {
+                ok = assembler.applyWarpage(op.warpage, matE, matNu, configDir);
+            }
         } else if (op.type == AssemblyOperation::OFFSET) {
             ok = assembler.applyOffset(op.offset, matE, matNu);
         } else if (op.type == AssemblyOperation::MATSWAP) {
@@ -1739,6 +1779,8 @@ int runAssemble(const std::string& configFile, const ConsoleOutput& console) {
             ok = assembler.applyControl(op.control);
         } else if (op.type == AssemblyOperation::GENERATE) {
             ok = assembler.applyGenerate(op.generate);
+        } else if (op.type == AssemblyOperation::FILLET) {
+            ok = assembler.applyFillet(op.fillet);
         }
 
         if (!ok) {

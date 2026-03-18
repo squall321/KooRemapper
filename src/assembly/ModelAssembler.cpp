@@ -10932,4 +10932,228 @@ bool ModelAssembler::applyUpdate(const UpdateOperation& op) {
     return true;
 }
 
+// ========== getAllPartIds ==========
+
+std::vector<int> ModelAssembler::getAllPartIds() const {
+    std::set<int> pids;
+    for (auto& [eid, elem] : baseMesh_.elements) {
+        if (!removedElementIds_.count(eid)) pids.insert(elem.partId);
+    }
+    for (auto& elem : addedElements_) pids.insert(elem.pid);
+    return std::vector<int>(pids.begin(), pids.end());
+}
+
+// ========== FILLET: Round edges of a structured HEX8 mesh face ==========
+
+bool ModelAssembler::applyFillet(const FilletOperation& op) {
+    if (op.faces.empty()) {
+        errorMessage_ = "fillet: no face(s) specified";
+        return false;
+    }
+
+    // Resolve which PIDs to process
+    std::vector<int> pidsToProcess;
+    if (!op.targetPids.empty()) {
+        pidsToProcess = op.targetPids;
+    } else if (op.targetPid == 0) {
+        // all structured (HEX8) parts
+        for (auto& [eid, elem] : baseMesh_.elements) {
+            if (!removedElementIds_.count(eid) && elem.type == ElementType::HEX8)
+                pidsToProcess.push_back(elem.partId);
+        }
+        for (auto& elem : addedElements_)
+            if (elem.type == ElementType::HEX8) pidsToProcess.push_back(elem.pid);
+        // deduplicate
+        std::sort(pidsToProcess.begin(), pidsToProcess.end());
+        pidsToProcess.erase(std::unique(pidsToProcess.begin(), pidsToProcess.end()), pidsToProcess.end());
+    } else {
+        pidsToProcess = {op.targetPid};
+    }
+
+    if (pidsToProcess.empty()) {
+        errorMessage_ = "fillet: no structured HEX8 parts found";
+        return false;
+    }
+
+    int totalMovedAll = 0;
+    for (int pid : pidsToProcess) {
+        FilletOperation singleOp = op;
+        singleOp.targetPid  = pid;
+        singleOp.targetPids = {};
+
+    // Collect nodes belonging to target PID (base + added elements)
+    std::set<int> partNodes;
+    for (auto& [eid, elem] : baseMesh_.elements) {
+        if (removedElementIds_.count(eid)) continue;
+        if (elem.partId != singleOp.targetPid) continue;
+        if (elem.type != ElementType::HEX8) {
+            errorMessage_ = "fillet: non-HEX8 element found in PID "
+                            + std::to_string(singleOp.targetPid) + ". Structured mesh required.";
+            return false;
+        }
+        for (int nid : elem.nodeIds) if (nid > 0) partNodes.insert(nid);
+    }
+    for (auto& elem : addedElements_) {
+        if (elem.pid != singleOp.targetPid) continue;
+        for (int nid : elem.nodeIds) if (nid > 0) partNodes.insert(nid);
+    }
+    if (partNodes.empty()) continue;
+
+    // Get current node position (modifiedNodePositions_ takes priority)
+    auto getPos = [&](int nid) -> Vector3D {
+        auto it = modifiedNodePositions_.find(nid);
+        if (it != modifiedNodePositions_.end()) return it->second;
+        auto nit = baseMesh_.nodes.find(nid);
+        if (nit != baseMesh_.nodes.end()) return nit->second.position;
+        for (auto& n : addedNodes_) if (n.id == nid) return {n.x, n.y, n.z};
+        return {0, 0, 0};
+    };
+
+    // Set node position
+    auto setPos = [&](int nid, const Vector3D& p) {
+        modifiedNodePositions_[nid] = p;
+        for (auto& n : addedNodes_) {
+            if (n.id == nid) { n.x = p.x; n.y = p.y; n.z = p.z; break; }
+        }
+    };
+
+    // Bounding box of target part
+    double xmin =  1e18, xmax = -1e18;
+    double ymin =  1e18, ymax = -1e18;
+    double zmin =  1e18, zmax = -1e18;
+    for (int nid : partNodes) {
+        auto p = getPos(nid);
+        xmin = std::min(xmin, p.x); xmax = std::max(xmax, p.x);
+        ymin = std::min(ymin, p.y); ymax = std::max(ymax, p.y);
+        zmin = std::min(zmin, p.z); zmax = std::max(zmax, p.z);
+    }
+
+    const double R = op.radius;
+    int totalMoved = 0;
+
+    for (const auto& faceStr : op.faces) {
+        // Normalise
+        std::string face = faceStr;
+        for (auto& c : face) c = (char)tolower((unsigned char)c);
+
+        int moved = 0;
+        for (int nid : partNodes) {
+            auto p = getPos(nid);
+            double x = p.x, y = p.y, z = p.z;
+
+            // Per-face: determine main axis and side axes
+            // main_val: coordinate along face normal
+            // main_ref: face position along that axis
+            // main_sign: +1 for _max face, -1 for _min face
+            // s1, s2: the two tangential coordinates
+            double main_val, main_ref, main_sign;
+            double s1, s1min, s1max;
+            double s2, s2min, s2max;
+
+            if (face == "z_max") {
+                main_val = z; main_ref = zmax; main_sign = +1;
+                s1 = x; s1min = xmin; s1max = xmax;
+                s2 = y; s2min = ymin; s2max = ymax;
+            } else if (face == "z_min") {
+                main_val = z; main_ref = zmin; main_sign = -1;
+                s1 = x; s1min = xmin; s1max = xmax;
+                s2 = y; s2min = ymin; s2max = ymax;
+            } else if (face == "x_max") {
+                main_val = x; main_ref = xmax; main_sign = +1;
+                s1 = y; s1min = ymin; s1max = ymax;
+                s2 = z; s2min = zmin; s2max = zmax;
+            } else if (face == "x_min") {
+                main_val = x; main_ref = xmin; main_sign = -1;
+                s1 = y; s1min = ymin; s1max = ymax;
+                s2 = z; s2min = zmin; s2max = zmax;
+            } else if (face == "y_max") {
+                main_val = y; main_ref = ymax; main_sign = +1;
+                s1 = x; s1min = xmin; s1max = xmax;
+                s2 = z; s2min = zmin; s2max = zmax;
+            } else if (face == "y_min") {
+                main_val = y; main_ref = ymin; main_sign = -1;
+                s1 = x; s1min = xmin; s1max = xmax;
+                s2 = z; s2min = zmin; s2max = zmax;
+            } else {
+                errorMessage_ = "fillet: unknown face '" + faceStr + "'";
+                return false;
+            }
+
+            // Is this node within R of the face (inward)?
+            bool inMainZone = (main_sign > 0) ? (main_val > main_ref - R)
+                                              : (main_val < main_ref + R);
+            if (!inMainZone) continue;
+
+            // Proximity to each side edge
+            bool near_s1max = (s1 > s1max - R);
+            bool near_s1min = (s1 < s1min + R);
+            bool near_s2max = (s2 > s2max - R);
+            bool near_s2min = (s2 < s2min + R);
+            if (!near_s1max && !near_s1min && !near_s2max && !near_s2min) continue;
+
+            // Arc/sphere centre in each direction
+            double cmain = main_ref - main_sign * R;
+            double cs1 = near_s1max ? (s1max - R) : (near_s1min ? (s1min + R) : s1);
+            double cs2 = near_s2max ? (s2max - R) : (near_s2min ? (s2min + R) : s2);
+
+            double dm = main_val - cmain;
+            double d1 = s1 - cs1;
+            double d2 = s2 - cs2;
+
+            double new_main, new_s1, new_s2;
+            double len;
+
+            bool use_s1 = (near_s1max || near_s1min);
+            bool use_s2 = (near_s2max || near_s2min);
+
+            if (use_s1 && use_s2) {
+                // Spherical corner
+                len = std::sqrt(dm*dm + d1*d1 + d2*d2);
+                if (len < 1e-12) continue;
+                new_main = cmain + R * dm / len;
+                new_s1   = cs1   + R * d1 / len;
+                new_s2   = cs2   + R * d2 / len;
+            } else if (use_s1) {
+                // Cylindrical arc in main-s1 plane
+                len = std::sqrt(dm*dm + d1*d1);
+                if (len < 1e-12) continue;
+                new_main = cmain + R * dm / len;
+                new_s1   = cs1   + R * d1 / len;
+                new_s2   = s2;
+            } else {
+                // Cylindrical arc in main-s2 plane
+                len = std::sqrt(dm*dm + d2*d2);
+                if (len < 1e-12) continue;
+                new_main = cmain + R * dm / len;
+                new_s1   = s1;
+                new_s2   = cs2   + R * d2 / len;
+            }
+
+            // Reconstruct 3D position from (main, s1, s2) back to (x, y, z)
+            Vector3D newPos;
+            if (face == "z_max" || face == "z_min") {
+                newPos = {new_s1, new_s2, new_main};
+            } else if (face == "x_max" || face == "x_min") {
+                newPos = {new_main, new_s1, new_s2};
+            } else {  // y_max / y_min
+                newPos = {new_s1, new_main, new_s2};
+            }
+
+            setPos(nid, newPos);
+            moved++;
+        }
+        totalMoved += moved;
+    }
+        totalMovedAll += totalMoved;
+    } // end pid loop
+
+    std::ostringstream oss;
+    oss << "[fillet] " << totalMovedAll << " nodes moved across "
+        << pidsToProcess.size() << " part(s), R=" << op.radius
+        << " face(s):";
+    for (auto& f : op.faces) oss << " " << f;
+    infoMessages.push_back(oss.str());
+    return true;
+}
+
 } // namespace KooRemapper

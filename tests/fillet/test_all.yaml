@@ -1,0 +1,20 @@
+output: test_all_result
+
+operations:
+  - type: generate
+    shape: box
+    lx: 10.0
+    ly: 5.0
+    lz: 5.0
+    nx: 10
+    ny: 5
+    nz: 5
+    pid: 1
+    secid: 1
+    mid: 1
+    part_title: Box1
+
+  - type: fillet
+    target_pid: all
+    radius: 1.0
+    face: z_max

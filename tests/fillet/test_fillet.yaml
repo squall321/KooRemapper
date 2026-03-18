@@ -1,0 +1,24 @@
+# Fillet test: generate a 10x5x5mm box then fillet the z_max face edges
+output: fillet_result
+
+operations:
+  - type: generate
+    shape: box
+    lx: 10.0
+    ly: 5.0
+    lz: 5.0
+    nx: 10
+    ny: 5
+    nz: 5
+    rho: 7.85e-9
+    E: 210000.0
+    nu: 0.3
+    mid: 1
+    secid: 1
+    pid: 1
+    part_title: Test Box
+
+  - type: fillet
+    target_pid: 1
+    radius: 1.5
+    face: z_max

@@ -67,25 +67,29 @@ struct BendOperation {
 };
 
 struct FormStrainOperation {
-    int targetPid = 0;           // 0 = auto-detect all eligible shell parts
-    double shellThickness = 0.0; // 0 = auto from *SECTION_SHELL
-    double minCurvature = 0.0;   // noise filter threshold (default=0)
+    int targetPid = 0;               // 0 = all, -1 = use targetPids list
+    std::vector<int> targetPids;     // explicit pid list (overrides targetPid when non-empty)
+    double shellThickness = 0.0;
+    double minCurvature = 0.0;
 };
 
 struct Tet10ConvertOperation {
-    int targetPid = 0;        // 0 = all eligible parts
-    int elform = 0;           // 0 = auto (tet10→17, hex20→23, quad8→23, tria6→24)
-    std::string convertType = "tet10";  // tet10, hex20, quad8, tria6
+    int targetPid = 0;               // 0 = all, -1 = use targetPids list
+    std::vector<int> targetPids;
+    int elform = 0;
+    std::string convertType = "tet10";
 };
 
 struct RefineOperation {
-    int targetPid = 0;        // 0 = all parts
-    int ratio = 2;            // 2 or 3
+    int targetPid = 0;               // 0 = all, -1 = use targetPids list
+    std::vector<int> targetPids;
+    int ratio = 2;
 };
 
 struct ElformOperation {
-    int targetPid = 0;        // 0 = all parts
-    std::string targetElform; // ELFORM number (as string) or alias name
+    int targetPid = 0;               // 0 = all, -1 = use targetPids list
+    std::vector<int> targetPids;
+    std::string targetElform;
 };
 
 struct DisconnectOperation {
@@ -118,7 +122,8 @@ struct IGAOperation {
 };
 
 struct WarpageOperation {
-    int targetPid = 0;
+    int targetPid = 0;               // 0 = all, -1 = use targetPids list
+    std::vector<int> targetPids;
     std::string datFile;            // 필수
     std::string plane = "xy";       // xy | yz | zx
     std::string deflectionAxis = "z"; // +z | -z | +x | -x | +y | -y
@@ -371,8 +376,15 @@ struct DatabaseOperation {
     int neiph = 6, strflg = 1, sigflg = 1, epsflg = 1;
 };
 
+struct FilletOperation {
+    int targetPid = 0;               // 0 = all structured HEX8 parts, -1 = use targetPids list
+    std::vector<int> targetPids;
+    double radius = 1.0;
+    std::vector<std::string> faces;  // "z_max", "z_min", "x_max", "x_min", "y_max", "y_min"
+};
+
 struct AssemblyOperation {
-    enum Type { REPLACE, SQUEEZE, RESTACK, BEND, INDENT, FORMSTRAIN, TET10_CONVERT, REFINE, ELFORM, DISCONNECT, IGA, WARPAGE, OFFSET, MATSWAP, MATDB, LOAD, CONTACT, BOUNDARY, RBE, WRAP, UPDATE, DATABASE, CONTROL, GENERATE };
+    enum Type { REPLACE, SQUEEZE, RESTACK, BEND, INDENT, FORMSTRAIN, TET10_CONVERT, REFINE, ELFORM, DISCONNECT, IGA, WARPAGE, OFFSET, MATSWAP, MATDB, LOAD, CONTACT, BOUNDARY, RBE, WRAP, UPDATE, DATABASE, CONTROL, GENERATE, FILLET };
     Type type;
     ReplaceOperation replace;
     SqueezeOperation squeeze;
@@ -398,6 +410,7 @@ struct AssemblyOperation {
     UpdateOperation update;
     DatabaseOperation database;
     ControlOperation control;
+    FilletOperation fillet;
 };
 
 struct AssemblyConfig {
