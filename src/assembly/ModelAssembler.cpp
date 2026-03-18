@@ -1010,6 +1010,9 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
         // Card 2 is mandatory (LS-DYNA Vol_I). All defaults (FS=FD=DC=VC=VDC=0, PENCHK=0, BT=0, DT=1e20)
         ct << "$#       fs        fd        dc        vc       vdc    penchk        bt        dt\n";
         ct << "       0.0       0.0       0.0       0.0       0.0         0       0.0  1.0000E+20\n";
+        // Card 3 is mandatory (LS-DYNA Vol_I). SFSA=SFSB=SFSAT=SFSBT=FSF=VSF=1, SAST=SBST=0(auto)
+        ct << "$#     sfsa      sfsb      sast      sbst     sfsat     sfsbt       fsf       vsf\n";
+        ct << "       1.0       1.0       0.0       0.0       1.0       1.0       1.0       1.0\n";
         addedKeywordBlocks_.push_back(ct.str());
         tiedCount++;
     }
