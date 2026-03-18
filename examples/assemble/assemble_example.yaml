@@ -1,0 +1,14 @@
+# KooRemapper Assemble Example
+# Base model: 100x20x20 mm HEX8 box (PID=1, Steel)
+# Bends the box using a sinusoidal deflection formula
+
+base_model: box.k
+output: assembled_box
+
+operations:
+  # Bend: sinusoidal deflection in Z direction on XY plane
+  - type: bend
+    target_pid: 1
+    plane: xy                   # deflection surface plane
+    source: formula
+    expression: "3.0 * sin(pi * x1 / L1)"   # max 3mm Z-deflection

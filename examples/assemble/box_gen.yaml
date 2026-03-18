@@ -1,0 +1,24 @@
+# generate box config
+# KooRemapper generate box examples/assemble/box_gen.yaml
+#
+# Generates a 100x20x10mm box: 10x4x2 elements
+# Material: Steel (E=210000 MPa, nu=0.3, rho=7.85e-9 t/mm3)
+
+output: box_steel.k
+
+lx: 100.0        # X length [mm]
+ly: 20.0         # Y length [mm]
+lz: 10.0         # Z length [mm]
+
+nx: 10           # elements in X
+ny: 4            # elements in Y
+nz: 2            # elements in Z
+
+rho: 7.85e-9     # density [t/mm3]
+E: 210000.0      # Young's modulus [MPa]
+nu: 0.3          # Poisson's ratio
+
+mid: 1
+secid: 1
+pid: 1
+part_title: Steel Base

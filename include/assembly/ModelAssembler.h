@@ -52,6 +52,10 @@ public:
     bool applyBoundary(const BoundaryOperation& op);
     bool applyRbe(const RbeOperation& op);
     bool applyWrap(const WrapOperation& op, double E, double nu);
+    bool applyGenerate(const GenerateOperation& op);
+    bool applyUpdate(const UpdateOperation& op);
+    bool applyDatabase(const DatabaseOperation& op);
+    bool applyControl(const ControlOperation& op);
     bool writeOutput(const std::string& outputPrefix);
 
     const std::vector<ElementResult>& getAccumulatedResults() const {

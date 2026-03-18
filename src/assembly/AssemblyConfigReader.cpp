@@ -772,6 +772,14 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             op.type = AssemblyOperation::RBE;
                         } else if (val == "wrap") {
                             op.type = AssemblyOperation::WRAP;
+                        } else if (val == "update") {
+                            op.type = AssemblyOperation::UPDATE;
+                        } else if (val == "database") {
+                            op.type = AssemblyOperation::DATABASE;
+                        } else if (val == "control") {
+                            op.type = AssemblyOperation::CONTROL;
+                        } else if (val == "generate") {
+                            op.type = AssemblyOperation::GENERATE;
                         } else {
                             throw std::runtime_error("Unknown operation type: " + val);
                         }
@@ -1115,6 +1123,64 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                                     }
                                 }
                             }
+                        } else if (op.type == AssemblyOperation::UPDATE) {
+                            if (key == "dynain") {
+                                op.update.dynainFile = val;
+                            }
+                        } else if (op.type == AssemblyOperation::GENERATE) {
+                            auto& g = op.generate;
+                            try {
+                                if      (key == "shape")      g.shape     = val;
+                                else if (key == "lx")         g.lx        = std::stod(val);
+                                else if (key == "ly")         g.ly        = std::stod(val);
+                                else if (key == "lz")         g.lz        = std::stod(val);
+                                else if (key == "nx")         g.nx        = std::stoi(val);
+                                else if (key == "ny")         g.ny        = std::stoi(val);
+                                else if (key == "nz")         g.nz        = std::stoi(val);
+                                else if (key == "rho")        g.rho       = std::stod(val);
+                                else if (key == "E")          g.E         = std::stod(val);
+                                else if (key == "nu")         g.nu        = std::stod(val);
+                                else if (key == "mid")        g.mid       = std::stoi(val);
+                                else if (key == "secid")      g.secid     = std::stoi(val);
+                                else if (key == "pid")        g.pid       = std::stoi(val);
+                                else if (key == "part_title") g.partTitle = val;
+                            } catch (...) {}
+                        } else if (op.type == AssemblyOperation::CONTROL) {
+                            auto& ct = op.control;
+                            try {
+                                if      (key == "endtime") { ct.endtime = std::stod(val); }
+                                else if (key == "tssfac")  { ct.tssfac  = std::stod(val); }
+                                else if (key == "dt2ms")   { ct.dt2ms   = std::stod(val); ct.setDt2ms = true; }
+                                else if (key == "hgen")    { ct.hgen    = std::stoi(val); }
+                                else if (key == "rwen")    { ct.rwen    = std::stoi(val); }
+                                else if (key == "slnten")  { ct.slnten  = std::stoi(val); }
+                                else if (key == "rylen")   { ct.rylen   = std::stoi(val); }
+                                else if (key == "ihq")     { ct.ihq     = std::stoi(val); }
+                                else if (key == "qh")      { ct.qh      = std::stod(val); }
+                                else if (key == "q1")      { ct.q1      = std::stod(val); }
+                                else if (key == "q2")      { ct.q2      = std::stod(val); }
+                                else if (key == "bulk_type") { ct.bulkType = std::stoi(val); }
+                                else if (key == "energy") {
+                                    // shorthand: energy: true → hgen=rwen=2, slnten=rylen=1
+                                    if (val == "true" || val == "yes" || val == "1") {
+                                        ct.hgen = 2; ct.rwen = 2; ct.slnten = 1; ct.rylen = 1;
+                                    }
+                                }
+                            } catch (...) {}
+                        } else if (op.type == AssemblyOperation::DATABASE) {
+                            if (key == "preset") {
+                                op.database.preset = val;
+                            } else if (key == "dt") {
+                                try { op.database.dt = std::stod(val); } catch (...) {}
+                            } else if (key == "dt_plot") {
+                                try { op.database.dtPlot = std::stod(val); } catch (...) {}
+                            } else if (key == "dt_thdt") {
+                                try { op.database.dtThdt = std::stod(val); } catch (...) {}
+                            } else if (key == "extent") {
+                                op.database.extentBinary = (val == "true" || val == "yes" || val == "1");
+                            } else if (key == "neiph") {
+                                try { op.database.neiph = std::stoi(val); } catch (...) {}
+                            }
                         } else if (op.type == AssemblyOperation::MATDB) {
                             if (key == "database") {
                                 op.matdb.databasePath = val;
@@ -1176,7 +1242,12 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
 
     // Validate
     if (config.baseModel.empty()) {
-        throw std::runtime_error("base_model not specified in assembly config");
+        // Allowed if first operation is 'generate'
+        bool hasGenerate = !config.operations.empty() &&
+                           config.operations[0].type == AssemblyOperation::GENERATE;
+        if (!hasGenerate) {
+            throw std::runtime_error("base_model not specified in assembly config");
+        }
     }
     if (config.output.empty()) {
         throw std::runtime_error("output not specified in assembly config");

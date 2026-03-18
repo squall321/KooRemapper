@@ -1,0 +1,12 @@
+# Test: both direction - shell as mid-plane
+# Extrude ±thickness/2 from shell surface
+
+model: ../../examples/arc30/arc30_flat.k
+output: both_direction_test
+
+source_pid: 1
+thickness: 2.0
+num_layers: 1
+element_type: solid
+offset_direction: both
+new_pid: 10

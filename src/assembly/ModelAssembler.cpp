@@ -5174,16 +5174,64 @@ bool ModelAssembler::applyOffset(const OffsetOperation& op, double E, double nu)
     }
 
     // 4. Parse offset direction
-    Vector3D offsetDir = parseOffsetDirection(op.offsetDirection, sourceSurface);
+    // "both" mode: shell becomes mid-plane, extrude ±thickness/2
+    bool isBothMode = (op.offsetDirection == "both");
+    if (isBothMode) {
+        std::cout << "[INFO] Both-side offset: shell as mid-plane, thickness="
+                  << op.thickness << " mm (±" << op.thickness / 2.0 << ")\n";
+    }
+
+    // For "both" mode, treat as +normal internally
+    std::string effectiveDirection = isBothMode ? "+normal" : op.offsetDirection;
+    Vector3D offsetDir = parseOffsetDirection(effectiveDirection, sourceSurface);
     std::cout << "[INFO] Offset direction: ("
               << offsetDir.x << ", " << offsetDir.y << ", " << offsetDir.z << ")\n";
 
     // Check if using local normals
-    bool usingLocalNormals = op.useLocalNormals &&
-                             (op.offsetDirection == "+normal" || op.offsetDirection == "normal" ||
-                              op.offsetDirection == "-normal");
+    bool usingLocalNormals = (op.useLocalNormals || isBothMode) &&
+                             (effectiveDirection == "+normal" || effectiveDirection == "normal" ||
+                              effectiveDirection == "-normal");
     if (usingLocalNormals) {
         std::cout << "[INFO] Using local normals (per-node averaged)\n";
+    }
+
+    // "both" mode: shift source surface nodes by -thickness/2 along normal
+    if (isBothMode) {
+        double halfThickness = op.thickness / 2.0;
+        std::map<int, Vector3D> perNodeNormals = computePerNodeNormals(sourceSurface);
+        std::map<int, int> shiftedNodeMap;  // origNid -> newNid
+
+        for (const auto& shell : sourceSurface) {
+            for (int i = 0; i < 4; ++i) {
+                int origNid = shell.nodeIds[i];
+                if (origNid <= 0 || shiftedNodeMap.count(origNid)) continue;
+
+                int newNid = ++maxNodeId_;
+                Vector3D origPos = getNodePosition(origNid);
+                Vector3D normal = perNodeNormals.count(origNid)
+                    ? perNodeNormals[origNid] : offsetDir;
+                Vector3D shiftedPos = origPos - normal * halfThickness;
+
+                AddedNode an;
+                an.id = newNid;
+                an.x = shiftedPos.x;
+                an.y = shiftedPos.y;
+                an.z = shiftedPos.z;
+                addedNodes_.push_back(an);
+                shiftedNodeMap[origNid] = newNid;
+            }
+        }
+
+        // Replace surface node IDs with shifted nodes
+        for (auto& shell : sourceSurface) {
+            for (int i = 0; i < 4; ++i) {
+                if (shell.nodeIds[i] > 0 && shiftedNodeMap.count(shell.nodeIds[i])) {
+                    shell.nodeIds[i] = shiftedNodeMap[shell.nodeIds[i]];
+                }
+            }
+        }
+        std::cout << "[INFO] Shifted " << shiftedNodeMap.size()
+                  << " nodes by -" << halfThickness << " mm (bottom face)\n";
     }
 
     // 5. Create offset geometry based on element type
@@ -5208,7 +5256,7 @@ bool ModelAssembler::applyOffset(const OffsetOperation& op, double E, double nu)
                 std::map<int, Vector3D> perNodeNormals = computePerNodeNormals(sourceSurface);
 
                 // Apply sign for -normal direction
-                if (op.offsetDirection == "-normal") {
+                if (effectiveDirection == "-normal") {
                     for (auto& pair : perNodeNormals) {
                         pair.second = pair.second * -1.0;
                     }
@@ -5230,7 +5278,7 @@ bool ModelAssembler::applyOffset(const OffsetOperation& op, double E, double nu)
             std::map<int, Vector3D> perNodeNormals = computePerNodeNormals(sourceSurface);
 
             // Apply sign for -normal direction
-            if (op.offsetDirection == "-normal") {
+            if (effectiveDirection == "-normal") {
                 for (auto& pair : perNodeNormals) {
                     pair.second = pair.second * -1.0;
                 }
@@ -5413,8 +5461,8 @@ bool ModelAssembler::applyOffset(const OffsetOperation& op, double E, double nu)
                       << std::fixed << std::setprecision(3) << summary.minJacobian << ")\n";
         }
 
-        // Self-intersection check (only for +normal/-normal directions with concave surfaces)
-        if (op.offsetDirection == "+normal" || op.offsetDirection == "-normal") {
+        // Self-intersection check (only for +normal/-normal/both directions with concave surfaces)
+        if (effectiveDirection == "+normal" || effectiveDirection == "-normal") {
             std::cout << "[INFO] Checking for self-intersections...\n";
             IntersectionDetector intersectionDetector;
 
@@ -10339,6 +10387,546 @@ bool ModelAssembler::applyWrap(const WrapOperation& op, double E, double nu) {
         << " N/mm, axis=" << op.axis
         << ", center=(" << cA << "," << cB << ")"
         << ", " << totalElements << " elements";
+    infoMessages.push_back(oss.str());
+
+    return true;
+}
+
+// ========== DATABASE: Insert *DATABASE_* output control keywords ==========
+
+bool ModelAssembler::applyGenerate(const GenerateOperation& op) {
+    if (op.shape != "box" && !op.shape.empty()) {
+        errorMessage_ = "generate: unknown shape '" + op.shape + "' (only 'box' supported)";
+        return false;
+    }
+
+    int nx = op.nx, ny = op.ny, nz = op.nz;
+    if (nx < 1 || ny < 1 || nz < 1) {
+        errorMessage_ = "generate: nx/ny/nz must be >= 1";
+        return false;
+    }
+    int npx = nx + 1, npy = ny + 1, npz = nz + 1;
+    double dx = op.lx / nx, dy = op.ly / ny, dz = op.lz / nz;
+    int mid = op.mid > 0 ? op.mid : 1;
+    int secid = op.secid > 0 ? op.secid : 1;
+    int pid = op.pid > 0 ? op.pid : 1;
+    std::string title = op.partTitle.empty() ? "Box" : op.partTitle;
+
+    auto nid = [&](int ix, int iy, int iz) -> int {
+        return iz * (npx * npy) + iy * npx + ix + 1;
+    };
+
+    // Format helpers
+    auto fmt10d = [](double v) -> std::string {
+        char buf[32];
+        if (v == 0.0)
+            snprintf(buf, sizeof(buf), "       0.0");
+        else if (std::abs(v) < 1e-4 || std::abs(v) >= 1e8)
+            snprintf(buf, sizeof(buf), "%10.4E", v);
+        else
+            snprintf(buf, sizeof(buf), "%10g", v);
+        std::string s(buf);
+        while (s.size() < 10) s = " " + s;
+        return s.substr(s.size() - 10);
+    };
+
+    // Build rawLines_
+    rawLines_.clear();
+    rawLines_.push_back("$ Generated by KooRemapper assemble (generate box)");
+    rawLines_.push_back("*KEYWORD");
+    rawLines_.push_back("*MAT_ELASTIC");
+    rawLines_.push_back("$#     mid        ro         e        pr        da        db  not used");
+    {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "%10d%s%s%s%10.1f%10.1f%10.1f",
+                 mid, fmt10d(op.rho).c_str(), fmt10d(op.E).c_str(), fmt10d(op.nu).c_str(),
+                 0.0, 0.0, 0.0);
+        rawLines_.push_back(std::string(buf));
+    }
+    rawLines_.push_back("*SECTION_SOLID");
+    rawLines_.push_back("$#   secid    elform       aet");
+    {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "%10d%10d%10d", secid, 1, 0);
+        rawLines_.push_back(std::string(buf));
+    }
+    rawLines_.push_back("*PART");
+    rawLines_.push_back(title);
+    {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "%10d%10d%10d", pid, secid, mid);
+        rawLines_.push_back(std::string(buf));
+    }
+    rawLines_.push_back("*NODE");
+    for (int iz = 0; iz < npz; iz++)
+        for (int iy = 0; iy < npy; iy++)
+            for (int ix = 0; ix < npx; ix++) {
+                char buf[128];
+                snprintf(buf, sizeof(buf), "%8d%16.7E%16.7E%16.7E",
+                         nid(ix,iy,iz), ix*dx, iy*dy, iz*dz);
+                rawLines_.push_back(std::string(buf));
+            }
+    rawLines_.push_back("*ELEMENT_SOLID");
+    int eid = 1;
+    for (int iz = 0; iz < nz; iz++)
+        for (int iy = 0; iy < ny; iy++)
+            for (int ix = 0; ix < nx; ix++, eid++) {
+                std::array<int,8> n = {
+                    nid(ix,   iy,   iz),   nid(ix+1, iy,   iz),
+                    nid(ix+1, iy+1, iz),   nid(ix,   iy+1, iz),
+                    nid(ix,   iy,   iz+1), nid(ix+1, iy,   iz+1),
+                    nid(ix+1, iy+1, iz+1), nid(ix,   iy+1, iz+1)
+                };
+                char buf[128];
+                snprintf(buf, sizeof(buf), "%8d%8d%8d%8d%8d%8d%8d%8d%8d%8d",
+                         eid, pid, n[0], n[1], n[2], n[3], n[4], n[5], n[6], n[7]);
+                rawLines_.push_back(std::string(buf));
+            }
+    rawLines_.push_back("*END");
+
+    // Populate baseMesh_ directly (no file I/O needed)
+    baseMesh_.clear();
+    baseMesh_.addMaterial(mid, op.E, op.nu, op.rho);
+    baseMesh_.addPart(pid, secid, mid, title);
+    for (int iz = 0; iz < npz; iz++)
+        for (int iy = 0; iy < npy; iy++)
+            for (int ix = 0; ix < npx; ix++)
+                baseMesh_.addNode(nid(ix,iy,iz), ix*dx, iy*dy, iz*dz);
+    eid = 1;
+    for (int iz = 0; iz < nz; iz++)
+        for (int iy = 0; iy < ny; iy++)
+            for (int ix = 0; ix < nx; ix++, eid++) {
+                std::array<int,8> n = {
+                    nid(ix,   iy,   iz),   nid(ix+1, iy,   iz),
+                    nid(ix+1, iy+1, iz),   nid(ix,   iy+1, iz),
+                    nid(ix,   iy,   iz+1), nid(ix+1, iy,   iz+1),
+                    nid(ix+1, iy+1, iz+1), nid(ix,   iy+1, iz+1)
+                };
+                baseMesh_.addElement(eid, pid, n);
+            }
+    baseMesh_.setGridDimensions(nx, ny, nz);
+
+    // Update ID trackers
+    maxNodeId_    = npx * npy * npz;
+    maxElementId_ = nx * ny * nz;
+    maxPartId_    = pid;
+    maxSectionId_ = secid;
+    maxMaterialId_= mid;
+
+    int totalNodes = npx * npy * npz;
+    int totalElems = nx * ny * nz;
+    infoMessages.push_back("[generate] box " +
+        std::to_string(op.lx) + "x" + std::to_string(op.ly) + "x" + std::to_string(op.lz) +
+        " mm, " + std::to_string(totalNodes) + " nodes, " + std::to_string(totalElems) + " elements");
+    return true;
+}
+
+bool ModelAssembler::applyControl(const ControlOperation& op) {
+    // Right-align a value in a 10-char fixed-width field
+    auto fmt10d = [](double v) -> std::string {
+        char buf[32];
+        if (v == 0.0) {
+            snprintf(buf, sizeof(buf), "       0.0");
+        } else if (std::abs(v) < 0.001 || std::abs(v) >= 1e7) {
+            snprintf(buf, sizeof(buf), "%10.4E", v);
+        } else {
+            snprintf(buf, sizeof(buf), "%10g", v);
+        }
+        std::string s(buf);
+        while (s.size() < 10) s = " " + s;
+        return s.substr(s.size() - 10);
+    };
+    auto fmt10i = [](int v) -> std::string {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%10d", v);
+        return std::string(buf).substr(0, 10);
+    };
+    auto setField = [](std::string& line, int fi, const std::string& val10) {
+        size_t needed = (size_t)(fi + 1) * 10;
+        if (line.size() < needed) line.resize(needed, ' ');
+        line.replace((size_t)fi * 10, 10, val10.substr(0, 10));
+    };
+
+    // Find keyword line in rawLines_ (case-insensitive, exact keyword match)
+    auto findKeyword = [&](const std::string& kw) -> int {
+        for (size_t i = 0; i < rawLines_.size(); i++) {
+            std::string up = rawLines_[i];
+            for (auto& c : up) c = (char)toupper((unsigned char)c);
+            // strip trailing whitespace
+            while (!up.empty() && (up.back() == ' ' || up.back() == '\t' || up.back() == '\r')) up.pop_back();
+            if (up == kw) return (int)i;
+        }
+        return -1;
+    };
+    // First data line (non-comment, non-keyword) after keyword index
+    auto findDataLine = [&](int kwIdx) -> int {
+        for (int j = kwIdx + 1; j < (int)rawLines_.size() && j < kwIdx + 10; j++) {
+            if (rawLines_[j].empty()) continue;
+            char c = rawLines_[j][0];
+            if (c == '$' || c == '*') continue;
+            return j;
+        }
+        return -1;
+    };
+
+    int affected = 0;
+
+    // --- *CONTROL_TERMINATION ---
+    if (op.endtime > 0.0) {
+        int ki = findKeyword("*CONTROL_TERMINATION");
+        if (ki >= 0) {
+            int di = findDataLine(ki);
+            if (di >= 0) { setField(rawLines_[di], 0, fmt10d(op.endtime)); affected++; }
+        } else {
+            std::string card = "*CONTROL_TERMINATION\n";
+            card += fmt10d(op.endtime) + fmt10i(0) + "       0.0       0.0       0.0" + fmt10i(0) + "\n";
+            addedKeywordBlocks_.push_back(card);
+            affected++;
+        }
+    }
+
+    // --- *CONTROL_TIMESTEP ---
+    if (op.tssfac > 0.0 || op.setDt2ms) {
+        int ki = findKeyword("*CONTROL_TIMESTEP");
+        if (ki >= 0) {
+            int di = findDataLine(ki);
+            if (di >= 0) {
+                if (op.tssfac > 0.0) setField(rawLines_[di], 1, fmt10d(op.tssfac));
+                if (op.setDt2ms)     setField(rawLines_[di], 4, fmt10d(op.dt2ms));
+                affected++;
+            }
+        } else {
+            std::string card = "*CONTROL_TIMESTEP\n";
+            std::string line = "       0.0";  // DTINIT
+            line += (op.tssfac > 0.0 ? fmt10d(op.tssfac) : "      0.90");  // TSSFAC
+            line += fmt10i(0);                // ISDO
+            line += "       0.0";            // TSLIMT
+            line += (op.setDt2ms ? fmt10d(op.dt2ms) : "       0.0");  // DT2MS
+            line += fmt10i(0) + fmt10i(0) + fmt10i(0);  // LCTM ERODE MS1ST
+            card += line + "\n";
+            addedKeywordBlocks_.push_back(card);
+            affected++;
+        }
+    }
+
+    // --- *CONTROL_ENERGY ---
+    if (op.hgen || op.rwen || op.slnten || op.rylen) {
+        int ki = findKeyword("*CONTROL_ENERGY");
+        if (ki >= 0) {
+            int di = findDataLine(ki);
+            if (di >= 0) {
+                if (op.hgen)   setField(rawLines_[di], 0, fmt10i(op.hgen));
+                if (op.rwen)   setField(rawLines_[di], 1, fmt10i(op.rwen));
+                if (op.slnten) setField(rawLines_[di], 2, fmt10i(op.slnten));
+                if (op.rylen)  setField(rawLines_[di], 3, fmt10i(op.rylen));
+                affected++;
+            }
+        } else {
+            std::string card = "*CONTROL_ENERGY\n";
+            card += fmt10i(op.hgen   ? op.hgen   : 2);
+            card += fmt10i(op.rwen   ? op.rwen   : 2);
+            card += fmt10i(op.slnten ? op.slnten : 1);
+            card += fmt10i(op.rylen  ? op.rylen  : 1);
+            card += "\n";
+            addedKeywordBlocks_.push_back(card);
+            affected++;
+        }
+    }
+
+    // --- *CONTROL_HOURGLASS ---
+    if (op.ihq > 0) {
+        int ki = findKeyword("*CONTROL_HOURGLASS");
+        if (ki >= 0) {
+            int di = findDataLine(ki);
+            if (di >= 0) {
+                setField(rawLines_[di], 0, fmt10i(op.ihq));
+                setField(rawLines_[di], 1, fmt10d(op.qh));
+                affected++;
+            }
+        } else {
+            std::string card = "*CONTROL_HOURGLASS\n";
+            card += fmt10i(op.ihq) + fmt10d(op.qh) + "\n";
+            addedKeywordBlocks_.push_back(card);
+            affected++;
+        }
+    }
+
+    // --- *CONTROL_BULK_VISCOSITY ---
+    if (op.q1 != 0.0 || op.q2 != 0.0) {
+        int ki = findKeyword("*CONTROL_BULK_VISCOSITY");
+        if (ki >= 0) {
+            int di = findDataLine(ki);
+            if (di >= 0) {
+                if (op.q1) setField(rawLines_[di], 0, fmt10d(op.q1));
+                if (op.q2) setField(rawLines_[di], 1, fmt10d(op.q2));
+                if (op.bulkType) setField(rawLines_[di], 2, fmt10i(op.bulkType));
+                affected++;
+            }
+        } else {
+            std::string card = "*CONTROL_BULK_VISCOSITY\n";
+            card += fmt10d(op.q1) + fmt10d(op.q2) + fmt10i(op.bulkType) + "\n";
+            addedKeywordBlocks_.push_back(card);
+            affected++;
+        }
+    }
+
+    infoMessages.push_back("[control] " + std::to_string(affected) + " control card(s) applied");
+    return true;
+}
+
+bool ModelAssembler::applyDatabase(const DatabaseOperation& op) {
+    // Preset definitions (mirrors db_getPresets in main.cpp)
+    struct DbPreset {
+        std::string name;
+        std::vector<std::string> ascii;
+        std::vector<std::string> binary;
+        bool extent;
+    };
+    static const DbPreset PRESETS[] = {
+        {"all",
+         {"glstat","matsum","nodout","elout","rcforc","sleout","spcforc","nodfor",
+          "rwforc","secforc","jntforc","bndout","abstat","swforc","ssstat","deforc",
+          "disbout","ncforc","tprint","massout"},
+         {"d3plot","d3thdt","d3dump","runrsf"}, true},
+        {"drop",
+         {"glstat","matsum","nodout","elout","rcforc","sleout","spcforc","rwforc",
+          "nodfor","secforc","bndout","ncforc"},
+         {"d3plot","d3thdt","d3dump"}, true},
+        {"crash",
+         {"glstat","matsum","nodout","elout","rcforc","sleout","spcforc","rwforc",
+          "nodfor","secforc","swforc","ncforc","abstat"},
+         {"d3plot","d3thdt","d3dump"}, true},
+        {"static",
+         {"glstat","matsum","nodout","elout","spcforc","nodfor","bndout","secforc"},
+         {"d3plot","d3thdt"}, true},
+        {"thermal",
+         {"glstat","matsum","nodout","elout","spcforc","tprint","bndout"},
+         {"d3plot","d3thdt"}, true},
+        {"forming",
+         {"glstat","matsum","nodout","elout","rcforc","sleout","spcforc","nodfor",
+          "secforc","ncforc","swforc"},
+         {"d3plot","d3thdt","d3dump"}, true},
+        {"modal",
+         {"glstat","matsum","nodout","elout","spcforc"},
+         {"d3plot"}, false},
+        {"minimal",
+         {"glstat","matsum"},
+         {"d3plot"}, false},
+    };
+
+    // Resolve which keywords to enable
+    std::set<std::string> enabledAscii(op.enabledAscii.begin(), op.enabledAscii.end());
+    std::set<std::string> enabledBinary(op.enabledBinary.begin(), op.enabledBinary.end());
+    bool extentBinary = op.extentBinary;
+
+    if (!op.preset.empty()) {
+        for (const auto& p : PRESETS) {
+            if (p.name == op.preset) {
+                enabledAscii.insert(p.ascii.begin(), p.ascii.end());
+                enabledBinary.insert(p.binary.begin(), p.binary.end());
+                if (p.extent) extentBinary = true;
+                break;
+            }
+        }
+    }
+
+    if (enabledAscii.empty() && enabledBinary.empty()) {
+        errorMessage_ = "database: no keywords enabled (check preset name)";
+        return false;
+    }
+
+    double dt = op.dt > 0 ? op.dt : 0.001;
+    double dtPlot = op.dtPlot > 0 ? op.dtPlot : dt * 10.0;
+    double dtThdt = op.dtThdt > 0 ? op.dtThdt : dt;
+
+    // Scan rawLines_ for already-existing *DATABASE_ keywords
+    std::set<std::string> existing;
+    for (const auto& line : rawLines_) {
+        std::string up = line;
+        for (auto& c : up) c = (char)toupper((unsigned char)c);
+        std::string tr = up;
+        while (!tr.empty() && std::isspace((unsigned char)tr.front())) tr.erase(tr.begin());
+        if (tr.find("*DATABASE_") == 0) {
+            size_t e = tr.find_first_of(" \t\r\n");
+            existing.insert(e != std::string::npos ? tr.substr(0, e) : tr);
+        }
+    }
+
+    // ASCII keyword → *DATABASE_XXX map
+    static const std::pair<const char*, const char*> ASCII_KW[] = {
+        {"glstat",  "*DATABASE_GLSTAT"},  {"matsum",  "*DATABASE_MATSUM"},
+        {"nodout",  "*DATABASE_NODOUT"},  {"elout",   "*DATABASE_ELOUT"},
+        {"rcforc",  "*DATABASE_RCFORC"},  {"sleout",  "*DATABASE_SLEOUT"},
+        {"spcforc", "*DATABASE_SPCFORC"}, {"nodfor",  "*DATABASE_NODFOR"},
+        {"rwforc",  "*DATABASE_RWFORC"},  {"secforc", "*DATABASE_SECFORC"},
+        {"jntforc", "*DATABASE_JNTFORC"}, {"bndout",  "*DATABASE_BNDOUT"},
+        {"abstat",  "*DATABASE_ABSTAT"},  {"swforc",  "*DATABASE_SWFORC"},
+        {"ssstat",  "*DATABASE_SSSTAT"},  {"deforc",  "*DATABASE_DEFORC"},
+        {"disbout", "*DATABASE_DISBOUT"}, {"ncforc",  "*DATABASE_NCFORC"},
+        {"tprint",  "*DATABASE_TPRINT"},  {"massout", "*DATABASE_MASSOUT"},
+    };
+    static const std::pair<const char*, const char*> BINARY_KW[] = {
+        {"d3plot",  "*DATABASE_BINARY_D3PLOT"},
+        {"d3thdt",  "*DATABASE_BINARY_D3THDT"},
+        {"d3dump",  "*DATABASE_BINARY_D3DUMP"},
+        {"runrsf",  "*DATABASE_BINARY_RUNRSF"},
+        {"intfor",  "*DATABASE_BINARY_INTFOR"},
+        {"d3drlf",  "*DATABASE_BINARY_D3DRLF"},
+    };
+
+    std::ostringstream blk;
+    blk << "$\n$ === DATABASE OUTPUT CONTROL (KooRemapper) ===\n$\n";
+    char buf[128];
+    int inserted = 0;
+
+    for (const auto& [name, kw] : ASCII_KW) {
+        if (!enabledAscii.count(name)) continue;
+        std::string kwUp = kw;
+        for (auto& c : kwUp) c = (char)toupper((unsigned char)c);
+        if (existing.count(kwUp)) continue;
+        blk << kw << "\n";
+        blk << "$#        dt    binary      lcur     ioopt\n";
+        snprintf(buf, sizeof(buf), "%10.4g%10d%10d%10d\n", dt, 0, 0, 1);
+        blk << buf;
+        ++inserted;
+    }
+    for (const auto& [name, kw] : BINARY_KW) {
+        if (!enabledBinary.count(name)) continue;
+        std::string kwUp = kw;
+        for (auto& c : kwUp) c = (char)toupper((unsigned char)c);
+        if (existing.count(kwUp)) continue;
+        double interval = dt;
+        if (std::string(name) == "d3plot") interval = dtPlot;
+        else if (std::string(name) == "d3thdt") interval = dtThdt;
+        blk << kw << "\n";
+        blk << "$#        dt      lcdt      beam     npltc    psetid\n";
+        snprintf(buf, sizeof(buf), "%10.4g%10d%10d%10d%10d\n", interval, 0, 0, 0, 0);
+        blk << buf;
+        ++inserted;
+    }
+    if (extentBinary && !existing.count("*DATABASE_EXTENT_BINARY")) {
+        blk << "*DATABASE_EXTENT_BINARY\n";
+        blk << "$#   neiph     neips    maxint    strflg    sigflg    epsflg    rltflg    engflg\n";
+        snprintf(buf, sizeof(buf), "%10d%10d%10d%10d%10d%10d%10d%10d\n",
+                 op.neiph, 0, 3, op.strflg, op.sigflg, op.epsflg, 1, 1);
+        blk << buf;
+        blk << "$#  cmpflg    ieverp    beamip     dcomp      shge     stssz    n3thdt   ialemat\n";
+        blk << "         0         0         0         1         1         0         0         0\n";
+        ++inserted;
+    }
+    blk << "$\n$ === END DATABASE OUTPUT CONTROL ===\n$\n";
+
+    addedKeywordBlocks_.push_back(blk.str());
+
+    std::ostringstream msg;
+    msg << "[database] " << inserted << " keywords inserted (preset: "
+        << (op.preset.empty() ? "custom" : op.preset) << ")";
+    infoMessages.push_back(msg.str());
+    return true;
+}
+
+// ========== UPDATE: Apply node coordinates from dynain/k-file ==========
+
+bool ModelAssembler::applyUpdate(const UpdateOperation& op) {
+    std::ifstream f(op.dynainFile);
+    if (!f.is_open()) {
+        errorMessage_ = "update: cannot open dynain file: " + op.dynainFile;
+        return false;
+    }
+
+    // Parse *NODE block from dynain file
+    std::map<int, Vector3D> dynainNodes;
+    bool inNodeSection = false;
+    std::string line;
+
+    while (std::getline(f, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        std::string upper = line;
+        for (auto& c : upper) c = (char)toupper((unsigned char)c);
+        std::string trimmed = upper;
+        while (!trimmed.empty() && std::isspace((unsigned char)trimmed.front())) trimmed.erase(trimmed.begin());
+
+        // Detect keyword transitions
+        if (!trimmed.empty() && trimmed[0] == '*') {
+            if (trimmed.substr(0, 5) == "*NODE") {
+                inNodeSection = true;
+                continue;
+            } else {
+                inNodeSection = false;
+                // Don't break — there may be multiple *NODE blocks
+                continue;
+            }
+        }
+
+        if (!inNodeSection) continue;
+
+        // Skip comments
+        if (!trimmed.empty() && trimmed[0] == '$') continue;
+
+        // Parse node line: NID, X, Y, Z  (fixed 8 or 16-char fields, or free-format)
+        // Use same approach as KFileReader: try fixed-width first, fallback to free-format
+        int nid = 0;
+        double x = 0, y = 0, z = 0;
+
+        // Try to parse as space/comma-separated tokens
+        std::istringstream iss(line);
+        if (iss >> nid >> x >> y >> z) {
+            if (nid > 0) {
+                dynainNodes[nid] = Vector3D(x, y, z);
+            }
+        }
+    }
+    f.close();
+
+    if (dynainNodes.empty()) {
+        errorMessage_ = "update: no *NODE data found in " + op.dynainFile;
+        return false;
+    }
+
+    std::cout << "[INFO] Parsed " << dynainNodes.size() << " nodes from dynain\n";
+
+    // Update matching nodes
+    int updatedBase = 0;
+    int updatedAdded = 0;
+
+    // Build addedNodes index for fast lookup
+    std::map<int, size_t> addedNodeIdx;
+    for (size_t i = 0; i < addedNodes_.size(); ++i) {
+        addedNodeIdx[addedNodes_[i].id] = i;
+    }
+
+    for (const auto& [nid, pos] : dynainNodes) {
+        // Check addedNodes_ first (from prior operations)
+        auto ait = addedNodeIdx.find(nid);
+        if (ait != addedNodeIdx.end()) {
+            addedNodes_[ait->second].x = pos.x;
+            addedNodes_[ait->second].y = pos.y;
+            addedNodes_[ait->second].z = pos.z;
+            ++updatedAdded;
+            continue;
+        }
+
+        // Check base mesh nodes
+        const auto* node = baseMesh_.getNode(nid);
+        if (node) {
+            modifiedNodePositions_[nid] = pos;
+            ++updatedBase;
+        }
+        // Nodes not in model are silently skipped
+    }
+
+    int total = updatedBase + updatedAdded;
+    int skipped = (int)dynainNodes.size() - total;
+    std::cout << "[INFO] Updated " << total << " nodes ("
+              << updatedBase << " base + " << updatedAdded << " added)";
+    if (skipped > 0) {
+        std::cout << ", " << skipped << " not in model (skipped)";
+    }
+    std::cout << "\n";
+
+    std::ostringstream oss;
+    oss << "[update] " << total << "/" << dynainNodes.size() << " nodes updated from "
+        << op.dynainFile;
     infoMessages.push_back(oss.str());
 
     return true;

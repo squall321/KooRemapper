@@ -866,6 +866,154 @@ int runInfo(const std::string& meshFile, const ConsoleOutput& console) {
 /**
  * Generate variable density mesh from YAML config
  */
+int runGenerateBox(const std::string& yamlFile, ConsoleOutput& console) {
+    // Parse YAML
+    std::ifstream f(yamlFile);
+    if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
+
+    std::string configDir;
+    {
+        size_t sp = yamlFile.find_last_of("/\\");
+        if (sp != std::string::npos) configDir = yamlFile.substr(0, sp);
+    }
+
+    auto trim = [](const std::string& s) -> std::string {
+        size_t a = s.find_first_not_of(" \t\r\n\"'");
+        size_t b = s.find_last_not_of(" \t\r\n\"'");
+        return (a == std::string::npos) ? "" : s.substr(a, b - a + 1);
+    };
+    auto resolvePath = [&](const std::string& p) -> std::string {
+        if (p.find('/') != std::string::npos || p.find('\\') != std::string::npos)
+            return p;
+        return configDir.empty() ? p : configDir + "/" + p;
+    };
+
+    // Parameters with defaults
+    double lx = 100.0, ly = 20.0, lz = 20.0;
+    int nx = 4, ny = 4, nz = 2;
+    double rho = 7.85e-9, E = 210000.0, nu = 0.3;
+    int mid = 1, secid = 1, pid = 1;
+    std::string partTitle = "Box";
+    std::string outputPath;
+
+    std::string ln;
+    while (std::getline(f, ln)) {
+        if (!ln.empty() && ln.back() == '\r') ln.pop_back();
+        std::string tr = trim(ln);
+        if (tr.empty() || tr[0] == '#') continue;
+        size_t cp = tr.find(':');
+        if (cp == std::string::npos) continue;
+        std::string key = trim(tr.substr(0, cp));
+        std::string val = trim(tr.substr(cp + 1));
+
+        if      (key == "output")     outputPath = resolvePath(val);
+        else if (key == "lx")         { try { lx = std::stod(val); } catch (...) {} }
+        else if (key == "ly")         { try { ly = std::stod(val); } catch (...) {} }
+        else if (key == "lz")         { try { lz = std::stod(val); } catch (...) {} }
+        else if (key == "nx")         { try { nx = std::stoi(val); } catch (...) {} }
+        else if (key == "ny")         { try { ny = std::stoi(val); } catch (...) {} }
+        else if (key == "nz")         { try { nz = std::stoi(val); } catch (...) {} }
+        else if (key == "rho")        { try { rho = std::stod(val); } catch (...) {} }
+        else if (key == "E")          { try { E   = std::stod(val); } catch (...) {} }
+        else if (key == "nu")         { try { nu  = std::stod(val); } catch (...) {} }
+        else if (key == "mid")        { try { mid   = std::stoi(val); } catch (...) {} }
+        else if (key == "secid")      { try { secid = std::stoi(val); } catch (...) {} }
+        else if (key == "pid")        { try { pid   = std::stoi(val); } catch (...) {} }
+        else if (key == "part_title") partTitle = val;
+    }
+    f.close();
+
+    if (outputPath.empty()) { console.error("[box] output not specified"); return 1; }
+    if (nx < 1 || ny < 1 || nz < 1) { console.error("[box] nx/ny/nz must be >= 1"); return 1; }
+
+    // Ensure .k extension
+    if (outputPath.size() < 2 || outputPath.substr(outputPath.size() - 2) != ".k")
+        outputPath += ".k";
+
+    int npx = nx + 1, npy = ny + 1, npz = nz + 1;
+    int nodeCount = npx * npy * npz;
+    int elemCount = nx * ny * nz;
+
+    // Node index: (ix, iy, iz) → NID (1-based)
+    auto nid = [&](int ix, int iy, int iz) -> int {
+        return iz * (npx * npy) + iy * npx + ix + 1;
+    };
+
+    std::ofstream out(outputPath);
+    if (!out.is_open()) { console.error("[box] Cannot write: " + outputPath); return 1; }
+
+    out << "*KEYWORD\n";
+    out << "$\n$ Box mesh: " << lx << "x" << ly << "x" << lz
+        << " mm, " << nx << "x" << ny << "x" << nz << " elements\n$\n";
+
+    // MAT_ELASTIC
+    char buf[128];
+    out << "*MAT_ELASTIC\n";
+    out << "$#     mid        ro         e        pr\n";
+    snprintf(buf, sizeof(buf), "%10d%10.4g%10.4g%10.4g\n", mid, rho, E, nu);
+    out << buf;
+
+    // SECTION_SOLID
+    out << "*SECTION_SOLID\n";
+    out << "$#   secid    elform\n";
+    snprintf(buf, sizeof(buf), "%10d%10d\n", secid, 1);
+    out << buf;
+
+    // PART
+    out << "*PART\n";
+    out << partTitle << "\n";
+    out << "$#     pid     secid       mid\n";
+    snprintf(buf, sizeof(buf), "%10d%10d%10d\n", pid, secid, mid);
+    out << buf;
+
+    // NODE
+    out << "*NODE\n";
+    out << "$#   nid               x               y               z\n";
+    for (int iz = 0; iz < npz; ++iz) {
+        double z = lz * iz / nz;
+        for (int iy = 0; iy < npy; ++iy) {
+            double y = ly * iy / ny;
+            for (int ix = 0; ix < npx; ++ix) {
+                double x = lx * ix / nx;
+                snprintf(buf, sizeof(buf), "%8d%16.9e%16.9e%16.9e\n",
+                         nid(ix, iy, iz), x, y, z);
+                out << buf;
+            }
+        }
+    }
+
+    // ELEMENT_SOLID (HEX8)
+    out << "*ELEMENT_SOLID\n";
+    out << "$#   eid     pid      n1      n2      n3      n4      n5      n6      n7      n8\n";
+    int eid = 1;
+    for (int iz = 0; iz < nz; ++iz) {
+        for (int iy = 0; iy < ny; ++iy) {
+            for (int ix = 0; ix < nx; ++ix) {
+                // HEX8 node ordering: bottom face (CCW from outside) then top face
+                int n1 = nid(ix,   iy,   iz);
+                int n2 = nid(ix+1, iy,   iz);
+                int n3 = nid(ix+1, iy+1, iz);
+                int n4 = nid(ix,   iy+1, iz);
+                int n5 = nid(ix,   iy,   iz+1);
+                int n6 = nid(ix+1, iy,   iz+1);
+                int n7 = nid(ix+1, iy+1, iz+1);
+                int n8 = nid(ix,   iy+1, iz+1);
+                snprintf(buf, sizeof(buf),
+                         "%8d%8d%8d%8d%8d%8d%8d%8d%8d%8d\n",
+                         eid++, pid, n1, n2, n3, n4, n5, n6, n7, n8);
+                out << buf;
+            }
+        }
+    }
+
+    out << "*END\n";
+    out.close();
+
+    console.success("[box] " + std::to_string(nodeCount) + " nodes, "
+                    + std::to_string(elemCount) + " elements → " + outputPath);
+    return 0;
+}
+
 int runGenerateVar(const std::string& configFile, const std::string& outputFile,
                    const std::string& refFile, bool noScale,
                    const ConsoleOutput& console) {
@@ -1494,18 +1642,22 @@ int runAssemble(const std::string& configFile, const ConsoleOutput& console) {
         outputPrefix = configDir + "/" + outputPrefix;
     }
 
-    // 2. Load base model
-    console.info("Loading base model: " + baseModelPath);
+    // 2. Load base model (skip if first op is 'generate')
     ModelAssembler assembler;
     assembler.setDynamicRelaxation(config.dynamicRelaxation);
     assembler.setDynainEmbed(config.dynainEmbed);
-    if (!assembler.loadBaseModel(baseModelPath)) {
-        console.error(assembler.getErrorMessage());
-        return 1;
+    bool firstIsGenerate = !config.operations.empty() &&
+                           config.operations[0].type == AssemblyOperation::GENERATE;
+    if (!firstIsGenerate) {
+        console.info("Loading base model: " + baseModelPath);
+        if (!assembler.loadBaseModel(baseModelPath)) {
+            console.error(assembler.getErrorMessage());
+            return 1;
+        }
+        console.success("Loaded " + std::to_string(assembler.getNodeCount()) + " nodes, " +
+                       std::to_string(assembler.getElementCount()) + " elements, " +
+                       std::to_string(assembler.getPartCount()) + " parts");
     }
-    console.success("Loaded " + std::to_string(assembler.getNodeCount()) + " nodes, " +
-                   std::to_string(assembler.getElementCount()) + " elements, " +
-                   std::to_string(assembler.getPartCount()) + " parts");
 
     // Determine material
     double matE = config.E;
@@ -1560,6 +1712,21 @@ int runAssemble(const std::string& configFile, const ConsoleOutput& console) {
             ok = assembler.applyRbe(op.rbe);
         } else if (op.type == AssemblyOperation::WRAP) {
             ok = assembler.applyWrap(op.wrap, matE, matNu);
+        } else if (op.type == AssemblyOperation::UPDATE) {
+            // Resolve dynain path relative to config directory
+            UpdateOperation updateOp = op.update;
+            if (!updateOp.dynainFile.empty() &&
+                updateOp.dynainFile.find('/') == std::string::npos &&
+                updateOp.dynainFile.find('\\') == std::string::npos) {
+                updateOp.dynainFile = configDir + "/" + updateOp.dynainFile;
+            }
+            ok = assembler.applyUpdate(updateOp);
+        } else if (op.type == AssemblyOperation::DATABASE) {
+            ok = assembler.applyDatabase(op.database);
+        } else if (op.type == AssemblyOperation::CONTROL) {
+            ok = assembler.applyControl(op.control);
+        } else if (op.type == AssemblyOperation::GENERATE) {
+            ok = assembler.applyGenerate(op.generate);
         }
 
         if (!ok) {
@@ -5617,6 +5784,59 @@ int runWrap(const std::string& yamlFile, ConsoleOutput& console) {
         console.error(assembler.getErrorMessage()); return 1;
     }
     console.success("Wrap output: " + y.getOutputPrefix() + ".k");
+    return 0;
+}
+
+// ── Standalone update ───────────────────────────────────────────────────────
+int runUpdate(const std::string& yamlFile, ConsoleOutput& console) {
+    using namespace KooRemapper;
+    StandaloneYamlBase y;
+    y.resolveFiles(yamlFile);
+
+    UpdateOperation op;
+
+    std::ifstream f(yamlFile);
+    if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
+    std::string ln;
+    while (std::getline(f, ln)) {
+        std::string tr = y.trim(ln);
+        if (tr.empty() || tr[0] == '#') continue;
+        size_t cp = tr.find(':');
+        if (cp == std::string::npos) continue;
+        std::string key = y.trim(tr.substr(0, cp));
+        std::string val = y.stripQuotes(y.trim(tr.substr(cp + 1)));
+
+        y.parseCommonKey(key, val);
+
+        if (key == "dynain") {
+            op.dynainFile = val;
+        }
+    }
+    f.close();
+
+    if (y.modelFile.empty()) { console.error("[update] model not specified"); return 1; }
+    if (op.dynainFile.empty()) { console.error("[update] dynain not specified"); return 1; }
+
+    // Resolve paths
+    std::string modelPath = y.resolvePath(y.modelFile);
+    op.dynainFile = y.resolvePath(op.dynainFile);
+    std::string outputPrefix = y.getOutputPrefix();
+
+    console.println("[update] Model: " + modelPath);
+    console.println("[update] Dynain: " + op.dynainFile);
+
+    ModelAssembler assembler;
+    if (!assembler.loadBaseModel(modelPath)) {
+        console.error(assembler.getErrorMessage()); return 1;
+    }
+    if (!assembler.applyUpdate(op)) {
+        console.error(assembler.getErrorMessage()); return 1;
+    }
+    for (auto& msg : assembler.infoMessages) console.info(msg);
+    if (!assembler.writeOutput(outputPrefix)) {
+        console.error(assembler.getErrorMessage()); return 1;
+    }
+    console.success("Update output: " + outputPrefix + ".k");
     return 0;
 }
 
@@ -10221,8 +10441,12 @@ int main(int argc, char* argv[]) {
                 console.println("Use --single for debugging or when OpenMP is not available.");
             } else if (helpCmd == "generate") {
                 console.println("Usage: KooRemapper generate [options] <type> <output_prefix>");
+                console.println("       KooRemapper generate box <config.yaml>");
                 std::cout << "\n";
                 console.println("Generate example meshes for testing.");
+                std::cout << "\n";
+                console.println("Sub-commands:");
+                console.println("  box <config.yaml>  Generate a box (rectangular solid) mesh from YAML");
                 std::cout << "\n";
                 console.println("Arguments:");
                 console.println("  type           Mesh type:");
@@ -10235,6 +10459,22 @@ int main(int argc, char* argv[]) {
                 console.println("  --dim-i <n>    Number of elements in I direction (default: 10)");
                 console.println("  --dim-j <n>    Number of elements in J direction (default: 5)");
                 console.println("  --dim-k <n>    Number of elements in K direction (default: 5)");
+                std::cout << "\n";
+                console.println("Box YAML parameters:");
+                console.println("  output: box.k      # output file path");
+                console.println("  lx: 100.0          # length X [mm]");
+                console.println("  ly: 20.0           # length Y [mm]");
+                console.println("  lz: 5.0            # length Z [mm]");
+                console.println("  nx: 10             # elements in X");
+                console.println("  ny: 4              # elements in Y");
+                console.println("  nz: 1              # elements in Z");
+                console.println("  rho: 7.85e-9       # density [t/mm3]");
+                console.println("  E: 210000.0        # Young's modulus [MPa]");
+                console.println("  nu: 0.3            # Poisson's ratio");
+                console.println("  mid: 1             # material ID");
+                console.println("  secid: 1           # section ID");
+                console.println("  pid: 1             # part ID");
+                console.println("  part_title: Box    # part title");
             } else if (helpCmd == "strain") {
                 console.println("Usage: KooRemapper strain [options] <ref_mesh> <def_mesh> <output.csv>");
                 std::cout << "\n";
@@ -10471,7 +10711,7 @@ int main(int argc, char* argv[]) {
                 console.println("  offset       Extrude surface elements to solid layer(s)");
                 console.println("    source_pid: 3");
                 console.println("    thickness: 1.0");
-                console.println("    offset_direction: +normal  # +normal/-normal/+x/-x/+y/-y/+z/-z");
+                console.println("    offset_direction: +normal  # +normal/-normal/both/+x/-x/+y/-y/+z/-z");
                 console.println("    num_layers: 1");
                 console.println("    connection_mode: tied      # tied / czm / contact");
                 console.println("    use_local_normals: true    # Per-node normal averaging");
@@ -11013,6 +11253,27 @@ int main(int argc, char* argv[]) {
                 console.println("  nodfor rwforc secforc jntforc bndout abstat swforc ssstat");
                 console.println("  deforc disbout ncforc tprint massout");
                 console.println("Binary keywords: d3plot d3thdt d3dump runrsf intfor d3drlf");
+            } else if (helpCmd == "update") {
+                console.println("Usage: KooRemapper update <config.yaml>");
+                std::cout << "\n";
+                console.println("Update node coordinates from a dynain or K-file.");
+                console.println("Reads *NODE block from the source file and overwrites matching");
+                console.println("node positions in the model. Unmatched nodes are left unchanged.");
+                std::cout << "\n";
+                console.println("YAML Config Format:");
+                console.println("  model:  original.k");
+                console.println("  output: updated.k");
+                console.println("  dynain: dr_result.dynain   # Any file with *NODE block");
+                std::cout << "\n";
+                console.println("Assemble operation:");
+                console.println("  - type: update");
+                console.println("    dynain: dr_result.dynain");
+                std::cout << "\n";
+                console.println("Notes:");
+                console.println("  - Only nodes present in both model and dynain are updated");
+                console.println("  - Nodes in dynain but not in model are silently skipped");
+                console.println("  - Works with any file containing *NODE (dynain, K-file, etc.)");
+                console.println("  - Can be chained with other assemble operations");
             } else {
                 console.error("Unknown command: " + helpCmd);
                 return 1;
@@ -11057,6 +11318,7 @@ int main(int argc, char* argv[]) {
             console.println("  warpage      Apply warpage deflection to shell/solid parts");
             console.println("  offset       Extrude surface elements to solid layer(s)");
             console.println("  wrap         Apply winding tension prestress (hoop + radial)");
+            console.println("  update       Update node coordinates from dynain/k-file");
             console.println("  info         Display information about a mesh file");
             console.println("  help         Show help for a command");
             console.println("  version      Show version information");
@@ -11132,6 +11394,16 @@ int main(int argc, char* argv[]) {
 
     // Generate command
     if (command == "generate") {
+        // Sub-command: generate box <yaml>
+        if (argc >= 3 && std::string(argv[2]) == "box") {
+            if (argc < 4) {
+                console.error("Usage: KooRemapper generate box <config.yaml>");
+                return 1;
+            }
+            printBanner(console);
+            return runGenerateBox(argv[3], console);
+        }
+
         ArgumentParser parser("KooRemapper generate", "Generate example meshes");
         parser.addPositional("type", "Mesh type: teardrop, arc, scurve, helix");
         parser.addPositional("output_prefix", "Prefix for output files");
@@ -11594,6 +11866,16 @@ int main(int argc, char* argv[]) {
         }
         printBanner(console);
         return runWrap(argv[2], console);
+    }
+
+    // Update command
+    if (command == "update") {
+        if (argc < 3) {
+            console.error("Usage: KooRemapper update <config.yaml>");
+            return 1;
+        }
+        printBanner(console);
+        return runUpdate(argv[2], console);
     }
 
     // Unknown command

@@ -321,8 +321,58 @@ struct WrapOperation {
     double tension = 0.0;            // wrapping tension [N/mm] (force per unit width)
 };
 
+struct GenerateOperation {
+    std::string shape = "box";       // box (only shape currently)
+    double lx = 100.0, ly = 20.0, lz = 10.0;   // dimensions [mm]
+    int    nx = 10, ny = 4, nz = 2;             // element counts
+    double rho = 7.85e-9, E = 210000.0, nu = 0.3;
+    int    mid = 1, secid = 1, pid = 1;
+    std::string partTitle = "Box";
+};
+
+struct UpdateOperation {
+    std::string dynainFile;          // dynain file with *NODE coordinates
+};
+
+struct ControlOperation {
+    // *CONTROL_TERMINATION
+    double endtime = 0.0;     // 0 = skip
+
+    // *CONTROL_TIMESTEP
+    double tssfac = 0.0;      // 0 = skip
+    double dt2ms  = 0.0;      // 0 = skip (negative value = mass scaling on)
+    bool   setDt2ms = false;
+
+    // *CONTROL_ENERGY  (inserted if any field != 0)
+    int hgen   = 0;           // 0=skip, 1=off, 2=on
+    int rwen   = 0;
+    int slnten = 0;
+    int rylen  = 0;
+
+    // *CONTROL_HOURGLASS  (inserted if ihq != 0)
+    int    ihq = 0;           // hourglass type (1-10, 0=skip)
+    double qh  = 0.1;
+
+    // *CONTROL_BULK_VISCOSITY  (inserted if q1 or q2 != 0)
+    double q1       = 0.0;
+    double q2       = 0.0;
+    int    bulkType = 0;      // 0 = standard
+};
+
+struct DatabaseOperation {
+    std::string preset;              // all/drop/crash/static/thermal/forming/modal/minimal
+    double dt = 0.001;              // ASCII output interval
+    double dtPlot = 0.0;            // d3plot interval (0 = dt*10)
+    double dtThdt = 0.0;            // d3thdt interval (0 = dt)
+    // Individual toggles (used when preset is empty)
+    std::vector<std::string> enabledAscii;
+    std::vector<std::string> enabledBinary;
+    bool extentBinary = false;
+    int neiph = 6, strflg = 1, sigflg = 1, epsflg = 1;
+};
+
 struct AssemblyOperation {
-    enum Type { REPLACE, SQUEEZE, RESTACK, BEND, INDENT, FORMSTRAIN, TET10_CONVERT, REFINE, ELFORM, DISCONNECT, IGA, WARPAGE, OFFSET, MATSWAP, MATDB, LOAD, CONTACT, BOUNDARY, RBE, WRAP };
+    enum Type { REPLACE, SQUEEZE, RESTACK, BEND, INDENT, FORMSTRAIN, TET10_CONVERT, REFINE, ELFORM, DISCONNECT, IGA, WARPAGE, OFFSET, MATSWAP, MATDB, LOAD, CONTACT, BOUNDARY, RBE, WRAP, UPDATE, DATABASE, CONTROL, GENERATE };
     Type type;
     ReplaceOperation replace;
     SqueezeOperation squeeze;
@@ -344,6 +394,10 @@ struct AssemblyOperation {
     BoundaryOperation boundary;
     RbeOperation rbe;
     WrapOperation wrap;
+    GenerateOperation generate;
+    UpdateOperation update;
+    DatabaseOperation database;
+    ControlOperation control;
 };
 
 struct AssemblyConfig {

@@ -1,0 +1,52 @@
+# Al-Cu 2-layer explicit crash analysis example
+# Single YAML: generate → restack → control → database
+# KooRemapper assemble examples/assemble/al_cu_explicit.yaml
+
+output: al_cu_result
+
+operations:
+  - type: generate
+    shape: box
+    lx: 100.0
+    ly: 20.0
+    lz: 10.0
+    nx: 10
+    ny: 4
+    nz: 2
+    rho: 7.85e-9
+    E: 210000.0
+    nu: 0.3
+    pid: 1
+    secid: 1
+    mid: 1
+    part_title: Base Box
+
+  - type: restack
+    target_pid: 1
+    direction: z
+    element_type: solid
+    layers:
+      - thickness: 5.0
+        material_card: |
+          *MAT_ELASTIC
+          $#     mid        ro         e        pr        da        db  not used
+                   2  2.70E-09   68900.0      0.33       0.0       0.0       0.0
+      - thickness: 5.0
+        material_card: |
+          *MAT_ELASTIC
+          $#     mid        ro         e        pr        da        db  not used
+                   3  8.96E-09  117000.0      0.34       0.0       0.0       0.0
+
+  - type: control
+    endtime: 0.001      # 1ms termination
+    tssfac: 0.9         # timestep safety factor
+    energy: true        # CONTROL_ENERGY: hgen=2, rwen=2, slnten=1, rylen=1
+    ihq: 4              # CONTROL_HOURGLASS: stiffness-based (IHQ=4)
+    qh: 0.05
+    q1: 1.5             # CONTROL_BULK_VISCOSITY: standard explicit
+    q2: 0.06
+
+  - type: database
+    preset: crash
+    dt: 0.0001          # 0.1ms ASCII output
+    dt_plot: 0.001      # 1ms d3plot

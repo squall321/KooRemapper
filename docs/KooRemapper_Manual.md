@@ -1,6 +1,6 @@
 # KooRemapper 기능 설명서
 
-> **버전 1.1.0** | LS-DYNA 메시 전처리 도구
+> **버전 1.2.0** | LS-DYNA 메시 전처리 도구
 > 빌드: `cmake --build build --config Release`
 > 실행: `KooRemapper.exe <command> [options] ...`
 
@@ -51,26 +51,27 @@
 34. [optimize — 재료별 해석 최적화](#34-optimize--재료별-해석-최적화)
 35. [ale — ALE 변환](#35-ale--ale-변환)
 36. [stabilize — Explicit 솔버 안정화](#36-stabilize--explicit-솔버-안정화)
-37. [키워드 제거(strip) 기능](#37-키워드-제거strip-기능)
-38. [assemble — 통합 어셈블리](#38-assemble--통합-어셈블리)
-    - 38.1 [replace](#381-replace--상세-메시-교체)
-    - 38.2 [squeeze (assemble 내)](#382-squeeze-assemble-내)
-    - 38.3 [restack](#383-restack--레이어-재적층)
-    - 38.4 [bend](#384-bend--굽힘-변형--초기-응력)
-    - 38.5 [indent](#385-indent--압입--엠보싱)
-    - 38.6 [formstrain](#386-formstrain--성형-소성-변형률)
-    - 38.7 [tet10 / hex20 / quad8 / tria6](#387-tet10--hex20--quad8--tria6--2차-요소-변환)
-    - 38.8 [refine](#388-refine--메시-세분화)
-    - 38.9 [elform](#389-elform--요소-공식-변경)
-    - 38.10 [disconnect](#3810-disconnect--노드-분리)
-    - 38.11 [iga](#3811-iga--등기하해석-nurbs-박스-생성)
-    - 38.12 [warpage](#3812-warpage--워피지-보정)
-    - 38.13 [offset](#3813-offset--셸-오프셋-솔리드-생성)
-    - 38.14 [matswap](#3814-matswap--재료-번들-교체)
-    - 38.15 [matdb](#3815-matdb--재료-db-교체)
-    - 38.16 [wrap](#3816-wrap--와인딩-인장-프리스트레스)
-39. [수학 이론](#39-수학-이론)
-40. [출력 파일 형식](#40-출력-파일-형식)
+37. [database — DATABASE 출력 제어](#37-database--database-출력-제어)
+38. [키워드 제거(strip) 기능](#38-키워드-제거strip-기능)
+39. [assemble — 통합 어셈블리](#39-assemble--통합-어셈블리)
+    - 39.1 [replace](#391-replace--상세-메시-교체)
+    - 39.2 [squeeze (assemble 내)](#392-squeeze-assemble-내)
+    - 39.3 [restack](#393-restack--레이어-재적층)
+    - 39.4 [bend](#394-bend--굽힘-변형--초기-응력)
+    - 39.5 [indent](#395-indent--압입--엠보싱)
+    - 39.6 [formstrain](#396-formstrain--성형-소성-변형률)
+    - 39.7 [tet10 / hex20 / quad8 / tria6](#397-tet10--hex20--quad8--tria6--2차-요소-변환)
+    - 39.8 [refine](#398-refine--메시-세분화)
+    - 39.9 [elform](#399-elform--요소-공식-변경)
+    - 39.10 [disconnect](#3910-disconnect--노드-분리)
+    - 39.11 [iga](#3911-iga--등기하해석-nurbs-박스-생성)
+    - 39.12 [warpage](#3912-warpage--워피지-보정)
+    - 39.13 [offset](#3913-offset--셸-오프셋-솔리드-생성)
+    - 39.14 [matswap](#3914-matswap--재료-번들-교체)
+    - 39.15 [matdb](#3915-matdb--재료-db-교체)
+    - 39.16 [wrap](#3916-wrap--와인딩-인장-프리스트레스)
+40. [수학 이론](#40-수학-이론)
+41. [출력 파일 형식](#41-출력-파일-형식)
 
 ---
 
@@ -97,6 +98,7 @@ KooRemapper는 LS-DYNA FEA 해석을 위한 **메시 전처리 도구**입니다
 | **재료 관리** | 재료 번들 교체(matswap), 재료 DB 교체(matdb) |
 | **메시 생성** | 변밀도 메시 생성(generate-var) |
 | **해석 설정** | Implicit/Modal/DR/ALE/Stabilize 변환 |
+| **출력 관리** | DATABASE 출력 제어 키워드 삽입 (8종 프리셋) |
 
 ---
 
@@ -172,6 +174,7 @@ Commands:
   optimize       재료별 해석 최적화
   ale            ALE(Arbitrary Lagrangian-Eulerian) 변환
   stabilize      Explicit 솔버 안정화 (12단계)
+  database       DATABASE 출력 제어 키워드 삽입
 
   # 통합 실행
   assemble       다중 오퍼레이션 통합 어셈블리
@@ -321,11 +324,16 @@ KooRemapper.exe squeeze <mesh.k> <config.yaml> <output_prefix>
 ### YAML 설정
 
 ```yaml
+# 방법 1: 직접 변형률 지정 (노드 이동 + dynain)
 parts:
   - pid: 3
     eps_x: -0.02    # x방향 2% 압축
     eps_y: -0.02
     eps_z:  0.0
+
+# 방법 2: 등방 팽창(swelling) — 열팽창 카드 삽입
+  - pid: 5
+    swelling: 0.01  # 1% 등방 팽창
 
 material:           # 전역 재료 (K-파일 재료 없을 때)
   E: 210000
@@ -334,7 +342,7 @@ material:           # 전역 재료 (K-파일 재료 없을 때)
 
 ### 동작 원리
 
-파트 바운딩 박스 중심 $\mathbf{c}$에 대해 각 노드 위치:
+**방법 1 (eps_x/y/z):** 파트 바운딩 박스 중심 $\mathbf{c}$에 대해 각 노드 위치:
 
 $$\mathbf{x}' = \mathbf{c} + \begin{pmatrix} 1+\varepsilon_x & 0 & 0 \\ 0 & 1+\varepsilon_y & 0 \\ 0 & 0 & 1+\varepsilon_z \end{pmatrix} (\mathbf{x} - \mathbf{c})$$
 
@@ -342,9 +350,17 @@ $$\mathbf{x}' = \mathbf{c} + \begin{pmatrix} 1+\varepsilon_x & 0 & 0 \\ 0 & 1+\v
 
 $$\sigma_{xx} = -(\lambda + 2\mu)\varepsilon_x - \lambda(\varepsilon_y + \varepsilon_z)$$
 
+**방법 2 (swelling):** 노드를 이동하지 않고 LS-DYNA 열팽창 카드를 삽입합니다.
+- `*MAT_ADD_THERMAL_EXPANSION` (LCID=0, 등방 ALPHA = swelling)
+- `*INITIAL_TEMPERATURE` (모든 노드, T=1.0)
+- `*LOAD_THERMAL_VARIABLE` (LCID=온도 커브 ID)
+- 해석 시 LS-DYNA가 자동으로 열팽창을 적용
+
+swelling 파트는 dynain에 포함되지 않습니다.
+
 ### 출력
-- `<prefix>.k`: 압축된 메시
-- `<prefix>_dynain.dat`: `*INITIAL_STRESS_SOLID`
+- `<prefix>.k`: 압축된 메시 + 열팽창 카드 (swelling 파트)
+- `<prefix>_dynain.dat`: `*INITIAL_STRESS_SOLID` (eps 파트만)
 
 ---
 
@@ -1938,7 +1954,76 @@ level: 6               # 1 ~ 12
 
 ---
 
-## 37. 키워드 제거(strip) 기능
+## 37. database — DATABASE 출력 제어
+
+### 용도
+
+LS-DYNA K-파일에 `*DATABASE_*` 출력 제어 키워드를 자동 삽입합니다.
+프리셋 또는 개별 키워드 토글 방식을 지원하며, 기존 키워드는 자동으로 건너뜁니다.
+
+### 사용법
+
+```bash
+KooRemapper.exe database <config.yaml>
+```
+
+### YAML 형식 (프리셋)
+
+```yaml
+model:  model.k
+output: model_db.k
+preset: drop           # all/drop/crash/static/thermal/forming/modal/minimal
+dt:     0.001          # ASCII 출력 간격 (기본 0.001)
+dt_plot: 0.01          # D3PLOT 간격 (기본 dt×10)
+```
+
+### YAML 형식 (개별 지정)
+
+```yaml
+model:  model.k
+output: model_db.k
+ascii:
+  glstat: true
+  matsum: true
+  nodout: true
+  rcforc: true
+binary:
+  d3plot: true
+  d3thdt: true
+extent:
+  neiph: 6             # 추가 적분점 히스토리 변수
+  strflg: 1            # 변형률 텐서 출력
+  sigflg: 1            # 응력 텐서 출력
+  epsflg: 1            # 유효 소성 변형률 출력
+```
+
+### 프리셋 (8종)
+
+| 프리셋 | ASCII 키워드 | Binary | EXTENT |
+|--------|-------------|--------|--------|
+| `all` | 20종 전체 (glstat~massout) | d3plot, d3thdt, d3dump, runrsf | O |
+| `drop` | glstat, matsum, nodout, elout, rcforc, sleout, spcforc, rwforc, nodfor, secforc, bndout, ncforc | d3plot, d3thdt, d3dump | O |
+| `crash` | glstat, matsum, nodout, elout, rcforc, sleout, spcforc, rwforc, nodfor, secforc, swforc, ncforc, abstat | d3plot, d3thdt, d3dump | O |
+| `static` | glstat, matsum, nodout, elout, spcforc, nodfor, bndout, secforc | d3plot, d3thdt | O |
+| `thermal` | glstat, matsum, nodout, elout, spcforc, tprint, bndout | d3plot, d3thdt | O |
+| `forming` | glstat, matsum, nodout, elout, rcforc, sleout, spcforc, nodfor, secforc, ncforc, swforc | d3plot, d3thdt, d3dump | O |
+| `modal` | glstat, matsum, nodout, elout, spcforc | d3plot | X |
+| `minimal` | glstat, matsum | d3plot | X |
+
+### 지원 키워드
+
+**ASCII (20종):** glstat, matsum, nodout, elout, rcforc, sleout, spcforc, nodfor, rwforc, secforc, jntforc, bndout, abstat, swforc, ssstat, deforc, disbout, ncforc, tprint, massout
+
+**Binary (6종):** d3plot, d3thdt, d3dump, runrsf, intfor, d3drlf
+
+### 동작
+- 기존 `*DATABASE_*` 키워드를 스캔하여 중복 건너뛰기 (`[SKIP]` 표시)
+- `*END` 직전에 출력 블록 삽입
+- 프리셋 미지정 + 개별 미지정 시 `all` 프리셋 자동 적용
+
+---
+
+## 38. 키워드 제거(strip) 기능
 
 ### 개요
 
@@ -1964,7 +2049,7 @@ level: 6               # 1 ~ 12
 
 ---
 
-## 38. assemble — 통합 어셈블리
+## 39. assemble — 통합 어셈블리
 
 ### 개요
 
@@ -2002,7 +2087,7 @@ operations:
 
 ---
 
-### 38.1 replace — 상세 메시 교체
+### 39.1 replace — 상세 메시 교체
 
 ```yaml
 - type: replace
@@ -2016,7 +2101,7 @@ operations:
 
 ---
 
-### 38.2 squeeze (assemble 내)
+### 39.2 squeeze (assemble 내)
 
 ```yaml
 - type: squeeze
@@ -2030,7 +2115,7 @@ operations:
 
 ---
 
-### 38.3 restack — 레이어 재적층
+### 39.3 restack — 레이어 재적층
 
 ```yaml
 - type: restack
@@ -2052,7 +2137,7 @@ operations:
 
 ---
 
-### 38.4 bend — 굽힘 변형 + 초기 응력
+### 39.4 bend — 굽힘 변형 + 초기 응력
 
 ```yaml
 - type: bend
@@ -2067,7 +2152,7 @@ operations:
 
 ---
 
-### 38.5 indent — 압입 / 엠보싱
+### 39.5 indent — 압입 / 엠보싱
 
 ```yaml
 - type: indent
@@ -2091,7 +2176,7 @@ operations:
 
 ---
 
-### 38.6 formstrain — 성형 소성 변형률
+### 39.6 formstrain — 성형 소성 변형률
 
 ```yaml
 - type: formstrain
@@ -2104,7 +2189,7 @@ operations:
 
 ---
 
-### 38.7 tet10 / hex20 / quad8 / tria6 — 2차 요소 변환
+### 39.7 tet10 / hex20 / quad8 / tria6 — 2차 요소 변환
 
 ```yaml
 - type: tet10       # tet10 | hex20 | quad8 | tria6
@@ -2116,7 +2201,7 @@ operations:
 
 ---
 
-### 38.8 refine — 메시 세분화
+### 39.8 refine — 메시 세분화
 
 ```yaml
 - type: refine
@@ -2128,7 +2213,7 @@ operations:
 
 ---
 
-### 38.9 elform — 요소 공식 변경
+### 39.9 elform — 요소 공식 변경
 
 ```yaml
 - type: elform
@@ -2140,7 +2225,7 @@ operations:
 
 ---
 
-### 38.10 disconnect — 노드 분리
+### 39.10 disconnect — 노드 분리
 
 ```yaml
 - type: disconnect
@@ -2152,7 +2237,7 @@ operations:
 
 ---
 
-### 38.11 iga — 등기하해석 NURBS 박스 생성
+### 39.11 iga — 등기하해석 NURBS 박스 생성
 
 ```yaml
 - type: iga
@@ -2166,7 +2251,7 @@ operations:
 
 ---
 
-### 38.12 warpage — 워피지 보정
+### 39.12 warpage — 워피지 보정
 
 ```yaml
 - type: warpage
@@ -2182,7 +2267,7 @@ operations:
 
 ---
 
-### 38.13 offset — 셸 오프셋 솔리드 생성
+### 39.13 offset — 셸 오프셋 솔리드 생성
 
 ```yaml
 - type: offset
@@ -2197,7 +2282,7 @@ operations:
 
 ---
 
-### 38.14 matswap — 재료 번들 교체
+### 39.14 matswap — 재료 번들 교체
 
 ```yaml
 - type: matswap
@@ -2209,7 +2294,7 @@ operations:
 
 ---
 
-### 38.15 matdb — 재료 DB 교체
+### 39.15 matdb — 재료 DB 교체
 
 ```yaml
 - type: matdb
@@ -2222,7 +2307,7 @@ operations:
 
 ---
 
-### 38.16 wrap — 와인딩 인장 프리스트레스
+### 39.16 wrap — 와인딩 인장 프리스트레스
 
 ```yaml
 - type: wrap
@@ -2236,9 +2321,9 @@ operations:
 
 ---
 
-## 39. 수학 이론
+## 40. 수학 이론
 
-### 39.1 등매개변수 매핑 (map)
+### 40.1 등매개변수 매핑 (map)
 
 HEX8 요소의 자연 좌표계 (ξ, η, ζ) ∈ [-1, 1]³:
 
@@ -2252,7 +2337,7 @@ $$\begin{pmatrix} \Delta\xi \\ \Delta\eta \\ \Delta\zeta \end{pmatrix} = \mathbf
 
 $$J_{ij} = \frac{\partial x_i}{\partial \xi_j} = \sum_{k=1}^{8} \frac{\partial N_k}{\partial \xi_j} x_{ki}$$
 
-### 39.2 선형 탄성 재료 모델
+### 40.2 선형 탄성 재료 모델
 
 라메 상수:
 
@@ -2262,7 +2347,7 @@ $$\lambda = \frac{E\nu}{(1+\nu)(1-2\nu)}, \quad \mu = G = \frac{E}{2(1+\nu)}$$
 
 $$\begin{pmatrix} \sigma_{xx} \\ \sigma_{yy} \\ \sigma_{zz} \\ \sigma_{xy} \\ \sigma_{yz} \\ \sigma_{xz} \end{pmatrix} = \begin{pmatrix} \lambda+2\mu & \lambda & \lambda & 0 & 0 & 0 \\ \lambda & \lambda+2\mu & \lambda & 0 & 0 & 0 \\ \lambda & \lambda & \lambda+2\mu & 0 & 0 & 0 \\ 0 & 0 & 0 & \mu & 0 & 0 \\ 0 & 0 & 0 & 0 & \mu & 0 \\ 0 & 0 & 0 & 0 & 0 & \mu \end{pmatrix} \begin{pmatrix} \varepsilon_{xx} \\ \varepsilon_{yy} \\ \varepsilon_{zz} \\ 2\varepsilon_{xy} \\ 2\varepsilon_{yz} \\ 2\varepsilon_{xz} \end{pmatrix}$$
 
-### 39.3 Kirchhoff 판 이론 (bend/indent)
+### 40.3 Kirchhoff 판 이론 (bend/indent)
 
 중립면에서 거리 z인 지점의 변형률:
 
@@ -2274,7 +2359,7 @@ $$D = \frac{E t^3}{12(1-\nu^2)}$$
 
 $$M_{11} = D(\kappa_{11} + \nu \kappa_{22}), \quad M_{22} = D(\kappa_{22} + \nu \kappa_{11}), \quad M_{12} = D(1-\nu)\kappa_{12}$$
 
-### 39.4 형성 변형률 이론 (formstrain)
+### 40.4 형성 변형률 이론 (formstrain)
 
 이면각 θ, 인접 셸 중심 간 거리 L:
 
@@ -2290,7 +2375,7 @@ $$\overline{\varepsilon}^p = \frac{2}{\sqrt{3}} |\varepsilon_{max}|$$
 
 ---
 
-## 40. 출력 파일 형식
+## 41. 출력 파일 형식
 
 ### dynain 파일 (`*INITIAL_STRESS_SOLID`)
 
@@ -2320,4 +2405,4 @@ $#  sig-xx    sig-yy    sig-zz    sig-xy    sig-yz    sig-xz
 
 ---
 
-*KooRemapper v1.1.0 | 이 문서는 모든 구현 기능을 포함합니다.*
+*KooRemapper v1.2.0 | 이 문서는 모든 구현 기능을 포함합니다.*
