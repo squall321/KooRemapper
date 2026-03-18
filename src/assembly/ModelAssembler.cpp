@@ -66,6 +66,27 @@ bool ModelAssembler::loadBaseModel(const std::string& filename) {
         if (mid > maxMaterialId_) maxMaterialId_ = mid;
     }
 
+    // Scan rawLines_ for *SET_* IDs to initialize maxSetId_
+    maxSetId_ = 0;
+    {
+        bool inSet = false;
+        for (const auto& line : rawLines_) {
+            std::string up = line;
+            for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+            if (up.size() > 4 && up[0] == '*' && up.find("*SET_") == 0) {
+                inSet = true; continue;
+            }
+            if (inSet && !line.empty() && line[0] != '$' && line[0] != '*') {
+                try {
+                    int sid = std::stoi(line);
+                    if (sid > maxSetId_) maxSetId_ = sid;
+                } catch (...) {}
+                inSet = false;
+            }
+            if (!line.empty() && line[0] == '*') inSet = false;
+        }
+    }
+
     return true;
 }
 
@@ -802,6 +823,18 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
     std::set<int> emittedMids; // Track which MIDs have already been written
     std::vector<std::pair<int, std::string>> layerPidEtype; // (pid, effectiveEtype) per layer
 
+    // Per-layer interface segments for SET_SEGMENT-based tied contacts.
+    // For each layer we store:
+    //   topFaceSegs: nodes of the TOP face of the layer (interface to layer above)
+    //   selfSegs   : for shell layers, the actual shell element node quads (dup nodes at mid-plane)
+    struct LayerSegInfo {
+        int pid;
+        std::string etype;
+        std::vector<std::array<int,4>> topFaceSegs;  // solid/tshell top face
+        std::vector<std::array<int,4>> selfSegs;     // shell element segments (dup nodes)
+    };
+    std::vector<LayerSegInfo> layerSegInfos;
+
     int totalNewElems = 0;
     for (int layerIdx = 0; layerIdx < newLayerCount; layerIdx++) {
         const auto& layerDef = op.layers[layerIdx];
@@ -815,6 +848,7 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
         int newPid = ++maxPartId_;
         int newSecId = ++maxSectionId_;
         layerPidEtype.push_back({newPid, layerEtype});
+        layerSegInfos.push_back({newPid, layerEtype, {}, {}});
 
         // Resolve material card with actual MID
         std::string matCard = layerDef.materialCard;
@@ -938,6 +972,26 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
                 totalNewElems++;
             }
         }
+
+        // Collect interface segments for SET_SEGMENT-based tied contacts.
+        auto& lsi = layerSegInfos.back();
+        if (isShell) {
+            // Shell: selfSegs = dup node quads (one per footprint element, at mid-plane Z).
+            // shellDupMap is keyed by colIdx and populated over all e sub-elements.
+            for (const auto& fq : footprint) {
+                std::array<int,4> seg;
+                for (int n = 0; n < 4; n++) seg[n] = shellDupMap[fq.colIdx[n]];
+                lsi.selfSegs.push_back(seg);
+            }
+        } else {
+            // Solid/tshell: topFaceSegs = top-plane node quads (interface to layer above).
+            int topPlane = planeBase + numElemsPerLayer[layerIdx];
+            for (const auto& fq : footprint) {
+                std::array<int,4> seg;
+                for (int n = 0; n < 4; n++) seg[n] = newColumns[fq.colIdx[n]].nodeIds[topPlane];
+                lsi.topFaceSegs.push_back(seg);
+            }
+        }
     }
 
     // 11. Thickness mismatch → squeeze initial stress
@@ -988,33 +1042,151 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
 
     restackedParts_++;
 
-    // 12. Auto-generate *CONTACT_TIED_SURFACE_TO_SURFACE_OFFSET for shell-adjacent interfaces
-    // Rule: if at least one side is "shell" (not tshell/solid) → tied contact needed
-    //       slave = shell layer, master = the other layer
+    // 12. Auto-generate SET_SEGMENT + CONTACT_TIED_SURFACE_TO_SURFACE_OFFSET
+    // for shell-adjacent interfaces.
+    // Rule: if at least one side is "shell" → tied contact needed.
+    // Slave = shell side (selfSegs = dup mid-plane nodes).
+    // Master = other side:
+    //   - lower solid/tshell: topFaceSegs (top face of solid, exact interface plane)
+    //   - upper solid/tshell: bottom face = newColumns[...].nodeIds[planeBase_upper]
+    //   - other shell: selfSegs of that shell layer
+    // sstyp=mstyp=0: segment set IDs (not part IDs).
     int tiedCount = 0;
-    for (int i = 0; i + 1 < static_cast<int>(layerPidEtype.size()); i++) {
-        bool iIsShell  = (layerPidEtype[i].second == "shell");
-        bool i1IsShell = (layerPidEtype[i + 1].second == "shell");
+    for (int i = 0; i + 1 < static_cast<int>(layerSegInfos.size()); i++) {
+        bool iIsShell  = (layerSegInfos[i].etype == "shell");
+        bool i1IsShell = (layerSegInfos[i + 1].etype == "shell");
         if (!iIsShell && !i1IsShell) continue;  // both solid/tshell → conformal, skip
 
-        // slave = shell side, master = other side (if both shell: lower=slave, upper=master)
-        int slavePid  = iIsShell ? layerPidEtype[i].first     : layerPidEtype[i + 1].first;
-        int masterPid = iIsShell ? layerPidEtype[i + 1].first : layerPidEtype[i].first;
+        // Determine slave (shell) and master (other) segment lists
+        const std::vector<std::array<int,4>>* slaveSegs  = nullptr;
+        const std::vector<std::array<int,4>>* masterSegs = nullptr;
 
-        std::ostringstream ct;
-        ct << "*CONTACT_TIED_SURFACE_TO_SURFACE_OFFSET\n";
-        ct << "$#     ssid      msid     sstyp     mstyp    sboxid    mboxid       spr       mpr\n";
-        ct << std::setw(10) << slavePid
-           << std::setw(10) << masterPid
-           << "         3         3         0         0         1         1\n";  // sstyp/mstyp=3: part (PID), not part set
-        // Card 2 is mandatory (LS-DYNA Vol_I). All defaults (FS=FD=DC=VC=VDC=0, PENCHK=0, BT=0, DT=1e20)
-        ct << "$#       fs        fd        dc        vc       vdc    penchk        bt        dt\n";
-        ct << "       0.0       0.0       0.0       0.0       0.0         0       0.0  1.0000E+20\n";
-        // Card 3 is mandatory (LS-DYNA Vol_I). SFSA=SFSB=SFSAT=SFSBT=FSF=VSF=1, SAST=SBST=0(auto)
-        ct << "$#     sfsa      sfsb      sast      sbst     sfsat     sfsbt       fsf       vsf\n";
-        ct << "       1.0       1.0       0.0       0.0       1.0       1.0       1.0       1.0\n";
-        addedKeywordBlocks_.push_back(ct.str());
-        tiedCount++;
+        if (iIsShell && !i1IsShell) {
+            // lower=shell, upper=solid: slave=shell selfSegs, master=solid bottom face
+            // Solid bottom face = top face of layer i (same plane as shell pTop)
+            // which is layer i+1's elements' bottom nodes.
+            // For solid layer i+1, bottom plane = planeBase of layer i+1.
+            // layerSegInfos[i].topFaceSegs holds solid top face (not applicable here).
+            // layerSegInfos[i+1] is solid: its bottom face nodes = column nodes at planeBase_i1.
+            // We stored topFaceSegs for solid layers (top face). For the bottom face we need
+            // to collect it differently. Use the shell's pTop plane (= planeBase_i+1).
+            // But we have layerSegInfos[i].selfSegs for the shell.
+            // For the solid above, bottom face = column nodes at planeBase of layer i+1.
+            // This equals planeFrac[planeBase_i+1] which is the same plane as pTop of shell.
+            // Collect bottom face of layer i+1:
+            int planeBase_i1 = 0;
+            for (int li = 0; li <= i; li++) planeBase_i1 += numElemsPerLayer[li];
+            std::vector<std::array<int,4>> solidBotSegs;
+            for (const auto& fq : footprint) {
+                std::array<int,4> seg;
+                for (int n = 0; n < 4; n++) seg[n] = newColumns[fq.colIdx[n]].nodeIds[planeBase_i1];
+                solidBotSegs.push_back(seg);
+            }
+            // Write both segment sets and contact
+            int ssid = ++maxSetId_;
+            int msid = ++maxSetId_;
+            // Slave SET_SEGMENT: shell selfSegs
+            {
+                std::ostringstream ss;
+                ss << "*SET_SEGMENT\n$#     sid\n" << std::setw(10) << ssid << "\n";
+                ss << "$#      n1        n2        n3        n4\n";
+                for (const auto& seg : layerSegInfos[i].selfSegs)
+                    ss << std::setw(10) << seg[0] << std::setw(10) << seg[1]
+                       << std::setw(10) << seg[2] << std::setw(10) << seg[3] << "\n";
+                addedKeywordBlocks_.push_back(ss.str());
+            }
+            // Master SET_SEGMENT: solid i+1 bottom face
+            {
+                std::ostringstream ss;
+                ss << "*SET_SEGMENT\n$#     sid\n" << std::setw(10) << msid << "\n";
+                ss << "$#      n1        n2        n3        n4\n";
+                for (const auto& seg : solidBotSegs)
+                    ss << std::setw(10) << seg[0] << std::setw(10) << seg[1]
+                       << std::setw(10) << seg[2] << std::setw(10) << seg[3] << "\n";
+                addedKeywordBlocks_.push_back(ss.str());
+            }
+            slaveSegs = nullptr; masterSegs = nullptr; // already written above
+            // Write contact
+            std::ostringstream ct;
+            ct << "*CONTACT_TIED_SURFACE_TO_SURFACE_OFFSET\n";
+            ct << "$#     ssid      msid     sstyp     mstyp    sboxid    mboxid       spr       mpr\n";
+            ct << std::setw(10) << ssid << std::setw(10) << msid
+               << "         0         0         0         0         1         1\n";
+            ct << "$#       fs        fd        dc        vc       vdc    penchk        bt        dt\n";
+            ct << "       0.0       0.0       0.0       0.0       0.0         0       0.0  1.0000E+20\n";
+            ct << "$#     sfsa      sfsb      sast      sbst     sfsat     sfsbt       fsf       vsf\n";
+            ct << "       1.0       1.0       0.0       0.0       1.0       1.0       1.0       1.0\n";
+            addedKeywordBlocks_.push_back(ct.str());
+            tiedCount++;
+
+        } else if (!iIsShell && i1IsShell) {
+            // lower=solid, upper=shell: slave=shell selfSegs, master=solid i topFaceSegs
+            int ssid = ++maxSetId_;
+            int msid = ++maxSetId_;
+            {
+                std::ostringstream ss;
+                ss << "*SET_SEGMENT\n$#     sid\n" << std::setw(10) << ssid << "\n";
+                ss << "$#      n1        n2        n3        n4\n";
+                for (const auto& seg : layerSegInfos[i + 1].selfSegs)
+                    ss << std::setw(10) << seg[0] << std::setw(10) << seg[1]
+                       << std::setw(10) << seg[2] << std::setw(10) << seg[3] << "\n";
+                addedKeywordBlocks_.push_back(ss.str());
+            }
+            {
+                std::ostringstream ss;
+                ss << "*SET_SEGMENT\n$#     sid\n" << std::setw(10) << msid << "\n";
+                ss << "$#      n1        n2        n3        n4\n";
+                for (const auto& seg : layerSegInfos[i].topFaceSegs)
+                    ss << std::setw(10) << seg[0] << std::setw(10) << seg[1]
+                       << std::setw(10) << seg[2] << std::setw(10) << seg[3] << "\n";
+                addedKeywordBlocks_.push_back(ss.str());
+            }
+            std::ostringstream ct;
+            ct << "*CONTACT_TIED_SURFACE_TO_SURFACE_OFFSET\n";
+            ct << "$#     ssid      msid     sstyp     mstyp    sboxid    mboxid       spr       mpr\n";
+            ct << std::setw(10) << ssid << std::setw(10) << msid
+               << "         0         0         0         0         1         1\n";
+            ct << "$#       fs        fd        dc        vc       vdc    penchk        bt        dt\n";
+            ct << "       0.0       0.0       0.0       0.0       0.0         0       0.0  1.0000E+20\n";
+            ct << "$#     sfsa      sfsb      sast      sbst     sfsat     sfsbt       fsf       vsf\n";
+            ct << "       1.0       1.0       0.0       0.0       1.0       1.0       1.0       1.0\n";
+            addedKeywordBlocks_.push_back(ct.str());
+            tiedCount++;
+
+        } else {
+            // both shells: lower=slave, upper=master (both use selfSegs)
+            int ssid = ++maxSetId_;
+            int msid = ++maxSetId_;
+            {
+                std::ostringstream ss;
+                ss << "*SET_SEGMENT\n$#     sid\n" << std::setw(10) << ssid << "\n";
+                ss << "$#      n1        n2        n3        n4\n";
+                for (const auto& seg : layerSegInfos[i].selfSegs)
+                    ss << std::setw(10) << seg[0] << std::setw(10) << seg[1]
+                       << std::setw(10) << seg[2] << std::setw(10) << seg[3] << "\n";
+                addedKeywordBlocks_.push_back(ss.str());
+            }
+            {
+                std::ostringstream ss;
+                ss << "*SET_SEGMENT\n$#     sid\n" << std::setw(10) << msid << "\n";
+                ss << "$#      n1        n2        n3        n4\n";
+                for (const auto& seg : layerSegInfos[i + 1].selfSegs)
+                    ss << std::setw(10) << seg[0] << std::setw(10) << seg[1]
+                       << std::setw(10) << seg[2] << std::setw(10) << seg[3] << "\n";
+                addedKeywordBlocks_.push_back(ss.str());
+            }
+            std::ostringstream ct;
+            ct << "*CONTACT_TIED_SURFACE_TO_SURFACE_OFFSET\n";
+            ct << "$#     ssid      msid     sstyp     mstyp    sboxid    mboxid       spr       mpr\n";
+            ct << std::setw(10) << ssid << std::setw(10) << msid
+               << "         0         0         0         0         1         1\n";
+            ct << "$#       fs        fd        dc        vc       vdc    penchk        bt        dt\n";
+            ct << "       0.0       0.0       0.0       0.0       0.0         0       0.0  1.0000E+20\n";
+            ct << "$#     sfsa      sfsb      sast      sbst     sfsat     sfsbt       fsf       vsf\n";
+            ct << "       1.0       1.0       0.0       0.0       1.0       1.0       1.0       1.0\n";
+            addedKeywordBlocks_.push_back(ct.str());
+            tiedCount++;
+        }
     }
 
     std::ostringstream msg;
