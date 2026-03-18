@@ -780,6 +780,7 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
     // 10. Generate new elements and keyword cards per layer
 
     std::set<int> emittedMids; // Track which MIDs have already been written
+    std::vector<std::pair<int, std::string>> layerPidEtype; // (pid, effectiveEtype) per layer
 
     int totalNewElems = 0;
     for (int layerIdx = 0; layerIdx < newLayerCount; layerIdx++) {
@@ -793,6 +794,7 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
         // Assign new PID and SECID for this layer
         int newPid = ++maxPartId_;
         int newSecId = ++maxSectionId_;
+        layerPidEtype.push_back({newPid, layerEtype});
 
         // Resolve material card with actual MID
         std::string matCard = layerDef.materialCard;
@@ -937,12 +939,37 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
 
     restackedParts_++;
 
+    // 12. Auto-generate *CONTACT_TIED_SURFACE_TO_SURFACE_OFFSET for shell-adjacent interfaces
+    // Rule: if at least one side is "shell" (not tshell/solid) → tied contact needed
+    //       slave = shell layer, master = the other layer
+    int tiedCount = 0;
+    for (int i = 0; i + 1 < static_cast<int>(layerPidEtype.size()); i++) {
+        bool iIsShell  = (layerPidEtype[i].second == "shell");
+        bool i1IsShell = (layerPidEtype[i + 1].second == "shell");
+        if (!iIsShell && !i1IsShell) continue;  // both solid/tshell → conformal, skip
+
+        // slave = shell side, master = other side (if both shell: lower=slave, upper=master)
+        int slavePid  = iIsShell ? layerPidEtype[i].first     : layerPidEtype[i + 1].first;
+        int masterPid = iIsShell ? layerPidEtype[i + 1].first : layerPidEtype[i].first;
+
+        std::ostringstream ct;
+        ct << "*CONTACT_TIED_SURFACE_TO_SURFACE_OFFSET\n";
+        ct << "$#     ssid      msid     sstyp     mstyp    sboxid    mboxid       spr       mpr\n";
+        ct << std::setw(10) << slavePid
+           << std::setw(10) << masterPid
+           << "         2         2         0         0         1         1\n";
+        addedKeywordBlocks_.push_back(ct.str());
+        tiedCount++;
+    }
+
     std::ostringstream msg;
     msg << "  Restack Part " << op.targetPid << " (" << axisName << "-axis): "
         << oldLayerCount << " layers -> " << newLayerCount << " layers ("
         << totalElements << " elements), "
         << footprint.size() << " elements/layer, "
         << columns.size() << " columns";
+    if (tiedCount > 0)
+        msg << ", " << tiedCount << " tied contact(s)";
     infoMessages.push_back(msg.str());
 
     return true;

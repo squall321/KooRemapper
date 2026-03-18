@@ -1,5 +1,6 @@
 # B7_PV1 Display Stack - Explicit Drop Analysis
 # 11 layers from B7_PV1.csv | XY: ~0.5 mm | Total Z: 0.395 mm | Analysis: 3 ms
+# Layer types: solid(PL/PSA0/FTG_F/PSA1/Panel/P-film=2ea), shell(PSA4/PSA5/BarrierPI/PSA6/PSA7)
 output: al_box
 
 operations:
@@ -25,10 +26,11 @@ operations:
     target_pid: 1
     direction: z
     element_type: solid
-    element_size: 0.01    # auto numElements = max(1, round(thickness / 0.01))
     layers:
-      # 1. PL - Polarizer Film (0.054 mm)
+      # 1. PL - Polarizer Film (0.054 mm) - solid 2ea
       - thickness: 0.054
+        element_type: solid
+        num_elements: 2
         material_card: |
           *MAT_GENERAL_VISCOELASTIC_TITLE
           PL_ADV
@@ -43,8 +45,10 @@ operations:
            2.000E+02 1.000E+02 3.500E+02 1.000E+02
            2.500E+02 1.000E+03 6.000E+02 1.000E+03
            1.300E+02 1.000E+04 4.000E+02 1.000E+04
-      # 2. PSA0 (0.035 mm)
+      # 2. PSA0 (0.035 mm) - solid 2ea
       - thickness: 0.035
+        element_type: solid
+        num_elements: 2
         material_card: |
           *MAT_GENERAL_VISCOELASTIC_TITLE
           PSA_ADV
@@ -59,15 +63,19 @@ operations:
            1.500E+01 1.000E+02 2.500E+02 1.000E+02
            4.000E+01 1.000E+03 4.500E+02 1.000E+03
            1.000E+02 1.000E+04 3.500E+02 1.000E+04
-      # 3. FTG_F - Flexible Thin Glass Film (0.050 mm)
+      # 3. FTG_F - Flexible Thin Glass Film (0.050 mm) - solid 2ea
       - thickness: 0.050
+        element_type: solid
+        num_elements: 2
         material_card: |
           *MAT_ELASTIC_TITLE
           FTG_F
           $#     mid        ro         e        pr        da        db  not used
                    2 1.350E-09 3.000E+03 3.400E-01       0.0       0.0       0.0
-      # 4. PSA1 (0.075 mm)
+      # 4. PSA1 (0.075 mm) - solid 2ea
       - thickness: 0.075
+        element_type: solid
+        num_elements: 2
         material_card: |
           *MAT_GENERAL_VISCOELASTIC_TITLE
           PSA_ADV
@@ -82,15 +90,19 @@ operations:
            1.500E+01 1.000E+02 2.500E+02 1.000E+02
            4.000E+01 1.000E+03 4.500E+02 1.000E+03
            1.000E+02 1.000E+04 3.500E+02 1.000E+04
-      # 5. Panel - Panel Film (0.030 mm)
+      # 5. Panel - Panel Film (0.030 mm) - solid 2ea
       - thickness: 0.030
+        element_type: solid
+        num_elements: 2
         material_card: |
           *MAT_ELASTIC_TITLE
           Panel-F
           $#     mid        ro         e        pr        da        db  not used
                    4 1.420E-09 3.300E+03 2.500E-01       0.0       0.0       0.0
-      # 6. PSA4 (0.025 mm)
+      # 6. PSA4 (0.025 mm) - SHELL
       - thickness: 0.025
+        element_type: shell
+        num_elements: 1
         material_card: |
           *MAT_GENERAL_VISCOELASTIC_TITLE
           PSA_ADV
@@ -105,8 +117,10 @@ operations:
            1.500E+01 1.000E+02 2.500E+02 1.000E+02
            4.000E+01 1.000E+03 4.500E+02 1.000E+03
            1.000E+02 1.000E+04 3.500E+02 1.000E+04
-      # 7. P-film - Protective Film (0.050 mm)
+      # 7. P-film - Protective Film (0.050 mm) - solid 2ea
       - thickness: 0.050
+        element_type: solid
+        num_elements: 2
         material_card: |
           *MAT_GENERAL_VISCOELASTIC_TITLE
           P-film_ADV
@@ -121,8 +135,10 @@ operations:
            1.200E+02 1.000E+02 2.000E+02 1.000E+02
            1.500E+02 1.000E+03 3.500E+02 1.000E+03
            7.000E+01 1.000E+04 2.000E+02 1.000E+04
-      # 8. PSA5 (0.015 mm)
+      # 8. PSA5 (0.015 mm) - SHELL
       - thickness: 0.015
+        element_type: shell
+        num_elements: 1
         material_card: |
           *MAT_GENERAL_VISCOELASTIC_TITLE
           PSA_ADV
@@ -137,15 +153,19 @@ operations:
            1.500E+01 1.000E+02 2.500E+02 1.000E+02
            4.000E+01 1.000E+03 4.500E+02 1.000E+03
            1.000E+02 1.000E+04 3.500E+02 1.000E+04
-      # 9. BarrierPI (0.025 mm)
+      # 9. BarrierPI (0.025 mm) - SHELL
       - thickness: 0.025
+        element_type: shell
+        num_elements: 1
         material_card: |
           *MAT_ELASTIC_TITLE
           BarrierPI
           $#     mid        ro         e        pr        da        db  not used
                    6 1.400E-09 3.000E+03 3.400E-01       0.0       0.0       0.0
-      # 10. PSA6 (0.016 mm)
+      # 10. PSA6 (0.016 mm) - SHELL
       - thickness: 0.016
+        element_type: shell
+        num_elements: 1
         material_card: |
           *MAT_GENERAL_VISCOELASTIC_TITLE
           PSA_ADV
@@ -160,8 +180,10 @@ operations:
            1.500E+01 1.000E+02 2.500E+02 1.000E+02
            4.000E+01 1.000E+03 4.500E+02 1.000E+03
            1.000E+02 1.000E+04 3.500E+02 1.000E+04
-      # 11. PSA7 (0.020 mm)
+      # 11. PSA7 (0.020 mm) - SHELL
       - thickness: 0.020
+        element_type: shell
+        num_elements: 1
         material_card: |
           *MAT_GENERAL_VISCOELASTIC_TITLE
           PSA_ADV
