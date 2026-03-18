@@ -860,7 +860,7 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
                     << std::setw(10) << std::fixed << std::setprecision(6) << layerDef.thickness
                     << std::setw(10) << std::fixed << std::setprecision(6) << layerDef.thickness
                     << std::setw(10) << std::fixed << std::setprecision(6) << layerDef.thickness
-                    << "      -1.0\n";  // NLOC=-1: reference surface at bottom → nodes at lower solid top, shell extends upward
+                    << "       0.0\n";  // NLOC=0: mid-plane reference → shell nodes at mid-Z, spans [pBot_Z, pTop_Z]
         } else if (isTshell) {
             kwBlock << "*SECTION_TSHELL\n";
             kwBlock << "$#  secid    elform\n";
@@ -872,8 +872,11 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
         }
 
         // Part card
+        std::string partTitle = layerDef.title.empty()
+            ? ("Restack Layer " + std::to_string(layerIdx + 1))
+            : layerDef.title;
         kwBlock << "*PART\n";
-        kwBlock << "Restack Layer " << (layerIdx + 1) << "\n";
+        kwBlock << partTitle << "\n";
         kwBlock << "$#     pid     secid       mid\n";
         kwBlock << std::setw(10) << newPid << std::setw(10) << newSecId << std::setw(10) << actualMid << "\n";
 
@@ -883,29 +886,39 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
         int planeBase = 0;
         for (int li = 0; li < layerIdx; li++) planeBase += numElemsPerLayer[li];
 
-        // Shell layers use independent (duplicate) nodes at pBot so they are NOT
-        // topologically attached to the adjacent solid layer below. This ensures
-        // tied contacts work correctly on BOTH interfaces (bottom and top of shell).
-        // Map: original pBot nodeId → dup nodeId (reset per layer, shared across e)
+        // Shell layers: create new nodes at the MID-PLANE of the thickness slot.
+        // Nodes are independent (not shared with adjacent solids) and sit visually
+        // between the solid layers above and below.  NLOC=0 (mid-plane ref in
+        // SECTION_SHELL) means the shell spans exactly [pBot_Z, pTop_Z].
+        // Tied contacts on both interfaces use OFFSET to bridge the half-thickness gap.
+        // Map: column index → mid-plane nodeId  (per sub-element e)
         std::unordered_map<int, int> shellDupMap;
 
         for (int e = 0; e < numElemsPerLayer[layerIdx]; e++) {
             int pBot = planeBase + e;
             int pTop = planeBase + e + 1;
+            double fracMid = (planeFrac[pBot] + planeFrac[pTop]) * 0.5;
+            shellDupMap.clear();  // new plane → new set of mid-plane nodes
+
             for (const auto& fq : footprint) {
                 if (isShell) {
                     AddedShellElement se;
                     se.id = ++maxElementId_;
                     se.pid = newPid;
                     for (int n = 0; n < 4; n++) {
-                        int origId = newColumns[fq.colIdx[n]].nodeIds[pBot];
-                        auto it = shellDupMap.find(origId);
+                        int colIdx = fq.colIdx[n];
+                        auto it = shellDupMap.find(colIdx);
                         if (it == shellDupMap.end()) {
-                            const auto& xyz = colNodeXYZ.at(origId);
+                            // Create node at mid-plane Z of this shell slot
+                            const auto* bn = baseMesh_.getNode(columns[colIdx].coordAndId[0].second);
+                            const auto* tn = baseMesh_.getNode(columns[colIdx].coordAndId[nodesPerColumn - 1].second);
+                            double nx = bn->position.x + fracMid * (tn->position.x - bn->position.x);
+                            double ny = bn->position.y + fracMid * (tn->position.y - bn->position.y);
+                            double nz = bn->position.z + fracMid * (tn->position.z - bn->position.z);
                             int dupId = ++maxNodeId_;
-                            addedNodes_.push_back({dupId, xyz[0], xyz[1], xyz[2]});
-                            shellDupMap[origId] = dupId;
-                            it = shellDupMap.find(origId);
+                            addedNodes_.push_back({dupId, nx, ny, nz});
+                            shellDupMap[colIdx] = dupId;
+                            it = shellDupMap.find(colIdx);
                         }
                         se.nodeIds[n] = it->second;
                     }

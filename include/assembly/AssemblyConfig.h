@@ -23,6 +23,7 @@ struct RestackLayer {
     double thickness = 0.0;
     int numElements = 0;               // 0 = use parent elementSize; >0 = explicit
     std::string elementType = "";      // "" = use parent; solid | tshell | shell
+    std::string title = "";            // *PART title (empty = auto "Restack Layer N")
     std::string materialCard;   // raw LS-DYNA material keyword block
 };
 

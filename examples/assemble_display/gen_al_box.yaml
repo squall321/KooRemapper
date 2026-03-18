@@ -28,7 +28,8 @@ operations:
     element_type: solid
     layers:
       # 1. PL - Polarizer Film (0.054 mm) - solid 2ea
-      - thickness: 0.054
+      - title: PL_ADV
+        thickness: 0.054
         element_type: solid
         num_elements: 2
         material_card: |
@@ -46,7 +47,8 @@ operations:
            2.500E+02 1.000E+03 6.000E+02 1.000E+03
            1.300E+02 1.000E+04 4.000E+02 1.000E+04
       # 2. PSA0 (0.035 mm) - solid 2ea
-      - thickness: 0.035
+      - title: PSA0_ADV
+        thickness: 0.035
         element_type: solid
         num_elements: 2
         material_card: |
@@ -64,7 +66,8 @@ operations:
            4.000E+01 1.000E+03 4.500E+02 1.000E+03
            1.000E+02 1.000E+04 3.500E+02 1.000E+04
       # 3. FTG_F - Flexible Thin Glass Film (0.050 mm) - solid 2ea
-      - thickness: 0.050
+      - title: FTG_F
+        thickness: 0.050
         element_type: solid
         num_elements: 2
         material_card: |
@@ -73,7 +76,8 @@ operations:
           $#     mid        ro         e        pr        da        db  not used
                    2 1.350E-09 3.000E+03 3.400E-01       0.0       0.0       0.0
       # 4. PSA1 (0.075 mm) - solid 2ea
-      - thickness: 0.075
+      - title: PSA1_ADV
+        thickness: 0.075
         element_type: solid
         num_elements: 2
         material_card: |
@@ -91,7 +95,8 @@ operations:
            4.000E+01 1.000E+03 4.500E+02 1.000E+03
            1.000E+02 1.000E+04 3.500E+02 1.000E+04
       # 5. Panel - Panel Film (0.030 mm) - solid 2ea
-      - thickness: 0.030
+      - title: Panel-F
+        thickness: 0.030
         element_type: solid
         num_elements: 2
         material_card: |
@@ -100,7 +105,8 @@ operations:
           $#     mid        ro         e        pr        da        db  not used
                    4 1.420E-09 3.300E+03 2.500E-01       0.0       0.0       0.0
       # 6. PSA4 (0.025 mm) - SHELL
-      - thickness: 0.025
+      - title: PSA4_ADV
+        thickness: 0.025
         element_type: shell
         num_elements: 1
         material_card: |
@@ -118,7 +124,8 @@ operations:
            4.000E+01 1.000E+03 4.500E+02 1.000E+03
            1.000E+02 1.000E+04 3.500E+02 1.000E+04
       # 7. P-film - Protective Film (0.050 mm) - solid 2ea
-      - thickness: 0.050
+      - title: P-film_ADV
+        thickness: 0.050
         element_type: solid
         num_elements: 2
         material_card: |
@@ -136,7 +143,8 @@ operations:
            1.500E+02 1.000E+03 3.500E+02 1.000E+03
            7.000E+01 1.000E+04 2.000E+02 1.000E+04
       # 8. PSA5 (0.015 mm) - SHELL
-      - thickness: 0.015
+      - title: PSA5_ADV
+        thickness: 0.015
         element_type: shell
         num_elements: 1
         material_card: |
@@ -154,7 +162,8 @@ operations:
            4.000E+01 1.000E+03 4.500E+02 1.000E+03
            1.000E+02 1.000E+04 3.500E+02 1.000E+04
       # 9. BarrierPI (0.025 mm) - SHELL
-      - thickness: 0.025
+      - title: BarrierPI
+        thickness: 0.025
         element_type: shell
         num_elements: 1
         material_card: |
@@ -163,7 +172,8 @@ operations:
           $#     mid        ro         e        pr        da        db  not used
                    6 1.400E-09 3.000E+03 3.400E-01       0.0       0.0       0.0
       # 10. PSA6 (0.016 mm) - SHELL
-      - thickness: 0.016
+      - title: PSA6_ADV
+        thickness: 0.016
         element_type: shell
         num_elements: 1
         material_card: |
@@ -181,7 +191,8 @@ operations:
            4.000E+01 1.000E+03 4.500E+02 1.000E+03
            1.000E+02 1.000E+04 3.500E+02 1.000E+04
       # 11. PSA7 (0.020 mm) - SHELL
-      - thickness: 0.020
+      - title: PSA7_ADV
+        thickness: 0.020
         element_type: shell
         num_elements: 1
         material_card: |
