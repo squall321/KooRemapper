@@ -329,6 +329,10 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             layer.elementType = val;
                         } else if (key == "title" || key == "name") {
                             layer.title = val;
+                        } else if (key == "czm_normal") {
+                            try { layer.czmNormal = std::stod(val); } catch (...) {}
+                        } else if (key == "czm_shear") {
+                            try { layer.czmShear = std::stod(val); } catch (...) {}
                         } else if (key == "material_card") {
                             if (val == "|") {
                                 // Multi-line block: find indentation of first content line
@@ -942,6 +946,10 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             if (key == "direction") op.restack.direction = val;
                             else if (key == "element_type") op.restack.elementType = val;
                             else if (key == "element_size") { try { op.restack.elementSize = std::stod(val); } catch (...) {} }
+                            else if (key == "interface_contact") op.restack.interfaceContact = val;
+                            else if (key == "czm_normal") { try { op.restack.czmNormal = std::stod(val); } catch (...) {} }
+                            else if (key == "czm_shear")  { try { op.restack.czmShear  = std::stod(val); } catch (...) {} }
+                            else if (key == "drop_height") { try { op.restack.dropHeight = std::stod(val); } catch (...) {} }
                             else if (key == "layers") {
                                 inLayersList = true;
                                 inLayerItem = false;

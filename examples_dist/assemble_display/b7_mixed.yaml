@@ -1,0 +1,197 @@
+# B7_PV1 Display Stack - Mixed Solid + Shell
+# Thin PSA/BarrierPI layers as shell; structural layers as solid.
+# Shell layers: PSA4/PSA5/BarrierPI/PSA6/PSA7 (interface_contact: tied)
+# Load simplebox.k (run simplebox.yaml first).
+# Usage: KooRemapper assemble examples/assemble_display/b7_mixed.yaml
+model: simplebox.k
+output: examples/assemble_display/b7_mixed
+
+operations:
+  - type: restack
+    target_pid: 1
+    direction: z
+    element_type: solid
+    interface_contact: tied
+    layers:
+      - title: PL_ADV
+        thickness: 0.054
+        num_elements: 2
+        material_card: |
+          *MAT_GENERAL_VISCOELASTIC_TITLE
+          PL_ADV
+          $#     mid        ro      bulk       pcf        ef      tref         a         b
+                  19 1.350E-09 4.000E+03       0.0       0.0       0.0       0.0       0.0
+          $#    lcid        nt    bstart     tramp     lcidk       ntk   bstartk    trampk
+                   0         0       0.0       0.0         0         0       0.0       0.0
+          $#      gi     betai        ki    betaki
+           3.800E+02       0.0       0.0       0.0
+           8.000E+01 1.000E+00 8.000E+01 1.000E+00
+           1.500E+02 1.000E+01 1.700E+02 1.000E+01
+           2.000E+02 1.000E+02 3.500E+02 1.000E+02
+           2.500E+02 1.000E+03 6.000E+02 1.000E+03
+           1.300E+02 1.000E+04 4.000E+02 1.000E+04
+      - title: PSA0_ADV
+        thickness: 0.035
+        num_elements: 2
+        material_card: |
+          *MAT_GENERAL_VISCOELASTIC_TITLE
+          PSA_ADV
+          $#     mid        ro      bulk       pcf        ef      tref         a         b
+                  14 1.100E-09 8.000E+02       0.0       0.0       0.0       0.0       0.0
+          $#    lcid        nt    bstart     tramp     lcidk       ntk   bstartk    trampk
+                   0         0       0.0       0.0         0         0       0.0       0.0
+          $#      gi     betai        ki    betaki
+           3.000E-01       0.0       0.0       0.0
+           2.000E+00 1.000E+00 5.000E+01 1.000E+00
+           5.000E+00 1.000E+01 1.000E+02 1.000E+01
+           1.500E+01 1.000E+02 2.500E+02 1.000E+02
+           4.000E+01 1.000E+03 4.500E+02 1.000E+03
+           1.000E+02 1.000E+04 3.500E+02 1.000E+04
+      - title: FTG_F
+        thickness: 0.050
+        num_elements: 2
+        material_card: |
+          *MAT_ELASTIC_TITLE
+          FTG_F
+          $#     mid        ro         e        pr        da        db  not used
+                   2 1.350E-09 3.000E+03 3.400E-01       0.0       0.0       0.0
+      - title: PSA1_ADV
+        thickness: 0.075
+        num_elements: 2
+        material_card: |
+          *MAT_GENERAL_VISCOELASTIC_TITLE
+          PSA_ADV
+          $#     mid        ro      bulk       pcf        ef      tref         a         b
+                  14 1.100E-09 8.000E+02       0.0       0.0       0.0       0.0       0.0
+          $#    lcid        nt    bstart     tramp     lcidk       ntk   bstartk    trampk
+                   0         0       0.0       0.0         0         0       0.0       0.0
+          $#      gi     betai        ki    betaki
+           3.000E-01       0.0       0.0       0.0
+           2.000E+00 1.000E+00 5.000E+01 1.000E+00
+           5.000E+00 1.000E+01 1.000E+02 1.000E+01
+           1.500E+01 1.000E+02 2.500E+02 1.000E+02
+           4.000E+01 1.000E+03 4.500E+02 1.000E+03
+           1.000E+02 1.000E+04 3.500E+02 1.000E+04
+      - title: Panel-F
+        thickness: 0.030
+        num_elements: 2
+        material_card: |
+          *MAT_ELASTIC_TITLE
+          Panel-F
+          $#     mid        ro         e        pr        da        db  not used
+                   4 1.420E-09 3.300E+03 2.500E-01       0.0       0.0       0.0
+      - title: PSA4_ADV
+        thickness: 0.025
+        element_type: shell
+        num_elements: 1
+        material_card: |
+          *MAT_GENERAL_VISCOELASTIC_TITLE
+          PSA_ADV
+          $#     mid        ro      bulk       pcf        ef      tref         a         b
+                  14 1.100E-09 8.000E+02       0.0       0.0       0.0       0.0       0.0
+          $#    lcid        nt    bstart     tramp     lcidk       ntk   bstartk    trampk
+                   0         0       0.0       0.0         0         0       0.0       0.0
+          $#      gi     betai        ki    betaki
+           3.000E-01       0.0       0.0       0.0
+           2.000E+00 1.000E+00 5.000E+01 1.000E+00
+           5.000E+00 1.000E+01 1.000E+02 1.000E+01
+           1.500E+01 1.000E+02 2.500E+02 1.000E+02
+           4.000E+01 1.000E+03 4.500E+02 1.000E+03
+           1.000E+02 1.000E+04 3.500E+02 1.000E+04
+      - title: P-film_ADV
+        thickness: 0.050
+        num_elements: 2
+        material_card: |
+          *MAT_GENERAL_VISCOELASTIC_TITLE
+          P-film_ADV
+          $#     mid        ro      bulk       pcf        ef      tref         a         b
+                  18 1.390E-09 2.400E+03       0.0       0.0       0.0       0.0       0.0
+          $#    lcid        nt    bstart     tramp     lcidk       ntk   bstartk    trampk
+                   0         0       0.0       0.0         0         0       0.0       0.0
+          $#      gi     betai        ki    betaki
+           2.200E+02       0.0       0.0       0.0
+           5.000E+01 1.000E+00 5.000E+01 1.000E+00
+           9.000E+01 1.000E+01 1.000E+02 1.000E+01
+           1.200E+02 1.000E+02 2.000E+02 1.000E+02
+           1.500E+02 1.000E+03 3.500E+02 1.000E+03
+           7.000E+01 1.000E+04 2.000E+02 1.000E+04
+      - title: PSA5_ADV
+        thickness: 0.015
+        element_type: shell
+        num_elements: 1
+        material_card: |
+          *MAT_GENERAL_VISCOELASTIC_TITLE
+          PSA_ADV
+          $#     mid        ro      bulk       pcf        ef      tref         a         b
+                  14 1.100E-09 8.000E+02       0.0       0.0       0.0       0.0       0.0
+          $#    lcid        nt    bstart     tramp     lcidk       ntk   bstartk    trampk
+                   0         0       0.0       0.0         0         0       0.0       0.0
+          $#      gi     betai        ki    betaki
+           3.000E-01       0.0       0.0       0.0
+           2.000E+00 1.000E+00 5.000E+01 1.000E+00
+           5.000E+00 1.000E+01 1.000E+02 1.000E+01
+           1.500E+01 1.000E+02 2.500E+02 1.000E+02
+           4.000E+01 1.000E+03 4.500E+02 1.000E+03
+           1.000E+02 1.000E+04 3.500E+02 1.000E+04
+      - title: BarrierPI
+        thickness: 0.025
+        element_type: shell
+        num_elements: 1
+        material_card: |
+          *MAT_ELASTIC_TITLE
+          BarrierPI
+          $#     mid        ro         e        pr        da        db  not used
+                   6 1.400E-09 3.000E+03 3.400E-01       0.0       0.0       0.0
+      - title: PSA6_ADV
+        thickness: 0.016
+        element_type: shell
+        num_elements: 1
+        material_card: |
+          *MAT_GENERAL_VISCOELASTIC_TITLE
+          PSA_ADV
+          $#     mid        ro      bulk       pcf        ef      tref         a         b
+                  14 1.100E-09 8.000E+02       0.0       0.0       0.0       0.0       0.0
+          $#    lcid        nt    bstart     tramp     lcidk       ntk   bstartk    trampk
+                   0         0       0.0       0.0         0         0       0.0       0.0
+          $#      gi     betai        ki    betaki
+           3.000E-01       0.0       0.0       0.0
+           2.000E+00 1.000E+00 5.000E+01 1.000E+00
+           5.000E+00 1.000E+01 1.000E+02 1.000E+01
+           1.500E+01 1.000E+02 2.500E+02 1.000E+02
+           4.000E+01 1.000E+03 4.500E+02 1.000E+03
+           1.000E+02 1.000E+04 3.500E+02 1.000E+04
+      - title: PSA7_ADV
+        thickness: 0.020
+        element_type: shell
+        num_elements: 1
+        material_card: |
+          *MAT_GENERAL_VISCOELASTIC_TITLE
+          PSA_ADV
+          $#     mid        ro      bulk       pcf        ef      tref         a         b
+                  14 1.100E-09 8.000E+02       0.0       0.0       0.0       0.0       0.0
+          $#    lcid        nt    bstart     tramp     lcidk       ntk   bstartk    trampk
+                   0         0       0.0       0.0         0         0       0.0       0.0
+          $#      gi     betai        ki    betaki
+           3.000E-01       0.0       0.0       0.0
+           2.000E+00 1.000E+00 5.000E+01 1.000E+00
+           5.000E+00 1.000E+01 1.000E+02 1.000E+01
+           1.500E+01 1.000E+02 2.500E+02 1.000E+02
+           4.000E+01 1.000E+03 4.500E+02 1.000E+03
+           1.000E+02 1.000E+04 3.500E+02 1.000E+04
+
+  - type: control
+    endtime: 0.003
+    tssfac: 0.9
+    ihq: 4
+    qh: 0.05
+    q1: 1.5
+    q2: 0.06
+    hgen: 2
+    rwen: 2
+    slnten: 1
+    rylen: 1
+
+  - type: database
+    preset: drop
+    dt: 0.0001
+    dt_plot: 0.0003

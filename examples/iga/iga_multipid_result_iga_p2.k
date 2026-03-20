@@ -13,21 +13,21 @@ Rymin              0
 Rymax             10
 Rzmin              5
 Rzmax             10
-Rrr                2
-Rrs                2
-Rrt                3
-Rofr               2
+Rrr                4
+Rrs                4
+Rrt                4
+Rofr               4
 Rofs               2
-Roft               3
-Iir                1
+Roft               1
+Iir                0
 Istyp              4
 Rtollg         0.001
-Rrxminn           -2
-Rrxmaxx           22
+Rrxminn           -4
+Rrxmaxx           24
 Rryminn           -2
 Rrymaxx           12
-Rrzminn            2
-Rrzmaxx           13
+Rrzminn            4
+Rrzmaxx           11
 *MAT_ELASTIC
 $#     mid        ro         e        pr        da        db  not used
          3  7.85E-09    210000       0.3
@@ -58,30 +58,30 @@ $# patchid        nr        ns        nt        pr        ps        pt
 $#    unir      unis      unit
         1        1        1
 $#            rfirst               rlast
-                  -2                  22
+                  -4                  24
 $#            sfirst               slast
                   -2                  12
 $#            tfirst               tlast
-                   2                  13
+                   4                  11
 $#                 x                   y                   z                 wgt
-                  -2                  -2                   2                 1.0
-                  10                  -2                   2                 1.0
-                  22                  -2                   2                 1.0
-                  -2                   5                   2                 1.0
-                  10                   5                   2                 1.0
-                  22                   5                   2                 1.0
-                  -2                  12                   2                 1.0
-                  10                  12                   2                 1.0
-                  22                  12                   2                 1.0
-                  -2                  -2                  13                 1.0
-                  10                  -2                  13                 1.0
-                  22                  -2                  13                 1.0
-                  -2                   5                  13                 1.0
-                  10                   5                  13                 1.0
-                  22                   5                  13                 1.0
-                  -2                  12                  13                 1.0
-                  10                  12                  13                 1.0
-                  22                  12                  13                 1.0
+                  -4                  -2                   4                 1.0
+                  10                  -2                   4                 1.0
+                  24                  -2                   4                 1.0
+                  -4                   5                   4                 1.0
+                  10                   5                   4                 1.0
+                  24                   5                   4                 1.0
+                  -4                  12                   4                 1.0
+                  10                  12                   4                 1.0
+                  24                  12                   4                 1.0
+                  -4                  -2                  11                 1.0
+                  10                  -2                  11                 1.0
+                  24                  -2                  11                 1.0
+                  -4                   5                  11                 1.0
+                  10                   5                  11                 1.0
+                  24                   5                  11                 1.0
+                  -4                  12                  11                 1.0
+                  10                  12                  11                 1.0
+                  24                  12                  11                 1.0
 *IGA_REFINE_SOLID
 $      rid      rtyp
       &id        2

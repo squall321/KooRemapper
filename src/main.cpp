@@ -52,7 +52,7 @@
 using namespace KooRemapper;
 
 // Version info
-constexpr const char* VERSION = "1.3.0";
+constexpr const char* VERSION = "1.3.1";
 
 /**
  * Display program banner
@@ -5764,7 +5764,7 @@ struct StandaloneYamlBase {
     }
 
     void parseCommonKey(const std::string& key, const std::string& val) {
-        if      (key == "model")  modelFile = val;
+        if      (key == "model" || key == "base_model")  modelFile = val;
         else if (key == "output") outputFile = val;
         else if (key == "E")  { try { matE = std::stod(val); } catch(...) {} }
         else if (key == "nu") { try { matNu = std::stod(val); } catch(...) {} }
@@ -6349,6 +6349,14 @@ int runIga(const std::string& yamlFile, ConsoleOutput& console) {
                 std::string rk = y.trim(rest.substr(0, rcp));
                 std::string rv = y.stripQuotes(y.trim(rest.substr(rcp+1)));
                 if (rk == "target_pid") { try { igaOp.targets.back().targetPid = std::stoi(rv); } catch(...) {} }
+                else if (rk == "target_pids") {
+                    std::string s = rv;
+                    if (!s.empty() && s.front() == '[') s = s.substr(1);
+                    if (!s.empty() && s.back()  == ']') s.pop_back();
+                    std::replace(s.begin(), s.end(), ',', ' ');
+                    std::istringstream ss(s);
+                    int pid; while (ss >> pid) igaOp.targets.back().targetPids.push_back(pid);
+                }
                 else if (rk == "element_size") { try { igaOp.targets.back().elementSize = std::stod(rv); } catch(...) {} }
             }
             continue;
@@ -6357,6 +6365,15 @@ int runIga(const std::string& yamlFile, ConsoleOutput& console) {
         if (inTargetItem && !igaOp.targets.empty()) {
             auto& t = igaOp.targets.back();
             if      (key == "target_pid") { try { t.targetPid = std::stoi(val); } catch(...) {} }
+            else if (key == "target_pids") {
+                // Parse inline list: [1, 2, 3] or "1 2 3"
+                std::string s = val;
+                if (!s.empty() && s.front() == '[') s = s.substr(1);
+                if (!s.empty() && s.back()  == ']') s.pop_back();
+                std::replace(s.begin(), s.end(), ',', ' ');
+                std::istringstream ss(s);
+                int pid; while (ss >> pid) t.targetPids.push_back(pid);
+            }
             else if (key == "element_size") { try { t.elementSize = std::stod(val); } catch(...) {} }
             else if (key == "element_size_r") { try { t.elementSizeR = std::stod(val); } catch(...) {} }
             else if (key == "element_size_s") { try { t.elementSizeS = std::stod(val); } catch(...) {} }
@@ -6382,6 +6399,24 @@ int runIga(const std::string& yamlFile, ConsoleOutput& console) {
     if (y.modelFile.empty()) { console.error("[iga] model not specified"); return 1; }
     std::string modelPath = y.resolvePath(y.modelFile);
     std::string outputPrefix = y.getOutputPrefix();
+
+    // Expand target_pids into individual single-pid targets
+    {
+        std::vector<KooRemapper::IGATargetConfig> expanded;
+        for (auto& t : igaOp.targets) {
+            if (!t.targetPids.empty()) {
+                for (int pid : t.targetPids) {
+                    auto copy = t;
+                    copy.targetPid = pid;
+                    copy.targetPids.clear();
+                    expanded.push_back(copy);
+                }
+            } else {
+                expanded.push_back(t);
+            }
+        }
+        igaOp.targets = std::move(expanded);
+    }
 
     console.println("[iga] Model: " + modelPath);
     console.println("[iga] Targets: " + std::to_string(igaOp.targets.size()));

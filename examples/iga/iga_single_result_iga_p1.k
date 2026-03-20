@@ -22,19 +22,18 @@ Roft               4
 Iir                0
 Istyp              4
 Rtollg         0.001
-*PARAMETER_EXPRESSION_LOCAL
-rxminn, &xmin-&ofr
-rxmaxx, &xmax+&ofr
-ryminn, &ymin-&ofs
-rymaxx, &ymax+&ofs
-rzminn, &zmin-&oft
-rzmaxx, &zmax+&oft
+Rrxminn           -4
+Rrxmaxx           24
+Rryminn           -4
+Rrymaxx           14
+Rrzminn           -4
+Rrzmaxx            9
 *MAT_ELASTIC
 $#     mid        ro         e        pr        da        db  not used
          2  7.85E-09    210000       0.3
 *IGA_DEV_STABILIZATION
-$      sid      styp                                   tollg
-      &id    &styp                                     &tollg
+$#      sid      styp                                   tollg
+       &id     &styp                                  &tollg
 *PART
 $#
 IGA_Part_1
@@ -59,20 +58,20 @@ $# patchid        nr        ns        nt        pr        ps        pt
 $#    unir      unis      unit
         1        1        1
 $#            rfirst               rlast
-             &rxminn             &rxmaxx
+                  -4                  24
 $#            sfirst               slast
-             &ryminn             &rymaxx
+                  -4                  14
 $#            tfirst               tlast
-             &rzminn             &rzmaxx
+                  -4                   9
 $#                 x                   y                   z                 wgt
-             &rxminn             &ryminn             &rzminn                 1.0
-             &rxmaxx             &ryminn             &rzminn                 1.0
-             &rxminn             &rymaxx             &rzminn                 1.0
-             &rxmaxx             &rymaxx             &rzminn                 1.0
-             &rxminn             &ryminn             &rzmaxx                 1.0
-             &rxmaxx             &ryminn             &rzmaxx                 1.0
-             &rxminn             &rymaxx             &rzmaxx                 1.0
-             &rxmaxx             &rymaxx             &rzmaxx                 1.0
+                  -4                  -4                  -4                 1.0
+                  24                  -4                  -4                 1.0
+                  -4                  14                  -4                 1.0
+                  24                  14                  -4                 1.0
+                  -4                  -4                   9                 1.0
+                  24                  -4                   9                 1.0
+                  -4                  14                   9                 1.0
+                  24                  14                   9                 1.0
 *IGA_REFINE_SOLID
 $      rid      rtyp
       &id        2

@@ -17,17 +17,17 @@ Rrr                4
 Rrs                4
 Rrt                4
 Rofr               4
-Rofs               4
-Roft               4
+Rofs               2
+Roft               1
 Iir                0
 Istyp              4
 Rtollg         0.001
 Rrxminn           -4
 Rrxmaxx           24
-Rryminn           -4
-Rrymaxx           14
-Rrzminn           -4
-Rrzmaxx            9
+Rryminn           -2
+Rrymaxx           12
+Rrzminn           -1
+Rrzmaxx            6
 *MAT_ELASTIC
 $#     mid        ro         e        pr        da        db  not used
          2  7.85E-09    210000       0.3
@@ -54,24 +54,34 @@ $#     sid       pid      nisr      niss      nist       rid
       &id      &id        1        1        1      &id
 *IGA_3D_NURBS_XYZ
 $# patchid        nr        ns        nt        pr        ps        pt
-      &id        2        2        2        1        1        1
+      &id        3        3        2        2        2        1
 $#    unir      unis      unit
         1        1        1
 $#            rfirst               rlast
                   -4                  24
 $#            sfirst               slast
-                  -4                  14
+                  -2                  12
 $#            tfirst               tlast
-                  -4                   9
+                  -1                   6
 $#                 x                   y                   z                 wgt
-                  -4                  -4                  -4                 1.0
-                  24                  -4                  -4                 1.0
-                  -4                  14                  -4                 1.0
-                  24                  14                  -4                 1.0
-                  -4                  -4                   9                 1.0
-                  24                  -4                   9                 1.0
-                  -4                  14                   9                 1.0
-                  24                  14                   9                 1.0
+                  -4                  -2                  -1                 1.0
+                  10                  -2                  -1                 1.0
+                  24                  -2                  -1                 1.0
+                  -4                   5                  -1                 1.0
+                  10                   5                  -1                 1.0
+                  24                   5                  -1                 1.0
+                  -4                  12                  -1                 1.0
+                  10                  12                  -1                 1.0
+                  24                  12                  -1                 1.0
+                  -4                  -2                   6                 1.0
+                  10                  -2                   6                 1.0
+                  24                  -2                   6                 1.0
+                  -4                   5                   6                 1.0
+                  10                   5                   6                 1.0
+                  24                   5                   6                 1.0
+                  -4                  12                   6                 1.0
+                  10                  12                   6                 1.0
+                  24                  12                   6                 1.0
 *IGA_REFINE_SOLID
 $      rid      rtyp
       &id        2

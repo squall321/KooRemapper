@@ -523,6 +523,101 @@ int ModelAssembler::detectExtrusionAxis(const std::vector<const Element*>& elems
     return bestAxis;
 }
 
+// ---------------------------------------------------------------------------
+// Prony series parsing + G''(ω) computation for czm_auto VC derivation
+// ---------------------------------------------------------------------------
+namespace {
+
+struct PronyTerm { double g; double beta; };  // G_i, β_i (= 1/τ_i)
+
+// Parse *MAT_GENERAL_VISCOELASTIC or *MAT_VISCOELASTIC shear Prony terms.
+// Returns list of {gi, βi} where βi > 0 (βi=0 = G∞, skipped here).
+std::vector<PronyTerm> parsePronyShear(const std::string& matCard) {
+    std::vector<PronyTerm> terms;
+    std::istringstream ss(matCard);
+    std::string line;
+
+    bool isGeneral = false, isSimple = false;
+    int dataLineIdx = 0;   // lines after header/comment/title
+    bool inData = false;
+
+    while (std::getline(ss, line)) {
+        // Trim
+        std::string up = line;
+        for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        auto ltrim = [](const std::string& s) {
+            size_t i = 0; while (i < s.size() && std::isspace((unsigned char)s[i])) i++; return s.substr(i); };
+        std::string upt = ltrim(up);
+
+        if (upt.rfind("*MAT_GENERAL_VISCOELASTIC", 0) == 0) { isGeneral = true; inData = false; dataLineIdx = 0; continue; }
+        if (upt.rfind("*MAT_VISCOELASTIC", 0) == 0 && upt.rfind("*MAT_VISCOELASTIC_HILL", 0) != 0) { isSimple = true; inData = false; dataLineIdx = 0; continue; }
+        if (!isGeneral && !isSimple) continue;
+        if (upt.empty() || upt[0] == '$' || upt[0] == '*') continue;  // comment / next keyword
+
+        inData = true;
+        dataLineIdx++;
+
+        if (isSimple) {
+            // *MAT_VISCOELASTIC: Card 1 = MID RO BULK G0 GI BETA
+            // G(t) = GI + (G0-GI)*exp(-BETA*t) → single Prony term: g=(G0-GI), β=BETA
+            if (dataLineIdx == 1) {
+                std::istringstream ls(line);
+                double mid, ro, bulk, g0, gi, beta;
+                if (ls >> mid >> ro >> bulk >> g0 >> gi >> beta) {
+                    double gProny = g0 - gi;
+                    if (gProny > 0.0 && beta > 0.0)
+                        terms.push_back({gProny, beta});
+                }
+                break; // only one data line
+            }
+        } else {
+            // *MAT_GENERAL_VISCOELASTIC:
+            // Card 1: MID RO BULK ...  (skip)
+            // Card 2: LCID NT BSTART TRAMP ... (skip)
+            // Card 3+: gi betai ki betaki  (Prony pairs, repeat)
+            if (dataLineIdx <= 2) continue; // skip cards 1 & 2
+            // Parse gi betai (first two fields; ki betaki for bulk, ignored)
+            // Fields may be fixed-width or space-separated
+            std::istringstream ls(line);
+            double g, beta, ki, betaki;
+            if (ls >> g >> beta >> ki >> betaki) {
+                if (beta > 0.0 && g > 0.0)  // betai=0 → G∞, skip
+                    terms.push_back({g, beta});
+            }
+        }
+    }
+    return terms;
+}
+
+// Shear loss modulus G''(ω) from Prony terms
+double computeGLoss(const std::vector<PronyTerm>& terms, double omega) {
+    double g2 = 0.0;
+    for (const auto& t : terms) {
+        double tau = 1.0 / t.beta;
+        double wt  = omega * tau;
+        g2 += t.g * wt / (1.0 + wt * wt);
+    }
+    return g2;
+}
+
+// Compute VC [stress·time/length] from PSA material card, drop height, layer thickness
+// VC = η / t_layer = G''(ω) / (ω × t_layer)
+// v_impact [mm/s] = sqrt(2 × 9810 mm/s² × h_mm)
+// ω [rad/s] = 2π × v / t_layer  (layer traversal time as characteristic period)
+double computeAutoVC(const std::string& matCard, double dropHeight_mm, double layerThickness_mm) {
+    if (dropHeight_mm <= 0.0 || layerThickness_mm <= 0.0) return 0.0;
+    auto terms = parsePronyShear(matCard);
+    if (terms.empty()) return 0.0;
+
+    double v    = std::sqrt(2.0 * 9810.0 * dropHeight_mm);          // mm/s
+    double omega = 2.0 * 3.14159265358979323846 * v / layerThickness_mm; // rad/s
+    double G2   = computeGLoss(terms, omega);                        // MPa
+    double vc   = G2 / (omega * layerThickness_mm);                  // MPa·s/mm = GPa·s/m
+    return vc;
+}
+
+} // anonymous namespace
+
 bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double nu) {
     // 1. Collect target part elements
     std::vector<const Element*> partElems;
@@ -994,55 +1089,62 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
         }
     }
 
-    // 11. Thickness mismatch → squeeze initial stress
+    // 11. Thickness mismatch → *INITIAL_STRAIN_SOLID (solid layers only)
+    // Each material model computes its own stress from the common strain → no global E/nu needed.
+    // Shell elements are skipped: *INITIAL_STRAIN_SHELL would be needed but thickness
+    // mismatch in shell-layer stacks is geometrically ambiguous; user should match thickness.
     double thicknessDiff = std::abs(sumThickness - originalThickness);
     double thicknessTol = originalThickness * 1e-6;
     bool hasMismatch = thicknessDiff > thicknessTol;
 
     if (hasMismatch) {
         double eps_axis = (originalThickness / sumThickness) - 1.0;
-        double eps[3] = {0, 0, 0};
-        eps[axis] = eps_axis;
+        double eps[3] = {0.0, 0.0, 0.0};
+        eps[axis] = eps_axis;  // uniaxial strain in stack direction; Poisson handled by material
 
-        // For each new element, compute reverse stress
-        // We need material E/nu for each layer
+        std::ostringstream ist;
+        ist << "*INITIAL_STRAIN_SOLID\n";
+        ist << "$#     eid\n";
+        ist << "$#   epsxx     epsyy     epszz     epsxy     epsyz     epszx\n";
+
+        int solidCount = 0;
         for (int layerIdx = 0; layerIdx < newLayerCount; layerIdx++) {
-            // Get material E,nu from YAML global material
-            double matE = E, matNu = nu;
-            if (matE <= 0) continue;
+            // Only solid/tshell elements (not shell layers)
+            const auto& ldef = op.layers[layerIdx];
+            std::string letype = ldef.elementType.empty() ? op.elementType : ldef.elementType;
+            if (letype == "shell") continue;
 
-            StrainTensor reverseStrain(-eps[0], -eps[1], -eps[2], 0.0, 0.0, 0.0);
-            StressTensor stress = StressTensor::fromStrain(reverseStrain, matE, matNu);
-
-            // Apply to all elements in this layer
-            int startElem = static_cast<int>(footprint.size()) * layerIdx;
+            int startElem = static_cast<int>(addedElements_.size()) - totalNewElems
+                            + static_cast<int>(footprint.size()) * layerIdx;
             for (int e = 0; e < static_cast<int>(footprint.size()); e++) {
-                // Find the element ID for this layer's element
-                int elemIdx = static_cast<int>(addedElements_.size()) - totalNewElems + startElem + e;
+                int elemIdx = startElem + e;
                 if (elemIdx < 0 || elemIdx >= static_cast<int>(addedElements_.size())) continue;
-
-                ElementResult er;
-                er.elementId = addedElements_[elemIdx].id;
-                er.stress = stress;
-                er.strain = reverseStrain;
-                er.isValid = true;
-                er.vonMisesStress = stress.vonMises();
-                er.vonMisesStrain = reverseStrain.vonMisesStrain();
-                accumulatedResults_.push_back(er);
+                int eid = addedElements_[elemIdx].id;
+                ist << std::setw(10) << eid << "\n";
+                // EPSxx EPSyy EPSzz EPSxy EPSyz EPSzx (global Cartesian)
+                ist << std::setw(10) << eps[0]
+                    << std::setw(10) << eps[1]
+                    << std::setw(10) << eps[2]
+                    << "       0.0       0.0       0.0\n";
+                solidCount++;
             }
         }
 
+        if (solidCount > 0)
+            addedKeywordBlocks_.push_back(ist.str());
+
         std::ostringstream sqMsg;
-        sqMsg << std::fixed << std::setprecision(4);
-        sqMsg << "  Thickness mismatch: target=" << sumThickness
+        sqMsg << std::fixed << std::setprecision(6);
+        sqMsg << "  Thickness mismatch: layers=" << sumThickness
               << " original=" << originalThickness
-              << " squeeze_eps=" << ((originalThickness / sumThickness) - 1.0);
+              << " eps=" << eps_axis
+              << " → *INITIAL_STRAIN_SOLID on " << solidCount << " solid elements";
         infoMessages.push_back(sqMsg.str());
     }
 
     restackedParts_++;
 
-    // 12. Auto-generate SET_SEGMENT + CONTACT_TIED_SURFACE_TO_SURFACE_OFFSET
+    // 12. Auto-generate SET_SEGMENT + CONTACT_TIED_*
     // for shell-adjacent interfaces.
     // Rule: if at least one side is "shell" → tied contact needed.
     // Slave = shell side (selfSegs = dup mid-plane nodes).
@@ -1051,6 +1153,45 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
     //   - upper solid/tshell: bottom face = newColumns[...].nodeIds[planeBase_upper]
     //   - other shell: selfSegs of that shell layer
     // sstyp=mstyp=0: segment set IDs (not part IDs).
+    // op.interfaceContact == "czm" → *CONTACT_TIED_SURFACE_TO_SURFACE_FAILURE (cohesive)
+    //                      == "tied" → *CONTACT_TIED_SURFACE_TO_SURFACE_OFFSET (default)
+    bool useCzm    = (op.interfaceContact == "czm" || op.interfaceContact == "czm_auto");
+    bool useCzmAuto = (op.interfaceContact == "czm_auto");
+
+    // fs/fd/vc: per-interface values resolved from layer overrides + restack defaults
+    auto writeContactCard = [&](int ssid, int msid, double fs, double fd, double vc) {
+        std::ostringstream ct;
+        if (useCzm) {
+            ct << "*CONTACT_TIED_SURFACE_TO_SURFACE_FAILURE\n";
+        } else {
+            ct << "*CONTACT_TIED_SURFACE_TO_SURFACE_OFFSET\n";
+        }
+        ct << "$#     ssid      msid     sstyp     mstyp    sboxid    mboxid       spr       mpr\n";
+        ct << std::setw(10) << ssid << std::setw(10) << msid
+           << "         0         0         0         0         1         1\n";
+        ct << "$#       fs        fd        dc        vc       vdc    penchk        bt        dt\n";
+        if (useCzm) {
+            ct << std::setw(10) << fs << std::setw(10) << fd
+               << "       0.0" << std::setw(10) << vc
+               << "       0.0         0       0.0  1.0000E+20\n";
+        } else {
+            ct << "       0.0       0.0       0.0       0.0       0.0         0       0.0  1.0000E+20\n";
+        }
+        ct << "$#     sfsa      sfsb      sast      sbst     sfsat     sfsbt       fsf       vsf\n";
+        ct << "       1.0       1.0       0.0       0.0       1.0       1.0       1.0       1.0\n";
+        addedKeywordBlocks_.push_back(ct.str());
+    };
+
+    // Helper: resolve fs/fd/vc for a given interface (layerIdx = the PSA/shell layer index)
+    auto resolveContactParams = [&](int shellLayerIdx) -> std::tuple<double,double,double> {
+        const auto& lyr = op.layers[shellLayerIdx];
+        double fs = (lyr.czmNormal >= 0.0) ? lyr.czmNormal : op.czmNormal;
+        double fd = (lyr.czmShear  >= 0.0) ? lyr.czmShear  : op.czmShear;
+        double vc = 0.0;
+        if (useCzmAuto)
+            vc = computeAutoVC(lyr.materialCard, op.dropHeight, lyr.thickness);
+        return {fs, fd, vc};
+    };
     int tiedCount = 0;
     for (int i = 0; i + 1 < static_cast<int>(layerSegInfos.size()); i++) {
         bool iIsShell  = (layerSegInfos[i].etype == "shell");
@@ -1106,17 +1247,7 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
                 addedKeywordBlocks_.push_back(ss.str());
             }
             slaveSegs = nullptr; masterSegs = nullptr; // already written above
-            // Write contact
-            std::ostringstream ct;
-            ct << "*CONTACT_TIED_SURFACE_TO_SURFACE_OFFSET\n";
-            ct << "$#     ssid      msid     sstyp     mstyp    sboxid    mboxid       spr       mpr\n";
-            ct << std::setw(10) << ssid << std::setw(10) << msid
-               << "         0         0         0         0         1         1\n";
-            ct << "$#       fs        fd        dc        vc       vdc    penchk        bt        dt\n";
-            ct << "       0.0       0.0       0.0       0.0       0.0         0       0.0  1.0000E+20\n";
-            ct << "$#     sfsa      sfsb      sast      sbst     sfsat     sfsbt       fsf       vsf\n";
-            ct << "       1.0       1.0       0.0       0.0       1.0       1.0       1.0       1.0\n";
-            addedKeywordBlocks_.push_back(ct.str());
+            { auto [fs,fd,vc] = resolveContactParams(i); writeContactCard(ssid, msid, fs, fd, vc); }
             tiedCount++;
 
         } else if (!iIsShell && i1IsShell) {
@@ -1141,16 +1272,7 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
                        << std::setw(10) << seg[2] << std::setw(10) << seg[3] << "\n";
                 addedKeywordBlocks_.push_back(ss.str());
             }
-            std::ostringstream ct;
-            ct << "*CONTACT_TIED_SURFACE_TO_SURFACE_OFFSET\n";
-            ct << "$#     ssid      msid     sstyp     mstyp    sboxid    mboxid       spr       mpr\n";
-            ct << std::setw(10) << ssid << std::setw(10) << msid
-               << "         0         0         0         0         1         1\n";
-            ct << "$#       fs        fd        dc        vc       vdc    penchk        bt        dt\n";
-            ct << "       0.0       0.0       0.0       0.0       0.0         0       0.0  1.0000E+20\n";
-            ct << "$#     sfsa      sfsb      sast      sbst     sfsat     sfsbt       fsf       vsf\n";
-            ct << "       1.0       1.0       0.0       0.0       1.0       1.0       1.0       1.0\n";
-            addedKeywordBlocks_.push_back(ct.str());
+            { auto [fs,fd,vc] = resolveContactParams(i+1); writeContactCard(ssid, msid, fs, fd, vc); }
             tiedCount++;
 
         } else {
@@ -1175,16 +1297,8 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
                        << std::setw(10) << seg[2] << std::setw(10) << seg[3] << "\n";
                 addedKeywordBlocks_.push_back(ss.str());
             }
-            std::ostringstream ct;
-            ct << "*CONTACT_TIED_SURFACE_TO_SURFACE_OFFSET\n";
-            ct << "$#     ssid      msid     sstyp     mstyp    sboxid    mboxid       spr       mpr\n";
-            ct << std::setw(10) << ssid << std::setw(10) << msid
-               << "         0         0         0         0         1         1\n";
-            ct << "$#       fs        fd        dc        vc       vdc    penchk        bt        dt\n";
-            ct << "       0.0       0.0       0.0       0.0       0.0         0       0.0  1.0000E+20\n";
-            ct << "$#     sfsa      sfsb      sast      sbst     sfsat     sfsbt       fsf       vsf\n";
-            ct << "       1.0       1.0       0.0       0.0       1.0       1.0       1.0       1.0\n";
-            addedKeywordBlocks_.push_back(ct.str());
+            // both shells: use lower shell (i) for params
+            { auto [fs,fd,vc] = resolveContactParams(i); writeContactCard(ssid, msid, fs, fd, vc); }
             tiedCount++;
         }
     }
@@ -1196,7 +1310,7 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
         << footprint.size() << " elements/layer, "
         << columns.size() << " columns";
     if (tiedCount > 0)
-        msg << ", " << tiedCount << " tied contact(s)";
+        msg << ", " << tiedCount << (useCzm ? " cohesive(CZM) contact(s)" : " tied contact(s)");
     infoMessages.push_back(msg.str());
 
     return true;
@@ -4578,15 +4692,13 @@ std::string ModelAssembler::generateIGAContent(
     pI("ir",     ir);
     pI("styp",   styp);
     pR("tollg",  tollg);
-
-    // PARAMETER_EXPRESSION_LOCAL (extended bbox via separate offset params)
-    o << "*PARAMETER_EXPRESSION_LOCAL\n";
-    o << "rxminn, &xmin-&ofr\n";
-    o << "rxmaxx, &xmax+&ofr\n";
-    o << "ryminn, &ymin-&ofs\n";
-    o << "rymaxx, &ymax+&ofs\n";
-    o << "rzminn, &zmin-&oft\n";
-    o << "rzmaxx, &zmax+&oft\n";
+    // Pre-computed extended bbox (avoids *PARAMETER_EXPRESSION_LOCAL compatibility issues)
+    pR("rxminn", xmin - offR);
+    pR("rxmaxx", xmax + offR);
+    pR("ryminn", ymin - offS);
+    pR("rymaxx", ymax + offS);
+    pR("rzminn", zmin - offT);
+    pR("rzmaxx", zmax + offT);
 
     // Material block (copied with newMid)
     if (!matBlock.empty()) {
@@ -4602,10 +4714,12 @@ std::string ModelAssembler::generateIGAContent(
     }
 
     // IGA_DEV_STABILIZATION
+    // Card: SID(F1) STYP(F2) A1-A3(F3-F5 blank) TOLLG(F6) — 10-char fixed fields
     o << "*IGA_DEV_STABILIZATION\n";
-    o << "$      sid      styp                                   tollg\n";
-    o << std::setw(9) << "&id" << std::setw(9) << "&styp"
-      << std::setw(43) << "&tollg" << "\n";
+    o << "$#      sid      styp                                   tollg\n";
+    o << std::setw(10) << "&id" << std::setw(10) << "&styp"
+      << "                              "   // fields 3-5 (30 chars blank)
+      << std::setw(10) << "&tollg" << "\n";
 
     // PART
     o << "*PART\n";
@@ -4638,29 +4752,44 @@ std::string ModelAssembler::generateIGAContent(
       << std::setw(9) << "&id" << "\n";
 
     // IGA_3D_NURBS_XYZ
+    // Minimum control points per direction: max(2, pr+1) — B-spline of degree pr needs pr+1 pts
+    int nr = std::max(2, pr + 1);
+    int ns = std::max(2, ps + 1);
+    int nt = std::max(2, pt + 1);
+    double rxminn = xmin - offR, rxmaxx = xmax + offR;
+    double ryminn = ymin - offS, rymaxx = ymax + offS;
+    double rzminn = zmin - offT, rzmaxx = zmax + offT;
+
+    auto ctrlPts = [](int n, double lo, double hi) {
+        std::vector<double> v(n);
+        for (int i = 0; i < n; ++i)
+            v[i] = lo + (hi - lo) * i / (n - 1);
+        return v;
+    };
+    auto rvx = ctrlPts(nr, rxminn, rxmaxx);
+    auto rvy = ctrlPts(ns, ryminn, rymaxx);
+    auto rvz = ctrlPts(nt, rzminn, rzmaxx);
+
     o << "*IGA_3D_NURBS_XYZ\n";
     o << "$# patchid        nr        ns        nt        pr        ps        pt\n";
     o << std::setw(9) << "&id"
-      << std::setw(9) << "2" << std::setw(9) << "2" << std::setw(9) << "2"
-      << std::setw(9) << pr  << std::setw(9) << ps  << std::setw(9) << pt << "\n";
+      << std::setw(9) << nr << std::setw(9) << ns << std::setw(9) << nt
+      << std::setw(9) << pr << std::setw(9) << ps << std::setw(9) << pt << "\n";
     o << "$#    unir      unis      unit\n";
     o << std::setw(9) << "1" << std::setw(9) << "1" << std::setw(9) << "1" << "\n";
     o << "$#            rfirst               rlast\n";
-    o << std::setw(20) << "&rxminn" << std::setw(20) << "&rxmaxx" << "\n";
+    o << std::setw(20) << rxminn << std::setw(20) << rxmaxx << "\n";
     o << "$#            sfirst               slast\n";
-    o << std::setw(20) << "&ryminn" << std::setw(20) << "&rymaxx" << "\n";
+    o << std::setw(20) << ryminn << std::setw(20) << rymaxx << "\n";
     o << "$#            tfirst               tlast\n";
-    o << std::setw(20) << "&rzminn" << std::setw(20) << "&rzmaxx" << "\n";
+    o << std::setw(20) << rzminn << std::setw(20) << rzmaxx << "\n";
     o << "$#                 x                   y                   z                 wgt\n";
-    // 8 corner control points (2×2×2)
-    const char* xs[2] = {"&rxminn", "&rxmaxx"};
-    const char* ys[2] = {"&ryminn", "&rymaxx"};
-    const char* zs[2] = {"&rzminn", "&rzmaxx"};
-    for (int k = 0; k < 2; ++k)
-        for (int j = 0; j < 2; ++j)
-            for (int i = 0; i < 2; ++i)
-                o << std::setw(20) << xs[i] << std::setw(20) << ys[j]
-                  << std::setw(20) << zs[k] << std::setw(20) << "1.0" << "\n";
+    // nr×ns×nt control points, linearly spaced, weight=1.0
+    for (int k = 0; k < nt; ++k)
+        for (int j = 0; j < ns; ++j)
+            for (int i = 0; i < nr; ++i)
+                o << std::setw(20) << rvx[i] << std::setw(20) << rvy[j]
+                  << std::setw(20) << rvz[k] << std::setw(20) << "1.0" << "\n";
 
     // IGA_REFINE_SOLID
     o << "*IGA_REFINE_SOLID\n";

@@ -1,0 +1,29 @@
+# iga_multipid.yaml
+# target_pids 리스트로 여러 파트에 동일 설정 일괄 적용
+#
+# 대상: block_2x2x1.k
+#   PID 1, 2 → 동일한 IGA 설정으로 한번에 처리
+#
+# 출력 파일:
+#   iga_multipid_result.k              메인 (원본 FE + *INCLUDE 2개)
+#   iga_multipid_result_iga_p1.k       PID 1 IGA 파일
+#   iga_multipid_result_iga_p2.k       PID 2 IGA 파일
+#
+# 참고: target_pid (단수)와 target_pids (복수) 혼용 가능
+#   - target_pids: [1, 2, 3]   → 3개 파트 동일 설정
+#   - target_pid: 4            → 별도 파트 개별 설정
+
+base_model: block_2x2x1.k
+output: iga_multipid_result
+
+operations:
+  - type: iga
+    targets:
+      # PID 1과 2를 동일 설정으로 일괄 처리
+      - target_pids: [1, 2]
+        element_size: 4.0
+        ir: 0
+        pr: 2
+        ps: 2
+        pt: 1
+        bbox_scale: 1.4

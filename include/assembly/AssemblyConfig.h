@@ -24,7 +24,9 @@ struct RestackLayer {
     int numElements = 0;               // 0 = use parent elementSize; >0 = explicit
     std::string elementType = "";      // "" = use parent; solid | tshell | shell
     std::string title = "";            // *PART title (empty = auto "Restack Layer N")
-    std::string materialCard;   // raw LS-DYNA material keyword block
+    std::string materialCard;          // raw LS-DYNA material keyword block
+    double czmNormal = -1.0;          // per-layer CZM normal failure stress (-1 = use restack default)
+    double czmShear  = -1.0;          // per-layer CZM shear failure stress  (-1 = use restack default)
 };
 
 struct RestackOperation {
@@ -32,6 +34,10 @@ struct RestackOperation {
     std::string direction = "auto";     // auto | x | y | z
     std::string elementType = "solid";  // solid | tshell | shell
     double elementSize = 0.0;          // auto numElements = max(1, round(t/elementSize)); 0=off
+    std::string interfaceContact = "tied";  // tied | czm | czm_auto
+    double czmNormal = 0.0;            // CZM: normal tensile stress at failure [MPa]
+    double czmShear  = 0.0;            // CZM: shear stress at failure [MPa]
+    double dropHeight = 0.0;           // czm_auto: drop height [mm] for VC computation
     std::vector<RestackLayer> layers;
 };
 
@@ -105,6 +111,7 @@ struct DisconnectOperation {
 
 struct IGATargetConfig {
     int targetPid = 0;
+    std::vector<int> targetPids; // multi-pid shorthand; expands to multiple single-pid targets
     double elementSize = 1.0;    // rr=rs=rt default voxel size
     double elementSizeR = 0.0;   // per-axis override (0 = use elementSize)
     double elementSizeS = 0.0;

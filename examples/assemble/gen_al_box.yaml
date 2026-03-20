@@ -1,0 +1,18 @@
+output: al_box
+
+operations:
+  - type: generate
+    shape: box
+    lx: 67.0
+    ly: 145.0
+    lz: 0.395
+    nx: 134
+    ny: 290
+    nz: 2
+    rho: 2.7e-9
+    E: 70000.0
+    nu: 0.33
+    mid: 1
+    secid: 1
+    pid: 1
+    part_title: Aluminum Box
