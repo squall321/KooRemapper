@@ -1,0 +1,20 @@
+# ex01_stress_yaml_material.yaml
+# 모드: 응력 (기본) — YAML에 재료 직접 지정
+#
+# 상황: K-파일에 *MAT 카드가 없을 때 (순수 기하 파일)
+# 결과: eps_x/y/z -> Hooke's law -> *INITIAL_STRESS_SOLID
+#       노드 좌표 스케일 적용
+#
+# 출력:
+#   output_s1.k      압착된 메시 + *INCLUDE output_s1.dynain
+#   output_s1.dynain *INITIAL_STRESS_SOLID (요소별 응력 6성분)
+
+parts:
+  - pid: 1
+    eps_x: -0.01    # x방향 1% 압축 (음수 = 압축)
+    eps_y: -0.01    # y방향 1% 압축
+    eps_z:  0.0     # z방향 변화 없음
+
+material:
+  E: 210000.0       # Young's modulus [MPa]
+  nu: 0.3           # Poisson's ratio

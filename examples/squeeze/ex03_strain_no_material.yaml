@@ -1,0 +1,24 @@
+# ex03_strain_no_material.yaml
+# 모드: 변형률 (strain_mode: true) — 재료 불필요
+#
+# 상황: 재료가 없거나 불분명할 때, 또는
+#       LS-DYNA가 재료 모델로 직접 응력을 계산하게 하고 싶을 때
+#
+# 동작:
+#   - 노드 좌표는 동일하게 스케일 적용 (압착)
+#   - 응력 계산 없이 eps 값을 *INITIAL_STRAIN_SOLID에 직접 기록
+#   - LS-DYNA가 해석 중 재료 모델로 응력 자동 계산
+#
+# 출력:
+#   output_s3.k      압착된 메시 + *INCLUDE output_s3.dynain
+#   output_s3.dynain *INITIAL_STRAIN_SOLID (요소별 변형률 6성분)
+
+strain_mode: true   # 재료 없이 변형률 직접 삽입
+
+parts:
+  - pid: 1
+    eps_x: -0.01
+    eps_y: -0.01
+    eps_z:  0.0
+
+# material: 섹션 불필요 (있어도 dynain 생성에 사용되지 않음)

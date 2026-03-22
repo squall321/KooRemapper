@@ -30,7 +30,7 @@ SqueezeConfig SqueezeConfigReader::readString(const std::string& yamlContent) {
     std::istringstream stream(yamlContent);
     std::string line;
 
-    enum class Section { NONE, PARTS, MATERIAL };
+    enum class Section { NONE, PARTS, MATERIAL, RELAX };
     Section section = Section::NONE;
     bool inPartItem = false;
 
@@ -62,6 +62,20 @@ SqueezeConfig SqueezeConfigReader::readString(const std::string& yamlContent) {
                 section = Section::MATERIAL;
                 inPartItem = false;
                 continue;
+            }
+            if (trimmed == "relax:" || trimmed == "relax") {
+                section = Section::RELAX;
+                inPartItem = false;
+                config.relax.enabled = true;  // presence of section = enabled by default
+                continue;
+            }
+            // Top-level scalar keys
+            size_t colonPos = trimmed.find(':');
+            if (colonPos != std::string::npos) {
+                std::string key = trim(trimmed.substr(0, colonPos));
+                std::string val = trim(trimmed.substr(colonPos + 1));
+                if (key == "strain_mode")
+                    config.strainMode = (val == "true" || val == "yes" || val == "1");
             }
         }
 
@@ -114,6 +128,28 @@ SqueezeConfig SqueezeConfigReader::readString(const std::string& yamlContent) {
                 try {
                     if (key == "E") config.E = std::stod(val);
                     else if (key == "nu") config.nu = std::stod(val);
+                } catch (...) {}
+            }
+        }
+        else if (section == Section::RELAX) {
+            size_t colonPos = trimmed.find(':');
+            if (colonPos != std::string::npos) {
+                std::string key = trim(trimmed.substr(0, colonPos));
+                std::string val = trim(trimmed.substr(colonPos + 1));
+                auto& r = config.relax;
+                try {
+                    if      (key == "enabled") r.enabled = (val == "true" || val == "yes" || val == "1");
+                    else if (key == "level")   r.level   = std::stoi(val);
+                    else if (key == "mode")    r.mode    = val;
+                    else if (key == "drterm")  r.drterm  = std::stod(val);
+                    else if (key == "endtime") r.endtime = std::stod(val);
+                    else if (key == "d3drlf")  r.d3drlf  = (val == "true" || val == "yes" || val == "1");
+                    else if (key == "nrcyck")  r.nrcyckOvr = std::stod(val);
+                    else if (key == "drtol")   r.drtolOvr  = std::stod(val);
+                    else if (key == "drfctr")  r.drfctrOvr = std::stod(val);
+                    else if (key == "tssfdr")  r.tssfdrOvr = std::stod(val);
+                    else if (key == "irelal")  r.irelalOvr = std::stoi(val);
+                    else if (key == "edttl")   r.edttlOvr  = std::stod(val);
                 } catch (...) {}
             }
         }

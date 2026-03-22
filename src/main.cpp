@@ -52,7 +52,7 @@
 using namespace KooRemapper;
 
 // Version info
-constexpr const char* VERSION = "1.3.1";
+constexpr const char* VERSION = "1.3.2";
 
 /**
  * Display program banner
@@ -1232,6 +1232,11 @@ int runGenerateVar(const std::string& configFile, const std::string& outputFile,
     return 0;
 }
 
+// Forward declaration (defined later in relax section)
+static std::string relax_generateCards(int level, const std::string& mode,
+    double drterm, double nrcyckOvr, double drtolOvr, double drfctrOvr,
+    double tssfdrOvr, int irelalOvr, double edttlOvr, bool d3drlf);
+
 /**
  * Squeeze: compress parts and generate reverse prestress for interference fit
  */
@@ -1276,9 +1281,11 @@ int runSqueeze(const std::string& meshFile, const std::string& configFile,
         console.info(oss.str());
     } else if (hasKFileMaterial) {
         console.info("Using materials from K-file (per-part)");
+    } else if (config.strainMode) {
+        console.info("strain_mode: no material needed (*INITIAL_STRAIN_SOLID)");
     } else {
         console.error("No material specified (required for stress computation)");
-        console.info("Add 'material:' section to YAML or include *MAT_ELASTIC in K-file");
+        console.info("Add 'material:' section to YAML, include *MAT_ELASTIC in K-file, or set strain_mode: true");
         return 1;
     }
 
@@ -1411,68 +1418,95 @@ int runSqueeze(const std::string& meshFile, const std::string& configFile,
     }
     console.success("Compressed mesh written");
 
-    // Build reverse prestress (MeshAnalysisResult)
-    MeshAnalysisResult results;
-    results.hasMaterial = true;
-    results.validElements = 0;
-    results.invalidElements = 0;
-
-    for (const auto& [eid, elem] : mesh.getElements()) {
-        auto it = partConfigMap.find(elem.partId);
-        if (it == partConfigMap.end()) continue;  // Not a squeeze part
-
-        const auto& pc = *(it->second);
-
-        // Skip swelling parts (handled via thermal expansion, not dynain)
-        if (pc.hasSwelling()) continue;
-
-        // Get material for this element
-        double matE = 0, matNu = 0;
-        if (hasYamlMaterial) {
-            matE = config.E;
-            matNu = config.nu;
-        } else {
-            const MaterialData* matData = mesh.getElementMaterial(elem);
-            if (matData && matData->E > 0) {
-                matE = matData->E;
-                matNu = matData->nu;
-            }
-        }
-
-        if (matE <= 0) {
-            results.invalidElements++;
-            continue;
-        }
-
-        // Reverse strain: opposite of squeeze strain
-        StrainTensor reverseStrain(-pc.eps_x, -pc.eps_y, -pc.eps_z,
-                                    0.0, 0.0, 0.0);
-
-        // Compute stress via Hooke's law
-        StressTensor stress = StressTensor::fromStrain(reverseStrain, matE, matNu);
-
-        ElementResult er;
-        er.elementId = elem.id;
-        er.stress = stress;
-        er.strain = reverseStrain;
-        er.isValid = true;
-        er.vonMisesStress = stress.vonMises();
-        er.vonMisesStrain = reverseStrain.vonMisesStrain();
-
-        results.elementResults.push_back(er);
-        results.validElements++;
-    }
-
-    // Write dynain
+    // Write dynain: stress mode or strain mode
     std::string dynainFile = outputPrefix + ".dynain";
-    console.info("Writing dynain: " + dynainFile);
-    DynainWriter dynainWriter;
-    if (!dynainWriter.writeFile(dynainFile, results, StrainType::ENGINEERING,
-                                meshFile, "squeeze: " + configFile)) {
-        console.error("Failed to write dynain: " + dynainWriter.getErrorMessage());
-        return 1;
+    int dynainElementCount = 0;
+
+    if (config.strainMode) {
+        // strain_mode: write *INITIAL_STRAIN_SOLID directly — no material needed
+        console.info("Writing strain dynain: " + dynainFile);
+        std::ofstream sf(dynainFile);
+        if (!sf.is_open()) { console.error("Cannot write dynain: " + dynainFile); return 1; }
+        sf << "*KEYWORD\n";
+        sf << "$\n$ KooRemapper - Initial Strain File (strain_mode)\n";
+        sf << "$ Source: " << configFile << "\n$\n";
+        sf << "*INITIAL_STRAIN_SOLID\n";
+        sf << "$#    eid    nint   nhisv   large\n";
+        sf << "$#       eps11        eps22        eps33        eps12        eps23        eps13\n";
+        for (const auto& [eid, elem] : mesh.getElements()) {
+            auto it = partConfigMap.find(elem.partId);
+            if (it == partConfigMap.end()) continue;
+            const auto& pc = *(it->second);
+            if (pc.hasSwelling()) continue;
+            // Card 1
+            sf << std::setw(10) << eid
+               << std::setw(8)  << 1
+               << std::setw(8)  << 0
+               << std::setw(8)  << 0 << "\n";
+            // Card 2: reverse strain (eps_x/y/z negated, shear = 0)
+            sf << std::scientific << std::setprecision(4)
+               << std::setw(13) << -pc.eps_x
+               << std::setw(13) << -pc.eps_y
+               << std::setw(13) << -pc.eps_z
+               << std::setw(13) << 0.0
+               << std::setw(13) << 0.0
+               << std::setw(13) << 0.0 << "\n";
+            ++dynainElementCount;
+        }
+        sf << "*END\n";
+        console.success("Strain dynain written: " + std::to_string(dynainElementCount) + " elements");
+    } else {
+        // stress mode: compute stress via Hooke's law -> *INITIAL_STRESS_SOLID
+        MeshAnalysisResult results;
+        results.hasMaterial = true;
+        results.validElements = 0;
+        results.invalidElements = 0;
+
+        for (const auto& [eid, elem] : mesh.getElements()) {
+            auto it = partConfigMap.find(elem.partId);
+            if (it == partConfigMap.end()) continue;
+
+            const auto& pc = *(it->second);
+            if (pc.hasSwelling()) continue;
+
+            double matE = 0, matNu = 0;
+            if (hasYamlMaterial) {
+                matE = config.E;
+                matNu = config.nu;
+            } else {
+                const MaterialData* matData = mesh.getElementMaterial(elem);
+                if (matData && matData->E > 0) {
+                    matE = matData->E;
+                    matNu = matData->nu;
+                }
+            }
+
+            if (matE <= 0) { results.invalidElements++; continue; }
+
+            StrainTensor reverseStrain(-pc.eps_x, -pc.eps_y, -pc.eps_z, 0.0, 0.0, 0.0);
+            StressTensor stress = StressTensor::fromStrain(reverseStrain, matE, matNu);
+
+            ElementResult er;
+            er.elementId = elem.id;
+            er.stress = stress;
+            er.strain = reverseStrain;
+            er.isValid = true;
+            er.vonMisesStress = stress.vonMises();
+            er.vonMisesStrain = reverseStrain.vonMisesStrain();
+            results.elementResults.push_back(er);
+            results.validElements++;
+        }
+
+        console.info("Writing dynain: " + dynainFile);
+        DynainWriter dynainWriter;
+        if (!dynainWriter.writeFile(dynainFile, results, StrainType::ENGINEERING,
+                                    meshFile, "squeeze: " + configFile)) {
+            console.error("Failed to write dynain: " + dynainWriter.getErrorMessage());
+            return 1;
+        }
+        dynainElementCount = results.validElements;
+        console.success("Dynain written: " + std::to_string(dynainElementCount) + " elements");
     }
-    console.success("Dynain written: " + std::to_string(results.validElements) + " elements");
 
     // Build swelling thermal expansion cards
     std::string swellingCards;
@@ -1541,7 +1575,7 @@ int runSqueeze(const std::string& meshFile, const std::string& configFile,
             dynainBasename = dynainBasename.substr(slashPos + 1);
         }
 
-        bool hasDynain = (results.validElements > 0);
+        bool hasDynain = (dynainElementCount > 0);
 
         // Re-read the compressed mesh and insert before *END
         std::ifstream srcFile(meshOutputFile);
@@ -1573,6 +1607,17 @@ int runSqueeze(const std::string& meshFile, const std::string& configFile,
                 if (!swellingCards.empty()) {
                     meshContent += swellingCards;
                 }
+                if (config.relax.enabled) {
+                    const auto& rc = config.relax;
+                    if (rc.endtime > 0) {
+                        char tbuf[64];
+                        snprintf(tbuf, sizeof(tbuf), "*CONTROL_TERMINATION\n$#  endtim\n%10.4g\n", rc.endtime);
+                        meshContent += tbuf;
+                    }
+                    meshContent += relax_generateCards(rc.level, rc.mode, rc.drterm,
+                        rc.nrcyckOvr, rc.drtolOvr, rc.drfctrOvr,
+                        rc.tssfdrOvr, rc.irelalOvr, rc.edttlOvr, rc.d3drlf);
+                }
                 endFound = true;
             }
             meshContent += line + "\n";
@@ -1586,6 +1631,17 @@ int runSqueeze(const std::string& meshFile, const std::string& configFile,
             }
             if (!swellingCards.empty()) {
                 meshContent += swellingCards;
+            }
+            if (config.relax.enabled) {
+                const auto& rc = config.relax;
+                if (rc.endtime > 0) {
+                    char tbuf[64];
+                    snprintf(tbuf, sizeof(tbuf), "*CONTROL_TERMINATION\n$#  endtim\n%10.4g\n", rc.endtime);
+                    meshContent += tbuf;
+                }
+                meshContent += relax_generateCards(rc.level, rc.mode, rc.drterm,
+                    rc.nrcyckOvr, rc.drtolOvr, rc.drfctrOvr,
+                    rc.tssfdrOvr, rc.irelalOvr, rc.edttlOvr, rc.d3drlf);
             }
             meshContent += "*END\n";
         }
@@ -1603,6 +1659,20 @@ int runSqueeze(const std::string& meshFile, const std::string& configFile,
         }
         if (!swellingCards.empty()) {
             console.success("Added thermal expansion cards to: " + meshOutputFile);
+        }
+        if (config.relax.enabled) {
+            const auto& rc = config.relax;
+            static const char* lvNames[5] = {"fast","standard","stable","conservative","max"};
+            int li = std::max(0, std::min(4, rc.level - 1));
+            char rbuf[128];
+            snprintf(rbuf, sizeof(rbuf), "[relax] Inserted *CONTROL_DYNAMIC_RELAXATION  level=%d(%s)  mode=%s%s",
+                rc.level, lvNames[li], rc.mode.c_str(), rc.d3drlf ? "  +D3DRLF" : "");
+            console.success(rbuf);
+            if (rc.endtime > 0) {
+                char tbuf[64];
+                snprintf(tbuf, sizeof(tbuf), "[relax] Inserted *CONTROL_TERMINATION  endtim=%g", rc.endtime);
+                console.println(tbuf);
+            }
         }
     }
 

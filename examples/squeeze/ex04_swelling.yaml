@@ -1,0 +1,29 @@
+# ex04_swelling.yaml
+# 모드: 열팽창 (swelling) — 균일 등방 팽윤
+#
+# 상황: 배터리 전극, 고분자, 흡수재 등
+#       재료가 균일하게 등방 팽창하는 경우
+#
+# 동작:
+#   - 노드 이동 없음 (기하 형상 유지)
+#   - *MAT_ADD_THERMAL_EXPANSION (CTE = swelling값) 삽입
+#   - *INITIAL_TEMPERATURE_NODE (T=1.0) 삽입
+#   - LS-DYNA가 ΔT=1 × CTE = swelling만큼 열변형 적용
+#
+# 제약:
+#   - K-파일에 해당 파트의 *MAT_* 카드 필수
+#     (MID를 *PART에서 읽어 *MAT_ADD_THERMAL_EXPANSION에 연결)
+#   - swelling과 eps_x/y/z는 같은 파트에 동시 사용 불가
+#
+# 출력:
+#   output_sw.k      원본 메시 + *MAT_ADD_THERMAL_EXPANSION + *INITIAL_TEMPERATURE_NODE
+
+parts:
+  - pid: 1
+    swelling: 0.03    # 3% 등방 팽윤 (부피 팽창)
+
+  - pid: 2
+    swelling: 0.05    # 5% 팽윤
+
+# material: 섹션은 swelling에 사용되지 않음
+# K-파일의 *MAT_* 카드가 반드시 필요

@@ -1,0 +1,35 @@
+# ex05_mixed_with_dr.yaml
+# 모드: 혼합 (응력 + 열팽창 동시) + DR 자동 삽입
+#
+# 상황: 여러 파트를 서로 다른 방식으로 처리하고
+#       squeeze 결과를 바로 DR로 평형화하는 전체 워크플로우
+#
+# PID 1: eps 방식 — K-파일 재료 사용 (응력 dynain)
+# PID 2: swelling 방식 — 열팽창 카드
+# + relax 섹션: 출력 K-파일에 DR 키워드 자동 삽입
+#
+# 출력:
+#   output_mix.k       압착 메시 + *INCLUDE + 열팽창 카드 + DR 카드
+#   output_mix.dynain  *INITIAL_STRESS_SOLID (PID 1만)
+
+parts:
+  - pid: 1
+    eps_x: -0.012
+    eps_y: -0.012
+    eps_z:  0.0
+
+  - pid: 2
+    swelling: 0.04
+
+# K-파일에 *MAT_ELASTIC 카드 있으면 material: 생략 가능
+# (없으면 아래 material: 섹션 필요 — eps 파트에만 적용)
+material:
+  E: 210000.0
+  nu: 0.3
+
+relax:
+  level: 2            # 표준 (NRCYCK=250, DRTOL=0.001, DRFCTR=0.995)
+  mode: explicit      # IDRFLG=1
+  drterm: 0.0         # 수렴까지 무한 DR
+  endtime: 1.0        # *CONTROL_TERMINATION 삽입
+  d3drlf: true        # D3DRLF 데이터베이스 출력
