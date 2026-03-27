@@ -38,6 +38,7 @@
 #include "util/Logger.h"
 #include "util/Timer.h"
 #include "util/Validator.h"
+#include "commands/kw_util.h"
 
 #include <iostream>
 #include <fstream>
@@ -1897,24 +1898,9 @@ int runAssemble(const std::string& configFile, const ConsoleOutput& console) {
 // =============================================================
 namespace {
 
-static std::string msw_trim(const std::string& s) {
-    size_t a = 0, b = s.size();
-    while (a < b && std::isspace((unsigned char)s[a])) ++a;
-    while (b > a && std::isspace((unsigned char)s[b-1])) --b;
-    return s.substr(a, b - a);
-}
-
-static std::vector<std::string> msw_tok10(const std::string& line) {
-    std::vector<std::string> v;
-    for (size_t i = 0; i < line.size(); i += 10)
-        v.push_back(msw_trim(line.substr(i, std::min((size_t)10, line.size()-i))));
-    return v;
-}
-
-static std::string msw_upper(std::string s) {
-    for (auto& c : s) c = (char)std::toupper((unsigned char)c);
-    return s;
-}
+static std::string msw_trim(const std::string& s)  { return kw_trim(s); }
+static std::vector<std::string> msw_tok10(const std::string& line) { return kw_tok10(line); }
+static std::string msw_upper(const std::string& s)  { return kw_upper(s); }
 
 // Determine what kind of ID a parameter name represents (by prefix convention)
 static std::string msw_idType(const std::string& name) {
@@ -2169,189 +2155,42 @@ static std::string msw_updatePartLine(const std::string& ln,
 
 // =====================================================================
 // Implicit converter helpers  (impl_*)
+// Delegates to kw_util.h — keeping impl_ names for backward compat
 // =====================================================================
 
-static std::string impl_trim(const std::string& s) {
-    size_t a = s.find_first_not_of(" \t\r\n");
-    if (a == std::string::npos) return "";
-    size_t b = s.find_last_not_of(" \t\r\n");
-    return s.substr(a, b - a + 1);
-}
-static std::string impl_upper(const std::string& s) {
-    std::string r = s;
-    std::transform(r.begin(), r.end(), r.begin(), [](unsigned char c){ return (char)std::toupper(c); });
-    return r;
-}
-static std::vector<std::string> impl_tok10(const std::string& s) {
-    std::vector<std::string> toks;
-    for (int i = 0; i < (int)s.size(); i += 10)
-        toks.push_back(impl_trim(s.substr(i, std::min(10, (int)s.size()-i))));
-    return toks;
-}
+static std::string impl_trim(const std::string& s)  { return kw_trim(s); }
+static std::string impl_upper(const std::string& s) { return kw_upper(s); }
+static std::vector<std::string> impl_tok10(const std::string& s) { return kw_tok10(s); }
 
-// Remove all blocks whose keyword line starts with keyword (case-insensitive, no ID check)
 static std::vector<std::string> impl_removeKeyword(
         const std::vector<std::string>& lines, const std::string& keyword) {
-    std::vector<bool> rm(lines.size(), false);
-    std::string kwUp = impl_upper(keyword);
-    for (int i = 0; i < (int)lines.size(); ) {
-        std::string up = impl_upper(impl_trim(lines[i]));
-        if (up.rfind(kwUp, 0) != 0) { ++i; continue; }
-        int end = i + 1;
-        while (end < (int)lines.size()) {
-            std::string et = impl_trim(lines[end]);
-            if (!et.empty() && et[0] == '*') break;
-            ++end;
-        }
-        for (int k = i; k < end; ++k) rm[k] = true;
-        i = end;
-    }
-    std::vector<std::string> out;
-    for (size_t i = 0; i < lines.size(); ++i) if (!rm[i]) out.push_back(lines[i]);
-    return out;
+    return kw_removeKeyword(lines, keyword);
 }
 
-// Remove *DEFINE_CURVE blocks where SIDR field (toks[1]) == 1 (DR load curve)
-// Modifies lines in place; returns number of curves removed
 static int impl_removeDrCurves(std::vector<std::string>& lines) {
-    int removed = 0;
-    std::vector<bool> rm(lines.size(), false);
-    for (int i = 0; i < (int)lines.size(); ) {
-        std::string up = impl_upper(impl_trim(lines[i]));
-        if (up.rfind("*DEFINE_CURVE", 0) != 0) { ++i; continue; }
-        bool hasTitle = (up.find("_TITLE") != std::string::npos);
-        int titlesLeft = hasTitle ? 1 : 0; int sidr = -1;
-        for (int j = i+1; j < (int)lines.size(); ++j) {
-            std::string jt = impl_trim(lines[j]);
-            if (jt.empty() || jt[0]=='$') continue;
-            if (jt[0]=='*') break;
-            if (titlesLeft-- > 0) continue;
-            auto toks = impl_tok10(lines[j]);
-            if (toks.size() >= 2) { try { sidr = std::stoi(toks[1]); } catch(...){} }
-            break;
-        }
-        if (sidr != 1) { ++i; continue; }
-        int end = i+1;
-        while (end < (int)lines.size()) {
-            std::string et = impl_trim(lines[end]);
-            if (!et.empty() && et[0]=='*') break;
-            ++end;
-        }
-        for (int k = i; k < end; ++k) rm[k] = true;
-        ++removed; i = end;
-    }
-    std::vector<std::string> out;
-    for (size_t i = 0; i < lines.size(); ++i) if (!rm[i]) out.push_back(lines[i]);
-    lines = std::move(out);
-    return removed;
+    return kw_removeDrCurves(lines);
 }
 
-// Set a fixed-width field at [pos, pos+width) in a line (right-aligned)
 static std::string impl_setField(const std::string& line, int pos, int width,
                                   const std::string& val) {
-    std::string r = line;
-    while ((int)r.size() < pos + width) r += ' ';
-    std::string v = val;
-    if ((int)v.size() > width) v = v.substr(v.size() - width);
-    r.replace(pos, width, std::string(width - (int)v.size(), ' ') + v);
-    return r;
+    return kw_setField(line, pos, width, val);
 }
 
-// Read endtim from *CONTROL_TERMINATION first data line.
-// Returns -1.0 if keyword not found, 0.0 if found but endtim=0, else the value.
 static double impl_readEndtime(const std::vector<std::string>& lines) {
-    bool inTerm=false, hasTitle=false, titleDone=false, found=false;
-    for (const auto& ln : lines) {
-        std::string tr = impl_trim(ln);
-        if (tr.empty()) continue;
-        if (tr[0]=='*') {
-            std::string up=impl_upper(tr);
-            inTerm = (up.rfind("*CONTROL_TERMINATION",0)==0);
-            if (inTerm) found=true;
-            hasTitle = (up.find("_TITLE")!=std::string::npos);
-            titleDone=false; continue;
-        }
-        if (!inTerm||tr[0]=='$') continue;
-        if (hasTitle&&!titleDone) { titleDone=true; continue; }
-        auto toks = impl_tok10(ln);
-        if (!toks.empty()) { try { return std::stod(toks[0]); } catch(...) { return 0.0; } }
-        inTerm=false;
-    }
-    return found ? 0.0 : -1.0;
+    return kw_readEndtime(lines);
 }
 
-// Modify *CONTROL_TIMESTEP: TSSFAC=0.90 (pos 10), DT2MS=0.0 (pos 40)
 static bool impl_modifyTimestep(std::vector<std::string>& lines) {
-    bool inTs=false, hasTitle=false, titleDone=false;
-    for (auto& ln : lines) {
-        std::string tr = impl_trim(ln);
-        if (tr.empty()) continue;
-        if (tr[0]=='*') {
-            std::string up=impl_upper(tr);
-            inTs=(up.rfind("*CONTROL_TIMESTEP",0)==0);
-            hasTitle=(up.find("_TITLE")!=std::string::npos);
-            titleDone=false; continue;
-        }
-        if (!inTs||tr[0]=='$') continue;
-        if (hasTitle&&!titleDone) { titleDone=true; continue; }
-        ln = impl_setField(ln, 10, 10, "0.900000"); // TSSFAC
-        ln = impl_setField(ln, 40, 10, "0.0");      // DT2MS
-        return true;
-    }
-    return false;
+    return kw_modifyTimestep(lines);
 }
 
-// Update *CONTROL_TERMINATION endtim field (pos 0, width 10)
 static bool impl_modifyTermination(std::vector<std::string>& lines, double endtime) {
-    bool inTerm=false, hasTitle=false, titleDone=false;
-    for (auto& ln : lines) {
-        std::string tr = impl_trim(ln);
-        if (tr.empty()) continue;
-        if (tr[0]=='*') {
-            std::string up=impl_upper(tr);
-            inTerm=(up.rfind("*CONTROL_TERMINATION",0)==0);
-            hasTitle=(up.find("_TITLE")!=std::string::npos);
-            titleDone=false; continue;
-        }
-        if (!inTerm||tr[0]=='$') continue;
-        if (hasTitle&&!titleDone) { titleDone=true; continue; }
-        char buf[32]; snprintf(buf, sizeof(buf), "%g", endtime);
-        ln = impl_setField(ln, 0, 10, impl_trim(buf));
-        return true;
-    }
-    return false;
+    return kw_modifyTermination(lines, endtime);
 }
 
-// Check *SECTION_SHELL for ELFORM=16 (not supported in implicit)
-// Appends warning strings; if fix==true, replaces ELFORM=16 with 2
 static void impl_checkShellElform(std::vector<std::string>& lines, bool fix,
                                    std::vector<std::string>& warnings) {
-    bool inShell=false, hasTitle=false, titleDone=false;
-    for (auto& ln : lines) {
-        std::string tr = impl_trim(ln);
-        if (tr.empty()) continue;
-        if (tr[0]=='*') {
-            std::string up=impl_upper(tr);
-            inShell=(up.rfind("*SECTION_SHELL",0)==0);
-            hasTitle=(up.find("_TITLE")!=std::string::npos);
-            titleDone=false; continue;
-        }
-        if (!inShell||tr[0]=='$') continue;
-        if (hasTitle&&!titleDone) { titleDone=true; continue; }
-        // First data line: SECID(0-10), ELFORM(10-20)
-        auto toks = impl_tok10(ln);
-        if (toks.size() >= 2) {
-            int elform=-1;
-            try { elform=std::stoi(toks[1]); } catch(...){}
-            if (elform==16) {
-                warnings.push_back("[WARNING]  *SECTION_SHELL SECID=" + toks[0] +
-                    ": ELFORM=16 not supported in implicit"
-                    " (set fix_shell_elform: true to auto-fix)");
-                if (fix) ln = impl_setField(ln, 10, 10, "2");
-            }
-        }
-        inShell=false; // one data line per section keyword
-    }
+    kw_checkShellElform(lines, fix, warnings);
 }
 
 // Generate the 4 *CONTROL_IMPLICIT_* blocks as a string
