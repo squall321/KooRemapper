@@ -171,6 +171,7 @@ endif()
 set(COMMAND_SOURCES
     src/commands/modal.cpp
     src/commands/relax.cpp
+    src/commands/implicit.cpp
 )
 
 # Main executable
