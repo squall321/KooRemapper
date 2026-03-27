@@ -173,6 +173,7 @@ set(COMMAND_SOURCES
     src/commands/relax.cpp
     src/commands/implicit.cpp
     src/commands/database.cpp
+    src/commands/matdb.cpp
 )
 
 # Main executable
