@@ -167,8 +167,14 @@ if(OpenMP_CXX_FOUND)
     target_compile_definitions(kooremapper_lib PUBLIC USE_OPENMP)
 endif()
 
+# Command source files (split from main.cpp one by one)
+set(COMMAND_SOURCES
+    src/commands/modal.cpp
+)
+
 # Main executable
-add_executable(KooRemapper src/main.cpp)
+add_executable(KooRemapper src/main.cpp ${COMMAND_SOURCES})
+target_include_directories(KooRemapper PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(KooRemapper PRIVATE kooremapper_lib)
 if(MSVC)
     target_compile_definitions(KooRemapper PRIVATE _USE_MATH_DEFINES)
