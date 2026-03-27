@@ -170,6 +170,7 @@ endif()
 # Command source files (split from main.cpp one by one)
 set(COMMAND_SOURCES
     src/commands/modal.cpp
+    src/commands/relax.cpp
 )
 
 # Main executable
