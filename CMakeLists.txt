@@ -172,6 +172,7 @@ set(COMMAND_SOURCES
     src/commands/modal.cpp
     src/commands/relax.cpp
     src/commands/implicit.cpp
+    src/commands/database.cpp
 )
 
 # Main executable
