@@ -176,6 +176,8 @@ set(COMMAND_SOURCES
     src/commands/matdb.cpp
     src/commands/stabilize.cpp
     src/commands/ale.cpp
+    src/commands/matswap.cpp
+    src/commands/optimize.cpp
 )
 
 # Main executable
