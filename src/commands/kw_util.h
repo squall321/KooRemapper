@@ -231,3 +231,47 @@ inline void kw_checkShellElform(std::vector<std::string>& lines, bool fix,
         inShell = false; // one data line per section keyword
     }
 }
+
+// ---------------------------------------------------------------------------
+// CONTROL card field patchers (used by stabilize, optimize, etc.)
+// ---------------------------------------------------------------------------
+
+// Returns 0=not found, 1=already has value, 2=modified
+inline int kw_patchControlField(std::vector<std::string>& lines,
+                                  const std::string& keyword,
+                                  int fieldPos, int fieldWidth,
+                                  const std::string& newVal) {
+    bool inBlock = false, hasTitle = false, titleDone = false;
+    for (auto& ln : lines) {
+        std::string tr = kw_trim(ln);
+        if (tr.empty()) continue;
+        if (tr[0] == '*') {
+            std::string up = kw_upper(tr);
+            inBlock = (up.rfind(keyword, 0) == 0);
+            hasTitle = (up.find("_TITLE") != std::string::npos);
+            titleDone = false;
+            continue;
+        }
+        if (!inBlock || tr[0] == '$') continue;
+        if (hasTitle && !titleDone) { titleDone = true; continue; }
+        std::string curVal;
+        if ((int)ln.size() > fieldPos) {
+            int end = std::min((int)ln.size(), fieldPos + fieldWidth);
+            curVal = kw_trim(ln.substr(fieldPos, end - fieldPos));
+        }
+        if (curVal == kw_trim(newVal)) return 1;
+        ln = kw_setField(ln, fieldPos, fieldWidth, newVal);
+        return 2;
+    }
+    return 0;
+}
+
+inline bool kw_hasKeyword(const std::vector<std::string>& lines, const std::string& keyword) {
+    for (const auto& ln : lines) {
+        std::string tr = kw_trim(ln);
+        if (!tr.empty() && tr[0] == '*') {
+            if (kw_upper(tr).rfind(keyword, 0) == 0) return true;
+        }
+    }
+    return false;
+}

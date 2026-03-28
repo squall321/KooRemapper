@@ -174,6 +174,7 @@ set(COMMAND_SOURCES
     src/commands/implicit.cpp
     src/commands/database.cpp
     src/commands/matdb.cpp
+    src/commands/stabilize.cpp
 )
 
 # Main executable
