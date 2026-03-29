@@ -182,6 +182,8 @@ set(COMMAND_SOURCES
     src/commands/contact.cpp
     src/commands/load_boundary.cpp
     src/commands/standalone_ops.cpp
+    src/commands/core_ops.cpp
+    src/commands/squeeze_assemble.cpp
 )
 
 # Main executable
