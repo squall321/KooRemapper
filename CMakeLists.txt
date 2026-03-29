@@ -178,6 +178,8 @@ set(COMMAND_SOURCES
     src/commands/ale.cpp
     src/commands/matswap.cpp
     src/commands/optimize.cpp
+    src/commands/contact_helpers.cpp
+    src/commands/contact.cpp
 )
 
 # Main executable
