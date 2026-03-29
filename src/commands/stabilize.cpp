@@ -1,4 +1,5 @@
 #include "stabilize.h"
+#include "contact_helpers.h"
 #include "kw_util.h"
 #include "cli/ConsoleOutput.h"
 
@@ -510,4 +511,39 @@ int runStabilize(const std::string& yamlFile, ConsoleOutput& console) {
 
     console.println("[stabilize] Done -> " + outputPath);
     return 0;
+}
+
+void stab_applyPerContact(std::vector<std::string>& lines,
+                           const StabilizeConfig& cfg,
+                           std::vector<std::string>& msgs) {
+    auto tag = [](const std::string& s) { return "[stabilize] " + s; };
+    auto contacts = ct_parseContacts(lines);
+    int modCount = 0;
+    for (auto& ct : contacts) {
+        ContactDef merged = ct;
+        bool changed = false;
+        if (cfg.soft >= 0 || cfg.sbopt >= 0 || cfg.depth >= 0 || cfg.maxpar >= 0) {
+            merged.hasCardA = true;
+            if (cfg.soft   >= 0) { merged.soft   = cfg.soft;   changed = true; }
+            if (cfg.sbopt  >= 0) { merged.sbopt  = cfg.sbopt;  changed = true; }
+            if (cfg.depth  >= 0) { merged.depth  = cfg.depth;  changed = true; }
+            if (cfg.maxpar >= 0) { merged.maxpar = cfg.maxpar; changed = true; }
+        }
+        if (cfg.ignore_ >= 0) {
+            merged.hasCardA = true; merged.hasCardB = true; merged.hasCardC = true;
+            merged.ignore_ = cfg.ignore_;
+            changed = true;
+        }
+        if (changed) {
+            ct_modifyOptionalCards(lines, ct, merged);
+            contacts = ct_parseContacts(lines);
+            modCount++;
+        }
+    }
+    if (modCount > 0)
+        msgs.push_back(tag(std::to_string(modCount) + " contact(s) updated (Card A/C options)"));
+    else if (!contacts.empty())
+        msgs.push_back(tag("Per-contact options: all contacts already up to date"));
+    else
+        msgs.push_back(tag("Per-contact options: no *CONTACT_* found in model"));
 }
