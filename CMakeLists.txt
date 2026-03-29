@@ -180,6 +180,8 @@ set(COMMAND_SOURCES
     src/commands/optimize.cpp
     src/commands/contact_helpers.cpp
     src/commands/contact.cpp
+    src/commands/load_boundary.cpp
+    src/commands/standalone_ops.cpp
 )
 
 # Main executable
