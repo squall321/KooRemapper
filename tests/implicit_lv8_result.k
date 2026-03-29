@@ -46,11 +46,13 @@ $    IMASS     GAMMA      BETA    TDYBIR    TDYDTH    TDYBUR     IRATE
 *CONTROL_IMPLICIT_SOLUTION
 $   NSOLVR    ILIMIT    MAXREF     DCTOL     ECTOL     RCTOL     LSTOL    ABSTOL
          7        40        50  0.000100  0.001000 1.000E-02  0.990000 1.000E-10
+$    DNORM    DIVERG     ISTIF   NLPRINT    NLNORM   D3ITCTL     CPCHK
+         0         0         1         0         0         0         0
 $   ARCCTL    ARCDIR    ARCLEN    ARCMTH    ARCDMP    ARCPSI    ARCALF    ARCTIM
          0         0  0.000000         1         2  0.000000  0.000000  0.000000
 *CONTROL_IMPLICIT_AUTO
 $    IAUTO    ITEOPT    ITEWIN     DTMIN     DTMAX     DTEXP     KFAIL    KCYCLE
-         1        20         5-1.000E-06  0.000100       0.0        15         0
+         1        20         5-1.000E-06 1.000E-04       0.0        15         0
 *CONTROL_IMPLICIT_STABILIZATION
 $       IAS     SCALE    TSTART      TEND
          1  1.000000       0.0 1.000E+28

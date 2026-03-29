@@ -83,14 +83,6 @@ void printBanner(const ConsoleOutput& console) {
 }
 
 
-// runMapping, runShellMapping, runGenerate, runStrain, runUnfold, runPrestress,
-// runInfo, runGenerateBox, runGenerateVar moved to src/commands/core_ops.cpp
-// runSqueeze, runAssemble moved to src/commands/squeeze_assemble.cpp
-
-
-// impl_* shims, opt_* helpers, opt_applyRubber moved to optimize.cpp
-// stab_applyPerContact moved to stabilize.cpp
-
 int main(int argc, char* argv[]) {
 #ifdef _WIN32
     // Set console output to UTF-8 so Korean/Unicode help text renders correctly

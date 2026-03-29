@@ -48,5 +48,8 @@ $   NSOLVR    ILIMIT    MAXREF     DCTOL     ECTOL     RCTOL     LSTOL    ABSTOL
         -2        11        15  0.000100  0.001000 1.000E+10  0.900000 1.000E-10
 *CONTROL_IMPLICIT_AUTO
 $    IAUTO    ITEOPT    ITEWIN     DTMIN     DTMAX     DTEXP     KFAIL    KCYCLE
-         1        11         5-1.000E-04  0.050000       0.0         0         0
+         1        11         5-1.000E-04 5.000E-02       0.0         0         0
+*CONTROL_IMPLICIT_SOLVER
+$    LSOLVR    LPRINT     NEGEV     ORDER      DRCM    DRCPRM   AUTOSPC   AUTOTOL
+         7         0         2         0         4       0.0         1       0.0
 *END
