@@ -318,7 +318,13 @@ static Vec3 cs_detectAxis(const std::vector<NodeXYZ>& nodes,
     cs_eigen3x3sym(cov, evals, evecs);
 
     // Largest eigenvalue eigenvector = cylinder axis
-    return {evecs[0][0], evecs[0][1], evecs[0][2]};
+    Vec3 axis = {evecs[0][0], evecs[0][1], evecs[0][2]};
+
+    // Snap to canonical axis if close (avoids floating-point tilt artifacts)
+    if (std::fabs(axis.x) > 0.9) return {axis.x > 0 ? 1.0 : -1.0, 0, 0};
+    if (std::fabs(axis.y) > 0.9) return {0, axis.y > 0 ? 1.0 : -1.0, 0};
+    if (std::fabs(axis.z) > 0.9) return {0, 0, axis.z > 0 ? 1.0 : -1.0};
+    return axis;
 }
 
 // ============================================================
@@ -536,25 +542,39 @@ static bool cs_convertOneCnrb(
         allZ.push_back(headTopZ);
         std::sort(allZ.begin(), allZ.end());
         zRlocal[headTopZ] = headR;
-
-        // Update R_local for head base Z-level too if needed (don't shrink existing)
-        // shaft levels keep R_shaft, head topZ gets R_head
-        // (zRlocal already has R_shaft for intermediate levels)
+        // Head base Z-level also uses headR so head layer gets full ring set
+        zRlocal[headZ]    = headR;
     }
 
     // --- 8. Determine radial rings ---
-    // Shaft inner ring = R_shaft_global * radiusScale
-    // If head: additional rings from R_shaft_global to headR
-    double R_inner = R_shaft_global * cfg.radiusScale;
+    // Build one ring per distinct R cluster found across all Z-levels,
+    // plus additional rings for bolt head if present.
 
-    // Radial ring boundaries: [0=core boundary, 1=R_inner, (2..K=head rings)]
+    // Collect and cluster all R values (from shaft levels only, not head)
+    std::vector<double> allShaftR;
+    for (double z : zLevels) allShaftR.push_back(zRmax[z]);
+    std::sort(allShaftR.begin(), allShaftR.end());
+
+    // Cluster with r_tolerance
+    std::vector<double> rClusters;
+    for (double rv : allShaftR) {
+        if (rClusters.empty() || rv - rClusters.back() > cfg.rTolerance)
+            rClusters.push_back(rv);
+        else
+            rClusters.back() = 0.5 * (rClusters.back() + rv); // running mean
+    }
+
+    // Ring radii = cluster centers * radiusScale
     std::vector<double> ringRadii;
-    ringRadii.push_back(R_inner); // shaft ring outer radius
+    for (double rc : rClusters)
+        ringRadii.push_back(rc * cfg.radiusScale);
+
     if (hasHead) {
-        // Add head rings: evenly spaced from R_inner to headR
+        // Add head rings: evenly spaced from R_shaft to headR
         int headRings = std::max(1, (int)std::round(cfg.headOffsetR / (R_shaft_global / 2.0)));
+        double R_shaft_scaled = R_shaft_global * cfg.radiusScale;
         for (int k = 1; k <= headRings; ++k)
-            ringRadii.push_back(R_inner + (headR - R_inner) * k / headRings);
+            ringRadii.push_back(R_shaft_scaled + (headR - R_shaft_global) * k / headRings * cfg.radiusScale);
     }
 
     // --- 9. Generate nodes for all Z-levels at full R_max ---
@@ -564,7 +584,7 @@ static bool cs_convertOneCnrb(
     //
     // We store: zNodeMap[z][ring_or_core_idx] = global node ID
 
-    double coreHalf = R_inner * cfg.innerRadiusRatio; // half-side of core square
+    double coreHalf = ringRadii[0] * cfg.innerRadiusRatio; // half-side of core square
 
     // Maps: per Z-level → flat array of node IDs
     //   coreBase: (m+1)*(m+1) nodes
@@ -621,20 +641,11 @@ static bool cs_convertOneCnrb(
         double zBot = allZ[li];
         double zTop = allZ[li+1];
 
-        // R_local for this layer = min of R at bot and top
+        // R_local for this layer = min of R at bot and top * scale
+        // (zRlocal already has headR for headZ and headTopZ levels)
         double rBot = zRlocal.count(zBot) ? zRlocal[zBot] : R_shaft_global;
         double rTop = zRlocal.count(zTop) ? zRlocal[zTop] : R_shaft_global;
         double rLocal = std::min(rBot, rTop) * cfg.radiusScale;
-        // For head layer: rLocal should equal headR (both sides have head R)
-        if (hasHead) {
-            bool botIsHead = (std::fabs(zBot - headTopZ) < 1e-8 || std::fabs(zTop - headTopZ) < 1e-8);
-            bool topIsHead = (hasHead && (std::fabs(zTop - headTopZ) < 1e-8));
-            // head layer: both base and top have headR or R_shaft
-            double rBotH = (std::fabs(zBot - headTopZ) < 1e-8) ? headR : rBot;
-            double rTopH = (std::fabs(zTop - headTopZ) < 1e-8) ? headR : rTop;
-            rLocal = std::min(rBotH, rTopH) * cfg.radiusScale;
-            (void)botIsHead; (void)topIsHead;
-        }
 
         const ZNodes& znBot = zNodes[zBot];
         const ZNodes& znTop = zNodes[zTop];
@@ -931,8 +942,7 @@ int runCnrb2Solid(const std::string& yamlFile, ConsoleOutput& console) {
 
     auto resolvePath = [&](const std::string& p) -> std::string {
         if (!configDir.empty() && !p.empty() &&
-            p[0] != '/' && p[0] != '\\' && !(p.size() >= 2 && p[1] == ':') &&
-            p.find('/') == std::string::npos && p.find('\\') == std::string::npos)
+            p[0] != '/' && p[0] != '\\' && !(p.size() >= 2 && p[1] == ':'))
             return configDir + "/" + p;
         return p;
     };

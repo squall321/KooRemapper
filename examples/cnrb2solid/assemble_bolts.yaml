@@ -1,0 +1,38 @@
+# =============================================================
+# KooRemapper assemble - cnrb2solid pipeline example
+# =============================================================
+# Assemble a model: replace CNRB rigid bolts with solid HEX8
+# meshes, then apply implicit solver settings for springback.
+#
+# Usage: KooRemapper assemble assemble_bolts.yaml
+# =============================================================
+
+base_model: bolt_simple.k
+output: bolt_assembly
+
+operations:
+  # --- Step 1: Convert CNRB rigid bolts to solid HEX8 mesh ---
+  - type: cnrb2solid
+    # Material (t/mm/s: MPa, t, mm, s)
+    E:   200000.0     # Young's modulus [MPa]
+    PR:  0.3          # Poisson's ratio
+    RHO: 7.85e-9      # Density [t/mm³]
+
+    # Mesh
+    radius_scale:       0.999   # ring radius = bolt-hole R × scale
+    num_circum_nodes:   0       # 0 = auto-detect from hole node count
+    inner_radius_ratio: 0.3     # core square size / ring radius
+
+    # Auto-detection
+    axis_direction: auto  # auto | x | y | z
+    z_tolerance:    0.1   # Z-level grouping tolerance [mm]
+    r_tolerance:    0.5   # radial cluster tolerance [mm]
+
+    # Bolt head (comment out or set head_offset_r: 0 to disable)
+    head_offset_r:  1.5   # head radius = R_shaft + 1.5 mm
+    head_thickness: 2.0   # head axial thickness [mm]
+    head_position:  auto  # auto | top | bottom | none
+
+  # --- Step 2: (optional) stabilize for tight-fit contact ---
+  # - type: stabilize
+  #   level: 4              # IHQ=4 hourglass control

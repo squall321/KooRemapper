@@ -1,0 +1,91 @@
+# =============================================================
+# KooRemapper cnrb2solid - Full Options Example
+# =============================================================
+# Convert CNRB (CONSTRAINED_NODAL_RIGID_BODY) rigid bolt models
+# to solid HEX8 O-grid cylinder meshes with optional bolt head.
+#
+# Usage: KooRemapper cnrb2solid cnrb2solid_full.yaml
+# =============================================================
+
+# --- Required ---
+model: bolt_simple.k       # Input K-file containing *CONSTRAINED_NODAL_RIGID_BODY
+output: bolt_solid.k       # Output K-file with solid HEX8 elements
+
+# --- Material (t/mm/s unit system: MPa, tonnes, mm, s) ---
+E:   200000.0   # Young's modulus [MPa]  (200 GPa steel)
+PR:  0.3        # Poisson's ratio
+RHO: 7.85e-9   # Density [t/mm³]
+
+# --- Mesh Parameters ---
+radius_scale:       0.999  # Ring node radius = bolt-hole R × this factor
+                            # (< 1.0 keeps nodes inside the hole, ~0.001 gap)
+num_circum_nodes:   0      # Circumferential nodes per ring. 0 = auto-detect
+                            # from max nodes-per-Z-level (rounded to multiple of 4).
+                            # Override: 8, 12, 16, 20, ... (must be multiple of 4)
+inner_radius_ratio: 0.3    # Core square half-side / ring radius.
+                            # 0.3 → core side ≈ 60% of bolt diameter.
+                            # Higher = larger square core, fewer ring cells.
+
+# --- Axis & Tolerance Detection ---
+axis_direction: auto       # Cylinder axis direction.
+                            # auto: detected by PCA then snapped to nearest canonical axis.
+                            # x / y / z: force a specific axis.
+z_tolerance:    0.1        # Z-level grouping tolerance [mm].
+                            # Nodes within this distance along the axis are treated as
+                            # the same cross-section level.
+r_tolerance:    0.5        # Radial cluster tolerance [mm].
+                            # Used to group distinct bolt radii (stepped bolts).
+                            # Each cluster → one ring; head rings are added on top.
+
+# --- Bolt Head (flange) ---
+head_offset_r:   0.0       # Head radius = R_shaft + head_offset_r [mm].
+                            # 0.0 (default) = no head generated.
+                            # e.g. 1.5 → head R = bolt R + 1.5 mm.
+head_thickness:  2.0       # Head axial thickness [mm].
+                            # Only used when head_offset_r > 0.
+head_position:   auto      # Where to place the head along the bolt axis:
+                            #   auto   (default) = the end with the larger Z value
+                            #   top    = force Z_max side
+                            #   bottom = force Z_min side
+                            #   none   = disable head (same as head_offset_r: 0)
+
+# =============================================================
+# Pipeline: what this command does
+#
+# INPUT  : K-file with *CONSTRAINED_NODAL_RIGID_BODY (CNRB) definitions.
+#          Each CNRB has: PID, NSID (node-set of hole nodes), PNID (center node).
+#
+# AUTO-DETECTS per CNRB:
+#   - Cylinder axis direction via PCA of hole-node positions (+ canonical snap)
+#   - Z-levels (cross-section layers) along the axis
+#   - Bolt-hole radius per Z-level (max radial distance from center)
+#   - Number of circumferential nodes N from max nodes per level (multiple of 4)
+#   - Distinct radius clusters (for stepped bolts → multiple rings per layer)
+#
+# GENERATES per CNRB:
+#   O-grid HEX8 topology:
+#     Core:     m × m square elements (m = N/4)
+#     Ring 0:   N elements connecting core boundary → first outer ring
+#     Ring k:   N elements per additional radius ring (stepped bolt / head)
+#   Total elements per layer = m² + N × (num_rings)
+#
+#   BOLT HEAD (if head_offset_r > 0):
+#     Extra Z-level added at shaft extremity + head_thickness
+#     Additional ring(s) from R_shaft to R_head = R_shaft + head_offset_r
+#
+# REMOVES:
+#   *CONSTRAINED_NODAL_RIGID_BODY  (the CNRB definition)
+#   *SET_NODE_LIST / *SET_NODE_LIST_TITLE  (CNRB hole node set)
+#
+# INSERTS:
+#   *NODE               - new solid mesh nodes
+#   *ELEMENT_SOLID      - HEX8 elements (ELFORM=1)
+#   *SECTION_SOLID      - new section (ELFORM=1)
+#   *MAT_ELASTIC        - isotropic elastic material
+#   *PART               - new solid part (same PID as original CNRB)
+#
+# TIED CONTACT:
+#   The outer ring nodes at each Z-level are placed at radius_scale × R_hole.
+#   LS-DYNA *CONTACT_TIED_NODES_TO_SURFACE or conformal mesh required
+#   between the solid bolt surface and the surrounding structure.
+# =============================================================
