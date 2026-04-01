@@ -394,6 +394,14 @@ struct FilletOperation {
     std::vector<std::string> faces;  // "z_max", "z_min", "x_max", "x_min", "y_max", "y_min"
 };
 
+struct HFDampOperation {
+    double dtTarget    = 0.0;      // REQUIRED: target timestep
+    double cdamp       = 0.99;     // fraction of critical damping
+    double fhighRatio  = 100.0;    // FHIGH = FLOW * fhigh_ratio
+    std::string mode   = "global"; // "global" | "selective"
+    double tssfac      = 0.9;      // element dt safety factor (selective mode)
+};
+
 struct Cnrb2SolidOperation {
     std::vector<int> targetPids;     // empty = all CNRBs
     double E               = 200000.0;
@@ -412,7 +420,7 @@ struct Cnrb2SolidOperation {
 };
 
 struct AssemblyOperation {
-    enum Type { REPLACE, SQUEEZE, RESTACK, BEND, INDENT, FORMSTRAIN, TET10_CONVERT, REFINE, ELFORM, DISCONNECT, IGA, WARPAGE, OFFSET, MATSWAP, MATDB, LOAD, CONTACT, BOUNDARY, RBE, WRAP, UPDATE, DATABASE, CONTROL, GENERATE, FILLET, CNRB2SOLID };
+    enum Type { REPLACE, SQUEEZE, RESTACK, BEND, INDENT, FORMSTRAIN, TET10_CONVERT, REFINE, ELFORM, DISCONNECT, IGA, WARPAGE, OFFSET, MATSWAP, MATDB, LOAD, CONTACT, BOUNDARY, RBE, WRAP, UPDATE, DATABASE, CONTROL, GENERATE, FILLET, CNRB2SOLID, HFDAMP };
     Type type;
     ReplaceOperation replace;
     SqueezeOperation squeeze;
@@ -440,6 +448,7 @@ struct AssemblyOperation {
     ControlOperation control;
     FilletOperation fillet;
     Cnrb2SolidOperation cnrb2solid;
+    HFDampOperation hfdamp;
 };
 
 struct AssemblyConfig {

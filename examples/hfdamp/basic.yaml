@@ -1,0 +1,8 @@
+# hfdamp - 기본 예제 (전 파트 global 적용)
+model: ../../examples/assemble/box.k
+output: box_hfdamp.k
+
+dt_target: 3.0e-7     # FLOW = 1/(2×3e-7) ≈ 1.67 MHz
+cdamp: 0.99
+fhigh_ratio: 100.0
+mode: global

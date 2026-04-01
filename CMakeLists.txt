@@ -188,6 +188,7 @@ set(COMMAND_SOURCES
     src/commands/core_ops.cpp
     src/commands/squeeze_assemble.cpp
     src/commands/cnrb2solid.cpp
+    src/commands/hfdamp.cpp
 )
 
 # Main executable

@@ -796,6 +796,8 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             op.type = AssemblyOperation::FILLET;
                         } else if (val == "cnrb2solid") {
                             op.type = AssemblyOperation::CNRB2SOLID;
+                        } else if (val == "hfdamp") {
+                            op.type = AssemblyOperation::HFDAMP;
                         } else {
                             throw std::runtime_error("Unknown operation type: " + val);
                         }
@@ -1278,6 +1280,12 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             else if (key == "head_offset_r")       op.cnrb2solid.headOffsetR     = std::stod(val);
                             else if (key == "head_thickness")      op.cnrb2solid.headThickness   = std::stod(val);
                             else if (key == "head_position")       op.cnrb2solid.headPosition    = val;
+                        } else if (op.type == AssemblyOperation::HFDAMP) {
+                            if      (key == "dt_target")   op.hfdamp.dtTarget   = std::stod(val);
+                            else if (key == "cdamp")       op.hfdamp.cdamp      = std::stod(val);
+                            else if (key == "fhigh_ratio") op.hfdamp.fhighRatio = std::stod(val);
+                            else if (key == "mode")        op.hfdamp.mode       = val;
+                            else if (key == "tssfac")      op.hfdamp.tssfac     = std::stod(val);
                         }
                     } catch (...) {}
                 }

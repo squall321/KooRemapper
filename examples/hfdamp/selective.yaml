@@ -1,0 +1,9 @@
+# hfdamp - selective 예제 (요소 dt 계산 → 해당 파트만)
+model: ../../examples/assemble/box.k
+output: box_hfdamp_selective.k
+
+dt_target: 3.0e-7
+cdamp: 0.99
+fhigh_ratio: 100.0
+mode: selective   # 요소 dt 계산 → dt <= dt_target 파트만 SET_PART 생성
+tssfac: 0.9

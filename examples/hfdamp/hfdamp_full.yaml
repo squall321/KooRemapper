@@ -1,0 +1,82 @@
+# =============================================================
+# KooRemapper hfdamp - Full Options Example
+# =============================================================
+# Insert *DAMPING_FREQUENCY_RANGE_DEFORM to suppress high-frequency
+# (spurious) oscillations caused by small elements.
+#
+# Core idea:
+#   Elements with time step dt_e = TSSFAC × L / c  generate
+#   wave frequencies up to f_max = 1 / (2 × dt_e).
+#   By setting FLOW = 1 / (2 × dt_target), any element whose
+#   dt ≤ dt_target will have its characteristic frequency
+#   inside the damped band [FLOW, FHIGH].
+#
+# Usage: KooRemapper hfdamp hfdamp_full.yaml
+# =============================================================
+
+# --- Required ---
+model:  input.k      # Input K-file
+output: output.k     # Output K-file
+
+# --- Target Timestep ---
+# Frequencies corresponding to elements with dt ≤ dt_target are damped.
+# FLOW = 1 / (2 × dt_target)
+#
+# Examples (t/mm/s unit system, steel E=200GPa, rho=7.85e-9 t/mm³):
+#   Typical 1mm element:   dt ≈ 2.0e-7 s → use dt_target: 2.0e-7
+#   Typical 0.1mm element: dt ≈ 2.0e-8 s → use dt_target: 2.0e-8
+#   If unsure: run with mode: selective to auto-detect
+dt_target: 3.0e-8     # [model time units]
+
+# --- Damping Ratio ---
+# CDAMP = fraction of critical damping applied over [FLOW, FHIGH].
+# 0.99  → near-critical: strongly suppresses high-frequency content.
+# 0.10  → 10% damping:   mild attenuation, less effect on response.
+# Recommended for noise suppression: 0.5 ~ 0.99
+cdamp: 0.99
+
+# --- Frequency Band Width ---
+# FHIGH = FLOW × fhigh_ratio
+# Recommended range: fhigh_ratio = 10 ~ 300
+#   Low ratio (10):   narrow band, minimal stiffness alteration
+#   High ratio (100): wide band, more thorough suppression
+# Note: wide band increases dynamic stiffness slightly (see manual Remark 3)
+fhigh_ratio: 100.0
+
+# --- Application Mode ---
+# global    (default): Apply PSID=0 → all parts
+#                      Simple and safe if all parts have similar mesh size.
+# selective:           Compute element dt for each part, collect parts where
+#                      min(dt_element) ≤ dt_target, create *SET_PART_LIST.
+#                      Requires material data (E, PR, RHO) in the K-file.
+#                      More targeted: avoids over-damping coarse-mesh parts.
+mode: global
+
+# --- TSSFAC (selective mode only) ---
+# Safety factor used when estimating element dt:
+#   dt_element = tssfac × L_char / c_wave
+# Should match *CONTROL_TIMESTEP TSSFAC in the model (default 0.9).
+tssfac: 0.9
+
+# =============================================================
+# What this command does:
+#
+# Inserts before *END:
+#   *DAMPING_FREQUENCY_RANGE_DEFORM
+#   CDAMP  FLOW  FHIGH  PSID  (PIDREL=0  IFLG=0)
+#
+# If mode=selective and targeted parts exist:
+#   *SET_PART_LIST_TITLE  (SID = max_existing_SID + 1)
+#   ... target PID list ...
+#   *DAMPING_FREQUENCY_RANGE_DEFORM  (PSID = SID above)
+#
+# Physics notes:
+#   - DEFORM option: damps element stresses/forces, NOT rigid body motion.
+#     Best for nonlinear explicit analysis.
+#   - FLOW  = 1 / (2 × dt_target): lower bound of damped frequency band.
+#   - FHIGH = FLOW × fhigh_ratio: upper bound.
+#   - CDAMP: effective at frequencies FLOW < f < FHIGH.
+#     Drops off outside the band.
+#   - Dynamic stiffness increases by ~CDAMP% for DEFORM option.
+#     Compensate by reducing E slightly if needed (see manual Table 15-1).
+# =============================================================

@@ -1,0 +1,22 @@
+# =============================================================
+# KooRemapper assemble - hfdamp pipeline example
+# =============================================================
+# Apply high-frequency damping as part of an assembly workflow.
+# Usage: KooRemapper assemble assemble_hfdamp.yaml
+# =============================================================
+
+base_model: my_model.k
+output: my_model_damped
+
+operations:
+  # --- High-frequency damping (suppress spurious oscillations) ---
+  - type: hfdamp
+    dt_target: 3.0e-8    # damp frequencies above 1/(2×dt_target) Hz
+    cdamp: 0.99           # near-critical damping in the target band
+    fhigh_ratio: 100.0    # FHIGH = FLOW × 100
+    mode: selective       # only damp parts with small elements
+    tssfac: 0.9           # match *CONTROL_TIMESTEP TSSFAC
+
+  # --- Example: combine with stabilize for contact-heavy models ---
+  # - type: stabilize
+  #   level: 6

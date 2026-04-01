@@ -1,5 +1,6 @@
 #include "assembly/ModelAssembler.h"
 #include "commands/cnrb2solid.h"
+#include "commands/hfdamp.h"
 #include "assembly/DeflectionGrid.h"
 #include "assembly/FormulaEvaluator.h"
 #include "assembly/ClosedLoop.h"
@@ -11603,6 +11604,26 @@ bool ModelAssembler::applyCnrb2Solid(const Cnrb2SolidOperation& op) {
     }
     char buf[64];
     snprintf(buf, sizeof(buf), "[cnrb2solid] Converted %d CNRB(s)", n);
+    infoMessages.push_back(buf);
+    return true;
+}
+
+bool ModelAssembler::applyHFDamp(const HFDampOperation& op) {
+    HFDampConfig cfg;
+    cfg.dtTarget   = op.dtTarget;
+    cfg.cdamp      = op.cdamp;
+    cfg.fhighRatio = op.fhighRatio;
+    cfg.mode       = op.mode;
+    cfg.tssfac     = op.tssfac;
+
+    ConsoleOutput console;
+    int rc = hfdamp_apply(rawLines_, cfg, maxSetId_, console);
+    if (rc != 0) {
+        errorMessage_ = "[hfdamp] Failed to apply damping";
+        return false;
+    }
+    char buf[128];
+    snprintf(buf, sizeof(buf), "[hfdamp] Inserted DAMPING_FREQUENCY_RANGE_DEFORM (mode=%s)", cfg.mode.c_str());
     infoMessages.push_back(buf);
     return true;
 }

@@ -637,6 +637,8 @@ int runAssemble(const std::string& configFile, const ConsoleOutput& console) {
             ok = assembler.applyFillet(op.fillet);
         } else if (op.type == AssemblyOperation::CNRB2SOLID) {
             ok = assembler.applyCnrb2Solid(op.cnrb2solid);
+        } else if (op.type == AssemblyOperation::HFDAMP) {
+            ok = assembler.applyHFDamp(op.hfdamp);
         }
 
         if (!ok) {

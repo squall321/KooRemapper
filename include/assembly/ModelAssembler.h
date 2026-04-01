@@ -58,6 +58,7 @@ public:
     bool applyControl(const ControlOperation& op);
     bool applyFillet(const FilletOperation& op);
     bool applyCnrb2Solid(const Cnrb2SolidOperation& op);
+    bool applyHFDamp(const HFDampOperation& op);
     // Returns all distinct part IDs currently in the model (base + added elements)
     std::vector<int> getAllPartIds() const;
     bool writeOutput(const std::string& outputPrefix);
