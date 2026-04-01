@@ -394,8 +394,25 @@ struct FilletOperation {
     std::vector<std::string> faces;  // "z_max", "z_min", "x_max", "x_min", "y_max", "y_min"
 };
 
+struct Cnrb2SolidOperation {
+    std::vector<int> targetPids;     // empty = all CNRBs
+    double E               = 200000.0;
+    double PR              = 0.3;
+    double RHO             = 7.85e-9;
+    double radiusScale     = 0.999;
+    int    numCircumNodes  = 0;      // 0 = auto
+    double innerRadiusRatio = 0.3;
+    std::string axisDirection = "auto"; // auto|x|y|z
+    double zTolerance      = 0.1;
+    double rTolerance      = 0.5;
+    // bolt head
+    double headOffsetR     = 0.0;   // 0 = no head
+    double headThickness   = 2.0;
+    std::string headPosition = "auto"; // auto|top|bottom|none
+};
+
 struct AssemblyOperation {
-    enum Type { REPLACE, SQUEEZE, RESTACK, BEND, INDENT, FORMSTRAIN, TET10_CONVERT, REFINE, ELFORM, DISCONNECT, IGA, WARPAGE, OFFSET, MATSWAP, MATDB, LOAD, CONTACT, BOUNDARY, RBE, WRAP, UPDATE, DATABASE, CONTROL, GENERATE, FILLET };
+    enum Type { REPLACE, SQUEEZE, RESTACK, BEND, INDENT, FORMSTRAIN, TET10_CONVERT, REFINE, ELFORM, DISCONNECT, IGA, WARPAGE, OFFSET, MATSWAP, MATDB, LOAD, CONTACT, BOUNDARY, RBE, WRAP, UPDATE, DATABASE, CONTROL, GENERATE, FILLET, CNRB2SOLID };
     Type type;
     ReplaceOperation replace;
     SqueezeOperation squeeze;
@@ -422,6 +439,7 @@ struct AssemblyOperation {
     DatabaseOperation database;
     ControlOperation control;
     FilletOperation fillet;
+    Cnrb2SolidOperation cnrb2solid;
 };
 
 struct AssemblyConfig {

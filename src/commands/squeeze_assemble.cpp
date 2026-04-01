@@ -635,6 +635,8 @@ int runAssemble(const std::string& configFile, const ConsoleOutput& console) {
             ok = assembler.applyGenerate(op.generate);
         } else if (op.type == AssemblyOperation::FILLET) {
             ok = assembler.applyFillet(op.fillet);
+        } else if (op.type == AssemblyOperation::CNRB2SOLID) {
+            ok = assembler.applyCnrb2Solid(op.cnrb2solid);
         }
 
         if (!ok) {

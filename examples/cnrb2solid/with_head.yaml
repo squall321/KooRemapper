@@ -1,0 +1,36 @@
+# cnrb2solid - 볼트 헤드 포함 예제
+# 샤프트 상단(큰 Z 쪽)에 플랜지형 헤드를 자동 생성
+#
+# 단면도:
+#        ┌──────────────┐  ← head_offset_r=1.5 → R_head=4.5
+#        │  Bolt Head   │  ← head_thickness=2.0
+#   ─────┼──┐      ┌──┼─────
+#           │Shaft │       ← R_shaft=3.0 (볼트홀에서 감지)
+#           │      │
+#           └──────┘
+#
+# Usage: KooRemapper cnrb2solid with_head.yaml
+#
+model: bolt_simple.k
+output: bolt_with_head.k
+
+# 재료 (t/mm/s 단위계)
+E: 200000.0
+PR: 0.3
+RHO: 7.85e-9
+
+# 메쉬
+radius_scale: 0.999
+num_circum_nodes: 8
+inner_radius_ratio: 0.3
+axis_direction: auto
+z_tolerance: 0.1
+r_tolerance: 0.5
+
+# 볼트 헤드
+head_offset_r: 1.5      # 헤드 반경 = R_shaft + head_offset_r [mm]
+head_thickness: 2.0     # 헤드 축방향 두께 [mm]
+head_position: auto     # auto: 큰 R 쪽(또는 Z_max)에 자동 배치
+                        # top:    Z_max 쪽 강제
+                        # bottom: Z_min 쪽 강제
+                        # none:   헤드 미생성

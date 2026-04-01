@@ -156,6 +156,9 @@ add_library(kooremapper_lib STATIC
     ${VALIDATION_SOURCES}
 )
 
+# Add src/ to lib include path so ModelAssembler can reach commands/ headers
+target_include_directories(kooremapper_lib PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
 # Define M_PI for MSVC (apply to both lib and executable)
 if(MSVC)
     target_compile_definitions(kooremapper_lib PRIVATE _USE_MATH_DEFINES)
@@ -184,6 +187,7 @@ set(COMMAND_SOURCES
     src/commands/standalone_ops.cpp
     src/commands/core_ops.cpp
     src/commands/squeeze_assemble.cpp
+    src/commands/cnrb2solid.cpp
 )
 
 # Main executable

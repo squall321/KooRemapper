@@ -794,6 +794,8 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             op.type = AssemblyOperation::GENERATE;
                         } else if (val == "fillet") {
                             op.type = AssemblyOperation::FILLET;
+                        } else if (val == "cnrb2solid") {
+                            op.type = AssemblyOperation::CNRB2SOLID;
                         } else {
                             throw std::runtime_error("Unknown operation type: " + val);
                         }
@@ -1263,6 +1265,19 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                                 inMatdbRulesList = true;
                                 matdbRulesKeyIndent = indent;
                             }
+                        } else if (op.type == AssemblyOperation::CNRB2SOLID) {
+                            if      (key == "E")                   op.cnrb2solid.E               = std::stod(val);
+                            else if (key == "PR" || key == "pr")   op.cnrb2solid.PR              = std::stod(val);
+                            else if (key == "RHO" || key == "rho") op.cnrb2solid.RHO             = std::stod(val);
+                            else if (key == "radius_scale")        op.cnrb2solid.radiusScale     = std::stod(val);
+                            else if (key == "num_circum_nodes")    op.cnrb2solid.numCircumNodes  = std::stoi(val);
+                            else if (key == "inner_radius_ratio")  op.cnrb2solid.innerRadiusRatio = std::stod(val);
+                            else if (key == "axis_direction")      op.cnrb2solid.axisDirection   = val;
+                            else if (key == "z_tolerance")         op.cnrb2solid.zTolerance      = std::stod(val);
+                            else if (key == "r_tolerance")         op.cnrb2solid.rTolerance      = std::stod(val);
+                            else if (key == "head_offset_r")       op.cnrb2solid.headOffsetR     = std::stod(val);
+                            else if (key == "head_thickness")      op.cnrb2solid.headThickness   = std::stod(val);
+                            else if (key == "head_position")       op.cnrb2solid.headPosition    = val;
                         }
                     } catch (...) {}
                 }

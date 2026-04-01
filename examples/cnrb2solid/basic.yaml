@@ -1,0 +1,22 @@
+# cnrb2solid - 기본 예제 (볼트 헤드 없음)
+# CNRB 강체 볼트를 O-grid HEX8 솔리드 실린더로 변환
+#
+# Usage: KooRemapper cnrb2solid basic.yaml
+#
+model: bolt_simple.k
+output: bolt_simple_solid.k
+
+# 재료 (t/mm/s 단위계: MPa, t, mm, s)
+E: 200000.0          # Young's modulus [MPa]  (= 2e5 MPa = 200 GPa)
+PR: 0.3              # Poisson's ratio
+RHO: 7.85e-9         # Density [t/mm³]
+
+# 메쉬 파라미터
+radius_scale: 0.999      # 볼트홀 반경 축소 비율 (원본 노드와 살짝 간격)
+num_circum_nodes: 8      # 원주 노드 수 (4의 배수; 0=자동감지)
+inner_radius_ratio: 0.3  # Core 사각형 반변 / R 비율
+
+# 자동 감지
+axis_direction: auto     # auto|x|y|z  (PCA로 실린더 축 자동 감지)
+z_tolerance: 0.1         # Z-level 그룹핑 허용 오차 [mm]
+r_tolerance: 0.5         # 다중 반경 클러스터링 허용 오차 [mm]

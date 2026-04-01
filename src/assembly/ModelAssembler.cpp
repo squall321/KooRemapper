@@ -1,4 +1,5 @@
 #include "assembly/ModelAssembler.h"
+#include "commands/cnrb2solid.h"
 #include "assembly/DeflectionGrid.h"
 #include "assembly/FormulaEvaluator.h"
 #include "assembly/ClosedLoop.h"
@@ -11567,6 +11568,42 @@ bool ModelAssembler::applyFillet(const FilletOperation& op) {
         << " face(s):";
     for (auto& f : op.faces) oss << " " << f;
     infoMessages.push_back(oss.str());
+    return true;
+}
+
+// ============================================================
+// applyCnrb2Solid
+// ============================================================
+
+bool ModelAssembler::applyCnrb2Solid(const Cnrb2SolidOperation& op) {
+    Cnrb2SolidConfig cfg;
+    cfg.targetPids       = op.targetPids;
+    cfg.E                = op.E;
+    cfg.PR               = op.PR;
+    cfg.RHO              = op.RHO;
+    cfg.radiusScale      = op.radiusScale;
+    cfg.numCircumNodes   = op.numCircumNodes;
+    cfg.innerRadiusRatio = op.innerRadiusRatio;
+    cfg.axisDirection    = op.axisDirection;
+    cfg.zTolerance       = op.zTolerance;
+    cfg.rTolerance       = op.rTolerance;
+    cfg.headOffsetR      = op.headOffsetR;
+    cfg.headThickness    = op.headThickness;
+    cfg.headPosition     = op.headPosition;
+
+    ConsoleOutput console;
+    int n = cnrb2solid_convert(rawLines_, cfg,
+                                maxNodeId_, maxElementId_,
+                                maxSectionId_, maxMaterialId_,
+                                maxSetId_, maxPartId_,
+                                console);
+    if (n < 0) {
+        errorMessage_ = "[cnrb2solid] Conversion failed";
+        return false;
+    }
+    char buf[64];
+    snprintf(buf, sizeof(buf), "[cnrb2solid] Converted %d CNRB(s)", n);
+    infoMessages.push_back(buf);
     return true;
 }
 
