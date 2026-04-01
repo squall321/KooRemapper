@@ -164,10 +164,11 @@ static HFParseResult hf_parseKFile(const std::vector<std::string>& lines) {
     HFParseResult res;
 
     std::string section;
-    bool inPartTitle = false;
-    bool inMatTitle  = false;
-    int  matLineIdx  = 0;   // which material data line we're on
-    int  curMatId    = 0;
+    bool inPartTitle  = false;
+    bool inMatTitle   = false;
+    bool inSetTitle   = false;  // true if *SET_*_TITLE: skip one title line before SID
+    int  matLineIdx   = 0;   // which material data line we're on
+    int  curMatId     = 0;
     MatData curMat;
 
     for (const auto& raw : lines) {
@@ -203,6 +204,8 @@ static HFParseResult hf_parseKFile(const std::vector<std::string>& lines) {
             }
             else if (kw.substr(0,9) == "*SET_PART") {
                 section = "SETPART";
+                // _TITLE suffix: first data line is a title string, not SID
+                inSetTitle = (kw.find("_TITLE") != std::string::npos);
             }
             else { section = "OTHER"; }
             (void)us;
@@ -281,14 +284,18 @@ static HFParseResult hf_parseKFile(const std::vector<std::string>& lines) {
         }
         // --- SET_PART (find max SID) ---
         else if (section == "SETPART") {
-            auto toks = hf_splitWS(line);
-            if (!toks.empty()) {
-                try {
-                    int sid = std::stoi(toks[0]);
-                    if (sid > res.maxSetId) res.maxSetId = sid;
-                } catch (...) {}
+            if (inSetTitle) {
+                inSetTitle = false; // this line is the title string — skip, read SID next
+            } else {
+                auto toks = hf_splitWS(line);
+                if (!toks.empty()) {
+                    try {
+                        int sid = std::stoi(toks[0]);
+                        if (sid > res.maxSetId) res.maxSetId = sid;
+                    } catch (...) {}
+                }
+                section = "OTHER"; // done — only need the SID line
             }
-            section = "OTHER"; // only read first data line (SID)
         }
     }
     return res;
@@ -582,23 +589,32 @@ int runHFDamp(const std::string& yamlFile, ConsoleOutput& console) {
     console.println("[hfdamp] Output : " + outPath);
     console.println("[hfdamp] Mode   : " + cfg.mode);
 
-    // Find max set ID in file
+    // Find max set ID in file (handles both plain and _TITLE variants)
     int maxSetId = 0;
     {
         bool inSetSection = false;
+        bool setHasTitle  = false;
         for (auto& l : lines) {
             std::string kw = hf_upper(hf_trim(l));
             if (!l.empty() && l[0] == '*') {
-                inSetSection = (kw.substr(0,4) == "*SET");
+                if (kw.substr(0,4) == "*SET") {
+                    inSetSection = true;
+                    setHasTitle  = (kw.find("_TITLE") != std::string::npos);
+                } else {
+                    inSetSection = false;
+                }
                 continue;
             }
-            if (inSetSection && l[0] != '$') {
-                try {
-                    int sid = std::stoi(hf_trim(l));
-                    if (sid > maxSetId) maxSetId = sid;
-                } catch (...) {}
-                inSetSection = false;
+            if (!inSetSection || l[0] == '$') continue;
+            if (setHasTitle) {
+                setHasTitle = false; // skip title line, read SID on next iteration
+                continue;
             }
+            try {
+                int sid = std::stoi(hf_trim(l));
+                if (sid > maxSetId) maxSetId = sid;
+            } catch (...) {}
+            inSetSection = false;
         }
     }
 
