@@ -3,6 +3,7 @@ name: Build
 on:
   push:
     branches: [ main ]
+    tags: [ 'v*' ]
   pull_request:
     branches: [ main ]
 
@@ -28,6 +29,12 @@ jobs:
           name: KooRemapper-windows
           path: build/bin/Release/KooRemapper.exe
 
+      - name: Attach to release (Windows)
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload ${{ github.ref_name }} build/bin/Release/KooRemapper.exe#KooRemapper-windows.exe
+
   build-linux:
     runs-on: ubuntu-latest
     steps:
@@ -52,6 +59,12 @@ jobs:
           name: KooRemapper-linux
           path: build/bin/KooRemapper
 
+      - name: Attach to release (Linux)
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload ${{ github.ref_name }} build/bin/KooRemapper#KooRemapper-linux
+
   build-macos:
     runs-on: macos-latest
     steps:
@@ -72,3 +85,9 @@ jobs:
         with:
           name: KooRemapper-macos
           path: build/bin/KooRemapper
+
+      - name: Attach to release (macOS)
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload ${{ github.ref_name }} build/bin/KooRemapper#KooRemapper-macos
