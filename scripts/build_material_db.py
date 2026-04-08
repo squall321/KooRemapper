@@ -1,0 +1,473 @@
+#!/usr/bin/env python3
+"""
+Build material_db.json from k-files + name_mapping.yaml.
+
+Usage:
+    python scripts/build_material_db.py [materials_dir]
+
+Reads:
+    materials/mat_elastic.k
+    materials/mat_rigid.k
+    materials/mat_plasticity.k
+    materials/mat_rubber.k
+    materials/mat_viscoelastic.k
+    materials/mat_thermal.k
+    materials/mat_thermal_expansion.k
+    materials/name_mapping.yaml
+
+Writes:
+    materials/material_db.json
+"""
+
+import json
+import sys
+import re
+from pathlib import Path
+from datetime import date
+
+
+# ═══════════════════════════════════════════════════════════════
+# K-file parser: extract MAT blocks
+# ═══════════════════════════════════════════════════════════════
+
+def read_int_field(line, col, width=10):
+    """Read integer from fixed-width field in raw (non-stripped) line."""
+    if len(line) < col + width:
+        s = line[col:] if col < len(line) else ""
+    else:
+        s = line[col:col + width]
+    s = s.strip()
+    if not s:
+        return 0
+    try:
+        return int(s)
+    except ValueError:
+        # Might be float like "7.9000E-09" — not an int field
+        return 0
+
+
+def read_float_field(line, col, width=10):
+    """Read float from fixed-width field."""
+    if len(line) < col + width:
+        s = line[col:] if col < len(line) else ""
+    else:
+        s = line[col:col + width]
+    s = s.strip()
+    if not s:
+        return 0.0
+    try:
+        return float(s)
+    except ValueError:
+        return 0.0
+
+
+def parse_k_file(path):
+    """Parse a .k file → list of (mid, mat_type, title, card_text, data_line)"""
+    lines = Path(path).read_text(errors='replace').splitlines()
+    blocks = []
+    i = 0
+    while i < len(lines):
+        raw = lines[i]
+        t = raw.strip()
+
+        # Detect *MAT_ keyword (not *MAT_ADD except *MAT_ADD_THERMAL_EXPANSION)
+        is_mat = t.startswith('*MAT_') and not t.startswith('*MAT_ADD')
+        is_cte = t.startswith('*MAT_ADD_THERMAL')
+        is_thermal = t.startswith('*MAT_THERMAL')
+
+        if is_mat or is_cte or is_thermal:
+            keyword = t
+            has_title = '_TITLE' in t.upper()
+            card_lines = [raw.rstrip()]
+            i += 1
+            title = ""
+            title_done = not has_title
+            mid = None
+            first_data = None
+
+            while i < len(lines):
+                raw2 = lines[i]
+                t2 = raw2.strip()
+
+                # Break on next keyword (* but not $ comment)
+                if t2.startswith('*') and not t2.startswith('$'):
+                    break
+
+                card_lines.append(raw2.rstrip())
+
+                # Skip $ comments
+                if t2.startswith('$') or not t2:
+                    i += 1
+                    continue
+
+                # Non-comment, non-empty line
+                if not title_done:
+                    title = t2
+                    title_done = True
+                elif mid is None:
+                    # First data line → MID in col 0-9
+                    mid = read_int_field(raw2, 0, 10)
+                    first_data = raw2.rstrip()
+
+                i += 1
+
+            if mid is not None and mid > 0:
+                # Normalize mat_type: remove _TITLE suffix
+                mat_type = keyword.replace('_TITLE', '').replace('*', '')
+                card_text = '\n'.join(card_lines)
+                blocks.append({
+                    'mid': mid,
+                    'mat_type': mat_type,
+                    'title': title,
+                    'card_text': card_text,
+                    'data_line': first_data or "",
+                })
+        else:
+            i += 1
+
+    return blocks
+
+
+def parse_mechanical(mat_type, data_line):
+    """Extract mechanical properties from first data line."""
+    props = {}
+    if not data_line:
+        return props
+
+    if mat_type in ('MAT_ELASTIC',):
+        # MID RHO E PR DA DB K
+        props['RHO'] = read_float_field(data_line, 10, 10)
+        props['E'] = read_float_field(data_line, 20, 10)
+        props['PR'] = read_float_field(data_line, 30, 10)
+
+    elif mat_type in ('MAT_RIGID',):
+        # MID RO E PR N COUPLE M ALIAS
+        props['RHO'] = read_float_field(data_line, 10, 10)
+        props['E'] = read_float_field(data_line, 20, 10)
+        props['PR'] = read_float_field(data_line, 30, 10)
+
+    elif mat_type in ('MAT_PIECEWISE_LINEAR_PLASTICITY',):
+        # MID RO E PR SIGY ETAN FAIL TDEL
+        props['RHO'] = read_float_field(data_line, 10, 10)
+        props['E'] = read_float_field(data_line, 20, 10)
+        props['PR'] = read_float_field(data_line, 30, 10)
+        props['SIGY'] = read_float_field(data_line, 40, 10)
+
+    elif 'MOONEY' in mat_type.upper():
+        # MID RO PR A B V REF
+        props['RHO'] = read_float_field(data_line, 10, 10)
+        props['PR'] = read_float_field(data_line, 20, 10)
+        a = read_float_field(data_line, 30, 10)
+        b = read_float_field(data_line, 40, 10)
+        props['A'] = a
+        props['B'] = b
+        props['E'] = 6.0 * (a + b)  # linear approximation
+
+    elif mat_type in ('MAT_VISCOELASTIC',):
+        # MID RO BULK G0 GI BETA
+        props['RHO'] = read_float_field(data_line, 10, 10)
+        props['BULK'] = read_float_field(data_line, 20, 10)
+        props['G0'] = read_float_field(data_line, 30, 10)
+        props['GI'] = read_float_field(data_line, 40, 10)
+        props['BETA'] = read_float_field(data_line, 50, 10)
+        # E from instantaneous shear modulus
+        if props['G0'] > 0 and props['BULK'] > 0:
+            props['E'] = 9.0 * props['BULK'] * props['G0'] / (3.0 * props['BULK'] + props['G0'])
+            props['PR'] = (3.0 * props['BULK'] - 2.0 * props['G0']) / (6.0 * props['BULK'] + 2.0 * props['G0'])
+
+    # SI reference values
+    if 'RHO' in props and props['RHO'] > 0:
+        props['rho_g_cm3'] = round(props['RHO'] * 1e9, 4)
+    if 'E' in props and props['E'] > 0:
+        props['E_GPa'] = round(props['E'] / 1000.0, 4)
+
+    return props
+
+
+def parse_thermal(data_line):
+    """Extract thermal properties from MAT_THERMAL_ISOTROPIC data line."""
+    # TMID TRO TGRLC TGMULT (card 1)
+    # HC TC (card 2) — but in our k-file, card 2 is the next data line
+    # We parse from the card text instead
+    return {}
+
+
+def parse_thermal_card(card_text):
+    """Extract HC, TC from MAT_THERMAL_ISOTROPIC card text."""
+    lines = card_text.split('\n')
+    has_title = any('_TITLE' in l.upper() for l in lines if l.strip().startswith('*'))
+    data_lines = [l for l in lines if l.strip() and not l.strip().startswith('$') and not l.strip().startswith('*')]
+    # With _TITLE: data_lines = [title, TMID_line, HC_line]
+    # Without:     data_lines = [TMID_line, HC_line]
+    hc_idx = 2 if has_title else 1
+    if len(data_lines) > hc_idx:
+        hc = read_float_field(data_lines[hc_idx], 0, 10)
+        tc = read_float_field(data_lines[hc_idx], 10, 10)
+        return {
+            'HC': hc,
+            'TC': tc,
+            'Cp_SI': round(hc / 1e6, 2) if hc > 0 else 0,
+            'k_SI': round(tc, 4) if tc > 0 else 0,
+        }
+    return {}
+
+
+def parse_cte_card(card_text):
+    """Extract ALPHA from MAT_ADD_THERMAL_EXPANSION card text."""
+    lines = card_text.split('\n')
+    data_lines = [l for l in lines if l.strip() and not l.strip().startswith('$') and not l.strip().startswith('*')]
+    if data_lines:
+        # PID LCID MULT
+        mult = read_float_field(data_lines[0], 20, 10)
+        return {
+            'ALPHA': mult,
+            'ALPHA_ppm_K': round(mult * 1e6, 2) if mult > 0 else 0,
+        }
+    return {}
+
+
+# ═══════════════════════════════════════════════════════════════
+# YAML parser (simple, no dependency)
+# ═══════════════════════════════════════════════════════════════
+
+def parse_name_mapping(path):
+    """Parse name_mapping.yaml → dict {MID: {original, tag, note, category}}"""
+    text = Path(path).read_text(errors='replace')
+    result = {}
+    current_cat = ""
+
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith('#'):
+            continue
+
+        # Category header (e.g. "metals:")
+        if not line.startswith(' ') and stripped.endswith(':'):
+            current_cat = stripped[:-1]
+            continue
+
+        # Key-value in list item
+        if '- MID:' in stripped:
+            mid = int(stripped.split('MID:')[1].strip())
+            result[mid] = {'category': current_cat}
+        elif ':' in stripped and current_cat:
+            key, val = stripped.split(':', 1)
+            key = key.strip().lstrip('- ')
+            val = val.strip().strip('"')
+            if result:
+                last_mid = max(result.keys())
+                if key in ('original', 'tag', 'note'):
+                    result[last_mid][key] = val
+
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════
+# Main: build material_db.json
+# ═══════════════════════════════════════════════════════════════
+
+def build_db(mat_dir):
+    mat_dir = Path(mat_dir)
+
+    # 1. Parse all k-files
+    structural_files = [
+        'mat_elastic.k', 'mat_rigid.k', 'mat_plasticity.k',
+        'mat_rubber.k', 'mat_viscoelastic.k',
+    ]
+    thermal_file = 'mat_thermal.k'
+    cte_file = 'mat_thermal_expansion.k'
+
+    # Collect: MID → {mat_type → card_text, ...}
+    cards = {}      # MID → { mat_type → card_text }
+    mech = {}       # MID → mechanical props (from primary type)
+    titles = {}     # MID → title (from primary)
+    primary = {}    # MID → primary mat_type
+
+    for fname in structural_files:
+        fpath = mat_dir / fname
+        if not fpath.exists():
+            print(f"  SKIP: {fname} not found")
+            continue
+        blocks = parse_k_file(fpath)
+        print(f"  {fname}: {len(blocks)} blocks")
+        for b in blocks:
+            mid = b['mid']
+            mt = b['mat_type']
+            if mid not in cards:
+                cards[mid] = {}
+            cards[mid][mt] = b['card_text']
+
+            # Primary type = first encountered
+            if mid not in primary:
+                primary[mid] = mt
+                titles[mid] = b['title']
+                mech[mid] = parse_mechanical(mt, b['data_line'])
+            elif mt == primary[mid]:
+                # Update if same type
+                mech[mid] = parse_mechanical(mt, b['data_line'])
+
+    # Thermal
+    thermal_cards = {}
+    thermal_props = {}
+    if (mat_dir / thermal_file).exists():
+        blocks = parse_k_file(mat_dir / thermal_file)
+        print(f"  {thermal_file}: {len(blocks)} blocks")
+        for b in blocks:
+            thermal_cards[b['mid']] = b['card_text']
+            thermal_props[b['mid']] = parse_thermal_card(b['card_text'])
+
+    # CTE
+    cte_cards_map = {}
+    cte_props = {}
+    if (mat_dir / cte_file).exists():
+        blocks = parse_k_file(mat_dir / cte_file)
+        print(f"  {cte_file}: {len(blocks)} blocks")
+        for b in blocks:
+            cte_cards_map[b['mid']] = b['card_text']
+            cte_props[b['mid']] = parse_cte_card(b['card_text'])
+
+    # 2. Parse name mapping
+    mapping = {}
+    yaml_path = mat_dir / 'name_mapping.yaml'
+    if yaml_path.exists():
+        mapping = parse_name_mapping(yaml_path)
+        print(f"  name_mapping.yaml: {len(mapping)} entries")
+
+    # 3. Build materials dict
+    all_mids = sorted(set(list(cards.keys()) + list(thermal_cards.keys()) + list(cte_cards_map.keys())))
+    print(f"\n  Total unique MIDs: {len(all_mids)}")
+
+    materials = {}
+    category_index = {}
+
+    for mid in all_mids:
+        meta = mapping.get(mid, {})
+        mat_type = primary.get(mid, "MAT_ELASTIC")
+
+        # Category
+        cat_map = {
+            'metals': 'metal', 'polymers': 'polymer', 'glass': 'glass',
+            'composites': 'composite', 'rubber': 'rubber'
+        }
+        raw_cat = meta.get('category', '')
+        category = cat_map.get(raw_cat, raw_cat or 'unknown')
+
+        # Thermal combined
+        th = thermal_props.get(mid, {})
+        ct = cte_props.get(mid, {})
+        thermal = {**th, **ct}
+
+        mat_type_id_map = {
+            'MAT_ELASTIC': 1, 'MAT_RIGID': 20,
+            'MAT_PIECEWISE_LINEAR_PLASTICITY': 24,
+            'MAT_MOONEY-RIVLIN_RUBBER': 27, 'MAT_VISCOELASTIC': 6,
+        }
+
+        # Auto-generate missing variants
+        card_set = dict(cards.get(mid, {}))
+        m = mech.get(mid, {})
+        name = meta.get('original', titles.get(mid, ''))
+
+        # Any type with known E/RHO/PR → auto-generate MAT_RIGID
+        if 'MAT_RIGID' not in card_set and m.get('E', 0) > 0:
+            rho = m.get('RHO', 0)
+            E = m.get('E', 0)
+            pr = m.get('PR', 0)
+            card_set['MAT_RIGID'] = (
+                f"*MAT_RIGID_TITLE\n{name}\n"
+                f"$      MID       RHO         E        PR"
+                f"         N     COUPLE         M     ALIAS\n"
+                f"{mid:10d}{rho:10.4E}{E:10.1f}{pr:10.4f}"
+                f"{'':10s}{'':10s}{'':10s}{'':10s}\n"
+                f"$      CMO      CON1      CON2\n"
+                f"{'1.0':>10s}{'7':>10s}{'7':>10s}\n"
+                f"$  A1  A2  A3  V1  V2  V3\n"
+                f"{'':10s}{'':10s}{'':10s}{'':10s}{'':10s}{'':10s}"
+            )
+
+        # MAT_ELASTIC (metal) → auto-generate MAT_024
+        if ('MAT_ELASTIC' in card_set and category == 'metal'
+                and 'MAT_PIECEWISE_LINEAR_PLASTICITY' not in card_set):
+            rho = m.get('RHO', 0)
+            E = m.get('E', 0)
+            pr = m.get('PR', 0)
+            sigy = m.get('SIGY', E * 0.002)  # estimate 0.2% yield
+            card_set['MAT_PIECEWISE_LINEAR_PLASTICITY'] = (
+                f"*MAT_PIECEWISE_LINEAR_PLASTICITY_TITLE\n{name}\n"
+                f"$      MID       RHO         E        PR"
+                f"      SIGY      ETAN      FAIL      TDEL\n"
+                f"{mid:10d}{rho:10.4E}{E:10.1f}{pr:10.4f}"
+                f"{sigy:10.1f}{'':10s}{'':10s}{'':10s}"
+            )
+
+        # Any type without MAT_ELASTIC → auto-generate from E/PR
+        if 'MAT_ELASTIC' not in card_set and m.get('E', 0) > 0:
+            rho = m.get('RHO', 0)
+            E = m.get('E', 0)
+            pr = m.get('PR', 0)
+            card_set['MAT_ELASTIC'] = (
+                f"*MAT_ELASTIC_TITLE\n{name}\n"
+                f"$      MID       RHO         E        PR"
+                f"        DA        DB         K\n"
+                f"{mid:10d}{rho:10.4E}{E:10.1f}{pr:10.4f}"
+                f"{'0.0':>10s}{'0.0':>10s}{'0.0':>10s}"
+            )
+
+        entry = {
+            'name': name,
+            'tag': meta.get('tag', ''),
+            'description': meta.get('note', ''),
+            'category': category,
+            'mat_type': mat_type,
+            'mat_type_id': mat_type_id_map.get(mat_type, 0),
+            'mechanical': m,
+            'thermal': thermal,
+            'cards_structural': card_set,
+            'card_thermal': thermal_cards.get(mid, ''),
+            'card_thermal_expansion': cte_cards_map.get(mid, ''),
+        }
+        materials[str(mid)] = entry
+
+        # Category index
+        if category not in category_index:
+            category_index[category] = []
+        category_index[category].append(mid)
+
+    # 4. Build final DB
+    db = {
+        '_meta': {
+            'description': 'LS-DYNA Material Database - Mechanical + Thermal',
+            'unit_system': 't / mm / s / K  → MPa',
+            'unit_notes': {
+                'density_RHO': 't/mm³  (multiply g/cm³ × 1e-9)',
+                'youngs_modulus_E': 'MPa',
+                'poissons_ratio_PR': 'dimensionless',
+                'yield_stress_SIGY': 'MPa',
+                'specific_heat_HC': 'mJ/(t·K)  (multiply J/(kg·K) × 1e6)',
+                'thermal_conductivity_TC': 'mW/(mm·K)  (numerically same as W/(m·K))',
+                'specific_heat_Cp_SI': 'J/(kg·K)',
+                'thermal_conductivity_k_SI': 'W/(m·K)',
+            },
+            'card_note': 'card_structural contains the EXACT original LS-DYNA keyword text',
+            'created': str(date.today()),
+            'generator': 'scripts/build_material_db.py',
+        },
+        'materials': materials,
+        'category_index': category_index,
+    }
+
+    # 5. Write
+    out_path = mat_dir / 'material_db.json'
+    with open(out_path, 'w', encoding='utf-8') as f:
+        json.dump(db, f, indent=2, ensure_ascii=False)
+
+    print(f"\n  Written: {out_path}")
+    print(f"  Materials: {len(materials)}")
+    for cat, mids in sorted(category_index.items()):
+        print(f"    {cat}: {len(mids)} ({mids})")
+
+
+if __name__ == '__main__':
+    mat_dir = sys.argv[1] if len(sys.argv) > 1 else 'materials'
+    print(f"Building material_db.json from: {mat_dir}/")
+    build_db(mat_dir)
