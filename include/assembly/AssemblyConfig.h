@@ -227,7 +227,8 @@ struct MatswapOperation {
 };
 
 struct MatdbMaterialRule {
-    std::string match;        // name/tag substring, "*" = catch-all
+    std::string match;        // MAT name/tag substring, "*" = catch-all
+    std::string matchPart;    // PART title pattern (supports *glob*), empty = skip
     int mid = 0;              // direct MID match (0 = use match string)
     std::string matType;      // override structural card type (empty = use global)
     int thermalOverride = -1; // -1=use global, 0=false, 1=true
@@ -402,6 +403,14 @@ struct HFDampOperation {
     double tssfac      = 0.9;      // element dt safety factor (selective mode)
 };
 
+struct BatteryOperation {
+    std::string configFile;    // path to battery YAML config (relative to assemble config)
+    std::string output;        // output prefix override (empty = use battery config's output)
+    int    nodeIdOffset  = 0;  // >0: explicit ID offset; 0 = auto (max of current model)
+    int    elemIdOffset  = 0;  // >0: explicit element ID offset; 0 = auto
+    bool   useInclude    = true;  // true = *INCLUDE the generated file; false = inline
+};
+
 struct Cnrb2SolidOperation {
     std::vector<int> targetPids;     // empty = all CNRBs
     double E               = 200000.0;
@@ -420,7 +429,7 @@ struct Cnrb2SolidOperation {
 };
 
 struct AssemblyOperation {
-    enum Type { REPLACE, SQUEEZE, RESTACK, BEND, INDENT, FORMSTRAIN, TET10_CONVERT, REFINE, ELFORM, DISCONNECT, IGA, WARPAGE, OFFSET, MATSWAP, MATDB, LOAD, CONTACT, BOUNDARY, RBE, WRAP, UPDATE, DATABASE, CONTROL, GENERATE, FILLET, CNRB2SOLID, HFDAMP };
+    enum Type { REPLACE, SQUEEZE, RESTACK, BEND, INDENT, FORMSTRAIN, TET10_CONVERT, REFINE, ELFORM, DISCONNECT, IGA, WARPAGE, OFFSET, MATSWAP, MATDB, LOAD, CONTACT, BOUNDARY, RBE, WRAP, UPDATE, DATABASE, CONTROL, GENERATE, FILLET, CNRB2SOLID, HFDAMP, BATTERY };
     Type type;
     ReplaceOperation replace;
     SqueezeOperation squeeze;
@@ -449,6 +458,7 @@ struct AssemblyOperation {
     FilletOperation fillet;
     Cnrb2SolidOperation cnrb2solid;
     HFDampOperation hfdamp;
+    BatteryOperation battery;
 };
 
 struct AssemblyConfig {

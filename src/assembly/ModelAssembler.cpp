@@ -1,6 +1,7 @@
 #include "assembly/ModelAssembler.h"
 #include "commands/cnrb2solid.h"
 #include "commands/hfdamp.h"
+#include "commands/battery.h"
 #include "assembly/DeflectionGrid.h"
 #include "assembly/FormulaEvaluator.h"
 #include "assembly/ClosedLoop.h"
@@ -8281,6 +8282,7 @@ struct MdMatBlock {
     int mid = 0;
     std::string keyword;      // e.g. "*MAT_ELASTIC_TITLE"
     std::string titleText;    // title line (for name matching)
+    std::vector<std::string> partTitles; // PART titles referencing this MID
     int startLine = 0;
     int endLine = 0;
 };
@@ -8374,8 +8376,55 @@ static int md_autoMatchDb(const std::string& titleText, int modelMid,
     return it != db.materials.end() ? modelMid : 0;
 }
 
+// Simple glob match: supports *prefix*, *suffix, prefix*, mid*fix, etc.
+static bool md_globMatch(const std::string& pattern, const std::string& text) {
+    std::string pl = md_lowerStr(pattern);
+    std::string tl = md_lowerStr(text);
+    if (pl == "*") return true;
+    // Split by '*' and check each segment appears in order
+    std::vector<std::string> segs;
+    size_t start = 0;
+    while (start < pl.size()) {
+        auto pos = pl.find('*', start);
+        if (pos == std::string::npos) { segs.push_back(pl.substr(start)); break; }
+        if (pos > start) segs.push_back(pl.substr(start, pos - start));
+        start = pos + 1;
+    }
+    if (segs.empty()) return true;
+    size_t searchFrom = 0;
+    // If pattern doesn't start with *, first segment must be at position 0
+    bool anchorStart = (!pl.empty() && pl[0] != '*');
+    bool anchorEnd = (!pl.empty() && pl.back() != '*');
+    for (size_t i = 0; i < segs.size(); ++i) {
+        auto pos = tl.find(segs[i], searchFrom);
+        if (pos == std::string::npos) return false;
+        if (i == 0 && anchorStart && pos != 0) return false;
+        searchFrom = pos + segs[i].size();
+    }
+    if (anchorEnd && searchFrom != tl.size()) return false;
+    return true;
+}
+
 static int md_matchRule(const MdMatBlock& blk, const MatdbMaterialRule& rule,
                          const MdMaterialDatabase& db) {
+    // match_part: check PART titles referencing this MID
+    if (!rule.matchPart.empty()) {
+        bool partMatched = false;
+        for (auto& pt : blk.partTitles) {
+            if (md_globMatch(rule.matchPart, pt)) { partMatched = true; break; }
+        }
+        if (!partMatched) return 0;
+        // Part matched — find DB entry by rule.match (material hint) or auto-match
+        if (!rule.match.empty() && rule.match != "*") {
+            std::string ml = md_lowerStr(rule.match);
+            for (auto& kv : db.materials) {
+                if (md_lowerStr(kv.second.name).find(ml) != std::string::npos ||
+                    md_lowerStr(kv.second.tag).find(ml) != std::string::npos)
+                    return kv.first;
+            }
+        }
+        return md_autoMatchDb(blk.titleText, blk.mid, db);
+    }
     if (rule.match.empty() && rule.mid <= 0) return 0;  // empty rule → no match
     if (rule.mid > 0) {
         if (blk.mid == rule.mid) {
@@ -8432,6 +8481,12 @@ static std::vector<std::string> md_splitLines(const std::string& s) {
     std::string ln;
     while (std::getline(iss, ln)) lines.push_back(ln);
     return lines;
+}
+
+static int md_readIntField(const std::string& line, int startCol, int width) {
+    if ((int)line.size() < startCol + width) return 0;
+    std::string f = line.substr(startCol, width);
+    try { return std::stoi(f); } catch (...) { return 0; }
 }
 
 static std::string md_setField(const std::string& line, int startCol, int width, int value) {
@@ -8562,6 +8617,42 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
     }
     infoMessages.push_back("[matdb] Found " + std::to_string(matBlocks.size()) + " MAT blocks in model");
 
+    // 3b. Build MID → part titles map from *PART blocks
+    {
+        std::map<int, std::vector<std::string>> midPartNames;
+        for (size_t i = 0; i < rawLines_.size(); ++i) {
+            std::string u = mw_upper(mw_trim(rawLines_[i]));
+            if (u.find("*PART") != 0 || u.find("*PART_CONTACT") == 0) continue;
+            bool hasTitle = (u.find("_TITLE") != std::string::npos) || (u == "*PART");
+            // *PART always has title line
+            size_t j = i + 1;
+            // skip comments
+            while (j < rawLines_.size() && !rawLines_[j].empty() && rawLines_[j][0] == '$') ++j;
+            std::string title;
+            if (hasTitle && j < rawLines_.size()) {
+                title = mw_trim(rawLines_[j]);
+                ++j;
+            }
+            // skip comments again
+            while (j < rawLines_.size() && !rawLines_[j].empty() && rawLines_[j][0] == '$') ++j;
+            if (j < rawLines_.size()) {
+                // data line: PID SID MID ...  (fields 0,10,20)
+                std::string dataLine = rawLines_[j];
+                if (dataLine.size() >= 30) {
+                    int partMid = md_readIntField(dataLine, 20, 10);
+                    if (partMid > 0 && !title.empty())
+                        midPartNames[partMid].push_back(title);
+                }
+            }
+        }
+        // Attach part titles to MAT blocks
+        for (auto& blk : matBlocks) {
+            auto it = midPartNames.find(blk.mid);
+            if (it != midPartNames.end())
+                blk.partTitles = it->second;
+        }
+    }
+
     // 4. Match each MAT block to DB
     struct MatchInfo {
         int modelMid;
@@ -8580,13 +8671,13 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
         bool thermal = op.globalThermal;
 
         if (!op.rules.empty()) {
+            // Apply rules in order — last match wins (allows override stacking)
             for (auto& rule : op.rules) {
                 int m = md_matchRule(blk, rule, db);
                 if (m > 0) {
                     dbMid = m;
                     if (!rule.matType.empty()) matType = md_normalizeMatType(rule.matType);
                     if (rule.thermalOverride >= 0) thermal = (rule.thermalOverride != 0);
-                    break;
                 }
             }
         } else {
@@ -11624,6 +11715,67 @@ bool ModelAssembler::applyHFDamp(const HFDampOperation& op) {
     }
     char buf[128];
     snprintf(buf, sizeof(buf), "[hfdamp] Inserted DAMPING_FREQUENCY_RANGE_DEFORM (mode=%s)", cfg.mode.c_str());
+    infoMessages.push_back(buf);
+    return true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// applyBattery — generate battery K-file and *INCLUDE it in the assembly
+// ─────────────────────────────────────────────────────────────────────────────
+bool ModelAssembler::applyBattery(const BatteryOperation& op, const std::string& configDir) {
+    if (op.configFile.empty()) {
+        errorMessage_ = "[battery] config file path is required";
+        return false;
+    }
+
+    // Resolve config path relative to assembly config directory
+    // (only prepend if not already absolute)
+    std::string cfgPath = op.configFile;
+    bool isAbsolute = (!cfgPath.empty() && (cfgPath[0] == '/' || cfgPath[0] == '\\')) ||
+                      (cfgPath.size() >= 2 && cfgPath[1] == ':');
+    if (!isAbsolute && !configDir.empty()) {
+        cfgPath = configDir + "/" + cfgPath;
+    }
+
+    // Parse battery config
+    BatteryConfig cfg;
+    try {
+        cfg = parseBatteryConfig(cfgPath);
+    } catch (const std::exception& e) {
+        errorMessage_ = std::string("[battery] Failed to parse config: ") + e.what();
+        return false;
+    }
+
+    // Output prefix override
+    if (!op.output.empty()) cfg.output = op.output;
+
+    // Generate the battery K-file
+    ConsoleOutput console;
+    std::string kPath = generateBatteryKFile(cfg, console);
+    if (kPath.empty()) {
+        errorMessage_ = "[battery] Failed to generate K-file";
+        return false;
+    }
+
+    // Insert *INCLUDE before *END (or append before closing)
+    bool inserted = false;
+    for (int i = (int)rawLines_.size() - 1; i >= 0; --i) {
+        std::string up = rawLines_[i];
+        for (auto& c : up) c = (char)std::toupper((unsigned char)c);
+        if (up == "*END") {
+            rawLines_.insert(rawLines_.begin() + i, "*INCLUDE");
+            rawLines_.insert(rawLines_.begin() + i + 1, kPath);
+            inserted = true;
+            break;
+        }
+    }
+    if (!inserted) {
+        rawLines_.push_back("*INCLUDE");
+        rawLines_.push_back(kPath);
+    }
+
+    char buf[256];
+    snprintf(buf, sizeof(buf), "[battery] Included: %s", kPath.c_str());
     infoMessages.push_back(buf);
     return true;
 }

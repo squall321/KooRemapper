@@ -370,6 +370,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                         config.operations.back().type == AssemblyOperation::MATDB) {
                         MatdbMaterialRule rule;
                         if (key == "match") rule.match = stripQuotes(val);
+                        else if (key == "match_part") rule.matchPart = stripQuotes(val);
                         else if (key == "mid") { try { rule.mid = std::stoi(val); } catch (...) {} }
                         config.operations.back().matdb.rules.push_back(rule);
                         inMatdbRuleItem = true;
@@ -390,6 +391,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                         !config.operations.back().matdb.rules.empty()) {
                         auto& rule = config.operations.back().matdb.rules.back();
                         if (key == "match") rule.match = stripQuotes(val);
+                        else if (key == "match_part") rule.matchPart = stripQuotes(val);
                         else if (key == "mid") { try { rule.mid = std::stoi(val); } catch (...) {} }
                         else if (key == "mat_type") rule.matType = stripQuotes(val);
                         else if (key == "thermal") {
@@ -798,6 +800,8 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             op.type = AssemblyOperation::CNRB2SOLID;
                         } else if (val == "hfdamp") {
                             op.type = AssemblyOperation::HFDAMP;
+                        } else if (val == "battery") {
+                            op.type = AssemblyOperation::BATTERY;
                         } else {
                             throw std::runtime_error("Unknown operation type: " + val);
                         }
@@ -1286,6 +1290,12 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             else if (key == "fhigh_ratio") op.hfdamp.fhighRatio = std::stod(val);
                             else if (key == "mode")        op.hfdamp.mode       = val;
                             else if (key == "tssfac")      op.hfdamp.tssfac     = std::stod(val);
+                        } else if (op.type == AssemblyOperation::BATTERY) {
+                            if      (key == "config")         op.battery.configFile   = val;
+                            else if (key == "output")         op.battery.output        = val;
+                            else if (key == "node_id_offset") op.battery.nodeIdOffset  = std::stoi(val);
+                            else if (key == "elem_id_offset") op.battery.elemIdOffset  = std::stoi(val);
+                            else if (key == "use_include")    op.battery.useInclude    = (val == "true" || val == "1");
                         }
                     } catch (...) {}
                 }
