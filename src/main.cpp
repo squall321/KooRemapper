@@ -1692,9 +1692,16 @@ int main(int argc, char* argv[]) {
     if (command == "matdb") {
         if (argc < 3) {
             console.error("Usage: KooRemapper matdb <config.yaml>");
+            console.error("       KooRemapper matdb list [database.json]");
             console.println("  Material database-driven swap: replace structural materials from JSON DB");
             console.println("  Options: mat_type (MAT_ELASTIC/MAT_024/MAT_RIGID), thermal (true/false)");
             return 1;
+        }
+        std::string subcmd(argv[2]);
+        if (subcmd == "list") {
+            printBanner(console);
+            std::string dbPath = (argc >= 4) ? argv[3] : "materials/material_db.json";
+            return runMatdbList(dbPath, console);
         }
         printBanner(console);
         return runMatdb(argv[2], console);

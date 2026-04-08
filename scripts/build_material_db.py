@@ -400,6 +400,24 @@ def build_db(mat_dir):
                 f"{sigy:10.1f}{'':10s}{'':10s}{'':10s}"
             )
 
+        # MAT_VISCOELASTIC → instantaneous (G0) and longterm (GI) elastic variants
+        if mat_type == 'MAT_VISCOELASTIC' and m.get('BULK', 0) > 0:
+            rho = m.get('RHO', 0)
+            bulk = m.get('BULK', 0)
+            for suffix, G_key in [('instantaneous', 'G0'), ('longterm', 'GI')]:
+                G = m.get(G_key, 0)
+                if G > 0:
+                    E_v = 9.0 * bulk * G / (3.0 * bulk + G)
+                    pr_v = (3.0 * bulk - 2.0 * G) / (6.0 * bulk + 2.0 * G)
+                    vname = f'MAT_ELASTIC_{suffix}'
+                    card_set[vname] = (
+                        f"*MAT_ELASTIC_TITLE\n{name}_{suffix}\n"
+                        f"$      MID       RHO         E        PR"
+                        f"        DA        DB         K\n"
+                        f"{mid:10d}{rho:10.4E}{E_v:10.1f}{pr_v:10.4f}"
+                        f"{'0.0':>10s}{'0.0':>10s}{'0.0':>10s}"
+                    )
+
         # Any type without MAT_ELASTIC → auto-generate from E/PR
         if 'MAT_ELASTIC' not in card_set and m.get('E', 0) > 0:
             rho = m.get('RHO', 0)

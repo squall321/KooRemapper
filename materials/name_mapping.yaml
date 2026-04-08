@@ -5,11 +5,6 @@
 
 # --- METALS ---
 metals:
-  - MID: 1
-    original: TAPE_1620MPa
-    tag: PET_HingeTape
-    note: "PET-based hinge tape film, E=1.62 GPa"
-
   - MID: 2
     original: Mobile.STS304
     tag: STS304_Stainless
@@ -67,6 +62,11 @@ metals:
 
 # --- POLYMERS ---
 polymers:
+  - MID: 1
+    original: TAPE_1620MPa
+    tag: PET_HingeTape
+    note: "PET-based hinge tape film, E=1.62 GPa"
+
   - MID: 5
     original: PC_QF1035
     tag: PC_Polycarbonate
