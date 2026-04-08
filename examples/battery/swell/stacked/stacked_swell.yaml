@@ -1,0 +1,53 @@
+# =============================================================
+# KooRemapper battery — Stacked Cell, Swelling DR
+# =============================================================
+# Solid electrode layers with 10% graphite intercalation strain.
+# CONTROL_DYNAMIC_RELAXATION finds equilibrium of the swelled state.
+#
+# Usage: KooRemapper battery examples/battery/swell/stacked/stacked_swell.yaml
+# =============================================================
+
+output: examples/battery/swell/stacked/battery_stacked_swell
+model_type: stacked
+tier: 0
+phase: 1
+mode: swell
+
+solid_electrode: true
+airbag_fill:     true
+no_pcm:          true
+no_thermal:      true
+
+geometry:
+  cell_width:   66.4
+  cell_height:  89.8
+  n_unit_cells: 11
+
+layer_thickness:
+  al_cc:              0.012
+  cathode:            0.065
+  separator:          0.020
+  anode:              0.070
+  cu_cc:              0.008
+  pouch:              0.153
+  electrolyte_buffer: 0.200
+
+pouch:
+  r_fillet:      2.0
+  n_fillet_segs: 1
+  buf_x:         0.5
+  buf_y:         0.5
+  dome_cap:      true
+
+swelling:
+  soc:          1.0
+  nmc_cte:      0.04    # NMC cathode ~4% at full charge
+  graphite_cte: 0.10    # Graphite anode 10% at full charge
+
+dr_endtim:      0.0005
+dr_tolerance:   1.0e-3
+dr_factor:      0.995
+dr_nrcyck:      250
+
+timestep_safety:   0.67
+output_interval:   5.0e-5

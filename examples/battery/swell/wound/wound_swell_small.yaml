@@ -1,0 +1,55 @@
+# =============================================================
+# KooRemapper battery — Wound Cell, Swelling DR (Small model)
+# =============================================================
+# Reduced n_winds=5 to fit Student license limit (128k elements)
+#
+# Usage: KooRemapper battery examples/battery/swell/wound/wound_swell_small.yaml
+# =============================================================
+
+output: examples/battery/swell/wound/battery_wound_swell_small
+model_type: wound
+tier: 0
+phase: 1
+mode: swell
+
+solid_electrode: true
+core_fill:      true
+solid_elform:   1       # 1=reduced (stable, default), 2=fully integrated (accurate)
+airbag_fill:     true
+no_pcm:          true
+no_thermal:      true
+
+geometry:
+  cell_width:   66.4
+  cell_height:  89.8
+
+layer_thickness:
+  al_cc:              0.012
+  cathode:            0.065
+  separator:          0.020
+  anode:              0.070
+  cu_cc:              0.008
+  pouch:              0.153
+  electrolyte_buffer: 0.200
+
+pouch:
+  r_fillet: 0.5
+
+wound:
+  flat:       true
+  flat_ratio: 1.0
+  n_winds:    5
+  layer_gap_frac: 0.1
+
+swelling:
+  soc:          1.0
+  nmc_cte:      0.04
+  graphite_cte: 0.10
+
+dr_endtim:      0.0005
+dr_tolerance:   1.0e-3
+dr_factor:      0.995
+dr_nrcyck:      250
+
+timestep_safety:   0.67
+output_interval:   5.0e-5

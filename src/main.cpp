@@ -57,6 +57,7 @@
 #include "commands/squeeze_assemble.h"
 #include "commands/cnrb2solid.h"
 #include "commands/hfdamp.h"
+#include "commands/battery.h"
 
 #include <iostream>
 #include <fstream>
@@ -116,6 +117,7 @@ int main(int argc, char* argv[]) {
         console.println("  contact     Analyze, create, modify, convert contact definitions");
         console.println("  cnrb2solid  Convert CNRB rigid bolts to solid HEX8 cylinder meshes");
         console.println("  hfdamp      Insert high-frequency damping (*DAMPING_FREQUENCY_RANGE_DEFORM)");
+        console.println("  battery     Generate battery cell K-file (stacked/wound, Phase 1+2)");
         console.println("  info        Display information about a mesh file");
         console.println("  help        Show help for a command");
         console.println("  version     Show version information");
@@ -1985,6 +1987,16 @@ int main(int argc, char* argv[]) {
         }
         printBanner(console);
         return runHFDamp(argv[2], console);
+    }
+
+    // Battery command
+    if (command == "battery") {
+        if (argc < 3) {
+            console.error("Usage: KooRemapper battery <config.yaml>");
+            return 1;
+        }
+        printBanner(console);
+        return runBattery(argv[2], console);
     }
 
     // Unknown command

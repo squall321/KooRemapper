@@ -189,6 +189,14 @@ set(COMMAND_SOURCES
     src/commands/squeeze_assemble.cpp
     src/commands/cnrb2solid.cpp
     src/commands/hfdamp.cpp
+    src/commands/battery.cpp
+    src/battery/BatteryWriter.cpp
+    src/battery/BatteryMaterials.cpp
+    src/battery/BatteryContacts.cpp
+    src/battery/BatteryControl.cpp
+    src/battery/BatteryMeshStacked.cpp
+    src/battery/BatteryMeshWound.cpp
+    src/battery/BatterySwelling.cpp
 )
 
 # Main executable
