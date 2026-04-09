@@ -172,3 +172,105 @@ rubber:
     original: PSA-31.7
     tag: PSA_MR_Adhesive
     note: "PSA Mooney-Rivlin (PSA0/2/4/6), G=63.4 MPa"
+
+# --- ADHESIVE TAPES (Viscoelastic) ---
+tapes:
+  - MID: 100001
+    original: OCA Rigid Standard (3M 8171)
+    tag: OCA_Rigid_Standard
+    note: "OCA for cover glass-LCD/OLED, G0=0.15 MPa"
+
+  - MID: 100002
+    original: OCA Rigid High Bond
+    tag: OCA_Rigid_HighBond
+    note: "High-bond OCA for Gorilla Glass-OLED, G0=0.25 MPa"
+
+  - MID: 100003
+    original: OCA Foldable (Tg<-30C)
+    tag: OCA_Foldable
+    note: "Foldable OCA for Galaxy Fold/Flip hinge, G0=0.05 MPa"
+
+  - MID: 100004
+    original: OCA Rollable (Tg<-40C)
+    tag: OCA_Rollable
+    note: "Rollable OCA for LG Rollable, ultra-flexible, G0=0.03 MPa"
+
+  - MID: 100005
+    original: OCA UV Cured
+    tag: OCA_UV_Cured
+    note: "UV-cured OCA for high-resolution display, G0=0.40 MPa"
+
+  - MID: 100006
+    original: PSA Acrylic General (3M 467MP)
+    tag: PSA_Acrylic_General
+    note: "General acrylic PSA for FPC-mainboard, G0=0.30 MPa"
+
+  - MID: 100007
+    original: PSA Silicone High-Temp
+    tag: PSA_Silicone_HighTemp
+    note: "Silicone PSA for battery-adjacent high-temp, G0=0.08 MPa"
+
+  - MID: 100008
+    original: PSA High Shear (Nitto 5000)
+    tag: PSA_HighShear
+    note: "High-shear PSA for camera module, G0=0.50 MPa"
+
+  - MID: 100009
+    original: PSA Removable
+    tag: PSA_Removable
+    note: "Removable PSA for screen protector, G0=0.05 MPa"
+
+  - MID: 100010
+    original: VHB Clear 0.5mm (3M 4905)
+    tag: VHB_Clear_Thin
+    note: "3M VHB 4905, clear 0.5mm, back cover bonding"
+
+  - MID: 100011
+    original: VHB Black 1.1mm (3M 5952)
+    tag: VHB_Black_Thick
+    note: "3M VHB 5952, black 1.1mm, battery mounting"
+
+  - MID: 100012
+    original: Foam PE General
+    tag: Foam_PE_General
+    note: "PE foam tape, frame-back cover bonding"
+
+  - MID: 100013
+    original: Foam PU Impact Absorber
+    tag: Foam_PU_Impact
+    note: "PU foam tape, display cushion/impact protection"
+
+  - MID: 100014
+    original: Battery Stretch-Release (SIS)
+    tag: Battery_StretchRelease
+    note: "SIS stretch-release tape for battery replacement"
+
+  - MID: 100015
+    original: Battery Permanent Bond
+    tag: Battery_Permanent
+    note: "Permanent battery bond, swelling-resistant"
+
+  - MID: 100016
+    original: Thermal Interface Tape
+    tag: Thermal_Interface_Tape
+    note: "Thermal interface tape for heatspreader-midframe"
+
+  - MID: 100017
+    original: Waterproof Gasket IP68
+    tag: Waterproof_Gasket
+    note: "IP67/68 waterproof gasket, display-frame seal"
+
+  - MID: 100018
+    original: Waterproof Butyl Seal
+    tag: Waterproof_Butyl
+    note: "Butyl waterproof tape, speaker/mic seal"
+
+  - MID: 100019
+    original: Damping Speaker Mount
+    tag: Damping_Speaker
+    note: "Speaker mount damping tape, tan(d)=2.65"
+
+  - MID: 100020
+    original: Damping Haptic Isolator
+    tag: Damping_Haptic
+    note: "Haptic motor isolation tape, tan(d)=4.02"

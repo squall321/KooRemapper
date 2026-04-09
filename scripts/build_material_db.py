@@ -272,7 +272,7 @@ def build_db(mat_dir):
     # 1. Parse all k-files
     structural_files = [
         'mat_elastic.k', 'mat_rigid.k', 'mat_plasticity.k',
-        'mat_rubber.k', 'mat_viscoelastic.k',
+        'mat_rubber.k', 'mat_viscoelastic.k', 'mat_tape.k',
     ]
     thermal_file = 'mat_thermal.k'
     cte_file = 'mat_thermal_expansion.k'
@@ -347,7 +347,7 @@ def build_db(mat_dir):
         # Category
         cat_map = {
             'metals': 'metal', 'polymers': 'polymer', 'glass': 'glass',
-            'composites': 'composite', 'rubber': 'rubber'
+            'composites': 'composite', 'rubber': 'rubber', 'tapes': 'tape'
         }
         raw_cat = meta.get('category', '')
         category = cat_map.get(raw_cat, raw_cat or 'unknown')
