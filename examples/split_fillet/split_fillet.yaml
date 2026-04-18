@@ -1,0 +1,12 @@
+base_model: box5x5x5.k
+output: split_fillet_result
+
+operations:
+  - type: split
+    direction: z
+    divisions: 2
+
+  - type: fillet
+    radius: 2.0
+    smooth_iter: 3
+    fix_jacobian: true

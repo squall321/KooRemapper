@@ -1,0 +1,8 @@
+base_model: box5x5x5.k
+output: fillet_only_result
+
+operations:
+  - type: fillet
+    radius: 2.0
+    smooth_iter: 3       # Laplacian smoothing iterations for interior nodes (0=off, default 3)
+    fix_jacobian: true   # split negative-Jacobian HEX8 → TET4 (default true)

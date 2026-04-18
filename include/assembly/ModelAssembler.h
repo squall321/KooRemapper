@@ -59,6 +59,8 @@ public:
     bool applyFillet(const FilletOperation& op);
     bool applyCnrb2Solid(const Cnrb2SolidOperation& op);
     bool applyHFDamp(const HFDampOperation& op);
+    bool applyBattery(const BatteryOperation& op, const std::string& configDir);
+    bool applySplit(const SplitOperation& op);
     // Returns all distinct part IDs currently in the model (base + added elements)
     std::vector<int> getAllPartIds() const;
     bool writeOutput(const std::string& outputPrefix);
@@ -219,6 +221,12 @@ private:
     void exportStressDistribution(const std::string& filename) const;
     Vector3D getNodePosition(int nid) const;
     double getShellThickness(int pid) const;
+
+    // Post-fillet Laplacian smoothing: relax interior nodes
+    void laplacianSmoothInterior(const std::vector<int>& pids, int iterations);
+
+    // Post-fillet Jacobian fix: split negative-J HEX8 → TET4 or remove
+    void fixNegativeJacobianElements(const std::vector<int>& pids);
 
     // Offset operation helpers
     void extractSourceSurface(int sourcePid, std::vector<ShellElement>& surfaceShells);

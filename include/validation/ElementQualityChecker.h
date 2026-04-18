@@ -35,6 +35,9 @@ public:
     // Check individual HEX8 element
     QualityMetrics checkHex8(const std::array<Vector3D, 8>& nodes);
 
+    // Check individual TET4 element
+    QualityMetrics checkTet4(const std::array<Vector3D, 4>& nodes);
+
     // Check individual QUAD4 element
     QualityMetrics checkQuad4(const std::array<Vector3D, 4>& nodes);
 
@@ -45,6 +48,9 @@ public:
     static constexpr double MIN_JACOBIAN_ERROR = -1.0e-10;  // Allow numerical noise near zero
     static constexpr double MAX_WARPING_WARN = 30.0;  // degrees
     static constexpr double MAX_WARPING_ERROR = 45.0; // degrees
+
+    // Compute signed volume for TET4 (positive = valid, negative = inverted)
+    static double computeVolumeTet4(const std::array<Vector3D, 4>& nodes);
 
 private:
     // Compute Jacobian at a point (xi, eta, zeta) for HEX8

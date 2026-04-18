@@ -802,6 +802,8 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             op.type = AssemblyOperation::HFDAMP;
                         } else if (val == "battery") {
                             op.type = AssemblyOperation::BATTERY;
+                        } else if (val == "split") {
+                            op.type = AssemblyOperation::SPLIT;
                         } else {
                             throw std::runtime_error("Unknown operation type: " + val);
                         }
@@ -869,7 +871,11 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
 
                     auto& op = config.operations.back();
                     try {
-                        if (key == "target_pid") {
+                        if (key == "target_pid" ||
+                            (key == "pid" &&
+                             op.type != AssemblyOperation::MATSWAP &&
+                             op.type != AssemblyOperation::MATDB &&
+                             op.type != AssemblyOperation::CONTROL)) {
                             // Helper lambda: set single PID on the relevant struct
                             auto setSingle = [&](int pid) {
                                 if (op.type == AssemblyOperation::REPLACE)       op.replace.targetPid    = pid;
@@ -884,15 +890,18 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                                 else if (op.type == AssemblyOperation::DISCONNECT) op.disconnect.targetPid = pid;
                                 else if (op.type == AssemblyOperation::WARPAGE)  op.warpage.targetPid    = pid;
                                 else if (op.type == AssemblyOperation::FILLET)   op.fillet.targetPid     = pid;
+                                else if (op.type == AssemblyOperation::SPLIT)    op.split.targetPid      = pid;
                             };
                             // Helper: push to targetPids list on structs that support it
                             auto pushMulti = [&](int pid) {
-                                if (op.type == AssemblyOperation::FORMSTRAIN)    op.formstrain.targetPids.push_back(pid);
+                                if (op.type == AssemblyOperation::BEND)          op.bend.targetPids.push_back(pid);
+                                else if (op.type == AssemblyOperation::FORMSTRAIN)    op.formstrain.targetPids.push_back(pid);
                                 else if (op.type == AssemblyOperation::TET10_CONVERT) op.tet10.targetPids.push_back(pid);
                                 else if (op.type == AssemblyOperation::REFINE)   op.refine.targetPids.push_back(pid);
                                 else if (op.type == AssemblyOperation::ELFORM)   op.elform.targetPids.push_back(pid);
                                 else if (op.type == AssemblyOperation::WARPAGE)  op.warpage.targetPids.push_back(pid);
                                 else if (op.type == AssemblyOperation::FILLET)   op.fillet.targetPids.push_back(pid);
+                                else if (op.type == AssemblyOperation::SPLIT)    op.split.targetPids.push_back(pid);
                                 else setSingle(pid); // ops without multi-pid: use first value
                             };
 
@@ -901,24 +910,52 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             std::string vl = v;
                             for (auto& c : vl) c = (char)tolower((unsigned char)c);
 
+                            // Helper: expand a single token that may be "N", "N-M" range
+                            auto expandToken = [](const std::string& tok, std::vector<int>& out) {
+                                size_t a = tok.find_first_not_of(" \t");
+                                if (a == std::string::npos) return;
+                                std::string s = tok.substr(a);
+                                // Trim trailing whitespace
+                                size_t b = s.find_last_not_of(" \t");
+                                if (b != std::string::npos) s = s.substr(0, b + 1);
+                                // Check for range: "N-M"
+                                size_t dash = s.find('-', s[0] == '-' ? 1 : 0);
+                                if (dash != std::string::npos && dash > 0 && dash < s.size() - 1) {
+                                    int lo = std::stoi(s.substr(0, dash));
+                                    int hi = std::stoi(s.substr(dash + 1));
+                                    if (lo > hi) std::swap(lo, hi);
+                                    for (int p = lo; p <= hi; ++p) out.push_back(p);
+                                } else {
+                                    out.push_back(std::stoi(s));
+                                }
+                            };
+
                             if (vl == "all") {
                                 setSingle(0);  // 0 = all
                             } else if (!v.empty() && v.front() == '[') {
-                                // List: [1, 2, 3]
+                                // List: [1, 2, 3] or [1-3, 5, 7-9]
                                 std::string inner = v.substr(1, v.size() - 2);
                                 std::istringstream ss(inner);
                                 std::string tok;
                                 bool first = true;
                                 while (std::getline(ss, tok, ',')) {
-                                    size_t a = tok.find_first_not_of(" \t");
-                                    if (a == std::string::npos) continue;
-                                    int pid = std::stoi(tok.substr(a));
-                                    if (first) { setSingle(-1); first = false; } // -1 = use list
-                                    pushMulti(pid);
+                                    std::vector<int> pids;
+                                    expandToken(tok, pids);
+                                    for (int pid : pids) {
+                                        if (first) { setSingle(-1); first = false; }
+                                        pushMulti(pid);
+                                    }
                                 }
                             } else {
-                                int pid = std::stoi(v);
-                                setSingle(pid);
+                                // Single value or range: "3" or "1-5"
+                                std::vector<int> pids;
+                                expandToken(v, pids);
+                                if (pids.size() == 1) {
+                                    setSingle(pids[0]);
+                                } else {
+                                    setSingle(-1);
+                                    for (int pid : pids) pushMulti(pid);
+                                }
                             }
                         } else if (key == "source_pid") {
                             int pid = std::stoi(val);
@@ -1259,6 +1296,14 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                                     if (a != std::string::npos)
                                         op.fillet.faces.push_back(tok.substr(a, b - a + 1));
                                 }
+                            } else if (key == "angle_min") {
+                                try { op.fillet.angleMin = std::stod(val); } catch (...) {}
+                            } else if (key == "angle_max") {
+                                try { op.fillet.angleMax = std::stod(val); } catch (...) {}
+                            } else if (key == "fix_jacobian") {
+                                op.fillet.fixJacobian = (val == "true" || val == "1" || val == "yes");
+                            } else if (key == "smooth_iter") {
+                                try { op.fillet.smoothIter = std::stoi(val); } catch (...) {}
                             }
                         } else if (op.type == AssemblyOperation::MATDB) {
                             if (key == "database") {
@@ -1290,6 +1335,12 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             else if (key == "fhigh_ratio") op.hfdamp.fhighRatio = std::stod(val);
                             else if (key == "mode")        op.hfdamp.mode       = val;
                             else if (key == "tssfac")      op.hfdamp.tssfac     = std::stod(val);
+                        } else if (op.type == AssemblyOperation::SPLIT) {
+                            if      (key == "direction")   op.split.direction  = val;
+                            else if (key == "divisions")   op.split.divisions  = std::stoi(val);
+                            else if (key == "target_pid") {
+                                try { op.split.targetPid = std::stoi(val); } catch (...) {}
+                            }
                         } else if (op.type == AssemblyOperation::BATTERY) {
                             if      (key == "config")         op.battery.configFile   = val;
                             else if (key == "output")         op.battery.output        = val;
@@ -1386,7 +1437,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                         ": layer " + std::to_string(j+1) + " has no material_card");
             }
         } else if (op.type == AssemblyOperation::BEND) {
-            if (op.bend.targetPid <= 0)
+            if (op.bend.targetPid <= 0 && op.bend.targetPid != 0 && op.bend.targetPids.empty())
                 throw std::runtime_error("Operation " + std::to_string(i+1) + ": missing target_pid for bend");
             if (op.bend.plane != "xy" && op.bend.plane != "yz" && op.bend.plane != "zx")
                 throw std::runtime_error("Operation " + std::to_string(i+1) + ": invalid plane '" +

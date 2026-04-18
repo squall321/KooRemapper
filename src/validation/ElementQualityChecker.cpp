@@ -70,6 +70,49 @@ ElementQualityChecker::QualityMetrics ElementQualityChecker::checkHex8(
     return metrics;
 }
 
+double ElementQualityChecker::computeVolumeTet4(const std::array<Vector3D, 4>& n) {
+    // V = (1/6) * (n1-n0) . ((n2-n0) x (n3-n0))
+    // Positive = valid orientation, negative = inverted
+    Vector3D a = n[1] - n[0];
+    Vector3D b = n[2] - n[0];
+    Vector3D c = n[3] - n[0];
+    return (1.0 / 6.0) * a.dot(b.cross(c));
+}
+
+ElementQualityChecker::QualityMetrics ElementQualityChecker::checkTet4(
+    const std::array<Vector3D, 4>& nodes) {
+
+    QualityMetrics metrics;
+    metrics.isAcceptable = true;
+
+    // For TET4, the Jacobian is constant (linear element) and proportional to signed volume
+    double vol = computeVolumeTet4(nodes);
+    metrics.minJacobian = vol;
+
+    if (vol <= MIN_JACOBIAN_ERROR) {
+        metrics.isAcceptable = false;
+        metrics.warnings.push_back("Negative/zero volume TET4: " + std::to_string(vol));
+    }
+
+    // Edge lengths for aspect ratio
+    std::vector<double> edges = {
+        (nodes[1] - nodes[0]).magnitude(),
+        (nodes[2] - nodes[0]).magnitude(),
+        (nodes[3] - nodes[0]).magnitude(),
+        (nodes[2] - nodes[1]).magnitude(),
+        (nodes[3] - nodes[1]).magnitude(),
+        (nodes[3] - nodes[2]).magnitude()
+    };
+    metrics.aspectRatio = computeAspectRatio(edges);
+
+    if (metrics.aspectRatio > ASPECT_RATIO_ERROR) {
+        metrics.isAcceptable = false;
+        metrics.warnings.push_back("Aspect ratio " + std::to_string(metrics.aspectRatio));
+    }
+
+    return metrics;
+}
+
 ElementQualityChecker::QualityMetrics ElementQualityChecker::checkQuad4(
     const std::array<Vector3D, 4>& nodes) {
 

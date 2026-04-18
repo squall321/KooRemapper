@@ -60,7 +60,8 @@ struct IndentOperation {
 };
 
 struct BendOperation {
-    int targetPid = 0;
+    int targetPid = 0;               // 0 = all, -1 = use targetPids list
+    std::vector<int> targetPids;     // explicit pid list (overrides targetPid when non-empty)
     std::string plane = "xy";       // xy | yz | zx
     std::string mode = "deform";    // deform | stress
     std::string source;             // dat | dat_pair | formula
@@ -388,11 +389,22 @@ struct DatabaseOperation {
     int neiph = 6, strflg = 1, sigflg = 1, epsflg = 1;
 };
 
+struct SplitOperation {
+    int targetPid = 0;               // 0 = all, -1 = use targetPids list
+    std::vector<int> targetPids;
+    std::string direction = "auto";  // "auto" | "x" | "y" | "z"
+    int divisions = 2;               // split each element into N along extrude direction
+};
+
 struct FilletOperation {
     int targetPid = 0;               // 0 = all structured HEX8 parts, -1 = use targetPids list
     std::vector<int> targetPids;
     double radius = 1.0;
-    std::vector<std::string> faces;  // "z_max", "z_min", "x_max", "x_min", "y_max", "y_min"
+    std::vector<std::string> faces;  // "z_max", ... (legacy bbox mode) or empty = auto-detect
+    double angleMin = 60.0;          // min dihedral angle (deg) to consider as sharp edge
+    double angleMax = 150.0;         // max dihedral angle (deg) to consider as sharp edge
+    bool fixJacobian = true;         // post-fillet: detect negative-J HEX8 → split to TET4 or remove
+    int smoothIter = 3;              // Laplacian smoothing iterations for interior nodes (0=off)
 };
 
 struct HFDampOperation {
@@ -429,7 +441,7 @@ struct Cnrb2SolidOperation {
 };
 
 struct AssemblyOperation {
-    enum Type { REPLACE, SQUEEZE, RESTACK, BEND, INDENT, FORMSTRAIN, TET10_CONVERT, REFINE, ELFORM, DISCONNECT, IGA, WARPAGE, OFFSET, MATSWAP, MATDB, LOAD, CONTACT, BOUNDARY, RBE, WRAP, UPDATE, DATABASE, CONTROL, GENERATE, FILLET, CNRB2SOLID, HFDAMP, BATTERY };
+    enum Type { REPLACE, SQUEEZE, RESTACK, BEND, INDENT, FORMSTRAIN, TET10_CONVERT, REFINE, ELFORM, DISCONNECT, IGA, WARPAGE, OFFSET, MATSWAP, MATDB, LOAD, CONTACT, BOUNDARY, RBE, WRAP, UPDATE, DATABASE, CONTROL, GENERATE, FILLET, CNRB2SOLID, HFDAMP, BATTERY, SPLIT };
     Type type;
     ReplaceOperation replace;
     SqueezeOperation squeeze;
@@ -459,6 +471,7 @@ struct AssemblyOperation {
     Cnrb2SolidOperation cnrb2solid;
     HFDampOperation hfdamp;
     BatteryOperation battery;
+    SplitOperation split;
 };
 
 struct AssemblyConfig {

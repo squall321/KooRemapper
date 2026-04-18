@@ -1,0 +1,14 @@
+base_model: box_2part.k
+output: split_pid2_fillet_result
+
+operations:
+  - type: split
+    direction: z
+    divisions: 2
+    pid: 2
+
+  - type: fillet
+    radius: 3.0
+    pid: 1
+    smooth_iter: 3
+    fix_jacobian: true

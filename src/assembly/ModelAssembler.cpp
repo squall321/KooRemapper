@@ -1340,11 +1340,27 @@ bool ModelAssembler::applyBend(const BendOperation& op, double E, double nu,
         inAxis1 = 2; inAxis2 = 0; normalAxis = 1;  // x1=Z, x2=X, normal=Y
     }
 
-    // 2. Gather nodes/elements (same pattern as applySqueeze)
+    // 2. Build target PID set (single, list, or all)
+    std::set<int> targetPidSet;
+    bool bendAllParts = false;
+    if (!op.targetPids.empty()) {
+        // Multi-PID list: target_pid: [1, 2, 3]
+        targetPidSet.insert(op.targetPids.begin(), op.targetPids.end());
+    } else if (op.targetPid == 0) {
+        bendAllParts = true;  // 0 = all parts
+    } else {
+        targetPidSet.insert(op.targetPid);
+    }
+
+    auto isTargetPid = [&](int pid) -> bool {
+        return bendAllParts || targetPidSet.count(pid) > 0;
+    };
+
+    // Gather nodes/elements (same pattern as applySqueeze)
     std::set<int> basePartNodeIds;
     std::set<int> basePartElemIds;
     for (const auto& [eid, elem] : baseMesh_.getElements()) {
-        if (elem.partId == op.targetPid && removedElementIds_.count(eid) == 0) {
+        if (isTargetPid(elem.partId) && removedElementIds_.count(eid) == 0) {
             basePartElemIds.insert(eid);
             for (int i = 0; i < Element::NUM_NODES; ++i) {
                 if (removedNodeIds_.count(elem.nodeIds[i]) == 0) {
@@ -1362,7 +1378,7 @@ bool ModelAssembler::applyBend(const BendOperation& op, double E, double nu,
     std::set<int> addedPartElemIds;
     std::set<int> addedPartNodeIds;
     for (const auto& ae : addedElements_) {
-        if (ae.pid == op.targetPid) {
+        if (isTargetPid(ae.pid)) {
             addedPartElemIds.insert(ae.id);
             for (int nid : ae.nodeIds) {
                 addedPartNodeIds.insert(nid);
@@ -1375,7 +1391,10 @@ bool ModelAssembler::applyBend(const BendOperation& op, double E, double nu,
     int totalElements = static_cast<int>(basePartElemIds.size() + addedPartElemIds.size());
 
     if (allNodeIds.empty()) {
-        errorMessage_ = "Part " + std::to_string(op.targetPid) + " not found for bend";
+        std::string pidStr;
+        if (bendAllParts) pidStr = "all";
+        else for (int p : targetPidSet) { if (!pidStr.empty()) pidStr += ","; pidStr += std::to_string(p); }
+        errorMessage_ = "Part(s) " + pidStr + " not found for bend";
         return false;
     }
 
@@ -1436,7 +1455,7 @@ bool ModelAssembler::applyBend(const BendOperation& op, double E, double nu,
     double L2 = x2Max - x2Min;
 
     if (L1 < 1e-12 || L2 < 1e-12) {
-        errorMessage_ = "Part " + std::to_string(op.targetPid) + ": zero extent in plane " + op.plane;
+        errorMessage_ = "Bend target: zero extent in plane " + op.plane;
         return false;
     }
 
@@ -1531,7 +1550,9 @@ bool ModelAssembler::applyBend(const BendOperation& op, double E, double nu,
         if (hasYamlMat) {
             matE = E; matNu = nu;
         } else {
-            auto partIt = baseMesh_.parts.find(op.targetPid);
+            // Use first target PID for material fallback
+            int lookupPid = targetPidSet.empty() ? 0 : *targetPidSet.begin();
+            auto partIt = baseMesh_.parts.find(lookupPid);
             if (partIt != baseMesh_.parts.end()) {
                 const MaterialData* matData = baseMesh_.getMaterial(partIt->second.materialId);
                 if (matData && matData->E > 0) {
@@ -1649,7 +1670,7 @@ bool ModelAssembler::applyBend(const BendOperation& op, double E, double nu,
 
     // 5b. Added elements
     for (const auto& ae : addedElements_) {
-        if (ae.pid == op.targetPid) {
+        if (isTargetPid(ae.pid)) {
             computeBendStress(ae.id, ae.nodeIds.data(), 8);
         }
     }
@@ -1707,8 +1728,13 @@ bool ModelAssembler::applyBend(const BendOperation& op, double E, double nu,
     else planeName = "ZX";
 
     std::ostringstream msg;
-    msg << "  Bend Part " << op.targetPid
-        << " (" << planeName << " plane, " << op.mode << ", " << op.source << "): "
+    msg << "  Bend Part ";
+    if (bendAllParts) msg << "ALL";
+    else if (targetPidSet.size() > 1) {
+        bool first = true;
+        for (int p : targetPidSet) { if (!first) msg << ","; msg << p; first = false; }
+    } else msg << *targetPidSet.begin();
+    msg << " (" << planeName << " plane, " << op.mode << ", " << op.source << "): "
         << allNodeIds.size() << " nodes, " << totalElements << " elements";
     infoMessages.push_back(msg.str());
 
@@ -2126,9 +2152,15 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                     }
 
                     if (isTet) {
-                        // TET4: output n1-n4, then duplicate n4 for n5-n8
-                        for (int n = 0; n < 4; ++n) oss << std::setw(8) << elem.nodeIds[n];
-                        for (int n = 0; n < 4; ++n) oss << std::setw(8) << elem.nodeIds[3];
+                        // TET4 as degenerate HEX8 (LS-DYNA convention):
+                        // base triangle: n1, n2, n3, n3  (node 4 = node 3)
+                        // apex point:    n4, n4, n4, n4  (nodes 5-8 collapsed)
+                        // nodeIds stores: [0]=n1, [1]=n2, [2]=n3, [3]=n4 (4 unique tet vertices)
+                        oss << std::setw(8) << elem.nodeIds[0]
+                            << std::setw(8) << elem.nodeIds[1]
+                            << std::setw(8) << elem.nodeIds[2]
+                            << std::setw(8) << elem.nodeIds[2];  // n4 = n3 (degenerate quad)
+                        for (int n = 0; n < 4; ++n) oss << std::setw(8) << elem.nodeIds[3];  // apex
                     } else {
                         // HEX8/QUAD4: output first 8 node IDs
                         for (int n = 0; n < 8; ++n) oss << std::setw(8) << elem.nodeIds[n];
@@ -2504,8 +2536,23 @@ std::string ModelAssembler::formatElementLine(const AddedElement& elem) const {
     std::ostringstream oss;
     oss << std::setw(8) << elem.id
         << std::setw(8) << elem.pid;
-    for (int i = 0; i < 8; ++i) {
-        oss << std::setw(8) << elem.nodeIds[i];
+    if (elem.type == ElementType::TET4) {
+        // LS-DYNA degenerate HEX8 convention for TET4:
+        //   base triangle: n1, n2, n3, n3  (position 4 = position 3)
+        //   apex point:    n4, n4, n4, n4  (positions 5-8 collapsed)
+        // Internal storage: nodeIds[0..3] = 4 unique tet vertices, [4..7] = n4
+        oss << std::setw(8) << elem.nodeIds[0]
+            << std::setw(8) << elem.nodeIds[1]
+            << std::setw(8) << elem.nodeIds[2]
+            << std::setw(8) << elem.nodeIds[2]   // n4 = n3 (degenerate quad)
+            << std::setw(8) << elem.nodeIds[3]   // apex
+            << std::setw(8) << elem.nodeIds[3]
+            << std::setw(8) << elem.nodeIds[3]
+            << std::setw(8) << elem.nodeIds[3];
+    } else {
+        for (int i = 0; i < 8; ++i) {
+            oss << std::setw(8) << elem.nodeIds[i];
+        }
     }
     return oss.str();
 }
@@ -4026,6 +4073,7 @@ bool ModelAssembler::applyDisconnect(const DisconnectOperation& op) {
         int pid;
         std::array<int, 8> nodeIds;
         bool isTet;
+        bool isPenta;
         bool fromAdded;   // true = from addedElements_
         int addedIdx;     // index into addedElements_ (if fromAdded)
     };
@@ -4035,19 +4083,24 @@ bool ModelAssembler::applyDisconnect(const DisconnectOperation& op) {
         return nids[4] == nids[3] && nids[5] == nids[3] &&
                nids[6] == nids[3] && nids[7] == nids[3];
     };
+    auto isPentaNodeIds = [](const std::array<int,8>& nids) -> bool {
+        return nids[2] == nids[3] && nids[6] == nids[7] && nids[4] != nids[3];
+    };
 
     for (const auto& [eid, elem] : baseMesh_.elements) {
         if (removedElementIds_.count(eid)) continue;
         if (elem.type == ElementType::QUAD4) continue;
         bool isTet = (elem.type == ElementType::TET4 || isTetNodeIds(elem.nodeIds));
-        activeElems[eid] = {elem.partId, elem.nodeIds, isTet, false, -1};
+        bool isPenta = (elem.type == ElementType::PENTA6 || (!isTet && isPentaNodeIds(elem.nodeIds)));
+        activeElems[eid] = {elem.partId, elem.nodeIds, isTet, isPenta, false, -1};
     }
     for (int i = 0; i < static_cast<int>(addedElements_.size()); ++i) {
         const auto& ae = addedElements_[i];
         if (removedElementIds_.count(ae.id)) continue;
         if (ae.isTshell) continue;
         bool isTet = isTetNodeIds(ae.nodeIds);
-        activeElems[ae.id] = {ae.pid, ae.nodeIds, isTet, true, i};
+        bool isPenta = (!isTet && isPentaNodeIds(ae.nodeIds));
+        activeElems[ae.id] = {ae.pid, ae.nodeIds, isTet, isPenta, true, i};
     }
 
     // Helper: get node position from baseMesh_ or addedNodes_
@@ -4158,6 +4211,8 @@ bool ModelAssembler::applyDisconnect(const DisconnectOperation& op) {
         } else {
             for (int f = 0; f < Element::NUM_FACES; ++f) {
                 auto faceNodes = getHexFaceNodes(ed.nodeIds, f);
+                // Skip degenerate faces (PENTA6 face 3: n2,n2,n6,n6)
+                if (faceNodes[0] == faceNodes[1] && faceNodes[2] == faceNodes[3]) continue;
                 FaceKey key = makeFaceKey(faceNodes);
                 faceToElements[key].push_back({eid, f});
             }
@@ -4217,7 +4272,7 @@ bool ModelAssembler::applyDisconnect(const DisconnectOperation& op) {
         int newNodeCount = 0;
         for (int eid : targetElems) {
             const auto& ed = activeElems.at(eid);
-            int nodeCount = ed.isTet ? 4 : 8;
+            int nodeCount = ed.isTet ? 4 : (ed.isPenta ? 6 : 8);
             std::array<int, 8> newNodeIds;
 
             for (int n = 0; n < nodeCount; ++n) {
@@ -4231,10 +4286,13 @@ bool ModelAssembler::applyDisconnect(const DisconnectOperation& op) {
             }
             if (ed.isTet) {
                 for (int n = 4; n < 8; ++n) newNodeIds[n] = newNodeIds[3];
+            } else if (ed.isPenta) {
+                newNodeIds[3] = newNodeIds[2];  // n4=n3
+                newNodeIds[7] = newNodeIds[6];  // n8=n7
             }
 
             removedElementIds_.insert(eid);
-            ElementType etype = ed.isTet ? ElementType::TET4 : ElementType::HEX8;
+            ElementType etype = ed.isTet ? ElementType::TET4 : (ed.isPenta ? ElementType::PENTA6 : ElementType::HEX8);
             addedElements_.push_back({eid, ed.pid, newNodeIds, etype, false});
         }
 
@@ -5039,7 +5097,7 @@ bool ModelAssembler::applyWarpage(const WarpageOperation& op, double E, double n
                     w = grid.interpolate(u, v) * unitScale * op.morphFactor;
                 } else if (op.outsideBehavior == "extrapolate") {
                     if (!warnedExtrapolation_) {
-                        std::cerr << "[WARNING] Warpage: extrapolating outside data_bbox\n";
+                        std::cout << "[WARNING] Warpage: extrapolating outside data_bbox\n";
                         warnedExtrapolation_ = true;
                     }
                     w = grid.interpolate(u, v) * unitScale * op.morphFactor;
@@ -5124,7 +5182,7 @@ bool ModelAssembler::validateWarpageOperation(const WarpageOperation& op, const 
         errors.push_back("morph_factor must be > 0");
     }
     if (op.morphFactor > 10.0) {
-        std::cerr << "[WARNING] morph_factor > 10.0 may cause excessive warpage\n";
+        std::cout << "[WARNING] morph_factor > 10.0 may cause excessive warpage\n";
     }
 
     // mode validation
@@ -5170,7 +5228,7 @@ void ModelAssembler::calculateWarpagePrestress(
     double E, double nu)
 {
     if (E <= 0) {
-        std::cerr << "[ERROR] Material E not defined for prestress mode\n";
+        std::cout << "[ERROR] Material E not defined for prestress mode\n";
         return;
     }
 
@@ -5298,7 +5356,7 @@ double ModelAssembler::getUnitScale(const std::string& unit) const {
 
     auto it = scaleMap.find(unit);
     if (it == scaleMap.end()) {
-        std::cerr << "[WARNING] Unknown unit '" << unit << "', using um\n";
+        std::cout << "[WARNING] Unknown unit '" << unit << "', using um\n";
         return 1.0e-3;
     }
 
@@ -5373,8 +5431,8 @@ void ModelAssembler::validateWarpageResults(const WarpageOperation& op, const Wa
     std::cout << "[INFO] Average curvature: " << avgK << "\n";
 
     if (std::abs(maxK) > 1e6) {
-        std::cerr << "[WARNING] Extremely high curvature detected (κ_max = " << maxK << ")\n";
-        std::cerr << "          This may indicate data issues or very sharp warpage.\n";
+        std::cout << "[WARNING] Extremely high curvature detected (κ_max = " << maxK << ")\n";
+        std::cout << "          This may indicate data issues or very sharp warpage.\n";
     }
 
     // Stress range check (prestress mode)
@@ -5973,10 +6031,8 @@ void ModelAssembler::extractSourceSurface(int sourcePid,
         const Element& elem = pair.second;
         if (elem.partId != sourcePid) continue;
 
-        // Get number of faces (6 for HEX8, 4 for TET4)
-        int numFaces = (elem.nodeIds[4] == elem.nodeIds[7]) ? 4 : 6;
-
-        for (int fi = 0; fi < numFaces; ++fi) {
+        // Iterate valid faces (skips degenerate faces for PENTA6)
+        for (int fi : elem.getValidFaceIndices()) {
             auto faceNodes = elem.getFaceNodeIds(fi);
 
             // Store original winding order
@@ -6004,9 +6060,7 @@ void ModelAssembler::extractSourceSurface(int sourcePid,
         e.nodeIds = elem.nodeIds;
         e.type = elem.type;
 
-        int numFaces = (e.nodeIds[4] == e.nodeIds[7]) ? 4 : 6;
-
-        for (int fi = 0; fi < numFaces; ++fi) {
+        for (int fi : e.getValidFaceIndices()) {
             auto faceNodes = e.getFaceNodeIds(fi);
 
             // Store original winding order
@@ -8238,6 +8292,7 @@ struct MdDbMaterial {
     std::map<std::string, std::string> cardsStructural; // matType → card text
     std::string cardThermal;
     std::string cardThermalExpansion;
+    std::string cardDamping;
 };
 
 struct MdMaterialDatabase {
@@ -8267,6 +8322,7 @@ static MdMaterialDatabase md_loadDatabase(const std::string& jsonPath) {
         m.defaultMatType = jm.get("mat_type") ? jm.get("mat_type")->asStr() : "MAT_ELASTIC";
         m.cardThermal = jm.get("card_thermal") ? jm.get("card_thermal")->asStr() : "";
         m.cardThermalExpansion = jm.get("card_thermal_expansion") ? jm.get("card_thermal_expansion")->asStr() : "";
+        m.cardDamping = jm.get("card_damping") ? jm.get("card_damping")->asStr() : "";
         auto* cs = jm.get("cards_structural");
         if (cs && cs->type == MdJsonValue::OBJECT) {
             for (auto& ck : cs->obj)
@@ -8376,10 +8432,8 @@ static int md_autoMatchDb(const std::string& titleText, int modelMid,
     return it != db.materials.end() ? modelMid : 0;
 }
 
-// Simple glob match: supports *prefix*, *suffix, prefix*, mid*fix, etc.
-static bool md_globMatch(const std::string& pattern, const std::string& text) {
-    std::string pl = md_lowerStr(pattern);
-    std::string tl = md_lowerStr(text);
+// Single glob match: supports *prefix*, *suffix, prefix*, mid*fix, etc.
+static bool md_globMatchSingle(const std::string& pl, const std::string& tl) {
     if (pl == "*") return true;
     // Split by '*' and check each segment appears in order
     std::vector<std::string> segs;
@@ -8405,6 +8459,31 @@ static bool md_globMatch(const std::string& pattern, const std::string& text) {
     return true;
 }
 
+// Glob match with space-separated AND patterns.
+// "  *E100* *CAM*  " → text must match BOTH *E100* AND *CAM* (order-independent).
+// Single pattern (no space) works as before.
+static bool md_globMatch(const std::string& pattern, const std::string& text) {
+    std::string pl = md_lowerStr(pattern);
+    std::string tl = md_lowerStr(text);
+    // Split pattern by spaces (skip empty tokens)
+    std::vector<std::string> pats;
+    size_t i = 0;
+    while (i < pl.size()) {
+        while (i < pl.size() && pl[i] == ' ') ++i;
+        if (i >= pl.size()) break;
+        size_t j = i;
+        while (j < pl.size() && pl[j] != ' ') ++j;
+        pats.push_back(pl.substr(i, j - i));
+        i = j;
+    }
+    if (pats.empty()) return true;
+    // ALL patterns must match (AND logic)
+    for (auto& p : pats) {
+        if (!md_globMatchSingle(p, tl)) return false;
+    }
+    return true;
+}
+
 static int md_matchRule(const MdMatBlock& blk, const MatdbMaterialRule& rule,
                          const MdMaterialDatabase& db) {
     // match_part: check PART titles referencing this MID
@@ -8414,7 +8493,12 @@ static int md_matchRule(const MdMatBlock& blk, const MatdbMaterialRule& rule,
             if (md_globMatch(rule.matchPart, pt)) { partMatched = true; break; }
         }
         if (!partMatched) return 0;
-        // Part matched — find DB entry by rule.match (material hint) or auto-match
+        // Part matched — use rule.mid if specified directly
+        if (rule.mid > 0) {
+            auto it = db.materials.find(rule.mid);
+            return it != db.materials.end() ? rule.mid : 0;
+        }
+        // Otherwise find DB entry by rule.match (material hint) or auto-match
         if (!rule.match.empty() && rule.match != "*") {
             std::string ml = md_lowerStr(rule.match);
             for (auto& kv : db.materials) {
@@ -8588,6 +8672,71 @@ static std::string md_updatePartTmid(const std::string& partDataLine, int tmid) 
     return md_setField(partDataLine, 70, 10, tmid);
 }
 
+static std::vector<std::string> md_substituteDampingCard(const std::string& cardText,
+        int dbMid, int modelMid, const std::vector<int>& pids) {
+    auto lines = md_splitLines(cardText);
+    int dbSid = dbMid + 800000;
+    int newSid = modelMid + 800000;
+
+    for (int i = 0; i < (int)lines.size(); ++i) {
+        std::string t = mw_trim(lines[i]);
+        if (t.empty() || t[0] == '$' || t[0] == '*') continue;
+
+        // Replace SID fields: any 10-char field containing dbSid → newSid
+        auto toks = mw_tok10(lines[i]);
+        for (int fi = 0; fi < (int)toks.size(); ++fi) {
+            int v = 0;
+            try { v = std::stoi(toks[fi]); } catch (...) {}
+            if (v == dbSid) {
+                lines[i] = md_setField(lines[i], fi * 10, 10, newSid);
+            }
+        }
+
+        // Fill PID slots: replace consecutive zeros with actual PIDs
+        // PID line follows *SET_PART_LIST data line (has 8 slots of 10 chars each)
+        // Guard: first field must parse as integer 0 (skip title lines like "Glass_parts")
+        bool allZero = true;
+        bool firstFieldIsInt = false;
+        for (int ti = 0; ti < (int)toks.size(); ++ti) {
+            std::string ts = mw_trim(toks[ti]);
+            if (ts.empty()) continue;
+            int v2 = 0;
+            bool isNum = false;
+            try { v2 = std::stoi(ts); isNum = true; } catch (...) {}
+            if (ti == 0) firstFieldIsInt = isNum;
+            if (v2 != 0) { allZero = false; break; }
+        }
+        if (allZero && firstFieldIsInt && !toks.empty() && !pids.empty()) {
+            // Build PID line: up to 8 PIDs per line, 10-char fields
+            std::string pidLine;
+            for (int pi = 0; pi < (int)pids.size() && pi < 8; ++pi) {
+                char buf[16];
+                snprintf(buf, sizeof(buf), "%10d", pids[pi]);
+                pidLine += buf;
+            }
+            // Fill remaining slots with zeros
+            for (int pi = (int)pids.size(); pi < 8; ++pi) {
+                pidLine += "         0";
+            }
+            lines[i] = pidLine;
+            // If more than 8 PIDs, add continuation lines
+            for (int pg = 8; pg < (int)pids.size(); pg += 8) {
+                std::string extLine;
+                for (int pi = pg; pi < (int)pids.size() && pi < pg + 8; ++pi) {
+                    char buf[16];
+                    snprintf(buf, sizeof(buf), "%10d", pids[pi]);
+                    extLine += buf;
+                }
+                for (int pi = (int)pids.size() - pg; pi < 8 && pi >= 0; ++pi) {
+                    extLine += "         0";
+                }
+                lines.insert(lines.begin() + i + 1 + (pg / 8 - 1), extLine);
+            }
+        }
+    }
+    return lines;
+}
+
 // end matdb helpers
 
 // ── applyMatdb() main ────────────────────────────────────────
@@ -8611,45 +8760,135 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
 
     // 3. Scan model *MAT blocks
     auto matBlocks = md_scanMatBlocks(rawLines_);
-    if (matBlocks.empty()) {
-        infoMessages.push_back("[matdb] WARNING: No *MAT_ blocks found in model");
-        return true;
-    }
     infoMessages.push_back("[matdb] Found " + std::to_string(matBlocks.size()) + " MAT blocks in model");
 
     // 3b. Build MID → part titles map from *PART blocks
+    //     Supports HyperWorks-style consecutive parts under one *PART keyword.
+    //     Also builds partDataLineByTitle for step 3c.
+    std::map<std::string, size_t> partDataLineByTitle; // title → data line index
     {
         std::map<int, std::vector<std::string>> midPartNames;
         for (size_t i = 0; i < rawLines_.size(); ++i) {
             std::string u = mw_upper(mw_trim(rawLines_[i]));
             if (u.find("*PART") != 0 || u.find("*PART_CONTACT") == 0) continue;
             bool hasTitle = (u.find("_TITLE") != std::string::npos) || (u == "*PART");
-            // *PART always has title line
+            // *PART always has title line — parse consecutive part entries
             size_t j = i + 1;
-            // skip comments
-            while (j < rawLines_.size() && !rawLines_[j].empty() && rawLines_[j][0] == '$') ++j;
-            std::string title;
-            if (hasTitle && j < rawLines_.size()) {
-                title = mw_trim(rawLines_[j]);
-                ++j;
-            }
-            // skip comments again
-            while (j < rawLines_.size() && !rawLines_[j].empty() && rawLines_[j][0] == '$') ++j;
-            if (j < rawLines_.size()) {
+            while (j < rawLines_.size()) {
+                // skip comments
+                while (j < rawLines_.size() && !rawLines_[j].empty() && rawLines_[j][0] == '$') ++j;
+                if (j >= rawLines_.size()) break;
+                // stop at next keyword
+                std::string uj = mw_trim(rawLines_[j]);
+                if (!uj.empty() && uj[0] == '*') break;
+                // read title
+                std::string title;
+                if (hasTitle) {
+                    title = mw_trim(rawLines_[j]);
+                    ++j;
+                    // skip comments between title and data
+                    while (j < rawLines_.size() && !rawLines_[j].empty() && rawLines_[j][0] == '$') ++j;
+                    if (j >= rawLines_.size()) break;
+                    uj = mw_trim(rawLines_[j]);
+                    if (!uj.empty() && uj[0] == '*') break;
+                }
                 // data line: PID SID MID ...  (fields 0,10,20)
                 std::string dataLine = rawLines_[j];
                 if (dataLine.size() >= 30) {
                     int partMid = md_readIntField(dataLine, 20, 10);
-                    if (partMid > 0 && !title.empty())
-                        midPartNames[partMid].push_back(title);
+                    if (!title.empty()) {
+                        if (partMid > 0)
+                            midPartNames[partMid].push_back(title);
+                        partDataLineByTitle[title] = j;
+                    }
                 }
+                ++j;
             }
+            if (j > i + 1) i = j - 1; // advance outer loop past processed lines
         }
         // Attach part titles to MAT blocks
         for (auto& blk : matBlocks) {
             auto it = midPartNames.find(blk.mid);
             if (it != midPartNames.end())
                 blk.partTitles = it->second;
+        }
+    }
+
+    // 3c. match_part rules: always assign fresh MID per matched part
+    //     Uses partDataLineByTitle from step 3b (supports consecutive parts).
+    {
+        int maxMid = 0;
+        for (auto& blk : matBlocks) if (blk.mid > maxMid) maxMid = blk.mid;
+        // Also scan all known part data lines for max MID
+        for (auto& kv : partDataLineByTitle) {
+            size_t j = kv.second;
+            if (j < rawLines_.size() && rawLines_[j].size() >= 30) {
+                int pm = md_readIntField(rawLines_[j], 20, 10);
+                if (pm > maxMid) maxMid = pm;
+            }
+        }
+
+        // Iterate all known parts, try match_part rules, assign new MID on match
+        for (auto& kv : partDataLineByTitle) {
+            const std::string& title = kv.first;
+            size_t j = kv.second;
+            if (j >= rawLines_.size() || rawLines_[j].size() < 30) continue;
+
+            int partMid = md_readIntField(rawLines_[j], 20, 10);
+
+            // Try match_part rules against this part title
+            for (auto& rule : op.rules) {
+                if (rule.matchPart.empty()) continue;
+                if (!md_globMatch(rule.matchPart, title)) continue;
+
+                // Find DB material: direct mid > match keyword > auto-match
+                int dbMid = 0;
+                if (rule.mid > 0) {
+                    auto it = db.materials.find(rule.mid);
+                    if (it != db.materials.end()) dbMid = rule.mid;
+                } else if (!rule.match.empty() && rule.match != "*") {
+                    std::string ml = md_lowerStr(rule.match);
+                    for (auto& kv2 : db.materials) {
+                        if (md_lowerStr(kv2.second.name).find(ml) != std::string::npos ||
+                            md_lowerStr(kv2.second.tag).find(ml) != std::string::npos) {
+                            dbMid = kv2.first;
+                            break;
+                        }
+                    }
+                }
+                if (dbMid <= 0) continue;
+
+                // Always assign fresh MID so other parts sharing old MID are unaffected
+                int newMid = ++maxMid;
+                rawLines_[j] = md_setField(rawLines_[j], 20, 10, newMid);
+
+                // Remove this title from old matBlock to prevent duplicate matching in step 4
+                if (partMid > 0) {
+                    for (auto& blk : matBlocks) {
+                        if (blk.mid != partMid) continue;
+                        auto& pt = blk.partTitles;
+                        pt.erase(std::remove(pt.begin(), pt.end(), title), pt.end());
+                    }
+                }
+
+                // Create a virtual MAT block for this new MID
+                MdMatBlock vblk;
+                vblk.mid = newMid;
+                vblk.titleText = title;
+                vblk.partTitles.push_back(title);
+                vblk.startLine = -1; // no existing MAT lines to remove
+                vblk.endLine = -1;
+                matBlocks.push_back(vblk);
+
+                std::string msg = "[matdb] part \"" + title + "\"";
+                if (partMid == 0) msg += " (MID=0)";
+                else msg += " (MID=" + std::to_string(partMid) + ")";
+                msg += " → new MID=" + std::to_string(newMid) +
+                       " → DB " + db.materials[dbMid].name +
+                       " (MID=" + std::to_string(dbMid) + ")";
+                infoMessages.push_back(msg);
+                break; // first matching rule wins
+            }
         }
     }
 
@@ -8667,7 +8906,7 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
     for (int bi = 0; bi < (int)matBlocks.size(); ++bi) {
         auto& blk = matBlocks[bi];
         int dbMid = 0;
-        std::string matType = md_normalizeMatType(op.globalMatType);
+        std::string matType = op.globalMatType.empty() ? "" : md_normalizeMatType(op.globalMatType);
         bool thermal = op.globalThermal;
 
         if (!op.rules.empty()) {
@@ -8685,14 +8924,23 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
         }
 
         if (dbMid <= 0) {
-            infoMessages.push_back("[matdb] WARNING: No DB match for MID=" +
-                std::to_string(blk.mid) + " (" + blk.titleText + ")");
+            // Skip warning for orphan MAT blocks (all referencing parts reassigned to new MIDs)
+            if (blk.partTitles.empty() && blk.startLine >= 0) {
+                // Mark orphan MAT block for deletion
+                matchedMids.insert(blk.mid);
+            } else {
+                infoMessages.push_back("[matdb] WARNING: No DB match for MID=" +
+                    std::to_string(blk.mid) + " (" + blk.titleText + ")");
+            }
             continue;
         }
 
         // Validate mat_type exists in DB
         auto dit = db.materials.find(dbMid);
         if (dit == db.materials.end()) continue;
+        // If no mat_type specified, use the DB material's default type
+        if (matType.empty())
+            matType = md_normalizeMatType(dit->second.defaultMatType);
         if (dit->second.cardsStructural.find(matType) == dit->second.cardsStructural.end()) {
             errorMessage_ = "[matdb] ERROR: DB MID=" + std::to_string(dbMid) +
                 " (" + dit->second.name + ") has no card for " + matType +
@@ -8784,7 +9032,7 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
 
     // 7. Build new cards to insert
     std::vector<std::string> insertCards;
-    int structCount = 0, thermalCount = 0, expansionCount = 0;
+    int structCount = 0, thermalCount = 0, expansionCount = 0, dampingCount = 0;
 
     for (auto& mi : matches) {
         auto& dbMat = db.materials[mi.dbMid];
@@ -8821,6 +9069,18 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
                     rawLines_[info.dataLine] = md_updatePartTmid(rawLines_[info.dataLine], mi.modelMid);
             }
         }
+
+        // Damping cards (Rayleigh: SET_PART_LIST + DAMPING_PART_MASS/STIFFNESS)
+        if (!dbMat.cardDamping.empty()) {
+            auto pids = mw_getPidsByMid(rawLines_, {mi.modelMid});
+            if (!pids.empty()) {
+                auto dampLines = md_substituteDampingCard(dbMat.cardDamping, mi.dbMid, mi.modelMid, pids);
+                insertCards.push_back("$");
+                insertCards.push_back("$ Rayleigh damping for MID " + std::to_string(mi.modelMid));
+                for (auto& dl : dampLines) insertCards.push_back(dl);
+                ++dampingCount;
+            }
+        }
     }
 
     // 8. Remove sentinel-marked lines from deletions
@@ -8849,11 +9109,12 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
         for (auto& c : insertCards) newLines.push_back(c);
     rawLines_ = std::move(newLines);
 
-    infoMessages.push_back("[matdb] Replaced " + std::to_string(structCount) + " structural MAT cards (" +
-        md_normalizeMatType(op.globalMatType) + ")");
+    infoMessages.push_back("[matdb] Replaced " + std::to_string(structCount) + " structural MAT cards");
     if (thermalCount > 0)
         infoMessages.push_back("[matdb] Inserted " + std::to_string(thermalCount) + " thermal + " +
             std::to_string(expansionCount) + " expansion cards, TMID updated");
+    if (dampingCount > 0)
+        infoMessages.push_back("[matdb] Inserted " + std::to_string(dampingCount) + " Rayleigh damping sets");
 
     return true;
 }
@@ -8889,11 +9150,7 @@ static std::vector<std::array<int,4>> ld_extractSurface(
 
     for (const auto& [eid, elem] : mesh.getElements()) {
         if (elem.partId != pid) continue;
-        bool isTet = (elem.nodeIds[4] == elem.nodeIds[7] &&
-                      elem.nodeIds[4] == elem.nodeIds[6] &&
-                      elem.nodeIds[4] == elem.nodeIds[5]);
-        int numFaces = isTet ? 4 : 6;
-        for (int fi = 0; fi < numFaces; ++fi) {
+        for (int fi : elem.getValidFaceIndices()) {
             auto fn = elem.getFaceNodeIds(fi);
             std::array<int,4> winding = {fn[0], fn[1], fn[2], fn[3]};
             std::array<int,4> key = winding;
@@ -9303,7 +9560,7 @@ bool ModelAssembler::applyLoad(const LoadOperation& op) {
         // 1. Resolve PID
         int pid = ld_resolvePid(rawLines_, lc.pid, lc.partName);
         if (pid <= 0) {
-            std::cerr << "[load] ERROR: Cannot resolve part (pid=" << lc.pid
+            std::cout << "[load] ERROR: Cannot resolve part (pid=" << lc.pid
                       << ", name=" << lc.partName << ")\n";
             return false;
         }
@@ -9314,7 +9571,7 @@ bool ModelAssembler::applyLoad(const LoadOperation& op) {
         bool hasDirection = (dirMag > 1e-30);
 
         if (lc.mode != "normal_pressure" && !hasDirection) {
-            std::cerr << "[load] ERROR: direction required for mode '" << lc.mode << "'\n";
+            std::cout << "[load] ERROR: direction required for mode '" << lc.mode << "'\n";
             return false;
         }
 
@@ -9333,7 +9590,7 @@ bool ModelAssembler::applyLoad(const LoadOperation& op) {
 
         if (lc.select == "set") {
             if (lc.setId <= 0) {
-                std::cerr << "[load] ERROR: set_id required for select=set\n";
+                std::cout << "[load] ERROR: set_id required for select=set\n";
                 return false;
             }
             existingSetId = lc.setId;
@@ -9365,7 +9622,7 @@ bool ModelAssembler::applyLoad(const LoadOperation& op) {
                 if (!ssids2.empty()) {
                     for (int sid : ssids2) {
                         auto faces = ld_parseSetSegmentFaces(extraLines, sid);
-                        std::cerr << "[load] DEBUG: segment set " << sid << " has " << faces.size() << " faces\n";
+                        std::cout << "[load] DEBUG: segment set " << sid << " has " << faces.size() << " faces\n";
                         selectedFaces.insert(selectedFaces.end(), faces.begin(), faces.end());
                     }
                 } else if (foundPartBased2) {
@@ -9380,7 +9637,7 @@ bool ModelAssembler::applyLoad(const LoadOperation& op) {
                 // Part-based tied (SSTYP=3): extract surface of this PID
                 selectedFaces = ld_extractSurface(baseMesh_, pid);
             } else {
-                std::cerr << "[load] WARNING: No tied contacts found for PID=" << pid
+                std::cout << "[load] WARNING: No tied contacts found for PID=" << pid
                           << ", extracting surface directly\n";
                 selectedFaces = ld_extractSurface(baseMesh_, pid);
             }
@@ -9389,7 +9646,7 @@ bool ModelAssembler::applyLoad(const LoadOperation& op) {
             if (hasDirection) {
                 auto indices = ld_filterByDirection(selectedFaceInfos, dir, lc.angle);
                 if (indices.empty()) {
-                    std::cerr << "[load] WARNING: No segments match direction filter for PID="
+                    std::cout << "[load] WARNING: No segments match direction filter for PID="
                               << pid << ", skipping\n";
                     continue;
                 }
@@ -9407,14 +9664,14 @@ bool ModelAssembler::applyLoad(const LoadOperation& op) {
             // direction mode (default)
             auto allFaces = ld_extractSurface(baseMesh_, pid);
             if (allFaces.empty()) {
-                std::cerr << "[load] WARNING: No surface faces found for PID=" << pid << "\n";
+                std::cout << "[load] WARNING: No surface faces found for PID=" << pid << "\n";
                 continue;
             }
             auto allInfos = ld_buildFaceInfo(allFaces, baseMesh_);
             if (hasDirection) {
                 auto indices = ld_filterByDirection(allInfos, dir, lc.angle);
                 if (indices.empty()) {
-                    std::cerr << "[load] WARNING: No segments match direction filter for PID="
+                    std::cout << "[load] WARNING: No segments match direction filter for PID="
                               << pid << ", skipping\n";
                     continue;
                 }
@@ -9434,7 +9691,7 @@ bool ModelAssembler::applyLoad(const LoadOperation& op) {
 
         if (lc.mode == "force") {
             if (selectedFaceInfos.empty()) {
-                std::cerr << "[load] ERROR: No face info for force calculation (PID=" << pid << ")\n";
+                std::cout << "[load] ERROR: No face info for force calculation (PID=" << pid << ")\n";
                 return false;
             }
             double totalProjArea = 0.0;
@@ -9443,7 +9700,7 @@ bool ModelAssembler::applyLoad(const LoadOperation& op) {
                 totalProjArea += fi.area * std::abs(dot);
             }
             if (totalProjArea < 1e-30) {
-                std::cerr << "[load] ERROR: Projected area is zero for PID=" << pid << "\n";
+                std::cout << "[load] ERROR: Projected area is zero for PID=" << pid << "\n";
                 return false;
             }
             sf = lc.value / totalProjArea;
@@ -9969,13 +10226,13 @@ bool ModelAssembler::applyContact(const ContactOperation& op) {
                 auto sFacesAll = ld_extractSurface(baseMesh_, slavePids[0]);
                 auto mFacesAll = ld_extractSurface(baseMesh_, masterPids[0]);
                 if (sFacesAll.empty() || mFacesAll.empty()) {
-                    std::cerr << "[contact] WARNING: No surface for facing filter (slave:"
+                    std::cout << "[contact] WARNING: No surface for facing filter (slave:"
                               << slavePids[0] << " master:" << masterPids[0] << ")\n";
                 } else {
                     auto pairs = ca_detectContacting(sFacesAll, mFacesAll, baseMesh_,
                         slavePids[0], masterPids[0], act.tolerance, act.normalAngle);
                     if (pairs.empty()) {
-                        std::cerr << "[contact] WARNING: No facing segments between PID "
+                        std::cout << "[contact] WARNING: No facing segments between PID "
                                   << slavePids[0] << " and PID " << masterPids[0] << "\n";
                     } else {
                         std::set<int> sIdxSet, mIdxSet;
@@ -10082,12 +10339,12 @@ bool ModelAssembler::applyContact(const ContactOperation& op) {
                 }
                 continue;
             } else {
-                std::cerr << "[contact] ERROR: detect needs scope, include/exclude, or slave+master PIDs\n";
+                std::cout << "[contact] ERROR: detect needs scope, include/exclude, or slave+master PIDs\n";
                 return false;
             }
 
             if (targetPids.size() < 2) {
-                std::cerr << "[contact] WARNING: Less than 2 parts for detection, skipping\n";
+                std::cout << "[contact] WARNING: Less than 2 parts for detection, skipping\n";
                 continue;
             }
 
@@ -10155,7 +10412,7 @@ bool ModelAssembler::applyContact(const ContactOperation& op) {
                       << pids.size() << " parts\n";
 
         } else {
-            std::cerr << "[contact] ERROR: Unknown action '" << act.action
+            std::cout << "[contact] ERROR: Unknown action '" << act.action
                       << "' (assemble supports: create, detect)\n";
             return false;
         }
@@ -10305,7 +10562,7 @@ bool ModelAssembler::applyBoundary(const BoundaryOperation& op) {
     for (const auto& bc : op.boundaries) {
         int pid = ld_resolvePid(rawLines_, bc.pid, bc.partName);
         if (pid <= 0) {
-            std::cerr << "[boundary] ERROR: Cannot resolve part (pid="
+            std::cout << "[boundary] ERROR: Cannot resolve part (pid="
                       << bc.pid << " name='" << bc.partName << "')\n";
             return false;
         }
@@ -10323,7 +10580,7 @@ bool ModelAssembler::applyBoundary(const BoundaryOperation& op) {
 
         if (bc.select == "set") {
             if (bc.setId <= 0) {
-                std::cerr << "[boundary] ERROR: set_id required for select=set\n";
+                std::cout << "[boundary] ERROR: set_id required for select=set\n";
                 return false;
             }
             usedSetId = bc.setId;
@@ -10332,7 +10589,7 @@ bool ModelAssembler::applyBoundary(const BoundaryOperation& op) {
             // direction mode (default)
             auto allFaces = ld_extractSurface(baseMesh_, pid);
             if (allFaces.empty()) {
-                std::cerr << "[boundary] WARNING: No surface faces for PID=" << pid << ", skipping\n";
+                std::cout << "[boundary] WARNING: No surface faces for PID=" << pid << ", skipping\n";
                 continue;
             }
             std::vector<std::array<int,4>> selectedFaces;
@@ -10340,7 +10597,7 @@ bool ModelAssembler::applyBoundary(const BoundaryOperation& op) {
                 auto faceInfos = ld_buildFaceInfo(allFaces, baseMesh_);
                 auto indices = ld_filterByDirection(faceInfos, dir, bc.angle);
                 if (indices.empty()) {
-                    std::cerr << "[boundary] WARNING: No faces match direction filter for PID="
+                    std::cout << "[boundary] WARNING: No faces match direction filter for PID="
                               << pid << ", skipping\n";
                     continue;
                 }
@@ -10350,7 +10607,7 @@ bool ModelAssembler::applyBoundary(const BoundaryOperation& op) {
             }
             nodeIds = bc_collectNodes(selectedFaces);
             if (nodeIds.empty()) {
-                std::cerr << "[boundary] WARNING: No nodes collected for PID=" << pid << ", skipping\n";
+                std::cout << "[boundary] WARNING: No nodes collected for PID=" << pid << ", skipping\n";
                 continue;
             }
 
@@ -10522,7 +10779,7 @@ bool ModelAssembler::applyRbe(const RbeOperation& op) {
     for (const auto& rc : op.constraints) {
         int pid = ld_resolvePid(rawLines_, rc.pid, rc.partName);
         if (pid <= 0) {
-            std::cerr << "[rbe] ERROR: Cannot resolve part (pid="
+            std::cout << "[rbe] ERROR: Cannot resolve part (pid="
                       << rc.pid << " name='" << rc.partName << "')\n";
             return false;
         }
@@ -10530,7 +10787,7 @@ bool ModelAssembler::applyRbe(const RbeOperation& op) {
         // Extract surface faces
         auto allFaces = ld_extractSurface(baseMesh_, pid);
         if (allFaces.empty()) {
-            std::cerr << "[rbe] WARNING: No surface faces for PID=" << pid << ", skipping\n";
+            std::cout << "[rbe] WARNING: No surface faces for PID=" << pid << ", skipping\n";
             continue;
         }
 
@@ -10542,7 +10799,7 @@ bool ModelAssembler::applyRbe(const RbeOperation& op) {
             double dir[3] = {rc.direction[0], rc.direction[1], rc.direction[2]};
             double dirMag = ld_mag(dir);
             if (dirMag < 1e-30) {
-                std::cerr << "[rbe] ERROR: Zero direction vector for PID=" << pid << "\n";
+                std::cout << "[rbe] ERROR: Zero direction vector for PID=" << pid << "\n";
                 return false;
             }
             dir[0] /= dirMag; dir[1] /= dirMag; dir[2] /= dirMag;
@@ -10550,7 +10807,7 @@ bool ModelAssembler::applyRbe(const RbeOperation& op) {
             auto faceInfos = ld_buildFaceInfo(allFaces, baseMesh_);
             auto indices = ld_filterByDirection(faceInfos, dir, rc.angle);
             if (indices.empty()) {
-                std::cerr << "[rbe] WARNING: No faces match direction filter for PID="
+                std::cout << "[rbe] WARNING: No faces match direction filter for PID="
                           << pid << ", skipping\n";
                 continue;
             }
@@ -11450,27 +11707,43 @@ std::vector<int> ModelAssembler::getAllPartIds() const {
     return std::vector<int>(pids.begin(), pids.end());
 }
 
-// ========== FILLET: Round edges of a structured HEX8 mesh face ==========
+// ========== FILLET: Round edges of a structured HEX8/PENTA6 mesh ==========
+// ── HEX8 → 5 TET4 decomposition (Dompierre's canonical splitting) ──────────
+// Splits one HEX8 into 5 tetrahedra.  The diagonal choice {0,2,5,7} minimizes
+// max-aspect-ratio for cuboid-like hexes and is consistent across shared faces.
+//
+//   TET 0: {0, 1, 2, 5}   — front-bottom triangle + node 5
+//   TET 1: {0, 2, 3, 7}   — back-bottom triangle  + node 7
+//   TET 2: {0, 5, 7, 4}   — left-top triangle     + node 4
+//   TET 3: {2, 5, 6, 7}   — right-top triangle    + node 6
+//   TET 4: {0, 2, 5, 7}   — interior diagonal tet
+//
+static const int HEX8_TO_TET4[5][4] = {
+    {0, 1, 2, 5},
+    {0, 2, 3, 7},
+    {0, 5, 7, 4},
+    {2, 5, 6, 7},
+    {0, 2, 5, 7}
+};
+
+// Two modes:
+//   faces specified → legacy bbox-based fillet (z_max, x_min, etc.)
+//   faces empty     → auto-detect sharp exterior edges and fillet them
 
 bool ModelAssembler::applyFillet(const FilletOperation& op) {
-    if (op.faces.empty()) {
-        errorMessage_ = "fillet: no face(s) specified";
-        return false;
-    }
-
     // Resolve which PIDs to process
     std::vector<int> pidsToProcess;
     if (!op.targetPids.empty()) {
         pidsToProcess = op.targetPids;
     } else if (op.targetPid == 0) {
-        // all structured (HEX8) parts
         for (auto& [eid, elem] : baseMesh_.elements) {
-            if (!removedElementIds_.count(eid) && elem.type == ElementType::HEX8)
+            if (!removedElementIds_.count(eid) &&
+                (elem.type == ElementType::HEX8 || elem.type == ElementType::PENTA6))
                 pidsToProcess.push_back(elem.partId);
         }
         for (auto& elem : addedElements_)
-            if (elem.type == ElementType::HEX8) pidsToProcess.push_back(elem.pid);
-        // deduplicate
+            if (elem.type == ElementType::HEX8 || elem.type == ElementType::PENTA6)
+                pidsToProcess.push_back(elem.pid);
         std::sort(pidsToProcess.begin(), pidsToProcess.end());
         pidsToProcess.erase(std::unique(pidsToProcess.begin(), pidsToProcess.end()), pidsToProcess.end());
     } else {
@@ -11478,181 +11751,793 @@ bool ModelAssembler::applyFillet(const FilletOperation& op) {
     }
 
     if (pidsToProcess.empty()) {
-        errorMessage_ = "fillet: no structured HEX8 parts found";
+        errorMessage_ = "fillet: no HEX8/PENTA6 parts found";
         return false;
     }
 
-    int totalMovedAll = 0;
-    for (int pid : pidsToProcess) {
-        FilletOperation singleOp = op;
-        singleOp.targetPid  = pid;
-        singleOp.targetPids = {};
+    // Common helpers — build addedNodes index for O(1) lookup
+    std::unordered_map<int, int> addedNodeIdx;
+    for (int i = 0; i < (int)addedNodes_.size(); ++i)
+        addedNodeIdx[addedNodes_[i].id] = i;
 
-    // Collect nodes belonging to target PID (base + added elements)
-    std::set<int> partNodes;
-    for (auto& [eid, elem] : baseMesh_.elements) {
-        if (removedElementIds_.count(eid)) continue;
-        if (elem.partId != singleOp.targetPid) continue;
-        if (elem.type != ElementType::HEX8) {
-            errorMessage_ = "fillet: non-HEX8 element found in PID "
-                            + std::to_string(singleOp.targetPid) + ". Structured mesh required.";
-            return false;
-        }
-        for (int nid : elem.nodeIds) if (nid > 0) partNodes.insert(nid);
-    }
-    for (auto& elem : addedElements_) {
-        if (elem.pid != singleOp.targetPid) continue;
-        for (int nid : elem.nodeIds) if (nid > 0) partNodes.insert(nid);
-    }
-    if (partNodes.empty()) continue;
-
-    // Get current node position (modifiedNodePositions_ takes priority)
     auto getPos = [&](int nid) -> Vector3D {
         auto it = modifiedNodePositions_.find(nid);
         if (it != modifiedNodePositions_.end()) return it->second;
         auto nit = baseMesh_.nodes.find(nid);
         if (nit != baseMesh_.nodes.end()) return nit->second.position;
-        for (auto& n : addedNodes_) if (n.id == nid) return {n.x, n.y, n.z};
+        auto ait = addedNodeIdx.find(nid);
+        if (ait != addedNodeIdx.end()) {
+            auto& n = addedNodes_[ait->second];
+            return {n.x, n.y, n.z};
+        }
         return {0, 0, 0};
     };
-
-    // Set node position
     auto setPos = [&](int nid, const Vector3D& p) {
         modifiedNodePositions_[nid] = p;
-        for (auto& n : addedNodes_) {
-            if (n.id == nid) { n.x = p.x; n.y = p.y; n.z = p.z; break; }
+        auto ait = addedNodeIdx.find(nid);
+        if (ait != addedNodeIdx.end()) {
+            addedNodes_[ait->second].x = p.x;
+            addedNodes_[ait->second].y = p.y;
+            addedNodes_[ait->second].z = p.z;
         }
     };
 
-    // Bounding box of target part
-    double xmin =  1e18, xmax = -1e18;
-    double ymin =  1e18, ymax = -1e18;
-    double zmin =  1e18, zmax = -1e18;
-    for (int nid : partNodes) {
-        auto p = getPos(nid);
-        xmin = std::min(xmin, p.x); xmax = std::max(xmax, p.x);
-        ymin = std::min(ymin, p.y); ymax = std::max(ymax, p.y);
-        zmin = std::min(zmin, p.z); zmax = std::max(zmax, p.z);
+    // ================================================================
+    // AUTO-DETECT MODE (faces empty)
+    // ================================================================
+    if (op.faces.empty()) {
+        const double R = op.radius;
+        const double angMinRad = op.angleMin * M_PI / 180.0;
+        const double angMaxRad = op.angleMax * M_PI / 180.0;
+        int totalMoved = 0;
+        int totalEdges = 0;
+
+        int pidIdx = 0;
+        for (int pid : pidsToProcess) {
+            ++pidIdx;
+            if (pidsToProcess.size() > 1 || true) {
+                std::cout << "\r  [fillet] PID " << pid << " (" << pidIdx << "/" << pidsToProcess.size()
+                          << ") collecting elements..." << std::flush;
+            }
+            // 1. Collect elements of this part
+            struct EInfo { int eid; std::array<int,8> n; bool isPenta; };
+            std::vector<EInfo> elems;
+            for (auto& [eid, elem] : baseMesh_.elements) {
+                if (removedElementIds_.count(eid)) continue;
+                if (elem.partId != pid) continue;
+                if (elem.type != ElementType::HEX8 && elem.type != ElementType::PENTA6) continue;
+                EInfo ei;
+                ei.eid = eid;
+                for (int i = 0; i < 8; i++) ei.n[i] = elem.nodeIds[i];
+                ei.isPenta = (elem.type == ElementType::PENTA6) ||
+                             (ei.n[2] == ei.n[3] && ei.n[6] == ei.n[7] && ei.n[2] != ei.n[1]);
+                elems.push_back(ei);
+            }
+            for (auto& elem : addedElements_) {
+                if (elem.pid != pid) continue;
+                if (elem.type != ElementType::HEX8 && elem.type != ElementType::PENTA6) continue;
+                EInfo ei;
+                ei.eid = elem.id;
+                ei.n = elem.nodeIds;
+                ei.isPenta = (elem.type == ElementType::PENTA6) ||
+                             (ei.n[2] == ei.n[3] && ei.n[6] == ei.n[7] && ei.n[2] != ei.n[1]);
+                elems.push_back(ei);
+            }
+            if (elems.empty()) continue;
+
+            // Pre-build node→element adjacency and edge→element adjacency
+            std::unordered_map<int, std::vector<int>> nodeElemAdj;  // nid → list of elem indices
+            using EdgeKey2 = std::pair<int,int>;
+            auto makeEdge2 = [](int a, int b) -> EdgeKey2 {
+                return a < b ? EdgeKey2{a,b} : EdgeKey2{b,a};
+            };
+            struct EdgeKey2Hash {
+                size_t operator()(const EdgeKey2& e) const {
+                    return std::hash<long long>()(((long long)e.first << 32) | e.second);
+                }
+            };
+            std::unordered_map<EdgeKey2, std::vector<int>, EdgeKey2Hash> edgeElemAdj;
+            static const int hexEdges[12][2] = {
+                {0,1},{1,2},{2,3},{3,0}, {4,5},{5,6},{6,7},{7,4},
+                {0,4},{1,5},{2,6},{3,7}
+            };
+            for (int ei = 0; ei < (int)elems.size(); ++ei) {
+                std::set<int> uniq;
+                for (int i = 0; i < 8; ++i) uniq.insert(elems[ei].n[i]);
+                for (int nid : uniq) nodeElemAdj[nid].push_back(ei);
+                for (auto& he : hexEdges) {
+                    int a = elems[ei].n[he[0]], b = elems[ei].n[he[1]];
+                    if (a != b) edgeElemAdj[makeEdge2(a, b)].push_back(ei);
+                }
+            }
+
+            // HEX8 face indices: {n0,n1,n2,n3} with outward-consistent winding
+            static const int hexFaceIdx[6][4] = {
+                {0,4,7,3}, {1,2,6,5}, {0,1,5,4}, {3,7,6,2}, {0,3,2,1}, {4,5,6,7}
+            };
+
+            std::cout << "\r  [fillet] PID " << pid << ": " << elems.size()
+                      << " elements, building exterior faces..." << std::flush;
+
+            // 2. Build exterior face map using integer hash keys
+            // Face key: sorted node IDs hashed to uint64
+            struct FaceData {
+                int nodes[4];   // original winding (up to 4 node IDs, 0-padded)
+                int nCount;     // 3 or 4
+                int elemId;
+            };
+
+            // Hash: combine sorted node IDs into a single key
+            // For 3-node faces, pad 4th with 0
+            auto makeFaceKey = [](int n0, int n1, int n2, int n3) -> uint64_t {
+                int s[4] = {n0, n1, n2, n3};
+                // Simple sort of 4 elements
+                if (s[0] > s[1]) std::swap(s[0], s[1]);
+                if (s[2] > s[3]) std::swap(s[2], s[3]);
+                if (s[0] > s[2]) std::swap(s[0], s[2]);
+                if (s[1] > s[3]) std::swap(s[1], s[3]);
+                if (s[1] > s[2]) std::swap(s[1], s[2]);
+                // Combine into hash — using mix to reduce collisions
+                uint64_t h = (uint64_t)s[0];
+                h = h * 2654435761ULL + (uint64_t)s[1];
+                h = h * 2654435761ULL + (uint64_t)s[2];
+                h = h * 2654435761ULL + (uint64_t)s[3];
+                return h;
+            };
+
+            // face hash → list of face data (typically 1 or 2 entries)
+            std::unordered_map<uint64_t, std::vector<FaceData>> faceCount;
+            faceCount.reserve(elems.size() * 3); // ~half of 6 faces are shared
+
+            for (auto& ei : elems) {
+                for (int fi = 0; fi < 6; fi++) {
+                    int raw[4];
+                    for (int vi = 0; vi < 4; vi++)
+                        raw[vi] = ei.n[hexFaceIdx[fi][vi]];
+                    // Deduplicate (PENTA6: two nodes may be same)
+                    int fn[4] = {raw[0], 0, 0, 0};
+                    int nc = 1;
+                    for (int vi = 1; vi < 4; vi++) {
+                        bool dup = false;
+                        for (int k = 0; k < nc; k++) if (fn[k] == raw[vi]) { dup = true; break; }
+                        if (!dup) fn[nc++] = raw[vi];
+                    }
+                    if (nc < 3) continue; // degenerate
+
+                    FaceData fd;
+                    for (int k = 0; k < 4; k++) fd.nodes[k] = (k < nc) ? fn[k] : 0;
+                    fd.nCount = nc;
+                    fd.elemId = ei.eid;
+
+                    uint64_t key = makeFaceKey(fn[0], fn[1], (nc > 2 ? fn[2] : 0), (nc > 3 ? fn[3] : 0));
+                    faceCount[key].push_back(fd);
+                }
+            }
+
+            // Build element centroid map (no std::set, just handle degenerate HEX→PENTA)
+            std::unordered_map<int, Vector3D> elemCentroids;
+            elemCentroids.reserve(elems.size());
+            for (auto& ei : elems) {
+                Vector3D c = {0,0,0};
+                int cnt = 0;
+                bool seen[8]; int seenIds[8];
+                for (int i = 0; i < 8; i++) { seen[i] = false; seenIds[i] = 0; }
+                for (int i = 0; i < 8; i++) {
+                    bool isDup = false;
+                    for (int j = 0; j < cnt; j++) if (seenIds[j] == ei.n[i]) { isDup = true; break; }
+                    if (!isDup) {
+                        seenIds[cnt++] = ei.n[i];
+                        auto pp = getPos(ei.n[i]);
+                        c.x += pp.x; c.y += pp.y; c.z += pp.z;
+                    }
+                }
+                c.x /= cnt; c.y /= cnt; c.z /= cnt;
+                elemCentroids[ei.eid] = c;
+            }
+
+            // Exterior faces: appear exactly once in faceCount
+            struct ExtFace {
+                int nodes[4];   // original winding
+                int nCount;     // 3 or 4
+                Vector3D normal;
+            };
+            std::vector<ExtFace> extFaces;
+            extFaces.reserve(elems.size()); // rough estimate
+
+            for (auto& [key, flist] : faceCount) {
+                if (flist.size() != 1) continue;
+                auto& fd = flist[0];
+                // Compute normal from face winding
+                Vector3D p0 = getPos(fd.nodes[0]);
+                Vector3D p1 = getPos(fd.nodes[1]);
+                Vector3D p2 = getPos(fd.nodes[2]);
+                Vector3D e1 = {p1.x - p0.x, p1.y - p0.y, p1.z - p0.z};
+                Vector3D e2 = {p2.x - p0.x, p2.y - p0.y, p2.z - p0.z};
+                Vector3D n = {e1.y*e2.z - e1.z*e2.y,
+                              e1.z*e2.x - e1.x*e2.z,
+                              e1.x*e2.y - e1.y*e2.x};
+                double mag = std::sqrt(n.x*n.x + n.y*n.y + n.z*n.z);
+                if (mag < 1e-15) continue;
+                n.x /= mag; n.y /= mag; n.z /= mag;
+                // Ensure outward: normal should point away from element centroid
+                Vector3D faceCtr = {0,0,0};
+                for (int k = 0; k < fd.nCount; k++) {
+                    auto pp = getPos(fd.nodes[k]);
+                    faceCtr.x += pp.x; faceCtr.y += pp.y; faceCtr.z += pp.z;
+                }
+                double nf = (double)fd.nCount;
+                faceCtr.x /= nf; faceCtr.y /= nf; faceCtr.z /= nf;
+                auto& ec = elemCentroids[fd.elemId];
+                Vector3D toFace = {faceCtr.x - ec.x, faceCtr.y - ec.y, faceCtr.z - ec.z};
+                double dotCheck = n.x*toFace.x + n.y*toFace.y + n.z*toFace.z;
+                if (dotCheck < 0) { n.x = -n.x; n.y = -n.y; n.z = -n.z; }
+                ExtFace ef;
+                for (int k = 0; k < 4; k++) ef.nodes[k] = fd.nodes[k];
+                ef.nCount = fd.nCount;
+                ef.normal = n;
+                extFaces.push_back(ef);
+            }
+
+            // Free faceCount memory — no longer needed
+            faceCount.clear();
+
+            // 3. Build edge → adjacent exterior faces (hash map)
+            using EdgeKey = std::pair<int,int>;
+            auto makeEdge = [](int a, int b) -> EdgeKey {
+                return a < b ? EdgeKey{a,b} : EdgeKey{b,a};
+            };
+            struct EdgeKeyHash {
+                size_t operator()(const EdgeKey& e) const {
+                    return std::hash<long long>()(((long long)e.first << 32) | e.second);
+                }
+            };
+            std::unordered_map<EdgeKey, std::vector<int>, EdgeKeyHash> edgeFaces;
+            edgeFaces.reserve(extFaces.size() * 2);
+            for (int fi = 0; fi < (int)extFaces.size(); fi++) {
+                auto& ef = extFaces[fi];
+                for (int j = 0; j < ef.nCount; j++) {
+                    EdgeKey ek = makeEdge(ef.nodes[j], ef.nodes[(j+1) % ef.nCount]);
+                    edgeFaces[ek].push_back(fi);
+                }
+            }
+
+            std::cout << "\r  [fillet] PID " << pid << ": " << extFaces.size()
+                      << " exterior faces, finding sharp edges..." << std::flush;
+
+            // 4. Find sharp edges and accumulate per-node normal sums
+            // For each node on a sharp edge, accumulate the outward normals
+            // of all adjacent exterior faces that form sharp edges at that node
+            std::map<int, Vector3D> nodeNormalSum;  // nid → sum of outward normals from sharp edges
+            std::map<int, double> nodeMinEdgeLen;    // nid → minimum adjacent edge length
+            std::set<int> sharpNodes;
+
+            // Sharp edge info stored with face indices for step 5 reuse
+            struct SharpEdgeRef {
+                EdgeKey ek;
+                int fi0, fi1;   // face indices into extFaces
+                double angle;
+            };
+            std::vector<SharpEdgeRef> sharpEdgeRefs;
+            // node → indices into sharpEdgeRefs
+            std::unordered_map<int, std::vector<int>> nodeSharpEdges;
+
+            for (auto& [ek, faceIndices] : edgeFaces) {
+                if (faceIndices.size() != 2) continue;
+                auto& n1 = extFaces[faceIndices[0]].normal;
+                auto& n2 = extFaces[faceIndices[1]].normal;
+                // Dihedral angle between outward normals
+                double dot = n1.x*n2.x + n1.y*n2.y + n1.z*n2.z;
+                dot = std::max(-1.0, std::min(1.0, dot));
+                double angle = std::acos(dot); // 0 = coplanar, π = opposite
+
+                if (angle < angMinRad || angle > angMaxRad) continue;
+
+                // This is a sharp edge — mark both nodes
+                double edgeLen = 0;
+                {
+                    Vector3D pa = getPos(ek.first);
+                    Vector3D pb = getPos(ek.second);
+                    double dx = pb.x-pa.x, dy = pb.y-pa.y, dz = pb.z-pa.z;
+                    edgeLen = std::sqrt(dx*dx + dy*dy + dz*dz);
+                }
+
+                int seIdx = (int)sharpEdgeRefs.size();
+                sharpEdgeRefs.push_back({ek, faceIndices[0], faceIndices[1], angle});
+
+                totalEdges++;
+                for (int nid : {ek.first, ek.second}) {
+                    sharpNodes.insert(nid);
+                    nodeSharpEdges[nid].push_back(seIdx);
+                    // Track min edge length at this node
+                    auto it = nodeMinEdgeLen.find(nid);
+                    if (it == nodeMinEdgeLen.end()) nodeMinEdgeLen[nid] = edgeLen;
+                    else it->second = std::min(it->second, edgeLen);
+                }
+            }
+
+            // For each sharp node, sum outward normals of ALL adjacent exterior faces
+            // (not just faces on sharp edges — we need the full picture)
+            std::unordered_map<int, std::vector<int>> nodeExtFaces;
+            for (int fi = 0; fi < (int)extFaces.size(); fi++) {
+                auto& ef = extFaces[fi];
+                for (int k = 0; k < ef.nCount; k++) {
+                    int nid = ef.nodes[k];
+                    if (sharpNodes.count(nid))
+                        nodeExtFaces[nid].push_back(fi);
+                }
+            }
+
+            std::cout << "\r  [fillet] PID " << pid << ": " << sharpNodes.size()
+                      << " sharp nodes, computing offsets..." << std::flush;
+
+            // 5. Compute offset for each sharp node
+            for (int nid : sharpNodes) {
+                // Check R constraint: R < minEdgeLen / 2
+                double minLen = nodeMinEdgeLen[nid];
+                double localR = std::min(R, minLen * 0.5);
+                if (localR < 1e-10) continue;
+
+                // Collect unique outward normals at this node
+                // Use normal-sum approach: deduplicate near-parallel normals
+                Vector3D nsum = {0, 0, 0};
+                auto& faces = nodeExtFaces[nid];
+                std::vector<Vector3D> normals;
+                for (int fi : faces) {
+                    auto& nn = extFaces[fi].normal;
+                    // Check if this normal is already represented (parallel dedup)
+                    bool dup = false;
+                    for (auto& existing : normals) {
+                        double d = existing.x*nn.x + existing.y*nn.y + existing.z*nn.z;
+                        if (d > 0.999) { dup = true; break; }
+                    }
+                    if (!dup) {
+                        normals.push_back(nn);
+                        nsum.x += nn.x; nsum.y += nn.y; nsum.z += nn.z;
+                    }
+                }
+
+                if (normals.size() < 2) continue; // single face → no edge to fillet
+
+                double nsumMag = std::sqrt(nsum.x*nsum.x + nsum.y*nsum.y + nsum.z*nsum.z);
+                if (nsumMag < 1e-12) continue; // opposing normals cancel out
+
+                // Per-edge fillet: collect unique bisector directions, take max magnitude
+                // Multiple edge segments on the same geometric ridge share the same
+                // bisector direction — dedup to avoid double-counting.
+                Vector3D pos = getPos(nid);
+
+                struct BisectContrib {
+                    Vector3D dir;   // unit bisector direction (signed for convex/concave)
+                    double mag;     // offset magnitude
+                };
+                std::vector<BisectContrib> contribs;
+
+                auto nseIt = nodeSharpEdges.find(nid);
+                if (nseIt == nodeSharpEdges.end()) continue;
+
+                for (int seIdx : nseIt->second) {
+                    auto& ser = sharpEdgeRefs[seIdx];
+                    auto& ek2 = ser.ek;
+
+                    auto& en1 = extFaces[ser.fi0].normal;
+                    auto& en2 = extFaces[ser.fi1].normal;
+                    double edot = en1.x*en2.x + en1.y*en2.y + en1.z*en2.z;
+                    edot = std::max(-1.0, std::min(1.0, edot));
+
+
+                    // Edge midpoint for concavity test
+                    Vector3D epA = getPos(ek2.first);
+                    Vector3D epB = getPos(ek2.second);
+                    Vector3D eMid = {(epA.x+epB.x)/2, (epA.y+epB.y)/2, (epA.z+epB.z)/2};
+
+                    Vector3D bisect = {en1.x+en2.x, en1.y+en2.y, en1.z+en2.z};
+                    double bmag = std::sqrt(bisect.x*bisect.x + bisect.y*bisect.y + bisect.z*bisect.z);
+                    if (bmag < 1e-12) continue;
+                    Vector3D bhat = {bisect.x/bmag, bisect.y/bmag, bisect.z/bmag};
+
+                    // Concavity test — use edge→element adjacency map
+                    Vector3D eElemDir = {0,0,0};
+                    auto eeIt = edgeElemAdj.find(makeEdge2(ek2.first, ek2.second));
+                    if (eeIt != edgeElemAdj.end()) {
+                        for (int eIdx : eeIt->second) {
+                            auto& ec = elemCentroids[elems[eIdx].eid];
+                            eElemDir.x += ec.x - eMid.x;
+                            eElemDir.y += ec.y - eMid.y;
+                            eElemDir.z += ec.z - eMid.z;
+                        }
+                    }
+                    double ctest = bisect.x*eElemDir.x + bisect.y*eElemDir.y + bisect.z*eElemDir.z;
+                    double esign = (ctest > 0) ? 1.0 : -1.0;
+
+                    double nsumEdgeMag = std::sqrt(2.0 + 2.0 * edot);
+                    if (nsumEdgeMag < 1e-10) continue;
+                    double emag = localR * (1.0 - 1.0 / nsumEdgeMag);
+                    if (emag < 1e-10) continue;
+
+                    // Signed direction
+                    Vector3D signedDir = {bhat.x * esign, bhat.y * esign, bhat.z * esign};
+
+                    // Dedup: if a similar bisector direction already exists, take max magnitude
+                    bool merged = false;
+                    for (auto& c : contribs) {
+                        double ddot = c.dir.x*signedDir.x + c.dir.y*signedDir.y + c.dir.z*signedDir.z;
+                        if (ddot > 0.95) { // same ridge direction
+                            c.mag = std::max(c.mag, emag);
+                            merged = true;
+                            break;
+                        }
+                    }
+                    if (!merged) {
+                        contribs.push_back({signedDir, emag});
+                    }
+                }
+
+                if (contribs.empty()) continue;
+                Vector3D totalDelta = {0, 0, 0};
+                for (auto& c : contribs) {
+                    totalDelta.x += c.dir.x * c.mag;
+                    totalDelta.y += c.dir.y * c.mag;
+                    totalDelta.z += c.dir.z * c.mag;
+                }
+                Vector3D newPos = {
+                    pos.x + totalDelta.x,
+                    pos.y + totalDelta.y,
+                    pos.z + totalDelta.z
+                };
+                setPos(nid, newPos);
+                totalMoved++;
+            }
+
+            std::cout << "\r  [fillet] PID " << pid << ": smoothing interior face nodes..."
+                      << std::flush;
+
+            // 6. Move interior face nodes near sharp edges (arc profile)
+            // For each sharp edge, find face nodes within R/tan(β) and offset them
+            // along the face inward normal by the arc profile amount.
+            struct SharpEdgeInfo {
+                EdgeKey ek;
+                Vector3D pA, pB;       // edge endpoint positions
+                Vector3D edgeDir;      // unit direction along edge
+                double edgeLen;
+                Vector3D n1, n2;       // outward normals of the two faces
+                double dihedralAngle;  // angle between outward normals
+                int face1, face2;      // indices into extFaces
+            };
+            std::vector<SharpEdgeInfo> sharpEdgeList;
+
+            for (auto& [ek, faceIndices] : edgeFaces) {
+                if (faceIndices.size() != 2) continue;
+                auto& fn1 = extFaces[faceIndices[0]].normal;
+                auto& fn2 = extFaces[faceIndices[1]].normal;
+                double dot = fn1.x*fn2.x + fn1.y*fn2.y + fn1.z*fn2.z;
+                dot = std::max(-1.0, std::min(1.0, dot));
+                double angle = std::acos(dot);
+                if (angle < angMinRad || angle > angMaxRad) continue;
+
+                Vector3D pA = getPos(ek.first);
+                Vector3D pB = getPos(ek.second);
+                Vector3D ed = {pB.x-pA.x, pB.y-pA.y, pB.z-pA.z};
+                double elen = std::sqrt(ed.x*ed.x + ed.y*ed.y + ed.z*ed.z);
+                if (elen < 1e-15) continue;
+                ed.x /= elen; ed.y /= elen; ed.z /= elen;
+
+                sharpEdgeList.push_back({ek, pA, pB, ed, elen,
+                                         fn1, fn2, angle,
+                                         faceIndices[0], faceIndices[1]});
+            }
+
+            // Collect all exterior face nodes (excluding sharp nodes already moved)
+            std::set<int> extFaceNodes;
+            std::unordered_map<int, std::vector<int>> nodeToExtFace;
+            for (int fi = 0; fi < (int)extFaces.size(); fi++) {
+                auto& ef = extFaces[fi];
+                for (int k = 0; k < ef.nCount; k++) {
+                    int nid = ef.nodes[k];
+                    if (!sharpNodes.count(nid)) {
+                        extFaceNodes.insert(nid);
+                        nodeToExtFace[nid].push_back(fi);
+                    }
+                }
+            }
+
+            // Compute max search distance for face node → sharp edge matching
+            // tangentDist = R / tan(β), β = (π - α) / 2
+            // Use the largest tangentDist across all sharp edges as search radius
+            double maxSearchDist = 0;
+            for (auto& sei : sharpEdgeList) {
+                double beta = (M_PI - sei.dihedralAngle) / 2.0;
+                double tb = std::tan(beta);
+                if (std::abs(tb) > 1e-10) {
+                    double td = R / tb;
+                    if (td > maxSearchDist) maxSearchDist = td;
+                }
+            }
+            // Add margin for edge length (point-to-segment distance can extend beyond endpoints)
+            double gridCellSize = maxSearchDist * 2.0;
+            if (gridCellSize < 1e-10) gridCellSize = R * 4.0;
+
+            // Build spatial grid of sharp edges for O(1) neighbor lookup
+            struct GridKey {
+                int ix, iy, iz;
+                bool operator==(const GridKey& o) const { return ix==o.ix && iy==o.iy && iz==o.iz; }
+            };
+            struct GridHash {
+                size_t operator()(const GridKey& k) const {
+                    size_t h = std::hash<int>()(k.ix);
+                    h ^= std::hash<int>()(k.iy) + 0x9e3779b9 + (h<<6) + (h>>2);
+                    h ^= std::hash<int>()(k.iz) + 0x9e3779b9 + (h<<6) + (h>>2);
+                    return h;
+                }
+            };
+            std::unordered_map<GridKey, std::vector<int>, GridHash> edgeGrid;
+            double invCell = 1.0 / gridCellSize;
+
+            for (int si = 0; si < (int)sharpEdgeList.size(); ++si) {
+                auto& sei = sharpEdgeList[si];
+                // Insert edge into all cells it touches (AABB of edge endpoints + margin)
+                double xlo = std::min(sei.pA.x, sei.pB.x) - maxSearchDist;
+                double xhi = std::max(sei.pA.x, sei.pB.x) + maxSearchDist;
+                double ylo = std::min(sei.pA.y, sei.pB.y) - maxSearchDist;
+                double yhi = std::max(sei.pA.y, sei.pB.y) + maxSearchDist;
+                double zlo = std::min(sei.pA.z, sei.pB.z) - maxSearchDist;
+                double zhi = std::max(sei.pA.z, sei.pB.z) + maxSearchDist;
+                int ixlo = (int)std::floor(xlo * invCell), ixhi = (int)std::floor(xhi * invCell);
+                int iylo = (int)std::floor(ylo * invCell), iyhi = (int)std::floor(yhi * invCell);
+                int izlo = (int)std::floor(zlo * invCell), izhi = (int)std::floor(zhi * invCell);
+                for (int ix = ixlo; ix <= ixhi; ++ix)
+                    for (int iy = iylo; iy <= iyhi; ++iy)
+                        for (int iz = izlo; iz <= izhi; ++iz)
+                            edgeGrid[{ix, iy, iz}].push_back(si);
+            }
+
+            int faceNodeCount = 0;
+            int totalFaceNodes = (int)extFaceNodes.size();
+            int fnProgressInterval = std::max(1, totalFaceNodes / 20);
+
+            for (int nid : extFaceNodes) {
+                if (faceNodeCount % fnProgressInterval == 0) {
+                    std::cout << "\r  [fillet] PID " << pid << ": face nodes "
+                              << faceNodeCount << "/" << totalFaceNodes << "..." << std::flush;
+                }
+                ++faceNodeCount;
+
+                Vector3D pos = getPos(nid);
+                // Accumulate max offset from all nearby sharp edges
+                Vector3D totalOffset = {0, 0, 0};
+                bool moved = false;
+
+                // Query spatial grid for nearby sharp edges
+                int gx = (int)std::floor(pos.x * invCell);
+                int gy = (int)std::floor(pos.y * invCell);
+                int gz = (int)std::floor(pos.z * invCell);
+                auto git = edgeGrid.find({gx, gy, gz});
+                if (git == edgeGrid.end()) continue;
+
+                for (int si : git->second) {
+                    auto& sei = sharpEdgeList[si];
+                    // Check if this node lies on a face coplanar with one of the edge's faces
+                    bool onFace1 = false, onFace2 = false;
+                    for (int fi : nodeToExtFace[nid]) {
+                        auto& fn = extFaces[fi].normal;
+                        double d1 = fn.x*sei.n1.x + fn.y*sei.n1.y + fn.z*sei.n1.z;
+                        double d2 = fn.x*sei.n2.x + fn.y*sei.n2.y + fn.z*sei.n2.z;
+                        if (d1 > 0.99) onFace1 = true;
+                        if (d2 > 0.99) onFace2 = true;
+                    }
+                    if (!onFace1 && !onFace2) continue;
+
+                    // Perpendicular distance from node to edge line
+                    Vector3D ap = {pos.x - sei.pA.x, pos.y - sei.pA.y, pos.z - sei.pA.z};
+                    double t = ap.x*sei.edgeDir.x + ap.y*sei.edgeDir.y + ap.z*sei.edgeDir.z;
+                    // Clamp to edge segment
+                    t = std::max(0.0, std::min(sei.edgeLen, t));
+                    Vector3D closest = {sei.pA.x + t*sei.edgeDir.x,
+                                        sei.pA.y + t*sei.edgeDir.y,
+                                        sei.pA.z + t*sei.edgeDir.z};
+                    double dx = pos.x - closest.x;
+                    double dy = pos.y - closest.y;
+                    double dz = pos.z - closest.z;
+                    double dist = std::sqrt(dx*dx + dy*dy + dz*dz);
+
+                    // Fillet geometry: β = half interior angle
+                    double alpha = sei.dihedralAngle;
+                    double beta = (M_PI - alpha) / 2.0;
+                    double tanBeta = std::tan(beta);
+                    if (std::abs(tanBeta) < 1e-10) continue;
+                    double localR = R;
+                    double tangentDist = localR / tanBeta;
+
+                    if (dist < 1e-10 || dist > tangentDist) continue;
+
+                    // Arc offset
+                    double dFromTangent = tangentDist - dist;
+                    double arg = localR * localR - dFromTangent * dFromTangent;
+                    if (arg < 0) continue;
+                    double offset = localR - std::sqrt(arg);
+                    if (offset < 1e-10) continue;
+
+                    // Offset direction
+                    Vector3D faceNormal = onFace1 ? sei.n1 : sei.n2;
+                    Vector3D nBisect = {sei.n1.x+sei.n2.x, sei.n1.y+sei.n2.y, sei.n1.z+sei.n2.z};
+                    Vector3D avgEDir = {0,0,0};
+                    auto neIt = nodeElemAdj.find(nid);
+                    if (neIt != nodeElemAdj.end()) {
+                        for (int eIdx : neIt->second) {
+                            auto& ec = elemCentroids[elems[eIdx].eid];
+                            avgEDir.x += ec.x - pos.x;
+                            avgEDir.y += ec.y - pos.y;
+                            avgEDir.z += ec.z - pos.z;
+                        }
+                    }
+                    double bisectDot = nBisect.x*avgEDir.x + nBisect.y*avgEDir.y + nBisect.z*avgEDir.z;
+                    double sign = (bisectDot > 0) ? 1.0 : -1.0;
+                    Vector3D delta = {sign * faceNormal.x * offset,
+                                      sign * faceNormal.y * offset,
+                                      sign * faceNormal.z * offset};
+
+                    if (std::abs(delta.x) > std::abs(totalOffset.x)) totalOffset.x = delta.x;
+                    if (std::abs(delta.y) > std::abs(totalOffset.y)) totalOffset.y = delta.y;
+                    if (std::abs(delta.z) > std::abs(totalOffset.z)) totalOffset.z = delta.z;
+                    moved = true;
+                }
+
+                if (moved) {
+                    Vector3D newPos = {pos.x + totalOffset.x,
+                                       pos.y + totalOffset.y,
+                                       pos.z + totalOffset.z};
+                    setPos(nid, newPos);
+                    totalMoved++;
+                }
+            }
+        } // end pid loop
+
+        // Clear progress line
+        std::cout << "\r" << std::string(80, ' ') << "\r" << std::flush;
+
+        std::ostringstream oss;
+        oss << "[fillet] auto-detect: " << totalEdges/2 << " sharp edges found, "
+            << totalMoved << " nodes moved across "
+            << pidsToProcess.size() << " part(s), R=" << R
+            << " angle=[" << op.angleMin << "°," << op.angleMax << "°]";
+        infoMessages.push_back(oss.str());
+
+        laplacianSmoothInterior(pidsToProcess, op.smoothIter);
+        if (op.fixJacobian) fixNegativeJacobianElements(pidsToProcess);
+        return true;
     }
 
-    const double R = op.radius;
-    int totalMoved = 0;
+    // ================================================================
+    // LEGACY BBOX MODE (faces specified)
+    // ================================================================
+    int totalMovedAll = 0;
+    for (int pid : pidsToProcess) {
+        // Collect nodes belonging to target PID
+        std::set<int> partNodes;
+        for (auto& [eid, elem] : baseMesh_.elements) {
+            if (removedElementIds_.count(eid)) continue;
+            if (elem.partId != pid) continue;
+            for (int nid : elem.nodeIds) if (nid > 0) partNodes.insert(nid);
+        }
+        for (auto& elem : addedElements_) {
+            if (elem.pid != pid) continue;
+            for (int nid : elem.nodeIds) if (nid > 0) partNodes.insert(nid);
+        }
+        if (partNodes.empty()) continue;
 
-    for (const auto& faceStr : op.faces) {
-        // Normalise
-        std::string face = faceStr;
-        for (auto& c : face) c = (char)tolower((unsigned char)c);
-
-        int moved = 0;
+        // Bounding box
+        double xmin =  1e18, xmax = -1e18;
+        double ymin =  1e18, ymax = -1e18;
+        double zmin =  1e18, zmax = -1e18;
         for (int nid : partNodes) {
             auto p = getPos(nid);
-            double x = p.x, y = p.y, z = p.z;
-
-            // Per-face: determine main axis and side axes
-            // main_val: coordinate along face normal
-            // main_ref: face position along that axis
-            // main_sign: +1 for _max face, -1 for _min face
-            // s1, s2: the two tangential coordinates
-            double main_val, main_ref, main_sign;
-            double s1, s1min, s1max;
-            double s2, s2min, s2max;
-
-            if (face == "z_max") {
-                main_val = z; main_ref = zmax; main_sign = +1;
-                s1 = x; s1min = xmin; s1max = xmax;
-                s2 = y; s2min = ymin; s2max = ymax;
-            } else if (face == "z_min") {
-                main_val = z; main_ref = zmin; main_sign = -1;
-                s1 = x; s1min = xmin; s1max = xmax;
-                s2 = y; s2min = ymin; s2max = ymax;
-            } else if (face == "x_max") {
-                main_val = x; main_ref = xmax; main_sign = +1;
-                s1 = y; s1min = ymin; s1max = ymax;
-                s2 = z; s2min = zmin; s2max = zmax;
-            } else if (face == "x_min") {
-                main_val = x; main_ref = xmin; main_sign = -1;
-                s1 = y; s1min = ymin; s1max = ymax;
-                s2 = z; s2min = zmin; s2max = zmax;
-            } else if (face == "y_max") {
-                main_val = y; main_ref = ymax; main_sign = +1;
-                s1 = x; s1min = xmin; s1max = xmax;
-                s2 = z; s2min = zmin; s2max = zmax;
-            } else if (face == "y_min") {
-                main_val = y; main_ref = ymin; main_sign = -1;
-                s1 = x; s1min = xmin; s1max = xmax;
-                s2 = z; s2min = zmin; s2max = zmax;
-            } else {
-                errorMessage_ = "fillet: unknown face '" + faceStr + "'";
-                return false;
-            }
-
-            // Is this node within R of the face (inward)?
-            bool inMainZone = (main_sign > 0) ? (main_val > main_ref - R)
-                                              : (main_val < main_ref + R);
-            if (!inMainZone) continue;
-
-            // Proximity to each side edge
-            bool near_s1max = (s1 > s1max - R);
-            bool near_s1min = (s1 < s1min + R);
-            bool near_s2max = (s2 > s2max - R);
-            bool near_s2min = (s2 < s2min + R);
-            if (!near_s1max && !near_s1min && !near_s2max && !near_s2min) continue;
-
-            // Arc/sphere centre in each direction
-            double cmain = main_ref - main_sign * R;
-            double cs1 = near_s1max ? (s1max - R) : (near_s1min ? (s1min + R) : s1);
-            double cs2 = near_s2max ? (s2max - R) : (near_s2min ? (s2min + R) : s2);
-
-            double dm = main_val - cmain;
-            double d1 = s1 - cs1;
-            double d2 = s2 - cs2;
-
-            double new_main, new_s1, new_s2;
-            double len;
-
-            bool use_s1 = (near_s1max || near_s1min);
-            bool use_s2 = (near_s2max || near_s2min);
-
-            if (use_s1 && use_s2) {
-                // Spherical corner
-                len = std::sqrt(dm*dm + d1*d1 + d2*d2);
-                if (len < 1e-12) continue;
-                new_main = cmain + R * dm / len;
-                new_s1   = cs1   + R * d1 / len;
-                new_s2   = cs2   + R * d2 / len;
-            } else if (use_s1) {
-                // Cylindrical arc in main-s1 plane
-                len = std::sqrt(dm*dm + d1*d1);
-                if (len < 1e-12) continue;
-                new_main = cmain + R * dm / len;
-                new_s1   = cs1   + R * d1 / len;
-                new_s2   = s2;
-            } else {
-                // Cylindrical arc in main-s2 plane
-                len = std::sqrt(dm*dm + d2*d2);
-                if (len < 1e-12) continue;
-                new_main = cmain + R * dm / len;
-                new_s1   = s1;
-                new_s2   = cs2   + R * d2 / len;
-            }
-
-            // Reconstruct 3D position from (main, s1, s2) back to (x, y, z)
-            Vector3D newPos;
-            if (face == "z_max" || face == "z_min") {
-                newPos = {new_s1, new_s2, new_main};
-            } else if (face == "x_max" || face == "x_min") {
-                newPos = {new_main, new_s1, new_s2};
-            } else {  // y_max / y_min
-                newPos = {new_s1, new_main, new_s2};
-            }
-
-            setPos(nid, newPos);
-            moved++;
+            xmin = std::min(xmin, p.x); xmax = std::max(xmax, p.x);
+            ymin = std::min(ymin, p.y); ymax = std::max(ymax, p.y);
+            zmin = std::min(zmin, p.z); zmax = std::max(zmax, p.z);
         }
-        totalMoved += moved;
-    }
+
+        const double R = op.radius;
+        int totalMoved = 0;
+
+        for (const auto& faceStr : op.faces) {
+            std::string face = faceStr;
+            for (auto& c : face) c = (char)tolower((unsigned char)c);
+
+            int moved = 0;
+            for (int nid : partNodes) {
+                auto p = getPos(nid);
+                double x = p.x, y = p.y, z = p.z;
+
+                double main_val, main_ref, main_sign;
+                double s1, s1min, s1max;
+                double s2, s2min, s2max;
+
+                if (face == "z_max") {
+                    main_val = z; main_ref = zmax; main_sign = +1;
+                    s1 = x; s1min = xmin; s1max = xmax;
+                    s2 = y; s2min = ymin; s2max = ymax;
+                } else if (face == "z_min") {
+                    main_val = z; main_ref = zmin; main_sign = -1;
+                    s1 = x; s1min = xmin; s1max = xmax;
+                    s2 = y; s2min = ymin; s2max = ymax;
+                } else if (face == "x_max") {
+                    main_val = x; main_ref = xmax; main_sign = +1;
+                    s1 = y; s1min = ymin; s1max = ymax;
+                    s2 = z; s2min = zmin; s2max = zmax;
+                } else if (face == "x_min") {
+                    main_val = x; main_ref = xmin; main_sign = -1;
+                    s1 = y; s1min = ymin; s1max = ymax;
+                    s2 = z; s2min = zmin; s2max = zmax;
+                } else if (face == "y_max") {
+                    main_val = y; main_ref = ymax; main_sign = +1;
+                    s1 = x; s1min = xmin; s1max = xmax;
+                    s2 = z; s2min = zmin; s2max = zmax;
+                } else if (face == "y_min") {
+                    main_val = y; main_ref = ymin; main_sign = -1;
+                    s1 = x; s1min = xmin; s1max = xmax;
+                    s2 = z; s2min = zmin; s2max = zmax;
+                } else {
+                    errorMessage_ = "fillet: unknown face '" + faceStr + "'";
+                    return false;
+                }
+
+                bool inMainZone = (main_sign > 0) ? (main_val > main_ref - R)
+                                                   : (main_val < main_ref + R);
+                if (!inMainZone) continue;
+
+                bool near_s1max = (s1 > s1max - R);
+                bool near_s1min = (s1 < s1min + R);
+                bool near_s2max = (s2 > s2max - R);
+                bool near_s2min = (s2 < s2min + R);
+                if (!near_s1max && !near_s1min && !near_s2max && !near_s2min) continue;
+
+                double cmain = main_ref - main_sign * R;
+                double cs1 = near_s1max ? (s1max - R) : (near_s1min ? (s1min + R) : s1);
+                double cs2 = near_s2max ? (s2max - R) : (near_s2min ? (s2min + R) : s2);
+
+                double dm = main_val - cmain;
+                double d1 = s1 - cs1;
+                double d2 = s2 - cs2;
+
+                double new_main, new_s1, new_s2;
+                double len;
+                bool use_s1 = (near_s1max || near_s1min);
+                bool use_s2 = (near_s2max || near_s2min);
+
+                if (use_s1 && use_s2) {
+                    len = std::sqrt(dm*dm + d1*d1 + d2*d2);
+                    if (len < 1e-12) continue;
+                    new_main = cmain + R * dm / len;
+                    new_s1   = cs1   + R * d1 / len;
+                    new_s2   = cs2   + R * d2 / len;
+                } else if (use_s1) {
+                    len = std::sqrt(dm*dm + d1*d1);
+                    if (len < 1e-12) continue;
+                    new_main = cmain + R * dm / len;
+                    new_s1   = cs1   + R * d1 / len;
+                    new_s2   = s2;
+                } else {
+                    len = std::sqrt(dm*dm + d2*d2);
+                    if (len < 1e-12) continue;
+                    new_main = cmain + R * dm / len;
+                    new_s1   = s1;
+                    new_s2   = cs2   + R * d2 / len;
+                }
+
+                Vector3D newPos;
+                if (face == "z_max" || face == "z_min") {
+                    newPos = {new_s1, new_s2, new_main};
+                } else if (face == "x_max" || face == "x_min") {
+                    newPos = {new_main, new_s1, new_s2};
+                } else {
+                    newPos = {new_s1, new_main, new_s2};
+                }
+                setPos(nid, newPos);
+                moved++;
+            }
+            totalMoved += moved;
+        }
         totalMovedAll += totalMoved;
-    } // end pid loop
+    }
 
     std::ostringstream oss;
     oss << "[fillet] " << totalMovedAll << " nodes moved across "
@@ -11660,7 +12545,325 @@ bool ModelAssembler::applyFillet(const FilletOperation& op) {
         << " face(s):";
     for (auto& f : op.faces) oss << " " << f;
     infoMessages.push_back(oss.str());
+
+    laplacianSmoothInterior(pidsToProcess, op.smoothIter);
+    if (op.fixJacobian) fixNegativeJacobianElements(pidsToProcess);
     return true;
+}
+
+// ============================================================
+// fixNegativeJacobianElements — post-fillet quality repair
+// ============================================================
+// laplacianSmoothInterior — Laplacian smoothing for interior nodes
+// ============================================================
+// Exterior (surface) nodes are pinned; only interior nodes are relaxed.
+// Adjacency graph is built once; each iteration is O(N_interior * avg_neighbors).
+
+void ModelAssembler::laplacianSmoothInterior(const std::vector<int>& pids, int iterations) {
+    if (iterations <= 0) return;
+
+    std::set<int> pidSet(pids.begin(), pids.end());
+
+    // Build addedNodes index for O(1) lookup
+    std::unordered_map<int, int> addedNodeIdx;
+    for (int i = 0; i < (int)addedNodes_.size(); ++i)
+        addedNodeIdx[addedNodes_[i].id] = i;
+
+    auto getPos = [&](int nid) -> Vector3D {
+        auto it = modifiedNodePositions_.find(nid);
+        if (it != modifiedNodePositions_.end()) return it->second;
+        auto nit = baseMesh_.nodes.find(nid);
+        if (nit != baseMesh_.nodes.end()) return nit->second.position;
+        auto ait = addedNodeIdx.find(nid);
+        if (ait != addedNodeIdx.end()) {
+            auto& n = addedNodes_[ait->second];
+            return {n.x, n.y, n.z};
+        }
+        return {0, 0, 0};
+    };
+
+    auto setPos = [&](int nid, const Vector3D& p) {
+        modifiedNodePositions_[nid] = p;
+        auto ait = addedNodeIdx.find(nid);
+        if (ait != addedNodeIdx.end()) {
+            addedNodes_[ait->second].x = p.x;
+            addedNodes_[ait->second].y = p.y;
+            addedNodes_[ait->second].z = p.z;
+        }
+    };
+
+    // 1. Collect all nodes belonging to target PIDs and build adjacency
+    std::set<int> allNodes;
+    // face count per sorted face key → detect exterior faces (count == 1)
+    std::map<std::array<int, 4>, int> faceCount;
+
+    auto sortedFace = [](int a, int b, int c, int d) -> std::array<int, 4> {
+        std::array<int, 4> f = {a, b, c, d};
+        std::sort(f.begin(), f.end());
+        return f;
+    };
+
+    // Adjacency: node → set of neighbor nodes (from element edges)
+    std::unordered_map<int, std::vector<int>> adj;
+
+    // Process baseMesh_ elements
+    for (auto& [eid, elem] : baseMesh_.elements) {
+        if (removedElementIds_.count(eid)) continue;
+        if (!pidSet.count(elem.partId)) continue;
+        if (elem.type != ElementType::HEX8) continue;
+
+        for (int i = 0; i < 8; ++i) allNodes.insert(elem.nodeIds[i]);
+
+        // 12 edges → adjacency
+        static const int edges[12][2] = {
+            {0,1},{1,2},{2,3},{3,0},{4,5},{5,6},{6,7},{7,4},{0,4},{1,5},{2,6},{3,7}};
+        for (auto& e : edges) {
+            int a = elem.nodeIds[e[0]], b = elem.nodeIds[e[1]];
+            adj[a].push_back(b);
+            adj[b].push_back(a);
+        }
+
+        // 6 faces → face count for exterior detection
+        static const int faces[6][4] = {
+            {0,3,7,4},{1,2,6,5},{0,1,5,4},{3,2,6,7},{0,1,2,3},{4,5,6,7}};
+        for (auto& f : faces) {
+            auto key = sortedFace(elem.nodeIds[f[0]], elem.nodeIds[f[1]],
+                                   elem.nodeIds[f[2]], elem.nodeIds[f[3]]);
+            faceCount[key]++;
+        }
+    }
+
+    // Process addedElements_
+    for (auto& elem : addedElements_) {
+        if (!pidSet.count(elem.pid)) continue;
+        if (elem.type != ElementType::HEX8) continue;
+
+        for (int i = 0; i < 8; ++i) allNodes.insert(elem.nodeIds[i]);
+
+        static const int edges[12][2] = {
+            {0,1},{1,2},{2,3},{3,0},{4,5},{5,6},{6,7},{7,4},{0,4},{1,5},{2,6},{3,7}};
+        for (auto& e : edges) {
+            int a = elem.nodeIds[e[0]], b = elem.nodeIds[e[1]];
+            adj[a].push_back(b);
+            adj[b].push_back(a);
+        }
+
+        static const int faces[6][4] = {
+            {0,3,7,4},{1,2,6,5},{0,1,5,4},{3,2,6,7},{0,1,2,3},{4,5,6,7}};
+        for (auto& f : faces) {
+            auto key = sortedFace(elem.nodeIds[f[0]], elem.nodeIds[f[1]],
+                                   elem.nodeIds[f[2]], elem.nodeIds[f[3]]);
+            faceCount[key]++;
+        }
+    }
+
+    // 2. Identify exterior (surface) nodes — nodes on any face with count == 1
+    std::set<int> surfaceNodes;
+    for (auto& [fkey, cnt] : faceCount) {
+        if (cnt == 1) {  // Exterior face
+            for (int nid : fkey) surfaceNodes.insert(nid);
+        }
+    }
+
+    // Interior nodes = allNodes - surfaceNodes
+    std::vector<int> interiorNodes;
+    interiorNodes.reserve(allNodes.size());
+    for (int nid : allNodes) {
+        if (!surfaceNodes.count(nid)) interiorNodes.push_back(nid);
+    }
+
+    if (interiorNodes.empty()) return;
+
+    // De-duplicate adjacency lists
+    for (auto& [nid, neighbors] : adj) {
+        std::sort(neighbors.begin(), neighbors.end());
+        neighbors.erase(std::unique(neighbors.begin(), neighbors.end()), neighbors.end());
+    }
+
+    // 3. Iterate: move each interior node to average of neighbors
+    int totalMoved = 0;
+    for (int iter = 0; iter < iterations; ++iter) {
+        for (int nid : interiorNodes) {
+            auto ait = adj.find(nid);
+            if (ait == adj.end() || ait->second.empty()) continue;
+
+            Vector3D avg = {0, 0, 0};
+            int count = 0;
+            for (int nb : ait->second) {
+                Vector3D p = getPos(nb);
+                avg.x += p.x; avg.y += p.y; avg.z += p.z;
+                count++;
+            }
+            if (count > 0) {
+                avg.x /= count; avg.y /= count; avg.z /= count;
+                setPos(nid, avg);
+                if (iter == 0) totalMoved++;
+            }
+        }
+    }
+
+    if (totalMoved > 0) {
+        std::ostringstream msg;
+        msg << "[fillet] Laplacian smooth: " << totalMoved << " interior nodes, "
+            << iterations << " iterations";
+        infoMessages.push_back(msg.str());
+    }
+}
+
+// ============================================================
+// Scans all HEX8 elements in the given PIDs for negative Jacobians.
+// Negative-J hexes are decomposed into 5 TET4 elements (Dompierre split).
+// If any resulting TET4 still has negative volume it is discarded.
+
+void ModelAssembler::fixNegativeJacobianElements(const std::vector<int>& pids) {
+    // Build fast PID lookup
+    std::set<int> pidSet(pids.begin(), pids.end());
+
+    // Build addedNodes index for O(1) lookup
+    std::unordered_map<int, int> addedNodeIdx;
+    for (int i = 0; i < (int)addedNodes_.size(); ++i)
+        addedNodeIdx[addedNodes_[i].id] = i;
+
+    // Helper: get node position (same logic as applyFillet getPos)
+    auto getPos = [&](int nid) -> Vector3D {
+        auto it = modifiedNodePositions_.find(nid);
+        if (it != modifiedNodePositions_.end()) return it->second;
+        auto nit = baseMesh_.nodes.find(nid);
+        if (nit != baseMesh_.nodes.end()) return nit->second.position;
+        auto ait = addedNodeIdx.find(nid);
+        if (ait != addedNodeIdx.end()) {
+            auto& n = addedNodes_[ait->second];
+            return {n.x, n.y, n.z};
+        }
+        return {0, 0, 0};
+    };
+
+    ElementQualityChecker checker;
+    int negCount = 0, splitCount = 0, removedCount = 0;
+
+    // --- Phase 1: Check baseMesh_ elements ---
+    std::vector<int> badBaseEids;
+    for (auto& [eid, elem] : baseMesh_.elements) {
+        if (removedElementIds_.count(eid)) continue;
+        if (!pidSet.count(elem.partId)) continue;
+        if (elem.type != ElementType::HEX8) continue;
+
+        std::array<Vector3D, 8> nodes;
+        for (int i = 0; i < 8; ++i) nodes[i] = getPos(elem.nodeIds[i]);
+
+        auto metrics = checker.checkHex8(nodes);
+        if (metrics.minJacobian <= ElementQualityChecker::MIN_JACOBIAN_ERROR) {
+            badBaseEids.push_back(eid);
+            negCount++;
+        }
+    }
+
+    // --- Phase 2: Check addedElements_ ---
+    std::vector<int> badAddedIndices;
+    for (int ai = 0; ai < (int)addedElements_.size(); ++ai) {
+        auto& elem = addedElements_[ai];
+        if (!pidSet.count(elem.pid)) continue;
+        if (elem.type != ElementType::HEX8) continue;
+
+        std::array<Vector3D, 8> nodes;
+        for (int i = 0; i < 8; ++i) nodes[i] = getPos(elem.nodeIds[i]);
+
+        auto metrics = checker.checkHex8(nodes);
+        if (metrics.minJacobian <= ElementQualityChecker::MIN_JACOBIAN_ERROR) {
+            badAddedIndices.push_back(ai);
+            negCount++;
+        }
+    }
+
+    if (negCount == 0) return;  // All clean
+
+    std::cout << "[fillet] " << negCount << " negative-Jacobian HEX8 detected, splitting to TET4...\n";
+
+    // Helper: decompose one HEX8 into up to 5 TET4, discard invalid ones
+    auto splitHex = [&](const std::array<int, 8>& hexNodes, int pid) -> int {
+        int added = 0;
+        for (int t = 0; t < 5; ++t) {
+            std::array<int, 8> tetNodeIds{};
+            tetNodeIds[0] = hexNodes[HEX8_TO_TET4[t][0]];
+            tetNodeIds[1] = hexNodes[HEX8_TO_TET4[t][1]];
+            tetNodeIds[2] = hexNodes[HEX8_TO_TET4[t][2]];
+            tetNodeIds[3] = hexNodes[HEX8_TO_TET4[t][3]];
+            // TET4 stored as degenerate HEX8: N4=N5=N6=N7=N3
+            tetNodeIds[4] = tetNodeIds[3];
+            tetNodeIds[5] = tetNodeIds[3];
+            tetNodeIds[6] = tetNodeIds[3];
+            tetNodeIds[7] = tetNodeIds[3];
+
+            // Validate TET4 volume
+            std::array<Vector3D, 4> tetPos;
+            for (int i = 0; i < 4; ++i) tetPos[i] = getPos(tetNodeIds[i]);
+
+            double vol = ElementQualityChecker::computeVolumeTet4(tetPos);
+            if (vol <= ElementQualityChecker::MIN_JACOBIAN_ERROR) {
+                // Try flipping orientation (swap nodes 2 and 3)
+                std::swap(tetNodeIds[2], tetNodeIds[3]);
+                tetNodeIds[4] = tetNodeIds[3];
+                tetNodeIds[5] = tetNodeIds[3];
+                tetNodeIds[6] = tetNodeIds[3];
+                tetNodeIds[7] = tetNodeIds[3];
+                for (int i = 0; i < 4; ++i) tetPos[i] = getPos(tetNodeIds[i]);
+                vol = ElementQualityChecker::computeVolumeTet4(tetPos);
+                if (vol <= ElementQualityChecker::MIN_JACOBIAN_ERROR) {
+                    continue;  // Discard this tet — truly degenerate
+                }
+            }
+
+            ++maxElementId_;
+            AddedElement tet;
+            tet.id = maxElementId_;
+            tet.pid = pid;
+            tet.nodeIds = tetNodeIds;
+            tet.type = ElementType::TET4;
+            addedElements_.push_back(tet);
+            added++;
+        }
+        return added;
+    };
+
+    // --- Phase 3: Split bad baseMesh_ elements ---
+    for (int eid : badBaseEids) {
+        auto& elem = baseMesh_.elements.at(eid);
+        int nTets = splitHex(elem.nodeIds, elem.partId);
+        removedElementIds_.insert(eid);
+        if (nTets > 0) splitCount++;
+        else removedCount++;
+    }
+
+    // --- Phase 4: Split bad addedElements_ (iterate in reverse to not invalidate indices) ---
+    // Collect info first, then mark for removal
+    struct BadAdded { std::array<int, 8> nodeIds; int pid; int origId; };
+    std::vector<BadAdded> badAddedInfo;
+    std::set<int> badAddedIdSet;
+    for (int ai : badAddedIndices) {
+        auto& elem = addedElements_[ai];
+        badAddedInfo.push_back({elem.nodeIds, elem.pid, elem.id});
+        badAddedIdSet.insert(elem.id);
+    }
+
+    // Remove bad added elements (erase from vector)
+    addedElements_.erase(
+        std::remove_if(addedElements_.begin(), addedElements_.end(),
+            [&](const AddedElement& e) { return badAddedIdSet.count(e.id) > 0; }),
+        addedElements_.end());
+
+    // Now split them into TET4
+    for (auto& bad : badAddedInfo) {
+        int nTets = splitHex(bad.nodeIds, bad.pid);
+        if (nTets > 0) splitCount++;
+        else removedCount++;
+    }
+
+    // --- Report ---
+    std::ostringstream msg;
+    msg << "[fillet] Jacobian fix: " << splitCount << " HEX8 → TET4 split";
+    if (removedCount > 0)
+        msg << ", " << removedCount << " removed (degenerate)";
+    infoMessages.push_back(msg.str());
 }
 
 // ============================================================
@@ -11776,6 +12979,276 @@ bool ModelAssembler::applyBattery(const BatteryOperation& op, const std::string&
 
     char buf[256];
     snprintf(buf, sizeof(buf), "[battery] Included: %s", kPath.c_str());
+    infoMessages.push_back(buf);
+    return true;
+}
+
+// ========== SPLIT: Subdivide extruded HEX8/PENTA6 along extrude direction ==========
+
+bool ModelAssembler::applySplit(const SplitOperation& op) {
+    int N = op.divisions;
+    if (N < 2) {
+        errorMessage_ = "split: divisions must be >= 2";
+        return false;
+    }
+
+    // ── 1. Collect target elements ──────────────────────────
+    struct ElemInfo {
+        int eid, pid;
+        std::array<int, 8> nids;
+        ElementType etype;
+        bool inBase;   // true=baseMesh_, false=addedElements_
+        int addedIdx;  // index in addedElements_ if !inBase
+    };
+    std::vector<ElemInfo> targets;
+
+    // Build PID filter set
+    std::set<int> splitPidFilter;
+    if (!op.targetPids.empty()) {
+        for (int p : op.targetPids) splitPidFilter.insert(p);
+    } else if (op.targetPid > 0) {
+        splitPidFilter.insert(op.targetPid);
+    }
+    auto pidMatch = [&](int pid) {
+        return splitPidFilter.empty() || splitPidFilter.count(pid);
+    };
+
+    for (const auto& [eid, elem] : baseMesh_.elements) {
+        if (removedElementIds_.count(eid)) continue;
+        if (elem.type != ElementType::HEX8 && elem.type != ElementType::PENTA6) continue;
+        if (!pidMatch(elem.partId)) continue;
+        auto nids = elem.nodeIds;
+        auto mit = modifiedElementNodes_.find(eid);
+        if (mit != modifiedElementNodes_.end()) nids = mit->second;
+        targets.push_back({eid, elem.partId, nids, elem.type, true, -1});
+    }
+    for (int i = 0; i < (int)addedElements_.size(); ++i) {
+        const auto& ae = addedElements_[i];
+        if (removedElementIds_.count(ae.id)) continue;
+        if (ae.type != ElementType::HEX8 && ae.type != ElementType::PENTA6) continue;
+        if (ae.isTshell) continue;
+        if (!pidMatch(ae.pid)) continue;
+        targets.push_back({ae.id, ae.pid, ae.nodeIds, ae.type, false, i});
+    }
+
+    if (targets.empty()) {
+        infoMessages.push_back("  split: no target HEX8/PENTA6 elements found");
+        return true;
+    }
+
+    // ── 2. Build node position lookup ───────────────────────
+    std::map<int, int> addedNodeIndex;
+    for (int i = 0; i < (int)addedNodes_.size(); ++i)
+        addedNodeIndex[addedNodes_[i].id] = i;
+
+    auto getPos = [&](int nid, double& x, double& y, double& z) -> bool {
+        auto it = addedNodeIndex.find(nid);
+        if (it != addedNodeIndex.end()) {
+            x = addedNodes_[it->second].x;
+            y = addedNodes_[it->second].y;
+            z = addedNodes_[it->second].z;
+            return true;
+        }
+        const auto* node = baseMesh_.getNode(nid);
+        if (!node) return false;
+        x = node->position.x; y = node->position.y; z = node->position.z;
+        return true;
+    };
+
+    // ── 3. Detect extrude direction ─────────────────────────
+    // Face pair indices: {botFace, topFace}
+    // i: face 0/1, j: face 2/3, k: face 4/5
+    // For each face pair, top face nodes index into the 8-node HEX8:
+    //   k-dir: bot={0,1,2,3} top={4,5,6,7}
+    //   j-dir: bot={0,1,5,4} top={3,2,6,7}
+    //   i-dir: bot={0,3,7,4} top={1,2,6,5}
+
+    struct FacePairDef {
+        int botLocal[4];   // bottom face local node indices
+        int topLocal[4];   // top face local node indices (matching order)
+        char axis;         // 'x', 'y', 'z'
+    };
+    // Matching order: botLocal[i] connects to topLocal[i] via edge
+    FacePairDef facePairs[3] = {
+        {{0,3,7,4}, {1,2,6,5}, 'x'},  // i-direction (face 0→1)
+        {{0,1,5,4}, {3,2,6,7}, 'y'},  // j-direction (face 2→3)
+        {{0,1,2,3}, {4,5,6,7}, 'z'},  // k-direction (face 4→5)
+    };
+
+    int fpIdx = -1;  // chosen face pair index
+
+    if (op.direction == "x")      fpIdx = 0;
+    else if (op.direction == "y") fpIdx = 1;
+    else if (op.direction == "z") fpIdx = 2;
+    else {
+        // Auto-detect: find direction where face normal is most aligned
+        // Use first element to determine
+        const auto& nids = targets[0].nids;
+        double pos[8][3];
+        for (int i = 0; i < 8; ++i)
+            if (!getPos(nids[i], pos[i][0], pos[i][1], pos[i][2])) {
+                errorMessage_ = "split: cannot read node " + std::to_string(nids[i]);
+                return false;
+            }
+
+        // For PENTA6, extrude = direction connecting triangular faces
+        if (targets[0].etype == ElementType::PENTA6) {
+            // Dynamically detect which face pair has triangular faces
+            fpIdx = 2;  // default k-direction
+            for (int f = 0; f < 3; ++f) {
+                std::set<int> botU, topU;
+                for (int c = 0; c < 4; ++c) {
+                    botU.insert(targets[0].nids[facePairs[f].botLocal[c]]);
+                    topU.insert(targets[0].nids[facePairs[f].topLocal[c]]);
+                }
+                if (botU.size() == 3 && topU.size() == 3) { fpIdx = f; break; }
+            }
+        } else {
+            // HEX8: pick direction with smallest face-area (= extrude cross-section is thin)
+            // Actually better: pick direction where the edge connecting bot→top face is longest
+            // = the extrude direction typically has the thinnest dimension
+            // Wait — user wants to split along extrude direction, so we need to find
+            // the direction where elements are stacked (chained through shared faces).
+            //
+            // Simpler heuristic: compute average edge length for each face-pair direction.
+            // Extrude direction = the one where bot→top edges are shortest (thin layers).
+            double avgLen[3] = {0, 0, 0};
+            for (int fp = 0; fp < 3; ++fp) {
+                double sum = 0;
+                for (int c = 0; c < 4; ++c) {
+                    int b = facePairs[fp].botLocal[c];
+                    int t = facePairs[fp].topLocal[c];
+                    double dx = pos[t][0] - pos[b][0];
+                    double dy = pos[t][1] - pos[b][1];
+                    double dz = pos[t][2] - pos[b][2];
+                    sum += std::sqrt(dx*dx + dy*dy + dz*dz);
+                }
+                avgLen[fp] = sum / 4.0;
+            }
+            // Shortest = extrude direction (layers are thin)
+            fpIdx = 0;
+            if (avgLen[1] < avgLen[fpIdx]) fpIdx = 1;
+            if (avgLen[2] < avgLen[fpIdx]) fpIdx = 2;
+        }
+        infoMessages.push_back("  split: auto-detected extrude direction = " +
+                               std::string(1, facePairs[fpIdx].axis));
+    }
+
+    const auto& fp = facePairs[fpIdx];
+
+    // ── 4. Split each element into N sub-elements ───────────
+    // For each element:
+    //   - bottom face nodes = nids[fp.botLocal[0..3]]
+    //   - top face nodes    = nids[fp.topLocal[0..3]]
+    //   - create (N-1) intermediate layers by linear interpolation
+    //   - create N sub-elements
+    //
+    // Edge mid-node dedup: key = (min(botNid, topNid), max(botNid, topNid), fraction_index)
+    // to share nodes between adjacent elements.
+
+    struct EdgeKey {
+        int n0, n1;     // sorted
+        int layer;      // 1..N-1
+        bool operator<(const EdgeKey& o) const {
+            if (n0 != o.n0) return n0 < o.n0;
+            if (n1 != o.n1) return n1 < o.n1;
+            return layer < o.layer;
+        }
+    };
+    std::map<EdgeKey, int> midNodeMap;
+
+    auto getOrCreateMidNode = [&](int nBot, int nTop, int layer) -> int {
+        int lo = std::min(nBot, nTop), hi = std::max(nBot, nTop);
+        EdgeKey key{lo, hi, layer};
+        auto it = midNodeMap.find(key);
+        if (it != midNodeMap.end()) return it->second;
+
+        double bx, by, bz, tx, ty, tz;
+        getPos(nBot, bx, by, bz);
+        getPos(nTop, tx, ty, tz);
+
+        double t = (double)layer / (double)N;
+        double mx = bx + t * (tx - bx);
+        double my = by + t * (ty - by);
+        double mz = bz + t * (tz - bz);
+
+        int nid = ++maxNodeId_;
+        addedNodes_.push_back({nid, mx, my, mz});
+        midNodeMap[key] = nid;
+        return nid;
+    };
+
+    int splitCount = 0;
+    int totalTargets = (int)targets.size();
+    int progressInterval = std::max(1, totalTargets / 20);  // update ~20 times
+
+    for (const auto& ei : targets) {
+        if (splitCount % progressInterval == 0) {
+            std::cout << "\r  [split] " << splitCount << "/" << totalTargets
+                      << " elements processed..." << std::flush;
+        }
+        // PENTA6: split between the two triangular faces (prism axis).
+        // Dynamically detect which face pair has degenerate (triangular) faces
+        // to handle all degenerate patterns (k-face AND vertical-edge).
+        int fpPentaIdx = fpIdx;
+        if (ei.etype == ElementType::PENTA6) {
+            for (int f = 0; f < 3; ++f) {
+                std::set<int> botU, topU;
+                for (int c = 0; c < 4; ++c) {
+                    botU.insert(ei.nids[facePairs[f].botLocal[c]]);
+                    topU.insert(ei.nids[facePairs[f].topLocal[c]]);
+                }
+                if (botU.size() == 3 && topU.size() == 3) { fpPentaIdx = f; break; }
+            }
+        }
+        const auto& fpElem = (ei.etype == ElementType::PENTA6) ? facePairs[fpPentaIdx] : fp;
+
+        // Get the 4 bot and 4 top node IDs
+        int botNids[4], topNids[4];
+        for (int c = 0; c < 4; ++c) {
+            botNids[c] = ei.nids[fpElem.botLocal[c]];
+            topNids[c] = ei.nids[fpElem.topLocal[c]];
+        }
+
+        // Build layer node arrays: layer 0 = bot, layer N = top
+        // layerNids[layer][corner]
+        std::vector<std::array<int,4>> layerNids(N + 1);
+        for (int c = 0; c < 4; ++c) {
+            layerNids[0][c]  = botNids[c];
+            layerNids[N][c]  = topNids[c];
+        }
+        for (int layer = 1; layer < N; ++layer) {
+            for (int c = 0; c < 4; ++c) {
+                layerNids[layer][c] = getOrCreateMidNode(botNids[c], topNids[c], layer);
+            }
+        }
+
+        // Remove original element
+        removedElementIds_.insert(ei.eid);
+
+        // Create N sub-elements
+        for (int sub = 0; sub < N; ++sub) {
+            std::array<int, 8> newNids;
+            // Map back: botLocal[] gets layerNids[sub], topLocal[] gets layerNids[sub+1]
+            for (int c = 0; c < 4; ++c) {
+                newNids[fpElem.botLocal[c]] = layerNids[sub][c];
+                newNids[fpElem.topLocal[c]] = layerNids[sub + 1][c];
+            }
+
+            int newEid = ++maxElementId_;
+            addedElements_.push_back({newEid, ei.pid, newNids, ei.etype, false});
+        }
+        ++splitCount;
+    }
+
+    // Clear progress line
+    std::cout << "\r" << std::string(80, ' ') << "\r" << std::flush;
+
+    char buf[256];
+    snprintf(buf, sizeof(buf),
+             "  split: %d elements → %d (×%d along %c-axis, %d mid-nodes created)",
+             splitCount, splitCount * N, N, fp.axis,
+             (int)midNodeMap.size());
     infoMessages.push_back(buf);
     return true;
 }
