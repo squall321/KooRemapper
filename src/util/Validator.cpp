@@ -85,9 +85,9 @@ ValidationResult Validator::validateFlatMesh(const Mesh& mesh) {
     // Check that all elements are hexahedral or tetrahedral
     for (const auto& pair : mesh.getElements()) {
         const Element& elem = pair.second;
-        if (elem.type != ElementType::HEX8 && elem.type != ElementType::TET4) {
+        if (elem.type != ElementType::HEX8 && elem.type != ElementType::TET4 && elem.type != ElementType::PENTA6) {
             result.addError("Element " + std::to_string(elem.id) +
-                           " is not a supported element type (HEX8 or TET4)");
+                           " is not a supported element type (HEX8, TET4, or PENTA6)");
         }
     }
 

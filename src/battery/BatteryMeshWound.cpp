@@ -102,7 +102,17 @@ private:
     std::vector<int> flatLoopNodes(double h, double cx, double half_L,
                                    double flat_ratio, int n_str, int n_arc,
                                    int ny, double dy,
-                                   std::vector<int>* botPerim = nullptr);
+                                   std::vector<int>* botPerim = nullptr,
+                                   double y0 = 0.0);
+
+    // Build separator grid with axial overhang: take a base grid (ny rows)
+    // and prepend/append one row at y=-oh and y=cellHeight+oh.
+    // Returns new grid with (ny+2) rows and same n_total columns.
+    std::vector<int> addAxialOverhang(
+        const std::vector<int>& baseGrid, int n_total, int ny,
+        double oh, double cellHeight,
+        double h, double cx, double half_L, double flat_ratio,
+        int n_str, int n_arc);
 
     // Elements from two adjacent grid columns (SHELL)
     // segs: if non-null, append (n1,n2,n3,n4) quads for airbag tracking
@@ -205,7 +215,8 @@ std::vector<int> WoundMeshGen::flatLoopNodes(
         double h, double cx, double half_L,
         double flat_ratio, int n_str, int n_arc,
         int ny, double dy,
-        std::vector<int>* botPerim) {
+        std::vector<int>* botPerim,
+        double y0) {
 
     // n_total = 2*n_str + 2*n_arc  (closed loop)
     int n_total = (n_arc > 0) ? (2 * n_str + 2 * n_arc)
@@ -224,7 +235,7 @@ std::vector<int> WoundMeshGen::flatLoopNodes(
 
     auto addCol = [&](double x, double z) {
         for (int jy = 0; jy <= ny; ++jy) {
-            int nid = addNode(x, jy * dy, z);
+            int nid = addNode(x, y0 + jy * dy, z);
             G(jy, idx) = nid;
             if (jy == 0 && botPerim) botPerim->push_back(nid);
         }
@@ -275,6 +286,45 @@ std::vector<int> WoundMeshGen::flatLoopNodes(
     }
 
     return grid;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Separator axial overhang: prepend row at y=-oh, append row at y=cellHeight+oh
+// ─────────────────────────────────────────────────────────────
+std::vector<int> WoundMeshGen::addAxialOverhang(
+        const std::vector<int>& baseGrid, int n_total, int ny,
+        double oh, double cellHeight,
+        double h, double cx, double half_L, double flat_ratio,
+        int n_str, int n_arc) {
+    // Generate two single-row grids at overhang y positions
+    auto botRow = flatLoopNodes(h, cx, half_L, flat_ratio, n_str, n_arc,
+                                0, 1.0, nullptr, -oh);       // 1 row at y=-oh
+    auto topRow = flatLoopNodes(h, cx, half_L, flat_ratio, n_str, n_arc,
+                                0, 1.0, nullptr, cellHeight + oh); // 1 row at y=cH+oh
+
+    int stride = n_total + 1;
+    int ny_new = ny + 2;
+    std::vector<int> newGrid((ny_new + 1) * stride);
+
+    auto G = [&](int jy, int js) -> int& {
+        return newGrid[jy * stride + js];
+    };
+    auto Gb = [&](int jy, int js) {
+        return baseGrid[jy * stride + js];
+    };
+
+    // Row 0: bottom overhang
+    for (int js = 0; js <= n_total; ++js)
+        G(0, js) = botRow[js];  // botRow has (0+1)*stride entries
+    // Rows 1..ny+1: original base grid
+    for (int jy = 0; jy <= ny; ++jy)
+        for (int js = 0; js <= n_total; ++js)
+            G(jy + 1, js) = Gb(jy, js);
+    // Row ny+2: top overhang
+    for (int js = 0; js <= n_total; ++js)
+        G(ny + 2, js) = topRow[js];
+
+    return newGrid;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -513,14 +563,23 @@ void WoundMeshGen::buildFlatCell() {
         }
 
         // Separator — SHELL at base_h + tAl + tCat
+        // Axial (Y) overhang: separator extends beyond electrode edges
         {
             double h = base_h + tAl + tCat;
-            int n_arc = nArcSegs(h, flatRatio, meshSizeP);
+            double sepOH = t.sepOverhang;
+            int n_arc_sep = nArcSegs(h, flatRatio, meshSizeP);
+            int n_total_sep = (n_arc_sep > 0) ? (2*n_str + 2*n_arc_sep) : (2*(n_str+1));
             out_ << "*NODE\n";
-            auto grid = flatLoopNodes(h, cx, half_L, flatRatio, n_str, n_arc, ny, dy);
-            int n_total = (n_arc > 0) ? (2*n_str + 2*n_arc) : (2*(n_str+1));
-            out_ << "*ELEMENT_SHELL\n";
-            shellFromGrid(PID_W_SEP, grid, n_total, ny);
+            auto baseGrid = flatLoopNodes(h, cx, half_L, flatRatio, n_str, n_arc_sep, ny, dy);
+            if (sepOH > 0.0) {
+                auto grid = addAxialOverhang(baseGrid, n_total_sep, ny, sepOH,
+                                             cellHeight, h, cx, half_L, flatRatio, n_str, n_arc_sep);
+                out_ << "*ELEMENT_SHELL\n";
+                shellFromGrid(PID_W_SEP, grid, n_total_sep, ny + 2);
+            } else {
+                out_ << "*ELEMENT_SHELL\n";
+                shellFromGrid(PID_W_SEP, baseGrid, n_total_sep, ny);
+            }
         }
 
         // Anode — SOLID / TSHELL / SHELL(all_shell)
@@ -629,9 +688,11 @@ void WoundMeshGen::buildPouch(double h_outer, double cx, double half_L,
 
     // Content boundary (electrolyte envelope)
     // Z: tight to jellyroll outer surface (no extra buf in Z)
-    // X/Y: +buf offset
+    // X/Y: +buf offset. Y expands for separator overhang.
+    double oh = cfg_.thick.sepOverhang;
+    double bufY = std::max(buf, oh + buf);   // sep overhang + fillet clearance
     double ctx0 = jx0 - buf,    ctx1 = jx1 + buf;
-    double cty0 = -buf,         cty1 = H + buf;
+    double cty0 = -bufY,        cty1 = H + bufY;
     double ctz0 = -h_outer,     ctz1 = h_outer;
 
     // Fillet centers
@@ -1264,13 +1325,21 @@ void WoundMeshGen::buildSpiralCell() {
             }
         }
 
-        // Separator
+        // Separator (axial overhang)
         {
             double h_sep = base_h + tAl + tCat;
+            double sepOH = t.sepOverhang;
             out_ << "*NODE\n";
-            auto sepGrid = flatLoopNodes(h_sep, cx, half_L, flatRatio, n_str, n_arc, ny, dy);
-            out_ << "*ELEMENT_SHELL\n";
-            shellFromGrid(PID_W_SEP, sepGrid, n_total, ny);
+            auto baseGrid = flatLoopNodes(h_sep, cx, half_L, flatRatio, n_str, n_arc, ny, dy);
+            if (sepOH > 0.0) {
+                auto grid = addAxialOverhang(baseGrid, n_total, ny, sepOH,
+                                             cellHeight, h_sep, cx, half_L, flatRatio, n_str, n_arc);
+                out_ << "*ELEMENT_SHELL\n";
+                shellFromGrid(PID_W_SEP, grid, n_total, ny + 2);
+            } else {
+                out_ << "*ELEMENT_SHELL\n";
+                shellFromGrid(PID_W_SEP, baseGrid, n_total, ny);
+            }
         }
 
         // Anode

@@ -35,31 +35,41 @@ $      EID       PID      N1      N2      N3      N4      N5      N6      N7    
          1         1       1       2       3       4       5       6       7       8
          2         2       5       6       7       8       9      10      11      12
 *MAT_ELASTIC_TITLE
-$HWCOLOR MATERIAL          2     43
-Mobile.STS304::CAE_Hinge-Edge_JG2_x_t_Fem::[2]
+Mobile.STS304
 $      MID       RHO         E        PR        DA        DB         K
          27.9000E-09  190000.0       0.3       0.0       0.0       0.0
+$
+$$ --- MID 3: Mobile.Rigid (Steel-like, unused) ---
 *MAT_THERMAL_ISOTROPIC_TITLE
 STS304
 $     TMID       TRO     TGRLC    TGMULT
          2       0.0       0.0       0.0
 $       HC        TC
  5.000E+08      16.2
+$
+$$ --- TMID 3: Mobile.Rigid (Carbon steel) ---
 *MAT_ADD_THERMAL_EXPANSION
 $      PID      LCID      MULT
          1         01.7300E-05
+$
+$$ --- MID 3: Mobile.Rigid (S45C_CarbonSteel, ALPHA=1.2E-05 1/K) ---
 *MAT_ELASTIC_TITLE
-$HWCOLOR MATERIAL          1     11
-TAPE_1620MPa::CAE_Hinge-Edge_JG2_x_t_Fem::[1]
+TAPE_1620MPa
 $      MID       RHO         E        PR        DA        DB         K
          11.1000E-09    1620.0    0.3902       0.0       0.0       0.0
+$
+$$ --- MID 2: Mobile.STS304 (STS304 stainless steel) ---
 *MAT_THERMAL_ISOTROPIC_TITLE
 TAPE_1620MPa
 $     TMID       TRO     TGRLC    TGMULT
          1       0.0       0.0       0.0
 $       HC        TC
  1.200E+09      0.20
+$
+$$ --- TMID 2: STS304 (Stainless Steel 304) ---
 *MAT_ADD_THERMAL_EXPANSION
 $      PID      LCID      MULT
          2         05.9000E-05
+$
+$$ --- MID 2: Mobile.STS304 (STS304_Stainless, ALPHA=1.7E-05 1/K) ---
 *END

@@ -34,6 +34,7 @@ struct BatteryLayerThickness {
     double separator  = 0.020;   // mm  PE separator
     double anode      = 0.070;   // mm  Graphite half-coating (×2 = solid height 0.140)
     double cuCC       = 0.008;   // mm  Cu current collector foil
+    double sepOverhang = 0.3;    // mm  Separator overhang beyond electrode edges (each side)
     double pouch      = 0.153;   // mm  Pouch laminate (each face)
     double buffer     = 0.200;   // mm  Electrolyte buffer between pouch and jellyroll
 };
@@ -334,7 +335,7 @@ struct BatteryConfig {
 
     // ── Wound-only ──────────────────────────────────────────
     bool   woundFlat        = true;   // flat (non-conformal) vs Archimedean spiral
-    double woundFlatRatio   = 0.3;    // arc x-radius = h * ratio (1.0=semicircle, 0.3=flat)
+    double woundFlatRatio   = 1.0;    // arc x-radius = h * ratio (1.0=semicircle, 0.3=flat)
     int    woundNWinds      = 15;     // number of windings
     double woundMandrel     = 1.5;    // mandrel inner radius mm (spiral mode only)
     double woundMeshSizePath = 0.0;   // 0 = auto (meshSize * 0.8)

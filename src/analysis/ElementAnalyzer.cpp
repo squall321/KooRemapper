@@ -100,7 +100,7 @@ ElementResult ElementAnalyzer::analyzeElement(
     // Get material for this element (from part or default)
     const MaterialModel* elemMaterial = getMaterialForElement(elem, refMesh);
     
-    if (elem.type == ElementType::HEX8) {
+    if (elem.type == ElementType::HEX8 || elem.type == ElementType::PENTA6) {
         // Get node positions
         std::array<Vector3D, 8> refNodes, defNodes;
         

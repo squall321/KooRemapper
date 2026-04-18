@@ -322,13 +322,7 @@ std::vector<std::array<int,4>> ct_extractSurface(
         if (elem.partId != pid) continue;
         foundSolid = true;
 
-        // TET4 detection
-        bool isTet = (elem.nodeIds[4] == elem.nodeIds[7] &&
-                      elem.nodeIds[4] == elem.nodeIds[6] &&
-                      elem.nodeIds[4] == elem.nodeIds[5]);
-        int numFaces = isTet ? 4 : 6;
-
-        for (int fi = 0; fi < numFaces; ++fi) {
+        for (int fi : elem.getValidFaceIndices()) {
             auto fn = elem.getFaceNodeIds(fi);
             std::array<int,4> winding = {fn[0], fn[1], fn[2], fn[3]};
 

@@ -14,6 +14,7 @@ enum class ElementType {
     HEX20,      // 20-node hexahedron
     TET4,       // 4-node tetrahedron
     TET10,      // 10-node tetrahedron
+    PENTA6,     // 6-node pentahedron (wedge/prism), stored as degenerate HEX8: n3=n4, n7=n8
     QUAD4,      // 4-node shell (quad)
     UNKNOWN
 };
@@ -77,6 +78,20 @@ public:
         indexAssigned = true;
     }
 
+    // Number of real faces for this element type
+    int getNumFaces() const {
+        if (type == ElementType::TET4)   return 4;
+        if (type == ElementType::PENTA6) return 5;
+        return 6;  // HEX8
+    }
+
+    // Check if face is degenerate (all 4 node IDs resolve to <= 2 unique nodes)
+    bool isFaceDegenerate(int faceIndex) const {
+        auto fn = getFaceNodeIds(faceIndex);
+        // Degenerate if two pairs collapse (e.g. PENTA face 3: n2,n2,n6,n6)
+        return (fn[0] == fn[1] && fn[2] == fn[3]);
+    }
+
     // Get face node indices (local indices 0-7)
     static std::array<int, NODES_PER_FACE> getFaceLocalNodes(int faceIndex) {
         // Face definitions based on LS-DYNA convention
@@ -93,6 +108,17 @@ public:
             return faceNodes[faceIndex];
         }
         return {0, 0, 0, 0};
+    }
+
+    // Get valid face indices for this element type (skips degenerate faces)
+    std::vector<int> getValidFaceIndices() const {
+        std::vector<int> faces;
+        for (int fi = 0; fi < NUM_FACES; ++fi) {
+            if (!isFaceDegenerate(fi)) {
+                faces.push_back(fi);
+            }
+        }
+        return faces;
     }
 
     // Get face node IDs (actual node IDs)

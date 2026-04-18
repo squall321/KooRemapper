@@ -32,8 +32,8 @@ void ConnectivityAnalyzer::buildConnectivity(const Mesh& mesh) {
 
 void ConnectivityAnalyzer::buildFaceMap(const Mesh& mesh) {
     for (const auto& [elemId, elem] : mesh.elements) {
-        // Process each of the 6 faces
-        for (int faceIdx = 0; faceIdx < Element::NUM_FACES; ++faceIdx) {
+        // Process each valid face (skips degenerate faces for PENTA6)
+        for (int faceIdx : elem.getValidFaceIndices()) {
             std::array<int, 4> faceNodes = elem.getFaceNodeIds(faceIdx);
 
             Face face(faceNodes, elemId, faceIdx);

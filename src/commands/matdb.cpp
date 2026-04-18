@@ -84,17 +84,19 @@ int runMatdb(const std::string& yamlFile, ConsoleOutput& console) {
                     std::string rk = trim(rest.substr(0, rcp));
                     std::string rv = stripQuotes(trim(rest.substr(rcp+1)));
                     auto& rule = op.rules.back();
-                    if      (rk == "match")    rule.match = rv;
-                    else if (rk == "mid")      { try { rule.mid = std::stoi(rv); } catch(...) {} }
-                    else if (rk == "mat_type") rule.matType = rv;
-                    else if (rk == "thermal")  rule.thermalOverride = (rv == "true" || rv == "yes" || rv == "1") ? 1 : 0;
+                    if      (rk == "match")      rule.match = rv;
+                    else if (rk == "match_part") rule.matchPart = rv;
+                    else if (rk == "mid")        { try { rule.mid = std::stoi(rv); } catch(...) {} }
+                    else if (rk == "mat_type")   rule.matType = rv;
+                    else if (rk == "thermal")    rule.thermalOverride = (rv == "true" || rv == "yes" || rv == "1") ? 1 : 0;
                 }
             } else if (inMaterialItem && indent > materialItemIndent) {
                 auto& rule = op.rules.back();
-                if      (key == "match")    rule.match = val;
-                else if (key == "mid")      { try { rule.mid = std::stoi(val); } catch(...) {} }
-                else if (key == "mat_type") rule.matType = val;
-                else if (key == "thermal")  rule.thermalOverride = (val == "true" || val == "yes" || val == "1") ? 1 : 0;
+                if      (key == "match")      rule.match = val;
+                else if (key == "match_part") rule.matchPart = val;
+                else if (key == "mid")        { try { rule.mid = std::stoi(val); } catch(...) {} }
+                else if (key == "mat_type")   rule.matType = val;
+                else if (key == "thermal")    rule.thermalOverride = (val == "true" || val == "yes" || val == "1") ? 1 : 0;
             }
         }
     }
@@ -114,7 +116,10 @@ int runMatdb(const std::string& yamlFile, ConsoleOutput& console) {
 
     console.println("[matdb] Model: " + modelFile);
     console.println("[matdb] Output: " + outputPrefix + ".k");
-    console.println("[matdb] Mat type: " + op.globalMatType);
+    if (!op.globalMatType.empty())
+        console.println("[matdb] Global mat type: " + op.globalMatType);
+    else
+        console.println("[matdb] Mat type: per-rule (no global default)");
     console.println("[matdb] Thermal: " + std::string(op.globalThermal ? "ON" : "OFF"));
     if (!op.rules.empty())
         console.println("[matdb] Material rules: " + std::to_string(op.rules.size()));

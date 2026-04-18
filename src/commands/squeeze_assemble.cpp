@@ -639,6 +639,18 @@ int runAssemble(const std::string& configFile, const ConsoleOutput& console) {
             ok = assembler.applyCnrb2Solid(op.cnrb2solid);
         } else if (op.type == AssemblyOperation::HFDAMP) {
             ok = assembler.applyHFDamp(op.hfdamp);
+        } else if (op.type == AssemblyOperation::BATTERY) {
+            ok = assembler.applyBattery(op.battery, configDir);
+        } else if (op.type == AssemblyOperation::SPLIT) {
+            if (!op.split.targetPids.empty()) {
+                for (int pid : op.split.targetPids) {
+                    SplitOperation s = op.split; s.targetPid = pid; s.targetPids = {};
+                    ok = assembler.applySplit(s);
+                    if (!ok) break;
+                }
+            } else {
+                ok = assembler.applySplit(op.split);
+            }
         }
 
         if (!ok) {

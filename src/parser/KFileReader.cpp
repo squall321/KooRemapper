@@ -9,6 +9,84 @@
 
 namespace KooRemapper {
 
+// Detect PENTA6 from any degenerate HEX8 node pattern and normalize
+// to standard form: n[2]=n[3], n[6]=n[7].
+// Returns true if element is PENTA6 (nodeIds may be reordered).
+static bool detectAndNormalizePenta6(std::array<int, 8>& n) {
+    // Count unique nodes — PENTA6 has exactly 6
+    int unique = 0;
+    int seen[8]; // max 8
+    for (int i = 0; i < 8; ++i) {
+        bool dup = false;
+        for (int j = 0; j < i; ++j)
+            if (n[i] == n[j]) { dup = true; break; }
+        if (!dup) seen[unique++] = n[i];
+    }
+    if (unique != 6) return false;
+
+    // Standard: n[2]=n[3] && n[6]=n[7]
+    if (n[2] == n[3] && n[6] == n[7]) return true;
+
+    // Cyclic-rotate bottom face {0,1,2,3} and top face {4,5,6,7}
+    // so that the degenerate pair lands at positions [2]=[3] and [6]=[7].
+    // Rotation preserves face winding order and vertical edge connectivity.
+
+    // Pattern: n[0]=n[1] && n[4]=n[5]  →  rotate by 2
+    //   bottom {0,1,2,3} → {2,3,0,1}, top {4,5,6,7} → {6,7,4,5}
+    if (n[0] == n[1] && n[4] == n[5]) {
+        std::array<int, 8> r = {n[2], n[3], n[0], n[1], n[6], n[7], n[4], n[5]};
+        n = r;
+        return true;
+    }
+
+    // Pattern: n[0]=n[3] && n[4]=n[7]  →  rotate by 1
+    //   bottom {0,1,2,3} → {1,2,3,0}, top {4,5,6,7} → {5,6,7,4}
+    //   new[2]=old[3], new[3]=old[0], old[0]=old[3] → new[2]=new[3] ✓
+    if (n[0] == n[3] && n[4] == n[7]) {
+        std::array<int, 8> r = {n[1], n[2], n[3], n[0], n[5], n[6], n[7], n[4]};
+        n = r;
+        return true;
+    }
+
+    // Pattern: n[1]=n[2] && n[5]=n[6]  →  rotate by 3 (= reverse by 1)
+    //   bottom {0,1,2,3} → {3,0,1,2}, top {4,5,6,7} → {7,4,5,6}
+    //   new[2]=old[1], new[3]=old[2], old[1]=old[2] → new[2]=new[3] ✓
+    if (n[1] == n[2] && n[5] == n[6]) {
+        std::array<int, 8> r = {n[3], n[0], n[1], n[2], n[7], n[4], n[5], n[6]};
+        n = r;
+        return true;
+    }
+
+    // ── Vertical edge collapse patterns (prism axis ≠ k) ──
+    // These collapse edges connecting bottom and top faces.
+    // No normalization (node reorder) — just detect as PENTA6.
+    // The split code dynamically finds the correct face pair direction.
+
+    // n[0]=n[4] && n[1]=n[5]  → front face degenerate, prism axis = i
+    if (n[0] == n[4] && n[1] == n[5]) return true;
+    // n[2]=n[6] && n[3]=n[7]  → back face degenerate, prism axis = i
+    if (n[2] == n[6] && n[3] == n[7]) return true;
+    // n[0]=n[4] && n[3]=n[7]  → left face degenerate, prism axis = j
+    if (n[0] == n[4] && n[3] == n[7]) return true;
+    // n[1]=n[5] && n[2]=n[6]  → right face degenerate, prism axis = j
+    if (n[1] == n[5] && n[2] == n[6]) return true;
+
+    // ── Same-face opposite-edge collapse (prism axis ≠ k) ──
+    // Both collapsed edges on bottom or top face.
+
+    // n[0]=n[1] && n[2]=n[3]  → bottom i-edges collapse, prism axis = j
+    if (n[0] == n[1] && n[2] == n[3]) return true;
+    // n[4]=n[5] && n[6]=n[7]  → top i-edges collapse, prism axis = j
+    if (n[4] == n[5] && n[6] == n[7]) return true;
+    // n[0]=n[3] && n[1]=n[2]  → bottom j-edges collapse, prism axis = i
+    if (n[0] == n[3] && n[1] == n[2]) return true;
+    // n[4]=n[7] && n[5]=n[6]  → top j-edges collapse, prism axis = i
+    if (n[4] == n[7] && n[5] == n[6]) return true;
+
+    return false;
+}
+
+
 KFileReader::KFileReader()
     : currentLine_(0)
     , linesProcessed_(0)
@@ -371,6 +449,11 @@ bool KFileReader::parseElementSolidSection(std::ifstream& file) {
                             nodeIds[6] == nodeIds[3] && nodeIds[7] == nodeIds[3]) {
                             elem.type = ElementType::TET4;
                         }
+                        // Detect PENTA6 (wedge): any degenerate pair → normalize to n[2]=n[3], n[6]=n[7]
+                        else if (detectAndNormalizePenta6(nodeIds)) {
+                            elem.nodeIds = nodeIds;
+                            elem.type = ElementType::PENTA6;
+                        }
                         mesh_.addElement(elem);
                         elementCount++;
                         continue;  // Successfully parsed, move to next line
@@ -396,6 +479,11 @@ bool KFileReader::parseElementSolidSection(std::ifstream& file) {
                 if (nodeIds[4] == nodeIds[3] && nodeIds[5] == nodeIds[3] &&
                     nodeIds[6] == nodeIds[3] && nodeIds[7] == nodeIds[3]) {
                     elem.type = ElementType::TET4;
+                }
+                // Detect PENTA6 (wedge): any degenerate pair → normalize to n[2]=n[3], n[6]=n[7]
+                else if (detectAndNormalizePenta6(nodeIds)) {
+                    elem.nodeIds = nodeIds;
+                    elem.type = ElementType::PENTA6;
                 }
                 mesh_.addElement(elem);
                 elementCount++;
@@ -466,6 +554,11 @@ bool KFileReader::parseElementSolidSection(std::ifstream& file) {
                                 nodeIds[6] == nodeIds[3] && nodeIds[7] == nodeIds[3]) {
                                 elem.type = ElementType::TET4;
                             }
+                            // Detect PENTA6 (wedge): any degenerate pair → normalize to n[2]=n[3], n[6]=n[7]
+                            else if (detectAndNormalizePenta6(nodeIds)) {
+                                elem.nodeIds = nodeIds;
+                                elem.type = ElementType::PENTA6;
+                            }
                             mesh_.addElement(elem);
                             elementCount++;
                             parsedNodeLine = true;
@@ -485,6 +578,11 @@ bool KFileReader::parseElementSolidSection(std::ifstream& file) {
                         if (nodeIds[4] == nodeIds[3] && nodeIds[5] == nodeIds[3] &&
                             nodeIds[6] == nodeIds[3] && nodeIds[7] == nodeIds[3]) {
                             elem.type = ElementType::TET4;
+                        }
+                        // Detect PENTA6 (wedge): any degenerate pair → normalize to n[2]=n[3], n[6]=n[7]
+                        else if (detectAndNormalizePenta6(nodeIds)) {
+                            elem.nodeIds = nodeIds;
+                            elem.type = ElementType::PENTA6;
                         }
                         mesh_.addElement(elem);
                         elementCount++;

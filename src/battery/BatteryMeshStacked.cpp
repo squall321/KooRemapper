@@ -58,7 +58,7 @@ static inline int gAt(const Grid& g, int ix, int iy, int stride) {
 // ─────────────────────────────────────────────────────────────
 class BatMeshGen {
 public:
-    const BatteryConfig& cfg;
+    BatteryConfig cfg;   // local copy (pouch buf adjusted for sep overhang)
     int    nx, ny;       // element counts (node counts = nx+1, ny+1)
     double dx, dy;       // element sizes
     double meshSize;
@@ -118,6 +118,12 @@ public:
         if (ny < 1) ny = 1;
         dx = c.geo.cellWidth  / nx;
         dy = c.geo.cellHeight / ny;
+        // Expand pouch buffer to accommodate separator overhang
+        double oh = cfg.thick.sepOverhang;
+        if (oh > 0.0) {
+            cfg.pouch.bufX = std::max(cfg.pouch.bufX, oh);
+            cfg.pouch.bufY = std::max(cfg.pouch.bufY, oh);
+        }
         buildJellyCoords();
     }
 
@@ -315,6 +321,63 @@ public:
                 addShell(pid,
                     gAt(g,ix,  iy,  s), gAt(g,ix+1,iy,  s),
                     gAt(g,ix+1,iy+1,s), gAt(g,ix,  iy+1,s));
+    }
+
+    // ── createSepShellWithOverhang ──────────────────────────
+    // Creates a separator SHELL grid with overhang: inner nodes shared with
+    // existing electrode grid (innerGrid), overhang ring of extra nodes/elements
+    // extends beyond electrode edges in X and Y by 'oh' mm.
+    // Grid layout: (nx+3) × (ny+3), where indices 1..nx+1 / 1..ny+1 are inner.
+    void createSepShellWithOverhang(int pid, const Grid& innerGrid, double z, double oh) {
+        if (oh <= 0.0) {
+            // No overhang — fall back to standard shell
+            createShellFromGrid(pid, innerGrid);
+            return;
+        }
+        int snx = nx + 3;   // stride for extended grid
+        int sny = ny + 3;
+        Grid eg(snx * sny, 0);
+
+        auto eAt = [&](int ix, int iy) -> int& {
+            return eg[iy * snx + ix];
+        };
+
+        // Fill inner region (1..nx+1, 1..ny+1) from innerGrid
+        int sInner = nx + 1;
+        for (int iy = 0; iy <= ny; ++iy)
+            for (int ix = 0; ix <= nx; ++ix)
+                eAt(ix + 1, iy + 1) = gAt(innerGrid, ix, iy, sInner);
+
+        // Overhang edge coordinates
+        double xMin = jellyXs[0]  - oh;
+        double xMax = jellyXs[nx] + oh;
+        double yMin = jellyYs[0]  - oh;
+        double yMax = jellyYs[ny] + oh;
+
+        // Bottom overhang row (iy=0): y = yMin
+        for (int ix = 0; ix <= nx; ++ix)
+            eAt(ix + 1, 0) = addNode(jellyXs[ix], yMin, z);
+        // Top overhang row (iy=ny+2): y = yMax
+        for (int ix = 0; ix <= nx; ++ix)
+            eAt(ix + 1, ny + 2) = addNode(jellyXs[ix], yMax, z);
+        // Left overhang col (ix=0): x = xMin
+        for (int iy = 0; iy <= ny; ++iy)
+            eAt(0, iy + 1) = addNode(xMin, jellyYs[iy], z);
+        // Right overhang col (ix=nx+2): x = xMax
+        for (int iy = 0; iy <= ny; ++iy)
+            eAt(nx + 2, iy + 1) = addNode(xMax, jellyYs[iy], z);
+        // Four corners
+        eAt(0,      0)      = addNode(xMin, yMin, z);
+        eAt(nx + 2, 0)      = addNode(xMax, yMin, z);
+        eAt(0,      ny + 2) = addNode(xMin, yMax, z);
+        eAt(nx + 2, ny + 2) = addNode(xMax, yMax, z);
+
+        // Create shell elements over entire extended grid
+        for (int iy = 0; iy < ny + 2; ++iy)
+            for (int ix = 0; ix < nx + 2; ++ix)
+                addShell(pid,
+                    eAt(ix,   iy),   eAt(ix+1, iy),
+                    eAt(ix+1, iy+1), eAt(ix,   iy+1));
     }
 
     // ── create_solid_layer_between ───────────────────────────
@@ -1022,12 +1085,14 @@ public:
             cathPids.push_back(pidCat);
 
             // Separator: SHELL on Cathode top, NO z-advance
+            // If sep_overhang > 0, separator extends beyond electrode edges
             int pidSep = base + LT_SEP;
+            double sepOH = thk.sepOverhang;
             if (!cfg.allShell) {
-                createShellFromGrid(pidSep, ucPrev);
+                createSepShellWithOverhang(pidSep, ucPrev, z, sepOH);
             } else {
                 Grid sepMid = createPlaneNodes(z);
-                createShellFromGrid(pidSep, sepMid);
+                createSepShellWithOverhang(pidSep, sepMid, z, sepOH);
                 ucPrev = sepMid;
             }
             sepPids.push_back(pidSep);

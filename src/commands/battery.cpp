@@ -149,6 +149,7 @@ BatteryConfig parseBatteryConfig(const std::string& yamlFile) {
             else if (key == "separator")    cfg.thick.separator= bat_toDouble(val);
             else if (key == "anode")        cfg.thick.anode    = bat_toDouble(val);
             else if (key == "cu_cc")        cfg.thick.cuCC     = bat_toDouble(val);
+            else if (key == "sep_overhang") cfg.thick.sepOverhang = bat_toDouble(val);
             else if (key == "pouch")        cfg.thick.pouch    = bat_toDouble(val);
             else if (key == "electrolyte_buffer") cfg.thick.buffer = bat_toDouble(val);
         }
