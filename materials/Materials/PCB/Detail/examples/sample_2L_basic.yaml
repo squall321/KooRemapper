@@ -1,0 +1,24 @@
+# 2-Layer Basic PCB
+# Simple double-sided board (Cu-PPG-Cu)
+
+material_name: "PCB_2L_Basic_FR4"
+material_id: 200001
+description: "2층 기본 PCB (표준 FR-4 + ED Cu)"
+
+layers:
+  # Top signal Cu (1 oz = 35 um, 40% Cu ratio for signal)
+  - type: cu
+    material: "Cu Electrodeposited Standard (Rigid PCB)"
+    thickness_um: 35
+    cu_ratio: 0.40
+
+  # Core prepreg
+  - type: ppg
+    material: "Doosan DS-7402"
+    thickness_um: 800
+
+  # Bottom signal Cu
+  - type: cu
+    material: "Cu Electrodeposited Standard (Rigid PCB)"
+    thickness_um: 35
+    cu_ratio: 0.40

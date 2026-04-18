@@ -1,0 +1,28 @@
+# FPC (Flexible Printed Circuit)
+# Single-layer flexible Cu on polyimide
+
+material_name: "FPC_SingleLayer_Kapton"
+material_id: 200004
+description: "단층 FPC (Kapton Polyimide + Rolled Annealed Cu)"
+
+layers:
+  # Coverlay (top thin PI)
+  - type: ppg
+    material: "PPG DuPont Kapton Polyimide"
+    thickness_um: 25
+
+  # Cu trace layer (Rolled Annealed for flexibility, 50% coverage)
+  - type: cu
+    material: "Cu Rolled Annealed Standard (FPC grade)"
+    thickness_um: 18
+    cu_ratio: 0.50
+
+  # Base film (thicker PI)
+  - type: ppg
+    material: "PPG DuPont Kapton Polyimide"
+    thickness_um: 50
+
+  # Stiffener (optional - if present)
+  - type: ppg
+    material: "PPG DuPont Kapton Polyimide"
+    thickness_um: 25

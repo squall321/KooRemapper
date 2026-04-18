@@ -1,22 +1,18 @@
 #!/usr/bin/env python3
 """
-Build material_db.json from k-files + name_mapping.yaml.
+Build material_db.json from ALL .k files in materials/ + name_mapping.yaml.
 
 Usage:
     python scripts/build_material_db.py [materials_dir]
 
 Reads:
-    materials/mat_elastic.k
-    materials/mat_rigid.k
-    materials/mat_plasticity.k
-    materials/mat_rubber.k
-    materials/mat_viscoelastic.k
-    materials/mat_thermal.k
-    materials/mat_thermal_expansion.k
+    materials/*.k              (all k-files, auto-classified by keyword)
     materials/name_mapping.yaml
 
 Writes:
     materials/material_db.json
+
+Files named test_* are excluded.
 """
 
 import json
@@ -227,6 +223,90 @@ def parse_cte_card(card_text):
 
 
 # ═══════════════════════════════════════════════════════════════
+# Damping parser: *_damping.k files
+#   Pattern per MID:
+#     $$ --- Name (variant, MID XXXXXX) ---
+#     $$ zeta=... alpha=... beta=...
+#     *SET_PART_LIST_TITLE  →  SID = MID + 800000
+#     *DAMPING_PART_MASS_SET  →  alpha (VALDMP)
+#     *DAMPING_PART_STIFFNESS_SET  →  beta (COEF)
+# ═══════════════════════════════════════════════════════════════
+
+def parse_damping_file(path):
+    """Parse a *_damping.k file → dict { MID: {zeta, alpha, beta, card_text} }"""
+    text = Path(path).read_text(errors='replace')
+    lines = text.splitlines()
+    result = {}
+
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+
+        # Detect $$ --- ... MID XXXXXX ---
+        if line.startswith('$$') and 'MID' in line:
+            m = re.search(r'MID\s+(\d+)', line)
+            if m:
+                mid = int(m.group(1))
+                # Read zeta from line i+1, alpha/beta from line i+2
+                zeta, alpha, beta = 0.0, 0.0, 0.0
+                for offset in [1, 2]:
+                    if i + offset < len(lines):
+                        cl = lines[i + offset].strip()
+                        if not cl.startswith('$$'):
+                            break
+                        zm = re.search(r'zeta=([\d.Ee+-]+)', cl)
+                        am = re.search(r'alpha=([\d.Ee+-]+)', cl)
+                        bm = re.search(r'beta=([\d.Ee+-]+)', cl)
+                        if zm: zeta = float(zm.group(1))
+                        if am: alpha = float(am.group(1))
+                        if bm: beta = float(bm.group(1))
+
+                # Collect the full card block (SET_PART_LIST + DAMPING_*)
+                block_start = i
+                i += 1
+                # Skip to *SET_PART_LIST
+                while i < len(lines) and not lines[i].strip().startswith('*SET_PART_LIST'):
+                    i += 1
+                card_start = i
+                # Collect until next $$ --- or EOF
+                while i < len(lines):
+                    l = lines[i].strip()
+                    if l.startswith('$$') and 'MID' in l:
+                        break
+                    if l.startswith('$ ===='):
+                        break
+                    i += 1
+                card_text = '\n'.join(lines[card_start:i])
+
+                # Fallback: extract alpha/beta from card text if not in comments
+                if alpha == 0 or beta == 0:
+                    for cl in card_text.split('\n'):
+                        cl_s = cl.strip()
+                        if cl_s.startswith('$') or cl_s.startswith('*') or not cl_s:
+                            continue
+                        # *DAMPING_PART_MASS_SET data: PSID LCID VALDMP(alpha)
+                        valdmp = read_float_field(cl, 20, 10)
+                        if valdmp > 0 and alpha == 0:
+                            alpha = valdmp
+                        # *DAMPING_PART_STIFFNESS_SET data: PSID COEF(beta)
+                        coef = read_float_field(cl, 10, 10)
+                        if coef > 0 and coef < 1.0 and beta == 0:
+                            beta = coef
+
+                if alpha > 0 or beta > 0:
+                    result[mid] = {
+                        'zeta': zeta,
+                        'alpha': alpha,
+                        'beta': beta,
+                        'card_text': card_text.rstrip(),
+                    }
+                continue
+        i += 1
+
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════
 # YAML parser (simple, no dependency)
 # ═══════════════════════════════════════════════════════════════
 
@@ -246,7 +326,7 @@ def parse_name_mapping(path):
             current_cat = stripped[:-1]
             continue
 
-        # Key-value in list item
+        # Key-value in list item1
         if '- MID:' in stripped:
             mid = int(stripped.split('MID:')[1].strip())
             result[mid] = {'category': current_cat}
@@ -269,62 +349,105 @@ def parse_name_mapping(path):
 def build_db(mat_dir):
     mat_dir = Path(mat_dir)
 
-    # 1. Parse all k-files
-    structural_files = [
-        'mat_elastic.k', 'mat_rigid.k', 'mat_plasticity.k',
-        'mat_rubber.k', 'mat_viscoelastic.k', 'mat_tape.k',
-    ]
-    thermal_file = 'mat_thermal.k'
-    cte_file = 'mat_thermal_expansion.k'
-
-    # Collect: MID → {mat_type → card_text, ...}
+    # 1. Parse ALL .k files in materials/ (auto-classify by keyword)
     cards = {}      # MID → { mat_type → card_text }
     mech = {}       # MID → mechanical props (from primary type)
     titles = {}     # MID → title (from primary)
     primary = {}    # MID → primary mat_type
+    thermal_cards = {}
+    thermal_props = {}
+    cte_cards_map = {}
+    cte_props = {}
+    dir_category = {}  # MID → category inferred from source directory (Materials/<Cat>/...)
 
-    for fname in structural_files:
-        fpath = mat_dir / fname
-        if not fpath.exists():
-            print(f"  SKIP: {fname} not found")
-            continue
+    # (a) top-level curated k-files (legacy mat_*.k bundles)
+    top_files = sorted(mat_dir.glob('*.k'))
+    top_files = [f for f in top_files if not f.name.startswith('test_')]
+
+    # (b) full library under materials/Materials/**/*.k
+    lib_root = mat_dir / 'Materials'
+    lib_files = []
+    if lib_root.exists():
+        lib_files = sorted(lib_root.rglob('*.k'))
+        lib_files = [f for f in lib_files
+                     if not f.name.startswith('test_')
+                     and 'example' not in str(f).lower()]
+
+    # (c) damping files: *_damping.k
+    damping_files = sorted(lib_root.rglob('*_damping.k')) if lib_root.exists() else []
+    # Also check top-level
+    damping_files += sorted(mat_dir.glob('*_damping.k'))
+
+    # Exclude damping files from structural parsing (they don't have *MAT_ cards)
+    damping_names = {f.resolve() for f in damping_files}
+    k_files = [f for f in (top_files + lib_files) if f.resolve() not in damping_names]
+    print(f"  Found {len(top_files)} top-level + {len(lib_files)} library k-files"
+          f" ({len(damping_files)} damping files)")
+
+    # Parse damping files
+    damping_data = {}  # MID → {zeta, alpha, beta, card_text}
+    for df in damping_files:
+        parsed = parse_damping_file(df)
+        damping_data.update(parsed)
+        display = str(df.relative_to(mat_dir)) if df.is_relative_to(mat_dir) else df.name
+        if parsed:
+            print(f"  {display}: {len(parsed)} damping entries")
+
+    for fpath in k_files:
         blocks = parse_k_file(fpath)
-        print(f"  {fname}: {len(blocks)} blocks")
+        if not blocks:
+            continue
+
+        # Infer category from directory name when file lives under Materials/<Cat>/...
+        src_cat = ''
+        try:
+            rel = fpath.relative_to(lib_root) if lib_root.exists() else None
+        except ValueError:
+            rel = None
+        if rel is not None and len(rel.parts) >= 2:
+            src_cat = rel.parts[0].lower()  # e.g. "Metal" → "metal"
+
+        n_struct, n_thermal, n_cte = 0, 0, 0
         for b in blocks:
             mid = b['mid']
             mt = b['mat_type']
-            if mid not in cards:
-                cards[mid] = {}
-            cards[mid][mt] = b['card_text']
 
-            # Primary type = first encountered
-            if mid not in primary:
-                primary[mid] = mt
-                titles[mid] = b['title']
-                mech[mid] = parse_mechanical(mt, b['data_line'])
-            elif mt == primary[mid]:
-                # Update if same type
-                mech[mid] = parse_mechanical(mt, b['data_line'])
+            if mt.startswith('MAT_THERMAL'):
+                # *MAT_THERMAL_ISOTROPIC etc.
+                thermal_cards[mid] = b['card_text']
+                thermal_props[mid] = parse_thermal_card(b['card_text'])
+                n_thermal += 1
+            elif mt.startswith('MAT_ADD_THERMAL'):
+                # *MAT_ADD_THERMAL_EXPANSION
+                cte_cards_map[mid] = b['card_text']
+                cte_props[mid] = parse_cte_card(b['card_text'])
+                n_cte += 1
+            else:
+                # Structural MAT card — library wins over top-level on conflict
+                if mid not in cards:
+                    cards[mid] = {}
+                cards[mid][mt] = b['card_text']
 
-    # Thermal
-    thermal_cards = {}
-    thermal_props = {}
-    if (mat_dir / thermal_file).exists():
-        blocks = parse_k_file(mat_dir / thermal_file)
-        print(f"  {thermal_file}: {len(blocks)} blocks")
-        for b in blocks:
-            thermal_cards[b['mid']] = b['card_text']
-            thermal_props[b['mid']] = parse_thermal_card(b['card_text'])
+                if mid not in primary:
+                    primary[mid] = mt
+                    titles[mid] = b['title']
+                    mech[mid] = parse_mechanical(mt, b['data_line'])
+                elif mt == primary[mid]:
+                    mech[mid] = parse_mechanical(mt, b['data_line'])
+                    if b['title']:
+                        titles[mid] = b['title']
+                n_struct += 1
 
-    # CTE
-    cte_cards_map = {}
-    cte_props = {}
-    if (mat_dir / cte_file).exists():
-        blocks = parse_k_file(mat_dir / cte_file)
-        print(f"  {cte_file}: {len(blocks)} blocks")
-        for b in blocks:
-            cte_cards_map[b['mid']] = b['card_text']
-            cte_props[b['mid']] = parse_cte_card(b['card_text'])
+            if src_cat:
+                dir_category[mid] = src_cat
+
+        display_name = str(fpath.relative_to(mat_dir)) if fpath.is_relative_to(mat_dir) else fpath.name
+        parts = []
+        if n_struct:  parts.append(f"{n_struct} struct")
+        if n_thermal: parts.append(f"{n_thermal} thermal")
+        if n_cte:     parts.append(f"{n_cte} CTE")
+        if parts:
+            print(f"  {display_name}: {', '.join(parts)}")
 
     # 2. Parse name mapping
     mapping = {}
@@ -334,8 +457,19 @@ def build_db(mat_dir):
         print(f"  name_mapping.yaml: {len(mapping)} entries")
 
     # 3. Build materials dict
-    all_mids = sorted(set(list(cards.keys()) + list(thermal_cards.keys()) + list(cte_cards_map.keys())))
-    print(f"\n  Total unique MIDs: {len(all_mids)}")
+    #    Only MIDs that have a structural card become first-class entries.
+    #    Library thermal/CTE cards use shared TMID (e.g. 120501) that is a
+    #    template for all structural variants sharing the suffix (100501,
+    #    110501, …), so they must not become orphan materials in the DB.
+    struct_mids = sorted(cards.keys())
+    orphan_thermal = sorted(set(thermal_cards.keys()) - set(struct_mids))
+    orphan_cte = sorted(set(cte_cards_map.keys()) - set(struct_mids))
+    all_mids = struct_mids
+    print(f"\n  Total unique structural MIDs: {len(all_mids)}")
+    if orphan_thermal:
+        print(f"  Shared thermal TMIDs (template cards, not first-class): {len(orphan_thermal)}")
+    if orphan_cte:
+        print(f"  Shared CTE template MIDs: {len(orphan_cte)}")
 
     materials = {}
     category_index = {}
@@ -344,13 +478,17 @@ def build_db(mat_dir):
         meta = mapping.get(mid, {})
         mat_type = primary.get(mid, "MAT_ELASTIC")
 
-        # Category
+        # Category: dir_category (library) > name_mapping.yaml > 'unknown'
         cat_map = {
             'metals': 'metal', 'polymers': 'polymer', 'glass': 'glass',
-            'composites': 'composite', 'rubber': 'rubber', 'tapes': 'tape'
+            'composites': 'composite', 'rubber': 'rubber', 'tapes': 'tape',
+            'plastic': 'polymer',
         }
-        raw_cat = meta.get('category', '')
-        category = cat_map.get(raw_cat, raw_cat or 'unknown')
+        if mid in dir_category:
+            category = cat_map.get(dir_category[mid], dir_category[mid])
+        else:
+            raw_cat = meta.get('category', '')
+            category = cat_map.get(raw_cat, raw_cat or 'unknown')
 
         # Thermal combined
         th = thermal_props.get(mid, {})
@@ -431,6 +569,18 @@ def build_db(mat_dir):
                 f"{'0.0':>10s}{'0.0':>10s}{'0.0':>10s}"
             )
 
+        # Damping data
+        damp = damping_data.get(mid, {})
+        damping_info = {}
+        damp_card = ''
+        if damp:
+            damping_info = {
+                'zeta': damp['zeta'],
+                'alpha': damp['alpha'],
+                'beta': damp['beta'],
+            }
+            damp_card = damp.get('card_text', '')
+
         entry = {
             'name': name,
             'tag': meta.get('tag', ''),
@@ -440,9 +590,11 @@ def build_db(mat_dir):
             'mat_type_id': mat_type_id_map.get(mat_type, 0),
             'mechanical': m,
             'thermal': thermal,
+            'damping': damping_info,
             'cards_structural': card_set,
             'card_thermal': thermal_cards.get(mid, ''),
             'card_thermal_expansion': cte_cards_map.get(mid, ''),
+            'card_damping': damp_card,
         }
         materials[str(mid)] = entry
 

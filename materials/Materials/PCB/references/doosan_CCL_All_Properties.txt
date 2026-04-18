@@ -1,0 +1,317 @@
+Copper Clad Laminate (CCL) - Technical Data Sheet
+[Thermal Properties]                                                                                                                                                                          https://www.doosanelectronics.com
+                                                                                      Td             T-288
+                                                Tg                                                                                                                                                          Max. Operating
+                                                                                 (Decomposition     (Time to                                  CTE                                 Thermal Conductivity                       Z Expansion
+                                  (Glass Transition Temperature)                                                                                                                                            Temperature
+                                                                                 Temperature)     Delamination)
+                       DMA             DMA            TMA             DSC        TGA 5% Loss          TMA          X Axis a1     Y Axis a1           Z Axis a1     Z Axis a2
+Condition                                                                                                                                                                       As received   As received    As received     As received
+                    As received    As received    As received      As received    As received     As received     As received   As received         As received   As received
+                                                                                  IPC-TM-650
+                    IPC-TM-650 IPC-TM-650 IPC-TM-650 IPC-TM-650                                   IPC-TM-650      IPC-TM-650    IPC-TM-650          IPC-TM-650    IPC-TM-650                                                 IPC-TM-650
+Test method                                                                          2.3.40                                                                                     ASTM E 1461   ASTM D 5470       UL 796
+                     2.4.24.4        2.4.24.2        2.4.24C        2.4.25C                         2.4.24.1       2.4.41.2      2.4.41.2             2.4.24        2.4.24                                                    2.4.24.5
+                                                                                     (TGA)
+Unit                    ℃               ℃              ℃               ℃               ℃              min          ppm/℃         ppm/℃               ppm/℃         ppm/℃          W/m·K         W/m·K             ℃              %
+DS-7402                                165            145                             380             >10             15            14                  38           230          0.4~0.5                        130             2.8
+DS-7402M                               165            145                             370              >5             15            14                  39           235          0.4~0.5                        130             2.9
+DS-7402BS (DF)         185                            150             169             360             >20           18~21         18~21               90~100       350~400        0.3~0.4                        130           4.5~6.5
+DS-7402LC                              175            155                             360             >15             11            10                  19           150            0.6                          130             1.5
+DS-8402H               190                            165                             380             >60             15            14                  35           230          0.4~0.5                        130           2.6~2.8
+DS-8402H BS (DFL)      200                            165                             400              20           19~23         19~23               70~100       350~400          0.3
+DS-8502LC                              280            230                             430             >120            10             9                  20           120            0.6                          130             1.3
+DS-8502SQ              260                            200                             420             >120           9~10          9~10               20~25          <150           0.5                                         <1.3
+DS-8502SQN             260                            200                             420             >120           9~10          9~10               20~25          <150           0.5                                         <1.3
+DS-9530                                                                               510             >120            25            23                  30                          0.5                          180
+DSR-1000             160~180                                                        345~360       >60 (260℃)        11~14         11~14               90~140       280~380       0.35~0.45
+DSF-900LC                              280                                            360             >60             25            25                  25            65            0.5                                         <1.2
+DSF-900SQ                              190                                            400             >120            25            25                  25            65            0.5                                          1
+DST-9000                               130                                            380              30             30            30                  30           105            1.3                          160
+DST-9000HT                             180                                            410             120             25            25                  25            55            3                            155
+DSflex-600                             320                                           >500                           22~25         22~25                                             0.2                          130
+DSflex-600P                            350                                           >500                           18~22         18~22                                             0.2                          130
+DSflex-600U                            330                                           >500                           18~22         18~22                                             0.2                          200
+DSflex-600D                            330                                           >500                           22~25         22~25                                             0.2                          130
+DSflex-600UY                           260                                           >500                           25~28         25~28                                             0.2                          130
+DSflex-600UF (DS)                      280                                           >500                           18~22         18~22                                             0.2                          130
+DSflex-600UK (SS)                      280                                           >500                           18~22         18~22                                             0.2                          130
+DSflex-900                             340                                           >500                           22~25         22~25                                             0.2                          130
+                                                                                    Td             T-288
+                                              Tg                                                                                                                                                          Max. Operating
+                                                                               (Decomposition     (Time to                                  CTE                                 Thermal Conductivity                       Z Expansion
+                                (Glass Transition Temperature)                                                                                                                                            Temperature
+                                                                               Temperature)     Delamination)
+                     DMA             DMA            TMA             DSC        TGA 5% Loss          TMA          X Axis a1     Y Axis a1           Z Axis a1     Z Axis a2
+Condition                                                                                                                                                                     As received   As received    As received     As received
+                  As received    As received    As received      As received    As received     As received     As received   As received         As received   As received
+                                                                                IPC-TM-650
+                  IPC-TM-650 IPC-TM-650 IPC-TM-650 IPC-TM-650                                   IPC-TM-650      IPC-TM-650    IPC-TM-650          IPC-TM-650    IPC-TM-650                                                 IPC-TM-650
+Test method                                                                        2.3.40                                                                                     ASTM E 1461   ASTM D 5470       UL 796
+                   2.4.24.4        2.4.24.2        2.4.24C        2.4.25C                         2.4.24.1       2.4.41.2      2.4.41.2             2.4.24        2.4.24                                                    2.4.24.5
+                                                                                   (TGA)
+Unit                  ℃               ℃              ℃               ℃               ℃              min          ppm/℃         ppm/℃               ppm/℃         ppm/℃          W/m·K         W/m·K             ℃              %
+DS-7409DJL2+         220                            170                             380             120             15            15                  47                          0.4           0.7                            2.3
+DS-7409DJN2+         220                            170                             380             120             15            15                  47                          0.4           0.7                            2.3
+DS-7409DJN+          220                            170                             380             120             15            15                  47                          0.4           0.7                            2.3
+DS-8502HQN           240                            180                             420             >120          13~14         13~14               25~30          <200           0.5                                         <1.6
+DS-8502HQ            240                            180                             420             >120          13~14         13~14               25~30          <200           0.5                                         <1.6
+DS-7409DV (N)        225                            180             190             400             120             16            16                  45           270            0.4           0.7
+DS-7409DV (NT)       225                            180             190             400             120             16            16                  45           270            0.4           0.7
+DS-7409DV (T)        225                            180             190             400             120             16            16                  45           270            0.4           0.7
+DS-7409DV (C)        225                            180             190             400             120             16            16                  45           270            0.4           0.7
+DS-7409DJG (N)       220                            170                             400             120             16            16                  45         230~240          0.4           0.7                            2.3
+DS-7409DJG (S)       220                            170                             400             120             16            16                  45                          0.4           0.7                            2.3
+DS-7409DJG           220                            170                             400             120             16            16                  45                          0.4           0.7                            2.3
+DS-7409DXG           280                            230                             430             120             10             9                  20           120            0.6           0.8
+RAPIDON-10W (N)      200                            170                             400             120             13            13                  25           100            1             1.2
+RAPIDON-10W          200                            170                             400             120             13            13                  25           100            1             1.2
+DS-7409DX (C)        220                            175             185             365              60             16            16                  35           260            0.4
+DS-7409S (N)         190                            165             170             350             120             16            15                  50           280
+DS-7402H             200                            170             180             380              30             15            14                  40           260            0.4
+DS-7402HD            210                            180                             380             >120            14            14                  30           120            0.6
+DS-7409HG (FQ)       200                            170                             380             >120             3             3                  12            50            0.7
+DS-7409HG (ZL)       300                            270                             380             >120             2             2                   8            40            0.9
+DS-7409HG (X)        260                            230                             380             >120             5             5                  12            50            0.8
+DS-7409HG (LE)       240                            210                             380             >120             8             8                  20            80            0.7
+DS-7409HG (I)        270                            240                             380             >120             3             3                   9            40            0.9
+DS-7409HG (Z)        270                            240                             380             >120             3             3                   9            40            0.9
+DS-7409HG (KN)       250                            220                             380             >120            10            10                  20            90            0.7
+DS-7409HG (JQ)       260                            230                             380             >120             7            10                  15            60            0.8
+DS-7409HG (ZS)       280                            250                             380             >120             2             2                   8            40            0.9
+DS-7409HG (IQ)       260                            230                             380             >120             7            10                  15            60            0.8
+Copper Clad Laminate (CCL) - Technical Data Sheet
+[Mechanical Properties]                                                                                                                                                       https://www.doosanelectronics.com
+                     Young's     Flexural     Storage
+                                                               Tensile Strength                   Peel Strength                 Elongation       Dimensional Stability          Density        Poisson Ratio
+                     Modulus     Strength     Modulus
+                                                                                    As Received    As Received      ED/RA,                    After Etching   After Heating
+Condition           As Received As Received    DMA       As Received         -                                                  As Received                                        -                 -
+                                                                                     /STD Toz       /VLP Toz      >12um(>Toz)                     (B-A)           (C-A)
+                    IPC-TM-650 IPC-TM-650 IPC-TM-650 IPC-TM-650        IPC-TM-650   IPC-TM-650     IPC-TM-650     IPC-TM-650    IPC-TM-650    IPC-TM-650      IPC-TM-650
+Test method                                                                                                                                                                        -                 -
+                     2.4.18.3     2.4.4B      2.4.24.4    2.4.18.3       2.4.19C      2.4.8C         2.4.8C         2.4.9.1       2.4.19C        2.2.4C          2.2.4C
+Unit                   GPa         MPa         GPa          MPa            MPa        Kgf/cm         Kgf/cm            -            %              %               %            g/cm
+                                                                                                                                                                                        3
+                                                                                                                                                                                                     -
+DS-7402               24~25                                                         1.15 (Hoz)                                                                                    1.9            0.15~0.17
+DS-7402M              24~25                                                         1.25 (Hoz)                                                                                   1.87            0.15~0.17
+DS-7402BS (DF)        15~18      350~400       12~14                     200~230         1                                         3~5                                         1.55~1.65         0.15~0.17
+DS-7402LC             32~33                                                         1.05 (Hoz)                                                                                   2.03            0.15~0.17
+DS-8402H              22~24                                                           1 (Hoz)                                                                                    1.87            0.15~0.17
+DS-8402H BS (DFL)     13~16      320~370                                 180~220                       0.7                        1.0~3.0                                       1.4~1.6
+DS-8502LC             29~30                                                         0.95 (Hoz)                                                                                   1.96            0.19~0.21
+DS-8502SQ             28~32      500~550                                              1 (1oz)
+DS-8502SQN            28~32      500~550                                              1 (1oz)          0.7
+DS-9530                 0.8                                  4.5                         1             0.8                          80            -0.05           -0.09           2.1
+DSR-1000              10~14                    10~14                                                 0.7~0.8
+DSF-900LC               10                                                                             0.7                                                                      1.7~1.8             0.3
+DSF-900SQ               10                      10                                                     0.7                                                                     1.65~1.75           0.28
+DST-9000                                                                             2.2 (1oz)
+
+DST-9000HT                                                                           1.5 (1oz)
+
+DSflex-600              6.9                                 210                                                       >1            30           <±0.1           <±0.1           1.42              0.34
+DSflex-600P             4.6                                 180                                                      >1.2          100           <±0.1           <±0.1           1.42              0.34
+DSflex-600U             6.2                                 390                                                      >1.2           65           <±0.1           <±0.1           1.42              0.34
+DSflex-600D             4.2                                 290                                                      >1.2           70           <±0.1           <±0.1           1.42              0.34
+DSflex-600UY            7.7                                 185                                                       >1            15           <±0.1           <±0.1           1.42              0.34
+DSflex-600UF (DS)       7.5                                 280                                                      >1.2           80           <±0.1           <±0.1           1.42              0.34
+DSflex-600UK (SS)       7.5                                 280                                                      >1.2           80           <±0.1           <±0.1           1.42              0.34
+DSflex-900              5.7                                 300                                                       >1            50           <±0.1           <±0.1           1.42              0.34
+                   Young's     Flexural     Storage
+                                                             Tensile Strength                   Peel Strength                 Elongation       Dimensional Stability        Density     Poisson Ratio
+                   Modulus     Strength     Modulus
+                                                                                  As Received    As Received      ED/RA,                    After Etching   After Heating
+Condition         As Received As Received    DMA       As Received         -                                                  As Received                                      -              -
+                                                                                   /STD Toz       /VLP Toz      >12um(>Toz)                     (B-A)           (C-A)
+                  IPC-TM-650 IPC-TM-650 IPC-TM-650 IPC-TM-650        IPC-TM-650   IPC-TM-650     IPC-TM-650     IPC-TM-650    IPC-TM-650    IPC-TM-650      IPC-TM-650
+Test method                                                                                                                                                                    -              -
+                   2.4.18.3     2.4.4B      2.4.24.4    2.4.18.3        2.4.19C     2.4.8C         2.4.8C         2.4.9.1       2.4.19C        2.2.4C          2.2.4C
+Unit                 GPa         MPa         GPa          MPa            MPa        Kgf/cm         Kgf/cm            -            %              %               %          g/cm
+                                                                                                                                                                                    3
+                                                                                                                                                                                              -
+DS-7409DJL2+                                                                           1
+DS-7409DJN2+                                                                           1
+DS-7409DJN+                                                                            1
+DS-8502HQN          25~26                                                          0.8 (Hoz)
+DS-8502HQ           25~26                                                          0.8 (Hoz)
+DS-7409DV (N)       22~24      450~470                                                1.2             1
+DS-7409DV (NT)      22~24      450~470                                                1.2             1
+DS-7409DV (T)       22~24      450~470                                                1.2             1
+DS-7409DV (C)       22~24      450~470                                                1.2             1
+DS-7409DJG (N)                                                                         1             0.8
+DS-7409DJG (S)      21~23                                                              1             0.8                                                                                  0.16~0.18
+DS-7409DJG          21~23                                                              1             0.8                                                                                  0.16~0.18
+DS-7409DXG          24~27                                                              1                                                                                     1.71         0.17~0.19
+                                                                                                    0.75
+RAPIDON-10W (N)       15                      15                                                                                                                                            0.17
+                                                                                                 (HVLP Toz)
+                                                                                                    0.75
+RAPIDON-10W           15                      15                                                                                                                                            0.17
+                                                                                                 (HVLP Toz)
+DS-7409DX (C)                                                                         1.2             1
+DS-7409S (N)          26                                                              1.7
+DS-7402H                                                                              1.6
+DS-7402HD             24                      26                                                    0.75                                                                      1.7            0.2
+DS-7409HG (FQ)        26                      28                                                     0.7                                                                       2            0.16
+DS-7409HG (ZL)        33                      35                                                    0.75                                                                      2.1           0.19
+DS-7409HG (X)         29                      31                                                    0.75                                                                       2            0.195
+DS-7409HG (LE)        27                      29                                                    0.75                                                                      2.1            0.2
+DS-7409HG (I)         31                      33                                                     0.7                                                                      2.1           0.194
+DS-7409HG (Z)         31                      33                                                     0.7                                                                      2.1           0.194
+DS-7409HG (KN)        26                      28                                                     0.7                                                                      1.9           0.185
+DS-7409HG (JQ)        26                      28                                                     0.7                                                                     2.07           0.185
+DS-7409HG (ZS)        32                      34                                                     0.8                                                                     2.09           0.194
+DS-7409HG (IQ)        27                      28                                                     0.7                                                                     2.07           0.185
+Copper Clad Laminate (CCL) - Technical Data Sheet
+[Electrical Properties]                                                                                                                                                 https://www.doosanelectronics.com
+                                              Dk                                                       Df                                                                           Comparative     Dielectric
+                                                                                                                                           Surface Resistace   Volume Resistance
+                                      (Dielectric Constant)                                    (Dissipation Factor)                                                                Tracking Index   Breakdown
+Condition                      1GHz                           10GHz                     1GHz                              10GHz              As Received          As Received       As Received        AC
+Test method          2.5.5.9          SPDR          2.5.5.5           SPDR    2.5.5.9          SPDR             2.5.5.5           SPDR         2.5.17.1A           2.5.17.1A         IEC 60112       2.5.6.2A
+Unit                    -               -              -               -         -               -                    -             -            MΩ                 MΩ/cm                -           kV/mm
+DS-7402               4.33                                                    0.013                                                            >1.00E+8            >1.00E+9              4             >30
+DS-7402M              4.25                                                    0.013                                                            >1.00E+8            >1.00E+9              4             >30
+
+DS-7402BS (DF)         3.8                                                    0.016                                                        >1.00E+6~1.00E+7    >1.00E+7~1.00E+8          4             >30
+
+DS-7402LC             4.23                                                    0.007                                                           >1.00E+08            >1.00E+9              4             >30
+                      3.4                             3.6                     0.008                             0.012
+DS-8402H                                                                                                                                   5.00E+7~5.00E+8     1.00E+7~1.00E+8           4             >30
+                    (RC 70%)                       (RC 70%)                  (RC 70%)                         (RC 70%)
+DS-8402H BS (DFL)     3.3                             3.2                     0.003                             0.0039                         1.00E+06            5.00E+06                           >0.8
+                      3.4                             3.5                     0.005                             0.007
+DS-8502LC                                                                                                                                      >1.00E+8            >1.00E+9              4             >30
+                    (RC 70%)                       (RC 70%)                  (RC 70%)                         (RC 70%)
+                      3.4                             3.3                     0.0015                            0.003
+DS-8502SQ                                                                                                                                      1.00E+09            1.00E+10
+                    (RC 70%)                       (RC 70%)                  (RC 70%)                         (RC 70%)
+                      3.2                             3.1                     0.001                             0.0025
+DS-8502SQN                                                                                                                                     1.00E+09            1.00E+10
+                    (RC 70%)                       (RC 70%)                  (RC 70%)                         (RC 70%)
+DS-9530                3                               3                      0.0013                            0.0013                         1.00E+14            1.00E+15
+DSR-1000               3.7                            3.6                     0.008                             0.009                          1.00E+06            5.00E+06                           >0.8
+DSF-900LC              3.1                            3.1                     0.004                             0.006                      >1.00E+6~1.00E+7    >1.00E+7~1.00E+8                        >30
+DSF-900SQ              3                               3                      0.0022                            0.0025                     >1.00E+6~1.00E+7    >1.00E+7~1.00E+8                        >30
+DST-9000               5.6                                                    0.017                                                            >1.00E+6            >1.00E+8              0             12
+DST-9000HT             6                                                      0.015                                                            >1.00E+6            >1.00E+8              0              6
+DSflex-600                             3.5                             3.4                     0.006                              0.008       >1.00E+13            >1.00E+14             3             >5
+DSflex-600P                            3.3                             3.2                     0.006                              0.008       >1.00E+13            >1.00E+14             3             >5
+DSflex-600U                            3.5                             3.4                     0.005                              0.007       >1.00E+13            >1.00E+14             3             >5
+DSflex-600D                            3.4                            3.3                      0.005                              0.007       >1.00E+13            >1.00E+14             3             >5
+DSflex-600UY                           3.5                            3.4                      0.002                              0.0025      >1.00E+13            >1.00E+14             3             >5
+DSflex-600UF (DS)                      3.5                            3.4                      0.002                              0.0025      >1.00E+13            >1.00E+14             4             >5
+DSflex-600UK (SS)                      3.5                            3.4                      0.002                              0.0025      >1.00E+13            >1.00E+14             4             >5
+DSflex-900                             3.3                            3.2                      0.005                              0.007       >1.00E+13            >1.00E+14             3             >5
+                                           Dk                                                      Df                                                                        Comparative      Dielectric
+                                                                                                                                     Surface Resistace   Volume Resistance
+                                   (Dielectric Constant)                                   (Dissipation Factor)                                                              Tracking Index   Breakdown
+Condition                   1GHz                           10GHz                    1GHz                              10GHz            As Received          As Received       As Received        AC
+Test method       2.5.5.9          SPDR          2.5.5.5           SPDR   2.5.5.9          SPDR             2.5.5.5           SPDR       2.5.17.1A           2.5.17.1A         IEC 60112       2.5.6.2A
+Unit                 -               -              -               -        -               -                    -            -           MΩ                 MΩ/cm                -           kV/mm
+DS-7409DJL2+       2.93                            2.84                   0.0004                            0.0011
+DS-7409DJN2+       2.93                            2.84                   0.0004                            0.0011
+DS-7409DJN+        3.23                            3.14                   0.0006                            0.0014
+DS-8502HQN          3.5                            3.4                    0.001                             0.0025                       >1.00E+9            >1.00E+10
+DS-8502HQ           3.7                            3.6                    0.0015                            0.003                        >1.00E+9            >1.00E+10
+DS-7409DV (N)      3.35                            3.26                   0.001                             0.0025                       >1.00E+9            >1.00E+10
+DS-7409DV (NT)     3.35                            3.26                   0.001                             0.0025                       >1.00E+9            >1.00E+10
+DS-7409DV (T)      3.65                            3.56                   0.0015                            0.003                        >1.00E+9            >1.00E+10
+DS-7409DV (C)      3.65                            3.56                   0.0015                            0.003                        >1.00E+9            >1.00E+10
+DS-7409DJG (N)      3.3                                                   0.0009                                                         >1.00E+9            >1.00E+10
+DS-7409DJG (S)      3.6                                                   0.0014                                                         >1.00E+9            >1.00E+10
+DS-7409DJG          3.6                                                   0.0014                                                         >1.00E+9            >1.00E+10
+DS-7409DXG         3.81                            3.8                    0.004                             0.006
+RAPIDON-10W (N)     4.1                            3.7                    0.0012                            0.0025
+RAPIDON-10W         4.3                            3.9                    0.0015                            0.003
+DS-7409DX (C)       3.8                                                   0.004                                                          1.00E+09            1.00E+09
+DS-7409S (N)        4.3                                                   0.016                                                          1.00E+09            1.00E+10
+DS-7402H            4.4                            4.3                    0.013                             0.014                        1.00E+09            1.00E+10
+
+DS-7402HD           3.5                            3.4                    0.007                             0.008                    5.00E+7~5.00E+8     1.00E+7~1.00E+8
+
+
+DS-7409HG (FQ)      4                              3.9                    0.011                             0.012                    5.00E+7~5.00E+8     1.00E+7~1.00E+8
+
+DS-7409HG (ZL)      4.1                             4                     0.009                              0.01                    5.00E+7~5.00E+8     1.00E+7~1.00E+8
+DS-7409HG (X)       4.2                            4.1                    0.008                             0.009                    5.00E+7~5.00E+8     1.00E+7~1.00E+8
+DS-7409HG (LE)      4.2                            4.1                    0.007                             0.008                    5.00E+7~5.00E+8     1.00E+7~1.00E+8
+DS-7409HG (I)       4.1                             4                     0.009                              0.01                    5.00E+7~5.00E+8     1.00E+7~1.00E+8
+DS-7409HG (Z)       4.1                             4                     0.009                              0.01                    5.00E+7~5.00E+8     1.00E+7~1.00E+8
+DS-7409HG (KN)      3.5                            3.4                    0.003                             0.004                    5.00E+7~5.00E+8     1.00E+7~1.00E+8
+DS-7409HG (JQ)      4.4                            4.3                     0.01                             0.011                    5.00E+7~5.00E+8     1.00E+7~1.00E+8
+DS-7409HG (ZS)      4.2                            4.1                     0.01                             0.011                    5.00E+7~5.00E+8     1.00E+7~1.00E+8
+DS-7409HG (IQ)      4.3                            4.5                    0.009                              0.01                    5.00E+7~5.00E+8     1.00E+7~1.00E+8
+Copper Clad Laminate (CCL) - Technical Data Sheet
+[Others]                                                     https://www.doosanelectronics.com
+                                  Water Absorption                       Flammability
+Condition             D-24h/23℃                  D-2h/100℃                    -
+Test method         IPC-TM 2.6.2.1A                   -                     UL94
+
+Unit                      %                          %                        -
+DS-7402                  0.11                                                V-0
+DS-7402M                 0.13                                                V-0
+DS-7402BS (DF)          0.2~0.4                                              V-0
+DS-7402LC                 0.1                                                V-0
+DS-8402H                 0.08                                                V-0
+DS-8402H BS (DFL)       0.1~0.3                                              V-0
+DS-8502LC                0.15                                                V-0
+DS-8502SQ                0.15                                                V-0
+DS-8502SQN               0.15                                                V-0
+DS-9530                  0.02                        0.02                    V-0
+DSR-1000                0.4~0.6                                              V-0
+DSF-900LC                 0.5                                                V-0
+DSF-900SQ                0.25                                                V-0
+DST-9000                  0.5                                                V-0
+DST-9000HT                0.1                                                V-0
+DSflex-600                1.1                                               VTM-0
+DSflex-600P               1.1                                               VTM-0
+                                                                            VTM-0
+DSflex-600U               1.1
+                                                                          (12,20um)
+DSflex-600D               1.1                                               VTM-0
+DSflex-600UY              0.6                                               VTM-0
+                                                                            VTM-0
+DSflex-600UF (DS)         0.7
+                                                                          (12,25um)
+                                                                            VTM-0
+DSflex-600UK (SS)         0.7
+                                                                          (12,25um)
+DSflex-900                1.1                                               VTM-0
+                              Water Absorption           Flammability
+Condition           D-24h/23℃                D-2h/100℃        -
+Test method       IPC-TM 2.6.2.1A                 -         UL94
+
+Unit                    %                        %            -
+DS-7409DJL2+           0.06                                  V-0
+DS-7409DJN2+           0.06                                  V-0
+DS-7409DJN+            0.06                                  V-0
+DS-8502HQN             0.12                                  V-0
+DS-8502HQ              0.12                                  V-0
+DS-7409DV (N)          0.12                                  V-0
+DS-7409DV (NT)         0.12                                  V-0
+DS-7409DV (T)          0.12                                  V-0
+DS-7409DV (C)          0.12                                  V-0
+DS-7409DJG (N)         0.08                                  V-0
+DS-7409DJG (S)         0.08                                  V-0
+DS-7409DJG             0.08                                  V-0
+DS-7409DXG             0.15                                  V-0
+RAPIDON-10W (N)        0.12                                  V-0
+RAPIDON-10W            0.12                                  V-0
+DS-7409DX (C)          0.13                                  V-0
+DS-7409S (N)           0.15                                  V-0
+DS-7402H               0.13                                  V-0
+DS-7402HD               0.3                      0.35        V-0
+DS-7409HG (FQ)          0.3                      0.35        V-0
+DS-7409HG (ZL)          0.3                      0.35        V-0
+DS-7409HG (X)           0.3                      0.35        V-0
+DS-7409HG (LE)          0.3                      0.35        V-0
+DS-7409HG (I)           0.3                      0.35        V-0
+DS-7409HG (Z)           0.3                      0.35        V-0
+DS-7409HG (KN)          0.2                      0.3         V-0
+DS-7409HG (JQ)          0.3                      0.35        V-0
+DS-7409HG (ZS)          0.3                      0.35        V-0
+DS-7409HG (IQ)          0.3                      0.35        V-0
+

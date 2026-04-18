@@ -1,0 +1,952 @@
+{
+  "Standard": [
+    {
+      "name": "PC_Makrolon",
+      "lin_mid": 100961,
+      "bi_mid": 110961,
+      "mu_mid": 120961,
+      "kin_mid": 130961,
+      "samp_mid": 140961,
+      "tmid": 150961,
+      "rho_gcc": 1.2,
+      "E_GPa": 2.4,
+      "nu": 0.37,
+      "sigy_MPa": 65.0,
+      "sigu_MPa": 68.0,
+      "eps_f": 1.15,
+      "ss_plastic": [
+        [
+          0.0,
+          65.0
+        ],
+        [
+          0.005,
+          66.0
+        ],
+        [
+          0.01,
+          66.5
+        ],
+        [
+          0.02,
+          65.5
+        ],
+        [
+          0.05,
+          62.0
+        ],
+        [
+          0.1,
+          60.0
+        ],
+        [
+          0.3,
+          64.0
+        ],
+        [
+          0.6,
+          68.0
+        ],
+        [
+          1.15,
+          68.0
+        ]
+      ],
+      "cte_ppmK": 65.0,
+      "tc_WmK": 0.21,
+      "cp_JkgK": 1200.0,
+      "cs_C": 1.4,
+      "cs_P": 2.5,
+      "damping_zeta": 0.025,
+      "desc": "Polycarbonate (Makrolon 2405), transparent, cover glass",
+      "ref": "Covestro Makrolon 2405 TDS: E=2.4 GPa, sigy=65 MPa, ISO 527, eps_break=115%"
+    },
+    {
+      "name": "ABS_Cycolac",
+      "lin_mid": 100962,
+      "bi_mid": 110962,
+      "mu_mid": 120962,
+      "kin_mid": 130962,
+      "samp_mid": 140962,
+      "tmid": 150962,
+      "rho_gcc": 1.05,
+      "E_GPa": 2.3,
+      "nu": 0.38,
+      "sigy_MPa": 42.0,
+      "sigu_MPa": 45.0,
+      "eps_f": 0.25,
+      "ss_plastic": [
+        [
+          0.0,
+          42.0
+        ],
+        [
+          0.01,
+          44.0
+        ],
+        [
+          0.02,
+          45.0
+        ],
+        [
+          0.05,
+          44.0
+        ],
+        [
+          0.1,
+          43.0
+        ],
+        [
+          0.15,
+          44.0
+        ],
+        [
+          0.25,
+          45.0
+        ]
+      ],
+      "cte_ppmK": 90.0,
+      "tc_WmK": 0.17,
+      "cp_JkgK": 1300.0,
+      "cs_C": 5.0,
+      "cs_P": 3.0,
+      "damping_zeta": 0.05,
+      "desc": "Acrylonitrile-Butadiene-Styrene, housings",
+      "ref": "SABIC Cycolac TDS, Louche 2009"
+    },
+    {
+      "name": "PC_ABS_Cycoloy",
+      "lin_mid": 100963,
+      "bi_mid": 110963,
+      "mu_mid": 120963,
+      "kin_mid": 130963,
+      "samp_mid": 140963,
+      "tmid": 150963,
+      "rho_gcc": 1.14,
+      "E_GPa": 2.4,
+      "nu": 0.38,
+      "sigy_MPa": 55.0,
+      "sigu_MPa": 60.0,
+      "eps_f": 0.5,
+      "ss_plastic": [
+        [
+          0.0,
+          55.0
+        ],
+        [
+          0.01,
+          57.0
+        ],
+        [
+          0.02,
+          58.0
+        ],
+        [
+          0.04,
+          57.5
+        ],
+        [
+          0.08,
+          56.0
+        ],
+        [
+          0.15,
+          55.0
+        ],
+        [
+          0.3,
+          58.0
+        ],
+        [
+          0.5,
+          60.0
+        ]
+      ],
+      "cte_ppmK": 78.0,
+      "tc_WmK": 0.19,
+      "cp_JkgK": 1250.0,
+      "cs_C": 2.5,
+      "cs_P": 2.8,
+      "damping_zeta": 0.045,
+      "desc": "PC/ABS blend (Cycoloy), smartphone midframe",
+      "ref": "SABIC Cycoloy C1200HF TDS"
+    },
+    {
+      "name": "PA6_Ultramid_B",
+      "lin_mid": 100964,
+      "bi_mid": 110964,
+      "mu_mid": 120964,
+      "kin_mid": 130964,
+      "samp_mid": 140964,
+      "tmid": 150964,
+      "rho_gcc": 1.14,
+      "E_GPa": 3.0,
+      "nu": 0.38,
+      "sigy_MPa": 90.0,
+      "sigu_MPa": 95.0,
+      "eps_f": 0.15,
+      "ss_plastic": [
+        [
+          0.0,
+          90.0
+        ],
+        [
+          0.01,
+          92.0
+        ],
+        [
+          0.02,
+          93.0
+        ],
+        [
+          0.04,
+          92.0
+        ],
+        [
+          0.06,
+          91.0
+        ],
+        [
+          0.1,
+          93.0
+        ],
+        [
+          0.15,
+          95.0
+        ]
+      ],
+      "cte_ppmK": 100.0,
+      "tc_WmK": 0.27,
+      "cp_JkgK": 1700.0,
+      "cs_C": 0.5,
+      "cs_P": 5.0,
+      "damping_zeta": 0.04,
+      "desc": "Nylon 6 (PA6) BASF Ultramid B27, connectors, gears (dry state)",
+      "ref": "BASF Ultramid B27 E 01 TDS: E=3.0 GPa, sigy=90 MPa (dry)"
+    },
+    {
+      "name": "PA66_Zytel",
+      "lin_mid": 100965,
+      "bi_mid": 110965,
+      "mu_mid": 120965,
+      "kin_mid": 130965,
+      "samp_mid": 140965,
+      "tmid": 150965,
+      "rho_gcc": 1.14,
+      "E_GPa": 3.0,
+      "nu": 0.38,
+      "sigy_MPa": 80.0,
+      "sigu_MPa": 85.0,
+      "eps_f": 0.6,
+      "ss_plastic": [
+        [
+          0.0,
+          80.0
+        ],
+        [
+          0.01,
+          82.0
+        ],
+        [
+          0.02,
+          83.0
+        ],
+        [
+          0.05,
+          82.0
+        ],
+        [
+          0.1,
+          81.0
+        ],
+        [
+          0.3,
+          83.0
+        ],
+        [
+          0.6,
+          85.0
+        ]
+      ],
+      "cte_ppmK": 80.0,
+      "tc_WmK": 0.26,
+      "cp_JkgK": 1670.0,
+      "cs_C": 0.8,
+      "cs_P": 4.5,
+      "damping_zeta": 0.04,
+      "desc": "Nylon 66 (Zytel 101), high-strength connectors",
+      "ref": "DuPont Zytel 101 TDS"
+    },
+    {
+      "name": "PBT_Crastin",
+      "lin_mid": 100966,
+      "bi_mid": 110966,
+      "mu_mid": 120966,
+      "kin_mid": 130966,
+      "samp_mid": 140966,
+      "tmid": 150966,
+      "rho_gcc": 1.31,
+      "E_GPa": 2.6,
+      "nu": 0.38,
+      "sigy_MPa": 60.0,
+      "sigu_MPa": 65.0,
+      "eps_f": 0.25,
+      "ss_plastic": [
+        [
+          0.0,
+          60.0
+        ],
+        [
+          0.01,
+          62.0
+        ],
+        [
+          0.02,
+          63.0
+        ],
+        [
+          0.05,
+          62.0
+        ],
+        [
+          0.1,
+          61.0
+        ],
+        [
+          0.2,
+          64.0
+        ],
+        [
+          0.25,
+          65.0
+        ]
+      ],
+      "cte_ppmK": 75.0,
+      "tc_WmK": 0.3,
+      "cp_JkgK": 1450.0,
+      "cs_C": 3.0,
+      "cs_P": 3.5,
+      "damping_zeta": 0.045,
+      "desc": "Polybutylene Terephthalate, connectors, switches",
+      "ref": "DuPont Crastin S600F20 TDS"
+    },
+    {
+      "name": "POM_Delrin",
+      "lin_mid": 100967,
+      "bi_mid": 110967,
+      "mu_mid": 120967,
+      "kin_mid": 130967,
+      "samp_mid": 140967,
+      "tmid": 150967,
+      "rho_gcc": 1.41,
+      "E_GPa": 3.1,
+      "nu": 0.35,
+      "sigy_MPa": 72.0,
+      "sigu_MPa": 78.0,
+      "eps_f": 0.3,
+      "ss_plastic": [
+        [
+          0.0,
+          72.0
+        ],
+        [
+          0.01,
+          74.0
+        ],
+        [
+          0.02,
+          76.0
+        ],
+        [
+          0.05,
+          75.0
+        ],
+        [
+          0.1,
+          74.0
+        ],
+        [
+          0.2,
+          76.0
+        ],
+        [
+          0.3,
+          78.0
+        ]
+      ],
+      "cte_ppmK": 110.0,
+      "tc_WmK": 0.3,
+      "cp_JkgK": 1470.0,
+      "cs_C": 800.0,
+      "cs_P": 2.0,
+      "damping_zeta": 0.04,
+      "desc": "Polyoxymethylene (Delrin), gears, slides",
+      "ref": "DuPont Delrin 500P TDS"
+    },
+    {
+      "name": "PP_Homo",
+      "lin_mid": 100968,
+      "bi_mid": 110968,
+      "mu_mid": 120968,
+      "kin_mid": 130968,
+      "samp_mid": 140968,
+      "tmid": 150968,
+      "rho_gcc": 0.9,
+      "E_GPa": 1.5,
+      "nu": 0.42,
+      "sigy_MPa": 35.0,
+      "sigu_MPa": 40.0,
+      "eps_f": 1.5,
+      "ss_plastic": [
+        [
+          0.0,
+          35.0
+        ],
+        [
+          0.01,
+          36.0
+        ],
+        [
+          0.02,
+          36.5
+        ],
+        [
+          0.05,
+          35.5
+        ],
+        [
+          0.1,
+          34.0
+        ],
+        [
+          0.3,
+          35.0
+        ],
+        [
+          0.8,
+          38.0
+        ],
+        [
+          1.5,
+          40.0
+        ]
+      ],
+      "cte_ppmK": 150.0,
+      "tc_WmK": 0.22,
+      "cp_JkgK": 1920.0,
+      "cs_C": 3.0,
+      "cs_P": 3.5,
+      "damping_zeta": 0.07,
+      "desc": "Homopolymer Polypropylene, low-cost housings",
+      "ref": "LyondellBasell Moplen TDS"
+    }
+  ],
+  "Reinforced": [
+    {
+      "name": "PA66_GF30",
+      "lin_mid": 100971,
+      "bi_mid": 110971,
+      "mu_mid": 120971,
+      "kin_mid": 130971,
+      "samp_mid": 140971,
+      "tmid": 150971,
+      "rho_gcc": 1.36,
+      "E_GPa": 9.5,
+      "nu": 0.37,
+      "sigy_MPa": 180.0,
+      "sigu_MPa": 195.0,
+      "eps_f": 0.04,
+      "ss_plastic": [
+        [
+          0.0,
+          180.0
+        ],
+        [
+          0.005,
+          185.0
+        ],
+        [
+          0.01,
+          190.0
+        ],
+        [
+          0.02,
+          193.0
+        ],
+        [
+          0.03,
+          194.0
+        ],
+        [
+          0.04,
+          195.0
+        ]
+      ],
+      "cte_ppmK": 25.0,
+      "tc_WmK": 0.3,
+      "cp_JkgK": 1400.0,
+      "cs_C": 50.0,
+      "cs_P": 2.0,
+      "damping_zeta": 0.025,
+      "desc": "PA66 + 30% Glass Fiber, high-strength connectors",
+      "ref": "BASF Ultramid A3WG6 TDS, DuPont Zytel 70G30"
+    },
+    {
+      "name": "PA66_GF50",
+      "lin_mid": 100972,
+      "bi_mid": 110972,
+      "mu_mid": 120972,
+      "kin_mid": 130972,
+      "samp_mid": 140972,
+      "tmid": 150972,
+      "rho_gcc": 1.57,
+      "E_GPa": 16.0,
+      "nu": 0.36,
+      "sigy_MPa": 230.0,
+      "sigu_MPa": 250.0,
+      "eps_f": 0.025,
+      "ss_plastic": [
+        [
+          0.0,
+          230.0
+        ],
+        [
+          0.003,
+          238.0
+        ],
+        [
+          0.007,
+          244.0
+        ],
+        [
+          0.012,
+          247.0
+        ],
+        [
+          0.02,
+          249.0
+        ],
+        [
+          0.025,
+          250.0
+        ]
+      ],
+      "cte_ppmK": 18.0,
+      "tc_WmK": 0.4,
+      "cp_JkgK": 1350.0,
+      "cs_C": 80.0,
+      "cs_P": 2.0,
+      "damping_zeta": 0.02,
+      "desc": "PA66 + 50% Glass Fiber, structural parts",
+      "ref": "BASF Ultramid A3WG10 TDS"
+    },
+    {
+      "name": "PBT_GF30",
+      "lin_mid": 100973,
+      "bi_mid": 110973,
+      "mu_mid": 120973,
+      "kin_mid": 130973,
+      "samp_mid": 140973,
+      "tmid": 150973,
+      "rho_gcc": 1.53,
+      "E_GPa": 10.0,
+      "nu": 0.37,
+      "sigy_MPa": 130.0,
+      "sigu_MPa": 145.0,
+      "eps_f": 0.03,
+      "ss_plastic": [
+        [
+          0.0,
+          130.0
+        ],
+        [
+          0.005,
+          136.0
+        ],
+        [
+          0.01,
+          140.0
+        ],
+        [
+          0.015,
+          142.0
+        ],
+        [
+          0.02,
+          144.0
+        ],
+        [
+          0.03,
+          145.0
+        ]
+      ],
+      "cte_ppmK": 30.0,
+      "tc_WmK": 0.35,
+      "cp_JkgK": 1350.0,
+      "cs_C": 60.0,
+      "cs_P": 2.5,
+      "damping_zeta": 0.025,
+      "desc": "PBT + 30% GF, electrical parts",
+      "ref": "DuPont Crastin SK605 TDS"
+    },
+    {
+      "name": "PPS_GF40",
+      "lin_mid": 100974,
+      "bi_mid": 110974,
+      "mu_mid": 120974,
+      "kin_mid": 130974,
+      "samp_mid": 140974,
+      "tmid": 150974,
+      "rho_gcc": 1.66,
+      "E_GPa": 14.0,
+      "nu": 0.38,
+      "sigy_MPa": 180.0,
+      "sigu_MPa": 195.0,
+      "eps_f": 0.02,
+      "ss_plastic": [
+        [
+          0.0,
+          180.0
+        ],
+        [
+          0.004,
+          186.0
+        ],
+        [
+          0.008,
+          190.0
+        ],
+        [
+          0.012,
+          192.0
+        ],
+        [
+          0.016,
+          194.0
+        ],
+        [
+          0.02,
+          195.0
+        ]
+      ],
+      "cte_ppmK": 20.0,
+      "tc_WmK": 0.35,
+      "cp_JkgK": 1100.0,
+      "cs_C": 150.0,
+      "cs_P": 2.0,
+      "damping_zeta": 0.02,
+      "desc": "PPS + 40% GF, high-temperature structural",
+      "ref": "Solvay Ryton R-4-02XT TDS"
+    }
+  ],
+  "HighPerformance": [
+    {
+      "name": "PPS_Ryton",
+      "lin_mid": 100975,
+      "bi_mid": 110975,
+      "mu_mid": 120975,
+      "kin_mid": 130975,
+      "samp_mid": 140975,
+      "tmid": 150975,
+      "rho_gcc": 1.35,
+      "E_GPa": 3.8,
+      "nu": 0.38,
+      "sigy_MPa": 80.0,
+      "sigu_MPa": 90.0,
+      "eps_f": 0.02,
+      "ss_plastic": [
+        [
+          0.0,
+          80.0
+        ],
+        [
+          0.005,
+          84.0
+        ],
+        [
+          0.01,
+          87.0
+        ],
+        [
+          0.015,
+          89.0
+        ],
+        [
+          0.02,
+          90.0
+        ]
+      ],
+      "cte_ppmK": 49.0,
+      "tc_WmK": 0.29,
+      "cp_JkgK": 1000.0,
+      "cs_C": 100.0,
+      "cs_P": 2.5,
+      "damping_zeta": 0.025,
+      "desc": "Polyphenylene Sulfide (Ryton), high-temp base resin",
+      "ref": "Solvay Ryton PR06 TDS"
+    },
+    {
+      "name": "PEEK_Victrex",
+      "lin_mid": 100976,
+      "bi_mid": 110976,
+      "mu_mid": 120976,
+      "kin_mid": 130976,
+      "samp_mid": 140976,
+      "tmid": 150976,
+      "rho_gcc": 1.32,
+      "E_GPa": 4.0,
+      "nu": 0.39,
+      "sigy_MPa": 98.0,
+      "sigu_MPa": 115.0,
+      "eps_f": 0.5,
+      "ss_plastic": [
+        [
+          0.0,
+          98.0
+        ],
+        [
+          0.005,
+          103.0
+        ],
+        [
+          0.01,
+          106.0
+        ],
+        [
+          0.02,
+          109.0
+        ],
+        [
+          0.05,
+          108.0
+        ],
+        [
+          0.1,
+          107.0
+        ],
+        [
+          0.3,
+          112.0
+        ],
+        [
+          0.5,
+          115.0
+        ]
+      ],
+      "cte_ppmK": 47.0,
+      "tc_WmK": 0.25,
+      "cp_JkgK": 1340.0,
+      "cs_C": 40.0,
+      "cs_P": 2.0,
+      "damping_zeta": 0.025,
+      "desc": "Polyetheretherketone (PEEK), medical, aerospace",
+      "ref": "Victrex PEEK 450G TDS: E=4.0 GPa, sigy=98 MPa, ISO 527"
+    },
+    {
+      "name": "PEI_Ultem",
+      "lin_mid": 100977,
+      "bi_mid": 110977,
+      "mu_mid": 120977,
+      "kin_mid": 130977,
+      "samp_mid": 140977,
+      "tmid": 150977,
+      "rho_gcc": 1.27,
+      "E_GPa": 3.0,
+      "nu": 0.36,
+      "sigy_MPa": 105.0,
+      "sigu_MPa": 110.0,
+      "eps_f": 0.6,
+      "ss_plastic": [
+        [
+          0.0,
+          105.0
+        ],
+        [
+          0.005,
+          107.0
+        ],
+        [
+          0.01,
+          109.0
+        ],
+        [
+          0.02,
+          110.0
+        ],
+        [
+          0.05,
+          109.0
+        ],
+        [
+          0.1,
+          108.0
+        ],
+        [
+          0.3,
+          109.0
+        ],
+        [
+          0.6,
+          110.0
+        ]
+      ],
+      "cte_ppmK": 56.0,
+      "tc_WmK": 0.22,
+      "cp_JkgK": 1200.0,
+      "cs_C": 50.0,
+      "cs_P": 2.5,
+      "damping_zeta": 0.025,
+      "desc": "Polyetherimide (Ultem 1000), high-temp electrical",
+      "ref": "SABIC Ultem 1000 TDS"
+    }
+  ],
+  "Optical": [
+    {
+      "name": "PMMA_Plexiglas",
+      "lin_mid": 100981,
+      "bi_mid": 110981,
+      "mu_mid": 120981,
+      "kin_mid": 130981,
+      "samp_mid": 140981,
+      "tmid": 150981,
+      "rho_gcc": 1.19,
+      "E_GPa": 3.0,
+      "nu": 0.38,
+      "sigy_MPa": 72.0,
+      "sigu_MPa": 80.0,
+      "eps_f": 0.05,
+      "ss_plastic": [
+        [
+          0.0,
+          72.0
+        ],
+        [
+          0.005,
+          75.0
+        ],
+        [
+          0.01,
+          77.0
+        ],
+        [
+          0.02,
+          79.0
+        ],
+        [
+          0.03,
+          79.5
+        ],
+        [
+          0.05,
+          80.0
+        ]
+      ],
+      "cte_ppmK": 75.0,
+      "tc_WmK": 0.19,
+      "cp_JkgK": 1470.0,
+      "cs_C": 50.0,
+      "cs_P": 3.0,
+      "damping_zeta": 0.03,
+      "desc": "Polymethyl Methacrylate (Plexiglas), transparent, cheap lens",
+      "ref": "Altuglas V825 TDS, Arkema Plexiglas V825-100"
+    },
+    {
+      "name": "COP_Zeonex",
+      "lin_mid": 100982,
+      "bi_mid": 110982,
+      "mu_mid": 120982,
+      "kin_mid": 130982,
+      "samp_mid": 140982,
+      "tmid": 150982,
+      "rho_gcc": 1.01,
+      "E_GPa": 2.4,
+      "nu": 0.37,
+      "sigy_MPa": 68.0,
+      "sigu_MPa": 72.0,
+      "eps_f": 0.1,
+      "ss_plastic": [
+        [
+          0.0,
+          68.0
+        ],
+        [
+          0.005,
+          69.5
+        ],
+        [
+          0.01,
+          70.5
+        ],
+        [
+          0.02,
+          71.5
+        ],
+        [
+          0.05,
+          72.0
+        ],
+        [
+          0.1,
+          72.0
+        ]
+      ],
+      "cte_ppmK": 70.0,
+      "tc_WmK": 0.15,
+      "cp_JkgK": 1800.0,
+      "cs_C": 30.0,
+      "cs_P": 3.0,
+      "damping_zeta": 0.025,
+      "desc": "Cyclic Olefin Polymer (Zeonex), smartphone camera lens (low birefringence)",
+      "ref": "Zeon Zeonex E48R TDS, Japan Zeon CL"
+    },
+    {
+      "name": "COC_TOPAS",
+      "lin_mid": 100983,
+      "bi_mid": 110983,
+      "mu_mid": 120983,
+      "kin_mid": 130983,
+      "samp_mid": 140983,
+      "tmid": 150983,
+      "rho_gcc": 1.02,
+      "E_GPa": 2.6,
+      "nu": 0.37,
+      "sigy_MPa": 63.0,
+      "sigu_MPa": 66.0,
+      "eps_f": 0.04,
+      "ss_plastic": [
+        [
+          0.0,
+          63.0
+        ],
+        [
+          0.005,
+          64.5
+        ],
+        [
+          0.01,
+          65.5
+        ],
+        [
+          0.02,
+          66.0
+        ],
+        [
+          0.03,
+          66.0
+        ],
+        [
+          0.04,
+          66.0
+        ]
+      ],
+      "cte_ppmK": 60.0,
+      "tc_WmK": 0.15,
+      "cp_JkgK": 1750.0,
+      "cs_C": 30.0,
+      "cs_P": 3.0,
+      "damping_zeta": 0.025,
+      "desc": "Cyclic Olefin Copolymer (TOPAS), optical and medical",
+      "ref": "TOPAS 5013 TDS, Polyplastics TOPAS"
+    }
+  ]
+}

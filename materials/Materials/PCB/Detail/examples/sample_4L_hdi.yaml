@@ -1,0 +1,46 @@
+# 4-Layer Smartphone HDI Main PCB
+# Typical layup: Signal - GND - PWR - Signal
+
+material_name: "PCB_4L_HDI_Smartphone"
+material_id: 200002
+description: "4층 스마트폰 HDI 메인보드 (DS-8402H + ED Cu)"
+
+layers:
+  # Top signal layer (Half oz = 18 um Cu, ~35% Cu density for dense routing)
+  - type: cu
+    material: "Cu Electrodeposited Standard (Rigid PCB)"
+    thickness_um: 18
+    cu_ratio: 0.35
+
+  # Prepreg layer 1 (DS-8402H, low-loss halogen-free)
+  - type: ppg
+    material: "Doosan DS-8402H"
+    thickness_um: 100
+
+  # Inner GND plane (35 um = 1 oz, 90% Cu — mostly solid plane)
+  - type: cu
+    material: "Cu Electrodeposited Standard (Rigid PCB)"
+    thickness_um: 35
+    cu_ratio: 0.90
+
+  # Core prepreg (thicker inner dielectric)
+  - type: ppg
+    material: "Doosan DS-7402LC"
+    thickness_um: 200
+
+  # Inner power plane
+  - type: cu
+    material: "Cu Electrodeposited Standard (Rigid PCB)"
+    thickness_um: 35
+    cu_ratio: 0.88
+
+  # Prepreg layer 2
+  - type: ppg
+    material: "Doosan DS-8402H"
+    thickness_um: 100
+
+  # Bottom signal layer
+  - type: cu
+    material: "Cu Electrodeposited Standard (Rigid PCB)"
+    thickness_um: 18
+    cu_ratio: 0.35

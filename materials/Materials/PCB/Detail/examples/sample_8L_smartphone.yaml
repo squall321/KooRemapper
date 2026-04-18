@@ -1,0 +1,90 @@
+# 8-Layer Smartphone HDI Main PCB
+# Typical high-end smartphone AP board layup
+
+material_name: "PCB_8L_HDI_Smartphone_Premium"
+material_id: 200003
+description: "8층 프리미엄 스마트폰 HDI (EM-526 low-loss + Doosan 8402H + HVLP Cu)"
+
+layers:
+  # L1 Top signal (sig routing, 40% coverage)
+  - type: cu
+    material: "Cu HVLP Very High Low Profile"
+    thickness_um: 18
+    cu_ratio: 0.40
+
+  # PPG 1-2 (outer, low-loss for high-speed signals)
+  - type: ppg
+    material: "Elite EM-526"
+    thickness_um: 80
+
+  # L2 GND plane
+  - type: cu
+    material: "Cu HVLP Very High Low Profile"
+    thickness_um: 18
+    cu_ratio: 0.92
+
+  # PPG 2-3
+  - type: ppg
+    material: "Doosan DS-8402H"
+    thickness_um: 75
+
+  # L3 signal
+  - type: cu
+    material: "Cu HVLP Very High Low Profile"
+    thickness_um: 18
+    cu_ratio: 0.50
+
+  # PPG 3-4 (core prepreg, Doosan DS-7402LC for low CTE)
+  - type: ppg
+    material: "Doosan DS-7402LC"
+    thickness_um: 150
+
+  # L4 power plane
+  - type: cu
+    material: "Cu HVLP Very High Low Profile"
+    thickness_um: 35
+    cu_ratio: 0.88
+
+  # PPG 4-5 (center core)
+  - type: ppg
+    material: "Doosan DS-7402LC"
+    thickness_um: 150
+
+  # L5 power plane
+  - type: cu
+    material: "Cu HVLP Very High Low Profile"
+    thickness_um: 35
+    cu_ratio: 0.88
+
+  # PPG 5-6
+  - type: ppg
+    material: "Doosan DS-7402LC"
+    thickness_um: 150
+
+  # L6 signal
+  - type: cu
+    material: "Cu HVLP Very High Low Profile"
+    thickness_um: 18
+    cu_ratio: 0.50
+
+  # PPG 6-7
+  - type: ppg
+    material: "Doosan DS-8402H"
+    thickness_um: 75
+
+  # L7 GND plane
+  - type: cu
+    material: "Cu HVLP Very High Low Profile"
+    thickness_um: 18
+    cu_ratio: 0.92
+
+  # PPG 7-8
+  - type: ppg
+    material: "Elite EM-526"
+    thickness_um: 80
+
+  # L8 Bottom signal
+  - type: cu
+    material: "Cu HVLP Very High Low Profile"
+    thickness_um: 18
+    cu_ratio: 0.40

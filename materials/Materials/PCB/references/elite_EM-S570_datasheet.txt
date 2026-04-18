@@ -1,0 +1,58 @@
+          Elite Material Co., Ltd.                                                            Preliminary Datasheet
+          http://www.emctw.com
+
+
+
+
+                 EM-S570 / EM-S57B
+       High Modulus / Ultra Low CTE / Halogen Free
+     Applications Include: FC-CSP/BGA, PoP, SiP
+     Compatible with multiple lamination and high thermal reliability applications.
+     Ultra low CTE in X/Y direction
+     RoHS Compliant
+     UL File: E150504
+     Applicable IPC-4103 Slash Sheets: 250/ 550
+
+
+Basic Laminate Property
+    Property                             Item            Typical Value    Unit     Test Condition     IPC-TM-650
+                                                             280           oC          TMA               2.4.24
+                                          Tg                               oC
+                                                             320                       DMA              2.4.24.4
+                                   CTE, X/Y-axis             4/6         ppm/ oC     < Tg, TMA          2.4.24.5
+                                                             8~13        ppm/ oC     < Tg, TMA
+                                    CTE, Z-axis                                                          2.4.24
+                                                            70~90        ppm/ oC     > Tg, TMA
+    Thermal                                                                oC
+                                          Td                 440                   TGA (5%W.L)          2.4.24.6
+                                                            > 120         Min          Clad
+                                         T288                                                           2.4.24.1
+                                                            > 120         Min         Etched
+                                                                                                         ASTM
+                           Thermal Conductivity              0.59        W/m.K           -
+                                                                                                         D5470
+                                 Dk
+                                                             4.5
+                             (R/C:50%)
+                                                  1GHz                      -       C-24/23/50          2.5.5.9
+                                    Df
+    Electrical                                              0.006
+                             (R/C:50%)
+                                 Volume Resistivity         > 1010       MΩ-cm
+                                                                                    C-96/35/90          2.5.17.1
+                            Surface Resistivity             > 109         MΩ
+                          Peel Strength
+                                           18um              0.9         kg/cm      As Received          2.4.8
+                              (RTF)
+    Physical                Flexural
+                                           Warp             30~32         GPa       As Received          2.4.4
+                            Modulus
+                                 Flame Resistance            V-0            -       C-48/23/50           UL-94
+Above typical values are tested under specified constructions and not intended for specification.
+
+
+
+
+                                                                1
+                                                                                                    Rev: 2024 July.
+

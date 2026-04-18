@@ -1,0 +1,2142 @@
+{
+  "SUS": [
+    {
+      "name": "SUS201_annealed",
+      "bi_mid": 100501,
+      "multi_mid": 110501,
+      "tmid": 120501,
+      "temper": "Annealed",
+      "rho_gcc": 7.8,
+      "E_GPa": 200.0,
+      "nu": 0.3,
+      "sigy_MPa": 260.0,
+      "sigu_MPa": 655.0,
+      "eps_f": 0.4,
+      "ss_plastic": [
+        [
+          0.0,
+          260.0
+        ],
+        [
+          0.02,
+          340.0
+        ],
+        [
+          0.05,
+          420.0
+        ],
+        [
+          0.1,
+          510.0
+        ],
+        [
+          0.2,
+          600.0
+        ],
+        [
+          0.3,
+          640.0
+        ],
+        [
+          0.4,
+          655.0
+        ]
+      ],
+      "cte_ppmK": 16.9,
+      "tc_WmK": 16.2,
+      "cp_JkgK": 500.0,
+      "cs": {
+        "C": 100.0,
+        "P": 10.0
+      },
+      "damping_zeta": 0.005,
+      "desc": "Low-Ni austenitic, economic grade",
+      "ref": "ASTM A666, AISI 201, MatWeb",
+      "kin_pure_mid": 130501,
+      "kin_mixed_mid": 140501
+    },
+    {
+      "name": "SUS301_annealed",
+      "bi_mid": 100502,
+      "multi_mid": 110502,
+      "tmid": 120502,
+      "temper": "Annealed",
+      "rho_gcc": 7.88,
+      "E_GPa": 193.0,
+      "nu": 0.3,
+      "sigy_MPa": 275.0,
+      "sigu_MPa": 690.0,
+      "eps_f": 0.4,
+      "ss_plastic": [
+        [
+          0.0,
+          275.0
+        ],
+        [
+          0.02,
+          360.0
+        ],
+        [
+          0.05,
+          445.0
+        ],
+        [
+          0.1,
+          535.0
+        ],
+        [
+          0.2,
+          625.0
+        ],
+        [
+          0.3,
+          675.0
+        ],
+        [
+          0.4,
+          690.0
+        ]
+      ],
+      "cte_ppmK": 16.9,
+      "tc_WmK": 16.2,
+      "cp_JkgK": 500.0,
+      "cs": {
+        "C": 100.0,
+        "P": 10.0
+      },
+      "damping_zeta": 0.005,
+      "desc": "High-strength spring austenitic",
+      "ref": "AISI 301, ASM Handbook",
+      "kin_pure_mid": 130502,
+      "kin_mixed_mid": 140502
+    },
+    {
+      "name": "SUS304_annealed",
+      "bi_mid": 100503,
+      "multi_mid": 110503,
+      "tmid": 120503,
+      "temper": "Annealed",
+      "rho_gcc": 8.0,
+      "E_GPa": 193.0,
+      "nu": 0.29,
+      "sigy_MPa": 215.0,
+      "sigu_MPa": 505.0,
+      "eps_f": 0.4,
+      "ss_plastic": [
+        [
+          0.0,
+          215.0
+        ],
+        [
+          0.02,
+          280.0
+        ],
+        [
+          0.05,
+          340.0
+        ],
+        [
+          0.1,
+          400.0
+        ],
+        [
+          0.2,
+          460.0
+        ],
+        [
+          0.3,
+          490.0
+        ],
+        [
+          0.4,
+          505.0
+        ]
+      ],
+      "cte_ppmK": 17.3,
+      "tc_WmK": 16.2,
+      "cp_JkgK": 500.0,
+      "cs": {
+        "C": 100.0,
+        "P": 10.0
+      },
+      "damping_zeta": 0.005,
+      "desc": "Most common austenitic stainless steel",
+      "ref": "AISI 304, ASTM A240, MatWeb",
+      "kin_pure_mid": 130503,
+      "kin_mixed_mid": 140503
+    },
+    {
+      "name": "SUS304L_annealed",
+      "bi_mid": 100504,
+      "multi_mid": 110504,
+      "tmid": 120504,
+      "temper": "Annealed",
+      "rho_gcc": 8.0,
+      "E_GPa": 193.0,
+      "nu": 0.29,
+      "sigy_MPa": 205.0,
+      "sigu_MPa": 485.0,
+      "eps_f": 0.4,
+      "ss_plastic": [
+        [
+          0.0,
+          205.0
+        ],
+        [
+          0.02,
+          265.0
+        ],
+        [
+          0.05,
+          325.0
+        ],
+        [
+          0.1,
+          380.0
+        ],
+        [
+          0.2,
+          440.0
+        ],
+        [
+          0.3,
+          470.0
+        ],
+        [
+          0.4,
+          485.0
+        ]
+      ],
+      "cte_ppmK": 17.3,
+      "tc_WmK": 16.2,
+      "cp_JkgK": 500.0,
+      "cs": {
+        "C": 100.0,
+        "P": 10.0
+      },
+      "damping_zeta": 0.005,
+      "desc": "Low-carbon 304, weld-friendly",
+      "ref": "AISI 304L, ASTM A240",
+      "kin_pure_mid": 130504,
+      "kin_mixed_mid": 140504
+    },
+    {
+      "name": "SUS316_annealed",
+      "bi_mid": 100505,
+      "multi_mid": 110505,
+      "tmid": 120505,
+      "temper": "Annealed",
+      "rho_gcc": 8.0,
+      "E_GPa": 193.0,
+      "nu": 0.3,
+      "sigy_MPa": 240.0,
+      "sigu_MPa": 550.0,
+      "eps_f": 0.4,
+      "ss_plastic": [
+        [
+          0.0,
+          240.0
+        ],
+        [
+          0.02,
+          310.0
+        ],
+        [
+          0.05,
+          375.0
+        ],
+        [
+          0.1,
+          440.0
+        ],
+        [
+          0.2,
+          510.0
+        ],
+        [
+          0.3,
+          540.0
+        ],
+        [
+          0.4,
+          550.0
+        ]
+      ],
+      "cte_ppmK": 16.0,
+      "tc_WmK": 15.9,
+      "cp_JkgK": 500.0,
+      "cs": {
+        "C": 100.0,
+        "P": 10.0
+      },
+      "damping_zeta": 0.005,
+      "desc": "Mo-bearing austenitic, corrosion resistant",
+      "ref": "AISI 316, ASTM A240",
+      "kin_pure_mid": 130505,
+      "kin_mixed_mid": 140505
+    },
+    {
+      "name": "SUS316L_annealed",
+      "bi_mid": 100506,
+      "multi_mid": 110506,
+      "tmid": 120506,
+      "temper": "Annealed",
+      "rho_gcc": 8.0,
+      "E_GPa": 193.0,
+      "nu": 0.3,
+      "sigy_MPa": 220.0,
+      "sigu_MPa": 520.0,
+      "eps_f": 0.4,
+      "ss_plastic": [
+        [
+          0.0,
+          220.0
+        ],
+        [
+          0.02,
+          285.0
+        ],
+        [
+          0.05,
+          345.0
+        ],
+        [
+          0.1,
+          410.0
+        ],
+        [
+          0.2,
+          475.0
+        ],
+        [
+          0.3,
+          510.0
+        ],
+        [
+          0.4,
+          520.0
+        ]
+      ],
+      "cte_ppmK": 16.0,
+      "tc_WmK": 15.9,
+      "cp_JkgK": 500.0,
+      "cs": {
+        "C": 50.0,
+        "P": 5.0
+      },
+      "damping_zeta": 0.005,
+      "desc": "Low-carbon 316, medical/weld",
+      "ref": "AISI 316L, ASTM A240, Hsu&Jones 2004 (CS)",
+      "kin_pure_mid": 130506,
+      "kin_mixed_mid": 140506
+    },
+    {
+      "name": "SUS410_annealed",
+      "bi_mid": 100507,
+      "multi_mid": 110507,
+      "tmid": 120507,
+      "temper": "Annealed",
+      "rho_gcc": 7.74,
+      "E_GPa": 200.0,
+      "nu": 0.3,
+      "sigy_MPa": 275.0,
+      "sigu_MPa": 485.0,
+      "eps_f": 0.22,
+      "ss_plastic": [
+        [
+          0.0,
+          275.0
+        ],
+        [
+          0.02,
+          350.0
+        ],
+        [
+          0.05,
+          410.0
+        ],
+        [
+          0.1,
+          450.0
+        ],
+        [
+          0.15,
+          475.0
+        ],
+        [
+          0.22,
+          485.0
+        ]
+      ],
+      "cte_ppmK": 10.4,
+      "tc_WmK": 24.9,
+      "cp_JkgK": 460.0,
+      "cs": {
+        "C": 40.0,
+        "P": 5.0
+      },
+      "damping_zeta": 0.003,
+      "desc": "Martensitic, hardenable",
+      "ref": "AISI 410, ASTM A240",
+      "kin_pure_mid": 130507,
+      "kin_mixed_mid": 140507
+    },
+    {
+      "name": "SUS420_annealed",
+      "bi_mid": 100508,
+      "multi_mid": 110508,
+      "tmid": 120508,
+      "temper": "Annealed",
+      "rho_gcc": 7.75,
+      "E_GPa": 200.0,
+      "nu": 0.29,
+      "sigy_MPa": 345.0,
+      "sigu_MPa": 655.0,
+      "eps_f": 0.2,
+      "ss_plastic": [
+        [
+          0.0,
+          345.0
+        ],
+        [
+          0.02,
+          440.0
+        ],
+        [
+          0.05,
+          520.0
+        ],
+        [
+          0.1,
+          585.0
+        ],
+        [
+          0.15,
+          630.0
+        ],
+        [
+          0.2,
+          655.0
+        ]
+      ],
+      "cte_ppmK": 10.3,
+      "tc_WmK": 24.9,
+      "cp_JkgK": 460.0,
+      "cs": {
+        "C": 40.0,
+        "P": 5.0
+      },
+      "damping_zeta": 0.003,
+      "desc": "High-C martensitic, knife/mold",
+      "ref": "AISI 420, ASM Handbook",
+      "kin_pure_mid": 130508,
+      "kin_mixed_mid": 140508
+    },
+    {
+      "name": "SUS430_annealed",
+      "bi_mid": 100509,
+      "multi_mid": 110509,
+      "tmid": 120509,
+      "temper": "Annealed",
+      "rho_gcc": 7.7,
+      "E_GPa": 200.0,
+      "nu": 0.3,
+      "sigy_MPa": 205.0,
+      "sigu_MPa": 450.0,
+      "eps_f": 0.22,
+      "ss_plastic": [
+        [
+          0.0,
+          205.0
+        ],
+        [
+          0.02,
+          275.0
+        ],
+        [
+          0.05,
+          340.0
+        ],
+        [
+          0.1,
+          395.0
+        ],
+        [
+          0.15,
+          430.0
+        ],
+        [
+          0.22,
+          450.0
+        ]
+      ],
+      "cte_ppmK": 10.4,
+      "tc_WmK": 26.1,
+      "cp_JkgK": 460.0,
+      "cs": {
+        "C": 40.0,
+        "P": 5.0
+      },
+      "damping_zeta": 0.004,
+      "desc": "Ferritic, magnetic",
+      "ref": "AISI 430, ASTM A240",
+      "kin_pure_mid": 130509,
+      "kin_mixed_mid": 140509
+    },
+    {
+      "name": "SUS_17-4PH_H900",
+      "bi_mid": 100510,
+      "multi_mid": 110510,
+      "tmid": 120510,
+      "temper": "H900 (aged)",
+      "rho_gcc": 7.8,
+      "E_GPa": 196.0,
+      "nu": 0.272,
+      "sigy_MPa": 1170.0,
+      "sigu_MPa": 1310.0,
+      "eps_f": 0.14,
+      "ss_plastic": [
+        [
+          0.0,
+          1170.0
+        ],
+        [
+          0.01,
+          1220.0
+        ],
+        [
+          0.02,
+          1250.0
+        ],
+        [
+          0.05,
+          1285.0
+        ],
+        [
+          0.1,
+          1305.0
+        ],
+        [
+          0.14,
+          1310.0
+        ]
+      ],
+      "cte_ppmK": 10.8,
+      "tc_WmK": 17.9,
+      "cp_JkgK": 460.0,
+      "cs": {
+        "C": 3200.0,
+        "P": 5.0
+      },
+      "damping_zeta": 0.003,
+      "desc": "Precipitation hardening, high strength",
+      "ref": "AMS 5643, ASM Handbook",
+      "kin_pure_mid": 130510,
+      "kin_mixed_mid": 140510
+    }
+  ],
+  "Al": [
+    {
+      "name": "Al1050-O",
+      "bi_mid": 100521,
+      "multi_mid": 110521,
+      "tmid": 120521,
+      "temper": "O (annealed)",
+      "rho_gcc": 2.705,
+      "E_GPa": 69.0,
+      "nu": 0.33,
+      "sigy_MPa": 28.0,
+      "sigu_MPa": 76.0,
+      "eps_f": 0.36,
+      "ss_plastic": [
+        [
+          0.0,
+          28.0
+        ],
+        [
+          0.02,
+          40.0
+        ],
+        [
+          0.05,
+          52.0
+        ],
+        [
+          0.1,
+          62.0
+        ],
+        [
+          0.2,
+          72.0
+        ],
+        [
+          0.36,
+          76.0
+        ]
+      ],
+      "cte_ppmK": 23.6,
+      "tc_WmK": 229.0,
+      "cp_JkgK": 900.0,
+      "cs": {
+        "C": 6500.0,
+        "P": 4.0
+      },
+      "damping_zeta": 0.008,
+      "desc": "Pure Al annealed, reflector grade",
+      "ref": "Al Association, MatWeb",
+      "kin_pure_mid": 130521,
+      "kin_mixed_mid": 140521
+    },
+    {
+      "name": "Al1100-O",
+      "bi_mid": 100522,
+      "multi_mid": 110522,
+      "tmid": 120522,
+      "temper": "O (annealed)",
+      "rho_gcc": 2.71,
+      "E_GPa": 69.0,
+      "nu": 0.33,
+      "sigy_MPa": 34.0,
+      "sigu_MPa": 90.0,
+      "eps_f": 0.35,
+      "ss_plastic": [
+        [
+          0.0,
+          34.0
+        ],
+        [
+          0.02,
+          48.0
+        ],
+        [
+          0.05,
+          62.0
+        ],
+        [
+          0.1,
+          73.0
+        ],
+        [
+          0.2,
+          84.0
+        ],
+        [
+          0.35,
+          90.0
+        ]
+      ],
+      "cte_ppmK": 23.6,
+      "tc_WmK": 222.0,
+      "cp_JkgK": 904.0,
+      "cs": {
+        "C": 6500.0,
+        "P": 4.0
+      },
+      "damping_zeta": 0.008,
+      "desc": "Commercial pure Al, foil and sheet",
+      "ref": "ASTM B209, Al Assoc",
+      "kin_pure_mid": 130522,
+      "kin_mixed_mid": 140522
+    },
+    {
+      "name": "Al2024-T3",
+      "bi_mid": 100523,
+      "multi_mid": 110523,
+      "tmid": 120523,
+      "temper": "T3",
+      "rho_gcc": 2.78,
+      "E_GPa": 73.1,
+      "nu": 0.33,
+      "sigy_MPa": 345.0,
+      "sigu_MPa": 483.0,
+      "eps_f": 0.18,
+      "ss_plastic": [
+        [
+          0.0,
+          345.0
+        ],
+        [
+          0.005,
+          385.0
+        ],
+        [
+          0.01,
+          410.0
+        ],
+        [
+          0.02,
+          435.0
+        ],
+        [
+          0.05,
+          465.0
+        ],
+        [
+          0.1,
+          478.0
+        ],
+        [
+          0.18,
+          483.0
+        ]
+      ],
+      "cte_ppmK": 23.2,
+      "tc_WmK": 121.0,
+      "cp_JkgK": 875.0,
+      "cs": {
+        "C": 1288000.0,
+        "P": 4.0
+      },
+      "damping_zeta": 0.003,
+      "desc": "Al-Cu aerospace alloy",
+      "ref": "ASTM B209, MIL-HDBK-5; Bodner-Partom (rate-insensitive)",
+      "kin_pure_mid": 130523,
+      "kin_mixed_mid": 140523
+    },
+    {
+      "name": "Al3003-H14",
+      "bi_mid": 100524,
+      "multi_mid": 110524,
+      "tmid": 120524,
+      "temper": "H14 (half-hard)",
+      "rho_gcc": 2.73,
+      "E_GPa": 68.9,
+      "nu": 0.33,
+      "sigy_MPa": 145.0,
+      "sigu_MPa": 150.0,
+      "eps_f": 0.1,
+      "ss_plastic": [
+        [
+          0.0,
+          145.0
+        ],
+        [
+          0.01,
+          148.0
+        ],
+        [
+          0.03,
+          149.0
+        ],
+        [
+          0.05,
+          150.0
+        ],
+        [
+          0.08,
+          150.0
+        ],
+        [
+          0.1,
+          150.0
+        ]
+      ],
+      "cte_ppmK": 23.2,
+      "tc_WmK": 159.0,
+      "cp_JkgK": 893.0,
+      "cs": {
+        "C": 6500.0,
+        "P": 4.0
+      },
+      "damping_zeta": 0.006,
+      "desc": "Al-Mn, roofing and radiator",
+      "ref": "ASTM B209",
+      "kin_pure_mid": 130524,
+      "kin_mixed_mid": 140524
+    },
+    {
+      "name": "Al5052-H32",
+      "bi_mid": 100525,
+      "multi_mid": 110525,
+      "tmid": 120525,
+      "temper": "H32 (strain-hardened)",
+      "rho_gcc": 2.68,
+      "E_GPa": 70.3,
+      "nu": 0.33,
+      "sigy_MPa": 193.0,
+      "sigu_MPa": 228.0,
+      "eps_f": 0.12,
+      "ss_plastic": [
+        [
+          0.0,
+          193.0
+        ],
+        [
+          0.01,
+          205.0
+        ],
+        [
+          0.02,
+          213.0
+        ],
+        [
+          0.05,
+          222.0
+        ],
+        [
+          0.08,
+          226.0
+        ],
+        [
+          0.12,
+          228.0
+        ]
+      ],
+      "cte_ppmK": 23.8,
+      "tc_WmK": 138.0,
+      "cp_JkgK": 880.0,
+      "cs": {
+        "C": 6500.0,
+        "P": 4.0
+      },
+      "damping_zeta": 0.008,
+      "desc": "Al-Mg marine grade",
+      "ref": "ASTM B209",
+      "kin_pure_mid": 130525,
+      "kin_mixed_mid": 140525
+    },
+    {
+      "name": "Al5083-H116",
+      "bi_mid": 100526,
+      "multi_mid": 110526,
+      "tmid": 120526,
+      "temper": "H116",
+      "rho_gcc": 2.66,
+      "E_GPa": 70.3,
+      "nu": 0.33,
+      "sigy_MPa": 215.0,
+      "sigu_MPa": 305.0,
+      "eps_f": 0.16,
+      "ss_plastic": [
+        [
+          0.0,
+          215.0
+        ],
+        [
+          0.005,
+          240.0
+        ],
+        [
+          0.01,
+          258.0
+        ],
+        [
+          0.02,
+          275.0
+        ],
+        [
+          0.05,
+          293.0
+        ],
+        [
+          0.1,
+          303.0
+        ],
+        [
+          0.16,
+          305.0
+        ]
+      ],
+      "cte_ppmK": 23.8,
+      "tc_WmK": 117.0,
+      "cp_JkgK": 900.0,
+      "cs": {
+        "C": 6500.0,
+        "P": 4.0
+      },
+      "damping_zeta": 0.008,
+      "desc": "High-strength Al-Mg, LNG tanks",
+      "ref": "ASTM B928",
+      "kin_pure_mid": 130526,
+      "kin_mixed_mid": 140526
+    },
+    {
+      "name": "Al6061-T6",
+      "bi_mid": 100535,
+      "multi_mid": 110535,
+      "tmid": 120535,
+      "temper": "T6",
+      "rho_gcc": 2.7,
+      "E_GPa": 68.9,
+      "nu": 0.33,
+      "sigy_MPa": 276.0,
+      "sigu_MPa": 310.0,
+      "eps_f": 0.12,
+      "ss_plastic": [
+        [
+          0.0,
+          276.0
+        ],
+        [
+          0.005,
+          289.0
+        ],
+        [
+          0.01,
+          296.0
+        ],
+        [
+          0.02,
+          302.0
+        ],
+        [
+          0.05,
+          308.0
+        ],
+        [
+          0.1,
+          310.0
+        ],
+        [
+          0.12,
+          310.0
+        ]
+      ],
+      "cte_ppmK": 23.4,
+      "tc_WmK": 167.0,
+      "cp_JkgK": 896.0,
+      "cs": {
+        "C": 1288000.0,
+        "P": 4.0
+      },
+      "damping_zeta": 0.003,
+      "desc": "Al-Mg-Si general structural (most common)",
+      "ref": "ASTM B209, MIL-HDBK-5; precipitation hardened rate-insensitive",
+      "kin_pure_mid": 130535,
+      "kin_mixed_mid": 140535
+    },
+    {
+      "name": "Al6063-T5",
+      "bi_mid": 100536,
+      "multi_mid": 110536,
+      "tmid": 120536,
+      "temper": "T5",
+      "rho_gcc": 2.7,
+      "E_GPa": 68.9,
+      "nu": 0.33,
+      "sigy_MPa": 145.0,
+      "sigu_MPa": 186.0,
+      "eps_f": 0.12,
+      "ss_plastic": [
+        [
+          0.0,
+          145.0
+        ],
+        [
+          0.005,
+          158.0
+        ],
+        [
+          0.01,
+          168.0
+        ],
+        [
+          0.02,
+          176.0
+        ],
+        [
+          0.05,
+          183.0
+        ],
+        [
+          0.1,
+          186.0
+        ],
+        [
+          0.12,
+          186.0
+        ]
+      ],
+      "cte_ppmK": 23.4,
+      "tc_WmK": 201.0,
+      "cp_JkgK": 900.0,
+      "cs": {
+        "C": 1288000.0,
+        "P": 4.0
+      },
+      "damping_zeta": 0.003,
+      "desc": "Extrusion alloy, windows/frames",
+      "ref": "ASTM B221",
+      "kin_pure_mid": 130536,
+      "kin_mixed_mid": 140536
+    },
+    {
+      "name": "Al6063-T6",
+      "bi_mid": 100537,
+      "multi_mid": 110537,
+      "tmid": 120537,
+      "temper": "T6",
+      "rho_gcc": 2.7,
+      "E_GPa": 68.9,
+      "nu": 0.33,
+      "sigy_MPa": 214.0,
+      "sigu_MPa": 241.0,
+      "eps_f": 0.12,
+      "ss_plastic": [
+        [
+          0.0,
+          214.0
+        ],
+        [
+          0.005,
+          225.0
+        ],
+        [
+          0.01,
+          232.0
+        ],
+        [
+          0.02,
+          237.0
+        ],
+        [
+          0.05,
+          240.0
+        ],
+        [
+          0.1,
+          241.0
+        ],
+        [
+          0.12,
+          241.0
+        ]
+      ],
+      "cte_ppmK": 23.4,
+      "tc_WmK": 201.0,
+      "cp_JkgK": 900.0,
+      "cs": {
+        "C": 1288000.0,
+        "P": 4.0
+      },
+      "damping_zeta": 0.003,
+      "desc": "T6 heat-treated 6063 extrusion",
+      "ref": "ASTM B221",
+      "kin_pure_mid": 130537,
+      "kin_mixed_mid": 140537
+    },
+    {
+      "name": "Al7050-T7451",
+      "bi_mid": 100538,
+      "multi_mid": 110538,
+      "tmid": 120538,
+      "temper": "T7451",
+      "rho_gcc": 2.83,
+      "E_GPa": 71.7,
+      "nu": 0.33,
+      "sigy_MPa": 469.0,
+      "sigu_MPa": 524.0,
+      "eps_f": 0.11,
+      "ss_plastic": [
+        [
+          0.0,
+          469.0
+        ],
+        [
+          0.005,
+          492.0
+        ],
+        [
+          0.01,
+          505.0
+        ],
+        [
+          0.02,
+          515.0
+        ],
+        [
+          0.05,
+          521.0
+        ],
+        [
+          0.1,
+          524.0
+        ],
+        [
+          0.11,
+          524.0
+        ]
+      ],
+      "cte_ppmK": 23.5,
+      "tc_WmK": 157.0,
+      "cp_JkgK": 860.0,
+      "cs": {
+        "C": 1288000.0,
+        "P": 4.0
+      },
+      "damping_zeta": 0.003,
+      "desc": "Al-Zn aerospace, stress-corrosion resistant",
+      "ref": "ASTM B209, MIL-HDBK-5",
+      "kin_pure_mid": 130538,
+      "kin_mixed_mid": 140538
+    },
+    {
+      "name": "Al7075-T6",
+      "bi_mid": 100539,
+      "multi_mid": 110539,
+      "tmid": 120539,
+      "temper": "T6",
+      "rho_gcc": 2.81,
+      "E_GPa": 71.7,
+      "nu": 0.33,
+      "sigy_MPa": 503.0,
+      "sigu_MPa": 572.0,
+      "eps_f": 0.11,
+      "ss_plastic": [
+        [
+          0.0,
+          503.0
+        ],
+        [
+          0.005,
+          528.0
+        ],
+        [
+          0.01,
+          543.0
+        ],
+        [
+          0.02,
+          555.0
+        ],
+        [
+          0.05,
+          567.0
+        ],
+        [
+          0.1,
+          572.0
+        ],
+        [
+          0.11,
+          572.0
+        ]
+      ],
+      "cte_ppmK": 23.6,
+      "tc_WmK": 130.0,
+      "cp_JkgK": 960.0,
+      "cs": {
+        "C": 1288000.0,
+        "P": 4.0
+      },
+      "damping_zeta": 0.003,
+      "desc": "Highest-strength Al-Zn aerospace",
+      "ref": "ASTM B209, MIL-HDBK-5",
+      "kin_pure_mid": 130539,
+      "kin_mixed_mid": 140539
+    },
+    {
+      "name": "ADC12_diecast",
+      "bi_mid": 100540,
+      "multi_mid": 110540,
+      "tmid": 120540,
+      "temper": "As-cast",
+      "rho_gcc": 2.7,
+      "E_GPa": 71.0,
+      "nu": 0.33,
+      "sigy_MPa": 150.0,
+      "sigu_MPa": 310.0,
+      "eps_f": 0.025,
+      "ss_plastic": [
+        [
+          0.0,
+          150.0
+        ],
+        [
+          0.005,
+          220.0
+        ],
+        [
+          0.01,
+          260.0
+        ],
+        [
+          0.015,
+          285.0
+        ],
+        [
+          0.02,
+          300.0
+        ],
+        [
+          0.025,
+          310.0
+        ]
+      ],
+      "cte_ppmK": 21.0,
+      "tc_WmK": 96.0,
+      "cp_JkgK": 963.0,
+      "cs": {
+        "C": 1500.0,
+        "P": 4.0
+      },
+      "damping_zeta": 0.015,
+      "desc": "Die-cast Al-Si-Cu (smartphone frames)",
+      "ref": "JIS H 5302, Nadca handbook; porosity raises damping",
+      "kin_pure_mid": 130540,
+      "kin_mixed_mid": 140540
+    }
+  ],
+  "Ti": [
+    {
+      "name": "Ti_Grade1",
+      "bi_mid": 100561,
+      "multi_mid": 110561,
+      "tmid": 120561,
+      "temper": "Annealed",
+      "rho_gcc": 4.51,
+      "E_GPa": 105.0,
+      "nu": 0.34,
+      "sigy_MPa": 170.0,
+      "sigu_MPa": 240.0,
+      "eps_f": 0.24,
+      "ss_plastic": [
+        [
+          0.0,
+          170.0
+        ],
+        [
+          0.01,
+          195.0
+        ],
+        [
+          0.03,
+          215.0
+        ],
+        [
+          0.06,
+          228.0
+        ],
+        [
+          0.12,
+          236.0
+        ],
+        [
+          0.24,
+          240.0
+        ]
+      ],
+      "cte_ppmK": 8.6,
+      "tc_WmK": 16.4,
+      "cp_JkgK": 523.0,
+      "cs": {
+        "C": 120.0,
+        "P": 9.0
+      },
+      "damping_zeta": 0.005,
+      "desc": "CP Ti, softest, medical",
+      "ref": "ASTM B265 Grade 1",
+      "kin_pure_mid": 130561,
+      "kin_mixed_mid": 140561
+    },
+    {
+      "name": "Ti_Grade2",
+      "bi_mid": 100562,
+      "multi_mid": 110562,
+      "tmid": 120562,
+      "temper": "Annealed",
+      "rho_gcc": 4.51,
+      "E_GPa": 105.0,
+      "nu": 0.34,
+      "sigy_MPa": 275.0,
+      "sigu_MPa": 345.0,
+      "eps_f": 0.2,
+      "ss_plastic": [
+        [
+          0.0,
+          275.0
+        ],
+        [
+          0.01,
+          300.0
+        ],
+        [
+          0.03,
+          320.0
+        ],
+        [
+          0.06,
+          335.0
+        ],
+        [
+          0.12,
+          342.0
+        ],
+        [
+          0.2,
+          345.0
+        ]
+      ],
+      "cte_ppmK": 8.6,
+      "tc_WmK": 16.4,
+      "cp_JkgK": 523.0,
+      "cs": {
+        "C": 120.0,
+        "P": 9.0
+      },
+      "damping_zeta": 0.005,
+      "desc": "CP Ti, most common commercial grade",
+      "ref": "ASTM B265 Grade 2",
+      "kin_pure_mid": 130562,
+      "kin_mixed_mid": 140562
+    },
+    {
+      "name": "Ti_Grade4",
+      "bi_mid": 100563,
+      "multi_mid": 110563,
+      "tmid": 120563,
+      "temper": "Annealed",
+      "rho_gcc": 4.51,
+      "E_GPa": 105.0,
+      "nu": 0.34,
+      "sigy_MPa": 480.0,
+      "sigu_MPa": 550.0,
+      "eps_f": 0.15,
+      "ss_plastic": [
+        [
+          0.0,
+          480.0
+        ],
+        [
+          0.01,
+          505.0
+        ],
+        [
+          0.03,
+          525.0
+        ],
+        [
+          0.06,
+          540.0
+        ],
+        [
+          0.1,
+          547.0
+        ],
+        [
+          0.15,
+          550.0
+        ]
+      ],
+      "cte_ppmK": 8.6,
+      "tc_WmK": 16.4,
+      "cp_JkgK": 523.0,
+      "cs": {
+        "C": 120.0,
+        "P": 9.0
+      },
+      "damping_zeta": 0.005,
+      "desc": "High-strength CP Ti",
+      "ref": "ASTM B265 Grade 4",
+      "kin_pure_mid": 130563,
+      "kin_mixed_mid": 140563
+    },
+    {
+      "name": "Ti6Al4V_Grade5",
+      "bi_mid": 100564,
+      "multi_mid": 110564,
+      "tmid": 120564,
+      "temper": "Annealed",
+      "rho_gcc": 4.43,
+      "E_GPa": 113.8,
+      "nu": 0.342,
+      "sigy_MPa": 880.0,
+      "sigu_MPa": 950.0,
+      "eps_f": 0.14,
+      "ss_plastic": [
+        [
+          0.0,
+          880.0
+        ],
+        [
+          0.005,
+          905.0
+        ],
+        [
+          0.01,
+          920.0
+        ],
+        [
+          0.02,
+          935.0
+        ],
+        [
+          0.05,
+          945.0
+        ],
+        [
+          0.1,
+          950.0
+        ],
+        [
+          0.14,
+          950.0
+        ]
+      ],
+      "cte_ppmK": 8.6,
+      "tc_WmK": 6.7,
+      "cp_JkgK": 526.3,
+      "cs": {
+        "C": 255.0,
+        "P": 2.0
+      },
+      "damping_zeta": 0.003,
+      "desc": "Ti-6Al-4V workhorse alpha-beta alloy",
+      "ref": "ASTM B265 Grade 5, MIL-HDBK-5; Meyer&Kleponis 2001 (CS)",
+      "kin_pure_mid": 130564,
+      "kin_mixed_mid": 140564
+    },
+    {
+      "name": "Ti6Al4V_Grade5_ELI",
+      "bi_mid": 100565,
+      "multi_mid": 110565,
+      "tmid": 120565,
+      "temper": "Annealed ELI",
+      "rho_gcc": 4.43,
+      "E_GPa": 113.8,
+      "nu": 0.342,
+      "sigy_MPa": 795.0,
+      "sigu_MPa": 860.0,
+      "eps_f": 0.14,
+      "ss_plastic": [
+        [
+          0.0,
+          795.0
+        ],
+        [
+          0.005,
+          820.0
+        ],
+        [
+          0.01,
+          835.0
+        ],
+        [
+          0.02,
+          848.0
+        ],
+        [
+          0.05,
+          857.0
+        ],
+        [
+          0.1,
+          860.0
+        ],
+        [
+          0.14,
+          860.0
+        ]
+      ],
+      "cte_ppmK": 8.6,
+      "tc_WmK": 6.7,
+      "cp_JkgK": 526.3,
+      "cs": {
+        "C": 255.0,
+        "P": 2.0
+      },
+      "damping_zeta": 0.003,
+      "desc": "Extra-Low Interstitial Ti-6Al-4V, medical implant",
+      "ref": "ASTM F136, ASTM B348 Gr 23",
+      "kin_pure_mid": 130565,
+      "kin_mixed_mid": 140565
+    },
+    {
+      "name": "Ti3Al2.5V_Grade9",
+      "bi_mid": 100566,
+      "multi_mid": 110566,
+      "tmid": 120566,
+      "temper": "Annealed",
+      "rho_gcc": 4.48,
+      "E_GPa": 100.0,
+      "nu": 0.3,
+      "sigy_MPa": 485.0,
+      "sigu_MPa": 620.0,
+      "eps_f": 0.15,
+      "ss_plastic": [
+        [
+          0.0,
+          485.0
+        ],
+        [
+          0.01,
+          540.0
+        ],
+        [
+          0.02,
+          575.0
+        ],
+        [
+          0.05,
+          605.0
+        ],
+        [
+          0.1,
+          618.0
+        ],
+        [
+          0.15,
+          620.0
+        ]
+      ],
+      "cte_ppmK": 9.4,
+      "tc_WmK": 8.3,
+      "cp_JkgK": 540.0,
+      "cs": {
+        "C": 120.0,
+        "P": 9.0
+      },
+      "damping_zeta": 0.004,
+      "desc": "Ti-3Al-2.5V, bicycle/tubing grade",
+      "ref": "ASTM B338 Grade 9",
+      "kin_pure_mid": 130566,
+      "kin_mixed_mid": 140566
+    }
+  ],
+  "Mg": [
+    {
+      "name": "Mg_AZ31B_H24",
+      "bi_mid": 100581,
+      "multi_mid": 110581,
+      "tmid": 120581,
+      "temper": "H24",
+      "rho_gcc": 1.77,
+      "E_GPa": 45.0,
+      "nu": 0.35,
+      "sigy_MPa": 220.0,
+      "sigu_MPa": 290.0,
+      "eps_f": 0.15,
+      "ss_plastic": [
+        [
+          0.0,
+          220.0
+        ],
+        [
+          0.01,
+          240.0
+        ],
+        [
+          0.02,
+          255.0
+        ],
+        [
+          0.05,
+          275.0
+        ],
+        [
+          0.1,
+          285.0
+        ],
+        [
+          0.15,
+          290.0
+        ]
+      ],
+      "cte_ppmK": 26.0,
+      "tc_WmK": 96.0,
+      "cp_JkgK": 1024.0,
+      "cs": {
+        "C": 4800.0,
+        "P": 4.0
+      },
+      "damping_zeta": 0.01,
+      "desc": "Wrought Mg-Al-Zn, most common sheet grade (smartphone midframe)",
+      "ref": "ASTM B90 AZ31B-H24, ASM Handbook Vol 2",
+      "kin_pure_mid": 130581,
+      "kin_mixed_mid": 140581
+    },
+    {
+      "name": "Mg_AZ91D_diecast",
+      "bi_mid": 100582,
+      "multi_mid": 110582,
+      "tmid": 120582,
+      "temper": "As-cast",
+      "rho_gcc": 1.81,
+      "E_GPa": 45.0,
+      "nu": 0.35,
+      "sigy_MPa": 160.0,
+      "sigu_MPa": 230.0,
+      "eps_f": 0.03,
+      "ss_plastic": [
+        [
+          0.0,
+          160.0
+        ],
+        [
+          0.005,
+          185.0
+        ],
+        [
+          0.01,
+          200.0
+        ],
+        [
+          0.015,
+          215.0
+        ],
+        [
+          0.02,
+          223.0
+        ],
+        [
+          0.03,
+          230.0
+        ]
+      ],
+      "cte_ppmK": 26.0,
+      "tc_WmK": 72.0,
+      "cp_JkgK": 1020.0,
+      "cs": {
+        "C": 4800.0,
+        "P": 4.0
+      },
+      "damping_zeta": 0.015,
+      "desc": "Die-cast Mg-Al-Zn, laptop/phone housings",
+      "ref": "ASTM B94 AZ91D, NADCA standards",
+      "kin_pure_mid": 130582,
+      "kin_mixed_mid": 140582
+    },
+    {
+      "name": "Mg_ZK60A_T5",
+      "bi_mid": 100583,
+      "multi_mid": 110583,
+      "tmid": 120583,
+      "temper": "T5 (aged)",
+      "rho_gcc": 1.83,
+      "E_GPa": 45.0,
+      "nu": 0.35,
+      "sigy_MPa": 255.0,
+      "sigu_MPa": 325.0,
+      "eps_f": 0.11,
+      "ss_plastic": [
+        [
+          0.0,
+          255.0
+        ],
+        [
+          0.005,
+          275.0
+        ],
+        [
+          0.01,
+          290.0
+        ],
+        [
+          0.03,
+          310.0
+        ],
+        [
+          0.06,
+          320.0
+        ],
+        [
+          0.11,
+          325.0
+        ]
+      ],
+      "cte_ppmK": 26.0,
+      "tc_WmK": 117.0,
+      "cp_JkgK": 1004.0,
+      "cs": {
+        "C": 4800.0,
+        "P": 4.0
+      },
+      "damping_zeta": 0.01,
+      "desc": "Extruded Mg-Zn-Zr high-strength (aerospace/bike frame)",
+      "ref": "ASTM B107 ZK60A-T5",
+      "kin_pure_mid": 130583,
+      "kin_mixed_mid": 140583
+    }
+  ],
+  "Steel": [
+    {
+      "name": "SPCC_mild_steel",
+      "bi_mid": 100591,
+      "multi_mid": 110591,
+      "tmid": 120591,
+      "temper": "Cold rolled",
+      "rho_gcc": 7.85,
+      "E_GPa": 210.0,
+      "nu": 0.3,
+      "sigy_MPa": 195.0,
+      "sigu_MPa": 350.0,
+      "eps_f": 0.37,
+      "ss_plastic": [
+        [
+          0.0,
+          195.0
+        ],
+        [
+          0.02,
+          240.0
+        ],
+        [
+          0.05,
+          275.0
+        ],
+        [
+          0.1,
+          310.0
+        ],
+        [
+          0.2,
+          335.0
+        ],
+        [
+          0.3,
+          345.0
+        ],
+        [
+          0.37,
+          350.0
+        ]
+      ],
+      "cte_ppmK": 12.0,
+      "tc_WmK": 52.0,
+      "cp_JkgK": 465.0,
+      "cs": {
+        "C": 40.0,
+        "P": 5.0
+      },
+      "damping_zeta": 0.003,
+      "desc": "Cold-rolled mild steel sheet (brackets, housings)",
+      "ref": "JIS G 3141 SPCC, ASTM A1008",
+      "kin_pure_mid": 130591,
+      "kin_mixed_mid": 140591
+    },
+    {
+      "name": "S45C_medium_carbon",
+      "bi_mid": 100592,
+      "multi_mid": 110592,
+      "tmid": 120592,
+      "temper": "Normalized",
+      "rho_gcc": 7.85,
+      "E_GPa": 205.0,
+      "nu": 0.29,
+      "sigy_MPa": 343.0,
+      "sigu_MPa": 569.0,
+      "eps_f": 0.2,
+      "ss_plastic": [
+        [
+          0.0,
+          343.0
+        ],
+        [
+          0.01,
+          410.0
+        ],
+        [
+          0.02,
+          450.0
+        ],
+        [
+          0.05,
+          500.0
+        ],
+        [
+          0.1,
+          540.0
+        ],
+        [
+          0.15,
+          560.0
+        ],
+        [
+          0.2,
+          569.0
+        ]
+      ],
+      "cte_ppmK": 11.0,
+      "tc_WmK": 49.8,
+      "cp_JkgK": 486.0,
+      "cs": {
+        "C": 802.0,
+        "P": 3.585
+      },
+      "damping_zeta": 0.003,
+      "desc": "0.45%C medium carbon steel (shafts, fasteners)",
+      "ref": "JIS G 4051 S45C, AISI 1045",
+      "kin_pure_mid": 130592,
+      "kin_mixed_mid": 140592
+    },
+    {
+      "name": "SCM440_alloy_steel",
+      "bi_mid": 100593,
+      "multi_mid": 110593,
+      "tmid": 120593,
+      "temper": "Q&T (HB 285)",
+      "rho_gcc": 7.85,
+      "E_GPa": 205.0,
+      "nu": 0.29,
+      "sigy_MPa": 835.0,
+      "sigu_MPa": 980.0,
+      "eps_f": 0.12,
+      "ss_plastic": [
+        [
+          0.0,
+          835.0
+        ],
+        [
+          0.005,
+          875.0
+        ],
+        [
+          0.01,
+          905.0
+        ],
+        [
+          0.02,
+          935.0
+        ],
+        [
+          0.05,
+          965.0
+        ],
+        [
+          0.1,
+          978.0
+        ],
+        [
+          0.12,
+          980.0
+        ]
+      ],
+      "cte_ppmK": 12.3,
+      "tc_WmK": 42.6,
+      "cp_JkgK": 477.0,
+      "cs": {
+        "C": 802.0,
+        "P": 3.585
+      },
+      "damping_zeta": 0.003,
+      "desc": "Cr-Mo alloy steel Q&T (high-strength bolts, gears)",
+      "ref": "JIS G 4053 SCM440, AISI 4140",
+      "kin_pure_mid": 130593,
+      "kin_mixed_mid": 140593
+    }
+  ],
+  "Brass": [
+    {
+      "name": "C26000_Cartridge_Brass",
+      "bi_mid": 100601,
+      "multi_mid": 110601,
+      "tmid": 120601,
+      "temper": "1/2 Hard",
+      "rho_gcc": 8.53,
+      "E_GPa": 110.0,
+      "nu": 0.375,
+      "sigy_MPa": 310.0,
+      "sigu_MPa": 425.0,
+      "eps_f": 0.23,
+      "ss_plastic": [
+        [
+          0.0,
+          310.0
+        ],
+        [
+          0.01,
+          345.0
+        ],
+        [
+          0.02,
+          370.0
+        ],
+        [
+          0.05,
+          395.0
+        ],
+        [
+          0.1,
+          410.0
+        ],
+        [
+          0.15,
+          420.0
+        ],
+        [
+          0.23,
+          425.0
+        ]
+      ],
+      "cte_ppmK": 19.9,
+      "tc_WmK": 120.0,
+      "cp_JkgK": 375.0,
+      "cs": {
+        "C": 1400.0,
+        "P": 5.0
+      },
+      "damping_zeta": 0.004,
+      "desc": "70/30 Cu-Zn cartridge brass (connector shells)",
+      "ref": "ASTM B36 / UNS C26000, Copper Development Assoc",
+      "kin_pure_mid": 130601,
+      "kin_mixed_mid": 140601
+    },
+    {
+      "name": "C36000_FreeCutting_Brass",
+      "bi_mid": 100602,
+      "multi_mid": 110602,
+      "tmid": 120602,
+      "temper": "Half hard",
+      "rho_gcc": 8.5,
+      "E_GPa": 97.0,
+      "nu": 0.31,
+      "sigy_MPa": 310.0,
+      "sigu_MPa": 400.0,
+      "eps_f": 0.18,
+      "ss_plastic": [
+        [
+          0.0,
+          310.0
+        ],
+        [
+          0.01,
+          340.0
+        ],
+        [
+          0.02,
+          360.0
+        ],
+        [
+          0.05,
+          380.0
+        ],
+        [
+          0.1,
+          392.0
+        ],
+        [
+          0.18,
+          400.0
+        ]
+      ],
+      "cte_ppmK": 20.5,
+      "tc_WmK": 115.0,
+      "cp_JkgK": 380.0,
+      "cs": {
+        "C": 1400.0,
+        "P": 5.0
+      },
+      "damping_zeta": 0.004,
+      "desc": "Free-cutting leaded brass (precision machined parts)",
+      "ref": "ASTM B16 / UNS C36000",
+      "kin_pure_mid": 130602,
+      "kin_mixed_mid": 140602
+    },
+    {
+      "name": "C51000_Phosphor_Bronze",
+      "bi_mid": 100603,
+      "multi_mid": 110603,
+      "tmid": 120603,
+      "temper": "Spring temper",
+      "rho_gcc": 8.86,
+      "E_GPa": 110.0,
+      "nu": 0.34,
+      "sigy_MPa": 590.0,
+      "sigu_MPa": 655.0,
+      "eps_f": 0.08,
+      "ss_plastic": [
+        [
+          0.0,
+          590.0
+        ],
+        [
+          0.005,
+          615.0
+        ],
+        [
+          0.01,
+          630.0
+        ],
+        [
+          0.02,
+          642.0
+        ],
+        [
+          0.05,
+          650.0
+        ],
+        [
+          0.08,
+          655.0
+        ]
+      ],
+      "cte_ppmK": 17.8,
+      "tc_WmK": 69.0,
+      "cp_JkgK": 380.0,
+      "cs": {
+        "C": 1800.0,
+        "P": 5.0
+      },
+      "damping_zeta": 0.005,
+      "desc": "5% Sn phosphor bronze spring material (contacts, bearings)",
+      "ref": "ASTM B103 / UNS C51000",
+      "kin_pure_mid": 130603,
+      "kin_mixed_mid": 140603
+    }
+  ],
+  "Inconel": [
+    {
+      "name": "Inconel_625_annealed",
+      "bi_mid": 100611,
+      "multi_mid": 110611,
+      "tmid": 120611,
+      "temper": "Annealed",
+      "rho_gcc": 8.44,
+      "E_GPa": 207.5,
+      "nu": 0.312,
+      "sigy_MPa": 415.0,
+      "sigu_MPa": 827.0,
+      "eps_f": 0.3,
+      "ss_plastic": [
+        [
+          0.0,
+          415.0
+        ],
+        [
+          0.01,
+          510.0
+        ],
+        [
+          0.02,
+          585.0
+        ],
+        [
+          0.05,
+          685.0
+        ],
+        [
+          0.1,
+          760.0
+        ],
+        [
+          0.2,
+          810.0
+        ],
+        [
+          0.3,
+          827.0
+        ]
+      ],
+      "cte_ppmK": 12.8,
+      "tc_WmK": 9.8,
+      "cp_JkgK": 410.0,
+      "cs": {
+        "C": 17200.0,
+        "P": 3.0
+      },
+      "damping_zeta": 0.003,
+      "desc": "Ni-Cr-Mo solid-solution superalloy (aerospace, marine)",
+      "ref": "ASTM B443 / UNS N06625, Special Metals TDS",
+      "kin_pure_mid": 130611,
+      "kin_mixed_mid": 140611
+    },
+    {
+      "name": "Inconel_718_aged",
+      "bi_mid": 100612,
+      "multi_mid": 110612,
+      "tmid": 120612,
+      "temper": "Solution + aged",
+      "rho_gcc": 8.19,
+      "E_GPa": 205.0,
+      "nu": 0.294,
+      "sigy_MPa": 1035.0,
+      "sigu_MPa": 1240.0,
+      "eps_f": 0.12,
+      "ss_plastic": [
+        [
+          0.0,
+          1035.0
+        ],
+        [
+          0.005,
+          1105.0
+        ],
+        [
+          0.01,
+          1150.0
+        ],
+        [
+          0.02,
+          1185.0
+        ],
+        [
+          0.05,
+          1215.0
+        ],
+        [
+          0.1,
+          1235.0
+        ],
+        [
+          0.12,
+          1240.0
+        ]
+      ],
+      "cte_ppmK": 13.0,
+      "tc_WmK": 11.4,
+      "cp_JkgK": 435.0,
+      "cs": {
+        "C": 17200.0,
+        "P": 3.0
+      },
+      "damping_zeta": 0.003,
+      "desc": "Ni-Cr precipitation-hardenable (turbine, rocket)",
+      "ref": "ASTM B637 / UNS N07718, Special Metals TDS",
+      "kin_pure_mid": 130612,
+      "kin_mixed_mid": 140612
+    }
+  ],
+  "Tungsten": [
+    {
+      "name": "Tungsten_99pct",
+      "bi_mid": 100621,
+      "multi_mid": 110621,
+      "tmid": 120621,
+      "temper": "Sintered 99%",
+      "rho_gcc": 19.3,
+      "E_GPa": 411.0,
+      "nu": 0.28,
+      "sigy_MPa": 750.0,
+      "sigu_MPa": 980.0,
+      "eps_f": 0.03,
+      "ss_plastic": [
+        [
+          0.0,
+          750.0
+        ],
+        [
+          0.005,
+          820.0
+        ],
+        [
+          0.01,
+          870.0
+        ],
+        [
+          0.015,
+          920.0
+        ],
+        [
+          0.02,
+          960.0
+        ],
+        [
+          0.03,
+          980.0
+        ]
+      ],
+      "cte_ppmK": 4.5,
+      "tc_WmK": 174.0,
+      "cp_JkgK": 134.0,
+      "cs": {
+        "C": 40.0,
+        "P": 5.0
+      },
+      "damping_zeta": 0.002,
+      "desc": "Tungsten 99% pure sintered (haptic motor counterweight, densest)",
+      "ref": "Plansee Tungsten TDS, ASM Handbook Vol 2",
+      "kin_pure_mid": 130621,
+      "kin_mixed_mid": 140621
+    }
+  ]
+}

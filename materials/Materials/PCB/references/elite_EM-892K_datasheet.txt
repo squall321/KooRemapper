@@ -1,0 +1,55 @@
+           Elite Material Co., Ltd.                                                                    Datasheet
+           http://www.emctw.com
+
+
+
+
+                                           EM-892K / EM-892BK
+                   High Tg / Extreme Low Loss / Halogen Free
+     Applications include: high-speed Ethernet, network, HPC, AI, 5G and antenna.
+     Designed for high thermal reliability with excellent CAF resistance.
+     Outstanding multiple lamination capability.
+     Fabrication friendly resin can be combined with mid-loss resins for "hybrid" designs.
+     RoHS Compliant
+     UL File: E150504
+     Applicable IPC Slash Sheets: IPC-4101 /134; IPC-4103 /230, /530
+
+Basic Laminate Property
+Property                          Item              Typical Value    Unit     Test Condition     IPC-TM-650
+                                                        N/A           oC           DSC              2.4.25
+                                   Tg                   180           oC           TMA              2.4.24
+                                                        215           oC           DMA             2.4.24.4
+                           CTE, X/Y-axis               12/13        ppm/ oC     < Tg, TMA          2.4.24.5
+                                                       40~45        ppm/ oC     < Tg, TMA
+                             CTE, Z-axis                                                            2.4.24
+Thermal                                               185~205       ppm/ oC     > Tg, TMA
+                        Z-axis Expansion                 1.8          %         50~260 oC           2.4.24
+                                  Td                    420           oC       TGA (5% W.L)        2.4.24.6
+                                                        >60          min.          Clad
+                                  T288                                                             2.4.24.1
+                                                        >60          min.         Etched
+                   Thermal Conductivity                 0.46        W/m.K            -           ASTM D5470
+                                           1 GHz      3.11/2.93        -                            2.5.5.9
+                       Dk
+                                                      3.00/2.84        -        C-24/23/50      Cavity Resonator
+                 (R/C: 55/70%)             10 GHz
+                                                      3.00/2.84        -                         SPC method
+                                           1 GHz    0.0014/0.0012      -                            2.5.5.9
+Electrical             Df
+                                                    0.0019/0.0017      -        C-24/23/50      Cavity Resonator
+                 (R/C: 55/70%)             10 GHz
+                                                    0.0015/0.0013      -                         SPC method
+                      Volume Resistivity                >1010       MΩ-cm       C-96/35/90         2.5.17.1
+                      Surface Resistivity               >109         MΩ         C-96/35/90         2.5.17.1
+                    Water Absorption                    0.07          %       E-1/105+D-24/23       2.6.2.1
+                  Peel Strength
+                                   H oz                  3.5         lb/in     As Received           2.4.8
+                    (HVLP3)
+Physical                                   Warp       450~510        MPa
+                      Flexural
+                                                                               As Received           2.4.4
+                      Strength              Fill      400~450        MPa
+                       Flame Resistance                 V-0            -        C-48/23/50          UL-94
+Above typical values are tested under specified constructions and not intended for specification.
+                                                                                                  Rev: 2024 July.
+

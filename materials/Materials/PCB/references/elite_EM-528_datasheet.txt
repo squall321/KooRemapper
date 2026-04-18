@@ -1,0 +1,61 @@
+             Elite Material Co., Ltd.                                                                        Datasheet
+             http://www.emctw.com
+
+
+
+
+                                                  EM-528 / EM-528B
+                            High Tg / Very Low Loss / Halogen Free
+      Applications include: high-speed server, network and telecom.
+      Low Df for excellent electrical performance.
+      Low CTE for X/ Y/ Z-axis direction.
+      Multiple lamination and high thermal reliability applications.
+      RoHS Compliant
+      UL File: E150504
+      Applicable IPC Slash Sheets: IPC-4103 /240, /540
+
+  Basic Laminate Property
+Property                            Item                Typical Value     Unit     Test Condition     IPC-TM-650
+                                                            N/A            oC            DSC             2.4.25
+                                                                           oC
+                                     Tg                     220                         TMA               2.4.24
+                                                                           oC
+                                                            250                         DMA             2.4.24.4
+                              CTE, X/Y-axis                 9/10         ppm/ oC     < Tg, TMA           2.4.24.5
+                                                           25~30         ppm/ oC     < Tg, TMA
+                                CTE, Z-axis                                                               2.4.24
+Thermal                                                   130~150        ppm/ oC     > Tg, TMA
+                           Z-axis Expansion                  1.4           %         50~260 oC            2.4.24
+                                     Td                     420            oC       TGA (5%W.L)         2.4.24.6
+                                                            > 60          min.          Clad
+                                    T288                                                                2.4.24.1
+                                                            > 60          min.         Etched
+                      Thermal Conductivity                   0.6         W/m.K            -           ASTM D5470
+                                              1GHz         4.0/3.6          -                             2.5.5.9
+                      Dk
+                                              10GHz        3.9/3.5          -        C-24/23/50      Cavity Resonator
+                 (R/C:50/70%)
+                                              10GHz        3.9/3.5          -                         SPC method
+                                              1GHz      0.0047/0.0044       -                            2.5.5.9
+Electrical            Df
+                                              10GHz     0.0061/0.0058       -        C-24/23/50      Cavity Resonator
+                 (R/C:50/70%)
+                                              10GHz     0.0050/0.0046       -                         SPC method
+                         Volume Resistivity                > 1010        MΩ-cm                          2.5.17.1
+                                                                                     C-96/35/90
+                          Surface Resistivity               > 109         MΩ                            2.5.17.1
+                          Water Absorption                  0.11           %       E-1/105+D-24/23       2.6.2.1
+                                           RTF, H oz         5.0          lb/in     As Received
+                 Peel Strength                                                                            2.4.8
+                                           HVLP, H oz        4.0          lb/in     As Received
+Physical
+                      Flexural                Warp         24~26          GPa       As Received
+                                                                                                          2.4.4
+                      Modulus                  Fill        23~25          GPa       As Received
+                 Flame Resistance               V-0              -         C-48/23/50             UL-94
+  Above typical values are tested under specified constructions and not intended for specification.
+
+
+                                                                     1
+                                                                                                      Rev: 2024 July.
+

@@ -1,0 +1,122 @@
+# 10-Layer Smartphone HDI PCB — 0.50 mm total
+# DS-7402 series + Elite EM-370Z, Electrodeposited Cu
+
+material_name: "PCB_10L_050T_DS7402_EM370Z"
+material_id: 200010
+description: "10층 HDI 0.50mm — DS-7402 series + EM-370Z, ED Cu"
+
+rayleigh_damping:
+  target_zeta: 0.02      # 2% equivalent damping
+  omega_ref_hz: 1000     # 1 kHz reference (drop impact)
+
+# Layer structure (top -> bottom):
+# L1 sig / L2 GND / L3 sig / L4 GND / L5 PWR / L6 PWR / L7 GND / L8 sig / L9 GND / L10 sig
+# Cu: 2x18 + 8x12 = 132 um
+# PPG: 30+40+40+40+68+40+40+40+30 = 368 um
+# Total: 500 um = 0.50 mm
+
+layers:
+  # L1 — Top signal
+  - type: cu
+    material: "Cu Electrodeposited Standard (Rigid PCB)"
+    thickness_um: 18
+    cu_ratio: 0.40
+
+  # PPG outer (EM-370Z)
+  - type: ppg
+    material: "Elite EM-370Z"
+    thickness_um: 30
+
+  # L2 — Inner GND
+  - type: cu
+    material: "Cu Electrodeposited Standard (Rigid PCB)"
+    thickness_um: 12
+    cu_ratio: 0.92
+
+  # PPG (DS-7402H)
+  - type: ppg
+    material: "Doosan DS-7402H"
+    thickness_um: 40
+
+  # L3 — Inner signal
+  - type: cu
+    material: "Cu Electrodeposited Standard (Rigid PCB)"
+    thickness_um: 12
+    cu_ratio: 0.50
+
+  # PPG
+  - type: ppg
+    material: "Doosan DS-7402H"
+    thickness_um: 40
+
+  # L4 — Inner GND
+  - type: cu
+    material: "Cu Electrodeposited Standard (Rigid PCB)"
+    thickness_um: 12
+    cu_ratio: 0.90
+
+  # PPG
+  - type: ppg
+    material: "Doosan DS-7402H"
+    thickness_um: 40
+
+  # L5 — Inner PWR
+  - type: cu
+    material: "Cu Electrodeposited Standard (Rigid PCB)"
+    thickness_um: 12
+    cu_ratio: 0.90
+
+  # Core PPG (DS-7402LC low CTE)
+  - type: ppg
+    material: "Doosan DS-7402LC"
+    thickness_um: 68
+
+  # L6 — Inner PWR
+  - type: cu
+    material: "Cu Electrodeposited Standard (Rigid PCB)"
+    thickness_um: 12
+    cu_ratio: 0.90
+
+  # PPG
+  - type: ppg
+    material: "Doosan DS-7402H"
+    thickness_um: 40
+
+  # L7 — Inner GND
+  - type: cu
+    material: "Cu Electrodeposited Standard (Rigid PCB)"
+    thickness_um: 12
+    cu_ratio: 0.90
+
+  # PPG
+  - type: ppg
+    material: "Doosan DS-7402H"
+    thickness_um: 40
+
+  # L8 — Inner signal
+  - type: cu
+    material: "Cu Electrodeposited Standard (Rigid PCB)"
+    thickness_um: 12
+    cu_ratio: 0.50
+
+  # PPG
+  - type: ppg
+    material: "Doosan DS-7402H"
+    thickness_um: 40
+
+  # L9 — Inner GND
+  - type: cu
+    material: "Cu Electrodeposited Standard (Rigid PCB)"
+    thickness_um: 12
+    cu_ratio: 0.92
+
+  # PPG outer (EM-370Z)
+  - type: ppg
+    material: "Elite EM-370Z"
+    thickness_um: 30
+
+  # L10 — Bottom signal
+  - type: cu
+    material: "Cu Electrodeposited Standard (Rigid PCB)"
+    thickness_um: 18
+    cu_ratio: 0.40
