@@ -1,0 +1,10 @@
+# Merge 3-layer stack into 1 homogenized layer
+# Steel(MAT_001) + Polymer_VE(MAT_076) + Aluminum(MAT_024)
+# VE: fully-relaxed assumption (G∞, K → E∞, nu∞)
+model: three_layer.k
+output: merged_output.k
+direction: z
+method: vrh        # voigt / reuss / vrh (Voigt-Reuss-Hill average)
+merge:
+  - pids: [1, 2, 3]
+    name: "Homogenized_Stack"

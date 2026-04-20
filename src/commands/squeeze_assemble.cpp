@@ -651,6 +651,10 @@ int runAssemble(const std::string& configFile, const ConsoleOutput& console) {
             } else {
                 ok = assembler.applySplit(op.split);
             }
+        } else if (op.type == AssemblyOperation::MERGE) {
+            ok = assembler.applyMerge(op.merge);
+        } else if (op.type == AssemblyOperation::STRIP) {
+            ok = assembler.applyStrip(op.strip);
         }
 
         if (!ok) {

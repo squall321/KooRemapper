@@ -58,6 +58,8 @@
 #include "commands/cnrb2solid.h"
 #include "commands/hfdamp.h"
 #include "commands/battery.h"
+#include "commands/strip.h"
+#include "commands/merge.h"
 
 #include <iostream>
 #include <fstream>
@@ -72,7 +74,7 @@
 using namespace KooRemapper;
 
 // Version info
-constexpr const char* VERSION = "1.4.0";
+constexpr const char* VERSION = "1.8.0";
 
 /**
  * Display program banner
@@ -2004,6 +2006,26 @@ int main(int argc, char* argv[]) {
         }
         printBanner(console);
         return runBattery(argv[2], console);
+    }
+
+    // Merge command
+    if (command == "merge") {
+        if (argc < 3) {
+            console.error("Usage: KooRemapper merge <config.yaml>");
+            return 1;
+        }
+        printBanner(console);
+        return runMerge(argv[2], console);
+    }
+
+    // Strip command
+    if (command == "strip") {
+        if (argc < 3) {
+            console.error("Usage: KooRemapper strip <config.yaml>");
+            return 1;
+        }
+        printBanner(console);
+        return runStrip(argv[2], console);
     }
 
     // Unknown command

@@ -804,6 +804,10 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             op.type = AssemblyOperation::BATTERY;
                         } else if (val == "split") {
                             op.type = AssemblyOperation::SPLIT;
+                        } else if (val == "merge") {
+                            op.type = AssemblyOperation::MERGE;
+                        } else if (val == "strip") {
+                            op.type = AssemblyOperation::STRIP;
                         } else {
                             throw std::runtime_error("Unknown operation type: " + val);
                         }
@@ -872,6 +876,11 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                     auto& op = config.operations.back();
                     try {
                         if (key == "target_pid" ||
+                            key == "target_pids" ||
+                            (key == "pids" &&
+                             op.type != AssemblyOperation::MATSWAP &&
+                             op.type != AssemblyOperation::MATDB &&
+                             op.type != AssemblyOperation::CONTROL) ||
                             (key == "pid" &&
                              op.type != AssemblyOperation::MATSWAP &&
                              op.type != AssemblyOperation::MATDB &&
@@ -902,6 +911,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                                 else if (op.type == AssemblyOperation::WARPAGE)  op.warpage.targetPids.push_back(pid);
                                 else if (op.type == AssemblyOperation::FILLET)   op.fillet.targetPids.push_back(pid);
                                 else if (op.type == AssemblyOperation::SPLIT)    op.split.targetPids.push_back(pid);
+                                else if (op.type == AssemblyOperation::MERGE)   op.merge.pids.push_back(pid);
                                 else setSingle(pid); // ops without multi-pid: use first value
                             };
 
@@ -1340,6 +1350,42 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             else if (key == "divisions")   op.split.divisions  = std::stoi(val);
                             else if (key == "target_pid") {
                                 try { op.split.targetPid = std::stoi(val); } catch (...) {}
+                            }
+                        } else if (op.type == AssemblyOperation::MERGE) {
+                            if      (key == "direction") {
+                                std::string d = val;
+                                for (auto& c : d) c = (char)toupper((unsigned char)c);
+                                if (d == "X") op.merge.direction = 0;
+                                else if (d == "Y") op.merge.direction = 1;
+                                else op.merge.direction = 2;
+                            }
+                            else if (key == "method") {
+                                std::string m = val;
+                                for (auto& c : m) c = (char)toupper((unsigned char)c);
+                                if (m == "VOIGT") op.merge.method = 0;
+                                else if (m == "REUSS") op.merge.method = 1;
+                                else op.merge.method = 2;
+                            }
+                            else if (key == "name")    op.merge.name   = val;
+                            else if (key == "new_pid") op.merge.newPid = std::stoi(val);
+                            else if (key == "new_mid") op.merge.newMid = std::stoi(val);
+                            else if (key == "layers")  op.merge.layers = std::max(1, std::stoi(val));
+                            else if (key == "tolerance" || key == "tol") op.merge.tolerance = std::stod(val);
+                        } else if (op.type == AssemblyOperation::STRIP) {
+                            if (key == "keywords" && !val.empty() && val[0] == '[') {
+                                // Inline array: ["*NODE", "*ELEMENT_SOLID"]
+                                std::string inner = val.substr(1);
+                                size_t rb = inner.rfind(']');
+                                if (rb != std::string::npos) inner = inner.substr(0, rb);
+                                std::istringstream ss(inner);
+                                std::string tok;
+                                while (std::getline(ss, tok, ',')) {
+                                    tok = trim(tok);
+                                    if (tok.size() >= 2 && ((tok.front() == '"' && tok.back() == '"') ||
+                                        (tok.front() == '\'' && tok.back() == '\'')))
+                                        tok = tok.substr(1, tok.size() - 2);
+                                    if (!tok.empty()) op.strip.keywords.push_back(tok);
+                                }
                             }
                         } else if (op.type == AssemblyOperation::BATTERY) {
                             if      (key == "config")         op.battery.configFile   = val;

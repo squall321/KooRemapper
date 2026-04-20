@@ -440,8 +440,23 @@ struct Cnrb2SolidOperation {
     std::string headPosition = "auto"; // auto|top|bottom|none
 };
 
+struct MergeOperation {
+    std::vector<int> pids;     // PIDs to merge (one group per operation)
+    std::string name;          // name for merged part/material
+    int direction = 2;         // 0=x, 1=y, 2=z
+    int method = 2;            // 0=voigt, 1=reuss, 2=vrh
+    int newPid = 0;            // 0 = auto (max+1), >0 = user-specified
+    int newMid = 0;            // 0 = auto
+    int layers = 1;            // output layers per column (1=fully merge, N=split into N)
+    double tolerance = 0.0;    // node merge tolerance (0=disabled, >0=merge coincident nodes first)
+};
+
+struct StripOperation {
+    std::vector<std::string> keywords;  // e.g. "*NODE", "*ELEMENT_SOLID"
+};
+
 struct AssemblyOperation {
-    enum Type { REPLACE, SQUEEZE, RESTACK, BEND, INDENT, FORMSTRAIN, TET10_CONVERT, REFINE, ELFORM, DISCONNECT, IGA, WARPAGE, OFFSET, MATSWAP, MATDB, LOAD, CONTACT, BOUNDARY, RBE, WRAP, UPDATE, DATABASE, CONTROL, GENERATE, FILLET, CNRB2SOLID, HFDAMP, BATTERY, SPLIT };
+    enum Type { REPLACE, SQUEEZE, RESTACK, BEND, INDENT, FORMSTRAIN, TET10_CONVERT, REFINE, ELFORM, DISCONNECT, IGA, WARPAGE, OFFSET, MATSWAP, MATDB, LOAD, CONTACT, BOUNDARY, RBE, WRAP, UPDATE, DATABASE, CONTROL, GENERATE, FILLET, CNRB2SOLID, HFDAMP, BATTERY, SPLIT, MERGE, STRIP };
     Type type;
     ReplaceOperation replace;
     SqueezeOperation squeeze;
@@ -472,6 +487,8 @@ struct AssemblyOperation {
     HFDampOperation hfdamp;
     BatteryOperation battery;
     SplitOperation split;
+    MergeOperation merge;
+    StripOperation strip;
 };
 
 struct AssemblyConfig {

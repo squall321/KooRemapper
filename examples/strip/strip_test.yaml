@@ -1,0 +1,10 @@
+# Strip command example
+# Remove bulky mesh data keywords, keep only options/controls
+model: ../assemble_display/al_box.k
+output: stripped_output.k
+keywords:
+  - "*NODE"
+  - "*ELEMENT_SOLID"
+  - "*ELEMENT_SHELL"
+  - "*INITIAL_STRESS_SOLID"
+  - "*INITIAL_STRESS_SHELL"

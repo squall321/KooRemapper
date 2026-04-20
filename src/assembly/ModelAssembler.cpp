@@ -25,6 +25,8 @@
 #include <algorithm>
 #include <limits>
 #include <cmath>
+#include <unordered_map>
+#include <unordered_set>
 
 namespace KooRemapper {
 
@@ -13249,6 +13251,600 @@ bool ModelAssembler::applySplit(const SplitOperation& op) {
              "  split: %d elements → %d (×%d along %c-axis, %d mid-nodes created)",
              splitCount, splitCount * N, N, fp.axis,
              (int)midNodeMap.size());
+    infoMessages.push_back(buf);
+    return true;
+}
+
+// ─────────────────────────────────────────────────────────────
+// applyMerge — merge stacked layers into one homogenized layer
+// ─────────────────────────────────────────────────────────────
+
+// Helpers for material property extraction from rawLines_
+struct mg_MatInfo { std::string type; double E=0, nu=0, rho=0, cte=0; bool hasCte=false; };
+
+static std::string mg_upper(const std::string& s) {
+    std::string r = s;
+    for (auto& c : r) c = (char)toupper((unsigned char)c);
+    return r;
+}
+static std::string mg_ws_trim(const std::string& s) {
+    size_t a = s.find_first_not_of(" \t\r\n");
+    if (a == std::string::npos) return "";
+    size_t b = s.find_last_not_of(" \t\r\n");
+    return s.substr(a, b - a + 1);
+}
+static std::vector<std::string> mg_ws_tokenize(const std::string& s) {
+    std::vector<std::string> t;
+    std::istringstream iss(s);
+    std::string tok;
+    while (iss >> tok) t.push_back(tok);
+    return t;
+}
+static double mg_d(const std::string& s) { try { return std::stod(s); } catch(...) { return 0; } }
+
+static std::map<int, mg_MatInfo> mg_parseMaterials(const std::vector<std::string>& lines) {
+    std::map<int, mg_MatInfo> mats;
+    bool inMat = false;
+    std::string matType;
+    int matCard = 0, matMid = 0;
+    bool titleLine = false;
+    double veBulk = 0, veRho = 0;
+    std::vector<double> veGi, veBetai;
+
+    auto finishVE = [&]() {
+        if (matMid > 0) {
+            double G_inf = 0;
+            for (size_t i = 0; i < veGi.size(); i++)
+                if (veBetai[i] == 0.0) G_inf += veGi[i];
+            double K = veBulk, E = 0, nu = 0;
+            if (K > 0 && G_inf > 0) {
+                E = 9.0*K*G_inf / (3.0*K + G_inf);
+                nu = (3.0*K - 2.0*G_inf) / (2.0*(3.0*K + G_inf));
+            }
+            mats[matMid] = {"VE076", E, nu, veRho, 0, false};
+        }
+        veGi.clear(); veBetai.clear(); veBulk = veRho = 0;
+    };
+
+    // CTE: second pass
+    bool inCTE = false; int cteMid = 0; int cteCard = 0; bool cteTitleLine = false;
+
+    for (auto& line : lines) {
+        std::string tr = mg_ws_trim(line);
+        if (tr.empty() || tr[0] == '$') continue;
+        if (tr[0] == '*') {
+            if (inMat && matType == "VE076") finishVE();
+            std::string up = mg_upper(tr);
+            inMat = false; inCTE = false;
+
+            if ((up.find("*MAT_ELASTIC") == 0) &&
+                up.find("*MAT_ELASTIC_PLASTIC") == std::string::npos &&
+                up.find("*MAT_ELASTIC_VISCOPLASTIC") == std::string::npos) {
+                inMat = true; matType = "ELASTIC"; matCard = matMid = 0;
+                titleLine = (up.find("TITLE") != std::string::npos);
+            } else if (up.find("*MAT_PIECEWISE_LINEAR") == 0 || up.find("*MAT_024") == 0) {
+                inMat = true; matType = "024"; matCard = matMid = 0;
+                titleLine = (up.find("TITLE") != std::string::npos);
+            } else if (up.find("*MAT_GENERAL_VISCOELASTIC") == 0 || up.find("*MAT_076") == 0) {
+                inMat = true; matType = "VE076"; matCard = matMid = 0;
+                titleLine = (up.find("TITLE") != std::string::npos);
+            } else if ((up.find("*MAT_VISCOELASTIC") == 0 || up.find("*MAT_006") == 0) &&
+                       up.find("*MAT_VISCOELASTIC_THERMAL") == std::string::npos) {
+                inMat = true; matType = "VE006"; matCard = matMid = 0;
+                titleLine = (up.find("TITLE") != std::string::npos);
+            } else if (up.find("*MAT_RIGID") == 0 || up.find("*MAT_020") == 0) {
+                inMat = true; matType = "RIGID"; matCard = matMid = 0;
+                titleLine = (up.find("TITLE") != std::string::npos);
+            } else if (up.find("*MAT_ADD_THERMAL_EXPANSION") == 0) {
+                inCTE = true; cteMid = 0; cteCard = 0;
+                cteTitleLine = (up.find("TITLE") != std::string::npos);
+            }
+            continue;
+        }
+        if (inMat) {
+            if (titleLine) { titleLine = false; continue; }
+            matCard++;
+            auto t = mg_ws_tokenize(tr);
+            if ((matType == "ELASTIC" || matType == "024" || matType == "RIGID") && matCard == 1 && t.size() >= 4) {
+                matMid = (int)mg_d(t[0]);
+                mats[matMid] = {matType, mg_d(t[2]), mg_d(t[3]), mg_d(t[1]), 0, false};
+                inMat = false;
+            } else if (matType == "VE006" && matCard == 1 && t.size() >= 6) {
+                // MAT_VISCOELASTIC (006): MID, RO, BULK, G0, GI, BETA
+                // G∞ = GI (long-term shear modulus)
+                matMid = (int)mg_d(t[0]);
+                double rho = mg_d(t[1]), K = mg_d(t[2]), GI = mg_d(t[4]);
+                double E = 0, nu = 0;
+                if (K > 0 && GI > 0) {
+                    E = 9.0*K*GI / (3.0*K + GI);
+                    nu = (3.0*K - 2.0*GI) / (2.0*(3.0*K + GI));
+                }
+                mats[matMid] = {"VE006", E, nu, rho, 0, false};
+                inMat = false;
+            } else if (matType == "VE076") {
+                if (matCard == 1 && t.size() >= 3) {
+                    matMid = (int)mg_d(t[0]); veRho = mg_d(t[1]); veBulk = mg_d(t[2]);
+                } else if (matCard >= 3 && t.size() >= 2) {
+                    veGi.push_back(mg_d(t[0])); veBetai.push_back(mg_d(t[1]));
+                }
+            }
+            continue;
+        }
+        if (inCTE) {
+            if (cteTitleLine) { cteTitleLine = false; continue; }
+            cteCard++;
+            auto t = mg_ws_tokenize(tr);
+            if (cteCard == 1 && t.size() >= 1) cteMid = (int)mg_d(t[0]);
+            else if (cteCard == 2 && t.size() >= 1) {
+                if (cteMid > 0 && mats.count(cteMid)) {
+                    mats[cteMid].cte = mg_d(t[0]);
+                    mats[cteMid].hasCte = true;
+                }
+                inCTE = false;
+            }
+            continue;
+        }
+    }
+    if (inMat && matType == "VE076") finishVE();
+    return mats;
+}
+
+// Face key for column detection — hash for unordered_map
+using MgFaceKey = std::array<int, 4>;
+static MgFaceKey mg_faceKey(int a, int b, int c, int d) {
+    MgFaceKey f = {a,b,c,d};
+    std::sort(f.begin(), f.end());
+    return f;
+}
+struct MgFaceKeyHash {
+    size_t operator()(const MgFaceKey& k) const {
+        size_t h = 0;
+        for (int v : k) h ^= std::hash<int>()(v) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        return h;
+    }
+};
+
+bool ModelAssembler::applyMerge(const MergeOperation& op) {
+    infoMessages.clear();
+
+    if (op.pids.empty()) {
+        errorMessage_ = "merge: no PIDs specified";
+        return false;
+    }
+
+    const char* dirName[] = {"X", "Y", "Z"};
+    const char* methName[] = {"Voigt", "Reuss", "VRH"};
+    char buf[256];
+
+    snprintf(buf, sizeof(buf), "[merge] direction=%s method=%s pids=%d layers=%d",
+             dirName[op.direction], methName[op.method], (int)op.pids.size(), std::max(1, op.layers));
+    infoMessages.push_back(buf);
+
+    std::unordered_set<int> pidSet(op.pids.begin(), op.pids.end());
+
+    // Collect elements (from baseMesh_ not yet removed + addedElements_)
+    struct EInfo { int eid, pid; int nid[8]; };
+    std::vector<EInfo> grpElems;
+    grpElems.reserve(baseMesh_.getElementCount() / 2); // rough estimate
+
+    for (size_t i = 0; i < baseMesh_.getElementCount(); i++) {
+        auto& e = baseMesh_.elements[i];
+        if (removedElementIds_.count(e.id)) continue;
+        if (!pidSet.count(e.partId)) continue;
+        EInfo ei; ei.eid = e.id; ei.pid = e.partId;
+        for (int j = 0; j < 8; j++) ei.nid[j] = e.nodeIds[j];
+        grpElems.push_back(ei);
+    }
+    for (auto& ae : addedElements_) {
+        if (!pidSet.count(ae.pid)) continue;
+        EInfo ei; ei.eid = ae.id; ei.pid = ae.pid;
+        for (int j = 0; j < 8; j++) ei.nid[j] = ae.nodeIds[j];
+        grpElems.push_back(ei);
+    }
+
+    if (grpElems.empty()) {
+        errorMessage_ = "merge: no elements found for specified PIDs";
+        return false;
+    }
+
+    snprintf(buf, sizeof(buf), "[merge] %d elements in group", (int)grpElems.size());
+    infoMessages.push_back(buf);
+
+    // Pre-build addedNodes lookup (avoids O(N) scan per getCoord call)
+    std::unordered_map<int, size_t> addedNodeIdx;
+    addedNodeIdx.reserve(addedNodes_.size());
+    for (size_t i = 0; i < addedNodes_.size(); i++)
+        addedNodeIdx[addedNodes_[i].id] = i;
+
+    // Node position lookup — O(1)
+    auto getCoord = [&](int nid, int dir) -> double {
+        auto nit = modifiedNodePositions_.find(nid);
+        if (nit != modifiedNodePositions_.end()) {
+            if (dir == 0) return nit->second.x;
+            if (dir == 1) return nit->second.y;
+            return nit->second.z;
+        }
+        auto ait = addedNodeIdx.find(nid);
+        if (ait != addedNodeIdx.end()) {
+            auto& an = addedNodes_[ait->second];
+            if (dir == 0) return an.x;
+            if (dir == 1) return an.y;
+            return an.z;
+        }
+        auto* n = baseMesh_.getNode(nid);
+        if (!n) return 0.0;
+        if (dir == 0) return n->position.x;
+        if (dir == 1) return n->position.y;
+        return n->position.z;
+    };
+
+    // Node merge within tolerance (grid-based spatial hash, O(N) average)
+    if (op.tolerance > 0.0) {
+        // Collect unique node IDs used by group elements
+        std::unordered_set<int> usedNids;
+        for (auto& e : grpElems)
+            for (int j = 0; j < 8; j++) usedNids.insert(e.nid[j]);
+
+        // Build position array
+        struct NPos { int id; double x, y, z; };
+        std::vector<NPos> npos;
+        npos.reserve(usedNids.size());
+        for (int nid : usedNids) {
+            NPos np;
+            np.id = nid;
+            np.x = getCoord(nid, 0);
+            np.y = getCoord(nid, 1);
+            np.z = getCoord(nid, 2);
+            npos.push_back(np);
+        }
+
+        // Grid-based spatial hash
+        double tol = op.tolerance;
+        double cellSize = tol * 2.0;  // cell > tolerance → only check 27 neighbors
+        double invCell = 1.0 / cellSize;
+
+        // Find bounding box for offset
+        double bx = npos[0].x, by = npos[0].y, bz = npos[0].z;
+        for (auto& p : npos) {
+            if (p.x < bx) bx = p.x;
+            if (p.y < by) by = p.y;
+            if (p.z < bz) bz = p.z;
+        }
+
+        auto cellKey = [&](double x, double y, double z) -> uint64_t {
+            int64_t ix = (int64_t)std::floor((x - bx) * invCell);
+            int64_t iy = (int64_t)std::floor((y - by) * invCell);
+            int64_t iz = (int64_t)std::floor((z - bz) * invCell);
+            // Hash combine
+            uint64_t h = (uint64_t)ix * 73856093ULL ^ (uint64_t)iy * 19349663ULL ^ (uint64_t)iz * 83492791ULL;
+            return h;
+        };
+
+        std::unordered_map<uint64_t, std::vector<size_t>> grid;
+        grid.reserve(npos.size());
+        for (size_t i = 0; i < npos.size(); i++)
+            grid[cellKey(npos[i].x, npos[i].y, npos[i].z)].push_back(i);
+
+        // Union-Find
+        std::vector<size_t> parent(npos.size());
+        for (size_t i = 0; i < npos.size(); i++) parent[i] = i;
+        std::function<size_t(size_t)> ufFind = [&](size_t a) -> size_t {
+            while (parent[a] != a) { parent[a] = parent[parent[a]]; a = parent[a]; }
+            return a;
+        };
+        auto ufUnion = [&](size_t a, size_t b) {
+            a = ufFind(a); b = ufFind(b);
+            if (a != b) parent[std::max(a,b)] = std::min(a,b); // keep lower index
+        };
+
+        double tol2 = tol * tol;
+        for (size_t i = 0; i < npos.size(); i++) {
+            auto& p = npos[i];
+            int64_t cx = (int64_t)std::floor((p.x - bx) * invCell);
+            int64_t cy = (int64_t)std::floor((p.y - by) * invCell);
+            int64_t cz = (int64_t)std::floor((p.z - bz) * invCell);
+            // Check 27 neighbor cells
+            for (int64_t dx = -1; dx <= 1; dx++)
+            for (int64_t dy = -1; dy <= 1; dy++)
+            for (int64_t dz = -1; dz <= 1; dz++) {
+                uint64_t nk = (uint64_t)(cx+dx) * 73856093ULL ^ (uint64_t)(cy+dy) * 19349663ULL ^ (uint64_t)(cz+dz) * 83492791ULL;
+                auto git = grid.find(nk);
+                if (git == grid.end()) continue;
+                for (size_t j : git->second) {
+                    if (j >= i) continue; // only check earlier entries
+                    double ddx = p.x - npos[j].x;
+                    double ddy = p.y - npos[j].y;
+                    double ddz = p.z - npos[j].z;
+                    if (ddx*ddx + ddy*ddy + ddz*ddz <= tol2) {
+                        ufUnion(i, j);
+                    }
+                }
+            }
+        }
+
+        // Build remap: nodeId → canonical nodeId (lowest in group)
+        std::unordered_map<int, int> nodeRemap;
+        int mergedCount = 0;
+        for (size_t i = 0; i < npos.size(); i++) {
+            size_t root = ufFind(i);
+            if (root != i) {
+                nodeRemap[npos[i].id] = npos[root].id;
+                mergedCount++;
+            }
+        }
+
+        if (mergedCount > 0) {
+            // Apply remap to element connectivity
+            for (auto& e : grpElems) {
+                for (int j = 0; j < 8; j++) {
+                    auto rit = nodeRemap.find(e.nid[j]);
+                    if (rit != nodeRemap.end()) e.nid[j] = rit->second;
+                }
+            }
+            snprintf(buf, sizeof(buf), "[merge] node merge: %d nodes merged (tol=%.6g)",
+                     mergedCount, tol);
+            infoMessages.push_back(buf);
+        } else {
+            snprintf(buf, sizeof(buf), "[merge] node merge: no coincident nodes found (tol=%.6g)", tol);
+            infoMessages.push_back(buf);
+        }
+    }
+
+    // Build face connectivity for column detection
+    std::unordered_map<MgFaceKey, int, MgFaceKeyHash> highFaceOf, lowFaceOf;
+    highFaceOf.reserve(grpElems.size());
+    lowFaceOf.reserve(grpElems.size());
+    auto getStackFaces = [&](const EInfo& e, int lo[4], int hi[4]) {
+        double zA = 0, zB = 0;
+        for (int i = 0; i < 4; i++) {
+            zA += getCoord(e.nid[i], op.direction);
+            zB += getCoord(e.nid[i+4], op.direction);
+        }
+        if (zA <= zB) {
+            for (int i=0;i<4;i++) { lo[i]=e.nid[i]; hi[i]=e.nid[i+4]; }
+        } else {
+            for (int i=0;i<4;i++) { lo[i]=e.nid[i+4]; hi[i]=e.nid[i]; }
+        }
+    };
+
+    for (auto& e : grpElems) {
+        int lo[4], hi[4];
+        getStackFaces(e, lo, hi);
+        highFaceOf[mg_faceKey(hi[0],hi[1],hi[2],hi[3])] = e.eid;
+        lowFaceOf[mg_faceKey(lo[0],lo[1],lo[2],lo[3])] = e.eid;
+    }
+
+    // Build element lookup
+    std::unordered_map<int, const EInfo*> elemById;
+    std::unordered_set<int> elemIdSet;
+    elemById.reserve(grpElems.size());
+    elemIdSet.reserve(grpElems.size());
+    for (auto& e : grpElems) { elemById[e.eid] = &e; elemIdSet.insert(e.eid); }
+
+    // Build columns
+    std::unordered_set<int> visited;
+    visited.reserve(grpElems.size());
+    std::vector<std::vector<int>> columns;
+
+    for (auto& e : grpElems) {
+        if (visited.count(e.eid)) continue;
+        int lo[4], hi[4];
+        getStackFaces(e, lo, hi);
+        MgFaceKey loKey = mg_faceKey(lo[0],lo[1],lo[2],lo[3]);
+        auto hIt = highFaceOf.find(loKey);
+        if (hIt != highFaceOf.end() && elemIdSet.count(hIt->second)) continue;
+
+        std::vector<int> col;
+        int cur = e.eid;
+        while (cur > 0 && !visited.count(cur)) {
+            visited.insert(cur);
+            col.push_back(cur);
+            auto cIt = elemById.find(cur);
+            if (cIt == elemById.end()) break;
+            int clo[4], chi[4];
+            getStackFaces(*cIt->second, clo, chi);
+            MgFaceKey chiKey = mg_faceKey(chi[0],chi[1],chi[2],chi[3]);
+            auto lIt = lowFaceOf.find(chiKey);
+            if (lIt != lowFaceOf.end() && elemIdSet.count(lIt->second) && !visited.count(lIt->second))
+                cur = lIt->second;
+            else
+                cur = 0;
+        }
+        if (!col.empty()) columns.push_back(col);
+    }
+
+    snprintf(buf, sizeof(buf), "[merge] %d columns detected", (int)columns.size());
+    infoMessages.push_back(buf);
+
+    // Material property extraction
+    auto matDB = mg_parseMaterials(rawLines_);
+    // Also scan addedKeywordBlocks_ (each entry is a multi-line string → split into lines)
+    {
+        std::vector<std::string> kbLines;
+        for (auto& block : addedKeywordBlocks_) {
+            std::istringstream iss(block);
+            std::string ln;
+            while (std::getline(iss, ln)) kbLines.push_back(ln);
+        }
+        if (!kbLines.empty()) {
+            auto matDB2 = mg_parseMaterials(kbLines);
+            for (auto& [k,v] : matDB2) matDB[k] = v;
+        }
+    }
+
+    // Pre-build PID→MID cache (avoids repeated rawLines_ scan per element)
+    std::unordered_map<int, int> pidMidCache;
+    for (auto& [mid, _] : matDB) (void)mid; // just ensure matDB populated
+    for (int pid : op.pids) pidMidCache[pid] = findPartMid(pid);
+
+    // Volume fractions
+    std::unordered_map<int, int> midCount;
+    int total = 0;
+    for (auto& col : columns) {
+        for (int eid : col) {
+            auto it = elemById.find(eid);
+            if (it == elemById.end()) continue;
+            auto pc = pidMidCache.find(it->second->pid);
+            int mid = (pc != pidMidCache.end()) ? pc->second : findPartMid(it->second->pid);
+            midCount[mid]++;
+            total++;
+        }
+    }
+
+    // Homogenize
+    double E_voigt = 0, inv_E_reuss = 0, nu_mix = 0, rho_mix = 0, cte_mix = 0;
+    bool anyCte = false;
+    for (auto& [mid, cnt] : midCount) {
+        double vf = (double)cnt / total;
+        auto mIt = matDB.find(mid);
+        if (mIt == matDB.end() || mIt->second.E <= 0) {
+            snprintf(buf, sizeof(buf), "[merge] WARNING: MID %d not found or E=0, skipping", mid);
+            infoMessages.push_back(buf);
+            continue;
+        }
+        auto& m = mIt->second;
+        E_voigt += vf * m.E;
+        inv_E_reuss += vf / m.E;
+        nu_mix += vf * m.nu;
+        rho_mix += vf * m.rho;
+        if (m.hasCte) { cte_mix += vf * m.cte; anyCte = true; }
+
+        snprintf(buf, sizeof(buf), "[merge] MID %d (%s): E=%.1f nu=%.4f rho=%.3E vf=%.3f",
+                 mid, m.type.c_str(), m.E, m.nu, m.rho, vf);
+        infoMessages.push_back(buf);
+    }
+
+    double E_reuss = (inv_E_reuss > 0) ? (1.0/inv_E_reuss) : 0;
+    double E_hom;
+    if (op.method == 0) E_hom = E_voigt;
+    else if (op.method == 1) E_hom = E_reuss;
+    else E_hom = 0.5 * (E_voigt + E_reuss);
+
+    // Assign IDs
+    int newPid = (op.newPid > 0) ? op.newPid : (++maxPartId_);
+    int newMid = (op.newMid > 0) ? op.newMid : (++maxMaterialId_);
+    int newSec = ++maxSectionId_;
+
+    // Create merged elements — split each column into op.layers groups
+    int nLayers = std::max(1, op.layers);
+    for (auto& col : columns) {
+        if (col.empty()) continue;
+        for (int eid : col) removedElementIds_.insert(eid);
+
+        int colSize = (int)col.size();
+        int actualLayers = std::min(nLayers, colSize);
+
+        for (int L = 0; L < actualLayers; L++) {
+            // Distribute elements: group L gets indices [start, end)
+            int start = (int)((long long)L * colSize / actualLayers);
+            int end   = (int)((long long)(L+1) * colSize / actualLayers);
+            if (start >= end) continue;
+
+            auto botIt = elemById.find(col[start]);
+            auto topIt = elemById.find(col[end - 1]);
+            if (botIt == elemById.end() || topIt == elemById.end()) continue;
+
+            int blo[4], bhi[4], tlo[4], thi[4];
+            getStackFaces(*botIt->second, blo, bhi);
+            getStackFaces(*topIt->second, tlo, thi);
+
+            AddedElement ne;
+            ne.id = ++maxElementId_;
+            ne.pid = newPid;
+            ne.type = ElementType::HEX8;
+            for (int i=0;i<4;i++) ne.nodeIds[i] = blo[i];
+            for (int i=0;i<4;i++) ne.nodeIds[i+4] = thi[i];
+            addedElements_.push_back(ne);
+        }
+    }
+
+    // Add keyword blocks (MAT + SECTION + PART)
+    std::string name = op.name.empty() ? ("Merged_PID" + std::to_string(newPid)) : op.name;
+    std::ostringstream kb;
+    kb << "$\n$ === Merged: " << name << " ===\n$\n";
+    kb << "*MAT_ELASTIC_TITLE\n" << name << "\n";
+    char mbuf[128];
+    snprintf(mbuf, sizeof(mbuf), "%10d%10.3E%10.1f%10.4f       0.0       0.0       0.0",
+             newMid, rho_mix, E_hom, nu_mix);
+    kb << "$#     mid        ro         e        pr        da        db  not used\n";
+    kb << mbuf << "\n";
+    if (anyCte) {
+        kb << "*MAT_ADD_THERMAL_EXPANSION_TITLE\n" << name << "_CTE\n";
+        snprintf(mbuf, sizeof(mbuf), "%10d%10d%10.3E", newMid, 0, 1.0);
+        kb << "$#     pid      lcid      mult\n" << mbuf << "\n";
+        snprintf(mbuf, sizeof(mbuf), "%10.3E", cte_mix);
+        kb << "$#                                   alpha\n" << mbuf << "\n";
+    }
+    kb << "*SECTION_SOLID\n";
+    snprintf(mbuf, sizeof(mbuf), "%10d%10d", newSec, 1);
+    kb << "$#   secid    elform\n" << mbuf << "\n";
+    kb << "*PART\n" << name << "\n";
+    snprintf(mbuf, sizeof(mbuf), "%10d%10d%10d", newPid, newSec, newMid);
+    kb << mbuf << "\n";
+
+    addedKeywordBlocks_.push_back(kb.str());
+
+    snprintf(buf, sizeof(buf), "[merge] %d elems → %d merged (PID=%d MID=%d E=%.1f nu=%.4f rho=%.3E)",
+             (int)grpElems.size(), (int)columns.size(), newPid, newMid, E_hom, nu_mix, rho_mix);
+    infoMessages.push_back(buf);
+    if (anyCte) {
+        snprintf(buf, sizeof(buf), "[merge] CTE=%.4E", cte_mix);
+        infoMessages.push_back(buf);
+    }
+
+    return true;
+}
+
+// ─────────────────────────────────────────────────────────────
+// applyStrip — remove keyword blocks from rawLines_
+// ─────────────────────────────────────────────────────────────
+
+bool ModelAssembler::applyStrip(const StripOperation& op) {
+    infoMessages.clear();
+
+    if (op.keywords.empty()) {
+        errorMessage_ = "strip: no keywords specified";
+        return false;
+    }
+
+    // Build uppercase keyword set
+    std::set<std::string> stripSet;
+    for (auto& kw : op.keywords) {
+        std::string up = mg_upper(kw);
+        if (!up.empty() && up[0] != '*') up = "*" + up;
+        stripSet.insert(up);
+    }
+
+    bool skipping = false;
+    int stripped = 0;
+    std::vector<std::string> newLines;
+    newLines.reserve(rawLines_.size());
+
+    for (auto& line : rawLines_) {
+        if (!line.empty() && line[0] == '*') {
+            std::string up = mg_upper(mg_ws_trim(line));
+            bool shouldStrip = false;
+            for (auto& sk : stripSet) {
+                if (up.size() >= sk.size() && up.compare(0, sk.size(), sk) == 0) {
+                    if (up.size() == sk.size() || up[sk.size()] == ' ' ||
+                        up[sk.size()] == '_' || up[sk.size()] == '\t') {
+                        shouldStrip = true;
+                        break;
+                    }
+                }
+            }
+            if (shouldStrip) { skipping = true; stripped++; continue; }
+            else skipping = false;
+        }
+        if (skipping) { stripped++; continue; }
+        newLines.push_back(line);
+    }
+
+    rawLines_ = std::move(newLines);
+
+    char buf[256];
+    snprintf(buf, sizeof(buf), "[strip] removed %d lines from %d keyword blocks",
+             stripped, (int)op.keywords.size());
     infoMessages.push_back(buf);
     return true;
 }

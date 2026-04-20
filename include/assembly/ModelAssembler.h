@@ -61,6 +61,8 @@ public:
     bool applyHFDamp(const HFDampOperation& op);
     bool applyBattery(const BatteryOperation& op, const std::string& configDir);
     bool applySplit(const SplitOperation& op);
+    bool applyMerge(const MergeOperation& op);
+    bool applyStrip(const StripOperation& op);
     // Returns all distinct part IDs currently in the model (base + added elements)
     std::vector<int> getAllPartIds() const;
     bool writeOutput(const std::string& outputPrefix);

@@ -257,40 +257,8 @@ bool KFileReader::parseFile(std::ifstream& file) {
         reportProgress(file.tellg());
     }
 
-    // Check for unsupported materials
-    if (!unsupportedMaterials_.empty()) {
-        errorMessage_ = "Unsupported material types found:\n";
-        for (const auto& mat : unsupportedMaterials_) {
-            errorMessage_ += "  MID " + std::to_string(mat.first) + ": *" + mat.second + "\n";
-        }
-
-        // Find parts using unsupported materials
-        std::vector<int> affectedParts;
-        for (const auto& part : mesh_.getParts()) {
-            for (const auto& mat : unsupportedMaterials_) {
-                if (part.second.materialId == mat.first) {
-                    affectedParts.push_back(part.first);
-                    break;
-                }
-            }
-        }
-
-        if (!affectedParts.empty()) {
-            errorMessage_ += "\nAffected parts (will be skipped in stress calculation):\n";
-            for (int pid : affectedParts) {
-                errorMessage_ += "  PID " + std::to_string(pid);
-                const auto& part = mesh_.getParts().at(pid);
-                if (!part.name.empty()) {
-                    errorMessage_ += " (" + part.name + ")";
-                }
-                errorMessage_ += "\n";
-            }
-        }
-
-        errorMessage_ += "\nSupported materials: MAT_ELASTIC, MAT_PIECEWISE_LINEAR_PLASTICITY, "
-                        "MAT_RIGID, MAT_VISCOELASTIC, MAT_MOONEY-RIVLIN_RUBBER";
-        return false;
-    }
+    // Unsupported materials are non-fatal — log but do not fail
+    // (assemble mode uses raw-line processing for all keyword types)
 
     return true;
 }
@@ -1394,8 +1362,11 @@ void KFileReader::reportProgress(std::streampos currentPos) {
 }
 
 bool KFileReader::isMaterialKeyword(const std::string& keyword) const {
-    // Check if keyword starts with "MAT_"
-    return keyword.find("MAT_") == 0;
+    // Check if keyword starts with "MAT_" but exclude auxiliary cards
+    if (keyword.find("MAT_") != 0) return false;
+    // MAT_ADD_* are auxiliary cards, not material definitions
+    if (keyword.find("MAT_ADD_") == 0) return false;
+    return true;
 }
 
 bool KFileReader::isSupportedMaterial(const std::string& keyword) const {
@@ -1404,6 +1375,7 @@ bool KFileReader::isSupportedMaterial(const std::string& keyword) const {
     if (keyword.find("MAT_PIECEWISE_LINEAR_PLASTICITY") == 0 || keyword.find("MAT_024") == 0) return true;
     if (keyword.find("MAT_RIGID") == 0 || keyword.find("MAT_020") == 0) return true;
     if (keyword.find("MAT_VISCOELASTIC") == 0 || keyword.find("MAT_006") == 0) return true;
+    if (keyword.find("MAT_GENERAL_VISCOELASTIC") == 0 || keyword.find("MAT_076") == 0) return true;
     if (keyword.find("MAT_MOONEY-RIVLIN_RUBBER") == 0 || keyword.find("MAT_027") == 0) return true;
     return false;
 }

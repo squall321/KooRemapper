@@ -190,6 +190,8 @@ set(COMMAND_SOURCES
     src/commands/cnrb2solid.cpp
     src/commands/hfdamp.cpp
     src/commands/battery.cpp
+    src/commands/strip.cpp
+    src/commands/merge.cpp
     src/battery/BatteryWriter.cpp
     src/battery/BatteryMaterials.cpp
     src/battery/BatteryContacts.cpp
