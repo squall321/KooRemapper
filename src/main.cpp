@@ -60,9 +60,13 @@
 #include "commands/battery.h"
 #include "commands/strip.h"
 #include "commands/merge.h"
+#include "commands/tetremesh.h"
 
 #include <iostream>
 #include <fstream>
+#include <cctype>
+#include <cstdio>
+#include <system_error>
 #include <memory>
 #include <limits>
 #include <climits>
@@ -85,6 +89,65 @@ void printBanner(const ConsoleOutput& console) {
     console.println("  Version " + std::string(VERSION), ConsoleOutput::Color::CYAN);
     console.separator('=', 60);
     std::cout << "\n";
+}
+
+/**
+ * Apply the same mirror+swap that MeshRemapper::applyOutputFlip does, but to
+ * an arbitrary k-file on disk. Produces a transformed copy at outFile.
+ *
+ * Why this exists: the map -> prestress YAML chain uses the FLAT mesh as
+ * prestress reference and the MAPPED mesh as deformed configuration. When
+ * any flip is active, the mapped mesh has odd-parity HEX8 connectivity
+ * swapped (n[0..3] <-> n[4..7]) to keep positive Jacobians, so its element-
+ * local node order no longer matches the original FLAT reference. Computing
+ * F = dx_def/dx_ref then dereferences mismatched physical points and
+ * yields garbage strain. The fix: apply the SAME flip+swap to the flat
+ * mesh before handing it to runPrestress; both ref and def are then
+ * mirrored consistently and strain becomes reflection-invariant
+ * (E' = R E R^T, von Mises identical).
+ */
+static int applyMeshFlipFile(const std::string& inFile,
+                              const std::string& outFile,
+                              bool fx, bool fy, bool fz,
+                              const ConsoleOutput& console) {
+    KFileReader reader;
+    Mesh mesh;
+    try {
+        mesh = reader.readFile(inFile);
+    } catch (const std::exception& e) {
+        console.error(std::string("flip-helper: cannot load ") + inFile + ": " + e.what());
+        return 1;
+    }
+    // negate node coords on selected axes
+    for (auto& kv : mesh.nodes) {
+        Vector3D p = kv.second.position;
+        if (fx) p.x = -p.x;
+        if (fy) p.y = -p.y;
+        if (fz) p.z = -p.z;
+        kv.second.position = p;
+        kv.second.setMappedPosition(p);
+    }
+    // odd-parity flip count flips local handedness; restore by swapping
+    // bottom/top face of every HEX8 (matches MeshRemapper::applyOutputFlip).
+    int parity = (int)fx + (int)fy + (int)fz;
+    if (parity % 2 == 1) {
+        for (auto& kv : mesh.elements) {
+            Element& e = kv.second;
+            if (e.type != ElementType::HEX8) continue;
+            std::array<int, 8> orig = e.nodeIds;
+            e.nodeIds[0] = orig[4]; e.nodeIds[1] = orig[5];
+            e.nodeIds[2] = orig[6]; e.nodeIds[3] = orig[7];
+            e.nodeIds[4] = orig[0]; e.nodeIds[5] = orig[1];
+            e.nodeIds[6] = orig[2]; e.nodeIds[7] = orig[3];
+        }
+    }
+    KFileWriter writer;
+    if (!writer.writeFile(outFile, mesh, /*useMappedPositions=*/false)) {
+        console.error(std::string("flip-helper: cannot write ") + outFile +
+                      ": " + writer.getErrorMessage());
+        return 1;
+    }
+    return 0;
 }
 
 
@@ -1426,25 +1489,303 @@ int main(int argc, char* argv[]) {
     if (command == "map") {
         // Parse options
         bool useParallel = true;  // Default: parallel mode
+        bool forcePositive = false;
+        bool flipX = false, flipY = false, flipZ = false;
+        std::string bboxAlignMode = "none";   // none | source | target
+        double bboxAlignMaxDrift = 2.0;       // percent
+        bool sawBboxAlignCli = false;
+        bool sawBboxDriftCli = false;
         std::vector<std::string> positionalArgs;
 
         for (int i = 2; i < argc; ++i) {
             std::string arg = argv[i];
             if (arg == "--single" || arg == "-s") {
                 useParallel = false;
+            } else if (arg == "--force-positive" || arg == "--fp") {
+                forcePositive = true;
+            } else if (arg == "--flip-x") {
+                flipX = true;
+            } else if (arg == "--flip-y") {
+                flipY = true;
+            } else if (arg == "--flip-z") {
+                flipZ = true;
+            } else if (arg == "--bbox-align" && i + 1 < argc) {
+                bboxAlignMode = argv[++i];
+                sawBboxAlignCli = true;
+            } else if (arg == "--bbox-align-max-drift" && i + 1 < argc) {
+                try { bboxAlignMaxDrift = std::stod(argv[++i]); sawBboxDriftCli = true; }
+                catch (...) {
+                    console.error("Invalid value for --bbox-align-max-drift");
+                    return 1;
+                }
             } else if (arg[0] != '-') {
                 positionalArgs.push_back(arg);
             }
         }
 
-        if (positionalArgs.size() < 3) {
-            console.error("Usage: KooRemapper map [--single] <bent_mesh> <flat_mesh> <output>");
-            console.println("Options:");
-            console.println("  --single, -s  Use single-threaded mode (default: parallel)");
-            return 1;
+        // YAML mode: single positional arg ending in .yaml/.yml replaces the
+        // 3-positional + flag form. All options (including bent/flat/output
+        // paths and flip flags) come from the YAML. CLI flags act as
+        // overrides (CLI takes precedence over YAML).
+        auto endsWith = [](const std::string& s, const std::string& suf) {
+            return s.size() >= suf.size() &&
+                   s.compare(s.size() - suf.size(), suf.size(), suf) == 0;
+        };
+        bool yamlMode = (positionalArgs.size() == 1 &&
+                         (endsWith(positionalArgs[0], ".yaml") ||
+                          endsWith(positionalArgs[0], ".yml")));
+
+        std::string bentPath, flatPath, outputPath;
+
+        // Optional prestress chaining state populated by YAML reader.
+        bool   pre_enabled = false;
+        std::string pre_output;
+        std::string pre_strainType = "green";  // green | engineering | log
+        double pre_E = 0.0;
+        double pre_nu = 0.0;
+        bool   pre_csv = false;
+
+        if (yamlMode) {
+            // Minimal flat YAML reader for the map config schema.
+            //   bent: <path>
+            //   flat: <path>
+            //   output: <path>
+            //   parallel: true|false       (optional, default true)
+            //   force_positive: true|false (optional, default false)
+            //   flip_x: true|false         (optional, default false)
+            //   flip_y: true|false         (optional, default false)
+            //   flip_z: true|false         (optional, default false)
+            //
+            //   prestress:                 (optional; when present + enabled,
+            //     enabled: true             generates a dynain from the mapped
+            //     output: detail_stress.dynain
+            //     strain_type: green       # green | engineering | log
+            //     E:  210000.0             # MPa, optional (omit -> strain only)
+            //     nu: 0.3                  # optional
+            //     csv: false               # optional, write CSV instead of dynain
+            //   )
+            // Comments start with '#'. Unknown keys are ignored with a warning.
+            std::ifstream yf(positionalArgs[0]);
+            if (!yf.is_open()) {
+                console.error("Cannot open YAML config: " + positionalArgs[0]);
+                return 1;
+            }
+            auto trim = [](std::string s) {
+                size_t a = s.find_first_not_of(" \t\r\n");
+                size_t b = s.find_last_not_of(" \t\r\n");
+                if (a == std::string::npos) return std::string();
+                return s.substr(a, b - a + 1);
+            };
+            auto stripQuotes = [](std::string s) {
+                if (s.size() >= 2 && ((s.front() == '"' && s.back() == '"') ||
+                                      (s.front() == '\'' && s.back() == '\''))) {
+                    return s.substr(1, s.size() - 2);
+                }
+                return s;
+            };
+            auto parseBool = [](const std::string& v) {
+                std::string t = v;
+                for (auto& c : t) c = (char)std::tolower((unsigned char)c);
+                return t == "true" || t == "yes" || t == "on" || t == "1";
+            };
+            // Track which keys were set in YAML so CLI flags can override.
+            bool yamlForce = false, yamlFlipX = false, yamlFlipY = false, yamlFlipZ = false;
+            bool yamlParallel = useParallel;
+            bool sawForce = false, sawFlipX = false, sawFlipY = false, sawFlipZ = false, sawParallel = false;
+            std::string yamlBboxAlign;
+            double yamlBboxDrift = 2.0;
+            bool sawBboxAlignYaml = false, sawBboxDriftYaml = false;
+
+            std::string line;
+            std::string section;       // "" or "prestress"
+            int sectionIndent = -1;    // tracks the prestress block's indent
+            while (std::getline(yf, line)) {
+                size_t hash = line.find('#');
+                if (hash != std::string::npos) line = line.substr(0, hash);
+                if (line.find_first_not_of(" \t\r\n") == std::string::npos) continue;
+                int indent = 0;
+                while (indent < (int)line.size() &&
+                       (line[indent] == ' ' || line[indent] == '\t')) ++indent;
+                std::string body = trim(line);
+                size_t colon = body.find(':');
+                if (colon == std::string::npos) continue;
+                std::string key = trim(body.substr(0, colon));
+                std::string val = stripQuotes(trim(body.substr(colon + 1)));
+
+                // Section bookkeeping
+                if (indent == 0) {
+                    section.clear();
+                    sectionIndent = -1;
+                    if (val.empty() && key == "prestress") {
+                        section = "prestress";
+                        sectionIndent = 0;
+                        pre_enabled = true;  // presence of section enables it by default
+                        continue;
+                    }
+                } else if (sectionIndent < 0 || indent <= sectionIndent) {
+                    section.clear();
+                }
+
+                if (section == "prestress") {
+                    if      (key == "enabled")     pre_enabled = parseBool(val);
+                    else if (key == "output")      pre_output = val;
+                    else if (key == "strain_type") pre_strainType = val;
+                    else if (key == "E")        { try { pre_E = std::stod(val); } catch(...) {} }
+                    else if (key == "nu")       { try { pre_nu = std::stod(val); } catch(...) {} }
+                    else if (key == "csv")         pre_csv = parseBool(val);
+                    continue;
+                }
+
+                if      (key == "bent")           bentPath = val;
+                else if (key == "flat")           flatPath = val;
+                else if (key == "output")         outputPath = val;
+                else if (key == "parallel")     { yamlParallel = parseBool(val); sawParallel = true; }
+                else if (key == "force_positive"){ yamlForce = parseBool(val); sawForce = true; }
+                else if (key == "flip_x")       { yamlFlipX = parseBool(val); sawFlipX = true; }
+                else if (key == "flip_y")       { yamlFlipY = parseBool(val); sawFlipY = true; }
+                else if (key == "flip_z")       { yamlFlipZ = parseBool(val); sawFlipZ = true; }
+                else if (key == "bbox_align")   { yamlBboxAlign = val; sawBboxAlignYaml = true; }
+                else if (key == "bbox_align_max_drift") {
+                    try { yamlBboxDrift = std::stod(val); sawBboxDriftYaml = true; }
+                    catch(...) { console.warning("Invalid bbox_align_max_drift: " + val); }
+                }
+                else if (key == "prestress")    { /* handled above as section */ }
+                else {
+                    console.warning("Unknown YAML key in map config: " + key);
+                }
+            }
+            if (bentPath.empty() || flatPath.empty() || outputPath.empty()) {
+                console.error("YAML config missing required keys (bent, flat, output)");
+                return 1;
+            }
+            // CLI flags override YAML values when explicitly passed.
+            if (sawParallel && useParallel) useParallel = yamlParallel;  // CLI --single sets useParallel=false; respect that
+            if (sawForce  && !forcePositive) forcePositive = yamlForce;
+            if (sawFlipX  && !flipX)         flipX         = yamlFlipX;
+            if (sawFlipY  && !flipY)         flipY         = yamlFlipY;
+            if (sawFlipZ  && !flipZ)         flipZ         = yamlFlipZ;
+            if (sawBboxAlignYaml && !sawBboxAlignCli) bboxAlignMode = yamlBboxAlign;
+            if (sawBboxDriftYaml && !sawBboxDriftCli) bboxAlignMaxDrift = yamlBboxDrift;
+        } else {
+            if (positionalArgs.size() < 3) {
+                console.error("Usage: KooRemapper map [--single] [--force-positive] "
+                              "[--flip-x|y|z] <bent_mesh> <flat_mesh> <output>");
+                console.println("       KooRemapper map <config.yaml>");
+                console.println("Options:");
+                console.println("  --single, -s         Use single-threaded mode (default: parallel)");
+                console.println("  --force-positive,    Force every mapped HEX8 Jacobian positive by");
+                console.println("    --fp               swapping connectivity (overrides source sign).");
+                console.println("                       Use when source mesh has unreliable HEX winding.");
+                console.println("  --flip-x             Mirror output along global X (negate node X).");
+                console.println("  --flip-y             Mirror output along global Y.");
+                console.println("  --flip-z             Mirror output along global Z. Combine multiple");
+                console.println("                       (e.g. --flip-x --flip-z) to compose reflections.");
+                console.println("                       HEX8 connectivity is swapped automatically when");
+                console.println("                       odd-parity flips would otherwise invert Jacobian.");
+                console.println("  --bbox-align <mode>  Auto-rescale to remove uniform stretch in mapping.");
+                console.println("                       mode = source: rescale detail flat to bent ijk lengths");
+                console.println("                              target: rescale bent to detail XYZ lengths");
+                console.println("                              none  : default, no rescaling");
+                console.println("                       Eliminates axial-bias bending stress asymmetry caused");
+                console.println("                       by detail/target bbox mismatch.");
+                console.println("  --bbox-align-max-drift <pct>");
+                console.println("                       Reject scaling if any axis ratio drifts beyond this");
+                console.println("                       percent. Default 2.0%. Safety guard for big mismatches.");
+                console.println("YAML config (alternative to positional args):");
+                console.println("  bent: <bent.k>");
+                console.println("  flat: <flat.k>");
+                console.println("  output: <out.k>");
+                console.println("  parallel: true            # optional");
+                console.println("  force_positive: false     # optional");
+                console.println("  flip_x: false             # optional");
+                console.println("  flip_y: false             # optional");
+                console.println("  flip_z: true              # optional");
+                console.println("  bbox_align: source        # optional: source|target|none");
+                console.println("  bbox_align_max_drift: 2.0 # optional, percent (reject above)");
+                console.println("  prestress:                # optional, chain prestress after map");
+                console.println("    enabled: true");
+                console.println("    output: detail_stress.dynain");
+                console.println("    strain_type: green      # green | engineering | log");
+                console.println("    E:  210000.0            # MPa, optional (omit = strain only)");
+                console.println("    nu: 0.3                 # optional");
+                console.println("    csv: false              # optional");
+                console.println("Diagnostics:");
+                console.println("  Set KOO_MAP_DEBUG=1 to print orientation correction internals.");
+                return 1;
+            }
+            bentPath = positionalArgs[0];
+            flatPath = positionalArgs[1];
+            outputPath = positionalArgs[2];
         }
+
         printBanner(console);
-        return runMapping(positionalArgs[0], positionalArgs[1], positionalArgs[2], console, useParallel);
+        std::string scaledFlatPath;  // populated by runMapping when bbox_align=source
+        int mapRc = runMapping(bentPath, flatPath, outputPath,
+                               console, useParallel, forcePositive, flipX, flipY, flipZ,
+                               bboxAlignMode, bboxAlignMaxDrift, &scaledFlatPath);
+        if (mapRc != 0) return mapRc;
+
+        // Optional prestress chaining: configured only via YAML (CLI form
+        // does not accept it). After mapping, treat the original FLAT mesh
+        // as the reference and the just-written MAPPED file as the deformed
+        // configuration, computing strain/stress per the chosen option.
+        if (yamlMode && pre_enabled) {
+            if (pre_output.empty()) {
+                console.error("Prestress section requested but 'output:' "
+                              "(dynain/csv path) not set");
+                return 1;
+            }
+            StrainType strainType = StrainType::GREEN_LAGRANGE;
+            std::string st = pre_strainType;
+            for (auto& c : st) c = (char)std::tolower((unsigned char)c);
+            if      (st == "engineering") strainType = StrainType::ENGINEERING;
+            else if (st == "log" || st == "logarithmic" || st == "true")
+                                          strainType = StrainType::LOGARITHMIC;
+
+            // Reference selection priority:
+            //   1. bbox_align=source: use the bbox-scaled flat written by
+            //      runMapping (otherwise the un-scaled flat would inject
+            //      the same uniform stretch we just removed back as residual
+            //      stress in F = ∂x_def/∂X_ref).
+            //   2. flip_x/y/z: apply the same flip to the flat reference so
+            //      element-local node orderings match between ref and def.
+            //      Both 1 and 2 may apply; flip is composed on top of the
+            //      scaled flat in that case.
+            //   3. Otherwise: use the original flat as-is.
+            std::string refFileForPrestress = flatPath;
+            std::string tempRefPath;
+            bool ownsScaledFlat = !scaledFlatPath.empty();   // we own its lifetime
+            if (ownsScaledFlat) {
+                refFileForPrestress = scaledFlatPath;
+            }
+            bool needFlipRef = (flipX || flipY || flipZ);
+            if (needFlipRef) {
+                tempRefPath = outputPath + ".__flipped_ref.k";
+                std::cout << "\n";
+                console.info("Generating flip-aligned reference for prestress: "
+                             + tempRefPath);
+                int frc = applyMeshFlipFile(refFileForPrestress, tempRefPath,
+                                             flipX, flipY, flipZ, console);
+                if (frc != 0) return frc;
+                refFileForPrestress = tempRefPath;
+            }
+
+            std::cout << "\n";
+            console.header("Chained Prestress");
+            console.info("Reference (flat): " + refFileForPrestress);
+            console.info("Deformed (mapped): " + outputPath);
+            console.info("Output: " + pre_output);
+            int prc = runPrestress(refFileForPrestress, outputPath, pre_output,
+                                    pre_E, pre_nu, strainType, pre_csv, console);
+
+            // Clean up temp ref(s) regardless of prestress success.
+            if (!tempRefPath.empty()) std::remove(tempRefPath.c_str());
+            if (ownsScaledFlat)      std::remove(scaledFlatPath.c_str());
+            return prc;
+        }
+        // No prestress chain — scaled flat tmp (if any) is no longer needed.
+        if (!scaledFlatPath.empty()) std::remove(scaledFlatPath.c_str());
+        return 0;
     }
 
     // Shell-based mapping command
@@ -1836,6 +2177,54 @@ int main(int argc, char* argv[]) {
         }
         printBanner(console);
         return runDatabase(argv[2], console);
+    }
+
+    // TET local remesh command
+    if (command == "tetremesh") {
+        if (argc < 3) {
+            console.error("Usage: KooRemapper tetremesh <config.yaml>");
+            console.println("");
+            console.println("YAML schema:");
+            console.println("  model:        input.k");
+            console.println("  output:       output.k");
+            console.println("  backend:      localimprove | tetgen   # default localimprove");
+            console.println("  fallback:     localimprove | tetgen   # optional, used when");
+            console.println("                                        # primary backend fails per patch");
+            console.println("  report_only:  false                   # true = scan + report only");
+            console.println("  target_pids:  [1, 2, 3]               # optional; empty = all parts");
+            console.println("");
+            console.println("  quality:");
+            console.println("    # SCALED JACOBIAN: 1.0 = perfect equilateral tet, 0 = degenerate,");
+            console.println("    # <0 = inverted. Suggested thresholds:");
+            console.println("    #   <0.1   very poor    0.2~0.5  acceptable    >0.7  excellent");
+            console.println("    min_jacobian:     0.2");
+            console.println("    max_aspect_ratio: 8.0");
+            console.println("");
+            console.println("  patch:");
+            console.println("    ring_expand:           2");
+            console.println("    surface_flatness_deg:  5.0");
+            console.println("    surface_move_tolerance: 0.0   # >0 = flat-surface tangential motion");
+            console.println("    preserve_multi_material: true");
+            console.println("");
+            console.println("  improve:                  # Phase A backend tuning");
+            console.println("    laplacian_iters: 5");
+            console.println("    max_outer_iters: 3");
+            console.println("    allow_subdivide: true");
+            console.println("");
+            console.println("  tetgen:                   # Phase B backend tuning");
+            console.println("    quality_ratio:    1.4   # TetGen -q radius/edge ratio");
+            console.println("    min_dihedral_deg: 10.0");
+            console.println("");
+            console.println("Backends:");
+            console.println("  localimprove   smoothing + 2-3 face-edge swap + subdivide.");
+            console.println("                 No external lib. Always available.");
+            console.println("  tetgen         constrained Delaunay tetrahedralization via");
+            console.println("                 third_party/tetgen. Build flag KOOREMAPPER_BUILD_TETGEN");
+            console.println("                 must be ON (TetGen is AGPL v3).");
+            return 1;
+        }
+        printBanner(console);
+        return runTetRemesh(argv[2], console);
     }
 
     // Info command

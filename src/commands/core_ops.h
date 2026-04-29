@@ -4,10 +4,29 @@
 
 namespace KooRemapper { class ConsoleOutput; }
 
+// runMapping
+//   bboxAlignMode: "" / "none" / "source" / "target"
+//     - "source": rescale detail flat XYZ to match bent ijk neutral lengths
+//                 (writes scaled flat to a temp file; *outScaledFlatPath
+//                  receives the path so the caller's prestress chain can
+//                  use it as reference). Detail mesh modified in memory too.
+//     - "target": rescale bent XYZ to match detail XYZ (in memory only).
+//                 Detail flat untouched, prestress reference is original flat.
+//     - "none"/"" (default): no rescaling.
+//   bboxAlignMaxDriftPct: reject scaling and abort if any axis ratio drifts
+//                         beyond this percent. Safety net against accidentally
+//                         applying bbox_align on grossly mismatched meshes.
+//   outScaledFlatPath: (optional, source mode only) receives the temp file
+//                      path the caller should use as prestress reference.
 int runMapping(const std::string& bentFile, const std::string& flatFile,
                const std::string& outputFile,
                const KooRemapper::ConsoleOutput& console,
-               bool useParallel = true);
+               bool useParallel = true,
+               bool forcePositive = false,
+               bool flipX = false, bool flipY = false, bool flipZ = false,
+               const std::string& bboxAlignMode = "none",
+               double bboxAlignMaxDriftPct = 2.0,
+               std::string* outScaledFlatPath = nullptr);
 
 int runShellMapping(const std::string& bentShellFile, const std::string& flatFile,
                     const std::string& outputFile, double thickness,

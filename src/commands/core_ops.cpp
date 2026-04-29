@@ -1,5 +1,7 @@
 #include "core_ops.h"
 #include "core/Platform.h"
+#include <cstdio>
+#include <cmath>
 #include "core/Mesh.h"
 #include "core/ShellMesh.h"
 #include "parser/KFileReader.h"
@@ -32,9 +34,184 @@
 
 using namespace KooRemapper;
 
+namespace {
+
+// =============================================================================
+// bbox-align preprocessor
+//
+// Detail flat (CAD source) and simple_bent (target) often have small but
+// non-zero bbox mismatches per axis -- e.g. detail width 44.5 vs bent k 44.897
+// (0.9% drift). The mapper normalizes detail XYZ to [0,1]^3 and replays into
+// bent ijk parametric coords, so any bbox ratio mismatch is silently injected
+// as a uniform stretch on top of the genuine bending strain. That stretch
+// shows up as an axial bias in the post-map prestress, breaking the otherwise
+// symmetric ±κz bending stress distribution.
+//
+// This helper rescales ONE of the two meshes (per `mode`) so their bboxes line
+// up before mapping. After rescaling, the only strain left in the prestress
+// step is the actual bending term.
+//
+//   mode = "source": rescale flat (detail) so flat XYZ axes match the bent
+//                    ijk neutral lengths. Detail geometry is mildly stretched
+//                    by the per-axis ratios. The prestress reference must use
+//                    the SAME scaled flat (caller writes a temp file).
+//   mode = "target": rescale bent (target) so bent ijk neutral lengths match
+//                    flat XYZ. Detail stays untouched. The prestress reference
+//                    is the original flat (no temp file needed).
+//   mode = "none":   no rescaling.
+//
+// Axis matching uses RANK by sorted length: smallest detail axis ↔ smallest
+// bent axis, etc. This survives axis permutations (e.g. detail ZYX ↔ bent IJK)
+// without depending on auto-axis-mapping running first.
+// =============================================================================
+
+struct BboxAlignResult {
+    bool   applied = false;
+    bool   rejected = false;             // drift exceeded max allowed
+    std::string rejectionReason;
+    std::string mode;                    // "source" / "target"
+    double scale[3] = {1.0, 1.0, 1.0};   // scale applied to MODIFIED mesh's XYZ
+    double maxDriftPct = 0.0;            // largest |1 - scale| in percent
+    std::string axisMatch;               // "detailX↔bentK, detailY↔bentJ, detailZ↔bentI"
+};
+
+// Sort indices by ascending value; returns idx such that arr[idx[0]] <= ... <= arr[idx[2]]
+void rankIndices(const double a[3], int idx[3]) {
+    idx[0] = 0; idx[1] = 1; idx[2] = 2;
+    auto cmp = [&](int x, int y){ return a[x] < a[y]; };
+    if (cmp(idx[1], idx[0])) std::swap(idx[0], idx[1]);
+    if (cmp(idx[2], idx[1])) std::swap(idx[1], idx[2]);
+    if (cmp(idx[1], idx[0])) std::swap(idx[0], idx[1]);
+}
+
+void applyAffineScaleAboutCenter(Mesh& m, double sx, double sy, double sz) {
+    if (sx == 1.0 && sy == 1.0 && sz == 1.0) return;
+    Vector3D mn, mx;
+    m.calculateBoundingBox(mn, mx);
+    Vector3D c((mn.x + mx.x) * 0.5, (mn.y + mx.y) * 0.5, (mn.z + mx.z) * 0.5);
+    for (auto& kv : m.nodes) {
+        Vector3D& p = kv.second.position;
+        p.x = c.x + (p.x - c.x) * sx;
+        p.y = c.y + (p.y - c.y) * sy;
+        p.z = c.z + (p.z - c.z) * sz;
+        // Mirror to mappedPosition if it tracks original — matters only for
+        // result writing later, but this is a pre-map mesh so the mapped
+        // position is meaningless here. Leave it untouched.
+    }
+}
+
+// Compute scale factors for `mode` given bent ijk neutral lengths and detail
+// XYZ bbox lengths. axisMatch tags out which detail axis pairs with which
+// bent axis (rank-based).
+BboxAlignResult computeBboxAlign(const std::string& mode,
+                                 const double bentIJK[3],
+                                 const double detailXYZ[3],
+                                 double maxDriftPct) {
+    BboxAlignResult res;
+    res.mode = mode;
+    if (mode == "none" || mode.empty()) return res;
+
+    int rb[3], rd[3];
+    rankIndices(bentIJK, rb);
+    rankIndices(detailXYZ, rd);
+    // detailToBent[d] = bent axis paired with detail axis d (by rank).
+    int detailToBent[3];
+    for (int r = 0; r < 3; ++r) detailToBent[rd[r]] = rb[r];
+
+    static const char* IJK[3] = {"i", "j", "k"};
+    static const char* XYZ[3] = {"X", "Y", "Z"};
+    {
+        std::ostringstream am;
+        for (int d = 0; d < 3; ++d) {
+            if (d) am << ", ";
+            am << "detail" << XYZ[d] << "↔bent" << IJK[detailToBent[d]];
+        }
+        res.axisMatch = am.str();
+    }
+
+    // Per-detail-axis ratio = bent_paired_length / detail_length.
+    //   source mode: scale detail XYZ by this ratio (detail grows toward bent).
+    //   target mode: scale bent (in detail XYZ frame) by reciprocal.
+    // We always express the result as the scale APPLIED to whichever mesh is
+    // being modified, indexed in that mesh's own XYZ frame.
+    double sx[3];
+    double maxAbsDelta = 0.0;
+    for (int d = 0; d < 3; ++d) {
+        double rd_len = detailXYZ[d];
+        double rb_len = bentIJK[detailToBent[d]];
+        if (rd_len < 1e-12 || rb_len < 1e-12) {
+            res.rejected = true;
+            res.rejectionReason = "degenerate axis length (one mesh is flat in some axis)";
+            return res;
+        }
+        double ratio = rb_len / rd_len;       // detail -> bent
+        if (mode == "source") {
+            sx[d] = ratio;                     // grow detail toward bent
+        } else {  // target
+            // bent gets scaled in its own XYZ frame, but we want bent_x scale
+            // to come from detail rank-paired with bent_x. That requires
+            // inverting the detailToBent mapping below.
+            sx[d] = 1.0;  // placeholder, fill in next loop
+        }
+        double drift = std::fabs(ratio - 1.0);
+        if (drift > maxAbsDelta) maxAbsDelta = drift;
+    }
+
+    if (mode == "target") {
+        // bentToDetail[b] = detail axis paired with bent axis b.
+        int bentToDetail[3];
+        for (int d = 0; d < 3; ++d) bentToDetail[detailToBent[d]] = d;
+        for (int b = 0; b < 3; ++b) {
+            double rd_len = detailXYZ[bentToDetail[b]];
+            double rb_len = bentIJK[b];
+            // Note: bent ijk lengths come from neutral arc length, but the
+            // bent mesh's actual XYZ bbox length is what we'll be scaling.
+            // For target rescale we still use detail/bent ratio in PARAMETRIC
+            // (ijk) frame because that's what the mapper consumes -- the user
+            // sees this as the fraction by which we shrink/expand the bent
+            // mesh in its own physical XYZ. We approximate this as the same
+            // ratio (1.0/ratio) since for moderate scales the PARAMETRIC arc
+            // and the PHYSICAL extent move proportionally for slim bend
+            // shapes. This is the operating point of the bbox-align feature.
+            sx[b] = rd_len / rb_len;          // shrink bent toward detail
+        }
+    }
+
+    // Always populate scale[] (even when rejected) so the diagnostic line
+    // shows the would-be ratios. maxAbsDelta was computed in source-mode
+    // form; recompute as max |1 - sx[i]| over all axes so target mode also
+    // reflects what would be applied.
+    double driftFromScales = 0.0;
+    for (int i = 0; i < 3; ++i) {
+        driftFromScales = std::max(driftFromScales, std::fabs(sx[i] - 1.0));
+    }
+    res.maxDriftPct = driftFromScales * 100.0;
+    res.scale[0] = sx[0];
+    res.scale[1] = sx[1];
+    res.scale[2] = sx[2];
+
+    if (res.maxDriftPct > maxDriftPct) {
+        res.rejected = true;
+        std::ostringstream rr;
+        rr << "drift " << std::fixed << std::setprecision(3) << res.maxDriftPct
+           << "% exceeds max " << maxDriftPct << "%";
+        res.rejectionReason = rr.str();
+        return res;
+    }
+
+    res.applied = (sx[0] != 1.0 || sx[1] != 1.0 || sx[2] != 1.0);
+    return res;
+}
+
+}  // anonymous namespace
+
 int runMapping(const std::string& bentFile, const std::string& flatFile,
                const std::string& outputFile, const ConsoleOutput& console,
-               bool useParallel) {
+               bool useParallel, bool forcePositive,
+               bool flipX, bool flipY, bool flipZ,
+               const std::string& bboxAlignMode,
+               double bboxAlignMaxDriftPct,
+               std::string* outScaledFlatPath) {
     Timer timer;
 
     // Load bent mesh
@@ -83,12 +260,113 @@ int runMapping(const std::string& bentFile, const std::string& flatFile,
         return 1;
     }
 
+    // -----------------------------------------------------------------
+    // bbox-align preprocessor (optional)
+    // -----------------------------------------------------------------
+    std::string scaledFlatTmpPath;
+    {
+        std::string mode = bboxAlignMode;
+        for (auto& c : mode) c = (char)std::tolower((unsigned char)c);
+        if (mode != "none" && mode != "" && mode != "source" && mode != "target") {
+            console.error("bbox_align: unknown mode '" + bboxAlignMode +
+                          "' (expected: none | source | target)");
+            return 1;
+        }
+        if (mode == "source" || mode == "target") {
+            // Probe bent neutral arc lengths via a throwaway analyze.
+            MeshRemapper probe;
+            probe.setBentMesh(&bentMesh);
+            probe.setFlatMesh(&flatMesh);
+            if (!probe.analyzeBentOnly()) {
+                console.error("bbox_align: bent analysis failed: " + probe.getErrorMessage());
+                return 1;
+            }
+            double bentIJK[3] = {
+                probe.getNeutralSizeI(),
+                probe.getNeutralSizeJ(),
+                probe.getNeutralSizeK()
+            };
+
+            Vector3D fMin0, fMax0;
+            flatMesh.calculateBoundingBox(fMin0, fMax0);
+            double detailXYZ[3] = {
+                fMax0.x - fMin0.x,
+                fMax0.y - fMin0.y,
+                fMax0.z - fMin0.z
+            };
+
+            BboxAlignResult ba = computeBboxAlign(mode, bentIJK, detailXYZ,
+                                                   bboxAlignMaxDriftPct);
+
+            std::cout << "\n";
+            console.header("bbox-align preprocessor");
+            console.keyValue("Mode", mode);
+            console.keyValue("Axis match", ba.axisMatch);
+            {
+                std::ostringstream s;
+                s << std::fixed << std::setprecision(6)
+                  << ba.scale[0] << " / " << ba.scale[1] << " / " << ba.scale[2]
+                  << "  (drift " << std::setprecision(3) << ba.maxDriftPct << "%)";
+                console.keyValue("Scale (X/Y/Z)", s.str());
+            }
+
+            if (ba.rejected) {
+                console.error("bbox_align rejected: " + ba.rejectionReason);
+                console.info("Raise bbox_align_max_drift if intentional, or fix the input "
+                             "mesh sizing.");
+                return 1;
+            }
+            if (ba.applied) {
+                if (mode == "source") {
+                    applyAffineScaleAboutCenter(flatMesh,
+                                                ba.scale[0], ba.scale[1], ba.scale[2]);
+                    // Write a temp .k of the scaled flat so chain prestress
+                    // can use it as reference (otherwise F = ∂x_def/∂X_ref
+                    // would compute against the un-scaled flat and the
+                    // injected uniform stretch would reappear as residual
+                    // stress).
+                    scaledFlatTmpPath = outputFile + ".__bbox_scaled_flat.k";
+                    KFileWriter w;
+                    if (!w.writeFile(scaledFlatTmpPath, flatMesh, false)) {
+                        console.warning("bbox_align: failed to write scaled flat temp: "
+                                        + w.getErrorMessage()
+                                        + " (chain prestress may report residual axial bias)");
+                        scaledFlatTmpPath.clear();
+                    } else if (outScaledFlatPath) {
+                        *outScaledFlatPath = scaledFlatTmpPath;
+                    }
+                } else {  // target
+                    applyAffineScaleAboutCenter(bentMesh,
+                                                ba.scale[0], ba.scale[1], ba.scale[2]);
+                }
+                console.success(std::string("Applied scale to ") +
+                                (mode == "source" ? "detail flat" : "bent target"));
+            } else {
+                console.info("Bboxes already aligned within tolerance — no scaling needed.");
+            }
+        }
+    }
+
     // Perform mapping
     std::string modeStr = useParallel ? "parallel" : "single-threaded";
     console.info("Performing mesh mapping (" + modeStr + " mode)...");
     MeshRemapper remapper;
     remapper.setBentMesh(&bentMesh);
     remapper.setFlatMesh(&flatMesh);
+    remapper.setForcePositive(forcePositive);
+    if (forcePositive) {
+        console.info("Force-positive mode: result HEX8 Jacobians will be made positive "
+                     "regardless of source winding.");
+    }
+    remapper.setOutputFlip(flipX, flipY, flipZ);
+    if (flipX || flipY || flipZ) {
+        std::string axes;
+        if (flipX) axes += "X";
+        if (flipY) axes += "Y";
+        if (flipZ) axes += "Z";
+        console.info("Output mirror: " + axes +
+                     " axis flipped (HEX8 connectivity swapped to preserve handedness if needed).");
+    }
 
     // Set progress callback
     remapper.setProgressCallback([&console](int percent) {
@@ -103,18 +381,115 @@ int runMapping(const std::string& bentFile, const std::string& flatFile,
     console.clearLine();
     console.success("Mapping completed successfully");
 
+    // Report auto-detected axis mapping
+    int axisMap[3];
+    remapper.getAxisMap(axisMap);
+    auto ijkName = [](int v) -> std::string {
+        return (v == 0) ? "i" : (v == 1) ? "j" : "k";
+    };
+    bool isIdentity = (axisMap[0] == 0 && axisMap[1] == 1 && axisMap[2] == 2);
+    std::cout << "\n";
+    console.header("Auto Axis Mapping (detail XYZ -> bent ijk)");
+
+    // Source lengths used for ranking (for diagnostic clarity)
+    double bentI = remapper.getNeutralSizeI();
+    double bentJ = remapper.getNeutralSizeJ();
+    double bentK = remapper.getNeutralSizeK();
+    Vector3D fMin, fMax;
+    flatMesh.calculateBoundingBox(fMin, fMax);
+    double dX = fMax.x - fMin.x, dY = fMax.y - fMin.y, dZ = fMax.z - fMin.z;
+
+    auto fmt3 = [](double a, double b, double c) {
+        std::ostringstream ss;
+        ss << std::fixed << std::setprecision(3)
+           << a << " / " << b << " / " << c;
+        return ss.str();
+    };
+    console.keyValue("Bent ijk lengths",  fmt3(bentI, bentJ, bentK));
+    console.keyValue("Detail XYZ lengths", fmt3(dX, dY, dZ));
+    console.keyValue("Detail X -> bent", ijkName(axisMap[0]));
+    console.keyValue("Detail Y -> bent", ijkName(axisMap[1]));
+    console.keyValue("Detail Z -> bent", ijkName(axisMap[2]));
+    if (!isIdentity) {
+        console.info("Detail axes were reordered to match bent ijk arc lengths.");
+    }
+    const std::string& topo = remapper.getTopologyDiagnostic();
+    if (!topo.empty()) {
+        console.info("Topology: " + topo);
+    }
+    {
+        long long filled = remapper.getGridFilledCount();
+        long long total  = remapper.getGridTotalCount();
+        bool active = remapper.isGridLookupActive();
+        if (total > 0) {
+            double pct = 100.0 * (double)filled / (double)total;
+            char buf[128];
+            std::snprintf(buf, sizeof(buf),
+                "%lld / %lld grid nodes (%.2f%%)  active=%s",
+                filled, total, pct, active ? "yes" : "no");
+            console.keyValue("Interior grid lookup", std::string(buf));
+        }
+    }
+
     // Print statistics
     const auto& stats = remapper.getStats();
+
+    // Format helper: scientific notation for small magnitudes, fixed for
+    // values in a "human" range. std::to_string truncates anything below
+    // ~1e-6 to "0.000000" which is highly misleading when the actual value
+    // is 1e-19 (genuine collapse) vs 1e-7 (just small but valid).
+    auto fmtJac = [](double v) -> std::string {
+        char buf[32];
+        double a = std::fabs(v);
+        if (a == 0.0) return "0";
+        if (a < 1e-3 || a >= 1e7) {
+            std::snprintf(buf, sizeof(buf), "%+.6e", v);
+        } else {
+            std::snprintf(buf, sizeof(buf), "%.6f", v);
+        }
+        return std::string(buf);
+    };
+
+    // Source mesh diagnostic (pre-map). Helps separate source-side bugs
+    // from mapping-side bugs.
+    if (stats.sourceHex8Count > 0) {
+        std::cout << "\n";
+        console.header("Source Mesh Diagnostic (pre-map jacFlat)");
+        console.keyValue("HEX8 elements analyzed", std::to_string(stats.sourceHex8Count));
+        console.keyValue("Positive jacFlat (right-handed)",
+                         std::to_string(stats.sourcePosJacCount));
+        if (stats.sourceNegJacCount > 0) {
+            console.warning("Negative jacFlat (left-handed CW winding): " +
+                            std::to_string(stats.sourceNegJacCount));
+        }
+        if (stats.sourceDegenerateCount > 0) {
+            console.warning("Degenerate (|jacFlat| < 1e-15): " +
+                            std::to_string(stats.sourceDegenerateCount));
+        }
+        console.keyValue("Source jacFlat range",
+                         fmtJac(stats.sourceMinJac) + " to " +
+                         fmtJac(stats.sourceMaxJac));
+        if (stats.sourceNegJacCount > 0 && stats.sourcePosJacCount > 0) {
+            console.warning("Source mesh has MIXED orientation. "
+                            "Per-element correction will preserve each element's source sign. "
+                            "Use --force-positive if you want all output positive.");
+        }
+    }
+
     std::cout << "\n";
     console.header("Mapping Statistics");
     console.keyValue("Nodes processed", std::to_string(stats.nodesProcessed));
     console.keyValue("Elements processed", std::to_string(stats.elementsProcessed));
-    console.keyValue("Min Jacobian", std::to_string(stats.minJacobian));
-    console.keyValue("Max Jacobian", std::to_string(stats.maxJacobian));
-    console.keyValue("Avg Jacobian", std::to_string(stats.avgJacobian));
+    console.keyValue("Min Jacobian", fmtJac(stats.minJacobian));
+    console.keyValue("Max Jacobian", fmtJac(stats.maxJacobian));
+    console.keyValue("Avg Jacobian", fmtJac(stats.avgJacobian));
     if (stats.invalidElements > 0) {
         console.warning("Invalid elements (negative Jacobian): " +
                        std::to_string(stats.invalidElements));
+    }
+    if (stats.reorientedElements > 0) {
+        console.info("Reoriented elements (connectivity swap for sign match): " +
+                     std::to_string(stats.reorientedElements));
     }
     console.keyValue("Processing time", std::to_string(stats.processingTimeMs) + " ms");
     std::cout << "\n";
@@ -685,38 +1060,49 @@ int runPrestress(const std::string& refFile, const std::string& defFile,
             dynainFilename = dynainFilename.substr(slashPos + 1);
         }
 
-        // Read deformed mesh file and append *INCLUDE
-        std::ifstream srcFile(defFile, std::ios::binary);
-        if (!srcFile.is_open()) {
-            console.error("Failed to read deformed mesh for copy");
+        // Read the deformed mesh entirely INTO MEMORY first, then write the
+        // augmented copy. Buffering up front (rather than streaming src->dst)
+        // makes the operation safe even when meshOutputFile and defFile refer
+        // to the same file -- a real hazard when the user picks `output:` and
+        // `prestress.output:` with matching prefixes (e.g. foo.k + foo.dynain
+        // both auto-derive foo.k). Streaming src->dst in that case truncates
+        // the source on dst-open and produces a .k with only *INCLUDE/*END
+        // (no mesh content), the exact symptom users hit.
+        std::vector<std::string> defLines;
+        {
+            std::ifstream srcFile(defFile, std::ios::binary);
+            if (!srcFile.is_open()) {
+                console.error("Failed to read deformed mesh for copy");
+                return 1;
+            }
+            std::string line;
+            defLines.reserve(1024);
+            while (std::getline(srcFile, line)) defLines.push_back(std::move(line));
+        }
+        if (defLines.empty()) {
+            console.error("Deformed mesh file is empty: " + defFile);
             return 1;
         }
 
         std::ofstream dstFile(meshOutputFile, std::ios::binary);
         if (!dstFile.is_open()) {
             console.error("Failed to create mesh output file: " + meshOutputFile);
-            srcFile.close();
             return 1;
         }
 
-        // Copy original content
-        std::string line;
+        // Copy original content, inserting *INCLUDE before *END.
         bool endFound = false;
-        while (std::getline(srcFile, line)) {
-            // Check for *END keyword
+        for (const auto& line : defLines) {
             std::string trimmedLine = line;
-            // Remove leading whitespace
             size_t start = trimmedLine.find_first_not_of(" \t");
             if (start != std::string::npos) {
                 trimmedLine = trimmedLine.substr(start);
             }
-            // Check if it's *END
             if (trimmedLine.length() >= 4 &&
                 (trimmedLine[0] == '*') &&
                 (trimmedLine[1] == 'E' || trimmedLine[1] == 'e') &&
                 (trimmedLine[2] == 'N' || trimmedLine[2] == 'n') &&
                 (trimmedLine[3] == 'D' || trimmedLine[3] == 'd')) {
-                // Insert *INCLUDE before *END
                 dstFile << "*INCLUDE\n";
                 dstFile << dynainFilename << "\n";
                 endFound = true;
@@ -724,14 +1110,12 @@ int runPrestress(const std::string& refFile, const std::string& defFile,
             dstFile << line << "\n";
         }
 
-        // If no *END found, append *INCLUDE at the end
         if (!endFound) {
             dstFile << "*INCLUDE\n";
             dstFile << dynainFilename << "\n";
             dstFile << "*END\n";
         }
 
-        srcFile.close();
         dstFile.close();
 
         console.success("Deformed mesh with prestress: " + meshOutputFile);
