@@ -140,6 +140,31 @@ set(VALIDATION_SOURCES
     src/validation/IntersectionDetector.cpp
 )
 
+# Local TET remesh module (Phase A self-contained; Phase B TetGen optional).
+set(REMESH_SOURCES
+    src/remesh/PatchExtractor.cpp
+    src/remesh/LocalImproveRemesher.cpp
+    src/remesh/TetGenRemesher.cpp
+    src/remesh/RemeshOrchestrator.cpp
+)
+
+# TetGen integration is OPT-IN due to AGPL v3 license. Default OFF.
+# Enable with:  cmake -DKOOREMAPPER_BUILD_TETGEN=ON ..
+option(KOOREMAPPER_BUILD_TETGEN
+       "Build the TetGen-backed remesher (third_party/tetgen, AGPL v3)" OFF)
+if(KOOREMAPPER_BUILD_TETGEN)
+    list(APPEND REMESH_SOURCES
+        third_party/tetgen/predicates.cxx
+        third_party/tetgen/tetgen.cxx
+    )
+    add_definitions(-DKOOREMAPPER_BUILD_TETGEN -DTETLIBRARY)
+    include_directories(${CMAKE_SOURCE_DIR}/third_party/tetgen)
+    message(STATUS "TetGen backend: ENABLED (AGPL v3 -- check distribution policy)")
+else()
+    message(STATUS "TetGen backend: disabled (Phase A only). "
+                   "Pass -DKOOREMAPPER_BUILD_TETGEN=ON to enable.")
+endif()
+
 # Create library
 add_library(kooremapper_lib STATIC
     ${CORE_SOURCES}
@@ -154,6 +179,7 @@ add_library(kooremapper_lib STATIC
     ${CLI_SOURCES}
     ${UTIL_SOURCES}
     ${VALIDATION_SOURCES}
+    ${REMESH_SOURCES}
 )
 
 # Add src/ to lib include path so ModelAssembler can reach commands/ headers
@@ -162,6 +188,17 @@ target_include_directories(kooremapper_lib PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # Define M_PI for MSVC (apply to both lib and executable)
 if(MSVC)
     target_compile_definitions(kooremapper_lib PRIVATE _USE_MATH_DEFINES)
+endif()
+
+# TetGen library mode -- ensure TETLIBRARY (causes terminatetetgen to throw
+# instead of exit()) is defined for BOTH the tetgen .cxx files and our
+# wrapper TetGenRemesher.cpp. add_definitions() above applies post-config
+# but we re-apply via target_compile_definitions to be unambiguous.
+if(KOOREMAPPER_BUILD_TETGEN)
+    target_compile_definitions(kooremapper_lib PRIVATE
+        TETLIBRARY
+        KOOREMAPPER_BUILD_TETGEN
+    )
 endif()
 
 # Link OpenMP to library
@@ -192,6 +229,7 @@ set(COMMAND_SOURCES
     src/commands/battery.cpp
     src/commands/strip.cpp
     src/commands/merge.cpp
+    src/commands/tetremesh.cpp
     src/battery/BatteryWriter.cpp
     src/battery/BatteryMaterials.cpp
     src/battery/BatteryContacts.cpp
