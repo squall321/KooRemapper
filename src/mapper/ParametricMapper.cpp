@@ -1,11 +1,14 @@
 #include "mapper/ParametricMapper.h"
 #include <cmath>
 #include <algorithm>
+#include <limits>
 
 namespace KooRemapper {
 
 ParametricMapper::ParametricMapper()
-    : isValid_(false), useTransfinite_(true)
+    : isValid_(false), useTransfinite_(true), arcAxis_(0),
+      isClosedLoop_(false), hasDegenerateEdges_(false),
+      gridDimI_(0), gridDimJ_(0), gridDimK_(0), gridReady_(false)
 {}
 
 void ParametricMapper::build(const Mesh& mesh, const BoundaryExtractor& boundary,
@@ -25,13 +28,157 @@ void ParametricMapper::build(const Mesh& mesh, const BoundaryExtractor& boundary
         }
     }
 
-    // Build edge interpolators
+    // Build edge interpolators (kept for fallback path and edge-based mode).
     buildEdges(mesh, edgeCalc);
 
-    // Build face interpolators
+    // Build face interpolators (kept for fallback transfinite path).
     buildFaces();
 
+    // Cache the structured-grid node positions for direct trilinear lookup.
+    // This is the PRIMARY interpolation path: it uses the actual interior
+    // node positions instead of reconstructing the shape from boundary
+    // corners + edges, so cross-section topology (teardrop, U-channel,
+    // any non-convex shape) is preserved exactly.
+    gridDimI_ = boundary.getDimI();
+    gridDimJ_ = boundary.getDimJ();
+    gridDimK_ = boundary.getDimK();
+    gridReady_ = false;
+    gridFilledCount_ = 0;
+    gridTotalCount_ = 0;
+    if (gridDimI_ > 0 && gridDimJ_ > 0 && gridDimK_ > 0) {
+        long long total = (long long)(gridDimI_ + 1) * (gridDimJ_ + 1) * (gridDimK_ + 1);
+        gridTotalCount_ = total;
+        gridPositions_.assign((size_t)total,
+            Vector3D(std::numeric_limits<double>::quiet_NaN(),
+                     std::numeric_limits<double>::quiet_NaN(),
+                     std::numeric_limits<double>::quiet_NaN()));
+        long long filled = 0;
+        for (int i = 0; i <= gridDimI_; ++i) {
+            for (int j = 0; j <= gridDimJ_; ++j) {
+                for (int k = 0; k <= gridDimK_; ++k) {
+                    int nodeId = boundary.getNodeAtGrid(i, j, k);
+                    if (nodeId < 0) continue;
+                    const Node* n = mesh.getNode(nodeId);
+                    if (!n) continue;
+                    gridPositions_[gridIdx(i, j, k)] = n->position;
+                    ++filled;
+                }
+            }
+        }
+        gridFilledCount_ = filled;
+        // Always enable grid lookup if grid was allocated. Per-cell coverage
+        // is checked inside gridLookupInterpolate (NaN sentinel falls back
+        // to edge-based for THAT query only). Closed-loop / shared-seam
+        // topologies legitimately reduce raw fill count; we don't want a
+        // global threshold to disable the better algorithm wholesale.
+        gridReady_ = (filled > 0);
+    }
+
+    // Detect arc axis = bent indexer axis with the longest neutral edge length.
+    // The 4 edges parallel to this axis are the dominant curvature carriers
+    // and will be used as the primary interpolation direction in
+    // edgeBasedInterpolate. The other two axes are treated as short
+    // cross-section directions blended bilinearly.
+    //
+    // Why this matters: the StructuredGridIndexer can label any geometric axis
+    // as "i". For closed-loop / fully-folded bent meshes (e.g. teardrop), if
+    // the indexer labels the arc as j or k while leaving i as a thin
+    // thickness direction, the legacy "always-use-i-edges" mapping collapses
+    // along the cross-section (Jacobian = 0 everywhere) because the i-edges
+    // are barely longer than a point and the j/k corners coincide at the
+    // loop seam.
+    double lenI = edgeCalc.getNeutralLengthI();
+    double lenJ = edgeCalc.getNeutralLengthJ();
+    double lenK = edgeCalc.getNeutralLengthK();
+    arcAxis_ = 0;
+    if (lenJ > lenI && lenJ >= lenK) arcAxis_ = 1;
+    else if (lenK > lenI && lenK > lenJ) arcAxis_ = 2;
+
+    // Topology diagnostics: detect closed-loop (coincident arc-endpoint
+    // corners) and genuine edge degeneracy (coincident endpoints AND
+    // collapsed interior). A valid teardrop closed loop has coincident
+    // corners at the seam but the arc-direction edges curve all the way
+    // around and have substantial interior length. A truly broken mesh
+    // would have an edge whose entire curve is pinned to the endpoint.
+    isClosedLoop_ = false;
+    hasDegenerateEdges_ = false;
+    topologyDiagnostic_.clear();
+    validateTopology(edgeCalc);
+
     isValid_ = true;
+}
+
+void ParametricMapper::validateTopology(const EdgeCalculator& edgeCalc) {
+    const double coincidentTol = 1e-6;
+
+    // Corner pair structure (LS-DYNA hex ordering):
+    //   i-axis endpoints:  (0<->1), (3<->2), (4<->5), (7<->6)
+    //   j-axis endpoints:  (0<->3), (1<->2), (4<->7), (5<->6)
+    //   k-axis endpoints:  (0<->4), (1<->5), (2<->6), (3<->7)
+    // For a closed loop along axis A, all 4 pairs on that axis coincide.
+    const int cornerPairs[3][4][2] = {
+        {{0,1}, {3,2}, {4,5}, {7,6}},  // i
+        {{0,3}, {1,2}, {4,7}, {5,6}},  // j
+        {{0,4}, {1,5}, {2,6}, {3,7}}   // k
+    };
+    const char* axisName[3] = {"i", "j", "k"};
+
+    for (int axis = 0; axis < 3; ++axis) {
+        int coincCount = 0;
+        for (int p = 0; p < 4; ++p) {
+            Vector3D d = corners_[cornerPairs[axis][p][0]] -
+                         corners_[cornerPairs[axis][p][1]];
+            if (std::sqrt(d.x*d.x + d.y*d.y + d.z*d.z) < coincidentTol) {
+                ++coincCount;
+            }
+        }
+        if (coincCount == 4) {
+            // All four corner pairs on this axis coincide. Could be a
+            // valid closed loop (if the connecting edges curve around) or
+            // a degenerate axis (if the edges collapse). Distinguish by
+            // sampling the edge interpolators at param 0.5.
+            //
+            // Edge indices for each axis:
+            //   axis 0 (i-edges):  0..3
+            //   axis 1 (j-edges):  4..7
+            //   axis 2 (k-edges):  8..11
+            int eStart = axis * 4;
+            int collapsedEdgeCount = 0;
+            for (int e = 0; e < 4; ++e) {
+                const EdgeInfo& info = edgeCalc.getEdge(eStart + e);
+                if (info.points.size() < 2) { ++collapsedEdgeCount; continue; }
+                // Pick a midpoint-ish sample along the edge chain.
+                const Vector3D& a = info.points.front();
+                const Vector3D& mid = info.points[info.points.size() / 2];
+                Vector3D dm = mid - a;
+                double midDist = std::sqrt(dm.x*dm.x + dm.y*dm.y + dm.z*dm.z);
+                // If endpoints coincide AND midpoint also coincides with
+                // them, the edge is truly degenerate (zero-length curve).
+                if (midDist < coincidentTol) ++collapsedEdgeCount;
+            }
+            if (collapsedEdgeCount == 4) {
+                // All 4 edges on this axis have zero length interior.
+                // This is NOT a closed loop -- it's a broken/degenerate
+                // axis and the mapping will collapse along it.
+                hasDegenerateEdges_ = true;
+                topologyDiagnostic_ += std::string("DEGENERATE axis ") +
+                    axisName[axis] + ": all 4 edges have zero interior length. ";
+            } else if (collapsedEdgeCount == 0) {
+                // Clean closed loop: coincident corners but edges curve
+                // around with substantial length.
+                isClosedLoop_ = true;
+                topologyDiagnostic_ += std::string("Closed-loop topology along ") +
+                    axisName[axis] + " axis detected (valid). ";
+            } else {
+                // Some edges curve, some don't. Unusual; mark as
+                // degenerate to be safe.
+                hasDegenerateEdges_ = true;
+                topologyDiagnostic_ += std::string("Partial-degenerate axis ") +
+                    axisName[axis] + ": " + std::to_string(collapsedEdgeCount) +
+                    "/4 edges collapsed. ";
+            }
+        }
+    }
 }
 
 void ParametricMapper::buildEdges(const Mesh& mesh, const EdgeCalculator& edgeCalc) {
@@ -71,16 +218,22 @@ Vector3D ParametricMapper::mapToPhysical(double u, double v, double w) const {
     v = std::max(0.0, std::min(1.0, v));
     w = std::max(0.0, std::min(1.0, w));
 
-    // Always use edge-based interpolation for structured grids
-    // This ensures bent -> unfold -> remap returns exact original positions
-    // when the flat mesh is generated from the bent mesh.
+    // Primary path: trilinear lookup over the actual structured-grid
+    // INTERIOR nodes. This represents the exact bent geometry (any
+    // cross-section topology, including teardrop / U / closed loop) by
+    // blending the 8 interior grid nodes surrounding the parametric
+    // query point. Falls back to edge-based when the grid is unavailable.
     //
-    // Edge-based interpolation uses the actual edge curves and bilinear
-    // interpolation in the cross-section plane, which is more accurate
-    // for structured hex meshes than Gordon-Hall transfinite interpolation.
-    //
-    // For unstructured or refined flat meshes mapped to bent reference,
-    // edge-based still works well because edges define the deformation field.
+    // The previous edge-based-only path reconstructed shape from 8
+    // boundary corners + 12 boundary edges. That works for shapes whose
+    // cross-section is well-approximated by 4-corner bilinear blending
+    // (cylinders, simple bends), but COLLAPSES to 1D when the cross-
+    // section corners are coplanar/colinear -- which is exactly what
+    // happens for teardrop battery cells where the cross-section
+    // perimeter (k axis) loops back near its start point.
+    if (gridReady_) {
+        return gridLookupInterpolate(u, v, w);
+    }
     return edgeBasedInterpolate(u, v, w);
 }
 
@@ -109,25 +262,111 @@ bool ParametricMapper::isUFoldGeometry() const {
     return (xDiff / meshSize) < 0.1;
 }
 
+Vector3D ParametricMapper::gridLookupInterpolate(double u, double v, double w) const {
+    // Caller (mapToPhysical) clamps u,v,w to [0,1] and checks gridReady_.
+    // Convert parametric coords into floating grid index space:
+    //   real_i = u * gridDimI_   (gridDimI_ is # of element layers in i;
+    //                             node grid spans i in [0, gridDimI_])
+    double real_i = u * (double)gridDimI_;
+    double real_j = v * (double)gridDimJ_;
+    double real_k = w * (double)gridDimK_;
+
+    int i_low = (int)std::floor(real_i);
+    int j_low = (int)std::floor(real_j);
+    int k_low = (int)std::floor(real_k);
+    if (i_low < 0) i_low = 0;
+    if (j_low < 0) j_low = 0;
+    if (k_low < 0) k_low = 0;
+    if (i_low >= gridDimI_) i_low = gridDimI_ - 1;
+    if (j_low >= gridDimJ_) j_low = gridDimJ_ - 1;
+    if (k_low >= gridDimK_) k_low = gridDimK_ - 1;
+    int i_high = i_low + 1;
+    int j_high = j_low + 1;
+    int k_high = k_low + 1;
+    // i_high never exceeds gridDimI_ because i_low was clamped to gridDimI_-1
+    // and the node grid has gridDimI_+1 layers indexed [0, gridDimI_].
+
+    double ti = real_i - (double)i_low;
+    double tj = real_j - (double)j_low;
+    double tk = real_k - (double)k_low;
+    if (ti < 0.0) ti = 0.0; else if (ti > 1.0) ti = 1.0;
+    if (tj < 0.0) tj = 0.0; else if (tj > 1.0) tj = 1.0;
+    if (tk < 0.0) tk = 0.0; else if (tk > 1.0) tk = 1.0;
+
+    const Vector3D& p000 = gridPositions_[gridIdx(i_low,  j_low,  k_low )];
+    const Vector3D& p100 = gridPositions_[gridIdx(i_high, j_low,  k_low )];
+    const Vector3D& p010 = gridPositions_[gridIdx(i_low,  j_high, k_low )];
+    const Vector3D& p110 = gridPositions_[gridIdx(i_high, j_high, k_low )];
+    const Vector3D& p001 = gridPositions_[gridIdx(i_low,  j_low,  k_high)];
+    const Vector3D& p101 = gridPositions_[gridIdx(i_high, j_low,  k_high)];
+    const Vector3D& p011 = gridPositions_[gridIdx(i_low,  j_high, k_high)];
+    const Vector3D& p111 = gridPositions_[gridIdx(i_high, j_high, k_high)];
+
+    // Sparse-grid guard: if any of the 8 surrounding nodes is missing
+    // (sentinel NaN), fall back to boundary-based edge interpolation.
+    if (std::isnan(p000.x) || std::isnan(p100.x) || std::isnan(p010.x) ||
+        std::isnan(p110.x) || std::isnan(p001.x) || std::isnan(p101.x) ||
+        std::isnan(p011.x) || std::isnan(p111.x)) {
+        return edgeBasedInterpolate(u, v, w);
+    }
+
+    double mi = 1.0 - ti, mj = 1.0 - tj, mk = 1.0 - tk;
+    double w000 = mi * mj * mk;
+    double w100 = ti * mj * mk;
+    double w010 = mi * tj * mk;
+    double w110 = ti * tj * mk;
+    double w001 = mi * mj * tk;
+    double w101 = ti * mj * tk;
+    double w011 = mi * tj * tk;
+    double w111 = ti * tj * tk;
+
+    return Vector3D(
+        p000.x * w000 + p100.x * w100 + p010.x * w010 + p110.x * w110 +
+        p001.x * w001 + p101.x * w101 + p011.x * w011 + p111.x * w111,
+        p000.y * w000 + p100.y * w100 + p010.y * w010 + p110.y * w110 +
+        p001.y * w001 + p101.y * w101 + p011.y * w011 + p111.y * w111,
+        p000.z * w000 + p100.z * w100 + p010.z * w010 + p110.z * w110 +
+        p001.z * w001 + p101.z * w101 + p011.z * w011 + p111.z * w111
+    );
+}
+
 Vector3D ParametricMapper::edgeBasedInterpolate(double u, double v, double w) const {
-    // Interpolate using edges directly
-    // For structured grids, this gives exact results at grid nodes
-    
-    const double mu = 1.0 - u;
-    const double mv = 1.0 - v;
-    const double mw = 1.0 - w;
-    
-    // Get points on the 4 i-edges at this u
-    Vector3D p00 = edges_[0].interpolate(u);  // j=0, k=0
-    Vector3D p10 = edges_[1].interpolate(u);  // j=N, k=0
-    Vector3D p01 = edges_[2].interpolate(u);  // j=0, k=P
-    Vector3D p11 = edges_[3].interpolate(u);  // j=N, k=P
-    
-    // Bilinear interpolation in v,w at this u-slice
-    Vector3D bottom = p00 * mv + p10 * v;  // k=0 line
-    Vector3D top = p01 * mv + p11 * v;     // k=P line
-    
-    return bottom * mw + top * w;
+    // Interpolate using the 4 edges parallel to the auto-detected ARC axis,
+    // then bilinearly blend across the two short cross-section axes.
+    //
+    // EdgeCalculator's edge ordering (consistent with transfiniteInterpolate):
+    //   axis 0 (i-edges, vary in u): edges_[0..3] at (j,k) = (0,0),(N,0),(0,P),(N,P)
+    //   axis 1 (j-edges, vary in v): edges_[4..7] at (i,k) = (0,0),(M,0),(0,P),(M,P)
+    //   axis 2 (k-edges, vary in w): edges_[8..11] at (i,j) = (0,0),(M,0),(0,N),(M,N)
+    //
+    // For arcAxis = 0: arcRatio=u, cross=(v,w) -- i was the long arc direction (legacy default).
+    // For arcAxis = 1: arcRatio=v, cross=(u,w) -- bent indexer labeled arc as j.
+    // For arcAxis = 2: arcRatio=w, cross=(u,v) -- bent indexer labeled arc as k.
+    //
+    // Picking the long axis as the curve carrier is mandatory for closed-loop
+    // bent meshes (teardrop); using the short i-edges in that case collapses
+    // the cross-section blend and produces zero-Jacobian output everywhere.
+
+    double arcRatio, ratioA, ratioB;
+    int eStart;
+    if (arcAxis_ == 1) {
+        arcRatio = v; ratioA = u; ratioB = w; eStart = 4;
+    } else if (arcAxis_ == 2) {
+        arcRatio = w; ratioA = u; ratioB = v; eStart = 8;
+    } else {
+        arcRatio = u; ratioA = v; ratioB = w; eStart = 0;
+    }
+
+    Vector3D p00 = edges_[eStart + 0].interpolate(arcRatio);  // crossA=0, crossB=0
+    Vector3D p10 = edges_[eStart + 1].interpolate(arcRatio);  // crossA=max, crossB=0
+    Vector3D p01 = edges_[eStart + 2].interpolate(arcRatio);  // crossA=0, crossB=max
+    Vector3D p11 = edges_[eStart + 3].interpolate(arcRatio);  // crossA=max, crossB=max
+
+    const double mA = 1.0 - ratioA;
+    const double mB = 1.0 - ratioB;
+    Vector3D bottom = p00 * mA + p10 * ratioA;  // crossB=0 line
+    Vector3D top    = p01 * mA + p11 * ratioA;  // crossB=max line
+    return bottom * mB + top * ratioB;
 }
 
 Vector3D ParametricMapper::trilinearInterpolate(double u, double v, double w) const {

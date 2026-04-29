@@ -56,11 +56,23 @@ private:
     BoundaryExtractor boundary_;
     EdgeCalculator edgeCalc_;
 
-    // Results
+    // Results (flat-axis-oriented; see axisPerm_ for bent<->flat mapping)
     double flatLengthI_;
     double flatLengthJ_;
     double flatLengthK_;
     int dimI_, dimJ_, dimK_;
+
+    // Bent-mesh indexer dimensions (raw, before axis permutation).
+    int bentDimI_, bentDimJ_, bentDimK_;
+
+    // Axis permutation: axisPerm_[flatAxis] = bent indexer axis.
+    //   axisPerm_[0] = which bent axis (0=i,1=j,2=k) is the ARC (longest edge length)
+    //   axisPerm_[1] = which bent axis is flat Y (width)
+    //   axisPerm_[2] = which bent axis is flat Z (thickness)
+    // All getNodeAt/element lookups in this class go through this permutation
+    // so the flat coordinate frame is consistent regardless of how the
+    // indexer happened to label axes on the input mesh.
+    int axisPerm_[3];
 
     // Cross-section axis directions (in bent mesh local coordinates)
     // These are determined by analyzing the first cross-section
@@ -98,14 +110,38 @@ private:
     Mesh generateMesh();
 
     /**
-     * Get node at grid position from analyzed mesh
+     * Get node at FLAT-axis grid position (fi, fj, fk).
+     * Internally permutes to bent-axis indices via axisPerm_ and calls
+     * getNodeAtBent. Use this from all post-permutation code paths
+     * (generateMesh, detectApexShift, analyzeCrossSectionAxes, etc.).
      */
-    const Node* getNodeAt(int i, int j, int k) const;
+    const Node* getNodeAt(int fi, int fj, int fk) const;
+
+    /**
+     * Get node at raw BENT-axis grid position (bi, bj, bk).
+     * Bypasses axis permutation -- use this only during axis detection
+     * inside analyzeBentMesh, before axisPerm_ is finalized.
+     */
+    const Node* getNodeAtBent(int bi, int bj, int bk) const;
 
     /**
      * Analyze cross-section at i=0 to determine J and K axis directions
      */
     void analyzeCrossSectionAxes();
+
+    /**
+     * Detect optimal cyclic shift for closed-loop bent meshes.
+     *
+     * Returns the amount to cyclic-shift i indexing so that new i=0 lands at
+     * the lowest-curvature point on the centerline. This puts the mesh's
+     * fold apex (max curvature) at the middle of the unfold, giving a
+     * symmetric, intuitive flat layout.
+     *
+     * Returns 0 if the mesh is not a closed loop (fewer than 80% of
+     * cross-section nodes shared between i=0 and i=dimI), or if the
+     * lowest-curvature point already coincides with i=0.
+     */
+    int detectApexShift();
 };
 
 } // namespace KooRemapper
