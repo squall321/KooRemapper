@@ -18,6 +18,14 @@ namespace KooRemapper { class ConsoleOutput; }
 //                         applying bbox_align on grossly mismatched meshes.
 //   outScaledFlatPath: (optional, source mode only) receives the temp file
 //                      path the caller should use as prestress reference.
+// flipInputX/Y/Z: PRE-MAP detail flat mirror. The detail mesh is
+//   mirrored about its bbox center BEFORE mapping; HEX8 connectivity is
+//   swapped on odd-parity flips so source winding stays right-handed.
+//   Use to put detail's slits/holes/asymmetric features on the OPPOSITE
+//   face of the bent target without moving the mapped result's global
+//   coordinates the way --flip-x/y/z (post-map output mirror) would.
+//   Composes with bbox_align=source: both transforms write into the same
+//   preprocessed-flat temp file used as the prestress reference.
 int runMapping(const std::string& bentFile, const std::string& flatFile,
                const std::string& outputFile,
                const KooRemapper::ConsoleOutput& console,
@@ -26,7 +34,8 @@ int runMapping(const std::string& bentFile, const std::string& flatFile,
                bool flipX = false, bool flipY = false, bool flipZ = false,
                const std::string& bboxAlignMode = "none",
                double bboxAlignMaxDriftPct = 2.0,
-               std::string* outScaledFlatPath = nullptr);
+               std::string* outScaledFlatPath = nullptr,
+               bool flipInputX = false, bool flipInputY = false, bool flipInputZ = false);
 
 int runShellMapping(const std::string& bentShellFile, const std::string& flatFile,
                     const std::string& outputFile, double thickness,

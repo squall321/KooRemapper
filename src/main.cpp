@@ -1491,6 +1491,7 @@ int main(int argc, char* argv[]) {
         bool useParallel = true;  // Default: parallel mode
         bool forcePositive = false;
         bool flipX = false, flipY = false, flipZ = false;
+        bool flipInX = false, flipInY = false, flipInZ = false;
         std::string bboxAlignMode = "none";   // none | source | target
         double bboxAlignMaxDrift = 2.0;       // percent
         bool sawBboxAlignCli = false;
@@ -1509,6 +1510,12 @@ int main(int argc, char* argv[]) {
                 flipY = true;
             } else if (arg == "--flip-z") {
                 flipZ = true;
+            } else if (arg == "--flip-input-x") {
+                flipInX = true;
+            } else if (arg == "--flip-input-y") {
+                flipInY = true;
+            } else if (arg == "--flip-input-z") {
+                flipInZ = true;
             } else if (arg == "--bbox-align" && i + 1 < argc) {
                 bboxAlignMode = argv[++i];
                 sawBboxAlignCli = true;
@@ -1590,8 +1597,10 @@ int main(int argc, char* argv[]) {
             };
             // Track which keys were set in YAML so CLI flags can override.
             bool yamlForce = false, yamlFlipX = false, yamlFlipY = false, yamlFlipZ = false;
+            bool yamlFlipInX = false, yamlFlipInY = false, yamlFlipInZ = false;
             bool yamlParallel = useParallel;
             bool sawForce = false, sawFlipX = false, sawFlipY = false, sawFlipZ = false, sawParallel = false;
+            bool sawFlipInX = false, sawFlipInY = false, sawFlipInZ = false;
             std::string yamlBboxAlign;
             double yamlBboxDrift = 2.0;
             bool sawBboxAlignYaml = false, sawBboxDriftYaml = false;
@@ -1644,6 +1653,9 @@ int main(int argc, char* argv[]) {
                 else if (key == "flip_x")       { yamlFlipX = parseBool(val); sawFlipX = true; }
                 else if (key == "flip_y")       { yamlFlipY = parseBool(val); sawFlipY = true; }
                 else if (key == "flip_z")       { yamlFlipZ = parseBool(val); sawFlipZ = true; }
+                else if (key == "flip_input_x") { yamlFlipInX = parseBool(val); sawFlipInX = true; }
+                else if (key == "flip_input_y") { yamlFlipInY = parseBool(val); sawFlipInY = true; }
+                else if (key == "flip_input_z") { yamlFlipInZ = parseBool(val); sawFlipInZ = true; }
                 else if (key == "bbox_align")   { yamlBboxAlign = val; sawBboxAlignYaml = true; }
                 else if (key == "bbox_align_max_drift") {
                     try { yamlBboxDrift = std::stod(val); sawBboxDriftYaml = true; }
@@ -1664,6 +1676,9 @@ int main(int argc, char* argv[]) {
             if (sawFlipX  && !flipX)         flipX         = yamlFlipX;
             if (sawFlipY  && !flipY)         flipY         = yamlFlipY;
             if (sawFlipZ  && !flipZ)         flipZ         = yamlFlipZ;
+            if (sawFlipInX && !flipInX)      flipInX       = yamlFlipInX;
+            if (sawFlipInY && !flipInY)      flipInY       = yamlFlipInY;
+            if (sawFlipInZ && !flipInZ)      flipInZ       = yamlFlipInZ;
             if (sawBboxAlignYaml && !sawBboxAlignCli) bboxAlignMode = yamlBboxAlign;
             if (sawBboxDriftYaml && !sawBboxDriftCli) bboxAlignMaxDrift = yamlBboxDrift;
         } else {
@@ -1682,6 +1697,11 @@ int main(int argc, char* argv[]) {
                 console.println("                       (e.g. --flip-x --flip-z) to compose reflections.");
                 console.println("                       HEX8 connectivity is swapped automatically when");
                 console.println("                       odd-parity flips would otherwise invert Jacobian.");
+                console.println("  --flip-input-x|y|z   PRE-map detail flat mirror. Mirrors detail BEFORE");
+                console.println("                       mapping so its features land on the OPPOSITE face");
+                console.println("                       of the bent target while keeping the result's");
+                console.println("                       global coordinates unchanged. Use for slit/hole");
+                console.println("                       face swap independent of bent location.");
                 console.println("  --bbox-align <mode>  Auto-rescale to remove uniform stretch in mapping.");
                 console.println("                       mode = source: rescale detail flat to bent ijk lengths");
                 console.println("                              target: rescale bent to detail XYZ lengths");
@@ -1697,9 +1717,12 @@ int main(int argc, char* argv[]) {
                 console.println("  output: <out.k>");
                 console.println("  parallel: true            # optional");
                 console.println("  force_positive: false     # optional");
-                console.println("  flip_x: false             # optional");
+                console.println("  flip_x: false             # optional, output mirror");
                 console.println("  flip_y: false             # optional");
                 console.println("  flip_z: true              # optional");
+                console.println("  flip_input_x: false       # optional, PRE-map detail flat mirror");
+                console.println("  flip_input_y: false       # (slit/hole face swap; result coords unchanged)");
+                console.println("  flip_input_z: true        # ");
                 console.println("  bbox_align: source        # optional: source|target|none");
                 console.println("  bbox_align_max_drift: 2.0 # optional, percent (reject above)");
                 console.println("  prestress:                # optional, chain prestress after map");
@@ -1719,10 +1742,11 @@ int main(int argc, char* argv[]) {
         }
 
         printBanner(console);
-        std::string scaledFlatPath;  // populated by runMapping when bbox_align=source
+        std::string scaledFlatPath;  // populated by runMapping when flat is preprocessed
         int mapRc = runMapping(bentPath, flatPath, outputPath,
                                console, useParallel, forcePositive, flipX, flipY, flipZ,
-                               bboxAlignMode, bboxAlignMaxDrift, &scaledFlatPath);
+                               bboxAlignMode, bboxAlignMaxDrift, &scaledFlatPath,
+                               flipInX, flipInY, flipInZ);
         if (mapRc != 0) return mapRc;
 
         // Optional prestress chaining: configured only via YAML (CLI form

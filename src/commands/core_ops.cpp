@@ -211,7 +211,8 @@ int runMapping(const std::string& bentFile, const std::string& flatFile,
                bool flipX, bool flipY, bool flipZ,
                const std::string& bboxAlignMode,
                double bboxAlignMaxDriftPct,
-               std::string* outScaledFlatPath) {
+               std::string* outScaledFlatPath,
+               bool flipInputX, bool flipInputY, bool flipInputZ) {
     Timer timer;
 
     // Load bent mesh
@@ -320,21 +321,6 @@ int runMapping(const std::string& bentFile, const std::string& flatFile,
                 if (mode == "source") {
                     applyAffineScaleAboutCenter(flatMesh,
                                                 ba.scale[0], ba.scale[1], ba.scale[2]);
-                    // Write a temp .k of the scaled flat so chain prestress
-                    // can use it as reference (otherwise F = ∂x_def/∂X_ref
-                    // would compute against the un-scaled flat and the
-                    // injected uniform stretch would reappear as residual
-                    // stress).
-                    scaledFlatTmpPath = outputFile + ".__bbox_scaled_flat.k";
-                    KFileWriter w;
-                    if (!w.writeFile(scaledFlatTmpPath, flatMesh, false)) {
-                        console.warning("bbox_align: failed to write scaled flat temp: "
-                                        + w.getErrorMessage()
-                                        + " (chain prestress may report residual axial bias)");
-                        scaledFlatTmpPath.clear();
-                    } else if (outScaledFlatPath) {
-                        *outScaledFlatPath = scaledFlatTmpPath;
-                    }
                 } else {  // target
                     applyAffineScaleAboutCenter(bentMesh,
                                                 ba.scale[0], ba.scale[1], ba.scale[2]);
@@ -344,6 +330,95 @@ int runMapping(const std::string& bentFile, const std::string& flatFile,
             } else {
                 console.info("Bboxes already aligned within tolerance — no scaling needed.");
             }
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // flip-input preprocessor (optional)
+    //
+    // Mirror the detail flat IN PLACE before mapping, so the resulting
+    // mapped mesh has its features (slits, holes, asymmetric thickness
+    // patterns) on the opposite face of the bent target -- WITHOUT
+    // moving the mapped mesh's global coordinates the way output flip
+    // (--flip-x/y/z) would. Useful when:
+    //   * detail CAD has a slit on +Z face but the model needs it on -Z
+    //     face of the bent target (e.g. inner vs outer surface swap)
+    //   * detail handedness needs adjusting independent of bent location
+    //
+    // HEX8 connectivity is also swapped on odd-parity flips so the
+    // detail's Jacobian sign is preserved through the mirror; the
+    // mapper's downstream sign-preservation logic then matches the
+    // mirrored-detail's signs to the bent's Jacobian as usual.
+    //
+    // Composition with bbox_align=source: BOTH transforms write into the
+    // same temp .k file (path stored in scaledFlatTmpPath -- name kept
+    // for back-compat though it now means "preprocessed flat") so chain
+    // prestress sees the already-mirrored-AND-scaled flat as F's
+    // reference.
+    //
+    // Composition with output flip (--flip-x/y/z): orthogonal. flip_input
+    // mirrors detail BEFORE mapping; output flip mirrors result AFTER.
+    // Both can be combined; main.cpp's chain prestress wraps the second
+    // step's mirror around the same flat ref.
+    // -----------------------------------------------------------------
+    if (flipInputX || flipInputY || flipInputZ) {
+        Vector3D fMin, fMax;
+        flatMesh.calculateBoundingBox(fMin, fMax);
+        double cx = (fMin.x + fMax.x) * 0.5;
+        double cy = (fMin.y + fMax.y) * 0.5;
+        double cz = (fMin.z + fMax.z) * 0.5;
+        for (auto& kv : flatMesh.nodes) {
+            Vector3D& p = kv.second.position;
+            if (flipInputX) p.x = 2.0 * cx - p.x;
+            if (flipInputY) p.y = 2.0 * cy - p.y;
+            if (flipInputZ) p.z = 2.0 * cz - p.z;
+        }
+        // Odd-parity mirror inverts every HEX8 Jacobian. Swap
+        // bottom/top to restore positive winding so the source mesh
+        // analyzer sees a clean right-handed input.
+        int parity = (flipInputX ? 1 : 0) + (flipInputY ? 1 : 0) + (flipInputZ ? 1 : 0);
+        if ((parity % 2) != 0) {
+            for (auto& kv : flatMesh.elements) {
+                Element& e = kv.second;
+                if (e.type != ElementType::HEX8) continue;
+                std::array<int, 8> orig = e.nodeIds;
+                e.nodeIds[0] = orig[4]; e.nodeIds[1] = orig[5];
+                e.nodeIds[2] = orig[6]; e.nodeIds[3] = orig[7];
+                e.nodeIds[4] = orig[0]; e.nodeIds[5] = orig[1];
+                e.nodeIds[6] = orig[2]; e.nodeIds[7] = orig[3];
+            }
+        }
+        std::string axes;
+        if (flipInputX) axes += "X";
+        if (flipInputY) axes += "Y";
+        if (flipInputZ) axes += "Z";
+        console.info("Input mirror: detail flat " + axes +
+                     " axis flipped before mapping" +
+                     ((parity % 2) != 0 ? " (HEX8 connectivity swapped, parity restored)" : ""));
+    }
+
+    // If detail flat got pre-processed (bbox_align=source and/or
+    // flip_input), persist it as a temp .k so chain prestress can use
+    // the SAME pre-processed mesh as F's reference. Otherwise F would
+    // compute against the un-pre-processed flat and reintroduce the
+    // injected stretch / mirror as spurious residual strain.
+    bool flatWasPreprocessed = (!scaledFlatTmpPath.empty()) ||
+                                flipInputX || flipInputY || flipInputZ;
+    if (flatWasPreprocessed) {
+        // Use the existing path slot regardless of which preprocessor(s)
+        // ran -- bbox_align=source may have written it already, but we
+        // need to re-write to capture the additional flip_input state.
+        if (scaledFlatTmpPath.empty()) {
+            scaledFlatTmpPath = outputFile + ".__preproc_flat.k";
+        }
+        KFileWriter w;
+        if (!w.writeFile(scaledFlatTmpPath, flatMesh, false)) {
+            console.warning("Failed to write pre-processed flat temp: "
+                            + w.getErrorMessage()
+                            + " (chain prestress may report residual strain)");
+            scaledFlatTmpPath.clear();
+        } else if (outScaledFlatPath) {
+            *outScaledFlatPath = scaledFlatTmpPath;
         }
     }
 
