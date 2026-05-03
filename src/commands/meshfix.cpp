@@ -336,6 +336,16 @@ static AnalysisResult analyzePart(const Mesh& mesh, int pid, const Cfg& cfg) {
     // Attractors — cap at 1000 to keep geo file/Distance field manageable
     static constexpr int MAX_ATTRACTORS = 1000;
     if (cfg.adaptive) {
+        // Always add the 8 bounding-box corner points as attractors.
+        // Corners have 90° dihedral angles; without fine elements there the
+        // scaled Jacobian will be very poor regardless of other settings.
+        for (int cx=0;cx<2;++cx) for (int cy=0;cy<2;++cy) for (int cz=0;cz<2;++cz)
+            ar.attractors.push_back({
+                cx ? bMax[0] : bMin[0],
+                cy ? bMax[1] : bMin[1],
+                cz ? bMax[2] : bMin[2]
+            });
+
         double thresh = cfg.lcTarget * cfg.attractorRatio;
         std::set<std::pair<int,int>> seenEdge;
         for (auto* e : elems) {
@@ -727,6 +737,7 @@ static bool writeGeoScript(const std::string& geoPath,
       << "Mesh.CharacteristicLengthMax = " << ar.lcMaxEff << ";\n"
       << "Mesh.CharacteristicLengthExtendFromBoundary = 1;\n"
       << "Mesh.Algorithm3D = " << algoCode(cfg.algorithm) << ";\n"
+      << "Mesh.OptimizeThreshold = 0.5;\n"
       << "Mesh.Optimize = 1;\n"
       << "Mesh.OptimizeNetgen = " << (cfg.optimizeNetgen?1:0) << ";\n"
       << "Mesh.MshFileVersion = 2.2;\n\n"
