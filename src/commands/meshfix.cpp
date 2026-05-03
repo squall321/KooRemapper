@@ -727,9 +727,6 @@ static bool writeGeoScript(const std::string& geoPath,
       << "Mesh.CharacteristicLengthMax = " << ar.lcMaxEff << ";\n"
       << "Mesh.CharacteristicLengthExtendFromBoundary = 1;\n"
       << "Mesh.Algorithm3D = " << algoCode(cfg.algorithm) << ";\n"
-      // Only re-optimise elements whose scaled Jacobian is below this
-      // threshold — avoids touching already-good elements.
-      << "Mesh.OptimizeThreshold = 0.5;\n"
       << "Mesh.Optimize = 1;\n"
       << "Mesh.OptimizeNetgen = " << (cfg.optimizeNetgen?1:0) << ";\n"
       << "Mesh.MshFileVersion = 2.2;\n\n"
