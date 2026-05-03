@@ -61,6 +61,7 @@
 #include "commands/strip.h"
 #include "commands/merge.h"
 #include "commands/tetremesh.h"
+#include "commands/meshfix.h"
 
 #include <iostream>
 #include <fstream>
@@ -2249,6 +2250,45 @@ int main(int argc, char* argv[]) {
         }
         printBanner(console);
         return runTetRemesh(argv[2], console);
+    }
+
+    // MeshFix command — whole-part TET4 remesh via Gmsh subprocess
+    if (command == "meshfix") {
+        if (argc < 3) {
+            console.error("Usage: KooRemapper meshfix <config.yaml>");
+            console.println("");
+            console.println("Requires dist/gmsh/gmsh.exe (or dist/gmsh-<ver>/gmsh.exe).");
+            console.println("");
+            console.println("YAML schema:");
+            console.println("  model:          input.k");
+            console.println("  output:         output.k");
+            console.println("  pid:            3                 # part to remesh");
+            console.println("");
+            console.println("  lc_target:      1.0               # target avg element size");
+            console.println("  lc_min:         0.3               # min size (or auto from min_dt)");
+            console.println("  lc_max:         2.0               # max size (default: lc_target*2)");
+            console.println("");
+            console.println("  # min_dt-based lc_min (alternative to lc_min):");
+            console.println("  min_dt:         1.0e-4            # LS-DYNA explicit dt lower bound");
+            console.println("  density:        7.85e-9           # rho (t/mm^3)");
+            console.println("  E:              210000.0          # MPa");
+            console.println("  nu:             0.3");
+            console.println("");
+            console.println("  min_layers_thin: 2               # layers through thin dimension");
+            console.println("  adaptive:       true             # attractor-based size field");
+            console.println("  attractor_ratio: 0.4            # edge < lc_target*ratio -> attractor");
+            console.println("  decay_factor:   8.0             # size ramp distance = lc_min*factor");
+            console.println("");
+            console.println("  boundary_nodes: free             # free | fixed | snap");
+            console.println("  snap_tolerance: 0.001");
+            console.println("");
+            console.println("  algorithm:      hxt              # hxt | frontal3d | del3d");
+            console.println("  optimize_netgen: true");
+            console.println("  warn_min_jac:   0.15");
+            return 1;
+        }
+        printBanner(console);
+        return runMeshFix(argv[2], console);
     }
 
     // Info command

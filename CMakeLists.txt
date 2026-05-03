@@ -230,6 +230,7 @@ set(COMMAND_SOURCES
     src/commands/strip.cpp
     src/commands/merge.cpp
     src/commands/tetremesh.cpp
+    src/commands/meshfix.cpp
     src/battery/BatteryWriter.cpp
     src/battery/BatteryMaterials.cpp
     src/battery/BatteryContacts.cpp
