@@ -57,10 +57,8 @@ struct Cfg {
     // thin solid
     int minLayersThin = 2;
 
-    // adaptive size field
-    bool   adaptive        = false; // explicit opt-in; lc_min auto formula covers most cases
-    double attractorRatio  = 0.4;   // edge < lcTarget*ratio → attractor
-    double attractorMinJac = 0.0;   // scaledJac < this → attractor; 0 = off
+    // adaptive size field (MathEval distance-to-bbox-corners, no embedded Points)
+    bool   adaptive        = true;  // fine mesh near 90° corners via MathEval field
     double decayFactor     = 8.0;   // distMax = lcMin * decayFactor
 
     // boundary node handling
@@ -71,8 +69,8 @@ struct Cfg {
     std::string algorithm   = "hxt"; // hxt | frontal3d | del3d
     bool optimizeNetgen     = true;
 
-    // surface refinement before Gmsh (each level 4× the triangle count)
-    int    refineSurface = 0;   // 0 = off; N = N midpoint-subdivision levels
+    // surface refinement before Gmsh
+    int    refineSurface = -1;  // -1 = auto (from lc_min); 0 = off; N = N levels
 
     // quality report after remesh
     bool   qualityCheck = true;
@@ -141,8 +139,7 @@ static bool readConfig(const std::string& path, Cfg& cfg, std::string& err) {
             if (key=="nu")             { cfg.nu      = std::stod(val); continue; }
             if (key=="min_layers_thin"){ cfg.minLayersThin = std::stoi(val); continue; }
             if (key=="adaptive"&&!val.empty()){ cfg.adaptive = mf_bool(val); continue; }
-            if (key=="attractor_ratio")    { cfg.attractorRatio  = std::stod(val); continue; }
-            if (key=="attractor_min_jac")  { cfg.attractorMinJac = std::stod(val); continue; }
+            // attractor_ratio / attractor_min_jac: legacy, ignored (MathEval field now)
             if (key=="decay_factor")       { cfg.decayFactor = std::stod(val); continue; }
             if (key=="boundary_nodes") { cfg.boundaryNodes = val; continue; }
             if (key=="snap_tolerance") { cfg.snapTolerance = std::stod(val); continue; }
@@ -150,7 +147,8 @@ static bool readConfig(const std::string& path, Cfg& cfg, std::string& err) {
             if (key=="optimize_netgen"){ cfg.optimizeNetgen = mf_bool(val); continue; }
             if (key=="quality_check")  { cfg.qualityCheck = mf_bool(val); continue; }
             if (key=="warn_min_jac")   { cfg.warnMinJac = std::stod(val); continue; }
-            if (key=="refine_surface") { cfg.refineSurface = std::stoi(val); continue; }
+            if (key=="refine_surface") { cfg.refineSurface = (val=="auto")?-1:std::stoi(val); continue; }
+            if (key=="decay_factor")   { cfg.decayFactor = std::stod(val); continue; }
             // section headers (val empty)
             if (trySection("material")) continue;
             if (trySection("adaptive")) continue;
@@ -163,15 +161,14 @@ static bool readConfig(const std::string& path, Cfg& cfg, std::string& err) {
             if (key=="E")              cfg.E       = std::stod(val);
             if (key=="nu")             cfg.nu      = std::stod(val);
             if (key=="min_layers_thin")cfg.minLayersThin = std::stoi(val);
-            if (key=="attractor_ratio")    cfg.attractorRatio  = std::stod(val);
-            if (key=="attractor_min_jac")  cfg.attractorMinJac = std::stod(val);
             if (key=="decay_factor")       cfg.decayFactor = std::stod(val);
             if (key=="nodes")          cfg.boundaryNodes = val;
             if (key=="snap_tolerance") cfg.snapTolerance = std::stod(val);
             if (key=="algorithm")      cfg.algorithm = val;
             if (key=="optimize_netgen")cfg.optimizeNetgen = mf_bool(val);
             if (key=="warn_min_jac")   cfg.warnMinJac = std::stod(val);
-            if (key=="refine_surface") cfg.refineSurface = std::stoi(val);
+            if (key=="refine_surface") cfg.refineSurface = (val=="auto")?-1:std::stoi(val);
+            if (key=="decay_factor")   cfg.decayFactor = std::stod(val);
         }
     }
     if (cfg.model.empty())  { err = "Missing 'model'";  return false; }
@@ -269,20 +266,23 @@ static double tetScaledJac(const Mesh& mesh, const Element& e) {
 // Mesh Analysis → lc_min + attractors
 // ─────────────────────────────────────────────────────────────────────────────
 
-struct AttractorPt { double x,y,z; };
-
 struct AnalysisResult {
-    double lcMinEff;
+    double lcMinEff;       // absolute element size floor (CharacteristicLengthMin)
+    double lcMinField;     // size floor for distance-field SizeMin; ≥ lcMinEff
+                           // raised to thinDim/layers when thin solid detected,
+                           // so the MathEval zone doesn't fill the thin dimension
     double lcMaxEff;
     double edgeMin, edgeAvg, edgeMax;
-    double thinDim;       // >0 if thin solid detected
+    double thinDim;        // >0 if thin solid detected
     int    nodeCount, elemCount, badElemCount;
-    std::vector<AttractorPt> attractors;
+    double bMin[3], bMax[3]; // bbox — used for MathEval distance field
+    int    autoRefineSurface; // computed levels for refine_surface:-1 (auto)
+    bool   geomThin;          // min_bbox < avg_bbox*0.3 → skip adaptive field
 };
 
 static AnalysisResult analyzePart(const Mesh& mesh, int pid, const Cfg& cfg) {
     AnalysisResult ar{};
-    ar.thinDim = -1;
+    ar.thinDim = -1; ar.autoRefineSurface = 0; ar.geomThin = false;
 
     std::vector<const Element*> elems;
     for (auto& [eid,e] : mesh.elements)
@@ -294,17 +294,17 @@ static AnalysisResult analyzePart(const Mesh& mesh, int pid, const Cfg& cfg) {
     ar.nodeCount = (int)nids.size();
 
     // BBox
-    double bMin[3]={1e30,1e30,1e30}, bMax[3]={-1e30,-1e30,-1e30};
+    for(int i=0;i<3;++i){ar.bMin[i]=1e30;ar.bMax[i]=-1e30;}
     for (int nid : nids) {
         const Node* n = mesh.getNode(nid); if(!n) continue;
-        bMin[0]=std::min(bMin[0],n->position.x); bMax[0]=std::max(bMax[0],n->position.x);
-        bMin[1]=std::min(bMin[1],n->position.y); bMax[1]=std::max(bMax[1],n->position.y);
-        bMin[2]=std::min(bMin[2],n->position.z); bMax[2]=std::max(bMax[2],n->position.z);
+        ar.bMin[0]=std::min(ar.bMin[0],n->position.x); ar.bMax[0]=std::max(ar.bMax[0],n->position.x);
+        ar.bMin[1]=std::min(ar.bMin[1],n->position.y); ar.bMax[1]=std::max(ar.bMax[1],n->position.y);
+        ar.bMin[2]=std::min(ar.bMin[2],n->position.z); ar.bMax[2]=std::max(ar.bMax[2],n->position.z);
     }
-    double dims[3]={bMax[0]-bMin[0], bMax[1]-bMin[1], bMax[2]-bMin[2]};
+    double dims[3]={ar.bMax[0]-ar.bMin[0], ar.bMax[1]-ar.bMin[1], ar.bMax[2]-ar.bMin[2]};
     double minDim = *std::min_element(dims, dims+3);
 
-    // Edge stats
+    // Edge stats + bad-Jac count
     double eMin=1e30, eMax=0, eSum=0; int eCnt=0;
     for (auto* e : elems) {
         int t[4]; getTet(*e,t);
@@ -315,79 +315,53 @@ static AnalysisResult analyzePart(const Mesh& mesh, int pid, const Cfg& cfg) {
             double l = edgeLen(*n[TE[ei][0]], *n[TE[ei][1]]);
             eMin=std::min(eMin,l); eMax=std::max(eMax,l); eSum+=l; eCnt++;
         }
+        if (tetScaledJac(mesh, *e) < 0.15) ++ar.badElemCount;
     }
     ar.edgeMin = eCnt>0 ? eMin : cfg.lcTarget;
     ar.edgeAvg = eCnt>0 ? eSum/eCnt : cfg.lcTarget;
     ar.edgeMax = eCnt>0 ? eMax : cfg.lcTarget;
 
-    // lc_min
+    // lc_min: from dt_min/material, or explicit, or auto-cap at 20% of lc_target
     double lcMin = cfg.lcMin;
     if (lcMin < 0 && cfg.minDt>0 && cfg.E>0 && cfg.nu>0 && cfg.density>0) {
         double cd = std::sqrt(cfg.E*(1-cfg.nu)/(cfg.density*(1+cfg.nu)*(1-2*cfg.nu)));
         lcMin = cfg.minDt * cd;
     }
-    // Allow fine corner elements: cap at 20% of lc_target so coarse-mesh runs
-    // (large lc_target relative to edge_min) don't get over-constrained.
     if (lcMin < 0) lcMin = std::min(ar.edgeMin * 0.8, cfg.lcTarget * 0.2);
 
-    // thin solid
+    // thin solid override
+    double lcThin = -1;
     if (minDim > 0 && minDim < cfg.lcTarget * 0.6) {
         ar.thinDim = minDim;
-        double lcThin = minDim / std::max(cfg.minLayersThin, 1);
+        lcThin = minDim / std::max(cfg.minLayersThin, 1);
         lcMin = std::min(lcMin, lcThin);
     }
-
     ar.lcMinEff = lcMin;
+    // Detect geometrically thin parts: skip adaptive field if min_bbox < avg_bbox*0.3.
+    {
+        double bd[3]={ar.bMax[0]-ar.bMin[0], ar.bMax[1]-ar.bMin[1], ar.bMax[2]-ar.bMin[2]};
+        double bdMin=*std::min_element(bd,bd+3), bdAvg=(bd[0]+bd[1]+bd[2])/3.0;
+        ar.geomThin = (bdAvg > 0 && bdMin < bdAvg * 0.3);
+    }
+    // For the MathEval distance field, use max(lc_min, thin_lc) as SizeMin.
+    // Prevents the fine zone from filling the whole thin dimension (which would
+    // create many tiny elements throughout and hurt quality on thin solids).
+    ar.lcMinField = (lcThin > 0) ? std::max(lcMin, lcThin) : lcMin;
+
+    // lc_max: CharacteristicLengthMax hard ceiling.
+    // When adaptive=true, Field[3]=MathEval("lc_target") and Field[4]=Min(2,3)
+    // already cap interior elements at lc_target via the background field.
+    // CharacteristicLengthMax can stay at 2×target to give Gmsh layout freedom.
     ar.lcMaxEff = (cfg.lcMax > 0) ? cfg.lcMax : cfg.lcTarget * 2.0;
 
-    // Attractors — cap at 1000 to keep geo file/Distance field manageable
-    static constexpr int MAX_ATTRACTORS = 1000;
-    if (cfg.adaptive) {
-        // Always add the 8 bounding-box corner points as attractors.
-        // Corners have 90° dihedral angles; without fine elements there the
-        // scaled Jacobian will be very poor regardless of other settings.
-        for (int cx=0;cx<2;++cx) for (int cy=0;cy<2;++cy) for (int cz=0;cz<2;++cz)
-            ar.attractors.push_back({
-                cx ? bMax[0] : bMin[0],
-                cy ? bMax[1] : bMin[1],
-                cz ? bMax[2] : bMin[2]
-            });
-
-        double thresh = cfg.lcTarget * cfg.attractorRatio;
-        std::set<std::pair<int,int>> seenEdge;
-        for (auto* e : elems) {
-            int t[4]; getTet(*e,t);
-            const Node* n[4]; bool ok=true;
-            for (int i=0;i<4;++i) { n[i]=mesh.getNode(t[i]); if(!n[i]) { ok=false; break; } }
-            if (!ok) continue;
-
-            // small edge → attractor at midpoint
-            for (int ei=0;ei<6;++ei) {
-                if ((int)ar.attractors.size() >= MAX_ATTRACTORS) break;
-                int a=t[TE[ei][0]], b=t[TE[ei][1]];
-                auto key=std::make_pair(std::min(a,b),std::max(a,b));
-                if (seenEdge.count(key)) continue;
-                double l = edgeLen(*n[TE[ei][0]], *n[TE[ei][1]]);
-                if (l < thresh) {
-                    seenEdge.insert(key);
-                    ar.attractors.push_back({
-                        (n[TE[ei][0]]->position.x + n[TE[ei][1]]->position.x)*0.5,
-                        (n[TE[ei][0]]->position.y + n[TE[ei][1]]->position.y)*0.5,
-                        (n[TE[ei][0]]->position.z + n[TE[ei][1]]->position.z)*0.5
-                    });
-                }
-            }
-            if ((int)ar.attractors.size() >= MAX_ATTRACTORS) break;
-
-            // low quality → attractor at centroid
-            double jac = tetScaledJac(mesh, *e);
-            if (jac < cfg.attractorMinJac) {
-                ++ar.badElemCount;
-                double cx=0,cy=0,cz=0;
-                for (int i=0;i<4;++i) { cx+=n[i]->position.x; cy+=n[i]->position.y; cz+=n[i]->position.z; }
-                ar.attractors.push_back({cx/4,cy/4,cz/4});
-            }
-        }
+    // Auto refine_surface: only when surface is significantly coarser than lc_target
+    // AND bisected corner triangles would still be ≥ 0.4×lc_target (no over-split).
+    // The MathEval gradient handles corner refinement for most cases; manual
+    // refine_surface: N is available for geometries with very coarse corners.
+    if (cfg.adaptive && cfg.refineSurface < 0) {
+        double halfAvg = ar.edgeAvg * 0.5;
+        if (ar.edgeAvg > cfg.lcTarget * 1.5 && halfAvg > cfg.lcTarget * 0.4)
+            ar.autoRefineSurface = 1;
     }
     return ar;
 }
@@ -857,30 +831,42 @@ static bool writeGeoScript(const std::string& geoPath,
     f << "sl = newsl; Surface Loop(sl) = {s()};\n";
     f << "v  = newv;  Volume(v) = {sl};\n\n";
 
-    if (cfg.adaptive && !ar.attractors.empty()) {
-        // Attractor points are defined AFTER CreateGeometry using IDs starting at
-        // 1,000,000 — well above any IDs that ClassifySurfaces/CreateGeometry assigns
-        // (which are at most a few hundred for typical meshes).  Using a fixed high
-        // base avoids the "GEO point already exists" error that occurs when IDs
-        // start at 1 and collide with geometry vertices.
-        static constexpr int ATTR_ID_BASE = 1000000;
+    if (cfg.adaptive && !ar.geomThin) {
+        // MathEval distance to the 8 bbox corners — no embedded Point entities,
+        // so HXT never chokes on stray nodes inside the volume.
+        // Field[1] = sqrt(min distance² to any of the 8 corners).
+        // Field[2] = Threshold on that distance: lc_min near corners → lc_max far away.
+        // Field[3] = uniform lc_target background.
+        // Field[4] = Min(2,3) as background field.
         f << std::scientific;
-        for (int i=0;i<(int)ar.attractors.size();++i)
-            f << "Point(" << (ATTR_ID_BASE+i) << ") = {"
-              << ar.attractors[i].x << ","
-              << ar.attractors[i].y << ","
-              << ar.attractors[i].z << "};\n";
-        f << "\n";
 
-        f << "Field[1] = Distance;\nField[1].PointsList = {";
-        for (int i=0;i<(int)ar.attractors.size();++i) { if(i) f<<","; f<<(ATTR_ID_BASE+i); }
-        f << "};\n\n";
+        // Build Min-tree of squared distances to 8 corners (balanced, depth 3).
+        // Corner index i: bit2=x, bit1=y, bit0=z.
+        auto dsq = [&](int idx) -> std::string {
+            double cx = (idx&4) ? ar.bMax[0] : ar.bMin[0];
+            double cy = (idx&2) ? ar.bMax[1] : ar.bMin[1];
+            double cz = (idx&1) ? ar.bMax[2] : ar.bMin[2];
+            std::ostringstream s; s << std::scientific;
+            s << "(x-" << cx << ")*(x-" << cx << ")"
+              << "+(y-" << cy << ")*(y-" << cy << ")"
+              << "+(z-" << cz << ")*(z-" << cz << ")";
+            return s.str();
+        };
+        auto minPair = [](const std::string& a, const std::string& b){
+            return "Min(" + a + "," + b + ")";
+        };
+        std::string m01=minPair(dsq(0),dsq(1)), m23=minPair(dsq(2),dsq(3));
+        std::string m45=minPair(dsq(4),dsq(5)), m67=minPair(dsq(6),dsq(7));
+        std::string distExpr = "Sqrt(" + minPair(minPair(m01,m23), minPair(m45,m67)) + ")";
 
-        double distMin = ar.lcMinEff * 2.0;
-        double distMax = ar.lcMinEff * cfg.decayFactor;
+        f << "Field[1] = MathEval;\n"
+          << "Field[1].F = \"" << distExpr << "\";\n\n";
+
+        double distMin = ar.lcMinField * 2.0;
+        double distMax = ar.lcMinField * cfg.decayFactor;
         f << "Field[2] = Threshold;\n"
           << "Field[2].InField = 1;\n"
-          << "Field[2].SizeMin = " << ar.lcMinEff << ";\n"
+          << "Field[2].SizeMin = " << ar.lcMinField << ";\n"
           << "Field[2].SizeMax = " << ar.lcMaxEff << ";\n"
           << "Field[2].DistMin = " << distMin << ";\n"
           << "Field[2].DistMax = " << distMax << ";\n\n";
@@ -1334,10 +1320,12 @@ int runMeshFix(const char* configPath, ConsoleOutput& console) {
         std::ostringstream s; s << ar.thinDim << " (thin solid → " << cfg.minLayersThin << " layers)";
         console.warning("Thin dimension: " + s.str());
     }
-    if (cfg.adaptive)
-        console.keyValue("Attractors", std::to_string(ar.attractors.size()));
+    if (cfg.adaptive && !ar.geomThin)
+        console.println("  Adaptive: MathEval dist-to-bbox-corners");
+    else if (cfg.adaptive && ar.geomThin)
+        console.println("  Adaptive: off (thin geometry — field would fill thin dim)");
     if (ar.badElemCount > 0)
-        console.warning("Bad Jacobian elements: " + std::to_string(ar.badElemCount));
+        console.warning("Input bad-Jac (J<0.15): " + std::to_string(ar.badElemCount));
 
     // Temp paths alongside output — use fs::path for native separator consistency
     fs::path outDir = fs::path(cfg.output).parent_path();
@@ -1357,10 +1345,12 @@ int runMeshFix(const char* configPath, ConsoleOutput& console) {
     if (!extractSTL(mesh, cfg.pid, stlPath, err, &stlFaces)) { console.error(err); return 1; }
     console.keyValue("STL faces (after filter)", std::to_string(stlFaces));
 
-    // 5b. Optional surface subdivision — finer feature triangles at corners
-    if (cfg.refineSurface > 0) {
-        if (!subdivideSTLFile(stlPath, cfg.refineSurface, err)) { console.error(err); return 1; }
-        // Count triangles in the rewritten STL to report exact number
+    // 5b. Surface subdivision — refine_surface:-1 auto, 0=off, N=explicit
+    int refineLevels = (cfg.refineSurface >= 0) ? cfg.refineSurface : ar.autoRefineSurface;
+    if (refineLevels > 0) {
+        if (cfg.refineSurface < 0)
+            console.keyValue("Auto refine_surface", std::to_string(refineLevels) + " levels");
+        if (!subdivideSTLFile(stlPath, refineLevels, err)) { console.error(err); return 1; }
         int refinedFaces = 0;
         {
             std::ifstream stlf(stlPath); std::string ln;
