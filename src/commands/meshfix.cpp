@@ -58,9 +58,9 @@ struct Cfg {
     int minLayersThin = 2;
 
     // adaptive size field
-    bool   adaptive        = true;
+    bool   adaptive        = false; // explicit opt-in; lc_min auto formula covers most cases
     double attractorRatio  = 0.4;   // edge < lcTarget*ratio → attractor
-    double attractorMinJac = 0.2;   // scaledJac < this   → attractor
+    double attractorMinJac = 0.0;   // scaledJac < this → attractor; 0 = off
     double decayFactor     = 8.0;   // distMax = lcMin * decayFactor
 
     // boundary node handling
@@ -70,6 +70,9 @@ struct Cfg {
     // gmsh options
     std::string algorithm   = "hxt"; // hxt | frontal3d | del3d
     bool optimizeNetgen     = true;
+
+    // surface refinement before Gmsh (each level 4× the triangle count)
+    int    refineSurface = 0;   // 0 = off; N = N midpoint-subdivision levels
 
     // quality report after remesh
     bool   qualityCheck = true;
@@ -147,6 +150,7 @@ static bool readConfig(const std::string& path, Cfg& cfg, std::string& err) {
             if (key=="optimize_netgen"){ cfg.optimizeNetgen = mf_bool(val); continue; }
             if (key=="quality_check")  { cfg.qualityCheck = mf_bool(val); continue; }
             if (key=="warn_min_jac")   { cfg.warnMinJac = std::stod(val); continue; }
+            if (key=="refine_surface") { cfg.refineSurface = std::stoi(val); continue; }
             // section headers (val empty)
             if (trySection("material")) continue;
             if (trySection("adaptive")) continue;
@@ -167,6 +171,7 @@ static bool readConfig(const std::string& path, Cfg& cfg, std::string& err) {
             if (key=="algorithm")      cfg.algorithm = val;
             if (key=="optimize_netgen")cfg.optimizeNetgen = mf_bool(val);
             if (key=="warn_min_jac")   cfg.warnMinJac = std::stod(val);
+            if (key=="refine_surface") cfg.refineSurface = std::stoi(val);
         }
     }
     if (cfg.model.empty())  { err = "Missing 'model'";  return false; }
@@ -321,7 +326,9 @@ static AnalysisResult analyzePart(const Mesh& mesh, int pid, const Cfg& cfg) {
         double cd = std::sqrt(cfg.E*(1-cfg.nu)/(cfg.density*(1+cfg.nu)*(1-2*cfg.nu)));
         lcMin = cfg.minDt * cd;
     }
-    if (lcMin < 0) lcMin = ar.edgeMin * 0.8;
+    // Allow fine corner elements: cap at 20% of lc_target so coarse-mesh runs
+    // (large lc_target relative to edge_min) don't get over-constrained.
+    if (lcMin < 0) lcMin = std::min(ar.edgeMin * 0.8, cfg.lcTarget * 0.2);
 
     // thin solid
     if (minDim > 0 && minDim < cfg.lcTarget * 0.6) {
@@ -665,6 +672,152 @@ static bool extractSTL(const Mesh& mesh, int pid,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// STL surface subdivision (midpoint, each level → 4× triangles)
+// Finer boundary triangles give Gmsh smaller surface elements at corners,
+// which lets it fill those regions with higher-quality TET4.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Subdivide only the triangles at sharp geometric features (dihedral angle >
+// featureAngleDeg between adjacent triangles). Uniform subdivision forces Gmsh
+// to create tiny surface elements everywhere, causing a lc-mismatch with the
+// large interior elements → slivers. Feature-only subdivision puts fine triangles
+// exactly where quality is poor (corners) while leaving flat faces unchanged.
+static bool subdivideSTLFile(const std::string& path, int levels, std::string& err) {
+    // Conforming feature-edge bisection:
+    // 1) Identify feature edges (dihedral > 40°, same as ClassifySurfaces).
+    // 2) Mark per-triangle split mask (which of its 3 edges to bisect).
+    // 3) Retriangulate using SHARED midpoints → no T-junctions, stays manifold.
+    // 4) Repeat for requested number of levels.
+    static constexpr double FEATURE_ANGLE_DEG = 40.0;
+    constexpr double kPiSub = 3.14159265358979323846;
+    const double cosThresh = std::cos(FEATURE_ANGLE_DEG * kPiSub / 180.0);
+
+    struct V3 { double x,y,z; };
+    struct Tri { V3 v[3]; };
+
+    auto vkey = [](const V3& v) {
+        char buf[64];
+        std::snprintf(buf,sizeof(buf),"%.6e,%.6e,%.6e",v.x,v.y,v.z);
+        return std::string(buf);
+    };
+    auto midV = [](const V3& a,const V3& b)->V3{
+        return{(a.x+b.x)*0.5,(a.y+b.y)*0.5,(a.z+b.z)*0.5};
+    };
+    auto faceN = [](const Tri& t)->V3{
+        double ax=t.v[1].x-t.v[0].x,ay=t.v[1].y-t.v[0].y,az=t.v[1].z-t.v[0].z;
+        double bx=t.v[2].x-t.v[0].x,by=t.v[2].y-t.v[0].y,bz=t.v[2].z-t.v[0].z;
+        double nx=ay*bz-az*by,ny=az*bx-ax*bz,nz=ax*by-ay*bx;
+        double nl=std::sqrt(nx*nx+ny*ny+nz*nz);
+        return(nl>1e-15)?V3{nx/nl,ny/nl,nz/nl}:V3{0,0,1};
+    };
+
+    // Parse ASCII STL
+    std::vector<Tri> tris;
+    {
+        std::ifstream f(path);
+        if (!f.is_open()) { err="Cannot open STL for subdivision: "+path; return false; }
+        Tri cur; int vi=0; std::string line;
+        while(std::getline(f,line)){
+            size_t p=line.find_first_not_of(" \t\r\n"); if(p==std::string::npos) continue;
+            if(line.compare(p,6,"vertex")==0){
+                std::istringstream iss(line.substr(p+6));
+                iss>>cur.v[vi].x>>cur.v[vi].y>>cur.v[vi].z;
+                if(++vi==3){tris.push_back(cur);vi=0;}
+            }
+        }
+    }
+    if(tris.empty()){err="STL subdivision: no triangles";return false;}
+
+    // Each level: detect feature edges, conforming bisect, repeat
+    for(int lv=0;lv<levels;++lv){
+        int N=(int)tris.size();
+
+        // Compute face normals
+        std::vector<V3> normals(N);
+        for(int i=0;i<N;++i) normals[i]=faceN(tris[i]);
+
+        // Build edge->(triIdx, localEdge) map using coordinate keys
+        std::map<std::pair<std::string,std::string>,std::vector<std::pair<int,int>>> edgeMap;
+        for(int i=0;i<N;++i)
+            for(int e=0;e<3;++e){
+                auto ka=vkey(tris[i].v[e]),kb=vkey(tris[i].v[(e+1)%3]);
+                if(ka>kb) std::swap(ka,kb);
+                edgeMap[{ka,kb}].push_back({i,e});
+            }
+
+        // Mark feature edges; store shared midpoint per canonical edge key
+        std::vector<uint8_t> splitMask(N,0); // bit k = split edge k of triangle i
+        std::map<std::pair<std::string,std::string>,V3> edgeMid;
+
+        for(auto&[key,flist]:edgeMap){
+            if(flist.size()!=2) continue; // boundary edges left untouched
+            int fi0=flist[0].first,fi1=flist[1].first;
+            int e0=flist[0].second,e1=flist[1].second;
+            V3&n0=normals[fi0]; V3&n1=normals[fi1];
+            if(n0.x*n1.x+n0.y*n1.y+n0.z*n1.z<cosThresh){
+                splitMask[fi0]|=(uint8_t)(1u<<e0);
+                splitMask[fi1]|=(uint8_t)(1u<<e1);
+                if(!edgeMid.count(key))
+                    edgeMid[key]=midV(tris[fi0].v[e0],tris[fi0].v[(e0+1)%3]);
+            }
+        }
+
+        // Retriangulate each triangle according to its split mask.
+        // Edges: 0=v0-v1, 1=v1-v2, 2=v2-v0.  Mx = midpoint of edge x.
+        // All patterns maintain CCW winding of original triangle.
+        std::vector<Tri> next; next.reserve(N*2);
+        for(int i=0;i<N;++i){
+            uint8_t m=splitMask[i];
+            if(!m){next.push_back(tris[i]);continue;}
+
+            auto getM=[&](int e)->V3{
+                auto ka=vkey(tris[i].v[e]),kb=vkey(tris[i].v[(e+1)%3]);
+                if(ka>kb) std::swap(ka,kb);
+                return edgeMid.at({ka,kb});
+            };
+            const V3 v0=tris[i].v[0],v1=tris[i].v[1],v2=tris[i].v[2];
+            V3 M0{},M1{},M2{};
+            if(m&1) M0=getM(0);
+            if(m&2) M1=getM(1);
+            if(m&4) M2=getM(2);
+
+            switch(m){
+            case 1: next.push_back({v0,M0,v2}); next.push_back({M0,v1,v2}); break;
+            case 2: next.push_back({v0,v1,M1}); next.push_back({v0,M1,v2}); break;
+            case 4: next.push_back({v0,v1,M2}); next.push_back({v1,v2,M2}); break;
+            case 3: next.push_back({v0,M0,v2}); next.push_back({M0,v1,M1}); next.push_back({M0,M1,v2}); break;
+            case 5: next.push_back({v0,M0,M2}); next.push_back({M0,v1,v2}); next.push_back({M0,v2,M2}); break;
+            case 6: next.push_back({v0,v1,M1}); next.push_back({v0,M1,M2}); next.push_back({M1,v2,M2}); break;
+            case 7: next.push_back({v0,M0,M2}); next.push_back({M0,v1,M1}); next.push_back({v2,M2,M1}); next.push_back({M0,M1,M2}); break;
+            default: next.push_back(tris[i]);
+            }
+        }
+        tris=std::move(next);
+    }
+
+    // Write back ASCII STL
+    std::ofstream o(path);
+    if(!o.is_open()){err="Cannot write subdivided STL: "+path;return false;}
+    o<<std::scientific;
+    o<<"solid part\n";
+    for(auto&t:tris){
+        double ax=t.v[1].x-t.v[0].x,ay=t.v[1].y-t.v[0].y,az=t.v[1].z-t.v[0].z;
+        double bx=t.v[2].x-t.v[0].x,by=t.v[2].y-t.v[0].y,bz=t.v[2].z-t.v[0].z;
+        double nx=ay*bz-az*by,ny=az*bx-ax*bz,nz=ax*by-ay*bx;
+        double nl=std::sqrt(nx*nx+ny*ny+nz*nz);
+        if(nl>1e-15){nx/=nl;ny/=nl;nz/=nl;}
+        o<<"  facet normal "<<nx<<" "<<ny<<" "<<nz<<"\n";
+        o<<"    outer loop\n";
+        for(int i=0;i<3;++i)
+            o<<"      vertex "<<t.v[i].x<<" "<<t.v[i].y<<" "<<t.v[i].z<<"\n";
+        o<<"    endloop\n";
+        o<<"  endfacet\n";
+    }
+    o<<"endsolid part\n";
+    return true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Gmsh .geo script
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -705,16 +858,22 @@ static bool writeGeoScript(const std::string& geoPath,
     f << "v  = newv;  Volume(v) = {sl};\n\n";
 
     if (cfg.adaptive && !ar.attractors.empty()) {
+        // Attractor points are defined AFTER CreateGeometry using IDs starting at
+        // 1,000,000 — well above any IDs that ClassifySurfaces/CreateGeometry assigns
+        // (which are at most a few hundred for typical meshes).  Using a fixed high
+        // base avoids the "GEO point already exists" error that occurs when IDs
+        // start at 1 and collide with geometry vertices.
+        static constexpr int ATTR_ID_BASE = 1000000;
         f << std::scientific;
         for (int i=0;i<(int)ar.attractors.size();++i)
-            f << "Point(" << (i+1) << ") = {"
+            f << "Point(" << (ATTR_ID_BASE+i) << ") = {"
               << ar.attractors[i].x << ","
               << ar.attractors[i].y << ","
               << ar.attractors[i].z << "};\n";
         f << "\n";
 
         f << "Field[1] = Distance;\nField[1].PointsList = {";
-        for (int i=0;i<(int)ar.attractors.size();++i) { if(i) f<<","; f<<(i+1); }
+        for (int i=0;i<(int)ar.attractors.size();++i) { if(i) f<<","; f<<(ATTR_ID_BASE+i); }
         f << "};\n\n";
 
         double distMin = ar.lcMinEff * 2.0;
@@ -1197,6 +1356,21 @@ int runMeshFix(const char* configPath, ConsoleOutput& console) {
     int stlFaces = 0;
     if (!extractSTL(mesh, cfg.pid, stlPath, err, &stlFaces)) { console.error(err); return 1; }
     console.keyValue("STL faces (after filter)", std::to_string(stlFaces));
+
+    // 5b. Optional surface subdivision — finer feature triangles at corners
+    if (cfg.refineSurface > 0) {
+        if (!subdivideSTLFile(stlPath, cfg.refineSurface, err)) { console.error(err); return 1; }
+        // Count triangles in the rewritten STL to report exact number
+        int refinedFaces = 0;
+        {
+            std::ifstream stlf(stlPath); std::string ln;
+            while(std::getline(stlf,ln)) {
+                size_t p=ln.find_first_not_of(" \t\r\n");
+                if(p!=std::string::npos && ln.compare(p,6,"facet ")==0) ++refinedFaces;
+            }
+        }
+        console.keyValue("STL faces (after subdivision)", std::to_string(refinedFaces));
+    }
 
     // 6. Geo script
     if (!writeGeoScript(geoPath, stlPath, mshPath, ar, cfg, err)) { console.error(err); return 1; }

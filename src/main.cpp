@@ -2275,7 +2275,11 @@ int main(int argc, char* argv[]) {
             console.println("  nu:             0.3");
             console.println("");
             console.println("  min_layers_thin: 2               # layers through thin dimension");
-            console.println("  adaptive:       true             # attractor-based size field");
+            console.println("  adaptive:       false            # bbox-corner attractor size field");
+            console.println("                                   # (false is safe default; true adds");
+            console.println("                                   #  Distance/Threshold fields around");
+            console.println("                                   #  bbox corners; may slow HXT on");
+            console.println("                                   #  complex surfaces)");
             console.println("  attractor_ratio: 0.4            # edge < lc_target*ratio -> attractor");
             console.println("  decay_factor:   8.0             # size ramp distance = lc_min*factor");
             console.println("");
@@ -2285,6 +2289,11 @@ int main(int argc, char* argv[]) {
             console.println("  algorithm:      hxt              # hxt | frontal3d | del3d");
             console.println("  optimize_netgen: true");
             console.println("  warn_min_jac:   0.15");
+            console.println("");
+            console.println("  refine_surface: 0                # 0=off; 1-3 = conforming feature");
+            console.println("                                   # bisection on boundary STL edges");
+            console.println("                                   # with dihedral > 40 deg; adds finer");
+            console.println("                                   # triangles at corners before Gmsh");
             return 1;
         }
         printBanner(console);
