@@ -360,14 +360,17 @@ static AnalysisResult analyzePart(const Mesh& mesh, int pid, const Cfg& cfg) {
     // CharacteristicLengthMax can stay at 2×target to give Gmsh layout freedom.
     ar.lcMaxEff = (cfg.lcMax > 0) ? cfg.lcMax : cfg.lcTarget * 2.0;
 
-    // Auto refine_surface: only when surface is significantly coarser than lc_target
-    // AND bisected corner triangles would still be ≥ 0.4×lc_target (no over-split).
-    // The MathEval gradient handles corner refinement for most cases; manual
-    // refine_surface: N is available for geometries with very coarse corners.
-    if (cfg.adaptive && cfg.refineSurface < 0) {
-        double halfAvg = ar.edgeAvg * 0.5;
-        if (ar.edgeAvg > cfg.lcTarget * 1.5 && halfAvg > cfg.lcTarget * 0.4)
-            ar.autoRefineSurface = 1;
+    // Auto refine_surface: disabled when Mesh 2 is active (!geomThin) because
+    // Gmsh re-meshes the surface itself via the size field — STL pre-refinement
+    // only changes ClassifySurfaces input and can hurt quality.
+    // When geomThin (Mesh 2 skipped): 1 level if surface >> lc_target.
+    if (cfg.refineSurface < 0) {
+        if (ar.geomThin) {
+            double halfAvg = ar.edgeAvg * 0.5;
+            if (ar.edgeAvg > cfg.lcTarget * 1.5 && halfAvg > cfg.lcTarget * 0.4)
+                ar.autoRefineSurface = 1;
+        }
+        // else: Mesh 2 handles corner refinement → no STL pre-refine needed
     }
     return ar;
 }
