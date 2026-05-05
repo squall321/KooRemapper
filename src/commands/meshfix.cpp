@@ -283,12 +283,13 @@ struct AnalysisResult {
     int    nodeCount, elemCount, badElemCount;
     double bMin[3], bMax[3]; // bbox — used for MathEval distance field
     int    autoRefineSurface; // computed levels for refine_surface:-1 (auto)
-    bool   geomThin;          // min_bbox < avg_bbox*0.3 → skip adaptive field
+    bool   geomThin;          // min_bbox < avg_bbox*0.3 → skip Mesh 2 / 8-corner field
+    bool   thinFieldOk;      // geomThin AND edgeAvg > lcTarget*1.3 → emit 4-corner field
 };
 
 static AnalysisResult analyzePart(const Mesh& mesh, int pid, const Cfg& cfg) {
     AnalysisResult ar{};
-    ar.thinDim = -1; ar.autoRefineSurface = 0; ar.geomThin = false;
+    ar.thinDim = -1; ar.autoRefineSurface = 0; ar.geomThin = false; ar.thinFieldOk = false;
 
     std::vector<const Element*> elems;
     for (auto& [eid,e] : mesh.elements)
@@ -366,6 +367,11 @@ static AnalysisResult analyzePart(const Mesh& mesh, int pid, const Cfg& cfg) {
     } else if (lcThin > 0) {
         ar.lcMinField = std::max(lcMin, lcThin);
     }
+
+    // thinFieldOk: computed AFTER lcMinField so the comparison is valid.
+    ar.thinFieldOk = ar.geomThin
+                  && (ar.edgeAvg > cfg.lcTarget * 1.3)
+                  && (cfg.lcTarget > ar.lcMinField);
 
     // lc_max: CharacteristicLengthMax hard ceiling.
     // When adaptive=true, Field[3]=MathEval("lc_target") and Field[4]=Min(2,3)
@@ -1005,10 +1011,53 @@ static bool writeGeoScript(const std::string& geoPath,
     f << "sl = newsl; Surface Loop(sl) = {s()};\n";
     f << "v  = newv;  Volume(v) = {sl};\n\n";
 
+    if (cfg.adaptive && ar.thinFieldOk) {
+        // Thin geometry: use only the 4 in-plane corners (not all 8 bbox corners).
+        // The 8-corner field floods the thin dimension; 4 in-plane corners with a
+        // smaller decay keep the fine zone confined to the corner XY regions.
+        // Also uses lcMinField (= minBboxDim/minLayersThin ≥ lcMin) so the fine
+        // zone matches the layer-count constraint, not the absolute lc_min.
+        f << std::scientific;
+
+        // Detect thin axis (the bbox dimension index with minimum size)
+        double bd[3]={ar.bMax[0]-ar.bMin[0], ar.bMax[1]-ar.bMin[1], ar.bMax[2]-ar.bMin[2]};
+        int ta  = (int)(std::min_element(bd,bd+3)-bd); // thin axis
+        int a0  = (ta+1)%3, a1 = (ta+2)%3;             // in-plane axes
+        double cThin = (ar.bMin[ta]+ar.bMax[ta])*0.5;  // center of thin dim
+
+        // 4 in-plane corner coordinates: (bMin/bMax a0) × (bMin/bMax a1) × cThin
+        double pts[4][3];
+        for (int k=0;k<4;++k) {
+            pts[k][ta] = cThin;
+            pts[k][a0] = (k&1) ? ar.bMax[a0] : ar.bMin[a0];
+            pts[k][a1] = (k&2) ? ar.bMax[a1] : ar.bMin[a1];
+        }
+        auto dsq = [&](int k)->std::string{
+            std::ostringstream s; s<<std::scientific;
+            s<<"(x-"<<pts[k][0]<<")*(x-"<<pts[k][0]<<")"
+             <<"+(y-"<<pts[k][1]<<")*(y-"<<pts[k][1]<<")"
+             <<"+(z-"<<pts[k][2]<<")*(z-"<<pts[k][2]<<")";
+            return s.str();
+        };
+        std::string distExpr="Sqrt(Min(Min("+dsq(0)+","+dsq(1)+"),Min("+dsq(2)+","+dsq(3)+")))";
+        f<<"Field[1] = MathEval;\nField[1].F = \""<<distExpr<<"\";\n\n";
+
+        // Smaller decay (4×) so the fine zone doesn't spread across the plate
+        double distMin = ar.lcMinField * 2.0;
+        double distMax = ar.lcMinField * 4.0;
+        f<<"Field[2] = Threshold;\n"
+         <<"Field[2].InField = 1;\n"
+         <<"Field[2].SizeMin = "<<ar.lcMinField<<";\n"
+         <<"Field[2].SizeMax = "<<ar.lcMaxEff<<";\n"
+         <<"Field[2].DistMin = "<<distMin<<";\n"
+         <<"Field[2].DistMax = "<<distMax<<";\n\n";
+        f<<"Field[3] = MathEval;\nField[3].F = \""<<cfg.lcTarget<<"\";\n\n";
+        f<<"Field[4] = Min;\nField[4].FieldsList = {2,3};\nBackground Field = 4;\n\n";
+    }
+
     if (cfg.adaptive && !ar.geomThin) {
         // MathEval distance to the 8 bbox corners — no embedded Point entities.
-        // Skipped for thin geometry: distMax would cover the entire thin dimension,
-        // flooding it with fine elements and hurting quality.
+        // Skipped for thin geometry (handled above with 4 in-plane corners).
         // Field[1] = sqrt(min distance² to any of the 8 corners).
         // Field[2] = Threshold on that distance: lc_min near corners → lc_max far away.
         // Field[3] = uniform lc_target background.
@@ -1070,8 +1119,6 @@ static bool writeGeoScript(const std::string& geoPath,
         f << "Mesh 2;\n";
     f << "Mesh 3;\n";
     // Extra Netgen passes — skipped for thin geometry.
-    // On thin solids, Netgen inserts nodes in the thin dimension creating new
-    // geometrically constrained elements that hurt quality.
     if (!ar.geomThin)
         for (int i = 0; i < cfg.optimizePasses; ++i)
             f << "OptimizeMesh \"Netgen\";\n";
@@ -1509,9 +1556,11 @@ int runMeshFix(const char* configPath, ConsoleOutput& console) {
         console.warning("Thin dimension: " + s.str());
     }
     if (cfg.adaptive && !ar.geomThin)
-        console.println("  Adaptive: MathEval dist-to-bbox-corners");
+        console.println("  Adaptive: MathEval dist-to-bbox-corners (8 corners)");
+    else if (ar.thinFieldOk)
+        console.println("  Adaptive: MathEval in-plane corners (thin mode, 4 corners)");
     else if (cfg.adaptive && ar.geomThin)
-        console.println("  Adaptive: off (thin geometry — distMax would flood thin dim)");
+        console.println("  Adaptive: off (thin, surface ≈ lc_target — uniform is best)");
     if (ar.badElemCount > 0)
         console.warning("Input bad-Jac (J<0.15): " + std::to_string(ar.badElemCount));
 
