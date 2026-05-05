@@ -343,16 +343,29 @@ static AnalysisResult analyzePart(const Mesh& mesh, int pid, const Cfg& cfg) {
         lcMin = std::min(lcMin, lcThin);
     }
     ar.lcMinEff = lcMin;
-    // Detect geometrically thin parts: skip adaptive field if min_bbox < avg_bbox*0.3.
+    // Detect geometrically thin parts (min_bbox < avg_bbox * 0.3).
+    // Mesh 2 is skipped for thin solids (re-meshing the fine surface creates
+    // too many tiny elements through the thin dimension).
     {
         double bd[3]={ar.bMax[0]-ar.bMin[0], ar.bMax[1]-ar.bMin[1], ar.bMax[2]-ar.bMin[2]};
         double bdMin=*std::min_element(bd,bd+3), bdAvg=(bd[0]+bd[1]+bd[2])/3.0;
         ar.geomThin = (bdAvg > 0 && bdMin < bdAvg * 0.3);
     }
-    // For the MathEval distance field, use max(lc_min, thin_lc) as SizeMin.
-    // Prevents the fine zone from filling the whole thin dimension (which would
-    // create many tiny elements throughout and hurt quality on thin solids).
-    ar.lcMinField = (lcThin > 0) ? std::max(lcMin, lcThin) : lcMin;
+    // lcMinField for the MathEval distance field SizeMin.
+    // For thin solids: raise to minBboxDim/minLayersThin regardless of lc_target.
+    // This is geometry-based (not lc_target-based) so it works even when the
+    // user sets a large lc_target for a fine mesh.  Effect: the fine zone near
+    // corners matches exactly the layer-count constraint through the thin dim,
+    // preventing the field from flooding the whole thin dimension.
+    ar.lcMinField = lcMin;
+    if (ar.geomThin) {
+        double bd[3]={ar.bMax[0]-ar.bMin[0], ar.bMax[1]-ar.bMin[1], ar.bMax[2]-ar.bMin[2]};
+        double minBboxDim = *std::min_element(bd, bd+3);
+        double lcThinGeom = minBboxDim / std::max(cfg.minLayersThin, 1);
+        ar.lcMinField = std::max(lcMin, lcThinGeom);
+    } else if (lcThin > 0) {
+        ar.lcMinField = std::max(lcMin, lcThin);
+    }
 
     // lc_max: CharacteristicLengthMax hard ceiling.
     // When adaptive=true, Field[3]=MathEval("lc_target") and Field[4]=Min(2,3)
@@ -993,8 +1006,9 @@ static bool writeGeoScript(const std::string& geoPath,
     f << "v  = newv;  Volume(v) = {sl};\n\n";
 
     if (cfg.adaptive && !ar.geomThin) {
-        // MathEval distance to the 8 bbox corners — no embedded Point entities,
-        // so HXT never chokes on stray nodes inside the volume.
+        // MathEval distance to the 8 bbox corners — no embedded Point entities.
+        // Skipped for thin geometry: distMax would cover the entire thin dimension,
+        // flooding it with fine elements and hurting quality.
         // Field[1] = sqrt(min distance² to any of the 8 corners).
         // Field[2] = Threshold on that distance: lc_min near corners → lc_max far away.
         // Field[3] = uniform lc_target background.
@@ -1055,10 +1069,12 @@ static bool writeGeoScript(const std::string& geoPath,
     if (!ar.geomThin)
         f << "Mesh 2;\n";
     f << "Mesh 3;\n";
-    // Extra Netgen passes — skip for thin geometry (already fine enough)
-    int effPasses = ar.geomThin ? 0 : cfg.optimizePasses;
-    for (int i = 0; i < effPasses; ++i)
-        f << "OptimizeMesh \"Netgen\";\n";
+    // Extra Netgen passes — skipped for thin geometry.
+    // On thin solids, Netgen inserts nodes in the thin dimension creating new
+    // geometrically constrained elements that hurt quality.
+    if (!ar.geomThin)
+        for (int i = 0; i < cfg.optimizePasses; ++i)
+            f << "OptimizeMesh \"Netgen\";\n";
     f << "Save \"" << fwdSlash(mshPath) << "\";\n";
     return true;
 }
@@ -1495,7 +1511,7 @@ int runMeshFix(const char* configPath, ConsoleOutput& console) {
     if (cfg.adaptive && !ar.geomThin)
         console.println("  Adaptive: MathEval dist-to-bbox-corners");
     else if (cfg.adaptive && ar.geomThin)
-        console.println("  Adaptive: off (thin geometry — field would fill thin dim)");
+        console.println("  Adaptive: off (thin geometry — distMax would flood thin dim)");
     if (ar.badElemCount > 0)
         console.warning("Input bad-Jac (J<0.15): " + std::to_string(ar.badElemCount));
 
