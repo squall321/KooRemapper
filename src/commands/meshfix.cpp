@@ -68,9 +68,11 @@ struct Cfg {
     // gmsh options
     std::string algorithm   = "hxt"; // hxt | frontal3d | del3d
     bool optimizeNetgen     = true;
+    int  optimizePasses     = 3;     // extra OptimizeMesh "Netgen" calls after Mesh 3
 
-    // surface refinement before Gmsh
-    int    refineSurface = -1;  // -1 = auto (from lc_min); 0 = off; N = N levels
+    // surface pre-processing before Gmsh
+    int  refineSurface  = -1;  // -1 = auto (from lc_min); 0 = off; N = N levels
+    int  smoothSurface  = 0;   // Laplacian steps on feature-edge vertices (0 = off)
 
     // quality report after remesh
     bool   qualityCheck = true;
@@ -144,11 +146,13 @@ static bool readConfig(const std::string& path, Cfg& cfg, std::string& err) {
             if (key=="boundary_nodes") { cfg.boundaryNodes = val; continue; }
             if (key=="snap_tolerance") { cfg.snapTolerance = std::stod(val); continue; }
             if (key=="algorithm")      { cfg.algorithm = val; continue; }
-            if (key=="optimize_netgen"){ cfg.optimizeNetgen = mf_bool(val); continue; }
-            if (key=="quality_check")  { cfg.qualityCheck = mf_bool(val); continue; }
-            if (key=="warn_min_jac")   { cfg.warnMinJac = std::stod(val); continue; }
-            if (key=="refine_surface") { cfg.refineSurface = (val=="auto")?-1:std::stoi(val); continue; }
-            if (key=="decay_factor")   { cfg.decayFactor = std::stod(val); continue; }
+            if (key=="optimize_netgen"){ cfg.optimizeNetgen  = mf_bool(val); continue; }
+            if (key=="optimize_passes"){ cfg.optimizePasses  = std::stoi(val); continue; }
+            if (key=="quality_check")  { cfg.qualityCheck    = mf_bool(val); continue; }
+            if (key=="warn_min_jac")   { cfg.warnMinJac      = std::stod(val); continue; }
+            if (key=="refine_surface") { cfg.refineSurface   = (val=="auto")?-1:std::stoi(val); continue; }
+            if (key=="smooth_surface") { cfg.smoothSurface   = std::stoi(val); continue; }
+            if (key=="decay_factor")   { cfg.decayFactor     = std::stod(val); continue; }
             // section headers (val empty)
             if (trySection("material")) continue;
             if (trySection("adaptive")) continue;
@@ -164,11 +168,13 @@ static bool readConfig(const std::string& path, Cfg& cfg, std::string& err) {
             if (key=="decay_factor")       cfg.decayFactor = std::stod(val);
             if (key=="nodes")          cfg.boundaryNodes = val;
             if (key=="snap_tolerance") cfg.snapTolerance = std::stod(val);
-            if (key=="algorithm")      cfg.algorithm = val;
+            if (key=="algorithm")      cfg.algorithm      = val;
             if (key=="optimize_netgen")cfg.optimizeNetgen = mf_bool(val);
-            if (key=="warn_min_jac")   cfg.warnMinJac = std::stod(val);
-            if (key=="refine_surface") cfg.refineSurface = (val=="auto")?-1:std::stoi(val);
-            if (key=="decay_factor")   cfg.decayFactor = std::stod(val);
+            if (key=="optimize_passes")cfg.optimizePasses = std::stoi(val);
+            if (key=="warn_min_jac")   cfg.warnMinJac     = std::stod(val);
+            if (key=="refine_surface") cfg.refineSurface  = (val=="auto")?-1:std::stoi(val);
+            if (key=="smooth_surface") cfg.smoothSurface  = std::stoi(val);
+            if (key=="decay_factor")   cfg.decayFactor    = std::stod(val);
         }
     }
     if (cfg.model.empty())  { err = "Missing 'model'";  return false; }
@@ -646,6 +652,158 @@ static bool extractSTL(const Mesh& mesh, int pid,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// STL feature-edge Laplacian smoothing
+// Moves only vertices that lie on sharp feature edges (dihedral > 40°) toward
+// the centroid of their direct neighbours.  Non-feature vertices (flat faces)
+// are untouched, preserving planarity.  Effect: 90° corners become slightly
+// rounded, removing the strict geometric constraint that caps min Jac at ~0.03.
+// ─────────────────────────────────────────────────────────────────────────────
+
+static bool smoothSTLFile(const std::string& path, int steps, std::string& err) {
+    static constexpr double FEATURE_ANGLE_DEG = 40.0;
+    static constexpr double SMOOTH_ALPHA      = 0.15; // conservative blend; large alpha creates inverted tris
+
+    struct V3 { double x,y,z; };
+    auto sub=[](const V3&a,const V3&b)->V3{ return{a.x-b.x,a.y-b.y,a.z-b.z}; };
+    auto crs=[](const V3&a,const V3&b)->V3{
+        return{a.y*b.z-a.z*b.y,a.z*b.x-a.x*b.z,a.x*b.y-a.y*b.x};
+    };
+    auto vkey=[](const V3&v){
+        char buf[64]; std::snprintf(buf,sizeof(buf),"%.6e,%.6e,%.6e",v.x,v.y,v.z);
+        return std::string(buf);
+    };
+
+    // 1. Parse STL → unique vertex array + triangle index list
+    std::vector<V3> verts;
+    std::vector<std::array<int,3>> tris;
+    std::map<std::string,int> vidx;
+    {
+        std::ifstream f(path);
+        if (!f.is_open()) { err="Cannot open STL for smoothing: "+path; return false; }
+        V3 cur{}; int vi=0; std::string line;
+        while (std::getline(f,line)) {
+            size_t p=line.find_first_not_of(" \t\r\n"); if(p==std::string::npos) continue;
+            if (line.compare(p,6,"vertex")==0) {
+                std::istringstream iss(line.substr(p+6));
+                iss>>cur.x>>cur.y>>cur.z;
+                if (++vi==3) {
+                    // push 3 vertices into the index
+                    // compute once per triangle, vi is back to 0 after this block
+                    // we need to process the 3 vertices that have been filled
+                    // (vi goes 1,2,3 so the three vertices are in a rolling buffer)
+                    // use a small temp array
+                    V3 tv[3]; tv[2]=cur;
+                    // re-parse? No — track with a small ring buffer instead.
+                    // Actually cur only holds the LAST vertex. Need to redo with ring.
+                    vi=0; // will fall through to the ring-buffer approach below
+                }
+            }
+        }
+    }
+    // Use a ring buffer instead:
+    verts.clear(); tris.clear(); vidx.clear();
+    {
+        std::ifstream f(path);
+        if (!f.is_open()) { err="Cannot open STL for smoothing: "+path; return false; }
+        V3 ring[3]{}; int vi=0; std::string line;
+        while (std::getline(f,line)) {
+            size_t p=line.find_first_not_of(" \t\r\n"); if(p==std::string::npos) continue;
+            if (line.compare(p,6,"vertex")==0) {
+                std::istringstream iss(line.substr(p+6));
+                iss>>ring[vi].x>>ring[vi].y>>ring[vi].z;
+                if (++vi==3) {
+                    std::array<int,3> tri;
+                    for (int i=0;i<3;++i) {
+                        auto k=vkey(ring[i]);
+                        auto it=vidx.find(k);
+                        if (it==vidx.end()) {
+                            tri[i]=(int)verts.size();
+                            vidx[k]=tri[i];
+                            verts.push_back(ring[i]);
+                        } else { tri[i]=it->second; }
+                    }
+                    tris.push_back(tri); vi=0;
+                }
+            }
+        }
+    }
+    if (tris.empty()) { err="STL smoothing: no triangles"; return false; }
+
+    int NV=(int)verts.size(), NT=(int)tris.size();
+
+    // 2. Face normals
+    std::vector<V3> fnorm(NT);
+    for (int i=0;i<NT;++i) {
+        auto n=crs(sub(verts[tris[i][1]],verts[tris[i][0]]),
+                   sub(verts[tris[i][2]],verts[tris[i][0]]));
+        double l=std::sqrt(n.x*n.x+n.y*n.y+n.z*n.z);
+        fnorm[i]=(l>1e-15)?V3{n.x/l,n.y/l,n.z/l}:V3{0,0,1};
+    }
+
+    // 3. Edge → face adjacency (vertex-index keyed)
+    constexpr double kPiSmth=3.14159265358979323846;
+    double cosThresh=std::cos(FEATURE_ANGLE_DEG*kPiSmth/180.0);
+    std::map<std::pair<int,int>,std::vector<int>> edgeT;
+    for (int i=0;i<NT;++i)
+        for (int e=0;e<3;++e) {
+            int a=tris[i][e],b=tris[i][(e+1)%3];
+            edgeT[{std::min(a,b),std::max(a,b)}].push_back(i);
+        }
+
+    // 4. Mark feature vertices
+    std::vector<bool> feat(NV,false);
+    for (auto&[edge,faces]:edgeT) {
+        if (faces.size()!=2) continue;
+        auto&n0=fnorm[faces[0]]; auto&n1=fnorm[faces[1]];
+        if (n0.x*n1.x+n0.y*n1.y+n0.z*n1.z<cosThresh)
+            feat[edge.first]=feat[edge.second]=true;
+    }
+
+    // 5. Vertex neighbour lists (deduplicated)
+    std::vector<std::vector<int>> nbrs(NV);
+    for (int i=0;i<NT;++i)
+        for (int e=0;e<3;++e) {
+            int a=tris[i][e],b=tris[i][(e+1)%3];
+            nbrs[a].push_back(b); nbrs[b].push_back(a);
+        }
+    for (auto&n:nbrs){std::sort(n.begin(),n.end());n.erase(std::unique(n.begin(),n.end()),n.end());}
+
+    // 6. Laplacian smoothing — feature vertices only
+    for (int st=0;st<steps;++st) {
+        std::vector<V3> nv=verts;
+        for (int v=0;v<NV;++v) {
+            if (!feat[v]||nbrs[v].empty()) continue;
+            double cx=0,cy=0,cz=0;
+            for (int nb:nbrs[v]){cx+=verts[nb].x;cy+=verts[nb].y;cz+=verts[nb].z;}
+            int k=(int)nbrs[v].size();
+            nv[v].x=(1-SMOOTH_ALPHA)*verts[v].x+SMOOTH_ALPHA*(cx/k);
+            nv[v].y=(1-SMOOTH_ALPHA)*verts[v].y+SMOOTH_ALPHA*(cy/k);
+            nv[v].z=(1-SMOOTH_ALPHA)*verts[v].z+SMOOTH_ALPHA*(cz/k);
+        }
+        verts=std::move(nv);
+    }
+
+    // 7. Write back ASCII STL
+    std::ofstream o(path);
+    if (!o.is_open()){err="Cannot write smoothed STL: "+path;return false;}
+    o<<std::scientific;
+    o<<"solid part\n";
+    for (auto&t:tris){
+        auto n=crs(sub(verts[t[1]],verts[t[0]]),sub(verts[t[2]],verts[t[0]]));
+        double l=std::sqrt(n.x*n.x+n.y*n.y+n.z*n.z);
+        if(l>1e-15){n.x/=l;n.y/=l;n.z/=l;}
+        o<<"  facet normal "<<n.x<<" "<<n.y<<" "<<n.z<<"\n";
+        o<<"    outer loop\n";
+        for(int i=0;i<3;++i)
+            o<<"      vertex "<<verts[t[i]].x<<" "<<verts[t[i]].y<<" "<<verts[t[i]].z<<"\n";
+        o<<"    endloop\n";
+        o<<"  endfacet\n";
+    }
+    o<<"endsolid part\n";
+    return true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // STL surface subdivision (midpoint, each level → 4× triangles)
 // Finer boundary triangles give Gmsh smaller surface elements at corners,
 // which lets it fill those regions with higher-quality TET4.
@@ -885,9 +1043,20 @@ static bool writeGeoScript(const std::string& geoPath,
       << "Mesh.OptimizeThreshold = 0.5;\n"
       << "Mesh.Optimize = 1;\n"
       << "Mesh.OptimizeNetgen = " << (cfg.optimizeNetgen?1:0) << ";\n"
-      << "Mesh.MshFileVersion = 2.2;\n\n"
-      << "Mesh 3;\n"
-      << "Save \"" << fwdSlash(mshPath) << "\";\n";
+      << "Mesh.MshFileVersion = 2.2;\n\n";
+    // Mesh 2 first: Gmsh creates a new surface mesh obeying the MathEval size
+    // field → corner triangles at lc_min, flat faces at lc_target.
+    // Mesh 3 then uses this surface → much better corner TET4.
+    // Skip for thin geometry: Mesh 2 would create very fine surface elements
+    // (lc_min << lc_target) that fill the thin dimension and hurt quality.
+    if (!ar.geomThin)
+        f << "Mesh 2;\n";
+    f << "Mesh 3;\n";
+    // Extra Netgen passes — skip for thin geometry (already fine enough)
+    int effPasses = ar.geomThin ? 0 : cfg.optimizePasses;
+    for (int i = 0; i < effPasses; ++i)
+        f << "OptimizeMesh \"Netgen\";\n";
+    f << "Save \"" << fwdSlash(mshPath) << "\";\n";
     return true;
 }
 
@@ -1345,7 +1514,13 @@ int runMeshFix(const char* configPath, ConsoleOutput& console) {
     if (!extractSTL(mesh, cfg.pid, stlPath, err, &stlFaces)) { console.error(err); return 1; }
     console.keyValue("STL faces (after filter)", std::to_string(stlFaces));
 
-    // 5b. Surface subdivision — refine_surface:-1 auto, 0=off, N=explicit
+    // 5b. Laplacian smoothing — micro-chamfer at 90° feature edges
+    if (cfg.smoothSurface > 0) {
+        if (!smoothSTLFile(stlPath, cfg.smoothSurface, err)) { console.error(err); return 1; }
+        console.keyValue("STL smooth steps", std::to_string(cfg.smoothSurface));
+    }
+
+    // 5c. Surface subdivision — refine_surface:-1 auto, 0=off, N=explicit
     int refineLevels = (cfg.refineSurface >= 0) ? cfg.refineSurface : ar.autoRefineSurface;
     if (refineLevels > 0) {
         if (cfg.refineSurface < 0)
