@@ -2292,8 +2292,12 @@ int main(int argc, char* argv[]) {
             console.println("");
             console.println("  refine_surface: 0                # 0=off; 1-3 = conforming feature");
             console.println("                                   # bisection on boundary STL edges");
-            console.println("                                   # with dihedral > 40 deg; adds finer");
-            console.println("                                   # triangles at corners before Gmsh");
+            console.println("                                   # with dihedral > 40 deg");
+            console.println("");
+            console.println("  # Post-remesh patch polish (experimental):");
+            console.println("  polish:         false            # enable local bad-element re-mesh");
+            console.println("  polish_jac:     0.10             # polish elements below this Jac");
+            console.println("  polish_max_iter: 2               # max polish iterations");
             return 1;
         }
         printBanner(console);

@@ -77,6 +77,11 @@ struct Cfg {
     // quality report after remesh
     bool   qualityCheck = true;
     double warnMinJac   = 0.15;
+
+    // Polish: post-remesh bad-patch iteration
+    bool   polish        = false; // off by default (experimental)
+    double polishJac     = 0.10;  // re-mesh patches with Jac < this
+    int    polishMaxIter = 2;
 };
 
 // ─── YAML helpers ─────────────────────────────────────────────────────────────
@@ -153,6 +158,9 @@ static bool readConfig(const std::string& path, Cfg& cfg, std::string& err) {
             if (key=="refine_surface") { cfg.refineSurface   = (val=="auto")?-1:std::stoi(val); continue; }
             if (key=="smooth_surface") { cfg.smoothSurface   = std::stoi(val); continue; }
             if (key=="decay_factor")   { cfg.decayFactor     = std::stod(val); continue; }
+            if (key=="polish")         { cfg.polish          = mf_bool(val); continue; }
+            if (key=="polish_jac")     { cfg.polishJac       = std::stod(val); continue; }
+            if (key=="polish_max_iter"){ cfg.polishMaxIter   = std::stoi(val); continue; }
             // section headers (val empty)
             if (trySection("material")) continue;
             if (trySection("adaptive")) continue;
@@ -175,6 +183,9 @@ static bool readConfig(const std::string& path, Cfg& cfg, std::string& err) {
             if (key=="refine_surface") cfg.refineSurface  = (val=="auto")?-1:std::stoi(val);
             if (key=="smooth_surface") cfg.smoothSurface  = std::stoi(val);
             if (key=="decay_factor")   cfg.decayFactor    = std::stod(val);
+            if (key=="polish")         cfg.polish         = mf_bool(val);
+            if (key=="polish_jac")     cfg.polishJac      = std::stod(val);
+            if (key=="polish_max_iter")cfg.polishMaxIter  = std::stoi(val);
         }
     }
     if (cfg.model.empty())  { err = "Missing 'model'";  return false; }
@@ -1350,6 +1361,32 @@ static void buildFinalMesh(const Mesh& mesh, int pid,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Per-element scaled Jacobian (shared by reportQuality and polishMesh)
+// ─────────────────────────────────────────────────────────────────────────────
+
+static double mshJac(const std::map<int,std::array<double,3>>& nmap, const MshElem& e) {
+    const int eIdx[6][2]={{0,1},{0,2},{0,3},{1,2},{1,3},{2,3}};
+    const std::array<double,3>* p[4];
+    for (int i=0;i<4;++i) {
+        auto it=nmap.find(e.nodes[i]);
+        if (it==nmap.end()) return 0.0;
+        p[i]=&it->second;
+    }
+    double v1x=(*p[1])[0]-(*p[0])[0],v1y=(*p[1])[1]-(*p[0])[1],v1z=(*p[1])[2]-(*p[0])[2];
+    double v2x=(*p[2])[0]-(*p[0])[0],v2y=(*p[2])[1]-(*p[0])[1],v2z=(*p[2])[2]-(*p[0])[2];
+    double v3x=(*p[3])[0]-(*p[0])[0],v3y=(*p[3])[1]-(*p[0])[1],v3z=(*p[3])[2]-(*p[0])[2];
+    double vol=(v1x*(v2y*v3z-v2z*v3y)-v1y*(v2x*v3z-v2z*v3x)+v1z*(v2x*v3y-v2y*v3x))/6.0;
+    if (vol<=0.0) return vol;
+    double maxE=0;
+    for (auto& ed:eIdx) {
+        auto& a=*p[ed[0]]; auto& b=*p[ed[1]];
+        double dx=a[0]-b[0],dy=a[1]-b[1],dz=a[2]-b[2];
+        maxE=std::max(maxE,std::sqrt(dx*dx+dy*dy+dz*dz));
+    }
+    return (maxE>1e-15)?6.0*vol/(maxE*maxE*maxE)*std::sqrt(2.0):0.0;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Quality check on Gmsh output
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1361,21 +1398,7 @@ static void reportQuality(const std::vector<MshNode>& nodes,
 
     double minJ=1e30, maxJ=-1e30, sumJ=0; int bad=0;
     for (auto& e : elems) {
-        auto& p0=nmap[e.nodes[0]]; auto& p1=nmap[e.nodes[1]];
-        auto& p2=nmap[e.nodes[2]]; auto& p3=nmap[e.nodes[3]];
-        double v1x=p1[0]-p0[0],v1y=p1[1]-p0[1],v1z=p1[2]-p0[2];
-        double v2x=p2[0]-p0[0],v2y=p2[1]-p0[1],v2z=p2[2]-p0[2];
-        double v3x=p3[0]-p0[0],v3y=p3[1]-p0[1],v3z=p3[2]-p0[2];
-        double vol=(v1x*(v2y*v3z-v2z*v3y)-v1y*(v2x*v3z-v2z*v3x)+v1z*(v2x*v3y-v2y*v3x))/6.0;
-        double maxE=0;
-        int ns[4]={e.nodes[0],e.nodes[1],e.nodes[2],e.nodes[3]};
-        const int eIdx[6][2]={{0,1},{0,2},{0,3},{1,2},{1,3},{2,3}};
-        for (auto& ed:eIdx) {
-            auto& a=nmap[ns[ed[0]]]; auto& b=nmap[ns[ed[1]]];
-            double dx=a[0]-b[0],dy=a[1]-b[1],dz=a[2]-b[2];
-            maxE=std::max(maxE,std::sqrt(dx*dx+dy*dy+dz*dz));
-        }
-        double jac=(maxE>1e-15)?6.0*vol/(maxE*maxE*maxE)*std::sqrt(2.0):0.0;
+        double jac=mshJac(nmap,e);
         minJ=std::min(minJ,jac); maxJ=std::max(maxJ,jac); sumJ+=jac;
         if (jac<warnThr) ++bad;
     }
@@ -1494,6 +1517,340 @@ static bool spliceMesh(const std::string& modelPath,
         out << "*END\n";
     }
     return true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Local patch re-meshing of bad elements (polish pass)
+// Processes each connected component of bad elements as an independent patch,
+// giving each patch simple corner-region topology that ClassifySurfaces handles.
+// ─────────────────────────────────────────────────────────────────────────────
+
+static bool polishMesh(
+    std::vector<MshNode>& nodes,
+    std::vector<MshElem>& elems,
+    const std::string& gmshExe,
+    const AnalysisResult& ar,
+    const Cfg& cfg,
+    const std::string& workDir,
+    const std::string& stem,
+    ConsoleOutput& console) {
+
+    // TET4 face tables (indices into e.nodes[0..3])
+    static const int GFW[4][3]={{0,2,1},{0,1,3},{1,2,3},{0,3,2}}; // outward winding
+    static const int GFS[4][3]={{0,1,2},{0,1,3},{0,2,3},{1,2,3}}; // sorted for adjacency
+
+    using FK3 = std::array<int,3>;
+    bool anyImproved = false;
+
+    // Helper: BFS expand a seed set by N rings using the given adjacency map
+    auto bfsExpand = [&](std::set<int>& patchSet, int rings,
+                          const std::map<FK3,std::vector<int>>& faceElems) {
+        for (int ring=0; ring<rings; ++ring) {
+            std::set<int> frontier;
+            for (int idx : patchSet) {
+                for (int fi=0;fi<4;++fi) {
+                    FK3 key={elems[idx].nodes[GFS[fi][0]],
+                             elems[idx].nodes[GFS[fi][1]],
+                             elems[idx].nodes[GFS[fi][2]]};
+                    std::sort(key.begin(),key.end());
+                    auto it=faceElems.find(key); if (it==faceElems.end()) continue;
+                    for (int ni:it->second) if (!patchSet.count(ni)) frontier.insert(ni);
+                }
+            }
+            patchSet.insert(frontier.begin(),frontier.end());
+        }
+    };
+
+    for (int iter = 0; iter < cfg.polishMaxIter; ++iter) {
+        // Rebuild nmap each iteration
+        std::map<int,std::array<double,3>> nmap;
+        for (auto& n : nodes) nmap[n.id]={n.x,n.y,n.z};
+
+        // Find bad elements
+        std::vector<int> badIdx;
+        for (int i=0; i<(int)elems.size(); ++i)
+            if (mshJac(nmap,elems[i]) < cfg.polishJac) badIdx.push_back(i);
+        if (badIdx.empty()) {
+            if (anyImproved) console.success("Polish: no bad elements remaining");
+            break;
+        }
+        console.keyValue("Polish iter "+std::to_string(iter+1)+" bad", std::to_string(badIdx.size()));
+
+        // Build global face→elem adjacency
+        std::map<FK3,std::vector<int>> faceElems;
+        for (int i=0; i<(int)elems.size(); ++i)
+            for (int fi=0;fi<4;++fi) {
+                FK3 key={elems[i].nodes[GFS[fi][0]],elems[i].nodes[GFS[fi][1]],elems[i].nodes[GFS[fi][2]]};
+                std::sort(key.begin(),key.end());
+                faceElems[key].push_back(i);
+            }
+
+        // Find connected components of bad elements (BFS within bad set only).
+        // Each component is a localized cluster (typically one corner of the mesh).
+        std::vector<std::set<int>> components;
+        {
+            std::set<int> remaining(badIdx.begin(),badIdx.end());
+            while (!remaining.empty()) {
+                int start=*remaining.begin();
+                std::set<int> comp;
+                std::queue<int> q;
+                q.push(start); comp.insert(start); remaining.erase(start);
+                while (!q.empty()) {
+                    int cur=q.front(); q.pop();
+                    for (int fi=0;fi<4;++fi) {
+                        FK3 key={elems[cur].nodes[GFS[fi][0]],
+                                 elems[cur].nodes[GFS[fi][1]],
+                                 elems[cur].nodes[GFS[fi][2]]};
+                        std::sort(key.begin(),key.end());
+                        auto it=faceElems.find(key); if(it==faceElems.end()) continue;
+                        for (int ni:it->second)
+                            if (remaining.count(ni)) { remaining.erase(ni); comp.insert(ni); q.push(ni); }
+                    }
+                }
+                components.push_back(std::move(comp));
+            }
+        }
+        console.keyValue("  Bad components", std::to_string(components.size()));
+
+        // Global counters for new IDs (shared across all components in this iteration)
+        int maxNid=0; for (auto& n:nodes) maxNid=std::max(maxNid,n.id);
+        int maxEid=0; for (auto& e:elems) maxEid=std::max(maxEid,e.id);
+
+        // Collected results from all successfully processed components
+        struct CompResult {
+            std::set<int>      removeElemIdx;
+            std::set<int>      removableNodeIds;
+            std::set<int>      bndNodeIds;    // boundary nodes — must NEVER be deleted
+            std::vector<MshNode> newNodes;
+            std::vector<MshElem> newElems;
+        };
+        std::vector<CompResult> results;
+        std::set<int> claimedElems; // element indices already claimed by a patch
+        int skippedOverlap = 0;
+
+        double pLc = ar.lcMinEff * 0.7;
+        double snapTol2 = ar.lcMinEff * ar.lcMinEff * 1e-6;
+
+        for (int ci=0; ci<(int)components.size(); ++ci) {
+            // BFS expand 2 rings from this component
+            std::set<int> patchSet = components[ci];
+            bfsExpand(patchSet, 2, faceElems);
+
+            // Skip if patch covers entire mesh or overlaps already-claimed elements
+            if (patchSet.size() >= elems.size()) continue;
+            bool overlap=false;
+            for (int idx:patchSet) if (claimedElems.count(idx)) { overlap=true; break; }
+            if (overlap) { ++skippedOverlap; continue; }
+            claimedElems.insert(patchSet.begin(),patchSet.end());
+
+            // Collect patch node IDs
+            std::set<int> patchNodeIds;
+            for (int idx:patchSet) for (int i=0;i<4;++i) patchNodeIds.insert(elems[idx].nodes[i]);
+
+            // Extract boundary faces (count=1 among patch elements)
+            std::map<FK3,std::pair<int,std::array<int,3>>> faceMap;
+            for (int idx:patchSet)
+                for (int fi=0;fi<4;++fi) {
+                    int n0=elems[idx].nodes[GFW[fi][0]];
+                    int n1=elems[idx].nodes[GFW[fi][1]];
+                    int n2=elems[idx].nodes[GFW[fi][2]];
+                    FK3 key={n0,n1,n2}; std::sort(key.begin(),key.end());
+                    auto& e=faceMap[key]; e.first++;
+                    if (e.first==1) e.second={n0,n1,n2};
+                }
+            std::vector<std::array<int,3>> bndFaces;
+            for (auto& [k,v]:faceMap) if (v.first==1) bndFaces.push_back(v.second);
+            if (bndFaces.empty()) continue;
+
+            std::set<int> bndNodeIds;
+            for (auto& f:bndFaces) for (int ni:f) bndNodeIds.insert(ni);
+
+            // Temp file names include iter+component index
+            std::string tag="__pol"+std::to_string(iter)+"_"+std::to_string(ci);
+            auto pp=[&](const std::string& ext){
+                return (fs::path(workDir)/(stem+tag+ext)).string();
+            };
+            std::string pStl=pp(".stl"),pGeo=pp(".geo"),pMsh=pp(".msh"),pLog=pp(".log");
+            auto cleanup=[&](){ for (auto& p:{pStl,pGeo,pMsh,pLog}) { std::error_code ec; fs::remove(p,ec); } };
+
+            // Write patch STL (no Mesh 2 → STL vertices remain boundary nodes)
+            {
+                std::ofstream stl(pStl);
+                stl<<std::scientific<<"solid patch\n";
+                for (auto& f:bndFaces) {
+                    auto& p0=nmap[f[0]]; auto& p1=nmap[f[1]]; auto& p2=nmap[f[2]];
+                    double ax=p1[0]-p0[0],ay=p1[1]-p0[1],az=p1[2]-p0[2];
+                    double bx=p2[0]-p0[0],by=p2[1]-p0[1],bz=p2[2]-p0[2];
+                    double nx=ay*bz-az*by,ny=az*bx-ax*bz,nz=ax*by-ay*bx;
+                    double nl=std::sqrt(nx*nx+ny*ny+nz*nz);
+                    if (nl>1e-15){nx/=nl;ny/=nl;nz/=nl;}
+                    stl<<"  facet normal "<<nx<<" "<<ny<<" "<<nz<<"\n    outer loop\n"
+                       <<"      vertex "<<p0[0]<<" "<<p0[1]<<" "<<p0[2]<<"\n"
+                       <<"      vertex "<<p1[0]<<" "<<p1[1]<<" "<<p1[2]<<"\n"
+                       <<"      vertex "<<p2[0]<<" "<<p2[1]<<" "<<p2[2]<<"\n"
+                       <<"    endloop\n  endfacet\n";
+                }
+                stl<<"endsolid patch\n";
+            }
+
+            // Write patch geo: serial Delaunay, finer lc, no size field
+            {
+                std::ofstream geo(pGeo);
+                geo<<std::scientific;
+                geo<<"Merge \""<<fwdSlash(pStl)<<"\";\n";
+                geo<<"ClassifySurfaces{40*Pi/180, 1, 1, Pi/2};\n";
+                geo<<"CreateGeometry;\n";
+                geo<<"s() = Surface{:};\n";
+                geo<<"sl = newsl; Surface Loop(sl) = {s()};\n";
+                geo<<"v  = newv;  Volume(v) = {sl};\n\n";
+                geo<<"Mesh.CharacteristicLengthMin = "<<pLc<<";\n";
+                geo<<"Mesh.CharacteristicLengthMax = "<<ar.lcMaxEff<<";\n";
+                geo<<"Mesh.CharacteristicLengthExtendFromBoundary = 1;\n";
+                // Serial Delaunay avoids HXT parallel face-partitioning failure
+                geo<<"Mesh.Algorithm3D = 1;\n";
+                geo<<"Mesh.MaxNumThreads2D = 1;\n";
+                geo<<"Mesh.MaxNumThreads3D = 1;\n";
+                geo<<"Mesh.OptimizeThreshold = 0.5;\n";
+                geo<<"Mesh.Optimize = 1;\n";
+                geo<<"Mesh.OptimizeNetgen = 1;\n";
+                geo<<"Mesh.MshFileVersion = 2.2;\n\n";
+                geo<<"Mesh 3;\n";
+                for (int p=0;p<cfg.optimizePasses;++p) geo<<"OptimizeMesh \"Netgen\";\n";
+                geo<<"Save \""<<fwdSlash(pMsh)<<"\";\n";
+            }
+
+            // Run Gmsh
+            std::string gerr;
+            if (!runGmsh(gmshExe,pGeo,pMsh,pLog,gerr)) {
+                cleanup(); continue; // skip silently; Gmsh warns are common for small patches
+            }
+
+            // Parse
+            std::vector<MshNode> pNodes;
+            std::vector<MshElem> pElems;
+            if (!parseMsh2(pMsh,pNodes,pElems,gerr)) {
+                cleanup(); continue;
+            }
+
+            // Quality gate: accept only if BOTH criteria improve:
+            // 1. Min Jac of patch must not regress (pMinJ >= origMinJ * 0.95)
+            // 2. Bad-element count within patch must decrease
+            //    (remeshing at corners often raises min Jac but adds many more
+            //    elements still below warn_min_jac — reject those)
+            std::map<int,std::array<double,3>> pNmap;
+            for (auto& n:pNodes) pNmap[n.id]={n.x,n.y,n.z};
+            double origMinJ=1e30; int origBad=0;
+            for (int idx:patchSet) {
+                double j=mshJac(nmap,elems[idx]);
+                origMinJ=std::min(origMinJ,j);
+                if (j<cfg.warnMinJac) ++origBad;
+            }
+            double pMinJ=1e30; int newBad=0;
+            for (auto& e:pElems) {
+                double j=mshJac(pNmap,e);
+                pMinJ=std::min(pMinJ,j);
+                if (j<cfg.warnMinJac) ++newBad;
+            }
+            if (pMinJ < origMinJ*0.95 || newBad >= origBad) { cleanup(); continue; }
+
+            // Node matching: patch boundary nodes → existing global IDs by coordinate
+            std::map<std::string,int> bndCoordMap;
+            for (int nid:bndNodeIds) {
+                auto& p=nmap[nid];
+                char buf[96]; std::snprintf(buf,sizeof(buf),"%.6e %.6e %.6e",p[0],p[1],p[2]);
+                bndCoordMap[buf]=nid;
+            }
+            std::vector<std::pair<int,std::array<double,3>>> bndList;
+            bndList.reserve(bndNodeIds.size());
+            for (int nid:bndNodeIds) bndList.push_back({nid,nmap[nid]});
+
+            std::map<int,int> pToGlobal;
+            CompResult res;
+            for (auto& pn:pNodes) {
+                char buf[96]; std::snprintf(buf,sizeof(buf),"%.6e %.6e %.6e",pn.x,pn.y,pn.z);
+                auto it=bndCoordMap.find(buf);
+                if (it!=bndCoordMap.end()) { pToGlobal[pn.id]=it->second; continue; }
+                int bestId=-1; double bestD2=snapTol2;
+                for (auto& [nid,bp]:bndList) {
+                    double dx=pn.x-bp[0],dy=pn.y-bp[1],dz=pn.z-bp[2];
+                    double d2=dx*dx+dy*dy+dz*dz;
+                    if (d2<bestD2){bestD2=d2;bestId=nid;}
+                }
+                if (bestId>=0) { pToGlobal[pn.id]=bestId; }
+                else { int newId=++maxNid; pToGlobal[pn.id]=newId; res.newNodes.push_back({newId,pn.x,pn.y,pn.z}); }
+            }
+            for (auto& pe:pElems) {
+                MshElem ne; ne.id=++maxEid; bool ok=true;
+                for (int i=0;i<4;++i) {
+                    auto it=pToGlobal.find(pe.nodes[i]);
+                    if (it==pToGlobal.end()){ok=false;break;}
+                    ne.nodes[i]=it->second;
+                }
+                if (ok) res.newElems.push_back(ne);
+            }
+            res.removeElemIdx    = patchSet;
+            res.removableNodeIds = patchNodeIds;
+            res.bndNodeIds       = bndNodeIds;
+            results.push_back(std::move(res));
+            cleanup();
+            {
+                std::ostringstream s;
+                s<<"  Comp "<<ci<<": Jac "<<origMinJ<<" → "<<pMinJ
+                 <<" ("<<patchSet.size()<<" elems)";
+                console.println(s.str());
+            }
+        }
+
+        {
+            std::ostringstream s;
+            s<<results.size()<<"/"<<components.size();
+            if (skippedOverlap>0) s<<" ("<<skippedOverlap<<" overlap-skipped)";
+            console.keyValue("  Patches improved", s.str());
+        }
+        if (results.empty()) break; // no component succeeded
+
+        // Apply all results.
+        // Boundary nodes of any accepted component must be preserved — they're
+        // referenced by both the new patch elements and the surrounding non-patch
+        // elements.  Interior-only nodes (in patchNodeIds but NOT in any bndNodeIds)
+        // are safe to remove once no non-patch element references them.
+        std::set<int> allRemoveElemIdx;
+        std::set<int> allPatchNodes;    // candidate for removal (all patch nodes)
+        std::set<int> allBndNodes;     // protected: boundary of any accepted component
+        for (auto& r:results) {
+            allRemoveElemIdx.insert(r.removeElemIdx.begin(), r.removeElemIdx.end());
+            allPatchNodes.insert(r.removableNodeIds.begin(), r.removableNodeIds.end());
+            allBndNodes.insert(r.bndNodeIds.begin(), r.bndNodeIds.end());
+        }
+
+        // Remove patch elements (descending index to preserve remaining indices)
+        {
+            std::vector<int> pv(allRemoveElemIdx.begin(),allRemoveElemIdx.end());
+            std::sort(pv.begin(),pv.end(),[](int a,int b){return a>b;});
+            for (int idx:pv) elems.erase(elems.begin()+idx);
+        }
+        // Remove orphaned interior patch nodes only:
+        // - must be in allPatchNodes (was inside a patch)
+        // - must NOT be in allBndNodes (not a shared boundary node)
+        // - must NOT be referenced by any remaining (non-patch) element
+        {
+            std::set<int> usedAfter;
+            for (auto& e:elems) for (int i=0;i<4;++i) usedAfter.insert(e.nodes[i]);
+            nodes.erase(std::remove_if(nodes.begin(),nodes.end(),
+                [&](const MshNode& n){
+                    return allPatchNodes.count(n.id)
+                        && !allBndNodes.count(n.id)
+                        && !usedAfter.count(n.id);
+                }), nodes.end());
+        }
+        // Insert new nodes and elements from all components
+        for (auto& r:results) {
+            for (auto& n:r.newNodes) nodes.push_back(n);
+            for (auto& e:r.newElems) elems.push_back(e);
+        }
+        anyImproved = true;
+    }
+    return anyImproved;
 }
 
 } // anonymous namespace
@@ -1647,6 +2004,26 @@ int runMeshFix(const char* configPath, ConsoleOutput& console) {
     if (cfg.qualityCheck) {
         console.header("Output Quality");
         reportQuality(gmshNodes, gmshElems, cfg.warnMinJac, console);
+    }
+
+    // 9b. Polish: iteratively re-mesh bad-element patches
+    if (cfg.polish) {
+        int badCount=0;
+        {
+            std::map<int,std::array<double,3>> nm;
+            for (auto& n:gmshNodes) nm[n.id]={n.x,n.y,n.z};
+            for (auto& e:gmshElems) if (mshJac(nm,e)<cfg.polishJac) ++badCount;
+        }
+        if (badCount>0) {
+            console.header("Polishing bad patches");
+            console.keyValue("Bad elements (J<"+[&](){std::ostringstream s;s<<cfg.polishJac;return s.str();}()+")", std::to_string(badCount));
+            bool improved = polishMesh(gmshNodes, gmshElems, gmshExe, ar, cfg,
+                                       outDir.string(), stem, console);
+            if (improved && cfg.qualityCheck) {
+                console.header("Post-Polish Quality");
+                reportQuality(gmshNodes, gmshElems, cfg.warnMinJac, console);
+            }
+        }
     }
 
     // 10. Build final IDs
