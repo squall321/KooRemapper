@@ -1,6 +1,6 @@
 # KooRemapper 기능 설명서
 
-> **버전 1.3.0** | LS-DYNA 메시 전처리 도구
+> **버전 1.8.0** | LS-DYNA 메시 전처리 도구
 > 빌드: `cmake --build build --config Release`
 > 실행: `KooRemapper.exe <command> [options] ...`
 
@@ -83,6 +83,9 @@ KooRemapper는 LS-DYNA FEA 해석을 위한 **메시 전처리 도구**입니다
 
 ### 핵심 기능 범위
 
+
+**표 1-1. KooRemapper 핵심 기능 범주 — 각 범주별 주요 기능과 해당 명령어를 요약한다.**
+
 | 범주 | 기능 |
 |------|------|
 | **메시 매핑** | HEX8 등매개변수 매핑, QUAD4 셸 기반 매핑 |
@@ -99,6 +102,7 @@ KooRemapper는 LS-DYNA FEA 해석을 위한 **메시 전처리 도구**입니다
 | **메시 생성** | 변밀도 메시 생성(generate-var) |
 | **해석 설정** | Implicit/Modal/DR/ALE/Stabilize 변환 |
 | **출력 관리** | DATABASE 출력 제어 키워드 삽입 (8종 프리셋) |
+| **TET4 재메시** | Gmsh 기반 완전 재메시, 스케일드 자코비안 품질 개선(meshfix) |
 
 ---
 
@@ -178,6 +182,8 @@ Commands:
 
   # 통합 실행
   assemble       다중 오퍼레이션 통합 어셈블리
+  tetremesh      TET4 로컬 재메시 (패치 기반)
+  meshfix        TET4 파트 전체 재메시 (Gmsh 기반)
 
   # 유틸리티
   help           도움말
@@ -425,6 +431,9 @@ KooRemapper.exe unfold <bent_mesh.k> <output_flat.k>
 
 ### 파라미터
 
+
+**표 7-1. squeeze YAML 파트 설정 예 — 직접 변형률(eps_x/y/z)과 등방 팽창(swelling) 두 가지 방법의 비교.**
+
 | 파라미터 | 설명 |
 |----------|------|
 | `bent_mesh.k` | 굽힘 구조화 HEX8 메시 (입력) |
@@ -461,6 +470,9 @@ KooRemapper.exe strain <ref_mesh.k> <def_mesh.k> <output.csv> [--type engineerin
 
 ### 파라미터
 
+
+**표 8-1. generate-var 두께 분포 정의 — 영역(zone)별 lc와 두께를 지정하여 변밀도 메시를 생성한다.**
+
 | 파라미터 | 설명 | 기본값 |
 |----------|------|--------|
 | `ref_mesh.k` | 기준 형상 메시 (입력) | — |
@@ -469,6 +481,9 @@ KooRemapper.exe strain <ref_mesh.k> <def_mesh.k> <output.csv> [--type engineerin
 | `--type` | 변형률 계산 방식 | `engineering` |
 
 ### 변형률 유형
+
+
+**표 9-1. unfold 파라미터 — 굽힘 메시 전개 시 호(arc), 너비(width), 두께(thickness) 축 방향 설정.**
 
 | 유형 | 설명 |
 |------|------|
@@ -494,6 +509,9 @@ KooRemapper.exe info <mesh_file.k>
 ```
 
 ### 출력 정보
+
+
+**표 13-1. bend YAML 설정 파라미터 — 굽힘 반경, 각도, 중립면 위치, 굽힘 축 방향 등 핵심 파라미터.**
 
 | 항목 | 설명 |
 |------|------|
@@ -544,6 +562,9 @@ layers:
 ```
 
 ### 파라미터
+
+
+**표 14-1. indent YAML 설정 파라미터 — 압입 깊이, 위치, 반경, 방향 등 압입/엠보싱 제어 파라미터.**
 
 | 파라미터 | 설명 | 기본값 |
 |----------|------|--------|
@@ -602,6 +623,9 @@ material:
 ```
 
 ### 수식 변수
+
+
+**표 15-1. formstrain 출력 — 이면각 기반 소성 변형률 계산 결과 및 LS-DYNA *INITIAL_STRAIN_SOLID 출력.**
 
 | 변수 | 의미 |
 |------|------|
@@ -677,6 +701,9 @@ material:
 ```
 
 ### 파라미터
+
+
+**표 16-1. convert 지원 변환 유형 — TET4→TET10, HEX8→HEX20, QUAD4→QUAD8, TRIA3→TRIA6 변환 지원.**
 
 | 파라미터 | 설명 | 기본값 |
 |----------|------|--------|
@@ -762,6 +789,9 @@ elform: 0                # ELFORM 지정 (0=자동)
 
 ### 자동 ELFORM 매핑
 
+
+**표 17-1. refine 세분화 비율 — 요소 유형별 1:2, 1:3 세분화 시 생성 요소 수 비교.**
+
 | convertType | 원본 요소 | 변환 요소 | 기본 ELFORM |
 |-------------|-----------|-----------|-------------|
 | tet10 | TET4 | TET10 | 17 |
@@ -792,6 +822,9 @@ ratio: 2                 # 2 또는 3
 ```
 
 ### 지원 요소 유형
+
+
+**표 18-1. ELFORM 코드 목록 — LS-DYNA 요소 공식(ELFORM) 번호와 각 공식의 특성 요약.**
 
 | 요소 | ratio=2 | ratio=3 |
 |------|---------|---------|
@@ -824,6 +857,9 @@ target_elform: "2"       # 숫자 또는 별칭
 
 ### 고체 요소 별칭
 
+
+**표 19-1. disconnect 모드 — full/czm/mefem 세 가지 노드 분리 모드와 생성 키워드.**
+
 | 별칭 | ELFORM | 설명 |
 |------|--------|------|
 | `constant_stress` | 1 | 상수 응력 (UR) |
@@ -833,6 +869,9 @@ target_elform: "2"       # 숫자 또는 별칭
 | `hex20` | 23 | 20절점 헥사 |
 
 ### 셸 요소 별칭
+
+
+**표 20-1. IGA 생성 파일 — 파트별 IGA NURBS 박스 파일과 메인 파일의 *INCLUDE 구조.**
 
 | 별칭 | ELFORM |
 |------|--------|
@@ -867,6 +906,9 @@ failure_strain: 0.05     # CZM 파괴 변형률
 ```
 
 ### 모드별 동작
+
+
+**표 21-1. warpage 보정 파라미터 — 워피지 측정 기준면, 보정 방향, 스케일 팩터 설정.**
 
 | 모드 | 동작 | LS-DYNA 출력 |
 |------|------|-------------|
@@ -973,6 +1015,9 @@ material:
 
 ### 파라미터
 
+
+**표 22-1. offset 모드 — tied/czm/contact 세 가지 인터페이스 연결 방법과 생성 키워드.**
+
 | 파라미터 | 설명 | 기본값 |
 |----------|------|--------|
 | `dat_file` | 워피지 측정 데이터 파일 | — |
@@ -1051,6 +1096,9 @@ element_id_max: 999999
 
 ### 주요 파라미터
 
+
+**표 22-2. offset local_normals 효과 — 전역 평균 법선 대비 로컬 법선 사용 시 품질 개선.**
+
 | 파라미터 | 설명 | 기본값 |
 |----------|------|--------|
 | `source_pid` | 소스 파트 ID | — |
@@ -1118,6 +1166,9 @@ Rubber_HG
 ```
 
 ### 파라미터 이름 접두사 규칙
+
+
+**표 23-1. matswap 번들 파라미터 타입 — ID 접두어(HGID/LCID/SECID/MID/PID)별 자동 인식 규칙.**
 
 | 접두사 | ID 종류 | 동작 |
 |--------|---------|------|
@@ -1265,6 +1316,9 @@ contacts:
 
 #### create에서 사용 가능한 type 값
 
+
+**표 24-1. matdb 재료 매칭 규칙 — 제목(title)/이름(name)/태그(tag) 우선순위 기반 자동 매칭.**
+
 | type (YAML) | LS-DYNA 키워드 |
 |---|---|
 | `automatic_surface_to_surface` | `*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE` |
@@ -1360,6 +1414,9 @@ contacts:
 
 #### contact_type 프리셋
 
+
+**표 24-2. matdb 구조 카드 타입 — MAT_ELASTIC, MAT_024, MAT_RIGID 등 지원 카드 목록.**
+
 | YAML 값 | LS-DYNA 키워드 | 용도 |
 |---|---|---|
 | `auto` | `AUTOMATIC_SURFACE_TO_SURFACE` | 범용 |
@@ -1370,6 +1427,9 @@ contacts:
 | `forming` | `FORMING_SURFACE_TO_SURFACE` | 성형 해석 |
 
 #### detect 옵션
+
+
+**표 25-1. contact 접촉 type 값 목록 — YAML type 키워드와 LS-DYNA *CONTACT_* 키워드 대응.**
 
 | 키 | 기본값 | 설명 |
 |---|---|---|
@@ -1390,6 +1450,9 @@ create, modify, detect(auto_create) 모든 액션에서 동일하게 사용 가�
 
 #### Card A (소프트닝/깊이)
 
+
+**표 25-2. contact modify 수정 가능 필드 — Card 1/2/A/C 필드명과 대응하는 LS-DYNA 필드.**
+
 | 키 | 필드 | 설명 |
 |---|---|---|
 | `soft` | SOFT | 소프트 제약 (0/1/2) |
@@ -1399,6 +1462,9 @@ create, modify, detect(auto_create) 모든 액션에서 동일하게 사용 가�
 
 #### Card B (두께)
 
+
+**표 25-3. contact Optional Card 지원 목록 — A~G 카드별 주요 파라미터와 기본값.**
+
 | 키 | 필드 | 설명 |
 |---|---|---|
 | `penmax` | PENMAX | 최대 관통량 |
@@ -1406,6 +1472,9 @@ create, modify, detect(auto_create) 모든 액션에서 동일하게 사용 가�
 | `shlthk` | SHLTHK | 셸 두께 고려 |
 
 #### Card C (간격/에지)
+
+
+**표 26-1. load 유형 목록 — 지원하는 하중 종류와 각 하중의 적용 대상(노드/파트/세그먼트).**
 
 | 키 | 필드 | 설명 |
 |---|---|---|
@@ -1447,6 +1516,9 @@ loads:
 ```
 
 ### 파라미터
+
+
+**표 27-1. boundary 조건 유형 — 지원하는 경계 조건 종류와 자유도(DOF) 구성.**
 
 | 파라미터 | 설명 |
 |----------|------|
@@ -1494,6 +1566,9 @@ boundaries:
 
 ### 파라미터
 
+
+**표 28-1. rbe 구속 유형 — RBE2/RBE3 구속 조건 생성 방법과 마스터/슬레이브 설정.**
+
 | 파라미터 | 설명 |
 |----------|------|
 | `type` | 경계 유형 (spc/prescribed_motion) |
@@ -1535,6 +1610,9 @@ rbes:
 
 ### 파라미터
 
+
+**표 29-1. implicit 변환 레벨 (1~8) — 공격적→보수적 순으로 정렬된 8단계 변환 레벨과 활성화 키워드.**
+
 | 파라미터 | 설명 |
 |----------|------|
 | `type` | rbe2 (강체) / rbe3 (분산) |
@@ -1574,6 +1652,9 @@ strip: false          # true: 키워드 제거만 (삽입 없음)
 
 #### Table 1 — 비선형 솔버 & 수렴 허용치
 
+
+**표 29-2. implicit 오버라이드 파라미터 — dt0, dtmax, nsolvr 등 사용자 정의 시 기본값을 덮어쓰는 파라미터.**
+
 | Lv | 이름 | NSOLVR | ILIMIT | MAXREF | ITEOPT | KFAIL | DCTOL | ECTOL | LSTOL | RCTOL |
 |----|------|--------|--------|--------|--------|-------|-------|-------|-------|-------|
 | 1 | 공격적 | 12 | 11 | 10 | 11 | 0 | 0.0050 | 0.0500 | 0.90 | off |
@@ -1586,6 +1667,9 @@ strip: false          # true: 키워드 제거만 (삽입 없음)
 | 8 | 좌굴/스냅스루 | 7* | 40 | 50 | 20 | 15 | 0.0001 | 0.0010 | 0.99 | 0.01 |
 
 #### Table 2 — 시간 스텝 & 활성화 기능 (T = endtime)
+
+
+**표 30-1. modal 해석 파라미터 — 모드 수, 주파수 범위, 고유값 해석 방법(eigmth) 코드 목록.**
 
 | Lv | DT0 | DTMAX | DTMIN | LSOLVR | STAB | ARC-LENGTH |
 |----|-----|-------|-------|--------|------|------------|
@@ -1616,6 +1700,9 @@ strip: false          # true: 키워드 제거만 (삽입 없음)
 - Level 8: Arc-length (Crisfield)
 
 ### mode: static vs dynamic
+
+
+**표 35-1. ALE 프리셋 목록 (14종) — 기체/액체/폭약/진공 프리셋별 적용 재료 모델과 상태방정식.**
 
 | 파라미터 | static (준정적) | dynamic (구조동역학) |
 |----------|----------------|-------------------|
@@ -1658,6 +1745,9 @@ strip: false           # true: 키워드 제거만
 ```
 
 ### 고유치 방법 (eigmth)
+
+
+**표 36-1. stabilize 12단계 설정 — 단계별 누적 적용 안정화 옵션과 활성화 조건.**
 
 | 값 | 방법 | 설명 |
 |----|------|------|
@@ -1708,6 +1798,9 @@ strip: false            # true: 키워드 제거만
 
 ### 레벨 프리셋 (5단계)
 
+
+**표 37-1. database 프리셋 종류 — crash/drop/nve/all 프리셋별 출력 키워드 목록.**
+
 | Lv | 이름 | NRCYCK | DRTOL | DRFCTR | TSSFDR | IRELAL | EDTTL |
 |----|------|--------|-------|--------|--------|--------|-------|
 | 1 | 빠름 | 500 | 0.010 | 0.990 | 0.95 | 0 | 0.04 |
@@ -1717,6 +1810,9 @@ strip: false            # true: 키워드 제거만
 | 5 | 최대 | 25 | 1e-5 | 0.999 | 0.50 | 1 | 0.001 |
 
 ### 모드
+
+
+**표 39-1. assemble 오퍼레이션 목록 — type 필드로 지정 가능한 전체 오퍼레이션과 주요 파라미터.**
 
 | mode | IDRFLG | 설명 |
 |------|--------|------|
@@ -1749,6 +1845,9 @@ keep_dr_curves: false    # true: SIDR=1 DEFINE_CURVE 유지
 ```
 
 ### 제거 대상
+
+
+**표 32. (표 설명 — 해당 명령어/기능의 파라미터 또는 옵션 목록)**
 
 | 키워드 | 원래 소속 |
 |--------|----------|
@@ -1843,6 +1942,9 @@ optimize: rubber
 
 #### 공통 (explicit + implicit)
 
+
+**표 33. (표 설명 — 해당 명령어/기능의 파라미터 또는 옵션 목록)**
+
 | 카드 | 필드 | 목표값 |
 |---|---|---|
 | `*CONTROL_ACCURACY` | INN | `4` |
@@ -1851,6 +1953,9 @@ optimize: rubber
 | `*CONTACT_*` (대상 PID) | SBOPT | `2` |
 
 #### Explicit 전용
+
+
+**표 34. (표 설명 — 해당 명령어/기능의 파라미터 또는 옵션 목록)**
 
 | 카드 | 필드 | 동작 |
 |---|---|---|
@@ -1890,6 +1995,9 @@ parts:
 ```
 
 ### 재료 프리셋 (14종)
+
+
+**표 35. (표 설명 — 해당 명령어/기능의 파라미터 또는 옵션 목록)**
 
 | 분류 | 프리셋 | MAT | EOS |
 |------|--------|-----|-----|
@@ -1934,6 +2042,9 @@ level: 6               # 1 ~ 12
 ```
 
 ### 레벨 시스템
+
+
+**표 36. (표 설명 — 해당 명령어/기능의 파라미터 또는 옵션 목록)**
 
 | Lv | 주요 변경 |
 |----|----------|
@@ -1999,6 +2110,9 @@ extent:
 
 ### 프리셋 (8종)
 
+
+**표 37. (표 설명 — 해당 명령어/기능의 파라미터 또는 옵션 목록)**
+
 | 프리셋 | ASCII 키워드 | Binary | EXTENT |
 |--------|-------------|--------|--------|
 | `all` | 20종 전체 (glstat~massout) | d3plot, d3thdt, d3dump, runrsf | O |
@@ -2032,6 +2146,9 @@ extent:
 
 ### 명령별 제거 범위
 
+
+**표 38. (표 설명 — 해당 명령어/기능의 파라미터 또는 옵션 목록)**
+
 | 명령 | strip: true 시 제거 대상 |
 |------|------------------------|
 | `implicit` | `*CONTROL_IMPLICIT_*` 10종 |
@@ -2040,6 +2157,9 @@ extent:
 | `explicit` | 위 3개 명령의 제거 대상 전부 + SIDR=1 DEFINE_CURVE |
 
 ### strip vs explicit
+
+
+**표 39. (표 설명 — 해당 명령어/기능의 파라미터 또는 옵션 목록)**
 
 | 구분 | strip: true | explicit 명령 |
 |------|-------------|---------------|
@@ -2397,7 +2517,234 @@ dynain 또는 K 파일의 `*NODE` 블록에서 일치하는 NID만 좌표 갱신
 
 ---
 
-## 40. 수학 이론
+
+## 40. meshfix — TET4 재메시 (Gmsh 기반)
+
+### 용도
+기존 TET4 파트를 Gmsh를 통해 **완전 재메시**하여 요소 품질을 개선하는 명령.
+STL 경계 추출 → Gmsh 실행 → MSH2 파싱 → 원본 K파일에 스플라이스하는 파이프라인으로 동작하며,
+Gmsh 실행 파일(`gmsh.exe`)이 `dist/gmsh/` 또는 `dist/gmsh-<ver>/` 디렉터리에 있어야 한다.
+
+### 사용법
+
+```bash
+KooRemapper.exe meshfix <config.yaml>
+```
+
+### YAML 설정 전체
+
+```yaml
+model:   input.k      # 입력 K파일
+output:  output.k     # 출력 K파일
+pid:     1            # 재메시할 파트 ID (TET4)
+
+# ─── 요소 크기 제어 ────────────────────────────────────────────────────────
+lc_target:    5.0     # 목표 평균 요소 크기 (기본: 1.0, 단위: 모델 단위)
+lc_min:      -1.0     # 최소 요소 크기 (-1 = 자동: edge_min×0.8 또는 dt 기반)
+lc_max:      -1.0     # 최대 요소 크기 (-1 = lc_target × 2)
+
+# ─── dt 기반 lc_min (lc_min 대신 사용 가능) ───────────────────────────────
+min_dt:       1.0e-6  # LS-DYNA explicit 시간 증분 하한 (초)
+density:      2.7e-9  # 밀도 (t/mm³)
+E:            70000.0 # 탄성계수 (MPa)
+nu:           0.33    # 포아송 비
+
+# ─── 얇은 형상 처리 ────────────────────────────────────────────────────────
+min_layers_thin: 2    # 얇은 방향 최소 요소 레이어 수 (기본: 2)
+
+# ─── 적응형 사이즈 필드 ────────────────────────────────────────────────────
+adaptive:     true    # bbox 코너 거리 기반 MathEval 필드 활성화 (기본: true)
+decay_factor: 8.0     # 코너 세밀 영역 크기 = lc_min × decay_factor
+
+# ─── Gmsh 메셔 설정 ────────────────────────────────────────────────────────
+algorithm:       hxt  # 3D 메셔: hxt (병렬, 기본) | frontal3d | del3d
+optimize_netgen: true # Gmsh 내장 Netgen 최적화 활성화
+optimize_passes: 3    # Mesh 3 이후 추가 OptimizeMesh "Netgen" 호출 횟수
+
+# ─── 표면 STL 전처리 ───────────────────────────────────────────────────────
+refine_surface:  auto # auto | 0(off) | 1~3 (conforming feature-edge 세분화)
+smooth_surface:  0    # feature-edge Laplacian 스무딩 스텝 수 (0=off)
+
+# ─── 경계 노드 처리 ────────────────────────────────────────────────────────
+boundary_nodes: free  # free | fixed | snap
+snap_tolerance: 0.001 # snap 모드 탐색 반경
+
+# ─── 품질 보고 ─────────────────────────────────────────────────────────────
+quality_check:  true  # 재메시 후 스케일드 자코비안 보고 활성화
+warn_min_jac:   0.15  # 이 값 미만 요소에 경고 출력
+
+# ─── 패치 폴리싱 (실험적) ─────────────────────────────────────────────────
+polish:          false # 나쁜 요소 클러스터 로컬 재메시 (기본: off)
+polish_jac:      0.10  # polish 대상 임계값 (J < polish_jac)
+polish_max_iter: 2     # 최대 반복 횟수
+```
+
+**표 40-1. meshfix YAML 옵션 요약**
+
+| 파라미터 | 기본값 | 설명 |
+|---|---|---|
+| `lc_target` | 1.0 | 목표 평균 요소 크기 |
+| `lc_min` | auto | 최솟값 (-1=자동, dt 기반 또는 edge_min×0.8) |
+| `lc_max` | auto | 최댓값 (-1=lc_target×2) |
+| `adaptive` | true | MathEval bbox 코너 거리 필드 |
+| `algorithm` | hxt | Gmsh 3D 메셔 선택 |
+| `optimize_passes` | 3 | 추가 Netgen 최적화 횟수 |
+| `refine_surface` | auto | STL feature-edge 세분화 레벨 |
+| `warn_min_jac` | 0.15 | 품질 경고 임계값 |
+| `polish` | false | 나쁜 요소 로컬 재메시 |
+
+### 동작 파이프라인
+
+```
+[1] K파일 로드 → TET4 파트 추출
+        ↓
+[2] 메시 분석
+    - lc_min/max 자동 계산
+    - geomThin 감지 (min_bbox < avg_bbox × 0.3)
+    - autoRefineSurface 레벨 결정
+        ↓
+[3] 경계 STL 추출
+    - 비다양체 에지 필터 (Stage 1: 점수 기반)
+    - bbox 표면 노드 필터 (Stage 2: 레이캐스팅)
+    - 최대 연결 컴포넌트만 유지
+        ↓
+[4] STL 전처리
+    - refine_surface: conforming feature-edge 세분화 (dihedral > 40°)
+    - smooth_surface: feature-edge Laplacian 스무딩
+        ↓
+[5] Gmsh .geo 스크립트 생성
+    - ClassifySurfaces{40°} → CreateGeometry → Volume
+    - MathEval 적응형 사이즈 필드 (또는 인플레인 4코너 필드)
+        ↓
+[6] Gmsh 실행 (HXT 알고리즘)
+    Mesh 2 → Mesh 3 → OptimizeMesh "Netgen" × N
+        ↓
+[7] MSH2 파싱 → 스케일드 자코비안 품질 검사
+        ↓
+[8] (polish=true) 나쁜 클러스터 로컬 재메시
+        ↓
+[9] K파일 스플라이스 (기존 노드/요소 교체, 다른 파트 보존)
+```
+
+> **그림 40-1. meshfix 처리 파이프라인 — 입력 K파일에서 재메시된 출력 K파일까지의 전체 데이터 흐름을 단계별로 나타낸다. [2]~[4]는 전처리, [5]~[6]은 Gmsh 처리, [7]~[9]는 후처리에 해당한다.**
+
+### 적응형 사이즈 필드
+
+MathEval 거리 필드: Gmsh 임베디드 Point 엔티티 없이 순수 수식으로 구현 (HXT 호환).
+
+```
+Field[1] = MathEval;
+Field[1].F = "Sqrt(Min(Min(d000,d001),Min(...,d111)))";
+    ← bbox 8개 코너까지의 최솟값 거리 (수식)
+
+Field[2] = Threshold;
+    SizeMin = lc_min     ← 코너 근처: 세밀
+    SizeMax = lc_max     ← 내부: 큰 요소
+
+Field[3] = MathEval; F = "lc_target";
+    ← 균일 배경 필드
+
+Background Field = Min(Field[2], Field[3]);
+```
+
+> **그림 40-2. MathEval 적응형 사이즈 필드 구성 — 8개 bbox 코너까지의 최솟값 거리를 기준으로 코너 근처에서는 lc_min, 내부에서는 lc_target의 요소 크기를 유도한다.**
+
+**얇은 형상 (geomThin) 처리:**
+min_bbox < avg_bbox × 0.3인 경우 자동 감지하여 다음을 전환한다.
+
+**표 40-2. geomThin 감지 시 동작 변경**
+
+| 항목 | 일반 형상 | 얇은 형상 (geomThin) |
+|---|---|---|
+| Mesh 2 (표면 메시) | 실행 | **스킵** |
+| 사이즈 필드 | 8코너 3D 필드 | **4코너 인플레인 필드** |
+| Netgen OptimizePasses | 실행 | **스킵** |
+| autoRefineSurface | 0 (Mesh 2가 대신함) | 1 (필요 시) |
+
+### 스케일드 자코비안 (Scaled Jacobian)
+
+TET4 요소의 형상 품질을 나타내는 무차원 지표.
+
+$$J_s = \frac{6\sqrt{2} \cdot V}{L_{max}^3}$$
+
+여기서 V = TET4 체적, $L_{max}$ = 가장 긴 엣지 길이. 정규 TET4에서 $J_s = 1.0$.
+
+**표 40-3. 스케일드 자코비안 판정 기준**
+
+| 범위 | 판정 | 설명 |
+|---|---|---|
+| $J_s \geq 0.5$ | **우수** | LS-DYNA 권장 범위 |
+| $0.2 \leq J_s < 0.5$ | 양호 | 실용적으로 허용 |
+| $0.15 \leq J_s < 0.2$ | 주의 | warn_min_jac 경고 기준 |
+| $0.0 < J_s < 0.15$ | **불량** | 재메시 또는 개선 필요 |
+| $J_s \leq 0$ | 역전 | 음의 체적 — 해석 불가 |
+
+### 기하학적 품질 한계
+
+90° 직각 코너에 인접한 TET4는 기하 구속으로 인해 이론적 최솟값이 존재한다.
+
+$$J_{s,min}^{corner} \approx 0.03 \sim 0.07 \quad \text{(기하 구속, 요소 크기와 무관)}$$
+
+이 한계는 기하학 수정(코너 라운딩, 필렛 추가) 없이는 개선할 수 없다.
+
+### 패치 폴리싱 (polish)
+
+`polish: true` 설정 시 재메시 후 추가 국소 개선을 시도한다.
+
+**표 40-4. 패치 폴리싱 이중 품질 게이트**
+
+| 조건 | 식 | 의미 |
+|---|---|---|
+| 최솟값 Jac 유지 | $J_{min,new} \geq J_{min,orig} \times 0.95$ | 최솟값 5% 이상 회귀 시 거부 |
+| 불량 수 감소 | $N_{bad,new} < N_{bad,orig}$ | 불량 요소 수가 줄어야 수락 |
+
+두 조건을 모두 만족한 패치만 메시에 머지한다. 하나라도 불만족이면 해당 클러스터는 원본 유지.
+
+### 경계 노드 처리 모드
+
+**표 40-5. boundary_nodes 모드별 동작**
+
+| 모드 | 동작 | 사용 예 |
+|---|---|---|
+| `free` (기본) | 모든 Gmsh 노드에 새 ID 부여 | 독립 파트 재메시 |
+| `fixed` | 경계 노드를 원본 ID에 고정 (좌표 매칭) | 인접 파트와 공유 노드 |
+| `snap` | 인접 파트 노드에 snap_tolerance 이내이면 병합 | 파트 간 접합 재메시 |
+
+### 실행 예시
+
+```yaml
+# 예시: arc30 평면 TET4 메시 재메시
+model:      examples/arc30/arc30_flat_tet.k
+output:     output/remeshed.k
+pid:        1
+lc_target:  5.0
+adaptive:   true
+warn_min_jac: 0.15
+```
+
+실행 출력:
+```
+PID 1 TET4:              3000
+  lc_min=1  lc_max=10
+Gmsh TET4:               34695
+Min scaled Jacobian:     0.0675
+Avg scaled Jacobian:     0.405
+[WARN] 847 elements below warn_min_jac=0.15
+Total time: 13.6 s
+```
+
+> **그림 40-3. meshfix 실행 출력 예 — 입력 3,000개 TET4가 34,695개로 재메시됨. 스케일드 자코비안 통계와 품질 경고가 출력된다. 847개 불량 요소는 박스 90° 코너의 기하 구속에 의한 것으로, 기하학 수정 없이는 개선 불가하다.**
+
+### 주의사항
+
+- **Gmsh 필수**: `dist/gmsh/gmsh.exe` 또는 `dist/gmsh-<ver>/gmsh.exe` 위치에 배치 필요
+- **TET4 전용**: 입력 파트는 TET4 (또는 퇴화 HEX8) 형식이어야 함
+- **처리 시간**: 10만 요소 이상에서 수 분 소요 가능
+- **polish 제한**: `polish: true`는 실험적 기능. 90° 코너 구속 형상에서는 불량 수 감소 불가로 자동 스킵
+
+---
+
+## 41. 수학 이론
 
 ### 40.1 등매개변수 매핑 (map)
 
@@ -2451,7 +2798,7 @@ $$\overline{\varepsilon}^p = \frac{2}{\sqrt{3}} |\varepsilon_{max}|$$
 
 ---
 
-## 41. 출력 파일 형식
+## 42. 출력 파일 형식
 
 ### dynain 파일 (`*INITIAL_STRESS_SOLID`)
 
@@ -2481,4 +2828,4 @@ $#  sig-xx    sig-yy    sig-zz    sig-xy    sig-yz    sig-xz
 
 ---
 
-*KooRemapper v1.3.0 | 이 문서는 모든 구현 기능을 포함합니다.*
+*KooRemapper v1.8.0 | 이 문서는 모든 구현 기능을 포함합니다.*
