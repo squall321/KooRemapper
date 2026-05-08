@@ -315,6 +315,366 @@ def is_table_start(line):
     return line.strip().startswith('|') and '|' in line[1:]
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# LaTeX → Unicode + Word run formatting
+# ─────────────────────────────────────────────────────────────────────────────
+
+LATEX_SYMBOLS = {
+    # Greek lowercase
+    r'\alpha': 'α', r'\beta': 'β', r'\gamma': 'γ', r'\delta': 'δ',
+    r'\epsilon': 'ϵ', r'\varepsilon': 'ε', r'\zeta': 'ζ', r'\eta': 'η',
+    r'\theta': 'θ', r'\vartheta': 'ϑ', r'\iota': 'ι', r'\kappa': 'κ',
+    r'\lambda': 'λ', r'\mu': 'μ', r'\nu': 'ν', r'\xi': 'ξ',
+    r'\omicron': 'ο', r'\pi': 'π', r'\varpi': 'ϖ', r'\rho': 'ρ',
+    r'\varrho': 'ϱ', r'\sigma': 'σ', r'\varsigma': 'ς', r'\tau': 'τ',
+    r'\upsilon': 'υ', r'\phi': 'ϕ', r'\varphi': 'φ', r'\chi': 'χ',
+    r'\psi': 'ψ', r'\omega': 'ω',
+    # Greek uppercase
+    r'\Gamma': 'Γ', r'\Delta': 'Δ', r'\Theta': 'Θ', r'\Lambda': 'Λ',
+    r'\Xi': 'Ξ', r'\Pi': 'Π', r'\Sigma': 'Σ', r'\Upsilon': 'Υ',
+    r'\Phi': 'Φ', r'\Psi': 'Ψ', r'\Omega': 'Ω',
+    # Operators
+    r'\cdot': '·', r'\times': '×', r'\div': '÷', r'\pm': '±', r'\mp': '∓',
+    r'\leq': '≤', r'\geq': '≥', r'\neq': '≠', r'\approx': '≈',
+    r'\equiv': '≡', r'\sim': '∼', r'\propto': '∝',
+    r'\in': '∈', r'\notin': '∉', r'\subset': '⊂', r'\supset': '⊃',
+    r'\cup': '∪', r'\cap': '∩', r'\emptyset': '∅',
+    r'\forall': '∀', r'\exists': '∃', r'\partial': '∂',
+    r'\nabla': '∇', r'\infty': '∞', r'\to': '→', r'\rightarrow': '→',
+    r'\leftarrow': '←', r'\Rightarrow': '⇒', r'\Leftarrow': '⇐',
+    r'\Leftrightarrow': '⇔', r'\mapsto': '↦',
+    r'\sum': 'Σ', r'\prod': '∏', r'\int': '∫',
+    r'\ldots': '…', r'\cdots': '⋯', r'\vdots': '⋮', r'\ddots': '⋱',
+    # NOTE: \hat, \bar, \overline, \tilde, \widehat are handled by stripping below
+    # (they take an argument like \hat{x}; the symbol form alone is rare here)
+    r'\quad': '   ', r'\qquad': '      ',
+    r'\,': ' ', r'\;': ' ', r'\:': ' ', r'\!': '',
+    r'\%': '%', r'\$': '$', r'\&': '&', r'\#': '#', r'\_': '_',
+    r'\{': '{', r'\}': '}', r'\\': '',
+    r'\sqrt': '√',
+}
+
+# Unicode subscript/superscript digits (used for short single-char sub/sup)
+_SUB_DIGITS = {'0':'₀','1':'₁','2':'₂','3':'₃','4':'₄','5':'₅','6':'₆','7':'₇','8':'₈','9':'₉',
+               '+':'₊','-':'₋','=':'₌','(':'₍',')':'₎','i':'ᵢ','j':'ⱼ','x':'ₓ'}
+_SUP_DIGITS = {'0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹',
+               '+':'⁺','-':'⁻','=':'⁼','(':'⁽',')':'⁾','i':'ⁱ','n':'ⁿ'}
+
+
+def _strip_braces(s):
+    s = s.strip()
+    if s.startswith('{') and s.endswith('}'):
+        return s[1:-1]
+    return s
+
+
+def _balanced_arg(text, start):
+    """Return content inside {...} starting at start (must point to '{').
+    Returns (content, end_index_after_closing_brace)."""
+    if start >= len(text) or text[start] != '{':
+        return None, start
+    depth = 0
+    i = start
+    while i < len(text):
+        if text[i] == '{':
+            depth += 1
+        elif text[i] == '}':
+            depth -= 1
+            if depth == 0:
+                return text[start+1:i], i+1
+        i += 1
+    return None, start
+
+
+def _try_unicode_sub(text):
+    """Convert text to Unicode subscript if all chars are mappable."""
+    if all(c in _SUB_DIGITS for c in text):
+        return ''.join(_SUB_DIGITS[c] for c in text), True
+    return text, False
+
+
+def _try_unicode_sup(text):
+    """Convert text to Unicode superscript if all chars are mappable."""
+    if all(c in _SUP_DIGITS for c in text):
+        return ''.join(_SUP_DIGITS[c] for c in text), True
+    return text, False
+
+
+class MathToken:
+    """Token for a math expression: ('text'|'sub'|'sup'|'frac'|'sqrt', content, ...)."""
+    __slots__ = ('kind', 'data', 'extra')
+    def __init__(self, kind, data, extra=None):
+        self.kind = kind
+        self.data = data
+        self.extra = extra
+
+
+def parse_latex_math(text):
+    """Parse LaTeX math text into a list of MathToken. Greedy left-to-right."""
+    # First, replace LaTeX symbols with Unicode (longest-first to avoid prefix issues)
+    sorted_syms = sorted(LATEX_SYMBOLS.items(), key=lambda kv: -len(kv[0]))
+    # Use a regex to replace whole-command tokens (followed by non-letter)
+    def repl(m):
+        tok = m.group(0)
+        return LATEX_SYMBOLS.get(tok, tok)
+    pat = re.compile('|'.join(re.escape(k) for k, _ in sorted_syms) + r'(?![A-Za-z])')
+    text = pat.sub(repl, text)
+
+    # Strip \mathbf{...}, \mathrm{...}, \text{...}, \boldsymbol{...}
+    for cmd in ['mathbf', 'mathrm', 'mathit', 'text', 'textrm', 'boldsymbol', 'operatorname']:
+        pattern = r'\\' + cmd + r'\s*\{([^{}]*)\}'
+        text = re.sub(pattern, r'\1', text)
+
+    # Strip \left and \right (delimiter sizing) — keep just the delimiter
+    text = re.sub(r'\\left\s*([\(\[\{\|])', r'\1', text)
+    text = re.sub(r'\\right\s*([\)\]\}\|])', r'\1', text)
+    text = re.sub(r'\\left\.', '', text)
+    text = re.sub(r'\\right\.', '', text)
+    # Misc spacing/control commands (drop entirely)
+    text = re.sub(r'\\(?:displaystyle|textstyle|scriptstyle|scriptscriptstyle)\b', '', text)
+    text = re.sub(r'\\(?:limits|nolimits)\b', '', text)
+    # \overline{x}, \underline{x}, \widehat{x}, \widetilde{x} — keep content
+    for cmd in ['overline', 'underline', 'widehat', 'widetilde', 'overrightarrow',
+                'overleftarrow', 'hat', 'tilde', 'bar', 'vec', 'dot', 'ddot']:
+        pattern = r'\\' + cmd + r'\s*\{([^{}]*)\}'
+        text = re.sub(pattern, r'\1', text)
+
+    # Math function names (ln, log, sin, cos, ...) — render as plain text
+    for fn in ['ln', 'log', 'sin', 'cos', 'tan', 'cot', 'sec', 'csc',
+               'arcsin', 'arccos', 'arctan', 'sinh', 'cosh', 'tanh',
+               'exp', 'lim', 'min', 'max', 'sup', 'inf', 'det', 'arg']:
+        text = re.sub(r'\\' + fn + r'(?![A-Za-z])', fn, text)
+
+    # Now parse: text + sub/sup + frac + sqrt
+    tokens = []
+    i = 0
+    buf = ''
+
+    def flush_buf():
+        nonlocal buf
+        if buf:
+            tokens.append(MathToken('text', buf))
+            buf = ''
+
+    while i < len(text):
+        c = text[i]
+
+        # \frac{a}{b}
+        if text[i:i+5] == r'\frac':
+            flush_buf()
+            j = i + 5
+            # skip whitespace
+            while j < len(text) and text[j] == ' ':
+                j += 1
+            num, j = _balanced_arg(text, j)
+            while j < len(text) and text[j] == ' ':
+                j += 1
+            den, j = _balanced_arg(text, j)
+            if num is not None and den is not None:
+                tokens.append(MathToken('frac', (num, den)))
+                i = j
+                continue
+            else:
+                buf += '\\frac'
+                i += 5
+                continue
+
+        # √{x} or √x — \sqrt was already converted to '√' above
+        if c == '√' and i + 1 < len(text) and text[i+1] == '{':
+            flush_buf()
+            arg, j = _balanced_arg(text, i+1)
+            tokens.append(MathToken('sqrt', arg if arg is not None else ''))
+            i = j
+            continue
+
+        # Subscript: _{xxx} or _x
+        if c == '_':
+            flush_buf()
+            if i + 1 < len(text) and text[i+1] == '{':
+                arg, j = _balanced_arg(text, i+1)
+                tokens.append(MathToken('sub', arg if arg is not None else ''))
+                i = j
+            elif i + 1 < len(text):
+                tokens.append(MathToken('sub', text[i+1]))
+                i += 2
+            else:
+                i += 1
+            continue
+
+        # Superscript: ^{xxx} or ^x
+        if c == '^':
+            flush_buf()
+            if i + 1 < len(text) and text[i+1] == '{':
+                arg, j = _balanced_arg(text, i+1)
+                tokens.append(MathToken('sup', arg if arg is not None else ''))
+                i = j
+            elif i + 1 < len(text):
+                tokens.append(MathToken('sup', text[i+1]))
+                i += 2
+            else:
+                i += 1
+            continue
+
+        buf += c
+        i += 1
+
+    flush_buf()
+    return tokens
+
+
+def _convert_matrix_envs(text):
+    """Convert pmatrix/bmatrix/matrix environments to bracketed row form:
+    \\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}  →  [ a, b ; c, d ]
+    """
+    pattern = re.compile(r'\\begin\{(p|b|v|V|B)?matrix\}(.*?)\\end\{\1?matrix\}', re.DOTALL)
+
+    def repl(m):
+        kind = m.group(1) or ''
+        body = m.group(2)
+        # Split rows on \\
+        rows = re.split(r'\\\\\s*', body)
+        rendered_rows = []
+        for row in rows:
+            row = row.strip()
+            if not row:
+                continue
+            cells = [c.strip() for c in row.split('&')]
+            rendered_rows.append(', '.join(cells))
+        joined = ' ; '.join(rendered_rows)
+        # Choose brackets by env type
+        open_b, close_b = '[', ']'
+        if kind == 'p':
+            open_b, close_b = '(', ')'
+        elif kind == 'b':
+            open_b, close_b = '[', ']'
+        elif kind in ('v', 'V'):
+            open_b, close_b = '|', '|'
+        elif kind == 'B':
+            open_b, close_b = '{', '}'
+        return f' {open_b} {joined} {close_b} '
+    return pattern.sub(repl, text)
+
+
+def render_math_to_paragraph(p, latex_text, base_font='Cambria Math', base_size=11):
+    """Render LaTeX math text into a python-docx paragraph p, using Unicode +
+    sub/super run formatting + simple a/b fractions."""
+    # Convert matrix environments first (before generic begin/end stripping)
+    latex_text = _convert_matrix_envs(latex_text)
+    # Drop any remaining environments
+    latex_text = re.sub(r'\\begin\{[^}]+\}', '', latex_text)
+    latex_text = re.sub(r'\\end\{[^}]+\}', '', latex_text)
+    # Normalize whitespace
+    latex_text = latex_text.replace('\n', ' ').strip()
+
+    tokens = parse_latex_math(latex_text)
+
+    for tok in tokens:
+        if tok.kind == 'text':
+            r = p.add_run(tok.data)
+            r.font.name = base_font
+            r.font.size = Pt(base_size)
+        elif tok.kind == 'sub':
+            inner = tok.data
+            uni, ok = _try_unicode_sub(inner)
+            if ok:
+                r = p.add_run(uni)
+                r.font.name = base_font
+                r.font.size = Pt(base_size)
+            else:
+                r = p.add_run(inner)
+                r.font.name = base_font
+                r.font.size = Pt(base_size)
+                r.font.subscript = True
+        elif tok.kind == 'sup':
+            inner = tok.data
+            uni, ok = _try_unicode_sup(inner)
+            if ok:
+                r = p.add_run(uni)
+                r.font.name = base_font
+                r.font.size = Pt(base_size)
+            else:
+                r = p.add_run(inner)
+                r.font.name = base_font
+                r.font.size = Pt(base_size)
+                r.font.superscript = True
+        elif tok.kind == 'frac':
+            num, den = tok.data
+            # Render as "(num) / (den)" — wrap multi-char in parens
+            num_str = num.strip()
+            den_str = den.strip()
+            need_paren_n = len(num_str) > 1 and not (num_str.startswith('(') and num_str.endswith(')'))
+            need_paren_d = len(den_str) > 1 and not (den_str.startswith('(') and den_str.endswith(')'))
+            # Recursively expand any LaTeX inside
+            n_tokens = parse_latex_math(num_str)
+            d_tokens = parse_latex_math(den_str)
+            if need_paren_n:
+                r = p.add_run('(')
+                r.font.name = base_font; r.font.size = Pt(base_size)
+            for nt in n_tokens:
+                _emit_token(p, nt, base_font, base_size)
+            if need_paren_n:
+                r = p.add_run(')')
+                r.font.name = base_font; r.font.size = Pt(base_size)
+            r = p.add_run(' / ')
+            r.font.name = base_font; r.font.size = Pt(base_size)
+            if need_paren_d:
+                r = p.add_run('(')
+                r.font.name = base_font; r.font.size = Pt(base_size)
+            for dt in d_tokens:
+                _emit_token(p, dt, base_font, base_size)
+            if need_paren_d:
+                r = p.add_run(')')
+                r.font.name = base_font; r.font.size = Pt(base_size)
+        elif tok.kind == 'sqrt':
+            r = p.add_run('√')
+            r.font.name = base_font; r.font.size = Pt(base_size)
+            arg_str = tok.data
+            need_paren = len(arg_str.strip()) > 1
+            if need_paren:
+                r = p.add_run('(')
+                r.font.name = base_font; r.font.size = Pt(base_size)
+            for at in parse_latex_math(arg_str):
+                _emit_token(p, at, base_font, base_size)
+            if need_paren:
+                r = p.add_run(')')
+                r.font.name = base_font; r.font.size = Pt(base_size)
+
+
+def _emit_token(p, tok, base_font, base_size):
+    """Emit a single MathToken into paragraph p."""
+    if tok.kind == 'text':
+        r = p.add_run(tok.data)
+        r.font.name = base_font; r.font.size = Pt(base_size)
+    elif tok.kind == 'sub':
+        uni, ok = _try_unicode_sub(tok.data)
+        if ok:
+            r = p.add_run(uni)
+        else:
+            r = p.add_run(tok.data)
+            r.font.subscript = True
+        r.font.name = base_font; r.font.size = Pt(base_size)
+    elif tok.kind == 'sup':
+        uni, ok = _try_unicode_sup(tok.data)
+        if ok:
+            r = p.add_run(uni)
+        else:
+            r = p.add_run(tok.data)
+            r.font.superscript = True
+        r.font.name = base_font; r.font.size = Pt(base_size)
+    else:
+        # Recurse for frac/sqrt within frac/sqrt
+        render_math_to_paragraph(p, _reconstruct(tok), base_font, base_size)
+
+
+def _reconstruct(tok):
+    """Reconstruct LaTeX-like text from a token (for recursion)."""
+    if tok.kind == 'frac':
+        return r'\frac{' + tok.data[0] + '}{' + tok.data[1] + '}'
+    if tok.kind == 'sqrt':
+        return r'\sqrt{' + tok.data + '}'
+    return tok.data
+
+
 def has_caption_above(lines, idx):
     """Check if there's already a caption line within 3 lines above idx."""
     for i in range(max(0, idx-3), idx):
@@ -595,9 +955,9 @@ class DocxBuilder:
                 run.font.size = Pt(9)
                 run.font.color.rgb = RGBColor(0xC7, 0x25, 0x4E)
             elif part.startswith('$') and part.endswith('$'):
-                run = para.add_run(part)  # math as-is
-                run.font.name = 'Cambria Math'
-                run.font.size = Pt(10)
+                # Inline LaTeX: render via Unicode + sub/sup formatting
+                inner = part[1:-1]
+                render_math_to_paragraph(para, inner, base_size=10)
             else:
                 # Strip trailing HTML comments
                 clean = re.sub(r'<!--.*?-->', '', part)
@@ -795,9 +1155,7 @@ class DocxBuilder:
                     p.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     p.paragraph_format.space_before = Pt(4)
                     p.paragraph_format.space_after = Pt(4)
-                    run = p.add_run(math_text)
-                    run.font.name = 'Cambria Math'
-                    run.font.size = Pt(10)
+                    render_math_to_paragraph(p, math_text, base_size=11)
                     i += 1
                     continue
                 else:
@@ -814,9 +1172,7 @@ class DocxBuilder:
                     p.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     p.paragraph_format.space_before = Pt(4)
                     p.paragraph_format.space_after = Pt(4)
-                    run = p.add_run(math_text)
-                    run.font.name = 'Cambria Math'
-                    run.font.size = Pt(10)
+                    render_math_to_paragraph(p, math_text, base_size=11)
                     continue
 
             # ── List items ────────────────────────────────────────────────────
