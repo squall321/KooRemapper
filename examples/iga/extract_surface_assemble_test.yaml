@@ -1,0 +1,24 @@
+# extract_surface_assemble_test.yaml — REQ-002 assemble op smoke test
+# Uses the same block_2x2x1.k as iga_multipart.yaml.
+# PID 1 (lower, Z 0..5) and PID 2 (upper, Z 5..10) are layered HEX8.
+#
+# This config emits two shell layers into the assembled output:
+#   * top face of PID 2   → PID 101
+#   * midsurface of PID 2 → PID 102 (averaged top↔bottom XY pairing)
+#
+# After running, the output .k will contain the original solid mesh
+# plus these added *ELEMENT_SHELL groups.
+
+base_model: block_2x2x1.k
+output: extract_surface_assemble_result
+
+operations:
+  - type: extract_surface
+    target_pid: 2
+    face: top
+    output_pid: 101
+
+  - type: extract_surface
+    target_pid: 2
+    mid_surface: true
+    output_pid: 102

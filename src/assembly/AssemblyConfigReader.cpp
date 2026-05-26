@@ -815,6 +815,8 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             op.type = AssemblyOperation::MERGE;
                         } else if (val == "strip") {
                             op.type = AssemblyOperation::STRIP;
+                        } else if (val == "extract_surface" || val == "extract-surface") {
+                            op.type = AssemblyOperation::EXTRACT_SURFACE;
                         } else {
                             throw std::runtime_error("Unknown operation type: " + val);
                         }
@@ -907,6 +909,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                                 else if (op.type == AssemblyOperation::WARPAGE)  op.warpage.targetPid    = pid;
                                 else if (op.type == AssemblyOperation::FILLET)   op.fillet.targetPid     = pid;
                                 else if (op.type == AssemblyOperation::SPLIT)    op.split.targetPid      = pid;
+                                else if (op.type == AssemblyOperation::EXTRACT_SURFACE) op.extractSurface.targetPid = pid;
                             };
                             // Helper: push to targetPids list on structs that support it
                             auto pushMulti = [&](int pid) {
@@ -1056,6 +1059,11 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             if (key == "mode") op.disconnect.mode = val;
                             else if (key == "cohesive_part_id") op.disconnect.cohesivePartId = std::stoi(val);
                             else if (key == "failure_strain") op.disconnect.failureStrain = std::stod(val);
+                        } else if (op.type == AssemblyOperation::EXTRACT_SURFACE) {
+                            if (key == "face") op.extractSurface.face = stripQuotes(val);
+                            else if (key == "output_pid") op.extractSurface.outputPid = std::stoi(val);
+                            else if (key == "mid_surface" || key == "midsurface")
+                                op.extractSurface.midSurface = (val == "true" || val == "yes" || val == "1");
                         } else if (op.type == AssemblyOperation::IGA) {
                             if (key == "targets") {
                                 inTargetsList = true;
@@ -1509,6 +1517,12 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
             }
             if (op.bend.source == "formula" && op.bend.expression.empty())
                 throw std::runtime_error("Operation " + std::to_string(i+1) + ": formula source requires expression");
+        } else if (op.type == AssemblyOperation::EXTRACT_SURFACE) {
+            const std::string& f = op.extractSurface.face;
+            if (f != "top" && f != "bottom" && f != "all") {
+                throw std::runtime_error("Operation " + std::to_string(i+1) +
+                    " (extract_surface): face must be one of top, bottom, all (got '" + f + "')");
+            }
         } else if (op.type == AssemblyOperation::IGA) {
             if (op.iga.targets.empty())
                 throw std::runtime_error("Operation " + std::to_string(i+1) + ": no targets defined for iga");

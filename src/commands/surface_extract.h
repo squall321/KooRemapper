@@ -30,8 +30,9 @@
 
 struct ExtractSurfaceOptions {
     int filterPid = 0;            // 0 = all parts
-    std::string face = "all";     // top | bottom | all
+    std::string face = "all";     // top | bottom | all (ignored when midSurface=true)
     int outputPid = 1;            // PID for emitted shell part
+    bool midSurface = false;      // average top↔bottom node positions → midsurface shells
 };
 
 int runExtractSurface(const std::string& solidFile,

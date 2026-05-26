@@ -44,6 +44,7 @@ public:
     bool applyRefine(const RefineOperation& op);
     bool applyElform(const ElformOperation& op);
     bool applyDisconnect(const DisconnectOperation& op);
+    bool applyExtractSurface(const ExtractSurfaceOperation& op);
     bool applyIGA(const IGAOperation& op, const std::string& outputPrefix);
     bool applyWarpage(const WarpageOperation& op, double E, double nu,
                       const std::string& configDir);

@@ -659,6 +659,8 @@ int runAssemble(const std::string& configFile, const ConsoleOutput& console) {
             ok = assembler.applyMerge(op.merge);
         } else if (op.type == AssemblyOperation::STRIP) {
             ok = assembler.applyStrip(op.strip);
+        } else if (op.type == AssemblyOperation::EXTRACT_SURFACE) {
+            ok = assembler.applyExtractSurface(op.extractSurface);
         }
 
         if (!ok) {

@@ -1884,9 +1884,7 @@ int main(int argc, char* argv[]) {
             else if (a == "--face")      opts.face      = need("--face");
             else if (a == "--output-pid") opts.outputPid = std::stoi(need("--output-pid"));
             else if (a == "--mid-surface") {
-                console.warning("--mid-surface is not yet implemented; "
-                                "falling back to --face top.");
-                opts.face = "top";
+                opts.midSurface = true;
             } else {
                 console.error("Unknown option: " + a);
                 return 1;

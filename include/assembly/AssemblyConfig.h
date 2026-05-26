@@ -457,8 +457,18 @@ struct StripOperation {
     std::vector<std::string> keywords;  // e.g. "*NODE", "*ELEMENT_SOLID"
 };
 
+// REQ-002: free-face extraction integrated into assemble flow.
+// Same algorithm as the standalone `extract-surface` command, but emits
+// shells directly into the assembled model (addedShellElements_ / addedNodes_).
+struct ExtractSurfaceOperation {
+    int targetPid = 0;          // 0 = all parts (source solids)
+    std::string face = "all";   // top | bottom | all  (ignored when midSurface=true)
+    int outputPid = 0;          // PID for the new shell part (0 = auto = ++maxPartId_)
+    bool midSurface = false;    // average top↔bottom node positions → midsurface shells
+};
+
 struct AssemblyOperation {
-    enum Type { REPLACE, SQUEEZE, RESTACK, BEND, INDENT, FORMSTRAIN, TET10_CONVERT, REFINE, ELFORM, DISCONNECT, IGA, WARPAGE, OFFSET, MATSWAP, MATDB, LOAD, CONTACT, BOUNDARY, RBE, WRAP, UPDATE, DATABASE, CONTROL, GENERATE, FILLET, CNRB2SOLID, HFDAMP, BATTERY, SPLIT, MERGE, STRIP };
+    enum Type { REPLACE, SQUEEZE, RESTACK, BEND, INDENT, FORMSTRAIN, TET10_CONVERT, REFINE, ELFORM, DISCONNECT, IGA, WARPAGE, OFFSET, MATSWAP, MATDB, LOAD, CONTACT, BOUNDARY, RBE, WRAP, UPDATE, DATABASE, CONTROL, GENERATE, FILLET, CNRB2SOLID, HFDAMP, BATTERY, SPLIT, MERGE, STRIP, EXTRACT_SURFACE };
     Type type;
     ReplaceOperation replace;
     SqueezeOperation squeeze;
@@ -491,6 +501,7 @@ struct AssemblyOperation {
     SplitOperation split;
     MergeOperation merge;
     StripOperation strip;
+    ExtractSurfaceOperation extractSurface;
 };
 
 struct AssemblyConfig {

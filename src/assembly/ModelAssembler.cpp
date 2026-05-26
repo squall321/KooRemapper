@@ -4898,6 +4898,221 @@ std::string ModelAssembler::generateIGAContent(
     return o.str();
 }
 
+// =====================================================================
+// applyExtractSurface — REQ-002 assemble integration.
+//
+// Same free-face logic as the standalone `extract-surface` command, but
+// operates on the in-flight assemble state (baseMesh_ + addedElements_)
+// and emits shells into addedShellElements_. Mid-surface mode also
+// emits new mid nodes into addedNodes_.
+// =====================================================================
+bool ModelAssembler::applyExtractSurface(const ExtractSurfaceOperation& op) {
+    using FaceKey = std::array<int,4>;
+    struct FaceVal { int count; FaceKey winding; double elemZ; };
+
+    // Lambda — element centroid Z (uses live position lookup, so previous
+    // ops' node movements propagate correctly).
+    auto elemCentroidZ = [&](const std::array<int,8>& nodeIds) -> double {
+        double sum = 0.0; int cnt = 0;
+        for (int nid : nodeIds) {
+            if (nid <= 0) continue;
+            sum += getNodePosition(nid).z;
+            ++cnt;
+        }
+        return cnt > 0 ? sum / cnt : 0.0;
+    };
+    auto faceCentroidZ = [&](const FaceKey& f) -> double {
+        double sum = 0.0; int cnt = 0; int seen[4] = {0,0,0,0};
+        for (int i = 0; i < 4; ++i) {
+            int nid = f[i]; if (nid <= 0) continue;
+            bool dup = false;
+            for (int j = 0; j < i; ++j) if (seen[j] == nid) { dup = true; break; }
+            if (dup) continue;
+            seen[i] = nid;
+            sum += getNodePosition(nid).z; ++cnt;
+        }
+        return cnt > 0 ? sum / cnt : 0.0;
+    };
+
+    // ---- 1. Build face-count map over (baseMesh_ \ removed) + added ------
+    std::map<FaceKey, FaceVal> faceMap;
+    int elemsScanned = 0;
+
+    auto processFaces = [&](const Element& e) {
+        ++elemsScanned;
+        double ezc = elemCentroidZ(e.nodeIds);
+        for (int fi : e.getValidFaceIndices()) {
+            auto fn = e.getFaceNodeIds(fi);
+            FaceKey orig{fn[0], fn[1], fn[2], fn[3]};
+            std::sort(fn.begin(), fn.end());
+            FaceKey key{fn[0], fn[1], fn[2], fn[3]};
+            auto it = faceMap.find(key);
+            if (it == faceMap.end()) faceMap[key] = {1, orig, ezc};
+            else ++it->second.count;
+        }
+    };
+
+    for (const auto& [eid, elem] : baseMesh_.elements) {
+        if (removedElementIds_.count(eid)) continue;
+        if (op.targetPid > 0 && elem.partId != op.targetPid) continue;
+        processFaces(elem);
+    }
+    for (const auto& ae : addedElements_) {
+        if (op.targetPid > 0 && ae.pid != op.targetPid) continue;
+        Element shim;
+        shim.partId = ae.pid;
+        shim.nodeIds = ae.nodeIds;
+        shim.type = ae.type;
+        processFaces(shim);
+    }
+
+    if (elemsScanned == 0) {
+        errorMessage_ = "extract_surface: no solid elements found"
+            + (op.targetPid > 0 ? " in PID " + std::to_string(op.targetPid) : "");
+        return false;
+    }
+
+    // ---- 2. Partition free faces ----------------------------------------
+    std::vector<FaceKey> topFaces, bottomFaces, allFreeFaces;
+    for (const auto& [key, val] : faceMap) {
+        if (val.count != 1) continue;
+        allFreeFaces.push_back(val.winding);
+        double dz = faceCentroidZ(val.winding) - val.elemZ;
+        if (dz > 0)      topFaces.push_back(val.winding);
+        else if (dz < 0) bottomFaces.push_back(val.winding);
+    }
+
+    // ---- 3. Resolve output PID -----------------------------------------
+    int outPid = op.outputPid > 0 ? op.outputPid : ++maxPartId_;
+    if (op.outputPid > 0) maxPartId_ = std::max(maxPartId_, op.outputPid);
+
+    // ---- 4. Mid-surface mode -------------------------------------------
+    if (op.midSurface) {
+        if (topFaces.empty() || bottomFaces.empty()) {
+            errorMessage_ = "extract_surface mid_surface: need both top and bottom "
+                "free faces (top=" + std::to_string(topFaces.size()) +
+                ", bottom=" + std::to_string(bottomFaces.size()) + ")";
+            return false;
+        }
+
+        std::set<int> botNodes, topNodes;
+        for (const auto& f : topFaces)    for (int n : f) if (n > 0) topNodes.insert(n);
+        for (const auto& f : bottomFaces) for (int n : f) if (n > 0) botNodes.insert(n);
+
+        double xMin = +1e30, xMax = -1e30, yMin = +1e30, yMax = -1e30;
+        for (int nid : botNodes) {
+            auto p = getNodePosition(nid);
+            xMin = std::min(xMin, p.x); xMax = std::max(xMax, p.x);
+            yMin = std::min(yMin, p.y); yMax = std::max(yMax, p.y);
+        }
+        double diag = std::sqrt((xMax-xMin)*(xMax-xMin) + (yMax-yMin)*(yMax-yMin));
+        double cell = diag / std::max(1.0, std::sqrt((double)botNodes.size()));
+        if (!(cell > 0.0)) cell = 1.0;
+
+        std::unordered_map<long long, std::vector<int>> hashBuckets;
+        auto cellKey = [&](double x, double y) -> std::pair<int,int> {
+            return {static_cast<int>(std::floor(x/cell)), static_cast<int>(std::floor(y/cell))};
+        };
+        auto bucketHash = [](int cx, int cy) -> long long {
+            return static_cast<long long>(cx) * 1000003LL + static_cast<long long>(cy);
+        };
+        for (int nid : botNodes) {
+            auto p = getNodePosition(nid);
+            auto [cx, cy] = cellKey(p.x, p.y);
+            hashBuckets[bucketHash(cx, cy)].push_back(nid);
+        }
+
+        std::map<int, int> topToMid;
+        int unmatched = 0;
+        for (int tNid : topNodes) {
+            auto tp = getNodePosition(tNid);
+            auto [cx, cy] = cellKey(tp.x, tp.y);
+            int bestB = -1; double bestD2 = std::numeric_limits<double>::max();
+            for (int dx = -1; dx <= 1; ++dx)
+            for (int dy = -1; dy <= 1; ++dy) {
+                auto it = hashBuckets.find(bucketHash(cx+dx, cy+dy));
+                if (it == hashBuckets.end()) continue;
+                for (int bNid : it->second) {
+                    auto bp = getNodePosition(bNid);
+                    double ddx = tp.x - bp.x, ddy = tp.y - bp.y;
+                    double d2 = ddx*ddx + ddy*ddy;
+                    if (d2 < bestD2) { bestD2 = d2; bestB = bNid; }
+                }
+            }
+            if (bestB < 0) { ++unmatched; continue; }
+            auto tp_ = getNodePosition(tNid);
+            auto bp_ = getNodePosition(bestB);
+            int midId = ++maxNodeId_;
+            addedNodes_.push_back({midId,
+                (tp_.x + bp_.x) * 0.5,
+                (tp_.y + bp_.y) * 0.5,
+                (tp_.z + bp_.z) * 0.5});
+            topToMid[tNid] = midId;
+        }
+
+        int emitted = 0, skipped = 0;
+        for (const auto& tf : topFaces) {
+            AddedShellElement s;
+            s.id = ++maxShellElementId_;
+            s.pid = outPid;
+            for (int& n : s.nodeIds) n = 0;
+            bool ok = true;
+            for (int i = 0; i < 4; ++i) {
+                int srcN = tf[i];
+                if (i == 3 && (srcN == tf[2] || srcN == 0 || srcN == tf[0])) {
+                    s.nodeIds[i] = s.nodeIds[i-1];
+                    continue;
+                }
+                auto it = topToMid.find(srcN);
+                if (it == topToMid.end()) { ok = false; break; }
+                s.nodeIds[i] = it->second;
+            }
+            if (ok) { addedShellElements_.push_back(s); ++emitted; }
+            else    { --maxShellElementId_; ++skipped; }
+        }
+
+        infoMessages.push_back("  extract_surface(mid): " + std::to_string(emitted) +
+            " shells, " + std::to_string(topToMid.size()) + " new mid nodes (PID " +
+            std::to_string(outPid) + ")" +
+            (unmatched > 0 ? " — " + std::to_string(unmatched) + " unpaired top nodes" : "") +
+            (skipped > 0   ? " — " + std::to_string(skipped)   + " skipped faces" : ""));
+        return true;
+    }
+
+    // ---- 5. Filter mode (top / bottom / all) ----------------------------
+    std::vector<FaceKey>* chosen = nullptr;
+    if      (op.face == "top")    chosen = &topFaces;
+    else if (op.face == "bottom") chosen = &bottomFaces;
+    else                          chosen = &allFreeFaces;
+
+    if (chosen->empty()) {
+        errorMessage_ = "extract_surface: no free faces matched filter '" + op.face + "'";
+        return false;
+    }
+
+    int triCount = 0, quadCount = 0;
+    for (const auto& f : *chosen) {
+        AddedShellElement s;
+        s.id = ++maxShellElementId_;
+        s.pid = outPid;
+        for (int& n : s.nodeIds) n = 0;
+        bool tri = (f[3] == f[2] || f[3] == 0 || f[3] == f[0]);
+        s.nodeIds[0] = f[0];
+        s.nodeIds[1] = f[1];
+        s.nodeIds[2] = f[2];
+        s.nodeIds[3] = tri ? f[2] : f[3];
+        addedShellElements_.push_back(s);
+        if (tri) ++triCount; else ++quadCount;
+    }
+
+    infoMessages.push_back("  extract_surface(" + op.face + "): " +
+        std::to_string(quadCount + triCount) + " shells emitted to PID " +
+        std::to_string(outPid) +
+        (triCount > 0 ? " (" + std::to_string(quadCount) + " QUAD4, " +
+                        std::to_string(triCount) + " TRIA3)" : ""));
+    return true;
+}
+
 bool ModelAssembler::applyIGA(const IGAOperation& op, const std::string& outputPrefix) {
     // Derive output basename (no directory, no extension)
     std::string basename = outputPrefix;
