@@ -4,6 +4,9 @@
 #include <algorithm>
 #include <atomic>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/analysis]]
+
 #ifdef USE_OPENMP
 #include <omp.h>
 #endif

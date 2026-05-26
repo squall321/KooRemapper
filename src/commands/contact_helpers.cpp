@@ -13,6 +13,10 @@
 #include <cmath>
 #include <unordered_map>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/commands]]
+//   @lat: [[commands/contact]]
+
 using namespace KooRemapper;
 
 std::vector<ContactDef> ct_parseContacts(const std::vector<std::string>& lines) {

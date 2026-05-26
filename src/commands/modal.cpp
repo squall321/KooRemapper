@@ -7,6 +7,10 @@
 #include <fstream>
 #include <sstream>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/commands]]
+//   @lat: [[commands/modal]]
+
 using KooRemapper::ConsoleOutput;
 
 // ---------------------------------------------------------------------------

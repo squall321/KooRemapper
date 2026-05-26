@@ -4,6 +4,9 @@
 #include <algorithm>
 #include <sstream>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/cli]]
+
 namespace KooRemapper {
 
 ArgumentParser::ArgumentParser(const std::string& programName, const std::string& description)

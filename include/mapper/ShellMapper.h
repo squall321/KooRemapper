@@ -6,6 +6,9 @@
 #include "util/SpatialHash2D.h"
 #include <string>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/mapper]]
+
 namespace KooRemapper {
 
 /**

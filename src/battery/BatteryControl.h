@@ -7,6 +7,9 @@
 #include <ostream>
 #include <vector>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/battery]]
+
 namespace bat {
 
 // Write *CONTROL_* cards for the given phase/mode

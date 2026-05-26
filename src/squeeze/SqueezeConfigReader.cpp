@@ -4,6 +4,9 @@
 #include <stdexcept>
 #include <algorithm>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/squeeze]]
+
 namespace KooRemapper {
 
 std::string SqueezeConfigReader::trim(const std::string& str) {

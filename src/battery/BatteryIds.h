@@ -6,6 +6,9 @@
 #include "BatteryConfig.h"
 #include <string>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/battery]]
+
 // ─────────────────────────────────────────────────────────────
 // PID — Stacked model
 // PID = 1000 + uc_index * 10 + layer_type  (UC 0-based)

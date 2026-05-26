@@ -1,5 +1,8 @@
 #include "grid/NeutralGridGenerator.h"
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/grid]]
+
 namespace KooRemapper {
 
 NeutralGridGenerator::NeutralGridGenerator()

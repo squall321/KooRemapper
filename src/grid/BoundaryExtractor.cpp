@@ -5,6 +5,9 @@
 #include <map>
 #include <cmath>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/grid]]
+
 namespace KooRemapper {
 
 BoundaryExtractor::BoundaryExtractor()

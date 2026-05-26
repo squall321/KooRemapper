@@ -3,6 +3,9 @@
 #include "core/Vector3D.h"
 #include <vector>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/mapper]]
+
 namespace KooRemapper {
 
 /**

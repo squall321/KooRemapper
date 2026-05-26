@@ -4,6 +4,9 @@
 #include <limits>
 #include <set>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/mapper]]
+
 namespace KooRemapper {
 
 FlatMeshGenerator::FlatMeshGenerator()

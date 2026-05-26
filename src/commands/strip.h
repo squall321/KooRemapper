@@ -21,5 +21,9 @@
 #include "cli/ConsoleOutput.h"
 #include <string>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/commands]]
+//   @lat: [[commands/strip]]
+
 int runStrip(const std::string& yamlFile,
              KooRemapper::ConsoleOutput& console);

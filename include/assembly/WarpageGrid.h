@@ -4,6 +4,9 @@
 #include <string>
 #include <unordered_map>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/assembly]]
+
 namespace KooRemapper {
 
 class WarpageGrid {

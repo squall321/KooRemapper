@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <stdexcept>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/assembly]]
+
 namespace KooRemapper {
 
 IndentProfile::IndentProfile(double depth, double r1, double r2)

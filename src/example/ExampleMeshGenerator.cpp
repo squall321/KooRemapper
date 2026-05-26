@@ -2,6 +2,9 @@
 #include <cmath>
 #include <algorithm>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/generator]]
+
 namespace KooRemapper {
 
 namespace {

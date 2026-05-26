@@ -7,6 +7,9 @@
 #include <cstdlib>
 #include <iostream>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/parser]]
+
 namespace KooRemapper {
 
 // Detect PENTA6 from any degenerate HEX8 node pattern and normalize

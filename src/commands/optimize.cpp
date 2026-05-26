@@ -10,6 +10,10 @@
 #include <cstdio>
 #include <cmath>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/commands]]
+//   @lat: [[commands/optimize]]
+
 using namespace KooRemapper;
 
 // ── opt_* helpers ─────────────────────────────────────────────────────────────

@@ -2,6 +2,9 @@
 #include <algorithm>
 #include <fstream>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/core]]
+
 #ifdef PLATFORM_WINDOWS
     #include <windows.h>
     #include <direct.h>

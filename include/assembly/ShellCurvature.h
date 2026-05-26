@@ -6,6 +6,9 @@
 #include <map>
 #include <utility>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/assembly]]
+
 namespace KooRemapper {
 
 struct ShellCurvatureResult {

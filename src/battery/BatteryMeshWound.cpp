@@ -12,6 +12,9 @@
 #include <algorithm>
 #include <numeric>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/battery]]
+
 namespace bat {
 
 // ─────────────────────────────────────────────────────────────

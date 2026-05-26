@@ -3,6 +3,9 @@
 #include <string>
 #include <vector>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/commands]]
+
 // ================================================================
 // hfdamp - High-Frequency Damping generator
 // Inserts *DAMPING_FREQUENCY_RANGE_DEFORM into a K-file.

@@ -3,6 +3,9 @@
 #include <sstream>
 #include <iomanip>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/util]]
+
 namespace KooRemapper {
 
 Timer::Timer()

@@ -7,6 +7,9 @@
 #include <utility>
 #include <cmath>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/battery]]
+
 namespace bat {
 
 // ─────────────────────────────────────────────────────────────

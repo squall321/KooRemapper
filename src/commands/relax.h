@@ -1,6 +1,10 @@
 #pragma once
 #include <string>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/commands]]
+//   @lat: [[commands/relax]]
+
 namespace KooRemapper { class ConsoleOutput; }
 
 // Generate *CONTROL_DYNAMIC_RELAXATION card string (also used by assemble command)

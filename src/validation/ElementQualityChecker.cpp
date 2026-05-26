@@ -2,6 +2,9 @@
 #include <cmath>
 #include <algorithm>
 #include <limits>
+
+// Knowledge graph (lat.md):
+//   @lat: [[modules/validation]]
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif

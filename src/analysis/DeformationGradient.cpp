@@ -1,6 +1,9 @@
 #include "analysis/DeformationGradient.h"
 #include <cmath>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/analysis]]
+
 namespace KooRemapper {
 
 // HEX8 corner natural coordinates

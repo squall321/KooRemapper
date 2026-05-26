@@ -5,6 +5,9 @@
 #include <stdexcept>
 #include <cstdlib>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/parser]]
+
 namespace KooRemapper {
 
 ShellReader::ShellReader()

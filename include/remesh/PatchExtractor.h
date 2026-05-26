@@ -6,6 +6,9 @@
 #include <set>
 #include <string>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/remesh]]
+
 namespace KooRemapper {
 namespace remesh {
 

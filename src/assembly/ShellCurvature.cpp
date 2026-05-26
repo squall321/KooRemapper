@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <iostream>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/assembly]]
+
 namespace KooRemapper {
 
 Vector3D ShellCurvature::computeElementNormal(const Mesh& mesh, const Element& elem) const {

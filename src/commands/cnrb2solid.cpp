@@ -12,6 +12,10 @@
 #include <fstream>
 #include <cstdio>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/commands]]
+//   @lat: [[commands/cnrb2solid]]
+
 using KooRemapper::ConsoleOutput;
 
 // ============================================================

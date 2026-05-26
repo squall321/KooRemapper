@@ -6,6 +6,9 @@
 #include <map>
 #include <vector>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/generator]]
+
 namespace KooRemapper {
 
 /**

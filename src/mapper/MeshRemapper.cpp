@@ -8,6 +8,9 @@
 #include <cstdlib>
 #include <cstdio>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/mapper]]
+
 #ifdef USE_OPENMP
 #include <omp.h>
 #endif

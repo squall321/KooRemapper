@@ -9,6 +9,10 @@
 #include <algorithm>
 #include <cstdio>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/commands]]
+//   @lat: [[commands/implicit]]
+
 using KooRemapper::ConsoleOutput;
 
 // ---------------------------------------------------------------------------

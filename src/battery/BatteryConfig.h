@@ -8,6 +8,9 @@
 #include <string>
 #include <vector>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/battery]]
+
 // ── Layer type indices (used for PID calculation) ──────────────
 enum BatteryLayerType {
     LT_AL   = 1,   // Al current collector (SHELL)

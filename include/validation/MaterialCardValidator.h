@@ -4,6 +4,9 @@
 #include <string>
 #include <vector>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/validation]]
+
 namespace KooRemapper {
 
 class MaterialCardValidator {

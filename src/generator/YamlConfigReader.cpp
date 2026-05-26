@@ -5,6 +5,9 @@
 #include <stdexcept>
 #include <stack>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/generator]]
+
 namespace KooRemapper {
 
 double YamlConfigReader::YamlNode::asDouble(double defaultVal) const {

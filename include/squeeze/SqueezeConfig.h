@@ -3,6 +3,9 @@
 #include <vector>
 #include <string>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/squeeze]]
+
 namespace KooRemapper {
 
 /**

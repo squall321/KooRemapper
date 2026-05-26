@@ -3,6 +3,10 @@
 #include <string>
 #include <vector>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/commands]]
+//   @lat: [[commands/cnrb2solid]]
+
 // Standalone: KooRemapper cnrb2solid config.yaml
 int runCnrb2Solid(const std::string& yamlFile, KooRemapper::ConsoleOutput& console);
 

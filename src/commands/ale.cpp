@@ -11,6 +11,10 @@
 #include <algorithm>
 #include <cstdio>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/commands]]
+//   @lat: [[commands/ale]]
+
 using KooRemapper::ConsoleOutput;
 
 // ── ALE helpers ──────────────────────────────────────────────────────────────

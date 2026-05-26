@@ -2,6 +2,9 @@
 #include <algorithm>
 #include <numeric>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/grid]]
+
 namespace KooRemapper {
 
 double EdgeInfo::getArcLengthParameter(int pointIndex) const {

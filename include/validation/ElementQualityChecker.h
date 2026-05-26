@@ -6,6 +6,9 @@
 #include <vector>
 #include <string>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/validation]]
+
 namespace KooRemapper {
 
 class ElementQualityChecker {

@@ -4,6 +4,9 @@
 #include "core/Matrix3x3.h"
 #include <array>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/analysis]]
+
 namespace KooRemapper {
 
 /**

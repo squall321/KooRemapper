@@ -31,5 +31,8 @@
 #include "cli/ConsoleOutput.h"
 #include <string>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/commands]]
+
 int runMerge(const std::string& yamlFile,
              KooRemapper::ConsoleOutput& console);

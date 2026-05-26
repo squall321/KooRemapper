@@ -3,6 +3,9 @@
 #include <vector>
 #include <array>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/commands]]
+
 // ContactDef: parsed *CONTACT_* block
 struct ContactDef {
     int index = 0;

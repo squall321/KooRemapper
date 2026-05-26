@@ -13,6 +13,9 @@
 #include <array>
 #include <string>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/assembly]]
+
 namespace KooRemapper {
 
 class ModelAssembler {

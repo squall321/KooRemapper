@@ -8,6 +8,10 @@
 #include <sstream>
 #include <cstdio>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/commands]]
+//   @lat: [[commands/relax]]
+
 using KooRemapper::ConsoleOutput;
 
 // ---------------------------------------------------------------------------

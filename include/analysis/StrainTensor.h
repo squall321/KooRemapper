@@ -4,6 +4,9 @@
 #include <array>
 #include <cmath>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/analysis]]
+
 namespace KooRemapper {
 
 /**

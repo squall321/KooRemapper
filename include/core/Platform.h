@@ -2,6 +2,9 @@
 
 #include <string>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/core]]
+
 // Platform-specific path separator
 #ifdef PLATFORM_WINDOWS
     #define PATH_SEPARATOR '\\'

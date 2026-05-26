@@ -8,6 +8,9 @@
 #include <set>
 #include <algorithm>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/grid]]
+
 namespace KooRemapper {
 
 /**

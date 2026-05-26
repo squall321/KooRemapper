@@ -4,6 +4,9 @@
 #include <ctime>
 #include <algorithm>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/parser]]
+
 namespace KooRemapper {
 
 KFileWriter::KFileWriter()

@@ -21,6 +21,9 @@
 #include "BatteryMeshStacked.h"   // reuse MeshStats
 #include <ostream>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/battery]]
+
 namespace bat {
 
 // Generate complete wound-cell mesh into 'out'.

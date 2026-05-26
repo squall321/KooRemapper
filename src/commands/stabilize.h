@@ -3,6 +3,10 @@
 #include <vector>
 #include <climits>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/commands]]
+//   @lat: [[commands/stabilize]]
+
 namespace KooRemapper { class ConsoleOutput; }
 
 struct StabilizeConfig {

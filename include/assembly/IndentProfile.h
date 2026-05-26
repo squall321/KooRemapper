@@ -1,3 +1,6 @@
+
+// Knowledge graph (lat.md):
+//   @lat: [[modules/assembly]]
 #pragma once
 
 namespace KooRemapper {

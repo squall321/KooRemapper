@@ -3,6 +3,9 @@
 #include "assembly/AssemblyConfig.h"
 #include <string>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/assembly]]
+
 namespace KooRemapper {
 
 class AssemblyConfigReader {

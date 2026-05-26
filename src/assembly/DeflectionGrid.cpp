@@ -4,6 +4,9 @@
 #include <cmath>
 #include <algorithm>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/assembly]]
+
 namespace KooRemapper {
 
 bool DeflectionGrid::loadFromFile(const std::string& filename) {

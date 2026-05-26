@@ -1,6 +1,10 @@
 #pragma once
 #include <string>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/commands]]
+//   @lat: [[commands/matswap]]
+
 namespace KooRemapper { class ConsoleOutput; }
 
 int runMatswap(const std::string& modelFile, const std::string& bundleFile,

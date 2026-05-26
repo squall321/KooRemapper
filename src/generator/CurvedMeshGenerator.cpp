@@ -3,6 +3,9 @@
 #include <stdexcept>
 #include <limits>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/generator]]
+
 namespace KooRemapper {
 
 CurvedMeshGenerator::CurvedMeshGenerator()

@@ -8,6 +8,9 @@
 #include <vector>
 #include <algorithm>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/commands]]
+
 using namespace KooRemapper;
 
 // ══════════════════════════════════════════════════════════════════════════════

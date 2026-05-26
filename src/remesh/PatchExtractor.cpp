@@ -8,6 +8,9 @@
 #include <unordered_map>
 #include <unordered_set>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/remesh]]
+
 namespace KooRemapper {
 namespace remesh {
 

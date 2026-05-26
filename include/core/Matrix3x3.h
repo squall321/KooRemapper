@@ -5,6 +5,9 @@
 #include <cmath>
 #include <stdexcept>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/core]]
+
 namespace KooRemapper {
 
 /**

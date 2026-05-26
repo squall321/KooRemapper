@@ -2,6 +2,9 @@
 #include "util/Logger.h"
 #include <cmath>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/mapper]]
+
 namespace KooRemapper {
 
 std::array<double, 4> ShellMapper::shapeFunctions(double xi, double eta) {

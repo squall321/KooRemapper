@@ -3,6 +3,9 @@
 #include "core/Mesh.h"
 #include "grid/EdgeCalculator.h"
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/grid]]
+
 namespace KooRemapper {
 
 /**

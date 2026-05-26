@@ -1,4 +1,8 @@
 #include "core/Platform.h"
+
+// Knowledge graph (lat.md):
+//   @lat: [[modules/commands]]
+//   @lat: [[architecture]]
 #ifdef _WIN32
 #  define WIN32_LEAN_AND_MEAN
 #  define NOMINMAX
@@ -1487,6 +1491,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Map command
+    // @lat: [[commands/map]]
     if (command == "map") {
         // Parse options
         bool useParallel = true;  // Default: parallel mode
@@ -1814,6 +1819,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Shell-based mapping command
+    // @lat: [[commands/shellmap]]
     if (command == "shellmap") {
         double thickness = -1.0;  // Auto-detect
         std::vector<std::string> positionalArgs;
@@ -1842,6 +1848,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Unfold command
+    // @lat: [[commands/unfold]]
     if (command == "unfold") {
         if (argc < 4) {
             console.error("Usage: KooRemapper unfold <bent_mesh> <output_flat>");
@@ -1852,6 +1859,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Generate command
+    // @lat: [[commands/generate]]
     if (command == "generate") {
         // Sub-command: generate box <yaml>
         if (argc >= 3 && std::string(argv[2]) == "box") {
@@ -1897,6 +1905,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Generate-var command
+    // @lat: [[commands/generate]]
     if (command == "generate-var") {
         ArgumentParser parser("KooRemapper generate-var", "Generate variable density mesh");
         parser.addPositional("config", "YAML configuration file");
@@ -1927,6 +1936,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Strain command
+    // @lat: [[commands/strain]]
     if (command == "strain") {
         ArgumentParser parser("KooRemapper strain", "Calculate strain between meshes");
         parser.addPositional("ref_mesh", "Reference mesh (k-file)");
@@ -1958,6 +1968,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Prestress command
+    // @lat: [[commands/prestress]]
     if (command == "prestress") {
         ArgumentParser parser("KooRemapper prestress", "Calculate prestress");
         parser.addPositional("ref_mesh", "Reference mesh (k-file)");
@@ -2002,6 +2013,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Squeeze command
+    // @lat: [[commands/squeeze]]
     if (command == "squeeze") {
         std::vector<std::string> positionalArgs;
 
@@ -2021,6 +2033,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Assemble command
+    // @lat: [[commands/assemble]]
     if (command == "assemble") {
         if (argc < 3) {
             console.error("Usage: KooRemapper assemble <config.yaml>");
@@ -2031,6 +2044,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Matswap command
+    // @lat: [[commands/matswap]]
     if (command == "matswap") {
         // YAML mode: single argument ending in .yaml/.yml
         if (argc == 3) {
@@ -2057,6 +2071,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Matdb command
+    // @lat: [[commands/matdb]]
     if (command == "matdb") {
         if (argc < 3) {
             console.error("Usage: KooRemapper matdb <config.yaml>");
@@ -2076,6 +2091,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Load command
+    // @lat: [[commands/load]]
     if (command == "load") {
         if (argc < 3) {
             console.error("Usage: KooRemapper load <config.yaml>");
@@ -2089,6 +2105,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Boundary command
+    // @lat: [[commands/boundary]]
     if (command == "boundary") {
         if (argc < 3) {
             console.error("Usage: KooRemapper boundary <config.yaml>");
@@ -2102,6 +2119,7 @@ int main(int argc, char* argv[]) {
     }
 
     // RBE command
+    // @lat: [[commands/rbe]]
     if (command == "rbe") {
         if (argc < 3) {
             console.error("Usage: KooRemapper rbe <config.yaml>");
@@ -2115,6 +2133,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Relax command (Dynamic Relaxation)
+    // @lat: [[commands/relax]]
     if (command == "relax") {
         if (argc < 3) {
             console.error("Usage: KooRemapper relax <config.yaml>");
@@ -2125,6 +2144,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Explicit command (revert to pure explicit)
+    // @lat: [[commands/explicit]]
     if (command == "explicit") {
         if (argc < 3) {
             console.error("Usage: KooRemapper explicit <config.yaml>");
@@ -2135,6 +2155,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Implicit command
+    // @lat: [[commands/implicit]]
     if (command == "implicit") {
         if (argc < 3) {
             console.error("Usage: KooRemapper implicit <config.yaml>");
@@ -2145,6 +2166,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Modal command
+    // @lat: [[commands/modal]]
     if (command == "modal") {
         if (argc < 3) {
             console.error("Usage: KooRemapper modal <config.yaml>");
@@ -2155,6 +2177,7 @@ int main(int argc, char* argv[]) {
     }
 
     // ALE command
+    // @lat: [[commands/ale]]
     if (command == "ale") {
         if (argc < 3) {
             console.error("Usage: KooRemapper ale <config.yaml>");
@@ -2165,6 +2188,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Contact command
+    // @lat: [[commands/contact]]
     if (command == "contact") {
         if (argc < 3) {
             console.error("Usage: KooRemapper contact <config.yaml>");
@@ -2175,6 +2199,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Optimize command
+    // @lat: [[commands/optimize]]
     if (command == "optimize") {
         if (argc < 3) {
             console.error("Usage: KooRemapper optimize <config.yaml>");
@@ -2185,6 +2210,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Stabilize command
+    // @lat: [[commands/stabilize]]
     if (command == "stabilize") {
         if (argc < 3) {
             console.error("Usage: KooRemapper stabilize <config.yaml>");
@@ -2195,6 +2221,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Database command
+    // @lat: [[commands/database]]
     if (command == "database") {
         if (argc < 3) {
             console.error("Usage: KooRemapper database <config.yaml>");
@@ -2253,6 +2280,7 @@ int main(int argc, char* argv[]) {
     }
 
     // MeshFix command — whole-part TET4 remesh via Gmsh subprocess
+    // @lat: [[commands/meshfix]]
     if (command == "meshfix") {
         if (argc < 3) {
             console.error("Usage: KooRemapper meshfix <config.yaml>");
@@ -2305,6 +2333,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Info command
+    // @lat: [[commands/info]]
     if (command == "info") {
         if (argc < 3) {
             console.error("Usage: KooRemapper info <mesh_file>");
@@ -2315,6 +2344,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Restack command
+    // @lat: [[commands/restack]]
     if (command == "restack") {
         if (argc < 3) {
             console.error("Usage: KooRemapper restack <config.yaml>");
@@ -2325,6 +2355,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Bend command
+    // @lat: [[commands/bend]]
     if (command == "bend") {
         if (argc < 3) {
             console.error("Usage: KooRemapper bend <config.yaml>");
@@ -2335,6 +2366,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Indent command
+    // @lat: [[commands/indent]]
     if (command == "indent") {
         if (argc < 3) {
             console.error("Usage: KooRemapper indent <config.yaml>");
@@ -2345,6 +2377,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Formstrain command
+    // @lat: [[commands/formstrain]]
     if (command == "formstrain") {
         if (argc < 3) {
             console.error("Usage: KooRemapper formstrain <config.yaml>");
@@ -2355,6 +2388,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Convert command (tet10/hex20/quad8/tria6)
+    // @lat: [[commands/convert]]
     if (command == "convert") {
         if (argc < 3) {
             console.error("Usage: KooRemapper convert <config.yaml>");
@@ -2365,6 +2399,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Refine command
+    // @lat: [[commands/refine]]
     if (command == "refine") {
         if (argc < 3) {
             console.error("Usage: KooRemapper refine <config.yaml>");
@@ -2375,6 +2410,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Elform command
+    // @lat: [[commands/elform]]
     if (command == "elform") {
         if (argc < 3) {
             console.error("Usage: KooRemapper elform <config.yaml>");
@@ -2385,6 +2421,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Disconnect command
+    // @lat: [[commands/disconnect]]
     if (command == "disconnect") {
         if (argc < 3) {
             console.error("Usage: KooRemapper disconnect <config.yaml>");
@@ -2395,6 +2432,7 @@ int main(int argc, char* argv[]) {
     }
 
     // IGA command
+    // @lat: [[commands/iga]]
     if (command == "iga") {
         if (argc < 3) {
             console.error("Usage: KooRemapper iga <config.yaml>");
@@ -2405,6 +2443,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Warpage command
+    // @lat: [[commands/warpage]]
     if (command == "warpage") {
         if (argc < 3) {
             console.error("Usage: KooRemapper warpage <config.yaml>");
@@ -2415,6 +2454,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Offset command
+    // @lat: [[commands/offset]]
     if (command == "offset") {
         if (argc < 3) {
             console.error("Usage: KooRemapper offset <config.yaml>");
@@ -2425,6 +2465,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Wrap command
+    // @lat: [[commands/wrap]]
     if (command == "wrap") {
         if (argc < 3) {
             console.error("Usage: KooRemapper wrap <config.yaml>");
@@ -2445,6 +2486,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Cnrb2Solid command
+    // @lat: [[commands/cnrb2solid]]
     if (command == "cnrb2solid") {
         if (argc < 3) {
             console.error("Usage: KooRemapper cnrb2solid <config.yaml>");
@@ -2465,6 +2507,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Battery command
+    // @lat: [[commands/battery]]
     if (command == "battery") {
         if (argc < 3) {
             console.error("Usage: KooRemapper battery <config.yaml>");
@@ -2485,6 +2528,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Strip command
+    // @lat: [[commands/strip]]
     if (command == "strip") {
         if (argc < 3) {
             console.error("Usage: KooRemapper strip <config.yaml>");

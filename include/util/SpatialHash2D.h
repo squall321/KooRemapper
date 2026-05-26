@@ -8,6 +8,9 @@
 #include <cstdint>
 #include <array>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/util]]
+
 namespace KooRemapper {
 
 /**

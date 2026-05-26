@@ -4,6 +4,9 @@
 #include <cmath>
 #include <algorithm>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/mapper]]
+
 namespace KooRemapper {
 
 bool ShellUnfolder::unfold(const ShellMesh& bentShell) {

@@ -4,6 +4,9 @@
 #include <functional>
 #include <string>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/generator]]
+
 namespace KooRemapper {
 
 /**

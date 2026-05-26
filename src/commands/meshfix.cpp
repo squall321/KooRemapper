@@ -2,6 +2,10 @@
 #  define WIN32_LEAN_AND_MEAN
 #  define NOMINMAX
 #  include <windows.h>
+
+// Knowledge graph (lat.md):
+//   @lat: [[modules/commands]]
+//   @lat: [[commands/meshfix]]
 #  ifdef ERROR
 #    undef ERROR
 #  endif

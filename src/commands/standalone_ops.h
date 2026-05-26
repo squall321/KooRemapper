@@ -1,6 +1,9 @@
 #pragma once
 #include <string>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/commands]]
+
 namespace KooRemapper { class ConsoleOutput; }
 
 int runWrap(const std::string& yamlFile, KooRemapper::ConsoleOutput& console);

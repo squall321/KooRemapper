@@ -10,6 +10,10 @@
 #include <cstdio>
 #include <cctype>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/commands]]
+//   @lat: [[commands/database]]
+
 using KooRemapper::ConsoleOutput;
 
 // ---------------------------------------------------------------------------

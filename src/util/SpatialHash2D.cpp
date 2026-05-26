@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <limits>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/util]]
+
 namespace KooRemapper {
 
 void SpatialHash2D::build(const std::map<int, ShellElement>& elements,

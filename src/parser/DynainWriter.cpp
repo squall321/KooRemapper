@@ -3,6 +3,9 @@
 #include <sstream>
 #include <ctime>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/parser]]
+
 namespace KooRemapper {
 
 DynainWriter::DynainWriter()

@@ -3,6 +3,9 @@
 #include <chrono>
 #include <string>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/util]]
+
 namespace KooRemapper {
 
 /**

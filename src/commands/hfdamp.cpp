@@ -13,6 +13,9 @@
 #include <cstdio>
 #include <climits>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/commands]]
+
 using KooRemapper::ConsoleOutput;
 
 // ============================================================

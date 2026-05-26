@@ -1,6 +1,9 @@
 #include "mapper/EdgeInterpolator.h"
 #include <algorithm>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/mapper]]
+
 namespace KooRemapper {
 
 EdgeInterpolator::EdgeInterpolator()

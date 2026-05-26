@@ -6,6 +6,10 @@
 #include <array>
 #include <utility>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/commands]]
+//   @lat: [[commands/contact]]
+
 namespace KooRemapper { class Mesh; class ConsoleOutput; }
 
 // ── Structs needed by callers ─────────────────────────────────────────────────

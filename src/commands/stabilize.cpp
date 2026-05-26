@@ -10,6 +10,10 @@
 #include <cstdio>
 #include <iostream>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/commands]]
+//   @lat: [[commands/stabilize]]
+
 using KooRemapper::ConsoleOutput;
 
 static bool stab_hasShellElements(const std::vector<std::string>& lines) {

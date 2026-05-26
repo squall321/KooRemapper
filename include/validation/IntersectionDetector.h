@@ -5,6 +5,9 @@
 #include <vector>
 #include <array>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/validation]]
+
 namespace KooRemapper {
 
 class IntersectionDetector {

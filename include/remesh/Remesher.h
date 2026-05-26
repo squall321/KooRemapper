@@ -2,6 +2,9 @@
 
 #include "remesh/RemeshTask.h"
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/remesh]]
+
 namespace KooRemapper {
 namespace remesh {
 

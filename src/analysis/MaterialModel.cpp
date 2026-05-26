@@ -2,6 +2,9 @@
 #include <sstream>
 #include <iomanip>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/analysis]]
+
 namespace KooRemapper {
 
 MaterialModel MaterialModel::isotropicElastic(double E, double nu)

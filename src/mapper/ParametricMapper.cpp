@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <limits>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/mapper]]
+
 namespace KooRemapper {
 
 ParametricMapper::ParametricMapper()

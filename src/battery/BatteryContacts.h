@@ -7,6 +7,9 @@
 #include <ostream>
 #include <vector>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/battery]]
+
 namespace bat {
 
 // Write all contact definitions for a stacked cell model.

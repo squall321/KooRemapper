@@ -1,6 +1,9 @@
 #include "mapper/UnstructuredMeshAnalyzer.h"
 #include <limits>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/mapper]]
+
 namespace KooRemapper {
 
 UnstructuredMeshAnalyzer::UnstructuredMeshAnalyzer()

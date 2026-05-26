@@ -4,6 +4,9 @@
 #include <iomanip>
 #include <sstream>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/util]]
+
 namespace KooRemapper {
 
 Logger& Logger::instance() {

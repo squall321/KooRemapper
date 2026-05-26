@@ -1,5 +1,8 @@
 #include "remesh/TetGenRemesher.h"
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/remesh]]
+
 // =============================================================================
 // Phase B backend body. When KOOREMAPPER_BUILD_TETGEN is defined, this file
 // compiles against third_party/tetgen and translates RemeshTask <-> tetgenio.

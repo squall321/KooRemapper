@@ -2,6 +2,9 @@
 #include <algorithm>
 #include <sstream>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/grid]]
+
 namespace KooRemapper {
 
 ConnectivityAnalyzer::ConnectivityAnalyzer()

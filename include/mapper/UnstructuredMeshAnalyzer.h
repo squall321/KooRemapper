@@ -3,6 +3,9 @@
 #include "core/Mesh.h"
 #include "core/Vector3D.h"
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/mapper]]
+
 namespace KooRemapper {
 
 /**

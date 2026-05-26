@@ -32,6 +32,9 @@
 #include <limits>
 #include <iomanip>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/commands]]
+
 using namespace KooRemapper;
 
 namespace {

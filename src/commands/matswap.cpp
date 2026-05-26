@@ -12,6 +12,10 @@
 #include <vector>
 #include <stdexcept>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/commands]]
+//   @lat: [[commands/matswap]]
+
 using namespace KooRemapper;
 
 // =====================================================================

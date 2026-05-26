@@ -3,6 +3,9 @@
 #include <iomanip>
 #include <sstream>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/cli]]
+
 namespace KooRemapper {
 
 ConsoleOutput::ConsoleOutput()

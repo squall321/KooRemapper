@@ -4,6 +4,9 @@
 #include <cmath>
 #include <algorithm>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/util]]
+
 namespace KooRemapper {
 
 ValidationResult Validator::validateMesh(const Mesh& mesh) {

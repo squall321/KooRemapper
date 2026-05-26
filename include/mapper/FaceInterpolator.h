@@ -4,6 +4,9 @@
 #include "mapper/EdgeInterpolator.h"
 #include <array>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/mapper]]
+
 namespace KooRemapper {
 
 /**

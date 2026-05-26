@@ -7,6 +7,12 @@
 #include <string>
 #include <vector>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/commands]]
+//   @lat: [[commands/load]]
+//   @lat: [[commands/boundary]]
+//   @lat: [[commands/rbe]]
+
 using namespace KooRemapper;
 
 int runLoad(const std::string& yamlFile, ConsoleOutput& console) {

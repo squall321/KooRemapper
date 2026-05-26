@@ -2,6 +2,9 @@
 #include <algorithm>
 #include <limits>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/validation]]
+
 namespace KooRemapper {
 
 IntersectionDetector::BoundingBox IntersectionDetector::computeBoundingBox(

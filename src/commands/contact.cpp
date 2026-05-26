@@ -12,6 +12,10 @@
 #include <set>
 #include <algorithm>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/commands]]
+//   @lat: [[commands/contact]]
+
 using namespace KooRemapper;
 
 int runContact(const std::string& yamlFile, ConsoleOutput& console) {

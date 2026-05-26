@@ -2,6 +2,9 @@
 #include <sstream>
 #include <iomanip>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/core]]
+
 namespace KooRemapper {
 
 std::string Vector3D::toString() const {

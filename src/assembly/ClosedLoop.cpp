@@ -3,6 +3,9 @@
 #include <limits>
 #include <stdexcept>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/assembly]]
+
 namespace KooRemapper {
 
 void ClosedLoop::setPolygon(const std::vector<Vec2>& points) {

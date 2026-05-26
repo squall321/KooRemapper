@@ -5,6 +5,9 @@
 #include <set>
 #include <cmath>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/grid]]
+
 namespace KooRemapper {
 
 StructuredGridIndexer::StructuredGridIndexer()

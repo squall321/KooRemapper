@@ -1,6 +1,9 @@
 #include "core/ShellMesh.h"
 #include <algorithm>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/core]]
+
 namespace KooRemapper {
 
 void ShellMesh::buildConnectivity() {

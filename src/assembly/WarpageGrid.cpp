@@ -7,6 +7,9 @@
 #include <cmath>
 #include <queue>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/assembly]]
+
 namespace KooRemapper {
 
 bool WarpageGrid::loadFromFile(const std::string& filepath, double maskValue, double noiseThreshold) {

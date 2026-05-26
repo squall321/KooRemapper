@@ -14,6 +14,9 @@
 #include <string>
 #include <vector>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/commands]]
+
 namespace {
 
 // Minimal flat YAML reader for the tetremesh config.

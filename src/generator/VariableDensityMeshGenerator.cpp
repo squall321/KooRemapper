@@ -2,6 +2,9 @@
 #include <cmath>
 #include <stdexcept>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/generator]]
+
 namespace KooRemapper {
 
 VariableDensityMeshGenerator::VariableDensityMeshGenerator()

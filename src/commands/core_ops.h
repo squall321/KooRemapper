@@ -2,6 +2,9 @@
 #include "analysis/StrainTensor.h"
 #include <string>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/commands]]
+
 namespace KooRemapper { class ConsoleOutput; }
 
 // runMapping

@@ -22,6 +22,10 @@
 #include <unordered_map>
 #include <iomanip>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/commands]]
+//   @lat: [[commands/squeeze]]
+
 using namespace KooRemapper;
 
 int runSqueeze(const std::string& meshFile, const std::string& configFile,

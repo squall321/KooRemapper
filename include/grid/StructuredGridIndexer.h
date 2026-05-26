@@ -9,6 +9,9 @@
 #include <tuple>
 #include <array>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/grid]]
+
 namespace KooRemapper {
 
 /**

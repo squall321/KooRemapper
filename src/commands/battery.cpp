@@ -19,6 +19,10 @@
 #include <algorithm>
 #include <stdexcept>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/commands]]
+//   @lat: [[commands/battery]]
+
 using KooRemapper::ConsoleOutput;
 
 // ─────────────────────────────────────────────────────────────

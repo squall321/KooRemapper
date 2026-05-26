@@ -1,5 +1,8 @@
 #include "mapper/FaceInterpolator.h"
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/mapper]]
+
 namespace KooRemapper {
 
 FaceInterpolator::FaceInterpolator()

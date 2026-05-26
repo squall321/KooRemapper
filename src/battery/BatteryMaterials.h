@@ -6,6 +6,9 @@
 #include "BatteryConfig.h"
 #include <ostream>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/battery]]
+
 namespace bat {
 
 // Write all section definitions (SHELL/SOLID/HOURGLASS) for stacked
