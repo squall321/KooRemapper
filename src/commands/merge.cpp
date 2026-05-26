@@ -13,6 +13,9 @@
 #include <cstdio>
 #include <functional>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/commands]]
+
 using KooRemapper::ConsoleOutput;
 
 // ─────────────────────────────────────────────────────────────
@@ -55,6 +58,20 @@ static std::vector<std::string> mg_tokenWS(const std::string& line) {
     std::string tok;
     while (iss >> tok) toks.push_back(tok);
     return toks;
+}
+
+// 10-char fixed-width tokenizer for MAT card data lines
+static std::vector<std::string> mg_tok10(const std::string& s) {
+    std::vector<std::string> t;
+    for (size_t i = 0; i < s.size(); i += 10) {
+        size_t len = std::min((size_t)10, s.size() - i);
+        std::string f = s.substr(i, len);
+        size_t a = f.find_first_not_of(" \t");
+        if (a == std::string::npos) { t.push_back(""); continue; }
+        size_t b = f.find_last_not_of(" \t");
+        t.push_back(f.substr(a, b - a + 1));
+    }
+    return t;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -323,6 +340,9 @@ static void mg_parseKFile(const std::string& path, mg_KModel& mdl, ConsoleOutput
                 nu = (3.0 * K - 2.0 * G_inf) / (2.0 * (3.0 * K + G_inf));
             }
             mdl.mats[matMid] = {"VE076", E, nu, veRho, 0, false};
+            console.info("  [mat-parse] VE076 MID=" + std::to_string(matMid) +
+                " BULK=" + std::to_string(K) + " G_inf=" + std::to_string(G_inf) +
+                " E=" + std::to_string(E) + " nu=" + std::to_string(nu));
         }
         veGi.clear();
         veBetai.clear();
@@ -390,6 +410,9 @@ static void mg_parseKFile(const std::string& path, mg_KModel& mdl, ConsoleOutput
                 thermalExpMid = 0;
                 thermalExpCard = 0;
                 matTitleLine = (up.find("TITLE") != std::string::npos);
+            } else if (up.find("*MAT_") == 0) {
+                // Unrecognized MAT keyword — log it
+                console.info("  [mat-parse] SKIP unrecognized: " + trimmed);
             }
             continue;
         }
@@ -461,7 +484,9 @@ static void mg_parseKFile(const std::string& path, mg_KModel& mdl, ConsoleOutput
                 continue; // skip title line
             }
             matCardNum++;
-            auto toks = mg_tokenWS(trimmed);
+            // Use fixed-width 10-char tokenizer (handles LS-DYNA fixed format)
+            auto toks = mg_tok10(line);
+            if (toks.size() < 4 || (toks.size() >= 1 && toks[0].empty())) toks = mg_tokenWS(trimmed);
 
             if (matType == "ELASTIC" && matCardNum == 1) {
                 // Card 1: MID, RO, E, PR, DA, DB
@@ -470,10 +495,15 @@ static void mg_parseKFile(const std::string& path, mg_KModel& mdl, ConsoleOutput
                     double rho = mg_toDouble(toks[1]);
                     double E = mg_toDouble(toks[2]);
                     double pr = mg_toDouble(toks[3]);
+                    console.info("  [mat-parse] ELASTIC MID=" + std::to_string(matMid) +
+                        " RO=" + toks[1] + " E=" + toks[2] + " PR=" + toks[3] +
+                        " (toks=" + std::to_string(toks.size()) + ")");
                     if (matMid > 0) {
                         mdl.mats[matMid] = {"ELASTIC", E, pr, rho, 0, false};
                         if (matMid > mdl.maxMatId) mdl.maxMatId = matMid;
                     }
+                } else {
+                    console.info("  [mat-parse] ELASTIC card1 too few tokens: " + std::to_string(toks.size()) + " raw=[" + trimmed + "]");
                 }
                 inMat = false;
             } else if (matType == "024" && matCardNum == 1) {
@@ -483,10 +513,14 @@ static void mg_parseKFile(const std::string& path, mg_KModel& mdl, ConsoleOutput
                     double rho = mg_toDouble(toks[1]);
                     double E = mg_toDouble(toks[2]);
                     double pr = mg_toDouble(toks[3]);
+                    console.info("  [mat-parse] MAT_024 MID=" + std::to_string(matMid) +
+                        " RO=" + toks[1] + " E=" + toks[2] + " PR=" + toks[3]);
                     if (matMid > 0) {
                         mdl.mats[matMid] = {"024", E, pr, rho, 0, false};
                         if (matMid > mdl.maxMatId) mdl.maxMatId = matMid;
                     }
+                } else {
+                    console.info("  [mat-parse] MAT_024 card1 too few tokens: " + std::to_string(toks.size()) + " raw=[" + trimmed + "]");
                 }
                 inMat = false;
             } else if (matType == "RIGID" && matCardNum == 1) {
@@ -495,10 +529,14 @@ static void mg_parseKFile(const std::string& path, mg_KModel& mdl, ConsoleOutput
                     double rho = mg_toDouble(toks[1]);
                     double E = mg_toDouble(toks[2]);
                     double pr = mg_toDouble(toks[3]);
+                    console.info("  [mat-parse] RIGID MID=" + std::to_string(matMid) +
+                        " RO=" + toks[1] + " E=" + toks[2] + " PR=" + toks[3]);
                     if (matMid > 0) {
                         mdl.mats[matMid] = {"RIGID", E, pr, rho, 0, false};
                         if (matMid > mdl.maxMatId) mdl.maxMatId = matMid;
                     }
+                } else {
+                    console.info("  [mat-parse] RIGID card1 too few tokens: " + std::to_string(toks.size()) + " raw=[" + trimmed + "]");
                 }
                 inMat = false;
             } else if (matType == "VE076") {
@@ -532,7 +570,8 @@ static void mg_parseKFile(const std::string& path, mg_KModel& mdl, ConsoleOutput
                 continue;
             }
             thermalExpCard++;
-            auto toks = mg_tokenWS(trimmed);
+            auto toks = mg_tok10(line);
+            if (toks.size() < 2 || (toks.size() >= 1 && toks[0].empty())) toks = mg_tokenWS(trimmed);
             if (thermalExpCard == 1 && toks.size() >= 2) {
                 // Card 1: PID (actually MID reference), LCID, MULT
                 thermalExpMid = mg_toInt(toks[0]);
@@ -572,8 +611,13 @@ static FaceKey mg_makeFaceKey(int a, int b, int c, int d) {
 // Returns {lowFaceNodes[4], highFaceNodes[4]}
 static void mg_getStackFaces(const mg_Elem& e, const std::map<int, mg_Vec3>& nodes,
                               int dir, int lowFace[4], int highFace[4]) {
-    // HEX8 faces: face A = nid[0..3], face B = nid[4..7]
-    // Determine which is low/high based on centroid in stacking direction
+    // HEX8 has 3 opposite face pairs; pick the one most aligned with stacking direction
+    // Each pair: face0[i] and face1[i] are connected by an edge
+    static const int facePairs[3][2][4] = {
+        {{0,1,2,3}, {4,5,6,7}},   // pair A: nid[0..3] vs nid[4..7]
+        {{0,1,5,4}, {3,2,6,7}},   // pair B: edges 0-3,1-2,5-6,4-7
+        {{0,3,7,4}, {1,2,6,5}}    // pair C: edges 0-1,3-2,7-6,4-5
+    };
     auto getCoord = [&](int nid) -> double {
         auto it = nodes.find(nid);
         if (it == nodes.end()) return 0.0;
@@ -582,18 +626,26 @@ static void mg_getStackFaces(const mg_Elem& e, const std::map<int, mg_Vec3>& nod
         return it->second.z;
     };
 
-    double zA = 0, zB = 0;
-    for (int i = 0; i < 4; i++) {
-        zA += getCoord(e.nid[i]);
-        zB += getCoord(e.nid[i + 4]);
+    int bestPair = 0;
+    double maxDiff = 0;
+    for (int p = 0; p < 3; p++) {
+        double avgA = 0, avgB = 0;
+        for (int k = 0; k < 4; k++) {
+            avgA += getCoord(e.nid[facePairs[p][0][k]]);
+            avgB += getCoord(e.nid[facePairs[p][1][k]]);
+        }
+        double diff = std::abs(avgB - avgA);
+        if (diff > maxDiff) { maxDiff = diff; bestPair = p; }
     }
-    zA *= 0.25;
-    zB *= 0.25;
-
-    if (zA <= zB) {
-        for (int i = 0; i < 4; i++) { lowFace[i] = e.nid[i]; highFace[i] = e.nid[i + 4]; }
+    double avgA = 0, avgB = 0;
+    for (int k = 0; k < 4; k++) {
+        avgA += getCoord(e.nid[facePairs[bestPair][0][k]]);
+        avgB += getCoord(e.nid[facePairs[bestPair][1][k]]);
+    }
+    if (avgA <= avgB) {
+        for (int i = 0; i < 4; i++) { lowFace[i] = e.nid[facePairs[bestPair][0][i]]; highFace[i] = e.nid[facePairs[bestPair][1][i]]; }
     } else {
-        for (int i = 0; i < 4; i++) { lowFace[i] = e.nid[i + 4]; highFace[i] = e.nid[i]; }
+        for (int i = 0; i < 4; i++) { lowFace[i] = e.nid[facePairs[bestPair][1][i]]; highFace[i] = e.nid[facePairs[bestPair][0][i]]; }
     }
 }
 
@@ -876,11 +928,70 @@ int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
                 mg_getStackFaces(botIt->second, mdl.nodes, cfg.dir, botLo, botHi);
                 mg_getStackFaces(topIt->second, mdl.nodes, cfg.dir, topLo, topHi);
 
+                // Build robust HEX8 from bottom and top face nodes
+                // Sort bottom face CCW (viewed from stacking-), match top 1:1
+                int dim1 = (cfg.dir + 1) % 3;
+                int dim2 = (cfg.dir + 2) % 3;
+                auto gc = [&](int nid, int d) -> double {
+                    auto it = mdl.nodes.find(nid);
+                    if (it == mdl.nodes.end()) return 0.0;
+                    if (d == 0) return it->second.x;
+                    if (d == 1) return it->second.y;
+                    return it->second.z;
+                };
+
+                // Sort bottom face nodes CCW by angle from centroid
+                double cx = 0, cy = 0;
+                for (int i = 0; i < 4; i++) {
+                    cx += gc(botLo[i], dim1);
+                    cy += gc(botLo[i], dim2);
+                }
+                cx /= 4; cy /= 4;
+                // Compute angle and sort
+                struct AngleIdx { double angle; int idx; };
+                AngleIdx ai[4];
+                for (int i = 0; i < 4; i++) {
+                    ai[i].angle = std::atan2(gc(botLo[i], dim2) - cy, gc(botLo[i], dim1) - cx);
+                    ai[i].idx = i;
+                }
+                std::sort(ai, ai + 4, [](const AngleIdx& a, const AngleIdx& b) { return a.angle < b.angle; });
+                int sortedBot[4];
+                for (int i = 0; i < 4; i++) sortedBot[i] = botLo[ai[i].idx];
+
+                // Verify CCW: cross product should align with stacking direction (+)
+                double v1x = gc(sortedBot[1], dim1) - gc(sortedBot[0], dim1);
+                double v1y = gc(sortedBot[1], dim2) - gc(sortedBot[0], dim2);
+                double v3x = gc(sortedBot[3], dim1) - gc(sortedBot[0], dim1);
+                double v3y = gc(sortedBot[3], dim2) - gc(sortedBot[0], dim2);
+                double cross = v1x * v3y - v1y * v3x;
+                if (cross < 0) {
+                    // Reverse to make CCW: swap [1] and [3]
+                    std::swap(sortedBot[1], sortedBot[3]);
+                }
+
+                // Spatially match top face nodes to sorted bottom
+                int matched[4];
+                bool used[4] = {false,false,false,false};
+                for (int i = 0; i < 4; i++) {
+                    double b1 = gc(sortedBot[i], dim1), b2 = gc(sortedBot[i], dim2);
+                    double bestDist = 1e30;
+                    int bestJ = 0;
+                    for (int j = 0; j < 4; j++) {
+                        if (used[j]) continue;
+                        double d1 = gc(topHi[j], dim1) - b1;
+                        double d2 = gc(topHi[j], dim2) - b2;
+                        double dist = d1*d1 + d2*d2;
+                        if (dist < bestDist) { bestDist = dist; bestJ = j; }
+                    }
+                    matched[i] = topHi[bestJ];
+                    used[bestJ] = true;
+                }
+
                 NewElem ne;
                 ne.id = newEid++;
                 ne.pid = grpPidNew;
-                for (int i = 0; i < 4; i++) ne.nid[i] = botLo[i];
-                for (int i = 0; i < 4; i++) ne.nid[i + 4] = topHi[i];
+                for (int i = 0; i < 4; i++) ne.nid[i] = sortedBot[i];
+                for (int i = 0; i < 4; i++) ne.nid[i + 4] = matched[i];
                 newElems.push_back(ne);
             }
         }
@@ -898,8 +1009,19 @@ int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
         return 1;
     }
 
-    // Copy raw lines, filtering elements of merged PIDs
+    // Build set of nodes still in use (remaining + new elements) for orphan removal
+    std::set<int> usedNodeIds;
+    for (auto& [eid, el] : mdl.elems) {
+        if (removeElemIds.count(eid)) continue;
+        for (int j = 0; j < 8; j++) usedNodeIds.insert(el.nid[j]);
+    }
+    for (auto& ne : newElems) {
+        for (int j = 0; j < 8; j++) usedNodeIds.insert(ne.nid[j]);
+    }
+
+    // Copy raw lines, filtering removed elements and orphan nodes
     bool inElemBlock = false;
+    bool inNodeBlock = false;
     bool atEnd = false;
 
     for (auto& rawLine : mdl.rawLines) {
@@ -907,19 +1029,26 @@ int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
 
         if (!rawLine.empty() && rawLine[0] == '*') {
             inElemBlock = (up.find("*ELEMENT_SOLID") == 0);
+            inNodeBlock = (up.find("*NODE") == 0 && up.find("*NODE_") == std::string::npos);
             if (up == "*END") {
                 atEnd = true;
-                // Insert new blocks before *END
                 break;
             }
         }
 
         if (inElemBlock && !rawLine.empty() && rawLine[0] != '*' && rawLine[0] != '$') {
-            // Parse element line to check PID
             auto toks = mg_tokenWS(rawLine);
             if (toks.size() >= 2) {
                 int eid = mg_toInt(toks[0]);
-                if (removeElemIds.count(eid)) continue; // Skip merged element
+                if (removeElemIds.count(eid)) continue;
+            }
+        }
+
+        if (inNodeBlock && !rawLine.empty() && rawLine[0] != '*' && rawLine[0] != '$') {
+            auto toks = mg_tokenWS(rawLine);
+            if (toks.size() >= 1) {
+                int nid = mg_toInt(toks[0]);
+                if (nid > 0 && !usedNodeIds.count(nid)) continue; // orphan node
             }
         }
 
