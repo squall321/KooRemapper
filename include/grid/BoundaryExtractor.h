@@ -4,6 +4,9 @@
 #include <vector>
 #include <map>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/grid]]
+
 namespace KooRemapper {
 
 /**
@@ -49,6 +52,25 @@ public:
     int getDimI() const { return dimI_; }
     int getDimJ() const { return dimJ_; }
     int getDimK() const { return dimK_; }
+
+    /**
+     * Look up the node ID at structured grid position (i, j, k).
+     * Valid index range: i in [0, dimI], j in [0, dimJ], k in [0, dimK]
+     * (i.e. (dimI+1) x (dimJ+1) x (dimK+1) NODE positions, vs. dimI x dimJ x dimK ELEMENT cells).
+     *
+     * Returns the node ID, or -1 if no node was assigned to that grid
+     * position (sparse / partially-broken indexing).
+     *
+     * Used by ParametricMapper::gridLookupInterpolate to evaluate physical
+     * positions at arbitrary parametric (u,v,w) by trilinearly blending
+     * the 8 surrounding interior grid nodes -- this preserves cross-section
+     * shape (e.g. teardrop) where 8-corner-only interpolation collapses.
+     */
+    int getNodeAtGrid(int i, int j, int k) const {
+        if (i < 0 || i > dimI_ || j < 0 || j > dimJ_ || k < 0 || k > dimK_) return -1;
+        if (nodeGrid_.empty()) return -1;
+        return nodeGrid_[i][j][k];
+    }
 
 private:
     std::vector<const Element*> faceI0_, faceIM_;
