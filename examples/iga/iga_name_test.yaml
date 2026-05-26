@@ -1,0 +1,25 @@
+# iga_name_test.yaml — verify target_name / exclude_name (REQ-001)
+# Uses block_2x2x1.k which has two parts:
+#   PID 1: "Lower layer (IGA upgrade target)"
+#   PID 2: "Upper layer (standard FE)"
+
+base_model: block_2x2x1.k
+output: iga_name_test_result
+
+operations:
+  - type: iga
+    targets:
+      # Match by title — should resolve to PID 1
+      - target_name: "Lower*"
+        element_size: 4.0
+      # Match-and-exclude — "*layer*" matches both, but excluding "Lower*"
+      # leaves only PID 2
+      - target_name: "*layer*"
+        exclude_name: "Lower*"
+        element_size: 3.0
+        element_size_r: 2.0
+        element_size_s: 2.0
+        ir: 1
+        pr: 2
+        ps: 2
+        pt: 1

@@ -113,6 +113,8 @@ struct DisconnectOperation {
 struct IGATargetConfig {
     int targetPid = 0;
     std::vector<int> targetPids; // multi-pid shorthand; expands to multiple single-pid targets
+    std::string targetName;      // wildcard pattern matching *PART titles (e.g. "*FRONT*"); applyIGA expands to all matching PIDs
+    std::string excludeName;     // wildcard pattern; matches the same titles to *exclude* (e.g. "Manual_*")
     double elementSize = 1.0;    // rr=rs=rt default voxel size
     double elementSizeR = 0.0;   // per-axis override (0 = use elementSize)
     double elementSizeS = 0.0;

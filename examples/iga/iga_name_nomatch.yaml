@@ -1,0 +1,9 @@
+# iga_name_nomatch.yaml — verify error message for unmatched pattern
+base_model: block_2x2x1.k
+output: iga_nomatch_result
+
+operations:
+  - type: iga
+    targets:
+      - target_name: "SIMSOCKET*"
+        element_size: 1.0

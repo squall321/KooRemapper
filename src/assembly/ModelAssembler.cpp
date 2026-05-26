@@ -533,6 +533,37 @@ int ModelAssembler::detectExtrusionAxis(const std::vector<const Element*>& elems
 // ---------------------------------------------------------------------------
 namespace {
 
+// Wildcard pattern match for *PART titles. Supports:
+//   '*' — any string of chars (including empty)
+//   '?' — any single char
+// Matching is iterative (no recursion-depth concerns), case-sensitive,
+// and lookahead-style: O(|pattern| * |text|).
+//
+// Used by ModelAssembler::applyIGA() when a target specifies target_name
+// instead of target_pid.
+bool wildcardMatch(const std::string& pattern, const std::string& text) {
+    size_t p = 0, t = 0;
+    size_t starP = std::string::npos;  // position of last '*' in pattern
+    size_t starT = 0;                   // text position when we hit that '*'
+    while (t < text.size()) {
+        if (p < pattern.size() && (pattern[p] == '?' || pattern[p] == text[t])) {
+            ++p; ++t;
+        } else if (p < pattern.size() && pattern[p] == '*') {
+            starP = p++;
+            starT = t;
+        } else if (starP != std::string::npos) {
+            // Backtrack: extend the previous '*' by one more char of text
+            p = starP + 1;
+            t = ++starT;
+        } else {
+            return false;
+        }
+    }
+    // Consume trailing '*'s in pattern
+    while (p < pattern.size() && pattern[p] == '*') ++p;
+    return p == pattern.size();
+}
+
 struct PronyTerm { double g; double beta; };  // G_i, β_i (= 1/τ_i)
 
 // Parse *MAT_GENERAL_VISCOELASTIC or *MAT_VISCOELASTIC shear Prony terms.
@@ -4874,7 +4905,38 @@ bool ModelAssembler::applyIGA(const IGAOperation& op, const std::string& outputP
     if (slash != std::string::npos) basename = basename.substr(slash + 1);
     // outputPrefix already has no extension, so basename is ready
 
+    // Phase 1 — expand name-pattern targets into concrete (per-PID) targets.
+    // Each target with targetName is matched against baseMesh_.parts[*].name;
+    // every hit becomes its own IGATargetConfig (preserving element_size etc.)
+    // with targetPid set. PID-only targets pass through unchanged.
+    std::vector<IGATargetConfig> effectiveTargets;
+    effectiveTargets.reserve(op.targets.size());
     for (const auto& tgt : op.targets) {
+        if (tgt.targetName.empty()) {
+            effectiveTargets.push_back(tgt);
+            continue;
+        }
+        int matchCount = 0;
+        for (const auto& [pid, part] : baseMesh_.parts) {
+            if (!wildcardMatch(tgt.targetName, part.name)) continue;
+            if (!tgt.excludeName.empty() && wildcardMatch(tgt.excludeName, part.name)) continue;
+            IGATargetConfig resolved = tgt;
+            resolved.targetPid = pid;
+            resolved.targetName.clear();
+            resolved.excludeName.clear();
+            effectiveTargets.push_back(resolved);
+            ++matchCount;
+            infoMessages.push_back("  IGA: matched '" + tgt.targetName + "' → PID " +
+                std::to_string(pid) + " ('" + part.name + "')");
+        }
+        if (matchCount == 0) {
+            errorMessage_ = "IGA: target_name pattern '" + tgt.targetName +
+                "' matched 0 parts";
+            return false;
+        }
+    }
+
+    for (const auto& tgt : effectiveTargets) {
         int pid = tgt.targetPid;
 
         // 1. Compute bounding box

@@ -241,6 +241,10 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                         IGATargetConfig tgt;
                         if (key == "target_pid") {
                             try { tgt.targetPid = std::stoi(val); } catch (...) {}
+                        } else if (key == "target_name") {
+                            tgt.targetName = stripQuotes(val);
+                        } else if (key == "exclude_name") {
+                            tgt.excludeName = stripQuotes(val);
                         }
                         config.operations.back().iga.targets.push_back(tgt);
                         inTargetItem = true;
@@ -258,6 +262,9 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                     std::string key = trim(trimmed.substr(0, colonPos));
                     std::string val = trim(trimmed.substr(colonPos + 1));
                     auto& tgt = config.operations.back().iga.targets.back();
+                    // String fields handled outside the try (std::stoi would throw)
+                    if (key == "target_name") { tgt.targetName = stripQuotes(val); continue; }
+                    if (key == "exclude_name") { tgt.excludeName = stripQuotes(val); continue; }
                     try {
                         if (key == "target_pid") tgt.targetPid = std::stoi(val);
                         else if (key == "element_size") tgt.elementSize = std::stod(val);
@@ -1506,10 +1513,12 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
             if (op.iga.targets.empty())
                 throw std::runtime_error("Operation " + std::to_string(i+1) + ": no targets defined for iga");
             for (size_t j = 0; j < op.iga.targets.size(); ++j) {
-                if (op.iga.targets[j].targetPid <= 0)
+                const auto& tgt = op.iga.targets[j];
+                if (tgt.targetPid <= 0 && tgt.targetName.empty())
                     throw std::runtime_error("Operation " + std::to_string(i+1) +
-                        ": iga target " + std::to_string(j+1) + " missing target_pid");
-                if (op.iga.targets[j].elementSize <= 0)
+                        ": iga target " + std::to_string(j+1) +
+                        " requires either target_pid or target_name");
+                if (tgt.elementSize <= 0)
                     throw std::runtime_error("Operation " + std::to_string(i+1) +
                         ": iga target " + std::to_string(j+1) + " element_size must be positive");
             }
