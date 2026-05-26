@@ -6,6 +6,9 @@
 #include <algorithm>
 #include <iostream>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/assembly]]
+
 namespace KooRemapper {
 
 std::string AssemblyConfigReader::trim(const std::string& str) {
@@ -1337,6 +1340,19 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                                 op.matdb.globalMatType = val;
                             } else if (key == "thermal") {
                                 op.matdb.globalThermal = (val == "true" || val == "yes" || val == "1");
+                            } else if (key == "damping_alpha_scale") {
+                                try { op.matdb.dampingAlphaScale = std::stod(val); } catch (...) {}
+                            } else if (key == "damping_alpha_floor") {
+                                try { op.matdb.dampingAlphaFloor = std::stod(val); } catch (...) {}
+                            } else if (key == "damping_apply_to_all_parts") {
+                                op.matdb.dampingApplyToAllParts =
+                                    (val == "true" || val == "yes" || val == "1");
+                            } else if (key == "damping_target_freq_hz" ||
+                                       key == "damping_freq_hz") {
+                                try { op.matdb.dampingTargetFreqHz = std::stod(val); }
+                                catch (...) {}
+                            } else if (key == "damping_preset") {
+                                op.matdb.dampingPreset = val;
                             } else if (key == "materials") {
                                 inMatdbRulesList = true;
                                 matdbRulesKeyIndent = indent;

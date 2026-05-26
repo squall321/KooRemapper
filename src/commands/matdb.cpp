@@ -10,6 +10,10 @@
 #include <vector>
 #include <iterator>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/commands]]
+//   @lat: [[commands/matdb]]
+
 using KooRemapper::ConsoleOutput;
 using KooRemapper::MatdbOperation;
 using KooRemapper::ModelAssembler;
@@ -67,6 +71,21 @@ int runMatdb(const std::string& yamlFile, ConsoleOutput& console) {
             else if (key == "database") op.databasePath = val;
             else if (key == "mat_type") op.globalMatType = val;
             else if (key == "thermal")  op.globalThermal = (val == "true" || val == "yes" || val == "1");
+            else if (key == "damping_alpha_scale") {
+                try { op.dampingAlphaScale = std::stod(val); } catch(...) {}
+            }
+            else if (key == "damping_alpha_floor") {
+                try { op.dampingAlphaFloor = std::stod(val); } catch(...) {}
+            }
+            else if (key == "damping_apply_to_all_parts") {
+                op.dampingApplyToAllParts = (val == "true" || val == "yes" || val == "1");
+            }
+            else if (key == "damping_target_freq_hz" || key == "damping_freq_hz") {
+                try { op.dampingTargetFreqHz = std::stod(val); } catch(...) {}
+            }
+            else if (key == "damping_preset") {
+                op.dampingPreset = val;
+            }
             else if (key == "materials") {
                 inMaterialsList = true;
                 materialsIndent = indent;

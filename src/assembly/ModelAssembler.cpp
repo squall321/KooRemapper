@@ -28,6 +28,9 @@
 #include <unordered_map>
 #include <unordered_set>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/assembly]]
+
 namespace KooRemapper {
 
 bool ModelAssembler::loadBaseModel(const std::string& filename) {
@@ -4622,9 +4625,12 @@ int ModelAssembler::findPartMid(int pid) const {
         if (!line.empty() && line[0] == '*') {
             std::string upper = line;
             for (auto& c : upper) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-            if (upper.substr(0, 5) == "*PART" && upper.find("_") == std::string::npos) {
+            // Match *PART and *PART_TITLE but not *PART_CONTACT, *PART_COMPOSITE etc.
+            if (upper.substr(0, 5) == "*PART" &&
+                (upper.find("_") == std::string::npos ||
+                 upper.find("*PART_TITLE") != std::string::npos)) {
                 inPart = true;
-                needTitle = true;
+                needTitle = true;  // *PART always has title line
                 continue;
             }
             inPart = false;
@@ -4995,6 +5001,7 @@ bool ModelAssembler::applyExtractSurface(const ExtractSurfaceOperation& op) {
             return false;
         }
 
+        // Collect bottom-side node IDs + bbox for spatial hash.
         std::set<int> botNodes, topNodes;
         for (const auto& f : topFaces)    for (int n : f) if (n > 0) topNodes.insert(n);
         for (const auto& f : bottomFaces) for (int n : f) if (n > 0) botNodes.insert(n);
@@ -5022,6 +5029,7 @@ bool ModelAssembler::applyExtractSurface(const ExtractSurfaceOperation& op) {
             hashBuckets[bucketHash(cx, cy)].push_back(nid);
         }
 
+        // Pair each top node with closest bottom node by XY.
         std::map<int, int> topToMid;
         int unmatched = 0;
         for (int tNid : topNodes) {
@@ -5050,6 +5058,7 @@ bool ModelAssembler::applyExtractSurface(const ExtractSurfaceOperation& op) {
             topToMid[tNid] = midId;
         }
 
+        // Emit mid shells using top-face winding remapped to mid IDs.
         int emitted = 0, skipped = 0;
         for (const auto& tf : topFaces) {
             AddedShellElement s;
@@ -8572,6 +8581,12 @@ struct MdDbMaterial {
     std::string cardThermal;
     std::string cardThermalExpansion;
     std::string cardDamping;
+    // baked-at-50Hz Rayleigh-style values from the JSON `damping` field
+    // (kept for per-PID logging so the user can see what alpha/beta got
+    // applied to each part after rescale + floor).
+    double dampZeta = 0.0;
+    double dampAlpha = 0.0;
+    double dampBeta = 0.0;
 };
 
 struct MdMaterialDatabase {
@@ -8602,6 +8617,11 @@ static MdMaterialDatabase md_loadDatabase(const std::string& jsonPath) {
         m.cardThermal = jm.get("card_thermal") ? jm.get("card_thermal")->asStr() : "";
         m.cardThermalExpansion = jm.get("card_thermal_expansion") ? jm.get("card_thermal_expansion")->asStr() : "";
         m.cardDamping = jm.get("card_damping") ? jm.get("card_damping")->asStr() : "";
+        if (auto* dmp = jm.get("damping")) {
+            if (auto* z = dmp->get("zeta"))  m.dampZeta  = z->asNum();
+            if (auto* a = dmp->get("alpha")) m.dampAlpha = a->asNum();
+            if (auto* b = dmp->get("beta"))  m.dampBeta  = b->asNum();
+        }
         auto* cs = jm.get("cards_structural");
         if (cs && cs->type == MdJsonValue::OBJECT) {
             for (auto& ck : cs->obj)
@@ -8952,14 +8972,35 @@ static std::string md_updatePartTmid(const std::string& partDataLine, int tmid) 
 }
 
 static std::vector<std::string> md_substituteDampingCard(const std::string& cardText,
-        int dbMid, int modelMid, const std::vector<int>& pids) {
+        int dbMid, int modelMid, const std::vector<int>& pids,
+        double alphaScale = 1.0, double alphaFloor = 0.0) {
     auto lines = md_splitLines(cardText);
     int dbSid = dbMid + 800000;
     int newSid = modelMid + 800000;
 
+    // Track keyword context so we know when the next non-comment data line
+    // belongs to a DAMPING_PART_MASS card. LS-DYNA has multiple variants
+    // sharing the same VALDMP-at-field-2 layout: *DAMPING_PART_MASS,
+    // *DAMPING_PART_MASS_SET, *DAMPING_PART_MASS_TITLE,
+    // *DAMPING_PART_MASS_SET_TITLE -- catch them all so floor/scale apply
+    // regardless of which variant the source DB uses.
+    bool nextDataIsMassSet = false;
+
+    auto isDampMassKw = [](const std::string& upperKw) {
+        return upperKw.rfind("*DAMPING_PART_MASS", 0) == 0;
+    };
+
     for (int i = 0; i < (int)lines.size(); ++i) {
         std::string t = mw_trim(lines[i]);
-        if (t.empty() || t[0] == '$' || t[0] == '*') continue;
+        if (t.empty()) continue;
+
+        // Update keyword context.
+        if (t[0] == '*') {
+            std::string upperKw = mw_upper(t);
+            nextDataIsMassSet = isDampMassKw(upperKw);
+            continue;
+        }
+        if (t[0] == '$') continue;
 
         // Replace SID fields: any 10-char field containing dbSid → newSid
         auto toks = mw_tok10(lines[i]);
@@ -8969,6 +9010,34 @@ static std::vector<std::string> md_substituteDampingCard(const std::string& card
             if (v == dbSid) {
                 lines[i] = md_setField(lines[i], fi * 10, 10, newSid);
             }
+        }
+
+        // VALDMP rescaling for *DAMPING_PART_MASS_SET data line.
+        // Card layout (10-char fields):
+        //   PSID(0-9)  LCID(10-19)  VALDMP(20-29)  FLAG(30-39)
+        // VALDMP is the alpha (mass damping) coefficient. The DB ships it
+        // baked at f_ref=50Hz via update_explicit_damping.py:
+        //   alpha_baked = beta * (2*pi*50)
+        // To retarget at a new characteristic frequency f_new without
+        // regenerating the DB, we scale by (f_new / 50). beta is left
+        // alone -- it is a numerical-stability parameter, not Rayleigh.
+        if (nextDataIsMassSet &&
+            (std::fabs(alphaScale - 1.0) > 1e-12 || alphaFloor > 0.0) &&
+            (int)toks.size() >= 3) {
+            double oldAlpha = 0.0;
+            try { oldAlpha = std::stod(toks[2]); } catch (...) {}
+            if (oldAlpha > 0.0) {
+                double newAlpha = oldAlpha * alphaScale;
+                if (newAlpha < alphaFloor) newAlpha = alphaFloor;
+                char buf[16];
+                std::snprintf(buf, sizeof(buf), "%10.3e", newAlpha);
+                std::string newField(buf);
+                if ((int)lines[i].size() < 30) lines[i].resize(30, ' ');
+                for (int k = 0; k < 10; ++k) {
+                    lines[i][20 + k] = newField[k];
+                }
+            }
+            nextDataIsMassSet = false;  // only the first data line is the data row
         }
 
         // Fill PID slots: replace consecutive zeros with actual PIDs
@@ -9018,6 +9087,131 @@ static std::vector<std::string> md_substituteDampingCard(const std::string& card
 
 // end matdb helpers
 
+// Enumerate every PID in the model by scanning *PART data lines.
+// Used by the apply-to-all-parts default-damping path.
+//
+// Mirrors the HyperWorks-style consecutive *PART parser used in matdb's
+// MAT-block scan above: a single *PART keyword can be followed by many
+// (title, data) pairs back-to-back until the next *KEYWORD. Naive parsers
+// (one PID per *PART) miss most parts in mobile-OEM models which routinely
+// concatenate hundreds of PIDs under one keyword.
+static std::vector<int> md_enumerateAllPids(const std::vector<std::string>& lines) {
+    std::vector<int> out;
+    for (size_t i = 0; i < lines.size(); ++i) {
+        std::string u = mw_upper(mw_trim(lines[i]));
+        // *PART, *PART_TITLE: yes. *PART_CONTACT / *PART_COMPOSITE / etc: no.
+        if (u.find("*PART") != 0) continue;
+        if (u.find("*PART_CONTACT") == 0) continue;
+        if (u.find("*PART_COMPOSITE") == 0) continue;
+        if (u.find("*PART_INERTIA") == 0) continue;
+        if (u.find("*PART_REPOSITION") == 0) continue;
+
+        bool hasTitle = (u.find("_TITLE") != std::string::npos) || (u == "*PART");
+
+        size_t j = i + 1;
+        while (j < lines.size()) {
+            // skip comments
+            while (j < lines.size() && !lines[j].empty() && lines[j][0] == '$') ++j;
+            if (j >= lines.size()) break;
+            std::string uj = mw_trim(lines[j]);
+            if (!uj.empty() && uj[0] == '*') break;       // next keyword: stop
+
+            if (hasTitle) {
+                ++j;                                       // consume title line
+                while (j < lines.size() && !lines[j].empty() && lines[j][0] == '$') ++j;
+                if (j >= lines.size()) break;
+                uj = mw_trim(lines[j]);
+                if (!uj.empty() && uj[0] == '*') break;
+            }
+            // PART data line: PID SID MID EOSID HGID GRAV ADPOPT TMID
+            // First whitespace token is PID.
+            std::istringstream iss(lines[j]);
+            int pid = 0;
+            if (iss >> pid && pid > 0) out.push_back(pid);
+            ++j;
+        }
+        i = (j > 0 ? j - 1 : i);  // outer loop will ++i
+    }
+    std::sort(out.begin(), out.end());
+    out.erase(std::unique(out.begin(), out.end()), out.end());
+    return out;
+}
+
+// Build a default DAMPING_PART_MASS_SET + DAMPING_PART_STIFFNESS_SET pair
+// for an unmatched PID. Uses alphaFloor as VALDMP and a small fixed beta=0.01
+// (Phase A explicit numerical noise damping minimum).
+static std::vector<std::string> md_buildDefaultDampingForPid(int pid, double alpha,
+                                                              double beta = 0.01) {
+    std::vector<std::string> out;
+    int sid = pid + 800000;
+    char buf[160];
+
+    out.push_back("$");
+    std::snprintf(buf, sizeof(buf),
+        "$ Default damping (matdb apply_to_all_parts) for PID %d", pid);
+    out.push_back(buf);
+
+    out.push_back("*SET_PART_LIST_TITLE");
+    std::snprintf(buf, sizeof(buf), "default_damping_pid_%d", pid);
+    out.push_back(buf);
+    out.push_back("$      SID       DA1       DA2       DA3       DA4");
+    std::snprintf(buf, sizeof(buf), "%10d       0.0       0.0       0.0       0.0", sid);
+    out.push_back(buf);
+    out.push_back("$      PID1      PID2      PID3      PID4      PID5      PID6      PID7      PID8");
+    std::snprintf(buf, sizeof(buf), "%10d         0         0         0         0         0         0         0", pid);
+    out.push_back(buf);
+
+    out.push_back("*DAMPING_PART_MASS_SET");
+    out.push_back("$     PSID      LCID    VALDMP      FLAG");
+    std::snprintf(buf, sizeof(buf), "%10d         0%10.3e         1", sid, alpha);
+    out.push_back(buf);
+    out.push_back("$      STX       STY       STZ       SRX       SRY       SRZ");
+    out.push_back("       1.0       1.0       1.0       1.0       1.0       1.0");
+
+    out.push_back("*DAMPING_PART_STIFFNESS_SET");
+    out.push_back("$     PSID      COEF");
+    std::snprintf(buf, sizeof(buf), "%10d%10.3e", sid, beta);
+    out.push_back(buf);
+
+    return out;
+}
+
+// Damping rescaling resolver. Combines preset + explicit overrides into the
+// final (scale, floor, applyAll) triple consumed downstream. Explicit fields
+// take precedence over preset values when the user set them (non-default).
+struct MdResolvedDamping {
+    double scale = 1.0;
+    double floor = 0.0;
+    bool   applyAll = false;
+};
+
+static MdResolvedDamping md_resolveDamping(const MatdbOperation& op) {
+    MdResolvedDamping d;
+
+    // Preset baseline.
+    std::string preset = op.dampingPreset;
+    for (auto& c : preset) c = (char)std::tolower((unsigned char)c);
+    if (preset == "smartphone_drop") {
+        d.scale = 15.0; d.floor = 150.0; d.applyAll = true;
+    } else if (preset == "smartphone_drop_aggressive") {
+        d.scale = 20.0; d.floor = 300.0; d.applyAll = true;
+    } else if (preset == "quasi_static") {
+        d.scale = 5.0;  d.floor = 50.0;  d.applyAll = false;
+    }
+
+    // Explicit fields override the preset when user set them.
+    if (op.dampingAlphaScale     != 1.0)   d.scale    = op.dampingAlphaScale;
+    if (op.dampingAlphaFloor     != 0.0)   d.floor    = op.dampingAlphaFloor;
+    if (op.dampingApplyToAllParts)         d.applyAll = true;
+
+    // Legacy alias: target frequency Hz expressed as scale = freq / 50Hz baked.
+    if (op.dampingTargetFreqHz > 0.0) {
+        d.scale = op.dampingTargetFreqHz / 50.0;
+    }
+
+    return d;
+}
+
 // ── applyMatdb() main ────────────────────────────────────────
 bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& configDir) {
     // infoMessages is a public member of ModelAssembler (no underscore)
@@ -9036,6 +9230,17 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
         return false;
     }
     infoMessages.push_back("[matdb] Loaded " + std::to_string(db.materials.size()) + " materials from DB");
+
+    // 2b. Resolve damping rescaling (preset + explicit fields).
+    MdResolvedDamping dampCfg = md_resolveDamping(op);
+    if (std::fabs(dampCfg.scale - 1.0) > 1e-12 || dampCfg.floor > 0.0 || dampCfg.applyAll) {
+        std::ostringstream dmsg;
+        dmsg << "[matdb] Damping rescale: alpha_scale=" << dampCfg.scale
+             << " alpha_floor=" << dampCfg.floor
+             << " apply_to_all_parts=" << (dampCfg.applyAll ? "true" : "false");
+        if (!op.dampingPreset.empty()) dmsg << " (preset=" << op.dampingPreset << ")";
+        infoMessages.push_back(dmsg.str());
+    }
 
     // 3. Scan model *MAT blocks
     auto matBlocks = md_scanMatBlocks(rawLines_);
@@ -9255,6 +9460,51 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
             rawLines_[li] = DEL;
     }
 
+    // 6b. Strip pre-existing damping cards when any damping rescale option is
+    // active. Without this, model-baked damping (e.g. VALDMP=3.142e+00 from a
+    // prior matdb run or hand authoring) survives and LS-DYNA applies BOTH
+    // the stale card AND the freshly emitted card to the same PART -- the
+    // user just sees the smaller stale value and assumes nothing changed.
+    // We strip *DAMPING_PART_MASS_SET and *DAMPING_PART_STIFFNESS_SET keyword
+    // blocks (their continuation lines until the next *KEYWORD). The
+    // associated *SET_PART_LIST cards are LEFT ALONE because they may be
+    // referenced by other features (CONTACT, BOUNDARY, etc.).
+    const bool stripExistingDamping =
+        (std::fabs(dampCfg.scale - 1.0) > 1e-12) ||
+        (dampCfg.floor > 0.0) ||
+        dampCfg.applyAll ||
+        !op.dampingPreset.empty();
+    int strippedDampingBlocks = 0;
+    if (stripExistingDamping) {
+        int i = 0;
+        while (i < (int)rawLines_.size()) {
+            std::string up = mw_upper(mw_trim(rawLines_[i]));
+            // Catch every DAMPING_PART_* variant (with/without _SET, with/
+            // without _TITLE). LS-DYNA models exported by HyperWorks /
+            // ANSA / etc. mix these freely, and missing one means stale
+            // VALDMP values survive into the new model.
+            bool isDamp =
+                (up.rfind("*DAMPING_PART_MASS", 0) == 0) ||
+                (up.rfind("*DAMPING_PART_STIFFNESS", 0) == 0);
+            if (!isDamp) { ++i; continue; }
+            // mark this keyword + all data/comment lines until next *KEYWORD
+            int j = i;
+            rawLines_[j++] = DEL;
+            while (j < (int)rawLines_.size()) {
+                std::string lt = mw_trim(rawLines_[j]);
+                if (!lt.empty() && lt[0] == '*') break;
+                rawLines_[j++] = DEL;
+            }
+            ++strippedDampingBlocks;
+            i = j;
+        }
+        if (strippedDampingBlocks > 0) {
+            infoMessages.push_back("[matdb] Stripped " +
+                std::to_string(strippedDampingBlocks) +
+                " pre-existing *DAMPING_PART_* card(s)");
+        }
+    }
+
     // Remove existing *MAT_THERMAL_* and *MAT_ADD_THERMAL_EXPANSION for matched MIDs
     for (int i = 0; i < (int)rawLines_.size(); ++i) {
         std::string t = mw_trim(rawLines_[i]);
@@ -9312,6 +9562,9 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
     // 7. Build new cards to insert
     std::vector<std::string> insertCards;
     int structCount = 0, thermalCount = 0, expansionCount = 0, dampingCount = 0;
+    // Track which PIDs received damping cards from the main matdb loop, so the
+    // apply-to-all-parts pass below can fill in defaults for the rest.
+    std::set<int> pidsWithDamping;
 
     for (auto& mi : matches) {
         auto& dbMat = db.materials[mi.dbMid];
@@ -9349,16 +9602,53 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
             }
         }
 
-        // Damping cards (Rayleigh: SET_PART_LIST + DAMPING_PART_MASS/STIFFNESS)
+        // Damping cards (Explicit numerical: SET_PART_LIST + DAMPING_PART_MASS/STIFFNESS)
         if (!dbMat.cardDamping.empty()) {
             auto pids = mw_getPidsByMid(rawLines_, {mi.modelMid});
             if (!pids.empty()) {
-                auto dampLines = md_substituteDampingCard(dbMat.cardDamping, mi.dbMid, mi.modelMid, pids);
+                auto dampLines = md_substituteDampingCard(
+                    dbMat.cardDamping, mi.dbMid, mi.modelMid, pids,
+                    dampCfg.scale, dampCfg.floor);
                 insertCards.push_back("$");
-                insertCards.push_back("$ Rayleigh damping for MID " + std::to_string(mi.modelMid));
+                insertCards.push_back("$ Damping for MID " + std::to_string(mi.modelMid)
+                                       + " (alpha scale=" + std::to_string(dampCfg.scale)
+                                       + " floor=" + std::to_string(dampCfg.floor) + ")");
                 for (auto& dl : dampLines) insertCards.push_back(dl);
                 ++dampingCount;
+                // Compute the alpha actually written so each PID is logged.
+                double appliedAlpha = dbMat.dampAlpha * dampCfg.scale;
+                if (appliedAlpha < dampCfg.floor) appliedAlpha = dampCfg.floor;
+                for (int pid : pids) {
+                    pidsWithDamping.insert(pid);
+                    char buf[256];
+                    std::snprintf(buf, sizeof(buf),
+                        "[matdb]   PID %-6d  matType=%-32s  damping a=%.3e b=%.3e  (DB %s)",
+                        pid, mi.matType.c_str(),
+                        appliedAlpha, dbMat.dampBeta, dbMat.name.c_str());
+                    infoMessages.push_back(buf);
+                }
             }
+        }
+    }
+
+    // 7b. Default damping for unmatched PIDs (apply_to_all_parts).
+    //     Every PART in the model that did NOT get damping from the matdb
+    //     swap above receives a baseline DAMPING_PART_MASS_SET with
+    //     alpha = floor and a small fixed beta. Ensures the entire model
+    //     has at least minimum noise dissipation in explicit drop simulation.
+    int defaultDampingCount = 0;
+    if (dampCfg.applyAll && dampCfg.floor > 0.0) {
+        auto allPids = md_enumerateAllPids(rawLines_);
+        for (int pid : allPids) {
+            if (pidsWithDamping.count(pid)) continue;
+            auto dampLines = md_buildDefaultDampingForPid(pid, dampCfg.floor);
+            for (auto& dl : dampLines) insertCards.push_back(dl);
+            ++defaultDampingCount;
+            char buf[256];
+            std::snprintf(buf, sizeof(buf),
+                "[matdb]   PID %-6d  matType=%-32s  damping a=%.3e b=%.3e  (default, no DB match)",
+                pid, "(unmatched)", dampCfg.floor, 0.01);
+            infoMessages.push_back(buf);
         }
     }
 
@@ -9393,7 +9683,11 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
         infoMessages.push_back("[matdb] Inserted " + std::to_string(thermalCount) + " thermal + " +
             std::to_string(expansionCount) + " expansion cards, TMID updated");
     if (dampingCount > 0)
-        infoMessages.push_back("[matdb] Inserted " + std::to_string(dampingCount) + " Rayleigh damping sets");
+        infoMessages.push_back("[matdb] Inserted " + std::to_string(dampingCount)
+                                + " damping sets (matched MIDs)");
+    if (defaultDampingCount > 0)
+        infoMessages.push_back("[matdb] Inserted " + std::to_string(defaultDampingCount)
+                                + " default damping sets (apply_to_all_parts)");
 
     return true;
 }
@@ -13557,9 +13851,24 @@ static std::vector<std::string> mg_ws_tokenize(const std::string& s) {
     while (iss >> tok) t.push_back(tok);
     return t;
 }
+// 10-char fixed-width tokenizer for MAT card data lines
+static std::vector<std::string> mg_tok10(const std::string& s) {
+    std::vector<std::string> t;
+    for (size_t i = 0; i < s.size(); i += 10) {
+        size_t len = std::min((size_t)10, s.size() - i);
+        std::string f = s.substr(i, len);
+        // trim whitespace
+        size_t a = f.find_first_not_of(" \t");
+        if (a == std::string::npos) { t.push_back(""); continue; }
+        size_t b = f.find_last_not_of(" \t");
+        t.push_back(f.substr(a, b - a + 1));
+    }
+    return t;
+}
 static double mg_d(const std::string& s) { try { return std::stod(s); } catch(...) { return 0; } }
 
-static std::map<int, mg_MatInfo> mg_parseMaterials(const std::vector<std::string>& lines) {
+static std::map<int, mg_MatInfo> mg_parseMaterials(const std::vector<std::string>& lines,
+                                                   std::vector<std::string>* log = nullptr) {
     std::map<int, mg_MatInfo> mats;
     bool inMat = false;
     std::string matType;
@@ -13567,6 +13876,8 @@ static std::map<int, mg_MatInfo> mg_parseMaterials(const std::vector<std::string
     bool titleLine = false;
     double veBulk = 0, veRho = 0;
     std::vector<double> veGi, veBetai;
+
+    auto logMsg = [&](const std::string& msg) { if (log) log->push_back(msg); };
 
     auto finishVE = [&]() {
         if (matMid > 0) {
@@ -13579,6 +13890,8 @@ static std::map<int, mg_MatInfo> mg_parseMaterials(const std::vector<std::string
                 nu = (3.0*K - 2.0*G_inf) / (2.0*(3.0*K + G_inf));
             }
             mats[matMid] = {"VE076", E, nu, veRho, 0, false};
+            char b[256]; snprintf(b, sizeof(b), "[merge-mat] VE076 MID=%d BULK=%.4g G_inf=%.4g E=%.1f nu=%.4f", matMid, K, G_inf, E, nu);
+            logMsg(b);
         }
         veGi.clear(); veBetai.clear(); veBulk = veRho = 0;
     };
@@ -13612,19 +13925,35 @@ static std::map<int, mg_MatInfo> mg_parseMaterials(const std::vector<std::string
             } else if (up.find("*MAT_RIGID") == 0 || up.find("*MAT_020") == 0) {
                 inMat = true; matType = "RIGID"; matCard = matMid = 0;
                 titleLine = (up.find("TITLE") != std::string::npos);
+            } else if (up.find("*MAT_") == 0 && up.find("*MAT_ADD_") != 0 &&
+                       up.find("*MAT_THERMAL_") != 0) {
+                // Generic fallback: try Card 1 = MID, RO, E, PR
+                inMat = true; matType = "GENERIC"; matCard = matMid = 0;
+                titleLine = (up.find("TITLE") != std::string::npos);
+                logMsg("[merge-mat] GENERIC fallback: " + tr);
             } else if (up.find("*MAT_ADD_THERMAL_EXPANSION") == 0) {
                 inCTE = true; cteMid = 0; cteCard = 0;
                 cteTitleLine = (up.find("TITLE") != std::string::npos);
+            } else if (up.find("*MAT_") == 0) {
+                logMsg("[merge-mat] SKIP: " + tr);
             }
             continue;
         }
         if (inMat) {
             if (titleLine) { titleLine = false; continue; }
             matCard++;
-            auto t = mg_ws_tokenize(tr);
-            if ((matType == "ELASTIC" || matType == "024" || matType == "RIGID") && matCard == 1 && t.size() >= 4) {
+            // Use fixed-width 10-char tokenizer (handles fields touching without whitespace)
+            auto t = mg_tok10(line);  // use original line, not trimmed
+            // Fallback to whitespace if too few tokens (free-format file)
+            if (t.size() < 4 || (t.size() >= 1 && t[0].empty())) t = mg_ws_tokenize(tr);
+            if ((matType == "ELASTIC" || matType == "024" || matType == "RIGID" || matType == "GENERIC") && matCard == 1 && t.size() >= 4) {
                 matMid = (int)mg_d(t[0]);
-                mats[matMid] = {matType, mg_d(t[2]), mg_d(t[3]), mg_d(t[1]), 0, false};
+                double E = mg_d(t[2]), PR = mg_d(t[3]);
+                char b[256]; snprintf(b, sizeof(b), "[merge-mat] %s MID=%d RO=%s E=%.1f PR=%.4f toks=%d raw=[%.60s]",
+                    matType.c_str(), matMid, t[1].c_str(), E, PR, (int)t.size(), line.c_str());
+                logMsg(b);
+                if (E > 0) mats[matMid] = {matType, E, PR, mg_d(t[1]), 0, false};
+                else logMsg("[merge-mat] WARNING: E<=0 for MID=" + std::to_string(matMid) + ", NOT stored");
                 inMat = false;
             } else if (matType == "VE006" && matCard == 1 && t.size() >= 6) {
                 // MAT_VISCOELASTIC (006): MID, RO, BULK, G0, GI, BETA
@@ -13637,6 +13966,7 @@ static std::map<int, mg_MatInfo> mg_parseMaterials(const std::vector<std::string
                     nu = (3.0*K - 2.0*GI) / (2.0*(3.0*K + GI));
                 }
                 mats[matMid] = {"VE006", E, nu, rho, 0, false};
+                { char b[256]; snprintf(b, sizeof(b), "[merge-mat] VE006 MID=%d BULK=%.4g GI=%.4g E=%.1f nu=%.4f", matMid, K, GI, E, nu); logMsg(b); }
                 inMat = false;
             } else if (matType == "VE076") {
                 if (matCard == 1 && t.size() >= 3) {
@@ -13871,16 +14201,34 @@ bool ModelAssembler::applyMerge(const MergeOperation& op) {
     std::unordered_map<MgFaceKey, int, MgFaceKeyHash> highFaceOf, lowFaceOf;
     highFaceOf.reserve(grpElems.size());
     lowFaceOf.reserve(grpElems.size());
+    // HEX8 has 3 opposite face pairs; pick the one most aligned with stacking direction
+    // Pair indices into nid[8]: face0[4] vs face1[4], where face0[i]↔face1[i] are connected edges
+    static const int facePairs[3][2][4] = {
+        {{0,1,2,3}, {4,5,6,7}},   // pair A: nid[0..3] vs nid[4..7]
+        {{0,1,5,4}, {3,2,6,7}},   // pair B: edges 0-3,1-2,5-6,4-7
+        {{0,3,7,4}, {1,2,6,5}}    // pair C: edges 0-1,3-2,7-6,4-5
+    };
     auto getStackFaces = [&](const EInfo& e, int lo[4], int hi[4]) {
-        double zA = 0, zB = 0;
-        for (int i = 0; i < 4; i++) {
-            zA += getCoord(e.nid[i], op.direction);
-            zB += getCoord(e.nid[i+4], op.direction);
+        int bestPair = 0;
+        double maxDiff = 0;
+        for (int p = 0; p < 3; p++) {
+            double avgA = 0, avgB = 0;
+            for (int k = 0; k < 4; k++) {
+                avgA += getCoord(e.nid[facePairs[p][0][k]], op.direction);
+                avgB += getCoord(e.nid[facePairs[p][1][k]], op.direction);
+            }
+            double diff = std::abs(avgB - avgA);
+            if (diff > maxDiff) { maxDiff = diff; bestPair = p; }
         }
-        if (zA <= zB) {
-            for (int i=0;i<4;i++) { lo[i]=e.nid[i]; hi[i]=e.nid[i+4]; }
+        double avgA = 0, avgB = 0;
+        for (int k = 0; k < 4; k++) {
+            avgA += getCoord(e.nid[facePairs[bestPair][0][k]], op.direction);
+            avgB += getCoord(e.nid[facePairs[bestPair][1][k]], op.direction);
+        }
+        if (avgA <= avgB) {
+            for (int i = 0; i < 4; i++) { lo[i] = e.nid[facePairs[bestPair][0][i]]; hi[i] = e.nid[facePairs[bestPair][1][i]]; }
         } else {
-            for (int i=0;i<4;i++) { lo[i]=e.nid[i+4]; hi[i]=e.nid[i]; }
+            for (int i = 0; i < 4; i++) { lo[i] = e.nid[facePairs[bestPair][1][i]]; hi[i] = e.nid[facePairs[bestPair][0][i]]; }
         }
     };
 
@@ -13934,7 +14282,9 @@ bool ModelAssembler::applyMerge(const MergeOperation& op) {
     infoMessages.push_back(buf);
 
     // Material property extraction
-    auto matDB = mg_parseMaterials(rawLines_);
+    std::vector<std::string> matLog;
+    auto matDB = mg_parseMaterials(rawLines_, &matLog);
+    for (auto& ml : matLog) infoMessages.push_back(ml);
     // Also scan addedKeywordBlocks_ (each entry is a multi-line string → split into lines)
     {
         std::vector<std::string> kbLines;
@@ -13944,7 +14294,10 @@ bool ModelAssembler::applyMerge(const MergeOperation& op) {
             while (std::getline(iss, ln)) kbLines.push_back(ln);
         }
         if (!kbLines.empty()) {
-            auto matDB2 = mg_parseMaterials(kbLines);
+            infoMessages.push_back("[merge] scanning addedKeywordBlocks (" + std::to_string(kbLines.size()) + " lines)");
+            std::vector<std::string> matLog2;
+            auto matDB2 = mg_parseMaterials(kbLines, &matLog2);
+            for (auto& ml : matLog2) infoMessages.push_back(ml);
             for (auto& [k,v] : matDB2) matDB[k] = v;
         }
     }
@@ -14025,12 +14378,60 @@ bool ModelAssembler::applyMerge(const MergeOperation& op) {
             getStackFaces(*botIt->second, blo, bhi);
             getStackFaces(*topIt->second, tlo, thi);
 
+            // Build robust HEX8: sort bottom face CCW, match top 1:1
+            int dim1 = (op.direction + 1) % 3;
+            int dim2 = (op.direction + 2) % 3;
+
+            // Sort bottom face nodes CCW by angle from centroid
+            double cx = 0, cy = 0;
+            for (int i = 0; i < 4; i++) {
+                cx += getCoord(blo[i], dim1);
+                cy += getCoord(blo[i], dim2);
+            }
+            cx /= 4; cy /= 4;
+            struct AngleIdx { double angle; int idx; };
+            AngleIdx ai[4];
+            for (int i = 0; i < 4; i++) {
+                ai[i].angle = std::atan2(getCoord(blo[i], dim2) - cy, getCoord(blo[i], dim1) - cx);
+                ai[i].idx = i;
+            }
+            std::sort(ai, ai + 4, [](const AngleIdx& a, const AngleIdx& b) { return a.angle < b.angle; });
+            int sortedBot[4];
+            for (int i = 0; i < 4; i++) sortedBot[i] = blo[ai[i].idx];
+
+            // Verify CCW: (n1-n0)×(n3-n0) should point in stacking direction
+            double v1x = getCoord(sortedBot[1], dim1) - getCoord(sortedBot[0], dim1);
+            double v1y = getCoord(sortedBot[1], dim2) - getCoord(sortedBot[0], dim2);
+            double v3x = getCoord(sortedBot[3], dim1) - getCoord(sortedBot[0], dim1);
+            double v3y = getCoord(sortedBot[3], dim2) - getCoord(sortedBot[0], dim2);
+            double cross = v1x * v3y - v1y * v3x;
+            if (cross < 0) std::swap(sortedBot[1], sortedBot[3]);
+
+            // Spatially match top face nodes to sorted bottom
+            int matched[4];
+            bool used[4] = {false,false,false,false};
+            for (int i = 0; i < 4; i++) {
+                double b1 = getCoord(sortedBot[i], dim1);
+                double b2 = getCoord(sortedBot[i], dim2);
+                double bestDist = 1e30;
+                int bestJ = 0;
+                for (int j = 0; j < 4; j++) {
+                    if (used[j]) continue;
+                    double d1 = getCoord(thi[j], dim1) - b1;
+                    double d2 = getCoord(thi[j], dim2) - b2;
+                    double dist = d1*d1 + d2*d2;
+                    if (dist < bestDist) { bestDist = dist; bestJ = j; }
+                }
+                matched[i] = thi[bestJ];
+                used[bestJ] = true;
+            }
+
             AddedElement ne;
             ne.id = ++maxElementId_;
             ne.pid = newPid;
             ne.type = ElementType::HEX8;
-            for (int i=0;i<4;i++) ne.nodeIds[i] = blo[i];
-            for (int i=0;i<4;i++) ne.nodeIds[i+4] = thi[i];
+            for (int i=0;i<4;i++) ne.nodeIds[i] = sortedBot[i];
+            for (int i=0;i<4;i++) ne.nodeIds[i+4] = matched[i];
             addedElements_.push_back(ne);
         }
     }
@@ -14060,6 +14461,35 @@ bool ModelAssembler::applyMerge(const MergeOperation& op) {
     kb << mbuf << "\n";
 
     addedKeywordBlocks_.push_back(kb.str());
+
+    // Remove orphan nodes: collect nodes still used, mark the rest for removal
+    {
+        std::unordered_set<int> usedNodes;
+        // Nodes from non-removed baseMesh elements (solid + shell are both in elements)
+        for (auto& [eid, elem] : baseMesh_.getElements()) {
+            if (removedElementIds_.count(eid)) continue;
+            for (int j = 0; j < 8; j++) if (elem.nodeIds[j] > 0) usedNodes.insert(elem.nodeIds[j]);
+        }
+        // Nodes from addedElements_ and addedShellElements_
+        for (auto& ae : addedElements_)
+            for (int j = 0; j < 8; j++) if (ae.nodeIds[j] > 0) usedNodes.insert(ae.nodeIds[j]);
+        for (auto& se : addedShellElements_)
+            for (int j = 0; j < 4; j++) if (se.nodeIds[j] > 0) usedNodes.insert(se.nodeIds[j]);
+
+        int orphanCount = 0;
+        for (auto& e : grpElems) {
+            for (int j = 0; j < 8; j++) {
+                if (e.nid[j] > 0 && !usedNodes.count(e.nid[j])) {
+                    removedNodeIds_.insert(e.nid[j]);
+                    orphanCount++;
+                }
+            }
+        }
+        if (orphanCount > 0) {
+            snprintf(buf, sizeof(buf), "[merge] %d orphan nodes removed", orphanCount);
+            infoMessages.push_back(buf);
+        }
+    }
 
     snprintf(buf, sizeof(buf), "[merge] %d elems → %d merged (PID=%d MID=%d E=%.1f nu=%.4f rho=%.3E)",
              (int)grpElems.size(), (int)columns.size(), newPid, newMid, E_hom, nu_mix, rho_mix);

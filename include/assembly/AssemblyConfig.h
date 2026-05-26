@@ -3,6 +3,9 @@
 #include <vector>
 #include <string>
 
+// Knowledge graph (lat.md):
+//   @lat: [[modules/assembly]]
+
 namespace KooRemapper {
 
 struct ReplaceOperation {
@@ -241,6 +244,46 @@ struct MatdbOperation {
     std::string databasePath;                  // path to material_db.json (empty = default)
     std::string globalMatType = "MAT_ELASTIC"; // default structural card type
     bool globalThermal = false;                // global thermal toggle
+
+    // ------------------------------------------------------------------
+    // Optional damping rescaling (LS-DYNA explicit interpretation).
+    //
+    // In LS-DYNA explicit `*DAMPING_PART_MASS_SET` VALDMP (alpha) is a
+    // direct node-velocity damping coefficient (F_damp = -alpha * M * v),
+    // NOT a Rayleigh modal coefficient. Time constant of velocity decay
+    // is 2/alpha. The DB ships alpha baked at a low reference frequency
+    // (~50 Hz) so raw values are 3..63 -- inadequate for smartphone drop
+    // where post-impact ringing should die in ~5..10 ms (alpha 200+).
+    //
+    // Two knobs:
+    //   * dampingAlphaScale  : multiplier on baked alpha. Default 1.0.
+    //   * dampingAlphaFloor  : minimum alpha applied to all emitted damping
+    //                          cards. Default 0.0 (no floor).
+    //   final_alpha = max(dampingAlphaFloor, baked_alpha * dampingAlphaScale)
+    //
+    // dampingApplyToAllParts: if true, emit a default DAMPING_PART_MASS_SET
+    // for every PART in the model whose material was NOT in the matdb DB
+    // (so no damping was added by the swap). Those unmatched parts get
+    // alpha = dampingAlphaFloor and a small default beta (0.01).
+    //
+    // Preset shortcut (set via dampingPreset). Recognised values:
+    //   "smartphone_drop"            : scale=15, floor=150, apply_all=true
+    //   "smartphone_drop_aggressive" : scale=20, floor=300, apply_all=true
+    //   "quasi_static"               : scale=5,  floor=50,  apply_all=false
+    //   "off" / ""                   : leave defaults (no rescaling)
+    // Individual fields above OVERRIDE the preset when explicitly set.
+    //
+    // dampingTargetFreqHz: legacy alias for dampingAlphaScale, expressed
+    // as a characteristic frequency. Internally converted via
+    //   scale = dampingTargetFreqHz / 50.0
+    // (kept for back-compat; setting dampingAlphaScale directly is
+    // preferred since the "frequency" framing is misleading for explicit.)
+    double      dampingAlphaScale       = 1.0;
+    double      dampingAlphaFloor       = 0.0;
+    bool        dampingApplyToAllParts  = false;
+    double      dampingTargetFreqHz     = 0.0;
+    std::string dampingPreset;
+
     std::vector<MatdbMaterialRule> rules;       // per-material override rules
 };
 
