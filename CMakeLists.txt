@@ -231,6 +231,7 @@ set(COMMAND_SOURCES
     src/commands/merge.cpp
     src/commands/tetremesh.cpp
     src/commands/meshfix.cpp
+    src/commands/surface_extract.cpp
     src/battery/BatteryWriter.cpp
     src/battery/BatteryMaterials.cpp
     src/battery/BatteryContacts.cpp

@@ -66,6 +66,7 @@
 #include "commands/merge.h"
 #include "commands/tetremesh.h"
 #include "commands/meshfix.h"
+#include "commands/surface_extract.h"
 
 #include <iostream>
 #include <fstream>
@@ -1856,6 +1857,48 @@ int main(int argc, char* argv[]) {
         }
         printBanner(console);
         return runUnfold(argv[2], argv[3], console);
+    }
+
+    // Extract-surface command (REQ-002)
+    // @lat: [[commands/extract-surface]]
+    if (command == "extract-surface") {
+        if (argc < 4) {
+            console.error(
+                "Usage: KooRemapper extract-surface <solid.k> <output_shell.k> "
+                "[--pid N] [--face top|bottom|all] [--output-pid N]");
+            return 1;
+        }
+        ExtractSurfaceOptions opts;
+        std::string solidFile = argv[2];
+        std::string outputFile = argv[3];
+        for (int i = 4; i < argc; ++i) {
+            std::string a = argv[i];
+            auto need = [&](const char* name) -> const char* {
+                if (i + 1 >= argc) {
+                    console.error(std::string("Missing value for ") + name);
+                    std::exit(1);
+                }
+                return argv[++i];
+            };
+            if (a == "--pid")            opts.filterPid = std::stoi(need("--pid"));
+            else if (a == "--face")      opts.face      = need("--face");
+            else if (a == "--output-pid") opts.outputPid = std::stoi(need("--output-pid"));
+            else if (a == "--mid-surface") {
+                console.warning("--mid-surface is not yet implemented; "
+                                "falling back to --face top.");
+                opts.face = "top";
+            } else {
+                console.error("Unknown option: " + a);
+                return 1;
+            }
+        }
+        if (opts.face != "top" && opts.face != "bottom" && opts.face != "all") {
+            console.error("--face must be one of: top, bottom, all (got '" +
+                          opts.face + "')");
+            return 1;
+        }
+        printBanner(console);
+        return runExtractSurface(solidFile, outputFile, opts, console);
     }
 
     // Generate command
