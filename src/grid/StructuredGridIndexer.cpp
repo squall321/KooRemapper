@@ -80,6 +80,31 @@ bool StructuredGridIndexer::assignIndices(Mesh& mesh,
     // Calculate dimensions
     calculateDimensions(mesh);
 
+    // REQ-003: Fail fast on degenerate BFS results.
+    // A correct structured grid has fill rate near 100% (dimI * dimJ * dimK
+    // ≈ element count). When axis detection collapses two directions onto
+    // the same world axis, BFS spreads elements across an impossibly large
+    // grid space and fill rate drops to a few percent — better to abort
+    // here than crash later inside the parametric mapper.
+    {
+        long long expected = (long long)dimI_ * dimJ_ * dimK_;
+        long long actual   = (long long)mesh.elements.size();
+        if (expected > 0 && (double)actual / (double)expected < 0.5) {
+            errorMessage_ = "Grid indexing failed: fill rate " +
+                std::to_string(100.0 * (double)actual / (double)expected) + "% " +
+                "(dims=" + std::to_string(dimI_) + "x" +
+                std::to_string(dimJ_) + "x" + std::to_string(dimK_) + ", " +
+                "actual=" + std::to_string(actual) + " elements)";
+            mesh_ = nullptr;
+            return false;
+        }
+    }
+
+    // REQ-003: Sort axes so the smallest-span dimension is K (thickness).
+    // After this call, dimI >= dimJ >= dimK by convention; downstream
+    // mapping code relies on K being the thinnest extent.
+    reorderAxes(mesh);
+
     // Update mesh dimensions
     mesh.setGridDimensions(dimI_, dimJ_, dimK_);
 
@@ -258,6 +283,17 @@ void StructuredGridIndexer::reorderAxes(Mesh& mesh) {
         elem.k = oldIdx[perm[2]];
     }
 
+    // REQ-003: also permute axisDirections_ so reorderElementNodes()'s
+    // global-axis fallback (e.g. when an element has no neighbor in some
+    // direction) reads the direction that matches the *new* i/j/k labels.
+    // Without this, axisDirections_[0] still pointed at the pre-reorder
+    // axis-0 vector and arc30 corner elements got node ordering rotated,
+    // breaking the boundary corner-node detection downstream.
+    std::array<Vector3D, 3> oldDirs = axisDirections_;
+    for (int i = 0; i < 3; ++i) {
+        axisDirections_[i] = oldDirs[perm[i]];
+    }
+
     // Update dimensions
     dimI_ = dims[0].first;
     dimJ_ = dims[1].first;
@@ -335,105 +371,32 @@ bool StructuredGridIndexer::determineInitialDirectionsGeometry(const Mesh& mesh,
     }
     int third = 3 - pair1 - pair2;  // The remaining index
 
-    // Now pair1 and pair2 are the most orthogonal pair
-    // Assign them to the two world axes they're most aligned with
-    // The third direction gets the remaining axis
-
-    // For each direction, find its dominant world axis component
-    auto getDominantAxis = [](const Vector3D& dir) -> int {
-        double ax = std::abs(dir.x);
-        double ay = std::abs(dir.y);
-        double az = std::abs(dir.z);
-        if (ax >= ay && ax >= az) return 0;
-        if (ay >= ax && ay >= az) return 1;
-        return 2;
-    };
-
-    std::array<int, 3> dirToAxis = {-1, -1, -1};
-    std::array<bool, 3> axisUsed = {false, false, false};
-
-    // Assign pair1 to its dominant axis
-    int axis1 = getDominantAxis(directions[pair1]);
-    dirToAxis[pair1] = axis1;
-    axisUsed[axis1] = true;
-
-    // Assign pair2 to its dominant axis (if not taken)
-    int axis2 = getDominantAxis(directions[pair2]);
-    if (axisUsed[axis2]) {
-        // Find next best axis for pair2
-        double scores[3] = {std::abs(directions[pair2].x),
-                            std::abs(directions[pair2].y),
-                            std::abs(directions[pair2].z)};
-        double bestScore = -1.0;
-        for (int a = 0; a < 3; ++a) {
-            if (!axisUsed[a] && scores[a] > bestScore) {
-                bestScore = scores[a];
-                axis2 = a;
-            }
-        }
-    }
-    dirToAxis[pair2] = axis2;
-    axisUsed[axis2] = true;
-
-    // Third direction gets the remaining axis
-    for (int a = 0; a < 3; ++a) {
-        if (!axisUsed[a]) {
-            dirToAxis[third] = a;
-            break;
-        }
-    }
-
-    // Build axisToDir (inverse mapping)
-    std::array<int, 3> axisToDir = {-1, -1, -1};
-    for (int d = 0; d < 3; ++d) {
-        if (dirToAxis[d] >= 0) {
-            axisToDir[dirToAxis[d]] = d;
-        }
-    }
-
-    // Store axis directions
-    for (int axis = 0; axis < 3; ++axis) {
-        int dirIdx = axisToDir[axis];
-        if (dirIdx >= 0) {
-            axisDirections_[axis] = directions[dirIdx];
-        } else {
-            errorMessage_ = "Failed to assign axis " + std::to_string(axis);
-            return false;
-        }
-    }
-
-    // CRITICAL: Ensure consistent k-axis direction for correct layer mapping
-    // k=0 should be at the "outer" side (larger radius for arc/curved meshes)
-    // k=max should be at the "inner" side (smaller radius)
+    // REQ-003: Direct assignment of the 3 orthogonal neighbor directions to
+    // axes 0/1/2. The old getDominantAxis() world-X/Y/Z mapping failed on
+    // curved meshes — when the arc direction had mixed Y/Z components, two
+    // directions could collide on the same world axis, causing index
+    // explosion in BFS (Q8 case: dims=1536×1533×396, fill rate 0.26%).
     //
-    // For arc/curved meshes, the "outer" side has larger Y values (further from center)
-    // So k+ direction should point toward smaller Y (inward)
-    //
-    // We check the k-axis direction's Y component:
-    // - If k+ points toward larger Y (outward), flip it so k+ points inward
-    // - This ensures k=0 is outer, k=max is inner
-    //
-    // For flat meshes where k is typically Z (thickness), we want:
-    // - k=0 at bottom (minZ), k=max at top (maxZ)
-    // - So k+ should point toward larger Z
-    //
-    // Heuristic: If |kAxis.y| > |kAxis.z|, it's radial (Y-dominant)
-    //            Otherwise it's thickness (Z-dominant)
-    Vector3D& kAxis = axisDirections_[2];
-    if (std::abs(kAxis.y) > std::abs(kAxis.z)) {
-        // Radial direction (Y-dominant) - k+ should point inward (toward smaller Y)
-        // This makes k=0 = outer, k=max = inner
-        if (kAxis.y > 0) {
-            kAxis = kAxis * -1.0;  // Flip so k+ points toward smaller Y
-        }
-    } else {
-        // Thickness direction (Z-dominant) - k+ should point upward (toward larger Z)
-        // This makes k=0 = bottom, k=max = top
-        if (kAxis.z < 0) {
-            kAxis = kAxis * -1.0;  // Flip so k+ points toward larger Z
-        }
-    }
+    // Skipping the world-axis mapping is safe because reorderAxes() (called
+    // from assignIndices() after BFS completes) places the smallest-span
+    // dimension as K. The "k+ points inward / k+ points up" heuristic that
+    // used to live here was only meaningful when the axis 0/1/2 mapping
+    // matched world XYZ — once reorderAxes runs, that invariant is set
+    // post-hoc by dimension order.
+    axisDirections_[0] = directions[pair1];
+    axisDirections_[1] = directions[pair2];
+    axisDirections_[2] = directions[third];
 
+    // REQ-003: Enforce a right-handed triad on axisDirections_. The cross-product
+    // fallback in propagateIndicesGeometry assumes I × J = K; if the original
+    // neighbor directions happened to form a left-handed set, the cross would
+    // give the opposite sign of the global fallback for missing-axis elements,
+    // causing inconsistent BFS labelling (arc30 dim_K split 1 → 2). Flipping K
+    // when needed restores the agreement.
+    Vector3D ij = axisDirections_[0].cross(axisDirections_[1]);
+    if (ij.dot(axisDirections_[2]) < 0.0) {
+        axisDirections_[2] = axisDirections_[2] * -1.0;
+    }
     return true;
 }
 
@@ -532,11 +495,33 @@ bool StructuredGridIndexer::propagateIndicesGeometry(Mesh& mesh, int startElem,
             }
         }
 
-        // Fill in missing axes with global defaults
+        // REQ-003: Fill missing axes with global defaults first, then refine
+        // via cross products of the *locally-derived* axes.
+        //
+        // Global fallbacks go stale on curved meshes — e.g. at ~90° along the
+        // arc from the seed corner, the seed's thickness direction has near-zero
+        // dot with the actual local thickness direction, so determineAxis above
+        // picks essentially at random. I × J = K (and permutations) recovers the
+        // correct local axis when two of three are found locally.
+        //
+        // Important: only refine when BOTH operands of the cross are locally
+        // found. Crossing a local axis with a stale global fallback yields
+        // another stale direction (and broke arc30 regression by spreading
+        // a 20×10×1 slab over k∈{0,1}).
         for (int ax = 0; ax < 3; ++ax) {
-            if (!axisFound[ax]) {
-                localAxes[ax] = axisDirections_[ax];
-            }
+            if (!axisFound[ax]) localAxes[ax] = axisDirections_[ax];
+        }
+        if (!axisFound[2] && (axisFound[0] || axisFound[1])) {
+            Vector3D cross = localAxes[0].cross(localAxes[1]);
+            if (cross.magnitude() > 1e-10) localAxes[2] = cross.normalized();
+        }
+        if (!axisFound[1] && (axisFound[0] || axisFound[2])) {
+            Vector3D cross = localAxes[2].cross(localAxes[0]);
+            if (cross.magnitude() > 1e-10) localAxes[1] = cross.normalized();
+        }
+        if (!axisFound[0] && (axisFound[1] || axisFound[2])) {
+            Vector3D cross = localAxes[1].cross(localAxes[2]);
+            if (cross.magnitude() > 1e-10) localAxes[0] = cross.normalized();
         }
 
         // Now process unindexed neighbors
