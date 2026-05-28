@@ -572,10 +572,17 @@ int runMapping(const std::string& bentFile, const std::string& flatFile,
     console.keyValue("Processing time", std::to_string(stats.processingTimeMs) + " ms");
     std::cout << "\n";
 
-    // Write output (use mapped positions)
+    // Write output (use mapped positions).
+    //
+    // Preserve the flat input's non-geometry cards (*PART, *SECTION_*, *MAT_*,
+    // *CONTROL_*, *CONTACT_*, *BOUNDARY_*, *INCLUDE, …) so the result is a
+    // self-contained LS-DYNA deck rather than a NODE+ELEMENT_SOLID stub.
+    // The flat file is the canonical source for material/part definitions in
+    // the standard workflow (CAD-derived geometry + material assignment); the
+    // bent reference contributes only the target shape.
     console.info("Writing output: " + outputFile);
     KFileWriter writer;
-    if (!writer.writeFile(outputFile, remapper.getResult(), true)) {
+    if (!writer.writeFileWithSource(outputFile, remapper.getResult(), flatFile, true)) {
         console.error("Failed to write output: " + writer.getErrorMessage());
         return 1;
     }
@@ -684,10 +691,10 @@ int runShellMapping(const std::string& bentShellFile, const std::string& flatFil
     }
     console.success("Mapping completed: " + std::to_string(flatMesh.getNodeCount()) + " nodes mapped");
 
-    // Write output
+    // Write output — preserve flat's non-geometry cards (see runMapping for rationale).
     console.info("Writing output: " + outputFile);
     KFileWriter writer;
-    if (!writer.writeFile(outputFile, resultMesh, true)) {
+    if (!writer.writeFileWithSource(outputFile, resultMesh, flatFile, true)) {
         console.error("Failed to write output: " + writer.getErrorMessage());
         return 1;
     }

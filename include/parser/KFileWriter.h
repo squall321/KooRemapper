@@ -28,6 +28,29 @@ public:
                    bool useMappedPositions = true);
 
     /**
+     * Write mesh, preserving every non-geometry keyword from a source .k file.
+     *
+     * Reads `sourceFile` line by line. `*NODE` and `*ELEMENT_SOLID` blocks are
+     * SKIPPED and replaced with the current mesh's data; everything else
+     * (`*PART`, `*SECTION_*`, `*MAT_*`, `*CONTROL_*`, `*INCLUDE`, `*CONTACT_*`,
+     * comments, blank lines) is copied verbatim. The output is a self-contained
+     * LS-DYNA input that no longer needs the source file.
+     *
+     * Used by `map` / `shellmap` so the output `detail_bent.k` keeps the
+     * material/part/section definitions that were authored on the flat
+     * source, instead of producing a geometry-only stub.
+     *
+     * @param filename            Output file path
+     * @param mesh                Mesh to write (provides new NODE/ELEMENT_SOLID)
+     * @param sourceFile          .k file to copy non-geometry cards from
+     * @param useMappedPositions  Use mapped positions instead of original (default true)
+     * @return true on success
+     */
+    bool writeFileWithSource(const std::string& filename, const Mesh& mesh,
+                             const std::string& sourceFile,
+                             bool useMappedPositions = true);
+
+    /**
      * Get last error message
      */
     const std::string& getErrorMessage() const { return errorMessage_; }

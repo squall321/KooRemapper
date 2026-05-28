@@ -3,17 +3,161 @@
 #include <iomanip>
 #include <ctime>
 #include <algorithm>
+#include <fstream>
+#include <cctype>
 
 // Knowledge graph (lat.md):
 //   @lat: [[modules/parser]]
 
 namespace KooRemapper {
 
+namespace {
+// Case-insensitive prefix check for keyword detection.
+// Accepts variants like "*NODE", "*node ", "*NODE_RIGID_SURFACE" (when
+// prefix="*NODE"); the caller decides whether sub-variants should be
+// treated as "same family".
+bool startsWithKeyword(const std::string& line, const char* keyword) {
+    size_t i = 0;
+    // Allow leading whitespace before '*'
+    while (i < line.size() && std::isspace(static_cast<unsigned char>(line[i]))) ++i;
+    size_t k = 0;
+    while (keyword[k] != '\0') {
+        if (i >= line.size()) return false;
+        char a = static_cast<char>(std::toupper(static_cast<unsigned char>(line[i])));
+        char b = static_cast<char>(std::toupper(static_cast<unsigned char>(keyword[k])));
+        if (a != b) return false;
+        ++i; ++k;
+    }
+    // Match if the keyword ends here or is followed by space/_/end-of-line
+    if (i >= line.size()) return true;
+    char next = line[i];
+    return next == ' ' || next == '\t' || next == '_' || next == '\r';
+}
+}  // namespace
+
 KFileWriter::KFileWriter()
     : precision_(9)
     , coordFieldWidth_(16)
     , includeHeader_(true)
 {}
+
+bool KFileWriter::writeFileWithSource(const std::string& filename, const Mesh& mesh,
+                                      const std::string& sourceFile,
+                                      bool useMappedPositions) {
+    errorMessage_.clear();
+
+    // Slurp source so we can stream it out while substituting NODE/ELEMENT
+    // blocks. Reading first guards against the case where filename and
+    // sourceFile point at the same path.
+    std::ifstream src(sourceFile);
+    if (!src.is_open()) {
+        errorMessage_ = "Cannot open source file for preservation: " + sourceFile;
+        return false;
+    }
+    std::vector<std::string> srcLines;
+    srcLines.reserve(1024);
+    {
+        std::string line;
+        while (std::getline(src, line)) {
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            srcLines.push_back(std::move(line));
+        }
+    }
+    src.close();
+
+    std::ofstream out(filename);
+    if (!out.is_open()) {
+        errorMessage_ = "Cannot create file: " + filename;
+        return false;
+    }
+
+    try {
+        if (includeHeader_) writeHeader(out);
+
+        // Block-skipping state machine. When we enter a NODE or ELEMENT_SOLID
+        // block, we drop the source content (the keyword line itself and all
+        // subsequent data lines) until the next *KEYWORD. The replacement
+        // block is emitted once, at the first time we see the corresponding
+        // keyword. `*END` is emitted by writeEnd() at the very bottom, so we
+        // skip any `*END` line we find in the source.
+        bool inSkipBlock = false;
+        bool nodeEmitted = false;
+        bool elemEmitted = false;
+        bool endSuppressed = false;  // we'll emit our own *END
+
+        auto emitOurNodes = [&]() {
+            if (nodeEmitted) return;
+            writeNodeSection(out, mesh, useMappedPositions);
+            nodeEmitted = true;
+        };
+        auto emitOurElems = [&]() {
+            if (elemEmitted) return;
+            writeElementSection(out, mesh);
+            elemEmitted = true;
+        };
+
+        for (const std::string& line : srcLines) {
+            // Detect start of a new keyword block (any line beginning with '*'
+            // after optional whitespace).
+            size_t firstNonWs = 0;
+            while (firstNonWs < line.size() &&
+                   std::isspace(static_cast<unsigned char>(line[firstNonWs]))) {
+                ++firstNonWs;
+            }
+            bool isKeyword = firstNonWs < line.size() && line[firstNonWs] == '*';
+
+            if (isKeyword) {
+                // Exiting the previous skip block (if any).
+                inSkipBlock = false;
+
+                if (startsWithKeyword(line, "*NODE")) {
+                    // *NODE family — match exact *NODE only, not *NODE_*
+                    // variants like *NODE_RIGID_SURFACE.
+                    std::string up;
+                    for (size_t i = firstNonWs; i < line.size(); ++i) {
+                        char c = static_cast<char>(std::toupper(
+                            static_cast<unsigned char>(line[i])));
+                        if (c == ' ' || c == '\t' || c == '\r') break;
+                        up.push_back(c);
+                    }
+                    if (up == "*NODE") {
+                        emitOurNodes();
+                        inSkipBlock = true;
+                        continue;
+                    }
+                }
+                if (startsWithKeyword(line, "*ELEMENT_SOLID")) {
+                    emitOurElems();
+                    inSkipBlock = true;
+                    continue;
+                }
+                if (startsWithKeyword(line, "*END")) {
+                    endSuppressed = true;
+                    continue;
+                }
+                // Other keyword — fall through to verbatim emit
+            }
+
+            if (inSkipBlock) continue;
+            out << line << "\n";
+        }
+
+        // If the source somehow lacked the keyword we were planning to
+        // substitute, emit it now so the output is still well-formed.
+        if (!nodeEmitted) writeNodeSection(out, mesh, useMappedPositions);
+        if (!elemEmitted) writeElementSection(out, mesh);
+        (void)endSuppressed;
+        writeEnd(out);
+
+        out.close();
+        return true;
+    }
+    catch (const std::exception& e) {
+        errorMessage_ = std::string("Error writing file: ") + e.what();
+        out.close();
+        return false;
+    }
+}
 
 bool KFileWriter::writeFile(const std::string& filename, const Mesh& mesh,
                             bool useMappedPositions) {
