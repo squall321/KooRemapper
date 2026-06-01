@@ -1,0 +1,73 @@
+# =============================================================================
+# Display Bent Prestress — simple_bent + detail_flat → detail_bent + dynain
+# =============================================================================
+#
+# Inputs (provided by user):
+#   simple_bent_display.k   3D HEX8 reference shape (the bent geometry)
+#   detail_flat_display.k   3D HEX8 detailed flat mesh
+#                           — has *MAT_*/*PART/*SECTION cards
+#
+# Outputs (this YAML produces):
+#   detail_bent_display.k       deck = detail_flat's MAT/PART/SECTION
+#                               + NODE/ELEMENT replaced with bent geometry
+#                               + *INCLUDE detail_bent_display.dynain
+#   detail_bent_display.dynain  *INITIAL_STRESS_SOLID, Kirchhoff plate
+#                               prestress computed from detail_flat's MAT
+#
+# Why base_model = detail_flat:
+#   assemble's raw-line preservation keeps base_model's MAT/PART/SECTION
+#   verbatim in the output. Picking detail_flat as base means the output
+#   inherits its material naturally — no need to inject material elsewhere.
+#
+# Why `replace` and not `map`/`shellmap` directly:
+#   `replace` is the assemble-pipeline op that pairs a bent SHELL reference
+#   with a flat detail and substitutes the geometry with the bent mapping
+#   while preserving PID. Doing it inside assemble (vs. running `map`
+#   followed by `prestress`) keeps it to a single command and lets stress
+#   accumulate cleanly with any other ops you add later (squeeze, indent,
+#   restack, …).
+#
+# Pre-step (one-shot, run before `assemble`):
+#   simple_bent_display.k is 3D HEX8, but `replace` requires a QUAD4 shell
+#   reference. Extract the top-surface mid-plane shell once:
+#
+#     KooRemapper extract-surface simple_bent_display.k bent_shell.k --face top
+#
+#   Options:
+#     --face top       : outward-facing top free faces (default direction)
+#     --face bottom    : bottom free faces
+#     --mid-surface    : top↔bottom XY pair → midsurface (best for layered
+#                        solids where the user wants the neutral plane)
+#
+# Run:
+#   KooRemapper assemble prestress.yaml
+# =============================================================================
+
+base_model: detail_flat_display.k
+output: detail_bent_display
+
+operations:
+  - type: replace
+    target_pid: 1                       # PID in detail_flat_display.k to remap
+    detail_flat: detail_flat_display.k  # detail geometry source (= base here)
+    shell_bent: bent_shell.k            # produced by extract-surface above
+    prestress: true                     # compute Kirchhoff bending prestress
+
+# -----------------------------------------------------------------------------
+# Optional knobs (uncomment as needed)
+# -----------------------------------------------------------------------------
+#
+# Material override — only needed if detail_flat lacks *MAT_* cards.
+# Uses these E/nu instead of the K-file material for stress calculation.
+#   material:
+#     E:  70000      # Young's modulus  (LS-DYNA units, e.g. MPa for mm-N)
+#     nu: 0.33       # Poisson's ratio
+#
+# Embed dynain inline rather than emit a separate .dynain file.
+# Output becomes a single self-contained .k with *INITIAL_STRESS_SOLID inline.
+#   dynain_embed: true
+#
+# Auto-insert *CONTROL_DYNAMIC_RELAXATION + *CONTROL_TERMINATION endtim=0
+# (typical for prestress→drop chained simulations where the bent state is
+# converged via DR before the impact analysis starts).
+#   dynamic_relaxation: true
