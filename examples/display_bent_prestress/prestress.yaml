@@ -48,10 +48,14 @@ output: detail_bent_display
 
 operations:
   - type: replace
-    target_pid: 1                       # PID in detail_flat_display.k to remap
-    detail_flat: detail_flat_display.k  # detail geometry source (= base here)
-    shell_bent: bent_shell.k            # produced by extract-surface above
-    prestress: true                     # compute Kirchhoff bending prestress
+    target_pid: 1                          # PID in detail_flat_display.k to remap
+    detail_flat: detail_flat_display.k     # detail geometry source (= base here)
+    simple_bent: simple_bent_display.k     # 3D HEX8 bent reference; KooRemapper
+                                           # auto-extracts top free faces → shell
+    prestress: true                        # compute Kirchhoff bending prestress
+
+# Legacy alternative — pre-extracted QUAD4 shell:
+#   shell_bent: bent_shell.k        (mutually exclusive with simple_bent)
 
 # -----------------------------------------------------------------------------
 # Optional knobs (uncomment as needed)
