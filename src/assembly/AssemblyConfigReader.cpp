@@ -1005,6 +1005,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                         } else if (op.type == AssemblyOperation::REPLACE) {
                             if (key == "detail_flat") op.replace.detailFlat = val;
                             else if (key == "shell_bent") op.replace.shellBent = val;
+                            else if (key == "simple_bent") op.replace.simpleBent = val;
                             else if (key == "prestress") op.replace.prestress = (val == "true" || val == "yes" || val == "1");
                         } else if (op.type == AssemblyOperation::SQUEEZE) {
                             if (key == "eps_x") op.squeeze.eps_x = std::stod(val);
@@ -1495,8 +1496,12 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                 throw std::runtime_error("Operation " + std::to_string(i+1) + ": missing target_pid");
             if (op.replace.detailFlat.empty())
                 throw std::runtime_error("Operation " + std::to_string(i+1) + ": missing detail_flat");
-            if (op.replace.shellBent.empty())
-                throw std::runtime_error("Operation " + std::to_string(i+1) + ": missing shell_bent");
+            if (op.replace.shellBent.empty() && op.replace.simpleBent.empty())
+                throw std::runtime_error("Operation " + std::to_string(i+1) +
+                    ": replace requires either shell_bent (QUAD4 shell) or simple_bent (3D HEX8, auto-extracted)");
+            if (!op.replace.shellBent.empty() && !op.replace.simpleBent.empty())
+                throw std::runtime_error("Operation " + std::to_string(i+1) +
+                    ": replace cannot use both shell_bent and simple_bent — choose one");
         } else if (op.type == AssemblyOperation::SQUEEZE) {
             if (op.squeeze.targetPid <= 0)
                 throw std::runtime_error("Operation " + std::to_string(i+1) + ": missing target_pid");

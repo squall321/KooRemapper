@@ -12,6 +12,7 @@ struct ReplaceOperation {
     int targetPid = 0;
     std::string detailFlat;    // flat detail mesh path
     std::string shellBent;     // bent shell reference path (QUAD4)
+    std::string simpleBent;    // 3D HEX8 bent reference; auto-extract top free faces → shell
     bool prestress = false;    // compute flat→bent bending prestress
 };
 

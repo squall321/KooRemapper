@@ -127,7 +127,8 @@ bool ModelAssembler::applyReplace(const ReplaceOperation& op, double E, double n
     };
 
     std::string detailFlatPath = resolvePath(op.detailFlat);
-    std::string shellBentPath = resolvePath(op.shellBent);
+    std::string shellBentPath  = resolvePath(op.shellBent);
+    std::string simpleBentPath = resolvePath(op.simpleBent);
 
     // 1. Identify target part's elements and exclusive nodes
     std::set<int> partElemIds = getPartElementIds(op.targetPid);
@@ -138,14 +139,93 @@ bool ModelAssembler::applyReplace(const ReplaceOperation& op, double E, double n
 
     std::set<int> partExclusiveNodes = getPartExclusiveNodeIds(op.targetPid);
 
-    // 2. Load bent shell
-    ShellReader shellReader;
+    // 2. Acquire bent shell — either load a QUAD4 .k file (legacy) or
+    //    extract free top-faces in-memory from a 3D HEX8 reference.
     ShellMesh bentShell;
-    try {
-        bentShell = shellReader.readFile(shellBentPath);
-    } catch (const std::exception& e) {
-        errorMessage_ = "Failed to load bent shell: " + std::string(e.what());
-        return false;
+    if (!simpleBentPath.empty()) {
+        // 2a. simple_bent — 3D HEX8 → in-memory free-face extraction.
+        // Eliminates the separate `extract-surface` prep step, so users can
+        // express the whole pipeline (3D bent ref + flat detail + prestress)
+        // in a single YAML.
+        KFileReader simpleReader;
+        Mesh simpleBent;
+        try {
+            simpleBent = simpleReader.readFile(simpleBentPath);
+        } catch (const std::exception& e) {
+            errorMessage_ = "Failed to load simple_bent: " + std::string(e.what());
+            return false;
+        }
+
+        // Free-face extraction (top side, by element-centroid Z) — mirrors
+        // the standalone `extract-surface --face top` command.
+        using FaceKey = std::array<int,4>;
+        struct FaceVal { int count; FaceKey winding; double elemZ; };
+        std::map<FaceKey, FaceVal> faceMap;
+        auto elemCentZ = [&](const Element& e) {
+            double s = 0.0; int n = 0;
+            for (int nid : e.nodeIds) {
+                if (nid <= 0) continue;
+                auto it = simpleBent.nodes.find(nid);
+                if (it == simpleBent.nodes.end()) continue;
+                s += it->second.position.z; ++n;
+            }
+            return n > 0 ? s / n : 0.0;
+        };
+        auto faceCentZ = [&](const FaceKey& f) {
+            double s = 0.0; int n = 0; int seen[4] = {0,0,0,0};
+            for (int i = 0; i < 4; ++i) {
+                int nid = f[i]; if (nid <= 0) continue;
+                bool dup = false;
+                for (int j = 0; j < i; ++j) if (seen[j] == nid) { dup = true; break; }
+                if (dup) continue;
+                seen[i] = nid;
+                auto it = simpleBent.nodes.find(nid);
+                if (it == simpleBent.nodes.end()) continue;
+                s += it->second.position.z; ++n;
+            }
+            return n > 0 ? s / n : 0.0;
+        };
+        for (const auto& [eid, elem] : simpleBent.elements) {
+            double ez = elemCentZ(elem);
+            for (int fi : elem.getValidFaceIndices()) {
+                auto fn = elem.getFaceNodeIds(fi);
+                FaceKey orig{fn[0], fn[1], fn[2], fn[3]};
+                std::sort(fn.begin(), fn.end());
+                FaceKey key{fn[0], fn[1], fn[2], fn[3]};
+                auto it = faceMap.find(key);
+                if (it == faceMap.end()) faceMap[key] = {1, orig, ez};
+                else ++it->second.count;
+            }
+        }
+        // Collect top free faces, build ShellMesh in-memory.
+        int shellEid = 1;
+        std::set<int> usedNodes;
+        for (const auto& [key, val] : faceMap) {
+            if (val.count != 1) continue;
+            if (faceCentZ(val.winding) - val.elemZ <= 0) continue;  // top only
+            std::array<int,4> nids{val.winding[0], val.winding[1],
+                                    val.winding[2], val.winding[3]};
+            bentShell.addElement(shellEid++, 1, nids);
+            for (int n : nids) if (n > 0) usedNodes.insert(n);
+        }
+        if (bentShell.getElementCount() == 0) {
+            errorMessage_ = "simple_bent: no top free faces found in " + simpleBentPath;
+            return false;
+        }
+        // Copy used nodes from the source 3D mesh into the shell.
+        for (int nid : usedNodes) {
+            const auto& p = simpleBent.nodes.at(nid).position;
+            bentShell.addNode(nid, p.x, p.y, p.z);
+        }
+    } else {
+        // 2b. shell_bent — load QUAD4 .k file via ShellReader (existing path).
+        ShellReader shellReader;
+        try {
+            bentShell = shellReader.readFile(shellBentPath);
+        } catch (const std::exception& e) {
+            errorMessage_ = "Failed to load bent shell: " + std::string(e.what());
+            return false;
+        }
     }
 
     // 3. Load flat detail mesh
