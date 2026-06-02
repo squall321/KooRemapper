@@ -1003,10 +1003,19 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                                 }
                             }
                         } else if (op.type == AssemblyOperation::REPLACE) {
+                            auto boolVal = [](const std::string& v) {
+                                return v == "true" || v == "yes" || v == "1";
+                            };
                             if (key == "detail_flat") op.replace.detailFlat = val;
                             else if (key == "shell_bent") op.replace.shellBent = val;
                             else if (key == "simple_bent") op.replace.simpleBent = val;
-                            else if (key == "prestress") op.replace.prestress = (val == "true" || val == "yes" || val == "1");
+                            else if (key == "prestress") op.replace.prestress = boolVal(val);
+                            else if (key == "flip_input_x") op.replace.flipInputX = boolVal(val);
+                            else if (key == "flip_input_y") op.replace.flipInputY = boolVal(val);
+                            else if (key == "flip_input_z") op.replace.flipInputZ = boolVal(val);
+                            else if (key == "flip_x")       op.replace.flipX      = boolVal(val);
+                            else if (key == "flip_y")       op.replace.flipY      = boolVal(val);
+                            else if (key == "flip_z")       op.replace.flipZ      = boolVal(val);
                         } else if (op.type == AssemblyOperation::SQUEEZE) {
                             if (key == "eps_x") op.squeeze.eps_x = std::stod(val);
                             else if (key == "eps_y") op.squeeze.eps_y = std::stod(val);

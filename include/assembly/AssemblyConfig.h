@@ -14,6 +14,18 @@ struct ReplaceOperation {
     std::string shellBent;     // bent shell reference path (QUAD4)
     std::string simpleBent;    // 3D HEX8 bent reference; auto-extract top free faces → shell
     bool prestress = false;    // compute flat→bent bending prestress
+
+    // Pre-map mirror of the detail flat (about its bbox center). Use when
+    // detail's thickness/normal is oriented opposite to what the bent shell
+    // expects (e.g. cover-glass face of detail should match outer face of
+    // bent but currently matches inner). HEX8 connectivity is swapped on
+    // odd-parity flips to keep Jacobians positive.
+    bool flipInputX = false, flipInputY = false, flipInputZ = false;
+
+    // Post-map mirror of the result (about origin). Use when the entire
+    // bent result must be mirrored about a global axis (e.g. mirror-image
+    // half of an assembly). Same odd-parity HEX8 swap rule applies.
+    bool flipX = false, flipY = false, flipZ = false;
 };
 
 struct SqueezeOperation {

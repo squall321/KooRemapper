@@ -238,6 +238,45 @@ bool ModelAssembler::applyReplace(const ReplaceOperation& op, double E, double n
         return false;
     }
 
+    // 3.5 Pre-map mirror of detail flat (about its bbox center). Matches the
+    //     standalone `map` command's --flip-input-{x,y,z} semantics: use to
+    //     swap detail's top/bottom (or any axis) faces so the right face of
+    //     the detail maps to the right face of the bent shell. Odd-parity
+    //     mirror inverts every HEX8 Jacobian, so we swap n[0..3] ↔ n[4..7]
+    //     to keep the source winding right-handed for the mapper.
+    if (op.flipInputX || op.flipInputY || op.flipInputZ) {
+        Vector3D fMin, fMax;
+        flatMesh.calculateBoundingBox(fMin, fMax);
+        double cx = (fMin.x + fMax.x) * 0.5;
+        double cy = (fMin.y + fMax.y) * 0.5;
+        double cz = (fMin.z + fMax.z) * 0.5;
+        for (auto& kv : flatMesh.nodes) {
+            Vector3D& p = kv.second.position;
+            if (op.flipInputX) p.x = 2.0 * cx - p.x;
+            if (op.flipInputY) p.y = 2.0 * cy - p.y;
+            if (op.flipInputZ) p.z = 2.0 * cz - p.z;
+        }
+        int parity = (op.flipInputX ? 1 : 0) + (op.flipInputY ? 1 : 0) + (op.flipInputZ ? 1 : 0);
+        if ((parity % 2) != 0) {
+            for (auto& kv : flatMesh.elements) {
+                Element& e = kv.second;
+                if (e.type != ElementType::HEX8) continue;
+                std::array<int, 8> orig = e.nodeIds;
+                e.nodeIds[0] = orig[4]; e.nodeIds[1] = orig[5];
+                e.nodeIds[2] = orig[6]; e.nodeIds[3] = orig[7];
+                e.nodeIds[4] = orig[0]; e.nodeIds[5] = orig[1];
+                e.nodeIds[6] = orig[2]; e.nodeIds[7] = orig[3];
+            }
+        }
+        std::string axes;
+        if (op.flipInputX) axes += "X";
+        if (op.flipInputY) axes += "Y";
+        if (op.flipInputZ) axes += "Z";
+        infoMessages.push_back("  Replace: pre-map mirror detail flat " + axes +
+            " (parity=" + std::to_string(parity) + ", HEX8 reordered=" +
+            (parity % 2 ? "yes" : "no") + ")");
+    }
+
     // 4. Run ShellMapper: flat → mapped
     ShellMapper mapper;
     if (!mapper.build(bentShell)) {
@@ -253,6 +292,41 @@ bool ModelAssembler::applyReplace(const ReplaceOperation& op, double E, double n
     if (!mapper.mapMesh(flatMesh, mappedMesh, thickness)) {
         errorMessage_ = "Mapping failed: " + mapper.getErrorMessage();
         return false;
+    }
+
+    // 4.5 Post-map mirror of result (about origin). Matches standalone
+    //     `map`'s --flip-{x,y,z}. Applied BEFORE the prestress branch so
+    //     stress is computed in the final orientation and dynain tensor
+    //     components are consistent with the emitted geometry.
+    if (op.flipX || op.flipY || op.flipZ) {
+        for (auto& kv : mappedMesh.nodes) {
+            Vector3D pos = kv.second.isMapped ? kv.second.mappedPosition
+                                              : kv.second.position;
+            if (op.flipX) pos.x = -pos.x;
+            if (op.flipY) pos.y = -pos.y;
+            if (op.flipZ) pos.z = -pos.z;
+            kv.second.position = pos;
+            kv.second.setMappedPosition(pos);
+        }
+        int parity = (op.flipX ? 1 : 0) + (op.flipY ? 1 : 0) + (op.flipZ ? 1 : 0);
+        if ((parity % 2) != 0) {
+            for (auto& kv : mappedMesh.elements) {
+                Element& e = kv.second;
+                if (e.type != ElementType::HEX8) continue;
+                std::array<int, 8> orig = e.nodeIds;
+                e.nodeIds[0] = orig[4]; e.nodeIds[1] = orig[5];
+                e.nodeIds[2] = orig[6]; e.nodeIds[3] = orig[7];
+                e.nodeIds[4] = orig[0]; e.nodeIds[5] = orig[1];
+                e.nodeIds[6] = orig[2]; e.nodeIds[7] = orig[3];
+            }
+        }
+        std::string axes;
+        if (op.flipX) axes += "X";
+        if (op.flipY) axes += "Y";
+        if (op.flipZ) axes += "Z";
+        infoMessages.push_back("  Replace: post-map mirror result " + axes +
+            " (parity=" + std::to_string(parity) + ", HEX8 reordered=" +
+            (parity % 2 ? "yes" : "no") + ")");
     }
 
     // 5. Renumber mapped mesh IDs
