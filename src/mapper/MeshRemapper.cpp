@@ -321,8 +321,16 @@ bool MeshRemapper::step4_MapNodes() {
     // (reference dummies for *CONSTRAINED_*, *BOUNDARY_*, *ELEMENT_MASS,
     // etc.) are not part of the geometry and should not be moved into
     // the bent shape — they retain their original coordinates.
+    //
+    // When targetPids_ is non-empty, only elements whose partId is in the
+    // set count; nodes that belong exclusively to other PIDs pass through
+    // alongside true orphans. Shared interface nodes (referenced by both
+    // a target and a non-target PID's elements) ARE in the set and get
+    // mapped — the non-target PID's element at the interface will be
+    // partially deformed. See setTargetPids() doc.
     std::set<int> referencedNodes;
     for (const auto& [eid, elem] : flatMesh_->elements) {
+        if (!targetPids_.empty() && targetPids_.count(elem.partId) == 0) continue;
         for (int i = 0; i < Element::NUM_NODES; ++i) {
             int nid = elem.nodeIds[i];
             if (nid > 0) referencedNodes.insert(nid);
@@ -333,8 +341,9 @@ bool MeshRemapper::step4_MapNodes() {
     for (const auto& pair : nodes) {
         const Node& flatNode = pair.second;
 
-        // Orphan → pass through unchanged so SPC/CNRB reference points
-        // stay where the user placed them.
+        // Orphan or non-target-PID node → pass through unchanged so SPC/
+        // CNRB reference points stay where the user placed them and so
+        // non-target PIDs retain their original geometry.
         if (referencedNodes.count(flatNode.id) == 0) {
             Node passthrough(flatNode.id, flatNode.position);
             passthrough.setMappedPosition(flatNode.position);
@@ -410,10 +419,12 @@ bool MeshRemapper::step4_MapNodesParallel() {
     int axisMapLocal[3] = {axisMap_[0], axisMap_[1], axisMap_[2]};
     bool flipILocal = flipI_, flipJLocal = flipJ_, flipKLocal = flipK_;
 
-    // Build element-referenced node set — orphans pass through unchanged
+    // Build element-referenced node set, filtered by targetPids_ if set
+    // — orphans and non-target-PID nodes pass through unchanged
     // (see sequential step4_MapNodes for rationale).
     std::set<int> referencedNodes;
     for (const auto& [eid, elem] : flatMesh_->elements) {
+        if (!targetPids_.empty() && targetPids_.count(elem.partId) == 0) continue;
         for (int i = 0; i < Element::NUM_NODES; ++i) {
             int nid = elem.nodeIds[i];
             if (nid > 0) referencedNodes.insert(nid);

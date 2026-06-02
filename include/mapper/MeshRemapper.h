@@ -8,6 +8,7 @@
 #include "mapper/ParametricMapper.h"
 #include "mapper/UnstructuredMeshAnalyzer.h"
 #include <functional>
+#include <set>
 #include <string>
 
 // Knowledge graph (lat.md):
@@ -151,6 +152,24 @@ public:
     bool getForcePositive() const { return forcePositive_; }
 
     /**
+     * Restrict mapping to nodes referenced by elements with PID in this set.
+     * Empty set (default) = no filter, every element-referenced node is
+     * mapped. When set, only elements whose partId is in the set contribute
+     * to the referenced-node set; nodes NOT referenced by any of those
+     * elements (orphans + nodes belonging only to non-target PIDs) pass
+     * through with their original positions.
+     *
+     * Shared-interface caveat: an interface node referenced by both a target
+     * PID and a non-target PID IS in the referenced set (because it belongs
+     * to a target element) and therefore gets mapped. The non-target PID's
+     * element sharing that node will be partially deformed at the interface.
+     * If a user wants the non-target PID to stay completely rigid, they
+     * should run `disconnect` first to decouple the interface nodes.
+     */
+    void setTargetPids(const std::set<int>& pids) { targetPids_ = pids; }
+    const std::set<int>& getTargetPids() const { return targetPids_; }
+
+    /**
      * Mirror the mapped output along one or more global axes (X / Y / Z).
      * Each axis with the corresponding flag = true gets its node coordinate
      * negated. To preserve element handedness (positive Jacobian), HEX8
@@ -212,6 +231,10 @@ private:
     bool axisMapAuto_;  // true = auto-detect, false = identity (X->i, Y->j, Z->k)
     bool forcePositive_ = false;  // see setForcePositive() doc
     bool flipOutX_ = false, flipOutY_ = false, flipOutZ_ = false;  // see setOutputFlip()
+
+    // Subset of PIDs whose elements contribute to the mapped-node set.
+    // Empty = map every element-referenced node (default behavior).
+    std::set<int> targetPids_;
 
     // Analyze bent mesh to determine if i/j/k need flipping
     void analyzeLayerOrientation();

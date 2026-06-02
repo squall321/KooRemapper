@@ -215,7 +215,8 @@ int runMapping(const std::string& bentFile, const std::string& flatFile,
                const std::string& bboxAlignMode,
                double bboxAlignMaxDriftPct,
                std::string* outScaledFlatPath,
-               bool flipInputX, bool flipInputY, bool flipInputZ) {
+               bool flipInputX, bool flipInputY, bool flipInputZ,
+               const std::set<int>& targetPids) {
     Timer timer;
 
     // Load bent mesh
@@ -444,6 +445,17 @@ int runMapping(const std::string& bentFile, const std::string& flatFile,
         if (flipZ) axes += "Z";
         console.info("Output mirror: " + axes +
                      " axis flipped (HEX8 connectivity swapped to preserve handedness if needed).");
+    }
+    if (!targetPids.empty()) {
+        remapper.setTargetPids(targetPids);
+        std::string pidList;
+        for (int p : targetPids) {
+            if (!pidList.empty()) pidList += ", ";
+            pidList += std::to_string(p);
+        }
+        console.info("Target PIDs: " + pidList +
+                     " — only nodes referenced by elements in these parts will be mapped; "
+                     "everything else (other PIDs + orphans) passes through unchanged.");
     }
 
     // Set progress callback

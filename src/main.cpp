@@ -1503,7 +1503,21 @@ int main(int argc, char* argv[]) {
         double bboxAlignMaxDrift = 2.0;       // percent
         bool sawBboxAlignCli = false;
         bool sawBboxDriftCli = false;
+        std::set<int> targetPids;             // empty = all parts (default)
         std::vector<std::string> positionalArgs;
+
+        auto parseIntList = [](const std::string& s, std::set<int>& out) {
+            // Accept "1", "1,2,3", "1 2 3"
+            std::string buf;
+            for (char c : s) {
+                if (c == ',' || c == ' ' || c == '\t') {
+                    if (!buf.empty()) { try { out.insert(std::stoi(buf)); } catch (...) {} buf.clear(); }
+                } else {
+                    buf.push_back(c);
+                }
+            }
+            if (!buf.empty()) { try { out.insert(std::stoi(buf)); } catch (...) {} }
+        };
 
         for (int i = 2; i < argc; ++i) {
             std::string arg = argv[i];
@@ -1532,6 +1546,8 @@ int main(int argc, char* argv[]) {
                     console.error("Invalid value for --bbox-align-max-drift");
                     return 1;
                 }
+            } else if ((arg == "--target-pid" || arg == "--target-pids") && i + 1 < argc) {
+                parseIntList(argv[++i], targetPids);
             } else if (arg[0] != '-') {
                 positionalArgs.push_back(arg);
             }
@@ -1753,7 +1769,7 @@ int main(int argc, char* argv[]) {
         int mapRc = runMapping(bentPath, flatPath, outputPath,
                                console, useParallel, forcePositive, flipX, flipY, flipZ,
                                bboxAlignMode, bboxAlignMaxDrift, &scaledFlatPath,
-                               flipInX, flipInY, flipInZ);
+                               flipInX, flipInY, flipInZ, targetPids);
         if (mapRc != 0) return mapRc;
 
         // Optional prestress chaining: configured only via YAML (CLI form

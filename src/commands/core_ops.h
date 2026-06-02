@@ -1,5 +1,6 @@
 #pragma once
 #include "analysis/StrainTensor.h"
+#include <set>
 #include <string>
 
 // Knowledge graph (lat.md):
@@ -38,7 +39,8 @@ int runMapping(const std::string& bentFile, const std::string& flatFile,
                const std::string& bboxAlignMode = "none",
                double bboxAlignMaxDriftPct = 2.0,
                std::string* outScaledFlatPath = nullptr,
-               bool flipInputX = false, bool flipInputY = false, bool flipInputZ = false);
+               bool flipInputX = false, bool flipInputY = false, bool flipInputZ = false,
+               const std::set<int>& targetPids = {});
 
 int runShellMapping(const std::string& bentShellFile, const std::string& flatFile,
                     const std::string& outputFile, double thickness,
