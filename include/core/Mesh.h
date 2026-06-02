@@ -4,9 +4,11 @@
 #include "core/Element.h"
 #include "core/Vector3D.h"
 #include <map>
+#include <set>
 #include <vector>
 #include <string>
 #include <utility>
+#include <algorithm>
 
 // Knowledge graph (lat.md):
 //   @lat: [[modules/core]]
@@ -239,7 +241,16 @@ public:
         gridDimensionsSet = true;
     }
 
-    // Calculate bounding box
+    // Calculate bounding box.
+    //
+    // When the mesh has elements, only nodes referenced by an element are
+    // considered. This prevents far-outside orphan reference nodes (e.g.
+    // dummy nodes for *CONSTRAINED_RIGID_BODIES, *BOUNDARY_PRESCRIBED_*,
+    // *ELEMENT_MASS) from inflating the bbox — which would distort every
+    // parametric ratio downstream in `map` and `shellmap`.
+    //
+    // For meshes with no elements (node-only meshes used in some unit
+    // tests / generators), the bbox falls back to all nodes.
     void calculateBoundingBox(Vector3D& minPoint, Vector3D& maxPoint) const {
         if (nodes.empty()) {
             minPoint = Vector3D(0, 0, 0);
@@ -247,8 +258,19 @@ public:
             return;
         }
 
+        // Build the set of node IDs referenced by any element.
+        std::set<int> refNodes;
+        for (const auto& [eid, elem] : elements) {
+            for (int i = 0; i < Element::NUM_NODES; ++i) {
+                int nid = elem.nodeIds[i];
+                if (nid > 0) refNodes.insert(nid);
+            }
+        }
+        bool useRefOnly = !refNodes.empty();
+
         bool first = true;
         for (const auto& [id, node] : nodes) {
+            if (useRefOnly && refNodes.count(id) == 0) continue;
             if (first) {
                 minPoint = node.position;
                 maxPoint = node.position;
@@ -261,6 +283,12 @@ public:
                 maxPoint.y = std::max(maxPoint.y, node.position.y);
                 maxPoint.z = std::max(maxPoint.z, node.position.z);
             }
+        }
+        // If elements existed but none referenced any node in `nodes`
+        // (shouldn't happen for valid meshes but guard anyway), fall back.
+        if (first) {
+            minPoint = nodes.begin()->second.position;
+            maxPoint = minPoint;
         }
     }
 

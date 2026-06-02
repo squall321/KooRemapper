@@ -2,7 +2,9 @@
 #include <chrono>
 #include <cmath>
 #include <algorithm>
+#include <iostream>
 #include <limits>
+#include <set>
 #include <vector>
 #include <mutex>
 #include <cstdlib>
@@ -315,8 +317,31 @@ bool MeshRemapper::step4_MapNodes() {
     double xyzMin[3] = {minBound.x, minBound.y, minBound.z};
     double xyzSize[3] = {flatSizeI, flatSizeJ, flatSizeK};
 
+    // Build set of nodes actually referenced by an element. Orphan nodes
+    // (reference dummies for *CONSTRAINED_*, *BOUNDARY_*, *ELEMENT_MASS,
+    // etc.) are not part of the geometry and should not be moved into
+    // the bent shape — they retain their original coordinates.
+    std::set<int> referencedNodes;
+    for (const auto& [eid, elem] : flatMesh_->elements) {
+        for (int i = 0; i < Element::NUM_NODES; ++i) {
+            int nid = elem.nodeIds[i];
+            if (nid > 0) referencedNodes.insert(nid);
+        }
+    }
+    int orphanCount = 0;
+
     for (const auto& pair : nodes) {
         const Node& flatNode = pair.second;
+
+        // Orphan → pass through unchanged so SPC/CNRB reference points
+        // stay where the user placed them.
+        if (referencedNodes.count(flatNode.id) == 0) {
+            Node passthrough(flatNode.id, flatNode.position);
+            passthrough.setMappedPosition(flatNode.position);
+            resultMesh_.addNode(passthrough);
+            ++orphanCount;
+            continue;
+        }
 
         // Convert detail XYZ -> bent ijk parametric coordinates via axisMap_
         double xyz[3] = {flatNode.position.x, flatNode.position.y, flatNode.position.z};
@@ -350,6 +375,10 @@ bool MeshRemapper::step4_MapNodes() {
         stats_.nodesProcessed++;
     }
 
+    if (orphanCount > 0) {
+        std::cout << "[INFO] Orphan nodes passed through unchanged: " << orphanCount << "\n";
+    }
+
     return true;
 }
 
@@ -381,10 +410,32 @@ bool MeshRemapper::step4_MapNodesParallel() {
     int axisMapLocal[3] = {axisMap_[0], axisMap_[1], axisMap_[2]};
     bool flipILocal = flipI_, flipJLocal = flipJ_, flipKLocal = flipK_;
 
+    // Build element-referenced node set — orphans pass through unchanged
+    // (see sequential step4_MapNodes for rationale).
+    std::set<int> referencedNodes;
+    for (const auto& [eid, elem] : flatMesh_->elements) {
+        for (int i = 0; i < Element::NUM_NODES; ++i) {
+            int nid = elem.nodeIds[i];
+            if (nid > 0) referencedNodes.insert(nid);
+        }
+    }
+    std::vector<char> isReferenced(nodeCount, 0);
+    for (int i = 0; i < nodeCount; ++i) {
+        isReferenced[i] = referencedNodes.count(nodesList[i].first) ? 1 : 0;
+    }
+
     // Parallel node mapping
     #pragma omp parallel for schedule(dynamic, 100)
     for (int i = 0; i < nodeCount; ++i) {
         const Node& flatNode = nodesList[i].second;
+
+        if (!isReferenced[i]) {
+            // Orphan — pass through.
+            Node passthrough(flatNode.id, flatNode.position);
+            passthrough.setMappedPosition(flatNode.position);
+            mappedNodes[i] = passthrough;
+            continue;
+        }
 
         double xyz[3] = {flatNode.position.x, flatNode.position.y, flatNode.position.z};
         double ijkRatio[3] = {0.0, 0.0, 0.0};
@@ -414,11 +465,17 @@ bool MeshRemapper::step4_MapNodesParallel() {
     }
 
     // Add all nodes to result mesh (sequential, but fast)
-    for (const auto& node : mappedNodes) {
-        resultMesh_.addNode(node);
+    int orphanCount = 0;
+    for (int i = 0; i < nodeCount; ++i) {
+        resultMesh_.addNode(mappedNodes[i]);
+        if (!isReferenced[i]) ++orphanCount;
     }
 
-    stats_.nodesProcessed = static_cast<int>(nodeCount);
+    if (orphanCount > 0) {
+        std::cout << "[INFO] Orphan nodes passed through unchanged: " << orphanCount << "\n";
+    }
+
+    stats_.nodesProcessed = static_cast<int>(nodeCount) - orphanCount;
     return true;
 #else
     // Fallback to sequential version if OpenMP not available
