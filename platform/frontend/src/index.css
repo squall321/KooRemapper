@@ -1,0 +1,39 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: 0 0% 100%;
+  --surface: 0 0% 98%;
+  --border: 220 13% 88%;
+  --muted: 220 9% 46%;
+  --fg: 222 47% 11%;
+  --primary: 222 89% 55%;
+  --primary-fg: 0 0% 100%;
+  --success: 142 71% 40%;
+  --warning: 38 92% 50%;
+  --danger: 0 72% 51%;
+}
+
+.dark {
+  --bg: 222 47% 8%;
+  --surface: 222 33% 12%;
+  --border: 222 20% 22%;
+  --muted: 220 12% 60%;
+  --fg: 210 40% 96%;
+  --primary: 217 91% 60%;
+  --primary-fg: 222 47% 8%;
+  --success: 142 65% 47%;
+  --warning: 38 92% 55%;
+  --danger: 0 72% 58%;
+}
+
+html, body, #root { height: 100%; }
+body {
+  background-color: hsl(var(--bg));
+  color: hsl(var(--fg));
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans KR', sans-serif;
+}
+
+/* code/log blocks */
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }

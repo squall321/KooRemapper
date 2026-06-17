@@ -1,0 +1,25 @@
+Bootstrap: docker
+From: python:3.12-slim
+
+%labels
+    Component  koorm-mcp
+    Version    0.1.0
+
+%post
+    set -eux
+    pip install --upgrade pip
+    # Separate image from the API: the mcp SDK and FastAPI/starlette pins can
+    # conflict, so the MCP server runs as its own process/deps (REST-only link).
+    pip install --no-cache-dir "mcp>=1.2" "httpx>=0.28"
+
+%environment
+    export PYTHONDONTWRITEBYTECODE=1
+    export PYTHONUNBUFFERED=1
+
+%startscript
+    cd /workspace/platform/mcp_server
+    exec python server.py
+
+%help
+    KooRemapper MCP server (streamable-http). Forwards Authorization PAT to the API.
+    Env: KOOREMAPPER_API_BASE, KOORM_MCP_PORT, MCP_HOST, MCP_ALLOWED_HOSTS

@@ -1,0 +1,3464 @@
+{
+ "operations": [
+  {
+   "name": "map",
+   "category": "core",
+   "summary": "Map a flat unstructured mesh onto a bent structured mesh",
+   "description": "Maps a flat CAD-derived unstructured mesh onto a bent structured reference mesh (solid HEX8 elements), remapping node positions from parametric bent coordinates to match target bending geometry. Automatically detects and aligns detail/bent XYZ axes by length ranking. Supports output mirroring (flip-x/y/z), input mirroring (flip-input-x/y/z for slit/hole face swap), bbox alignment (to eliminate uniform stretch), optional strain/stress computation via YAML prestress section, and selective part targeting. Preserves material and part definitions from the flat source.",
+   "invocation": "positional",
+   "config_style": null,
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "single",
+     "type": "boolean",
+     "role": "flag",
+     "flag": "--single",
+     "aliases": [
+      "-s"
+     ],
+     "required": false,
+     "default": "false",
+     "description": "Use single-threaded mode for mapping. Default is parallel processing."
+    },
+    {
+     "name": "force_positive",
+     "type": "boolean",
+     "role": "flag",
+     "flag": "--force-positive",
+     "aliases": [
+      "--fp"
+     ],
+     "required": false,
+     "default": "false",
+     "description": "Force every mapped HEX8 Jacobian positive by swapping connectivity. Use when source mesh has unreliable handedness."
+    },
+    {
+     "name": "flip_x",
+     "type": "boolean",
+     "role": "flag",
+     "flag": "--flip-x",
+     "required": false,
+     "default": "false",
+     "description": "Mirror output along global X axis. Swaps HEX8 connectivity when odd-parity flips would invert Jacobian."
+    },
+    {
+     "name": "flip_y",
+     "type": "boolean",
+     "role": "flag",
+     "flag": "--flip-y",
+     "required": false,
+     "default": "false",
+     "description": "Mirror output along global Y axis. Can be combined with --flip-x and/or --flip-z."
+    },
+    {
+     "name": "flip_z",
+     "type": "boolean",
+     "role": "flag",
+     "flag": "--flip-z",
+     "required": false,
+     "default": "false",
+     "description": "Mirror output along global Z axis. Can be combined with --flip-x and/or --flip-y."
+    },
+    {
+     "name": "flip_input_x",
+     "type": "boolean",
+     "role": "flag",
+     "flag": "--flip-input-x",
+     "required": false,
+     "default": "false",
+     "description": "Pre-map detail flat mirror along X. Mirrors detail BEFORE mapping so features land on opposite face of bent target. Use for slit/hole face swap."
+    },
+    {
+     "name": "flip_input_y",
+     "type": "boolean",
+     "role": "flag",
+     "flag": "--flip-input-y",
+     "required": false,
+     "default": "false",
+     "description": "Pre-map detail flat mirror along Y axis. Can be combined with --flip-input-x and/or --flip-input-z."
+    },
+    {
+     "name": "flip_input_z",
+     "type": "boolean",
+     "role": "flag",
+     "flag": "--flip-input-z",
+     "required": false,
+     "default": "false",
+     "description": "Pre-map detail flat mirror along Z axis. Can be combined with --flip-input-x and/or --flip-input-y."
+    },
+    {
+     "name": "bbox_align",
+     "type": "enum",
+     "role": "flag",
+     "flag": "--bbox-align",
+     "required": false,
+     "default": "none",
+     "enum": [
+      "source",
+      "target",
+      "none"
+     ],
+     "description": "Auto-rescale to remove uniform stretch. 'source' rescales detail to bent ijk lengths; 'target' rescales bent to detail XYZ lengths; 'none' disables (default)."
+    },
+    {
+     "name": "bbox_align_max_drift",
+     "type": "number",
+     "role": "flag",
+     "flag": "--bbox-align-max-drift",
+     "required": false,
+     "default": "2.0",
+     "description": "Reject scaling if any axis ratio drifts beyond this percent. Default 2.0%."
+    },
+    {
+     "name": "target_pid",
+     "type": "string",
+     "role": "flag",
+     "flag": "--target-pid",
+     "aliases": [
+      "--target-pids"
+     ],
+     "required": false,
+     "description": "Target specific part IDs for mapping (comma or space separated). Default: all parts. Example: --target-pid '1,2,3' or --target-pids '1 2 3'."
+    },
+    {
+     "name": "bent_mesh",
+     "type": "file",
+     "role": "input_file",
+     "order": 0,
+     "required": true,
+     "description": "Bent structured reference mesh (LS-DYNA .k file). Must contain HEX8 elements."
+    },
+    {
+     "name": "flat_mesh",
+     "type": "file",
+     "role": "input_file",
+     "order": 1,
+     "required": true,
+     "description": "Flat unstructured mesh to be mapped (LS-DYNA .k file). CAD-derived with material/section definitions."
+    },
+    {
+     "name": "output",
+     "type": "output",
+     "role": "output",
+     "order": 2,
+     "required": true,
+     "description": "Output file path for mapped mesh (LS-DYNA .k). Contains remapped geometry with all source material/part definitions."
+    }
+   ],
+   "example": {
+    "args": {
+     "bent_mesh": "arc30_bent.k",
+     "flat_mesh": "arc30_flat.k",
+     "output": "arc30_mapped.k"
+    },
+    "note": "Basic mapping: flat mesh onto bent reference. Auto-detects axis alignment by ranked bounding box lengths."
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/arc30",
+   "alternative_invocations": [
+    {
+     "form": "yaml",
+     "description": "YAML config file (single argument ending in .yaml or .yml)",
+     "usage": "KooRemapper map config.yaml",
+     "yaml_keys": {
+      "bent": "Path to bent reference mesh (required)",
+      "flat": "Path to flat detail mesh (required)",
+      "output": "Path to output mapped mesh (required)",
+      "parallel": "Boolean, default true",
+      "force_positive": "Boolean, default false",
+      "flip_x": "Boolean, default false",
+      "flip_y": "Boolean, default false",
+      "flip_z": "Boolean, default false",
+      "flip_input_x": "Boolean, default false",
+      "flip_input_y": "Boolean, default false",
+      "flip_input_z": "Boolean, default false",
+      "bbox_align": "String: source|target|none, default none",
+      "bbox_align_max_drift": "Number, default 2.0 (percent)",
+      "prestress": {
+       "enabled": "Boolean, default false",
+       "output": "Path to output dynain or CSV file",
+       "strain_type": "String: green|engineering|log, default green",
+       "E": "Number, Young's modulus in MPa (optional)",
+       "nu": "Number, Poisson's ratio (optional)",
+       "csv": "Boolean, output CSV instead of dynain, default false"
+      }
+     }
+    }
+   ],
+   "notes": "Positional form accepts flags in any order before/between filenames. YAML alternative supported (auto-detected by .yaml/.yml extension); includes optional prestress section for strain/stress chaining. bbox-align uses rank-based axis pairing to survive axis permutations. flip-input mirrors detail BEFORE mapping; flip-x/y/z mirrors result AFTER (orthogonal). bbox-align source may output scaled flat temp (.__preproc_flat.k) for prestress reference. Set KOO_MAP_DEBUG=1 for internals. CLI flags override YAML values when both present."
+  },
+  {
+   "name": "shellmap",
+   "category": "core",
+   "summary": "Map a flat detail mesh onto a bent QUAD4 shell reference mesh",
+   "description": "Maps an unstructured flat detail mesh (solid or shell elements) onto a bent QUAD4 shell reference. The shell is unfolded to a flat plane preserving edge lengths, then flat detail nodes are mapped onto the bent shell surface. Best for developable surfaces with single curvature (e.g., cylinders); non-developable surfaces generate a distortion warning.",
+   "invocation": "positional",
+   "config_style": null,
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "bent_shell",
+     "type": "file",
+     "role": "input_file",
+     "order": 0,
+     "required": true,
+     "description": "Bent shell reference mesh with QUAD4 elements (k-file)"
+    },
+    {
+     "name": "flat_detail",
+     "type": "file",
+     "role": "input_file",
+     "order": 1,
+     "required": true,
+     "description": "Flat detail mesh to be mapped (solid or shell elements, k-file)"
+    },
+    {
+     "name": "output",
+     "type": "output",
+     "role": "output",
+     "order": 2,
+     "required": true,
+     "description": "Output file path for the mapped mesh"
+    },
+    {
+     "name": "thickness",
+     "type": "number",
+     "role": "flag",
+     "flag": "--thickness",
+     "required": false,
+     "default": null,
+     "description": "Shell thickness for Z-offset mapping (default: auto-detect from flat mesh Z-range)"
+    }
+   ],
+   "example": {
+    "args": {
+     "bent_shell": "arc_shell.k",
+     "flat_detail": "arc_flat.k",
+     "output": "arc_mapped.k"
+    },
+    "note": "Maps a flat 8x4 detail mesh onto a 30-degree cylindrical arc shell. Auto-detects thickness from flat mesh Z-range (-0.1 to +0.1 = 0.2). Output contains mapped quad4 or hex elements on the bent surface."
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/shellmap_arc",
+   "notes": "Threshold: Unlike the 'map' operation which requires structured HEX8 reference meshes, shellmap accepts unstructured QUAD4 shells. Works via unfolding (preserving edge lengths) then planar mapping. Non-developable surfaces (double curvature) will show distortion warnings during execution. Thickness flag overrides auto-detection if provided."
+  },
+  {
+   "name": "unfold",
+   "category": "core",
+   "summary": "Generate a flat unfolded mesh from a bent structured HEX8 mesh by computing arc-length along the centerline.",
+   "description": "This operation takes a bent structured HEX8 mesh and generates a corresponding flat mesh. The algorithm computes arc-length along the neutral axis for the X dimension while preserving Y and Z cross-section sizes. The output flat mesh maintains the same structured grid topology as the input bent mesh but with coordinates adjusted to an unfolded (flat) configuration. This flat mesh can be used as a reference for mapping detailed flat meshes back to the bent geometry.",
+   "invocation": "positional",
+   "config_style": null,
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "bent_mesh",
+     "type": "file",
+     "role": "input_file",
+     "order": 0,
+     "required": true,
+     "description": "The bent structured mesh (LS-DYNA .k file with HEX8 elements)"
+    },
+    {
+     "name": "output_flat",
+     "type": "output",
+     "role": "output",
+     "order": 1,
+     "required": true,
+     "description": "Output file path for the flat (unfolded) mesh"
+    }
+   ],
+   "example": {
+    "args": {
+     "bent_mesh": "arc30_bent.k",
+     "output_flat": "arc30_unfolded.k"
+    },
+    "note": "Reads a bent HEX8-element mesh (arc30_bent.k with 3x21x20 grid) and generates a flat reference mesh with arc-length unwrapped along X, output topology identical to input"
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/arc30",
+   "notes": "The operation validates the input bent mesh for proper HEX8 structure. The generated flat mesh preserves the exact same grid dimensions (I, J, K) and element topology as the input. The X coordinates in the output are arc-length distances computed from the bent configuration. The output is primarily intended as a reference geometry for the `map` operation to apply mapping from a detailed flat mesh. No flags or configuration options are available; unfold is a direct deterministic transformation based on the input bent mesh geometry alone."
+  },
+  {
+   "name": "generate",
+   "category": "core",
+   "summary": "Generate example test meshes (curved/bent types or box solids) with customizable grid dimensions.",
+   "description": "Generates example meshes for testing and validation. The main mode creates paired bent-flat mesh sets for types like teardrop, arc, torus, wave, and waterdrop (foldable display) with controlled element counts in I/J/K directions. The 'box' sub-command creates uniform hexahedral solids with specified dimensions and material properties from YAML configuration. All output files are written as LS-DYNA .k files.",
+   "invocation": "positional",
+   "config_style": null,
+   "takes_kfile": false,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "type",
+     "type": "enum",
+     "role": "value",
+     "order": 0,
+     "required": true,
+     "default": null,
+     "enum": [
+      "teardrop",
+      "arc",
+      "scurve",
+      "helix",
+      "torus",
+      "twist",
+      "bendtwist",
+      "wave",
+      "bulge",
+      "taper",
+      "waterdrop"
+     ],
+     "description": "Mesh geometry type. Determines the curved shape for bent/flat mesh pair generation. waterdrop is a foldable display geometry (160x70x1mm default). Mutually exclusive with 'box' sub-command."
+    },
+    {
+     "name": "output_prefix",
+     "type": "string",
+     "role": "value",
+     "order": 1,
+     "required": true,
+     "default": null,
+     "description": "Prefix for output file names. Generates {prefix}_bent.k, {prefix}_flat.k, {prefix}_flat_fine.k, {prefix}_flat_tet.k. Only used with type mode (not with box sub-command)."
+    },
+    {
+     "name": "dim-i",
+     "type": "integer",
+     "role": "flag",
+     "flag": "--dim-i",
+     "required": false,
+     "default": "10",
+     "description": "Number of elements in I (first parametric) direction. Only used with type mode."
+    },
+    {
+     "name": "dim-j",
+     "type": "integer",
+     "role": "flag",
+     "flag": "--dim-j",
+     "required": false,
+     "default": "5",
+     "description": "Number of elements in J (second parametric) direction. Only used with type mode."
+    },
+    {
+     "name": "dim-k",
+     "type": "integer",
+     "role": "flag",
+     "flag": "--dim-k",
+     "required": false,
+     "default": "5",
+     "description": "Number of elements in K (thickness) direction. Only used with type mode."
+    }
+   ],
+   "example": {
+    "args": {
+     "type": "torus",
+     "output_prefix": "torus",
+     "dim-i": 10,
+     "dim-j": 5,
+     "dim-k": 5
+    },
+    "note": "Generates torus_bent.k, torus_flat.k, torus_flat_fine.k, torus_flat_tet.k with 10x5x5 elements. For box generation use: KooRemapper generate box /path/to/box_gen.yaml"
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/torus",
+   "notes": "The command has two distinct invocation modes: (1) Type mode: 'KooRemapper generate [options] <type> <output_prefix>' generates paired bent-flat mesh sets with optional --dim-i/--dim-j/--dim-k flags. (2) Box mode: 'KooRemapper generate box <config.yaml>' generates a uniform hexahedral solid from YAML config. Type mode generates four output files automatically: _bent.k (curved configuration), _flat.k (undeformed flat), _flat_fine.k (refined unstructured quad mesh for mapping tests), _flat_tet.k (tetrahedral mesh). Waterdrop type has special defaults (160x70x1mm, fold radius 2mm). Box mode generates a single .k output file as specified in the YAML with keys: output, lx, ly, lz, nx, ny, nz, rho, E, nu, mid, secid, pid, part_title. | box 모드(generate box <config.yaml>)는 v1 UI 미노출."
+  },
+  {
+   "name": "generate-var",
+   "category": "core",
+   "summary": "YAML 설정으로부터 평탄 또는 곡선 가변 밀도 메시 생성",
+   "description": "고정밀도 메시 또는 중심선 곡선을 따르는 곡선 메시를 YAML 설정으로부터 생성합니다. 평탄형은 I 방향을 따라 5개 영역(밀집 시작, 증가, 희소, 감소, 밀집 끝)으로 가변 요소 밀도를 지원합니다. 곡선형은 Catmull-Rom/B-spline 보간 중심선을 사용합니다. 선택적 참조 메시로 자동 스케일링을 적용합니다.",
+   "invocation": "positional",
+   "config_style": null,
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "config",
+     "type": "config",
+     "role": "config",
+     "order": 0,
+     "required": true,
+     "description": "YAML 설정 파일 (type, reference, variable_density 또는 centerline_points 포함)"
+    },
+    {
+     "name": "output",
+     "type": "output",
+     "role": "output",
+     "order": 1,
+     "required": true,
+     "description": "출력 K-file 경로"
+    },
+    {
+     "name": "ref",
+     "type": "file",
+     "role": "flag",
+     "flag": "--ref",
+     "required": false,
+     "description": "스케일링을 위한 참조 평탄 메시 파일"
+    },
+    {
+     "name": "no_scale",
+     "type": "boolean",
+     "role": "flag",
+     "flag": "--no-scale",
+     "required": false,
+     "default": false,
+     "description": "참조에 대한 스케일링을 비활성화 (YAML 길이를 그대로 사용)"
+    }
+   ],
+   "example": {
+    "args": {
+     "config": {
+      "type": "flat",
+      "elements_j": 20,
+      "elements_k": 4,
+      "variable_density": {
+       "zones": [
+        {
+         "fraction": 0.3,
+         "density": 2.0
+        },
+        {
+         "fraction": 0.4,
+         "density": 1.0
+        },
+        {
+         "fraction": 0.3,
+         "density": 2.0
+        }
+       ]
+      }
+     },
+     "output": "var_mesh.k"
+    },
+    "note": "가변 밀도 flat 메쉬 생성(양끝 조밀, 중앙 성김)"
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/wave",
+   "notes": "평탄형(flat): 5개 영역(zone1_dense_start, zone2_increasing, zone3_sparse, zone4_decreasing, zone5_dense_end)을 I 방향으로 순차 배치. 각 영역은 length(스케일 전 길이), num_elements, 선택적으로 growthType 포함. 곡선형(curved): centerline_points (최소 2개 [x,y] 좌표), interpolation (linear/catmull_rom/bspline), cross_section (width, thickness), elements_along_curve, elements_j, elements_k 필요. 참조 메시가 지정되면 자동으로 I/J/K 방향 길이에 맞춰 스케일링됩니다. --no-scale 플래그로 스케일링 비활성화 가능."
+  },
+  {
+   "name": "strain",
+   "category": "core",
+   "summary": "Calculate strain tensor between reference and deformed meshes",
+   "description": "두 메시 사이의 변형률 텐서를 계산하고 CSV 파일로 출력합니다. 참조(변형 전) 메시와 변형된 메시를 입력으로 받아 공학 변형률, Green-Lagrange 변형률, 또는 로그 변형률을 선택하여 계산합니다. 계산 결과는 Von Mises, 주 변형률 등의 통계를 포함합니다.",
+   "invocation": "positional",
+   "config_style": null,
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "ref_mesh",
+     "type": "file",
+     "role": "input_file",
+     "order": 0,
+     "required": true,
+     "description": "Reference (undeformed) mesh in k-file format"
+    },
+    {
+     "name": "def_mesh",
+     "type": "file",
+     "role": "input_file",
+     "order": 1,
+     "required": true,
+     "description": "Deformed mesh in k-file format"
+    },
+    {
+     "name": "output",
+     "type": "output",
+     "role": "output",
+     "order": 2,
+     "required": true,
+     "description": "Output CSV file containing strain data (node IDs, strain components, principal strains, von Mises strain)"
+    },
+    {
+     "name": "type",
+     "type": "enum",
+     "role": "flag",
+     "flag": "--type",
+     "required": false,
+     "default": "engineering",
+     "enum": [
+      "engineering",
+      "green",
+      "log"
+     ],
+     "description": "Strain type: engineering (infinitesimal), green (Green-Lagrange finite), or log (logarithmic/natural). Default: engineering"
+    }
+   ],
+   "example": {
+    "args": {
+     "ref_mesh": "bent_shell.k",
+     "def_mesh": "formstrain_result.k",
+     "output": "strain_output.csv",
+     "type": "engineering"
+    },
+    "note": "Uses bent_shell.k as reference (undeformed) and formstrain_result.k as the deformed configuration. Computes engineering strain tensor at each node and writes statistics (max/average von Mises, volumetric, principal strains) to console and detailed results to CSV."
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/formstrain",
+   "notes": "Default strain type is 'engineering' (infinitesimal strain suitable for small deformations). Use 'green' for finite deformations that respect material frame indifference. 'log' strain (true strain) is suitable for large deformations in ductile materials. Output CSV includes per-element strain components (Exx, Eyy, Ezz, Exy, Exz, Eyz), principal strains, von Mises equivalent, and volumetric strain."
+  },
+  {
+   "name": "prestress",
+   "category": "core",
+   "summary": "변형 메시로부터 초기응력(초기변형률) 계산 및 dynain 출력.",
+   "description": "참조 메시와 변형 메시로부터 변형률 텐서를 계산하고, 재료 정보가 있으면 후크 법칙으로 응력을 계산하여 *INITIAL_STRESS_SOLID 카드를 dynain 형식으로 출력합니다. LS-DYNA K-파일에서 재료 정보를 자동으로 읽거나 명령행 옵션으로 재정의할 수 있습니다.",
+   "invocation": "positional",
+   "config_style": null,
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "ref_mesh",
+     "type": "file",
+     "role": "input_file",
+     "order": 0,
+     "required": true,
+     "description": "Reference (undeformed) mesh in K-file format"
+    },
+    {
+     "name": "def_mesh",
+     "type": "file",
+     "role": "input_file",
+     "order": 1,
+     "required": true,
+     "description": "Deformed mesh in K-file format (must have same topology as ref_mesh)"
+    },
+    {
+     "name": "output",
+     "type": "output",
+     "role": "output",
+     "order": 2,
+     "required": true,
+     "description": "Output file path (dynain format or CSV prefix, no extension needed)"
+    },
+    {
+     "name": "E",
+     "type": "number",
+     "role": "flag",
+     "flag": "--E",
+     "required": false,
+     "description": "Young's modulus override (Pa/MPa). Overrides K-file materials when specified."
+    },
+    {
+     "name": "nu",
+     "type": "number",
+     "role": "flag",
+     "flag": "--nu",
+     "required": false,
+     "description": "Poisson's ratio override. Overrides K-file materials when specified."
+    },
+    {
+     "name": "strain",
+     "type": "enum",
+     "role": "flag",
+     "flag": "--strain",
+     "required": false,
+     "default": "green",
+     "enum": [
+      "engineering",
+      "green"
+     ],
+     "description": "Strain type: engineering (small) or green (large/Green-Lagrange)"
+    },
+    {
+     "name": "csv",
+     "type": "boolean",
+     "role": "flag",
+     "flag": "--csv",
+     "required": false,
+     "default": "false",
+     "description": "Also output strain/stress data as CSV file"
+    }
+   ],
+   "example": {
+    "args": {
+     "ref_mesh": "arc30_flat.k",
+     "def_mesh": "arc30_mapped.k",
+     "output": "arc30_test_prestress.dynain",
+     "E": 210000,
+     "nu": 0.3,
+     "strain": "engineering",
+     "csv": false
+    },
+    "note": "Computes initial stress from deformed configuration. ref_mesh is reference state (undeformed); def_mesh is current deformed state. Both must have identical element topology and node count. Material properties (*MAT_ELASTIC) are read from ref_mesh unless overridden with --E/--nu."
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/arc30",
+   "notes": "재료 정보가 K-파일에 없으면 응력(stress)이 0이 되지만 변형률(strain)은 항상 계산됩니다. 참조 메시는 *PART와 *MAT_ELASTIC 카드를 포함해야 하며, 각 PART는 유효한 재료 ID를 가져야 합니다. 출력 파일 확장자를 명시하지 않으면 .dynain이 자동으로 추가됩니다. --csv 플래그를 사용하면 추가로 CSV 파일이 생성됩니다."
+  },
+  {
+   "name": "info",
+   "category": "core",
+   "summary": "Display comprehensive mesh information including node/element counts, bounding box, validation, and element quality metrics.",
+   "description": "Display detailed information about a mesh file including node and element counts, part count, bounding box dimensions, mesh validation results, and element quality metrics (Jacobian analysis). This operation reads a LS-DYNA K-file and generates a formatted report about mesh topology and geometry.",
+   "invocation": "positional",
+   "config_style": null,
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "mesh_file",
+     "type": "file",
+     "role": "input_file",
+     "order": 0,
+     "required": true,
+     "description": "Input mesh file (K-file format)"
+    }
+   ],
+   "example": {
+    "args": {
+     "mesh_file": "arc30_bent.k"
+    },
+    "note": "Reads arc30_bent.k and prints node/element counts, bounding box, validation status, and Jacobian quality metrics"
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/arc30",
+   "notes": "No output file is generated - information is printed to console. Validation includes node/element ID continuity checks, element type consistency, and Jacobian calculation for all elements. Negative Jacobian elements indicate mesh quality issues."
+  },
+  {
+   "name": "extract-surface",
+   "category": "core",
+   "summary": "Extract free surface faces from solid HEX8/TET4 mesh as ELEMENT_SHELL (QUAD4)",
+   "description": "Extracts the outer (free) surface of a solid mesh where a face is shared by exactly one element. Supports directional filtering (top/bottom/all) via Z-height heuristic and optional mid-surface mode that pairs top/bottom nodes by XY proximity to generate a single averaged shell layer.",
+   "invocation": "positional",
+   "config_style": null,
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "solid_file",
+     "type": "file",
+     "role": "input_file",
+     "order": 0,
+     "required": true,
+     "description": "Input solid mesh file (HEX8/TET4 elements, LS-DYNA K-file)"
+    },
+    {
+     "name": "output_shell",
+     "type": "output",
+     "role": "output",
+     "order": 1,
+     "required": true,
+     "description": "Output shell mesh file (ELEMENT_SHELL QUAD4, LS-DYNA K-file)"
+    },
+    {
+     "name": "pid",
+     "type": "integer",
+     "role": "flag",
+     "flag": "--pid",
+     "required": false,
+     "default": "0",
+     "description": "Filter extraction by part ID (0 = all parts)"
+    },
+    {
+     "name": "face",
+     "type": "enum",
+     "role": "flag",
+     "flag": "--face",
+     "required": false,
+     "default": "all",
+     "enum": [
+      "top",
+      "bottom",
+      "all"
+     ],
+     "description": "Extract top, bottom, or all free faces (uses Z-centroid heuristic; ignored with --mid-surface)"
+    },
+    {
+     "name": "output_pid",
+     "type": "integer",
+     "role": "flag",
+     "flag": "--output-pid",
+     "required": false,
+     "default": "1",
+     "description": "Part ID for emitted shell elements"
+    },
+    {
+     "name": "mid_surface",
+     "type": "boolean",
+     "role": "flag",
+     "flag": "--mid-surface",
+     "required": false,
+     "default": "false",
+     "description": "Enable mid-surface mode: pair top/bottom nodes by XY proximity, create averaged shell layer (requires both top and bottom faces)"
+    }
+   ],
+   "example": {
+    "args": {
+     "solid_file": "bolt_simple_solid.k",
+     "output_shell": "bolt_surface.k",
+     "pid": 0,
+     "face": "all",
+     "output_pid": 1
+    },
+    "note": "Extracts all free surfaces from solid mesh and emits as PID 1 shell elements. For mid-surface mode on a layered part, add --mid-surface flag to pair top/bottom faces."
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/cnrb2solid",
+   "notes": "Free face detection: face appearing in exactly 1 element (interior faces shared by 2+ elements are dropped). Top/bottom discrimination uses unweighted centroid Z of element vs. face. Mid-surface mode uses 2D spatial hash (XY) for nearest-neighbor node pairing; fails if top and bottom face sets are empty. Degenerate triangles (TRIA3) are written as degenerate QUAD4 with N4=N3 per LS-DYNA convention. Output K-file contains only nodes/shells; interior HEX8/TET4 not preserved."
+  },
+  {
+   "name": "squeeze",
+   "category": "deform",
+   "summary": "Compress parts with strain conditions and generate initial stress/strain for interference fit modeling",
+   "description": "squeeze은 각 파트별로 지정된 변형률(eps_x, eps_y, eps_z)에 따라 노드를 압착하고, 그에 대응하는 초기 응력 또는 변형률을 dynain 파일로 생성한다. LS-DYNA 동적 이완(DR)과 함께 간섭끼워맞춤, 팽윤, 초기 변형 상태의 평형을 모델링할 수 있다. 응력 모드(재료 필수), 변형률 모드(재료 불필요), 열팽창 모드(swelling)를 지원한다.",
+   "invocation": "positional",
+   "config_style": null,
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "mesh",
+     "type": "file",
+     "role": "input_file",
+     "order": 0,
+     "required": true,
+     "description": "Input mesh K-file with multiple parts"
+    },
+    {
+     "name": "config",
+     "type": "config",
+     "role": "config",
+     "order": 1,
+     "required": true,
+     "description": "YAML config specifying per-part strain conditions (eps_x/y/z, swelling, material, relax)"
+    },
+    {
+     "name": "output",
+     "type": "output",
+     "role": "output",
+     "order": 2,
+     "required": true,
+     "description": "Output prefix (generates .k and _dynain.dat files)"
+    }
+   ],
+   "example": {
+    "args": {
+     "mesh": "model.k",
+     "config": {
+      "parts": [
+       {
+        "pid": 1,
+        "eps_x": -0.01,
+        "eps_y": -0.01,
+        "eps_z": 0.0
+       }
+      ],
+      "material": {
+       "E": 210000.0,
+       "nu": 0.3
+      }
+     },
+     "output": "output_s1"
+    },
+    "note": "간섭끼움 압축: pid1 x/y 1% 압축 후 역인장 prestress 생성"
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/squeeze",
+   "notes": "YAML config supports three modes: (1) stress (default): eps_x/y/z + material (E, nu) → *INITIAL_STRESS_SOLID; (2) strain_mode: true with eps_x/y/z → *INITIAL_STRAIN_SOLID (no material needed); (3) swelling: isotropic thermal expansion → *MAT_ADD_THERMAL_EXPANSION + *INITIAL_TEMPERATURE_NODE (K-file material required). Optional relax section auto-inserts DR keywords (*CONTROL_DYNAMIC_RELAXATION, *CONTROL_TERMINATION, *DATABASE_BINARY_D3DRLF). Material precedence: YAML material overrides K-file *MAT. swelling and eps_x/y/z cannot be used on same part simultaneously."
+  },
+  {
+   "name": "bend",
+   "category": "deform",
+   "summary": "Apply bending deformation and optional prestress to a part.",
+   "description": "Applies bending deformation and optional prestress to a part using formula-based or dat-file curvature input. Supports multiple bending planes (xy, yz, zx) and two modes: deform (node repositioning with backward prestress) and stress (forward prestress only without deformation).",
+   "invocation": "yaml",
+   "config_style": "freeform",
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "config",
+     "type": "config",
+     "role": "config",
+     "required": true,
+     "description": "YAML 설정 객체. base_model, output, operations[] 배열 포함. 각 operation은 type:bend로 지정."
+    }
+   ],
+   "example": {
+    "args": {
+     "config": {
+      "base_model": "block.k",
+      "output": "formula_deform_output",
+      "material": {
+       "E": 210000,
+       "nu": 0.3
+      },
+      "dynain_embed": true,
+      "operations": [
+       {
+        "type": "bend",
+        "target_pid": 1,
+        "plane": "xy",
+        "mode": "deform",
+        "source": "formula",
+        "expression": "1.0 * sin(pi*x1/L1) * sin(pi*x2/L2)"
+       }
+      ]
+     }
+    },
+    "note": "실행: KooRemapper bend formula_deform.yaml → formula_deform_output.k 생성. source=formula 모드에서는 expression 필수; source=dat 모드에서는 dat_file 필수; source=dat_pair 모드에서는 dat_top, dat_bottom 필수."
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/bend/small",
+   "notes": "Formula variables: x1, x2 (좌표, 바운딩박스 최소값 기준), L1, L2 (바운딩박스 치수), pi (3.14159...). mode=deform: 노드 변형 + 역방향 초기응력 (동적 이완 후 굽힌 상태 유지). mode=stress: 노드 변형 없이 순방향 초기응력만 (동적 이완 시 평면→굽힘 변형). plane 옵션: xy | yz | zx (굽힘 평면). dat_file 형식: grid point와 deflection 값 포함. E, nu는 prestress 계산용 (dynain_embed 활성화 시). target_pid=0은 모든 PART, target_pid=-1은 targetPids 배열 사용."
+  },
+  {
+   "name": "indent",
+   "category": "deform",
+   "summary": "Apply indentation or embossing deformation and compute prestress with polygon or spline punch shapes.",
+   "description": "이 작업은 평탄한 부품에 다각형 또는 스플라인 형상의 펀치를 사용하여 들여쓰기(인덴테이션) 또는 엠보싱(역방향) 변형을 적용합니다. 선택적으로 평탄-변형 상태의 사전응력(prestress)을 계산하여 LS-DYNA 동적이완(dynamic relaxation)으로 전달할 수 있습니다. 셸 요소의 경우 명시적 두께를 지정하거나 SECTION_SHELL에서 자동 추출됩니다.",
+   "invocation": "yaml",
+   "config_style": "freeform",
+   "takes_kfile": false,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "config",
+     "type": "config",
+     "role": "config",
+     "required": true,
+     "description": "Complete YAML configuration object containing base_model, output, optional material/dynain settings, and operations array with indent specifications"
+    }
+   ],
+   "example": {
+    "args": {
+     "config": {
+      "base_model": "block.k",
+      "output": "indent_result",
+      "material": {
+       "E": 210000,
+       "nu": 0.3
+      },
+      "operations": [
+       {
+        "type": "indent",
+        "target_pid": 1,
+        "plane": "xy",
+        "direction": "-z",
+        "depth": 0.5,
+        "r1": 0.5,
+        "r2": 1,
+        "bottom_ratio": 0,
+        "stress": true,
+        "shape": {
+         "type": "polygon",
+         "points": [
+          [
+           3,
+           3
+          ],
+          [
+           7,
+           3
+          ],
+          [
+           7,
+           7
+          ],
+          [
+           3,
+           7
+          ]
+         ]
+        }
+       }
+      ]
+     }
+    },
+    "note": "Example shows polygon-shaped indent with prestress calculation. Uses material E and nu from top-level material block. Coordinates are in the indentation plane (xy in this case). For spline shapes, use 'type: spline' with multiple points that are interpolated smoothly as a continuous curve."
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/indent",
+   "notes": "depth < 0 reverses direction (emboss/pull outward instead of indent). r1 is flat bottom radius, r2 is fillet blend radius. bottom_ratio controls the ratio of flat bottom to fillet (0.0 = full fillet). Supported shape types are 'polygon' (requires points array with 3+ vertices) and 'spline' (requires points array that are interpolated as a smooth curve). For shell elements with stress=true, shell_thickness must be provided explicitly or will be auto-extracted from *SECTION_SHELL. Material (E, nu) required for stress=true; specified at top-level config. stress=true generates *INITIAL_STRESS_SOLID that can be embedded (dynain_embed: true) or saved to separate .dynain file. Top-level config keys: dynamic_relaxation (insert *CONTROL_DYNAMIC_RELAXATION), dynain_embed (embed *INITIAL_STRESS_SOLID inline)."
+  },
+  {
+   "name": "formstrain",
+   "category": "deform",
+   "summary": "Compute plastic strain from shell mesh dihedral angles using curvature estimation.",
+   "description": "Estimates plastic equivalent strain (EPS) from bent shell mesh dihedral angles. Uses local curvature (kappa=theta/L) at each element to compute forming strain, then embeds the result as *INITIAL_STRAIN_SHELL in the output LS-DYNA .k file. Optional target_pid filtering (defaults to all shell parts); shell_thickness and min_curvature thresholds can tune the analysis.",
+   "invocation": "yaml",
+   "config_style": "freeform",
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "config",
+     "type": "config",
+     "role": "config",
+     "required": true,
+     "description": "Full YAML configuration object with base_model, output, and operations array"
+    }
+   ],
+   "example": {
+    "args": {
+     "config": {
+      "base_model": "bent_shell.k",
+      "output": "formstrain_result",
+      "dynain_embed": true,
+      "operations": [
+       {
+        "type": "formstrain",
+        "target_pid": 1,
+        "shell_thickness": 0.3,
+        "min_curvature": 0.001
+       }
+      ]
+     }
+    },
+    "note": "Example shows a single operation targeting PID 1 with explicit thickness override and curvature floor. Omit target_pid to auto-detect all shell parts; omit shell_thickness/min_curvature for defaults."
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/formstrain",
+   "notes": "- Requires bent shell mesh with *ELEMENT_SHELL cards. Flat meshes are not suitable.\n- Reads material sigy from *MAT_024 (Piecewise Linear Plasticity) for EPS scaling; if not found, uses defaults.\n- When multiple operations overlap (rare), EPS values merge by taking max(), not summing.\n- dynain_embed: true writes *INITIAL_STRAIN_SHELL to output; false skips this keyword.\n- target_pid 0 or omitted = auto-detect all shell parts in the model.\n- Curvature threshold (min_curvature) filters out nearly-flat regions; typical range 0.001-0.01 depends on mesh scale."
+  },
+  {
+   "name": "warpage",
+   "category": "deform",
+   "summary": "측정된 변형 데이터를 셸 또는 솔리드 부품에 적용합니다",
+   "description": "측정된 변형 필드(CSV/DAT)를 읽어 메시 노드를 변형합니다. 측정된 2D 격자 데이터(x, y 위치의 변형값)를 3D 메시에 쌍선형 보간으로 적용하여 실측 변형 형상을 반영합니다.",
+   "invocation": "yaml",
+   "config_style": "freeform",
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "config",
+     "type": "config",
+     "role": "config",
+     "required": true,
+     "description": "전체 YAML 설정 객체. base_model, output, operations 포함"
+    }
+   ],
+   "example": {
+    "args": {
+     "config": {
+      "base_model": "wave_flat.k",
+      "output": "wave_warped",
+      "operations": [
+       {
+        "type": "warpage",
+        "target_pid": 0,
+        "dat_file": "warpage_3x3.dat",
+        "plane": "xy",
+        "deflection_axis": "z",
+        "unit": "um",
+        "mask_value": 9999,
+        "noise_threshold": 1e-10,
+        "outside_behavior": "zero",
+        "morph_factor": 1,
+        "mode": "prestress",
+        "finite_strain": true
+       }
+      ]
+     }
+    },
+    "note": "wave_flat.k 메시에 warpage_3x3.dat 변형 필드를 적용하여 wave_warped.k 출력"
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/wave",
+   "notes": "dat 파일은 탭/공백 구분 텍스트로 숫자 격자 형태(3x3 이상 권장). mask_value: 데이터 마스킹값(기본 9999.0); outside_behavior: 영역 밖 동작(zero|clamp|extrapolate); mode: prestress(응력초기화, 기본값) 또는 deform(형상변경); plane: xy|yz|zx 중 데이터 평면 선택; deflection_axis: 변형 방향(+z|-z|+x|-x|+y|-y); unit: 단위(um|mm|m); finite_strain: von Kármán 대변형 이론 사용 여부; noise_threshold: 무시할 소음 임계값(기본 1e-10); data_bbox (선택): x_min, x_max, y_min, y_max로 데이터 경계 지정"
+  },
+  {
+   "name": "offset",
+   "category": "deform",
+   "summary": "Extrude surface elements to solid HEX8 layer(s) with optional tied/CZM/contact connections.",
+   "description": "offset는 쉘이나 솔리드 요소의 표면을 여러 겹의 HEX8 솔리드 레이어로 돌출시키는 작업입니다. 고정 방향(±x/±y/±z) 또는 적응형 법선 방향(±normal)을 사용하여 선택 가능하며, 결합 방식(tied/CZM/contact/none)을 통해 원본 및 돌출된 표면 간의 연결을 제어합니다. 복합 재료 및 박층-솔리드 분석에 유용합니다.",
+   "invocation": "yaml",
+   "config_style": "freeform",
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "config",
+     "type": "config",
+     "role": "config",
+     "required": true,
+     "description": "전체 YAML 설정 객체 (config.yaml 로 기록되어 실행됨)"
+    }
+   ],
+   "example": {
+    "args": {
+     "config": {
+      "base_model": "../arc30/arc30_flat.k",
+      "output": "offset_result",
+      "operations": [
+       {
+        "type": "offset",
+        "source_pid": 1,
+        "element_type": "solid",
+        "thickness": 1,
+        "num_layers": 1,
+        "offset_direction": "+z",
+        "connection_mode": "tied",
+        "new_pid": 10,
+        "part_title": "Offset_Layer",
+        "use_local_normals": false,
+        "material_card": "*MAT_ELASTIC\n$#     mid        ro         e        pr\n     @MID@       2.0     12000       0.25\n"
+       }
+      ]
+     }
+    },
+    "note": "예제는 examples/offset/01_basic_solid_tied.yaml 기반. arc30_flat.k는 examples/arc30/ 디렉토리에 있으며, 실행 경로에 따라 base_model 경로 조정 필요."
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/offset",
+   "notes": "offset은 freeform YAML 형식으로 base_model, output, operations 배열을 포함합니다. operations 배열의 각 항목은 하나의 offset 작업을 정의합니다.\n\n필수 파라미터: source_pid, element_type (solid|tshell|shell), thickness, num_layers, offset_direction (±x/±y/±z/±normal), connection_mode (tied|czm|contact|none), new_pid\n\n선택 파라미터: use_local_normals (곡면 품질 개선), thickness_formula (위치 기반 가변 두께), material_card (솔리드 재료), czm_material_card (CZM 모드, connection_mode=czm일 때), part_title (부품 명칭), region 필터 (bbox_xmin/max, bbox_ymin/max, bbox_zmin/max, node_id_min/max, element_id_min/max)\n\n주요 특징:\n(1) element_type별 지원: solid (모든 기능 지원), tshell (CZM 제외), shell (CZM 제외)\n(2) -normal 방향은 v1.1.0+에서 정상 작동 (이전 음수 자코비안 오류 해결)\n(3) TET4 원본은 작동하지만 품질 저하 (HEX8 원본 권장)\n(4) 한 작업에서 생성된 쉘 요소는 다음 작업의 원본으로 사용할 수 없음 (PID 추적 제한)\n(5) Multi-layer에서 계층별 다른 재료: 여러 offset 작업을 순차적으로 실행\n(6) @MID@는 자동으로 할당된 재료 ID로 치환됨\n(7) 고급 기능: use_local_normals (Phase 2), region 필터 (Phase 3), variable thickness (Phase 4)"
+  },
+  {
+   "name": "wrap",
+   "category": "deform",
+   "summary": "Apply winding tension prestress (hoop + radial stress) for cylindrical parts",
+   "description": "원통형 부품에 감기 장력 사전응력(원주 + 방사상)을 적용합니다. 와이어/파이버 감기 또는 압착 실린더 장력을 모델링하며, 후행 이완(relax) 명령으로 평형화할 수 있습니다.",
+   "invocation": "yaml",
+   "config_style": "freeform",
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "config",
+     "type": "config",
+     "role": "config",
+     "required": true,
+     "description": "전체 YAML 설정 객체"
+    }
+   ],
+   "example": {
+    "args": {
+     "config": {
+      "model": "cylinder_2layer.k",
+      "output": "cylinder_wrapped",
+      "target_pid": [
+       1,
+       2
+      ],
+      "axis": "z",
+      "tension": 100,
+      "center": null,
+      "E": 210000,
+      "nu": 0.3
+     }
+    },
+    "note": "Example: wrap_test.yaml in examples/wrap/. Produces cylinder_wrapped.k and cylinder_wrapped.dynain with hoop + radial prestress. Use with 'relax' command for dynamic relaxation before main analysis."
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/wrap",
+   "notes": "center is optional and auto-detects from geometry if omitted. Generates *INITIAL_STRESS_SOLID in separate .dynain file. Use with relax command or dynamic_relaxation flag to equilibrate before analysis. axis must be x, y, or z. E and nu are parsed as top-level YAML keys (parser ignores material: nesting)."
+  },
+  {
+   "name": "cnrb2solid",
+   "category": "deform",
+   "summary": "CNRB 강체 볼트를 O-grid HEX8 원형 솔리드 메시로 변환",
+   "description": "CONSTRAINED_NODAL_RIGID_BODY(CNRB) 강체 볼트 정의를 구조화된 HEX8 실린더 메시로 변환합니다. PCA 축 감지, 원주 스캔, Z-레벨 분층을 통해 볼트홀 형상에서 O-grid 솔리드 메시를 자동 생성하며, 선택적으로 헤드(플랜지)를 추가할 수 있습니다. 결과 메시는 Tied Contact로 기존 구조와 연결됩니다.",
+   "invocation": "yaml",
+   "config_style": "structured",
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "model",
+     "type": "file",
+     "role": "yaml_field",
+     "yaml_path": "model",
+     "required": true,
+     "description": "입력 K-파일 (*CONSTRAINED_NODAL_RIGID_BODY 포함)"
+    },
+    {
+     "name": "output",
+     "type": "output",
+     "role": "yaml_field",
+     "yaml_path": "output",
+     "required": true,
+     "description": "출력 K-파일 (HEX8 솔리드 요소 포함)"
+    },
+    {
+     "name": "E",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "E",
+     "required": true,
+     "description": "Young의 탄성계수 [MPa]"
+    },
+    {
+     "name": "PR",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "PR",
+     "required": true,
+     "description": "Poisson 비율 (0.0~0.5)"
+    },
+    {
+     "name": "RHO",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "RHO",
+     "required": true,
+     "description": "재료 밀도 [t/mm³] (예: 강철 7.85e-9)"
+    },
+    {
+     "name": "radius_scale",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "radius_scale",
+     "required": false,
+     "default": "0.999",
+     "description": "링 노드 반경 = 볼트홀 반경 × 이 값 (1.0 이하로 체결 간격 유지)"
+    },
+    {
+     "name": "num_circum_nodes",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "num_circum_nodes",
+     "required": false,
+     "default": "0",
+     "description": "원주 노드 수 (4의 배수; 0=자동 감지)"
+    },
+    {
+     "name": "inner_radius_ratio",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "inner_radius_ratio",
+     "required": false,
+     "default": "0.3",
+     "description": "코어 사각형 반변 / 링 반경 비율"
+    },
+    {
+     "name": "axis_direction",
+     "type": "enum",
+     "role": "yaml_field",
+     "yaml_path": "axis_direction",
+     "required": false,
+     "default": "auto",
+     "enum": [
+      "auto",
+      "x",
+      "y",
+      "z"
+     ],
+     "description": "실린더 축 방향 (auto=PCA 자동 감지)"
+    },
+    {
+     "name": "z_tolerance",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "z_tolerance",
+     "required": false,
+     "default": "0.1",
+     "description": "Z-레벨 그룹핑 허용 오차 [mm]"
+    },
+    {
+     "name": "r_tolerance",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "r_tolerance",
+     "required": false,
+     "default": "0.5",
+     "description": "반경 클러스터링 허용 오차 [mm] (단계형 볼트용)"
+    },
+    {
+     "name": "head_offset_r",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "head_offset_r",
+     "required": false,
+     "default": "0.0",
+     "description": "볼트 헤드 반경 오프셋 [mm] (0.0=헤드 미생성)"
+    },
+    {
+     "name": "head_thickness",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "head_thickness",
+     "required": false,
+     "default": "2.0",
+     "description": "볼트 헤드 축방향 두께 [mm]"
+    },
+    {
+     "name": "head_position",
+     "type": "enum",
+     "role": "yaml_field",
+     "yaml_path": "head_position",
+     "required": false,
+     "default": "auto",
+     "enum": [
+      "auto",
+      "top",
+      "bottom",
+      "none"
+     ],
+     "description": "헤드 위치 (auto=큰 R 또는 Z_max 쪽, none=헤드 미생성)"
+    }
+   ],
+   "example": {
+    "args": {
+     "model": "bolt_simple.k",
+     "output": "bolt_simple_solid.k",
+     "E": 200000,
+     "PR": 0.3,
+     "RHO": 7.85e-09,
+     "radius_scale": 0.999,
+     "num_circum_nodes": 8,
+     "inner_radius_ratio": 0.3,
+     "axis_direction": "auto",
+     "z_tolerance": 0.1,
+     "r_tolerance": 0.5,
+     "head_offset_r": 0,
+     "head_thickness": 2,
+     "head_position": "auto"
+    },
+    "note": "실제 예제 폴더의 bolt_simple.k 파일을 사용하며, 기본 설정은 헤드 없음(head_offset_r=0). head_offset_r>0으로 설정하면 볼트 헤드가 추가됨."
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/cnrb2solid",
+   "notes": "CNRB 정의는 변환 후 제거되며, 생성된 HEX8 메시는 원본 CNRB의 PID를 유지합니다. 원주 노드(링)는 radius_scale×R_hole에 배치되어 Tied Contact로 주변 구조와 연결 필요. 축 방향은 자동으로 정규화되어 x/y/z 중 하나로 스냅됨. assemble 파이프라인에서도 type: cnrb2solid로 사용 가능."
+  },
+  {
+   "name": "convert",
+   "category": "mesh",
+   "summary": "선형 요소를 2차 요소로 변환 (TET10/HEX20/QUAD8/TRIA6)",
+   "description": "선형 요소(TET4, HEX8, QUAD4, TRIA3)에 중간 절점을 추가하여 2차 요소로 변환합니다. 각 YAML 설정 파일당 하나의 변환 작업을 적용할 수 있습니다.",
+   "invocation": "yaml",
+   "config_style": "structured",
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "config",
+     "type": "config",
+     "role": "config",
+     "required": true,
+     "description": "YAML 설정 객체 (base_model, output, type, target_pid, elform 포함)"
+    }
+   ],
+   "example": {
+    "args": {
+     "config": {
+      "base_model": "two_tets.k",
+      "output": "tet10_result",
+      "type": "tet10",
+      "elform": 17
+     }
+    },
+    "note": "두 개의 선형 사면체를 2차 사면체(TET10)로 변환. type은 필수(tet10|hex20|quad8|tria6), elform과 target_pid는 선택사항. target_pid를 생략하면 모든 요소 변환"
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/tet10",
+   "notes": "- type: 필수, tet10 | hex20 | quad8 | tria6 중 하나\n- target_pid: 선택사항, 특정 부품만 변환. 생략시 모든 요소 변환\n- elform: 선택사항, 변환된 요소에 적용할 ELFORM 값\n- 각 변환은 LS-DYNA 키워드 호환: TET10(ELFORM 10), HEX20(ELFORM 1), QUAD8(ELFORM 1), TRIA6(ELFORM 1)\n- 한 번에 여러 요소 타입을 변환하려면 각각 별도의 convert 실행 필요"
+  },
+  {
+   "name": "refine",
+   "category": "mesh",
+   "summary": "Mesh refinement by subdivision (1:2 or 1:3 split)",
+   "description": "Mesh refinement operation performs element subdivision to increase mesh density. Supports 1:2 (bisection) and 1:3 subdivision ratios. Can refine all parts or target specific parts by ID. Applies to HEX8, QUAD4, TRIA3, and TET4 elements.",
+   "invocation": "yaml",
+   "config_style": "freeform",
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "config",
+     "type": "config",
+     "role": "config",
+     "required": true,
+     "description": "Complete YAML configuration object containing base_model, output, and operations array"
+    }
+   ],
+   "example": {
+    "args": {
+     "config": {
+      "base_model": "two_hexes.k",
+      "output": "refine_hex_1to2_result",
+      "operations": [
+       {
+        "type": "refine",
+        "ratio": 2
+       }
+      ]
+     }
+    },
+    "note": "Example refines all HEX8 elements using 1:2 subdivision. To refine only part 1: add 'target_pid: 1' to operation. For 1:3 split use 'ratio: 3'."
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/quadratic",
+   "notes": "target_pid is optional; omit to refine all parts. ratio must be 2 or 3. HEX8 ratio 2 -> 8 hexes, ratio 3 -> 27 hexes. QUAD4 ratio 2 -> 4 quads, ratio 3 -> 9 quads. TRIA3 ratio 2 -> 4 triangles. TET4 ratio 2 -> 8 tetrahedra. Output written to &lt;output&gt;.k in working directory."
+  },
+  {
+   "name": "elform",
+   "category": "mesh",
+   "summary": "Change element formulation (ELFORM) in LS-DYNA *SECTION_* cards",
+   "description": "Modifies ELFORM parameter in section definitions. Supports solid formulations: 1 (1-point reduced, default HEX8), 2 (full integration), 10 (1-point tet), 13 (1-point nodal pressure tet), 16 (5-point tet improved), 23 (HEX20 quadratic); and shell formulations: 2 (Belytschko-Tsay, default), 16 (fully integrated). target_pid filters to specific parts; omit to change all.",
+   "invocation": "yaml",
+   "config_style": "structured",
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "config",
+     "type": "config",
+     "role": "config",
+     "required": true,
+     "description": "YAML configuration object containing base_model, output, and operations array with elform operations"
+    }
+   ],
+   "example": {
+    "args": {
+     "config": {
+      "base_model": "simple_hex.k",
+      "output": "elform_case_a_result",
+      "operations": [
+       {
+        "type": "elform",
+        "target_elform": 2
+       }
+      ]
+     }
+    },
+    "note": "Changes all elements to ELFORM 2 (full integration). Run in examples/elform/ directory."
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/elform",
+   "notes": "target_pid is optional (omit to change all parts); target_elform is required. Solid formulations: 1 (1-point reduced, default HEX8), 2 (full integration 2x2x2), 10 (1-point tet), 13 (1-point nodal pressure tet), 16 (5-point tet improved), 23 (HEX20 quadratic). Shell formulations: 2 (Belytschko-Tsay default), 16 (fully integrated)."
+  },
+  {
+   "name": "disconnect",
+   "category": "mesh",
+   "summary": "Decohere conformal mesh interface for fracture modeling by splitting shared nodes at part boundaries.",
+   "description": "Splits shared nodes at mesh part boundaries to create independent parts for fracture analysis. Supports three modes: full (complete node separation), czm (insert cohesive zone elements), and mefem (insert mesh-free peridynamic elements). Primarily used with LS-DYNA cohesive zone material models and fracture mechanics studies.",
+   "invocation": "yaml",
+   "config_style": "structured",
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "config",
+     "type": "config",
+     "role": "config",
+     "required": true,
+     "description": "Complete YAML configuration object with base_model, output, and operations array"
+    }
+   ],
+   "example": {
+    "args": {
+     "config": {
+      "base_model": "two_hex_2part.k",
+      "output": "disconnect_czm_result",
+      "operations": [
+       {
+        "type": "disconnect",
+        "mode": "czm",
+        "target_pid": 0,
+        "cohesive_part_id": 99,
+        "failure_strain": 0.5
+       }
+      ]
+     }
+    },
+    "note": "Example uses two_hex_2part.k from examples/disconnect. Mode 'czm' requires cohesive_part_id and optionally failure_strain. Mode 'full' splits all nodes without cohesive elements. Mode 'mefem' adds peridynamic elements and supports failure_strain."
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/disconnect",
+   "notes": "YAML structure is nested with operations[] array. Within each operation: type (always \"disconnect\"), mode (czm|full|mefem), target_pid (interface part ID, 0=all parts), cohesive_part_id (output part ID for cohesive/peridynamic elements, czm/mefem mode), failure_strain (material property for czm/mefem mode). Uses LS-DYNA *MAT_COHESIVE and related keywords. Operate embedded within operations list alongside other assembly operations (restack, offset, etc.)."
+  },
+  {
+   "name": "iga",
+   "category": "mesh",
+   "summary": "Embed FE parts in IGA (Isogeometric Analysis) NURBS trivariate box",
+   "description": "Wraps selected FE parts with NURBS trivariate volumes for isogeometric analysis. Generates *IGA_DEV_VOLUME_XYZ patches per target part, with configurable NURBS resolution, polynomial degrees, integration rules, and bounding box expansion. Supports both explicit PID lists and wildcard pattern matching on part names. Requires LS-DYNA R12 or later.",
+   "invocation": "yaml",
+   "config_style": "freeform",
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "config",
+     "type": "config",
+     "role": "config",
+     "required": true,
+     "description": "Complete YAML configuration object with base_model, output, and operations array"
+    }
+   ],
+   "example": {
+    "args": {
+     "config": {
+      "base_model": "block_2x2x1.k",
+      "output": "iga_result",
+      "operations": [
+       {
+        "type": "iga",
+        "targets": [
+         {
+          "target_pid": 1,
+          "element_size": 4,
+          "ir": 0,
+          "pr": 2,
+          "ps": 2,
+          "pt": 1,
+          "bbox_scale": 1.4
+         },
+         {
+          "target_pid": 2,
+          "element_size": 3,
+          "element_size_r": 2,
+          "element_size_s": 2,
+          "pr": 2,
+          "ps": 2,
+          "pt": 1
+         }
+        ]
+       }
+      ]
+     }
+    },
+    "note": "Example uses real files from examples/iga/ folder: base_model block_2x2x1.k with PIDs 1, 2 (two-layer structure). Outputs iga_result.k plus per-part IGA files iga_result_iga_p1.k, iga_result_iga_p2.k"
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/iga",
+   "notes": "Target selection: Use target_pid (int), target_pids (list), targetName (wildcard string), or excludeName (wildcard string to exclude matching parts). NURBS control points per direction = max(2, polynomial_order+1). IGA and FE parts must use separate material IDs (LS-DYNA requirement). All six bbox_scale parameters (uniform bboxScale or per-axis bboxScaleR/S/T) are optional; when 0 they defer to bboxScale. Per-axis elementSize overrides (element_size_r/s/t) default to element_size. Integration rule ir=0 is reduced Gauss, ir=1 is full Gauss. Polynomial orders pr, ps, pt must be >= 1. LCP stabilization parameters (ir, styp, tollg, nisr, niss, nist) have sensible defaults."
+  },
+  {
+   "name": "tetremesh",
+   "category": "mesh",
+   "summary": "TET4 local remesh: improve quality via Laplacian smoothing/swap (localimprove) or constrained Delaunay (tetgen)",
+   "description": "Improves tetrahedral mesh quality by identifying poorly-shaped elements and applying local remeshing. Supports two backends: localimprove (smoothing + face-edge swap, no external dependencies) and tetgen (constrained Delaunay tetrahedralization, requires TetGen library). Detects bad quality elements (min Jacobian, aspect ratio) or explicitly selected elements, extracts local patches, and improves them while preserving multi-material boundaries and surface integrity. Can iterate until target quality is reached or report-only mode for scanning.",
+   "invocation": "yaml",
+   "config_style": "freeform",
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "config",
+     "type": "config",
+     "role": "config",
+     "required": true,
+     "description": "전체 YAML 설정 객체 (config.yaml 로 기록되어 실행됨)"
+    }
+   ],
+   "example": {
+    "args": {
+     "config": {
+      "model": "two_tets.k",
+      "output": "tet10_result.k",
+      "backend": "localimprove",
+      "fallback": "tetgen",
+      "report_only": false,
+      "target_pids": [],
+      "selection": {
+       "mode": "bad_quality",
+       "ring_expand": 2,
+       "ring_mode": "node"
+      },
+      "quality": {
+       "min_jacobian": 0.2,
+       "max_aspect_ratio": 8
+      },
+      "patch": {
+       "ring_expand": 2,
+       "surface_flatness_deg": 5,
+       "surface_move_tolerance": 0,
+       "preserve_multi_material": true
+      },
+      "improve": {
+       "laplacian_iters": 5,
+       "max_outer_iters": 3,
+       "allow_subdivide": true
+      },
+      "tetgen": {
+       "quality_ratio": 1.4,
+       "min_dihedral_deg": 10
+      },
+      "iterate": {
+       "max_iterations": 10,
+       "quality_target": 0.3,
+       "convergence_tol": 0.01,
+       "keep_best": true
+      }
+     }
+    },
+    "note": "Two TET4 elements from examples/tet10/. Uses localimprove backend to improve Jacobian. Set backend:tetgen to use TetGen (requires KOOREMAPPER_BUILD_TETGEN). Set report_only:true to scan quality without changes. selection.mode can be 'bad_quality' (auto-detect poor elements) or 'explicit_ids' (user element_ids list). iterate section enables iterative remesh until quality_target met."
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/tet10",
+   "notes": "tetremesh reads TET4 elements and improves mesh quality locally. Scaled Jacobian: 1.0=perfect tet, 0=degenerate, <0=inverted. Suggested thresholds: <0.1 very poor, 0.2-0.5 acceptable, >0.7 excellent. Two backends available: localimprove (always available, no dependencies), tetgen (AGPL v3, optional, requires compile flag ON). fallback backend used if primary fails on a patch. Iterative mode keeps best mesh state across runs and reports per-iteration summaries. selection_mode default is 'bad_quality' (scans and finds poor elements); 'explicit_ids' mode uses element_ids array. ring_mode 'node' or 'face' determines neighborhood extraction. Preserves material boundaries when preserve_multi_material:true. Works with all solid element types, focuses remeshing on TET portions. Output mesh overwrites input topology and element list while preserving node IDs of boundary/fixed nodes where possible."
+  },
+  {
+   "name": "meshfix",
+   "category": "mesh",
+   "summary": "TET4 Gmsh-based adaptive remesh with quality control",
+   "description": "Gmsh-driven adaptive TET4 remesh with element quality improvement via scaled-Jacobian checking and optional patch polishing. Extracts boundary STL, runs Gmsh with configurable 3D algorithms, and splices remeshed elements back into the model. Supports thin-solid detection, distance-field size adaptation, and boundary node handling strategies.",
+   "invocation": "yaml",
+   "config_style": "structured",
+   "takes_kfile": true,
+   "requires_gmsh": true,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "model",
+     "type": "file",
+     "role": "yaml_field",
+     "yaml_path": "model",
+     "required": true,
+     "description": "Input LS-DYNA .k file containing the TET4 part to remesh"
+    },
+    {
+     "name": "output",
+     "type": "output",
+     "role": "yaml_field",
+     "yaml_path": "output",
+     "required": true,
+     "description": "Output LS-DYNA .k file with remeshed part (other parts preserved)"
+    },
+    {
+     "name": "pid",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "pid",
+     "required": true,
+     "description": "Part ID of the TET4 element part to remesh"
+    },
+    {
+     "name": "lc_target",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "lc_target",
+     "required": false,
+     "default": "1.0",
+     "description": "Target average element size for remesh"
+    },
+    {
+     "name": "lc_min",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "lc_min",
+     "required": false,
+     "default": "-1.0",
+     "description": "Minimum element size (-1 = auto from edge_min*0.8 or min_dt-based)"
+    },
+    {
+     "name": "lc_max",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "lc_max",
+     "required": false,
+     "default": "-1.0",
+     "description": "Maximum element size (-1 = lc_target * 2)"
+    },
+    {
+     "name": "min_dt",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "min_dt",
+     "required": false,
+     "default": "-1.0",
+     "description": "LS-DYNA explicit time step lower bound (for auto lc_min calculation)"
+    },
+    {
+     "name": "density",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "density",
+     "required": false,
+     "default": "-1.0",
+     "description": "Material density (t/mm³, used with min_dt)"
+    },
+    {
+     "name": "E",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "E",
+     "required": false,
+     "default": "-1.0",
+     "description": "Young's modulus (MPa, used with min_dt)"
+    },
+    {
+     "name": "nu",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "nu",
+     "required": false,
+     "default": "-1.0",
+     "description": "Poisson's ratio (used with min_dt)"
+    },
+    {
+     "name": "min_layers_thin",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "min_layers_thin",
+     "required": false,
+     "default": "2",
+     "description": "Minimum element layers through thin dimension for thin-solid handling"
+    },
+    {
+     "name": "adaptive",
+     "type": "boolean",
+     "role": "yaml_field",
+     "yaml_path": "adaptive",
+     "required": false,
+     "default": "true",
+     "description": "Enable MathEval distance-field size adaptation around bbox corners"
+    },
+    {
+     "name": "decay_factor",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "decay_factor",
+     "required": false,
+     "default": "8.0",
+     "description": "Corner refinement decay distance = lc_min * decay_factor"
+    },
+    {
+     "name": "boundary_nodes",
+     "type": "enum",
+     "role": "yaml_field",
+     "yaml_path": "boundary_nodes",
+     "required": false,
+     "default": "free",
+     "enum": [
+      "free",
+      "fixed",
+      "snap"
+     ],
+     "description": "Boundary node handling: free (new IDs) | fixed (match original) | snap (merge to neighbors)"
+    },
+    {
+     "name": "snap_tolerance",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "snap_tolerance",
+     "required": false,
+     "default": "0.001",
+     "description": "Search radius for snap mode boundary node merging"
+    },
+    {
+     "name": "algorithm",
+     "type": "enum",
+     "role": "yaml_field",
+     "yaml_path": "algorithm",
+     "required": false,
+     "default": "hxt",
+     "enum": [
+      "hxt",
+      "frontal3d",
+      "del3d"
+     ],
+     "description": "Gmsh 3D mesh algorithm (hxt=parallel hybrid, frontal3d=advancing front, del3d=Delaunay)"
+    },
+    {
+     "name": "optimize_netgen",
+     "type": "boolean",
+     "role": "yaml_field",
+     "yaml_path": "optimize_netgen",
+     "required": false,
+     "default": "true",
+     "description": "Enable Gmsh built-in Netgen optimization after Mesh 3"
+    },
+    {
+     "name": "optimize_passes",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "optimize_passes",
+     "required": false,
+     "default": "3",
+     "description": "Number of additional OptimizeMesh Netgen passes after Mesh 3 (skipped for thin geometry)"
+    },
+    {
+     "name": "quality_check",
+     "type": "boolean",
+     "role": "yaml_field",
+     "yaml_path": "quality_check",
+     "required": false,
+     "default": "true",
+     "description": "Report scaled-Jacobian quality statistics after remesh"
+    },
+    {
+     "name": "warn_min_jac",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "warn_min_jac",
+     "required": false,
+     "default": "0.15",
+     "description": "Warn if elements have scaled Jacobian below this threshold"
+    },
+    {
+     "name": "refine_surface",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "refine_surface",
+     "required": false,
+     "default": "-1",
+     "description": "STL surface refinement levels (-1=auto, 0=off, 1-3=conforming feature-edge bisection)"
+    },
+    {
+     "name": "smooth_surface",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "smooth_surface",
+     "required": false,
+     "default": "0",
+     "description": "Laplacian smoothing steps on STL feature-edge vertices (0=off)"
+    },
+    {
+     "name": "polish",
+     "type": "boolean",
+     "role": "yaml_field",
+     "yaml_path": "polish",
+     "required": false,
+     "default": "false",
+     "description": "Enable local bad-element patch re-meshing (experimental)"
+    },
+    {
+     "name": "polish_jac",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "polish_jac",
+     "required": false,
+     "default": "0.10",
+     "description": "Polish target: re-mesh patches with scaled Jacobian below this"
+    },
+    {
+     "name": "polish_max_iter",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "polish_max_iter",
+     "required": false,
+     "default": "2",
+     "description": "Maximum iterations for patch polishing"
+    }
+   ],
+   "example": {
+    "args": {
+     "model": "examples/mesh/tetramesh.k",
+     "output": "output_remeshed.k",
+     "pid": 1,
+     "lc_target": 5,
+     "lc_min": -1,
+     "lc_max": 10,
+     "adaptive": true,
+     "algorithm": "hxt",
+     "optimize_netgen": true,
+     "optimize_passes": 3,
+     "quality_check": true,
+     "warn_min_jac": 0.15,
+     "boundary_nodes": "free",
+     "refine_surface": -1,
+     "polish": false
+    },
+    "note": "Remeshes TET4 part 1 from tetramesh.k with target size 5.0 and adaptive corner refinement via Gmsh HXT algorithm. Gmsh executable must be in dist/gmsh/ or dist/gmsh-<ver>/ directory next to KooRemapper executable."
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/mesh",
+   "notes": "Gmsh executable (dist/gmsh/gmsh.exe or dist/gmsh-<ver>/gmsh.exe) must be present relative to KooRemapper executable. Thin-solid detection is automatic (bbox min < avg*0.3): switches to 4-corner in-plane field, skips Mesh 2 and Netgen passes. Polish mode (experimental) requires meeting dual quality gates (min Jac ≥95% retention + bad count reduction) to accept local patches. Boundary_nodes=fixed requires coordinate matching tolerance (snap_tolerance) for boundary node IDs. For explicit dt-based lc_min, supply all four: min_dt, density, E, nu."
+  },
+  {
+   "name": "matswap",
+   "category": "mesh",
+   "summary": "Replace material bundle (MAT/HOURGLASS/DEFINE_CURVE/SECTION) for one or more parts",
+   "description": "Swaps a complete material bundle (material, hourglass, curves, and section) from a bundle file to one or more target parts. Supports single PID, multiple PIDs, or all parts. Automatically handles ID collision avoidance, orphaned card removal, and parameter resolution via *PARAMETER block.",
+   "invocation": "yaml",
+   "config_style": "freeform",
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "config",
+     "type": "config",
+     "role": "config",
+     "required": true,
+     "description": "Complete YAML configuration object with model, output, and swaps array"
+    }
+   ],
+   "example": {
+    "args": {
+     "config": {
+      "model": "two_cubes.k",
+      "output": "result.k",
+      "swaps": [
+       {
+        "bundle": "rubber.k",
+        "pid": 1
+       }
+      ]
+     }
+    },
+    "note": "Invoked as: KooRemapper matswap config.yaml where config.yaml contains the YAML structure above"
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/matswap",
+   "notes": "Bundle file format requires *PARAMETER block with prefixed parameter names (HGID*, LCID*, SECID*, MID*, PID*) for ID remapping. MID reuses orphan IDs when possible; HGID, LCID, SECID always allocate new IDs (model max + 1). Output file has no *PARAMETER block (all parameters resolved to numbers). Orphaned old MAT/SECTION/HOURGLASS cards are automatically removed; shared cards (used by non-target parts) are preserved. Legacy positional invocation (KooRemapper matswap model.k bundle.k pid output.k) still supported for backward compatibility."
+  },
+  {
+   "name": "matdb",
+   "category": "material",
+   "summary": "Replace *MAT cards from a JSON material database with structural and thermal card support.",
+   "description": "matdb loads a JSON material database and replaces *MAT cards in an LS-DYNA model. It supports matching materials by MID (Material ID) or by title substring, and can insert thermal cards (*MAT_THERMAL_ISOTROPIC + *MAT_ADD_THERMAL_EXPANSION) alongside structural definitions. Supports damping preset configuration via damping_alpha_scale, damping_alpha_floor, and damping_target_freq_hz (or legacy alias damping_freq_hz) parameters.",
+   "invocation": "yaml",
+   "config_style": "structured",
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "model",
+     "type": "file",
+     "role": "yaml_field",
+     "yaml_path": "model",
+     "required": true,
+     "description": "Input LS-DYNA K-file containing parts and material definitions"
+    },
+    {
+     "name": "output",
+     "type": "output",
+     "role": "yaml_field",
+     "yaml_path": "output",
+     "required": true,
+     "description": "Output K-file name (without .k extension; auto-appended)"
+    },
+    {
+     "name": "database",
+     "type": "file",
+     "role": "yaml_field",
+     "yaml_path": "database",
+     "required": true,
+     "description": "JSON material database file (materials/material_db.json or custom path)"
+    },
+    {
+     "name": "mat_type",
+     "type": "string",
+     "role": "yaml_field",
+     "yaml_path": "mat_type",
+     "required": false,
+     "default": "MAT_ELASTIC",
+     "description": "Global default structural material card type (e.g., MAT_ELASTIC, MAT_024, MAT_181)"
+    },
+    {
+     "name": "thermal",
+     "type": "boolean",
+     "role": "yaml_field",
+     "yaml_path": "thermal",
+     "required": false,
+     "default": "false",
+     "description": "Insert thermal cards (*MAT_THERMAL_ISOTROPIC + *MAT_ADD_THERMAL_EXPANSION) globally"
+    },
+    {
+     "name": "damping_alpha_scale",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "damping_alpha_scale",
+     "required": false,
+     "description": "Damping scaling factor for alpha calculation"
+    },
+    {
+     "name": "damping_alpha_floor",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "damping_alpha_floor",
+     "required": false,
+     "description": "Minimum damping alpha value threshold"
+    },
+    {
+     "name": "damping_apply_to_all_parts",
+     "type": "boolean",
+     "role": "yaml_field",
+     "yaml_path": "damping_apply_to_all_parts",
+     "required": false,
+     "default": "false",
+     "description": "Apply damping configuration to all parts (true/false)"
+    },
+    {
+     "name": "damping_target_freq_hz",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "damping_target_freq_hz",
+     "required": false,
+     "description": "Target frequency in Hz for damping calculation (legacy alias: damping_freq_hz; frequency-based scale conversion via scale = freq / 50.0)"
+    },
+    {
+     "name": "damping_preset",
+     "type": "string",
+     "role": "yaml_field",
+     "yaml_path": "damping_preset",
+     "required": false,
+     "description": "Named damping preset configuration (e.g., smartphone_drop, smartphone_drop_aggressive, quasi_static, off)"
+    },
+    {
+     "name": "materials",
+     "type": "array",
+     "role": "yaml_field",
+     "yaml_path": "materials",
+     "required": false,
+     "description": "Array of per-material match rules with optional mat_type/thermal overrides"
+    }
+   ],
+   "example": {
+    "args": {
+     "model": "test_matdb_model.k",
+     "output": "test_matdb_result.k",
+     "database": "material_db.json",
+     "mat_type": "MAT_ELASTIC",
+     "thermal": true
+    },
+    "note": "Replaces all materials in the model with database definitions using global MAT_ELASTIC type and thermal card insertion enabled. Materials matched by existing MID or title substring."
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/materials",
+   "notes": "Match rules: match key supports substring matching of material title/name (case-insensitive), wildcard '*' for catch-all; mid key matches specific Material ID. Thermal parameter inserts *MAT_THERMAL_ISOTROPIC and *MAT_ADD_THERMAL_EXPANSION cards. Database file path is relative to config YAML directory if not absolute. Output .k extension auto-added if not present."
+  },
+  {
+   "name": "hfdamp",
+   "category": "material",
+   "summary": "LS-DYNA *DAMPING_FREQUENCY_RANGE_DEFORM 키워드 삽입으로 고주파 노이즈 감쇠",
+   "description": "고주파 노이즈 댐핑(HFDamp)을 K-파일에 자동 삽입합니다. 소형 요소가 생성하는 고주파 성분을 dt_target 기반으로 CDAMP 비율만큼 감쇠합니다. Global 모드는 모든 파트에 적용하고, Selective 모드는 요소 dt를 계산하여 dt ≤ dt_target인 파트만 자동 선택합니다.",
+   "invocation": "yaml",
+   "config_style": "freeform",
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "config",
+     "type": "config",
+     "role": "config",
+     "required": true,
+     "description": "전체 YAML 설정 객체"
+    }
+   ],
+   "example": {
+    "args": {
+     "config": {
+      "model": "box.k",
+      "output": "box_hfdamp.k",
+      "dt_target": 3e-07,
+      "cdamp": 0.99,
+      "fhigh_ratio": 100,
+      "mode": "global",
+      "tssfac": 0.9
+     }
+    },
+    "note": "Global 모드: 모든 파트에 CDAMP=0.99 댐핑 적용. FLOW ≈ 1.67MHz, FHIGH ≈ 167MHz 대역 댐핑"
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/hfdamp",
+   "notes": "Selective 모드 사용 시 K-파일에 각 PART의 MAT_ELASTIC (또는 E, PR, RHO를 가진 다른 MAT_*) 정의가 필요합니다. 결과는 *DAMPING_FREQUENCY_RANGE_DEFORM 키워드 삽입으로 고주파 (거짓) 진동을 억제하며, 선택적 모드에서는 추가로 *SET_PART_LIST를 생성합니다. 물리적으로 DEFORM 옵션은 요소 응력/힘을 댐핑하고 강체 운동은 영향 받지 않습니다."
+  },
+  {
+   "name": "optimize",
+   "category": "material",
+   "summary": "Apply material-specific global card optimization for rubber/foam analysis in LS-DYNA models.",
+   "description": "Applies material-specific optimizations to LS-DYNA K-files. Currently supports 'rubber' mode which enforces control card settings (CONTROL_ACCURACY INN=4, CONTROL_ENERGY HGEN/RWEN/SLNTEN/RYLEN=2, CONTROL_TIMESTEP TSSFAC, CONTACT SOFT/SBOPT) and validates bulk viscosity parameters for explicit dynamic impact analysis. Can be used standalone via YAML config or integrated within matswap workflows.",
+   "invocation": "yaml",
+   "config_style": "freeform",
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "config",
+     "type": "config",
+     "role": "config",
+     "required": true,
+     "description": "전체 YAML 설정 객체. model, output, optimize 필수; pids, tssfac, analysis_type 선택."
+    }
+   ],
+   "example": {
+    "args": {
+     "config": {
+      "model": "model.k",
+      "output": "optimized.k",
+      "optimize": "rubber",
+      "pids": [
+       3,
+       5
+      ],
+      "tssfac": 0.67,
+      "analysis_type": "explicit"
+     }
+    },
+    "note": "Standalone rubber optimization config. Targets PIDs 3 and 5 for contact SOFT=0 / SBOPT=2.0 patching. analysis_type auto-detects if omitted. Run: KooRemapper optimize <this-yaml>"
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/matswap",
+   "notes": "1. optimize 모드는 현재 'rubber'만 지원. 2. pids는 선택사항(target 파트 지정). 생략시 global cards만 패칭, contact 카드는 스킵. 3. tssfac 기본값 0.67. implicit 분석 시 CONTROL_TIMESTEP 스킵. 4. analysis_type이 공백이면 *CONTROL_IMPLICIT 존재 여부로 자동 감지. 5. 모든 경로는 YAML 디렉터리 기준 상대/절대 경로 지원. 6. Contact side SSTYP=0 경고만 표시(패칭 스킵). 7. *PARAMETER 사용 시 matswap과 함께 사용 가능."
+  },
+  {
+   "name": "relax",
+   "category": "analysis",
+   "summary": "Set up Dynamic Relaxation for initial stress equilibrium with 5-level preset system",
+   "description": "초응력 평형을 위한 동적이완(Dynamic Relaxation)을 설정하여 *CONTROL_DYNAMIC_RELAXATION을 삽입합니다. 5단계 프리셋 시스템(빠름~최대)을 지원하며, Explicit/Implicit 모드 선택이 가능합니다.",
+   "invocation": "yaml",
+   "config_style": "structured",
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "model",
+     "type": "file",
+     "role": "yaml_field",
+     "yaml_path": "model",
+     "required": true,
+     "description": "Input LS-DYNA .k file to apply Dynamic Relaxation"
+    },
+    {
+     "name": "output",
+     "type": "output",
+     "role": "yaml_field",
+     "yaml_path": "output",
+     "required": true,
+     "description": "Output .k file with DR keywords inserted"
+    },
+    {
+     "name": "level",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "level",
+     "required": false,
+     "default": "2",
+     "enum": [
+      "1",
+      "2",
+      "3",
+      "4",
+      "5"
+     ],
+     "description": "DR convergence level: 1(빠름/fast)~5(최대/max conservative)"
+    },
+    {
+     "name": "mode",
+     "type": "enum",
+     "role": "yaml_field",
+     "yaml_path": "mode",
+     "required": false,
+     "default": "explicit",
+     "enum": [
+      "explicit",
+      "implicit"
+     ],
+     "description": "DR mode: explicit(IDRFLG=1) or implicit(IDRFLG=5)"
+    },
+    {
+     "name": "drterm",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "drterm",
+     "required": false,
+     "default": "0.0",
+     "description": "DR termination time in seconds (0=convergence only)"
+    },
+    {
+     "name": "endtime",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "endtime",
+     "required": false,
+     "description": "Post-DR analysis endtime (optional, for continuing transient)"
+    },
+    {
+     "name": "nrcyck",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "nrcyck",
+     "required": false,
+     "description": "Convergence check interval (overrides level preset)"
+    },
+    {
+     "name": "drtol",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "drtol",
+     "required": false,
+     "description": "Convergence tolerance (overrides level preset)"
+    },
+    {
+     "name": "drfctr",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "drfctr",
+     "required": false,
+     "description": "Velocity damping factor 0~1 (overrides level preset)"
+    },
+    {
+     "name": "tssfdr",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "tssfdr",
+     "required": false,
+     "description": "DR timestep scale factor (overrides level preset)"
+    },
+    {
+     "name": "irelal",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "irelal",
+     "required": false,
+     "enum": [
+      "0",
+      "1"
+     ],
+     "description": "Auto control: 0=off, 1=Papadrakakis (overrides level preset)"
+    },
+    {
+     "name": "edttl",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "edttl",
+     "required": false,
+     "description": "Auto control convergence tolerance (overrides level preset)"
+    },
+    {
+     "name": "d3drlf",
+     "type": "boolean",
+     "role": "yaml_field",
+     "yaml_path": "d3drlf",
+     "required": false,
+     "default": "true",
+     "description": "Enable *DATABASE_BINARY_D3DRLF output for DR database"
+    },
+    {
+     "name": "fix_shell_elform",
+     "type": "boolean",
+     "role": "yaml_field",
+     "yaml_path": "fix_shell_elform",
+     "required": false,
+     "default": "false",
+     "description": "Fix shell element formulation issues if present"
+    },
+    {
+     "name": "strip",
+     "type": "boolean",
+     "role": "yaml_field",
+     "yaml_path": "strip",
+     "required": false,
+     "default": "false",
+     "description": "Strip mode: true removes all DR keywords without insertion"
+    }
+   ],
+   "example": {
+    "args": {
+     "model": "wrapped_model.k",
+     "output": "relaxed_model.k",
+     "level": 2,
+     "mode": "explicit"
+    },
+    "note": "Applies standard (level 2) Explicit Dynamic Relaxation with 100s DR phase and 1s post-DR analysis time. Config file path is relative to the YAML file location."
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/wrap",
+   "notes": "Level presets (NRCYCK,DRTOL,DRFCTR,TSSFDR,IRELAL,EDTTL): Lv1[500,0.01,0.99,0.95,0,0.04], Lv2[250,0.001,0.995,0.90,0,0.04], Lv3[100,0.001,0.998,0.80,0,0.04], Lv4[50,0.0001,0.999,0.67,1,0.01], Lv5[25,0.00001,0.999,0.50,1,0.001]. Implicit mode requires CONTROL_IMPLICIT_GENERAL and CONTROL_IMPLICIT_SOLUTION keywords. Strip mode removes DR keywords without insertion (model/output still required)."
+  },
+  {
+   "name": "explicit",
+   "category": "analysis",
+   "summary": "LS-DYNA K-file에서 implicit/DR/modal 키워드를 제거하여 순수 explicit 형태로 변환",
+   "description": "implicit 솔버 설정, 동적 완화(DR), 모달 분석 관련 키워드를 제거하고 LS-DYNA K-file을 순수 explicit 형태로 되돌립니다. *CONTROL_IMPLICIT_*, *CONTROL_DYNAMIC_RELAXATION, *DATABASE_BINARY_D3DRLF 카드와 SIDR=1 곡선이 제거됩니다.",
+   "invocation": "yaml",
+   "config_style": "structured",
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "model",
+     "type": "file",
+     "role": "yaml_field",
+     "yaml_path": "model",
+     "required": true,
+     "description": "변환할 입력 K-file (implicit/DR/modal 키워드 포함)"
+    },
+    {
+     "name": "output",
+     "type": "output",
+     "role": "yaml_field",
+     "yaml_path": "output",
+     "required": true,
+     "description": "변환된 K-file의 출력 경로"
+    },
+    {
+     "name": "keep_dr_curves",
+     "type": "boolean",
+     "role": "yaml_field",
+     "yaml_path": "keep_dr_curves",
+     "required": false,
+     "default": "false",
+     "description": "true인 경우 SIDR=1 DEFINE_CURVE 유지; false(기본값)인 경우 제거"
+    }
+   ],
+   "example": {
+    "args": {
+     "model": "implicit_model.k",
+     "output": "explicit_model.k",
+     "keep_dr_curves": false
+    },
+    "note": "implicit_model.k에서 모든 *CONTROL_IMPLICIT_* 블록, 동적 완화, 모달 분석 카드를 제거하고 explicit_model.k로 저장. SIDR=1 곡선도 함께 제거됨."
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/explicit",
+   "notes": "keep_dr_curves를 true로 설정하면 동적 완화(SIDR=1) 곡선 정의는 유지하면서 implicit/DR 제어 카드만 제거. implicit, modal, relax 명령어도 'strip: true' 옵션으로 해당 키워드만 제거 가능."
+  },
+  {
+   "name": "implicit",
+   "category": "analysis",
+   "summary": "LS-DYNA explicit K-file을 implicit 솔버 세팅으로 변환하며, 명시적 전용 카드 제거 및 CONTROL_IMPLICIT_* 블록 삽입",
+   "description": "explicit LS-DYNA K-파일을 implicit 솔버로 변환합니다. 수렴성 레벨(1~8)에 따라 NSOLVR, ILIMIT, MAXREF, ITEOPT, KFAIL, LSOLVR, STABILIZATION, ARC-LENGTH 등을 자동 설정합니다. mode(static/dynamic)에 따라 IMASS, GAMMA, BETA를 결정하며, 세밀한 오버라이드로 커스터마이징 가능합니다. *CONTROL_DYNAMIC_RELAXATION, *CONTROL_BULK_VISCOSITY, *DATABASE_BINARY_D3DRLF를 제거하고 SIDR=1 곡선을 정리합니다.",
+   "invocation": "yaml",
+   "config_style": "structured",
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "model",
+     "type": "file",
+     "role": "yaml_field",
+     "yaml_path": "model",
+     "required": true,
+     "description": "입력 explicit K-파일"
+    },
+    {
+     "name": "output",
+     "type": "output",
+     "role": "yaml_field",
+     "yaml_path": "output",
+     "required": true,
+     "description": "출력 implicit K-파일"
+    },
+    {
+     "name": "mode",
+     "type": "enum",
+     "role": "yaml_field",
+     "yaml_path": "mode",
+     "required": false,
+     "default": "static",
+     "enum": [
+      "static",
+      "dynamic"
+     ],
+     "description": "동역학 모드: static(IMASS=0, GAMMA=0.5, BETA=0.25), dynamic(IMASS=1, GAMMA=0.6, BETA=0.30)"
+    },
+    {
+     "name": "level",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "level",
+     "required": false,
+     "default": 2,
+     "enum": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "description": "수렴성 레벨 1(공격적)~8(좌굴/스냅스루). 각 레벨은 NSOLVR, 수렴 tolerance, 시간스텝, 안정화 기능을 결정"
+    },
+    {
+     "name": "endtime",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "endtime",
+     "required": false,
+     "description": "해석 종료시간. DT0/DTMAX/DTMIN 계산 기준. 미지정시 *CONTROL_TERMINATION에서 읽음"
+    },
+    {
+     "name": "dctol",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "dctol",
+     "required": false,
+     "description": "변위 수렴 tolerance (CONTROL_IMPLICIT_SOLUTION). 미지정시 level 기본값"
+    },
+    {
+     "name": "ectol",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "ectol",
+     "required": false,
+     "description": "에너지 수렴 tolerance (CONTROL_IMPLICIT_SOLUTION). 미지정시 level 기본값"
+    },
+    {
+     "name": "dt0",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "dt0",
+     "required": false,
+     "description": "초기 타임스텝 (CONTROL_IMPLICIT_GENERAL). 미지정시 level 기본값"
+    },
+    {
+     "name": "dtmax",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "dtmax",
+     "required": false,
+     "description": "최대 타임스텝 (CONTROL_IMPLICIT_AUTO). 미지정시 level 기본값"
+    },
+    {
+     "name": "nsolvr",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "nsolvr",
+     "required": false,
+     "description": "비선형 솔버: 12=BFGS, -2=BFGS+line search, 7=Full Newton (CONTROL_IMPLICIT_SOLUTION). 미지정시 level 기본값"
+    },
+    {
+     "name": "kfail",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "kfail",
+     "required": false,
+     "description": "스텝 이등분 이후 강성 개혁 (CONTROL_IMPLICIT_AUTO). 미지정시 level 기본값"
+    },
+    {
+     "name": "rctol",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "rctol",
+     "required": false,
+     "description": "잔여력 norm tolerance (CONTROL_IMPLICIT_SOLUTION). 1e10=비활성화. 미지정시 level 기본값"
+    },
+    {
+     "name": "lsolvr",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "lsolvr",
+     "required": false,
+     "description": "선형 솔버: 7=default sparse, 30=MUMPS (CONTROL_IMPLICIT_SOLVER). 미지정시 level 기본값"
+    },
+    {
+     "name": "stab",
+     "type": "boolean",
+     "role": "yaml_field",
+     "yaml_path": "stab",
+     "required": false,
+     "description": "*CONTROL_IMPLICIT_STABILIZATION on/off override. 미지정시 level 기본값"
+    },
+    {
+     "name": "stab_scale",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "stab_scale",
+     "required": false,
+     "default": 1,
+     "description": "안정화 SCALE 인수 (작을수록 안정화 강함, 스프링백용 0.001)"
+    },
+    {
+     "name": "arc_length",
+     "type": "boolean",
+     "role": "yaml_field",
+     "yaml_path": "arc_length",
+     "required": false,
+     "description": "Arc-length(Crisfield) 방법 on/off. true일 때 필요시 NSOLVR=7로 자동 설정. 좌굴/스냅스루 경로 추적"
+    },
+    {
+     "name": "fix_shell_elform",
+     "type": "boolean",
+     "role": "yaml_field",
+     "yaml_path": "fix_shell_elform",
+     "required": false,
+     "default": false,
+     "description": "true: *SECTION_SHELL ELFORM=16 자동 수정→2 (Belytschko-Tsay). false: 경고만 출력"
+    },
+    {
+     "name": "keep_dr_curves",
+     "type": "boolean",
+     "role": "yaml_field",
+     "yaml_path": "keep_dr_curves",
+     "required": false,
+     "default": false,
+     "description": "true: SIDR=1인 *DEFINE_CURVE 유지. false(기본): 제거"
+    },
+    {
+     "name": "strip",
+     "type": "boolean",
+     "role": "yaml_field",
+     "yaml_path": "strip",
+     "required": false,
+     "default": false,
+     "description": "true: *CONTROL_IMPLICIT_* 카드만 제거 (삽입 없음)"
+    }
+   ],
+   "example": {
+    "args": {
+     "model": "explicit.k",
+     "output": "implicit.k",
+     "mode": "static",
+     "level": 2,
+     "endtime": 1
+    },
+    "note": "examples/implicit/level2.yaml에서 실제 파일명 확인. 최소 설정으로 레벨별 기본값 사용"
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/implicit",
+   "notes": "레벨 스펙트럼: Lv1=공격적(NSOLVR=12, DCTOL=0.005) ~ Lv8=좌굴/스냅스루(NSOLVR=7 + arc-length 기본활성, DCTOL=0.0001). 레벨 5부터 STABILIZATION(인공강성). 레벨 6부터 MUMPS(LSOLVR=30). 레벨 8에서는 arc-length 기본활성(Crisfield). 오버라이드는 레벨 기본값 무시. strip:true로 implicit 카드만 제거 가능. 제거 대상: *CONTROL_DYNAMIC_RELAXATION, *CONTROL_BULK_VISCOSITY, *DATABASE_BINARY_D3DRLF, SIDR=1 DEFINE_CURVE."
+  },
+  {
+   "name": "modal",
+   "category": "analysis",
+   "summary": "Convert explicit LS-DYNA K-file for implicit modal (eigenvalue) analysis",
+   "description": "Transforms an explicit dynamics K-file into an implicit modal eigenvalue analysis model. Removes explicit-only keywords (*CONTROL_DYNAMIC_RELAXATION, *CONTROL_BULK_VISCOSITY, *DATABASE_BINARY_D3DRLF), optionally removes damping ratio curves (SIDR=1), and inserts implicit eigenvalue control cards (*CONTROL_IMPLICIT_GENERAL, *CONTROL_IMPLICIT_EIGENVALUE, *CONTROL_IMPLICIT_SOLUTION). Supports multiple eigensolvers (Block Shift Lanczos, MCMS, LOBPCG, Fast Lanczos) and both direct and iterative linear solvers (sparse or MUMPS). 구조, NVH, 음향해석을 위해 자연진동수(고유진동수) 및 모드형을 추출하는 암시적 고유치 해석으로 변환합니다.",
+   "invocation": "yaml",
+   "config_style": "structured",
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "model",
+     "type": "file",
+     "role": "yaml_field",
+     "yaml_path": "model",
+     "required": true,
+     "description": "Input explicit LS-DYNA K-file (*.k)"
+    },
+    {
+     "name": "output",
+     "type": "output",
+     "role": "yaml_field",
+     "yaml_path": "output",
+     "required": true,
+     "description": "Output implicit modal K-file (*.k)"
+    },
+    {
+     "name": "nmode",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "nmode",
+     "required": false,
+     "default": "10",
+     "description": "Number of modes to extract (NEIG parameter)"
+    },
+    {
+     "name": "fmin",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "fmin",
+     "required": false,
+     "default": "0.0",
+     "description": "Lower frequency bound (Hz). 0 = no lower limit, >0 sets LFLAG=1"
+    },
+    {
+     "name": "fmax",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "fmax",
+     "required": false,
+     "default": "0.0",
+     "description": "Upper frequency bound (Hz). 0 = no upper limit, >0 sets RFLAG=1"
+    },
+    {
+     "name": "center",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "center",
+     "required": false,
+     "default": "0.0",
+     "description": "Frequency shift center (Hz) for shifted eigenvalue problems"
+    },
+    {
+     "name": "eigmth",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "eigmth",
+     "required": false,
+     "default": "2",
+     "enum": [
+      "2",
+      "101",
+      "102",
+      "103"
+     ],
+     "description": "Eigensolver method: 2=Block Shift Lanczos (default), 101=MCMS (NVH/thousands of modes), 102=LOBPCG (large models), 103=Fast Lanczos (MPP parallel)"
+    },
+    {
+     "name": "solver",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "solver",
+     "required": false,
+     "default": "7",
+     "enum": [
+      "7",
+      "30"
+     ],
+     "description": "Linear solver: 7=sparse direct (default, small-medium models), 30=MUMPS parallel (large models)"
+    },
+    {
+     "name": "fix_shell_elform",
+     "type": "boolean",
+     "role": "yaml_field",
+     "yaml_path": "fix_shell_elform",
+     "required": false,
+     "default": "false",
+     "description": "Auto-fix shell elements with ELFORM=16 to ELFORM=2; default warns instead"
+    },
+    {
+     "name": "keep_dr_curves",
+     "type": "boolean",
+     "role": "yaml_field",
+     "yaml_path": "keep_dr_curves",
+     "required": false,
+     "default": "false",
+     "description": "Preserve *DEFINE_CURVE with SIDR=1 (dynamic relaxation curves); default removes them"
+    },
+    {
+     "name": "strip",
+     "type": "boolean",
+     "role": "yaml_field",
+     "yaml_path": "strip",
+     "required": false,
+     "default": "false",
+     "description": "Strip-only mode: remove implicit eigenvalue keywords without inserting new ones (revert to explicit or other analysis type)"
+    }
+   ],
+   "example": {
+    "args": {
+     "model": "explicit.k",
+     "output": "modal.k",
+     "nmode": 20,
+     "fmin": 0,
+     "fmax": 3000,
+     "center": 0,
+     "eigmth": 2,
+     "solver": 7,
+     "fix_shell_elform": false,
+     "keep_dr_curves": false,
+     "strip": false
+    },
+    "note": "Configuration in examples/modal/modal_full.yaml; input model file must be an explicit K-file with material, geometry, and boundary conditions. Output produces modal.k (implicit eigenvalue), eigout (ASCII freq list), and d3eigv (binary mode shapes for LS-PrePost visualization). YAML keys are relative to config directory."
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/modal",
+   "notes": "1. YAML keys are relative to the config file directory (configDir/model if no path separator). 2. Removed cards: *CONTROL_DYNAMIC_RELAXATION, *CONTROL_BULK_VISCOSITY, *DATABASE_BINARY_D3DRLF (always), *DEFINE_CURVE with SIDR=1 (unless keep_dr_curves=true). 3. Inserted cards: *CONTROL_IMPLICIT_GENERAL (IMFLAG=1, IMFORM=2), *CONTROL_IMPLICIT_EIGENVALUE (NEIG, LFLAG/RFLAG based on fmin/fmax), *CONTROL_IMPLICIT_SOLUTION (NSOLVR=12), *CONTROL_IMPLICIT_SOLVER only when solver=30 (MUMPS). 4. Eigensolver choice: eigmth=2 for general/structural, eigmth=101 (MCMS) for NVH (hundreds to thousands of modes), eigmth=102 for very large iterative, eigmth=103 for MPP. 5. Shell ELFORM=16 check warns by default; use fix_shell_elform=true to auto-convert to ELFORM=2. 6. strip mode removes all implicit eigenvalue keywords without inserting new ones (useful to revert or change analysis type). 7. fmin>0 sets LFLAG=1, fmax>0 sets RFLAG=1; both=0 searches from -∞ with no upper bound. 8. Output files eigout and d3eigv are automatically created by LS-DYNA; no DATABASE card needed. 9. Requires valid LS-DYNA input model (material definitions, elements, and constraints); modal analysis will fail if model is incomplete. 10. For damping ratio curves (SIDR=1) needed in subsequent transient analysis, use keep_dr_curves=true."
+  },
+  {
+   "name": "ale",
+   "category": "analysis",
+   "summary": "LS-DYNA 파트를 ALE(임의 라그랑-오일러) 형식으로 변환, 물성 프리셋 및 FSI 커플링 적용",
+   "description": "ALE 전환 및 물성 할당을 위한 YAML 기반 도구. air, water, TNT 등 내장 프리셋 물성 또는 커스텀 번들을 사용하여 지정된 파트의 ELFORM을 변경하고 *CONTROL_ALE, *ALE_MULTI-MATERIAL_GROUP, *HOURGLASS, FSI 커플링(*CONSTRAINED_LAGRANGE_IN_SOLID) 카드를 자동 삽입합니다. 폭약(TNT/C4) 프리셋에는 *INITIAL_DETONATION 카드 지원.",
+   "invocation": "yaml",
+   "config_style": "freeform",
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "config",
+     "type": "config",
+     "role": "config",
+     "required": true,
+     "description": "ALE 변환 설정을 정의하는 전체 YAML 객체. 하위 필드: model, output, ale_parts (필수), fsi_pids, elform, dct, nadv, meth, ctype, direc, nquad, pfac, detonation"
+    }
+   ],
+   "example": {
+    "args": {
+     "config": {
+      "model": "explicit.k",
+      "output": "ale_minimal.k",
+      "ale_parts": [
+       {
+        "pid": 3,
+        "material": "air"
+       }
+      ]
+     }
+    },
+    "note": "최소 구성: explicit.k에서 PID 3을 air ALE로 변환하여 ale_minimal.k로 저장. ale_parts는 필수 배열."
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/ale",
+   "notes": "프리셋 물성(단위: t/mm/s → MPa): 기체(air/nitrogen/argon), 액체(water/electrolyte/gasoline/oil/coolant/resin/tim/silicone), 폭약(tnt/c4), 진공(vacuum). 폭약 사용 시 detonation 섹션의 pid, x, y, z, lt 필드로 기폭점 지정. fsi_pids에는 ALE 파트 PID를 포함시킬 수 없음(자기-결합 불가). 공유 섹션(*SECTION_SOLID)은 새 SECID로 복제되고 ELFORM이 변경됨."
+  },
+  {
+   "name": "stabilize",
+   "category": "analysis",
+   "summary": "LS-DYNA explicit solver 안정화 제어 (12단계 누적 시스템)",
+   "description": "명시적 동역학 해석의 발산/수렴 문제를 해결하기 위해 LS-DYNA 제어 카드(타임스텝, 모래시계, 접촉, 에너지, 쉘, 벌크 점성도)를 자동으로 조정합니다. 레벨 기반 사전설정(1-12) 또는 수동 옵션 지정이 가능하며, 높은 레벨은 하위 레벨의 모든 조치를 포함합니다. Lv11 이상 침식(ERODE) 적용 시 사용자 확인이 필요합니다.",
+   "invocation": "yaml",
+   "config_style": "structured",
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "model",
+     "type": "file",
+     "role": "yaml_field",
+     "yaml_path": "model",
+     "required": true,
+     "description": "입력 LS-DYNA .k 모델 파일 경로"
+    },
+    {
+     "name": "output",
+     "type": "output",
+     "role": "yaml_field",
+     "yaml_path": "output",
+     "required": true,
+     "description": "출력 안정화된 .k 파일 경로"
+    },
+    {
+     "name": "stabilize",
+     "type": "enum",
+     "role": "yaml_field",
+     "yaml_path": "stabilize",
+     "required": true,
+     "enum": [
+      "explicit"
+     ],
+     "default": "explicit",
+     "description": "안정화 모드 (현재 'explicit'만 지원)"
+    },
+    {
+     "name": "level",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "level",
+     "required": false,
+     "enum": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12
+     ],
+     "description": "안정화 레벨 프리셋 (1-12, 각 레벨은 하위 모든 조치 포함). 0 또는 생략 시 수동 모드"
+    },
+    {
+     "name": "confirm_erosion",
+     "type": "boolean",
+     "role": "yaml_field",
+     "yaml_path": "confirm_erosion",
+     "required": false,
+     "default": "false",
+     "description": "true 설정 시 Lv11+ ERODE 옵션 적용 시 interactive 확인 생략"
+    },
+    {
+     "name": "tssfac",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "tssfac",
+     "required": false,
+     "description": "*CONTROL_TIMESTEP TSSFAC (Courant 안전계수; 0.50-0.90)"
+    },
+    {
+     "name": "erode",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "erode",
+     "required": false,
+     "description": "*CONTROL_TIMESTEP ERODE (요소 침식: 0=비활성, 1=솔리드, 10=쉘, 11=솔리드+쉘, 111=전체)"
+    },
+    {
+     "name": "ihq",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "ihq",
+     "required": false,
+     "description": "*CONTROL_HOURGLASS IHQ (모래시계 제어: 1=표준, 4=강화, 6=최적)"
+    },
+    {
+     "name": "qh",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "qh",
+     "required": false,
+     "description": "*CONTROL_HOURGLASS QH (모래시계 강성; 0.05-1.0)"
+    },
+    {
+     "name": "osu",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "osu",
+     "required": false,
+     "description": "*CONTROL_ACCURACY OSU (정확도 옵션)"
+    },
+    {
+     "name": "inn",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "inn",
+     "required": false,
+     "description": "*CONTROL_ACCURACY INN (내부 노드 정렬)"
+    },
+    {
+     "name": "esort_solid",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "esort_solid",
+     "required": false,
+     "description": "*CONTROL_SOLID ESORT (솔리드 요소 정렬)"
+    },
+    {
+     "name": "esort_shell",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "esort_shell",
+     "required": false,
+     "description": "*CONTROL_SHELL ESORT (쉘 요소 정렬)"
+    },
+    {
+     "name": "bwc",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "bwc",
+     "required": false,
+     "description": "*CONTROL_SHELL BWC (쉘 두께 변경 제어)"
+    },
+    {
+     "name": "miter",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "miter",
+     "required": false,
+     "description": "*CONTROL_SHELL MITER (수정 반복)"
+    },
+    {
+     "name": "irnxx",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "irnxx",
+     "required": false,
+     "description": "*CONTROL_SHELL IRNXX (쉘 회전 처리: -1 또는 -2)"
+    },
+    {
+     "name": "wrpang",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "wrpang",
+     "required": false,
+     "description": "*CONTROL_SHELL WRPANG (래핑 각도 제한; 도 단위)"
+    },
+    {
+     "name": "orien",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "orien",
+     "required": false,
+     "description": "*CONTROL_CONTACT ORIEN (카드 1: 세그먼트 법선 재정렬)"
+    },
+    {
+     "name": "shlthk",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "shlthk",
+     "required": false,
+     "description": "*CONTROL_CONTACT SHLTHK (카드 1: 쉘 두께 포함)"
+    },
+    {
+     "name": "islchk",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "islchk",
+     "required": false,
+     "description": "*CONTROL_CONTACT ISLCHK (카드 1: 고립 쉘 검사)"
+    },
+    {
+     "name": "enmass",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "enmass",
+     "required": false,
+     "description": "*CONTROL_CONTACT ENMASS (카드 1: 침식 노드 접촉 유지)"
+    },
+    {
+     "name": "xpene",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "xpene",
+     "required": false,
+     "description": "*CONTROL_CONTACT XPENE (카드 2: 최대 침투 배수)"
+    },
+    {
+     "name": "nsbcs",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "nsbcs",
+     "required": false,
+     "description": "*CONTROL_CONTACT NSBCS (카드 2: 버킷 검색 빈도)"
+    },
+    {
+     "name": "soft",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "soft",
+     "required": false,
+     "description": "Per-contact SOFT (카드 A: 0=표준, 1=소프트, 2=핀볼)"
+    },
+    {
+     "name": "sbopt",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "sbopt",
+     "required": false,
+     "description": "Per-contact SBOPT (카드 A: 세그먼트 기반 옵션)"
+    },
+    {
+     "name": "depth",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "depth",
+     "required": false,
+     "description": "Per-contact DEPTH (카드 A: 접촉 검색 깊이)"
+    },
+    {
+     "name": "maxpar",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "maxpar",
+     "required": false,
+     "description": "Per-contact MAXPAR (카드 A: 최대 병렬도)"
+    },
+    {
+     "name": "ignore",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "ignore",
+     "required": false,
+     "description": "Per-contact IGNORE (카드 C: 접촉 무시 플래그)"
+    },
+    {
+     "name": "bulk_q1",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "bulk_q1",
+     "required": false,
+     "description": "*CONTROL_BULK_VISCOSITY Q1 (선형 벌크 점성도)"
+    },
+    {
+     "name": "bulk_q2",
+     "type": "number",
+     "role": "yaml_field",
+     "yaml_path": "bulk_q2",
+     "required": false,
+     "description": "*CONTROL_BULK_VISCOSITY Q2 (2차 벌크 점성도)"
+    },
+    {
+     "name": "hgen",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "hgen",
+     "required": false,
+     "description": "*CONTROL_ENERGY HGEN (모래시계 에너지 출력)"
+    },
+    {
+     "name": "rwen",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "rwen",
+     "required": false,
+     "description": "*CONTROL_ENERGY RWEN (강성 작동 에너지 출력)"
+    },
+    {
+     "name": "slnten",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "slnten",
+     "required": false,
+     "description": "*CONTROL_ENERGY SLNTEN (슬라이드라인 에너지 출력)"
+    },
+    {
+     "name": "rylen",
+     "type": "integer",
+     "role": "yaml_field",
+     "yaml_path": "rylen",
+     "required": false,
+     "description": "*CONTROL_ENERGY RYLEN (회전/일탈 에너지 출력)"
+    }
+   ],
+   "example": {
+    "args": {
+     "model": "your_model.k",
+     "output": "your_model_lv06.k",
+     "stabilize": "explicit",
+     "level": 6
+    },
+    "note": "examples/explicit/level06.yaml — 접촉 1단계 프리셋. 페널티 불균형, 채터링, 이종 재료 접촉 시 사용"
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/explicit",
+   "notes": "1. 'level' 키 생략 또는 level:0 설정 → 순수 수동 모드 (프리셋 기본값 무시, 명시한 옵션만 적용)\n2. 'level' 지정 후 개별 옵션 override 가능 (혼합 모드)\n3. Lv11+ ERODE 적용 시 기본적으로 interactive y/N 확인 필요 → 'confirm_erosion: true' 설정으로 생략 가능\n4. 쉘 요소 미포함 모델 시 쉘 관련 옵션(WRPANG, ESORT_SHELL, BWC, MITER, IRNXX) 자동 스킵\n5. 각 레벨 누적 규칙 (Lv6 ⊃ Lv5 ⊃ ... ⊃ Lv1):\n   Lv1: 에너지 진단 (출력만)\n   Lv2: 정확도 개선\n   Lv3: 타임스텝 1차 (TSSFAC=0.80)\n   Lv4: 모래시계 강화\n   Lv5: 쉘 안정화 (쉘 있을 시만)\n   Lv6: 접촉 1단계 (이종 강성)\n   Lv7: 타임스텝 2차 + 벌크 점성도\n   Lv8: 접촉 2단계 (핀볼, 고변형)\n   Lv9: 최적 모래시계 (IHQ=6)\n   Lv10: 타임스텝 3차\n   Lv11: 침식 활성화 (물리 변경, 질량 비보존) ⚠\n   Lv12: 최보수 (모든 조치 극대화)"
+  },
+  {
+   "name": "database",
+   "category": "analysis",
+   "summary": "Insert DATABASE output control keywords into K-file with presets or custom settings",
+   "description": "Inserts LS-DYNA *DATABASE_* keywords for output control into a K-file. Supports quick preset configurations (all, drop, crash, static, thermal, forming, modal, minimal) or fine-grained control over ASCII/binary/extent options. Automatically detects and skips existing keywords.",
+   "invocation": "yaml",
+   "config_style": "freeform",
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "config",
+     "type": "config",
+     "role": "config",
+     "required": true,
+     "description": "Complete YAML configuration object for database output control. Use either preset mode (model, output, preset, dt, dt_plot) or custom mode (model, output, ascii, binary, extent sections). Existing keywords in the K-file are automatically detected and skipped."
+    }
+   ],
+   "example": {
+    "args": {
+     "config": {
+      "model": "test_model.k",
+      "output": "test_model_db.k",
+      "preset": "all",
+      "dt": 0.001,
+      "dt_plot": 0.01
+     }
+    },
+    "note": "Run as: KooRemapper database config.yaml (where config.yaml contains the above structure). Example files: database_all.yaml, database_drop.yaml in examples/database/"
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/database",
+   "notes": "Preset mode: Use preset (all/drop/crash/static/thermal/forming/modal/minimal) to automatically select appropriate keywords. Custom mode: Define ascii, binary, and extent sections for fine control. dt_plot defaults to dt*10; dt_thdt defaults to dt; dt_dump defaults to dt_plot*10. Existing DATABASE keywords are automatically skipped. Output keywords injected before *END or at end of file.\""
+  },
+  {
+   "name": "load",
+   "category": "bc",
+   "summary": "YAML으로 부하(압력/힘)를 부분에 적용하고 *LOAD_*, *DEFINE_CURVE, *SET_* 키워드 삽입",
+   "description": "LS-DYNA 모델에 시간 이력 부하(압력/힘)를 적용하고 곡선, 세그먼트 집합, 연결 인터페이스를 자동 생성합니다. 방향 필터, 접촉 기반 선택, 직접 집합 ID 지정을 지원합니다.",
+   "invocation": "yaml",
+   "config_style": "freeform",
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "config",
+     "type": "config",
+     "role": "config",
+     "required": true,
+     "description": "YAML 설정 객체; model, output, loads 필수"
+    }
+   ],
+   "example": {
+    "args": {
+     "config": {
+      "model": "mesh.k",
+      "output": "mesh_loaded.k",
+      "loads": [
+       {
+        "part": 10,
+        "mode": "pressure",
+        "value": 1,
+        "direction": [
+         0,
+         0,
+         1
+        ],
+        "select": "tied",
+        "angle": 45,
+        "curve": [
+         [
+          0,
+          0
+         ],
+         [
+          0.001,
+          1
+         ],
+         [
+          0.01,
+          1
+         ]
+        ]
+       }
+      ]
+     }
+    },
+    "note": "tied contact 인터페이스에 z+ 방향 압력 1.0 MPa 적용; 시간 곡선으로 0~10ms에 선형 로드"
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/load",
+   "notes": "select 모드: direction=법선 각도 필터, set=SET_SEGMENT ID, tied=CONTACT ID 기반 인터페이스, all=모든 노출된 면. angle은 direction 필터 시에만 사용 (기본값 45도). mode 값: pressure (MPa), force (N), normal_pressure. set_id와 contact_id는 선택 사항."
+  },
+  {
+   "name": "boundary",
+   "category": "bc",
+   "summary": "Apply boundary conditions (SPC/rigid wall) from YAML config",
+   "description": "KooRemapper의 boundary 연산은 YAML 설정에서 경계 조건(SPC 노드 구속/강체벽)을 읽어 LS-DYNA .k 파일에 *BOUNDARY_SPC_NODE, *RIGIDWALL_PLANAR 키워드를 삽입합니다. 각 경계조건은 부품 ID, DOF 타입, 방향 벡터, 선택 방법, 각도 공차를 지정합니다.",
+   "invocation": "yaml",
+   "config_style": "freeform",
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "config",
+     "type": "config",
+     "role": "config",
+     "required": true,
+     "description": "YAML configuration object containing model path, output path (optional, defaults to model path), and boundaries array"
+    }
+   ],
+   "example": {
+    "args": {
+     "config": {
+      "model": "mesh.k",
+      "output": "mesh_bc.k",
+      "boundaries": [
+       {
+        "part": 9,
+        "dof": "z",
+        "direction": [
+         0,
+         0,
+         -1
+        ],
+        "select": "direction",
+        "angle": 45
+       },
+       {
+        "part": 11,
+        "dof": "xyz",
+        "direction": [
+         0,
+         0,
+         1
+        ],
+        "select": "direction",
+        "angle": 45
+       }
+      ]
+     }
+    },
+    "note": "Example: KooRemapper boundary boundary_partial.yaml. Input and output paths are relative to the YAML file directory. Output field is optional and defaults to input filename if omitted."
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/boundary",
+   "notes": "DOF 옵션: all(모든 6DOF 고정), x/y/z(단일 병진), xy/xz/yz(두 개 병진). 면 선택 방법: direction(방향 벡터 기반, 각도 허용오차 적용), set(사전 정의된 set_id로 노드 선택). 개별 DOF 제어: dofx, dofy, dofz, dofrx, dofry, dofrz를 이용해 각 DOF별로 1(고정) 또는 0(자유) 지정 가능. set_id는 SPC 집합 ID 또는 select=set일 때 필수. 출력 파일명이 생략되면 입력 파일명 사용."
+  },
+  {
+   "name": "rbe",
+   "category": "bc",
+   "summary": "RBE2/RBE3 rigid body element constraints from YAML config",
+   "description": "RBE2/RBE3 rigid body element constraints를 YAML 설정에서 생성합니다. *CONSTRAINED_NODAL_RIGID_BODY (RBE2) 또는 *CONSTRAINED_INTERPOLATION (RBE3) 키워드를 삽입하여 마스터-슬레이브 노드 관계를 정의합니다. 방향 선택, 앵글 필터링, spider/face 모드를 지원합니다.",
+   "invocation": "yaml",
+   "config_style": "freeform",
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "config",
+     "type": "config",
+     "role": "config",
+     "required": true,
+     "description": "YAML 설정 객체. model, output, rbe 배열을 포함합니다."
+    }
+   ],
+   "example": {
+    "args": {
+     "config": {
+      "model": "mesh.k",
+      "output": "mesh_rbe_spider.k",
+      "rbe": [
+       {
+        "part": 9,
+        "select": "direction",
+        "direction": [
+         0,
+         0,
+         -1
+        ],
+        "angle": 45,
+        "type": "rbe3",
+        "mode": "spider"
+       }
+      ]
+     }
+    },
+    "note": "rbe_spider.yaml 예제: 부품 PID=9 하단면(z-)에 1개 centroid 마스터 노드와 CONSTRAINED_INTERPOLATION 생성"
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/boundary",
+   "notes": "\n- select: \"direction\" - 지정 방향의 법선을 가진 요소만 선택 (필수)\n- select: \"all\" - 모든 요소 선택\n- type: \"rbe2\" - 강체 (slave가 master와 정확히 같이 움직임)\n- type: \"rbe3\" - 보간 (master는 slave들의 가중평균 운동)\n- mode: \"spider\" - 1개 centroid 마스터 노드 생성\n- mode: \"face\" - 각 면마다 centroid 마스터 노드 생성\n- direction: [x, y, z] - 법선 방향 벡터 (필수, select=\"direction\" 일 때)\n- angle: degrees - 방향 벡터와의 편차각 임계값 (기본값 없음)\n- 모델 파일 경로는 YAML 폴더 기준으로 상대경로 가능\n"
+  },
+  {
+   "name": "assemble",
+   "category": "model",
+   "summary": "Assemble a full model with sequential part operations (replace, squeeze, restack, bend, indent, offset, IGA, matswap, etc.)",
+   "description": "Reads a base K-file and applies a sequence of part modification operations from a YAML config file. Supports material definition, dynamic relaxation, and prestress computation. Outputs assembled model and optional accumulated *INITIAL_STRESS_SOLID prestress.",
+   "invocation": "yaml",
+   "config_style": "freeform",
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "config",
+     "type": "config",
+     "role": "config",
+     "required": true,
+     "description": "YAML configuration object with base_model, output, optional material section, and operations array. Each operation type (replace, squeeze, restack, bend, indent, formstrain, refine, elform, disconnect, iga, offset, warpage, matswap, etc.) has its own parameters."
+    }
+   ],
+   "example": {
+    "args": {
+     "config": {
+      "base_model": "box.k",
+      "output": "assembled_box",
+      "dynamic_relaxation": false,
+      "dynain_embed": false,
+      "material": {
+       "E": 210000,
+       "nu": 0.3
+      },
+      "operations": [
+       {
+        "type": "bend",
+        "target_pid": 1,
+        "plane": "xy",
+        "source": "formula",
+        "expression": "3.0 * sin(pi * x1 / L1)"
+       }
+      ]
+     }
+    },
+    "note": "Real files from examples/assemble/: box.k (input), assemble_example.yaml (config). Output: assembled_box.k, optionally assembled_box.dynain if prestress is computed."
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/assemble",
+   "notes": "Supports 20+ operation types: replace (detail mapping with prestress), squeeze (interference fit compression), restack (extrude/layer rebuild), bend (deflection + prestress), indent (emboss + prestress), formstrain (dihedral-based plastic strain), refine (1:2 or 1:3 subdivision), elform (element formulation change), disconnect (cohesive or MEFEM decohering), iga (NURBS embedding), offset (extrude surface to solid layers with optional CZM), warpage (out-of-plane deflection from dat file), matswap (material bundle replacement), matdb (material database lookup with damping tuning), plus assembly utilities (generate, control, database, contact, load, boundary, rbe, wrap, update, cnrb2solid, hfdamp, battery, split, merge, strip, extract_surface). Operation sequence is applied sequentially; each modifies the mesh in-place. Prestress outputs are accumulated into single *INITIAL_STRESS_SOLID block if multiple operations compute stress."
+  },
+  {
+   "name": "merge",
+   "category": "model",
+   "summary": "Merge multiple stacked solid layers into homogenized layer with Voigt/Reuss/VRH averaging.",
+   "description": "Merges stacked solid elements (along X/Y/Z direction) into homogenized layers. Detects columns via face connectivity, computes volume-weighted average material properties (E, nu, rho, CTE) for each group using Voigt (upper bound), Reuss (lower bound), or VRH (Hill) rule-of-mixtures. Supports MAT_ELASTIC, MAT_024, MAT_076 (viscoelastic), MAT_RIGID, and optional MAT_ADD_THERMAL_EXPANSION. Removes original stacked elements and inserts new column-spanning HEX8s with homogenized material cards.",
+   "invocation": "yaml",
+   "config_style": "freeform",
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "config",
+     "type": "config",
+     "role": "config",
+     "required": true,
+     "description": "병합 설정 객체 (models[], output, id_offset_increment 등)"
+    }
+   ],
+   "example": {
+    "args": {
+     "config": {
+      "model": "three_layer.k",
+      "output": "merged_output.k",
+      "direction": "z",
+      "method": "vrh",
+      "merge": [
+       {
+        "pids": [
+         1,
+         2,
+         3
+        ],
+        "name": "Homogenized_Stack"
+       }
+      ]
+     }
+    },
+    "config_content": {
+     "model": "three_layer.k",
+     "output": "merged_output.k",
+     "direction": "z",
+     "method": "vrh",
+     "merge": [
+      {
+       "pids": [
+        1,
+        2,
+        3
+       ],
+       "name": "Homogenized_Stack",
+       "layers": 1
+      }
+     ]
+    },
+    "note": "3층 스택을 VRH 평균으로 1개 균질화 레이어로 병합"
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/merge",
+   "notes": "direction: 'x'|'y'|'z' (stacking axis for column detection; default z, case-insensitive). method: 'voigt'|'reuss'|'vrh' (elastic constant averaging rule; default vrh, case-insensitive). Per-group keys: pids (required array of part IDs to merge), name (optional group label), layers (optional element count for subdivision per column, default 1). Config supports both 'model' and 'input' keys for input path. Viscoelastic (MAT_076) uses fully-relaxed moduli (G∞, K → E∞). CTE mixed if *MAT_ADD_THERMAL_EXPANSION present. Output includes original geometry with merged elements + homogenized MAT_ELASTIC cards."
+  },
+  {
+   "name": "strip",
+   "category": "model",
+   "summary": "Remove specified LS-DYNA keyword blocks from a K-file for debugging and comparison.",
+   "description": "Strip removes bulky data keyword blocks (*NODE, *ELEMENT_*, *INITIAL_STRESS_*, etc.) from an LS-DYNA K-file while preserving control and option keywords. Useful for comparing only option/control changes between variants or for debugging. Keyword matching is prefix-based with boundary checking (space/underscore/end of line) to avoid partial matches.",
+   "invocation": "yaml",
+   "config_style": "structured",
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "model",
+     "type": "file",
+     "role": "yaml_field",
+     "yaml_path": "model",
+     "required": true,
+     "description": "Input LS-DYNA K-file (or use 'input' as alternative key name)"
+    },
+    {
+     "name": "output",
+     "type": "output",
+     "role": "yaml_field",
+     "yaml_path": "output",
+     "required": false,
+     "default": null,
+     "description": "Output K-file path. If omitted, defaults to input filename with '_stripped' suffix (e.g., model.k → model_stripped.k)"
+    },
+    {
+     "name": "keywords",
+     "type": "array",
+     "role": "yaml_field",
+     "yaml_path": "keywords",
+     "required": true,
+     "description": "List of LS-DYNA keywords to strip (e.g., *NODE, *ELEMENT_SOLID, *INITIAL_STRESS_SOLID). Matches are prefix-based: *NODE matches *NODE, *NODE_TITLE, etc."
+    }
+   ],
+   "example": {
+    "args": {
+     "model": "../assemble_display/al_box.k",
+     "output": "stripped_output.k",
+     "keywords": [
+      "*NODE",
+      "*ELEMENT_SOLID",
+      "*ELEMENT_SHELL",
+      "*INITIAL_STRESS_SOLID",
+      "*INITIAL_STRESS_SHELL"
+     ]
+    },
+    "note": "Removes mesh data and initial stress blocks while preserving material, section, part, and control keywords. Output shows line counts (total, stripped, remaining). Keyword paths are resolved relative to YAML directory."
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/strip",
+   "notes": "Keyword matching uses case-insensitive prefix matching with word boundary checking (next char must be space, underscore, or end of line) to avoid false positives. Empty keywords list returns error. If output path is empty, auto-generates using _stripped suffix. Output always written as text (one line per input line, preserving LS-DYNA format)."
+  },
+  {
+   "name": "restack",
+   "category": "model",
+   "summary": "Extrude shell surface into stacked solid layers with independent material per layer.",
+   "description": "restack는 단일 균질 솔리드 파트를 다층 재료 스택으로 교체하는 어셈블리 오퍼레이션입니다. 원본 파트의 노드를 지정 방향(x/y/z/auto)으로 재배열하여 새로운 레이어를 생성하며, 각 레이어는 독립적인 PID/SECID/MID를 갖습니다. Solid, TShell, Shell 요소를 혼합 사용할 수 있으며, 인접 레이어 간 tied 또는 CZM (점탄성 감쇠 자동 계산) 접촉 지원합니다.",
+   "invocation": "yaml",
+   "config_style": "freeform",
+   "takes_kfile": false,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "config",
+     "type": "config",
+     "role": "config",
+     "required": true,
+     "description": "전체 YAML 설정 객체 (base_model, output, operations: [type: restack, ...])"
+    }
+   ],
+   "example": {
+    "args": {
+     "config": {
+      "base_model": "examples/assemble_display/simplebox.k",
+      "output": "examples/assemble_display/b7_mixed",
+      "operations": [
+       {
+        "type": "restack",
+        "target_pid": 1,
+        "direction": "z",
+        "element_type": "solid",
+        "interface_contact": "czm_auto",
+        "drop_height": 1000,
+        "czm_normal": 50,
+        "czm_shear": 30,
+        "layers": [
+         {
+          "title": "PL_ADV",
+          "thickness": 0.054,
+          "num_elements": 2,
+          "material_card": "*MAT_GENERAL_VISCOELASTIC_TITLE\nPL_ADV\n$#     mid        ro      bulk       pcf        ef      tref         a         b\n          19 1.350E-09 4.000E+03       0.0       0.0       0.0       0.0       0.0"
+         },
+         {
+          "title": "PSA4_ADV",
+          "thickness": 0.025,
+          "element_type": "shell",
+          "num_elements": 1,
+          "czm_normal": 45,
+          "czm_shear": 25,
+          "material_card": "*MAT_GENERAL_VISCOELASTIC_TITLE\nPSA_ADV\n$#     mid        ro      bulk       pcf        ef      tref         a         b\n          14 1.100E-09 8.000E+02       0.0       0.0       0.0       0.0       0.0"
+         }
+        ]
+       }
+      ]
+     }
+    },
+    "note": "Restack는 yaml 기반 어셈블리 파이프라인의 일부로, base_model은 simplebox.k 같은 기존 k파일을 가리킵니다. 예제는 b7_mixed.yaml에서 참고. layers 배열 각 항목이 독립 층을 정의합니다."
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/assemble_display",
+   "notes": "- invocation은 yaml으로만 지원 (positional args 아님)\n- base_model + output + operations[] 구조는 KooRemapper assemble의 표준 포맷\n- target_pid: 압출 대상 부품 ID (필수)\n- direction: auto | x | y | z (기본: auto 자동 감지)\n- element_type: solid | tshell | shell (기본: solid) — 모든 레이어의 기본값\n- element_size: 레이어별 목표 요소 크기 [mm] (0=비활성)\n- interface_contact: tied (기본) | czm | czm_auto\n  * tied: 노드 공유 또는 tied contact (shell layer 있을 시만 필요)\n  * czm: CONTACT_TIED_SURFACE_TO_SURFACE_FAILURE (czm_normal/czm_shear 필수)\n  * czm_auto: czm + 자동 VC 계산 (drop_height 필수, 재료 Prony 급수 필요)\n- czm_normal/czm_shear: 파손 응력 [MPa] (czm/czm_auto 모드 시)\n- drop_height: 낙하 높이 [mm] (czm_auto 전용, 영향속도 → VC 자동 계산)\n- layers[]: 리스트 (각 항목이 하나의 압출 층)\n  * thickness: 층 두께 [mm] (필수)\n  * num_elements: 두께 방향 요소 수 (0=element_size로 자동 계산)\n  * element_type: 층별 타입 override (비지정 시 상위 element_type)\n  * title: *PART 제목 (비지정 시 \"Restack Layer N\")\n  * czm_normal/czm_shear: 이 층 인터페이스 파손 응력 override\n  * material_card: LS-DYNA 재료 카드 (파이프 | 블록 형식)\n- 두께 불일치: 총 층두께 ≠ 원본 두께 → 노드 강제 스케일 + *INITIAL_STRAIN_SOLID 삽입\n- Shell 레이어: 인접 Solid와 노드 미공유, independent mid-plane → 양쪽과 tied/CZM 접촉"
+  },
+  {
+   "name": "update",
+   "category": "model",
+   "summary": "Update node coordinates from a dynain or K-file with *NODE block.",
+   "description": "Update operation reads *NODE block from a dynain or K-file and overwrites matching node positions in the model. Only nodes present in both the model and source file are updated; unmatched nodes remain unchanged. Works with any file containing a *NODE block (dynain, K-file, etc.) and can be chained with other assemble operations.",
+   "invocation": "yaml",
+   "config_style": "structured",
+   "takes_kfile": false,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "model",
+     "type": "file",
+     "role": "yaml_field",
+     "yaml_path": "model",
+     "required": true,
+     "description": "Original K-file to be updated (also accepts 'base_model' as alias key)"
+    },
+    {
+     "name": "output",
+     "type": "output",
+     "role": "yaml_field",
+     "yaml_path": "output",
+     "required": true,
+     "description": "Output file prefix (without .k extension; .k will be appended automatically)"
+    },
+    {
+     "name": "dynain",
+     "type": "file",
+     "role": "yaml_field",
+     "yaml_path": "dynain",
+     "required": true,
+     "description": "dynain or K-file with *NODE block to read coordinates from"
+    }
+   ],
+   "example": {
+    "args": {
+     "model": "base_model.k",
+     "output": "updated_model",
+     "dynain": "assembled_dr_result.dynain"
+    },
+    "note": "Creates updated_model.k with node coordinates from dynain. Nodes in dynain not found in model are silently skipped. YAML config file path determines the base directory for relative file paths."
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/replace_test",
+   "notes": "Can be invoked as standalone `KooRemapper update <config.yaml>` or as part of assemble operations list with `type: update`. When used in assemble, coordinates are updated in the existing base_model context. Only nodes present in BOTH files are updated; nodes only in dynain are discarded, and nodes only in model are left untouched. Supports free-format or fixed-width *NODE blocks from LS-DYNA format. YAML keys 'model' and 'base_model' are equivalent aliases."
+  },
+  {
+   "name": "contact",
+   "category": "model",
+   "summary": "Analyze, create, modify, convert, remove, or auto-detect contact definitions (*CONTACT_*, *SET_SEGMENT, *SET_PART, *SET_NODE keywords)",
+   "description": "Manage LS-DYNA contact definitions through a flexible YAML workflow. Support actions: analyze (read-only report), create (part/segment/node-based), convert (transform SSTYP), modify (change friction/SOFT/Cards), remove (delete), and detect (auto-find contact pairs with spatial hashing). Each action can specify detailed Card parameters (A~G) for fine-grained control.",
+   "invocation": "yaml",
+   "config_style": "freeform",
+   "takes_kfile": true,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "config",
+     "type": "config",
+     "role": "config",
+     "required": true,
+     "description": "전체 YAML 설정 객체"
+    }
+   ],
+   "example": {
+    "args": {
+     "config": {
+      "model": "model.k",
+      "output": "result.k",
+      "contacts": [
+       {
+        "action": "analyze"
+       },
+       {
+        "action": "create",
+        "type": "automatic_surface_to_surface",
+        "slave": {
+         "pid": 1
+        },
+        "master": {
+         "pid": 2
+        },
+        "friction": 0.3,
+        "soft": 2,
+        "title": "Contact_1"
+       },
+       {
+        "action": "detect",
+        "scope": "all",
+        "tolerance": 0.1,
+        "auto_create": true,
+        "contact_type": "auto",
+        "friction": 0.15
+       }
+      ]
+     }
+    },
+    "note": "This example shows analyze (report existing contacts), create (direct part IDs), and detect (auto-find contacting surfaces across all parts)"
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/contact",
+   "notes": "analyze: Report mode, no output required if only reporting. create: Use pid/pids for direct reference (SSTYP=3/2), or as_segment:true/facing:true for surface extraction (SSTYP=0). convert: Transform existing contact SSTYP (e.g. part→segment); facing filter available. modify: Change friction, SOFT, and any Card A~G field in-place (56 fields total). remove: Delete contact by contact_index. detect: Auto-find contact pairs via Spatial Hash Grid; supports pid-to-pid, scope:all (global), include/exclude keywords, and pair-level filters (skip_existing:tied/all, subtract_existing:true). contactType presets: auto→AUTOMATIC_SURFACE_TO_SURFACE, tied→TIED_SURFACE_TO_SURFACE, mortar→AUTOMATIC_SURFACE_TO_SURFACE_MORTAR, tied_mortar→TIED_SURFACE_TO_SURFACE_MORTAR, single→AUTOMATIC_SINGLE_SURFACE, eroding→ERODING_SURFACE_TO_SURFACE, forming→FORMING_SURFACE_TO_SURFACE (arbitrary names auto-converted to uppercase). All actions processed in order; actions may reference prior contact_index values."
+  },
+  {
+   "name": "battery",
+   "category": "model",
+   "summary": "Generate LS-DYNA battery cell model (stacked/wound, Phase 1+2, swelling support)",
+   "description": "Generates complete parametric LS-DYNA K-file models for cylindrical or pouch battery cells (stacked layer or wound jelly-roll geometry). Supports Phase 1 mechanical/thermal analysis and Phase 2 intercalation-induced swelling with dynamic relaxation equilibration. Configurable layer stacks, electrode formulations, contact definitions, and material properties via YAML.",
+   "invocation": "yaml",
+   "config_style": "freeform",
+   "takes_kfile": false,
+   "requires_gmsh": false,
+   "requires_tetgen": false,
+   "params": [
+    {
+     "name": "config",
+     "type": "config",
+     "role": "config",
+     "required": true,
+     "description": "배터리 셀 생성 설정 객체(geometry/layer_thickness/swelling 등 중첩)"
+    }
+   ],
+   "example": {
+    "args": {
+     "config": {
+      "output": "examples/battery/swell/stacked/battery_stacked_swell",
+      "model_type": "stacked",
+      "tier": 0,
+      "phase": 1,
+      "mode": "swell",
+      "geometry": {
+       "cell_width": 66.4,
+       "cell_height": 89.8,
+       "n_unit_cells": 11
+      },
+      "layer_thickness": {
+       "al_cc": 0.012,
+       "cathode": 0.065,
+       "separator": 0.02,
+       "anode": 0.07,
+       "cu_cc": 0.008,
+       "pouch": 0.153,
+       "electrolyte_buffer": 0.2
+      },
+      "solid_electrode": true,
+      "airbag_fill": true,
+      "no_pcm": true,
+      "no_thermal": true,
+      "swelling": {
+       "soc": 1,
+       "nmc_cte": 0.04,
+       "graphite_cte": 0.1
+      },
+      "dr_endtim": 0.0005,
+      "dr_tolerance": 0.001,
+      "dr_factor": 0.995,
+      "dr_nrcyck": 250,
+      "timestep_safety": 0.67,
+      "output_interval": 5e-05
+     }
+    },
+    "note": "Stacked cell with solid electrodes in swell mode (thermal expansion + dynamic relaxation); generates battery_stacked_swell_tier0_phase1.k with 11 unit cells; intercalation-driven swelling equilibrated via DR."
+   },
+   "example_folder": "/home/koopark/claude/KooRemapper/examples/battery/swell/stacked/",
+   "notes": "battery takes ONLY a YAML config file argument (no positional args). Output filename is auto-built from 'output' field with tier suffix (e.g., _tier0) and phase suffix (e.g., _phase1) appended; .k extension added. Batch mode activated if batch.tiers[], batch.phases[], or batch.model_types[] are non-empty — generates multiple models per config. Phase 2 automatically enables swelling if phase==2. Modes 'bare' and 'swell' auto-set no_fixture=true. Phase chaining (use_dynain=true + phases [1,2]) auto-computes dynain filenames for Phase 2 to reference Phase 1 DR state. All dimensions in mm, densities in t/mm^3, moduli in MPa. Material properties fallback to built-in defaults if not specified. Mesh density (tier) controls element size for contact/accuracy tradeoff."
+  }
+ ]
+}

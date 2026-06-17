@@ -33,6 +33,9 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cctype>
+#ifndef _WIN32
+#include <unistd.h>   // readlink (findGmshExe, POSIX)
+#endif
 
 namespace fs = std::filesystem;
 using namespace KooRemapper;

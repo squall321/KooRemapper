@@ -1,0 +1,44 @@
+Bootstrap: docker
+From: python:3.12-slim
+
+%labels
+    Component  koorm-api
+    Version    0.1.0
+
+%post
+    set -eux
+    apt-get update
+    apt-get install -y --no-install-recommends build-essential libpq-dev curl
+    rm -rf /var/lib/apt/lists/*
+    pip install --upgrade pip
+    # Baseline tooling baked in; app source comes from the bind-mounted /workspace.
+    pip install --no-cache-dir \
+        "fastapi>=0.115" "uvicorn[standard]>=0.32" \
+        "sqlalchemy[asyncio]>=2.0.36" "alembic>=1.14" "asyncpg>=0.30" \
+        "pydantic>=2.9" "email-validator>=2.2" "pydantic-settings>=2.6" \
+        "python-jose[cryptography]>=3.3" "argon2-cffi>=23.1" "python-multipart>=0.0.18" \
+        "ulid-py>=1.1" "PyYAML>=6.0" "jsonschema>=4.23" "httpx>=0.28"
+
+%environment
+    export PYTHONDONTWRITEBYTECODE=1
+    export PYTHONUNBUFFERED=1
+    export PYTHONPATH=/workspace/platform/backend
+
+%runscript
+    PORT="${KOORM_API_PORT:-8700}"
+    cd /workspace/platform/backend
+    exec uvicorn app.main:app --host 0.0.0.0 --port "$PORT" \
+        --timeout-graceful-shutdown 5 "$@"
+
+%startscript
+    # No --reload: the bind-mounted source generates .pyc churn under app/ when
+    # other processes import the package, which would trip the reloader and bounce
+    # the server. Apply code changes with: infra/scripts/restart.sh
+    PORT="${KOORM_API_PORT:-8700}"
+    cd /workspace/platform/backend
+    exec uvicorn app.main:app --host 0.0.0.0 --port "$PORT" \
+        --timeout-graceful-shutdown 5
+
+%help
+    KooRemapper Platform API container.
+    Build: apptainer build platform/infra/apptainer/api.sif platform/infra/apptainer/api.def

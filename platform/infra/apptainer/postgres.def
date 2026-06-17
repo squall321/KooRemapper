@@ -1,0 +1,11 @@
+Bootstrap: docker
+From: postgres:15
+
+%labels
+    Component  koorm-postgres
+    Wraps      postgres:15
+
+%startscript
+    # docker-entrypoint.sh respects POSTGRES_USER/PASSWORD/DB, PGPORT, PGDATA
+    # supplied via `instance start --env`.
+    exec docker-entrypoint.sh postgres

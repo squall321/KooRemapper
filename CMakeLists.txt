@@ -253,6 +253,31 @@ endif()
 install(TARGETS KooRemapper DESTINATION bin)
 
 # ============================================================
+# Platform backend integration (opt-in; ZERO impact when unset)
+# ------------------------------------------------------------
+# When -DKOOREMAPPER_PLATFORM_BIN=<dir> is passed, the freshly built
+# binary and its runtime material DB are copied into that directory
+# after every build, so the FastAPI backend always runs the current
+# binary. Leaving the cache var empty (the default) makes this a no-op,
+# so existing build/CI workflows are completely unaffected.
+#   cmake -DKOOREMAPPER_PLATFORM_BIN=$PWD/platform/backend/bin -S . -B build/linux
+# ============================================================
+set(KOOREMAPPER_PLATFORM_BIN "" CACHE PATH
+    "If set, copy the built KooRemapper binary + materials/ here for the FastAPI backend")
+if(KOOREMAPPER_PLATFORM_BIN)
+    add_custom_command(TARGET KooRemapper POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${KOOREMAPPER_PLATFORM_BIN}"
+        COMMAND ${CMAKE_COMMAND} -E copy
+            "$<TARGET_FILE:KooRemapper>"
+            "${KOOREMAPPER_PLATFORM_BIN}/$<TARGET_FILE_NAME:KooRemapper>"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/dist/materials"
+            "${KOOREMAPPER_PLATFORM_BIN}/materials"
+        COMMENT "Copying KooRemapper binary + materials -> ${KOOREMAPPER_PLATFORM_BIN}"
+        VERBATIM)
+endif()
+
+# ============================================================
 # Testing
 # ============================================================
 option(BUILD_TESTS "Build test suite" ON)
