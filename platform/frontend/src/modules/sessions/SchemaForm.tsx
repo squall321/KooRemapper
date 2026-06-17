@@ -3,6 +3,7 @@
 // - enums render as <select>, booleans as checkbox, numbers/strings as inputs
 // - freeform yaml ops (single `config` object param) render a JSON/YAML textarea
 import { useState } from 'react'
+import yaml from 'js-yaml'
 import type { OperationDetail, SessionFile } from '@/shared/api/types'
 import { Input, Label, Select, Textarea } from '@/shared/ui/ui'
 
@@ -91,22 +92,26 @@ export function SchemaForm({
 }
 
 function ConfigEditor({ value, onChange, example }: { value: ArgValues; onChange: (v: ArgValues) => void; example: Record<string, unknown> }) {
-  const initial = JSON.stringify((value.config ?? example.config ?? {}), null, 2)
+  // Default to YAML (KooRemapper-native). Accepts YAML or JSON (YAML is a superset).
+  const initial = yaml.dump((value.config ?? example.config ?? {}), { lineWidth: 100 })
   const [text, setText] = useState(initial)
   const [err, setErr] = useState<string | null>(null)
   return (
     <div>
-      <Label>config (JSON) — 이 작업은 자유 형식 설정 객체를 받습니다</Label>
+      <Label>config (YAML/JSON) — 이 작업은 자유 형식 설정 객체를 받습니다</Label>
       <Textarea
         rows={14}
         value={text}
         onChange={(e) => {
           setText(e.target.value)
-          try { onChange({ config: JSON.parse(e.target.value) }); setErr(null) }
-          catch (x) { setErr((x as Error).message) }
+          try {
+            const parsed = yaml.load(e.target.value)
+            if (parsed && typeof parsed === 'object') { onChange({ config: parsed }); setErr(null) }
+            else setErr('설정은 객체여야 합니다')
+          } catch (x) { setErr((x as Error).message) }
         }}
       />
-      {err && <div className="text-xs text-danger mt-1">JSON 오류: {err}</div>}
+      {err && <div className="text-xs text-danger mt-1">파싱 오류: {err}</div>}
     </div>
   )
 }

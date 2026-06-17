@@ -68,7 +68,33 @@ class Settings(BaseSettings):
 
     @property
     def frontend_dist_path(self) -> Path | None:
-        return self.serve_frontend_dist
+        # Treat empty/"." (pydantic coerces "" → Path(".")) as "not configured".
+        p = self.serve_frontend_dist
+        if p is None or str(p) in ("", "."):
+            return None
+        return p
+
+    def model_post_init(self, _ctx) -> None:
+        # In production, refuse to run with the dev placeholder secrets.
+        if not self.is_development:
+            insecure = []
+            if self.jwt_secret == "dev-insecure-change-me":
+                insecure.append("KOORM_JWT_SECRET")
+            if "koorm:koorm@" in self.database_url:
+                insecure.append("KOORM_DATABASE_URL (default password)")
+            if insecure:
+                raise RuntimeError(
+                    "Refusing to start in production with default secrets: "
+                    + ", ".join(insecure)
+                )
+
+    def __repr__(self) -> str:  # never leak secrets in logs/tracebacks
+        return (
+            f"Settings(app_env={self.app_env!r}, api_port={self.api_port}, "
+            f"jwt_secret=***, database_url=***, storage_dir={self.storage_dir})"
+        )
+
+    __str__ = __repr__
 
 
 @lru_cache

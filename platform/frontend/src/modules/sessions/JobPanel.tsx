@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Download, FileText, ScrollText, X, Ban } from 'lucide-react'
 import { cancelJob, downloadFile, getJobLogs, getJobOutputs, listSessionJobs } from '@/shared/api/endpoints'
 import type { Job } from '@/shared/api/types'
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Spinner } from '@/shared/ui/ui'
 import { fmtDate } from '@/shared/lib/cn'
+import { errorMessage } from '@/shared/api/client'
 
 export function JobPanel({ sessionId }: { sessionId: string }) {
   const { data, isLoading } = useQuery({
@@ -43,6 +44,10 @@ function JobRow({ job, sessionId, onLogs }: { job: Job; sessionId: string; onLog
     queryFn: () => getJobOutputs(job.id),
     enabled: job.status === 'succeeded',
   })
+  const cancel = useMutation({
+    mutationFn: () => cancelJob(job.id),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['jobs', sessionId] }),
+  })
   return (
     <li className="px-3 py-2 text-sm">
       <div className="flex items-center gap-2">
@@ -53,7 +58,7 @@ function JobRow({ job, sessionId, onLogs }: { job: Job; sessionId: string; onLog
         {job.exit_code !== null && <span className="text-xs text-muted">exit {job.exit_code}</span>}
         <span className="text-xs text-muted">{fmtDate(job.created_at)}</span>
         <Button size="sm" variant="ghost" onClick={onLogs}><ScrollText size={14} /></Button>
-        {active && <Button size="sm" variant="ghost" onClick={() => cancelJob(job.id).then(() => qc.invalidateQueries({ queryKey: ['jobs', sessionId] }))}><Ban size={14} /></Button>}
+        {active && <Button size="sm" variant="ghost" disabled={cancel.isPending} onClick={() => cancel.mutate()}><Ban size={14} /></Button>}
       </div>
       {job.status === 'running' && (
         <div className="mt-1.5 h-1.5 rounded-full bg-bg overflow-hidden">
@@ -63,6 +68,7 @@ function JobRow({ job, sessionId, onLogs }: { job: Job; sessionId: string; onLog
           />
         </div>
       )}
+      {cancel.isError && <div className="text-xs text-danger mt-1">취소 실패: {errorMessage(cancel.error)}</div>}
       {job.status === 'failed' && job.error_summary && (
         <pre className="mono text-xs text-danger bg-bg rounded p-2 mt-1 max-h-24 overflow-auto whitespace-pre-wrap">{job.error_summary}</pre>
       )}
@@ -81,7 +87,7 @@ function JobRow({ job, sessionId, onLogs }: { job: Job; sessionId: string; onLog
 }
 
 function LogModal({ jobId, onClose }: { jobId: string; onClose: () => void }) {
-  const { data, isLoading } = useQuery({ queryKey: ['joblogs', jobId], queryFn: () => getJobLogs(jobId) })
+  const { data, isLoading, error } = useQuery({ queryKey: ['joblogs', jobId], queryFn: () => getJobLogs(jobId) })
   return (
     <div className="fixed inset-0 bg-black/50 grid place-items-center p-6 z-50" onClick={onClose}>
       <Card className="max-w-3xl w-full max-h-[80vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
@@ -90,7 +96,7 @@ function LogModal({ jobId, onClose }: { jobId: string; onClose: () => void }) {
           <Button size="sm" variant="ghost" onClick={onClose}><X size={14} /></Button>
         </CardHeader>
         <CardBody className="overflow-auto">
-          {isLoading ? <Spinner /> : <pre className="mono text-xs whitespace-pre-wrap">{data || '(로그 없음)'}</pre>}
+          {isLoading ? <Spinner /> : error ? <div className="text-sm text-danger">로그를 불러오지 못했습니다: {errorMessage(error)}</div> : <pre className="mono text-xs whitespace-pre-wrap">{data || '(로그 없음)'}</pre>}
         </CardBody>
       </Card>
     </div>

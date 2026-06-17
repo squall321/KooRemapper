@@ -6,15 +6,18 @@ import { createSession, listSessions } from '@/shared/api/endpoints'
 import { Button, Card, CardBody, EmptyState, Input, Spinner } from '@/shared/ui/ui'
 import { PageHeader } from '@/shared/components/PageHeader'
 import { fmtDate } from '@/shared/lib/cn'
+import { errorMessage } from '@/shared/api/client'
 
 export function SessionsPage() {
   const qc = useQueryClient()
   const { data, isLoading } = useQuery({ queryKey: ['sessions'], queryFn: listSessions })
   const [name, setName] = useState('')
   const [open, setOpen] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
   const create = useMutation({
     mutationFn: () => createSession(name || '새 세션'),
-    onSuccess: () => { setName(''); setOpen(false); qc.invalidateQueries({ queryKey: ['sessions'] }) },
+    onSuccess: () => { setErr(null); setName(''); setOpen(false); qc.invalidateQueries({ queryKey: ['sessions'] }) },
+    onError: (e) => setErr(errorMessage(e)),
   })
 
   return (
@@ -31,6 +34,7 @@ export function SessionsPage() {
             <Input autoFocus placeholder="세션 이름" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && create.mutate()} />
             <Button variant="primary" onClick={() => create.mutate()} disabled={create.isPending}>생성</Button>
           </CardBody>
+          {err && <div className="px-4 pb-3 text-xs text-danger">{err}</div>}
         </Card>
       )}
 

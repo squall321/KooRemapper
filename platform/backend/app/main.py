@@ -7,6 +7,7 @@ Deployment shapes:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -44,7 +45,10 @@ async def lifespan(app: FastAPI):
 
     start_worker()
     yield
-    await stop_worker()
+    try:
+        await asyncio.wait_for(stop_worker(), timeout=3.5)
+    except asyncio.TimeoutError:
+        logger.warning("worker did not stop within 3.5s — forcing shutdown")
     logger.info("Shutting down %s", settings.app_name)
 
 

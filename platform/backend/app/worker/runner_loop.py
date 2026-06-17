@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import subprocess
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -95,8 +96,16 @@ async def _execute(job_id: str) -> None:
         job.stderr_path = str(err_path)
         await db.commit()
 
-        # snapshot existing files to detect new outputs
-        before = {p.name for p in work_dir.iterdir() if p.is_file()}
+        # snapshot existing files to detect new outputs (recursive — some ops
+        # write into subdirs; paths are relative to the session dir).
+        def _snap() -> set[str]:
+            return {
+                p.relative_to(work_dir).as_posix()
+                for p in work_dir.rglob("*")
+                if p.is_file()
+            }
+
+        before = _snap()
 
         try:
             exit_code = await asyncio.to_thread(
@@ -113,16 +122,17 @@ async def _execute(job_id: str) -> None:
         _CANCELED.discard(job_id)
 
         # register new files as outputs
-        after = {p.name for p in work_dir.iterdir() if p.is_file()}
+        after = _snap()
         new_names = sorted(after - before)
         output_ids: list[int] = []
         for name in new_names:
-            if name.startswith(".job_"):  # log files
+            base = name.rsplit("/", 1)[-1]
+            if base.startswith(".job_"):  # our log files
                 continue
             fpath = work_dir / name
             row = SessionFile(
                 session_id=session.id,
-                filename=name,
+                filename=name,  # may include a subdir (posix) for nested outputs
                 rel_path=f"{session.storage_path}/{name}",
                 kind="output",
                 origin_job_id=job_id,
@@ -157,18 +167,44 @@ _CANCELED: set[str] = set()
 
 
 def request_cancel(job_id: str) -> bool:
-    """Mark a running job for cancellation and kill its process if active."""
+    """Mark a running job for cancellation and stop its process if active.
+    SIGTERM first, then SIGKILL after a short grace period (binary may ignore TERM)."""
     _CANCELED.add(job_id)
     proc = _running.get(job_id)
     if proc is not None:
         proc.terminate()
+
+        def _kill_if_alive():
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+
+        threading.Thread(target=_kill_if_alive, daemon=True).start()
         return True
     return False  # queued (not yet running) — worker will see _CANCELED
+
+
+async def reconcile_orphans() -> None:
+    """On startup, fail any job left 'running' by a previous (crashed/restarted)
+    worker — its subprocess is gone, so it can never complete."""
+    async with SessionLocal() as db:
+        result = await db.execute(
+            text(
+                "UPDATE jobs SET status='failed', "
+                "error_summary='worker restarted while job was running', "
+                "finished_at=now() WHERE status='running'"
+            )
+        )
+        await db.commit()
+        if result.rowcount:
+            logger.warning("reconciled %d orphaned running job(s) → failed", result.rowcount)
 
 
 async def _loop() -> None:
     sem = asyncio.Semaphore(settings.worker_concurrency)
     tasks: set[asyncio.Task] = set()
+    await reconcile_orphans()
     logger.info("worker loop started (concurrency=%d)", settings.worker_concurrency)
     while not _stop.is_set():
         async with SessionLocal() as db:

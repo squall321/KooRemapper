@@ -65,12 +65,12 @@ export function OperationsPage() {
 }
 
 function OperationDetailModal({ op, onClose }: { op: string; onClose: () => void }) {
-  const { data } = useQuery<OperationDetail>({ queryKey: ['operation', op], queryFn: () => getOperation(op) })
+  const { data, error } = useQuery<OperationDetail>({ queryKey: ['operation', op], queryFn: () => getOperation(op) })
   return (
     <div className="fixed inset-0 bg-black/50 grid place-items-center p-6 z-50" onClick={onClose}>
       <Card className="max-w-2xl w-full max-h-[80vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
         <CardBody>
-          {!data ? <Spinner /> : (
+          {error ? <div className="text-sm text-danger">불러오기 실패: {String((error as Error).message)}</div> : !data ? <Spinner /> : (
             <>
               <div className="flex items-center gap-2 mb-1">
                 <code className="text-lg font-semibold">{data.name}</code>

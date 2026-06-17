@@ -38,7 +38,12 @@ def ensure_session_dir(user_id: int, session_id: str) -> Path:
 
 
 def abs_path(rel_path: str) -> Path:
-    return settings.storage_dir / rel_path
+    """Resolve a stored relative path, refusing anything that escapes storage_dir."""
+    root = settings.storage_dir.resolve()
+    resolved = (root / rel_path).resolve()
+    if resolved != root and root not in resolved.parents:
+        raise ValueError(f"path escapes storage dir: {rel_path}")
+    return resolved
 
 
 def sha256_of(path: Path) -> str:

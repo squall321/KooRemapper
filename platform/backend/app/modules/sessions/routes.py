@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,9 +23,12 @@ router = APIRouter(tags=["sessions"])
 # ── sessions ────────────────────────────────────────────────────────
 @router.get("/sessions")
 async def list_sessions(
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+    limit: int = Query(200, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    rows = await svc.list_sessions(db, user.id)
+    rows = (await svc.list_sessions(db, user.id))[offset : offset + limit]
     data = []
     for s, count in rows:
         d = SessionRead.model_validate(s).model_dump()

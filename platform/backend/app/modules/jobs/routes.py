@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import ulid
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import PlainTextResponse
@@ -79,13 +81,19 @@ async def create_job(
 @router.get("/sessions/{session_id}/jobs")
 async def list_session_jobs(
     session_id: str,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     await _require_session(db, user, session_id)
     rows = (
         await db.execute(
-            select(Job).where(Job.session_id == session_id).order_by(Job.created_at.desc())
+            select(Job)
+            .where(Job.session_id == session_id)
+            .order_by(Job.created_at.desc())
+            .limit(limit)
+            .offset(offset)
         )
     ).scalars()
     return ok([JobRead.model_validate(j).model_dump() for j in rows])
@@ -140,8 +148,15 @@ async def get_job_logs(
     def _read(path: str | None) -> str:
         if not path:
             return ""
+        # defense in depth: only read log files inside the storage dir
+        from app.config import settings as _s
+
         try:
-            with open(path, encoding="utf-8", errors="ignore") as fh:
+            rp = Path(path).resolve()
+            root = _s.storage_dir.resolve()
+            if root not in rp.parents:
+                return ""
+            with open(rp, encoding="utf-8", errors="ignore") as fh:
                 return fh.read()
         except OSError:
             return ""

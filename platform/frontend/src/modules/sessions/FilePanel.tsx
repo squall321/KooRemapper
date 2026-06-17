@@ -5,19 +5,23 @@ import { deleteFile, downloadFile, uploadFiles } from '@/shared/api/endpoints'
 import type { SessionFile } from '@/shared/api/types'
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Spinner } from '@/shared/ui/ui'
 import { fmtBytes } from '@/shared/lib/cn'
+import { errorMessage } from '@/shared/api/client'
 
 export function FilePanel({ sessionId, files }: { sessionId: string; files: SessionFile[] }) {
   const qc = useQueryClient()
   const inputRef = useRef<HTMLInputElement>(null)
   const [expanded, setExpanded] = useState<number | null>(null)
+  const [err, setErr] = useState<string | null>(null)
 
   const upload = useMutation({
     mutationFn: (fl: File[]) => uploadFiles(sessionId, fl),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['session', sessionId] }),
+    onSuccess: () => { setErr(null); qc.invalidateQueries({ queryKey: ['session', sessionId] }) },
+    onError: (e) => setErr(errorMessage(e)),
   })
   const del = useMutation({
     mutationFn: (id: number) => deleteFile(sessionId, id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['session', sessionId] }),
+    onSuccess: () => { setErr(null); qc.invalidateQueries({ queryKey: ['session', sessionId] }) },
+    onError: (e) => setErr(errorMessage(e)),
   })
 
   return (
@@ -34,6 +38,7 @@ export function FilePanel({ sessionId, files }: { sessionId: string; files: Sess
         </Button>
       </CardHeader>
       <CardBody className="p-0">
+        {err && <div className="px-3 py-2 text-xs text-danger border-b border-border">{err}</div>}
         {!files.length ? (
           <EmptyState title="파일 없음" hint="K파일을 업로드하면 자동으로 정보를 분석합니다." />
         ) : (

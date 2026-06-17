@@ -90,7 +90,7 @@ export function SessionDetailPage() {
                 <p className="text-xs text-muted">{opDetail.data.description}</p>
                 <SchemaForm op={opDetail.data} files={files} value={args} onChange={setArgs} />
                 {err && <div className="text-xs text-danger whitespace-pre-wrap">{err}</div>}
-                <Button variant="primary" className="w-full" onClick={() => run.mutate()} disabled={run.isPending}>
+                <Button variant="primary" className="w-full" onClick={() => run.mutate()} disabled={run.isPending || opDetail.isLoading}>
                   <Play size={15} /> {run.isPending ? '제출 중…' : '실행'}
                 </Button>
               </>

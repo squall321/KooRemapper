@@ -88,6 +88,9 @@ start_instance "$INST_API" "$API_SIF" \
   --env "KOORM_JWT_SECRET=${KOORM_JWT_SECRET}" \
   --env "KOORM_CORS_ORIGINS=${KOORM_CORS_ORIGINS}" \
   --env "KOORM_SERVE_FRONTEND_DIST=${KOORM_SPA_DIST}" \
+  --env "KOORM_WORKER_CONCURRENCY=${KOORM_WORKER_CONCURRENCY:-4}" \
+  --env "KOORM_JOB_TIMEOUT_SEC=${KOORM_JOB_TIMEOUT_SEC:-1800}" \
+  --env "KOORM_MAX_UPLOAD_MB=${KOORM_MAX_UPLOAD_MB:-512}" \
   --env "KOORM_APP_ENV=${KOORM_APP_ENV:-development}"
 
 # ── mcp ─────────────────────────────────────────────────────────────

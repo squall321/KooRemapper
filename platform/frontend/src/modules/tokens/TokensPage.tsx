@@ -31,7 +31,8 @@ export function TokensPage() {
   })
   const revoke = useMutation({
     mutationFn: (id: number) => revokeToken(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['tokens'] }),
+    onSuccess: () => { setErr(null); qc.invalidateQueries({ queryKey: ['tokens'] }) },
+    onError: (e) => setErr(errorMessage(e)),
   })
 
   return (

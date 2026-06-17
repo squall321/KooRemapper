@@ -38,13 +38,15 @@ def _forward_headers(ctx: Context) -> dict:
 
 
 def _unwrap(r: httpx.Response):
+    """Unwrap {success,data,message}. RAISE on error so Claude sees a tool error
+    (a returned error dict would look like a successful result)."""
     try:
         body = r.json()
     except Exception:
-        return {"error": f"HTTP {r.status_code} (non-JSON)", "status": r.status_code}
+        raise RuntimeError(f"Backend returned HTTP {r.status_code} (non-JSON)")
     if r.status_code >= 400 or (isinstance(body, dict) and not body.get("success", True)):
-        msg = body.get("message") if isinstance(body, dict) else None
-        return {"error": msg or f"HTTP {r.status_code}", "detail": body}
+        msg = (body.get("message") if isinstance(body, dict) else None) or f"HTTP {r.status_code}"
+        raise RuntimeError(msg)
     return body.get("data", body) if isinstance(body, dict) else body
 
 
@@ -145,8 +147,36 @@ async def get_job(job_id: str, ctx: Context, include_logs: bool = False) -> dict
     if include_logs and isinstance(job, dict):
         async with httpx.AsyncClient(base_url=API, timeout=60) as c:
             r = await c.get(f"/jobs/{job_id}/logs", headers=_forward_headers(ctx))
-            job = {**job, "logs": r.text[-4000:]}
+            job = {**job, "logs": r.text[-4000:] if r.status_code < 400 else f"(logs unavailable: HTTP {r.status_code})"}
     return job
+
+
+@mcp.tool()
+async def cancel_job(job_id: str, ctx: Context) -> dict:
+    """실행 중이거나 대기 중인 Job 을 취소한다. / Cancel a queued or running job."""
+    return await _post(ctx, f"/jobs/{job_id}/cancel", None)
+
+
+@mcp.tool()
+async def update_session(
+    session_id: str, ctx: Context, name: str | None = None, description: str | None = None
+) -> dict:
+    """세션 이름/설명 수정. / Rename or re-describe a session."""
+    body = {k: v for k, v in {"name": name, "description": description}.items() if v is not None}
+    async with httpx.AsyncClient(base_url=API, timeout=60) as c:
+        return _unwrap(await c.patch(f"/sessions/{session_id}", json=body, headers=_forward_headers(ctx)))
+
+
+@mcp.tool()
+async def delete_session(session_id: str, ctx: Context) -> dict:
+    """세션과 그 안의 모든 파일을 삭제. / Delete a session and all its files (irreversible)."""
+    return await _delete(ctx, f"/sessions/{session_id}")
+
+
+@mcp.tool()
+async def delete_file(session_id: str, file_id: int, ctx: Context) -> dict:
+    """세션에서 파일 1건 삭제. / Delete a single file from a session."""
+    return await _delete(ctx, f"/sessions/{session_id}/files/{file_id}")
 
 
 @mcp.tool()
@@ -169,6 +199,15 @@ async def download_result(
     if r.status_code >= 400:
         return {"error": f"HTTP {r.status_code}", "detail": r.text[:500]}
     data = r.content
+    # Guard against dumping a huge file into the model context.
+    MAX = int(os.environ.get("KOORM_MCP_MAX_DOWNLOAD_BYTES", str(5 * 1024 * 1024)))
+    if len(data) > MAX and not as_base64:
+        return {
+            "filename_id": file_id, "bytes": len(data),
+            "error": f"파일이 큽니다({len(data)} bytes > {MAX}). 내용 대신 요약만 반환합니다. "
+                     f"전체가 필요하면 as_base64=true 로 다시 요청하세요.",
+            "preview": data[:2000].decode("utf-8", "ignore"),
+        }
     if as_base64:
         return {"filename_id": file_id, "base64": base64.b64encode(data).decode(), "bytes": len(data)}
     try:
@@ -187,8 +226,16 @@ if __name__ == "__main__":
         from mcp.server.transport_security import TransportSecuritySettings
 
         allowed = [h.strip() for h in os.environ.get("MCP_ALLOWED_HOSTS", "").split(",") if h.strip()]
+        if not allowed:
+            print(
+                "⚠ MCP bound to non-localhost but MCP_ALLOWED_HOSTS is empty — DNS-rebinding "
+                "protection stays ON and will reject external Host headers. Set MCP_ALLOWED_HOSTS "
+                "(e.g. 'mcp.example.com,10.0.0.5:8701') or front with nginx.",
+                flush=True,
+            )
+        # Keep protection ON by default (secure); operator must allowlist hosts.
         mcp.settings.transport_security = TransportSecuritySettings(
-            enable_dns_rebinding_protection=bool(allowed),
+            enable_dns_rebinding_protection=True,
             allowed_hosts=allowed,
             allowed_origins=[],
         )

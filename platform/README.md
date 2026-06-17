@@ -68,6 +68,36 @@ uvicorn app.main:app --reload --port 8700
 | mcp | 8701 |
 | web | 5273 |
 
+환경변수 전체는 [ENVIRONMENT.md](ENVIRONMENT.md) 참조.
+
+## 운영 스크립트 (infra/scripts)
+
+| 스크립트 | 용도 |
+|---|---|
+| `start.sh` | build → postgres → migrate → api(+SPA) → mcp 일괄 기동 |
+| `stop.sh` | api + postgres 중지 |
+| `restart.sh` | api 재기동(이미지 확인 포함) |
+| `restart-api-only.sh` | api만 빠르게 재기동(코드 변경 반영, SIF/마이그레이션 생략) |
+| `status.sh` | 인스턴스 + 헬스 점검 |
+| `migrate.sh` / `seed.sh` | 마이그레이션 / 관리자 시드 |
+| `build-frontend.sh` | SPA 빌드(dist) |
+| `backup-db.sh` | postgres 덤프(infra/data/backups, 최근 14개 보관) |
+| `reset-db.sh` | (파괴적) postgres 데이터 초기화 |
+
+## 트러블슈팅
+
+| 증상 | 원인 / 해결 |
+|---|---|
+| `/api/health` 에 `binary_present:false` | 바이너리 미복사 → 루트에서 `cmake -DKOOREMAPPER_PLATFORM_BIN=$PWD/platform/backend/bin … && cmake --build …` |
+| 로그인/API `connection refused` | api 인스턴스 미기동 → `status.sh` 확인 후 `restart-api-only.sh` |
+| `password authentication failed` | `POSTGRES_PORT` 가 다른 postgres와 충돌(이 호스트는 5436 사용). `.env` 포트/비번 일치 + `reset-db.sh` 후 재기동 |
+| `/` 는 404, `/api/docs` 는 정상 | SPA dist 없음 → `build-frontend.sh` 후 `restart-api-only.sh` |
+| Job이 `running`에 멈춤 | api 재기동 시 워커가 startup에서 자동으로 `failed` 처리(reconcile). 재기동만 하면 됨 |
+| 업로드 413 | 파일이 `KOORM_MAX_UPLOAD_MB`(기본 512MB) 초과 |
+| op 실행 422 "세션에 없는 입력 파일" | 파일 인자가 세션에 업로드되지 않음 → 먼저 업로드 |
+| `meshfix` 실패 | gmsh 바이너리 필요(`requires_gmsh`) — `dist/gmsh/` 배치 필요 |
+| api가 `--reload`로 계속 죽음 | 의도적으로 비활성(번들 마운트 .pyc churn). 코드 변경은 `restart-api-only.sh` |
+
 ## 진행 상태
 
 - ✅ Phase 0 — 스캐폴딩 + 빌드 무영향 확인 + POST_BUILD 복사

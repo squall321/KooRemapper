@@ -15,7 +15,7 @@ from typing import Optional
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -43,8 +43,14 @@ async def _resolve_pat(db: AsyncSession, plaintext: str) -> Optional[User]:
     user = await db.get(User, row.user_id)
     if user is None or not user.is_active:
         return None
+    # Touch last_used_at at most every 10 min, via a targeted UPDATE (no
+    # read-modify-write race when the same token is used concurrently).
     if row.last_used_at is None or (now - row.last_used_at) > _TOUCH_INTERVAL:
-        row.last_used_at = now
+        await db.execute(
+            update(PersonalAccessToken)
+            .where(PersonalAccessToken.id == row.id)
+            .values(last_used_at=now)
+        )
         await db.commit()
     return user
 
