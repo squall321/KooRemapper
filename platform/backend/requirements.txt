@@ -14,3 +14,4 @@ ulid-py>=1.1
 PyYAML>=6.0
 jsonschema>=4.23
 httpx>=0.28
+pytest>=8.3

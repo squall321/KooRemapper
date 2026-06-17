@@ -103,10 +103,18 @@ async def upload_files(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    from app.config import settings
+
     s = await _require_session(db, user, session_id)
+    cap = settings.max_upload_mb * 1024 * 1024
     created = []
     for uf in files:
         raw = await uf.read()
+        if len(raw) > cap:
+            raise HTTPException(
+                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                f"{uf.filename}: 파일이 너무 큽니다 (최대 {settings.max_upload_mb}MB)",
+            )
         row = await svc.add_uploaded_file(db, s, filename=uf.filename or "file", raw=raw)
         created.append(FileRead.model_validate(row).model_dump())
     return ok(created, message=f"{len(created)}개 파일 업로드됨", status_code=201)

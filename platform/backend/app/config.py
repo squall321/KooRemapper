@@ -49,6 +49,8 @@ class Settings(BaseSettings):
     job_timeout_sec: int = 1800
     # Concurrent runner workers.
     worker_concurrency: int = 4
+    # Max single-file upload size (MB).
+    max_upload_mb: int = 512
 
     # --- CORS ---
     cors_origins: str = "http://localhost:5273,http://127.0.0.1:5273"

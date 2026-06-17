@@ -81,11 +81,14 @@ def create_app() -> FastAPI:
 
 
 def _configure_cors(app: FastAPI) -> None:
+    # Auth is via the Authorization: Bearer header (not cookies), so credentials
+    # are not needed — which lets us safely keep a wildcard fallback in dev
+    # (wildcard + allow_credentials is rejected by browsers and unsafe).
     origins = settings.cors_origin_list
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins if origins else ["*"],
-        allow_credentials=True,
+        allow_credentials=False,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["*"],
     )

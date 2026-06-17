@@ -68,7 +68,18 @@ export function SchemaForm({
                 placeholder={def.default !== undefined ? `기본값: ${String(def.default)}` : ''}
                 onChange={(e) => {
                   const raw = e.target.value
-                  set(name, def.type === 'number' ? parseFloat(raw) : def.type === 'integer' ? parseInt(raw, 10) : raw)
+                  if (raw === '') {
+                    const next = { ...value }
+                    delete next[name]
+                    onChange(next)
+                    return
+                  }
+                  if (def.type === 'number' || def.type === 'integer') {
+                    const n = def.type === 'integer' ? parseInt(raw, 10) : parseFloat(raw)
+                    if (!Number.isNaN(n)) set(name, n)
+                  } else {
+                    set(name, raw)
+                  }
                 }}
               />
             )}

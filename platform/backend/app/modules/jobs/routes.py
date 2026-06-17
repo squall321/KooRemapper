@@ -40,11 +40,28 @@ async def create_job(
     db: AsyncSession = Depends(get_db),
 ):
     await _require_session(db, user, session_id)
-    if catalog.get_operation(body.operation) is None:
+    entry = catalog.get_operation(body.operation)
+    if entry is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"알 수 없는 오퍼레이션: {body.operation}")
     errs = catalog.validate_args(body.operation, body.args)
     if errs:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "인자 검증 실패: " + "; ".join(errs))
+
+    # Pre-check that file-typed args reference files that exist in the session,
+    # so the user gets a clear error instead of a worker failure later.
+    from app.modules.sessions.services import list_files
+
+    names = {f.filename for f in await list_files(db, session_id)}
+    missing = [
+        f"{p['name']}={body.args[p['name']]}"
+        for p in entry.get("params", [])
+        if p.get("type") == "file" and body.args.get(p["name"]) and body.args[p["name"]] not in names
+    ]
+    if missing:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "세션에 없는 입력 파일: " + ", ".join(missing) + " (먼저 업로드하세요)",
+        )
     job = Job(
         id=ulid.new().str,
         session_id=session_id,

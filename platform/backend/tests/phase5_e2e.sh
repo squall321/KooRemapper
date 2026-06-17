@@ -49,9 +49,17 @@ LOG=$(curl -fsS "$BASE/jobs/$JID2/logs" "${AUTH[@]}")
 echo "$LOG" | grep -q "Nodes:" && { echo "  ✓ info job logs captured"; pass=$((pass+1)); } || { echo "  ✗ no log content"; fail=$((fail+1)); }
 
 echo "== failing job surfaces error =="
+# pre-validation: missing input file → 422 at creation (not a worker failure)
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/sessions/$SID/jobs" "${AUTH[@]}" -H 'Content-Type: application/json' \
+  -d '{"operation":"map","args":{"bent_mesh":"nonexistent.k","flat_mesh":"arc30_flat.k","output":"x.k"}}')
+chk "$CODE" "422" "missing input file rejected at creation (422)"
+
+# worker-level failure: corrupt .k passes pre-validation but the binary fails → status failed + error_summary
+printf 'this is not a valid k-file\n' > /tmp/koorm_bad.k
+curl -fsS -X POST "$BASE/sessions/$SID/files" "${AUTH[@]}" -F "files=@/tmp/koorm_bad.k" >/dev/null
 JID3=$(curl -fsS -X POST "$BASE/sessions/$SID/jobs" "${AUTH[@]}" -H 'Content-Type: application/json' \
-  -d '{"operation":"map","args":{"bent_mesh":"nonexistent.k","flat_mesh":"arc30_flat.k","output":"x.k"}}' | jget 'd["data"]["id"]')
-ST3=$(poll "$JID3"); chk "$ST3" "failed" "map with missing file → failed"
+  -d '{"operation":"map","args":{"bent_mesh":"koorm_bad.k","flat_mesh":"arc30_flat.k","output":"x.k"}}' | jget 'd["data"]["id"]')
+ST3=$(poll "$JID3"); chk "$ST3" "failed" "map with corrupt input → failed"
 ERR=$(curl -fsS "$BASE/jobs/$JID3" "${AUTH[@]}" | jget 'bool(d["data"]["error_summary"])')
 chk "$ERR" "True" "failed job has error_summary"
 
