@@ -55,6 +55,14 @@ function JobRow({ job, sessionId, onLogs }: { job: Job; sessionId: string; onLog
         <Button size="sm" variant="ghost" onClick={onLogs}><ScrollText size={14} /></Button>
         {active && <Button size="sm" variant="ghost" onClick={() => cancelJob(job.id).then(() => qc.invalidateQueries({ queryKey: ['jobs', sessionId] }))}><Ban size={14} /></Button>}
       </div>
+      {job.status === 'running' && (
+        <div className="mt-1.5 h-1.5 rounded-full bg-bg overflow-hidden">
+          <div
+            className="h-full bg-primary transition-all duration-500"
+            style={{ width: `${job.progress ?? 8}%` }}
+          />
+        </div>
+      )}
       {job.status === 'failed' && job.error_summary && (
         <pre className="mono text-xs text-danger bg-bg rounded p-2 mt-1 max-h-24 overflow-auto whitespace-pre-wrap">{job.error_summary}</pre>
       )}

@@ -91,6 +91,30 @@ async def list_session_jobs(
     return ok([JobRead.model_validate(j).model_dump() for j in rows])
 
 
+import re
+
+_PCT = re.compile(r"(\d{1,3})\s*%")
+
+
+def _live_progress(stdout_path: str | None) -> int | None:
+    """Parse the most recent NN% marker from a running job's stdout."""
+    if not stdout_path:
+        return None
+    try:
+        with open(stdout_path, "rb") as fh:
+            try:
+                fh.seek(-4096, 2)
+            except OSError:
+                fh.seek(0)
+            tail = fh.read().decode("utf-8", "ignore")
+    except OSError:
+        return None
+    matches = _PCT.findall(tail)
+    if not matches:
+        return None
+    return min(100, int(matches[-1]))
+
+
 @router.get("/jobs/{job_id}")
 async def get_job(
     job_id: str,
@@ -98,7 +122,10 @@ async def get_job(
     db: AsyncSession = Depends(get_db),
 ):
     job = await _require_job(db, user, job_id)
-    return ok(JobRead.model_validate(job).model_dump())
+    data = JobRead.model_validate(job).model_dump()
+    if job.status == "running" and data.get("progress") is None:
+        data["progress"] = _live_progress(job.stdout_path)
+    return ok(data)
 
 
 @router.get("/jobs/{job_id}/logs", response_class=PlainTextResponse)
