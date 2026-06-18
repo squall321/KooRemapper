@@ -122,6 +122,20 @@ export interface JsonSchema {
   additionalProperties: boolean
 }
 
+export interface OperationKey {
+  path: string
+  type: string
+  required: boolean
+  default?: string | null
+  values?: string[] | null
+  desc: string
+}
+
+export interface OperationPreset {
+  name: string
+  summary: string
+}
+
 export interface OperationDetail extends OperationSummary {
   description: string
   config_style: 'structured' | 'freeform' | null
@@ -130,4 +144,7 @@ export interface OperationDetail extends OperationSummary {
   example_folder: string
   notes: string
   args_schema: JsonSchema
+  // deep option reference (source-grounded enrichment); optional for back-compat
+  keys?: OperationKey[]
+  presets?: OperationPreset[] | null
 }

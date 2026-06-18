@@ -5,6 +5,7 @@ import { getOperation, listOperations } from '@/shared/api/endpoints'
 import type { OperationDetail } from '@/shared/api/types'
 import { Badge, Card, CardBody, Input, Spinner } from '@/shared/ui/ui'
 import { PageHeader } from '@/shared/components/PageHeader'
+import { OptionReference } from './OptionReference'
 
 const CAT_LABEL: Record<string, string> = {
   core: '코어', deform: '변형', mesh: '메쉬', material: '재료',
@@ -88,7 +89,13 @@ function OperationDetailModal({ op, onClose }: { op: string; onClose: () => void
                   </div>
                 ))}
               </div>
-              <h3 className="text-xs font-semibold text-muted mb-1">예제 args</h3>
+              {(data.keys?.length || data.presets?.length) ? (
+                <>
+                  <h3 className="text-xs font-semibold text-muted mb-1 mt-3">옵션/키 레퍼런스</h3>
+                  <OptionReference keys={data.keys} presets={data.presets} />
+                </>
+              ) : null}
+              <h3 className="text-xs font-semibold text-muted mb-1 mt-3">예제 args</h3>
               <pre className="mono text-xs bg-bg rounded-md p-3 overflow-auto">{JSON.stringify(data.example.args, null, 2)}</pre>
               {data.notes && <p className="text-xs text-muted mt-3">{data.notes}</p>}
             </>

@@ -10,6 +10,7 @@ import { errorMessage } from '@/shared/api/client'
 import { FilePanel } from './FilePanel'
 import { JobPanel } from './JobPanel'
 import { SchemaForm, type ArgValues } from './SchemaForm'
+import { OptionReference } from '@/modules/operations/OptionReference'
 
 const CAT_LABEL: Record<string, string> = {
   core: '코어', deform: '변형', mesh: '메쉬', material: '재료', analysis: '해석', bc: '하중/경계', model: '모델',
@@ -88,7 +89,11 @@ export function SessionDetailPage() {
                   <Button size="sm" variant="ghost" onClick={fillExample}>예제 채우기</Button>
                 </div>
                 <p className="text-xs text-muted">{opDetail.data.description}</p>
+                {opDetail.data.config_style === 'freeform' && (
+                  <OptionReference keys={opDetail.data.keys} presets={opDetail.data.presets} collapsible />
+                )}
                 <SchemaForm op={opDetail.data} files={files} value={args} onChange={setArgs} />
+                {opDetail.data.notes && <p className="text-[11px] text-muted">💡 {opDetail.data.notes}</p>}
                 {err && <div className="text-xs text-danger whitespace-pre-wrap">{err}</div>}
                 <Button variant="primary" className="w-full" onClick={() => run.mutate()} disabled={run.isPending || opDetail.isLoading}>
                   <Play size={15} /> {run.isPending ? '제출 중…' : '실행'}
