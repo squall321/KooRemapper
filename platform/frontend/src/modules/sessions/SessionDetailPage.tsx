@@ -89,10 +89,10 @@ export function SessionDetailPage() {
                   <Button size="sm" variant="ghost" onClick={fillExample}>예제 채우기</Button>
                 </div>
                 <p className="text-xs text-muted">{opDetail.data.description}</p>
-                {opDetail.data.config_style === 'freeform' && (
-                  <OptionReference keys={opDetail.data.keys} presets={opDetail.data.presets} collapsible />
-                )}
                 <SchemaForm op={opDetail.data} files={files} value={args} onChange={setArgs} />
+                {(opDetail.data.keys?.length || opDetail.data.presets?.length) ? (
+                  <OptionReference keys={opDetail.data.keys} presets={opDetail.data.presets} collapsible />
+                ) : null}
                 {opDetail.data.notes && <p className="text-[11px] text-muted">💡 {opDetail.data.notes}</p>}
                 {err && <div className="text-xs text-danger whitespace-pre-wrap">{err}</div>}
                 <Button variant="primary" className="w-full" onClick={() => run.mutate()} disabled={run.isPending || opDetail.isLoading}>
