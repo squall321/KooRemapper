@@ -101,9 +101,18 @@ start_instance "$INST_MCP" "$MCP_SIF" \
   --env "MCP_HOST=${MCP_HOST:-127.0.0.1}" \
   --env "MCP_ALLOWED_HOSTS=${MCP_ALLOWED_HOSTS:-}"
 
+# ── nginx (optional TLS reverse proxy) ──────────────────────────────
+if [ "${KOORM_ENABLE_NGINX:-0}" = "1" ]; then
+  [ -f "$NGINX_SIF" ] || "$APPTAINER" build "$NGINX_SIF" "$APPT_DIR/nginx.def"
+  [ -f "$PLATFORM_ROOT/infra/nginx/certs/server.crt" ] || "$SCRIPT_DIR/gen-certs.sh"
+  start_instance "$INST_NGINX" "$NGINX_SIF" \
+    --bind "$PLATFORM_ROOT/infra/nginx/certs:/etc/nginx/certs:ro"
+fi
+
 echo
 echo "✓ stack started"
 echo "  postgres : 127.0.0.1:${POSTGRES_PORT}"
 echo "  api      : http://127.0.0.1:${KOORM_API_PORT}/api/docs"
 echo "  mcp      : http://127.0.0.1:${KOORM_MCP_PORT}/mcp"
+[ "${KOORM_ENABLE_NGINX:-0}" = "1" ] && echo "  nginx    : https://127.0.0.1:${KOORM_HTTPS_PORT}/  (TLS, /api + /mcp 프록시)"
 echo "  web(SPA) : http://127.0.0.1:${KOORM_API_PORT}/  (when frontend dist is built + KOORM_SERVE_FRONTEND_DIST set)"

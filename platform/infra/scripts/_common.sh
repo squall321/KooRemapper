@@ -33,14 +33,18 @@ mkdir -p "$DATA_DIR/postgres" "$DATA_DIR/postgres-run"
 POSTGRES_SIF="$APPT_DIR/postgres.sif"
 API_SIF="$APPT_DIR/api.sif"
 MCP_SIF="$APPT_DIR/mcp.sif"
+NGINX_SIF="$APPT_DIR/nginx.sif"
 
 INST_POSTGRES=koorm_postgres
 INST_API=koorm_api
 INST_MCP=koorm_mcp
+INST_NGINX=koorm_nginx
 
 : "${POSTGRES_PORT:=5433}"
 : "${KOORM_API_PORT:=8700}"
 : "${KOORM_MCP_PORT:=8701}"
+: "${KOORM_HTTPS_PORT:=8443}"
+: "${KOORM_HTTP_PORT:=8080}"
 
 # Prefer a local extracted apptainer (no D-Bus / systemd-cgroups requirement).
 if [ -z "${APPTAINER:-}" ]; then
