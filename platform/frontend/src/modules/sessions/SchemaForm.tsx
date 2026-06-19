@@ -49,6 +49,15 @@ export function SchemaForm({
             </label>
           )
         }
+        if (def.type === 'object' || def.type === 'array') {
+          // config/object/array param → YAML editor (e.g. squeeze.config, convert.config)
+          return (
+            <div key={name}>
+              {label}
+              <ObjectField value={value[name]} onChange={(v) => set(name, v)} />
+            </div>
+          )
+        }
         return (
           <div key={name}>
             {label}
@@ -87,6 +96,29 @@ export function SchemaForm({
           </div>
         )
       })}
+    </div>
+  )
+}
+
+// YAML editor for a single object/array-typed parameter (initialized once;
+// the parent remounts SchemaForm via key when the op changes or example is filled).
+function ObjectField({ value, onChange }: { value: unknown; onChange: (v: unknown) => void }) {
+  const [text, setText] = useState(() => (value == null ? '' : yaml.dump(value, { lineWidth: 100 })))
+  const [err, setErr] = useState<string | null>(null)
+  return (
+    <div>
+      <Textarea
+        rows={10}
+        value={text}
+        placeholder="YAML 또는 JSON"
+        onChange={(e) => {
+          setText(e.target.value)
+          if (e.target.value.trim() === '') { onChange(undefined); setErr(null); return }
+          try { onChange(yaml.load(e.target.value)); setErr(null) }
+          catch (x) { setErr((x as Error).message) }
+        }}
+      />
+      {err && <div className="text-xs text-danger mt-1">파싱 오류: {err}</div>}
     </div>
   )
 }

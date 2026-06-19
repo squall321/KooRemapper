@@ -28,6 +28,7 @@ export function SessionDetailPage() {
   })
   const [args, setArgs] = useState<ArgValues>({})
   const [err, setErr] = useState<string | null>(null)
+  const [formKey, setFormKey] = useState(0)  // bump to remount SchemaForm (re-init YAML editors)
 
   const run = useMutation({
     mutationFn: () => createJob(id, opName, args),
@@ -45,9 +46,10 @@ export function SessionDetailPage() {
     setOpName(name)
     setArgs({})
     setErr(null)
+    setFormKey((k) => k + 1)
   }
   function fillExample() {
-    if (opDetail.data) setArgs(opDetail.data.example.args as ArgValues)
+    if (opDetail.data) { setArgs(opDetail.data.example.args as ArgValues); setFormKey((k) => k + 1) }
   }
 
   if (session.isLoading) return <div className="p-10 text-center"><Spinner /></div>
@@ -89,7 +91,7 @@ export function SessionDetailPage() {
                   <Button size="sm" variant="ghost" onClick={fillExample}>예제 채우기</Button>
                 </div>
                 <p className="text-xs text-muted">{opDetail.data.description}</p>
-                <SchemaForm op={opDetail.data} files={files} value={args} onChange={setArgs} />
+                <SchemaForm key={formKey} op={opDetail.data} files={files} value={args} onChange={setArgs} />
                 {(opDetail.data.keys?.length || opDetail.data.presets?.length) ? (
                   <OptionReference keys={opDetail.data.keys} presets={opDetail.data.presets} collapsible />
                 ) : null}
