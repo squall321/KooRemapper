@@ -82,6 +82,7 @@ uvicorn app.main:app --reload --port 8700
 | `migrate.sh` / `seed.sh` | 마이그레이션 / 관리자 시드 |
 | `build-frontend.sh` | SPA 빌드(dist) |
 | `backup-db.sh` | postgres 덤프(infra/data/backups, 최근 14개 보관) |
+| `supervisor.sh` | 와치독 — 죽은 인스턴스 자동 재기동(`--once` 또는 루프). 백그라운드 권장: `nohup infra/scripts/supervisor.sh >infra/logs/supervisor.log 2>&1 &` |
 | `reset-db.sh` | (파괴적) postgres 데이터 초기화 |
 
 ## 트러블슈팅
