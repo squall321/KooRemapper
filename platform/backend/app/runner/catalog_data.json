@@ -728,28 +728,44 @@
     "args": {
      "config": {
       "type": "flat",
+      "reference": {
+       "dimensions": {
+        "length_i": 140.0,
+        "length_j": 70.0,
+        "length_k": 1.0
+       }
+      },
       "elements_j": 20,
       "elements_k": 4,
       "variable_density": {
-       "zones": [
-        {
-         "fraction": 0.3,
-         "density": 2.0
-        },
-        {
-         "fraction": 0.4,
-         "density": 1.0
-        },
-        {
-         "fraction": 0.3,
-         "density": 2.0
-        }
-       ]
+       "zone1_dense_start": {
+        "length": 20.0,
+        "num_elements": 40
+       },
+       "zone2_increasing": {
+        "length": 30.0,
+        "num_elements": 20,
+        "growth_type": "linear"
+       },
+       "zone3_sparse": {
+        "length": 40.0,
+        "num_elements": 20
+       },
+       "zone4_decreasing": {
+        "length": 30.0,
+        "num_elements": 20,
+        "growth_type": "linear"
+       },
+       "zone5_dense_end": {
+        "length": 20.0,
+        "num_elements": 40
+       }
       }
      },
-     "output": "var_mesh.k"
+     "output": "var_mesh.k",
+     "no_scale": true
     },
-    "note": "가변 밀도 flat 메쉬 생성(양끝 조밀, 중앙 성김)"
+    "note": "가변밀도 flat 메쉬(5존: 양끝 조밀, 중앙 성김). --no-scale로 reference 불필요."
    },
    "example_folder": "/home/koopark/claude/KooRemapper/examples/wave",
    "notes": "FLAT TYPE BEHAVIOR: The 5 zones (zone1_dense_start, zone2_increasing, zone3_sparse, zone4_decreasing, zone5_dense_end) partition the I direction. Total I length = sum of zone lengths (before scaling). Total I elements = sum of zone num_elements. If reference mesh or dimensions provided, all zone lengths are scaled proportionally to match reference I dimension, unless --no-scale flag suppresses scaling. J and K elements are always uniform. CURVED TYPE BEHAVIOR: Requires centerline_points with minimum 2 points. Interpolation creates smooth curve through (or near) points depending on interpolation type. If reference mesh provided, arc length and cross-section (width, thickness) are auto-scaled to reference I, J, K dimensions; otherwise uses cross_section.width/thickness directly (defaults 1.0 each if omitted). elements_along_curve, elements_j (alias for width), elements_k (alias for thickness) control element counts. GROWTH_TYPE: Linear = uniform element spacing within zone; Geometric = element size varies multiplicatively; Exponential = exponential progression. Used for transition zones (2, 4) to smoothly vary element density. SCALING: Command-line --ref option overrides config's reference.flat_mesh. If both --ref and reference in YAML present, --ref takes precedence. --no-scale disables all scaling; zone lengths used as absolute dimensions. COMMON GOTCHAS: (1) Centerline_points must be YAML list format (each point on separate line with '- [x, y]'); inline [x,y] on one line not parsed. (2) Cross_section (width, thickness) ignored if reference mesh/dimensions provided. (3) Growth_type applies only to zones; sparse/dense zone distinction is determined by num_elements relative to neighbors, not by growth_type. (4) All numeric values (length, num_elements, width, thickness) must be positive. Zero or negative values cause validation failure. (5) If type not specified, defaults to 'flat'. Curved requires explicit type: curved in YAML.",
@@ -1857,7 +1873,7 @@
       ]
      }
     },
-    "note": "Example shows polygon-shaped indent with prestress calculation. Uses material E and nu from top-level material block. Coordinates are in the indentation plane (xy in this case). For spline shapes, use 'type: spline' with multiple points that are interpolated smoothly as a continuous curve."
+    "note": "실행 검증된 예제 (입력: block.k, shell_plate.k)"
    },
    "example_folder": "/home/koopark/claude/KooRemapper/examples/indent",
    "notes": "Coordinate system: shape points are 2D coordinates in the indentation plane. For plane='xy', use [x,y]. For plane='yz', use [y,z]. For plane='zx', use [z,x]. Direction must be perpendicular to plane (e.g., plane='xy' with direction='+z' or '-z'). Profile uses quarter-arc fillets with curvatures computed from r1, r2, depth. Stress calculation applies BEFORE node deformation (like bend); strain capping uses strainLimit/(thickness/2) upper bound for curvature at singularities. For shells with stress=true, shell_thickness must be explicitly provided in YAML or present as *SECTION_SHELL in K-file; if neither exists, operation fails. Part thickness computed as difference between max and min node positions along normal axis. Warning if k = |depth|/(r1+r2) > 1.0 (steep fillet). Mutually exclusive: cannot use both explicit shell_thickness override and auto-extraction from *SECTION_SHELL (priority: explicit first, then *SECTION_SHELL).",
@@ -2138,7 +2154,7 @@
       "operations": [
        {
         "type": "warpage",
-        "target_pid": 0,
+        "target_pid": 1,
         "dat_file": "warpage_3x3.dat",
         "plane": "xy",
         "deflection_axis": "z",
@@ -2153,7 +2169,7 @@
       ]
      }
     },
-    "note": "wave_flat.k 메시에 warpage_3x3.dat 변형 필드를 적용하여 wave_warped.k 출력"
+    "note": "실행 검증된 예제 (입력: wave_flat.k, warpage_3x3.dat)"
    },
    "example_folder": "/home/koopark/claude/KooRemapper/examples/wave",
    "notes": "CRITICAL GOTCHAS:\n\n1. **data_bbox vs part bbox**: If data_bbox is omitted, the operation auto-maps part geometry 1:1 to grid coordinates. This is correct only if part bbox dimensions align with grid extent. If data was measured in a different coordinate system, explicitly set data_bbox to avoid 1:1 assumption errors.\n\n2. **Mask interpolation**: Values exactly equal to mask_value (within 1e-6) are flagged as invalid. Isolated masked regions that cannot be interpolated from neighbors will fail the load. >50% masking triggers a warning.\n\n3. **Deflection axis sign**: Use explicit ±z/±x/±y. Unsigned z/x/y default to positive direction. The deflection is applied in physical coordinates AFTER the grid interpolation, so sign is part-global, not grid-local.\n\n4. **Unit conversion chain**: dat_file values [um/mm/m] → unit_scale multiplier → * morph_factor → deflection applied to node position. For example, if dat_file contains 0.5 and unit=um, morph_factor=2.0, the node moves 0.5 * 1e-3 * 2.0 = 0.001 mm.\n\n5. **Plane-axis coupling**: Plane (xy/yz/zx) defines which 2D axes of the grid map to mesh coordinates. Deflection must be perpendicular to the plane. E.g., plane=xy + deflection_axis=z is valid; plane=xy + deflection_axis=x is invalid (would deflect in-plane).\n\n6. **Prestress mode requires material**: E > 0 and 0 < nu < 0.5 must be set at operation or assembly level. Curvatures are computed via finite differences; finite_strain=true adds nonlinear (∂w/∂x)² strain terms.\n\n7. **Finite strain theory**: Only affects prestress mode. Von Kármán (true) captures membrane coupling for large deflections. Kirchhoff (false) is linear; appropriate for small deflections (w << thickness).\n\n8. **Grid minimum size**: Minimum 3×3 grid required; maximum 1000×1000. File must be rectangular (all rows same column count).\n\n9. **Bilinear interpolation assumes monotonic axis ordering** in the grid file. The grid is indexed as data[row][col] = data[i][j]; row indices map to v-axis, columns to u-axis in the normalized [0,1]×[0,1] space.\n\n10. **Added elements**: Warpage collects both base mesh and addedElements_ nodes (from prior operations like replace/restack) belonging to target_pid.\n\nMUTUALLY EXCLUSIVE / INCOMPATIBLE OPTIONS:\n- Cannot use both data_bbox and auto-map (only one is active per operation).\n- mode=deform ignores material (E, nu); mode=prestress requires them.\n- finite_strain only applies to prestress mode.\n\nWORKFLOW NOTES:\n- Warpage is typically applied AFTER replace/restack operations in the operations list so it can access the assembled geometry.\n- For shell elements, thickness is auto-detected from *SECTION_SHELL or explicitly provided in debug output.\n- Curvature calculation uses centered finite differences; edges use one-sided differences.",
@@ -2326,7 +2342,7 @@
    "example": {
     "args": {
      "config": {
-      "base_model": "../arc30/arc30_flat.k",
+      "base_model": "arc30_flat.k",
       "output": "offset_result",
       "operations": [
        {
@@ -2345,7 +2361,7 @@
       ]
      }
     },
-    "note": "예제는 examples/offset/01_basic_solid_tied.yaml 기반. arc30_flat.k는 examples/arc30/ 디렉토리에 있으며, 실행 경로에 따라 base_model 경로 조정 필요."
+    "note": "실행 검증된 예제 (입력: arc30_flat.k)"
    },
    "example_folder": "/home/koopark/claude/KooRemapper/examples/offset",
    "notes": "CRITICAL CONSTRAINTS AND GOTCHAS:\\n\\n(1) REQUIRED PARAMETERS:\\n    - source_pid, offset_direction, thickness (unless thickness_formula), num_layers, connection_mode are mandatory\\n    - Missing any triggers validation error\\n\\n(2) CONNECTION MODES:\\n    - tied: shares nodes at interface (lowest cost, zero gap)\\n    - czm: inserts cohesive elements with czm_material_card (requires *MAT_COHESIVE_*)\\n    - contact: duplicates nodes, user must add *CONTACT_* afterward\\n    - connection_mode=\\\"czm\\\" REQUIRES czm_material_card; without it, validation fails\\n\\n(3) ELEMENT TYPES AND RESTRICTIONS:\\n    - solid (HEX8): all features supported (tied/czm/contact, multi-layer, normal offset)\\n    - tshell (TSHELL): tied/contact only, NO czm mode\\n    - shell (QUAD4): tied/contact only, NO czm mode\\n    - When element_type is tshell/shell, shell_thickness MUST be set or defaults to thickness\\n\\n(4) OFFSET DIRECTION:\\n    - +normal/-normal: auto-detects surface normal per element (best for curved surfaces; use with use_local_normals=true for better quality)\\n    - ±x/±y/±z: fixed global direction (simpler, faster)\\n    - v1.1.0+: -normal direction fixed (prior versions had negative Jacobian bugs)\\n\\n(5) THICKNESS & LAYERS:\\n    - thickness: uniform per-layer thickness; with num_layers=3, creates 3 layers each of (thickness/3)\\n    - thickness_formula: if set, overrides thickness; supports x,y,z variables (e.g., \\\"1.0 + 0.01*x\\\")\\n    - num_layers must be ≥ 1\\n    - Multi-layer with different materials: use material_cards[] (array), one entry per layer\\n\\n(6) MATERIAL CARD MAGIC:\\n    - Use @MID@ placeholder in material_card; auto-replaced with assigned material ID\\n    - Use @CZM_MID@ placeholder in czm_material_card; auto-replaced with CZM material ID\\n    - If new_mid=0, MID auto-increments; if new_mid > 0, uses that ID\\n    - Multi-layer material_cards[] must have length == num_layers\\n    - material_card and material_cards[] are mutually exclusive\\n\\n(7) REGION FILTERS:\\n    - bbox_xmin/max, bbox_ymin/max, bbox_zmin/max: bounding box filter (all 6 values optional)\\n    - node_id_min/max: only offset nodes in this range (0 = disabled)\\n    - element_id_min/max: only offset elements in this range (0 = disabled)\\n    - Multiple filters can be combined (logical AND)\\n    - Filters apply to SOURCE elements; offset surfaces inherit the subset\\n\\n(8) QUALITY WARNINGS:\\n    - Aspect Ratio > 10: warning; > 20: error\\n    - Jacobian < 0.1: warning; < 1e-10: error (negative = degenerate)\\n    - Warping > 30°: warning; > 45°: error\\n    - -normal offset on highly concave surfaces may cause self-intersection → check warnings\\n\\n(9) PHASE/VERSION FEATURES:\\n    - use_local_normals, shell_offset, shell_thickness: Phase 2+\\n    - region filters (bbox_*, node_id_*, element_id_*): Phase 3+\\n    - thickness_formula: Phase 4+\\n    - prestress_mode=\\\"dual_offset\\\": Phase 3+ (advanced)\\n    - material_cards[]: Phase 3+\\n\\n(10) SOURCE ELEMENT SUPPORT:\\n    - Solid source elements: HEX8, TET4 (TET4 output quality degrades; HEX8 recommended)\\n    - Shell source elements: QUAD4, TRIA3 (auto-detected and handled)\\n    - Cannot use shell elements generated by prior offset in same operations[] list (PID tracking limitation)\\n\\n(11) YAML STRUCTURE:\\n    - operations[] array; each offset entry is one offset operation\\n    - Can chain multiple offset operations (e.g., offset PID 1 → PID 10, then offset PID 10 → PID 11)\\n    - Base model, output, and operations are at root level\\n\\n(12) @MID@ SUBSTITUTION:\\n    - material_card: \\\"*MAT_ELASTIC ... @MID@ ... \\\" → auto-replaces @MID@ with new_mid (or auto ID)\\n    - Each occurrence of @MID@ replaced; OK to have multiple @MID@ in same card\\n    - If material_card is empty/missing, no material written (user adds manually or via matswap)\\n\\n(13) COMMON MISTAKES:\\n    - Forgetting material_card when connection_mode=czm (validation will fail)\\n    - Using connection_mode=czm with element_type=tshell/shell (not supported)\\n    - Setting thickness_formula but leaving variables undefined in coord system\\n    - Not setting shell_thickness for tshell/shell element types\\n    - Mixing material_card and material_cards[] (use one, not both)\\n    - Trying to offset shell elements created by prior offset in same operations[] call\"",
@@ -4162,23 +4178,11 @@
    ],
    "example": {
     "args": {
-     "model": "examples/mesh/tetramesh.k",
-     "output": "output_remeshed.k",
-     "pid": 1,
-     "lc_target": 5,
-     "lc_min": -1,
-     "lc_max": 10,
-     "adaptive": true,
-     "algorithm": "hxt",
-     "optimize_netgen": true,
-     "optimize_passes": 3,
-     "quality_check": true,
-     "warn_min_jac": 0.15,
-     "boundary_nodes": "free",
-     "refine_surface": -1,
-     "polish": false
+     "model": "tetramesh.k",
+     "output": "meshfix_out.k",
+     "pid": 1
     },
-    "note": "Remeshes TET4 part 1 from tetramesh.k with target size 5.0 and adaptive corner refinement via Gmsh HXT algorithm. Gmsh executable must be in dist/gmsh/ or dist/gmsh-<ver>/ directory next to KooRemapper executable."
+    "note": "실행 검증된 예제 (입력: tetramesh.k)"
    },
    "example_folder": "/home/koopark/claude/KooRemapper/examples/mesh",
    "notes": "\nCRITICAL REQUIREMENTS:\n- Gmsh executable must be placed at dist/gmsh/gmsh.exe or dist/gmsh-<ver>/gmsh.exe relative to KooRemapper executable. Without it, operation fails immediately.\n- Input must be TET4 elements or degenerate HEX8 (nodes[3..7] all equal node[3]).\n\nSECTION HEADERS (optional YAML organization):\nAll top-level keys can also be nested under optional section headers for readability: [material], [adaptive], [gmsh], [boundary], [quality]. Keys under sections use slightly different names:\n- Under [boundary]: use 'nodes' instead of 'boundary_nodes'\n- Other section keys match top-level names (e.g., 'min_dt', 'E', 'nu' under [material]).\n\nAUTO-DETECTION & GEOMETRY:\n- lc_min auto-calc: If lc_min < 0 AND all of (min_dt, density, E, nu) > 0, computed from wave speed. Otherwise: lc_min = min(edge_min*0.8, lc_target*0.2).\n- THIN SOLID DETECTION: If min_bbox_dimension < avg_bbox_dimension * 0.3, geomThin=true → Mesh 2 skipped, 4-corner in-plane field used, Netgen passes skipped, autoRefineSurface=1 if needed.\n- AUTO refine_surface: Only applies when refine_surface=-1. Disabled for normal geometry (Mesh 2 handles it); applies 1 level for thin geometry if edge_avg > lc_target*1.5.\n\nDISTANCE FIELD SCALING (when adaptive=true):\n- Normal geometry: 8-corner field. DistMin = lcMinField*2, DistMax = lcMinField * decay_factor.\n- Thin geometry (thin axis detected): 4-corner in-plane field. DistMin = lcMinField*2, DistMax = lcMinField*4 (smaller decay to avoid flooding thin dim).\n\nPOLISH MODE (experimental):\n- Requires polish=true.\n- Identifies connected components of bad elements (Jac < polish_jac).\n- Each component expanded 2 rings, then patch re-meshed independently.\n- DUAL QUALITY GATES (both must pass to accept):\n  1. Min Jacobian retention: new_min_jac >= orig_min_jac * 0.95\n  2. Bad-element reduction: new_bad_count < orig_bad_count\n- If either gate fails, patch is discarded and original elements kept.\n- Mesh 2 skipped for patches; uses serial Delaunay (safer for small patches).\n\nBOUNDARY NODES:\n- free: all Gmsh nodes receive new sequential IDs (maxNodeId+1, maxNodeId+2, ...). Useful for independent part re-meshes.\n- fixed: Gmsh surface nodes matched to original model boundary nodes by coordinate (within snap_tolerance). Interior nodes get new IDs. Preserves node IDs at the interface for contact definitions.\n- snap: All Gmsh nodes get new IDs, but boundary nodes near adjacent parts are snapped to those part's nodes (within snap_tolerance). Allows loose coupling without strict coordinate matching.\n\nGOTCHAS & MUTUALLY EXCLUSIVE:\n- lc_min AND (min_dt, density, E, nu): if lc_min >= 0, dt-based calculation is skipped (explicit value takes priority).\n- optimize_netgen & optimize_passes: both skipped automatically for thin geometry regardless of setting.\n- refine_surface=-1 AND geomThin: auto refinement only applies to thin geometry. Normal geometry uses Mesh 2 instead.\n- polish=true AND 90° corners: if geometry has unrounded 90° corners, polish often cannot reduce bad elements (theoretical min ~0.03), so patches will be rejected.\n\nGMSH TIMEOUT & FAILURES:\n- No explicit timeout; Gmsh may hang on malformed STL or recursive ClassifySurfaces. If hung, Ctrl+C and check STL for open edges / non-manifold geometry.\n- Exit code 1 from Gmsh is often OK (warnings like ClassifySurfaces recursion). Check if .msh file was written before failing.\n\nPERFORMANCE HINTS:\n- Large meshes (100k+ TET4) take minutes. Use lc_target wisely to control output size.\n- Thin geometry disables Mesh 2 and Netgen, speeding up processing significantly.\n- Polish mode adds significant time; use sparingly on already-good meshes.\n",
@@ -5099,12 +5103,14 @@
    ],
    "example": {
     "args": {
-     "model": "wrapped_model.k",
-     "output": "relaxed_model.k",
+     "model": "cylinder_wrapped.k",
+     "output": "cylinder_relaxed.k",
      "level": 2,
-     "mode": "explicit"
+     "mode": "explicit",
+     "drterm": 100,
+     "endtime": 1
     },
-    "note": "Applies standard (level 2) Explicit Dynamic Relaxation with 100s DR phase and 1s post-DR analysis time. Config file path is relative to the YAML file location."
+    "note": "실행 검증된 예제 (입력: cylinder_wrapped.k)"
    },
    "example_folder": "/home/koopark/claude/KooRemapper/examples/wrap",
    "notes": "\n- **Level presets**: Lines 27-33 in relax.cpp define preset table (NRCYCK, DRTOL, DRFCTR, TSSFDR, IRELAL, EDTTL). Override thresholds: nrcyck/drtol/drfctr/tssfdr/edttl>0, irelal>=0.\n- **Strip mode exclusivity**: When strip=true, level/mode/drterm/endtime/nrcyck/drtol/drfctr/tssfdr/irelal/edttl are ignored; only removes keywords. Model and output paths still required.\n- **Implicit mode behavior**: mode=implicit automatically sets IDRFLG=5, inserts *CONTROL_IMPLICIT_GENERAL and *CONTROL_IMPLICIT_SOLUTION. Removes conflicting *CONTROL_IMPLICIT_* cards from input.\n- **Endtime logic**: endtime only applied if >0; modifies *CONTROL_TERMINATION to allow post-DR transient analysis.\n- **Path resolution**: Relative paths (no slash, no drive letter) resolved relative to YAML file directory; absolute paths used as-is.\n- **D3DRLF output**: d3drlf=true (default) adds *DATABASE_BINARY_D3DRLF with dt=1.0e-3, lcid=0.\n- **SIDR curves**: DEFINE_CURVE entries with SIDR=1 preserved; used by DR integrator.\n- **Boolean parsing**: Accepts 'true'/'yes'/'1' as true, 'false'/'no'/'0' as false (case-sensitive); empty/missing defaults per field.\n- **Validation**: level must be 1-5 (unless strip=true); mode must be 'explicit' or 'implicit' (unless strip=true).\n- **Output**: Inserts DR cards before *END keyword; existing DR/IMPLICIT cards removed first to avoid duplication.\n",
@@ -5314,11 +5320,11 @@
    ],
    "example": {
     "args": {
-     "model": "implicit_model.k",
+     "model": "base_model.k",
      "output": "explicit_model.k",
      "keep_dr_curves": false
     },
-    "note": "implicit_model.k에서 모든 *CONTROL_IMPLICIT_* 블록, 동적 완화, 모달 분석 카드를 제거하고 explicit_model.k로 저장. SIDR=1 곡선도 함께 제거됨."
+    "note": "실행 검증된 예제 (입력: base_model.k)"
    },
    "example_folder": "/home/koopark/claude/KooRemapper/examples/explicit",
    "notes": "\n제거되는 키워드 (keep_dr_curves 설정 무관):\n  - *CONTROL_DYNAMIC_RELAXATION (relax 명령어 소속)\n  - *DATABASE_BINARY_D3DRLF (relax 명령어 소속)\n  - *CONTROL_IMPLICIT_GENERAL, *CONTROL_IMPLICIT_DYNAMICS, *CONTROL_IMPLICIT_SOLUTION (implicit 명령어 소속)\n  - *CONTROL_IMPLICIT_AUTO, *CONTROL_IMPLICIT_STABILIZATION, *CONTROL_IMPLICIT_SOLVER (implicit 명령어 소속)\n  - *CONTROL_IMPLICIT_BUCKLE, *CONTROL_IMPLICIT_FORMING, *CONTROL_IMPLICIT_ROTATIONAL_DYNAMICS, *CONTROL_IMPLICIT_EIGENVALUE (modal 명령어 소속)\n\nkeep_dr_curves=false (기본값) 시 추가 제거:\n  - *DEFINE_CURVE 카드 중 SIDR=1 옵션을 가진 것들 (수량 로깅됨)\n\n경로 처리: YAML 파일이 있는 디렉토리를 기준으로 상대 경로를 해석함 (절대 경로도 지원).\n\n상호 배타적 옵션: 없음. keep_dr_curves는 독립적.\n\n주의 사항: 입력 K-file이 이미 순수 explicit인 경우에도 정상 작동하며, 제거 대상 키워드가 없으면 해당 키워드 로그가 표시되지 않음.\n",
@@ -6503,12 +6509,12 @@
    ],
    "example": {
     "args": {
-     "model": "your_model.k",
-     "output": "your_model_lv06.k",
+     "model": "base_model.k",
+     "output": "base_model_stabilized.k",
      "stabilize": "explicit",
-     "level": 6
+     "level": 1
     },
-    "note": "examples/explicit/level06.yaml — 접촉 1단계 프리셋. 페널티 불균형, 채터링, 이종 재료 접촉 시 사용"
+    "note": "실행 검증된 예제 (입력: base_model.k)"
    },
    "example_folder": "/home/koopark/claude/KooRemapper/examples/explicit",
    "notes": "CRITICAL GOTCHAS: (1) Shell-specific options (WRPANG, ESORT_SHELL, BWC, MITER, IRNXX) are auto-skipped if no *ELEMENT_SHELL in model—no error, just logged skip. (2) Level ordering is cumulative+hierarchical: if level: 6 is set, levels 1–6 all apply; later explicit option assignments override level defaults. (3) ERODE (Lv11+): Prompts interactively for y/N confirmation unless confirm_erosion: true (STDIN read, blocking). Once eroded elements deleted, mass/volume is NOT conserved—use for unstable/inversion-prone elements only. (4) IRNXX defaults to INT_MIN (unset); valid values are -1 or -2 only—no other integer accepted. (5) *CONTROL_CONTACT requires 2 cards for Card 2 fields (NSBCS, XPENE); if Card 2 missing, auto-inserted. (6) Per-contact options (SOFT, SBOPT, DEPTH, MAXPAR, IGNORE) applied to ALL *CONTACT_* in model via card injection; no per-contact granularity. (7) BULK_VISCOSITY is force-overridden starting Lv7 (overwrites if exists); not additive. (8) Shell thickness in contact (SHLTHK=1 vs =2) affects rigid body handling: SHLTHK=2 includes rigids, SHLTHK=1 excludes. (9) Contact SOFT=2 (pinball) requires MAXPAR tuning for large deformation—default 1.025 too strict → use 1.15+ for assembly/interference models. (10) Multiple mutually-exclusive IRNXX values: -1 (recalc) vs -2 (incremental)—choose based on rotation magnitude, not both. (11) IHQ=6 cost is 3–5× higher than IHQ=4; reserve for critical high-accuracy runs. (12) Lv8 contact: IGNORE=1 is quasi-standard for assemblies/press-fits to suppress divergence from initial penetration—omit only if initial geometry is exact. (13) Shell MITER: values 1/2/3 are ordinal; 2 is explicit plasticity standard (Lv5+). (14) No CLI flags—YAML-only invocation. (15) Catalog is complete and accurate (34 params, all present).",
@@ -9740,7 +9746,7 @@
    ],
    "example": {
     "args": {
-     "model": "../assemble_display/al_box.k",
+     "model": "al_box.k",
      "output": "stripped_output.k",
      "keywords": [
       "*NODE",
@@ -9750,7 +9756,7 @@
       "*INITIAL_STRESS_SHELL"
      ]
     },
-    "note": "Removes mesh data and initial stress blocks while preserving material, section, part, and control keywords. Output shows line counts (total, stripped, remaining). Keyword paths are resolved relative to YAML directory."
+    "note": "실행 검증된 예제 (입력: al_box.k)"
    },
    "example_folder": "/home/koopark/claude/KooRemapper/examples/strip",
    "notes": "Keyword matching uses case-insensitive prefix comparison with mandatory word boundary checking to avoid partial matches (e.g., *ELEMENT will not false-match *ELEMENTARYCURVE). Keywords are automatically converted to uppercase and prefixed with '*' if needed. Empty keywords list returns error. If output is empty/omitted, the parser auto-generates filename using _stripped suffix before the file extension. Output is always written as plain text (one line per input line, preserving LS-DYNA format). Relative paths in model/output/keywords are resolved relative to the YAML file's parent directory, not the current working directory. The 'input' key is an alias for 'model' — either can be used (both read from the same parser code path).",
@@ -9805,40 +9811,33 @@
    "example": {
     "args": {
      "config": {
-      "base_model": "examples/assemble_display/simplebox.k",
-      "output": "examples/assemble_display/b7_mixed",
+      "base_model": "restack_base.k",
+      "output": "restack_result_test",
       "operations": [
        {
         "type": "restack",
         "target_pid": 1,
-        "direction": "z",
+        "direction": "auto",
         "element_type": "solid",
-        "interface_contact": "czm_auto",
-        "drop_height": 1000,
-        "czm_normal": 50,
-        "czm_shear": 30,
         "layers": [
          {
-          "title": "PL_ADV",
-          "thickness": 0.054,
-          "num_elements": 2,
-          "material_card": "*MAT_GENERAL_VISCOELASTIC_TITLE\nPL_ADV\n$#     mid        ro      bulk       pcf        ef      tref         a         b\n          19 1.350E-09 4.000E+03       0.0       0.0       0.0       0.0       0.0"
+          "thickness": 0.3,
+          "material_card": "*MAT_ELASTIC\n$#     mid        ro         e        pr\n             MID001  7.85E-09  2.10E+05       0.3"
          },
          {
-          "title": "PSA4_ADV",
-          "thickness": 0.025,
-          "element_type": "shell",
-          "num_elements": 1,
-          "czm_normal": 45,
-          "czm_shear": 25,
-          "material_card": "*MAT_GENERAL_VISCOELASTIC_TITLE\nPSA_ADV\n$#     mid        ro      bulk       pcf        ef      tref         a         b\n          14 1.100E-09 8.000E+02       0.0       0.0       0.0       0.0       0.0"
+          "thickness": 0.4,
+          "material_card": "*MAT_ELASTIC\n$#     mid        ro         e        pr\n             MID002  7.85E-09  1.50E+05      0.25"
+         },
+         {
+          "thickness": 0.3,
+          "material_card": "*MAT_ELASTIC\n$#     mid        ro         e        pr\n             MID001  7.85E-09  2.10E+05       0.3"
          }
         ]
        }
       ]
      }
     },
-    "note": "Restack는 yaml 기반 어셈블리 파이프라인의 일부로, base_model은 simplebox.k 같은 기존 k파일을 가리킵니다. 예제는 b7_mixed.yaml에서 참고. layers 배열 각 항목이 독립 층을 정의합니다."
+    "note": "실행 검증된 예제 (입력: restack_base.k)"
    },
    "example_folder": "/home/koopark/claude/KooRemapper/examples/assemble_display",
    "notes": "**Critical requirements:**\n- target_pid: must exist in base_model and be a solid/tshell part.\n- layers[].thickness: each layer must have thickness > 0.\n- layers[].material_card: each layer must have non-empty material card.\n- At least one layer required.\n\n**Mutually exclusive / conditional:**\n- interface_contact=tied: does not require czm_normal/czm_shear (shell layers auto-generate tied contacts).\n- interface_contact=czm: requires czm_normal and czm_shear (and/or per-layer overrides).\n- interface_contact=czm_auto: requires czm_normal, czm_shear, AND drop_height; also requires layers to have *MAT_GENERAL_VISCOELASTIC or *MAT_VISCOELASTIC material cards (Prony series).\n\n**Defaults & behavior:**\n- direction=auto: parser inspects part bbox to infer extrusion axis (e.g., if dz >> dx,dy → z).\n- element_size=0: disables auto num_elements; each layer's num_elements must be explicit (or defaults to 0→error).\n- If total layer thickness != original part thickness: nodes are force-scaled and *INITIAL_STRAIN_SOLID is auto-inserted (solid layers only; shell layers are skipped).\n- Shell layers: create independent mid-plane nodes (not shared with adjacent solids); each interface gets separate tied/CZM contact.\n- Material ID placeholder handling: MID001, MID002, etc. in material_card are auto-renumbered to avoid collisions.\n\n**Common mistakes:**\n- Forgetting material_card in a layer (parser will error).\n- Using mismatched total thickness without understanding *INITIAL_STRAIN_SOLID will be applied (may produce unexpected pre-stress).\n- Mixing solid and shell without specifying interface_contact=tied (shell requires tied/CZM to stay attached).\n- Setting czm_auto without drop_height (required for VC auto-calc).\"",
@@ -10041,9 +10040,9 @@
     "args": {
      "model": "base_model.k",
      "output": "updated_model",
-     "dynain": "assembled_dr_result.dynain"
+     "dynain": "assembled_replace_result.k"
     },
-    "note": "Creates updated_model.k with node coordinates from dynain. Nodes in dynain not found in model are silently skipped. YAML config file path determines the base directory for relative file paths."
+    "note": "실행 검증된 예제 (입력: base_model.k, assembled_replace_result.k)"
    },
    "example_folder": "/home/koopark/claude/KooRemapper/examples/replace_test",
    "notes": "Can be invoked as standalone command: KooRemapper update config.yaml OR as part of assemble operations list with type: update. When used in assemble, coordinates are updated in the existing base_model context. Only nodes present in BOTH files are updated; nodes only in dynain are discarded (silently skipped), nodes only in model are left untouched. Supports both free-format (space/comma-separated) and fixed-width LS-DYNA *NODE blocks. YAML keys 'model' and 'base_model' are equivalent aliases. Returns error if dynain file cannot be opened or if no *NODE data is found in the dynain file. All file paths are resolved relative to the YAML config file directory.\"",
@@ -10867,7 +10866,7 @@
    "example": {
     "args": {
      "config": {
-      "output": "examples/battery/swell/stacked/battery_stacked_swell",
+      "output": "battery_output",
       "model_type": "stacked",
       "tier": 0,
       "phase": 1,
@@ -10903,7 +10902,7 @@
       "output_interval": 5e-05
      }
     },
-    "note": "Stacked cell with solid electrodes in swell mode (thermal expansion + dynamic relaxation); generates battery_stacked_swell_tier0_phase1.k with 11 unit cells; intercalation-driven swelling equilibrated via DR."
+    "note": "실행 검증된 예제 (입력: )"
    },
    "example_folder": "/home/koopark/claude/KooRemapper/examples/battery/swell/stacked/",
    "notes": "CRITICAL FEATURES & GOTCHAS:\n1. **Output filename auto-construction**: output + tier suffix (_tier-1, _tier0, _tier0_5, _tier1, _tier2) + phase suffix (_phase1, _phase2) + .k extension. The output field sets the base prefix only.\n2. **Phase 2 swelling auto-enable**: If phase==2, swelling.enabled is automatically set to true regardless of swelling config. Phase 2 is post-processing only (no displacement applied).\n3. **Mode side-effects**: Modes 'bare' and 'swell' auto-set no_fixture=true (removes PCM + tabs + impactor + ground plate). Mode 'swell' auto-enables swelling and switches to CONTROL_DYNAMIC_RELAXATION for equilibration.\n4. **no_fixture implications**: Setting no_fixture=true also auto-sets noPcm=true and noImpactor=true. These modes are fixture-free DR only.\n5. **Layer thickness semantics**: cathode/anode are \"half-coatings\"; stacked phase 1 solids are 2× thickness, Phase 2 TSHELL are 1×. Wound solids are also 2× (one side per electrode).\n6. **Auto-sizing**: If target_thickness > 0, automatically computes n_winds (wound) or n_unit_cells (stacked) from layer stack, overriding manual values.\n7. **Batch generation**: Active if any of batch.tiers[], batch.phases[], batch.model_types[] are non-empty. Generates nested loop across model_types → tiers → phases. Per-phase mode overrides via batch.phase_modes (parallel array).\n8. **Phase chaining (Dynain)**: If use_dynain=true and both phase 1 and 2 are in batch.phases, auto-computes Phase 2 dynain_file from Phase 1 output filename + tier + _phase1.dynain suffix. Manual dynain_file overrides auto-computation.\n9. **Mesh tier to element size mapping**: tier=-1 (5mm), tier=0 (2.5mm), tier=0.5 (1.5mm), tier=1 (1mm), tier=2 (0.5mm). Higher tier = finer mesh, more nodes/elements, higher cost.\n10. **Contact penalty scaling**: SOFSCL = sofscl_base × (ref_size / mesh_size)^sofscl_power, where ref_size=5mm is tier=-1 baseline. Finer meshes get larger SOFSCL for same stiffness behavior.\n11. **Solid electrode formulations**: solid_elform=1 (reduced, stable, default) or 2 (full integration, more accurate but slower). Only used for wound model with solid_electrode=true.\n12. **Material property fallback**: If not specified in YAML, all material E, nu, rho, viscoelastic params use built-in defaults from BatteryConfig.h (e.g., NMC G0=307.7, Al E=69000).\n13. **Mutually exclusive options**: solid_electrode vs. all_shell (solid_electrode=false → TSHELL Phase 2, all_shell=true → force SHELL). merge_cc incompatible with standard dual-CC model.\n14. **DR parameters (bare/swell modes)**: dr_tolerance (convergence KE/IE), dr_endtim (pseudo-time limit), dr_factor (damping 0.95 = 5%/cycle), dr_nrcyck (check interval). Tighter tolerance requires more iterations.\n15. **Wound-specific**: flat=true (non-conformal layers) vs. flat=false (Archimedean spiral, uses mandrel). flat_ratio affects layer profile curvature. mesh_size_path=0 auto-computes from tier meshSize.\n16. **Dimensions**: All thicknesses in mm, densities in t/mm³, moduli in MPa, CTE in dimensionless fraction (strain per unit SOC).\n17. **No positional arguments**: battery takes ONLY YAML config file via invocation directive; no CLI flags. All config via YAML keys.",

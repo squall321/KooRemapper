@@ -9,6 +9,10 @@ From: python:3.12-slim
     set -eux
     apt-get update
     apt-get install -y --no-install-recommends build-essential libpq-dev curl
+    # gmsh (meshfix) runtime shared libraries — gmsh is GL-linked even headless.
+    apt-get install -y --no-install-recommends \
+        libglu1-mesa libgl1 libxrender1 libxcursor1 libxfixes3 libxext6 \
+        libxft2 libfontconfig1 libxinerama1 libx11-6
     rm -rf /var/lib/apt/lists/*
     pip install --upgrade pip
     # Baseline tooling baked in; app source comes from the bind-mounted /workspace.

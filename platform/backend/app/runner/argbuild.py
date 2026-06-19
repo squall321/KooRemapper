@@ -51,6 +51,21 @@ def _represent_list(dumper, data):  # noqa: ANN001
 _KDumper.add_representer(list, _represent_list)
 
 
+# Job.args is stored as JSONB, which does NOT preserve key order. KooRemapper's
+# YAML parser is order-sensitive (it needs the discriminator `type`/`action` key
+# before the type-specific fields — e.g. indent reads r1/r2 into a default
+# profile if `type` hasn't been seen yet). Emit those keys first in every mapping.
+_PRIORITY_KEYS = ("type", "action")
+
+
+def _represent_dict(dumper, data):  # noqa: ANN001
+    keys = [k for k in _PRIORITY_KEYS if k in data] + [k for k in data if k not in _PRIORITY_KEYS]
+    return dumper.represent_mapping("tag:yaml.org,2002:map", [(k, data[k]) for k in keys])
+
+
+_KDumper.add_representer(dict, _represent_dict)
+
+
 def _dump_yaml(obj) -> str:
     return yaml.dump(
         obj, Dumper=_KDumper, default_flow_style=False, allow_unicode=True, sort_keys=False
@@ -145,5 +160,9 @@ def _build_yaml(op, entry, params, args, work_dir) -> BuiltCommand:
             _set_dotted(config, path, args[name])
 
     text = _dump_yaml(config)
-    (work_dir / "config.yaml").write_text(text, encoding="utf-8")
-    return BuiltCommand(argv=[op, "config.yaml"], written_files={"config.yaml": text})
+    cfg_path = work_dir / "config.yaml"
+    cfg_path.write_text(text, encoding="utf-8")
+    # Absolute path so ops that resolve companion files (dat_file, model, …)
+    # relative to the CONFIG's directory (e.g. warpage/bend) find them in the
+    # session dir. cwd is already the session dir, so this is strictly safer.
+    return BuiltCommand(argv=[op, str(cfg_path)], written_files={"config.yaml": text})

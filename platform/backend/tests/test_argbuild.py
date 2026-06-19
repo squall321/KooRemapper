@@ -33,7 +33,7 @@ def test_positional_valued_flag():
 def test_yaml_structured_written():
     wd = _wd()
     b = build_command("relax", {"model": "m.k", "output": "r.k", "level": 3, "mode": "explicit"}, wd)
-    assert b.argv == ["relax", "config.yaml"]
+    assert b.argv[0]=="relax" and b.argv[1].endswith("config.yaml")
     cfg = yaml.safe_load((wd / "config.yaml").read_text())
     assert cfg == {"model": "m.k", "output": "r.k", "level": 3, "mode": "explicit"}
 
@@ -42,7 +42,7 @@ def test_yaml_freeform_verbatim():
     wd = _wd()
     config = {"base_model": "x.k", "output": "r", "operations": [{"type": "bend", "target_pid": 1}]}
     b = build_command("assemble", {"config": config}, wd)
-    assert b.argv == ["assemble", "config.yaml"]
+    assert b.argv[0]=="assemble" and b.argv[1].endswith("config.yaml")
     cfg = yaml.safe_load((wd / "config.yaml").read_text())
     assert cfg == config
 
