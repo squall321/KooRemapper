@@ -117,6 +117,48 @@ async def upload_kfile(
 
 
 @mcp.tool()
+async def upload_local_path(session_id: str, path: str, ctx: Context, filename: str | None = None) -> dict:
+    """로컬 디스크의 파일을 그대로 세션에 업로드한다(대형 메쉬에 적합). MCP 서버가 그 파일을
+    읽을 수 있는 같은 머신에서 돌 때만 동작한다(예: Claude Desktop + 로컬 실행). 대화로
+    내용을 실어나르지 않으므로 수십 MB도 OK.
+    Upload a file straight from local disk (best for large meshes). Only works when the
+    MCP server can read `path` (server runs on the same machine, e.g. Claude Desktop local)."""
+    import os as _os
+    if not _os.path.isfile(path):
+        raise RuntimeError(f"file not found on the MCP host: {path}")
+    name = filename or _os.path.basename(path)
+    with open(path, "rb") as fh:
+        raw = fh.read()
+    files = {"files": (name, raw, "application/octet-stream")}
+    async with httpx.AsyncClient(base_url=API, timeout=300) as c:
+        return _unwrap(
+            await c.post(
+                f"/sessions/{session_id}/files", files=files, headers=_forward_headers(ctx)
+            )
+        )
+
+
+@mcp.tool()
+async def save_result_to_path(session_id: str, file_id: int, dest_path: str, ctx: Context) -> dict:
+    """세션 파일(산출물)을 로컬 디스크 경로로 저장한다(대형 파일에 적합, 대화로 안 실어나름).
+    MCP 서버가 dest_path 에 쓸 수 있는 같은 머신에서 돌 때만 동작.
+    Save a session file to a local disk path (best for large outputs; same-machine only)."""
+    import os as _os
+    async with httpx.AsyncClient(base_url=API, timeout=300) as c:
+        r = await c.get(
+            f"/sessions/{session_id}/files/{file_id}/download", headers=_forward_headers(ctx)
+        )
+    if r.status_code >= 400:
+        raise RuntimeError(f"download failed: HTTP {r.status_code}")
+    d = _os.path.dirname(dest_path)
+    if d:
+        _os.makedirs(d, exist_ok=True)
+    with open(dest_path, "wb") as fh:
+        fh.write(r.content)
+    return {"saved": dest_path, "bytes": len(r.content)}
+
+
+@mcp.tool()
 async def list_session_files(session_id: str, ctx: Context) -> list:
     """세션 안의 파일 목록 + 각 파일의 meta(노드/요소/파트/bbox/*INCLUDE/키워드).
     "이 K파일 안에 뭐가 들어있는지" 를 여기서 확인한다."""
