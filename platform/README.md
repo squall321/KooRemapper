@@ -111,3 +111,6 @@ uvicorn app.main:app --reload --port 8700
 - ✅ Phase 7 — MCP 서버 (`mcp_server/server.py`, FastMCP streamable-http, 12개 도구, PAT 전달) — Claude 전체 사이클 e2e 통과
 - ✅ Phase 8 — 프론트엔드 (React+TS+Vite+Tailwind+TanStack Query) — 로그인/대시보드/세션/세션상세(파일·op 자동폼·job 실시간)/카탈로그/토큰. `pnpm build` 0 에러, Playwright로 실제 동작 확인
 - ✅ Phase 9 — 배포: postgres+api(+SPA serving)+mcp 3 인스턴스, `start.sh` 일괄 기동, `build-frontend.sh`
+- ✅ Phase 10 — 하드닝·사용자관리·웹/MCP 패리티 UX: 회원가입/비번변경/관리자 사용자관리, rate limiting(429),
+  입력↔산출 비교 뷰, 시스템 상태+패리티 가시화 페이지, nginx+TLS 리버스프록시(/api+/mcp), gmsh 이미지 번들(meshfix 이식성),
+  MCP whoami/system_status 도구(20개). 계획: `../KOOREMAPPER_PHASE10_PLAN.md`
