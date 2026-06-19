@@ -9,6 +9,7 @@ import { PageHeader } from '@/shared/components/PageHeader'
 import { errorMessage } from '@/shared/api/client'
 import { FilePanel } from './FilePanel'
 import { JobPanel } from './JobPanel'
+import { ComparePanel } from './ComparePanel'
 import { SchemaForm, type ArgValues } from './SchemaForm'
 import { OptionReference } from '@/modules/operations/OptionReference'
 
@@ -65,6 +66,7 @@ export function SessionDetailPage() {
       <div className="grid lg:grid-cols-2 gap-4">
         <div className="space-y-4">
           <FilePanel sessionId={id} files={files} />
+          {files.length >= 2 && <ComparePanel files={files} />}
           <JobPanel sessionId={id} />
         </div>
 

@@ -1,13 +1,14 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { getToken, setToken, setUnauthorizedHandler } from '@/shared/api/client'
-import { getMe, login as apiLogin } from '@/shared/api/endpoints'
+import { getMe, login as apiLogin, signup as apiSignup } from '@/shared/api/endpoints'
 import type { User } from '@/shared/api/types'
 
 interface AuthCtx {
   user: User | null
   loading: boolean
   login: (email: string, password: string) => Promise<void>
+  signup: (email: string, password: string, displayName?: string) => Promise<void>
   logout: () => void
 }
 
@@ -44,6 +45,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(await getMe())
   }, [])
 
-  const value = useMemo(() => ({ user, loading, login, logout }), [user, loading, login, logout])
+  const signup = useCallback(async (email: string, password: string, displayName?: string) => {
+    const token = await apiSignup(email, password, displayName)
+    setToken(token)
+    setUser(await getMe())
+  }, [])
+
+  const value = useMemo(() => ({ user, loading, login, signup, logout }), [user, loading, login, signup, logout])
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

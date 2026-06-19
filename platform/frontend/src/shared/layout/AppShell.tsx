@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom'
-import { Boxes, FolderOpen, LayoutDashboard, KeyRound, BookOpen, Moon, Sun, LogOut } from 'lucide-react'
+import { Boxes, FolderOpen, LayoutDashboard, KeyRound, BookOpen, Moon, Sun, LogOut, Activity, UserCog, Users } from 'lucide-react'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { useTheme } from '@/shared/theme/ThemeContext'
 import { cn } from '@/shared/lib/cn'
@@ -8,12 +8,17 @@ const nav = [
   { to: '/', label: '대시보드', icon: LayoutDashboard, end: true },
   { to: '/sessions', label: '세션', icon: FolderOpen },
   { to: '/operations', label: '오퍼레이션', icon: BookOpen },
+  { to: '/system', label: '시스템 상태', icon: Activity },
   { to: '/tokens', label: 'MCP 토큰', icon: KeyRound },
+  { to: '/account', label: '내 계정', icon: UserCog },
 ]
 
 export function AppShell() {
   const { user, logout } = useAuth()
   const { theme, toggle } = useTheme()
+  const items = user?.is_system_admin
+    ? [...nav, { to: '/admin/users', label: '사용자 관리', icon: Users }]
+    : nav
   return (
     <div className="flex h-full">
       <aside className="w-56 shrink-0 border-r border-border bg-surface flex flex-col">
@@ -22,7 +27,7 @@ export function AppShell() {
           <span className="font-semibold">KooRemapper</span>
         </div>
         <nav className="flex-1 p-2 space-y-1">
-          {nav.map((n) => (
+          {items.map((n) => (
             <NavLink
               key={n.to}
               to={n.to}

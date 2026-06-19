@@ -14,6 +14,14 @@ export async function getMe(): Promise<User> {
   const { data } = await api.get('/me')
   return unwrap<User>(data)
 }
+export async function signup(email: string, password: string, display_name?: string): Promise<string> {
+  const { data } = await api.post('/auth/signup', { email, password, display_name })
+  return unwrap<{ access_token: string }>(data).access_token
+}
+export async function getAuthConfig(): Promise<{ allow_signup: boolean }> {
+  const { data } = await api.get('/auth/config')
+  return unwrap<{ allow_signup: boolean }>(data)
+}
 
 // tokens
 export async function listTokens(): Promise<TokenInfo[]> {

@@ -8,6 +8,9 @@ import { SessionsPage } from '@/modules/sessions/SessionsPage'
 import { SessionDetailPage } from '@/modules/sessions/SessionDetailPage'
 import { OperationsPage } from '@/modules/operations/OperationsPage'
 import { TokensPage } from '@/modules/tokens/TokensPage'
+import { AccountPage } from '@/modules/account/AccountPage'
+import { SystemPage } from '@/modules/system/SystemPage'
+import { UsersPage } from '@/modules/admin/UsersPage'
 
 export function App() {
   const { user, loading } = useAuth()
@@ -38,6 +41,9 @@ export function App() {
         <Route path="/sessions/:id" element={<SessionDetailPage />} />
         <Route path="/operations" element={<OperationsPage />} />
         <Route path="/tokens" element={<TokensPage />} />
+        <Route path="/system" element={<SystemPage />} />
+        <Route path="/account" element={<AccountPage />} />
+        {user.is_system_admin && <Route path="/admin/users" element={<UsersPage />} />}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>
