@@ -13,8 +13,10 @@ from app.modules.sessions.schemas import (
     SessionRead,
     SessionUpdate,
 )
+from app.config import settings
 from app.shared import storage
 from app.shared.auth import get_current_user
+from app.shared.ratelimit import rate_limit
 from app.shared.responses import ok
 
 router = APIRouter(tags=["sessions"])
@@ -99,15 +101,16 @@ async def delete_session(
 
 
 # ── files ───────────────────────────────────────────────────────────
-@router.post("/sessions/{session_id}/files")
+@router.post(
+    "/sessions/{session_id}/files",
+    dependencies=[Depends(rate_limit("upload", settings.ratelimit_upload_per_min))],
+)
 async def upload_files(
     session_id: str,
     files: list[UploadFile] = File(...),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    from app.config import settings
-
     s = await _require_session(db, user, session_id)
     cap = settings.max_upload_mb * 1024 * 1024
     created = []

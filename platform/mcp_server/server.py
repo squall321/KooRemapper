@@ -82,6 +82,18 @@ async def describe_operation(operation: str, ctx: Context) -> dict:
 
 # ── 세션 / 파일 ──────────────────────────────────────────────────────
 @mcp.tool()
+async def whoami(ctx: Context) -> dict:
+    """현재 토큰의 사용자 정보. / The current authenticated user."""
+    return await _get(ctx, "/me")
+
+
+@mcp.tool()
+async def system_status(ctx: Context) -> dict:
+    """플랫폼 상태(api/db/worker 큐/gmsh/바이너리/op 수). / Platform health + worker queue."""
+    return await _get(ctx, "/system/status")
+
+
+@mcp.tool()
 async def list_sessions(ctx: Context) -> list:
     """내 세션(프로젝트) 목록. 각 세션은 업로드/생성된 K파일 묶음이다."""
     return await _get(ctx, "/sessions")

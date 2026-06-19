@@ -9,6 +9,7 @@ from app.models import User
 from app.modules.users import pat
 from app.modules.users.schemas import TokenCreateRequest, TokenRead
 from app.shared.auth import get_current_user
+from app.shared.ratelimit import rate_limit
 from app.shared.responses import ok
 
 router = APIRouter(tags=["tokens"])
@@ -32,7 +33,10 @@ async def list_my_tokens(
     return ok([TokenRead.model_validate(r).to_dict() for r in rows])
 
 
-@router.post("/me/tokens")
+@router.post(
+    "/me/tokens",
+    dependencies=[Depends(rate_limit("token", settings.ratelimit_token_per_min))],
+)
 async def create_my_token(
     body: TokenCreateRequest,
     user: User = Depends(get_current_user),

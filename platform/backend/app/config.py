@@ -39,6 +39,14 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_access_ttl_min: int = 720  # 12h
     pat_default_expires_days: int = 90
+    allow_signup: bool = True  # public /auth/signup enabled
+
+    # --- rate limiting (in-memory sliding window) ---
+    ratelimit_enabled: bool = True
+    ratelimit_login_per_min: int = 10
+    ratelimit_signup_per_min: int = 5
+    ratelimit_token_per_min: int = 20
+    ratelimit_upload_per_min: int = 60
 
     # --- storage / binary ---
     # Where uploaded/generated session files live (host path, bind-mounted).
