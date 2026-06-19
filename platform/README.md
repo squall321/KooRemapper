@@ -107,7 +107,7 @@ uvicorn app.main:app --reload --port 8700
 - ✅ Phase 3 — 세션 CRUD + 파일 업로드/목록/다운로드/삭제 + `info` 파싱(nodes/elems/parts/bbox/`*INCLUDE`/keyword) (`/api/v1/sessions/...`)
 - ✅ Phase 4 — op 카탈로그 **45개** (JSON Schema 인자, 예제, 매뉴얼) (`/api/v1/operations`, `/operations/{op}`)
 - ✅ Phase 5 — 비동기 Job 큐 & runner (`/sessions/{id}/jobs`, `/jobs/{id}`/logs/outputs/cancel) — 업로드→op 실행→산출물 자동등록·다운로드 e2e 9/9
-- ✅ Phase 6 — 전 op 통합 테스트 (45-agent 병렬). 초기 37/45 → argbuild 2건 수정(YAML flow/indent 스타일 + positional 플래그 순서) 후 **45/45**
+- ✅ Phase 6 — 전 op 통합 테스트. **라이브 API/워커로 45/45 op end-to-end 검증**(업로드→실행→산출물). 과정에서 실버그 수정: JSONB가 key 순서 미보존→argbuild가 type/action 키 우선 출력, config 절대경로(warpage 등 동반파일), 예제 12건 실제 실행가능화, meshfix gmsh 라이브러리/링크
 - ✅ Phase 7 — MCP 서버 (`mcp_server/server.py`, FastMCP streamable-http, 12개 도구, PAT 전달) — Claude 전체 사이클 e2e 통과
 - ✅ Phase 8 — 프론트엔드 (React+TS+Vite+Tailwind+TanStack Query) — 로그인/대시보드/세션/세션상세(파일·op 자동폼·job 실시간)/카탈로그/토큰. `pnpm build` 0 에러, Playwright로 실제 동작 확인
 - ✅ Phase 9 — 배포: postgres+api(+SPA serving)+mcp 3 인스턴스, `start.sh` 일괄 기동, `build-frontend.sh`
