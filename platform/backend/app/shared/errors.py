@@ -15,7 +15,8 @@ logger = logging.getLogger(__name__)
 def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(StarletteHTTPException)
     async def _http_exc(_req: Request, exc: StarletteHTTPException):
-        return fail(str(exc.detail), status_code=exc.status_code)
+        # preserve headers (e.g. Retry-After / X-RateLimit-* from 429, WWW-Authenticate from 401)
+        return fail(str(exc.detail), status_code=exc.status_code, headers=getattr(exc, "headers", None))
 
     @app.exception_handler(RequestValidationError)
     async def _validation_exc(_req: Request, exc: RequestValidationError):

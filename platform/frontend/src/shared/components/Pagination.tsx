@@ -9,6 +9,7 @@ interface PaginationProps {
 }
 
 export function Pagination({ offset, limit, count, onChange }: PaginationProps) {
+  if (count === 0 && offset === 0) return null
   const from = count === 0 ? 0 : offset + 1
   const to = offset + count
   const atStart = offset <= 0

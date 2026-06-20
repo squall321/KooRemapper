@@ -19,7 +19,7 @@ router = APIRouter(tags=["admin"], dependencies=[Depends(require_system_admin)])
 
 class UserCreate(BaseModel):
     email: str
-    password: str = Field(min_length=4, max_length=128)
+    password: str = Field(min_length=8, max_length=128)
     display_name: str | None = None
     is_system_admin: bool = False
 
@@ -31,7 +31,7 @@ class UserPatch(BaseModel):
 
 
 class PasswordReset(BaseModel):
-    new_password: str = Field(min_length=4, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
 
 
 @router.get("/admin/users")
@@ -51,7 +51,6 @@ async def list_users(
             )
         ).scalar_one()
         d = UserRead.model_validate(u).model_dump()
-        d["is_active"] = u.is_active
         d["session_count"] = cnt
         out.append(d)
     return ok(out)
@@ -59,11 +58,12 @@ async def list_users(
 
 @router.post("/admin/users")
 async def create_user(body: UserCreate, db: AsyncSession = Depends(get_db)):
-    exists = (await db.execute(select(User).where(User.email == body.email))).scalar_one_or_none()
+    email = body.email.strip().lower()
+    exists = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
     if exists is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "이미 등록된 이메일입니다.")
     u = User(
-        email=body.email,
+        email=email,
         password_hash=hash_password(body.password),
         display_name=body.display_name,
         is_active=True,
@@ -95,9 +95,7 @@ async def patch_user(
         u.display_name = body.display_name
     await db.commit()
     await db.refresh(u)
-    d = UserRead.model_validate(u).model_dump()
-    d["is_active"] = u.is_active
-    return ok(d, message="수정됨")
+    return ok(UserRead.model_validate(u).model_dump(), message="수정됨")
 
 
 @router.post("/admin/users/{user_id}/password")

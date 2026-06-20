@@ -6,12 +6,14 @@ import type { SessionFile } from '@/shared/api/types'
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Spinner } from '@/shared/ui/ui'
 import { fmtBytes } from '@/shared/lib/cn'
 import { errorMessage } from '@/shared/api/client'
+import { ConfirmDialog } from '@/shared/components/ConfirmDialog'
 
 export function FilePanel({ sessionId, files }: { sessionId: string; files: SessionFile[] }) {
   const qc = useQueryClient()
   const inputRef = useRef<HTMLInputElement>(null)
   const [expanded, setExpanded] = useState<number | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<SessionFile | null>(null)
 
   const upload = useMutation({
     mutationFn: (fl: File[]) => uploadFiles(sessionId, fl),
@@ -57,7 +59,7 @@ export function FilePanel({ sessionId, files }: { sessionId: string; files: Sess
                     <Badge tone={f.kind === 'output' ? 'succeeded' : 'default'}>{f.kind}</Badge>
                     {typeof m.nodes === 'number' && <span className="text-xs text-muted">{m.nodes}N/{m.elements}E</span>}
                     <Button size="sm" variant="ghost" onClick={() => downloadFile(sessionId, f.id, f.filename)}><Download size={14} /></Button>
-                    <Button size="sm" variant="ghost" onClick={() => del.mutate(f.id)}><Trash2 size={14} /></Button>
+                    <Button size="sm" variant="ghost" onClick={() => setPendingDelete(f)}><Trash2 size={14} /></Button>
                   </div>
                   {open && (
                     <div className="px-9 pb-3 text-xs text-muted space-y-1">
@@ -84,6 +86,18 @@ export function FilePanel({ sessionId, files }: { sessionId: string; files: Sess
           </ul>
         )}
       </CardBody>
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title="파일 삭제"
+        message={pendingDelete ? `'${pendingDelete.filename}' 파일을 삭제하시겠습니까?` : undefined}
+        confirmLabel="삭제"
+        danger
+        onConfirm={() => {
+          if (pendingDelete) del.mutate(pendingDelete.id)
+          setPendingDelete(null)
+        }}
+        onCancel={() => setPendingDelete(null)}
+      />
     </Card>
   )
 }

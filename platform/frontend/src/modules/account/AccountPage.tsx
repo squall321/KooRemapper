@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { KeyRound, Mail, ShieldCheck, User as UserIcon } from 'lucide-react'
 import { api, errorMessage, unwrap } from '@/shared/api/client'
@@ -44,12 +44,25 @@ export function AccountPage() {
     onError: (e) => setErr(errorMessage(e)),
   })
 
+  useEffect(() => {
+    if (!err && !ok) return
+    const t = setTimeout(() => {
+      setErr(null)
+      setOk(null)
+    }, 4000)
+    return () => clearTimeout(t)
+  }, [err, ok])
+
   function submit(e: React.FormEvent) {
     e.preventDefault()
     setErr(null)
     setOk(null)
     if (!current || !next) {
       setErr('현재 비밀번호와 새 비밀번호를 입력하세요.')
+      return
+    }
+    if (next.length < 8) {
+      setErr('새 비밀번호는 최소 8자 이상이어야 합니다.')
       return
     }
     if (next !== confirm) {
@@ -114,6 +127,7 @@ export function AccountPage() {
                   onChange={(e) => setNext(e.target.value)}
                   className="mt-1"
                 />
+                <div className="mt-1 text-xs text-muted">최소 8자</div>
               </Label>
               <Label className="block">
                 새 비밀번호 확인

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   Activity, Database, Cpu, Box, Boxes, ShieldCheck, ShieldOff,
@@ -64,10 +64,17 @@ function StatCard({
 
 function CopyBtn({ text }: { text: string }) {
   const [done, setDone] = useState(false)
+  const timer = useRef<ReturnType<typeof setTimeout>>()
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current) }, [])
+  const onCopy = async () => {
+    try { await navigator.clipboard.writeText(text) } catch { return }
+    setDone(true)
+    timer.current = setTimeout(() => setDone(false), 1500)
+  }
   return (
     <button
       type="button"
-      onClick={() => { navigator.clipboard.writeText(text); setDone(true); setTimeout(() => setDone(false), 1500) }}
+      onClick={onCopy}
       className="inline-flex items-center gap-1 shrink-0 rounded-md border border-border px-2.5 h-8 text-xs font-medium hover:bg-surface transition"
     >
       {done ? <Check size={13} className="text-success" /> : <Copy size={13} />}
@@ -226,6 +233,8 @@ export function SystemPage() {
         <CardBody className="space-y-4">
           {caps.isLoading ? (
             <Spinner />
+          ) : caps.isError ? (
+            <div className="text-sm text-danger">연결 정보를 불러오지 못했습니다: {errorMessage(caps.error)}</div>
           ) : c ? (
             <>
               <ConnectBlock icon={<Terminal size={13} />} title="Claude Code" cmd={c.mcp_add_hint} />

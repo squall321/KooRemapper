@@ -46,7 +46,7 @@ async def system_status(_user: User = Depends(get_current_user), db: AsyncSessio
         "api": {"ok": True, "port": settings.api_port},
         "database": {"ok": db_ok, "port": None},
         "worker": {"concurrency": settings.worker_concurrency, "queued": queued, "running": running},
-        "binary": {"present": settings.kooremapper_bin.exists(), "path": str(settings.kooremapper_bin)},
+        "binary": {"present": settings.kooremapper_bin.exists()},
         "gmsh": {"available": _gmsh_available(), "note": "meshfix 전용"},
         "mcp": {"port": settings.mcp_port, "url": f"http://<host>:{settings.mcp_port}/mcp"},
         "rate_limit": {"enabled": settings.ratelimit_enabled},

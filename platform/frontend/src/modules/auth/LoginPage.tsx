@@ -22,6 +22,14 @@ export function LoginPage() {
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     setErr(null)
+    if (!email || !password) {
+      setErr('이메일과 비밀번호를 입력하세요.')
+      return
+    }
+    if (mode === 'signup' && password.length < 8) {
+      setErr('비밀번호는 최소 8자 이상이어야 합니다.')
+      return
+    }
     setBusy(true)
     try {
       if (mode === 'signup') await signup(email, password, displayName || undefined)
@@ -64,7 +72,7 @@ export function LoginPage() {
           {allowSignup && (
             <button
               className="mt-3 text-xs text-primary w-full text-center"
-              onClick={() => { setErr(null); setMode(mode === 'login' ? 'signup' : 'login') }}
+              onClick={() => { setErr(null); setEmail(''); setPassword(''); setDisplayName(''); setMode(mode === 'login' ? 'signup' : 'login') }}
             >
               {mode === 'login' ? '계정이 없으신가요? 회원가입' : '이미 계정이 있으신가요? 로그인'}
             </button>

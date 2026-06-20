@@ -1,0 +1,255 @@
+"""Phase 10 endpoint tests — signup / login / password change, admin guard +
+user management, system status/capabilities, and rate-limit headers.
+
+The rate-limit test is pure (no DB). The rest hit the real ASGI app over an
+in-process httpx transport against the live dev postgres; they skip themselves
+if the DB is unreachable and clean up every row they create (email prefix
+`phase10_…@test.local`).
+"""
+import sys
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import httpx  # noqa: E402
+import pytest  # noqa: E402
+import pytest_asyncio  # noqa: E402
+import ulid  # noqa: E402
+from httpx import ASGITransport  # noqa: E402
+from sqlalchemy import delete, select  # noqa: E402
+
+from app.config import settings  # noqa: E402
+from app.database import SessionLocal, engine  # noqa: E402
+from app.models import User  # noqa: E402
+from app.shared import security  # noqa: E402
+
+pytestmark = pytest.mark.asyncio(loop_scope="session")
+
+API = "/api/v1"
+
+
+def _auth(token: str) -> dict:
+    return {"Authorization": f"Bearer {token}"}
+
+
+# ── DB-free: rate-limit dependency raises 429 with Retry-After (RL-001) ──────
+async def test_rate_limit_dependency_emits_429_with_headers():
+    from fastapi import Depends, FastAPI
+
+    from app.shared import ratelimit
+    from app.shared.ratelimit import rate_limit
+
+    ratelimit._hits.clear()
+    prev = settings.ratelimit_enabled
+    settings.ratelimit_enabled = True
+    app = FastAPI()
+
+    @app.get("/ping", dependencies=[Depends(rate_limit("unittest", 3))])
+    async def ping():
+        return {"ok": True}
+
+    # Constant bearer token → constant rate-limit key regardless of client host.
+    hdr = {"Authorization": "Bearer kr_unittest_constant_token"}
+    try:
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://t"
+        ) as c:
+            for _ in range(3):
+                assert (await c.get("/ping", headers=hdr)).status_code == 200
+            r = await c.get("/ping", headers=hdr)
+            assert r.status_code == 429
+            assert int(r.headers["Retry-After"]) >= 1
+            assert r.headers["X-RateLimit-Limit"] == "3"
+    finally:
+        settings.ratelimit_enabled = prev
+        ratelimit._hits.clear()
+
+
+# ── Shared fixtures for the DB-backed endpoint tests ────────────────────────
+@pytest_asyncio.fixture(loop_scope="session")
+async def db_up():
+    try:
+        async with engine.connect() as conn:
+            await conn.exec_driver_sql("SELECT 1")
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f"DB unavailable: {exc}")
+
+
+@pytest.fixture(autouse=True)
+def _no_ratelimit():
+    # Many tests log in repeatedly; keep the limiter out of their way.
+    prev = settings.ratelimit_enabled
+    settings.ratelimit_enabled = False
+    yield
+    settings.ratelimit_enabled = prev
+
+
+@pytest_asyncio.fixture(loop_scope="session")
+async def client(db_up):
+    from app.main import create_app
+
+    transport = ASGITransport(app=create_app())
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
+
+
+def _uniq_email() -> str:
+    return f"phase10_{ulid.new().str.lower()}@test.local"
+
+
+@pytest_asyncio.fixture(loop_scope="session")
+async def make_user(db_up):
+    """Factory creating real users; everything prefixed phase10_ is purged after."""
+
+    async def _make(is_admin: bool = False, password: str = "password123", active: bool = True):
+        email = _uniq_email()
+        async with SessionLocal() as s:
+            u = User(
+                email=email,
+                password_hash=security.hash_password(password),
+                display_name="P10",
+                is_active=active,
+                is_system_admin=is_admin,
+            )
+            s.add(u)
+            await s.commit()
+            await s.refresh(u)
+            return {"id": u.id, "email": email, "password": password,
+                    "token": security.create_access_token(u.id)}
+
+    yield _make
+    async with SessionLocal() as s:
+        await s.execute(delete(User).where(User.email.like("phase10_%@test.local")))
+        await s.commit()
+
+
+# ── login / me / password ───────────────────────────────────────────────────
+async def test_login_me_and_wrong_password(client, make_user):
+    u = await make_user()
+    r = await client.post(f"{API}/auth/login", json={"email": u["email"], "password": u["password"]})
+    assert r.status_code == 200, r.text
+    token = r.json()["data"]["access_token"]
+
+    me = await client.get(f"{API}/me", headers=_auth(token))
+    assert me.status_code == 200
+    assert me.json()["data"]["email"] == u["email"]
+
+    bad = await client.post(f"{API}/auth/login", json={"email": u["email"], "password": "nope"})
+    assert bad.status_code == 401
+
+
+async def test_password_change_flow(client, make_user):
+    u = await make_user(password="oldpassword1")
+    h = _auth(u["token"])
+
+    short = await client.post(f"{API}/me/password",
+                              json={"current_password": "oldpassword1", "new_password": "short"}, headers=h)
+    assert short.status_code == 422  # min_length=8
+
+    wrong = await client.post(f"{API}/me/password",
+                              json={"current_password": "WRONGWRONG", "new_password": "newpassword1"}, headers=h)
+    assert wrong.status_code == 400
+
+    okr = await client.post(f"{API}/me/password",
+                            json={"current_password": "oldpassword1", "new_password": "newpassword1"}, headers=h)
+    assert okr.status_code == 200
+    # PWD-001 fix: data carries the message so unwrap()-based clients see it
+    assert "변경" in okr.json()["data"]
+
+    assert (await client.post(f"{API}/auth/login",
+            json={"email": u["email"], "password": "newpassword1"})).status_code == 200
+    assert (await client.post(f"{API}/auth/login",
+            json={"email": u["email"], "password": "oldpassword1"})).status_code == 401
+
+
+# ── admin guard + management ────────────────────────────────────────────────
+async def test_admin_routes_require_admin(client, make_user):
+    normal = await make_user()
+    admin = await make_user(is_admin=True)
+
+    forbidden = await client.get(f"{API}/admin/users", headers=_auth(normal["token"]))
+    assert forbidden.status_code == 403
+
+    listed = await client.get(f"{API}/admin/users", headers=_auth(admin["token"]))
+    assert listed.status_code == 200
+    emails = {row["email"] for row in listed.json()["data"]}
+    assert normal["email"] in emails and admin["email"] in emails
+
+
+async def test_admin_create_patch_and_self_guards(client, make_user):
+    admin = await make_user(is_admin=True)
+    h = _auth(admin["token"])
+    new_email = _uniq_email()
+
+    created = await client.post(f"{API}/admin/users",
+                                json={"email": new_email, "password": "createduser1"}, headers=h)
+    assert created.status_code == 201, created.text
+    new_id = created.json()["data"]["id"]
+
+    dup = await client.post(f"{API}/admin/users",
+                            json={"email": new_email, "password": "createduser1"}, headers=h)
+    assert dup.status_code == 409
+
+    short = await client.post(f"{API}/admin/users",
+                              json={"email": _uniq_email(), "password": "short"}, headers=h)
+    assert short.status_code == 422
+
+    deact = await client.patch(f"{API}/admin/users/{new_id}", json={"is_active": False}, headers=h)
+    assert deact.status_code == 200 and deact.json()["data"]["is_active"] is False
+
+    self_deact = await client.patch(f"{API}/admin/users/{admin['id']}", json={"is_active": False}, headers=h)
+    assert self_deact.status_code == 400
+
+    self_demote = await client.patch(f"{API}/admin/users/{admin['id']}", json={"is_system_admin": False}, headers=h)
+    assert self_demote.status_code == 400
+
+
+# ── signup gate ─────────────────────────────────────────────────────────────
+async def test_signup_gate_and_validation(client):
+    prev = settings.allow_signup
+    try:
+        settings.allow_signup = False
+        off = await client.post(f"{API}/auth/signup",
+                                json={"email": _uniq_email(), "password": "signuptest1"})
+        assert off.status_code == 403
+
+        settings.allow_signup = True
+        email = _uniq_email()
+        ok_r = await client.post(f"{API}/auth/signup", json={"email": email, "password": "signuptest1"})
+        assert ok_r.status_code == 201, ok_r.text
+        assert ok_r.json()["data"]["access_token"]
+
+        dup = await client.post(f"{API}/auth/signup", json={"email": email, "password": "signuptest1"})
+        assert dup.status_code == 409
+
+        short = await client.post(f"{API}/auth/signup",
+                                  json={"email": _uniq_email(), "password": "short"})
+        assert short.status_code == 422
+    finally:
+        settings.allow_signup = prev
+        async with SessionLocal() as s:
+            await s.execute(delete(User).where(User.email.like("phase10_%@test.local")))
+            await s.commit()
+
+
+# ── system status / capabilities ────────────────────────────────────────────
+async def test_system_status_and_capabilities(client, make_user):
+    u = await make_user()
+    h = _auth(u["token"])
+
+    st = await client.get(f"{API}/system/status", headers=h)
+    assert st.status_code == 200, st.text
+    d = st.json()["data"]
+    assert d["operations"] >= 45
+    for key in ("api", "database", "worker", "binary", "gmsh", "rate_limit", "signup", "mcp"):
+        assert key in d, f"system/status missing {key}"
+    # SYS-004: no absolute binary path leaked
+    assert set(d["binary"].keys()) == {"present"}
+
+    caps = await client.get(f"{API}/system/capabilities", headers=h)
+    assert caps.status_code == 200
+    cd = caps.json()["data"]
+    assert cd["operations"] >= 45 and cd["mcp_tools"] >= 1
+    assert isinstance(cd["parity"], list) and len(cd["parity"]) >= 1
+    assert all("web" in p and "mcp" in p for p in cd["parity"])

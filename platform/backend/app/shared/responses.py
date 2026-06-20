@@ -26,10 +26,12 @@ def fail(
     status_code: int = 400,
     errors: Any = None,
     data: Any = None,
+    headers: dict | None = None,
 ) -> JSONResponse:
     return JSONResponse(
         status_code=status_code,
         content=jsonable_encoder(
             {"success": False, "data": data, "message": message, "errors": errors}
         ),
+        headers=headers,
     )

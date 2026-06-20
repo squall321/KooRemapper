@@ -47,11 +47,12 @@ async def auth_config():
 async def signup(body: SignupRequest, db: AsyncSession = Depends(get_db)):
     if not settings.allow_signup:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "회원가입이 비활성화되어 있습니다.")
-    exists = (await db.execute(select(User).where(User.email == body.email))).scalar_one_or_none()
+    email = body.email.strip().lower()
+    exists = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
     if exists is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "이미 등록된 이메일입니다.")
     user = User(
-        email=body.email,
+        email=email,
         password_hash=hash_password(body.password),
         display_name=body.display_name,
         is_active=True,
@@ -78,8 +79,11 @@ async def change_password(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    if not user.is_active:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "비활성 계정입니다.")
     if not verify_password(body.current_password, user.password_hash):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "현재 비밀번호가 올바르지 않습니다.")
     user.password_hash = hash_password(body.new_password)
     await db.commit()
-    return ok(message="비밀번호가 변경되었습니다.")
+    # data carries the message too so unwrap()-based clients receive it
+    return ok(data="비밀번호가 변경되었습니다.", message="비밀번호가 변경되었습니다.")

@@ -11,11 +11,12 @@ type Row = {
   fmt?: (n: number) => string
 }
 
-// bbox extent = max - min per axis; returns null if either bound missing.
+// bbox extent = max - min per axis; returns null if either bound missing or reversed.
 function extent(meta: SessionFile['meta'], axis: number): number | null {
   const lo = meta?.bbox_min?.[axis]
   const hi = meta?.bbox_max?.[axis]
   if (typeof lo !== 'number' || typeof hi !== 'number') return null
+  if (lo > hi) return null
   return hi - lo
 }
 
@@ -27,6 +28,16 @@ export function ComparePanel({ files }: { files: SessionFile[] }) {
 
   const a = useMemo(() => files.find((f) => f.id === aId) ?? null, [files, aId])
   const b = useMemo(() => files.find((f) => f.id === bId) ?? null, [files, bId])
+
+  // Keep A and B distinct: when one is set to the other's value, shift the other.
+  const pickA = (id: number) => {
+    setAId(id)
+    if (id === bId) setBId(files.find((f) => f.id !== id)?.id ?? null)
+  }
+  const pickB = (id: number) => {
+    setBId(id)
+    if (id === aId) setAId(files.find((f) => f.id !== id)?.id ?? null)
+  }
 
   const rows: Row[] = useMemo(() => {
     const num = (v: number | undefined) => (typeof v === 'number' ? v : null)
@@ -57,17 +68,17 @@ export function ComparePanel({ files }: { files: SessionFile[] }) {
             <div className="grid grid-cols-2 gap-3 mb-3">
               <div className="space-y-1">
                 <Label>A (기준)</Label>
-                <Select value={aId ?? ''} onChange={(e) => setAId(Number(e.target.value))}>
+                <Select value={aId ?? ''} onChange={(e) => pickA(Number(e.target.value))}>
                   {files.map((f) => (
-                    <option key={f.id} value={f.id}>{f.filename}</option>
+                    <option key={f.id} value={f.id} disabled={f.id === bId}>{f.filename}</option>
                   ))}
                 </Select>
               </div>
               <div className="space-y-1">
                 <Label>B (대상)</Label>
-                <Select value={bId ?? ''} onChange={(e) => setBId(Number(e.target.value))}>
+                <Select value={bId ?? ''} onChange={(e) => pickB(Number(e.target.value))}>
                   {files.map((f) => (
-                    <option key={f.id} value={f.id}>{f.filename}</option>
+                    <option key={f.id} value={f.id} disabled={f.id === aId}>{f.filename}</option>
                   ))}
                 </Select>
               </div>

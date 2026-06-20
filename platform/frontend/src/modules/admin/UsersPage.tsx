@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { UserPlus, KeyRound, ShieldCheck, ShieldOff, Power, PowerOff } from 'lucide-react'
 import { api, unwrap, errorMessage } from '@/shared/api/client'
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Input, Label, Spinner } from '@/shared/ui/ui'
 import { PageHeader } from '@/shared/components/PageHeader'
+import { ConfirmDialog } from '@/shared/components/ConfirmDialog'
 import { fmtDate } from '@/shared/lib/cn'
 import { useAuth } from '@/shared/auth/AuthContext'
 
@@ -62,7 +63,7 @@ function CreateUserModal({ onClose }: { onClose: () => void }) {
     onError: (e) => setErr(errorMessage(e)),
   })
 
-  const valid = email.trim().length > 0 && password.length > 0
+  const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) && password.length >= 8
 
   return (
     <Modal title="새 사용자" onClose={onClose}>
@@ -73,6 +74,7 @@ function CreateUserModal({ onClose }: { onClose: () => void }) {
       <div className="space-y-1">
         <Label>비밀번호</Label>
         <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="초기 비밀번호" />
+        <div className="text-xs text-muted">최소 8자</div>
       </div>
       <div className="space-y-1">
         <Label>표시 이름 (선택)</Label>
@@ -95,16 +97,23 @@ function CreateUserModal({ onClose }: { onClose: () => void }) {
 
 // ── 비밀번호 재설정 ──────────────────────────────────────────────────────────
 function ResetPasswordModal({ user, onClose }: { user: AdminUser; onClose: () => void }) {
+  const qc = useQueryClient()
   const [password, setPassword] = useState('')
   const [err, setErr] = useState<string | null>(null)
   const [done, setDone] = useState(false)
+
+  useEffect(() => {
+    setPassword('')
+    setErr(null)
+    setDone(false)
+  }, [user.id])
 
   const reset = useMutation({
     mutationFn: async () => {
       const { data } = await api.post(`/admin/users/${user.id}/password`, { new_password: password })
       return unwrap<unknown>(data)
     },
-    onSuccess: () => setDone(true),
+    onSuccess: () => { setDone(true); qc.invalidateQueries({ queryKey: USERS_KEY }) },
     onError: (e) => setErr(errorMessage(e)),
   })
 
@@ -122,11 +131,12 @@ function ResetPasswordModal({ user, onClose }: { user: AdminUser; onClose: () =>
           <div className="space-y-1">
             <Label>새 비밀번호</Label>
             <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="새 비밀번호" autoFocus />
+            <div className="text-xs text-muted">최소 8자</div>
           </div>
           {err && <div className="text-sm text-danger">{err}</div>}
           <div className="flex justify-end gap-2 pt-1">
             <Button size="sm" variant="ghost" onClick={onClose}>취소</Button>
-            <Button size="sm" variant="primary" disabled={!password || reset.isPending} onClick={() => { setErr(null); reset.mutate() }}>
+            <Button size="sm" variant="primary" disabled={password.length < 8 || reset.isPending} onClick={() => { setErr(null); reset.mutate() }}>
               {reset.isPending ? <Spinner /> : <KeyRound size={14} />} 재설정
             </Button>
           </div>
@@ -143,6 +153,7 @@ export function UsersPage() {
   const { data, isLoading, isError, error } = useQuery({ queryKey: USERS_KEY, queryFn: fetchUsers })
   const [creating, setCreating] = useState(false)
   const [resetFor, setResetFor] = useState<AdminUser | null>(null)
+  const [pending, setPending] = useState<{ u: AdminUser; kind: 'active' | 'admin' } | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
   const patch = useMutation({
@@ -154,19 +165,36 @@ export function UsersPage() {
     onError: (e) => setErr(errorMessage(e)),
   })
 
-  const toggleActive = (u: AdminUser) => {
-    const next = !u.is_active
-    if (!window.confirm(`${u.email} 계정을 ${next ? '활성화' : '비활성화'}하시겠습니까?`)) return
+  const confirmPending = () => {
+    if (!pending) return
+    const { u, kind } = pending
     setErr(null)
-    patch.mutate({ id: u.id, body: { is_active: next } })
+    if (kind === 'active') patch.mutate({ id: u.id, body: { is_active: !u.is_active } })
+    else patch.mutate({ id: u.id, body: { is_system_admin: !u.is_system_admin } })
+    setPending(null)
   }
 
-  const toggleAdmin = (u: AdminUser) => {
+  // Copy/title/danger for the confirm dialog, derived from the pending action.
+  const confirmProps = (() => {
+    if (!pending) return null
+    const { u, kind } = pending
+    if (kind === 'active') {
+      const next = !u.is_active
+      return {
+        title: '계정 상태 변경',
+        message: `${u.email} 계정을 ${next ? '활성화' : '비활성화'}하시겠습니까?`,
+        confirmLabel: next ? '활성화' : '비활성화',
+        danger: !next,
+      }
+    }
     const next = !u.is_system_admin
-    if (!window.confirm(`${u.email} 의 관리자 권한을 ${next ? '부여' : '회수'}하시겠습니까?`)) return
-    setErr(null)
-    patch.mutate({ id: u.id, body: { is_system_admin: next } })
-  }
+    return {
+      title: '관리자 권한 변경',
+      message: `${u.email} 의 관리자 권한을 ${next ? '부여' : '회수'}하시겠습니까?`,
+      confirmLabel: next ? '권한 부여' : '권한 회수',
+      danger: !next,
+    }
+  })()
 
   return (
     <div>
@@ -221,10 +249,10 @@ export function UsersPage() {
                       <td className="p-3 text-xs text-muted">{fmtDate(u.created_at)}</td>
                       <td className="p-3">
                         <div className="flex justify-end gap-1">
-                          <Button size="sm" variant="ghost" disabled={busy} title={u.is_system_admin ? '관리자 권한 회수' : '관리자 권한 부여'} onClick={() => toggleAdmin(u)}>
+                          <Button size="sm" variant="ghost" disabled={busy || isSelf} title={isSelf ? '본인 계정의 권한은 변경할 수 없습니다' : u.is_system_admin ? '관리자 권한 회수' : '관리자 권한 부여'} onClick={() => setPending({ u, kind: 'admin' })}>
                             {u.is_system_admin ? <ShieldOff size={14} /> : <ShieldCheck size={14} />}
                           </Button>
-                          <Button size="sm" variant="ghost" disabled={busy || isSelf} title={isSelf ? '본인 계정은 비활성화할 수 없습니다' : u.is_active ? '비활성화' : '활성화'} onClick={() => toggleActive(u)}>
+                          <Button size="sm" variant="ghost" disabled={busy || isSelf} title={isSelf ? '본인 계정은 비활성화할 수 없습니다' : u.is_active ? '비활성화' : '활성화'} onClick={() => setPending({ u, kind: 'active' })}>
                             {u.is_active ? <PowerOff size={14} /> : <Power size={14} />}
                           </Button>
                           <Button size="sm" variant="ghost" title="비밀번호 재설정" onClick={() => setResetFor(u)}>
@@ -243,6 +271,15 @@ export function UsersPage() {
 
       {creating && <CreateUserModal onClose={() => setCreating(false)} />}
       {resetFor && <ResetPasswordModal user={resetFor} onClose={() => setResetFor(null)} />}
+      <ConfirmDialog
+        open={pending !== null}
+        title={confirmProps?.title ?? ''}
+        message={confirmProps?.message}
+        confirmLabel={confirmProps?.confirmLabel}
+        danger={confirmProps?.danger}
+        onConfirm={confirmPending}
+        onCancel={() => setPending(null)}
+      />
     </div>
   )
 }

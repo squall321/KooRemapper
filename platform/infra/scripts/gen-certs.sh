@@ -17,9 +17,12 @@ if [ "$FORCE" -eq 0 ] && [ -f "$CRT" ] && [ -f "$KEY" ]; then
 fi
 
 mkdir -p "$CERT_DIR"
+CN="${CERT_CN:-kooremapper.local}"
 openssl req -x509 -newkey rsa:2048 -nodes -days 825 \
   -keyout "$KEY" -out "$CRT" \
-  -subj "/CN=kooremapper.local"
+  -subj "/CN=$CN" \
+  -addext "subjectAltName=DNS:$CN,DNS:localhost,IP:127.0.0.1"
+echo "  CN=$CN (override with CERT_CN env)"
 
 chmod 600 "$KEY"
 echo "✓ generated self-signed cert → $CRT"

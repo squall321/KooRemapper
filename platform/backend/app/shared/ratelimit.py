@@ -20,11 +20,15 @@ _hits: dict[str, deque[float]] = defaultdict(deque)
 
 
 def _client_key(request: Request, creds: HTTPAuthorizationCredentials | None, bucket: str) -> str:
-    # Prefer the token (per-user) when present, else client IP.
+    # Prefer the token (per-user) when present, else client IP. Behind nginx the
+    # peer is 127.0.0.1, so honour X-Forwarded-For (first hop) for the real client.
     if creds and creds.credentials:
         ident = creds.credentials[:24]
     else:
-        ident = request.client.host if request.client else "anon"
+        xff = request.headers.get("x-forwarded-for")
+        ident = (xff.split(",")[0].strip() if xff else None) or (
+            request.client.host if request.client else "anon"
+        )
     return f"{bucket}:{ident}"
 
 
