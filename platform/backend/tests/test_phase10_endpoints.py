@@ -66,6 +66,37 @@ async def test_rate_limit_dependency_emits_429_with_headers():
         ratelimit._hits.clear()
 
 
+# ── DB-free: _client_key must not be spoofable via X-Forwarded-For ──────────
+def _fake_request(headers: dict, peer: str | None):
+    from starlette.requests import Request
+
+    scope = {
+        "type": "http",
+        "headers": [(k.lower().encode(), v.encode()) for k, v in headers.items()],
+        "client": (peer, 12345) if peer else None,
+    }
+    return Request(scope)
+
+
+async def test_client_key_ignores_untrusted_xff():
+    from app.shared.ratelimit import _client_key
+
+    # Untrusted peer (direct hit) → XFF ignored, keyed on the real peer.
+    k1 = _client_key(_fake_request({"x-forwarded-for": "9.9.9.9"}, "8.8.8.8"), None, "login")
+    k2 = _client_key(_fake_request({"x-forwarded-for": "1.1.1.1"}, "8.8.8.8"), None, "login")
+    assert k1 == k2 == "login:8.8.8.8", (k1, k2)
+
+    # Trusted proxy peer (loopback) → use the LAST hop nginx appended, not the
+    # client-controlled first hop. Two different spoofed first hops, same real
+    # client → same bucket (bypass closed).
+    t1 = _client_key(_fake_request({"x-forwarded-for": "9.9.9.9, 5.5.5.5"}, "127.0.0.1"), None, "login")
+    t2 = _client_key(_fake_request({"x-forwarded-for": "1.1.1.1, 5.5.5.5"}, "127.0.0.1"), None, "login")
+    assert t1 == t2 == "login:5.5.5.5", (t1, t2)
+
+    # No XFF → fall back to the peer.
+    assert _client_key(_fake_request({}, "127.0.0.1"), None, "login") == "login:127.0.0.1"
+
+
 # ── Shared fixtures for the DB-backed endpoint tests ────────────────────────
 @pytest_asyncio.fixture(loop_scope="session")
 async def db_up():

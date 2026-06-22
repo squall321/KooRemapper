@@ -11,7 +11,9 @@ build_one() {
   local sif="$1" def="$2"
   if [ "$FORCE" -eq 1 ] || [ ! -f "$sif" ]; then
     echo "→ build $(basename "$sif")"
-    "$APPTAINER" build --force "$sif" "$def"
+    # Build with CWD at the .def's directory so relative %files (e.g. api.def's
+    # ../../../dist/gmsh) resolve. sif/def are absolute paths from _common.sh.
+    ( cd "$(dirname "$def")" && "$APPTAINER" build --force "$sif" "$(basename "$def")" )
   else
     echo "✓ skip $(basename "$sif") (exists)"
   fi

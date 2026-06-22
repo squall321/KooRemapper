@@ -18,17 +18,30 @@ from app.shared.auth import bearer_scheme
 _WINDOW = 60.0
 _hits: dict[str, deque[float]] = defaultdict(deque)
 
+# Only requests whose *direct* TCP peer is one of these are allowed to carry a
+# trusted X-Forwarded-For. In this deployment nginx shares the host net
+# namespace and connects to the API over loopback, so the proxy peer is always
+# loopback. A request arriving from any other peer is hitting the API directly,
+# so its XFF is attacker-supplied and must be ignored.
+_TRUSTED_PROXY_PEERS = {"127.0.0.1", "::1", "localhost"}
+
 
 def _client_key(request: Request, creds: HTTPAuthorizationCredentials | None, bucket: str) -> str:
-    # Prefer the token (per-user) when present, else client IP. Behind nginx the
-    # peer is 127.0.0.1, so honour X-Forwarded-For (first hop) for the real client.
+    # Prefer the token (per-user) when present, else the client IP.
     if creds and creds.credentials:
-        ident = creds.credentials[:24]
+        return f"{bucket}:{creds.credentials[:24]}"
+
+    peer = request.client.host if request.client else None
+    xff = request.headers.get("x-forwarded-for")
+    # Trust XFF only when the request actually came through our proxy, and then
+    # use the LAST hop — the address nginx itself observed and appended via
+    # $proxy_add_x_forwarded_for. The first hop is client-controlled (the client
+    # can prepend anything) and must never be used, or rate limiting on the
+    # unauthenticated endpoints (login/signup) is trivially bypassed.
+    if xff and peer in _TRUSTED_PROXY_PEERS:
+        ident = xff.split(",")[-1].strip() or peer
     else:
-        xff = request.headers.get("x-forwarded-for")
-        ident = (xff.split(",")[0].strip() if xff else None) or (
-            request.client.host if request.client else "anon"
-        )
+        ident = peer or "anon"
     return f"{bucket}:{ident}"
 
 
