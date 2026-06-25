@@ -11,6 +11,8 @@ From: nginx:1.27
     ../nginx/nginx.conf /etc/nginx/nginx.conf
 
 %startscript
+    # Writable scratch dir for pid + temp paths (image rootfs is read-only).
+    mkdir -p /tmp/nginx
     # daemon off so apptainer keeps the instance alive in the foreground.
     exec nginx -g 'daemon off;'
 
