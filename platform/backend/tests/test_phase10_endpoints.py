@@ -257,6 +257,16 @@ async def test_signup_gate_and_validation(client):
         short = await client.post(f"{API}/auth/signup",
                                   json={"email": _uniq_email(), "password": "short"})
         assert short.status_code == 422
+
+        # blank (all-whitespace) password is rejected like PasswordChange (#5)
+        blank = await client.post(f"{API}/auth/signup",
+                                  json={"email": _uniq_email(), "password": " " * 10})
+        assert blank.status_code == 422
+
+        # malformed email is rejected at registration (#5)
+        bad_email = await client.post(f"{API}/auth/signup",
+                                      json={"email": "notanemail", "password": "signuptest1"})
+        assert bad_email.status_code == 422
     finally:
         settings.allow_signup = prev
         async with SessionLocal() as s:

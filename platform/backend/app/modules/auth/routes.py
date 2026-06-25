@@ -79,8 +79,7 @@ async def change_password(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    if not user.is_active:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "비활성 계정입니다.")
+    # get_current_user already rejects inactive users (401), so no is_active check here.
     if not verify_password(body.current_password, user.password_hash):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "현재 비밀번호가 올바르지 않습니다.")
     user.password_hash = hash_password(body.new_password)

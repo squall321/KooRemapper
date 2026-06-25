@@ -1,7 +1,7 @@
 """System-admin user management (require_system_admin)."""
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models import Session as SessionModel
 from app.models import User
-from app.modules.auth.schemas import UserRead
+from app.modules.auth.schemas import UserRead, normalize_email, reject_blank_password
 from app.shared.auth import require_system_admin
 from app.shared.responses import ok
 from app.shared.security import hash_password
@@ -23,6 +23,16 @@ class UserCreate(BaseModel):
     display_name: str | None = None
     is_system_admin: bool = False
 
+    @field_validator("email")
+    @classmethod
+    def _norm_email(cls, v: str) -> str:
+        return normalize_email(v)
+
+    @field_validator("password")
+    @classmethod
+    def _pw_not_blank(cls, v: str) -> str:
+        return reject_blank_password(v)
+
 
 class UserPatch(BaseModel):
     is_active: bool | None = None
@@ -32,6 +42,23 @@ class UserPatch(BaseModel):
 
 class PasswordReset(BaseModel):
     new_password: str = Field(min_length=8, max_length=128)
+
+    @field_validator("new_password")
+    @classmethod
+    def _pw_not_blank(cls, v: str) -> str:
+        return reject_blank_password(v)
+
+
+async def _remaining_active_admins(db: AsyncSession, exclude_id: int) -> int:
+    return (
+        await db.execute(
+            select(func.count(User.id)).where(
+                User.is_system_admin.is_(True),
+                User.is_active.is_(True),
+                User.id != exclude_id,
+            )
+        )
+    ).scalar_one()
 
 
 @router.get("/admin/users")
@@ -83,6 +110,18 @@ async def patch_user(
     u = await db.get(User, user_id)
     if u is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "사용자를 찾을 수 없습니다.")
+    # Removing this user's admin access (deactivate or demote) must not drop the
+    # number of active system admins to zero — otherwise the /admin surface locks
+    # out entirely. The self-guard above already covers the single-actor case;
+    # this also covers concurrent mutual-demotion by two admins.
+    removes_admin_access = (
+        u.is_system_admin and u.is_active
+        and (body.is_active is False or body.is_system_admin is False)
+    )
+    if removes_admin_access and await _remaining_active_admins(db, u.id) == 0:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "마지막 시스템 관리자는 비활성화/권한 해제할 수 없습니다."
+        )
     if body.is_active is not None:
         if u.id == actor.id and body.is_active is False:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "자기 계정은 비활성화할 수 없습니다.")
