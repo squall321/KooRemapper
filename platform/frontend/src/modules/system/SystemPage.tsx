@@ -69,6 +69,7 @@ function CopyBtn({ text }: { text: string }) {
   const onCopy = async () => {
     try { await navigator.clipboard.writeText(text) } catch { return }
     setDone(true)
+    if (timer.current) clearTimeout(timer.current)  // reset, don't orphan, on rapid re-copy
     timer.current = setTimeout(() => setDone(false), 1500)
   }
   return (

@@ -95,17 +95,21 @@ export function ComparePanel({ files }: { files: SessionFile[] }) {
               </thead>
               <tbody className="divide-y divide-border">
                 {rows.map((r) => {
+                  const fa = show(r.a, r.fmt)
+                  const fb = show(r.b, r.fmt)
                   const delta = r.a !== null && r.b !== null ? r.b - r.a : null
-                  const eq = delta === 0
-                  const dColor = delta === null || eq ? 'text-muted' : delta > 0 ? 'text-success' : 'text-danger'
+                  // Treat as equal when the *displayed* (rounded) values match, so
+                  // we never show a colored Δ while the A and B columns look identical.
+                  const eq = delta === null || fa === fb
+                  const dColor = eq ? 'text-muted' : delta! > 0 ? 'text-success' : 'text-danger'
                   const dMag = delta === null ? '' : r.fmt ? r.fmt(Math.abs(delta)) : Math.abs(delta).toLocaleString()
                   return (
                     <tr key={r.label}>
                       <td className="py-1.5 text-muted">{r.label}</td>
-                      <td className="py-1.5 text-right mono">{show(r.a, r.fmt)}</td>
-                      <td className="py-1.5 text-right mono">{show(r.b, r.fmt)}</td>
+                      <td className="py-1.5 text-right mono">{fa}</td>
+                      <td className="py-1.5 text-right mono">{fb}</td>
                       <td className={`py-1.5 text-right mono ${dColor}`}>
-                        {delta === null || eq ? DASH : `${delta > 0 ? '+' : '−'}${dMag}`}
+                        {eq ? DASH : `${delta! > 0 ? '+' : '−'}${dMag}`}
                       </td>
                     </tr>
                   )

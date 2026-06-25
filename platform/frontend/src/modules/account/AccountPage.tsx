@@ -32,16 +32,22 @@ export function AccountPage() {
   const [confirm, setConfirm] = useState('')
   const [err, setErr] = useState<string | null>(null)
   const [ok, setOk] = useState<string | null>(null)
+  // Bumped every time a message is shown so the auto-dismiss timer re-arms even
+  // when the same message text is set twice in a row (React bails on X→X, which
+  // would otherwise leave the previous timer running and dismiss early).
+  const [flash, setFlash] = useState(0)
+  const showErr = (m: string) => { setErr(m); setOk(null); setFlash((f) => f + 1) }
+  const showOk = (m: string) => { setOk(m); setErr(null); setFlash((f) => f + 1) }
 
   const change = useMutation({
     mutationFn: () => changePassword(current, next),
     onSuccess: (msg) => {
-      setOk(msg || '비밀번호가 변경되었습니다.')
+      showOk(msg || '비밀번호가 변경되었습니다.')
       setCurrent('')
       setNext('')
       setConfirm('')
     },
-    onError: (e) => setErr(errorMessage(e)),
+    onError: (e) => showErr(errorMessage(e)),
   })
 
   useEffect(() => {
@@ -51,22 +57,22 @@ export function AccountPage() {
       setOk(null)
     }, 4000)
     return () => clearTimeout(t)
-  }, [err, ok])
+  }, [flash, err, ok])
 
   function submit(e: React.FormEvent) {
     e.preventDefault()
     setErr(null)
     setOk(null)
     if (!current || !next) {
-      setErr('현재 비밀번호와 새 비밀번호를 입력하세요.')
+      showErr('현재 비밀번호와 새 비밀번호를 입력하세요.')
       return
     }
     if (next.length < 8) {
-      setErr('새 비밀번호는 최소 8자 이상이어야 합니다.')
+      showErr('새 비밀번호는 최소 8자 이상이어야 합니다.')
       return
     }
     if (next !== confirm) {
-      setErr('새 비밀번호와 확인이 일치하지 않습니다.')
+      showErr('새 비밀번호와 확인이 일치하지 않습니다.')
       return
     }
     change.mutate()

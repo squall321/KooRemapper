@@ -9,10 +9,16 @@ interface PaginationProps {
 }
 
 export function Pagination({ offset, limit, count, onChange }: PaginationProps) {
-  if (count === 0 && offset === 0) return null
-  const from = count === 0 ? 0 : offset + 1
+  // Hide entirely on any empty page (not just the first) so we never render a
+  // nonsensical range like "0–20" on an overshot page.
+  if (count === 0) return null
+  const from = offset + 1
   const to = offset + count
   const atStart = offset <= 0
+  // NOTE: without a total/hasMore input we can't distinguish a full last page
+  // from a full middle page, so "다음" stays enabled on an exact-multiple last
+  // page (lands on an empty page, which then renders nothing). When wiring this
+  // component, pass a real total and compute `offset + limit >= total`.
   const atEnd = count < limit
 
   return (
