@@ -251,7 +251,13 @@ async def download_result(
             headers=_forward_headers(ctx),
         )
     if r.status_code >= 400:
-        return {"error": f"HTTP {r.status_code}", "detail": r.text[:500]}
+        # Surface as a tool error (like every other tool) instead of a dict that
+        # would look like a successful result.
+        try:
+            msg = r.json().get("message") or f"HTTP {r.status_code}"
+        except Exception:
+            msg = f"HTTP {r.status_code}"
+        raise RuntimeError(f"다운로드 실패: {msg}")
     data = r.content
     # Guard against dumping a huge file into the model context.
     MAX = int(os.environ.get("KOORM_MCP_MAX_DOWNLOAD_BYTES", str(5 * 1024 * 1024)))
