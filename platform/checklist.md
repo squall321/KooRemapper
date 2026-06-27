@@ -19,7 +19,7 @@
 - [x] tsc + vite 빌드 통과
 - [x] api 재시작 + 라이브 회원가입 검증 확인 (blank/bad-email 422, valid 201, ghost 401)
 - [x] 커밋(백엔드/프론트 분리) + 푸시
-- [ ] nginx read-only-fs 수정 + nginx.sif 재빌드 (재부팅으로 드러난 별개 이슈)
+- [x] nginx read-only-fs 수정 + nginx.sif 재빌드 (/tmp 경로 + gzip_proxied/text/javascript)
 
 ## 표면화 (구현 보류, 사용자 결정)
 - [ ] JWT 재설정 무효화 (#3) — token_version 마이그레이션 필요
