@@ -72,7 +72,7 @@ _PARITY = [
 async def capabilities(_user: User = Depends(get_current_user)):
     return ok({
         "operations": len(catalog.operation_names()),
-        "mcp_tools": 20,
+        "mcp_tools": 22,
         "parity": _PARITY,
         "mcp_add_hint": (
             f"claude mcp add --transport http kooremapper "

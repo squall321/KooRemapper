@@ -32,7 +32,7 @@ Windows `%APPDATA%\Claude\claude_desktop_config.json`.
   }
 }
 ```
-- `npx`(Node 18+) 필요. 저장 후 Claude Desktop 재시작 → 도구 20개가 보인다.
+- `npx`(Node 18+) 필요. 저장 후 Claude Desktop 재시작 → 도구 22개가 보인다.
 - 비-localhost(외부)면 서버에 `MCP_ALLOWED_HOSTS` 를 지정하고 가급적 nginx/TLS 뒤에 둔다.
 
 ## 3) 파일 보내기 — 두 가지 경로

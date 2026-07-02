@@ -277,6 +277,20 @@ async def download_result(
                 "note": "binary content returned as base64"}
 
 
+@mcp.tool()
+async def list_session_jobs(session_id: str, ctx: Context) -> list:
+    """세션에서 실행된 Job 이력(상태/오퍼레이션/exit_code/생성시각).
+    The job history of a session — status, operation, exit_code, timestamps."""
+    return await _get(ctx, f"/sessions/{session_id}/jobs")
+
+
+@mcp.tool()
+async def system_capabilities(ctx: Context) -> dict:
+    """플랫폼 기능 카탈로그 — 오퍼레이션 수, MCP 도구 수, 웹/MCP 패리티 매트릭스,
+    Claude 연결 방법 힌트. / Capability + web-MCP parity matrix + connect hints."""
+    return await _get(ctx, "/system/capabilities")
+
+
 if __name__ == "__main__":
     host = os.environ.get("MCP_HOST", "127.0.0.1")
     mcp.settings.host = host
