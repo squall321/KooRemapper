@@ -6,6 +6,7 @@ On limit, raises 429 with Retry-After. Disabled via KOORM_RATELIMIT_ENABLED=fals
 """
 from __future__ import annotations
 
+import hashlib
 import time
 from collections import defaultdict, deque
 
@@ -27,9 +28,12 @@ _TRUSTED_PROXY_PEERS = {"127.0.0.1", "::1", "localhost"}
 
 
 def _client_key(request: Request, creds: HTTPAuthorizationCredentials | None, bucket: str) -> str:
-    # Prefer the token (per-user) when present, else the client IP.
+    # Prefer the token (per-user) when present, else the client IP. Hash the FULL
+    # token — a JWT's first chars are the header, identical across all users, so a
+    # prefix would collapse every JWT (web) user into one shared bucket.
     if creds and creds.credentials:
-        return f"{bucket}:{creds.credentials[:24]}"
+        digest = hashlib.sha256(creds.credentials.encode()).hexdigest()[:24]
+        return f"{bucket}:{digest}"
 
     peer = request.client.host if request.client else None
     xff = request.headers.get("x-forwarded-for")

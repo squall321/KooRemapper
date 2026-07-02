@@ -4611,11 +4611,10 @@
     "args": {
      "model": "test_matdb_model.k",
      "output": "test_matdb_result.k",
-     "database": "material_db.json",
      "mat_type": "MAT_ELASTIC",
      "thermal": true
     },
-    "note": "Replaces all materials in the model with database definitions using global MAT_ELASTIC type and thermal card insertion enabled. Materials matched by existing MID or title substring."
+    "note": "Replaces all materials in the model with database definitions using global MAT_ELASTIC type and thermal card insertion enabled. database is omitted, so the bundled 525-material library is used automatically (no upload). Materials matched by existing MID or title substring."
    },
    "example_folder": "/home/koopark/claude/KooRemapper/materials",
    "notes": "MATCHING PRIORITY: (1) materials[] rules processed in order; (2) within each rule, mid > match field; (3) '*' in match field is catch-all for any unmatched material; (4) match_part rules always assign fresh MID from database material. MATERIAL ID ASSIGNMENT: Matched materials are assigned new MIDs by the matdb op; existing part MIDs in the model are replaced. DAMPING: Alpha (damping coefficient) is baked in the database at ~50 Hz reference. Presets or explicit damping_* fields rescale via final_alpha = max(damping_alpha_floor, baked_alpha * damping_alpha_scale). damping_target_freq_hz is legacy (converted to scale internally); prefer damping_alpha_scale. Explicit fields OVERRIDE preset baselines when set. DATABASE PATH: If relative (no / or \\\\), resolved vs YAML config directory. MAT TYPE SUPPORT: Database ships variants per material; common types include MAT_ELASTIC, MAT_024 (PIECEWISE_LINEAR_PLASTICITY), MAT_RIGID, MAT_PIECEWISE_LINEAR_PLASTICITY. THERMAL EXPANSION: thermal: true inserts *MAT_THERMAL_ISOTROPIC and *MAT_ADD_THERMAL_EXPANSION pairs with auto-linked TMID.",

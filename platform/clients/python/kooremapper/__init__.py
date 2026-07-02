@@ -112,6 +112,9 @@ class KooRemapper:
     def system_status(self):
         return _unwrap(self._c.get("/system/status"))
 
+    def system_capabilities(self):
+        return _unwrap(self._c.get("/system/capabilities"))
+
     def list_operations(self):
         return _unwrap(self._c.get("/operations"))
 
@@ -165,6 +168,9 @@ class KooRemapper:
 
     def get_job(self, job_id: str):
         return _unwrap(self._c.get(f"/jobs/{job_id}"))
+
+    def list_session_jobs(self, session_id: str):
+        return _unwrap(self._c.get(f"/sessions/{session_id}/jobs"))
 
     def job_outputs(self, job_id: str):
         return _unwrap(self._c.get(f"/jobs/{job_id}/outputs"))
@@ -234,6 +240,9 @@ class AsyncKooRemapper:
     async def system_status(self):
         return _unwrap(await self._c.get("/system/status"))
 
+    async def system_capabilities(self):
+        return _unwrap(await self._c.get("/system/capabilities"))
+
     async def list_operations(self):
         return _unwrap(await self._c.get("/operations"))
 
@@ -282,6 +291,9 @@ class AsyncKooRemapper:
 
     async def get_job(self, job_id: str):
         return _unwrap(await self._c.get(f"/jobs/{job_id}"))
+
+    async def list_session_jobs(self, session_id: str):
+        return _unwrap(await self._c.get(f"/sessions/{session_id}/jobs"))
 
     async def job_outputs(self, job_id: str):
         return _unwrap(await self._c.get(f"/jobs/{job_id}/outputs"))

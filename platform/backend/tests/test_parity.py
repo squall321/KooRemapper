@@ -20,6 +20,7 @@ from app.runner import catalog  # noqa: E402
 _PLATFORM = _BACKEND.parent
 _MCP_SERVER = _PLATFORM / "mcp_server" / "server.py"
 _SYSTEM_ROUTES = _BACKEND / "app" / "modules" / "system" / "routes.py"
+_PY_CLIENT = _PLATFORM / "clients" / "python" / "kooremapper" / "__init__.py"
 
 
 def test_every_op_is_describable():
@@ -53,3 +54,23 @@ def test_advertised_mcp_tool_count_matches_server():
         f"/system/capabilities advertises mcp_tools={advertised} but server.py has "
         f"{actual} @mcp.tool tools — update the literal in system/routes.py"
     )
+
+
+def test_python_client_mirrors_mcp_read_surface():
+    """The Python client (sync + async) must expose the same session/job/system
+    reads as MCP, so adding an MCP tool without a client method is caught."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("kooremapper_client", _PY_CLIENT)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    # Python client uses pythonic short names (run, job_outputs) for a few MCP
+    # tools (run_operation, get_job_outputs); assert by the client's own names.
+    required = {
+        "whoami", "system_status", "system_capabilities", "list_operations",
+        "describe_operation", "list_sessions", "get_session", "list_files",
+        "list_session_jobs", "get_job", "job_outputs", "run",
+    }
+    for cls in (mod.KooRemapper, mod.AsyncKooRemapper):
+        missing = sorted(m for m in required if not hasattr(cls, m))
+        assert not missing, f"{cls.__name__} missing {missing}"
