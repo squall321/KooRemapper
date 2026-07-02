@@ -20,7 +20,13 @@ from typing import Any
 
 import yaml
 
+from app.config import settings
 from app.runner import catalog
+
+# matdb's material DB is bundled next to the binary (bin/materials/material_db.json).
+# When a matdb job omits `database`, default to this absolute path so the 525-material
+# library is used with no session upload. (The binary loads an absolute path as-is.)
+_BUNDLED_MATERIAL_DB = settings.kooremapper_bin.parent / "materials" / "material_db.json"
 
 
 class _KDumper(yaml.SafeDumper):
@@ -91,6 +97,11 @@ def build_command(op: str, args: dict, work_dir: Path) -> BuiltCommand:
     entry = catalog.get_operation(op)
     if entry is None:
         return BuiltCommand(argv=[], error=f"unknown operation: {op}")
+
+    # matdb convenience: if no database given, use the bundled material library so
+    # users don't have to upload material_db.json into the session.
+    if op == "matdb" and not args.get("database"):
+        args = {**args, "database": str(_BUNDLED_MATERIAL_DB)}
 
     # Validate against the op's JSON Schema first.
     errs = catalog.validate_args(op, args)

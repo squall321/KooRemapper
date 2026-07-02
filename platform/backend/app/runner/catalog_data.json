@@ -4536,8 +4536,8 @@
      "type": "file",
      "role": "yaml_field",
      "yaml_path": "database",
-     "required": true,
-     "description": "JSON material database file (materials/material_db.json or custom path)"
+     "required": false,
+     "description": "JSON material database file. Optional — if omitted, the bundled 525-material library next to the binary is used automatically (no upload needed)."
     },
     {
      "name": "mat_type",
