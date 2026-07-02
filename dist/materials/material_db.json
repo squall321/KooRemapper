@@ -13,7 +13,7 @@
       "thermal_conductivity_k_SI": "W/(m·K)"
     },
     "card_note": "card_structural contains the EXACT original LS-DYNA keyword text",
-    "created": "2026-04-18",
+    "created": "2026-04-20",
     "generator": "scripts/build_material_db.py"
   },
   "materials": {
@@ -1045,12 +1045,12 @@
       "mat_type_id": 6,
       "mechanical": {
         "RHO": 1.05e-09,
-        "BULK": 2000.0,
+        "BULK": 2.5,
         "G0": 0.15,
         "GI": 0.015,
         "BETA": 50.0,
-        "E": 0.449988750281243,
-        "PR": 0.4999625009374766,
+        "E": 0.4411764705882353,
+        "PR": 0.47058823529411764,
         "rho_g_cm3": 1.05,
         "E_GPa": 0.0004
       },
@@ -1060,14 +1060,14 @@
       },
       "damping": {},
       "cards_structural": {
-        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nOCA Rigid Standard (3M 8171)\n$      MID        RO      BULK        G0        GI      BETA\n    100001 1.050e-09    2000.0    0.1500    0.0150      50.0\n$\n$$ [DB] PID slot holds MID=100001 (external tool must replace with actual PART IDs)\n$$ CTE=80 ppm/K (polymer standard value)",
-        "MAT_RIGID": "*MAT_RIGID_TITLE\nOCA Rigid Standard (3M 8171)\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000011.0500E-09       0.4    0.5000                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
-        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nOCA Rigid Standard (3M 8171)_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000011.0500E-09       0.4    0.5000       0.0       0.0       0.0",
-        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nOCA Rigid Standard (3M 8171)_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000011.0500E-09       0.0    0.5000       0.0       0.0       0.0",
-        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nOCA Rigid Standard (3M 8171)\n$      MID       RHO         E        PR        DA        DB         K\n    1000011.0500E-09       0.4    0.5000       0.0       0.0       0.0"
+        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nOCA Rigid Standard (3M 8171)\n$      MID        RO      BULK        G0        GI      BETA\n    100001 1.050e-09    2.5000    0.1500    0.0150      50.0\n$\n$$ [DB] PID slot holds MID=100001 (external tool must replace with actual PART IDs)\n$$ CTE=80 ppm/K (polymer standard value)",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nOCA Rigid Standard (3M 8171)\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000011.0500E-09       0.4    0.4706                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
+        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nOCA Rigid Standard (3M 8171)_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000011.0500E-09       0.4    0.4706       0.0       0.0       0.0",
+        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nOCA Rigid Standard (3M 8171)_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000011.0500E-09       0.0    0.4970       0.0       0.0       0.0",
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nOCA Rigid Standard (3M 8171)\n$      MID       RHO         E        PR        DA        DB         K\n    1000011.0500E-09       0.4    0.4706       0.0       0.0       0.0"
       },
       "card_thermal": "",
-      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100001         0 8.000e-05\n$\n$$ --- OCA_RIGID_HIGH_BOND (MID 100002) ---\n$$ 고접착 OCA — 강화유리 접합, 높은 유지력\n$$ 용도: Gorilla Glass-OLED, 높은 전단 저항 필요\n$$ 두께: 100~200 um\n$$ 출처: 가교밀도 높은 아크릴 OCA, G' 증가\n$$ E_inst=0.75MPa E_equil=0.090MPa tau=12.5ms\n$$ tan(d)=1.27 M=2200MPa G0/GI=8x",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100001         0 8.000e-05\n$\n$$ --- OCA_RIGID_HIGH_BOND (MID 100002) ---\n$$ 고접착 OCA — 강화유리 접합, 높은 유지력\n$$ 용도: Gorilla Glass-OLED, 높은 전단 저항 필요\n$$ 두께: 100~200 um\n$$ 출처: 가교밀도 높은 아크릴 OCA, G' 증가\n$$ E_inst=0.75MPa E_equil=0.090MPa tau=12.5ms v=0.47\n$$ tan(d)=1.27 K=4.17MPa G0/GI=8x",
       "card_damping": ""
     },
     "100002": {
@@ -1079,12 +1079,12 @@
       "mat_type_id": 6,
       "mechanical": {
         "RHO": 1.08e-09,
-        "BULK": 2200.0,
+        "BULK": 4.1667,
         "G0": 0.25,
         "GI": 0.03,
         "BETA": 80.0,
-        "E": 0.7499715919851521,
-        "PR": 0.49994318397030413,
+        "E": 0.7352942329864078,
+        "PR": 0.4705884659728159,
         "rho_g_cm3": 1.08,
         "E_GPa": 0.0007
       },
@@ -1094,14 +1094,14 @@
       },
       "damping": {},
       "cards_structural": {
-        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nOCA Rigid High Bond\n$      MID        RO      BULK        G0        GI      BETA\n    100002 1.080e-09    2200.0    0.2500    0.0300      80.0\n$\n$$ [DB] PID slot holds MID=100002 (external tool must replace with actual PART IDs)\n$$ CTE=80 ppm/K (polymer standard value)",
-        "MAT_RIGID": "*MAT_RIGID_TITLE\nOCA Rigid High Bond\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000021.0800E-09       0.7    0.4999                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
-        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nOCA Rigid High Bond_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000021.0800E-09       0.7    0.4999       0.0       0.0       0.0",
-        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nOCA Rigid High Bond_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000021.0800E-09       0.1    0.5000       0.0       0.0       0.0",
-        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nOCA Rigid High Bond\n$      MID       RHO         E        PR        DA        DB         K\n    1000021.0800E-09       0.7    0.4999       0.0       0.0       0.0"
+        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nOCA Rigid High Bond\n$      MID        RO      BULK        G0        GI      BETA\n    100002 1.080e-09    4.1667    0.2500    0.0300      80.0\n$\n$$ [DB] PID slot holds MID=100002 (external tool must replace with actual PART IDs)\n$$ CTE=80 ppm/K (polymer standard value)",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nOCA Rigid High Bond\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000021.0800E-09       0.7    0.4706                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
+        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nOCA Rigid High Bond_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000021.0800E-09       0.7    0.4706       0.0       0.0       0.0",
+        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nOCA Rigid High Bond_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000021.0800E-09       0.1    0.4964       0.0       0.0       0.0",
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nOCA Rigid High Bond\n$      MID       RHO         E        PR        DA        DB         K\n    1000021.0800E-09       0.7    0.4706       0.0       0.0       0.0"
       },
       "card_thermal": "",
-      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100002         0 8.000e-05\n$\n$$ --- OCA_FOLDABLE (MID 100003) ---\n$$ 폴더블 OCA — 폴더블폰 힌지영역 (Tg<-30°C)\n$$ 용도: Galaxy Fold/Flip 힌지, 반복 굽힘\n$$ 두께: 25~50 um\n$$ 출처: oaepublish ss.2024.22: G'~10kPa at RT\n$$ E_inst=0.15MPa E_equil=0.030MPa tau=50.0ms\n$$ tan(d)=0.89 M=2000MPa G0/GI=5x",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100002         0 8.000e-05\n$\n$$ --- OCA_FOLDABLE (MID 100003) ---\n$$ 폴더블 OCA — 폴더블폰 힌지영역 (Tg<-30°C)\n$$ 용도: Galaxy Fold/Flip 힌지, 반복 굽힘\n$$ 두께: 25~50 um\n$$ 출처: oaepublish ss.2024.22: G'~10kPa at RT\n$$ E_inst=0.15MPa E_equil=0.030MPa tau=50.0ms v=0.46\n$$ tan(d)=0.89 K=0.63MPa G0/GI=5x",
       "card_damping": ""
     },
     "100003": {
@@ -1113,12 +1113,12 @@
       "mat_type_id": 6,
       "mechanical": {
         "RHO": 1.05e-09,
-        "BULK": 2000.0,
+        "BULK": 0.625,
         "G0": 0.05,
         "GI": 0.01,
         "BETA": 20.0,
-        "E": 0.14999875001041657,
-        "PR": 0.49998750010416576,
+        "E": 0.1461038961038961,
+        "PR": 0.461038961038961,
         "rho_g_cm3": 1.05,
         "E_GPa": 0.0001
       },
@@ -1128,14 +1128,14 @@
       },
       "damping": {},
       "cards_structural": {
-        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nOCA Foldable (Tg<-30C)\n$      MID        RO      BULK        G0        GI      BETA\n    100003 1.050e-09    2000.0    0.0500    0.0100      20.0\n$\n$$ [DB] PID slot holds MID=100003 (external tool must replace with actual PART IDs)\n$$ CTE=90 ppm/K (polymer standard value)",
-        "MAT_RIGID": "*MAT_RIGID_TITLE\nOCA Foldable (Tg<-30C)\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000031.0500E-09       0.1    0.5000                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
-        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nOCA Foldable (Tg<-30C)_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000031.0500E-09       0.1    0.5000       0.0       0.0       0.0",
-        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nOCA Foldable (Tg<-30C)_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000031.0500E-09       0.0    0.5000       0.0       0.0       0.0",
-        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nOCA Foldable (Tg<-30C)\n$      MID       RHO         E        PR        DA        DB         K\n    1000031.0500E-09       0.1    0.5000       0.0       0.0       0.0"
+        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nOCA Foldable (Tg<-30C)\n$      MID        RO      BULK        G0        GI      BETA\n    100003 1.050e-09    0.6250    0.0500    0.0100      20.0\n$\n$$ [DB] PID slot holds MID=100003 (external tool must replace with actual PART IDs)\n$$ CTE=90 ppm/K (polymer standard value)",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nOCA Foldable (Tg<-30C)\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000031.0500E-09       0.1    0.4610                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
+        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nOCA Foldable (Tg<-30C)_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000031.0500E-09       0.1    0.4610       0.0       0.0       0.0",
+        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nOCA Foldable (Tg<-30C)_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000031.0500E-09       0.0    0.4920       0.0       0.0       0.0",
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nOCA Foldable (Tg<-30C)\n$      MID       RHO         E        PR        DA        DB         K\n    1000031.0500E-09       0.1    0.4610       0.0       0.0       0.0"
       },
       "card_thermal": "",
-      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100003         0 9.000e-05\n$\n$$ --- OCA_ROLLABLE (MID 100004) ---\n$$ 롤러블 OCA — 롤러블 디스플레이용 극유연\n$$ 용도: LG Rollable TV, 롤러블폰 컨셉\n$$ 두께: 25~50 um\n$$ 출처: oaepublish: Tg<-40°C, G'<10kPa, recovery>85%\n$$ E_inst=0.09MPa E_equil=0.015MPa tau=100.0ms\n$$ tan(d)=1.02 M=1800MPa G0/GI=6x",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100003         0 9.000e-05\n$\n$$ --- OCA_ROLLABLE (MID 100004) ---\n$$ 롤러블 OCA — 롤러블 디스플레이용 극유연\n$$ 용도: LG Rollable TV, 롤러블폰 컨셉\n$$ 두께: 25~50 um\n$$ 출처: oaepublish: Tg<-40°C, G'<10kPa, recovery>85%\n$$ E_inst=0.09MPa E_equil=0.015MPa tau=100.0ms v=0.45\n$$ tan(d)=1.02 K=0.30MPa G0/GI=6x",
       "card_damping": ""
     },
     "100004": {
@@ -1147,12 +1147,12 @@
       "mat_type_id": 6,
       "mechanical": {
         "RHO": 1.03e-09,
-        "BULK": 1800.0,
+        "BULK": 0.3,
         "G0": 0.03,
         "GI": 0.005,
         "BETA": 10.0,
-        "E": 0.08999950000277776,
-        "PR": 0.4999916667129627,
+        "E": 0.08709677419354839,
+        "PR": 0.4516129032258064,
         "rho_g_cm3": 1.03,
         "E_GPa": 0.0001
       },
@@ -1162,14 +1162,14 @@
       },
       "damping": {},
       "cards_structural": {
-        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nOCA Rollable (Tg<-40C)\n$      MID        RO      BULK        G0        GI      BETA\n    100004 1.030e-09    1800.0    0.0300    0.0050      10.0\n$\n$$ [DB] PID slot holds MID=100004 (external tool must replace with actual PART IDs)\n$$ CTE=100 ppm/K (polymer standard value)",
-        "MAT_RIGID": "*MAT_RIGID_TITLE\nOCA Rollable (Tg<-40C)\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000041.0300E-09       0.1    0.5000                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
-        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nOCA Rollable (Tg<-40C)_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000041.0300E-09       0.1    0.5000       0.0       0.0       0.0",
-        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nOCA Rollable (Tg<-40C)_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000041.0300E-09       0.0    0.5000       0.0       0.0       0.0",
-        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nOCA Rollable (Tg<-40C)\n$      MID       RHO         E        PR        DA        DB         K\n    1000041.0300E-09       0.1    0.5000       0.0       0.0       0.0"
+        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nOCA Rollable (Tg<-40C)\n$      MID        RO      BULK        G0        GI      BETA\n    100004 1.030e-09    0.3000    0.0300    0.0050      10.0\n$\n$$ [DB] PID slot holds MID=100004 (external tool must replace with actual PART IDs)\n$$ CTE=100 ppm/K (polymer standard value)",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nOCA Rollable (Tg<-40C)\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000041.0300E-09       0.1    0.4516                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
+        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nOCA Rollable (Tg<-40C)_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000041.0300E-09       0.1    0.4516       0.0       0.0       0.0",
+        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nOCA Rollable (Tg<-40C)_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000041.0300E-09       0.0    0.4917       0.0       0.0       0.0",
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nOCA Rollable (Tg<-40C)\n$      MID       RHO         E        PR        DA        DB         K\n    1000041.0300E-09       0.1    0.4516       0.0       0.0       0.0"
       },
       "card_thermal": "",
-      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100004         0 1.000e-04\n$\n$$ --- OCA_UV_CURED (MID 100005) ---\n$$ UV경화 OCA — 접합 후 UV 경화로 강성 증가\n$$ 용도: 고해상도 디스플레이, 광학 정밀 접합\n$$ 두께: 25~100 um\n$$ 출처: UV 가교 후 G' 증가, BULK 상승\n$$ E_inst=1.20MPa E_equil=0.150MPa tau=6.7ms\n$$ tan(d)=1.24 M=2501MPa G0/GI=8x",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100004         0 1.000e-04\n$\n$$ --- OCA_UV_CURED (MID 100005) ---\n$$ UV경화 OCA — 접합 후 UV 경화로 강성 증가\n$$ 용도: 고해상도 디스플레이, 광학 정밀 접합\n$$ 두께: 25~100 um\n$$ 출처: UV 가교 후 G' 증가, BULK 상승\n$$ E_inst=1.20MPa E_equil=0.150MPa tau=6.7ms v=0.47\n$$ tan(d)=1.24 K=6.67MPa G0/GI=8x",
       "card_damping": ""
     },
     "100005": {
@@ -1181,12 +1181,12 @@
       "mat_type_id": 6,
       "mechanical": {
         "RHO": 1.1e-09,
-        "BULK": 2500.0,
+        "BULK": 6.6667,
         "G0": 0.4,
         "GI": 0.05,
         "BETA": 150.0,
-        "E": 1.1999360034131514,
-        "PR": 0.4999200042664391,
+        "E": 1.1764707035749826,
+        "PR": 0.4705883794687281,
         "rho_g_cm3": 1.1,
         "E_GPa": 0.0012
       },
@@ -1196,14 +1196,14 @@
       },
       "damping": {},
       "cards_structural": {
-        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nOCA UV Cured\n$      MID        RO      BULK        G0        GI      BETA\n    100005 1.100e-09    2500.0    0.4000    0.0500     150.0\n$\n$$ [DB] PID slot holds MID=100005 (external tool must replace with actual PART IDs)\n$$ CTE=75 ppm/K (polymer standard value)",
-        "MAT_RIGID": "*MAT_RIGID_TITLE\nOCA UV Cured\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000051.1000E-09       1.2    0.4999                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
-        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nOCA UV Cured_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000051.1000E-09       1.2    0.4999       0.0       0.0       0.0",
-        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nOCA UV Cured_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000051.1000E-09       0.1    0.5000       0.0       0.0       0.0",
-        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nOCA UV Cured\n$      MID       RHO         E        PR        DA        DB         K\n    1000051.1000E-09       1.2    0.4999       0.0       0.0       0.0"
+        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nOCA UV Cured\n$      MID        RO      BULK        G0        GI      BETA\n    100005 1.100e-09    6.6667    0.4000    0.0500     150.0\n$\n$$ [DB] PID slot holds MID=100005 (external tool must replace with actual PART IDs)\n$$ CTE=75 ppm/K (polymer standard value)",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nOCA UV Cured\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000051.1000E-09       1.2    0.4706                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
+        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nOCA UV Cured_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000051.1000E-09       1.2    0.4706       0.0       0.0       0.0",
+        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nOCA UV Cured_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000051.1000E-09       0.1    0.4963       0.0       0.0       0.0",
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nOCA UV Cured\n$      MID       RHO         E        PR        DA        DB         K\n    1000051.1000E-09       1.2    0.4706       0.0       0.0       0.0"
       },
       "card_thermal": "",
-      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100005         0 7.500e-05\n$\n$ ================================================================\n$ 2. PSA Thin Film — FPC/부품 접합\n$ ================================================================\n$\n$$ --- PSA_ACRYLIC_GENERAL (MID 100006) ---\n$$ 범용 아크릴 PSA — FPC, 보강판 접합\n$$ 용도: FPC-메인보드, 보강판, 차폐필름 접합\n$$ 두께: 10~50 um\n$$ 출처: PMC 10537401: E=0.45MPa, Tg=-40°C, v=0.499\n$$ E_inst=0.90MPa E_equil=0.150MPa tau=10.0ms\n$$ tan(d)=1.02 M=2500MPa G0/GI=6x",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100005         0 7.500e-05\n$\n$ ================================================================\n$ 2. PSA Thin Film — FPC/부품 접합\n$ ================================================================\n$\n$$ --- PSA_ACRYLIC_GENERAL (MID 100006) ---\n$$ 범용 아크릴 PSA — FPC, 보강판 접합\n$$ 용도: FPC-메인보드, 보강판, 차폐필름 접합\n$$ 두께: 10~50 um\n$$ 출처: PMC 10537401: E=0.45MPa, Tg=-40°C, v=0.47\n$$ E_inst=0.90MPa E_equil=0.150MPa tau=10.0ms v=0.47\n$$ tan(d)=1.02 K=5.00MPa G0/GI=6x",
       "card_damping": ""
     },
     "100006": {
@@ -1215,12 +1215,12 @@
       "mat_type_id": 6,
       "mechanical": {
         "RHO": 1.1e-09,
-        "BULK": 2500.0,
+        "BULK": 5.0,
         "G0": 0.3,
         "GI": 0.05,
         "BETA": 100.0,
-        "E": 0.8999640014399424,
-        "PR": 0.499940002399904,
+        "E": 0.8823529411764706,
+        "PR": 0.47058823529411764,
         "rho_g_cm3": 1.1,
         "E_GPa": 0.0009
       },
@@ -1230,14 +1230,14 @@
       },
       "damping": {},
       "cards_structural": {
-        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nPSA Acrylic General (3M 467MP)\n$      MID        RO      BULK        G0        GI      BETA\n    100006 1.100e-09    2500.0    0.3000    0.0500     100.0\n$\n$$ [DB] PID slot holds MID=100006 (external tool must replace with actual PART IDs)\n$$ CTE=85 ppm/K (polymer standard value)",
-        "MAT_RIGID": "*MAT_RIGID_TITLE\nPSA Acrylic General (3M 467MP)\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000061.1000E-09       0.9    0.4999                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
-        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nPSA Acrylic General (3M 467MP)_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000061.1000E-09       0.9    0.4999       0.0       0.0       0.0",
-        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nPSA Acrylic General (3M 467MP)_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000061.1000E-09       0.1    0.5000       0.0       0.0       0.0",
-        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nPSA Acrylic General (3M 467MP)\n$      MID       RHO         E        PR        DA        DB         K\n    1000061.1000E-09       0.9    0.4999       0.0       0.0       0.0"
+        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nPSA Acrylic General (3M 467MP)\n$      MID        RO      BULK        G0        GI      BETA\n    100006 1.100e-09    5.0000    0.3000    0.0500     100.0\n$\n$$ [DB] PID slot holds MID=100006 (external tool must replace with actual PART IDs)\n$$ CTE=85 ppm/K (polymer standard value)",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nPSA Acrylic General (3M 467MP)\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000061.1000E-09       0.9    0.4706                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
+        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nPSA Acrylic General (3M 467MP)_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000061.1000E-09       0.9    0.4706       0.0       0.0       0.0",
+        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nPSA Acrylic General (3M 467MP)_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000061.1000E-09       0.1    0.4950       0.0       0.0       0.0",
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nPSA Acrylic General (3M 467MP)\n$      MID       RHO         E        PR        DA        DB         K\n    1000061.1000E-09       0.9    0.4706       0.0       0.0       0.0"
       },
       "card_thermal": "",
-      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100006         0 8.500e-05\n$\n$$ --- PSA_SILICONE_HIGHTEMP (MID 100007) ---\n$$ 실리콘 PSA — 고온 안정성 (Tg<-100°C)\n$$ 용도: 배터리 인접부, 열원 주변 접합\n$$ 두께: 25~75 um\n$$ 출처: 실리콘 PSA: 넓은 온도범위, 낮은 G'\n$$ E_inst=0.24MPa E_equil=0.060MPa tau=33.3ms\n$$ tan(d)=0.75 M=1500MPa G0/GI=4x",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100006         0 8.500e-05\n$\n$$ --- PSA_SILICONE_HIGHTEMP (MID 100007) ---\n$$ 실리콘 PSA — 고온 안정성 (Tg<-100°C)\n$$ 용도: 배터리 인접부, 열원 주변 접합\n$$ 두께: 25~75 um\n$$ 출처: 실리콘 PSA: 넓은 온도범위, 낮은 G'\n$$ E_inst=0.24MPa E_equil=0.060MPa tau=33.3ms v=0.46\n$$ tan(d)=0.75 K=1.00MPa G0/GI=4x",
       "card_damping": ""
     },
     "100007": {
@@ -1249,12 +1249,12 @@
       "mat_type_id": 6,
       "mechanical": {
         "RHO": 1.15e-09,
-        "BULK": 1500.0,
+        "BULK": 1.0,
         "G0": 0.08,
         "GI": 0.02,
         "BETA": 30.0,
-        "E": 0.23999573340918384,
-        "PR": 0.499973333807399,
+        "E": 0.23376623376623376,
+        "PR": 0.461038961038961,
         "rho_g_cm3": 1.15,
         "E_GPa": 0.0002
       },
@@ -1264,14 +1264,14 @@
       },
       "damping": {},
       "cards_structural": {
-        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nPSA Silicone High-Temp\n$      MID        RO      BULK        G0        GI      BETA\n    100007 1.150e-09    1500.0    0.0800    0.0200      30.0\n$\n$$ [DB] PID slot holds MID=100007 (external tool must replace with actual PART IDs)\n$$ CTE=250 ppm/K (polymer standard value)",
-        "MAT_RIGID": "*MAT_RIGID_TITLE\nPSA Silicone High-Temp\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000071.1500E-09       0.2    0.5000                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
-        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nPSA Silicone High-Temp_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000071.1500E-09       0.2    0.5000       0.0       0.0       0.0",
-        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nPSA Silicone High-Temp_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000071.1500E-09       0.1    0.5000       0.0       0.0       0.0",
-        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nPSA Silicone High-Temp\n$      MID       RHO         E        PR        DA        DB         K\n    1000071.1500E-09       0.2    0.5000       0.0       0.0       0.0"
+        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nPSA Silicone High-Temp\n$      MID        RO      BULK        G0        GI      BETA\n    100007 1.150e-09    1.0000    0.0800    0.0200      30.0\n$\n$$ [DB] PID slot holds MID=100007 (external tool must replace with actual PART IDs)\n$$ CTE=250 ppm/K (polymer standard value)",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nPSA Silicone High-Temp\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000071.1500E-09       0.2    0.4610                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
+        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nPSA Silicone High-Temp_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000071.1500E-09       0.2    0.4610       0.0       0.0       0.0",
+        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nPSA Silicone High-Temp_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000071.1500E-09       0.1    0.4901       0.0       0.0       0.0",
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nPSA Silicone High-Temp\n$      MID       RHO         E        PR        DA        DB         K\n    1000071.1500E-09       0.2    0.4610       0.0       0.0       0.0"
       },
       "card_thermal": "",
-      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100007         0 2.500e-04\n$\n$$ --- PSA_HIGH_SHEAR (MID 100008) ---\n$$ 고전단 PSA — 높은 유지력, 구조접합 보조\n$$ 용도: 카메라모듈 고정, 커넥터 접합, 진동 부위\n$$ 두께: 25~100 um\n$$ 출처: 고가교 아크릴: Nitto 5000계열 수준\n$$ E_inst=1.50MPa E_equil=0.300MPa tau=5.0ms\n$$ tan(d)=0.89 M=2801MPa G0/GI=5x",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100007         0 2.500e-04\n$\n$$ --- PSA_HIGH_SHEAR (MID 100008) ---\n$$ 고전단 PSA — 높은 유지력, 구조접합 보조\n$$ 용도: 카메라모듈 고정, 커넥터 접합, 진동 부위\n$$ 두께: 25~100 um\n$$ 출처: 고가교 아크릴: Nitto 5000계열 수준\n$$ E_inst=1.50MPa E_equil=0.300MPa tau=5.0ms v=0.47\n$$ tan(d)=0.89 K=8.33MPa G0/GI=5x",
       "card_damping": ""
     },
     "100008": {
@@ -1283,12 +1283,12 @@
       "mat_type_id": 6,
       "mechanical": {
         "RHO": 1.12e-09,
-        "BULK": 2800.0,
+        "BULK": 8.3333,
         "G0": 0.5,
         "GI": 0.1,
         "BETA": 200.0,
-        "E": 1.4999107196000239,
-        "PR": 0.4999107196000238,
+        "E": 1.4705881199534117,
+        "PR": 0.4705881199534116,
         "rho_g_cm3": 1.12,
         "E_GPa": 0.0015
       },
@@ -1298,14 +1298,14 @@
       },
       "damping": {},
       "cards_structural": {
-        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nPSA High Shear (Nitto 5000)\n$      MID        RO      BULK        G0        GI      BETA\n    100008 1.120e-09    2800.0    0.5000    0.1000     200.0\n$\n$$ [DB] PID slot holds MID=100008 (external tool must replace with actual PART IDs)\n$$ CTE=75 ppm/K (polymer standard value)",
-        "MAT_RIGID": "*MAT_RIGID_TITLE\nPSA High Shear (Nitto 5000)\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000081.1200E-09       1.5    0.4999                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
-        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nPSA High Shear (Nitto 5000)_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000081.1200E-09       1.5    0.4999       0.0       0.0       0.0",
-        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nPSA High Shear (Nitto 5000)_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000081.1200E-09       0.3    0.5000       0.0       0.0       0.0",
-        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nPSA High Shear (Nitto 5000)\n$      MID       RHO         E        PR        DA        DB         K\n    1000081.1200E-09       1.5    0.4999       0.0       0.0       0.0"
+        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nPSA High Shear (Nitto 5000)\n$      MID        RO      BULK        G0        GI      BETA\n    100008 1.120e-09    8.3333    0.5000    0.1000     200.0\n$\n$$ [DB] PID slot holds MID=100008 (external tool must replace with actual PART IDs)\n$$ CTE=75 ppm/K (polymer standard value)",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nPSA High Shear (Nitto 5000)\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000081.1200E-09       1.5    0.4706                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
+        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nPSA High Shear (Nitto 5000)_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000081.1200E-09       1.5    0.4706       0.0       0.0       0.0",
+        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nPSA High Shear (Nitto 5000)_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000081.1200E-09       0.3    0.4940       0.0       0.0       0.0",
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nPSA High Shear (Nitto 5000)\n$      MID       RHO         E        PR        DA        DB         K\n    1000081.1200E-09       1.5    0.4706       0.0       0.0       0.0"
       },
       "card_thermal": "",
-      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100008         0 7.500e-05\n$\n$$ --- PSA_REMOVABLE (MID 100009) ---\n$$ 재작업용 PSA — 수리 시 분리 가능\n$$ 용도: 스크린 프로텍터, 임시 고정, 검사용\n$$ 두께: 10~25 um\n$$ 출처: 저가교 아크릴: 낮은 peel/shear, 재탈착\n$$ E_inst=0.15MPa E_equil=0.024MPa tau=33.3ms\n$$ tan(d)=1.05 M=1800MPa G0/GI=6x",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100008         0 7.500e-05\n$\n$$ --- PSA_REMOVABLE (MID 100009) ---\n$$ 재작업용 PSA — 수리 시 분리 가능\n$$ 용도: 스크린 프로텍터, 임시 고정, 검사용\n$$ 두께: 10~25 um\n$$ 출처: 저가교 아크릴: 낮은 peel/shear, 재탈착\n$$ E_inst=0.15MPa E_equil=0.024MPa tau=33.3ms v=0.46\n$$ tan(d)=1.05 K=0.63MPa G0/GI=6x",
       "card_damping": ""
     },
     "100009": {
@@ -1317,12 +1317,12 @@
       "mat_type_id": 6,
       "mechanical": {
         "RHO": 1.05e-09,
-        "BULK": 1800.0,
+        "BULK": 0.625,
         "G0": 0.05,
         "GI": 0.008,
         "BETA": 30.0,
-        "E": 0.14999861112397106,
-        "PR": 0.4999861112397107,
+        "E": 0.1461038961038961,
+        "PR": 0.461038961038961,
         "rho_g_cm3": 1.05,
         "E_GPa": 0.0001
       },
@@ -1332,14 +1332,14 @@
       },
       "damping": {},
       "cards_structural": {
-        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nPSA Removable\n$      MID        RO      BULK        G0        GI      BETA\n    100009 1.050e-09    1800.0    0.0500    0.0080      30.0\n$\n$$ [DB] PID slot holds MID=100009 (external tool must replace with actual PART IDs)\n$$ CTE=90 ppm/K (polymer standard value)",
-        "MAT_RIGID": "*MAT_RIGID_TITLE\nPSA Removable\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000091.0500E-09       0.1    0.5000                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
-        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nPSA Removable_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000091.0500E-09       0.1    0.5000       0.0       0.0       0.0",
-        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nPSA Removable_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000091.0500E-09       0.0    0.5000       0.0       0.0       0.0",
-        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nPSA Removable\n$      MID       RHO         E        PR        DA        DB         K\n    1000091.0500E-09       0.1    0.5000       0.0       0.0       0.0"
+        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nPSA Removable\n$      MID        RO      BULK        G0        GI      BETA\n    100009 1.050e-09    0.6250    0.0500    0.0080      30.0\n$\n$$ [DB] PID slot holds MID=100009 (external tool must replace with actual PART IDs)\n$$ CTE=90 ppm/K (polymer standard value)",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nPSA Removable\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000091.0500E-09       0.1    0.4610                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
+        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nPSA Removable_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000091.0500E-09       0.1    0.4610       0.0       0.0       0.0",
+        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nPSA Removable_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000091.0500E-09       0.0    0.4936       0.0       0.0       0.0",
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nPSA Removable\n$      MID       RHO         E        PR        DA        DB         K\n    1000091.0500E-09       0.1    0.4610       0.0       0.0       0.0"
       },
       "card_thermal": "",
-      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100009         0 9.000e-05\n$\n$ ================================================================\n$ 3. VHB/Foam Tape — 구조 접합\n$ ================================================================\n$\n$$ --- VHB_CLEAR_THIN (MID 100010) ---\n$$ 3M VHB 투명 (4905) — 0.5mm 얇은 폼\n$$ 용도: 후면 커버 접합, 투명 구조접합\n$$ 두께: 500 um\n$$ 출처: PMC 6835935: G'~50kPa@100rad/s, Tg=-36°C\n$$ E_inst=0.30MPa E_equil=0.030MPa tau=33.3ms\n$$ tan(d)=1.42 M=500MPa G0/GI=10x",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100009         0 9.000e-05\n$\n$ ================================================================\n$ 3. VHB/Foam Tape — 구조 접합\n$ ================================================================\n$\n$$ --- VHB_CLEAR_THIN (MID 100010) ---\n$$ 3M VHB 투명 (4905) — 0.5mm 얇은 폼\n$$ 용도: 후면 커버 접합, 투명 구조접합\n$$ 두께: 500 um\n$$ 출처: PMC 6835935: G'~50kPa@100rad/s, Tg=-36°C\n$$ E_inst=0.30MPa E_equil=0.030MPa tau=33.3ms v=0.42\n$$ tan(d)=1.42 K=0.63MPa G0/GI=10x",
       "card_damping": ""
     },
     "100010": {
@@ -1351,12 +1351,12 @@
       "mat_type_id": 6,
       "mechanical": {
         "RHO": 9.6e-10,
-        "BULK": 500.0,
+        "BULK": 0.625,
         "G0": 0.1,
         "GI": 0.01,
         "BETA": 30.0,
-        "E": 0.2999800013332445,
-        "PR": 0.49990000666622225,
+        "E": 0.28481012658227844,
+        "PR": 0.4240506329113924,
         "rho_g_cm3": 0.96,
         "E_GPa": 0.0003
       },
@@ -1366,14 +1366,14 @@
       },
       "damping": {},
       "cards_structural": {
-        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nVHB Clear 0.5mm (3M 4905)\n$      MID        RO      BULK        G0        GI      BETA\n    100010 9.600e-10     500.0    0.1000    0.0100      30.0\n$\n$$ [DB] PID slot holds MID=100010 (external tool must replace with actual PART IDs)\n$$ CTE=170 ppm/K (polymer standard value)",
-        "MAT_RIGID": "*MAT_RIGID_TITLE\nVHB Clear 0.5mm (3M 4905)\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000109.6000E-10       0.3    0.4999                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
-        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nVHB Clear 0.5mm (3M 4905)_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000109.6000E-10       0.3    0.4999       0.0       0.0       0.0",
-        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nVHB Clear 0.5mm (3M 4905)_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000109.6000E-10       0.0    0.5000       0.0       0.0       0.0",
-        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nVHB Clear 0.5mm (3M 4905)\n$      MID       RHO         E        PR        DA        DB         K\n    1000109.6000E-10       0.3    0.4999       0.0       0.0       0.0"
+        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nVHB Clear 0.5mm (3M 4905)\n$      MID        RO      BULK        G0        GI      BETA\n    100010 9.600e-10    0.6250    0.1000    0.0100      30.0\n$\n$$ [DB] PID slot holds MID=100010 (external tool must replace with actual PART IDs)\n$$ CTE=170 ppm/K (polymer standard value)",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nVHB Clear 0.5mm (3M 4905)\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000109.6000E-10       0.3    0.4241                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
+        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nVHB Clear 0.5mm (3M 4905)_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000109.6000E-10       0.3    0.4241       0.0       0.0       0.0",
+        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nVHB Clear 0.5mm (3M 4905)_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000109.6000E-10       0.0    0.4920       0.0       0.0       0.0",
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nVHB Clear 0.5mm (3M 4905)\n$      MID       RHO         E        PR        DA        DB         K\n    1000109.6000E-10       0.3    0.4241       0.0       0.0       0.0"
       },
       "card_thermal": "",
-      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100010         0 1.700e-04\n$\n$$ --- VHB_BLACK_THICK (MID 100011) ---\n$$ 3M VHB 블랙 (5952) — 1.1mm 두꺼운 폼\n$$ 용도: 배터리 마운팅, 진동 흡수, 갭 충진\n$$ 두께: 1100 um\n$$ 출처: VHB 5952: 낮은 밀도(720kg/m3), 높은 접착\n$$ E_inst=0.24MPa E_equil=0.024MPa tau=40.0ms\n$$ tan(d)=1.42 M=350MPa G0/GI=10x",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100010         0 1.700e-04\n$\n$$ --- VHB_BLACK_THICK (MID 100011) ---\n$$ 3M VHB 블랙 (5952) — 1.1mm 두꺼운 폼\n$$ 용도: 배터리 마운팅, 진동 흡수, 갭 충진\n$$ 두께: 1100 um\n$$ 출처: VHB 5952: 낮은 밀도(720kg/m3), 높은 접착\n$$ E_inst=0.24MPa E_equil=0.024MPa tau=40.0ms v=0.40\n$$ tan(d)=1.42 K=0.40MPa G0/GI=10x",
       "card_damping": ""
     },
     "100011": {
@@ -1385,12 +1385,12 @@
       "mat_type_id": 6,
       "mechanical": {
         "RHO": 7.2e-10,
-        "BULK": 350.0,
+        "BULK": 0.4,
         "G0": 0.08,
         "GI": 0.008,
         "BETA": 25.0,
-        "E": 0.23998171567880544,
-        "PR": 0.4998857229925339,
+        "E": 0.22499999999999998,
+        "PR": 0.40625,
         "rho_g_cm3": 0.72,
         "E_GPa": 0.0002
       },
@@ -1400,14 +1400,14 @@
       },
       "damping": {},
       "cards_structural": {
-        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nVHB Black 1.1mm (3M 5952)\n$      MID        RO      BULK        G0        GI      BETA\n    100011 7.200e-10     350.0    0.0800    0.0080      25.0\n$\n$$ [DB] PID slot holds MID=100011 (external tool must replace with actual PART IDs)\n$$ CTE=170 ppm/K (polymer standard value)",
-        "MAT_RIGID": "*MAT_RIGID_TITLE\nVHB Black 1.1mm (3M 5952)\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000117.2000E-10       0.2    0.4999                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
-        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nVHB Black 1.1mm (3M 5952)_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000117.2000E-10       0.2    0.4999       0.0       0.0       0.0",
-        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nVHB Black 1.1mm (3M 5952)_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000117.2000E-10       0.0    0.5000       0.0       0.0       0.0",
-        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nVHB Black 1.1mm (3M 5952)\n$      MID       RHO         E        PR        DA        DB         K\n    1000117.2000E-10       0.2    0.4999       0.0       0.0       0.0"
+        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nVHB Black 1.1mm (3M 5952)\n$      MID        RO      BULK        G0        GI      BETA\n    100011 7.200e-10    0.4000    0.0800    0.0080      25.0\n$\n$$ [DB] PID slot holds MID=100011 (external tool must replace with actual PART IDs)\n$$ CTE=170 ppm/K (polymer standard value)",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nVHB Black 1.1mm (3M 5952)\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000117.2000E-10       0.2    0.4062                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
+        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nVHB Black 1.1mm (3M 5952)_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000117.2000E-10       0.2    0.4062       0.0       0.0       0.0",
+        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nVHB Black 1.1mm (3M 5952)_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000117.2000E-10       0.0    0.4901       0.0       0.0       0.0",
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nVHB Black 1.1mm (3M 5952)\n$      MID       RHO         E        PR        DA        DB         K\n    1000117.2000E-10       0.2    0.4062       0.0       0.0       0.0"
       },
       "card_thermal": "",
-      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100011         0 1.700e-04\n$\n$$ --- FOAM_PE_GENERAL (MID 100012) ---\n$$ PE 폼 양면테이프 — 범용 구조접합\n$$ 용도: 프레임-후면커버, 스피커 가스켓\n$$ 두께: 200~500 um\n$$ 출처: PE폼: 밀도 500kg/m3, 매우 낮은 BULK\n$$ E_inst=0.15MPa E_equil=0.015MPa tau=50.0ms\n$$ tan(d)=1.42 M=200MPa G0/GI=10x",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100011         0 1.700e-04\n$\n$$ --- FOAM_PE_GENERAL (MID 100012) ---\n$$ PE 폼 양면테이프 — 범용 구조접합\n$$ 용도: 프레임-후면커버, 스피커 가스켓\n$$ 두께: 200~500 um\n$$ 출처: PE폼: 밀도 500kg/m3, 매우 낮은 BULK\n$$ E_inst=0.15MPa E_equil=0.015MPa tau=50.0ms v=0.35\n$$ tan(d)=1.42 K=0.17MPa G0/GI=10x",
       "card_damping": ""
     },
     "100012": {
@@ -1419,12 +1419,12 @@
       "mat_type_id": 6,
       "mechanical": {
         "RHO": 5e-10,
-        "BULK": 200.0,
+        "BULK": 0.1667,
         "G0": 0.05,
         "GI": 0.005,
         "BETA": 20.0,
-        "E": 0.14998750104157987,
-        "PR": 0.4998750104157987,
+        "E": 0.1363661152517724,
+        "PR": 0.363661152517724,
         "rho_g_cm3": 0.5,
         "E_GPa": 0.0001
       },
@@ -1434,14 +1434,14 @@
       },
       "damping": {},
       "cards_structural": {
-        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nFoam PE General\n$      MID        RO      BULK        G0        GI      BETA\n    100012 5.000e-10     200.0    0.0500    0.0050      20.0\n$\n$$ [DB] PID slot holds MID=100012 (external tool must replace with actual PART IDs)\n$$ CTE=200 ppm/K (polymer standard value)",
-        "MAT_RIGID": "*MAT_RIGID_TITLE\nFoam PE General\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000125.0000E-10       0.1    0.4999                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
-        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nFoam PE General_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000125.0000E-10       0.1    0.4999       0.0       0.0       0.0",
-        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nFoam PE General_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000125.0000E-10       0.0    0.5000       0.0       0.0       0.0",
-        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nFoam PE General\n$      MID       RHO         E        PR        DA        DB         K\n    1000125.0000E-10       0.1    0.4999       0.0       0.0       0.0"
+        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nFoam PE General\n$      MID        RO      BULK        G0        GI      BETA\n    100012 5.000e-10    0.1667    0.0500    0.0050      20.0\n$\n$$ [DB] PID slot holds MID=100012 (external tool must replace with actual PART IDs)\n$$ CTE=200 ppm/K (polymer standard value)",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nFoam PE General\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000125.0000E-10       0.1    0.3637                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
+        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nFoam PE General_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000125.0000E-10       0.1    0.3637       0.0       0.0       0.0",
+        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nFoam PE General_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000125.0000E-10       0.0    0.4852       0.0       0.0       0.0",
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nFoam PE General\n$      MID       RHO         E        PR        DA        DB         K\n    1000125.0000E-10       0.1    0.3637       0.0       0.0       0.0"
       },
       "card_thermal": "",
-      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100012         0 2.000e-04\n$\n$$ --- FOAM_PU_IMPACT (MID 100013) ---\n$$ PU 폼테이프 — 충격 흡수, 진동 절연\n$$ 용도: 디스플레이 쿠션, 카메라 충격 보호\n$$ 두께: 100~300 um\n$$ 출처: PU폼: 중간 밀도, 적절한 반발탄성\n$$ E_inst=0.45MPa E_equil=0.030MPa tau=25.0ms\n$$ tan(d)=1.81 M=300MPa G0/GI=15x",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100012         0 2.000e-04\n$\n$$ --- FOAM_PU_IMPACT (MID 100013) ---\n$$ PU 폼테이프 — 충격 흡수, 진동 절연\n$$ 용도: 디스플레이 쿠션, 카메라 충격 보호\n$$ 두께: 100~300 um\n$$ 출처: PU폼: 중간 밀도, 적절한 반발탄성\n$$ E_inst=0.45MPa E_equil=0.030MPa tau=25.0ms v=0.38\n$$ tan(d)=1.81 K=0.63MPa G0/GI=15x",
       "card_damping": ""
     },
     "100013": {
@@ -1453,12 +1453,12 @@
       "mat_type_id": 6,
       "mechanical": {
         "RHO": 6e-10,
-        "BULK": 300.0,
+        "BULK": 0.625,
         "G0": 0.15,
         "GI": 0.01,
         "BETA": 40.0,
-        "E": 0.449925012497917,
-        "PR": 0.4997500416597234,
+        "E": 0.4166666666666667,
+        "PR": 0.3888888888888889,
         "rho_g_cm3": 0.6,
         "E_GPa": 0.0004
       },
@@ -1468,14 +1468,14 @@
       },
       "damping": {},
       "cards_structural": {
-        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nFoam PU Impact Absorber\n$      MID        RO      BULK        G0        GI      BETA\n    100013 6.000e-10     300.0    0.1500    0.0100      40.0\n$\n$$ [DB] PID slot holds MID=100013 (external tool must replace with actual PART IDs)\n$$ CTE=180 ppm/K (polymer standard value)",
-        "MAT_RIGID": "*MAT_RIGID_TITLE\nFoam PU Impact Absorber\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000136.0000E-10       0.4    0.4998                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
-        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nFoam PU Impact Absorber_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000136.0000E-10       0.4    0.4998       0.0       0.0       0.0",
-        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nFoam PU Impact Absorber_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000136.0000E-10       0.0    0.5000       0.0       0.0       0.0",
-        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nFoam PU Impact Absorber\n$      MID       RHO         E        PR        DA        DB         K\n    1000136.0000E-10       0.4    0.4998       0.0       0.0       0.0"
+        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nFoam PU Impact Absorber\n$      MID        RO      BULK        G0        GI      BETA\n    100013 6.000e-10    0.6250    0.1500    0.0100      40.0\n$\n$$ [DB] PID slot holds MID=100013 (external tool must replace with actual PART IDs)\n$$ CTE=180 ppm/K (polymer standard value)",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nFoam PU Impact Absorber\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000136.0000E-10       0.4    0.3889                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
+        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nFoam PU Impact Absorber_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000136.0000E-10       0.4    0.3889       0.0       0.0       0.0",
+        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nFoam PU Impact Absorber_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000136.0000E-10       0.0    0.4920       0.0       0.0       0.0",
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nFoam PU Impact Absorber\n$      MID       RHO         E        PR        DA        DB         K\n    1000136.0000E-10       0.4    0.3889       0.0       0.0       0.0"
       },
       "card_thermal": "",
-      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100013         0 1.800e-04\n$\n$ ================================================================\n$ 4. Battery/Special — 배터리/특수\n$ ================================================================\n$\n$$ --- BATTERY_STRETCH_RELEASE (MID 100014) ---\n$$ 배터리 탈착 테이프 (SIS 블록공중합체)\n$$ 용도: 배터리 교체 가능 설계, stretch-release\n$$ 두께: 50~200 um\n$$ 출처: SIS: PS경질+PI연질 block copolymer\n$$ E_inst=1.50MPa E_equil=0.300MPa tau=5.0ms\n$$ tan(d)=0.89 M=1801MPa G0/GI=5x",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100013         0 1.800e-04\n$\n$ ================================================================\n$ 4. Battery/Special — 배터리/특수\n$ ================================================================\n$\n$$ --- BATTERY_STRETCH_RELEASE (MID 100014) ---\n$$ 배터리 탈착 테이프 (SIS 블록공중합체)\n$$ 용도: 배터리 교체 가능 설계, stretch-release\n$$ 두께: 50~200 um\n$$ 출처: SIS: PS경질+PI연질 block copolymer\n$$ E_inst=1.50MPa E_equil=0.300MPa tau=5.0ms v=0.46\n$$ tan(d)=0.89 K=6.25MPa G0/GI=5x",
       "card_damping": ""
     },
     "100014": {
@@ -1487,12 +1487,12 @@
       "mat_type_id": 6,
       "mechanical": {
         "RHO": 1e-09,
-        "BULK": 1800.0,
+        "BULK": 6.25,
         "G0": 0.5,
         "GI": 0.1,
         "BETA": 200.0,
-        "E": 1.4998611239700028,
-        "PR": 0.49986112397000276,
+        "E": 1.4610389610389611,
+        "PR": 0.461038961038961,
         "rho_g_cm3": 1.0,
         "E_GPa": 0.0015
       },
@@ -1502,14 +1502,14 @@
       },
       "damping": {},
       "cards_structural": {
-        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nBattery Stretch-Release (SIS)\n$      MID        RO      BULK        G0        GI      BETA\n    100014 1.000e-09    1800.0    0.5000    0.1000     200.0\n$\n$$ [DB] PID slot holds MID=100014 (external tool must replace with actual PART IDs)\n$$ CTE=130 ppm/K (polymer standard value)",
-        "MAT_RIGID": "*MAT_RIGID_TITLE\nBattery Stretch-Release (SIS)\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000141.0000E-09       1.5    0.4999                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
-        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nBattery Stretch-Release (SIS)_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000141.0000E-09       1.5    0.4999       0.0       0.0       0.0",
-        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nBattery Stretch-Release (SIS)_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000141.0000E-09       0.3    0.5000       0.0       0.0       0.0",
-        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nBattery Stretch-Release (SIS)\n$      MID       RHO         E        PR        DA        DB         K\n    1000141.0000E-09       1.5    0.4999       0.0       0.0       0.0"
+        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nBattery Stretch-Release (SIS)\n$      MID        RO      BULK        G0        GI      BETA\n    100014 1.000e-09    6.2500    0.5000    0.1000     200.0\n$\n$$ [DB] PID slot holds MID=100014 (external tool must replace with actual PART IDs)\n$$ CTE=130 ppm/K (polymer standard value)",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nBattery Stretch-Release (SIS)\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000141.0000E-09       1.5    0.4610                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
+        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nBattery Stretch-Release (SIS)_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000141.0000E-09       1.5    0.4610       0.0       0.0       0.0",
+        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nBattery Stretch-Release (SIS)_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000141.0000E-09       0.3    0.4920       0.0       0.0       0.0",
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nBattery Stretch-Release (SIS)\n$      MID       RHO         E        PR        DA        DB         K\n    1000141.0000E-09       1.5    0.4610       0.0       0.0       0.0"
       },
       "card_thermal": "",
-      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100014         0 1.300e-04\n$\n$$ --- BATTERY_PERMANENT (MID 100015) ---\n$$ 배터리 영구접합 테이프 — 강한 유지력\n$$ 용도: 배터리 스웰링 저항, 낙하 시 이탈 방지\n$$ 두께: 100~300 um\n$$ 출처: 고접착 아크릴, 높은 정적 전단 저항\n$$ E_inst=1.05MPa E_equil=0.240MPa tau=8.3ms\n$$ tan(d)=0.81 M=2000MPa G0/GI=4x",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100014         0 1.300e-04\n$\n$$ --- BATTERY_PERMANENT (MID 100015) ---\n$$ 배터리 영구접합 테이프 — 강한 유지력\n$$ 용도: 배터리 스웰링 저항, 낙하 시 이탈 방지\n$$ 두께: 100~300 um\n$$ 출처: 고접착 아크릴, 높은 정적 전단 저항\n$$ E_inst=1.05MPa E_equil=0.240MPa tau=8.3ms v=0.47\n$$ tan(d)=0.81 K=5.83MPa G0/GI=4x",
       "card_damping": ""
     },
     "100015": {
@@ -1521,12 +1521,12 @@
       "mat_type_id": 6,
       "mechanical": {
         "RHO": 1.05e-09,
-        "BULK": 2000.0,
+        "BULK": 5.8333,
         "G0": 0.35,
         "GI": 0.08,
         "BETA": 120.0,
-        "E": 1.0499387535727083,
-        "PR": 0.4999125051038689,
+        "E": 1.0294116493649823,
+        "PR": 0.47058807052140345,
         "rho_g_cm3": 1.05,
         "E_GPa": 0.001
       },
@@ -1536,14 +1536,14 @@
       },
       "damping": {},
       "cards_structural": {
-        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nBattery Permanent Bond\n$      MID        RO      BULK        G0        GI      BETA\n    100015 1.050e-09    2000.0    0.3500    0.0800     120.0\n$\n$$ [DB] PID slot holds MID=100015 (external tool must replace with actual PART IDs)\n$$ CTE=85 ppm/K (polymer standard value)",
-        "MAT_RIGID": "*MAT_RIGID_TITLE\nBattery Permanent Bond\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000151.0500E-09       1.0    0.4999                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
-        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nBattery Permanent Bond_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000151.0500E-09       1.0    0.4999       0.0       0.0       0.0",
-        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nBattery Permanent Bond_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000151.0500E-09       0.2    0.5000       0.0       0.0       0.0",
-        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nBattery Permanent Bond\n$      MID       RHO         E        PR        DA        DB         K\n    1000151.0500E-09       1.0    0.4999       0.0       0.0       0.0"
+        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nBattery Permanent Bond\n$      MID        RO      BULK        G0        GI      BETA\n    100015 1.050e-09    5.8333    0.3500    0.0800     120.0\n$\n$$ [DB] PID slot holds MID=100015 (external tool must replace with actual PART IDs)\n$$ CTE=85 ppm/K (polymer standard value)",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nBattery Permanent Bond\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000151.0500E-09       1.0    0.4706                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
+        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nBattery Permanent Bond_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000151.0500E-09       1.0    0.4706       0.0       0.0       0.0",
+        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nBattery Permanent Bond_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000151.0500E-09       0.2    0.4932       0.0       0.0       0.0",
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nBattery Permanent Bond\n$      MID       RHO         E        PR        DA        DB         K\n    1000151.0500E-09       1.0    0.4706       0.0       0.0       0.0"
       },
       "card_thermal": "",
-      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100015         0 8.500e-05\n$\n$$ --- THERMAL_INTERFACE_TAPE (MID 100016) ---\n$$ 열전도 양면테이프 — AP/SoC 방열\n$$ 용도: 히트스프레더-미드프레임, 열관리\n$$ 두께: 50~150 um\n$$ 출처: 필러충진 실리콘/아크릴: 높은 밀도, 높은 BULK\n$$ E_inst=1.80MPa E_equil=0.300MPa tau=3.3ms\n$$ tan(d)=1.02 M=3001MPa G0/GI=6x",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100015         0 8.500e-05\n$\n$$ --- THERMAL_INTERFACE_TAPE (MID 100016) ---\n$$ 열전도 양면테이프 — AP/SoC 방열\n$$ 용도: 히트스프레더-미드프레임, 열관리\n$$ 두께: 50~150 um\n$$ 출처: 필러충진 실리콘/아크릴: 높은 밀도, 높은 BULK\n$$ E_inst=1.80MPa E_equil=0.300MPa tau=3.3ms v=0.43\n$$ tan(d)=1.02 K=4.29MPa G0/GI=6x",
       "card_damping": ""
     },
     "100016": {
@@ -1555,14 +1555,14 @@
       "mat_type_id": 6,
       "mechanical": {
         "RHO": 2e-09,
-        "BULK": 3000.0,
+        "BULK": 4.2857,
         "G0": 0.6,
         "GI": 0.1,
         "BETA": 300.0,
-        "E": 1.7998800079994666,
-        "PR": 0.4999000066662222,
+        "E": 1.7197449673406602,
+        "PR": 0.433120806117217,
         "rho_g_cm3": 2.0,
-        "E_GPa": 0.0018
+        "E_GPa": 0.0017
       },
       "thermal": {
         "ALPHA": 5e-05,
@@ -1570,14 +1570,14 @@
       },
       "damping": {},
       "cards_structural": {
-        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nThermal Interface Tape\n$      MID        RO      BULK        G0        GI      BETA\n    100016 2.000e-09    3000.0    0.6000    0.1000     300.0\n$\n$$ [DB] PID slot holds MID=100016 (external tool must replace with actual PART IDs)\n$$ CTE=50 ppm/K (polymer standard value)",
-        "MAT_RIGID": "*MAT_RIGID_TITLE\nThermal Interface Tape\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000162.0000E-09       1.8    0.4999                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
-        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nThermal Interface Tape_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000162.0000E-09       1.8    0.4999       0.0       0.0       0.0",
-        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nThermal Interface Tape_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000162.0000E-09       0.3    0.5000       0.0       0.0       0.0",
-        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nThermal Interface Tape\n$      MID       RHO         E        PR        DA        DB         K\n    1000162.0000E-09       1.8    0.4999       0.0       0.0       0.0"
+        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nThermal Interface Tape\n$      MID        RO      BULK        G0        GI      BETA\n    100016 2.000e-09    4.2857    0.6000    0.1000     300.0\n$\n$$ [DB] PID slot holds MID=100016 (external tool must replace with actual PART IDs)\n$$ CTE=50 ppm/K (polymer standard value)",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nThermal Interface Tape\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000162.0000E-09       1.7    0.4331                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
+        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nThermal Interface Tape_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000162.0000E-09       1.7    0.4331       0.0       0.0       0.0",
+        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nThermal Interface Tape_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000162.0000E-09       0.3    0.4884       0.0       0.0       0.0",
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nThermal Interface Tape\n$      MID       RHO         E        PR        DA        DB         K\n    1000162.0000E-09       1.7    0.4331       0.0       0.0       0.0"
       },
       "card_thermal": "",
-      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100016         0 5.000e-05\n$\n$ ================================================================\n$ 5. Waterproof/Gasket — 방수/기밀\n$ ================================================================\n$\n$$ --- WATERPROOF_GASKET (MID 100017) ---\n$$ 방수 가스켓 테이프 — IP67/68 등급\n$$ 용도: 디스플레이-프레임 방수씰, SIM트레이\n$$ 두께: 100~300 um\n$$ 출처: 변성 아크릴: 내수성, 중간 접착력\n$$ E_inst=0.60MPa E_equil=0.090MPa tau=16.7ms\n$$ tan(d)=1.10 M=2200MPa G0/GI=7x",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100016         0 5.000e-05\n$\n$ ================================================================\n$ 5. Waterproof/Gasket — 방수/기밀\n$ ================================================================\n$\n$$ --- WATERPROOF_GASKET (MID 100017) ---\n$$ 방수 가스켓 테이프 — IP67/68 등급\n$$ 용도: 디스플레이-프레임 방수씰, SIM트레이\n$$ 두께: 100~300 um\n$$ 출처: 변성 아크릴: 내수성, 중간 접착력\n$$ E_inst=0.60MPa E_equil=0.090MPa tau=16.7ms v=0.46\n$$ tan(d)=1.10 K=2.50MPa G0/GI=7x",
       "card_damping": ""
     },
     "100017": {
@@ -1589,12 +1589,12 @@
       "mat_type_id": 6,
       "mechanical": {
         "RHO": 1.15e-09,
-        "BULK": 2200.0,
+        "BULK": 2.5,
         "G0": 0.2,
         "GI": 0.03,
         "BETA": 60.0,
-        "E": 0.5999818187327657,
-        "PR": 0.4999545468319142,
+        "E": 0.5844155844155844,
+        "PR": 0.461038961038961,
         "rho_g_cm3": 1.15,
         "E_GPa": 0.0006
       },
@@ -1604,14 +1604,14 @@
       },
       "damping": {},
       "cards_structural": {
-        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nWaterproof Gasket IP68\n$      MID        RO      BULK        G0        GI      BETA\n    100017 1.150e-09    2200.0    0.2000    0.0300      60.0\n$\n$$ [DB] PID slot holds MID=100017 (external tool must replace with actual PART IDs)\n$$ CTE=90 ppm/K (polymer standard value)",
-        "MAT_RIGID": "*MAT_RIGID_TITLE\nWaterproof Gasket IP68\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000171.1500E-09       0.6    0.5000                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
-        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nWaterproof Gasket IP68_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000171.1500E-09       0.6    0.5000       0.0       0.0       0.0",
-        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nWaterproof Gasket IP68_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000171.1500E-09       0.1    0.5000       0.0       0.0       0.0",
-        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nWaterproof Gasket IP68\n$      MID       RHO         E        PR        DA        DB         K\n    1000171.1500E-09       0.6    0.5000       0.0       0.0       0.0"
+        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nWaterproof Gasket IP68\n$      MID        RO      BULK        G0        GI      BETA\n    100017 1.150e-09    2.5000    0.2000    0.0300      60.0\n$\n$$ [DB] PID slot holds MID=100017 (external tool must replace with actual PART IDs)\n$$ CTE=90 ppm/K (polymer standard value)",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nWaterproof Gasket IP68\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000171.1500E-09       0.6    0.4610                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
+        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nWaterproof Gasket IP68_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000171.1500E-09       0.6    0.4610       0.0       0.0       0.0",
+        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nWaterproof Gasket IP68_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000171.1500E-09       0.1    0.4940       0.0       0.0       0.0",
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nWaterproof Gasket IP68\n$      MID       RHO         E        PR        DA        DB         K\n    1000171.1500E-09       0.6    0.4610       0.0       0.0       0.0"
       },
       "card_thermal": "",
-      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100017         0 9.000e-05\n$\n$$ --- WATERPROOF_BUTYL (MID 100018) ---\n$$ 부틸 방수테이프 — 극한 내수/기밀\n$$ 용도: 스피커 방수, 마이크 기밀\n$$ 두께: 50~200 um\n$$ 출처: 부틸고무: Tg~-70°C, 극한 기밀성\n$$ E_inst=0.75MPa E_equil=0.015MPa tau=25.0ms\n$$ tan(d)=3.46 M=1500MPa G0/GI=50x",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100017         0 9.000e-05\n$\n$$ --- WATERPROOF_BUTYL (MID 100018) ---\n$$ 부틸 방수테이프 — 극한 내수/기밀\n$$ 용도: 스피커 방수, 마이크 기밀\n$$ 두께: 50~200 um\n$$ 출처: 부틸고무: Tg~-70°C, 극한 기밀성\n$$ E_inst=0.75MPa E_equil=0.015MPa tau=25.0ms v=0.48\n$$ tan(d)=3.46 K=6.25MPa G0/GI=50x",
       "card_damping": ""
     },
     "100018": {
@@ -1623,12 +1623,12 @@
       "mat_type_id": 6,
       "mechanical": {
         "RHO": 1.3e-09,
-        "BULK": 1500.0,
+        "BULK": 6.25,
         "G0": 0.25,
         "GI": 0.005,
         "BETA": 40.0,
-        "E": 0.7499583356480195,
-        "PR": 0.4999166712960391,
+        "E": 0.7401315789473685,
+        "PR": 0.48026315789473684,
         "rho_g_cm3": 1.3,
         "E_GPa": 0.0007
       },
@@ -1638,14 +1638,14 @@
       },
       "damping": {},
       "cards_structural": {
-        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nWaterproof Butyl Seal\n$      MID        RO      BULK        G0        GI      BETA\n    100018 1.300e-09    1500.0    0.2500    0.0050      40.0\n$\n$$ [DB] PID slot holds MID=100018 (external tool must replace with actual PART IDs)\n$$ CTE=160 ppm/K (polymer standard value)",
-        "MAT_RIGID": "*MAT_RIGID_TITLE\nWaterproof Butyl Seal\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000181.3000E-09       0.7    0.4999                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
-        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nWaterproof Butyl Seal_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000181.3000E-09       0.7    0.4999       0.0       0.0       0.0",
-        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nWaterproof Butyl Seal_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000181.3000E-09       0.0    0.5000       0.0       0.0       0.0",
-        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nWaterproof Butyl Seal\n$      MID       RHO         E        PR        DA        DB         K\n    1000181.3000E-09       0.7    0.4999       0.0       0.0       0.0"
+        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nWaterproof Butyl Seal\n$      MID        RO      BULK        G0        GI      BETA\n    100018 1.300e-09    6.2500    0.2500    0.0050      40.0\n$\n$$ [DB] PID slot holds MID=100018 (external tool must replace with actual PART IDs)\n$$ CTE=160 ppm/K (polymer standard value)",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nWaterproof Butyl Seal\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000181.3000E-09       0.7    0.4803                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
+        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nWaterproof Butyl Seal_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000181.3000E-09       0.7    0.4803       0.0       0.0       0.0",
+        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nWaterproof Butyl Seal_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000181.3000E-09       0.0    0.4996       0.0       0.0       0.0",
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nWaterproof Butyl Seal\n$      MID       RHO         E        PR        DA        DB         K\n    1000181.3000E-09       0.7    0.4803       0.0       0.0       0.0"
       },
       "card_thermal": "",
-      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100018         0 1.600e-04\n$\n$ ================================================================\n$ 6. Damping — 진동/감쇠\n$ ================================================================\n$\n$$ --- DAMPING_SPEAKER (MID 100019) ---\n$$ 스피커 마운팅 감쇠 테이프\n$$ 용도: 스피커-프레임, 레시버-하우징\n$$ 두께: 50~150 um\n$$ 출처: 감쇠 최적화 아크릴: tan(d)~1.4\n$$ E_inst=0.90MPa E_equil=0.030MPa tau=12.5ms\n$$ tan(d)=2.65 M=1800MPa G0/GI=30x",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100018         0 1.600e-04\n$\n$ ================================================================\n$ 6. Damping — 진동/감쇠\n$ ================================================================\n$\n$$ --- DAMPING_SPEAKER (MID 100019) ---\n$$ 스피커 마운팅 감쇠 테이프\n$$ 용도: 스피커-프레임, 레시버-하우징\n$$ 두께: 50~150 um\n$$ 출처: 감쇠 최적화 아크릴: tan(d)~1.4\n$$ E_inst=0.90MPa E_equil=0.030MPa tau=12.5ms v=0.47\n$$ tan(d)=2.65 K=5.00MPa G0/GI=30x",
       "card_damping": ""
     },
     "100019": {
@@ -1657,12 +1657,12 @@
       "mat_type_id": 6,
       "mechanical": {
         "RHO": 1.2e-09,
-        "BULK": 1800.0,
+        "BULK": 5.0,
         "G0": 0.3,
         "GI": 0.01,
         "BETA": 80.0,
-        "E": 0.8999500027776234,
-        "PR": 0.49991667129603906,
+        "E": 0.8823529411764706,
+        "PR": 0.47058823529411764,
         "rho_g_cm3": 1.2,
         "E_GPa": 0.0009
       },
@@ -1672,14 +1672,14 @@
       },
       "damping": {},
       "cards_structural": {
-        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nDamping Speaker Mount\n$      MID        RO      BULK        G0        GI      BETA\n    100019 1.200e-09    1800.0    0.3000    0.0100      80.0\n$\n$$ [DB] PID slot holds MID=100019 (external tool must replace with actual PART IDs)\n$$ CTE=100 ppm/K (polymer standard value)",
-        "MAT_RIGID": "*MAT_RIGID_TITLE\nDamping Speaker Mount\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000191.2000E-09       0.9    0.4999                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
-        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nDamping Speaker Mount_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000191.2000E-09       0.9    0.4999       0.0       0.0       0.0",
-        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nDamping Speaker Mount_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000191.2000E-09       0.0    0.5000       0.0       0.0       0.0",
-        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nDamping Speaker Mount\n$      MID       RHO         E        PR        DA        DB         K\n    1000191.2000E-09       0.9    0.4999       0.0       0.0       0.0"
+        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nDamping Speaker Mount\n$      MID        RO      BULK        G0        GI      BETA\n    100019 1.200e-09    5.0000    0.3000    0.0100      80.0\n$\n$$ [DB] PID slot holds MID=100019 (external tool must replace with actual PART IDs)\n$$ CTE=100 ppm/K (polymer standard value)",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nDamping Speaker Mount\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000191.2000E-09       0.9    0.4706                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
+        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nDamping Speaker Mount_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000191.2000E-09       0.9    0.4706       0.0       0.0       0.0",
+        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nDamping Speaker Mount_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000191.2000E-09       0.0    0.4990       0.0       0.0       0.0",
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nDamping Speaker Mount\n$      MID       RHO         E        PR        DA        DB         K\n    1000191.2000E-09       0.9    0.4706       0.0       0.0       0.0"
       },
       "card_thermal": "",
-      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100019         0 1.000e-04\n$\n$$ --- DAMPING_HAPTIC (MID 100020) ---\n$$ 진동모터(햅틱) 절연 테이프\n$$ 용도: LRA/ERM 모터 마운팅, 진동 전달 차단\n$$ 두께: 100~300 um\n$$ 출처: 고감쇠 부틸/아크릴 블렌드\n$$ E_inst=0.60MPa E_equil=0.009MPa tau=20.0ms\n$$ tan(d)=4.02 M=1200MPa G0/GI=67x",
+      "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100019         0 1.000e-04\n$\n$$ --- DAMPING_HAPTIC (MID 100020) ---\n$$ 진동모터(햅틱) 절연 테이프\n$$ 용도: LRA/ERM 모터 마운팅, 진동 전달 차단\n$$ 두께: 100~300 um\n$$ 출처: 고감쇠 부틸/아크릴 블렌드\n$$ E_inst=0.60MPa E_equil=0.009MPa tau=20.0ms v=0.47\n$$ tan(d)=4.02 K=3.33MPa G0/GI=67x",
       "card_damping": ""
     },
     "100020": {
@@ -1691,12 +1691,12 @@
       "mat_type_id": 6,
       "mechanical": {
         "RHO": 1.25e-09,
-        "BULK": 1200.0,
+        "BULK": 3.3333,
         "G0": 0.2,
         "GI": 0.003,
         "BETA": 50.0,
-        "E": 0.5999666685184156,
-        "PR": 0.4999166712960391,
+        "E": 0.5882351787762626,
+        "PR": 0.4705879469406563,
         "rho_g_cm3": 1.25,
         "E_GPa": 0.0006
       },
@@ -1706,11 +1706,11 @@
       },
       "damping": {},
       "cards_structural": {
-        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nDamping Haptic Isolator\n$      MID        RO      BULK        G0        GI      BETA\n    100020 1.250e-09    1200.0    0.2000    0.0030      50.0\n$\n$$ [DB] PID slot holds MID=100020 (external tool must replace with actual PART IDs)\n$$ CTE=150 ppm/K (polymer standard value)",
-        "MAT_RIGID": "*MAT_RIGID_TITLE\nDamping Haptic Isolator\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000201.2500E-09       0.6    0.4999                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
-        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nDamping Haptic Isolator_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000201.2500E-09       0.6    0.4999       0.0       0.0       0.0",
-        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nDamping Haptic Isolator_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000201.2500E-09       0.0    0.5000       0.0       0.0       0.0",
-        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nDamping Haptic Isolator\n$      MID       RHO         E        PR        DA        DB         K\n    1000201.2500E-09       0.6    0.4999       0.0       0.0       0.0"
+        "MAT_VISCOELASTIC": "*MAT_VISCOELASTIC_TITLE\nDamping Haptic Isolator\n$      MID        RO      BULK        G0        GI      BETA\n    100020 1.250e-09    3.3333    0.2000    0.0030      50.0\n$\n$$ [DB] PID slot holds MID=100020 (external tool must replace with actual PART IDs)\n$$ CTE=150 ppm/K (polymer standard value)",
+        "MAT_RIGID": "*MAT_RIGID_TITLE\nDamping Haptic Isolator\n$      MID       RHO         E        PR         N     COUPLE         M     ALIAS\n    1000201.2500E-09       0.6    0.4706                                        \n$      CMO      CON1      CON2\n       1.0         7         7\n$  A1  A2  A3  V1  V2  V3\n                                                            ",
+        "MAT_ELASTIC_instantaneous": "*MAT_ELASTIC_TITLE\nDamping Haptic Isolator_instantaneous\n$      MID       RHO         E        PR        DA        DB         K\n    1000201.2500E-09       0.6    0.4706       0.0       0.0       0.0",
+        "MAT_ELASTIC_longterm": "*MAT_ELASTIC_TITLE\nDamping Haptic Isolator_longterm\n$      MID       RHO         E        PR        DA        DB         K\n    1000201.2500E-09       0.0    0.4996       0.0       0.0       0.0",
+        "MAT_ELASTIC": "*MAT_ELASTIC_TITLE\nDamping Haptic Isolator\n$      MID       RHO         E        PR        DA        DB         K\n    1000201.2500E-09       0.6    0.4706       0.0       0.0       0.0"
       },
       "card_thermal": "",
       "card_thermal_expansion": "*MAT_ADD_THERMAL_EXPANSION\n$      PID      LCID      MULT\n    100020         0 1.500e-04\n$\n$ ================================================================\n$ END OF TAPE MATERIAL LIBRARY\n$ ================================================================",
