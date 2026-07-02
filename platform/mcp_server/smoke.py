@@ -33,7 +33,7 @@ API_BASE = os.environ.get("KOOREMAPPER_API_BASE", os.environ.get("KOORM_API_BASE
 API = f"{API_BASE}/api/v1"
 ADMIN_EMAIL = os.environ.get("KOORM_ADMIN_EMAIL", "admin@kooremapper.local")
 ADMIN_PASSWORD = os.environ.get("KOORM_ADMIN_PASSWORD", "admin")
-EXPECTED_TOOLS = 20
+EXPECTED_TOOLS = 22
 
 
 def _p(*a):
@@ -97,6 +97,11 @@ async def _run(pat: str) -> bool:
             _p(f"[list_operations] blocks={len(ops.content)} isError={ops.isError}")
             ok &= len(ops.content) >= 45 and not ops.isError
 
+            caps = _data(await s.call_tool("system_capabilities", {}))
+            ok_caps = isinstance(caps, dict) and caps.get("operations", 0) >= 45 and caps.get("mcp_tools") == EXPECTED_TOOLS
+            _p(f"[system_capabilities] ops={caps.get('operations')} mcp_tools={caps.get('mcp_tools')}")
+            ok &= ok_caps
+
             # full operation pipeline through MCP (self-contained `generate` op)
             sess = _data(await s.call_tool("create_session", {"name": "mcp_smoke"}))
             sid = sess.get("id") if isinstance(sess, dict) else None
@@ -122,6 +127,9 @@ async def _run(pat: str) -> bool:
                 outs = await s.call_tool("get_job_outputs", {"job_id": jid})
                 _p(f"[get_job_outputs] blocks={len(outs.content)}")
                 ok &= len(outs.content) >= 1
+                jobs = await s.call_tool("list_session_jobs", {"session_id": sid})
+                _p(f"[list_session_jobs] blocks={len(jobs.content)} isError={jobs.isError}")
+                ok &= len(jobs.content) >= 1 and not jobs.isError
                 # backend errors must surface as a tool error, not a fake-success result
                 bad = await s.call_tool("describe_operation", {"operation": "no_such_op"})
                 _p(f"[describe bad-op] isError={bad.isError}")
