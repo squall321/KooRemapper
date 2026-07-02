@@ -22,7 +22,7 @@ MCP 서버는 streamable-http로 뜨고, 들어온 `Authorization: Bearer kr_...
 | `update_session` | session_id, name?, description? | PATCH /sessions/{id} | 세션 이름/설명 수정 |
 | `delete_session` | session_id | DELETE /sessions/{id} | 세션 + 전체 파일 삭제 |
 
-## 파일 (6)
+## 파일 (7)
 | 도구 | 인자 | REST | 설명 |
 |---|---|---|---|
 | `upload_kfile` | session_id, filename, content, base64_encoded? | POST /sessions/{id}/files | 내용(텍스트/base64)으로 업로드 |
@@ -42,7 +42,7 @@ MCP 서버는 streamable-http로 뜨고, 들어온 `Authorization: Bearer kr_...
 | `cancel_job` | job_id | POST /jobs/{id}/cancel | 대기/실행 중 Job 취소 |
 | `get_job_outputs` | job_id | GET /jobs/{id}/outputs | Job이 만든 산출 파일 목록 |
 
-## 시스템 / 신원 (4)
+## 시스템 / 신원 (3)
 | 도구 | 인자 | REST | 설명 |
 |---|---|---|---|
 | `whoami` | — | GET /me | 현재 토큰의 사용자 정보 |

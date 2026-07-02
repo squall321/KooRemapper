@@ -108,9 +108,9 @@ uvicorn app.main:app --reload --port 8700
 - ✅ Phase 4 — op 카탈로그 **45개** (JSON Schema 인자, 예제, 매뉴얼) (`/api/v1/operations`, `/operations/{op}`)
 - ✅ Phase 5 — 비동기 Job 큐 & runner (`/sessions/{id}/jobs`, `/jobs/{id}`/logs/outputs/cancel) — 업로드→op 실행→산출물 자동등록·다운로드 e2e 9/9
 - ✅ Phase 6 — 전 op 통합 테스트. **라이브 API/워커로 45/45 op end-to-end 검증**(업로드→실행→산출물). 과정에서 실버그 수정: JSONB가 key 순서 미보존→argbuild가 type/action 키 우선 출력, config 절대경로(warpage 등 동반파일), 예제 12건 실제 실행가능화, meshfix gmsh 라이브러리/링크
-- ✅ Phase 7 — MCP 서버 (`mcp_server/server.py`, FastMCP streamable-http, 12개 도구, PAT 전달) — Claude 전체 사이클 e2e 통과
+- ✅ Phase 7 — MCP 서버 (`mcp_server/server.py`, FastMCP streamable-http, 22개 도구, PAT 전달) — Claude 전체 사이클 e2e 통과
 - ✅ Phase 8 — 프론트엔드 (React+TS+Vite+Tailwind+TanStack Query) — 로그인/대시보드/세션/세션상세(파일·op 자동폼·job 실시간)/카탈로그/토큰. `pnpm build` 0 에러, Playwright로 실제 동작 확인
 - ✅ Phase 9 — 배포: postgres+api(+SPA serving)+mcp 3 인스턴스, `start.sh` 일괄 기동, `build-frontend.sh`
 - ✅ Phase 10 — 하드닝·사용자관리·웹/MCP 패리티 UX: 회원가입/비번변경/관리자 사용자관리, rate limiting(429),
   입력↔산출 비교 뷰, 시스템 상태+패리티 가시화 페이지, nginx+TLS 리버스프록시(/api+/mcp), gmsh 이미지 번들(meshfix 이식성),
-  MCP whoami/system_status 도구(20개). 계획: `../KOOREMAPPER_PHASE10_PLAN.md`
+  MCP 도구 22개(whoami/system_status/system_capabilities/list_session_jobs 포함, auth·토큰·admin은 보안상 웹 전용). 계획: `../KOOREMAPPER_PHASE10_PLAN.md`
