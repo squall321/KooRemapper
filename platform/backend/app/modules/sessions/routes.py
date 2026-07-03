@@ -115,8 +115,15 @@ async def upload_files(
     cap = settings.max_upload_mb * 1024 * 1024
     created = []
     for uf in files:
+        # Reject oversized parts BEFORE buffering the whole body into memory,
+        # using the part's declared size when available.
+        if uf.size is not None and uf.size > cap:
+            raise HTTPException(
+                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                f"{uf.filename}: 파일이 너무 큽니다 (최대 {settings.max_upload_mb}MB)",
+            )
         raw = await uf.read()
-        if len(raw) > cap:
+        if len(raw) > cap:  # fallback when size wasn't declared
             raise HTTPException(
                 status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                 f"{uf.filename}: 파일이 너무 큽니다 (최대 {settings.max_upload_mb}MB)",
