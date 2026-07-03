@@ -71,9 +71,6 @@ export async function listFiles(sessionId: string): Promise<SessionFile[]> {
 export async function deleteFile(sessionId: string, fileId: number): Promise<void> {
   await api.delete(`/sessions/${sessionId}/files/${fileId}`)
 }
-export function downloadFileUrl(sessionId: string, fileId: number): string {
-  return `/api/v1/sessions/${sessionId}/files/${fileId}/download`
-}
 export async function downloadFile(sessionId: string, fileId: number, filename: string): Promise<void> {
   const res = await api.get(`/sessions/${sessionId}/files/${fileId}/download`, { responseType: 'blob' })
   const url = URL.createObjectURL(res.data as Blob)

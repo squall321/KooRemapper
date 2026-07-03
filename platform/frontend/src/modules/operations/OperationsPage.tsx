@@ -28,7 +28,7 @@ export function OperationsPage() {
 
   return (
     <div>
-      <PageHeader title="오퍼레이션 카탈로그" desc="KooRemapper가 지원하는 45개 작업. 각 작업의 인자/입출력/예제를 확인하세요." />
+      <PageHeader title="오퍼레이션 카탈로그" desc={`KooRemapper가 지원하는 ${data?.length ?? ''}개 작업. 각 작업의 인자/입출력/예제를 확인하세요.`} />
       <div className="relative mb-4 max-w-sm">
         <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
         <Input className="pl-9" placeholder="검색 (이름/설명)" value={q} onChange={(e) => setQ(e.target.value)} />

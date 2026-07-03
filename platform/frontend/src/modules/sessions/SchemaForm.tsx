@@ -19,6 +19,12 @@ export function SchemaForm({
 }) {
   const schema = op.args_schema
   const set = (k: string, v: unknown) => onChange({ ...value, [k]: v })
+  // Selecting the empty option deletes the key (don't send '' — it traps
+  // optional enums and turns an optional file arg like matdb's database into '').
+  const setOpt = (k: string, v: string) => {
+    if (v === '') { const next = { ...value }; delete next[k]; onChange(next) }
+    else set(k, v)
+  }
 
   // freeform config object → raw editor
   const isFreeform = op.invocation === 'yaml' && op.config_style === 'freeform'
@@ -62,12 +68,12 @@ export function SchemaForm({
           <div key={name}>
             {label}
             {def.enum ? (
-              <Select value={(value[name] as string) ?? ''} onChange={(e) => set(name, e.target.value)}>
+              <Select value={(value[name] as string) ?? ''} onChange={(e) => setOpt(name, e.target.value)}>
                 <option value="">(선택)</option>
                 {def.enum.map((o) => <option key={String(o)} value={String(o)}>{String(o)}</option>)}
               </Select>
             ) : isFile ? (
-              <Select value={(value[name] as string) ?? ''} onChange={(e) => set(name, e.target.value)}>
+              <Select value={(value[name] as string) ?? ''} onChange={(e) => setOpt(name, e.target.value)}>
                 <option value="">(파일 선택)</option>
                 {files.map((f) => <option key={f.id} value={f.filename}>{f.filename}</option>)}
               </Select>
