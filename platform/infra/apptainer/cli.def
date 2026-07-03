@@ -1,0 +1,51 @@
+Bootstrap: docker
+From: debian:12-slim
+
+%labels
+    Component  koorm-cli
+    Purpose    One-shot KooRemapper CLI for batch/HPC jobs (stateless)
+
+%files
+    # Self-contained: bake the built binary, gmsh, and the 525-material DB so the
+    # image runs anywhere Apptainer runs with no host repo dependency.
+    ../../../build/linux/bin/KooRemapper /opt/kooremapper/bin/KooRemapper
+    ../../../dist/gmsh /opt/kooremapper/bin/gmsh
+    ../../../materials/material_db.json /opt/kooremapper/materials/material_db.json
+
+%post
+    set -eux
+    apt-get update
+    # binary needs libgomp/libstdc++; gmsh (meshfix) is GL/X-linked even headless.
+    apt-get install -y --no-install-recommends \
+        libgomp1 libstdc++6 \
+        libglu1-mesa libgl1 libxrender1 libxcursor1 libxfixes3 libxext6 \
+        libxft2 libfontconfig1 libxinerama1 libx11-6
+    rm -rf /var/lib/apt/lists/*
+    # KooRemapper's findGmshExe looks for <binary_dir>/gmsh/gmsh.exe
+    ln -sf gmsh /opt/kooremapper/bin/gmsh/gmsh.exe
+    chmod +x /opt/kooremapper/bin/KooRemapper /opt/kooremapper/bin/gmsh/gmsh
+
+%environment
+    export PATH=/opt/kooremapper/bin:$PATH
+    # Baked 525-material DB — pass this in a matdb config's `database:` field.
+    export KOOREMAPPER_MATERIAL_DB=/opt/kooremapper/materials/material_db.json
+
+%runscript
+    # `apptainer run cli.sif <op> [args...]` → KooRemapper <op> [args...]
+    exec /opt/kooremapper/bin/KooRemapper "$@"
+
+%help
+    One-shot KooRemapper CLI for batch/HPC jobs. Stateless — bind your work dir
+    (inputs + config live there; outputs are written there).
+
+      apptainer run  kooremapper-cli.sif <op> [args...]
+      apptainer exec kooremapper-cli.sif KooRemapper <op> [args...]
+
+    Examples (from a dir holding your .k / config.yaml):
+      apptainer run --bind "$PWD:/work" --pwd /work kooremapper-cli.sif \
+        generate torus t --dim-i 10 --dim-j 5 --dim-k 5
+      apptainer run --bind "$PWD:/work" --pwd /work kooremapper-cli.sif \
+        matdb job.yaml            # in job.yaml: database: $KOOREMAPPER_MATERIAL_DB
+
+    The bundled 525-material library is baked at $KOOREMAPPER_MATERIAL_DB.
+    Build: apptainer build kooremapper-cli.sif cli.def  (from infra/apptainer/)
