@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import shutil
 from pathlib import Path
 from typing import Optional
@@ -97,17 +98,20 @@ async def add_uploaded_file(
             n += 1
         safe = f"{stem}_{n}{suffix}"
         dest = sess_dir / safe
-    dest.write_bytes(raw)
+    # Offload the blocking I/O + `info` subprocess (up to 120s) off the event loop
+    # so one upload doesn't stall the single-process API for all other requests.
+    await asyncio.to_thread(dest.write_bytes, raw)
 
     rel = f"{session.storage_path}/{safe}"
-    meta = inspect_kfile(dest)
+    meta = await asyncio.to_thread(inspect_kfile, dest)
+    sha = await asyncio.to_thread(storage.sha256_of, dest)
     row = SessionFile(
         session_id=session.id,
         filename=safe,
         rel_path=rel,
         kind=kind,
         size_bytes=dest.stat().st_size,
-        sha256=storage.sha256_of(dest),
+        sha256=sha,
         meta=meta,
     )
     db.add(row)

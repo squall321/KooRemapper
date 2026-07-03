@@ -130,6 +130,10 @@ async def _execute(job_id: str) -> None:
             if base.startswith(".job_"):  # our log files
                 continue
             fpath = work_dir / name
+            # Offload hashing + the `info` subprocess off the event loop so output
+            # registration doesn't stall the API (worker shares the loop).
+            sha = await asyncio.to_thread(storage.sha256_of, fpath)
+            meta = await asyncio.to_thread(inspect_kfile, fpath)
             row = SessionFile(
                 session_id=session.id,
                 filename=name,  # may include a subdir (posix) for nested outputs
@@ -137,8 +141,8 @@ async def _execute(job_id: str) -> None:
                 kind="output",
                 origin_job_id=job_id,
                 size_bytes=fpath.stat().st_size,
-                sha256=storage.sha256_of(fpath),
-                meta=inspect_kfile(fpath),
+                sha256=sha,
+                meta=meta,
             )
             db.add(row)
             await db.flush()
