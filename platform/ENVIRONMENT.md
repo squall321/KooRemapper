@@ -25,6 +25,15 @@
 | `KOORM_JOB_TIMEOUT_SEC` | `1800` | Job 1건 최대 실행시간 |
 | `KOORM_WORKER_CONCURRENCY` | `4` | 동시 워커 수 |
 | `KOORM_MAX_UPLOAD_MB` | `512` | 업로드 파일 1건 최대 크기 |
+| `KOORM_ALLOW_SIGNUP` | `true` | 공개 회원가입(`/auth/signup`) 허용 |
+| `KOORM_RATELIMIT_ENABLED` | `true` | rate limiting 사용 |
+| `KOORM_RATELIMIT_LOGIN_PER_MIN` | `10` | 로그인 분당 한도(IP) |
+| `KOORM_RATELIMIT_SIGNUP_PER_MIN` | `5` | 회원가입 분당 한도(IP) |
+| `KOORM_RATELIMIT_TOKEN_PER_MIN` | `20` | 토큰 발급 분당 한도(사용자) |
+| `KOORM_RATELIMIT_UPLOAD_PER_MIN` | `60` | 업로드 분당 한도(사용자) |
+| `KOORM_ENABLE_NGINX` | `0` | 1이면 nginx TLS 리버스프록시 인스턴스 기동(start.sh/supervisor) |
+| `KOORM_HTTPS_PORT` | `8443` | nginx HTTPS 포트 |
+| `KOORM_HTTP_PORT` | `8089` | nginx HTTP(→HTTPS 리다이렉트) 포트 |
 | `KOORM_CORS_ORIGINS` | `http://localhost:5273,…` | 허용 오리진(쉼표 구분) |
 | `KOORM_SERVE_FRONTEND_DIST` | (빈값) | 설정 시 API가 SPA도 서빙(단일 오리진). start.sh가 dist 존재 시 자동 설정 |
 

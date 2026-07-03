@@ -73,3 +73,31 @@ def test_validation_error_propagates():
 def test_unknown_op_error():
     b = build_command("nope", {}, _wd())
     assert b.error and "unknown" in b.error
+
+
+def test_all_catalog_examples_build():
+    """Every op's catalog example must build a command without error — guards
+    against an argbuild/catalog change breaking any of the 45 ops (M14)."""
+    from app.runner import catalog
+
+    failures = []
+    for name in catalog.operation_names():
+        op = catalog.get_operation(name)
+        args = (op.get("example") or {}).get("args") or {}
+        b = build_command(name, args, _wd())
+        if b.error:
+            failures.append(f"{name}: {b.error}")
+    assert not failures, "catalog examples that fail to build:\n" + "\n".join(failures)
+
+
+def test_matdb_defaults_to_bundled_db():
+    """Omitting `database` for matdb injects the bundled library path (L8)."""
+    from app.runner.argbuild import _BUNDLED_MATERIAL_DB
+
+    b = build_command("matdb", {"model": "m.k", "output": "o.k", "mat_type": "MAT_ELASTIC"}, _wd())
+    assert b.error is None
+    cfg = b.written_files.get("config.yaml", "")
+    assert str(_BUNDLED_MATERIAL_DB) in cfg, "bundled DB path not injected"
+    # an explicit database is respected (not overridden)
+    b2 = build_command("matdb", {"model": "m.k", "output": "o.k", "database": "custom.json"}, _wd())
+    assert "custom.json" in b2.written_files.get("config.yaml", "")

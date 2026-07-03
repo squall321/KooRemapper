@@ -291,6 +291,6 @@ async def test_system_status_and_capabilities(client, make_user):
     caps = await client.get(f"{API}/system/capabilities", headers=h)
     assert caps.status_code == 200
     cd = caps.json()["data"]
-    assert cd["operations"] >= 45 and cd["mcp_tools"] >= 1
+    assert cd["operations"] >= 45 and cd["mcp_tools"] >= 20
     assert isinstance(cd["parity"], list) and len(cd["parity"]) >= 1
     assert all("web" in p and "mcp" in p for p in cd["parity"])

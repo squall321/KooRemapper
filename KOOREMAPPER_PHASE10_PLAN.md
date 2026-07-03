@@ -43,7 +43,7 @@
 - `infra/nginx/nginx.conf` : `/` → SPA(api:8700), `/api` → api, `/mcp` → mcp(8701).
 - `infra/apptainer/nginx.def` : nginx 인스턴스(또는 호스트 nginx 문서). 자체서명 TLS(dev) + 인증서 마운트.
 - MCP: `MCP_HOST=0.0.0.0` + `MCP_ALLOWED_HOSTS` 지원(이미 코드 있음) — start.sh에서 nginx 뒤 도메인 전달.
-- 포트: nginx 8443(https)/8080(http). start.sh에 nginx 인스턴스 추가(옵션 `KOORM_ENABLE_NGINX`).
+- 포트: nginx 8443(https)/8089(http). start.sh에 nginx 인스턴스 추가(옵션 `KOORM_ENABLE_NGINX`).
 
 ### E. gmsh 이미지 번들 (infra, meshfix 이식성)
 - `api.def`에 gmsh 바이너리 + 런타임 라이브러리 동봉(현재 라이브러리만 추가됨, 바이너리는 호스트 의존).
