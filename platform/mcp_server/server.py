@@ -47,7 +47,14 @@ def _unwrap(r: httpx.Response):
     if r.status_code >= 400 or (isinstance(body, dict) and not body.get("success", True)):
         msg = (body.get("message") if isinstance(body, dict) else None) or f"HTTP {r.status_code}"
         raise RuntimeError(msg)
-    return body.get("data", body) if isinstance(body, dict) else body
+    if not isinstance(body, dict):
+        return body
+    data = body.get("data")
+    # Success responses with no data but a message (delete/cancel) would return
+    # an empty result — surface the message so Claude sees the outcome.
+    if data is None and body.get("message"):
+        return {"message": body["message"]}
+    return data if "data" in body else body
 
 
 async def _get(ctx, path, params=None):
@@ -259,13 +266,16 @@ async def download_result(
             msg = f"HTTP {r.status_code}"
         raise RuntimeError(f"다운로드 실패: {msg}")
     data = r.content
-    # Guard against dumping a huge file into the model context.
+    # Guard against dumping a huge file into the model context. The cap applies to
+    # BOTH the text and base64 branches — base64 is ~33% bigger, so it can't be the
+    # escape hatch. For genuinely large files use save_result_to_path (writes to
+    # disk, same-machine) instead of pulling bytes through the conversation.
     MAX = int(os.environ.get("KOORM_MCP_MAX_DOWNLOAD_BYTES", str(5 * 1024 * 1024)))
-    if len(data) > MAX and not as_base64:
+    if len(data) > MAX:
         return {
             "filename_id": file_id, "bytes": len(data),
-            "error": f"파일이 큽니다({len(data)} bytes > {MAX}). 내용 대신 요약만 반환합니다. "
-                     f"전체가 필요하면 as_base64=true 로 다시 요청하세요.",
+            "error": f"파일이 큽니다({len(data)} bytes > {MAX}). 대화로 실어나르기엔 큽니다. "
+                     f"같은 머신이면 save_result_to_path 로 디스크에 저장하세요.",
             "preview": data[:2000].decode("utf-8", "ignore"),
         }
     if as_base64:
