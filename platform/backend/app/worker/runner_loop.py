@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import signal
 import subprocess
 import threading
 from datetime import datetime, timezone
@@ -56,16 +58,32 @@ async def _claim_one(db) -> str | None:
     return row[0] if row else None
 
 
+def _kill_proc_group(proc: subprocess.Popen, sig: int) -> None:
+    """Signal the whole process group (the binary + any children like gmsh),
+    falling back to the direct child if the group can't be addressed."""
+    try:
+        os.killpg(os.getpgid(proc.pid), sig)
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            proc.send_signal(sig)
+        except ProcessLookupError:
+            pass
+
+
 def _run_blocking(job_id: str, argv: list[str], cwd: Path, out_path: Path, err_path: Path) -> int:
     """Run the binary synchronously (called via asyncio.to_thread)."""
     cmd = [str(settings.kooremapper_bin), *argv]
     with out_path.open("w") as out, err_path.open("w") as err:
-        proc = subprocess.Popen(cmd, cwd=str(cwd), stdout=out, stderr=err, text=True)
+        # start_new_session=True → the binary leads its own process group, so a
+        # timeout/cancel can kill the whole group (incl. gmsh grandchildren).
+        proc = subprocess.Popen(
+            cmd, cwd=str(cwd), stdout=out, stderr=err, text=True, start_new_session=True
+        )
         _running[job_id] = proc
         try:
             return proc.wait(timeout=settings.job_timeout_sec)
         except subprocess.TimeoutExpired:
-            proc.kill()
+            _kill_proc_group(proc, signal.SIGKILL)
             proc.wait()
             err.write("\n[timeout exceeded]\n")
             return 124
@@ -207,13 +225,13 @@ def request_cancel(job_id: str) -> bool:
     _CANCELED.add(job_id)
     proc = _running.get(job_id)
     if proc is not None:
-        proc.terminate()
+        _kill_proc_group(proc, signal.SIGTERM)
 
         def _kill_if_alive():
             try:
                 proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                proc.kill()
+                _kill_proc_group(proc, signal.SIGKILL)
 
         threading.Thread(target=_kill_if_alive, daemon=True).start()
         return True
@@ -294,5 +312,9 @@ def start_worker() -> None:
 
 async def stop_worker() -> None:
     _stop.set()
+    # Kill any in-flight subprocess groups so a shutdown/restart doesn't leave
+    # orphaned binaries running (and mutating session dirs).
+    for proc in list(_running.values()):
+        _kill_proc_group(proc, signal.SIGKILL)
     if _worker_task is not None:
         await _worker_task
