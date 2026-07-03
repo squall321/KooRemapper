@@ -294,3 +294,49 @@ async def test_system_status_and_capabilities(client, make_user):
     assert cd["operations"] >= 45 and cd["mcp_tools"] >= 20
     assert isinstance(cd["parity"], list) and len(cd["parity"]) >= 1
     assert all("web" in p and "mcp" in p for p in cd["parity"])
+
+
+async def test_file_lifecycle_and_cross_user_isolation(client, make_user):
+    """File upload/list/inspect/download/delete + a non-owner is denied (M15)."""
+    owner = await make_user()
+    other = await make_user()
+    sid = (await client.post(f"{API}/sessions", json={"name": "files"},
+                             headers=_auth(owner["token"]))).json()["data"]["id"]
+    kf = b"*KEYWORD\n*NODE\n       1     0.0     0.0     0.0\n*END\n"
+    up = await client.post(f"{API}/sessions/{sid}/files",
+                           files={"files": ("t.k", kf, "text/plain")}, headers=_auth(owner["token"]))
+    assert up.status_code == 201, up.text
+    fid = up.json()["data"][0]["id"]
+
+    lst = await client.get(f"{API}/sessions/{sid}/files", headers=_auth(owner["token"]))
+    assert any(f["id"] == fid for f in lst.json()["data"])
+    assert (await client.get(f"{API}/sessions/{sid}/files/{fid}/inspect",
+                             headers=_auth(owner["token"]))).status_code == 200
+    dl = await client.get(f"{API}/sessions/{sid}/files/{fid}/download", headers=_auth(owner["token"]))
+    assert dl.status_code == 200 and b"*NODE" in dl.content
+
+    # a different user cannot reach the session or its file
+    assert (await client.get(f"{API}/sessions/{sid}", headers=_auth(other["token"]))).status_code in (403, 404)
+    assert (await client.get(f"{API}/sessions/{sid}/files/{fid}/download",
+                             headers=_auth(other["token"]))).status_code in (403, 404)
+
+    assert (await client.delete(f"{API}/sessions/{sid}/files/{fid}",
+                                headers=_auth(owner["token"]))).status_code == 200
+
+
+async def test_token_lifecycle(client, make_user):
+    """PAT create → authenticates → list → revoke → rejected (M15)."""
+    u = await make_user()
+    h = _auth(u["token"])
+    cr = await client.post(f"{API}/me/tokens", json={"name": "test-pat"}, headers=h)
+    assert cr.status_code == 201, cr.text
+    pat = cr.json()["data"]["token"]
+    tid = cr.json()["data"]["info"]["id"]
+    assert pat.startswith("kr_")
+
+    me = await client.get(f"{API}/me", headers=_auth(pat))
+    assert me.status_code == 200 and me.json()["data"]["email"] == u["email"]
+    assert any(t["id"] == tid for t in (await client.get(f"{API}/me/tokens", headers=h)).json()["data"])
+
+    assert (await client.delete(f"{API}/me/tokens/{tid}", headers=h)).status_code == 200
+    assert (await client.get(f"{API}/me", headers=_auth(pat))).status_code == 401
