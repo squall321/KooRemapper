@@ -4,7 +4,7 @@ set -uo pipefail
 . "$(dirname "$0")/_common.sh"
 
 echo "── instances ──────────────────────────────────"
-"$APPTAINER" instance list 2>/dev/null | grep -E "INSTANCE|$INST_POSTGRES|$INST_API|$INST_MCP" || echo "(none running)"
+"$APPTAINER" instance list 2>/dev/null | grep -E "INSTANCE|$INST_POSTGRES|$INST_API|$INST_MCP|$INST_NGINX" || echo "(none running)"
 
 echo "── health ─────────────────────────────────────"
 if "$APPTAINER" exec instance://"$INST_POSTGRES" pg_isready -h 127.0.0.1 -p "$POSTGRES_PORT" -U "$POSTGRES_USER" >/dev/null 2>&1; then
@@ -22,4 +22,13 @@ if curl -fsS -m3 -o /dev/null "http://127.0.0.1:${KOORM_MCP_PORT}/mcp" 2>/dev/nu
   echo "  ✓ mcp listening (:${KOORM_MCP_PORT})"
 else
   echo "  ✗ mcp not listening (:${KOORM_MCP_PORT})"
+fi
+if instance_running "$INST_NGINX"; then
+  if curl -fsSk -m3 -o /dev/null "https://127.0.0.1:${KOORM_HTTPS_PORT}/" 2>/dev/null; then
+    echo "  ✓ nginx TLS ready (https://127.0.0.1:${KOORM_HTTPS_PORT})"
+  else
+    echo "  ✗ nginx running but https not answering (:${KOORM_HTTPS_PORT})"
+  fi
+else
+  echo "  · nginx not running (optional; KOORM_ENABLE_NGINX=1 to enable)"
 fi

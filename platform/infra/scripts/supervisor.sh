@@ -32,6 +32,15 @@ check_once() {
       --env "KOORM_MCP_PORT=${KOORM_MCP_PORT}" --env "MCP_HOST=${MCP_HOST:-127.0.0.1}" \
       --env "MCP_ALLOWED_HOSTS=${MCP_ALLOWED_HOSTS:-}" "$MCP_SIF" "$INST_MCP" >/dev/null 2>&1 || true
   fi
+  # nginx (only when enabled): restart instance if gone
+  if [ "${KOORM_ENABLE_NGINX:-0}" = "1" ] && ! instance_running "$INST_NGINX"; then
+    echo "[$(date '+%F %T')] nginx down → start"
+    local net2=(); [ "${KOORM_APPT_HOST_NET:-0}" = "1" ] && net2=(--net --network=host)
+    [ -f "$PLATFORM_ROOT/infra/nginx/certs/server.crt" ] || "$SCRIPT_DIR/gen-certs.sh" >/dev/null 2>&1 || true
+    "$APPTAINER" instance start "${net2[@]}" \
+      --bind "$PLATFORM_ROOT/infra/nginx/certs:/etc/nginx/certs:ro" \
+      "$NGINX_SIF" "$INST_NGINX" >/dev/null 2>&1 || true
+  fi
 }
 
 if [ "$ONCE" = 1 ]; then check_once; echo "✓ supervise check done"; exit 0; fi
