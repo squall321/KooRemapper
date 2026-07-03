@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest
 import ulid
-from sqlalchemy import delete, text
+from sqlalchemy import delete, func, select, text
 
 from app.models import Job, PersonalAccessToken, Session, User
 from app.shared import auth, security
@@ -116,6 +116,14 @@ async def test_session_ownership_isolation(db):
 async def test_reconcile_orphans_fails_running_jobs(db):
     from app.database import SessionLocal
     from app.worker.runner_loop import reconcile_orphans
+
+    # reconcile_orphans fails ALL 'running' jobs (global, by design). Against the
+    # shared dev DB that would clobber a genuinely in-flight job, so skip if any
+    # other job is running.
+    async with SessionLocal() as sg:
+        running = (await sg.execute(select(func.count(Job.id)).where(Job.status == "running"))).scalar_one()
+    if running:
+        pytest.skip(f"{running} job(s) already running — reconcile_orphans is global; skipping to avoid clobbering them")
 
     u = await _mk_user(db)
     sid = ulid.new().str

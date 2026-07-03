@@ -5,6 +5,10 @@ set -euo pipefail
 require_apptainer
 "$SCRIPT_DIR/build.sh"
 
+# Link the bundled gmsh next to the binary so meshfix works (optional — warn,
+# don't fail, if gmsh isn't present since it's only needed for meshfix).
+"$SCRIPT_DIR/setup-gmsh.sh" || echo "  ⚠ gmsh not linked — meshfix will be unavailable (see setup-gmsh.sh)"
+
 NET_ARGS=()
 if [ "${KOORM_APPT_HOST_NET:-0}" = "1" ]; then
   NET_ARGS=(--net --network=host)
