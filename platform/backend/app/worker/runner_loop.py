@@ -17,7 +17,7 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 
 from app.config import settings
 from app.database import SessionLocal
@@ -34,13 +34,20 @@ _stop = asyncio.Event()
 
 
 async def _claim_one(db) -> str | None:
-    """Atomically claim the oldest queued job (FOR UPDATE SKIP LOCKED)."""
+    """Atomically claim the oldest queued job whose session has no running job.
+
+    Jobs in the SAME session are serialized: they share one work_dir, so running
+    two concurrently would let one overwrite the other's config.yaml and mis-
+    attribute outputs. Different sessions still run concurrently (up to the
+    worker concurrency)."""
     row = (
         await db.execute(
             text(
                 "UPDATE jobs SET status='running', started_at=now() "
-                "WHERE id = (SELECT id FROM jobs WHERE status='queued' "
-                "ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED) "
+                "WHERE id = (SELECT id FROM jobs q WHERE q.status='queued' "
+                "AND NOT EXISTS (SELECT 1 FROM jobs r WHERE r.status='running' "
+                "AND r.session_id = q.session_id) "
+                "ORDER BY q.created_at LIMIT 1 FOR UPDATE SKIP LOCKED) "
                 "RETURNING id"
             )
         )
@@ -96,11 +103,13 @@ async def _execute(job_id: str) -> None:
         job.stderr_path = str(err_path)
         await db.commit()
 
-        # snapshot existing files to detect new outputs (recursive — some ops
-        # write into subdirs; paths are relative to the session dir).
-        def _snap() -> set[str]:
+        # snapshot existing files (name -> mtime) to detect outputs (recursive —
+        # some ops write into subdirs; paths are relative to the session dir). We
+        # track mtime so an op that OVERWRITES an existing file (same name) is
+        # still detected as an output, not silently missed.
+        def _snap() -> dict[str, float]:
             return {
-                p.relative_to(work_dir).as_posix()
+                p.relative_to(work_dir).as_posix(): p.stat().st_mtime
                 for p in work_dir.rglob("*")
                 if p.is_file()
             }
@@ -121,11 +130,16 @@ async def _execute(job_id: str) -> None:
         canceled = job_id in _CANCELED
         _CANCELED.discard(job_id)
 
-        # register new files as outputs
+        # register outputs: files that are new OR whose mtime advanced (overwritten
+        # by this run). For an overwritten file, update the existing row instead of
+        # inserting a duplicate.
         after = _snap()
-        new_names = sorted(after - before)
+        changed = sorted(
+            n for n, mt in after.items()
+            if n not in before or mt > before[n]
+        )
         output_ids: list[int] = []
-        for name in new_names:
+        for name in changed:
             base = name.rsplit("/", 1)[-1]
             if base.startswith(".job_"):  # our log files
                 continue
@@ -134,19 +148,36 @@ async def _execute(job_id: str) -> None:
             # registration doesn't stall the API (worker shares the loop).
             sha = await asyncio.to_thread(storage.sha256_of, fpath)
             meta = await asyncio.to_thread(inspect_kfile, fpath)
-            row = SessionFile(
-                session_id=session.id,
-                filename=name,  # may include a subdir (posix) for nested outputs
-                rel_path=f"{session.storage_path}/{name}",
-                kind="output",
-                origin_job_id=job_id,
-                size_bytes=fpath.stat().st_size,
-                sha256=sha,
-                meta=meta,
-            )
-            db.add(row)
-            await db.flush()
-            output_ids.append(row.id)
+            existing = (
+                await db.execute(
+                    select(SessionFile).where(
+                        SessionFile.session_id == session.id,
+                        SessionFile.filename == name,
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing is not None:
+                existing.kind = "output"
+                existing.origin_job_id = job_id
+                existing.size_bytes = fpath.stat().st_size
+                existing.sha256 = sha
+                existing.meta = meta
+                await db.flush()
+                output_ids.append(existing.id)
+            else:
+                row = SessionFile(
+                    session_id=session.id,
+                    filename=name,  # may include a subdir (posix) for nested outputs
+                    rel_path=f"{session.storage_path}/{name}",
+                    kind="output",
+                    origin_job_id=job_id,
+                    size_bytes=fpath.stat().st_size,
+                    sha256=sha,
+                    meta=meta,
+                )
+                db.add(row)
+                await db.flush()
+                output_ids.append(row.id)
 
         job.exit_code = exit_code
         job.output_file_ids = output_ids
