@@ -1,0 +1,17 @@
+[project]
+name = "kooremapper-core"
+version = "0.1.0"
+description = "Shared KooRemapper operation catalog + argument builder (45 ops)"
+requires-python = ">=3.9"
+dependencies = ["PyYAML>=6.0", "jsonschema>=4.0"]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["kooremapper_core*"]
+
+[tool.setuptools.package-data]
+kooremapper_core = ["catalog_data.json"]

@@ -74,3 +74,15 @@ def test_python_client_mirrors_mcp_read_surface():
     for cls in (mod.KooRemapper, mod.AsyncKooRemapper):
         missing = sorted(m for m in required if not hasattr(cls, m))
         assert not missing, f"{cls.__name__} missing {missing}"
+
+
+def test_core_catalog_matches_backend():
+    """kooremapper-core vendors a copy of catalog_data.json; it must stay identical
+    to the backend's so the shared package can't drift from the running platform."""
+    core = _PLATFORM / "core" / "kooremapper_core" / "catalog_data.json"
+    backend = _BACKEND / "app" / "runner" / "catalog_data.json"
+    assert core.exists(), f"core catalog missing: {core}"
+    assert core.read_bytes() == backend.read_bytes(), (
+        "platform/core/kooremapper_core/catalog_data.json is out of sync with the "
+        "backend copy — re-copy it (or wire the backend to import kooremapper_core)."
+    )
