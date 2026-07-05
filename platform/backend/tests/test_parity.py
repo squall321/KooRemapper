@@ -76,13 +76,12 @@ def test_python_client_mirrors_mcp_read_surface():
         assert not missing, f"{cls.__name__} missing {missing}"
 
 
-def test_core_catalog_matches_backend():
-    """kooremapper-core vendors a copy of catalog_data.json; it must stay identical
-    to the backend's so the shared package can't drift from the running platform."""
-    core = _PLATFORM / "core" / "kooremapper_core" / "catalog_data.json"
-    backend = _BACKEND / "app" / "runner" / "catalog_data.json"
-    assert core.exists(), f"core catalog missing: {core}"
-    assert core.read_bytes() == backend.read_bytes(), (
-        "platform/core/kooremapper_core/catalog_data.json is out of sync with the "
-        "backend copy — re-copy it (or wire the backend to import kooremapper_core)."
+def test_backend_catalog_is_single_source_from_core():
+    """The backend no longer carries its own catalog_data.json — it re-exports
+    kooremapper_core (single source). Guard against a stray backend copy reappearing
+    and confirm the re-export still yields the 45 ops."""
+    assert not (_BACKEND / "app" / "runner" / "catalog_data.json").exists(), (
+        "backend catalog_data.json reappeared — it must come from kooremapper_core"
     )
+    assert (_PLATFORM / "core" / "kooremapper_core" / "catalog_data.json").exists()
+    assert len(catalog.operation_names()) >= 45
