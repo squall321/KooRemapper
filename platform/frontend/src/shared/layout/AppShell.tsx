@@ -7,7 +7,7 @@ import { cn } from '@/shared/lib/cn'
 const nav = [
   { to: '/', label: '대시보드', icon: LayoutDashboard, end: true },
   { to: '/sessions', label: '세션', icon: FolderOpen },
-  { to: '/operations', label: '오퍼레이션', icon: BookOpen },
+  { to: '/operations', label: '기능 · 도구', icon: BookOpen },
   { to: '/system', label: '시스템 상태', icon: Activity },
   { to: '/tokens', label: 'MCP 토큰', icon: KeyRound },
   { to: '/account', label: '내 계정', icon: UserCog },
