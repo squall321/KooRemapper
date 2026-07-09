@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PreFit · 설계 선반영 검토 (UI 목업)</title>
+</head>
+<body>
+<style>
+  :root{
+    --ink:#0E1730; --ink-2:#33406A; --muted:#6B7793;
+    --paper:#EEF1F8; --card:#FFFFFF; --card-2:#F4F6FC; --card-3:#EDF1FA;
+    --line:#DCE2F0; --line-2:#E9EDF7;
+    --brand:#1E3AE6; --brand-ink:#12246B; --brand-tint:#EAEEFF;
+    --heat:#FF5A3C; --heat-ink:#B32C15; --heat-tint:#FFEDE8;
+    --good:#1E9E63; --good-tint:#E4F5EC; --warn:#D98A17; --warn-tint:#FBF0DC;
+    --nav:#0B1440; --nav-2:#141E52; --nav-line:#25306E; --nav-ink:#C7D0F0; --nav-mut:#7C88BE;
+    --spectrum:linear-gradient(90deg,#2E5BFF 0%,#23A7D6 26%,#46C36A 48%,#F4C33E 70%,#F6883E 86%,#E8402C 100%);
+    --mono:ui-monospace,"SF Mono","JetBrains Mono","Menlo",monospace;
+    --sans:system-ui,-apple-system,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+    --shadow:0 18px 44px -20px rgba(14,23,48,.30), 0 2px 8px -4px rgba(14,23,48,.18);
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --ink:#EAF0FF; --ink-2:#B7C2E6; --muted:#8592BC;
+    --paper:#070B1A; --card:#0F1730; --card-2:#141E3B; --card-3:#111A38;
+    --line:#25315C; --line-2:#1C2748; --brand-tint:#182552; --heat-tint:#3A1A13;
+    --good-tint:#0F2C1E; --warn-tint:#2C2410;
+  }}
+  :root[data-theme="dark"]{
+    --ink:#EAF0FF; --ink-2:#B7C2E6; --muted:#8592BC;
+    --paper:#070B1A; --card:#0F1730; --card-2:#141E3B; --card-3:#111A38;
+    --line:#25315C; --line-2:#1C2748; --brand-tint:#182552; --heat-tint:#3A1A13;
+    --good-tint:#0F2C1E; --warn-tint:#2C2410;
+  }
+  :root[data-theme="light"]{
+    --ink:#0E1730; --ink-2:#33406A; --muted:#6B7793; --paper:#EEF1F8; --card:#FFFFFF;
+    --card-2:#F4F6FC; --card-3:#EDF1FA; --line:#DCE2F0; --line-2:#E9EDF7;
+    --brand-tint:#EAEEFF; --heat-tint:#FFEDE8; --good-tint:#E4F5EC; --warn-tint:#FBF0DC;
+  }
+
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{font-family:var(--sans);color:var(--ink);background:var(--paper);-webkit-font-smoothing:antialiased}
+  button{font-family:inherit;cursor:pointer}
+  .num{font-variant-numeric:tabular-nums}
+
+  .app{display:grid;grid-template-columns:236px 1fr;min-height:100vh}
+
+  /* ---------------- sidebar ---------------- */
+  .side{background:linear-gradient(180deg,var(--nav),#0A1138);color:var(--nav-ink);
+    display:flex;flex-direction:column;padding:20px 16px;gap:22px;position:sticky;top:0;height:100vh}
+  .logo{display:flex;align-items:center;gap:10px;padding:2px 6px}
+  .logo svg{width:30px;height:auto}
+  .logo .wm{font-family:var(--mono);font-weight:700;font-size:18px;letter-spacing:.04em;color:#fff}
+  .logo .wm span{color:var(--heat)}
+  .logo .sub{font-size:10px;letter-spacing:.14em;color:var(--nav-mut);font-family:var(--mono);text-transform:uppercase;margin-top:2px}
+  .nav{display:flex;flex-direction:column;gap:3px;margin-top:4px}
+  .navi{display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:9px;color:var(--nav-ink);
+    font-size:13.5px;font-weight:550;text-decoration:none;border:1px solid transparent}
+  .navi svg{width:17px;height:17px;flex:0 0 auto;opacity:.9}
+  .navi:hover{background:var(--nav-2)}
+  .navi.on{background:var(--nav-2);border-color:var(--nav-line);color:#fff}
+  .navi.on svg{color:#8FA0F0;opacity:1}
+  .nav-h{font-family:var(--mono);font-size:10px;letter-spacing:.16em;color:var(--nav-mut);text-transform:uppercase;padding:0 11px;margin-top:8px}
+  .side-foot{margin-top:auto;border-top:1px solid var(--nav-line);padding-top:14px;display:flex;align-items:center;gap:10px}
+  .avatar{width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,#2E4BFF,#7A3FD0);
+    display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:13px;font-family:var(--mono)}
+  .side-foot .who{font-size:12.5px;font-weight:600;color:#fff;line-height:1.2}
+  .side-foot .who small{display:block;color:var(--nav-mut);font-size:10.5px;font-weight:500;font-family:var(--mono)}
+
+  /* ---------------- main ---------------- */
+  .main{display:flex;flex-direction:column;min-width:0}
+  .topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;
+    padding:16px 30px;border-bottom:1px solid var(--line);background:var(--card);position:sticky;top:0;z-index:5}
+  .crumb{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--muted);font-family:var(--mono)}
+  .crumb b{color:var(--ink);font-weight:600}
+  .crumb .sep{opacity:.5}
+  .top-r{display:flex;align-items:center;gap:10px}
+  .chip-sel{font-size:12.5px;font-family:var(--mono);color:var(--ink-2);background:var(--card-2);
+    border:1px solid var(--line);border-radius:8px;padding:6px 12px}
+  .ghost{font-size:12.5px;color:var(--muted);background:transparent;border:1px solid var(--line);
+    border-radius:8px;padding:6px 12px}
+
+  .work{padding:26px 30px 40px;display:grid;grid-template-columns:minmax(0,420px) minmax(0,1fr);
+    gap:24px;align-items:start;max-width:1220px;width:100%;margin:0 auto}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow)}
+  .card-h{padding:16px 20px;border-bottom:1px solid var(--line-2);display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .card-h h2{margin:0;font-size:15.5px;font-weight:750;letter-spacing:-.01em}
+  .card-h .hint{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;color:var(--muted);text-transform:uppercase}
+  .card-b{padding:18px 20px;display:flex;flex-direction:column;gap:18px}
+
+  .field{display:flex;flex-direction:column;gap:9px}
+  .flabel{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:var(--muted);
+    text-transform:uppercase;letter-spacing:.06em;font-family:var(--mono)}
+  .flabel .idx{width:18px;height:18px;border-radius:5px;background:var(--brand);color:#fff;font-size:11px;
+    display:flex;align-items:center;justify-content:center;font-weight:700}
+
+  .model-pill{display:flex;align-items:center;gap:11px;background:var(--card-2);border:1px solid var(--line);
+    border-radius:11px;padding:11px 13px}
+  .model-pill .ic{width:30px;height:30px;border-radius:8px;background:var(--brand-tint);color:var(--brand);
+    display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+  .model-pill .nm{font-size:13.5px;font-weight:650;font-family:var(--mono);color:var(--ink)}
+  .model-pill .mt{font-size:11.5px;color:var(--muted)}
+  .tag{font-family:var(--mono);font-size:10px;letter-spacing:.08em;padding:3px 8px;border-radius:99px;
+    background:var(--brand-tint);color:var(--brand-ink);font-weight:600;margin-left:auto}
+
+  /* change rows */
+  .change{display:flex;flex-direction:column;gap:2px;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .crow{padding:12px 14px;background:var(--card)}
+  .crow + .crow{border-top:1px solid var(--line-2)}
+  .crow-top{display:flex;align-items:center;gap:12px}
+  .crow-top .t{font-size:13.5px;font-weight:650;color:var(--ink)}
+  .crow-top .t small{display:block;font-weight:500;color:var(--muted);font-size:11.5px;margin-top:1px}
+  .crow .sub{margin-top:11px;padding-top:11px;border-top:1px dashed var(--line);opacity:.4;pointer-events:none;transition:opacity .18s}
+  .crow.on .sub{opacity:1;pointer-events:auto}
+
+  .switch{position:relative;display:inline-flex;width:42px;height:23px;flex:0 0 auto;margin-left:auto}
+  .switch input{position:absolute;opacity:0;width:100%;height:100%;margin:0;cursor:pointer}
+  .track{position:absolute;inset:0;background:var(--line);border-radius:99px;transition:.18s}
+  .thumb{position:absolute;top:3px;left:3px;width:17px;height:17px;background:#fff;border-radius:99px;
+    transition:.18s;box-shadow:0 1px 3px rgba(0,0,0,.25);pointer-events:none}
+  .switch input:checked ~ .track{background:var(--brand)}
+  .switch input:checked ~ .thumb{transform:translateX(19px)}
+  .switch.heat input:checked ~ .track{background:var(--heat)}
+  .switch input:focus-visible ~ .track{outline:2px solid var(--brand);outline-offset:2px}
+
+  .slider-row{display:flex;align-items:center;gap:12px}
+  input[type=range]{flex:1;accent-color:var(--brand);height:4px}
+  .readout{font-family:var(--mono);font-size:12.5px;font-weight:650;color:var(--ink);min-width:64px;text-align:right}
+  .sel{width:100%;font-family:var(--mono);font-size:12.5px;padding:8px 10px;border:1px solid var(--line);
+    border-radius:8px;background:var(--card);color:var(--ink)}
+  .subnote{font-size:11.5px;color:var(--muted);margin-top:7px;line-height:1.45}
+
+  .seg{display:flex;gap:6px;flex-wrap:wrap}
+  .seg button{font-size:12.5px;font-family:var(--mono);padding:7px 13px;border-radius:8px;border:1px solid var(--line);
+    background:var(--card);color:var(--ink-2);font-weight:600}
+  .seg button[aria-pressed=true]{background:var(--brand);border-color:var(--brand);color:#fff}
+  .seg button:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+
+  .prestress{display:flex;align-items:flex-start;gap:12px;background:var(--heat-tint);border:1px solid #F6C7BC;
+    border-radius:12px;padding:13px 14px}
+  :root[data-theme=dark] .prestress{border-color:#5A2418}
+  .prestress .t{font-size:13.5px;font-weight:700;color:var(--heat-ink)}
+  .prestress .t small{display:block;font-weight:500;color:var(--ink-2);font-size:11.5px;margin-top:2px;line-height:1.45}
+
+  .run{width:100%;padding:14px;border:none;border-radius:12px;background:var(--brand);color:#fff;
+    font-size:15px;font-weight:750;letter-spacing:-.01em;box-shadow:0 10px 22px -10px rgba(30,58,230,.7);transition:.15s}
+  .run:hover{filter:brightness(1.06)}
+  .run:disabled{opacity:.55;cursor:progress;box-shadow:none}
+  .run:focus-visible{outline:2px solid var(--brand);outline-offset:3px}
+
+  .engine{font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.6;text-align:center}
+  .engine b{color:var(--brand-ink)}
+  :root[data-theme=dark] .engine b{color:#8FA0F0}
+
+  /* ---------------- result ---------------- */
+  .rcard{min-height:520px}
+  .r-empty,.r-run{display:flex;flex-direction:column;align-items:center;justify-content:center;
+    text-align:center;gap:16px;padding:60px 30px;color:var(--muted)}
+  .r-empty svg{width:120px;height:auto;opacity:.5}
+  .r-empty p{margin:0;font-size:14px;max-width:280px;line-height:1.5}
+  .steps-run{display:flex;flex-direction:column;gap:11px;width:100%;max-width:300px;text-align:left}
+  .srow{display:flex;align-items:center;gap:11px;font-size:13px;color:var(--muted);
+    font-family:var(--mono);opacity:.4;transition:.2s}
+  .srow.active{opacity:1;color:var(--ink)} .srow.done{opacity:1;color:var(--ink-2)}
+  .srow .bx{width:18px;height:18px;border-radius:5px;border:1.6px solid var(--line);flex:0 0 auto;
+    display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff}
+  .srow.done .bx{background:var(--brand);border-color:var(--brand)}
+  .srow.active .bx{border-color:var(--brand)}
+  .spin{width:30px;height:30px;border:3px solid var(--line);border-top-color:var(--brand);border-radius:99px;animation:sp .8s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+
+  .r-done{display:none;flex-direction:column;gap:18px;padding:20px}
+  .r-done.show{display:flex}
+  .verdict{display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:12px;font-weight:750}
+  .verdict .vd{width:11px;height:11px;border-radius:99px;flex:0 0 auto}
+  .verdict .vt{font-size:16px;letter-spacing:-.01em}
+  .verdict .vs{margin-left:auto;font-family:var(--mono);font-size:12px;font-weight:600;opacity:.8}
+  .verdict.good{background:var(--good-tint);color:#0f6b3f} .verdict.good .vd{background:var(--good)}
+  .verdict.warn{background:var(--warn-tint);color:#8a5a0c} .verdict.warn .vd{background:var(--warn)}
+  .verdict.bad{background:var(--heat-tint);color:var(--heat-ink)} .verdict.bad .vd{background:var(--heat)}
+  :root[data-theme=dark] .verdict.good{color:#57d99a} :root[data-theme=dark] .verdict.warn{color:#e6b054}
+
+  .metrics{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+  .m{border:1px solid var(--line);border-radius:11px;padding:12px 13px;background:var(--card-2)}
+  .m .mk{font-family:var(--mono);font-size:10px;letter-spacing:.05em;color:var(--muted);text-transform:uppercase}
+  .m .mv{font-size:20px;font-weight:750;color:var(--ink);margin-top:3px;letter-spacing:-.01em}
+  .m .mv em{font-style:normal;font-size:12px;color:var(--muted);font-weight:600}
+  .m .mv.pos{color:var(--good)} .m .mv.neg{color:var(--heat-ink)}
+  .m .mv.small{font-size:14px}
+
+  .viz-wrap{border:1px solid var(--line);border-radius:12px;background:linear-gradient(180deg,var(--card),var(--card-2));padding:14px}
+  .viz-wrap svg{width:100%;height:auto;display:block}
+  .viz-cap{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-align:center;margin-top:8px}
+
+  .bars{display:flex;flex-direction:column;gap:10px}
+  .bar-h{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+  .bar{position:relative;height:34px;background:var(--card-3);border-radius:8px;overflow:hidden;border:1px solid var(--line-2)}
+  .bar .fill{position:absolute;left:0;top:0;bottom:0;border-radius:8px 0 0 8px;transition:width .5s cubic-bezier(.2,.7,.2,1)}
+  .bar .lab{position:absolute;left:11px;top:0;bottom:0;display:flex;align-items:center;gap:8px;
+    font-size:12px;font-weight:650;color:var(--ink)}
+  .bar .val{position:absolute;right:11px;top:0;bottom:0;display:flex;align-items:center;font-family:var(--mono);
+    font-size:12.5px;font-weight:700;color:var(--ink)}
+  .yield-line{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--heat);z-index:3}
+  .yield-line::after{content:"항복 " attr(data-y);position:absolute;top:-15px;left:50%;transform:translateX(-50%);
+    white-space:nowrap;font-family:var(--mono);font-size:9.5px;color:var(--heat-ink);font-weight:700}
+  .bars-box{position:relative;padding-top:16px}
+
+  .r-actions{display:flex;gap:10px}
+  .r-actions button{flex:1;padding:11px;border-radius:10px;font-size:13px;font-weight:650;border:1px solid var(--line);background:var(--card-2);color:var(--ink)}
+  .r-actions .primary{background:var(--brand-tint);border-color:transparent;color:var(--brand-ink)}
+  .r-actions button:hover{filter:brightness(.98)}
+
+  .disclaimer{font-size:10.5px;color:var(--muted);text-align:center;line-height:1.5;padding:0 30px 22px}
+  .disclaimer b{color:var(--ink-2)}
+
+  @media (prefers-reduced-motion:reduce){*{animation-duration:.001s!important;transition:none!important}}
+  @media (max-width:940px){
+    .app{grid-template-columns:1fr}
+    .side{position:static;height:auto;flex-direction:row;align-items:center;flex-wrap:wrap;gap:14px}
+    .nav{flex-direction:row;flex-wrap:wrap} .nav-h{display:none} .side-foot{margin:0;border:none;padding:0}
+    .work{grid-template-columns:1fr}
+  }
+</style>
+
+<div class="app">
+  <!-- ============ SIDEBAR ============ -->
+  <aside class="side">
+    <div class="logo">
+      <svg viewBox="0 0 40 26" aria-hidden="true">
+        <path d="M2 21 H38" fill="none" stroke="#3B4788" stroke-width="2.4" stroke-linecap="round"/>
+        <path d="M2 21 Q22 21 38 5" fill="none" stroke="url(#lg)" stroke-width="3.4" stroke-linecap="round"/>
+        <circle cx="38" cy="5" r="2.8" fill="#E8402C"/>
+        <defs><linearGradient id="lg" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#5A79FF"/><stop offset="1" stop-color="#E8402C"/></linearGradient></defs>
+      </svg>
+      <div><div class="wm">Pre<span>Fit</span></div><div class="sub">설계 선반영</div></div>
+    </div>
+    <nav class="nav">
+      <a class="navi on" href="#" onclick="return false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v16M4 8l8-4 8 4"/><path d="M4 8v8l8 4 8-4V8"/></svg> 새 설계안 검토</a>
+      <a class="navi" href="#" onclick="return false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg> 세션 · 모델</a>
+      <a class="navi" href="#" onclick="return false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5M4 19h16M8 16v-5M13 16V8M18 16v-9"/></svg> 결과 이력</a>
+      <div class="nav-h">라이브러리</div>
+      <a class="navi" href="#" onclick="return false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6z"/></svg> 재료 DB · 525종</a>
+      <a class="navi" href="#" onclick="return false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg> 설정</a>
+    </nav>
+    <div class="side-foot">
+      <div class="avatar">KP</div>
+      <div class="who">koo.park<small>CAE · 설계해석</small></div>
+    </div>
+  </aside>
+
+  <!-- ============ MAIN ============ -->
+  <div class="main">
+    <div class="topbar">
+      <div class="crumb"><span>새 설계안 검토</span><span class="sep">/</span><b>Galaxy_Frame_v3</b></div>
+      <div class="top-r">
+        <span class="chip-sel">프로젝트 · 전면 프레임</span>
+        <button class="ghost" onclick="toggleTheme()">테마</button>
+      </div>
+    </div>
+
+    <div class="work">
+      <!-- ---------- FORM ---------- -->
+      <section class="card">
+        <div class="card-h"><h2>설계안 정의</h2><span class="hint">Input</span></div>
+        <div class="card-b">
+
+          <div class="field">
+            <div class="flabel"><span class="idx">1</span>기준 모델</div>
+            <div class="model-pill">
+              <span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 4v10l-8 4-8-4V7z"/><path d="M12 12l8-4M12 12v9M12 12L4 8"/></svg></span>
+              <div><div class="nm">Galaxy_Frame_v3.k</div><div class="mt">전면 프레임 · 9개 파트</div></div>
+              <span class="tag">원안</span>
+            </div>
+          </div>
+
+          <div class="field">
+            <div class="flabel"><span class="idx">2</span>설계 변경</div>
+            <div class="change">
+              <div class="crow" id="row-move">
+                <div class="crow-top"><div class="t">부품 배치 이동<small>주요 부품 위치를 자동으로 탐색</small></div>
+                  <label class="switch"><input type="checkbox" id="sw-move" onchange="onChange()"><span class="track"></span><span class="thumb"></span></label></div>
+                <div class="sub"><div class="slider-row"><span style="font-family:var(--mono);font-size:11.5px;color:var(--muted)">배치안 (DOE)</span>
+                  <input type="range" id="doe" min="8" max="120" step="8" value="24" oninput="onChange()"><span class="readout"><span id="doe-v">24</span>안</span></div>
+                  <div class="subnote">여러 배치안을 자동 생성해 응력이 가장 낮은 안을 선택합니다.</div></div>
+              </div>
+              <div class="crow" id="row-thin">
+                <div class="crow-top"><div class="t">전면부 두께 저감<small>프레임 벽 두께 조정 (경량화)</small></div>
+                  <label class="switch"><input type="checkbox" id="sw-thin" onchange="onChange()"><span class="track"></span><span class="thumb"></span></label></div>
+                <div class="sub"><div class="slider-row"><span style="font-family:var(--mono);font-size:11.5px;color:var(--muted)">두께 저감</span>
+                  <input type="range" id="thin" min="0" max="0.30" step="0.05" value="0.15" oninput="onChange()"><span class="readout">−<span id="thin-v">0.15</span> mm</span></div></div>
+              </div>
+              <div class="crow" id="row-mat">
+                <div class="crow-top"><div class="t">재료 변경<small>525종 재료 DB에서 선택</small></div>
+                  <label class="switch"><input type="checkbox" id="sw-mat" onchange="onChange()"><span class="track"></span><span class="thumb"></span></label></div>
+                <div class="sub"><select class="sel" id="mat" onchange="onChange()">
+                  <option value="sus301">SUS301 · 고강도 스테인리스</option>
+                  <option value="al6013">AL6013 · 고강도 알루미늄</option>
+                  <option value="mg">Mg AZ91 · 경량 마그네슘</option>
+                  <option value="pcabs">PC/ABS · 엔지니어링 수지</option>
+                </select></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="field">
+            <div class="flabel"><span class="idx">3</span>조립 굽힘 응력 반영</div>
+            <div class="prestress">
+              <div class="t">잔류 응력 반영 <span style="font-family:var(--mono);font-size:11px;opacity:.7">(prestress)</span>
+                <small>조립 시 프레임이 휘며 생기는 초기 응력을 시작점으로 반영합니다.</small></div>
+              <label class="switch heat"><input type="checkbox" id="sw-pre" checked onchange="onChange()"><span class="track"></span><span class="thumb"></span></label>
+            </div>
+          </div>
+
+          <div class="field">
+            <div class="flabel"><span class="idx">4</span>낙하 조건</div>
+            <div class="seg" id="seg-h" role="group" aria-label="낙하 높이">
+              <button aria-pressed="false" data-h="1.0" onclick="pick('h',this)">1.0 m</button>
+              <button aria-pressed="true" data-h="1.5" onclick="pick('h',this)">1.5 m</button>
+              <button aria-pressed="false" data-h="1.8" onclick="pick('h',this)">1.8 m</button>
+            </div>
+            <div class="seg" id="seg-p" role="group" aria-label="낙하 자세" style="margin-top:2px">
+              <button aria-pressed="false" data-p="면" onclick="pick('p',this)">면 낙하</button>
+              <button aria-pressed="true" data-p="모서리" onclick="pick('p',this)">모서리</button>
+              <button aria-pressed="false" data-p="코너" onclick="pick('p',this)">코너</button>
+            </div>
+          </div>
+
+          <button class="run" id="run" onclick="runSim()">가상 낙하 해석 실행</button>
+          <div class="engine">뒤에서 실행 → <b id="ops">matdb · prestress · explicit</b></div>
+        </div>
+      </section>
+
+      <!-- ---------- RESULT ---------- -->
+      <section class="card rcard">
+        <div class="card-h"><h2>가상 낙하 해석 결과</h2><span class="hint" id="rstate">대기</span></div>
+
+        <div class="r-empty" id="r-empty">
+          <svg viewBox="0 0 200 150" fill="none" aria-hidden="true">
+            <rect x="62" y="20" width="76" height="120" rx="12" stroke="var(--line)" stroke-width="2.5"/>
+            <path d="M74 44h52M74 60h52M74 76h52" stroke="var(--line)" stroke-width="2" stroke-linecap="round"/>
+            <circle cx="100" cy="112" r="9" stroke="var(--line)" stroke-width="2.5"/>
+          </svg>
+          <p>설계안을 정의하고 <b style="color:var(--ink-2)">가상 낙하 해석</b>을 실행하세요.</p>
+        </div>
+
+        <div class="r-run" id="r-run" style="display:none">
+          <div class="spin"></div>
+          <div class="steps-run" id="steps-run"></div>
+        </div>
+
+        <div class="r-done" id="r-done">
+          <div class="verdict" id="verdict"><span class="vd"></span><span class="vt"></span><span class="vs"></span></div>
+          <div class="metrics">
+            <div class="m"><div class="mk">최대 응력 (von Mises)</div><div class="mv num" id="m-stress">— <em>MPa</em></div></div>
+            <div class="m"><div class="mk">항복 대비</div><div class="mv num" id="m-ratio">—</div></div>
+            <div class="m"><div class="mk">원안 대비</div><div class="mv num" id="m-delta">—</div></div>
+            <div class="m"><div class="mk">응력 집중 위치</div><div class="mv small" id="m-loc">—</div></div>
+          </div>
+          <div class="viz-wrap">
+            <svg viewBox="0 0 320 150" role="img" aria-label="응력 분포">
+              <defs>
+                <radialGradient id="hot" cx="0.5" cy="0.5" r="0.5">
+                  <stop offset="0" id="hot0" stop-color="#E8402C"/><stop offset=".55" id="hot1" stop-color="#F6883E" stop-opacity=".55"/><stop offset="1" stop-color="#F6883E" stop-opacity="0"/>
+                </radialGradient>
+              </defs>
+              <rect x="108" y="16" width="104" height="118" rx="13" fill="var(--card-2)" stroke="var(--line)" stroke-width="2"/>
+              <path d="M122 40h76M122 58h76M122 76h76M122 94h76" stroke="var(--line-2)" stroke-width="2" stroke-linecap="round"/>
+              <ellipse id="blob" cx="122" cy="122" rx="46" ry="40" fill="url(#hot)"/>
+              <circle id="hotdot" cx="122" cy="122" r="5" fill="#E8402C"/>
+              <text id="hotlabel" x="150" y="140" font-family="ui-monospace,monospace" font-size="10" fill="var(--heat-ink)" font-weight="700">— MPa</text>
+              <g font-family="ui-monospace,monospace" font-size="9" fill="var(--muted)">
+                <rect x="234" y="20" width="12" height="96" rx="3" fill="url(#spec)"/>
+                <text x="252" y="26">고</text><text x="252" y="115">저</text>
+              </g>
+              <defs><linearGradient id="spec" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="#E8402C"/><stop offset=".3" stop-color="#F6883E"/><stop offset=".5" stop-color="#F4C33E"/><stop offset=".72" stop-color="#46C36A"/><stop offset="1" stop-color="#2E5BFF"/></linearGradient></defs>
+            </svg>
+            <div class="viz-cap">응력 분포 · 전면 <span id="cap-pose">모서리</span> 집중 (개념도)</div>
+          </div>
+          <div class="bars">
+            <div class="bar-h"><span>원안 대비</span><span>최대 응력</span></div>
+            <div class="bars-box">
+              <div class="yield-line" id="yline" data-y=""></div>
+              <div class="bar" style="margin-bottom:8px"><div class="fill" id="bar-o" style="background:#8A97C0"></div><div class="lab">원안</div><div class="val num" id="bo-v"></div></div>
+              <div class="bar"><div class="fill" id="bar-c"></div><div class="lab">변경안</div><div class="val num" id="bc-v"></div></div>
+            </div>
+          </div>
+          <div class="r-actions">
+            <button class="primary" onclick="return false">응력 분포 상세</button>
+            <button onclick="return false">리포트 PDF</button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <p class="disclaimer"><b>UI 목업입니다.</b> 화면 흐름과 결과 표현을 보여주기 위한 것으로, 수치는 입력에 따라 반응하는 예시 계산이며 실제 해석 결과가 아닙니다.</p>
+  </div>
+</div>
+
+<script>
+  const $=id=>document.getElementById(id);
+  const state={h:'1.5',p:'모서리'};
+
+  function pick(k,btn){
+    const grp=btn.parentElement;
+    [...grp.children].forEach(b=>b.setAttribute('aria-pressed','false'));
+    btn.setAttribute('aria-pressed','true');
+    state[k]=btn.dataset[k]; onChange();
+  }
+  function toggleTheme(){
+    const r=document.documentElement;
+    const cur=r.getAttribute('data-theme')|| (matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');
+    r.setAttribute('data-theme', cur==='dark'?'light':'dark');
+  }
+
+  const MATS={
+    _orig:{y:340,s:1.00,name:'AL7003H(원안)'},
+    sus301:{y:515,s:1.07,name:'SUS301'},
+    al6013:{y:395,s:1.01,name:'AL6013'},
+    mg:{y:210,s:0.86,name:'Mg AZ91'},
+    pcabs:{y:62,s:0.52,name:'PC/ABS'},
+  };
+
+  function readInputs(){
+    return {
+      move:$('sw-move').checked, doe:+$('doe').value,
+      thin:$('sw-thin').checked, thinmm:+$('thin').value,
+      mat:$('sw-mat').checked, matKey:$('mat').value,
+      pre:$('sw-pre').checked, h:state.h, p:state.p,
+    };
+  }
+  function model(i){
+    const base=260;
+    const hF={'1.0':0.80,'1.5':1.00,'1.8':1.15}[i.h];
+    const pF={'면':0.74,'모서리':1.00,'코너':1.13}[i.p];
+    const thinF=i.thin?1+(i.thinmm/0.30)*0.28:1;
+    const moveF=i.move?(1-0.07*Math.min(1,i.doe/60)):1;
+    const preF=i.pre?1.09:1;
+    const mat=i.mat?MATS[i.matKey]:MATS._orig;
+    const changed=base*hF*pF*thinF*moveF*preF*mat.s;
+    const orig=base*hF*pF*preF*MATS._orig.s;
+    return {changed, orig, y:mat.y, ratio:changed/mat.y, mat};
+  }
+  function ops(i){
+    const o=['모델 로드'];
+    if(i.mat)o.push('재료 반영 (matdb)');
+    if(i.move)o.push('부품 배치 (DOE)');
+    if(i.thin)o.push('두께 저감 (offset)');
+    if(i.pre)o.push('조립 굽힘응력 (prestress)');
+    o.push('낙하 해석 (explicit)');
+    return o;
+  }
+
+  function onChange(){
+    ['move','thin','mat'].forEach(k=>$('row-'+k).classList.toggle('on',$('sw-'+k).checked));
+    $('doe-v').textContent=$('doe').value;
+    $('thin-v').textContent=(+$('thin').value).toFixed(2);
+    const i=readInputs();
+    const codes=[]; if(i.mat)codes.push('matdb'); if(i.move)codes.push('doe'); if(i.thin)codes.push('offset'); if(i.pre)codes.push('prestress'); codes.push('explicit');
+    $('ops').textContent=codes.join(' · ');
+  }
+
+  function verdictOf(r){
+    if(r<0.75)return{cls:'good',t:'구조 여유',s:'PASS'};
+    if(r<1.00)return{cls:'warn',t:'주의 · 항복 근접',s:'REVIEW'};
+    return{cls:'bad',t:'항복 초과',s:'FAIL'};
+  }
+
+  function runSim(){
+    const i=readInputs(); const steps=ops(i);
+    $('run').disabled=true; $('r-empty').style.display='none'; $('r-done').classList.remove('show');
+    $('r-run').style.display='flex'; $('rstate').textContent='해석 중';
+    const box=$('steps-run'); box.innerHTML='';
+    steps.forEach((s,k)=>{ const d=document.createElement('div'); d.className='srow'; d.id='sr'+k;
+      d.innerHTML='<span class="bx"></span>'+s; box.appendChild(d); });
+    const reduce=matchMedia('(prefers-reduced-motion:reduce)').matches;
+    const per=reduce?60:330; let k=0;
+    (function tick(){
+      if(k>0){const p=$('sr'+(k-1)); p.classList.remove('active'); p.classList.add('done'); p.querySelector('.bx').textContent='✓';}
+      if(k<steps.length){$('sr'+k).classList.add('active'); k++; setTimeout(tick,per);}
+      else setTimeout(showResult,reduce?60:260);
+    })();
+  }
+
+  function showResult(){
+    const i=readInputs(); const m=model(i); const v=verdictOf(m.ratio);
+    const changed=Math.round(m.changed), orig=Math.round(m.orig), yv=Math.round(m.y);
+    const ratioPct=Math.round(m.ratio*100);
+    const delta=Math.round((m.changed-m.orig)/m.orig*100);
+
+    $('r-run').style.display='none'; $('rstate').textContent='완료';
+    const vd=$('verdict'); vd.className='verdict '+v.cls;
+    vd.querySelector('.vt').textContent=v.t; vd.querySelector('.vs').textContent=v.s+' · '+ (i.mat?MATS[i.matKey].name:'AL7003H');
+
+    $('m-stress').innerHTML=changed+' <em>MPa</em>';
+    $('m-ratio').textContent=ratioPct+' %';
+    const md=$('m-delta'); md.textContent=(delta>0?'+':'')+delta+' %'; md.className='mv num '+(delta>0?'neg':(delta<0?'pos':''));
+    $('m-loc').textContent='전면 '+i.p+' 모서리';
+    $('cap-pose').textContent=i.p;
+
+    // viz hotspot color by verdict
+    const col=v.cls==='good'?'#2f9e5b':(v.cls==='warn'?'#E08A1E':'#E8402C');
+    $('hot0').setAttribute('stop-color',col); $('hot1').setAttribute('stop-color',col);
+    $('hotdot').setAttribute('fill',col);
+    $('hotlabel').textContent=changed+' MPa'; $('hotlabel').setAttribute('fill',col);
+
+    // bars
+    const axis=Math.max(changed,orig,yv)*1.25;
+    $('bar-o').style.width=(orig/axis*100)+'%'; $('bo-v').textContent=orig+' MPa';
+    const bc=$('bar-c'); bc.style.width=(changed/axis*100)+'%'; bc.style.background=col; $('bc-v').textContent=changed+' MPa';
+    const yl=$('yline'); yl.style.left=(yv/axis*100)+'%'; yl.setAttribute('data-y',yv);
+
+    $('r-done').classList.add('show'); $('run').disabled=false;
+  }
+
+  onChange();
+</script>
+
+</body>
+</html>

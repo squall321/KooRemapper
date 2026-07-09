@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PreFit 자료 모음</title>
+<style>
+  :root{--ink:#0E1730;--muted:#5B6B8C;--brand:#1E3AE6;--heat:#FF5A3C;--line:#DCE2F0;--panel:#fff;
+    --mono:ui-monospace,"SF Mono",Menlo,monospace;--sans:system-ui,-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif}
+  *{box-sizing:border-box} body{margin:0;font-family:var(--sans);color:var(--ink);
+    background:radial-gradient(120% 120% at 50% -10%,#E7EBF4,#D3DAE9);padding:56px 22px;min-height:100vh}
+  .wrap{max-width:760px;margin:0 auto}
+  .brand{font-family:var(--mono);font-weight:700;font-size:22px;letter-spacing:.04em}
+  .brand span{color:var(--heat)}
+  h1{font-size:15px;color:var(--muted);font-weight:600;margin:6px 0 26px;letter-spacing:.02em}
+  .grid{display:flex;flex-direction:column;gap:14px}
+  .card{display:block;text-decoration:none;color:inherit;background:var(--panel);border:1px solid var(--line);
+    border-radius:14px;padding:18px 20px;box-shadow:0 14px 34px -20px rgba(14,23,48,.3);transition:.15s}
+  .card:hover{border-color:var(--brand);transform:translateY(-2px)}
+  .card .t{font-size:17px;font-weight:750;letter-spacing:-.01em}
+  .card .s{font-size:13px;color:var(--muted);margin-top:4px;line-height:1.5}
+  .card .f{font-family:var(--mono);font-size:11px;color:var(--brand);margin-top:8px}
+  .note{font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:24px;line-height:1.7}
+</style></head>
+<body><div class="wrap">
+  <div class="brand">Pre<span>Fit</span></div>
+  <h1>설계 선반영 시뮬레이션 에이전트 · 자료 모음</h1>
+  <div class="grid">
+    <a class="card" href="prefit-deck.html">
+      <div class="t">PreFit 소개 발표자료 (6장)</div>
+      <div class="s">표지 · 패러다임 · 두 기둥 · 기능 카탈로그 · 효과 · 로드맵</div>
+      <div class="f">prefit-deck.html</div>
+    </a>
+    <a class="card" href="prefit-ui-flow.html">
+      <div class="t">PreFit UI — 설계 선반영 검토</div>
+      <div class="s">설계 변경 선택 → 가상 낙하 해석 → 결과 (클릭 가능 목업)</div>
+      <div class="f">prefit-ui-flow.html</div>
+    </a>
+    <a class="card" href="prefit-catalog.html">
+      <div class="t">PreFit — 기능·도구 카탈로그 (MCP)</div>
+      <div class="s">45개 기능을 MCP 도구로 소개 (검색·필터 목업)</div>
+      <div class="f">prefit-catalog.html</div>
+    </a>
+  </div>
+  <div class="note">self-contained 정적 HTML · 외부 의존 없음. 브라우저로 바로 열림.<br>발표 삽입 → 각 슬라이드 캡처 또는 인쇄 → PDF(가로).</div>
+</div></body></html>

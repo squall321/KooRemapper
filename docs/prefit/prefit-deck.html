@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PreFit · 설계 선반영 시뮬레이션 에이전트</title>
+</head>
+<body>
+<style>
+  :root{
+    --ink:#0E1730; --ink-2:#334066; --muted:#5B6B8C;
+    --paper:#F6F8FC; --panel:#FFFFFF; --panel-2:#F1F4FB;
+    --line:#DCE2F0; --line-2:#E9EDF7;
+    --brand:#1E3AE6; --brand-ink:#12246B; --brand-tint:#EAEEFF;
+    --heat:#FF5A3C; --heat-ink:#B32C15; --heat-tint:#FFEDE8;
+    --good:#1E9E63; --good-tint:#E4F5EC;
+    --stage:#E7EBF4; --stage-edge:#D3DAE9;
+    --spectrum:linear-gradient(90deg,#2E5BFF 0%,#23A7D6 26%,#46C36A 48%,#F4C33E 70%,#F6883E 86%,#E8402C 100%);
+    --mono:ui-monospace,"SF Mono","JetBrains Mono","Menlo",monospace;
+    --sans:system-ui,-apple-system,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+    --shadow:0 24px 60px -22px rgba(14,23,48,.34), 0 4px 14px -8px rgba(14,23,48,.25);
+  }
+  @media (prefers-color-scheme:dark){:root{ --stage:#0A1024; --stage-edge:#060B1A; }}
+  :root[data-theme="dark"]{ --stage:#0A1024; --stage-edge:#060B1A; }
+  :root[data-theme="light"]{ --stage:#E7EBF4; --stage-edge:#D3DAE9; }
+
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(120% 120% at 50% -10%,var(--stage) 0%,var(--stage-edge) 100%);
+    font-family:var(--sans);color:var(--ink);-webkit-font-smoothing:antialiased;padding:34px 18px 60px}
+  .deck{max-width:1280px;margin:0 auto;display:flex;flex-direction:column;gap:34px}
+  .note{font-family:var(--mono);font-size:12px;letter-spacing:.02em;color:var(--muted);text-align:center;line-height:1.6;padding:2px 10px}
+  .note b{color:var(--ink-2);font-weight:600}
+
+  .slide{position:relative;width:100%;aspect-ratio:16/9;background:var(--panel);
+    border:1px solid var(--line);border-radius:20px;box-shadow:var(--shadow);
+    container-type:inline-size;overflow:hidden;color:var(--ink)}
+  .pad{position:absolute;inset:0;padding:5cqw 5.6cqw;display:flex;flex-direction:column}
+
+  .chrome{display:flex;align-items:center;justify-content:space-between;gap:2cqw}
+  .brand{display:flex;align-items:center;gap:1.1cqw}
+  .brand svg{width:3.1cqw;height:auto;display:block}
+  .brand .wm{font-family:var(--mono);font-weight:700;font-size:1.5cqw;letter-spacing:.06em;color:var(--brand-ink)}
+  .brand .wm span{color:var(--heat)}
+  .pageno{font-family:var(--mono);font-size:1.12cqw;letter-spacing:.14em;color:var(--muted)}
+  .pageno b{color:var(--ink)}
+
+  .eyebrow{font-family:var(--mono);font-size:1.08cqw;letter-spacing:.2em;text-transform:uppercase;color:var(--brand);font-weight:600}
+  .eyebrow-ko{font-size:1.5cqw;letter-spacing:.01em;color:var(--muted);font-weight:600;margin-top:.5cqw}
+  .head{display:flex;flex-direction:column;gap:.4cqw}
+
+  .spectrum{height:.85cqw;border-radius:99px;background:var(--spectrum)}
+  .spectrum-row{display:flex;align-items:center;gap:1.4cqw}
+  .spectrum-lab{font-family:var(--mono);font-size:1cqw;letter-spacing:.06em;color:var(--muted);white-space:nowrap}
+  .spectrum-lab.hot{color:var(--heat-ink)} .spectrum-lab.cool{color:var(--brand-ink)}
+
+  h1.hero{font-size:6.6cqw;line-height:.94;letter-spacing:-.02em;font-weight:800;margin:0;color:var(--ink);text-wrap:balance}
+  h1.hero em{font-style:normal;color:var(--brand)}
+  .lede{font-size:2.7cqw;line-height:1.26;font-weight:750;letter-spacing:-.01em;color:var(--ink);text-wrap:balance;margin:0}
+  p{margin:0}
+  .body{font-size:1.55cqw;line-height:1.6;color:var(--ink-2)}
+  .body b{color:var(--ink);font-weight:700}
+  .hl{color:var(--brand);font-weight:700} .hl-heat{color:var(--heat-ink);font-weight:700}
+
+  /* S1 */
+  .s1-grid{flex:1;display:grid;grid-template-columns:1.12fr .88fr;gap:3.6cqw;align-items:center;margin-top:2cqw}
+  .s1-l{display:flex;flex-direction:column;gap:1.9cqw;max-width:58cqw}
+  .steps{display:flex;flex-direction:column;gap:.9cqw;margin-top:.4cqw}
+  .step{display:flex;align-items:flex-start;gap:1.4cqw;padding:1.2cqw 1.5cqw;border:1px solid var(--line);border-radius:12px;background:var(--panel-2)}
+  .step .n{font-family:var(--mono);font-size:1.25cqw;font-weight:700;color:#fff;background:var(--brand);width:2.4cqw;height:2.4cqw;border-radius:7px;display:flex;align-items:center;justify-content:center;flex:0 0 auto;margin-top:.1cqw}
+  .step.hotstep .n{background:var(--heat)}
+  .step .t{font-size:1.5cqw;font-weight:700;color:var(--ink);line-height:1.25}
+  .step .d{font-size:1.24cqw;color:var(--muted);line-height:1.4;margin-top:.2cqw}
+  .s1-r{display:flex;flex-direction:column;justify-content:center;gap:1.8cqw}
+  figure{margin:0}
+  .viz{width:100%;border:1px solid var(--line);border-radius:16px;background:linear-gradient(180deg,#FBFCFF,#F1F4FB);padding:2.2cqw 2.2cqw 1.6cqw;display:block}
+  figcaption{font-family:var(--mono);font-size:1cqw;letter-spacing:.04em;color:var(--muted);text-align:center;margin-top:1cqw;line-height:1.5}
+
+  /* S2 flow lanes */
+  .lanes{flex:1;display:flex;flex-direction:column;justify-content:center;gap:2.4cqw;margin-top:1.8cqw}
+  .lane{border:1px solid var(--line);border-radius:14px;padding:1.8cqw 2cqw;background:var(--panel-2)}
+  .lane.prefit{border-color:#BFCBFF;background:var(--brand-tint)}
+  .lane-h{display:flex;align-items:baseline;gap:1.2cqw;margin-bottom:1.2cqw}
+  .lane-h .lt{font-size:1.7cqw;font-weight:800;letter-spacing:-.01em}
+  .lane-h .ls{font-family:var(--mono);font-size:1.05cqw;color:var(--muted)}
+  .lane.prefit .lane-h .lt{color:var(--brand-ink)}
+  .flow{display:flex;align-items:center;gap:.9cqw;flex-wrap:wrap}
+  .node{font-size:1.3cqw;font-weight:650;padding:.75cqw 1.2cqw;border-radius:9px;background:var(--panel);border:1px solid var(--line);color:var(--ink-2);white-space:nowrap}
+  .lane.prefit .node{border-color:#C7D0FF;color:var(--brand-ink);background:#fff}
+  .node.key{background:var(--brand);color:#fff;border-color:var(--brand)}
+  .node.warn{background:var(--heat-tint);border-color:#F6C7BC;color:var(--heat-ink)}
+  .arrow{color:var(--muted);font-size:1.3cqw}
+  .lane.prefit .arrow{color:var(--brand)}
+  .loop{font-family:var(--mono);font-size:1.02cqw;color:var(--heat-ink);margin-left:.5cqw}
+  .axes{display:flex;gap:1.4cqw;margin-top:1.6cqw;flex-wrap:wrap}
+  .axis{flex:1;min-width:26cqw;display:flex;align-items:center;gap:1.1cqw;border:1px solid var(--line);border-radius:11px;padding:1.1cqw 1.3cqw;background:var(--panel)}
+  .axis .ai{width:2.2cqw;height:2.2cqw;border-radius:7px;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-weight:700;font-size:1.2cqw;color:#fff;flex:0 0 auto}
+  .axis.a .ai{background:var(--brand)} .axis.b .ai{background:var(--heat)}
+  .axis .at{font-size:1.42cqw;font-weight:750;color:var(--ink)}
+  .axis .ad{font-size:1.14cqw;color:var(--muted);margin-top:.1cqw}
+
+  /* S3 pillars */
+  .pillars{flex:1;display:grid;grid-template-columns:1fr 1fr;gap:3.2cqw;margin-top:2.2cqw;align-content:center}
+  .pillar{display:flex;flex-direction:column;gap:1.3cqw}
+  .ptag{display:inline-flex;align-items:center;gap:.9cqw;align-self:flex-start;font-family:var(--mono);font-size:1.02cqw;letter-spacing:.06em;font-weight:600;padding:.5cqw 1.05cqw;border-radius:99px}
+  .ptag.a{color:var(--brand-ink);background:var(--brand-tint)} .ptag.b{color:var(--heat-ink);background:var(--heat-tint)}
+  .ph{font-size:2.3cqw;font-weight:800;letter-spacing:-.01em;line-height:1.12;color:var(--ink);text-wrap:balance}
+  .plist{display:flex;flex-direction:column;gap:.75cqw;margin:.1cqw 0}
+  .pitem{display:flex;gap:1.05cqw;align-items:flex-start;font-size:1.42cqw;line-height:1.38;color:var(--ink-2)}
+  .pitem .k{font-weight:750;color:var(--ink)}
+  .pitem .o{font-family:var(--mono);font-size:.86em;color:var(--muted)}
+  .dot{width:1.05cqw;height:1.05cqw;border-radius:99px;flex:0 0 auto;margin-top:.5cqw}
+  .dot.a{background:var(--brand)} .dot.b{background:var(--heat)}
+  .analogy{border-left:.38cqw solid var(--heat);background:var(--heat-tint);border-radius:0 12px 12px 0;padding:1.2cqw 1.5cqw;font-size:1.32cqw;line-height:1.48;color:var(--heat-ink);font-weight:650}
+  .analogy b{color:#7f1c08}
+
+  /* S4 catalog */
+  .cat-grid{flex:1;display:grid;grid-template-columns:repeat(3,1fr);gap:1.5cqw;margin-top:2cqw;align-content:center}
+  .catc{border:1px solid var(--line);border-radius:13px;padding:1.4cqw 1.5cqw;background:var(--panel-2);display:flex;flex-direction:column;gap:.85cqw}
+  .catc.hot{background:var(--heat-tint);border-color:#F6C7BC}
+  .catc.mat{background:var(--brand-tint);border-color:#C7D0FF}
+  .catc-h{display:flex;align-items:baseline;gap:.8cqw}
+  .catc-h .ct{font-size:1.5cqw;font-weight:800;letter-spacing:-.01em;color:var(--ink)}
+  .catc-h .cn{font-family:var(--mono);font-size:1.05cqw;color:var(--muted)}
+  .catc .cd{font-size:1.18cqw;color:var(--ink-2);line-height:1.4}
+  .chips{display:flex;flex-wrap:wrap;gap:.5cqw;margin-top:.2cqw}
+  .opchip{font-family:var(--mono);font-size:.98cqw;padding:.28cqw .7cqw;border-radius:6px;background:var(--panel);border:1px solid var(--line);color:var(--ink-2)}
+  .catc.mat .opchip{background:#fff;border-color:#C7D0FF;color:var(--brand-ink)}
+  .catc.hot .opchip{background:#fff;border-color:#F6C7BC;color:var(--heat-ink)}
+  .s4-foot{margin-top:1.8cqw;font-family:var(--mono);font-size:1.08cqw;color:var(--muted);text-align:center}
+  .s4-foot b{color:var(--brand-ink)}
+
+  /* S5 before/after */
+  .ba{flex:1;display:flex;flex-direction:column;gap:.9cqw;margin-top:1.8cqw;justify-content:center}
+  .ba-h{display:grid;grid-template-columns:1.1fr 1.5fr 1.5fr;gap:1.4cqw;font-family:var(--mono);font-size:1cqw;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:0 1.3cqw}
+  .ba-row{display:grid;grid-template-columns:1.1fr 1.5fr 1.5fr;gap:1.4cqw;align-items:center;border:1px solid var(--line);border-radius:11px;padding:1cqw 1.3cqw;background:var(--panel)}
+  .ba-row .dim{font-size:1.3cqw;font-weight:750;color:var(--ink)}
+  .ba-row .bf{font-size:1.28cqw;color:var(--muted);display:flex;align-items:center;gap:.7cqw}
+  .ba-row .af{font-size:1.32cqw;color:var(--brand-ink);font-weight:650;display:flex;align-items:center;gap:.7cqw}
+  .ba-row .af b{color:var(--heat-ink)}
+  .x{color:var(--muted);font-weight:700} .ck{color:var(--brand);font-weight:700}
+  .s5-foot{display:flex;gap:1.4cqw;margin-top:1.6cqw}
+  .can{flex:1;border:1px solid #BFCBFF;background:var(--brand-tint);border-radius:12px;padding:1.2cqw 1.4cqw}
+  .can .ck2{font-family:var(--mono);font-size:.98cqw;letter-spacing:.05em;color:var(--brand);text-transform:uppercase}
+  .can .cv{font-size:1.4cqw;font-weight:750;color:var(--ink);margin-top:.3cqw;line-height:1.28}
+
+  /* S6 phases */
+  .s6-vision{font-size:2.4cqw;font-weight:800;letter-spacing:-.01em;line-height:1.18;margin-top:1.8cqw;text-wrap:balance;color:var(--ink);max-width:76cqw}
+  .s6-vision em{font-style:normal;color:var(--brand)}
+  .phases{flex:1;display:grid;grid-template-columns:repeat(3,1fr);gap:2.2cqw;margin-top:2.2cqw;align-content:center}
+  .phase{position:relative;border:1px solid var(--line);border-radius:16px;background:var(--panel);padding:1.9cqw 1.8cqw;display:flex;flex-direction:column;gap:1cqw;overflow:hidden}
+  .phase::before{content:"";position:absolute;left:0;top:0;bottom:0;width:.5cqw;background:var(--brand)}
+  .phase.mid::before{background:linear-gradient(180deg,var(--brand),var(--heat))}
+  .phase.far::before{background:var(--heat)}
+  .phlabel{display:flex;align-items:baseline;gap:1cqw}
+  .phlabel .when{font-family:var(--mono);font-size:1.02cqw;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+  .phlabel .tag{font-family:var(--mono);font-size:.9cqw;letter-spacing:.08em;color:#fff;background:var(--brand);padding:.24cqw .7cqw;border-radius:99px}
+  .phase.mid .phlabel .tag{background:#8a3fb0} .phase.far .phlabel .tag{background:var(--heat)}
+  .phttl{font-size:1.78cqw;font-weight:800;line-height:1.16;color:var(--ink);letter-spacing:-.01em;text-wrap:balance}
+  .phlist{display:flex;flex-direction:column;gap:.65cqw;margin-top:.1cqw}
+  .phli{font-size:1.26cqw;line-height:1.42;color:var(--ink-2);display:flex;gap:.85cqw}
+  .phli::before{content:"→";color:var(--brand);font-weight:700;flex:0 0 auto}
+  .phase.far .phli::before{color:var(--heat)}
+  .s6-foot{margin-top:1.8cqw;border-top:1px solid var(--line-2);padding-top:1.4cqw;display:flex;align-items:center;gap:1.4cqw}
+  .s6-foot .lab{font-family:var(--mono);font-size:1.02cqw;letter-spacing:.1em;color:var(--muted);text-transform:uppercase}
+  .s6-foot .val{font-size:1.46cqw;font-weight:700;color:var(--ink)}
+  .s6-foot .val em{font-style:normal;color:var(--brand)}
+
+  @media (prefers-reduced-motion:no-preference){
+    .slide{opacity:0;transform:translateY(14px);animation:rise .7s cubic-bezier(.2,.7,.2,1) forwards}
+    .slide:nth-child(3){animation-delay:.04s}.slide:nth-child(4){animation-delay:.08s}
+    .slide:nth-child(5){animation-delay:.12s}.slide:nth-child(6){animation-delay:.16s}.slide:nth-child(7){animation-delay:.2s}
+    @keyframes rise{to{opacity:1;transform:none}}
+  }
+  @media print{
+    body{background:#fff;padding:0}.deck{gap:0;max-width:none}.note{display:none}
+    .slide{box-shadow:none;border:none;border-radius:0;width:100%;page-break-after:always;animation:none;opacity:1;transform:none}
+    @page{size:landscape;margin:0}
+  }
+</style>
+
+<div class="deck">
+  <p class="note">16:9 슬라이드 6장 · PPT 삽입용. &nbsp;<b>각 슬라이드 캡처</b> 또는 브라우저 <b>인쇄 → PDF(가로)</b>.</p>
+
+  <!-- ============ S1 표지 ============ -->
+  <section class="slide" aria-label="1. PreFit 소개">
+    <div class="pad">
+      <div class="chrome">
+        <div class="brand">
+          <svg viewBox="0 0 40 26" aria-hidden="true"><path d="M2 21 H38" fill="none" stroke="#C3CCE0" stroke-width="2.4" stroke-linecap="round"/><path d="M2 21 Q22 21 38 5" fill="none" stroke="url(#g1)" stroke-width="3.4" stroke-linecap="round"/><circle cx="38" cy="5" r="2.8" fill="#E8402C"/><defs><linearGradient id="g1" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#2E5BFF"/><stop offset="1" stop-color="#E8402C"/></linearGradient></defs></svg>
+          <span class="wm">Pre<span>Fit</span></span>
+        </div>
+        <div class="pageno"><b>01</b> / 06</div>
+      </div>
+      <div class="s1-grid">
+        <div class="s1-l">
+          <div class="head"><div class="eyebrow">Design Pre-Reflection Agent</div><div class="eyebrow-ko">설계 선반영 시뮬레이션 에이전트</div></div>
+          <h1 class="hero">설계 변경의 영향을,<br>CAD 재설계 이전에 <em>예측한다.</em></h1>
+          <p class="body">새 설계안의 낙하·충격 성능은 통상 <b>CAD 재설계와 시제품 낙하시험</b>을 거쳐 확인한다. PreFit은 부품 배치·두께·재료 변경과 <b>조립·폴딩에 의한 잔류 응력</b>을 해석 모델에 사전 반영하여, <span class="hl">재작업 이전에 구조 응답을 예측</span>한다.</p>
+          <div class="steps">
+            <div class="step"><div class="n">1</div><div><div class="t">변경 · 상태 정의</div><div class="d">부품 배치 · 두께 · 재료 · 폴딩/조립 조건 지정</div></div></div>
+            <div class="step hotstep"><div class="n">2</div><div><div class="t">선반영 모델링</div><div class="d">변경 및 조립·폴딩 잔류응력(prestress) 사전 반영</div></div></div>
+            <div class="step"><div class="n">3</div><div><div class="t">가상 낙하 해석 → 구조 응답 예측</div><div class="d">CAD 재작업·시제품 이전 성능 평가</div></div></div>
+          </div>
+        </div>
+        <div class="s1-r">
+          <figure>
+            <svg class="viz" viewBox="0 0 340 210" role="img" aria-label="폴딩 잔류 응력을 반영한 단면 개념도">
+              <defs><linearGradient id="st" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2E5BFF"/><stop offset=".28" stop-color="#23A7D6"/><stop offset=".5" stop-color="#46C36A"/><stop offset=".72" stop-color="#F4C33E"/><stop offset=".88" stop-color="#F6883E"/><stop offset="1" stop-color="#E8402C"/></linearGradient></defs>
+              <text x="14" y="150" font-family="ui-monospace,monospace" font-size="10" fill="#9AA6C2">통상 해석</text>
+              <rect x="40" y="158" width="260" height="16" rx="4" fill="#E4E9F4"/>
+              <text x="150" y="196" text-anchor="middle" font-family="ui-monospace,monospace" font-size="10" fill="#9AA6C2">무응력 · 평면 초기 상태</text>
+              <text x="14" y="34" font-family="ui-monospace,monospace" font-size="10" fill="#12246B" font-weight="600">PreFit · 폴딩 상태 반영</text>
+              <path d="M40 92 Q170 34 300 92" fill="none" stroke="url(#st)" stroke-width="17" stroke-linecap="round"/>
+              <path d="M40 92 Q170 34 300 92" fill="none" stroke="#ffffff" stroke-width="1.4" opacity=".6"/>
+              <circle cx="170" cy="47" r="4.5" fill="#E8402C"/>
+              <text x="170" y="30" text-anchor="middle" font-family="ui-monospace,monospace" font-size="10" fill="#B32C15" font-weight="700">잔류 응력 집중</text>
+            </svg>
+            <figcaption>접힌(폴딩) 상태의 잔류 응력을 시작점으로 반영</figcaption>
+          </figure>
+          <div class="spectrum-row"><span class="spectrum-lab cool">저응력 · 여유</span><span class="spectrum" style="flex:1"></span><span class="spectrum-lab hot">고응력 · 집중</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ S2 패러다임 ============ -->
+  <section class="slide" aria-label="2. 패러다임 전환">
+    <div class="pad">
+      <div class="chrome">
+        <div class="brand"><svg viewBox="0 0 40 26" aria-hidden="true"><path d="M2 21 H38" fill="none" stroke="#C3CCE0" stroke-width="2.4" stroke-linecap="round"/><path d="M2 21 Q22 21 38 5" fill="none" stroke="url(#g2)" stroke-width="3.4" stroke-linecap="round"/><circle cx="38" cy="5" r="2.8" fill="#E8402C"/><defs><linearGradient id="g2" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#2E5BFF"/><stop offset="1" stop-color="#E8402C"/></linearGradient></defs></svg><span class="wm">Pre<span>Fit</span></span></div>
+        <div class="pageno"><b>02</b> / 06</div>
+      </div>
+      <div class="head"><div class="eyebrow">Why · Positioning</div><div class="eyebrow-ko">CAD 재설계 이전에 영향성을 선별한다.</div></div>
+      <div class="lanes">
+        <div class="lane">
+          <div class="lane-h"><span class="lt" style="color:var(--muted)">기존</span><span class="ls">재작업 후에야 결과를 안다</span></div>
+          <div class="flow">
+            <span class="node">설계안</span><span class="arrow">→</span>
+            <span class="node warn">CAD 재설계</span><span class="arrow">→</span>
+            <span class="node warn">메시 재작성</span><span class="arrow">→</span>
+            <span class="node">해석</span><span class="arrow">→</span>
+            <span class="node">평가</span><span class="loop">↺ 실패 시 반복</span>
+          </div>
+        </div>
+        <div class="lane prefit">
+          <div class="lane-h"><span class="lt">PreFit</span><span class="ls">재작업 이전에 결과를 본다</span></div>
+          <div class="flow">
+            <span class="node">설계안</span><span class="arrow">→</span>
+            <span class="node key">해석 모델에 직접 선반영</span><span class="arrow">→</span>
+            <span class="node">가상 해석</span><span class="arrow">→</span>
+            <span class="node">선별</span><span class="arrow">→</span>
+            <span class="node key">선택안만 CAD 확정</span>
+          </div>
+        </div>
+        <div class="axes">
+          <div class="axis a"><span class="ai">A</span><div><div class="at">설계 변경</div><div class="ad">부품 배치 · 두께 · 재료</div></div></div>
+          <div class="axis b"><span class="ai">B</span><div><div class="at">실제 상태</div><div class="ad">폴딩 · 조립 잔류 응력 · 휨</div></div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ S3 두 기둥 ============ -->
+  <section class="slide" aria-label="3. 무엇을 반영하나">
+    <div class="pad">
+      <div class="chrome">
+        <div class="brand"><svg viewBox="0 0 40 26" aria-hidden="true"><path d="M2 21 H38" fill="none" stroke="#C3CCE0" stroke-width="2.4" stroke-linecap="round"/><path d="M2 21 Q22 21 38 5" fill="none" stroke="url(#g3)" stroke-width="3.4" stroke-linecap="round"/><circle cx="38" cy="5" r="2.8" fill="#E8402C"/><defs><linearGradient id="g3" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#2E5BFF"/><stop offset="1" stop-color="#E8402C"/></linearGradient></defs></svg><span class="wm">Pre<span>Fit</span></span></div>
+        <div class="pageno"><b>03</b> / 06</div>
+      </div>
+      <div class="head"><div class="eyebrow">What is reflected</div><div class="eyebrow-ko">해석 이전에 두 요소를 사전 반영한다.</div></div>
+      <div class="pillars">
+        <div class="pillar">
+          <span class="ptag a">◆ 기둥 A · 설계 변경</span>
+          <div class="ph">설계 수정의 사전 반영</div>
+          <div class="plist">
+            <div class="pitem"><span class="dot a"></span><span><span class="k">부품 배치 DOE</span> — 다수 배치안 자동 생성·비교 <span class="o">(탐색 범위·안 수)</span></span></div>
+            <div class="pitem"><span class="dot a"></span><span><span class="k">전면부 두께 저감(살파기)</span> — 벽 두께 증감 반영 <span class="o">(저감량)</span></span></div>
+            <div class="pitem"><span class="dot a"></span><span><span class="k">재료 치환</span> — 525종 DB <span class="o">(탄성/소성/점탄성)</span></span></div>
+          </div>
+        </div>
+        <div class="pillar">
+          <span class="ptag b">◆ 기둥 B · 실제 상태</span>
+          <div class="ph">폴딩 · 조립 상태의 사전 반영</div>
+          <div class="plist">
+            <div class="pitem"><span class="dot b"></span><span><span class="k">굽힘 잔류 응력(prestress)</span> — 접힌/조립 상태를 초기 조건으로</span></div>
+            <div class="pitem"><span class="dot b"></span><span><span class="k">휨(warpage)</span> — 제조·조립 휨 형상 반영</span></div>
+            <div class="pitem"><span class="dot b"></span><span><span class="k">성형·초기 변형(formstrain·strain)</span> — 이력 반영</span></div>
+          </div>
+          <div class="analogy"><b>폴더블</b>처럼 접힌 상태에서 이미 응력을 보유한 구조를, <b>그 상태 그대로</b> 낙하·충격 해석한다.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ S4 기능 카탈로그 ============ -->
+  <section class="slide" aria-label="4. 기능 옵션 카탈로그">
+    <div class="pad">
+      <div class="chrome">
+        <div class="brand"><svg viewBox="0 0 40 26" aria-hidden="true"><path d="M2 21 H38" fill="none" stroke="#C3CCE0" stroke-width="2.4" stroke-linecap="round"/><path d="M2 21 Q22 21 38 5" fill="none" stroke="url(#g4)" stroke-width="3.4" stroke-linecap="round"/><circle cx="38" cy="5" r="2.8" fill="#E8402C"/><defs><linearGradient id="g4" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#2E5BFF"/><stop offset="1" stop-color="#E8402C"/></linearGradient></defs></svg><span class="wm">Pre<span>Fit</span></span></div>
+        <div class="pageno"><b>04</b> / 06</div>
+      </div>
+      <div class="head"><div class="eyebrow">Capabilities · 45 기능</div><div class="eyebrow-ko">목적별 기능 옵션 — CLI · 웹 · MCP(AI) 공통</div></div>
+      <div class="cat-grid">
+        <div class="catc mat"><div class="catc-h"><span class="ct">재료</span><span class="cn">2</span></div><div class="cd">525종 DB 기반 물성 치환</div><div class="chips"><span class="opchip">matdb</span><span class="opchip">matswap</span></div></div>
+        <div class="catc hot"><div class="catc-h"><span class="ct">변형 · 전처리</span><span class="cn">8</span></div><div class="cd">폴딩·조립 응력, 휨, 성형 변형 반영</div><div class="chips"><span class="opchip">prestress</span><span class="opchip">warpage</span><span class="opchip">bend</span><span class="opchip">formstrain</span><span class="opchip">indent</span><span class="opchip">squeeze</span><span class="opchip">strain</span><span class="opchip">assemble</span></div></div>
+        <div class="catc"><div class="catc-h"><span class="ct">매핑 · 생성</span><span class="cn">6</span></div><div class="cd">굽은/평평 메시 매핑, 형상 생성</div><div class="chips"><span class="opchip">map</span><span class="opchip">shellmap</span><span class="opchip">unfold</span><span class="opchip">generate</span><span class="opchip">generate-var</span><span class="opchip">info</span></div></div>
+        <div class="catc"><div class="catc-h"><span class="ct">메쉬</span><span class="cn">15</span></div><div class="cd">두께 저감·세분화·재메시·변환</div><div class="chips"><span class="opchip">offset</span><span class="opchip">refine</span><span class="opchip">tetremesh</span><span class="opchip">meshfix</span><span class="opchip">extract-surface</span><span class="opchip">convert</span><span class="opchip">…</span></div></div>
+        <div class="catc"><div class="catc-h"><span class="ct">해석 · 솔버</span><span class="cn">9</span></div><div class="cd">explicit/implicit·모달·최적화</div><div class="chips"><span class="opchip">explicit</span><span class="opchip">implicit</span><span class="opchip">modal</span><span class="opchip">ale</span><span class="opchip">optimize</span><span class="opchip">battery</span><span class="opchip">…</span></div></div>
+        <div class="catc"><div class="catc-h"><span class="ct">하중 · 경계</span><span class="cn">5</span></div><div class="cd">하중·구속·접촉·감쇠</div><div class="chips"><span class="opchip">load</span><span class="opchip">boundary</span><span class="opchip">contact</span><span class="opchip">rbe</span><span class="opchip">hfdamp</span></div></div>
+      </div>
+      <div class="s4-foot">동일 카탈로그를 <b>CLI · 웹 UI · MCP(AI)</b> 세 경로가 공유 — 기능이 늘어도 세 경로에 자동 반영</div>
+    </div>
+  </section>
+
+  <!-- ============ S5 효과 ============ -->
+  <section class="slide" aria-label="5. 효과">
+    <div class="pad">
+      <div class="chrome">
+        <div class="brand"><svg viewBox="0 0 40 26" aria-hidden="true"><path d="M2 21 H38" fill="none" stroke="#C3CCE0" stroke-width="2.4" stroke-linecap="round"/><path d="M2 21 Q22 21 38 5" fill="none" stroke="url(#g5)" stroke-width="3.4" stroke-linecap="round"/><circle cx="38" cy="5" r="2.8" fill="#E8402C"/><defs><linearGradient id="g5" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#2E5BFF"/><stop offset="1" stop-color="#E8402C"/></linearGradient></defs></svg><span class="wm">Pre<span>Fit</span></span></div>
+        <div class="pageno"><b>05</b> / 06</div>
+      </div>
+      <div class="head"><div class="eyebrow">Outcomes</div><div class="eyebrow-ko">이제 할 수 있는 것 — 기존 대비</div></div>
+      <div class="ba">
+        <div class="ba-h"><span>구분</span><span>기존</span><span>PreFit</span></div>
+        <div class="ba-row"><span class="dim">폴딩·조립 응력</span><span class="bf"><span class="x">✕</span> 평면 무응력 가정</span><span class="af"><span class="ck">✓</span> 접힌 상태 <b>잔류 응력 반영</b></span></div>
+        <div class="ba-row"><span class="dim">설계 변경 반영</span><span class="bf"><span class="x">✕</span> CAD 재작업 필요</span><span class="af"><span class="ck">✓</span> 해석 모델에 직접</span></div>
+        <div class="ba-row"><span class="dim">설계안 비교</span><span class="bf"><span class="x">✕</span> 소수 · 수동</span><span class="af"><span class="ck">✓</span> 다수 자동 스크리닝</span></div>
+        <div class="ba-row"><span class="dim">접근 경로</span><span class="bf"><span class="x">✕</span> 전문가 CLI</span><span class="af"><span class="ck">✓</span> 웹 · AI 자연어</span></div>
+      </div>
+      <div class="s5-foot">
+        <div class="can"><div class="ck2">가능해진 것 ①</div><div class="cv">폴딩 상태 낙하·충격 해석</div></div>
+        <div class="can"><div class="ck2">② </div><div class="cv">CAD 재설계 이전 영향 스크리닝</div></div>
+        <div class="can"><div class="ck2">③ </div><div class="cv">AI로 설계 변경 질의·실행</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ S6 추진 방향 ============ -->
+  <section class="slide" aria-label="6. 추진 방향">
+    <div class="pad">
+      <div class="chrome">
+        <div class="brand"><svg viewBox="0 0 40 26" aria-hidden="true"><path d="M2 21 H38" fill="none" stroke="#C3CCE0" stroke-width="2.4" stroke-linecap="round"/><path d="M2 21 Q22 21 38 5" fill="none" stroke="url(#g6)" stroke-width="3.4" stroke-linecap="round"/><circle cx="38" cy="5" r="2.8" fill="#E8402C"/><defs><linearGradient id="g6" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#2E5BFF"/><stop offset="1" stop-color="#E8402C"/></linearGradient></defs></svg><span class="wm">Pre<span>Fit</span></span></div>
+        <div class="pageno"><b>06</b> / 06</div>
+      </div>
+      <div class="head"><div class="eyebrow">Where we're headed</div><div class="eyebrow-ko">추진 방향</div></div>
+      <h2 class="s6-vision">설계 입력에 대해 <em>해석 · 평가 · 개선을 자동 순환</em>하는 체계로 확장한다.</h2>
+      <div class="phases">
+        <div class="phase"><div class="phlabel"><span class="when">단기</span><span class="tag">진행 중</span></div><div class="phttl">사내 CAE 파이프라인 통합 확대</div><div class="phlist"><div class="phli">설계 변환의 자동 해석 스텝 연계 확대</div><div class="phli">낙하·충격 워크플로에 사전 반영 단계 통합</div></div></div>
+        <div class="phase mid"><div class="phlabel"><span class="when">중기</span><span class="tag">개발</span></div><div class="phttl">설계 최적화 자동 순환</div><div class="phlist"><div class="phli">설계안 생성 → 가상 해석 → 최적안 도출 폐루프</div><div class="phli">웹 · 대화형 인터페이스로 설계 변경 질의 지원</div></div></div>
+        <div class="phase far"><div class="phlabel"><span class="when">장기</span><span class="tag">확장</span></div><div class="phttl">신뢰성 기반 · 적용 범위 확대</div><div class="phlist"><div class="phli">재료 DB 확충 및 실측 낙하시험 대조 검증</div><div class="phli">폴더블 · 배터리 · PCB · 패키지로 대상 확대</div></div></div>
+      </div>
+      <div class="s6-foot"><span class="lab">기대 효과</span><span class="val">설계 의사결정의 <em>신속성 · 정확성 · 경제성</em> 향상.</span></div>
+    </div>
+  </section>
+</div>
+
+</body>
+</html>

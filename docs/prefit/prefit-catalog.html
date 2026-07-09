@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PreFit · 기능 · 도구 카탈로그 (MCP)</title>
+</head>
+<body>
+<style>
+  :root{
+    --ink:#0E1730; --ink-2:#33406A; --muted:#6B7793;
+    --paper:#EEF1F8; --card:#FFFFFF; --card-2:#F4F6FC; --card-3:#EDF1FA;
+    --line:#DCE2F0; --line-2:#E9EDF7;
+    --brand:#1E3AE6; --brand-ink:#12246B; --brand-tint:#EAEEFF;
+    --heat:#FF5A3C; --heat-ink:#B32C15; --heat-tint:#FFEDE8;
+    --good:#1E9E63;
+    --nav:#0B1440; --nav-2:#141E52; --nav-line:#25306E; --nav-ink:#C7D0F0; --nav-mut:#7C88BE;
+    --spectrum:linear-gradient(90deg,#2E5BFF,#23A7D6,#46C36A,#F4C33E,#F6883E,#E8402C);
+    --mono:ui-monospace,"SF Mono","JetBrains Mono","Menlo",monospace;
+    --sans:system-ui,-apple-system,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+    --shadow:0 18px 44px -22px rgba(14,23,48,.28), 0 2px 8px -4px rgba(14,23,48,.16);
+  }
+  :root[data-theme="dark"]{
+    --ink:#EAF0FF; --ink-2:#B7C2E6; --muted:#8592BC; --paper:#070B1A; --card:#0F1730;
+    --card-2:#141E3B; --card-3:#111A38; --line:#25315C; --line-2:#1C2748;
+    --brand-tint:#182552; --heat-tint:#3A1A13;
+  }
+  @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+    --ink:#EAF0FF; --ink-2:#B7C2E6; --muted:#8592BC; --paper:#070B1A; --card:#0F1730;
+    --card-2:#141E3B; --card-3:#111A38; --line:#25315C; --line-2:#1C2748;
+    --brand-tint:#182552; --heat-tint:#3A1A13;
+  }}
+
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{font-family:var(--sans);color:var(--ink);background:var(--paper);-webkit-font-smoothing:antialiased}
+  button{font-family:inherit;cursor:pointer}
+  .app{display:grid;grid-template-columns:236px 1fr;min-height:100vh}
+
+  /* sidebar (동일 아이덴티티) */
+  .side{background:linear-gradient(180deg,var(--nav),#0A1138);color:var(--nav-ink);
+    display:flex;flex-direction:column;padding:20px 16px;gap:22px;position:sticky;top:0;height:100vh}
+  .logo{display:flex;align-items:center;gap:10px;padding:2px 6px}
+  .logo svg{width:30px;height:auto}
+  .logo .wm{font-family:var(--mono);font-weight:700;font-size:18px;letter-spacing:.04em;color:#fff}
+  .logo .wm span{color:var(--heat)}
+  .logo .sub{font-size:10px;letter-spacing:.14em;color:var(--nav-mut);font-family:var(--mono);text-transform:uppercase;margin-top:2px}
+  .nav{display:flex;flex-direction:column;gap:3px;margin-top:4px}
+  .navi{display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:9px;color:var(--nav-ink);
+    font-size:13.5px;font-weight:550;text-decoration:none;border:1px solid transparent}
+  .navi svg{width:17px;height:17px;flex:0 0 auto;opacity:.9}
+  .navi:hover{background:var(--nav-2)}
+  .navi.on{background:var(--nav-2);border-color:var(--nav-line);color:#fff}
+  .navi.on svg{color:#8FA0F0;opacity:1}
+  .nav-h{font-family:var(--mono);font-size:10px;letter-spacing:.16em;color:var(--nav-mut);text-transform:uppercase;padding:0 11px;margin-top:8px}
+  .side-foot{margin-top:auto;border-top:1px solid var(--nav-line);padding-top:14px;display:flex;align-items:center;gap:10px}
+  .avatar{width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,#2E4BFF,#7A3FD0);
+    display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:13px;font-family:var(--mono)}
+  .side-foot .who{font-size:12.5px;font-weight:600;color:#fff;line-height:1.2}
+  .side-foot .who small{display:block;color:var(--nav-mut);font-size:10.5px;font-weight:500;font-family:var(--mono)}
+
+  .main{display:flex;flex-direction:column;min-width:0}
+  .topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;
+    padding:16px 30px;border-bottom:1px solid var(--line);background:var(--card);position:sticky;top:0;z-index:5}
+  .crumb{font-size:13px;color:var(--muted);font-family:var(--mono)}
+  .crumb b{color:var(--ink);font-weight:600}
+  .top-r{display:flex;align-items:center;gap:10px}
+  .mcp-chip{display:flex;align-items:center;gap:7px;font-size:12px;font-family:var(--mono);color:var(--good);
+    background:rgba(30,158,99,.1);border:1px solid rgba(30,158,99,.3);border-radius:8px;padding:6px 11px;font-weight:600}
+  .mcp-chip .d{width:7px;height:7px;border-radius:99px;background:var(--good)}
+  .ghost{font-size:12.5px;color:var(--muted);background:transparent;border:1px solid var(--line);border-radius:8px;padding:6px 12px}
+
+  .wrap{padding:26px 30px 48px;max-width:1180px;width:100%;margin:0 auto}
+
+  /* hero */
+  .hero{background:linear-gradient(135deg,#0E1A54,#141E3B 60%,#0B1440);border-radius:18px;padding:26px 28px;
+    color:#EAF0FF;position:relative;overflow:hidden;box-shadow:var(--shadow)}
+  .hero::after{content:"";position:absolute;right:-40px;top:-30px;width:220px;height:220px;
+    background:radial-gradient(circle,rgba(94,121,255,.35),transparent 70%);pointer-events:none}
+  .hero .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:#8FA0F0;font-weight:600}
+  .hero h1{margin:8px 0 0;font-size:27px;font-weight:800;letter-spacing:-.02em;line-height:1.15;text-wrap:balance}
+  .hero h1 em{font-style:normal;color:#FF8A6B}
+  .hero p{margin:10px 0 0;font-size:14px;line-height:1.6;color:#B7C2E6;max-width:640px}
+  .hero .code{display:inline-flex;align-items:center;gap:8px;margin-top:16px;font-family:var(--mono);font-size:12.5px;
+    background:rgba(255,255,255,.07);border:1px solid rgba(143,160,240,.3);border-radius:9px;padding:8px 13px;color:#DDE4FF}
+  .hero .code b{color:#7FE0A0}
+  .hero .code .mut{color:#8592BC}
+
+  .stat-row{display:flex;gap:26px;margin-top:20px;flex-wrap:wrap}
+  .stat .n{font-size:22px;font-weight:800;font-family:var(--mono);letter-spacing:-.01em}
+  .stat .l{font-size:11px;color:#8FA0F0;font-family:var(--mono);letter-spacing:.06em;text-transform:uppercase;margin-top:1px}
+
+  /* controls */
+  .controls{display:flex;align-items:center;gap:12px;margin:24px 0 4px;flex-wrap:wrap}
+  .search{flex:1;min-width:200px;display:flex;align-items:center;gap:9px;background:var(--card);border:1px solid var(--line);
+    border-radius:10px;padding:9px 13px}
+  .search svg{width:16px;height:16px;color:var(--muted);flex:0 0 auto}
+  .search input{border:none;outline:none;background:transparent;font-size:13.5px;color:var(--ink);width:100%;font-family:var(--sans)}
+  .count{font-family:var(--mono);font-size:12px;color:var(--muted);white-space:nowrap}
+  .count b{color:var(--brand-ink)}
+  :root[data-theme=dark] .count b{color:#8FA0F0}
+
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 22px}
+  .chip{font-size:12.5px;font-family:var(--mono);padding:6px 13px;border-radius:99px;border:1px solid var(--line);
+    background:var(--card);color:var(--ink-2);font-weight:600}
+  .chip[aria-pressed=true]{background:var(--brand);border-color:var(--brand);color:#fff}
+  .chip:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+
+  .cat{margin-bottom:26px}
+  .cat-h{display:flex;align-items:baseline;gap:10px;margin-bottom:12px}
+  .cat-h .ct{font-size:15px;font-weight:750;letter-spacing:-.01em}
+  .cat-h .cc{font-family:var(--mono);font-size:11px;color:var(--muted)}
+  .cat-h .bar{flex:1;height:1px;background:var(--line-2)}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(232px,1fr));gap:12px}
+  .tool{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:14px 15px;
+    display:flex;flex-direction:column;gap:7px;transition:.14s;position:relative}
+  .tool:hover{border-color:var(--brand);transform:translateY(-2px);box-shadow:var(--shadow)}
+  .tool-top{display:flex;align-items:center;gap:8px}
+  .tool .code{font-family:var(--mono);font-size:12.5px;font-weight:700;color:var(--brand-ink);
+    background:var(--brand-tint);padding:3px 8px;border-radius:6px}
+  :root[data-theme=dark] .tool .code{color:#9DB0FF}
+  .tool.hot .code{color:var(--heat-ink);background:var(--heat-tint)}
+  :root[data-theme=dark] .tool.hot .code{color:#FF9377}
+  .mcp{margin-left:auto;font-family:var(--mono);font-size:9px;letter-spacing:.08em;font-weight:700;
+    color:var(--good);border:1px solid rgba(30,158,99,.4);border-radius:5px;padding:2px 6px}
+  .tool .tt{font-size:14px;font-weight:700;color:var(--ink);letter-spacing:-.005em}
+  .tool .td{font-size:12.5px;color:var(--muted);line-height:1.5}
+
+  .empty{text-align:center;color:var(--muted);font-size:14px;padding:40px}
+
+  .foot{margin-top:26px;border-top:1px solid var(--line-2);padding-top:16px;font-size:12px;color:var(--muted);line-height:1.6}
+  .foot b{color:var(--ink-2)}
+  .foot code{font-family:var(--mono);background:var(--card-2);border:1px solid var(--line);border-radius:5px;padding:1px 6px;color:var(--ink-2)}
+
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+  @media (max-width:940px){
+    .app{grid-template-columns:1fr}
+    .side{position:static;height:auto;flex-direction:row;align-items:center;flex-wrap:wrap;gap:14px}
+    .nav{flex-direction:row;flex-wrap:wrap}.nav-h{display:none}.side-foot{margin:0;border:none;padding:0}
+  }
+</style>
+
+<div class="app">
+  <aside class="side">
+    <div class="logo">
+      <svg viewBox="0 0 40 26" aria-hidden="true">
+        <path d="M2 21 H38" fill="none" stroke="#3B4788" stroke-width="2.4" stroke-linecap="round"/>
+        <path d="M2 21 Q22 21 38 5" fill="none" stroke="url(#lg)" stroke-width="3.4" stroke-linecap="round"/>
+        <circle cx="38" cy="5" r="2.8" fill="#E8402C"/>
+        <defs><linearGradient id="lg" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#5A79FF"/><stop offset="1" stop-color="#E8402C"/></linearGradient></defs>
+      </svg>
+      <div><div class="wm">Pre<span>Fit</span></div><div class="sub">설계 선반영</div></div>
+    </div>
+    <nav class="nav">
+      <a class="navi" href="#" onclick="return false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v16M4 8l8-4 8 4"/><path d="M4 8v8l8 4 8-4V8"/></svg> 새 설계안 검토</a>
+      <a class="navi" href="#" onclick="return false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg> 세션 · 모델</a>
+      <a class="navi" href="#" onclick="return false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5M4 19h16M8 16v-5M13 16V8M18 16v-9"/></svg> 결과 이력</a>
+      <div class="nav-h">라이브러리</div>
+      <a class="navi on" href="#" onclick="return false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg> 기능 · 도구 (MCP)</a>
+      <a class="navi" href="#" onclick="return false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6z"/></svg> 재료 DB · 525종</a>
+      <a class="navi" href="#" onclick="return false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg> 설정</a>
+    </nav>
+    <div class="side-foot">
+      <div class="avatar">KP</div>
+      <div class="who">koo.park<small>CAE · 설계해석</small></div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="crumb">라이브러리 / <b>기능 · 도구 (MCP)</b></div>
+      <div class="top-r">
+        <span class="mcp-chip"><span class="d"></span>MCP 연결됨</span>
+        <button class="ghost" onclick="toggleTheme()">테마</button>
+      </div>
+    </div>
+
+    <div class="wrap">
+      <div class="hero">
+        <div class="eyebrow">Capabilities · Model Context Protocol</div>
+        <h1>PreFit의 모든 기능은,<br><em>MCP 도구로 열려 있습니다.</em></h1>
+        <p>재료 교체부터 굽힘 응력 반영·메시 변환·해석 설정까지 — 모든 기능을 Claude 같은 AI에서 자연어로 호출할 수 있습니다. 몇 개의 MCP 도구가 전체 기능을 감싸므로, 기능이 늘어도 같은 방식으로 바로 쓸 수 있습니다.</p>
+        <span class="code"><span class="mut">mcp ▸</span> run_operation(<b>"matdb"</b>, {materials: […]})</span>
+        <div class="stat-row">
+          <div class="stat"><div class="n" id="stat-feat">—</div><div class="l">기능 (op)</div></div>
+          <div class="stat"><div class="n">22</div><div class="l">MCP 도구</div></div>
+          <div class="stat"><div class="n">525</div><div class="l">재료 DB</div></div>
+          <div class="stat"><div class="n">3</div><div class="l">사용 경로 · CLI·웹·MCP</div></div>
+        </div>
+      </div>
+
+      <div class="controls">
+        <div class="search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+          <input id="q" type="text" placeholder="기능 검색 — 예: 재료, 굽힘, 메시, prestress…" oninput="render()">
+        </div>
+        <div class="count"><b id="cnt">—</b> 개 기능</div>
+      </div>
+      <div class="chips" id="chips"></div>
+
+      <div id="list"></div>
+
+      <div class="foot">
+        <b>MCP화란?</b> 위 기능들은 개별 도구가 아니라 <code>run_operation</code>, <code>describe_operation</code>, <code>list_operations</code> 같은 소수의 MCP 도구로 감싸여 제공됩니다. 그래서 기능(op)이 늘어도 MCP 쪽 코드는 그대로이고, AI가 <code>list_operations</code>로 목록을 받아 <code>run_operation</code>으로 실행합니다. — 같은 카탈로그를 <b>CLI · 웹 UI · MCP</b> 세 경로가 공유합니다.
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const $=id=>document.getElementById(id);
+  function toggleTheme(){
+    const r=document.documentElement;
+    const cur=r.getAttribute('data-theme')||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');
+    r.setAttribute('data-theme',cur==='dark'?'light':'dark');
+  }
+
+  const CATS=[
+    {key:'material', name:'재료', hot:true},
+    {key:'preform', name:'변형 · 전처리', hot:true},
+    {key:'mapping', name:'메시 매핑'},
+    {key:'genmesh', name:'메시 생성'},
+    {key:'editmesh', name:'메시 편집'},
+    {key:'surface', name:'표면 · 재메시'},
+    {key:'loads', name:'하중 · 경계 · 접촉'},
+    {key:'solver', name:'솔버 · 해석 제어'},
+    {key:'info', name:'정보'},
+  ];
+  const TOOLS=[
+    {c:'material',code:'matdb',t:'재료 일괄 교체',d:'525종 DB에서 부품 재료를 자동으로 찾아 교체'},
+    {c:'material',code:'matswap',t:'재료 카드 치환',d:'특정 재료 정의를 다른 재료로 바꾸기'},
+
+    {c:'preform',code:'prestress',t:'초기 응력 반영',d:'조립 굽힘 응력을 해석 시작점으로 설정'},
+    {c:'preform',code:'warpage',t:'휨(워피지) 반영',d:'제조·조립에서 생긴 휨 형상을 모델에 반영'},
+    {c:'preform',code:'bend',t:'굽힘 적용',d:'지정한 곡률로 모델을 굽히기'},
+    {c:'preform',code:'formstrain',t:'성형 변형 반영',d:'성형 이력에 의한 변형·경화 반영'},
+    {c:'preform',code:'strain',t:'초기 변형 부여',d:'초기 변형 상태를 모델에 부여'},
+    {c:'preform',code:'indent',t:'눌림 적용',d:'국부 압입(인덴트) 형상 반영'},
+    {c:'preform',code:'squeeze',t:'압착 적용',d:'조립 압착 상태 반영'},
+    {c:'preform',code:'assemble',t:'조립',d:'여러 파트를 조립 위치로 결합'},
+
+    {c:'mapping',code:'map',t:'메시 필드 매핑',d:'굽은/평평 메시 사이로 결과·상태를 옮기기'},
+    {c:'mapping',code:'shellmap',t:'셸 매핑',d:'셸 요소 간 데이터 매핑'},
+    {c:'mapping',code:'unfold',t:'언폴드',d:'굽은 형상을 평평하게 펼치기'},
+
+    {c:'genmesh',code:'generate',t:'형상 메시 생성',d:'기본 형상(토러스 등) 메시 생성'},
+    {c:'genmesh',code:'generate-var',t:'파라메트릭 생성',d:'치수를 바꿔가며 형상 자동 생성'},
+
+    {c:'editmesh',code:'offset',t:'두께 오프셋(살파기)',d:'벽 두께를 줄이거나 늘려 반영'},
+    {c:'editmesh',code:'refine',t:'메시 세분화',d:'요소를 더 잘게 나누어 정밀도 향상'},
+    {c:'editmesh',code:'elform',t:'요소 타입 변경',d:'요소 정식(formulation) 변경'},
+    {c:'editmesh',code:'disconnect',t:'파트 분리',d:'붙어있는 파트를 분리'},
+    {c:'editmesh',code:'convert',t:'포맷·요소 변환',d:'요소/포맷 변환'},
+    {c:'editmesh',code:'restack',t:'적층 재구성',d:'적층(스택) 구성 재정렬'},
+    {c:'editmesh',code:'wrap',t:'감싸기',d:'표면을 감싸는 메시 생성'},
+    {c:'editmesh',code:'update',t:'모델 갱신',d:'변경 사항을 모델에 반영·갱신'},
+    {c:'editmesh',code:'iga',t:'IGA 변환',d:'등기하 해석(IGA)용 변환'},
+
+    {c:'surface',code:'extract-surface',t:'표면 추출',d:'솔리드에서 겉면(셸)만 추출'},
+    {c:'surface',code:'tetremesh',t:'사면체 재메시',d:'gmsh 기반 사면체 재메시'},
+    {c:'surface',code:'meshfix',t:'메시 보정',d:'gmsh 기반 결함 메시 보정'},
+    {c:'surface',code:'cnrb2solid',t:'CNRB→솔리드',d:'구속 강체(CNRB)를 솔리드로 변환'},
+    {c:'surface',code:'merge',t:'병합',d:'메시·파트 병합'},
+    {c:'surface',code:'strip',t:'정리',d:'불필요 카드·요소 제거'},
+
+    {c:'loads',code:'load',t:'하중 부여',d:'하중·초기속도 등 부여'},
+    {c:'loads',code:'boundary',t:'경계조건',d:'구속·경계조건 설정'},
+    {c:'loads',code:'rbe',t:'강체 요소',d:'RBE/강체 연결 정의'},
+    {c:'loads',code:'contact',t:'접촉 정의',d:'접촉 카드 설정'},
+    {c:'loads',code:'relax',t:'동적 완화',d:'초기 응력 완화(relaxation)'},
+    {c:'loads',code:'stabilize',t:'안정화',d:'수치 안정화 설정'},
+    {c:'loads',code:'database',t:'출력 설정',d:'결과 출력(database) 카드 설정'},
+    {c:'loads',code:'hfdamp',t:'고주파 감쇠',d:'고주파 진동 감쇠 설정'},
+
+    {c:'solver',code:'explicit',t:'외연 해석 설정',d:'explicit 낙하·충격 해석 제어'},
+    {c:'solver',code:'implicit',t:'내연 해석 설정',d:'implicit 정적/준정적 해석 제어'},
+    {c:'solver',code:'modal',t:'모달 해석',d:'고유진동수·모드 해석 설정'},
+    {c:'solver',code:'ale',t:'ALE 설정',d:'유체-구조(ALE) 설정'},
+    {c:'solver',code:'optimize',t:'최적화 설정',d:'설계 최적화 카드 설정'},
+    {c:'solver',code:'battery',t:'배터리 모델링',d:'배터리 셀 모델링 설정'},
+
+    {c:'info',code:'info',t:'모델 정보 조회',d:'노드·요소·파트 등 모델 정보'},
+  ];
+
+  const HOT=new Set(['material','preform']);
+  let filter='all';
+
+  function chips(){
+    const box=$('chips');
+    const all=[{key:'all',name:'전체'}].concat(CATS);
+    box.innerHTML='';
+    all.forEach(c=>{
+      const b=document.createElement('button');
+      b.className='chip'; b.setAttribute('aria-pressed', filter===c.key);
+      b.textContent=c.name + (c.key==='all'?'':' · '+TOOLS.filter(t=>t.c===c.key).length);
+      b.onclick=()=>{filter=c.key; chips(); render();};
+      box.appendChild(b);
+    });
+  }
+
+  function render(){
+    const q=$('q').value.trim().toLowerCase();
+    const list=$('list'); list.innerHTML='';
+    let shown=0;
+    CATS.forEach(cat=>{
+      if(filter!=='all' && filter!==cat.key) return;
+      const items=TOOLS.filter(t=>t.c===cat.key).filter(t=>
+        !q || t.code.toLowerCase().includes(q) || t.t.toLowerCase().includes(q) || t.d.toLowerCase().includes(q));
+      if(!items.length) return;
+      shown+=items.length;
+      const sec=document.createElement('div'); sec.className='cat';
+      sec.innerHTML='<div class="cat-h"><span class="ct">'+cat.name+'</span><span class="cc">'+items.length+'</span><span class="bar"></span></div>';
+      const g=document.createElement('div'); g.className='grid';
+      items.forEach(t=>{
+        const el=document.createElement('div'); el.className='tool'+(HOT.has(t.c)?' hot':'');
+        el.innerHTML='<div class="tool-top"><span class="code">'+t.code+'</span><span class="mcp">MCP</span></div>'+
+          '<div class="tt">'+t.t+'</div><div class="td">'+t.d+'</div>';
+        g.appendChild(el);
+      });
+      sec.appendChild(g); list.appendChild(sec);
+    });
+    if(!shown) list.innerHTML='<div class="empty">검색 결과가 없습니다.</div>';
+    $('cnt').textContent=shown;
+  }
+
+  $('stat-feat').textContent=TOOLS.length;
+  chips(); render();
+</script>
+
+</body>
+</html>
