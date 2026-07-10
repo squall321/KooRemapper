@@ -11850,6 +11850,431 @@
         }
       ],
       "presets": null
+    },
+    {
+      "name": "cclip",
+      "category": "deform",
+      "summary": "Replace hex box parts with F-δ calibrated C-clip shell strips (smartphone spring contacts) in pressed state with *INITIAL_STRESS_SHELL.",
+      "description": "Replaces selected hexahedral (box) parts with simplified C-shaped shell-strip clips — the spring contacts (C-clip / ground spring / antenna contact) SMT-mounted on smartphone PBAs that are compressed during assembly. Clip stiffness is calibrated against measured force-deflection data from a detailed-model compression analysis (a full F-δ curve or a single operating point) via Castigliano closed-form thickness solve, then the clip is written in its pressed (installed) state with *INITIAL_STRESS_SHELL bending prestress whose moment field equilibrates the calibrated contact force. Default analytic mode needs no solver; deck mode additionally emits an LS-DYNA rigid-plate compression deck for solver-based preloading (rcforc validation, dynain chaining).",
+      "invocation": "yaml",
+      "config_style": "structured",
+      "takes_kfile": true,
+      "requires_gmsh": false,
+      "requires_tetgen": false,
+      "params": [
+        {
+          "name": "model",
+          "type": "file",
+          "role": "yaml_field",
+          "yaml_path": "model",
+          "required": true,
+          "description": "Input LS-DYNA K-file containing the hex box part(s) standing in for C-clips"
+        },
+        {
+          "name": "output",
+          "type": "output",
+          "role": "yaml_field",
+          "yaml_path": "output",
+          "required": true,
+          "description": "Output basename (without .k). Writes <output>.k (pressed clip, original PID kept), <output>_cclip_report.json; include mode adds <output>.dynain; deck mode adds <output>_cclip_deck_<pid>.k per clip"
+        },
+        {
+          "name": "clips",
+          "type": "array",
+          "role": "yaml_field",
+          "yaml_path": "clips",
+          "required": true,
+          "description": "Per-clip target rules, processed in order: [{pid: N} | {match_part: \"CCLIP_*\"}] with optional per-clip overrides (free_height | overtravel, width, thickness, profile{flat_bottom,flat_top,radius,tip_rise}, n_arc, n_flat, n_width, elform, match_mass, axis, material, calibration)"
+        },
+        {
+          "name": "calibration",
+          "type": "object",
+          "role": "yaml_field",
+          "yaml_path": "calibration",
+          "required": true,
+          "description": "F-δ calibration: {point: {deflection, force}} for a single operating point, or {curve: [[deflection, force], ...], operating_deflection: d}. Optional: tolerance (default 0.05), calibrate (thickness|modulus), t_min, t_max"
+        },
+        {
+          "name": "material",
+          "type": "object",
+          "role": "yaml_field",
+          "yaml_path": "material",
+          "required": false,
+          "description": "Clip material {E, nu, rho, sigy} [MPa, -, t/mm3, MPa]. Default: inherit from the box part's K-file material, else BeCu (E=131000, nu=0.3, rho=8.36e-9, sigy=900)"
+        },
+        {
+          "name": "mode",
+          "type": "enum",
+          "role": "yaml_field",
+          "yaml_path": "mode",
+          "required": false,
+          "default": "analytic",
+          "enum": [
+            "analytic",
+            "deck"
+          ],
+          "description": "analytic (default): closed-form pressed state + *INITIAL_STRESS_SHELL, no solver needed. deck: additionally emit an LS-DYNA compression deck per clip for solver-based preloading"
+        },
+        {
+          "name": "attach",
+          "type": "enum",
+          "role": "yaml_field",
+          "yaml_path": "attach",
+          "required": false,
+          "default": "none",
+          "enum": [
+            "none",
+            "cnrb"
+          ],
+          "description": "Clip foot attachment: none (leave to contact/user) or cnrb (*CONSTRAINED_NODAL_RIGID_BODY spanning foot nodes + board nodes within attach_tol)"
+        },
+        {
+          "name": "stress_output",
+          "type": "enum",
+          "role": "yaml_field",
+          "yaml_path": "stress_output",
+          "required": false,
+          "default": "embed",
+          "enum": [
+            "embed",
+            "include"
+          ],
+          "description": "embed (default): *INITIAL_STRESS_SHELL written before *END in <output>.k. include: separate <output>.dynain + *INCLUDE"
+        },
+        {
+          "name": "axis",
+          "type": "enum",
+          "role": "yaml_field",
+          "yaml_path": "axis",
+          "required": false,
+          "default": "auto",
+          "enum": [
+            "auto",
+            "x",
+            "y",
+            "z"
+          ],
+          "description": "Compression (working) axis. auto = shortest bbox edge of each target box"
+        },
+        {
+          "name": "attach_tol",
+          "type": "number",
+          "role": "yaml_field",
+          "yaml_path": "attach_tol",
+          "required": false,
+          "default": "0.1",
+          "description": "Board-node capture distance [mm] for attach=cnrb"
+        },
+        {
+          "name": "report",
+          "type": "boolean",
+          "role": "yaml_field",
+          "yaml_path": "report",
+          "required": false,
+          "default": "true",
+          "description": "Write <output>_cclip_report.json (target vs achieved stiffness, calibrated thickness, working force, sig_max/sigy, mass, orphan nodes)"
+        }
+      ],
+      "example": {
+        "args": {
+          "model": "clip_board.k",
+          "output": "clip_board_cclip",
+          "calibration": {
+            "point": {
+              "deflection": 0.15,
+              "force": 1.2
+            }
+          },
+          "clips": [
+            {
+              "pid": 2,
+              "overtravel": 0.15
+            }
+          ],
+          "mode": "analytic"
+        },
+        "note": "PID 2 육면체를 C형 쉘 클립으로 치환 — 작동점(0.15mm 눌림에서 1.2N)으로 두께를 캘리브레이션하고 0.15mm 눌린 상태 + *INITIAL_STRESS_SHELL로 출력. Replaces hex part PID 2 with a C-clip calibrated to the operating point, written in the pressed state; the prestress moment field equilibrates the 1.2N contact force."
+      },
+      "example_folder": "/home/koopark/claude/KooRemapper/examples/cclip",
+      "notes": "TARGET SELECTION: clips[] rules processed in order; pid takes precedence over match_part (glob vs *PART title, each match becomes one clip). Each matched hex part's solid elements are deleted and replaced by one shell-strip clip; the ORIGINAL PID IS KEPT (*PART SECID/MID retargeted) so existing *SET_PART/*CONTACT references stay valid; old *SECTION/*MAT removed only when unshared; box nodes preserved (orphan count reported). GEOMETRY: foot flat → bend arc (semicircle, or quarter arcs + vertical legs when radius < height/2) → inclined contact arm whose tip is the apex; default tip_rise = 1.2x working deflection keeps the pressed shoulder clear of the mating plane. CALIBRATION: Castigliano unit-load integral J=∫m²ds gives k(t)=E·W·t³/(12·J); thickness solved in closed form (calibrate=thickness, default) or E scaled with fixed thickness (calibrate=modulus). Curve input uses the secant at operating_deflection (guarantees the working contact force; LSQ slope and max residual reported — v1 matches LINEAR stiffness only). Fails if achieved-vs-target stiffness error exceeds tolerance. PRESSED STATE: pressed geometry solved so max clip height equals the installed height (box height); the *INITIAL_STRESS_SHELL bending field (NPLANE=1, NTHICK=2) is scaled by the calibrated working force so dynamic relaxation pushes the mating surface with that force. VALIDATION: tools/cclip_check.py verifies geometry/stiffness/bending-pattern/stress→force consistency without a solver. DECK MODE: per-clip <output>_cclip_deck_<pid>.k with free-state clip, rigid plate, *BOUNDARY_PRESCRIBED_MOTION_RIGID displacement ramp, implicit quasi-static controls, *DATABASE_RCFORC and *INTERFACE_SPRINGBACK_LSDYNA (dynain for chaining). LIMITS (v1): linear secant stiffness match; elastic bending prestress only (warns when sig_max > 0.8·sigy); axis-aligned boxes assumed; shell contact gap ~t/2 not compensated. Relative paths resolved vs config YAML directory.",
+      "keys": [
+        {
+          "path": "model",
+          "type": "file",
+          "required": true,
+          "desc": "Input K-file with hex box parts standing in for clips"
+        },
+        {
+          "path": "output",
+          "type": "string",
+          "required": true,
+          "desc": "Output basename; .k auto-appended"
+        },
+        {
+          "path": "clips",
+          "type": "array",
+          "required": true,
+          "desc": "Clip target rules, processed in order"
+        },
+        {
+          "path": "clips[].pid",
+          "type": "integer",
+          "required": false,
+          "desc": "Part ID of the hex box to replace. Takes precedence over match_part"
+        },
+        {
+          "path": "clips[].match_part",
+          "type": "string",
+          "required": false,
+          "desc": "Glob vs *PART title (e.g. 'CCLIP_*'); each match becomes one clip"
+        },
+        {
+          "path": "clips[].free_height",
+          "type": "number",
+          "required": false,
+          "desc": "Free (uncompressed) clip height [mm]; must exceed installed height"
+        },
+        {
+          "path": "clips[].overtravel",
+          "type": "number",
+          "required": false,
+          "desc": "Alternative to free_height: H_free = installed height + overtravel [mm]; default = calibration deflection"
+        },
+        {
+          "path": "clips[].width",
+          "type": "number",
+          "required": false,
+          "desc": "Strip width [mm]; default = box width"
+        },
+        {
+          "path": "clips[].thickness",
+          "type": "number",
+          "required": false,
+          "desc": "Shell thickness [mm]; omitted = solved by calibration"
+        },
+        {
+          "path": "clips[].profile.flat_bottom",
+          "type": "number",
+          "required": false,
+          "desc": "Foot flat length [mm]; default 0.6·L"
+        },
+        {
+          "path": "clips[].profile.flat_top",
+          "type": "number",
+          "required": false,
+          "desc": "Contact arm length [mm]; default 0.4·L"
+        },
+        {
+          "path": "clips[].profile.radius",
+          "type": "number",
+          "required": false,
+          "desc": "Bend radius [mm]; default min(arc-height/2, L-flat_bottom)"
+        },
+        {
+          "path": "clips[].profile.tip_rise",
+          "type": "number",
+          "required": false,
+          "desc": "Contact tip height above arc shoulder [mm]; default 1.2x working deflection"
+        },
+        {
+          "path": "clips[].n_arc",
+          "type": "integer",
+          "required": false,
+          "default": "8",
+          "desc": "Elements along the bend arc"
+        },
+        {
+          "path": "clips[].n_flat",
+          "type": "integer",
+          "required": false,
+          "default": "2",
+          "desc": "Elements per flat/arm segment"
+        },
+        {
+          "path": "clips[].n_width",
+          "type": "integer",
+          "required": false,
+          "default": "3",
+          "desc": "Elements across the strip width"
+        },
+        {
+          "path": "clips[].elform",
+          "type": "integer",
+          "required": false,
+          "default": "16",
+          "desc": "*SECTION_SHELL ELFORM"
+        },
+        {
+          "path": "clips[].match_mass",
+          "type": "boolean",
+          "required": false,
+          "default": "false",
+          "desc": "Scale clip density to preserve the box mass"
+        },
+        {
+          "path": "clips[].axis",
+          "type": "string",
+          "required": false,
+          "desc": "Per-clip compression axis override (auto|x|y|z)"
+        },
+        {
+          "path": "clips[].material",
+          "type": "object",
+          "required": false,
+          "desc": "Per-clip material override (same shape as global material)"
+        },
+        {
+          "path": "clips[].calibration",
+          "type": "object",
+          "required": false,
+          "desc": "Per-clip calibration override (same shape as global calibration)"
+        },
+        {
+          "path": "calibration.point.deflection",
+          "type": "number",
+          "required": false,
+          "desc": "Operating-point deflection [mm]; also the installed deflection. Mutually exclusive with curve"
+        },
+        {
+          "path": "calibration.point.force",
+          "type": "number",
+          "required": false,
+          "desc": "Operating-point contact force [N]"
+        },
+        {
+          "path": "calibration.curve",
+          "type": "array",
+          "required": false,
+          "desc": "F-δ pairs [[deflection, force], ...] ascending; REQUIRES operating_deflection. Mutually exclusive with point"
+        },
+        {
+          "path": "calibration.operating_deflection",
+          "type": "number",
+          "required": false,
+          "desc": "Installed deflection [mm]; required with curve"
+        },
+        {
+          "path": "calibration.tolerance",
+          "type": "number",
+          "required": false,
+          "default": "0.05",
+          "desc": "Max allowed relative stiffness error; op fails above this"
+        },
+        {
+          "path": "calibration.calibrate",
+          "type": "string",
+          "required": false,
+          "default": "thickness",
+          "values": [
+            "thickness",
+            "modulus"
+          ],
+          "desc": "Quantity the solver adjusts (modulus requires explicit thickness)"
+        },
+        {
+          "path": "calibration.t_min",
+          "type": "number",
+          "required": false,
+          "default": "0.03",
+          "desc": "Thickness clamp lower bound [mm]"
+        },
+        {
+          "path": "calibration.t_max",
+          "type": "number",
+          "required": false,
+          "default": "0.30",
+          "desc": "Thickness clamp upper bound [mm]"
+        },
+        {
+          "path": "material.E",
+          "type": "number",
+          "required": false,
+          "default": "131000",
+          "desc": "Young's modulus [MPa] (BeCu default; inherits box material when omitted)"
+        },
+        {
+          "path": "material.nu",
+          "type": "number",
+          "required": false,
+          "default": "0.3",
+          "desc": "Poisson's ratio"
+        },
+        {
+          "path": "material.rho",
+          "type": "number",
+          "required": false,
+          "default": "8.36e-9",
+          "desc": "Density [t/mm3]"
+        },
+        {
+          "path": "material.sigy",
+          "type": "number",
+          "required": false,
+          "default": "900",
+          "desc": "Yield stress [MPa]; used for the plasticity warning (sig_max > 0.8·sigy)"
+        },
+        {
+          "path": "mode",
+          "type": "string",
+          "required": false,
+          "default": "analytic",
+          "values": [
+            "analytic",
+            "deck"
+          ],
+          "desc": "Prestress generation path"
+        },
+        {
+          "path": "attach",
+          "type": "string",
+          "required": false,
+          "default": "none",
+          "values": [
+            "none",
+            "cnrb"
+          ],
+          "desc": "Clip foot attachment cards"
+        },
+        {
+          "path": "stress_output",
+          "type": "string",
+          "required": false,
+          "default": "embed",
+          "values": [
+            "embed",
+            "include"
+          ],
+          "desc": "Initial stress placement"
+        },
+        {
+          "path": "axis",
+          "type": "string",
+          "required": false,
+          "default": "auto",
+          "values": [
+            "auto",
+            "x",
+            "y",
+            "z"
+          ],
+          "desc": "Global compression axis (auto = shortest box edge)"
+        },
+        {
+          "path": "attach_tol",
+          "type": "number",
+          "required": false,
+          "default": "0.1",
+          "desc": "Board-node capture distance for cnrb [mm]"
+        },
+        {
+          "path": "report",
+          "type": "boolean",
+          "required": false,
+          "default": "true",
+          "desc": "Emit <output>_cclip_report.json"
+        }
+      ],
+      "presets": null
     }
   ]
 }
