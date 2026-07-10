@@ -11952,9 +11952,28 @@
             "auto",
             "x",
             "y",
-            "z"
+            "z",
+            "+x",
+            "-x",
+            "+y",
+            "-y",
+            "+z",
+            "-z"
           ],
-          "description": "Compression (working) axis. auto = shortest bbox edge of each target box"
+          "description": "Compression axis and press-from side. auto = shortest bbox edge, pressed from the + side. Signed forms set the side the mating part presses from (foot on the opposite face): e.g. -z = pressed from below, foot on the top face."
+        },
+        {
+          "name": "open",
+          "type": "enum",
+          "role": "yaml_field",
+          "yaml_path": "open",
+          "required": false,
+          "default": "+",
+          "enum": [
+            "+",
+            "-"
+          ],
+          "description": "C opening/bulge direction along the length axis (+ default). '-' mirrors the profile — use it to match the real clip orientation (wipe direction, keep-out)."
         },
         {
           "name": "attach_tol",
@@ -11996,7 +12015,7 @@
         "note": "PID 2 육면체를 C형 쉘 클립으로 치환 — 작동점(0.15mm 눌림에서 1.2N)으로 두께를 캘리브레이션하고 0.15mm 눌린 상태 + *INITIAL_STRESS_SHELL로 출력. Replaces hex part PID 2 with a C-clip calibrated to the operating point, written in the pressed state; the prestress moment field equilibrates the 1.2N contact force."
       },
       "example_folder": "/home/koopark/claude/KooRemapper/examples/cclip",
-      "notes": "TARGET SELECTION: clips[] rules processed in order; pid takes precedence over match_part (glob vs *PART title, each match becomes one clip). Each matched hex part's solid elements are deleted and replaced by one shell-strip clip; the ORIGINAL PID IS KEPT (*PART SECID/MID retargeted) so existing *SET_PART/*CONTACT references stay valid; old *SECTION/*MAT removed only when unshared; box nodes preserved (orphan count reported). GEOMETRY: foot flat → bend arc (semicircle, or quarter arcs + vertical legs when radius < height/2) → inclined contact arm whose tip is the apex; default tip_rise = 1.2x working deflection keeps the pressed shoulder clear of the mating plane. CALIBRATION: Castigliano unit-load integral J=∫m²ds gives k(t)=E·W·t³/(12·J); thickness solved in closed form (calibrate=thickness, default) or E scaled with fixed thickness (calibrate=modulus). Curve input uses the secant at operating_deflection (guarantees the working contact force; LSQ slope and max residual reported — v1 matches LINEAR stiffness only). Fails if achieved-vs-target stiffness error exceeds tolerance. PRESSED STATE: pressed geometry solved so max clip height equals the installed height (box height); the *INITIAL_STRESS_SHELL bending field (NPLANE=1, NTHICK=2) is scaled by the calibrated working force so dynamic relaxation pushes the mating surface with that force. VALIDATION: tools/cclip_check.py verifies geometry/stiffness/bending-pattern/stress→force consistency without a solver. DECK MODE: per-clip <output>_cclip_deck_<pid>.k with free-state clip, rigid plate, *BOUNDARY_PRESCRIBED_MOTION_RIGID displacement ramp, implicit quasi-static controls, *DATABASE_RCFORC and *INTERFACE_SPRINGBACK_LSDYNA (dynain for chaining). LIMITS (v1): linear secant stiffness match; elastic bending prestress only (warns when sig_max > 0.8·sigy); axis-aligned boxes assumed; shell contact gap ~t/2 not compensated. Relative paths resolved vs config YAML directory.",
+      "notes": "TARGET SELECTION: clips[] rules processed in order; pid takes precedence over match_part (glob vs *PART title, each match becomes one clip). Each matched hex part's solid elements are deleted and replaced by one shell-strip clip; the ORIGINAL PID IS KEPT (*PART SECID/MID retargeted) so existing *SET_PART/*CONTACT references stay valid; old *SECTION/*MAT removed only when unshared; box nodes preserved (orphan count reported). DIRECTION: axis accepts signed press-from values (+z default / -z = pressed from below with the foot on the top face); open (+|-) mirrors the C bulge along the length axis. Both settable globally and per clip; report carries press_from/open. GEOMETRY: foot flat → bend arc (semicircle, or quarter arcs + vertical legs when radius < height/2) → inclined contact arm whose tip is the apex; default tip_rise = 1.2x working deflection keeps the pressed shoulder clear of the mating plane. CALIBRATION: Castigliano unit-load integral J=∫m²ds gives k(t)=E·W·t³/(12·J); thickness solved in closed form (calibrate=thickness, default) or E scaled with fixed thickness (calibrate=modulus). Curve input uses the secant at operating_deflection (guarantees the working contact force; LSQ slope and max residual reported — v1 matches LINEAR stiffness only). Fails if achieved-vs-target stiffness error exceeds tolerance. PRESSED STATE: pressed geometry solved so max clip height equals the installed height (box height); the *INITIAL_STRESS_SHELL bending field (NPLANE=1, NTHICK=2) is scaled by the calibrated working force so dynamic relaxation pushes the mating surface with that force. VALIDATION: tools/cclip_check.py verifies geometry/stiffness/bending-pattern/stress→force consistency without a solver. DECK MODE: per-clip <output>_cclip_deck_<pid>.k with free-state clip, rigid plate, *BOUNDARY_PRESCRIBED_MOTION_RIGID displacement ramp, implicit quasi-static controls, *DATABASE_RCFORC and *INTERFACE_SPRINGBACK_LSDYNA (dynain for chaining). LIMITS (v1): linear secant stiffness match; elastic bending prestress only (warns when sig_max > 0.8·sigy); axis-aligned boxes assumed; shell contact gap ~t/2 not compensated. Relative paths resolved vs config YAML directory.",
       "keys": [
         {
           "path": "model",
@@ -12115,7 +12134,18 @@
           "path": "clips[].axis",
           "type": "string",
           "required": false,
-          "desc": "Per-clip compression axis override (auto|x|y|z)"
+          "desc": "Per-clip press-from override (auto|[+|-]x|y|z, e.g. -z = pressed from below)"
+        },
+        {
+          "path": "clips[].open",
+          "type": "string",
+          "required": false,
+          "default": "+",
+          "values": [
+            "+",
+            "-"
+          ],
+          "desc": "Per-clip C opening direction override"
         },
         {
           "path": "clips[].material",
@@ -12255,9 +12285,26 @@
             "auto",
             "x",
             "y",
-            "z"
+            "z",
+            "+x",
+            "-x",
+            "+y",
+            "-y",
+            "+z",
+            "-z"
           ],
-          "desc": "Global compression axis (auto = shortest box edge)"
+          "desc": "Global compression axis + press-from side (auto = shortest edge, + side)"
+        },
+        {
+          "path": "open",
+          "type": "string",
+          "required": false,
+          "default": "+",
+          "values": [
+            "+",
+            "-"
+          ],
+          "desc": "Global C opening/bulge direction along the length axis"
         },
         {
           "path": "attach_tol",

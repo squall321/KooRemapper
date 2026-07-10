@@ -64,7 +64,8 @@ struct CcRule {
     CcProfileCfg profile;
     int nArc = 8, nFlat = 2, nWidth = 3, elform = 16;
     bool matchMass = false;
-    std::string axis;          // per-clip override of global axis
+    std::string axis;          // per-clip override of global axis (press-from side, e.g. "-z")
+    std::string open;          // per-clip override of C opening ("+"|"-" along the length axis)
     CcMaterial material;       // per-clip override (material.set)
     CcCalib calib;             // per-clip override (calib.set)
 };
@@ -74,7 +75,8 @@ struct CcConfig {
     std::string mode = "analytic";        // analytic | deck
     std::string attach = "none";          // none | cnrb
     std::string stressOutput = "embed";   // embed | include
-    std::string axis = "auto";            // auto|x|y|z
+    std::string axis = "auto";            // auto|[+|-]x|y|z — press-from side (default +)
+    std::string open = "+";               // C opening/bulge direction along the length axis
     double attachTol = 0.1;
     bool report = true;
     CcMaterial material;
@@ -264,6 +266,7 @@ bool parseCclipYaml(const std::string& yamlFile, CcConfig& cfg, ConsoleOutput& c
             else if (key == "attach")        cfg.attach = val;
             else if (key == "stress_output") cfg.stressOutput = val;
             else if (key == "axis")          cfg.axis = val;
+            else if (key == "open")          cfg.open = val;
             else if (key == "attach_tol")    cfg.attachTol = cc_toD(val, cfg.attachTol);
             else if (key == "report")        cfg.report = cc_toBool(val);
             else if (key == "material") {
@@ -325,6 +328,7 @@ bool parseCclipYaml(const std::string& yamlFile, CcConfig& cfg, ConsoleOutput& c
         else if (key == "elform")      r.elform = cc_toI(val, r.elform);
         else if (key == "match_mass")  r.matchMass = cc_toBool(val);
         else if (key == "axis")        r.axis = val;
+        else if (key == "open")        r.open = val;
         else if (key == "profile") {
             if (!val.empty() && val[0]=='{') for (const auto& kv : cc_parseInlineMap(val)) {
                 if      (kv.first == "flat_bottom") r.profile.flatBottom = cc_toD(kv.second);
@@ -360,7 +364,10 @@ struct CcFrame {
     bool valid = false;
 };
 
-CcFrame deriveBoxFrame(const Mesh& mesh, int pid, const std::string& axisSel, ConsoleOutput& console) {
+// axisSel: auto | [+|-]x|y|z — the SIDE the mating part presses from (foot on the
+// opposite face). openSel: "+"|"-" — C bulge direction along the length axis.
+CcFrame deriveBoxFrame(const Mesh& mesh, int pid, const std::string& axisSel,
+                       const std::string& openSel, ConsoleOutput& console) {
     CcFrame fr;
     std::set<int> nids;
     for (const auto& [eid, elem] : mesh.getElements()) {
@@ -378,24 +385,36 @@ CcFrame deriveBoxFrame(const Mesh& mesh, int pid, const std::string& axisSel, Co
     }
     double ext[3] = { hi[0]-lo[0], hi[1]-lo[1], hi[2]-lo[2] };
 
+    std::string ax = axisSel;
+    double swSign = 1.0;
+    if (ax.size() == 2 && (ax[0] == '+' || ax[0] == '-')) {
+        if (ax[0] == '-') swSign = -1.0;
+        ax = ax.substr(1);
+    }
     int iw;
-    if      (axisSel == "x") iw = 0;
-    else if (axisSel == "y") iw = 1;
-    else if (axisSel == "z") iw = 2;
-    else { iw = 0; if (ext[1] < ext[iw]) iw = 1; if (ext[2] < ext[iw]) iw = 2; }  // auto: shortest
+    if      (ax == "x") iw = 0;
+    else if (ax == "y") iw = 1;
+    else if (ax == "z") iw = 2;
+    else if (ax == "auto" || ax.empty()) {
+        iw = 0; if (ext[1] < ext[iw]) iw = 1; if (ext[2] < ext[iw]) iw = 2;      // auto: shortest
+    } else {
+        console.error("[cclip] invalid axis '" + axisSel + "' (expected auto or [+|-]x|y|z)");
+        return fr;   // fr.valid stays false
+    }
 
     int a1 = (iw+1)%3, a2 = (iw+2)%3;
     int iu = (ext[a1] >= ext[a2]) ? a1 : a2;    // length = longer of the rest
     int iv = (iu == a1) ? a2 : a1;
 
     fr.iu = iu; fr.iv = iv; fr.iw = iw;
-    fr.su = 1.0; fr.sw = 1.0;
+    fr.sw = swSign;                              // + : pressed from +axis (foot at min face)
+    fr.su = (openSel == "-") ? -1.0 : 1.0;       // C bulge toward ±length axis
     // right-handed (u,v,w): e_v = e_w × e_u  → sign via Levi-Civita of (iw,iu,iv)
     auto lc = [](int a, int b, int c) {
         if (a==b || b==c || a==c) return 0;
         return ((b-a+3)%3 == 1) ? 1 : -1;
     };
-    fr.sv = (double)lc(fr.iw, fr.iu, fr.iv);    // e_w x e_u = lc * e_v
+    fr.sv = fr.sw * fr.su * (double)lc(fr.iw, fr.iu, fr.iv);   // signed e_w x e_u
     for (int a = 0; a < 3; ++a) { fr.lo[a] = lo[a]; fr.hi[a] = hi[a]; }
     fr.L = ext[iu]; fr.W = ext[iv]; fr.hInst = ext[iw];
     fr.valid = (fr.L > 0 && fr.W > 0 && fr.hInst > 0);
@@ -830,7 +849,7 @@ struct CcBuilt {
     double Fwork = 0, deltaWork = 0, freeHeight = 0, hInst = 0;
     double J = 0, sigMax = 0, sigy = 0;
     double massBox = 0, massClip = 0;
-    double stripWidth = 0; char axisChar = 'z';
+    double stripWidth = 0; char axisChar = 'z'; char pressSign = '+'; char openSign = '+';
     double lsqSlope = 0, curveMaxResid = 0; bool usedCurve = false;
     int orphanNodes = 0, nNodes = 0, nElems = 0;
     std::string nodeCards, shellCards, sectionCard, matCard, attachCards;
@@ -936,10 +955,13 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
 
         // ---- frame
         std::string axisSel = !r.axis.empty() ? r.axis : cfg.axis;
-        CcFrame fr = deriveBoxFrame(mesh, pid, axisSel, console);
+        std::string openSel = !r.open.empty() ? r.open : cfg.open;
+        CcFrame fr = deriveBoxFrame(mesh, pid, axisSel, openSel, console);
         if (!fr.valid) return 1;
         b.hInst = fr.hInst;
         b.axisChar = "xyz"[fr.iw];
+        b.pressSign = (fr.sw > 0) ? '+' : '-';
+        b.openSign = (fr.su > 0) ? '+' : '-';
 
         // ---- free height / working deflection
         double Hfree = r.freeHeight;
@@ -1247,8 +1269,9 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
                     for (int j = 0; j <= nW; ++j) tipN.push_back(localNid[i*(nW+1)+j]);
             bat::writeSetNodeList(dk, 2, "CCLIP_TIP", tipN);
             cc_writeContactNodesToSurface(dk, 2, 2);
-            // prescribed compression: plate moves −(δ+gap) along w so tip lands at h_inst
-            bat::writeDefineCurve(dk, 1, "cclip_compress", {{0.0, 0.0}, {1.0, -(deltaWork + gap)}});
+            // prescribed compression: plate moves toward the clip (local −w) so the tip
+            // lands at h_inst; global displacement sign follows the frame's sw
+            bat::writeDefineCurve(dk, 1, "cclip_compress", {{0.0, 0.0}, {1.0, -fr.sw * (deltaWork + gap)}});
             cc_writeBpmRigid(dk, 2, fr.iw + 1, 1);
             // implicit quasi-static (card text mirrors implicit op level defaults)
             dk << "*CONTROL_IMPLICIT_GENERAL\n$#  imflag       dt0\n         1       0.1\n";
@@ -1282,7 +1305,8 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
             std::ostringstream os;
             os << std::fixed << std::setprecision(4);
             os << "[cclip] pid " << pid << " (" << b.partTitle << "): L=" << fr.L << " W=" << W
-               << " h_inst=" << fr.hInst << " H_free=" << Hfree << " δ=" << deltaWork;
+               << " h_inst=" << fr.hInst << " H_free=" << Hfree << " δ=" << deltaWork
+               << " press_from=" << b.pressSign << b.axisChar << " open=" << b.openSign;
             console.info(os.str());
             std::ostringstream os2;
             os2 << std::scientific << std::setprecision(4);
@@ -1384,6 +1408,8 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
                    << "      \"E\": " << b.E << ",\n"
                    << "      \"moment_integral_J\": " << b.J << ",\n"
                    << "      \"axis\": \"" << b.axisChar << "\",\n"
+                   << "      \"press_from\": \"" << b.pressSign << b.axisChar << "\",\n"
+                   << "      \"open\": \"" << b.openSign << "\",\n"
                    << "      \"strip_width\": " << b.stripWidth << ",\n"
                    << "      \"sig_max\": " << b.sigMax << ",\n"
                    << "      \"sigy\": " << b.sigy << ",\n"

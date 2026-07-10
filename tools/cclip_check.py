@@ -110,7 +110,9 @@ def main():
         others = [a for a in range(3) if a != iw]
         exts = [max(p[a] for p in pts) - min(p[a] for p in pts) for a in others]
         iu = others[0] if exts[0] >= exts[1] else others[1]
-        tip = max(pts, key=lambda p: p[iw])
+        press = clip.get("press_from", "+" + clip["axis"])
+        psign = -1.0 if press.startswith("-") else 1.0
+        tip = max(pts, key=lambda p: psign * p[iw])   # extremum toward the mating plane
         xs = [p[iu] for p in pts]
         arm = max(abs(tip[iu] - max(xs)), abs(tip[iu] - min(xs)))
         f_est = sig_max * W * t * t / 6.0 / arm if arm > 0 else 0.0

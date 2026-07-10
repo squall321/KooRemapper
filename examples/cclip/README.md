@@ -54,6 +54,8 @@ analytic 산출물은 `KooRemapper relax`로 DR 덱을 구성해 접촉력 재�
 
 ## Variants
 
+- **방향성**: `axis: "-z"` — 아래에서 눌리는 클립(발이 윗면, 쉴드캔 하면 접점 등).
+  `open: "-"` — C 개구/벌지 방향 미러(실물 방향·와이프 방향에 맞춤). 전역·클립별 모두 가능.
 - **여러 클립 일괄**: `clips: [- match_part: "CCLIP_*"]` — 파트 타이틀 글롭, 매치마다 클립 1개.
 - **바닥 부착**: `attach: cnrb` — 발 노드 + attach_tol 내 주변(보드) 노드를 *CONSTRAINED_NODAL_RIGID_BODY로 묶음.
 - **초기응력 별도 파일**: `stress_output: include` — `<output>.dynain` + *INCLUDE.
