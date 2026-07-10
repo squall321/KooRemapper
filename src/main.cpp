@@ -67,6 +67,7 @@
 #include "commands/tetremesh.h"
 #include "commands/meshfix.h"
 #include "commands/surface_extract.h"
+#include "commands/cclip.h"
 
 #include <iostream>
 #include <fstream>
@@ -2593,6 +2594,25 @@ int main(int argc, char* argv[]) {
         }
         printBanner(console);
         return runStrip(argv[2], console);
+    }
+
+    // C-clip command (spring-contact simplification)
+    // @lat: [[commands/cclip]]
+    if (command == "cclip") {
+        if (argc < 3) {
+            console.error("Usage: KooRemapper cclip <config.yaml>");
+            console.info("Replaces hex box parts with calibrated C-clip shell strips");
+            console.info("(pressed state + *INITIAL_STRESS_SHELL). Minimal config:");
+            console.info("  model: pba.k");
+            console.info("  output: pba_cclip");
+            console.info("  calibration:");
+            console.info("    point: {deflection: 0.35, force: 1.2}");
+            console.info("  clips:");
+            console.info("    - pid: 2");
+            return 1;
+        }
+        printBanner(console);
+        return runCclip(argv[2], console);
     }
 
     // Unknown command

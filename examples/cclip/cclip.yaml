@@ -1,0 +1,20 @@
+# C-clip 치환 — analytic 모드, 작동점 1점 캘리브레이션
+# KooRemapper cclip examples/cclip/cclip.yaml
+#
+# PID 2 육면체를 C형 쉘 스트립으로 치환하고, 작동점(0.15mm 눌림에서 1.2N)으로
+# 두께를 캘리브레이션한 뒤 눌린 상태 + *INITIAL_STRESS_SHELL로 출력한다.
+
+model: clip_board.k
+output: clip_board_cclip
+
+mode: analytic          # analytic | deck
+attach: none            # none | cnrb
+stress_output: embed    # embed | include
+
+calibration:
+  point: {deflection: 0.15, force: 1.2}
+  tolerance: 0.05
+
+clips:
+  - pid: 2
+    overtravel: 0.15    # H_free = 설치높이 + 0.15mm (자유 상태가 그만큼 높음 = 조립 오버랩)

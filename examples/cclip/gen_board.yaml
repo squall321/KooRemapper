@@ -1,0 +1,21 @@
+# cclip 예제 입력 생성 — C-clip 자리에 놓인 단순 육면체(BeCu, 3.0 x 1.5 x 0.5 mm)
+# KooRemapper generate box examples/cclip/gen_board.yaml
+
+output: clip_board.k
+
+lx: 3.0          # length [mm]
+ly: 1.5          # width [mm]
+lz: 0.5          # installed height (assembly gap) [mm]
+
+nx: 6
+ny: 3
+nz: 1
+
+rho: 8.36e-9     # BeCu [t/mm3]
+E: 131000.0      # [MPa]
+nu: 0.3
+
+mid: 2
+secid: 2
+pid: 2
+part_title: CCLIP_ANT_01

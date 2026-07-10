@@ -1,0 +1,19 @@
+# C-clip 치환 — deck 모드, F-δ 곡선 캘리브레이션
+# KooRemapper cclip examples/cclip/cclip_deck.yaml
+#
+# analytic 산출물에 더해, 자유 상태 클립 + 강체 압축판 + 변위 제어(implicit) 압축덱
+# (<output>_cclip_deck_<pid>.k)을 생성한다. LS-DYNA로 실행하면 rcforc로 F-δ를 검증하고
+# *INTERFACE_SPRINGBACK이 만드는 dynain을 본 모델에 체인할 수 있다.
+
+model: clip_board.k
+output: clip_board_deck
+
+mode: deck
+
+calibration:
+  curve: [[0.05, 0.45], [0.10, 0.85], [0.15, 1.20]]
+  operating_deflection: 0.15   # 곡선 모드에서는 필수 (설치 눌림량)
+  tolerance: 0.05
+
+clips:
+  - pid: 2

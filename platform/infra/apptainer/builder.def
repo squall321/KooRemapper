@@ -1,0 +1,14 @@
+# glibc 2.36(debian:12) 타깃 C++ 빌더 — 컨테이너(api/cli)와 HPC 노드 호환 바이너리 생산용.
+Bootstrap: docker
+From: debian:12-slim
+
+%post
+    apt-get update && apt-get install -y --no-install-recommends \
+        build-essential cmake git ca-certificates \
+        && rm -rf /var/lib/apt/lists/*
+
+%labels
+    Purpose KooRemapper C++ builder (glibc 2.36 target)
+
+%runscript
+    exec "$@"
