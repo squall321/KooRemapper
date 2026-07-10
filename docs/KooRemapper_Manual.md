@@ -152,6 +152,7 @@ Commands:
   warpage        워피지(면외 변형) 보정
   offset         셸 오프셋 솔리드 생성
   wrap           와인딩 인장 프리스트레스
+  cclip          육면체 파트를 F-δ 캘리브레이션된 C형 스프링 클립으로 치환 (눌린 상태+초기응력)
 
   # 메시 변환
   convert        2차 요소 변환 (TET10/HEX20/QUAD8/TRIA6)

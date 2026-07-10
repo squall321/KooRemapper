@@ -190,6 +190,7 @@ int main(int argc, char* argv[]) {
         console.println("  cnrb2solid  Convert CNRB rigid bolts to solid HEX8 cylinder meshes");
         console.println("  hfdamp      Insert high-frequency damping (*DAMPING_FREQUENCY_RANGE_DEFORM)");
         console.println("  battery     Generate battery cell K-file (stacked/wound, Phase 1+2)");
+        console.println("  cclip       Replace hex box parts with calibrated C-clip spring contacts");
         console.println("  info        Display information about a mesh file");
         console.println("  help        Show help for a command");
         console.println("  version     Show version information");
@@ -1437,6 +1438,33 @@ int main(int argc, char* argv[]) {
                 console.println("  - Generates hoop (circumferential) + radial prestress dynain");
                 console.println("  - Use with 'relax' command or dynamic_relaxation: true for");
                 console.println("    equilibration before main analysis");
+            } else if (helpCmd == "cclip") {
+                console.println("Usage: KooRemapper cclip <config.yaml>");
+                std::cout << "\n";
+                console.println("Replace hex box parts (smartphone spring contacts) with C-shaped");
+                console.println("shell-strip clips calibrated to measured force-deflection data,");
+                console.println("written in the pressed state with *INITIAL_STRESS_SHELL.");
+                std::cout << "\n";
+                console.println("Config format:");
+                console.println("  model: pba.k");
+                console.println("  output: pba_cclip            # writes .k + _cclip_report.json");
+                console.println("  mode: analytic               # analytic | deck (LS-DYNA press deck)");
+                console.println("  attach: none                 # none | cnrb (foot tied to board)");
+                console.println("  stress_output: embed         # embed | include (.dynain + *INCLUDE)");
+                console.println("  axis: auto                   # auto | [+|-]x|y|z (press-from side)");
+                console.println("  open: \"+\"                    # C bulge direction along length axis");
+                console.println("  calibration:");
+                console.println("    point: {deflection: 0.15, force: 1.2}   # or curve: [[d,F],...]");
+                console.println("    tolerance: 0.05");
+                console.println("  clips:");
+                console.println("    - pid: 2                   # or match_part: \"CCLIP_*\"");
+                console.println("      overtravel: 0.15         # free height = installed + overtravel");
+                std::cout << "\n";
+                console.println("Notes:");
+                console.println("  - Original PID is kept (SET/CONTACT references survive)");
+                console.println("  - Stiffness solved in closed form; fails if error > tolerance");
+                console.println("  - Prestress moment field equilibrates the working contact force");
+                console.println("  - Verify outputs with tools/cclip_check.py (no solver needed)");
             } else {
                 console.error("Unknown command: " + helpCmd);
                 return 1;
@@ -1482,6 +1510,7 @@ int main(int argc, char* argv[]) {
             console.println("  offset       Extrude surface elements to solid layer(s)");
             console.println("  wrap         Apply winding tension prestress (hoop + radial)");
             console.println("  update       Update node coordinates from dynain/k-file");
+            console.println("  cclip        Replace hex box parts with calibrated C-clip spring contacts");
             console.println("  info         Display information about a mesh file");
             console.println("  help         Show help for a command");
             console.println("  version      Show version information");
