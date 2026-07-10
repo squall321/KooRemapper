@@ -1451,6 +1451,7 @@ int main(int argc, char* argv[]) {
                 console.println("  mode: analytic               # analytic | deck (LS-DYNA press deck)");
                 console.println("  attach: none                 # none | cnrb (foot tied to board)");
                 console.println("  stress_output: embed         # embed | include (.dynain + *INCLUDE)");
+                console.println("  free_output: false           # also write <output>_free.k (un-pressed)");
                 console.println("  axis: auto                   # auto | [+|-]x|y|z (press-from side)");
                 console.println("  open: \"+\"                    # C bulge direction along length axis");
                 console.println("  calibration:");

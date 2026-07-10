@@ -79,6 +79,7 @@ struct CcConfig {
     std::string open = "+";               // C opening/bulge direction along the length axis
     double attachTol = 0.1;
     bool report = true;
+    bool freeOutput = false;   // also emit the un-pressed (as-designed) model
     CcMaterial material;
     CcCalib calib;
     std::vector<CcRule> clips;
@@ -282,6 +283,7 @@ bool parseCclipYaml(const std::string& yamlFile, CcConfig& cfg, ConsoleOutput& c
             else if (key == "open")          cfg.open = val;
             else if (key == "attach_tol")    cfg.attachTol = cc_toD(val, cfg.attachTol);
             else if (key == "report")        cfg.report = cc_toBool(val);
+            else if (key == "free_output")   cfg.freeOutput = cc_toBool(val);
             else if (key == "material") {
                 if (!val.empty()) for (const auto& kv : cc_parseInlineMap(val))
                     cc_applyMaterialKey(cfg.material, kv.first, kv.second);
@@ -937,7 +939,7 @@ struct CcBuilt {
     double stripWidth = 0; char axisChar = 'z'; char pressSign = '+'; char openSign = '+';
     double lsqSlope = 0, curveMaxResid = 0; bool usedCurve = false;
     int orphanNodes = 0, nNodes = 0, nElems = 0;
-    std::string nodeCards, shellCards, sectionCard, matCard, attachCards;
+    std::string nodeCards, freeNodeCards, shellCards, sectionCard, matCard, attachCards;
     std::vector<std::pair<int,CcStressRow>> stress;   // eid → rows
     std::string deckFile;
 };
@@ -1235,6 +1237,22 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
         b.nodeCards = nodeSS.str();
         b.shellCards = shellSS.str();
 
+        // free-state node cards (same IDs/connectivity, un-pressed profile) for the
+        // optional as-designed companion model. Only meaningful when pressed; in deck
+        // mode the main output already holds the free geometry.
+        if (cfg.freeOutput && pressed) {
+            std::ostringstream fSS;
+            bat::writeComment(fSS, "cclip pid " + std::to_string(pid) + " nodes (free/as-designed)");
+            fSS << "*NODE\n";
+            for (int i = 0; i < nP; ++i)
+                for (int j = 0; j <= nW; ++j) {
+                    double g[3];
+                    cc_toGlobal(fr, prof.pts[i].x, y0 + W * j / nW, prof.pts[i].z, g);
+                    bat::writeNode(fSS, baseNid + i * (nW + 1) + j, g[0], g[1], g[2]);
+                }
+            b.freeNodeCards = fSS.str();
+        }
+
         // ---- section + material cards (new SECID/MID, PID kept)
         b.newSecid = nextSec++;
         b.newMid = nextMid++;
@@ -1507,6 +1525,31 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
             console.info("[cclip] Initial stress → " + dynainPath);
         }
     }
+    // free-state (as-designed) companion — same box replacement, un-pressed clip
+    // geometry, NO initial stress. Built from a copy of the shared retargeted lines
+    // BEFORE the pressed insert mutates them.
+    if (cfg.freeOutput) {
+        std::ostringstream insFree;
+        bool haveFree = false;
+        for (const auto& b : builds) {
+            if (b.freeNodeCards.empty()) continue;
+            haveFree = true;
+            insFree << b.freeNodeCards << b.shellCards << b.sectionCard << b.matCard << b.attachCards;
+        }
+        if (haveFree) {
+            std::vector<std::string> freeLines = lines;
+            kw_insertBeforeEnd(freeLines, insFree.str());
+            std::string freePath = outPrefixPath + "_free.k";
+            std::ofstream ff(freePath);
+            if (!ff.is_open()) { console.error("[cclip] cannot write: " + freePath); return 1; }
+            for (const auto& l : freeLines) ff << l << "\n";
+            ff.close();
+            console.info("[cclip] Free-state (as-designed) model → " + freePath);
+        } else {
+            console.info("[cclip] free_output: main output is already the free state (deck mode) — skipped");
+        }
+    }
+
     kw_insertBeforeEnd(lines, ins.str());
 
     std::ofstream of(outPath);

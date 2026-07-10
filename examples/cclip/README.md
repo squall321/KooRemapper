@@ -23,6 +23,7 @@ python3 ../../tools/cclip_check.py clip_board_cclip.k clip_board_cclip_cclip_rep
 | `cclip.yaml` | analytic 모드 + 작동점(0.15mm, 1.2N) 캘리브레이션 |
 | `cclip_deck.yaml` | deck 모드 + F-δ 곡선 캘리브레이션 |
 | → `clip_board_cclip.k` | 눌린 클립 (원 PID 유지, *SECTION_SHELL T=보정 두께, 초기응력 embed) |
+| → `clip_board_cclip_free.k` | (free_output) 눌리지 않은 설계 원안 — 자유높이, 초기응력 없음 |
 | → `clip_board_cclip_cclip_report.json` | 목표/달성 강성·두께·오차·작동력·σ_max·질량 리포트 |
 | → `clip_board_deck_cclip_deck_2.k` | (deck 모드) 강체판 압축덱 — LS-DYNA 실행용 |
 

@@ -10,6 +10,7 @@ output: clip_board_cclip
 mode: analytic          # analytic | deck
 attach: none            # none | cnrb
 stress_output: embed    # embed | include
+free_output: true       # <output>_free.k(눌리지 않은 설계 원안)도 함께 출력
 
 calibration:
   point: {deflection: 0.15, force: 1.2}
