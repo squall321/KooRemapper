@@ -7,6 +7,7 @@
 #include "kw_util.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -62,7 +63,7 @@ struct CcRule {
     double freeHeight = 0.0, overtravel = 0.0;
     double width = 0.0, thickness = 0.0;
     CcProfileCfg profile;
-    int nArc = 8, nFlat = 2, nWidth = 3, elform = 16;
+    int nArc = 8, nFlat = 2, nWidth = 3, nThick = 2, elform = 16;
     bool matchMass = false;
     std::string axis;          // per-clip override of global axis (press-from side, e.g. "-z")
     std::string open;          // per-clip override of C opening ("+"|"-" along the length axis)
@@ -75,6 +76,7 @@ struct CcConfig {
     std::string mode = "analytic";        // analytic | deck
     std::string attach = "none";          // none | cnrb
     std::string stressOutput = "embed";   // embed | include
+    std::string element = "shell";        // shell | solid — clip element type
     std::string axis = "auto";            // auto|[+|-]x|y|z — press-from side (default +)
     std::string open = "+";               // C opening/bulge direction along the length axis
     double attachTol = 0.1;
@@ -281,6 +283,7 @@ bool parseCclipYaml(const std::string& yamlFile, CcConfig& cfg, ConsoleOutput& c
             else if (key == "stress_output") cfg.stressOutput = val;
             else if (key == "axis")          cfg.axis = val;
             else if (key == "open")          cfg.open = val;
+            else if (key == "element")       cfg.element = val;
             else if (key == "attach_tol")    cfg.attachTol = cc_toD(val, cfg.attachTol);
             else if (key == "report")        cfg.report = cc_toBool(val);
             else if (key == "free_output")   cfg.freeOutput = cc_toBool(val);
@@ -342,6 +345,7 @@ bool parseCclipYaml(const std::string& yamlFile, CcConfig& cfg, ConsoleOutput& c
         else if (key == "n_arc")       r.nArc = cc_toI(val, r.nArc);
         else if (key == "n_flat")      r.nFlat = cc_toI(val, r.nFlat);
         else if (key == "n_width")     r.nWidth = cc_toI(val, r.nWidth);
+        else if (key == "n_thick")     r.nThick = cc_toI(val, r.nThick);
         else if (key == "elform")      r.elform = cc_toI(val, r.elform);
         else if (key == "match_mass")  r.matchMass = cc_toBool(val);
         else if (key == "axis")        r.axis = val;
@@ -870,6 +874,22 @@ void cc_writeInitialStressShell(std::ostream& out,
     out.unsetf(std::ios::scientific);
 }
 
+void cc_writeInitialStressSolid(std::ostream& out,
+                                const std::vector<std::pair<int,std::array<double,6>>>& rows) {
+    out << "*INITIAL_STRESS_SOLID\n";
+    out << std::scientific << std::setprecision(3);
+    bool first = true;
+    for (const auto& [eid, s] : rows) {
+        if (first) out << "$#    eid    nint   nhisv   large     ics   ncomp\n";
+        out << std::setw(10) << eid << std::setw(8) << 1 << std::setw(8) << 0
+            << std::setw(8) << 0 << std::setw(8) << 0 << std::setw(8) << 0 << "\n";
+        if (first) { out << "$#  sigxx     sigyy     sigzz     sigxy     sigyz     sigxz       eps\n"; first = false; }
+        for (int k = 0; k < 6; ++k) out << std::setw(10) << s[k];
+        out << std::setw(10) << 0.0 << "\n";
+    }
+    out.unsetf(std::ios::scientific);
+}
+
 void cc_writeMatElastic(std::ostream& out, int mid, double rho, double E, double nu,
                         const std::string& name) {
     char buf[128];
@@ -940,7 +960,9 @@ struct CcBuilt {
     double lsqSlope = 0, curveMaxResid = 0; bool usedCurve = false;
     int orphanNodes = 0, nNodes = 0, nElems = 0;
     std::string nodeCards, freeNodeCards, shellCards, sectionCard, matCard, attachCards;
-    std::vector<std::pair<int,CcStressRow>> stress;   // eid → rows
+    std::vector<std::pair<int,CcStressRow>> stress;              // shell: eid → top/bot rows
+    std::vector<std::pair<int,std::array<double,6>>> stressSolid; // solid: eid → sigma[6]
+    bool isSolid = false;
     std::string deckFile;
 };
 
@@ -965,6 +987,7 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
     if (cfg.clips.empty())      { console.error("[cclip] 'clips' rules not specified"); return 1; }
     if (cfg.mode != "analytic" && cfg.mode != "deck") { console.error("[cclip] mode must be analytic|deck"); return 1; }
     if (cfg.stressOutput != "embed" && cfg.stressOutput != "include") { console.error("[cclip] stress_output must be embed|include"); return 1; }
+    if (cfg.element != "shell" && cfg.element != "solid") { console.error("[cclip] element must be shell|solid"); return 1; }
 
     auto resolvePath = [&](const std::string& p) {
         if (!cfg.configDir.empty() && p.find('/')==std::string::npos && p.find('\\')==std::string::npos)
@@ -1183,6 +1206,17 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
         }
         b.t = t; b.E = E;
 
+        // solid extrudes ±t/2 along the profile normal; if a bend radius is tighter than
+        // t/2 the inner offset surface folds through the curvature centre → inverted
+        // (negative-Jacobian) hexes. Guard now that both t and the bend radius are known.
+        if (cfg.element == "solid" && prof.r < 0.5 * t) {
+            console.error("[cclip] pid " + std::to_string(pid) + ": solid bend radius (" +
+                          std::to_string(prof.r) + ") < t/2 (" + std::to_string(0.5*t) +
+                          ") — through-thickness self-intersection. Increase profile.radius, or "
+                          "reduce thickness/n_thick, or use element: shell");
+            return 1;
+        }
+
         // ---- pressed shape (analytic) — moment-matched morph
         double I = W * t * t * t / 12.0;
         double EI = E * I;
@@ -1206,50 +1240,89 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
             shape = prof.pts;
         }
 
-        // ---- strip mesh (nodes + quads), IDs allocated from running counters
+        // ---- strip mesh (shell QUAD4 or through-thickness solid HEX8)
+        bool solid = (cfg.element == "solid");
         int nP = (int)shape.size();
         int nW = std::max(1, r.nWidth);
+        int nT = solid ? std::max(1, r.nThick) : 0;   // thickness element layers
         int baseNid = nextNid, baseEid = nextEid;
-        std::ostringstream nodeSS, shellSS;
-        bat::writeComment(nodeSS, "cclip pid " + std::to_string(pid) + " nodes");
-        nodeSS << "*NODE\n";
         double y0 = (fr.W - W) / 2.0;
-        for (int i = 0; i < nP; ++i)
-            for (int j = 0; j <= nW; ++j) {
-                double g[3];
-                cc_toGlobal(fr, shape[i].x, y0 + W * j / nW, shape[i].z, g);
-                bat::writeNode(nodeSS, baseNid + i * (nW + 1) + j, g[0], g[1], g[2]);
+        b.isSolid = solid;
+
+        // node id at (profile i, width j, thickness kk)
+        auto nid = [&](int i, int j, int kk) {
+            return solid ? baseNid + (i*(nW+1)+j)*(nT+1) + kk
+                         : baseNid + i*(nW+1) + j;
+        };
+        // write the node grid for a given profile; solid extrudes ±t/2 along the
+        // profile normal n=(-sinθ, cosθ) in the local (x,z) plane
+        auto writeNodeGrid = [&](std::ostream& out, const std::vector<CcPt>& pts) {
+            out << "*NODE\n";
+            for (int i = 0; i < nP; ++i) {
+                double nx = -std::sin(pts[i].theta), nz = std::cos(pts[i].theta);
+                for (int j = 0; j <= nW; ++j) {
+                    double y = y0 + W * j / nW;
+                    if (!solid) {
+                        double g[3]; cc_toGlobal(fr, pts[i].x, y, pts[i].z, g);
+                        bat::writeNode(out, nid(i,j,0), g[0], g[1], g[2]);
+                    } else for (int kk = 0; kk <= nT; ++kk) {
+                        double off = ((double)kk/nT - 0.5) * t;
+                        double g[3];
+                        cc_toGlobal(fr, pts[i].x + off*nx, y, pts[i].z + off*nz, g);
+                        bat::writeNode(out, nid(i,j,kk), g[0], g[1], g[2]);
+                    }
+                }
             }
-        bat::writeComment(shellSS, "cclip pid " + std::to_string(pid) + " shells");
-        shellSS << "*ELEMENT_SHELL\n";
-        for (int i = 0; i < nP - 1; ++i)
-            for (int j = 0; j < nW; ++j) {
-                int n00 = baseNid + i * (nW+1) + j;
-                int n10 = baseNid + (i+1) * (nW+1) + j;
-                int n11 = baseNid + (i+1) * (nW+1) + j + 1;
-                int n01 = baseNid + i * (nW+1) + j + 1;
-                bat::writeShell(shellSS, baseEid + i * nW + j, pid, n00, n10, n11, n01);
-            }
-        b.nNodes = nP * (nW + 1);
-        b.nElems = (nP - 1) * nW;
+        };
+
+        std::ostringstream nodeSS, elSS;
+        bat::writeComment(nodeSS, "cclip pid " + std::to_string(pid) + " nodes");
+        writeNodeGrid(nodeSS, shape);
+
+        bat::writeComment(elSS, "cclip pid " + std::to_string(pid) + (solid ? " solids" : " shells"));
+        if (!solid) {
+            elSS << "*ELEMENT_SHELL\n";
+            for (int i = 0; i < nP - 1; ++i)
+                for (int j = 0; j < nW; ++j)
+                    bat::writeShell(elSS, baseEid + i*nW + j, pid,
+                                    nid(i,j,0), nid(i+1,j,0), nid(i+1,j+1,0), nid(i,j+1,0));
+            b.nElems = (nP - 1) * nW;
+        } else {
+            // pick winding so hex volume is positive (frame handedness varies with signs)
+            auto co = [&](int i,int j,int kk,double g[3]){
+                double nx=-std::sin(shape[i].theta), nz=std::cos(shape[i].theta);
+                double off=((double)kk/nT-0.5)*t;
+                cc_toGlobal(fr, shape[i].x+off*nx, y0+W*j/nW, shape[i].z+off*nz, g);
+            };
+            double A[3],C[3],D[3],Ee[3]; co(0,0,0,A); co(1,0,0,C); co(0,1,0,D); co(0,0,1,Ee);
+            double vv[3]={C[0]-A[0],C[1]-A[1],C[2]-A[2]};
+            double ww[3]={D[0]-A[0],D[1]-A[1],D[2]-A[2]};
+            double uu[3]={Ee[0]-A[0],Ee[1]-A[1],Ee[2]-A[2]};
+            double cr[3]={ww[1]*uu[2]-ww[2]*uu[1], ww[2]*uu[0]-ww[0]*uu[2], ww[0]*uu[1]-ww[1]*uu[0]};
+            bool flip = (vv[0]*cr[0]+vv[1]*cr[1]+vv[2]*cr[2]) < 0;
+            elSS << "*ELEMENT_SOLID\n";
+            for (int i = 0; i < nP - 1; ++i)
+                for (int j = 0; j < nW; ++j)
+                    for (int kk = 0; kk < nT; ++kk) {
+                        int b1=nid(i,j,kk),   b2=nid(i+1,j,kk),   b3=nid(i+1,j+1,kk),   b4=nid(i,j+1,kk);
+                        int t1=nid(i,j,kk+1), t2=nid(i+1,j,kk+1), t3=nid(i+1,j+1,kk+1), t4=nid(i,j+1,kk+1);
+                        int eid = baseEid + (i*nW + j)*nT + kk;
+                        if (!flip) bat::writeSolid(elSS, eid, pid, b1,b2,b3,b4, t1,t2,t3,t4);
+                        else       bat::writeSolid(elSS, eid, pid, t1,t2,t3,t4, b1,b2,b3,b4);
+                    }
+            b.nElems = (nP - 1) * nW * nT;
+        }
+        b.nNodes = nP * (nW + 1) * (solid ? (nT + 1) : 1);
         nextNid += b.nNodes;
         nextEid += b.nElems;
         b.nodeCards = nodeSS.str();
-        b.shellCards = shellSS.str();
+        b.shellCards = elSS.str();
 
-        // free-state node cards (same IDs/connectivity, un-pressed profile) for the
-        // optional as-designed companion model. Only meaningful when pressed; in deck
-        // mode the main output already holds the free geometry.
+        // free-state node cards (as-designed companion; same ids/connectivity)
         if (cfg.freeOutput && pressed) {
             std::ostringstream fSS;
             bat::writeComment(fSS, "cclip pid " + std::to_string(pid) + " nodes (free/as-designed)");
-            fSS << "*NODE\n";
-            for (int i = 0; i < nP; ++i)
-                for (int j = 0; j <= nW; ++j) {
-                    double g[3];
-                    cc_toGlobal(fr, prof.pts[i].x, y0 + W * j / nW, prof.pts[i].z, g);
-                    bat::writeNode(fSS, baseNid + i * (nW + 1) + j, g[0], g[1], g[2]);
-                }
+            writeNodeGrid(fSS, prof.pts);
             b.freeNodeCards = fSS.str();
         }
 
@@ -1257,7 +1330,6 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
         b.newSecid = nextSec++;
         b.newMid = nextMid++;
         double rhoClip = mat.rho;
-        // mass bookkeeping (box bbox volume ≈ exact for a rectangular block)
         const MaterialData* mdBox = mesh.getMaterial(mesh.getParts().at(pid).materialId);
         double rhoBox = (mdBox && mdBox->density > 0) ? mdBox->density : mat.rho;
         b.massBox = rhoBox * fr.L * fr.W * fr.hInst;
@@ -1268,35 +1340,48 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
             b.massClip = b.massBox;
         }
         std::ostringstream secSS, matSS;
-        bat::writeSectionShell(secSS, b.newSecid, r.elform, t);
+        if (!solid) {
+            bat::writeSectionShell(secSS, b.newSecid, r.elform, t);
+        } else {
+            // ELFORM -2 (fully integrated, assumed strain) bends thin solids without
+            // hourglass control or shear locking; user elform overrides the default
+            int elfS = (r.elform == 16) ? -2 : r.elform;
+            bat::writeSectionSolid(secSS, b.newSecid, elfS);
+        }
         cc_writeMatElastic(matSS, b.newMid, rhoClip, E, mat.nu, "CCLIP_" + std::to_string(pid));
         b.sectionCard = secSS.str();
         b.matCard = matSS.str();
 
-        // ---- initial stress rows (pressed bending state, tangent-aligned uniaxial)
+        // ---- initial stress (pressed bending state, tangent-aligned uniaxial)
         if (pressed) {
-            std::vector<double> Kcum(nP, 0.0);
-            for (int i = 1; i < nP; ++i) {
-                double km0 = cc_unitMoment(prof, i-1) / EI, km1 = cc_unitMoment(prof, i) / EI;
-                Kcum[i] = Kcum[i-1] + 0.5 * (km0 + km1) * (prof.pts[i].s - prof.pts[i-1].s);
-            }
             double stressSign = (cScale >= 0) ? 1.0 : -1.0;
             for (int i = 0; i < nP - 1; ++i) {
                 double dKm = stressSign * Fwork * 0.5 * (cc_unitMoment(prof, i) + cc_unitMoment(prof, i+1)) / EI;
-                double sigB = E * dKm * t / 2.0;   // fiber stress magnitude at surfaces
-                b.sigMax = std::max(b.sigMax, std::fabs(sigB));
+                double sigSurf = E * dKm * t / 2.0;   // peak fiber stress at the surface
+                b.sigMax = std::max(b.sigMax, std::fabs(sigSurf));
                 double thm = 0.5 * (shape[i].theta + shape[i+1].theta);
-                // tangent in global coords: cos(th)*su*e_iu + sin(th)*sw*e_iw
                 double tau[3] = {0,0,0};
                 tau[fr.iu] = std::cos(thm) * fr.su;
                 tau[fr.iw] = std::sin(thm) * fr.sw;
-                // sigma(zeta)=-E*dK*zeta → top(T=+1, +normal side) = -sigB, bottom = +sigB
-                CcStressRow row;
                 double comp[6] = { tau[0]*tau[0], tau[1]*tau[1], tau[2]*tau[2],
                                    tau[0]*tau[1], tau[1]*tau[2], tau[2]*tau[0] };
-                for (int k = 0; k < 6; ++k) { row.top[k] = -sigB * comp[k]; row.bot[k] = +sigB * comp[k]; }
-                for (int j = 0; j < nW; ++j)
-                    b.stress.push_back({ baseEid + i * nW + j, row });
+                if (!solid) {
+                    // sigma(zeta)=-E*dK*zeta → top(T=+1,+normal)=-sigSurf, bottom=+sigSurf
+                    CcStressRow row;
+                    for (int k = 0; k < 6; ++k) { row.top[k] = -sigSurf * comp[k]; row.bot[k] = +sigSurf * comp[k]; }
+                    for (int j = 0; j < nW; ++j)
+                        b.stress.push_back({ baseEid + i * nW + j, row });
+                } else {
+                    // each thickness layer holds its element-center fiber stress
+                    for (int kk = 0; kk < nT; ++kk) {
+                        double zeta = (((double)kk + 0.5)/nT - 0.5) * t;   // +t/2 = +normal (top)
+                        double sig = -E * dKm * zeta;
+                        std::array<double,6> s;
+                        for (int k = 0; k < 6; ++k) s[k] = sig * comp[k];
+                        for (int j = 0; j < nW; ++j)
+                            b.stressSolid.push_back({ baseEid + (i*nW + j)*nT + kk, s });
+                    }
+                }
             }
             if (mat.sigy > 0 && b.sigMax > 0.8 * mat.sigy)
                 console.warning("[cclip] pid " + std::to_string(pid) + ": sig_max " + std::to_string(b.sigMax) +
@@ -1308,7 +1393,10 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
         if (cfg.attach == "cnrb") {
             std::vector<int> setNids;
             for (int i = 0; i <= prof.iFootEnd; ++i)
-                for (int j = 0; j <= nW; ++j) setNids.push_back(baseNid + i * (nW+1) + j);
+                for (int j = 0; j <= nW; ++j) {
+                    if (!solid) setNids.push_back(nid(i,j,0));
+                    else for (int kk = 0; kk <= nT; ++kk) setNids.push_back(nid(i,j,kk));
+                }
             // foot bbox in global coords
             double g0[3], g1[3];
             cc_toGlobal(fr, 0.0, y0, 0.0, g0);
@@ -1342,6 +1430,10 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
 
         // ---- deck mode: standalone compression deck per clip
         if (cfg.mode == "deck") {
+            if (solid)
+                console.info("[cclip] pid " + std::to_string(pid) +
+                             ": deck uses a shell idealization of the clip (F-δ validation); "
+                             "the main output is the solid clip");
             std::string deckPath = outPrefixPath + "_cclip_deck_" + std::to_string(pid) + ".k";
             std::ofstream dk(deckPath);
             if (!dk.is_open()) { console.error("[cclip] cannot write deck: " + deckPath); return 1; }
@@ -1439,7 +1531,8 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
         {
             std::ostringstream os;
             os << std::fixed << std::setprecision(4);
-            os << "[cclip] pid " << pid << " (" << b.partTitle << "): L=" << fr.L << " W=" << W
+            os << "[cclip] pid " << pid << " (" << b.partTitle << "): " << (solid ? "solid" : "shell")
+               << " L=" << fr.L << " W=" << W
                << " h_inst=" << fr.hInst << " H_free=" << Hfree << " δ=" << deltaWork
                << " press_from=" << b.pressSign << b.axisChar << " open=" << b.openSign;
             console.info(os.str());
@@ -1499,7 +1592,7 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
         ins << b.nodeCards << b.shellCards << b.sectionCard << b.matCard << b.attachCards;
     }
     bool anyStress = false;
-    for (const auto& b : builds) if (!b.stress.empty()) anyStress = true;
+    for (const auto& b : builds) if (!b.stress.empty() || !b.stressSolid.empty()) anyStress = true;
     // *INCLUDE must be relative to the DECK's directory (LS-DYNA convention),
     // so use the basename even when output points into a subdirectory
     std::string dynainName = outPrefix + ".dynain";
@@ -1508,17 +1601,24 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
         if (sl != std::string::npos) dynainName = dynainName.substr(sl + 1);
     }
     if (anyStress) {
-        std::vector<std::pair<int,const CcStressRow*>> rows;
-        for (const auto& b : builds)
-            for (const auto& [eid, sr] : b.stress) rows.push_back({eid, &sr});
+        std::vector<std::pair<int,const CcStressRow*>> shRows;
+        std::vector<std::pair<int,std::array<double,6>>> soRows;
+        for (const auto& b : builds) {
+            for (const auto& [eid, sr] : b.stress) shRows.push_back({eid, &sr});
+            for (const auto& kv : b.stressSolid) soRows.push_back(kv);
+        }
+        auto emit = [&](std::ostream& out) {
+            if (!shRows.empty()) cc_writeInitialStressShell(out, shRows);
+            if (!soRows.empty()) cc_writeInitialStressSolid(out, soRows);
+        };
         if (cfg.stressOutput == "embed") {
-            cc_writeInitialStressShell(ins, rows);
+            emit(ins);
         } else {
             std::string dynainPath = outPrefixPath + ".dynain";
             std::ofstream df(dynainPath);
             if (!df.is_open()) { console.error("[cclip] cannot write: " + dynainPath); return 1; }
             df << "*KEYWORD\n";
-            cc_writeInitialStressShell(df, rows);
+            emit(df);
             df << "*END\n";
             df.close();
             ins << "*INCLUDE\n" << dynainName << "\n";
@@ -1586,6 +1686,7 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
                    << "      \"press_from\": \"" << b.pressSign << b.axisChar << "\",\n"
                    << "      \"open\": \"" << b.openSign << "\",\n"
                    << "      \"strip_width\": " << b.stripWidth << ",\n"
+                   << "      \"element\": \"" << (b.isSolid ? "solid" : "shell") << "\",\n"
                    << "      \"sig_max\": " << b.sigMax << ",\n"
                    << "      \"sigy\": " << b.sigy << ",\n"
                    << "      \"mass_box\": " << b.massBox << ",\n"
