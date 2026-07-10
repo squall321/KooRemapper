@@ -106,10 +106,15 @@ std::string cc_stripQuotes(const std::string& s) {
     return s;
 }
 
-// drop an inline "  # comment" tail (only when '#' follows whitespace, so quoted
-// or embedded '#' survives via the quote path)
+// drop an inline "  # comment" tail; '#' inside a leading-quoted value survives
 std::string cc_stripInlineComment(const std::string& s) {
-    for (size_t i = 1; i < s.size(); ++i)
+    size_t start = 1;
+    if (!s.empty() && (s[0] == '"' || s[0] == '\'')) {
+        size_t close = s.find(s[0], 1);
+        if (close == std::string::npos) return s;   // unterminated quote — leave as-is
+        start = close + 1;
+    }
+    for (size_t i = start; i < s.size(); ++i)
         if (s[i] == '#' && std::isspace((unsigned char)s[i-1]))
             return cc_trim(s.substr(0, i));
     return s;
@@ -137,15 +142,23 @@ bool cc_wildcardMatch(const std::string& pattern, const std::string& text) {
     return p == pattern.size();
 }
 
-// inline map "{k: v, k2: v2}" → pairs
+// inline map "{k: v, k2: {..}, k3: [..]}" → pairs; comma split is {}/[]-depth aware
+// so nested flow collections stay intact as values
 std::vector<std::pair<std::string,std::string>> cc_parseInlineMap(const std::string& v) {
     std::vector<std::pair<std::string,std::string>> out;
     std::string s = cc_trim(v);
     if (s.size() < 2 || s.front() != '{' || s.back() != '}') return out;
     s = s.substr(1, s.size() - 2);
-    std::stringstream ss(s);
-    std::string item;
-    while (std::getline(ss, item, ',')) {
+    std::vector<std::string> items;
+    int depth = 0; std::string cur;
+    for (char c : s) {
+        if (c == '{' || c == '[') ++depth;
+        else if (c == '}' || c == ']') --depth;
+        if (c == ',' && depth == 0) { items.push_back(cur); cur.clear(); }
+        else cur += c;
+    }
+    if (!cc_trim(cur).empty()) items.push_back(cur);
+    for (const auto& item : items) {
         size_t cp = item.find(':');
         if (cp == std::string::npos) continue;
         out.push_back({cc_trim(item.substr(0,cp)), cc_stripQuotes(cc_trim(item.substr(cp+1)))});
@@ -283,11 +296,13 @@ bool parseCclipYaml(const std::string& yamlFile, CcConfig& cfg, ConsoleOutput& c
             continue;
         }
 
-        // inside clips list
-        if (tr.substr(0,2) == "- " && indent > clipsIndent) {
+        // inside clips list — items may sit AT the key's indent (PyYAML default style)
+        int keyIndent = indent;
+        if (tr.substr(0,2) == "- " && indent >= clipsIndent) {
             cfg.clips.push_back(CcRule());
             inClipItem = true; clipItemIndent = indent; clipBlock = 0;
             curCalib = nullptr; calibSub = 0;   // rule vector may reallocate
+            keyIndent = indent + 2;             // effective indent of the key after "- "
             std::string rest = cc_trim(tr.substr(2));
             size_t rcp = rest.find(':');
             if (rcp != std::string::npos) {
@@ -309,7 +324,7 @@ bool parseCclipYaml(const std::string& yamlFile, CcConfig& cfg, ConsoleOutput& c
         if (clipBlock == 2) { cc_applyMaterialKey(r.material, key, val); continue; }
         if (clipBlock == 3) {
             if ((key == "point" || key == "curve") && val.empty()) {
-                curCalib = &r.calib; calibSub = (key == "point") ? 1 : 2; calibSubIndent = indent;
+                curCalib = &r.calib; calibSub = (key == "point") ? 1 : 2; calibSubIndent = keyIndent;
                 if (key == "point") r.calib.hasPoint = true;
                 r.calib.set = true;
             } else cc_applyCalibKey(r.calib, key, val);
@@ -336,17 +351,17 @@ bool parseCclipYaml(const std::string& yamlFile, CcConfig& cfg, ConsoleOutput& c
                 else if (kv.first == "radius")      r.profile.radius = cc_toD(kv.second);
                 else if (kv.first == "tip_rise")    r.profile.tipRise = cc_toD(kv.second);
             }
-            else { clipBlock = 1; clipBlockIndent = indent; }
+            else { clipBlock = 1; clipBlockIndent = keyIndent; }
         }
         else if (key == "material") {
             if (!val.empty() && val[0]=='{') for (const auto& kv : cc_parseInlineMap(val))
                 cc_applyMaterialKey(r.material, kv.first, kv.second);
-            else { clipBlock = 2; clipBlockIndent = indent; }
+            else { clipBlock = 2; clipBlockIndent = keyIndent; }
         }
         else if (key == "calibration") {
             if (!val.empty() && val[0]=='{') for (const auto& kv : cc_parseInlineMap(val))
                 cc_applyCalibKey(r.calib, kv.first, kv.second);
-            else { clipBlock = 3; clipBlockIndent = indent; }
+            else { clipBlock = 3; clipBlockIndent = keyIndent; }
         }
     }
     return true;
@@ -625,6 +640,50 @@ int cc_scanMaxId(const std::vector<std::string>& lines, const std::string& prefi
     return maxId;
 }
 
+// scan corpus = model lines + one level of *INCLUDE file contents (IDs allocated
+// against includes too, so new SECID/MID/SET/CNRB ids cannot collide with them)
+std::vector<std::string> cc_collectScanLines(const std::vector<std::string>& lines,
+                                             const std::string& baseDir) {
+    std::vector<std::string> all = lines;
+    for (size_t i = 0; i < lines.size(); ++i) {
+        if (kw_upper(kw_trim(lines[i])).rfind("*INCLUDE",0) != 0) continue;
+        for (size_t j = i+1; j < lines.size(); ++j) {
+            std::string ft = kw_trim(lines[j]);
+            if (ft.empty() || ft[0]=='$') continue;
+            if (ft[0]=='*') break;
+            std::string path = ft;
+            if (!baseDir.empty() && path.find('/')==std::string::npos && path.find('\\')==std::string::npos)
+                path = baseDir + "/" + path;
+            std::ifstream inc(path);
+            std::string l;
+            while (std::getline(inc, l)) {
+                if (!l.empty() && l.back()=='\r') l.pop_back();
+                all.push_back(l);
+            }
+            break;
+        }
+    }
+    return all;
+}
+
+// max PID over all *PART variants (plain *PART carries a title line too, which
+// cc_scanMaxId would misread — this scanner always skips one title line)
+int cc_scanMaxPartId(const std::vector<std::string>& lines) {
+    int maxId = 0;
+    bool inPart = false, titleDone = false;
+    for (const auto& ln : lines) {
+        std::string tr = kw_trim(ln);
+        if (tr.empty()) continue;
+        if (tr[0]=='*') { inPart = (kw_upper(tr).rfind("*PART",0)==0); titleDone = false; continue; }
+        if (!inPart || tr[0]=='$') continue;
+        if (!titleDone) { titleDone = true; continue; }
+        auto toks = kw_tok10(ln);
+        if (!toks.empty()) { try { maxId = std::max(maxId, std::stoi(toks[0])); } catch(...){} }
+        titleDone = false;
+    }
+    return maxId;
+}
+
 struct CcPartLine { int lineIdx = -1; int secid = 0, mid = 0, hgid = 0; };
 
 CcPartLine cc_findPartLine(const std::vector<std::string>& lines, int targetPid) {
@@ -635,7 +694,8 @@ CcPartLine cc_findPartLine(const std::vector<std::string>& lines, int targetPid)
         if (tr.empty()) continue;
         if (tr[0]=='*') {
             std::string up = kw_upper(tr);
-            inPart = (up=="*PART" || up=="*PART_TITLE"); titleDone = false; continue;
+            inPart = (up.rfind("*PART",0)==0);   // any *PART variant (TITLE/CONTACT/INERTIA...)
+            titleDone = false; continue;
         }
         if (!inPart || tr[0]=='$') continue;
         if (!titleDone) { titleDone = true; continue; }
@@ -663,7 +723,8 @@ bool cc_idShared(const std::vector<std::string>& lines, int fieldIdx, int target
         if (tr.empty()) continue;
         if (tr[0]=='*') {
             std::string up = kw_upper(tr);
-            inPart = (up=="*PART" || up=="*PART_TITLE"); titleDone = false; continue;
+            inPart = (up.rfind("*PART",0)==0);   // any *PART variant (TITLE/CONTACT/INERTIA...)
+            titleDone = false; continue;
         }
         if (!inPart || tr[0]=='$') continue;
         if (!titleDone) { titleDone = true; continue; }
@@ -713,32 +774,53 @@ std::vector<std::string> cc_removeBlockById(const std::vector<std::string>& line
     return out;
 }
 
-// Remove *ELEMENT_SOLID data lines whose PID (2nd 8-char field) is in pids.
-// Drops the keyword line too if its block becomes empty. Returns removed line count.
+// Remove *ELEMENT_SOLID elements whose PID is in pids. Handles the single-line
+// HEX8 form (>=6 fields), the two-line 10-node form (2-field header + node line),
+// and I10/free-format widths (whitespace-first parse; fixed-8 fallback for jammed
+// decks). Drops the keyword line too if its block becomes empty.
+// Returns removed ELEMENT count — the caller cross-checks it against the parsed mesh.
 int cc_removeSolidElements(std::vector<std::string>& lines, const std::set<int>& pids) {
     std::vector<bool> rm(lines.size(), false);
     int removed = 0;
+    auto wsToks = [](const std::string& s) {
+        std::vector<long> t; std::istringstream iss(s); long v;
+        while (iss >> v) t.push_back(v);
+        return t;
+    };
     for (int i = 0; i < (int)lines.size(); ) {
         std::string tr = kw_trim(lines[i]);
         if (tr.empty() || tr[0] != '*') { ++i; continue; }
         if (kw_upper(tr).rfind("*ELEMENT_SOLID",0) != 0) { ++i; continue; }
-        int kwLine = i, end = i + 1, kept = 0;
+        int kwLine = i, end = i + 1, kept = 0, removedHere = 0;
+        std::vector<int> data;   // data-line indices of this block
         while (end < (int)lines.size()) {
             std::string et = kw_trim(lines[end]);
             if (!et.empty() && et[0]=='*') break;
-            if (!et.empty() && et[0] != '$') {
-                int pid = -1;
-                if ((int)lines[end].size() >= 16) pid = cc_toI(cc_trim(lines[end].substr(8,8)), -1);
-                if (pid < 0) {   // whitespace-split fallback
-                    std::istringstream iss(lines[end]);
-                    long a=-1, b=-1; iss >> a >> b; pid = (int)b;
-                }
-                if (pids.count(pid)) { rm[end] = true; ++removed; }
-                else ++kept;
-            }
+            if (!et.empty() && et[0] != '$') data.push_back(end);
             ++end;
         }
-        if (kept == 0 && removed > 0) {
+        for (size_t d = 0; d < data.size(); ) {
+            int li = data[d];
+            auto toks = wsToks(lines[li]);
+            int pid = -1;
+            size_t consume = 1;
+            if (toks.size() == 2) {                       // two-line 10-node header
+                pid = (int)toks[1];
+                consume = (d + 1 < data.size()) ? 2 : 1;  // header + node line
+            } else if (toks.size() >= 6) {                // single-line element
+                pid = (int)toks[1];
+            } else if (toks.size() <= 1 && (int)lines[li].size() >= 16) {
+                pid = cc_toI(cc_trim(lines[li].substr(8,8)), -1);   // jammed fixed-8
+            }
+            if (pid >= 0 && pids.count(pid)) {
+                for (size_t c = 0; c < consume; ++c) rm[data[d+c]] = true;
+                ++removed; ++removedHere;
+            } else {
+                ++kept;
+            }
+            d += consume;
+        }
+        if (kept == 0 && removedHere > 0) {
             rm[kwLine] = true;
             for (int k = kwLine+1; k < end; ++k) rm[k] = true;   // drop leftover comments too
         }
@@ -834,7 +916,10 @@ void cc_writeContactNodesToSurface(std::ostream& out, int ssid, int msid) {
     snprintf(buf, sizeof(buf), "%10.2f%10.2f%10.1f%10.1f%10.1f%10d%10.1f%10s\n",
              0.2, 0.2, 0.0, 0.0, 0.0, 0, 0.0, "1.0E20");
     out << buf;
-    out << "       1.0       1.0       1.0       1.0\n";
+    // Card 3: SFS SFM SST MST — SST/MST=0.0 keeps the element contact thickness
+    // (a nonzero value would OVERRIDE it and cause spurious initial penetration)
+    out << "$#     sfs       sfm       sst       mst\n";
+    out << "       1.0       1.0       0.0       0.0\n";
 }
 
 // ---------------------------------------------------------------------------
@@ -935,13 +1020,22 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
     if (targets.empty()) { console.error("[cclip] no target parts resolved"); return 1; }
     console.info("[cclip] Targets: " + std::to_string(targets.size()) + " part(s)");
 
-    // ID bases (mesh IDs + raw-scan for MID/SECID/SET that KFileReader may not track)
+    // ID bases — raw-scan over model lines PLUS one level of *INCLUDE contents,
+    // covering keywords KFileReader may not track (and include-file id spaces)
+    std::string modelDir;
+    {
+        size_t sl = modelPath.find_last_of("/\\");
+        if (sl != std::string::npos) modelDir = modelPath.substr(0, sl);
+    }
+    std::vector<std::string> scanLines = cc_collectScanLines(lines, modelDir);
     int nextNid  = mesh.getMaxNodeId() + 1;
     int nextEid  = mesh.getMaxElementId() + 1;
-    int nextSec  = std::max(cc_scanMaxId(lines, "*SECTION"), 0) + 1;
-    int nextMid  = std::max(cc_scanMaxId(lines, "*MAT"), 0) + 1;
-    int nextSet  = std::max(cc_scanMaxId(lines, "*SET"), 0) + 1;
-    int nextPidX = 0;   // extra part-like ids (CNRB)
+    int nextSec  = std::max(cc_scanMaxId(scanLines, "*SECTION"), 0) + 1;
+    int nextMid  = std::max(cc_scanMaxId(scanLines, "*MAT"), 0) + 1;
+    int nextSet  = std::max(cc_scanMaxId(scanLines, "*SET"), 0) + 1;
+    // extra part-like ids (CNRB shares the part id space with *PART variants)
+    int nextPidX = std::max(cc_scanMaxPartId(scanLines),
+                            cc_scanMaxId(scanLines, "*CONSTRAINED_NODAL_RIGID_BODY"));
     for (const auto& [pid, p] : mesh.getParts()) nextPidX = std::max(nextPidX, pid);
     ++nextPidX;
 
@@ -1005,6 +1099,18 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
             // secant at operating point (guarantees working force); LSQ slope reported as diagnostic
             auto cv = cal.curve;
             std::sort(cv.begin(), cv.end());
+            for (const auto& pt : cv)
+                if (pt.first <= 0 || pt.second <= 0) {
+                    console.error("[cclip] curve points must be positive (deflection, force) — got (" +
+                                  std::to_string(pt.first) + ", " + std::to_string(pt.second) +
+                                  "); record compression magnitudes, not signed values");
+                    return 1;
+                }
+            if (deltaOp <= 0) { console.error("[cclip] operating_deflection must be positive"); return 1; }
+            if (deltaOp > cv.back().first * (1.0 + 1e-9))
+                console.warning("[cclip] operating_deflection " + std::to_string(deltaOp) +
+                                " exceeds curve range (max " + std::to_string(cv.back().first) +
+                                ") — force saturated at the last point (stiffness likely underestimated)");
             double Fop = 0;
             if (deltaOp <= cv.front().first) Fop = cv.front().second * (deltaOp / cv.front().first);
             else if (deltaOp >= cv.back().first) Fop = cv.back().second;
@@ -1014,6 +1120,7 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
                     Fop = cv[i].second + a * (cv[i+1].second - cv[i].second);
                     break;
                 }
+            if (!(Fop > 0)) { console.error("[cclip] interpolated working force must be positive"); return 1; }
             kTarget = Fop / deltaOp;
             Fwork = Fop;
             double sdF = 0, sdd = 0;
@@ -1028,6 +1135,11 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
         b.kTarget = kTarget; b.Fwork = Fwork;
 
         // ---- profile + calibration
+        if (r.nArc < 2 || r.nFlat < 1 || r.nWidth < 1) {
+            console.error("[cclip] pid " + std::to_string(pid) +
+                          ": invalid discretization (need n_arc>=2, n_flat>=1, n_width>=1)");
+            return 1;
+        }
         double W = (r.width > 0) ? r.width : fr.W;
         // tip rise > working deflection keeps the pressed shoulder clear of the mating plane
         double rise = (r.profile.tipRise > 0) ? r.profile.tipRise
@@ -1227,8 +1339,12 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
                     bat::writeNode(dk, dn, g[0], g[1], g[2]);
                     localNid[i * (nW+1) + j] = dn++;
                 }
-            // plate: 4 nodes just above the top flat, spanning contact flat × width
-            double gap = 0.01 * t + t / 2.0;
+            // plate: 4 nodes just above the contact arm. Midplane standoff covers both
+            // shell contact thicknesses (clip t/2 + plate t/2) plus a small clearance,
+            // so contact initializes penetration-free; the ram travel adds the same
+            // clearance so the tip still compresses by exactly deltaWork.
+            const double plateT = 0.5, clearance = 0.01;
+            double gap = clearance + t / 2.0 + plateT / 2.0;
             double zPlate = Hfree + gap;
             double xA = prof.Lb - prof.Lt, xB = prof.Lb;
             int pn[4];
@@ -1252,7 +1368,7 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
             bat::writeSectionShell(dk, 1, r.elform, t);
             cc_writeMatElastic(dk, 1, rhoClip, E, mat.nu, "CCLIP");
             bat::writePart(dk, "PRESS_PLATE", 2, 2, 2);
-            bat::writeSectionShell(dk, 2, 2, 0.5);
+            bat::writeSectionShell(dk, 2, 2, plateT);
             // plate free only along compression axis: CON1 code by axis (x→5, y→6, z→4), all rotations fixed
             int con1 = (fr.iw == 0) ? 5 : (fr.iw == 1) ? 6 : 4;
             cc_writeMatRigid(dk, 2, 7.85e-9, 210000.0, 0.3, 1, con1, 7, "PRESS_PLATE");
@@ -1269,9 +1385,10 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
                     for (int j = 0; j <= nW; ++j) tipN.push_back(localNid[i*(nW+1)+j]);
             bat::writeSetNodeList(dk, 2, "CCLIP_TIP", tipN);
             cc_writeContactNodesToSurface(dk, 2, 2);
-            // prescribed compression: plate moves toward the clip (local −w) so the tip
-            // lands at h_inst; global displacement sign follows the frame's sw
-            bat::writeDefineCurve(dk, 1, "cclip_compress", {{0.0, 0.0}, {1.0, -fr.sw * (deltaWork + gap)}});
+            // prescribed compression: ram closes the surface clearance then compresses the
+            // tip by exactly deltaWork (contact thicknesses handled by LS-DYNA, SST/MST=0);
+            // global displacement sign follows the frame's sw
+            bat::writeDefineCurve(dk, 1, "cclip_compress", {{0.0, 0.0}, {1.0, -fr.sw * (deltaWork + clearance)}});
             cc_writeBpmRigid(dk, 2, fr.iw + 1, 1);
             // implicit quasi-static (card text mirrors implicit op level defaults)
             dk << "*CONTROL_IMPLICIT_GENERAL\n$#  imflag       dt0\n         1       0.1\n";
@@ -1337,8 +1454,17 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
     // ------------------------------------------------------------------
     std::set<int> pidSet;
     for (const auto& b : builds) pidSet.insert(b.pid);
-    int removedLines = cc_removeSolidElements(lines, pidSet);
-    console.info("[cclip] Removed " + std::to_string(removedLines) + " solid element line(s)");
+    int expectedElems = 0;
+    for (const auto& [eid, elem] : mesh.getElements())
+        if (pidSet.count(elem.partId)) ++expectedElems;
+    int removedElems = cc_removeSolidElements(lines, pidSet);
+    if (removedElems != expectedElems) {
+        console.error("[cclip] element removal mismatch: parsed mesh has " +
+                      std::to_string(expectedElems) + " target element(s) but splice removed " +
+                      std::to_string(removedElems) + " — unsupported *ELEMENT_SOLID layout; aborting to avoid a corrupt deck");
+        return 1;
+    }
+    console.info("[cclip] Removed " + std::to_string(removedElems) + " solid element(s)");
 
     for (const auto& b : builds) {
         CcPartLine pl = cc_findPartLine(lines, b.pid);
@@ -1356,7 +1482,13 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
     }
     bool anyStress = false;
     for (const auto& b : builds) if (!b.stress.empty()) anyStress = true;
+    // *INCLUDE must be relative to the DECK's directory (LS-DYNA convention),
+    // so use the basename even when output points into a subdirectory
     std::string dynainName = outPrefix + ".dynain";
+    {
+        size_t sl = dynainName.find_last_of("/\\");
+        if (sl != std::string::npos) dynainName = dynainName.substr(sl + 1);
+    }
     if (anyStress) {
         std::vector<std::pair<int,const CcStressRow*>> rows;
         for (const auto& b : builds)

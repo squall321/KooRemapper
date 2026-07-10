@@ -75,6 +75,12 @@ def main():
         if os.path.exists(dynain):
             stress = parse_kfile(dynain)[3]
 
+    deck_mode = rep.get("mode") == "deck"
+    if deck_mode:
+        print("[mode=deck] main deck holds the FREE-state clip (no prestress by design) — "
+              "checking free height + stiffness only; press verification belongs to the "
+              "LS-DYNA compression deck (rcforc)")
+
     failures = 0
     for clip in rep["clips"]:
         pid = clip["pid"]
@@ -84,16 +90,21 @@ def main():
         pts = [nodes[n] for n in clip_nids if n in nodes]
         print(f"[clip pid {pid}] shells={len(clip_shells)} nodes={len(pts)}")
 
-        # 1. geometry: pressed max height == installed_height
+        # 1. geometry: pressed max height == installed_height (deck mode: free height)
         wvals = [p[iw] for p in pts]
         height = max(wvals) - min(wvals)
-        h_ok = abs(height - clip["installed_height"]) <= 0.01 * clip["installed_height"] + 1e-6
-        print(f"  [1] pressed height {height:.4f} vs installed {clip['installed_height']:.4f} "
-              f"→ {'PASS' if h_ok else 'FAIL'}")
+        target_h = clip["free_height"] if deck_mode else clip["installed_height"]
+        h_ok = abs(height - target_h) <= 0.01 * target_h + 1e-6
+        print(f"  [1] {'free' if deck_mode else 'pressed'} height {height:.4f} vs "
+              f"{target_h:.4f} → {'PASS' if h_ok else 'FAIL'}")
 
         # 2. stiffness
         k_ok = clip["rel_error"] <= 0.05
         print(f"  [2] stiffness rel_error {clip['rel_error']:.2e} → {'PASS' if k_ok else 'FAIL'}")
+
+        if deck_mode:   # [3][4] are pressed-state checks — not applicable to the free deck
+            failures += sum(not ok for ok in (h_ok, k_ok))
+            continue
 
         # 3. bending sign flip (trace(top) == -trace(bot)) on stressed rows
         eids = {e[0] for e in clip_shells}
