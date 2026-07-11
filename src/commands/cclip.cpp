@@ -60,6 +60,8 @@ struct CcCalib {
 struct CcRule {
     int pid = 0;
     std::string matchPart;
+    bool autoDetect = false;            // find clip parts by name keywords
+    std::vector<std::string> keywords;  // optional override of the built-in keyword set
     double freeHeight = 0.0, overtravel = 0.0;
     double width = 0.0, thickness = 0.0;
     CcProfileCfg profile;
@@ -165,6 +167,26 @@ std::vector<std::pair<std::string,std::string>> cc_parseInlineMap(const std::str
         size_t cp = item.find(':');
         if (cp == std::string::npos) continue;
         out.push_back({cc_trim(item.substr(0,cp)), cc_stripQuotes(cc_trim(item.substr(cp+1)))});
+    }
+    return out;
+}
+
+std::string cc_lower(const std::string& s) {
+    std::string r = s;
+    std::transform(r.begin(), r.end(), r.begin(), [](unsigned char c){ return (char)std::tolower(c); });
+    return r;
+}
+
+// inline string list "[a, b, \"c d\"]" → items
+std::vector<std::string> cc_parseInlineStrList(const std::string& v) {
+    std::vector<std::string> out;
+    std::string s = cc_trim(v);
+    if (s.size() >= 2 && s.front() == '[' && s.back() == ']') s = s.substr(1, s.size() - 2);
+    std::stringstream ss(s);
+    std::string it;
+    while (std::getline(ss, it, ',')) {
+        std::string t = cc_stripQuotes(cc_trim(it));
+        if (!t.empty()) out.push_back(t);
     }
     return out;
 }
@@ -338,6 +360,8 @@ bool parseCclipYaml(const std::string& yamlFile, CcConfig& cfg, ConsoleOutput& c
 
         if      (key == "pid")         r.pid = cc_toI(val);
         else if (key == "match_part")  r.matchPart = val;
+        else if (key == "auto")        r.autoDetect = cc_toBool(val);
+        else if (key == "keywords")    r.keywords = cc_parseInlineStrList(val);
         else if (key == "free_height") r.freeHeight = cc_toD(val);
         else if (key == "overtravel")  r.overtravel = cc_toD(val);
         else if (key == "width")       r.width = cc_toD(val);
@@ -1038,8 +1062,29 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
                 }
             }
             if (!any) console.warning("[cclip] match_part '" + r.matchPart + "' matched no parts");
+        } else if (r.autoDetect) {
+            // detect clip parts by name keyword (spring contacts are conventionally named);
+            // only parts that actually have elements are eligible. Reported, never silent.
+            static const std::vector<std::string> DEF = {
+                "clip", "cclip", "contact", "spring", "gnd", "ground", "shield", "finger", "pogo"};
+            const auto& kws = r.keywords.empty() ? DEF : r.keywords;
+            std::set<int> withEls;
+            for (const auto& [eid, el] : mesh.getElements()) withEls.insert(el.partId);
+            int hits = 0;
+            for (const auto& [pid, part] : mesh.getParts()) {
+                if (!withEls.count(pid)) continue;
+                std::string title = cc_lower(part.name);
+                bool kw = false;
+                for (const auto& k : kws) if (title.find(cc_lower(k)) != std::string::npos) { kw = true; break; }
+                if (kw && seen.insert(pid).second) {
+                    targets.push_back({pid, &r}); ++hits;
+                    console.info("[cclip] auto-detected clip: PID " + std::to_string(pid) + " '" + part.name + "'");
+                }
+            }
+            if (!hits) console.warning("[cclip] auto: no parts matched clip keywords "
+                                       "(name them clip/contact/spring/gnd/shield or set pid/match_part/keywords)");
         } else {
-            console.error("[cclip] clip rule needs pid or match_part"); return 1;
+            console.error("[cclip] clip rule needs pid, match_part, or auto"); return 1;
         }
     }
     if (targets.empty()) { console.error("[cclip] no target parts resolved"); return 1; }

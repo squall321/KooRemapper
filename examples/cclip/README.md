@@ -61,6 +61,9 @@ analytic 산출물은 `KooRemapper relax`로 DR 덱을 구성해 접촉력 재�
   올-솔리드 어셈블리와 요소 타입 일치, 쉘 접촉두께 오프셋 없음. 얇은 접점엔 쉘이 더 효율적이라
   기본은 쉘. 솔리드는 미드서피스 ±t/2로 실제 두께를 가져 bbox 높이가 설치높이+~t.
 - **여러 클립 일괄**: `clips: [- match_part: "CCLIP_*"]` — 파트 타이틀 글롭, 매치마다 클립 1개.
+- **자동 감지**: `clips: [- auto: true]` — pid/match_part 없이 이름 키워드
+  (clip/contact/spring/gnd/shield…)로 클립 파트를 찾아 일괄 치환(감지 결과는 로그로 보고).
+  `keywords: ["ANT","GND"]`로 키워드 지정 가능. 요소가 없는 파트는 제외.
 - **바닥 부착**: `attach: cnrb` — 발 노드 + attach_tol 내 주변(보드) 노드를 *CONSTRAINED_NODAL_RIGID_BODY로 묶음.
 - **초기응력 별도 파일**: `stress_output: include` — `<output>.dynain` + *INCLUDE.
 - **재료/캘리브레이션 클립별 오버라이드**: clips 항목 안에 `material:`/`calibration:` 지정.

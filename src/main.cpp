@@ -1459,7 +1459,7 @@ int main(int argc, char* argv[]) {
                 console.println("    point: {deflection: 0.15, force: 1.2}   # or curve: [[d,F],...]");
                 console.println("    tolerance: 0.05");
                 console.println("  clips:");
-                console.println("    - pid: 2                   # or match_part: \"CCLIP_*\"");
+                console.println("    - pid: 2                   # or match_part: \"CCLIP_*\" or auto: true");
                 console.println("      overtravel: 0.15         # free height = installed + overtravel");
                 std::cout << "\n";
                 console.println("Notes:");
