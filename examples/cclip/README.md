@@ -53,6 +53,12 @@ python3 ../../tools/cclip_check.py clip_board_cclip.k clip_board_cclip_cclip_rep
 LS-DYNA가 있으면: deck 모드 덱을 실행해 rcforc의 반력-변위를 입력 F-δ와 대조하고,
 analytic 산출물은 `KooRemapper relax`로 DR 덱을 구성해 접촉력 재현을 확인할 수 있다.
 
+**실솔버 검증 완료** — LS-DYNA MPP double R16.1.1(implicit)로 두 검증을 수행했다
+([validation/](validation/) 참조). ① 압축덱 F-δ: FE 강성 9.17 vs 캘리브 8.00 N/mm
+(+15%, 빔이론의 곡률강성 무시에 의한 타당한 계통오차, 전 구간 선형). ② 선응력
+스프링백: 발 고정+초기응력만으로 팁이 +0.162mm 복원(기대 +0.15, 7.8%) — 초기응력의
+부호·크기가 눌림량을 정확히 인코딩함을 실솔버로 확인.
+
 ## Variants
 
 - **방향성**: `axis: "-z"` — 아래에서 눌리는 클립(발이 윗면, 쉴드캔 하면 접점 등).
