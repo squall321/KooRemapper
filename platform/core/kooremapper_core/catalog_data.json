@@ -12382,6 +12382,144 @@
         }
       ],
       "presets": null
+    },
+    {
+      "name": "modelmeta",
+      "category": "inspect",
+      "summary": "Extract structured model metadata JSON — per-part free-surface area, volume, x/y/z projected areas, material (K-file card + bundled DB), and part-to-part contact connectivity.",
+      "description": "Reads a K-file and writes <output>_modelmeta.json with per-part geometric metrics (external free-surface area, volume via face-pyramid decomposition, projected areas onto the x/y/z planes), material metadata (PID→MID mapping, *MAT card keyword/title plus structurally parsed E/nu/rho/sigy, and a bundled material-DB lookup with name/category/representative properties reported with an explicit match_basis), and part connectivity resolved from *CONTACT definitions (SSID/MSID of PID, SET_PART, SET_NODE and SET_SEGMENT are resolved to part id lists; single-surface contacts are recorded as a scope, not exploded into pairs). Optional geometric contact-pair detection finds touching parts without *CONTACT cards. Conventions: solid parts use closed free-surface sums with projected areas halved (front/back faces cancel); shell parts use one-sided element areas without halving and volume 0. Read-only: the input model is never modified.",
+      "invocation": "yaml",
+      "config_style": "structured",
+      "takes_kfile": true,
+      "requires_gmsh": false,
+      "requires_tetgen": false,
+      "params": [
+        {
+          "name": "model",
+          "type": "file",
+          "role": "yaml_field",
+          "yaml_path": "model",
+          "required": true,
+          "description": "Input LS-DYNA K-file to analyze (read-only; *INCLUDE followed one level)"
+        },
+        {
+          "name": "output",
+          "type": "string",
+          "role": "yaml_field",
+          "yaml_path": "output",
+          "required": false,
+          "description": "Output basename; _modelmeta.json auto-appended (default: model name without extension)"
+        },
+        {
+          "name": "detect",
+          "type": "boolean",
+          "role": "yaml_field",
+          "yaml_path": "detect",
+          "required": false,
+          "description": "Also run geometric contact-pair detection (spatial hash + gap tolerance) and report geometric_edges — finds touching parts even without *CONTACT cards (default false)"
+        },
+        {
+          "name": "gap_tol",
+          "type": "number",
+          "role": "yaml_field",
+          "yaml_path": "gap_tol",
+          "required": false,
+          "description": "Gap tolerance for geometric detection, model length units (default 0.1)"
+        },
+        {
+          "name": "normal_angle",
+          "type": "number",
+          "role": "yaml_field",
+          "yaml_path": "normal_angle",
+          "required": false,
+          "description": "Max face-normal angle in degrees for geometric detection (default 45)"
+        },
+        {
+          "name": "material_db",
+          "type": "file",
+          "role": "yaml_field",
+          "yaml_path": "material_db",
+          "required": false,
+          "description": "Material DB JSON path (default: bundled materials/material_db.json next to the executable)"
+        },
+        {
+          "name": "db_mid_fallback",
+          "type": "boolean",
+          "role": "yaml_field",
+          "yaml_path": "db_mid_fallback",
+          "required": false,
+          "description": "Allow DB lookup by MID equality when name matching fails — off by default because model-local MIDs collide with DB numbering by coincidence"
+        },
+        {
+          "name": "max_edges",
+          "type": "integer",
+          "role": "yaml_field",
+          "yaml_path": "max_edges",
+          "required": false,
+          "description": "Cap on emitted contact edges; edges_truncated flag set when hit (default 2000)"
+        }
+      ],
+      "example": {
+        "args": {
+          "model": "clip_board.k",
+          "detect": true,
+          "gap_tol": 0.2
+        },
+        "note": "파트별 외부 표면적·부피·정사영 면적·재료(카드+DB)·접촉 connectivity를 clip_board_modelmeta.json으로 추출. detect: true면 *CONTACT 없이도 기하학적으로 닿는 파트쌍을 찾는다. Extracts per-part metrics, materials, and part connectivity to JSON; with detect the op also finds geometrically touching part pairs."
+      },
+      "example_folder": "/home/koopark/claude/KooRemapper/examples/modelmeta",
+      "notes": "Read-only inspection op — emits JSON only, never modifies the model. match_basis in the db block reports how the material was matched (name-mat: *MAT_TITLE name, name-part: part title, mid: opt-in MID equality). Single-surface contacts are reported with their part scope instead of pairwise edges. Designed as the metadata source for AI Data Hub SIM-record enrichment (parts/connectivity/material linkage).",
+      "keys": [
+        {
+          "path": "model",
+          "type": "file",
+          "required": true,
+          "desc": "Input K-file to analyze"
+        },
+        {
+          "path": "output",
+          "type": "string",
+          "required": false,
+          "desc": "Output basename; _modelmeta.json appended"
+        },
+        {
+          "path": "detect",
+          "type": "boolean",
+          "required": false,
+          "desc": "Geometric contact-pair detection on/off"
+        },
+        {
+          "path": "gap_tol",
+          "type": "number",
+          "required": false,
+          "desc": "Detection gap tolerance"
+        },
+        {
+          "path": "normal_angle",
+          "type": "number",
+          "required": false,
+          "desc": "Detection normal angle limit (deg)"
+        },
+        {
+          "path": "material_db",
+          "type": "file",
+          "required": false,
+          "desc": "Material DB JSON (default: bundled)"
+        },
+        {
+          "path": "db_mid_fallback",
+          "type": "boolean",
+          "required": false,
+          "desc": "Opt-in MID-equality DB fallback"
+        },
+        {
+          "path": "max_edges",
+          "type": "integer",
+          "required": false,
+          "desc": "Contact edge cap (default 2000)"
+        }
+      ],
+      "presets": null
     }
   ]
 }

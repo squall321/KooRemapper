@@ -1,0 +1,8 @@
+# K파일 구조화 메타 추출 — 파트별 기하·재료·connectivity JSON
+# KooRemapper modelmeta examples/modelmeta/modelmeta.yaml
+model: clip_board.k        # 분석 대상 (읽기 전용, *INCLUDE 1단계 추적)
+detect: true               # *CONTACT 없이도 기하학적으로 닿는 파트쌍 탐지
+gap_tol: 0.2               # 탐지 갭 허용치 (모델 길이 단위)
+# output: my_model         # 생략 시 model 이름에서 유도 → <model>_modelmeta.json
+# material_db: /path/material_db.json   # 생략 시 실행파일 옆 번들 DB
+# db_mid_fallback: false   # MID 일치 폴백 (로컬 MID 충돌 위험 — opt-in)

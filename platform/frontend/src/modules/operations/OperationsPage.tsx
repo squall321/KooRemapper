@@ -18,6 +18,7 @@ const HOT_CATS = new Set(['material', 'deform'])
 // 비전문가용 한국어 요약. 없으면 API의 summary(영문)로 폴백 → 기능이 늘어도 자동 노출.
 const KO: Record<string, string> = {
   cclip: '육면체 파트를 C형 스프링 클립(쉘)으로 치환 — F-δ 데이터로 강성 보정 후 눌린 상태+초기응력으로 출력',
+  modelmeta: 'K파일 구조화 메타 추출 — 파트별 표면적·부피·정사영·재료(카드+DB)·접촉 connectivity를 JSON으로',
   matdb: '525종 DB에서 부품 재료를 자동으로 찾아 교체',
   matswap: '특정 재료 정의를 다른 재료로 치환',
   prestress: '조립 굽힘 응력을 해석 시작점으로 반영',

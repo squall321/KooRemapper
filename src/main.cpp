@@ -68,6 +68,7 @@
 #include "commands/meshfix.h"
 #include "commands/surface_extract.h"
 #include "commands/cclip.h"
+#include "commands/modelmeta.h"
 
 #include <iostream>
 #include <fstream>
@@ -191,6 +192,7 @@ int main(int argc, char* argv[]) {
         console.println("  hfdamp      Insert high-frequency damping (*DAMPING_FREQUENCY_RANGE_DEFORM)");
         console.println("  battery     Generate battery cell K-file (stacked/wound, Phase 1+2)");
         console.println("  cclip       Replace hex box parts with calibrated C-clip spring contacts");
+        console.println("  modelmeta   Extract per-part metrics/materials/connectivity to JSON");
         console.println("  info        Display information about a mesh file");
         console.println("  help        Show help for a command");
         console.println("  version     Show version information");
@@ -1513,6 +1515,7 @@ int main(int argc, char* argv[]) {
             console.println("  wrap         Apply winding tension prestress (hoop + radial)");
             console.println("  update       Update node coordinates from dynain/k-file");
             console.println("  cclip        Replace hex box parts with calibrated C-clip spring contacts");
+            console.println("  modelmeta    Extract per-part metrics/materials/connectivity to JSON");
             console.println("  info         Display information about a mesh file");
             console.println("  help         Show help for a command");
             console.println("  version      Show version information");
@@ -2625,6 +2628,24 @@ int main(int argc, char* argv[]) {
         }
         printBanner(console);
         return runStrip(argv[2], console);
+    }
+
+    // Model metadata extraction (per-part metrics + materials + connectivity)
+    // @lat: [[commands/modelmeta]]
+    if (command == "modelmeta") {
+        if (argc < 3) {
+            console.error("Usage: KooRemapper modelmeta <config.yaml>");
+            console.info("Extracts structured model metadata to <output>_modelmeta.json:");
+            console.info("  per-part free-surface area, volume, x/y/z projected areas,");
+            console.info("  material (K-file card + bundled DB lookup), and part-to-part");
+            console.info("  connectivity from *CONTACT (optional geometric detection).");
+            console.info("Minimal config:");
+            console.info("  model: model.k");
+            console.info("  detect: false        # true = geometric contact pair detection");
+            return 1;
+        }
+        printBanner(console);
+        return runModelmeta(argv[2], console);
     }
 
     // C-clip command (spring-contact simplification)
