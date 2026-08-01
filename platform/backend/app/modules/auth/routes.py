@@ -19,12 +19,16 @@ from app.modules.auth.schemas import (
     UserRead,
 )
 from app.modules.auth.services import authenticate
+from app.modules.users.pat import create_token, list_tokens, revoke_token
 from app.shared.auth import get_current_user
 from app.shared.ratelimit import rate_limit
 from app.shared.responses import ok
 from app.shared.security import create_access_token, hash_password, verify_password
 
 router = APIRouter(tags=["auth"])
+
+# 포탈 SSO 로 발급하는 PAT 의 고정 이름 — 재발급 시 직전 것을 식별·회수한다.
+_SSO_PAT_NAME = "HEAX Portal SSO"
 
 
 @router.post("/auth/login", dependencies=[Depends(rate_limit("login", settings.ratelimit_login_per_min))])
@@ -48,12 +52,17 @@ async def auth_config():
 
 @router.post("/auth/sso", dependencies=[Depends(rate_limit("sso", settings.ratelimit_login_per_min))])
 async def sso_login(request: Request, db: AsyncSession = Depends(get_db)):
-    """HEAX Portal 게이트웨이 SSO — 신뢰된 프록시 헤더로 자동 로그인(JIT 프로비저닝).
+    """HEAX Portal 게이트웨이 SSO — 신뢰된 프록시 헤더로 PAT 자동 발급(JIT 프로비저닝).
 
     신뢰 근거는 게이트웨이 공유 시크릿(X-Heax-Gateway-Secret)이다. 이 시크릿은
     HEAXHub Caddy 가 portal_auth 프록시 라우트에서만 주입하며, 직접 접근(:8700/:8443)
     경로는 값을 모르고, 프록시 경로에선 Caddy 의 header set 이 클라이언트 위조
     헤더를 덮어쓴다. KOORM_HEAX_GATEWAY_SECRET 미설정 시 이 엔드포인트는 닫힌다.
+
+    발급 자격증명은 **kr_ PAT** 다 — 웹 SPA(bearer)와 MCP/Claude(동일 kr_ PAT)가
+    같은 자격증명 체계를 쓰도록 통일한다. 짧은 수명 세션 JWT 대신 장수명·폐기가능
+    PAT 라 1시간 만료로 세션이 조용히 죽지 않고, "MCP 토큰" 화면에 노출·회수된다.
+    직전 SSO PAT 는 회수해 사용자당 활성 SSO PAT 를 1개로 유지한다(파일업 방지).
     """
     secret = settings.heax_gateway_secret
     if not secret:
@@ -82,8 +91,13 @@ async def sso_login(request: Request, db: AsyncSession = Depends(get_db)):
         await db.refresh(user)
     if not user.is_active:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "비활성화된 계정입니다.")
-    token = create_access_token(user.id)
-    return ok(TokenResponse(access_token=token).model_dump(), message="SSO 로그인 성공")
+
+    # 직전 SSO PAT 회수 후 새 PAT 발급 — 사용자당 활성 SSO PAT 1개.
+    for t in await list_tokens(db, user.id):
+        if t.name == _SSO_PAT_NAME and t.revoked_at is None:
+            await revoke_token(db, user.id, t.id)
+    _row, plaintext = await create_token(db, user.id, _SSO_PAT_NAME)
+    return ok(TokenResponse(access_token=plaintext).model_dump(), message="SSO 로그인 성공")
 
 
 @router.post("/auth/signup", dependencies=[Depends(rate_limit("signup", settings.ratelimit_signup_per_min))])

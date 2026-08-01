@@ -304,24 +304,30 @@ async def system_capabilities(ctx: Context) -> dict:
 if __name__ == "__main__":
     host = os.environ.get("MCP_HOST", "127.0.0.1")
     mcp.settings.host = host
-    mcp.settings.port = int(os.environ.get("KOORM_MCP_PORT", os.environ.get("MCP_PORT", "8701")))
+    port = int(os.environ.get("KOORM_MCP_PORT", os.environ.get("MCP_PORT", "8701")))
+    mcp.settings.port = port
 
-    if host not in ("127.0.0.1", "localhost", "::1"):
-        from mcp.server.transport_security import TransportSecuritySettings
+    # DNS-rebinding 보호는 항상 ON으로 두되 허용 Host를 명시한다. 리버스 프록시
+    # (nginx, HEAX Caddy)는 Host를 포트 없이(예: '127.0.0.1') 보내기도 하므로
+    # 포트 유무 양쪽을 기본 허용에 넣는다 — 이게 없으면 프록시 경유가 421로 막힌다.
+    from mcp.server.transport_security import TransportSecuritySettings
 
-        allowed = [h.strip() for h in os.environ.get("MCP_ALLOWED_HOSTS", "").split(",") if h.strip()]
-        if not allowed:
-            print(
-                "⚠ MCP bound to non-localhost but MCP_ALLOWED_HOSTS is empty — DNS-rebinding "
-                "protection stays ON and will reject external Host headers. Set MCP_ALLOWED_HOSTS "
-                "(e.g. 'mcp.example.com,10.0.0.5:8701') or front with nginx.",
-                flush=True,
-            )
-        # Keep protection ON by default (secure); operator must allowlist hosts.
-        mcp.settings.transport_security = TransportSecuritySettings(
-            enable_dns_rebinding_protection=True,
-            allowed_hosts=allowed,
-            allowed_origins=[],
+    extra = [h.strip() for h in os.environ.get("MCP_ALLOWED_HOSTS", "").split(",") if h.strip()]
+    allowed = extra + [
+        "127.0.0.1", "localhost", "::1",
+        f"127.0.0.1:{port}", f"localhost:{port}",
+    ]
+    if host not in ("127.0.0.1", "localhost", "::1") and not extra:
+        print(
+            "⚠ MCP bound to non-localhost but MCP_ALLOWED_HOSTS is empty — 외부 도메인으로 "
+            "접근하려면 MCP_ALLOWED_HOSTS(예: 'mcp.example.com')를 설정하라. 프록시(nginx/Caddy) "
+            "뒤에서는 프록시가 보내는 Host를 넣어야 한다.",
+            flush=True,
         )
+    mcp.settings.transport_security = TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=allowed,
+        allowed_origins=[],
+    )
 
     mcp.run(transport="streamable-http")
