@@ -10,6 +10,7 @@ import { OptionReference } from './OptionReference'
 const CAT_LABEL: Record<string, string> = {
   material: '재료', deform: '변형 · 전처리', core: '코어 · 매핑', mesh: '메쉬',
   analysis: '해석 · 솔버', bc: '하중 · 경계 · 접촉', model: '모델 · 정보',
+  inspect: '검사 · 메타',
 }
 const CAT_ORDER = ['material', 'deform', 'core', 'mesh', 'analysis', 'bc', 'model']
 // PreFit 서사에서 앞세우는 카테고리(설계 선반영의 두 기둥)

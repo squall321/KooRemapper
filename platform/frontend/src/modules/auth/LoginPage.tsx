@@ -5,12 +5,17 @@ import { Button, Card, CardBody, Input, Label } from '@/shared/ui/ui'
 import { errorMessage } from '@/shared/api/client'
 import { getAuthConfig } from '@/shared/api/endpoints'
 
+// 개발 기본 계정 프리필 (seed.sh 기본값) — 배포 빌드에서 끄려면 VITE_DEV_LOGIN=off
+const DEV_PREFILL = import.meta.env.VITE_DEV_LOGIN !== 'off'
+const DEV_EMAIL = DEV_PREFILL ? 'admin@kooremapper.local' : ''
+const DEV_PASSWORD = DEV_PREFILL ? 'admin' : ''
+
 export function LoginPage() {
   const { login, signup } = useAuth()
   const [mode, setMode] = useState<'login' | 'signup'>('login')
   const [allowSignup, setAllowSignup] = useState(false)
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
+  const [email, setEmail] = useState(DEV_EMAIL)
+  const [password, setPassword] = useState(DEV_PASSWORD)
   const [displayName, setDisplayName] = useState('')
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -65,6 +70,11 @@ export function LoginPage() {
               <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} />
             </div>
             {err && <div className="text-xs text-danger">{err}</div>}
+            {DEV_PREFILL && mode === 'login' && (
+              <div className="text-xs text-muted-foreground">
+                개발 서버 기본 계정이 입력되어 있습니다 (admin@kooremapper.local).
+              </div>
+            )}
             <Button type="submit" variant="primary" className="w-full" disabled={busy}>
               {busy ? '처리 중…' : mode === 'signup' ? '회원가입' : '로그인'}
             </Button>
