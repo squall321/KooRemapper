@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     jwt_access_ttl_min: int = 720  # 12h
     pat_default_expires_days: int = 90
     allow_signup: bool = True  # public /auth/signup enabled
+    # HEAX Portal 게이트웨이 SSO 공유 시크릿 — HEAXHub gateway_shared_secret 와
+    # 동일 값. 비우면 /auth/sso 비활성(404).
+    heax_gateway_secret: str = ""
 
     # --- rate limiting (in-memory sliding window) ---
     ratelimit_enabled: bool = True

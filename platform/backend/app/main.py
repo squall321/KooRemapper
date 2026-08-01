@@ -108,13 +108,21 @@ def _mount_frontend_if_configured(app: FastAPI) -> None:
         app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
 
     index_file = dist_path / "index.html"
+    # HEAX 포탈 프록시(/apps/kooremapper/) 경유 요청용 index — base 가 서브패스로
+    # 구워진 빌드. 게이트웨이 헤더 존재로 판별한다 (build-frontend.sh 가 생성).
+    portal_index = dist_path / "index.portal.html"
 
-    @app.get("/", include_in_schema=False)
-    def _serve_index() -> FileResponse:
+    def _index_for(request: Request) -> FileResponse:
+        if portal_index.is_file() and request.headers.get("x-heax-gateway-secret"):
+            return FileResponse(portal_index)
         return FileResponse(index_file)
 
+    @app.get("/", include_in_schema=False)
+    def _serve_index(request: Request) -> FileResponse:
+        return _index_for(request)
+
     @app.get("/{full_path:path}", include_in_schema=False)
-    def _spa_fallback(full_path: str, _request: Request):
+    def _spa_fallback(full_path: str, request: Request):
         if full_path.startswith("api/"):
             return JSONResponse(
                 {"success": False, "data": None,
@@ -124,7 +132,7 @@ def _mount_frontend_if_configured(app: FastAPI) -> None:
         candidate = dist_path / full_path
         if candidate.is_file():
             return FileResponse(candidate)
-        return FileResponse(index_file)
+        return _index_for(request)
 
     logger.info("Serving frontend dist from %s", dist_path)
 

@@ -22,6 +22,11 @@ export async function getAuthConfig(): Promise<{ allow_signup: boolean }> {
   const { data } = await api.get('/auth/config')
   return unwrap<{ allow_signup: boolean }>(data)
 }
+/** HEAX 포탈 게이트웨이 SSO — 프록시 헤더 기반 자동 로그인 (미구성/미로그인 시 throw). */
+export async function ssoLogin(): Promise<string> {
+  const { data } = await api.post('/auth/sso')
+  return unwrap<{ access_token: string }>(data).access_token
+}
 
 // tokens
 export async function listTokens(): Promise<TokenInfo[]> {

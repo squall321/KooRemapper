@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+import hmac
+import secrets
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sqlalchemy import select
@@ -41,6 +44,46 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
 async def auth_config():
     """Public: lets the login screen know whether signup is enabled."""
     return ok({"allow_signup": settings.allow_signup})
+
+
+@router.post("/auth/sso", dependencies=[Depends(rate_limit("sso", settings.ratelimit_login_per_min))])
+async def sso_login(request: Request, db: AsyncSession = Depends(get_db)):
+    """HEAX Portal 게이트웨이 SSO — 신뢰된 프록시 헤더로 자동 로그인(JIT 프로비저닝).
+
+    신뢰 근거는 게이트웨이 공유 시크릿(X-Heax-Gateway-Secret)이다. 이 시크릿은
+    HEAXHub Caddy 가 portal_auth 프록시 라우트에서만 주입하며, 직접 접근(:8700/:8443)
+    경로는 값을 모르고, 프록시 경로에선 Caddy 의 header set 이 클라이언트 위조
+    헤더를 덮어쓴다. KOORM_HEAX_GATEWAY_SECRET 미설정 시 이 엔드포인트는 닫힌다.
+    """
+    secret = settings.heax_gateway_secret
+    if not secret:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "SSO가 구성되어 있지 않습니다.")
+    provided = request.headers.get("x-heax-gateway-secret", "")
+    if not hmac.compare_digest(provided, secret):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "게이트웨이 검증 실패.")
+    email = (request.headers.get("x-heax-user-email") or "").strip().lower()
+    if not email or "@" not in email:
+        # 익명 공개앱 통과(포탈 미로그인) — 자동 로그인 대상 아님.
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "포탈 로그인 정보가 없습니다.")
+
+    user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
+    if user is None:
+        # JIT 프로비저닝 — 비밀번호 로그인 불가 계정(무작위 해시 placeholder).
+        display = (request.headers.get("x-heax-user-name") or "").strip() or None
+        user = User(
+            email=email,
+            password_hash=hash_password(secrets.token_urlsafe(32)),
+            display_name=display,
+            is_active=True,
+            is_system_admin=False,
+        )
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+    if not user.is_active:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "비활성화된 계정입니다.")
+    token = create_access_token(user.id)
+    return ok(TokenResponse(access_token=token).model_dump(), message="SSO 로그인 성공")
 
 
 @router.post("/auth/signup", dependencies=[Depends(rate_limit("signup", settings.ratelimit_signup_per_min))])

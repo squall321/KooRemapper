@@ -18,7 +18,8 @@ createRoot(document.getElementById('root')!).render(
       <QueryClientProvider client={queryClient}>
         <ThemeProvider>
           <AuthProvider>
-            <BrowserRouter>
+            {/* 서브패스 배포(HEAX 포탈) 대응 — BASE_URL 이 basename 이 된다 */}
+            <BrowserRouter basename={import.meta.env.BASE_URL}>
               <App />
             </BrowserRouter>
           </AuthProvider>

@@ -11,7 +11,10 @@ export function setToken(t: string | null) {
   else localStorage.removeItem(TOKEN_KEY)
 }
 
-export const api = axios.create({ baseURL: '/api/v1' })
+// 서브패스 배포(HEAX 포탈 /apps/kooremapper/) 대응 — BASE_URL 기준으로 API 경로 파생.
+// standalone 빌드는 BASE_URL '/' → '/api/v1' 그대로.
+const base = import.meta.env.BASE_URL.replace(/\/$/, '')
+export const api = axios.create({ baseURL: `${base}/api/v1` })
 
 api.interceptors.request.use((cfg) => {
   const t = getToken()
