@@ -7,6 +7,7 @@ import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Spinner } from '
 import { fmtBytes } from '@/shared/lib/cn'
 import { errorMessage } from '@/shared/api/client'
 import { ConfirmDialog } from '@/shared/components/ConfirmDialog'
+import { ConnectivityView } from './ConnectivityView'
 
 export function FilePanel({ sessionId, files }: { sessionId: string; files: SessionFile[] }) {
   const qc = useQueryClient()
@@ -78,6 +79,12 @@ export function FilePanel({ sessionId, files }: { sessionId: string; files: Sess
                         </div>
                       )}
                       {m.info_error && <div className="text-danger">분석 오류: {m.info_error}</div>}
+                      {m.modelmeta && !m.modelmeta.error && (
+                        <div className="pt-2 mt-1 border-t border-border">
+                          <div className="font-medium text-foreground mb-2">파트 연결도 · 메트릭</div>
+                          <ConnectivityView sessionId={sessionId} fileId={f.id} meta={m.modelmeta} />
+                        </div>
+                      )}
                     </div>
                   )}
                 </li>

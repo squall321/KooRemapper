@@ -42,6 +42,47 @@ export interface SessionSummary {
   file_count: number | null
 }
 
+export interface ModelPart {
+  pid: number
+  title: string
+  elem_class: string
+  n_elems: number
+  area_ext: number
+  volume: number
+  proj: { x: number; y: number; z: number }
+  material: {
+    mid: number
+    kfile?: { keyword?: string; name?: string; E?: number; nu?: number; rho?: number }
+    db?: { name: string; category: string; match_basis: string; E_GPa: number } | null
+  }
+}
+
+export interface ModelEdge {
+  a: number
+  b: number
+  a_title: string
+  b_title: string
+  type?: string
+  fs?: number
+  gap_min?: number
+}
+
+export interface ModelConnectivity {
+  contact_edges: ModelEdge[]
+  single_surface: { contact: number; type: string; title: string; pids: number[] }[]
+  geometric_edges?: ModelEdge[]
+  contacts_total: number
+  unresolved_sides: number
+}
+
+export interface ModelMeta {
+  parts: ModelPart[]
+  connectivity: ModelConnectivity
+  conventions?: Record<string, string>
+  detect?: boolean
+  error?: string
+}
+
 export interface FileMeta {
   nodes?: number
   elements?: number
@@ -54,6 +95,7 @@ export interface FileMeta {
   part_titles?: string[]
   keyword_counts?: Record<string, number>
   info_error?: string
+  modelmeta?: ModelMeta
   [k: string]: unknown
 }
 

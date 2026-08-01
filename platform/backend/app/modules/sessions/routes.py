@@ -164,11 +164,34 @@ async def inspect_file(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Cached metadata (nodes/elements/parts/bbox/*INCLUDE/keywords)."""
+    """Cached metadata (nodes/elements/parts/bbox/*INCLUDE/keywords/modelmeta)."""
     f = await svc.get_owned_file(db, user.id, session_id, file_id)
     if f is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "파일을 찾을 수 없습니다.")
     return ok({"filename": f.filename, "meta": f.meta or {}})
+
+
+@router.post(
+    "/sessions/{session_id}/files/{file_id}/connectivity",
+    dependencies=[Depends(rate_limit("connectivity", settings.ratelimit_upload_per_min))],
+)
+async def file_connectivity(
+    session_id: str,
+    file_id: int,
+    detect: bool = True,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """온디맨드 connectivity 재추출 — detect=true 면 기하 접촉쌍 탐지(무거움).
+
+    *CONTACT 가 SINGLE_SURFACE(자기접촉)라 카드만으로 파트쌍이 안 나오는 모델에서
+    실제 '어떤 파트가 어디에 닿나'를 기하 탐지로 뽑는다. 결과는 file.meta 에 저장.
+    """
+    f = await svc.get_owned_file(db, user.id, session_id, file_id)
+    if f is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "파일을 찾을 수 없습니다.")
+    mm = await svc.run_file_connectivity(db, f, detect=detect)
+    return ok(mm, message="connectivity 추출 완료")
 
 
 @router.get("/sessions/{session_id}/files/{file_id}/download")

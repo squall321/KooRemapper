@@ -1,7 +1,7 @@
 // Typed API functions per resource.
 import { api, unwrap } from './client'
 import type {
-  Job, OperationDetail, OperationSummary, SessionDetail, SessionFile,
+  Job, ModelMeta, OperationDetail, OperationSummary, SessionDetail, SessionFile,
   SessionSummary, TokenCreated, TokenInfo, User,
 } from './types'
 
@@ -75,6 +75,14 @@ export async function listFiles(sessionId: string): Promise<SessionFile[]> {
 }
 export async function deleteFile(sessionId: string, fileId: number): Promise<void> {
   await api.delete(`/sessions/${sessionId}/files/${fileId}`)
+}
+export async function extractConnectivity(
+  sessionId: string, fileId: number, detect = true,
+): Promise<ModelMeta> {
+  const { data } = await api.post(
+    `/sessions/${sessionId}/files/${fileId}/connectivity?detect=${detect}`,
+  )
+  return unwrap<ModelMeta>(data)
 }
 export async function downloadFile(sessionId: string, fileId: number, filename: string): Promise<void> {
   const res = await api.get(`/sessions/${sessionId}/files/${fileId}/download`, { responseType: 'blob' })

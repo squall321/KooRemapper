@@ -13,6 +13,7 @@ import re
 from pathlib import Path
 
 from app.runner.binary import run_kooremapper
+from app.runner.kfile_modelmeta import run_modelmeta
 
 _NUM = r"([-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)"
 _RE_NODES = re.compile(r"^Nodes:\s+(\d+)", re.M)
@@ -105,5 +106,13 @@ def inspect_kfile(path: Path) -> dict:
         except FileNotFoundError as exc:
             meta["info_error"] = str(exc)
         meta.update(_scan_keywords(path))
+        # 파트 메트릭·재료·접촉 connectivity 자동 추출 (detect off — 빠름; 카드 기반).
+        # 기하 탐지(detect on)는 무거우므로 온디맨드 엔드포인트에서 실행한다.
+        try:
+            mm = run_modelmeta(path, detect=False)
+            if mm is not None:
+                meta["modelmeta"] = mm
+        except Exception as exc:  # noqa: BLE001 — inspect 는 절대 실패하면 안 됨
+            meta["modelmeta"] = {"error": str(exc)}
 
     return meta

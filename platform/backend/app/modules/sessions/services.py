@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Job, Session, SessionFile
 from app.runner.kfile_inspect import inspect_kfile
+from app.runner.kfile_modelmeta import run_modelmeta
 from app.shared import storage
 
 
@@ -118,6 +119,24 @@ async def add_uploaded_file(
     await db.commit()
     await db.refresh(row)
     return row
+
+
+async def run_file_connectivity(
+    db: AsyncSession, f: SessionFile, *, detect: bool = True
+) -> dict:
+    """온디맨드 connectivity 재추출 (detect=기하 탐지). 결과를 file.meta 에 갱신.
+
+    modelmeta 는 별도 프로세스라 이벤트 루프를 막지 않게 스레드로 오프로드한다.
+    """
+    p = storage.abs_path(f.rel_path)
+    mm = await asyncio.to_thread(run_modelmeta, p, detect=detect, timeout=300)
+    if mm is not None:
+        meta = dict(f.meta or {})
+        meta["modelmeta"] = mm
+        f.meta = meta
+        await db.commit()
+        await db.refresh(f)
+    return mm or {"error": "not a keyword deck"}
 
 
 async def delete_file(db: AsyncSession, f: SessionFile) -> None:
