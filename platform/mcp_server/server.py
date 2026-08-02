@@ -24,7 +24,9 @@ from mcp.server.fastmcp import Context, FastMCP
 API_BASE = os.environ.get("KOOREMAPPER_API_BASE", "http://127.0.0.1:8700").rstrip("/")
 API = f"{API_BASE}/api/v1"
 
-mcp = FastMCP("kooremapper")
+# MCP serverInfo.name — 포탈/HEAX 카탈로그와 통일한 브랜드 표시명.
+# (라우트 슬러그·URL 은 여전히 kooremapper 로 유지된다.)
+mcp = FastMCP("DynaForge")
 
 
 def _forward_headers(ctx: Context) -> dict:
