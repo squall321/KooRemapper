@@ -82,6 +82,11 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
         int d2binr = -1, ssftyp = -1, swtpr = -1; double tetfac = -1;
         // Card G
         double shloff = -1;
+        // THERMAL 카드 (create; -1=미설정 sentinel)
+        double th_k=-1, th_frad=-1, th_h0=-1, th_lmin=-1, th_lmax=-1, th_chlm=-1;
+        int th_bcflag=-1, th_algo=-1;
+        // TIEBREAK 카드 (create)
+        int tb_option=-1; double tb_nfls=-1, tb_sfls=-1, tb_param=-1, tb_eraten=-1, tb_erates=-1, tb_ct2cn=-1;
         // detect fields
         std::string scope;                        // "all" or empty
         std::vector<std::string> includeKeys;     // part name include keywords
@@ -258,6 +263,23 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
             if (key == "tetfac")  { try { curAction.tetfac = std::stod(val); } catch(...){} continue; }
             // Card G
             if (key == "shloff")  { try { curAction.shloff = std::stod(val); } catch(...){} continue; }
+            // THERMAL 카드 필드 (create, type: tied_thermal)
+            if (key == "k")       { try { curAction.th_k = std::stod(val); } catch(...){} continue; }
+            if (key == "frad")    { try { curAction.th_frad = std::stod(val); } catch(...){} continue; }
+            if (key == "h0")      { try { curAction.th_h0 = std::stod(val); } catch(...){} continue; }
+            if (key == "lmin")    { try { curAction.th_lmin = std::stod(val); } catch(...){} continue; }
+            if (key == "lmax")    { try { curAction.th_lmax = std::stod(val); } catch(...){} continue; }
+            if (key == "chlm")    { try { curAction.th_chlm = std::stod(val); } catch(...){} continue; }
+            if (key == "bc_flag") { try { curAction.th_bcflag = std::stoi(val); } catch(...){} continue; }
+            if (key == "algo")    { try { curAction.th_algo = std::stoi(val); } catch(...){} continue; }
+            // TIEBREAK 카드 필드 (create, type: tiebreak)
+            if (key == "option")  { try { curAction.tb_option = std::stoi(val); } catch(...){} continue; }
+            if (key == "nfls")    { try { curAction.tb_nfls = std::stod(val); } catch(...){} continue; }
+            if (key == "sfls")    { try { curAction.tb_sfls = std::stod(val); } catch(...){} continue; }
+            if (key == "param")   { try { curAction.tb_param = std::stod(val); } catch(...){} continue; }
+            if (key == "eraten")  { try { curAction.tb_eraten = std::stod(val); } catch(...){} continue; }
+            if (key == "erates")  { try { curAction.tb_erates = std::stod(val); } catch(...){} continue; }
+            if (key == "ct2cn")   { try { curAction.tb_ct2cn = std::stod(val); } catch(...){} continue; }
 
             // detect fields
             if (key == "scope") { curAction.scope = val; continue; }
@@ -407,6 +429,11 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
             std::string ctype = act.type;
             // Normalize type to uppercase with underscores
             for (auto& c : ctype) { if (c == '-') c = '_'; c = static_cast<char>(toupper(static_cast<unsigned char>(c))); }
+            // 짧은 별칭 → 전체 키워드 (thermal/tiebreak). 전체 키워드로 쓴 경우는 그대로 통과.
+            if (ctype == "TIED_THERMAL" || ctype == "THERMAL")
+                ctype = "TIED_SURFACE_TO_SURFACE_THERMAL";
+            else if (ctype == "TIEBREAK")
+                ctype = "AUTOMATIC_SURFACE_TO_SURFACE_TIEBREAK";
 
             int ssid = 0, msid = 0, sstyp = 0, mstyp = 0;
 
@@ -635,6 +662,29 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
                 newDef.hasCardD = true; newDef.hasCardC = true;
                 newDef.hasCardB = true; newDef.hasCardA = true;
                 newDef.shloff = act.shloff;
+            }
+            // THERMAL 카드 (_THERMAL 계열) — 필드는 미설정 시 기본값(chlm=1) 유지.
+            if (ctype.find("THERMAL") != std::string::npos) {
+                newDef.hasThermal = true;
+                if (act.th_k >= 0)      newDef.thK = act.th_k;
+                if (act.th_frad >= 0)   newDef.thFrad = act.th_frad;
+                if (act.th_h0 >= 0)     newDef.thH0 = act.th_h0;
+                if (act.th_lmin >= 0)   newDef.thLmin = act.th_lmin;
+                if (act.th_lmax >= 0)   newDef.thLmax = act.th_lmax;
+                if (act.th_chlm >= 0)   newDef.thChlm = act.th_chlm;
+                if (act.th_bcflag >= 0) newDef.thBcflag = act.th_bcflag;
+                if (act.th_algo >= 0)   newDef.thAlgo = act.th_algo;
+            }
+            // TIEBREAK 카드 (_TIEBREAK 계열) — OPTION 기본 1(quadratic NFLS/SFLS).
+            if (ctype.find("TIEBREAK") != std::string::npos) {
+                newDef.hasTiebreak = true;
+                if (act.tb_option >= 0) newDef.tbOption = act.tb_option;
+                if (act.tb_nfls >= 0)   newDef.tbNfls = act.tb_nfls;
+                if (act.tb_sfls >= 0)   newDef.tbSfls = act.tb_sfls;
+                if (act.tb_param >= 0)  newDef.tbParam = act.tb_param;
+                if (act.tb_eraten >= 0) newDef.tbEraten = act.tb_eraten;
+                if (act.tb_erates >= 0) newDef.tbErates = act.tb_erates;
+                if (act.tb_ct2cn >= 0)  newDef.tbCt2cn = act.tb_ct2cn;
             }
 
             insertBlocks.push_back(ct_generateContact(newDef));

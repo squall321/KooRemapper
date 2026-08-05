@@ -842,6 +842,10 @@ ct_ContactPreset ct_getPreset(const std::string& contactType) {
         return {"AUTOMATIC_SURFACE_TO_SURFACE", true};
     if (t == "tied")
         return {"TIED_SURFACE_TO_SURFACE", true};
+    if (t == "tied_thermal" || t == "thermal")
+        return {"TIED_SURFACE_TO_SURFACE_THERMAL", true};
+    if (t == "tiebreak")
+        return {"AUTOMATIC_SURFACE_TO_SURFACE_TIEBREAK", true};
     if (t == "mortar")
         return {"AUTOMATIC_SURFACE_TO_SURFACE_MORTAR", true};
     if (t == "tied_mortar")
@@ -1149,6 +1153,21 @@ std::string ct_generateContact(const ContactDef& d) {
 
     // Optional Cards A~G
     ct_appendOptionalCards(ss, d);
+
+    // THERMAL 카드 (_THERMAL 계열) — 옵션 카드 뒤. K FRAD H0 LMIN LMAX CHLM BC_FLAG ALGO
+    if (d.hasThermal) {
+        snprintf(buf, sizeof(buf), "%10.3g%10.3g%10.3g%10.3g%10.3g%10.3g%10d%10d",
+                 d.thK, d.thFrad, d.thH0, d.thLmin, d.thLmax, d.thChlm, d.thBcflag, d.thAlgo);
+        ss << "$#       k      frad        h0      lmin      lmax      chlm   bc_flag      algo\n";
+        ss << buf << "\n";
+    }
+    // TIEBREAK 카드 (_TIEBREAK 계열) — 옵션 카드 뒤. OPTION NFLS SFLS PARAM ERATEN ERATES CT2CN
+    if (d.hasTiebreak) {
+        snprintf(buf, sizeof(buf), "%10d%10.3g%10.3g%10.3g%10.3g%10.3g%10.3g",
+                 d.tbOption, d.tbNfls, d.tbSfls, d.tbParam, d.tbEraten, d.tbErates, d.tbCt2cn);
+        ss << "$#  option      nfls      sfls     param    eraten    erates     ct2cn\n";
+        ss << buf << "\n";
+    }
 
     return ss.str();
 }

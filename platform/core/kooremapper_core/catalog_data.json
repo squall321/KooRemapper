@@ -10074,7 +10074,7 @@
       "name": "contact",
       "category": "bc",
       "summary": "Analyze, create, modify, convert, remove, or auto-detect contact definitions (*CONTACT_*, *SET_SEGMENT, *SET_PART, *SET_NODE keywords)",
-      "description": "LS-DYNA contact management operation supporting: analyze (read-only report), create (new contacts from parts/segments), convert (SSTYP transformation), modify (friction/optional cards), remove (delete), and detect (auto-find contact pairs via spatial hashing). All actions specified as YAML list under contacts[] key. Each action processes optional Cards A-G (SOFT, SOFSCL, LCIDAB, MAXPAR, SBOPT, DEPTH, BSORT, FRCFRQ, PENMAX, THKOPT, SHLTHK, SNLOG, ISYM, I2D3D, SLDTHK, SLDSTF, IGAP, IGNORE, DPRFAC, DTSTIF, EDGEK, FLANGL, CID_RCF, Q2TRI, DTPCHK, SFNBR, FNLSCL, DNLSCL, TCSO, TIEDID, SHLEDG, SHAREC, CPARM8, IPBACK, SRNDE, FRICSF, ICOR, FTORQ, REGION, PSTIFF, IGNROFF, FSTOL, D2BINR/2DBINR, SSFTYP, SWTPR, TETFAC, SHLOFF).",
+      "description": "LS-DYNA contact management operation supporting: analyze (read-only report), create (new contacts from parts/segments), convert (SSTYP transformation), modify (friction/optional cards), remove (delete), and detect (auto-find contact pairs via spatial hashing). All actions specified as YAML list under contacts[] key. Each action processes optional Cards A-G (SOFT, SOFSCL, LCIDAB, MAXPAR, SBOPT, DEPTH, BSORT, FRCFRQ, PENMAX, THKOPT, SHLTHK, SNLOG, ISYM, I2D3D, SLDTHK, SLDSTF, IGAP, IGNORE, DPRFAC, DTSTIF, EDGEK, FLANGL, CID_RCF, Q2TRI, DTPCHK, SFNBR, FNLSCL, DNLSCL, TCSO, TIEDID, SHLEDG, SHAREC, CPARM8, IPBACK, SRNDE, FRICSF, ICOR, FTORQ, REGION, PSTIFF, IGNROFF, FSTOL, D2BINR/2DBINR, SSFTYP, SWTPR, TETFAC, SHLOFF). create also supports thermal (K/FRAD/H0/CHLM…) and tiebreak (OPTION/NFLS/SFLS/CT2CN…) special cards via type tied_thermal / tiebreak.",
       "invocation": "yaml",
       "config_style": "freeform",
       "takes_kfile": true,
@@ -10163,7 +10163,7 @@
           "path": "contacts[].type",
           "type": "string",
           "required": false,
-          "desc": "Contact type for create action. Preset values: auto/tied/mortar/tied_mortar/single/eroding/forming. Maps to: AUTOMATIC_SURFACE_TO_SURFACE / TIED_SURFACE_TO_SURFACE / AUTOMATIC_SURFACE_TO_SURFACE_MORTAR / TIED_SURFACE_TO_SURFACE_MORTAR / AUTOMATIC_SINGLE_SURFACE / ERODING_SURFACE_TO_SURFACE / FORMING_SURFACE_TO_SURFACE. Arbitrary strings auto-uppercased."
+          "desc": "Contact type for create action. Preset values: auto/tied/mortar/tied_mortar/single/eroding/forming. Maps to: AUTOMATIC_SURFACE_TO_SURFACE / TIED_SURFACE_TO_SURFACE / AUTOMATIC_SURFACE_TO_SURFACE_MORTAR / TIED_SURFACE_TO_SURFACE_MORTAR / AUTOMATIC_SINGLE_SURFACE / ERODING_SURFACE_TO_SURFACE / FORMING_SURFACE_TO_SURFACE. Arbitrary strings auto-uppercased. Special: tied_thermal(*CONTACT_TIED_SURFACE_TO_SURFACE_THERMAL) sets a thermal-contact card; tiebreak(*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_TIEBREAK) sets a tiebreak card. Full keyword also accepted."
         },
         {
           "path": "contacts[].title",
@@ -10810,6 +10810,96 @@
           "required": false,
           "default": "false",
           "desc": "For detect action only. If true, remove segments from detected faces that are already in existing TIED contacts for same PID pair. Creates contact from remaining (non-tied) segments. Ignored if no existing tied contact found."
+        },
+        {
+          "path": "contacts[].k",
+          "type": "number",
+          "required": false,
+          "desc": "THERMAL card K (thermal conductivity of gas in gap). create with tied_thermal type."
+        },
+        {
+          "path": "contacts[].frad",
+          "type": "number",
+          "required": false,
+          "desc": "THERMAL card FRAD (radiation factor). Optional."
+        },
+        {
+          "path": "contacts[].h0",
+          "type": "number",
+          "required": false,
+          "desc": "THERMAL card H0 (heat transfer conductance for closed gap). Optional."
+        },
+        {
+          "path": "contacts[].lmin",
+          "type": "number",
+          "required": false,
+          "desc": "THERMAL card LMIN (min gap for conduction). Optional."
+        },
+        {
+          "path": "contacts[].lmax",
+          "type": "number",
+          "required": false,
+          "desc": "THERMAL card LMAX (max gap for conduction). Optional."
+        },
+        {
+          "path": "contacts[].chlm",
+          "type": "number",
+          "required": false,
+          "desc": "THERMAL card CHLM (characteristic length multiplier, default 1.0)."
+        },
+        {
+          "path": "contacts[].bc_flag",
+          "type": "integer",
+          "required": false,
+          "desc": "THERMAL card BC_FLAG (thermal boundary condition flag). Optional."
+        },
+        {
+          "path": "contacts[].algo",
+          "type": "integer",
+          "required": false,
+          "desc": "THERMAL card ALGO (thermal contact algorithm). Optional."
+        },
+        {
+          "path": "contacts[].option",
+          "type": "integer",
+          "required": false,
+          "desc": "TIEBREAK card OPTION (tiebreak model, e.g. 1=quadratic NFLS/SFLS). create with tiebreak type."
+        },
+        {
+          "path": "contacts[].nfls",
+          "type": "number",
+          "required": false,
+          "desc": "TIEBREAK card NFLS (normal failure stress). Bond releases above this."
+        },
+        {
+          "path": "contacts[].sfls",
+          "type": "number",
+          "required": false,
+          "desc": "TIEBREAK card SFLS (shear failure stress)."
+        },
+        {
+          "path": "contacts[].param",
+          "type": "number",
+          "required": false,
+          "desc": "TIEBREAK card PARAM (option-dependent parameter, e.g. crit. distance/energy)."
+        },
+        {
+          "path": "contacts[].eraten",
+          "type": "number",
+          "required": false,
+          "desc": "TIEBREAK card ERATEN (normal energy release rate). Optional."
+        },
+        {
+          "path": "contacts[].erates",
+          "type": "number",
+          "required": false,
+          "desc": "TIEBREAK card ERATES (shear energy release rate). Optional."
+        },
+        {
+          "path": "contacts[].ct2cn",
+          "type": "number",
+          "required": false,
+          "desc": "TIEBREAK card CT2CN (tensile-to-normal stiffness ratio, default 1.0)."
         }
       ],
       "presets": [

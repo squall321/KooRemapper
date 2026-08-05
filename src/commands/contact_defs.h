@@ -46,6 +46,14 @@ struct ContactDef {
     // Optional Card G
     bool hasCardG=false;
     double shloff=0;
+    // THERMAL 카드 (*CONTACT_..._THERMAL): K FRAD H0 LMIN LMAX CHLM BC_FLAG ALGO
+    bool hasThermal=false;
+    double thK=0, thFrad=0, thH0=0, thLmin=0, thLmax=0, thChlm=1.0;
+    int thBcflag=0, thAlgo=0;
+    // TIEBREAK 카드 (*CONTACT_..._TIEBREAK): OPTION NFLS SFLS PARAM ERATEN ERATES CT2CN
+    bool hasTiebreak=false;
+    int tbOption=1;
+    double tbNfls=0, tbSfls=0, tbParam=0, tbEraten=0, tbErates=0, tbCt2cn=1.0;
     // Raw optional cards (backward compat)
     std::vector<std::string> optionalCards;
     int startLine=0, endLine=0;  // [start, end) in rawLines

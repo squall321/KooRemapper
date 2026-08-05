@@ -1,0 +1,15 @@
+# TIEBREAK 접촉 생성 — 접착 결합·박리 파손(AUTOMATIC_SURFACE_TO_SURFACE_TIEBREAK)
+# 법선 응력 NFLS 또는 전단 SFLS 초과 시 결합 해제.
+# KooRemapper contact examples/contact/16_create_tiebreak.yaml
+model: model.k
+output: 16_create_tiebreak_result.k
+contacts:
+  - action: create
+    type: tiebreak              # *CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_TIEBREAK
+    title: Adhesive bond
+    slave: {pids: [1]}
+    master: {pids: [2]}
+    option: 1                   # 1 = quadratic NFLS/SFLS 파손식
+    nfls: 10.0                  # 법선 파단 응력 (MPa)
+    sfls: 50.0                  # 전단 파단 응력 (MPa)
+    ct2cn: 1.0

@@ -1,0 +1,13 @@
+# THERMAL 접촉 생성 — 접촉 열전달(TIED_SURFACE_TO_SURFACE_THERMAL)
+# KooRemapper contact examples/contact/15_create_thermal.yaml
+model: model.k
+output: 15_create_thermal_result.k
+contacts:
+  - action: create
+    type: tied_thermal          # *CONTACT_TIED_SURFACE_TO_SURFACE_THERMAL
+    title: Metal-Metal thermal
+    slave: {pid: 1}
+    master: {pid: 2}
+    k: 100.0                     # gap 열전도도 (W/mm·K)
+    chlm: 0.5                    # 특성길이 배수
+    # frad/h0/lmin/lmax/bc_flag/algo 도 지정 가능
