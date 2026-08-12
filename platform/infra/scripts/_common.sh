@@ -23,6 +23,39 @@ if [ "${ALLOW_PLACEHOLDER_SECRETS:-0}" != "1" ]; then
     echo "  (and the password inside KOORM_DATABASE_URL). Bypass with ALLOW_PLACEHOLDER_SECRETS=1 for throwaway envs."
     exit 1
   fi
+  # 비밀번호가 .env 안에 두 번 적힌다 — POSTGRES_PASSWORD 는 컨테이너 초기화용,
+  # KOORM_DATABASE_URL 안의 것은 API 가 붙을 때 쓰는 값이다. 한쪽만 고치면 기동은
+  # 멀쩡히 되고 API 만 'password authentication failed for user "koorm"' 로 죽는다.
+  # 정합을 아무도 안 봐서 cae00 에서 실제로 이 상태가 됐다(2026-08-12). 포트도 같은 이유로 본다.
+  if ! python3 - "$PLATFORM_ROOT/.env" <<'PY'
+import re, sys, urllib.parse
+env = {}
+for line in open(sys.argv[1]):
+    m = re.match(r'\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)', line)
+    if m:
+        env[m.group(1)] = m.group(2).strip().strip('"\'')
+dsn = env.get("KOORM_DATABASE_URL")
+if not dsn:
+    sys.exit(0)                       # DSN 미지정이면 앱 기본값 — 이 검사의 대상이 아니다
+u = urllib.parse.urlparse(dsn)
+bad = []
+if urllib.parse.unquote(u.password or "") != (env.get("POSTGRES_PASSWORD") or ""):
+    bad.append("비밀번호가 POSTGRES_PASSWORD 와 KOORM_DATABASE_URL 에서 다르다")
+if env.get("POSTGRES_PORT") and str(u.port) != env["POSTGRES_PORT"]:
+    bad.append(f"포트가 다르다 (POSTGRES_PORT={env['POSTGRES_PORT']}, DSN={u.port})")
+if env.get("POSTGRES_USER") and u.username != env["POSTGRES_USER"]:
+    bad.append(f"사용자가 다르다 (POSTGRES_USER={env['POSTGRES_USER']}, DSN={u.username})")
+if bad:
+    print("✗ platform/.env 불일치 — " + " / ".join(bad), file=sys.stderr)
+    sys.exit(1)
+PY
+  then
+    echo "  두 값은 반드시 같아야 한다. 이미 DB 가 만들어져 있으면 .env 만 고치는 걸로는 부족하고,"
+    echo "  실행 중인 postgres 의 롤 비밀번호도 함께 맞춰야 한다(데이터는 지우지 말 것):"
+    echo "    apptainer exec instance://koorm_postgres psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" \\"
+    echo "      -h /var/run/postgresql -p \"\$POSTGRES_PORT\" -c \"ALTER ROLE \$POSTGRES_USER WITH PASSWORD '<새 비번>';\""
+    exit 1
+  fi
 fi
 
 # ── Paths ───────────────────────────────────────────────────────────
