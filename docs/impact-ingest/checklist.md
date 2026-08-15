@@ -43,11 +43,11 @@
 - [x] kr2datahub 계열 업로더 확장 재사용
 - [x] verify: DataHub 검색 노출
 
-## Phase 5 — (선택) 웹 UI
-- [ ] 리포트 목록·요약·최악케이스 표 + 원본 HTML iframe
+## Phase 5 — 웹 UI
+- [x] 리포트 목록·요약·최악케이스 표 + 원본 HTML iframe + DataHub 등재 폼
 
 ## 배포/무회귀
-- [ ] 계약 테스트 통과 유지
-- [ ] C++ 빌드/Windows CLI 무영향(변경은 platform/ 한정)
-- [ ] build_linux_compat → SIF → restart-api-only/mcp 라이브 반영
+- [x] 계약 테스트 통과 유지
+- [x] C++ 빌드/Windows CLI 무영향(변경은 platform/ 한정)
+- [x] build_linux_compat → SIF → restart-api-only/mcp 라이브 반영
 - [ ] 커밋(feat)·main ff-merge·push

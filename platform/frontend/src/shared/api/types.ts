@@ -190,3 +190,44 @@ export interface OperationDetail extends OperationSummary {
   keys?: OperationKey[]
   presets?: OperationPreset[] | null
 }
+
+// 낙하/충격 리포트 (deep/sphere/impact)
+export type ReportKind = 'deep' | 'sphere' | 'impact'
+export interface ReportFinding {
+  severity: string
+  title: string
+  detail: string
+  recommendation: string
+}
+export interface ReportListItem {
+  id: string
+  kind: ReportKind
+  label: string | null
+  project_name: string | null
+  n_cases: number
+  created_at: string
+}
+export interface Report extends ReportListItem {
+  session_id: string
+  source_file_id: number | null
+  generator: string | null
+  doe_strategy: string | null
+  test_dir: string | null
+  sim_params: Record<string, unknown> | null
+  parts: Array<{ part_id: number; name: string; group: string }> | null
+  findings: ReportFinding[] | null
+  summary: Record<string, unknown> | null
+}
+export interface ReportCase {
+  id: number
+  report_id: string
+  case_key: string
+  identity: Record<string, unknown> | null
+  num_states: number | null
+  success: boolean | null
+  parts_metrics: Record<string, Record<string, number | null>> | null
+  max_stress: number | null
+  max_g: number | null
+  max_disp: number | null
+  min_safety_factor: number | null
+}

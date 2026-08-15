@@ -1,8 +1,8 @@
 // Typed API functions per resource.
 import { api, unwrap } from './client'
 import type {
-  Job, ModelMeta, OperationDetail, OperationSummary, SessionDetail, SessionFile,
-  SessionSummary, TokenCreated, TokenInfo, User,
+  Job, ModelMeta, OperationDetail, OperationSummary, Report, ReportCase, ReportListItem,
+  SessionDetail, SessionFile, SessionSummary, TokenCreated, TokenInfo, User,
 } from './types'
 
 // auth
@@ -127,4 +127,43 @@ export async function getJobOutputs(jobId: string): Promise<SessionFile[]> {
 }
 export async function cancelJob(jobId: string): Promise<void> {
   await api.post(`/jobs/${jobId}/cancel`)
+}
+
+// reports (낙하/충격 리포트 인제스트·분석)
+export async function listReports(sessionId: string): Promise<ReportListItem[]> {
+  const { data } = await api.get(`/sessions/${sessionId}/reports`)
+  return unwrap<ReportListItem[]>(data)
+}
+export async function ingestReport(sessionId: string, file: File, kind?: string): Promise<Report> {
+  const fd = new FormData()
+  fd.append('file', file)
+  if (kind) fd.append('kind', kind)
+  const { data } = await api.post(`/sessions/${sessionId}/reports`, fd)
+  return unwrap<Report>(data)
+}
+export async function getReport(reportId: string): Promise<Report> {
+  const { data } = await api.get(`/reports/${reportId}`)
+  return unwrap<Report>(data)
+}
+export async function listReportCases(
+  reportId: string, sort = 'max_stress', order = 'desc', limit = 20,
+): Promise<ReportCase[]> {
+  const { data } = await api.get(`/reports/${reportId}/cases`, { params: { sort, order, limit } })
+  return unwrap<ReportCase[]>(data)
+}
+export async function publishReportToDatahub(
+  reportId: string, body: { project: string; stage: string; variation?: string; doe?: string },
+): Promise<{ record_id: string; view: string }> {
+  const { data } = await api.post(`/reports/${reportId}/publish-datahub`, body)
+  return unwrap<{ record_id: string; view: string }>(data)
+}
+export async function deleteReport(reportId: string): Promise<void> {
+  await api.delete(`/reports/${reportId}`)
+}
+/** 원본 리포트 HTML 을 blob URL 로 (iframe src 용 — 인증 헤더가 필요해 직접 fetch).
+ *  백엔드 download 는 octet-stream 이라 iframe 이 다운로드해버린다 → text/html 로 리타입. */
+export async function reportHtmlBlobUrl(sessionId: string, fileId: number): Promise<string> {
+  const res = await api.get(`/sessions/${sessionId}/files/${fileId}/download`, { responseType: 'blob' })
+  const html = new Blob([res.data as Blob], { type: 'text/html' })
+  return URL.createObjectURL(html)
 }
