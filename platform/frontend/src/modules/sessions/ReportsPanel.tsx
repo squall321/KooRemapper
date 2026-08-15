@@ -1,5 +1,5 @@
 // 낙하/충격 리포트(deep/sphere/impact) 인제스트·요약·최악케이스·DataHub 등재 패널.
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Upload, Trash2, ChevronRight, FileBarChart, ExternalLink, UploadCloud } from 'lucide-react'
 import {
@@ -97,6 +97,8 @@ function ReportDetail({ sessionId, reportId }: { sessionId: string; reportId: st
     queryKey: ['report-cases', reportId], queryFn: () => listReportCases(reportId, 'max_stress', 'desc', 10),
   })
   const [htmlUrl, setHtmlUrl] = useState<string | null>(null)
+  // blob URL 은 교체·언마운트 시 해제(메모리 누수 방지).
+  useEffect(() => () => { if (htmlUrl) URL.revokeObjectURL(htmlUrl) }, [htmlUrl])
 
   if (report.isLoading || !report.data) return <div className="px-4 py-3"><Spinner /></div>
   const r = report.data

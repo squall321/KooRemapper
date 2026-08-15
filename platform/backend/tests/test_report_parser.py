@@ -117,6 +117,51 @@ def test_sphere_part_series():
     assert "note" not in s
 
 
+def test_garbage_inputs_raise_cleanly():
+    # 임베드 데이터가 없거나 빈/비HTML 입력은 ReportParseError(→400) 여야 하고, 크래시 금지.
+    for bad in ("", "   ", "<html><body>no data</body></html>", "*KEYWORD\n*END\n"):
+        with pytest.raises(parser.ReportParseError):
+            parser.parse_html(bad)
+
+
+def test_wrong_kind_hint_does_not_crash():
+    # kind 힌트가 데이터 모양과 어긋나도 500(예외 누수)이 아니라 ReportParseError 로.
+    sphere_like = {"results": [], "sphere_coverage": 1.0, "parts": {"1": {"name": "A", "group": "G"}}}
+    # sphere dict parts 를 impact 로 강제 → 과거엔 AttributeError(500). 이제 방어.
+    study = parser.parse_data(sphere_like, kind_hint="impact")
+    assert study["kind"] == "impact"  # 방어적으로 정규화(케이스 0 → 상위에서 400)
+    assert study["cases"] == []
+
+
+@pytest.mark.skipif(not _SPHERE.exists(), reason="sphere 샘플 없음")
+def test_wrong_kind_hint_on_real_sphere_html():
+    # 실제 sphere HTML 에 impact 힌트 → 크래시 없이 빈 케이스(상위 인제스트가 400 처리).
+    study = parser.parse_html(_read(_SPHERE), kind_hint="impact")
+    assert study["cases"] == []
+
+
+def test_num_rejects_nan_inf():
+    # JSONB 커밋을 깨뜨리는 NaN/Inf 는 None 으로. (json.loads 는 JS NaN/Infinity 를 파싱함)
+    assert parser._num(float("nan")) is None
+    assert parser._num(float("inf")) is None
+    assert parser._num(float("-inf")) is None
+    assert parser._num(3.5) == 3.5
+    assert parser._num(True) is None and parser._num("x") is None
+
+
+def test_normalize_sphere_scrubs_nan_metrics():
+    data = {
+        "results": [{"folder": "R1", "angle": {"name": "F1", "category": "face"},
+                     "parts": {"1": {"peak_stress": float("nan"), "peak_g": 5.0}}}],
+        "sphere_coverage": 1.0, "parts": {"1": {"name": "A", "group": "G"}},
+    }
+    study = parser.parse_data(data, kind_hint="sphere")
+    pm = study["cases"][0]["parts_metrics"]["1"]
+    assert pm["peak_stress"] is None  # NaN → None (JSONB 안전)
+    assert pm["peak_g"] == 5.0
+    assert study["cases"][0]["rollup"]["max_g"] == 5.0
+
+
 def test_deferred_koo_data_script():
     # deferred(tier C) 임베드: <script type=application/json id=koo-data>.
     payload = {"positions": [], "results": [], "faces": [], "doe_analysis": {}}

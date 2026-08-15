@@ -150,11 +150,18 @@ def _group_of(name: str) -> str:
 
 
 def _num(v):
-    """숫자면 float, None/비숫자면 None (미측정을 0으로 왜곡하지 않음)."""
+    """숫자면 float, None/비숫자면 None (미측정을 0으로 왜곡하지 않음).
+
+    NaN/Infinity 는 None 으로 막는다 — json.loads 는 JS 의 NaN/Infinity 를 그대로
+    파싱하는데, 이 값이 JSONB 컬럼에 들어가면 Postgres 커밋이 깨진다(유효 JSON 아님).
+    """
     if isinstance(v, bool):
         return None
     if isinstance(v, (int, float)):
-        return float(v)
+        f = float(v)
+        if f != f or f in (float("inf"), float("-inf")):  # NaN 또는 ±Inf
+            return None
+        return f
     return None
 
 
@@ -194,11 +201,15 @@ def normalize_deep(data: dict) -> dict:
     sim = data.get("sim") or {}
     meta = data.get("metadata") or {}
     summary_in = data.get("summary") or {}
-    parts_in = data.get("parts") or {}
+    parts_in = data.get("parts")
+    if not isinstance(parts_in, dict):
+        parts_in = {}
 
     parts = []
     parts_metrics = {}
     for pid, p in parts_in.items():
+        if not isinstance(p, dict):
+            continue
         name = p.get("name") or f"Part_{pid}"
         parts.append({"part_id": _to_int(pid), "name": name, "group": _group_of(name)})
         parts_metrics[str(pid)] = {
@@ -268,16 +279,24 @@ def normalize_deep(data: dict) -> dict:
 
 # ── sphere 정규화 ────────────────────────────────────────────────────
 def normalize_sphere(data: dict) -> dict:
-    sim_params_in = data.get("sim_params") or {}
-    parts_in = data.get("parts") or {}
+    sim_params_in = data.get("sim_params")
+    if not isinstance(sim_params_in, dict):
+        sim_params_in = {}
+    parts_in = data.get("parts")
+    if not isinstance(parts_in, dict):
+        parts_in = {}
 
     parts = []
     for pid, p in parts_in.items():
+        if not isinstance(p, dict):
+            continue
         name = p.get("name") or p.get("part_name") or f"Part_{pid}"
         parts.append({"part_id": _to_int(pid), "name": name, "group": p.get("group") or _group_of(name)})
 
     cases = []
     for r in data.get("results") or []:
+        if not isinstance(r, dict):
+            continue
         angle = r.get("angle") or {}
         pm = {}
         for pid, p in (r.get("parts") or {}).items():
@@ -367,18 +386,28 @@ def normalize_impact(data: dict) -> dict:
     (face, pos_id, x, y, part_id, g/s/e/d[, s1/s3/e1/e3/evm]) 이다. pos_id 로 묶어
     위치별 케이스를 만들고, 파트별 메트릭 약어를 공통 스키마로 편다.
     """
-    meta = data.get("meta") or {}
-    kpi = data.get("kpi") or {}
-    sim_params_in = meta.get("sim_params") or {}
-    impactor = meta.get("impactor") or {}
+    meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
+    kpi = data.get("kpi") if isinstance(data.get("kpi"), dict) else {}
+    sim_params_in = meta.get("sim_params") if isinstance(meta.get("sim_params"), dict) else {}
+    impactor = meta.get("impactor") if isinstance(meta.get("impactor"), dict) else {}
 
+    # impact parts 는 리스트가 정상이나, 잘못된 kind 힌트로 dict 가 들어와도 죽지 않게 방어.
+    parts_raw = data.get("parts")
+    if isinstance(parts_raw, dict):
+        parts_raw = list(parts_raw.values())
+    elif not isinstance(parts_raw, list):
+        parts_raw = []
     parts = []
-    for p in data.get("parts") or []:
+    for p in parts_raw:
+        if not isinstance(p, dict):
+            continue
         name = p.get("name") or f"Part_{p.get('id')}"
         parts.append({"part_id": _to_int(p.get("id")), "name": name, "group": p.get("group") or _group_of(name)})
 
     by_pos: dict[str, dict] = {}
     for row in data.get("results") or []:
+        if not isinstance(row, dict):
+            continue
         pos_id = row.get("pos_id")
         if pos_id is None:
             continue
@@ -498,19 +527,30 @@ _NORMALIZERS = {
 }
 
 
+def _normalize(data: dict, kind: str) -> dict:
+    """kind 노멀라이저 실행. 모양 불일치(잘못된 kind 힌트 등)로 인한 예외는
+    ReportParseError 로 감싸 상위에서 400 으로 흐르게 한다(500 방지)."""
+    if kind not in _NORMALIZERS:
+        raise ReportParseError(f"지원하지 않는 kind: {kind}")
+    try:
+        return _NORMALIZERS[kind](data)
+    except ReportParseError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — 모양 불일치를 사용자 입력 오류로 취급
+        raise ReportParseError(
+            f"'{kind}' 정규화 실패 — kind 힌트가 리포트 종류와 맞지 않을 수 있습니다 ({type(exc).__name__})."
+        ) from exc
+
+
 def parse_html(html: str, *, kind_hint: str | None = None) -> dict:
     """리포트 HTML → 공통 정규화 스터디 dict. kind_hint 로 자동판별을 덮어쓸 수 있다."""
     data = extract_embedded_data(html)
-    kind = kind_hint or detect_kind(data)
-    if kind not in _NORMALIZERS:
-        raise ReportParseError(f"지원하지 않는 kind: {kind}")
-    return _NORMALIZERS[kind](data)
+    return _normalize(data, kind_hint or detect_kind(data))
 
 
 def parse_data(data: dict, *, kind_hint: str | None = None) -> dict:
     """이미 파싱된 임베드/사이드카 dict → 공통 정규화 스터디 dict."""
-    kind = kind_hint or detect_kind(data)
-    return _NORMALIZERS[kind](data)
+    return _normalize(data, kind_hint or detect_kind(data))
 
 
 # ── 심화 추출기(원본 HTML 재파싱용) ─────────────────────────────────
