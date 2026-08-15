@@ -8,7 +8,9 @@ from datetime import datetime
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     SmallInteger,
@@ -104,6 +106,71 @@ class SessionFile(Base):
     )
 
     session: Mapped[Session] = relationship(back_populates="files")
+
+
+class ImpactReport(Base):
+    """A structured drop/impact study ingested from a koo_*_report HTML.
+
+    kind ∈ {deep, sphere, impact}. Study-level fields live here; per-case metrics
+    live in ``impact_cases`` (promoted rollup columns there enable cheap ranking).
+    """
+
+    __tablename__ = "impact_reports"
+
+    id: Mapped[str] = mapped_column(String(26), primary_key=True)  # ULID
+    session_id: Mapped[str] = mapped_column(
+        ForeignKey("sessions.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    kind: Mapped[str] = mapped_column(String(12), index=True, nullable=False)  # deep|sphere|impact
+    label: Mapped[str | None] = mapped_column(String(255))
+    # 원본 HTML 을 담은 SessionFile — 온디맨드 시계열 재파싱용. 삭제돼도 리포트는 유지.
+    source_file_id: Mapped[int | None] = mapped_column(
+        ForeignKey("session_files.id", ondelete="SET NULL"), index=True
+    )
+    generator: Mapped[str | None] = mapped_column(String(40))
+    generator_version: Mapped[str | None] = mapped_column(String(40))
+    schema_str: Mapped[str | None] = mapped_column(String(64))
+    project_name: Mapped[str | None] = mapped_column(String(255))
+    doe_strategy: Mapped[str | None] = mapped_column(String(64))
+    test_dir: Mapped[str | None] = mapped_column(String(1024))
+    sim_params: Mapped[dict | None] = mapped_column(JSONB)
+    parts: Mapped[list | None] = mapped_column(JSONB)  # [{part_id,name,group}]
+    findings: Mapped[list | None] = mapped_column(JSONB)
+    summary: Mapped[dict | None] = mapped_column(JSONB)  # 전역 최악 롤업
+    n_cases: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True, nullable=False
+    )
+
+    cases: Mapped[list["ImpactCase"]] = relationship(
+        back_populates="report", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+
+class ImpactCase(Base):
+    """One case of a study: deep=single, sphere=per-angle, impact=per face×position."""
+
+    __tablename__ = "impact_cases"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    report_id: Mapped[str] = mapped_column(
+        ForeignKey("impact_reports.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    case_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    identity: Mapped[dict | None] = mapped_column(JSONB)  # sphere: angle{}, impact: face+pos
+    num_states: Mapped[int | None] = mapped_column(Integer)
+    success: Mapped[bool | None] = mapped_column(Boolean)
+    parts_metrics: Mapped[dict | None] = mapped_column(JSONB)  # {pid: {peak_*}}
+    # 랭킹 정렬용 승격 컬럼 (케이스 롤업).
+    max_stress: Mapped[float | None] = mapped_column(Float)
+    max_g: Mapped[float | None] = mapped_column(Float)
+    max_disp: Mapped[float | None] = mapped_column(Float)
+    min_safety_factor: Mapped[float | None] = mapped_column(Float)
+
+    report: Mapped[ImpactReport] = relationship(back_populates="cases")
 
 
 class Job(Base):
