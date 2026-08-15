@@ -56,3 +56,17 @@
 - 고해상도 시계열(stress_ts/motion/glstat/peak_element_tensors)은 DB 미저장 — report_case/energy_flow
   도구가 원본 HTML(source_file_id)을 재파싱해 제공(Phase 3에서 parse_series 헬퍼 추가 예정).
 - federate(리비전 비교)는 compare_reports MCP 로 v1 포함, 별도 kind 아님.
+
+## Phase 4 완료 + 범용 forge 방향 (사용자 지침)
+- 사용자: "여러 시뮬레이션에 대한 forge를 만들거야", "툴마다 포지를 만들거니까 데이터 허브에
+  양식을 넣을 때 참고로 해" → DataHub 등재 양식을 **모든 forge 공용 sim_report 템플릿**으로 고정.
+  표준 문서: docs/impact-ingest/datahub-sim-report-schema.md.
+- 구현: app/reports/datahub.py (build_record/publish), POST /reports/{id}/publish-datahub,
+  MCP publish_report_to_datahub. config.datahub_url(기본 127.0.0.1:8001, 호스트넷 공유라 도달 OK).
+- AIDataHub 함정(실측):
+  · /api/records limit 최대 100 (200→422). next_sim_id 는 (team,group,year) 접두 max+1.
+  · bundle 은 record.id 필수(서버 자동부여 아님), 첨부 file_path 는 zip 내 경로와 일치해야.
+  · SimContent.eng_meta.doe = DoeRef(extra 금지): study(필수)/case/factors 만. 전략은 factors 에.
+  · SimContent 정의外 content 키(sim_domain/report_kind)는 정규화서 유실 → inputs/tags/첨부 extra 로 이중화.
+- E2E 검증: sphere 리포트 publish → SIM-MX-CAE-... 생성, 판별자 3곳 생존, eng_meta.doe 정상,
+  components 23·첨부 1·worst_cases. 스모크 레코드 정리 완료. 유닛 test_report_datahub 3개 + 전체 55 passed.

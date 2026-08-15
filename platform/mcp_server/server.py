@@ -423,6 +423,32 @@ async def compare_reports(report_ids: list, ctx: Context, part_id: int | None = 
 
 
 @mcp.tool()
+async def publish_report_to_datahub(
+    report_id: str,
+    project: str,
+    stage: str,
+    ctx: Context,
+    variation: str | None = None,
+    doe: str | None = None,
+    unit: str = "mm-t-s",
+    title: str | None = None,
+) -> dict:
+    """리포트를 AI Data Hub 에 범용 sim_report 데이터 레코드로 등재한다.
+
+    project=과제코드, stage=개발단계(pre|dv1..dvr|pv1..pvr|pra|mp), variation=설계안,
+    doe=DOE 참조(study[:case]). 리포트 요약·소견·최악케이스·파트를 content 로 싣고 원본
+    HTML 을 첨부한다. 도메인 무관 스키마라 검색·리비전 비교에 그대로 얹힌다."""
+    body = {"project": project, "stage": stage, "unit": unit}
+    if variation:
+        body["variation"] = variation
+    if doe:
+        body["doe"] = doe
+    if title:
+        body["title"] = title
+    return await _post(ctx, f"/reports/{report_id}/publish-datahub", body)
+
+
+@mcp.tool()
 async def delete_report(report_id: str, ctx: Context) -> dict:
     """인제스트된 리포트를 삭제한다(원본 HTML 포함). / Delete an ingested report."""
     return await _delete(ctx, f"/reports/{report_id}")

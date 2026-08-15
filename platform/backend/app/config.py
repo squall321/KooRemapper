@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     # Max single-file upload size (MB).
     max_upload_mb: int = 512
 
+    # --- AI Data Hub (시뮬레이션 리포트 등재 대상) ---
+    # 비우면 publish-datahub 비활성(400). 기본은 호스트 네트워크 공유 인스턴스.
+    datahub_url: str = "http://127.0.0.1:8001"
+
     # --- CORS ---
     cors_origins: str = "http://localhost:5273,http://127.0.0.1:5273"
 

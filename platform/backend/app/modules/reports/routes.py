@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -157,6 +158,46 @@ async def report_findings(
         sev = severity.upper()
         items = [f for f in items if (f.get("severity") or "").upper() == sev]
     return ok(items)
+
+
+class PublishDataHubBody(BaseModel):
+    project: str = Field(min_length=1, max_length=64)  # 과제코드
+    stage: str = Field(min_length=1, max_length=8)     # 개발단계 pre|dv1..dvr|pv1..pvr|pra|mp
+    variation: str | None = None                        # 설계안
+    doe: str | None = None                              # DOE 참조 study[:case]
+    unit: str = "mm-t-s"
+    title: str | None = None
+
+
+@router.post("/reports/{report_id}/publish-datahub")
+async def publish_report_to_datahub(
+    report_id: str,
+    body: PublishDataHubBody,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """리포트를 AI Data Hub 의 범용 sim_report 레코드로 등재한다(과제/개발단계/BOM 연계)."""
+    from app.reports.datahub import DataHubError, parse_stage
+
+    r = await _require_report(db, user, report_id)
+    if not settings.datahub_url:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "datahub_url 이 설정되지 않았습니다.")
+    # stage 형식 오류는 클라이언트 잘못 → 400 으로 먼저 걸러낸다.
+    try:
+        parse_stage(body.stage)
+    except DataHubError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
+    try:
+        res = await svc.publish_to_datahub(
+            db, r, hub_url=settings.datahub_url,
+            project=body.project, stage=body.stage, variation=body.variation,
+            doe=body.doe, unit=body.unit, title=body.title,
+        )
+    except ValueError as exc:  # 원본 HTML 없음 등
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
+    except DataHubError as exc:  # 업로드/네트워크 실패
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"DataHub 등재 실패: {exc}")
+    return ok(res, message=f"DataHub 등재 완료: {res['record_id']}", status_code=201)
 
 
 @router.delete("/reports/{report_id}")

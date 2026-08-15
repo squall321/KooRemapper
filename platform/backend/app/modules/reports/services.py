@@ -213,6 +213,47 @@ async def part_risk(db: AsyncSession, report: ImpactReport, part_id: int | None 
     return {"report_id": report.id, "kind": report.kind, "parts": parts}
 
 
+async def publish_to_datahub(
+    db: AsyncSession,
+    report: ImpactReport,
+    *,
+    hub_url: str,
+    project: str,
+    stage: str,
+    variation: str | None = None,
+    doe: str | None = None,
+    unit: str = "mm-t-s",
+    title: str | None = None,
+) -> dict:
+    """리포트를 AI Data Hub 의 범용 sim_report 레코드로 등재한다.
+
+    원본 HTML(source_file_id)을 첨부로 싣는다. 파싱 실패/형식 오류는 datahub 모듈이
+    DataHubError 를 던지고, 상위(라우트)가 400 으로 변환한다.
+    """
+    from app.reports import datahub
+
+    cases = list((await db.execute(
+        select(ImpactCase).where(ImpactCase.report_id == report.id)
+    )).scalars())
+
+    html_name = "report.html"
+    html_bytes = b""
+    if report.source_file_id is not None:
+        f = await db.get(SessionFile, report.source_file_id)
+        if f is not None:
+            html_name = f.filename
+            p = storage.abs_path(f.rel_path)
+            if p.exists():
+                html_bytes = await asyncio.to_thread(p.read_bytes)
+    if not html_bytes:
+        raise ValueError("원본 리포트 HTML 을 찾을 수 없어 등재할 수 없습니다.")
+
+    return await datahub.publish(
+        report, cases, hub_url=hub_url, html_bytes=html_bytes, html_name=html_name,
+        project=project, stage=stage, variation=variation, doe=doe, unit=unit, title=title,
+    )
+
+
 async def delete_report(db: AsyncSession, report: ImpactReport) -> None:
     # 원본 HTML SessionFile 도 함께 정리(있으면).
     if report.source_file_id is not None:

@@ -39,9 +39,9 @@
 - [x] verify: MCP tools/list 노출 + 실제 report_id 로 호출
 
 ## Phase 4 — AIDataHub 등재
-- [ ] publish-datahub 엔드포인트(sim-result 레코드 + eng_meta 과제/개발단계/BOM)
-- [ ] kr2datahub 계열 업로더 확장 재사용
-- [ ] verify: DataHub 검색 노출
+- [x] publish-datahub 엔드포인트(sim-result 레코드 + eng_meta 과제/개발단계/BOM)
+- [x] kr2datahub 계열 업로더 확장 재사용
+- [x] verify: DataHub 검색 노출
 
 ## Phase 5 — (선택) 웹 UI
 - [ ] 리포트 목록·요약·최악케이스 표 + 원본 HTML iframe
