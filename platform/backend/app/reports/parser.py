@@ -511,3 +511,100 @@ def parse_data(data: dict, *, kind_hint: str | None = None) -> dict:
     """이미 파싱된 임베드/사이드카 dict → 공통 정규화 스터디 dict."""
     kind = kind_hint or detect_kind(data)
     return _NORMALIZERS[kind](data)
+
+
+# ── 심화 추출기(원본 HTML 재파싱용) ─────────────────────────────────
+# DB 엔 요약·케이스 스칼라만 저장하므로, 에너지 밸런스·접촉·시계열 같은 상세는
+# 원본 HTML 을 다시 파싱해 필요할 때만 뽑는다.
+
+def case_energy(data: dict, kind: str, case_key: str | None = None) -> dict:
+    """케이스의 에너지/접촉 상세.
+
+    deep: glstat 에너지 밸런스 + 접촉력(rcforc) + contact_metrics(있으면).
+    sphere/impact: energy_flows[case_key] 하중경로 그래프(있으면).
+    """
+    if kind == "deep":
+        g = data.get("glstat") or {}
+        b = data.get("binout") or {}
+        rc = [
+            {"id": c.get("id"), "name": c.get("name"), "side": c.get("side"),
+             "peak_fmag": _num(c.get("peak_fmag"))}
+            for c in (b.get("rcforc") or [])
+        ]
+        return {
+            "kind": "deep",
+            "energy_balance": {
+                "energy_ratio_min": _num(g.get("energy_ratio_min")),
+                "energy_ratio_max": _num(g.get("energy_ratio_max")),
+                "has_mass_added": g.get("has_mass_added"),
+                "normal_termination": g.get("normal_termination"),
+            },
+            "energy_series": {
+                k: g.get(k) for k in
+                ("t", "total_energy", "kinetic_energy", "internal_energy",
+                 "hourglass_energy", "energy_ratio")
+                if g.get(k) is not None
+            },
+            "contacts": sorted(rc, key=lambda c: (c["peak_fmag"] is None, -(c["peak_fmag"] or 0))),
+            "contact_metrics": data.get("contact_metrics"),
+            "has_matsum": bool(b.get("matsum")),
+        }
+    # sphere/impact — 각 케이스별 에너지 플로우 그래프.
+    flows = data.get("energy_flows") or {}
+    flow = flows.get(case_key) if case_key else None
+    if flow is None and flows:
+        flow = next(iter(flows.values()))
+    if not isinstance(flow, dict):
+        return {"kind": kind, "case_key": case_key, "energy_flow": None,
+                "note": "이 리포트/케이스엔 에너지 플로우 데이터가 없습니다."}
+    return {
+        "kind": kind, "case_key": case_key,
+        "energy_flow": {
+            "impactor_ke_initial": _num(flow.get("impactor_ke_initial")),
+            "impactor_ke_final": _num(flow.get("impactor_ke_final")),
+            "energy_dissipated": _num(flow.get("energy_dissipated")),
+            "propagation_order": flow.get("propagation_order"),
+            "nodes": [
+                {"node_id": n.get("node_id"), "is_impactor": n.get("is_impactor"),
+                 "peak_ie": _num(n.get("peak_ie")), "peak_ke": _num(n.get("peak_ke"))}
+                for n in (flow.get("nodes") or [])
+            ],
+            "edges": [
+                {"src": e.get("src"), "dst": e.get("dst"), "name": e.get("name"),
+                 "peak_force": _num(e.get("peak_force")), "total_work": _num(e.get("total_work")),
+                 "confidence": _num(e.get("confidence"))}
+                for e in (flow.get("edges") or [])
+            ],
+        },
+    }
+
+
+def part_series(data: dict, kind: str, case_key: str, part_id: int) -> dict:
+    """한 케이스·한 파트의 시계열(다운샘플). DB 미저장분을 원본에서 복원."""
+    pid = str(part_id)
+    if kind == "deep":
+        out: dict = {"kind": "deep", "part_id": part_id, "stress": {}, "motion": {}}
+        for entry in data.get("stress") or []:
+            if str(entry.get("part_id")) == pid:
+                out["stress"][entry.get("quantity") or "von_mises"] = {
+                    "t": entry.get("t"), "max": entry.get("max_vals"), "avg": entry.get("avg_vals"),
+                    "global_max": _num(entry.get("global_max")),
+                }
+        m = (data.get("motion") or {}).get(pid)
+        if isinstance(m, dict):
+            out["motion"] = {k: m.get(k) for k in ("t", "disp_mag", "vel_mag", "acc_mag") if m.get(k) is not None}
+        return out
+    if kind == "sphere":
+        for r in data.get("results") or []:
+            if (r.get("folder") or (r.get("angle") or {}).get("name")) == case_key:
+                p = (r.get("parts") or {}).get(pid) or {}
+                return {"kind": "sphere", "case_key": case_key, "part_id": part_id,
+                        "stress_ts": p.get("stress_ts"), "strain_ts": p.get("strain_ts"),
+                        "g_ts": p.get("g_ts"), "disp_ts": p.get("disp_ts")}
+        return {"kind": "sphere", "case_key": case_key, "part_id": part_id, "note": "케이스를 찾지 못함"}
+    # impact — 평탄 results 행에서 (pos_id, part_id) 매칭.
+    for row in data.get("results") or []:
+        if row.get("pos_id") == case_key and str(row.get("part_id")) == pid:
+            return {"kind": "impact", "case_key": case_key, "part_id": part_id,
+                    "stress_ts": row.get("stress_ts")}
+    return {"kind": "impact", "case_key": case_key, "part_id": part_id, "note": "케이스/파트를 찾지 못함"}

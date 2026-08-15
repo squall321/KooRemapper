@@ -385,6 +385,29 @@ async def report_case(report_id: str, case_key: str, ctx: Context) -> dict:
 
 
 @mcp.tool()
+async def report_directional(report_id: str, ctx: Context, part_id: int | None = None) -> dict:
+    """방향 취약도 — 방향 범주(sphere: 면/엣지/코너, impact: F1~F6)별 최악 응력·G.
+    part_id 를 주면 그 파트의 범주별 취약도. "어느 방향이 가장 위험한가"."""
+    params = {"part_id": part_id} if part_id is not None else None
+    return await _get(ctx, f"/reports/{report_id}/directional", params=params)
+
+
+@mcp.tool()
+async def report_energy_flow(report_id: str, ctx: Context, case_key: str | None = None) -> dict:
+    """에너지/접촉 상세(원본 재파싱). deep=에너지 밸런스(hourglass/energy_ratio)·접촉력(rcforc)·
+    Newton-3 신뢰도, sphere/impact=하중경로 그래프(impactor→parts 전파, 접촉 엣지 work).
+    deep 은 case_key 불필요, sphere/impact 는 case_key 로 특정 방향/위치 지정."""
+    params = {"case_key": case_key} if case_key else None
+    return await _get(ctx, f"/reports/{report_id}/energy", params=params)
+
+
+@mcp.tool()
+async def report_part_series(report_id: str, case_key: str, part_id: int, ctx: Context) -> dict:
+    """한 케이스·파트의 시계열(원본 재파싱, 다운샘플) — 응력/변형률/G/변위 시간이력."""
+    return await _get(ctx, f"/reports/{report_id}/cases/{case_key}/series", params={"part_id": part_id})
+
+
+@mcp.tool()
 async def report_findings(report_id: str, ctx: Context, severity: str | None = None) -> list:
     """리포트의 위험 소견(CRITICAL/WARNING/INFO). severity 로 필터 가능.
     항복 초과·과도 G 등 자동 판정된 항목을 준다(sphere/impact)."""

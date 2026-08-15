@@ -145,6 +145,49 @@ async def report_part_risk(
     return ok(await svc.part_risk(db, r, part_id))
 
 
+@router.get("/reports/{report_id}/directional")
+async def report_directional(
+    report_id: str,
+    part_id: int | None = Query(default=None),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """방향 취약도 — 방향 범주(면/엣지/코너·F1~F6)별 최악. part_id 로 파트 한정."""
+    r = await _require_report(db, user, report_id)
+    return ok(await svc.directional(db, r, part_id))
+
+
+@router.get("/reports/{report_id}/energy")
+async def report_energy(
+    report_id: str,
+    case_key: str | None = Query(default=None),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """에너지/접촉 상세(원본 재파싱). deep=에너지밸런스·접촉력, sphere/impact=하중경로 그래프."""
+    r = await _require_report(db, user, report_id)
+    try:
+        return ok(await svc.case_energy(db, r, case_key))
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
+
+
+@router.get("/reports/{report_id}/cases/{case_key}/series")
+async def report_part_series(
+    report_id: str,
+    case_key: str,
+    part_id: int = Query(...),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """케이스·파트의 시계열(원본 재파싱, 다운샘플)."""
+    r = await _require_report(db, user, report_id)
+    try:
+        return ok(await svc.part_series(db, r, case_key, part_id))
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
+
+
 @router.get("/reports/{report_id}/findings")
 async def report_findings(
     report_id: str,

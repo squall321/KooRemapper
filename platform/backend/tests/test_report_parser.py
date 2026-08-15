@@ -92,6 +92,31 @@ def test_detect_kind_signatures():
         parser.detect_kind({"nope": 1})
 
 
+@pytest.mark.skipif(not _DEEP.exists(), reason="deep 샘플 없음")
+def test_deep_case_energy_and_series():
+    data = parser.extract_embedded_data(_read(_DEEP))
+    e = parser.case_energy(data, "deep")
+    assert e["kind"] == "deep"
+    assert e["energy_balance"]["energy_ratio_min"] == pytest.approx(0.999311, rel=1e-4)
+    assert "t" in e["energy_series"]  # glstat 에너지 시계열
+    # 파트 1 시계열: von_mises global_max = 전역 최악.
+    s = parser.part_series(data, "deep", "single", 1)
+    assert s["part_id"] == 1
+    assert s["stress"]["von_mises"]["global_max"] == pytest.approx(3748.51419693, rel=1e-6)
+
+
+@pytest.mark.skipif(not _SPHERE.exists(), reason="sphere 샘플 없음")
+def test_sphere_part_series():
+    data = parser.extract_embedded_data(_read(_SPHERE))
+    # 첫 케이스의 folder 를 case_key 로.
+    r0 = (data.get("results") or [])[0]
+    key = r0.get("folder") or (r0.get("angle") or {}).get("name")
+    s = parser.part_series(data, "sphere", key, 1)
+    assert s["kind"] == "sphere" and s["part_id"] == 1
+    # 다운샘플 시계열이 있거나(측정됨) 최소한 케이스는 찾았다.
+    assert "note" not in s
+
+
 def test_deferred_koo_data_script():
     # deferred(tier C) 임베드: <script type=application/json id=koo-data>.
     payload = {"positions": [], "results": [], "faces": [], "doe_analysis": {}}

@@ -254,6 +254,81 @@ async def publish_to_datahub(
     )
 
 
+def _category_of(case: ImpactCase, kind: str) -> str:
+    """케이스의 방향 범주. sphere=angle.category(face/edge/corner/…), impact=face, deep=single."""
+    idt = case.identity or {}
+    if kind == "sphere":
+        return (idt.get("angle") or {}).get("category") or "unknown"
+    if kind == "impact":
+        return idt.get("face") or "unknown"
+    return "single"
+
+
+async def directional(db: AsyncSession, report: ImpactReport, part_id: int | None = None) -> dict:
+    """방향 취약도. part_id 없으면 방향 범주별 최악, 있으면 그 파트의 범주별 최악.
+
+    sphere=면/엣지/코너 등 방향 범주, impact=면(F1~F6). "어느 방향이 가장 위험한가".
+    """
+    cases = list((await db.execute(
+        select(ImpactCase).where(ImpactCase.report_id == report.id)
+    )).scalars())
+    name_of = {int(p["part_id"]): p.get("name") for p in (report.parts or []) if _isint(p.get("part_id"))}
+
+    agg: dict[str, dict] = {}
+    for c in cases:
+        cat = _category_of(c, report.kind)
+        slot = agg.setdefault(cat, {
+            "category": cat, "n_cases": 0,
+            "worst_stress": {"value": None, "part_id": None, "part_name": None, "case_key": None},
+            "worst_g": {"value": None, "part_id": None, "part_name": None, "case_key": None},
+        })
+        slot["n_cases"] += 1
+        for pid_s, m in (c.parts_metrics or {}).items():
+            try:
+                pid = int(pid_s)
+            except (TypeError, ValueError):
+                continue
+            if part_id is not None and pid != part_id:
+                continue
+            for key, metric in (("worst_stress", "peak_stress"), ("worst_g", "peak_g")):
+                v = m.get(metric)
+                if v is not None and (slot[key]["value"] is None or v > slot[key]["value"]):
+                    slot[key] = {"value": v, "part_id": pid, "part_name": name_of.get(pid), "case_key": c.case_key}
+
+    directions = sorted(
+        agg.values(),
+        key=lambda d: (d["worst_stress"]["value"] is None, -(d["worst_stress"]["value"] or 0)),
+    )
+    return {"report_id": report.id, "kind": report.kind, "part_id": part_id, "directions": directions}
+
+
+async def _load_html_data(db: AsyncSession, report: ImpactReport) -> tuple[dict, str]:
+    """원본 HTML 을 다시 파싱해 임베드 데이터(dict)와 kind 를 돌려준다."""
+    if report.source_file_id is None:
+        raise ValueError("원본 리포트 HTML 이 없어 상세를 복원할 수 없습니다.")
+    f = await db.get(SessionFile, report.source_file_id)
+    if f is None:
+        raise ValueError("원본 리포트 파일 레코드가 없습니다.")
+    p = storage.abs_path(f.rel_path)
+    if not p.exists():
+        raise ValueError("원본 리포트 HTML 실물이 없습니다.")
+    text = await asyncio.to_thread(p.read_text, encoding="utf-8", errors="replace")
+    data = await asyncio.to_thread(parser.extract_embedded_data, text)
+    return data, report.kind
+
+
+async def case_energy(db: AsyncSession, report: ImpactReport, case_key: str | None) -> dict:
+    """케이스 에너지/접촉 상세(원본 재파싱). deep=에너지밸런스·접촉, sphere/impact=하중경로."""
+    data, kind = await _load_html_data(db, report)
+    return await asyncio.to_thread(parser.case_energy, data, kind, case_key)
+
+
+async def part_series(db: AsyncSession, report: ImpactReport, case_key: str, part_id: int) -> dict:
+    """케이스·파트 시계열(원본 재파싱, 다운샘플)."""
+    data, kind = await _load_html_data(db, report)
+    return await asyncio.to_thread(parser.part_series, data, kind, case_key, part_id)
+
+
 async def delete_report(db: AsyncSession, report: ImpactReport) -> None:
     # 원본 HTML SessionFile 도 함께 정리(있으면).
     if report.source_file_id is not None:

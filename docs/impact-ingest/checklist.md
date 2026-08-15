@@ -34,7 +34,7 @@
 ## Phase 3 — MCP 분석 도구
 - [x] server.py 비카탈로그 도구: ingest_report·list_reports·report_summary
 - [x] report_worst_cases·report_part_risk·report_findings·report_case
-- [x] report_energy_flow·compare_reports·report_directional
+- [x] report_energy_flow·compare_reports·report_directional·report_part_series (Phase6 심화)
 - [x] TOOLS.md/SKILL.md 갱신(개수 하드코딩 금지)
 - [x] verify: MCP tools/list 노출 + 실제 report_id 로 호출
 

@@ -76,6 +76,16 @@ async def test_ingest_sphere_and_query(db):
         # 파트 리스크: 전 파트 최악값 계산.
         pr = await svc.part_risk(db, rep)
         assert pr["parts"] and pr["parts"][0]["worst_stress"]["value"] is not None
+
+        # 방향 취약도: cuboid_26 → 면/엣지/코너 범주가 잡힌다.
+        dr = await svc.directional(db, rep)
+        cats = {d["category"] for d in dr["directions"]}
+        assert cats & {"face", "edge", "corner"}
+        assert dr["directions"][0]["worst_stress"]["value"] is not None
+
+        # 에너지 상세(원본 재파싱) — sphere 는 하중경로(이 샘플은 비어 note).
+        en = await svc.case_energy(db, rep, top[0].case_key)
+        assert en["kind"] == "sphere"
     finally:
         await _cleanup(db, u, s)
 

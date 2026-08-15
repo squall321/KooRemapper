@@ -70,3 +70,14 @@
   · SimContent 정의外 content 키(sim_domain/report_kind)는 정규화서 유실 → inputs/tags/첨부 extra 로 이중화.
 - E2E 검증: sphere 리포트 publish → SIM-MX-CAE-... 생성, 판별자 3곳 생존, eng_meta.doe 정상,
   components 23·첨부 1·worst_cases. 스모크 레코드 정리 완료. 유닛 test_report_datahub 3개 + 전체 55 passed.
+
+## Phase 6 — forge 심화 (사용자: "B. 현재 forge 심화")
+- report_directional: 방향 범주별(sphere 면/엣지/코너, impact F1~F6) 최악 응력·G. DB(케이스)만으로 계산.
+  실측: cuboid_26 → edge 12케이스 최악 1046.2 > face 6 최악 661.6 > corner 8 최악 579.5(엣지가 최악방향).
+- report_energy_flow: 원본 HTML 재파싱. deep=glstat 에너지밸런스(energy_ratio_min/hourglass)+rcforc 접촉력+
+  contact_metrics(Newton-3), sphere/impact=energy_flows[case] 하중경로 그래프(있으면; 샘플엔 비어 note).
+- report_part_series: 케이스·파트 시계열(다운샘플) 재파싱 — 응력/변형률/G/변위.
+- 파서 추가: case_energy/part_series (app/reports/parser.py). services: directional/case_energy/part_series
+  + _load_html_data(원본 재파싱 헬퍼). routes: /directional /energy /cases/{key}/series.
+- MCP 35종(신규 report_directional/report_energy_flow/report_part_series). 유닛+E2E 57 passed. 라이브 검증.
+- 남은 후속: impact chunked(tier D, 데이터 분할→다중파일 필요) 미지원(문서화).
