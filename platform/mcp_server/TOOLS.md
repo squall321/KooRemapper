@@ -1,4 +1,4 @@
-# KooRemapper MCP 도구 레퍼런스 (22개)
+# KooRemapper MCP 도구 레퍼런스
 
 MCP 서버는 streamable-http로 뜨고, 들어온 `Authorization: Bearer kr_...`(PAT)를
 백엔드 REST에 그대로 전달해 **그 사용자 권한**으로 동작한다. 모든 도구는 백엔드
@@ -7,13 +7,13 @@ MCP 서버는 streamable-http로 뜨고, 들어온 `Authorization: Bearer kr_...
 
 연결: `claude mcp add --transport http kooremapper http://<host>:8701/mcp --header "Authorization: Bearer kr_..."`
 
-## 카탈로그 (2)
+## 카탈로그
 | 도구 | 인자 | REST | 설명 |
 |---|---|---|---|
 | `list_operations` | — | GET /operations | 전체 오퍼레이션 요약 목록 |
 | `describe_operation` | operation | GET /operations/{op} | 한 op의 인자 JSON Schema·예제·매뉴얼 |
 
-## 세션 (5)
+## 세션
 | 도구 | 인자 | REST | 설명 |
 |---|---|---|---|
 | `list_sessions` | — | GET /sessions | 내 세션(프로젝트) 목록 |
@@ -22,7 +22,7 @@ MCP 서버는 streamable-http로 뜨고, 들어온 `Authorization: Bearer kr_...
 | `update_session` | session_id, name?, description? | PATCH /sessions/{id} | 세션 이름/설명 수정 |
 | `delete_session` | session_id | DELETE /sessions/{id} | 세션 + 전체 파일 삭제 |
 
-## 파일 (7)
+## 파일
 | 도구 | 인자 | REST | 설명 |
 |---|---|---|---|
 | `upload_kfile` | session_id, filename, content, base64_encoded? | POST /sessions/{id}/files | 내용(텍스트/base64)으로 업로드 |
@@ -33,7 +33,7 @@ MCP 서버는 streamable-http로 뜨고, 들어온 `Authorization: Bearer kr_...
 | `download_result` | session_id, file_id, as_base64? | GET …/files/{id}/download | 파일 내용 회수(5MB 상한, base64/미리보기) |
 | `save_result_to_path` | session_id, file_id, dest_path | GET …/files/{id}/download | 산출물을 로컬 경로로 저장(대형, 같은 머신) |
 
-## 실행 / Job (5)
+## 실행 / Job
 | 도구 | 인자 | REST | 설명 |
 |---|---|---|---|
 | `run_operation` | session_id, operation, args | POST /sessions/{id}/jobs | 오퍼레이션 실행(비동기 Job) → job_id |
@@ -42,7 +42,21 @@ MCP 서버는 streamable-http로 뜨고, 들어온 `Authorization: Bearer kr_...
 | `cancel_job` | job_id | POST /jobs/{id}/cancel | 대기/실행 중 Job 취소 |
 | `get_job_outputs` | job_id | GET /jobs/{id}/outputs | Job이 만든 산출 파일 목록 |
 
-## 시스템 / 신원 (3)
+## 낙하/충격 리포트
+SmartTwin 파이프라인이 만든 deep(단건 심층)·sphere(전각도 낙하)·impact(전위치 부분충격) 리포트 HTML 인제스트·분석.
+| 도구 | 인자 | REST | 설명 |
+|---|---|---|---|
+| `ingest_report` | session_id, filename, html_content, kind?, label?, base64_encoded? | POST /sessions/{id}/reports | 리포트 HTML 인제스트(kind 자동판별) → report_id |
+| `list_reports` | session_id | GET /sessions/{id}/reports | 세션의 리포트 목록 |
+| `report_summary` | report_id | GET /reports/{id} | kind·프로젝트·sim_params·parts·findings·전역 최악 롤업 |
+| `report_worst_cases` | report_id, metric?, top_n? | GET /reports/{id}/cases | 최악 케이스 랭킹(sphere=방향, impact=위치, deep=단건) |
+| `report_part_risk` | report_id, part_id? | GET /reports/{id}/parts | 파트별 최악값·발생 케이스·최소 안전율 |
+| `report_case` | report_id, case_key | GET /reports/{id}/cases/{key} | 한 케이스 상세(파트별 메트릭) |
+| `report_findings` | report_id, severity? | GET /reports/{id}/findings | 위험 소견(CRITICAL/WARNING/INFO) |
+| `compare_reports` | report_ids[], part_id? | (다중 GET) | 리비전/조건 간 파트별 최악값 비교(federate 식) |
+| `delete_report` | report_id | DELETE /reports/{id} | 리포트 삭제(원본 HTML 포함) |
+
+## 시스템 / 신원
 | 도구 | 인자 | REST | 설명 |
 |---|---|---|---|
 | `whoami` | — | GET /me | 현재 토큰의 사용자 정보 |

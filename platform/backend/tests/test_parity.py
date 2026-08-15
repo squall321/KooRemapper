@@ -4,8 +4,8 @@ These are pure (no DB): they assert the single-source-of-truth invariants that
 let a new operation propagate to all three surfaces with no per-surface code:
   - every catalog op is describable (has an args_schema) → web SchemaForm,
     MCP describe_operation and Python describe_operation all work for any op;
-  - the hand-written mcp_tools count advertised by /system/capabilities matches
-    the actual number of @mcp.tool tools (the one literal that can drift).
+  - the mcp_tools count advertised by /system/capabilities is derived (not
+    hand-written) from the actual number of @mcp.tool tools.
 """
 import re
 import sys
@@ -36,23 +36,22 @@ def test_every_op_is_describable():
     assert not missing, f"ops without a usable args_schema: {missing}"
 
 
-def test_advertised_mcp_tool_count_matches_server():
-    """The mcp_tools number in /system/capabilities must match the real tool count.
+def test_advertised_mcp_tool_count_is_derived_from_server():
+    """capabilities 의 mcp_tools 는 리터럴이 아니라 MCP 소스에서 산출돼야 한다.
 
-    This is the only place the count is hand-written; if an @mcp.tool is added or
-    removed without updating the literal, the web System page mis-reports it.
+    system/routes 의 _mcp_tool_count() 가 server.py 의 실제 @mcp.tool( 수와 일치하는지
+    검증한다(도구 추가/삭제 시 손댈 리터럴이 없어야 한다 = 하드코딩 금지).
     """
-    server_src = _MCP_SERVER.read_text(encoding="utf-8")
-    actual = server_src.count("@mcp.tool(")
-    assert actual >= 20, f"unexpectedly few MCP tools: {actual}"
+    from app.modules.system.routes import _mcp_tool_count
 
+    actual = _MCP_SERVER.read_text(encoding="utf-8").count("@mcp.tool(")
+    assert actual >= 20, f"unexpectedly few MCP tools: {actual}"
+    assert _mcp_tool_count() == actual
+
+    # system/routes 에 mcp_tools=<숫자> 리터럴이 남아있지 않아야 한다.
     routes_src = _SYSTEM_ROUTES.read_text(encoding="utf-8")
-    m = re.search(r"['\"]?mcp_tools['\"]?\s*[:=]\s*(\d+)", routes_src)
-    assert m, "could not find the mcp_tools count in system/routes.py"
-    advertised = int(m.group(1))
-    assert advertised == actual, (
-        f"/system/capabilities advertises mcp_tools={advertised} but server.py has "
-        f"{actual} @mcp.tool tools — update the literal in system/routes.py"
+    assert not re.search(r"['\"]?mcp_tools['\"]?\s*[:=]\s*\d+", routes_src), (
+        "system/routes.py 에 mcp_tools 숫자 리터럴이 있습니다 — 동적 산출로 바꾸세요."
     )
 
 

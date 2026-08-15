@@ -52,3 +52,18 @@ LS-DYNA `.k` 파일을 다루는 KooRemapper 플랫폼을 Claude에서 사용하
 - `info` : 메쉬 정보 조회
 
 > meshfix는 gmsh 바이너리가 필요할 수 있다(`requires_gmsh`). 실패 시 로그를 확인하라.
+
+## 낙하/충격 리포트 분석
+
+SmartTwin 파이프라인이 만든 낙하/충격 리포트 HTML(deep 단건 심층 · sphere 전각도 낙하 ·
+impact 전위치 부분충격)을 인제스트해 구조화 분석한다.
+
+1. **인제스트** — `ingest_report(session_id, filename, html_content)` 로 리포트 HTML 을 올린다.
+   kind 는 자동판별(원하면 kind 명시). 반환 report_id 로 이후 분석한다.
+2. **개요 파악** — `report_summary(report_id)` 로 kind·프로젝트·전역 최악값·findings 를 본다.
+3. **최악 케이스** — `report_worst_cases(report_id, metric)` (sphere=최악 방향, impact=최악 위치).
+   metric ∈ max_stress/max_g/max_disp/min_safety_factor.
+4. **파트 리스크** — `report_part_risk(report_id, part_id?)` 로 "어느 파트가 어느 방향/위치에서
+   가장 위험한가" 와 최소 안전율을 확인한다.
+5. **소견/케이스** — `report_findings(report_id, severity?)`, `report_case(report_id, case_key)`.
+6. **리비전 비교** — `compare_reports([id1, id2, ...])` 로 조건/리비전 간 파트별 최악값을 나란히 본다.

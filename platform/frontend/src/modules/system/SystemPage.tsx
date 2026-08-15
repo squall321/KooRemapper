@@ -26,7 +26,7 @@ type SystemStatus = {
 type ParityRow = { feature: string; web: boolean; mcp: boolean; note?: string }
 type Capabilities = {
   operations: number
-  mcp_tools: number
+  mcp_tools?: number
   parity: ParityRow[]
   mcp_add_hint: string
   mcp_desktop_hint: string
@@ -190,7 +190,7 @@ export function SystemPage() {
           {c && (
             <span className="flex items-center gap-2 text-xs text-muted">
               <Badge tone="default">오퍼레이션 {c.operations}</Badge>
-              <Badge tone="running">MCP 도구 {c.mcp_tools}</Badge>
+              <Badge tone="running">{c.mcp_tools != null ? `MCP 도구 ${c.mcp_tools}` : "MCP 도구"}</Badge>
             </span>
           )}
         </CardHeader>
@@ -241,7 +241,7 @@ export function SystemPage() {
               <ConnectBlock icon={<Terminal size={13} />} title="Claude Code" cmd={c.mcp_add_hint} />
               <ConnectBlock icon={<Monitor size={13} />} title="Claude Desktop" cmd={c.mcp_desktop_hint} />
               <p className="text-xs text-muted">
-                연결 후 <span className="font-medium text-fg">{c.mcp_tools}</span>개의 MCP 도구를 Claude에서 바로 사용할 수 있습니다.
+                연결 후 MCP 도구를 Claude에서 바로 사용할 수 있습니다.
                 토큰 발급은 <span className="font-medium text-fg">MCP 토큰</span> 메뉴에서 진행하세요.
               </p>
             </>

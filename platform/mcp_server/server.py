@@ -303,6 +303,131 @@ async def system_capabilities(ctx: Context) -> dict:
     return await _get(ctx, "/system/capabilities")
 
 
+# ── 낙하/충격 리포트 분석 ────────────────────────────────────────────
+# SmartTwin 파이프라인이 만든 deep(단건 심층)·sphere(전각도 낙하)·impact(전위치
+# 부분충격) 리포트 HTML 을 받아 구조화하고, 최악 케이스/파트 리스크/소견을 질의한다.
+_WORST_METRICS = {"max_stress", "max_g", "max_disp", "min_safety_factor"}
+
+
+@mcp.tool()
+async def ingest_report(
+    session_id: str,
+    filename: str,
+    html_content: str,
+    ctx: Context,
+    kind: str | None = None,
+    label: str | None = None,
+    base64_encoded: bool = False,
+) -> dict:
+    """낙하/충격 리포트 HTML 을 세션에 인제스트한다(deep/sphere/impact 자동판별).
+
+    `html_content` 는 koo_deep_report / koo_sphere_report / koo_impact_report 가 생성한
+    리포트 HTML 전체다(데이터가 임베드돼 있어 그대로 파싱된다). 큰 HTML 은 base64 로
+    주고 base64_encoded=true. kind 를 명시하면 자동판별을 덮어쓴다. 반환은 report_id 와
+    요약(kind·프로젝트·케이스수·전역 최악값)."""
+    raw = base64.b64decode(html_content) if base64_encoded else html_content.encode("utf-8")
+    data = {}
+    if kind:
+        data["kind"] = kind
+    if label:
+        data["label"] = label
+    files = {"file": (filename, raw, "text/html")}
+    async with httpx.AsyncClient(base_url=API, timeout=180) as c:
+        return _unwrap(await c.post(
+            f"/sessions/{session_id}/reports",
+            files=files, data=data, headers=_forward_headers(ctx),
+        ))
+
+
+@mcp.tool()
+async def list_reports(session_id: str, ctx: Context) -> list:
+    """세션에 인제스트된 리포트 목록(id·kind·프로젝트·케이스수·시각)."""
+    return await _get(ctx, f"/sessions/{session_id}/reports")
+
+
+@mcp.tool()
+async def report_summary(report_id: str, ctx: Context) -> dict:
+    """리포트 요약 — kind, 프로젝트/DOE, sim_params, parts, findings, 전역 최악 롤업.
+    무엇을 분석할 수 있는지 먼저 여기서 파악하라."""
+    return await _get(ctx, f"/reports/{report_id}")
+
+
+@mcp.tool()
+async def report_worst_cases(
+    report_id: str, ctx: Context, metric: str = "max_stress", top_n: int = 10
+) -> list:
+    """최악 케이스 랭킹. sphere=최악 낙하 방향, impact=최악 충격 위치, deep=단건.
+
+    metric ∈ {max_stress, max_g, max_disp, min_safety_factor}. min_safety_factor 는
+    작을수록 위험하므로 오름차순으로 준다. 각 케이스의 identity(각도/위치)와 승격 메트릭 반환."""
+    if metric not in _WORST_METRICS:
+        raise RuntimeError(f"metric 은 {sorted(_WORST_METRICS)} 중 하나여야 합니다.")
+    order = "asc" if metric == "min_safety_factor" else "desc"
+    return await _get(
+        ctx, f"/reports/{report_id}/cases",
+        params={"sort": metric, "order": order, "limit": top_n},
+    )
+
+
+@mcp.tool()
+async def report_part_risk(report_id: str, ctx: Context, part_id: int | None = None) -> dict:
+    """파트별 최악값과 그게 발생한 케이스(각도/위치) + 최소 안전율. part_id 를 주면 그 파트만.
+    "어느 파트가 어느 방향/위치에서 가장 위험한가" 를 답한다."""
+    params = {"part_id": part_id} if part_id is not None else None
+    return await _get(ctx, f"/reports/{report_id}/parts", params=params)
+
+
+@mcp.tool()
+async def report_case(report_id: str, case_key: str, ctx: Context) -> dict:
+    """한 케이스(각도/위치)의 상세 — identity + 파트별 메트릭. case_key 는
+    report_worst_cases 결과의 case_key(sphere=run_folder/각도명, impact=pos_id)."""
+    return await _get(ctx, f"/reports/{report_id}/cases/{case_key}")
+
+
+@mcp.tool()
+async def report_findings(report_id: str, ctx: Context, severity: str | None = None) -> list:
+    """리포트의 위험 소견(CRITICAL/WARNING/INFO). severity 로 필터 가능.
+    항복 초과·과도 G 등 자동 판정된 항목을 준다(sphere/impact)."""
+    params = {"severity": severity} if severity else None
+    return await _get(ctx, f"/reports/{report_id}/findings", params=params)
+
+
+@mcp.tool()
+async def compare_reports(report_ids: list, ctx: Context, part_id: int | None = None) -> dict:
+    """여러 리포트(리비전/조건)를 파트별 최악 응력으로 비교한다(federate 식 비교).
+
+    각 리포트의 part_risk 를 모아 파트별로 리포트 간 최악 응력·안전율을 나란히 놓는다.
+    같은 kind 끼리 비교해야 의미가 있다(sphere↔sphere, impact↔impact)."""
+    if not report_ids or len(report_ids) < 2:
+        raise RuntimeError("비교하려면 report_ids 가 2개 이상이어야 합니다.")
+    rows = {}
+    kinds = {}
+    for rid in report_ids:
+        summ = await _get(ctx, f"/reports/{rid}")
+        kinds[rid] = summ.get("kind")
+        pr = await _get(ctx, f"/reports/{rid}/parts",
+                        params={"part_id": part_id} if part_id is not None else None)
+        for p in pr.get("parts", []):
+            key = p.get("part_id")
+            slot = rows.setdefault(key, {"part_id": key, "part_name": p.get("part_name"), "by_report": {}})
+            slot["by_report"][rid] = {
+                "worst_stress": p.get("worst_stress", {}).get("value"),
+                "worst_stress_case": p.get("worst_stress", {}).get("case_key"),
+                "min_safety_factor": p.get("min_safety_factor"),
+            }
+    if len(set(kinds.values())) > 1:
+        note = f"⚠ 서로 다른 kind 비교({kinds}) — 물리적으로 다른 시험일 수 있습니다."
+    else:
+        note = None
+    return {"kinds": kinds, "note": note, "parts": sorted(rows.values(), key=lambda r: str(r["part_id"]))}
+
+
+@mcp.tool()
+async def delete_report(report_id: str, ctx: Context) -> dict:
+    """인제스트된 리포트를 삭제한다(원본 HTML 포함). / Delete an ingested report."""
+    return await _delete(ctx, f"/reports/{report_id}")
+
+
 if __name__ == "__main__":
     host = os.environ.get("MCP_HOST", "127.0.0.1")
     mcp.settings.host = host

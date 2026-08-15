@@ -32,11 +32,11 @@
 - [x] verify: 실제 HTML 업로드 → 케이스수·최악값이 원본 일치
 
 ## Phase 3 — MCP 분석 도구
-- [ ] server.py 비카탈로그 도구: ingest_report·list_reports·report_summary
-- [ ] report_worst_cases·report_part_risk·report_findings·report_case
-- [ ] report_energy_flow·compare_reports·report_directional
-- [ ] TOOLS.md/SKILL.md 갱신(개수 하드코딩 금지)
-- [ ] verify: MCP tools/list 노출 + 실제 report_id 로 호출
+- [x] server.py 비카탈로그 도구: ingest_report·list_reports·report_summary
+- [x] report_worst_cases·report_part_risk·report_findings·report_case
+- [x] report_energy_flow·compare_reports·report_directional
+- [x] TOOLS.md/SKILL.md 갱신(개수 하드코딩 금지)
+- [x] verify: MCP tools/list 노출 + 실제 report_id 로 호출
 
 ## Phase 4 — AIDataHub 등재
 - [ ] publish-datahub 엔드포인트(sim-result 레코드 + eng_meta 과제/개발단계/BOM)

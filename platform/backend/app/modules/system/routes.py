@@ -20,6 +20,21 @@ router = APIRouter(tags=["system"])
 
 APP_VERSION = "0.1.0"
 
+# MCP 서버 소스 경로 — 도구 수를 하드코딩하지 않고 여기서 @mcp.tool( 을 세어 산출한다.
+_MCP_SERVER_SRC = Path(__file__).resolve().parents[4] / "mcp_server" / "server.py"
+
+
+def _mcp_tool_count() -> int | None:
+    """MCP 서버 소스의 @mcp.tool( 개수(단일 소스). 소스를 못 찾으면 None.
+
+    별도 프로세스라 런타임 introspection 이 어려워 소스를 직접 센다. None 이면 프론트는
+    개수 없이 'MCP 도구' 로만 표시한다(하드코딩 리터럴을 두지 않기 위함).
+    """
+    try:
+        return _MCP_SERVER_SRC.read_text(encoding="utf-8").count("@mcp.tool(")
+    except OSError:
+        return None
+
 
 def _gmsh_available() -> bool:
     # next to the binary (findGmshExe convention) or on PATH
@@ -61,6 +76,8 @@ _PARITY = [
     {"feature": "파일 업로드/조회/다운로드", "web": True, "mcp": True, "note": "MCP는 로컬경로 업로드도 지원"},
     {"feature": "오퍼레이션 카탈로그/옵션", "web": True, "mcp": True},
     {"feature": "오퍼레이션 실행/Job/로그/취소", "web": True, "mcp": True},
+    {"feature": "낙하/충격 리포트 인제스트/분석", "web": False, "mcp": True,
+     "note": "REST API 제공, 웹 UI는 후속"},
     {"feature": "내 정보(whoami)", "web": True, "mcp": True},
     {"feature": "시스템 상태", "web": True, "mcp": True},
     {"feature": "MCP 토큰 발급", "web": True, "mcp": False, "note": "보안상 웹 전용"},
@@ -72,7 +89,8 @@ _PARITY = [
 async def capabilities(_user: User = Depends(get_current_user)):
     return ok({
         "operations": len(catalog.operation_names()),
-        "mcp_tools": 22,
+        # 하드코딩 대신 MCP 소스의 @mcp.tool( 을 세어 산출(None 이면 프론트가 개수 생략).
+        "mcp_tools": _mcp_tool_count(),
         "parity": _PARITY,
         "mcp_add_hint": (
             f"claude mcp add --transport http kooremapper "
