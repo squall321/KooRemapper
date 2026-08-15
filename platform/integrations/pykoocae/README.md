@@ -47,7 +47,7 @@ kr.run("generate", workdir=case_dir, argv=["torus", "t", "--dim-i", "10", "--dim
 - **번들 DB** — matdb `database:` 에 `/opt/kooremapper/materials/material_db.json` 을 주면 업로드 없이 525종 사용.
 - **YAML 들여쓰기** — matdb의 미니 파서가 리스트 항목을 키보다 더 들여써야 인식한다. 모듈이
   `_IndentDumper`로 이를 보장한다(직접 config.yaml을 쓸 땐 `  - match:` 처럼 들여쓸 것).
-- **임의 op의 dict 인자 전체 지원** — 45개 op를 dict로 완전 검증·생성하려면 `kooremapper-core`
+- **임의 op의 dict 인자 전체 지원** — 전체 op를 dict로 완전 검증·생성하려면 `kooremapper-core`
   (argbuild+catalog) 를 설치해 argv/yaml을 생성하면 된다. 이 모듈은 무의존 subprocess 경로를 유지한다.
 
 ## 세 모드

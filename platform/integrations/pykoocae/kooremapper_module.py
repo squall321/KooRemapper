@@ -10,7 +10,7 @@ Two invocation shapes cover chain use:
   - yaml ops  (matdb, warpage, assemble, …): pass a `config` dict or a config.yaml
   - positional ops (generate, map, info, …): pass `argv` (list of tokens)
 
-For a fully dict-driven invocation of ANY of the 45 ops (arg validation + config
+For a fully dict-driven invocation of ANY op (arg validation + config
 generation from a plain dict), install `kooremapper-core` and build the argv/yaml
 with it; this module keeps the dependency-free subprocess path.
 

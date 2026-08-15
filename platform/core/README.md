@@ -1,6 +1,6 @@
 # kooremapper-core
 
-KooRemapper의 **op 지식(45개 스키마·예제·호출규칙)과 인자 빌더**를 담은 의존성 최소
+KooRemapper의 **op 지식(스키마·예제·호출규칙)과 인자 빌더**를 담은 의존성 최소
 설치형 패키지. CLI·MCP·pyKooCAE 모듈이 이 **한 소스**를 공유해 op 인자 생성/검증을 중복
 없이 한다(순수 Python → Win/Mac/Linux).
 
@@ -16,7 +16,7 @@ from pathlib import Path
 from kooremapper_core import catalog, build_command
 
 # 카탈로그 조회
-for name in catalog.operation_names():           # 45개
+for name in catalog.operation_names():           # 전체 op
     op = catalog.get_operation(name)
     schema = catalog.args_json_schema(name)       # JSON Schema (폼/검증용)
 

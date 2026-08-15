@@ -1,5 +1,5 @@
-"""KooRemapper MCP 서버 — Claude 가 K파일 세션을 관리하고 45개 메쉬/해석 오퍼레이션을
-실행·다운로드하게 하는 도구.
+"""KooRemapper MCP 서버 — Claude 가 K파일 세션을 관리하고 메쉬/해석 오퍼레이션을
+실행·다운로드하게 하는 도구. (op 개수는 카탈로그 단일 소스에서 동적으로 결정된다.)
 
 백엔드(FastAPI)와 의존성 충돌을 피하려고 **별도 venv·프로세스**로 돌리고, 백엔드와는
 **REST API** 로만 통신한다. 들어온 MCP 요청의 `Authorization: Bearer kr_...`(개인 토큰)을
@@ -77,7 +77,7 @@ async def _delete(ctx, path):
 # ── 오퍼레이션 카탈로그 ──────────────────────────────────────────────
 @mcp.tool()
 async def list_operations(ctx: Context) -> list:
-    """사용 가능한 45개 오퍼레이션 요약(name, category, summary, 입력유형). 무엇을 할 수
+    """사용 가능한 전체 오퍼레이션 요약(name, category, summary, 입력유형). 무엇을 할 수
     있는지 먼저 조회. 상세 인자는 describe_operation 으로."""
     return await _get(ctx, "/operations")
 

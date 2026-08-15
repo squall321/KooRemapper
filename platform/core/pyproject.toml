@@ -1,7 +1,7 @@
 [project]
 name = "kooremapper-core"
 version = "0.1.0"
-description = "Shared KooRemapper operation catalog + argument builder (45 ops)"
+description = "Shared KooRemapper operation catalog + argument builder"
 requires-python = ">=3.9"
 dependencies = ["PyYAML>=6.0", "jsonschema>=4.0"]
 

@@ -79,7 +79,7 @@ def test_python_client_mirrors_mcp_read_surface():
 def test_backend_catalog_is_single_source_from_core():
     """The backend no longer carries its own catalog_data.json — it re-exports
     kooremapper_core (single source). Guard against a stray backend copy reappearing
-    and confirm the re-export still yields the 45 ops."""
+    and confirm the re-export still yields all ops."""
     assert not (_BACKEND / "app" / "runner" / "catalog_data.json").exists(), (
         "backend catalog_data.json reappeared — it must come from kooremapper_core"
     )

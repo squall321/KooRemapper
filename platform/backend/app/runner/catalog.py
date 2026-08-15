@@ -1,6 +1,6 @@
 # app.runner.catalog — 공유 kooremapper_core.catalog 재수출(op 지식 단일 소스).
 """Backend catalog access — a thin re-export of ``kooremapper_core.catalog`` so
-the 45-op knowledge (catalog_data.json + loader/validator) lives in ONE place
+the op knowledge (catalog_data.json + loader/validator) lives in ONE place
 (platform/core), shared by the CLI, MCP, and pyKooCAE module."""
 from __future__ import annotations
 

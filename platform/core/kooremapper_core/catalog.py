@@ -1,4 +1,4 @@
-"""Operation catalog — single source of truth for the 45 KooRemapper ops.
+"""Operation catalog — single source of truth for the KooRemapper ops.
 
 The data lives in `catalog_data.json` (one entry per op). This module loads it,
 exposes lookups, and derives a JSON Schema per op for (a) request validation,

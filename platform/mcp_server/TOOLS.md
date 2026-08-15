@@ -10,7 +10,7 @@ MCP 서버는 streamable-http로 뜨고, 들어온 `Authorization: Bearer kr_...
 ## 카탈로그 (2)
 | 도구 | 인자 | REST | 설명 |
 |---|---|---|---|
-| `list_operations` | — | GET /operations | 45개 오퍼레이션 요약 목록 |
+| `list_operations` | — | GET /operations | 전체 오퍼레이션 요약 목록 |
 | `describe_operation` | operation | GET /operations/{op} | 한 op의 인자 JSON Schema·예제·매뉴얼 |
 
 ## 세션 (5)

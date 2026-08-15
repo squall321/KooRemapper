@@ -1,7 +1,7 @@
-# KooRemapper op 지식(45개 스키마)의 단일 소스 — 카탈로그 + argbuild.
+# KooRemapper op 지식(전체 스키마)의 단일 소스 — 카탈로그 + argbuild.
 """kooremapper_core — the shared operation catalog + argument builder.
 
-One source of KooRemapper's 45-operation knowledge (JSON Schemas, examples,
+One source of KooRemapper's operation knowledge (JSON Schemas, examples,
 invocation rules) reusable by the platform backend, the MCP server, a pyKooCAE
 module, or any external tool — so the three consumption modes (CLI / MCP /
 module) don't each re-implement how to build an op invocation.

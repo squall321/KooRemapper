@@ -1,7 +1,7 @@
 ---
 name: kooremapper
 description: >
-  LS-DYNA K파일에 메쉬 매핑/응력/재메쉬/해석셋업 등 45개 오퍼레이션을 적용하고 결과를
+  LS-DYNA K파일에 메쉬 매핑/응력/재메쉬/해석셋업 등 전체 오퍼레이션을 적용하고 결과를
   내려받는다. "K파일 매핑/prestress/squeeze/assemble/메쉬 변환/접촉/하중/경계조건"
   같은 LS-DYNA 전처리 요청에 사용. KooRemapper MCP 서버(도구)가 연결돼 있어야 한다.
 ---
@@ -14,7 +14,7 @@ LS-DYNA `.k` 파일을 다루는 KooRemapper 플랫폼을 Claude에서 사용하
 
 ## 표준 워크플로
 
-1. **무엇을 할지 정한다** — `list_operations()` 로 45개 op 요약을 본다.
+1. **무엇을 할지 정한다** — `list_operations()` 로 전체 op 요약을 본다.
    원하는 op를 고르면 `describe_operation(op)` 로 **args_schema**(인자 JSON Schema),
    입출력, 예제 args를 확인한다. **args는 반드시 이 스키마를 따른다.**
 2. **세션 준비** — 기존 세션은 `list_sessions()`, 없으면 `create_session(name)`.

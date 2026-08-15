@@ -77,7 +77,7 @@ def test_unknown_op_error():
 
 def test_all_catalog_examples_build():
     """Every op's catalog example must build a command without error — guards
-    against an argbuild/catalog change breaking any of the 45 ops (M14)."""
+    against an argbuild/catalog change breaking any op (M14)."""
     from app.runner import catalog
 
     failures = []
