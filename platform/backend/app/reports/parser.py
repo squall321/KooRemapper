@@ -16,7 +16,9 @@ meaning "not measured" (never coerced to 0).
 from __future__ import annotations
 
 import json
+import math
 import re
+import statistics
 
 # 임베드 데이터 대입식: `const IDENT = {`. 알려진 식별자를 우선 시도하고, 없으면
 # 모든 `const IDENT = {…}` 를 훑어 kind 시그니처가 잡히는 가장 큰 객체를 고른다.
@@ -648,3 +650,128 @@ def part_series(data: dict, kind: str, case_key: str, part_id: int) -> dict:
             return {"kind": "impact", "case_key": case_key, "part_id": part_id,
                     "stress_ts": row.get("stress_ts")}
     return {"kind": "impact", "case_key": case_key, "part_id": part_id, "note": "케이스/파트를 찾지 못함"}
+
+
+# ── 스캐터링/섭동 분석 (sphere 전용) ────────────────────────────────
+# 26면 낙하 주변의 방향 섭동에 대한 응답 산포. 케이스를 최근접 26 정준방향으로 묶어
+# 방향별 통계(mean/std/CoV/최악)와 민감도를 낸다. sphere 리포트에서 도출한다.
+_SCATTER_METRICS = ("peak_stress", "peak_g", "peak_disp")
+_CUBE_BASES: list[tuple[tuple[int, int, int], tuple[float, float, float]]] | None = None
+
+
+def _cube_bases():
+    """26 정준 큐브 방향(면6·엣지12·코너8) 단위벡터."""
+    global _CUBE_BASES
+    if _CUBE_BASES is None:
+        bs = []
+        for x in (-1, 0, 1):
+            for y in (-1, 0, 1):
+                for z in (-1, 0, 1):
+                    if (x, y, z) == (0, 0, 0):
+                        continue
+                    n = math.sqrt(x * x + y * y + z * z)
+                    bs.append(((x, y, z), (x / n, y / n, z / n)))
+        _CUBE_BASES = bs
+    return _CUBE_BASES
+
+
+def _angle_vec(a: dict) -> tuple[float, float, float]:
+    """각도(roll/pitch/yaw[+swap]) → 단위 방향벡터. sphere 리포트 변환과 동일."""
+    swap = bool(a.get("swap"))
+    roll = _num(a.get("roll")) or 0.0
+    pitch = _num(a.get("pitch")) or 0.0
+    if swap:
+        lat, lon = math.radians(pitch), math.radians(roll)
+    else:
+        lat, lon = math.radians(roll), math.radians(pitch)
+    lat = max(-math.pi / 2, min(math.pi / 2, lat))
+    return (math.cos(lat) * math.cos(lon), math.cos(lat) * math.sin(lon), math.sin(lat))
+
+
+def _nearest_base(v):
+    """벡터를 최근접 26 정준방향에 배정 → (key_tuple, angular_error_deg)."""
+    best, bdot = None, -2.0
+    for key, bv in _cube_bases():
+        dot = max(-1.0, min(1.0, v[0] * bv[0] + v[1] * bv[1] + v[2] * bv[2]))
+        if dot > bdot:
+            bdot, best = dot, key
+    return best, math.degrees(math.acos(max(-1.0, min(1.0, bdot))))
+
+
+def _base_category(key: tuple[int, int, int]) -> str:
+    return {1: "face", 2: "edge", 3: "corner"}[sum(1 for c in key if c != 0)]
+
+
+def scatter_analysis(data: dict, kind: str, *, metric: str = "peak_stress",
+                     part_id: int | None = None) -> dict:
+    """방향 섭동 산포 분석(sphere 전용).
+
+    각 케이스를 최근접 26 정준방향으로 묶어 방향별 metric 산포(n/mean/std/CoV/min/max/
+    최악 케이스)를 계산한다. part_id 미지정 시 케이스별 파트 최댓값을 쓴다.
+    방향당 표본이 1개뿐이면(순수 26면) 산포=0 이라 degenerate 로 표시한다.
+    """
+    if kind != "sphere":
+        return {"kind": kind, "note": "스캐터 분석은 sphere(전각도) 리포트에서만 지원됩니다."}
+    if metric not in _SCATTER_METRICS:
+        raise ReportParseError(f"metric 은 {list(_SCATTER_METRICS)} 중 하나여야 합니다.")
+
+    groups: dict[tuple, dict] = {}
+    n_cases = 0
+    for r in data.get("results") or []:
+        if not isinstance(r, dict):
+            continue
+        a = r.get("angle") or {}
+        parts = r.get("parts") or {}
+        if part_id is not None:
+            val = _num((parts.get(str(part_id)) or {}).get(metric))
+        else:
+            vals = [_num((p or {}).get(metric)) for p in parts.values()]
+            vals = [x for x in vals if x is not None]
+            val = max(vals) if vals else None
+        if val is None:
+            continue
+        key, err = _nearest_base(_angle_vec(a))
+        case_key = r.get("folder") or a.get("name") or f"run_{n_cases}"
+        g = groups.setdefault(key, {"values": [], "cases": [], "rep_name": None, "rep_err": 1e9})
+        g["values"].append(val)
+        g["cases"].append((val, case_key))
+        if err < g["rep_err"]:
+            g["rep_err"], g["rep_name"] = err, a.get("name")
+        n_cases += 1
+
+    out_groups = []
+    for key, g in groups.items():
+        vals = g["values"]
+        mean = statistics.fmean(vals)
+        std = statistics.pstdev(vals) if len(vals) > 1 else 0.0
+        worst = max(g["cases"], key=lambda c: c[0])
+        out_groups.append({
+            "base": ",".join(str(c) for c in key),
+            "category": _base_category(key),
+            "representative": g["rep_name"],
+            "n": len(vals),
+            "mean": mean,
+            "std": std,
+            "cov": (std / mean) if mean else None,
+            "min": min(vals),
+            "max": max(vals),
+            "worst_value": worst[0],
+            "worst_case_key": worst[1],
+        })
+    out_groups.sort(key=lambda d: -d["mean"])
+
+    degenerate = all(g["n"] <= 1 for g in out_groups)
+    most_scattered = None
+    scat = [g for g in out_groups if g["n"] >= 2 and g["cov"] is not None]
+    if scat:
+        most_scattered = max(scat, key=lambda d: d["cov"])
+    return {
+        "kind": "sphere", "metric": metric, "part_id": part_id,
+        "n_cases": n_cases, "n_bases": len(out_groups),
+        "degenerate": degenerate,
+        "note": ("방향당 표본이 1개뿐이라 산포가 0입니다 — 섭동 DOE(방향당 여러 run)가 아니면 "
+                 "민감도가 나오지 않습니다.") if degenerate else None,
+        "most_severe": out_groups[0] if out_groups else None,
+        "most_scattered": most_scattered,
+        "groups": out_groups,
+    }

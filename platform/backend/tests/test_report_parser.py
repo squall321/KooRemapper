@@ -18,6 +18,7 @@ from app.reports import parser
 _DEEP = Path("/data/SmartTwinPostprocessor/lib/koo_deep_report/single_report/report.html")
 _SPHERE = Path("/data/SmartTwinPostprocessor/lib/koo_sphere_report/examples/Test_001_report.html")
 # impact 는 세션 중 생성한 스크래치패드 산출물(있으면 검증).
+_SPHERE_DENSE = Path("/data/SmartTwinPostprocessor/lib/koo_sphere_report/examples/Test_006_report.html")
 _IMPACT_CANDIDATES = [
     Path("/tmp/claude-1000/-home-koopark-claude-KooRemapper/"
          "c1650bf4-b3b2-4d9d-88d1-a34a9ec0f959/scratchpad/impact_report.html"),
@@ -138,6 +139,34 @@ def test_wrong_kind_hint_on_real_sphere_html():
     # 실제 sphere HTML 에 impact 힌트 → 크래시 없이 빈 케이스(상위 인제스트가 400 처리).
     study = parser.parse_html(_read(_SPHERE), kind_hint="impact")
     assert study["cases"] == []
+
+
+@pytest.mark.skipif(not _SPHERE.exists(), reason="sphere 샘플 없음")
+def test_scatter_pure26_is_degenerate():
+    # 순수 26면(방향당 1 run) → 26방향 배정 + degenerate(산포 0).
+    data = parser.extract_embedded_data(_read(_SPHERE))
+    r = parser.scatter_analysis(data, "sphere", metric="peak_stress")
+    assert r["kind"] == "sphere" and r["n_bases"] == 26
+    assert r["degenerate"] is True and r["most_scattered"] is None
+    assert r["most_severe"]["mean"] == pytest.approx(1046.2, rel=1e-3)
+
+
+@pytest.mark.skipif(not _SPHERE_DENSE.exists(), reason="dense sphere 샘플 없음")
+def test_scatter_dense_sphere_real_spread():
+    # 조밀 구면(1146방향) → 방향당 표본 다수 → 진짜 산포·민감도.
+    data = parser.extract_embedded_data(_read(_SPHERE_DENSE))
+    r = parser.scatter_analysis(data, "sphere", metric="peak_stress")
+    assert r["degenerate"] is False
+    assert r["n_bases"] == 26 and r["n_cases"] > 100
+    assert r["most_scattered"] is not None and r["most_scattered"]["n"] >= 2
+    assert r["most_scattered"]["cov"] > 0
+    # 각 그룹은 방향 범주를 갖는다.
+    assert {g["category"] for g in r["groups"]} <= {"face", "edge", "corner"}
+
+
+def test_scatter_non_sphere_noted():
+    r = parser.scatter_analysis({"sim": {}, "glstat": {}}, "deep", metric="peak_stress")
+    assert "note" in r  # deep/impact 는 스캐터 미지원 안내
 
 
 def test_num_rejects_nan_inf():

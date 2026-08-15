@@ -329,6 +329,13 @@ async def part_series(db: AsyncSession, report: ImpactReport, case_key: str, par
     return await asyncio.to_thread(parser.part_series, data, kind, case_key, part_id)
 
 
+async def scatter(db: AsyncSession, report: ImpactReport, *, metric: str = "peak_stress",
+                  part_id: int | None = None) -> dict:
+    """방향 섭동 산포 분석(sphere) — 원본 재파싱(swap 포함 authoritative angle 필요)."""
+    data, kind = await _load_html_data(db, report)
+    return await asyncio.to_thread(parser.scatter_analysis, data, kind, metric=metric, part_id=part_id)
+
+
 async def delete_report(db: AsyncSession, report: ImpactReport) -> None:
     # 원본 HTML SessionFile 도 함께 정리(있으면).
     if report.source_file_id is not None:

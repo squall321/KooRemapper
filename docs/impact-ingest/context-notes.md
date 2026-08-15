@@ -81,3 +81,14 @@
   + _load_html_data(원본 재파싱 헬퍼). routes: /directional /energy /cases/{key}/series.
 - MCP 35종(신규 report_directional/report_energy_flow/report_part_series). 유닛+E2E 57 passed. 라이브 검증.
 - 남은 후속: impact chunked(tier D, 데이터 분할→다중파일 필요) 미지원(문서화).
+
+## 방향 섭동 산포(scatter) 분석 — sphere 도출 (사용자: "26면 주변 퍼터베이션")
+- 외부 scatter 리포트 생성기는 없음(리포트 4종뿐). DynaForge 가 sphere 케이스에서 도출(경로 B).
+- report_scatter: 케이스를 최근접 26 정준방향(면6·엣지12·코너8)으로 묶어 방향별 metric
+  산포(n·mean·std·CoV·min·max·최악) + most_severe/most_scattered. metric∈peak_stress/g/disp.
+- 프레임 정합 실측 검증: cuboid_26 26케이스 → 26 정준방향 1:1, 카테고리 100% 일치(면 0°, 최대 9.7°).
+  euler→벡터는 sphere 리포트 규약 그대로(lon=pitch,lat=roll[+swap], v=(coslat·coslon,coslat·sinlon,sinlat)).
+  swap 필요 → scatter 는 원본 재파싱(authoritative angle).
+- degenerate: 방향당 표본 1개(순수 26면)면 산포 0 → note. 조밀/섭동 DOE 라야 의미.
+  실측 Test_006(1146): non-degenerate, peak_g 최악 corner mean 304k, 최대산포 face CoV 1.15(75k→1.34M).
+- MCP 36종. REST /reports/{id}/scatter?metric=&part_id=. 파서 scatter_analysis(순수함수).

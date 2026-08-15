@@ -157,6 +157,22 @@ async def report_directional(
     return ok(await svc.directional(db, r, part_id))
 
 
+@router.get("/reports/{report_id}/scatter")
+async def report_scatter(
+    report_id: str,
+    metric: str = Query("peak_stress", pattern="^(peak_stress|peak_g|peak_disp)$"),
+    part_id: int | None = Query(default=None),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """방향 섭동 산포 분석(sphere) — 26 정준방향별 metric 산포(mean/std/CoV/최악)·민감도."""
+    r = await _require_report(db, user, report_id)
+    try:
+        return ok(await svc.scatter(db, r, metric=metric, part_id=part_id))
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
+
+
 @router.get("/reports/{report_id}/energy")
 async def report_energy(
     report_id: str,

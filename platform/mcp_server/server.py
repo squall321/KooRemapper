@@ -393,6 +393,23 @@ async def report_directional(report_id: str, ctx: Context, part_id: int | None =
 
 
 @mcp.tool()
+async def report_scatter(
+    report_id: str, ctx: Context, metric: str = "peak_stress", part_id: int | None = None
+) -> dict:
+    """방향 섭동 산포 분석(sphere 전용) — 26면 낙하 주변 방향 섭동에 대한 응답 산포.
+
+    케이스를 최근접 26 정준방향(면/엣지/코너)으로 묶어 방향별 metric 산포(n·mean·std·
+    CoV·최악)와 민감도(가장 산포 큰 방향)를 낸다. metric ∈ {peak_stress,peak_g,peak_disp}.
+    방향당 표본이 1개뿐(순수 26면)이면 degenerate=true(산포 0) — 섭동 DOE 라야 의미 있다."""
+    if metric not in ("peak_stress", "peak_g", "peak_disp"):
+        raise RuntimeError("metric 은 peak_stress/peak_g/peak_disp 중 하나여야 합니다.")
+    params = {"metric": metric}
+    if part_id is not None:
+        params["part_id"] = part_id
+    return await _get(ctx, f"/reports/{report_id}/scatter", params=params)
+
+
+@mcp.tool()
 async def report_energy_flow(report_id: str, ctx: Context, case_key: str | None = None) -> dict:
     """에너지/접촉 상세(원본 재파싱). deep=에너지 밸런스(hourglass/energy_ratio)·접촉력(rcforc)·
     Newton-3 신뢰도, sphere/impact=하중경로 그래프(impactor→parts 전파, 접촉 엣지 work).
