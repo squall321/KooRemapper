@@ -92,3 +92,15 @@
 - degenerate: 방향당 표본 1개(순수 26면)면 산포 0 → note. 조밀/섭동 DOE 라야 의미.
   실측 Test_006(1146): non-degenerate, peak_g 최악 corner mean 304k, 최대산포 face CoV 1.15(75k→1.34M).
 - MCP 36종. REST /reports/{id}/scatter?metric=&part_id=. 파서 scatter_analysis(순수함수).
+
+## 26방향 스캐터 — 생성 경로 확인 + 런처 (사용자 "다 되게 하자")
+- scenario.json 에 이미 존재: angle_source.cuboid_geometry(6F+12E+8C=26방향) + tolerance
+  (roll/pitch/yaw ±범위, doe_count, doe_type lhs/full_factorial/random). **방향마다** 적용.
+- 실측(KooChainRun prepare, LS-DYNA 불필요): cuboid+tolerance(doe_count=5) → doe_angles=130=26×5.
+  각 기준방향 F1_Back_DOE001~005 처럼 ±2° 흩뿌림. 사용자 주장(26방향 스캐터 옵션 있음)이 맞음.
+- 런처 공백 해소: SmartTwinMCP 에 cuboid_scatter_drop_simulation 툴 신규(feat/cuboid-scatter-drop).
+  scenario_builder.build_cuboid_scatter_scenario. dry-run 130run 검증, 카탈로그 0-issue 등록.
+- 전체 루프: cuboid_scatter_drop_simulation(런치) → KooChainRun → sphere_report → DynaForge
+  인제스트 → report_scatter(26방향 산포/민감도). 실제 LS-DYNA run 만 남음(수 시간, 별도 승인).
+- report_scatter 프레임은 sphere 리포트(후처리) 각도 기준 검증됨(Test_001/006). runner_config raw
+  각도는 리포트 이전 규약이라 다름 — report_scatter 는 리포트를 소비하므로 무관.
