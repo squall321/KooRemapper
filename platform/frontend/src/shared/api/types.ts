@@ -218,6 +218,91 @@ export interface Report extends ReportListItem {
   findings: ReportFinding[] | null
   summary: Record<string, unknown> | null
 }
+/** 최악값 + 그 값이 나온 케이스 — 분석 응답이 공통으로 쓰는 모양. */
+export interface WorstRef {
+  value: number | null
+  case_key: string | null
+  part_id?: number | null
+  part_name?: string | null
+}
+export interface ReportPartRisk {
+  report_id: string
+  kind: ReportKind
+  parts: Array<{
+    part_id: number
+    part_name: string | null
+    worst_stress: WorstRef
+    worst_g: WorstRef
+    worst_disp: WorstRef
+    min_safety_factor: number | null
+  }>
+}
+export interface ReportDirectional {
+  report_id: string
+  kind: ReportKind
+  part_id: number | null
+  directions: Array<{
+    category: string
+    n_cases: number
+    worst_stress: WorstRef
+    worst_g: WorstRef
+  }>
+}
+export type ScatterMetric = 'peak_stress' | 'peak_g' | 'peak_disp'
+export interface ReportScatter {
+  kind: ReportKind
+  note?: string
+  metric?: ScatterMetric
+  part_id?: number | null
+  n_cases?: number
+  n_bases?: number
+  /** 방향당 표본이 1개뿐이라 산포가 0인 상태 — 값이 아니라 DOE 설계의 문제다. */
+  degenerate?: boolean
+  most_severe?: { base?: string; representative?: string | null; worst_value?: number | null } | null
+  most_scattered?: { base?: string; representative?: string | null; cov?: number | null } | null
+  groups?: Array<{
+    base: string
+    category: string
+    representative: string | null
+    n: number
+    mean: number | null
+    std: number | null
+    cov: number | null
+    min: number | null
+    max: number | null
+    worst_value: number | null
+    worst_case_key: string | null
+  }>
+}
+export interface ReportEnergy {
+  kind: ReportKind
+  note?: string
+  energy_balance?: {
+    energy_ratio_min: number | null
+    energy_ratio_max: number | null
+    has_mass_added: boolean | null
+    normal_termination: boolean | null
+  }
+  /** deep: {t:[], <계열명>:[]}. sphere/impact 는 energy_flow 쪽에 담긴다. */
+  energy_series?: Record<string, number[]> | null
+  energy_flow?: Record<string, unknown> | null
+  contacts?: Array<{ id: number | null; name: string | null; side: number | string | null; peak_fmag: number | null }>
+  contact_metrics?: Record<string, unknown> | null
+  has_matsum?: boolean
+}
+/** 시계열 — kind 마다 담기는 키가 다르다(deep=stress/motion, sphere=*_ts). */
+export interface ReportPartSeries {
+  kind: ReportKind
+  case_key?: string
+  part_id: number
+  note?: string
+  stress?: Record<string, { t?: number[]; max?: number[]; avg?: number[]; global_max?: number | null }>
+  motion?: Record<string, unknown>
+  stress_ts?: number[][] | null
+  strain_ts?: number[][] | null
+  g_ts?: number[][] | null
+  disp_ts?: number[][] | null
+}
 export interface ReportCase {
   id: number
   report_id: string

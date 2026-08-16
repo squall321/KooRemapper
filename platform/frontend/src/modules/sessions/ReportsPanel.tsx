@@ -5,10 +5,11 @@ import { Upload, Trash2, ChevronRight, FileBarChart, ExternalLink, UploadCloud }
 import {
   deleteReport, getReport, ingestReport, listReportCases, listReports, publishReportToDatahub, reportHtmlBlobUrl,
 } from '@/shared/api/endpoints'
-import type { Report, ReportCase, ReportListItem } from '@/shared/api/types'
+import type { Report, ReportCase, ReportFinding, ReportListItem } from '@/shared/api/types'
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Input, Spinner } from '@/shared/ui/ui'
 import { errorMessage } from '@/shared/api/client'
 import { ConfirmDialog } from '@/shared/components/ConfirmDialog'
+import { ReportAnalysis } from './ReportAnalysis'
 
 const KIND_LABEL: Record<string, string> = {
   deep: '단건 심층', sphere: '전각도 낙하', impact: '전위치 부분충격',
@@ -113,16 +114,7 @@ function ReportDetail({ sessionId, reportId }: { sessionId: string; reportId: st
         {r.generator && <span>{r.generator}</span>}
       </div>
 
-      {findings.length > 0 && (
-        <div className="space-y-1">
-          {findings.slice(0, 5).map((f, i) => (
-            <div key={i} className="flex items-start gap-2">
-              <Badge tone={f.severity === 'CRITICAL' ? 'failed' : f.severity === 'WARNING' ? 'canceled' : 'default'}>{f.severity}</Badge>
-              <span className="text-fg">{f.title}</span>
-            </div>
-          ))}
-        </div>
-      )}
+      {findings.length > 0 && <Findings items={findings} />}
 
       <div>
         <div className="text-muted mb-1">최악 케이스 (최대 응력순)</div>
@@ -152,6 +144,8 @@ function ReportDetail({ sessionId, reportId }: { sessionId: string; reportId: st
         )}
       </div>
 
+      <ReportAnalysis report={r} cases={cases.data ?? []} />
+
       <div className="flex items-center gap-2 flex-wrap">
         {r.source_file_id != null && (
           <Button size="sm" variant="ghost" onClick={async () => setHtmlUrl(await reportHtmlBlobUrl(sessionId, r.source_file_id!))}>
@@ -164,6 +158,42 @@ function ReportDetail({ sessionId, reportId }: { sessionId: string; reportId: st
       {htmlUrl && (
         <iframe title="report" src={htmlUrl} className="w-full h-[480px] border border-border rounded bg-white" />
       )}
+    </div>
+  )
+}
+
+/** 발견사항 — 심각도 높은 것부터, 접으면 권고까지 읽힌다.
+ *  예전에는 상위 5건의 제목만 보여 줘서 "무엇을 하라"는 부분(recommendation)이 화면에 없었다. */
+function Findings({ items }: { items: ReportFinding[] }) {
+  const [open, setOpen] = useState<number | null>(null)
+  const rank = (s: string) => (s === 'CRITICAL' ? 0 : s === 'WARNING' ? 1 : 2)
+  const sorted = [...items].sort((a, b) => rank(a.severity) - rank(b.severity))
+  const crit = sorted.filter((f) => f.severity === 'CRITICAL').length
+  return (
+    <div className="space-y-1">
+      <div className="text-muted">
+        발견사항 {sorted.length}건{crit > 0 && <span className="text-danger"> · CRITICAL {crit}</span>}
+      </div>
+      {sorted.map((f, i) => (
+        <div key={i} className="rounded border border-border">
+          <button className="w-full flex items-start gap-2 px-2 py-1 text-left"
+                  onClick={() => setOpen(open === i ? null : i)}>
+            <Badge tone={f.severity === 'CRITICAL' ? 'failed' : f.severity === 'WARNING' ? 'canceled' : 'default'}>
+              {f.severity}
+            </Badge>
+            <span className="text-fg flex-1">{f.title}</span>
+            <ChevronRight size={12} className={`text-muted mt-0.5 ${open === i ? 'rotate-90 transition' : 'transition'}`} />
+          </button>
+          {open === i && (
+            <div className="px-2 pb-2 space-y-1 text-muted">
+              {f.detail && <div className="whitespace-pre-wrap">{f.detail}</div>}
+              {f.recommendation && (
+                <div className="text-fg"><span className="text-muted">권고 — </span>{f.recommendation}</div>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   )
 }

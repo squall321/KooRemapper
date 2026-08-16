@@ -1,7 +1,8 @@
 // Typed API functions per resource.
 import { api, unwrap } from './client'
 import type {
-  Job, ModelMeta, OperationDetail, OperationSummary, Report, ReportCase, ReportListItem,
+  Job, ModelMeta, OperationDetail, OperationSummary, Report, ReportCase, ReportDirectional,
+  ReportEnergy, ReportListItem, ReportPartRisk, ReportPartSeries, ReportScatter, ScatterMetric,
   SessionDetail, SessionFile, SessionSummary, TokenCreated, TokenInfo, User,
 } from './types'
 
@@ -159,6 +160,35 @@ export async function publishReportToDatahub(
 }
 export async function deleteReport(reportId: string): Promise<void> {
   await api.delete(`/reports/${reportId}`)
+}
+// 결과 분석 — 지금까지 MCP 도구로만 열려 있던 것들을 웹에서도 그대로 본다.
+export async function reportPartRisk(reportId: string, partId?: number): Promise<ReportPartRisk> {
+  const { data } = await api.get(`/reports/${reportId}/parts`, { params: partId != null ? { part_id: partId } : {} })
+  return unwrap<ReportPartRisk>(data)
+}
+export async function reportDirectional(reportId: string, partId?: number): Promise<ReportDirectional> {
+  const { data } = await api.get(`/reports/${reportId}/directional`, { params: partId != null ? { part_id: partId } : {} })
+  return unwrap<ReportDirectional>(data)
+}
+export async function reportScatter(
+  reportId: string, metric: ScatterMetric = 'peak_stress', partId?: number,
+): Promise<ReportScatter> {
+  const { data } = await api.get(`/reports/${reportId}/scatter`, {
+    params: { metric, ...(partId != null ? { part_id: partId } : {}) },
+  })
+  return unwrap<ReportScatter>(data)
+}
+export async function reportEnergy(reportId: string, caseKey?: string): Promise<ReportEnergy> {
+  const { data } = await api.get(`/reports/${reportId}/energy`, { params: caseKey ? { case_key: caseKey } : {} })
+  return unwrap<ReportEnergy>(data)
+}
+export async function reportPartSeries(
+  reportId: string, caseKey: string, partId: number,
+): Promise<ReportPartSeries> {
+  const { data } = await api.get(`/reports/${reportId}/cases/${encodeURIComponent(caseKey)}/series`, {
+    params: { part_id: partId },
+  })
+  return unwrap<ReportPartSeries>(data)
 }
 /** 원본 리포트 HTML 을 blob URL 로 (iframe src 용 — 인증 헤더가 필요해 직접 fetch).
  *  백엔드 download 는 octet-stream 이라 iframe 이 다운로드해버린다 → text/html 로 리타입. */
