@@ -30,7 +30,7 @@ async def list_sessions(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    rows = (await svc.list_sessions(db, user.id))[offset : offset + limit]
+    rows = (await svc.list_sessions(db, user))[offset : offset + limit]
     data = []
     for s, count in rows:
         d = SessionRead.model_validate(s).model_dump()
@@ -50,10 +50,26 @@ async def create_session(
 
 
 async def _require_session(db, user, session_id):
+    """쓰기·삭제용 — 소유자만. 공개 세션이어도 남이 고치지는 못한다."""
     s = await svc.get_owned_session(db, user.id, session_id)
     if s is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "세션을 찾을 수 없습니다.")
     return s
+
+
+async def _require_viewable(db, user, session_id):
+    """읽기용 — 내 것이거나 공개 범위에 걸리는 세션."""
+    s = await svc.get_viewable_session(db, user, session_id)
+    if s is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "세션을 찾을 수 없습니다.")
+    return s
+
+
+async def _require_viewable_file(db, user, session_id, file_id):
+    f = await svc.get_viewable_file(db, user, session_id, file_id)
+    if f is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "파일을 찾을 수 없습니다.")
+    return f
 
 
 @router.get("/sessions/{session_id}")
@@ -62,7 +78,7 @@ async def get_session(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    s = await _require_session(db, user, session_id)
+    s = await _require_viewable(db, user, session_id)
     files = await svc.list_files(db, session_id)
     d = SessionRead.model_validate(s).model_dump()
     d["file_count"] = len(files)
@@ -84,6 +100,9 @@ async def update_session(
         s.description = body.description
     if body.status is not None:
         s.status = body.status
+    if body.visibility is not None:
+        # 이 세션을 조직에 여는 행위 — 소유자만 도달한다(_require_session).
+        s.visibility = body.visibility
     await db.commit()
     await db.refresh(s)
     return ok(SessionRead.model_validate(s).model_dump(), message="수정됨")
@@ -139,7 +158,7 @@ async def list_files(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _require_session(db, user, session_id)
+    await _require_viewable(db, user, session_id)
     files = await svc.list_files(db, session_id)
     return ok([FileRead.model_validate(f).model_dump() for f in files])
 
@@ -151,7 +170,7 @@ async def get_file(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    f = await svc.get_owned_file(db, user.id, session_id, file_id)
+    f = await svc.get_viewable_file(db, user, session_id, file_id)
     if f is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "파일을 찾을 수 없습니다.")
     return ok(FileRead.model_validate(f).model_dump())
@@ -165,7 +184,7 @@ async def inspect_file(
     db: AsyncSession = Depends(get_db),
 ):
     """Cached metadata (nodes/elements/parts/bbox/*INCLUDE/keywords/modelmeta)."""
-    f = await svc.get_owned_file(db, user.id, session_id, file_id)
+    f = await svc.get_viewable_file(db, user, session_id, file_id)
     if f is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "파일을 찾을 수 없습니다.")
     return ok({"filename": f.filename, "meta": f.meta or {}})
@@ -201,7 +220,7 @@ async def download_file(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    f = await svc.get_owned_file(db, user.id, session_id, file_id)
+    f = await svc.get_viewable_file(db, user, session_id, file_id)
     if f is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "파일을 찾을 수 없습니다.")
     path = storage.abs_path(f.rel_path)

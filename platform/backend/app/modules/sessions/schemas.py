@@ -14,6 +14,8 @@ class SessionUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = None
     status: str | None = Field(default=None, pattern="^(active|archived)$")
+    # 공개 범위 — 소유자만 바꿀 수 있다(라우터가 _require_session 으로 이미 강제).
+    visibility: str | None = Field(default=None, pattern="^(company|department|team|private)$")
 
 
 class SessionRead(BaseModel):
@@ -21,6 +23,7 @@ class SessionRead(BaseModel):
     name: str
     description: str | None
     status: str
+    visibility: str = "private"
     created_at: datetime
     updated_at: datetime
     file_count: int | None = None

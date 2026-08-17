@@ -9,7 +9,8 @@ import ulid
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Job, Session, SessionFile
+from app.models import Job, Session, SessionFile, User
+from app.shared import visibility as vis
 from app.runner.kfile_inspect import inspect_kfile
 from app.runner.kfile_modelmeta import run_modelmeta
 from app.shared import storage
@@ -33,12 +34,17 @@ async def create_session(
     return row
 
 
-async def list_sessions(db: AsyncSession, user_id: int) -> list[tuple[Session, int]]:
+async def list_sessions(db: AsyncSession, viewer: User) -> list[tuple[Session, int]]:
+    """내 세션 + 내가 볼 수 있는 공개 세션(회사·부서·팀).
+
+    예전에는 user_id 로만 걸렀다. 그러면 조직이 공개해 둔 레퍼런스 모델도 안 보이고,
+    게이트웨이 서비스 계정으로 조회하는 심의는 아무것도 못 본다.
+    """
     rows = (
         await db.execute(
             select(Session, func.count(SessionFile.id))
             .outerjoin(SessionFile, SessionFile.session_id == Session.id)
-            .where(Session.user_id == user_id)
+            .where(vis.visible_filter(viewer))
             .group_by(Session.id)
             .order_by(Session.updated_at.desc())
         )
@@ -49,9 +55,51 @@ async def list_sessions(db: AsyncSession, user_id: int) -> list[tuple[Session, i
 async def get_owned_session(
     db: AsyncSession, user_id: int, session_id: str
 ) -> Optional[Session]:
+    """쓰기·삭제용 — 소유자 본인만. 공개 세션이어도 남이 고치지는 못한다."""
     row = await db.get(Session, session_id)
     if row is None or row.user_id != user_id:
         return None
+    return row
+
+
+async def get_viewable_session(
+    db: AsyncSession, viewer: User, session_id: str
+) -> Optional[Session]:
+    """읽기용 — 내 것이거나, 공개 범위에 걸리는 남의 세션."""
+    row = await db.get(Session, session_id)
+    if row is None:
+        return None
+    if row.user_id == viewer.id:
+        return row
+    owner = await db.get(User, row.user_id)
+    return row if vis.can_view(viewer, row, owner) else None
+
+
+async def get_viewable_file(
+    db: AsyncSession, viewer: User, session_id: str, file_id: int
+) -> Optional[SessionFile]:
+    """읽기용 파일 — 세션이 보이면 그 안의 파일도 보인다."""
+    sess = await get_viewable_session(db, viewer, session_id)
+    if sess is None:
+        return None
+    f = await db.get(SessionFile, file_id)
+    if f is None or f.session_id != session_id:
+        return None
+    return f
+
+
+async def set_visibility(
+    db: AsyncSession, user_id: int, session_id: str, level: str
+) -> Optional[Session]:
+    """공개 범위 변경 — 소유자만. 잘못된 값은 예외로 구분한다."""
+    if not vis.is_valid(level):
+        raise ValueError(f"visibility 는 {'|'.join(vis.LEVELS)} 중 하나여야 한다: {level!r}")
+    row = await get_owned_session(db, user_id, session_id)
+    if row is None:
+        return None
+    row.visibility = level
+    await db.commit()
+    await db.refresh(row)
     return row
 
 
