@@ -303,6 +303,46 @@ async def system_capabilities(ctx: Context) -> dict:
     return await _get(ctx, "/system/capabilities")
 
 
+# ── 전사 코퍼스 통계 ──────────────────────────────────────────────────
+# 개인 식별 없는 집계다. 세션·파일·잡·리포트는 user_id 스코프라 남의 모델을 열 수 없지만,
+# '조직이 무엇을 어떻게 모델링해 왔는가' 라는 분포는 공개해도 된다. 심의(HWAX 시뮬심의·
+# 시험계획)가 "일반적으로" 대신 "우리 조직은 이렇게" 를 말하려면 이 층이 필요하다.
+# 전부 무인자 읽기 전용 — MCP 스모크의 실호출 검사 대상이 된다.
+@mcp.tool()
+async def corpus_summary(ctx: Context) -> dict:
+    """전사 모델 규모 — 세션·파일·잡 수와 메시 규모 분포(개인 식별 없음).
+    Org-wide model scale: counts and mesh-size distribution (no personal data)."""
+    return await _get(ctx, "/corpus/summary")
+
+
+@mcp.tool()
+async def material_usage(ctx: Context, limit: int = 30) -> dict:
+    """물성 카드별 사용 모델 수 — 어떤 *MAT_ 가 실제로 몇 개 K파일에 쓰였나.
+    시험 계획의 우선순위를 '민감도 추정' 이 아니라 '실사용 빈도' 로 근거화할 때 쓴다.
+    Material card usage across the corpus — evidence for test prioritization."""
+    return await _get(ctx, "/corpus/materials", params={"limit": limit})
+
+
+@mcp.tool()
+async def operation_usage(ctx: Context) -> dict:
+    """오퍼레이션 실행 이력 집계 — 조직이 실제로 쓰는 전처리 관행과 성공률.
+    Which preprocessing operations the org actually runs, and how they fare."""
+    return await _get(ctx, "/corpus/operations")
+
+
+@mcp.tool()
+async def section_contact_usage(ctx: Context, limit: int = 20) -> dict:
+    """요소 정식(*SECTION_)·접촉(*CONTACT_) 카드 사용 분포 — 해석 설계 관행의 근거.
+    Element-formulation and contact card usage distribution."""
+    return await _get(ctx, "/corpus/sections-contacts", params={"limit": limit})
+
+
+@mcp.tool()
+async def report_corpus(ctx: Context) -> dict:
+    """해석 결과 분포 — 리포트 종류·케이스 수·반복되는 findings(설계 규칙 후보).
+    Simulation-result corpus: report kinds, case counts, recurring findings."""
+    return await _get(ctx, "/corpus/reports")
+
 # ── 낙하/충격 리포트 분석 ────────────────────────────────────────────
 # SmartTwin 파이프라인이 만든 deep(단건 심층)·sphere(전각도 낙하)·impact(전위치
 # 부분충격) 리포트 HTML 을 받아 구조화하고, 최악 케이스/파트 리스크/소견을 질의한다.

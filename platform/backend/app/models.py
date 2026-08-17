@@ -33,6 +33,10 @@ class User(Base):
     display_name: Mapped[str | None] = mapped_column(String(255))
     is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
     is_system_admin: Mapped[bool] = mapped_column(default=False, nullable=False)
+    # 소속 — 세션 가시성의 department/team 판정에 쓴다. 포털/SSO 가 주는 값을 그대로 받고
+    # 정규화는 값이 쌓인 뒤에. 빈 값끼리는 매칭되지 않는다(미설정끼리 보이면 사고다).
+    department: Mapped[str | None] = mapped_column(String(120))
+    team: Mapped[str | None] = mapped_column(String(120))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -75,6 +79,11 @@ class Session(Base):
     description: Mapped[str | None] = mapped_column(Text)
     storage_path: Mapped[str] = mapped_column(String(512), nullable=False)  # rel to storage_dir
     status: Mapped[str] = mapped_column(String(16), default="active", nullable=False)
+    # 공개 범위 — company|department|team|private (HEAX Hub 와 같은 4단).
+    # 기본 private: 만들어 두기만 한 세션이 조직에 노출되지 않는다. 넓히는 것은 소유자의 명시 행위.
+    visibility: Mapped[str] = mapped_column(
+        String(16), default="private", server_default="private", index=True, nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
