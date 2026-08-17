@@ -27,8 +27,19 @@ from app.shared.security import create_access_token, hash_password, verify_passw
 
 router = APIRouter(tags=["auth"])
 
-# 포탈 SSO 로 발급하는 PAT 의 고정 이름 — 재발급 시 직전 것을 식별·회수한다.
+# 포탈 SSO 로 발급하는 PAT 의 이름 — 재발급 시 '같은 이름의' 직전 것만 식별·회수한다.
+#
+# ⚠ 이름이 하나뿐이면 클라이언트끼리 서로의 세션을 끊는다. 실제로 겪었다 — 심의(게이트웨이)가
+# 사용자 신원으로 SSO 를 부르는 순간 그 사용자의 웹 세션 토큰이 회수돼 브라우저가 튕긴다.
+# 그래서 클라이언트를 이름으로 구분하고, 회수는 같은 이름 안에서만 한다.
+# X-Heax-Client 헤더로 지정(미지정이면 기본 web). 값은 화이트리스트로 제한한다 —
+# 임의 문자열을 허용하면 회수가 안 되는 토큰이 무한히 쌓인다.
 _SSO_PAT_NAME = "HEAX Portal SSO"
+_SSO_CLIENT_NAMES = {
+    "web": _SSO_PAT_NAME,                       # 브라우저 SPA(기본, 종전과 동일한 이름)
+    "deliberation": "HWAX Deliberation SSO",    # 심의가 사용자 시야로 조회할 때
+    "agent": "HWAX Agent SSO",                  # 에이전트 서버 일반 도구 호출
+}
 
 
 @router.post("/auth/login", dependencies=[Depends(rate_limit("login", settings.ratelimit_login_per_min))])
@@ -92,11 +103,19 @@ async def sso_login(request: Request, db: AsyncSession = Depends(get_db)):
     if not user.is_active:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "비활성화된 계정입니다.")
 
-    # 직전 SSO PAT 회수 후 새 PAT 발급 — 사용자당 활성 SSO PAT 1개.
+    # 클라이언트별 이름 — 같은 이름의 직전 것만 회수한다(클라이언트당 활성 1개).
+    # 다른 클라이언트의 토큰은 건드리지 않는다: 심의가 발급해도 웹 세션이 살아 있어야 한다.
+    client = (request.headers.get("x-heax-client") or "web").strip().lower()
+    pat_name = _SSO_CLIENT_NAMES.get(client)
+    if pat_name is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"알 수 없는 클라이언트: {client!r} (허용: {', '.join(sorted(_SSO_CLIENT_NAMES))})",
+        )
     for t in await list_tokens(db, user.id):
-        if t.name == _SSO_PAT_NAME and t.revoked_at is None:
+        if t.name == pat_name and t.revoked_at is None:
             await revoke_token(db, user.id, t.id)
-    _row, plaintext = await create_token(db, user.id, _SSO_PAT_NAME)
+    _row, plaintext = await create_token(db, user.id, pat_name)
     return ok(TokenResponse(access_token=plaintext).model_dump(), message="SSO 로그인 성공")
 
 
