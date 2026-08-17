@@ -76,16 +76,31 @@ company     → 인증된 사용자 전부
 
 ## 5. 단계
 
-| 단계 | 내용 | 리포 |
-|---|---|---|
-| **S1** | 스키마 + 가시성 판정 유틸 + 통계 4종(REST+MCP) | KooRemapper |
-| S2 | 공개 지정 + 기존 조회 확장 | KooRemapper |
-| S3 | 심의 스냅샷에 통계 연결 | HWAXAgentServer |
-| S4 | 개인 시야 배선(포털→에이전트→게이트웨이→DynaForge 사용자별 kr_ PAT) | 4개 리포 |
+| 단계 | 내용 | 리포 | 상태 |
+|---|---|---|---|
+| **S1** | 스키마 + 가시성 판정 유틸 + 통계 4종(REST+MCP) | KooRemapper | ✅ `840acec` |
+| S2 | 공개 지정 + 기존 조회 확장 | KooRemapper | ✅ `b51de3b` |
+| S3 | 심의 스냅샷에 통계 연결 | HWAXAgentServer | ✅ `f22072c` |
+| S4 | 개인 시야 배선(포털→에이전트→게이트웨이→DynaForge 사용자별 kr_ PAT) | 4개 리포 | ✅ 아래 |
 
 S1~S3 은 신원 배선 없이 값을 낸다 — 게이트웨이 서비스 계정도 통계는 볼 수 있다.
-S4 는 별도 건으로 다룬다(DynaForge SSO 의 '사용자당 활성 PAT 1개' 정책 때문에
-심의 전용 토큰 이름 분리가 선행돼야 한다 — 안 하면 사용자 웹 세션이 회수된다).
+
+### S4 결과 (2026-08-17)
+
+| 홉 | 무엇을 했나 | 커밋 |
+|---|---|---|
+| 선행 | SSO PAT 이름을 클라이언트별로 분리(`X-Heax-Client`) | KooRemapper `8721d56` |
+| 포털→에이전트 | 검증된 principal.email 을 `user_email` 로 전달 | HWAXPortal `41f91c5` |
+| 에이전트→게이트웨이 | MCP 연결 헤더 `X-HWAX-User` + 에이전트 캐시 키에 신원 포함 | HWAXAgentServer `432c196` |
+| 게이트웨이→DynaForge | `per_user_sso` 백엔드는 단발 세션 + 사용자 PAT(캐시·락) | HWAXMcpGateway `ad9bcfb` |
+
+선행 분리가 필요했던 이유 — SSO PAT 이름이 하나뿐이면 심의가 사용자 신원으로 발급하는
+순간 그 사람의 웹 세션 토큰이 회수된다(작업 중 실제로 두 번 겪었다).
+
+실측: `list_sessions` 를 신원 없이 / admin / insp 로 → **0 · 10 · 2 건**, DB 와 일치.
+발급 불가 시엔 0건이 아니라 `isError`(서비스 계정으로 강등하지 않는다 — 강등하면
+'내 모델이 없다'는 틀린 답이 나가고 실패가 정상 응답과 구분되지 않는다).
+insp PAT 로 admin 을 사칭한 헤더는 무시(검증된 PAT 의 email 만 싣는다).
 
 ## 6. 지켜야 할 것
 
