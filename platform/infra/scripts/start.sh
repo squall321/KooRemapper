@@ -76,6 +76,29 @@ if [ -z "$_sock_id" ]; then
   exit 1
 fi
 _tcp_id="$(pg_id 127.0.0.1)"
+# TCP 가 어긋났을 때 원인은 둘인데 조치가 정반대다.
+#   (a) 다른 postmaster 가 포트를 물고 있다        → 그것을 멈춰야 한다
+#   (b) 포트는 지금 비었는데 우리가 IPv4 를 못 잡았다 → 우리를 재기동하면 된다
+# postgres 는 기동 때 한 번만 바인드한다. 그래서 기동 순간 남이 물고 있었으면 IPv6·소켓으로만
+# 뜨고, 그 남이 나중에 사라져도 우리는 영영 IPv4 에 안 붙는다. 이때 '남이 물고 있다'고만
+# 말하면 사람이 있지도 않은 범인을 찾는다(cae00 2026-08-18: 소켓 정상 · TCP 응답없음).
+if [ "$_tcp_id" != "$_sock_id" ] && [ -z "$_tcp_id" ] \
+   && ! (exec 3<>"/dev/tcp/127.0.0.1/${POSTGRES_PORT}") 2>/dev/null; then
+  echo "  · 포트 ${POSTGRES_PORT} 는 지금 비어 있다 — 기동 순간에만 막혔던 것이다. 재기동한다."
+  "$APPTAINER" instance stop "$INST_POSTGRES" >/dev/null 2>&1 || true
+  start_instance "$INST_POSTGRES" "$POSTGRES_SIF" \
+    --bind "$DATA_DIR/postgres:/var/lib/postgresql/data" \
+    --bind "$DATA_DIR/postgres-run:/var/run/postgresql" \
+    --env "POSTGRES_USER=${POSTGRES_USER}" --env "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}" \
+    --env "POSTGRES_DB=${POSTGRES_DB}" --env "PGPORT=${POSTGRES_PORT}" \
+    --env "PGDATA=/var/lib/postgresql/data/pgdata" \
+    --env "LANG=C.UTF-8" --env "LC_ALL=C.UTF-8"
+  for _i in $(seq 1 40); do
+    _sock_id="$(pg_id /var/run/postgresql)"; [ -n "$_sock_id" ] && break
+    sleep 1
+  done
+  _tcp_id="$(pg_id 127.0.0.1)"
+fi
 if [ "$_tcp_id" != "$_sock_id" ]; then
   echo "✗ 127.0.0.1:${POSTGRES_PORT} 가 우리 postgres 가 아니다."
   echo "    유닉스소켓 클러스터=${_sock_id}  /  TCP 클러스터=${_tcp_id:-(응답없음·인증실패)}"
