@@ -102,7 +102,7 @@ fi
 if [ "$_tcp_id" != "$_sock_id" ]; then
   echo "✗ 127.0.0.1:${POSTGRES_PORT} 가 우리 postgres 가 아니다."
   echo "    유닉스소켓 클러스터=${_sock_id}  /  TCP 클러스터=${_tcp_id:-(응답없음·인증실패)}"
-  echo "  그 포트를 다른 postmaster 가 물고 있어서 우리 쪽은 IPv4 바인드에 실패했다"
+  echo "  그 포트를 다른 프로세스가 물고 있어서 우리 쪽은 IPv4 바인드에 실패했다"
   echo "  (postgres 로그의 'could not bind IPv4 address ... Address already in use')."
   echo "  이대로 두면 alembic 이 'password authentication failed for user ${POSTGRES_USER}' 로 죽는다."
   # 사람에게 명령을 시키지 말고 여기서 바로 찍는다 — 이 왕복이 세 번 반복됐다.
@@ -114,7 +114,26 @@ if [ "$_tcp_id" != "$_sock_id" ]; then
   echo "  이 박스의 postgres 인스턴스:"
   "$APPTAINER" instance list 2>/dev/null | grep -i postgres | awk '{printf "    %-24s pid=%s\n",$1,$2}' \
     || echo "    (없음)"
-  echo "  koorm 것이 아니면 그 서비스의 포트를 바꾸거나, koorm 의 POSTGRES_PORT 를 옮겨라."
+  # 소유자가 안 보이면(=users: 가 비어 있으면) 남의 계정 프로세스다. 그 사실을 말해 주지 않으면
+  # 사람이 ss 를 아무리 다시 돌려도 범인 이름을 못 본다(cae00 2026-08-19 실측).
+  if ! ss -lptnH "sport = :${POSTGRES_PORT}" 2>/dev/null | grep -q 'users:('; then
+    echo "  ⚠ 소유자가 안 보인다 = 다른 사용자(root 등)의 프로세스다. 이름을 보려면:"
+    echo "      sudo ss -lptn 'sport = :${POSTGRES_PORT}'"
+  fi
+  # 그 프로세스를 못 건드릴 수도 있으므로, 우리가 비켜 갈 포트를 바로 제안한다.
+  _free=""
+  for _p in $(seq $((POSTGRES_PORT+1)) $((POSTGRES_PORT+20))); do
+    ss -lntH "sport = :${_p}" 2>/dev/null | grep -q . && continue
+    _free="$_p"; break
+  done
+  if [ -n "$_free" ]; then
+    echo "  그 프로세스를 멈출 수 없으면 koorm 을 비어 있는 포트로 옮겨라 — ${_free} 가 비어 있다."
+    echo "    platform/.env 의 두 값을 함께 고쳐야 한다(둘이 어긋나면 기동 전 검사에서 걸린다):"
+    echo "      POSTGRES_PORT=${_free}"
+    echo "      KOORM_DATABASE_URL=…@127.0.0.1:${_free}/…"
+  else
+    echo "  koorm 것이 아니면 그 서비스의 포트를 바꾸거나, koorm 의 POSTGRES_PORT 를 옮겨라."
+  fi
   exit 1
 fi
 echo "✓ postgres ready"
