@@ -58,7 +58,11 @@ pg_id() {  # $1: -h 값 → 그 서버의 클러스터 식별자. 못 붙거나 
   # system_identifier 는 데이터디렉토리(클러스터)마다 다르므로 '같은 서버인가'를 정확히 가른다.
   APPTAINERENV_PGPASSWORD="$POSTGRES_PASSWORD" "$APPTAINER" exec instance://"$INST_POSTGRES" \
     psql -h "$1" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
-    -Atc 'select system_identifier from pg_control_system()' 2>/dev/null | tr -dc '0-9'
+    -Atc 'select system_identifier from pg_control_system()' 2>/dev/null | tr -dc '0-9' || true
+  # ⚠ || true 가 핵심이다. 이 파일은 set -euo pipefail 이라, psql 이 실패하면 pipefail 로
+  # 파이프라인이 비0 이 되고 _id="$(pg_id …)" 대입이 비0 → set -e 가 그 자리에서 스크립트를
+  # 죽인다. 아래 진단문이 한 줄도 못 나온 채 끝난다(cae00 2026-08-18: "waiting for postgres…"
+  # 다음이 그냥 없었다). 붙는 데 실패하는 것은 이 함수의 정상 결과다 — 빈 문자열로 알린다.
 }
 _sock_id=""
 for _i in $(seq 1 40); do
