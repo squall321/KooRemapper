@@ -153,6 +153,32 @@ if [ "${KOORM_ENABLE_NGINX:-0}" = "1" ]; then
     --bind "$PLATFORM_ROOT/infra/nginx/certs:/etc/nginx/certs:ro"
 fi
 
+# ── 기동 확인 ───────────────────────────────────────────────────────
+# instance start 는 '컨테이너를 띄웠다'까지만 말한다. 안의 프로세스가 부팅 중에 죽어도
+# 성공으로 돌아오므로, 예전엔 api·mcp 가 통째로 죽은 상태에서도 "✓ stack started" 가
+# 찍혔다. 그 거짓 초록은 한참 뒤 다른 얼굴로 나타난다 — 게이트웨이의 kr_ PAT 발급 실패,
+# heax 앱 502, MCP 도구 0개. 전부 여기서 안 뜬 것이 원인인데 원인처럼 보이지 않는다.
+wait_http() {  # $1: URL, $2: 이름 → 응답이 오면 0. 상태코드는 안 따진다(MCP 루트는 400/404 가 정상).
+  for _i in $(seq 1 40); do
+    curl -s -o /dev/null -m 3 "$1" && return 0
+    sleep 1
+  done
+  return 1
+}
+_down=""
+wait_http "http://127.0.0.1:${KOORM_API_PORT}/api/health" api || _down="$_down api(:${KOORM_API_PORT})"
+wait_http "http://127.0.0.1:${KOORM_MCP_PORT}/mcp"        mcp || _down="$_down mcp(:${KOORM_MCP_PORT})"
+if [ -n "$_down" ]; then
+  echo
+  echo "✗ 인스턴스는 떴는데 응답하지 않는다:$_down"
+  echo "  안의 프로세스가 부팅 중에 죽은 것이다. 로그를 보라:"
+  for _n in "$INST_API" "$INST_MCP"; do
+    echo "    $APPTAINER logs $_n"
+  done
+  echo "  이 상태를 방치하면 게이트웨이 kr_ PAT 발급 실패·heax 앱 502·MCP 도구 0개로 나타난다."
+  exit 1
+fi
+
 echo
 echo "✓ stack started"
 echo "  postgres : 127.0.0.1:${POSTGRES_PORT}"
