@@ -105,9 +105,16 @@ if [ "$_tcp_id" != "$_sock_id" ]; then
   echo "  그 포트를 다른 postmaster 가 물고 있어서 우리 쪽은 IPv4 바인드에 실패했다"
   echo "  (postgres 로그의 'could not bind IPv4 address ... Address already in use')."
   echo "  이대로 두면 alembic 이 'password authentication failed for user ${POSTGRES_USER}' 로 죽는다."
-  echo "  포트 점유 프로세스를 확인하라:"
-  echo "    ss -lptn 'sport = :${POSTGRES_PORT}'   (또는 lsof -iTCP:${POSTGRES_PORT} -sTCP:LISTEN)"
-  echo "    $APPTAINER instance list   ← koorm 잔여 인스턴스면 instance stop <이름>"
+  # 사람에게 명령을 시키지 말고 여기서 바로 찍는다 — 이 왕복이 세 번 반복됐다.
+  # 한 박스에 postgres 인스턴스가 대여섯 개씩 뜨므로(aidh·mxwp·heax·sf·axwb…) 이름이 곧 답이다.
+  echo "  포트 ${POSTGRES_PORT} 를 잡고 있는 것:"
+  { ss -lptnH "sport = :${POSTGRES_PORT}" 2>/dev/null \
+    || lsof -iTCP:"${POSTGRES_PORT}" -sTCP:LISTEN -Pn 2>/dev/null; } | sed 's/^/    /' \
+    || echo "    (권한 부족으로 프로세스명을 못 봤다 — sudo ss -lptn 로 다시 보라)"
+  echo "  이 박스의 postgres 인스턴스:"
+  "$APPTAINER" instance list 2>/dev/null | grep -i postgres | awk '{printf "    %-24s pid=%s\n",$1,$2}' \
+    || echo "    (없음)"
+  echo "  koorm 것이 아니면 그 서비스의 포트를 바꾸거나, koorm 의 POSTGRES_PORT 를 옮겨라."
   exit 1
 fi
 echo "✓ postgres ready"
