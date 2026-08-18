@@ -46,13 +46,44 @@ start_instance "$INST_POSTGRES" "$POSTGRES_SIF" \
   --env "LANG=C.UTF-8" --env "LC_ALL=C.UTF-8"
 
 echo "→ waiting for postgres…"
+# ⚠ pg_isready 는 인증을 하지 않는다 — "접속을 받는다"까지만 본다. 인스턴스는 호스트
+# 네트워크를 공유하므로, 같은 포트를 이미 물고 있는 *다른* postmaster 가 있으면 이 검사는
+# 그 남의 서버를 보고 초록을 찍는다. 그때 우리 postgres 는 IPv4 바인드에 실패하고
+# ("could not bind IPv4 address ... Address already in use") IPv6·유닉스소켓으로만 뜬다.
+# 실패는 30줄 뒤 alembic 의 'password authentication failed for user koorm' 로 나타나,
+# 원인과 증상이 완전히 달라 보인다(cae00 2026-08-18 실제 사고).
+# 그래서 두 경로를 따로 확인한다 — 유닉스소켓은 우리 것이 확실하고, TCP 는 아닐 수 있다.
+pg_id() {  # $1: -h 값 → 그 서버의 클러스터 식별자. 못 붙거나 인증 실패면 빈 문자열.
+  # 인증 통과만으로는 부족하다 — 남의 postmaster 가 trust 로 받으면 그것도 통과한다.
+  # system_identifier 는 데이터디렉토리(클러스터)마다 다르므로 '같은 서버인가'를 정확히 가른다.
+  APPTAINERENV_PGPASSWORD="$POSTGRES_PASSWORD" "$APPTAINER" exec instance://"$INST_POSTGRES" \
+    psql -h "$1" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+    -Atc 'select system_identifier from pg_control_system()' 2>/dev/null | tr -dc '0-9'
+}
+_sock_id=""
 for _i in $(seq 1 40); do
-  if "$APPTAINER" exec instance://"$INST_POSTGRES" \
-        pg_isready -h 127.0.0.1 -p "$POSTGRES_PORT" -U "$POSTGRES_USER" >/dev/null 2>&1; then
-    echo "✓ postgres ready"; break
-  fi
+  _sock_id="$(pg_id /var/run/postgresql)"
+  [ -n "$_sock_id" ] && break
   sleep 1
 done
+if [ -z "$_sock_id" ]; then
+  echo "✗ postgres 가 뜨지 않았다 (유닉스소켓으로도 응답 없음) — 인스턴스 로그를 보라:"
+  echo "    $APPTAINER instance list; $APPTAINER logs $INST_POSTGRES"
+  exit 1
+fi
+_tcp_id="$(pg_id 127.0.0.1)"
+if [ "$_tcp_id" != "$_sock_id" ]; then
+  echo "✗ 127.0.0.1:${POSTGRES_PORT} 가 우리 postgres 가 아니다."
+  echo "    유닉스소켓 클러스터=${_sock_id}  /  TCP 클러스터=${_tcp_id:-(응답없음·인증실패)}"
+  echo "  그 포트를 다른 postmaster 가 물고 있어서 우리 쪽은 IPv4 바인드에 실패했다"
+  echo "  (postgres 로그의 'could not bind IPv4 address ... Address already in use')."
+  echo "  이대로 두면 alembic 이 'password authentication failed for user ${POSTGRES_USER}' 로 죽는다."
+  echo "  포트 점유 프로세스를 확인하라:"
+  echo "    ss -lptn 'sport = :${POSTGRES_PORT}'   (또는 lsof -iTCP:${POSTGRES_PORT} -sTCP:LISTEN)"
+  echo "    $APPTAINER instance list   ← koorm 잔여 인스턴스면 instance stop <이름>"
+  exit 1
+fi
+echo "✓ postgres ready"
 
 # Rootless /dev/shm flakiness → mmap shared memory (idempotent).
 PGCONF="$DATA_DIR/postgres/pgdata/postgresql.conf"
@@ -69,10 +100,18 @@ if [ -f "$PGCONF" ] && ! grep -qE '^[[:space:]]*dynamic_shared_memory_type[[:spa
     --env "POSTGRES_DB=${POSTGRES_DB}" --env "PGPORT=${POSTGRES_PORT}" \
     --env "PGDATA=/var/lib/postgresql/data/pgdata" \
     --env "LANG=C.UTF-8" --env "LC_ALL=C.UTF-8"
+  # 재기동 뒤에도 같은 함정이 있다 — 인증까지 하는 프로브로 확인한다(위 주석 참조).
+  # 재기동 뒤에도 같은 함정이 있다 — 같은 판별을 다시 한다(위 주석 참조).
+  _sock_id=""
   for _i in $(seq 1 40); do
-    "$APPTAINER" exec instance://"$INST_POSTGRES" pg_isready -h 127.0.0.1 -p "$POSTGRES_PORT" -U "$POSTGRES_USER" >/dev/null 2>&1 && break
+    _sock_id="$(pg_id /var/run/postgresql)"
+    [ -n "$_sock_id" ] && break
     sleep 1
   done
+  if [ -z "$_sock_id" ] || [ "$(pg_id 127.0.0.1)" != "$_sock_id" ]; then
+    echo "✗ mmap 재기동 후 127.0.0.1:${POSTGRES_PORT} 가 우리 postgres 가 아니다 — 포트 점유 프로세스를 확인하라."
+    exit 1
+  fi
 fi
 
 # ── migrate ─────────────────────────────────────────────────────────
