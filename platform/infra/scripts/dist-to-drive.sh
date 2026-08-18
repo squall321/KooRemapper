@@ -55,7 +55,11 @@ TS="$(date -u +%Y%m%d-%H%M%SZ)"
 STAGE="$(mktemp -d)"; trap 'rm -rf "$STAGE"' EXIT
 
 echo "  · binary + gmsh 번들 → koorm-bin.tar.gz"
-tar -C platform/backend -czf "$STAGE/koorm-bin.tar.gz" bin
+# -h(심볼릭 링크 역참조)가 핵심이다. bin/gmsh/gmsh.exe 는 dist/gmsh/gmsh(87MB)를 가리키는
+# 링크인데, -h 가 없으면 tar 가 '링크 자체'만 담는다. 받는 쪽엔 dist/gmsh 가 없으므로
+# 깨진 링크가 풀리고, meshfix 는 영영 못 쓴다 — 주석은 'gmsh 번들'이라 적혀 있는데 실제로는
+# 한 번도 실려 간 적이 없었다(cae00 이 매 배포마다 'gmsh not linked' 를 찍었다).
+tar -C platform/backend -chzf "$STAGE/koorm-bin.tar.gz" bin
 echo "  · frontend/dist → koorm-frontend-dist.tar.gz"
 tar -C platform/frontend -czf "$STAGE/koorm-frontend-dist.tar.gz" dist
 # 서비스 SIF(postgres/api/mcp/nginx) + cli.sif — 오프라인 prod 가 build.sh 없이 뜨도록
