@@ -31,8 +31,10 @@ class Settings(BaseSettings):
     mcp_port: int = 8701
 
     # --- database ---
-    # asyncpg DSN, e.g. postgresql+asyncpg://koorm:pw@127.0.0.1:5433/koorm
-    database_url: str = "postgresql+asyncpg://koorm:koorm@127.0.0.1:5433/koorm"
+    # asyncpg DSN, e.g. postgresql+asyncpg://koorm:pw@127.0.0.1:5436/koorm
+    # 포트 5436 — 5433 은 Debian/Ubuntu 의 두 번째 시스템 PostgreSQL 클러스터가 쓴다.
+    # 배정표: HWAXPortal/docs/PORT-MAP.md. 바꿀 때 platform/.env 의 POSTGRES_PORT 와 함께.
+    database_url: str = "postgresql+asyncpg://koorm:koorm@127.0.0.1:5436/koorm"
 
     # --- auth ---
     jwt_secret: str = "dev-insecure-change-me"

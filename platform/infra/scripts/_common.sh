@@ -73,14 +73,13 @@ INST_API=koorm_api
 INST_MCP=koorm_mcp
 INST_NGINX=koorm_nginx
 
-# ⚠ 기본값 5433 은 Debian/Ubuntu 계열에서 apt 로 깔린 두 번째 PostgreSQL 클러스터가 쓰는
-# 포트다. 그런 박스에서는 우리 컨테이너가 IPv4 바인드에 실패하고 IPv6·유닉스소켓으로만 떠서,
-# 증상이 한참 뒤 alembic 의 'password authentication failed' 로 나타난다(cae00 2026-08-19:
-# 127.0.0.1:5433 을 시스템 postgres pid 1539 가 점유). dev 는 이미 5436 으로 옮겨 쓴다.
-# 충돌하는 박스는 platform/.env 에서 POSTGRES_PORT 와 KOORM_DATABASE_URL 을 **함께** 바꿔라
-# (한쪽만 바꾸면 기동 전 정합 검사에서 걸린다). 기본값 자체는 안 바꾼다 — 이미 5433 으로
-# 돌고 있는 설치를 조용히 옮기면 앱 기본 DSN(config.py)과 어긋난다.
-: "${POSTGRES_PORT:=5433}"
+# 기본 DB 포트 — 5433 이 아니라 5436 이다. 5433 은 Debian/Ubuntu 계열에서 apt 로 깔린 두 번째
+# PostgreSQL 클러스터가 쓰는 포트라, 그런 박스에서는 우리 컨테이너가 IPv4 바인드에 실패하고
+# IPv6·유닉스소켓으로만 뜬다. 증상은 한참 뒤 alembic 의 'password authentication failed' 로
+# 나타나 원인과 전혀 달라 보인다(cae00 2026-08-19: 시스템 postgres pid 1539 가 점유).
+# app/config.py 의 기본 DSN 도 5436 이다 — 둘은 반드시 같아야 한다.
+# 서비스별 포트 배정은 HWAXPortal/docs/PORT-MAP.md 에 있다. 새 박스는 거기부터 보라.
+: "${POSTGRES_PORT:=5436}"
 : "${KOORM_API_PORT:=8700}"
 : "${KOORM_MCP_PORT:=8701}"
 : "${KOORM_HTTPS_PORT:=8443}"
