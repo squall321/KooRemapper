@@ -50,4 +50,4 @@
 - [x] 계약 테스트 통과 유지
 - [x] C++ 빌드/Windows CLI 무영향(변경은 platform/ 한정)
 - [x] build_linux_compat → SIF → restart-api-only/mcp 라이브 반영
-- [ ] 커밋(feat)·main ff-merge·push
+- [x] 커밋(feat)·main ff-merge·push (KooRemapper e64f756, SmartTwinMCP a98b9a7 모두 main push)
