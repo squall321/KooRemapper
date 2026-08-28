@@ -66,4 +66,11 @@ impact 전위치 부분충격)을 인제스트해 구조화 분석한다.
 4. **파트 리스크** — `report_part_risk(report_id, part_id?)` 로 "어느 파트가 어느 방향/위치에서
    가장 위험한가" 와 최소 안전율을 확인한다.
 5. **소견/케이스** — `report_findings(report_id, severity?)`, `report_case(report_id, case_key)`.
-6. **리비전 비교** — `compare_reports([id1, id2, ...])` 로 조건/리비전 간 파트별 최악값을 나란히 본다.
+6. **심화 분석** —
+   - `report_directional(report_id, part_id?)` : 방향 범주(면/엣지/코너, F1~F6)별 최악.
+   - `report_scatter(report_id, metric?)` : sphere 방향 섭동 산포/민감도(26방향별 mean/std/CoV/최악).
+   - `report_energy_flow(report_id, case_key?)` : deep 에너지밸런스·접촉, sphere/impact 하중경로.
+   - `report_part_series(report_id, case_key, part_id)` : 케이스·파트 시계열.
+7. **리비전 비교** — `compare_reports([id1, id2, ...])` 로 조건/리비전 간 파트별 최악값을 나란히 본다.
+8. **DataHub 등재** — `publish_report_to_datahub(report_id, project, stage)` 로 구조화 요약을
+   AI Data Hub 데이터 자산(sim_report)으로 올린다(과제/개발단계/BOM 연계, 검색·리비전 비교용).

@@ -52,8 +52,13 @@ SmartTwin 파이프라인이 만든 deep(단건 심층)·sphere(전각도 낙하
 | `report_worst_cases` | report_id, metric?, top_n? | GET /reports/{id}/cases | 최악 케이스 랭킹(sphere=방향, impact=위치, deep=단건) |
 | `report_part_risk` | report_id, part_id? | GET /reports/{id}/parts | 파트별 최악값·발생 케이스·최소 안전율 |
 | `report_case` | report_id, case_key | GET /reports/{id}/cases/{key} | 한 케이스 상세(파트별 메트릭) |
+| `report_directional` | report_id, part_id? | GET /reports/{id}/directional | 방향 범주(sphere 면/엣지/코너, impact F1~F6)별 최악 응력·G |
+| `report_scatter` | report_id, metric?, part_id? | GET /reports/{id}/scatter | 방향 섭동 산포(sphere) — 26방향별 mean/std/CoV/최악 + 민감도 |
+| `report_energy_flow` | report_id, case_key? | GET /reports/{id}/energy | deep=에너지밸런스·접촉력·Newton-3, sphere/impact=하중경로 그래프 |
+| `report_part_series` | report_id, case_key, part_id | GET /reports/{id}/cases/{key}/series | 케이스·파트 시계열(응력/변형률/G/변위, 다운샘플) |
 | `report_findings` | report_id, severity? | GET /reports/{id}/findings | 위험 소견(CRITICAL/WARNING/INFO) |
 | `compare_reports` | report_ids[], part_id? | (다중 GET) | 리비전/조건 간 파트별 최악값 비교(federate 식) |
+| `publish_report_to_datahub` | report_id, project, stage, variation?, doe?, unit?, title? | POST /reports/{id}/publish-datahub | AI Data Hub 에 범용 sim_report 레코드로 등재(eng_meta 연계) |
 | `delete_report` | report_id | DELETE /reports/{id} | 리포트 삭제(원본 HTML 포함) |
 
 ## 시스템 / 신원
