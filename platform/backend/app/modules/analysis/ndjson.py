@@ -63,8 +63,12 @@ def _dump(obj: dict) -> str:
     return json.dumps(obj, ensure_ascii=False) + "\n"
 
 
-def iter_ndjson_lines(report, cases) -> Iterator[str]:
-    """``run`` 1줄 + ``fact`` N줄. report=ImpactReport, cases=list[ImpactCase]."""
+def iter_ndjson_lines(report, cases, *, site: str | None = None) -> Iterator[str]:
+    """``run`` 1줄 + ``fact`` N줄. report=ImpactReport, cases=list[ImpactCase].
+
+    site: 이 DynaForge 인스턴스 식별자(여러 DynaForge → 하나의 ReportArchive 로 모을 때
+    출처 표시). run_key 는 그대로 두고 provenance 로만 싣는다.
+    """
     parts = {}
     for p in report.parts or []:
         pid = p.get("part_id")
@@ -86,6 +90,10 @@ def iter_ndjson_lines(report, cases) -> Iterator[str]:
         "project_name": report.project_name,
         "test_dir": report.test_dir,
     }
+    if site:
+        # 출처 인스턴스 — 규격 §3.1 provenance 관례에 맞춰 싣는다.
+        run["site"] = site
+        run["provenance"] = {"site": site, "source_system": "DynaForge"}
     yield _dump(run)
 
     for c in cases:

@@ -73,6 +73,11 @@ class Settings(BaseSettings):
     # 목록 응답의 file_url 에 쓸 외부 베이스 URL. 비우면 요청의 base_url 을 쓴다.
     # 포탈 서브패스(/apps/kooremapper) 뒤라 내부 base 와 다르면 여기에 외부 URL 을 넣는다.
     analysis_public_base_url: str = ""
+    # 이 DynaForge 인스턴스 식별자(예: "dynaforge-cae00"). 여러 DynaForge → 하나의
+    # ReportArchive 로 모을 때 각 결과가 어느 인스턴스에서 왔는지 표시한다(provenance).
+    # run_key 자체는 ULID 라 전역 유일하므로 여기 값은 표시·그룹핑용이고 dedup 엔 안 쓴다.
+    # 한 번 정하면 안정적으로 유지한다(바꾸면 site 표시만 바뀌고 run_key 는 그대로).
+    analysis_site_id: str = ""
 
     # --- CORS ---
     cors_origins: str = "http://localhost:5273,http://127.0.0.1:5273"

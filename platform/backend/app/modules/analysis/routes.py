@@ -45,11 +45,13 @@ async def list_runs(
     """새 해석 결과 목록(ReportArchive §1). 소유 리포트를 id(시각순) 커서로 페이지네이션."""
     rows = await svc.list_runs(db, user.id, since=_parse_since(since), after=after, limit=limit)
     base = _base_url(request)
+    site = settings.analysis_site_id or None
     items = [{
         "run_key": r.id,
         "id": r.id,
         "title": r.label,
         "kind": r.kind,
+        "site": site,  # 어느 DynaForge 인스턴스인지(여러→하나 집계용). None 이면 미설정.
         "analyzed_at": r.created_at.isoformat() if r.created_at else None,
         "file_url": f"{base}/api/v1/analysis/runs/{r.id}/export.ndjson",
         "n_cases": r.n_cases,
@@ -73,6 +75,6 @@ async def export_run_ndjson(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "결과를 찾을 수 없습니다.")
     cases = await svc.load_cases(db, report.id)
     # 이미 로드된 report+cases 위를 도는 순수 제너레이터 → 상수 메모리 스트리밍.
-    gen = iter_ndjson_lines(report, cases)
+    gen = iter_ndjson_lines(report, cases, site=settings.analysis_site_id or None)
     headers = {"Content-Disposition": f'attachment; filename="{run_key}.ndjson"'}
     return StreamingResponse(gen, media_type="application/x-ndjson", headers=headers)

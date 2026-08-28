@@ -60,3 +60,22 @@ ReportArchive 가 DynaForge 의 해석 결과를 **자동으로 당겨간다**(�
   (config `analysis_public_base_url`)에 외부 URL 을 넣는다. 비우면 요청 base_url 을 쓴다.
 - **sha256/bytes 미제공** — NDJSON 을 즉석 생성하므로 목록에 크기·해시를 안 싣는다(규격상 선택).
 - Range/gzip 미지원(후속). 규격 §2 상 없어도 동작(끊기면 처음부터).
+
+## 다대다(M:N) 토폴로지 — 여러 DynaForge ↔ 여러 ReportArchive
+
+현재 설계로 **이미 성립**한다(읽기전용 pull + PAT 다중 공존). 추가 서버 로직 불필요.
+
+**여러 DynaForge → 하나의 ReportArchive (fan-in)**
+- ReportArchive 가 각 DynaForge 를 별도 소스(AnalysisSource)로 등록 — 인스턴스마다 base_url + PAT.
+- 각 결과에 **`site`** 필드가 실려 어느 인스턴스에서 왔는지 구분된다(목록 item + NDJSON run 줄·provenance).
+  `KOORM_ANALYSIS_SITE_ID`(config `analysis_site_id`, 예 "dynaforge-cae00")로 인스턴스마다 설정.
+- `run_key` 는 ULID 라 인스턴스 간 전역 유일 → 충돌 없이 한 아카이브로 합쳐진다(site 는 표시·그룹핑용, dedup 은 run_key).
+
+**하나의 DynaForge → 여러 ReportArchive (fan-out)**
+- 읽기전용·멱등이라 N개가 동시에 폴링해도 무방. 각 ReportArchive 는 자기 이름의 PAT 를 쓴다
+  (한 계정에 여러 named PAT 공존 가능, 또는 ReportArchive 마다 별도 계정).
+
+**SSO PAT 와 ReportArchive PAT 공존 (맞는 설계)**
+- SSO PAT 는 포탈 로그인 시 **같은 이름만** 회전(회수+재발급)한다. ReportArchive PAT 는 **다른 이름**
+  (예 `ReportArchive`)이라 절대 안 건드려진다 → 한 계정에 SSO PAT + 서비스 PAT 가 안전하게 공존.
+- 즉 사람(웹/Claude, SSO PAT)과 기계(ReportArchive, 고정 PAT)가 같은 계정을 써도 서로 안 끊는다.

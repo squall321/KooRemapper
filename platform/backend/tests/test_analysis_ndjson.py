@@ -66,6 +66,21 @@ def test_ndjson_conforms_to_ra_analysis_v1():
         "stress", "strain", "g", "disp", "max_principal_stress", "min_principal_stress", "vm_strain"}
 
 
+def test_ndjson_site_provenance():
+    # 여러 DynaForge → 하나의 ReportArchive: 출처 site 를 run 줄에 싣는다(run_key 는 그대로).
+    report = SimpleNamespace(
+        id="RUNKEY-1", kind="sphere", label="t", parts=[], findings=[],
+        project_name="p", test_dir=None, created_at=None,
+    )
+    run_with = json.loads(next(iter_ndjson_lines(report, [], site="dynaforge-cae00")))
+    assert run_with["site"] == "dynaforge-cae00"
+    assert run_with["provenance"]["site"] == "dynaforge-cae00"
+    assert run_with["run_key"] == "RUNKEY-1"  # run_key 는 site 와 무관하게 안정
+    # site 미설정이면 필드 없음(지어내지 않음).
+    run_without = json.loads(next(iter_ndjson_lines(report, [])))
+    assert "site" not in run_without
+
+
 def test_ndjson_skips_nonnumeric_values():
     report = SimpleNamespace(
         id="X", kind="sphere", label="t", parts=[{"part_id": 1, "name": "A", "group": "G"}],
