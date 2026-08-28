@@ -42,8 +42,14 @@ async def list_runs(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """새 해석 결과 목록(ReportArchive §1). 소유 리포트를 id(시각순) 커서로 페이지네이션."""
-    rows = await svc.list_runs(db, user.id, since=_parse_since(since), after=after, limit=limit)
+    """새 해석 결과 목록(ReportArchive §1). id(시각순) 커서로 페이지네이션.
+
+    시스템 관리자 PAT 면 전 사용자 리포트(전사 수집), 아니면 소유 리포트만.
+    """
+    rows = await svc.list_runs(
+        db, user.id, is_admin=user.is_system_admin,
+        since=_parse_since(since), after=after, limit=limit,
+    )
     base = _base_url(request)
     site = settings.analysis_site_id or None
     items = [{
@@ -52,6 +58,7 @@ async def list_runs(
         "title": r.label,
         "kind": r.kind,
         "site": site,  # 어느 DynaForge 인스턴스인지(여러→하나 집계용). None 이면 미설정.
+        "owner_user_id": r.user_id,  # 전사(admin) 수집 시 어느 계정 결과인지 구분용.
         "analyzed_at": r.created_at.isoformat() if r.created_at else None,
         "file_url": f"{base}/api/v1/analysis/runs/{r.id}/export.ndjson",
         "n_cases": r.n_cases,
@@ -70,7 +77,7 @@ async def export_run_ndjson(
     db: AsyncSession = Depends(get_db),
 ):
     """ra.analysis.v1 NDJSON 스트리밍(ReportArchive §2·§3). run + fact 줄."""
-    report = await svc.get_owned_report(db, user.id, run_key)
+    report = await svc.get_report(db, user.id, run_key, is_admin=user.is_system_admin)
     if report is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "결과를 찾을 수 없습니다.")
     cases = await svc.load_cases(db, report.id)

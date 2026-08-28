@@ -20,12 +20,18 @@ async def list_runs(
     db: AsyncSession,
     user_id: int,
     *,
+    is_admin: bool = False,
     since: datetime | None = None,
     after: str | None = None,
     limit: int = 100,
 ) -> list[ImpactReport]:
-    """소유 리포트를 id(=ULID, 시각순) 오름차순으로. since=증분, after=커서."""
-    q = select(ImpactReport).where(ImpactReport.user_id == user_id)
+    """리포트를 id(=ULID, 시각순) 오름차순으로. since=증분, after=커서.
+
+    is_admin 이면 전 사용자 리포트(전사 수집), 아니면 소유 리포트만.
+    """
+    q = select(ImpactReport)
+    if not is_admin:
+        q = q.where(ImpactReport.user_id == user_id)
     if since is not None:
         q = q.where(ImpactReport.created_at >= since)
     if after:
@@ -34,12 +40,14 @@ async def list_runs(
     return list((await db.execute(q)).scalars())
 
 
-async def get_owned_report(
-    db: AsyncSession, user_id: int, run_key: str
+async def get_report(
+    db: AsyncSession, user_id: int, run_key: str, *, is_admin: bool = False
 ) -> Optional[ImpactReport]:
-    """run_key(=report.id) 로 소유 리포트 조회."""
+    """run_key(=report.id) 로 리포트 조회. admin 은 전체, 아니면 소유분만."""
     row = await db.get(ImpactReport, run_key)
-    if row is None or row.user_id != user_id:
+    if row is None:
+        return None
+    if not is_admin and row.user_id != user_id:
         return None
     return row
 

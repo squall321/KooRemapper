@@ -55,7 +55,9 @@ ReportArchive 가 DynaForge 의 해석 결과를 **자동으로 당겨간다**(�
 
 - **series(시간이력) 미포함** — v1 은 run + fact(피크값). series 는 원본 HTML 재파싱이라 후속.
   ReportArchive 도 §3.3 series 는 선택.
-- **인증 범위** = PAT 소유자 리포트. 전사 수집이 필요하면 admin 범위 변형 추가.
+- **인증 범위** — 일반 PAT=소유자 리포트, **시스템 관리자 PAT=전 사용자 리포트(전사 수집)**.
+  admin 이면 목록 item 에 `owner_user_id` 로 어느 계정 결과인지 표시된다. 같은 엔드포인트라
+  ReportArchive fetch_config 변경 없이 PAT 권한만으로 범위가 결정된다.
 - **file_url 외부 도달** — 포탈 서브패스 뒤라 내부 base 와 다르면 `KOORM_ANALYSIS_PUBLIC_BASE_URL`
   (config `analysis_public_base_url`)에 외부 URL 을 넣는다. 비우면 요청 base_url 을 쓴다.
 - **sha256/bytes 미제공** — NDJSON 을 즉석 생성하므로 목록에 크기·해시를 안 싣는다(규격상 선택).
