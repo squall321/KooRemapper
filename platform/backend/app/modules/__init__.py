@@ -8,6 +8,7 @@ API_PREFIX = "/api/v1"
 
 def register_routers(app: FastAPI) -> None:
     from app.modules.admin.routes import router as admin_router
+    from app.modules.analysis.routes import router as analysis_router
     from app.modules.auth.routes import router as auth_router
     from app.modules.corpus.routes import router as corpus_router
     from app.modules.jobs.routes import router as jobs_router
@@ -21,6 +22,7 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(users_router, prefix=API_PREFIX)
     app.include_router(sessions_router, prefix=API_PREFIX)
     app.include_router(reports_router, prefix=API_PREFIX)
+    app.include_router(analysis_router, prefix=API_PREFIX)
     app.include_router(operations_router, prefix=API_PREFIX)
     app.include_router(jobs_router, prefix=API_PREFIX)
     app.include_router(admin_router, prefix=API_PREFIX)

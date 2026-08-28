@@ -69,6 +69,11 @@ class Settings(BaseSettings):
     # 비우면 publish-datahub 비활성(400). 기본은 호스트 네트워크 공유 인스턴스.
     datahub_url: str = "http://127.0.0.1:8001"
 
+    # --- ReportArchive pull 연동 ---
+    # 목록 응답의 file_url 에 쓸 외부 베이스 URL. 비우면 요청의 base_url 을 쓴다.
+    # 포탈 서브패스(/apps/kooremapper) 뒤라 내부 base 와 다르면 여기에 외부 URL 을 넣는다.
+    analysis_public_base_url: str = ""
+
     # --- CORS ---
     cors_origins: str = "http://localhost:5273,http://127.0.0.1:5273"
 
