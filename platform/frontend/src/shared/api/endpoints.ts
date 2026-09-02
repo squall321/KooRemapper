@@ -2,8 +2,9 @@
 import { api, unwrap } from './client'
 import type {
   Job, ModelMeta, OperationDetail, OperationSummary, Report, ReportCase, ReportDirectional,
-  ReportEnergy, ReportListItem, ReportPartRisk, ReportPartSeries, ReportScatter, ScatterMetric,
-  SessionDetail, SessionFile, SessionSummary, TokenCreated, TokenInfo, User,
+  ReportEnergy, ReportFactQuery, ReportGeometry, ReportListItem, ReportPartRisk, ReportPartSeries,
+  ReportScatter, ScatterMetric, SessionDetail, SessionFile, SessionSummary, TokenCreated,
+  TokenInfo, User,
 } from './types'
 
 // auth
@@ -196,6 +197,20 @@ export async function reportScatter(
 export async function reportEnergy(reportId: string, caseKey?: string): Promise<ReportEnergy> {
   const { data } = await api.get(`/reports/${reportId}/energy`, { params: caseKey ? { case_key: caseKey } : {} })
   return unwrap<ReportEnergy>(data)
+}
+/** 공간 컨텍스트(부품 위치 시각화) — impact 디바이스 외곽선 + 파트 footprint. */
+export async function reportGeometry(reportId: string): Promise<ReportGeometry> {
+  const { data } = await api.get(`/reports/${reportId}/geometry`)
+  return unwrap<ReportGeometry>(data)
+}
+/** 한 물리량 기준 (각도/위치 × 값) fact — 마커 시각화용 서버 필터. */
+export async function reportQuery(
+  reportId: string, opts: { part_id?: number; metric?: string; category?: string; limit?: number } = {},
+): Promise<ReportFactQuery> {
+  const { data } = await api.get(`/reports/${reportId}/query`, {
+    params: { metric: 'peak_stress', limit: 2000, ...opts },
+  })
+  return unwrap<ReportFactQuery>(data)
 }
 export async function reportPartSeries(
   reportId: string, caseKey: string, partId: number,

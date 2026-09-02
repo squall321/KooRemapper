@@ -351,6 +351,21 @@ async def report_scatter(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
 
 
+@router.get("/reports/{report_id}/geometry")
+async def report_geometry(
+    report_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """공간 컨텍스트(부품 위치 시각화) — impact=디바이스 외곽선+파트 footprint(XY)+z범위.
+    sphere/deep 은 각도 기반이라 부품 형상은 원본 렌더(iframe)에만 있다."""
+    r = await _require_report(db, user, report_id)
+    try:
+        return ok(await svc.geometry(db, r))
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
+
+
 @router.get("/reports/{report_id}/energy")
 async def report_energy(
     report_id: str,

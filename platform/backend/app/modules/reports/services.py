@@ -852,6 +852,12 @@ async def part_series(db: AsyncSession, report: ImpactReport, case_key: str, par
     return await asyncio.to_thread(parser.part_series, data, kind, case_key, part_id)
 
 
+async def geometry(db: AsyncSession, report: ImpactReport) -> dict:
+    """공간 컨텍스트(부품 위치 시각화용, 원본 재파싱). impact=디바이스 외곽선+파트 footprint."""
+    data, kind = await _load_html_data(db, report)
+    return await asyncio.to_thread(parser.extract_geometry, data, kind)
+
+
 async def scatter(db: AsyncSession, report: ImpactReport, *, metric: str = "peak_stress",
                   part_id: int | None = None) -> dict:
     """방향 섭동 산포 분석(sphere) — 원본 재파싱(swap 포함 authoritative angle 필요)."""

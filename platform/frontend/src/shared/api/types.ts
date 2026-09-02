@@ -313,6 +313,31 @@ export interface ReportPartSeries {
   g_ts?: number[][] | null
   disp_ts?: number[][] | null
 }
+export interface ReportGeometry {
+  kind: ReportKind
+  device_outline: number[][] | null
+  device_bbox: { xmin: number; xmax: number; ymin: number; ymax: number } | null
+  parts: Array<{ part_id: number; name: string | null; group: string | null; footprint: number[][] | null; zmin: number | null; zmax: number | null }>
+}
+export interface ReportFact {
+  case_key: string
+  identity: Record<string, unknown> | null
+  part_id: number
+  part_name: string | null
+  quantity: string
+  value: number
+  at_time?: number
+}
+export interface ReportFactQuery {
+  report_id: string
+  kind: ReportKind
+  metric: string
+  n_matched: number
+  returned: number
+  truncated: boolean
+  facts: ReportFact[]
+}
+
 export interface ReportCase {
   id: number
   report_id: string

@@ -604,6 +604,14 @@ async def report_energy_flow(report_id: str, ctx: Context, case_key: str | None 
 
 
 @mcp.tool()
+async def report_geometry(report_id: str, ctx: Context) -> dict:
+    """공간 컨텍스트(부품 위치·시각화용) — impact=디바이스 외곽선(device_outline)+파트별
+    footprint(XY 다각형)+z범위. "부품이 어디 있나"·충격 위치를 좌표로 안다. sphere/deep 은
+    각도 기반이라 부품 형상은 원본 렌더에만 있다(geometry 비어 있음)."""
+    return await _get(ctx, f"/reports/{report_id}/geometry")
+
+
+@mcp.tool()
 async def report_part_series(report_id: str, case_key: str, part_id: int, ctx: Context) -> dict:
     """한 케이스·파트의 시계열(원본 재파싱, 다운샘플) — 응력/변형률/G/변위 시간이력."""
     return await _get(ctx, f"/reports/{report_id}/cases/{case_key}/series", params={"part_id": part_id})

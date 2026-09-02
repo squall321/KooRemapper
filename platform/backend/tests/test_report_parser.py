@@ -84,6 +84,25 @@ def test_impact_normalizes():
     assert len(study["parts"]) == 12
 
 
+@pytest.mark.skipif(not any(p.exists() for p in _IMPACT_CANDIDATES), reason="impact 샘플 없음")
+def test_extract_geometry_impact():
+    path = next(p for p in _IMPACT_CANDIDATES if p.exists())
+    data = parser.extract_embedded_data(_read(path))
+    g = parser.extract_geometry(data, "impact")
+    assert g["kind"] == "impact"
+    assert g["device_bbox"] and {"xmin", "xmax", "ymin", "ymax"} <= set(g["device_bbox"])
+    assert isinstance(g["device_outline"], list) and len(g["device_outline"]) >= 3
+    # 파트별 footprint(XY 다각형)로 '부품이 어디인지'를 그린다.
+    assert g["parts"] and any(p["footprint"] for p in g["parts"])
+
+
+@pytest.mark.skipif(not _SPHERE.exists(), reason="sphere 샘플 없음")
+def test_extract_geometry_sphere_empty():
+    data = parser.extract_embedded_data(_read(_SPHERE))
+    g = parser.extract_geometry(data, "sphere")
+    assert g["kind"] == "sphere" and g["device_outline"] is None and g["parts"] == []
+
+
 def test_detect_kind_signatures():
     assert parser.detect_kind({"results": [], "sphere_coverage": 1.0}) == "sphere"
     assert parser.detect_kind({"positions": [], "results": []}) == "impact"

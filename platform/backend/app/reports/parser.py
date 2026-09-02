@@ -621,6 +621,34 @@ def case_energy(data: dict, kind: str, case_key: str | None = None) -> dict:
     }
 
 
+def extract_geometry(data: dict, kind: str) -> dict:
+    """공간 컨텍스트(부품 위치 시각화용) — impact 는 디바이스 외곽선 + 파트 footprint(XY),
+    sphere/deep 은 각도 기반이라 부품 위치는 원본 렌더에만 있다(빈 값 반환).
+
+    impact HTML DATA 의 device_outline/device_bbox/parts[].footprint 를 그대로 추린다.
+    """
+    if kind != "impact":
+        return {"kind": kind, "device_outline": None, "device_bbox": None, "parts": []}
+    outline = data.get("device_outline")
+    if not isinstance(outline, list):
+        outline = None
+    bbox = data.get("device_bbox") if isinstance(data.get("device_bbox"), dict) else None
+    parts = []
+    for p in data.get("parts") or []:
+        if not isinstance(p, dict):
+            continue
+        fp = p.get("footprint")
+        parts.append({
+            "part_id": _to_int(p.get("id")),
+            "name": p.get("name"),
+            "group": p.get("group"),
+            "footprint": fp if isinstance(fp, list) else None,
+            "zmin": _num(p.get("zmin")),
+            "zmax": _num(p.get("zmax")),
+        })
+    return {"kind": "impact", "device_outline": outline, "device_bbox": bbox, "parts": parts}
+
+
 def part_series(data: dict, kind: str, case_key: str, part_id: int) -> dict:
     """한 케이스·한 파트의 시계열(다운샘플). DB 미저장분을 원본에서 복원."""
     pid = str(part_id)

@@ -11,6 +11,7 @@ import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Input, Spinner }
 import { errorMessage } from '@/shared/api/client'
 import { ConfirmDialog } from '@/shared/components/ConfirmDialog'
 import { ReportAnalysis } from './ReportAnalysis'
+import { ReportVisuals } from './ReportVisuals'
 
 const KIND_LABEL: Record<string, string> = {
   deep: '단건 심층', sphere: '전각도 낙하', impact: '전위치 부분충격',
@@ -161,6 +162,8 @@ function ReportDetail({ sessionId, reportId, files }: { sessionId: string; repor
           </div>
         )}
       </div>
+
+      <ReportVisuals report={r} />
 
       <ReportAnalysis report={r} cases={cases.data ?? []} />
 
