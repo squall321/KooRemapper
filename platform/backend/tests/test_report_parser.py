@@ -56,9 +56,11 @@ def test_sphere_normalizes():
     # Test_001 = 26방향(cuboid).
     assert len(study["cases"]) == 26
     assert study["project"]["doe_strategy"] == "cuboid_26"
-    # 각 케이스는 각도 identity 를 갖는다.
+    # 각 케이스는 각도 identity 를 갖는다(마커 투영용 lon/lat/swap 포함).
     a0 = study["cases"][0]["identity"]["angle"]
-    assert set(a0) == {"name", "roll", "pitch", "yaw", "category"}
+    assert set(a0) == {"name", "roll", "pitch", "yaw", "category", "swap", "lon", "lat"}
+    # lon/lat 은 swap 규약을 반영한 등장방형 좌표(정의역 안).
+    assert -180.0 <= a0["lon"] <= 180.0 and -90.0 <= a0["lat"] <= 90.0
     # 전역 최악 응력이 어느 각도에서 났는지 롤업.
     ws = study["summary"]["worst_stress"]
     assert ws["value"] is not None and ws["case_key"] is not None
@@ -82,6 +84,20 @@ def test_impact_normalizes():
     assert set(pm) >= {"peak_stress", "peak_strain", "peak_g", "peak_disp"}
     # 12 파트.
     assert len(study["parts"]) == 12
+
+
+@pytest.mark.skipif(not _SPHERE.exists(), reason="sphere 샘플 없음")
+def test_sphere_lonlat_all_on_canvas():
+    # cuboid_26 은 roll 이 ±90 을 넘는 방향(Front 반구)이 있어, swap 무시한 raw
+    # roll/pitch 를 위경도로 쓰면 9/26 이 캔버스 밖으로 잘렸다. lon/lat 저장으로 정합.
+    study = parser.parse_html(_read(_SPHERE))
+    angs = [c["identity"]["angle"] for c in study["cases"]]
+    assert all(-180.0 <= a["lon"] <= 180.0 for a in angs)
+    assert all(-90.0 <= a["lat"] <= 90.0 for a in angs)
+    # swap=True 케이스에서 lat 은 roll 이 아니라 pitch 에서 온다(축 전치 방지).
+    sw = next(a for a in angs if a["swap"])
+    assert sw["lat"] == pytest.approx(max(-90.0, min(90.0, sw["pitch"])))
+    assert sw["lon"] == pytest.approx(((sw["roll"] + 180.0) % 360.0) - 180.0)
 
 
 @pytest.mark.skipif(not any(p.exists() for p in _IMPACT_CANDIDATES), reason="impact 샘플 없음")

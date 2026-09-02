@@ -310,6 +310,9 @@ def normalize_sphere(data: dict) -> dict:
                 "time_of_peak_stress": _num(p.get("time_of_peak_stress")),
                 "time_of_peak_g": _num(p.get("time_of_peak_g")),
             }
+        # 등장방형 마커용 방향 좌표(lon/lat). swap 규약을 여기서 한 번만 반영해
+        # 저장한다 — 소비자(웹 마커·근접필터)가 Euler+swap 을 재계산하지 않도록.
+        _lon_deg, _lat_deg = _angle_lonlat(angle)
         cases.append({
             "case_key": r.get("folder") or angle.get("name") or f"run_{len(cases)}",
             "identity": {
@@ -319,6 +322,9 @@ def normalize_sphere(data: dict) -> dict:
                     "pitch": _num(angle.get("pitch")),
                     "yaw": _num(angle.get("yaw")),
                     "category": angle.get("category"),
+                    "swap": bool(angle.get("swap")),
+                    "lon": _lon_deg,
+                    "lat": _lat_deg,
                 }
             },
             "meta": {"num_states": r.get("num_states"), "success": True},
@@ -714,6 +720,21 @@ def _angle_vec(a: dict) -> tuple[float, float, float]:
         lat, lon = math.radians(roll), math.radians(pitch)
     lat = max(-math.pi / 2, min(math.pi / 2, lat))
     return (math.cos(lat) * math.cos(lon), math.cos(lat) * math.sin(lon), math.sin(lat))
+
+
+def _angle_lonlat(a: dict) -> tuple[float, float]:
+    """각도 → 등장방형 투영 좌표(경도 lon∈[-180,180], 위도 lat∈[-90,90], 도).
+
+    _angle_vec 과 동일한 규약(swap 반영)이라 방향벡터↔lon/lat 이 정합한다.
+    lat=asin(vz), lon=atan2(vy,vx) 이지만 clamp 후 항등이므로 직접 계산한다.
+    """
+    swap = bool(a.get("swap"))
+    roll = _num(a.get("roll")) or 0.0
+    pitch = _num(a.get("pitch")) or 0.0
+    lat, lon = (pitch, roll) if swap else (roll, pitch)
+    lat = max(-90.0, min(90.0, lat))
+    lon = ((lon + 180.0) % 360.0) - 180.0  # [-180,180] 로 래핑
+    return (lon, lat)
 
 
 def _nearest_base(v):

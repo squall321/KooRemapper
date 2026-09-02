@@ -587,7 +587,11 @@ async def query_facts(
         if angle_name and ang.get("name") != angle_name:
             continue
         if target_vec is not None:
-            lat, lon = radians(ang.get("roll") or 0.0), radians(ang.get("pitch") or 0.0)
+            # 저장된 lon/lat(swap 규약 반영)을 우선 사용. 구버전 리포트는 raw 로 폴백.
+            a_lat, a_lon = ang.get("lat"), ang.get("lon")
+            if a_lat is None or a_lon is None:
+                a_lat, a_lon = ang.get("roll") or 0.0, ang.get("pitch") or 0.0
+            lat, lon = radians(a_lat), radians(a_lon)
             v = (cos(lat) * cos(lon), cos(lat) * sin(lon), sin(lat))
             dot = max(-1.0, min(1.0, sum(a * b for a, b in zip(v, target_vec))))
             if acos(dot) * 180.0 / 3.141592653589793 > tol:
