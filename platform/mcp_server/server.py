@@ -482,6 +482,65 @@ async def report_directional(report_id: str, ctx: Context, part_id: int | None =
 
 
 @mcp.tool()
+async def find_reports(
+    ctx: Context,
+    kind: str | None = None,
+    project: str | None = None,
+    dev_rev: str | None = None,
+    session_id: str | None = None,
+    kfile_id: int | None = None,
+    limit: int = 100,
+) -> list:
+    """조건으로 리포트 검색(전 세션, 결과 폭증 대비 서버 필터) — 소유분(관리자는 전사).
+    kind(deep/sphere/impact)·project(과제)·dev_rev(개발단계)·session_id·kfile_id 로 좁힌다.
+    필터는 서버(SQL)가 처리하므로 리포트가 수천 개여도 슬라이스만 받는다."""
+    params = {k: v for k, v in {
+        "kind": kind, "project": project, "dev_rev": dev_rev,
+        "session_id": session_id, "kfile_id": kfile_id, "limit": limit,
+    }.items() if v is not None}
+    return await _get(ctx, "/reports", params=params)
+
+
+@mcp.tool()
+async def report_query(
+    report_id: str,
+    ctx: Context,
+    part_id: int | None = None,
+    category: str | None = None,
+    angle_name: str | None = None,
+    near_roll: float | None = None,
+    near_pitch: float | None = None,
+    near_yaw: float | None = None,
+    angle_tol_deg: float | None = None,
+    metric: str = "peak_stress",
+    min_value: float | None = None,
+    max_value: float | None = None,
+    sort: str = "desc",
+    limit: int = 200,
+) -> dict:
+    """리포트 내부 fact 드릴다운 — 서버가 부품·각도·물리량·임계로 필터해 슬라이스만 준다.
+
+    "특정 부품이 특정 각도에서 어떤 값" 을 한 콜로. 필터:
+    - part_id: 특정 부품
+    - category: 방향 범주(sphere face/edge/corner, impact F1~F6)
+    - angle_name: 정확한 각도명(예 F1_Back, P0001)
+    - near_roll/near_pitch/near_yaw + angle_tol_deg: 각도 근접(대원거리 ±도)
+    - metric: peak_stress|peak_g|peak_disp|peak_strain|peak_principal|min_principal|peak_vm_strain|safety_factor
+    - min_value/max_value: 값 임계, sort(desc|asc), limit
+    반환: (case_key·각도·부품·물리량·값·at_time) 평탄 fact + n_matched·truncated.
+    전 케이스를 LLM 이 훑지 않아도 되니 대형 sphere(수천 케이스)에서 효율적이다."""
+    params: dict = {"metric": metric, "sort": sort, "limit": limit}
+    for k, v in {
+        "part_id": part_id, "category": category, "angle_name": angle_name,
+        "near_roll": near_roll, "near_pitch": near_pitch, "near_yaw": near_yaw,
+        "angle_tol_deg": angle_tol_deg, "min_value": min_value, "max_value": max_value,
+    }.items():
+        if v is not None:
+            params[k] = v
+    return await _get(ctx, f"/reports/{report_id}/query", params=params)
+
+
+@mcp.tool()
 async def report_scatter(
     report_id: str, ctx: Context, metric: str = "peak_stress", part_id: int | None = None
 ) -> dict:

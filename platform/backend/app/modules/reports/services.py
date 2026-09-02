@@ -479,6 +479,155 @@ async def publish_to_datahub(
     )
 
 
+# fact 질의에 허용되는 물리량(parts_metrics 키) + 그 값이 나온 시각 키.
+_QUERY_METRICS = {
+    "peak_stress": "time_of_peak_stress", "peak_strain": None,
+    "peak_g": "time_of_peak_g", "peak_disp": None,
+    "peak_principal": None, "min_principal": None, "peak_vm_strain": None,
+    "safety_factor": None,
+}
+_MAX_FACT_SCAN = 20000  # 한 질의가 훑는 케이스×파트 상한(서버 보호)
+
+
+def _angle_of(identity: dict | None) -> dict:
+    return ((identity or {}).get("angle") or {}) if isinstance(identity, dict) else {}
+
+
+async def query_facts(
+    db: AsyncSession,
+    report: ImpactReport,
+    *,
+    part_id: int | None = None,
+    category: str | None = None,
+    angle_name: str | None = None,
+    near_roll: float | None = None,
+    near_pitch: float | None = None,
+    near_yaw: float | None = None,
+    angle_tol_deg: float | None = None,
+    metric: str = "peak_stress",
+    min_value: float | None = None,
+    max_value: float | None = None,
+    sort: str = "desc",
+    limit: int = 200,
+) -> dict:
+    """리포트 내부를 서버에서 필터해 (케이스=각도 × 부품 × 물리량 = 값) fact 슬라이스를 준다.
+
+    필터: part_id(특정 부품) · category(면/엣지/코너·F1~F6) · angle_name(F1_Back 등) ·
+    near_(roll,pitch,yaw)+angle_tol_deg(각도 근접, 대원거리) · metric · min/max_value.
+    정렬·limit 까지 서버에서 처리 — LLM 은 걸러진 결과만 받는다. 대형 sphere 안전.
+    """
+    from math import acos, cos, radians, sin
+    if metric not in _QUERY_METRICS:
+        raise ValueError(f"metric 은 {sorted(_QUERY_METRICS)} 중 하나여야 합니다.")
+
+    # 각도 근접 타깃 벡터(주어졌을 때). identity 저장 규약과 동일하게 계산해 self-consistent.
+    target_vec = None
+    if angle_tol_deg is not None or any(x is not None for x in (near_roll, near_pitch, near_yaw)):
+        lat, lon = radians(near_roll or 0.0), radians(near_pitch or 0.0)
+        target_vec = (cos(lat) * cos(lon), cos(lat) * sin(lon), sin(lat))
+        tol = angle_tol_deg if angle_tol_deg is not None else 15.0
+
+    # SQL 선필터: report_id (+ 가능하면 category 를 JSONB 로). 나머지는 로드 후 판정.
+    q = select(ImpactCase).where(ImpactCase.report_id == report.id)
+    cases = list((await db.execute(q)).scalars())
+
+    name_of = {int(p["part_id"]): p.get("name") for p in (report.parts or []) if _isint(p.get("part_id"))}
+    tkey = _QUERY_METRICS[metric]
+    facts: list[dict] = []
+    scanned = 0
+    truncated_scan = False
+    for c in cases:
+        cat = _category_of(c, report.kind)
+        if category and cat != category:
+            continue
+        ang = _angle_of(c.identity)
+        if angle_name and ang.get("name") != angle_name:
+            continue
+        if target_vec is not None:
+            lat, lon = radians(ang.get("roll") or 0.0), radians(ang.get("pitch") or 0.0)
+            v = (cos(lat) * cos(lon), cos(lat) * sin(lon), sin(lat))
+            dot = max(-1.0, min(1.0, sum(a * b for a, b in zip(v, target_vec))))
+            if acos(dot) * 180.0 / 3.141592653589793 > tol:
+                continue
+        pm = c.parts_metrics or {}
+        pids = [str(part_id)] if part_id is not None else list(pm.keys())
+        for pid in pids:
+            scanned += 1
+            if scanned > _MAX_FACT_SCAN:
+                truncated_scan = True
+                break
+            m = pm.get(pid)
+            if not isinstance(m, dict):
+                continue
+            val = m.get(metric)
+            if not isinstance(val, (int, float)) or isinstance(val, bool):
+                continue
+            if min_value is not None and val < min_value:
+                continue
+            if max_value is not None and val > max_value:
+                continue
+            try:
+                pid_i = int(pid)
+            except (TypeError, ValueError):
+                pid_i = pid
+            fact = {
+                "case_key": c.case_key,
+                "identity": c.identity,
+                "part_id": pid_i,
+                "part_name": name_of.get(pid_i),
+                "quantity": metric,
+                "value": val,
+            }
+            if tkey and isinstance(m.get(tkey), (int, float)) and not isinstance(m.get(tkey), bool):
+                fact["at_time"] = m.get(tkey)
+            facts.append(fact)
+        if truncated_scan:
+            break
+
+    facts.sort(key=lambda f: f["value"], reverse=(sort != "asc"))
+    return {
+        "report_id": report.id, "kind": report.kind, "metric": metric,
+        "n_matched": len(facts),
+        "returned": min(len(facts), limit),
+        "truncated": len(facts) > limit or truncated_scan,
+        "facts": facts[:limit],
+    }
+
+
+async def find_reports(
+    db: AsyncSession,
+    user_id: int,
+    *,
+    is_admin: bool = False,
+    session_id: str | None = None,
+    kind: str | None = None,
+    project: str | None = None,
+    dev_rev: str | None = None,
+    kfile_id: int | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[ImpactReport]:
+    """소유(또는 admin=전사) 리포트를 조건으로 서버에서 필터 — 결과가 많아져도 슬라이스만.
+
+    project/dev_rev 는 eng_meta(JSONB) 로 매칭. kind/session/kfile 은 컬럼.
+    """
+    q = select(ImpactReport)
+    if not is_admin:
+        q = q.where(ImpactReport.user_id == user_id)
+    if session_id:
+        q = q.where(ImpactReport.session_id == session_id)
+    if kind:
+        q = q.where(ImpactReport.kind == kind)
+    if kfile_id is not None:
+        q = q.where(ImpactReport.source_kfile_id == kfile_id)
+    if project:
+        q = q.where(ImpactReport.eng_meta["project"].astext == project)
+    if dev_rev:
+        q = q.where(ImpactReport.eng_meta[("dev_revision", "code")].astext == dev_rev)
+    q = q.order_by(ImpactReport.created_at.desc()).limit(limit).offset(offset)
+    return list((await db.execute(q)).scalars())
+
+
 def _category_of(case: ImpactCase, kind: str) -> str:
     """케이스의 방향 범주. sphere=angle.category(face/edge/corner/…), impact=face, deep=single."""
     idt = case.identity or {}

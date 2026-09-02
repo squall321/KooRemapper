@@ -173,6 +173,64 @@ async def get_report(
     return ok(ReportRead.model_validate(r).model_dump())
 
 
+@router.get("/reports")
+async def find_reports(
+    kind: str | None = Query(default=None, pattern="^(deep|sphere|impact)$"),
+    project: str | None = Query(default=None),
+    dev_rev: str | None = Query(default=None),
+    session_id: str | None = Query(default=None),
+    kfile_id: int | None = Query(default=None),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """조건으로 리포트 검색(결과 폭증 대비 서버 필터). 소유분(관리자는 전사).
+
+    필터: kind·project(과제)·dev_rev(개발단계)·session·kfile. 서버에서 걸러 슬라이스만.
+    """
+    rows = await svc.find_reports(
+        db, user.id, is_admin=user.is_system_admin, session_id=session_id, kind=kind,
+        project=project, dev_rev=dev_rev, kfile_id=kfile_id, limit=limit, offset=offset,
+    )
+    return ok([ReportListItem.model_validate(r).model_dump() for r in rows])
+
+
+@router.get("/reports/{report_id}/query")
+async def query_report_facts(
+    report_id: str,
+    part_id: int | None = Query(default=None),
+    category: str | None = Query(default=None),
+    angle_name: str | None = Query(default=None),
+    near_roll: float | None = Query(default=None),
+    near_pitch: float | None = Query(default=None),
+    near_yaw: float | None = Query(default=None),
+    angle_tol_deg: float | None = Query(default=None, ge=0, le=180),
+    metric: str = Query("peak_stress"),
+    min_value: float | None = Query(default=None),
+    max_value: float | None = Query(default=None),
+    sort: str = Query("desc", pattern="^(asc|desc)$"),
+    limit: int = Query(200, ge=1, le=5000),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """리포트 내부 fact 드릴다운 — 부품·각도(범주/이름/근접)·물리량·임계로 서버 필터.
+
+    "특정 부품이 특정 각도(±허용)에서 응력 상위 N" 같은 데이터 질의를 한 콜로.
+    반환은 (case_key·각도·부품·물리량·값·at_time) 평탄 fact 리스트(정렬·limit 적용).
+    """
+    r = await _require_report(db, user, report_id)
+    try:
+        return ok(await svc.query_facts(
+            db, r, part_id=part_id, category=category, angle_name=angle_name,
+            near_roll=near_roll, near_pitch=near_pitch, near_yaw=near_yaw,
+            angle_tol_deg=angle_tol_deg, metric=metric,
+            min_value=min_value, max_value=max_value, sort=sort, limit=limit,
+        ))
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
+
+
 @router.get("/reports/{report_id}/cases")
 async def list_report_cases(
     report_id: str,
