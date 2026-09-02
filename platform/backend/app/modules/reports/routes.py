@@ -49,6 +49,7 @@ async def ingest_report(
     dev_rev: str | None = Form(default=None),
     variation: str | None = Form(default=None),
     doe: str | None = Form(default=None),
+    focus: str | None = Form(default=None),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -87,6 +88,7 @@ async def ingest_report(
             scenario_raw=scenario_raw,
             scenario_filename=(scenario.filename if scenario is not None else None),
             kfile_id=kfile_id, project=project, dev_rev=dev_rev, variation=variation, doe=doe,
+            focus=focus,
         )
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
@@ -116,6 +118,7 @@ class ReportMetaPatch(BaseModel):
     dev_rev: str | None = Field(default=None, max_length=8)    # 개발단계 (pre|dv1..dvr|pv..|pra|mp)
     variation: str | None = Field(default=None, max_length=64)  # 설계안
     doe: str | None = Field(default=None, max_length=128)       # DOE 참조 study[:case]
+    focus: str | None = Field(default=None, max_length=64)      # 초점 라벨(camera-detail 등)
     kfile_id: int | None = None     # 원본 K파일(세션 내 file id)
 
 
@@ -131,7 +134,7 @@ async def patch_report_meta(
     try:
         r = await svc.update_report_meta(
             db, r, label=body.label, project=body.project, dev_rev=body.dev_rev,
-            variation=body.variation, doe=body.doe, kfile_id=body.kfile_id,
+            variation=body.variation, doe=body.doe, kfile_id=body.kfile_id, focus=body.focus,
         )
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
@@ -163,6 +166,73 @@ async def attach_report_scenario(
     return ok(ReportRead.model_validate(r).model_dump(), message="시뮬 조건(scenario) 첨부됨")
 
 
+@router.get("/reports/facets")
+async def report_facets(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """리포트 검색 facet — 어떤 kind·과제·rev·설계안·방향컨셉·초점·심각도·높이가 있나 + 건수.
+    목표를 정하기 전 '먼저 뭐가 있나'를 보는 화면. 소유분(관리자는 전사)."""
+    return ok(await svc.report_facets(db, user.id, is_admin=user.is_system_admin))
+
+
+def _parse_dt(v: str | None, field: str):
+    if not v:
+        return None
+    from datetime import datetime
+    try:
+        return datetime.fromisoformat(v.replace("Z", "+00:00"))
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"{field} 형식 오류(ISO-8601): {v}")
+
+
+@router.get("/reports")
+async def find_reports(
+    kind: str | None = Query(default=None, pattern="^(deep|sphere|impact)$"),
+    project: str | None = Query(default=None, description="과제 (eng_meta 또는 임베드 project_name)"),
+    dev_rev: str | None = Query(default=None, description="개발단계 (dv1 등)"),
+    variation: str | None = Query(default=None, description="설계안"),
+    doe: str | None = Query(default=None, description="DOE 캠페인(study)"),
+    session_id: str | None = Query(default=None),
+    kfile_id: int | None = Query(default=None),
+    focus: str | None = Query(default=None, description="초점 라벨(예 camera-detail)"),
+    doe_strategy: str | None = Query(default=None, description="방향 컨셉(cuboid_26·fibonacci_162 등)"),
+    scenario_type: str | None = Query(default=None, description="scenario source_type"),
+    drop_height: float | None = Query(default=None, description="낙하 높이(±height_tol)"),
+    height_tol: float = Query(1.0, ge=0),
+    severity: str | None = Query(default=None, pattern="^(CRITICAL|WARNING|INFO)$", description="이 심각도 이상 소견 보유"),
+    min_worst_stress: float | None = Query(default=None),
+    min_worst_g: float | None = Query(default=None),
+    has_part: str | None = Query(default=None, description="이 부품명을 포함한 리포트"),
+    q: str | None = Query(default=None, description="라벨/과제 텍스트 검색"),
+    since: str | None = Query(default=None, description="created_at ≥ (ISO)"),
+    until: str | None = Query(default=None, description="created_at ≤ (ISO)"),
+    sort: str = Query("created_at", pattern="^(created_at|worst_stress|worst_g|drop_height)$"),
+    order: str = Query("desc", pattern="^(asc|desc)$"),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """조건으로 리포트 검색(결과 폭증 대비 다축 서버 필터). 소유분(관리자는 전사).
+
+    같은 전각도라도 방향 컨셉(doe_strategy)·초점(focus)·조건(scenario_type)·높이별로
+    각기 골라낼 수 있다. 전부 서버에서 걸러 슬라이스만 반환.
+    """
+    rows = await svc.find_reports(
+        db, user.id, is_admin=user.is_system_admin,
+        sort=sort, order=order, limit=limit, offset=offset,
+        session_id=session_id, kind=kind, project=project, dev_rev=dev_rev,
+        variation=variation, doe=doe, kfile_id=kfile_id, focus=focus,
+        doe_strategy=doe_strategy, scenario_type=scenario_type,
+        drop_height=drop_height, height_tol=height_tol, severity=severity,
+        min_worst_stress=min_worst_stress, min_worst_g=min_worst_g,
+        has_part=has_part, q_text=q,
+        since=_parse_dt(since, "since"), until=_parse_dt(until, "until"),
+    )
+    return ok([ReportListItem.model_validate(r).model_dump() for r in rows])
+
+
 @router.get("/reports/{report_id}")
 async def get_report(
     report_id: str,
@@ -171,29 +241,6 @@ async def get_report(
 ):
     r = await _require_report(db, user, report_id)
     return ok(ReportRead.model_validate(r).model_dump())
-
-
-@router.get("/reports")
-async def find_reports(
-    kind: str | None = Query(default=None, pattern="^(deep|sphere|impact)$"),
-    project: str | None = Query(default=None),
-    dev_rev: str | None = Query(default=None),
-    session_id: str | None = Query(default=None),
-    kfile_id: int | None = Query(default=None),
-    limit: int = Query(100, ge=1, le=500),
-    offset: int = Query(0, ge=0),
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """조건으로 리포트 검색(결과 폭증 대비 서버 필터). 소유분(관리자는 전사).
-
-    필터: kind·project(과제)·dev_rev(개발단계)·session·kfile. 서버에서 걸러 슬라이스만.
-    """
-    rows = await svc.find_reports(
-        db, user.id, is_admin=user.is_system_admin, session_id=session_id, kind=kind,
-        project=project, dev_rev=dev_rev, kfile_id=kfile_id, limit=limit, offset=offset,
-    )
-    return ok([ReportListItem.model_validate(r).model_dump() for r in rows])
 
 
 @router.get("/reports/{report_id}/query")

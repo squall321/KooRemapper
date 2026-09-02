@@ -209,11 +209,17 @@ export interface ReportListItem {
 }
 export interface Report extends ReportListItem {
   session_id: string
+  focus?: string | null              // 초점 라벨(camera-detail 등)
   source_file_id: number | null
   source_kfile_id?: number | null   // 원본 K파일 (1 K : N 리포트)
   scenario_file_id?: number | null
   scenario?: Record<string, unknown> | null  // 시뮬 조건 요약
+  scenario_type?: string | null
   eng_meta?: Record<string, unknown> | null  // 과제/rev 수동 메타
+  drop_height?: number | null
+  worst_stress?: number | null
+  worst_g?: number | null
+  max_severity?: string | null
   generator: string | null
   doe_strategy: string | null
   test_dir: string | null

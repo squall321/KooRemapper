@@ -153,6 +153,15 @@ class ImpactReport(Base):
     # 과제/개발단계 수동 메타 — {project, dev_revision:{phase,round?}, design_variation?, doe?}.
     # DataHub 등재 폼의 기본값으로도 쓰인다.
     eng_meta: Mapped[dict | None] = mapped_column(JSONB)
+    # 리포트 초점/변형 라벨(수동) — 같은 전각도라도 "카메라 디테일"·"코너 정밀" 등 초점이
+    # 다른 리포트를 구분·검색하기 위한 자유 태그. doe_strategy(방향 컨셉)와 직교한다.
+    focus: Mapped[str | None] = mapped_column(String(64), index=True)
+    # 검색·정렬용 승격 컬럼(JSONB 대신 컬럼으로 빠른 필터). 인제스트 시 채운다.
+    worst_stress: Mapped[float | None] = mapped_column(Float, index=True)
+    worst_g: Mapped[float | None] = mapped_column(Float)
+    max_severity: Mapped[str | None] = mapped_column(String(12), index=True)  # CRITICAL|WARNING|INFO
+    drop_height: Mapped[float | None] = mapped_column(Float, index=True)
+    scenario_type: Mapped[str | None] = mapped_column(String(32), index=True)  # cuboid_geometry 등
     generator: Mapped[str | None] = mapped_column(String(40))
     generator_version: Mapped[str | None] = mapped_column(String(40))
     schema_str: Mapped[str | None] = mapped_column(String(64))

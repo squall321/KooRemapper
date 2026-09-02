@@ -103,21 +103,56 @@ async def test_find_reports_filters(db):
     u, s = await _mk(db)
     try:
         r1 = await svc.ingest_report(db, s, filename="a.html", raw=_SPHERE.read_bytes(),
-                                     project="S26-DROP", dev_rev="dv1")
+                                     project="S26-DROP", dev_rev="dv1", focus="camera-detail")
         r2 = await svc.ingest_report(db, s, filename="b.html", raw=_SPHERE.read_bytes(),
                                      project="OTHER", dev_rev="pv1")
+        # 검색축 승격 — sphere 는 worst_stress·doe_strategy·max_severity 가 컬럼에 채워짐.
+        assert r1.worst_stress and r1.worst_stress > 1000
+        assert r1.doe_strategy == "cuboid_26" and r1.max_severity in ("CRITICAL", "WARNING", "INFO")
+
         # project 필터.
-        p = await svc.find_reports(db, u.id, project="S26-DROP", limit=100)
-        ids = {r.id for r in p}
-        assert r1.id in ids and r2.id not in ids
+        assert {r.id for r in await svc.find_reports(db, u.id, project="S26-DROP", limit=100)} == {r1.id}
         # dev_rev 필터.
-        d = await svc.find_reports(db, u.id, dev_rev="pv1", limit=100)
-        dids = {r.id for r in d}
-        assert r2.id in dids and r1.id not in dids
-        # kind 필터(둘 다 sphere) — 둘 다.
-        k = await svc.find_reports(db, u.id, kind="sphere", session_id=s.id, limit=100)
-        assert {r1.id, r2.id} <= {r.id for r in k}
-        # impact 로 필터 → 없음.
+        assert {r.id for r in await svc.find_reports(db, u.id, dev_rev="pv1", limit=100)} == {r2.id}
+        # focus 필터(같은 전각도라도 초점 다른 리포트 구분).
+        assert {r.id for r in await svc.find_reports(db, u.id, focus="camera-detail", limit=100)} == {r1.id}
+        # doe_strategy(방향 컨셉) — 둘 다 cuboid_26.
+        assert {r1.id, r2.id} <= {r.id for r in await svc.find_reports(db, u.id, doe_strategy="cuboid_26", session_id=s.id)}
+        # severity 필터(CRITICAL 있는 리포트만) — 둘 다 CRITICAL(cuboid_26 항복초과).
+        crit = await svc.find_reports(db, u.id, severity="CRITICAL", session_id=s.id)
+        assert {r1.id, r2.id} <= {r.id for r in crit}
+        # 최악응력 임계.
+        assert {r1.id, r2.id} <= {r.id for r in await svc.find_reports(db, u.id, min_worst_stress=500, session_id=s.id)}
+        assert await svc.find_reports(db, u.id, min_worst_stress=1e9, session_id=s.id) == []
+        # 텍스트 검색(q) — 과제명.
+        assert {r.id for r in await svc.find_reports(db, u.id, q_text="S26", session_id=s.id)} == {r1.id}
+        # has_part — 부품명 포함.
+        pname = (r1.parts or [{}])[0].get("name")
+        if pname:
+            assert r1.id in {r.id for r in await svc.find_reports(db, u.id, has_part=pname, session_id=s.id)}
+        # 정렬(worst_stress desc).
+        srt = await svc.find_reports(db, u.id, session_id=s.id, sort="worst_stress", order="desc")
+        ws = [r.worst_stress for r in srt if r.worst_stress is not None]
+        assert ws == sorted(ws, reverse=True)
+        # impact → 없음.
         assert await svc.find_reports(db, u.id, kind="impact", session_id=s.id) == []
+    finally:
+        await _cleanup(db, u, s)
+
+
+@pytest.mark.skipif(not _SPHERE.exists(), reason="sphere 샘플 없음")
+async def test_report_facets(db):
+    u, s = await _mk(db)
+    try:
+        await svc.ingest_report(db, s, filename="a.html", raw=_SPHERE.read_bytes(),
+                                project="S26-DROP", dev_rev="dv1", focus="camera-detail")
+        f = await svc.report_facets(db, u.id)
+        # facet 은 {value,count} 목록 — 목표 정하기 전 '뭐가 있나'.
+        kinds = {x["value"]: x["count"] for x in f["kind"]}
+        assert kinds.get("sphere", 0) >= 1
+        assert any(x["value"] == "S26-DROP" for x in f["project"])
+        assert any(x["value"] == "cuboid_26" for x in f["doe_strategy"])
+        assert any(x["value"] == "camera-detail" for x in f["focus"])
+        assert any(x["value"] in ("CRITICAL", "WARNING", "INFO") for x in f["max_severity"])
     finally:
         await _cleanup(db, u, s)

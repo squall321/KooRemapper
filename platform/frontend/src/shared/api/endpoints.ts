@@ -164,7 +164,7 @@ export async function deleteReport(reportId: string): Promise<void> {
 /** 과제명·rev·설계안·DOE·원본 K파일 링크 수동 설정(부분 갱신). */
 export async function patchReportMeta(
   reportId: string,
-  body: Partial<{ label: string; project: string; dev_rev: string; variation: string; doe: string; kfile_id: number }>,
+  body: Partial<{ label: string; project: string; dev_rev: string; variation: string; doe: string; focus: string; kfile_id: number }>,
 ): Promise<Report> {
   const { data } = await api.patch(`/reports/${reportId}`, body)
   return unwrap<Report>(data)

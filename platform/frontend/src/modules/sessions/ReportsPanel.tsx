@@ -114,10 +114,16 @@ function ReportDetail({ sessionId, reportId, files }: { sessionId: string; repor
         {(em.project || r.project_name) && <span>과제 <b className="text-fg">{em.project ?? r.project_name}</b></span>}
         {em.dev_revision?.code && <span>rev <b className="text-fg">{em.dev_revision.code}</b></span>}
         {em.design_variation && <span>설계안 <b className="text-fg">{em.design_variation}</b></span>}
+        {r.focus && <span>초점 <b className="text-fg">{r.focus}</b></span>}
         {kfileName && <span>K파일 <b className="text-fg">{kfileName}</b></span>}
-        {r.doe_strategy && <span>DOE <b className="text-fg">{r.doe_strategy}</b></span>}
+        {r.doe_strategy && <span>방향 <b className="text-fg">{r.doe_strategy}</b></span>}
+        {r.drop_height != null && <span>높이 <b className="text-fg">{r.drop_height}mm</b></span>}
         <span>케이스 <b className="text-fg">{r.n_cases}</b></span>
-        {r.generator && <span>{r.generator}</span>}
+        {r.max_severity && (
+          <Badge tone={r.max_severity === 'CRITICAL' ? 'failed' : r.max_severity === 'WARNING' ? 'canceled' : 'default'}>
+            {r.max_severity}
+          </Badge>
+        )}
       </div>
       {scenarioLabel(r.scenario) && (
         <div className="text-muted">시뮬 조건 — <span className="text-fg">{scenarioLabel(r.scenario)}</span></div>
@@ -226,7 +232,7 @@ function caseLabel(c: ReportCase): string {
 function metaKey(r: Report): string {
   const em = (r.eng_meta ?? {}) as { project?: string; dev_revision?: { code?: string }; design_variation?: string }
   return [em.project ?? '', em.dev_revision?.code ?? '', em.design_variation ?? '',
-          r.source_kfile_id ?? '', r.scenario_file_id ?? ''].join('|')
+          r.focus ?? '', r.source_kfile_id ?? '', r.scenario_file_id ?? ''].join('|')
 }
 
 /** 시뮬 조건 요약 한 줄 — scenario.json 요약(source_type·tolerance·예상 run). */
@@ -249,6 +255,7 @@ function MetaEditor({ report, files }: { report: Report; files: SessionFile[] })
   const [project, setProject] = useState(em.project ?? '')
   const [devRev, setDevRev] = useState(em.dev_revision?.code ?? '')
   const [variation, setVariation] = useState(em.design_variation ?? '')
+  const [focus, setFocus] = useState(report.focus ?? '')
   const [kfileId, setKfileId] = useState<string>(report.source_kfile_id != null ? String(report.source_kfile_id) : '')
   const [err, setErr] = useState<string | null>(null)
   const scenRef = useRef<HTMLInputElement>(null)
@@ -261,7 +268,7 @@ function MetaEditor({ report, files }: { report: Report; files: SessionFile[] })
   const save = useMutation({
     // ""=삭제 시맨틱 — 칸을 비우고 저장하면 그 필드가 지워진다(조용한 no-op 방지).
     mutationFn: () => patchReportMeta(report.id, {
-      project, dev_rev: devRev, variation,
+      project, dev_rev: devRev, variation, focus,
       ...(kfileId ? { kfile_id: Number(kfileId) } : {}),
     }),
     onSuccess: () => { setErr(null); setOpen(false); refresh() },
@@ -286,6 +293,7 @@ function MetaEditor({ report, files }: { report: Report; files: SessionFile[] })
         <Input value={project} onChange={(e) => setProject(e.target.value)} placeholder="과제명 (S26-X)" className="w-28 text-xs" />
         <Input value={devRev} onChange={(e) => setDevRev(e.target.value)} placeholder="rev (dv1)" className="w-20 text-xs" />
         <Input value={variation} onChange={(e) => setVariation(e.target.value)} placeholder="설계안" className="w-20 text-xs" />
+        <Input value={focus} onChange={(e) => setFocus(e.target.value)} placeholder="초점(camera-detail)" className="w-32 text-xs" />
         <select value={kfileId} onChange={(e) => setKfileId(e.target.value)}
                 className="h-8 rounded border border-border bg-surface px-2 text-xs">
           <option value="">원본 K파일 선택…</option>

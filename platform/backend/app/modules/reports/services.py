@@ -60,6 +60,34 @@ async def _store_report_html(session: Session, filename: str, raw: bytes) -> Ses
     )
 
 
+_SEVERITY_RANK = {"CRITICAL": 3, "WARNING": 2, "INFO": 1}
+
+
+def _search_axes(study: dict, cases: list[dict], scenario_summary: dict | None) -> dict:
+    """리포트 검색·정렬용 승격 컬럼 값 계산(worst/severity/height/scenario_type)."""
+    def _mx(key):
+        xs = [c.get("rollup", {}).get(key) for c in cases]
+        xs = [x for x in xs if isinstance(x, (int, float)) and not isinstance(x, bool)]
+        return max(xs) if xs else None
+    sev = None
+    for f in study.get("findings") or []:
+        s = (f.get("severity") or "").upper()
+        if _SEVERITY_RANK.get(s, 0) > _SEVERITY_RANK.get(sev or "", 0):
+            sev = s
+    sp = study.get("sim_params") or {}
+    stype = None
+    if scenario_summary:
+        scens = scenario_summary.get("scenarios") or []
+        stype = scens[0].get("source_type") if scens else None
+    return {
+        "worst_stress": _mx("max_stress"),
+        "worst_g": _mx("max_g"),
+        "max_severity": sev,
+        "drop_height": sp.get("drop_height"),
+        "scenario_type": stype,
+    }
+
+
 def build_eng_meta(
     project: str | None, dev_rev: str | None,
     variation: str | None = None, doe: str | None = None,
@@ -181,6 +209,7 @@ async def ingest_report(
     dev_rev: str | None = None,
     variation: str | None = None,
     doe: str | None = None,
+    focus: str | None = None,
 ) -> ImpactReport:
     """리포트 HTML 을 파싱·정규화해 ImpactReport + ImpactCase 로 저장한다.
 
@@ -197,7 +226,9 @@ async def ingest_report(
         )
 
     # ── 검증·파싱을 전부 먼저 — 실패 시(400) 디스크에 고아 파일이 안 남게 한다 ──
-    eng_meta = build_eng_meta(project, dev_rev, variation, doe)  # 형식 오류 → ValueError(400)
+    proj = (study.get("project") or {})
+    # eng_meta.project 미지정 시 임베드 project_name 으로 폴백 — 수동 안 채워도 과제로 찾아진다.
+    eng_meta = build_eng_meta(project or proj.get("name"), dev_rev, variation, doe)
     scenario_summary = None
     if scenario_raw is not None:  # 0바이트 동반도 조용히 무시하지 않고 명시 오류
         scenario_summary = _parse_scenario_summary(scenario_raw)
@@ -224,7 +255,7 @@ async def ingest_report(
         )
 
     src = study.get("source") or {}
-    proj = study.get("project") or {}
+    axes = _search_axes(study, cases, scenario_summary)
     rid = ulid.new().str
     report = ImpactReport(
         id=rid,
@@ -232,11 +263,17 @@ async def ingest_report(
         user_id=session.user_id,
         kind=study["kind"],
         label=label or proj.get("name") or study["kind"],
+        focus=focus or None,
         source_file_id=file_row.id,
         source_kfile_id=source_kfile_id,
         scenario_file_id=scenario_file_id,
         scenario=scenario_summary,
         eng_meta=eng_meta,
+        worst_stress=axes["worst_stress"],
+        worst_g=axes["worst_g"],
+        max_severity=axes["max_severity"],
+        drop_height=axes["drop_height"],
+        scenario_type=axes["scenario_type"],
         generator=src.get("generator"),
         generator_version=src.get("generator_version"),
         schema_str=src.get("schema"),
@@ -291,8 +328,9 @@ async def update_report_meta(
     variation: str | None = None,
     doe: str | None = None,
     kfile_id: int | None = None,
+    focus: str | None = None,
 ) -> ImpactReport:
-    """과제명·rev 등 수동 메타 설정(부분 갱신). 형식/소속 오류는 ValueError.
+    """과제명·rev·초점 등 수동 메타 설정(부분 갱신). 형식/소속 오류는 ValueError.
 
     시맨틱: None=건드리지 않음, **빈 문자열("")=그 필드 삭제**, 값=설정. (빈 값을
     조용히 무시하면 '칸 비우고 저장'이 no-op 이 되어 낡은 과제로 등재될 수 있다.)
@@ -300,6 +338,8 @@ async def update_report_meta(
     """
     if label is not None:
         report.label = label or None
+    if focus is not None:
+        report.focus = focus or None
     field_map = {  # 입력 인자 → eng_meta 키
         "project": ("project", project),
         "dev_rev": ("dev_revision", dev_rev),
@@ -339,6 +379,9 @@ async def attach_scenario(
     scen_row, summary = await _store_scenario(db, session, raw, filename or "scenario.json")
     report.scenario_file_id = scen_row.id
     report.scenario = summary
+    scens = summary.get("scenarios") or []
+    if scens and scens[0].get("source_type"):
+        report.scenario_type = scens[0]["source_type"]  # 검색축 갱신
     if report.source_kfile_id is None:
         report.source_kfile_id = await _match_kfile_by_templates(
             db, report.session_id, summary.get("templates") or []
@@ -594,38 +637,144 @@ async def query_facts(
     }
 
 
+_REPORT_SORTS = {
+    "created_at": ImpactReport.created_at,
+    "worst_stress": ImpactReport.worst_stress,
+    "worst_g": ImpactReport.worst_g,
+    "drop_height": ImpactReport.drop_height,
+}
+
+
+def _find_reports_query(
+    user_id: int,
+    *,
+    is_admin: bool,
+    session_id: str | None = None,
+    kind: str | None = None,
+    project: str | None = None,
+    dev_rev: str | None = None,
+    variation: str | None = None,
+    doe: str | None = None,
+    kfile_id: int | None = None,
+    focus: str | None = None,
+    doe_strategy: str | None = None,
+    scenario_type: str | None = None,
+    drop_height: float | None = None,
+    height_tol: float = 1.0,
+    severity: str | None = None,
+    min_worst_stress: float | None = None,
+    min_worst_g: float | None = None,
+    has_part: str | None = None,
+    q_text: str | None = None,
+    since=None,
+    until=None,
+):
+    """find_reports/facets 공용 WHERE 절 빌더 — 모든 필터를 서버(SQL)에서 건다."""
+    from sqlalchemy import func as _f, or_
+    stmt = select(ImpactReport)
+    if not is_admin:
+        stmt = stmt.where(ImpactReport.user_id == user_id)
+    if session_id:
+        stmt = stmt.where(ImpactReport.session_id == session_id)
+    if kind:
+        stmt = stmt.where(ImpactReport.kind == kind)
+    if kfile_id is not None:
+        stmt = stmt.where(ImpactReport.source_kfile_id == kfile_id)
+    if focus:
+        stmt = stmt.where(ImpactReport.focus == focus)
+    if doe_strategy:
+        stmt = stmt.where(ImpactReport.doe_strategy == doe_strategy)
+    if scenario_type:
+        stmt = stmt.where(ImpactReport.scenario_type == scenario_type)
+    if project:
+        # 과제 = 수동 eng_meta.project 또는 임베드 project_name (수동 미기입분도 잡힌다).
+        stmt = stmt.where(or_(
+            ImpactReport.eng_meta["project"].astext == project,
+            ImpactReport.project_name == project,
+        ))
+    if dev_rev:
+        stmt = stmt.where(ImpactReport.eng_meta[("dev_revision", "code")].astext == dev_rev)
+    if variation:
+        stmt = stmt.where(ImpactReport.eng_meta["design_variation"].astext == variation)
+    if doe:
+        stmt = stmt.where(ImpactReport.eng_meta[("doe", "study")].astext == doe)
+    if drop_height is not None:
+        stmt = stmt.where(ImpactReport.drop_height.between(drop_height - height_tol, drop_height + height_tol))
+    if severity:
+        want = {"CRITICAL": ["CRITICAL"], "WARNING": ["CRITICAL", "WARNING"]}.get(severity.upper(), [severity.upper()])
+        stmt = stmt.where(ImpactReport.max_severity.in_(want))
+    if min_worst_stress is not None:
+        stmt = stmt.where(ImpactReport.worst_stress >= min_worst_stress)
+    if min_worst_g is not None:
+        stmt = stmt.where(ImpactReport.worst_g >= min_worst_g)
+    if has_part:
+        # parts JSONB 배열에 그 부품명이 있는가 (부품 기준 리포트 검색). JSONB containment(@>)
+        # 로 매칭 — 백슬래시 등 이스케이프를 Postgres 가 정확히 처리한다.
+        stmt = stmt.where(ImpactReport.parts.contains([{"name": has_part}]))
+    if q_text:
+        like = f"%{q_text}%"
+        stmt = stmt.where(or_(
+            ImpactReport.label.ilike(like),
+            ImpactReport.project_name.ilike(like),
+            _f.coalesce(ImpactReport.eng_meta["project"].astext, "").ilike(like),
+        ))
+    if since is not None:
+        stmt = stmt.where(ImpactReport.created_at >= since)
+    if until is not None:
+        stmt = stmt.where(ImpactReport.created_at <= until)
+    return stmt
+
+
 async def find_reports(
     db: AsyncSession,
     user_id: int,
     *,
     is_admin: bool = False,
-    session_id: str | None = None,
-    kind: str | None = None,
-    project: str | None = None,
-    dev_rev: str | None = None,
-    kfile_id: int | None = None,
+    sort: str = "created_at",
+    order: str = "desc",
     limit: int = 100,
     offset: int = 0,
+    **filters,
 ) -> list[ImpactReport]:
-    """소유(또는 admin=전사) 리포트를 조건으로 서버에서 필터 — 결과가 많아져도 슬라이스만.
+    """소유(또는 admin=전사) 리포트를 다축 조건으로 서버에서 필터·정렬 — 슬라이스만.
 
-    project/dev_rev 는 eng_meta(JSONB) 로 매칭. kind/session/kfile 은 컬럼.
+    필터(kwargs): kind·project(eng_meta OR project_name)·dev_rev·variation·doe·
+    kfile_id·focus·doe_strategy·scenario_type·drop_height(±height_tol)·severity·
+    min_worst_stress·min_worst_g·has_part·q_text·since·until.
     """
-    q = select(ImpactReport)
-    if not is_admin:
-        q = q.where(ImpactReport.user_id == user_id)
-    if session_id:
-        q = q.where(ImpactReport.session_id == session_id)
-    if kind:
-        q = q.where(ImpactReport.kind == kind)
-    if kfile_id is not None:
-        q = q.where(ImpactReport.source_kfile_id == kfile_id)
-    if project:
-        q = q.where(ImpactReport.eng_meta["project"].astext == project)
-    if dev_rev:
-        q = q.where(ImpactReport.eng_meta[("dev_revision", "code")].astext == dev_rev)
-    q = q.order_by(ImpactReport.created_at.desc()).limit(limit).offset(offset)
-    return list((await db.execute(q)).scalars())
+    stmt = _find_reports_query(user_id, is_admin=is_admin, **filters)
+    col = _REPORT_SORTS.get(sort, ImpactReport.created_at)
+    direction = asc if order == "asc" else desc
+    stmt = stmt.order_by(col.is_(None), direction(col), ImpactReport.id.desc()).limit(limit).offset(offset)
+    return list((await db.execute(stmt)).scalars())
+
+
+async def report_facets(db: AsyncSession, user_id: int, *, is_admin: bool = False) -> dict:
+    """리포트 검색 facet — 어떤 kind·과제·rev·설계안·방향컨셉·초점·심각도가 있나 + 건수.
+
+    목표지향 접근의 '먼저 뭐가 있나' 화면. distinct 값과 개수를 서버 집계로 준다.
+    """
+    from sqlalchemy import func as _f
+    base = ImpactReport.user_id == user_id
+
+    async def _count_by(expr):
+        q = select(expr, _f.count()).group_by(expr)
+        if not is_admin:
+            q = q.where(base)
+        rows = (await db.execute(q)).all()
+        return [{"value": v, "count": n} for v, n in rows if v is not None]
+
+    return {
+        "kind": await _count_by(ImpactReport.kind),
+        "project": await _count_by(_f.coalesce(ImpactReport.eng_meta["project"].astext, ImpactReport.project_name)),
+        "dev_rev": await _count_by(ImpactReport.eng_meta[("dev_revision", "code")].astext),
+        "design_variation": await _count_by(ImpactReport.eng_meta["design_variation"].astext),
+        "doe_strategy": await _count_by(ImpactReport.doe_strategy),
+        "scenario_type": await _count_by(ImpactReport.scenario_type),
+        "focus": await _count_by(ImpactReport.focus),
+        "max_severity": await _count_by(ImpactReport.max_severity),
+        "drop_height": await _count_by(ImpactReport.drop_height),
+    }
 
 
 def _category_of(case: ImpactCase, kind: str) -> str:

@@ -158,9 +158,10 @@ async def test_ingest_with_scenario_meta_and_kfile_match(db):
         with pytest.raises(ValueError):
             await svc.update_report_meta(db, rep, kfile_id=999999999)  # 남의/없는 파일
 
-        # ⑥ 등재 폴백 — 메타 없으면 ValueError, 있으면 project/stage 없이도 통과 지점까지.
-        assert rep2.eng_meta is None
+        # ⑥ project 자동 폴백 — 수동 project 안 줘도 임베드 project_name 이 eng_meta 에 채워짐.
+        assert rep2.eng_meta and rep2.eng_meta["project"] == "Test_001_Full26_1Step"
+        # dev_rev 는 여전히 없으므로 등재는 stage 없음으로 400(project 는 폴백으로 있음).
         with pytest.raises(ValueError, match="project/stage"):
-            await svc.publish_to_datahub(db, rep2, hub_url="http://127.0.0.1:1")  # 메타無→즉시 400
+            await svc.publish_to_datahub(db, rep2, hub_url="http://127.0.0.1:1")
     finally:
         await _cleanup(db, u, s)

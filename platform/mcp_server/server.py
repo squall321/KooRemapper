@@ -401,13 +401,14 @@ async def update_report_meta(
     variation: str | None = None,
     doe: str | None = None,
     kfile_id: int | None = None,
+    focus: str | None = None,
 ) -> dict:
     """리포트의 과제명(project)·개발단계(dev_rev: pre|dv1..dvr|pv1..pvr|pra|mp)·설계안·
-    DOE·원본 K파일 링크를 수동 설정한다(부분 갱신). 설정해두면 DataHub 등재 때
-    project/stage 를 다시 입력할 필요가 없다(기본값으로 쓰임)."""
+    DOE·초점(focus 예 camera-detail)·원본 K파일 링크를 수동 설정한다(부분 갱신).
+    설정해두면 DataHub 등재 때 project/stage 재입력 불필요. ""(빈문자)=그 필드 삭제."""
     body = {k: v for k, v in {
         "label": label, "project": project, "dev_rev": dev_rev,
-        "variation": variation, "doe": doe, "kfile_id": kfile_id,
+        "variation": variation, "doe": doe, "kfile_id": kfile_id, "focus": focus,
     }.items() if v is not None}
     async with httpx.AsyncClient(base_url=API, timeout=60) as c:
         return _unwrap(await c.patch(
@@ -482,22 +483,58 @@ async def report_directional(report_id: str, ctx: Context, part_id: int | None =
 
 
 @mcp.tool()
+async def report_facets(ctx: Context) -> dict:
+    """리포트 검색 facet — 어떤 kind·과제·rev·설계안·방향컨셉(doe_strategy)·조건종류·초점·
+    심각도·높이가 있나 + 각 건수. 목표를 정하기 전 '먼저 뭐가 있나'를 보고 find_reports 로
+    좁힌다. 소유분(관리자는 전사)."""
+    return await _get(ctx, "/reports/facets")
+
+
+@mcp.tool()
 async def find_reports(
     ctx: Context,
     kind: str | None = None,
     project: str | None = None,
     dev_rev: str | None = None,
+    variation: str | None = None,
+    doe: str | None = None,
+    focus: str | None = None,
+    doe_strategy: str | None = None,
+    scenario_type: str | None = None,
+    drop_height: float | None = None,
+    severity: str | None = None,
+    min_worst_stress: float | None = None,
+    min_worst_g: float | None = None,
+    has_part: str | None = None,
+    q: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
     session_id: str | None = None,
     kfile_id: int | None = None,
+    sort: str = "created_at",
+    order: str = "desc",
     limit: int = 100,
 ) -> list:
-    """조건으로 리포트 검색(전 세션, 결과 폭증 대비 서버 필터) — 소유분(관리자는 전사).
-    kind(deep/sphere/impact)·project(과제)·dev_rev(개발단계)·session_id·kfile_id 로 좁힌다.
-    필터는 서버(SQL)가 처리하므로 리포트가 수천 개여도 슬라이스만 받는다."""
-    params = {k: v for k, v in {
-        "kind": kind, "project": project, "dev_rev": dev_rev,
-        "session_id": session_id, "kfile_id": kfile_id, "limit": limit,
-    }.items() if v is not None}
+    """조건으로 리포트 검색(전 세션, 결과 폭증 대비 다축 서버 필터) — 소유분(관리자는 전사).
+
+    같은 전각도라도 방향 컨셉·초점·조건·높이별로 각기 골라낸다. 필터는 서버(SQL)가 처리해
+    리포트가 수천 개여도 슬라이스만. 축:
+    - kind, project(과제·미기입분은 임베드 project_name 폴백), dev_rev, variation, doe
+    - focus(초점 예 camera-detail), doe_strategy(cuboid_26·fibonacci_162 등), scenario_type
+    - drop_height(특정 높이), severity(이 심각도 이상 소견 보유), min_worst_stress/min_worst_g
+    - has_part(그 부품명 포함), q(라벨/과제 텍스트), since/until(ISO), session_id, kfile_id
+    - sort(created_at|worst_stress|worst_g|drop_height)·order. 먼저 report_facets 로 값을 훑어라."""
+    params: dict = {"sort": sort, "order": order, "limit": limit}
+    for k, v in {
+        "kind": kind, "project": project, "dev_rev": dev_rev, "variation": variation, "doe": doe,
+        "focus": focus, "doe_strategy": doe_strategy, "scenario_type": scenario_type,
+        "drop_height": drop_height, "severity": severity,
+        "min_worst_stress": min_worst_stress, "min_worst_g": min_worst_g,
+        "has_part": has_part, "q": q, "since": since, "until": until,
+        "session_id": session_id, "kfile_id": kfile_id,
+    }.items():
+        if v is not None:
+            params[k] = v
     return await _get(ctx, "/reports", params=params)
 
 
