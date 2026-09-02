@@ -104,3 +104,10 @@
   인제스트 → report_scatter(26방향 산포/민감도). 실제 LS-DYNA run 만 남음(수 시간, 별도 승인).
 - report_scatter 프레임은 sphere 리포트(후처리) 각도 기준 검증됨(Test_001/006). runner_config raw
   각도는 리포트 이전 규약이라 다름 — report_scatter 는 리포트를 소비하므로 무관.
+
+## 공간 시각화(2dfcb23) — 부품 위치·낙하방향 맵
+- 요구: 리스크 부품이 어디인지 이미지로 보여주고, 전각도 낙하/충격위치를 찍고 값을 표시. 확정 범위=웹 리포트 상세 SVG + bbox 개략도.
+- 백엔드: parser.extract_geometry(impact 만 outline·bbox·파트 footprint 반환, sphere/deep 는 빈 지오메트리), services.geometry, GET /reports/{id}/geometry, MCP report_geometry. 순수 additive 57줄.
+- 프런트: ReportVisuals.tsx. sphere=등장방형 pitch×roll 방향맵(각 방향 값 히트·최악 링+라벨), impact=디바이스맵(외곽선+선택 파트 footprint 초록+충격위치 값 마커). 값은 report_query(part_id×metric fact) 서버필터로 채움. deep 은 단건이라 마커 없음(원본 렌더 안내).
+- 실측 검증: impact 샘플 ingest → geometry(bbox -50..50/-40..40, outline 4pt, 12파트 전부 footprint 4pt), query(peak_stress 50 fact, identity=face/pos_x/pos_y). 합성샘플은 pos 가 전부 0,0 이라 impact 점이 원점에 겹침(데이터 아티팩트, 코드 아님). 실제 리포트는 위치 분산됨.
+- 테스트 78 passed(+2 geometry). 프런트 tsc+vite 빌드 clean. dev 인스턴스 api/mcp 재기동으로 라우트·툴(47개) 반영. Drive 배포는 아직(다음 build-all-to-drive 필요).
