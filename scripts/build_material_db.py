@@ -21,6 +21,10 @@ import re
 from pathlib import Path
 from datetime import date
 
+import sys as _sys
+_sys.path.insert(0, str(Path(__file__).resolve().parent))
+from material_cards import CARD_FIELDS, CardEditError, set_card_field
+
 
 # ═══════════════════════════════════════════════════════════════
 # K-file parser: extract MAT blocks
@@ -170,6 +174,16 @@ def parse_mechanical(mat_type, data_line):
         if props['G0'] > 0 and props['BULK'] > 0:
             props['E'] = 9.0 * props['BULK'] * props['G0'] / (3.0 * props['BULK'] + props['G0'])
             props['PR'] = (3.0 * props['BULK'] - 2.0 * props['G0']) / (6.0 * props['BULK'] + 2.0 * props['G0'])
+
+    elif mat_type in CARD_FIELDS:
+        # **표만 있으면 읽을 수 있다.** 예전엔 분기가 없는 타입(MAT_PLASTIC_KINEMATIC 102종·
+        # SAMP-1 18종·HYPERELASTIC_RUBBER 14종·ORTHOTROPIC_ELASTIC 6종 = 525 중 140종,
+        # 27%)의 `mechanical` 이 통째로 비어 있었다 — 카드에는 값이 멀쩡히 있는데도.
+        # 칸 배치는 material_cards.CARD_FIELDS 한 곳이 정본이다(되쓰기와 같은 표).
+        for field, col in CARD_FIELDS[mat_type].items():
+            val = read_float_field(data_line, col, 10)
+            if val is not None:
+                props[field] = val
 
     # SI reference values
     if 'RHO' in props and props['RHO'] > 0:
@@ -345,6 +359,52 @@ def parse_name_mapping(path):
 # ═══════════════════════════════════════════════════════════════
 # Main: build material_db.json
 # ═══════════════════════════════════════════════════════════════
+
+def apply_overrides(mat_dir, materials):
+    """`materials/material_overrides.yaml` 을 얹는다. 없으면 아무것도 안 한다.
+
+    돌려주는 것은 `_meta.overrides` 에 남길 요약이다 — **무엇이 원본이 아닌지**가
+    DB 안에 남아야 한다. 못 얹은 것은 조용히 넘기지 않고 사유와 함께 센다.
+    """
+    path = Path(mat_dir) / 'material_overrides.yaml'
+    if not path.is_file():
+        return {'file': None, 'materials': 0, 'fields': 0}
+    import yaml
+    doc = yaml.safe_load(path.read_text(encoding='utf-8')) or {}
+    applied, skipped = 0, []
+    for mid, entry in (doc.get('overrides') or {}).items():
+        mat = materials.get(str(mid)) or materials.get(int(mid) if str(mid).isdigit() else mid)
+        if mat is None:
+            skipped.append({'mid': mid, 'why': 'MID 가 DB 에 없다'})
+            continue
+        for field, value in (entry.get('mechanical') or {}).items():
+            mat.setdefault('mechanical', {})[field] = value
+            # 카드 원문도 같은 값으로 — 안 고치면 항목이 스스로 모순된다
+            card_key = mat.get('mat_type')
+            card = (mat.get('cards_structural') or {}).get(card_key)
+            if card is None:
+                skipped.append({'mid': mid, 'field': field, 'why': '카드 원문이 없다'})
+                continue
+            try:
+                mat['cards_structural'][card_key] = set_card_field(
+                    card, card_key, field, float(value))
+            except CardEditError as exc:
+                skipped.append({'mid': mid, 'field': field, 'why': str(exc)})
+                continue
+            applied += 1
+        # 파생 SI 표기도 다시 계산한다(안 하면 rho_g_cm3 가 옛 값으로 남는다)
+        mech = mat.get('mechanical') or {}
+        if mech.get('RHO'):
+            mech['rho_g_cm3'] = round(mech['RHO'] * 1e9, 4)
+        if mech.get('E'):
+            mech['E_GPa'] = round(mech['E'] / 1000.0, 4)
+    print(f"  Overrides: {applied} fields from {path.name}"
+          + (f"  (skipped {len(skipped)})" if skipped else ""))
+    for sk in skipped[:5]:
+        print(f"    ! {sk}")
+    return {'file': path.name, 'materials': len(doc.get('overrides') or {}),
+            'fields': applied, 'skipped': skipped}
+
 
 def build_db(mat_dir):
     mat_dir = Path(mat_dir)
@@ -603,6 +663,14 @@ def build_db(mat_dir):
             category_index[category] = []
         category_index[category].append(mid)
 
+    # 4-b. 오버레이 병합 — 레이크 대조로 갱신된 값을 얹는다(scripts/material_sync.py).
+    #
+    # ⚠ 이 파일은 **생성물**이라 직접 고치면 다음 재생성에서 사라진다. 그래서 갱신은
+    # 오버레이로 두고 여기서 얹는다. 카드 텍스트도 함께 고친다 — 한 항목이
+    # `mechanical.RHO` 와 `cards_structural` 원문에 **같은 값을 두 번** 들고 있어서,
+    # 한쪽만 고치면 DB 가 스스로 모순된다.
+    overlay = apply_overrides(mat_dir, materials)
+
     # 4. Build final DB
     db = {
         '_meta': {
@@ -621,6 +689,7 @@ def build_db(mat_dir):
             'card_note': 'card_structural contains the EXACT original LS-DYNA keyword text',
             'created': str(date.today()),
             'generator': 'scripts/build_material_db.py',
+            'overrides': overlay,
         },
         'materials': materials,
         'category_index': category_index,
