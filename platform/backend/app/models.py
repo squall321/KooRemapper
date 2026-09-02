@@ -139,6 +139,20 @@ class ImpactReport(Base):
     source_file_id: Mapped[int | None] = mapped_column(
         ForeignKey("session_files.id", ondelete="SET NULL"), index=True
     )
+    # 이 결과를 만든 원본 K파일(SessionFile) — 한 K에 여러 리포트가 매달린다(1:N).
+    # scenario.json 의 template 파일명으로 자동 매칭되거나 수동 지정.
+    source_kfile_id: Mapped[int | None] = mapped_column(
+        ForeignKey("session_files.id", ondelete="SET NULL"), index=True
+    )
+    # 시뮬레이션 조건 — 원본 scenario.json 은 SessionFile(kind=scenario)로 보관하고,
+    # 여기엔 조건 요약(angle_source/tolerance/height 등)만 캐시한다.
+    scenario_file_id: Mapped[int | None] = mapped_column(
+        ForeignKey("session_files.id", ondelete="SET NULL")
+    )
+    scenario: Mapped[dict | None] = mapped_column(JSONB)
+    # 과제/개발단계 수동 메타 — {project, dev_revision:{phase,round?}, design_variation?, doe?}.
+    # DataHub 등재 폼의 기본값으로도 쓰인다.
+    eng_meta: Mapped[dict | None] = mapped_column(JSONB)
     generator: Mapped[str | None] = mapped_column(String(40))
     generator_version: Mapped[str | None] = mapped_column(String(40))
     schema_str: Mapped[str | None] = mapped_column(String(64))

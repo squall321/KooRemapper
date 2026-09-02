@@ -358,20 +358,32 @@ async def ingest_report(
     kind: str | None = None,
     label: str | None = None,
     base64_encoded: bool = False,
+    scenario_content: str | None = None,
+    kfile_id: int | None = None,
+    project: str | None = None,
+    dev_rev: str | None = None,
+    variation: str | None = None,
+    doe: str | None = None,
 ) -> dict:
     """낙하/충격 리포트 HTML 을 세션에 인제스트한다(deep/sphere/impact 자동판별).
 
     `html_content` 는 koo_deep_report / koo_sphere_report / koo_impact_report 가 생성한
     리포트 HTML 전체다(데이터가 임베드돼 있어 그대로 파싱된다). 큰 HTML 은 base64 로
-    주고 base64_encoded=true. kind 를 명시하면 자동판별을 덮어쓴다. 반환은 report_id 와
-    요약(kind·프로젝트·케이스수·전역 최악값)."""
+    주고 base64_encoded=true. kind 를 명시하면 자동판별을 덮어쓴다.
+
+    선택 동반물 — scenario_content: 시뮬 조건 scenario.json 텍스트(조건 요약 + template
+    으로 세션 내 K파일 자동매칭 → 한 K에 여러 결과를 매달 수 있다), kfile_id: 원본
+    K파일 수동 지정, project/dev_rev/variation/doe: 과제 메타(예: S26-X / dv1)."""
     raw = base64.b64decode(html_content) if base64_encoded else html_content.encode("utf-8")
     data = {}
-    if kind:
-        data["kind"] = kind
-    if label:
-        data["label"] = label
+    for k, v in (("kind", kind), ("label", label), ("kfile_id", kfile_id),
+                 ("project", project), ("dev_rev", dev_rev),
+                 ("variation", variation), ("doe", doe)):
+        if v is not None:
+            data[k] = str(v)
     files = {"file": (filename, raw, "text/html")}
+    if scenario_content:
+        files["scenario"] = ("scenario.json", scenario_content.encode("utf-8"), "application/json")
     async with httpx.AsyncClient(base_url=API, timeout=180) as c:
         return _unwrap(await c.post(
             f"/sessions/{session_id}/reports",
@@ -380,9 +392,46 @@ async def ingest_report(
 
 
 @mcp.tool()
-async def list_reports(session_id: str, ctx: Context) -> list:
-    """세션에 인제스트된 리포트 목록(id·kind·프로젝트·케이스수·시각)."""
-    return await _get(ctx, f"/sessions/{session_id}/reports")
+async def update_report_meta(
+    report_id: str,
+    ctx: Context,
+    label: str | None = None,
+    project: str | None = None,
+    dev_rev: str | None = None,
+    variation: str | None = None,
+    doe: str | None = None,
+    kfile_id: int | None = None,
+) -> dict:
+    """리포트의 과제명(project)·개발단계(dev_rev: pre|dv1..dvr|pv1..pvr|pra|mp)·설계안·
+    DOE·원본 K파일 링크를 수동 설정한다(부분 갱신). 설정해두면 DataHub 등재 때
+    project/stage 를 다시 입력할 필요가 없다(기본값으로 쓰임)."""
+    body = {k: v for k, v in {
+        "label": label, "project": project, "dev_rev": dev_rev,
+        "variation": variation, "doe": doe, "kfile_id": kfile_id,
+    }.items() if v is not None}
+    async with httpx.AsyncClient(base_url=API, timeout=60) as c:
+        return _unwrap(await c.patch(
+            f"/reports/{report_id}", json=body, headers=_forward_headers(ctx)))
+
+
+@mcp.tool()
+async def attach_report_scenario(report_id: str, scenario_content: str, ctx: Context) -> dict:
+    """이미 인제스트된 리포트에 시뮬 조건(scenario.json 텍스트)을 첨부한다.
+
+    조건 요약(angle_source·tolerance·예상 run 수)이 리포트에 캐시되고, template(.k
+    파일명)로 세션 내 원본 K파일이 자동 매칭된다(미연결일 때)."""
+    files = {"file": ("scenario.json", scenario_content.encode("utf-8"), "application/json")}
+    async with httpx.AsyncClient(base_url=API, timeout=60) as c:
+        return _unwrap(await c.post(
+            f"/reports/{report_id}/scenario", files=files, headers=_forward_headers(ctx)))
+
+
+@mcp.tool()
+async def list_reports(session_id: str, ctx: Context, kfile_id: int | None = None) -> list:
+    """세션에 인제스트된 리포트 목록(id·kind·프로젝트·과제메타·케이스수·시각).
+    kfile_id 를 주면 그 K파일에 매달린 리포트만 — 단일 K ↔ 다수 해석결과 조회."""
+    params = {"kfile_id": kfile_id} if kfile_id is not None else None
+    return await _get(ctx, f"/sessions/{session_id}/reports", params=params)
 
 
 @mcp.tool()

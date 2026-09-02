@@ -16,8 +16,11 @@ import ulid
 from sqlalchemy import asc, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import json
+
 from app.models import ImpactCase, ImpactReport, Session, SessionFile
 from app.reports import parser
+from app.reports.scenario import ScenarioParseError, summarize_scenario
 from app.shared import storage
 
 # 케이스 랭킹에 허용되는 정렬 키(승격 컬럼) — 그 외 값은 거부해 임의 컬럼 정렬을 막는다.
@@ -57,6 +60,112 @@ async def _store_report_html(session: Session, filename: str, raw: bytes) -> Ses
     )
 
 
+def build_eng_meta(
+    project: str | None, dev_rev: str | None,
+    variation: str | None = None, doe: str | None = None,
+) -> dict | None:
+    """과제/개발단계 수동 메타 → eng_meta dict. 전부 비면 None. dev_rev 형식 검증.
+
+    DataHub eng_meta 와 같은 모양({project, dev_revision, design_variation, doe})이라
+    등재 폼 기본값으로 그대로 쓰인다. 형식 오류는 ValueError.
+    """
+    if not any(x for x in (project, dev_rev, variation, doe)):
+        return None
+    meta: dict = {}
+    if project:
+        meta["project"] = project
+    if dev_rev:
+        from app.reports.datahub import DataHubError, parse_stage
+        try:
+            meta["dev_revision"] = parse_stage(dev_rev)
+        except DataHubError as exc:
+            raise ValueError(str(exc))
+        meta["dev_revision"]["code"] = dev_rev
+    if variation:
+        meta["design_variation"] = variation
+    if doe:
+        st, _, case = doe.partition(":")
+        meta["doe"] = {"study": st, **({"case": case} if case else {})}
+    return meta
+
+
+async def _resolve_session_kfile(
+    db: AsyncSession, session_id: str, kfile_id: int
+) -> SessionFile:
+    """kfile_id 가 이 세션의 파일인지 검증. 아니면 ValueError."""
+    f = await db.get(SessionFile, kfile_id)
+    if f is None or f.session_id != session_id:
+        raise ValueError(f"kfile_id {kfile_id} 는 이 세션의 파일이 아닙니다.")
+    return f
+
+
+async def _match_kfile_by_templates(
+    db: AsyncSession, session_id: str, templates: list[str]
+) -> int | None:
+    """scenario.json 의 template(.k 파일명)으로 세션 내 K파일을 자동 매칭.
+
+    같은 이름을 재업로드하면 세션이 foo_1.k 로 dedup 하므로, 정확 일치뿐 아니라
+    ``stem_N.ext`` 변형까지 후보로 보고 **가장 최근 것(id 최대)** 을 고른다 —
+    안 그러면 항상 낡은 첫 업로드에 매칭된다.
+    """
+    if not templates:
+        return None
+    import re as _re
+    rows = list((await db.execute(
+        select(SessionFile).where(SessionFile.session_id == session_id)
+    )).scalars())
+    for tpl in templates:
+        p = Path(tpl)
+        pat = _re.compile(rf"^{_re.escape(p.stem)}(_\d+)?{_re.escape(p.suffix)}$")
+        cands = [f for f in rows if pat.match(f.filename)]
+        if cands:
+            return max(cands, key=lambda f: f.id).id
+    return None
+
+
+def _parse_scenario_summary(raw: bytes) -> dict:
+    """scenario.json 바이트 → 조건 요약. 디스크 쓰기 전에 호출해 검증 실패 시 고아 파일이
+    안 생기게 한다. 오류는 ValueError."""
+    try:
+        data = json.loads(raw.decode("utf-8", errors="replace"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"scenario.json 파싱 실패: {exc}")
+    try:
+        return summarize_scenario(data)
+    except ScenarioParseError as exc:
+        raise ValueError(str(exc))
+
+
+async def _store_scenario(
+    db: AsyncSession, session: Session, raw: bytes, filename: str,
+    summary: dict | None = None,
+) -> tuple[SessionFile, dict]:
+    """scenario.json 저장(SessionFile kind=scenario) + 조건 요약. 오류는 ValueError."""
+    if summary is None:
+        summary = _parse_scenario_summary(raw)
+    safe = storage.safe_filename(filename or "scenario.json")
+    sess_dir = storage.ensure_session_dir(session.user_id, session.id)
+    dest = sess_dir / safe
+    if dest.exists():
+        stem, suffix = Path(safe).stem, Path(safe).suffix
+        n = 1
+        while (sess_dir / f"{stem}_{n}{suffix}").exists():
+            n += 1
+        safe = f"{stem}_{n}{suffix}"
+        dest = sess_dir / safe
+    await asyncio.to_thread(dest.write_bytes, raw)
+    row = SessionFile(
+        session_id=session.id, filename=safe,
+        rel_path=f"{session.storage_path}/{safe}", kind="scenario",
+        size_bytes=dest.stat().st_size,
+        sha256=await asyncio.to_thread(storage.sha256_of, dest),
+        meta={"scenario": True},
+    )
+    db.add(row)
+    await db.flush()
+    return row, summary
+
+
 async def ingest_report(
     db: AsyncSession,
     session: Session,
@@ -65,6 +174,13 @@ async def ingest_report(
     raw: bytes,
     kind_hint: str | None = None,
     label: str | None = None,
+    scenario_raw: bytes | None = None,
+    scenario_filename: str | None = None,
+    kfile_id: int | None = None,
+    project: str | None = None,
+    dev_rev: str | None = None,
+    variation: str | None = None,
+    doe: str | None = None,
 ) -> ImpactReport:
     """리포트 HTML 을 파싱·정규화해 ImpactReport + ImpactCase 로 저장한다.
 
@@ -80,9 +196,32 @@ async def ingest_report(
             "리포트에서 케이스를 추출하지 못했습니다(데이터가 비었거나 chunked 임베드일 수 있음)."
         )
 
+    # ── 검증·파싱을 전부 먼저 — 실패 시(400) 디스크에 고아 파일이 안 남게 한다 ──
+    eng_meta = build_eng_meta(project, dev_rev, variation, doe)  # 형식 오류 → ValueError(400)
+    scenario_summary = None
+    if scenario_raw is not None:  # 0바이트 동반도 조용히 무시하지 않고 명시 오류
+        scenario_summary = _parse_scenario_summary(scenario_raw)
+    source_kfile_id = None
+    if kfile_id is not None:
+        source_kfile_id = (await _resolve_session_kfile(db, session.id, kfile_id)).id
+
+    # ── 여기부터 디스크/DB 쓰기 ──
     file_row = await _store_report_html(session, filename, raw)
     db.add(file_row)
     await db.flush()  # source_file_id 확보
+
+    scenario_file_id = None
+    if scenario_raw is not None:
+        scen_row, _ = await _store_scenario(
+            db, session, scenario_raw, scenario_filename or "scenario.json",
+            summary=scenario_summary,
+        )
+        scenario_file_id = scen_row.id
+
+    if source_kfile_id is None and scenario_summary:
+        source_kfile_id = await _match_kfile_by_templates(
+            db, session.id, scenario_summary.get("templates") or []
+        )
 
     src = study.get("source") or {}
     proj = study.get("project") or {}
@@ -94,6 +233,10 @@ async def ingest_report(
         kind=study["kind"],
         label=label or proj.get("name") or study["kind"],
         source_file_id=file_row.id,
+        source_kfile_id=source_kfile_id,
+        scenario_file_id=scenario_file_id,
+        scenario=scenario_summary,
+        eng_meta=eng_meta,
         generator=src.get("generator"),
         generator_version=src.get("generator_version"),
         schema_str=src.get("schema"),
@@ -128,12 +271,81 @@ async def ingest_report(
     return report
 
 
-async def list_reports(db: AsyncSession, session_id: str) -> list[ImpactReport]:
-    return list((await db.execute(
-        select(ImpactReport)
-        .where(ImpactReport.session_id == session_id)
-        .order_by(ImpactReport.created_at.desc())
-    )).scalars())
+async def list_reports(
+    db: AsyncSession, session_id: str, *, kfile_id: int | None = None
+) -> list[ImpactReport]:
+    """세션 리포트 목록. kfile_id 를 주면 그 K파일에 매달린 리포트만(1 K : N 결과 조회)."""
+    q = select(ImpactReport).where(ImpactReport.session_id == session_id)
+    if kfile_id is not None:
+        q = q.where(ImpactReport.source_kfile_id == kfile_id)
+    return list((await db.execute(q.order_by(ImpactReport.created_at.desc()))).scalars())
+
+
+async def update_report_meta(
+    db: AsyncSession,
+    report: ImpactReport,
+    *,
+    label: str | None = None,
+    project: str | None = None,
+    dev_rev: str | None = None,
+    variation: str | None = None,
+    doe: str | None = None,
+    kfile_id: int | None = None,
+) -> ImpactReport:
+    """과제명·rev 등 수동 메타 설정(부분 갱신). 형식/소속 오류는 ValueError.
+
+    시맨틱: None=건드리지 않음, **빈 문자열("")=그 필드 삭제**, 값=설정. (빈 값을
+    조용히 무시하면 '칸 비우고 저장'이 no-op 이 되어 낡은 과제로 등재될 수 있다.)
+    kfile_id 는 세션 소속 검증.
+    """
+    if label is not None:
+        report.label = label or None
+    field_map = {  # 입력 인자 → eng_meta 키
+        "project": ("project", project),
+        "dev_rev": ("dev_revision", dev_rev),
+        "variation": ("design_variation", variation),
+        "doe": ("doe", doe),
+    }
+    if any(v is not None for _, (_, v) in field_map.items()):
+        cur = dict(report.eng_meta or {})
+        # ""=삭제 를 먼저 반영하고, 값이 있는 것만 build_eng_meta 로 검증·설정.
+        for _, (meta_key, v) in field_map.items():
+            if v == "":
+                cur.pop(meta_key, None)
+        new = build_eng_meta(project or None, dev_rev or None, variation or None, doe or None) or {}
+        cur.update(new)
+        report.eng_meta = cur or None
+    if kfile_id is not None:
+        report.source_kfile_id = (await _resolve_session_kfile(db, report.session_id, kfile_id)).id
+    await db.commit()
+    await db.refresh(report)
+    return report
+
+
+async def attach_scenario(
+    db: AsyncSession,
+    report: ImpactReport,
+    *,
+    raw: bytes,
+    filename: str | None = None,
+) -> ImpactReport:
+    """이미 인제스트된 리포트에 scenario.json(시뮬 조건)을 첨부한다.
+
+    저장+요약을 리포트에 캐시하고, K파일 미연결이면 template 로 자동 매칭 시도.
+    """
+    session = await db.get(Session, report.session_id)
+    if session is None:
+        raise ValueError("세션이 없습니다.")
+    scen_row, summary = await _store_scenario(db, session, raw, filename or "scenario.json")
+    report.scenario_file_id = scen_row.id
+    report.scenario = summary
+    if report.source_kfile_id is None:
+        report.source_kfile_id = await _match_kfile_by_templates(
+            db, report.session_id, summary.get("templates") or []
+        )
+    await db.commit()
+    await db.refresh(report)
+    return report
 
 
 async def get_owned_report(
@@ -218,8 +430,8 @@ async def publish_to_datahub(
     report: ImpactReport,
     *,
     hub_url: str,
-    project: str,
-    stage: str,
+    project: str | None = None,
+    stage: str | None = None,
     variation: str | None = None,
     doe: str | None = None,
     unit: str = "mm-t-s",
@@ -227,10 +439,23 @@ async def publish_to_datahub(
 ) -> dict:
     """리포트를 AI Data Hub 의 범용 sim_report 레코드로 등재한다.
 
-    원본 HTML(source_file_id)을 첨부로 싣는다. 파싱 실패/형식 오류는 datahub 모듈이
-    DataHubError 를 던지고, 상위(라우트)가 400 으로 변환한다.
+    project/stage 를 안 주면 리포트에 수동 설정된 eng_meta 를 기본값으로 쓴다
+    (한 번 설정해두면 등재 때 재입력 불필요). 둘 다 없으면 ValueError(400).
+    원본 HTML(source_file_id)을 첨부로 싣는다.
     """
     from app.reports import datahub
+
+    em = report.eng_meta or {}
+    project = project or em.get("project")
+    stage = stage or (em.get("dev_revision") or {}).get("code")
+    variation = variation or em.get("design_variation")
+    if doe is None and isinstance(em.get("doe"), dict):
+        d = em["doe"]
+        doe = d.get("study") and (d["study"] + (f":{d['case']}" if d.get("case") else ""))
+    if not project or not stage:
+        raise ValueError(
+            "project/stage 가 없습니다 — 요청에 넣거나 리포트 메타(PATCH /reports/{id})에 먼저 설정하세요."
+        )
 
     cases = list((await db.execute(
         select(ImpactCase).where(ImpactCase.report_id == report.id)
@@ -337,9 +562,12 @@ async def scatter(db: AsyncSession, report: ImpactReport, *, metric: str = "peak
 
 
 async def delete_report(db: AsyncSession, report: ImpactReport) -> None:
-    # 원본 HTML SessionFile 도 함께 정리(있으면).
-    if report.source_file_id is not None:
-        f = await db.get(SessionFile, report.source_file_id)
+    # 원본 HTML + scenario.json SessionFile 도 함께 정리(있으면). K파일은 모델
+    # 자산이라 남긴다(다른 리포트가 참조 가능).
+    for fid in (report.source_file_id, report.scenario_file_id):
+        if fid is None:
+            continue
+        f = await db.get(SessionFile, fid)
         if f is not None:
             try:
                 storage.abs_path(f.rel_path).unlink(missing_ok=True)

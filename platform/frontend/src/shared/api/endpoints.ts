@@ -161,6 +161,21 @@ export async function publishReportToDatahub(
 export async function deleteReport(reportId: string): Promise<void> {
   await api.delete(`/reports/${reportId}`)
 }
+/** 과제명·rev·설계안·DOE·원본 K파일 링크 수동 설정(부분 갱신). */
+export async function patchReportMeta(
+  reportId: string,
+  body: Partial<{ label: string; project: string; dev_rev: string; variation: string; doe: string; kfile_id: number }>,
+): Promise<Report> {
+  const { data } = await api.patch(`/reports/${reportId}`, body)
+  return unwrap<Report>(data)
+}
+/** 시뮬 조건(scenario.json) 첨부 — 조건 요약 캐시 + K파일 자동매칭. */
+export async function attachReportScenario(reportId: string, file: File): Promise<Report> {
+  const fd = new FormData()
+  fd.append('file', file)
+  const { data } = await api.post(`/reports/${reportId}/scenario`, fd)
+  return unwrap<Report>(data)
+}
 // 결과 분석 — 지금까지 MCP 도구로만 열려 있던 것들을 웹에서도 그대로 본다.
 export async function reportPartRisk(reportId: string, partId?: number): Promise<ReportPartRisk> {
   const { data } = await api.get(`/reports/${reportId}/parts`, { params: partId != null ? { part_id: partId } : {} })

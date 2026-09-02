@@ -12,6 +12,10 @@ class ReportRead(BaseModel):
     kind: str
     label: str | None
     source_file_id: int | None
+    source_kfile_id: int | None = None   # 원본 K파일(1 K : N 리포트)
+    scenario_file_id: int | None = None  # 원본 scenario.json
+    scenario: dict | None = None         # 시뮬 조건 요약
+    eng_meta: dict | None = None         # 과제/rev 수동 메타
     generator: str | None
     generator_version: str | None
     project_name: str | None
@@ -32,6 +36,8 @@ class ReportListItem(BaseModel):
     kind: str
     label: str | None
     project_name: str | None
+    source_kfile_id: int | None = None
+    eng_meta: dict | None = None
     n_cases: int
     created_at: datetime
 

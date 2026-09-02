@@ -112,7 +112,7 @@ export function SessionDetailPage() {
       {/* 리포트는 2열 그리드 밖에 둔다 — 방향 산포·시계열은 폭이 곧 가독성이라,
           431px 컬럼에 넣으면 케이스 키와 방향 라벨이 전부 잘린다(실측). */}
       <div className="mt-4">
-        <ReportsPanel sessionId={id} />
+        <ReportsPanel sessionId={id} files={files} />
       </div>
     </div>
   )

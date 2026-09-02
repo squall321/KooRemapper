@@ -41,8 +41,14 @@ async def _require_report(db, user, report_id):
 async def ingest_report(
     session_id: str,
     file: UploadFile = File(...),
+    scenario: UploadFile | None = File(default=None),
     kind: str | None = Form(default=None),
     label: str | None = Form(default=None),
+    kfile_id: int | None = Form(default=None),
+    project: str | None = Form(default=None),
+    dev_rev: str | None = Form(default=None),
+    variation: str | None = Form(default=None),
+    doe: str | None = Form(default=None),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -50,6 +56,9 @@ async def ingest_report(
 
     kind(deep|sphere|impact) 를 주면 자동판별을 덮어쓴다. 데이터는 HTML 에 임베드된
     ``const … = {…}`` 를 파싱해 공통 스키마로 정규화된다.
+
+    선택 동반물: scenario(시뮬 조건 scenario.json — 조건 요약 + template 로 K파일
+    자동매칭), kfile_id(원본 K파일 수동 지정), project/dev_rev/variation/doe(과제 메타).
     """
     s = await _require_session(db, user, session_id)
     if kind is not None and kind not in _KINDS:
@@ -66,9 +75,18 @@ async def ingest_report(
             status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             f"파일이 너무 큽니다 (최대 {settings.max_upload_mb}MB)",
         )
+    scenario_raw = await scenario.read() if scenario is not None else None
+    if scenario_raw is not None and len(scenario_raw) > cap:  # 동반 scenario 도 캡 적용
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            f"scenario 파일이 너무 큽니다 (최대 {settings.max_upload_mb}MB)",
+        )
     try:
         report = await svc.ingest_report(
-            db, s, filename=file.filename or "report.html", raw=raw, kind_hint=kind, label=label
+            db, s, filename=file.filename or "report.html", raw=raw, kind_hint=kind, label=label,
+            scenario_raw=scenario_raw,
+            scenario_filename=(scenario.filename if scenario is not None else None),
+            kfile_id=kfile_id, project=project, dev_rev=dev_rev, variation=variation, doe=doe,
         )
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
@@ -82,12 +100,67 @@ async def ingest_report(
 @router.get("/sessions/{session_id}/reports")
 async def list_reports(
     session_id: str,
+    kfile_id: int | None = Query(default=None, description="이 K파일에 매달린 리포트만(1 K:N 결과)"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     await _require_session(db, user, session_id)
-    rows = await svc.list_reports(db, session_id)
+    rows = await svc.list_reports(db, session_id, kfile_id=kfile_id)
     return ok([ReportListItem.model_validate(r).model_dump() for r in rows])
+
+
+class ReportMetaPatch(BaseModel):
+    # 시맨틱: None=유지, ""=삭제, 값=설정. 길이는 DataHub 등재 검증과 정합하게 제한.
+    label: str | None = Field(default=None, max_length=255)
+    project: str | None = Field(default=None, max_length=64)   # 과제명
+    dev_rev: str | None = Field(default=None, max_length=8)    # 개발단계 (pre|dv1..dvr|pv..|pra|mp)
+    variation: str | None = Field(default=None, max_length=64)  # 설계안
+    doe: str | None = Field(default=None, max_length=128)       # DOE 참조 study[:case]
+    kfile_id: int | None = None     # 원본 K파일(세션 내 file id)
+
+
+@router.patch("/reports/{report_id}")
+async def patch_report_meta(
+    report_id: str,
+    body: ReportMetaPatch,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """과제명·rev·설계안·DOE·원본 K파일 링크를 수동 설정(부분 갱신)."""
+    r = await _require_report(db, user, report_id)
+    try:
+        r = await svc.update_report_meta(
+            db, r, label=body.label, project=body.project, dev_rev=body.dev_rev,
+            variation=body.variation, doe=body.doe, kfile_id=body.kfile_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
+    return ok(ReportRead.model_validate(r).model_dump(), message="메타 갱신됨")
+
+
+@router.post(
+    "/reports/{report_id}/scenario",
+    dependencies=[Depends(rate_limit("upload", settings.ratelimit_upload_per_min))],
+)
+async def attach_report_scenario(
+    report_id: str,
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """리포트에 시뮬 조건(scenario.json)을 첨부 — 조건 요약 캐시 + K파일 자동매칭."""
+    r = await _require_report(db, user, report_id)
+    raw = await file.read()
+    if len(raw) > settings.max_upload_mb * 1024 * 1024:
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            f"파일이 너무 큽니다 (최대 {settings.max_upload_mb}MB)",
+        )
+    try:
+        r = await svc.attach_scenario(db, r, raw=raw, filename=file.filename)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
+    return ok(ReportRead.model_validate(r).model_dump(), message="시뮬 조건(scenario) 첨부됨")
 
 
 @router.get("/reports/{report_id}")
@@ -220,10 +293,11 @@ async def report_findings(
 
 
 class PublishDataHubBody(BaseModel):
-    project: str = Field(min_length=1, max_length=64)  # 과제코드
-    stage: str = Field(min_length=1, max_length=8)     # 개발단계 pre|dv1..dvr|pv1..pvr|pra|mp
-    variation: str | None = None                        # 설계안
-    doe: str | None = None                              # DOE 참조 study[:case]
+    # 비우면 리포트에 수동 설정된 eng_meta(PATCH /reports/{id})를 기본값으로 쓴다.
+    project: str | None = Field(default=None, max_length=64)  # 과제코드
+    stage: str | None = Field(default=None, max_length=8)     # 개발단계 pre|dv1..dvr|pv..|pra|mp
+    variation: str | None = None                               # 설계안
+    doe: str | None = None                                     # DOE 참조 study[:case]
     unit: str = "mm-t-s"
     title: str | None = None
 
@@ -242,10 +316,12 @@ async def publish_report_to_datahub(
     if not settings.datahub_url:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "datahub_url 이 설정되지 않았습니다.")
     # stage 형식 오류는 클라이언트 잘못 → 400 으로 먼저 걸러낸다.
-    try:
-        parse_stage(body.stage)
-    except DataHubError as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
+    # (미지정이면 서비스가 리포트 eng_meta 로 폴백하므로 여기선 준 값만 검증)
+    if body.stage:
+        try:
+            parse_stage(body.stage)
+        except DataHubError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
     try:
         res = await svc.publish_to_datahub(
             db, r, hub_url=settings.datahub_url,

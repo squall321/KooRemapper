@@ -210,6 +210,10 @@ export interface ReportListItem {
 export interface Report extends ReportListItem {
   session_id: string
   source_file_id: number | null
+  source_kfile_id?: number | null   // 원본 K파일 (1 K : N 리포트)
+  scenario_file_id?: number | null
+  scenario?: Record<string, unknown> | null  // 시뮬 조건 요약
+  eng_meta?: Record<string, unknown> | null  // 과제/rev 수동 메타
   generator: string | null
   doe_strategy: string | null
   test_dir: string | null
