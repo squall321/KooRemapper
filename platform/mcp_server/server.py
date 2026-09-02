@@ -104,7 +104,8 @@ async def system_status(ctx: Context) -> dict:
 
 @mcp.tool()
 async def list_sessions(ctx: Context) -> list:
-    """내 세션(프로젝트) 목록. 각 세션은 업로드/생성된 K파일 묶음이다."""
+    """내 세션(프로젝트) 목록 — **user_id 스코프**(이 호출자 계정의 것만). 각 세션은
+    업로드/생성된 K파일 묶음이다. 빈 배열 ≠ 전사에 없음 — 전사 집계는 corpus_summary."""
     return await _get(ctx, "/sessions")
 
 
@@ -430,7 +431,11 @@ async def attach_report_scenario(report_id: str, scenario_content: str, ctx: Con
 @mcp.tool()
 async def list_reports(session_id: str, ctx: Context, kfile_id: int | None = None) -> list:
     """세션에 인제스트된 리포트 목록(id·kind·프로젝트·과제메타·케이스수·시각).
-    kfile_id 를 주면 그 K파일에 매달린 리포트만 — 단일 K ↔ 다수 해석결과 조회."""
+    kfile_id 를 주면 그 K파일에 매달린 리포트만 — 단일 K ↔ 다수 해석결과 조회.
+
+    ⚠ **user_id 스코프다** — 빈 배열은 '전사에 리포트가 없다'가 아니라 '이 호출자
+    계정에 없다'는 뜻이다. 전사 규모의 유사 해석 유무는 corpus_summary·report_corpus
+    (개인 식별 없는 집계)로 물어라. 심의 좌석이 빈 배열을 부재 증거로 오독한 실사례 있음."""
     params = {"kfile_id": kfile_id} if kfile_id is not None else None
     return await _get(ctx, f"/sessions/{session_id}/reports", params=params)
 
