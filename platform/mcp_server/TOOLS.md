@@ -46,9 +46,14 @@ MCP 서버는 streamable-http로 뜨고, 들어온 `Authorization: Bearer kr_...
 SmartTwin 파이프라인이 만든 deep(단건 심층)·sphere(전각도 낙하)·impact(전위치 부분충격) 리포트 HTML 인제스트·분석.
 | 도구 | 인자 | REST | 설명 |
 |---|---|---|---|
-| `ingest_report` | session_id, filename, html_content, kind?, label?, base64_encoded? | POST /sessions/{id}/reports | 리포트 HTML 인제스트(kind 자동판별) → report_id |
-| `list_reports` | session_id | GET /sessions/{id}/reports | 세션의 리포트 목록 |
-| `report_summary` | report_id | GET /reports/{id} | kind·프로젝트·sim_params·parts·findings·전역 최악 롤업 |
+| `ingest_report` | session_id, filename, html_content, kind?, label?, scenario_content?, kfile_id?, project?, dev_rev?, variation?, doe?, focus?, base64_encoded? | POST /sessions/{id}/reports | 리포트 HTML 인제스트(kind 자동판별) + scenario.json 조건/K파일 자동매칭/과제메타 → report_id |
+| `list_reports` | session_id, kfile_id? | GET /sessions/{id}/reports | 세션의 리포트 목록(kfile_id=그 K에 매달린 것만) |
+| `report_facets` | — | GET /reports/facets | 검색 facet — 어떤 kind·과제·rev·방향컨셉·초점·심각도·높이가 있나 + 건수(먼저 '뭐가 있나') |
+| `find_reports` | kind?·project?·dev_rev?·variation?·doe?·focus?·doe_strategy?·scenario_type?·drop_height?·severity?·min_worst_stress?·min_worst_g?·has_part?·q?·since/until?·session_id?·kfile_id?·sort·order·limit | GET /reports | 조건으로 리포트 검색(전 세션, 서버 다축 필터). 목표→리포트 특정 |
+| `report_query` | report_id, part_id?·category?·angle_name?·near_roll/pitch/yaw+angle_tol_deg?·metric?·min/max_value?·sort·limit | GET /reports/{id}/query | 리포트 내부 fact 드릴다운(부품×각도×물리량×값, 서버 필터) |
+| `update_report_meta` | report_id, label?·project?·dev_rev?·variation?·doe?·focus?·kfile_id? | PATCH /reports/{id} | 과제명·rev·초점·K파일 링크 수동 설정(""=삭제) |
+| `attach_report_scenario` | report_id, scenario_content | POST /reports/{id}/scenario | 시뮬 조건 scenario.json 첨부 — 요약 캐시 + K파일 자동매칭 |
+| `report_summary` | report_id | GET /reports/{id} | kind·과제메타·scenario·sim_params·parts·findings·전역 최악·검색축 |
 | `report_worst_cases` | report_id, metric?, top_n? | GET /reports/{id}/cases | 최악 케이스 랭킹(sphere=방향, impact=위치, deep=단건) |
 | `report_part_risk` | report_id, part_id? | GET /reports/{id}/parts | 파트별 최악값·발생 케이스·최소 안전율 |
 | `report_case` | report_id, case_key | GET /reports/{id}/cases/{key} | 한 케이스 상세(파트별 메트릭) |

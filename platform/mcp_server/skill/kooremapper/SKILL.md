@@ -58,8 +58,12 @@ LS-DYNA `.k` 파일을 다루는 KooRemapper 플랫폼을 Claude에서 사용하
 SmartTwin 파이프라인이 만든 낙하/충격 리포트 HTML(deep 단건 심층 · sphere 전각도 낙하 ·
 impact 전위치 부분충격)을 인제스트해 구조화 분석한다.
 
-1. **인제스트** — `ingest_report(session_id, filename, html_content)` 로 리포트 HTML 을 올린다.
-   kind 는 자동판별(원하면 kind 명시). 반환 report_id 로 이후 분석한다.
+0. **목표로 리포트 찾기(결과 많을 때)** — `report_facets()` 로 "어떤 과제·방향컨셉·초점·
+   심각도·높이가 있나" 를 훑고 → `find_reports(project=…, doe_strategy=…, focus=…, severity=…,
+   drop_height=…, has_part=…, q=…)` 로 목표에 맞는 리포트를 서버 필터로 특정한다.
+1. **인제스트** — `ingest_report(session_id, filename, html_content, [scenario_content=…,
+   project=…, dev_rev=…, focus=…])` 로 리포트 HTML(+선택 scenario.json·과제메타)을 올린다.
+   kind 자동판별, scenario 의 template 로 원본 K파일 자동매칭(1 K:N). 반환 report_id.
 2. **개요 파악** — `report_summary(report_id)` 로 kind·프로젝트·전역 최악값·findings 를 본다.
 3. **최악 케이스** — `report_worst_cases(report_id, metric)` (sphere=최악 방향, impact=최악 위치).
    metric ∈ max_stress/max_g/max_disp/min_safety_factor.
@@ -71,6 +75,8 @@ impact 전위치 부분충격)을 인제스트해 구조화 분석한다.
    - `report_scatter(report_id, metric?)` : sphere 방향 섭동 산포/민감도(26방향별 mean/std/CoV/최악).
    - `report_energy_flow(report_id, case_key?)` : deep 에너지밸런스·접촉, sphere/impact 하중경로.
    - `report_part_series(report_id, case_key, part_id)` : 케이스·파트 시계열.
+   - `report_query(report_id, part_id?, category?, near_roll/pitch/yaw+angle_tol_deg?, metric?, min_value?)` :
+     리포트 안 fact 드릴다운 — "특정 부품이 특정 각도에서 응력 상위 N" 을 한 콜(서버 필터).
 7. **리비전 비교** — `compare_reports([id1, id2, ...])` 로 조건/리비전 간 파트별 최악값을 나란히 본다.
 8. **DataHub 등재** — `publish_report_to_datahub(report_id, project, stage)` 로 구조화 요약을
    AI Data Hub 데이터 자산(sim_report)으로 올린다(과제/개발단계/BOM 연계, 검색·리비전 비교용).
