@@ -1,9 +1,10 @@
 // 부품 리스크의 공간 컨텍스트 시각화 — 낙하 방향(구면)·충격 위치(디바이스)에 값 마커.
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { Download } from 'lucide-react'
 import { reportGeometry, reportQuery } from '@/shared/api/endpoints'
 import type { Report, ReportFact, ReportGeometry } from '@/shared/api/types'
-import { Select, Spinner } from '@/shared/ui/ui'
+import { Button, Select, Spinner } from '@/shared/ui/ui'
 
 const METRICS = [
   { v: 'peak_stress', label: '응력(MPa)' },
@@ -31,84 +32,6 @@ function fmtVal(v: number): string {
   return v.toExponential(1)
 }
 
-/** 색→값 매핑 범례(연속 컬러바 + 최소/최대 실값). 없으면 색이 무슨 값인지 못 읽는다. */
-function Legend({ vmin, vmax, unit }: { vmin: number; vmax: number; unit: string }) {
-  const stops = Array.from({ length: 12 }, (_, i) => i / 11)
-  return (
-    <svg viewBox="0 0 200 26" className="w-[200px]">
-      {stops.map((t, i) => (
-        <rect key={i} x={10 + t * 168} y={2} width={168 / 11 + 0.6} height={9} fill={heat(t)} />
-      ))}
-      <text x={10} y={22} fontSize="8" fill="#666" textAnchor="start">{fmtVal(vmin)}</text>
-      <text x={94} y={22} fontSize="8" fill="#999" textAnchor="middle">{unit}</text>
-      <text x={178} y={22} fontSize="8" fill="#666" textAnchor="end">{fmtVal(vmax)}</text>
-    </svg>
-  )
-}
-
-export function ReportVisuals({ report }: { report: Report }) {
-  const partList = report.parts ?? []
-  const [partId, setPartId] = useState<number | ''>(partList[0]?.part_id ?? '')
-  const [metric, setMetric] = useState('peak_stress')
-
-  const facts = useQuery({
-    queryKey: ['report-facts', report.id, partId, metric],
-    queryFn: () => reportQuery(report.id, { part_id: Number(partId), metric, limit: 3000 }),
-    enabled: partId !== '',
-  })
-  const geom = useQuery<ReportGeometry>({
-    queryKey: ['report-geom', report.id],
-    queryFn: () => reportGeometry(report.id),
-    enabled: report.kind === 'impact',
-  })
-
-  if (report.kind === 'deep') {
-    return <div className="text-muted text-[11px]">단건 심층 리포트는 방향/위치 마커가 없습니다 — 원본 리포트 렌더를 보세요.</div>
-  }
-
-  const fs = facts.data?.facts ?? []
-  const vals = fs.map((f) => f.value)
-  const vmin = vals.length ? Math.min(...vals) : 0
-  const vmax = vals.length ? Math.max(...vals) : 1
-  const norm = (v: number) => (vmax > vmin ? (v - vmin) / (vmax - vmin) : 0.5)
-  const worst = fs.reduce<ReportFact | null>((a, f) => (!a || f.value > a.value ? f : a), null)
-  const unit = METRICS.find((m) => m.v === metric)?.label ?? metric
-
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2 flex-wrap text-[11px]">
-        <span className="text-muted">부품 위치·방향 시각화</span>
-        <Select value={String(partId)} onChange={(e) => setPartId(e.target.value === '' ? '' : Number(e.target.value))}
-                className="h-7 text-xs w-40">
-          {partList.map((p) => <option key={p.part_id} value={p.part_id}>{p.name ?? `Part ${p.part_id}`}</option>)}
-        </Select>
-        <Select value={metric} onChange={(e) => setMetric(e.target.value)} className="h-7 text-xs w-28">
-          {METRICS.map((m) => <option key={m.v} value={m.v}>{m.label}</option>)}
-        </Select>
-        {worst && <span className="text-fg">최악 <b>{fmtVal(worst.value)}</b> @ {factLabel(worst)}</span>}
-      </div>
-
-      {facts.isLoading || (report.kind === 'impact' && geom.isLoading) ? <Spinner /> : !fs.length ? (
-        <div className="text-muted text-[11px]">이 부품·물리량의 값이 없습니다.</div>
-      ) : (
-        <div className="space-y-1">
-          {report.kind === 'sphere' ? (
-            <SphereMarker facts={fs} norm={norm} worst={worst} unit={unit} fmt={fmtVal} />
-          ) : (
-            <DeviceMarker facts={fs} norm={norm} worst={worst} unit={unit} fmt={fmtVal} geom={geom.data} partId={Number(partId)} />
-          )}
-          <Legend vmin={vmin} vmax={vmax} unit={unit} />
-          {facts.data?.truncated && (
-            <div className="text-[10px] text-amber-600">
-              값이 많아 {fs.length}건만 표시(색 스케일이 일부 편향될 수 있음). 부품/물리량으로 좁혀 보세요.
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
 function factLabel(f: ReportFact): string {
   const a = (f.identity as { angle?: { name?: string } })?.angle
   if (a?.name) return a.name
@@ -117,11 +40,25 @@ function factLabel(f: ReportFact): string {
   return f.case_key
 }
 
+type Plot = { w: number; h: number; inner: JSX.Element; note?: string }
+
+/** 색→값 매핑 범례를 <g> 로(자립 SVG 안에 함께 구워 내보내기 가능). */
+function legendGroup(vmin: number, vmax: number, unit: string, x: number, y: number): JSX.Element {
+  const stops = Array.from({ length: 12 }, (_, i) => i / 11)
+  return (
+    <g transform={`translate(${x},${y})`}>
+      {stops.map((t, i) => <rect key={i} x={t * 168} y={0} width={168 / 11 + 0.6} height={8} fill={heat(t)} />)}
+      <text x={0} y={19} fontSize="8" fill="#666" textAnchor="start">{fmtVal(vmin)}</text>
+      <text x={84} y={19} fontSize="8" fill="#999" textAnchor="middle">{unit}</text>
+      <text x={168} y={19} fontSize="8" fill="#666" textAnchor="end">{fmtVal(vmax)}</text>
+    </g>
+  )
+}
+
 /** 전각도 낙하 — 등장방형(경도×위도)에 각 방향을 값으로 색칠, 최악 별표.
  *  좌표는 백엔드가 swap 규약을 반영해 저장한 lon/lat 을 그대로 쓴다(구버전은 클램프 폴백). */
-function SphereMarker({ facts, norm, worst, unit, fmt }: {
-  facts: ReportFact[]; norm: (v: number) => number; worst: ReportFact | null; unit: string; fmt: (v: number) => string
-}) {
+function spherePlot(facts: ReportFact[], norm: (v: number) => number, worst: ReportFact | null,
+                    unit: string, fmt: (v: number) => string): Plot {
   const W = 320, H = 170, pad = 18
   const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
   const lonlat = (f: ReportFact) => {
@@ -133,9 +70,8 @@ function SphereMarker({ facts, norm, worst, unit, fmt }: {
   const sx = (lon: number) => pad + ((lon + 180) / 360) * (W - 2 * pad)
   const sy = (lat: number) => pad + ((90 - lat) / 180) * (H - 2 * pad)
   const angName = (f: ReportFact) => (f.identity as { angle?: { name?: string } })?.angle?.name ?? f.case_key
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full max-w-[360px] border border-border rounded bg-white">
-      {/* graticule + 각도 눈금 */}
+  const inner = (
+    <g>
       {[-90, 0, 90].map((lat) => <line key={`la${lat}`} x1={pad} x2={W - pad} y1={sy(lat)} y2={sy(lat)} stroke="#eee" />)}
       {[-180, -90, 0, 90, 180].map((lon) => <line key={`lo${lon}`} y1={pad} y2={H - pad} x1={sx(lon)} x2={sx(lon)} stroke="#eee" />)}
       {[-90, 0, 90].map((lat) => <text key={`lat${lat}`} x={pad - 2} y={sy(lat) + 3} textAnchor="end" fontSize="6" fill="#bbb">{lat}°</text>)}
@@ -156,16 +92,16 @@ function SphereMarker({ facts, norm, worst, unit, fmt }: {
           <text x={clamp(sx(lon) + 8, 0, W - 40)} y={clamp(sy(lat) - 6, 10, H)} fontSize="8" fill="#111">{fmt(worst.value)} {unit}</text>
         </g>
       )})()}
-    </svg>
+    </g>
   )
+  return { w: W, h: H, inner }
 }
 
 /** 전위치 부분충격 — 디바이스 외곽선 + 선택 부품 footprint + 충격 위치 값 마커.
  *  종횡비를 보존(늘어남 방지)하고, bbox 결측 시 외곽선/footprint 로 범위를 유추한다. */
-function DeviceMarker({ facts, norm, worst, unit, fmt, geom, partId }: {
-  facts: ReportFact[]; norm: (v: number) => number; worst: ReportFact | null; unit: string
-  fmt: (v: number) => string; geom: ReportGeometry | undefined; partId: number
-}) {
+function devicePlot(facts: ReportFact[], norm: (v: number) => number, worst: ReportFact | null,
+                    unit: string, fmt: (v: number) => string,
+                    geom: ReportGeometry | undefined, partId: number): Plot {
   const W = 300, H = 240, pad = 16
   const partFp = geom?.parts.find((p) => p.part_id === partId)?.footprint ?? null
   const pos = (f: ReportFact) => {
@@ -196,29 +132,150 @@ function DeviceMarker({ facts, norm, worst, unit, fmt, geom, partId }: {
   const coincident = facts.length > 1 && facts.every((f) => {
     const p = pos(f), q = pos(facts[0]); return Math.abs(p.x - q.x) < 1e-6 && Math.abs(p.y - q.y) < 1e-6
   })
+  const inner = (
+    <g>
+      {geom?.device_outline && <polygon points={poly(geom.device_outline)} fill="none" stroke="#bbb" strokeWidth={1} />}
+      {partFp && <polygon points={poly(partFp)} fill="#4ecca355" stroke="#2a9d78" strokeWidth={1} />}
+      {facts.map((f, i) => { const p = pos(f); return (
+        <circle key={i} cx={sx(p.x)} cy={sy(p.y)} r={4} fill={heat(norm(f.value))} opacity={0.85}>
+          <title>{factLbl(f)}</title>
+        </circle>
+      )})}
+      {worst && (() => { const p = pos(worst); return (
+        <g>
+          <circle cx={sx(p.x)} cy={sy(p.y)} r={7} fill="none" stroke="#111" strokeWidth={1.5} />
+          <text x={Math.min(sx(p.x) + 9, W - 40)} y={Math.max(sy(p.y) - 7, 10)} fontSize="8" fill="#111">{fmt(worst.value)} {unit}</text>
+        </g>
+      )})()}
+      <text x={W / 2} y={H - 3} textAnchor="middle" fontSize="8" fill="#999">디바이스 XY · 초록=선택 부품 footprint</text>
+    </g>
+  )
+  return {
+    w: W, h: H, inner,
+    note: coincident ? '충격 위치가 모두 같은 좌표에 뭉쳐 있습니다(면 단위 낙하로 보임) — 개별 위치 구분은 리포트 조건에 따라 달라집니다.' : undefined,
+  }
+}
+
+function serializeSvg(svg: SVGSVGElement): string {
+  const clone = svg.cloneNode(true) as SVGSVGElement
+  clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+  return new XMLSerializer().serializeToString(clone)
+}
+function downloadBlob(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = name; a.click()
+  URL.revokeObjectURL(url)
+}
+function exportSvg(svg: SVGSVGElement, name: string) {
+  downloadBlob(new Blob([serializeSvg(svg)], { type: 'image/svg+xml' }), `${name}.svg`)
+}
+async function exportPng(svg: SVGSVGElement, name: string, scale = 2) {
+  const vb = svg.viewBox.baseVal
+  const src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(serializeSvg(svg))
+  const img = new Image()
+  await new Promise<void>((res, rej) => { img.onload = () => res(); img.onerror = () => rej(new Error('svg load')); img.src = src })
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.round(vb.width * scale); canvas.height = Math.round(vb.height * scale)
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height)
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+  canvas.toBlob((b) => { if (b) downloadBlob(b, `${name}.png`) }, 'image/png')
+}
+
+/** 캡션+플롯+범례를 하나의 자립 SVG 로 합쳐 그리고, 그 SVG 를 그대로 PNG/SVG 로 내보낸다. */
+function MarkerFigure({ plot, caption, vmin, vmax, unit, fileBase }: {
+  plot: Plot; caption: string; vmin: number; vmax: number; unit: string; fileBase: string
+}) {
+  const svgRef = useRef<SVGSVGElement>(null)
+  const CAP = 18, GAP = 8, LEG_H = 22
+  const totH = CAP + plot.h + GAP + LEG_H
+  const legX = Math.max(0, (plot.w - 168) / 2)
   return (
-    <>
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full max-w-[320px] border border-border rounded bg-white">
-        {geom?.device_outline && <polygon points={poly(geom.device_outline)} fill="none" stroke="#bbb" strokeWidth={1} />}
-        {partFp && <polygon points={poly(partFp)} fill="#4ecca355" stroke="#2a9d78" strokeWidth={1} />}
-        {facts.map((f, i) => { const p = pos(f); return (
-          <circle key={i} cx={sx(p.x)} cy={sy(p.y)} r={4} fill={heat(norm(f.value))} opacity={0.85}>
-            <title>{factLbl(f)}</title>
-          </circle>
-        )})}
-        {worst && (() => { const p = pos(worst); return (
-          <g>
-            <circle cx={sx(p.x)} cy={sy(p.y)} r={7} fill="none" stroke="#111" strokeWidth={1.5} />
-            <text x={Math.min(sx(p.x) + 9, W - 40)} y={Math.max(sy(p.y) - 7, 10)} fontSize="8" fill="#111">{fmt(worst.value)} {unit}</text>
-          </g>
-        )})()}
-        <text x={W / 2} y={H - 3} textAnchor="middle" fontSize="8" fill="#999">디바이스 XY · 초록=선택 부품 footprint</text>
+    <div className="space-y-1">
+      <svg ref={svgRef} viewBox={`0 0 ${plot.w} ${totH}`}
+           className="w-full border border-border rounded"
+           style={{ maxWidth: plot.w + 40, background: '#fff' }}>
+        <rect x={0} y={0} width={plot.w} height={totH} fill="#fff" />
+        <text x={plot.w / 2} y={13} textAnchor="middle" fontSize="10" fill="#333" fontWeight="600">{caption}</text>
+        <g transform={`translate(0,${CAP})`}>{plot.inner}</g>
+        {legendGroup(vmin, vmax, unit, legX, CAP + plot.h + GAP)}
       </svg>
-      {coincident && (
-        <div className="text-[10px] text-amber-600">
-          충격 위치가 모두 같은 좌표에 뭉쳐 있습니다(면 단위 낙하로 보임) — 개별 위치 구분은 리포트 조건에 따라 달라집니다.
+      {plot.note && <div className="text-[10px] text-amber-600">{plot.note}</div>}
+      <div className="flex gap-1">
+        <Button size="sm" variant="ghost" onClick={() => svgRef.current && exportPng(svgRef.current, fileBase)}>
+          <Download size={12} /> PNG
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => svgRef.current && exportSvg(svgRef.current, fileBase)}>
+          <Download size={12} /> SVG
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+export function ReportVisuals({ report }: { report: Report }) {
+  const partList = report.parts ?? []
+  const [partId, setPartId] = useState<number | ''>(partList[0]?.part_id ?? '')
+  const [metric, setMetric] = useState('peak_stress')
+
+  const facts = useQuery({
+    queryKey: ['report-facts', report.id, partId, metric],
+    queryFn: () => reportQuery(report.id, { part_id: Number(partId), metric, limit: 3000 }),
+    enabled: partId !== '',
+  })
+  const geom = useQuery<ReportGeometry>({
+    queryKey: ['report-geom', report.id],
+    queryFn: () => reportGeometry(report.id),
+    enabled: report.kind === 'impact',
+  })
+
+  if (report.kind === 'deep') {
+    return <div className="text-muted text-[11px]">단건 심층 리포트는 방향/위치 마커가 없습니다 — 원본 리포트 렌더를 보세요.</div>
+  }
+
+  const fs = facts.data?.facts ?? []
+  const vals = fs.map((f) => f.value)
+  const vmin = vals.length ? Math.min(...vals) : 0
+  const vmax = vals.length ? Math.max(...vals) : 1
+  const norm = (v: number) => (vmax > vmin ? (v - vmin) / (vmax - vmin) : 0.5)
+  const worst = fs.reduce<ReportFact | null>((a, f) => (!a || f.value > a.value ? f : a), null)
+  const unit = METRICS.find((m) => m.v === metric)?.label ?? metric
+  const partName = partList.find((p) => p.part_id === Number(partId))?.name ?? `Part ${partId}`
+  const caption = `${partName} · ${unit}`
+  const fileBase = `${report.kind}_${partName}_${metric}`.replace(/[^\w.-]+/g, '_')
+
+  const plot: Plot | null = !fs.length ? null
+    : report.kind === 'sphere' ? spherePlot(fs, norm, worst, unit, fmtVal)
+    : devicePlot(fs, norm, worst, unit, fmtVal, geom.data, Number(partId))
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 flex-wrap text-[11px]">
+        <span className="text-muted">부품 위치·방향 시각화</span>
+        <Select value={String(partId)} onChange={(e) => setPartId(e.target.value === '' ? '' : Number(e.target.value))}
+                className="h-7 text-xs w-40">
+          {partList.map((p) => <option key={p.part_id} value={p.part_id}>{p.name ?? `Part ${p.part_id}`}</option>)}
+        </Select>
+        <Select value={metric} onChange={(e) => setMetric(e.target.value)} className="h-7 text-xs w-28">
+          {METRICS.map((m) => <option key={m.v} value={m.v}>{m.label}</option>)}
+        </Select>
+        {worst && <span className="text-fg">최악 <b>{fmtVal(worst.value)}</b> @ {factLabel(worst)}</span>}
+      </div>
+
+      {facts.isLoading || (report.kind === 'impact' && geom.isLoading) ? <Spinner /> : !plot ? (
+        <div className="text-muted text-[11px]">이 부품·물리량의 값이 없습니다.</div>
+      ) : (
+        <div className="space-y-1">
+          <MarkerFigure plot={plot} caption={caption} vmin={vmin} vmax={vmax} unit={unit} fileBase={fileBase} />
+          {facts.data?.truncated && (
+            <div className="text-[10px] text-amber-600">
+              값이 많아 {fs.length}건만 표시(색 스케일이 일부 편향될 수 있음). 부품/물리량으로 좁혀 보세요.
+            </div>
+          )}
         </div>
       )}
-    </>
+    </div>
   )
 }
