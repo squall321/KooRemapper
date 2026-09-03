@@ -111,3 +111,19 @@
 - 프런트: ReportVisuals.tsx. sphere=등장방형 pitch×roll 방향맵(각 방향 값 히트·최악 링+라벨), impact=디바이스맵(외곽선+선택 파트 footprint 초록+충격위치 값 마커). 값은 report_query(part_id×metric fact) 서버필터로 채움. deep 은 단건이라 마커 없음(원본 렌더 안내).
 - 실측 검증: impact 샘플 ingest → geometry(bbox -50..50/-40..40, outline 4pt, 12파트 전부 footprint 4pt), query(peak_stress 50 fact, identity=face/pos_x/pos_y). 합성샘플은 pos 가 전부 0,0 이라 impact 점이 원점에 겹침(데이터 아티팩트, 코드 아님). 실제 리포트는 위치 분산됨.
 - 테스트 78 passed(+2 geometry). 프런트 tsc+vite 빌드 clean. dev 인스턴스 api/mcp 재기동으로 라우트·툴(47개) 반영. Drive 배포는 아직(다음 build-all-to-drive 필요).
+
+## 시각화 다관점 리뷰 & 보강(7760f93, a895a45)
+- 워크플로 리뷰(30 에이전트, 5 렌즈, 적대적 검증) → 22건 확정(high3/med12/low7). 실질 6덩어리.
+- **핵심 버그(내가 방금 커밋한 것)**: SphereMarker 가 swap 무시하고 raw roll/pitch 를 위경도로 투영.
+  cuboid_26 은 swap=True·roll∈[-135,180] 이라 26 중 9(Front 반구)가 화면밖·축전치. 최악 별표도 소실 가능.
+  실측(Test_001)으로 재현·검증. 수정: normalize_sphere 가 identity.angle 에 swap/lon/lat 저장(authoritative
+  _angle_lonlat, _angle_vec 규약과 정합), 프런트는 lon/lat 투영. 라이브 재인제스트로 9/26→0/26 off-canvas 확인.
+  query_facts 근접필터도 동일 결함이라 저장 lon/lat 사용으로 수정.
+- 판독성: 컬러바 범례+호버 툴팁, 크기별 값 포맷(변형률 '0' 뭉갬 해소), 색각안전 램프(파랑→회→노랑),
+  각도 눈금, truncated 안내, DeviceMarker 종횡비 보존+bbox 결측 시 외곽선/footprint 로 범위 유추+좌표 뭉침 감지.
+- 사용자 확정: impact 위치=좌표 스캐터(현 DeviceMarker 가 정확 — 면 small-multiples 불요), 이미지 내보내기 추가.
+- 내보내기: 캡션+플롯+범례를 단일 자립 SVG(MarkerFigure)로 합쳐 SVG 저장/PNG 래스터화(2x). Chromium 에서
+  PNG blob·canvas 미-taint·한글 캡션 직렬화 검증. spherePlot/devicePlot 을 <g> 빌더로 분리.
+- 남은 low: 진짜 결측(angle/pos 자체가 없음) 시 (0,0) 폴백 잔존, 절대 severity 임계선 색 기준 부재(현재는
+  로컬 min/max 정규화 + 범례 실값으로 오독 완화). 필요 시 후속.
+- 테스트 79 passed(+sphere lon/lat on-canvas·swap 전치). tsc+build clean. Drive 배포 대기(다음 build-all-to-drive).
