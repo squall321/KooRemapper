@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     app_env: str = "development"  # development | production
     api_port: int = 8700
     mcp_port: int = 8701
+    # 외부 클라이언트 안내용 MCP 공개 주소(비우면 요청 헤더에서 파생). raw host:port 는
+    # 사외 PC 에서 안 닿는다 — 포털 라우트(/apps/kooremapper_mcp/mcp)가 공개 경로다.
+    mcp_public_url: str = ""
 
     # --- database ---
     # asyncpg DSN, e.g. postgresql+asyncpg://koorm:pw@127.0.0.1:5436/koorm

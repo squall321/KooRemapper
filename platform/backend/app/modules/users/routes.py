@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -15,12 +15,27 @@ from app.shared.responses import ok
 router = APIRouter(tags=["tokens"])
 
 
-def _mcp_add_snippet(plaintext: str) -> str:
+def mcp_public_url(request: Request) -> str:
+    """외부 클라이언트가 실제로 닿을 MCP 주소.
+
+    포털/허브 프록시 경유 요청(X-Forwarded-* 존재)이면 그 오리진의 고정 라우트
+    /apps/kooremapper_mcp/mcp 가 정답이다 — raw host:port(8701)는 사외 PC 에서
+    안 닿는다(cae00 실사고: 힌트대로 등록하면 연결 불가). 설정이 있으면 그것이 정본.
+    """
+    if settings.mcp_public_url:
+        return settings.mcp_public_url
+    fwd_host = request.headers.get("x-forwarded-host")
+    if fwd_host:
+        proto = request.headers.get("x-forwarded-proto") or "http"
+        return f"{proto}://{fwd_host}/apps/kooremapper_mcp/mcp"
+    return f"http://127.0.0.1:{settings.mcp_port}/mcp"
+
+
+def _mcp_add_snippet(plaintext: str, request: Request) -> str:
     """Ready-to-paste `claude mcp add` command for the issued token."""
-    port = settings.mcp_port
     return (
         f"claude mcp add --transport http kooremapper "
-        f"http://127.0.0.1:{port}/mcp "
+        f"{mcp_public_url(request)} "
         f'--header "Authorization: Bearer {plaintext}"'
     )
 
@@ -39,6 +54,7 @@ async def list_my_tokens(
 )
 async def create_my_token(
     body: TokenCreateRequest,
+    request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -50,7 +66,7 @@ async def create_my_token(
         {
             "token": plaintext,
             "info": TokenRead.model_validate(row).to_dict(),
-            "mcp_add": _mcp_add_snippet(plaintext),
+            "mcp_add": _mcp_add_snippet(plaintext, request),
         },
         message="토큰이 발급되었습니다. 이 값은 다시 표시되지 않습니다.",
         status_code=201,

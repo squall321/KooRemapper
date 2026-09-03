@@ -5,7 +5,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +14,7 @@ from app.database import get_db
 from app.models import Job, User
 from app.runner import catalog
 from app.shared.auth import get_current_user
+from app.modules.users.routes import mcp_public_url
 from app.shared.responses import ok
 
 router = APIRouter(tags=["system"])
@@ -86,7 +87,7 @@ _PARITY = [
 
 
 @router.get("/system/capabilities")
-async def capabilities(_user: User = Depends(get_current_user)):
+async def capabilities(request: Request, _user: User = Depends(get_current_user)):
     return ok({
         "operations": len(catalog.operation_names()),
         # 하드코딩 대신 MCP 소스의 @mcp.tool( 을 세어 산출(None 이면 프론트가 개수 생략).
@@ -94,7 +95,7 @@ async def capabilities(_user: User = Depends(get_current_user)):
         "parity": _PARITY,
         "mcp_add_hint": (
             f"claude mcp add --transport http kooremapper "
-            f"http://<host>:{settings.mcp_port}/mcp --header \"Authorization: Bearer kr_...\""
+            f"{mcp_public_url(request)} --header \"Authorization: Bearer kr_...\""
         ),
         "mcp_desktop_hint": "Claude Desktop은 mcp-remote 브리지 사용 (mcp_server/CLAUDE_DESKTOP.md)",
     })
