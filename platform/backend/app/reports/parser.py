@@ -686,6 +686,60 @@ def part_series(data: dict, kind: str, case_key: str, part_id: int) -> dict:
     return {"kind": "impact", "case_key": case_key, "part_id": part_id, "note": "케이스/파트를 찾지 못함"}
 
 
+def part_energy_series(data: dict, kind: str, part_id: int | None = None) -> dict:
+    """파트별 에너지(내부/운동) 시계열 — deep 리포트의 binout matsum(있을 때).
+
+    LS-DYNA matsum 이 덤프된 deep run 이면 파트별 IE/KE(+hourglass) 시간이력이 리포트에
+    임베드된다(part_ids/part_names/t/internal_energy/kinetic_energy). part_id 지정 시 그
+    파트만. sphere/impact 는 파트별 에너지 시계열이 리포트에 없다(글로벌 에너지·하중경로만).
+    """
+    if kind != "deep":
+        return {"kind": kind, "part_id": part_id, "parts": [],
+                "note": "파트별 에너지 시계열은 deep 리포트(matsum)에서만 제공됩니다 — "
+                        "sphere/impact 는 글로벌 에너지·하중경로 그래프만 있습니다."}
+    binout = data.get("binout")
+    ms = binout.get("matsum") if isinstance(binout, dict) else None
+    if not isinstance(ms, dict):
+        return {"kind": "deep", "part_id": part_id, "t": None, "parts": [],
+                "note": "이 리포트엔 matsum(파트별 에너지)이 없습니다 — LS-DYNA run 이 matsum 을 "
+                        "덤프해야 파트별 에너지 시계열이 담깁니다."}
+    t = ms.get("t") or []
+    pids = ms.get("part_ids") or []
+    names = ms.get("part_names") or []
+
+    def _per_part(mat):
+        # 임베드는 파트-메이저([n_parts][n_times]) 의도. [n_times][n_parts] 로 오면 전치.
+        if not isinstance(mat, list) or not mat:
+            return []
+        if len(mat) != len(pids) and t and len(mat) == len(t):
+            return [list(col) for col in zip(*mat)]
+        return mat
+
+    ie, ke, hg = _per_part(ms.get("internal_energy")), _per_part(ms.get("kinetic_energy")), _per_part(ms.get("hourglass_energy"))
+
+    def _series(rows, i):
+        s = rows[i] if i < len(rows) else None
+        return [_num(x) for x in s] if isinstance(s, list) else None
+
+    def _peak(s):
+        vals = [x for x in (s or []) if isinstance(x, (int, float))]
+        return max(vals) if vals else None
+
+    parts = []
+    for i, pid in enumerate(pids):
+        s_ie, s_ke, s_hg = _series(ie, i), _series(ke, i), _series(hg, i)
+        row = {"part_id": _to_int(pid), "part_name": names[i] if i < len(names) else None,
+               "internal_energy": s_ie, "kinetic_energy": s_ke,
+               "peak_internal_energy": _peak(s_ie), "peak_kinetic_energy": _peak(s_ke)}
+        if s_hg is not None:
+            row["hourglass_energy"] = s_hg
+        parts.append(row)
+    if part_id is not None:
+        parts = [p for p in parts if p["part_id"] == part_id]
+    return {"kind": "deep", "t": [_num(x) for x in t], "parts": parts,
+            "note": None if parts else "matsum 에서 해당 파트를 찾지 못했습니다."}
+
+
 # ── 스캐터링/섭동 분석 (sphere 전용) ────────────────────────────────
 # 26면 낙하 주변의 방향 섭동에 대한 응답 산포. 케이스를 최근접 26 정준방향으로 묶어
 # 방향별 통계(mean/std/CoV/최악)와 민감도를 낸다. sphere 리포트에서 도출한다.

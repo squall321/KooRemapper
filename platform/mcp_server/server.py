@@ -607,6 +607,17 @@ async def report_scatter(
 
 
 @mcp.tool()
+async def report_part_energy(report_id: str, ctx: Context, part_id: int | None = None) -> dict:
+    """파트별 에너지(내부 IE·운동 KE) 시계열 — deep 리포트의 binout matsum(덤프됐을 때).
+
+    각 파트의 IE/KE 시간이력(+peak, hourglass 있으면) 을 준다. part_id 미지정 시 전 파트,
+    지정 시 그 파트만. matsum 이 없으면(run 이 안 덤프) note 로 안내. sphere/impact 는 파트별
+    에너지 시계열이 리포트에 없어 note — 글로벌 에너지/하중경로는 report_energy_flow 를 써라."""
+    params = {"part_id": part_id} if part_id is not None else None
+    return await _get(ctx, f"/reports/{report_id}/part-energy", params=params)
+
+
+@mcp.tool()
 async def report_angle_stats(
     report_id: str, ctx: Context, metric: str = "peak_stress", part_id: int | None = None,
     category: str | None = None, angle_name: str | None = None,

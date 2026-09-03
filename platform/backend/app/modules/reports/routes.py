@@ -351,6 +351,22 @@ async def report_scatter(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
 
 
+@router.get("/reports/{report_id}/part-energy")
+async def report_part_energy(
+    report_id: str,
+    part_id: int | None = Query(default=None),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """파트별 에너지(내부/운동) 시계열 — deep matsum(있을 때). part_id 로 한 파트만.
+    sphere/impact 는 파트별 에너지 시계열이 없어 note 반환(글로벌 에너지는 /energy)."""
+    r = await _require_report(db, user, report_id)
+    try:
+        return ok(await svc.part_energy_series(db, r, part_id))
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
+
+
 @router.get("/reports/{report_id}/angle-stats")
 async def report_angle_stats(
     report_id: str,

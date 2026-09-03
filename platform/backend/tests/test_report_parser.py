@@ -153,6 +153,53 @@ def test_sphere_part_series():
     assert "note" not in s
 
 
+def test_part_energy_series_part_major():
+    # 임베드 기본 형태(파트-메이저): internal_energy[part_idx] = 시계열.
+    data = {"binout": {"matsum": {
+        "part_ids": [1, 2], "part_names": ["A", "B"], "t": [0.0, 0.5, 1.0],
+        "internal_energy": [[0.0, 10.0, 25.0], [0.0, 5.0, 8.0]],
+        "kinetic_energy": [[30.0, 12.0, 1.0], [10.0, 6.0, 2.0]],
+    }}}
+    r = parser.part_energy_series(data, "deep")
+    assert r["kind"] == "deep" and r["t"] == [0.0, 0.5, 1.0] and len(r["parts"]) == 2
+    p1 = next(p for p in r["parts"] if p["part_id"] == 1)
+    assert p1["internal_energy"] == [0.0, 10.0, 25.0] and p1["peak_internal_energy"] == 25.0
+    assert p1["kinetic_energy"][0] == 30.0 and p1["peak_kinetic_energy"] == 30.0
+    # part_id 한정.
+    only2 = parser.part_energy_series(data, "deep", part_id=2)
+    assert [p["part_id"] for p in only2["parts"]] == [2]
+
+
+def test_part_energy_series_time_major_transposed():
+    # [n_times][n_parts] 로 와도 part_ids/t 길이로 감지해 전치.
+    data = {"binout": {"matsum": {
+        "part_ids": [1, 2], "part_names": ["A", "B"], "t": [0.0, 0.5, 1.0],
+        "internal_energy": [[0.0, 0.0], [10.0, 5.0], [25.0, 8.0]],  # [n_times][n_parts]
+        "kinetic_energy": [[30.0, 10.0], [12.0, 6.0], [1.0, 2.0]],
+    }}}
+    r = parser.part_energy_series(data, "deep")
+    p1 = next(p for p in r["parts"] if p["part_id"] == 1)
+    assert p1["internal_energy"] == [0.0, 10.0, 25.0]  # 파트1 시계열로 전치됨
+    assert p1["peak_internal_energy"] == 25.0
+
+
+def test_part_energy_series_absent_and_non_deep():
+    # matsum 없음(run 미덤프) → 빈 parts + 안내.
+    r = parser.part_energy_series({"binout": {"matsum": None}}, "deep")
+    assert r["parts"] == [] and r["note"] and "matsum" in r["note"]
+    # sphere/impact 는 파트별 에너지 시계열 미지원 → note.
+    rs = parser.part_energy_series({"results": []}, "sphere")
+    assert rs["parts"] == [] and rs["note"] and "deep" in rs["note"]
+
+
+@pytest.mark.skipif(not _DEEP.exists(), reason="deep 샘플 없음")
+def test_part_energy_series_real_deep_sample():
+    # 실측 deep 샘플은 matsum 이 None(이 run 은 미덤프) — 크래시 없이 안내.
+    data = parser.extract_embedded_data(_read(_DEEP))
+    r = parser.part_energy_series(data, "deep")
+    assert r["kind"] == "deep" and r["parts"] == [] and "matsum" in (r["note"] or "")
+
+
 def test_garbage_inputs_raise_cleanly():
     # 임베드 데이터가 없거나 빈/비HTML 입력은 ReportParseError(→400) 여야 하고, 크래시 금지.
     for bad in ("", "   ", "<html><body>no data</body></html>", "*KEYWORD\n*END\n"):

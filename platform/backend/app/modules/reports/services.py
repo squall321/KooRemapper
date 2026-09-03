@@ -1034,6 +1034,12 @@ async def part_series(db: AsyncSession, report: ImpactReport, case_key: str, par
     return await asyncio.to_thread(parser.part_series, data, kind, case_key, part_id)
 
 
+async def part_energy_series(db: AsyncSession, report: ImpactReport, part_id: int | None = None) -> dict:
+    """파트별 에너지(IE/KE) 시계열(원본 재파싱) — deep matsum. part_id 로 한정."""
+    data, kind = await _load_html_data(db, report)
+    return await asyncio.to_thread(parser.part_energy_series, data, kind, part_id)
+
+
 async def geometry(db: AsyncSession, report: ImpactReport) -> dict:
     """공간 컨텍스트(부품 위치 시각화용, 원본 재파싱). impact=디바이스 외곽선+파트 footprint."""
     data, kind = await _load_html_data(db, report)
