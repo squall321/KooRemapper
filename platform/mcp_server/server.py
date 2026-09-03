@@ -111,13 +111,15 @@ async def list_sessions(ctx: Context) -> list:
 
 @mcp.tool()
 async def create_session(name: str, ctx: Context, description: str | None = None) -> dict:
-    """새 세션 생성. 이후 이 session_id 로 파일을 업로드하고 오퍼레이션을 실행한다."""
+    """새 세션(작업 공간)을 만든다 — K파일 업로드·오퍼레이션 실행의 컨테이너라 모든 작업의
+    첫 도구다. 기존 작업을 이어가려면 list_sessions 로 먼저 찾는다."""
     return await _post(ctx, "/sessions", {"name": name, "description": description})
 
 
 @mcp.tool()
 async def get_session(session_id: str, ctx: Context) -> dict:
-    """세션 상세 + 포함된 파일 목록(meta 포함)."""
+    """세션 상세와 포함 파일 목록(meta 포함)을 반환한다 — "이 세션에 뭐가 들어 있나"의 입구.
+    파일 하나의 깊은 메타는 inspect_file, 잡 이력은 list_session_jobs."""
     return await _get(ctx, f"/sessions/{session_id}")
 
 
@@ -189,7 +191,8 @@ async def list_session_files(session_id: str, ctx: Context) -> list:
 
 @mcp.tool()
 async def inspect_file(session_id: str, file_id: int, ctx: Context) -> dict:
-    """단일 파일의 상세 메타(info 결과 + *INCLUDE 내부 파일 목록)."""
+    """단일 K파일의 상세 메타(info 결과 + *INCLUDE 내부 파일 목록)를 반환한다 — 업로드한
+    덱의 구조·포함 관계를 확인할 때 쓴다. 파트 단위 정보는 part_info/list_parts."""
     return await _get(ctx, f"/sessions/{session_id}/files/{file_id}/inspect")
 
 
@@ -217,7 +220,8 @@ async def get_job(job_id: str, ctx: Context, include_logs: bool = False) -> dict
 
 @mcp.tool()
 async def cancel_job(job_id: str, ctx: Context) -> dict:
-    """실행 중이거나 대기 중인 Job 을 취소한다. / Cancel a queued or running job."""
+    """실행 중이거나 대기 중인 Job 을 취소한다 — 잘못 낸 잡이나 매달린 잡을 정리할 때.
+    상태 확인은 job_status, 취소 후 재실행은 run_job. / Cancel a queued or running job."""
     return await _post(ctx, f"/jobs/{job_id}/cancel", None)
 
 
@@ -225,7 +229,8 @@ async def cancel_job(job_id: str, ctx: Context) -> dict:
 async def update_session(
     session_id: str, ctx: Context, name: str | None = None, description: str | None = None
 ) -> dict:
-    """세션 이름/설명 수정. / Rename or re-describe a session."""
+    """세션 이름·설명을 수정한다 — 작업이 진화해 이름이 안 맞을 때 정리용.
+    / Rename or re-describe a session."""
     body = {k: v for k, v in {"name": name, "description": description}.items() if v is not None}
     async with httpx.AsyncClient(base_url=API, timeout=60) as c:
         return _unwrap(await c.patch(f"/sessions/{session_id}", json=body, headers=_forward_headers(ctx)))
@@ -239,13 +244,15 @@ async def delete_session(session_id: str, ctx: Context) -> dict:
 
 @mcp.tool()
 async def delete_file(session_id: str, file_id: int, ctx: Context) -> dict:
-    """세션에서 파일 1건 삭제. / Delete a single file from a session."""
+    """세션에서 파일 1건을 삭제한다(복구 불가) — 잘못 올린 파일 정리용. 어떤 파일이 있는지는
+    get_session 으로 먼저 확인. / Delete a single file from a session."""
     return await _delete(ctx, f"/sessions/{session_id}/files/{file_id}")
 
 
 @mcp.tool()
 async def get_job_outputs(job_id: str, ctx: Context) -> list:
-    """Job 이 생성한 산출 파일 목록(session_file id/이름/meta)."""
+    """Job 이 생성한 산출 파일 목록(session_file id/이름/meta)을 반환한다 — 잡이 끝난 뒤
+    "무엇이 나왔나"의 입구. 내려받기는 download_result, 잡 로그는 slurm/job 로그 도구."""
     return await _get(ctx, f"/jobs/{job_id}/outputs")
 
 
