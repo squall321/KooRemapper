@@ -607,6 +607,33 @@ async def report_scatter(
 
 
 @mcp.tool()
+async def report_angle_stats(
+    report_id: str, ctx: Context, metric: str = "peak_stress", part_id: int | None = None,
+    category: str | None = None, angle_name: str | None = None,
+    near_lon: float | None = None, near_lat: float | None = None,
+    tol_deg: float = 15.0, top_parts: int = 5,
+) -> dict:
+    """특정 각도군의 표준 통계(분포 + 부품별 분해) — 한 도구, 전 선택 모드.
+
+    각도군 선택(우선순위): near_lon+near_lat(임의 방향 콘, tol_deg 반경, sphere) >
+    angle_name(그 방향의 최근접 26-base 퍼터베이션 구름, sphere) > category(면/엣지/코너 또는
+    impact 면) > 미지정(전체: sphere=base별, impact=면별). part_id 미지정 시 케이스별 파트
+    최댓값을 대표값으로 쓴다.
+
+    모든 그룹이 동일 스키마 — stats{n,mean,std(표본),cov,min,p05,p25,median,p75,p95,max,iqr,
+    range} + worst{value,angle_name,part_id,case_key} + (part_id 미지정 시) parts{top_risk(max),
+    most_sensitive(CoV)}. metric 은 리포트에 실재하는 것만(응답 available_metrics 참고 —
+    현재 낙하/충격 리포트는 peak_stress/peak_strain/peak_g/peak_disp. 소성 스트레인 등은
+    상류 리포트가 넣어야 잡힌다)."""
+    params: dict = {"metric": metric, "tol_deg": tol_deg, "top_parts": top_parts}
+    for k, v in (("part_id", part_id), ("category", category), ("angle_name", angle_name),
+                 ("near_lon", near_lon), ("near_lat", near_lat)):
+        if v is not None:
+            params[k] = v
+    return await _get(ctx, f"/reports/{report_id}/angle-stats", params=params)
+
+
+@mcp.tool()
 async def report_energy_flow(report_id: str, ctx: Context, case_key: str | None = None) -> dict:
     """에너지/접촉 상세(원본 재파싱). deep=에너지 밸런스(hourglass/energy_ratio)·접촉력(rcforc)·
     Newton-3 신뢰도, sphere/impact=하중경로 그래프(impactor→parts 전파, 접촉 엣지 work).

@@ -351,6 +351,31 @@ async def report_scatter(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
 
 
+@router.get("/reports/{report_id}/angle-stats")
+async def report_angle_stats(
+    report_id: str,
+    metric: str = Query("peak_stress"),
+    part_id: int | None = Query(default=None),
+    category: str | None = Query(default=None),
+    angle_name: str | None = Query(default=None),
+    near_lon: float | None = Query(default=None),
+    near_lat: float | None = Query(default=None),
+    tol_deg: float = Query(15.0, ge=0.0, le=180.0),
+    top_parts: int = Query(5, ge=1, le=50),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """특정 각도군 표준 통계 — 선택(near/angle_name/category/전체) × 분포(mean/std/CoV/
+    백분위/IQR/최악) + 부품별 위험·민감도 분해. 있는 물리량은 available_metrics 로 안내."""
+    r = await _require_report(db, user, report_id)
+    try:
+        return ok(await svc.angle_group_stats(
+            db, r, metric=metric, part_id=part_id, category=category, angle_name=angle_name,
+            near_lon=near_lon, near_lat=near_lat, tol_deg=tol_deg, top_parts=top_parts))
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
+
+
 @router.get("/reports/{report_id}/geometry")
 async def report_geometry(
     report_id: str,

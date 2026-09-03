@@ -98,6 +98,59 @@ def _case_cat(f):
     return a.get("category")
 
 
+_STAT_KEYS = {"n", "mean", "std", "cov", "min", "p05", "p25", "median", "p75", "p95", "max", "iqr", "range"}
+
+
+@pytest.mark.skipif(not _SPHERE.exists(), reason="sphere 샘플 없음")
+async def test_angle_group_stats(db):
+    u, s = await _mk(db)
+    try:
+        rep = await svc.ingest_report(db, s, filename="t.html", raw=_SPHERE.read_bytes(), project="S26")
+
+        # available_metrics — 낙하 리포트에 실재하는 물리량(소성 스트레인은 없음).
+        r0 = await svc.angle_group_stats(db, rep, metric="peak_stress")
+        assert set(r0["available_metrics"]) == {"peak_disp", "peak_g", "peak_strain", "peak_stress"}
+
+        # ① 전체(미지정) — sphere 는 base별 그룹, 26방향, 동일 통계 스키마 + mean 내림차순.
+        assert r0["selection"]["mode"] == "all_bases" and r0["n_groups"] == 26
+        assert all(_STAT_KEYS <= set(g["stats"]) for g in r0["groups"])
+        means = [g["stats"]["mean"] for g in r0["groups"]]
+        assert means == sorted(means, reverse=True)
+        # part_id 미지정 → 부품별 분해(top_risk/most_sensitive) 포함.
+        assert all("parts" in g and "top_risk" in g["parts"] for g in r0["groups"])
+
+        # ② 범주(category) 선택 — edge 12방향이 한 그룹으로.
+        re = await svc.angle_group_stats(db, rep, metric="peak_stress", category="edge")
+        assert re["selection"]["mode"] == "category" and re["n_groups"] == 1
+        g = re["groups"][0]
+        assert g["category"] == "edge" and g["stats"]["n"] == 12
+        assert g["worst"]["value"] == g["stats"]["max"]
+
+        # ③ 기준방향 퍼터베이션 구름 — 순수 cuboid_26 이라 그 방향 1개(degenerate).
+        rb = await svc.angle_group_stats(db, rep, metric="peak_strain", angle_name="F1_Back")
+        assert rb["selection"]["mode"] == "base" and rb["n_groups"] == 1
+        assert rb["groups"][0]["representative"] == "F1_Back" and rb["groups"][0]["stats"]["n"] >= 1
+
+        # ④ 임의 각도 콘(near) — 좁은 tol 은 그 방향만, 넓은 tol 은 더 많이(sphere 전용).
+        near = rep  # F1_Back ≈ lon0,lat0 부근이 아니라 각 방향; 넓은 콘으로 다중 포섭 확인
+        rn_wide = await svc.angle_group_stats(db, near, metric="peak_stress", near_lon=0, near_lat=0, tol_deg=90)
+        rn_narrow = await svc.angle_group_stats(db, near, metric="peak_stress", near_lon=0, near_lat=0, tol_deg=10)
+        n_wide = rn_wide["groups"][0]["stats"]["n"] if rn_wide["groups"] else 0
+        n_narrow = rn_narrow["groups"][0]["stats"]["n"] if rn_narrow["groups"] else 0
+        assert n_wide >= n_narrow
+
+        # ⑤ 특정 부품 — 부품별 분해는 생략(단일 부품), 통계는 그 부품 값으로.
+        rp = await svc.angle_group_stats(db, rep, metric="peak_stress", part_id=1, category="face")
+        assert rp["groups"] and "parts" not in rp["groups"][0]
+
+        # ⑥ 소성 스트레인은 데이터에 없음 → 빈 그룹 + 안내(available_metrics 로 대체 안내).
+        rpl = await svc.angle_group_stats(db, rep, metric="peak_plastic_strain")
+        assert rpl["groups"] == [] and rpl["note"] and "peak_plastic_strain" in rpl["note"]
+        assert "peak_stress" in rpl["available_metrics"]
+    finally:
+        await _cleanup(db, u, s)
+
+
 @pytest.mark.skipif(not _SPHERE.exists(), reason="sphere 샘플 없음")
 async def test_find_reports_filters(db):
     u, s = await _mk(db)
