@@ -280,6 +280,30 @@ def normalize_deep(data: dict) -> dict:
 
 
 # ── sphere 정규화 ────────────────────────────────────────────────────
+def _sphere_part_metrics(p: dict) -> dict:
+    """sphere 파트의 스칼라 물리량을 전부 통과시킨다(시계열 *_ts·중첩 제외).
+
+    상류(koo_sphere_report)가 새 지표를 넣으면 하드코딩 없이 자동 인식된다(peak_vel 등).
+    - energy{peak_ie/peak_ke/final_ie/final_ke(+time)} 블록은 평탄화해 방향별 분석 대상이 되게.
+    - peak_plastic_strain 이 없고 peak_strain 이 있으면 명시 별칭 추가(상류 확인: sphere 의
+      peak_strain 은 유효소성변형률이다 — 이름만 달랐다).
+    """
+    m: dict = {}
+    for k, v in (p or {}).items():
+        if k.endswith("_ts") or isinstance(v, (dict, list, bool)):
+            continue
+        if isinstance(v, (int, float)):
+            m[k] = _num(v)
+    e = p.get("energy")
+    if isinstance(e, dict):
+        for ek in ("peak_ie", "peak_ke", "final_ie", "final_ke", "peak_ie_time", "peak_ke_time"):
+            if ek in e:
+                m[ek] = _num(e.get(ek))
+    if "peak_plastic_strain" not in m and m.get("peak_strain") is not None:
+        m["peak_plastic_strain"] = m["peak_strain"]
+    return m
+
+
 def normalize_sphere(data: dict) -> dict:
     sim_params_in = data.get("sim_params")
     if not isinstance(sim_params_in, dict):
@@ -302,14 +326,7 @@ def normalize_sphere(data: dict) -> dict:
         angle = r.get("angle") or {}
         pm = {}
         for pid, p in (r.get("parts") or {}).items():
-            pm[str(pid)] = {
-                "peak_stress": _num(p.get("peak_stress")),
-                "peak_strain": _num(p.get("peak_strain")),
-                "peak_g": _num(p.get("peak_g")),
-                "peak_disp": _num(p.get("peak_disp")),
-                "time_of_peak_stress": _num(p.get("time_of_peak_stress")),
-                "time_of_peak_g": _num(p.get("time_of_peak_g")),
-            }
+            pm[str(pid)] = _sphere_part_metrics(p)
         # 등장방형 마커용 방향 좌표(lon/lat). swap 규약을 여기서 한 번만 반영해
         # 저장한다 — 소비자(웹 마커·근접필터)가 Euler+swap 을 재계산하지 않도록.
         _lon_deg, _lat_deg = _angle_lonlat(angle)
@@ -655,6 +672,16 @@ def extract_geometry(data: dict, kind: str) -> dict:
     return {"kind": "impact", "device_outline": outline, "device_bbox": bbox, "parts": parts}
 
 
+def _ts_with_max(ts: dict | None, alt_key: str) -> dict | None:
+    """시계열에 표준 'max' 키가 없으면 대체 값키(alt_key)로 별칭을 얹는다.
+    (구버전 리포트: g_ts→'g', disp_ts→'mag'. 신버전은 'max' 를 이미 가짐)."""
+    if not isinstance(ts, dict):
+        return ts
+    if "max" not in ts and alt_key in ts:
+        return {**ts, "max": ts[alt_key]}
+    return ts
+
+
 def part_series(data: dict, kind: str, case_key: str, part_id: int) -> dict:
     """한 케이스·한 파트의 시계열(다운샘플). DB 미저장분을 원본에서 복원."""
     pid = str(part_id)
@@ -674,9 +701,12 @@ def part_series(data: dict, kind: str, case_key: str, part_id: int) -> dict:
         for r in data.get("results") or []:
             if (r.get("folder") or (r.get("angle") or {}).get("name")) == case_key:
                 p = (r.get("parts") or {}).get(pid) or {}
+                # g_ts 는 값키가 'g', disp_ts 는 'mag' 라 표준 'max' 별칭을 얹는다(소비자 일관).
                 return {"kind": "sphere", "case_key": case_key, "part_id": part_id,
                         "stress_ts": p.get("stress_ts"), "strain_ts": p.get("strain_ts"),
-                        "g_ts": p.get("g_ts"), "disp_ts": p.get("disp_ts")}
+                        "g_ts": _ts_with_max(p.get("g_ts"), "g"),
+                        "disp_ts": _ts_with_max(p.get("disp_ts"), "mag"),
+                        "acc_ts": p.get("acc_ts")}
         return {"kind": "sphere", "case_key": case_key, "part_id": part_id, "note": "케이스를 찾지 못함"}
     # impact — 평탄 results 행에서 (pos_id, part_id) 매칭.
     for row in data.get("results") or []:
@@ -743,7 +773,8 @@ def part_energy_series(data: dict, kind: str, part_id: int | None = None) -> dic
 # ── 스캐터링/섭동 분석 (sphere 전용) ────────────────────────────────
 # 26면 낙하 주변의 방향 섭동에 대한 응답 산포. 케이스를 최근접 26 정준방향으로 묶어
 # 방향별 통계(mean/std/CoV/최악)와 민감도를 낸다. sphere 리포트에서 도출한다.
-_SCATTER_METRICS = ("peak_stress", "peak_g", "peak_disp")
+_SCATTER_METRICS = ("peak_stress", "peak_strain", "peak_plastic_strain", "peak_g",
+                    "peak_disp", "peak_vel", "peak_ie", "peak_ke")
 _CUBE_BASES: list[tuple[tuple[int, int, int], tuple[float, float, float]]] | None = None
 
 
@@ -826,9 +857,9 @@ def scatter_analysis(data: dict, kind: str, *, metric: str = "peak_stress",
         a = r.get("angle") or {}
         parts = r.get("parts") or {}
         if part_id is not None:
-            val = _num((parts.get(str(part_id)) or {}).get(metric))
+            val = _sphere_part_metrics(parts.get(str(part_id)) or {}).get(metric)
         else:
-            vals = [_num((p or {}).get(metric)) for p in parts.values()]
+            vals = [_sphere_part_metrics(p or {}).get(metric) for p in parts.values()]
             vals = [x for x in vals if x is not None]
             val = max(vals) if vals else None
         if val is None:

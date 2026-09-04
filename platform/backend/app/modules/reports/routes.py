@@ -338,7 +338,7 @@ async def report_directional(
 @router.get("/reports/{report_id}/scatter")
 async def report_scatter(
     report_id: str,
-    metric: str = Query("peak_stress", pattern="^(peak_stress|peak_g|peak_disp)$"),
+    metric: str = Query("peak_stress"),
     part_id: int | None = Query(default=None),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),

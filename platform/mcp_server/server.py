@@ -596,10 +596,9 @@ async def report_scatter(
     """방향 섭동 산포 분석(sphere 전용) — 26면 낙하 주변 방향 섭동에 대한 응답 산포.
 
     케이스를 최근접 26 정준방향(면/엣지/코너)으로 묶어 방향별 metric 산포(n·mean·std·
-    CoV·최악)와 민감도(가장 산포 큰 방향)를 낸다. metric ∈ {peak_stress,peak_g,peak_disp}.
-    방향당 표본이 1개뿐(순수 26면)이면 degenerate=true(산포 0) — 섭동 DOE 라야 의미 있다."""
-    if metric not in ("peak_stress", "peak_g", "peak_disp"):
-        raise RuntimeError("metric 은 peak_stress/peak_g/peak_disp 중 하나여야 합니다.")
+    CoV·최악)와 민감도(가장 산포 큰 방향)를 낸다. metric 은 리포트에 실재하는 지표
+    (stress/strain/plastic_strain/g/disp/vel/ie/ke 등, 없으면 400). 방향당 표본이 1개뿐
+    (순수 26면)이면 degenerate=true(산포 0) — 섭동 DOE 라야 의미 있다."""
     params = {"metric": metric}
     if part_id is not None:
         params["part_id"] = part_id

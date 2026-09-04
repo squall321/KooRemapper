@@ -527,9 +527,14 @@ async def publish_to_datahub(
 # fact 질의에 허용되는 물리량(parts_metrics 키) + 그 값이 나온 시각 키.
 _QUERY_METRICS = {
     "peak_stress": "time_of_peak_stress", "peak_strain": None,
-    "peak_g": "time_of_peak_g", "peak_disp": None,
-    "peak_principal": None, "min_principal": None, "peak_vm_strain": None,
-    "safety_factor": None,
+    "peak_g": "time_of_peak_g", "peak_disp": None, "peak_vel": None,
+    "peak_plastic_strain": None,
+    "peak_principal": None, "min_principal": None,
+    "peak_principal_stress": None, "min_principal_stress": None,
+    "peak_principal_strain": None, "min_principal_strain": None,
+    "peak_vm_strain": None, "safety_factor": None,
+    "peak_ie": "peak_ie_time", "peak_ke": "peak_ke_time",
+    "final_ie": None, "final_ke": None,
 }
 _MAX_FACT_SCAN = 20000  # 한 질의가 훑는 케이스×파트 상한(서버 보호)
 

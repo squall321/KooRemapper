@@ -273,6 +273,50 @@ def test_normalize_sphere_scrubs_nan_metrics():
     assert study["cases"][0]["rollup"]["max_g"] == 5.0
 
 
+_SPHERE_ENRICHED = Path("/data/Tests/Test_001_Full26_1Step/report.html")  # energy+peak_vel 실산출물
+
+
+def test_sphere_part_metrics_passthrough_and_energy():
+    # 스칼라 물리량 전부 통과(시계열 제외), energy 평탄화, 소성 별칭.
+    p = {"peak_stress": 100.0, "peak_strain": 5.0, "peak_vel": 3.2,
+         "stress_ts": {"t": [0.0]},
+         "energy": {"peak_ie": 10.0, "peak_ke": 7.0, "final_ie": 2.0, "final_ke": 1.0}}
+    m = parser._sphere_part_metrics(p)
+    assert m["peak_vel"] == 3.2 and "stress_ts" not in m and "energy" not in m
+    assert m["peak_ie"] == 10.0 and m["peak_ke"] == 7.0 and m["final_ie"] == 2.0 and m["final_ke"] == 1.0
+    assert m["peak_plastic_strain"] == 5.0  # peak_strain 명시 별칭(상류 확인)
+
+
+def test_ts_with_max_alias():
+    assert parser._ts_with_max({"t": [0, 1], "g": [3, 5]}, "g")["max"] == [3, 5]
+    assert parser._ts_with_max({"t": [0, 1], "mag": [2, 4]}, "mag")["max"] == [2, 4]
+    assert parser._ts_with_max({"t": [0], "max": [9], "g": [1]}, "g")["max"] == [9]  # 기존 max 유지
+    assert parser._ts_with_max(None, "g") is None
+
+
+@pytest.mark.skipif(not _SPHERE_ENRICHED.exists(), reason="enriched sphere 샘플 없음")
+def test_sphere_enriched_real_report():
+    # 실 enriched 리포트(energy+peak_vel) 를 normalize 가 전부 소비하는지.
+    study = parser.parse_html(_read(_SPHERE_ENRICHED))
+    keys = set()
+    for c in study["cases"]:
+        for m in c["parts_metrics"].values():
+            keys |= set(m.keys())
+    assert "peak_vel" in keys
+    assert {"peak_ie", "peak_ke", "final_ie", "final_ke"} <= keys   # energy 평탄화
+    assert "peak_plastic_strain" in keys
+    # part_series 의 g_ts/disp_ts 에 표준 max 별칭이 붙는지(값이 있는 파트에서).
+    data = parser.extract_embedded_data(_read(_SPHERE_ENRICHED))
+    for r in data.get("results") or []:
+        ck = r.get("folder") or (r.get("angle") or {}).get("name")
+        for pid, pk in (r.get("parts") or {}).items():
+            if isinstance(pk.get("g_ts"), dict):
+                s = parser.part_series(data, "sphere", ck, int(pid))
+                assert "max" in s["g_ts"] and "max" in s["disp_ts"]
+                return
+    pytest.skip("g_ts 있는 파트를 찾지 못함")
+
+
 def test_deferred_koo_data_script():
     # deferred(tier C) 임베드: <script type=application/json id=koo-data>.
     payload = {"positions": [], "results": [], "faces": [], "doe_analysis": {}}

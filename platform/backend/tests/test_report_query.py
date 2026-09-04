@@ -107,9 +107,10 @@ async def test_angle_group_stats(db):
     try:
         rep = await svc.ingest_report(db, s, filename="t.html", raw=_SPHERE.read_bytes(), project="S26")
 
-        # available_metrics — 낙하 리포트에 실재하는 물리량(소성 스트레인은 없음).
+        # available_metrics — 리포트에 실재하는 물리량을 자동 감지(peak_vel·소성 별칭 포함).
         r0 = await svc.angle_group_stats(db, rep, metric="peak_stress")
-        assert set(r0["available_metrics"]) == {"peak_disp", "peak_g", "peak_strain", "peak_stress"}
+        assert {"peak_disp", "peak_g", "peak_strain", "peak_stress",
+                "peak_plastic_strain", "peak_vel"} <= set(r0["available_metrics"])
 
         # ① 전체(미지정) — sphere 는 base별 그룹, 26방향, 동일 통계 스키마 + mean 내림차순.
         assert r0["selection"]["mode"] == "all_bases" and r0["n_groups"] == 26
@@ -143,10 +144,14 @@ async def test_angle_group_stats(db):
         rp = await svc.angle_group_stats(db, rep, metric="peak_stress", part_id=1, category="face")
         assert rp["groups"] and "parts" not in rp["groups"][0]
 
-        # ⑥ 소성 스트레인은 데이터에 없음 → 빈 그룹 + 안내(available_metrics 로 대체 안내).
-        rpl = await svc.angle_group_stats(db, rep, metric="peak_plastic_strain")
-        assert rpl["groups"] == [] and rpl["note"] and "peak_plastic_strain" in rpl["note"]
+        # ⑥ 없는 물리량 → 빈 그룹 + 안내(available_metrics 로 대체 안내).
+        rpl = await svc.angle_group_stats(db, rep, metric="made_up_metric")
+        assert rpl["groups"] == [] and rpl["note"] and "made_up_metric" in rpl["note"]
         assert "peak_stress" in rpl["available_metrics"]
+
+        # ⑦ 소성 변형률은 이제 자동 인식(sphere peak_strain==eff_plastic 별칭) → 방향별 통계 나옴.
+        rps = await svc.angle_group_stats(db, rep, metric="peak_plastic_strain", category="edge")
+        assert rps["groups"] and rps["groups"][0]["stats"]["n"] == 12
     finally:
         await _cleanup(db, u, s)
 

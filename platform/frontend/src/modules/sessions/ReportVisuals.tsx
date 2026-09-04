@@ -6,11 +6,16 @@ import { reportGeometry, reportQuery } from '@/shared/api/endpoints'
 import type { Report, ReportFact, ReportGeometry } from '@/shared/api/types'
 import { Button, Select, Spinner } from '@/shared/ui/ui'
 
+// 값이 없는 지표는 조회 시 빈 결과로 안내되므로, 리포트에 있으면 자동으로 채워진다.
 const METRICS = [
   { v: 'peak_stress', label: '응력(MPa)' },
   { v: 'peak_g', label: 'G' },
   { v: 'peak_disp', label: '변위(mm)' },
   { v: 'peak_strain', label: '변형률' },
+  { v: 'peak_plastic_strain', label: '소성변형률' },
+  { v: 'peak_vel', label: '속도' },
+  { v: 'peak_ie', label: '내부E(IE)' },
+  { v: 'peak_ke', label: '운동E(KE)' },
 ]
 
 /** 값 → 색(색각 안전 순차 램프, 파랑→회→노랑. 적록 회피·명도 단조). */
