@@ -317,6 +317,20 @@ def test_sphere_enriched_real_report():
     pytest.skip("g_ts 있는 파트를 찾지 못함")
 
 
+def test_available_metrics_excludes_time_and_series():
+    # 시각(_time·time_of_)·시계열(*_ts) 필드는 분석 가능 물리량으로 노출되면 안 된다.
+    from types import SimpleNamespace
+    from app.modules.reports import services as svc
+    cases = [SimpleNamespace(parts_metrics={"1": {
+        "peak_stress": 100.0, "peak_ie": 5.0, "peak_plastic_strain": 2.0,
+        "peak_ie_time": 3.4e-5, "peak_ke_time": 1.0e-5,
+        "time_of_peak_stress": 2.0, "stress_ts": {"t": [0]},
+    }})]
+    m = svc._available_metrics(cases)
+    assert {"peak_stress", "peak_ie", "peak_plastic_strain"} <= set(m)
+    assert not ({"peak_ie_time", "peak_ke_time", "time_of_peak_stress", "stress_ts"} & set(m))
+
+
 def test_deferred_koo_data_script():
     # deferred(tier C) 임베드: <script type=application/json id=koo-data>.
     payload = {"positions": [], "results": [], "faces": [], "doe_analysis": {}}

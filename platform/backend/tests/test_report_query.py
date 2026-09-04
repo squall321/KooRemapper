@@ -89,6 +89,13 @@ async def test_query_facts_filters(db):
         # ⑦ 잘못된 metric → ValueError(400).
         with pytest.raises(ValueError):
             await svc.query_facts(db, rep, metric="banana")
+
+        # ⑧ swap=true(cuboid_26) 코너 방향 근접 — raw roll/pitch 로 지목해도 그 케이스가 잡혀야.
+        #    (과거 버그: 타깃이 swap 미반영이라 C5(roll135,pitch45)가 60° 벗어나 누락)
+        q8 = await svc.query_facts(db, rep, near_roll=135, near_pitch=45, angle_tol_deg=10,
+                                   metric="peak_stress", limit=1000)
+        names8 = {f["identity"]["angle"]["name"] for f in q8["facts"]}
+        assert "C5_Front_Right_Top" in names8
     finally:
         await _cleanup(db, u, s)
 

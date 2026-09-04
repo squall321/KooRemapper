@@ -563,23 +563,30 @@ async def query_facts(
     """리포트 내부를 서버에서 필터해 (케이스=각도 × 부품 × 물리량 = 값) fact 슬라이스를 준다.
 
     필터: part_id(특정 부품) · category(면/엣지/코너·F1~F6) · angle_name(F1_Back 등) ·
-    near_(roll,pitch,yaw)+angle_tol_deg(각도 근접, 대원거리) · metric · min/max_value.
+    near_(roll,pitch)+angle_tol_deg(각도 근접, 대원거리; yaw 는 낙하방향 무영향이라 무시) · metric · min/max_value.
     정렬·limit 까지 서버에서 처리 — LLM 은 걸러진 결과만 받는다. 대형 sphere 안전.
     """
     from math import acos, cos, radians, sin
     if metric not in _QUERY_METRICS:
         raise ValueError(f"metric 은 {sorted(_QUERY_METRICS)} 중 하나여야 합니다.")
 
-    # 각도 근접 타깃 벡터(주어졌을 때). identity 저장 규약과 동일하게 계산해 self-consistent.
+    # SQL 선필터: report_id. 나머지는 로드 후 판정.
+    cases = list((await db.execute(
+        select(ImpactCase).where(ImpactCase.report_id == report.id)
+    )).scalars())
+
+    # 각도 근접 타깃 벡터 — 후보는 저장 lon/lat(swap 반영)을 쓰므로, 타깃도 같은 규약으로
+    # 투영해야 정합한다(과거엔 raw roll/pitch 를 lat/lon 으로 직접 써 swap=true 서 어긋났다).
+    # 리포트 단위 swap 은 케이스에서 취득(같은 DOE → 동일). yaw 는 낙하 방향 무영향이라 무시.
     target_vec = None
-    if angle_tol_deg is not None or any(x is not None for x in (near_roll, near_pitch, near_yaw)):
-        lat, lon = radians(near_roll or 0.0), radians(near_pitch or 0.0)
+    if angle_tol_deg is not None or any(x is not None for x in (near_roll, near_pitch)):
+        rep_swap = next((bool(_angle_of(c.identity).get("swap")) for c in cases
+                         if _angle_of(c.identity).get("swap") is not None), False)
+        t_lon, t_lat = parser._angle_lonlat(
+            {"roll": near_roll or 0.0, "pitch": near_pitch or 0.0, "swap": rep_swap})
+        lat, lon = radians(t_lat), radians(t_lon)
         target_vec = (cos(lat) * cos(lon), cos(lat) * sin(lon), sin(lat))
         tol = angle_tol_deg if angle_tol_deg is not None else 15.0
-
-    # SQL 선필터: report_id (+ 가능하면 category 를 JSONB 로). 나머지는 로드 후 판정.
-    q = select(ImpactCase).where(ImpactCase.report_id == report.id)
-    cases = list((await db.execute(q)).scalars())
 
     name_of = {int(p["part_id"]): p.get("name") for p in (report.parts or []) if _isint(p.get("part_id"))}
     tkey = _QUERY_METRICS[metric]
@@ -844,7 +851,8 @@ def _available_metrics(cases: list[ImpactCase]) -> list[str]:
             if not isinstance(m, dict):
                 continue
             for k, v in m.items():
-                if k.startswith("time_of_") or k.endswith("_ts"):
+                # 시계열(*_ts)·이벤트 시각(time_of_*, *_time: peak_ie_time 등)은 분석 물리량 아님.
+                if k.startswith("time_of_") or k.endswith(("_ts", "_time")):
                     continue
                 if isinstance(v, (int, float)) and not isinstance(v, bool):
                     keys.add(k)
@@ -862,6 +870,15 @@ def _percentile(s: list[float], q: float) -> float:
     return s[lo] + (s[hi] - s[lo]) * (pos - lo)
 
 
+# 값이 '작을수록 나쁜' 물리량 — worst 는 max 가 아니라 min, top_risk 는 오름차순.
+_LOWER_IS_WORSE = {"safety_factor", "min_principal", "min_principal_strain", "min_principal_stress"}
+
+
+def _cov(std: float, mean: float) -> float | None:
+    """변동계수 — 부호 있는/0 근처 평균에서 음수·발산 방지(크기 기준)."""
+    return (std / abs(mean)) if mean else None
+
+
 def _stat_block(vals: list[float]) -> dict:
     """표준 통계 블록 — 어느 각도군이든 동일 스키마라 비교 가능. std 는 표본(n-1)."""
     s = sorted(vals)
@@ -870,15 +887,16 @@ def _stat_block(vals: list[float]) -> dict:
     std = statistics.stdev(s) if n > 1 else 0.0
     p25, p75 = _percentile(s, 25), _percentile(s, 75)
     return {
-        "n": n, "mean": mean, "std": std, "cov": (std / mean) if mean else None,
+        "n": n, "mean": mean, "std": std, "cov": _cov(std, mean),
         "min": s[0], "p05": _percentile(s, 5), "p25": p25, "median": _percentile(s, 50),
         "p75": p75, "p95": _percentile(s, 95), "max": s[-1],
         "iqr": p75 - p25, "range": s[-1] - s[0],
     }
 
 
-def _part_breakdown(recs: list[dict], name_of: dict, top: int) -> dict:
-    """각도군 안에서 부품별 위험(max)·민감도(CoV) 분해 — '이 방향군에서 어느 부품이'."""
+def _part_breakdown(recs: list[dict], name_of: dict, top: int, lower: bool = False) -> dict:
+    """각도군 안에서 부품별 위험(worst)·민감도(CoV) 분해 — '이 방향군에서 어느 부품이'.
+    lower=True(safety_factor·min_principal 등)면 작을수록 위험 → worst=min, 오름차순."""
     by_part: dict[int, list[float]] = {}
     for r in recs:
         for pid, v in r["per_part"].items():
@@ -888,8 +906,8 @@ def _part_breakdown(recs: list[dict], name_of: dict, top: int) -> dict:
         mean = statistics.fmean(vs)
         std = statistics.stdev(vs) if len(vs) > 1 else 0.0
         rows.append({"part_id": pid, "part_name": name_of.get(pid), "n": len(vs),
-                     "mean": mean, "max": max(vs), "cov": (std / mean) if mean else None})
-    top_risk = sorted(rows, key=lambda d: -d["max"])[:top]
+                     "mean": mean, "worst": (min(vs) if lower else max(vs)), "cov": _cov(std, mean)})
+    top_risk = sorted(rows, key=lambda d: (d["worst"] if lower else -d["worst"]))[:top]
     sens = [d for d in rows if d["n"] >= 2 and d["cov"] is not None]
     most_sensitive = sorted(sens, key=lambda d: -(d["cov"] or 0))[:top]
     return {"top_risk": top_risk, "most_sensitive": most_sensitive}
@@ -921,6 +939,7 @@ async def angle_group_stats(
                 "note": f"이 리포트엔 '{metric}' 가 없습니다. 사용 가능: {avail}"}
     name_of = {int(p["part_id"]): p.get("name") for p in (report.parts or []) if _isint(p.get("part_id"))}
     is_sphere = report.kind == "sphere"
+    lower = metric in _LOWER_IS_WORSE   # 작을수록 나쁜 지표(safety_factor·min_principal 등)
 
     recs: list[dict] = []
     for c in cases:
@@ -942,7 +961,8 @@ async def angle_group_stats(
         else:
             if not per_part:
                 continue
-            val_part = max(per_part, key=lambda k: per_part[k])
+            # 케이스 대표 파트 = 가장 나쁜 파트(작을수록 나쁜 지표는 min).
+            val_part = (min if lower else max)(per_part, key=lambda k: per_part[k])
             case_val = per_part[val_part]
         vec = parser._angle_vec(ang) if is_sphere else None
         bkey, berr = parser._nearest_base(vec) if vec else (None, None)
@@ -996,16 +1016,17 @@ async def angle_group_stats(
     for label, b in buckets.items():
         rs = b["recs"]
         stats = _stat_block([r["case_val"] for r in rs])
-        w = max(rs, key=lambda r: r["case_val"])
+        w = (min if lower else max)(rs, key=lambda r: r["case_val"])
         g = {"group_key": label, "category": b["cat"], "representative": b.get("rep"),
              "stats": stats,
              "worst": {"value": w["case_val"], "angle_name": w["angle_name"],
                        "part_id": w["val_part"], "part_name": name_of.get(w["val_part"]),
                        "case_key": w["case_key"]}}
         if part_id is None:
-            g["parts"] = _part_breakdown(rs, name_of, top_parts)
+            g["parts"] = _part_breakdown(rs, name_of, top_parts, lower)
         groups.append(g)
-    groups.sort(key=lambda d: -(d["stats"]["mean"] or 0))
+    # 가장 위험한 그룹부터: 작을수록 나쁜 지표는 mean 오름차순, 아니면 내림차순.
+    groups.sort(key=lambda d: (d["stats"]["mean"] or 0) * (1 if lower else -1))
 
     return {**base, "selection": selection, "n_cases_total": len(recs),
             "n_groups": len(groups), "groups": groups,

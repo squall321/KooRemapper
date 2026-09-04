@@ -877,7 +877,7 @@ def scatter_analysis(data: dict, kind: str, *, metric: str = "peak_stress",
     for key, g in groups.items():
         vals = g["values"]
         mean = statistics.fmean(vals)
-        std = statistics.pstdev(vals) if len(vals) > 1 else 0.0
+        std = statistics.stdev(vals) if len(vals) > 1 else 0.0  # 표본(n-1) — angle_group_stats 와 통일
         worst = max(g["cases"], key=lambda c: c[0])
         out_groups.append({
             "base": ",".join(str(c) for c in key),

@@ -66,11 +66,13 @@ function spherePlot(facts: ReportFact[], norm: (v: number) => number, worst: Rep
                     unit: string, fmt: (v: number) => string): Plot {
   const W = 320, H = 170, pad = 18
   const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
+  const wrapLon = (v: number) => (((v + 180) % 360) + 360) % 360 - 180
   const lonlat = (f: ReportFact) => {
-    const a = (f.identity as { angle?: { lon?: number; lat?: number; roll?: number; pitch?: number } })?.angle ?? {}
-    const lon = a.lon ?? a.pitch ?? 0            // 폴백: 구버전 리포트(재인제스트 전)
-    const lat = clamp(a.lat ?? a.roll ?? 0, -90, 90)
-    return { lon: clamp(lon, -180, 180), lat }
+    const a = (f.identity as { angle?: { lon?: number; lat?: number; roll?: number; pitch?: number; swap?: boolean } })?.angle ?? {}
+    if (typeof a.lon === 'number' && typeof a.lat === 'number') return { lon: wrapLon(a.lon), lat: clamp(a.lat, -90, 90) }
+    // 폴백(구버전 리포트, lon/lat 미저장): swap 규약 반영 + 경도 래핑(클램프 아님).
+    const roll = a.roll ?? 0, pitch = a.pitch ?? 0
+    return { lon: wrapLon(a.swap ? roll : pitch), lat: clamp(a.swap ? pitch : roll, -90, 90) }
   }
   const sx = (lon: number) => pad + ((lon + 180) / 360) * (W - 2 * pad)
   const sy = (lat: number) => pad + ((90 - lat) / 180) * (H - 2 * pad)
@@ -222,7 +224,11 @@ function MarkerFigure({ plot, caption, vmin, vmax, unit, fileBase }: {
 
 export function ReportVisuals({ report }: { report: Report }) {
   const partList = report.parts ?? []
-  const [partId, setPartId] = useState<number | ''>(partList[0]?.part_id ?? '')
+  // 기본 파트를 parts[0](흔히 강체/바닥 파트1, 값이 비거나 0)이 아니라 최악응력 파트로 —
+  // 첫 화면이 빈 맵으로 떠 '데이터 없음'으로 오독되는 것 방지(파트1 함정).
+  const worstPart = (report.summary as { worst_stress?: { part_id?: number } } | null)?.worst_stress?.part_id
+  const [partId, setPartId] = useState<number | ''>(
+    (typeof worstPart === 'number' ? worstPart : partList[0]?.part_id) ?? '')
   const [metric, setMetric] = useState('peak_stress')
 
   const facts = useQuery({
