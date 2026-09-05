@@ -50,7 +50,8 @@ SmartTwin 파이프라인이 만든 deep(단건 심층)·sphere(전각도 낙하
 | `list_reports` | session_id, kfile_id? | GET /sessions/{id}/reports | 세션의 리포트 목록(kfile_id=그 K에 매달린 것만) |
 | `report_facets` | — | GET /reports/facets | 검색 facet — 어떤 kind·과제·rev·방향컨셉·초점·심각도·높이가 있나 + 건수(먼저 '뭐가 있나') |
 | `find_reports` | kind?·project?·dev_rev?·variation?·doe?·focus?·doe_strategy?·scenario_type?·drop_height?·severity?·min_worst_stress?·min_worst_g?·has_part?·q?·since/until?·session_id?·kfile_id?·sort·order·limit | GET /reports | 조건으로 리포트 검색(전 세션, 서버 다축 필터). 목표→리포트 특정 |
-| `report_query` | report_id, part_id?·category?·angle_name?·near_roll/pitch/yaw+angle_tol_deg?·metric?·min/max_value?·sort·limit | GET /reports/{id}/query | 리포트 내부 fact 드릴다운(부품×각도×물리량×값, 서버 필터) |
+| `report_query` | report_id, part_id?·category?·angle_name?·near_roll/pitch+angle_tol_deg?(yaw 무시)·metric?·min/max_value?·sort·limit | GET /reports/{id}/query | 리포트 내부 fact 드릴다운(부품×각도×물리량×값, 서버 필터) |
+| `report_angle_stats` | report_id, metric?·part_id?·category?/angle_name?/near_lon+near_lat+tol_deg?·top_parts? | GET /reports/{id}/angle-stats | 특정 각도군 표준 통계(분포 n/mean/std/CoV/백분위/IQR/최악 + 부품별 위험·민감도). available_metrics 자동 감지 |
 | `update_report_meta` | report_id, label?·project?·dev_rev?·variation?·doe?·focus?·kfile_id? | PATCH /reports/{id} | 과제명·rev·초점·K파일 링크 수동 설정(""=삭제) |
 | `attach_report_scenario` | report_id, scenario_content | POST /reports/{id}/scenario | 시뮬 조건 scenario.json 첨부 — 요약 캐시 + K파일 자동매칭 |
 | `report_summary` | report_id | GET /reports/{id} | kind·과제메타·scenario·sim_params·parts·findings·전역 최악·검색축 |
@@ -60,7 +61,9 @@ SmartTwin 파이프라인이 만든 deep(단건 심층)·sphere(전각도 낙하
 | `report_directional` | report_id, part_id? | GET /reports/{id}/directional | 방향 범주(sphere 면/엣지/코너, impact F1~F6)별 최악 응력·G |
 | `report_scatter` | report_id, metric?, part_id? | GET /reports/{id}/scatter | 방향 섭동 산포(sphere) — 26방향별 mean/std/CoV/최악 + 민감도 |
 | `report_energy_flow` | report_id, case_key? | GET /reports/{id}/energy | deep=에너지밸런스·접촉력·Newton-3, sphere/impact=하중경로 그래프 |
+| `report_part_energy` | report_id, part_id? | GET /reports/{id}/part-energy | 파트별 에너지(내부 IE·운동 KE) 시계열(deep matsum, 있을 때) |
 | `report_part_series` | report_id, case_key, part_id | GET /reports/{id}/cases/{key}/series | 케이스·파트 시계열(응력/변형률/G/변위, 다운샘플) |
+| `report_geometry` | report_id | GET /reports/{id}/geometry | impact 디바이스 외곽선+파트 footprint(XY)+z범위 — 부품 위치 시각화 |
 | `report_findings` | report_id, severity? | GET /reports/{id}/findings | 위험 소견(CRITICAL/WARNING/INFO) |
 | `compare_reports` | report_ids[], part_id? | (다중 GET) | 리비전/조건 간 파트별 최악값 비교(federate 식) |
 | `publish_report_to_datahub` | report_id, project, stage, variation?, doe?, unit?, title? | POST /reports/{id}/publish-datahub | AI Data Hub 에 범용 sim_report 레코드로 등재(eng_meta 연계) |

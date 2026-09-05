@@ -73,10 +73,15 @@ impact 전위치 부분충격)을 인제스트해 구조화 분석한다.
 6. **심화 분석** —
    - `report_directional(report_id, part_id?)` : 방향 범주(면/엣지/코너, F1~F6)별 최악.
    - `report_scatter(report_id, metric?)` : sphere 방향 섭동 산포/민감도(26방향별 mean/std/CoV/최악).
+   - `report_angle_stats(report_id, metric?, part_id?, category?/angle_name?/near_lon+near_lat+tol_deg?, top_parts?)` :
+     특정 각도군(범주·기준방향 퍼터베이션·임의 콘·전체) 표준 통계(분포 n/mean/std/CoV/백분위/IQR/최악 +
+     부품별 위험·민감도). metric 은 리포트에 실재하는 것만(응답 available_metrics).
    - `report_energy_flow(report_id, case_key?)` : deep 에너지밸런스·접촉, sphere/impact 하중경로.
-   - `report_part_series(report_id, case_key, part_id)` : 케이스·파트 시계열.
-   - `report_query(report_id, part_id?, category?, near_roll/pitch/yaw+angle_tol_deg?, metric?, min_value?)` :
-     리포트 안 fact 드릴다운 — "특정 부품이 특정 각도에서 응력 상위 N" 을 한 콜(서버 필터).
+   - `report_part_energy(report_id, part_id?)` : 파트별 에너지(내부 IE·운동 KE) 시계열(deep matsum, 있을 때).
+   - `report_part_series(report_id, case_key, part_id)` : 케이스·파트 시계열(응력/변형률/G/변위).
+   - `report_geometry(report_id)` : impact 디바이스 외곽선+파트 footprint(XY)+z범위 — "부품이 어디 있나" 시각화.
+   - `report_query(report_id, part_id?, category?, angle_name?, near_roll/pitch+angle_tol_deg?, metric?, min/max_value?)` :
+     리포트 안 fact 드릴다운 — "특정 부품이 특정 각도에서 응력 상위 N" 을 한 콜(서버 필터, yaw 는 무시).
 7. **리비전 비교** — `compare_reports([id1, id2, ...])` 로 조건/리비전 간 파트별 최악값을 나란히 본다.
 8. **DataHub 등재** — `publish_report_to_datahub(report_id, project, stage)` 로 구조화 요약을
    AI Data Hub 데이터 자산(sim_report)으로 올린다(과제/개발단계/BOM 연계, 검색·리비전 비교용).
