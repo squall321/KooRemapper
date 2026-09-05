@@ -1,10 +1,10 @@
 // Typed API functions per resource.
 import { api, unwrap } from './client'
 import type {
-  Job, ModelMeta, OperationDetail, OperationSummary, Report, ReportCase, ReportDirectional,
-  ReportEnergy, ReportFactQuery, ReportGeometry, ReportListItem, ReportPartRisk, ReportPartSeries,
-  ReportScatter, ScatterMetric, SessionDetail, SessionFile, SessionSummary, TokenCreated,
-  TokenInfo, User,
+  AngleGroupStats, Job, ModelMeta, OperationDetail, OperationSummary, PartEnergySeries, Report,
+  ReportCase, ReportDirectional, ReportEnergy, ReportFactQuery, ReportGeometry, ReportListItem,
+  ReportPartRisk, ReportPartSeries, ReportScatter, ScatterMetric, SessionDetail, SessionFile,
+  SessionSummary, TokenCreated, TokenInfo, User,
 } from './types'
 
 // auth
@@ -211,6 +211,19 @@ export async function reportQuery(
     params: { metric: 'peak_stress', limit: 2000, ...opts },
   })
   return unwrap<ReportFactQuery>(data)
+}
+/** 특정 각도군 표준 통계(분포 + 부품별 위험/민감도) — 선택 모드 인자(미지정=전체 그룹). */
+export async function reportAngleStats(
+  reportId: string,
+  opts: { metric?: string; part_id?: number; category?: string; angle_name?: string; near_lon?: number; near_lat?: number; tol_deg?: number; top_parts?: number } = {},
+): Promise<AngleGroupStats> {
+  const { data } = await api.get(`/reports/${reportId}/angle-stats`, { params: opts })
+  return unwrap<AngleGroupStats>(data)
+}
+/** 파트별 에너지(IE/KE) 시계열 — deep matsum. part_id 로 한 파트만. */
+export async function reportPartEnergy(reportId: string, partId?: number): Promise<PartEnergySeries> {
+  const { data } = await api.get(`/reports/${reportId}/part-energy`, { params: partId != null ? { part_id: partId } : {} })
+  return unwrap<PartEnergySeries>(data)
 }
 export async function reportPartSeries(
   reportId: string, caseKey: string, partId: number,

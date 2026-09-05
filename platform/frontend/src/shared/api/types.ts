@@ -337,6 +337,47 @@ export interface ReportFactQuery {
   truncated: boolean
   facts: ReportFact[]
 }
+/** 각도군 표준 통계 — 분포(백분위·IQR·CoV) + 부품별 위험·민감도. */
+export interface AngleStatBlock {
+  n: number; mean: number; std: number; cov: number | null
+  min: number; p05: number; p25: number; median: number; p75: number; p95: number; max: number
+  iqr: number; range: number
+}
+export interface AnglePartRow {
+  part_id: number; part_name: string | null; n: number; mean: number; worst: number; cov: number | null
+}
+export interface AngleGroupStats {
+  report_id: string
+  kind: ReportKind
+  metric: string
+  part_id: number | null
+  available_metrics: string[]
+  selection?: { mode: string; category?: string; angle_name?: string; near_lon?: number; near_lat?: number; tol_deg?: number }
+  n_cases_total: number
+  n_groups?: number
+  groups: Array<{
+    group_key: string
+    category: string
+    representative: string | null
+    stats: AngleStatBlock
+    worst: { value: number; angle_name: string | null; part_id: number; part_name: string | null; case_key: string }
+    parts?: { top_risk: AnglePartRow[]; most_sensitive: AnglePartRow[] }
+  }>
+  note?: string | null
+}
+/** 파트별 에너지(내부 IE·운동 KE) 시계열 — deep matsum(있을 때). */
+export interface PartEnergySeries {
+  kind: ReportKind
+  t?: number[] | null
+  part_id?: number | null
+  parts: Array<{
+    part_id: number; part_name: string | null
+    internal_energy: number[] | null; kinetic_energy: number[] | null
+    peak_internal_energy: number | null; peak_kinetic_energy: number | null
+    hourglass_energy?: number[]
+  }>
+  note?: string | null
+}
 
 export interface ReportCase {
   id: number

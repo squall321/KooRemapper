@@ -7,13 +7,14 @@
 // 색은 전부 테마 토큰(currentColor/text-*)으로 잡아 라이트·다크가 자동으로 따라온다.
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Activity, AlertTriangle, Compass, Layers, LineChart } from 'lucide-react'
+import { Activity, AlertTriangle, Compass, Layers, LineChart, Sigma, Zap } from 'lucide-react'
 import {
-  reportDirectional, reportEnergy, reportPartRisk, reportPartSeries, reportScatter,
+  reportAngleStats, reportDirectional, reportEnergy, reportPartEnergy, reportPartRisk,
+  reportPartSeries, reportScatter,
 } from '@/shared/api/endpoints'
 import type {
-  Report, ReportCase, ReportDirectional, ReportEnergy, ReportPartRisk, ReportPartSeries,
-  ReportScatter, ScatterMetric,
+  AngleGroupStats, PartEnergySeries, Report, ReportCase, ReportDirectional, ReportEnergy,
+  ReportPartRisk, ReportPartSeries, ReportScatter, ScatterMetric,
 } from '@/shared/api/types'
 import { Badge, EmptyState, Spinner } from '@/shared/ui/ui'
 
@@ -32,6 +33,14 @@ function smart(n: number | null | undefined): string {
 const METRIC_LABEL: Record<ScatterMetric, string> = {
   peak_stress: '최대응력', peak_g: '최대 G', peak_disp: '최대변위',
 }
+// 각도군 통계는 리포트에 실재하는 어떤 물리량이든 받으므로(available_metrics) 넓은 라벨맵 + 폴백.
+const M_LABEL: Record<string, string> = {
+  peak_stress: '응력', peak_strain: '변형률', peak_plastic_strain: '소성변형률',
+  peak_g: 'G', peak_disp: '변위', peak_vel: '속도',
+  peak_ie: '내부E', peak_ke: '운동E', final_ie: '최종IE', final_ke: '최종KE',
+  peak_principal: '주응력', min_principal: '최소주응력', peak_vm_strain: 'vM변형률', safety_factor: '안전계수',
+}
+const mlabel = (m: string) => M_LABEL[m] ?? m
 
 // ── 차트 프리미티브 ──────────────────────────────────────────────────────────
 /** 가로 막대 — 크기 비교용. 값은 막대 끝에 직접 라벨한다(범례 없이 읽히게). */
@@ -134,12 +143,14 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: 'ok
 }
 
 // ── 탭 ───────────────────────────────────────────────────────────────────────
-type TabKey = 'parts' | 'directional' | 'scatter' | 'energy' | 'series'
+type TabKey = 'parts' | 'directional' | 'scatter' | 'anglestats' | 'energy' | 'partenergy' | 'series'
 const TABS: Array<{ key: TabKey; label: string; icon: typeof Layers; kinds?: string[] }> = [
   { key: 'parts', label: '파트 위험도', icon: Layers },
   { key: 'directional', label: '방향 취약도', icon: Compass },
   { key: 'scatter', label: '방향 산포', icon: Activity, kinds: ['sphere'] },
+  { key: 'anglestats', label: '각도군 통계', icon: Sigma, kinds: ['sphere', 'impact'] },
   { key: 'energy', label: '에너지·접촉', icon: AlertTriangle },
+  { key: 'partenergy', label: '파트 에너지', icon: Zap, kinds: ['deep'] },
   { key: 'series', label: '파트 시계열', icon: LineChart },
 ]
 
@@ -171,7 +182,9 @@ export function ReportAnalysis({ report, cases }: { report: Report; cases: Repor
         {tab === 'parts' && <PartsView reportId={report.id} />}
         {tab === 'directional' && <DirectionalView reportId={report.id} />}
         {tab === 'scatter' && <ScatterView reportId={report.id} />}
+        {tab === 'anglestats' && <AngleStatsView reportId={report.id} />}
         {tab === 'energy' && <EnergyView reportId={report.id} cases={cases} />}
+        {tab === 'partenergy' && <PartEnergyView reportId={report.id} />}
         {tab === 'series' && <SeriesView report={report} cases={cases} />}
       </div>
     </div>
@@ -420,6 +433,102 @@ function SeriesView({ report, cases }: { report: Report; cases: ReportCase[] }) 
       {q.isLoading ? <Spinner />
         : q.data?.note ? <EmptyState title="시계열 없음" hint={q.data.note} />
         : <Sparkline xs={xs} ys={ys} />}
+    </div>
+  )
+}
+
+// ── 각도군 통계 ──────────────────────────────────────────────────────────────
+// 방향군(sphere=base·범주, impact=면)별 분포(mean/±σ/최소–최대/최악) + 위험 부품.
+// 물리량 목록은 리포트에 실재하는 것(available_metrics)으로 동적 구성 — 소성·에너지도 여기서.
+function AngleStatsView({ reportId }: { reportId: string }) {
+  const [metric, setMetric] = useState('peak_stress')
+  const q = useQuery<AngleGroupStats>({
+    queryKey: ['report-anglestats', reportId, metric], queryFn: () => reportAngleStats(reportId, { metric }),
+  })
+  if (q.isLoading) return <Spinner />
+  const d = q.data
+  const avail = d?.available_metrics ?? []
+  const groups = d?.groups ?? []
+  const domainMax = Math.max(...groups.map((g) => g.stats.max ?? 0), 0) || 1
+  return (
+    <div className="space-y-2 text-[11px]">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-muted">물리량</span>
+        {avail.map((m) => (
+          <button key={m} onClick={() => setMetric(m)}
+            className={`px-1.5 py-0.5 rounded text-[10px] ${metric === m ? 'bg-primary text-primary-fg' : 'text-muted hover:text-fg'}`}>
+            {mlabel(m)}
+          </button>
+        ))}
+      </div>
+      {!groups.length ? (
+        <EmptyState title="데이터 없음" hint={d?.note ?? '이 물리량이 리포트에 없습니다.'} />
+      ) : (
+        <>
+          <div className="flex items-center gap-2 text-[10px] text-muted">
+            <span>방향군 {groups.length}개 · 위험한 순</span>
+            <span className="inline-block w-3 h-[7px] rounded-sm bg-primary/40" /> ±1σ
+            <span className="inline-block w-[2px] h-3 bg-fg" /> 평균
+            <span className="inline-block w-[2px] h-3 bg-danger" /> 최악
+            <span className="ml-auto">단위 {mlabel(metric)}</span>
+          </div>
+          {groups.map((g) => (
+            <div key={g.group_key} className="space-y-0.5">
+              <SpreadRow
+                label={`${g.representative ?? g.group_key} · ${g.category} · n=${g.stats.n}`}
+                mean={g.stats.mean} std={g.stats.std} min={g.stats.min} max={g.stats.max}
+                worst={g.worst.value} cov={g.stats.cov} domainMax={domainMax}
+              />
+              {g.parts?.top_risk?.length ? (
+                <div className="pl-2 text-[10px] text-muted">
+                  위험 부품 {g.parts.top_risk.slice(0, 3).map((p) => `${p.part_name ?? p.part_id}(${smart(p.worst)})`).join(' · ')}
+                </div>
+              ) : null}
+            </div>
+          ))}
+        </>
+      )}
+    </div>
+  )
+}
+
+// ── 파트 에너지 ──────────────────────────────────────────────────────────────
+// deep matsum 의 파트별 내부(IE)·운동(KE) 에너지 시간이력. run 이 matsum 을 덤프해야 담긴다.
+function PartEnergyView({ reportId }: { reportId: string }) {
+  const q = useQuery<PartEnergySeries>({
+    queryKey: ['report-partenergy', reportId], queryFn: () => reportPartEnergy(reportId),
+  })
+  const [pid, setPid] = useState<number | null>(null)
+  if (q.isLoading) return <Spinner />
+  const d = q.data
+  const parts = d?.parts ?? []
+  if (!parts.length) {
+    return <EmptyState title="파트 에너지 없음"
+      hint={d?.note ?? 'LS-DYNA run 이 matsum 을 덤프해야 파트별 에너지 시계열이 담깁니다.'} />
+  }
+  const sel = parts.find((p) => p.part_id === pid) ?? parts[0]
+  const t = d?.t ?? []
+  return (
+    <div className="space-y-2 text-[11px]">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-muted">부품</span>
+        <select value={sel.part_id} onChange={(e) => setPid(Number(e.target.value))}
+                className="bg-transparent border border-border rounded px-1 py-0.5 text-[11px] text-fg max-w-[240px]">
+          {parts.map((p) => <option key={p.part_id} value={p.part_id}>{p.part_name || `part ${p.part_id}`}</option>)}
+        </select>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <div className="text-muted mb-1">내부에너지 IE · peak {smart(sel.peak_internal_energy)}</div>
+          {sel.internal_energy && t.length ? <Sparkline xs={t} ys={sel.internal_energy} />
+            : <span className="text-muted">—</span>}
+        </div>
+        <div>
+          <div className="text-muted mb-1">운동에너지 KE · peak {smart(sel.peak_kinetic_energy)}</div>
+          {sel.kinetic_energy && t.length ? <Sparkline xs={t} ys={sel.kinetic_energy} />
+            : <span className="text-muted">—</span>}
+        </div>
+      </div>
     </div>
   )
 }
