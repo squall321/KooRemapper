@@ -177,7 +177,12 @@ if [ -f "$REPO_ROOT/platform/frontend/dist/index.html" ]; then
   KOORM_SPA_DIST=/workspace/platform/frontend/dist
   echo "  → API will also serve SPA from frontend/dist"
 fi
+# /data 레지스트리 바인드(HWAXPortal docs/data-migration D9) — 컨테이너는 호스트 /data 를 못 본다(실측). 대상 디렉터리가
+# **존재하면** 동일경로로 바인드한다(env 조건 없이 — 이관 도구가 디렉터리를 만든 뒤 재기동해 가시성을 확인한다).
+# KOORM_STORAGE_DIR 는 레지스트리가 이동 뒤에만 주입한다(pydantic env_prefix KOORM_ 로 storage_dir 오버라이드).
+KOORM_DATA_BINDS=(); _d="${HWAX_DATA_ROOT:-/data}/svc/kooremapper"; [ -d "$_d" ] && KOORM_DATA_BINDS+=(--bind "$_d:$_d")
 start_instance "$INST_API" "$API_SIF" \
+  ${KOORM_DATA_BINDS[@]+"${KOORM_DATA_BINDS[@]}"} ${KOORM_STORAGE_DIR:+--env "KOORM_STORAGE_DIR=$KOORM_STORAGE_DIR"} \
   --bind "$REPO_ROOT:/workspace" \
   --env "KOORM_API_PORT=${KOORM_API_PORT}" \
   --env "KOORM_DATABASE_URL=${KOORM_DATABASE_URL}" \
