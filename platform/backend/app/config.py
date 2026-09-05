@@ -65,8 +65,11 @@ class Settings(BaseSettings):
     job_timeout_sec: int = 1800
     # Concurrent runner workers.
     worker_concurrency: int = 4
-    # Max single-file upload size (MB).
+    # Max single-file upload size (MB) — 전송(멀티파트) 상한. .gz 는 이 압축 크기에 걸린다.
     max_upload_mb: int = 512
+    # 리포트 HTML 압축 해제 후 상한 (MB) — .gz 를 서버가 풀 때의 크기 가드(zip-bomb·메모리 보호).
+    # 대용량(GB) 리포트는 .gz 로 올리면 전송은 작고 여기서만 크기를 본다. 필요 시 KOORM_MAX_REPORT_MB.
+    max_report_mb: int = 2048
 
     # --- AI Data Hub (시뮬레이션 리포트 등재 대상) ---
     # 비우면 publish-datahub 비활성(400). 기본은 호스트 네트워크 공유 인스턴스.

@@ -317,6 +317,26 @@ def test_sphere_enriched_real_report():
     pytest.skip("g_ts 있는 파트를 찾지 못함")
 
 
+def test_maybe_gunzip_roundtrip_passthrough_and_corrupt():
+    import gzip as _gz
+    from fastapi import HTTPException
+    from app.modules.reports.routes import _maybe_gunzip
+    html = b"<html><body><script>const DATA={}</script></body></html>"
+    gz = _gz.compress(html)
+    # .gz 확장자 → 해제 + 확장자 제거
+    out, name = _maybe_gunzip(gz, "report.html.gz")
+    assert out == html and name == "report.html"
+    # 매직바이트로도 감지(확장자 없어도)
+    out2, name2 = _maybe_gunzip(gz, "report")
+    assert out2 == html and name2 == "report"
+    # 비압축은 그대로 통과
+    assert _maybe_gunzip(html, "report.html") == (html, "report.html")
+    # 손상된 gzip → 400
+    with pytest.raises(HTTPException) as ei:
+        _maybe_gunzip(b"\x1f\x8bbroken-not-really-gzip", "x.gz")
+    assert ei.value.status_code == 400
+
+
 def test_available_metrics_excludes_time_and_series():
     # 시각(_time·time_of_)·시계열(*_ts) 필드는 분석 가능 물리량으로 노출되면 안 된다.
     from types import SimpleNamespace

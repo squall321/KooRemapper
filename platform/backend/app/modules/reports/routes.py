@@ -1,6 +1,9 @@
 # 충격 리포트 인제스트/조회 REST 라우트 (/api/v1).
 from __future__ import annotations
 
+import gzip
+import io
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +21,35 @@ from app.shared.responses import ok
 router = APIRouter(tags=["reports"])
 
 _KINDS = {"deep", "sphere", "impact"}
+
+
+def _maybe_gunzip(raw: bytes, filename: str | None) -> tuple[bytes, str | None]:
+    """gzip(.gz) 업로드면 서버에서 압축 해제한다 — 대용량 리포트는 압축으로 올려 전송을 줄인다.
+
+    gzip 매직바이트(1f 8b) 또는 .gz 확장자로 감지. 압축 해제 크기는 max_report_mb 로
+    상한(스트리밍 읽기라 zip-bomb 이 메모리를 다 먹기 전에 끊는다). .gz 를 벗긴 파일명 반환.
+    """
+    is_gz = raw[:2] == b"\x1f\x8b" or (filename or "").lower().endswith(".gz")
+    if not is_gz:
+        return raw, filename
+    cap = settings.max_report_mb * 1024 * 1024
+    out = bytearray()
+    try:
+        with gzip.GzipFile(fileobj=io.BytesIO(raw)) as gz:
+            while True:
+                chunk = gz.read(1024 * 1024)
+                if not chunk:
+                    break
+                out += chunk
+                if len(out) > cap:
+                    raise HTTPException(
+                        status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        f"압축 해제 크기가 상한(최대 {settings.max_report_mb}MB)을 넘었습니다.",
+                    )
+    except (OSError, EOFError) as exc:  # 손상된 gzip
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"gzip 압축 해제 실패: {exc}")
+    name = filename[:-3] if (filename or "").lower().endswith(".gz") else filename
+    return bytes(out), name
 
 
 async def _require_session(db, user, session_id):
@@ -74,19 +106,23 @@ async def ingest_report(
     if len(raw) > cap:
         raise HTTPException(
             status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            f"파일이 너무 큽니다 (최대 {settings.max_upload_mb}MB)",
+            f"파일이 너무 큽니다 (전송 최대 {settings.max_upload_mb}MB — 대용량 리포트는 .gz 로 올리세요)",
         )
+    raw, up_name = _maybe_gunzip(raw, file.filename)   # .gz 면 서버에서 압축 해제(전송량↓, GB 리포트 대응)
     scenario_raw = await scenario.read() if scenario is not None else None
     if scenario_raw is not None and len(scenario_raw) > cap:  # 동반 scenario 도 캡 적용
         raise HTTPException(
             status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             f"scenario 파일이 너무 큽니다 (최대 {settings.max_upload_mb}MB)",
         )
+    sc_name = scenario.filename if scenario is not None else None
+    if scenario_raw is not None:
+        scenario_raw, sc_name = _maybe_gunzip(scenario_raw, sc_name)
     try:
         report = await svc.ingest_report(
-            db, s, filename=file.filename or "report.html", raw=raw, kind_hint=kind, label=label,
+            db, s, filename=up_name or "report.html", raw=raw, kind_hint=kind, label=label,
             scenario_raw=scenario_raw,
-            scenario_filename=(scenario.filename if scenario is not None else None),
+            scenario_filename=sc_name,
             kfile_id=kfile_id, project=project, dev_rev=dev_rev, variation=variation, doe=doe,
             focus=focus,
         )
