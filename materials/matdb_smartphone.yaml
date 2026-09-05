@@ -1,0 +1,26 @@
+# 대표 스마트폰 스택 -> 점탄성/소성 최대 매핑 (이름 기반)
+model: smartphone_stack.k
+output: smartphone_stack_mapped.k
+database: material_db.json
+mat_type: MAT_ELASTIC
+thermal: false
+materials:
+  - match: "AL7003H"
+    mat_type: MAT_PIECEWISE_LINEAR_PLASTICITY
+  - match: "SUS304_annealed"
+    mat_type: MAT_PIECEWISE_LINEAR_PLASTICITY
+  - match: "SUS301_annealed"
+    mat_type: MAT_PIECEWISE_LINEAR_PLASTICITY
+  - match: "SUS201_annealed"
+    mat_type: MAT_PIECEWISE_LINEAR_PLASTICITY
+  - match: "OCA Rigid Standard"
+    mat_type: MAT_VISCOELASTIC
+  - match: "PSA Acrylic General"
+    mat_type: MAT_VISCOELASTIC
+  - match: "PPG FR-4 Standard"
+    mat_type: MAT_VISCOELASTIC
+  - match: "Battery Stretch-Release"
+    mat_type: MAT_VISCOELASTIC
+  - match: "Foam PE General"
+    mat_type: MAT_VISCOELASTIC
+  - match: "*"

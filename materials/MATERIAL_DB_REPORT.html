@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KooRemapper 재료 데이터베이스 정리 현황 레포트</title>
+<style>
+  :root{--fg:#1a1d24;--muted:#5b6472;--line:#e4e8ee;--bg:#f6f8fb;--card:#fff;
+        --p:#2456e6;--plast:#e0762b;--visco:#7b3ff2;--hyper:#159c6a;--elastic:#9aa3b2;}
+  *{box-sizing:border-box}
+  body{margin:0;font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,
+       "Noto Sans KR",sans-serif;color:var(--fg);background:var(--bg);}
+  .wrap{max-width:980px;margin:0 auto;padding:32px 24px 80px;}
+  h1{font-size:26px;margin:0 0 4px;letter-spacing:-.3px}
+  h2{font-size:19px;margin:38px 0 14px;padding-bottom:8px;border-bottom:2px solid var(--line)}
+  h3{font-size:15px;margin:20px 0 8px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:700}
+  .sub{color:var(--muted);margin:0 0 4px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px 22px;margin:16px 0;
+        box-shadow:0 1px 2px rgba(20,30,60,.04)}
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;text-align:center}
+  .kpi .n{font-size:30px;font-weight:800;letter-spacing:-1px;color:var(--p)}
+  .kpi .l{font-size:12px;color:var(--muted);margin-top:2px}
+  table{width:100%;border-collapse:collapse;font-size:14px;margin:8px 0}
+  th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line)}
+  th{font-size:12px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted)}
+  td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+  .bar{position:relative;background:#eef1f6;border-radius:5px;height:18px;overflow:hidden;min-width:60px}
+  .bar>span{position:absolute;left:0;top:0;bottom:0;border-radius:5px}
+  .badge{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:20px;color:#fff}
+  .b-plast{background:var(--plast)} .b-visco{background:var(--visco)}
+  .b-hyper{background:var(--hyper)} .b-elastic{background:var(--elastic)} .b-p{background:var(--p)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .pill{display:inline-block;background:#eef2fb;color:#234;border:1px solid #d9e2f5;border-radius:6px;
+        padding:1px 8px;margin:2px 4px 2px 0;font-size:12px}
+  code{background:#eef1f6;border-radius:5px;padding:1px 6px;font-size:13px}
+  pre{background:#11151c;color:#d7e0ee;border-radius:10px;padding:14px 16px;overflow:auto;font-size:12.5px;line-height:1.5}
+  .muted{color:var(--muted)} .small{font-size:12.5px}
+  .foot{margin-top:40px;color:var(--muted);font-size:12px;border-top:1px solid var(--line);padding-top:14px}
+  @media print{
+    body{background:#fff} .wrap{max-width:none;padding:0 6mm}
+    .card,.kpi{box-shadow:none}
+    .page1{page-break-after:always}
+    h2{margin-top:22px}
+  }
+  @media(max-width:640px){.kpis{grid-template-columns:repeat(2,1fr)}.grid2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<!-- ══════════════ 1페이지 요약 ══════════════ -->
+<section class="page1">
+  <h1>KooRemapper 재료 데이터베이스 정리 현황</h1>
+  <p class="sub">단일 요약 + 상세 레포트 · 출처: <code>materials/material_db.json</code> · 생성 2026-04-20 (<code>build_material_db.py</code>)</p>
+
+  <div class="kpis">
+    <div class="kpi"><div class="n">525</div><div class="l">총 재료 수</div></div>
+    <div class="kpi"><div class="n">11</div><div class="l">카테고리</div></div>
+    <div class="kpi"><div class="n">380</div><div class="l">비탄성 모델(소성·점탄성·초탄성 등)</div></div>
+    <div class="kpi"><div class="n">525</div><div class="l">열물성 보유(100%)</div></div>
+  </div>
+
+  <div class="card">
+    <h3>한눈에</h3>
+    <p style="margin:.2em 0">여러 출처(국제규격·재료DB·벤더 데이터시트·논문)에서 모은 재료 물성을
+    <b>LS-DYNA 키워드 카드</b>로 통합한 DB다. 각 재료는 기계·열·감쇠 물성과 그것을 담은 *MAT 카드
+    (여러 모델 변형 포함)를 함께 가진다. KooRemapper <code>matdb</code> 가 이 DB로 모델 부품 재료를
+    이름/부품명 기준으로 치환한다.</p>
+    <div class="grid2" style="margin-top:10px">
+      <div>
+        <h3>수집 규모 (상위 카테고리)</h3>
+        <table>
+          <tr><td>metal 금속</td><td class="n">171</td><td>polymer 폴리머</td><td class="n">106</td></tr>
+          <tr><td>pcb 기판</td><td class="n">81</td><td>rubber 고무</td><td class="n">45</td></tr>
+          <tr><td>tape 접착</td><td class="n">34</td><td>ceramic 세라믹</td><td class="n">22</td></tr>
+          <tr><td>semicon 반도체</td><td class="n">18</td><td>display</td><td class="n">18</td></tr>
+          <tr><td>glass 유리</td><td class="n">17</td><td>magnet 자석 / composite</td><td class="n">12 / 1</td></tr>
+        </table>
+      </div>
+      <div>
+        <h3>재료 모델 구성</h3>
+        <table>
+          <tr><td><span class="badge b-plast">소성</span></td><td class="n">234</td><td class="muted small">piecewise 132 + kinematic 102</td></tr>
+          <tr><td><span class="badge b-visco">점탄성</span></td><td class="n">92</td><td class="muted small">MAT_VISCOELASTIC</td></tr>
+          <tr><td><span class="badge b-hyper">초탄성·폴리머소성</span></td><td class="n">48</td><td class="muted small">무니16·하이퍼14·SAMP18</td></tr>
+          <tr><td><span class="badge b-elastic">탄성·직교·강체</span></td><td class="n">151</td><td class="muted small">취성/선형 재료</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>완성도 & 출처 요약</h3>
+    <div class="grid2">
+      <div class="small">
+        <b>완성도</b> — 열물성 525/525, 기계물성 385/525, 감쇠 397/525.
+        한 물성으로 <b>여러 모델 카드 동시 제공</b>(다변형 385/525, 최대 5변형).
+        열팽창 카드 525/525.
+      </div>
+      <div class="small">
+        <b>출처(교차 수집)</b> — ASTM 154 · 벤더 TDS 104 · ASM 19 · JIS 15 ·
+        MatWeb 10 · 3M 9 · PMC논문 2 · Nitto 1. 재료명에 벤더 직접 노출(Panasonic
+        Megtron, Hitachi, Isola, Gorilla Glass, 3M/Nitto 테이프).
+      </div>
+    </div>
+    <p class="small muted" style="margin:.6em 0 0">산출물: <code>all_materials.k</code>(전 525종 단일 k파일, 소성/점탄성 우선),
+    <code>export_all_materials.py</code>, 대표 매핑 예제 <code>smartphone_stack_mapped.k</code>.</p>
+  </div>
+</section>
+
+<!-- ══════════════ 상세 ══════════════ -->
+<h2>1. 개요</h2>
+<div class="card">
+  <p>국제 규격(ASTM/ISO/JIS), 온라인 재료 DB(MatWeb, ASM Handbook), 벤더 데이터시트(3M·Nitto·
+  Panasonic·Hitachi·Isola 등), 학술 논문(OCA/PSA 점탄성 특성)을 교차 수집해 모델별로 손질한
+  LS-DYNA <code>.k</code> 파일로 정리하고, 빌드 스크립트가 이를 단일 JSON DB로 합쳤다.</p>
+  <table>
+    <tr><th>항목</th><th>값</th></tr>
+    <tr><td>총 재료 수</td><td class="n"><b>525</b></td></tr>
+    <tr><td>카테고리</td><td class="n">11</td></tr>
+    <tr><td>단위계</td><td>t / mm / s / K → MPa (밀도 t/mm³, 비열 mJ/(t·K) 등 <code>_meta</code>에 전부 문서화)</td></tr>
+    <tr><td>카드 보존</td><td>구조 카드는 <b>원본 LS-DYNA 키워드 텍스트 그대로</b> 저장</td></tr>
+    <tr><td>생성</td><td>2026-04-20 · <code>scripts/build_material_db.py</code></td></tr>
+  </table>
+</div>
+
+<h2>2. 수집 규모 — 카테고리별</h2>
+<div class="card">
+  <table>
+    <tr><th>카테고리</th><th class="n">수</th><th style="width:38%">분포</th><th>대표 재료 / E 범위</th></tr>
+    <tr><td>metal 금속</td><td class="n">171</td><td><div class="bar"><span class="b-p" style="width:100%"></span></div></td><td class="small">STS304, AL7003H, CU · 45–411 GPa</td></tr>
+    <tr><td>polymer 폴리머</td><td class="n">106</td><td><div class="bar"><span class="b-p" style="width:62%"></span></div></td><td class="small">PC, PI, TPU · 0.015–16 GPa</td></tr>
+    <tr><td>pcb 기판/프리프레그</td><td class="n">81</td><td><div class="bar"><span class="b-p" style="width:47%"></span></div></td><td class="small">FR-4, Megtron-6, Isola 370HR · 0.005–120 GPa</td></tr>
+    <tr><td>rubber 고무</td><td class="n">45</td><td><div class="bar"><span class="b-p" style="width:26%"></span></div></td><td class="small">NR, PSA · 0.002–0.36 GPa</td></tr>
+    <tr><td>tape 접착(OCA/PSA)</td><td class="n">34</td><td><div class="bar"><span class="b-p" style="width:20%"></span></div></td><td class="small">OCA 3M 8171, VHB, Foam · 점탄성</td></tr>
+    <tr><td>ceramic 세라믹</td><td class="n">22</td><td><div class="bar"><span class="b-p" style="width:13%"></span></div></td><td class="small">Al2O3, AlN, ZrO2, Si3N4 · 10.6–410 GPa</td></tr>
+    <tr><td>semiconductor 반도체/EMC</td><td class="n">18</td><td><div class="bar"><span class="b-p" style="width:11%"></span></div></td><td class="small">EMC EME-G700 등 · 18–62 GPa</td></tr>
+    <tr><td>display 디스플레이</td><td class="n">18</td><td><div class="bar"><span class="b-p" style="width:11%"></span></div></td><td class="small">Rigid/Flexible/Foldable OLED · 10–70 GPa</td></tr>
+    <tr><td>glass 유리</td><td class="n">17</td><td><div class="bar"><span class="b-p" style="width:10%"></span></div></td><td class="small">Gorilla Glass 3/5, Dragontrail · 71.5–370 GPa</td></tr>
+    <tr><td>magnet 자석</td><td class="n">12</td><td><div class="bar"><span class="b-p" style="width:7%"></span></div></td><td class="small">NdFeB N35/N42/N52, SmCo · 12–170 GPa</td></tr>
+    <tr><td>composite 복합재</td><td class="n">1</td><td><div class="bar"><span class="b-p" style="width:1%"></span></div></td><td class="small">CFRP · 69 GPa</td></tr>
+    <tr><td><b>합계</b></td><td class="n"><b>525</b></td><td></td><td></td></tr>
+  </table>
+</div>
+
+<h2>3. 재료 모델 분포 (native mat_type)</h2>
+<div class="card">
+  <table>
+    <tr><th>모델</th><th class="n">수</th><th style="width:42%">분포</th><th>성격</th></tr>
+    <tr><td>MAT_PIECEWISE_LINEAR_PLASTICITY</td><td class="n">132</td><td><div class="bar"><span class="b-plast" style="width:92%"></span></div></td><td>소성</td></tr>
+    <tr><td>MAT_PLASTIC_KINEMATIC</td><td class="n">102</td><td><div class="bar"><span class="b-plast" style="width:71%"></span></div></td><td>소성</td></tr>
+    <tr><td>MAT_VISCOELASTIC</td><td class="n">92</td><td><div class="bar"><span class="b-visco" style="width:64%"></span></div></td><td>점탄성</td></tr>
+    <tr><td>MAT_SAMP-1</td><td class="n">18</td><td><div class="bar"><span class="b-hyper" style="width:13%"></span></div></td><td>폴리머 소성</td></tr>
+    <tr><td>MAT_MOONEY-RIVLIN_RUBBER</td><td class="n">16</td><td><div class="bar"><span class="b-hyper" style="width:11%"></span></div></td><td>초탄성(고무)</td></tr>
+    <tr><td>MAT_HYPERELASTIC_RUBBER</td><td class="n">14</td><td><div class="bar"><span class="b-hyper" style="width:10%"></span></div></td><td>초탄성(고무)</td></tr>
+    <tr><td>MAT_ORTHOTROPIC_ELASTIC</td><td class="n">6</td><td><div class="bar"><span class="b-elastic" style="width:4%"></span></div></td><td>직교 탄성</td></tr>
+    <tr><td>MAT_ELASTIC</td><td class="n">143</td><td><div class="bar"><span class="b-elastic" style="width:100%"></span></div></td><td>탄성(취성/선형)</td></tr>
+    <tr><td>MAT_RIGID</td><td class="n">2</td><td><div class="bar"><span class="b-elastic" style="width:1.5%"></span></div></td><td>강체</td></tr>
+  </table>
+  <p class="small muted">소성+점탄성+초탄성 등 비탄성 모델 380종. 탄성 143은 유리·세라믹·디스플레이·자석 등
+  취성/선형 재료 + 일부 선형근사 항목.</p>
+</div>
+
+<h2>4. 데이터 완성도</h2>
+<div class="card">
+  <table>
+    <tr><th>항목</th><th class="n">보유</th><th style="width:42%">비율 (/525)</th></tr>
+    <tr><td>열 물성 (thermal)</td><td class="n">525</td><td><div class="bar"><span class="b-hyper" style="width:100%"></span></div></td></tr>
+    <tr><td>열팽창 카드</td><td class="n">525</td><td><div class="bar"><span class="b-hyper" style="width:100%"></span></div></td></tr>
+    <tr><td>구조 카드 (≥1 변형)</td><td class="n">525</td><td><div class="bar"><span class="b-hyper" style="width:100%"></span></div></td></tr>
+    <tr><td>감쇠 (damping)</td><td class="n">397</td><td><div class="bar"><span class="b-p" style="width:76%"></span></div></td></tr>
+    <tr><td>감쇠 카드</td><td class="n">397</td><td><div class="bar"><span class="b-p" style="width:76%"></span></div></td></tr>
+    <tr><td>기계 물성 (mechanical)</td><td class="n">385</td><td><div class="bar"><span class="b-p" style="width:73%"></span></div></td></tr>
+    <tr><td>구조 카드 다변형 (≥2 mat_type)</td><td class="n">385</td><td><div class="bar"><span class="b-p" style="width:73%"></span></div></td></tr>
+    <tr><td>열 카드 풀블록 (*MAT_THERMAL_ISOTROPIC)</td><td class="n">32</td><td><div class="bar"><span class="b-elastic" style="width:6%"></span></div></td></tr>
+    <tr><td>설명 (description)</td><td class="n">32</td><td><div class="bar"><span class="b-elastic" style="width:6%"></span></div></td></tr>
+  </table>
+  <p class="small muted">구조 카드 변형 수 분포: 1변형 140 · 2변형 137 · 3변형 156 · 5변형 92 —
+  대부분이 하나의 물성으로 여러 모델(탄성/소성/강체, 점탄성/탄성근사 등)을 동시 제공.</p>
+</div>
+
+<h2>5. 출처 — "여러 웹에서 모아서"</h2>
+<div class="card">
+  <table>
+    <tr><th>출처</th><th class="n">인용</th><th>비고</th></tr>
+    <tr><td>ASTM 규격</td><td class="n">154</td><td>금속/플라스틱 기계·열 물성 표준</td></tr>
+    <tr><td>벤더 TDS (Technical Data)</td><td class="n">104</td><td>제조사 데이터시트</td></tr>
+    <tr><td>ASM Handbook</td><td class="n">19</td><td>금속 표준 물성</td></tr>
+    <tr><td>JIS</td><td class="n">15</td><td>일본 산업규격</td></tr>
+    <tr><td>MatWeb</td><td class="n">10</td><td>온라인 재료 DB</td></tr>
+    <tr><td>3M</td><td class="n">9</td><td>OCA/VHB/PSA 테이프</td></tr>
+    <tr><td>ISO</td><td class="n">4</td><td>국제규격</td></tr>
+    <tr><td>PMC 논문</td><td class="n">2</td><td>OCA/PSA 점탄성 특성 논문</td></tr>
+    <tr><td>Nitto</td><td class="n">1</td><td>고전단 PSA</td></tr>
+  </table>
+  <p class="small">재료 이름에 벤더가 직접 드러나는 항목 다수:
+    <span class="pill">Panasonic Megtron-6</span><span class="pill">Hitachi MCL-E-679F</span>
+    <span class="pill">Isola 370HR</span><span class="pill">3M 8171 / 4905 / 5952</span>
+    <span class="pill">Nitto 5000</span><span class="pill">Gorilla Glass 3/5</span>
+    <span class="pill">Dragontrail</span><span class="pill">NdFeB N35–N52</span>
+  </p>
+  <p class="small muted">※ 인용 수는 카드 주석·설명 텍스트 기준(키워드명 'ISOTROPIC' 등 오염 제외). 절대치보다
+  <b>국제규격 + 재료DB + 벤더 데이터시트 + 학술논문의 교차 수집</b>이라는 구성을 보여주는 지표.</p>
+</div>
+
+<h2>6. 빌드 파이프라인</h2>
+<div class="card">
+<pre>materials/*.k (9개 소스) + name_mapping.yaml
+   ├ mat_elastic.k   mat_plasticity.k   mat_rigid.k   mat_rubber.k
+   ├ mat_tape.k      mat_viscoelastic.k mat_thermal.k
+   └ mat_thermal_expansion.k   rubber.k
+        │  scripts/build_material_db.py   (MAT 블록 파싱 · 자동 분류)
+        ▼
+materials/material_db.json   (525종 · 카드 텍스트 보존)
+        │  matdb 오퍼레이션 (이름/부품명 기준 치환)
+        ▼
+모델의 *MAT 카드 교체  →  웹 · MCP · Python 어디서나</pre>
+  <p class="small muted">원본은 모델별로 손질된 LS-DYNA <code>.k</code> 파일이고, 빌드 스크립트가
+  MAT 블록을 파싱·분류해 단일 JSON DB로 합친다.</p>
+</div>
+
+<h2>7. 산출물</h2>
+<div class="card">
+  <table>
+    <tr><th>파일</th><th>설명</th></tr>
+    <tr><td><code>all_materials.k</code></td><td>전 525종 *MAT 키워드 단일 k파일 (소성/점탄성 우선, 탄성은 그것뿐일 때만)</td></tr>
+    <tr><td><code>export_all_materials.py</code></td><td>위 덤프 생성기 (<code>--thermal</code>, <code>--native</code> 옵션)</td></tr>
+    <tr><td><code>smartphone_stack.k</code> + <code>matdb_smartphone.yaml</code></td><td>대표 매핑 예제 입력</td></tr>
+    <tr><td><code>smartphone_stack_mapped.k</code></td><td>매핑 결과 — 소성 금속 4 + 점탄성 접착/PCB/폼 5</td></tr>
+  </table>
+</div>
+
+<h2>8. 남은 보강 여지</h2>
+<div class="card">
+  <ul>
+    <li><b>출처 추적성</b> — <code>description</code> 32/525. 구조화된 source/doi 필드 추가 시 추적성↑ (현재는 카드 주석에 산재).</li>
+    <li><b>선형 근사 항목</b> — 폴리머·고무·테이프 일부가 "…Linear" 선형 근사만 보유 → 탄성 137종. 소성/점탄성 데이터 보강 여지.</li>
+    <li><b>복합재</b> — composite 1종(CFRP)뿐. 적층/직교이방성 복합재 확장 필요.</li>
+    <li><b>열 카드</b> — 열 물성 수치는 525 전부 보유하나 <code>*MAT_THERMAL_ISOTROPIC</code> 풀블록은 32종만. 카드화 확대 여지.</li>
+  </ul>
+</div>
+
+<div class="foot">
+  KooRemapper Material Database Report · material_db.json (525 materials, 11 categories) ·
+  생성 2026-04-20 · 레포트 자동 작성. 인쇄 시 첫 섹션이 1페이지 요약으로 분리됩니다.
+</div>
+
+</div>
+</body>
+</html>
