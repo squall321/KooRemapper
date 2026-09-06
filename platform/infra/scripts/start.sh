@@ -198,7 +198,13 @@ start_instance "$INST_API" "$API_SIF" \
   --env "KOORM_APP_ENV=${KOORM_APP_ENV:-development}"
 
 # ── mcp ─────────────────────────────────────────────────────────────
+# ⚠ MCP 컨테이너에도 /data 를 붙인다. upload_local_path·save_result_to_path 는 "서버가 읽을 수
+#   있는 같은 머신 경로" 를 전제로 하는데, 여기 바인드가 /workspace 하나뿐이라 해석 결과가 실제로
+#   사는 /data 에 닿지 못했다(실측: 인스턴스 bindpath 가 /workspace 뿐). 그래서 대용량 반입·반출이
+#   MCP 로 닫히지 않고 사람이 셸에 앉아 파일을 날라야 했다. api 인스턴스와 같은 규율이다.
 start_instance "$INST_MCP" "$MCP_SIF" \
+  ${KOORM_DATA_BINDS[@]+"${KOORM_DATA_BINDS[@]}"} \
+  ${KOORM_STORAGE_DIR:+--env "KOORM_STORAGE_DIR=$KOORM_STORAGE_DIR"} \
   --bind "$REPO_ROOT:/workspace" \
   --env "KOOREMAPPER_API_BASE=http://127.0.0.1:${KOORM_API_PORT}" \
   --env "KOORM_MCP_PORT=${KOORM_MCP_PORT}" \
