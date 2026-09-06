@@ -2,6 +2,12 @@
 # Shared env for KooRemapper Platform Apptainer orchestration.
 set -euo pipefail
 
+# 사내망 프록시(http_proxy) 환경에서 로컬 헬스체크가 프록시를 타면 안 된다 — 프록시가
+# 127.0.0.1 에 못 닿아 curl 이 000 을 내고(실사고: cae00 update-forges), 스크립트가
+# 서비스를 죽은 것으로 오판한다. 바깥용(git·rclone) http_proxy 는 그대로 두고 로컬만 우회한다.
+export NO_PROXY="127.0.0.1,localhost,::1${NO_PROXY:+,$NO_PROXY}"
+export no_proxy="$NO_PROXY"
+
 # Absolute dir of the scripts (stable regardless of CWD or how $0 was invoked).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # platform/infra/scripts -> repo root (KooRemapper/)
