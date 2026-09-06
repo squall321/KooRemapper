@@ -64,6 +64,9 @@ impact 전위치 부분충격)을 인제스트해 구조화 분석한다.
 1. **인제스트** — `ingest_report(session_id, filename, html_content, [scenario_content=…,
    project=…, dev_rev=…, focus=…])` 로 리포트 HTML(+선택 scenario.json·과제메타)을 올린다.
    kind 자동판별, scenario 의 template 로 원본 K파일 자동매칭(1 K:N). 반환 report_id.
+   ⚠ **대용량(전각도 낙하 등, 압축해도 수백 MB~GB)은 문자열 인제스트 말고 REST intake** —
+   `report_upload_instructions()` 가 로컬 리포트+K파일을 한 호출로 올리는 명령을 준다
+   (`POST /reports/intake`: file·kfile·scenario·project… multipart, .gz 가능 → 세션 생성/K링크까지).
 2. **개요 파악** — `report_summary(report_id)` 로 kind·프로젝트·전역 최악값·findings 를 본다.
 3. **최악 케이스** — `report_worst_cases(report_id, metric)` (sphere=최악 방향, impact=최악 위치).
    metric ∈ max_stress/max_g/max_disp/min_safety_factor.

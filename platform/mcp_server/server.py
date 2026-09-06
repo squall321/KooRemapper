@@ -358,6 +358,44 @@ _WORST_METRICS = {"max_stress", "max_g", "max_disp", "min_safety_factor"}
 
 
 @mcp.tool()
+async def report_upload_instructions(project: str = "", filename: str = "") -> dict:
+    """**PC/서버의 리포트 파일을 어떻게 올리나** — 그 자리서 쓸 REST intake 명령을 준다.
+
+    MCP 로는 파일 본문을 나르지 않는다 — 전각도 낙하 리포트는 압축해도 수십~수백 MB, GB 급도
+    있어 JSON-RPC 페이로드에 못 싣는다. 대신 REST intake 로 **리포트+K파일(+scenario)을 한
+    호출**에 올린다(세션 생성까지 자동). .gz 로 올리면 서버가 풀어 전송을 줄인다.
+
+    ⚠ 토큰을 만들지도 담지도 않는다 — 아래 $KR_PAT 는 당신 환경변수(kr_ PAT)다."""
+    import shlex
+    base = os.environ.get("KOORM_PUBLIC_BASE", "").rstrip("/")
+    origin = base or "<포탈오리진>"          # 예: https://hwax.sec.samsung.net
+    api = f"{origin}/apps/kooremapper_api/api/v1"
+    rep = filename or "<리포트.html[.gz]>"
+    curl = (f"curl -sS -X POST {shlex.quote(api + '/reports/intake')} "
+            f'-H "Authorization: Bearer $KR_PAT" '
+            f"-F file=@{shlex.quote(rep)} -F kfile=@<모델.k[.gz]> "
+            f"-F project={shlex.quote(project or '<과제명>')} -F kind=sphere")
+    return {
+        "권장(스크립트)": {
+            "방법": "kr_ PAT + REST intake — 리포트+K파일+scenario 를 한 호출로 반입",
+            "엔드포인트": f"POST {api}/reports/intake",
+            "명령": curl,
+            "폼필드": "file(리포트,필수) · kfile(원본 K) · scenario(scenario.json) · "
+                     "kind(deep|sphere|impact) · project · dev_rev · variation · doe · focus · "
+                     "session_id(기존)/session_name(새 세션)",
+            "대용량": ".gz 로 올리면 서버가 해제. 전송 상한 512MB(압축 크기), 해제 상한 "
+                     "2048MB(KOORM_MAX_REPORT_MB). 베어러 경로(/apps/kooremapper_api)는 portal_auth 없이 kr_ PAT 검증.",
+        },
+        "웹 UI": f"포탈 로그인 후 {origin}/apps/kooremapper/ 에서 세션을 열고 '리포트 업로드'.",
+        "토큰 발급": f"웹 UI 로그인→MCP 토큰 화면에서 kr_ PAT, 또는 REST POST {api}/auth/login→JWT→"
+                    f"POST {api}/me/tokens. 환경변수 KR_PAT 에 둔다.",
+        "note": ("MCP 로 파일 본문을 나르지 않는다(GB 급 불가) — REST intake 를 쓴다."
+                 + ("" if base else " ⚠ 이 서버는 공개 주소를 모른다(KOORM_PUBLIC_BASE 미설정) — "
+                    "<포탈오리진> 자리엔 포탈을 연 브라우저 주소창 오리진을 넣는다")),
+    }
+
+
+@mcp.tool()
 async def ingest_report(
     session_id: str,
     filename: str,
@@ -374,6 +412,10 @@ async def ingest_report(
     doe: str | None = None,
 ) -> dict:
     """낙하/충격 리포트 HTML 을 세션에 인제스트한다(deep/sphere/impact 자동판별).
+
+    ⚠ **대용량은 이 도구가 아니다** — html_content 를 문자열로 나르므로 수십 MB 이상은
+    부적합하다. PC/서버의 리포트 파일(전각도 낙하 등, 압축해도 수백 MB~GB)은 REST intake
+    로 올린다 — `report_upload_instructions()` 가 리포트+K파일 한 호출 명령을 알려 준다.
 
     `html_content` 는 koo_deep_report / koo_sphere_report / koo_impact_report 가 생성한
     리포트 HTML 전체다(데이터가 임베드돼 있어 그대로 파싱된다). 큰 HTML 은 base64 로

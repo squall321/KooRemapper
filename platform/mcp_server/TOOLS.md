@@ -46,7 +46,9 @@ MCP 서버는 streamable-http로 뜨고, 들어온 `Authorization: Bearer kr_...
 SmartTwin 파이프라인이 만든 deep(단건 심층)·sphere(전각도 낙하)·impact(전위치 부분충격) 리포트 HTML 인제스트·분석.
 | 도구 | 인자 | REST | 설명 |
 |---|---|---|---|
-| `ingest_report` | session_id, filename, html_content, kind?, label?, scenario_content?, kfile_id?, project?, dev_rev?, variation?, doe?, focus?, base64_encoded? | POST /sessions/{id}/reports | 리포트 HTML 인제스트(kind 자동판별) + scenario.json 조건/K파일 자동매칭/과제메타 → report_id |
+| `ingest_report` | session_id, filename, html_content, kind?, label?, scenario_content?, kfile_id?, project?, dev_rev?, variation?, doe?, focus?, base64_encoded? | POST /sessions/{id}/reports | 리포트 HTML 인제스트(문자열 — 소용량). 대용량은 REST intake |
+| `report_upload_instructions` | project?, filename? | (안내 전용) | 로컬 리포트+K파일 업로드용 REST intake 명령(kr_ PAT curl)을 준다 — MCP 로 GB 못 나름 |
+| — (REST 전용) | file, kfile?, scenario?, session_id?/session_name?, kind?, project?, … (multipart, .gz 가능) | POST /reports/intake | **원샷 반입** — (세션 생성/지정)+K파일+리포트+scenario 를 한 호출로. 대용량은 여기로 |
 | `list_reports` | session_id, kfile_id? | GET /sessions/{id}/reports | 세션의 리포트 목록(kfile_id=그 K에 매달린 것만) |
 | `report_facets` | — | GET /reports/facets | 검색 facet — 어떤 kind·과제·rev·방향컨셉·초점·심각도·높이가 있나 + 건수(먼저 '뭐가 있나') |
 | `find_reports` | kind?·project?·dev_rev?·variation?·doe?·focus?·doe_strategy?·scenario_type?·drop_height?·severity?·min_worst_stress?·min_worst_g?·has_part?·q?·since/until?·session_id?·kfile_id?·sort·order·limit | GET /reports | 조건으로 리포트 검색(전 세션, 서버 다축 필터). 목표→리포트 특정 |

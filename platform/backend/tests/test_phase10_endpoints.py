@@ -340,3 +340,36 @@ async def test_token_lifecycle(client, make_user):
 
     assert (await client.delete(f"{API}/me/tokens/{tid}", headers=h)).status_code == 200
     assert (await client.get(f"{API}/me", headers=_auth(pat))).status_code == 401
+
+
+# ── 리포트 원샷 인테이크 (세션+K파일+리포트 한 호출) ─────────────────────────────
+_SPHERE_INTAKE = Path("/data/SmartTwinPostprocessor/lib/koo_sphere_report/examples/Test_001_report.html")
+
+
+@pytest.mark.skipif(not _SPHERE_INTAKE.exists(), reason="sphere 샘플 없음")
+async def test_report_intake_one_shot_with_kfile(client, make_user):
+    import gzip
+    u = await make_user()
+    h = _auth(u["token"])
+    html = _SPHERE_INTAKE.read_bytes()
+    # ① 세션 없이 리포트+K파일 한 호출 → 세션 자동 생성 + K 링크
+    r = await client.post(
+        f"{API}/reports/intake", headers=h,
+        files={"file": ("Test_001_report.html", html, "text/html"),
+               "kfile": ("model.k", b"*KEYWORD\n*TITLE\nintake test\n*END\n", "text/plain")},
+        data={"project": "INTAKE-TEST", "kind": "sphere"},
+    )
+    assert r.status_code == 201, r.text
+    d = r.json()["data"]
+    assert d["session_id"] and d["report_id"] and d["kfile_id"]
+    assert d["kind"] == "sphere" and d["n_cases"] == 26
+    assert d["source_kfile_id"] == d["kfile_id"]   # K파일이 리포트에 링크됨
+    # ② .gz 리포트를 기존 세션에 한 호출로(전송량↓)
+    rz = await client.post(
+        f"{API}/reports/intake", headers=h,
+        files={"file": ("Test_001_report.html.gz", gzip.compress(html), "application/gzip")},
+        data={"session_id": d["session_id"], "kind": "sphere"},
+    )
+    assert rz.status_code == 201, rz.text
+    assert rz.json()["data"]["session_id"] == d["session_id"]   # 기존 세션 재사용
+    await client.delete(f"{API}/sessions/{d['session_id']}", headers=h)

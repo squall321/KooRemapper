@@ -52,6 +52,23 @@ def _maybe_gunzip(raw: bytes, filename: str | None) -> tuple[bytes, str | None]:
     return bytes(out), name
 
 
+async def _read_upload(file: UploadFile, *, what: str = "파일") -> tuple[bytes, str | None]:
+    """업로드를 읽어 전송 상한 검사 후 .gz 면 서버에서 해제한다(ingest·intake 공용)."""
+    cap = settings.max_upload_mb * 1024 * 1024
+    if file.size is not None and file.size > cap:
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            f"{what}이 너무 큽니다 (전송 최대 {settings.max_upload_mb}MB — 대용량은 .gz 로 올리세요)",
+        )
+    raw = await file.read()
+    if len(raw) > cap:
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            f"{what}이 너무 큽니다 (전송 최대 {settings.max_upload_mb}MB — 대용량은 .gz 로 올리세요)",
+        )
+    return _maybe_gunzip(raw, file.filename)
+
+
 async def _require_session(db, user, session_id):
     s = await sess_svc.get_owned_session(db, user.id, session_id)
     if s is None:
@@ -96,28 +113,10 @@ async def ingest_report(
     s = await _require_session(db, user, session_id)
     if kind is not None and kind not in _KINDS:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"kind 는 {sorted(_KINDS)} 중 하나여야 합니다.")
-    cap = settings.max_upload_mb * 1024 * 1024
-    if file.size is not None and file.size > cap:
-        raise HTTPException(
-            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            f"파일이 너무 큽니다 (최대 {settings.max_upload_mb}MB)",
-        )
-    raw = await file.read()
-    if len(raw) > cap:
-        raise HTTPException(
-            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            f"파일이 너무 큽니다 (전송 최대 {settings.max_upload_mb}MB — 대용량 리포트는 .gz 로 올리세요)",
-        )
-    raw, up_name = _maybe_gunzip(raw, file.filename)   # .gz 면 서버에서 압축 해제(전송량↓, GB 리포트 대응)
-    scenario_raw = await scenario.read() if scenario is not None else None
-    if scenario_raw is not None and len(scenario_raw) > cap:  # 동반 scenario 도 캡 적용
-        raise HTTPException(
-            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            f"scenario 파일이 너무 큽니다 (최대 {settings.max_upload_mb}MB)",
-        )
-    sc_name = scenario.filename if scenario is not None else None
-    if scenario_raw is not None:
-        scenario_raw, sc_name = _maybe_gunzip(scenario_raw, sc_name)
+    raw, up_name = await _read_upload(file, what="파일")   # 전송 상한 + .gz 서버 해제
+    scenario_raw, sc_name = (None, None)
+    if scenario is not None:
+        scenario_raw, sc_name = await _read_upload(scenario, what="scenario 파일")
     try:
         report = await svc.ingest_report(
             db, s, filename=up_name or "report.html", raw=raw, kind_hint=kind, label=label,
@@ -131,6 +130,72 @@ async def ingest_report(
     return ok(
         ReportRead.model_validate(report).model_dump(),
         message=f"{report.kind} 리포트 인제스트 완료 ({report.n_cases} 케이스)",
+        status_code=201,
+    )
+
+
+@router.post(
+    "/reports/intake",
+    dependencies=[Depends(rate_limit("upload", settings.ratelimit_upload_per_min))],
+)
+async def report_intake(
+    file: UploadFile = File(...),                       # 리포트 HTML(.gz 가능) — 전각도/전위치/deep
+    kfile: UploadFile | None = File(default=None),      # 원본 K파일(.gz 가능) — 리포트와 함께 올려 링크
+    scenario: UploadFile | None = File(default=None),   # 시뮬 조건 scenario.json(.gz 가능)
+    session_id: str | None = Form(default=None),        # 기존 세션에 넣을 때
+    session_name: str | None = Form(default=None),      # 새 세션 이름(미지정 시 자동)
+    kind: str | None = Form(default=None),
+    label: str | None = Form(default=None),
+    project: str | None = Form(default=None),
+    dev_rev: str | None = Form(default=None),
+    variation: str | None = Form(default=None),
+    doe: str | None = Form(default=None),
+    focus: str | None = Form(default=None),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """**한 번에 반입** — (세션 생성/지정) + K파일 + 리포트 + scenario 를 한 호출로.
+
+    지금까지는 세 번 불러야 했다(세션 생성 → K 업로드 → 리포트 인제스트+kfile_id 링크).
+    "전각도 낙하/전위치 충격/deep 리포트를 K파일과 함께" 올리는 걸 한 호출로 얇게 조립한다
+    (안에서 하는 일은 기존 경로 그대로 — 로직 복제 없음). 파일은 전부 .gz 로 올려 전송을 줄일
+    수 있다(서버가 해제). 반환: session_id·report_id·kfile_id.
+    """
+    if kind is not None and kind not in _KINDS:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"kind 는 {sorted(_KINDS)} 중 하나여야 합니다.")
+    # 세션 확정 — 기존 지정 우선, 없으면 신규 생성(이름: session_name>project>label 순).
+    if session_id:
+        s = await _require_session(db, user, session_id)
+    else:
+        s = await sess_svc.create_session(
+            db, user.id, name=(session_name or project or label or "report intake"),
+            description="report intake",
+        )
+    # K파일(선택)을 먼저 세션에 저장 → 그 id 로 리포트에 링크(1 K : N 리포트).
+    kfile_id: int | None = None
+    if kfile is not None:
+        k_raw, k_name = await _read_upload(kfile, what="K파일")
+        krow = await sess_svc.add_uploaded_file(db, s, filename=k_name or "model.k", raw=k_raw, kind="input")
+        kfile_id = krow.id
+    raw, up_name = await _read_upload(file, what="리포트")
+    scenario_raw, sc_name = (None, None)
+    if scenario is not None:
+        scenario_raw, sc_name = await _read_upload(scenario, what="scenario 파일")
+    try:
+        report = await svc.ingest_report(
+            db, s, filename=up_name or "report.html", raw=raw, kind_hint=kind, label=label,
+            scenario_raw=scenario_raw, scenario_filename=sc_name,
+            kfile_id=kfile_id, project=project, dev_rev=dev_rev, variation=variation, doe=doe,
+            focus=focus,
+        )
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
+    return ok(
+        {"session_id": s.id, "report_id": report.id, "kfile_id": kfile_id,
+         "kind": report.kind, "n_cases": report.n_cases, "label": report.label,
+         "source_kfile_id": report.source_kfile_id},
+        message=f"{report.kind} 리포트 반입 완료 ({report.n_cases} 케이스"
+                + ("· K파일 링크" if kfile_id else "") + ")",
         status_code=201,
     )
 
