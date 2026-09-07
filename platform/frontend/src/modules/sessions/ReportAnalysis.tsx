@@ -5,7 +5,7 @@
 //   ① 이 화면이 쓰는 형태가 가로 막대·오차막대·꺾은선 셋뿐이라 라이브러리 값어치가 없고,
 //   ② 번들이 커지면 포탈 서브패스 빌드까지 두 벌로 늘어난다(현재 399KB).
 // 색은 전부 테마 토큰(currentColor/text-*)으로 잡아 라이트·다크가 자동으로 따라온다.
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Activity, AlertTriangle, Compass, Layers, LineChart, Sigma, Zap } from 'lucide-react'
 import {
@@ -445,9 +445,13 @@ function AngleStatsView({ reportId }: { reportId: string }) {
   const q = useQuery<AngleGroupStats>({
     queryKey: ['report-anglestats', reportId, metric], queryFn: () => reportAngleStats(reportId, { metric }),
   })
+  const avail = q.data?.available_metrics ?? []
+  // 기본 metric(peak_stress)이 이 리포트에 없으면 있는 첫 물리량으로 자동 전환(빈 화면 오독 방지).
+  useEffect(() => {
+    if (avail.length && !avail.includes(metric)) setMetric(avail[0])
+  }, [avail.join(',')])  // eslint-disable-line react-hooks/exhaustive-deps
   if (q.isLoading) return <Spinner />
   const d = q.data
-  const avail = d?.available_metrics ?? []
   const groups = d?.groups ?? []
   const domainMax = Math.max(...groups.map((g) => g.stats.max ?? 0), 0) || 1
   return (

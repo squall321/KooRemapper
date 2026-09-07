@@ -373,3 +373,19 @@ async def test_report_intake_one_shot_with_kfile(client, make_user):
     assert rz.status_code == 201, rz.text
     assert rz.json()["data"]["session_id"] == d["session_id"]   # 기존 세션 재사용
     await client.delete(f"{API}/sessions/{d['session_id']}", headers=h)
+
+
+async def test_report_intake_cleans_up_on_failure(client, make_user):
+    # 원샷 원자성 — 리포트 파싱 실패 시 신규 세션·K파일이 orphan 으로 남지 않는다.
+    u = await make_user()
+    h = _auth(u["token"])
+    before = (await client.get(f"{API}/sessions", headers=h)).json()["data"]
+    r = await client.post(
+        f"{API}/reports/intake", headers=h,
+        files={"file": ("bad.html", b"<html>not a report</html>", "text/html"),
+               "kfile": ("model.k", b"*KEYWORD\n*END\n", "text/plain")},
+        data={"kind": "sphere"},
+    )
+    assert r.status_code == 400, r.text
+    after = (await client.get(f"{API}/sessions", headers=h)).json()["data"]
+    assert len(after) == len(before)   # 실패 intake 가 세션을 안 남김(정리됨)

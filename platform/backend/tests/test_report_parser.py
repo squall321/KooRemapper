@@ -331,10 +331,18 @@ def test_maybe_gunzip_roundtrip_passthrough_and_corrupt():
     assert out2 == html and name2 == "report"
     # 비압축은 그대로 통과
     assert _maybe_gunzip(html, "report.html") == (html, "report.html")
-    # 손상된 gzip → 400
+    # 손상된 gzip(헤더만) → 400
     with pytest.raises(HTTPException) as ei:
         _maybe_gunzip(b"\x1f\x8bbroken-not-really-gzip", "x.gz")
     assert ei.value.status_code == 400
+    # 헤더는 정상인데 deflate 본문이 깨진 경우(zlib.error) 도 500 아니라 400 이어야 한다
+    good = _gz.compress(b"A" * 4096)
+    corrupt = bytearray(good)
+    for i in range(12, min(40, len(corrupt))):   # 본문(deflate) 바이트를 뒤집는다
+        corrupt[i] ^= 0xFF
+    with pytest.raises(HTTPException) as ei2:
+        _maybe_gunzip(bytes(corrupt), "x.html.gz")
+    assert ei2.value.status_code == 400
 
 
 def test_available_metrics_excludes_time_and_series():

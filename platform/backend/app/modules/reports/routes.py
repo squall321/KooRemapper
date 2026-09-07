@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import gzip
 import io
+import zlib
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel, Field
@@ -23,16 +24,18 @@ router = APIRouter(tags=["reports"])
 _KINDS = {"deep", "sphere", "impact"}
 
 
-def _maybe_gunzip(raw: bytes, filename: str | None) -> tuple[bytes, str | None]:
+def _maybe_gunzip(raw: bytes, filename: str | None, cap_mb: int | None = None) -> tuple[bytes, str | None]:
     """gzip(.gz) 업로드면 서버에서 압축 해제한다 — 대용량 리포트는 압축으로 올려 전송을 줄인다.
 
-    gzip 매직바이트(1f 8b) 또는 .gz 확장자로 감지. 압축 해제 크기는 max_report_mb 로
-    상한(스트리밍 읽기라 zip-bomb 이 메모리를 다 먹기 전에 끊는다). .gz 를 벗긴 파일명 반환.
+    gzip 매직바이트(1f 8b) 또는 .gz 확장자로 감지. 압축 해제 크기는 cap_mb(미지정 시
+    max_report_mb) 로 상한(스트리밍 읽기라 zip-bomb 이 메모리를 다 먹기 전에 끊는다) —
+    scenario/K파일은 작은 상한을 넘겨 증폭을 막는다. .gz 를 벗긴 파일명 반환.
     """
     is_gz = raw[:2] == b"\x1f\x8b" or (filename or "").lower().endswith(".gz")
     if not is_gz:
         return raw, filename
-    cap = settings.max_report_mb * 1024 * 1024
+    limit_mb = cap_mb if cap_mb is not None else settings.max_report_mb
+    cap = limit_mb * 1024 * 1024
     out = bytearray()
     try:
         with gzip.GzipFile(fileobj=io.BytesIO(raw)) as gz:
@@ -44,16 +47,19 @@ def _maybe_gunzip(raw: bytes, filename: str | None) -> tuple[bytes, str | None]:
                 if len(out) > cap:
                     raise HTTPException(
                         status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                        f"압축 해제 크기가 상한(최대 {settings.max_report_mb}MB)을 넘었습니다.",
+                        f"압축 해제 크기가 상한(최대 {limit_mb}MB)을 넘었습니다.",
                     )
-    except (OSError, EOFError) as exc:  # 손상된 gzip
+    except (OSError, EOFError, zlib.error) as exc:  # 손상된 gzip(zlib.error 는 OSError 하위 아님)
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"gzip 압축 해제 실패: {exc}")
     name = filename[:-3] if (filename or "").lower().endswith(".gz") else filename
     return bytes(out), name
 
 
-async def _read_upload(file: UploadFile, *, what: str = "파일") -> tuple[bytes, str | None]:
-    """업로드를 읽어 전송 상한 검사 후 .gz 면 서버에서 해제한다(ingest·intake 공용)."""
+async def _read_upload(
+    file: UploadFile, *, what: str = "파일", decompress_cap_mb: int | None = None,
+) -> tuple[bytes, str | None]:
+    """업로드를 읽어 전송 상한 검사 후 .gz 면 서버에서 해제한다(ingest·intake 공용).
+    decompress_cap_mb: 압축 해제 상한(리포트=기본 max_report_mb, K파일·scenario=작게)."""
     cap = settings.max_upload_mb * 1024 * 1024
     if file.size is not None and file.size > cap:
         raise HTTPException(
@@ -66,7 +72,7 @@ async def _read_upload(file: UploadFile, *, what: str = "파일") -> tuple[bytes
             status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             f"{what}이 너무 큽니다 (전송 최대 {settings.max_upload_mb}MB — 대용량은 .gz 로 올리세요)",
         )
-    return _maybe_gunzip(raw, file.filename)
+    return _maybe_gunzip(raw, file.filename, cap_mb=decompress_cap_mb)
 
 
 async def _require_session(db, user, session_id):
@@ -116,7 +122,8 @@ async def ingest_report(
     raw, up_name = await _read_upload(file, what="파일")   # 전송 상한 + .gz 서버 해제
     scenario_raw, sc_name = (None, None)
     if scenario is not None:
-        scenario_raw, sc_name = await _read_upload(scenario, what="scenario 파일")
+        scenario_raw, sc_name = await _read_upload(scenario, what="scenario 파일",
+                                                   decompress_cap_mb=settings.max_upload_mb)
     try:
         report = await svc.ingest_report(
             db, s, filename=up_name or "report.html", raw=raw, kind_hint=kind, label=label,
@@ -163,7 +170,18 @@ async def report_intake(
     """
     if kind is not None and kind not in _KINDS:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"kind 는 {sorted(_KINDS)} 중 하나여야 합니다.")
-    # 세션 확정 — 기존 지정 우선, 없으면 신규 생성(이름: session_name>project>label 순).
+    # ① 모든 업로드를 먼저 읽고 검증(전송상한+gz 해제) — 아무것도 영속되기 전에 크기/gz 실패를
+    #    반려해 orphan 세션·파일을 안 남긴다(원샷 원자성). K파일·scenario 는 작은 해제 상한.
+    raw, up_name = await _read_upload(file, what="리포트")
+    k_raw, k_name = (None, None)
+    if kfile is not None:
+        k_raw, k_name = await _read_upload(kfile, what="K파일", decompress_cap_mb=settings.max_upload_mb)
+    scenario_raw, sc_name = (None, None)
+    if scenario is not None:
+        scenario_raw, sc_name = await _read_upload(scenario, what="scenario 파일",
+                                                   decompress_cap_mb=settings.max_upload_mb)
+    # ② 세션 확정 — 기존 지정 우선(소유 검증), 없으면 신규 생성(이름: session_name>project>label).
+    created_here = not session_id
     if session_id:
         s = await _require_session(db, user, session_id)
     else:
@@ -171,17 +189,13 @@ async def report_intake(
             db, user.id, name=(session_name or project or label or "report intake"),
             description="report intake",
         )
-    # K파일(선택)을 먼저 세션에 저장 → 그 id 로 리포트에 링크(1 K : N 리포트).
+    # ③ K 저장 + 인제스트 — 실패하면 이번 호출이 만든 것(신규 세션 또는 방금 넣은 K)을 되돌린다.
     kfile_id: int | None = None
-    if kfile is not None:
-        k_raw, k_name = await _read_upload(kfile, what="K파일")
-        krow = await sess_svc.add_uploaded_file(db, s, filename=k_name or "model.k", raw=k_raw, kind="input")
-        kfile_id = krow.id
-    raw, up_name = await _read_upload(file, what="리포트")
-    scenario_raw, sc_name = (None, None)
-    if scenario is not None:
-        scenario_raw, sc_name = await _read_upload(scenario, what="scenario 파일")
+    krow = None
     try:
+        if k_raw is not None:
+            krow = await sess_svc.add_uploaded_file(db, s, filename=k_name or "model.k", raw=k_raw, kind="input")
+            kfile_id = krow.id
         report = await svc.ingest_report(
             db, s, filename=up_name or "report.html", raw=raw, kind_hint=kind, label=label,
             scenario_raw=scenario_raw, scenario_filename=sc_name,
@@ -189,6 +203,10 @@ async def report_intake(
             focus=focus,
         )
     except ValueError as exc:
+        if created_here:
+            await sess_svc.delete_session(db, s)          # 신규 세션+K 통째로 정리(cascade+rmtree)
+        elif krow is not None:
+            await sess_svc.delete_file(db, krow)          # 기존 세션엔 방금 넣은 K만 회수
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
     return ok(
         {"session_id": s.id, "report_id": report.id, "kfile_id": kfile_id,
