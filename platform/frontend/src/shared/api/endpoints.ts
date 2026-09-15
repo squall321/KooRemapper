@@ -3,8 +3,8 @@ import { api, unwrap } from './client'
 import type {
   AngleGroupStats, Job, ModelMeta, OperationDetail, OperationSummary, PartEnergySeries, Report,
   ReportCase, ReportDirectional, ReportEnergy, ReportFactQuery, ReportGeometry, ReportListItem,
-  ReportPartRisk, ReportPartSeries, ReportScatter, ScatterMetric, SessionDetail, SessionFile,
-  SessionSummary, TokenCreated, TokenInfo, User,
+  ReportKind, ReportPartRisk, ReportPartSeries, ReportScatter, ScatterMetric, SessionDetail,
+  SessionFile, SessionSummary, TokenCreated, TokenInfo, User,
 } from './types'
 
 // auth
@@ -142,6 +142,26 @@ export async function ingestReport(sessionId: string, file: File, kind?: string)
   if (kind) fd.append('kind', kind)
   const { data } = await api.post(`/sessions/${sessionId}/reports`, fd)
   return unwrap<Report>(data)
+}
+/** 원샷 반입 — 리포트+K파일(+scenario)을 한 호출로. .gz 가능(서버가 해제). */
+export interface ReportIntakeResult {
+  session_id: string; report_id: string; kfile_id: number | null
+  source_kfile_id: number | null; kind: ReportKind; n_cases: number; label: string | null
+}
+export async function reportIntake(opts: {
+  file: File; kfile?: File | null; scenario?: File | null; session_id?: string;
+  kind?: string; project?: string; dev_rev?: string; variation?: string; doe?: string; focus?: string;
+}): Promise<ReportIntakeResult> {
+  const fd = new FormData()
+  fd.append('file', opts.file)
+  if (opts.kfile) fd.append('kfile', opts.kfile)
+  if (opts.scenario) fd.append('scenario', opts.scenario)
+  for (const k of ['session_id', 'kind', 'project', 'dev_rev', 'variation', 'doe', 'focus'] as const) {
+    const v = opts[k]
+    if (v) fd.append(k, v)
+  }
+  const { data } = await api.post('/reports/intake', fd)
+  return unwrap<ReportIntakeResult>(data)
 }
 export async function getReport(reportId: string): Promise<Report> {
   const { data } = await api.get(`/reports/${reportId}`)

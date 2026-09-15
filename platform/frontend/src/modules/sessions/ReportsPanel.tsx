@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Upload, Trash2, ChevronRight, FileBarChart, ExternalLink, UploadCloud, Pencil } from 'lucide-react'
 import {
-  attachReportScenario, deleteReport, getReport, ingestReport, listReportCases, listReports,
+  attachReportScenario, deleteReport, getReport, ingestReport, listReportCases, listReports, reportIntake,
   patchReportMeta, publishReportToDatahub, reportHtmlBlobUrl,
 } from '@/shared/api/endpoints'
 import type { Report, ReportCase, ReportFinding, ReportListItem, SessionFile } from '@/shared/api/types'
@@ -40,6 +40,21 @@ export function ReportsPanel({ sessionId, files = [] }: { sessionId: string; fil
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['reports', sessionId] }); setOpenId(null) },
     onError: (e) => setErr(errorMessage(e)),
   })
+  // 원샷 반입 — 리포트 + 원본 K파일(+과제명)을 한 번에(.gz 가능).
+  const [showIntake, setShowIntake] = useState(false)
+  const [rptFile, setRptFile] = useState<File | null>(null)
+  const [kFile, setKFile] = useState<File | null>(null)
+  const [proj, setProj] = useState('')
+  const intake = useMutation({
+    mutationFn: (v: { file: File; kfile: File | null; project: string }) =>
+      reportIntake({ file: v.file, kfile: v.kfile, session_id: sessionId, project: v.project || undefined }),
+    onSuccess: (r) => {
+      setErr(null); setOpenId(r.report_id); setShowIntake(false)
+      setRptFile(null); setKFile(null); setProj('')
+      qc.invalidateQueries({ queryKey: ['reports', sessionId] })
+    },
+    onError: (e) => setErr(errorMessage(e)),
+  })
 
   return (
     <Card>
@@ -52,12 +67,42 @@ export function ReportsPanel({ sessionId, files = [] }: { sessionId: string; fil
           if (f) upload.mutate(f)
           e.target.value = ''
         }} />
-        <Button size="sm" variant="primary" onClick={() => inputRef.current?.click()} disabled={upload.isPending}>
-          {upload.isPending ? <Spinner /> : <Upload size={14} />} 리포트 업로드
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button size="sm" variant="ghost" onClick={() => setShowIntake((v) => !v)}>+ K 한 번에</Button>
+          <Button size="sm" variant="primary" onClick={() => inputRef.current?.click()} disabled={upload.isPending}>
+            {upload.isPending ? <Spinner /> : <Upload size={14} />} 리포트 업로드
+          </Button>
+        </div>
       </CardHeader>
       <CardBody className="p-0">
         {err && <div className="px-3 py-2 text-xs text-danger border-b border-border whitespace-pre-wrap">{err}</div>}
+        {showIntake && (
+          <div className="px-3 py-2 border-b border-border space-y-1.5 text-xs bg-muted/5">
+            <div className="text-muted">리포트 + 원본 K파일을 한 번에 반입 — 세션·링크까지 자동. 대용량은 .gz 로.</div>
+            <label className="flex items-center gap-2">
+              <span className="w-12 shrink-0 text-muted">리포트</span>
+              <input type="file" accept=".html,.htm,.gz" className="text-xs min-w-0"
+                     onChange={(e) => setRptFile(e.target.files?.[0] ?? null)} />
+            </label>
+            <label className="flex items-center gap-2">
+              <span className="w-12 shrink-0 text-muted">K파일</span>
+              <input type="file" accept=".k,.key,.dyn,.gz" className="text-xs min-w-0"
+                     onChange={(e) => setKFile(e.target.files?.[0] ?? null)} />
+            </label>
+            <label className="flex items-center gap-2">
+              <span className="w-12 shrink-0 text-muted">과제명</span>
+              <input value={proj} onChange={(e) => setProj(e.target.value)} placeholder="선택"
+                     className="border border-border rounded px-1 py-0.5 bg-transparent text-xs flex-1" />
+            </label>
+            <div className="flex gap-2 pt-0.5">
+              <Button size="sm" variant="primary" disabled={!rptFile || intake.isPending}
+                      onClick={() => rptFile && intake.mutate({ file: rptFile, kfile: kFile, project: proj })}>
+                {intake.isPending ? <Spinner /> : <Upload size={14} />} 반입
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setShowIntake(false)}>취소</Button>
+            </div>
+          </div>
+        )}
         {reports.isLoading ? (
           <div className="p-6 text-center"><Spinner /></div>
         ) : !reports.data?.length ? (
