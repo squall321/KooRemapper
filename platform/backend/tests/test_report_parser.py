@@ -359,6 +359,34 @@ def test_available_metrics_excludes_time_and_series():
     assert not ({"peak_ie_time", "peak_ke_time", "time_of_peak_stress", "stress_ts"} & set(m))
 
 
+@pytest.mark.skipif(not _SPHERE.exists(), reason="sphere 샘플 없음")
+def test_cli_analyzes_standalone(capsys):
+    # 서버·DB 없이 CLI 가 리포트를 분석하고, analyze 코어를 서비스와 공유하는지.
+    from app.reports import analyze, cli
+    rc = cli.main([str(_SPHERE), "--do",
+                   "summary,available-metrics,angle-stats,directional,scatter", "--metric", "peak_stress"])
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["summary"]["kind"] == "sphere" and out["summary"]["n_cases"] == 26
+    assert "peak_stress" in out["available-metrics"]
+    assert out["angle-stats"]["n_groups"] == 26 and out["angle-stats"]["groups"]
+    assert out["directional"]["directions"]
+    assert out["scatter"]["n_bases"] == 26
+    # 코어 1벌 — CLI 결과가 analyze 직접 호출과 동일(서비스도 같은 함수에 위임).
+    study = parser.parse_data(parser.extract_embedded_data(_read(_SPHERE)), kind_hint="sphere")
+    direct = analyze.angle_group_stats(study["cases"], "sphere", study["parts"], metric="peak_stress")
+    assert direct["n_groups"] == out["angle-stats"]["n_groups"]
+    assert direct["groups"][0]["stats"]["mean"] == out["angle-stats"]["groups"][0]["stats"]["mean"]
+
+
+def test_cli_bad_report_errors(capsys, tmp_path):
+    from app.reports import cli
+    p = tmp_path / "x.html"
+    p.write_text("<html>not a report</html>")
+    rc = cli.main([str(p), "--do", "summary"])
+    assert rc == 2 and "파싱 실패" in capsys.readouterr().err
+
+
 def test_deferred_koo_data_script():
     # deferred(tier C) 임베드: <script type=application/json id=koo-data>.
     payload = {"positions": [], "results": [], "faces": [], "doe_analysis": {}}
