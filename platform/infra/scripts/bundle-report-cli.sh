@@ -20,8 +20,10 @@ cat > "$OUT/koo-report-analyze" <<'LAUNCH'
 #!/usr/bin/env bash
 # DynaForge 리포트 분석 CLI(자립 번들) — python3 만 있으면 된다(외부 패키지 불요).
 # CWD 는 유지(리포트 상대경로 보존)하고 번들 루트만 PYTHONPATH 에 얹는다.
+# python 은 $PYTHON > python3(PATH) > /opt/py313/bin/python(SmartTwin SIF) 순으로 찾는다.
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec env PYTHONPATH="$here${PYTHONPATH:+:$PYTHONPATH}" "${PYTHON:-python3}" -m app.reports.cli "$@"
+py="${PYTHON:-}"; [ -n "$py" ] || py="$(command -v python3 || true)"; [ -n "$py" ] || py=/opt/py313/bin/python
+exec env PYTHONPATH="$here${PYTHONPATH:+:$PYTHONPATH}" "$py" -m app.reports.cli "$@"
 LAUNCH
 chmod +x "$OUT/koo-report-analyze"
 
