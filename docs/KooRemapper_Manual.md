@@ -70,8 +70,10 @@
     - 39.14 [matswap](#3914-matswap--재료-번들-교체)
     - 39.15 [matdb](#3915-matdb--재료-db-교체)
     - 39.16 [wrap](#3916-wrap--와인딩-인장-프리스트레스)
-40. [수학 이론](#40-수학-이론)
-41. [출력 파일 형식](#41-출력-파일-형식)
+40. [meshfix — TET4 재메시 (Gmsh 기반)](#40-meshfix--tet4-재메시-gmsh-기반)
+41. [수학 이론](#41-수학-이론)
+42. [출력 파일 형식](#42-출력-파일-형식)
+43. [추가 op 레퍼런스 (v1.8.0 대조 추가)](#43-추가-op-레퍼런스-v180-대조-추가)
 
 ---
 
@@ -80,6 +82,8 @@
 KooRemapper는 LS-DYNA FEA 해석을 위한 **메시 전처리 도구**입니다.
 주요 목적은 개략 메시(coarse mesh)로 구성된 전체 모델에 **상세 메시(detail mesh)**를 매핑하고,
 조립 공정에 수반되는 **초기 응력 상태(prestress)**를 재현하는 것입니다.
+
+> **v1.8.0 바이너리 대조 반영(2026-09-16)** — 이 문서는 실제 v1.8.0 바이너리의 `help` 덤프와 shipped 예제 YAML(`examples/`)에 대조하여 호출형태·config 키·기본값·스키마를 정정했습니다. 이론·동작원리 서술은 보존했습니다.
 
 ### 핵심 기능 범위
 
@@ -128,20 +132,23 @@ cmake --build build --config Release
 ## 3. 명령어 목록
 
 ```
-KooRemapper.exe <command> [options] ...
+KooRemapper <command> [options] ...
 
 Commands:
   # 메시 처리
   map            HEX8 구조화 메시를 굽힘 참조 형상에 매핑
   shellmap       QUAD4 셸 참조 기반 상세 메시 매핑
   unfold         굽힘 구조화 메시로부터 평면 메시 전개
-  generate       테스트용 예제 메시 생성
+  generate       테스트용 예제 메시 생성 (box 하위명령 포함)
   generate-var   YAML 설정 기반 변밀도 메시 생성
+  battery        배터리 셀(stacked/wound) K파일 생성 + 스웰링 DR 데크
 
-  # 분석
+  # 분석 / 메타
   strain         두 메시 간 변형률 계산
   prestress      변형 형상 기반 초기 응력 계산 + dynain 출력
   info           메시 파일 정보 출력
+  modelmeta      파트별 기하·재료·연결성 메타 JSON 추출
+  version        버전 정보
 
   # 형상 변형 (단독 실행)
   squeeze        간섭 끼워맞춤 초기 변형 계산
@@ -154,12 +161,14 @@ Commands:
   wrap           와인딩 인장 프리스트레스
   cclip          육면체 파트를 F-δ 캘리브레이션된 C형 스프링 클립으로 치환 (눌린 상태+초기응력)
 
-  # 메시 변환
+  # 메시 변환 / 편집
   convert        2차 요소 변환 (TET10/HEX20/QUAD8/TRIA6)
   refine         메시 세분화 (1:2, 1:3)
   elform         요소 공식(ELFORM) 변경
   disconnect     파트 간 노드 분리 (full/czm/mefem)
   iga            등기하해석(IGA) NURBS 박스 생성
+  cnrb2solid     CNRB 강체 볼트를 HEX8 솔리드 실린더로 변환
+  update         dynain/K파일 *NODE 블록으로 노드 좌표 갱신
 
   # 재료/접촉 관리
   matswap        재료 번들 교체
@@ -180,16 +189,23 @@ Commands:
   ale            ALE(Arbitrary Lagrangian-Eulerian) 변환
   stabilize      Explicit 솔버 안정화 (12단계)
   database       DATABASE 출력 제어 키워드 삽입
+  hfdamp         고주파(스퓨리어스) 진동 댐핑 (*DAMPING_FREQUENCY_RANGE_DEFORM)
 
   # 통합 실행
   assemble       다중 오퍼레이션 통합 어셈블리
-  tetremesh      TET4 로컬 재메시 (패치 기반)
-  meshfix        TET4 파트 전체 재메시 (Gmsh 기반)
+
+  # 표면·재메시 (숨은 op — --help 목록에는 없으나 정상 동작)
+  extract-surface  솔리드에서 표면 셸 추출
+  tetremesh        TET4 로컬 재메시 (패치 기반, localimprove/tetgen 백엔드)
+  meshfix          TET4 파트 전체 재메시 (Gmsh 기반)
+  merge            적층 파트를 균질화(Voigt-Reuss-Hill) 단일 레이어로 병합
+  strip            지정 키워드(keywords 리스트)를 K파일에서 제거
 
   # 유틸리티
   help           도움말
-  version        버전 정보
 ```
+
+> **명령 개수**: v1.8.0 바이너리는 총 47개 op(유틸리티 `help`/`version` 제외)을 제공합니다. 이 중 `extract-surface`·`tetremesh`·`meshfix`·`merge`·`strip` 5종은 `KooRemapper --help` 최상위 목록에는 표시되지 않는 **숨은 op**이지만 정상 동작합니다(op 이름으로 실행하면 고유 Usage/YAML 스키마 출력). 실제 v1.8.0 리눅스 바이너리 경로는 `/opt/kooremapper/bin/KooRemapper` 이며, 아래 사용법의 `KooRemapper.exe` 표기는 Windows 빌드 기준입니다.
 
 ---
 
@@ -278,9 +294,11 @@ KooRemapper.exe prestress [options] <ref_mesh.k> <def_mesh.k> <output_prefix>
 Options:
   --E <value>          영률 (K-파일 재료 카드 대체)
   --nu <value>         푸아송 비
-  --strain engineering|green|log   변형률 계산 방식 (기본: engineering)
+  --strain engineering|green   변형률 계산 방식 (기본: green)
   --csv                CSV 형식 추가 출력
 ```
+
+> **v1.8.0 정정**: `--strain` 기본값은 `green`(Green-Lagrange)입니다(help `Usage:` 기준). prestress 의 help 는 `engineering`/`green` 두 가지만 지원하며 `log` 는 없습니다(두 메시 변형률만 필요할 때는 `strain` 명령이 `log` 도 지원, §10). `--E`/`--nu` 를 생략하면 K-파일 재료값이 쓰입니다.
 
 ### 변형률 계산
 
@@ -375,45 +393,75 @@ swelling 파트는 dynain에 포함되지 않습니다.
 
 ### generate — 예제 메시 생성
 
-```bash
-KooRemapper.exe generate <type> [options] <output.k>
+호출형태는 두 가지입니다(help `Usage:`).
 
-Types: teardrop, arc, scurve, helix, torus, twist, wave,
-       bulge, taper, waterdrop
+```bash
+KooRemapper generate [options] <type> <output_prefix>
+KooRemapper generate box <config.yaml>
+
+Types: teardrop, arc, scurve, helix, torus, twist, bendtwist,
+       wave, bulge, taper, waterdrop
+
+Options:
+  --dim-i <n>   I 방향 요소 수 (기본 10)
+  --dim-j <n>   J 방향 요소 수 (기본 5)
+  --dim-k <n>   K 방향 요소 수 (기본 5)
 ```
 
-테스트 및 데모용 다양한 기하학적 형상 HEX8 메시 생성.
+테스트 및 데모용 다양한 기하학적 형상 HEX8 메시 생성. `box` 하위명령은 YAML(`lx/ly/lz`, `nx/ny/nz`, `rho/E/nu`, `mid/secid/pid`, `part_title`)로 직육면체 메시를 만듭니다.
 
 ### generate-var — 변밀도 메시 생성
 
+호출형태는 positional 입니다(`--ref`, `--no-scale` 는 옵션).
+
 ```bash
-KooRemapper.exe generate-var [--ref <ref.k>] [--no-scale] <config.yaml> <output.k>
+KooRemapper generate-var [options] <config.yaml> <output.k>
+
+Options:
+  --ref <file>   스케일링용 참조 평면 메시
+  --no-scale     참조로 스케일하지 않고 YAML 길이를 그대로 사용
 ```
 
-#### YAML 설정 (평면 타입)
+#### YAML 설정 (평면 타입, `type: flat`)
+
+help 기준 스키마는 `variable_density` + `elements_j/k` 구조입니다(존별 `length`/`num_elements`).
 
 ```yaml
-type: flat
-zones:
-  - id: 1
-    nx: 10
-    ny: 8
-    nz: 2
-    x_min: 0.0
-    x_max: 50.0
-    y_min: 0.0
-    y_max: 40.0
+type: flat                     # 생략 시 기본 flat
+reference:
+  flat_mesh: "ref_flat.k"      # 자동 스케일용 참조 메시
+elements_j: 50                 # J 방향 요소 수
+elements_k: 10                 # K 방향 요소 수
+variable_density:
+  zone1_dense_start:
+    length: 10.0
+    num_elements: 50
+  # zone2_... 존을 이어서 정의
 ```
 
-#### YAML 설정 (곡선 타입)
+#### YAML 설정 (곡선 타입, `type: curved`)
+
+중심선 좌표(`centerline_points`)를 보간해 단면을 스윕합니다.
 
 ```yaml
 type: curved
-centerline: centerline.dat   # 중심선 좌표 파일
-reference: ref_mesh.k        # 참조 두께용
-zones:
-  - ...
+reference:
+  flat_mesh: "ref_flat.k"      # 스케일용(선택)
+centerline_points:
+  - [0, 0]
+  - [50, 0]
+  - [100, 50]
+  - [150, 50]
+interpolation: catmull_rom     # linear | catmull_rom | bspline
+cross_section:                 # 참조가 없을 때만
+  width: 10.0
+  thickness: 2.0
+elements_along_curve: 100
+elements_j: 20
+elements_k: 5
 ```
+
+> **v1.8.0 정정**: 구버전 정본이 보이던 `zones:`(id/nx/ny/nz/x_min/x_max…) 형식은 v1.8.0 바이너리가 파싱하는 스키마와 다릅니다. help 기준은 위 `variable_density`/`centerline_points` 구조입니다(zones 형식 병행 지원 여부는 확인 필요).
 
 ---
 
@@ -601,27 +649,26 @@ KooRemapper.exe bend <config.yaml>
 ### YAML 형식
 
 ```yaml
-model: base.k
+base_model: flat.k
 output: bent
-target_pid: 1
-plane: xy               # xy | yz | zx (굽힘 평면)
-mode: deform            # deform (노드 이동) | stress (응력만)
-source: formula         # formula | dat | dat_pair
-
-# source: formula
-expression: "0.5 * sin(pi * x1 / L1) * sin(pi * x2 / L2)"
-
-# source: dat
-# dat_file: deflection.dat
-
-# source: dat_pair
-# dat_top: top.dat
-# dat_bottom: bottom.dat
-
 material:
   E: 210000
   nu: 0.3
+operations:
+  - type: bend
+    target_pid: 1
+    plane: xz               # xy | xz | yz (굽힘 평면)
+    mode: formula           # formula | dat
+    expression: "0.5 * sin(pi * x1 / L1) * sin(pi * x2 / L2)"   # 처짐 w(x1,x2) 수식
+
+    # dat 모드:
+    # source: dat_file
+    # dat_file: deflection.dat
+    # dat_top: top
+    # dat_bottom: bottom
 ```
+
+> **v1.8.0 정정**: (1) 굽힘 평면 값은 `xy | xz | yz` 입니다(구버전의 `zx` 표기 정정, help 기준). (2) config 는 최상위 `base_model`/`output` + `operations[].type: bend` 구조입니다(help·examples). (3) help 는 `mode: formula | dat` 를 씁니다(구버전의 `mode: deform|stress` + `source: dat_pair` 는 정본 서술 기준이며, v1.8.0 호출은 help 형식을 따름).
 
 ### 수식 변수
 
@@ -676,30 +723,32 @@ KooRemapper.exe indent <config.yaml>
 ### YAML 형식
 
 ```yaml
-model: base.k
+base_model: flat.k
 output: indented
-target_pid: 1
-plane: xy
-direction: -z
-depth: 2.0              # 양수=압입, 음수=엠보싱
-r1: 1.5                 # 펀치 측 필렛 반경
-r2: 1.0                 # 다이 측 필렛 반경
-bottom_ratio: 0.5       # 두께 방향 관통 비율 (0~1)
-stress: true            # 굽힘 응력 계산 여부
-shell_thickness: 1.0    # 셸 두께 (셸 요소일 때)
-
-shape:
-  type: polygon         # polygon | spline
-  points:
-    - [0.0, 0.0]
-    - [10.0, 0.0]
-    - [10.0, 8.0]
-    - [0.0, 8.0]
-
 material:
   E: 210000
   nu: 0.3
+operations:
+  - type: indent
+    target_pid: 1
+    plane: xy
+    direction: -z
+    depth: 2.0              # 양수=압입, 음수=엠보싱
+    r1: 1.5                 # 펀치(바닥) 반경
+    r2: 1.0                 # 필렛 반경
+    bottom_ratio: 0.5       # 두께 방향 관통 비율 (0~1)
+    stress: true            # 굽힘 응력 계산 여부
+    shell_thickness: 1.0    # 셸 두께 (셸 요소일 때)
+    shape:
+      type: polygon         # circle | polygon (spline 은 정본 서술)
+      points:
+        - [0.0, 0.0]
+        - [10.0, 0.0]
+        - [10.0, 8.0]
+        - [0.0, 8.0]
 ```
+
+> **v1.8.0 정정**: config 는 최상위 `base_model`/`output` + `operations[].type: indent` 구조입니다(help·examples). `shape.type` 은 help 기준 `circle | polygon` 이며(`spline` 은 정본 서술), `bottom_ratio`/`shell_thickness`/`material` 은 정본이 추가 문서화한 필드입니다.
 
 ### 파라미터
 
@@ -735,7 +784,8 @@ $$k = \frac{\text{depth}}{r_1 + r_2}$$
 
 ### 용도
 셸 메시의 **이면각(dihedral angle)**으로부터 굽힘 곡률을 계산하여
-등가 소성 변형률(EPS)을 `*INITIAL_STRESS_SHELL`로 출력합니다.
+등가 소성 변형률(EPS)을 `*INITIAL_STRAIN_SHELL`(초기 변형률)로 출력합니다.
+재료 항복응력 sigy 는 `*MAT_024` 에서 읽어 EPS 스케일에 씁니다.
 
 ### 사용법
 
@@ -746,12 +796,17 @@ KooRemapper.exe formstrain <config.yaml>
 ### YAML 형식
 
 ```yaml
-model: base.k
-output: formed
-target_pid: 0            # 0 = 전체 셸 파트 자동 감지
-shell_thickness: 0.0     # 0 = *SECTION_SHELL에서 자동
-min_curvature: 0.001     # 잡음 필터 임계값
+base_model: bent_shell.k
+output: formstrain_result
+dynain_embed: true           # 출력에 초기 변형률 셸 카드 임베드
+operations:
+  - type: formstrain
+    target_pid: 0            # 생략/0 = 전체 셸 파트 자동 감지
+    shell_thickness: 0.0     # 0 = *SECTION_SHELL에서 자동
+    min_curvature: 0.001     # 잡음 필터 임계값
 ```
+
+> **v1.8.0 정정**: 출력 카드는 `*INITIAL_STRAIN_SHELL`(초기 변형률)입니다(help 기준. 구버전의 `*INITIAL_STRESS_SHELL` 표기 정정). config 는 최상위 `base_model`/`output`/`dynain_embed` + `operations[].type: formstrain` 구조입니다.
 
 ### 이론
 
@@ -989,30 +1044,34 @@ KooRemapper.exe warpage <config.yaml>
 ### YAML 형식
 
 ```yaml
-model: base.k
+base_model: flat.k
 output: warped
-target_pid: 1
-dat_file: warpage.dat      # 변형 데이터 파일
-plane: xy                  # 투영 평면
-deflection_axis: z         # 변형 축
-unit: mm                   # 단위
-mask_value: -9999          # 무효 데이터 마커
-noise_threshold: 0.001     # 노이즈 임계값
-morph_factor: 1.0          # 변형 배율
-mode: curvature            # curvature | raw
-finite_strain: false       # 유한 변형률 사용
-outside_behavior: clamp    # 경계 외 처리
-debug: false
-debug_prefix: debug_
-data_bbox:                 # 데이터 바운딩 박스 (선택)
-  x_min: 0
-  x_max: 100
-  y_min: 0
-  y_max: 100
 material:
   E: 210000
   nu: 0.3
+operations:
+  - type: warpage
+    target_pid: 1
+    source: dat_file         # dat_file | formula
+    dat_file: warpage.dat    # 측정 변형 데이터 파일
+    dat_top: top             # 상면 컬럼명
+    dat_bottom: bottom       # 하면 컬럼명
+    x_min: 0.0               # 데이터 바운딩 박스 (선택)
+    x_max: 100.0
+    y_min: 0.0
+    y_max: 100.0
+    # 아래는 정본이 추가 문서화한 파라미터(operations 내 배치는 확인 필요):
+    # mode: curvature        # curvature | raw
+    # morph_factor: 1.0      # 변형 배율
+    # plane: xy              # 투영 평면
+    # deflection_axis: z     # 변형 축
+    # noise_threshold: 0.001 # 노이즈 임계값
+    # finite_strain: false   # 유한 변형률 사용
+    # outside_behavior: clamp # clamp | zero
+    # mask_value: -9999      # 무효 데이터 마커
 ```
+
+> **v1.8.0 정정**: config 는 최상위 `base_model`/`output` + `operations[].type: warpage` 구조입니다(help·examples). help 스키마는 `source`(dat_file|formula)/`dat_file`/`dat_top`/`dat_bottom`/`x_min~y_max` 이며, `mode`/`morph_factor` 등 정본 문서화 파라미터의 operations 내 정확한 배치는 확인 필요입니다.
 
 ### 파라미터
 
@@ -1055,45 +1114,36 @@ KooRemapper.exe offset <config.yaml>
 ### YAML 형식
 
 ```yaml
-model: base.k
+base_model: model.k
 output: offset_result
-source_pid: 1
-offset_direction: +normal   # +normal|-normal|+x|-x|+y|-y|+z|-z
-thickness: 2.0
-thickness_formula: "1.0 + 0.01*x"   # 가변 두께 수식 (선택)
-num_layers: 1
-use_local_normals: true      # 곡면 법선 사용
-element_type: hex            # hex | tet
-connection_mode: shared      # shared | tied | czm
-new_pid: 0                   # 0=자동
-part_title: "Offset part"
-material:
-  E: 210000
-  nu: 0.3
+operations:
+  - type: offset
+    source_pid: 1
+    element_type: solid          # solid | tshell | shell
+    thickness: 2.0
+    thickness_formula: "1.0 + 0.01*x"   # 가변 두께 수식 (선택, x/y/z 변수)
+    num_layers: 1
+    offset_direction: +normal    # +normal|-normal|+x|-x|+y|-y|+z|-z
+    use_local_normals: true      # 곡면 노드별 법선 사용
+    connection_mode: tied        # tied | czm | contact | none (기본 tied)
+    new_pid: 10                  # 새 파트 ID
+    part_title: "Offset part"
+    material_card: |             # @MID@ 자동 치환
+      *MAT_ELASTIC
+      $#  mid   ro     e    pr
+           @MID@  2.0  12000  0.25
 
-# CZM 연결 (connection_mode: czm)
-czm_part_id: 100
-czm_mid: 50
-czm_material_card: |
-  *MAT_COHESIVE_...
+    # CZM 연결 (connection_mode: czm)
+    czm_material_card: |         # @CZM_MID@ 자동 치환
+      *MAT_COHESIVE_MIXED_MODE
+      ...
 
-# 재료 카드 직접 지정 (선택)
-material_card: |
-  *MAT_ELASTIC
-  ...
-
-# 영역 선택 (선택)
-bbox_xmin: 0
-bbox_xmax: 100
-bbox_ymin: 0
-bbox_ymax: 100
-bbox_zmin: 0
-bbox_zmax: 100
-node_id_min: 1
-node_id_max: 999999
-element_id_min: 1
-element_id_max: 999999
+    # 영역(region) 필터 (선택): 소스 표면의 일부만 처리
+    # bbox_xmin/xmax/ymin/ymax/zmin/zmax
+    # node_id_min/max, element_id_min/max
 ```
+
+> **v1.8.0 정정**: (1) `connection_mode` 값 집합은 `tied | czm | contact | none` 이며 **기본값은 `tied`** 입니다(help·examples. 구버전의 `shared | tied | czm`/기본 `shared` 정정). `contact` 는 인터페이스 노드를 복제해 별도 표면을 만들고 사용자가 이후 `*CONTACT` 를 정의합니다. (2) `element_type` 값은 `solid | tshell | shell` 입니다(구버전의 `hex | tet` 정정). (3) config 는 최상위 `base_model`/`output` + `operations[].type: offset` 구조입니다. 재료는 `material_card`(인라인, `@MID@` 치환)로 지정합니다.
 
 ### 주요 파라미터
 
@@ -1107,7 +1157,8 @@ element_id_max: 999999
 | `thickness` | 균일 두께 | — |
 | `thickness_formula` | 가변 두께 수식 (x,y,z 변수) | — |
 | `use_local_normals` | 곡면 노드별 법선 사용 | `false` |
-| `connection_mode` | 연결 방식 (shared/tied/czm) | `shared` |
+| `element_type` | 요소 유형 (solid/tshell/shell) | `solid` |
+| `connection_mode` | 연결 방식 (tied/czm/contact/none) | `tied` |
 
 ### 품질 검증
 생성된 솔리드 요소의 품질을 자동 검증합니다:
@@ -1499,21 +1550,22 @@ KooRemapper.exe load <config.yaml>
 
 ### YAML 형식
 
+파트의 **면을 선택**해 압력/힘/중력 하중을 부여합니다. `*LOAD_*`, `*DEFINE_CURVE`, `*SET_*` 키워드를 삽입합니다.
+
 ```yaml
-model: model.k
-output: loaded.k
+model: mesh.k
+output: mesh_loaded.k
 loads:
-  - type: force
-    nid: 100
-    dof: 3             # 1=x, 2=y, 3=z
-    value: -1000.0
-    lcid: 0            # Load Curve ID (0=상수)
-  - type: pressure
-    pid: 1
-    value: 10.0
-  - type: gravity
-    direction: z
-    value: -9810.0
+  - part: 10
+    mode: pressure          # pressure | force | gravity
+    value: 1.0              # 하중 크기
+    direction: [0, 0, 1]    # 하중 방향 벡터
+    select: direction       # direction | tied | all
+    angle: 45.0             # 면 선택 각도 허용치(°)
+    curve:                  # 선택. 시간-하중 곡선 → *DEFINE_CURVE
+      - [0.0, 0.0]
+      - [0.001, 1.0]
+      - [0.01, 1.0]
 ```
 
 ### 파라미터
@@ -1523,13 +1575,15 @@ loads:
 
 | 파라미터 | 설명 |
 |----------|------|
-| `type` | 하중 유형 (force/pressure/gravity) |
-| `nid` | 노드 ID (force) |
-| `pid` | 파트 ID (pressure) |
-| `dof` | 자유도 방향 1=x, 2=y, 3=z (force) |
+| `part` | 하중 대상 파트 ID |
+| `mode` | 하중 유형 (`pressure` / `force` / `gravity`) |
 | `value` | 하중 크기 |
-| `lcid` | Load Curve ID (0=상수) |
-| `direction` | 중력 방향 (gravity) |
+| `direction` | 하중 방향 벡터 `[x, y, z]` |
+| `select` | 면 선택 방식 — `direction`(방향벡터 각도 내 법선 면) / `tied`(tied 접촉 참여 면) / `all`(파트 노출면 전체) |
+| `angle` | 면 선택 각도 허용치(°) |
+| `curve` | 선택. `[[t, f], ...]` 시간-하중 곡선 |
+
+> **v1.8.0 정정**: 구버전이 보이던 `type`/`nid`/`pid`/`dof`/`lcid` 노드·파트 ID 직접지정 스키마 대신, v1.8.0 은 위 `part`/`mode`/`select`/`direction`/`angle` **면-선택 스키마**를 씁니다(help·`examples/load`).
 
 ---
 
@@ -1546,23 +1600,17 @@ KooRemapper.exe boundary <config.yaml>
 
 ### YAML 형식
 
+파트의 **면을 선택**해 자유도 구속(SPC) 또는 강체벽 경계를 부여합니다. `*BOUNDARY_SPC_NODE`, `*RIGIDWALL_PLANAR` 키워드를 삽입합니다.
+
 ```yaml
-model: model.k
-output: constrained.k
+model: mesh.k
+output: mesh_bc.k
 boundaries:
-  - type: spc
-    nid: 100
-    dofx: 1            # 0=자유, 1=구속
-    dofy: 1
-    dofz: 1
-    dofrx: 0
-    dofry: 0
-    dofrz: 0
-  - type: prescribed_motion
-    nid: 200
-    dof: 1
-    value: 10.0
-    lcid: 1
+  - part: 9
+    dof: all                 # all | x | y | z | xy | xz | yz | xyz
+    direction: [0, 0, -1]    # 면 선택 방향 벡터
+    select: direction        # direction | all
+    angle: 45.0              # 면 선택 각도 허용치(°)
 ```
 
 ### 파라미터
@@ -1572,12 +1620,13 @@ boundaries:
 
 | 파라미터 | 설명 |
 |----------|------|
-| `type` | 경계 유형 (spc/prescribed_motion) |
-| `nid` | 노드 ID |
-| `dofx~dofrz` | DOF 구속 (SPC: 0=자유, 1=구속) |
-| `dof` | 자유도 방향 (prescribed_motion) |
-| `value` | 변위값 |
-| `lcid` | Load Curve ID |
+| `part` | 경계 대상 파트 ID |
+| `dof` | 구속 자유도 — `all`(6 DOF 전체) / `x`·`y`·`z`(단일 병진) / `xy`·`xz`·`yz`·`xyz`(다중 병진) |
+| `direction` | 면 선택 방향 벡터 |
+| `select` | `direction`(방향 면) / `all`(파트 노출면 전체) |
+| `angle` | 면 선택 각도 허용치(°) |
+
+> **v1.8.0 정정**: 구버전이 보이던 `type: spc/prescribed_motion` + `nid` + `dofx~dofrz` 노드 ID 직접지정 스키마 대신, v1.8.0 은 위 `part`/`dof`/`select`/`direction` **면-선택 스키마**를 씁니다(help·`examples/boundary`). help 의 `dof` 목록은 `all|x|y|z|xy|xz|yz` 이나 예제는 3방향 병진 구속에 `xyz` 도 사용합니다.
 
 ---
 
@@ -1594,19 +1643,18 @@ KooRemapper.exe rbe <config.yaml>
 
 ### YAML 형식
 
+파트의 **면을 선택**해 RBE2/RBE3 강체 요소 구속을 만듭니다. RBE2 는 `*CONSTRAINED_NODAL_RIGID_BODY`, RBE3 는 `*CONSTRAINED_INTERPOLATION` 을 삽입합니다.
+
 ```yaml
-model: model.k
-output: rbe_model.k
-rbes:
-  - type: rbe2
-    master_nid: 100
-    slave_nids: [101, 102, 103, 104]
-    dof: 123456
-  - type: rbe3
-    master_nid: 200
-    slave_nids: [201, 202, 203]
-    dof: 123
-    weights: [1.0, 1.0, 1.0]
+model: mesh.k
+output: mesh_rbe.k
+rbe:
+  - part: 9
+    select: direction        # direction | all
+    direction: [0, 0, -1]    # 면 선택 방향 벡터
+    angle: 45.0              # 면 선택 각도 허용치(°)
+    type: rbe3               # rbe2 | rbe3
+    mode: spider             # spider (centroid 마스터 노드 1개) | face (면마다 centroid)
 ```
 
 ### 파라미터
@@ -1616,11 +1664,14 @@ rbes:
 
 | 파라미터 | 설명 |
 |----------|------|
-| `type` | rbe2 (강체) / rbe3 (분산) |
-| `master_nid` | 마스터 노드 ID |
-| `slave_nids` | 슬레이브 노드 ID 리스트 |
-| `dof` | 구속 자유도 (예: 123456) |
-| `weights` | 가중치 (RBE3 전용) |
+| `part` | 대상 파트 ID |
+| `select` | `direction`(방향 면) / `all`(파트 노출면 전체) |
+| `direction` | 면 선택 방향 벡터 |
+| `angle` | 면 선택 각도 허용치(°) |
+| `type` | `rbe2`(강체: 슬레이브가 마스터와 정확히 동일 이동) / `rbe3`(보간: 마스터 이동이 슬레이브 가중 평균) |
+| `mode` | `spider`(centroid 마스터 노드 1개) / `face`(면마다 centroid 노드) |
+
+> **v1.8.0 정정**: 구버전이 보이던 `type: rbe2/rbe3` + `master_nid`/`slave_nids`/`dof`/`weights` 노드 ID 직접지정 스키마 대신, v1.8.0 은 위 `part`/`select`/`mode` **면-선택 스키마**를 씁니다(help·`examples/boundary` 의 rbe_spider/rbe_face). 최상위 키는 `rbe:` 입니다.
 
 ---
 
@@ -1845,6 +1896,8 @@ output: explicit_model.k
 keep_dr_curves: false    # true: SIDR=1 DEFINE_CURVE 유지
 ```
 
+> **v1.8.0 정정**: explicit 복원 op 에는 **level 체계가 없습니다**. `model`/`output`/`keep_dr_curves` 세 키만 받습니다(help). `examples/explicit/level01.yaml`~`level12.yaml` 는 이 explicit 복원 op 이 아니라 별도 op 인 **`stabilize`**(파일 내용이 `stabilize: explicit` + `level: 1~12`, 호출 `KooRemapper stabilize levelNN.yaml`)용 예제이므로 혼동에 주의합니다(§36 stabilize 참조).
+
 ### 제거 대상
 
 
@@ -1884,15 +1937,17 @@ KooRemapper.exe wrap <config.yaml>
 
 ```yaml
 model: cylinder.k
-output: wrapped
-target_pid: 1
+output: cylinder_wrapped
+target_pid: [1, 2]      # 하나 이상의 파트 ID (리스트)
 axis: z                 # 와인딩 축 (x/y/z)
-axis_center: [0, 0]     # 축 중심 좌표 [c1, c2]
-tension: 100.0          # 와인딩 인장력 (MPa)
+tension: 100.0          # 와인딩 인장력 [force/length]
+center: [0.0, 0.0]      # 축 중심 좌표 [c1, c2] (선택, 자동 감지)
 material:
   E: 210000
   nu: 0.3
 ```
+
+> **v1.8.0 정정**: (1) `tension` 단위는 `[force/length]` 입니다(help. 구버전의 `MPa` 표기 정정 — 모델 단위계에 맞춰 해석). (2) 축 중심 필드명은 `center` 입니다(help·example. 구버전의 `axis_center` 정정). (3) `target_pid` 는 하나 이상의 파트 ID 리스트를 받습니다. 생성된 프리스트레스는 `relax` 또는 `dynamic_relaxation: true` 로 평형화한 뒤 본 해석에 넘깁니다.
 
 ### 물리 모델
 
@@ -1986,14 +2041,17 @@ KooRemapper.exe ale <config.yaml>
 ```yaml
 model: model.k
 output: ale_model.k
-parts:
+ale_parts:                 # 변환 대상 파트 (필수)
   - pid: 5
-    preset: air           # 프리셋 이름 또는 bundle 경로
-    lagrangian_pids: [1, 2, 3]   # FSI 라그랑지안 파트
+    material: air          # 프리셋 이름 또는 커스텀 .k 번들 경로
   - pid: 6
-    preset: water
-    lagrangian_pids: [1]
+    material: water
+fsi_pids: [1, 2, 3]        # FSI 라그랑지안 파트 (선택)
+elform: 11                 # ALE ELFORM (11=multi-mat, 12=single, 기본 11)
+# dct/nadv/meth (CONTROL_ALE), ctype/pfac (FSI), detonation (tnt/c4) 등 선택 옵션
 ```
+
+> **v1.8.0 정정**: config 키는 `ale_parts`(각 항목 `{pid, material}`) / `fsi_pids` 입니다(help·`examples/ale`. 구버전의 `parts`/`preset`/`lagrangian_pids` 정정). `fsi_pids` 는 최상위 리스트이며(파트별 아님), 폭발물 기폭점은 최상위 `detonation: {pid, x, y, z, lt}` 로 지정합니다.
 
 ### 재료 프리셋 (14종)
 
@@ -2004,7 +2062,7 @@ parts:
 |------|--------|-----|-----|
 | 기체 | air, nitrogen, argon | MAT_NULL | EOS_LINEAR_POLYNOMIAL |
 | 액체 | water, electrolyte, gasoline, oil, coolant, resin, tim, silicone | MAT_NULL | EOS_GRUNEISEN |
-| 폭발물 | tnt, c4 | MAT_HE_BURN | EOS_JWL |
+| 폭발물 | tnt, c4 | MAT_HIGH_EXPLOSIVE_BURN | EOS_JWL |
 | 진공 | vacuum | MAT_VACUUM | — |
 
 ### 자동 삽입 카드
@@ -2144,6 +2202,8 @@ extent:
 
 `implicit`, `modal`, `relax` 명령에 `strip: true` 옵션을 추가하면,
 해당 명령이 관리하는 키워드를 **제거만** 하고 새 키워드는 삽입하지 않습니다.
+
+> **참고 — 독립 `strip` op 과 구분**: 여기서 다루는 `strip: true` 는 `implicit`/`modal`/`relax`/`explicit` 명령에 붙는 옵션으로, 해당 명령 소속 키워드만 제거합니다. 이와 별개로 v1.8.0 에는 **독립 `strip` op**(숨은 op)이 있어 `keywords` 리스트에 나열한 임의 키워드를 K파일에서 제거합니다(§43 추가 op 레퍼런스 참조). 둘 다 "제거만 하고 새 키워드는 삽입하지 않는다"는 점은 같습니다.
 
 ### 명령별 제거 범위
 
@@ -2434,7 +2494,7 @@ operations:
 - type: wrap
   target_pid: 1
   axis: z
-  axis_center: [0, 0]
+  center: [0, 0]
   tension: 100.0
 ```
 
@@ -2826,6 +2886,284 @@ $#  sig-xx    sig-yy    sig-zz    sig-xy    sig-yz    sig-xz
 ### dynain embed 모드 (`dynain_embed: true`)
 
 별도 `.dynain` 파일 없이 `*INITIAL_STRESS_SOLID` 블록을 메인 `.k` 파일에 직접 삽입.
+
+---
+
+## 43. 추가 op 레퍼런스 (v1.8.0 대조 추가)
+
+정본에 전용 섹션이 없던 op 들을 v1.8.0 바이너리 기준으로 간결히 정리한다. 각 op 의 근거(help / examples / pyKooCAE 페이지)를 함께 표기한다. 이 중 `extract-surface`·`tetremesh`·`merge`·`strip` 4종과 `meshfix`(§40)는 `KooRemapper --help` 최상위 목록에 없는 **숨은 op** 이지만 정상 동작한다.
+
+### 43.1 battery — 배터리 셀 생성
+
+**용도**: 배터리 셀(적층 `stacked` / 권취 `wound`) 모델을 YAML 설정에서 생성하고, 스웰링(swelling) 상태 평형을 `*CONTROL_DYNAMIC_RELAXATION` 데크로 잡는다.
+
+**호출형태**: yaml-config op.
+
+```bash
+KooRemapper battery <config.yaml>
+```
+
+**주요 config 키** (예제 관찰 기반 — `examples/battery/swell/*`; help 는 필드 문서를 출력하지 않음):
+
+| 키 | 설명 |
+|---|---|
+| `output` | 출력 접두사/경로 |
+| `model_type` | `stacked` 또는 `wound` |
+| `tier` / `phase` / `mode` | 티어·페이즈 지정, `mode: swell` |
+| `solid_electrode` / `solid_elform` | 전극층 solid 화, (wound) 1=reduced/2=full |
+| `geometry.cell_width` / `.cell_height` / `.n_unit_cells` | 셀 치수·(stacked) 단위셀 수 |
+| `layer_thickness.*` | al_cc·cathode·separator·anode·cu_cc·pouch·electrolyte_buffer 두께 [mm] |
+| `pouch.*` | 필렛·버퍼·돔캡 파라미터 |
+| `wound.flat` / `.flat_ratio` / `.n_winds` | (wound) 편평·비율·권취 수 |
+| `swelling.soc` / `.nmc_cte` / `.graphite_cte` | SOC·양극/음극 팽창률 |
+| `dr_endtim` / `dr_tolerance` / `dr_factor` / `dr_nrcyck` | DR 파라미터 |
+
+**근거**: pyKooCAE `mesh_generate.md`, `examples/battery/swell/{stacked,wound}/*.yaml`. 정본에 없던 op 이라 필드는 예제 관찰 기반이며, 미등장 필드·기본값은 확인 필요.
+
+---
+
+### 43.2 cclip — C형 스프링 클립 치환
+
+**용도**: 스마트폰 스프링 접점 등 hex box 파트를 측정 힘-변위(F-δ) 데이터에 캘리브레이션한 C형 쉘 스트립 클립으로 치환하고, 눌린(pressed) 상태로 `*INITIAL_STRESS_SHELL` 을 넣어 출력한다.
+
+**호출형태**: yaml-config op.
+
+```bash
+KooRemapper cclip <config.yaml>
+```
+
+**주요 config 키** (help + `examples/cclip/*.yaml`):
+
+| 키 | 값/설명 |
+|---|---|
+| `model` / `output` | 입력 .k / 출력 접두(`.k` + `_cclip_report.json` 생성) |
+| `mode` | `analytic` 또는 `deck`(LS-DYNA press deck) |
+| `attach` | `none` 또는 `cnrb`(foot tied to board) |
+| `stress_output` | `embed` 또는 `include`(.dynain + `*INCLUDE`) |
+| `free_output` | true 시 `<output>_free.k`(눌리지 않은 원안)도 출력 |
+| `element` | `shell` 또는 `solid`(through-thickness HEX8) |
+| `axis` | `auto` 또는 `[+\|-]x\|y\|z`(press-from side) |
+| `open` | C 벌징 방향(길이축 기준, 예: `"+"`) |
+| `calibration.point` | `{deflection, force}` 단일 작동점(analytic) |
+| `calibration.curve` | `[[d,F], ...]` F-δ 곡선(deck) |
+| `calibration.operating_deflection` | 곡선 모드 필수(설치 눌림량) |
+| `calibration.tolerance` | 캘리브레이션 허용오차 |
+| `clips[].pid` | 대상 파트 ID(또는 `match_part: "CCLIP_*"`, `auto: true`) |
+| `clips[].overtravel` | free height = installed + overtravel |
+
+**근거**: help(`Usage:`), pyKooCAE `mesh_generate.md`, `examples/cclip/cclip.yaml`(analytic)·`cclip_deck.yaml`(deck). 원본 PID 를 유지해 기존 SET/CONTACT 참조가 살아남으며, 출력 검증은 `tools/cclip_check.py` 로 한다(솔버 불필요).
+
+---
+
+### 43.3 cnrb2solid — CNRB 볼트를 솔리드로 변환
+
+**용도**: `*CONSTRAINED_NODAL_RIGID_BODY`(CNRB, 강체 볼트 구속)를 O-grid(butterfly) 토폴로지의 HEX8 솔리드 실린더로 변환하고, 원본 노드와 신규 솔리드 사이에 `*CONTACT_TIED_SURFACE_TO_SURFACE_OFFSET` 를 생성한다. 볼트 헤드(플랜지)도 자동 생성할 수 있다.
+
+**호출형태**: yaml-config op (모든 키를 최상위 flat 에 둠).
+
+```bash
+KooRemapper cnrb2solid <config.yaml>
+```
+
+**주요 config 키** (`examples/cnrb2solid/{basic,with_head}.yaml`):
+
+| 키 | 기본값 | 설명 |
+|---|---|---|
+| `model` / `output` | (필수) | 입출력 K파일 |
+| `E` / `PR` / `RHO` | (필수) | 탄성계수[MPa] / 포아송비 / 밀도[t/mm³] |
+| `radius_scale` | 0.999 | 링 노드 반경 = 볼트홀 R × scale |
+| `num_circum_nodes` | 0(자동) | 원주 노드 수(4의 배수) |
+| `inner_radius_ratio` | 0.3 | 코어 사각형 반변 / R 비율 |
+| `axis_direction` | auto | 실린더 축(PCA 자동 감지) |
+| `z_tolerance` / `r_tolerance` | 0.1 / 0.5 | Z-레벨 그룹핑 / 다중 반경 클러스터링 허용오차 [mm] |
+| `head_offset_r` / `head_thickness` / `head_position` | 0.0 / 2.0 / auto | 헤드 반경 오프셋(0=미생성) / 두께 / 위치 |
+
+**근거**: pyKooCAE `surface_remesh.md`, `docs/cnrb2solid_concept.md`, `examples/cnrb2solid/*.yaml`. 재료값(E/PR/RHO)은 변환 없이 그대로 쓰이므로 모델 단위계와 일치시켜야 한다.
+
+---
+
+### 43.4 hfdamp — 고주파 댐핑
+
+**용도**: 소형 요소가 만드는 고주파(스퓨리어스) 진동을 억제한다. `*DAMPING_FREQUENCY_RANGE_DEFORM` 을 삽입한다(selective 모드에서는 대상 파트의 `*SET_PART_LIST` 도 생성).
+
+**호출형태**: yaml-config op.
+
+```bash
+KooRemapper hfdamp <config.yaml>
+```
+
+**주요 config 키** (`examples/hfdamp/*.yaml`, README):
+
+| 키 | 기본값 | 설명 |
+|---|---|---|
+| `model` / `output` | (필수) | 입출력 K파일 |
+| `dt_target` | (필수) | 댐핑 타겟 dt. `FLOW = 1/(2×dt_target)` |
+| `cdamp` | 0.99 | 임계 감쇠비(0 < cdamp ≤ 1), 대역 [FLOW, FHIGH]에 적용 |
+| `fhigh_ratio` | 100.0 | `FHIGH = FLOW × ratio`(권장 10~300) |
+| `mode` | global | `global`(PSID=0 전 파트) / `selective`(요소 dt ≤ dt_target 파트만, 재료 E·PR·RHO 필요) |
+| `tssfac` | 0.9 | selective 전용. 요소 dt 추정 안전계수 |
+
+**근거**: pyKooCAE `load_bc_contact.md`, `examples/hfdamp/{basic,selective,hfdamp_full}.yaml`. DEFORM 옵션은 요소 응력/힘을 감쇠하고 강체 운동은 감쇠하지 않으며 동적 강성을 약 CDAMP% 높인다. `--help` 는 인자를 config 경로로 해석해 에러를 내므로 근거는 예제·README.
+
+---
+
+### 43.5 modelmeta — 파트별 메타 JSON 추출
+
+**용도**: K파일을 읽어 파트별 기하 메트릭·재료·연결성(connectivity)을 구조화된 JSON 으로 추출한다. 모델을 변형하지 않는 읽기 전용 op 로, `*CONTACT` 카드가 없어도 기하학적으로 닿는 파트쌍을 탐지할 수 있다.
+
+**호출형태**: yaml-config op.
+
+```bash
+KooRemapper modelmeta <config.yaml>
+```
+
+**주요 config 키** (`examples/modelmeta/modelmeta.yaml`):
+
+| 키 | 예제값/기본 | 설명 |
+|---|---|---|
+| `model` | (필수) | 분석 대상 K파일(읽기 전용, `*INCLUDE` 1단계 추적) |
+| `detect` | true | `*CONTACT` 없이도 기하학적으로 닿는 파트쌍 탐지 |
+| `gap_tol` | 0.2 | 탐지 갭 허용치(모델 길이 단위) |
+| `output` | (생략 시 `<model>_modelmeta.json`) | 출력 JSON 이름 |
+| `material_db` | (생략 시 실행파일 옆 번들 DB) | 재료 DB 경로 |
+| `db_mid_fallback` | false | MID 일치 폴백(로컬 MID 충돌 위험 — opt-in) |
+
+**근거**: pyKooCAE `info_meta.md`, `examples/modelmeta/modelmeta.yaml`. 정본에 없던 op 이라 필드는 help 동작과 단일 예제 유추이며, JSON 스키마 상세 필드·기본값은 확인 필요.
+
+---
+
+### 43.6 update — 노드 좌표 갱신
+
+**용도**: dynain 또는 K파일의 `*NODE` 블록을 읽어 모델의 일치 노드 좌표를 덮어쓴다. 불일치 노드는 그대로 둔다. (assemble §39.18 에 operations 형태로도 기술)
+
+**호출형태**: yaml-config op (flat 스키마).
+
+```bash
+KooRemapper update <config.yaml>
+```
+
+```yaml
+model:  original.k
+output: updated.k
+dynain: dr_result.dynain   # *NODE 블록을 가진 임의 파일(dynain/K-file 등)
+```
+
+assemble/체인에서는 operations 항목으로도 쓴다.
+
+```yaml
+operations:
+  - type: update
+    dynain: dr_result.dynain
+```
+
+**근거**: help(`Usage:`), pyKooCAE `mesh_edit.md`. model 과 소스 양쪽에 있는 노드만 갱신되고 나머지는 유지된다.
+
+---
+
+### 43.7 extract-surface — 표면 셸 추출 (숨은 op)
+
+**용도**: 솔리드 K파일에서 표면 셸을 추출한다.
+
+**호출형태**: positional op (help `Usage:` 와 정확히 일치).
+
+```bash
+KooRemapper extract-surface <solid.k> <output_shell.k> [--pid N] [--face top|bottom|all] [--output-pid N]
+```
+
+| 인자/옵션 | 설명 |
+|---|---|
+| `<solid.k>` | 입력 솔리드 K파일 (positional 1) |
+| `<output_shell.k>` | 출력 셸 K파일 (positional 2) |
+| `--pid N` | 대상 파트 ID |
+| `--face top\|bottom\|all` | 추출할 면 선택 |
+| `--output-pid N` | 출력 셸에 부여할 파트 ID |
+
+**근거**: help(`Usage:`), pyKooCAE `surface_remesh.md`. 옵션 세부 동작·기본값은 정본 예제가 없어 플래그 이름 기준이며 확인 필요.
+
+---
+
+### 43.8 tetremesh — TET4 로컬 재메시 (숨은 op)
+
+**용도**: 기존 TET4 파트를 품질 게이트(스케일드 자코비안·종횡비)로 스캔하고, 불량 요소 패치를 국소 재메시한다. `localimprove`(외부 라이브러리 불필요, 항상 사용 가능)와 `tetgen`(빌드 플래그 `KOOREMAPPER_BUILD_TETGEN` 필요, AGPL v3) 두 백엔드를 지원한다. (§40 meshfix 의 Gmsh 전체 재메시와 별개)
+
+**호출형태**: yaml-config op.
+
+```bash
+KooRemapper tetremesh <config.yaml>
+```
+
+**주요 config 키** (help YAML 스키마):
+
+| 키 | 기본값 | 설명 |
+|---|---|---|
+| `model` / `output` | (필수) | 입출력 K파일 |
+| `backend` | localimprove | `localimprove` \| `tetgen` |
+| `fallback` | (없음) | 주 백엔드 실패 시 대체 백엔드 |
+| `report_only` | false | true 면 스캔·보고만 |
+| `target_pids` | [](전체) | 대상 파트 ID 리스트 |
+| `quality.min_jacobian` | 0.2 | 스케일드 자코비안 하한 |
+| `quality.max_aspect_ratio` | 8.0 | 종횡비 상한 |
+| `patch.ring_expand` / `.surface_flatness_deg` / `.surface_move_tolerance` / `.preserve_multi_material` | 2 / 5.0 / 0.0 / true | 패치 확장·평면 판정·이동·다중재료 보존 |
+| `improve.laplacian_iters` / `.max_outer_iters` / `.allow_subdivide` | 5 / 3 / true | (Phase A) 스무딩·반복·세분화 |
+| `tetgen.quality_ratio` / `.min_dihedral_deg` | 1.4 / 10.0 | (Phase B) `-q` 반경/에지 비·최소 이면각 |
+
+**근거**: help(`Usage:` + YAML 스키마), pyKooCAE `surface_remesh.md`. `report_only: true` 로 먼저 품질 스캔 후 재메시가 안전하다.
+
+---
+
+### 43.9 merge — 적층 파트 균질화 병합 (숨은 op)
+
+**용도**: 적층된 여러 파트(PID)를 하나의 균질화(homogenized) 재료 레이어로 병합한다.
+
+**호출형태**: yaml-config op.
+
+```bash
+KooRemapper merge <config.yaml>
+```
+
+```yaml
+model: three_layer.k
+output: merged_output.k
+direction: z
+method: vrh        # voigt | reuss | vrh (Voigt-Reuss-Hill 평균)
+merge:
+  - pids: [1, 2, 3]
+    name: "Homogenized_Stack"
+```
+
+| 키 | 설명 |
+|---|---|
+| `model` / `output` | 입출력 K파일 |
+| `direction` | 적층 방향 |
+| `method` | `voigt` / `reuss` / `vrh` |
+| `merge[]` | 병합 그룹(`pids` 합칠 리스트 + `name` 결과 파트 이름) |
+
+**근거**: help(`Usage:` 한 줄), pyKooCAE `surface_remesh.md`, `examples/merge/merge_test.yaml`. 정본 섹션이 없어 `direction` 의 다른 값·추가 키 여부는 확인 필요.
+
+---
+
+### 43.10 strip — 키워드 제거 (숨은 op)
+
+**용도**: `keywords` 리스트로 지정한 LS-DYNA 키워드를 K파일에서 제거한다(부피 큰 메시 데이터 제거 등). §38 의 `strip: true` 옵션과는 별개의 독립 op 다.
+
+**호출형태**: yaml-config op.
+
+```bash
+KooRemapper strip <config.yaml>
+```
+
+```yaml
+model: al_box.k
+output: stripped_output.k
+keywords:
+  - "*NODE"
+  - "*ELEMENT_SOLID"
+  - "*ELEMENT_SHELL"
+  - "*INITIAL_STRESS_SOLID"
+  - "*INITIAL_STRESS_SHELL"
+```
+
+**근거**: help(`Usage:` 한 줄), pyKooCAE `surface_remesh.md`, `examples/strip/strip_test.yaml`.
 
 ---
 
