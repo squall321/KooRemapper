@@ -44,6 +44,17 @@ static std::string stripQuotes(const std::string& s) {
     return s;
 }
 
+// PID 목록: "[1, 2, 3]" 또는 "1 2 3" / "1,2,3"
+static std::vector<int> parsePidList(const std::string& raw) {
+    std::string s = stripComment(raw);
+    for (auto& c : s) if (c == '[' || c == ']' || c == ',') c = ' ';
+    std::istringstream ss(s);
+    std::vector<int> out;
+    int pid;
+    while (ss >> pid) out.push_back(pid);
+    return out;
+}
+
 AssemblyConfig AssemblyConfigReader::readFile(const std::string& filename) {
     std::ifstream file(filename);
     if (!file.is_open()) {
@@ -244,6 +255,8 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                         IGATargetConfig tgt;
                         if (key == "target_pid") {
                             try { tgt.targetPid = std::stoi(val); } catch (...) {}
+                        } else if (key == "target_pids") {
+                            tgt.targetPids = parsePidList(val);
                         } else if (key == "target_name") {
                             tgt.targetName = stripQuotes(val);
                         } else if (key == "exclude_name") {
@@ -268,6 +281,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                     // String fields handled outside the try (std::stoi would throw)
                     if (key == "target_name") { tgt.targetName = stripQuotes(val); continue; }
                     if (key == "exclude_name") { tgt.excludeName = stripQuotes(val); continue; }
+                    if (key == "target_pids") { tgt.targetPids = parsePidList(val); continue; }
                     try {
                         if (key == "target_pid") tgt.targetPid = std::stoi(val);
                         else if (key == "element_size") tgt.elementSize = std::stod(val);
@@ -1496,6 +1510,23 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
     }
     if (config.operations.empty()) {
         throw std::runtime_error("No operations defined in assembly config");
+    }
+
+    // iga target_pids: 타겟 하나를 PID 마다 복제해 펼친다 (v1.3.1 동작 — PID 별 bbox, 나머지 설정 동일).
+    // 리팩터링 때 파싱·펼침이 빠져 examples/iga/iga_multipid.yaml 이 'requires either target_pid' 로 실패했다.
+    for (auto& op : config.operations) {
+        if (op.type != AssemblyOperation::IGA) continue;
+        std::vector<IGATargetConfig> expanded;
+        for (const auto& t : op.iga.targets) {
+            if (t.targetPids.empty()) { expanded.push_back(t); continue; }
+            for (int pid : t.targetPids) {
+                IGATargetConfig one = t;
+                one.targetPid = pid;
+                one.targetPids.clear();
+                expanded.push_back(one);
+            }
+        }
+        op.iga.targets = std::move(expanded);
     }
 
     for (size_t i = 0; i < config.operations.size(); ++i) {
