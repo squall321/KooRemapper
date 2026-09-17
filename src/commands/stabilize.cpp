@@ -65,8 +65,9 @@ static int stab_patchControlFieldN(std::vector<std::string>& lines,
     return 0;
 }
 
-// If *CONTROL_CONTACT exists with only Card 1, insert a blank Card 2 after it.
-static void stab_ensureControlContactCard2(std::vector<std::string>& lines) {
+// If *CONTROL_CONTACT exists with only Card 1, insert card2 after it. Returns true if inserted.
+// 예전엔 빈 줄을 넣었는데 패치가 빈 줄을 건너뛰어 NSBCS·XPENE 가 조용히 빠지고 로그는 OK 였다
+static bool stab_ensureControlContactCard2(std::vector<std::string>& lines, const std::string& card2) {
     bool inBlock = false, hasTitle = false, titleDone = false;
     int dataCardSeen = 0, card1Idx = -1;
     for (int i = 0; i < (int)lines.size(); ++i) {
@@ -76,8 +77,8 @@ static void stab_ensureControlContactCard2(std::vector<std::string>& lines) {
             std::string up = kw_upper(tr);
             bool isCC = (up.rfind("*CONTROL_CONTACT", 0) == 0);
             if (inBlock && card1Idx >= 0 && dataCardSeen == 1) {
-                lines.insert(lines.begin() + card1Idx + 1, "");
-                return;
+                lines.insert(lines.begin() + card1Idx + 1, card2);
+                return true;
             }
             inBlock      = isCC;
             hasTitle     = isCC && (up.find("_TITLE") != std::string::npos);
@@ -89,11 +90,14 @@ static void stab_ensureControlContactCard2(std::vector<std::string>& lines) {
         if (!inBlock || tr[0] == '$') continue;
         if (hasTitle && !titleDone) { titleDone = true; continue; }
         if (dataCardSeen == 0) card1Idx = i;
-        else if (dataCardSeen == 1) return;
+        else if (dataCardSeen == 1) return false;
         ++dataCardSeen;
     }
-    if (inBlock && card1Idx >= 0 && dataCardSeen == 1)
-        lines.insert(lines.begin() + card1Idx + 1, "");
+    if (inBlock && card1Idx >= 0 && dataCardSeen == 1) {
+        lines.insert(lines.begin() + card1Idx + 1, card2);
+        return true;
+    }
+    return false;
 }
 
 static void stab_resolveLevel(StabilizeConfig& cfg) {
@@ -329,18 +333,18 @@ std::vector<std::string> stab_applyExplicit(
     bool needCC2 = (cfg.nsbcs >= 0 || cfg.xpene  >= 0);
     if (needCC1 || needCC2) {
         bool anyMod = false;
+        std::string c2(80, ' ');
+        if (cfg.nsbcs >= 0) c2 = kw_setField(c2, 20, 10, std::to_string(cfg.nsbcs));
+        if (cfg.xpene >= 0) {
+            char buf[16]; snprintf(buf, sizeof(buf), "%10.4f", cfg.xpene);
+            c2 = kw_setField(c2, 40, 10, std::string(buf));
+        }
         if (!kw_hasKeyword(lines, "*CONTROL_CONTACT")) {
             std::string c1(80, ' ');
             if (cfg.islchk >= 0) c1 = kw_setField(c1, 20, 10, std::to_string(cfg.islchk));
             if (cfg.shlthk >= 0) c1 = kw_setField(c1, 30, 10, std::to_string(cfg.shlthk));
             if (cfg.orien  >= 0) c1 = kw_setField(c1, 60, 10, std::to_string(cfg.orien));
             if (cfg.enmass >= 0) c1 = kw_setField(c1, 70, 10, std::to_string(cfg.enmass));
-            std::string c2(80, ' ');
-            if (cfg.nsbcs >= 0) c2 = kw_setField(c2, 20, 10, std::to_string(cfg.nsbcs));
-            if (cfg.xpene >= 0) {
-                char buf[16]; snprintf(buf, sizeof(buf), "%10.4f", cfg.xpene);
-                c2 = kw_setField(c2, 40, 10, std::string(buf));
-            }
             kw_insertBeforeEnd(lines,
                 "*CONTROL_CONTACT\n"
                 "$    SLSFAC    RWPNAL    ISLCHK    SHLTHK    PENOPT    THKCHG     ORIEN    ENMASS\n" + c1 + "\n"
@@ -351,8 +355,9 @@ std::vector<std::string> stab_applyExplicit(
             if (cfg.shlthk >= 0 && kw_patchControlField(lines, "*CONTROL_CONTACT", 30, 10, std::to_string(cfg.shlthk)) == 2) anyMod = true;
             if (cfg.orien  >= 0 && kw_patchControlField(lines, "*CONTROL_CONTACT", 60, 10, std::to_string(cfg.orien))  == 2) anyMod = true;
             if (cfg.enmass >= 0 && kw_patchControlField(lines, "*CONTROL_CONTACT", 70, 10, std::to_string(cfg.enmass)) == 2) anyMod = true;
-            if (needCC2) {
-                stab_ensureControlContactCard2(lines);
+            if (needCC2 && stab_ensureControlContactCard2(lines, c2)) {
+                anyMod = true;
+            } else if (needCC2) {
                 if (cfg.nsbcs >= 0 && stab_patchControlFieldN(lines, "*CONTROL_CONTACT", 1, 20, 10, std::to_string(cfg.nsbcs)) == 2) anyMod = true;
                 if (cfg.xpene >= 0) {
                     char buf[16]; snprintf(buf, sizeof(buf), "%10.4f", cfg.xpene);

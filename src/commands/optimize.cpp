@@ -312,12 +312,20 @@ int runOptimize(const std::string& yamlFile, ConsoleOutput& console) {
     std::string modelFile, outputFile;
     OptimizeConfig cfg;
     cfg.mode = "rubber";  // default
+    bool inPidsBlock = false;
 
     std::string ln;
     while (std::getline(f, ln)) {
         if (!ln.empty() && ln.back()=='\r') ln.pop_back();
         std::string tr = trim(ln);
         if (tr.empty() || tr[0]=='#') continue;
+        // 'pids:' 아래 '- 1' 블록 목록 — 예전엔 ':' 가 없는 줄이라 건너뛰어 인라인 [..] 만 먹었다
+        if (inPidsBlock && tr[0]=='-') {
+            std::string t = stripQuotes(trim(KooRemapper::yamlStripComment(tr.substr(1))));
+            if (!t.empty()) try { cfg.pids.push_back(std::stoi(t)); } catch(...) {}
+            continue;
+        }
+        inPidsBlock = false;
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
         std::string key = trim(tr.substr(0, cp));
@@ -331,6 +339,7 @@ int runOptimize(const std::string& yamlFile, ConsoleOutput& console) {
         else if (key == "analysis_type") cfg.analysisType = val;
         else if (key == "pid")           cfg.pids = { std::stoi(val) };
         else if (key == "pids") {
+            if (val.empty()) inPidsBlock = true;
             std::string lv = val;
             if (!lv.empty() && lv.front()=='[') lv = lv.substr(1);
             if (!lv.empty() && lv.back()==']') lv.pop_back();
