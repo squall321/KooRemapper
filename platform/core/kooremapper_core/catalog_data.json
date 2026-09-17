@@ -2356,7 +2356,7 @@
                 "new_pid": 10,
                 "part_title": "Offset_Layer",
                 "use_local_normals": false,
-                "material_card": "*MAT_ELASTIC\n$#     mid        ro         e        pr\n     @MID@       2.0     12000       0.25\n"
+                "material_card": "*MAT_ELASTIC\n$#     mid        ro         e        pr\n     @MID@       2.0     12000      0.25\n"
               }
             ]
           }
@@ -9821,15 +9821,15 @@
                 "layers": [
                   {
                     "thickness": 0.3,
-                    "material_card": "*MAT_ELASTIC\n$#     mid        ro         e        pr\n             MID001  7.85E-09  2.10E+05       0.3"
+                    "material_card": "*MAT_ELASTIC\n$#     mid        ro         e        pr\n    MID001  7.85E-09  2.10E+05       0.3"
                   },
                   {
                     "thickness": 0.4,
-                    "material_card": "*MAT_ELASTIC\n$#     mid        ro         e        pr\n             MID002  7.85E-09  1.50E+05      0.25"
+                    "material_card": "*MAT_ELASTIC\n$#     mid        ro         e        pr\n    MID002  7.85E-09  1.50E+05      0.25"
                   },
                   {
                     "thickness": 0.3,
-                    "material_card": "*MAT_ELASTIC\n$#     mid        ro         e        pr\n             MID001  7.85E-09  2.10E+05       0.3"
+                    "material_card": "*MAT_ELASTIC\n$#     mid        ro         e        pr\n    MID001  7.85E-09  2.10E+05       0.3"
                   }
                 ]
               }
