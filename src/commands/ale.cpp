@@ -1,6 +1,7 @@
 #include "ale.h"
 #include "kw_util.h"
 #include "cli/ConsoleOutput.h"
+#include "util/YamlComment.h"
 
 #include <string>
 #include <vector>
@@ -426,6 +427,7 @@ int runAle(const std::string& yamlFile, ConsoleOutput& console) {
         std::string line;
         bool inAleParts = false;
         bool inDetonation = false;
+        bool inFsiPids = false;
         AlePartEntry curEntry{0, ""};
         int aleIndent = 0;
         while (std::getline(yin, line)) {
@@ -435,11 +437,23 @@ int runAle(const std::string& yamlFile, ConsoleOutput& console) {
             std::string t = kw_trim(raw);
             if (t.empty() || t[0] == '#') continue;
 
+            // 예전엔 블록 스타일 'fsi_pids:' 아래 '- 1' 줄이 콜론이 없다고 버려져 FSI 커플링이 조용히 빠졌다
+            if (inFsiPids) {
+                if (t[0] == '-') {
+                    std::string pv = kw_trim(KooRemapper::yamlStripComment(t.substr(1)));
+                    try { fsiPids.push_back(std::stoi(pv)); } catch (...) {}
+                    continue;
+                }
+                inFsiPids = false;
+            }
+
             size_t colon = t.find(':');
             if (colon == std::string::npos) continue;
             std::string key = kw_trim(t.substr(0, colon));
-            std::string val = kw_trim(t.substr(colon+1));
-            { size_t h = val.find('#'); if (h != std::string::npos) val = kw_trim(val.substr(0, h)); }
+            // 예전엔 값의 첫 '#' 에서 잘라 '"air # x"' 같은 따옴표 안 주석 기호까지 잘렸고 따옴표도 남았다
+            std::string val = kw_trim(KooRemapper::yamlStripComment(t.substr(colon+1)));
+            if (val.size() >= 2 && (val.front() == '"' || val.front() == '\'') && val.back() == val.front())
+                val = val.substr(1, val.size() - 2);
 
             if (key == "ale_parts" && indent < 4) {
                 inAleParts = true;
@@ -455,22 +469,21 @@ int runAle(const std::string& yamlFile, ConsoleOutput& console) {
             }
 
             if (inAleParts) {
-                if (indent <= aleIndent && key != "-" && t.find("- pid") == std::string::npos
-                    && key != "pid" && key != "material") {
+                // 예전엔 줄 어디에 있든(주석 본문 포함) '- pid' 를 새 항목으로 봤고, '- material' 로 시작한 항목은 놓쳤다
+                bool dashItem = (t[0] == '-');
+                std::string ikey = dashItem ? kw_trim(key.substr(1)) : key;
+                if (indent <= aleIndent && !dashItem && key != "pid" && key != "material") {
                     inAleParts = false;
                     if (curEntry.pid > 0) aleEntries.push_back(curEntry);
                     curEntry = {0, ""};
                 } else {
-                    if (t.find("- pid") != std::string::npos) {
+                    if (dashItem) {
                         if (curEntry.pid > 0) aleEntries.push_back(curEntry);
                         curEntry = {0, ""};
-                        size_t pidColon = t.find("pid:");
-                        if (pidColon != std::string::npos) {
-                            std::string pv = kw_trim(t.substr(pidColon + 4));
-                            size_t h = pv.find('#'); if (h != std::string::npos) pv = kw_trim(pv.substr(0, h));
-                            try { curEntry.pid = std::stoi(pv); } catch (...) {}
-                        }
-                    } else if (key == "material") {
+                    }
+                    if (ikey == "pid") {
+                        try { curEntry.pid = std::stoi(val); } catch (...) {}
+                    } else if (ikey == "material") {
                         curEntry.material = val;
                     }
                     continue;
@@ -492,7 +505,7 @@ int runAle(const std::string& yamlFile, ConsoleOutput& console) {
 
             if (key == "model")    modelFile  = val;
             else if (key == "output")   outputFile = val;
-            else if (key == "fsi_pids") fsiPids    = ale_parsePidList(val);
+            else if (key == "fsi_pids") { if (val.empty()) inFsiPids = true; else fsiPids = ale_parsePidList(val); }
             else if (key == "elform")   try { elform = std::stoi(val); } catch (...) {}
             else if (key == "dct")      try { dct    = std::stoi(val); } catch (...) {}
             else if (key == "nadv")     try { nadv   = std::stoi(val); } catch (...) {}
@@ -642,8 +655,9 @@ int runAle(const std::string& yamlFile, ConsoleOutput& console) {
             std::string bundlePath = resolvePath(entry.material);
             matCards = ale_customMaterial(bundlePath, newMid, newEosid);
             if (matCards.empty()) {
+                // 예전엔 오류만 찍고 넘어가 재료 없는 ALE 파트가 담긴 출력을 rc 0 으로 썼다
                 console.error("[ale] Cannot load bundle: " + entry.material);
-                continue;
+                return 1;
             }
         }
         insertCards += matCards;
