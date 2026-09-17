@@ -31,7 +31,7 @@ public:
     };
 
     // Main validation function
-    ValidationResult validate(const std::string& materialCard, bool checkPlaceholder = true);
+    ValidationResult validate(const std::string& materialCard);
 
 private:
     // Check if line is a valid LS-DYNA keyword

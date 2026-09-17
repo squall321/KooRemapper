@@ -691,8 +691,8 @@ int ModelAssembler::detectExtrusionAxis(const std::vector<const Element*>& elems
 // ---------------------------------------------------------------------------
 namespace {
 
-// restack 재질 카드의 MID 칸 (*MAT 블록 첫 데이터 줄의 첫 필드)
-struct RestackMidField {
+// 재질 카드의 MID 칸 (*MAT 블록 첫 데이터 줄의 첫 필드) — restack·offset·CZM 공용
+struct MatMidField {
     size_t start = 0;
     size_t width = 0;
     std::string label;
@@ -706,7 +706,7 @@ bool restackHasMidPlaceholder(const std::string& card) {
 }
 
 // 데이터 줄 하나의 첫 필드. lineStart 는 카드 안 오프셋.
-bool restackLineMidField(const std::string& line, size_t lineStart, RestackMidField& out) {
+bool matCardLineMidField(const std::string& line, size_t lineStart, MatMidField& out) {
     size_t first = line.find_first_not_of(" \t");
     if (first == std::string::npos) return false;
     size_t comma = line.find(',');
@@ -733,8 +733,8 @@ bool restackLineMidField(const std::string& line, size_t lineStart, RestackMidFi
 
 // 카드 안 *MAT 블록마다 첫 데이터 줄의 MID 칸. *MAT_…_TITLE 은 제목 줄을 건너뛴다.
 // (*MAT_ADD_EROSION 처럼 같은 MID 를 가리키는 뒤 블록도 함께 잡아야 참조가 끊기지 않는다)
-std::vector<RestackMidField> restackFindMidFields(const std::string& card) {
-    std::vector<RestackMidField> fields;
+std::vector<MatMidField> matCardFindMidFields(const std::string& card) {
+    std::vector<MatMidField> fields;
     bool inMat = false;
     bool titlePending = false;
     size_t lineStart = 0;
@@ -753,8 +753,8 @@ std::vector<RestackMidField> restackFindMidFields(const std::string& card) {
             } else if (inMat && titlePending) {
                 titlePending = false;
             } else if (inMat) {
-                RestackMidField f;
-                if (restackLineMidField(line, lineStart, f)) fields.push_back(f);
+                MatMidField f;
+                if (matCardLineMidField(line, lineStart, f)) fields.push_back(f);
                 inMat = false;
             }
         }
@@ -764,7 +764,7 @@ std::vector<RestackMidField> restackFindMidFields(const std::string& card) {
 }
 
 // label 이 같은 MID 칸을 value 로 오른쪽 정렬 치환. 뒤 칸부터 바꿔 앞 오프셋을 보존한다.
-std::string restackReplaceMidFields(std::string card, const std::vector<RestackMidField>& fields,
+std::string matCardReplaceMidFields(std::string card, const std::vector<MatMidField>& fields,
                                     const std::string& label, const std::string& value) {
     for (auto it = fields.rbegin(); it != fields.rend(); ++it) {
         if (it->label != label) continue;
@@ -773,6 +773,22 @@ std::string restackReplaceMidFields(std::string card, const std::vector<RestackM
         card.replace(it->start, it->width, v);
     }
     return card;
+}
+
+// 재질 하나짜리 카드(offset·CZM)에 새 MID 를 넣는다. 첫 *MAT 블록 MID 칸의 토큰(@MID@·@CZM_MID@·10·MAT01 …)을
+// 라벨로 보고 같은 라벨인 블록을 칸 폭 안에서 바꾼다 — 예전엔 @MID@ 를 10자·숫자 길이 문자열로 바꿔 줄이 밀렸다.
+// 첫 칸 밖에 남은 @MID@(다른 카드의 MID 참조)는 자리표시 폭 안에서 오른쪽 정렬한다.
+std::string matCardAssignMid(const std::string& card, int mid) {
+    const std::string midStr = std::to_string(mid);
+    auto fields = matCardFindMidFields(card);
+    std::string out = fields.empty() ? card : matCardReplaceMidFields(card, fields, fields.front().label, midStr);
+    const std::string ph = "@MID@";
+    for (size_t pos = out.find(ph); pos != std::string::npos; pos = out.find(ph, pos + 1)) {
+        std::string v = midStr;
+        if (v.size() < ph.size()) v = std::string(ph.size() - v.size(), ' ') + v;
+        out.replace(pos, ph.size(), v);
+    }
+    return out;
 }
 
 // Wildcard pattern match for *PART titles. Supports:
@@ -1111,15 +1127,15 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
     // 자리표시 스캔 뒤에 두어 기존 MID<숫자> 카드의 번호는 그대로 둔다.
     std::map<std::string, int> labelMidMapping;
     std::map<std::string, std::string> firstBodyOfLabel;
-    std::vector<std::vector<RestackMidField>> labelFields(op.layers.size());
+    std::vector<std::vector<MatMidField>> labelFields(op.layers.size());
     std::vector<std::string> labelKeys(op.layers.size());
     for (size_t li = 0; li < op.layers.size(); ++li) {
         const auto& card = op.layers[li].materialCard;
         if (restackHasMidPlaceholder(card)) continue;
-        labelFields[li] = restackFindMidFields(card);
+        labelFields[li] = matCardFindMidFields(card);
         if (labelFields[li].empty()) continue;
         const std::string& label = labelFields[li].front().label;
-        std::string body = restackReplaceMidFields(card, labelFields[li], label, "");
+        std::string body = matCardReplaceMidFields(card, labelFields[li], label, "");
         labelKeys[li] = label + '\n' + body;
         if (labelMidMapping.count(labelKeys[li])) continue;
         labelMidMapping[labelKeys[li]] = ++maxMaterialId_;
@@ -1267,7 +1283,7 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
         // 라벨 MID (자리표시 없는 카드): 같은 라벨인 *MAT 첫 필드를 새 MID 로 오른쪽 정렬 치환
         if (actualMid == 0 && !labelKeys[layerIdx].empty()) {
             actualMid = labelMidMapping[labelKeys[layerIdx]];
-            matCard = restackReplaceMidFields(matCard, labelFields[layerIdx],
+            matCard = matCardReplaceMidFields(matCard, labelFields[layerIdx],
                                               labelFields[layerIdx].front().label,
                                               std::to_string(actualMid));
         }
@@ -2266,6 +2282,9 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                 // Insert keyword blocks (MAT/SECTION/PART from restack)
                 for (const auto& block : addedKeywordBlocks_) {
                     output << block;
+                    // 블록은 줄 단위로 끝나야 한다 — YAML 블록에서 온 재질 카드는 끝 줄바꿈이 없어
+                    // 뒤 키워드가 같은 줄에 붙었다('0.25*END' → *END 없음, '30.0*PART')
+                    if (!block.empty() && block.back() != '\n') output << '\n';
                 }
 
                 // Insert dynain before *END
@@ -7533,19 +7552,7 @@ std::string ModelAssembler::formatCzmSectionBlock(int secid) {
 }
 
 void ModelAssembler::insertMaterialCard(const std::string& materialCard, int actualMid) {
-    std::string processed = materialCard;
-
-    std::stringstream ss;
-    ss << std::setw(10) << actualMid;
-    std::string midStr = ss.str();
-
-    size_t pos = processed.find("@MID@");
-    while (pos != std::string::npos) {
-        processed.replace(pos, 5, midStr);
-        pos = processed.find("@MID@", pos + midStr.length());
-    }
-
-    addedKeywordBlocks_.push_back(processed);
+    addedKeywordBlocks_.push_back(matCardAssignMid(materialCard, actualMid));
     std::cout << "[INFO] Inserted material card with MID=" << actualMid << "\n";
 }
 
@@ -7826,14 +7833,7 @@ void ModelAssembler::applyConnectionCZM(
     // 4. CZM keywords
     std::string partBlock = formatPartBlock(czmPid, czmSecid, czmMid, "CZM_Layer");
     std::string sectionBlock = formatCzmSectionBlock(czmSecid);
-    std::string materialBlock = op.czmMaterialCard;
-
-    // Replace @MID@ placeholder
-    size_t pos = 0;
-    while ((pos = materialBlock.find("@MID@", pos)) != std::string::npos) {
-        materialBlock.replace(pos, 5, std::to_string(czmMid));
-        pos += std::to_string(czmMid).length();
-    }
+    std::string materialBlock = matCardAssignMid(op.czmMaterialCard, czmMid);
 
     addedKeywordBlocks_.push_back(partBlock);
     addedKeywordBlocks_.push_back(sectionBlock);
@@ -8208,14 +8208,7 @@ void ModelAssembler::createCzmElementsForDualOffset(
     // CZM keywords
     std::string partBlock = formatPartBlock(czmPid, czmSecid, czmMid, "CZM_DualOffset");
     std::string sectionBlock = formatCzmSectionBlock(czmSecid);
-    std::string materialBlock = op.czmMaterialCard;
-
-    // Replace @MID@ placeholder
-    size_t pos = 0;
-    while ((pos = materialBlock.find("@MID@", pos)) != std::string::npos) {
-        materialBlock.replace(pos, 5, std::to_string(czmMid));
-        pos += std::to_string(czmMid).length();
-    }
+    std::string materialBlock = matCardAssignMid(op.czmMaterialCard, czmMid);
 
     addedKeywordBlocks_.push_back(partBlock);
     addedKeywordBlocks_.push_back(sectionBlock);

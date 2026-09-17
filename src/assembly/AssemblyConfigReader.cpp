@@ -1658,7 +1658,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
             // Material card validation
             if (!op.offset.materialCard.empty()) {
                 MaterialCardValidator validator;
-                auto result = validator.validate(op.offset.materialCard, true);
+                auto result = validator.validate(op.offset.materialCard);
 
                 // Print warnings
                 for (const auto& warning : result.warnings) {
@@ -1678,7 +1678,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
             // CZM material card validation
             if (cmode == "czm" && !op.offset.czmMaterialCard.empty()) {
                 MaterialCardValidator validator;
-                auto result = validator.validate(op.offset.czmMaterialCard, true);
+                auto result = validator.validate(op.offset.czmMaterialCard);
 
                 // Print warnings
                 for (const auto& warning : result.warnings) {

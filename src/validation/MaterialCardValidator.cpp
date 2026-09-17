@@ -10,7 +10,7 @@
 namespace KooRemapper {
 
 MaterialCardValidator::ValidationResult MaterialCardValidator::validate(
-    const std::string& materialCard, bool checkPlaceholder) {
+    const std::string& materialCard) {
 
     ValidationResult result;
     result.isValid = true;
@@ -49,19 +49,7 @@ MaterialCardValidator::ValidationResult MaterialCardValidator::validate(
         return result;
     }
 
-    // Check for @MID@ placeholder if required
-    if (checkPlaceholder) {
-        bool hasMidPlaceholder = false;
-        for (const auto& ln : lines) {
-            if (ln.find("@MID@") != std::string::npos) {
-                hasMidPlaceholder = true;
-                break;
-            }
-        }
-        if (!hasMidPlaceholder) {
-            result.addWarning("No @MID@ placeholder found - material ID assignment may fail");
-        }
-    }
+    // MID 칸은 @MID@ 가 아니어도(10·MAT01·@CZM_MID@) 새 MID 로 바뀌므로 자리표시 유무는 검사하지 않는다
 
     // Validate based on keyword type
     if (keyword.find("MAT_ELASTIC") != std::string::npos) {
