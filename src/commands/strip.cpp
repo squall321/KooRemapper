@@ -70,7 +70,7 @@ int runStrip(const std::string& yamlFile, ConsoleOutput& console)
         if (inKeywordsList && trimmed.size() > 2 && trimmed[0] == '-') {
             if (indent <= 0) { inKeywordsList = false; }
             else {
-                std::string val = st_trim(trimmed.substr(1));
+                std::string val = st_trim(KooRemapper::yamlStripComment(trimmed.substr(1)));
                 val = st_stripQuotes(val);
                 if (!val.empty()) stripKeywords.push_back(val);
                 continue;

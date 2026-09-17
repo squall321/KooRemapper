@@ -64,14 +64,16 @@ int runLoad(const std::string& yamlFile, ConsoleOutput& console) {
         }
 
         // Exit curve list
-        if (inCurveList && indent <= curveListIndent && tr.substr(0,2) != "- ") {
+        // 예전엔 'curve:' 보다 얕은 다음 하중 항목 '- part: 2' 도 곡선 점으로 삼켜 하중 케이스가 합쳐졌다
+        if (inCurveList && (indent < curveListIndent ||
+                            (indent == curveListIndent && tr.substr(0,2) != "- "))) {
             inCurveList = false;
         }
 
         // Curve points: - [0.0, 1.0]
         if (inCurveList && tr.substr(0,2) == "- ") {
-            std::string rest = trim(tr.substr(2));
-            if (rest.front() == '[' && rest.back() == ']') {
+            std::string rest = trim(KooRemapper::yamlStripComment(tr.substr(2)));
+            if (!rest.empty() && rest.front() == '[' && rest.back() == ']') {
                 rest = rest.substr(1, rest.size()-2);
                 size_t comma = rest.find(',');
                 if (comma != std::string::npos) {
@@ -111,7 +113,7 @@ int runLoad(const std::string& yamlFile, ConsoleOutput& console) {
             size_t rcp = rest.find(':');
             if (rcp != std::string::npos) {
                 std::string rk = trim(rest.substr(0, rcp));
-                std::string rv = stripQuotes(trim(rest.substr(rcp+1)));
+                std::string rv = stripQuotes(trim(KooRemapper::yamlStripComment(rest.substr(rcp+1))));
                 auto& lcase = loadOp.loads.back();
                 if      (rk == "part") {
                     try { lcase.pid = std::stoi(rv); } catch(...) { lcase.partName = rv; }
@@ -270,7 +272,7 @@ int runBoundary(const std::string& yamlFile, ConsoleOutput& console) {
             size_t rcp = rest.find(':');
             if (rcp != std::string::npos) {
                 std::string rk = trim(rest.substr(0, rcp));
-                std::string rv = stripQuotes(trim(rest.substr(rcp+1)));
+                std::string rv = stripQuotes(trim(KooRemapper::yamlStripComment(rest.substr(rcp+1))));
                 auto& bc = boundaryOp.boundaries.back();
                 if (rk == "part") {
                     try { bc.pid = std::stoi(rv); } catch(...) { bc.partName = rv; }
@@ -420,7 +422,7 @@ int runRbe(const std::string& yamlFile, ConsoleOutput& console) {
             size_t rcp = rest.find(':');
             if (rcp != std::string::npos) {
                 std::string rk = trim(rest.substr(0, rcp));
-                std::string rv = stripQuotes(trim(rest.substr(rcp+1)));
+                std::string rv = stripQuotes(trim(KooRemapper::yamlStripComment(rest.substr(rcp+1))));
                 auto& rc = rbeOp.constraints.back();
                 if (rk == "part") {
                     try { rc.pid = std::stoi(rv); } catch(...) { rc.partName = rv; }

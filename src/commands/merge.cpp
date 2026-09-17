@@ -144,7 +144,7 @@ static mg_Config mg_parseConfig(const std::string& yamlFile, ConsoleOutput& cons
 
         // PID list items
         if (inPidsList && trimmed[0] == '-' && indent > mergeListIndent + 2) {
-            std::string val = mg_trim(trimmed.substr(1));
+            std::string val = mg_trim(KooRemapper::yamlStripComment(trimmed.substr(1)));
             int pid = mg_toInt(val);
             if (pid > 0) curGroup.pids.push_back(pid);
             continue;
