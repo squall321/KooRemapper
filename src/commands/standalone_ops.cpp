@@ -199,7 +199,10 @@ int runRestack(const std::string& yamlFile, ConsoleOutput& console) {
     bool inLayers = false;
     int layersIndent = 0;
     bool readingMatCard = false;
-    int matCardBaseIndent = 0;
+    // 블록은 키보다 깊게 들여쓴 줄까지(YAML). 예전엔 ':' 나 '-' 로 시작하는 카드 줄(제목 'Steel: SUS304')에서
+    // 끊겨 층 PART mid 가 0 이 됐고, 들여쓰기를 키+2칸으로 가정해 더 깊은 카드는 10열 칸이 밀렸다.
+    int matCardKeyIndent = 0;
+    int matCardBaseIndent = -1;  // 첫 내용 줄의 들여쓰기
 
     std::string ln;
     while (std::getline(f, ln)) {
@@ -209,7 +212,8 @@ int runRestack(const std::string& yamlFile, ConsoleOutput& console) {
         if (tr.empty() || tr[0]=='#') continue;
 
         if (readingMatCard) {
-            if (indent > matCardBaseIndent || (tr[0] != '-' && tr.find(':') == std::string::npos)) {
+            if (indent > matCardKeyIndent) {
+                if (matCardBaseIndent < 0) matCardBaseIndent = indent;
                 if (!op.layers.empty())
                     op.layers.back().materialCard += ln.substr(std::min(indent, matCardBaseIndent)) + "\n";
                 continue;
@@ -244,13 +248,13 @@ int runRestack(const std::string& yamlFile, ConsoleOutput& console) {
                 std::string rk = y.trim(rest.substr(0, rcp));
                 std::string rv = y.stripQuotes(y.trim(rest.substr(rcp+1)));
                 if (rk == "thickness") { try { op.layers.back().thickness = std::stod(rv); } catch(...) {} }
-                else if (rk == "material_card" && rv == "|") { readingMatCard = true; matCardBaseIndent = indent + 4; }
+                else if (rk == "material_card" && rv == "|") { readingMatCard = true; matCardKeyIndent = indent + 2; matCardBaseIndent = -1; }
             }
             continue;
         }
         if (!op.layers.empty()) {
             if (key == "thickness") { try { op.layers.back().thickness = std::stod(val); } catch(...) {} }
-            else if (key == "material_card" && val == "|") { readingMatCard = true; matCardBaseIndent = indent + 2; }
+            else if (key == "material_card" && val == "|") { readingMatCard = true; matCardKeyIndent = indent; matCardBaseIndent = -1; }
         }
     }
     f.close();
@@ -790,7 +794,9 @@ int runOffset(const std::string& yamlFile, ConsoleOutput& console) {
     OffsetOperation op;
     bool readingMatCard = false;
     bool readingCzmMatCard = false;
-    int matCardBaseIndent = 0;
+    // 블록은 키보다 깊게 들여쓴 줄까지, 기준 들여쓰기는 첫 내용 줄(YAML) — 키+2칸 가정은 더 깊은 카드의 10열 칸을 밀었다
+    int matCardKeyIndent = 0;
+    int matCardBaseIndent = -1;
     // material_cards: 층마다 다른 재질 목록 — assemble 은 읽는데 여기선 빠져, 층 PART 가 없는 MID 를 가리켰다
     bool inMatCardsList = false;
     bool readingMatCardsItem = false;
@@ -803,39 +809,43 @@ int runOffset(const std::string& yamlFile, ConsoleOutput& console) {
         std::string tr = y.trim(ln);
         if (tr.empty() || tr[0]=='#') {
             // Multi-line material card may include comment-like lines
-            if (readingMatCard && indent >= matCardBaseIndent) {
+            if (readingMatCard && matCardBaseIndent >= 0 && indent >= matCardBaseIndent) {
                 op.materialCard += ln.substr(std::min(indent, matCardBaseIndent)) + "\n";
-            } else if (readingCzmMatCard && indent >= matCardBaseIndent) {
+            } else if (readingCzmMatCard && matCardBaseIndent >= 0 && indent >= matCardBaseIndent) {
                 op.czmMaterialCard += ln.substr(std::min(indent, matCardBaseIndent)) + "\n";
-            } else if (readingMatCardsItem && indent >= matCardBaseIndent) {
+            } else if (readingMatCardsItem && matCardBaseIndent >= 0 && indent >= matCardBaseIndent) {
                 op.materialCards.back() += ln.substr(std::min(indent, matCardBaseIndent)) + "\n";
             }
             continue;
         }
 
         if (readingMatCard) {
-            if (indent >= matCardBaseIndent) {
+            if (indent > matCardKeyIndent) {
+                if (matCardBaseIndent < 0) matCardBaseIndent = indent;
                 op.materialCard += ln.substr(std::min(indent, matCardBaseIndent)) + "\n";
                 continue;
             }
             readingMatCard = false;
         }
         if (readingCzmMatCard) {
-            if (indent >= matCardBaseIndent) {
+            if (indent > matCardKeyIndent) {
+                if (matCardBaseIndent < 0) matCardBaseIndent = indent;
                 op.czmMaterialCard += ln.substr(std::min(indent, matCardBaseIndent)) + "\n";
                 continue;
             }
             readingCzmMatCard = false;
         }
         if (inMatCardsList) {
-            if (readingMatCardsItem && indent >= matCardBaseIndent) {
+            if (readingMatCardsItem && indent > matCardKeyIndent) {
+                if (matCardBaseIndent < 0) matCardBaseIndent = indent;
                 op.materialCards.back() += ln.substr(std::min(indent, matCardBaseIndent)) + "\n";
                 continue;
             }
             if (indent > matCardsKeyIndent && (tr == "- |" || tr == "-|")) {
                 op.materialCards.emplace_back();
                 readingMatCardsItem = true;
-                matCardBaseIndent = indent + 2;
+                matCardKeyIndent = indent;
+                matCardBaseIndent = -1;
                 continue;
             }
             inMatCardsList = false;
@@ -868,8 +878,8 @@ int runOffset(const std::string& yamlFile, ConsoleOutput& console) {
         else if (key == "part_title") op.partTitle = val;
         else if (key == "shell_thickness") { try { op.shellThickness = std::stod(val); } catch(...) {} }
         else if (key == "shell_offset") { try { op.shellOffset = std::stod(val); } catch(...) {} }
-        else if (key == "material_card" && val == "|") { readingMatCard = true; matCardBaseIndent = indent + 2; }
-        else if (key == "czm_material_card" && val == "|") { readingCzmMatCard = true; matCardBaseIndent = indent + 2; }
+        else if (key == "material_card" && val == "|") { readingMatCard = true; matCardKeyIndent = indent; matCardBaseIndent = -1; }
+        else if (key == "czm_material_card" && val == "|") { readingCzmMatCard = true; matCardKeyIndent = indent; matCardBaseIndent = -1; }
         // Region selection
         else if (key == "bbox_xmin") { try { op.region.xMin = std::stod(val); op.region.useBoundingBox = true; } catch(...) {} }
         else if (key == "bbox_xmax") { try { op.region.xMax = std::stod(val); op.region.useBoundingBox = true; } catch(...) {} }

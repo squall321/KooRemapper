@@ -1522,6 +1522,21 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
         op.iga.targets = std::move(expanded);
     }
 
+    // YAML '|' 블록은 끝 빈 줄을 버린다(clip). 마지막 층 카드 뒤 빈 줄이 남아 같은 라벨·같은 내용 카드가
+    // "다른 카드"로 판정돼 MID 가 따로 발급됐다(examples/assemble_display/gen_al_box.yaml 의 PSA7).
+    auto clipBlock = [](std::string& s) {
+        while (!s.empty() && s.back() == '\n') s.pop_back();
+    };
+    for (auto& op : config.operations) {
+        if (op.type == AssemblyOperation::RESTACK) {
+            for (auto& layer : op.restack.layers) clipBlock(layer.materialCard);
+        } else if (op.type == AssemblyOperation::OFFSET) {
+            clipBlock(op.offset.materialCard);
+            clipBlock(op.offset.czmMaterialCard);
+            for (auto& c : op.offset.materialCards) clipBlock(c);
+        }
+    }
+
     for (size_t i = 0; i < config.operations.size(); ++i) {
         const auto& op = config.operations[i];
         if (op.type == AssemblyOperation::REPLACE) {
