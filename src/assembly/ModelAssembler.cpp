@@ -690,7 +690,7 @@ int ModelAssembler::detectExtrusionAxis(const std::vector<const Element*>& elems
 // ---------------------------------------------------------------------------
 namespace {
 
-// restack 재질 카드의 MID 칸 (첫 데이터 줄 첫 필드)
+// restack 재질 카드의 MID 칸 (*MAT 블록 첫 데이터 줄의 첫 필드)
 struct RestackMidField {
     size_t start = 0;
     size_t width = 0;
@@ -704,7 +704,38 @@ bool restackHasMidPlaceholder(const std::string& card) {
     return false;
 }
 
-bool restackFindMidField(const std::string& card, RestackMidField& out) {
+// 데이터 줄 하나의 첫 필드. lineStart 는 카드 안 오프셋.
+bool restackLineMidField(const std::string& line, size_t lineStart, RestackMidField& out) {
+    size_t first = line.find_first_not_of(" \t");
+    if (first == std::string::npos) return false;
+    size_t comma = line.find(',');
+    if (comma != std::string::npos) {
+        // 자유 형식: 첫 쉼표 앞
+        if (first >= comma) return false;
+        size_t e = line.find_last_not_of(" \t", comma - 1);
+        out.start = lineStart + first;
+        out.width = e - first + 1;
+        out.label = line.substr(first, out.width);
+        return true;
+    }
+    // 고정폭: 토큰 뒤로 10열까지 비어 있을 때만 1~10열을 한 칸으로 본다. 10열 안에 다음 값이
+    // 이미 있는 줄(help 예제식 '     10  2.0 …')은 토큰 끝까지만 — 10열로 덮으면 밀도 첫 글자가 지워진다.
+    size_t tokEnd = line.find_first_of(" \t", first);
+    if (tokEnd == std::string::npos) tokEnd = line.size();
+    size_t next = line.find_first_not_of(" \t", tokEnd);
+    bool fieldTo10 = tokEnd <= 10 && (next == std::string::npos || next >= 10);
+    out.start = lineStart;
+    out.width = fieldTo10 ? std::min<size_t>(10, line.size()) : tokEnd;
+    out.label = line.substr(first, tokEnd - first);
+    return true;
+}
+
+// 카드 안 *MAT 블록마다 첫 데이터 줄의 MID 칸. *MAT_…_TITLE 은 제목 줄을 건너뛴다.
+// (*MAT_ADD_EROSION 처럼 같은 MID 를 가리키는 뒤 블록도 함께 잡아야 참조가 끊기지 않는다)
+std::vector<RestackMidField> restackFindMidFields(const std::string& card) {
+    std::vector<RestackMidField> fields;
+    bool inMat = false;
+    bool titlePending = false;
     size_t lineStart = 0;
     while (lineStart < card.size()) {
         size_t lineEnd = card.find('\n', lineStart);
@@ -712,31 +743,35 @@ bool restackFindMidField(const std::string& card, RestackMidField& out) {
         std::string line = card.substr(lineStart, lineEnd - lineStart);
         if (!line.empty() && line.back() == '\r') line.pop_back();
         size_t first = line.find_first_not_of(" \t");
-        if (first != std::string::npos && line[first] != '*' && line[first] != '$') {
-            size_t comma = line.find(',');
-            if (comma != std::string::npos) {
-                // 자유 형식: 첫 쉼표 앞
-                size_t b = line.find_first_not_of(" \t");
-                size_t e = line.find_last_not_of(" \t", comma == 0 ? 0 : comma - 1);
-                if (b >= comma || e == std::string::npos) return false;
-                out.start = lineStart + b;
-                out.width = e - b + 1;
-            } else {
-                // 고정폭: 첫 토큰이 10칸 안에서 끝나면 1~10칸 전체, 넘치면 토큰 끝까지
-                size_t tokEnd = line.find_first_of(" \t", first);
-                if (tokEnd == std::string::npos) tokEnd = line.size();
-                out.start = lineStart;
-                out.width = tokEnd <= 10 ? std::min<size_t>(10, line.size()) : tokEnd;
-                first = line.find_first_not_of(" \t");
-                out.label = line.substr(first, tokEnd - first);
-                return true;
+        if (first != std::string::npos && line[first] != '$') {
+            if (line[first] == '*') {
+                std::string up = line.substr(first);
+                for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+                inMat = up.rfind("*MAT", 0) == 0;
+                titlePending = inMat && up.find("_TITLE") != std::string::npos;
+            } else if (inMat && titlePending) {
+                titlePending = false;
+            } else if (inMat) {
+                RestackMidField f;
+                if (restackLineMidField(line, lineStart, f)) fields.push_back(f);
+                inMat = false;
             }
-            out.label = card.substr(out.start, out.width);
-            return true;
         }
         lineStart = lineEnd + 1;
     }
-    return false;
+    return fields;
+}
+
+// label 이 같은 MID 칸을 value 로 오른쪽 정렬 치환. 뒤 칸부터 바꿔 앞 오프셋을 보존한다.
+std::string restackReplaceMidFields(std::string card, const std::vector<RestackMidField>& fields,
+                                    const std::string& label, const std::string& value) {
+    for (auto it = fields.rbegin(); it != fields.rend(); ++it) {
+        if (it->label != label) continue;
+        std::string v = value;
+        while (v.size() < it->width) v = " " + v;
+        card.replace(it->start, it->width, v);
+    }
+    return card;
 }
 
 // Wildcard pattern match for *PART titles. Supports:
@@ -1051,17 +1086,6 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
 
     // Build MID placeholder → actual ID mapping
     std::map<std::string, int> midMapping;
-    // MID<숫자> 자리표시가 없는 카드는 첫 데이터 줄 첫 필드(11, MAT01 등)를 라벨로 보고 새 MID 를 준다.
-    // (예전엔 자리표시만 인식해 PART mid=0 + 두 번째 층 재질 카드 누락)
-    std::vector<RestackMidField> labelFields(op.layers.size());
-    for (size_t li = 0; li < op.layers.size(); ++li) {
-        const auto& card = op.layers[li].materialCard;
-        if (restackHasMidPlaceholder(card)) continue;
-        if (restackFindMidField(card, labelFields[li]) && !labelFields[li].label.empty()) {
-            std::string key = "@label:" + labelFields[li].label;
-            if (midMapping.find(key) == midMapping.end()) midMapping[key] = ++maxMaterialId_;
-        }
-    }
     for (const auto& layer : op.layers) {
         // Scan for MIDxxx patterns
         size_t pos = 0;
@@ -1077,6 +1101,32 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
                 }
                 pos = end;
             }
+        }
+    }
+
+    // MID<숫자> 자리표시가 없는 카드는 *MAT 첫 필드(10, MAT01 …)를 라벨로 보고 새 MID 를 준다.
+    // 예전엔 자리표시만 인식해 층 PART mid=0 이 되고, 재질 카드가 MID 0 으로 중복 판정돼 둘째 층부터 빠졌다.
+    // 공유 키는 라벨+카드 본문 — 같은 라벨이라도 물성이 다르면 MID 를 따로 준다(묶으면 뒤 층 재질이 사라진다).
+    // 자리표시 스캔 뒤에 두어 기존 MID<숫자> 카드의 번호는 그대로 둔다.
+    std::map<std::string, int> labelMidMapping;
+    std::map<std::string, std::string> firstBodyOfLabel;
+    std::vector<std::vector<RestackMidField>> labelFields(op.layers.size());
+    std::vector<std::string> labelKeys(op.layers.size());
+    for (size_t li = 0; li < op.layers.size(); ++li) {
+        const auto& card = op.layers[li].materialCard;
+        if (restackHasMidPlaceholder(card)) continue;
+        labelFields[li] = restackFindMidFields(card);
+        if (labelFields[li].empty()) continue;
+        const std::string& label = labelFields[li].front().label;
+        std::string body = restackReplaceMidFields(card, labelFields[li], label, "");
+        labelKeys[li] = label + '\n' + body;
+        if (labelMidMapping.count(labelKeys[li])) continue;
+        labelMidMapping[labelKeys[li]] = ++maxMaterialId_;
+        auto [it, fresh] = firstBodyOfLabel.emplace(label, body);
+        if (!fresh && it->second != body) {
+            infoMessages.push_back("  Restack layer " + std::to_string(li + 1) + ": material label '" + label +
+                                   "' reused with a different card -> separate MID " +
+                                   std::to_string(maxMaterialId_));
         }
     }
 
@@ -1213,14 +1263,12 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
             }
         }
 
-        // 라벨 MID (자리표시 없는 카드): 첫 필드를 새 MID 로 오른쪽 정렬 치환
-        if (actualMid == 0 && !labelFields[layerIdx].label.empty()) {
-            const auto& lf = labelFields[layerIdx];
-            int mid = midMapping["@label:" + lf.label];
-            std::string midStr = std::to_string(mid);
-            while (midStr.size() < lf.width) midStr = " " + midStr;
-            matCard.replace(lf.start, lf.width, midStr);
-            actualMid = mid;
+        // 라벨 MID (자리표시 없는 카드): 같은 라벨인 *MAT 첫 필드를 새 MID 로 오른쪽 정렬 치환
+        if (actualMid == 0 && !labelKeys[layerIdx].empty()) {
+            actualMid = labelMidMapping[labelKeys[layerIdx]];
+            matCard = restackReplaceMidFields(matCard, labelFields[layerIdx],
+                                              labelFields[layerIdx].front().label,
+                                              std::to_string(actualMid));
         }
 
         // Find which MID is used in this layer's card
