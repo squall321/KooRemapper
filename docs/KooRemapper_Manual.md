@@ -325,8 +325,12 @@ Cauchy 응력:
 $$\sigma_{ij} = \lambda \varepsilon_{kk} \delta_{ij} + 2\mu \varepsilon_{ij}$$
 
 ### 출력
-- `<prefix>_dynain.dat`: `*INITIAL_STRESS_SOLID` 카드
-- `<prefix>.csv` (옵션): 요소별 변형률/응력 CSV
+세 번째 인자 `<output>` 은 dynain 파일 경로입니다.
+- `<output>`: `*INITIAL_STRESS_SOLID` 카드(dynain). `pre.k` 처럼 `.k` 로 끝나면 아래 메시 사본과 겹치지 않게 `pre.dynain` 으로 씁니다.
+- `<output 에서 확장자를 뗀 이름>.k`: 변형 메시 사본 + 위 dynain `*INCLUDE`
+- `<output 에서 확장자를 뗀 이름>.csv` (`--csv`): 요소별 변형률/응력 CSV. 재료(E·ν)를 찾지 못하면 dynain 대신 `<output>` 에 CSV 만 씁니다.
+
+예: `KooRemapper prestress --E 210000 --nu 0.3 flat.k bent.k pre.dynain` → `pre.dynain` + `pre.k`
 
 ### 재료 우선순위
 1. 명령행 `--E`, `--nu` 인자 (전체 오버라이드)
@@ -384,8 +388,10 @@ $$\sigma_{xx} = -(\lambda + 2\mu)\varepsilon_x - \lambda(\varepsilon_y + \vareps
 swelling 파트는 dynain에 포함되지 않습니다.
 
 ### 출력
-- `<prefix>.k`: 압축된 메시 + 열팽창 카드 (swelling 파트)
-- `<prefix>_dynain.dat`: `*INITIAL_STRESS_SOLID` (eps 파트만)
+- `<prefix>.k`: 압축된 메시 + 열팽창 카드 (swelling 파트) + dynain `*INCLUDE`
+- `<prefix>.dynain`: `*INITIAL_STRESS_SOLID` (eps 파트만)
+
+접두어 끝의 `.k` 는 떼고 씁니다(`out.k` 를 줘도 `out.k`·`out.dynain`).
 
 ---
 
@@ -481,7 +487,7 @@ KooRemapper.exe unfold <bent_mesh.k> <output_flat.k>
 ### 파라미터
 
 
-**표 7-1. squeeze YAML 파트 설정 예 — 직접 변형률(eps_x/y/z)과 등방 팽창(swelling) 두 가지 방법의 비교.**
+**표 9-1. unfold 인자 — 입력 굽힘 메시와 출력 평면 메시.**
 
 | 파라미터 | 설명 |
 |----------|------|
@@ -520,7 +526,7 @@ KooRemapper.exe strain <ref_mesh.k> <def_mesh.k> <output.csv> [--type engineerin
 ### 파라미터
 
 
-**표 8-1. generate-var 두께 분포 정의 — 영역(zone)별 lc와 두께를 지정하여 변밀도 메시를 생성한다.**
+**표 10-1. strain 인자 — 기준·변형 메시, 출력 CSV, 변형률 유형 옵션.**
 
 | 파라미터 | 설명 | 기본값 |
 |----------|------|--------|
@@ -532,7 +538,7 @@ KooRemapper.exe strain <ref_mesh.k> <def_mesh.k> <output.csv> [--type engineerin
 ### 변형률 유형
 
 
-**표 9-1. unfold 파라미터 — 굽힘 메시 전개 시 호(arc), 너비(width), 두께(thickness) 축 방향 설정.**
+**표 10-2. strain 변형률 유형 — engineering·green·log 정의.**
 
 | 유형 | 설명 |
 |------|------|
@@ -560,7 +566,7 @@ KooRemapper.exe info <mesh_file.k>
 ### 출력 정보
 
 
-**표 13-1. bend YAML 설정 파라미터 — 굽힘 반경, 각도, 중립면 위치, 굽힘 축 방향 등 핵심 파라미터.**
+**표 11-1. info 출력 항목 — 노드·요소·파트 수, 바운딩 박스, 검증 결과, 요소 품질.**
 
 | 항목 | 설명 |
 |------|------|
@@ -613,7 +619,7 @@ layers:
 ### 파라미터
 
 
-**표 14-1. indent YAML 설정 파라미터 — 압입 깊이, 위치, 반경, 방향 등 압입/엠보싱 제어 파라미터.**
+**표 12-1. restack YAML 파라미터 — 대상 파트, 적층 방향, 요소 유형, 레이어 목록.**
 
 | 파라미터 | 설명 | 기본값 |
 |----------|------|--------|
@@ -624,7 +630,10 @@ layers:
 | `element_type` | 요소 유형 | `solid` |
 | `layers` | 레이어 리스트 (thickness + material_card) | — |
 
-> **참고**: `MID001`, `MID002` 등의 플레이스홀더가 자동으로 실제 MID로 치환됩니다.
+> **재질 카드 MID 칸**: 각 층 `material_card` 의 첫 `*MAT` 카드 MID 칸(1~10열, `*MAT_…_TITLE` 이면 제목 다음 줄)에 쓴 값은 라벨입니다. `MID001`·`MAT01`·`@MID@`·`14` 무엇이든 층마다 새로 발급한 MID 로 바뀌고, 같은 MID 를 가리키는 `*MAT_ADD_…` 카드도 함께 바뀝니다.
+> - 라벨과 카드 내용(MID 칸 제외)이 같은 층끼리만 MID 하나를 공유합니다. 라벨이 같아도 물성이 다르면 따로 발급하고 `material label 'X' reused with a different card -> separate MID N` 을 안내합니다(위 예시의 두 층은 라벨은 같고 물성이 달라 MID 가 둘).
+> - 값은 LS-DYNA 고정 폭 10열 칸 안에 두세요(블록 들여쓰기를 뺀 뒤 기준). 쉼표 자유 형식도 됩니다.
+> - YAML `|` 블록은 키보다 깊게 들여쓴 줄까지이며 끝 빈 줄은 버립니다. 제목에 `:` 나 `-` 가 있어도 됩니다.
 
 ### 동작
 1. `target_pid` 파트의 요소 분석 → 두께 방향 결정
@@ -651,29 +660,27 @@ KooRemapper.exe bend <config.yaml>
 ```yaml
 base_model: flat.k
 output: bent
-material:
+material:                   # 선택 — 생략하면 대상 파트의 *MAT_ELASTIC
   E: 210000
   nu: 0.3
 operations:
   - type: bend
-    target_pid: 1
-    plane: xz               # xy | xz | yz (굽힘 평면)
-    mode: formula           # formula | dat
-    expression: "0.5 * sin(pi * x1 / L1) * sin(pi * x2 / L2)"   # 처짐 w(x1,x2) 수식
+    target_pid: 1           # 0 또는 생략 = 모든 파트
+    plane: xy               # xy | yz | zx  (x1,x2 = X,Y | Y,Z | Z,X)
+    mode: deform            # deform(노드 이동 + 역응력) | stress(노드 그대로, 정응력)
+    source: formula         # formula | dat | dat_pair
+    expression: "0.5 * sin(pi * x1 / L1) * sin(pi * x2 / L2)"   # 처짐 w(x1,x2)
 
-    # dat 모드:
-    # source: dat_file
-    # dat_file: deflection.dat
-    # dat_top: top
-    # dat_bottom: bottom
+    # source: dat      → dat_file: deflection.dat
+    # source: dat_pair → dat_top: top.dat  +  dat_bottom: bottom.dat (상·하면 처짐 격자)
 ```
 
-> **v1.8.0 정정**: (1) 굽힘 평면 값은 `xy | xz | yz` 입니다(구버전의 `zx` 표기 정정, help 기준). (2) config 는 최상위 `base_model`/`output` + `operations[].type: bend` 구조입니다(help·examples). (3) help 는 `mode: formula | dat` 를 씁니다(구버전의 `mode: deform|stress` + `source: dat_pair` 는 정본 서술 기준이며, v1.8.0 호출은 help 형식을 따름).
+> **v1.8.0 정정**: (1) 굽힘 평면 값은 `xy | yz | zx` 입니다. `xz` 는 거부됩니다(이전 help 와 이 문서의 `xz` 표기가 틀렸음). (2) config 는 최상위 `base_model`/`output` + `operations[].type: bend` 구조입니다. (3) `mode` 는 `deform | stress`, `source` 는 `formula | dat | dat_pair` 이고 모두 필수 검사 대상입니다(이전 help 의 `mode: formula` 는 거부). 단독 `bend` 명령도 assemble 과 같은 검사를 거칩니다(예전엔 검사 없이 source 누락 시 비정상 종료).
 
 ### 수식 변수
 
 
-**표 15-1. formstrain 출력 — 이면각 기반 소성 변형률 계산 결과 및 LS-DYNA *INITIAL_STRAIN_SOLID 출력.**
+**표 13-1. bend 수식 변수 — 면내 좌표 x1·x2, 바운딩 박스 길이 L1·L2, π.**
 
 | 변수 | 의미 |
 |------|------|
@@ -706,6 +713,8 @@ $$\varepsilon_{11} = d \cdot \kappa_1, \quad \varepsilon_{22} = d \cdot \kappa_2
 ...
 ```
 
+값은 모델 길이 단위의 처짐이며, 격자는 대상 파트의 평면 바운딩 박스에 펼칩니다. warpage 의 dat 는 행 0 이 2축 **최소**라 방향이 반대입니다(§21).
+
 ---
 
 ## 14. indent — 압입/엠보싱
@@ -733,50 +742,51 @@ operations:
     target_pid: 1
     plane: xy
     direction: -z
-    depth: 2.0              # 양수=압입, 음수=엠보싱
-    r1: 1.5                 # 펀치(바닥) 반경
-    r2: 1.0                 # 필렛 반경
-    bottom_ratio: 0.5       # 두께 방향 관통 비율 (0~1)
+    depth: 2.0              # 양수=압입, 음수=엠보싱 (0 불가)
+    r1: 1.5                 # 바닥 쪽 전이 호 반경 (> 0)
+    r2: 1.0                 # 표면 쪽 전이 호 반경 (> 0)
+    bottom_ratio: 0.5       # 반대 면 변위 비율 (0 = 반대 면 고정, 기본 0)
     stress: true            # 굽힘 응력 계산 여부
-    shell_thickness: 1.0    # 셸 두께 (셸 요소일 때)
+    shell_thickness: 1.0    # 셸 응력 두께 (0 = *SECTION_SHELL)
     shape:
-      type: polygon         # circle | polygon (spline 은 정본 서술)
-      points:
+      type: polygon         # polygon | spline (3점 이상)
+      points:               # 평평한 바닥 윤곽 — 평면 좌표계의 모델 좌표
         - [0.0, 0.0]
         - [10.0, 0.0]
         - [10.0, 8.0]
         - [0.0, 8.0]
 ```
 
-> **v1.8.0 정정**: config 는 최상위 `base_model`/`output` + `operations[].type: indent` 구조입니다(help·examples). `shape.type` 은 help 기준 `circle | polygon` 이며(`spline` 은 정본 서술), `bottom_ratio`/`shell_thickness`/`material` 은 정본이 추가 문서화한 필드입니다.
+> **v1.8.0 정정**: config 는 최상위 `base_model`/`output` + `operations[].type: indent` 구조입니다. `shape.type` 은 `polygon | spline` 이고 `points` 는 3점 이상이어야 합니다(`circle` 은 없음 — 이전 help 표기가 틀렸음). `depth ≠ 0`, `r1·r2 > 0`, `direction` 은 `+x|-x|+y|-y|+z|-z` 를 검사하며 단독 `indent` 도 같습니다(예전엔 points·r1/r2 누락 시 비정상 종료).
 
 ### 파라미터
 
 
-**표 16-1. convert 지원 변환 유형 — TET4→TET10, HEX8→HEX20, QUAD4→QUAD8, TRIA3→TRIA6 변환 지원.**
+**표 14-1. indent 파라미터 — 깊이, 전이 호 반경 r1·r2, 반대 면 변위 비율, 응력·셸 두께.**
 
 | 파라미터 | 설명 | 기본값 |
 |----------|------|--------|
 | `depth` | 압입 깊이 (양수=압입, 음수=엠보싱) | — |
-| `r1` | 펀치 측(내부) 필렛 반경 | — |
-| `r2` | 다이 측(외부) 필렛 반경 | — |
-| `bottom_ratio` | 두께 방향 관통 비율 | `0.5` |
+| `r1` | 바닥 쪽 전이 호 반경 (윤곽 바깥 0~r1) | — |
+| `r2` | 표면 쪽 전이 호 반경 (윤곽 바깥 r1~r1+r2) | — |
+| `bottom_ratio` | 반대 면 변위 비율 (눌리는 면 1 → 반대 면 bottom_ratio 로 선형) | `0.0` |
 | `stress` | 굽힘 응력 계산 여부 | `false` |
-| `shell_thickness` | 셸 요소 두께 | 자동 |
+| `shell_thickness` | 셸 응력 두께 | `0` (= `*SECTION_SHELL`) |
 
 ### 압입 프로파일
 
-부호 있는 거리 d에서의 프로파일 함수 h(d):
+윤곽(shape)으로부터의 부호 있는 거리 d(안쪽 < 0)에서 표면 변위 h(d):
 
 $$k = \frac{\text{depth}}{r_1 + r_2}$$
 
-**r₁ 구역** (0 ≤ d ≤ r₁): $h(d) = -\text{depth} + k \cdot r_1 (1 - \sqrt{1 - (d/r_1)^2})$
+- **윤곽 안** (d < 0): $h = -\text{depth}$ (평평한 바닥)
+- **r₁ 구역** (0 ≤ d < r₁, 바닥 쪽 호): $h(d) = -\text{depth} + k\, r_1 \left(1 - \sqrt{1 - (d/r_1)^2}\right)$
+- **r₂ 구역** (r₁ ≤ d < r₁+r₂, 표면 쪽 호): $h(d) = -k\, r_2 \left(1 - \sqrt{1 - \left((r_1 + r_2 - d)/r_2\right)^2}\right)$
+- **바깥** (d ≥ r₁+r₂): $h = 0$
 
-**평탄 구역** (r₁ < d ≤ D - r₂): $h(d) = -\text{depth}$
+두께 방향으로는 눌리는 면에서 h, 반대 면에서 `bottom_ratio`·h 로 선형 보간합니다.
 
-**r₂ 구역** (D - r₂ < d ≤ D): 역 quarter-arc 천이
-
-> **주의**: 응력은 노드 변위 **전에** 계산. h''(d) 특이점 → `strainLimit / (thickness/2)` 상한 제한.
+> **주의**: 응력은 노드 변위 **전에** 계산. h''(d) 특이점은 변형률 0.05 기준 `0.05 / (thickness/2)` 로 상한 제한.
 
 ---
 
@@ -846,7 +856,7 @@ elform: 0                # ELFORM 지정 (0=자동)
 ### 자동 ELFORM 매핑
 
 
-**표 17-1. refine 세분화 비율 — 요소 유형별 1:2, 1:3 세분화 시 생성 요소 수 비교.**
+**표 16-1. convert 변환 유형 — 원본·변환 요소와 기본 ELFORM.**
 
 | convertType | 원본 요소 | 변환 요소 | 기본 ELFORM |
 |-------------|-----------|-----------|-------------|
@@ -880,7 +890,7 @@ ratio: 2                 # 2 또는 3
 ### 지원 요소 유형
 
 
-**표 18-1. ELFORM 코드 목록 — LS-DYNA 요소 공식(ELFORM) 번호와 각 공식의 특성 요약.**
+**표 17-1. refine 세분화 결과 — 요소 유형별 ratio=2·3 서브 요소.**
 
 | 요소 | ratio=2 | ratio=3 |
 |------|---------|---------|
@@ -914,7 +924,7 @@ target_elform: "2"       # 숫자 또는 별칭
 ### 고체 요소 별칭
 
 
-**표 19-1. disconnect 모드 — full/czm/mefem 세 가지 노드 분리 모드와 생성 키워드.**
+**표 18-1. elform 고체 요소 별칭 — 별칭과 LS-DYNA ELFORM 번호.**
 
 | 별칭 | ELFORM | 설명 |
 |------|--------|------|
@@ -927,7 +937,7 @@ target_elform: "2"       # 숫자 또는 별칭
 ### 셸 요소 별칭
 
 
-**표 20-1. IGA 생성 파일 — 파트별 IGA NURBS 박스 파일과 메인 파일의 *INCLUDE 구조.**
+**표 18-2. elform 셸 요소 별칭 — 별칭과 LS-DYNA ELFORM 번호.**
 
 | 별칭 | ELFORM |
 |------|--------|
@@ -964,7 +974,7 @@ failure_strain: 0.05     # CZM 파괴 변형률
 ### 모드별 동작
 
 
-**표 21-1. warpage 보정 파라미터 — 워피지 측정 기준면, 보정 방향, 스케일 팩터 설정.**
+**표 19-1. disconnect 모드 — full·czm·mefem 동작과 LS-DYNA 출력.**
 
 | 모드 | 동작 | LS-DYNA 출력 |
 |------|------|-------------|
@@ -992,6 +1002,8 @@ KooRemapper.exe iga <config.yaml>
 model: base.k
 output: iga_result
 targets:
+  # 대상 지정: target_pid 하나 | target_pids: [2, 3] (같은 설정, PID 마다 따로 감쌈)
+  #           | target_name: "Lower*" (파트 제목 와일드카드 * ?, 0개 매칭이면 오류) + exclude_name
   - target_pid: 1
     element_size: 4.0       # NURBS 복셀 크기 (rr=rs=rt 공통)
     element_size_r: 2.0     # r방향 개별 지정 (0=element_size 사용)
@@ -1052,50 +1064,60 @@ material:
 operations:
   - type: warpage
     target_pid: 1
-    source: dat_file         # dat_file | formula
-    dat_file: warpage.dat    # 측정 변형 데이터 파일
-    dat_top: top             # 상면 컬럼명
-    dat_bottom: bottom       # 하면 컬럼명
-    x_min: 0.0               # 데이터 바운딩 박스 (선택)
-    x_max: 100.0
-    y_min: 0.0
-    y_max: 100.0
-    # 아래는 정본이 추가 문서화한 파라미터(operations 내 배치는 확인 필요):
-    # mode: curvature        # curvature | raw
-    # morph_factor: 1.0      # 변형 배율
-    # plane: xy              # 투영 평면
-    # deflection_axis: z     # 변형 축
-    # noise_threshold: 0.001 # 노이즈 임계값
-    # finite_strain: false   # 유한 변형률 사용
-    # outside_behavior: clamp # clamp | zero
-    # mask_value: -9999      # 무효 데이터 마커
+    dat_file: warpage.dat      # 처짐값 격자 (YAML 폴더 기준 상대 경로)
+    plane: xy                  # xy | yz | zx
+    deflection_axis: +z        # +z | -z | +x | -x | +y | -y
+    unit: um                   # um(기본) | mm | m — 격자 값 단위
+    mode: prestress            # prestress(기본, 초기응력) | deform(노드 이동)
+    morph_factor: 1.0          # 처짐 배율 (> 0)
+    finite_strain: true        # true: von Kármán 대변형(기본) | false: Kirchhoff
+    outside_behavior: zero     # zero(기본) | clamp | extrapolate — 격자 범위 밖 노드
+    mask_value: 9999           # 결측으로 보고 주변에서 보간할 값
+    noise_threshold: 1.0e-10   # 노이즈 임계값
+    # data_bbox:               # 격자가 덮는 평면 좌표 범위 (생략 시 파트 bbox)
+    #   x_min: 0.0
+    #   x_max: 100.0
+    #   y_min: 0.0
+    #   y_max: 100.0
 ```
 
-> **v1.8.0 정정**: config 는 최상위 `base_model`/`output` + `operations[].type: warpage` 구조입니다(help·examples). help 스키마는 `source`(dat_file|formula)/`dat_file`/`dat_top`/`dat_bottom`/`x_min~y_max` 이며, `mode`/`morph_factor` 등 정본 문서화 파라미터의 operations 내 정확한 배치는 확인 필요입니다.
+> **v1.8.0 정정**: config 는 최상위 `base_model`/`output` + `operations[].type: warpage` 구조입니다. 이전 help 와 이 문서가 적었던 `source`·`dat_top`·`dat_bottom`·op 바로 아래 `x_min~y_max` 는 warpage 파서가 읽지 않는 키였습니다(오류 없이 무시). 격자 범위는 `data_bbox:` 아래에 두고, `mode` 는 `prestress | deform` 입니다(`curvature | raw` 아님). YAML 이 현재 폴더에 있을 때 `dat_file` 을 루트(`/파일`)에서 찾던 문제는 고쳐졌습니다.
 
 ### 파라미터
 
 
-**표 22-1. offset 모드 — tied/czm/contact 세 가지 인터페이스 연결 방법과 생성 키워드.**
+**표 21-1. warpage 파라미터 — 격자 파일·평면·단위·모드·범위 처리와 기본값.**
 
 | 파라미터 | 설명 | 기본값 |
 |----------|------|--------|
-| `dat_file` | 워피지 측정 데이터 파일 | — |
+| `dat_file` | 처짐값 격자 파일 (필수) | — |
 | `plane` | 투영 평면 (xy/yz/zx) | `xy` |
-| `deflection_axis` | 변형 방향 축 | `z` |
-| `mode` | curvature(곡률 응력) / raw(직접 변위) | `curvature` |
-| `morph_factor` | 변형 배율 | `1.0` |
-| `mask_value` | 무효 데이터 값 | — |
-| `noise_threshold` | 노이즈 필터 임계값 | `0.001` |
-| `finite_strain` | 유한 변형률 사용 여부 | `false` |
-| `outside_behavior` | 경계 외 처리 (clamp/zero) | `clamp` |
-| `data_bbox` | 데이터 영역 제한 | 자동 |
+| `deflection_axis` | 처짐 방향 축 (±x/±y/±z) | `z` |
+| `unit` | 격자 값 단위 (um/mm/m) | `um` |
+| `mode` | prestress(초기응력만) / deform(노드 이동) | `prestress` |
+| `morph_factor` | 처짐 배율 (> 0, 10 초과 시 경고) | `1.0` |
+| `mask_value` | 결측 값 (주변 보간) | `9999` |
+| `noise_threshold` | 노이즈 임계값 | `1e-10` |
+| `finite_strain` | von Kármán 대변형(true) / Kirchhoff 소변형(false) | `true` |
+| `outside_behavior` | 격자 범위 밖 노드 처리 (zero/clamp/extrapolate) | `zero` |
+| `data_bbox` | 격자가 덮는 평면 범위 (`x_min`·`x_max`·`y_min`·`y_max`) | 파트 bbox |
+| `debug` / `debug_prefix` | 격자·곡률 VTK 등 디버그 출력 | `false` / `debug/warp` |
+
+### dat 파일 형식
+
+공백(탭) 구분 처짐값 행렬입니다. `data_bbox`(생략 시 파트 bbox)에 펼치며 **열 0 = 평면 1축 최소, 행 0 = 2축 최소**입니다(bend 의 dat 는 행 0 = x2 최대로 반대). 값 단위는 `unit` 입니다.
+
+```
+0  0   0   0  0
+0 50 100  50  0      # 가운데가 최대 100 um
+0  0   0   0  0
+```
 
 ### 동작
-1. .dat 파일에서 격자 데이터 로드
-2. 바이리니어 보간으로 각 노드 위치의 변형량 계산
-3. curvature 모드: 유한 차분으로 곡률 계산 → 굽힘 응력
-4. raw 모드: 직접 노드 변위만 적용
+1. .dat 격자 로드 (`mask_value` 결측은 주변 보간)
+2. 바이리니어 보간으로 각 노드 위치의 처짐 계산
+3. prestress 모드: 유한 차분 곡률 → Kirchhoff/von Kármán 굽힘 변형률 → 초기응력 (노드 그대로)
+4. deform 모드: 노드를 처짐만큼 이동
 
 ---
 
@@ -1128,27 +1150,30 @@ operations:
     connection_mode: tied        # tied | czm | contact | none (기본 tied)
     new_pid: 10                  # 새 파트 ID
     part_title: "Offset part"
-    material_card: |             # @MID@ 자동 치환
+    material_card: |             # MID 칸(@MID@·숫자·라벨)은 새 MID 로 바뀜
       *MAT_ELASTIC
-      $#  mid   ro     e    pr
-           @MID@  2.0  12000  0.25
+      $#     mid        ro         e        pr
+           @MID@       2.0     12000      0.25
 
     # CZM 연결 (connection_mode: czm)
-    czm_material_card: |         # @CZM_MID@ 자동 치환
+    czm_material_card: |         # MID 칸(@CZM_MID@ 등)은 새 CZM MID 로 바뀜
       *MAT_COHESIVE_MIXED_MODE
-      ...
+      $#     mid        ro     roflg   intfail        en        et       gic      giic
+       @CZM_MID@       2.0         0       1.0     20000     10000       0.5       0.5
+      $#     xmu         t         s       und       utd     gamma
+             2.0       1.0       1.0
 
     # 영역(region) 필터 (선택): 소스 표면의 일부만 처리
     # bbox_xmin/xmax/ymin/ymax/zmin/zmax
     # node_id_min/max, element_id_min/max
 ```
 
-> **v1.8.0 정정**: (1) `connection_mode` 값 집합은 `tied | czm | contact | none` 이며 **기본값은 `tied`** 입니다(help·examples. 구버전의 `shared | tied | czm`/기본 `shared` 정정). `contact` 는 인터페이스 노드를 복제해 별도 표면을 만들고 사용자가 이후 `*CONTACT` 를 정의합니다. (2) `element_type` 값은 `solid | tshell | shell` 입니다(구버전의 `hex | tet` 정정). (3) config 는 최상위 `base_model`/`output` + `operations[].type: offset` 구조입니다. 재료는 `material_card`(인라인, `@MID@` 치환)로 지정합니다.
+> **v1.8.0 정정**: (1) `connection_mode` 값 집합은 `tied | czm | contact | none` 이며 **기본값은 `tied`** 입니다(help·examples. 구버전의 `shared | tied | czm`/기본 `shared` 정정). `contact` 는 인터페이스 노드를 복제해 별도 표면을 만들고 사용자가 이후 `*CONTACT` 를 정의합니다. (2) `element_type` 값은 `solid | tshell | shell` 입니다(구버전의 `hex | tet` 정정). (3) config 는 최상위 `base_model`/`output` + `operations[].type: offset` 구조입니다. 재료는 `material_card` 로 지정하고, 층마다 다르면 `material_cards:` 목록(`- |` 항목)을 씁니다(단독·assemble 모두). (4) 카드 MID 칸의 값(`@MID@`·`@CZM_MID@`·숫자·라벨)은 새 MID 로 바뀌며, 값은 LS-DYNA 고정 폭 10열 칸 안에 두세요. (5) `new_pid`·`new_secid`·`new_mid` 를 지정해도 뒤이어 자동 발급되는 ID 와 겹치지 않습니다. (6) `connection_mode: none` 은 assemble 경로에서도 허용됩니다. 단독 `offset` 도 assemble 과 같은 값 검사를 거칩니다.
 
 ### 주요 파라미터
 
 
-**표 22-2. offset local_normals 효과 — 전역 평균 법선 대비 로컬 법선 사용 시 품질 개선.**
+**표 22-1. offset 주요 파라미터 — 소스 파트, 방향·두께, 요소 유형, 연결 방식.**
 
 | 파라미터 | 설명 | 기본값 |
 |----------|------|--------|
@@ -1216,6 +1241,8 @@ Rubber_HG
 ...  &PID1   &SECID1   &MID1   0   &HGID1 ...
 *END
 ```
+
+> **대상 PART 카드**: `*PART` 데이터 줄이 PID·SECID·MID 3칸뿐인 모델(예: `generate box` 출력)도 인식합니다(예전엔 `PID not found`).
 
 ### 파라미터 이름 접두사 규칙
 
@@ -1369,7 +1396,7 @@ contacts:
 #### create에서 사용 가능한 type 값
 
 
-**표 24-1. matdb 재료 매칭 규칙 — 제목(title)/이름(name)/태그(tag) 우선순위 기반 자동 매칭.**
+**표 25-1. contact create 접촉 type — YAML type 값과 LS-DYNA *CONTACT 키워드.**
 
 | type (YAML) | LS-DYNA 키워드 |
 |---|---|
@@ -1467,7 +1494,7 @@ contacts:
 #### contact_type 프리셋
 
 
-**표 24-2. matdb 구조 카드 타입 — MAT_ELASTIC, MAT_024, MAT_RIGID 등 지원 카드 목록.**
+**표 25-2. contact detect 접촉 type — YAML 값, LS-DYNA 키워드, 용도.**
 
 | YAML 값 | LS-DYNA 키워드 | 용도 |
 |---|---|---|
@@ -1481,7 +1508,7 @@ contacts:
 #### detect 옵션
 
 
-**표 25-1. contact 접촉 type 값 목록 — YAML type 키워드와 LS-DYNA *CONTACT_* 키워드 대응.**
+**표 25-3. contact detect 옵션 — 탐지 범위, 포함·제외, 허용치, 법선 각, 자동 생성.**
 
 | 키 | 기본값 | 설명 |
 |---|---|---|
@@ -1503,7 +1530,7 @@ create, modify, detect(auto_create) 모든 액션에서 동일하게 사용 가�
 #### Card A (소프트닝/깊이)
 
 
-**표 25-2. contact modify 수정 가능 필드 — Card 1/2/A/C 필드명과 대응하는 LS-DYNA 필드.**
+**표 25-4. contact 세부 옵션 (soft·sofscl·depth·sbopt) — 키와 LS-DYNA 필드.**
 
 | 키 | 필드 | 설명 |
 |---|---|---|
@@ -1515,7 +1542,7 @@ create, modify, detect(auto_create) 모든 액션에서 동일하게 사용 가�
 #### Card B (두께)
 
 
-**표 25-3. contact Optional Card 지원 목록 — A~G 카드별 주요 파라미터와 기본값.**
+**표 25-5. contact 세부 옵션 (penmax·thkopt·shlthk) — 키와 LS-DYNA 필드.**
 
 | 키 | 필드 | 설명 |
 |---|---|---|
@@ -1526,7 +1553,7 @@ create, modify, detect(auto_create) 모든 액션에서 동일하게 사용 가�
 #### Card C (간격/에지)
 
 
-**표 26-1. load 유형 목록 — 지원하는 하중 종류와 각 하중의 적용 대상(노드/파트/세그먼트).**
+**표 25-6. contact 세부 옵션 (igap·ignore) — 키와 LS-DYNA 필드.**
 
 | 키 | 필드 | 설명 |
 |---|---|---|
@@ -1571,7 +1598,7 @@ loads:
 ### 파라미터
 
 
-**표 27-1. boundary 조건 유형 — 지원하는 경계 조건 종류와 자유도(DOF) 구성.**
+**표 26-1. load 파라미터 — 대상 파트, 하중 유형·크기·방향, 면 선택, 시간 곡선.**
 
 | 파라미터 | 설명 |
 |----------|------|
@@ -1579,7 +1606,7 @@ loads:
 | `mode` | 하중 유형 (`pressure` / `force` / `gravity`) |
 | `value` | 하중 크기 |
 | `direction` | 하중 방향 벡터 `[x, y, z]` |
-| `select` | 면 선택 방식 — `direction`(방향벡터 각도 내 법선 면) / `tied`(tied 접촉 참여 면) / `all`(파트 노출면 전체) |
+| `select` | 면 선택 방식 — `direction`(방향벡터 각도 내 법선 면) / `tied`(tied 접촉 참여 면, 모델에 해당 파트의 `*CONTACT_TIED…` 가 없으면 경고 후 파트 표면에서 고름) / `all`(파트 노출면 전체) |
 | `angle` | 면 선택 각도 허용치(°) |
 | `curve` | 선택. `[[t, f], ...]` 시간-하중 곡선 |
 
@@ -1616,7 +1643,7 @@ boundaries:
 ### 파라미터
 
 
-**표 28-1. rbe 구속 유형 — RBE2/RBE3 구속 조건 생성 방법과 마스터/슬레이브 설정.**
+**표 27-1. boundary 파라미터 — 대상 파트, 구속 자유도, 면 선택.**
 
 | 파라미터 | 설명 |
 |----------|------|
@@ -1660,7 +1687,7 @@ rbe:
 ### 파라미터
 
 
-**표 29-1. implicit 변환 레벨 (1~8) — 공격적→보수적 순으로 정렬된 8단계 변환 레벨과 활성화 키워드.**
+**표 28-1. rbe 파라미터 — 대상 파트, 면 선택, RBE 유형·모드.**
 
 | 파라미터 | 설명 |
 |----------|------|
@@ -1705,7 +1732,7 @@ strip: false          # true: 키워드 제거만 (삽입 없음)
 #### Table 1 — 비선형 솔버 & 수렴 허용치
 
 
-**표 29-2. implicit 오버라이드 파라미터 — dt0, dtmax, nsolvr 등 사용자 정의 시 기본값을 덮어쓰는 파라미터.**
+**표 29-1. implicit 레벨별 비선형 솔버 설정 — NSOLVR·ILIMIT·MAXREF·수렴 허용치.**
 
 | Lv | 이름 | NSOLVR | ILIMIT | MAXREF | ITEOPT | KFAIL | DCTOL | ECTOL | LSTOL | RCTOL |
 |----|------|--------|--------|--------|--------|-------|-------|-------|-------|-------|
@@ -1721,7 +1748,7 @@ strip: false          # true: 키워드 제거만 (삽입 없음)
 #### Table 2 — 시간 스텝 & 활성화 기능 (T = endtime)
 
 
-**표 30-1. modal 해석 파라미터 — 모드 수, 주파수 범위, 고유값 해석 방법(eigmth) 코드 목록.**
+**표 29-2. implicit 레벨별 시간 증분·선형 솔버·안정화 설정.**
 
 | Lv | DT0 | DTMAX | DTMIN | LSOLVR | STAB | ARC-LENGTH |
 |----|-----|-------|-------|--------|------|------------|
@@ -1754,7 +1781,7 @@ strip: false          # true: 키워드 제거만 (삽입 없음)
 ### mode: static vs dynamic
 
 
-**표 35-1. ALE 프리셋 목록 (14종) — 기체/액체/폭약/진공 프리셋별 적용 재료 모델과 상태방정식.**
+**표 29-3. implicit mode: static 과 dynamic 의 IMASS·GAMMA·BETA.**
 
 | 파라미터 | static (준정적) | dynamic (구조동역학) |
 |----------|----------------|-------------------|
@@ -1799,7 +1826,7 @@ strip: false           # true: 키워드 제거만
 ### 고유치 방법 (eigmth)
 
 
-**표 36-1. stabilize 12단계 설정 — 단계별 누적 적용 안정화 옵션과 활성화 조건.**
+**표 30-1. modal 고유치 방법(eigmth) — 값별 방법과 용도.**
 
 | 값 | 방법 | 설명 |
 |----|------|------|
@@ -1851,7 +1878,7 @@ strip: false            # true: 키워드 제거만
 ### 레벨 프리셋 (5단계)
 
 
-**표 37-1. database 프리셋 종류 — crash/drop/nve/all 프리셋별 출력 키워드 목록.**
+**표 31-1. relax 레벨 프리셋 — NRCYCK·DRTOL·DRFCTR 등 DR 설정.**
 
 | Lv | 이름 | NRCYCK | DRTOL | DRFCTR | TSSFDR | IRELAL | EDTTL |
 |----|------|--------|-------|--------|--------|--------|-------|
@@ -1864,7 +1891,7 @@ strip: false            # true: 키워드 제거만
 ### 모드
 
 
-**표 39-1. assemble 오퍼레이션 목록 — type 필드로 지정 가능한 전체 오퍼레이션과 주요 파라미터.**
+**표 31-2. relax 모드 — explicit·implicit DR 과 IDRFLG.**
 
 | mode | IDRFLG | 설명 |
 |------|--------|------|
@@ -1901,7 +1928,7 @@ keep_dr_curves: false    # true: SIDR=1 DEFINE_CURVE 유지
 ### 제거 대상
 
 
-**표 32. (표 설명 — 해당 명령어/기능의 파라미터 또는 옵션 목록)**
+**표 32-1. explicit 제거 대상 키워드 — 키워드와 원래 소속 명령.**
 
 | 키워드 | 원래 소속 |
 |--------|----------|
@@ -1999,7 +2026,7 @@ optimize: rubber
 #### 공통 (explicit + implicit)
 
 
-**표 33. (표 설명 — 해당 명령어/기능의 파라미터 또는 옵션 목록)**
+**표 34-1. optimize rubber 모드가 맞추는 카드 — 카드·필드·목표값.**
 
 | 카드 | 필드 | 목표값 |
 |---|---|---|
@@ -2011,7 +2038,7 @@ optimize: rubber
 #### Explicit 전용
 
 
-**표 34. (표 설명 — 해당 명령어/기능의 파라미터 또는 옵션 목록)**
+**표 34-2. optimize rubber 모드가 조정하는 카드 — 카드·필드·동작.**
 
 | 카드 | 필드 | 동작 |
 |---|---|---|
@@ -2056,7 +2083,7 @@ elform: 11                 # ALE ELFORM (11=multi-mat, 12=single, 기본 11)
 ### 재료 프리셋 (14종)
 
 
-**표 35. (표 설명 — 해당 명령어/기능의 파라미터 또는 옵션 목록)**
+**표 35-1. ale 재료 프리셋 — 분류별 프리셋과 MAT·EOS.**
 
 | 분류 | 프리셋 | MAT | EOS |
 |------|--------|-----|-----|
@@ -2103,7 +2130,7 @@ level: 6               # 1 ~ 12
 ### 레벨 시스템
 
 
-**표 36. (표 설명 — 해당 명령어/기능의 파라미터 또는 옵션 목록)**
+**표 36-1. stabilize 레벨 — 레벨별 주요 변경.**
 
 | Lv | 주요 변경 |
 |----|----------|
@@ -2170,7 +2197,7 @@ extent:
 ### 프리셋 (8종)
 
 
-**표 37. (표 설명 — 해당 명령어/기능의 파라미터 또는 옵션 목록)**
+**표 37-1. database 프리셋 — ASCII·Binary 키워드와 EXTENT.**
 
 | 프리셋 | ASCII 키워드 | Binary | EXTENT |
 |--------|-------------|--------|--------|
@@ -2208,7 +2235,7 @@ extent:
 ### 명령별 제거 범위
 
 
-**표 38. (표 설명 — 해당 명령어/기능의 파라미터 또는 옵션 목록)**
+**표 38-1. 명령별 strip: true 제거 범위.**
 
 | 명령 | strip: true 시 제거 대상 |
 |------|------------------------|
@@ -2220,7 +2247,7 @@ extent:
 ### strip vs explicit
 
 
-**표 39. (표 설명 — 해당 명령어/기능의 파라미터 또는 옵션 목록)**
+**표 38-2. strip: true 와 explicit 명령 비교.**
 
 | 구분 | strip: true | explicit 명령 |
 |------|-------------|---------------|
@@ -2262,6 +2289,10 @@ operations:
 - **원본 키워드 보존**: `*CONTACT`, `*BOUNDARY`, `*LOAD` 등 미파싱 키워드 그대로 유지
 - **응력 누적**: 동일 요소에 여러 오퍼레이션 적용 시 응력 합산(`std::map` 기반)
 - **ID 자동 관리**: 파트/섹션/노드/요소 ID 자동 발급 (충돌 방지)
+- **출력 이름**: `output` 끝의 `.k` 는 있어도 없어도 같습니다(`result`·`result.k` → `result.k`, dynain 은 `result.dynain`).
+- **상대 경로**: `base_model`·`dat_file`·`bundle`·`dynain` 등은 YAML 파일이 있는 폴더 기준입니다(YAML 이 현재 폴더에 있어도 같음).
+- **인라인 주석**: 값 뒤에 공백 + `#` 로 주석을 달 수 있습니다(따옴표 안의 `#` 는 값). 단독 YAML 명령도 같습니다.
+- **값 검사**: 각 op 값을 읽을 때 검사하며, 단독 `bend`·`indent`·`offset`·`restack`·`iga` 도 같은 규칙을 씁니다.
 
 > **참고**: 아래 각 오퍼레이션은 동일 이름의 독립 명령어(12~22장)와 동일한 알고리즘을 사용합니다.
 > assemble 내에서는 `- type: <이름>` 으로 지정하며, 여러 오퍼레이션을 순차 결합할 수 있습니다.
@@ -2439,8 +2470,9 @@ operations:
   target_pid: 1
   dat_file: warpage.dat
   plane: xy
-  deflection_axis: z
-  mode: curvature
+  deflection_axis: +z
+  unit: um
+  mode: prestress
   morph_factor: 1.0
 ```
 
@@ -2456,7 +2488,7 @@ operations:
   offset_direction: +normal
   thickness: 2.0
   use_local_normals: true
-  element_type: hex
+  element_type: solid
 ```
 
 → 독립 명령 [22. offset](#22-offset--셸-오프셋-솔리드-생성) 참조
@@ -2807,7 +2839,7 @@ Total time: 13.6 s
 
 ## 41. 수학 이론
 
-### 40.1 등매개변수 매핑 (map)
+### 41.1 등매개변수 매핑 (map)
 
 HEX8 요소의 자연 좌표계 (ξ, η, ζ) ∈ [-1, 1]³:
 
@@ -2821,7 +2853,7 @@ $$\begin{pmatrix} \Delta\xi \\ \Delta\eta \\ \Delta\zeta \end{pmatrix} = \mathbf
 
 $$J_{ij} = \frac{\partial x_i}{\partial \xi_j} = \sum_{k=1}^{8} \frac{\partial N_k}{\partial \xi_j} x_{ki}$$
 
-### 40.2 선형 탄성 재료 모델
+### 41.2 선형 탄성 재료 모델
 
 라메 상수:
 
@@ -2831,7 +2863,7 @@ $$\lambda = \frac{E\nu}{(1+\nu)(1-2\nu)}, \quad \mu = G = \frac{E}{2(1+\nu)}$$
 
 $$\begin{pmatrix} \sigma_{xx} \\ \sigma_{yy} \\ \sigma_{zz} \\ \sigma_{xy} \\ \sigma_{yz} \\ \sigma_{xz} \end{pmatrix} = \begin{pmatrix} \lambda+2\mu & \lambda & \lambda & 0 & 0 & 0 \\ \lambda & \lambda+2\mu & \lambda & 0 & 0 & 0 \\ \lambda & \lambda & \lambda+2\mu & 0 & 0 & 0 \\ 0 & 0 & 0 & \mu & 0 & 0 \\ 0 & 0 & 0 & 0 & \mu & 0 \\ 0 & 0 & 0 & 0 & 0 & \mu \end{pmatrix} \begin{pmatrix} \varepsilon_{xx} \\ \varepsilon_{yy} \\ \varepsilon_{zz} \\ 2\varepsilon_{xy} \\ 2\varepsilon_{yz} \\ 2\varepsilon_{xz} \end{pmatrix}$$
 
-### 40.3 Kirchhoff 판 이론 (bend/indent)
+### 41.3 Kirchhoff 판 이론 (bend/indent)
 
 중립면에서 거리 z인 지점의 변형률:
 
@@ -2843,7 +2875,7 @@ $$D = \frac{E t^3}{12(1-\nu^2)}$$
 
 $$M_{11} = D(\kappa_{11} + \nu \kappa_{22}), \quad M_{22} = D(\kappa_{22} + \nu \kappa_{11}), \quad M_{12} = D(1-\nu)\kappa_{12}$$
 
-### 40.4 형성 변형률 이론 (formstrain)
+### 41.4 형성 변형률 이론 (formstrain)
 
 이면각 θ, 인접 셸 중심 간 거리 L:
 
@@ -2863,15 +2895,19 @@ $$\overline{\varepsilon}^p = \frac{2}{\sqrt{3}} |\varepsilon_{max}|$$
 
 ### dynain 파일 (`*INITIAL_STRESS_SOLID`)
 
+파일 이름은 `<output>.dynain` 입니다(assemble·squeeze·restack 등, prestress 는 §6). 머리 `$` 주석 뒤 요소마다 두 줄을 씁니다.
+
 ```
 *INITIAL_STRESS_SOLID
-$#     eid    numint
-   12345         1
-$# hisv1 ~ hisv7 (미사용, 0)
-         0         0         0         0         0         0         0
-$#  sig-xx    sig-yy    sig-zz    sig-xy    sig-yz    sig-xz
-  5654.00  2423.00  2423.00     0.00     0.00     0.00
+$#    eid    nint   nhisv   large     ics   ncomp
+         3       1       0       0       0       0
+$#  sigxx     sigyy     sigzz     sigxy     sigyz     sigxz       eps
+ 5.654e+03 2.423e+03 2.423e+03 0.000e+00 0.000e+00 0.000e+00 0.000e+00
 ```
+
+### 사면체 요소 연결 순서
+
+TET4 는 `*ELEMENT_SOLID` 8절점 칸에 LS-DYNA 규정대로 **N1, N2, N3, N4, N4, N4, N4, N4** 로 씁니다(elform 하향, split_fillet 분할 등). LS-DYNA R16 Vol I 는 이 순서를 어기면 초기화에서 negative volume 으로 종료한다고 적고 있고, KooRemapper 도 이 순서만 TET4 로 다시 읽습니다.
 
 ### IGA 포함 메인 파일 구조
 
