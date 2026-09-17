@@ -38,6 +38,13 @@ struct StandaloneYamlBase {
             return s.substr(1, s.size()-2);
         return s;
     }
+    // 'key: value' 줄의 키 — operations 항목 첫 줄('- type: hex20')은 대시를 떼고 읽는다.
+    // 예전엔 키가 '- type'·'- source_pid' 가 되어 항목의 첫 키를 조용히 버렸다(convert 가 hex20 대신 tet10 기본값).
+    static std::string keyOf(const std::string& tr, size_t cp) {
+        std::string k = trim(tr.substr(0, cp));
+        if (k.size() >= 2 && k[0] == '-' && (k[1] == ' ' || k[1] == '\t')) k = trim(k.substr(2));
+        return k;
+    }
 
     bool resolveFiles(const std::string& yamlFile) {
         size_t lastSlash = yamlFile.find_last_of("/\\");
@@ -82,7 +89,7 @@ int runWrap(const std::string& yamlFile, ConsoleOutput& console) {
         if (tr.empty() || tr[0] == '#') continue;
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
-        std::string key = y.trim(tr.substr(0, cp));
+        std::string key = y.keyOf(tr, cp);
         std::string val = y.stripQuotes(y.trim(KooRemapper::yamlStripComment(tr.substr(cp+1))));
 
         y.parseCommonKey(key, val);
@@ -151,7 +158,7 @@ int runUpdate(const std::string& yamlFile, ConsoleOutput& console) {
         if (tr.empty() || tr[0] == '#') continue;
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
-        std::string key = y.trim(tr.substr(0, cp));
+        std::string key = y.keyOf(tr, cp);
         std::string val = y.stripQuotes(y.trim(KooRemapper::yamlStripComment(tr.substr(cp+1))));
 
         y.parseCommonKey(key, val);
@@ -245,7 +252,7 @@ int runRestack(const std::string& yamlFile, ConsoleOutput& console) {
 
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
-        std::string key = y.trim(tr.substr(0, cp));
+        std::string key = y.keyOf(tr, cp);
         std::string val = y.stripQuotes(y.trim(KooRemapper::yamlStripComment(tr.substr(cp+1))));
 
         if (!inLayers) {
@@ -264,7 +271,8 @@ int runRestack(const std::string& yamlFile, ConsoleOutput& console) {
             size_t rcp = rest.find(':');
             if (rcp != std::string::npos) {
                 std::string rk = y.trim(rest.substr(0, rcp));
-                std::string rv = y.stripQuotes(y.trim(rest.substr(rcp+1)));
+                // 예전엔 대시 줄 값의 주석을 안 떼 'material_card: |  # 메모' 층을 카드 없음으로, '"0.2"  # 메모' 를 잘못된 두께로 봤다
+                std::string rv = y.stripQuotes(y.trim(KooRemapper::yamlStripComment(rest.substr(rcp+1))));
                 if (rk == "thickness") { try { op.layers.back().thickness = std::stod(rv); } catch(...) {} }
                 else if (rk == "material_card" && rv == "|") { readingMatCard = true; matCardKeyIndent = indent + 2; matCardBaseIndent = -1; }
             }
@@ -308,7 +316,7 @@ int runBend(const std::string& yamlFile, ConsoleOutput& console) {
         if (tr.empty() || tr[0]=='#') continue;
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
-        std::string key = y.trim(tr.substr(0, cp));
+        std::string key = y.keyOf(tr, cp);
         std::string val = y.stripQuotes(y.trim(KooRemapper::yamlStripComment(tr.substr(cp+1))));
 
         y.parseCommonKey(key, val);
@@ -363,8 +371,8 @@ int runIndent(const std::string& yamlFile, ConsoleOutput& console) {
         }
 
         if (inPoints && tr.substr(0,2) == "- ") {
-            // Parse [x1, x2]
-            std::string rest = y.trim(tr.substr(2));
+            // Parse [x1, x2] — 예전엔 '- [6, 3]   # 메모' 가 ']' 로 끝나지 않아 점을 조용히 버렸다
+            std::string rest = y.trim(KooRemapper::yamlStripComment(tr.substr(2)));
             if (!rest.empty() && rest.front() == '[' && rest.back() == ']') {
                 std::string inner = rest.substr(1, rest.size()-2);
                 std::istringstream iss(inner);
@@ -379,7 +387,7 @@ int runIndent(const std::string& yamlFile, ConsoleOutput& console) {
 
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
-        std::string key = y.trim(tr.substr(0, cp));
+        std::string key = y.keyOf(tr, cp);
         std::string val = y.stripQuotes(y.trim(KooRemapper::yamlStripComment(tr.substr(cp+1))));
 
         y.parseCommonKey(key, val);
@@ -429,7 +437,7 @@ int runFormstrain(const std::string& yamlFile, ConsoleOutput& console) {
         if (tr.empty() || tr[0]=='#') continue;
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
-        std::string key = y.trim(tr.substr(0, cp));
+        std::string key = y.keyOf(tr, cp);
         std::string val = y.stripQuotes(y.trim(KooRemapper::yamlStripComment(tr.substr(cp+1))));
 
         y.parseCommonKey(key, val);
@@ -469,7 +477,7 @@ int runConvert(const std::string& yamlFile, ConsoleOutput& console) {
         if (tr.empty() || tr[0]=='#') continue;
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
-        std::string key = y.trim(tr.substr(0, cp));
+        std::string key = y.keyOf(tr, cp);
         std::string val = y.stripQuotes(y.trim(KooRemapper::yamlStripComment(tr.substr(cp+1))));
 
         y.parseCommonKey(key, val);
@@ -510,7 +518,7 @@ int runRefine(const std::string& yamlFile, ConsoleOutput& console) {
         if (tr.empty() || tr[0]=='#') continue;
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
-        std::string key = y.trim(tr.substr(0, cp));
+        std::string key = y.keyOf(tr, cp);
         std::string val = y.stripQuotes(y.trim(KooRemapper::yamlStripComment(tr.substr(cp+1))));
 
         y.parseCommonKey(key, val);
@@ -549,7 +557,7 @@ int runElform(const std::string& yamlFile, ConsoleOutput& console) {
         if (tr.empty() || tr[0]=='#') continue;
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
-        std::string key = y.trim(tr.substr(0, cp));
+        std::string key = y.keyOf(tr, cp);
         std::string val = y.stripQuotes(y.trim(KooRemapper::yamlStripComment(tr.substr(cp+1))));
 
         y.parseCommonKey(key, val);
@@ -588,7 +596,7 @@ int runDisconnect(const std::string& yamlFile, ConsoleOutput& console) {
         if (tr.empty() || tr[0]=='#') continue;
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
-        std::string key = y.trim(tr.substr(0, cp));
+        std::string key = y.keyOf(tr, cp);
         std::string val = y.stripQuotes(y.trim(KooRemapper::yamlStripComment(tr.substr(cp+1))));
 
         y.parseCommonKey(key, val);
@@ -640,7 +648,7 @@ int runIga(const std::string& yamlFile, ConsoleOutput& console) {
 
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
-        std::string key = y.trim(tr.substr(0, cp));
+        std::string key = y.keyOf(tr, cp);
         std::string val = y.stripQuotes(y.trim(KooRemapper::yamlStripComment(tr.substr(cp+1))));
 
         if (!inTargets) {
@@ -760,7 +768,7 @@ int runWarpage(const std::string& yamlFile, ConsoleOutput& console) {
 
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
-        std::string key = y.trim(tr.substr(0, cp));
+        std::string key = y.keyOf(tr, cp);
         std::string val = y.stripQuotes(y.trim(KooRemapper::yamlStripComment(tr.substr(cp+1))));
 
         if (inDataBbox) {
@@ -861,7 +869,9 @@ int runOffset(const std::string& yamlFile, ConsoleOutput& console) {
                 op.materialCards.back() += ln.substr(std::min(indent, matCardBaseIndent)) + "\n";
                 continue;
             }
-            if (indent > matCardsKeyIndent && (tr == "- |" || tr == "-|")) {
+            // 예전엔 '- |   # 메모' 항목을 못 알아봐 목록이 끊기고 층 재질이 빠졌다
+            std::string item = KooRemapper::yamlStripComment(tr);
+            if (indent > matCardsKeyIndent && (item == "- |" || item == "-|")) {
                 op.materialCards.emplace_back();
                 readingMatCardsItem = true;
                 matCardKeyIndent = indent;
@@ -874,7 +884,7 @@ int runOffset(const std::string& yamlFile, ConsoleOutput& console) {
 
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
-        std::string key = y.trim(tr.substr(0, cp));
+        std::string key = y.keyOf(tr, cp);
         std::string val = y.stripQuotes(y.trim(KooRemapper::yamlStripComment(tr.substr(cp+1))));
 
         y.parseCommonKey(key, val);
