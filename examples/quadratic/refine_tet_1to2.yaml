@@ -1,4 +1,4 @@
-base_model: tet4_block.k
+base_model: tet_test.k
 output: refine_tet_1to2_result
 
 operations:
