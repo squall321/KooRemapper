@@ -511,6 +511,9 @@ int runAssemble(const std::string& configFile, const ConsoleOutput& console) {
         outputPrefix[0] != '/' && outputPrefix[0] != '\\') {
         outputPrefix = configDir + "/" + outputPrefix;
     }
+    // writeOutput appends ".k" - strip trailing ".k" from output if present
+    if (outputPrefix.size() >= 2 && outputPrefix.substr(outputPrefix.size() - 2) == ".k")
+        outputPrefix = outputPrefix.substr(0, outputPrefix.size() - 2);
 
     // 2. Load base model (skip if first op is 'generate')
     ModelAssembler assembler;
