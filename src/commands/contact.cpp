@@ -110,6 +110,8 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
         ContactAction curAction;
         bool hasAction = false;
         std::string currentSide;  // "slave" or "master"
+        // 'include:'/'exclude:' 뒤에 오는 블록 리스트(- 항목)를 담을 자리 (없으면 nullptr)
+        std::vector<std::string>* pendingKeyList = nullptr;
 
         auto flushAction = [&]() {
             if (hasAction) {
@@ -147,6 +149,17 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
             for (char c : raw) { if (c == ' ') ++indent; else break; }
             std::string t = kw_trim(raw);
             if (t.empty() || t[0] == '#') continue;
+
+            // include:/exclude: 의 블록 리스트 항목 — 예전엔 콜론이 없어 그냥 버려졌다
+            if (pendingKeyList && t[0] == '-') {
+                std::string item = kw_trim(yamlStripComment(t.substr(1)));
+                if (item.find(':') == std::string::npos) {
+                    item = stripQuotes(item);
+                    if (!item.empty()) pendingKeyList->push_back(item);
+                    continue;
+                }
+            }
+            pendingKeyList = nullptr;
 
             size_t colon = t.find(':');
             if (colon == std::string::npos) continue;
@@ -286,7 +299,26 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
 
             // detect fields
             if (key == "scope") { curAction.scope = val; continue; }
-            if (key == "contact_type") { curAction.contactType = val; continue; }
+            if (key == "contact_type") {
+                // 예전엔 모르는 값을 그대로 키워드로 붙여 *CONTACT_BOGUS_TITLE 같은 덱을 만들었다
+                static const char* kContactTypes[] = {
+                    "auto", "automatic", "tied", "tied_thermal", "thermal", "tiebreak",
+                    "mortar", "tied_mortar", "single", "eroding", "forming"
+                };
+                std::string lv = val;
+                std::transform(lv.begin(), lv.end(), lv.begin(),
+                               [](unsigned char c){ return (char)std::tolower(c); });
+                bool known = lv.empty();
+                for (const char* ct : kContactTypes) if (lv == ct) { known = true; break; }
+                if (!known) {
+                    console.error("[contact] unsupported contact_type '" + val +
+                                  "' (allowed: auto, tied, tied_thermal, tiebreak, mortar, "
+                                  "tied_mortar, single, eroding, forming)");
+                    return 1;
+                }
+                curAction.contactType = val;
+                continue;
+            }
             if (key == "tolerance") { try { curAction.detectTolerance = std::stod(val); } catch(...){} continue; }
             if (key == "normal_angle") { try { curAction.detectNormalAngle = std::stod(val); } catch(...){} continue; }
             if (key == "auto_create") { curAction.detectAutoCreate = (val=="true"||val=="yes"||val=="1"); continue; }
@@ -298,6 +330,7 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
                 std::vector<std::string>& tgt = (key == "include") ?
                     curAction.includeKeys : curAction.excludeKeys;
                 std::string v = val;
+                if (v.empty()) { pendingKeyList = &tgt; continue; }   // 블록 리스트 형식
                 if (!v.empty() && v.front() == '[') v.erase(v.begin());
                 if (!v.empty() && v.back() == ']') v.pop_back();
                 std::istringstream kss(v);
