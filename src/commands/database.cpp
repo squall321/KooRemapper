@@ -1,4 +1,5 @@
 #include "database.h"
+#include "util/YamlComment.h"
 #include "cli/ConsoleOutput.h"
 
 #include <string>
@@ -211,7 +212,7 @@ int runDatabase(const std::string& yamlFile, ConsoleOutput& console) {
         size_t cp = trimmed.find(':');
         if (cp == std::string::npos) continue;
         std::string key = trimmed.substr(0, cp);
-        std::string val = trimmed.substr(cp + 1);
+        std::string val = KooRemapper::yamlStripComment(trimmed.substr(cp + 1));
         size_t vs = val.find_first_not_of(" \t\"'");
         size_t ve = val.find_last_not_of(" \t\"'");
         if (vs != std::string::npos) val = val.substr(vs, ve - vs + 1);

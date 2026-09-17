@@ -1,4 +1,5 @@
 #include "load_boundary.h"
+#include "util/YamlComment.h"
 #include "assembly/ModelAssembler.h"
 #include "assembly/AssemblyConfig.h"
 #include "cli/ConsoleOutput.h"
@@ -88,7 +89,7 @@ int runLoad(const std::string& yamlFile, ConsoleOutput& console) {
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
         std::string key = trim(tr.substr(0, cp));
-        std::string val = stripQuotes(trim(tr.substr(cp+1)));
+        std::string val = stripQuotes(trim(KooRemapper::yamlStripComment(tr.substr(cp+1))));
 
         if (!inLoadsList) {
             if      (key == "model")  modelFile = val;
@@ -249,7 +250,7 @@ int runBoundary(const std::string& yamlFile, ConsoleOutput& console) {
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
         std::string key = trim(tr.substr(0, cp));
-        std::string val = stripQuotes(trim(tr.substr(cp+1)));
+        std::string val = stripQuotes(trim(KooRemapper::yamlStripComment(tr.substr(cp+1))));
 
         if (!inBoundariesList) {
             if      (key == "model")  modelFile = val;
@@ -399,7 +400,7 @@ int runRbe(const std::string& yamlFile, ConsoleOutput& console) {
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
         std::string key = trim(tr.substr(0, cp));
-        std::string val = stripQuotes(trim(tr.substr(cp+1)));
+        std::string val = stripQuotes(trim(KooRemapper::yamlStripComment(tr.substr(cp+1))));
 
         if (!inRbeList) {
             if      (key == "model")  modelFile = val;

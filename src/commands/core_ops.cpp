@@ -1,4 +1,5 @@
 #include "core_ops.h"
+#include "util/YamlComment.h"
 #include "core/Platform.h"
 #include <cstdio>
 #include <cmath>
@@ -1360,7 +1361,7 @@ int runGenerateBox(const std::string& yamlFile, ConsoleOutput& console) {
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
         std::string key = trim(tr.substr(0, cp));
-        std::string val = trim(tr.substr(cp + 1));
+        std::string val = trim(KooRemapper::yamlStripComment(tr.substr(cp + 1)));
 
         if      (key == "output")     outputPath = resolvePath(val);
         else if (key == "lx")         { try { lx = std::stod(val); } catch (...) {} }

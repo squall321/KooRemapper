@@ -1,4 +1,5 @@
 #include "strip.h"
+#include "util/YamlComment.h"
 #include "cli/ConsoleOutput.h"
 
 #include <string>
@@ -81,7 +82,7 @@ int runStrip(const std::string& yamlFile, ConsoleOutput& console)
         if (colon == std::string::npos) continue;
 
         std::string key = st_trim(trimmed.substr(0, colon));
-        std::string val = st_trim(trimmed.substr(colon + 1));
+        std::string val = st_trim(KooRemapper::yamlStripComment(trimmed.substr(colon + 1)));
         val = st_stripQuotes(val);
 
         if (key == "model" || key == "input") {

@@ -1,4 +1,5 @@
 #include "assembly/AssemblyConfigReader.h"
+#include "util/YamlComment.h"
 #include "validation/MaterialCardValidator.h"
 #include <fstream>
 #include <sstream>
@@ -19,17 +20,9 @@ std::string AssemblyConfigReader::trim(const std::string& str) {
     return str.substr(start, end - start);
 }
 
+// 값 뒤 인라인 주석 제거 — 명령 공용 규칙(따옴표 안·공백 없이 붙은 # 은 값)을 쓴다
 static std::string stripComment(const std::string& str) {
-    size_t pos = str.find('#');
-    if (pos != std::string::npos) {
-        // Remove everything from '#' onward, then trim
-        std::string result = str.substr(0, pos);
-        // Trim trailing whitespace before comment
-        size_t end = result.length();
-        while (end > 0 && std::isspace(result[end - 1])) end--;
-        return result.substr(0, end);
-    }
-    return str;
+    return KooRemapper::yamlStripComment(str);
 }
 
 static int countIndent(const std::string& line) {
@@ -203,7 +196,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
             size_t colonPos = trimmed.find(':');
             if (colonPos != std::string::npos) {
                 std::string key = trim(trimmed.substr(0, colonPos));
-                std::string val = trim(trimmed.substr(colonPos + 1));
+                std::string val = trim(stripComment(trimmed.substr(colonPos + 1)));
 
                 if (key == "base_model") {
                     config.baseModel = val;
@@ -248,7 +241,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                 size_t colonPos = afterDash.find(':');
                 if (colonPos != std::string::npos) {
                     std::string key = trim(afterDash.substr(0, colonPos));
-                    std::string val = trim(afterDash.substr(colonPos + 1));
+                    std::string val = trim(stripComment(afterDash.substr(colonPos + 1)));
 
                     if (!config.operations.empty() &&
                         config.operations.back().type == AssemblyOperation::IGA) {
@@ -276,7 +269,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                 size_t colonPos = trimmed.find(':');
                 if (colonPos != std::string::npos) {
                     std::string key = trim(trimmed.substr(0, colonPos));
-                    std::string val = trim(trimmed.substr(colonPos + 1));
+                    std::string val = trim(stripComment(trimmed.substr(colonPos + 1)));
                     auto& tgt = config.operations.back().iga.targets.back();
                     // String fields handled outside the try (std::stoi would throw)
                     if (key == "target_name") { tgt.targetName = stripQuotes(val); continue; }
@@ -314,7 +307,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                 size_t colonPos = afterDash.find(':');
                 if (colonPos != std::string::npos) {
                     std::string key = trim(afterDash.substr(0, colonPos));
-                    std::string val = trim(afterDash.substr(colonPos + 1));
+                    std::string val = trim(stripComment(afterDash.substr(colonPos + 1)));
 
                     if (!config.operations.empty() &&
                         config.operations.back().type == AssemblyOperation::RESTACK) {
@@ -339,7 +332,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                 size_t colonPos = trimmed.find(':');
                 if (colonPos != std::string::npos) {
                     std::string key = trim(trimmed.substr(0, colonPos));
-                    std::string val = trim(trimmed.substr(colonPos + 1));
+                    std::string val = trim(stripComment(trimmed.substr(colonPos + 1)));
 
                     if (!config.operations.empty() &&
                         config.operations.back().type == AssemblyOperation::RESTACK &&
@@ -388,7 +381,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                 size_t colonPos = afterDash.find(':');
                 if (colonPos != std::string::npos) {
                     std::string key = trim(afterDash.substr(0, colonPos));
-                    std::string val = trim(afterDash.substr(colonPos + 1));
+                    std::string val = trim(stripComment(afterDash.substr(colonPos + 1)));
 
                     if (!config.operations.empty() &&
                         config.operations.back().type == AssemblyOperation::MATDB) {
@@ -408,7 +401,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                 size_t colonPos = trimmed.find(':');
                 if (colonPos != std::string::npos) {
                     std::string key = trim(trimmed.substr(0, colonPos));
-                    std::string val = trim(trimmed.substr(colonPos + 1));
+                    std::string val = trim(stripComment(trimmed.substr(colonPos + 1)));
 
                     if (!config.operations.empty() &&
                         config.operations.back().type == AssemblyOperation::MATDB &&
@@ -756,7 +749,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                 size_t colonPos = afterDash.find(':');
                 if (colonPos != std::string::npos) {
                     std::string key = trim(afterDash.substr(0, colonPos));
-                    std::string val = trim(afterDash.substr(colonPos + 1));
+                    std::string val = trim(stripComment(afterDash.substr(colonPos + 1)));
 
                     AssemblyOperation op;
                     if (key == "type") {
@@ -879,7 +872,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                     size_t colonPos = trimmed.find(':');
                     if (colonPos != std::string::npos) {
                         std::string key = trim(trimmed.substr(0, colonPos));
-                        std::string val = trim(trimmed.substr(colonPos + 1));
+                        std::string val = trim(stripComment(trimmed.substr(colonPos + 1)));
                         auto& wp = config.operations.back().warpage;
                         try {
                             if (key == "x_min") wp.dataBboxXmin = std::stod(val);
@@ -1486,7 +1479,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
             size_t colonPos = trimmed.find(':');
             if (colonPos != std::string::npos) {
                 std::string key = trim(trimmed.substr(0, colonPos));
-                std::string val = trim(trimmed.substr(colonPos + 1));
+                std::string val = trim(stripComment(trimmed.substr(colonPos + 1)));
 
                 try {
                     if (key == "E") config.E = std::stod(val);

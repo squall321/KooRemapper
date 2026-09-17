@@ -1,4 +1,5 @@
 #include "optimize.h"
+#include "util/YamlComment.h"
 #include "contact_helpers.h"
 #include "kw_util.h"
 #include "cli/ConsoleOutput.h"
@@ -315,7 +316,7 @@ int runOptimize(const std::string& yamlFile, ConsoleOutput& console) {
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
         std::string key = trim(tr.substr(0, cp));
-        std::string val = trim(tr.substr(cp+1));
+        std::string val = trim(KooRemapper::yamlStripComment(tr.substr(cp+1)));
 
         if      (key == "model")    modelFile = val;
         else if (key == "output")   outputFile = val;

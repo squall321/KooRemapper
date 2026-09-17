@@ -1,4 +1,5 @@
 #include "standalone_ops.h"
+#include "util/YamlComment.h"
 #include "assembly/ModelAssembler.h"
 #include "assembly/AssemblyConfig.h"
 #include "cli/ConsoleOutput.h"
@@ -81,7 +82,7 @@ int runWrap(const std::string& yamlFile, ConsoleOutput& console) {
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
         std::string key = y.trim(tr.substr(0, cp));
-        std::string val = y.stripQuotes(y.trim(tr.substr(cp + 1)));
+        std::string val = y.stripQuotes(y.trim(KooRemapper::yamlStripComment(tr.substr(cp+1))));
 
         y.parseCommonKey(key, val);
 
@@ -150,7 +151,7 @@ int runUpdate(const std::string& yamlFile, ConsoleOutput& console) {
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
         std::string key = y.trim(tr.substr(0, cp));
-        std::string val = y.stripQuotes(y.trim(tr.substr(cp + 1)));
+        std::string val = y.stripQuotes(y.trim(KooRemapper::yamlStripComment(tr.substr(cp+1))));
 
         y.parseCommonKey(key, val);
 
@@ -223,7 +224,7 @@ int runRestack(const std::string& yamlFile, ConsoleOutput& console) {
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
         std::string key = y.trim(tr.substr(0, cp));
-        std::string val = y.stripQuotes(y.trim(tr.substr(cp+1)));
+        std::string val = y.stripQuotes(y.trim(KooRemapper::yamlStripComment(tr.substr(cp+1))));
 
         if (!inLayers) {
             y.parseCommonKey(key, val);
@@ -285,7 +286,7 @@ int runBend(const std::string& yamlFile, ConsoleOutput& console) {
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
         std::string key = y.trim(tr.substr(0, cp));
-        std::string val = y.stripQuotes(y.trim(tr.substr(cp+1)));
+        std::string val = y.stripQuotes(y.trim(KooRemapper::yamlStripComment(tr.substr(cp+1))));
 
         y.parseCommonKey(key, val);
         if      (key == "target_pid") { try { op.targetPid = std::stoi(val); } catch(...) {} }
@@ -355,7 +356,7 @@ int runIndent(const std::string& yamlFile, ConsoleOutput& console) {
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
         std::string key = y.trim(tr.substr(0, cp));
-        std::string val = y.stripQuotes(y.trim(tr.substr(cp+1)));
+        std::string val = y.stripQuotes(y.trim(KooRemapper::yamlStripComment(tr.substr(cp+1))));
 
         y.parseCommonKey(key, val);
         if      (key == "target_pid") { try { op.targetPid = std::stoi(val); } catch(...) {} }
@@ -404,7 +405,7 @@ int runFormstrain(const std::string& yamlFile, ConsoleOutput& console) {
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
         std::string key = y.trim(tr.substr(0, cp));
-        std::string val = y.stripQuotes(y.trim(tr.substr(cp+1)));
+        std::string val = y.stripQuotes(y.trim(KooRemapper::yamlStripComment(tr.substr(cp+1))));
 
         y.parseCommonKey(key, val);
         if      (key == "target_pid") { try { op.targetPid = std::stoi(val); } catch(...) {} }
@@ -444,7 +445,7 @@ int runConvert(const std::string& yamlFile, ConsoleOutput& console) {
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
         std::string key = y.trim(tr.substr(0, cp));
-        std::string val = y.stripQuotes(y.trim(tr.substr(cp+1)));
+        std::string val = y.stripQuotes(y.trim(KooRemapper::yamlStripComment(tr.substr(cp+1))));
 
         y.parseCommonKey(key, val);
         if      (key == "target_pid") { try { op.targetPid = std::stoi(val); } catch(...) {} }
@@ -485,7 +486,7 @@ int runRefine(const std::string& yamlFile, ConsoleOutput& console) {
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
         std::string key = y.trim(tr.substr(0, cp));
-        std::string val = y.stripQuotes(y.trim(tr.substr(cp+1)));
+        std::string val = y.stripQuotes(y.trim(KooRemapper::yamlStripComment(tr.substr(cp+1))));
 
         y.parseCommonKey(key, val);
         if      (key == "target_pid") { try { op.targetPid = std::stoi(val); } catch(...) {} }
@@ -524,7 +525,7 @@ int runElform(const std::string& yamlFile, ConsoleOutput& console) {
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
         std::string key = y.trim(tr.substr(0, cp));
-        std::string val = y.stripQuotes(y.trim(tr.substr(cp+1)));
+        std::string val = y.stripQuotes(y.trim(KooRemapper::yamlStripComment(tr.substr(cp+1))));
 
         y.parseCommonKey(key, val);
         if      (key == "target_pid") { try { op.targetPid = std::stoi(val); } catch(...) {} }
@@ -563,7 +564,7 @@ int runDisconnect(const std::string& yamlFile, ConsoleOutput& console) {
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
         std::string key = y.trim(tr.substr(0, cp));
-        std::string val = y.stripQuotes(y.trim(tr.substr(cp+1)));
+        std::string val = y.stripQuotes(y.trim(KooRemapper::yamlStripComment(tr.substr(cp+1))));
 
         y.parseCommonKey(key, val);
         if      (key == "target_pid") { try { op.targetPid = std::stoi(val); } catch(...) {} }
@@ -615,7 +616,7 @@ int runIga(const std::string& yamlFile, ConsoleOutput& console) {
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
         std::string key = y.trim(tr.substr(0, cp));
-        std::string val = y.stripQuotes(y.trim(tr.substr(cp+1)));
+        std::string val = y.stripQuotes(y.trim(KooRemapper::yamlStripComment(tr.substr(cp+1))));
 
         if (!inTargets) {
             y.parseCommonKey(key, val);
@@ -736,7 +737,7 @@ int runWarpage(const std::string& yamlFile, ConsoleOutput& console) {
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
         std::string key = y.trim(tr.substr(0, cp));
-        std::string val = y.stripQuotes(y.trim(tr.substr(cp+1)));
+        std::string val = y.stripQuotes(y.trim(KooRemapper::yamlStripComment(tr.substr(cp+1))));
 
         if (inDataBbox) {
             if      (key == "x_min") { try { op.dataBboxXmin = std::stod(val); op.hasDataBbox = true; } catch(...) {} }
@@ -844,7 +845,7 @@ int runOffset(const std::string& yamlFile, ConsoleOutput& console) {
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
         std::string key = y.trim(tr.substr(0, cp));
-        std::string val = y.stripQuotes(y.trim(tr.substr(cp+1)));
+        std::string val = y.stripQuotes(y.trim(KooRemapper::yamlStripComment(tr.substr(cp+1))));
 
         y.parseCommonKey(key, val);
         if      (key == "source_pid") { try { op.sourcePid = std::stoi(val); } catch(...) {} }

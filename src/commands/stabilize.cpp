@@ -1,4 +1,5 @@
 #include "stabilize.h"
+#include "util/YamlComment.h"
 #include "contact_helpers.h"
 #include "kw_util.h"
 #include "cli/ConsoleOutput.h"
@@ -411,7 +412,7 @@ int runStabilize(const std::string& yamlFile, ConsoleOutput& console) {
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
         std::string key = kw_trim(tr.substr(0, cp));
-        std::string val = kw_trim(tr.substr(cp+1));
+        std::string val = kw_trim(KooRemapper::yamlStripComment(tr.substr(cp+1)));
         if (val.empty()) continue;
 
         auto parseInt  = [&](int& v)    { try { v = std::stoi(val); } catch(...) {} };

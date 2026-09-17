@@ -1,4 +1,5 @@
 #include "matswap.h"
+#include "util/YamlComment.h"
 #include "kw_util.h"
 #include "optimize.h"
 #include "cli/ConsoleOutput.h"
@@ -458,7 +459,7 @@ int runMatswapYaml(const std::string& yamlFile, ConsoleOutput& console) {
             size_t cp = rest.find(':');
             if (cp != std::string::npos) {
                 std::string key = trim(rest.substr(0,cp));
-                std::string val = trim(rest.substr(cp+1));
+                std::string val = trim(KooRemapper::yamlStripComment(rest.substr(cp+1)));
                 auto parseIL = [&](const std::string& v, std::vector<int>& out) {
                     std::string lv=v;
                     if (!lv.empty()&&lv.front()=='[') lv=lv.substr(1);
@@ -481,7 +482,7 @@ int runMatswapYaml(const std::string& yamlFile, ConsoleOutput& console) {
             size_t cp = tr.find(':');
             if (cp != std::string::npos) {
                 std::string key = trim(tr.substr(0,cp));
-                std::string val = trim(tr.substr(cp+1));
+                std::string val = trim(KooRemapper::yamlStripComment(tr.substr(cp+1)));
                 auto parseIL = [&](const std::string& v, std::vector<int>& out) {
                     std::string lv=v;
                     if (!lv.empty()&&lv.front()=='[') lv=lv.substr(1);
@@ -508,7 +509,7 @@ int runMatswapYaml(const std::string& yamlFile, ConsoleOutput& console) {
         size_t cp = tr.find(':');
         if (cp != std::string::npos) {
             std::string key = trim(tr.substr(0,cp));
-            std::string val = trim(tr.substr(cp+1));
+            std::string val = trim(KooRemapper::yamlStripComment(tr.substr(cp+1)));
             auto parseIL = [&](const std::string& v, std::vector<int>& out) {
                 std::string lv=v;
                 if (!lv.empty()&&lv.front()=='[') lv=lv.substr(1);

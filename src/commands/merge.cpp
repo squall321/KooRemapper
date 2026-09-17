@@ -1,4 +1,5 @@
 #include "merge.h"
+#include "util/YamlComment.h"
 #include "cli/ConsoleOutput.h"
 
 #include <string>
@@ -166,7 +167,7 @@ static mg_Config mg_parseConfig(const std::string& yamlFile, ConsoleOutput& cons
                 size_t colon = content.find(':');
                 if (colon != std::string::npos) {
                     std::string k = mg_trim(content.substr(0, colon));
-                    std::string v = mg_trim(content.substr(colon + 1));
+                    std::string v = mg_trim(KooRemapper::yamlStripComment(content.substr(colon + 1)));
                     v = mg_stripQuotes(v);
 
                     if (k == "pids") {
@@ -200,7 +201,7 @@ static mg_Config mg_parseConfig(const std::string& yamlFile, ConsoleOutput& cons
                 size_t colon = trimmed.find(':');
                 if (colon != std::string::npos) {
                     std::string k = mg_trim(trimmed.substr(0, colon));
-                    std::string v = mg_trim(trimmed.substr(colon + 1));
+                    std::string v = mg_trim(KooRemapper::yamlStripComment(trimmed.substr(colon + 1)));
                     v = mg_stripQuotes(v);
                     if (k == "pids") {
                         if (!v.empty() && v[0] == '[') {
@@ -230,7 +231,7 @@ static mg_Config mg_parseConfig(const std::string& yamlFile, ConsoleOutput& cons
         size_t colon = trimmed.find(':');
         if (colon == std::string::npos) continue;
         std::string key = mg_trim(trimmed.substr(0, colon));
-        std::string val = mg_trim(trimmed.substr(colon + 1));
+        std::string val = mg_trim(KooRemapper::yamlStripComment(trimmed.substr(colon + 1)));
         val = mg_stripQuotes(val);
 
         if (key == "model" || key == "input") {
