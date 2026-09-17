@@ -2,6 +2,7 @@
 #include "cli/ConsoleOutput.h"
 #include "assembly/AssemblyConfig.h"
 #include "assembly/ModelAssembler.h"
+#include "util/YamlComment.h"
 
 #include <string>
 #include <fstream>
@@ -63,7 +64,7 @@ int runMatdb(const std::string& yamlFile, ConsoleOutput& console) {
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
         std::string key = trim(tr.substr(0, cp));
-        std::string val = stripQuotes(trim(tr.substr(cp+1)));
+        std::string val = stripQuotes(trim(KooRemapper::yamlStripComment(tr.substr(cp+1))));
 
         if (!inMaterialsList) {
             if      (key == "model")    modelFile = val;
@@ -101,7 +102,7 @@ int runMatdb(const std::string& yamlFile, ConsoleOutput& console) {
                 size_t rcp = rest.find(':');
                 if (rcp != std::string::npos) {
                     std::string rk = trim(rest.substr(0, rcp));
-                    std::string rv = stripQuotes(trim(rest.substr(rcp+1)));
+                    std::string rv = stripQuotes(trim(KooRemapper::yamlStripComment(rest.substr(rcp+1))));
                     auto& rule = op.rules.back();
                     if      (rk == "match")      rule.match = rv;
                     else if (rk == "match_part") rule.matchPart = rv;
