@@ -1537,195 +1537,199 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
         }
     }
 
-    for (size_t i = 0; i < config.operations.size(); ++i) {
-        const auto& op = config.operations[i];
-        if (op.type == AssemblyOperation::REPLACE) {
-            if (op.replace.targetPid <= 0)
-                throw std::runtime_error("Operation " + std::to_string(i+1) + ": missing target_pid");
-            if (op.replace.detailFlat.empty())
-                throw std::runtime_error("Operation " + std::to_string(i+1) + ": missing detail_flat");
-            if (op.replace.shellBent.empty() && op.replace.simpleBent.empty())
-                throw std::runtime_error("Operation " + std::to_string(i+1) +
-                    ": replace requires either shell_bent (QUAD4 shell) or simple_bent (3D HEX8, auto-extracted)");
-            if (!op.replace.shellBent.empty() && !op.replace.simpleBent.empty())
-                throw std::runtime_error("Operation " + std::to_string(i+1) +
-                    ": replace cannot use both shell_bent and simple_bent — choose one");
-        } else if (op.type == AssemblyOperation::SQUEEZE) {
-            if (op.squeeze.targetPid <= 0)
-                throw std::runtime_error("Operation " + std::to_string(i+1) + ": missing target_pid");
-        } else if (op.type == AssemblyOperation::RESTACK) {
-            if (op.restack.targetPid <= 0)
-                throw std::runtime_error("Operation " + std::to_string(i+1) + ": missing target_pid");
-            if (op.restack.layers.empty())
-                throw std::runtime_error("Operation " + std::to_string(i+1) + ": no layers defined for restack");
-            for (size_t j = 0; j < op.restack.layers.size(); ++j) {
-                if (op.restack.layers[j].thickness <= 0)
-                    throw std::runtime_error("Operation " + std::to_string(i+1) +
-                        ": layer " + std::to_string(j+1) + " has invalid thickness");
-                if (op.restack.layers[j].materialCard.empty())
-                    throw std::runtime_error("Operation " + std::to_string(i+1) +
-                        ": layer " + std::to_string(j+1) + " has no material_card");
-            }
-        } else if (op.type == AssemblyOperation::BEND) {
-            if (op.bend.targetPid <= 0 && op.bend.targetPid != 0 && op.bend.targetPids.empty())
-                throw std::runtime_error("Operation " + std::to_string(i+1) + ": missing target_pid for bend");
-            if (op.bend.plane != "xy" && op.bend.plane != "yz" && op.bend.plane != "zx")
-                throw std::runtime_error("Operation " + std::to_string(i+1) + ": invalid plane '" +
-                    op.bend.plane + "' (must be xy, yz, or zx)");
-            if (op.bend.mode != "deform" && op.bend.mode != "stress")
-                throw std::runtime_error("Operation " + std::to_string(i+1) + ": invalid mode '" +
-                    op.bend.mode + "' (must be deform or stress)");
-            if (op.bend.source != "dat" && op.bend.source != "dat_pair" && op.bend.source != "formula")
-                throw std::runtime_error("Operation " + std::to_string(i+1) + ": invalid source '" +
-                    op.bend.source + "' (must be dat, dat_pair, or formula)");
-            if (op.bend.source == "dat" && op.bend.datFile.empty())
-                throw std::runtime_error("Operation " + std::to_string(i+1) + ": dat source requires dat_file");
-            if (op.bend.source == "dat_pair") {
-                if (op.bend.datTop.empty() || op.bend.datBottom.empty())
-                    throw std::runtime_error("Operation " + std::to_string(i+1) + ": dat_pair source requires dat_top and dat_bottom");
-            }
-            if (op.bend.source == "formula" && op.bend.expression.empty())
-                throw std::runtime_error("Operation " + std::to_string(i+1) + ": formula source requires expression");
-        } else if (op.type == AssemblyOperation::EXTRACT_SURFACE) {
-            const std::string& f = op.extractSurface.face;
-            if (f != "top" && f != "bottom" && f != "all") {
-                throw std::runtime_error("Operation " + std::to_string(i+1) +
-                    " (extract_surface): face must be one of top, bottom, all (got '" + f + "')");
-            }
-        } else if (op.type == AssemblyOperation::IGA) {
-            if (op.iga.targets.empty())
-                throw std::runtime_error("Operation " + std::to_string(i+1) + ": no targets defined for iga");
-            for (size_t j = 0; j < op.iga.targets.size(); ++j) {
-                const auto& tgt = op.iga.targets[j];
-                if (tgt.targetPid <= 0 && tgt.targetName.empty())
-                    throw std::runtime_error("Operation " + std::to_string(i+1) +
-                        ": iga target " + std::to_string(j+1) +
-                        " requires either target_pid or target_name");
-                if (tgt.elementSize <= 0)
-                    throw std::runtime_error("Operation " + std::to_string(i+1) +
-                        ": iga target " + std::to_string(j+1) + " element_size must be positive");
-            }
-        } else if (op.type == AssemblyOperation::WARPAGE) {
-            std::string pfx = "Operation " + std::to_string(i+1) + " (warpage): ";
-            if (op.warpage.targetPid <= 0)
-                throw std::runtime_error(pfx + "missing target_pid");
-            if (op.warpage.datFile.empty())
-                throw std::runtime_error(pfx + "missing dat_file");
-            if (op.warpage.plane != "xy" && op.warpage.plane != "yz" && op.warpage.plane != "zx")
-                throw std::runtime_error(pfx + "invalid plane '" + op.warpage.plane + "'");
-            if (op.warpage.unit != "um" && op.warpage.unit != "mm" && op.warpage.unit != "m")
-                throw std::runtime_error(pfx + "invalid unit '" + op.warpage.unit + "'");
-            if (op.warpage.morphFactor <= 0.0)
-                throw std::runtime_error(pfx + "morph_factor must be positive");
-            if (op.warpage.mode != "prestress" && op.warpage.mode != "deform")
-                throw std::runtime_error(pfx + "invalid mode '" + op.warpage.mode + "'");
-            if (op.warpage.outsideBehavior != "zero" &&
-                op.warpage.outsideBehavior != "clamp" &&
-                op.warpage.outsideBehavior != "extrapolate")
-                throw std::runtime_error(pfx + "invalid outside_behavior '" + op.warpage.outsideBehavior + "'");
-            if (op.warpage.hasDataBbox) {
-                if (op.warpage.dataBboxXmax <= op.warpage.dataBboxXmin)
-                    throw std::runtime_error(pfx + "data_bbox: x_max must be > x_min");
-                if (op.warpage.dataBboxYmax <= op.warpage.dataBboxYmin)
-                    throw std::runtime_error(pfx + "data_bbox: y_max must be > y_min");
-            }
-        } else if (op.type == AssemblyOperation::OFFSET) {
-            std::string pfx = "Operation " + std::to_string(i+1) + " (offset): ";
-
-            if (op.offset.sourcePid <= 0)
-                throw std::runtime_error(pfx + "source_pid required");
-
-            // Prestress mode validation
-            bool isDualOffset = (op.offset.prestressMode == "dual_offset");
-            if (isDualOffset) {
-                // Dual offset mode: inner/outer required
-                if (op.offset.innerOffset >= 0.0)
-                    throw std::runtime_error(pfx + "inner_offset must be < 0 (inward)");
-                if (op.offset.outerOffset <= 0.0)
-                    throw std::runtime_error(pfx + "outer_offset must be > 0 (outward)");
-                if (op.offset.innerOffset >= op.offset.outerOffset)
-                    throw std::runtime_error(pfx + "inner_offset must be < outer_offset");
-            } else {
-                // Normal mode: thickness required
-                if (op.offset.thickness <= 0.0)
-                    throw std::runtime_error(pfx + "thickness must be > 0");
-            }
-
-            if (op.offset.numLayers < 1)
-                throw std::runtime_error(pfx + "num_layers must be >= 1");
-
-            std::string etype = op.offset.elementType;
-            if (etype != "solid" && etype != "tshell" && etype != "shell")
-                throw std::runtime_error(pfx + "element_type must be solid|tshell|shell");
-
-            // Connection mode validation
-            std::string cmode = op.offset.connectionMode;
-            // none 은 단독 offset·help 가 허용하는 값 — assemble 경로만 거부해 같은 YAML 이 명령에 따라 갈렸다
-            if (cmode != "tied" && cmode != "czm" && cmode != "contact" && cmode != "none")
-                throw std::runtime_error(pfx + "connection_mode must be tied|czm|contact|none");
-
-            // Material card validation
-            if (!op.offset.materialCard.empty()) {
-                MaterialCardValidator validator;
-                auto result = validator.validate(op.offset.materialCard);
-
-                // Print warnings
-                for (const auto& warning : result.warnings) {
-                    std::cout << "[WARNING] " << pfx << "material_card: " << warning << "\n";
-                }
-
-                // Errors are fatal
-                if (!result.errors.empty()) {
-                    std::string errMsg = pfx + "material_card validation failed:\n";
-                    for (const auto& error : result.errors) {
-                        errMsg += "  - " + error + "\n";
-                    }
-                    throw std::runtime_error(errMsg);
-                }
-            }
-
-            // CZM material card validation
-            if (cmode == "czm" && !op.offset.czmMaterialCard.empty()) {
-                MaterialCardValidator validator;
-                auto result = validator.validate(op.offset.czmMaterialCard);
-
-                // Print warnings
-                for (const auto& warning : result.warnings) {
-                    std::cout << "[WARNING] " << pfx << "czm_material_card: " << warning << "\n";
-                }
-
-                // Errors are fatal
-                if (!result.errors.empty()) {
-                    std::string errMsg = pfx + "czm_material_card validation failed:\n";
-                    for (const auto& error : result.errors) {
-                        errMsg += "  - " + error + "\n";
-                    }
-                    throw std::runtime_error(errMsg);
-                }
-            }
-
-        } else if (op.type == AssemblyOperation::INDENT) {
-            std::string pfx = "Operation " + std::to_string(i+1) + " (indent): ";
-            if (op.indent.targetPid <= 0)
-                throw std::runtime_error(pfx + "missing target_pid");
-            if (op.indent.plane != "xy" && op.indent.plane != "yz" && op.indent.plane != "zx")
-                throw std::runtime_error(pfx + "invalid plane '" + op.indent.plane + "'");
-            std::string dir = op.indent.direction;
-            if (dir != "+z" && dir != "-z" && dir != "+x" && dir != "-x" &&
-                dir != "+y" && dir != "-y")
-                throw std::runtime_error(pfx + "invalid direction '" + dir + "'");
-            if (op.indent.depth == 0.0)
-                throw std::runtime_error(pfx + "depth must be non-zero (positive=indent, negative=emboss)");
-            if (op.indent.r1 <= 0.0 || op.indent.r2 <= 0.0)
-                throw std::runtime_error(pfx + "r1 and r2 must be positive");
-            if (op.indent.shapeType != "polygon" && op.indent.shapeType != "spline")
-                throw std::runtime_error(pfx + "invalid shape type '" + op.indent.shapeType + "'");
-            if (op.indent.points.size() < 3)
-                throw std::runtime_error(pfx + "shape requires at least 3 points");
-        }
-    }
+    for (size_t i = 0; i < config.operations.size(); ++i)
+        validateOperation(config.operations[i], i);
 
     return config;
+}
+
+// 오퍼레이션 값 검증 — assemble 과 단독 명령(bend·indent·offset·restack·iga 등)이 같은 규칙을 쓴다.
+// 단독 명령은 검증 없이 적용 함수로 넘겨 bend(source 누락)는 SIGSEGV, indent(points·r1/r2 누락)는 abort 했다.
+void AssemblyConfigReader::validateOperation(const AssemblyOperation& op, size_t i) {
+    if (op.type == AssemblyOperation::REPLACE) {
+        if (op.replace.targetPid <= 0)
+            throw std::runtime_error("Operation " + std::to_string(i+1) + ": missing target_pid");
+        if (op.replace.detailFlat.empty())
+            throw std::runtime_error("Operation " + std::to_string(i+1) + ": missing detail_flat");
+        if (op.replace.shellBent.empty() && op.replace.simpleBent.empty())
+            throw std::runtime_error("Operation " + std::to_string(i+1) +
+                ": replace requires either shell_bent (QUAD4 shell) or simple_bent (3D HEX8, auto-extracted)");
+        if (!op.replace.shellBent.empty() && !op.replace.simpleBent.empty())
+            throw std::runtime_error("Operation " + std::to_string(i+1) +
+                ": replace cannot use both shell_bent and simple_bent — choose one");
+    } else if (op.type == AssemblyOperation::SQUEEZE) {
+        if (op.squeeze.targetPid <= 0)
+            throw std::runtime_error("Operation " + std::to_string(i+1) + ": missing target_pid");
+    } else if (op.type == AssemblyOperation::RESTACK) {
+        if (op.restack.targetPid <= 0)
+            throw std::runtime_error("Operation " + std::to_string(i+1) + ": missing target_pid");
+        if (op.restack.layers.empty())
+            throw std::runtime_error("Operation " + std::to_string(i+1) + ": no layers defined for restack");
+        for (size_t j = 0; j < op.restack.layers.size(); ++j) {
+            if (op.restack.layers[j].thickness <= 0)
+                throw std::runtime_error("Operation " + std::to_string(i+1) +
+                    ": layer " + std::to_string(j+1) + " has invalid thickness");
+            if (op.restack.layers[j].materialCard.empty())
+                throw std::runtime_error("Operation " + std::to_string(i+1) +
+                    ": layer " + std::to_string(j+1) + " has no material_card");
+        }
+    } else if (op.type == AssemblyOperation::BEND) {
+        if (op.bend.targetPid <= 0 && op.bend.targetPid != 0 && op.bend.targetPids.empty())
+            throw std::runtime_error("Operation " + std::to_string(i+1) + ": missing target_pid for bend");
+        if (op.bend.plane != "xy" && op.bend.plane != "yz" && op.bend.plane != "zx")
+            throw std::runtime_error("Operation " + std::to_string(i+1) + ": invalid plane '" +
+                op.bend.plane + "' (must be xy, yz, or zx)");
+        if (op.bend.mode != "deform" && op.bend.mode != "stress")
+            throw std::runtime_error("Operation " + std::to_string(i+1) + ": invalid mode '" +
+                op.bend.mode + "' (must be deform or stress)");
+        if (op.bend.source != "dat" && op.bend.source != "dat_pair" && op.bend.source != "formula")
+            throw std::runtime_error("Operation " + std::to_string(i+1) + ": invalid source '" +
+                op.bend.source + "' (must be dat, dat_pair, or formula)");
+        if (op.bend.source == "dat" && op.bend.datFile.empty())
+            throw std::runtime_error("Operation " + std::to_string(i+1) + ": dat source requires dat_file");
+        if (op.bend.source == "dat_pair") {
+            if (op.bend.datTop.empty() || op.bend.datBottom.empty())
+                throw std::runtime_error("Operation " + std::to_string(i+1) + ": dat_pair source requires dat_top and dat_bottom");
+        }
+        if (op.bend.source == "formula" && op.bend.expression.empty())
+            throw std::runtime_error("Operation " + std::to_string(i+1) + ": formula source requires expression");
+    } else if (op.type == AssemblyOperation::EXTRACT_SURFACE) {
+        const std::string& f = op.extractSurface.face;
+        if (f != "top" && f != "bottom" && f != "all") {
+            throw std::runtime_error("Operation " + std::to_string(i+1) +
+                " (extract_surface): face must be one of top, bottom, all (got '" + f + "')");
+        }
+    } else if (op.type == AssemblyOperation::IGA) {
+        if (op.iga.targets.empty())
+            throw std::runtime_error("Operation " + std::to_string(i+1) + ": no targets defined for iga");
+        for (size_t j = 0; j < op.iga.targets.size(); ++j) {
+            const auto& tgt = op.iga.targets[j];
+            if (tgt.targetPid <= 0 && tgt.targetName.empty())
+                throw std::runtime_error("Operation " + std::to_string(i+1) +
+                    ": iga target " + std::to_string(j+1) +
+                    " requires either target_pid or target_name");
+            if (tgt.elementSize <= 0)
+                throw std::runtime_error("Operation " + std::to_string(i+1) +
+                    ": iga target " + std::to_string(j+1) + " element_size must be positive");
+        }
+    } else if (op.type == AssemblyOperation::WARPAGE) {
+        std::string pfx = "Operation " + std::to_string(i+1) + " (warpage): ";
+        if (op.warpage.targetPid <= 0)
+            throw std::runtime_error(pfx + "missing target_pid");
+        if (op.warpage.datFile.empty())
+            throw std::runtime_error(pfx + "missing dat_file");
+        if (op.warpage.plane != "xy" && op.warpage.plane != "yz" && op.warpage.plane != "zx")
+            throw std::runtime_error(pfx + "invalid plane '" + op.warpage.plane + "'");
+        if (op.warpage.unit != "um" && op.warpage.unit != "mm" && op.warpage.unit != "m")
+            throw std::runtime_error(pfx + "invalid unit '" + op.warpage.unit + "'");
+        if (op.warpage.morphFactor <= 0.0)
+            throw std::runtime_error(pfx + "morph_factor must be positive");
+        if (op.warpage.mode != "prestress" && op.warpage.mode != "deform")
+            throw std::runtime_error(pfx + "invalid mode '" + op.warpage.mode + "'");
+        if (op.warpage.outsideBehavior != "zero" &&
+            op.warpage.outsideBehavior != "clamp" &&
+            op.warpage.outsideBehavior != "extrapolate")
+            throw std::runtime_error(pfx + "invalid outside_behavior '" + op.warpage.outsideBehavior + "'");
+        if (op.warpage.hasDataBbox) {
+            if (op.warpage.dataBboxXmax <= op.warpage.dataBboxXmin)
+                throw std::runtime_error(pfx + "data_bbox: x_max must be > x_min");
+            if (op.warpage.dataBboxYmax <= op.warpage.dataBboxYmin)
+                throw std::runtime_error(pfx + "data_bbox: y_max must be > y_min");
+        }
+    } else if (op.type == AssemblyOperation::OFFSET) {
+        std::string pfx = "Operation " + std::to_string(i+1) + " (offset): ";
+
+        if (op.offset.sourcePid <= 0)
+            throw std::runtime_error(pfx + "source_pid required");
+
+        // Prestress mode validation
+        bool isDualOffset = (op.offset.prestressMode == "dual_offset");
+        if (isDualOffset) {
+            // Dual offset mode: inner/outer required
+            if (op.offset.innerOffset >= 0.0)
+                throw std::runtime_error(pfx + "inner_offset must be < 0 (inward)");
+            if (op.offset.outerOffset <= 0.0)
+                throw std::runtime_error(pfx + "outer_offset must be > 0 (outward)");
+            if (op.offset.innerOffset >= op.offset.outerOffset)
+                throw std::runtime_error(pfx + "inner_offset must be < outer_offset");
+        } else {
+            // Normal mode: thickness required
+            if (op.offset.thickness <= 0.0)
+                throw std::runtime_error(pfx + "thickness must be > 0");
+        }
+
+        if (op.offset.numLayers < 1)
+            throw std::runtime_error(pfx + "num_layers must be >= 1");
+
+        std::string etype = op.offset.elementType;
+        if (etype != "solid" && etype != "tshell" && etype != "shell")
+            throw std::runtime_error(pfx + "element_type must be solid|tshell|shell");
+
+        // Connection mode validation
+        std::string cmode = op.offset.connectionMode;
+        // none 은 단독 offset·help 가 허용하는 값 — assemble 경로만 거부해 같은 YAML 이 명령에 따라 갈렸다
+        if (cmode != "tied" && cmode != "czm" && cmode != "contact" && cmode != "none")
+            throw std::runtime_error(pfx + "connection_mode must be tied|czm|contact|none");
+
+        // Material card validation
+        if (!op.offset.materialCard.empty()) {
+            MaterialCardValidator validator;
+            auto result = validator.validate(op.offset.materialCard);
+
+            // Print warnings
+            for (const auto& warning : result.warnings) {
+                std::cout << "[WARNING] " << pfx << "material_card: " << warning << "\n";
+            }
+
+            // Errors are fatal
+            if (!result.errors.empty()) {
+                std::string errMsg = pfx + "material_card validation failed:\n";
+                for (const auto& error : result.errors) {
+                    errMsg += "  - " + error + "\n";
+                }
+                throw std::runtime_error(errMsg);
+            }
+        }
+
+        // CZM material card validation
+        if (cmode == "czm" && !op.offset.czmMaterialCard.empty()) {
+            MaterialCardValidator validator;
+            auto result = validator.validate(op.offset.czmMaterialCard);
+
+            // Print warnings
+            for (const auto& warning : result.warnings) {
+                std::cout << "[WARNING] " << pfx << "czm_material_card: " << warning << "\n";
+            }
+
+            // Errors are fatal
+            if (!result.errors.empty()) {
+                std::string errMsg = pfx + "czm_material_card validation failed:\n";
+                for (const auto& error : result.errors) {
+                    errMsg += "  - " + error + "\n";
+                }
+                throw std::runtime_error(errMsg);
+            }
+        }
+
+    } else if (op.type == AssemblyOperation::INDENT) {
+        std::string pfx = "Operation " + std::to_string(i+1) + " (indent): ";
+        if (op.indent.targetPid <= 0)
+            throw std::runtime_error(pfx + "missing target_pid");
+        if (op.indent.plane != "xy" && op.indent.plane != "yz" && op.indent.plane != "zx")
+            throw std::runtime_error(pfx + "invalid plane '" + op.indent.plane + "'");
+        std::string dir = op.indent.direction;
+        if (dir != "+z" && dir != "-z" && dir != "+x" && dir != "-x" &&
+            dir != "+y" && dir != "-y")
+            throw std::runtime_error(pfx + "invalid direction '" + dir + "'");
+        if (op.indent.depth == 0.0)
+            throw std::runtime_error(pfx + "depth must be non-zero (positive=indent, negative=emboss)");
+        if (op.indent.r1 <= 0.0 || op.indent.r2 <= 0.0)
+            throw std::runtime_error(pfx + "r1 and r2 must be positive");
+        if (op.indent.shapeType != "polygon" && op.indent.shapeType != "spline")
+            throw std::runtime_error(pfx + "invalid shape type '" + op.indent.shapeType + "'");
+        if (op.indent.points.size() < 3)
+            throw std::runtime_error(pfx + "shape requires at least 3 points");
+    }
 }
 
 } // namespace KooRemapper

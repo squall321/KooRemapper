@@ -1477,7 +1477,7 @@ static int runHelp(ConsoleOutput& console, int argc, char* argv[]) {
     return 0;
 }
 
-int main(int argc, char* argv[]) {
+static int runMain(int argc, char* argv[]) {
 #ifdef _WIN32
     // Set console output to UTF-8 so Korean/Unicode help text renders correctly
     SetConsoleOutputCP(65001);
@@ -2657,4 +2657,16 @@ int main(int argc, char* argv[]) {
     console.error("Unknown command: " + command);
     console.info("Use 'KooRemapper help' for a list of commands.");
     return 1;
+}
+
+int main(int argc, char* argv[]) {
+    // 명령이 던진 예외를 잡지 않아 terminate → abort(rc 134)로 죽던 것(예: indent 의 points 누락)을
+    // 오류 메시지 + rc 1 로 바꾼다
+    try {
+        return runMain(argc, argv);
+    } catch (const std::exception& e) {
+        ConsoleOutput console;
+        console.error(std::string("Unhandled error: ") + e.what());
+        return 1;
+    }
 }

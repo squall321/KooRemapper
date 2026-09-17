@@ -2,6 +2,7 @@
 #include "util/YamlComment.h"
 #include "assembly/ModelAssembler.h"
 #include "assembly/AssemblyConfig.h"
+#include "assembly/AssemblyConfigReader.h"
 #include "cli/ConsoleOutput.h"
 #include <fstream>
 #include <sstream>
@@ -187,6 +188,23 @@ int runUpdate(const std::string& yamlFile, ConsoleOutput& console) {
     return 0;
 }
 
+// 단독 명령도 assemble 과 같은 규칙으로 값을 검사한다 — 예전엔 검증 없이 적용해 bend(source 누락)는 SIGSEGV,
+// indent(points·r1/r2 누락)는 abort 했고, offset connection_mode: shared·iga element_size: 0 같은 값은 조용히 통과했다.
+template <typename Op>
+static bool validateLikeAssemble(AssemblyOperation::Type type, Op AssemblyOperation::*member, const Op& op,
+                                 const char* tag, ConsoleOutput& console) {
+    AssemblyOperation aop;
+    aop.type = type;
+    aop.*member = op;
+    try {
+        AssemblyConfigReader::validateOperation(aop, 0);
+    } catch (const std::exception& e) {
+        console.error(std::string("[") + tag + "] " + e.what());
+        return false;
+    }
+    return true;
+}
+
 // ── Standalone restack ──────────────────────────────────────────────────────
 int runRestack(const std::string& yamlFile, ConsoleOutput& console) {
     StandaloneYamlBase y;
@@ -264,6 +282,7 @@ int runRestack(const std::string& yamlFile, ConsoleOutput& console) {
     std::string outputPrefix = y.getOutputPrefix();
 
     console.println("[restack] Model: " + modelPath);
+    if (!validateLikeAssemble(AssemblyOperation::RESTACK, &AssemblyOperation::restack, op, "restack", console)) return 1;
     ModelAssembler assembler;
     if (!assembler.loadBaseModel(modelPath)) { console.error(assembler.getErrorMessage()); return 1; }
     if (!assembler.applyRestack(op, y.matE, y.matNu)) { console.error(assembler.getErrorMessage()); return 1; }
@@ -309,6 +328,7 @@ int runBend(const std::string& yamlFile, ConsoleOutput& console) {
     std::string outputPrefix = y.getOutputPrefix();
 
     console.println("[bend] Model: " + modelPath);
+    if (!validateLikeAssemble(AssemblyOperation::BEND, &AssemblyOperation::bend, op, "bend", console)) return 1;
     ModelAssembler assembler;
     if (!assembler.loadBaseModel(modelPath)) { console.error(assembler.getErrorMessage()); return 1; }
     if (!assembler.applyBend(op, y.matE, y.matNu, y.configDir)) { console.error(assembler.getErrorMessage()); return 1; }
@@ -383,6 +403,7 @@ int runIndent(const std::string& yamlFile, ConsoleOutput& console) {
     std::string outputPrefix = y.getOutputPrefix();
 
     console.println("[indent] Model: " + modelPath);
+    if (!validateLikeAssemble(AssemblyOperation::INDENT, &AssemblyOperation::indent, op, "indent", console)) return 1;
     ModelAssembler assembler;
     if (!assembler.loadBaseModel(modelPath)) { console.error(assembler.getErrorMessage()); return 1; }
     if (!assembler.applyIndent(op, y.matE, y.matNu)) { console.error(assembler.getErrorMessage()); return 1; }
@@ -708,6 +729,7 @@ int runIga(const std::string& yamlFile, ConsoleOutput& console) {
 
     console.println("[iga] Model: " + modelPath);
     console.println("[iga] Targets: " + std::to_string(igaOp.targets.size()));
+    if (!validateLikeAssemble(AssemblyOperation::IGA, &AssemblyOperation::iga, igaOp, "iga", console)) return 1;
     ModelAssembler assembler;
     if (!assembler.loadBaseModel(modelPath)) { console.error(assembler.getErrorMessage()); return 1; }
     if (!assembler.applyIGA(igaOp, outputPrefix)) { console.error(assembler.getErrorMessage()); return 1; }
@@ -899,6 +921,7 @@ int runOffset(const std::string& yamlFile, ConsoleOutput& console) {
     std::string outputPrefix = y.getOutputPrefix();
 
     console.println("[offset] Model: " + modelPath);
+    if (!validateLikeAssemble(AssemblyOperation::OFFSET, &AssemblyOperation::offset, op, "offset", console)) return 1;
     ModelAssembler assembler;
     if (!assembler.loadBaseModel(modelPath)) { console.error(assembler.getErrorMessage()); return 1; }
     if (!assembler.applyOffset(op, y.matE, y.matNu)) { console.error(assembler.getErrorMessage()); return 1; }
