@@ -1,5 +1,6 @@
 # Strip command example
 # Remove bulky mesh data keywords, keep only options/controls
+# 입력 먼저: KooRemapper assemble examples/assemble_display/gen_al_box.yaml   (→ al_box.k, 약 120MB 라 저장소에 두지 않음)
 model: ../assemble_display/al_box.k
 output: stripped_output.k
 keywords:

@@ -29,6 +29,8 @@ test_error.k
 # quadratic 예제 입력 — 위 규칙에 걸려 한 번도 커밋되지 않아 예제가 실행되지 않았다
 !examples/quadratic/shell_test.k
 !examples/quadratic/tet_test.k
+# examples/assemble_display/gen_al_box.yaml 산출(약 120MB) — GitHub 파일 100MB 제한, 필요하면 YAML 로 다시 만든다
+examples/assemble_display/al_box.k
 
 # Temporary files
 *.tmp
