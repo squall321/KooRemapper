@@ -7,6 +7,7 @@
     넣으면(source 없음) SIGSEGV, indent 는 points·r1/r2 가 없으면 잡히지 않은 예외로 abort(134) 했고,
     offset connection_mode: shared·iga element_size: 0·restack 층 없음은 오류 없이 통과했다.
   - warpage dat_file·assemble update 의 dynain 은 YAML 이 현재 폴더에 있으면 '/파일'(루트)에서 찾았다.
+  - 검증 추가 후 thickness_formula 만 쓴 단독 offset 이 거부됐고(예전·카탈로그는 허용), 단독 iga 는 target_name 을 읽지 않았다.
 """
 import os
 import shutil
@@ -58,6 +59,18 @@ def main():
     rejects(binary, d, "offset", "source_pid: 1\nthickness: 1.0\nconnection_mode: shared\n", "connection_mode must be")
     rejects(binary, d, "iga", "targets:\n  - target_pid: 1\n    element_size: 0\n", "element_size must be positive")
     rejects(binary, d, "restack", "target_pid: 1\n", "no layers defined")
+
+    print("[허용돼야 하는 값]")
+    open(os.path.join(d, "of_formula.yaml"), "w").write(
+        "model: flat.k\noutput: of_formula\nsource_pid: 1\nthickness_formula: 1.0 + 0.01*x\nnum_layers: 1\n"
+        "offset_direction: +z\nnew_pid: 10\nmaterial_card: |\n  *MAT_ELASTIC\n           @MID@       2.0     12000      0.25\n")
+    rc, out = run(binary, d, "offset", "of_formula.yaml")
+    check("offset: thickness 없이 thickness_formula 만 → 실행 (rc=0)", rc == 0 and os.path.exists(os.path.join(d, "of_formula.k")),
+          f"rc={rc} {out[-200:]}")
+    open(os.path.join(d, "iga_name.yaml"), "w").write(
+        "model: flat.k\noutput: iga_name\ntargets:\n  - target_name: \"*\"   # 모든 파트 제목\n    element_size: 5.0\n")
+    rc, out = run(binary, d, "iga", "iga_name.yaml")
+    check("iga 단독: target_name 으로 파트 지정 (rc=0, 매칭 안내)", rc == 0 and "IGA: matched" in out, f"rc={rc} {out[-300:]}")
 
     print("[현재 폴더 YAML 의 상대 경로]")
     w = tempfile.mkdtemp(prefix="warp_cwd_")

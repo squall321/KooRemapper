@@ -649,6 +649,41 @@ int runIga(const std::string& yamlFile, ConsoleOutput& console) {
             continue;
         }
 
+        // 대상 한 항목의 키 — 대시 줄(- key: v)과 하위 줄에 같은 규칙. 예전엔 대시 줄은 target_pid·target_pids·element_size 만,
+        // 둘 다 target_name·exclude_name 을 몰라 이름 지정 대상이 'part 0' 으로 실패했다(assemble 경로는 지원).
+        auto applyTargetKey = [&](KooRemapper::IGATargetConfig& t, const std::string& k, const std::string& v) {
+            if      (k == "target_pid") { try { t.targetPid = std::stoi(v); } catch(...) {} }
+            else if (k == "target_pids") {
+                // Parse inline list: [1, 2, 3] or "1 2 3"
+                std::string s = v;
+                if (!s.empty() && s.front() == '[') s = s.substr(1);
+                if (!s.empty() && s.back()  == ']') s.pop_back();
+                std::replace(s.begin(), s.end(), ',', ' ');
+                std::istringstream ss(s);
+                int pid; while (ss >> pid) t.targetPids.push_back(pid);
+            }
+            else if (k == "target_name") t.targetName = v;
+            else if (k == "exclude_name") t.excludeName = v;
+            else if (k == "element_size") { try { t.elementSize = std::stod(v); } catch(...) {} }
+            else if (k == "element_size_r") { try { t.elementSizeR = std::stod(v); } catch(...) {} }
+            else if (k == "element_size_s") { try { t.elementSizeS = std::stod(v); } catch(...) {} }
+            else if (k == "element_size_t") { try { t.elementSizeT = std::stod(v); } catch(...) {} }
+            else if (k == "offset") { try { t.offset = std::stod(v); } catch(...) {} }
+            else if (k == "bbox_scale") { try { t.bboxScale = std::stod(v); } catch(...) {} }
+            else if (k == "bbox_scale_r") { try { t.bboxScaleR = std::stod(v); } catch(...) {} }
+            else if (k == "bbox_scale_s") { try { t.bboxScaleS = std::stod(v); } catch(...) {} }
+            else if (k == "bbox_scale_t") { try { t.bboxScaleT = std::stod(v); } catch(...) {} }
+            else if (k == "ir") { try { t.ir = std::stoi(v); } catch(...) {} }
+            else if (k == "styp") { try { t.styp = std::stoi(v); } catch(...) {} }
+            else if (k == "tollg") { try { t.tollg = std::stod(v); } catch(...) {} }
+            else if (k == "pr") { try { t.pr = std::stoi(v); } catch(...) {} }
+            else if (k == "ps") { try { t.ps = std::stoi(v); } catch(...) {} }
+            else if (k == "pt") { try { t.pt = std::stoi(v); } catch(...) {} }
+            else if (k == "nisr") { try { t.nisr = std::stoi(v); } catch(...) {} }
+            else if (k == "niss") { try { t.niss = std::stoi(v); } catch(...) {} }
+            else if (k == "nist") { try { t.nist = std::stoi(v); } catch(...) {} }
+        };
+
         if (tr.substr(0,2) == "- " && indent > targetsIndent) {
             igaOp.targets.push_back({});
             inTargetItem = true;
@@ -656,51 +691,14 @@ int runIga(const std::string& yamlFile, ConsoleOutput& console) {
             size_t rcp = rest.find(':');
             if (rcp != std::string::npos) {
                 std::string rk = y.trim(rest.substr(0, rcp));
-                std::string rv = y.stripQuotes(y.trim(rest.substr(rcp+1)));
-                if (rk == "target_pid") { try { igaOp.targets.back().targetPid = std::stoi(rv); } catch(...) {} }
-                else if (rk == "target_pids") {
-                    std::string s = rv;
-                    if (!s.empty() && s.front() == '[') s = s.substr(1);
-                    if (!s.empty() && s.back()  == ']') s.pop_back();
-                    std::replace(s.begin(), s.end(), ',', ' ');
-                    std::istringstream ss(s);
-                    int pid; while (ss >> pid) igaOp.targets.back().targetPids.push_back(pid);
-                }
-                else if (rk == "element_size") { try { igaOp.targets.back().elementSize = std::stod(rv); } catch(...) {} }
+                std::string rv = y.stripQuotes(y.trim(KooRemapper::yamlStripComment(rest.substr(rcp+1))));
+                applyTargetKey(igaOp.targets.back(), rk, rv);
             }
             continue;
         }
 
         if (inTargetItem && !igaOp.targets.empty()) {
-            auto& t = igaOp.targets.back();
-            if      (key == "target_pid") { try { t.targetPid = std::stoi(val); } catch(...) {} }
-            else if (key == "target_pids") {
-                // Parse inline list: [1, 2, 3] or "1 2 3"
-                std::string s = val;
-                if (!s.empty() && s.front() == '[') s = s.substr(1);
-                if (!s.empty() && s.back()  == ']') s.pop_back();
-                std::replace(s.begin(), s.end(), ',', ' ');
-                std::istringstream ss(s);
-                int pid; while (ss >> pid) t.targetPids.push_back(pid);
-            }
-            else if (key == "element_size") { try { t.elementSize = std::stod(val); } catch(...) {} }
-            else if (key == "element_size_r") { try { t.elementSizeR = std::stod(val); } catch(...) {} }
-            else if (key == "element_size_s") { try { t.elementSizeS = std::stod(val); } catch(...) {} }
-            else if (key == "element_size_t") { try { t.elementSizeT = std::stod(val); } catch(...) {} }
-            else if (key == "offset") { try { t.offset = std::stod(val); } catch(...) {} }
-            else if (key == "bbox_scale") { try { t.bboxScale = std::stod(val); } catch(...) {} }
-            else if (key == "bbox_scale_r") { try { t.bboxScaleR = std::stod(val); } catch(...) {} }
-            else if (key == "bbox_scale_s") { try { t.bboxScaleS = std::stod(val); } catch(...) {} }
-            else if (key == "bbox_scale_t") { try { t.bboxScaleT = std::stod(val); } catch(...) {} }
-            else if (key == "ir") { try { t.ir = std::stoi(val); } catch(...) {} }
-            else if (key == "styp") { try { t.styp = std::stoi(val); } catch(...) {} }
-            else if (key == "tollg") { try { t.tollg = std::stod(val); } catch(...) {} }
-            else if (key == "pr") { try { t.pr = std::stoi(val); } catch(...) {} }
-            else if (key == "ps") { try { t.ps = std::stoi(val); } catch(...) {} }
-            else if (key == "pt") { try { t.pt = std::stoi(val); } catch(...) {} }
-            else if (key == "nisr") { try { t.nisr = std::stoi(val); } catch(...) {} }
-            else if (key == "niss") { try { t.niss = std::stoi(val); } catch(...) {} }
-            else if (key == "nist") { try { t.nist = std::stoi(val); } catch(...) {} }
+            applyTargetKey(igaOp.targets.back(), key, val);
         }
     }
     f.close();

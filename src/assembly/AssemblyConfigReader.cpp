@@ -1651,9 +1651,9 @@ void AssemblyConfigReader::validateOperation(const AssemblyOperation& op, size_t
             if (op.offset.innerOffset >= op.offset.outerOffset)
                 throw std::runtime_error(pfx + "inner_offset must be < outer_offset");
         } else {
-            // Normal mode: thickness required
-            if (op.offset.thickness <= 0.0)
-                throw std::runtime_error(pfx + "thickness must be > 0");
+            // Normal mode: thickness required (thickness_formula 가 있으면 수식이 두께를 준다 — 카탈로그 안내·예전 단독 offset 동작)
+            if (op.offset.thickness <= 0.0 && op.offset.thicknessFormula.empty())
+                throw std::runtime_error(pfx + "thickness must be > 0 (or give thickness_formula)");
         }
 
         if (op.offset.numLayers < 1)
