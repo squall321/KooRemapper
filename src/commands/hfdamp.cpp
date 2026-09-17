@@ -1,5 +1,6 @@
 #include "hfdamp.h"
 #include "cli/ConsoleOutput.h"
+#include "util/YamlComment.h"
 
 #include <string>
 #include <vector>
@@ -27,6 +28,12 @@ static std::string hf_trim(const std::string& s) {
     if (a == std::string::npos) return "";
     size_t b = s.find_last_not_of(" \t\r\n");
     return s.substr(a, b - a + 1);
+}
+
+static std::string hf_stripQuotes(const std::string& s) {
+    if (s.size() >= 2 && ((s.front()=='"' && s.back()=='"') || (s.front()=='\'' && s.back()=='\'')))
+        return s.substr(1, s.size()-2);
+    return s;
 }
 
 static std::string hf_upper(const std::string& s) {
@@ -552,10 +559,8 @@ int runHFDamp(const std::string& yamlFile, ConsoleOutput& console) {
         size_t colon = t.find(':');
         if (colon == std::string::npos) continue;
         std::string key = hf_trim(t.substr(0, colon));
-        std::string val = hf_trim(t.substr(colon + 1));
-        // Strip inline comment
-        size_t hsh = val.find('#');
-        if (hsh != std::string::npos) val = hf_trim(val.substr(0, hsh));
+        // 예전엔 find('#') 로 따옴표 안 # 까지 잘랐고 따옴표도 떼지 않았다 (mode: "selective" → 조용히 global)
+        std::string val = hf_stripQuotes(hf_trim(KooRemapper::yamlStripComment(t.substr(colon + 1))));
         if (val.empty()) continue;
 
         try {

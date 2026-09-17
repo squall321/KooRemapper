@@ -2,6 +2,7 @@
 #include "contact_helpers.h"
 #include "kw_util.h"
 #include "cli/ConsoleOutput.h"
+#include "util/YamlComment.h"
 #include "core/Mesh.h"
 #include "parser/KFileReader.h"
 #include <fstream>
@@ -119,6 +120,12 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
             }
         };
 
+        auto stripQuotes = [](const std::string& s) -> std::string {
+            if (s.size() >= 2 && ((s.front()=='"' && s.back()=='"') || (s.front()=='\'' && s.back()=='\'')))
+                return s.substr(1, s.size()-2);
+            return s;
+        };
+
         auto parsePidList = [](const std::string& s) -> std::vector<int> {
             std::vector<int> result;
             std::string buf;
@@ -144,9 +151,8 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
             size_t colon = t.find(':');
             if (colon == std::string::npos) continue;
             std::string key = kw_trim(t.substr(0, colon));
-            std::string val = kw_trim(t.substr(colon+1));
-            // strip inline comment
-            { size_t h = val.find('#'); if (h != std::string::npos) val = kw_trim(val.substr(0, h)); }
+            // 예전엔 find('#') 로 따옴표 안·붙어 쓴 # 까지 잘랐고 따옴표도 떼지 않았다 (title: "Self # x" → '"Self')
+            std::string val = stripQuotes(kw_trim(yamlStripComment(t.substr(colon+1))));
 
             // Top-level keys
             if (key == "model" && indent < 4) { modelFile = val; inContacts = false; continue; }
@@ -165,10 +171,7 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
                 flushAction();
                 size_t ac = t.find(':');
                 if (ac != std::string::npos) {
-                    curAction.action = kw_trim(t.substr(ac+1));
-                    // strip inline comment from action
-                    size_t h = curAction.action.find('#');
-                    if (h != std::string::npos) curAction.action = kw_trim(curAction.action.substr(0, h));
+                    curAction.action = stripQuotes(kw_trim(yamlStripComment(t.substr(ac+1))));
                 }
                 hasAction = true;
                 currentSide.clear();

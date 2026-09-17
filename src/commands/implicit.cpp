@@ -1,6 +1,7 @@
 #include "implicit.h"
 #include "kw_util.h"
 #include "cli/ConsoleOutput.h"
+#include "util/YamlComment.h"
 
 #include <string>
 #include <vector>
@@ -14,6 +15,12 @@
 //   @lat: [[commands/implicit]]
 
 using KooRemapper::ConsoleOutput;
+
+static std::string impl_stripQuotes(const std::string& s) {
+    if (s.size() >= 2 && ((s.front()=='"' && s.back()=='"') || (s.front()=='\'' && s.back()=='\'')))
+        return s.substr(1, s.size()-2);
+    return s;
+}
 
 // ---------------------------------------------------------------------------
 // Generate the *CONTROL_IMPLICIT_* block set as a string
@@ -131,8 +138,8 @@ int runExplicit(const std::string& yamlFile, ConsoleOutput& console) {
         size_t cp = t.find(':');
         if (cp == std::string::npos) continue;
         std::string key = kw_trim(t.substr(0, cp));
-        std::string val = kw_trim(t.substr(cp + 1));
-        { size_t h = val.find('#'); if (h != std::string::npos) val = kw_trim(val.substr(0, h)); }
+        // 예전엔 find('#') 로 따옴표 안 # 까지 잘랐고 따옴표도 떼지 않았다 (output: "x.k" → '"x.k"')
+        std::string val = impl_stripQuotes(kw_trim(KooRemapper::yamlStripComment(t.substr(cp + 1))));
         if (val.empty()) continue;
         if      (key == "model")           modelFile  = val;
         else if (key == "output")          outputFile = val;
@@ -232,8 +239,8 @@ int runImplicit(const std::string& yamlFile, ConsoleOutput& console) {
         size_t cp = tr.find(':');
         if (cp==std::string::npos) continue;
         std::string key = kw_trim(tr.substr(0,cp));
-        std::string val = kw_trim(tr.substr(cp+1));
-        { size_t h = val.find('#'); if (h != std::string::npos) val = kw_trim(val.substr(0,h)); }
+        // 예전엔 find('#') 로 따옴표 안 # 까지 잘랐고 따옴표도 떼지 않았다 (mode: "static" → 오류)
+        std::string val = impl_stripQuotes(kw_trim(KooRemapper::yamlStripComment(tr.substr(cp+1))));
         if (val.empty()) continue;
         try {
             if      (key=="model")   modelFile  = val;

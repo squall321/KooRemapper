@@ -303,6 +303,11 @@ int runOptimize(const std::string& yamlFile, ConsoleOutput& console) {
         while (b>a && std::isspace((unsigned char)s[b-1])) --b;
         return s.substr(a,b-a);
     };
+    auto stripQuotes = [](const std::string& s) -> std::string {
+        if (s.size() >= 2 && ((s.front()=='"' && s.back()=='"') || (s.front()=='\'' && s.back()=='\'')))
+            return s.substr(1, s.size()-2);
+        return s;
+    };
 
     std::string modelFile, outputFile;
     OptimizeConfig cfg;
@@ -316,7 +321,8 @@ int runOptimize(const std::string& yamlFile, ConsoleOutput& console) {
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
         std::string key = trim(tr.substr(0, cp));
-        std::string val = trim(KooRemapper::yamlStripComment(tr.substr(cp+1)));
+        // 예전엔 따옴표를 떼지 않아 optimize: "rubber" 가 Unknown mode, output: "x.k" 가 '"x.k"' 파일이 됐다
+        std::string val = stripQuotes(trim(KooRemapper::yamlStripComment(tr.substr(cp+1))));
 
         if      (key == "model")    modelFile = val;
         else if (key == "output")   outputFile = val;

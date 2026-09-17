@@ -1,6 +1,7 @@
 #include "modal.h"
 #include "kw_util.h"
 #include "cli/ConsoleOutput.h"
+#include "util/YamlComment.h"
 
 #include <string>
 #include <vector>
@@ -16,6 +17,12 @@ using KooRemapper::ConsoleOutput;
 // ---------------------------------------------------------------------------
 // Modal helpers
 // ---------------------------------------------------------------------------
+
+static std::string modal_stripQuotes(const std::string& s) {
+    if (s.size() >= 2 && ((s.front()=='"' && s.back()=='"') || (s.front()=='\'' && s.back()=='\'')))
+        return s.substr(1, s.size()-2);
+    return s;
+}
 
 static std::string modal_eigmthName(int eigmth) {
     switch (eigmth) {
@@ -89,10 +96,9 @@ int runModal(const std::string& yamlFile, ConsoleOutput& console) {
             size_t colon = t.find(':');
             if (colon == std::string::npos) continue;
             std::string key = kw_trim(t.substr(0, colon));
-            std::string val = kw_trim(t.substr(colon+1));
-            if (val.empty() || val[0] == '#') continue;
-            size_t hpos = val.find('#');
-            if (hpos != std::string::npos) val = kw_trim(val.substr(0, hpos));
+            // 예전엔 find('#') 로 따옴표 안 # 까지 잘랐고 따옴표도 떼지 않았다 (output: "x.k" → '"x.k"')
+            std::string val = modal_stripQuotes(kw_trim(KooRemapper::yamlStripComment(t.substr(colon+1))));
+            if (val.empty()) continue;
             if      (key == "model")             modelPath    = val;
             else if (key == "output")            outPath      = val;
             else if (key == "nmode")             nmode        = std::stoi(val);

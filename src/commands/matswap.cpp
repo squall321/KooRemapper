@@ -431,6 +431,12 @@ int runMatswapYaml(const std::string& yamlFile, ConsoleOutput& console) {
     auto countIndent = [](const std::string& s) -> int {
         int n=0; while (n<(int)s.size() && s[n]==' ') ++n; return n;
     };
+    // 예전엔 따옴표를 떼지 않아 output: "x.k" 가 '"x.k".k', bundle: "rubber.k" 가 Cannot open bundle 이었다
+    auto stripQuotes = [](const std::string& s) -> std::string {
+        if (s.size() >= 2 && ((s.front()=='"' && s.back()=='"') || (s.front()=='\'' && s.back()=='\'')))
+            return s.substr(1, s.size()-2);
+        return s;
+    };
 
     std::string modelFile, outputFile;
     std::string optimizeMode;
@@ -459,7 +465,7 @@ int runMatswapYaml(const std::string& yamlFile, ConsoleOutput& console) {
             size_t cp = rest.find(':');
             if (cp != std::string::npos) {
                 std::string key = trim(rest.substr(0,cp));
-                std::string val = trim(KooRemapper::yamlStripComment(rest.substr(cp+1)));
+                std::string val = stripQuotes(trim(KooRemapper::yamlStripComment(rest.substr(cp+1))));
                 auto parseIL = [&](const std::string& v, std::vector<int>& out) {
                     std::string lv=v;
                     if (!lv.empty()&&lv.front()=='[') lv=lv.substr(1);
@@ -482,7 +488,7 @@ int runMatswapYaml(const std::string& yamlFile, ConsoleOutput& console) {
             size_t cp = tr.find(':');
             if (cp != std::string::npos) {
                 std::string key = trim(tr.substr(0,cp));
-                std::string val = trim(KooRemapper::yamlStripComment(tr.substr(cp+1)));
+                std::string val = stripQuotes(trim(KooRemapper::yamlStripComment(tr.substr(cp+1))));
                 auto parseIL = [&](const std::string& v, std::vector<int>& out) {
                     std::string lv=v;
                     if (!lv.empty()&&lv.front()=='[') lv=lv.substr(1);
@@ -509,7 +515,7 @@ int runMatswapYaml(const std::string& yamlFile, ConsoleOutput& console) {
         size_t cp = tr.find(':');
         if (cp != std::string::npos) {
             std::string key = trim(tr.substr(0,cp));
-            std::string val = trim(KooRemapper::yamlStripComment(tr.substr(cp+1)));
+            std::string val = stripQuotes(trim(KooRemapper::yamlStripComment(tr.substr(cp+1))));
             auto parseIL = [&](const std::string& v, std::vector<int>& out) {
                 std::string lv=v;
                 if (!lv.empty()&&lv.front()=='[') lv=lv.substr(1);

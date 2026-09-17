@@ -17,6 +17,12 @@
 
 using KooRemapper::ConsoleOutput;
 
+static std::string stab_stripQuotes(const std::string& s) {
+    if (s.size() >= 2 && ((s.front()=='"' && s.back()=='"') || (s.front()=='\'' && s.back()=='\'')))
+        return s.substr(1, s.size()-2);
+    return s;
+}
+
 static bool stab_hasShellElements(const std::vector<std::string>& lines) {
     for (const auto& ln : lines) {
         std::string tr = kw_trim(ln);
@@ -412,7 +418,8 @@ int runStabilize(const std::string& yamlFile, ConsoleOutput& console) {
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
         std::string key = kw_trim(tr.substr(0, cp));
-        std::string val = kw_trim(KooRemapper::yamlStripComment(tr.substr(cp+1)));
+        // 예전엔 따옴표를 떼지 않아 stabilize: "explicit" 가 Unknown mode, output: "x.k" 가 '"x.k"' 파일이 됐다
+        std::string val = stab_stripQuotes(kw_trim(KooRemapper::yamlStripComment(tr.substr(cp+1))));
         if (val.empty()) continue;
 
         auto parseInt  = [&](int& v)    { try { v = std::stoi(val); } catch(...) {} };
