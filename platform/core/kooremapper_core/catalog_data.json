@@ -1461,7 +1461,7 @@
           "role": "output",
           "order": 2,
           "required": true,
-          "description": "Output prefix (generates .k and _dynain.dat files)"
+          "description": "Output prefix (generates .k and .dynain files; a trailing .k is ignored)"
         }
       ],
       "example": {
@@ -1486,7 +1486,7 @@
         "note": "간섭끼움 압축: pid1 x/y 1% 압축 후 역인장 prestress 생성"
       },
       "example_folder": "/home/koopark/claude/KooRemapper/examples/squeeze",
-      "notes": "**핵심 제약사항:** (1) swelling과 eps_x/y/z는 동일 파트에서 동시 사용 불가. (2) eps 모드(응력 계산)는 재료 필수: YAML material 또는 K-파일 *MAT_ELASTIC. (3) swelling 모드는 K-파일 *MAT_* 카드 필수 (MID를 *PART에서 자동 읽음). (4) strain_mode=true일 때 응력 계산 안 함 (재료 불필요). **동작 모드:** 응력 모드(기본): eps_x/y/z로 노드 변형, Hooke의 법칙으로 응력 계산 → *INITIAL_STRESS_SOLID 생성. 변형률 모드(strain_mode=true): eps_x/y/z로 노드 변형, 역방향 변형률만 기록 → *INITIAL_STRAIN_SOLID 생성 (재료 무관). 열팽창 모드(swelling): 노드 이동 없음, 대신 *MAT_ADD_THERMAL_EXPANSION + *INITIAL_TEMPERATURE_NODE 삽입, LS-DYNA가 런타임에 열변형 적용. **재료 우선순위:** YAML material 섹션 > K-파일 *MAT_ELASTIC. **출력 파일:** <prefix>.k = 압축 메시 + 열팽창 카드 + DR 카드. <prefix>_dynain.dat = *INITIAL_STRESS_SOLID (eps 파트만, swelling 파트 제외). **공식:** 바운딩박스 중심 c에 대해 x' = c + (1+eps_i) * (x - c). 응력 σxx = -(λ+2μ)eps_x - λ(eps_y+eps_z) (라메 상수 기반).",
+      "notes": "**핵심 제약사항:** (1) swelling과 eps_x/y/z는 동일 파트에서 동시 사용 불가. (2) eps 모드(응력 계산)는 재료 필수: YAML material 또는 K-파일 *MAT_ELASTIC. (3) swelling 모드는 K-파일 *MAT_* 카드 필수 (MID를 *PART에서 자동 읽음). (4) strain_mode=true일 때 응력 계산 안 함 (재료 불필요). **동작 모드:** 응력 모드(기본): eps_x/y/z로 노드 변형, Hooke의 법칙으로 응력 계산 → *INITIAL_STRESS_SOLID 생성. 변형률 모드(strain_mode=true): eps_x/y/z로 노드 변형, 역방향 변형률만 기록 → *INITIAL_STRAIN_SOLID 생성 (재료 무관). 열팽창 모드(swelling): 노드 이동 없음, 대신 *MAT_ADD_THERMAL_EXPANSION + *INITIAL_TEMPERATURE_NODE 삽입, LS-DYNA가 런타임에 열변형 적용. **재료 우선순위:** YAML material 섹션 > K-파일 *MAT_ELASTIC. **출력 파일:** <prefix>.k = 압축 메시 + 열팽창 카드 + DR 카드. <prefix>.dynain = *INITIAL_STRESS_SOLID (eps 파트만, swelling 파트 제외). **공식:** 바운딩박스 중심 c에 대해 x' = c + (1+eps_i) * (x - c). 응력 σxx = -(λ+2μ)eps_x - λ(eps_y+eps_z) (라메 상수 기반).",
       "keys": [
         {
           "path": "parts",

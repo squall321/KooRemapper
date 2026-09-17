@@ -67,6 +67,20 @@ def _represent_dict(dumper, data):  # noqa: ANN001
 _KDumper.add_representer(dict, _represent_dict)
 
 
+# 여러 줄 문자열(material_card 등)은 리터럴 블록 `key: |` 로 쓴다. PyYAML 기본은 따옴표 문자열
+# ("*MAT_ELASTIC\n$#...")이라 C++ 파서가 블록으로 읽지 못해, 단독 restack 은 층 PART mid=0·카드 누락,
+# assemble 은 따옴표 문자열을 그대로 덱에 썼다. 줄 끝 공백이 있으면 PyYAML 이 블록을 포기하므로 떼고
+# (LS-DYNA 고정 폭 칸은 끝 공백에 의미 없음), 끝 줄바꿈을 하나로 맞춰 `|` (strip/keep 표시 없음)로 나오게 한다.
+def _represent_str(dumper, data):  # noqa: ANN001
+    if "\n" in data.rstrip("\n"):
+        text = "\n".join(line.rstrip() for line in data.rstrip("\n").split("\n")) + "\n"
+        return dumper.represent_scalar("tag:yaml.org,2002:str", text, style="|")
+    return dumper.represent_scalar("tag:yaml.org,2002:str", data)
+
+
+_KDumper.add_representer(str, _represent_str)
+
+
 def _dump_yaml(obj) -> str:
     return yaml.dump(
         obj, Dumper=_KDumper, default_flow_style=False, allow_unicode=True, sort_keys=False
