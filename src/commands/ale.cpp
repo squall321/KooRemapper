@@ -428,6 +428,7 @@ int runAle(const std::string& yamlFile, ConsoleOutput& console) {
         bool inAleParts = false;
         bool inDetonation = false;
         bool inFsiPids = false;
+        bool fsiPendingItem = false;  // '-' 만 있는 항목 — 값은 다음 줄에 온다
         AlePartEntry curEntry{0, ""};
         int aleIndent = 0;
         while (std::getline(yin, line)) {
@@ -441,10 +442,30 @@ int runAle(const std::string& yamlFile, ConsoleOutput& console) {
             if (inFsiPids) {
                 if (t[0] == '-') {
                     std::string pv = kw_trim(KooRemapper::yamlStripComment(t.substr(1)));
+                    // '-' 만 있는 줄은 값이 다음 줄에 온다 — 예전엔 그 다음 줄도 콜론이 없다고 버려져
+                    // fsi_pids 가 통째로 비었고 FSI 커플링이 조용히 빠졌다
+                    if (pv.empty()) { fsiPendingItem = true; continue; }
                     try { fsiPids.push_back(std::stoi(pv)); } catch (...) {}
+                    fsiPendingItem = false;
+                    continue;
+                }
+                if (fsiPendingItem && t.find(':') == std::string::npos) {
+                    std::string pv = kw_trim(KooRemapper::yamlStripComment(t));
+                    try { fsiPids.push_back(std::stoi(pv)); } catch (...) {}
+                    fsiPendingItem = false;
                     continue;
                 }
                 inFsiPids = false;
+                fsiPendingItem = false;
+            }
+
+            // 'ale_parts:' 아래 '-' 만 있는 줄(키는 다음 줄부터 들여쓰기)은 콜론이 없다고 버려져,
+            // 뒤따르는 pid/material 이 앞 항목에 덮어써졌다 — 항목 두 개가 하나로 합쳐진 모델이 조용히 나왔다
+            if (inAleParts && t[0] == '-' &&
+                kw_trim(KooRemapper::yamlStripComment(t.substr(1))).empty()) {
+                if (curEntry.pid > 0) aleEntries.push_back(curEntry);
+                curEntry = {0, ""};
+                continue;
             }
 
             size_t colon = t.find(':');
