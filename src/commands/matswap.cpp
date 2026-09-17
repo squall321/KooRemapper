@@ -572,6 +572,19 @@ int runMatswapYaml(const std::string& yamlFile, ConsoleOutput& console) {
     if (outputFile.empty()) { console.error("matswap YAML: 'output' not specified"); return 1; }
     if (swaps.empty())      { console.error("matswap YAML: no swaps defined");        return 1; }
 
+    // configDir 는 bundle 에만 쓰여, 저장소 루트에서 'matswap examples/matswap/01_single_pid.yaml' 을
+    // 돌리면 model/output 이 현재 폴더 기준이라 모델을 못 찾았다 — optimize 와 같게 YAML 폴더 기준으로 푼다
+    auto resolvePath = [&](const std::string& p) -> std::string {
+        if (!configDir.empty() && !p.empty() &&
+            p[0] != '/' && p[0] != '\\' &&
+            !(p.size() >= 2 && p[1] == ':')) {
+            return configDir + "/" + p;
+        }
+        return p;
+    };
+    modelFile  = resolvePath(modelFile);
+    outputFile = resolvePath(outputFile);
+
     console.println("[matswap] Model  : " + modelFile);
     console.println("[matswap] Output : " + outputFile);
     console.println("[matswap] Swaps  : " + std::to_string(swaps.size()));
