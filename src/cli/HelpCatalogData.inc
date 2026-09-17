@@ -262,7 +262,7 @@ operations:
 )KRH"}},
      {"KooRemapper generate box box.yaml", "KooRemapper restack restack.yaml"},
      {},
-     {"material_card 의 mid 칸은 라벨이다 (MID001, MAT01, 11 모두 가능). 층마다 새 MID 로 바뀌고 같은 라벨은 재질 카드를 공유한다", "카드는 10칸 고정폭 (블록 들여쓰기를 뺀 뒤 기준). 자유 형식(쉼표)도 된다. 새 PID·SECID 는 자동"}},
+     {"material_card 의 mid 칸은 라벨이다 (MID001, MAT01, 11 모두 가능). 층마다 새 MID 로 바뀐다. 라벨과 카드 내용이 같으면 재질을 공유하고, 라벨이 같아도 물성이 다르면 MID 를 따로 준다", "*MAT_…_TITLE 의 제목 줄은 그대로 두고, 같은 MID 를 가리키는 *MAT_ADD_… 카드도 함께 새 MID 로 바뀐다", "카드는 10칸 고정폭 (블록 들여쓰기를 뺀 뒤 기준). 자유 형식(쉼표)도 된다. 새 PID·SECID 는 자동"}},
     {"update", "메시 편집", "dynain·k 파일의 *NODE 좌표로 모델 절점 좌표 덮어쓰기", "좌표갱신 dynain node", "KooRemapper update <config.yaml>",
      {{"box.yaml", R"KRH(output: box.k
 lx: 20.0
