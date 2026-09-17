@@ -45,31 +45,36 @@ $#  secid    elform
 $#     mid        ro         e        pr
          1  7.85E-09    210000       0.3
 *MAT_ELASTIC
-     MAT01  7.85E-09    210000       0.3
+         2  7.85E-09    210000       0.3
 *SECTION_SOLID
 $#  secid    elform
          2         1
 *PART
 Restack Layer 1
 $#     pid     secid       mid
-         2         2         0
+         2         2         2
+*MAT_ELASTIC
+         3  7.85E-09    140000       0.3
 *SECTION_SOLID
 $#  secid    elform
          3         1
 *PART
 Restack Layer 2
 $#     pid     secid       mid
-         3         3         0
+         3         3         3
+*MAT_ELASTIC
+         4  7.85E-09     70000       0.3
+
 *SECTION_SOLID
 $#  secid    elform
          4         1
 *PART
 Restack Layer 3
 $#     pid     secid       mid
-         4         4         0
+         4         4         4
 *MAT_COHESIVE_MIXED_MODE
 $#     mid        ro     roflg   intfail        en        et       gic      giic
-         2     0.0         0       0.0     1.0E6     1.0E6       1.0       2.0
+         5     0.0         0       0.0     1.0E6     1.0E6       1.0       2.0
 $#      xmu         t         s       und       utd     gamma
        1.0      50.0      30.0       0.0       0.0       1.0
 *SECTION_SOLID
@@ -78,5 +83,5 @@ $#  secid    elform
 *PART
 Cohesive interface
 $#     pid     secid       mid
-         5         5         2
+         5         5         5
 *END

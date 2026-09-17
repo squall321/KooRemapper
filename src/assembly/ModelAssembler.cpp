@@ -690,6 +690,55 @@ int ModelAssembler::detectExtrusionAxis(const std::vector<const Element*>& elems
 // ---------------------------------------------------------------------------
 namespace {
 
+// restack 재질 카드의 MID 칸 (첫 데이터 줄 첫 필드)
+struct RestackMidField {
+    size_t start = 0;
+    size_t width = 0;
+    std::string label;
+};
+
+bool restackHasMidPlaceholder(const std::string& card) {
+    for (size_t pos = card.find("MID"); pos != std::string::npos; pos = card.find("MID", pos + 3)) {
+        if (pos + 3 < card.size() && std::isdigit(static_cast<unsigned char>(card[pos + 3]))) return true;
+    }
+    return false;
+}
+
+bool restackFindMidField(const std::string& card, RestackMidField& out) {
+    size_t lineStart = 0;
+    while (lineStart < card.size()) {
+        size_t lineEnd = card.find('\n', lineStart);
+        if (lineEnd == std::string::npos) lineEnd = card.size();
+        std::string line = card.substr(lineStart, lineEnd - lineStart);
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        size_t first = line.find_first_not_of(" \t");
+        if (first != std::string::npos && line[first] != '*' && line[first] != '$') {
+            size_t comma = line.find(',');
+            if (comma != std::string::npos) {
+                // 자유 형식: 첫 쉼표 앞
+                size_t b = line.find_first_not_of(" \t");
+                size_t e = line.find_last_not_of(" \t", comma == 0 ? 0 : comma - 1);
+                if (b >= comma || e == std::string::npos) return false;
+                out.start = lineStart + b;
+                out.width = e - b + 1;
+            } else {
+                // 고정폭: 첫 토큰이 10칸 안에서 끝나면 1~10칸 전체, 넘치면 토큰 끝까지
+                size_t tokEnd = line.find_first_of(" \t", first);
+                if (tokEnd == std::string::npos) tokEnd = line.size();
+                out.start = lineStart;
+                out.width = tokEnd <= 10 ? std::min<size_t>(10, line.size()) : tokEnd;
+                first = line.find_first_not_of(" \t");
+                out.label = line.substr(first, tokEnd - first);
+                return true;
+            }
+            out.label = card.substr(out.start, out.width);
+            return true;
+        }
+        lineStart = lineEnd + 1;
+    }
+    return false;
+}
+
 // Wildcard pattern match for *PART titles. Supports:
 //   '*' — any string of chars (including empty)
 //   '?' — any single char
@@ -1002,6 +1051,17 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
 
     // Build MID placeholder → actual ID mapping
     std::map<std::string, int> midMapping;
+    // MID<숫자> 자리표시가 없는 카드는 첫 데이터 줄 첫 필드(11, MAT01 등)를 라벨로 보고 새 MID 를 준다.
+    // (예전엔 자리표시만 인식해 PART mid=0 + 두 번째 층 재질 카드 누락)
+    std::vector<RestackMidField> labelFields(op.layers.size());
+    for (size_t li = 0; li < op.layers.size(); ++li) {
+        const auto& card = op.layers[li].materialCard;
+        if (restackHasMidPlaceholder(card)) continue;
+        if (restackFindMidField(card, labelFields[li]) && !labelFields[li].label.empty()) {
+            std::string key = "@label:" + labelFields[li].label;
+            if (midMapping.find(key) == midMapping.end()) midMapping[key] = ++maxMaterialId_;
+        }
+    }
     for (const auto& layer : op.layers) {
         // Scan for MIDxxx patterns
         size_t pos = 0;
@@ -1151,6 +1211,16 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
                 actualMid = mid;
                 pos += midStr.size();
             }
+        }
+
+        // 라벨 MID (자리표시 없는 카드): 첫 필드를 새 MID 로 오른쪽 정렬 치환
+        if (actualMid == 0 && !labelFields[layerIdx].label.empty()) {
+            const auto& lf = labelFields[layerIdx];
+            int mid = midMapping["@label:" + lf.label];
+            std::string midStr = std::to_string(mid);
+            while (midStr.size() < lf.width) midStr = " " + midStr;
+            matCard.replace(lf.start, lf.width, midStr);
+            actualMid = mid;
         }
 
         // Find which MID is used in this layer's card
@@ -8219,11 +8289,13 @@ static MwBundle mw_parseBundle(const std::string& path) {
             if (!partTitle) { partTitle=true; continue; }
             if (!partData) {
                 auto toks = mw_tok10(ln);
-                if (toks.size()>=5) {
+                // PID SECID MID 3필드만 쓴 PART 도 허용 (EOSID·HGID 생략 = 0)
+                if (toks.size()>=3) {
                     bnd.bundlePid   = mw_resolveInt(toks[0], bnd.params);
                     bnd.bundleSecid = mw_resolveInt(toks[1], bnd.params);
                     bnd.bundleMid   = mw_resolveInt(toks[2], bnd.params);
-                    bnd.bundleHgid  = mw_resolveInt(toks[4], bnd.params);
+                    if (toks.size()>=5 && !toks[4].empty())
+                        bnd.bundleHgid = mw_resolveInt(toks[4], bnd.params);
                 }
                 partData=true;
             }
@@ -8271,12 +8343,14 @@ static MwPartInfo mw_getPartInfo(const std::vector<std::string>& lines, int targ
         if (!inPart||tr[0]=='$') continue;
         if (!titleDone) { titleDone=true; continue; }
         auto toks = mw_tok10(lines[i]);
-        if (toks.size()>=5) {
+        // PID SECID MID 3필드만 쓴 PART 도 허용 (generate box 출력 등). EOSID·HGID 생략 = 0
+        if (toks.size()>=3) {
             try {
                 int pid=std::stoi(toks[0]);
                 if (pid==targetPid) {
                     info.pid=pid; info.secid=std::stoi(toks[1]);
-                    info.mid=std::stoi(toks[2]); info.hgid=std::stoi(toks[4]);
+                    info.mid=std::stoi(toks[2]);
+                    info.hgid=(toks.size()>=5 && !toks[4].empty()) ? std::stoi(toks[4]) : 0;
                     info.dataLine=i; return info;
                 }
             } catch(...) {}
