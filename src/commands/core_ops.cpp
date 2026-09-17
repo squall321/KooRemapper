@@ -1133,8 +1133,13 @@ int runPrestress(const std::string& refFile, const std::string& defFile,
     writer.setLargeDeformation(strainType == StrainType::GREEN_LAGRANGE);
 
     if (hasMaterial) {
-        console.info("Writing dynain file: " + outputFile);
-        if (!writer.writeFile(outputFile, results, strainType, refFile, defFile)) {
+        // output 이 .k 로 끝나면 아래 변형 메시 사본(<stem>.k)과 같은 파일이 된다 — 사본이 dynain 을 덮어쓰고
+        // 자기 자신을 *INCLUDE 했다. 이때 dynain 은 <stem>.dynain 으로 쓴다.
+        std::string dynainFile = outputFile;
+        if (dynainFile.size() >= 2 && dynainFile.substr(dynainFile.size() - 2) == ".k")
+            dynainFile = dynainFile.substr(0, dynainFile.size() - 2) + ".dynain";
+        console.info("Writing dynain file: " + dynainFile);
+        if (!writer.writeFile(dynainFile, results, strainType, refFile, defFile)) {
             console.error("Failed to write dynain: " + writer.getErrorMessage());
             return 1;
         }
@@ -1152,7 +1157,7 @@ int runPrestress(const std::string& refFile, const std::string& defFile,
         }
 
         // Get just the dynain filename (not full path) for *INCLUDE
-        std::string dynainFilename = outputFile;
+        std::string dynainFilename = dynainFile;
         size_t slashPos = dynainFilename.find_last_of("/\\");
         if (slashPos != std::string::npos) {
             dynainFilename = dynainFilename.substr(slashPos + 1);

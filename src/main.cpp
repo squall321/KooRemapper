@@ -343,11 +343,11 @@ static bool printLegacyHelp(ConsoleOutput& console, const std::string& helpCmd) 
         console.println("Arguments:");
         console.println("  mesh.k         Input mesh with multiple parts (k-file)");
         console.println("  config.yaml    YAML config specifying per-part strain conditions");
-        console.println("  output_prefix  Output prefix (generates .k and _dynain.dat)");
+        console.println("  output_prefix  Output prefix (generates .k and .dynain)");
         std::cout << "\n";
         console.println("Output:");
         console.println("  <prefix>.k          Compressed mesh with *INCLUDE dynain");
-        console.println("  <prefix>_dynain.dat  Reverse prestress (*INITIAL_STRESS_SOLID)");
+        console.println("  <prefix>.dynain     Reverse prestress (*INITIAL_STRESS_SOLID)");
         std::cout << "\n";
         console.println("YAML Config Format:");
         console.println("  parts:");

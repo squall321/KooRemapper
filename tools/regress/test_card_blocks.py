@@ -9,7 +9,9 @@
     재질 카드가 제목 없이 빠졌다.
   - 단독 restack·offset: 블록 들여쓰기를 '키 + 2칸'으로 가정해, 더 깊게 들여쓴 카드는 앞 공백이 남아
     10열 칸이 밀렸다(assemble 은 첫 내용 줄 들여쓰기를 쓴다).
-  - assemble: output 에 .k 를 붙이면 name.k.k 가 생겼다(다른 명령은 .k 를 떼어 냄).
+  - assemble: output 에 .k 를 붙이면 name.k.k 가 생겼다(다른 명령은 .k 를 떼어 냄). 단독 squeeze 접두어도 같았다.
+  - prestress: 출력 이름을 x.k 로 주면 dynain 과 변형 메시 사본이 같은 x.k 에 써져 dynain 이 사라지고
+    x.k 가 자기 자신을 *INCLUDE 했다.
 """
 import os
 import re
@@ -214,6 +216,32 @@ def test_assemble_output_ext(binary):
     check("named.k.k 없음", not os.path.exists(os.path.join(d, "named.k.k")))
 
 
+def test_positional_output_ext(binary):
+    print("[squeeze·prestress] 위치 인자 출력에 .k")
+    d = workdir(binary, "posext")
+    open(os.path.join(d, "sq.yaml"), "w").write("parts:\n  - pid: 1\n    eps_x: -0.01\n    eps_y: 0.0\n    eps_z: 0.0\n"
+                                                "material:\n  E: 210000.0\n  nu: 0.3\n")
+    rc, out = run(binary, d, "squeeze", "box.k", "sq.yaml", "sq_out.k")
+    check("squeeze rc=0", rc == 0, out[-300:])
+    check("squeeze: sq_out.k·sq_out.dynain 생성, .k.k 없음",
+          os.path.exists(os.path.join(d, "sq_out.k")) and os.path.exists(os.path.join(d, "sq_out.dynain"))
+          and not os.path.exists(os.path.join(d, "sq_out.k.k")), str(sorted(os.listdir(d))))
+    # prestress: 변형 메시 = x 방향 1% 늘린 박스
+    open(os.path.join(d, "def.yaml"), "w").write(BOX.replace("output: box.k", "output: def.k").replace("lx: 20.0", "lx: 20.2"))
+    run(binary, d, "generate", "box", "def.yaml")
+    rc, out = run(binary, d, "prestress", "--E", "210000", "--nu", "0.3", "box.k", "def.k", "pre.k")
+    check("prestress rc=0", rc == 0, out[-300:])
+    k = os.path.join(d, "pre.k")
+    dyn = os.path.join(d, "pre.dynain")
+    ok = os.path.exists(k) and os.path.exists(dyn)
+    check("prestress: pre.k(메시) + pre.dynain(응력) 분리 생성", ok, str(sorted(os.listdir(d))))
+    if ok:
+        txt = open(k).read()
+        check("pre.k 가 pre.dynain 을 *INCLUDE (자기 자신 아님)", re.search(r"\*INCLUDE\s*\npre\.dynain", txt) is not None
+              and "*NODE" in txt, txt[-120:])
+        check("pre.dynain 에 *INITIAL_STRESS_SOLID", "*INITIAL_STRESS_SOLID" in open(dyn).read())
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__)
@@ -223,6 +251,7 @@ def main():
     test_standalone_restack_colon(binary)
     test_deep_indent(binary)
     test_assemble_output_ext(binary)
+    test_positional_output_ext(binary)
     print()
     if FAILS:
         print(f"FAIL {len(FAILS)}")

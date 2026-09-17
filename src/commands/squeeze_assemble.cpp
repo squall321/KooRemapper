@@ -29,8 +29,12 @@
 using namespace KooRemapper;
 
 int runSqueeze(const std::string& meshFile, const std::string& configFile,
-               const std::string& outputPrefix, const ConsoleOutput& console) {
+               const std::string& outputPrefixArg, const ConsoleOutput& console) {
     Timer timer;
+    // <prefix>.k·<prefix>.dynain 을 만든다 — 접두어 끝의 .k 는 다른 명령처럼 뗀다(예전엔 name.k.k)
+    std::string outputPrefix = outputPrefixArg;
+    if (outputPrefix.size() >= 2 && outputPrefix.substr(outputPrefix.size() - 2) == ".k")
+        outputPrefix.resize(outputPrefix.size() - 2);
 
     // Load mesh
     console.info("Loading mesh: " + meshFile);
