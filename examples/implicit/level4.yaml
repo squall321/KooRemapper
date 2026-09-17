@@ -2,7 +2,7 @@
 # NSOLVR=-2 (BFGS+line search). Lv3에서 수렴 안되면 시도.
 # KFAIL=3: 연속 3회 step bisection 후 강성 행렬 재구성.
 # Usage: KooRemapper implicit level4.yaml
-model: explicit.k
+model: ../ale/explicit.k
 output: implicit_lv4.k
 mode: static
 level: 4

@@ -3,7 +3,7 @@
 # MUMPS + STABILIZATION + 엄격한 RCTOL=0.01 잔류력 체크.
 # DT 기준: dtmax ≤ 1/(10*f_max)  예) 100 Hz → dtmax: 0.001
 # Usage: KooRemapper implicit dynamic_lv7.yaml
-model: explicit.k
+model: ../ale/explicit.k
 output: implicit_dyn_lv7.k
 mode: dynamic
 level: 7

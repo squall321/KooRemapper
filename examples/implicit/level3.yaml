@@ -1,7 +1,7 @@
 # KooRemapper implicit - Level 3 (안정 / Stable)
 # 반복 횟수 늘리고 시간 스텝 줄임. 재료 비선형 모델에 적합.
 # Usage: KooRemapper implicit level3.yaml
-model: explicit.k
+model: ../ale/explicit.k
 output: implicit_lv3.k
 mode: static
 level: 3

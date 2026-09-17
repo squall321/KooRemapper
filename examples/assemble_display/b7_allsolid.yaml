@@ -2,8 +2,8 @@
 # All 11 layers as solid elements. Fully conformal mesh, no interface contacts.
 # Load simplebox.k (run simplebox.yaml first).
 # Usage: KooRemapper assemble examples/assemble_display/b7_allsolid.yaml
-model: simplebox.k
-output: examples/assemble_display/b7_allsolid
+base_model: simplebox.k
+output: b7_allsolid
 
 operations:
   - type: restack

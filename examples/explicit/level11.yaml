@@ -39,7 +39,7 @@
 # Usage: KooRemapper stabilize level11.yaml --confirm-erosion
 # =============================================================
 
-model:  your_model.k
+model:  ../ale/explicit.k
 output: your_model_lv11.k
 stabilize: explicit
 level: 11

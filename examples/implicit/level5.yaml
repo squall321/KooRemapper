@@ -2,7 +2,7 @@
 # *CONTROL_IMPLICIT_STABILIZATION 추가.
 # Rigid body mode, singular K matrix, contact 초기 불안정 문제에 효과적.
 # Usage: KooRemapper implicit level5.yaml
-model: explicit.k
+model: ../ale/explicit.k
 output: implicit_lv5.k
 mode: static
 level: 5

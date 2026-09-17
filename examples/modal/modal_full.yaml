@@ -1,7 +1,7 @@
 # modal_full.yaml — 전체 옵션 예제
 # 모든 옵션을 명시적으로 지정한 레퍼런스 파일
 
-model:  explicit.k
+model:  ../ale/explicit.k
 output: modal_full.k
 
 # ── 주요 파라미터 ──────────────────────────────────

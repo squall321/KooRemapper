@@ -6,7 +6,7 @@
 # =============================================================
 
 # --- Required ---
-model: explicit.k          # Input explicit K-file
+model: ../ale/explicit.k          # Input explicit K-file
 output: implicit.k         # Output implicit K-file
 
 # --- Solver Mode ---

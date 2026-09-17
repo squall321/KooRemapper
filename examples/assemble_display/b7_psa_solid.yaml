@@ -5,8 +5,8 @@
 # BarrierPI shell still requires tied contacts on both sides.
 # Load simplebox.k (run simplebox.yaml first).
 # Usage: KooRemapper assemble examples/assemble_display/b7_psa_solid.yaml
-model: simplebox.k
-output: examples/assemble_display/b7_psa_solid
+base_model: simplebox.k
+output: b7_psa_solid
 
 operations:
   - type: restack

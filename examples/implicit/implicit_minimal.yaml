@@ -1,6 +1,6 @@
 # KooRemapper implicit - Minimal Example
 # Usage: KooRemapper implicit implicit_minimal.yaml
-model: explicit.k
+model: ../ale/explicit.k
 output: implicit.k
 mode: static
 level: 2

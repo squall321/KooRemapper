@@ -9,7 +9,7 @@
 #   - 불안정 경로가 있는 비선형 구조 해석
 #
 # Usage: KooRemapper implicit level8.yaml
-model: explicit.k
+model: ../ale/explicit.k
 output: implicit_lv8.k
 mode: static
 level: 8

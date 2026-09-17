@@ -36,7 +36,7 @@
 # Usage: KooRemapper stabilize level06.yaml
 # =============================================================
 
-model:  your_model.k
+model:  ../ale/explicit.k
 output: your_model_lv06.k
 stabilize: explicit
 level: 6

@@ -2,7 +2,7 @@
 # 일반적인 implicit 해석 기본 세팅.
 # 대부분의 모델에서 첫 시도로 권장.
 # Usage: KooRemapper implicit level2.yaml
-model: explicit.k
+model: ../ale/explicit.k
 output: implicit_lv2.k
 mode: static
 level: 2

@@ -1,4 +1,4 @@
-model: test_model.k
+model: ../../materials/test_model.k
 output: test_model_drop.k
 preset: drop
 dt: 0.0001

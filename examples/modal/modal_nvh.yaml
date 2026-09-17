@@ -3,7 +3,7 @@
 # EIGMTH=101 (MCMS): 대량 모드 추출에 최적화
 # solver=30 (MUMPS): 대규모 모델의 강성 행렬 처리
 
-model:  explicit.k
+model:  ../ale/explicit.k
 output: modal_nvh.k
 
 nmode:  200      # NVH 해석: 일반적으로 100~500 모드

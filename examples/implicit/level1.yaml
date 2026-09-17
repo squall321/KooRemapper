@@ -2,7 +2,7 @@
 # 빠른 수렴 시도. 발산 가능성 있지만 가장 빠름.
 # 수렴이 잘 되는 잘 구속된 선형성 높은 모델에 적합.
 # Usage: KooRemapper implicit level1.yaml
-model: explicit.k
+model: ../ale/explicit.k
 output: implicit_lv1.k
 mode: static
 level: 1

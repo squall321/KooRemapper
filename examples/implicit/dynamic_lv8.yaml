@@ -3,7 +3,7 @@
 # 하중-변위 곡선의 음의 기울기 구간(동적 불안정)을 포착.
 # 주의: arc-length는 NSOLVR 6~9 범위 필요 → NSOLVR=7 고정.
 # Usage: KooRemapper implicit dynamic_lv8.yaml
-model: explicit.k
+model: ../ale/explicit.k
 output: implicit_dyn_lv8.k
 mode: dynamic
 level: 8

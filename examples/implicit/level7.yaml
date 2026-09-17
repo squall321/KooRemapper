@@ -2,7 +2,7 @@
 # 가능한 모든 수렴 보조 기능 활성화 + 최소 시간 스텝.
 # 매우 느리지만 수렴 가능성 최대. 마지막 수단으로 사용.
 # Usage: KooRemapper implicit level7.yaml
-model: explicit.k
+model: ../ale/explicit.k
 output: implicit_lv7.k
 mode: static
 level: 7

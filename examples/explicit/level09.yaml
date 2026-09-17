@@ -29,7 +29,7 @@
 # Usage: KooRemapper stabilize level09.yaml
 # =============================================================
 
-model:  your_model.k
+model:  ../ale/explicit.k
 output: your_model_lv09.k
 stabilize: explicit
 level: 9

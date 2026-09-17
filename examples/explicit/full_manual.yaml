@@ -14,7 +14,7 @@
 # Usage: KooRemapper stabilize full_manual.yaml
 # =============================================================
 
-model:  your_model.k
+model:  ../ale/explicit.k
 output: your_model_stable.k
 stabilize: explicit
 # level: 7                 # 생략 시 pure manual 모드

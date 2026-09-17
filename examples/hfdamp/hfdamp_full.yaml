@@ -15,7 +15,7 @@
 # =============================================================
 
 # --- Required ---
-model:  input.k      # Input K-file
+model:  ../assemble/box.k      # Input K-file
 output: output.k     # Output K-file
 
 # --- Target Timestep ---

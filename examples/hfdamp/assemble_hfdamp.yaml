@@ -5,7 +5,7 @@
 # Usage: KooRemapper assemble assemble_hfdamp.yaml
 # =============================================================
 
-base_model: my_model.k
+base_model: ../assemble/box.k
 output: my_model_damped
 
 operations:

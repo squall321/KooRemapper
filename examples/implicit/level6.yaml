@@ -3,7 +3,7 @@
 # ill-conditioned 행렬, 복잡한 contact 모델에 적합.
 # 주의: MUMPS는 메모리 사용량이 많음.
 # Usage: KooRemapper implicit level6.yaml
-model: explicit.k
+model: ../ale/explicit.k
 output: implicit_lv6.k
 mode: static
 level: 6

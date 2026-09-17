@@ -1,4 +1,4 @@
-model: test_model.k
+model: ../../materials/test_model.k
 output: test_model_db.k
 preset: all
 dt: 0.001
