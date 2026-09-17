@@ -18,6 +18,7 @@
 #include "parser/KFileReader.h"
 #include "cli/ConsoleOutput.h"
 #include "util/Timer.h"
+#include "util/YamlComment.h"
 
 #include <filesystem>
 #include <fstream>
@@ -117,9 +118,9 @@ static bool readConfig(const std::string& path, Cfg& cfg, std::string& err) {
     std::string line, section;
     int secIndent = -1;
     while (std::getline(f, line)) {
-        size_t h = line.find('#');
-        if (h != std::string::npos) line = line.substr(0, h);
-        if (line.find_first_not_of(" \t\r\n") == std::string::npos) continue;
+        // 예전엔 줄 전체를 첫 '#' 에서 잘라 'output: "mf # x.k"' 가 '"mf' 로 남았다(따옴표가 짝이 안 맞아 gmsh 가 멈춤)
+        size_t h = line.find_first_not_of(" \t\r\n");
+        if (h == std::string::npos || line[h] == '#') continue;
 
         int indent = 0;
         while (indent < (int)line.size() && (line[indent]==' '||line[indent]=='\t')) ++indent;
@@ -127,7 +128,7 @@ static bool readConfig(const std::string& path, Cfg& cfg, std::string& err) {
         size_t col = body.find(':');
         if (col == std::string::npos) continue;
         std::string key = mf_trim(body.substr(0, col));
-        std::string val = mf_stripQ(mf_trim(body.substr(col + 1)));
+        std::string val = mf_stripQ(mf_trim(KooRemapper::yamlStripComment(body.substr(col + 1))));
 
         if (indent == 0) { section.clear(); secIndent = -1; }
         else if (secIndent >= 0 && indent <= secIndent) { section.clear(); secIndent = -1; }
@@ -1036,6 +1037,15 @@ static bool subdivideSTLFile(const std::string& path, int levels, std::string& e
 // Gmsh .geo script
 // ─────────────────────────────────────────────────────────────────────────────
 
+// MathEval 식의 '(x - 코너좌표)' — 음수 코너는 부호를 더하기로 뒤집는다.
+// 예전엔 (y--1.000000e+01) 처럼 빼기 두 번이 나와 gmsh 가 'invalid matheval expression' 으로
+// 크기장(Field[1])을 통째로 버렸다(frontal3d 는 TET4 를 하나도 못 만들었다).
+static std::string mf_axisMinus(const char* axis, double c) {
+    std::ostringstream s; s << std::scientific;
+    s << "(" << axis << (c < 0 ? "+" : "-") << std::fabs(c) << ")";
+    return s.str();
+}
+
 static int algoCode(const std::string& a) {
     if (a=="del3d")     return 1;
     if (a=="frontal3d") return 4;
@@ -1094,11 +1104,8 @@ static bool writeGeoScript(const std::string& geoPath,
             pts[k][a1] = (k&2) ? ar.bMax[a1] : ar.bMin[a1];
         }
         auto dsq = [&](int k)->std::string{
-            std::ostringstream s; s<<std::scientific;
-            s<<"(x-"<<pts[k][0]<<")*(x-"<<pts[k][0]<<")"
-             <<"+(y-"<<pts[k][1]<<")*(y-"<<pts[k][1]<<")"
-             <<"+(z-"<<pts[k][2]<<")*(z-"<<pts[k][2]<<")";
-            return s.str();
+            std::string dx=mf_axisMinus("x",pts[k][0]), dy=mf_axisMinus("y",pts[k][1]), dz=mf_axisMinus("z",pts[k][2]);
+            return dx+"*"+dx+"+"+dy+"*"+dy+"+"+dz+"*"+dz;
         };
         std::string distExpr="Sqrt(Min(Min("+dsq(0)+","+dsq(1)+"),Min("+dsq(2)+","+dsq(3)+")))";
         f<<"Field[1] = MathEval;\nField[1].F = \""<<distExpr<<"\";\n\n";
@@ -1131,11 +1138,8 @@ static bool writeGeoScript(const std::string& geoPath,
             double cx = (idx&4) ? ar.bMax[0] : ar.bMin[0];
             double cy = (idx&2) ? ar.bMax[1] : ar.bMin[1];
             double cz = (idx&1) ? ar.bMax[2] : ar.bMin[2];
-            std::ostringstream s; s << std::scientific;
-            s << "(x-" << cx << ")*(x-" << cx << ")"
-              << "+(y-" << cy << ")*(y-" << cy << ")"
-              << "+(z-" << cz << ")*(z-" << cz << ")";
-            return s.str();
+            std::string dx=mf_axisMinus("x",cx), dy=mf_axisMinus("y",cy), dz=mf_axisMinus("z",cz);
+            return dx+"*"+dx+"+"+dy+"*"+dy+"+"+dz+"*"+dz;
         };
         auto minPair = [](const std::string& a, const std::string& b){
             return "Min(" + a + "," + b + ")";
@@ -1191,6 +1195,19 @@ static bool writeGeoScript(const std::string& geoPath,
 // Gmsh subprocess
 // ─────────────────────────────────────────────────────────────────────────────
 
+#ifndef _WIN32
+// 셸에 넘길 경로를 작은따옴표로 감싼다 — 예전엔 "..." 로만 감싸 이름 안의 " 가 인자를 어긋나게 해
+// gmsh 가 -parse_and_exit 없이 떠서 응답 없이 멈췄고, $·` 는 셸이 먼저 풀어버렸다
+static std::string shQuote(const std::string& p) {
+    std::string q = "'";
+    for (char c : p) {
+        if (c == '\'') q += "'\\''";
+        else q += c;
+    }
+    return q + "'";
+}
+#endif
+
 static bool runGmsh(const std::string& gmshExe,
                     const std::string& geoPath,
                     const std::string& mshPath,   // check for output as success criterion
@@ -1213,8 +1230,8 @@ static bool runGmsh(const std::string& gmshExe,
     int ret = std::system(cmd.c_str());
     { std::error_code ec; fs::remove(batPath, ec); }
 #else
-    std::string cmd = "\"" + gmshExe + "\" \"" + geoPath + "\" -v 3 -parse_and_exit"
-                    + " > \"" + logPath + "\" 2>&1";
+    std::string cmd = shQuote(gmshExe) + " " + shQuote(geoPath) + " -v 3 -parse_and_exit"
+                    + " > " + shQuote(logPath) + " 2>&1";
     int ret = std::system(cmd.c_str());
 #endif
     // Gmsh may return exit code 1 for warnings (e.g. ClassifySurfaces recursion)
@@ -1975,6 +1992,8 @@ int runMeshFix(const char* configPath, ConsoleOutput& console) {
     fs::path outDir = fs::path(cfg.output).parent_path();
     if (outDir.empty()) outDir = fs::path(".");
     std::string stem = fs::path(cfg.output).stem().string();
+    // .geo 문자열에는 " 를 escape 할 방법이 없다 — 임시 파일 이름에서만 뺀다(출력 이름은 그대로)
+    for (auto& c : stem) if (c == '"') c = '_';
     auto tempPath = [&](const std::string& ext) {
         return (outDir / (stem + "__mf" + ext)).string();
     };
