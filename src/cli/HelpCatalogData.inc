@@ -262,7 +262,7 @@ operations:
 )KRH"}},
      {"KooRemapper generate box box.yaml", "KooRemapper restack restack.yaml"},
      {},
-     {"material_card 의 mid 칸은 MID001 같은 라벨로 쓸 것 — 숫자를 쓰면 층 PART 의 mid 가 0 이 되고 재질 카드가 빠진다", "카드는 10칸 고정폭. 블록 들여쓰기를 뺀 뒤 MID001 이 1~10 칸 오른쪽 정렬이어야 한다", "같은 라벨을 다시 쓰면 재질 카드를 공유한다. 새 PID·MID 는 자동"}},
+     {"material_card 의 mid 칸은 라벨이다 (MID001, MAT01, 11 모두 가능). 층마다 새 MID 로 바뀌고 같은 라벨은 재질 카드를 공유한다", "카드는 10칸 고정폭 (블록 들여쓰기를 뺀 뒤 기준). 자유 형식(쉼표)도 된다. 새 PID·SECID 는 자동"}},
     {"update", "메시 편집", "dynain·k 파일의 *NODE 좌표로 모델 절점 좌표 덮어쓰기", "좌표갱신 dynain node", "KooRemapper update <config.yaml>",
      {{"box.yaml", R"KRH(output: box.k
 lx: 20.0
@@ -570,7 +570,7 @@ swaps:
 )KRH"}},
      {"KooRemapper matswap swap.yaml"},
      {"examples/matswap/two_cubes.k", "examples/matswap/rubber.k"},
-     {"번들은 *PARAMETER 로 &PID1 &MID1 &SECID1 &HGID1 &LCID1 자리표시를 쓰는 k 파일 (examples/matswap/rubber.k 형식). ID 는 충돌 없게 자동 부여", "pids: [..] / swap_all: true 도 가능", "주의: generate box 로 만든 모델에는 현재 'PID not found' 로 실패한다"}},
+     {"번들은 *PARAMETER 로 &PID1 &MID1 &SECID1 &HGID1 &LCID1 자리표시를 쓰는 k 파일 (examples/matswap/rubber.k 형식). ID 는 충돌 없게 자동 부여", "pids: [..] / swap_all: true 도 가능. PART 카드가 PID SECID MID 3필드뿐인 모델(generate box 출력 등)도 된다"}},
     {"assemble", "재료·어셈블리", "replace·squeeze·restack·update 등 여러 파트 연산을 순차 적용하고 초기응력 누적", "조립 복합 pipeline", "KooRemapper assemble <config.yaml>",
      {{"box.yaml", R"KRH(output: box.k
 lx: 20.0
