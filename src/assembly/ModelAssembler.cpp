@@ -2480,15 +2480,10 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                     }
 
                     if (isTet) {
-                        // TET4 as degenerate HEX8 (LS-DYNA convention):
-                        // base triangle: n1, n2, n3, n3  (node 4 = node 3)
-                        // apex point:    n4, n4, n4, n4  (nodes 5-8 collapsed)
-                        // nodeIds stores: [0]=n1, [1]=n2, [2]=n3, [3]=n4 (4 unique tet vertices)
-                        oss << std::setw(8) << elem.nodeIds[0]
-                            << std::setw(8) << elem.nodeIds[1]
-                            << std::setw(8) << elem.nodeIds[2]
-                            << std::setw(8) << elem.nodeIds[2];  // n4 = n3 (degenerate quad)
-                        for (int n = 0; n < 4; ++n) oss << std::setw(8) << elem.nodeIds[3];  // apex
+                        // TET4: N1, N2, N3, N4, N4, N4, N4, N4 (LS-DYNA Vol I *ELEMENT_SOLID — 이 순서가 아니면
+                        // negative volume 으로 종료). n1 n2 n3 n3 n4.. 는 KFileReader 도 TET4 로 못 읽는다.
+                        for (int n = 0; n < 4; ++n) oss << std::setw(8) << elem.nodeIds[n];
+                        for (int n = 0; n < 4; ++n) oss << std::setw(8) << elem.nodeIds[3];
                     } else {
                         // HEX8/QUAD4: output first 8 node IDs
                         for (int n = 0; n < 8; ++n) oss << std::setw(8) << elem.nodeIds[n];
@@ -2865,18 +2860,10 @@ std::string ModelAssembler::formatElementLine(const AddedElement& elem) const {
     oss << std::setw(8) << elem.id
         << std::setw(8) << elem.pid;
     if (elem.type == ElementType::TET4) {
-        // LS-DYNA degenerate HEX8 convention for TET4:
-        //   base triangle: n1, n2, n3, n3  (position 4 = position 3)
-        //   apex point:    n4, n4, n4, n4  (positions 5-8 collapsed)
-        // Internal storage: nodeIds[0..3] = 4 unique tet vertices, [4..7] = n4
-        oss << std::setw(8) << elem.nodeIds[0]
-            << std::setw(8) << elem.nodeIds[1]
-            << std::setw(8) << elem.nodeIds[2]
-            << std::setw(8) << elem.nodeIds[2]   // n4 = n3 (degenerate quad)
-            << std::setw(8) << elem.nodeIds[3]   // apex
-            << std::setw(8) << elem.nodeIds[3]
-            << std::setw(8) << elem.nodeIds[3]
-            << std::setw(8) << elem.nodeIds[3];
+        // TET4: N1, N2, N3, N4, N4, N4, N4, N4 (LS-DYNA Vol I *ELEMENT_SOLID — 이 순서가 아니면
+        // negative volume 으로 종료). n1 n2 n3 n3 n4.. 는 KFileReader 도 TET4 로 못 읽는다.
+        for (int i = 0; i < 4; ++i) oss << std::setw(8) << elem.nodeIds[i];
+        for (int i = 0; i < 4; ++i) oss << std::setw(8) << elem.nodeIds[3];
     } else {
         for (int i = 0; i < 8; ++i) {
             oss << std::setw(8) << elem.nodeIds[i];
