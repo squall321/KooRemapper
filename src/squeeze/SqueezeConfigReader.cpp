@@ -1,4 +1,5 @@
 #include "squeeze/SqueezeConfigReader.h"
+#include "util/YamlComment.h"
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -37,6 +38,14 @@ SqueezeConfig SqueezeConfigReader::readString(const std::string& yamlContent) {
     Section section = Section::NONE;
     bool inPartItem = false;
 
+    // 예전엔 'strain_mode: true   # 주석' 의 주석·따옴표까지 값으로 읽어 조용히 false/기본값이 됐다
+    auto value = [this](const std::string& raw) {
+        std::string v = trim(yamlStripComment(raw));
+        if (v.size() >= 2 && ((v.front() == '"' && v.back() == '"') || (v.front() == '\'' && v.back() == '\'')))
+            v = v.substr(1, v.size() - 2);
+        return v;
+    };
+
     while (std::getline(stream, line)) {
         // Handle Windows line endings
         if (!line.empty() && line.back() == '\r') {
@@ -56,17 +65,19 @@ SqueezeConfig SqueezeConfigReader::readString(const std::string& yamlContent) {
 
         // Top-level section detection (indent 0)
         if (indent == 0) {
-            if (trimmed == "parts:" || trimmed == "parts") {
+            // 예전엔 'parts:   # 주석' 처럼 주석이 붙은 섹션 머리를 알아보지 못했다
+            std::string head = trim(yamlStripComment(trimmed));
+            if (head == "parts:" || head == "parts") {
                 section = Section::PARTS;
                 inPartItem = false;
                 continue;
             }
-            if (trimmed == "material:" || trimmed == "material") {
+            if (head == "material:" || head == "material") {
                 section = Section::MATERIAL;
                 inPartItem = false;
                 continue;
             }
-            if (trimmed == "relax:" || trimmed == "relax") {
+            if (head == "relax:" || head == "relax") {
                 section = Section::RELAX;
                 inPartItem = false;
                 config.relax.enabled = true;  // presence of section = enabled by default
@@ -76,7 +87,7 @@ SqueezeConfig SqueezeConfigReader::readString(const std::string& yamlContent) {
             size_t colonPos = trimmed.find(':');
             if (colonPos != std::string::npos) {
                 std::string key = trim(trimmed.substr(0, colonPos));
-                std::string val = trim(trimmed.substr(colonPos + 1));
+                std::string val = value(trimmed.substr(colonPos + 1));
                 if (key == "strain_mode")
                     config.strainMode = (val == "true" || val == "yes" || val == "1");
             }
@@ -92,7 +103,7 @@ SqueezeConfig SqueezeConfigReader::readString(const std::string& yamlContent) {
                 size_t colonPos = afterDash.find(':');
                 if (colonPos != std::string::npos) {
                     std::string key = trim(afterDash.substr(0, colonPos));
-                    std::string val = trim(afterDash.substr(colonPos + 1));
+                    std::string val = value(afterDash.substr(colonPos + 1));
 
                     PartSqueezeConfig part;
                     if (key == "pid") {
@@ -109,7 +120,7 @@ SqueezeConfig SqueezeConfigReader::readString(const std::string& yamlContent) {
                 size_t colonPos = trimmed.find(':');
                 if (colonPos != std::string::npos) {
                     std::string key = trim(trimmed.substr(0, colonPos));
-                    std::string val = trim(trimmed.substr(colonPos + 1));
+                    std::string val = value(trimmed.substr(colonPos + 1));
 
                     auto& part = config.parts.back();
                     try {
@@ -126,7 +137,7 @@ SqueezeConfig SqueezeConfigReader::readString(const std::string& yamlContent) {
             size_t colonPos = trimmed.find(':');
             if (colonPos != std::string::npos) {
                 std::string key = trim(trimmed.substr(0, colonPos));
-                std::string val = trim(trimmed.substr(colonPos + 1));
+                std::string val = value(trimmed.substr(colonPos + 1));
 
                 try {
                     if (key == "E") config.E = std::stod(val);
@@ -138,7 +149,7 @@ SqueezeConfig SqueezeConfigReader::readString(const std::string& yamlContent) {
             size_t colonPos = trimmed.find(':');
             if (colonPos != std::string::npos) {
                 std::string key = trim(trimmed.substr(0, colonPos));
-                std::string val = trim(trimmed.substr(colonPos + 1));
+                std::string val = value(trimmed.substr(colonPos + 1));
                 auto& r = config.relax;
                 try {
                     if      (key == "enabled") r.enabled = (val == "true" || val == "yes" || val == "1");

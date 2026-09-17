@@ -5,6 +5,7 @@
 #include "core/Mesh.h"
 #include "battery/BatteryWriter.h"
 #include "kw_util.h"
+#include "util/YamlComment.h"
 
 #include <algorithm>
 #include <array>
@@ -28,6 +29,7 @@ using KooRemapper::ConsoleOutput;
 using KooRemapper::KFileReader;
 using KooRemapper::Mesh;
 using KooRemapper::MaterialData;
+using KooRemapper::yamlStripComment;
 
 namespace {
 
@@ -108,20 +110,6 @@ int cc_indent(const std::string& s) {
 std::string cc_stripQuotes(const std::string& s) {
     if (s.size() >= 2 && ((s.front()=='"' && s.back()=='"') || (s.front()=='\'' && s.back()=='\'')))
         return s.substr(1, s.size()-2);
-    return s;
-}
-
-// drop an inline "  # comment" tail; '#' inside a leading-quoted value survives
-std::string cc_stripInlineComment(const std::string& s) {
-    size_t start = 1;
-    if (!s.empty() && (s[0] == '"' || s[0] == '\'')) {
-        size_t close = s.find(s[0], 1);
-        if (close == std::string::npos) return s;   // unterminated quote — leave as-is
-        start = close + 1;
-    }
-    for (size_t i = start; i < s.size(); ++i)
-        if (s[i] == '#' && std::isspace((unsigned char)s[i-1]))
-            return cc_trim(s.substr(0, i));
     return s;
 }
 
@@ -260,7 +248,8 @@ bool parseCclipYaml(const std::string& yamlFile, CcConfig& cfg, ConsoleOutput& c
 
         size_t cp0 = tr.find(':');
         std::string key0 = (cp0 == std::string::npos) ? "" : cc_trim(tr.substr(0, cp0));
-        std::string val0 = (cp0 == std::string::npos) ? "" : cc_stripQuotes(cc_stripInlineComment(cc_trim(tr.substr(cp0+1))));
+        // 예전 자체 주석 제거는 이미 trim 된 값 맨 앞 '#' 을 놓쳐 'material:   # 주석' 블록을 조용히 버렸다
+        std::string val0 = (cp0 == std::string::npos) ? "" : cc_stripQuotes(yamlStripComment(cc_trim(tr.substr(cp0+1))));
 
         if (curCalib && calibSub != 0) {
             // YAML sequence items may sit at the SAME indent as their key
@@ -334,7 +323,7 @@ bool parseCclipYaml(const std::string& yamlFile, CcConfig& cfg, ConsoleOutput& c
             size_t rcp = rest.find(':');
             if (rcp != std::string::npos) {
                 key = cc_trim(rest.substr(0, rcp));
-                val = cc_stripQuotes(cc_stripInlineComment(cc_trim(rest.substr(rcp+1))));
+                val = cc_stripQuotes(yamlStripComment(cc_trim(rest.substr(rcp+1))));
             } else continue;
         } else if (!(inClipItem && indent > clipItemIndent)) {
             continue;

@@ -37,6 +37,7 @@
 #include "cli/HelpCatalog.h"
 #include "squeeze/SqueezeConfig.h"
 #include "squeeze/SqueezeConfigReader.h"
+#include "util/YamlComment.h"
 #include "assembly/AssemblyConfig.h"
 #include "assembly/AssemblyConfigReader.h"
 #include "assembly/ModelAssembler.h"
@@ -1669,17 +1670,16 @@ static int runMain(int argc, char* argv[]) {
             std::string section;       // "" or "prestress"
             int sectionIndent = -1;    // tracks the prestress block's indent
             while (std::getline(yf, line)) {
-                size_t hash = line.find('#');
-                if (hash != std::string::npos) line = line.substr(0, hash);
-                if (line.find_first_not_of(" \t\r\n") == std::string::npos) continue;
+                // 예전엔 줄의 첫 '#' 에서 잘라 'output: "map # kept.k"' 가 '"map' 파일이 되고 'map#1.k' 가 'map' 이 됐다
+                std::string body = trim(line);
+                if (body.empty() || body[0] == '#') continue;
                 int indent = 0;
                 while (indent < (int)line.size() &&
                        (line[indent] == ' ' || line[indent] == '\t')) ++indent;
-                std::string body = trim(line);
-                size_t colon = body.find(':');
+                size_t colon = yamlStripComment(body).find(':');
                 if (colon == std::string::npos) continue;
                 std::string key = trim(body.substr(0, colon));
-                std::string val = stripQuotes(trim(body.substr(colon + 1)));
+                std::string val = stripQuotes(trim(yamlStripComment(body.substr(colon + 1))));
 
                 // Section bookkeeping
                 if (indent == 0) {

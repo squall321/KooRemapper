@@ -1,4 +1,5 @@
 #include "generator/YamlConfigReader.h"
+#include "util/YamlComment.h"
 #include <fstream>
 #include <sstream>
 #include <algorithm>
@@ -84,13 +85,14 @@ YamlConfigReader::ParsedLine YamlConfigReader::parseLine(const std::string& line
     result.isEmpty = false;
     
     // Check for list item (starts with "- ")
+    // 예전엔 값 뒤 '   # 주석' 을 떼지 않아 'variable_density:   # 주석' 이 하위 블록을 못 열고 값·목록 항목이 깨졌다
     if (content.size() >= 2 && content[0] == '-' && (content[1] == ' ' || content[1] == '[')) {
         result.isListItem = true;
         // The value is everything after "- "
         if (content[1] == ' ') {
-            result.value = trim(content.substr(2));
+            result.value = trim(yamlStripComment(content.substr(2)));
         } else {
-            result.value = trim(content.substr(1));  // "- [x,y]" -> "[x,y]"
+            result.value = trim(yamlStripComment(content.substr(1)));  // "- [x,y]" -> "[x,y]"
         }
         return result;
     }
@@ -104,7 +106,7 @@ YamlConfigReader::ParsedLine YamlConfigReader::parseLine(const std::string& line
     
     result.key = trim(content.substr(0, colonPos));
     if (colonPos + 1 < content.length()) {
-        result.value = trim(content.substr(colonPos + 1));
+        result.value = trim(yamlStripComment(content.substr(colonPos + 1)));
         // Remove quotes if present
         if (result.value.length() >= 2) {
             if ((result.value.front() == '"' && result.value.back() == '"') ||
