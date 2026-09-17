@@ -1,0 +1,18 @@
+# split_pid2_fillet 예제 입력 생성 — box5x5x5.k 위에 4 mm 솔리드 층(PID 2)을 쌓아 2파트 박스
+# 실행 (이 폴더에서, gen_box5x5x5.yaml 다음): KooRemapper assemble gen_box_2part.yaml   → box_2part.k
+base_model: box5x5x5.k
+output: box_2part
+operations:
+  - type: offset
+    source_pid: 1
+    element_type: solid
+    thickness: 4.0
+    num_layers: 2
+    offset_direction: +z
+    connection_mode: none
+    new_pid: 2
+    part_title: TOP
+    material_card: |
+      *MAT_ELASTIC
+      $#     mid        ro         e        pr
+           @MID@  7.85E-09  2.10E+05       0.3

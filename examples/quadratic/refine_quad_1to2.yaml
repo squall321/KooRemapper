@@ -1,4 +1,4 @@
-base_model: shell_test.k
+base_model: shell_mixed.k
 output: refine_quad_1to2_result
 
 operations:

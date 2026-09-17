@@ -1,4 +1,4 @@
-base_model: shell_test.k
+base_model: shell_mixed.k
 output: quad8_result
 
 operations:

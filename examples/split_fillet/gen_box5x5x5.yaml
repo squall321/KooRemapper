@@ -1,0 +1,16 @@
+# split_fillet 예제 입력 생성 — 10 mm 정육면체, 5×5×5 HEX8 (PID 1)
+# 실행 (이 폴더에서): KooRemapper generate box gen_box5x5x5.yaml   → box5x5x5.k
+output: box5x5x5.k
+lx: 10.0
+ly: 10.0
+lz: 10.0
+nx: 5
+ny: 5
+nz: 5
+rho: 7.85e-9
+E: 210000.0
+nu: 0.3
+mid: 1
+secid: 1
+pid: 1
+part_title: BOX
