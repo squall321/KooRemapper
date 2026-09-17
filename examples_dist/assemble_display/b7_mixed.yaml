@@ -3,8 +3,8 @@
 # Shell layers: PSA4/PSA5/BarrierPI/PSA6/PSA7 (interface_contact: tied)
 # Load simplebox.k (run simplebox.yaml first).
 # Usage: KooRemapper assemble examples/assemble_display/b7_mixed.yaml
-model: simplebox.k
-output: examples/assemble_display/b7_mixed
+base_model: simplebox.k
+output: b7_mixed
 
 operations:
   - type: restack

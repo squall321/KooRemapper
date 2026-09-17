@@ -1,7 +1,7 @@
 # B7_PV1 Base Aluminum Box - Generate Only
 # Run first to produce simplebox.k, then use b7_*.yaml examples.
 # Usage: KooRemapper assemble examples/assemble_display/simplebox.yaml
-output: examples/assemble_display/simplebox
+output: simplebox
 
 operations:
   - type: generate

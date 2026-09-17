@@ -4,8 +4,8 @@
 # from the PSA Prony series at the dominant impact frequency.
 # Load simplebox.k (run simplebox.yaml first).
 # Usage: KooRemapper assemble examples/assemble_display/b7_czm.yaml
-model: simplebox.k
-output: examples/assemble_display/b7_czm
+base_model: simplebox.k
+output: b7_czm
 
 operations:
   - type: restack
