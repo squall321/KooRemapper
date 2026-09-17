@@ -1,4 +1,4 @@
-model: mesh.k
+model: mesh_with_tied.k   # LAYER 간 *CONTACT_TIED 가 든 모델 — mesh.k 에는 tied 접촉이 없어 select: tied 가 전체 표면으로 우회한다
 output: mesh_loaded.k
 
 loads:
