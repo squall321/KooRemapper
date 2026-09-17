@@ -306,7 +306,7 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
                     size_t s = kw.find_first_not_of(" \t");
                     size_t e = kw.find_last_not_of(" \t");
                     if (s != std::string::npos && e != std::string::npos)
-                        tgt.push_back(kw.substr(s, e - s + 1));
+                        tgt.push_back(stripQuotes(kw.substr(s, e - s + 1)));  // 예전엔 ["CUBE"] 의 따옴표가 남아 아무 파트도 안 맞았다
                 }
                 continue;
             }

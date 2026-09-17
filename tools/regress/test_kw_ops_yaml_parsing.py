@@ -7,6 +7,7 @@
     제목이 '"Self' 가 됐고, 값 양끝의 따옴표는 아예 떼지 않아 'output: "q.k"' 는 따옴표가 들어간 이름으로
     파일을 쓰고 'mode: "explicit"' · 'stabilize: "explicit"' · 'optimize: "rubber"' 는 모르는 값으로 거부됐다.
     matswap 은 'bundle: "rubber.k"' 를 못 열고 'output: "x.k"' 를 '"x.k".k' 로 썼다.
+    contact 의 include: ["CUBE"] 도 항목의 따옴표가 남아 아무 파트와도 맞지 않았다.
   - stabilize 는 모델의 *CONTROL_CONTACT 에 카드 1 만 있으면 빈 줄을 카드 2 로 넣었는데 패치가 빈 줄을
     건너뛰어 nsbcs·xpene 이 조용히 빠지고 로그는 '*CONTROL_CONTACT: OK' 였다.
   - optimize 의 'pids:' 는 인라인 [1, 2] 만 읽고 블록 목록('- 1' 줄)은 조용히 무시했다.
@@ -126,6 +127,11 @@ def main():
     rc, out = run(binary, d, "optimize", "op.yaml")
     check("optimize: optimize: \"rubber\" 수용 + op_out.k 로 씀",
           rc == 0 and os.path.exists(os.path.join(d, "op_out.k")), f"rc={rc} {out[-200:]}")
+
+    yaml(d, "cl.yaml", 'model: two_cubes.k\noutput: cl_out.k\ncontacts:\n  - action: detect\n    include: ["CUBE"]\n')
+    rc, out = run(binary, d, "contact", "cl.yaml")
+    check("contact: include 목록 항목의 따옴표도 뗌 ([\"CUBE\"] 가 파트와 매칭)",
+          rc == 0 and "contacting pair" in out, f"rc={rc} {out[-200:]}")
 
     yaml(d, "ms.yaml", 'model: "two_cubes.k"\noutput: "ms_out.k"\nswaps:\n  - bundle: "rubber.k"\n    pid: 1\n')
     rc, out = run(binary, d, "matswap", "ms.yaml")
