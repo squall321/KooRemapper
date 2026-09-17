@@ -9790,7 +9790,7 @@
     {
       "name": "restack",
       "category": "mesh",
-      "summary": "Extrude shell surface into stacked solid layers with independent material per layer.",
+      "summary": "Re-divide an extruded solid part into stacked layers, each with its own thickness and material.",
       "description": "Extrude a single solid part into stacked multi-layer geometry with independent material per layer. Replaces target part with new PID/SECID/MID per layer, supporting mixed solid+shell, tied/CZM contact interfaces, and automatic thickness mismatch compensation via initial strain.",
       "invocation": "yaml",
       "config_style": "freeform",

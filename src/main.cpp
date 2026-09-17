@@ -1136,19 +1136,20 @@ static bool printLegacyHelp(ConsoleOutput& console, const std::string& helpCmd) 
     } else if (helpCmd == "restack") {
         console.println("Usage: KooRemapper restack <config.yaml>");
         std::cout << "\n";
-        console.println("Extrude shell surface into stacked solid layers.");
-        console.println("Used in assemble pipeline for multi-layer solid stacks.");
+        console.println("Re-divide an extruded solid part into stacked layers.");
+        console.println("In-plane mesh is kept; only the thickness direction is rebuilt.");
         std::cout << "\n";
         console.println("YAML Config Format:");
-        console.println("  base_model: shell.k");
+        console.println("  base_model: extruded_solid.k");
         console.println("  output: solid_stack");
         console.println("  operations:");
         console.println("    - type: restack");
-        console.println("      target_pid: 1            # Source shell part ID");
-        console.println("      direction: +z            # Extrusion direction");
-        console.println("      element_type: solid      # solid | tshell");
-        console.println("      layers:");
+        console.println("      target_pid: 1            # Extruded solid part ID (HEX8)");
+        console.println("      direction: z             # auto | x | y | z");
+        console.println("      element_type: solid      # solid | tshell | shell");
+        console.println("      layers:                  # first layer = lowest side");
         console.println("        - thickness: 0.5");
+        console.println("          num_elements: 2      # elements through this layer");
         console.println("          material_card: |");
         console.println("            *MAT_ELASTIC");
         console.println("            $#     mid        ro         e        pr");
@@ -1159,7 +1160,9 @@ static bool printLegacyHelp(ConsoleOutput& console, const std::string& helpCmd) 
         console.println("            ...");
         std::cout << "\n";
         console.println("Notes:");
-        console.println("  - Each layer gets a new PID/MID automatically");
+        console.println("  - Input must be an extrusion: same node count in every thickness column");
+        console.println("  - thickness values act as ratios, scaled to the part's real thickness");
+        console.println("  - Each layer gets a new PID/MID automatically; the old PID stays as an empty part");
         console.println("  - disconnect op can follow restack for CZM/Peri separation");
         console.println("  - See examples/assemble_display/restack_guide.md for full docs");
     } else if (helpCmd == "bend") {
