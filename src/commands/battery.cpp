@@ -9,6 +9,7 @@
 #include "battery/BatteryMeshWound.h"
 #include "battery/BatterySwelling.h"
 #include "cli/ConsoleOutput.h"
+#include "util/YamlComment.h"
 
 #include <string>
 #include <vector>
@@ -74,11 +75,6 @@ BatteryConfig parseBatteryConfig(const std::string& yamlFile) {
         if (!line.empty() && line.back() == '\r') line.pop_back();
         std::string t = bat_trim(line);
         if (t.empty() || t[0] == '#') continue;
-        // Strip inline comment
-        {
-            size_t hsh = t.find(" #");
-            if (hsh != std::string::npos) t = bat_trim(t.substr(0, hsh));
-        }
 
         int indent = bat_countIndent(line);
 
@@ -91,7 +87,8 @@ BatteryConfig parseBatteryConfig(const std::string& yamlFile) {
         size_t colon = t.find(':');
         if (colon == std::string::npos) continue;
         std::string key = bat_trim(t.substr(0, colon));
-        std::string val = bat_trim(t.substr(colon + 1));
+        // 예전엔 줄 단위로 ' #' 앞을 잘라 탭 앞 주석('stacked\t# note')은 값에 남고 따옴표 안 # 는 잘렸다
+        std::string val = bat_trim(KooRemapper::yamlStripComment(t.substr(colon + 1)));
 
         // Detect section headers (value empty = section start)
         if (val.empty()) {
@@ -99,6 +96,8 @@ BatteryConfig parseBatteryConfig(const std::string& yamlFile) {
             else if (indent == 2) subsect = key;
             continue;
         }
+        if (val.size() >= 2 && (val.front() == '"' || val.front() == '\'') && val.back() == val.front())
+            val = val.substr(1, val.size() - 2);
 
         // Dispatch by section
         if (indent == 0) {

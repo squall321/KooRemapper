@@ -17,6 +17,7 @@
 #include "parser/KFileReader.h"
 #include "core/Mesh.h"
 #include "core/Element.h"
+#include "util/YamlComment.h"
 
 #include <algorithm>
 #include <array>
@@ -51,17 +52,6 @@ std::string mm_trim(const std::string& s) {
 std::string mm_lower(std::string s) {
     for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     return s;
-}
-
-std::string mm_stripComment(const std::string& v) {
-    bool inS = false, inD = false;
-    for (size_t i = 0; i < v.size(); ++i) {
-        char c = v[i];
-        if (c == '\'' && !inD) inS = !inS;
-        else if (c == '"' && !inS) inD = !inD;
-        else if (c == '#' && !inS && !inD) return mm_trim(v.substr(0, i));
-    }
-    return mm_trim(v);
 }
 
 std::string mm_unquote(const std::string& s) {
@@ -125,7 +115,9 @@ bool mm_parseConfig(const std::string& path, MmConfig& cfg, ConsoleOutput& conso
         size_t c = s.find(':');
         if (c == std::string::npos) continue;
         std::string key = mm_trim(s.substr(0, c));
-        std::string val = mm_unquote(mm_stripComment(s.substr(c + 1)));
+        // 예전엔 값 어디에 있든 따옴표 한 짝에 상태가 뒤집혀("it's_meta   # note" 의 ') 주석이 값에 남았고,
+        // 공백 없이 붙은 #('run#2.k')도 잘랐다
+        std::string val = mm_unquote(mm_trim(KooRemapper::yamlStripComment(s.substr(c + 1))));
         if (key == "model") cfg.model = val;
         else if (key == "output") cfg.output = val;
         else if (key == "detect") cfg.detect = mm_toBool(val);

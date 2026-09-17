@@ -8,6 +8,7 @@
 #include "remesh/TetGenRemesher.h"
 #include "cli/ConsoleOutput.h"
 #include "util/Timer.h"
+#include "util/YamlComment.h"
 #include <fstream>
 #include <memory>
 #include <sstream>
@@ -112,10 +113,9 @@ bool readConfig(const std::string& path, Cfg& cfg, std::string& err) {
     std::string section;  // "" / "quality" / "patch" / "improve" / "tetgen"
     int sectionIndent = -1;
     while (std::getline(f, line)) {
-        // strip comment
-        size_t hash = line.find('#');
-        if (hash != std::string::npos) line = line.substr(0, hash);
-        if (line.find_first_not_of(" \t\r\n") == std::string::npos) continue;
+        // 예전엔 줄 전체를 첫 '#' 에서 잘라 따옴표 안 #('"tet # 1.k"')이나 붙은 #('tet#1.k')까지 날아갔다
+        size_t first = line.find_first_not_of(" \t\r\n");
+        if (first == std::string::npos || line[first] == '#') continue;
 
         // determine indent (count leading spaces)
         int indent = 0;
@@ -125,7 +125,7 @@ bool readConfig(const std::string& path, Cfg& cfg, std::string& err) {
         size_t colon = body.find(':');
         if (colon == std::string::npos) continue;
         std::string key = trim(body.substr(0, colon));
-        std::string val = stripQuotes(trim(body.substr(colon + 1)));
+        std::string val = stripQuotes(trim(KooRemapper::yamlStripComment(body.substr(colon + 1))));
 
         // Section start: top-level key with empty value -> opens section
         if (indent == 0) {

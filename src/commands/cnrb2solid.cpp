@@ -1,6 +1,7 @@
 #include "cnrb2solid.h"
 #include "kw_util.h"
 #include "cli/ConsoleOutput.h"
+#include "util/YamlComment.h"
 
 #include <string>
 #include <vector>
@@ -920,8 +921,10 @@ int runCnrb2Solid(const std::string& yamlFile, ConsoleOutput& console) {
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
         std::string key = cs_trim(tr.substr(0, cp));
-        std::string val = cs_trim(tr.substr(cp + 1));
-        { size_t h = val.find('#'); if (h != std::string::npos) val = cs_trim(val.substr(0, h)); }
+        // 예전엔 값의 첫 '#' 에서 자르고 따옴표도 떼지 않아 'model: "bolt.k"' 를 못 열고 'output: solid#1.k' 는 'solid' 로 썼다
+        std::string val = cs_trim(KooRemapper::yamlStripComment(tr.substr(cp + 1)));
+        if (val.size() >= 2 && (val.front() == '"' || val.front() == '\'') && val.back() == val.front())
+            val = val.substr(1, val.size() - 2);
         if (val.empty()) continue;
         try {
             if      (key == "model")               modelFile        = val;
