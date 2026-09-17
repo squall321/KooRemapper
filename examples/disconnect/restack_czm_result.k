@@ -64,7 +64,6 @@ $#     pid     secid       mid
          3         3         3
 *MAT_ELASTIC
          4  7.85E-09     70000       0.3
-
 *SECTION_SOLID
 $#  secid    elform
          4         1

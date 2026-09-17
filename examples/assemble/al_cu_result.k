@@ -265,14 +265,17 @@ $#  secid    elform
 *PART
 Restack Layer 1
 $#     pid     secid       mid
-         2         2         0
+         2         2         2
+*MAT_ELASTIC
+$#     mid        ro         e        pr        da        db  not used
+         3  8.96E-09  117000.0      0.34       0.0       0.0       0.0
 *SECTION_SOLID
 $#  secid    elform
          3         1
 *PART
 Restack Layer 2
 $#     pid     secid       mid
-         3         3         0
+         3         3         3
 *CONTROL_TERMINATION
      0.001         0       0.0       0.0       0.0         0
 *CONTROL_TIMESTEP

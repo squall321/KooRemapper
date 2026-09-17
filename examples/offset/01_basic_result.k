@@ -2701,4 +2701,5 @@ $#   secid    elform       aet
          1         1
 *MAT_ELASTIC
 $#     mid        ro         e        pr
-              1       2.0     12000       0.25*END
+         1       2.0     12000      0.25
+*END

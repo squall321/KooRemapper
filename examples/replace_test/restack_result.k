@@ -45,8 +45,7 @@ $#     mid        ro         e        pr
          1  7.85E-09  2.10E+05       0.3
 *MAT_ELASTIC
 $#     mid        ro         e        pr
-          2  7.85E-09  2.10E+05       0.3
-
+         2  7.85E-09  2.10E+05       0.3
 *SECTION_SOLID
 $#  secid    elform
          2         1
@@ -56,8 +55,7 @@ $#     pid     secid       mid
          3         2         2
 *MAT_ELASTIC
 $#     mid        ro         e        pr
-          3  7.85E-09  1.50E+05      0.25
-
+         3  7.85E-09  1.50E+05      0.25
 *SECTION_SOLID
 $#  secid    elform
          3         1

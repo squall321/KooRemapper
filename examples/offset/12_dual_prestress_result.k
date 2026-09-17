@@ -4445,7 +4445,7 @@ $#   secid    elform       aet
          1         1
 *MAT_ELASTIC
 $#     mid        ro         e        pr
-              1       2.0     12000       0.25
+         1       2.0     12000      0.25
 $
 $ ==================== CONTACT DEFINITION REQUIRED ====================
 $ The offset layer uses connection_mode: contact
@@ -4468,5 +4468,5 @@ $#   secid    elform       aet
          2         1
 *MAT_ELASTIC
 $#     mid        ro         e        pr
-              2       2.0     12000       0.25
+         2       2.0     12000      0.25
 *END

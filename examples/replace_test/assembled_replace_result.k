@@ -76,5 +76,5 @@ $#   nid       dofx      dofy      dofz     dofrx     dofry     dofrz
          5       1         1         1         0         0         0
          8       1         1         1         0         0         0
 *INCLUDE
-assembled_replace_result_dynain.dat
+assembled_replace_result.dynain
 *END

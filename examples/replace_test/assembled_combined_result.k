@@ -91,5 +91,5 @@ $#   nid       dofx      dofy      dofz     dofrx     dofry     dofrz
          1       1         1         1         0         0         0
          4       1         1         1         0         0         0
 *INCLUDE
-assembled_combined_result_dynain.dat
+assembled_combined_result.dynain
 *END

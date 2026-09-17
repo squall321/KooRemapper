@@ -3286,5 +3286,5 @@ $#      t1        t2        t3        t4      nloc     marea      idof    edgset
  1.500e+00 1.500e+00 1.500e+00 1.500e+00
 *MAT_ELASTIC
 $#     mid        ro         e        pr
-              1       2.0     12000       0.25
+         1       2.0     12000      0.25
 *END
