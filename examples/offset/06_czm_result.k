@@ -3868,7 +3868,7 @@ $#     mid        ro     roflg   intfail        en        et       gic      giic
 $#     xmu         t         s       und       utd     gamma
        2.0       1.0       1.0
 *PART
-"CZM_Offset"
+CZM_Offset
         10         1         1
 *SECTION_SOLID
 $#   secid    elform       aet

@@ -5018,7 +5018,7 @@ $#   eid     pid      n1      n2      n3      n4      n5      n6      n7      n8
     2339      10    1506    1314    1316    1335    2088    1896    1898    1917
     2340      10    2088    1896    1898    1917    2670    2478    2480    2499
 *PART
-"MultiLayer_Offset"
+MultiLayer_Offset
         10         1         1
 *SECTION_SOLID
 $#   secid    elform       aet

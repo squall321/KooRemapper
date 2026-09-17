@@ -4438,7 +4438,7 @@ $#   eid     pid      n1      n2      n3      n4      n5      n6      n7      n8
     1759      11    2669    2670    2499    2498    2087    2088    1917    1916
     1760      11    2670    2478    2480    2499    2088    1896    1898    1917
 *PART
-"Upper_Layer"
+Upper_Layer
         10         1         1
 *SECTION_SOLID
 $#   secid    elform       aet
@@ -4461,7 +4461,7 @@ $      0.00      0.00      0.00      0.00      0.00         0      0.00  1.00E+2
 $ ======================================================================
 $
 *PART
-"Side_Layer"
+Side_Layer
         11         2         2
 *SECTION_SOLID
 $#   secid    elform       aet

@@ -3277,7 +3277,7 @@ $#   eid     pid      n1      n2      n3      n4      n5      n6      n7      n8
      579      10    2085    2087    1745    1743
      580      10    2087    1703    1707    1745
 *PART
-"TShell_Offset"
+TShell_Offset
         10         1         1
 *SECTION_TSHELL
 $#   secid    elform      shrf       nip     propt   qr/irid     icomp     setyp

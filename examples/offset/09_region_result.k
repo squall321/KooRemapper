@@ -1710,7 +1710,7 @@ $#   eid     pid      n1      n2      n3      n4      n5      n6      n7      n8
      681      10     883     884     905     904     999    1019    1001    1000
      682      10     884     885     906     905    1019    1020    1002    1001
 *PART
-"Region_Offset"
+Region_Offset
         10         1         1
 *SECTION_SOLID
 $#   secid    elform       aet

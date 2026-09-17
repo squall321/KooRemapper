@@ -2694,7 +2694,7 @@ $#   eid     pid      n1      n2      n3      n4      n5      n6      n7      n8
     1179      10     901     902     923     922    1505    1506    1335    1334
     1180      10     902     903     924     923    1506    1314    1316    1335
 *PART
-"VarThickness_Offset"
+VarThickness_Offset
         10         1         1
 *SECTION_SOLID
 $#   secid    elform       aet
