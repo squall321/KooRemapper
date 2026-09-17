@@ -337,7 +337,11 @@ int runOptimize(const std::string& yamlFile, ConsoleOutput& console) {
         else if (key == "optimize")      cfg.mode = val;
         else if (key == "tssfac")        { try { cfg.tssfac = std::stod(val); } catch(...) {} }
         else if (key == "analysis_type") cfg.analysisType = val;
-        else if (key == "pid")           cfg.pids = { std::stoi(val) };
+        // 예전엔 try/catch 밖 stoi 라 'pid: abc' 가 '[ERROR] Unhandled error: stoi' 로 끝났다
+        else if (key == "pid") {
+            try { cfg.pids = { std::stoi(val) }; }
+            catch (...) { console.error("optimize YAML: 'pid' must be an integer: " + val); return 1; }
+        }
         else if (key == "pids") {
             if (val.empty()) inPidsBlock = true;
             std::string lv = val;

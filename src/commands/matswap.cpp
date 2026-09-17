@@ -438,6 +438,16 @@ int runMatswapYaml(const std::string& yamlFile, ConsoleOutput& console) {
         return s;
     };
 
+    // 예전엔 'pid:'/'mid:' 를 try/catch 밖 stoi 로 읽어 숫자가 아니면 '[ERROR] Unhandled error: stoi' 로 끝났다
+    bool badId = false;
+    auto parseId = [&](const std::string& key, const std::string& v, std::vector<int>& out) {
+        try { out = { std::stoi(v) }; }
+        catch (...) {
+            console.error("matswap YAML: '" + key + "' must be an integer: " + v);
+            badId = true;
+        }
+    };
+
     std::string modelFile, outputFile;
     std::string optimizeMode;
     double optimizeTssfac = 0.67;
@@ -485,9 +495,9 @@ int runMatswapYaml(const std::string& yamlFile, ConsoleOutput& console) {
                 };
                 if (key=="bundle") swaps.back().bundleFile = val;
                 else if (key=="swap_all") swaps.back().swapAll = (val=="true"||val=="yes"||val=="1");
-                else if (key=="pid")  swaps.back().pids = { std::stoi(val) };
+                else if (key=="pid")  parseId("pid", val, swaps.back().pids);
                 else if (key=="pids") { parseIL(val, swaps.back().pids); if (val.empty()) blockList = &swaps.back().pids; }
-                else if (key=="mid")  swaps.back().mids = { std::stoi(val) };
+                else if (key=="mid")  parseId("mid", val, swaps.back().mids);
                 else if (key=="mids") { parseIL(val, swaps.back().mids); if (val.empty()) blockList = &swaps.back().mids; }
             }
             continue;
@@ -509,9 +519,9 @@ int runMatswapYaml(const std::string& yamlFile, ConsoleOutput& console) {
                 try {
                     if (key=="bundle") swaps.back().bundleFile = val;
                     else if (key=="swap_all") swaps.back().swapAll=(val=="true"||val=="yes"||val=="1");
-                    else if (key=="pid")  swaps.back().pids = { std::stoi(val) };
+                    else if (key=="pid")  parseId("pid", val, swaps.back().pids);
                     else if (key=="pids") { parseIL(val, swaps.back().pids); if (val.empty()) blockList = &swaps.back().pids; }
-                    else if (key=="mid")  swaps.back().mids = { std::stoi(val) };
+                    else if (key=="mid")  parseId("mid", val, swaps.back().mids);
                     else if (key=="mids") { parseIL(val, swaps.back().mids); if (val.empty()) blockList = &swaps.back().mids; }
                 } catch(...) {}
             }
@@ -542,7 +552,7 @@ int runMatswapYaml(const std::string& yamlFile, ConsoleOutput& console) {
             }
             else if (key=="pid") {
                 if (swaps.empty()) swaps.push_back(MatswapOperation{});
-                swaps.back().pids = { std::stoi(val) };
+                parseId("pid", val, swaps.back().pids);
             }
             else if (key=="pids") {
                 if (swaps.empty()) swaps.push_back(MatswapOperation{});
@@ -551,7 +561,7 @@ int runMatswapYaml(const std::string& yamlFile, ConsoleOutput& console) {
             }
             else if (key=="mid") {
                 if (swaps.empty()) swaps.push_back(MatswapOperation{});
-                swaps.back().mids = { std::stoi(val) };
+                parseId("mid", val, swaps.back().mids);
             }
             else if (key=="mids") {
                 if (swaps.empty()) swaps.push_back(MatswapOperation{});
@@ -568,6 +578,7 @@ int runMatswapYaml(const std::string& yamlFile, ConsoleOutput& console) {
         }
     }
 
+    if (badId) return 1;  // 잘못된 pid/mid 는 parseId 가 이미 알렸다
     if (modelFile.empty())  { console.error("matswap YAML: 'model' not specified");  return 1; }
     if (outputFile.empty()) { console.error("matswap YAML: 'output' not specified"); return 1; }
     if (swaps.empty())      { console.error("matswap YAML: no swaps defined");        return 1; }
