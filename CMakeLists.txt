@@ -123,6 +123,7 @@ set(ASSEMBLY_SOURCES
 set(CLI_SOURCES
     src/cli/ArgumentParser.cpp
     src/cli/ConsoleOutput.cpp
+    src/cli/HelpCatalog.cpp
 )
 
 # Source files - Utility
