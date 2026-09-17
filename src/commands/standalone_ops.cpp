@@ -61,9 +61,12 @@ struct StandaloneYamlBase {
         return true;
     }
 
+    // 절대 경로가 아니면 YAML 이 있는 폴더 기준으로 푼다(assemble 과 같은 규칙).
+    // 예전엔 '/' 가 없는 이름만 붙여, '../arc30/arc30_flat.k' 같은 상대 경로는 실행 폴더에서 찾아 열지 못했다.
     std::string resolvePath(const std::string& p) const {
-        if (configDir.empty()) return p;
-        if (p.find('/') != std::string::npos || p.find('\\') != std::string::npos) return p;
+        if (configDir.empty() || p.empty()) return p;
+        if (p.size() >= 2 && p[1] == ':') return p;            // Windows 절대 경로(X:\...)
+        if (p[0] == '/' || p[0] == '\\') return p;             // POSIX 절대 경로 / UNC
         return configDir + "/" + p;
     }
 
