@@ -1206,6 +1206,25 @@ static std::string shQuote(const std::string& p) {
     }
     return q + "'";
 }
+#else
+// 배치 파일 한 줄에 넣을 경로를 큰따옴표로 감싼다 — 공백·& ( ) ^ 는 따옴표 안에서 글자로 남지만
+// %는 따옴표 안에서도 변수로 풀리므로 배치 규칙대로 %% 로 escape 한다.
+// 예전엔 그냥 "..." 로 감싸서 'C:\%TEMP%\out' 같은 폴더가 엉뚱한 경로로 바뀌었다.
+static std::string batQuote(const std::string& p) {
+    std::string q = "\"";
+    for (char c : p) {
+        if (c == '%') q += "%%";
+        else q += c;
+    }
+    return q + "\"";
+}
+// 큰따옴표·줄바꿈이 든 경로는 어떤 인용으로도 배치 한 줄을 지킬 수 없다(윈도 파일명에 " 는 애초에 못 쓴다).
+// 예전엔 그대로 "..." 안에 넣어 인용이 어긋난 채 명령이 쪼개졌다 — 지금은 실행 전에 거부한다.
+static bool batUnsafe(const std::string& p) {
+    return p.find('"')  != std::string::npos ||
+           p.find('\n') != std::string::npos ||
+           p.find('\r') != std::string::npos;
+}
 #endif
 
 static bool runGmsh(const std::string& gmshExe,
@@ -1219,14 +1238,21 @@ static bool runGmsh(const std::string& gmshExe,
     std::string logNative  = backSlash(logPath);
     // Use a .bat file: avoids system() double-quote nesting on Windows
     std::string batPath = backSlash(logPath) + ".bat";
+    if (batUnsafe(gmshNative) || batUnsafe(geoNative) ||
+        batUnsafe(logNative)  || batUnsafe(batPath)) {
+        err = "Path contains a quote or newline — cannot run Gmsh safely: " + geoPath;
+        return false;
+    }
     {
         std::ofstream bat(batPath);
         bat << "@echo off\r\n";
-        bat << "\"" << gmshNative << "\" \"" << geoNative << "\" -v 3 -parse_and_exit"
-            << " > \"" << logNative << "\" 2>&1\r\n";
+        bat << batQuote(gmshNative) << " " << batQuote(geoNative) << " -v 3 -parse_and_exit"
+            << " > " << batQuote(logNative) << " 2>&1\r\n";
     }
-    // cmd /c "batpath" — single quote level, no nesting
-    std::string cmd = "cmd /c \"" + batPath + "\"";
+    // cmd /c ""batpath"" — 바깥 한 겹은 cmd 가 벗겨 내고 안쪽 한 겹이 경로를 감싼 채 남는다.
+    // 예전처럼 한 겹만 쓰면 경로에 & ( ) ^ 가 있을 때 cmd 가 따옴표를 통째로 벗겨 명령이 쪼개졌다.
+    // (명령줄의 % 는 배치 안과 달리 escape 할 방법이 없어 %VAR% 폴더명은 여전히 풀린다 — 예전과 같다)
+    std::string cmd = "cmd /c \"\"" + batPath + "\"\"";
     int ret = std::system(cmd.c_str());
     { std::error_code ec; fs::remove(batPath, ec); }
 #else
