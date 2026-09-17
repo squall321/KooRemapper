@@ -65,6 +65,19 @@ def test_dump_yaml_nested_array_flow_inner():
     assert "points:\n" in text
 
 
+def test_dump_yaml_multiline_card_literal_block():
+    # 여러 줄 재질 카드는 `key: |` 리터럴 블록이어야 C++ 파서가 읽는다(따옴표 문자열이면 restack 층 mid=0).
+    card = "*MAT_ELASTIC   \n$#     mid        ro         e        pr\n    MID001  7.85E-09    210000       0.3"
+    cfg = {"layers": [{"thickness": 0.3, "material_card": card}]}
+    text = _dump_yaml(cfg)
+    assert "    material_card: |\n      *MAT_ELASTIC\n" in text, text
+    assert "\"*MAT_ELASTIC" not in text
+    back = yaml.safe_load(text)["layers"][0]["material_card"]
+    assert back.splitlines() == [ln.rstrip() for ln in card.splitlines()]
+    # 한 줄 문자열은 그대로(블록 아님)
+    assert "note: plain" in _dump_yaml({"note": "plain"})
+
+
 def test_validation_error_propagates():
     b = build_command("map", {"bent_mesh": "b.k"}, _wd())
     assert b.error and "flat_mesh" in b.error

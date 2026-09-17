@@ -211,6 +211,14 @@ async def _execute(job_id: str) -> None:
                 tail = err_path.read_text()[-800:]
             except OSError:
                 tail = ""
+            if not tail.strip():
+                # KooRemapper 는 [ERROR] 를 stdout 으로 찍는다 — stderr 가 비면 요약이 'exit 1:' 뿐이었다
+                try:
+                    out_lines = out_path.read_text(errors="replace").splitlines()
+                except OSError:
+                    out_lines = []
+                errs = [ln for ln in out_lines if "[ERROR]" in ln]
+                tail = "\n".join((errs or out_lines)[-5:])[-800:]
             job.error_summary = f"exit {exit_code}: {tail}".strip()
         await db.commit()
         logger.info("job %s %s (exit=%s, %d outputs)", job_id, job.status, exit_code, len(output_ids))
