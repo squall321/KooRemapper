@@ -1150,8 +1150,8 @@ static bool printLegacyHelp(ConsoleOutput& console, const std::string& helpCmd) 
         console.println("        - thickness: 0.5");
         console.println("          material_card: |");
         console.println("            *MAT_ELASTIC");
-        console.println("            $#  mid   ro    e   pr");
-        console.println("                 10  2.0 1000 0.35");
+        console.println("            $#     mid        ro         e        pr");
+        console.println("                    10       2.0      1000      0.35");
         console.println("        - thickness: 0.2");
         console.println("          material_card: |");
         console.println("            *MAT_ELASTIC");
@@ -1360,11 +1360,12 @@ static bool printLegacyHelp(ConsoleOutput& console, const std::string& helpCmd) 
         console.println("      thickness_formula: \"1.0+0.01*x\"  # Variable thickness");
         console.println("      material_card: |          # Inline material definition");
         console.println("        *MAT_ELASTIC");
-        console.println("        $#  mid   ro     e    pr");
-        console.println("             @MID@  2.0  1000  0.35");
+        console.println("        $#     mid        ro         e        pr");
+        console.println("             @MID@       2.0      1000      0.35");
         std::cout << "\n";
         console.println("Notes:");
-        console.println("  - @MID@ is auto-replaced with assigned material ID");
+        console.println("  - The MID field (@MID@, a number or any label) is replaced with the assigned material ID");
+        console.println("  - Keep each card value inside its 10-column field (LS-DYNA fixed format)");
         console.println("  - use_local_normals improves quality on curved surfaces");
         console.println("  - region: bbox/nodeId/elementId filters source surface");
         console.println("  - See examples/offset/README.md for full examples");

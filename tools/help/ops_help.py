@@ -199,8 +199,9 @@ operations:
     new_pid: 10
 """}),
    cmds=[BOX_CMD, "KooRemapper offset offset.yaml"], outputs=["box_offset.k"],
-   notes=["connection_mode: tied(기본) | czm | contact | none",
-          "YAML 값 뒤에 # 주석을 붙이지 말 것 (element_type: solid  # ... 는 값으로 읽혀 실패한다)"])
+   notes=["connection_mode: tied(기본) | czm | contact | none (assemble 경로도 none 허용)",
+          "material_card·czm_material_card 의 MID 칸(@MID@·@CZM_MID@·숫자·라벨)은 새 MID 로 바뀐다. 값은 10열 칸 안에 둘 것",
+          "material_cards: 목록으로 층마다 다른 재질 (단독 offset·assemble 모두)"])
 op("wrap", "메시 편집", "원통 파트에 와인딩 인장 초기응력(후프+반경) 부여", "와인딩 인장 hoop 압입",
    "KooRemapper wrap <config.yaml>",
    needs=["examples/wrap/cylinder_2layer.k"],
