@@ -90,6 +90,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
     MaterialCardTarget materialCardTarget = MaterialCardTarget::NONE;
     bool inShapeSection = false;
     bool inPointsList = false;
+    int pointsKeyIndent = 0;   // indent of "points:" key for indent shape
     bool inMaterialCardsList = false;
     int materialCardsKeyIndent = 0;
     bool readingMaterialCardsItem = false;
@@ -196,7 +197,8 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
             size_t colonPos = trimmed.find(':');
             if (colonPos != std::string::npos) {
                 std::string key = trim(trimmed.substr(0, colonPos));
-                std::string val = trim(stripComment(trimmed.substr(colonPos + 1)));
+                // 따옴표를 떼지 않아 'output: "qa"' 가 '"qa".k' 로 써졌다
+                std::string val = stripQuotes(trim(stripComment(trimmed.substr(colonPos + 1))));
 
                 if (key == "base_model") {
                     config.baseModel = val;
@@ -307,7 +309,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                 size_t colonPos = afterDash.find(':');
                 if (colonPos != std::string::npos) {
                     std::string key = trim(afterDash.substr(0, colonPos));
-                    std::string val = trim(stripComment(afterDash.substr(colonPos + 1)));
+                    std::string val = stripQuotes(trim(stripComment(afterDash.substr(colonPos + 1))));
 
                     if (!config.operations.empty() &&
                         config.operations.back().type == AssemblyOperation::RESTACK) {
@@ -332,7 +334,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                 size_t colonPos = trimmed.find(':');
                 if (colonPos != std::string::npos) {
                     std::string key = trim(trimmed.substr(0, colonPos));
-                    std::string val = trim(stripComment(trimmed.substr(colonPos + 1)));
+                    std::string val = stripQuotes(trim(stripComment(trimmed.substr(colonPos + 1))));
 
                     if (!config.operations.empty() &&
                         config.operations.back().type == AssemblyOperation::RESTACK &&
@@ -428,7 +430,8 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
 
             // --- Load cases curve points: "        - [0.0, 1.0]" ---
             if (inLoadCurveList && indent > loadCurveKeyIndent && trimmed[0] == '-' && trimmed.size() >= 2 && trimmed[1] == ' ') {
-                std::string rest = trim(trimmed.substr(2));
+                // 주석을 떼지 않아 '- [0.0, 0.0]   # 주석' 점이 ']' 로 끝나지 않는다며 빠졌다
+                std::string rest = trim(stripComment(trimmed.substr(2)));
                 if (!rest.empty() && rest.front() == '[' && rest.back() == ']') {
                     rest = rest.substr(1, rest.size()-2);
                     size_t comma = rest.find(',');
@@ -460,7 +463,8 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                     !config.operations.empty() &&
                     config.operations.back().type == AssemblyOperation::CONTACT) {
                     std::string key = trim(afterDash.substr(0, colonPos));
-                    std::string val = stripQuotes(trim(afterDash.substr(colonPos + 1)));
+                    // contact·load·boundary·rbe 목록 값은 예전엔 주석을 떼지 않아 '- action: create   # 주석' 을 모르는 action 으로 봤다
+                    std::string val = stripQuotes(trim(stripComment(afterDash.substr(colonPos + 1))));
                     ContactAction cact;
                     if (key == "action") cact.action = val;
                     else if (key == "type") cact.type = val;
@@ -480,7 +484,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                     config.operations.back().type == AssemblyOperation::CONTACT &&
                     !config.operations.back().contact.actions.empty()) {
                     std::string key = trim(trimmed.substr(0, colonPos));
-                    std::string val = stripQuotes(trim(trimmed.substr(colonPos + 1)));
+                    std::string val = stripQuotes(trim(stripComment(trimmed.substr(colonPos + 1))));
                     auto& cact = config.operations.back().contact.actions.back();
 
                     // Slave/master sub-sections
@@ -556,7 +560,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                     !config.operations.empty() &&
                     config.operations.back().type == AssemblyOperation::LOAD) {
                     std::string key = trim(afterDash.substr(0, colonPos));
-                    std::string val = stripQuotes(trim(afterDash.substr(colonPos + 1)));
+                    std::string val = stripQuotes(trim(stripComment(afterDash.substr(colonPos + 1))));
                     LoadCase lcase;
                     if (key == "part") {
                         try { lcase.pid = std::stoi(val); } catch(...) { lcase.partName = val; }
@@ -578,7 +582,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                     config.operations.back().type == AssemblyOperation::LOAD &&
                     !config.operations.back().load.loads.empty()) {
                     std::string key = trim(trimmed.substr(0, colonPos));
-                    std::string val = stripQuotes(trim(trimmed.substr(colonPos + 1)));
+                    std::string val = stripQuotes(trim(stripComment(trimmed.substr(colonPos + 1))));
                     auto& lcase = config.operations.back().load.loads.back();
 
                     if (key == "curve") {
@@ -620,7 +624,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                     !config.operations.empty() &&
                     config.operations.back().type == AssemblyOperation::BOUNDARY) {
                     std::string key = trim(afterDash.substr(0, colonPos));
-                    std::string val = stripQuotes(trim(afterDash.substr(colonPos + 1)));
+                    std::string val = stripQuotes(trim(stripComment(afterDash.substr(colonPos + 1))));
                     BoundaryCase bcase;
                     if (key == "part") {
                         try { bcase.pid = std::stoi(val); } catch(...) { bcase.partName = val; }
@@ -640,7 +644,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                     config.operations.back().type == AssemblyOperation::BOUNDARY &&
                     !config.operations.back().boundary.boundaries.empty()) {
                     std::string key = trim(trimmed.substr(0, colonPos));
-                    std::string val = stripQuotes(trim(trimmed.substr(colonPos + 1)));
+                    std::string val = stripQuotes(trim(stripComment(trimmed.substr(colonPos + 1))));
                     auto& bcase = config.operations.back().boundary.boundaries.back();
 
                     if (key == "part") {
@@ -683,7 +687,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                     !config.operations.empty() &&
                     config.operations.back().type == AssemblyOperation::RBE) {
                     std::string key = trim(afterDash.substr(0, colonPos));
-                    std::string val = stripQuotes(trim(afterDash.substr(colonPos + 1)));
+                    std::string val = stripQuotes(trim(stripComment(afterDash.substr(colonPos + 1))));
                     RbeCase rcase;
                     if (key == "part") {
                         try { rcase.pid = std::stoi(val); } catch(...) { rcase.partName = val; }
@@ -704,7 +708,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                     config.operations.back().type == AssemblyOperation::RBE &&
                     !config.operations.back().rbe.constraints.empty()) {
                     std::string key = trim(trimmed.substr(0, colonPos));
-                    std::string val = stripQuotes(trim(trimmed.substr(colonPos + 1)));
+                    std::string val = stripQuotes(trim(stripComment(trimmed.substr(colonPos + 1))));
                     auto& rcase = config.operations.back().rbe.constraints.back();
 
                     if (key == "part") {
@@ -733,6 +737,11 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                 inRbeItem = false;
             }
 
+            // indent points 목록은 들여쓰기로 끝낸다 — 예전엔 다음 '- type:' 오퍼레이션까지 점으로 삼켜 그 op 가 사라졌다
+            if (inPointsList && indent < pointsKeyIndent) {
+                inPointsList = false;
+            }
+
             // --- Operation list item start: "  - type: replace" ---
             if (!inPointsList && !inMatdbRulesList && !inLoadCasesList && !inContactActionsList && !inBoundaryList && !inRbeList && trimmed[0] == '-' && trimmed.size() >= 2 && trimmed[1] == ' ') {
                 inLayersList = false;
@@ -745,11 +754,12 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                 inMatdbRulesList = false;
                 inMatdbRuleItem = false;
 
-                std::string afterDash = trim(trimmed.substr(2));
+                // 주석을 먼저 떼야 '- |   # 주석: 값' 처럼 주석 안의 ':' 를 키로 보고 빈 op 를 만들지 않는다
+                std::string afterDash = trim(stripComment(trimmed.substr(2)));
                 size_t colonPos = afterDash.find(':');
                 if (colonPos != std::string::npos) {
                     std::string key = trim(afterDash.substr(0, colonPos));
-                    std::string val = trim(stripComment(afterDash.substr(colonPos + 1)));
+                    std::string val = stripQuotes(trim(stripComment(afterDash.substr(colonPos + 1))));
 
                     AssemblyOperation op;
                     if (key == "type") {
@@ -890,7 +900,8 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                 size_t colonPos = trimmed.find(':');
                 if (colonPos != std::string::npos) {
                     std::string key = trim(trimmed.substr(0, colonPos));
-                    std::string val = trim(stripComment(trimmed.substr(colonPos + 1)));
+                    // 예전엔 따옴표를 남겨 'dat_file: "a.dat"' 같은 값이 따옴표째 경로·이름이 됐다
+                    std::string val = stripQuotes(trim(stripComment(trimmed.substr(colonPos + 1))));
 
                     auto& op = config.operations.back();
                     try {
@@ -900,10 +911,12 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                              op.type != AssemblyOperation::MATSWAP &&
                              op.type != AssemblyOperation::MATDB &&
                              op.type != AssemblyOperation::CONTROL) ||
+                            // generate 의 pid 는 만들 파트 번호 — 예전엔 target_pid 로 보내 무시돼 늘 PID 1 이 됐다
                             (key == "pid" &&
                              op.type != AssemblyOperation::MATSWAP &&
                              op.type != AssemblyOperation::MATDB &&
-                             op.type != AssemblyOperation::CONTROL)) {
+                             op.type != AssemblyOperation::CONTROL &&
+                             op.type != AssemblyOperation::GENERATE)) {
                             // Helper lambda: set single PID on the relevant struct
                             auto setSingle = [&](int pid) {
                                 if (op.type == AssemblyOperation::REPLACE)       op.replace.targetPid    = pid;
@@ -1056,6 +1069,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             else if (inShapeSection && key == "type") op.indent.shapeType = val;
                             else if (inShapeSection && key == "points") {
                                 inPointsList = true;
+                                pointsKeyIndent = indent;
                             }
                         } else if (op.type == AssemblyOperation::FORMSTRAIN) {
                             if (key == "shell_thickness") op.formstrain.shellThickness = std::stod(val);
@@ -1446,7 +1460,8 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                 // Material cards list items: "        - |"
                 if (inMaterialCardsList && indent > materialCardsKeyIndent &&
                     trimmed.size() >= 1 && trimmed[0] == '-' && trimmed.size() >= 2) {
-                    std::string afterDash = trim(trimmed.substr(1));
+                    // 주석을 떼지 않아 '- |   # 주석' 을 카드 시작으로 못 봤다
+                    std::string afterDash = trim(stripComment(trimmed.substr(1)));
                     if (afterDash == "|" || afterDash.empty()) {
                         // Start new material card
                         if (!config.operations.empty() &&
