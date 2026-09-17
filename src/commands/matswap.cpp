@@ -97,11 +97,13 @@ static MswBundle msw_parseBundle(const std::string& path) {
             if (!partTitle) { partTitle=true; continue; }
             if (!partData) {
                 auto toks = kw_tok10(ln);
-                if (toks.size()>=5) {
+                // PID SECID MID 3필드만 쓴 PART 도 허용 (EOSID·HGID 생략 = 0)
+                if (toks.size()>=3) {
                     bnd.bundlePid   = msw_resolveInt(toks[0], bnd.params);
                     bnd.bundleSecid = msw_resolveInt(toks[1], bnd.params);
                     bnd.bundleMid   = msw_resolveInt(toks[2], bnd.params);
-                    bnd.bundleHgid  = msw_resolveInt(toks[4], bnd.params);
+                    if (toks.size()>=5 && !toks[4].empty())
+                        bnd.bundleHgid = msw_resolveInt(toks[4], bnd.params);
                 }
                 partData=true;
             }
@@ -150,12 +152,14 @@ static MswPartInfo msw_getPartInfo(const std::vector<std::string>& lines, int ta
         if (!inPart || tr[0]=='$') continue;
         if (!titleDone) { titleDone=true; continue; }
         auto toks = kw_tok10(lines[i]);
-        if (toks.size()>=5) {
+        // PID SECID MID 3필드만 쓴 PART 도 허용 (generate box 출력 등). EOSID·HGID 생략 = 0
+        if (toks.size()>=3) {
             try {
                 int pid=std::stoi(toks[0]);
                 if (pid==targetPid) {
                     info.pid=pid; info.secid=std::stoi(toks[1]);
-                    info.mid=std::stoi(toks[2]); info.hgid=std::stoi(toks[4]);
+                    info.mid=std::stoi(toks[2]);
+                    info.hgid=(toks.size()>=5 && !toks[4].empty()) ? std::stoi(toks[4]) : 0;
                     info.dataLine=i; return info;
                 }
             } catch(...) {}
