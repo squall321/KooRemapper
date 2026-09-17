@@ -70,6 +70,35 @@ struct StandaloneYamlBase {
         return configDir + "/" + p;
     }
 
+    // operations 항목 수 — 단독 명령은 한 항목만 다루므로, 여러 개면 조용히 합치지 말고 거부해야 한다.
+    static int countOperations(const std::string& yamlFile) {
+        std::ifstream f(yamlFile);
+        if (!f.is_open()) return 0;
+        int opsIndent = -1;   // 'operations:' 키의 들여쓰기
+        int itemIndent = -1;  // 항목 대시의 들여쓰기 — 하위 목록(layers·points·targets)은 더 깊어 세지 않는다
+        int count = 0;
+        std::string ln;
+        while (std::getline(f, ln)) {
+            if (!ln.empty() && ln.back() == '\r') ln.pop_back();
+            int indent = countIndent(ln);
+            std::string tr = trim(ln);
+            if (tr.empty() || tr[0] == '#') continue;
+            if (opsIndent < 0) {
+                size_t cp = tr.find(':');
+                if (cp != std::string::npos && trim(tr.substr(0, cp)) == "operations") opsIndent = indent;
+                continue;
+            }
+            if (tr.substr(0,2) == "- " || tr == "-") {
+                if (indent < opsIndent) break;   // 바깥 목록으로 나감
+                if (itemIndent < 0) itemIndent = indent;
+                if (indent == itemIndent) ++count;
+                continue;
+            }
+            if (indent <= opsIndent) break;      // operations 의 형제 키 — 블록 끝
+        }
+        return count;
+    }
+
     std::string getOutputPrefix() const {
         std::string op = outputFile.empty() ? modelFile : outputFile;
         op = resolvePath(op);
@@ -86,10 +115,23 @@ struct StandaloneYamlBase {
     }
 };
 
+// operations 가 여러 개인 YAML 은 단독 명령에서 키가 서로 덮여 마지막 항목만 적용됐다
+// (quad8 다음 tria6 이면 tria6 만). 조용히 하나만 하지 말고 assemble 로 안내한다.
+static bool rejectMultiOperation(const std::string& yamlFile, const char* tag, const ConsoleOutput& console) {
+    int n = StandaloneYamlBase::countOperations(yamlFile);
+    if (n <= 1) return false;
+    console.error(std::string("[") + tag + "] " + yamlFile + " 에 operations 항목이 " + std::to_string(n) +
+                  "개 있습니다 — 단독 명령은 한 항목만 적용합니다 / has " + std::to_string(n) +
+                  " operations; a standalone command applies only one.");
+    console.error(std::string("[") + tag + "] 'KooRemapper assemble " + yamlFile + "' 로 실행하세요 / run it instead.");
+    return true;
+}
+
 // ── Standalone wrap ─────────────────────────────────────────────────────────
 int runWrap(const std::string& yamlFile, ConsoleOutput& console) {
     StandaloneYamlBase y;
     y.resolveFiles(yamlFile);
+    if (rejectMultiOperation(yamlFile, "wrap", console)) return 1;
 
     WrapOperation op;
 
@@ -159,6 +201,7 @@ int runWrap(const std::string& yamlFile, ConsoleOutput& console) {
 int runUpdate(const std::string& yamlFile, ConsoleOutput& console) {
     StandaloneYamlBase y;
     y.resolveFiles(yamlFile);
+    if (rejectMultiOperation(yamlFile, "update", console)) return 1;
 
     UpdateOperation op;
 
@@ -228,6 +271,7 @@ static bool validateLikeAssemble(AssemblyOperation::Type type, Op AssemblyOperat
 int runRestack(const std::string& yamlFile, ConsoleOutput& console) {
     StandaloneYamlBase y;
     y.resolveFiles(yamlFile);
+    if (rejectMultiOperation(yamlFile, "restack", console)) return 1;
 
     std::ifstream f(yamlFile);
     if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
@@ -316,6 +360,7 @@ int runRestack(const std::string& yamlFile, ConsoleOutput& console) {
 int runBend(const std::string& yamlFile, ConsoleOutput& console) {
     StandaloneYamlBase y;
     y.resolveFiles(yamlFile);
+    if (rejectMultiOperation(yamlFile, "bend", console)) return 1;
 
     std::ifstream f(yamlFile);
     if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
@@ -362,6 +407,7 @@ int runBend(const std::string& yamlFile, ConsoleOutput& console) {
 int runIndent(const std::string& yamlFile, ConsoleOutput& console) {
     StandaloneYamlBase y;
     y.resolveFiles(yamlFile);
+    if (rejectMultiOperation(yamlFile, "indent", console)) return 1;
 
     std::ifstream f(yamlFile);
     if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
@@ -437,6 +483,7 @@ int runIndent(const std::string& yamlFile, ConsoleOutput& console) {
 int runFormstrain(const std::string& yamlFile, ConsoleOutput& console) {
     StandaloneYamlBase y;
     y.resolveFiles(yamlFile);
+    if (rejectMultiOperation(yamlFile, "formstrain", console)) return 1;
 
     std::ifstream f(yamlFile);
     if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
@@ -477,6 +524,7 @@ int runFormstrain(const std::string& yamlFile, ConsoleOutput& console) {
 int runConvert(const std::string& yamlFile, ConsoleOutput& console) {
     StandaloneYamlBase y;
     y.resolveFiles(yamlFile);
+    if (rejectMultiOperation(yamlFile, "convert", console)) return 1;
 
     std::ifstream f(yamlFile);
     if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
@@ -518,6 +566,7 @@ int runConvert(const std::string& yamlFile, ConsoleOutput& console) {
 int runRefine(const std::string& yamlFile, ConsoleOutput& console) {
     StandaloneYamlBase y;
     y.resolveFiles(yamlFile);
+    if (rejectMultiOperation(yamlFile, "refine", console)) return 1;
 
     std::ifstream f(yamlFile);
     if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
@@ -557,6 +606,7 @@ int runRefine(const std::string& yamlFile, ConsoleOutput& console) {
 int runElform(const std::string& yamlFile, ConsoleOutput& console) {
     StandaloneYamlBase y;
     y.resolveFiles(yamlFile);
+    if (rejectMultiOperation(yamlFile, "elform", console)) return 1;
 
     std::ifstream f(yamlFile);
     if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
@@ -596,6 +646,7 @@ int runElform(const std::string& yamlFile, ConsoleOutput& console) {
 int runDisconnect(const std::string& yamlFile, ConsoleOutput& console) {
     StandaloneYamlBase y;
     y.resolveFiles(yamlFile);
+    if (rejectMultiOperation(yamlFile, "disconnect", console)) return 1;
 
     std::ifstream f(yamlFile);
     if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
@@ -637,6 +688,7 @@ int runDisconnect(const std::string& yamlFile, ConsoleOutput& console) {
 int runIga(const std::string& yamlFile, ConsoleOutput& console) {
     StandaloneYamlBase y;
     y.resolveFiles(yamlFile);
+    if (rejectMultiOperation(yamlFile, "iga", console)) return 1;
 
     std::ifstream f(yamlFile);
     if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
@@ -761,6 +813,7 @@ int runIga(const std::string& yamlFile, ConsoleOutput& console) {
 int runWarpage(const std::string& yamlFile, ConsoleOutput& console) {
     StandaloneYamlBase y;
     y.resolveFiles(yamlFile);
+    if (rejectMultiOperation(yamlFile, "warpage", console)) return 1;
 
     std::ifstream f(yamlFile);
     if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
@@ -827,6 +880,7 @@ int runWarpage(const std::string& yamlFile, ConsoleOutput& console) {
 int runOffset(const std::string& yamlFile, ConsoleOutput& console) {
     StandaloneYamlBase y;
     y.resolveFiles(yamlFile);
+    if (rejectMultiOperation(yamlFile, "offset", console)) return 1;
 
     std::ifstream f(yamlFile);
     if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
