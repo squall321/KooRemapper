@@ -632,10 +632,11 @@ int runAssemble(const std::string& configFile, const ConsoleOutput& console) {
         } else if (op.type == AssemblyOperation::UPDATE) {
             // Resolve dynain path relative to config directory
             UpdateOperation updateOp = op.update;
-            // YAML 이 현재 폴더에 있으면 configDir 이 비어 '/파일' 로 루트를 찾았다
+            // YAML 이 현재 폴더에 있으면 configDir 이 비어 '/파일' 로 루트를 찾았고, 폴더가 붙은 상대 경로
+            // ('../x/dr.dynain')는 실행 폴더 기준이라 단독 update 와 결과가 갈렸다 — base_model 과 같은 규칙으로.
             if (!configDir.empty() && !updateOp.dynainFile.empty() &&
-                updateOp.dynainFile.find('/') == std::string::npos &&
-                updateOp.dynainFile.find('\\') == std::string::npos) {
+                !(updateOp.dynainFile.size() >= 2 && updateOp.dynainFile[1] == ':') &&
+                updateOp.dynainFile[0] != '/' && updateOp.dynainFile[0] != '\\') {
                 updateOp.dynainFile = configDir + "/" + updateOp.dynainFile;
             }
             ok = assembler.applyUpdate(updateOp);

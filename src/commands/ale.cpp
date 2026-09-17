@@ -449,8 +449,10 @@ int runAle(const std::string& yamlFile, ConsoleOutput& console) {
                     fsiPendingItem = false;
                     continue;
                 }
-                if (fsiPendingItem && t.find(':') == std::string::npos) {
-                    std::string pv = kw_trim(KooRemapper::yamlStripComment(t));
+                // 주석을 떼고 나서 콜론을 본다 — '3   # pid: 3' 처럼 주석에 콜론이 있으면 값 줄이 아닌 줄로 봤다
+                std::string tNoComment = kw_trim(KooRemapper::yamlStripComment(t));
+                if (fsiPendingItem && tNoComment.find(':') == std::string::npos) {
+                    std::string pv = tNoComment;
                     try { fsiPids.push_back(std::stoi(pv)); } catch (...) {}
                     fsiPendingItem = false;
                     continue;
