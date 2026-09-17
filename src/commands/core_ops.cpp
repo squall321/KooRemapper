@@ -1613,8 +1613,9 @@ int runGenerateVar(const std::string& configFile, const std::string& outputFile,
         console.keyValue("K elements", std::to_string(config.elementsK));
         console.keyValue("Total elements", std::to_string(config.getTotalElements()));
         
-        if (refLengthI <= 0 && !noScale) {
-            // No reference - use zone lengths as-is
+        // 예전엔 '&& !noScale' 조건 탓에 --no-scale 이면 기준 길이 0 으로 생성해 모든 노드가 원점에 모였다
+        if (refLengthI <= 0) {
+            // No reference (or --no-scale) - use zone lengths as-is
             refLengthI = config.getTotalLength();
             refLengthJ = 1.0;  // Default
             refLengthK = 1.0;  // Default
