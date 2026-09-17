@@ -11,6 +11,9 @@
   - 목록 항목 값의 인라인 주석을 떼지 않아 restack '- material_card: |  # 메모' 층은 카드 없음,
     '- thickness: "0.2"  # 메모' 는 잘못된 두께, indent '- [6, 3]  # 메모' 점은 조용히 빠졌고,
     offset material_cards '- |  # 메모' 는 목록이 끊겨 층 재질이 빠졌다.
+  - 블록을 여는 키(offset material_card/czm_material_card, warpage data_bbox, restack layers, iga targets)가
+    항목 첫 줄('- material_card: |')이면 키 열은 대시 다음인데 대시 줄 들여쓰기를 기준으로 삼아,
+    같은 항목의 형제 키들을 블록 안으로 삼켰다(재질 카드에 YAML 줄이 그대로 섞이거나 source_pid/dat_file 이 사라짐).
   - 대시 항목을 따로 읽는 목록(restack layers·iga targets·indent points·offset material_cards)은 그대로여야 한다.
 """
 import os
@@ -108,6 +111,184 @@ operations:
         *MAT_ELASTIC
         $#     mid        ro         e        pr
              @MID@       3.0      3000      0.30
+"""
+
+
+# 블록 리터럴 재질 카드 — 같은 뜻의 두 벌(키가 항목 중간 / 항목 첫 줄)
+OFFSET_CARD = """base_model: box.k
+output: {out}
+operations:
+  - type: offset
+    source_pid: 1
+    element_type: solid
+    thickness: 1.0
+    num_layers: 1
+    offset_direction: +z
+    new_pid: 10
+    new_secid: 20
+    new_mid: 30
+    material_card: |
+      *MAT_ELASTIC
+      $#     mid        ro         e        pr
+           @MID@  7.85E-09  2.10E+05       0.3
+"""
+
+OFFSET_CARD_FIRST = """base_model: box.k
+output: {out}
+operations:
+  - material_card: |
+      *MAT_ELASTIC
+      $#     mid        ro         e        pr
+           @MID@  7.85E-09  2.10E+05       0.3
+    source_pid: 1
+    element_type: solid
+    thickness: 1.0
+    num_layers: 1
+    offset_direction: +z
+    new_pid: 10
+    new_secid: 20
+    new_mid: 30
+"""
+
+OFFSET_CZM = """base_model: box.k
+output: {out}
+operations:
+  - type: offset
+    source_pid: 1
+    element_type: solid
+    thickness: 1.0
+    num_layers: 1
+    offset_direction: +z
+    new_pid: 10
+    connection_mode: czm
+    czm_part_id: 77
+    czm_mid: 88
+    czm_material_card: |
+      *MAT_COHESIVE_MIXED_MODE
+      $#     mid        ro     roflg   intfail        en        et       gic      giic
+           @MID@       1.0         0       0.0     1.0E6     1.0E6       1.0       2.0
+      $#     xmu         t         s       und       utd     gamma
+             1.0      50.0      30.0
+"""
+
+OFFSET_CZM_FIRST = """base_model: box.k
+output: {out}
+operations:
+  - czm_material_card: |
+      *MAT_COHESIVE_MIXED_MODE
+      $#     mid        ro     roflg   intfail        en        et       gic      giic
+           @MID@       1.0         0       0.0     1.0E6     1.0E6       1.0       2.0
+      $#     xmu         t         s       und       utd     gamma
+             1.0      50.0      30.0
+    source_pid: 1
+    element_type: solid
+    thickness: 1.0
+    num_layers: 1
+    offset_direction: +z
+    new_pid: 10
+    connection_mode: czm
+    czm_part_id: 77
+    czm_mid: 88
+"""
+
+WARPAGE_BBOX = """base_model: box.k
+output: {out}
+material:
+  E: 210000
+  nu: 0.3
+operations:
+  - type: warpage
+    dat_file: warp.dat
+    target_pid: 1
+    plane: xy
+    deflection_axis: +z
+    unit: um
+    mode: deform
+    data_bbox:
+      x_min: 0.0
+      x_max: 10.0
+      y_min: 0.0
+      y_max: 5.0
+"""
+
+WARPAGE_BBOX_FIRST = """base_model: box.k
+output: {out}
+material:
+  E: 210000
+  nu: 0.3
+operations:
+  - data_bbox:
+      x_min: 0.0
+      x_max: 10.0
+      y_min: 0.0
+      y_max: 5.0
+    dat_file: warp.dat
+    target_pid: 1
+    plane: xy
+    deflection_axis: +z
+    unit: um
+    mode: deform
+"""
+
+# 필수 키가 최상위에 있어 항목이 블록 하나뿐인 형태 — 삼킨 형제 키가 그대로 덱에 찍히는지(조용한 오염) 확인용
+OFFSET_CZM_TOP = """base_model: box.k
+output: {out}
+source_pid: 1
+thickness: 1.0
+num_layers: 1
+offset_direction: +z
+new_pid: 10
+connection_mode: czm
+czm_part_id: 77
+operations:
+  - type: offset
+    element_type: solid
+    czm_mid: 88
+    czm_material_card: |
+      *MAT_COHESIVE_MIXED_MODE
+      $#     mid        ro     roflg   intfail        en        et       gic      giic
+           @MID@       1.0         0       0.0     1.0E6     1.0E6       1.0       2.0
+      $#     xmu         t         s       und       utd     gamma
+             1.0      50.0      30.0
+"""
+
+OFFSET_CZM_TOP_FIRST = """base_model: box.k
+output: {out}
+source_pid: 1
+thickness: 1.0
+num_layers: 1
+offset_direction: +z
+new_pid: 10
+connection_mode: czm
+czm_part_id: 77
+operations:
+  - czm_material_card: |
+      *MAT_COHESIVE_MIXED_MODE
+      $#     mid        ro     roflg   intfail        en        et       gic      giic
+           @MID@       1.0         0       0.0     1.0E6     1.0E6       1.0       2.0
+      $#     xmu         t         s       und       utd     gamma
+             1.0      50.0      30.0
+    element_type: solid
+    czm_mid: 88
+"""
+
+RESTACK_LAYERS_FIRST = """base_model: box.k
+output: {out}
+operations:
+  - layers:
+      - thickness: 0.5
+        material_card: |
+          *MAT_ELASTIC
+          $#     mid        ro         e        pr
+              MID001  7.85E-09  2.10E+05       0.3
+      - thickness: 0.2
+        material_card: |
+          *MAT_ELASTIC
+          $#     mid        ro         e        pr
+              MID002  1.20E-09  3.00E+03      0.45
+    target_pid: 1
+    direction: z
+    element_type: solid
 """
 
 
@@ -226,6 +407,39 @@ def main():
                   "material_cards '- |  # 메모' 목록")
     check("offset: material_cards 주석 달린 두 항목 → 2 층", "Multi-material mode: 2 layers" in out, out[-250:])
 
+    print("[블록을 여는 키가 항목 첫 줄일 때]")
+    run_yaml(binary, d, "offset", "ofc_ref", OFFSET_CARD.format(out="ofc_ref"))
+    same_as(binary, d, "offset", "ofc_ref", "ofc_first", OFFSET_CARD_FIRST.format(out="ofc_first"),
+            "'- material_card: |' 첫 줄 + 형제 키")
+    kk = kbody(d, "ofc_first") or []
+    check("offset: material_card 블록이 형제 키 YAML 줄을 삼키지 않음",
+          not any(ln.strip().startswith(("source_pid:", "element_type:", "new_mid:")) for ln in kk),
+          str([ln for ln in kk if ":" in ln][:4]))
+    run_yaml(binary, d, "offset", "ozf_ref", OFFSET_CZM.format(out="ozf_ref"))
+    same_as(binary, d, "offset", "ozf_ref", "ozf_first", OFFSET_CZM_FIRST.format(out="ozf_first"),
+            "'- czm_material_card: |' 첫 줄 + 형제 키")
+    kk = kbody(d, "ozf_first") or []
+    check("offset: czm_material_card 블록이 czm_mid 를 삼키지 않음 (MID 88)",
+          any(ln.strip().startswith("88") for ln in kk)
+          and not any(ln.strip().startswith(("czm_mid:", "element_type:")) for ln in kk),
+          str([ln for ln in kk if ":" in ln][:4]))
+    run_yaml(binary, d, "offset", "ozt_ref", OFFSET_CZM_TOP.format(out="ozt_ref"))
+    same_as(binary, d, "offset", "ozt_ref", "ozt_first", OFFSET_CZM_TOP_FIRST.format(out="ozt_first"),
+            "'- czm_material_card: |' 만 있는 항목 (필수 키는 최상위)")
+    kk = kbody(d, "ozt_first") or []
+    check("offset: 삼킨 형제 키 YAML 줄이 덱에 찍히지 않음 (조용한 오염)",
+          kk and not any(ln.strip() in ("element_type: solid", "czm_mid: 88") for ln in kk),
+          str([ln for ln in kk if ":" in ln][:4]))
+    run_yaml(binary, d, "warpage", "wpb_ref", WARPAGE_BBOX.format(out="wpb_ref"))
+    same_as(binary, d, "warpage", "wpb_ref", "wpb_first", WARPAGE_BBOX_FIRST.format(out="wpb_first"),
+            "'- data_bbox:' 첫 줄 + 형제 키(dat_file)")
+    same_as(binary, d, "restack", "rs_ref", "rs_layers_first", RESTACK_LAYERS_FIRST.format(out="rs_layers_first"),
+            "'- layers:' 첫 줄 + 형제 키(target_pid)")
+    rc, out = run_yaml(binary, d, "iga", "iga_tf", "base_model: box.k\noutput: iga_tf\noperations:\n"
+                       "  - targets:\n      - target_pid: 1\n        element_size: 4.0\n    element_size: 9.9\n")
+    check("iga: '- targets:' 첫 줄 → 대상 1개, 블록 뒤 형제 키가 대상에 새지 않음",
+          rc == 0 and "[iga] Targets: 1" in out and "off=[4.000000" in out, f"rc={rc} {out[-250:]}")
+
     print("[대시 항목을 따로 읽는 목록은 그대로]")
     rc, out = run_yaml(binary, d, "iga", "iga", "base_model: box.k\noutput: iga\noperations:\n  - type: iga\n"
                        "    targets:\n      - target_pid: 1   # 상자\n        element_size: 4.0\n")
@@ -235,6 +449,10 @@ def main():
     rc, out = run(binary, d, "offset", "om_ref.yaml")
     check("offset: material_cards '- |' 두 항목 → 2 층", rc == 0 and "Multi-material mode: 2 layers" in out,
           f"rc={rc} {out[-250:]}")
+    rc, out = run_yaml(binary, d, "restack", "rs_tab", RESTACK.format(out="rs_tab").replace(
+        "      - thickness: 0.2\n", "      -\tthickness: 0.2\n"))
+    check("restack: '-<TAB>thickness' 는 예전처럼 무시 (앞 층을 덮지 않음)",
+          rc == 0 and "layers=0.500000" in out, f"rc={rc} {out[-250:]}")
     rc, out = run_yaml(binary, d, "wrap", "wr_top", "model: cylinder_2layer.k\noutput: wr_top\nmaterial:\n"
                        "  E: 210000.0\n  nu: 0.3\ntarget_pid: [1, 2]\naxis: z\ntension: 100.0\n")
     check("wrap: 최상위 target_pid: [1, 2] 그대로", rc == 0 and "2 layers" in out, f"rc={rc} {out[-250:]}")

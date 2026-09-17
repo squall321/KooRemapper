@@ -42,8 +42,17 @@ struct StandaloneYamlBase {
     // 예전엔 키가 '- type'·'- source_pid' 가 되어 항목의 첫 키를 조용히 버렸다(convert 가 hex20 대신 tet10 기본값).
     static std::string keyOf(const std::string& tr, size_t cp) {
         std::string k = trim(tr.substr(0, cp));
-        if (k.size() >= 2 && k[0] == '-' && (k[1] == ' ' || k[1] == '\t')) k = trim(k.substr(2));
+        // 대시 판정은 아래 목록 분기들과 같게 '- '(공백)만 — 예전엔 '-\t' 도 떼어 탭 항목이 앞 항목을 덮어썼다
+        if (k.size() >= 2 && k[0] == '-' && k[1] == ' ') k = trim(k.substr(2));
         return k;
+    }
+    // 키가 목록 항목 첫 줄('- layers:')이면 키 열은 대시 다음 — 블록을 여는 키의 들여쓰기 기준이 된다.
+    // 예전엔 대시 줄 들여쓰기를 기준 삼아 같은 항목의 형제 키들을 블록 안으로 삼켰다.
+    static int keyIndent(const std::string& tr, int indent) {
+        if (tr.substr(0,2) != "- ") return indent;
+        size_t i = 1;
+        while (i < tr.size() && tr[i] == ' ') ++i;
+        return indent + (int)i;
     }
 
     bool resolveFiles(const std::string& yamlFile) {
@@ -260,7 +269,7 @@ int runRestack(const std::string& yamlFile, ConsoleOutput& console) {
             if      (key == "target_pid") { try { op.targetPid = std::stoi(val); } catch(...) {} }
             else if (key == "direction") op.direction = val;
             else if (key == "element_type") op.elementType = val;
-            else if (key == "layers") { inLayers = true; layersIndent = indent; }
+            else if (key == "layers") { inLayers = true; layersIndent = y.keyIndent(tr, indent); }
             continue;
         }
 
@@ -274,7 +283,7 @@ int runRestack(const std::string& yamlFile, ConsoleOutput& console) {
                 // 예전엔 대시 줄 값의 주석을 안 떼 'material_card: |  # 메모' 층을 카드 없음으로, '"0.2"  # 메모' 를 잘못된 두께로 봤다
                 std::string rv = y.stripQuotes(y.trim(KooRemapper::yamlStripComment(rest.substr(rcp+1))));
                 if (rk == "thickness") { try { op.layers.back().thickness = std::stod(rv); } catch(...) {} }
-                else if (rk == "material_card" && rv == "|") { readingMatCard = true; matCardKeyIndent = indent + 2; matCardBaseIndent = -1; }
+                else if (rk == "material_card" && rv == "|") { readingMatCard = true; matCardKeyIndent = y.keyIndent(tr, indent); matCardBaseIndent = -1; }
             }
             continue;
         }
@@ -402,7 +411,7 @@ int runIndent(const std::string& yamlFile, ConsoleOutput& console) {
         else if (key == "shell_thickness") { try { op.shellThickness = std::stod(val); } catch(...) {} }
         else if (key == "type" && inShape) op.shapeType = val;
         else if (key == "shape") inShape = true;
-        else if (key == "points") { inPoints = true; pointsIndent = indent; }
+        else if (key == "points") { inPoints = true; pointsIndent = y.keyIndent(tr, indent); }
     }
     f.close();
 
@@ -653,7 +662,7 @@ int runIga(const std::string& yamlFile, ConsoleOutput& console) {
 
         if (!inTargets) {
             y.parseCommonKey(key, val);
-            if (key == "targets") { inTargets = true; targetsIndent = indent; }
+            if (key == "targets") { inTargets = true; targetsIndent = y.keyIndent(tr, indent); }
             continue;
         }
 
@@ -793,7 +802,7 @@ int runWarpage(const std::string& yamlFile, ConsoleOutput& console) {
         else if (key == "outside_behavior") op.outsideBehavior = val;
         else if (key == "debug") op.debug = (val == "true" || val == "yes" || val == "1");
         else if (key == "debug_prefix") op.debugPrefix = val;
-        else if (key == "data_bbox") { inDataBbox = true; dataBboxIndent = indent; }
+        else if (key == "data_bbox") { inDataBbox = true; dataBboxIndent = y.keyIndent(tr, indent); }
     }
     f.close();
 
@@ -889,7 +898,7 @@ int runOffset(const std::string& yamlFile, ConsoleOutput& console) {
 
         y.parseCommonKey(key, val);
         if      (key == "source_pid") { try { op.sourcePid = std::stoi(val); } catch(...) {} }
-        else if (key == "material_cards" && val.empty()) { inMatCardsList = true; matCardsKeyIndent = indent; }
+        else if (key == "material_cards" && val.empty()) { inMatCardsList = true; matCardsKeyIndent = y.keyIndent(tr, indent); }
         else if (key == "offset_direction") op.offsetDirection = val;
         else if (key == "thickness") { try { op.thickness = std::stod(val); } catch(...) {} }
         else if (key == "thickness_formula") op.thicknessFormula = val;
@@ -908,8 +917,8 @@ int runOffset(const std::string& yamlFile, ConsoleOutput& console) {
         else if (key == "part_title") op.partTitle = val;
         else if (key == "shell_thickness") { try { op.shellThickness = std::stod(val); } catch(...) {} }
         else if (key == "shell_offset") { try { op.shellOffset = std::stod(val); } catch(...) {} }
-        else if (key == "material_card" && val == "|") { readingMatCard = true; matCardKeyIndent = indent; matCardBaseIndent = -1; }
-        else if (key == "czm_material_card" && val == "|") { readingCzmMatCard = true; matCardKeyIndent = indent; matCardBaseIndent = -1; }
+        else if (key == "material_card" && val == "|") { readingMatCard = true; matCardKeyIndent = y.keyIndent(tr, indent); matCardBaseIndent = -1; }
+        else if (key == "czm_material_card" && val == "|") { readingCzmMatCard = true; matCardKeyIndent = y.keyIndent(tr, indent); matCardBaseIndent = -1; }
         // Region selection
         else if (key == "bbox_xmin") { try { op.region.xMin = std::stod(val); op.region.useBoundingBox = true; } catch(...) {} }
         else if (key == "bbox_xmax") { try { op.region.xMax = std::stod(val); op.region.useBoundingBox = true; } catch(...) {} }
