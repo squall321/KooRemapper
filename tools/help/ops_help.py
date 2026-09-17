@@ -216,7 +216,7 @@ tension: 100.0
 """},
    cmds=["KooRemapper wrap wrap.yaml"], outputs=["cylinder_wrapped.k"],
    notes=["입력은 축 방향 원통 솔리드 파트. tension 단위는 [힘/길이]"])
-op("restack", "메시 편집", "셸/면을 두께·재질이 다른 솔리드 층 스택으로 돌출", "적층 layer stack",
+op("restack", "메시 편집", "extrude 된 솔리드를 두께·재질이 다른 층으로 다시 나눔", "적층 layer stack 두께분할",
    "KooRemapper restack <config.yaml>",
    files=boxed({"restack.yaml": """base_model: box.k
 output: box_stack
@@ -240,7 +240,10 @@ operations:
    cmds=[BOX_CMD, "KooRemapper restack restack.yaml"], outputs=["box_stack.k"],
    notes=["material_card 의 mid 칸은 라벨이다 (MID001, MAT01, 11 모두 가능). 층마다 새 MID 로 바뀐다. 라벨과 카드 내용이 같으면 재질을 공유하고, 라벨이 같아도 물성이 다르면 MID 를 따로 준다",
           "*MAT_…_TITLE 의 제목 줄은 그대로 두고, 같은 MID 를 가리키는 *MAT_ADD_… 카드도 함께 새 MID 로 바뀐다",
-          "카드는 10칸 고정폭 (블록 들여쓰기를 뺀 뒤 기준). 자유 형식(쉼표)도 된다. 새 PID·SECID 는 자동"])
+          "카드는 10칸 고정폭 (블록 들여쓰기를 뺀 뒤 기준). 자유 형식(쉼표)도 된다. 새 PID·SECID 는 자동",
+          "입력은 extrude 된 헥사 솔리드. 두께 방향 노드 수가 곳곳에서 같아야 하고, 아니면 not a valid extrusion 으로 멈춘다",
+          "thickness 는 비율로 쓰인다 — 합이 실제 두께와 달라도 실제 두께에 맞춰 나눈다. 층마다 num_elements 로 두께 방향 요소 수를 준다 (첫 층이 아래쪽)",
+          "평면 메시는 그대로 두고 두께 방향만 다시 만든다. 원래 PID 는 요소 없는 빈 파트로 남으므로 접촉·세트가 그 PID 를 가리키면 새 PID 로 바꿀 것"])
 op("update", "메시 편집", "dynain·k 파일의 *NODE 좌표로 모델 절점 좌표 덮어쓰기", "좌표갱신 dynain node",
    "KooRemapper update <config.yaml>",
    files=boxed({"sq.yaml": """parts:
