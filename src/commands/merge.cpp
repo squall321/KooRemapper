@@ -109,6 +109,7 @@ struct mg_Config {
     int dir = 2;            // 0=x, 1=y, 2=z (default)
     int method = 2;         // 0=voigt, 1=reuss, 2=vrh
     std::vector<mg_MergeGroup> groups;
+    bool badValue = false;  // 지원하지 않는 direction/method 값을 만났다
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -239,15 +240,25 @@ static mg_Config mg_parseConfig(const std::string& yamlFile, ConsoleOutput& cons
         } else if (key == "output") {
             cfg.outputPath = val;
         } else if (key == "direction") {
+            // 예전엔 모르는 값을 조용히 Z 로 삼켰다
             std::string d = mg_toUpper(val);
             if (d == "X") cfg.dir = 0;
             else if (d == "Y") cfg.dir = 1;
-            else cfg.dir = 2;
+            else if (d == "Z") cfg.dir = 2;
+            else {
+                console.error("merge: unsupported direction '" + val + "' (allowed: x, y, z)");
+                cfg.badValue = true;
+            }
         } else if (key == "method") {
+            // 예전엔 모르는 값을 조용히 VRH 로 삼켰다
             std::string m = mg_toUpper(val);
             if (m == "VOIGT") cfg.method = 0;
             else if (m == "REUSS") cfg.method = 1;
-            else cfg.method = 2; // vrh
+            else if (m == "VRH") cfg.method = 2;
+            else {
+                console.error("merge: unsupported method '" + val + "' (allowed: voigt, reuss, vrh)");
+                cfg.badValue = true;
+            }
         } else if (key == "merge") {
             inMergeList = true;
             mergeListIndent = indent;
@@ -292,11 +303,11 @@ struct mg_KModel {
     int maxElemId = 0, maxPartId = 0, maxMatId = 0, maxSecId = 0;
 };
 
-static void mg_parseKFile(const std::string& path, mg_KModel& mdl, ConsoleOutput& console) {
+static bool mg_parseKFile(const std::string& path, mg_KModel& mdl, ConsoleOutput& console) {
     std::ifstream inf(path);
     if (!inf.is_open()) {
         console.error("Cannot open model: " + path);
-        return;
+        return false;
     }
 
     std::string line;
@@ -593,6 +604,7 @@ static void mg_parseKFile(const std::string& path, mg_KModel& mdl, ConsoleOutput
     if (inMat && matType == "VE076") finishVE();
 
     inf.close();
+    return true;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -787,6 +799,7 @@ static mg_MatProps mg_homogenize(
 
 int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
     mg_Config cfg = mg_parseConfig(yamlFile, console);
+    if (cfg.badValue) return 1;
     if (cfg.modelPath.empty() || cfg.groups.empty()) {
         console.error("Invalid config: model and merge groups required");
         return 1;
@@ -802,7 +815,9 @@ int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
 
     // --- Phase 1: Parse K-file ---
     mg_KModel mdl;
-    mg_parseKFile(cfg.modelPath, mdl, console);
+    // 모델을 못 읽으면 여기서 끝낸다 — 예전엔 [ERROR] 만 찍고 5바이트짜리 빈 덱을 rc=0 으로 남겼다
+    if (!mg_parseKFile(cfg.modelPath, mdl, console))
+        return 1;
 
     console.info("Nodes: " + std::to_string(mdl.nodes.size()) +
                  ", Elements: " + std::to_string(mdl.elems.size()) +
@@ -830,6 +845,7 @@ int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
         int nOrigElems;
     };
     std::vector<GroupResult> results;
+    bool groupFailed = false;   // [ERROR] 를 찍은 그룹이 하나라도 있으면 출력을 쓰지 않고 rc=1
 
     for (size_t gi = 0; gi < cfg.groups.size(); gi++) {
         const auto& grp = cfg.groups[gi];
@@ -847,6 +863,7 @@ int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
 
         if (grpElemIds.empty()) {
             console.error("  No elements found for PIDs");
+            groupFailed = true;
             continue;
         }
         console.info("  Elements: " + std::to_string(grpElemIds.size()));
@@ -859,6 +876,7 @@ int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
 
         if (columns.empty()) {
             console.error("  No columns detected — skipping");
+            groupFailed = true;
             continue;
         }
 
@@ -883,6 +901,7 @@ int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
             auto mit = mdl.mats.find(mid);
             if (mit == mdl.mats.end()) {
                 console.error("  MID " + std::to_string(mid) + " not found in material DB");
+                groupFailed = true;   // 빠진 재질을 빼고 균질화하면 체적분율이 틀린다
                 continue;
             }
             matsWithFrac.push_back({mit->second, vf});
@@ -1002,6 +1021,11 @@ int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
     }
 
     // --- Phase 3: Write output ---
+    if (groupFailed) {
+        console.error("Merge failed — no output written: " + cfg.outputPath);
+        return 1;
+    }
+
     console.info("\nWriting output: " + cfg.outputPath);
 
     std::ofstream outf(cfg.outputPath);
