@@ -447,6 +447,7 @@ int runMatswapYaml(const std::string& yamlFile, ConsoleOutput& console) {
     int swapsIndent = 0;
     bool inSwapItem = false;
     int swapItemIndent = 0;
+    std::vector<int>* blockList = nullptr;  // 값 없는 'pids:'/'mids:' 다음 '- 1' 줄들이 채울 목록
 
     std::string ln;
     while (std::getline(f, ln)) {
@@ -455,6 +456,15 @@ int runMatswapYaml(const std::string& yamlFile, ConsoleOutput& console) {
         if (tr.empty() || tr[0]=='#') continue;
 
         int indent = countIndent(ln);
+
+        // 'pids:'/'mids:' 아래 '- 1' 블록 목록 — 예전엔 이 줄을 새 swap 항목으로 세어
+        // 'Swaps : 3' 이 되고 정작 첫 항목은 'no target PIDs' 로 끝났다
+        if (blockList && tr[0]=='-' && (!inSwapItem || indent > swapItemIndent)) {
+            std::string t = stripQuotes(trim(KooRemapper::yamlStripComment(tr.substr(1))));
+            if (!t.empty()) { try { blockList->push_back(std::stoi(t)); } catch(...) {} }
+            continue;
+        }
+        blockList = nullptr;
 
         // New swap item
         if (inSwapsList && indent > swapsIndent && tr[0]=='-') {
@@ -476,9 +486,9 @@ int runMatswapYaml(const std::string& yamlFile, ConsoleOutput& console) {
                 if (key=="bundle") swaps.back().bundleFile = val;
                 else if (key=="swap_all") swaps.back().swapAll = (val=="true"||val=="yes"||val=="1");
                 else if (key=="pid")  swaps.back().pids = { std::stoi(val) };
-                else if (key=="pids") parseIL(val, swaps.back().pids);
+                else if (key=="pids") { parseIL(val, swaps.back().pids); if (val.empty()) blockList = &swaps.back().pids; }
                 else if (key=="mid")  swaps.back().mids = { std::stoi(val) };
-                else if (key=="mids") parseIL(val, swaps.back().mids);
+                else if (key=="mids") { parseIL(val, swaps.back().mids); if (val.empty()) blockList = &swaps.back().mids; }
             }
             continue;
         }
@@ -500,9 +510,9 @@ int runMatswapYaml(const std::string& yamlFile, ConsoleOutput& console) {
                     if (key=="bundle") swaps.back().bundleFile = val;
                     else if (key=="swap_all") swaps.back().swapAll=(val=="true"||val=="yes"||val=="1");
                     else if (key=="pid")  swaps.back().pids = { std::stoi(val) };
-                    else if (key=="pids") parseIL(val, swaps.back().pids);
+                    else if (key=="pids") { parseIL(val, swaps.back().pids); if (val.empty()) blockList = &swaps.back().pids; }
                     else if (key=="mid")  swaps.back().mids = { std::stoi(val) };
-                    else if (key=="mids") parseIL(val, swaps.back().mids);
+                    else if (key=="mids") { parseIL(val, swaps.back().mids); if (val.empty()) blockList = &swaps.back().mids; }
                 } catch(...) {}
             }
             continue;
@@ -537,6 +547,7 @@ int runMatswapYaml(const std::string& yamlFile, ConsoleOutput& console) {
             else if (key=="pids") {
                 if (swaps.empty()) swaps.push_back(MatswapOperation{});
                 parseIL(val, swaps.back().pids);
+                if (val.empty()) blockList = &swaps.back().pids;
             }
             else if (key=="mid") {
                 if (swaps.empty()) swaps.push_back(MatswapOperation{});
@@ -545,6 +556,7 @@ int runMatswapYaml(const std::string& yamlFile, ConsoleOutput& console) {
             else if (key=="mids") {
                 if (swaps.empty()) swaps.push_back(MatswapOperation{});
                 parseIL(val, swaps.back().mids);
+                if (val.empty()) blockList = &swaps.back().mids;
             }
             else if (key=="swap_all") {
                 if (swaps.empty()) swaps.push_back(MatswapOperation{});
