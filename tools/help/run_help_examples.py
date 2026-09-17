@@ -97,6 +97,15 @@ def run_case(binary, spec, files, cmds, keep):
     return True, "", tmp
 
 
+def _gmsh_available():
+    """meshfix 사례 실행 가능 여부 — KOOREMAPPER_GMSH 또는 PATH/opt 의 실행 가능한 gmsh"""
+    env = os.environ.get("KOOREMAPPER_GMSH")
+    if env and os.path.isfile(env):
+        return True
+    import glob
+    return bool(glob.glob("/opt/gmsh-*/bin/gmsh"))
+
+
 def main():
     args = sys.argv[1:]
     binary = os.path.abspath(args.pop(0))
@@ -107,7 +116,7 @@ def main():
     for spec in OPS:
         if only and spec["name"] not in only:
             continue
-        if spec["name"] in ("meshfix", "warpage"):
+        if spec["name"] == "warpage" or (spec["name"] == "meshfix" and not _gmsh_available()):
             skipped.append(spec["name"])
             continue
         if from_help:

@@ -296,7 +296,8 @@ adaptive: true
 warn_min_jac: 0.15
 """},
    cmds=["KooRemapper generate --dim-i 20 --dim-j 5 arc demo", "KooRemapper meshfix meshfix.yaml"],
-   outputs=[], notes=["gmsh 가 실행 파일 옆 dist/gmsh/ 에 있어야 한다. 없으면 실패한다."])
+   outputs=["remeshed.k"],
+   notes=["gmsh 탐색: KOOREMAPPER_GMSH 환경변수 → 실행 파일 옆 gmsh/·gmsh-<ver>/[bin/] → PATH → /opt/gmsh-*/bin/gmsh (SIF 는 그대로 동작)"])
 op("cnrb2solid", "표면·재메시", "CNRB(절점 강체) 볼트를 HEX8 솔리드 원통 + tied 접촉으로 변환", "볼트 bolt cnrb 원통",
    "KooRemapper cnrb2solid <config.yaml>",
    needs=["examples/cnrb2solid/bolt_simple.k"],
@@ -432,7 +433,7 @@ materials:
     match: "SUS304"
 """}),
    cmds=[BOX_CMD, "KooRemapper matdb matdb.yaml"], outputs=["box_matdb.k"],
-   notes=["database 는 절대경로로 줄 것 — 생략하면 작업 폴더 기준 materials/material_db.json 을 찾아 실패한다 (SIF 안 번들 DB = /opt/kooremapper/materials/material_db.json)",
+   notes=["database 를 생략하면 작업 폴더 materials/material_db.json → 실행 파일 기준 materials/·../materials/ 순으로 번들 DB 를 찾는다 (SIF: /opt/kooremapper/materials/material_db.json)",
           "match: 파트/재질 제목 부분일치, \"*\" 는 나머지 전부. mid: 로 MID 직접 지정"])
 op("matswap", "재료·어셈블리", "MAT+HOURGLASS+CURVE+SECTION 번들을 파트에 통째로 교체", "재질교체 bundle rubber",
    "KooRemapper matswap <config.yaml>\nKooRemapper matswap <model.k> <bundle.k> <pid> <output.k>",

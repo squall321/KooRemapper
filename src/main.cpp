@@ -1064,7 +1064,7 @@ static bool printLegacyHelp(ConsoleOutput& console, const std::string& helpCmd) 
         console.println("    - match: \"*\"              # Catch-all auto-match");
         std::cout << "\n";
         console.println("Notes:");
-        console.println("  - DB path: materials/material_db.json (relative to exe)");
+        console.println("  - DB path (database omitted): ./materials/material_db.json, then <exe>/materials or <exe>/../materials");
         console.println("  - Match: title->name/tag substring, case-insensitive");
         console.println("  - Thermal inserts: *MAT_THERMAL_ISOTROPIC + *MAT_ADD_THERMAL_EXPANSION");
     } else if (helpCmd == "load") {
@@ -2362,7 +2362,7 @@ int main(int argc, char* argv[]) {
         if (argc < 3) {
             console.error("Usage: KooRemapper meshfix <config.yaml>");
             console.println("");
-            console.println("Requires dist/gmsh/gmsh.exe (or dist/gmsh-<ver>/gmsh.exe).");
+            console.println("Gmsh: $KOOREMAPPER_GMSH > gmsh/ or gmsh-<ver>/[bin/] next to KooRemapper > PATH > /opt/gmsh-*/bin (Linux).");
             console.println("");
             console.println("YAML schema:");
             console.println("  model:          input.k");

@@ -206,33 +206,67 @@ static bool readConfig(const std::string& path, Cfg& cfg, std::string& err) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 static std::string findGmshExe() {
+    // 0. 직접 지정 (KOOREMAPPER_GMSH=/path/to/gmsh)
+    if (const char* env = std::getenv("KOOREMAPPER_GMSH")) {
+        if (*env && fs::is_regular_file(env)) return env;
+    }
+
     fs::path execDir;
 #ifdef _WIN32
     char buf[4096] = {};
     DWORD n = GetModuleFileNameA(nullptr, buf, sizeof(buf));
     if (n > 0) execDir = fs::path(std::string(buf)).parent_path();
+    const char* exeName = "gmsh.exe";
 #else
     char buf[4096] = {};
     ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf));
     if (n > 0) execDir = fs::path(std::string(buf, (size_t)n)).parent_path();
+    // 리눅스 실행 파일은 확장자가 없다 (예전엔 여기서도 gmsh.exe 만 찾아 meshfix 가 리눅스에서 동작하지 않았다)
+    const char* exeName = "gmsh";
 #endif
     if (execDir.empty()) execDir = ".";
 
-    // 1. simple: execDir/gmsh/gmsh.exe
+    // 1. simple: execDir/gmsh/<exe>
     {
-        auto p = execDir / "gmsh" / "gmsh.exe";
-        if (fs::exists(p)) return p.string();
+        auto p = execDir / "gmsh" / exeName;
+        if (fs::is_regular_file(p)) return p.string();
     }
-    // 2. versioned dir: execDir/gmsh-*/gmsh.exe
+    // 2. versioned dir: execDir/gmsh-*/<exe> 또는 execDir/gmsh-*/bin/<exe> (배포 tar 구조)
     std::error_code ec;
     for (auto& entry : fs::directory_iterator(execDir, ec)) {
         if (!entry.is_directory()) continue;
         std::string name = entry.path().filename().string();
         if (name.rfind("gmsh", 0) == 0) {
-            auto p = entry.path() / "gmsh.exe";
-            if (fs::exists(p)) return p.string();
+            for (auto p : {entry.path() / exeName, entry.path() / "bin" / exeName}) {
+                if (fs::is_regular_file(p)) return p.string();
+            }
         }
     }
+#ifndef _WIN32
+    // 3. PATH
+    if (const char* pathEnv = std::getenv("PATH")) {
+        std::string paths(pathEnv);
+        size_t start = 0;
+        while (start <= paths.size()) {
+            size_t end = paths.find(':', start);
+            if (end == std::string::npos) end = paths.size();
+            std::string dir = paths.substr(start, end - start);
+            if (!dir.empty()) {
+                fs::path p = fs::path(dir) / exeName;
+                if (fs::is_regular_file(p) && access(p.c_str(), X_OK) == 0) return p.string();
+            }
+            start = end + 1;
+        }
+    }
+    // 4. 표준 설치 위치 /opt/gmsh-*/bin/gmsh (SmartTwinPreprocessor SIF)
+    for (auto& entry : fs::directory_iterator("/opt", ec)) {
+        std::string name = entry.path().filename().string();
+        if (entry.is_directory() && name.rfind("gmsh", 0) == 0) {
+            fs::path p = entry.path() / "bin" / exeName;
+            if (fs::is_regular_file(p)) return p.string();
+        }
+    }
+#endif
     return "";
 }
 
@@ -1877,7 +1911,7 @@ int runMeshFix(const char* configPath, ConsoleOutput& console) {
     // 2. Gmsh
     std::string gmshExe = findGmshExe();
     if (gmshExe.empty()) {
-        console.error("Gmsh not found — place gmsh.exe in dist/gmsh/ or dist/gmsh-<ver>/ next to KooRemapper.exe");
+        console.error("Gmsh not found — set KOOREMAPPER_GMSH, or place gmsh(.exe) in gmsh/ or gmsh-<ver>/[bin/] next to KooRemapper, or put gmsh on PATH (Linux also checks /opt/gmsh-*/bin/gmsh)");
         return 1;
     }
     console.keyValue("Gmsh", gmshExe);

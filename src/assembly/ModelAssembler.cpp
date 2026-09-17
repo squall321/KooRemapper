@@ -18,6 +18,7 @@
 #include "analysis/MaterialModel.h"
 #include "validation/ElementQualityChecker.h"
 #include "validation/IntersectionDetector.h"
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <iomanip>
@@ -9494,7 +9495,21 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
 
     // 1. Resolve database path
     std::string dbPath = op.databasePath;
-    if (dbPath.empty()) dbPath = "materials/material_db.json";
+    if (dbPath.empty()) {
+        // 기본 번들 DB: 작업 폴더 materials/ (기존) → 없으면 실행 파일 기준 materials/, ../materials/
+        // (help 의 'relative to exe' 와 맞춘다. SIF 는 /opt/kooremapper/bin + /opt/kooremapper/materials)
+        dbPath = "materials/material_db.json";
+        if (!std::ifstream(dbPath).good()) {
+            std::error_code ec;
+            auto exe = std::filesystem::read_symlink("/proc/self/exe", ec);
+            if (!ec) {
+                for (const char* rel : {"materials/material_db.json", "../materials/material_db.json"}) {
+                    auto cand = (exe.parent_path() / rel).lexically_normal();
+                    if (std::ifstream(cand.string()).good()) { dbPath = cand.string(); break; }
+                }
+            }
+        }
+    }
     if (dbPath.find('/') == std::string::npos && dbPath.find('\\') == std::string::npos) {
         if (!configDir.empty()) dbPath = configDir + "/" + dbPath;
     }
