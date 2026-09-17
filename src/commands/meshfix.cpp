@@ -225,10 +225,17 @@ static std::string findGmshExe() {
     const char* exeName = "gmsh";
 #endif
     if (execDir.empty()) execDir = ".";
+    // 바이너리 옆 번들은 리눅스에서도 gmsh.exe 이름으로 둔다(플랫폼 bin/gmsh/gmsh.exe, setup-gmsh.sh·Drive 아티팩트).
+    // gmsh 만 찾으면 그 배치의 api 컨테이너에서 meshfix 가 'Gmsh not found' 로 실패했다.
+#ifdef _WIN32
+    const std::vector<std::string> bundledNames = {"gmsh.exe"};
+#else
+    const std::vector<std::string> bundledNames = {"gmsh", "gmsh.exe"};
+#endif
 
     // 1. simple: execDir/gmsh/<exe>
-    {
-        auto p = execDir / "gmsh" / exeName;
+    for (const auto& name : bundledNames) {
+        auto p = execDir / "gmsh" / name;
         if (fs::is_regular_file(p)) return p.string();
     }
     // 2. versioned dir: execDir/gmsh-*/<exe> 또는 execDir/gmsh-*/bin/<exe> (배포 tar 구조)
@@ -237,8 +244,10 @@ static std::string findGmshExe() {
         if (!entry.is_directory()) continue;
         std::string name = entry.path().filename().string();
         if (name.rfind("gmsh", 0) == 0) {
-            for (auto p : {entry.path() / exeName, entry.path() / "bin" / exeName}) {
-                if (fs::is_regular_file(p)) return p.string();
+            for (const auto& exe : bundledNames) {
+                for (auto p : {entry.path() / exe, entry.path() / "bin" / exe}) {
+                    if (fs::is_regular_file(p)) return p.string();
+                }
             }
         }
     }

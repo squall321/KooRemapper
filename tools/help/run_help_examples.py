@@ -97,10 +97,14 @@ def run_case(binary, spec, files, cmds, keep):
     return True, "", tmp
 
 
-def _gmsh_available():
-    """meshfix 사례 실행 가능 여부 — KOOREMAPPER_GMSH 또는 PATH/opt 의 실행 가능한 gmsh"""
+def _gmsh_available(binary):
+    """meshfix 사례 실행 가능 여부 — KOOREMAPPER_GMSH, 바이너리 옆 gmsh/gmsh(.exe), /opt 의 gmsh.
+    바이너리 옆 번들을 보지 않아 플랫폼 배치(bin/gmsh/gmsh.exe)에서 meshfix 가 조용히 건너뛰어졌다."""
     env = os.environ.get("KOOREMAPPER_GMSH")
     if env and os.path.isfile(env):
+        return True
+    bindir = os.path.dirname(os.path.realpath(binary))
+    if any(os.path.isfile(os.path.join(bindir, "gmsh", n)) for n in ("gmsh", "gmsh.exe")):
         return True
     import glob
     return bool(glob.glob("/opt/gmsh-*/bin/gmsh"))
@@ -116,7 +120,7 @@ def main():
     for spec in OPS:
         if only and spec["name"] not in only:
             continue
-        if spec["name"] == "meshfix" and not _gmsh_available():
+        if spec["name"] == "meshfix" and not _gmsh_available(binary):
             skipped.append(spec["name"])
             continue
         if from_help:
