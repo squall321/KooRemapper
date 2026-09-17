@@ -116,7 +116,7 @@ def main():
     for spec in OPS:
         if only and spec["name"] not in only:
             continue
-        if spec["name"] == "warpage" or (spec["name"] == "meshfix" and not _gmsh_available()):
+        if spec["name"] == "meshfix" and not _gmsh_available():
             skipped.append(spec["name"])
             continue
         if from_help:

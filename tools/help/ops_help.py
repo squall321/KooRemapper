@@ -378,8 +378,27 @@ operations:
           "target_pid 를 생략하면 조건에 맞는 모든 셸 파트"])
 op("warpage", "변형·초기응력", "측정 워피지 데이터(dat)로 셸·솔리드 파트 면외 변형", "워피지 휨 warp",
    "KooRemapper warpage <config.yaml>",
-   notes=["dat 파일은 x y z 열 (탭/공백). 스키마는 `KooRemapper help warpage` 의 YAML Config Format",
-          "실행 검증된 자체완결 사례가 아직 없다 — 측정 데이터로 직접 확인할 것"])
+   files=boxed({"warpage.yaml": """base_model: box.k
+output: box_warp
+material:
+  E: 210000
+  nu: 0.3
+operations:
+  - type: warpage
+    target_pid: 1
+    dat_file: warp.dat
+    plane: xy
+    deflection_axis: +z
+    unit: um
+    mode: deform
+""", "warp.dat": """0 0 0 0 0
+0 50 100 50 0
+0 0 0 0 0
+"""}),
+   cmds=[BOX_CMD, "KooRemapper warpage warpage.yaml"], outputs=["box_warp.k"],
+   notes=["dat 파일은 처짐값 행렬(행×열, 공백 구분). 파트 평면 bbox(또는 data_bbox)에 펼치며 열 0 = 평면 1축 최소, "
+          "행 0 = 2축 최소 (bend 의 dat 는 행 0 = 최대). 값 단위는 unit(기본 um)",
+          "mode: prestress(기본, 초기응력만) | deform(노드 이동). outside_behavior: zero(기본) | clamp | extrapolate"])
 op("bend", "변형·초기응력", "처짐 함수 w(x1,x2) 로 파트를 굽히고 초기응력 계산", "굽힘 bending 곡률 formula",
    "KooRemapper bend <config.yaml>",
    files=boxed({"bend.yaml": """base_model: box.k
@@ -397,8 +416,9 @@ operations:
     expression: "0.5 * sin(pi*x1/L1) * sin(pi*x2/L2)"
 """}),
    cmds=[BOX_CMD, "KooRemapper bend bend.yaml"], outputs=["box_bent.k"],
-   notes=["plane: xy | xz | yz. L1·L2 는 파트 평면 길이"])
-op("indent", "변형·초기응력", "원·다각형 펀치 영역에 필렛 압입(depth>0)/엠보싱(depth<0)", "압입 엠보싱 찍힘 dent emboss",
+   notes=["plane: xy | yz | zx (x1,x2 = X,Y | Y,Z | Z,X). L1·L2 는 파트 평면 길이",
+          "mode: deform(노드 이동 + 역응력) | stress(응력만), source: formula | dat | dat_pair — 모두 필수 값 검사"])
+op("indent", "변형·초기응력", "다각형·스플라인 펀치 윤곽에 필렛 압입(depth>0)/엠보싱(depth<0)", "압입 엠보싱 찍힘 dent emboss",
    "KooRemapper indent <config.yaml>",
    files=boxed({"indent.yaml": """base_model: box.k
 output: box_indent

@@ -461,10 +461,40 @@ operations:
      {"examples/formstrain/bent_shell.k"},
      {"대상은 SECTION_SHELL + MAT_024(SIGY > 0) 셸 파트. 없으면 'no eligible shell parts' 로 아무것도 안 쓴다", "target_pid 를 생략하면 조건에 맞는 모든 셸 파트"}},
     {"warpage", "변형·초기응력", "측정 워피지 데이터(dat)로 셸·솔리드 파트 면외 변형", "워피지 휨 warp", "KooRemapper warpage <config.yaml>",
+     {{"box.yaml", R"KRH(output: box.k
+lx: 20.0
+ly: 10.0
+lz: 2.0
+nx: 10
+ny: 5
+nz: 2
+rho: 7.85e-9
+E: 210000.0
+nu: 0.3
+mid: 1
+secid: 1
+pid: 1
+part_title: PLATE
+)KRH"}, {"warpage.yaml", R"KRH(base_model: box.k
+output: box_warp
+material:
+  E: 210000
+  nu: 0.3
+operations:
+  - type: warpage
+    target_pid: 1
+    dat_file: warp.dat
+    plane: xy
+    deflection_axis: +z
+    unit: um
+    mode: deform
+)KRH"}, {"warp.dat", R"KRH(0 0 0 0 0
+0 50 100 50 0
+0 0 0 0 0
+)KRH"}},
+     {"KooRemapper generate box box.yaml", "KooRemapper warpage warpage.yaml"},
      {},
-     {},
-     {},
-     {"dat 파일은 x y z 열 (탭/공백). 스키마는 `KooRemapper help warpage` 의 YAML Config Format", "실행 검증된 자체완결 사례가 아직 없다 — 측정 데이터로 직접 확인할 것"}},
+     {"dat 파일은 처짐값 행렬(행×열, 공백 구분). 파트 평면 bbox(또는 data_bbox)에 펼치며 열 0 = 평면 1축 최소, 행 0 = 2축 최소 (bend 의 dat 는 행 0 = 최대). 값 단위는 unit(기본 um)", "mode: prestress(기본, 초기응력만) | deform(노드 이동). outside_behavior: zero(기본) | clamp | extrapolate"}},
     {"bend", "변형·초기응력", "처짐 함수 w(x1,x2) 로 파트를 굽히고 초기응력 계산", "굽힘 bending 곡률 formula", "KooRemapper bend <config.yaml>",
      {{"box.yaml", R"KRH(output: box.k
 lx: 20.0
@@ -496,8 +526,8 @@ operations:
 )KRH"}},
      {"KooRemapper generate box box.yaml", "KooRemapper bend bend.yaml"},
      {},
-     {"plane: xy | xz | yz. L1·L2 는 파트 평면 길이"}},
-    {"indent", "변형·초기응력", "원·다각형 펀치 영역에 필렛 압입(depth>0)/엠보싱(depth<0)", "압입 엠보싱 찍힘 dent emboss", "KooRemapper indent <config.yaml>",
+     {"plane: xy | yz | zx (x1,x2 = X,Y | Y,Z | Z,X). L1·L2 는 파트 평면 길이", "mode: deform(노드 이동 + 역응력) | stress(응력만), source: formula | dat | dat_pair — 모두 필수 값 검사"}},
+    {"indent", "변형·초기응력", "다각형·스플라인 펀치 윤곽에 필렛 압입(depth>0)/엠보싱(depth<0)", "압입 엠보싱 찍힘 dent emboss", "KooRemapper indent <config.yaml>",
      {{"box.yaml", R"KRH(output: box.k
 lx: 20.0
 ly: 10.0
