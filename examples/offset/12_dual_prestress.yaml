@@ -19,7 +19,7 @@ operations:
     material_card: |
       *MAT_ELASTIC
       $#     mid        ro         e        pr
-           @MID@       2.0     12000       0.25
+           @MID@       2.0     12000      0.25
 
   # Second offset: +x direction (sideways) - demonstrates multi-directional offset
   - type: offset
@@ -34,7 +34,7 @@ operations:
     material_card: |
       *MAT_ELASTIC
       $#     mid        ro         e        pr
-           @MID@       2.0     12000       0.25
+           @MID@       2.0     12000      0.25
 
 # Note: Dual offset prestress workflow:
 #   1. Create outer layer (+normal offset)

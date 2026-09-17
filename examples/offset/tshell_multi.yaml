@@ -17,4 +17,4 @@ operations:
     material_card: |
       *MAT_ELASTIC
       $#     mid        ro         e        pr
-           @MID@       1.5      5000       0.35
+           @MID@       1.5      5000      0.35

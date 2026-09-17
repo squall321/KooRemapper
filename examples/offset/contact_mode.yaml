@@ -16,7 +16,7 @@ operations:
     material_card: |
       *MAT_ELASTIC
       $#     mid        ro         e        pr
-           @MID@       1.8      8000       0.28
+           @MID@       1.8      8000      0.28
 
 # 출력 파일에 *CONTACT_* 정의가 주석으로 포함됩니다.
 # 사용자가 필요에 따라 주석을 제거하고 파라미터를 수정하십시오.

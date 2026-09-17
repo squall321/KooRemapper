@@ -32,7 +32,7 @@ operations:
     material_card: |
       *MAT_ELASTIC
       $#     mid        ro         e        pr
-           @MID@       2.0     12000       0.25
+           @MID@       2.0     12000      0.25
 
 # Note: Local normals improvement:
 #   Without local normals (global average):
