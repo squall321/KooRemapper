@@ -1461,8 +1461,11 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                 if (inMaterialCardsList && indent > materialCardsKeyIndent &&
                     trimmed.size() >= 1 && trimmed[0] == '-' && trimmed.size() >= 2) {
                     // 주석을 떼지 않아 '- |   # 주석' 을 카드 시작으로 못 봤다
-                    std::string afterDash = trim(stripComment(trimmed.substr(1)));
-                    if (afterDash == "|" || afterDash.empty()) {
+                    std::string afterDashRaw = trim(trimmed.substr(1));
+                    std::string afterDash = trim(stripComment(afterDashRaw));
+                    // 빈 항목 판정은 주석을 떼기 전 기준 — '- # 주석'(주석뿐인 항목)을 카드 시작으로 보면
+                    // 다음 '- |' 줄까지 카드 본문으로 들어가 덱에 '- |' 가 그대로 찍힌다
+                    if (afterDash == "|" || afterDashRaw.empty()) {
                         // Start new material card
                         if (!config.operations.empty() &&
                             config.operations.back().type == AssemblyOperation::OFFSET) {

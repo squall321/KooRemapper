@@ -1495,7 +1495,7 @@ int runGenerateVar(const std::string& configFile, const std::string& outputFile,
     // Determine reference dimensions
     double refLengthI = 0, refLengthJ = 0, refLengthK = 0;
     
-    if (!refFile.empty()) {
+    if (!refFile.empty() && !noScale) {   // --no-scale 이면 명령행 기준 파일도 쓰지 않는다(설정 기준과 같은 규칙)
         // Load from command line reference file
         console.info("Loading reference mesh: " + refFile);
         KFileReader reader;

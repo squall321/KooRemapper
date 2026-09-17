@@ -139,7 +139,7 @@ int runLoad(const std::string& yamlFile, ConsoleOutput& console) {
             }
 
             if (key == "direction") {
-                if (val.front() == '[' && val.back() == ']') {
+                if (!val.empty() && val.front() == '[' && val.back() == ']') {   // 빈 값에 front() 를 부르던 것
                     std::string inner = val.substr(1, val.size()-2);
                     std::istringstream iss(inner);
                     std::string tok;
