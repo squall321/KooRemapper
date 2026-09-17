@@ -5572,7 +5572,8 @@ bool ModelAssembler::applyWarpage(const WarpageOperation& op, double E, double n
     WarpageGrid grid;
     std::string datPath = op.datFile;
     // If relative path, make it relative to config directory
-    if (!datPath.empty() && datPath[0] != '/' && !(datPath.size() > 1 && datPath[1] == ':')) {
+    // (YAML 이 현재 폴더에 있으면 configDir 이 비어 '/파일' 로 루트를 찾았다)
+    if (!configDir.empty() && !datPath.empty() && datPath[0] != '/' && !(datPath.size() > 1 && datPath[1] == ':')) {
         datPath = configDir + "/" + datPath;
     }
 
@@ -5801,7 +5802,7 @@ void ModelAssembler::calculateWarpagePrestress(
 
     double factor = E / (1 - nu*nu);
     std::cout << "[INFO] Material: E=" << E << ", nu=" << nu << "\n";
-    std::cout << "[DEBUG] useFiniteStrain = " << (op.useFiniteStrain ? "TRUE" : "FALSE") << "\n";
+    if (op.debug) std::cout << "[DEBUG] useFiniteStrain = " << (op.useFiniteStrain ? "TRUE" : "FALSE") << "\n";
 
     // Process each element
     for (auto& [eid, elem] : baseMesh_.getElements()) {
@@ -5866,7 +5867,7 @@ void ModelAssembler::calculateWarpagePrestress(
 
             // Debug output for first element
             static bool firstTime = true;
-            if (firstTime && eid == 1) {
+            if (op.debug && firstTime && eid == 1) {
                 std::cout << "[DEBUG] Finite strain enabled\n";
                 std::cout << "[DEBUG] Element 1: gradX=" << gradX << ", gradY=" << gradY << "\n";
                 std::cout << "[DEBUG] Membrane strain: eps_mem=" << (0.5*gradX*gradX) << "\n";

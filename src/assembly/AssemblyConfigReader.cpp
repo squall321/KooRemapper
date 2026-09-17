@@ -1100,9 +1100,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             else if (key == "morph_factor") op.warpage.morphFactor = std::stod(val);
                             else if (key == "mode") op.warpage.mode = val;
                             else if (key == "finite_strain") {
-                                bool newVal = (val == "true" || val == "yes" || val == "1");
-                                std::cout << "[YAML DEBUG] finite_strain: val='" << val << "' -> " << (newVal ? "TRUE" : "FALSE") << "\n";
-                                op.warpage.useFiniteStrain = newVal;
+                                op.warpage.useFiniteStrain = (val == "true" || val == "yes" || val == "1");
                             }
                             else if (key == "outside_behavior") op.warpage.outsideBehavior = val;
                             else if (key == "debug") op.warpage.debug = (val == "true" || val == "yes" || val == "1");
