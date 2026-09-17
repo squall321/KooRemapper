@@ -1652,8 +1652,9 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
 
             // Connection mode validation
             std::string cmode = op.offset.connectionMode;
-            if (cmode != "tied" && cmode != "czm" && cmode != "contact")
-                throw std::runtime_error(pfx + "connection_mode must be tied|czm|contact");
+            // none 은 단독 offset·help 가 허용하는 값 — assemble 경로만 거부해 같은 YAML 이 명령에 따라 갈렸다
+            if (cmode != "tied" && cmode != "czm" && cmode != "contact" && cmode != "none")
+                throw std::runtime_error(pfx + "connection_mode must be tied|czm|contact|none");
 
             // Material card validation
             if (!op.offset.materialCard.empty()) {

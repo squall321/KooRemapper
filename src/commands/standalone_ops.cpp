@@ -790,6 +790,10 @@ int runOffset(const std::string& yamlFile, ConsoleOutput& console) {
     bool readingMatCard = false;
     bool readingCzmMatCard = false;
     int matCardBaseIndent = 0;
+    // material_cards: 층마다 다른 재질 목록 — assemble 은 읽는데 여기선 빠져, 층 PART 가 없는 MID 를 가리켰다
+    bool inMatCardsList = false;
+    bool readingMatCardsItem = false;
+    int matCardsKeyIndent = 0;
 
     std::string ln;
     while (std::getline(f, ln)) {
@@ -802,6 +806,8 @@ int runOffset(const std::string& yamlFile, ConsoleOutput& console) {
                 op.materialCard += ln.substr(std::min(indent, matCardBaseIndent)) + "\n";
             } else if (readingCzmMatCard && indent >= matCardBaseIndent) {
                 op.czmMaterialCard += ln.substr(std::min(indent, matCardBaseIndent)) + "\n";
+            } else if (readingMatCardsItem && indent >= matCardBaseIndent) {
+                op.materialCards.back() += ln.substr(std::min(indent, matCardBaseIndent)) + "\n";
             }
             continue;
         }
@@ -820,6 +826,20 @@ int runOffset(const std::string& yamlFile, ConsoleOutput& console) {
             }
             readingCzmMatCard = false;
         }
+        if (inMatCardsList) {
+            if (readingMatCardsItem && indent >= matCardBaseIndent) {
+                op.materialCards.back() += ln.substr(std::min(indent, matCardBaseIndent)) + "\n";
+                continue;
+            }
+            if (indent > matCardsKeyIndent && (tr == "- |" || tr == "-|")) {
+                op.materialCards.emplace_back();
+                readingMatCardsItem = true;
+                matCardBaseIndent = indent + 2;
+                continue;
+            }
+            inMatCardsList = false;
+            readingMatCardsItem = false;
+        }
 
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
@@ -828,6 +848,7 @@ int runOffset(const std::string& yamlFile, ConsoleOutput& console) {
 
         y.parseCommonKey(key, val);
         if      (key == "source_pid") { try { op.sourcePid = std::stoi(val); } catch(...) {} }
+        else if (key == "material_cards" && val.empty()) { inMatCardsList = true; matCardsKeyIndent = indent; }
         else if (key == "offset_direction") op.offsetDirection = val;
         else if (key == "thickness") { try { op.thickness = std::stod(val); } catch(...) {} }
         else if (key == "thickness_formula") op.thicknessFormula = val;

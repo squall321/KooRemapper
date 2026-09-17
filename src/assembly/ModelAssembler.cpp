@@ -6202,6 +6202,11 @@ bool ModelAssembler::applyOffset(const OffsetOperation& op, double E, double nu)
     int actualPid = (op.newPid > 0) ? op.newPid : (++maxPartId_);
     int actualSecid = (op.newSecid > 0) ? op.newSecid : (++maxSectionId_);
     int actualMid = (op.newMid > 0) ? op.newMid : (++maxMaterialId_);
+    // 명시 ID 도 카운터에 올린다 — 안 올리면 다층 offset 의 둘째 층·뒤 op 의 자동 번호가 모델 최대+1 부터 다시
+    // 매겨져(new_pid 10 다음 층이 PID 2) 층이 많거나 명시값이 작으면 이 ID 와 겹친다
+    maxPartId_ = std::max(maxPartId_, actualPid);
+    maxSectionId_ = std::max(maxSectionId_, actualSecid);
+    maxMaterialId_ = std::max(maxMaterialId_, actualMid);
 
     std::cout << "[INFO] New IDs: PID=" << actualPid
               << ", SECID=" << actualSecid
