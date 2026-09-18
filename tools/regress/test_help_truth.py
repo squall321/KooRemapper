@@ -425,8 +425,19 @@ def main():
     # 스칼라 PID 칸은 restack(층 N 개)과 merge(새 PID 1 개)의 동작이 갈린다 — 한쪽 문장을 베껴 적으면
     # 사용자가 restack 결과를 '옮겨졌겠지' 하고 넘긴다.
     check("restack: 스칼라 PID 칸은 manual 로 남는다고 적음",
-          "manual(직접 고치세요)로 남는다" in rst and "merge 는 이 칸들까지 옮긴다" in rst,
+          "manual(직접 고치세요)로 남는다" in rst and "merge 는 이 칸들을 옮긴다" in rst,
           [l for l in rst.splitlines() if "manual" in l])
+    # *ELEMENT_MASS 는 스칼라 PID 칸 목록에 넣으면 안 된다 — merge 도 manual 로 남긴다(아래에서 실행으로 확인).
+    # operations[].pid_refs 는 assemble 에서 쓰는 키인데 'help assemble' 이 한 번도 적지 않았다.
+    asm_help = help_text(binary, "assemble")
+    check("help assemble: operations[] 의 pid_refs 를 적음",
+          "pid_refs: strict(기본) | warn" in asm_help,
+          [l for l in asm_help.splitlines() if "pid_refs" in l])
+
+    check("restack·merge: *ELEMENT_MASS 를 '옮기는 스칼라 PID 칸' 목록에 넣지 않음",
+          "*INITIAL_VELOCITY_GENERATION, *ELEMENT_MASS)" not in rst and
+          "*INITIAL_VELOCITY_GENERATION, *ELEMENT_MASS)" not in mrg,
+          [l for l in (rst + mrg).splitlines() if "ELEMENT_MASS" in l])
     check("merge: 스칼라 PID 칸까지 새 PID 로 바꾼다고 적음",
           "도 새 PID 로 바꾼다" in mrg and "restack 은 이 칸들을 manual 로 남긴다" in mrg,
           [l for l in mrg.splitlines() if "새 PID 로 바꾼다" in l])
@@ -573,6 +584,111 @@ def main():
     check("공통 규칙: restack·merge 의 참조 이관과 rc=1 을 한 줄로 적음",
           "restack·merge 는 비운 PID 를 가리키던 자리를 옮기고" in rules and
           "pid_refs: warn" in rules, rules[:1600])
+
+    print("[재질 카드 제목 줄 자동 보충이 닿는 범위 — 문구의 조건과 실제가 같은가]")
+    # 데이터 줄이 하나뿐인 *MAT_..._TITLE 은 제목 줄을 채워 주지만, 두 줄 이상인 카드는 탐지하지 못한다.
+    # help·매뉴얼·카탈로그가 이 조건을 빼고 적으면 사용자가 *MAT_RIGID_TITLE 을 제목 없이 넣고
+    # *PART 의 mid 가 조용히 바뀐 덱을 솔버로 넘긴다. 문구와 실제 동작을 함께 잠근다.
+    check("restack help: 제목 줄 자동 보충이 '데이터 줄이 하나뿐인 카드' 로 한정됨",
+          "데이터 줄이 하나뿐인 카드에서만" in rst,
+          [l for l in rst.splitlines() if "제목 줄" in l])
+
+    MAT1 = ("*MAT_ELASTIC_TITLE\n$#     mid        ro         e        pr\n"
+            "        71  7.85E-09  2.10E+05       0.3\n")
+    MAT2 = ("*MAT_ELASTIC_TITLE\n$#     mid        ro         e        pr\n"
+            "        72  1.20E-09  3.00E+03      0.45\n")
+
+    def layers(*cards):
+        out = "    layers:\n"
+        for c in cards:
+            out += "      - thickness: 0.5\n        material_card: |\n"
+            out += "".join("          " + l + "\n" for l in c.strip("\n").split("\n"))
+        return out
+
+    open(os.path.join(tmp, "t1.yaml"), "w").write(
+        "base_model: box.k\noutput: t1\noperations:\n  - type: restack\n"
+        "    target_pid: 1\n    direction: z\n" + layers(MAT1, MAT2))
+    rc, out = run(binary, tmp, "restack", "t1.yaml")
+    t1 = open(os.path.join(tmp, "t1.k")).read() if rc == 0 else ""
+    check("한 줄짜리 *MAT_..._TITLE: 제목 줄을 채우고 카드의 숫자 MID 를 *PART 가 그대로 쓴다",
+          rc == 0 and "had no title line" in out and "Restack Layer 1" in t1 and
+          t1.count("*MAT_ELASTIC_TITLE") == 2 and
+          "\n         2         2        71\n" in t1 and
+          "\n         3         3        72\n" in t1,
+          f"rc={rc} cards={t1.count('*MAT_ELASTIC_TITLE')} {out[-200:]}")
+
+    # 데이터 줄 2 개 + 제목 줄 없음 → 지금은 탐지하지 못한다(미수정 결함). 고치면 이 단언이 깨지고
+    # help·매뉴얼·카탈로그의 '데이터 줄이 하나뿐인 카드에서만' 문구도 함께 고쳐야 한다.
+    RIG = ("*MAT_RIGID_TITLE\n$#     mid        ro         e        pr\n"
+           "        90  7.85E-09  2.10E+05       0.3\n"
+           "$#     cmo      con1      con2\n         1         7         7\n")
+    open(os.path.join(tmp, "t2.yaml"), "w").write(
+        "base_model: box.k\noutput: t2\noperations:\n  - type: restack\n"
+        "    target_pid: 1\n    direction: z\n" + layers(RIG, MAT2))
+    rc, out = run(binary, tmp, "restack", "t2.yaml")
+    t2 = open(os.path.join(tmp, "t2.k")).read() if rc == 0 else ""
+    check("데이터 줄 2 개 + 제목 줄 없음: 아직 탐지하지 못한다 (미수정 결함 — 고치면 문서도 고칠 것)",
+          rc == 0 and "Restack layer 1: *MAT_..._TITLE card had no title line" not in out and
+          "*MAT_RIGID_TITLE\n$#     mid" in t2,
+          f"rc={rc} {out[-300:]}")
+
+    print("[*SET_PART_COLUMN 은 8개/줄 규칙이 아니라 층마다 한 줄]")
+    col = open(os.path.join(tmp, "box.k")).read().replace(
+        "*END", "*SET_PART_COLUMN\n$#     sid\n       500\n"
+                "$#    pid1        a1        a2        a3\n"
+                "         1       1.5       2.5       3.5\n"
+                "*DATABASE_HISTORY_PART_SET\n$#     sid\n       500\n*END")
+    open(os.path.join(tmp, "box_col.k"), "w").write(col)
+    open(os.path.join(tmp, "rs_col.yaml"), "w").write(
+        "base_model: box_col.k\noutput: rs_col\noperations:\n  - type: restack\n"
+        "    target_pid: 1\n    direction: z\n" + layers(MAT1, MAT2))
+    rc, out = run(binary, tmp, "restack", "rs_col.yaml")
+    body = open(os.path.join(tmp, "rs_col.k")).read() if os.path.exists(
+        os.path.join(tmp, "rs_col.k")) else ""
+    # 덱 머리 $ KOOREMAPPER-PIDREF 블록도 카드 이름을 되읊으므로 실제 카드(줄머리 '*')부터 자른다
+    seg = body.split("\n*SET_PART_COLUMN", 1)[-1].split("\n*DATABASE_HISTORY_PART_SET", 1)[0]
+    rows = [l for l in seg.splitlines() if l.strip() and not l.strip().startswith("$")
+            and l.split()[:1] in (["2"], ["3"]) and len(l.split()) == 4]
+    check("restack: *SET_PART_COLUMN 은 층마다 한 줄로 늘고 딸린 칸을 그대로 복사한다",
+          rc == 0 and len(rows) == 2 and all(r.split()[1:] == ["1.5", "2.5", "3.5"] for r in rows),
+          f"rc={rc} rows={rows}")
+    check("restack help: *SET_PART_COLUMN 을 8개/줄 규칙과 따로 적음",
+          "*SET_PART_COLUMN 은 딸린 칸이 있어" in rst,
+          [l for l in rst.splitlines() if "SET_PART_COLUMN" in l])
+
+    print("[merge 의 *ELEMENT_MASS — manual 이 정상, 2번째 칸 덮어쓰기는 미수정 결함]")
+    mk = os.path.join(REPO, "examples", "merge", "three_layer.k")
+    if not os.path.exists(mk):
+        print("  SKIP: examples/merge/three_layer.k 없음")
+    else:
+        base = open(mk).read()
+        MY = "model: em.k\noutput: em_out.k\ndirection: z\nmethod: vrh\nmerge:\n  - pids: [1, 2, 3]\n"
+        # (가) 2번째 칸이 죽은 PID 가 아닌 흔한 경우 → manual, 본문 그대로
+        open(os.path.join(tmp, "em.k"), "w").write(base.replace(
+            "*END", "*ELEMENT_MASS\n$#    eid       id             mass       pid\n"
+                    "      9001       11       1.50000E-3         1\n*END"))
+        open(os.path.join(tmp, "em.yaml"), "w").write(MY)
+        rc, out = run(binary, tmp, "merge", "em.yaml")
+        em = open(os.path.join(tmp, "em_out.k")).read() if os.path.exists(
+            os.path.join(tmp, "em_out.k")) else ""
+        check("merge: *ELEMENT_MASS 는 manual 로 남고 본문을 바꾸지 않는다",
+              "*ELEMENT_MASS (manual)" in out and "      9001       11       1.50000E-3         1" in em,
+              f"rc={rc} {out[-200:]}")
+        # (나) 2번째 칸(= LS-DYNA 의 노드 ID)이 죽은 PID 와 같은 번호면 덮어쓴다 — 미수정 결함
+        open(os.path.join(tmp, "em.k"), "w").write(base.replace(
+            "*END", "*ELEMENT_MASS\n$#    eid       id             mass       pid\n"
+                    "      9001        2       1.50000E-3       999\n*END"))
+        rc, out = run(binary, tmp, "merge", "em.yaml")
+        em = open(os.path.join(tmp, "em_out.k")).read() if os.path.exists(
+            os.path.join(tmp, "em_out.k")) else ""
+        moved = "*ELEMENT_MASS (moved)" in out
+        clob = "      9001         4      1.50000E-3       999" in em
+        check("merge: 2번째 칸이 죽은 PID 와 같으면 노드 ID 를 덮어쓴다 (미수정 결함 — 고치면 문서도 고칠 것)",
+              rc == 0 and moved and clob, f"rc={rc} moved={moved} clob={clob}")
+        check("매뉴얼·lat.md·help 가 그 덮어쓰기를 결함으로 적음",
+              "미수정 결함" in open(os.path.join(REPO, "docs", "KooRemapper_Manual.md")).read() and
+              "미수정 결함" in open(os.path.join(REPO, "lat.md", "commands", "restack.md")).read() and
+              "미수정 결함" in mrg)
 
     print("[HelpCatalogData.inc 가 ops_help.py 와 같은지]")
     p = subprocess.run([sys.executable, os.path.join(REPO, "tools", "help", "gen_help_cpp.py"), "--check"],

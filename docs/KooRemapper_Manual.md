@@ -941,7 +941,7 @@ restack 은 대상 파트를 층으로 나누면서 **층마다 새 PID·SECID·
 | 한 세트를 tied 와 체적 소비자가 함께 쓰는 경우 | 세트를 **복제해 가릅니다**(새 SID 를 발급해 tied 쪽만 그 층을 담습니다) | 해당 없음(새 PID 가 하나뿐입니다) |
 | 그 밖의 접촉 — AUTOMATIC·ERODING·SINGLE_SURFACE 등 | 모든 층이 solid 일 때 **층 전부를 담은 새 세트**로 바꾸고 STYP 를 3→2 로 고칩니다 | 합친 PID 로 바꿉니다 |
 | 스칼라 PID 칸 — `*DAMPING_PART_MASS`·`_STIFFNESS`, `*DATABASE_HISTORY_PART`, `*MAT_ADD_THERMAL_EXPANSION`, `*PART_MOVE`, `*BOUNDARY_PRESCRIBED_MOTION_RIGID`, `*DEFORMABLE_TO_RIGID`, `*INITIAL_VELOCITY_GENERATION` 의 PID 칸 | **`manual`(직접 고치세요)** — 칸 하나에 층 N 개를 담을 수 없습니다 | **옮깁니다** — 새 PID 가 하나뿐이라 칸에 그대로 들어갑니다 |
-| `*ELEMENT_MASS` | `manual` — `집중질량을 층에 나눌 수 없습니다 — 직접 배분하세요` | **2번째 칸**에 있는 죽은 PID 만 옮깁니다. 그 밖의 칸(EID·노드 축 포함)에 있으면 `manual` 로 남습니다 |
+| `*ELEMENT_MASS` | `manual` — `집중질량을 층에 나눌 수 없습니다 — 직접 배분하세요` | `manual` 이 정상 동작입니다. **다만 2번째 칸이 죽은 PID 와 같은 번호면 그 칸을 합친 PID 로 덮어씁니다 — 미수정 결함입니다.** LS-DYNA `*ELEMENT_MASS` 는 `EID, 노드 ID, MASS, PID` 라 2번째 칸은 **노드 ID** 입니다. 노드 번호가 합쳐진 파트 번호와 겹치면 집중질량이 다른 노드로 옮겨 붙고 `moved` 로 보고되며 rc=0 으로 끝납니다 — merge 전에 `*ELEMENT_MASS` 의 노드 ID 를 확인하세요 |
 | `*CONSTRAINED_RIGID_BODIES` 의 두 칸이 모두 죽은 경우 | `manual` | 옮기지 않고 보고만 합니다(`left`) — 합치면 자기 자신을 가리키게 됩니다 |
 | `EID` 축 — `*SET_SOLID`·`_SHELL`·`_BEAM`·`_TSHELL`, `*INITIAL_STRESS_*`, `*INITIAL_STRAIN_SOLID`, `*DATABASE_HISTORY_SOLID` 등 | `manual` | `manual` |
 | `NODE` 축 — `*SET_NODE`, `*SET_SEGMENT`, `*BOUNDARY_SPC_NODE`, 그 세트를 쓰는 `*CONSTRAINED_NODAL_RIGID_BODY` | `manual` | `manual` |
@@ -1112,6 +1112,14 @@ $#   ssid      msid     sstyp     mstyp
 
   `*MAT_..._TITLE` 다음 첫 줄은 제목으로 읽히므로, 제목 줄이 없으면 데이터 줄이 제목으로 먹혀 그 재질이 등록되지 않습니다.
   예전에는 경고 없이 그렇게 나갔습니다.
+
+  > **이 자동 보충은 데이터 줄이 하나뿐인 카드에서만 동작합니다 (2026-09-18 실행 확인).**
+  > 빠진 제목 줄은 '키워드 줄 뒤 비주석 줄이 하나뿐인가' 로 찾습니다. 그래서
+  > `*MAT_RIGID_TITLE`·`*MAT_PIECEWISE_LINEAR_PLASTICITY_TITLE` 처럼 **데이터 줄이 두 줄 이상인 카드**에서
+  > 제목 줄을 빠뜨리면 탐지하지 못하고, 첫 데이터 줄이 제목으로 먹힌 채 둘째 줄이 데이터 줄로 읽힙니다 —
+  > `*PART` 의 mid 칸에 엉뚱한 값이 들어가고(둘째 줄 첫 칸이 정수면 조용히, 실수면
+  > `material_card MID field reads '0.0'` 으로 rc=1), 제목 줄도 채워지지 않습니다.
+  > **데이터 줄이 두 줄 이상인 `*MAT_..._TITLE` 카드에는 제목 줄을 반드시 적으세요.**
 
 - **구조가 깨진 카드는 rc=1 입니다** — `*MAT` 키워드 줄이 없거나, 키워드 줄 뒤에 데이터 줄이 아예 없는 경우입니다.
 
@@ -3976,10 +3984,19 @@ restack 과 **같은 코드**로 처리하므로 훑는 세 축(`PID`·`EID`·`N
 1. **스칼라 PID 칸도 옮긴다.** 새 PID 가 하나뿐이라 칸 하나에 들어간다 —
    `*DAMPING_PART_MASS`/`_STIFFNESS`, `*DATABASE_HISTORY_PART`, `*MAT_ADD_THERMAL_EXPANSION`,
    `*PART_MOVE`, `*BOUNDARY_PRESCRIBED_MOTION_RIGID`, `*DEFORMABLE_TO_RIGID`,
-   `*INITIAL_VELOCITY_GENERATION` 의 PID 칸, 그리고 `*ELEMENT_MASS` 의 **2번째 칸**.
+   `*INITIAL_VELOCITY_GENERATION` 의 PID 칸.
    restack 은 칸 하나에 층 N 개를 담을 수 없어 이 칸들을 `manual`(직접 고치세요)로 남긴다.
-   `*ELEMENT_MASS` 의 다른 칸(EID·노드 축 포함)은 merge 에서도 `manual` 이다 —
+   `*ELEMENT_MASS`(`_PART` 포함)는 두 op 모두 `manual` 이다 —
    `집중질량을 층에 나눌 수 없습니다 — 직접 배분하세요`.
+
+   > **미수정 결함 — merge 의 `*ELEMENT_MASS` 2번째 칸 (2026-09-18 실행 확인)**
+   > merge 는 `*ELEMENT_MASS` 의 **2번째 칸**을 PID 칸으로 보고, 그 값이 이번 merge 로 사라진 PID 와
+   > 같은 번호면 합친 PID 로 덮어쓴다. LS-DYNA `*ELEMENT_MASS` 카드는 `EID, 노드 ID, MASS, PID` 라
+   > 2번째 칸은 **노드 ID** 다. 노드 번호가 합쳐진 파트 번호와 겹치는 덱(흔하다)에서는
+   > 집중질량이 다른 노드로 조용히 옮겨 붙고, 보고는 `moved`, 종료 코드는 **rc=0** 이라
+   > 자동화에도 걸리지 않는다. merge 를 돌리기 전에 `*ELEMENT_MASS` 의 노드 ID 가
+   > 합칠 파트 번호와 겹치는지 확인하라.
+
 2. **tied 계열 접촉은 옮기지 않고 보고만 한다.** 파트가 하나로 합쳐져 원 파트의 면을 특정할 수 없기 때문이다 —
    `세그먼트 세트로 바꾸세요` 를 이유로 적는다. restack 은 상대측 기하를 적층 축에 투영해
    층이 유일할 때 그 층으로 옮긴다.

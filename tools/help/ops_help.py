@@ -248,7 +248,7 @@ operations:
    notes=["element_type: solid(기본) | tshell | shell, direction: auto(기본, 자동 탐지) | x | y | z (+/- 부호도 같은 축). 모르는 값은 rc=1",
           "material_card 의 mid 칸은 라벨로도 쓸 수 있다 (MID001, MAT01). 층마다 새 MID 로 바뀐다. 라벨과 카드 내용이 같으면 재질을 공유하고, 라벨이 같아도 물성이 다르면 MID 를 따로 준다",
           "그 칸에 숫자를 적으면 그 번호를 그대로 쓴다. 이미 쓰이는 번호면 'material MID 90 is already in use -> assigned MID 91' 을 찍고 새 번호를 준다",
-          "*MAT_…_TITLE 의 제목 줄은 그대로 두고, 같은 MID 를 가리키는 *MAT_ADD_… 카드도 함께 새 MID 로 바뀐다. 제목 줄이 없으면 [WARN] 을 내고 'Restack Layer N' 을 제목 줄로 채워 내보낸다 (그 줄이 없으면 데이터 줄이 제목으로 먹힌다). 데이터 줄 자체가 없는 카드는 rc=1",
+          "*MAT_…_TITLE 의 제목 줄은 그대로 두고, 같은 MID 를 가리키는 *MAT_ADD_… 카드도 함께 새 MID 로 바뀐다. 제목 줄이 없으면 [WARN] 을 내고 'Restack Layer N'(layers[].title 이 있으면 그 제목)을 채워 내보낸다 — 다만 데이터 줄이 하나뿐인 카드에서만 그렇다. 데이터 줄이 두 줄 이상인 카드(*MAT_RIGID·*MAT_PIECEWISE_LINEAR_PLASTICITY 등)에서 제목 줄을 빠뜨리면 탐지하지 못하고 첫 데이터 줄이 제목으로 먹힌다 — 제목 줄을 반드시 적어라. 데이터 줄 자체가 없는 카드는 rc=1",
           "층 카드도 재질 카드 검사를 거친다 — 구조가 깨지면 rc=1, 물성 값 경고(예: PR 0.6)는 [WARN] 이고 그대로 진행한다",
           "카드는 10칸 고정폭 (블록 들여쓰기를 뺀 뒤 기준). 자유 형식(쉼표)도 된다. 새 PID·SECID 는 자동",
           "새 *SECTION 은 원 *SECTION 의 ELFORM 을, 새 *PART 는 원 *PART 의 HGID·TMID 를 물려받는다 (요소 종류가 같을 때만 — solid↔tshell 은 뜻이 달라 넘기지 않는다. EOSID 도 넘기지 않는다)",
@@ -256,9 +256,9 @@ operations:
           "입력은 extrude 된 헥사 솔리드. 두께 방향 노드 수가 곳곳에서 같아야 하고, 아니면 not a valid extrusion 으로 멈춘다",
           "thickness 는 비율로 쓰인다 — 합이 실제 두께와 달라도 실제 두께에 맞춰 나눈다. 층마다 num_elements 로 두께 방향 요소 수를 준다 (첫 층이 아래쪽)",
           "평면 메시는 그대로 두고 두께 방향만 다시 만든다. 층마다 새 PID·SECID·MID 를 주므로 원래 *PART 는 요소 0 개인 빈 파트로 남는다",
-          "그 죽은 PID·지워진 요소(EID)·지워진 노드(NODE)를 가리키던 자리를 훑어 옮긴다 — 체적 의미로 쓰이는 *SET_PART_LIST/_TITLE/_COLUMN 은 층 PID 전부로(한 줄 8개 규칙을 지켜 줄을 늘린다), tied 계열 접촉(*CONTACT_*TIED*/*TIEBREAK*/*SPOTWELD*/*CONTACT_CONSTRAINT_)은 상대측 기하를 적층 축에 투영해 층이 하나로 정해질 때만 그 층으로, 그 밖의 접촉(AUTOMATIC·ERODING·SINGLE_SURFACE)은 shell 층이 섞이지 않았을 때 층 전부를 담은 새 세트로(STYP 3→2)",
+          "그 죽은 PID·지워진 요소(EID)·지워진 노드(NODE)를 가리키던 자리를 훑어 옮긴다 — 체적 의미로 쓰이는 *SET_PART_LIST·*SET_PART_TITLE 은 층 PID 전부로(한 줄 8개 규칙을 지켜 줄을 늘린다), *SET_PART_COLUMN 은 딸린 칸이 있어 죽은 PID 줄을 층마다 한 줄씩으로 늘린다(딸린 칸은 그대로 복사), tied 계열 접촉(*CONTACT_*TIED*/*TIEBREAK*/*SPOTWELD*/*CONTACT_CONSTRAINT_)은 상대측 기하를 적층 축에 투영해 층이 하나로 정해질 때만 그 층으로, 그 밖의 접촉(AUTOMATIC·ERODING·SINGLE_SURFACE)은 shell 층이 섞이지 않았을 때 층 전부를 담은 새 세트로(STYP 3→2)",
           "한 세트를 tied 와 체적 소비자가 함께 쓰면 세트를 복제해 가른다(새 SID 를 발급). 접촉은 tied 든 아니든 층이 애매하거나 shell 층이 섞이면 옮기지 않고 이유만 보고한다(left — rc 에 들어간다)",
-          "PID 칸이 하나뿐인 카드(*DAMPING_PART_MASS/_STIFFNESS, *DATABASE_HISTORY_PART, *MAT_ADD_THERMAL_EXPANSION, *PART_MOVE, *BOUNDARY_PRESCRIBED_MOTION_RIGID, *DEFORMABLE_TO_RIGID, *INITIAL_VELOCITY_GENERATION, *ELEMENT_MASS)는 한 칸에 층 N 개를 담을 수 없어 manual(직접 고치세요)로 남는다 — 새 PID 가 하나뿐인 merge 는 이 칸들까지 옮긴다",
+          "PID 칸이 하나뿐인 카드(*DAMPING_PART_MASS/_STIFFNESS, *DATABASE_HISTORY_PART, *MAT_ADD_THERMAL_EXPANSION, *PART_MOVE, *BOUNDARY_PRESCRIBED_MOTION_RIGID, *DEFORMABLE_TO_RIGID, *INITIAL_VELOCITY_GENERATION)는 한 칸에 층 N 개를 담을 수 없어 manual(직접 고치세요)로 남는다 — 새 PID 가 하나뿐인 merge 는 이 칸들을 옮긴다. *ELEMENT_MASS(_PART 포함)는 집중질량을 층에 나눌 수 없어 restack 에서 manual 이다",
           "*INCLUDE 가 있는 덱은 세트의 소비자를 다 볼 수 없어 세트를 펴지 않고 보고만 한다",
           "못 옮긴 자리가 하나라도 남으면 rc=1 이고 덱은 쓴다. 전체 목록은 덱 머리(*KEYWORD 바로 뒤)의 '$ KOOREMAPPER-PIDREF' 블록에 moved/left/manual/unknown/maybe 등급과 입력 덱 기준 줄 번호로 들어간다. maybe(화이트리스트 밖)는 rc 에 넣지 않는다",
           "pid_refs: strict(기본) | warn — warn 은 같은 보고를 하고 rc=0 으로 끝낸다(기존 파이프라인의 탈출구). 그 밖의 값은 rc=1 + invalid pid_refs. assemble 은 operations[] 항목 안에, 단독 restack 은 YAML 에 그대로 적는다",
@@ -352,8 +352,9 @@ merge:
    cmds=["KooRemapper merge merge.yaml"], outputs=["three_layer_merged.k"],
    notes=["입력은 z 방향으로 쌓인 솔리드 층 파트들 (각 파트에 MAT_ELASTIC 계열 재질)",
           "합친 파트들은 요소 0 개인 빈 파트로 남고 새 PID 하나가 생긴다 (위 사례는 PID 1,2,3 → 4)",
-          "그 죽은 PID·지워진 요소(EID)·지워진 노드(NODE)를 가리키던 자리를 훑어 옮긴다 — 세트·접촉은 물론, PID 칸이 하나뿐인 카드(*DAMPING_PART_MASS/_STIFFNESS, *DATABASE_HISTORY_PART, *MAT_ADD_THERMAL_EXPANSION, *PART_MOVE, *BOUNDARY_PRESCRIBED_MOTION_RIGID, *DEFORMABLE_TO_RIGID, *INITIAL_VELOCITY_GENERATION, *ELEMENT_MASS)도 새 PID 로 바꾼다. 새 PID 가 여럿인 restack 은 이 칸들을 manual 로 남긴다",
+          "그 죽은 PID·지워진 요소(EID)·지워진 노드(NODE)를 가리키던 자리를 훑어 옮긴다 — 세트·접촉은 물론, PID 칸이 하나뿐인 카드(*DAMPING_PART_MASS/_STIFFNESS, *DATABASE_HISTORY_PART, *MAT_ADD_THERMAL_EXPANSION, *PART_MOVE, *BOUNDARY_PRESCRIBED_MOTION_RIGID, *DEFORMABLE_TO_RIGID, *INITIAL_VELOCITY_GENERATION)도 새 PID 로 바꾼다. 새 PID 가 여럿인 restack 은 이 칸들을 manual 로 남긴다",
           "두 칸이 모두 이번 merge 로 사라지는 *CONSTRAINED_RIGID_BODIES 는 합치면 자기 자신을 가리키게 되므로 옮기지 않고 보고만 한다",
+          "*ELEMENT_MASS(_PART 포함)는 집중질량을 층에 나눌 수 없어 manual 로 남는다 — 다만 2번째 칸이 이번 merge 로 사라진 PID 와 같은 번호면 그 칸을 합친 PID 로 덮어쓴다. LS-DYNA *ELEMENT_MASS 의 2번째 칸은 노드 ID 라 집중질량이 다른 노드로 옮겨 붙고 rc=0 으로 끝난다 — merge 전에 *ELEMENT_MASS 의 노드 ID 를 확인해라 (미수정 결함)",
           "못 옮긴 자리가 하나라도 남으면 rc=1 이고 덱은 쓴다. 전체 목록은 덱 머리(*KEYWORD 바로 뒤)의 '$ KOOREMAPPER-PIDREF' 블록에 moved/left/manual/unknown/maybe 등급과 입력 덱 기준 줄 번호로 들어간다. maybe(화이트리스트 밖)는 rc 에 넣지 않는다",
           "pid_refs: strict(기본) | warn — warn 은 같은 보고를 하고 rc=0 으로 끝낸다. 그 밖의 값은 rc=1 + invalid pid_refs. assemble 은 operations[] 항목 안에, 단독 merge 는 YAML 에 그대로 적는다",
           "위 사례의 three_layer.k 는 *MAT_ADD_THERMAL_EXPANSION 2 건이 죽은 PID 를 가리켜 '옮김' 으로 보고된다 — 못 옮긴 자리가 없어 rc=0 이다"])
@@ -516,7 +517,8 @@ material:
   nu: 0.3
 """}),
    cmds=[BOX_CMD, "KooRemapper assemble asm.yaml"], outputs=["box_assembled.k"],
-   notes=["operations[].type 는 각 op 이름(replace squeeze restack offset disconnect update generate ...)"])
+   notes=["operations[].type 는 각 op 이름(replace squeeze restack offset disconnect update generate ...)",
+          "restack·merge 항목은 operations[] 안에 pid_refs: strict(기본) | warn 을 받는다 — 비운 PID 를 가리키던 자리를 못 옮기면 strict 는 rc=1(덱은 쓴다), warn 은 같은 보고에 rc=0. 자세한 것은 help restack·help merge"])
 
 # ── 하중·경계·접촉 ──
 op("load", "하중·경계·접촉", "파트 면(방향/tied/세그먼트셋 선택)에 압력·힘 하중 + 곡선", "하중 pressure 압력 force",
