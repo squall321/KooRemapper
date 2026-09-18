@@ -284,7 +284,8 @@ static bool printLegacyHelp(ConsoleOutput& console, const std::string& helpCmd) 
         std::cout << "\n";
         console.println("Options:");
         console.println("  --ref <file>   Reference flat mesh for scaling");
-        console.println("  --no-scale     Don't scale to reference (use YAML lengths as-is)");
+        console.println("  --no-scale     Ignore the reference MESH FILE (--ref / reference.flat_mesh)");
+        console.println("                 reference.dimensions written in the YAML still apply");
         std::cout << "\n";
         console.println("YAML Format (Flat Variable Density):");
         console.println("  type: flat  # Optional, default is flat");
@@ -2008,7 +2009,7 @@ static int runMain(int argc, char* argv[]) {
         parser.addPositional("config", "YAML configuration file");
         parser.addPositional("output", "Output K-file");
         parser.addOption("", "ref", "Reference flat mesh for scaling", "");
-        parser.addFlag("", "no-scale", "Don't scale to reference");
+        parser.addFlag("", "no-scale", "Ignore the reference mesh file (reference.dimensions still apply)");
 
         int subArgc = argc - 1;
         char** subArgv = argv + 1;
