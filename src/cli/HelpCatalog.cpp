@@ -93,7 +93,12 @@ void printOverview(std::ostream& os, const std::string& version) {
         }
     }
     os << "\n공통 규칙\n";
-    os << "  - 경로는 작업 폴더 기준. YAML 의 model/base_model 로 입력, output 으로 출력 이름 (확장자 생략 op 는 .k 가 붙는다)\n";
+    os << "  - YAML 의 model/base_model 로 입력, output 으로 출력 이름 (확장자 생략 op 는 .k 가 붙는다)\n";
+    os << "  - 명령줄에 준 경로만 작업 폴더 기준. YAML 안의 상대 경로(model/base_model/output/dat_file/dynain…)는\n";
+    os << "    모두 그 YAML 파일이 있는 폴더 기준으로 푼다 — 작업 폴더로 되돌아가지 않는다\n";
+    os << "    (KooRemapper strip cfg/strip.yaml 의 output: ../data/box_stripped.k → cfg/../data/box_stripped.k)\n";
+    os << "  - 단독 op 명령은 operations 항목이 2개 이상인 YAML 을 거절하고 종료 코드 1 (assemble 로 실행할 것)\n";
+    os << "  - 값 뒤 '# 주석' 은 떼어내고 값을 감싼 따옴표도 벗긴다. 따옴표 안의 '#' 는 값으로 남는다\n";
     os << "  - 실패하면 [ERROR] 줄을 찍고 종료 코드 1\n";
     os << "  - SIF 안 경로: /opt/kooremapper/bin/KooRemapper, 번들 재질 DB /opt/kooremapper/materials/material_db.json\n";
 }
