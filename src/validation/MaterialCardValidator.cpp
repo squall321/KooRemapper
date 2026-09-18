@@ -89,20 +89,8 @@ std::string MaterialCardValidator::extractKeyword(const std::string& line) const
 void MaterialCardValidator::validateElastic(
     const std::vector<std::string>& lines, ValidationResult& result) {
 
-    // Find first data line (non-comment, non-blank after keyword)
-    int dataLineIdx = -1;
-    for (size_t i = 0; i < lines.size(); ++i) {
-        if (isKeywordLine(lines[i])) {
-            // Look for data line after keyword
-            for (size_t j = i + 1; j < lines.size(); ++j) {
-                if (!isCommentLine(lines[j]) && !isBlankLine(lines[j])) {
-                    dataLineIdx = static_cast<int>(j);
-                    break;
-                }
-            }
-            break;
-        }
-    }
+    // Find first data line (non-comment, non-blank after keyword; _TITLE 은 제목 줄 다음)
+    int dataLineIdx = findFirstDataLine(lines);
 
     if (dataLineIdx < 0) {
         result.addError("*MAT_ELASTIC: No data line found");
@@ -164,15 +152,12 @@ void MaterialCardValidator::validateElastic(
 void MaterialCardValidator::validateCohesiveMixedMode(
     const std::vector<std::string>& lines, ValidationResult& result) {
 
-    // Find data lines
+    // Find data lines (_TITLE 은 제목 줄 다음부터)
     std::vector<int> dataLineIndices;
-    bool afterKeyword = false;
-    for (size_t i = 0; i < lines.size(); ++i) {
-        if (isKeywordLine(lines[i])) {
-            afterKeyword = true;
-            continue;
-        }
-        if (afterKeyword && !isCommentLine(lines[i]) && !isBlankLine(lines[i])) {
+    int firstDataIdx = findFirstDataLine(lines);
+    for (size_t i = (firstDataIdx < 0 ? lines.size() : static_cast<size_t>(firstDataIdx));
+         i < lines.size(); ++i) {
+        if (!isCommentLine(lines[i]) && !isBlankLine(lines[i])) {
             dataLineIndices.push_back(static_cast<int>(i));
         }
     }
@@ -215,19 +200,8 @@ void MaterialCardValidator::validateCohesiveMixedMode(
 void MaterialCardValidator::validatePlasticKinematic(
     const std::vector<std::string>& lines, ValidationResult& result) {
 
-    // Find first data line
-    int dataLineIdx = -1;
-    bool afterKeyword = false;
-    for (size_t i = 0; i < lines.size(); ++i) {
-        if (isKeywordLine(lines[i])) {
-            afterKeyword = true;
-            continue;
-        }
-        if (afterKeyword && !isCommentLine(lines[i]) && !isBlankLine(lines[i])) {
-            dataLineIdx = static_cast<int>(i);
-            break;
-        }
-    }
+    // Find first data line (_TITLE 은 제목 줄 다음)
+    int dataLineIdx = findFirstDataLine(lines);
 
     if (dataLineIdx < 0) {
         result.addError("*MAT_PLASTIC_KINEMATIC: No data line found");
@@ -264,6 +238,23 @@ void MaterialCardValidator::validatePlasticKinematic(
             result.addError("*MAT_PLASTIC_KINEMATIC: Yield stress (SIGY) must be positive");
         }
     } catch (...) {}
+}
+
+// *MAT 키워드 다음 첫 데이터 줄. *MAT_..._TITLE 은 키워드 바로 다음(주석 제외) 줄이 제목이라
+// 데이터 줄이 아니다 — 예전엔 제목을 데이터로 읽어 restack 이 받는 카드를 offset 이 거부했다.
+int MaterialCardValidator::findFirstDataLine(const std::vector<std::string>& lines) const {
+    for (size_t i = 0; i < lines.size(); ++i) {
+        if (!isKeywordLine(lines[i])) continue;
+        bool titlePending = extractKeyword(lines[i]).find("_TITLE") != std::string::npos;
+        for (size_t j = i + 1; j < lines.size(); ++j) {
+            if (isCommentLine(lines[j])) continue;
+            if (titlePending) { titlePending = false; continue; }  // 제목 줄(비어 있어도 제목)
+            if (isBlankLine(lines[j])) continue;
+            return static_cast<int>(j);
+        }
+        break;
+    }
+    return -1;
 }
 
 std::vector<std::string> MaterialCardValidator::parseDataLine(const std::string& line) const {

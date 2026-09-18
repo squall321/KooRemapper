@@ -50,6 +50,9 @@ private:
     bool checkPositiveValue(double value, const std::string& fieldName, ValidationResult& result);
     bool checkRange(double value, double min, double max, const std::string& fieldName, ValidationResult& result);
 
+    // *MAT 키워드 뒤 첫 데이터 줄 (*MAT_..._TITLE 이면 제목 줄을 건너뛴다). 없으면 -1
+    int findFirstDataLine(const std::vector<std::string>& lines) const;
+
     // Parse data line (skip comments)
     std::vector<std::string> parseDataLine(const std::string& line) const;
     bool isCommentLine(const std::string& line) const;
