@@ -292,17 +292,19 @@ void KFileWriter::writeNodeSection(std::ofstream& file, const Mesh& mesh,
 
 void KFileWriter::writeElementSection(std::ofstream& file, const Mesh& mesh,
                                       const std::set<int>* skipIds) {
-    file << "*ELEMENT_SOLID" << std::endl;
-    file << "$#   eid     pid      n1      n2      n3      n4      n5      n6      n7      n8" << std::endl;
-
     // Sort elements by ID
     std::vector<std::pair<int, const Element*>> sortedElements;
     for (const auto& [id, elem] : mesh.elements) {
         if (skipIds && skipIds->count(id)) continue;
         sortedElements.push_back({id, &elem});
     }
+    // 쉘만 있는 덱이면 쓸 솔리드가 하나도 없다 — 빈 *ELEMENT_SOLID 블록을 남기지 않는다
+    if (sortedElements.empty()) return;
     std::sort(sortedElements.begin(), sortedElements.end(),
               [](const auto& a, const auto& b) { return a.first < b.first; });
+
+    file << "*ELEMENT_SOLID" << std::endl;
+    file << "$#   eid     pid      n1      n2      n3      n4      n5      n6      n7      n8" << std::endl;
 
     for (const auto& [id, elemPtr] : sortedElements) {
         const Element& elem = *elemPtr;

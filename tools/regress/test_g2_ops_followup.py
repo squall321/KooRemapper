@@ -54,6 +54,25 @@ ORTHO_BLOCK = """*ELEMENT_SOLID_ORTHO
        0.0       1.0       0.0
 """
 
+SHELL_ONLY = """*KEYWORD
+*NODE
+       1             0.0             0.0             0.0
+       2             1.0             0.0             0.0
+       3             1.0             1.0             0.0
+       4             0.0             1.0             0.0
+*PART
+Shell
+       1       1       1
+*SECTION_SHELL
+       1       2
+       1.0       1.0       1.0       1.0
+*MAT_ELASTIC
+       1 7.850E-09  210000.0       0.3
+*ELEMENT_SHELL
+       1       1       1       2       3       4
+*END
+"""
+
 GV_CURVED = """type: curved
 reference:
   dimensions:
@@ -181,6 +200,16 @@ def test_squeeze_element_ids(binary):
         txt = open(orp, errors="replace").read()
         check("*ELEMENT_SOLID_ORTHO 블록이 그대로 남는다 (예전엔 블록째 사라졌다)",
               "*ELEMENT_SOLID_ORTHO" in txt and "    6001" in txt, txt[-300:])
+
+    write(d, "shellonly.k", SHELL_ONLY)
+    rc, out = run(binary, d, "squeeze", "shellonly.k", "sq.yaml", "so")
+    sop = os.path.join(d, "so.k")
+    ok = rc == 0 and os.path.exists(sop)
+    check("쉘만 있는 덱도 rc=0", ok, f"rc={rc} {out[-200:]}")
+    if ok:
+        txt = open(sop, errors="replace").read()
+        check("쓸 솔리드가 없으면 빈 *ELEMENT_SOLID 블록을 남기지 않는다",
+              "*ELEMENT_SOLID" not in txt and "*ELEMENT_SHELL" in txt, txt[-300:])
 
 
 def test_stabilize_level_zero(binary):
