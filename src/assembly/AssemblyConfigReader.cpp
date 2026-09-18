@@ -1602,6 +1602,16 @@ void AssemblyConfigReader::validateOperation(const AssemblyOperation& op, size_t
             throw std::runtime_error("Operation " + std::to_string(i+1) + ": missing target_pid");
         if (op.restack.layers.empty())
             throw std::runtime_error("Operation " + std::to_string(i+1) + ": no layers defined for restack");
+        // 지원하지 않는 direction 은 조용히 auto 로 떨어져 엉뚱한 축으로 쌓였다 — 허용값을 찍고 거부한다(D1).
+        // 부호 표기(+z 등)는 help 가 안내하는 값이므로 허용한다.
+        {
+            const std::string& d = op.restack.direction;
+            if (d != "auto" && d != "x" && d != "y" && d != "z" &&
+                d != "+x" && d != "-x" && d != "+y" && d != "-y" && d != "+z" && d != "-z")
+                throw std::runtime_error("Operation " + std::to_string(i+1) +
+                    " (restack): invalid direction '" + d +
+                    "' (must be one of auto, x, y, z, +x, -x, +y, -y, +z, -z)");
+        }
         for (size_t j = 0; j < op.restack.layers.size(); ++j) {
             if (op.restack.layers[j].thickness <= 0)
                 throw std::runtime_error("Operation " + std::to_string(i+1) +
