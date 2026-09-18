@@ -243,7 +243,7 @@ layers:
 > **rc=1 을 기본으로 둔 이유** — pyKooCAE 체인과 플랫폼 워커는 **종료 코드로만** 성공을 판정합니다.
 > rc=0 이면 콘솔 경고가 자동화에 아예 보이지 않은 채 그 덱이 그대로 솔버까지 갑니다.
 
-rc=1 일 때의 마지막 출력입니다(위 예제).
+rc=1 일 때의 마지막 출력입니다(위 예제 덱에서 `pid_refs` 를 빼거나 `strict` 로 둔 경우 — 위 YAML 그대로는 `warn` 이라 rc=0 입니다).
 
 ```
 [ERROR] restack/merge 가 비운 PID·지운 요소·지운 노드를 아직 가리키는 자리가 2 건 남았습니다 — 덱은 stacked.k 에 썼지만 그대로 풀면 그 조건들이 아무 일도 하지 않습니다.
@@ -281,10 +281,15 @@ $#   ssid      msid     sstyp     mstyp
 ```
   [WARN] restack: PID 1 가 빈 파트가 됐습니다 — 지워진 PID·요소·노드를 가리키던 자리 5 건 — 옮긴 것 3 건, 못 옮긴 것 2 건 (새 층 PID: 3,4)
     [PID] line 70 *SET_PART_LIST (moved): 세트 300: 죽은 PID 를 층 PID 2개 전부로 바꿨습니다(구성원 2개)
+        |          1
     [PID] line 75 *CONTACT_TIED_SURFACE_TO_SURFACE (moved): slave part 1 → 층 2(PID 4) 로 바꿨습니다(상대측 기하를 적층 축에 투영해 층이 하나로 정해졌습니다)
+        |          1         2         3         3
     [PID] line 78 *CONTACT_AUTOMATIC_SURFACE_TO_SURFACE (moved): slave part 1 → 층 PID 2개를 담은 새 세트 301 (STYP 3→2) 로 바꿨습니다
+        |          1         2         3         3
     [PID] line 80 *DAMPING_PART_MASS (manual): `_SET` 변형으로 바꾸고 전 층 세트를 주세요
+        |          1       0.0
     [PID] line 82 *DATABASE_HISTORY_PART (manual): 층 PID 를 목록에 더하거나 `_SET` 변형으로 바꾸세요
+        |          1
     못 옮긴 자리가 남아 rc=1 로 끝냅니다(덱은 씁니다). pid_refs: warn 을 주면 같은 보고를 하고 rc=0 으로 끝냅니다.
 ```
 
