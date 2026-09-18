@@ -1069,6 +1069,28 @@ std::vector<RsBlock> rsCollectBlocks(const std::vector<std::string>& rawLines) {
     return out;
 }
 
+// 읽지 않은 *INCLUDE 가 몇 개인가(첫 줄 인덱스도 돌려준다).
+// rawLines_ 에는 *INCLUDE 줄만 들어오고 그 안의 카드는 읽지 않는다 — 실제 낙하시험 덱은
+// 거의 언제나 나뉘어 있으므로 '이 덱에 없으니 없다' 를 사실로 쓰면 안 된다.
+// *INCLUDE_PATH 는 탐색 경로일 뿐 카드를 끌어오지 않는다.
+size_t rsCountIncludes(const std::vector<std::string>& rawLines, size_t& firstLine) {
+    size_t n = 0;
+    bool got = false;
+    firstLine = 0;
+    for (size_t i = 0; i < rawLines.size(); ++i) {
+        size_t g = rawLines[i].find_first_not_of(" \t");
+        if (g == std::string::npos || rawLines[i][g] != '*') continue;
+        std::string up = rawLines[i].substr(g);
+        while (!up.empty() && (up.back() == '\r' || up.back() == ' ' || up.back() == '\t')) up.pop_back();
+        for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        if (up.rfind("*INCLUDE", 0) != 0) continue;
+        if (up.rfind("*INCLUDE_PATH", 0) == 0) continue;
+        ++n;
+        if (!got) { firstLine = i; got = true; }
+    }
+    return n;
+}
+
 bool rsStarts(const std::string& kw, const char* p) { return kw.rfind(p, 0) == 0; }
 bool rsHas(const std::string& kw, const char* p) { return kw.find(p) != std::string::npos; }
 bool rsEnds(const std::string& kw, const std::string& p) {
@@ -1389,6 +1411,11 @@ void ModelAssembler::migrateDeadReferences(const std::set<int>& deadPids,
     if (deadPids.empty() || ctx.newPids.empty()) return;
 
     const auto blocks = rsCollectBlocks(rawLines_);
+    // 세트의 소비자를 세는 일은 덱 전체를 볼 수 있을 때만 사실이다 — *INCLUDE 가 있으면
+    // tied 접촉이 그 안에 있어도 보이지 않는다. 그런 세트를 전 층으로 펴면 숨은 tied 가
+    // 전 층에 붙어 내부 계면까지 묶인다(결정 2 가 금지한 상태다).
+    size_t inclFirst = 0;
+    const size_t inclCount = rsCountIncludes(rawLines_, inclFirst);
     std::map<size_t, std::string> cardEdit;      // 접촉 카드 1 한 줄 치환
     std::vector<std::string> newSetBlocks;       // 새로 만드는 *SET_PART_LIST
 
@@ -1491,7 +1518,10 @@ void ModelAssembler::migrateDeadReferences(const std::set<int>& deadPids,
         for (const auto& [ci, side] : cons) { (void)side; if (contacts[ci].tied) anyTied = true; }
 
         std::string why;
-        if (s.column && anyTied)
+        if (inclCount > 0)
+            why = "*INCLUDE " + std::to_string(inclCount) + " 개를 읽지 않아 이 세트의 소비자를"
+                  " 모두 볼 수 없습니다 — 그 안에 tied 접촉이 있으면 전 층으로 펴는 것이 틀립니다";
+        else if (s.column && anyTied)
             why = "*SET_PART_COLUMN 은 구성원마다 칸이 딸려 있어 tied 용으로 복제하지 않습니다";
         else if (s.column && s.comma)
             why = "콤마 자유 형식의 *SET_PART_COLUMN 은 칸 자리를 확정할 수 없습니다";
@@ -1827,6 +1857,26 @@ void ModelAssembler::scanDeadReferences(const std::string& opName,
     const auto blocks = rsCollectBlocks(rawLines_);
     std::vector<bool> handled(blocks.size(), false);
     std::set<std::pair<int, std::string>> seen;   // (줄, 축) 중복 방지
+
+    // 인클루드 안은 읽지 않았다. 거기에 이 PID·요소·노드를 가리키는 자리가 있어도 못 찾으므로
+    // '0 건' 이 사실이라고 말할 수 없다 — 완결성의 착각을 만들지 않도록 한 줄로 못 박는다.
+    {
+        size_t inclFirst = 0;
+        size_t inclCount = rsCountIncludes(rawLines_, inclFirst);
+        if (inclCount > 0) {
+            PidRefFinding f;
+            f.axis = "ALL";
+            f.keyword = "*INCLUDE";
+            f.line = static_cast<int>(inclFirst) + 1;
+            f.text = rawLines_[inclFirst];
+            f.grade = "left";
+            f.advice = "*INCLUDE " + std::to_string(inclCount) +
+                       " 개를 읽지 않았습니다 — 그 안에 비운 PID·지운 요소·지운 노드를 가리키는"
+                       " 자리가 있어도 찾지 못합니다. 인클루드를 풀어 한 덱으로 주거나 그 파일들을"
+                       " 직접 확인하세요";
+            found.push_back(f);
+        }
+    }
 
     auto add = [&](const std::string& axis, const std::string& kw, size_t li,
                    const char* grade, const std::string& advice) {

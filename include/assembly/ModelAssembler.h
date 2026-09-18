@@ -102,7 +102,7 @@ public:
     // grade: auto(규칙표의 '자동으로 옮긴다' 대상) | manual(보고만) |
     //        unknown(화이트리스트 키워드인데 칸 자리가 확정되지 않음) | maybe(화이트리스트 밖)
     struct PidRefFinding {
-        std::string axis;      // "PID" | "EID" | "NODE"
+        std::string axis;      // "PID" | "EID" | "NODE" | "ALL"(덱 전체에 걸린 한계)
         std::string keyword;   // 그 줄이 속한 키워드
         int line = 0;          // 원본 덱 줄 번호(1 부터)
         std::string text;      // 원문
