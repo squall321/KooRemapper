@@ -199,6 +199,11 @@ static bool readConfig(const std::string& path, Cfg& cfg, std::string& err) {
     if (cfg.model.empty())  { err = "Missing 'model'";  return false; }
     if (cfg.output.empty()) { err = "Missing 'output'"; return false; }
     if (cfg.pid < 0)        { err = "Missing 'pid'";    return false; }
+    // 예전엔 모르는 값을 algoCode() 가 조용히 hxt(10)로 삼켰다
+    if (cfg.algorithm != "hxt" && cfg.algorithm != "frontal3d" && cfg.algorithm != "del3d") {
+        err = "unsupported algorithm '" + cfg.algorithm + "' (allowed: hxt, frontal3d, del3d)";
+        return false;
+    }
     return true;
 }
 
