@@ -46,6 +46,7 @@ Get-ChildItem *.yaml | ForEach-Object {
 | tied | ✅ | ✅ | ✅ | Shared nodes |
 | czm | ✅ | ❌ | ❌ | CZM elements between surfaces |
 | contact | ✅ | ✅ | ✅ | Duplicated nodes (no connection) |
+| none | ✅ | ✅ | ✅ | Duplicated nodes, no connection card written |
 | **Advanced Features** |
 | Local normals | ✅ | ✅ | ✅ | Phase 2 - quality improvement |
 | Region selection | ✅ | ✅ | ✅ | Phase 3 - bbox/node/element filters |
@@ -98,8 +99,18 @@ Get-ChildItem *.yaml | ForEach-Object {
 1. **Start Simple**: Begin with `01_basic_solid_tied.yaml`
 2. **Choose Right Direction**: Flat surfaces → use ±x/±y/±z; Curved → use +normal + local normals
 3. **Quality Optimization**: Combine `+normal` + `use_local_normals: true` + region filter
-4. **Multi-Material**: Use `material_cards` array for different materials per layer (v1.1.0+)
-   - Example: `material_cards: [{MAT_ELASTIC}, {MAT_PLASTIC}, {MAT_ELASTIC}]`
+4. **Multi-Material**: Use `material_cards` for different materials per layer (v1.1.0+)
+   - Each item must be a `- |` block holding the whole card; an inline list is rejected (rc=1):
+     ```yaml
+     material_cards:
+       - |
+         *MAT_ELASTIC
+         $#     mid        ro         e        pr
+              @MID@       2.0     12000      0.25
+       - |
+         *MAT_ELASTIC
+              @MID@       2.7      70000      0.33
+     ```
 5. **TET4 Meshes**: Expect poor quality warnings; use HEX8 source for best results
 6. **Negative Directions**: -normal, -x, -y, -z all work correctly (fixed in v1.1.0+)
 
@@ -113,7 +124,7 @@ operations:
     thickness: 1.0             # Offset distance (mm)
     element_type: solid        # Element type (solid/tshell/shell)
     offset_direction: +z       # Direction (±x/±y/±z/±normal)
-    connection_mode: tied      # Connection (tied/czm/contact)
+    connection_mode: tied      # Connection (tied/czm/contact/none)
     new_pid: 10                # New part ID
 ```
 

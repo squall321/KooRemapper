@@ -23,6 +23,8 @@ LS-DYNA 접촉 정의를 분석, 생성, 변환, 수정, 삭제, 자동 감지�
 | `12_multi_action.yaml` | 복합 워크플로우 (삭제→감지→수정) |
 | `13_detect_skip.yaml` | skip_existing: 기존 tied 쌍 건너뛰기 |
 | `14_detect_subtract.yaml` | subtract_existing: tied 세그먼트 차집합 |
+| `15_create_thermal.yaml` | THERMAL 접촉 생성 (tied_thermal — 접촉 열전달) |
+| `16_create_tiebreak.yaml` | TIEBREAK 접촉 생성 (접착 결합·박리 파손) |
 
 ---
 
@@ -43,6 +45,8 @@ KooRemapper contact 11_detect_optcards.yaml
 KooRemapper contact 12_multi_action.yaml
 KooRemapper contact 13_detect_skip.yaml
 KooRemapper contact 14_detect_subtract.yaml
+KooRemapper contact 15_create_thermal.yaml
+KooRemapper contact 16_create_tiebreak.yaml
 ```
 
 ---
@@ -278,6 +282,42 @@ PID 2↔3의 tied 세그먼트를 전체 접촉면에서 빼고 나머지만 일
 
 ---
 
+### 15 - create (THERMAL 접촉)
+
+```yaml
+contacts:
+  - action: create
+    type: tied_thermal          # *CONTACT_TIED_SURFACE_TO_SURFACE_THERMAL
+    title: Metal-Metal thermal
+    slave: {pid: 1}
+    master: {pid: 2}
+    k: 100.0                     # gap 열전도도 (W/mm·K)
+    chlm: 0.5                    # 특성길이 배수
+```
+
+접촉면 열전달 카드를 생성한다. `frad`/`h0`/`lmin`/`lmax`/`bc_flag`/`algo` 도 지정 가능.
+
+---
+
+### 16 - create (TIEBREAK 접촉)
+
+```yaml
+contacts:
+  - action: create
+    type: tiebreak              # *CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_TIEBREAK
+    title: Adhesive bond
+    slave: {pids: [1]}
+    master: {pids: [2]}
+    option: 1                   # 1 = quadratic NFLS/SFLS 파손식
+    nfls: 10.0                  # 법선 파단 응력 (MPa)
+    sfls: 50.0                  # 전단 파단 응력 (MPa)
+    ct2cn: 1.0
+```
+
+접착 결합 후 법선 응력 NFLS 또는 전단 SFLS 초과 시 결합이 풀린다.
+
+---
+
 ## 테스트 모델 구조
 
 ```
@@ -301,6 +341,8 @@ model.k: 3 HEX8 parts (1×1×1 cubes), 공유 노드 접촉면
 | `tied` | `TIED_SURFACE_TO_SURFACE` |
 | `mortar` | `AUTOMATIC_SURFACE_TO_SURFACE_MORTAR` |
 | `tied_mortar` | `TIED_SURFACE_TO_SURFACE_MORTAR` |
+| `tied_thermal` | `TIED_SURFACE_TO_SURFACE_THERMAL` |
+| `tiebreak` | `AUTOMATIC_SURFACE_TO_SURFACE_TIEBREAK` |
 | `single` | `AUTOMATIC_SINGLE_SURFACE` |
 | `eroding` | `ERODING_SURFACE_TO_SURFACE` |
 | `forming` | `FORMING_SURFACE_TO_SURFACE` |
