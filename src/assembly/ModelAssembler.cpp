@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <limits>
 #include <cmath>
+#include <cstdio>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -914,6 +915,28 @@ double computeAutoVC(const std::string& matCard, double dropHeight_mm, double la
 } // anonymous namespace
 
 bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double nu) {
+    // 0. element_type 은 세 값뿐이다 — 그 밖의 값(hex·오타)이 조용히 solid 로 떨어지던 것을 막는다(D1).
+    //    층(layer)의 element_type 은 비워 두면 op 값을 물려받으므로 빈 값만 예외로 둔다.
+    {
+        auto validEtype = [](const std::string& t) {
+            return t == "solid" || t == "tshell" || t == "shell";
+        };
+        if (!validEtype(op.elementType)) {
+            errorMessage_ = "restack: unsupported element_type '" + op.elementType +
+                            "' (allowed: solid, tshell, shell)";
+            return false;
+        }
+        for (size_t li = 0; li < op.layers.size(); ++li) {
+            const std::string& lt = op.layers[li].elementType;
+            if (!lt.empty() && !validEtype(lt)) {
+                errorMessage_ = "restack: layers[" + std::to_string(li) +
+                                "]: unsupported element_type '" + lt +
+                                "' (allowed: solid, tshell, shell)";
+                return false;
+            }
+        }
+    }
+
     // 1. Collect target part elements
     std::vector<const Element*> partElems;
     for (const auto& [eid, elem] : baseMesh_.getElements()) {
@@ -2089,6 +2112,65 @@ bool ModelAssembler::applyBend(const BendOperation& op, double E, double nu,
     return true;
 }
 
+// 비유한 값(nan/inf) 그물 — 단독 명령(standalone_ops.cpp)과 같은 규칙을 쓰되 '쓰기 전' 에 본다.
+// 덱 본문은 writeOutput 안에서 ostringstream 으로 다 만들어진 뒤에야 파일로 나가므로, 그 문자열을
+// 그대로 훑으면 기존 파일을 망가뜨리지 않고 막을 수 있다. 숫자만 들어가는 블록(*NODE·*ELEMENT·
+// *INITIAL)만 본다 — 제목 줄이 있는 키워드는 'Nan...' 같은 이름을 값으로 오해할 수 있다.
+static bool ma_textHasNonFinite(const std::string& text, const std::string& label, std::string& where) {
+    std::istringstream src(text);
+    bool numericBlock = false;
+    int lineNo = 0;
+    std::string ln;
+    while (std::getline(src, ln)) {
+        ++lineNo;
+        if (!ln.empty() && ln.back() == '\r') ln.pop_back();
+        if (!ln.empty() && ln[0] == '*') {
+            numericBlock = (ln.compare(0, 5, "*NODE") == 0 ||
+                            ln.compare(0, 8, "*ELEMENT") == 0 ||
+                            ln.compare(0, 8, "*INITIAL") == 0);
+            continue;
+        }
+        if (!numericBlock || ln.empty() || ln[0] == '$') continue;
+        // 숫자 줄에는 nan/inf 의 글자가 없다 — 빠른 걸러내기(큰 덱에서 줄마다 strtod 하지 않도록)
+        if (ln.find_first_of("nNiI") == std::string::npos) continue;
+        // 고정 칸 서식에서는 음수 값이 앞 칸과 공백 없이 붙는다(*INITIAL_STRESS_* 의 setw(10) 에서
+        // '-0.000e+00' 이 딱 10글자다) — 공백으로 끊으면 '-nan-0.000e+00' 이 한 토큰이 돼 놓친다.
+        // 칸이 시작될 수 있는 자리마다 직접 수를 읽는다: 줄 처음, 공백 뒤, 그리고 숫자 바로 뒤의 부호.
+        for (size_t i = 0; i < ln.size(); ++i) {
+            if (std::isspace((unsigned char)ln[i])) continue;
+            bool fieldStart = (i == 0) ||
+                              std::isspace((unsigned char)ln[i-1]) ||
+                              (std::isdigit((unsigned char)ln[i-1]) && (ln[i] == '-' || ln[i] == '+'));
+            if (!fieldStart) continue;
+            const char* begin = ln.c_str() + i;
+            char* end = nullptr;
+            double v = std::strtod(begin, &end);
+            if (end == begin || std::isfinite(v)) continue;
+            // 'nano' 같은 이름을 값으로 오해하지 않는다 — 읽은 수 뒤가 글자면 칸이 아니다
+            if (*end != '\0' && (std::isalpha((unsigned char)*end) || *end == '_')) continue;
+            where = label + ":" + std::to_string(lineNo) + " '" +
+                    ln.substr(i, (size_t)(end - begin)) + "'";
+            return true;
+        }
+    }
+    return false;
+}
+
+// dynain 은 DynainWriter 가 직접 파일로 쓰는 갈래가 있어 문자열을 훑을 수 없다. 원본 값을 본다.
+static bool ma_resultsHaveNonFinite(const std::vector<ElementResult>& results) {
+    auto badTensor = [](const auto& t) {
+        return !std::isfinite(t.xx) || !std::isfinite(t.yy) || !std::isfinite(t.zz) ||
+               !std::isfinite(t.xy) || !std::isfinite(t.yz) || !std::isfinite(t.xz);
+    };
+    for (const auto& er : results) {
+        if (!er.isValid) continue;
+        if (badTensor(er.stress) || badTensor(er.strain)) return true;
+        if (er.isShell && (badTensor(er.stressTop) || badTensor(er.stressBottom) ||
+                           !std::isfinite(er.epsTop) || !std::isfinite(er.epsBottom))) return true;
+    }
+    return false;
+}
+
 bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
     std::string outputFile = outputPrefix + ".k";
     std::string dynainFile = outputPrefix + ".dynain";
@@ -2654,6 +2736,40 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
             }
         }
         continueMainLoop:;
+    }
+
+    // 비유한 값(nan/inf)이 든 덱은 LS-DYNA 가 읽지 못한다 — 쓰기 전에 막는다(D7).
+    // 단독 명령과 같은 결말(에러 + 결과 파일 없음 + rc=1)이면서, 아직 아무것도 쓰지 않았으므로
+    // 같은 경로에 있던 예전 출력 파일이 망가지지도 않는다.
+    {
+        std::vector<std::string> planned{outputFile};
+        bool writesDynain = (!accumulatedResults_.empty() && !dynainEmbed_);
+        if (writesDynain) planned.push_back(dynainFile);
+        for (const auto& igaf : igaFiles_) planned.push_back(igaf.fullpath);
+
+        std::string where;
+        bool bad = ma_textHasNonFinite(output.str(), outputFile, where);
+        // 초기 응력/변형률은 dynain_embed 에서 .k 본문으로 들어간다 — 쓰는 곳과 무관하게 원본 값을 본다.
+        if (!bad && !accumulatedResults_.empty() && ma_resultsHaveNonFinite(accumulatedResults_)) {
+            bad = true;
+            where = (writesDynain ? dynainFile : outputFile) + " (초기 응력/변형률)";
+        }
+        if (!bad) {
+            for (const auto& igaf : igaFiles_) {
+                if (ma_textHasNonFinite(igaf.content, igaf.fullpath, where)) { bad = true; break; }
+            }
+        }
+        if (bad) {
+            // 같은 경로에 있던 파일은 건드리지 않는다 — 이 시점엔 아직 아무것도 쓰지 않았으니
+            // 지울 수 있는 것은 언제나 '이번 실행이 만들지 않은 파일'(예전 결과, in-place 출력의
+            // 입력 메시, 사용자 파일)뿐이다. 값이 입력 덱에서 온 것일 수도 있어 '결과' 라고도 안 쓴다.
+            std::string list;
+            for (const auto& f : planned) { if (!list.empty()) list += ", "; list += f; }
+            errorMessage_ = "출력 덱에 유한하지 않은 값(nan/inf)이 있습니다: " + where +
+                            " — 출력 파일을 쓰지 않았습니다: " + list +
+                            " / non-finite value in the output deck; no output written: " + list;
+            return false;
+        }
     }
 
     // Write output file
@@ -9502,6 +9618,22 @@ static MdResolvedDamping md_resolveDamping(const MatdbOperation& op) {
 bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& configDir) {
     // infoMessages is a public member of ModelAssembler (no underscore)
 
+    // 0. damping_preset 은 인식되는 값만 받는다 — 오타가 조용히 '프리셋 없음' 으로 떨어지면서도
+    //    묵은 감쇠 카드 제거(stripExistingDamping)는 촉발하던 것을 막는다(D1).
+    //    'off' 는 rescale 값을 바꾸지 않지만 AssemblyConfig.h 가 문서화한 값이고, 재실행 때 묵은
+    //    *DAMPING_PART_* 를 지우는 유일한 관용구라 목록에 남긴다. 키를 아예 빼면(빈 값) 무검사다.
+    if (!op.dampingPreset.empty()) {
+        std::string preset = op.dampingPreset;
+        for (auto& c : preset) c = (char)std::tolower((unsigned char)c);
+        if (preset != "smartphone_drop" && preset != "smartphone_drop_aggressive" &&
+            preset != "quasi_static" && preset != "off") {
+            errorMessage_ = "matdb: unsupported damping_preset '" + op.dampingPreset +
+                            "' (allowed: smartphone_drop, smartphone_drop_aggressive, "
+                            "quasi_static, off)";
+            return false;
+        }
+    }
+
     // 1. Resolve database path
     std::string dbPath = op.databasePath;
     if (dbPath.empty()) {
@@ -11432,6 +11564,18 @@ bool ModelAssembler::applyBoundary(const BoundaryOperation& op) {
         return true;
     }
 
+    // select 는 세 값뿐이다 — 아래 분기가 'set' 만 갈라내고 나머지를 전부 direction 으로 흘려서
+    // 오타가 조용히 direction 으로 돌던 것을 막는다(D1, 단독 load 와 같은 규칙). 'all' 은 help·문서가
+    // 계속 안내해 온 값이므로 그 뜻대로('파트 노출면 전체') 정식으로 받는다.
+    for (size_t i = 0; i < op.boundaries.size(); ++i) {
+        const std::string& sel = op.boundaries[i].select;
+        if (sel != "direction" && sel != "all" && sel != "set") {
+            errorMessage_ = "boundary: boundaries[" + std::to_string(i) +
+                            "]: unsupported select '" + sel + "' (allowed: direction, all, set)";
+            return false;
+        }
+    }
+
     int maxSetNodeId = bc_findMaxSetNodeId(rawLines_);
     int nextSetId = maxSetNodeId + 1;
     std::vector<std::string> insertBlocks;
@@ -11471,7 +11615,8 @@ bool ModelAssembler::applyBoundary(const BoundaryOperation& op) {
                 continue;
             }
             std::vector<std::array<int,4>> selectedFaces;
-            if (hasDirection) {
+            // select: all 은 '파트 노출면 전체' 다 — direction 이 함께 적혀 있어도 방향으로 걸러내지 않는다.
+            if (hasDirection && bc.select != "all") {
                 auto faceInfos = ld_buildFaceInfo(allFaces, baseMesh_);
                 auto indices = ld_filterByDirection(faceInfos, dir, bc.angle);
                 if (indices.empty()) {
@@ -11644,6 +11789,17 @@ bool ModelAssembler::applyRbe(const RbeOperation& op) {
     if (op.constraints.empty()) {
         std::cout << "[rbe] No RBE constraints specified\n";
         return true;
+    }
+
+    // select 는 두 값뿐이다 — 아래 분기가 'direction' 만 갈라내므로 오타는 조용히 'all'(면 전체)이
+    // 된다. boundary 와 같은 규칙으로 거절한다(D1).
+    for (size_t i = 0; i < op.constraints.size(); ++i) {
+        const std::string& sel = op.constraints[i].select;
+        if (sel != "direction" && sel != "all") {
+            errorMessage_ = "rbe: constraints[" + std::to_string(i) +
+                            "]: unsupported select '" + sel + "' (allowed: direction, all)";
+            return false;
+        }
     }
 
     int maxSetNodeId = bc_findMaxSetNodeId(rawLines_);
