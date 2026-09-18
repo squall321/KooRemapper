@@ -4001,7 +4001,7 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
     // Process raw lines
     std::ostringstream output;
 
-    enum class Section { NONE, NODE, ELEMENT, SHELL_ELEMENT };
+    enum class Section { NONE, NODE, ELEMENT, SHELL_ELEMENT, TSHELL_ELEMENT };
     Section currentSection = Section::NONE;
     bool nodesInserted = false;
     bool elementsInserted = false;
@@ -4013,6 +4013,11 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
     int sectionShellDataLine = 0;          // data line counter within *SECTION_SHELL
     bool inDowngradeElement = false;        // true while inside a multi-line element being downgraded
     bool skipSectionSolidPeri = false;     // true when skipping SECTION_SOLID to be replaced by PERI
+    // 두 줄 포맷(*ELEMENT_SOLID (ten nodes format)) 추적 — 한 요소가 'eid pid' 줄과 노드 줄 둘이다.
+    // 노드 줄의 첫 칸은 노드 ID 라 eid 로 읽으면 안 되고, 요소를 지울 때는 두 줄을 함께 지워야 한다.
+    bool elementTwoLineFormat = false;     // 지금 *ELEMENT_SOLID 섹션이 두 줄 포맷인가
+    bool pendingNodeCard = false;          // 다음 데이터 줄은 방금 읽은 헤더의 노드 줄이다
+    bool dropPendingNodeCard = false;      // 그 노드 줄을 버려야 하나(요소를 지웠거나 새로 썼다)
 
     for (size_t i = 0; i < rawLines_.size(); ++i) {
         const std::string& line = rawLines_[i];
@@ -4045,11 +4050,18 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
             }
             if (currentSection == Section::ELEMENT && !elementsInserted) {
                 // Only insert non-tshell (solid) elements here; tshell go before *END
+                // 두 줄 포맷 섹션에 한 줄 포맷을 섞으면 두 줄 리더가 새 요소의 절반을 노드 줄로
+                // 읽어 요소가 통째로 사라진다 — 표준 한 줄 포맷 *ELEMENT_SOLID 섹션을 새로 열어 쓴다.
+                bool anySolidAdded = false;
+                for (const auto& ae : addedElements_) if (!ae.isTshell) { anySolidAdded = true; break; }
+                if (anySolidAdded && elementTwoLineFormat) output << "*ELEMENT_SOLID\n";
                 for (const auto& ae : addedElements_) {
                     if (!ae.isTshell) output << formatElementLine(ae) << "\n";
                 }
                 elementsInserted = true;
             }
+            pendingNodeCard = false;
+            dropPendingNodeCard = false;
 
             // Detect section type
             std::string upper = trimmed;
@@ -4105,6 +4117,14 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                 currentSection = Section::NODE;
             } else if (upper.substr(0, 14) == "*ELEMENT_SOLID") {
                 currentSection = Section::ELEMENT;
+                // 헤더 문자열은 힌트일 뿐이다 — 줄 구조(2~3 칸짜리 'eid pid' 줄)로도 확인한다.
+                elementTwoLineFormat = (upper.find("TEN NODE") != std::string::npos);
+            } else if (upper.find("*ELEMENT_TSHELL") == 0) {
+                // 리더는 *ELEMENT_TSHELL 을 솔리드와 같은 칸(두 줄 포맷 포함)으로 읽는데
+                // 출력에서는 어느 섹션도 아니어서 지운 요소가 그대로 남아 있었다 —
+                // 원 파트 요소와 새 층이 같은 자리에 겹쳐 질량이 두 배인 덱이 나갔다.
+                currentSection = Section::TSHELL_ELEMENT;
+                elementTwoLineFormat = (upper.find("TEN NODE") != std::string::npos);
             } else if (upper.find("*ELEMENT_SHELL") == 0) {
                 currentSection = Section::SHELL_ELEMENT;
                 shellElementsHandled = true;
@@ -4316,6 +4336,25 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
             }
             bool isElementHeader = (tokenCount >= 2 && tokenCount <= 3);
 
+            // 두 줄 포맷 요소의 노드 줄 — 첫 칸은 노드 ID 다. 여기서 먼저 걷어내지 않으면
+            // (1) 노드 ID 가 지워진 요소 번호와 겹칠 때 남의 노드 줄이 사라지고
+            // (2) 요소를 지울 때 'eid pid' 줄만 지워져 노드 줄이 고아로 남는다(두 줄 리더가
+            //     그 줄을 다음 요소의 'eid pid' 로 읽어 덱 전체가 밀린다).
+            // 리더(KFileReader)와 같게 헤더 하나에 노드 줄 하나만 잇는다.
+            if (pendingNodeCard) {
+                pendingNodeCard = false;
+                bool dropIt = dropPendingNodeCard;
+                dropPendingNodeCard = false;
+                if (dropIt) continue;
+                output << line << "\n";
+                continue;
+            }
+            if (isElementHeader) {
+                elementTwoLineFormat = true;
+                pendingNodeCard = true;
+                dropPendingNodeCard = false;
+            }
+
             // If we're inside a downgraded multi-line element, skip continuation lines
             if (inDowngradeElement) {
                 if (isElementHeader) {
@@ -4330,6 +4369,7 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
 
             int elemId = parseElementIdFromLine(line);
             if (elemId > 0 && removedElementIds_.count(elemId) > 0) {
+                dropPendingNodeCard = pendingNodeCard;   // 두 줄 포맷이면 노드 줄도 함께 지운다
                 continue;  // Skip removed element
             }
 
@@ -4367,6 +4407,7 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
 
                     output << oss.str() << "\n";
                     inDowngradeElement = true;  // Skip subsequent continuation lines
+                    dropPendingNodeCard = pendingNodeCard;   // 두 줄 포맷이면 옛 노드 줄을 버린다
                     continue;
                 }
             }
@@ -4375,12 +4416,14 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
             if (elemId > 0 && tet10Elements_.count(elemId)) {
                 int pid = parsePartIdFromLine(line);
                 output << formatTet10ElementLine(elemId, pid, tet10Elements_[elemId]) << "\n";
+                dropPendingNodeCard = pendingNodeCard;   // 두 줄 포맷이면 옛 노드 줄을 버린다
                 continue;
             }
             // HEX20 conversion: replace single-line HEX8 with 3-line HEX20
             if (elemId > 0 && hex20Elements_.count(elemId)) {
                 int pid = parsePartIdFromLine(line);
                 output << formatHex20ElementLine(elemId, pid, hex20Elements_[elemId]) << "\n";
+                dropPendingNodeCard = pendingNodeCard;   // 두 줄 포맷이면 옛 노드 줄을 버린다
                 continue;
             }
             // Disconnect: modified element nodes (CZM/MEFEM)
@@ -4391,6 +4434,35 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                 oss << std::setw(8) << elemId << std::setw(8) << pid;
                 for (int n = 0; n < 8; ++n) oss << std::setw(8) << newNodes[n];
                 output << oss.str() << "\n";
+                dropPendingNodeCard = pendingNodeCard;   // 두 줄 포맷이면 옛 노드 줄을 버린다
+                continue;
+            }
+            output << line << "\n";
+        }
+        else if (currentSection == Section::TSHELL_ELEMENT) {
+            // 지우기만 한다 — 새 요소는 예전처럼 *END 앞의 *ELEMENT_TSHELL 로 나간다.
+            int tokenCount = 0;
+            {
+                std::istringstream iss(line);
+                std::string tok;
+                while (iss >> tok) tokenCount++;
+            }
+            if (pendingNodeCard) {
+                pendingNodeCard = false;
+                bool dropIt = dropPendingNodeCard;
+                dropPendingNodeCard = false;
+                if (dropIt) continue;
+                output << line << "\n";
+                continue;
+            }
+            if (tokenCount >= 2 && tokenCount <= 3) {
+                elementTwoLineFormat = true;
+                pendingNodeCard = true;
+                dropPendingNodeCard = false;
+            }
+            int elemId = parseElementIdFromLine(line);
+            if (elemId > 0 && removedElementIds_.count(elemId) > 0) {
+                dropPendingNodeCard = pendingNodeCard;   // 두 줄 포맷이면 노드 줄도 함께
                 continue;
             }
             output << line << "\n";
