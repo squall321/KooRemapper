@@ -1648,7 +1648,7 @@ static int runMain(int argc, char* argv[]) {
             //   prestress:                 (optional; when present + enabled,
             //     enabled: true             generates a dynain from the mapped
             //     output: detail_stress.dynain
-            //     strain_type: green       # green | engineering | log
+            //     strain_type: green       # green | engineering
             //     E:  210000.0             # MPa, optional (omit -> strain only)
             //     nu: 0.3                  # optional
             //     csv: false               # optional, write CSV instead of dynain
@@ -1809,7 +1809,7 @@ static int runMain(int argc, char* argv[]) {
                 console.println("  prestress:                # optional, chain prestress after map");
                 console.println("    enabled: true");
                 console.println("    output: detail_stress.dynain");
-                console.println("    strain_type: green      # green | engineering | log");
+                console.println("    strain_type: green      # green | engineering");
                 console.println("    E:  210000.0            # MPa, optional (omit = strain only)");
                 console.println("    nu: 0.3                 # optional");
                 console.println("    csv: false              # optional");
@@ -1844,8 +1844,14 @@ static int runMain(int argc, char* argv[]) {
             std::string st = pre_strainType;
             for (auto& c : st) c = (char)std::tolower((unsigned char)c);
             if      (st == "engineering") strainType = StrainType::ENGINEERING;
-            else if (st == "log" || st == "logarithmic" || st == "true")
-                                          strainType = StrainType::LOGARITHMIC;
+            else if (!st.empty() && st != "green") {
+                // prestress 경로는 engineering 외에는 모두 Green-Lagrange 로 계산한다
+                // (StrainTensor::fromDeformationGradient 에 대수 변형률 갈래가 없다).
+                // 조용히 다른 변형률로 계산해 내보내지 않는다.
+                console.error("Unknown prestress strain_type '" + pre_strainType +
+                              "' (allowed: engineering, green)");
+                return 1;
+            }
 
             // Reference selection priority:
             //   1. bbox_align=source: use the bbox-scaled flat written by

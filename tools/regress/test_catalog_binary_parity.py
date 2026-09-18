@@ -186,11 +186,19 @@ def main():
           cat_key(ops, "bend", "target_pid")["required"] is False,
           str(cat_key(ops, "bend", "target_pid")))
 
+    # prestress 경로는 대수 변형률(log)이 구현돼 있지 않다 — StrainTensor::fromDeformationGradient 는
+    # engineering 아니면 모두 Green-Lagrange 다. 그래서 바이너리가 거절하고 카탈로그도 싣지 않는다.
+    # (log 를 진짜 계산하는 곳은 StrainCalculator 를 쓰는 strain 명령이다.)
     rc, out = run(binary, d, "prestress", "--strain", "log", "flat.k", "flat.k", "pre_log.dynain")
-    check("prestress --strain log 은 rc=0", rc == 0, out[-200:])
-    check("카탈로그 prestress.params.strain enum 에 log 있음",
-          "log" in cat_param(ops, "prestress", "strain")["enum"],
+    check("prestress --strain log 은 rc=1 로 거절", rc == 1 and "log" in out, out[-200:])
+    check("카탈로그 prestress.params.strain enum 에 log 없음",
+          "log" not in cat_param(ops, "prestress", "strain")["enum"],
           str(cat_param(ops, "prestress", "strain")["enum"]))
+    rc, out = run(binary, d, "strain", "--type", "log", "flat.k", "flat.k", "st_log.csv")
+    check("strain --type log 은 rc=0 (StrainCalculator 가 구현)", rc == 0, out[-200:])
+    check("카탈로그 strain.params.type enum 에 log 있음",
+          "log" in cat_param(ops, "strain", "type")["enum"],
+          str(cat_param(ops, "strain", "type")["enum"]))
 
     rc, out = yaml_run(binary, d, "cnrb2solid", "cn", "model: flat.k\noutput: cn_out.k\n")
     check("cnrb2solid: E/PR/RHO 없이 rc=0 (기본값 있음)", rc == 0, out[-200:])

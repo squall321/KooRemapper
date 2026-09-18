@@ -141,19 +141,18 @@ def main():
         check("generate-var: 예제 결과가 reference dimensions 100x10x2 (100x1x1 퇴화 아님)",
               rc == 0 and got is not None and all(abs(g - w) < 1e-3 for g, w in zip(got, want)),
               f"rc={rc} bbox={got}")
-        # --no-scale 설명이 실제와 같은가 — 'use YAML lengths as-is' 는 거짓이었다
-        # (예제 var.yaml 의 length_j 10 / length_k 2 를 쓰지 않고 J/K 가 1.0 이 된다)
+        # --no-scale 은 '기준 메시 파일(--ref / reference.flat_mesh)을 무시' 하는 것이고,
+        # YAML 에 적은 reference.dimensions 는 그대로 적용된다(치수를 1.0 으로 뭉개던 결함을 고쳤다).
         check("generate-var: --no-scale 을 'use YAML lengths as-is' 라고 하지 않음",
               "use YAML lengths as-is" not in gv,
               [l for l in gv.splitlines() if "no-scale" in l])
-        check("generate-var: --no-scale 설명이 J/K 가 1.0 이 된다고 적음",
-              "J/K" in gv and "1.0" in gv,
-              [l for l in gv.splitlines() if "no-scale" in l or "J/K" in l])
+        check("generate-var: --no-scale 설명이 dimensions 는 계속 적용됨을 밝힘",
+              "dimensions" in gv and "still apply" in gv,
+              [l for l in gv.splitlines() if "no-scale" in l or "dimensions" in l])
         rc, out = run(binary, tmp, "generate-var", "--no-scale", "var.yaml", "var_ns.k")
         ns = bbox(os.path.join(tmp, "var_ns.k")) if os.path.exists(os.path.join(tmp, "var_ns.k")) else None
-        want_ns = [100.0, 1.0, 1.0]
-        check("generate-var: --no-scale 이 reference.dimensions 를 무시하고 J/K 1.0 (설명대로)",
-              rc == 0 and ns is not None and all(abs(g - w) < 1e-3 for g, w in zip(ns, want_ns)),
+        check("generate-var: --no-scale 에서도 reference.dimensions 100x10x2 가 지켜짐",
+              rc == 0 and ns is not None and all(abs(g - w) < 1e-3 for g, w in zip(ns, want)),
               f"rc={rc} bbox={ns}")
         _ = var
 

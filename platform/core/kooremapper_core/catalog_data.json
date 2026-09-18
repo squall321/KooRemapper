@@ -179,7 +179,7 @@
             "prestress": {
               "enabled": "Boolean, default false",
               "output": "Path to output dynain or CSV file",
-              "strain_type": "String: green|engineering|log, default green",
+              "strain_type": "String: green|engineering, default green",
               "E": "Number, Young's modulus in MPa (optional)",
               "nu": "Number, Poisson's ratio (optional)",
               "csv": "Boolean, output CSV instead of dynain, default false"
@@ -308,10 +308,9 @@
           "default": "green",
           "values": [
             "green",
-            "engineering",
-            "log"
+            "engineering"
           ],
-          "desc": "Strain calculation method. 'green': Green-Lagrange (large deformation); 'engineering': small-deformation; 'log' or 'logarithmic': true/logarithmic strain."
+          "desc": "Strain calculation method. 'green': Green-Lagrange (large deformation); 'engineering': small-deformation Note: 'log' is accepted only by the 'strain' command (StrainCalculator). The prestress path computes Green-Lagrange for anything but 'engineering', so prestress rejects 'log' with rc=1."
         },
         {
           "path": "prestress.E",
@@ -1176,10 +1175,9 @@
           "default": "green",
           "enum": [
             "engineering",
-            "green",
-            "log"
+            "green"
           ],
-          "description": "Strain type: engineering (small), green (large/Green-Lagrange) or log (logarithmic/true strain)"
+          "description": "Strain type: engineering (small), green (large/Green-Lagrange) or log (logarithmic/true strain). Note: 'log' is accepted only by the 'strain' command (StrainCalculator). The prestress path computes Green-Lagrange for anything but 'engineering', so prestress rejects 'log' with rc=1."
         },
         {
           "name": "csv",
@@ -1245,10 +1243,9 @@
           "default": "green",
           "values": [
             "engineering",
-            "green",
-            "log"
+            "green"
           ],
-          "desc": "Strain type for computation. 'engineering' = symmetric small-strain tensor ε_ij = 0.5(∂u_i/∂x_j + ∂u_j/∂x_i); 'green' = Green-Lagrange large-deformation E_ij = 0.5(∂u_i/∂X_j + ∂u_j/∂X_i + (∂u_k/∂X_i)(∂u_k/∂X_j)); 'log' = logarithmic true strain ln(L/L_0). All three are accepted; any other value falls back to 'green'."
+          "desc": "Strain type for computation. 'engineering' = symmetric small-strain tensor ε_ij = 0.5(∂u_i/∂x_j + ∂u_j/∂x_i); 'green' = Green-Lagrange large-deformation E_ij = 0.5(∂u_i/∂X_j + ∂u_j/∂X_i + (∂u_k/∂X_i)(∂u_k/∂X_j)) Note: 'log' is accepted only by the 'strain' command (StrainCalculator). The prestress path computes Green-Lagrange for anything but 'engineering', so prestress rejects 'log' with rc=1."
         },
         {
           "path": "csv",
