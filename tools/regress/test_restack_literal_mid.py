@@ -325,8 +325,12 @@ def main():
             "      $#     mid        ro         e        pr\n"
             "          MID001  7.85E-09  2.10E+05       0.3\n")
         rc, out = run(binary, d, "restack", "rr.yaml")
-        newmid = dict(part_mids(os.path.join(d, "rr.k"))).get("X") if rc == 0 else None
-        check("rc=0", rc == 0, out[-400:])
+        # 앞 restack 이 낸 *INITIAL_STRAIN_SOLID 는 이번 restack 이 지우는 요소를 가리킨다 —
+        # pid_refs strict 기본이 그것을 잡아 rc=1 로 끝낸다. 덱은 그대로 쓰므로 내용은 계속 본다.
+        deck = os.path.join(d, "rr.k")
+        check("rc=1 (앞 판이 남긴 초기변형률이 지워진 요소를 가리킨다)", rc == 1, out[-400:])
+        check("덱은 그래도 쓴다", os.path.exists(deck))
+        newmid = dict(part_mids(deck)).get("X") if os.path.exists(deck) else None
         # 90·91 이 재질로 등록됐으면 새 MID 는 그 위(92)다. 2 가 나오면 리더가 못 읽은 것이다.
         check("새 층 MID 가 90·91 위다", newmid is not None and newmid > 91, str(newmid))
 
@@ -345,10 +349,16 @@ def main():
             "      *MAT_ELASTIC_TITLE\n      Steel\n"
             "              91  7.85E-09  2.10E+05       0.3\n")
         rc, out = run(binary, d, "restack", "t.yaml")
-        check("rc=0", rc == 0, out[-400:])
+        # pid_refs 기본값은 strict 다 — 옮기지 못한 참조가 남으면 덱은 쓰고 rc=1 로 끝낸다.
+        # 자동화(pyKooCAE Runner·플랫폼 워커)는 종료 코드로만 성공을 보므로 rc=0 이면 경고가 묻힌다.
+        check("rc=1 (pid_refs strict 기본)", rc == 1, out[-400:])
+        check("덱은 그래도 쓴다", os.path.exists(os.path.join(d, "t.k")))
         check("빈 파트를 가리키는 키워드를 알린다",
-              "is now empty" in out and "*SET_PART_LIST 100" in out, out[-500:])
-        check("*CONTACT 도 함께 알린다", "*CONTACT_TIED_SURFACE_TO_SURFACE_ID" in out, out[-500:])
+              "*SET_PART_LIST" in out and "세트 100" in out, out[-800:])
+        check("*CONTACT 도 함께 알린다", "*CONTACT_TIED_SURFACE_TO_SURFACE_ID" in out, out[-800:])
+        check("덱 머리에 $ KOOREMAPPER-PIDREF 블록을 박는다",
+              "$ KOOREMAPPER-PIDREF" in open(os.path.join(d, "t.k"), encoding="utf-8",
+                                             errors="replace").read())
 
         print("[R5 리더가 모르는 *MAT 이 쓰는 MID 와 새 MID 가 겹치지 않는다]")
         base = open(os.path.join(d, "base.k"), encoding="utf-8", errors="replace").read()
