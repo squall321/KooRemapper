@@ -1192,6 +1192,7 @@ static bool printLegacyHelp(ConsoleOutput& console, const std::string& helpCmd) 
         console.println("  - Input must be an extrusion: same node count in every thickness column");
         console.println("  - thickness values act as ratios, scaled to the part's real thickness");
         console.println("  - Each layer gets a new PID/MID automatically; the old PID stays as an empty part");
+        console.println("  - References to that empty PID are migrated where possible; leftovers exit 1 (pid_refs: warn)");
         console.println("  - disconnect op can follow restack for CZM/Peri separation");
         console.println("  - See examples/assemble_display/restack_guide.md for full docs");
     } else if (helpCmd == "bend") {

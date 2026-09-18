@@ -16,8 +16,12 @@
   - 'generate-var --no-scale' 을 'use YAML lengths as-is' 라고 적었지만 J/K 는 1.0 이 된다.
   - 'prestress --strain' / 'strain --type' 이 모르는 값을 조용히 기본값으로 삼켰다.
   - 'prestress --strain log' 는 green 과 바이트 동일한 결과였다(help 에만 있던 값).
+  - restack·merge 가 비운 PID·지운 요소·지운 노드를 가리키던 자리를 옮기기 시작했다 —
+    help 가 rc=1 과 pid_refs 를 적지 않으면 자동화는 경고를 못 보고 그 덱을 솔버로 넘긴다.
+    스칼라 PID 칸의 동작이 restack(manual)과 merge(옮김)로 갈리는 것도 여기서 못 박는다.
 """
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -400,6 +404,148 @@ def main():
         check("matdb: database 를 생략하면 번들 DB 를 스스로 찾는다 (rc=0)",
               rc == 0 and os.path.exists(os.path.join(tmp, "nomat", "md_bundle.k")),
               f"rc={rc} {out[-250:]}")
+
+    print("[restack·merge 의 죽은 PID 참조 — help 문구가 실제 동작과 같은가]")
+    # help 가 '옮긴다' 고만 적고 rc=1 을 안 적으면, 자동화는 경고를 못 보고 빈 파트를 가리키는
+    # 덱을 그대로 솔버에 넘긴다. 문구와 종료 코드를 함께 잠근다.
+    rst = help_text(binary, "restack")
+    mrg = help_text(binary, "merge")
+    for nm, txt in (("restack", rst), ("merge", mrg)):
+        check(f"{nm}: 원 파트가 요소 0 개인 빈 파트로 남는다고 적음",
+              "요소 0 개인 빈 파트" in txt, [l for l in txt.splitlines() if "빈 파트" in l])
+        check(f"{nm}: pid_refs 허용값(strict 기본, warn)을 적음",
+              "pid_refs: strict(기본) | warn" in txt,
+              [l for l in txt.splitlines() if "pid_refs" in l])
+        check(f"{nm}: 못 옮기면 rc=1 이고 덱은 쓴다고 적음",
+              "못 옮긴 자리가 하나라도 남으면 rc=1 이고 덱은 쓴다" in txt,
+              [l for l in txt.splitlines() if "rc=1" in l])
+        check(f"{nm}: 덱 머리의 $ KOOREMAPPER-PIDREF 블록을 적음",
+              "$ KOOREMAPPER-PIDREF" in txt and "*KEYWORD 바로 뒤" in txt,
+              [l for l in txt.splitlines() if "PIDREF" in l])
+    # 스칼라 PID 칸은 restack(층 N 개)과 merge(새 PID 1 개)의 동작이 갈린다 — 한쪽 문장을 베껴 적으면
+    # 사용자가 restack 결과를 '옮겨졌겠지' 하고 넘긴다.
+    check("restack: 스칼라 PID 칸은 manual 로 남는다고 적음",
+          "manual(직접 고치세요)로 남는다" in rst and "merge 는 이 칸들까지 옮긴다" in rst,
+          [l for l in rst.splitlines() if "manual" in l])
+    check("merge: 스칼라 PID 칸까지 새 PID 로 바꾼다고 적음",
+          "도 새 PID 로 바꾼다" in mrg and "restack 은 이 칸들을 manual 로 남긴다" in mrg,
+          [l for l in mrg.splitlines() if "새 PID 로 바꾼다" in l])
+
+    RS_OPS = ("operations:\n  - type: restack\n    target_pid: 1\n    direction: z\n" + RESTACK_LAYERS)
+    # box.k 에 층 PID 로 나눌 수 없는 스칼라 PID 칸(*DATABASE_HISTORY_PART)과 펼 수 있는 세트를 함께 둔다
+    dead = open(os.path.join(tmp, "box.k")).read().replace(
+        "*END", "*DATABASE_HISTORY_PART\n$#     pid\n         1\n"
+                "*SET_PART_LIST\n$#     sid\n         9\n         1\n*END")
+    open(os.path.join(tmp, "box_dead.k"), "w").write(dead)
+    open(os.path.join(tmp, "rs_dead.yaml"), "w").write(
+        "base_model: box_dead.k\noutput: rs_dead\n" + RS_OPS)
+    rc, out = run(binary, tmp, "restack", "rs_dead.yaml")
+    head = open(os.path.join(tmp, "rs_dead.k")).read().splitlines()[:12]
+    check("restack: 옮기지 못한 스칼라 PID 칸이 남으면 rc=1 (덱은 쓴다)",
+          rc == 1 and os.path.exists(os.path.join(tmp, "rs_dead.k")) and
+          "*DATABASE_HISTORY_PART (manual)" in out, f"rc={rc} {out[-300:]}")
+    check("restack: 덱 머리 *KEYWORD 바로 뒤에 $ KOOREMAPPER-PIDREF 블록이 있다",
+          head[0].startswith("*KEYWORD") and head[1].startswith("$ KOOREMAPPER-PIDREF") and
+          any(l.startswith("$ KOOREMAPPER-PIDREF-END") for l in head), head[:4])
+    check("restack: 펼 수 있는 *SET_PART_LIST 는 층 PID 전부로 옮겨진다(moved)",
+          "*SET_PART_LIST (moved)" in out, [l for l in out.splitlines() if "SET_PART_LIST" in l])
+    open(os.path.join(tmp, "rs_warn.yaml"), "w").write(
+        "base_model: box_dead.k\noutput: rs_warn\npid_refs: warn\n" + RS_OPS)
+    rc, out = run(binary, tmp, "restack", "rs_warn.yaml")
+    check("restack: pid_refs 'warn' 은 같은 보고에 rc=0",
+          rc == 0 and "*DATABASE_HISTORY_PART (manual)" in out, f"rc={rc} {out[-300:]}")
+    open(os.path.join(tmp, "rs_pr_bad.yaml"), "w").write(
+        "base_model: box_dead.k\noutput: rs_pr_bad\npid_refs: bogus\n" + RS_OPS)
+    rc, out = run(binary, tmp, "restack", "rs_pr_bad.yaml")
+    check("restack: pid_refs 'bogus' 는 rc=1 + must be one of strict, warn",
+          rc == 1 and "invalid pid_refs 'bogus' (must be one of strict, warn)" in out,
+          f"rc={rc} {out[-300:]}")
+
+    # help merge 사례는 rc=0 이어야 한다 — three_layer.k 의 *MAT_ADD_THERMAL_EXPANSION 이 죽은 PID 를
+    # 가리키지만 merge 는 스칼라 칸까지 옮기므로 못 옮긴 자리가 남지 않는다.
+    check("merge: 사례가 rc=0 이고 *MAT_ADD_THERMAL_EXPANSION 이 옮겨진다고 적음",
+          "못 옮긴 자리가 없어 rc=0 이다" in mrg and "MAT_ADD_THERMAL_EXPANSION" in mrg,
+          [l for l in mrg.splitlines() if "rc=0" in l])
+    mdir = os.path.join(tmp, "mg")
+    os.makedirs(os.path.join(mdir, "examples", "merge"), exist_ok=True)
+    shutil.copy(os.path.join(REPO, "examples", "merge", "three_layer.k"),
+                os.path.join(mdir, "examples", "merge", "three_layer.k"))
+    open(os.path.join(mdir, "merge.yaml"), "w").write(
+        "model: examples/merge/three_layer.k\noutput: three_layer_merged.k\n"
+        'direction: z\nmethod: vrh\nmerge:\n  - pids: [1, 2, 3]\n    name: "Homogenized_Stack"\n')
+    rc, out = run(binary, mdir, "merge", "merge.yaml")
+    check("merge: help 사례가 실제로 rc=0 이고 '옮김' 으로 보고된다",
+          rc == 0 and "*MAT_ADD_THERMAL_EXPANSION_TITLE (moved)" in out and
+          os.path.exists(os.path.join(mdir, "three_layer_merged.k")), f"rc={rc} {out[-400:]}")
+
+    print("[restack 재질 카드 — 숫자 MID·빠진 제목 줄·강체 거부]")
+    check("restack: 숫자 MID 를 그대로 쓰고 충돌하면 새 번호를 준다고 적음",
+          "material MID 90 is already in use -> assigned MID 91" in rst,
+          [l for l in rst.splitlines() if "MID 90" in l])
+    NUM_MID = ("    layers:\n      - thickness: 0.5\n        material_card: |\n"
+               "          *MAT_ELASTIC\n          $#     mid        ro         e        pr\n"
+               "                  90  7.85E-09  2.10E+05       0.3\n"
+               "      - thickness: 0.5\n        material_card: |\n"
+               "          *MAT_ELASTIC\n          $#     mid        ro         e        pr\n"
+               "                  90  1.20E-09  3.00E+03      0.45\n")
+    open(os.path.join(tmp, "rs_num.yaml"), "w").write(
+        "base_model: box.k\noutput: rs_num\noperations:\n  - type: restack\n    target_pid: 1\n"
+        "    direction: z\n" + NUM_MID)
+    rc, out = run(binary, tmp, "restack", "rs_num.yaml")
+    made = open(os.path.join(tmp, "rs_num.k")).read() if rc == 0 else ""
+    check("restack: 숫자 MID 90 을 그대로 쓰고 충돌한 층은 91 을 받는다",
+          rc == 0 and "material MID 90 is already in use -> assigned MID 91" in out and
+          "        90  7.85E-09" in made and "        91  1.20E-09" in made,
+          f"rc={rc} {out[-300:]}")
+
+    check("restack: *MAT_..._TITLE 에 제목 줄이 없으면 채워 준다고 적음",
+          "제목 줄이 없으면" in rst and "Restack Layer N" in rst,
+          [l for l in rst.splitlines() if "제목 줄" in l])
+    NO_TITLE = ("    layers:\n      - thickness: 0.5\n        material_card: |\n"
+                "          *MAT_ELASTIC_TITLE\n"
+                "          $#     mid        ro         e        pr\n"
+                "              MID001  7.85E-09  2.10E+05       0.3\n")
+    open(os.path.join(tmp, "rs_nt.yaml"), "w").write(
+        "base_model: box.k\noutput: rs_nt\noperations:\n  - type: restack\n    target_pid: 1\n"
+        "    direction: z\n" + NO_TITLE)
+    rc, out = run(binary, tmp, "restack", "rs_nt.yaml")
+    nt = open(os.path.join(tmp, "rs_nt.k")).read() if rc == 0 else ""
+    check("restack: 제목 줄 없는 *MAT_..._TITLE 은 [WARN] 뒤 제목을 채워 데이터 줄을 지킨다",
+          rc == 0 and "[WARN]" in out and "no title line" in out and
+          "*MAT_ELASTIC_TITLE\nRestack Layer 1\n" in nt, f"rc={rc} {out[-300:]}")
+
+    check("restack: 강체 파트를 거절한다고 적음",
+          "강체" in rst and "*MAT_RIGID" in rst and "rc=1 로 거절한다" in rst,
+          [l for l in rst.splitlines() if "강체" in l])
+    rigid = open(os.path.join(tmp, "box.k")).read().replace("*MAT_ELASTIC", "*MAT_RIGID", 1)
+    open(os.path.join(tmp, "box_rigid.k"), "w").write(rigid)
+    open(os.path.join(tmp, "rs_rigid.yaml"), "w").write(
+        "base_model: box_rigid.k\noutput: rs_rigid\n" + RS_OPS)
+    rc, out = run(binary, tmp, "restack", "rs_rigid.yaml")
+    check("restack: 강체 파트는 rc=1 로 거절하고 출력을 쓰지 않는다",
+          rc == 1 and "cannot restack a rigid part" in out and
+          not os.path.exists(os.path.join(tmp, "rs_rigid.k")), f"rc={rc} {out[-300:]}")
+
+    check("restack: 새 층이 ELFORM·HGID·TMID 를 물려받는다고 적음",
+          "ELFORM" in rst and "HGID·TMID" in rst,
+          [l for l in rst.splitlines() if "ELFORM" in l])
+    e2 = open(os.path.join(tmp, "box.k")).read().replace(
+        "*SECTION_SOLID\n$#   secid    elform\n         1         1\n",
+        "*SECTION_SOLID\n$#   secid    elform\n         1         2\n", 1)
+    open(os.path.join(tmp, "box_e2.k"), "w").write(e2)
+    open(os.path.join(tmp, "rs_e2.yaml"), "w").write(
+        "base_model: box_e2.k\noutput: rs_e2\n" + RS_OPS)
+    rc, out = run(binary, tmp, "restack", "rs_e2.yaml")
+    elf = [l for l in (open(os.path.join(tmp, "rs_e2.k")).read().splitlines() if rc == 0 else [])]
+    secs = [elf[i + 2] for i, l in enumerate(elf) if l.strip() == "*SECTION_SOLID" and i + 2 < len(elf)]
+    check("restack: 원 ELFORM 2 가 새 층 *SECTION_SOLID 로 이어진다",
+          rc == 0 and len(secs) >= 2 and all(s.split()[-1] == "2" for s in secs),
+          f"rc={rc} {secs[:4]}")
+
+    print("[--help 공통 규칙 — restack·merge 의 죽은 PID 참조 한 줄]")
+    check("공통 규칙: restack·merge 의 참조 이관과 rc=1 을 한 줄로 적음",
+          "restack·merge 는 비운 PID 를 가리키던 자리를 옮기고" in rules and
+          "pid_refs: warn" in rules, rules[:1600])
 
     print("[HelpCatalogData.inc 가 ops_help.py 와 같은지]")
     p = subprocess.run([sys.executable, os.path.join(REPO, "tools", "help", "gen_help_cpp.py"), "--check"],

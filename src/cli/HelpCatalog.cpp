@@ -108,6 +108,7 @@ void printOverview(std::ostream& os, const std::string& version) {
     os << "  - YAML 들여쓰기에 탭은 못 쓴다 — [ERROR] + 종료 코드 1 (파일 전체 검사. '|' 블록 안 줄도 공백)\n";
     os << "    예외: 되감을 수 없는 입력(파이프·프로세스 치환·/dev/stdin)에는 이 검사가 없다\n";
     os << "  - 파일 앞 UTF-8 BOM 은 무시한다 (윈도우 편집기가 붙여도 그대로 돈다)\n";
+    os << "  - restack·merge 는 비운 PID 를 가리키던 자리를 옮기고, 못 옮기면 rc=1 (pid_refs: warn 으로 끌 수 있다)\n";
     os << "  - 실패하면 [ERROR] 줄을 찍고 종료 코드 1\n";
     os << "  - SIF 안 경로: /opt/kooremapper/bin/KooRemapper, 번들 재질 DB /opt/kooremapper/materials/material_db.json\n";
 }
