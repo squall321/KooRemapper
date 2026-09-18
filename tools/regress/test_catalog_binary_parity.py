@@ -371,6 +371,101 @@ def main():
     check("카탈로그 assemble operations[].layers[].element_type 도 solid/tshell/shell",
           vals == ["solid", "tshell", "shell"], str(vals))
 
+    # ── 6b-2. pid_refs (strict|warn) 는 카탈로그 값 그대로 바이너리가 판정한다 ──
+    print("[pid_refs — 카탈로그 enum·default 가 바이너리 rc 와 맞는다]")
+    for opname, path in (("restack", "pid_refs"), ("merge", "pid_refs"),
+                         ("assemble", "operations[].pid_refs")):
+        k = cat_key(ops, opname, path)
+        check(f"카탈로그 {opname}.{path} 가 있다", k is not None)
+        if k is None:
+            continue
+        check(f"카탈로그 {opname}.{path} 는 enum [strict, warn]",
+              k["type"] == "enum" and k["values"] == ["strict", "warn"], str(k))
+        check(f"카탈로그 {opname}.{path} 는 required=false, default=strict",
+              k["required"] is False and k["default"] == "strict", str(k))
+        check(f"카탈로그 {opname}.{path} desc 가 rc 정책(rc=1 / warn rc=0)을 적는다",
+              "rc=1" in k["desc"] and "rc=0" in k["desc"]
+              and "KOOREMAPPER-PIDREF" in k["desc"], k["desc"][:160])
+
+    # restack 은 층 N 개를 스칼라 PID 칸 하나에 못 담아 *DAMPING_PART_MASS 를 manual 로 남긴다.
+    # merge 는 그 칸을 옮기지만, 두 칸이 모두 사라지는 *CONSTRAINED_RIGID_BODIES 는 left 로 남는다.
+    # 두 경우 모두 '못 옮긴 자리' 라서 기본값(strict)이면 rc=1 이어야 한다.
+    pr = os.path.join(d, "pidref")
+    os.makedirs(pr, exist_ok=True)
+    open(os.path.join(pr, "box.yaml"), "w").write(BOX.replace("output: flat.k", "output: box.k"))
+    run(binary, pr, "generate", "box", "box.yaml")
+    deck = open(os.path.join(pr, "box.k"), encoding="utf-8").read()
+    open(os.path.join(pr, "sc.k"), "w").write(
+        deck.replace("*END", "*DAMPING_PART_MASS\n         1         1     1.000\n*END"))
+    open(os.path.join(pr, "crb.k"), "w").write(
+        deck.replace("*END", "*CONSTRAINED_RIGID_BODIES\n         1         1\n*END"))
+
+    RS_LAYERS = ("layers:\n"
+                 "  - title: A\n    thickness: 1.0\n    num_elements: 1\n"
+                 "    material_card: |\n      *MAT_ELASTIC\n"
+                 "        MID001  7.85E-09    210000       0.3\n"
+                 "  - title: B\n    thickness: 1.0\n    num_elements: 1\n"
+                 "    material_card: |\n      *MAT_ELASTIC\n"
+                 "        MID002  2.50E-09     70000      0.33\n")
+
+    def rs_alone(name, key):
+        body = (f"model: sc.k\noutput: {name}.k\ntarget_pid: 1\ndirection: z\n"
+                + (f"pid_refs: {key}\n" if key else "") + RS_LAYERS)
+        return yaml_run(binary, pr, "restack", name, body)
+
+    def rs_asm(name, key):
+        ind = "".join("    " + ln + "\n" for ln in RS_LAYERS.splitlines())
+        body = (f"base_model: sc.k\noutput: {name}\noperations:\n"
+                f"  - type: restack\n    target_pid: 1\n    direction: z\n"
+                + (f"    pid_refs: {key}\n" if key else "") + ind)
+        return yaml_run(binary, pr, "assemble", name, body)
+
+    def mg_alone(name, key):
+        body = (f"model: crb.k\noutput: {name}.k\ndirection: z\nmethod: vrh\n"
+                + (f"pid_refs: {key}\n" if key else "")
+                + "merge:\n  - pids: [1]\n    name: G\n")
+        return yaml_run(binary, pr, "merge", name, body)
+
+    def head_block(tag):
+        try:
+            body = open(os.path.join(pr, tag + ".k"), encoding="utf-8", errors="ignore").read()
+        except OSError:
+            return None, ""
+        return body.splitlines()[1].startswith("$ KOOREMAPPER-PIDREF"), body[:120]
+
+    for label, fn, stem in (("단독 restack", rs_alone, "rs"),
+                            ("assemble restack", rs_asm, "as"),
+                            ("단독 merge", mg_alone, "mg")):
+        rc, out = fn(stem + "_def", None)
+        # 단독 merge 는 끝에 [ERROR] 요약을 찍지 않고 rc 만 1 이다 — 세 경로가 함께 찍는
+        # 문구(탈출구 안내)로 본다.
+        check(f"{label}: pid_refs 를 안 주면 카탈로그 default(strict) 대로 rc=1",
+              rc == 1 and "pid_refs: warn" in out, f"rc={rc} {out[-300:]}")
+        ok, peek = head_block(stem + "_def")
+        check(f"{label}: rc=1 이어도 덱은 쓰고 머리에 $ KOOREMAPPER-PIDREF 블록이 있다", ok, peek)
+
+        rc, out = fn(stem + "_warn", "warn")
+        check(f"{label}: pid_refs: warn 은 rc=0 (카탈로그가 적은 탈출구)", rc == 0, f"rc={rc} {out[-300:]}")
+        ok, peek = head_block(stem + "_warn")
+        check(f"{label}: warn 도 같은 $ KOOREMAPPER-PIDREF 블록을 덱에 남긴다", ok, peek)
+
+        rc, out = fn(stem + "_strict", "strict")
+        check(f"{label}: pid_refs: strict 는 키를 뺀 것과 같은 rc=1", rc == 1, f"rc={rc} {out[-300:]}")
+
+        rc, out = fn(stem + "_bad", "nonsense")
+        check(f"{label}: 카탈로그 values 밖 값은 rc=1 + 허용값을 찍는다",
+              rc == 1 and "invalid pid_refs 'nonsense' (must be one of strict, warn)" in out,
+              f"rc={rc} {out[-300:]}")
+        check(f"{label}: 카탈로그 values 밖 값이면 덱을 내지 않는다",
+              not os.path.exists(os.path.join(pr, stem + "_bad.k")))
+
+    for opname in ("restack", "merge"):
+        notes = ops[opname]["notes"]
+        check(f"카탈로그 {opname} notes 가 $ KOOREMAPPER-PIDREF 블록과 rc 정책을 적는다",
+              "$ KOOREMAPPER-PIDREF" in notes and "pid_refs: warn" in notes
+              and "exit_code" in notes and "KooRemapperStep.py" in notes,
+              notes[:200])
+
     dpm = os.path.join(d, "dp")
     os.makedirs(dpm, exist_ok=True)
     shutil.copy2(os.path.join(REPO, "materials", "smartphone_stack.k"), dpm)
