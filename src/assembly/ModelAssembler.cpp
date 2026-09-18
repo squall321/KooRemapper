@@ -4109,6 +4109,40 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
     bool elementTwoLineFormat = false;     // 지금 *ELEMENT_SOLID 섹션이 두 줄 포맷인가
     bool pendingNodeCard = false;          // 다음 데이터 줄은 방금 읽은 헤더의 노드 줄이다
     bool dropPendingNodeCard = false;      // 그 노드 줄을 버려야 하나(요소를 지웠거나 새로 썼다)
+    bool tshellElementsInserted = false;   // 새 tshell 층을 이미 썼나(솔리드와 따로 센다)
+
+    // 고정폭 칸 너비 — *KEYWORD 의 i10=y 면 10 칸이다(리더와 같게 본다).
+    int elemFieldWidth = 8;
+    for (const std::string& rl : rawLines_) {
+        size_t s = rl.find_first_not_of(" \t");
+        if (s == std::string::npos || rl[s] != '*') continue;
+        std::string up = rl.substr(s);
+        std::transform(up.begin(), up.end(), up.begin(), [](unsigned char c){ return (char)std::toupper(c); });
+        if (up.compare(0, 8, "*KEYWORD") != 0) continue;
+        if (up.find("I10") != std::string::npos) elemFieldWidth = 10;
+        break;
+    }
+
+    // 리더(KFileReader::parseElementSolidSection)와 같은 순서로 판정한다 — 토큰을 세기 전에
+    // 고정폭 한 줄 해석을 먼저 시도한다. 8 칸 고정폭에 8 자리 노드 ID 가 들어가면 pid 칸과
+    // n1 칸이 공백 없이 붙어 한 줄 포맷 요소가 2 토큰으로 보이기 때문이다. 토큰 수만 보면
+    // 그런 줄을 '두 줄 헤더' 로 오판해 멀쩡한 다음 요소를 노드 줄로 버리거나(대상 파트),
+    // 지워야 할 다음 요소를 그냥 내보낸다(비대상 파트).
+    auto isTwoLineElementHeader = [&](const std::string& l) {
+        const size_t fw = (size_t)elemFieldWidth;
+        if (l.length() >= fw * 10) {
+            int eid = 0, n1 = 0;
+            try { eid = std::stoi(l.substr(0, fw)); } catch (...) { eid = 0; }
+            try { n1 = std::stoi(l.substr(fw * 2, fw)); } catch (...) { n1 = 0; }
+            if (eid > 0 && n1 > 0) return false;   // 고정폭 한 줄 포맷 요소다
+        }
+        int tokenCount = 0;
+        std::istringstream iss(l);
+        std::string tok;
+        while (iss >> tok) tokenCount++;
+        if (tokenCount >= 10) return false;        // 자유 포맷 한 줄 포맷 요소다
+        return (tokenCount >= 2 && tokenCount <= 3);
+    };
 
     for (size_t i = 0; i < rawLines_.size(); ++i) {
         const std::string& line = rawLines_[i];
@@ -4230,32 +4264,33 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                     }
                     nodesInserted = true;
                 }
-                if (!elementsInserted) {
+                if (!elementsInserted || !tshellElementsInserted) {
                     // Separate solid vs tshell elements
                     bool hasSolid = false, hasTshell = false;
                     for (const auto& ae : addedElements_) {
                         if (ae.isTshell) hasTshell = true;
                         else hasSolid = true;
                     }
-                    if (hasSolid) {
+                    if (hasSolid && !elementsInserted) {
                         output << "*ELEMENT_SOLID\n";
                         for (const auto& ae : addedElements_) {
                             if (!ae.isTshell) output << formatElementLine(ae) << "\n";
                         }
                     }
-                    if (hasTshell) {
+                    if (hasTshell && !tshellElementsInserted) {
                         output << "*ELEMENT_TSHELL\n";
                         for (const auto& ae : addedElements_) {
                             if (ae.isTshell) output << formatElementLine(ae) << "\n";
                         }
                     }
-                    if (!hasSolid && !hasTshell && !addedElements_.empty()) {
+                    if (!hasSolid && !hasTshell && !addedElements_.empty() && !elementsInserted) {
                         output << "*ELEMENT_SOLID\n";
                         for (const auto& ae : addedElements_) {
                             output << formatElementLine(ae) << "\n";
                         }
                     }
                     elementsInserted = true;
+                    tshellElementsInserted = true;
                 }
 
                 // Insert shell elements if any
@@ -4419,13 +4454,7 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
         else if (currentSection == Section::ELEMENT) {
             // Detect if this line is an element header (eid+pid, short line)
             // vs a continuation line (node IDs, many tokens)
-            int tokenCount = 0;
-            {
-                std::istringstream iss(line);
-                std::string tok;
-                while (iss >> tok) tokenCount++;
-            }
-            bool isElementHeader = (tokenCount >= 2 && tokenCount <= 3);
+            bool isElementHeader = isTwoLineElementHeader(line);
 
             // 두 줄 포맷 요소의 노드 줄 — 첫 칸은 노드 ID 다. 여기서 먼저 걷어내지 않으면
             // (1) 노드 ID 가 지워진 요소 번호와 겹칠 때 남의 노드 줄이 사라지고
@@ -4532,12 +4561,7 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
         }
         else if (currentSection == Section::TSHELL_ELEMENT) {
             // 지우기만 한다 — 새 요소는 예전처럼 *END 앞의 *ELEMENT_TSHELL 로 나간다.
-            int tokenCount = 0;
-            {
-                std::istringstream iss(line);
-                std::string tok;
-                while (iss >> tok) tokenCount++;
-            }
+            bool isElementHeader = isTwoLineElementHeader(line);
             if (pendingNodeCard) {
                 pendingNodeCard = false;
                 bool dropIt = dropPendingNodeCard;
@@ -4546,7 +4570,7 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                 output << line << "\n";
                 continue;
             }
-            if (tokenCount >= 2 && tokenCount <= 3) {
+            if (isElementHeader) {
                 elementTwoLineFormat = true;
                 pendingNodeCard = true;
                 dropPendingNodeCard = false;

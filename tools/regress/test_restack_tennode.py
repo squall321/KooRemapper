@@ -62,12 +62,30 @@ def element_sections(path, keyword="*ELEMENT_SOLID"):
     return out
 
 
+def fixed_width_eid(line, fw=8):
+    """리더처럼 고정폭 한 줄 포맷을 먼저 시도한다 — 8자리 노드 ID 는 칸이 붙어 2 토큰으로 보인다.
+    한 줄 포맷 요소면 eid, 아니면 None."""
+    if len(line) < fw * 10:
+        return None
+    try:
+        eid = int(line[0:fw])
+        n1 = int(line[fw * 2:fw * 3])
+    except ValueError:
+        return None
+    return eid if eid > 0 and n1 > 0 else None
+
+
 def parse_elements(data_lines):
-    """리더와 같은 규칙으로 요소를 읽는다 — 한 줄 포맷(10칸 이상) / 두 줄 포맷(2~3칸 + 노드 줄).
-    구조가 깨졌으면 예외를 던진다."""
+    """리더와 같은 규칙으로 요소를 읽는다 — 고정폭 한 줄 / 자유 포맷 한 줄(10칸 이상) /
+    두 줄 포맷(2~3칸 + 노드 줄). 구조가 깨졌으면 예외를 던진다."""
     eids = []
     i = 0
     while i < len(data_lines):
+        packed = fixed_width_eid(data_lines[i])
+        if packed is not None:
+            eids.append(packed)
+            i += 1
+            continue
         toks = data_lines[i].split()
         if len(toks) >= 10:
             eids.append(int(toks[0]))
@@ -117,6 +135,34 @@ UPPER
 
 def deck(element_block):
     return "*KEYWORD\n*TITLE\nten node format test\n*NODE\n" + NODES + "\n" + element_block + TAIL
+
+
+def packed_deck():
+    """8자리 노드 ID(10000001~) 3x2x3 격자 — 한 줄 포맷이지만 pid 칸과 n1 칸이 붙는다.
+    PID 1 과 PID 2 요소를 번갈아 놓아 오판이 어느 쪽으로 새든 드러나게 한다."""
+    nid = {}
+    nodes = []
+    n = 10000001
+    for k, z in enumerate([0.0, 2.0, 4.0]):
+        for j, y in enumerate([0.0, 10.0]):
+            for i, x in enumerate([0.0, 10.0, 20.0]):
+                nid[(i, j, k)] = n
+                nodes.append((n, x, y, z))
+                n += 1
+
+    def hexn(i, j, k):
+        return [nid[(i, j, k)], nid[(i + 1, j, k)], nid[(i + 1, j + 1, k)], nid[(i, j + 1, k)],
+                nid[(i, j, k + 1)], nid[(i + 1, j, k + 1)], nid[(i + 1, j + 1, k + 1)], nid[(i, j + 1, k + 1)]]
+
+    lines = ["*ELEMENT_SOLID"]
+    eid = 5001
+    for k in range(2):
+        for col, pid in ((0, 1), (1, 2)):
+            lines.append("%8d%8d" % (eid, pid) + "".join("%8d" % v for v in hexn(col, 0, k)))
+            eid += 1
+    return ("*KEYWORD\n*NODE\n"
+            + "\n".join("%8d%16.6f%16.6f%16.6f" % v for v in nodes) + "\n"
+            + "\n".join(lines) + "\n" + TAIL)
 
 
 LAYERS = """layers:
@@ -299,6 +345,42 @@ def main():
             b = [ln for ln in read(os.path.join(d, "start_out.k")) if not ln.startswith("$ KOOREMAPPER")]
             check("단독 restack 과 같은 덱", a == b,
                   "\n".join(x for x in a if x not in b)[:300])
+
+        print("[J 8자리 노드 ID — 칸이 붙어 2 토큰으로 보여도 한 줄 포맷으로 읽는다]")
+        # pid 칸과 n1 칸 사이에 공백이 없어 토큰 수만 보면 '두 줄 헤더' 로 오판된다.
+        # 대상 파트는 남겨야 할 다음 요소를 노드 줄로 버리고, 비대상 파트는 지워야 할
+        # 다음 요소를 그대로 내보낸다 — 양쪽 다 조용히 틀린 덱이 나간다.
+        open(os.path.join(d, "pk.k"), "w").write(packed_deck())
+        for tag, target, kept in (("a", 1, [5002, 5004]), ("b", 2, [5001, 5003])):
+            open(os.path.join(d, "pk%s.yaml" % tag), "w").write(
+                yaml("pk.k", "pk%s_out.k" % tag).replace("target_pid: 1", "target_pid: %d" % target))
+            rc, out = run(binary, d, "restack", "pk%s.yaml" % tag)
+            check("대상 %d rc=0" % target, rc == 0, out[-400:])
+            psecs = element_sections(os.path.join(d, "pk%s_out.k" % tag))
+            check("대상 %d 섹션을 새로 열지 않는다" % target, len(psecs) == 1, str([s[0] for s in psecs]))
+            if psecs:
+                check("대상 %d 비대상 파트 요소가 남고 대상 요소만 새 층으로 바뀐다" % target,
+                      parse_elements(psecs[0][1]) == kept + [5005, 5006], str(psecs[0][1]))
+            rc, n, e, out = info_counts(binary, d, "pk%s_out.k" % tag)
+            check("대상 %d 요소 4 개(남은 2 + 새 층 2)" % target, e == 4, "elements=%d" % e)
+
+        print("[K element_type: tshell 층 — 베이스 *ELEMENT_SOLID 섹션이 있어도 나간다]")
+        # *ELEMENT_SOLID 섹션 끝에서 솔리드만 쓰고 '다 썼다' 고 표시해 *END 앞의
+        # *ELEMENT_TSHELL 폴백이 영영 실행되지 않았다 — rc=0 인데 요소 0 개짜리 덱.
+        open(os.path.join(d, "tl.yaml"), "w").write(
+            yaml("one.k", "tl_out.k").replace("    num_elements: 1\n",
+                                              "    num_elements: 1\n    element_type: tshell\n"))
+        rc, out = run(binary, d, "restack", "tl.yaml")
+        check("rc=0", rc == 0, out[-400:])
+        tlsec = element_sections(os.path.join(d, "tl_out.k"), "*ELEMENT_TSHELL")
+        check("새 층이 *ELEMENT_TSHELL 섹션으로 나간다", len(tlsec) == 1, str(tlsec))
+        if tlsec:
+            check("새 tshell 요소 2 개", len(parse_elements(tlsec[0][1])) == 2, str(tlsec[0][1]))
+        ksol = element_sections(os.path.join(d, "tl_out.k"))
+        check("솔리드 섹션에는 비대상 요소 5002 만 남는다",
+              bool(ksol) and parse_elements(ksol[0][1]) == [5002], str(ksol))
+        rc, n, e, out = info_counts(binary, d, "tl_out.k")
+        check("요소 3 개(남은 1 + 새 층 2)", e == 3, "elements=%d" % e)
 
     print("FAIL %d" % FAIL if FAIL else "ALL PASS")
     return 1 if FAIL else 0
