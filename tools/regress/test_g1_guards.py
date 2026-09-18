@@ -11,7 +11,9 @@
   - A36 목록 항목 안에 중첩 매핑(gauss:)이 있으면 그 다음 형제 항목 대시를 들여쓰기 오류로 보고
         정상 YAML 을 rc=1 로 거부했다(메시지도 'YAML 로 읽을 수 없는 파일' 이라고 단정했다).
   - A16 assemble 의 층 대시 줄 파서가 thickness/title 만 읽어, 단독 restack 과 같은 YAML 이 다른 덱을 냈다
-        (대시 줄 '- num_elements: 4', 한 줄 material_card).
+        (대시 줄 '- num_elements: 4', 따옴표 한 줄 material_card).
+        카드 값은 키워드 줄만으로는 MID 를 쓸 자리가 없어 이제 rc=1 이므로, 데이터 줄까지 담은
+        한 줄 카드로 A16 의 의도(따옴표 한 줄 카드도 층 카드로 들어간다)를 확인한다.
 """
 import os
 import shutil
@@ -38,7 +40,7 @@ layers:
   - num_elements: 2
     thickness: 0.3
     title: Adhesive
-    material_card: "*MAT_ELASTIC"
+    material_card: "*MAT_ELASTIC\\n           @MID@   1.0E-9      3000      0.35"
 """
 
 

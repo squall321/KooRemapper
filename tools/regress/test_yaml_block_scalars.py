@@ -15,6 +15,13 @@
         없어 mid 0 덱이 된다 — rc=1 로 거절한다.
   - R7 '-' 만 있는 줄로 여는 목록 항목(다음 줄부터 키)이 정상 YAML 인데 'no layers defined for restack'
         (assemble 은 'No operations defined')으로 거부됐다.
+  - R2a 카드 키워드 줄이 1열에서 시작하지 않으면(‘|1’·‘|2’ 지시자나 앞 공백이 든 따옴표 값) LS-DYNA 가
+        키워드로 읽지 않아 앞 카드의 데이터 줄처럼 붙고 *PART 의 mid 가 정의되지 않은 MID 를 가리켰다.
+  - R2b '*MAT_..._TITLE' 인데 내용 줄이 하나뿐이면 제목·데이터 중 하나가 빠진 것이라 MID 를 쓸 자리가
+        없다 — rc=0 에 경고 0줄로 mid 0 덱이 나갔다.
+  - R2c '|4' 처럼 지시자가 요구하는 열보다 내용이 얕은 블록(PyYAML 은 ParserError)을 단독은 rc=0 덱으로,
+        assemble 은 rc=1 'has no material_card' 로 갈라 읽었다. 카드 '가운데' 빈 줄도 단독은 버리고
+        assemble 은 남겨 덱이 한 줄 달랐다(LS-DYNA 는 빈 줄을 칸이 모두 0 인 데이터 카드로 읽는다).
 """
 import os
 import subprocess
@@ -115,7 +122,8 @@ def layers_with(indicator, card1=CARD1, card2=CARD2):
     return out
 
 
-def both_paths(binary, tag, layers_body, expect_rc=0, want_msg=None, want_mids=(90, 91)):
+def both_paths(binary, tag, layers_body, expect_rc=0, want_msg=None, want_mids=(90, 91),
+               want_titles=("Substrate", "Cover")):
     """같은 층 목록을 단독 restack 과 assemble 로 돌려 rc·덱이 같은지 본다"""
     d = workdir(binary, tag)
     open(os.path.join(d, "sa.yaml"), "w").write(standalone_yaml(layers_body))
@@ -143,8 +151,10 @@ def both_paths(binary, tag, layers_body, expect_rc=0, want_msg=None, want_mids=(
           len(set(layer_mids)) == 2 and all(m in mats for m in layer_mids if m),
           f"{layer_mids} {list(mats)}")
     if all(m in mats for m in layer_mids if m):
-        titles = [mats[m][1] for m in layer_mids]
-        check(f"[{tag}] 카드 제목이 그대로다 (Substrate/Cover)", titles == ["Substrate", "Cover"], str(titles))
+        if want_titles:   # 제목 줄이 없는 '_TITLE' 아닌 카드는 견줄 제목이 없다
+            titles = [mats[m][1] for m in layer_mids]
+            check(f"[{tag}] 카드 제목이 그대로다 ({'/'.join(want_titles)})",
+                  titles == list(want_titles), str(titles))
         ros = [mats[m][2][10:20].strip() for m in layer_mids]
         check(f"[{tag}] 둘째 칸(RO)이 살아 있다", ros == ["7.85E-09", "7.85E-09"], str(ros))
     return sa_txt
@@ -225,6 +235,8 @@ def main():
                   str(mats))
 
     # ── 카드로 볼 수 없는 값은 rc=1 ─────────────────────────────────────────
+    inline_base = base   # '|' 블록 기준 덱 — 빈 줄이 든 카드와 견준다
+
     print("[R2] 카드로 볼 수 없는 값은 조용히 넘기지 않는다")
     both_paths(binary, "empty", "  - thickness: 1.0\n    material_card:\n",
                expect_rc=1, want_msg="비어 있습니다")
@@ -281,6 +293,63 @@ def main():
         rc, out = run(binary, d, "offset", "sa.yaml")
         check(f"[{tag}] 단독 offset rc=1", rc == 1, f"rc={rc} {out[-220:]}")
         check(f"[{tag}] 메시지에 '{msg}'", msg in out, out[-220:])
+
+    # ── R2a: 키워드 줄은 1열에서 시작해야 한다 ──────────────────────────────
+    print("[R2a] 카드 키워드 줄에 앞 공백이 있으면 거절한다 ('|N' 지시자·따옴표 값의 앞 공백)")
+    # '|1'/'|2' 는 내용을 지시자보다 깊게 써 카드 첫 줄에 앞 공백이 남는 표기다(PyYAML 도 같다)
+    for tag, indicator, extra in (("lead1", "|1", 1), ("lead2", "|2", 2)):
+        body = ""
+        for card in (CARD1, CARD2):
+            body += ("  - thickness: 1.0\n    material_card: " + indicator + "\n" +
+                     indent_block(card, 4 + extra + 1))
+        both_paths(binary, tag, body, expect_rc=1, want_msg="1열에서 시작하지 않습니다")
+    both_paths(binary, "lead_quote",
+               '  - thickness: 1.0\n    material_card: ' + dq(" " + CARD1) + "\n",
+               expect_rc=1, want_msg="1열에서 시작하지 않습니다")
+
+    # ── R2b: '_TITLE' 은 제목 줄과 데이터 줄이 모두 있어야 한다 ──────────────
+    print("[R2b] '*MAT_..._TITLE' 에 제목 줄이나 데이터 줄이 빠지면 거절한다")
+    TITLE_ONLY = "*MAT_ELASTIC_TITLE\nTitle\n$#     mid        ro         e        pr"
+    NO_TITLE = ("*MAT_ELASTIC_TITLE\n"
+                "$#     mid        ro         e        pr\n"
+                "        90  7.85E-09  2.10E+05       0.3")
+    for tag, card in (("title_only", TITLE_ONLY), ("no_title", NO_TITLE)):
+        body = "  - thickness: 1.0\n    material_card: |\n" + indent_block(card, 6)
+        both_paths(binary, tag, body, expect_rc=1, want_msg="제목 줄 다음에 데이터 줄이")
+    # 제목 줄이 없는 '_TITLE' 아닌 카드는 그대로 통과한다(데이터 줄만 있으면 된다)
+    PLAIN = ("*MAT_ELASTIC\n"
+             "$#     mid        ro         e        pr\n"
+             "        90  7.85E-09  2.10E+05       0.3")
+    both_paths(binary, "plain_mat",
+               "  - thickness: 1.0\n    material_card: |\n" + indent_block(PLAIN, 6) +
+               "  - thickness: 1.0\n    material_card: |\n" +
+               indent_block(PLAIN.replace("        90", "        91"), 6),
+               want_titles=None)
+
+    # ── R2c: 얕은 블록 내용·카드 가운데 빈 줄을 두 경로가 같게 다룬다 ────────
+    print("[R2c] 지시자보다 얕은 블록 내용은 두 경로 모두 rc=1 이고 원인을 그대로 말한다")
+    for tag, indicator in (("shallow3", "|3"), ("shallow4", "|4")):
+        body = ""
+        for card in (CARD1, CARD2):
+            body += ("  - thickness: 1.0\n    material_card: " + indicator + "\n" +
+                     indent_block(card, 6))
+        both_paths(binary, tag, body, expect_rc=1, want_msg="블록 내용이")
+    # 들쭉날쭉한 들여쓰기(첫 줄이 깊고 다음 줄이 얕다)도 같은 자리에서 걸린다
+    jag = ("  - thickness: 1.0\n    material_card: |\n" +
+           "        *MAT_ELASTIC_TITLE\n      Substrate\n" +
+           "      $#     mid        ro         e        pr\n" +
+           "              90  7.85E-09  2.10E+05       0.3\n")
+    both_paths(binary, "jagged", jag, expect_rc=1, want_msg="블록 내용이")
+
+    print("[R2c] 카드 '가운데' 빈 줄은 두 경로 모두 버린다 — 남기면 LS-DYNA 가 0 카드로 읽는다")
+    gap = ""
+    for card in (CARD1, CARD2):
+        lines = card.split("\n")
+        gapped = "\n".join(lines[:2] + [""] + lines[2:])
+        gap += "  - thickness: 1.0\n    material_card: |\n" + indent_block(gapped, 6)
+    gap_txt = both_paths(binary, "gapline", gap)
+    check("[R2c] 빈 줄이 든 카드 덱이 빈 줄 없는 덱과 같다",
+          gap_txt is not None and gap_txt == inline_base, "덱이 다르다")
 
     # ── R7: '-' 만 있는 줄 ──────────────────────────────────────────────────
     print("[R7] '-' 만 있는 줄로 여는 목록 항목도 정상 YAML 이다")

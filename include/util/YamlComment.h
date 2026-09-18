@@ -199,6 +199,39 @@ inline std::string yamlResolvePath(const std::string& configDir, const std::stri
     return configDir + "/" + p;
 }
 
+// ── 블록 내용 줄 판정 ────────────────────────────────────────────────────────
+// 블록 스칼라 안의 한 줄이 내용인지·블록 끝인지·YAML 오류인지는 들여쓰기 하나로 갈린다.
+// 예전엔 단독(standalone_ops)은 '키 열보다 깊으면 내용' 으로만 보고 명시 들여쓰기 지시자를
+// 사실상 무시했고, assemble 은 'base 열보다 얕으면 블록 끝' 으로 통째로 버렸다 —
+// 같은 '|4' YAML 이 단독은 rc=0 덱, assemble 은 rc=1 'has no material_card' 로 갈렸다.
+// PyYAML 기준은 이렇다.
+//   빈 줄                        → 블록 안(카드에서는 버린다 — 아래 주석 참고)
+//   indent <= 키 열              → 블록 끝(다음 키)
+//   base 미정                    → 이 줄이 첫 내용 줄이다(여기서 base 가 정해진다)
+//   indent < base 이고 '#' 로 시작 → 주석이라 블록을 닫는다
+//   indent < base                → YAML 오류(지시자나 첫 내용 줄보다 얕다)
+//   그 밖                        → 내용
+// 카드 안 빈 줄(BLANK)은 양쪽 경로 모두 버린다. LS-DYNA 는 빈 줄을 '칸이 모두 빈 데이터 카드'
+// (전부 0)로 읽으므로 *MAT 제목 바로 뒤에 남은 빈 줄 하나가 물성을 통째로 0 으로 만든다 —
+// 예전엔 단독은 버리고 assemble 은 남겨 같은 YAML 이 한 줄 다른 덱을 냈다.
+enum class YamlBlockLineKind { BLANK, CONTENT, END, TOO_SHALLOW };
+
+inline YamlBlockLineKind yamlClassifyBlockLine(const std::string& trimmed, int indent,
+                                               int keyIndent, int baseIndent) {
+    if (trimmed.empty()) return YamlBlockLineKind::BLANK;
+    if (indent <= keyIndent) return YamlBlockLineKind::END;
+    if (baseIndent >= 0 && indent < baseIndent)
+        return (trimmed[0] == '#') ? YamlBlockLineKind::END : YamlBlockLineKind::TOO_SHALLOW;
+    return YamlBlockLineKind::CONTENT;
+}
+
+// 얕은 내용 줄 거절 메시지 — 예전 assemble 의 'has no material_card' 는 원인을 가렸다.
+inline std::string yamlShallowBlockMessage(const std::string& key, int indent, int baseIndent) {
+    return key + ": 블록 내용이 " + std::to_string(baseIndent + 1) + "열보다 얕습니다(" +
+           std::to_string(indent + 1) + "열) — '|N' 지시자나 첫 내용 줄의 들여쓰기를 확인하세요 / "
+           "block content is indented less than the block requires";
+}
+
 // 블록 끝의 빈 줄 처리(chomping). strip('-')·clip(기본)은 끝 줄바꿈을 버리고, keep('+')은 남긴다.
 // 카드는 줄 단위라 끝 빈 줄이 덱에 그대로 찍히면 assemble 과 단독 결과가 갈렸다.
 inline void yamlChompBlock(std::string& block, char chomp) {
@@ -328,34 +361,63 @@ inline bool yamlJoinQuotedScalar(const std::vector<std::string>& lines, size_t l
 }
 
 // ── 카드 값 판정 ─────────────────────────────────────────────────────────────
-// 카드로 쓸 수 없는 값을 걸러 낸다. *MAT 키워드 줄이 없거나(예: '|-', 'Substrate'),
-// 키워드 줄만 있고 데이터 줄이 없으면(예: 한 줄짜리 '*MAT_ELASTIC') MID 를 찾을 자리가 없어
-// *PART 의 mid 칸이 0 인 덱이 조용히 나온다 — 그런 값은 rc=1 로 거절한다.
-// 이유를 why 에 한국어+영어로 담는다. 카드로 볼 수 있으면 true.
+// 카드로 쓸 수 없는 값을 걸러 낸다. 이유를 why 에 한국어+영어로 담는다.
+//  (1) *MAT 키워드 줄이 없는 값(예: '|-', 'Substrate') — MID 를 쓸 자리가 아예 없다.
+//  (2) 키워드 줄이 1열에서 시작하지 않는 값 — LS-DYNA 는 1열의 '*' 만 키워드로 읽는다.
+//      '|1'·'|2' 지시자나 앞 공백이 든 따옴표 값(argbuild·pyKooCAE 경로)이 그대로 들어오면
+//      덱에 ' *MAT_ELASTIC_TITLE' 이 찍혀 앞 카드의 데이터 줄처럼 붙고, *PART 의 mid 는
+//      정의되지 않은 MID 를 가리킨다 — 예전엔 rc=0, 경고 0줄이었다.
+//  (3) 키워드 줄 뒤에 데이터 줄이 없는 값 — MID 를 쓸 자리가 없어 *PART 의 mid 가 0 이 된다.
+// '*MAT_..._TITLE' 은 제목 줄이 데이터 줄이 아니므로 따로 센다. 제목 줄 판정은 추측하지 않는다
+// ('제목처럼 보이는지' 로 나누면 '7075-T6 aluminum' 같은 실제 제목에서 틀린다):
+//   내용 줄('$' 주석·빈 줄 제외)이 두 줄 이상이면 첫 줄이 제목, 나머지가 데이터 줄이다.
+//   한 줄뿐이면 그 줄이 제목인지 데이터인지로 결과가 갈리는데, 카드를 덱에 싣는 쪽
+//   (ModelAssembler 의 matCardFindMidFields)은 제목으로 먹어 MID 칸을 못 찾는다 —
+//   *PART 의 mid 가 0 이 되고 2층부터 카드가 '이미 씀' 으로 버려진다. 그래서 여기서 rc=1 로 멈추고
+//   제목 줄이 없다는 사실을 알린다(조용히 틀린 덱을 내지 않는다).
+// 카드로 볼 수 있으면 true.
 inline bool yamlCardLooksUsable(const std::string& card, std::string& why) {
-    std::vector<std::string> body;
+    std::vector<std::string> raw;   // 빈 줄만 버린 줄들 — 앞 공백은 1열 판정에 쓰므로 지우지 않는다
     {
         std::istringstream iss(card);
         std::string ln;
         while (std::getline(iss, ln)) {
             if (!ln.empty() && ln.back() == '\r') ln.pop_back();
-            size_t a = ln.find_first_not_of(" \t");
-            if (a == std::string::npos) continue;          // 빈 줄
-            body.push_back(ln.substr(a));
+            if (ln.find_first_not_of(" \t") == std::string::npos) continue;   // 빈 줄
+            raw.push_back(ln);
         }
     }
-    size_t kw = body.size();
-    for (size_t i = 0; i < body.size(); ++i)
-        if (body[i][0] == '*') { kw = i; break; }
-    if (kw == body.size()) {
+    size_t kw = raw.size();
+    for (size_t i = 0; i < raw.size(); ++i)
+        if (yamlTrimEdges(raw[i])[0] == '*') { kw = i; break; }
+    if (kw == raw.size()) {
         why = "*MAT 키워드 줄이 없습니다 / no '*MAT...' keyword line";
         return false;
     }
-    for (size_t i = kw + 1; i < body.size(); ++i)
-        if (body[i][0] != '$') return true;                 // 주석($)이 아닌 내용 줄이 있다
-    why = "키워드 줄 뒤에 데이터 줄이 없습니다 — MID 를 쓸 자리가 없어 mid 0 덱이 됩니다 / "
-          "no data line after the keyword line";
-    return false;
+    if (raw[kw][0] != '*') {
+        why = "키워드 줄이 1열에서 시작하지 않습니다 ('" + yamlTrimEdges(raw[kw]) +
+              "' 앞에 공백이 있습니다) — '|N' 지시자나 따옴표 값의 앞 공백을 확인하세요 / "
+              "the keyword line must start at column 1";
+        return false;
+    }
+    std::vector<size_t> content;    // 키워드 줄 뒤의 '$' 주석이 아닌 줄
+    for (size_t i = kw + 1; i < raw.size(); ++i)
+        if (yamlTrimEdges(raw[i])[0] != '$') content.push_back(i);
+    if (content.empty()) {
+        why = "키워드 줄 뒤에 데이터 줄이 없습니다 — MID 를 쓸 자리가 없어 mid 0 덱이 됩니다 / "
+              "no data line after the keyword line";
+        return false;
+    }
+    std::string kwUp = yamlTrimEdges(raw[kw]);
+    for (auto& c : kwUp) c = (char)std::toupper((unsigned char)c);
+    if (kwUp.find("_TITLE") != std::string::npos && content.size() == 1) {
+        why = "'" + yamlTrimEdges(raw[kw]) + "' 은 제목 줄 다음에 데이터 줄이 있어야 하는데 내용 줄이 '" +
+              yamlTrimEdges(raw[content[0]]) + "' 하나뿐입니다 — 제목 줄이 빠졌으면 제목 줄을, "
+              "데이터 줄이 빠졌으면 데이터 줄을 넣으세요 (지금 그대로면 MID 를 쓸 자리가 없어 "
+              "mid 0 덱이 됩니다) / a _TITLE card needs both a title line and a data line";
+        return false;
+    }
+    return true;
 }
 
 // '>' 블록은 줄을 접어 카드를 한 줄로 만든다 — LS-DYNA 카드는 줄 단위라 접힌 카드는 반드시 깨진다.

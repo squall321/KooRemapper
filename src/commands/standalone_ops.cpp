@@ -488,17 +488,28 @@ int runRestack(const std::string& yamlFile, ConsoleOutput& console) {
         const std::string& ln = lines[li];
         int indent = y.countIndent(ln);
         std::string tr = y.trim(ln);
-        if (tr.empty() || tr[0]=='#') continue;
 
+        // 블록 내용 판정은 assemble(AssemblyConfigReader)과 같은 규칙이다 — 예전엔 여기만
+        // '키 열보다 깊으면 내용' 으로 봐 '|4' 같은 명시 들여쓰기 지시자를 사실상 무시했고,
+        // 같은 YAML 이 단독은 rc=0 덱, assemble 은 rc=1 로 갈렸다. 빈 줄·'#' 줄 건너뛰기도
+        // 블록 읽기 뒤로 옮긴다('#' 로 시작하는 카드 줄은 주석이 아니라 내용이다).
         if (readingMatCard) {
-            if (indent > matCardKeyIndent) {
+            KooRemapper::YamlBlockLineKind kind =
+                KooRemapper::yamlClassifyBlockLine(tr, indent, matCardKeyIndent, matCardBaseIndent);
+            if (kind == KooRemapper::YamlBlockLineKind::BLANK) continue;   // 카드 안 빈 줄은 버린다
+            if (kind == KooRemapper::YamlBlockLineKind::TOO_SHALLOW) {
+                cardError = KooRemapper::yamlShallowBlockMessage("material_card", indent, matCardBaseIndent);
+                continue;
+            }
+            if (kind == KooRemapper::YamlBlockLineKind::CONTENT) {
                 if (matCardBaseIndent < 0) matCardBaseIndent = indent;
                 if (!op.layers.empty())
-                    op.layers.back().materialCard += ln.substr(std::min(indent, matCardBaseIndent)) + "\n";
+                    op.layers.back().materialCard += ln.substr(matCardBaseIndent) + "\n";
                 continue;
             }
             closeMatCard();
         }
+        if (tr.empty() || tr[0]=='#') continue;
 
         if (inLayers && indent <= layersIndent && tr.substr(0,2) != "- " && tr != "-") {
             inLayers = false;
@@ -1254,6 +1265,7 @@ int runOffset(const std::string& yamlFile, ConsoleOutput& console) {
 
     size_t li = 0;   // 따옴표 스칼라가 여러 줄에 걸치면 아래 람다가 이 값을 건너뛴다
 
+    std::string matCardKeyName = "material_card";   // 얕은 내용 줄 메시지에 쓸 카드 키 이름
     // 블록이 끝날 때 chomping 을 적용한다 — assemble 과 같게 끝 빈 줄을 버린다(clip/strip)
     auto closeOffsetCard = [&]() {
         // 끝 빈 줄은 어느 chomping 지시자든 버린다 — assemble 과 같은 규칙
@@ -1274,6 +1286,7 @@ int runOffset(const std::string& yamlFile, ConsoleOutput& console) {
             if (h.folded) { cardError = KooRemapper::yamlFoldedCardMessage(keyName); return; }
             readingFlag = true; matCardKeyIndent = blockKeyIndent;
             matCardBaseIndent = (h.indent > 0) ? blockKeyIndent + h.indent : -1;
+            matCardKeyName = keyName;
             return;
         }
         if (vv.empty()) {
@@ -1300,40 +1313,31 @@ int runOffset(const std::string& yamlFile, ConsoleOutput& console) {
         const std::string& ln = lines[li];
         int indent = y.countIndent(ln);
         std::string tr = y.trim(ln);
-        if (tr.empty() || tr[0]=='#') {
-            // Multi-line material card may include comment-like lines
-            if (readingMatCard && matCardBaseIndent >= 0 && indent >= matCardBaseIndent) {
-                op.materialCard += ln.substr(std::min(indent, matCardBaseIndent)) + "\n";
-            } else if (readingCzmMatCard && matCardBaseIndent >= 0 && indent >= matCardBaseIndent) {
-                op.czmMaterialCard += ln.substr(std::min(indent, matCardBaseIndent)) + "\n";
-            } else if (readingMatCardsItem && matCardBaseIndent >= 0 && indent >= matCardBaseIndent) {
-                op.materialCards.back() += ln.substr(std::min(indent, matCardBaseIndent)) + "\n";
+        // 블록 내용 판정은 assemble(AssemblyConfigReader)·단독 restack 과 같은 규칙이다.
+        // '#' 로 시작하는 줄도 블록 안에서는 주석이 아니라 카드 내용이고, 빈 줄은 양쪽 다 버린다.
+        if (readingMatCard || readingCzmMatCard || readingMatCardsItem) {
+            KooRemapper::YamlBlockLineKind kind =
+                KooRemapper::yamlClassifyBlockLine(tr, indent, matCardKeyIndent, matCardBaseIndent);
+            if (kind == KooRemapper::YamlBlockLineKind::BLANK) continue;
+            if (kind == KooRemapper::YamlBlockLineKind::TOO_SHALLOW) {
+                cardError = KooRemapper::yamlShallowBlockMessage(matCardKeyName, indent, matCardBaseIndent);
+                continue;
             }
-            continue;
+            if (kind == KooRemapper::YamlBlockLineKind::CONTENT) {
+                if (matCardBaseIndent < 0) matCardBaseIndent = indent;
+                std::string content = ln.substr(matCardBaseIndent) + "\n";
+                if (readingMatCard)            op.materialCard += content;
+                else if (readingCzmMatCard)    op.czmMaterialCard += content;
+                else if (!op.materialCards.empty()) op.materialCards.back() += content;
+                continue;
+            }
+            // 블록 끝 — material_cards 항목은 아래 목록 처리가 다음 '- |' 를 보고 닫는다
+            if (!readingMatCardsItem) closeOffsetCard();
         }
 
-        if (readingMatCard) {
-            if (indent > matCardKeyIndent) {
-                if (matCardBaseIndent < 0) matCardBaseIndent = indent;
-                op.materialCard += ln.substr(std::min(indent, matCardBaseIndent)) + "\n";
-                continue;
-            }
-            closeOffsetCard();
-        }
-        if (readingCzmMatCard) {
-            if (indent > matCardKeyIndent) {
-                if (matCardBaseIndent < 0) matCardBaseIndent = indent;
-                op.czmMaterialCard += ln.substr(std::min(indent, matCardBaseIndent)) + "\n";
-                continue;
-            }
-            closeOffsetCard();
-        }
+        if (tr.empty() || tr[0]=='#') continue;
+
         if (inMatCardsList) {
-            if (readingMatCardsItem && indent > matCardKeyIndent) {
-                if (matCardBaseIndent < 0) matCardBaseIndent = indent;
-                op.materialCards.back() += ln.substr(std::min(indent, matCardBaseIndent)) + "\n";
-                continue;
-            }
             // 예전엔 '- |   # 메모' 항목을 못 알아봐 목록이 끊기고 층 재질이 빠졌다.
             // 대시를 키와 같은 열에 쓰는 블록 목록도 YAML 에서 합법인데 '>' 로 걸러 통째로 버렸다(D4).
             // '- |-' '- |2' 처럼 지시자가 붙은 항목도 같은 블록이다.
@@ -1348,6 +1352,7 @@ int runOffset(const std::string& yamlFile, ConsoleOutput& console) {
                 readingMatCardsItem = true;
                 matCardKeyIndent = indent;
                 matCardBaseIndent = (ih.indent > 0) ? indent + ih.indent : -1;
+                matCardKeyName = "material_cards";
                 continue;
             }
             closeOffsetCard();
