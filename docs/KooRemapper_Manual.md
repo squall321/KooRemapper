@@ -865,6 +865,8 @@ layers:
 | `direction` | 적층 방향 — `auto`·`x`·`y`·`z`·`+x`·`-x`·`+y`·`-y`·`+z`·`-z` | `auto` |
 | `element_type` | 요소 유형 — **`solid` / `tshell` / `shell` 만** (소문자) | `solid` |
 | `layers` | 레이어 리스트 (thickness + material_card) | — |
+| `pid_start` | 자동 PID 를 이 번호부터 발급 — 이미 쓰는 번호는 건너뜁니다(예약 대역 회피) | `0`(= 모델 최대 PID + 1) |
+| `layers[].pid` | 그 층 `*PART` 의 PID 를 직접 지정 — 이미 쓰는 번호면 **rc=1** | `0`(자동) |
 | `pid_refs` | 빈 파트를 가리키는 자리를 못 옮겼을 때의 종료 코드 — **`strict` / `warn` 만**. `strict` 는 rc=1(덱은 씁니다), `warn` 은 같은 보고 + rc=0 ([아래](#pid_refs--못-옮긴-자리가-남았을-때의-종료-코드)) | `strict` |
 
 > **`element_type` 허용값(2026-09-18 변경)**: `solid`·`tshell`·`shell` **세 값만** 받습니다. 대소문자도 구분해
@@ -877,6 +879,22 @@ layers:
 > - 라벨과 카드 내용(MID 칸 제외)이 같은 층끼리만 MID 하나를 공유합니다. 라벨이 같아도 물성이 다르면 따로 발급하고 `material label 'X' reused with a different card -> separate MID N` 을 안내합니다(위 예시의 두 층은 라벨은 같고 물성이 달라 MID 가 둘).
 > - 값은 LS-DYNA 고정 폭 10열 칸 안에 두세요(블록 들여쓰기를 뺀 뒤 기준). 쉼표 자유 형식도 됩니다.
 > - YAML `|` 블록은 키보다 깊게 들여쓴 줄까지이며 끝 빈 줄은 버립니다. 제목에 `:` 나 `-` 가 있어도 됩니다.
+
+> **새 층 PID 를 직접 정하기(2026-09-18 추가)**: 예전에는 층 PID 가 언제나 `모델 최대 PID + 1` 부터였습니다.
+> 사내 ID 관례(예약 대역)와 부딪히면 새 층만 다른 번호로 다시 매겨야 했습니다.
+> - `layers[].pid` 는 그 층의 PID 를 못박습니다. `pid_start` 는 **자동 발급의 시작 번호**만 옮깁니다
+>   (이미 쓰는 번호와 다른 층이 못박은 번호는 건너뜁니다).
+> - 지정한 번호를 모델이 이미 쓰고 있으면 조용히 다른 번호로 바꾸지 않고 **rc=1** 로 멈춥니다 —
+>   `[ERROR] restack: layer 1 pid 2 is already used by this model - choose a free part ID`.
+>   그 PID 로 걸어 둔 접촉·세트가 엉뚱한 파트를 가리키게 두지 않기 위해서입니다.
+> - 아무것도 주지 않으면 예전과 똑같이 `모델 최대 PID + 1` 부터입니다. `SECID` 는 늘 자동입니다.
+
+> **두 줄 포맷 덱(2026-09-18 고침)**: `*ELEMENT_SOLID (ten nodes format)` 은 한 요소가 두 줄입니다
+> (1줄 `eid pid`, 2줄 노드). 예전에는 요소를 지울 때 `eid pid` 줄만 지워 **노드 줄이 고아로 남았고**,
+> 새 층 요소는 그 섹션 안에 한 줄 포맷으로 적혔습니다 — 두 줄로 읽는 쪽에서는 남은 노드 줄이 다음 요소의
+> `eid pid` 로 읽혀 덱 전체가 밀리고 새 층 요소의 절반이 사라졌습니다.
+> 지금은 두 줄을 함께 지우고, 새 층 요소는 **표준 한 줄 포맷 `*ELEMENT_SOLID` 섹션을 따로 열어** 씁니다
+> (한 섹션에 두 포맷을 섞지 않습니다). `*ELEMENT_TSHELL` 섹션의 요소도 이제 제대로 지워집니다.
 
 ### 동작
 1. `target_pid` 파트의 요소 분석 → 두께 방향 결정
@@ -904,7 +922,8 @@ layers:
 
 ### 층으로 나누면 원 파트가 빈 파트가 된다 — 그 참조를 이제 도구가 다룬다 (2026-09-18)
 
-restack 은 대상 파트를 층으로 나누면서 **층마다 새 PID·SECID·MID** 를 발급합니다.
+restack 은 대상 파트를 층으로 나누면서 **층마다 새 PID·SECID·MID** 를 발급합니다
+(PID 는 `layers[].pid`·`pid_start` 로 직접 정할 수 있습니다 — 위 표 12-1).
 원 `*PART` 카드는 지워지지 않고 **요소 0 개인 빈 파트**로 남습니다.
 그래서 원 PID 를 가리키던 tied 조건·세트·이력·감쇠는 전부 **빈 파트를 가리키게** 됩니다 —
 덱은 그대로 풀리지만 그 조건들이 아무 일도 하지 않습니다.
@@ -944,7 +963,8 @@ restack 은 대상 파트를 층으로 나누면서 **층마다 새 PID·SECID·
 | `*ELEMENT_MASS` | `manual` — `집중질량을 층에 나눌 수 없습니다 — 직접 배분하세요` | merge 에서도 옮기지 않고 `manual` 로 남깁니다. LS-DYNA `*ELEMENT_MASS` 는 `EID, 노드 ID, MASS, PID` 이고 `*ELEMENT_MASS_PART` 는 `PID, MASS` 라 변형마다 PID 칸 자리가 다릅니다 — 잘못 짚으면 노드 ID 를 덮어쓰므로 집중질량은 직접 배분하세요 |
 | `*CONSTRAINED_RIGID_BODIES` 의 두 칸이 모두 죽은 경우 | `manual` | 옮기지 않고 보고만 합니다(`left`) — 합치면 자기 자신을 가리키게 됩니다 |
 | `EID` 축 — `*SET_SOLID`·`_SHELL`·`_BEAM`·`_TSHELL`, `*INITIAL_STRESS_*`, `*INITIAL_STRAIN_SOLID`, `*DATABASE_HISTORY_SOLID` 등 | `manual` | `manual` |
-| `NODE` 축 — `*SET_NODE`, `*SET_SEGMENT`, `*BOUNDARY_SPC_NODE`, 그 세트를 쓰는 `*CONSTRAINED_NODAL_RIGID_BODY` | `manual` | `manual` |
+| `NODE` 축 — `*SET_NODE_LIST`(`_TITLE` 포함) 의 구성원 | 지운 중간면 노드와 **좌표가 똑같은 새 층 노드가 딱 하나** 있을 때만 그 노드로 바꿉니다(`moved`). 그 밖에는 `manual` | `manual` |
+| `NODE` 축 — `*SET_SEGMENT`, `*BOUNDARY_SPC_NODE`, `*SET_NODE_LIST_GENERATE`, 그 세트를 쓰는 `*CONSTRAINED_NODAL_RIGID_BODY` | `manual` | `manual` |
 | 칸 뜻이 카드마다 다른 키워드 — `*DEFINE_FRICTION`, `*ALE_*`, `*CONSTRAINED_LAGRANGE_IN_SOLID`, `*RIGIDWALL_*`, `*AIRBAG_*`, `*SET_PART_*_GENERATE` | `unknown` | `unknown` |
 | 화이트리스트 밖의 그 밖 키워드 | `maybe` — **rc 에는 넣지 않습니다** | `maybe` |
 | 덱에 `*INCLUDE` 가 있는 경우 | 소비자를 다 볼 수 없어 세트를 펴지 않고 **보고만** 합니다(`left`) | 같습니다 |

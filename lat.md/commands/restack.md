@@ -111,7 +111,8 @@ layers:
 
 ### 층으로 나누면 원 파트가 빈 파트가 된다 — 그 참조를 이제 도구가 다룬다 (2026-09-18)
 
-restack 은 대상 파트를 층으로 나누면서 **층마다 새 PID·SECID·MID** 를 발급합니다.
+restack 은 대상 파트를 층으로 나누면서 **층마다 새 PID·SECID·MID** 를 발급합니다
+(PID 는 `layers[].pid`·`pid_start` 로 직접 정할 수 있습니다 — 이미 쓰는 번호면 rc=1).
 원 `*PART` 카드는 지워지지 않고 **요소 0 개인 빈 파트**로 남습니다.
 그래서 원 PID 를 가리키던 tied 조건·세트·이력·감쇠는 전부 **빈 파트를 가리키게** 됩니다 —
 덱은 그대로 풀리지만 그 조건들이 아무 일도 하지 않습니다.
@@ -151,7 +152,8 @@ restack 은 대상 파트를 층으로 나누면서 **층마다 새 PID·SECID·
 | `*ELEMENT_MASS` | `manual` — `집중질량을 층에 나눌 수 없습니다 — 직접 배분하세요` | merge 에서도 옮기지 않고 `manual` 로 남깁니다. LS-DYNA `*ELEMENT_MASS` 는 `EID, 노드 ID, MASS, PID` 이고 `*ELEMENT_MASS_PART` 는 `PID, MASS` 라 변형마다 PID 칸 자리가 다릅니다 — 잘못 짚으면 노드 ID 를 덮어쓰므로 집중질량은 직접 배분하세요 |
 | `*CONSTRAINED_RIGID_BODIES` 의 두 칸이 모두 죽은 경우 | `manual` | 옮기지 않고 보고만 합니다(`left`) — 합치면 자기 자신을 가리키게 됩니다 |
 | `EID` 축 — `*SET_SOLID`·`_SHELL`·`_BEAM`·`_TSHELL`, `*INITIAL_STRESS_*`, `*INITIAL_STRAIN_SOLID`, `*DATABASE_HISTORY_SOLID` 등 | `manual` | `manual` |
-| `NODE` 축 — `*SET_NODE`, `*SET_SEGMENT`, `*BOUNDARY_SPC_NODE`, 그 세트를 쓰는 `*CONSTRAINED_NODAL_RIGID_BODY` | `manual` | `manual` |
+| `NODE` 축 — `*SET_NODE_LIST`(`_TITLE` 포함) 의 구성원 | 지운 중간면 노드와 **좌표가 똑같은 새 층 노드가 딱 하나** 있을 때만 그 노드로 바꿉니다(`moved`). 그 밖에는 `manual` | `manual` |
+| `NODE` 축 — `*SET_SEGMENT`, `*BOUNDARY_SPC_NODE`, `*SET_NODE_LIST_GENERATE`, 그 세트를 쓰는 `*CONSTRAINED_NODAL_RIGID_BODY` | `manual` | `manual` |
 | 칸 뜻이 카드마다 다른 키워드 — `*DEFINE_FRICTION`, `*ALE_*`, `*CONSTRAINED_LAGRANGE_IN_SOLID`, `*RIGIDWALL_*`, `*AIRBAG_*`, `*SET_PART_*_GENERATE` | `unknown` | `unknown` |
 | 화이트리스트 밖의 그 밖 키워드 | `maybe` — **rc 에는 넣지 않습니다** | `maybe` |
 | 덱에 `*INCLUDE` 가 있는 경우 | 소비자를 다 볼 수 없어 세트를 펴지 않고 **보고만** 합니다(`left`) | 같습니다 |
