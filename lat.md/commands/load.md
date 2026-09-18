@@ -37,37 +37,47 @@ KooRemapper.exe load <config.yaml>
 
 ### YAML 형식
 
+파트의 **면을 선택**해 압력/힘 하중을 부여합니다. `*LOAD_SEGMENT_SET`, `*DEFINE_CURVE`, `*SET_SEGMENT` 키워드를 삽입합니다.
+
 ```yaml
-model: model.k
-output: loaded.k
+model: mesh.k
+output: mesh_loaded.k
 loads:
-  - type: force
-    nid: 100
-    dof: 3             # 1=x, 2=y, 3=z
-    value: -1000.0
-    lcid: 0            # Load Curve ID (0=상수)
-  - type: pressure
-    pid: 1
-    value: 10.0
-  - type: gravity
-    direction: z
-    value: -9810.0
+  - part: 10
+    mode: pressure          # pressure | normal_pressure | force  (gravity 는 없다)
+    value: 1.0              # 압력 [MPa], force 모드는 총 힘 [N]
+    direction: [0, 0, 1]    # 하중 방향 벡터 (normal_pressure 외 필수)
+    select: direction       # direction | tied | set  (all 은 없다)
+    angle: 45.0             # 면 선택 각도 허용치(°)
+    curve:                  # 선택. 시간-하중 곡선 → *DEFINE_CURVE
+      - [0.0, 0.0]
+      - [0.001, 1.0]
+      - [0.01, 1.0]
 ```
 
 ### 파라미터
 
 
-**표 27-1. boundary 조건 유형 — 지원하는 경계 조건 종류와 자유도(DOF) 구성.**
+**표 26-1. load 파라미터 — 대상 파트, 하중 유형·크기·방향, 면 선택, 시간 곡선.**
 
 | 파라미터 | 설명 |
 |----------|------|
-| `type` | 하중 유형 (force/pressure/gravity) |
-| `nid` | 노드 ID (force) |
-| `pid` | 파트 ID (pressure) |
-| `dof` | 자유도 방향 1=x, 2=y, 3=z (force) |
-| `value` | 하중 크기 |
-| `lcid` | Load Curve ID (0=상수) |
-| `direction` | 중력 방향 (gravity) |
+| `part` | 하중 대상 파트 ID |
+| `mode` | 하중 유형 — `pressure`(값을 압력으로) / `normal_pressure`(방향 없이 노출면 전체에 법선 압력) / `force`(총 힘 [N] 을 투영면적으로 나눠 압력화) |
+| `value` | 하중 크기 — `pressure`/`normal_pressure` 는 [MPa], `force` 는 총 힘 [N] |
+| `direction` | 하중 방향 벡터 `[x, y, z]` (`normal_pressure` 외 필수) |
+| `select` | 면 선택 방식 — `direction`(방향벡터 각도 내 법선 면, 기본) / `tied`(tied 접촉 참여 면, 모델에 해당 파트의 `*CONTACT_TIED…` 가 없으면 경고 후 파트 표면에서 고름) / `set`(기존 `*SET_SEGMENT`, `set_id` 필수) |
+| `angle` | 면 선택 각도 허용치(°) |
+| `curve` | 선택. `[[t, f], ...]` 시간-하중 곡선 |
+
+> **허용값 (2026-09-18 실행 확인)**
+> - `mode` 는 **`pressure` / `normal_pressure` / `force`** 셋뿐입니다. **`gravity` 는 없습니다** —
+>   `[ERROR] [load] loads[0]: unsupported mode 'gravity' (allowed: pressure, force, normal_pressure)` 로 종료 코드 1 입니다.
+>   중력 하중이 필요하면 `*LOAD_BODY_*` 를 직접 덱에 넣으세요.
+> - `select` 는 **`direction` / `tied` / `set`** 셋뿐입니다. **`all` 은 없습니다**(종료 코드 1).
+>   `boundary`·`rbe` 의 `select` 와 허용값이 다르니 주의하세요([§27](#27-boundary--경계-조건-적용)·[§28](#28-rbe--rbe-구속-조건)).
+>
+> **v1.8.0 정정**: 구버전이 보이던 `type`/`nid`/`pid`/`dof`/`lcid` 노드·파트 ID 직접지정 스키마 대신, v1.8.0 은 위 `part`/`mode`/`select`/`direction`/`angle` **면-선택 스키마**를 씁니다(help·`examples/load`).
 
 ---
 

@@ -29,7 +29,29 @@ _Excerpted from [`KooRemapper_Manual.md`](../../docs/KooRemapper_Manual.md) §40
 ### 용도
 기존 TET4 파트를 Gmsh를 통해 **완전 재메시**하여 요소 품질을 개선하는 명령.
 STL 경계 추출 → Gmsh 실행 → MSH2 파싱 → 원본 K파일에 스플라이스하는 파이프라인으로 동작하며,
-Gmsh 실행 파일(`gmsh.exe`)이 `dist/gmsh/` 또는 `dist/gmsh-<ver>/` 디렉터리에 있어야 한다.
+Gmsh 실행 파일이 따로 있어야 한다(아래 **Gmsh 탐색 순서** 참조).
+
+### Gmsh 탐색 순서
+
+Gmsh 실행 파일은 아래 **순서대로** 찾습니다(2026-09-18 소스·실행 확인).
+
+1. 환경변수 **`KOOREMAPPER_GMSH`** — 실행 파일의 전체 경로(파일이 실제로 있어야 함)
+2. **KooRemapper 바이너리가 있는 폴더** 옆의 `gmsh/gmsh` 또는 `gmsh/gmsh.exe`
+3. 같은 폴더 옆의 `gmsh-<ver>/` 또는 `gmsh-<ver>/bin/` 안의 실행 파일
+4. **`PATH`** (Linux/macOS)
+5. `/opt/gmsh-*/bin/gmsh` (Linux/macOS)
+
+찾지 못하면 다음 메시지와 함께 종료 코드 1 입니다.
+
+```
+[ERROR] Gmsh not found — set KOOREMAPPER_GMSH, or place gmsh(.exe) in gmsh/ or gmsh-<ver>/[bin/] next to
+KooRemapper, or put gmsh on PATH (Linux also checks /opt/gmsh-*/bin/gmsh)
+```
+
+> **작업 폴더의 `dist/gmsh/` 는 탐색 대상이 아닙니다.** 저장소 루트의 `dist/gmsh/` 는 컨테이너를 구울 때 쓰는
+> 벤더 사본(`platform/infra/apptainer/cli.def` 의 `%files`)이며 `.gitignore` 대상이라 저장소에서 받아지지 않습니다 —
+> **호스트에 직접 준비해야 하는 파일**입니다. `meshfix` 가 그 폴더를 직접 보는 것은 아니므로,
+> 개발 트리에서 쓰려면 `KOOREMAPPER_GMSH=<저장소>/dist/gmsh/gmsh` 로 지정하는 것이 가장 확실합니다.
 
 ### 사용법
 
@@ -243,7 +265,7 @@ Total time: 13.6 s
 
 ### 주의사항
 
-- **Gmsh 필수**: `dist/gmsh/gmsh.exe` 또는 `dist/gmsh-<ver>/gmsh.exe` 위치에 배치 필요
+- **Gmsh 필수**: 위 **Gmsh 탐색 순서**(환경변수 `KOOREMAPPER_GMSH` → 바이너리 옆 `gmsh/`·`gmsh-<ver>/` → `PATH` → `/opt/gmsh-*/bin/`) 중 하나에 배치 필요
 - **TET4 전용**: 입력 파트는 TET4 (또는 퇴화 HEX8) 형식이어야 함
 - **처리 시간**: 10만 요소 이상에서 수 분 소요 가능
 - **polish 제한**: `polish: true`는 실험적 기능. 90° 코너 구속 형상에서는 불량 수 감소 불가로 자동 스킵

@@ -41,7 +41,7 @@ KooRemapper.exe unfold <bent_mesh.k> <output_flat.k>
 ### 파라미터
 
 
-**표 7-1. squeeze YAML 파트 설정 예 — 직접 변형률(eps_x/y/z)과 등방 팽창(swelling) 두 가지 방법의 비교.**
+**표 9-1. unfold 인자 — 입력 굽힘 메시와 출력 평면 메시.**
 
 | 파라미터 | 설명 |
 |----------|------|

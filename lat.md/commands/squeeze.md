@@ -68,16 +68,22 @@ $$\mathbf{x}' = \mathbf{c} + \begin{pmatrix} 1+\varepsilon_x & 0 & 0 \\ 0 & 1+\v
 $$\sigma_{xx} = -(\lambda + 2\mu)\varepsilon_x - \lambda(\varepsilon_y + \varepsilon_z)$$
 
 **방법 2 (swelling):** 노드를 이동하지 않고 LS-DYNA 열팽창 카드를 삽입합니다.
-- `*MAT_ADD_THERMAL_EXPANSION` (LCID=0, 등방 ALPHA = swelling)
-- `*INITIAL_TEMPERATURE` (모든 노드, T=1.0)
-- `*LOAD_THERMAL_VARIABLE` (LCID=온도 커브 ID)
+- `*MAT_ADD_THERMAL_EXPANSION` (LCID=0, 등방 ALPHA = `swelling` 값 그대로)
+- `*INITIAL_TEMPERATURE_NODE` (해당 파트의 노드, T=1.0)
 - 해석 시 LS-DYNA가 자동으로 열팽창을 적용
+
+> **확인(2026-09-18)**: `squeeze` 가 내는 스웰링 카드는 위 **두 종류뿐**입니다.
+> 예전 판이 적었던 `*LOAD_THERMAL_VARIABLE` 은 `squeeze` 가 **내지 않습니다**
+> (그 카드는 `battery` 명령의 스웰링 DR 덱에만 있습니다).
+> 온도는 `*INITIAL_TEMPERATURE_NODE` 로 T=1.0 을 직접 주므로 온도 커브가 필요 없습니다.
 
 swelling 파트는 dynain에 포함되지 않습니다.
 
 ### 출력
-- `<prefix>.k`: 압축된 메시 + 열팽창 카드 (swelling 파트)
-- `<prefix>_dynain.dat`: `*INITIAL_STRESS_SOLID` (eps 파트만)
+- `<prefix>.k`: 압축된 메시 + 열팽창 카드 (swelling 파트) + dynain `*INCLUDE`
+- `<prefix>.dynain`: `*INITIAL_STRESS_SOLID` (eps 파트만)
+
+접두어 끝의 `.k` 는 떼고 씁니다(`out.k` 를 줘도 `out.k`·`out.dynain`).
 
 ---
 

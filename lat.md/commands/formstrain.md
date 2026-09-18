@@ -30,7 +30,8 @@ _Excerpted from [`KooRemapper_Manual.md`](../../docs/KooRemapper_Manual.md) §15
 
 ### 용도
 셸 메시의 **이면각(dihedral angle)**으로부터 굽힘 곡률을 계산하여
-등가 소성 변형률(EPS)을 `*INITIAL_STRESS_SHELL`로 출력합니다.
+등가 소성 변형률(EPS)을 `*INITIAL_STRAIN_SHELL`(초기 변형률)로 출력합니다.
+재료 항복응력 sigy 는 `*MAT_024` 에서 읽어 EPS 스케일에 씁니다.
 
 ### 사용법
 
@@ -41,12 +42,17 @@ KooRemapper.exe formstrain <config.yaml>
 ### YAML 형식
 
 ```yaml
-model: base.k
-output: formed
-target_pid: 0            # 0 = 전체 셸 파트 자동 감지
-shell_thickness: 0.0     # 0 = *SECTION_SHELL에서 자동
-min_curvature: 0.001     # 잡음 필터 임계값
+base_model: bent_shell.k
+output: formstrain_result
+dynain_embed: true           # 출력에 초기 변형률 셸 카드 임베드
+operations:
+  - type: formstrain
+    target_pid: 0            # 생략/0 = 전체 셸 파트 자동 감지
+    shell_thickness: 0.0     # 0 = *SECTION_SHELL에서 자동
+    min_curvature: 0.001     # 잡음 필터 임계값
 ```
+
+> **v1.8.0 정정**: 출력 카드는 `*INITIAL_STRAIN_SHELL`(초기 변형률)입니다(help 기준. 구버전의 `*INITIAL_STRESS_SHELL` 표기 정정). config 는 최상위 `base_model`/`output`/`dynain_embed` + `operations[].type: formstrain` 구조입니다.
 
 ### 이론
 

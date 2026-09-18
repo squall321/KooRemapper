@@ -41,15 +41,17 @@ KooRemapper.exe wrap <config.yaml>
 
 ```yaml
 model: cylinder.k
-output: wrapped
-target_pid: 1
+output: cylinder_wrapped
+target_pid: [1, 2]      # 하나 이상의 파트 ID (리스트)
 axis: z                 # 와인딩 축 (x/y/z)
-axis_center: [0, 0]     # 축 중심 좌표 [c1, c2]
-tension: 100.0          # 와인딩 인장력 (MPa)
+tension: 100.0          # 와인딩 인장력 [force/length]
+center: [0.0, 0.0]      # 축 중심 좌표 [c1, c2] (선택, 자동 감지)
 material:
   E: 210000
   nu: 0.3
 ```
+
+> **v1.8.0 정정**: (1) `tension` 단위는 `[force/length]` 입니다(help. 구버전의 `MPa` 표기 정정 — 모델 단위계에 맞춰 해석). (2) 축 중심 필드명은 `center` 입니다(help·example. 구버전의 `axis_center` 정정). (3) `target_pid` 는 하나 이상의 파트 ID 리스트를 받습니다. 생성된 프리스트레스는 `relax` 또는 `dynamic_relaxation: true` 로 평형화한 뒤 본 해석에 넘깁니다.
 
 ### 물리 모델
 

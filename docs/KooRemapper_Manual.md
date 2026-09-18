@@ -11,6 +11,7 @@
 1. [개요](#1-개요)
 2. [시스템 요구사항 및 빌드](#2-시스템-요구사항-및-빌드)
 3. [명령어 목록](#3-명령어-목록)
+    - 3.1 [YAML 공통 규칙 (모든 op)](#31-yaml-공통-규칙-모든-op)
 4. [map — HEX8 구조화 메시 매핑](#4-map--hex8-구조화-메시-매핑)
 5. [shellmap — QUAD4 셸 기반 매핑](#5-shellmap--quad4-셸-기반-매핑)
 6. [prestress — 초기 응력/변형률 계산](#6-prestress--초기-응력변형률-계산)
@@ -83,7 +84,22 @@ KooRemapper는 LS-DYNA FEA 해석을 위한 **메시 전처리 도구**입니다
 주요 목적은 개략 메시(coarse mesh)로 구성된 전체 모델에 **상세 메시(detail mesh)**를 매핑하고,
 조립 공정에 수반되는 **초기 응력 상태(prestress)**를 재현하는 것입니다.
 
-> **v1.8.0 바이너리 대조 반영(2026-09-16)** — 이 문서는 실제 v1.8.0 바이너리의 `help` 덤프와 shipped 예제 YAML(`examples/`)에 대조하여 호출형태·config 키·기본값·스키마를 정정했습니다. 이론·동작원리 서술은 보존했습니다.
+> **바이너리와 일치 (확인일 2026-09-18)** — 이 문서의 호출형태·config 키·허용값·기본값·출력 키워드는
+> 통합 브랜치 `integrate/defects-20260918` 의 기준 커밋 `5913871` 에 2단계 A 세 그룹
+> (`ef70542` yaml-common-rules, `87362d3` assembler-gaps, `476bab4` examples-ci-provenance)을 합친
+> 트리(worktree HEAD **`21bff18`**)를 **Release 로 빌드해 직접 실행한 결과**에 맞춰 정정했습니다.
+> 이론·동작원리 서술은 보존했습니다.
+> `help all` 과 이 문서가 어긋나면 **바이너리가 정본**입니다. 어긋난 곳을 발견하면 문서를 고쳐 주세요.
+
+**재확인 방법** — 같은 커밋을 체크아웃한 뒤 아래를 돌리면 됩니다.
+
+```bash
+cmake -DCMAKE_BUILD_TYPE=Release -S . -B build/dev && cmake --build build/dev -j4
+./build/dev/bin/KooRemapper --help          # op 목록 + 공통 규칙
+./build/dev/bin/KooRemapper help all        # 전 op 상세 (이 문서와 대조할 정본)
+./build/dev/bin/KooRemapper_tests           # C++ 단위시험 (52건)
+for f in tools/regress/*.py; do python3 "$f" build/dev/bin/KooRemapper; done   # 회귀 시험 (26개 파일)
+```
 
 ### 핵심 기능 범위
 
@@ -113,12 +129,30 @@ KooRemapper는 LS-DYNA FEA 해석을 위한 **메시 전처리 도구**입니다
 ## 2. 시스템 요구사항 및 빌드
 
 ### 요구사항
-- Windows 10/11 x64
-- CMake 3.16 이상
-- MSVC 2019/2022 (Visual Studio)
-- C++17
+- CMake 3.16 이상, C++17 컴파일러
+- Linux x86-64 (배포 대상) 또는 Windows 10/11 x64
+- Linux 배포 빌드에는 `apptainer` 가 추가로 필요합니다(아래 참조)
 
-### 빌드
+### 빌드 — Linux (실제 배포물)
+
+배포되는 KooRemapper 는 **리눅스 ELF 바이너리**이며, 반드시 저장소의 빌더 스크립트로 만듭니다.
+
+```bash
+bash scripts/build_linux_compat.sh
+```
+
+이 스크립트는 `debian:12` 빌더 컨테이너(glibc 2.36) 안에서 `build/linux-compat/` 에 Release 빌드를 하고,
+결과 바이너리가 요구하는 최고 glibc 버전이 2.36 이하인지 검증합니다.
+호스트 glibc 가 2.36 보다 신형이면 **호스트에서 직접 cmake 로 만든 바이너리는 배포 컨테이너·HPC 노드에서 실행되지 않습니다**.
+
+개발·시험용 로컬 빌드(컨테이너 배포용이 아님)는 평소대로 하면 됩니다.
+
+```bash
+cmake -DCMAKE_BUILD_TYPE=Release -S . -B build/dev && cmake --build build/dev -j4
+# 실행 파일: build/dev/bin/KooRemapper, 단위시험: build/dev/bin/KooRemapper_tests
+```
+
+### 빌드 — Windows (선택)
 
 ```bash
 cmake -B build -G "Visual Studio 17 2022" -A x64
@@ -126,6 +160,9 @@ cmake --build build --config Release
 ```
 
 실행 파일: `build\bin\Release\KooRemapper.exe`
+
+> 이 문서의 사용법 예시에 보이는 `KooRemapper.exe` 표기는 Windows 빌드 기준입니다.
+> 리눅스/컨테이너에서는 확장자 없이 `KooRemapper` 이며, SIF 안의 경로는 `/opt/kooremapper/bin/KooRemapper` 입니다.
 
 ---
 
@@ -194,7 +231,7 @@ Commands:
   # 통합 실행
   assemble       다중 오퍼레이션 통합 어셈블리
 
-  # 표면·재메시 (숨은 op — --help 목록에는 없으나 정상 동작)
+  # 표면·재메시
   extract-surface  솔리드에서 표면 셸 추출
   tetremesh        TET4 로컬 재메시 (패치 기반, localimprove/tetgen 백엔드)
   meshfix          TET4 파트 전체 재메시 (Gmsh 기반)
@@ -205,7 +242,93 @@ Commands:
   help           도움말
 ```
 
-> **명령 개수**: v1.8.0 바이너리는 총 47개 op(유틸리티 `help`/`version` 제외)을 제공합니다. 이 중 `extract-surface`·`tetremesh`·`meshfix`·`merge`·`strip` 5종은 `KooRemapper --help` 최상위 목록에는 표시되지 않는 **숨은 op**이지만 정상 동작합니다(op 이름으로 실행하면 고유 Usage/YAML 스키마 출력). 실제 v1.8.0 리눅스 바이너리 경로는 `/opt/kooremapper/bin/KooRemapper` 이며, 아래 사용법의 `KooRemapper.exe` 표기는 Windows 빌드 기준입니다.
+> **명령 개수**: `KooRemapper --help` 첫 줄은 **48 op** 이라고 찍습니다(`version` 포함, `help` 제외).
+> 유틸리티 `help`/`version` 을 빼면 실제 작업 op 은 47개입니다.
+>
+> **'숨은 op' 은 없습니다** — 예전 판이 숨은 op 이라고 적었던 `extract-surface`·`tetremesh`·`meshfix`·`cnrb2solid`·`merge`·`strip` 은
+> `KooRemapper --help` 의 **`[표면·재메시]` 범주(29~35줄)에 그대로 표시**됩니다. 위 목록의 op 이름 집합은 `--help` 와 정확히 일치합니다.
+> 실제 리눅스 바이너리 경로는 `/opt/kooremapper/bin/KooRemapper` 이며, 아래 사용법의 `KooRemapper.exe` 표기는 Windows 빌드 기준입니다.
+
+---
+
+### 3.1 YAML 공통 규칙 (모든 op)
+
+`<config.yaml>` 을 받는 모든 op 과 `assemble` 에 공통으로 적용되는 규칙입니다.
+바이너리의 `KooRemapper --help` 아래쪽 "공통 규칙" 블록과 같은 내용입니다.
+
+#### (a) YAML 안의 상대 경로 = 그 YAML 파일이 있는 폴더 기준
+
+- **명령줄에 준 경로**(`KooRemapper strip cfg/strip.yaml` 의 `cfg/strip.yaml`)만 **작업 폴더(CWD)** 기준입니다.
+- **YAML 안에 적은 상대 경로**는 폴더가 붙어 있든 없든 **그 YAML 파일이 있는 폴더** 기준으로 풀리고, 작업 폴더로 되돌아가지 않습니다.
+  `cfg/strip.yaml` 의 `output: ../data/box.k` → `cfg/../data/box.k`.
+- 절대 경로(`/`·`\` 로 시작, 또는 `X:` 드라이브)는 그대로 씁니다.
+- 대상 키: `model`·`base_model`·`output`·`dat_file`·`dynain`·`bundle`·재료 번들 경로 등 **YAML 로 주는 모든 파일 경로**.
+- **예외 2개**:
+  - `matdb` 의 `database` 키는 아직 **작업 폴더 기준**입니다(생략하면 `./materials/material_db.json`
+    → 실행 파일 옆 `materials/`·`../materials/` 순으로 번들 DB 를 찾습니다).
+  - `map <config.yaml>` 은 **설정 전체가 작업 폴더 기준**입니다(파서가 별도 경로 — (d)(e) 의 예외와 같은 이유).
+    `bent`·`flat`·`output` 의 상대 경로가 YAML 폴더로 풀리지 않아, `KooRemapper map cfg/map.yaml` 의 `bent: bent.k` 는
+    `./bent.k` 를 찾고 `[ERROR] Failed to load bent mesh: Cannot open file: bent.k` 로 **종료 코드 1** 이 납니다(2026-09-18 실행 확인).
+    `output` 도 작업 폴더에 씁니다. YAML 을 둔 폴더에서 실행하거나 절대 경로를 쓰세요
+    (위치인자 호출형태 `KooRemapper map <bent> <flat> <output>`([§4](#4-map--hex8-구조화-메시-매핑))는 해당 없음).
+
+> 이 규칙은 예전에 op 마다 달랐습니다. `load`·`boundary`·`rbe`·`contact`·`relax`·`explicit`·`implicit`·`modal`·`ale`·`database`·`cclip`·`matdb`·`generate box` 는
+> "폴더 없는 이름(`box.k`)만 YAML 폴더 기준, 폴더가 붙은 상대 경로(`../data/box.k`)는 작업 폴더 기준" 이었으나 이제 위 한 가지 규칙으로 통일됐습니다.
+> 예전 동작에 기대어 `../` 경로를 적어 둔 기존 YAML 은 경로를 다시 확인해야 합니다.
+
+#### (b) 단독 명령은 `operations` 항목이 2개 이상이면 거절
+
+단독 op 명령에 `operations:` 가 2개 이상 들어 있는 YAML 을 주면 첫 항목만 조용히 적용하지 않고 **종료 코드 1** 로 거절하며,
+`KooRemapper assemble <같은 파일>` 로 실행하라고 안내합니다.
+
+#### (c) 줄 끝 `#` 주석 제거, 값을 감싼 따옴표 제거
+
+- 값 뒤에 공백 + `#` 로 인라인 주석을 달 수 있습니다(`model: box.k   # 입력`).
+- 값을 감싼 `"`·`'` 는 벗겨집니다(`model: "box.k"` → `box.k`).
+- **따옴표 안의 `#` 는 값으로 남습니다**(`output: "out #1.k"` → 파일 이름 `out #1.k`).
+
+#### (d) 탭 들여쓰기는 거절
+
+들여쓰기에 탭(`\t`)이 있으면 **종료 코드 1** 입니다. 메시지는 모든 op 이 같습니다.
+
+```
+[ERROR] [<op>] YAML 들여쓰기에 탭을 쓸 수 없습니다 (공백을 쓰세요): <줄 번호>번째 줄: <문제 줄>
+```
+
+- **값 안**의 탭은 막지 않습니다 — 따옴표로 감싼 값 속의 탭, 그리고 `|`/`>` 리터럴 블록
+  (`material_card`·`czm_material_card`·`material_cards`) 안에서 **공백으로 들여쓴** LS-DYNA 카드 줄.
+  단 리터럴 블록의 카드 줄을 **탭으로** 시작하면 파서가 그 줄을 블록 밖으로 보아 버리므로 이것도 거절합니다.
+- **주의 — 예전에 통과하던 입력이 거절됩니다.** op 이 읽지도 않는 구역(메모용 `notes:`, 미사용 키 블록)을 탭으로 들여썼을 뿐이어도
+  이제 종료 코드 1 입니다. 탭 검사는 파일 전체를 훑습니다. 예전에는 대개 종료 코드 0 으로 '아무 일도 안 한' 덱
+  (블록이 통째로 무너져 loads/operations/clips 가 0개)이 나왔으므로, **기존 자동화의 rc 가 0 → 1 로 바뀔 수 있습니다.**
+- 되감을 수 없는 입력(파이프, 프로세스 치환, `/dev/stdin`)으로 설정을 넘기면 이 검사를 건너뜁니다.
+- `map <config.yaml>` 에만 이 검사가 없습니다(파서가 별도 경로).
+
+#### (e) UTF-8 BOM 은 자동 제거
+
+파일 앞의 UTF-8 BOM(`EF BB BF`)을 무시합니다. **윈도우 편집기(메모장 등)가 붙이는 BOM 이 있어도 그대로 쓸 수 있습니다.**
+예전에는 BOM 때문에 첫 키가 깨져 `model not specified` / `base_model not specified in assembly config` 로 끝났습니다.
+
+예외 2개는 아직 남아 있습니다 — `map <config.yaml>` 은 `YAML config missing required keys (bent, flat, output)`,
+`squeeze <mesh> <config> <prefix>` 는 `Failed to read config: No parts defined in squeeze config` 로 실패합니다.
+이 두 명령에 쓸 YAML 은 BOM 없이 저장하세요.
+
+#### (f) 단독 op 의 `output` 은 필수
+
+단독 op(`wrap`·`update`·`restack`·`bend`·`indent`·`formstrain`·`convert`·`refine`·`elform`·`disconnect`·`iga`·`warpage`·`offset`)에서
+`output` 이 비어 있으면 입력 모델을 덮어쓰게 되므로 **종료 코드 1** 로 거절합니다. `generate box` 도 `output` 이 필수입니다.
+
+#### (g) 열거값은 오타를 거절
+
+`select`·`mode`·`element_type`·`damping_preset` 같은 열거형 키에 모르는 값을 주면 조용히 기본값으로 떨어지지 않고
+**종료 코드 1 + 출력 파일 없음** 입니다. 메시지 형식은 다음과 같습니다(대소문자 구분 여부는 키마다 다릅니다).
+
+```
+[ERROR] <op>: [<컨테이너>[i]: ]unsupported <키> '<값>' (allowed: a, b, c)
+```
+
+이 검증은 **단독 명령과 `assemble` 양쪽에 똑같이 걸립니다**(둘 다 같은 적용 코드를 지납니다).
+예외적으로 `contact` 의 `type` 만 목록에 없는 값을 거절하지 않고 경고 후 그대로 씁니다([§25.2](#25-contact--접촉-정의-관리) 참조).
 
 ---
 
@@ -298,7 +421,10 @@ Options:
   --csv                CSV 형식 추가 출력
 ```
 
-> **v1.8.0 정정**: `--strain` 기본값은 `green`(Green-Lagrange)입니다(help `Usage:` 기준). prestress 의 help 는 `engineering`/`green` 두 가지만 지원하며 `log` 는 없습니다(두 메시 변형률만 필요할 때는 `strain` 명령이 `log` 도 지원, §10). `--E`/`--nu` 를 생략하면 K-파일 재료값이 쓰입니다.
+> **확인(2026-09-18)**: `--strain` 은 **`engineering` / `green` 두 값만** 받으며 기본값은 `green`(Green-Lagrange)입니다.
+> `--strain log` 는 `[ERROR] Unknown --strain 'log' (allowed: engineering, green)` 와 함께 **종료 코드 1** 입니다.
+> 로그(진) 변형률이 필요하면 `strain` 명령의 `--type log` 를 쓰세요([§10](#10-strain--변형률-계산)).
+> `--E`/`--nu` 를 생략하면 K-파일 재료값이 쓰입니다.
 
 ### 변형률 계산
 
@@ -310,9 +436,12 @@ $$\varepsilon_{ij} = \frac{1}{2}\left(\frac{\partial u_i}{\partial x_j} + \frac{
 
 $$E_{ij} = \frac{1}{2}\left(\frac{\partial u_i}{\partial X_j} + \frac{\partial u_j}{\partial X_i} + \frac{\partial u_k}{\partial X_i}\frac{\partial u_k}{\partial X_j}\right)$$
 
-#### 로그 변형률 (Logarithmic / True Strain)
+#### 로그 변형률 (Logarithmic / True Strain) — `strain` 명령 전용
 
 $$\varepsilon_{log} = \ln\left(\frac{L}{L_0}\right)$$
+
+> **prestress 에서는 쓸 수 없습니다.** 이 정의는 `strain --type log`([§10](#10-strain--변형률-계산))에만 구현돼 있습니다.
+> `prestress --strain log` 는 종료 코드 1 로 거절됩니다.
 
 ### 응력 계산 (선형 탄성, Hooke의 법칙)
 
@@ -380,10 +509,14 @@ $$\mathbf{x}' = \mathbf{c} + \begin{pmatrix} 1+\varepsilon_x & 0 & 0 \\ 0 & 1+\v
 $$\sigma_{xx} = -(\lambda + 2\mu)\varepsilon_x - \lambda(\varepsilon_y + \varepsilon_z)$$
 
 **방법 2 (swelling):** 노드를 이동하지 않고 LS-DYNA 열팽창 카드를 삽입합니다.
-- `*MAT_ADD_THERMAL_EXPANSION` (LCID=0, 등방 ALPHA = swelling)
-- `*INITIAL_TEMPERATURE` (모든 노드, T=1.0)
-- `*LOAD_THERMAL_VARIABLE` (LCID=온도 커브 ID)
+- `*MAT_ADD_THERMAL_EXPANSION` (LCID=0, 등방 ALPHA = `swelling` 값 그대로)
+- `*INITIAL_TEMPERATURE_NODE` (해당 파트의 노드, T=1.0)
 - 해석 시 LS-DYNA가 자동으로 열팽창을 적용
+
+> **확인(2026-09-18)**: `squeeze` 가 내는 스웰링 카드는 위 **두 종류뿐**입니다.
+> 예전 판이 적었던 `*LOAD_THERMAL_VARIABLE` 은 `squeeze` 가 **내지 않습니다**
+> (그 카드는 `battery` 명령의 스웰링 DR 덱에만 있습니다).
+> 온도는 `*INITIAL_TEMPERATURE_NODE` 로 T=1.0 을 직접 주므로 온도 커브가 필요 없습니다.
 
 swelling 파트는 dynain에 포함되지 않습니다.
 
@@ -414,7 +547,29 @@ Options:
   --dim-k <n>   K 방향 요소 수 (기본 5)
 ```
 
-테스트 및 데모용 다양한 기하학적 형상 HEX8 메시 생성. `box` 하위명령은 YAML(`lx/ly/lz`, `nx/ny/nz`, `rho/E/nu`, `mid/secid/pid`, `part_title`)로 직육면체 메시를 만듭니다.
+테스트 및 데모용 다양한 기하학적 형상 HEX8 메시 생성.
+`box` 하위명령은 YAML 로 직육면체 메시를 만듭니다 — 키는 **`output`(필수)**, `lx/ly/lz`, `nx/ny/nz`, `rho/E/nu`, `mid/secid/pid`, `part_title` 입니다.
+
+```yaml
+output: box.k          # 필수 — 없으면 '[ERROR] [box] output not specified' 로 종료 코드 1
+lx: 20.0
+ly: 10.0
+lz: 2.0
+nx: 10
+ny: 5
+nz: 2
+rho: 7.85e-9
+E: 210000.0
+nu: 0.3
+mid: 1
+secid: 1
+pid: 1
+part_title: PLATE
+```
+
+> **`output` 은 필수입니다.** 예전 판의 키 목록에는 `output` 이 빠져 있어, 그대로 복사하면
+> `[ERROR] [box] output not specified` 로 **종료 코드 1** 이 납니다(실행해 확인).
+> `output` 의 상대 경로는 [§3.1(a)](#31-yaml-공통-규칙-모든-op) 대로 **그 YAML 파일이 있는 폴더** 기준입니다.
 
 ### generate-var — 변밀도 메시 생성
 
@@ -430,20 +585,45 @@ Options:
 
 #### YAML 설정 (평면 타입, `type: flat`)
 
-help 기준 스키마는 `variable_density` + `elements_j/k` 구조입니다(존별 `length`/`num_elements`).
+스키마는 `variable_density` + `elements_j/k` 구조입니다(존별 `length`/`num_elements`).
+**존 이름은 아래 5개로 고정**되어 있고, `reference` 로 J·K 방향 치수를 주지 않으면 그 두 방향이 1.0 으로 떨어집니다.
 
 ```yaml
 type: flat                     # 생략 시 기본 flat
 reference:
-  flat_mesh: "ref_flat.k"      # 자동 스케일용 참조 메시
-elements_j: 50                 # J 방향 요소 수
-elements_k: 10                 # K 방향 요소 수
-variable_density:
+  dimensions:                  # J·K 방향 실제 치수 (없으면 둘 다 1.0 이 된다)
+    length_i: 100.0
+    length_j: 10.0
+    length_k: 2.0
+  # flat_mesh: "ref_flat.k"    # 참조 메시로 자동 스케일할 때 (--no-scale 이면 무시)
+elements_j: 5                  # J 방향 요소 수
+elements_k: 2                  # K 방향 요소 수
+variable_density:              # 존 이름 고정 5개
   zone1_dense_start:
     length: 10.0
-    num_elements: 50
-  # zone2_... 존을 이어서 정의
+    num_elements: 10
+  zone2_increasing:
+    length: 20.0
+    num_elements: 8
+  zone3_sparse:
+    length: 40.0
+    num_elements: 8
+  zone4_decreasing:
+    length: 20.0
+    num_elements: 8
+  zone5_dense_end:
+    length: 10.0
+    num_elements: 10
 ```
+
+실행 결과(확인): `KooRemapper generate-var var.yaml var.k` → 810 노드 / 440 요소, 바운딩 박스 `100 × 10 × 2`.
+
+> **예전 판 예제는 퇴화 메시를 만들었습니다.** `reference.dimensions` 없이 `zone1` 만 적은 예제를 그대로 돌리면
+> 종료 코드는 0 이지만 바운딩 박스가 `10 × 1 × 1` 인 (J·K 방향 치수가 1.0 으로 떨어진) 메시가 나옵니다.
+> `elements_j: 50`·`elements_k: 10` 까지 그대로 쓰면 두께 1.0 을 10층으로 쪼갠 25,000 요소짜리 납작한 메시가 됩니다.
+>
+> **존 이름은 `zone1_dense_start`·`zone2_increasing`·`zone3_sparse`·`zone4_decreasing`·`zone5_dense_end` 5개로 고정**입니다
+> (다른 이름은 읽히지 않습니다). 전부 채울 필요는 없지만, 쓰려면 이 이름이어야 합니다.
 
 #### YAML 설정 (곡선 타입, `type: curved`)
 
@@ -468,6 +648,10 @@ elements_k: 5
 ```
 
 > **v1.8.0 정정**: 구버전 정본이 보이던 `zones:`(id/nx/ny/nz/x_min/x_max…) 형식은 v1.8.0 바이너리가 파싱하는 스키마와 다릅니다. help 기준은 위 `variable_density`/`centerline_points` 구조입니다(zones 형식 병행 지원 여부는 확인 필요).
+>
+> **출력 내용**: `generate-var` 가 쓰는 K파일은 `*NODE` + `*ELEMENT_SOLID` + `*END` 뿐입니다 —
+> `*PART`·`*SECTION`·`*MAT` 카드는 들어가지 않으므로(확인), 해석에 쓰려면 파트·재질 카드를 따로 붙여야 합니다.
+> 그래서 `KooRemapper info` 로 보면 `Parts: 0` 으로 나옵니다.
 
 ---
 
@@ -548,7 +732,26 @@ KooRemapper.exe strain <ref_mesh.k> <def_mesh.k> <output.csv> [--type engineerin
 
 ### 출력
 
-- `output.csv`: 요소별 6개 변형률 성분 (εxx, εyy, εzz, εxy, εyz, εxz)
+`output.csv` 는 **헤더 1줄 + 요소당 1줄, 11열** 입니다(확인).
+
+```
+ElementID,exx,eyy,ezz,exy,eyz,exz,VonMises,Volumetric,MaxShear,Jacobian
+```
+
+**표 10-3. strain 출력 CSV 열 구성 — 11열의 각 열이 담는 값.**
+
+| 열 | 내용 |
+|---|---|
+| `ElementID` | 요소 ID |
+| `exx`·`eyy`·`ezz`·`exy`·`eyz`·`exz` | 변형률 6성분 |
+| `VonMises` | 등가(von Mises) 변형률 |
+| `Volumetric` | 체적 변형률 |
+| `MaxShear` | 최대 전단 변형률 |
+| `Jacobian` | 요소 자코비안 |
+
+> **옵션 이름 주의**: `strain` 의 변형률 유형 옵션은 **`--type`** 입니다(`--strain` 은 `[ERROR] Unknown option: --strain`).
+> 반대로 `prestress` 는 **`--strain`** 이고 `engineering`/`green` 두 값만 받습니다([§6](#6-prestress--초기-응력변형률-계산)).
+> 모르는 값은 `[ERROR] Unknown --type 'xxx' (allowed: engineering, green, log)` 로 종료 코드 1 입니다.
 
 ---
 
@@ -626,9 +829,15 @@ layers:
 | `model` | 입력 K-파일 | — |
 | `output` | 출력 접두어 | — |
 | `target_pid` | 대상 파트 ID | — |
-| `direction` | 적층 방향 (auto/x/y/z) | `auto` |
-| `element_type` | 요소 유형 | `solid` |
+| `direction` | 적층 방향 — `auto`·`x`·`y`·`z`·`+x`·`-x`·`+y`·`-y`·`+z`·`-z` | `auto` |
+| `element_type` | 요소 유형 — **`solid` / `tshell` / `shell` 만** (소문자) | `solid` |
 | `layers` | 레이어 리스트 (thickness + material_card) | — |
+
+> **`element_type` 허용값(2026-09-18 변경)**: `solid`·`tshell`·`shell` **세 값만** 받습니다. 대소문자도 구분해
+> `SOLID` 조차 거절합니다 — `[ERROR] restack: unsupported element_type 'hex' (allowed: solid, tshell, shell)` 와 함께
+> **종료 코드 1, 출력 파일 없음** 입니다. 층(`layers[]`)별 `element_type` 도 같습니다(빈 값이면 op 수준 값을 상속).
+> 예전에는 `shell`·`tshell` 이 아닌 값이 전부 조용히 `solid` 로 처리됐으므로, `hex` 같은 값을 적어 둔 **기존 YAML 은 지금 깨집니다.**
+> 이 검증은 단독 `restack` 과 `assemble` 의 `- type: restack` 양쪽에 똑같이 걸립니다.
 
 > **재질 카드 MID 칸**: 각 층 `material_card` 의 첫 `*MAT` 카드 MID 칸(1~10열, `*MAT_…_TITLE` 이면 제목 다음 줄)에 쓴 값은 라벨입니다. `MID001`·`MAT01`·`@MID@`·`14` 무엇이든 층마다 새로 발급한 MID 로 바뀌고, 같은 MID 를 가리키는 `*MAT_ADD_…` 카드도 함께 바뀝니다.
 > - 라벨과 카드 내용(MID 칸 제외)이 같은 층끼리만 MID 하나를 공유합니다. 라벨이 같아도 물성이 다르면 따로 발급하고 `material label 'X' reused with a different card -> separate MID N` 을 안내합니다(위 예시의 두 층은 라벨은 같고 물성이 달라 MID 가 둘).
@@ -640,6 +849,24 @@ layers:
 2. 표면 메시(QUAD4) 추출
 3. 각 레이어를 누적 두께로 압출(extrude)
 4. 재료 카드 등록 + 새 파트/섹션/재료 ID 발급
+
+### 위 예제의 실제 실행 결과 (2026-09-18 확인)
+
+`lx=20, ly=10, lz=2` 박스(PID 1, MID 1)에 위 YAML 을 그대로 돌린 출력입니다.
+
+```
+  Restack layer 2: material label 'MID001' reused with a different card -> separate MID 3
+  Thickness mismatch: layers=0.800000 original=2.000000 eps=1.500000 → *INITIAL_STRAIN_SOLID on 100 solid elements
+  Restack Part 1 (Z-axis): 2 layers -> 2 layers (2 elements), 50 elements/layer, 66 columns
+[restack] Done -> restacked.k
+```
+
+- 출력 덱의 `*MAT_ELASTIC` 은 **3장**입니다 — 원본 MID 1 + 새 층 2장.
+- `Restack Layer 1` 파트는 **MID 2**(7.85E-09 / 210000 / 0.3), `Restack Layer 2` 파트는 **MID 3**(2.50E-09 / 70000 / 0.33).
+  **두 층이 서로 다른 재질을 제대로 받습니다** — 두 층이 같은 라벨 `MID001` 을 써도 카드 내용이 다르므로 MID 를 따로 발급합니다
+  (예전에는 둘째 층 재질이 사라졌습니다).
+- `layers` 두께 합(0.3 + 0.5 = 0.8)이 원본 두께(2.0)와 다르면 그 차이를 초기 변형률로 넣어
+  `*INITIAL_STRAIN_SOLID` 를 함께 씁니다. **두께를 그대로 유지하고 싶으면 `layers` 두께 합을 원본 두께에 맞추세요.**
 
 ---
 
@@ -1276,17 +1503,47 @@ KooRemapper.exe matdb <config.yaml>
 ```yaml
 model: model.k
 output: result.k
-database: materials/material_db.json
-mat_type: MAT_024         # 구조 카드 유형 (기본)
+database: materials/material_db.json   # 작업 폴더 기준 (§3.1(a) 의 유일한 예외)
+mat_type: MAT_ELASTIC     # 구조 카드 유형 — 생략 시 기본값
 thermal: false            # 열 재료 삽입 여부
+damping_preset: smartphone_drop   # 선택. smartphone_drop | smartphone_drop_aggressive | quasi_static | off
 
 materials:                # 개별 규칙 (선택)
   - match: "steel*"       # 파트 이름 패턴 매칭
-    mat_type: MAT_ELASTIC
+    mat_type: MAT_024     # 규칙별 오버라이드
   - mid: 5                # 직접 MID 지정
     thermal: true
   - match: "*"            # catch-all 자동 매칭
 ```
+
+> **`mat_type` 기본값은 `MAT_ELASTIC` 입니다**(확인 — 키를 생략하고 돌리면 `*MAT_ELASTIC_TITLE` 이 나옵니다).
+> 예전 판이 `MAT_024` 를 기본으로 적었던 것은 틀렸습니다. `MAT_024` 를 쓰려면 명시해야 합니다.
+
+> **경로 규칙**: `model`·`output` 의 상대 경로는 [§3.1(a)](#31-yaml-공통-규칙-모든-op) 대로 **YAML 파일이 있는 폴더** 기준입니다.
+> **`database` 만 예외로 작업 폴더(CWD) 기준**입니다 — 생략하면 `./materials/material_db.json`,
+> 그다음 실행 파일 옆 `materials/`·`../materials/` 순으로 번들 DB(525종)를 찾습니다.
+> SIF 안에서는 `/opt/kooremapper/materials/material_db.json` 입니다.
+
+### 감쇠 프리셋 (`damping_preset`)
+
+`*DAMPING_PART_MASS_SET` 의 α 를 일괄 재조정합니다. **아래 4개 값만** 받으며(대소문자 무시), 그 밖의 값은
+`[ERROR] matdb: unsupported damping_preset 'light' (allowed: smartphone_drop, smartphone_drop_aggressive, quasi_static, off)` 와 함께
+**종료 코드 1** 입니다. 키를 아예 빼면 검사하지 않습니다(예전 동작 그대로).
+
+**표 24-3. matdb damping_preset 허용값 — 프리셋별 α 스케일·하한과 미매칭 파트 적용 여부.**
+
+| 값 | α 스케일 | α 하한 | 미매칭 파트에도 적용 |
+|---|---|---|---|
+| `smartphone_drop` | 15 | 150 | O |
+| `smartphone_drop_aggressive` | 20 | 300 | O |
+| `quasi_static` | 5 | 50 | X |
+| `off` | (재조정 없음) | — | — |
+
+`off` 는 프리셋이 아니라 **"감쇠 세기는 그대로 두고 묵은 `*DAMPING_PART_*` 카드만 지우는"** 관용구입니다(재실행 시 중복 방지).
+`damping_alpha_scale`·`damping_alpha_floor` 등을 명시하면 프리셋 값을 덮어씁니다.
+
+> **예전 문서의 `light`/`moderate`/`heavy`/`custom` 은 없는 값입니다** — 지금은 종료 코드 1 입니다.
+> 이 검증은 단독 `matdb` 와 `assemble` 의 `- type: matdb` 양쪽에 걸립니다.
 
 ### 매칭 규칙
 - `match`: 파트 title과 DB의 name/tag 부분 문자열 매칭 (대소문자 무시)
@@ -1396,16 +1653,74 @@ contacts:
 #### create에서 사용 가능한 type 값
 
 
-**표 25-1. contact create 접촉 type — YAML type 값과 LS-DYNA *CONTACT 키워드.**
+약칭(short name)을 쓰면 전체 키워드로 풀립니다. `assemble` 의 `- type: contact` 도 **같은 표**를 씁니다(2026-09-18 확인).
 
-| type (YAML) | LS-DYNA 키워드 |
+**표 25-1. contact create 접촉 type 약칭 — YAML type 약칭과 LS-DYNA *CONTACT 키워드.**
+
+| type (YAML 약칭) | LS-DYNA 키워드 |
 |---|---|
-| `automatic_surface_to_surface` | `*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE` |
-| `tied_surface_to_surface` | `*CONTACT_TIED_SURFACE_TO_SURFACE` |
-| `automatic_single_surface` | `*CONTACT_AUTOMATIC_SINGLE_SURFACE` |
-| `eroding_surface_to_surface` | `*CONTACT_ERODING_SURFACE_TO_SURFACE` |
-| `forming_surface_to_surface` | `*CONTACT_FORMING_SURFACE_TO_SURFACE` |
-| (기타 직접 입력) | `*CONTACT_<입력값>` (대문자 변환) |
+| `auto` / `automatic` | `*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE` |
+| **키 생략** | `*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE` |
+| `tied` | `*CONTACT_TIED_SURFACE_TO_SURFACE` |
+| `tied_thermal` / `thermal` | `*CONTACT_TIED_SURFACE_TO_SURFACE_THERMAL` |
+| `tiebreak` | `*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_TIEBREAK` |
+| `mortar` | `*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_MORTAR` |
+| `tied_mortar` | `*CONTACT_TIED_SURFACE_TO_SURFACE_MORTAR` |
+| `single` | `*CONTACT_AUTOMATIC_SINGLE_SURFACE` |
+| `eroding` | `*CONTACT_ERODING_SURFACE_TO_SURFACE` |
+| `forming` | `*CONTACT_FORMING_SURFACE_TO_SURFACE` |
+
+> 실제로 쓰이는 카드는 `_TITLE` 붙은 형태입니다(`*CONTACT_TIED_SURFACE_TO_SURFACE_TITLE`).
+
+**약칭이 아닌 값**은 그대로 대문자로 바꿔 `*CONTACT_<입력값>` 으로 씁니다.
+즉 `automatic_nodes_to_surface`·`automatic_general`·`forming_one_way_surface_to_surface`·`tied_shell_edge_to_surface` 처럼
+표에 없는 LS-DYNA 접촉 키워드도 **그대로 통과**합니다(`KooRemapper` 자신이 `cclip` 에서 `automatic_nodes_to_surface` 를 씁니다).
+
+아래 27개 키워드는 KooRemapper 가 내는 카드 구성과 맞는다고 등록해 둔 목록이라 **조용히 통과**합니다.
+
+```
+SURFACE_TO_SURFACE                      ONE_WAY_SURFACE_TO_SURFACE
+NODES_TO_SURFACE                        SINGLE_SURFACE
+AUTOMATIC_SURFACE_TO_SURFACE            AUTOMATIC_SURFACE_TO_SURFACE_MORTAR
+AUTOMATIC_SURFACE_TO_SURFACE_TIEBREAK   AUTOMATIC_ONE_WAY_SURFACE_TO_SURFACE
+AUTOMATIC_SINGLE_SURFACE                AUTOMATIC_SINGLE_SURFACE_MORTAR
+AUTOMATIC_NODES_TO_SURFACE              AUTOMATIC_GENERAL
+TIED_SURFACE_TO_SURFACE                 TIED_SURFACE_TO_SURFACE_OFFSET
+TIED_SURFACE_TO_SURFACE_FAILURE         TIED_SURFACE_TO_SURFACE_MORTAR
+TIED_SURFACE_TO_SURFACE_THERMAL         TIED_NODES_TO_SURFACE
+TIED_NODES_TO_SURFACE_OFFSET            TIED_SHELL_EDGE_TO_SURFACE
+TIED_SHELL_EDGE_TO_SURFACE_OFFSET       ERODING_SURFACE_TO_SURFACE
+ERODING_SINGLE_SURFACE                  ERODING_NODES_TO_SURFACE
+FORMING_SURFACE_TO_SURFACE              FORMING_ONE_WAY_SURFACE_TO_SURFACE
+FORMING_NODES_TO_SURFACE
+```
+
+이 목록에도 없는 값은 **막지 않고 경고만** 합니다(종료 코드 0, 덱은 그대로 생성).
+
+```
+[WARN] [contact] create: type 'bogus' is not a known contact keyword — writing *CONTACT_BOGUS as-is
+       (LS-DYNA will reject it if the keyword does not exist). Short names: auto, automatic, tied,
+       tied_thermal, thermal, tiebreak, mortar, tied_mortar, single, eroding, forming
+```
+
+`assemble` 도 같은 문구를 찍습니다(그 파일 관례대로 접두어는 `[WARNING] `). 즉 **오타는 LS-DYNA 가 잡습니다.**
+
+> **`assemble` 쪽 약칭 비대칭**: `assemble` 의 약칭 표에는 `tied_thermal`/`thermal`/`tiebreak` 항목이 없어,
+> `assemble` 안에서 `type: thermal` 은 `*CONTACT_THERMAL` 을 내며 위 경고를 받습니다.
+> `assemble` 에서는 **전체 키워드(`tied_surface_to_surface_thermal`)를 적으세요.**
+
+#### `slave` / `master` 의 `pids` 표기
+
+인라인 목록과 블록 목록 **둘 다** 쓸 수 있고 **같은 덱**이 나옵니다(2026-09-18 확인 — 예전에는 블록 목록이 조용히 무시되어 `*SET_PART` 가 생기지 않았습니다).
+
+```yaml
+slave:
+  pids: [1, 2]        # 인라인
+slave:
+  pids:               # 블록 목록 — 위와 같다
+    - 1
+    - 2
+```
 
 ---
 
@@ -1577,17 +1892,17 @@ KooRemapper.exe load <config.yaml>
 
 ### YAML 형식
 
-파트의 **면을 선택**해 압력/힘/중력 하중을 부여합니다. `*LOAD_*`, `*DEFINE_CURVE`, `*SET_*` 키워드를 삽입합니다.
+파트의 **면을 선택**해 압력/힘 하중을 부여합니다. `*LOAD_SEGMENT_SET`, `*DEFINE_CURVE`, `*SET_SEGMENT` 키워드를 삽입합니다.
 
 ```yaml
 model: mesh.k
 output: mesh_loaded.k
 loads:
   - part: 10
-    mode: pressure          # pressure | force | gravity
-    value: 1.0              # 하중 크기
-    direction: [0, 0, 1]    # 하중 방향 벡터
-    select: direction       # direction | tied | all
+    mode: pressure          # pressure | normal_pressure | force  (gravity 는 없다)
+    value: 1.0              # 압력 [MPa], force 모드는 총 힘 [N]
+    direction: [0, 0, 1]    # 하중 방향 벡터 (normal_pressure 외 필수)
+    select: direction       # direction | tied | set  (all 은 없다)
     angle: 45.0             # 면 선택 각도 허용치(°)
     curve:                  # 선택. 시간-하중 곡선 → *DEFINE_CURVE
       - [0.0, 0.0]
@@ -1603,13 +1918,20 @@ loads:
 | 파라미터 | 설명 |
 |----------|------|
 | `part` | 하중 대상 파트 ID |
-| `mode` | 하중 유형 (`pressure` / `force` / `gravity`) |
-| `value` | 하중 크기 |
-| `direction` | 하중 방향 벡터 `[x, y, z]` |
-| `select` | 면 선택 방식 — `direction`(방향벡터 각도 내 법선 면) / `tied`(tied 접촉 참여 면, 모델에 해당 파트의 `*CONTACT_TIED…` 가 없으면 경고 후 파트 표면에서 고름) / `all`(파트 노출면 전체) |
+| `mode` | 하중 유형 — `pressure`(값을 압력으로) / `normal_pressure`(방향 없이 노출면 전체에 법선 압력) / `force`(총 힘 [N] 을 투영면적으로 나눠 압력화) |
+| `value` | 하중 크기 — `pressure`/`normal_pressure` 는 [MPa], `force` 는 총 힘 [N] |
+| `direction` | 하중 방향 벡터 `[x, y, z]` (`normal_pressure` 외 필수) |
+| `select` | 면 선택 방식 — `direction`(방향벡터 각도 내 법선 면, 기본) / `tied`(tied 접촉 참여 면, 모델에 해당 파트의 `*CONTACT_TIED…` 가 없으면 경고 후 파트 표면에서 고름) / `set`(기존 `*SET_SEGMENT`, `set_id` 필수) |
 | `angle` | 면 선택 각도 허용치(°) |
 | `curve` | 선택. `[[t, f], ...]` 시간-하중 곡선 |
 
+> **허용값 (2026-09-18 실행 확인)**
+> - `mode` 는 **`pressure` / `normal_pressure` / `force`** 셋뿐입니다. **`gravity` 는 없습니다** —
+>   `[ERROR] [load] loads[0]: unsupported mode 'gravity' (allowed: pressure, force, normal_pressure)` 로 종료 코드 1 입니다.
+>   중력 하중이 필요하면 `*LOAD_BODY_*` 를 직접 덱에 넣으세요.
+> - `select` 는 **`direction` / `tied` / `set`** 셋뿐입니다. **`all` 은 없습니다**(종료 코드 1).
+>   `boundary`·`rbe` 의 `select` 와 허용값이 다르니 주의하세요([§27](#27-boundary--경계-조건-적용)·[§28](#28-rbe--rbe-구속-조건)).
+>
 > **v1.8.0 정정**: 구버전이 보이던 `type`/`nid`/`pid`/`dof`/`lcid` 노드·파트 ID 직접지정 스키마 대신, v1.8.0 은 위 `part`/`mode`/`select`/`direction`/`angle` **면-선택 스키마**를 씁니다(help·`examples/load`).
 
 ---
@@ -1627,7 +1949,8 @@ KooRemapper.exe boundary <config.yaml>
 
 ### YAML 형식
 
-파트의 **면을 선택**해 자유도 구속(SPC) 또는 강체벽 경계를 부여합니다. `*BOUNDARY_SPC_NODE`, `*RIGIDWALL_PLANAR` 키워드를 삽입합니다.
+파트의 **면을 선택**해 자유도 구속(SPC)을 부여합니다.
+삽입되는 키워드는 **`*SET_NODE_LIST_TITLE` + `*BOUNDARY_SPC_SET`** 입니다(확인).
 
 ```yaml
 model: mesh.k
@@ -1635,10 +1958,16 @@ output: mesh_bc.k
 boundaries:
   - part: 9
     dof: all                 # all | x | y | z | xy | xz | yz | xyz
-    direction: [0, 0, -1]    # 면 선택 방향 벡터
-    select: direction        # direction | all
+    direction: [0, 0, -1]    # 면 선택 방향 벡터 (select: direction 일 때만 의미가 있다)
+    select: direction        # direction | all | set
+    set_id: 100              # select: set 일 때 필수 (기존 *SET_NODE)
     angle: 45.0              # 면 선택 각도 허용치(°)
 ```
+
+> **`*RIGIDWALL` 은 나오지 않습니다.** 바이너리의 `boundary` help 가 아직
+> `Inserts *BOUNDARY_SPC_NODE, *RIGIDWALL_PLANAR keywords.` 라고 찍지만, 소스에는 강체벽을 쓰는 코드가 없고
+> 실제 출력 덱에도 `*RIGIDWALL` 이 0건입니다. 노드 구속도 `*BOUNDARY_SPC_NODE` 가 아니라
+> **노드 세트 + `*BOUNDARY_SPC_SET`** 으로 나갑니다. 강체벽이 필요하면 `*RIGIDWALL_PLANAR` 를 직접 덱에 넣으세요.
 
 ### 파라미터
 
@@ -1649,10 +1978,20 @@ boundaries:
 |----------|------|
 | `part` | 경계 대상 파트 ID |
 | `dof` | 구속 자유도 — `all`(6 DOF 전체) / `x`·`y`·`z`(단일 병진) / `xy`·`xz`·`yz`·`xyz`(다중 병진) |
-| `direction` | 면 선택 방향 벡터 |
-| `select` | `direction`(방향 면) / `all`(파트 노출면 전체) |
+| `direction` | 면 선택 방향 벡터 (`select: direction` 에서만 쓰임) |
+| `select` | `direction`(방향 면) / `all`(파트 노출면 전체) / `set`(기존 `*SET_NODE`, `set_id` 필수) |
 | `angle` | 면 선택 각도 허용치(°) |
 
+> **허용값 (2026-09-18 실행 확인)**
+> - `select` 는 **`direction` / `all` / `set`** 셋입니다. 오타는
+>   `[ERROR] boundary: boundaries[0]: unsupported select 'bogus' (allowed: direction, all, set)` 와 함께 **종료 코드 1, 출력 파일 없음** 입니다
+>   (예전에는 조용히 `direction` 으로 떨어졌습니다).
+> - **`select: all` 에 `direction` 키가 같이 있으면 `direction` 을 무시하고 파트 노출면 전체를 잡습니다.**
+>   예전에는 이 조합에서 방향 필터가 걸렸으니, `all` 로 적어 둔 기존 YAML 은 구속 노드 수가 달라질 수 있습니다
+>   (예: 20×10×2 박스 PID 1 → `direction` 132 노드 vs `all` 162 노드).
+> - **`boundary` 와 `rbe` 의 `select` 허용값이 다릅니다** — `boundary` 는 `direction|all|set`, `rbe` 는 `direction|all`(`set` 없음),
+>   `load` 는 `direction|tied|set`(`all` 없음). 바이너리의 `boundary` help 가 아직 `# direction | all` 만 찍는 것은 낡은 표기입니다.
+>
 > **v1.8.0 정정**: 구버전이 보이던 `type: spc/prescribed_motion` + `nid` + `dofx~dofrz` 노드 ID 직접지정 스키마 대신, v1.8.0 은 위 `part`/`dof`/`select`/`direction` **면-선택 스키마**를 씁니다(help·`examples/boundary`). help 의 `dof` 목록은 `all|x|y|z|xy|xz|yz` 이나 예제는 3방향 병진 구속에 `xyz` 도 사용합니다.
 
 ---
@@ -1692,12 +2031,18 @@ rbe:
 | 파라미터 | 설명 |
 |----------|------|
 | `part` | 대상 파트 ID |
-| `select` | `direction`(방향 면) / `all`(파트 노출면 전체) |
+| `select` | `direction`(방향 면) / `all`(파트 노출면 전체) — **`set` 은 없습니다** |
 | `direction` | 면 선택 방향 벡터 |
 | `angle` | 면 선택 각도 허용치(°) |
 | `type` | `rbe2`(강체: 슬레이브가 마스터와 정확히 동일 이동) / `rbe3`(보간: 마스터 이동이 슬레이브 가중 평균) |
 | `mode` | `spider`(centroid 마스터 노드 1개) / `face`(면마다 centroid 노드) |
 
+> **허용값 (2026-09-18 실행 확인)**: `select` 는 **`direction` / `all`** 둘뿐입니다.
+> `select: set` 이나 오타는 `[ERROR] rbe: constraints[0]: unsupported select 'set' (allowed: direction, all)` 와 함께
+> **종료 코드 1** 입니다(예전에는 조용히 `all` 로 떨어져 면 전체를 잡았습니다).
+> **`boundary` 에는 `set` 이 있고 `rbe` 에는 없습니다** — 두 op 의 help 가 오랫동안 같은 `direction | all` 을 찍어 혼동을 키웠으니 주의하세요.
+> 이 검증은 단독 `rbe` 와 `assemble` 양쪽에 걸립니다.
+>
 > **v1.8.0 정정**: 구버전이 보이던 `type: rbe2/rbe3` + `master_nid`/`slave_nids`/`dof`/`weights` 노드 ID 직접지정 스키마 대신, v1.8.0 은 위 `part`/`select`/`mode` **면-선택 스키마**를 씁니다(help·`examples/boundary` 의 rbe_spider/rbe_face). 최상위 키는 `rbe:` 입니다.
 
 ---
@@ -2230,7 +2575,7 @@ extent:
 `implicit`, `modal`, `relax` 명령에 `strip: true` 옵션을 추가하면,
 해당 명령이 관리하는 키워드를 **제거만** 하고 새 키워드는 삽입하지 않습니다.
 
-> **참고 — 독립 `strip` op 과 구분**: 여기서 다루는 `strip: true` 는 `implicit`/`modal`/`relax`/`explicit` 명령에 붙는 옵션으로, 해당 명령 소속 키워드만 제거합니다. 이와 별개로 v1.8.0 에는 **독립 `strip` op**(숨은 op)이 있어 `keywords` 리스트에 나열한 임의 키워드를 K파일에서 제거합니다(§43 추가 op 레퍼런스 참조). 둘 다 "제거만 하고 새 키워드는 삽입하지 않는다"는 점은 같습니다.
+> **참고 — 독립 `strip` op 과 구분**: 여기서 다루는 `strip: true` 는 `implicit`/`modal`/`relax`/`explicit` 명령에 붙는 옵션으로, 해당 명령 소속 키워드만 제거합니다. 이와 별개로 v1.8.0 에는 **독립 `strip` op**(`--help` 의 `[표면·재메시]` 범주)이 있어 `keywords` 리스트에 나열한 임의 키워드를 K파일에서 제거합니다(§43 추가 op 레퍼런스 참조). 둘 다 "제거만 하고 새 키워드는 삽입하지 않는다"는 점은 같습니다.
 
 ### 명령별 제거 범위
 
@@ -2290,9 +2635,24 @@ operations:
 - **응력 누적**: 동일 요소에 여러 오퍼레이션 적용 시 응력 합산(`std::map` 기반)
 - **ID 자동 관리**: 파트/섹션/노드/요소 ID 자동 발급 (충돌 방지)
 - **출력 이름**: `output` 끝의 `.k` 는 있어도 없어도 같습니다(`result`·`result.k` → `result.k`, dynain 은 `result.dynain`).
-- **상대 경로**: `base_model`·`dat_file`·`bundle`·`dynain` 등은 YAML 파일이 있는 폴더 기준입니다(YAML 이 현재 폴더에 있어도 같음).
+- **상대 경로**: `base_model`·`output`·`dat_file`·`bundle`·`dynain` 등 YAML 안의 모든 파일 경로는
+  **그 YAML 파일이 있는 폴더 기준**입니다 — 폴더가 붙은 `../data/box.k` 도 같고, 작업 폴더로 되돌아가지 않습니다
+  (YAML 이 현재 폴더에 있어도 같음). 절대 경로는 그대로 씁니다.
+  **유일한 예외는 `matdb` 의 `database` 키**로, 이것만 작업 폴더(CWD) 기준입니다([§3.1(a)](#31-yaml-공통-규칙-모든-op)·[§24](#24-matdb--재료-db-교체)).
 - **인라인 주석**: 값 뒤에 공백 + `#` 로 주석을 달 수 있습니다(따옴표 안의 `#` 는 값). 단독 YAML 명령도 같습니다.
+- **탭 들여쓰기 거절 / UTF-8 BOM 허용**: [§3.1(d)(e)](#31-yaml-공통-규칙-모든-op) 와 같습니다.
 - **값 검사**: 각 op 값을 읽을 때 검사하며, 단독 `bend`·`indent`·`offset`·`restack`·`iga` 도 같은 규칙을 씁니다.
+  열거값 오타는 **종료 코드 1 + 출력 파일 없음** 이고, 이 검증은 `assemble` 과 단독 명령 양쪽에 똑같이 걸립니다
+  (`restack` 의 `element_type`, `matdb` 의 `damping_preset`, `boundary`/`rbe` 의 `select` 등).
+- **nan/inf 방어(2026-09-18)**: 결과 덱(`.k`·`.dynain`·IGA include)에 유한하지 않은 값이 하나라도 있으면
+  **아무 파일도 쓰지 않고 종료 코드 1** 입니다. `assemble` 도 단독 명령과 같습니다(예전에는 `assemble` 만 조용히 nan 덱을 냈습니다).
+
+  ```
+  [ERROR] 출력 덱에 유한하지 않은 값(nan/inf)이 있습니다: out.k:17 '-nan' — 출력 파일을 쓰지 않았습니다: out.k, out.dynain
+  ```
+
+  **같은 경로에 있던 지난 실행 결과는 지우지 않습니다** — 실패해도 그 자리에 예전 파일이 그대로 남으니,
+  새 결과로 오해하지 않도록 종료 코드를 반드시 확인하세요. in-place 출력(`output` == `base_model`)에서는 입력 메시가 보존됩니다.
 
 > **참고**: 아래 각 오퍼레이션은 동일 이름의 독립 명령어(12~22장)와 동일한 알고리즘을 사용합니다.
 > assemble 내에서는 `- type: <이름>` 으로 지정하며, 여러 오퍼레이션을 순차 결합할 수 있습니다.
@@ -2511,10 +2871,12 @@ operations:
 
 ```yaml
 - type: matdb
-  database: materials/material_db.json
-  mat_type: MAT_024
+  database: materials/material_db.json   # 작업 폴더 기준 (§3.1(a) 의 유일한 예외)
+  mat_type: MAT_024                      # 생략 시 기본값은 MAT_ELASTIC
   thermal: false
 ```
+
+`damping_preset` 은 `smartphone_drop` / `smartphone_drop_aggressive` / `quasi_static` / `off` 만 받습니다(그 밖의 값은 종료 코드 1).
 
 → 독립 명령 [24. matdb](#24-matdb--재료-db-교체) 참조
 
@@ -2601,10 +2963,13 @@ dynain 또는 K 파일의 `*NODE` 블록에서 일치하는 NID만 좌표 갱신
 
 ```yaml
 - type: database
-  preset: crash     # crash / drop / nve / all
+  preset: crash     # all | drop | crash | static | thermal | forming | modal | minimal
   dt: 0.0001        # ASCII 출력 간격 (초)
   dt_plot: 0.001    # d3plot 출력 간격
 ```
+
+> **프리셋은 위 8종뿐입니다.** 예전 판이 적었던 **`nve` 는 없는 프리셋**이고,
+> 주면 `[ERROR] Unknown preset: nve` 와 함께 종료 코드 1 입니다(확인). 전체 목록은 [§37 표 37-1](#37-database--database-출력-제어) 참조.
 
 → 독립 명령 [37. database](#37-database--database-출력-제어) 참조
 
@@ -2616,7 +2981,29 @@ dynain 또는 K 파일의 `*NODE` 블록에서 일치하는 NID만 좌표 갱신
 ### 용도
 기존 TET4 파트를 Gmsh를 통해 **완전 재메시**하여 요소 품질을 개선하는 명령.
 STL 경계 추출 → Gmsh 실행 → MSH2 파싱 → 원본 K파일에 스플라이스하는 파이프라인으로 동작하며,
-Gmsh 실행 파일(`gmsh.exe`)이 `dist/gmsh/` 또는 `dist/gmsh-<ver>/` 디렉터리에 있어야 한다.
+Gmsh 실행 파일이 따로 있어야 한다(아래 **Gmsh 탐색 순서** 참조).
+
+### Gmsh 탐색 순서
+
+Gmsh 실행 파일은 아래 **순서대로** 찾습니다(2026-09-18 소스·실행 확인).
+
+1. 환경변수 **`KOOREMAPPER_GMSH`** — 실행 파일의 전체 경로(파일이 실제로 있어야 함)
+2. **KooRemapper 바이너리가 있는 폴더** 옆의 `gmsh/gmsh` 또는 `gmsh/gmsh.exe`
+3. 같은 폴더 옆의 `gmsh-<ver>/` 또는 `gmsh-<ver>/bin/` 안의 실행 파일
+4. **`PATH`** (Linux/macOS)
+5. `/opt/gmsh-*/bin/gmsh` (Linux/macOS)
+
+찾지 못하면 다음 메시지와 함께 종료 코드 1 입니다.
+
+```
+[ERROR] Gmsh not found — set KOOREMAPPER_GMSH, or place gmsh(.exe) in gmsh/ or gmsh-<ver>/[bin/] next to
+KooRemapper, or put gmsh on PATH (Linux also checks /opt/gmsh-*/bin/gmsh)
+```
+
+> **작업 폴더의 `dist/gmsh/` 는 탐색 대상이 아닙니다.** 저장소 루트의 `dist/gmsh/` 는 컨테이너를 구울 때 쓰는
+> 벤더 사본(`platform/infra/apptainer/cli.def` 의 `%files`)이며 `.gitignore` 대상이라 저장소에서 받아지지 않습니다 —
+> **호스트에 직접 준비해야 하는 파일**입니다. `meshfix` 가 그 폴더를 직접 보는 것은 아니므로,
+> 개발 트리에서 쓰려면 `KOOREMAPPER_GMSH=<저장소>/dist/gmsh/gmsh` 로 지정하는 것이 가장 확실합니다.
 
 ### 사용법
 
@@ -2830,7 +3217,7 @@ Total time: 13.6 s
 
 ### 주의사항
 
-- **Gmsh 필수**: `dist/gmsh/gmsh.exe` 또는 `dist/gmsh-<ver>/gmsh.exe` 위치에 배치 필요
+- **Gmsh 필수**: 위 **Gmsh 탐색 순서**(환경변수 `KOOREMAPPER_GMSH` → 바이너리 옆 `gmsh/`·`gmsh-<ver>/` → `PATH` → `/opt/gmsh-*/bin/`) 중 하나에 배치 필요
 - **TET4 전용**: 입력 파트는 TET4 (또는 퇴화 HEX8) 형식이어야 함
 - **처리 시간**: 10만 요소 이상에서 수 분 소요 가능
 - **polish 제한**: `polish: true`는 실험적 기능. 90° 코너 구속 형상에서는 불량 수 감소 불가로 자동 스킵
@@ -2927,7 +3314,11 @@ TET4 는 `*ELEMENT_SOLID` 8절점 칸에 LS-DYNA 규정대로 **N1, N2, N3, N4, 
 
 ## 43. 추가 op 레퍼런스 (v1.8.0 대조 추가)
 
-정본에 전용 섹션이 없던 op 들을 v1.8.0 바이너리 기준으로 간결히 정리한다. 각 op 의 근거(help / examples / pyKooCAE 페이지)를 함께 표기한다. 이 중 `extract-surface`·`tetremesh`·`merge`·`strip` 4종과 `meshfix`(§40)는 `KooRemapper --help` 최상위 목록에 없는 **숨은 op** 이지만 정상 동작한다.
+정본에 전용 섹션이 없던 op 들을 v1.8.0 바이너리 기준으로 간결히 정리한다. 각 op 의 근거(help / examples / pyKooCAE 페이지)를 함께 표기한다.
+
+> **'숨은 op' 은 없다** — `extract-surface`·`tetremesh`·`merge`·`strip`·`cnrb2solid` 와 `meshfix`(§40)는
+> `KooRemapper --help` 의 **`[표면·재메시]` 범주에 그대로 나온다**(2026-09-18 확인). 예전 판의 '숨은 op' 표기는 삭제했다.
+> 여기 정리한 이유는 help 목록에서 빠져서가 아니라 정본에 전용 섹션이 없었기 때문이다.
 
 ### 43.1 battery — 배터리 셀 생성
 
@@ -3096,7 +3487,7 @@ operations:
 
 ---
 
-### 43.7 extract-surface — 표면 셸 추출 (숨은 op)
+### 43.7 extract-surface — 표면 셸 추출
 
 **용도**: 솔리드 K파일에서 표면 셸을 추출한다.
 
@@ -3118,7 +3509,7 @@ KooRemapper extract-surface <solid.k> <output_shell.k> [--pid N] [--face top|bot
 
 ---
 
-### 43.8 tetremesh — TET4 로컬 재메시 (숨은 op)
+### 43.8 tetremesh — TET4 로컬 재메시
 
 **용도**: 기존 TET4 파트를 품질 게이트(스케일드 자코비안·종횡비)로 스캔하고, 불량 요소 패치를 국소 재메시한다. `localimprove`(외부 라이브러리 불필요, 항상 사용 가능)와 `tetgen`(빌드 플래그 `KOOREMAPPER_BUILD_TETGEN` 필요, AGPL v3) 두 백엔드를 지원한다. (§40 meshfix 의 Gmsh 전체 재메시와 별개)
 
@@ -3147,7 +3538,7 @@ KooRemapper tetremesh <config.yaml>
 
 ---
 
-### 43.9 merge — 적층 파트 균질화 병합 (숨은 op)
+### 43.9 merge — 적층 파트 균질화 병합
 
 **용도**: 적층된 여러 파트(PID)를 하나의 균질화(homogenized) 재료 레이어로 병합한다.
 
@@ -3178,7 +3569,7 @@ merge:
 
 ---
 
-### 43.10 strip — 키워드 제거 (숨은 op)
+### 43.10 strip — 키워드 제거
 
 **용도**: `keywords` 리스트로 지정한 LS-DYNA 키워드를 K파일에서 제거한다(부피 큰 메시 데이터 제거 등). §38 의 `strip: true` 옵션과는 별개의 독립 op 다.
 

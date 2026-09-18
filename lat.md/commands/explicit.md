@@ -43,10 +43,12 @@ output: explicit_model.k
 keep_dr_curves: false    # true: SIDR=1 DEFINE_CURVE 유지
 ```
 
+> **v1.8.0 정정**: explicit 복원 op 에는 **level 체계가 없습니다**. `model`/`output`/`keep_dr_curves` 세 키만 받습니다(help). `examples/explicit/level01.yaml`~`level12.yaml` 는 이 explicit 복원 op 이 아니라 별도 op 인 **`stabilize`**(파일 내용이 `stabilize: explicit` + `level: 1~12`, 호출 `KooRemapper stabilize levelNN.yaml`)용 예제이므로 혼동에 주의합니다(§36 stabilize 참조).
+
 ### 제거 대상
 
 
-**표 32. (표 설명 — 해당 명령어/기능의 파라미터 또는 옵션 목록)**
+**표 32-1. explicit 제거 대상 키워드 — 키워드와 원래 소속 명령.**
 
 | 키워드 | 원래 소속 |
 |--------|----------|

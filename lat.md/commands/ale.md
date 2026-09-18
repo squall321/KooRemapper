@@ -42,25 +42,28 @@ KooRemapper.exe ale <config.yaml>
 ```yaml
 model: model.k
 output: ale_model.k
-parts:
+ale_parts:                 # 변환 대상 파트 (필수)
   - pid: 5
-    preset: air           # 프리셋 이름 또는 bundle 경로
-    lagrangian_pids: [1, 2, 3]   # FSI 라그랑지안 파트
+    material: air          # 프리셋 이름 또는 커스텀 .k 번들 경로
   - pid: 6
-    preset: water
-    lagrangian_pids: [1]
+    material: water
+fsi_pids: [1, 2, 3]        # FSI 라그랑지안 파트 (선택)
+elform: 11                 # ALE ELFORM (11=multi-mat, 12=single, 기본 11)
+# dct/nadv/meth (CONTROL_ALE), ctype/pfac (FSI), detonation (tnt/c4) 등 선택 옵션
 ```
+
+> **v1.8.0 정정**: config 키는 `ale_parts`(각 항목 `{pid, material}`) / `fsi_pids` 입니다(help·`examples/ale`. 구버전의 `parts`/`preset`/`lagrangian_pids` 정정). `fsi_pids` 는 최상위 리스트이며(파트별 아님), 폭발물 기폭점은 최상위 `detonation: {pid, x, y, z, lt}` 로 지정합니다.
 
 ### 재료 프리셋 (14종)
 
 
-**표 35. (표 설명 — 해당 명령어/기능의 파라미터 또는 옵션 목록)**
+**표 35-1. ale 재료 프리셋 — 분류별 프리셋과 MAT·EOS.**
 
 | 분류 | 프리셋 | MAT | EOS |
 |------|--------|-----|-----|
 | 기체 | air, nitrogen, argon | MAT_NULL | EOS_LINEAR_POLYNOMIAL |
 | 액체 | water, electrolyte, gasoline, oil, coolant, resin, tim, silicone | MAT_NULL | EOS_GRUNEISEN |
-| 폭발물 | tnt, c4 | MAT_HE_BURN | EOS_JWL |
+| 폭발물 | tnt, c4 | MAT_HIGH_EXPLOSIVE_BURN | EOS_JWL |
 | 진공 | vacuum | MAT_VACUUM | — |
 
 ### 자동 삽입 카드

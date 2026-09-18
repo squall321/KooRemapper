@@ -41,32 +41,29 @@ KooRemapper.exe bend <config.yaml>
 ### YAML 형식
 
 ```yaml
-model: base.k
+base_model: flat.k
 output: bent
-target_pid: 1
-plane: xy               # xy | yz | zx (굽힘 평면)
-mode: deform            # deform (노드 이동) | stress (응력만)
-source: formula         # formula | dat | dat_pair
-
-# source: formula
-expression: "0.5 * sin(pi * x1 / L1) * sin(pi * x2 / L2)"
-
-# source: dat
-# dat_file: deflection.dat
-
-# source: dat_pair
-# dat_top: top.dat
-# dat_bottom: bottom.dat
-
-material:
+material:                   # 선택 — 생략하면 대상 파트의 *MAT_ELASTIC
   E: 210000
   nu: 0.3
+operations:
+  - type: bend
+    target_pid: 1           # 0 또는 생략 = 모든 파트
+    plane: xy               # xy | yz | zx  (x1,x2 = X,Y | Y,Z | Z,X)
+    mode: deform            # deform(노드 이동 + 역응력) | stress(노드 그대로, 정응력)
+    source: formula         # formula | dat | dat_pair
+    expression: "0.5 * sin(pi * x1 / L1) * sin(pi * x2 / L2)"   # 처짐 w(x1,x2)
+
+    # source: dat      → dat_file: deflection.dat
+    # source: dat_pair → dat_top: top.dat  +  dat_bottom: bottom.dat (상·하면 처짐 격자)
 ```
+
+> **v1.8.0 정정**: (1) 굽힘 평면 값은 `xy | yz | zx` 입니다. `xz` 는 거부됩니다(이전 help 와 이 문서의 `xz` 표기가 틀렸음). (2) config 는 최상위 `base_model`/`output` + `operations[].type: bend` 구조입니다. (3) `mode` 는 `deform | stress`, `source` 는 `formula | dat | dat_pair` 이고 모두 필수 검사 대상입니다(이전 help 의 `mode: formula` 는 거부). 단독 `bend` 명령도 assemble 과 같은 검사를 거칩니다(예전엔 검사 없이 source 누락 시 비정상 종료).
 
 ### 수식 변수
 
 
-**표 15-1. formstrain 출력 — 이면각 기반 소성 변형률 계산 결과 및 LS-DYNA *INITIAL_STRAIN_SOLID 출력.**
+**표 13-1. bend 수식 변수 — 면내 좌표 x1·x2, 바운딩 박스 길이 L1·L2, π.**
 
 | 변수 | 의미 |
 |------|------|
@@ -98,6 +95,8 @@ $$\varepsilon_{11} = d \cdot \kappa_1, \quad \varepsilon_{22} = d \cdot \kappa_2
 0.1  0.2  0.4  0.6  0.7
 ...
 ```
+
+값은 모델 길이 단위의 처짐이며, 격자는 대상 파트의 평면 바운딩 박스에 펼칩니다. warpage 의 dat 는 행 0 이 2축 **최소**라 방향이 반대입니다(§21).
 
 ---
 

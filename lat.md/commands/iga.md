@@ -43,6 +43,8 @@ KooRemapper.exe iga <config.yaml>
 model: base.k
 output: iga_result
 targets:
+  # 대상 지정: target_pid 하나 | target_pids: [2, 3] (같은 설정, PID 마다 따로 감쌈)
+  #           | target_name: "Lower*" (파트 제목 와일드카드 * ?, 0개 매칭이면 오류) + exclude_name
   - target_pid: 1
     element_size: 4.0       # NURBS 복셀 크기 (rr=rs=rt 공통)
     element_size_r: 2.0     # r방향 개별 지정 (0=element_size 사용)

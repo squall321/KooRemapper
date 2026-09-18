@@ -54,7 +54,7 @@ strip: false          # true: 키워드 제거만 (삽입 없음)
 #### Table 1 — 비선형 솔버 & 수렴 허용치
 
 
-**표 29-2. implicit 오버라이드 파라미터 — dt0, dtmax, nsolvr 등 사용자 정의 시 기본값을 덮어쓰는 파라미터.**
+**표 29-1. implicit 레벨별 비선형 솔버 설정 — NSOLVR·ILIMIT·MAXREF·수렴 허용치.**
 
 | Lv | 이름 | NSOLVR | ILIMIT | MAXREF | ITEOPT | KFAIL | DCTOL | ECTOL | LSTOL | RCTOL |
 |----|------|--------|--------|--------|--------|-------|-------|-------|-------|-------|
@@ -70,7 +70,7 @@ strip: false          # true: 키워드 제거만 (삽입 없음)
 #### Table 2 — 시간 스텝 & 활성화 기능 (T = endtime)
 
 
-**표 30-1. modal 해석 파라미터 — 모드 수, 주파수 범위, 고유값 해석 방법(eigmth) 코드 목록.**
+**표 29-2. implicit 레벨별 시간 증분·선형 솔버·안정화 설정.**
 
 | Lv | DT0 | DTMAX | DTMIN | LSOLVR | STAB | ARC-LENGTH |
 |----|-----|-------|-------|--------|------|------------|
@@ -103,7 +103,7 @@ strip: false          # true: 키워드 제거만 (삽입 없음)
 ### mode: static vs dynamic
 
 
-**표 35-1. ALE 프리셋 목록 (14종) — 기체/액체/폭약/진공 프리셋별 적용 재료 모델과 상태방정식.**
+**표 29-3. implicit mode: static 과 dynamic 의 IMASS·GAMMA·BETA.**
 
 | 파라미터 | static (준정적) | dynamic (구조동역학) |
 |----------|----------------|-------------------|
