@@ -85,11 +85,24 @@ KooRemapper는 LS-DYNA FEA 해석을 위한 **메시 전처리 도구**입니다
 조립 공정에 수반되는 **초기 응력 상태(prestress)**를 재현하는 것입니다.
 
 > **바이너리와 일치 (확인일 2026-09-18)** — 이 문서의 호출형태·config 키·허용값·기본값·출력 키워드는
-> 통합 브랜치 `integrate/defects-20260918` 의 기준 커밋 `5913871` 에 2단계 A 세 그룹
-> (`ef70542` yaml-common-rules, `87362d3` assembler-gaps, `476bab4` examples-ci-provenance)을 합친
-> 트리(worktree HEAD **`21bff18`**)를 **Release 로 빌드해 직접 실행한 결과**에 맞춰 정정했습니다.
+> 통합 브랜치 `integrate/defects-20260918` 의 기준 커밋 `8352a89` 에 3단계 두 그룹
+> (`c21c8dd` 경로 규칙·enum·contact 별칭, `3f3846f` help 문구·검증 스크립트)을 합친
+> 트리(worktree HEAD **`b54bfde`**)를 **Release 로 빌드해 직접 실행한 결과**에 맞춰 정정했습니다.
 > 이론·동작원리 서술은 보존했습니다.
-> `help all` 과 이 문서가 어긋나면 **바이너리가 정본**입니다. 어긋난 곳을 발견하면 문서를 고쳐 주세요.
+> `help all` 과 이 문서가 어긋나면 **바이너리의 실제 동작이 정본**입니다. 어긋난 곳을 발견하면 문서를 고쳐 주세요.
+
+> **이 커밋에서 `--help` 문구가 실제 동작보다 뒤처진 자리 3곳** (2026-09-18 실행으로 확인, 문서는 실제 동작을 적었습니다).
+> `c21c8dd` 가 `map`·`squeeze` 의 BOM·탭 처리를 고쳤는데 `3f3846f` 가 쓴 help 문구는 그 전 상태를 적고 있어,
+> 두 갈래를 합치면서 어긋났습니다. 코드·help 문자열은 이 문서 작업의 범위 밖이라 그대로 두었습니다.
+>
+> | 자리 | help 가 적은 말 | 실제 동작 |
+> |---|---|---|
+> | `--help` 공통 규칙 탭 줄 | "예외: map …에는 이 검사가 없다" | `map` 도 탭을 **거절**한다(rc=1) |
+> | `--help` 공통 규칙 BOM 줄 | "예외: map 과 squeeze …는 아직 BOM 에서 실패한다" | 둘 다 BOM 을 **무시**하고 정상 동작한다(rc=0) |
+> | `help matdb` 주의 2번째 줄 | "폴더가 붙은 값은 작업 폴더 기준" | `database` 는 폴더가 붙든 말든 **YAML 폴더 기준**이다([§3.1(a)](#31-yaml-공통-규칙-모든-op)) |
+>
+> `help squeeze` 주의 마지막 줄("이 op 만은 아직 BOM 이 붙으면 … rc=1")도 같은 이유로 뒤처져 있습니다.
+> 회귀 시험 `tools/regress/test_help_truth.py` 가 이 어긋남 때문에 이 커밋에서 **FAIL 2** 로 떨어집니다(나머지 26개 파일은 통과).
 
 **재확인 방법** — 같은 커밋을 체크아웃한 뒤 아래를 돌리면 됩니다.
 
@@ -98,7 +111,12 @@ cmake -DCMAKE_BUILD_TYPE=Release -S . -B build/dev && cmake --build build/dev -j
 ./build/dev/bin/KooRemapper --help          # op 목록 + 공통 규칙
 ./build/dev/bin/KooRemapper help all        # 전 op 상세 (이 문서와 대조할 정본)
 ./build/dev/bin/KooRemapper_tests           # C++ 단위시험 (52건)
-for f in tools/regress/*.py; do python3 "$f" build/dev/bin/KooRemapper; done   # 회귀 시험 (26개 파일)
+# 회귀 시험 27개 파일 — meshfix·tetremesh 는 gmsh 경로가 필요하다
+export KOOREMAPPER_TEST_GMSH=$PWD/dist/gmsh/gmsh
+for f in tools/regress/*.py; do python3 "$f" build/dev/bin/KooRemapper; done
+
+cp -r dist/materials build/dev/                              # help 사례가 번들 DB 를 찾게 한다
+python3 tools/help/run_help_examples.py build/dev/bin/KooRemapper   # help 사례 (ALL PASS)
 ```
 
 ### 핵심 기능 범위
@@ -262,19 +280,30 @@ Commands:
 - **YAML 안에 적은 상대 경로**는 폴더가 붙어 있든 없든 **그 YAML 파일이 있는 폴더** 기준으로 풀리고, 작업 폴더로 되돌아가지 않습니다.
   `cfg/strip.yaml` 의 `output: ../data/box.k` → `cfg/../data/box.k`.
 - 절대 경로(`/`·`\` 로 시작, 또는 `X:` 드라이브)는 그대로 씁니다.
-- 대상 키: `model`·`base_model`·`output`·`dat_file`·`dynain`·`bundle`·재료 번들 경로 등 **YAML 로 주는 모든 파일 경로**.
-- **예외 2개**:
-  - `matdb` 의 `database` 키는 아직 **작업 폴더 기준**입니다(생략하면 `./materials/material_db.json`
-    → 실행 파일 옆 `materials/`·`../materials/` 순으로 번들 DB 를 찾습니다).
-  - `map <config.yaml>` 은 **설정 전체가 작업 폴더 기준**입니다(파서가 별도 경로 — (d)(e) 의 예외와 같은 이유).
-    `bent`·`flat`·`output` 의 상대 경로가 YAML 폴더로 풀리지 않아, `KooRemapper map cfg/map.yaml` 의 `bent: bent.k` 는
-    `./bent.k` 를 찾고 `[ERROR] Failed to load bent mesh: Cannot open file: bent.k` 로 **종료 코드 1** 이 납니다(2026-09-18 실행 확인).
-    `output` 도 작업 폴더에 씁니다. YAML 을 둔 폴더에서 실행하거나 절대 경로를 쓰세요
-    (위치인자 호출형태 `KooRemapper map <bent> <flat> <output>`([§4](#4-map--hex8-구조화-메시-매핑))는 해당 없음).
+- 대상 키: `model`·`base_model`·`output`·`dat_file`·`dynain`·`bundle`·`material_db`·`database`·재료 번들 경로 등
+  **YAML 로 주는 모든 파일 경로**. `battery`·`tetremesh`·`meshfix`·`modelmeta`·`matdb` 도 이 규칙을 씁니다
+  (2026-09-18 실행 확인 — `cfg/b.yaml` 의 `output: bat_out` 은 `cfg/bat_out_tier0_phase1.k` 로 나갑니다).
+
+- **남은 예외는 `map <config.yaml>` 하나뿐입니다.** 이 설정만 **전체가 작업 폴더 기준**입니다(파서가 CLI 프런트엔드에 따로 있습니다).
+  `bent`·`flat`·`output` 의 상대 경로가 YAML 폴더로 풀리지 않아, `KooRemapper map cfg/map.yaml` 의 `bent: bent.k` 는
+  `./bent.k` 를 찾고 `[ERROR] Failed to load bent mesh: Cannot open file: bent.k` 로 **종료 코드 1** 이 납니다(2026-09-18 실행 확인).
+  `output` 도 작업 폴더에 씁니다. YAML 을 둔 폴더에서 실행하거나 절대 경로를 쓰세요
+  (위치인자 호출형태 `KooRemapper map <bent> <flat> <output>`([§4](#4-map--hex8-구조화-메시-매핑))는 해당 없음).
+
+- **예외였다가 규칙 안으로 들어온 키** — `matdb` 의 `database` 는 더 이상 작업 폴더 기준이 아닙니다.
+  폴더가 붙었든 홑이름이든 **YAML 폴더 기준**으로 풀리고, 홑이름일 때만 번들 DB 폴백이 한 단계 더 붙습니다.
+  자세한 5단계는 [§24 경로 규칙](#24-matdb--재료-db-교체) 을 보세요.
+
+- **경로로 풀지 않는 키 하나** — `battery` 의 `dynain_file` 은 경로가 아니라
+  `*INCLUDE_DYNAIN` 다음 줄에 **적힌 문자열 그대로** 찍히는 값입니다. KooRemapper 는 이 파일을 열지 않고,
+  솔버가 산출 덱이 있는 폴더 기준으로 읽습니다. `cfg/b.yaml` 에 `dynain_file: ../state/my.dynain` 을 적으면
+  덱에도 `../state/my.dynain` 이 그대로 들어갑니다(2026-09-18 실행 확인) — **산출 덱 옆에서 솔버가 찾을 이름**으로 적으세요.
 
 > 이 규칙은 예전에 op 마다 달랐습니다. `load`·`boundary`·`rbe`·`contact`·`relax`·`explicit`·`implicit`·`modal`·`ale`·`database`·`cclip`·`matdb`·`generate box` 는
-> "폴더 없는 이름(`box.k`)만 YAML 폴더 기준, 폴더가 붙은 상대 경로(`../data/box.k`)는 작업 폴더 기준" 이었으나 이제 위 한 가지 규칙으로 통일됐습니다.
+> "폴더 없는 이름(`box.k`)만 YAML 폴더 기준, 폴더가 붙은 상대 경로(`../data/box.k`)는 작업 폴더 기준" 이었고,
+> `battery`·`tetremesh`·`meshfix` 는 통째로 작업 폴더 기준이었으나 이제 위 한 가지 규칙으로 통일됐습니다.
 > 예전 동작에 기대어 `../` 경로를 적어 둔 기존 YAML 은 경로를 다시 확인해야 합니다.
+> `extract-surface` 는 YAML 설정이 없는 위치인자 op 이라 애초에 이 규칙의 대상이 아닙니다([§43.7](#437-extract-surface--표면-셸-추출)).
 
 #### (b) 단독 명령은 `operations` 항목이 2개 이상이면 거절
 
@@ -301,17 +330,21 @@ Commands:
 - **주의 — 예전에 통과하던 입력이 거절됩니다.** op 이 읽지도 않는 구역(메모용 `notes:`, 미사용 키 블록)을 탭으로 들여썼을 뿐이어도
   이제 종료 코드 1 입니다. 탭 검사는 파일 전체를 훑습니다. 예전에는 대개 종료 코드 0 으로 '아무 일도 안 한' 덱
   (블록이 통째로 무너져 loads/operations/clips 가 0개)이 나왔으므로, **기존 자동화의 rc 가 0 → 1 로 바뀔 수 있습니다.**
-- 되감을 수 없는 입력(파이프, 프로세스 치환, `/dev/stdin`)으로 설정을 넘기면 이 검사를 건너뜁니다.
-- `map <config.yaml>` 에만 이 검사가 없습니다(파서가 별도 경로).
+- **예외는 되감을 수 없는 입력 하나뿐입니다** — 파이프, 프로세스 치환(`<(...)`), `/dev/stdin` 으로 설정을 넘기면
+  다시 읽을 수 없어 검사를 건너뛰고 파서로 그냥 넘깁니다(2026-09-18 실행 확인).
+- **`map`·`squeeze` 도 이제 이 검사를 합니다**(2026-09-18 실행 확인) —
+  `[ERROR] [map] YAML 들여쓰기에 탭을 쓸 수 없습니다 …` / `[ERROR] [squeeze] …` 로 **종료 코드 1**.
+  바이너리의 `--help` 공통 규칙은 아직 "예외: map …에는 이 검사가 없다" 고 적고 있으나 **문구가 뒤처진 것**입니다([§1](#1-개요) 표 참조).
 
 #### (e) UTF-8 BOM 은 자동 제거
 
 파일 앞의 UTF-8 BOM(`EF BB BF`)을 무시합니다. **윈도우 편집기(메모장 등)가 붙이는 BOM 이 있어도 그대로 쓸 수 있습니다.**
 예전에는 BOM 때문에 첫 키가 깨져 `model not specified` / `base_model not specified in assembly config` 로 끝났습니다.
 
-예외 2개는 아직 남아 있습니다 — `map <config.yaml>` 은 `YAML config missing required keys (bent, flat, output)`,
-`squeeze <mesh> <config> <prefix>` 는 `Failed to read config: No parts defined in squeeze config` 로 실패합니다.
-이 두 명령에 쓸 YAML 은 BOM 없이 저장하세요.
+**예외는 없습니다.** 예전에 남아 있던 두 자리 — `map <config.yaml>`(`YAML config missing required keys (bent, flat, output)`)와
+`squeeze <mesh> <config> <prefix>`(`Failed to read config: No parts defined in squeeze config`) — 도 이 커밋에서 고쳐졌습니다.
+BOM 을 붙인 설정으로 둘 다 **종료 코드 0** 으로 정상 산출물을 냈습니다(2026-09-18 실행 확인).
+바이너리의 `--help` 공통 규칙과 `help squeeze` 주의는 아직 이 두 op 을 예외로 적고 있으나 **문구가 뒤처진 것**입니다([§1](#1-개요) 표 참조).
 
 #### (f) 단독 op 의 `output` 은 필수
 
@@ -1503,7 +1536,7 @@ KooRemapper.exe matdb <config.yaml>
 ```yaml
 model: model.k
 output: result.k
-database: materials/material_db.json   # 작업 폴더 기준 (§3.1(a) 의 유일한 예외)
+database: materials/material_db.json   # YAML 폴더 기준 (§3.1(a) 와 같음). 생략하면 번들 DB
 mat_type: MAT_ELASTIC     # 구조 카드 유형 — 생략 시 기본값
 thermal: false            # 열 재료 삽입 여부
 damping_preset: smartphone_drop   # 선택. smartphone_drop | smartphone_drop_aggressive | quasi_static | off
@@ -1519,10 +1552,31 @@ materials:                # 개별 규칙 (선택)
 > **`mat_type` 기본값은 `MAT_ELASTIC` 입니다**(확인 — 키를 생략하고 돌리면 `*MAT_ELASTIC_TITLE` 이 나옵니다).
 > 예전 판이 `MAT_024` 를 기본으로 적었던 것은 틀렸습니다. `MAT_024` 를 쓰려면 명시해야 합니다.
 
-> **경로 규칙**: `model`·`output` 의 상대 경로는 [§3.1(a)](#31-yaml-공통-규칙-모든-op) 대로 **YAML 파일이 있는 폴더** 기준입니다.
-> **`database` 만 예외로 작업 폴더(CWD) 기준**입니다 — 생략하면 `./materials/material_db.json`,
-> 그다음 실행 파일 옆 `materials/`·`../materials/` 순으로 번들 DB(525종)를 찾습니다.
-> SIF 안에서는 `/opt/kooremapper/materials/material_db.json` 입니다.
+#### `database` 경로 규칙 (2026-09-18 실행 확인)
+
+`model`·`output` 은 [§3.1(a)](#31-yaml-공통-규칙-모든-op) 대로 **YAML 파일이 있는 폴더** 기준입니다.
+**`database` 도 이제 같은 규칙을 쓰며**, 여기에 번들 DB 폴백이 한 단계 더 붙습니다. 값을 위에서부터 순서대로 판정합니다.
+
+**표 24-1. matdb `database` 키 해석 순서 — 다섯 갈래와 각 갈래의 결과.**
+
+| # | `database` 값 | 찾는 자리 | 없을 때 |
+|---|---|---|---|
+| 1 | **키 생략** | 작업 폴더 `materials/material_db.json` → 실행 파일 옆 `materials/` → `<exe>/../materials/` | `[ERROR] … Cannot load database from: materials/material_db.json`, 종료 코드 1 |
+| 2 | **절대 경로** (`/`·`\` 시작, `X:` 드라이브) | 적은 자리 그대로 | **번들 폴백 없이** 종료 코드 1 |
+| 3 | **상대 경로** (폴더가 붙었든 홑이름이든) | **YAML 폴더 기준** — `cfg/m.yaml` 의 `sub/d.json` → `cfg/sub/d.json` | 4 번으로 |
+| 4 | 3 이 빗나갔고 값이 **홑이름**(`/`·`\` 없음) | 같은 **파일 이름**을 1 번의 번들 자리에서 찾는다 | 5 번으로 |
+| 5 | 그래도 없음 | — | **3 에서 푼 경로**를 찍고 종료 코드 1 |
+
+- 4 번은 `database: material_db.json` 처럼 **번들 DB 이름만 적던 예전 사용법을 보존**하려고 둔 단계입니다.
+  폴백이 일어나면 그 사실을 로그로 남깁니다 — `[matdb] WARNING: '<YAML폴더>/material_db.json' not found - using bundled '<번들경로>'`.
+- **폴더가 붙은 상대 경로는 4 번을 거치지 않습니다.** `database: nope/material_db.json` 처럼 오타가 난 경로를
+  조용히 다른 DB 로 바꿔치기하지 않고 `[ERROR] [matdb] ERROR: Cannot load database from: <YAML폴더>/nope/material_db.json` 으로 죽습니다.
+  예전에는 이 값이 작업 폴더 기준으로 풀려 종종 rc=0 으로 **엉뚱한 DB** 를 읽었습니다.
+- **어느 파일을 실제로 읽었는지 항상 로그에 남습니다** — `[matdb] Loaded 525 materials from <실제 경로>`.
+  예전 문구는 경로 없는 `… from DB` 였으므로, 이 줄을 정규식으로 긁는 외부 도구가 있다면 손봐야 합니다.
+- SIF 안에서는 실행 파일이 `/opt/kooremapper/bin/KooRemapper` 라서 1 번의 `<exe>/../materials/` 가
+  `/opt/kooremapper/materials/material_db.json` 으로 걸립니다 — **키를 생략하는 편이 가장 이식성 있습니다**.
+- `modelmeta` 의 `material_db` 키는 1·3 번만 있고 **4 번 번들 폴백이 없습니다** — [§43.5](#435-modelmeta--파트별-메타-json-추출) 참조.
 
 ### 감쇠 프리셋 (`damping_preset`)
 
@@ -1530,7 +1584,7 @@ materials:                # 개별 규칙 (선택)
 `[ERROR] matdb: unsupported damping_preset 'light' (allowed: smartphone_drop, smartphone_drop_aggressive, quasi_static, off)` 와 함께
 **종료 코드 1** 입니다. 키를 아예 빼면 검사하지 않습니다(예전 동작 그대로).
 
-**표 24-3. matdb damping_preset 허용값 — 프리셋별 α 스케일·하한과 미매칭 파트 적용 여부.**
+**표 24-2. matdb damping_preset 허용값 — 프리셋별 α 스케일·하한과 미매칭 파트 적용 여부.**
 
 | 값 | α 스케일 | α 하한 | 미매칭 파트에도 적용 |
 |---|---|---|---|
@@ -1671,6 +1725,12 @@ contacts:
 | `forming` | `*CONTACT_FORMING_SURFACE_TO_SURFACE` |
 
 > 실제로 쓰이는 카드는 `_TITLE` 붙은 형태입니다(`*CONTACT_TIED_SURFACE_TO_SURFACE_TITLE`).
+
+> **약칭은 대소문자를 가리지 않고, `-` 는 `_` 로 바꿔 읽습니다**(2026-09-18 실행 확인) —
+> `tied-thermal`·`TIED_THERMAL`·`tied_thermal` 이 모두 `*CONTACT_TIED_SURFACE_TO_SURFACE_THERMAL_TITLE` 로 나옵니다.
+> 이 표는 코드에서도 한 곳(`ct_getPreset`)에만 있어 **단독 `contact` 와 `assemble` 의 `- type: contact` 가 같은 결과**를 냅니다.
+> 예전에는 `assemble` 쪽에 `tied_thermal`·`thermal`·`tiebreak` 별칭이 없어 같은 YAML 이
+> LS-DYNA 에 없는 `*CONTACT_TIED_THERMAL` 로 나갔습니다.
 
 **약칭이 아닌 값**은 그대로 대문자로 바꿔 `*CONTACT_<입력값>` 으로 씁니다.
 즉 `automatic_nodes_to_surface`·`automatic_general`·`forming_one_way_surface_to_surface`·`tied_shell_edge_to_surface` 처럼
@@ -2640,7 +2700,9 @@ operations:
 - **상대 경로**: `base_model`·`output`·`dat_file`·`bundle`·`dynain` 등 YAML 안의 모든 파일 경로는
   **그 YAML 파일이 있는 폴더 기준**입니다 — 폴더가 붙은 `../data/box.k` 도 같고, 작업 폴더로 되돌아가지 않습니다
   (YAML 이 현재 폴더에 있어도 같음). 절대 경로는 그대로 씁니다.
-  **유일한 예외는 `matdb` 의 `database` 키**로, 이것만 작업 폴더(CWD) 기준입니다([§3.1(a)](#31-yaml-공통-규칙-모든-op)·[§24](#24-matdb--재료-db-교체)).
+  **`matdb` 의 `database` 도 같은 규칙입니다** — 값이 홑이름인데 그 자리에 없을 때만 번들 DB 로 한 번 더 찾아보고,
+  폴더가 붙은 상대 경로는 번들로 넘어가지 않고 종료 코드 1 입니다([§24 표 24-1](#24-matdb--재료-db-교체)).
+  **`assemble` 설정에 남은 경로 예외는 없습니다** — `map <config.yaml>` 만 단독 명령 쪽에서 예외로 남아 있습니다([§3.1(a)](#31-yaml-공통-규칙-모든-op)).
 - **인라인 주석**: 값 뒤에 공백 + `#` 로 주석을 달 수 있습니다(따옴표 안의 `#` 는 값). 단독 YAML 명령도 같습니다.
 - **탭 들여쓰기 거절 / UTF-8 BOM 허용**: [§3.1(d)(e)](#31-yaml-공통-규칙-모든-op) 와 같습니다.
 - **값 검사**: 각 op 값을 읽을 때 검사하며, 단독 `bend`·`indent`·`offset`·`restack`·`iga` 도 같은 규칙을 씁니다.
@@ -2873,7 +2935,7 @@ operations:
 
 ```yaml
 - type: matdb
-  database: materials/material_db.json   # 작업 폴더 기준 (§3.1(a) 의 유일한 예외)
+  database: materials/material_db.json   # YAML 폴더 기준 (§3.1(a) 와 같음). 생략하면 번들 DB
   mat_type: MAT_024                      # 생략 시 기본값은 MAT_ELASTIC
   thermal: false
 ```
@@ -3014,6 +3076,10 @@ KooRemapper.exe meshfix <config.yaml>
 ```
 
 ### YAML 설정 전체
+
+> **경로 규칙**(2026-09-18 실행 확인): `model`·`output` 의 상대 경로는 [§3.1(a)](#31-yaml-공통-규칙-모든-op) 대로
+> **그 YAML 파일이 있는 폴더** 기준입니다 — `KooRemapper meshfix cfg/meshfix.yaml` 은 `cfg/` 에서 읽고 `cfg/` 에 씁니다
+> (예전에는 작업 폴더 기준이었습니다). `tetremesh`([§43.8](#438-tetremesh--tet4-로컬-재메시))도 같습니다.
 
 ```yaml
 model:   input.k      # 입력 K파일
@@ -3333,6 +3399,8 @@ KooRemapper battery <config.yaml>
 ```
 
 **주요 config 키** (예제 관찰 기반 — `examples/battery/swell/*`; help 는 필드 문서를 출력하지 않음):
+**표 43-1. battery 주요 config 키 — 셀 형식·치수·층 두께·스웰링·DR 파라미터.**
+
 
 | 키 | 설명 |
 |---|---|
@@ -3347,7 +3415,16 @@ KooRemapper battery <config.yaml>
 | `swelling.soc` / `.nmc_cte` / `.graphite_cte` | SOC·양극/음극 팽창률 |
 | `dr_endtim` / `dr_tolerance` / `dr_factor` / `dr_nrcyck` | DR 파라미터 |
 
-**근거**: pyKooCAE `mesh_generate.md`, `examples/battery/swell/{stacked,wound}/*.yaml`. 정본에 없던 op 이라 필드는 예제 관찰 기반이며, 미등장 필드·기본값은 확인 필요.
+> **경로 규칙**(2026-09-18 실행 확인): `output` 의 상대 경로는 [§3.1(a)](#31-yaml-공통-규칙-모든-op) 대로
+> **그 YAML 파일이 있는 폴더** 기준입니다 — `KooRemapper battery cfg/b.yaml` 의 `output: bat_out` 은
+> `cfg/bat_out_tier0_phase1.k` 로 나갑니다(예전에는 작업 폴더에 떨어졌습니다). `output` 이 가리키는 폴더는 미리 있어야 합니다.
+>
+> **`dynain_file` 만은 경로로 풀지 않습니다.** `*INCLUDE_DYNAIN` 다음 줄에 **적힌 문자열 그대로** 찍히고
+> KooRemapper 는 그 파일을 열지 않습니다(솔버가 산출 덱 기준으로 읽습니다).
+> `use_dynain: true` + `dynain_file: ../state/my.dynain` 을 주면 덱에도 `../state/my.dynain` 이 그대로 들어갑니다.
+> **산출 덱 옆에서 솔버가 찾을 이름**으로 적으세요. (배치 체이닝에서 자동 계산되는 값도 같은 규칙입니다.)
+
+**근거**: pyKooCAE `mesh_generate.md`, `examples/battery/swell/{stacked,wound}/*.yaml`, 2026-09-18 실행 확인. 미등장 필드·기본값은 확인 필요.
 
 ---
 
@@ -3362,6 +3439,8 @@ KooRemapper cclip <config.yaml>
 ```
 
 **주요 config 키** (help + `examples/cclip/*.yaml`):
+**표 43-2. cclip 주요 config 키 — 대상 파트, F-δ 캘리브레이션, 눌림량 설정.**
+
 
 | 키 | 값/설명 |
 |---|---|
@@ -3395,6 +3474,8 @@ KooRemapper cnrb2solid <config.yaml>
 ```
 
 **주요 config 키** (`examples/cnrb2solid/{basic,with_head}.yaml`):
+**표 43-3. cnrb2solid 주요 config 키 — CNRB 볼트를 솔리드 원통 + tied 접촉으로 바꾸는 파라미터.**
+
 
 | 키 | 기본값 | 설명 |
 |---|---|---|
@@ -3422,6 +3503,8 @@ KooRemapper hfdamp <config.yaml>
 ```
 
 **주요 config 키** (`examples/hfdamp/*.yaml`, README):
+**표 43-4. hfdamp 주요 config 키 — 고주파 감쇠 주파수 대역과 감쇠 계수.**
+
 
 | 키 | 기본값 | 설명 |
 |---|---|---|
@@ -3447,17 +3530,31 @@ KooRemapper modelmeta <config.yaml>
 ```
 
 **주요 config 키** (`examples/modelmeta/modelmeta.yaml`):
+**표 43-5. modelmeta 주요 config 키 — 분석 대상, 접촉 탐지, 재료 DB, 출력 접두사.**
+
 
 | 키 | 예제값/기본 | 설명 |
 |---|---|---|
 | `model` | (필수) | 분석 대상 K파일(읽기 전용, `*INCLUDE` 1단계 추적) |
 | `detect` | true | `*CONTACT` 없이도 기하학적으로 닿는 파트쌍 탐지 |
 | `gap_tol` | 0.2 | 탐지 갭 허용치(모델 길이 단위) |
-| `output` | (생략 시 `<model>_modelmeta.json`) | 출력 JSON 이름 |
+| `output` | (생략 시 `<model>`) | 출력 JSON 의 **접두사** — 뒤에 `_modelmeta.json` 이 항상 붙는다 |
 | `material_db` | (생략 시 실행파일 옆 번들 DB) | 재료 DB 경로 |
 | `db_mid_fallback` | false | MID 일치 폴백(로컬 MID 충돌 위험 — opt-in) |
 
-**근거**: pyKooCAE `info_meta.md`, `examples/modelmeta/modelmeta.yaml`. 정본에 없던 op 이라 필드는 help 동작과 단일 예제 유추이며, JSON 스키마 상세 필드·기본값은 확인 필요.
+> **`output` 은 파일 이름이 아니라 접두사입니다**(2026-09-18 실행 확인). `output: meta3` → `meta3_modelmeta.json`,
+> 키를 생략하면 `<model>_modelmeta.json`. **확장자까지 적으면 그대로 접두사가 되어** `output: meta5.json` → `meta5.json_modelmeta.json` 이 나옵니다.
+
+> **`material_db` 경로 규칙 — `matdb` 의 `database` 와 다릅니다**(2026-09-18 실행 확인).
+> 상대 경로는 [§3.1(a)](#31-yaml-공통-규칙-모든-op) 대로 **YAML 폴더 기준**이지만,
+> **번들 DB 폴백([§24 표 24-1](#24-matdb--재료-db-교체) 의 4 번)이 없습니다.**
+> `material_db: material_db.json` 이라고 이름만 적었는데 YAML 폴더에 그 파일이 없으면 번들로 넘어가지 않고
+> `[INFO] [modelmeta] Material DB: <YAML폴더>/material_db.json (0 entries)` 로 **0건을 읽은 채 종료 코드 0** 으로 끝납니다
+> — 재료 매칭이 조용히 전부 빠지므로 **경로를 틀리면 알아채기 어렵습니다**. 키를 생략하거나 절대 경로를 쓰세요.
+> 키를 생략하면 실행 파일 옆 `materials/` → `<exe>/../materials/` → 작업 폴더 `materials/` 순으로 번들 DB 를 찾습니다
+> (`matdb` 는 작업 폴더를 **먼저** 봅니다 — 탐색 순서도 다릅니다).
+
+**근거**: pyKooCAE `info_meta.md`, `examples/modelmeta/modelmeta.yaml`, 2026-09-18 실행 확인. JSON 스키마 상세 필드·기본값은 확인 필요.
 
 ---
 
@@ -3498,6 +3595,8 @@ operations:
 ```bash
 KooRemapper extract-surface <solid.k> <output_shell.k> [--pid N] [--face top|bottom|all] [--output-pid N]
 ```
+**표 43-6. extract-surface 인자·옵션 — 위치인자 2개와 파트·면 선택 플래그.**
+
 
 | 인자/옵션 | 설명 |
 |---|---|
@@ -3522,6 +3621,8 @@ KooRemapper tetremesh <config.yaml>
 ```
 
 **주요 config 키** (help YAML 스키마):
+**표 43-7. tetremesh 주요 config 키 — 백엔드, 품질 게이트, 패치 확장, 개선 반복.**
+
 
 | 키 | 기본값 | 설명 |
 |---|---|---|
@@ -3536,7 +3637,11 @@ KooRemapper tetremesh <config.yaml>
 | `improve.laplacian_iters` / `.max_outer_iters` / `.allow_subdivide` | 5 / 3 / true | (Phase A) 스무딩·반복·세분화 |
 | `tetgen.quality_ratio` / `.min_dihedral_deg` | 1.4 / 10.0 | (Phase B) `-q` 반경/에지 비·최소 이면각 |
 
-**근거**: help(`Usage:` + YAML 스키마), pyKooCAE `surface_remesh.md`. `report_only: true` 로 먼저 품질 스캔 후 재메시가 안전하다.
+> **경로 규칙**(2026-09-18 실행 확인): `model`·`output` 의 상대 경로는 [§3.1(a)](#31-yaml-공통-규칙-모든-op) 대로
+> **그 YAML 파일이 있는 폴더** 기준입니다 — `KooRemapper tetremesh cfg/tet.yaml` 은 `cfg/` 에서 입력을 읽고 `cfg/` 에 씁니다
+> (예전에는 작업 폴더 기준이었습니다). `meshfix`([§40](#40-meshfix--tet4-재메시-gmsh-기반))도 같습니다.
+
+**근거**: help(`Usage:` + YAML 스키마), pyKooCAE `surface_remesh.md`, 2026-09-18 실행 확인. `report_only: true` 로 먼저 품질 스캔 후 재메시가 안전하다.
 
 ---
 
@@ -3559,6 +3664,8 @@ merge:
   - pids: [1, 2, 3]
     name: "Homogenized_Stack"
 ```
+**표 43-8. merge 주요 config 키 — 병합 대상 파트 목록과 균질화 방식.**
+
 
 | 키 | 설명 |
 |---|---|

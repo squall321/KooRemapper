@@ -140,6 +140,12 @@ contacts:
 
 > 실제로 쓰이는 카드는 `_TITLE` 붙은 형태입니다(`*CONTACT_TIED_SURFACE_TO_SURFACE_TITLE`).
 
+> **약칭은 대소문자를 가리지 않고, `-` 는 `_` 로 바꿔 읽습니다**(2026-09-18 실행 확인) —
+> `tied-thermal`·`TIED_THERMAL`·`tied_thermal` 이 모두 `*CONTACT_TIED_SURFACE_TO_SURFACE_THERMAL_TITLE` 로 나옵니다.
+> 이 표는 코드에서도 한 곳(`ct_getPreset`)에만 있어 **단독 `contact` 와 `assemble` 의 `- type: contact` 가 같은 결과**를 냅니다.
+> 예전에는 `assemble` 쪽에 `tied_thermal`·`thermal`·`tiebreak` 별칭이 없어 같은 YAML 이
+> LS-DYNA 에 없는 `*CONTACT_TIED_THERMAL` 로 나갔습니다.
+
 **약칭이 아닌 값**은 그대로 대문자로 바꿔 `*CONTACT_<입력값>` 으로 씁니다.
 즉 `automatic_nodes_to_surface`·`automatic_general`·`forming_one_way_surface_to_surface`·`tied_shell_edge_to_surface` 처럼
 표에 없는 LS-DYNA 접촉 키워드도 **그대로 통과**합니다(`KooRemapper` 자신이 `cclip` 에서 `automatic_nodes_to_surface` 를 씁니다).

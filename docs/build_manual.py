@@ -273,6 +273,9 @@ Total time: 13.6 s
 # For named tables (in meshfix section added above), we embed the caption
 # directly in the markdown text.
 
+# 2026-09-18: 매뉴얼의 표 55개가 모두 '**표 N-M. …**' 캡션을 직접 달고 있어 이 목록은 더 이상 쓰이지 않는다
+# (아래 has_caption_above() 가 전부 걸러낸다). 순서도 매뉴얼의 실제 표 순서와 맞지 않으므로,
+# 캡션 없는 표를 새로 넣거든 이 목록에 기대지 말고 매뉴얼에 캡션을 직접 적을 것.
 TABLE_CAPTIONS = [
     "표 1-1. KooRemapper 핵심 기능 범주 — 각 범주별 주요 기능과 해당 명령어를 요약한다.",
     "표 7-1. squeeze YAML 파트 설정 예 — 직접 변형률(eps_x/y/z)과 등방 팽창(swelling) 두 가지 방법의 비교.",

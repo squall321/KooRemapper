@@ -61,6 +61,10 @@ KooRemapper.exe meshfix <config.yaml>
 
 ### YAML 설정 전체
 
+> **경로 규칙**(2026-09-18 실행 확인): `model`·`output` 의 상대 경로는 [§3.1(a)](#31-yaml-공통-규칙-모든-op) 대로
+> **그 YAML 파일이 있는 폴더** 기준입니다 — `KooRemapper meshfix cfg/meshfix.yaml` 은 `cfg/` 에서 읽고 `cfg/` 에 씁니다
+> (예전에는 작업 폴더 기준이었습니다). `tetremesh`([§43.8](#438-tetremesh--tet4-로컬-재메시))도 같습니다.
+
 ```yaml
 model:   input.k      # 입력 K파일
 output:  output.k     # 출력 K파일

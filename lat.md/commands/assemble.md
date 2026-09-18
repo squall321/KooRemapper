@@ -61,7 +61,9 @@ operations:
 - **상대 경로**: `base_model`·`output`·`dat_file`·`bundle`·`dynain` 등 YAML 안의 모든 파일 경로는
   **그 YAML 파일이 있는 폴더 기준**입니다 — 폴더가 붙은 `../data/box.k` 도 같고, 작업 폴더로 되돌아가지 않습니다
   (YAML 이 현재 폴더에 있어도 같음). 절대 경로는 그대로 씁니다.
-  **유일한 예외는 `matdb` 의 `database` 키**로, 이것만 작업 폴더(CWD) 기준입니다([§3.1(a)](#31-yaml-공통-규칙-모든-op)·[§24](#24-matdb--재료-db-교체)).
+  **`matdb` 의 `database` 도 같은 규칙입니다** — 값이 홑이름인데 그 자리에 없을 때만 번들 DB 로 한 번 더 찾아보고,
+  폴더가 붙은 상대 경로는 번들로 넘어가지 않고 종료 코드 1 입니다([§24 표 24-1](#24-matdb--재료-db-교체)).
+  **`assemble` 설정에 남은 경로 예외는 없습니다** — `map <config.yaml>` 만 단독 명령 쪽에서 예외로 남아 있습니다([§3.1(a)](#31-yaml-공통-규칙-모든-op)).
 - **인라인 주석**: 값 뒤에 공백 + `#` 로 주석을 달 수 있습니다(따옴표 안의 `#` 는 값). 단독 YAML 명령도 같습니다.
 - **탭 들여쓰기 거절 / UTF-8 BOM 허용**: [§3.1(d)(e)](#31-yaml-공통-규칙-모든-op) 와 같습니다.
 - **값 검사**: 각 op 값을 읽을 때 검사하며, 단독 `bend`·`indent`·`offset`·`restack`·`iga` 도 같은 규칙을 씁니다.
@@ -294,7 +296,7 @@ operations:
 
 ```yaml
 - type: matdb
-  database: materials/material_db.json   # 작업 폴더 기준 (§3.1(a) 의 유일한 예외)
+  database: materials/material_db.json   # YAML 폴더 기준 (§3.1(a) 와 같음). 생략하면 번들 DB
   mat_type: MAT_024                      # 생략 시 기본값은 MAT_ELASTIC
   thermal: false
 ```
