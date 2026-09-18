@@ -26,6 +26,7 @@ Example:
 """
 from __future__ import annotations
 
+import io
 import subprocess
 from pathlib import Path
 
@@ -40,30 +41,74 @@ try:
         def increase_indent(self, flow=False, indentless=False):
             return super().increase_indent(flow, False)
 
+    class CardSerializationError(ValueError):
+        """A multi-line card cannot be emitted as a `|` block — fail instead of
+        letting a quoted scalar become a silently wrong deck."""
+
+    _CARD_BREAKS = "\x85  "  # characters YAML reads as line breaks
+
     def _normalize_block_text(data):
         """Make a multi-line card safe to emit as a `|` literal block.
 
-        LS-DYNA cards are fixed-width, so trailing blanks, tabs (a placeholder for
-        columns) and blank lines around the card carry no meaning — but each of
-        them makes PyYAML drop the literal block (trailing blanks and tabs give a
-        quoted "*MAT_ELASTIC\n…" scalar, leading blank lines give a `|2` header).
-        KooRemapper's line-oriented parser then reads that one line as the card and
-        silently emits a deck with mid=0. None of this moves a column.
+        LS-DYNA cards are fixed-width, so trailing blanks and blank lines around the
+        card carry no meaning, and \r\n / lone \r are just line separators — but each
+        of them makes PyYAML drop the literal block (a quoted "*MAT_ELASTIC\n…"
+        scalar, or a `|2` header). KooRemapper's line-oriented parser then reads that
+        one line as the card and silently emits a deck with mid=0. None of this moves
+        a column.
         """
-        lines = [line.rstrip() for line in data.expandtabs(8).split("\n")]
+        text = data.replace("\r\n", "\n").replace("\r", "\n")
+        lines = [line.rstrip() for line in text.split("\n")]
         while lines and not lines[0]:
             lines.pop(0)
         while lines and not lines[-1]:
             lines.pop()
         return "\n".join(lines) + "\n" if lines else ""
 
+    def _check_block_card(text):
+        """Reject cards whose meaning would change on the way out (tabs, YAML line
+        breaks, a first line starting with a blank, or anything the emitter refuses
+        to write as a block)."""
+        for i, line in enumerate(text.rstrip("\n").split("\n"), start=1):
+            if "\t" in line:
+                # Expanding a tab shifts every field after it (tab width 8? 4?) —
+                # the deck would look fine and be numerically wrong.
+                raise CardSerializationError(
+                    f"material_card line {i} contains a TAB — pad fixed-width "
+                    "LS-DYNA columns with spaces"
+                )
+            bad = next((ch for ch in line if ch in _CARD_BREAKS), None)
+            if bad is not None:
+                raise CardSerializationError(
+                    f"material_card line {i} contains U+{ord(bad):04X}, which YAML "
+                    "reads as a line break — use \\n only"
+                )
+        if text.startswith(" "):
+            # A first line starting with a blank forces a `|2` header, and the
+            # receiver takes its block indent from the first content line — those
+            # leading blanks get eaten and the MID column shifts.
+            raise CardSerializationError(
+                "material_card starts with a blank on its first line — a card must "
+                "begin with its *KEYWORD line"
+            )
+        if not yaml.emitter.Emitter(io.StringIO()).analyze_scalar(text).allow_block:
+            raise CardSerializationError(
+                "material_card cannot be emitted as a YAML literal block — check it "
+                "for control/special characters"
+            )
+
     def _represent_str(dumper, data):
         # Multi-line strings (restack layers' material_card, assemble cards) must go
         # out as `key: |`; PyYAML's default quoted scalar is not a card to KooRemapper.
         text = _normalize_block_text(data)
         if "\n" in text.rstrip("\n"):
+            _check_block_card(text)
             return dumper.represent_scalar("tag:yaml.org,2002:str", text, style="|")
-        return dumper.represent_scalar("tag:yaml.org,2002:str", data)
+        if not text and ("\n" in data or "\r" in data):
+            raise CardSerializationError("material_card is blank")
+        # Emit the normalized text in this branch too — `data` would resurrect the
+        # blank lines and tabs normalization just removed.
+        return dumper.represent_scalar("tag:yaml.org,2002:str", text.rstrip("\n"))
 
     _IndentDumper.add_representer(str, _represent_str)
 except Exception:  # pragma: no cover

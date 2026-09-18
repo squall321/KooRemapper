@@ -6,9 +6,11 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import pytest  # noqa: E402
 import yaml  # noqa: E402
 
 from app.runner.argbuild import _dump_yaml, build_command  # noqa: E402
+from kooremapper_core.argbuild import CardSerializationError  # noqa: E402
 
 
 def _wd():
@@ -78,17 +80,57 @@ def test_dump_yaml_multiline_card_literal_block():
     assert "note: plain" in _dump_yaml({"note": "plain"})
 
 
-def test_dump_yaml_card_with_tab_stays_literal_block():
-    # TAB 이 있으면 PyYAML 이 블록 표기를 포기하고 따옴표 문자열을 냈다 → 덱에 쓰레기 한 줄이 써지고 mid=0.
-    # 고정 폭 카드에서 탭은 자리 표시일 뿐이라 8칸으로 펴서 내보낸다(칸 위치가 그대로 유지된다).
-    tabbed = "*MAT_ELASTIC_TITLE\nSubstrate\n\t90  7.85E-09  2.10E+05       0.3"
-    spaced = "*MAT_ELASTIC_TITLE\nSubstrate\n        90  7.85E-09  2.10E+05       0.3"
-    text = _dump_yaml({"layers": [{"thickness": 0.3, "material_card": tabbed}]})
-    assert "    material_card: |\n      *MAT_ELASTIC_TITLE\n" in text, text
-    assert "\\t" not in text and '"*MAT' not in text
-    # 탭을 편 결과가 같은 카드를 공백으로 쓴 것과 한 글자도 다르지 않아야 한다(10칸 정렬 유지).
-    assert text == _dump_yaml({"layers": [{"thickness": 0.3, "material_card": spaced}]})
-    assert yaml.safe_load(text)["layers"][0]["material_card"] == spaced + "\n"
+def test_dump_yaml_card_with_tab_is_rejected():
+    # 탭을 펴면 탭 폭 가정(8/4)에 따라 뒤 칸이 밀린다 — 줄 중간 탭이면 RO 가 사라지고 E 가 'E-09' 가
+    # 되는데 덱은 정상으로 보인다. 조용히 틀린 덱 대신 여기서 멈춘다.
+    tabbed = "*MAT_ELASTIC_TITLE\nSubstrate\n        90\t7.85E-09\t2.10E+05\t0.3"
+    with pytest.raises(CardSerializationError) as exc:
+        _dump_yaml({"layers": [{"thickness": 0.3, "material_card": tabbed}]})
+    assert "TAB" in str(exc.value) and "line 3" in str(exc.value)
+    b = build_command("restack", {"config": {"base_model": "m.k", "output": "o",
+        "operations": [{"type": "restack", "target_pid": 1,
+                        "layers": [{"thickness": 0.3, "material_card": tabbed}]}]}}, _wd())
+    assert b.error and "TAB" in b.error, b.error
+
+
+def test_dump_yaml_card_with_cr_line_breaks_becomes_block():
+    # \r\n 과 단독 \r 은 줄 구분자다. 단독 \r 은 그대로 내보내면 따옴표 한 줄이 되어 덱에 쓰레기가
+    # 써지고 층 mid=0 이 됐다(수정 전 실측). 공백으로 쓴 같은 카드와 한 글자도 다르지 않아야 한다.
+    lf = "*MAT_ELASTIC_TITLE\nSubstrate\n        90  7.85E-09  2.10E+05       0.3\n"
+    for card in (lf.replace("\n", "\r\n"), lf.replace("\n", "\r")):
+        text = _dump_yaml({"layers": [{"material_card": card}]})
+        assert "  - material_card: |\n      *MAT_ELASTIC_TITLE\n" in text, text
+        assert text == _dump_yaml({"layers": [{"material_card": lf}]})
+        assert yaml.safe_load(text)["layers"][0]["material_card"] == lf
+
+
+def test_dump_yaml_blank_card_is_rejected():
+    # 공백·탭뿐인 카드는 정규화하면 내용 줄이 0 이다. 수정 전에는 따옴표 스칼라로 조용히 나가
+    # rc=0 인 채 층 mid=0 짜리 덱이 됐다.
+    with pytest.raises(CardSerializationError) as exc:
+        _dump_yaml({"layers": [{"material_card": "\n   \n\t\n"}]})
+    assert "blank" in str(exc.value)
+
+
+def test_dump_yaml_card_with_leading_space_is_rejected():
+    # 첫 줄이 공백으로 시작하면 YAML 이 `|2` 헤더를 붙이는데, 받는 쪽은 블록 들여쓰기를 '첫 내용
+    # 줄' 기준으로 잡아 그 선행 공백을 먹는다(MID 칸이 밀린다). 애매하므로 거절한다.
+    card = "  *MAT_ELASTIC_TITLE\nSubstrate\n        90  7.85E-09  2.10E+05       0.3\n"
+    with pytest.raises(CardSerializationError):
+        _dump_yaml({"layers": [{"material_card": card}]})
+
+
+def test_dump_yaml_card_with_yaml_line_break_char_is_rejected():
+    # 0x85/U+2028 은 블록으로는 나가지만 읽을 때 한 줄이 두 줄로 쪼개진다(카드 줄 수가 달라진다).
+    for ch in ("\x85", "\u2028"):
+        with pytest.raises(CardSerializationError):
+            _dump_yaml({"layers": [{"material_card": f"*MAT_ELASTIC_TITLE\nSub{ch}strate\n        90  1.0\n"}]})
+
+
+def test_dump_yaml_single_line_value_is_normalized():
+    # 한 줄로 접히는 값도 정규화한 쪽이 나가야 한다(예전에는 원본이 나가 앞뒤 빈 줄이 되살아났다).
+    text = _dump_yaml({"layers": [{"material_card": "\n\n*MAT_ELASTIC   \n\n"}]})
+    assert text == "layers:\n  - material_card: '*MAT_ELASTIC'\n", text
 
 
 def test_dump_yaml_card_with_leading_blank_line_stays_plain_block():

@@ -14,6 +14,7 @@ In both yaml cases argv = [op, "config.yaml"].
 """
 from __future__ import annotations
 
+import io
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -67,16 +68,22 @@ def _represent_dict(dumper, data):  # noqa: ANN001
 _KDumper.add_representer(dict, _represent_dict)
 
 
-# 여러 줄 문자열(material_card 등)을 리터럴 블록 `key: |` 로 내보내기 전에 정규화한다.
-# PyYAML 은 아래 세 경우에 블록 표기를 포기하거나 명시 들여쓰기 헤더를 붙이는데, 그러면 C++ 파서가
-# 카드를 못 읽어 조용히 mid=0 짜리 덱이 나온다(따옴표 문자열 한 줄이 그대로 덱에 써지기도 한다):
-#   - 줄 끝 공백  → 따옴표 문자열   (LS-DYNA 고정 폭 칸은 끝 공백에 의미 없음 → 뗀다)
-#   - TAB         → 따옴표 문자열   (고정 폭 카드에 탭은 자리 표시일 뿐 → 편집기 기준 8칸으로 편다)
-#   - 앞쪽 빈 줄  → `|2` 헤더       (카드 앞 빈 줄은 의미 없음 → 버린다)
-# 셋 다 칸 위치(10칸 정렬)를 바꾸지 않는다. 첫 줄이 공백으로 시작하는 카드는 YAML 규칙상 `|2` 를
-# 피할 수 없고, 선행 공백을 떼면 MID 칸이 망가지므로 여기서는 손대지 않는다.
+# 여러 줄 문자열(material_card 등)은 리터럴 블록 `key: |` 로 나가야 한다. PyYAML 이 블록 표기를
+# 포기해 따옴표 문자열 한 줄이 되면 C++ 파서는 그 한 줄을 카드로 읽어 조용히 mid=0 짜리 덱을 낸다.
+# 그래서 뜻이 없는 차이(줄 끝 공백, 줄 구분자 표기, 카드 앞뒤 빈 줄)는 정규화하고, 칸 위치를 흔들거나
+# 블록으로 내보낼 수 없는 카드는 조용히 넘기지 않고 거절한다 — 애매한 카드는 오답 덱보다 실패가 낫다.
+_CARD_BREAKS = "\x85  "  # YAML 이 줄바꿈으로 읽는 문자들(블록에 그대로 나가면 줄이 쪼개진다)
+
+
+class CardSerializationError(ValueError):
+    """여러 줄 카드를 리터럴 블록으로 안전하게 내보낼 수 없다(조용한 오답 덱 대신 실패시킨다)."""
+
+
 def _normalize_block_text(data: str) -> str:
-    lines = [line.rstrip() for line in data.expandtabs(8).split("\n")]
+    # \r\n 과 단독 \r 은 줄 구분자이므로 \n 으로 통일한다. 줄 끝 공백과 카드 앞뒤 빈 줄은 고정 폭
+    # 카드에서 뜻이 없다. 어느 것도 칸 위치(10칸 정렬)를 바꾸지 않는다.
+    text = data.replace("\r\n", "\n").replace("\r", "\n")
+    lines = [line.rstrip() for line in text.split("\n")]
     while lines and not lines[0]:
         lines.pop(0)
     while lines and not lines[-1]:
@@ -84,11 +91,48 @@ def _normalize_block_text(data: str) -> str:
     return "\n".join(lines) + "\n" if lines else ""
 
 
+def _check_block_card(text: str) -> None:
+    """블록으로 내보내면 조용히 뜻이 바뀌는 카드를 거절한다(TAB·줄바꿈 문자·첫 줄 선행 공백)."""
+    for i, line in enumerate(text.rstrip("\n").split("\n"), start=1):
+        if "\t" in line:
+            # 탭을 펴면 탭 폭 가정(8? 4?)에 따라 뒤 칸이 밀린다 → RO 가 사라지는 식으로 조용히 틀린다.
+            raise CardSerializationError(
+                f"material_card line {i} contains a TAB — "
+                "LS-DYNA 고정폭 카드는 공백으로 칸을 맞춰 주세요"
+            )
+        bad = next((ch for ch in line if ch in _CARD_BREAKS), None)
+        if bad is not None:
+            # 블록으로는 나가지만 읽을 때 한 줄이 두 줄로 쪼개진다(카드 줄 수가 달라진다).
+            raise CardSerializationError(
+                f"material_card line {i} contains U+{ord(bad):04X}, which YAML reads as a line "
+                "break — 줄바꿈은 \\n 만 쓰세요"
+            )
+    if text.startswith(" "):
+        # 첫 줄이 공백으로 시작하면 YAML 은 `|2` 명시 들여쓰기 헤더를 붙이는데, 받는 쪽은 블록
+        # 들여쓰기를 '첫 내용 줄' 기준으로 잡아 그 선행 공백을 먹는다 → MID 칸이 밀린다.
+        raise CardSerializationError(
+            "material_card 의 첫 줄이 공백으로 시작합니다 — "
+            "카드는 *KEYWORD 줄로 시작해야 합니다(선행 공백을 떼 주세요)"
+        )
+    if not yaml.emitter.Emitter(io.StringIO()).analyze_scalar(text).allow_block:
+        # 위에서 걸러낸 것 말고도 emitter 가 블록을 포기하는 입력이 있으면(특수 문자 등) 따옴표
+        # 스칼라로 조용히 떨어진다. 그게 바로 원래 결함이므로 여기서 멈춘다.
+        raise CardSerializationError(
+            "material_card 를 YAML 리터럴 블록으로 내보낼 수 없습니다 — "
+            "카드에 제어·특수 문자가 있는지 확인해 주세요"
+        )
+
+
 def _represent_str(dumper, data):  # noqa: ANN001
     text = _normalize_block_text(data)
     if "\n" in text.rstrip("\n"):
+        _check_block_card(text)
         return dumper.represent_scalar("tag:yaml.org,2002:str", text, style="|")
-    return dumper.represent_scalar("tag:yaml.org,2002:str", data)
+    if not text and ("\n" in data or "\r" in data):
+        # 여러 줄이었는데 내용 줄이 하나도 남지 않았다 = 빈 카드. 통과시키면 mid=0 덱이 된다.
+        raise CardSerializationError("material_card is blank — 카드 내용이 없습니다")
+    # 한 줄로 접히는 값도 정규화한 쪽을 내보낸다(원본을 내보내면 앞뒤 빈 줄·TAB 가 되살아난다).
+    return dumper.represent_scalar("tag:yaml.org,2002:str", text.rstrip("\n"))
 
 
 _KDumper.add_representer(str, _represent_str)
@@ -134,10 +178,14 @@ def build_command(op: str, args: dict, work_dir: Path,
     params = entry.get("params", [])
     invocation = entry.get("invocation")
 
-    if invocation == "positional":
-        return _build_positional(op, entry, params, args, work_dir)
-    if invocation == "yaml":
-        return _build_yaml(op, entry, params, args, work_dir)
+    # 카드를 안전하게 직렬화할 수 없으면 덱을 내지 않고 오류로 돌려준다(조용한 mid=0 덱 방지).
+    try:
+        if invocation == "positional":
+            return _build_positional(op, entry, params, args, work_dir)
+        if invocation == "yaml":
+            return _build_yaml(op, entry, params, args, work_dir)
+    except CardSerializationError as exc:
+        return BuiltCommand(argv=[], error=str(exc))
     return BuiltCommand(argv=[], error=f"unknown invocation: {invocation}")
 
 
