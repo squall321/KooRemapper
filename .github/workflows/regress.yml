@@ -1,0 +1,54 @@
+# C++ 회귀 가드 — 빌드 후 tools/regress 전체와 help 사례를 실제 바이너리로 돌린다(수동 전용이었다).
+name: regress
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  cpp-regress:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake g++ libomp-dev
+
+      - name: Configure CMake
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      # 이 잡에서 유일하게 오래 걸리는 단계다(전체 소스 컴파일, 수 분).
+      # 시험 자체는 gmsh 없이 1초, gmsh 가 있어도 20초 안쪽이다.
+      - name: Build (long — full compile)
+        run: cmake --build build --config Release -j$(nproc)
+
+      - name: Unit tests
+        run: ./build/bin/KooRemapper_tests
+
+      # help 의 matdb 사례는 database 를 SIF 경로로 직접 가리킨다.
+      # 번들 DB 를 그 자리에 두지 않으면 'Cannot load database from: ...' 로 rc=1 이 된다.
+      - name: Stage bundled material DB (for the matdb help example)
+        run: |
+          sudo mkdir -p /opt/kooremapper/materials
+          sudo cp dist/materials/material_db.json /opt/kooremapper/materials/
+
+      # 러너에는 gmsh 가 없다. gmsh 를 쓰는 항목(meshfix 실행, gmsh 탐색)은 시험 쪽에서
+      # 스스로 'SKIP: gmsh 실행 파일 없음' 을 찍고 넘어간다 — 아래 로그에 그대로 남는다.
+      - name: Regression suite (tools/regress)
+        run: |
+          echo "gmsh: $(command -v gmsh || echo 'not installed — gmsh-dependent checks will SKIP')"
+          fail=0
+          for t in tools/regress/*.py; do
+            echo "::group::$t"
+            if python3 "$t" build/bin/KooRemapper; then
+              echo "-> OK"
+            else
+              echo "-> FAIL"
+              fail=1
+            fi
+            echo "::endgroup::"
+          done
+          exit $fail
+
+      - name: Help examples
+        run: python3 tools/help/run_help_examples.py build/bin/KooRemapper
