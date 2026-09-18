@@ -268,7 +268,7 @@ operations:
           "요소 카드 줄 수는 어림짐작이 아니라 매뉴얼 표로 정한다 — 키워드 옵션(H20·T15·P21·H27·P40·H64·ORTHO·DOF·THICKNESS·BETA·MCID·OFFSET), 그다음 *SECTION_SOLID ELFORM 23-29, 마지막으로 줄 구조 순이다. *ELEMENT_SHELL_THICKNESS 계열은 두께 카드(중간절점이 있으면 셋째 카드까지)를 한 카드로 묶어 함께 지운다",
           "고차 정식 파트(ELFORM 23-29)는 rc=1 로 거절한다 — 이 도구는 요소마다 8 절점 모서리만 담아 중간 절점을 다시 만들 수 없다. 덱의 요소 카드 수와 리더가 읽은 수가 다를 때도 rc=1 이다(*ELEMENT_SOLID_ORTHO 처럼 읽지 않는 변형)",
           "COMPOSITE 계열(*ELEMENT_SHELL_COMPOSITE·*ELEMENT_TSHELL_COMPOSITE)은 적층점 수에 따라 카드 줄 수가 달라 손대지 않고 그대로 내보낸다. 그 섹션의 요소를 지워야 하면 덱을 쓰지 않고 rc=1",
-          "끝나면 파트별 요소 수를 'PID x: a → b (삭제/신규)' 와 합계로 찍고, 출력 덱을 다시 읽어 기대 수와 맞는지 스스로 확인한다 — 어긋나면 파일을 쓰지 않고 rc=1 이다(무증상 결함을 잡는 마지막 관문)",
+          "끝나면 파트별 요소 수를 'PID x: a → b (삭제/신규)' 와 합계로 찍고, 출력 덱을 다시 읽어 기대 수와 맞는지 스스로 확인한다 — 이번 op 가 건드리지 않은 파트와 합계까지 본다. 어긋나면 파일을 쓰지 않고 rc=1 이다(무증상 결함을 잡는 마지막 관문)",
           "*INCLUDE 가 있는 덱은 세트의 소비자를 다 볼 수 없어 세트를 펴지 않고 보고만 한다",
           "못 옮긴 자리가 하나라도 남으면 rc=1 이고 덱은 쓴다. 전체 목록은 덱 머리(*KEYWORD 바로 뒤)의 '$ KOOREMAPPER-PIDREF' 블록에 moved/left/manual/unknown/maybe 등급과 입력 덱 기준 줄 번호로 들어간다. maybe(화이트리스트 밖)는 rc 에 넣지 않는다",
           "pid_refs: strict(기본) | warn — warn 은 같은 보고를 하고 rc=0 으로 끝낸다(기존 파이프라인의 탈출구). 그 밖의 값은 rc=1 + invalid pid_refs. assemble 은 operations[] 항목 안에, 단독 restack 은 YAML 에 그대로 적는다",
