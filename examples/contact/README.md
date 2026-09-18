@@ -305,4 +305,5 @@ model.k: 3 HEX8 parts (1×1×1 cubes), 공유 노드 접촉면
 | `eroding` | `ERODING_SURFACE_TO_SURFACE` |
 | `forming` | `FORMING_SURFACE_TO_SURFACE` |
 
-약칭에 없는 값은 그대로 대문자 변환: `forming_one_way_surface_to_surface` → `*CONTACT_FORMING_ONE_WAY_SURFACE_TO_SURFACE`
+약칭에 없는 값은 그대로 대문자 변환: `forming_one_way_surface_to_surface` → `*CONTACT_FORMING_ONE_WAY_SURFACE_TO_SURFACE`.
+KooRemapper 가 아는 접촉 키워드 목록에 없는 값이면 `[WARN] ... is not a known contact keyword` 를 찍고 그대로 쓴다(rc=0) — 단독 `contact` 와 `assemble` 이 같은 목록·같은 경고를 쓴다.

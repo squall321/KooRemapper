@@ -3,6 +3,7 @@
 #include "kw_util.h"
 #include "cli/ConsoleOutput.h"
 #include "util/YamlComment.h"
+#include "util/ContactKeywords.h"
 #include "core/Mesh.h"
 #include "parser/KFileReader.h"
 #include <fstream>
@@ -494,39 +495,12 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
             // 단독 contact 에선 없는 키워드 AUTO 가 됐다. 전체 키워드로 쓴 값은 그대로 통과한다.
             ctype = ct_getPreset(ctype).keyword;
 
-            // 허용값 검증(D1) — 표에 없는 값은 ct_getPreset 이 대문자로 바꿔 그대로 돌려주므로,
-            // 예전엔 'type: bogus' 가 *CONTACT_BOGUS_TITLE 이라는 없는 키워드를 덱에 썼다.
-            // 아래 목록은 KooRemapper 가 실제로 쓰는 카드 구성(카드 1·2 + 선택 THERMAL/TIEBREAK)과
-            // 맞는 접촉 키워드 — ct_getPreset 의 프리셋 9종 + 자기 코드가 따로 쓰는 OFFSET/FAILURE 다.
-            {
-                static const char* kCreateTypes[] = {
-                    "AUTOMATIC_SURFACE_TO_SURFACE",
-                    "AUTOMATIC_SURFACE_TO_SURFACE_MORTAR",
-                    "AUTOMATIC_SURFACE_TO_SURFACE_TIEBREAK",
-                    "AUTOMATIC_SINGLE_SURFACE",
-                    "TIED_SURFACE_TO_SURFACE",
-                    "TIED_SURFACE_TO_SURFACE_OFFSET",
-                    "TIED_SURFACE_TO_SURFACE_FAILURE",
-                    "TIED_SURFACE_TO_SURFACE_MORTAR",
-                    "TIED_SURFACE_TO_SURFACE_THERMAL",
-                    "ERODING_SURFACE_TO_SURFACE",
-                    "FORMING_SURFACE_TO_SURFACE"
-                };
-                bool known = false;
-                for (const char* k : kCreateTypes) if (ctype == k) { known = true; break; }
-                if (!known) {
-                    console.error("[contact] create: unsupported type '" + act.type +
-                                  "' (allowed keywords: automatic_surface_to_surface, "
-                                  "automatic_surface_to_surface_mortar, automatic_surface_to_surface_tiebreak, "
-                                  "automatic_single_surface, tied_surface_to_surface, "
-                                  "tied_surface_to_surface_offset, tied_surface_to_surface_failure, "
-                                  "tied_surface_to_surface_mortar, tied_surface_to_surface_thermal, "
-                                  "eroding_surface_to_surface, forming_surface_to_surface; "
-                                  "short names: auto, automatic, tied, tied_thermal, thermal, tiebreak, "
-                                  "mortar, tied_mortar, single, eroding, forming)");
-                    return 1;
-                }
-            }
+            // 표에 없는 값은 ct_getPreset 이 대문자로 바꿔 그대로 돌려준다 — examples/contact/README.md 가
+            // 약속한 통과 규칙이므로 막지 않고, 아는 키워드 목록에 없을 때만 경고를 찍는다(assemble 과 같은 목록).
+            // 한동안 목록 밖을 rc=1 로 막았는데, LS-DYNA 접촉 키워드는 목록보다 훨씬 많아
+            // forming_one_way_surface_to_surface·automatic_nodes_to_surface 처럼 멀쩡한 값이 함께 막혔다.
+            if (!KooRemapper::ctKnownContactKeyword(ctype))
+                console.warning(KooRemapper::ctUnknownContactKeywordWarning(act.type, ctype));
 
             int ssid = 0, msid = 0, sstyp = 0, mstyp = 0;
 

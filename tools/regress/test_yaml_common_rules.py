@@ -22,10 +22,12 @@
     폴더 없는 이름만 그 규칙이고 '../data/box.k' 는 작업 폴더에서 찾아 열지 못했다.
   - contact slave:/master: 밑의 'pids:' 를 블록 목록('- 1')으로 쓰면 조용히 버려져 SET_PART 가
     만들어지지 않았다(인라인 'pids: [1]' 만 동작).
-  - contact create 의 'type:' 은 짧은 이름을 풀어 주지 않고 허용값 검증도 없어, assemble 에서
+  - contact create 의 'type:' 은 짧은 이름을 풀어 주지 않아, assemble 에서
     AUTOMATIC_SURFACE_TO_SURFACE 가 되는 'type: auto' 가 단독 contact 에서는 LS-DYNA 에 없는
-    *CONTACT_AUTO 가 됐다. 이제 assemble 과 같은 표(ct_getPreset)를 쓰고, 표에도 없고 아는
-    키워드도 아닌 값은 rc=1 로 거절한다.
+    *CONTACT_AUTO 가 됐다. 이제 assemble 과 같은 표(ct_getPreset)를 쓴다. 표에 없는 값은
+    examples/contact/README.md 의 약속대로 대문자로 그대로 통과하고, 아는 접촉 키워드 목록에
+    없을 때만 경고를 찍는다 — 단독과 assemble 이 같은 목록·같은 문구다. 한때 단독만 rc=1 로
+    막아 forming_one_way_surface_to_surface 같은 멀쩡한 키워드가 함께 막혔다.
 """
 import os
 import subprocess
@@ -282,10 +284,30 @@ def body(binary, tmp):
           "model: box.k\noutput: ct_bad.k\ncontacts:\n  - action: create\n    type: bogus\n"
           "    slave: { pid: 1 }\n    master: { pid: 1 }\n")
     rc, out = run(binary, data, "contact", "ct_bad.yaml")
-    check("contact: create 의 모르는 type 은 rc=1 + 허용값 목록 (예전엔 *CONTACT_BOGUS)",
-          rc == 1 and "unsupported type 'bogus'" in out and
-          "automatic_surface_to_surface" in out and "*CONTACT_BOGUS" not in out, f"rc={rc} {out[-300:]}")
-    check("contact: 거절했으면 산출 덱을 쓰지 않는다", not os.path.exists(os.path.join(data, "ct_bad.k")))
+    # 표에 없는 값은 examples/contact/README.md 의 약속대로 그대로 통과한다 — 다만 경고를 찍는다.
+    bad_deck = (open(os.path.join(data, "ct_bad.k")).read()
+                if os.path.exists(os.path.join(data, "ct_bad.k")) else "")
+    check("contact: create 의 모르는 type 은 경고만 찍고 그대로 통과한다",
+          rc == 0 and "not a known contact keyword" in out and "*CONTACT_BOGUS" in bad_deck,
+          f"rc={rc} {out[-300:]}")
+    # assemble 도 같은 목록·같은 문구를 쓴다 (예전엔 단독만 막고 assemble 은 조용히 통과했다)
+    write(os.path.join(data, "ct_bad_asm.yaml"),
+          "base_model: box.k\noutput: ct_bad_asm\noperations:\n  - type: contact\n    contacts:\n"
+          "      - action: create\n        type: bogus\n        slave:\n          pid: 1\n"
+          "        master:\n          pid: 1\n")
+    rc, out = run(binary, data, "assemble", "ct_bad_asm.yaml")
+    check("contact: assemble 도 모르는 type 에 같은 경고를 찍는다",
+          rc == 0 and "not a known contact keyword" in out, f"rc={rc} {out[-300:]}")
+    # 아는 접촉 키워드는 짧은 이름 표에 없어도 경고 없이 통과한다 (KooRemapper 자신이 쓰는 키워드 포함)
+    for kw in ("forming_one_way_surface_to_surface", "automatic_nodes_to_surface",
+               "automatic_general", "tied_shell_edge_to_surface"):
+        write(os.path.join(data, f"ct_k_{kw}.yaml"),
+              f"model: box.k\noutput: ct_k_{kw}.k\ncontacts:\n  - action: create\n    type: {kw}\n"
+              "    slave: { pid: 1 }\n    master: { pid: 1 }\n")
+        rc, out = run(binary, data, "contact", f"ct_k_{kw}.yaml")
+        check(f"contact: 아는 키워드 '{kw}' 는 경고 없이 *CONTACT_{kw.upper()} 로 나간다",
+              rc == 0 and "not a known contact keyword" not in out and
+              ("Created *CONTACT_" + kw.upper()) in out, f"rc={rc} {out[-250:]}")
 
     # 짧은 이름은 assemble 과 같은 전체 키워드로 풀린다 (예전엔 단독 contact 만 *CONTACT_AUTO 였다)
     for short, kw in (("auto", "AUTOMATIC_SURFACE_TO_SURFACE"),

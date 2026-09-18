@@ -18,6 +18,7 @@
 #include "analysis/MaterialModel.h"
 #include "validation/ElementQualityChecker.h"
 #include "validation/IntersectionDetector.h"
+#include "util/ContactKeywords.h"
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -10878,6 +10879,11 @@ static std::string ca_getContactKeyword(const std::string& type) {
     // Custom: uppercase as-is
     std::string upper = type;
     for (auto& c : upper) c = (char)std::toupper((unsigned char)c);
+    // 아는 접촉 키워드 목록에 없으면 알린다 — 단독 contact 와 같은 목록·같은 문구다.
+    // 예전엔 assemble 만 아무 말 없이 'type: bogus' 를 *CONTACT_BOGUS 로 내보내, 같은 값이
+    // 단독 contact 에선 rc=1 이고 assemble 에선 조용히 통과하는 비대칭이 있었다.
+    if (!KooRemapper::ctKnownContactKeyword(upper))
+        std::cout << "[WARNING] " << KooRemapper::ctUnknownContactKeywordWarning(type, upper) << "\n";
     return upper;
 }
 
