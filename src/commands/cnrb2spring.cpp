@@ -328,6 +328,7 @@ static std::map<int, std::set<int>> cg_parseElementOwners(const std::vector<std:
 // 사용 중 ID 집합 — 고정 번호대(9000만/990만/99만)가 원본과 겹치는지 '실행 시' 확인한다.
 // cnrb2solid runner 의 '모든 데이터 줄 칸0' 방식은 재질 상수까지 ID 로 세므로 쓰지 않는다.
 // 키워드 블록별로 그 블록에서 ID 가 실제로 있는 칸만 본다(ModelAssembler 의 mw_scanMaxId 와 같은 눈).
+// *SET_NODE* 의 SID 는 여기서 보지 않는다 — cg_parseNodeSets 가 읽은 것을 그대로 쓴다(파싱 정본은 하나다).
 // ============================================================
 
 struct CgUsedIds {
@@ -336,9 +337,10 @@ struct CgUsedIds {
 
 static CgUsedIds cg_scanUsedIds(const std::vector<std::string>& lines) {
     CgUsedIds u;
-    enum Kind { NONE, NODE, ELEM, PART, SECT, MAT, CURVE, SETNODE };
+    enum Kind { NONE, NODE, ELEM, PART, SECT, MAT, CURVE };
     Kind kind = NONE;
     bool firstDataTaken = false;
+    bool titlePending = false;   // '_TITLE' 카드의 제목 줄 한 줄
     int pendingElem = 0;   // ten nodes format — 다음 데이터 줄은 노드 목록이라 EID 가 아니다
     for (const auto& ln : lines) {
         std::string tr = cg_trim(ln);
@@ -353,8 +355,8 @@ static CgUsedIds cg_scanUsedIds(const std::vector<std::string>& lines) {
             else if (up.rfind("*SECTION_", 0) == 0)           kind = SECT;
             else if (up.rfind("*MAT_", 0) == 0)               kind = MAT;
             else if (up.rfind("*DEFINE_CURVE", 0) == 0)       kind = CURVE;
-            else if (up.rfind("*SET_NODE", 0) == 0)           kind = SETNODE;
             else                                              kind = NONE;
+            titlePending = (up.find("_TITLE") != std::string::npos);
             continue;
         }
         if (kind == NONE || tr[0] == '$') continue;
@@ -373,17 +375,27 @@ static CgUsedIds cg_scanUsedIds(const std::vector<std::string>& lines) {
             if (eid > 0) u.elem.insert(eid);
             continue;
         }
-        if (!cg_looksLikeDataLine(ln)) continue;      // 제목 줄
+        if (kind == PART) {                            // *PART 는 (제목,데이터) 쌍이 되풀이된다
+            if (!cg_looksLikeDataLine(ln)) continue;   // 제목 줄
+            int pid = cg_toInt(cg_field10(ln, 0));
+            if (pid > 0) u.part.insert(pid);
+            continue;
+        }
+        // SECTION·MAT·DEFINE_CURVE — 제목 줄은 '_TITLE 이면 한 줄' 로만 건넌다(cg_parseNodeSets 와 같은 판정).
+        // 여기서 cg_looksLikeDataLine 으로 거르면 칸이 하나뿐인 헤더 줄(예: *DEFINE_CURVE_TITLE 의 LCID)이
+        // 통째로 걸러지고 다음 데이터 줄이 ID 로 등록돼 충돌 검사가 죽는다.
+        if (titlePending) {
+            titlePending = false;
+            if (!cg_looksLikeDataLine(ln)) continue;   // 진짜 제목 줄만 건넌다
+        }
+        if (firstDataTaken) continue;                  // 이 카드들은 첫 데이터 줄에만 ID 가 있다
         int id = cg_toInt(cg_field10(ln, 0));
         if (id <= 0) continue;
-        if (kind == PART) { u.part.insert(id); continue; }   // *PART 는 (제목,데이터) 쌍이 되풀이된다
-        if (firstDataTaken) continue;                        // 그 밖의 카드는 첫 데이터 줄에만 ID 가 있다
         firstDataTaken = true;
         switch (kind) {
-            case SECT:    u.sect.insert(id);  break;
-            case MAT:     u.mat.insert(id);   break;
-            case CURVE:   u.curve.insert(id); break;
-            case SETNODE: u.set.insert(id);   break;
+            case SECT:  u.sect.insert(id);  break;
+            case MAT:   u.mat.insert(id);   break;
+            case CURVE: u.curve.insert(id); break;
             default: break;
         }
     }
@@ -558,6 +570,7 @@ static std::string cg_elementDiscreteLine(int eid, int pid, int n1, int n2) {
 
 struct CgJoint {
     int origPid = 0, origCid = 0, origPnode = 0, origNsid = 0;
+    int pnodeA = 0, pnodeB = 0;              // 원 PNODE 를 소속(요소 연결성)대로 한쪽 강체에만 넘긴다
     int sidePidA = 0, sidePidB = 0;          // 원 모델에서 CNRB 가 잇던 두 파트(작은 PID 가 A)
     std::vector<int> nodesA, nodesB;         // 원 세트의 등장 순서를 지킨 실재 노드
     CgVec3 anchor;
@@ -792,6 +805,18 @@ int cnrb2spring_apply(std::vector<std::string>& lines,
             double n = (double)v.size();
             return CgVec3{s.x / n, s.y / n, s.z / n};
         };
+        // PNODE 는 소속된 쪽 강체에만 넘긴다. 반대쪽 강체에 넘기면 그 노드가 두 강체에 함께 들어가고,
+        // LS-DYNA 가 PNODE 좌표를 그 강체 무게중심으로 옮겨 실메시 노드가 끌려간다(Vol_I *CONSTRAINED_NODAL_RIGID_BODY).
+        if (j.origPnode > 0) {
+            if (std::find(j.nodesA.begin(), j.nodesA.end(), j.origPnode) != j.nodesA.end())
+                j.pnodeA = j.origPnode;
+            else if (std::find(j.nodesB.begin(), j.nodesB.end(), j.origPnode) != j.nodesB.end())
+                j.pnodeB = j.origPnode;
+            else
+                console.warning("[cnrb2spring] PID " + std::to_string(c.pid) + ": PNODE " +
+                                std::to_string(j.origPnode) +
+                                " 은 어느 강체에 속하는지 정할 수 없어 버렸습니다(양쪽 다 PNODE=0)");
+        }
         j.cenA = cen(j.nodesA);
         j.cenB = cen(j.nodesB);
         j.anchor = {(j.cenA.x + j.cenB.x) / 2.0, (j.cenA.y + j.cenB.y) / 2.0,
@@ -836,8 +861,9 @@ int cnrb2spring_apply(std::vector<std::string>& lines,
     if (cfg.eps < cfg.gap)
         console.warning("[cnrb2spring] eps(" + cg_num(cfg.eps) + "mm) < gap(" + cg_num(cfg.gap) +
                         "mm): *ELEMENT_DISCRETE 는 VID=0 이라 작동축이 현재 N1->N2 방향입니다. 상대변위가 "
-                        "eps 를 넘으면 세 스프링이 모두 상대변위 방향으로 서므로 유격 없는 축 스프링(k_axial)이 "
-                        "전단 운동에도 저항할 수 있습니다");
+                        "eps 를 넘으면 세 스프링의 축이 모두 상대변위 방향으로 서서 사실상 하나의 반경 스프링처럼 "
+                        "동작합니다 — 유격을 다 쓰기 전에 축 분리가 깨지고 k_axial 이 전단 운동에도 저항합니다 "
+                        "(매뉴얼 43.11 참조)");
 
     // ── 5. ID 배정과 충돌 검사 (덱을 만들기 전에) ───────────────────────────
     const int B = cfg.cardIdStart;
@@ -859,6 +885,7 @@ int cnrb2spring_apply(std::vector<std::string>& lines,
     newPartIds.insert(pidShear); newPartIds.insert(pidAxial);
 
     CgUsedIds used = cg_scanUsedIds(lines);
+    for (const auto& kv : sets) used.set.insert(kv.first);  // SID 는 세트 파싱 정본에서 그대로 받는다
     for (const auto& c : cnrbs) used.part.insert(c.pid);   // CNRB 의 PID 는 파트 네임스페이스다
     for (const auto& j : joints) { used.part.erase(j.origPid); used.set.erase(j.origNsid); }
 
@@ -944,11 +971,11 @@ int cnrb2spring_apply(std::vector<std::string>& lines,
         cg_emitSetNode(ins, j.sidB, b, "cnrb2spring " + std::to_string(j.origPid) + " side B");
     }
     for (auto& j : joints) {
-        // PNODE 는 Side A 로 넘긴다(Side B 는 0). 원 PNODE 노드는 지우지 않는다.
+        // PNODE 는 소속된 쪽에만 붙인다(반대쪽은 0). 원 PNODE 노드는 지우지 않는다.
         cg_emitCnrb(ins, "cnrb2spring " + std::to_string(j.origPid) + " side A",
-                    j.newPidA, j.origCid, j.sidA, j.origPnode);
+                    j.newPidA, j.origCid, j.sidA, j.pnodeA);
         cg_emitCnrb(ins, "cnrb2spring " + std::to_string(j.origPid) + " side B",
-                    j.newPidB, j.origCid, j.sidB, 0);
+                    j.newPidB, j.origCid, j.sidB, j.pnodeB);
     }
     ins.push_back("*ELEMENT_DISCRETE");
     ins.push_back("$#    eid     pid      n1      n2     vid               s");
@@ -1065,9 +1092,10 @@ int cnrb2spring_apply(std::vector<std::string>& lines,
                                j.origPid, j.sidePidA, j.nodesA.size(), j.sidePidB, j.nodesB.size(),
                                AXN[ax], j.anchor.x, j.anchor.y, j.anchor.z, j.newPidA, j.newPidB));
     for (const auto& j : joints)
-        if (j.origPnode > 0)
-            console.println(cg_fmt("[cnrb2spring] PID %d: PNODE %d 를 side A 강체로 넘겼습니다(노드는 지우지 않습니다)",
-                                   j.origPid, j.origPnode));
+        if (j.pnodeA > 0 || j.pnodeB > 0)
+            console.println(cg_fmt("[cnrb2spring] PID %d: PNODE %d 를 side %s 강체로 넘겼습니다(노드는 지우지 않습니다)",
+                                   j.origPid, j.pnodeA > 0 ? j.pnodeA : j.pnodeB,
+                                   j.pnodeA > 0 ? "A" : "B"));
     console.println(cg_fmt("[cnrb2spring] 새 ID — 노드 %d..%d, 요소 %d..%d, 파트/세트 %d..%d, "
                            "곡선 %d,%d, 재질 %d,%d, 섹션 %d",
                            cfg.nodeIdStart, cfg.nodeIdStart + 4 * N - 1,

@@ -286,15 +286,27 @@ def body2(binary, d):
     check("_TITLE 인데 제목 줄이 빠진 덱에서도 PID/NSID 를 한 줄 밀려 읽지 않는다",
           rc == 0 and "PID 1201:" in out, f"rc={rc} {out[-300:]}")
 
-    # ── PNODE 는 side A 로 ────────────────────────────────────────────────
-    w(os.path.join(d, "pn.k"), shell_deck(pnode=9))
-    w(os.path.join(d, "pn.yaml"), "model: pn.k\noutput: pn_out.k\naxis: z\n")
-    rc, out = run(binary, d, "cnrb2spring", "pn.yaml")
-    pn = open(os.path.join(d, "pn_out.k")).read() if rc == 0 else ""
+    # ── PNODE 는 '소속된 쪽' 강체에만 ─────────────────────────────────────
+    # 양쪽에 다 넘기면 한 노드가 두 강체에 들어가고 LS-DYNA 가 PNODE 좌표를 무게중심으로 옮긴다.
+    # 노드 5 는 하판(PID 500=side A) 세트 멤버, 노드 11 은 상판(PID 700=side B) 세트 멤버,
+    # 노드 9 는 세트 멤버가 아니다.
+    for pn_node, sideA, sideB, why in ((5, 5, 0, "side A 노드"), (11, 0, 11, "side B 노드")):
+        w(os.path.join(d, "pn.k"), shell_deck(pnode=pn_node))
+        w(os.path.join(d, "pn.yaml"), "model: pn.k\noutput: pn_out.k\naxis: z\n")
+        rc, out = run(binary, d, "cnrb2spring", "pn.yaml")
+        pn = open(os.path.join(d, "pn_out.k")).read() if rc == 0 else ""
+        cn = blocks(pn).get("*CONSTRAINED_NODAL_RIGID_BODY_TITLE", [])
+        check(f"PNODE 가 {why}면 그 쪽 CNRB 에만 붙고 반대쪽은 0 이다 (노드는 지우지 않는다)",
+              rc == 0 and len(cn) == 2 and int(cn[0][30:40]) == sideA and int(cn[1][30:40]) == sideB,
+              f"rc={rc} {cn}")
+    w(os.path.join(d, "pnx.k"), shell_deck(pnode=9))
+    w(os.path.join(d, "pnx.yaml"), "model: pnx.k\noutput: pnx_out.k\naxis: z\n")
+    rc, out = run(binary, d, "cnrb2spring", "pnx.yaml")
+    pn = open(os.path.join(d, "pnx_out.k")).read() if rc == 0 else ""
     cn = blocks(pn).get("*CONSTRAINED_NODAL_RIGID_BODY_TITLE", [])
-    check("PNODE 는 side A 새 CNRB 로 넘어가고 side B 는 0 이다 (노드는 지우지 않는다)",
-          rc == 0 and len(cn) == 2 and int(cn[0][30:40]) == 9 and int(cn[1][30:40]) == 0 and
-          "PNODE 9 를 side A" in out, f"rc={rc} {cn}")
+    check("세트 멤버가 아닌 PNODE 는 양쪽 다 0 으로 두고 [WARN] 로 알린다",
+          rc == 0 and len(cn) == 2 and int(cn[0][30:40]) == 0 and int(cn[1][30:40]) == 0 and
+          "PNODE 9 은 어느 강체에 속하는지 정할 수 없어" in out, f"rc={rc} {cn}")
 
     # ── 축 교차검증 [WARN] ────────────────────────────────────────────────
     w(os.path.join(d, "ax.yaml"), "model: m.k\noutput: ax_out.k\naxis: x\n")
@@ -310,6 +322,30 @@ def body2(binary, d):
         check(f"ID 충돌({kw})은 조용히 밀지 않고 rc=1 + 바꿀 키 이름을 알린다",
               rc == 1 and f"{kw} ID 가 원본 덱과 겹칩니다" in out and key in out and
               not os.path.exists(os.path.join(d, "cl_out.k")), f"rc={rc} {out[-300:]}")
+    # 세트·곡선 축은 헤더 줄이 칸 하나뿐인 형식(LS-PrePost 가 내는 세 가지)에서도 충돌을 잡아야 한다 —
+    # 놓치면 SID 가 중복된 덱이 rc=0 으로 나가고 LS-DYNA 가 먼저 읽은 세트를 써 새 강체가 엉뚱한 노드를 묶는다.
+    sid_forms = (("한 칸", "%10d" % 990011),
+                 ("DA1..DA4", "%10d%10s%10s%10s%10s" % (990011, "0.0", "0.0", "0.0", "0.0")),
+                 ("DA1..DA4+SOLVER",
+                  "%10d%10s%10s%10s%10s%s" % (990011, "0.0", "0.0", "0.0", "0.0", "MECH")))
+    for form, hdr in sid_forms:
+        card = "*SET_NODE_LIST_TITLE\nunrelated\n%s\n%s" % (hdr, "%10d%10d" % (1, 2))
+        w(os.path.join(d, "sc.k"), shell_deck(extra_cards=card))
+        w(os.path.join(d, "sc.yaml"), "model: sc.k\noutput: sc_out.k\naxis: z\n")
+        if os.path.exists(os.path.join(d, "sc_out.k")):
+            os.remove(os.path.join(d, "sc_out.k"))
+        rc, out = run(binary, d, "cnrb2spring", "sc.yaml")
+        check(f"세트 SID 충돌을 '{form}' 형식 SID 줄에서도 rc=1 로 잡는다",
+              rc == 1 and "세트 ID 가 원본 덱과 겹칩니다" in out and "990011" in out and
+              not os.path.exists(os.path.join(d, "sc_out.k")), f"rc={rc} {out[-300:]}")
+    cv = ("*DEFINE_CURVE_TITLE\nexisting curve\n%10d\n%20.1f%20.1f\n%20.1f%20.1f" %
+          (990001, 0.0, 0.0, 1.0, 100.0))
+    w(os.path.join(d, "cc.k"), shell_deck(extra_cards=cv))
+    w(os.path.join(d, "cc.yaml"), "model: cc.k\noutput: cc_out.k\naxis: z\n")
+    rc, out = run(binary, d, "cnrb2spring", "cc.yaml")
+    check("성긴 *DEFINE_CURVE 헤더(LCID 한 칸)의 곡선 ID 충돌도 rc=1 로 잡는다",
+          rc == 1 and "곡선 ID 가 원본 덱과 겹칩니다" in out and "990001" in out and
+          not os.path.exists(os.path.join(d, "cc_out.k")), f"rc={rc} {out[-300:]}")
     w(os.path.join(d, "hi.yaml"), "model: m.k\noutput: hi_out.k\naxis: z\nnode_id_start: 99999999\n")
     rc, out = run(binary, d, "cnrb2spring", "hi.yaml")
     check("마지막 할당 ID 가 I8 상한(99999999)을 넘으면 rc=1",
