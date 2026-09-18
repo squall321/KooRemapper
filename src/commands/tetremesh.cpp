@@ -109,6 +109,7 @@ std::vector<int> parseIntList(const std::string& v) {
 bool readConfig(const std::string& path, Cfg& cfg, std::string& err) {
     std::ifstream f(path);
     if (!f.is_open()) { err = "Cannot open " + path; return false; }
+    KooRemapper::yamlSkipBOM(f);   // 윈도우 편집기가 붙인 BOM 이 첫 키를 망가뜨렸다
     std::string line;
     std::string section;  // "" / "quality" / "patch" / "improve" / "tetgen"
     int sectionIndent = -1;
@@ -202,6 +203,13 @@ bool readConfig(const std::string& path, Cfg& cfg, std::string& err) {
 
 int runTetRemesh(const std::string& configPath,
                  const KooRemapper::ConsoleOutput& console) {
+    {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(configPath, tabLine)) {
+            console.error(KooRemapper::yamlTabIndentMessage("tetremesh", tabLine));
+            return 1;
+        }
+    }
     using namespace KooRemapper;
     using namespace KooRemapper::remesh;
 

@@ -528,11 +528,19 @@ int hfdamp_apply(std::vector<std::string>& lines,
 // ============================================================
 
 int runHFDamp(const std::string& yamlFile, ConsoleOutput& console) {
+    {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(yamlFile, tabLine)) {
+            console.error(KooRemapper::yamlTabIndentMessage("hfdamp", tabLine));
+            return 1;
+        }
+    }
     std::ifstream f(yamlFile);
     if (!f.is_open()) {
         console.error("Cannot open config: " + yamlFile);
         return 1;
     }
+    KooRemapper::yamlSkipBOM(f);   // 윈도우 편집기가 붙인 BOM 이 첫 키를 망가뜨렸다
 
     // Determine config directory for relative path resolution
     std::string configDir;
@@ -541,10 +549,7 @@ int runHFDamp(const std::string& yamlFile, ConsoleOutput& console) {
         if (sl != std::string::npos) configDir = yamlFile.substr(0, sl);
     }
     auto resolvePath = [&](const std::string& p) -> std::string {
-        if (!configDir.empty() && !p.empty() &&
-            p[0] != '/' && p[0] != '\\' && !(p.size() >= 2 && p[1] == ':'))
-            return configDir + "/" + p;
-        return p;
+        return KooRemapper::yamlResolvePath(configDir, p);   // YAML 폴더 기준(절대 경로는 그대로)
     };
 
     std::string modelFile, outputFile;

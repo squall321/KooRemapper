@@ -65,6 +65,7 @@ BatteryConfig parseBatteryConfig(const std::string& yamlFile) {
     std::ifstream f(yamlFile);
     if (!f.is_open())
         throw std::runtime_error("Cannot open battery config: " + yamlFile);
+    KooRemapper::yamlSkipBOM(f);   // 윈도우 편집기가 붙인 BOM 이 첫 키를 망가뜨렸다
 
     BatteryConfig cfg;
     std::string section;   // current top-level section (geometry, materials, etc.)
@@ -589,6 +590,13 @@ static void generateBatch(const BatteryConfig& baseCfg,
 // ─────────────────────────────────────────────────────────────
 
 int runBattery(const std::string& yamlFile, ConsoleOutput& console) {
+    {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(yamlFile, tabLine)) {
+            console.error(KooRemapper::yamlTabIndentMessage("battery", tabLine));
+            return 1;
+        }
+    }
     BatteryConfig cfg;
     try {
         cfg = parseBatteryConfig(yamlFile);

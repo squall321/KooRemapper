@@ -66,6 +66,13 @@ static std::string modal_generateCards(int nmode, double fmin, double fmax,
 // ---------------------------------------------------------------------------
 
 int runModal(const std::string& yamlFile, ConsoleOutput& console) {
+    {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(yamlFile, tabLine)) {
+            console.error(KooRemapper::yamlTabIndentMessage("modal", tabLine));
+            return 1;
+        }
+    }
     // 1. Parse YAML
     std::string modelPath, outPath;
     int    nmode        = 10;
@@ -83,12 +90,13 @@ int runModal(const std::string& yamlFile, ConsoleOutput& console) {
     {
         std::string yf = yamlFile;
         size_t sep = yf.find_last_of("/\\");
-        configDir = (sep != std::string::npos) ? yf.substr(0, sep+1) : "";
+        configDir = (sep != std::string::npos) ? yf.substr(0, sep) : "";
     }
 
     {
         std::ifstream yin(yamlFile);
         if (!yin.is_open()) { console.error("Cannot open YAML: " + yamlFile); return 1; }
+        KooRemapper::yamlSkipBOM(yin);   // 윈도우 편집기가 붙인 BOM 이 첫 키를 망가뜨렸다
         std::string line;
         while (std::getline(yin, line)) {
             std::string t = kw_trim(line);
@@ -117,12 +125,7 @@ int runModal(const std::string& yamlFile, ConsoleOutput& console) {
     if (outPath.empty())   { console.error("YAML missing 'output' field"); return 1; }
 
     auto resolvePath = [&](const std::string& p) -> std::string {
-        if (!configDir.empty() && !p.empty() &&
-            p[0] != '/' && p[0] != '\\' && !(p.size() >= 2 && p[1] == ':') &&
-            p.find('/')  == std::string::npos &&
-            p.find('\\') == std::string::npos)
-            return configDir + "/" + p;
-        return p;
+        return KooRemapper::yamlResolvePath(configDir, p);   // YAML 폴더 기준(절대 경로는 그대로)
     };
     std::string modelFullPath = resolvePath(modelPath);
     std::string outFullPath   = resolvePath(outPath);

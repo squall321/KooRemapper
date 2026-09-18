@@ -1329,9 +1329,17 @@ int runInfo(const std::string& meshFile, const ConsoleOutput& console) {
  * Generate variable density mesh from YAML config
  */
 int runGenerateBox(const std::string& yamlFile, ConsoleOutput& console) {
+    {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(yamlFile, tabLine)) {
+            console.error(KooRemapper::yamlTabIndentMessage("generate", tabLine));
+            return 1;
+        }
+    }
     // Parse YAML
     std::ifstream f(yamlFile);
     if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
+    KooRemapper::yamlSkipBOM(f);   // 윈도우 편집기가 붙인 BOM 이 첫 키를 망가뜨렸다
 
     std::string configDir;
     {
@@ -1345,9 +1353,7 @@ int runGenerateBox(const std::string& yamlFile, ConsoleOutput& console) {
         return (a == std::string::npos) ? "" : s.substr(a, b - a + 1);
     };
     auto resolvePath = [&](const std::string& p) -> std::string {
-        if (p.find('/') != std::string::npos || p.find('\\') != std::string::npos)
-            return p;
-        return configDir.empty() ? p : configDir + "/" + p;
+        return KooRemapper::yamlResolvePath(configDir, p);   // YAML 폴더 기준(절대 경로는 그대로)
     };
 
     // Parameters with defaults
@@ -1479,6 +1485,13 @@ int runGenerateBox(const std::string& yamlFile, ConsoleOutput& console) {
 int runGenerateVar(const std::string& configFile, const std::string& outputFile,
                    const std::string& refFile, bool noScale,
                    const ConsoleOutput& console) {
+    {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(configFile, tabLine)) {
+            console.error(KooRemapper::yamlTabIndentMessage("generate-var", tabLine));
+            return 1;
+        }
+    }
     Timer timer;
     
     // Read YAML config (extended version)

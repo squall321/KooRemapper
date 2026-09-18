@@ -114,6 +114,7 @@ static bool mf_bool(const std::string& v) {
 static bool readConfig(const std::string& path, Cfg& cfg, std::string& err) {
     std::ifstream f(path);
     if (!f.is_open()) { err = "Cannot open " + path; return false; }
+    KooRemapper::yamlSkipBOM(f);   // 윈도우 편집기가 붙인 BOM 이 첫 키를 망가뜨렸다
 
     std::string line, section;
     int secIndent = -1;
@@ -1958,6 +1959,13 @@ static bool polishMesh(
 // ─────────────────────────────────────────────────────────────────────────────
 
 int runMeshFix(const char* configPath, ConsoleOutput& console) {
+    {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(std::string(configPath), tabLine)) {
+            console.error(KooRemapper::yamlTabIndentMessage("meshfix", tabLine));
+            return 1;
+        }
+    }
     Timer timer; timer.start();
 
     // 1. Config

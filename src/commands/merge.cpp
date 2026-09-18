@@ -123,11 +123,12 @@ static mg_Config mg_parseConfig(const std::string& yamlFile, ConsoleOutput& cons
         console.error("Cannot open config: " + yamlFile);
         return cfg;
     }
+    KooRemapper::yamlSkipBOM(yf);   // 윈도우 편집기가 붙인 BOM 이 첫 키를 망가뜨렸다
 
     std::string configDir;
     {
         size_t sep = yamlFile.find_last_of("/\\");
-        if (sep != std::string::npos) configDir = yamlFile.substr(0, sep + 1);
+        if (sep != std::string::npos) configDir = yamlFile.substr(0, sep);
     }
 
     bool inMergeList = false;
@@ -272,9 +273,7 @@ static mg_Config mg_parseConfig(const std::string& yamlFile, ConsoleOutput& cons
 
     // Resolve paths
     auto resolve = [&](std::string& p) {
-        if (p.empty()) return;
-        if (p.size() >= 2 && (p[1] == ':' || p[0] == '/' || p[0] == '\\')) return;
-        p = configDir + p;
+        p = KooRemapper::yamlResolvePath(configDir, p);   // YAML 폴더 기준(절대 경로는 그대로)
     };
     resolve(cfg.modelPath);
     resolve(cfg.outputPath);
@@ -826,6 +825,13 @@ static mg_MatProps mg_homogenize(
 // ─────────────────────────────────────────────────────────────
 
 int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
+    {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(yamlFile, tabLine)) {
+            console.error(KooRemapper::yamlTabIndentMessage("merge", tabLine));
+            return 1;
+        }
+    }
     mg_Config cfg = mg_parseConfig(yamlFile, console);
     if (cfg.badValue) return 1;
     if (cfg.modelPath.empty() || cfg.groups.empty()) {

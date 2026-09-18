@@ -225,6 +225,7 @@ void cc_applyCalibKey(CcCalib& c, const std::string& k, const std::string& v) {
 bool parseCclipYaml(const std::string& yamlFile, CcConfig& cfg, ConsoleOutput& console) {
     std::ifstream f(yamlFile);
     if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return false; }
+    KooRemapper::yamlSkipBOM(f);   // 윈도우 편집기가 붙인 BOM 이 첫 키를 망가뜨렸다
 
     size_t lastSlash = yamlFile.find_last_of("/\\");
     if (lastSlash != std::string::npos) cfg.configDir = yamlFile.substr(0, lastSlash);
@@ -992,6 +993,13 @@ std::string cc_jsonEsc(const std::string& s) {
 // ---------------------------------------------------------------------------
 
 int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
+    {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(yamlFile, tabLine)) {
+            console.error(KooRemapper::yamlTabIndentMessage("cclip", tabLine));
+            return 1;
+        }
+    }
     CcConfig cfg;
     if (!parseCclipYaml(yamlFile, cfg, console)) return 1;
 
@@ -1002,10 +1010,8 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
     if (cfg.stressOutput != "embed" && cfg.stressOutput != "include") { console.error("[cclip] stress_output must be embed|include"); return 1; }
     if (cfg.element != "shell" && cfg.element != "solid") { console.error("[cclip] element must be shell|solid"); return 1; }
 
-    auto resolvePath = [&](const std::string& p) {
-        if (!cfg.configDir.empty() && p.find('/')==std::string::npos && p.find('\\')==std::string::npos)
-            return cfg.configDir + "/" + p;
-        return p;
+    auto resolvePath = [&](const std::string& p) -> std::string {
+        return KooRemapper::yamlResolvePath(cfg.configDir, p);   // YAML 폴더 기준(절대 경로는 그대로)
     };
     std::string modelPath = resolvePath(cfg.modelFile);
     std::string outPrefix = cfg.outputFile;

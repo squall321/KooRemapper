@@ -121,8 +121,16 @@ static std::string impl_generateImplicitCards(
 // ---------------------------------------------------------------------------
 
 int runExplicit(const std::string& yamlFile, ConsoleOutput& console) {
+    {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(yamlFile, tabLine)) {
+            console.error(KooRemapper::yamlTabIndentMessage("explicit", tabLine));
+            return 1;
+        }
+    }
     std::ifstream f(yamlFile);
     if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
+    KooRemapper::yamlSkipBOM(f);   // 윈도우 편집기가 붙인 BOM 이 첫 키를 망가뜨렸다
 
     std::string configDir;
     size_t lastSlash = yamlFile.find_last_of("/\\");
@@ -150,11 +158,7 @@ int runExplicit(const std::string& yamlFile, ConsoleOutput& console) {
     if (outputFile.empty()) { console.error("explicit YAML: 'output' not specified"); return 1; }
 
     auto resolvePath = [&](const std::string& p) -> std::string {
-        if (!configDir.empty() && !p.empty() &&
-            p[0] != '/' && p[0] != '\\' && !(p.size() >= 2 && p[1] == ':') &&
-            p.find('/') == std::string::npos && p.find('\\') == std::string::npos)
-            return configDir + "/" + p;
-        return p;
+        return KooRemapper::yamlResolvePath(configDir, p);   // YAML 폴더 기준(절대 경로는 그대로)
     };
     std::string modelPath = resolvePath(modelFile);
     std::string outPath   = resolvePath(outputFile);
@@ -214,8 +218,16 @@ int runExplicit(const std::string& yamlFile, ConsoleOutput& console) {
 // ---------------------------------------------------------------------------
 
 int runImplicit(const std::string& yamlFile, ConsoleOutput& console) {
+    {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(yamlFile, tabLine)) {
+            console.error(KooRemapper::yamlTabIndentMessage("implicit", tabLine));
+            return 1;
+        }
+    }
     std::ifstream f(yamlFile);
     if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
+    KooRemapper::yamlSkipBOM(f);   // 윈도우 편집기가 붙인 BOM 이 첫 키를 망가뜨렸다
 
     std::string configDir;
     size_t lastSlash = yamlFile.find_last_of("/\\");
@@ -273,12 +285,7 @@ int runImplicit(const std::string& yamlFile, ConsoleOutput& console) {
     }
 
     auto resolvePath = [&](const std::string& p) -> std::string {
-        if (!configDir.empty() && !p.empty() &&
-            p[0]!='/' && p[0]!='\\' && !(p.size()>=2 && p[1]==':') &&
-            p.find('/')  == std::string::npos &&
-            p.find('\\') == std::string::npos)
-            return configDir + "/" + p;
-        return p;
+        return KooRemapper::yamlResolvePath(configDir, p);   // YAML 폴더 기준(절대 경로는 그대로)
     };
     std::string modelPath = resolvePath(modelFile);
     std::string outPath   = resolvePath(outputFile);

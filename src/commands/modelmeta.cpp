@@ -108,6 +108,7 @@ bool mm_parseConfig(const std::string& path, MmConfig& cfg, ConsoleOutput& conso
         console.error("[modelmeta] Cannot open config: " + path);
         return false;
     }
+    KooRemapper::yamlSkipBOM(f);   // 윈도우 편집기가 붙인 BOM 이 첫 키를 망가뜨렸다
     std::string line;
     while (std::getline(f, line)) {
         std::string s = mm_trim(line);
@@ -534,6 +535,13 @@ std::vector<int> mm_resolveSide(int sid, int styp,
 // ── 메인 ─────────────────────────────────────────────────────────────────────
 
 int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
+    {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(yamlFile, tabLine)) {
+            console.error(KooRemapper::yamlTabIndentMessage("modelmeta", tabLine));
+            return 1;
+        }
+    }
     MmConfig cfg;
     if (!mm_parseConfig(yamlFile, cfg, console)) return 1;
 

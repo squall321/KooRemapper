@@ -164,13 +164,21 @@ std::string db_buildExtentBinary(int neiph, int neips, int maxint,
 // ---------------------------------------------------------------------------
 
 int runDatabase(const std::string& yamlFile, ConsoleOutput& console) {
+    {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(yamlFile, tabLine)) {
+            console.error(KooRemapper::yamlTabIndentMessage("database", tabLine));
+            return 1;
+        }
+    }
     std::ifstream f(yamlFile);
     if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
+    KooRemapper::yamlSkipBOM(f);   // 윈도우 편집기가 붙인 BOM 이 첫 키를 망가뜨렸다
 
     std::string configDir;
     {
         size_t sp = yamlFile.find_last_of("/\\");
-        if (sp != std::string::npos) configDir = yamlFile.substr(0, sp + 1);
+        if (sp != std::string::npos) configDir = yamlFile.substr(0, sp);
     }
 
     std::string modelPath, outputPath;
@@ -220,13 +228,10 @@ int runDatabase(const std::string& yamlFile, ConsoleOutput& console) {
 
         if (section == Section::NONE) {
             if (key == "model") {
-                modelPath = val;
-                if (!configDir.empty() && modelPath.find('/') == std::string::npos && modelPath.find('\\') == std::string::npos)
-                    modelPath = configDir + modelPath;
+                // YAML 폴더 기준(절대 경로는 그대로) — 예전엔 폴더 붙은 상대 경로만 작업 폴더에서 찾았다
+                modelPath = KooRemapper::yamlResolvePath(configDir, val);
             } else if (key == "output") {
-                outputPath = val;
-                if (!configDir.empty() && outputPath.find('/') == std::string::npos && outputPath.find('\\') == std::string::npos)
-                    outputPath = configDir + outputPath;
+                outputPath = KooRemapper::yamlResolvePath(configDir, val);
             } else if (key == "preset") preset = val;
             else if (key == "dt")      try { dt      = std::stod(val); } catch (...) {}
             else if (key == "dt_plot") try { dt_plot = std::stod(val); } catch (...) {}

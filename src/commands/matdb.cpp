@@ -20,8 +20,16 @@ using KooRemapper::MatdbOperation;
 using KooRemapper::ModelAssembler;
 
 int runMatdb(const std::string& yamlFile, ConsoleOutput& console) {
+    {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(yamlFile, tabLine)) {
+            console.error(KooRemapper::yamlTabIndentMessage("matdb", tabLine));
+            return 1;
+        }
+    }
     std::ifstream f(yamlFile);
     if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
+    KooRemapper::yamlSkipBOM(f);   // 윈도우 편집기가 붙인 BOM 이 첫 키를 망가뜨렸다
 
     std::string configDir;
     size_t lastSlash = yamlFile.find_last_of("/\\");
@@ -125,14 +133,12 @@ int runMatdb(const std::string& yamlFile, ConsoleOutput& console) {
     if (modelFile.empty()) { console.error("[matdb] 'model' not specified"); return 1; }
     if (outputFile.empty()) { console.error("[matdb] 'output' not specified"); return 1; }
 
-    if (!configDir.empty() && modelFile.find('/') == std::string::npos && modelFile.find('\\') == std::string::npos)
-        modelFile = configDir + "/" + modelFile;
+    modelFile = KooRemapper::yamlResolvePath(configDir, modelFile);   // YAML 폴더 기준(절대 경로는 그대로)
 
     std::string outputPrefix = outputFile;
     if (outputPrefix.size() > 2 && outputPrefix.substr(outputPrefix.size()-2) == ".k")
         outputPrefix = outputPrefix.substr(0, outputPrefix.size()-2);
-    if (!configDir.empty() && outputPrefix.find('/') == std::string::npos && outputPrefix.find('\\') == std::string::npos)
-        outputPrefix = configDir + "/" + outputPrefix;
+    outputPrefix = KooRemapper::yamlResolvePath(configDir, outputPrefix);
 
     console.println("[matdb] Model: " + modelFile);
     console.println("[matdb] Output: " + outputPrefix + ".k");

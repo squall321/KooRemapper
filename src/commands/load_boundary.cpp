@@ -17,9 +17,17 @@
 using namespace KooRemapper;
 
 int runLoad(const std::string& yamlFile, ConsoleOutput& console) {
+    {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(yamlFile, tabLine)) {
+            console.error(KooRemapper::yamlTabIndentMessage("load", tabLine));
+            return 1;
+        }
+    }
 
     std::ifstream f(yamlFile);
     if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
+    KooRemapper::yamlSkipBOM(f);   // 윈도우 편집기가 붙인 BOM 이 첫 키를 망가뜨렸다
 
     std::string configDir;
     size_t lastSlash = yamlFile.find_last_of("/\\");
@@ -33,11 +41,6 @@ int runLoad(const std::string& yamlFile, ConsoleOutput& console) {
     };
     auto countIndent = [](const std::string& s) -> int {
         int n=0; while (n<(int)s.size() && s[n]==' ') ++n; return n;
-    };
-    // 들여쓰기에 탭이 있으면 countIndent 가 0 을 돌려줘 블록 구조가 통째로 무너진다 — 조용히 넘기지 않는다
-    auto tabIndent = [](const std::string& s) -> bool {
-        for (char c : s) { if (c == '\t') return true; if (c != ' ') return false; }
-        return false;
     };
     auto stripQuotes = [](const std::string& s) -> std::string {
         if (s.size() >= 2 && ((s.front()=='"' && s.back()=='"') || (s.front()=='\'' && s.back()=='\'')))
@@ -60,10 +63,6 @@ int runLoad(const std::string& yamlFile, ConsoleOutput& console) {
         int indent = countIndent(ln);
         std::string tr = trim(ln);
         if (tr.empty() || tr[0]=='#') continue;
-        if (tabIndent(ln)) {
-            console.error("[load] YAML 들여쓰기에 탭을 쓸 수 없습니다 (공백을 쓰세요): " + tr);
-            return 1;
-        }
 
         // Exit loads list
         if (inLoadsList && indent <= loadsListIndent && tr.substr(0,2) != "- ") {
@@ -195,14 +194,12 @@ int runLoad(const std::string& yamlFile, ConsoleOutput& console) {
         }
     }
 
-    if (!configDir.empty() && modelFile.find('/') == std::string::npos && modelFile.find('\\') == std::string::npos)
-        modelFile = configDir + "/" + modelFile;
+    modelFile = KooRemapper::yamlResolvePath(configDir, modelFile);   // YAML 폴더 기준(절대 경로는 그대로)
 
     std::string outputPrefix = outputFile;
     if (outputPrefix.size() > 2 && outputPrefix.substr(outputPrefix.size()-2) == ".k")
         outputPrefix = outputPrefix.substr(0, outputPrefix.size()-2);
-    if (!configDir.empty() && outputPrefix.find('/') == std::string::npos && outputPrefix.find('\\') == std::string::npos)
-        outputPrefix = configDir + "/" + outputPrefix;
+    outputPrefix = KooRemapper::yamlResolvePath(configDir, outputPrefix);
 
     console.println("[load] Model: " + modelFile);
     console.println("[load] Output: " + outputPrefix + ".k");
@@ -233,9 +230,17 @@ int runLoad(const std::string& yamlFile, ConsoleOutput& console) {
 
 // Standalone boundary command
 int runBoundary(const std::string& yamlFile, ConsoleOutput& console) {
+    {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(yamlFile, tabLine)) {
+            console.error(KooRemapper::yamlTabIndentMessage("boundary", tabLine));
+            return 1;
+        }
+    }
 
     std::ifstream f(yamlFile);
     if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
+    KooRemapper::yamlSkipBOM(f);   // 윈도우 편집기가 붙인 BOM 이 첫 키를 망가뜨렸다
 
     std::string configDir;
     size_t lastSlash = yamlFile.find_last_of("/\\");
@@ -249,11 +254,6 @@ int runBoundary(const std::string& yamlFile, ConsoleOutput& console) {
     };
     auto countIndent = [](const std::string& s) -> int {
         int n=0; while (n<(int)s.size() && s[n]==' ') ++n; return n;
-    };
-    // 들여쓰기에 탭이 있으면 countIndent 가 0 을 돌려줘 블록 구조가 통째로 무너진다 — 조용히 넘기지 않는다
-    auto tabIndent = [](const std::string& s) -> bool {
-        for (char c : s) { if (c == '\t') return true; if (c != ' ') return false; }
-        return false;
     };
     auto stripQuotes = [](const std::string& s) -> std::string {
         if (s.size() >= 2 && ((s.front()=='"' && s.back()=='"') || (s.front()=='\'' && s.back()=='\'')))
@@ -273,10 +273,6 @@ int runBoundary(const std::string& yamlFile, ConsoleOutput& console) {
         int indent = countIndent(ln);
         std::string tr = trim(ln);
         if (tr.empty() || tr[0]=='#') continue;
-        if (tabIndent(ln)) {
-            console.error("[boundary] YAML 들여쓰기에 탭을 쓸 수 없습니다 (공백을 쓰세요): " + tr);
-            return 1;
-        }
 
         // Exit boundaries list
         if (inBoundariesList && indent <= boundariesListIndent && tr.substr(0,2) != "- ") {
@@ -350,14 +346,9 @@ int runBoundary(const std::string& yamlFile, ConsoleOutput& console) {
     if (modelFile.empty()) { console.error("model not specified"); return 1; }
     if (outputFile.empty()) outputFile = modelFile;
 
-    // Resolve paths
-    if (!configDir.empty()) {
-        auto hasDir = [](const std::string& p) {
-            return p.find('/') != std::string::npos || p.find('\\') != std::string::npos;
-        };
-        if (!hasDir(modelFile))  modelFile  = configDir + "/" + modelFile;
-        if (!hasDir(outputFile)) outputFile = configDir + "/" + outputFile;
-    }
+    // Resolve paths — YAML 폴더 기준(절대 경로는 그대로)
+    modelFile  = KooRemapper::yamlResolvePath(configDir, modelFile);
+    outputFile = KooRemapper::yamlResolvePath(configDir, outputFile);
 
     std::string outputPrefix = outputFile;
     if (outputPrefix.size() >= 2 && outputPrefix.substr(outputPrefix.size()-2) == ".k")
@@ -392,9 +383,17 @@ int runBoundary(const std::string& yamlFile, ConsoleOutput& console) {
 
 // ── Standalone RBE command ──────────────────────────────────────────────────
 int runRbe(const std::string& yamlFile, ConsoleOutput& console) {
+    {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(yamlFile, tabLine)) {
+            console.error(KooRemapper::yamlTabIndentMessage("rbe", tabLine));
+            return 1;
+        }
+    }
 
     std::ifstream f(yamlFile);
     if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
+    KooRemapper::yamlSkipBOM(f);   // 윈도우 편집기가 붙인 BOM 이 첫 키를 망가뜨렸다
 
     std::string configDir;
     size_t lastSlash = yamlFile.find_last_of("/\\");
@@ -408,11 +407,6 @@ int runRbe(const std::string& yamlFile, ConsoleOutput& console) {
     };
     auto countIndent = [](const std::string& s) -> int {
         int n=0; while (n<(int)s.size() && s[n]==' ') ++n; return n;
-    };
-    // 들여쓰기에 탭이 있으면 countIndent 가 0 을 돌려줘 블록 구조가 통째로 무너진다 — 조용히 넘기지 않는다
-    auto tabIndent = [](const std::string& s) -> bool {
-        for (char c : s) { if (c == '\t') return true; if (c != ' ') return false; }
-        return false;
     };
     auto stripQuotes = [](const std::string& s) -> std::string {
         if (s.size() >= 2 && ((s.front()=='"' && s.back()=='"') || (s.front()=='\'' && s.back()=='\'')))
@@ -432,10 +426,6 @@ int runRbe(const std::string& yamlFile, ConsoleOutput& console) {
         int indent = countIndent(ln);
         std::string tr = trim(ln);
         if (tr.empty() || tr[0]=='#') continue;
-        if (tabIndent(ln)) {
-            console.error("[rbe] YAML 들여쓰기에 탭을 쓸 수 없습니다 (공백을 쓰세요): " + tr);
-            return 1;
-        }
 
         // Exit rbe list
         if (inRbeList && indent <= rbeListIndent && tr.substr(0,2) != "- ") {
@@ -504,14 +494,9 @@ int runRbe(const std::string& yamlFile, ConsoleOutput& console) {
     if (modelFile.empty()) { console.error("model not specified"); return 1; }
     if (outputFile.empty()) outputFile = modelFile;
 
-    // Resolve paths
-    if (!configDir.empty()) {
-        auto hasDir = [](const std::string& p) {
-            return p.find('/') != std::string::npos || p.find('\\') != std::string::npos;
-        };
-        if (!hasDir(modelFile))  modelFile  = configDir + "/" + modelFile;
-        if (!hasDir(outputFile)) outputFile = configDir + "/" + outputFile;
-    }
+    // Resolve paths — YAML 폴더 기준(절대 경로는 그대로)
+    modelFile  = KooRemapper::yamlResolvePath(configDir, modelFile);
+    outputFile = KooRemapper::yamlResolvePath(configDir, outputFile);
 
     std::string outputPrefix = outputFile;
     if (outputPrefix.size() >= 2 && outputPrefix.substr(outputPrefix.size()-2) == ".k")

@@ -413,9 +413,17 @@ int runMatswap(const std::string& modelFile, const std::string& bundleFile,
 // =====================================================================
 
 int runMatswapYaml(const std::string& yamlFile, ConsoleOutput& console) {
+    {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(yamlFile, tabLine)) {
+            console.error(KooRemapper::yamlTabIndentMessage("matswap", tabLine));
+            return 1;
+        }
+    }
     // Simple YAML parser for matswap config
     std::ifstream f(yamlFile);
     if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
+    KooRemapper::yamlSkipBOM(f);   // 윈도우 편집기가 붙인 BOM 이 첫 키를 망가뜨렸다
 
     // Config directory for relative paths
     std::string configDir;
@@ -586,12 +594,7 @@ int runMatswapYaml(const std::string& yamlFile, ConsoleOutput& console) {
     // configDir 는 bundle 에만 쓰여, 저장소 루트에서 'matswap examples/matswap/01_single_pid.yaml' 을
     // 돌리면 model/output 이 현재 폴더 기준이라 모델을 못 찾았다 — optimize 와 같게 YAML 폴더 기준으로 푼다
     auto resolvePath = [&](const std::string& p) -> std::string {
-        if (!configDir.empty() && !p.empty() &&
-            p[0] != '/' && p[0] != '\\' &&
-            !(p.size() >= 2 && p[1] == ':')) {
-            return configDir + "/" + p;
-        }
-        return p;
+        return KooRemapper::yamlResolvePath(configDir, p);   // YAML 폴더 기준(절대 경로는 그대로)
     };
     modelFile  = resolvePath(modelFile);
     outputFile = resolvePath(outputFile);

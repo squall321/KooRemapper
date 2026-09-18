@@ -46,12 +46,20 @@ static std::string st_toUpper(const std::string& s) {
 
 int runStrip(const std::string& yamlFile, ConsoleOutput& console)
 {
+    {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(yamlFile, tabLine)) {
+            console.error(KooRemapper::yamlTabIndentMessage("strip", tabLine));
+            return 1;
+        }
+    }
     // --- Parse YAML config ---
     std::ifstream yf(yamlFile);
     if (!yf.is_open()) {
         console.error("Cannot open config: " + yamlFile);
         return 1;
     }
+    KooRemapper::yamlSkipBOM(yf);   // 윈도우 편집기가 붙인 BOM 이 첫 키를 망가뜨렸다
 
     std::string modelPath, outputPath;
     std::vector<std::string> stripKeywords;
@@ -117,14 +125,10 @@ int runStrip(const std::string& yamlFile, ConsoleOutput& console)
     {
         size_t sep = yamlFile.find_last_of("/\\");
         if (sep != std::string::npos)
-            configDir = yamlFile.substr(0, sep + 1);
+            configDir = yamlFile.substr(0, sep);
     }
     auto resolvePath = [&](const std::string& p) -> std::string {
-        if (p.empty()) return p;
-        if (p.size() >= 2 && (p[1] == ':' || p[0] == '/' || p[0] == '\\')) return p;
-        if (p.find('/') == std::string::npos && p.find('\\') == std::string::npos)
-            return configDir + p;
-        return configDir + p;
+        return KooRemapper::yamlResolvePath(configDir, p);   // YAML 폴더 기준(절대 경로는 그대로)
     };
     modelPath = resolvePath(modelPath);
     outputPath = resolvePath(outputPath);

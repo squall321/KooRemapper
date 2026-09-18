@@ -67,10 +67,7 @@ struct StandaloneYamlBase {
     // 절대 경로가 아니면 YAML 이 있는 폴더 기준으로 푼다(assemble 과 같은 규칙).
     // 예전엔 '/' 가 없는 이름만 붙여, '../arc30/arc30_flat.k' 같은 상대 경로는 실행 폴더에서 찾아 열지 못했다.
     std::string resolvePath(const std::string& p) const {
-        if (configDir.empty() || p.empty()) return p;
-        if (p.size() >= 2 && p[1] == ':') return p;            // Windows 절대 경로(X:\...)
-        if (p[0] == '/' || p[0] == '\\') return p;             // POSIX 절대 경로 / UNC
-        return configDir + "/" + p;
+        return KooRemapper::yamlResolvePath(configDir, p);
     }
 
     // operations 항목 수 — 단독 명령은 한 항목만 다루므로, 여러 개면 조용히 합치지 말고 거부해야 한다.
@@ -79,6 +76,7 @@ struct StandaloneYamlBase {
     static int countOperations(const std::string& yamlFile) {
         std::ifstream f(yamlFile);
         if (!f.is_open()) return 0;
+        KooRemapper::yamlSkipBOM(f);   // 윈도우 편집기가 붙인 BOM 이 첫 키를 망가뜨렸다
         int opsIndent = -1;   // 'operations:' 키의 들여쓰기
         int itemIndent = -1;  // 항목 대시의 들여쓰기 — 하위 목록(layers·points·targets)은 더 깊어 세지 않는다
         // 현재 열려 있는 블록 키(값이 빈 'layers:'·'targets:' 등)의 들여쓰기 스택. 하나만 기억하면
@@ -283,6 +281,13 @@ static bool writeOutputChecked(ModelAssembler& assembler, const std::string& out
 
 // ── Standalone wrap ─────────────────────────────────────────────────────────
 int runWrap(const std::string& yamlFile, ConsoleOutput& console) {
+    {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(yamlFile, tabLine)) {
+            console.error(KooRemapper::yamlTabIndentMessage("wrap", tabLine));
+            return 1;
+        }
+    }
     StandaloneYamlBase y;
     y.resolveFiles(yamlFile);
     if (rejectMultiOperation(yamlFile, "wrap", console)) return 1;
@@ -291,6 +296,7 @@ int runWrap(const std::string& yamlFile, ConsoleOutput& console) {
 
     std::ifstream f(yamlFile);
     if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
+    KooRemapper::yamlSkipBOM(f);   // 윈도우 편집기가 붙인 BOM 이 첫 키를 망가뜨렸다
     std::string ln;
     while (std::getline(f, ln)) {
         std::string tr = y.trim(ln);
@@ -352,6 +358,13 @@ int runWrap(const std::string& yamlFile, ConsoleOutput& console) {
 
 // ── Standalone update ───────────────────────────────────────────────────────
 int runUpdate(const std::string& yamlFile, ConsoleOutput& console) {
+    {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(yamlFile, tabLine)) {
+            console.error(KooRemapper::yamlTabIndentMessage("update", tabLine));
+            return 1;
+        }
+    }
     StandaloneYamlBase y;
     y.resolveFiles(yamlFile);
     if (rejectMultiOperation(yamlFile, "update", console)) return 1;
@@ -360,6 +373,7 @@ int runUpdate(const std::string& yamlFile, ConsoleOutput& console) {
 
     std::ifstream f(yamlFile);
     if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
+    KooRemapper::yamlSkipBOM(f);   // 윈도우 편집기가 붙인 BOM 이 첫 키를 망가뜨렸다
     std::string ln;
     while (std::getline(f, ln)) {
         std::string tr = y.trim(ln);
@@ -422,12 +436,20 @@ static bool validateLikeAssemble(AssemblyOperation::Type type, Op AssemblyOperat
 
 // ── Standalone restack ──────────────────────────────────────────────────────
 int runRestack(const std::string& yamlFile, ConsoleOutput& console) {
+    {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(yamlFile, tabLine)) {
+            console.error(KooRemapper::yamlTabIndentMessage("restack", tabLine));
+            return 1;
+        }
+    }
     StandaloneYamlBase y;
     y.resolveFiles(yamlFile);
     if (rejectMultiOperation(yamlFile, "restack", console)) return 1;
 
     std::ifstream f(yamlFile);
     if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
+    KooRemapper::yamlSkipBOM(f);   // 윈도우 편집기가 붙인 BOM 이 첫 키를 망가뜨렸다
 
     RestackOperation op;
     bool inLayers = false;
@@ -543,12 +565,20 @@ int runRestack(const std::string& yamlFile, ConsoleOutput& console) {
 
 // ── Standalone bend ─────────────────────────────────────────────────────────
 int runBend(const std::string& yamlFile, ConsoleOutput& console) {
+    {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(yamlFile, tabLine)) {
+            console.error(KooRemapper::yamlTabIndentMessage("bend", tabLine));
+            return 1;
+        }
+    }
     StandaloneYamlBase y;
     y.resolveFiles(yamlFile);
     if (rejectMultiOperation(yamlFile, "bend", console)) return 1;
 
     std::ifstream f(yamlFile);
     if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
+    KooRemapper::yamlSkipBOM(f);   // 윈도우 편집기가 붙인 BOM 이 첫 키를 망가뜨렸다
 
     BendOperation op;
     std::string ln;
@@ -591,12 +621,20 @@ int runBend(const std::string& yamlFile, ConsoleOutput& console) {
 
 // ── Standalone indent ───────────────────────────────────────────────────────
 int runIndent(const std::string& yamlFile, ConsoleOutput& console) {
+    {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(yamlFile, tabLine)) {
+            console.error(KooRemapper::yamlTabIndentMessage("indent", tabLine));
+            return 1;
+        }
+    }
     StandaloneYamlBase y;
     y.resolveFiles(yamlFile);
     if (rejectMultiOperation(yamlFile, "indent", console)) return 1;
 
     std::ifstream f(yamlFile);
     if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
+    KooRemapper::yamlSkipBOM(f);   // 윈도우 편집기가 붙인 BOM 이 첫 키를 망가뜨렸다
 
     IndentOperation op;
     bool inPoints = false;
@@ -668,12 +706,20 @@ int runIndent(const std::string& yamlFile, ConsoleOutput& console) {
 
 // ── Standalone formstrain ───────────────────────────────────────────────────
 int runFormstrain(const std::string& yamlFile, ConsoleOutput& console) {
+    {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(yamlFile, tabLine)) {
+            console.error(KooRemapper::yamlTabIndentMessage("formstrain", tabLine));
+            return 1;
+        }
+    }
     StandaloneYamlBase y;
     y.resolveFiles(yamlFile);
     if (rejectMultiOperation(yamlFile, "formstrain", console)) return 1;
 
     std::ifstream f(yamlFile);
     if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
+    KooRemapper::yamlSkipBOM(f);   // 윈도우 편집기가 붙인 BOM 이 첫 키를 망가뜨렸다
 
     FormStrainOperation op;
     std::string ln;
@@ -710,12 +756,20 @@ int runFormstrain(const std::string& yamlFile, ConsoleOutput& console) {
 
 // ── Standalone convert (tet10/hex20/quad8/tria6) ────────────────────────────
 int runConvert(const std::string& yamlFile, ConsoleOutput& console) {
+    {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(yamlFile, tabLine)) {
+            console.error(KooRemapper::yamlTabIndentMessage("convert", tabLine));
+            return 1;
+        }
+    }
     StandaloneYamlBase y;
     y.resolveFiles(yamlFile);
     if (rejectMultiOperation(yamlFile, "convert", console)) return 1;
 
     std::ifstream f(yamlFile);
     if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
+    KooRemapper::yamlSkipBOM(f);   // 윈도우 편집기가 붙인 BOM 이 첫 키를 망가뜨렸다
 
     Tet10ConvertOperation op;
     std::string ln;
@@ -753,12 +807,20 @@ int runConvert(const std::string& yamlFile, ConsoleOutput& console) {
 
 // ── Standalone refine ───────────────────────────────────────────────────────
 int runRefine(const std::string& yamlFile, ConsoleOutput& console) {
+    {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(yamlFile, tabLine)) {
+            console.error(KooRemapper::yamlTabIndentMessage("refine", tabLine));
+            return 1;
+        }
+    }
     StandaloneYamlBase y;
     y.resolveFiles(yamlFile);
     if (rejectMultiOperation(yamlFile, "refine", console)) return 1;
 
     std::ifstream f(yamlFile);
     if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
+    KooRemapper::yamlSkipBOM(f);   // 윈도우 편집기가 붙인 BOM 이 첫 키를 망가뜨렸다
 
     RefineOperation op;
     std::string ln;
@@ -794,12 +856,20 @@ int runRefine(const std::string& yamlFile, ConsoleOutput& console) {
 
 // ── Standalone elform ───────────────────────────────────────────────────────
 int runElform(const std::string& yamlFile, ConsoleOutput& console) {
+    {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(yamlFile, tabLine)) {
+            console.error(KooRemapper::yamlTabIndentMessage("elform", tabLine));
+            return 1;
+        }
+    }
     StandaloneYamlBase y;
     y.resolveFiles(yamlFile);
     if (rejectMultiOperation(yamlFile, "elform", console)) return 1;
 
     std::ifstream f(yamlFile);
     if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
+    KooRemapper::yamlSkipBOM(f);   // 윈도우 편집기가 붙인 BOM 이 첫 키를 망가뜨렸다
 
     ElformOperation op;
     std::string ln;
@@ -835,12 +905,20 @@ int runElform(const std::string& yamlFile, ConsoleOutput& console) {
 
 // ── Standalone disconnect ───────────────────────────────────────────────────
 int runDisconnect(const std::string& yamlFile, ConsoleOutput& console) {
+    {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(yamlFile, tabLine)) {
+            console.error(KooRemapper::yamlTabIndentMessage("disconnect", tabLine));
+            return 1;
+        }
+    }
     StandaloneYamlBase y;
     y.resolveFiles(yamlFile);
     if (rejectMultiOperation(yamlFile, "disconnect", console)) return 1;
 
     std::ifstream f(yamlFile);
     if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
+    KooRemapper::yamlSkipBOM(f);   // 윈도우 편집기가 붙인 BOM 이 첫 키를 망가뜨렸다
 
     DisconnectOperation op;
     std::string ln;
@@ -878,12 +956,20 @@ int runDisconnect(const std::string& yamlFile, ConsoleOutput& console) {
 
 // ── Standalone iga ──────────────────────────────────────────────────────────
 int runIga(const std::string& yamlFile, ConsoleOutput& console) {
+    {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(yamlFile, tabLine)) {
+            console.error(KooRemapper::yamlTabIndentMessage("iga", tabLine));
+            return 1;
+        }
+    }
     StandaloneYamlBase y;
     y.resolveFiles(yamlFile);
     if (rejectMultiOperation(yamlFile, "iga", console)) return 1;
 
     std::ifstream f(yamlFile);
     if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
+    KooRemapper::yamlSkipBOM(f);   // 윈도우 편집기가 붙인 BOM 이 첫 키를 망가뜨렸다
 
     IGAOperation igaOp;
     bool inTargets = false;
@@ -1004,12 +1090,20 @@ int runIga(const std::string& yamlFile, ConsoleOutput& console) {
 
 // ── Standalone warpage ──────────────────────────────────────────────────────
 int runWarpage(const std::string& yamlFile, ConsoleOutput& console) {
+    {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(yamlFile, tabLine)) {
+            console.error(KooRemapper::yamlTabIndentMessage("warpage", tabLine));
+            return 1;
+        }
+    }
     StandaloneYamlBase y;
     y.resolveFiles(yamlFile);
     if (rejectMultiOperation(yamlFile, "warpage", console)) return 1;
 
     std::ifstream f(yamlFile);
     if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
+    KooRemapper::yamlSkipBOM(f);   // 윈도우 편집기가 붙인 BOM 이 첫 키를 망가뜨렸다
 
     WarpageOperation op;
     bool inDataBbox = false;
@@ -1072,12 +1166,20 @@ int runWarpage(const std::string& yamlFile, ConsoleOutput& console) {
 
 // ── Standalone offset ───────────────────────────────────────────────────────
 int runOffset(const std::string& yamlFile, ConsoleOutput& console) {
+    {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(yamlFile, tabLine)) {
+            console.error(KooRemapper::yamlTabIndentMessage("offset", tabLine));
+            return 1;
+        }
+    }
     StandaloneYamlBase y;
     y.resolveFiles(yamlFile);
     if (rejectMultiOperation(yamlFile, "offset", console)) return 1;
 
     std::ifstream f(yamlFile);
     if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
+    KooRemapper::yamlSkipBOM(f);   // 윈도우 편집기가 붙인 BOM 이 첫 키를 망가뜨렸다
 
     OffsetOperation op;
     bool readingMatCard = false;

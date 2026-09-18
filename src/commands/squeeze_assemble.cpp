@@ -1,4 +1,5 @@
 #include "squeeze_assemble.h"
+#include "util/YamlComment.h"
 #include "relax.h"
 #include "core/Mesh.h"
 #include "parser/KFileReader.h"
@@ -30,6 +31,13 @@ using namespace KooRemapper;
 
 int runSqueeze(const std::string& meshFile, const std::string& configFile,
                const std::string& outputPrefixArg, const ConsoleOutput& console) {
+    {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(configFile, tabLine)) {
+            console.error(KooRemapper::yamlTabIndentMessage("squeeze", tabLine));
+            return 1;
+        }
+    }
     Timer timer;
     // <prefix>.k·<prefix>.dynain 을 만든다 — 접두어 끝의 .k 는 다른 명령처럼 뗀다(예전엔 name.k.k)
     std::string outputPrefix = outputPrefixArg;
@@ -489,6 +497,14 @@ int runAssemble(const std::string& configFile, const ConsoleOutput& console) {
     size_t slashPos = configFile.find_last_of("/\\");
     if (slashPos != std::string::npos) {
         configDir = configFile.substr(0, slashPos);
+    }
+
+    {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(configFile, tabLine)) {
+            console.error(KooRemapper::yamlTabIndentMessage("assemble", tabLine));
+            return 1;
+        }
     }
 
     // 1. Read assembly config

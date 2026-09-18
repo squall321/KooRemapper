@@ -62,6 +62,13 @@ AssemblyConfig AssemblyConfigReader::readFile(const std::string& filename) {
 AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) {
     AssemblyConfig config;
 
+    {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다
+        std::istringstream tabStream(yamlContent);
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(tabStream, tabLine))
+            throw std::runtime_error(KooRemapper::yamlTabIndentMessage("assemble", tabLine));
+    }
+
     // Collect all lines first (needed for multi-line block lookahead)
     std::vector<std::string> lines;
     {
@@ -71,6 +78,8 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
             if (!line.empty() && line.back() == '\r') line.pop_back();
             lines.push_back(line);
         }
+        // 윈도우 편집기가 붙인 BOM 이 첫 키('base_model')를 망가뜨려 'base_model not specified' 였다
+        if (!lines.empty()) KooRemapper::yamlStripBOM(lines[0]);
     }
 
     enum class Section { NONE, OPERATIONS, MATERIAL };
