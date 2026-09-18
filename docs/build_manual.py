@@ -28,7 +28,20 @@ MESHFIX_SECTION = '''
 ### 용도
 기존 TET4 파트를 Gmsh를 통해 **완전 재메시**하여 요소 품질을 개선하는 명령.
 STL 경계 추출 → Gmsh 실행 → MSH2 파싱 → 원본 K파일에 스플라이스하는 파이프라인으로 동작하며,
-Gmsh 실행 파일(`gmsh.exe`)이 `dist/gmsh/` 또는 `dist/gmsh-<ver>/` 디렉터리에 있어야 한다.
+Gmsh 실행 파일이 따로 있어야 한다(아래 **Gmsh 탐색 순서** 참조).
+
+### Gmsh 탐색 순서
+
+Gmsh 실행 파일은 아래 **순서대로** 찾는다(2026-09-18 소스·실행 확인).
+
+1. 환경변수 **`KOOREMAPPER_GMSH`** — 실행 파일의 전체 경로(파일이 실제로 있어야 함)
+2. **KooRemapper 바이너리가 있는 폴더** 옆의 `gmsh/gmsh` 또는 `gmsh/gmsh.exe`
+3. 같은 폴더 옆의 `gmsh-<ver>/` 또는 `gmsh-<ver>/bin/` 안의 실행 파일
+4. **`PATH`** (Linux/macOS)
+5. `/opt/gmsh-*/bin/gmsh` (Linux/macOS)
+
+작업 폴더의 `dist/gmsh/` 는 탐색 대상이 아니다. 개발 트리에서 쓰려면
+`KOOREMAPPER_GMSH=<저장소>/dist/gmsh/gmsh` 로 지정하는 것이 가장 확실하다.
 
 ### 사용법
 
@@ -242,7 +255,7 @@ Total time: 13.6 s
 
 ### 주의사항
 
-- **Gmsh 필수**: `dist/gmsh/gmsh.exe` 또는 `dist/gmsh-<ver>/gmsh.exe` 위치에 배치 필요
+- **Gmsh 필수**: 위 **Gmsh 탐색 순서**(환경변수 `KOOREMAPPER_GMSH` → 바이너리 옆 `gmsh/`·`gmsh-<ver>/` → `PATH` → `/opt/gmsh-*/bin/`) 중 하나에 배치 필요
 - **TET4 전용**: 입력 파트는 TET4 (또는 퇴화 HEX8) 형식이어야 함
 - **처리 시간**: 10만 요소 이상에서 수 분 소요 가능
 - **polish 제한**: `polish: true`는 실험적 기능. 90° 코너 구속 형상에서는 불량 수 감소 불가로 자동 스킵
@@ -278,7 +291,7 @@ TABLE_CAPTIONS = [
     "표 22-2. offset local_normals 효과 — 전역 평균 법선 대비 로컬 법선 사용 시 품질 개선.",
     "표 23-1. matswap 번들 파라미터 타입 — ID 접두어(HGID/LCID/SECID/MID/PID)별 자동 인식 규칙.",
     "표 24-1. matdb 재료 매칭 규칙 — 제목(title)/이름(name)/태그(tag) 우선순위 기반 자동 매칭.",
-    "표 24-2. matdb 구조 카드 타입 — MAT_ELASTIC, MAT_024, MAT_RIGID 등 지원 카드 목록.",
+    "표 24-2. matdb 구조 카드 타입 — MAT_ELASTIC(기본), MAT_024, MAT_RIGID 등 지원 카드 목록.",
     "표 25-1. contact 접촉 type 값 목록 — YAML type 키워드와 LS-DYNA *CONTACT_* 키워드 대응.",
     "표 25-2. contact modify 수정 가능 필드 — Card 1/2/A/C 필드명과 대응하는 LS-DYNA 필드.",
     "표 25-3. contact Optional Card 지원 목록 — A~G 카드별 주요 파라미터와 기본값.",
@@ -290,7 +303,7 @@ TABLE_CAPTIONS = [
     "표 30-1. modal 해석 파라미터 — 모드 수, 주파수 범위, 고유값 해석 방법(eigmth) 코드 목록.",
     "표 35-1. ALE 프리셋 목록 (14종) — 기체/액체/폭약/진공 프리셋별 적용 재료 모델과 상태방정식.",
     "표 36-1. stabilize 12단계 설정 — 단계별 누적 적용 안정화 옵션과 활성화 조건.",
-    "표 37-1. database 프리셋 종류 — crash/drop/nve/all 프리셋별 출력 키워드 목록.",
+    "표 37-1. database 프리셋 종류 — all/drop/crash/static/thermal/forming/modal/minimal 8종 프리셋별 출력 키워드 목록.",
     "표 39-1. assemble 오퍼레이션 목록 — type 필드로 지정 가능한 전체 오퍼레이션과 주요 파라미터.",
 ]
 
