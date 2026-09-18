@@ -2087,9 +2087,10 @@ void ModelAssembler::reportPidRefFindings(const std::string& opName,
     }
     if (maybeCount > 0) {
         infoMessages.push_back("    (그 중 모르는 자리 " + std::to_string(maybeCount) +
-                               " 줄 — 화이트리스트 밖이라 칸 뜻을 확인하지 않았습니다)");
+                               " 줄 — 화이트리스트 밖이라 칸 뜻을 확인하지 않았습니다."
+                               " 값이 우연히 같기만 해도 걸리므로 rc 는 올리지 않습니다)");
     }
-    if (movedCount < found.size()) {
+    if (movedCount + maybeCount < found.size()) {
         infoMessages.push_back("    못 옮긴 자리가 남아 rc=1 로 끝냅니다(덱은 씁니다)."
                                " pid_refs: warn 을 주면 같은 보고를 하고 rc=0 으로 끝냅니다.");
     } else {
@@ -4223,7 +4224,7 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
             << " reference(s) — restack/merge 가 비운 PID·지운 요소·지운 노드를 가리키던 자리입니다"
                " (옮김 " << movedN << ", 못 옮김 " << (pidRefFindings_.size() - movedN) << ")\n";
         blk << "$ KOOREMAPPER-PIDREF: 등급 moved=이 덱에서 옮겼습니다, left=옮기지 못했습니다(이유가 붙습니다),"
-               " manual=직접 고치세요, unknown=칸 자리 미확정, maybe=화이트리스트 밖(칸 뜻 미확인)\n";
+               " manual=직접 고치세요, unknown=칸 자리 미확정, maybe=화이트리스트 밖(칸 뜻 미확인 — rc 에는 넣지 않습니다)\n";
         blk << "$ KOOREMAPPER-PIDREF: 줄 번호는 이 op 가 읽은 입력 덱 기준입니다"
                "(이 블록과 이관으로 늘어난 줄만큼 아래로 밀려 있습니다)\n";
         for (const auto& f : pidRefFindings_) {
@@ -4421,8 +4422,12 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
     // 덱은 이미 다 썼다(위에서). 여기서 false 를 돌려주는 것은 '쓰기 실패' 가 아니라
     // '결과를 믿지 말라' 는 신호다 — pyKooCAE Runner 와 플랫폼 워커는 종료 코드로만 성공을 보고,
     // rc=0 이면 콘솔 경고가 자동화에 아예 안 보인 채 체인이 솔버까지 간다.
+    // maybe 는 rc 판정에서 뺀다 — 화이트리스트 밖 줄의 아무 정수 칸이나 죽은 PID 와
+    // 견주는 훑기라, 흔한 target_pid 1 이면 *BOUNDARY_SPC_SET 의 DOF 플래그 같은 값이
+    // 그대로 걸린다. 오탐으로 rc 를 올리면 멀쩡한 덱이 파이프라인을 막는다(보고는 남긴다).
     std::vector<const PidRefFinding*> pidRefLeft;
-    for (const auto& f : pidRefFindings_) if (f.grade != "moved") pidRefLeft.push_back(&f);
+    for (const auto& f : pidRefFindings_)
+        if (f.grade != "moved" && f.grade != "maybe") pidRefLeft.push_back(&f);
     if (!pidRefLeft.empty() && pidRefPolicy_ != "warn") {
         size_t shown = std::min<size_t>(pidRefLeft.size(), 3);
         std::ostringstream em;
