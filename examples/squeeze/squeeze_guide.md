@@ -35,6 +35,14 @@ KooRemapper squeeze <mesh.k> <config.yaml> <output_prefix>
 | `<prefix>.k` | 압착된 메시 + `*INCLUDE` (dynain 연결) |
 | `<prefix>.dynain` | 초기 응력 또는 변형률 카드 |
 
+**이 폴더의 예제를 그대로 돌리려면** 동봉한 `squeeze_box.k` 를 입력으로 쓴다
+(2파트 HEX8 블록 — PID 1 강철 / PID 2 알루미늄, *MAT_ELASTIC 두 장 포함).
+
+```bash
+KooRemapper squeeze squeeze_box.k ex01_stress_yaml_material.yaml out_ex01
+bash run.sh          # ex01~ex05 를 한 번에 (KOOREMAPPER_BIN 으로 실행 파일 지정 가능)
+```
+
 ---
 
 ## 3. 초기 조건 방식 3가지
@@ -323,9 +331,17 @@ relax:
 | `ex04_swelling.yaml` | 열팽창 | K-파일 필수 | 없음 |
 | `ex05_mixed_with_dr.yaml` | 응력+열팽창 혼합 | YAML+K-파일 | 포함 |
 
+| 파일 | 설명 |
+|------|------|
+| `squeeze_box.k` | 다섯 예제 공용 입력 — 2파트 HEX8 블록(PID 1·2, *MAT_ELASTIC 포함) |
+| `run.sh` | ex01~ex05 일괄 실행 (`bash run.sh clean` 으로 출력 정리) |
+
 ---
 
 ## 9. 워크플로우별 사용 시나리오
+
+아래 `bearing.k` / `battery.k` / `part.k` 는 **읽는 사람이 가진 모델**을 가리키는 이름이다
+(이 폴더에는 없다). 그대로 시험해 보려면 `squeeze_box.k` 로 바꿔 넣으면 된다.
 
 ### 시나리오 A: 볼베어링 간섭끼워맞춤
 

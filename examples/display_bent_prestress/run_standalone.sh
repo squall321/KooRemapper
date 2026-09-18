@@ -12,9 +12,10 @@ set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 cd "$HERE"
 
-EXE="${KOOREMAPPER:-}"
+EXE="${KOOREMAPPER_BIN:-}"
 if [ -z "$EXE" ]; then
     for cand in \
+        "$HERE/../../build/linux/bin/KooRemapper" \
         "$HERE/../../build/bin/KooRemapper" \
         "$HERE/../../build/bin/Release/KooRemapper" \
         "$HERE/../../build/KooRemapper" \

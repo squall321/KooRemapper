@@ -78,22 +78,31 @@ def main():
         print("생성 실패:", out[-400:])
         return 2
 
-    # ── A18: nan 이면 같이 써진 dynain 도 지운다 ──────────────────────────────
-    print("[A18] nan 정리는 같이 써진 .dynain 까지 치운다")
+    # ── A18: nan 이면 .k 도 .dynain 도 만들지 않는다 ───────────────────────────
+    print("[A18] nan 결과는 .k·.dynain 어느 쪽도 파일이 되지 않는다")
     bend = ("model: flat.k\noutput: %s\nmaterial:\n  E: 210000\n  nu: 0.3\n"
             "target_pid: 1\nplane: xy\nmode: deform\nsource: formula\nexpression: %s\n")
     write(d, "bok.yaml", bend % ("bok", "0.01*x1"))
     rc, out = run(binary, d, "bend", "bok.yaml")
     check("bend 정상: .k 와 .dynain 이 둘 다 나온다 (rc=0)",
           rc == 0 and exists(d, "bok.k") and exists(d, "bok.dynain"), f"rc={rc} {out[-200:]}")
-    write(d, "bnan.yaml", bend % ("bok", "sqrt(-x1)"))
+    # 그물이 '쓰기 전' 으로 올라간 뒤로는 나쁜 결과가 파일이 된 적이 없다 — 새 이름으로 돌리면
+    # .k 도 .dynain 도 만들어지지 않고(A18 이 막으려던 'nan 초기응력이 든 dynain' 이 애초에 없다),
+    # 같은 이름으로 돌려도 이번 실행이 쓰지 않은 지난 결과는 지우지 않는다.
+    write(d, "bnan.yaml", bend % ("bnan", "sqrt(-x1)"))
     rc, out = run(binary, d, "bend", "bnan.yaml")
     check("bend nan: rc=1", rc == 1, f"rc={rc} {out[-250:]}")
-    check("bend nan: .k 가 남지 않는다", not exists(d, "bok.k"))
-    check("bend nan: nan 초기응력이 든 .dynain 도 남지 않는다", not exists(d, "bok.dynain"),
-          "dynain 이 남았다")
-    check("bend nan: 지운 파일 이름을 메시지에 적는다", "bok.dynain" in out and "bok.k" in out,
+    check("bend nan: .k 가 만들어지지 않는다", not exists(d, "bnan.k"))
+    check("bend nan: nan 초기응력이 든 .dynain 도 만들어지지 않는다", not exists(d, "bnan.dynain"),
+          "dynain 이 만들어졌다")
+    check("bend nan: 쓰지 않은 파일 이름을 메시지에 적는다", "bnan.dynain" in out and "bnan.k" in out,
           out[-250:])
+    prev_k, prev_dyn = read(d, "bok.k"), read(d, "bok.dynain")
+    write(d, "bnan2.yaml", bend % ("bok", "sqrt(-x1)"))
+    rc, out = run(binary, d, "bend", "bnan2.yaml")
+    check("bend nan: 같은 이름의 지난 결과는 지우지 않는다",
+          rc == 1 and read(d, "bok.k") == prev_k and read(d, "bok.dynain") == prev_dyn,
+          f"rc={rc} {out[-250:]}")
 
     # 이번에 쓰지 않은 남의 파일은 건드리지 않는다
     write(d, "cv.yaml", "model: flat.k\noutput: cv\ntype: hex20\ntarget_pid: 1\n")
