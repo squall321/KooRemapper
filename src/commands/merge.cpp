@@ -300,6 +300,7 @@ struct mg_KModel {
     std::map<int, mg_Elem> elems;      // solid elements only
     std::map<int, mg_PartInfo> parts;   // pid → {secid, mid, title}
     std::map<int, mg_MatProps> mats;    // mid → material props
+    std::map<int, std::string> unknownMats;  // mid → 재질 파서가 모르는 *MAT 키워드
     int maxElemId = 0, maxPartId = 0, maxMatId = 0, maxSecId = 0;
 };
 
@@ -323,6 +324,11 @@ static bool mg_parseKFile(const std::string& path, mg_KModel& mdl, ConsoleOutput
     int matMid = 0;
     int matCardNum = 0;
     bool matTitleLine = false; // _TITLE suffix means next line is title
+
+    // 재질 파서가 모르는 *MAT 블록 — MID 만 주워 두었다가 그룹이 그 MID 를 쓰면 이유를 알려준다
+    bool inUnknownMat = false;
+    std::string unknownMatKw;
+    bool unknownMatTitleLine = false;
 
     // VE076 Prony series
     double veBulk = 0;
@@ -377,6 +383,7 @@ static bool mg_parseKFile(const std::string& path, mg_KModel& mdl, ConsoleOutput
 
             std::string up = mg_toUpper(trimmed);
             inNode = inElemSolid = inPart = inMat = inThermalExp = inSection = false;
+            inUnknownMat = false;
 
             if (up.find("*NODE") == 0 && up.find("*NODE_") == std::string::npos) {
                 inNode = true;
@@ -423,8 +430,12 @@ static bool mg_parseKFile(const std::string& path, mg_KModel& mdl, ConsoleOutput
                 thermalExpCard = 0;
                 matTitleLine = (up.find("TITLE") != std::string::npos);
             } else if (up.find("*MAT_") == 0) {
-                // Unrecognized MAT keyword — log it
+                // Unrecognized MAT keyword — log it, and remember its MID so the
+                // group that uses it can say *why* the material is missing
                 console.info("  [mat-parse] SKIP unrecognized: " + trimmed);
+                inUnknownMat = true;
+                unknownMatKw = mg_tokenWS(trimmed).empty() ? trimmed : mg_tokenWS(trimmed)[0];
+                unknownMatTitleLine = (up.find("TITLE") != std::string::npos);
             }
             continue;
         }
@@ -486,6 +497,23 @@ static bool mg_parseKFile(const std::string& path, mg_KModel& mdl, ConsoleOutput
                 if (sid > mdl.maxSecId) mdl.maxSecId = sid;
             }
             inSection = false;
+            continue;
+        }
+
+        // 모르는 *MAT 의 첫 데이터 카드 첫 필드는 관례상 MID 다
+        if (inUnknownMat) {
+            if (unknownMatTitleLine) {
+                unknownMatTitleLine = false;
+                continue;
+            }
+            auto toks = mg_tok10(line);
+            if (toks.empty() || toks[0].empty()) toks = mg_tokenWS(trimmed);
+            if (!toks.empty()) {
+                int umid = mg_toInt(toks[0]);
+                if (umid > 0 && mdl.mats.find(umid) == mdl.mats.end())
+                    mdl.unknownMats[umid] = unknownMatKw;
+            }
+            inUnknownMat = false;
             continue;
         }
 
@@ -896,12 +924,23 @@ int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
         }
 
         std::vector<std::pair<mg_MatProps, double>> matsWithFrac;
+        bool matMissing = false;
         for (auto& [mid, cnt] : midCount) {
             double vf = (double)cnt / totalInGroup;
             auto mit = mdl.mats.find(mid);
             if (mit == mdl.mats.end()) {
-                console.error("  MID " + std::to_string(mid) + " not found in material DB");
+                auto uit = mdl.unknownMats.find(mid);
+                if (uit != mdl.unknownMats.end()) {
+                    // 'DB 에 없다' 가 아니라 '이 키워드를 merge 재질 파서가 모른다' 가 진짜 이유다
+                    console.error("  MID " + std::to_string(mid) + ": " + uit->second +
+                                  " is not understood by the merge material parser "
+                                  "(supported: *MAT_ELASTIC, *MAT_PIECEWISE_LINEAR_PLASTICITY/024, "
+                                  "*MAT_GENERAL_VISCOELASTIC/076, *MAT_RIGID/020)");
+                } else {
+                    console.error("  MID " + std::to_string(mid) + " not found in material DB");
+                }
                 groupFailed = true;   // 빠진 재질을 빼고 균질화하면 체적분율이 틀린다
+                matMissing = true;
                 continue;
             }
             matsWithFrac.push_back({mit->second, vf});
@@ -910,6 +949,13 @@ int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
                          " nu=" + std::to_string(mit->second.nu) +
                          " rho=" + std::to_string(mit->second.rho) +
                          " vf=" + std::to_string(vf));
+        }
+
+        // 재질이 빠진 그룹은 체적분율이 틀어져 있다 — 성공한 것처럼 보이는 Homogenized 요약을
+        // 찍지 않고 넘어간다(어차피 아래에서 출력 없이 rc=1 로 끝난다)
+        if (matMissing) {
+            console.error("  Skipping homogenization for this group");
+            continue;
         }
 
         // Homogenize
