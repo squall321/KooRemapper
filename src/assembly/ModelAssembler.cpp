@@ -15528,9 +15528,12 @@ bool ModelAssembler::applyMerge(const MergeOperation& op) {
     std::vector<EInfo> grpElems;
     grpElems.reserve(baseMesh_.getElementCount() / 2); // rough estimate
 
-    for (size_t i = 0; i < baseMesh_.getElementCount(); i++) {
-        auto& e = baseMesh_.elements[i];
-        if (removedElementIds_.count(e.id)) continue;
+    // baseMesh_.elements 는 map<요소 ID, Element> 다 — elements[i] 는 i 번째가 아니라 'ID 가 i' 를
+    // 찾는 것이고, 없으면 기본 Element(id 0, partId 1)를 새로 끼워 넣는다. 그래서 merge 는 없는
+    // 요소 하나를 그룹에 넣고, 그 유령이 partId 1 이라 원 파트 1 이 '아직 요소가 있다' 로 읽혀
+    // 빈 파트 보고에서 빠졌다(요소 ID 가 1 부터가 아니면 진짜 요소를 통째로 놓친다).
+    for (const auto& [eid, e] : baseMesh_.getElements()) {
+        if (removedElementIds_.count(eid)) continue;
         if (!pidSet.count(e.partId)) continue;
         EInfo ei; ei.eid = e.id; ei.pid = e.partId;
         for (int j = 0; j < 8; j++) ei.nid[j] = e.nodeIds[j];
