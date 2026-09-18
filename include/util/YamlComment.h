@@ -82,6 +82,8 @@ inline int yamlCountIndent(const std::string& s) {
 }
 
 // 탭 들여쓰기 거부 메시지 — 모든 YAML 파서가 load 가 쓰던 문구 그대로 쓴다.
+// 검사는 파일 전체를 훑으므로 op 이 읽지도 않는 구역(주석 대신 쓴 메모, 미사용 키 블록)의 탭도 걸린다.
+// 어느 줄인지 바로 찾도록 yamlScanTabIndent 가 badLine 을 '5번째 줄: <내용>' 꼴로 채워 준다.
 inline std::string yamlTabIndentMessage(const std::string& tag, const std::string& trimmedLine) {
     return "[" + tag + "] YAML 들여쓰기에 탭을 쓸 수 없습니다 (공백을 쓰세요): " + trimmedLine;
 }
@@ -89,25 +91,29 @@ inline std::string yamlTabIndentMessage(const std::string& tag, const std::strin
 // YAML 파일 전체에서 들여쓰기 탭을 찾는다(찾으면 true + 그 줄). 파서마다 흩어져 있던 countIndent 는
 // 공백만 세서, 탭으로 들여쓴 YAML 은 모든 줄이 indent 0 이 되어 블록이 통째로 무너지고도 rc=0 으로
 // '아무 일도 안 한' 덱을 냈다 — 파싱 전에 한 번 걸러 rc=1 로 알린다.
-// '|'/'>' 리터럴 블록 안의 줄은 구조가 아니라 값이므로 보지 않는다(LS-DYNA 카드 줄).
+// '|'/'>' 리터럴 블록 안의 줄은 구조가 아니라 값이므로 보지 않는다(LS-DYNA 카드 줄) — 단 블록 안이라는
+// 판정은 파서(countIndent)와 똑같이 '공백 들여쓰기' 만으로 한다. 예전엔 여기서 탭으로 시작한 카드 줄도
+// 블록 안으로 봐 통과시켰는데, 파서는 공백만 세어 그 줄을 블록 밖으로 튕겨 조용히 버렸다 —
+// *MAT 카드가 데이터 줄 없이 덱에 실리고도 rc=0 이었다. 이제 그 줄은 구조 줄로 보아 rc=1 로 막는다.
 inline bool yamlScanTabIndent(std::istream& f, std::string& badLine) {
     yamlSkipBOM(f);
     int literalIndent = -1;  // '|' 블록을 연 키의 들여쓰기 (-1 = 블록 밖)
     std::string ln;
+    int lineNo = 0;
     while (std::getline(f, ln)) {
+        ++lineNo;
         if (!ln.empty() && ln.back() == '\r') ln.pop_back();
         size_t ns = ln.find_first_not_of(" \t");
         std::string tr = (ns == std::string::npos) ? "" : ln.substr(ns);
         while (!tr.empty() && (tr.back() == ' ' || tr.back() == '\t')) tr.pop_back();
         int width = (ns == std::string::npos) ? -1 : (int)ns;
         if (literalIndent >= 0) {
-            // 블록은 '공백만으로 들여쓴 얕은 줄' 에서만 닫는다 — 앞이 탭인 카드 줄(LS-DYNA 자유 형식)도
-            // 값으로 남겨 막지 않는다
-            if (tr.empty() || width > literalIndent || yamlTabIndent(ln)) continue;
+            // 블록은 파서와 같은 규칙으로 닫는다 — 들여쓰기는 공백만 센다(yamlCountIndent).
+            if (tr.empty() || yamlCountIndent(ln) > literalIndent) continue;
             literalIndent = -1;
         }
         if (tr.empty() || tr[0] == '#') continue;
-        if (yamlTabIndent(ln)) { badLine = tr; return true; }
+        if (yamlTabIndent(ln)) { badLine = std::to_string(lineNo) + "번째 줄: " + tr; return true; }
         // 블록을 여는 줄 — standalone_ops 의 countOperations 와 같은 판정.
         // 목록 항목 '- |' 는 대시 열이, 'key: |'(항목 안의 '- key: |' 포함)은 키 열이 기준이다.
         std::string item = yamlStripComment(tr);
@@ -133,9 +139,14 @@ inline bool yamlScanTabIndent(std::istream& f, std::string& badLine) {
     return false;
 }
 
+// 경로판 — 검사를 위해 설정 파일을 '한 번 더' 여는 것이므로, 되감을 수 없는 입력(파이프, 프로세스
+// 치환 <(...), /dev/stdin)이면 그 한 번이 전부다. 그런 입력은 검사가 스트림을 먹어 뒤따르는 파서가
+// 빈 설정을 보고 "'model' not specified" 로 끝나므로, 아예 훑지 않고 통과시킨다 —
+// 탭 들여쓰기 검사는 되감을 수 있는 보통 파일에서만 돈다.
 inline bool yamlScanTabIndent(const std::string& path, std::string& badLine) {
     std::ifstream f(path);
     if (!f.is_open()) return false;
+    if (!f.seekg(0)) return false;  // seek 불가 = 되감을 수 없는 스트림 (아직 한 글자도 읽지 않았다)
     return yamlScanTabIndent(f, badLine);
 }
 

@@ -9,7 +9,14 @@
   - 탭 들여쓰기: 파서마다 흩어져 있던 countIndent 가 공백만 세서, 탭으로 들여쓴 YAML 은 모든 줄이
     indent 0 이 되어 블록(loads·operations·clips…)이 통째로 무너졌다. 대부분 rc=0 으로 '아무 일도
     안 한' 덱이 나왔다. 이제 YAML 을 읽는 모든 명령이 같은 문구로 rc=1 로 거절한다.
-    단, '|' 블록 안의 카드 줄과 따옴표 값 안의 탭은 값이므로 막지 않는다(들여쓰기만 본다).
+    단, 따옴표 값 안의 탭과 '|' 블록 안(공백으로 더 깊이 들여쓴 줄)의 탭은 값이므로 막지 않는다.
+    '|' 블록 안이라는 판정은 파서(공백만 세는 countIndent)와 같아야 한다 — 한때 스캐너만 탭 줄을
+    블록 안으로 봐 통과시켜, 파서가 그 카드 줄을 블록 밖으로 튕겨 버린 *MAT 카드가 데이터 줄 없이
+    덱에 실리고도 rc=0 이었다.
+  - 탭 검사는 파일 전체를 훑는다 — op 이 읽지도 않는 구역(메모·미사용 키)을 탭으로 들여쓴,
+    예전엔 올바른 덱을 내던 설정도 rc=1 이 된다. 문구에는 몇 번째 줄인지 붙는다.
+  - 탭 검사는 설정 파일을 '한 번 더' 여는데, 되감을 수 없는 입력(파이프·프로세스 치환)이면 그 한 번이
+    전부라 파서가 빈 설정을 봤다 — 그런 입력에서는 검사를 건너뛴다.
   - 상대 경로: assemble·strip·단독 op 은 'YAML 안의 상대 경로 = 그 YAML 폴더 기준' 인데
     load/boundary/rbe/contact/relax/database/explicit/implicit/modal/ale/cclip/matdb/generate 는
     폴더 없는 이름만 그 규칙이고 '../data/box.k' 는 작업 폴더에서 찾아 열지 못했다.
@@ -118,6 +125,8 @@ def body(binary, tmp):
     check("BOM: assemble 이 rc=0 으로 끝나고 산출 k 가 생긴다",
           rc == 0 and os.path.exists(os.path.join(data, "bom_asm.k")), f"rc={rc} {out[-200:]}")
 
+    LOAD_CASE = "loads:\n  - part: 1\n    mode: normal_pressure\n    value: 1.0\n"
+
     # ── 2. 탭 들여쓰기 ────────────────────────────────────────────────────────
     print("[탭 들여쓰기: 모든 YAML 명령이 같은 문구로 rc=1]")
     write(os.path.join(cfg, "tab.yaml"), "model: ../data/box.k\noutput: ../data/t.k\nfoo:\n\t- a: 1\n")
@@ -140,12 +149,31 @@ def body(binary, tmp):
     check("탭: 공백 들여쓰기 같은 설정은 그대로 rc=0",
           rc == 0 and os.path.exists(os.path.join(data, "notab.k")), f"rc={rc} {out[-200:]}")
 
-    # 값 안의 탭은 막지 않는다 — '|' 블록 카드 줄
+    # '|' 블록 안이라는 판정은 파서와 같다(공백만 들여쓰기) — 탭으로 시작한 카드 줄은 블록 밖이라
+    # 구조 줄로 보아 rc=1 이다. 예전엔 스캐너만 통과시켜 그 카드 줄이 조용히 사라졌다.
     write(os.path.join(cfg, "blocktab.yaml"),
           "model: ../data/box.k\noutput: ../data/blocktab.k\nsource_pid: 1\nthickness: 0.5\n"
           "material_cards:\n  - |\n    *MAT_ELASTIC_TITLE\n    Tabbed\n\t2,7.8e-9,2.0e5,0.3\n")
     rc, out = run(binary, tmp, "offset", "cfg/blocktab.yaml")
-    check("탭: '|' 블록 카드 줄 앞의 탭은 값이라 막지 않는다",
+    check("탭: '|' 블록 안의 탭 줄은 파서가 버리던 줄이라 rc=1 로 막는다",
+          rc == 1 and TAB_MSG in out and
+          not os.path.exists(os.path.join(data, "blocktab.k")), f"rc={rc} {out[-200:]}")
+    # 통제군 — 같은 카드 줄을 공백으로 들여쓰면 rc=0 이고 카드 내용이 산출 덱에 다 들어간다
+    write(os.path.join(cfg, "blockok.yaml"),
+          "model: ../data/box.k\noutput: ../data/blockok.k\nsource_pid: 1\nthickness: 0.5\n"
+          "material_cards:\n  - |\n    *MAT_ELASTIC_TITLE\n    Tabbed\n    2,7.8e-9,2.0e5,0.3\n")
+    rc, out = run(binary, tmp, "offset", "cfg/blockok.yaml")
+    deck = (open(os.path.join(data, "blockok.k")).read()
+            if os.path.exists(os.path.join(data, "blockok.k")) else "")
+    check("탭: 공백으로 들여쓴 '|' 블록은 카드 내용이 산출 덱에 다 들어간다",
+          rc == 0 and TAB_MSG not in out and "*MAT_ELASTIC_TITLE" in deck and
+          "2,7.8e-9,2.0e5,0.3" in deck, f"rc={rc} {out[-200:]}")
+    # 블록 안(공백으로 더 깊이 들여쓴 줄) 값 중간의 탭은 값이라 막지 않는다
+    write(os.path.join(cfg, "blockmid.yaml"),
+          "model: ../data/box.k\noutput: ../data/blockmid.k\nsource_pid: 1\nthickness: 0.5\n"
+          "material_cards:\n  - |\n    *MAT_ELASTIC_TITLE\n    Mid\n    2,7.8e-9\t,2.0e5,0.3\n")
+    rc, out = run(binary, tmp, "offset", "cfg/blockmid.yaml")
+    check("탭: '|' 블록 값 중간의 탭은 들여쓰기가 아니라 막지 않는다",
           rc == 0 and TAB_MSG not in out, f"rc={rc} {out[-200:]}")
     # 같은 파일에서 구조 줄이 탭이면 거절
     write(os.path.join(cfg, "blocktab2.yaml"),
@@ -153,12 +181,28 @@ def body(binary, tmp):
           "material_cards:\n  - |\n    *MAT_ELASTIC_TITLE\n    T2\n    2,7.8e-9,2.0e5,0.3\n")
     rc, out = run(binary, tmp, "offset", "cfg/blocktab2.yaml")
     check("탭: 같은 파일의 구조 줄 탭은 rc=1", rc == 1 and TAB_MSG in out, f"rc={rc} {out[-200:]}")
+    check("탭: 문구에 몇 번째 줄인지 붙는다 (blocktab2.yaml 의 4번째 줄)",
+          "4번째 줄: thickness: 0.5" in out, f"rc={rc} {out[-200:]}")
     # 따옴표 값 안의 탭도 값이다
     write(os.path.join(cfg, "qtab.yaml"),
           "model: ../data/box.k\noutput: \"../data/q\ttab.k\"\nkeywords:\n  - CONTACT\n")
     rc, out = run(binary, tmp, "strip", "cfg/qtab.yaml")
     check("탭: 따옴표 값 안의 탭은 들여쓰기가 아니라 막지 않는다",
           TAB_MSG not in out, f"rc={rc} {out[-200:]}")
+
+    # 되감을 수 없는 입력(파이프)도 설정이 통째로 도착한다 — 탭 검사가 파일을 '한 번 더' 열기 때문에
+    # 한때 파이프·프로세스 치환으로 넘긴 YAML 은 파서가 빈 설정을 보고 "'model' not specified" 로 끝났다.
+    # 그런 입력에서는 탭 검사를 건너뛴다(한 번 읽으면 끝인 스트림이라 검사와 파싱을 같이 할 수 없다).
+    if os.path.exists("/dev/stdin"):
+        print("[파이프 입력: 되감을 수 없는 스트림도 설정이 통째로 도착한다]")
+        pipe_cfg = (f"model: {os.path.join(data, 'box.k')}\n"
+                    f"output: {os.path.join(data, 'pipe_out.k')}\n" + LOAD_CASE)
+        pp = subprocess.run([binary, "load", "/dev/stdin"], cwd=tmp, input=pipe_cfg,
+                            capture_output=True, text=True, timeout=300)
+        pout = pp.stdout + pp.stderr
+        check("파이프: load /dev/stdin 이 rc=0 으로 덱을 낸다",
+              pp.returncode == 0 and os.path.exists(os.path.join(data, "pipe_out.k")),
+              f"rc={pp.returncode} {pout[-250:]}")
 
     # ── 3. 상대 경로 = YAML 폴더 기준 ─────────────────────────────────────────
     print("[상대 경로: 폴더가 붙은 상대 경로도 YAML 폴더 기준]")
