@@ -62,6 +62,49 @@ def _part_mid_zero(path):
     return False
 
 
+def _mesh_facts(path):
+    """k 파일 → (bbox 크기 [dx,dy,dz], 요소 수, 키워드 집합). *NODE 는 고정폭/콤마 둘 다 읽는다."""
+    xs, ys, zs, nelem, kws, sect = [], [], [], 0, set(), ""
+    for line in open(path, errors="replace"):
+        line = line.rstrip("\n")
+        if line.startswith("*"):
+            sect = line.strip().upper()
+            kws.add(sect)
+            continue
+        if not line.strip() or line.startswith("$"):
+            continue
+        if sect == "*NODE":
+            try:
+                f = [t for t in line.split(",")] if "," in line else [line[8:24], line[24:40], line[40:56]]
+                if "," in line:
+                    f = f[1:4]
+                xs.append(float(f[0])); ys.append(float(f[1])); zs.append(float(f[2]))
+            except (ValueError, IndexError):
+                pass
+        elif sect.startswith("*ELEMENT"):
+            nelem += 1
+    bbox = [max(v) - min(v) for v in (xs, ys, zs)] if xs else None
+    return bbox, nelem, kws
+
+
+def check_invariants(path, inv):
+    """선언된 불변식 위반 목록 — rc=0 이어도 결과가 틀린 사례(퇴화 메시 등)를 잡는다."""
+    bbox, nelem, kws = _mesh_facts(path)
+    bad = []
+    want = inv.get("bbox")
+    if want is not None:
+        if bbox is None:
+            bad.append("절점 없음")
+        elif any(abs(g - w) > max(1e-6, abs(w) * 1e-3) for g, w in zip(bbox, want)):
+            bad.append("bbox %s != %s" % ([round(v, 4) for v in bbox], want))
+    if "elements" in inv and nelem != inv["elements"]:
+        bad.append("요소 수 %d != %d" % (nelem, inv["elements"]))
+    for kw in inv.get("keywords", []):
+        if not any(k.startswith(kw.upper()) for k in kws):
+            bad.append("키워드 없음 %s" % kw)
+    return bad
+
+
 def run_case(binary, spec, files, cmds, keep):
     tmp = tempfile.mkdtemp(prefix=f"krhelp_{spec['name']}_")
     for need in spec["needs"]:
@@ -92,6 +135,10 @@ def run_case(binary, spec, files, cmds, keep):
     bad = [o for o in spec["outputs"] if o.endswith(".k") and _part_mid_zero(os.path.join(tmp, o))]
     if bad:
         return False, f"*PART mid=0 (재질 없음) {bad}", tmp
+    for name, inv in spec.get("invariants", {}).items():
+        viol = check_invariants(os.path.join(tmp, name), inv)
+        if viol:
+            return False, f"불변식 위반 {name}: {'; '.join(viol)}", tmp
     if not keep:
         shutil.rmtree(tmp, ignore_errors=True)
     return True, "", tmp

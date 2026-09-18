@@ -60,7 +60,7 @@ variable_density:
     length: 10.0
     num_elements: 10
 )KRH"}},
-     {"KooRemapper generate-var --no-scale var.yaml var.k"},
+     {"KooRemapper generate-var var.yaml var.k"},
      {},
      {"구간 이름은 고정 5개: zone1_dense_start zone2_increasing zone3_sparse zone4_decreasing zone5_dense_end", "--ref flat.k 를 주면 기준 메시 크기에 맞춰 스케일한다. 곡선형은 type: curved + centerline_points"}},
     {"battery", "메시 생성", "배터리 셀(적층·권취) 모델 + 스웰링 DR 덱 생성", "배터리 셀 pouch swelling 스웰링", "KooRemapper battery <config.yaml>",
