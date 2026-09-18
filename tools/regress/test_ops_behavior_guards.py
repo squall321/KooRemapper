@@ -14,7 +14,8 @@
   - 단독 squeeze 출력 .k 에 *KEYWORD/*PART/*SECTION/*MAT 이 없어 해석에 바로 넣을 수 없었고,
     swelling 의 *MAT_ADD_THERMAL_EXPANSION 이 없는 MID 를 가리켰다.
   - 쓰레기 enum 값을 조용히 삼켰다: merge method/direction → VRH/Z, contact contact_type → *CONTACT_BOGUS_TITLE,
-    meshfix algorithm → hxt, stabilize level 0/-1 은 no-op, 13/99 는 12 로 클램프.
+    meshfix algorithm → hxt, stabilize level -1 은 no-op, 13/99 는 12 로 클램프
+    (level: 0 은 문서에 적힌 수동 모드라 계속 받는다).
 """
 import os
 import shutil
@@ -250,10 +251,10 @@ def test_meshfix_stabilize(binary):
     check("meshfix algorithm: 'bogus' → rc=1 + 허용값 출력 (예전엔 hxt 로 실행)",
           rc == 1 and "hxt, frontal3d, del3d" in out, f"rc={rc} {out[-200:]}")
 
-    for lv in ("0", "-1", "13", "99", "abc"):
+    for lv in ("-1", "13", "99", "abc"):
         write(d, f"st_{lv}.yaml", f"model: box.k\noutput: st_{lv}.k\nstabilize: explicit\nlevel: {lv}\n")
         rc, out = run(binary, d, "stabilize", f"st_{lv}.yaml")
-        check(f"stabilize level: {lv} → rc=1 + 1~12 안내", rc == 1 and "1~12" in out
+        check(f"stabilize level: {lv} → rc=1 + 0~12 안내", rc == 1 and "0~12" in out
               and not os.path.exists(os.path.join(d, f"st_{lv}.k")), f"rc={rc} {out[-200:]}")
 
     write(d, "st_6.yaml", "model: box.k\noutput: st_6.k\nstabilize: explicit\nlevel: 6\n")
