@@ -9,6 +9,8 @@
   - stabilize 의 level: 0 은 examples/explicit/full_manual.yaml 과 MCP 카탈로그가 안내하는 수동 모드인데
     허용값을 1~12 로 좁히면서 rc=1 로 막혔다.
   - `help load` 는 mode: gravity / select: all 을 안내하는데 같은 바이너리가 그 값을 rc=1 로 거절했다.
+    (src/cli/HelpCatalogData.inc 의 한글 한 줄 요약 '압력·힘·중력 하중' 과 docs/KooRemapper_Manual.md 은
+     아직 중력을 적는다 — 다음 단계 문서 작업 몫이라 여기서는 단언하지 않는다.)
   - merge 재질 파서는 *MAT_ELASTIC/024/076/020 만 알아 *MAT_PLASTIC_KINEMATIC 등이 걸리면 rc=1 인데
     'MID 3 not found in material DB' 라고만 찍고, 실패가 확정된 그룹의 Homogenized 요약까지 찍었다.
   - 같은 loads 조각이 단독 load 에서는 rc=1, assemble 안에서는 rc=0 으로 통과했다.
@@ -238,7 +240,8 @@ def test_load_help_truth(binary):
     print("[load — 도움말이 안내하는 값이 실제로 통과한다]")
     d = mkd("g2_help_")
     rc, out = run(binary, d, "help", "load")
-    check("help load 는 구현 안 된 mode: gravity 를 더는 안내하지 않는다", "gravity" not in out.lower(),
+    # 한글 한 줄 요약(src/cli/HelpCatalogData.inc)은 아직 '압력·힘·중력 하중' 이다 — 이 커밋 범위 밖
+    check("help load 의 영문 안내에 구현 안 된 mode: gravity 가 없다", "gravity" not in out.lower(),
           out[:400])
     check("help load 는 select: all 을 더는 안내하지 않는다",
           "| all" not in out and "All exposed faces" not in out, out[:400])
