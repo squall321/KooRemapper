@@ -461,6 +461,33 @@ def main():
           rc == 1 and "invalid pid_refs 'bogus' (must be one of strict, warn)" in out,
           f"rc={rc} {out[-300:]}")
 
+    # 비-tied 접촉은 shell 층이 섞이면 옮기지 않는다 — help 가 조건 없이 'STYP 3→2 로 바꾼다' 라고만
+    # 적으면 shell restack 이 rc=1 로 멈추는 이유를 사용자가 못 찾는다.
+    check("restack: 비-tied 접촉은 shell 층이 섞이면 못 옮긴다고 적음",
+          "shell 층이 섞이지 않았을 때 층 전부를 담은 새 세트로(STYP 3→2)" in rst and
+          "shell 층이 섞이면 옮기지 않고" in rst,
+          [l for l in rst.splitlines() if "STYP 3" in l])
+    auto = open(os.path.join(tmp, "box.k")).read().replace(
+        "*END", "*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE\n"
+                "$#   ssid      msid     sstyp     mstyp\n"
+                "         1         0         3         0\n"
+                "       0.0       0.0       0.0       0.0       0.0         0       0.0       0.0\n"
+                "       1.0       1.0       0.0       0.0       1.0       1.0       1.0       1.0\n*END")
+    open(os.path.join(tmp, "box_auto.k"), "w").write(auto)
+    open(os.path.join(tmp, "rs_auto.yaml"), "w").write(
+        "base_model: box_auto.k\noutput: rs_auto\n" + RS_OPS)
+    rc, out = run(binary, tmp, "restack", "rs_auto.yaml")
+    check("restack: solid 층이면 비-tied 접촉을 층 전부의 세트로 옮긴다(STYP 3→2, rc=0)",
+          rc == 0 and "(STYP 3→2)" in out and
+          "*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE (moved)" in out, f"rc={rc} {out[-300:]}")
+    open(os.path.join(tmp, "rs_auto_sh.yaml"), "w").write(
+        "base_model: box_auto.k\noutput: rs_auto_sh\n" +
+        RS_OPS.replace("    direction: z\n", "    direction: z\n    element_type: shell\n"))
+    rc, out = run(binary, tmp, "restack", "rs_auto_sh.yaml")
+    check("restack: shell 층이면 그 접촉을 옮기지 않고 left 로 남겨 rc=1",
+          rc == 1 and "*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE (left)" in out and
+          "shell 층이 섞여" in out, f"rc={rc} {out[-300:]}")
+
     # help merge 사례는 rc=0 이어야 한다 — three_layer.k 의 *MAT_ADD_THERMAL_EXPANSION 이 죽은 PID 를
     # 가리키지만 merge 는 스칼라 칸까지 옮기므로 못 옮긴 자리가 남지 않는다.
     check("merge: 사례가 rc=0 이고 *MAT_ADD_THERMAL_EXPANSION 이 옮겨진다고 적음",
