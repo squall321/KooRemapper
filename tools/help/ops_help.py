@@ -572,8 +572,8 @@ rbe:
    cmds=[BOX_CMD, "KooRemapper rbe rbe.yaml"], outputs=["box_rbe.k"],
    notes=["mode: spider(면 전체 중심 1개) | face(면마다)",
           "select: direction | all(파트 노출면 전체) — boundary 와 달리 set 은 없다"])
-op("cnrb2spring", "하중·경계·접촉", "CNRB 체결점을 두 강체 + 3축 이산 스프링(자유유격) 조인트로 분할",
-   "볼트 유격 gap clearance 나사 체결 스프링 discrete 측면낙하",
+op("cnrb2spring", "하중·경계·접촉", "CNRB 체결점을 두 강체 + 유격 discrete beam 조인트로 분할",
+   "볼트 유격 gap clearance 나사 체결 스프링 discrete beam 측면낙하",
    "KooRemapper cnrb2spring <config.yaml>",
    needs=["examples/cnrb2spring/two_plate_bolt.k"],
    files={"spring.yaml": """model: examples/cnrb2spring/two_plate_bolt.k
@@ -582,7 +582,7 @@ axis: z
 gap: 0.1
 k_engage: 1.0e5
 k_axial: 1.0e7
-eps: 0.001
+k_rot: 1.0e7
 curve_range: 1.0
 target_pids: [1201]
 node_id_start: 90000001
@@ -591,12 +591,17 @@ card_id_start: 990001
 pid_refs: strict
 """},
    cmds=["KooRemapper cnrb2spring spring.yaml"], outputs=["two_plate_bolt_spring.k"],
-   invariants={"two_plate_bolt_spring.k": {"keywords": ["*ELEMENT_DISCRETE", "*SECTION_DISCRETE",
-                                                        "*MAT_SPRING_GENERAL_NONLINEAR", "*DEFINE_CURVE"]}},
-   notes=["CNRB 하나를 Side A/B 두 강체로 쪼개고 팬텀 노드 4개를 3개의 *ELEMENT_DISCRETE 로 잇는다."
+   invariants={"two_plate_bolt_spring.k": {"keywords": ["*ELEMENT_BEAM", "*SECTION_BEAM",
+                                                        "*MAT_NONLINEAR_ELASTIC_DISCRETE_BEAM",
+                                                        "*DEFINE_COORDINATE_SYSTEM", "*DEFINE_CURVE"]}},
+   notes=["CNRB 하나를 Side A/B 두 강체로 쪼개고 같은 자리에 둔 팬텀 노드 2개를 제로길이 discrete beam"
+          "(*SECTION_BEAM ELFORM=6 + *MAT_NONLINEAR_ELASTIC_DISCRETE_BEAM) 하나로 잇는다."
           " 원 CNRB 와 그 *SET_NODE_LIST 는 통째로 지운다.",
-          "axis 는 필수다(auto 없음). 이 축에 k_axial 이, 나머지 두 축에 ±gap 자유유격 곡선이 붙는다.",
-          "gap·k_engage·k_axial·eps 는 실측이 아닌 가정값이다 — 기본값을 쓰면 콘솔에 그 사실을 알린다.",
+          "축 분리는 *DEFINE_COORDINATE_SYSTEM 이 세운다 — 로컬 r=axis(k_axial), s·t=전단(±gap 유격)."
+          " 제로길이라 상대변위가 아무리 커져도 r/s/t 가 섞이지 않는다.",
+          "axis 는 필수다(auto 없음). 두 파트 간격의 최대 성분과 다르면 [WARN] 만 내고 계속한다.",
+          "k_rot 은 회전 3자유도 강성이다(기본 1.0e7 N*mm/rad). 0 으로 두면 회전을 풀지만 원 CNRB 와 달라진다.",
+          "gap·k_engage·k_axial·k_rot 는 실측이 아닌 가정값이다 — 기본값을 쓰면 콘솔에 그 사실을 알린다.",
           "새 ID 는 고정 번호대(노드 9000만·요소 990만·카드 99만)다. 원본과 겹치면 조용히 밀지 않고 rc=1 이다.",
           "CNRB 가 잇는 두 파트는 요소 연결성으로 판정한다. 세트 안의 '*NODE 에 없는 ID' 는 제외하고 몇 개인지 알린다."])
 op("contact", "하중·경계·접촉", "접촉 정의 분석·생성·자동감지·변환·수정·삭제를 한 YAML 로 순차 실행", "접촉 contact tied detect",

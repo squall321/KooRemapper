@@ -4070,9 +4070,9 @@ keywords:
 
 ---
 
-### 43.11 cnrb2spring — CNRB 체결점을 유격 스프링 조인트로 분할
+### 43.11 cnrb2spring — CNRB 체결점을 유격 discrete beam 조인트로 분할
 
-**용도**: `*CONSTRAINED_NODAL_RIGID_BODY`(CNRB)는 유격 0·강성 무한대라 나사-홀 반경 공차(측면 전단 방향 유격)를 표현하지 못한다. 측면 낙하는 체결부를 정확히 그 방향으로 가진한다. 이 op 은 CNRB 하나를 **Side A/Side B 두 개의 독립 강체**로 쪼개고, 그 사이를 팬텀 노드 4개와 `*ELEMENT_DISCRETE` 3개(X/Y/Z)로 잇는다. 축이 아닌 두 방향에는 ±`gap` 구간에서 힘이 0 인 자유유격 곡선을, 축 방향에는 거의 강체 수준의 선형 강성을 준다.
+**용도**: `*CONSTRAINED_NODAL_RIGID_BODY`(CNRB)는 유격 0·강성 무한대라 나사-홀 반경 공차(측면 전단 방향 유격)를 표현하지 못한다. 측면 낙하는 체결부를 정확히 그 방향으로 가진한다. 이 op 은 CNRB 하나를 **Side A/Side B 두 개의 독립 강체**로 쪼개고, 그 사이를 **같은 자리에 둔 팬텀 노드 2개 + 제로길이 discrete beam 1개**(`*ELEMENT_BEAM` + `*SECTION_BEAM` ELFORM=6 + `*MAT_NONLINEAR_ELASTIC_DISCRETE_BEAM`)로 잇는다. 로컬 좌표계의 `r` 축을 나사 축에 놓아 `r` 에는 거의 강체 수준의 `k_axial` 을, 전단인 `s`·`t` 에는 ±`gap` 구간에서 힘이 0 인 자유유격 곡선을, 회전 3자유도에는 `k_rot` 을 준다.
 
 **호출형태**: yaml-config op (모든 키를 최상위 flat 에 둠). assemble op 으로는 아직 내지 않았다.
 
@@ -4081,45 +4081,59 @@ KooRemapper cnrb2spring <config.yaml>
 ```
 
 **주요 config 키** (`examples/cnrb2spring/two_plate_bolt.yaml`):
-**표 43-11. cnrb2spring config 키 — CNRB 체결점을 두 강체 + 3축 이산 스프링으로 바꾸는 파라미터.**
+**표 43-11. cnrb2spring config 키 — CNRB 체결점을 두 강체 + 제로길이 discrete beam 으로 바꾸는 파라미터.**
 
 | 키 | 기본값 | 설명 |
 |---|---|---|
 | `model` / `output` | (필수) | 입출력 K파일 (YAML 폴더 기준 상대 경로) |
-| `axis` | **(필수, auto 없음)** | 나사 축 `x|y|z`. 이 축에 `k_axial`, 나머지 두 축에 유격 곡선이 붙는다 |
+| `axis` | **(필수, auto 없음)** | 나사 축 `x|y|z`. 빔의 로컬 `r` 이 된다 — `r` 에 `k_axial`, `s`·`t` 에 유격 곡선 |
 | `target_pids` | `[]`(전부) | 변환할 CNRB 의 PID 목록 |
-| `gap` | 0.1 | 반경 유격 ±[mm] |
+| `gap` | 0.1 | 반경 유격 ±[mm] — 로컬 `s`·`t` 에 적용 |
 | `k_engage` | 1.0e5 | 유격 소진 후 전단 강성 [N/mm] |
-| `k_axial` | 1.0e7 | 축방향(나사 헤드 클램핑) 강성 [N/mm] |
-| `eps` | 0.001 | 팬텀 노드 오프셋 [mm] — 0 이면 스프링 축이 정의되지 않는다 |
-| `curve_range` | 1.0 | 곡선 가로축 반범위 [mm] (`gap` 보다 커야 한다) |
+| `k_axial` | 1.0e7 | 축방향(로컬 `r`, 나사 헤드 클램핑) 강성 [N/mm] |
+| `k_rot` | 1.0e7 | 회전 3자유도 강성 [N·mm/rad]. **0 이면 회전을 푼다**(원 CNRB 와 달라진다 — `[WARN]`) |
+| `curve_range` | 1.0 | 병진 곡선 가로축 반범위 [mm] (`gap` 보다 커야 한다) |
 | `node_id_start` / `elem_id_start` / `card_id_start` | 90000001 / 9900001 / 990001 | 새 ID 시작 번호. 원본과 겹치면 조용히 밀지 않고 rc=1 |
 | `pid_refs` | strict | 지운 CNRB PID·SET SID 를 가리키던 참조가 남았을 때 `strict`=rc=1, `warn`=경고만 |
 
-**`axis` 에 `auto` 를 두지 않은 이유**: 두 파트 무게중심 차로 축을 고르면 겹판 체결에서는 맞지만 브래킷 측면을 프레임에 붙인 체결점에서는 나사 축이 아니라 옆으로 난 방향을 가리킨다. 그러면 `k_axial` 이 전단 방향에 붙고 유격 곡선이 나사 축에 붙은, **의도와 정확히 반대인 덱이 rc=0 으로** 나온다. 대신 선언한 축이 무게중심 차의 최대 성분이 아니면 `[WARN]` 으로 성분값을 찍는다 — 판정은 사람이 한다.
+`eps` 는 더 이상 쓰지 않는다. 옛 설정을 그대로 돌리면 rc 는 0 이고 `[WARN] 'eps' 는 더 이상 쓰지 않습니다` 한 줄이 나온다.
 
-**기본값에서는 3축 분리가 상대변위 `eps` 까지만 성립한다**: `*ELEMENT_DISCRETE` 는 VID=0 이라 작동축이 **현재** N1→N2 방향이고, 힘은 두 노드 사이 거리 변화로 계산된다. RA_i 와 RB 의 초기 거리는 `eps` 뿐이므로 **상대변위가 `eps` 를 넘으면 세 스프링의 축이 모두 상대변위 방향으로 서고, 사실상 하나의 반경 스프링처럼 동작한다**. 기본값(`eps`=0.001mm, `gap`=0.1mm)에서는 유격 구간이 이미 `eps` 의 100배라 `axis` 로 고른 축 분리가 유격을 다 쓰기 전에 깨진다 — 축 강성 `k_axial` 이 전단 운동에도 저항하고, 생성된 곡선의 음수 절반(신장량 < -`eps`)은 도달하지 않는 죽은 데이터다. 실행 때 `[WARN] eps(...) < gap(...)` 한 줄이 이 사실을 알린다(rc 는 0). `eps` 를 `curve_range` 이상으로 올리면 초기 길이가 유격보다 커져 축 분리가 유지되지만 팬텀 노드가 앵커에서 그만큼 멀어져 강체 형상이 달라진다 — 어느 쪽을 택할지는 사람이 정한다(현장 절차는 `eps`=0.001mm 로 LS-DYNA Normal termination 을 확인했다).
+**왜 스프링 3개에서 discrete beam 으로 바꿨나**: 처음 구현은 팬텀 노드 4개를 `*ELEMENT_DISCRETE` 3개(X/Y/Z)로 이었다. 그런데 `*ELEMENT_DISCRETE` 는 VID=0 이면 작동축이 **현재** N1→N2 방향이고 힘은 두 노드 사이 **거리 변화**로 계산된다. 팬텀 간격 `eps`=0.001mm 인데 유격 `gap`=0.1mm 라, 상대변위가 `eps` 를 넘는 순간 세 스프링이 모두 상대변위 방향으로 서서 축 분리가 깨졌다. 신장량 √(eps²+d²) − eps 로 계산하면 유격 구간 안인 횡변위 0.05mm 에서 축 스프링이 이미 4.9e5 N 을 냈다(`k_axial`=1e7 N/mm) — 사실상 강체라 **유격이 발현되지 않았다**. `eps` 를 키워도 2차 효과로만 줄어 실용적이지 않았다. 매뉴얼도 같은 말을 한다 — `*ELEMENT_DISCRETE` 의 VID 설명에 "The type 6, 3D beam element, is recommended when orientation is required ... since this option avoids rotational constraints." **제로길이 discrete beam 은 (r, s, t) 를 노드 위치가 아니라 `*SECTION_BEAM` 의 CID 에서 받으므로**("The local coordinate system which determines (r, s, t) is given by the coordinate ID", `*MAT_067` Remark 2) 상대변위가 아무리 커도 축 분리가 유지된다. 덤으로 스프링 3개가 병진만 묶어 두 파트가 체결점을 중심으로 자유 회전하던 구멍도 `k_rot` 으로 메웠다.
+
+**만들어지는 카드**: 모델 전체에 `*DEFINE_CURVE` 2개(축·전단, `k_rot`>0 이면 회전까지 3개) · `*DEFINE_COORDINATE_SYSTEM` 1개 · `*SECTION_BEAM` 1개 · `*MAT_NONLINEAR_ELASTIC_DISCRETE_BEAM` 1개 · `*PART` 1개. 체결점마다 `*NODE` 2줄(같은 좌표) · `*SET_NODE_LIST_TITLE` 2개 · `*CONSTRAINED_NODAL_RIGID_BODY_TITLE` 2개 · `*ELEMENT_BEAM` 1줄.
 
 **카드 형식 함정**(LS-DYNA 라이선스가 없어 회귀가 덱 문자열로 못 박는 항목):
 
-- `*ELEMENT_DISCRETE` 는 **8칸** 고정폭이다(다른 카드는 10칸). 10칸으로 쓰면 7자리 EID 가 잘려 `beam element ... has an undefined PID` 가 난다.
-- `*ELEMENT_DISCRETE` 의 S(스케일, 41~56열)는 1.0 을 **명시**한다. 비워 0.0 으로 읽히면 모든 스프링이 에러 없이 무력화된다.
-- `*SECTION_DISCRETE` 는 2번째 줄(CDL, TDL)이 필수다. 빼면 다음 키워드 줄을 그 줄로 먹는다.
-- `*MAT_SPRING_GENERAL_NONLINEAR` 은 MID LCDL LCDU 세 칸만 쓴다(LCDL=로딩, LCDU=언로딩; 같으면 대칭). 다른 스프링 재질의 7칸 형식으로 쓰면 `MAT n is not found`.
-- 블록 사이에 **빈 줄을 만들지 않는다**. `*ELEMENT_DISCRETE` 가 다음 `*` 까지 데이터로 읽어 빈 줄을 요소로 오인하면 `discrete element id 0 is invalid` 가 난다(`$` 주석 줄은 안전하다).
+- `*ELEMENT_BEAM` 은 **8칸** 고정폭이다(다른 카드는 10칸). 10칸으로 쓰면 7자리 EID 가 잘려 `beam element ... has an undefined PID` 가 난다. EID·PID·N1·N2 만 쓴다.
+- `N3`(방향 노드)는 **비운다**. `SCOOR`=2.0 일 때만 읽히고 그때도 optional 이며, 우리 방향은 CID 가 전담한다.
+- `RT1/RR1/RT2/RR2`(릴리즈)는 **반드시 0(빈칸)** 이다. 릴리즈를 건 노드는 nodal rigid body 에 넣을 수 없는데(`*ELEMENT_BEAM` Remark 2) 두 팬텀 노드는 양쪽 CNRB 에 들어간다.
+- `*SECTION_BEAM` 은 ELFORM=6 전용 Card 2f(VOL, INER, CID)가 필수다. `SCOOR` 는 **빈칸(=0.0)** 으로 둔다 — 제로길이 빔은 |SCOOR| ≤ 1 이어야 하고, ±2 는 "not recommended for zero length discrete beams" 다.
+- `VOL`·`INER` 는 **0 이면 안 된다**. type 6 빔의 병진 시간증분은 VOL·밀도·병진강성으로, 회전 시간증분은 INER·회전강성으로 계산된다(Remark 12).
+- `*MAT_NONLINEAR_ELASTIC_DISCRETE_BEAM` 은 Card 1~3 이 **전부 필수**다. 쓰지 않는 Card 2(감쇠)·Card 3(프리로드)는 빈 줄 대신 0 을 적는다 — 빈 줄을 넣으면 뒤 블록이 그 줄을 데이터로 읽는다.
+- **곡선 ID 0 은 '자유' 다**("For null load curve IDs, no forces are computed"). 회전을 묶으려면 LCIDRR/RS/RT 에 반드시 곡선을 줘야 한다 — 비워 두면 원 CNRB 대비 회전 자유가 그대로 남는다.
+- 블록 사이에 **빈 줄을 만들지 않는다**(`$` 주석 줄은 안전하다).
+
+**VOL·INER 를 어떻게 정했나**: 매뉴얼은 "reasonable non-zero values" 라고만 하고 수치 기준을 주지 않는다. 그래서 임의의 상수를 박는 대신 **기준 시간증분 `DT_REF`=5.0e-7 s** 를 정해 두고 강성에서 거꾸로 잡는다 — Δt ≈ 2√(m/k) 이므로 `VOL` = max(`k_axial`, `k_engage`)·(DT_REF/2)², `INER` = max(`k_axial`, `k_engage`, `k_rot`)·(DT_REF/2)². `RO`=1.0 으로 쓰므로 `VOL` 이 곧 요소 질량[t]이고 두 팬텀 노드에 반씩 실린다. 실행하면 콘솔이 `VOL`·`INER`·합계 추가 질량을 찍는다. `k_axial`·`k_rot` 을 키우면 추가 질량도 같이 커진다(가정값이다 — 실측이 아니다).
 
 **동작 규칙**:
 
+- 두 팬텀 노드는 **완전히 같은 좌표**(두 파트 무게중심의 중점)에 둔다. `*MAT_067` 이 "The two nodes defining a beam may be coincident to give a zero length beam" 이라고 명시하고 "The distance between the nodes of a beam should not affect the behavior of this material model" 이라 최소 간격 요구가 없다.
+- 축 분리는 `*DEFINE_COORDINATE_SYSTEM` 이 세운다. `axis=x` → XL=(1,0,0)·XP=(0,1,0)(r=X, s=Y, t=Z), `axis=y` → (0,1,0)/(0,0,1), `axis=z` → (0,0,1)/(1,0,0). CID 를 빼면 전역계가 그대로 r/s/t 라 `axis` 가 무시되므로 항상 만든다.
 - CNRB 가 잇는 두 파트는 **요소 연결성**으로만 판정한다(이름 패턴·가정 금지). `*ELEMENT_SOLID` 의 ten nodes format 은 한 요소가 두 줄이므로 원문 줄에서 직접 읽는다 — TET10 의 9·10번 중간절점이 CNRB 노드인 경우까지 잡는다.
 - 이 op 이 읽는 `*NODE`·`*ELEMENT_*`·`*SET_NODE*`·`*CONSTRAINED_NODAL_RIGID_BODY` 는 **고정폭으로만** 읽는다. 콤마 자유형식 줄이 섞여 있으면 칸 자리가 통째로 어긋나므로 조용히 읽지 않고 rc=1 이다.
 - 세트 안의 '실제 노드가 아닌 ID' 는 `*NODE` 목록과 대조해 거르고 몇 개를 걸렀는지 알린다('100 이하' 같은 값 규칙을 쓰지 않는다).
 - NSID=0 은 LS-DYNA 규칙대로 NSID=PID 로 읽는다. `_TITLE` 인데 제목 줄이 빠진 덱도 데이터 줄 모양 판정으로 가려낸다.
 - 원 CNRB 의 `PNODE` 는 **그 노드가 속한 쪽 강체에만** 넘긴다(요소 연결성으로 판정한 Side A/B, 반대쪽은 0). 양쪽에 다 넘기면 한 노드가 두 강체에 들어가고 LS-DYNA 가 PNODE 좌표를 무게중심으로 옮기면서 실메시 노드가 끌려간다. 세트 멤버가 아니어서 어느 쪽인지 정할 수 없으면 양쪽 다 0 으로 두고 `[WARN]` 로 알린다.
 - 원 CNRB 와 그 `*SET_NODE_LIST` 는 **통째로 삭제**한다. 그 PID 를 가리키던 카드는 restack/merge 와 같은 공용 죽은-참조 스캐너로, 그 SID 를 가리키던 카드는 이 op 이 같은 등급 어휘(manual/maybe)로 보고한다. 이관은 하지 않는다 — 강체 하나가 둘로 쪼개지므로 어느 쪽이 원 경계조건을 이어받을지는 사람이 정해야 한다.
+- 새 ID 충돌은 네임스페이스별로 본다 — 노드·요소·파트·세트·섹션·재질·곡선에 **좌표계(CID)** 가 더해졌다. 겹치면 조용히 밀지 않고 rc=1 이다.
 - 파라미터 기본값은 **실측이 아닌 가정값**이다(labeled assumption). 기본값을 쓰면 콘솔에 그 사실을 한 줄로 알린다.
-- rc 를 건드리지 않는 품질 경고: `eps < gap`(VID=0 이라 작동축이 현재 N1→N2 방향이다), 한 파트 쌍에 조인트가 1개뿐(병진 스프링 3개는 회전을 구속하지 않는다), 한쪽 노드가 3개 미만, `curve_range > 20*gap`.
+- rc 를 건드리지 않는 품질 경고: 선언한 `axis` 가 무게중심 차의 최대 성분이 아님, `k_rot`=0 인데 한 파트 쌍에 조인트가 1개뿐(그 점을 중심으로 돈다), 한쪽 노드가 3개 미만, `curve_range > 20*gap`.
 
-**근거**: 2026-09-18 T4_PV1/T4_DVR 6면 낙하 모델 21개 체결점 적용 절차(LS-DYNA Normal termination 확인), LS-DYNA R16 매뉴얼 Vol_I `*ELEMENT_DISCRETE`·`*SECTION_DISCRETE`·`*DEFINE_CURVE`, `examples/cnrb2spring/`, `tools/regress/test_cnrb2spring.py`.
+**`axis` 에 `auto` 를 두지 않은 이유**: 두 파트 무게중심 차로 축을 고르면 겹판 체결에서는 맞지만 브래킷 측면을 프레임에 붙인 체결점에서는 나사 축이 아니라 옆으로 난 방향을 가리킨다. 그러면 `k_axial` 이 전단 방향에 붙고 유격 곡선이 나사 축에 붙은, **의도와 정확히 반대인 덱이 rc=0 으로** 나온다. 대신 선언한 축이 무게중심 차의 최대 성분이 아니면 `[WARN]` 으로 성분값을 찍는다 — 판정은 사람이 한다.
+
+**미확인 사항**(라이선스가 생기면 `*DATABASE_DISBOUT` 으로 1회 확인할 것): CID 의 로컬 (x, y, z) 가 빔의 (r, s, t) 에 순서대로 대응한다는 명시적 원문 문장은 찾지 못했다. `*DEFINE_COORDINATE_*` 는 x/y/z 로만 정의되고 discrete beam 은 "(r, s, t) is given by the coordinate ID" 라고만 한다 — LS-DYNA 관례상 x→r, y→s, z→t 이지만 원문 확증은 아니다.
+
+**근거**: 2026-09-18 T4_PV1/T4_DVR 6면 낙하 모델 21개 체결점 적용 절차, LS-DYNA R16 매뉴얼 Vol_I `*ELEMENT_BEAM`·`*SECTION_BEAM`·`*DEFINE_COORDINATE_SYSTEM`·`*DEFINE_CURVE` 와 Vol_II `*MAT_NONLINEAR_ELASTIC_DISCRETE_BEAM`, `examples/cnrb2spring/`, `tools/regress/test_cnrb2spring.py`.
 
 ---
 

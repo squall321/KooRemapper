@@ -1,4 +1,4 @@
-// CNRB 체결점을 '두 강체 + 3축 이산 스프링' 유격 조인트로 쪼개는 op 의 공개 인터페이스
+// CNRB 체결점을 '두 강체 + 제로길이 discrete beam(ELFORM=6)' 유격 조인트로 쪼개는 op 의 공개 인터페이스
 #pragma once
 #include "cli/ConsoleOutput.h"
 #include <string>
@@ -16,8 +16,8 @@ struct Cnrb2SpringConfig {
     char   axis        = 0;           // 'x'|'y'|'z' — 0 이면 미지정(오류)
     double gap         = 0.1;         // 반경 유격 ±[mm]
     double kEngage     = 1.0e5;       // 유격 소진 후 전단 강성 [N/mm]
-    double kAxial      = 1.0e7;       // 축방향 강성 [N/mm]
-    double eps         = 0.001;       // 팬텀 노드 오프셋 [mm]
+    double kAxial      = 1.0e7;       // 축방향(로컬 r) 강성 [N/mm]
+    double kRot        = 1.0e7;       // 회전 3자유도 강성 [N*mm/rad]. 0 이면 회전을 풀어 둔다
     double curveRange  = 1.0;         // 곡선 가로축 반범위 [mm]
     int    nodeIdStart = 90000001;
     int    elemIdStart = 9900001;

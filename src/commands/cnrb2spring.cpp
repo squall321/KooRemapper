@@ -1,4 +1,4 @@
-// CNRB 체결점 하나를 Side A/B 두 강체로 쪼개고 그 사이를 3축 *ELEMENT_DISCRETE 스프링(자유유격)으로 잇는 op
+// CNRB 체결점 하나를 Side A/B 두 강체로 쪼개고 그 사이를 제로길이 discrete beam(ELFORM=6) 하나로 잇는 op
 #include "cnrb2spring.h"
 #include "cli/ConsoleOutput.h"
 #include "util/YamlComment.h"
@@ -26,8 +26,8 @@ using KooRemapper::ConsoleOutput;
 // ============================================================
 // 소도구 — 저장소 관례대로 이 파일 안에 cg_ 접두어로 둔다(cnrb2solid 의 cs_, merge 의 mg_ 와 같다).
 // 칸 폭이 카드마다 다르므로 8칸(cg_field8)·10칸(cg_field10) 헬퍼를 반드시 나눠 쓴다.
-//   8칸  : *ELEMENT_*  (*ELEMENT_DISCRETE 포함)
-//   10칸 : *PART *SECTION_* *MAT_* *SET_* *CONSTRAINED_* *DEFINE_CURVE *CONTACT_* ...
+//   8칸  : *ELEMENT_*  (*ELEMENT_BEAM 포함)
+//   10칸 : *PART *SECTION_* *MAT_* *SET_* *CONSTRAINED_* *DEFINE_CURVE *DEFINE_COORDINATE_* ...
 // ============================================================
 
 static std::string cg_trim(const std::string& s) {
@@ -332,12 +332,12 @@ static std::map<int, std::set<int>> cg_parseElementOwners(const std::vector<std:
 // ============================================================
 
 struct CgUsedIds {
-    std::set<int> node, elem, part, sect, mat, curve, set;
+    std::set<int> node, elem, part, sect, mat, curve, set, coord;
 };
 
 static CgUsedIds cg_scanUsedIds(const std::vector<std::string>& lines) {
     CgUsedIds u;
-    enum Kind { NONE, NODE, ELEM, PART, SECT, MAT, CURVE };
+    enum Kind { NONE, NODE, ELEM, PART, SECT, MAT, CURVE, COORD };
     Kind kind = NONE;
     bool firstDataTaken = false;
     bool titlePending = false;   // '_TITLE' 카드의 제목 줄 한 줄
@@ -355,6 +355,7 @@ static CgUsedIds cg_scanUsedIds(const std::vector<std::string>& lines) {
             else if (up.rfind("*SECTION_", 0) == 0)           kind = SECT;
             else if (up.rfind("*MAT_", 0) == 0)               kind = MAT;
             else if (up.rfind("*DEFINE_CURVE", 0) == 0)       kind = CURVE;
+            else if (up.rfind("*DEFINE_COORDINATE", 0) == 0)  kind = COORD;
             else                                              kind = NONE;
             titlePending = (up.find("_TITLE") != std::string::npos);
             continue;
@@ -381,7 +382,7 @@ static CgUsedIds cg_scanUsedIds(const std::vector<std::string>& lines) {
             if (pid > 0) u.part.insert(pid);
             continue;
         }
-        // SECTION·MAT·DEFINE_CURVE — 제목 줄은 '_TITLE 이면 한 줄' 로만 건넌다(cg_parseNodeSets 와 같은 판정).
+        // SECTION·MAT·DEFINE_CURVE·DEFINE_COORDINATE — 제목 줄은 '_TITLE 이면 한 줄' 로만 건넌다(cg_parseNodeSets 와 같은 판정).
         // 여기서 cg_looksLikeDataLine 으로 거르면 칸이 하나뿐인 헤더 줄(예: *DEFINE_CURVE_TITLE 의 LCID)이
         // 통째로 걸러지고 다음 데이터 줄이 ID 로 등록돼 충돌 검사가 죽는다.
         if (titlePending) {
@@ -396,6 +397,7 @@ static CgUsedIds cg_scanUsedIds(const std::vector<std::string>& lines) {
             case SECT:  u.sect.insert(id);  break;
             case MAT:   u.mat.insert(id);   break;
             case CURVE: u.curve.insert(id); break;
+            case COORD: u.coord.insert(id); break;
             default: break;
         }
     }
@@ -491,22 +493,55 @@ static void cg_emitDefineCurve(std::vector<std::string>& out, int lcid,
     for (const auto& p : pts) out.push_back(cg_fmt("%20.10E%20.10E", p.first, p.second));
 }
 
-// *MAT_SPRING_GENERAL_NONLINEAR — 10칸. MID LCDL LCDU 세 칸만 쓴다(LCDL=로딩, LCDU=언로딩; 같으면 대칭).
-// 7칸짜리 다른 스프링 재질 형식으로 쓰면 LS-DYNA 가 'MAT n is not found' 로 멈춘다.
-static void cg_emitMatSpring(std::vector<std::string>& out, int mid, int lcid) {
-    out.push_back("*MAT_SPRING_GENERAL_NONLINEAR");
-    out.push_back("$#     mid      lcdl      lcdu");
-    out.push_back(cg_fmt("%10d%10d%10d", mid, lcid, lcid));
+// 10칸 필드에 실수 하나 — VOL/INER 처럼 작은 값도 10칸 안에 유효숫자를 남긴다
+static std::string cg_f10(double v) { return cg_fmt("%10.3E", v); }
+
+// *DEFINE_COORDINATE_SYSTEM — 10칸 × 8필드. Card 1 + Card 2(XP, YP, ZP).
+// 로컬 x 를 체결 축에 놓는다. 제로길이 discrete beam 은 노드 간격이 아니라 이 좌표계가 (r, s, t) 를
+// 정하므로(Vol_II *MAT_067 Remark 2: "local coordinate system which determines (r, s, t) is given by
+// the coordinate ID") 축 분리가 상대변위 크기와 무관하게 성립한다 — 이것이 스프링 3개 방식과의 차이다.
+static void cg_emitCoordSystem(std::vector<std::string>& out, int cid, int ax) {
+    double xl[3] = {0.0, 0.0, 0.0}, xp[3] = {0.0, 0.0, 0.0};
+    xl[ax] = 1.0;                  // 로컬 x축 위의 점 → r = 체결 축
+    xp[(ax + 1) % 3] = 1.0;        // 로컬 xy평면 위의 점 → s, t = 나머지 두 전역축
+    out.push_back("*DEFINE_COORDINATE_SYSTEM");
+    out.push_back("$#     cid        xo        yo        zo        xl        yl        zl      cidl");
+    out.push_back(cg_fmt("%10d%10.1f%10.1f%10.1f%10.1f%10.1f%10.1f%10d",
+                         cid, 0.0, 0.0, 0.0, xl[0], xl[1], xl[2], 0));
+    out.push_back("$#      xp        yp        zp");
+    out.push_back(cg_fmt("%10.1f%10.1f%10.1f", xp[0], xp[1], xp[2]));
 }
 
-// *SECTION_DISCRETE — 10칸. Card 1 과 Card 2(CDL, TDL)가 한 쌍이다.
-// Card 2 를 빼면 LS-DYNA 가 다음 키워드 줄을 Card 2 로 먹는다.
-static void cg_emitSectionDiscrete(std::vector<std::string>& out, int secid) {
-    out.push_back("*SECTION_DISCRETE");
-    out.push_back("$#   secid       dro        kd        v0        cl        fd");
-    out.push_back(cg_fmt("%10d%10d%10s%10s%10s%10s", secid, 0, "0.0", "0.0", "0.0", "0.0"));
-    out.push_back("$#     cdl       tdl");
-    out.push_back(cg_fmt("%10s%10s", "0.0", "0.0"));
+// *SECTION_BEAM — 10칸 × 8필드. Card 1 + Card 2f(ELFORM=6 전용, 재질 146 이외는 이 카드).
+// SCOOR 는 빈칸(=0.0)으로 둔다 — |SCOOR| <= 1 이어야 제로길이 빔으로 다뤄진다(Vol_I Remark 6).
+// SHRF/QR/CST/NSM 은 discrete beam 에 쓰이지 않고 CA/OFFSET 은 케이블 전용이라 빈칸이다.
+// RRCON/SRCON/TRCON 도 빈칸(=0) — 이 셋은 구조 구속이 아니라 로컬 좌표계 갱신 플래그다(Vol_I Remark 7).
+// VOL·INER 는 0 이면 안 된다. type 6 빔의 병진 시간증분은 VOL·밀도·병진강성으로, 회전 시간증분은
+// INER·회전강성으로 계산된다(Vol_I Remark 12).
+static void cg_emitSectionBeam(std::vector<std::string>& out, int secid,
+                               double vol, double iner, int cid) {
+    out.push_back("*SECTION_BEAM");
+    out.push_back("$#   secid    elform      shrf   qr/irid       cst     scoor       nsm     naupd");
+    out.push_back(cg_fmt("%10d%10d", secid, 6));
+    out.push_back("$#     vol      iner       cid        ca    offset     rrcon     srcon     trcon");
+    out.push_back(cg_f10(vol) + cg_f10(iner) + cg_fmt("%10d", cid));
+}
+
+// *MAT_NONLINEAR_ELASTIC_DISCRETE_BEAM (MAT_067) — 10칸 × 8필드. Card 1~3 이 전부 필수다.
+// 6자유도 각각이 '힘/모멘트 = f(상대 변위/회전)' 곡선 하나를 쓴다. 곡선 ID 0 은 그 자유도에 힘을
+// 만들지 않는다(=자유)는 뜻이므로(Vol_II Remark 1 "For null load curve IDs, no forces are computed")
+// 회전을 묶으려면 반드시 곡선을 줘야 한다. RO=1.0 이면 VOL 이 곧 요소 질량이다(Vol_I VOL 설명).
+// Card 2(감쇠)·Card 3(프리로드)는 쓰지 않지만 카드 자체는 있어야 한다 — 빈 줄 대신 0 을 적는다.
+static void cg_emitMat067(std::vector<std::string>& out, int mid,
+                          int lcAxial, int lcShear, int lcRot) {
+    out.push_back("*MAT_NONLINEAR_ELASTIC_DISCRETE_BEAM");
+    out.push_back("$#     mid        ro    lcidtr    lcidts    lcidtt    lcidrr    lcidrs    lcidrt");
+    out.push_back(cg_fmt("%10d%10.1f%10d%10d%10d%10d%10d%10d", mid, 1.0,
+                         lcAxial, lcShear, lcShear, lcRot, lcRot, lcRot));
+    out.push_back("$# lcidtdr   lcidtds   lcidtdt   lcidrdr   lcidrds   lcidrdt");
+    out.push_back(cg_fmt("%10d%10d%10d%10d%10d%10d", 0, 0, 0, 0, 0, 0));
+    out.push_back("$#     for       fos       fot       mor       mos       mot");
+    out.push_back(cg_fmt("%10.1f%10.1f%10.1f%10.1f%10.1f%10.1f", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0));
 }
 
 // *PART — 제목 줄 + 10칸 데이터 줄
@@ -521,16 +556,6 @@ static void cg_emitPart(std::vector<std::string>& out, const std::string& title,
 // *NODE — 8칸 + 3×F16 (cnrb2solid 와 같은 형식)
 static std::string cg_nodeLine(int nid, const CgVec3& p) {
     return cg_fmt("%8d%16.8e%16.8e%16.8e       0       0", nid, p.x, p.y, p.z);
-}
-
-// 방금 만든 *NODE 줄을 되읽는다 — %16.8e 는 유효숫자 9자리라 좌표가 크면 eps 가 묻힐 수 있다
-static CgVec3 cg_readNodeLine(const std::string& ln) {
-    auto f = [&](int i) {
-        size_t pos = 8 + (size_t)i * 16;
-        if (pos >= ln.size()) return 0.0;
-        return cg_toDouble(cg_trim(ln.substr(pos, std::min<size_t>(16, ln.size() - pos))));
-    };
-    return {f(0), f(1), f(2)};
 }
 
 // *SET_NODE_LIST_TITLE — 10칸 (ModelAssembler 의 bc_generateSetNode 와 같은 형식)
@@ -557,11 +582,14 @@ static void cg_emitCnrb(std::vector<std::string>& out, const std::string& title,
     out.push_back(cg_fmt("%10d%10d%10d%10d%10d%10d%10d", pid, cid, nsid, pnode, 0, 0, 0));
 }
 
-// *ELEMENT_DISCRETE — **8칸**이다. 다른 카드(10칸)와 다르다.
+// *ELEMENT_BEAM — **8칸**이다. 다른 카드(10칸)와 다르다.
 // 10칸으로 쓰면 7자리 EID 가 잘려 엉뚱한 PID 로 읽히고 'beam element ... has an undefined PID' 가 난다.
-// S(스케일)는 cols 41-56(F16)에 1.0 을 명시한다 — 비워 0.0 으로 읽히면 스프링이 에러 없이 무력화된다.
-static std::string cg_elementDiscreteLine(int eid, int pid, int n1, int n2) {
-    return cg_fmt("%8d%8d%8d%8d%8d%16.1f", eid, pid, n1, n2, 0, 1.0);
+// EID PID N1 N2 만 쓴다. N3(방향 노드)는 SCOOR=2.0 일 때만 읽히고 그때도 optional 이므로 비운다
+// — 방향은 *SECTION_BEAM 의 CID 가 전담한다(Vol_I *ELEMENT_BEAM N3 설명).
+// RT1/RR1/RT2/RR2(릴리즈)는 반드시 0(빈칸)이다 — 릴리즈를 건 노드는 nodal rigid body 에 넣을 수
+// 없는데(Vol_I *ELEMENT_BEAM Remark 2) 우리 팬텀 노드 둘은 양쪽 CNRB 에 들어간다.
+static std::string cg_elementBeamLine(int eid, int pid, int n1, int n2) {
+    return cg_fmt("%8d%8d%8d%8d", eid, pid, n1, n2);
 }
 
 // ============================================================
@@ -576,9 +604,8 @@ struct CgJoint {
     CgVec3 anchor;
     CgVec3 cenA, cenB;
     int newPidA = 0, newPidB = 0, sidA = 0, sidB = 0;
-    int nRA[3] = {0, 0, 0};                  // RA_x, RA_y, RA_z (Side A)
-    int nRB = 0;                             // RB (Side B)
-    int eid[3] = {0, 0, 0};                  // X·Y·Z 스프링
+    int nA = 0, nB = 0;                      // 팬텀 노드 2개 — 앵커에 겹쳐 둔다(제로길이 빔)
+    int eid = 0;                             // discrete beam 1개
     size_t cnrbStart = 0, cnrbEnd = 0, setStart = 0, setEnd = 0;
 };
 
@@ -609,20 +636,28 @@ int cnrb2spring_apply(std::vector<std::string>& lines,
     }
     struct { const char* name; double v; } pos[] = {
         {"gap", cfg.gap}, {"k_engage", cfg.kEngage}, {"k_axial", cfg.kAxial},
-        {"eps", cfg.eps}, {"curve_range", cfg.curveRange}};
+        {"curve_range", cfg.curveRange}};
     for (const auto& p : pos) {
         if (!std::isfinite(p.v)) {
             console.error(std::string("[cnrb2spring] ") + p.name + " 값이 유한하지 않습니다 (nan/inf)");
             return -1;
         }
         if (p.v <= 0.0) {
-            std::string why;
-            if (std::string(p.name) == "eps")
-                why = " — eps=0 이면 두 팬텀 노드가 겹쳐 *ELEMENT_DISCRETE 의 작동축 N1->N2 가 정의되지 않습니다";
             console.error(std::string("[cnrb2spring] ") + p.name + " 는 0 보다 커야 합니다 (" +
-                          cg_num(p.v) + ")" + why);
+                          cg_num(p.v) + ")");
             return -1;
         }
+    }
+    // k_rot 만 0 을 허용한다 — 0 은 '회전 3자유도를 풀어 둔다' 는 뜻이다.
+    // MAT_067 은 곡선 ID 0 인 자유도에 힘을 만들지 않으므로(Vol_II Remark 1) 곡선을 아예 내지 않는다.
+    if (!std::isfinite(cfg.kRot)) {
+        console.error("[cnrb2spring] k_rot 값이 유한하지 않습니다 (nan/inf)");
+        return -1;
+    }
+    if (cfg.kRot < 0.0) {
+        console.error("[cnrb2spring] k_rot 는 0 이상이어야 합니다 (" + cg_num(cfg.kRot) +
+                      ") — 0 은 회전 3자유도를 풀어 둔다는 뜻입니다");
+        return -1;
     }
     if (cfg.curveRange <= cfg.gap) {
         console.error("[cnrb2spring] curve_range(" + cg_num(cfg.curveRange) +
@@ -631,8 +666,25 @@ int cnrb2spring_apply(std::vector<std::string>& lines,
     }
     double shearF = cfg.kEngage * (cfg.curveRange - cfg.gap);
     double axialF = cfg.kAxial * cfg.curveRange;
-    if (!std::isfinite(shearF) || !std::isfinite(axialF)) {
-        console.error("[cnrb2spring] 곡선 좌표가 유한하지 않습니다 (k_engage·k_axial·curve_range 를 줄이세요)");
+    // 회전 곡선 가로축 반범위 [rad]. 선형 곡선이라 이 범위 밖은 MAT_067 이 외삽해 같은 기울기로 이어진다
+    // (Vol_II Remark 3: "displacement values fall outside of the defined range ... will be extrapolated").
+    const double ROT_RANGE = 1.0;
+    double rotM = cfg.kRot * ROT_RANGE;
+    if (!std::isfinite(shearF) || !std::isfinite(axialF) || !std::isfinite(rotM)) {
+        console.error("[cnrb2spring] 곡선 좌표가 유한하지 않습니다 (k_engage·k_axial·k_rot·curve_range 를 줄이세요)");
+        return -1;
+    }
+    // *SECTION_BEAM 의 VOL·INER. 매뉴얼은 'reasonable non-zero values' 라고만 하고 수치 기준을 주지 않는다
+    // (Vol_I Remark 12). 임의의 상수를 박는 대신 기준 시간증분 DT_REF 에서 거꾸로 잡는다 —
+    // Δt ≈ 2*sqrt(m/k) 이므로 m = k*(Δt/2)^2 이면 이 빔이 그 Δt 아래로 모델을 끌어내리지 않는다.
+    // RO=1.0 이라 VOL 이 곧 요소 질량이고 두 팬텀 노드에 반씩 실린다(Vol_I *SECTION_BEAM VOL 설명).
+    const double DT_REF = 5.0e-7;   // [s] — 가정값(labeled assumption)
+    const double DT_H = 0.5 * DT_REF;
+    double volMass = std::max(cfg.kAxial, cfg.kEngage) * DT_H * DT_H;              // [t]
+    double inerVal = std::max(std::max(cfg.kAxial, cfg.kEngage), cfg.kRot) * DT_H * DT_H;  // [t*mm^2]
+    if (!std::isfinite(volMass) || !std::isfinite(inerVal) || volMass <= 0.0 || inerVal <= 0.0) {
+        console.error("[cnrb2spring] *SECTION_BEAM 의 VOL/INER 를 계산할 수 없습니다 "
+                      "(k_axial·k_engage·k_rot 를 줄이세요) — 둘 다 0 이 아니어야 합니다");
         return -1;
     }
     if (cfg.nodeIdStart <= 0 || cfg.elemIdStart <= 0 || cfg.cardIdStart <= 0) {
@@ -843,46 +895,39 @@ int cnrb2spring_apply(std::vector<std::string>& lines,
     joints = kept;
     const int N = (int)joints.size();
 
-    // 병진 스프링 3개는 회전을 구속하지 않는다 — 한 파트 쌍에 조인트가 하나뿐이면 그 점을 중심으로 돈다
-    {
+    // k_rot=0 이면 회전 3자유도가 자유다 — 한 파트 쌍에 조인트가 하나뿐이면 그 점을 중심으로 돈다
+    if (cfg.kRot <= 0.0) {
         std::map<std::pair<int,int>, int> pairCount;
         for (const auto& j : joints) pairCount[{j.sidePidA, j.sidePidB}]++;
         for (const auto& kv : pairCount)
             if (kv.second == 1)
                 console.warning("[cnrb2spring] PART " + std::to_string(kv.first.first) + " <-> PART " +
                                 std::to_string(kv.first.second) +
-                                " 사이 조인트가 1개입니다 — 스프링 3개는 병진만 구속하므로 두 파트가 이 점을 중심으로 "
-                                "자유 회전합니다(원 CNRB 는 회전도 구속했습니다)");
+                                " 사이 조인트가 1개인데 k_rot=0 입니다 — 회전 3자유도가 자유라 두 파트가 이 점을 "
+                                "중심으로 돕니다(원 CNRB 는 회전도 구속했습니다)");
     }
     if (cfg.curveRange > 20.0 * cfg.gap)
         console.warning("[cnrb2spring] curve_range(" + cg_num(cfg.curveRange) + ") 가 gap(" +
                         cg_num(cfg.gap) + ") 의 20배를 넘습니다 — LS-DYNA 가 곡선을 균일 격자로 "
                         "재이산화하면 자유유격 평탄부가 뭉개질 수 있습니다");
-    if (cfg.eps < cfg.gap)
-        console.warning("[cnrb2spring] eps(" + cg_num(cfg.eps) + "mm) < gap(" + cg_num(cfg.gap) +
-                        "mm): *ELEMENT_DISCRETE 는 VID=0 이라 작동축이 현재 N1->N2 방향입니다. 상대변위가 "
-                        "eps 를 넘으면 세 스프링의 축이 모두 상대변위 방향으로 서서 사실상 하나의 반경 스프링처럼 "
-                        "동작합니다 — 유격을 다 쓰기 전에 축 분리가 깨지고 k_axial 이 전단 운동에도 저항합니다 "
-                        "(매뉴얼 43.11 참조)");
 
     // ── 5. ID 배정과 충돌 검사 (덱을 만들기 전에) ───────────────────────────
     const int B = cfg.cardIdStart;
-    const int lcShear = B + 0, lcAxial = B + 1;
-    const int midShear = B + 0, midAxial = B + 1;
-    const int secId = B + 0;
-    const int pidShear = B + 0, pidAxial = B + 1;
+    const int lcAxial = B + 0, lcShear = B + 1, lcRot = B + 2;
+    const int matId = B + 0, secId = B + 0, coordId = B + 0, pidBeam = B + 0;
+    const int lcRotUse = (cfg.kRot > 0.0) ? lcRot : 0;   // 0 = 그 자유도는 자유
     std::set<int> newNodeIds, newElemIds, newPartIds, newSetIds;
     for (int k = 0; k < N; ++k) {
         CgJoint& j = joints[k];
-        for (int i = 0; i < 3; ++i) { j.nRA[i] = cfg.nodeIdStart + 4 * k + i; newNodeIds.insert(j.nRA[i]); }
-        j.nRB = cfg.nodeIdStart + 4 * k + 3; newNodeIds.insert(j.nRB);
-        for (int i = 0; i < 3; ++i) { j.eid[i] = cfg.elemIdStart + 3 * k + i; newElemIds.insert(j.eid[i]); }
+        j.nA  = cfg.nodeIdStart + 2 * k;      newNodeIds.insert(j.nA);
+        j.nB  = cfg.nodeIdStart + 2 * k + 1;  newNodeIds.insert(j.nB);
+        j.eid = cfg.elemIdStart + k;          newElemIds.insert(j.eid);
         j.newPidA = B + 10 + 2 * k;  j.newPidB = B + 11 + 2 * k;
         j.sidA = j.newPidA;          j.sidB = j.newPidB;   // 세트와 파트는 다른 네임스페이스다(NSID=PID 규약)
         newPartIds.insert(j.newPidA); newPartIds.insert(j.newPidB);
         newSetIds.insert(j.sidA);     newSetIds.insert(j.sidB);
     }
-    newPartIds.insert(pidShear); newPartIds.insert(pidAxial);
+    newPartIds.insert(pidBeam);
 
     CgUsedIds used = cg_scanUsedIds(lines);
     for (const auto& kv : sets) used.set.insert(kv.first);  // SID 는 세트 파싱 정본에서 그대로 받는다
@@ -890,7 +935,8 @@ int cnrb2spring_apply(std::vector<std::string>& lines,
     for (const auto& j : joints) { used.part.erase(j.origPid); used.set.erase(j.origNsid); }
 
     struct Ns { const char* name; const std::set<int>* mine; const std::set<int>* used; const char* key; };
-    std::set<int> mySect{secId}, myMat{midShear, midAxial}, myCurve{lcShear, lcAxial};
+    std::set<int> mySect{secId}, myMat{matId}, myCurve{lcAxial, lcShear}, myCoord{coordId};
+    if (lcRotUse > 0) myCurve.insert(lcRot);
     Ns nss[] = {
         {"노드",   &newNodeIds, &used.node,  "node_id_start"},
         {"요소",   &newElemIds, &used.elem,  "elem_id_start"},
@@ -899,6 +945,7 @@ int cnrb2spring_apply(std::vector<std::string>& lines,
         {"섹션",   &mySect,     &used.sect,  "card_id_start"},
         {"재질",   &myMat,      &used.mat,   "card_id_start"},
         {"곡선",   &myCurve,    &used.curve, "card_id_start"},
+        {"좌표계", &myCoord,    &used.coord, "card_id_start"},
     };
     bool clash = false;
     for (const auto& n : nss) {
@@ -923,50 +970,38 @@ int cnrb2spring_apply(std::vector<std::string>& lines,
     std::vector<std::string> ins;
     ins.push_back("$");
     ins.push_back("$ === cnrb2spring: CNRB 체결점 " + std::to_string(N) +
-                  "개를 두 강체 + 3축 이산 스프링 유격 조인트로 쪼갰습니다 ===");
-    ins.push_back(cg_fmt("$ gap=%g mm  k_engage=%g N/mm  k_axial=%g N/mm  eps=%g mm  curve_range=%g mm  axis=%c",
-                         cfg.gap, cfg.kEngage, cfg.kAxial, cfg.eps, cfg.curveRange, cfg.axis));
+                  "개를 두 강체 + 제로길이 discrete beam(ELFORM=6) 유격 조인트로 쪼갰습니다 ===");
+    ins.push_back(cg_fmt("$ gap=%g mm  k_engage=%g N/mm  k_axial=%g N/mm  k_rot=%g N*mm/rad  "
+                         "curve_range=%g mm  axis=%c (로컬 r)",
+                         cfg.gap, cfg.kEngage, cfg.kAxial, cfg.kRot, cfg.curveRange, cfg.axis));
+    ins.push_back(cg_fmt("$ *SECTION_BEAM VOL=%g (RO=1.0 이라 요소 질량[t]) INER=%g [t*mm^2] "
+                         "— 기준 시간증분 %g s 로 잡았습니다", volMass, inerVal, DT_REF));
     ins.push_back("$ 위 값은 실측이 아닌 가정값입니다(labeled assumption).");
-    // 전단 곡선 — 가장 음수부터. ±gap 구간은 힘 0(자유유격), 그 밖은 기울기 k_engage
+    // 축(로컬 r) 곡선 — 유격 없이 기울기 k_axial
+    cg_emitDefineCurve(ins, lcAxial, {{-cfg.curveRange, -axialF}, {cfg.curveRange, axialF}});
+    // 전단(로컬 s·t) 곡선 — 가장 음수부터. ±gap 구간은 힘 0(자유유격), 그 밖은 기울기 k_engage
     cg_emitDefineCurve(ins, lcShear, {{-cfg.curveRange, -shearF}, {-cfg.gap, 0.0},
                                       {cfg.gap, 0.0}, {cfg.curveRange, shearF}});
-    cg_emitDefineCurve(ins, lcAxial, {{-cfg.curveRange, -axialF}, {cfg.curveRange, axialF}});
-    cg_emitMatSpring(ins, midShear, lcShear);
-    cg_emitMatSpring(ins, midAxial, lcAxial);
-    cg_emitSectionDiscrete(ins, secId);
-    cg_emitPart(ins, cg_fmt("cnrb2spring shear (gap=%g)", cfg.gap), pidShear, secId, midShear);
-    cg_emitPart(ins, cg_fmt("cnrb2spring axial %s", AXN[ax]), pidAxial, secId, midAxial);
+    // 회전(로컬 r·s·t) 곡선 — 모멘트 vs 상대회전[rad]. k_rot=0 이면 아예 내지 않는다(=회전 자유)
+    if (lcRotUse > 0)
+        cg_emitDefineCurve(ins, lcRot, {{-ROT_RANGE, -rotM}, {ROT_RANGE, rotM}});
+    cg_emitCoordSystem(ins, coordId, ax);
+    cg_emitSectionBeam(ins, secId, volMass, inerVal, coordId);
+    cg_emitMat067(ins, matId, lcAxial, lcShear, lcRotUse);
+    cg_emitPart(ins, cg_fmt("cnrb2spring joint r=%s (gap=%g)", AXN[ax], cfg.gap), pidBeam, secId, matId);
 
+    // 두 팬텀 노드를 같은 자리에 둔다. MAT_067 은 "The two nodes defining a beam may be coincident to
+    // give a zero length beam" 이라 간격이 필요 없고, 방향은 CID 가 전담한다 — eps 개념이 사라진 자리다.
     ins.push_back("*NODE");
     for (auto& j : joints) {
-        CgVec3 base = j.anchor;
-        CgVec3 pa[3] = {base, base, base};
-        pa[0].x += cfg.eps; pa[1].y += cfg.eps; pa[2].z += cfg.eps;
-        std::string lb = cg_nodeLine(j.nRB, base);
-        CgVec3 rb = cg_readNodeLine(lb);
-        for (int i = 0; i < 3; ++i) {
-            std::string la = cg_nodeLine(j.nRA[i], pa[i]);
-            CgVec3 ra = cg_readNodeLine(la);
-            // %16.8e 는 유효숫자 9자리다 — 좌표가 크면 eps 가 마지막 자리에 묻혀 두 노드가 겹친다.
-            // 그러면 스프링 축이 정의되지 않은 채 조용히 망가지므로 쓰기 전에 되읽어 확인한다.
-            bool ok = (cg_comp(ra, i) != cg_comp(rb, i));
-            for (int o = 0; o < 3 && ok; ++o) if (o != i && cg_comp(ra, o) != cg_comp(rb, o)) ok = false;
-            if (!ok) {
-                console.error("[cnrb2spring] PID " + std::to_string(j.origPid) + ": 팬텀 노드 " +
-                              std::string(AXN[i]) + " 오프셋이 %16.8e 출력에서 사라졌습니다 (앵커=" +
-                              cg_num(base.x) + "," + cg_num(base.y) + "," + cg_num(base.z) +
-                              ") — eps 를 키우거나 모델 좌표 크기를 줄이세요");
-                return -1;
-            }
-            ins.push_back(la);
-        }
-        ins.push_back(lb);
+        ins.push_back(cg_nodeLine(j.nA, j.anchor));
+        ins.push_back(cg_nodeLine(j.nB, j.anchor));
     }
 
     for (auto& j : joints) {
         std::vector<int> a = j.nodesA, b = j.nodesB;
-        for (int i = 0; i < 3; ++i) a.push_back(j.nRA[i]);
-        b.push_back(j.nRB);
+        a.push_back(j.nA);
+        b.push_back(j.nB);
         cg_emitSetNode(ins, j.sidA, a, "cnrb2spring " + std::to_string(j.origPid) + " side A");
         cg_emitSetNode(ins, j.sidB, b, "cnrb2spring " + std::to_string(j.origPid) + " side B");
     }
@@ -977,12 +1012,10 @@ int cnrb2spring_apply(std::vector<std::string>& lines,
         cg_emitCnrb(ins, "cnrb2spring " + std::to_string(j.origPid) + " side B",
                     j.newPidB, j.origCid, j.sidB, j.pnodeB);
     }
-    ins.push_back("*ELEMENT_DISCRETE");
-    ins.push_back("$#    eid     pid      n1      n2     vid               s");
+    ins.push_back("*ELEMENT_BEAM");
+    ins.push_back("$#    eid     pid      n1      n2      n3     rt1     rr1     rt2     rr2   local");
     for (auto& j : joints)
-        for (int i = 0; i < 3; ++i)
-            ins.push_back(cg_elementDiscreteLine(j.eid[i], (i == ax) ? pidAxial : pidShear,
-                                                 j.nRA[i], j.nRB));
+        ins.push_back(cg_elementBeamLine(j.eid, pidBeam, j.nA, j.nB));
 
     for (const auto& l : ins) {
         std::string up = cg_upper(l);
@@ -992,7 +1025,7 @@ int cnrb2spring_apply(std::vector<std::string>& lines,
         }
         if (cg_trim(l).empty()) {
             console.error("[cnrb2spring] 삽입 블록에 빈 줄이 생겼습니다 — "
-                          "*ELEMENT_DISCRETE 가 빈 줄을 요소로 읽어 'discrete element id 0 is invalid' 가 납니다");
+                          "*ELEMENT_BEAM 이 빈 줄을 요소로 읽어 'element id 0 is invalid' 가 납니다");
             return -1;
         }
     }
@@ -1096,11 +1129,23 @@ int cnrb2spring_apply(std::vector<std::string>& lines,
             console.println(cg_fmt("[cnrb2spring] PID %d: PNODE %d 를 side %s 강체로 넘겼습니다(노드는 지우지 않습니다)",
                                    j.origPid, j.pnodeA > 0 ? j.pnodeA : j.pnodeB,
                                    j.pnodeA > 0 ? "A" : "B"));
+    std::string curveList = cg_fmt("%d,%d", lcAxial, lcShear);
+    if (lcRotUse > 0) curveList += cg_fmt(",%d", lcRot);
     console.println(cg_fmt("[cnrb2spring] 새 ID — 노드 %d..%d, 요소 %d..%d, 파트/세트 %d..%d, "
-                           "곡선 %d,%d, 재질 %d,%d, 섹션 %d",
-                           cfg.nodeIdStart, cfg.nodeIdStart + 4 * N - 1,
-                           cfg.elemIdStart, cfg.elemIdStart + 3 * N - 1,
-                           B, B + 11 + 2 * (N - 1), lcShear, lcAxial, midShear, midAxial, secId));
+                           "곡선 %s, 재질 %d, 섹션 %d, 좌표계 %d",
+                           cfg.nodeIdStart, cfg.nodeIdStart + 2 * N - 1,
+                           cfg.elemIdStart, cfg.elemIdStart + N - 1,
+                           B, B + 11 + 2 * (N - 1), curveList.c_str(), matId, secId, coordId));
+    console.println(cg_fmt("[cnrb2spring] 로컬계 CID %d — r=%s(k_axial), s·t=전단(±%g mm 유격). "
+                           "제로길이 빔이라 축 분리가 상대변위 크기와 무관합니다",
+                           coordId, AXN[ax], cfg.gap));
+    if (lcRotUse > 0)
+        console.println(cg_fmt("[cnrb2spring] 회전 3자유도를 k_rot=%g N*mm/rad 로 구속했습니다 "
+                               "(원 CNRB 와 같은 자리)", cfg.kRot));
+    else
+        console.warning("[cnrb2spring] k_rot=0 — 회전 3자유도를 풀었습니다. 원 CNRB 는 회전도 구속했습니다");
+    console.println(cg_fmt("[cnrb2spring] *SECTION_BEAM VOL=%g INER=%g — 조인트마다 질량 %g t 를 "
+                           "더합니다(합계 %g t)", volMass, inerVal, volMass, volMass * N));
     console.println(cg_fmt("[cnrb2spring] 삭제: CNRB %d, *SET_NODE_LIST %d", N, (int)deadSids.size()));
     console.println(cg_fmt("[cnrb2spring] 죽은 참조: PID 축 %s, SID 축 %zu건",
                            pidOk ? "0건" : "남음", sidFindings.size()));
@@ -1123,8 +1168,10 @@ int cnrb2spring_apply(std::vector<std::string>& lines,
 // 단독 YAML 러너
 // ============================================================
 
+// 'eps' 는 쓰지 않지만 목록에 남겨 둔다 — 스프링 3개 시절 설정을 그대로 돌렸을 때
+// 'eps 가 아직 뭔가 한다' 는 거짓 안내가 되지 않게 전용 [WARN] 을 내기 위해서다.
 static const char* CG_KEYS[] = {
-    "model", "output", "axis", "target_pids", "gap", "k_engage", "k_axial", "eps",
+    "model", "output", "axis", "target_pids", "gap", "k_engage", "k_axial", "k_rot", "eps",
     "curve_range", "node_id_start", "elem_id_start", "card_id_start", "pid_refs"};
 
 int runCnrb2Spring(const std::string& yamlFile, ConsoleOutput& console) {
@@ -1226,10 +1273,15 @@ int runCnrb2Spring(const std::string& yamlFile, ConsoleOutput& console) {
                 } else cfg.targetPids.push_back(i);
             }
         }
+        else if (key == "eps") {
+            console.warning("[cnrb2spring] 'eps' 는 더 이상 쓰지 않습니다 — 두 팬텀 노드를 같은 자리에 두는 "
+                            "제로길이 discrete beam 이라 간격이 필요 없고, 방향은 로컬 좌표계(CID)가 정합니다. "
+                            "값을 무시합니다");
+        }
         else if (key == "gap")           { if (cg_parseDoubleStrict(val, d)) cfg.gap = d;        else numErr(key, val); }
         else if (key == "k_engage")      { if (cg_parseDoubleStrict(val, d)) cfg.kEngage = d;    else numErr(key, val); }
         else if (key == "k_axial")       { if (cg_parseDoubleStrict(val, d)) cfg.kAxial = d;     else numErr(key, val); }
-        else if (key == "eps")           { if (cg_parseDoubleStrict(val, d)) cfg.eps = d;        else numErr(key, val); }
+        else if (key == "k_rot")         { if (cg_parseDoubleStrict(val, d)) cfg.kRot = d;       else numErr(key, val); }
         else if (key == "curve_range")   { if (cg_parseDoubleStrict(val, d)) cfg.curveRange = d; else numErr(key, val); }
         else if (key == "node_id_start") { if (cg_parseIntStrict(val, i)) cfg.nodeIdStart = i;   else numErr(key, val); }
         else if (key == "elem_id_start") { if (cg_parseIntStrict(val, i)) cfg.elemIdStart = i;   else numErr(key, val); }
@@ -1264,7 +1316,7 @@ int runCnrb2Spring(const std::string& yamlFile, ConsoleOutput& console) {
         add("gap", cfg.gap, "mm");
         add("k_engage", cfg.kEngage, "N/mm");
         add("k_axial", cfg.kAxial, "N/mm");
-        add("eps", cfg.eps, "mm");
+        add("k_rot", cfg.kRot, "N*mm/rad");
         add("curve_range", cfg.curveRange, "mm");
         if (!dflt.empty())
             console.println("[cnrb2spring] 기본값 사용: " + dflt + " (실측 아님 — labeled assumption)");

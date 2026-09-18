@@ -1,14 +1,14 @@
-# CNRB 체결점을 두 강체 + 3축 이산 스프링 유격 조인트로 쪼갠다
+# CNRB 체결점을 두 강체 + 제로길이 discrete beam(ELFORM=6) 유격 조인트로 쪼갠다
 model:  two_plate_bolt.k          # 이 YAML 폴더 기준. 절대 경로는 그대로
 output: two_plate_bolt_spring.k
 
-axis: z                           # 나사 축. 필수 — x|y|z (auto 없음)
+axis: z                           # 나사 축. 필수 — x|y|z (auto 없음). 로컬 r 축이 된다
 
 # 물성 (labeled assumption — 실측 아님)
-gap:         0.1                  # 반경 유격 ±[mm], 축이 아닌 두 방향에 적용
+gap:         0.1                  # 반경 유격 ±[mm], 로컬 s·t(전단) 두 방향에 적용
 k_engage:    1.0e5                # 유격 소진 후 전단 강성 [N/mm]
-k_axial:     1.0e7                # 축방향(나사 헤드 클램핑) 강성 [N/mm]
-eps:         0.001                # 팬텀 노드 오프셋 [mm]
+k_axial:     1.0e7                # 축방향(로컬 r, 나사 헤드 클램핑) 강성 [N/mm]
+k_rot:       1.0e7                # 회전 3자유도 강성 [N*mm/rad]. 0 이면 회전을 푼다(원 CNRB 와 달라진다)
 curve_range: 1.0                  # 곡선 가로축 반범위 [mm]
 
 # 대상 (생략하면 덱의 모든 CNRB)

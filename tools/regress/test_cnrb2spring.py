@@ -1,17 +1,19 @@
-# cnrb2spring 회귀 시험 — 덱 구조(칸 폭·칸 수·좌표·곡선·분할·삭제·충돌·멱등)를 문자열로 직접 못 박는다
+# cnrb2spring 회귀 시험 — 덱 구조(칸 폭·칸 수·좌표계·곡선·분할·삭제·충돌·멱등)를 문자열로 직접 못 박는다
 """
 사용: python3 tools/regress/test_cnrb2spring.py <KooRemapper 바이너리>
 
 배경
   - LS-DYNA 라이선스가 없어 솔버로 검증할 수 없다. 그래서 이 시험은 산출 덱의 칸 폭·칸 수·참조 정합성을
     직접 읽어 확인한다. 현장에서 실제로 당한 함정이 그대로 단언이 된다.
-      *ELEMENT_DISCRETE 는 8칸이다(다른 카드는 10칸) — 10칸으로 쓰면 7자리 EID 가 잘려
+      *ELEMENT_BEAM 은 8칸이다(다른 카드는 10칸) — 10칸으로 쓰면 7자리 EID 가 잘려
       'beam element ... has an undefined PID' 가 난다.
-      *SECTION_DISCRETE 는 2번째 줄(CDL,TDL)이 필수다 — 빼면 다음 키워드 줄을 그 줄로 먹는다.
-      *MAT_SPRING_GENERAL_NONLINEAR 은 MID LCDL LCDU 세 칸만 쓴다 — 7칸으로 쓰면 'MAT n is not found'.
-      블록 사이에 빈 줄이 들어가면 *ELEMENT_DISCRETE 가 빈 줄을 요소로 읽어
-      'discrete element id 0 is invalid' 가 난다.
-      *ELEMENT_DISCRETE 의 S 칸을 비우면 0.0 으로 읽혀 스프링이 에러 없이 무력화될 수 있다 — 1.0 을 명시한다.
+      *SECTION_BEAM 은 ELFORM=6 일 때 Card 2f(VOL,INER,CID)가 필수다. VOL·INER 가 0 이면
+      type 6 빔의 시간증분 계산이 무너진다.
+      *MAT_NONLINEAR_ELASTIC_DISCRETE_BEAM 은 Card 1~3 이 전부 필수다 — 빼면 다음 키워드 줄을 먹는다.
+      블록 사이에 빈 줄이 들어가면 *ELEMENT_BEAM 이 빈 줄을 요소로 읽는다.
+      곡선 ID 0 은 '그 자유도 자유' 다 — 회전을 묶으려면 LCIDRR/RS/RT 에 곡선을 줘야 한다.
+  - 축 분리는 노드 간격이 아니라 *SECTION_BEAM 의 CID(로컬 좌표계)가 세운다. 그래서 두 팬텀 노드를
+    같은 자리에 둘 수 있고(제로길이 빔), 상대변위가 아무리 커도 r/s/t 가 섞이지 않는다.
   - 파트 판정은 요소 연결성으로만 한다. *ELEMENT_SOLID 의 ten nodes format 은 한 요소가 두 줄이라
     한 줄짜리로 읽으면 노드 ID 를 PID 로 읽는다. CNRB 노드가 TET10 의 9·10번 중간절점일 수 있으므로
     둘째 줄 전체를 읽어야 한다.
@@ -135,6 +137,24 @@ def blocks(text):
     return out
 
 
+def curve_map(text):
+    """LCID -> [(a,o), ...]. 헤더 줄(80자)과 점 줄(40자)을 고정폭으로 가른다."""
+    out, cur, lc = {}, None, None
+    for ln in text.splitlines():
+        if ln.startswith("*"):
+            cur = "C" if ln.strip().upper() == "*DEFINE_CURVE" else None
+            lc = None
+            continue
+        if cur != "C" or ln.startswith("$") or not is_data(ln):
+            continue
+        if len(ln) == 80:
+            lc = int(ln[:10])
+            out[lc] = []
+        elif lc is not None:
+            out[lc].append((float(ln[:20]), float(ln[20:])))
+    return out
+
+
 def body(binary, tmp):
     d = tmp
     w(os.path.join(d, "m.k"), shell_deck())
@@ -178,76 +198,97 @@ def body(binary, tmp):
         else:
             setmap[sid] += [int(ln[i:i + 10]) for i in range(0, len(ln.rstrip()), 10)]
     sA, sB = sorted(setmap)[-2:]
-    check("Side A 세트 = 하판 노드 4개 + 팬텀 3개", sorted(setmap[sA]) == [1, 2, 4, 5, 90000001, 90000002, 90000003],
+    check("Side A 세트 = 하판 노드 4개 + 팬텀 1개", sorted(setmap[sA]) == [1, 2, 4, 5, 90000001],
           str(setmap[sA]))
-    check("Side B 세트 = 상판 노드 4개 + 팬텀 1개", sorted(setmap[sB]) == [11, 12, 14, 15, 90000004],
+    check("Side B 세트 = 상판 노드 4개 + 팬텀 1개", sorted(setmap[sB]) == [11, 12, 14, 15, 90000002],
           str(setmap[sB]))
 
-    # ── *NODE 팬텀 좌표: 차이가 정확히 eps, 나머지 두 성분은 같다 ─────────
+    # ── *NODE 팬텀 좌표: 두 노드가 정확히 같은 자리(제로길이 빔) ──────────
     ph = {}
     for l in B.get("*NODE", []):
         nid = int(l[:8])
         if nid >= 90000000:
             ph[nid] = (float(l[8:24]), float(l[24:40]), float(l[40:56]))
-    check("팬텀 노드가 4개다", len(ph) == 4, str(ph))
-    rb = ph[90000004]
-    for k, nid in enumerate((90000001, 90000002, 90000003)):
-        ra = ph[nid]
-        diffs = [round(ra[i] - rb[i], 12) for i in range(3)]
-        want = [0.0, 0.0, 0.0]
-        want[k] = 0.001
-        check(f"팬텀 {nid} 은 {'XYZ'[k]} 축으로만 eps=0.001 떨어져 있다", diffs == want, str(diffs))
+    check("팬텀 노드가 2개다 (스프링 3개 방식의 4개에서 줄었다)", len(ph) == 2, str(ph))
+    check("두 팬텀 노드가 정확히 같은 좌표다 — MAT_067 은 zero length beam 을 전제하고 방향은 "
+          "CID 가 정한다(eps 개념이 사라졌다)",
+          len(ph) == 2 and ph.get(90000001) == ph.get(90000002), str(ph))
 
-    # ── *ELEMENT_DISCRETE: 8칸 ────────────────────────────────────────────
-    ed = B.get("*ELEMENT_DISCRETE", [])
-    check("*ELEMENT_DISCRETE 데이터 줄이 3개다", len(ed) == 3, str(ed))
+    # ── *ELEMENT_BEAM: 8칸 ────────────────────────────────────────────────
+    eb = B.get("*ELEMENT_BEAM", [])
+    check("*ELEMENT_BEAM 데이터 줄이 1개다 (조인트당 빔 하나)", len(eb) == 1, str(eb))
     parts = {int(l[:10]) for l in B.get("*PART", []) if len(l.rstrip()) <= 30}
     nids = {int(l[:8]) for l in B.get("*NODE", [])}
     ok8 = True
-    for l in ed:
-        eid, pid, n1, n2, vid = (int(l[i:i + 8]) for i in range(0, 40, 8))
-        s = float(l[40:56])
-        if not (eid >= 9900001 and pid in parts and n1 in nids and n2 in nids and vid == 0 and s == 1.0):
+    for l in eb:
+        eid, pid, n1, n2 = (int(l[i:i + 8]) for i in range(0, 32, 8))
+        if not (eid >= 9900001 and pid in parts and n1 in nids and n2 in nids):
             ok8 = False
-    check("*ELEMENT_DISCRETE 를 8칸으로 잘라 읽으면 EID/PID/N1/N2/VID/S 가 모두 성립한다 "
-          "(10칸이면 전부 깨진다)", ok8, str(ed))
-    check("*ELEMENT_DISCRETE 줄 길이가 56(=8*5+16)이다", all(len(l) == 56 for l in ed), str([len(l) for l in ed]))
-    check("*ELEMENT_DISCRETE 의 S 칸(41-56)이 1.0 이다 — 비우면 0.0 으로 읽혀 스프링이 죽는다",
-          all(abs(float(l[40:56]) - 1.0) < 1e-12 for l in ed), str(ed))
-    axial = [l for l in ed if int(l[8:16]) == 990002]
-    check("축(Z) 스프링 1개만 축 파트(990002)에 붙고 N1 이 RA_z(90000003)다",
-          len(axial) == 1 and int(axial[0][16:24]) == 90000003, str(axial))
+    check("*ELEMENT_BEAM 을 8칸으로 잘라 읽으면 EID/PID/N1/N2 가 모두 성립한다 (10칸이면 전부 깨진다)",
+          ok8, str(eb))
+    check("*ELEMENT_BEAM 줄 길이가 32(=8*4)다 — N3 와 릴리즈 칸(RT1/RR1/RT2/RR2)은 비운다. "
+          "릴리즈를 걸면 그 노드를 nodal rigid body 에 넣을 수 없다",
+          all(len(l) == 32 for l in eb), str([len(l) for l in eb]))
+    n1, n2 = int(eb[0][16:24]), int(eb[0][24:32])
+    check("빔의 N1 은 Side A 세트 팬텀, N2 는 Side B 세트 팬텀이다",
+          n1 in setmap[sA] and n2 in setmap[sB], f"{n1} {n2}")
 
     # ── 10칸 카드 ─────────────────────────────────────────────────────────
-    sd = B.get("*SECTION_DISCRETE", [])
-    check("*SECTION_DISCRETE 의 데이터 줄이 2줄이다 (Card 2 = CDL,TDL 필수)", len(sd) == 2, str(sd))
-    check("*SECTION_DISCRETE Card 1 의 SECID 가 10칸 첫 칸이다", sd and int(sd[0][:10]) == 990001, str(sd))
-    ms = B.get("*MAT_SPRING_GENERAL_NONLINEAR", [])
-    check("*MAT_SPRING_GENERAL_NONLINEAR 이 2개(전단·축)다", len(ms) == 2, str(ms))
-    check("*MAT_SPRING_GENERAL_NONLINEAR 은 MID LCDL LCDU 세 칸만 쓴다(줄 길이 30)",
-          all(len(l) == 30 for l in ms), str([len(l) for l in ms]))
-    check("*MAT_SPRING_GENERAL_NONLINEAR 의 LCDL=LCDU (대칭 로딩/언로딩)",
-          all(int(l[10:20]) == int(l[20:30]) for l in ms), str(ms))
+    sb = B.get("*SECTION_BEAM", [])
+    check("*SECTION_BEAM 데이터 줄이 2줄이다 (Card 1 + ELFORM=6 전용 Card 2f)", len(sb) == 2, str(sb))
+    check("*SECTION_BEAM Card 1 의 SECID 가 10칸 첫 칸이고 ELFORM=6(discrete beam)이다",
+          len(sb) == 2 and int(sb[0][:10]) == 990001 and int(sb[0][10:20]) == 6, str(sb))
+    check("SCOOR 칸이 비어 있다(=0.0) — |SCOOR| <= 1 이어야 제로길이 빔으로 다뤄진다",
+          len(sb) == 2 and sb[0][50:60].strip() == "", str(sb[0]))
+    vol = float(sb[1][:10]) if len(sb) == 2 else 0.0
+    iner = float(sb[1][10:20]) if len(sb) == 2 else 0.0
+    secCid = int(sb[1][20:30]) if len(sb) == 2 else 0
+    check("Card 2f 의 VOL·INER 가 0 이 아니다 — type 6 빔의 병진·회전 시간증분이 이 값으로 계산된다",
+          vol > 0.0 and iner > 0.0, str(sb[-1]))
+
+    cs = B.get("*DEFINE_COORDINATE_SYSTEM", [])
+    check("*DEFINE_COORDINATE_SYSTEM 이 Card 1 + Card 2 두 줄이다", len(cs) == 2, str(cs))
+    check("*SECTION_BEAM 의 CID 가 그 좌표계를 가리킨다 (CID=0 이면 전역계라 axis 가 무시된다)",
+          len(cs) == 2 and secCid == int(cs[0][:10]), f"{secCid} / {cs}")
+    xl = tuple(float(cs[0][i:i + 10]) for i in (40, 50, 60)) if len(cs) == 2 else ()
+    xp = tuple(float(cs[1][i:i + 10]) for i in (0, 10, 20)) if len(cs) == 2 else ()
+    check("axis=z 면 로컬 x(=빔의 r)가 전역 Z 다 — 축 분리를 노드 간격이 아니라 이 좌표계가 세운다",
+          xl == (0.0, 0.0, 1.0), str(xl))
+    check("로컬 xy평면 점이 전역 X 라 s=X, t=Y 가 된다", xp == (1.0, 0.0, 0.0), str(xp))
+
+    mb = B.get("*MAT_NONLINEAR_ELASTIC_DISCRETE_BEAM", [])
+    check("*MAT_067 데이터 줄이 3줄이다 (Card 1~3 전부 필수 — 빈 줄 대신 0 을 적는다)", len(mb) == 3, str(mb))
+    check("RO=1.0 이라 *SECTION_BEAM 의 VOL 이 곧 요소 질량이다",
+          len(mb) == 3 and float(mb[0][10:20]) == 1.0, str(mb[:1]))
+    lc = [int(mb[0][i:i + 10]) for i in range(20, 80, 10)] if len(mb) == 3 else [0] * 6
+    check("LCIDTR(r)=축 곡선, LCIDTS=LCIDTT(s,t)=전단 곡선 — 자유도마다 다른 곡선이 붙었다",
+          lc[0] == 990001 and lc[1] == lc[2] == 990002, str(lc))
+    check("회전 3자유도(LCIDRR/RS/RT)에 회전 곡선이 붙었다 — 곡선 ID 0 이면 회전이 자유다",
+          lc[3] == lc[4] == lc[5] == 990003, str(lc))
+    check("*MAT_067 Card 2(감쇠)·Card 3(프리로드)가 줄로 존재하고 값이 0 이다",
+          len(mb) == 3 and set(mb[1].split()) == {"0"} and
+          all(float(v) == 0.0 for v in mb[2].split()), str(mb[1:]))
     pt = B.get("*PART", [])
     check("*PART 데이터 줄이 10칸이고 MID 가 0 이 아니다",
           all(int(l[20:30]) != 0 for l in pt if len(l.rstrip()) <= 30), str(pt))
+    check("스프링 파트 2개(전단·축)가 빔 파트 1개로 줄었다",
+          len([l for l in pt if len(l.rstrip()) <= 30 and int(l[:10]) == 990001]) == 1, str(pt))
 
     # ── *DEFINE_CURVE ─────────────────────────────────────────────────────
-    dc = B.get("*DEFINE_CURVE", [])
-    hdr = [l for l in dc if len(l) == 80]
-    pts = [l for l in dc if len(l) == 40]
-    check("*DEFINE_CURVE 헤더 2줄(10칸*8=80) + 점 6줄(20칸*2=40)",
-          len(hdr) == 2 and len(pts) == 6, f"hdr={len(hdr)} pts={len(pts)}")
-    shear = [(float(l[:20]), float(l[20:])) for l in pts[:4]]
-    ax = [(float(l[:20]), float(l[20:])) for l in pts[4:]]
-    check("전단 곡선 = (-1,-9e4) (-0.1,0) (0.1,0) (1,9e4) — ±gap 구간 힘 0, 밖 기울기 k_engage",
-          shear == [(-1.0, -90000.0), (-0.1, 0.0), (0.1, 0.0), (1.0, 90000.0)], str(shear))
-    check("축 곡선 = (-1,-1e7) (1,1e7) — 기울기 k_axial", ax == [(-1.0, -1e7), (1.0, 1e7)], str(ax))
+    curves = curve_map(deck)
+    check("*DEFINE_CURVE 가 3개(축·전단·회전)다", len(curves) == 3, str(sorted(curves)))
+    check("축 곡선 990001 = (-1,-1e7) (1,1e7) — 유격 없이 기울기 k_axial",
+          curves.get(990001) == [(-1.0, -1e7), (1.0, 1e7)], str(curves.get(990001)))
+    check("전단 곡선 990002 = (-1,-9e4) (-0.1,0) (0.1,0) (1,9e4) — ±gap 구간 힘 0, 밖 기울기 k_engage",
+          curves.get(990002) == [(-1.0, -90000.0), (-0.1, 0.0), (0.1, 0.0), (1.0, 90000.0)],
+          str(curves.get(990002)))
+    check("회전 곡선 990003 = (-1,-1e7) (1,1e7) [rad] — 원 CNRB 의 회전 구속을 되살린다",
+          curves.get(990003) == [(-1.0, -1e7), (1.0, 1e7)], str(curves.get(990003)))
 
     # ── 빈 줄 없음 ────────────────────────────────────────────────────────
     lines = deck.splitlines()
     i0 = next(i for i, l in enumerate(lines) if l.startswith("$ === cnrb2spring"))
-    check("삽입 블록 안에 빈 줄이 하나도 없다 (*ELEMENT_DISCRETE 가 요소로 오인한다)",
+    check("삽입 블록 안에 빈 줄이 하나도 없다 (*ELEMENT_BEAM 이 요소로 오인한다)",
           all(l.strip() for l in lines[i0:]), str([l for l in lines[i0:] if not l.strip()]))
     check("삽입 블록이 *END 바로 앞까지 이어진다", lines[-1].strip().upper() == "*END", lines[-1])
     return d
@@ -313,6 +354,12 @@ def body2(binary, d):
     rc, out = run(binary, d, "cnrb2spring", "ax.yaml")
     check("선언한 axis 가 두 파트 간격의 최대 성분과 다르면 [WARN] 한 줄 (rc 는 그대로 0)",
           rc == 0 and "최대 성분은 Z 입니다" in out, f"rc={rc} {out[-300:]}")
+    axk = open(os.path.join(d, "ax_out.k")).read() if rc == 0 else ""
+    csx = blocks(axk).get("*DEFINE_COORDINATE_SYSTEM", [])
+    check("axis=x 면 로컬 x(=빔의 r)가 전역 X, xy평면 점이 전역 Y 다 — 좌표계가 axis 를 따라간다",
+          len(csx) == 2 and
+          tuple(float(csx[0][i:i + 10]) for i in (40, 50, 60)) == (1.0, 0.0, 0.0) and
+          tuple(float(csx[1][i:i + 10]) for i in (0, 10, 20)) == (0.0, 1.0, 0.0), str(csx))
 
     # ── ID 충돌 ───────────────────────────────────────────────────────────
     for key, start, kw in (("node_id_start", 1, "노드"), ("elem_id_start", 1, "요소"),
@@ -346,6 +393,17 @@ def body2(binary, d):
     check("성긴 *DEFINE_CURVE 헤더(LCID 한 칸)의 곡선 ID 충돌도 rc=1 로 잡는다",
           rc == 1 and "곡선 ID 가 원본 덱과 겹칩니다" in out and "990001" in out and
           not os.path.exists(os.path.join(d, "cc_out.k")), f"rc={rc} {out[-300:]}")
+    # 좌표계는 이번 방식에서 새로 생긴 네임스페이스다 — 겹치면 LS-DYNA 가 먼저 읽은 CID 를 써
+    # 빔의 r 축이 엉뚱한 방향으로 서고, 축 분리가 조용히 무너진다.
+    cdc = ("*DEFINE_COORDINATE_SYSTEM\n"
+           "%10d%10.1f%10.1f%10.1f%10.1f%10.1f%10.1f%10d\n%10.1f%10.1f%10.1f"
+           % (990001, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0, 0.0, 1.0, 0.0))
+    w(os.path.join(d, "cs.k"), shell_deck(extra_cards=cdc))
+    w(os.path.join(d, "cs.yaml"), "model: cs.k\noutput: cs_out.k\naxis: z\n")
+    rc, out = run(binary, d, "cnrb2spring", "cs.yaml")
+    check("좌표계(CID) 충돌도 rc=1 로 잡는다",
+          rc == 1 and "좌표계 ID 가 원본 덱과 겹칩니다" in out and "990001" in out and
+          not os.path.exists(os.path.join(d, "cs_out.k")), f"rc={rc} {out[-300:]}")
     w(os.path.join(d, "hi.yaml"), "model: m.k\noutput: hi_out.k\naxis: z\nnode_id_start: 99999999\n")
     rc, out = run(binary, d, "cnrb2spring", "hi.yaml")
     check("마지막 할당 ID 가 I8 상한(99999999)을 넘으면 rc=1",
@@ -401,16 +459,32 @@ def body3(binary, d):
     check("모르는 pid_refs 값은 rc=1 + 허용값 출력",
           rc == 1 and "허용값: strict, warn" in out, f"rc={rc} {out[-200:]}")
 
-    for key, val, why in (("gap", "0", "0 이하"), ("eps", "0", "0 이하"), ("k_axial", "-1", "음수"),
+    for key, val, why in (("gap", "0", "0 이하"), ("k_rot", "-1", "음수"), ("k_axial", "-1", "음수"),
                           ("gap", "nan", "nan"), ("k_engage", "inf", "inf"),
+                          ("k_rot", "nan", "nan"),
                           ("curve_range", "0.05", "gap 보다 작음")):
         w(os.path.join(d, "v.yaml"), f"model: m.k\noutput: v.k\naxis: z\n{key}: {val}\n")
         rc, out = run(binary, d, "cnrb2spring", "v.yaml")
         check(f"{key}={val} ({why}) 는 덱을 쓰기 전에 rc=1",
               rc == 1 and not os.path.exists(os.path.join(d, "v.k")), f"rc={rc} {out[-250:]}")
-    w(os.path.join(d, "e0.yaml"), "model: m.k\noutput: e0.k\naxis: z\neps: 0\n")
-    rc, out = run(binary, d, "cnrb2spring", "e0.yaml")
-    check("eps=0 은 '작동축 N1->N2 가 정의되지 않습니다' 를 알린다", "N1->N2" in out, out[-250:])
+
+    # k_rot=0 만은 값 검증을 통과한다 — '회전 3자유도를 풀어 둔다' 는 뜻이기 때문이다.
+    # MAT_067 은 곡선 ID 0 인 자유도에 힘을 만들지 않으므로 회전 곡선을 아예 내지 않는다.
+    w(os.path.join(d, "kr0.yaml"), "model: m.k\noutput: kr0.k\naxis: z\nk_rot: 0\n")
+    rc, out = run(binary, d, "cnrb2spring", "kr0.yaml")
+    kr0 = open(os.path.join(d, "kr0.k")).read() if rc == 0 else ""
+    mb0 = blocks(kr0).get("*MAT_NONLINEAR_ELASTIC_DISCRETE_BEAM", [])
+    lc0 = [int(mb0[0][i:i + 10]) for i in range(50, 80, 10)] if mb0 else [-1]
+    check("k_rot=0 은 rc=0 이고 LCIDRR/RS/RT 를 0(=자유)으로 두며 회전 곡선을 내지 않는다",
+          rc == 0 and lc0 == [0, 0, 0] and len(curve_map(kr0)) == 2, f"rc={rc} {lc0}")
+    check("k_rot=0 이면 '회전 3자유도를 풀었습니다' 를 [WARN] 로 알린다",
+          "회전 3자유도를 풀었습니다" in out, out[-300:])
+
+    # eps 는 스프링 3개 시절 키다 — 제로길이 빔에는 쓰이지 않으니 조용히 먹지 않고 그 사실을 알린다
+    w(os.path.join(d, "eps.yaml"), "model: m.k\noutput: eps.k\naxis: z\neps: 0.001\n")
+    rc, out = run(binary, d, "cnrb2spring", "eps.yaml")
+    check("옛 키 eps 는 rc=0 으로 무시하되 '더 이상 쓰지 않습니다' 를 [WARN] 로 알린다",
+          rc == 0 and "'eps' 는 더 이상 쓰지 않습니다" in out, f"rc={rc} {out[-300:]}")
 
     w(os.path.join(d, "nn.yaml"), "model: m.k\noutput: nn.k\naxis: z\ngap: 없음\n")
     rc, out = run(binary, d, "cnrb2spring", "nn.yaml")
