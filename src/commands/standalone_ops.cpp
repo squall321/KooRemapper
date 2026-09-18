@@ -213,20 +213,65 @@ static bool deckHasNonFinite(const std::string& path, std::string& where) {
     return false;
 }
 
+// 이번 writeOutput 이 실제로 쓴 파일 목록. ModelAssembler 는 경로를 내주지 않아 같은 규칙으로 되짚는다 —
+//   <prefix>.k        항상
+//   <prefix>.dynain   초기응력이 쌓였을 때만(단독 명령은 dynain_embed 를 쓰지 않는다)
+//   <prefix>_iga_pN.k 덱에 들어간 *INCLUDE 이름으로 찾는다
+// 남의 파일은 건드리지 않아야 하므로 '있으면 우리 것' 이 아니라 '이번에 쓴 것' 만 고른다.
+static std::vector<std::string> writtenOutputs(const ModelAssembler& assembler, const std::string& outputPrefix) {
+    std::vector<std::string> out;
+    std::string deck = outputPrefix + ".k";
+    out.push_back(deck);
+    if (!assembler.getAccumulatedResults().empty()) out.push_back(outputPrefix + ".dynain");
+    if (assembler.getIGACount() <= 0) return out;
+
+    size_t slash = outputPrefix.find_last_of("/\\");
+    std::string dir = (slash == std::string::npos) ? "" : outputPrefix.substr(0, slash + 1);
+    std::string stem = ((slash == std::string::npos) ? outputPrefix : outputPrefix.substr(slash + 1)) + "_iga_p";
+    std::ifstream f(deck);
+    if (!f.is_open()) return out;
+    std::string ln;
+    bool afterInclude = false;
+    while (std::getline(f, ln)) {
+        if (!ln.empty() && ln.back() == '\r') ln.pop_back();
+        std::string tr = StandaloneYamlBase::trim(ln);
+        if (!tr.empty() && tr[0] == '*') { afterInclude = (tr.compare(0, 8, "*INCLUDE") == 0); continue; }
+        if (!afterInclude || tr.empty() || tr[0] == '$') continue;
+        afterInclude = false;
+        if (tr.size() > stem.size() + 2 && tr.compare(0, stem.size(), stem) == 0 &&
+            tr.compare(tr.size() - 2, 2, ".k") == 0) {
+            out.push_back(dir + tr);
+        }
+    }
+    return out;
+}
+
 // 쓰기 + 비유한 값 확인. ModelAssembler 는 쓰기 전에 노드 좌표를 꺼낼 공개 접근자가 없어 쓴 직후에 보고,
 // 발견하면 그 파일을 지워 0 나누기 경로와 같은 결과(에러 메시지 + 결과 파일 없음 + rc=1)로 맞춘다.
+// writeOutput 은 <prefix>.k 뿐 아니라 <prefix>.dynain·<prefix>_iga_pN.k 도 함께 쓴다 — .k 만 보고 .k 만 지우면
+// nan 초기응력이 든 dynain 이 디스크에 남고(formstrain·indent 는 그쪽이 주 산출물이다) 사용자는 남은 파일을
+// 멀쩡한 것으로 오해한다. 그래서 이번에 쓴 파일을 모두 보고, 하나라도 나쁘면 모두 지우고 목록을 찍는다.
 static bool writeOutputChecked(ModelAssembler& assembler, const std::string& outputPrefix,
                                const char* tag, ConsoleOutput& console) {
     if (!assembler.writeOutput(outputPrefix)) { console.error(assembler.getErrorMessage()); return false; }
+
+    std::vector<std::string> written = writtenOutputs(assembler, outputPrefix);
     std::string where;
-    std::string deck = outputPrefix + ".k";
-    if (deckHasNonFinite(deck, where)) {
-        std::remove(deck.c_str());
-        console.error(std::string("[") + tag + "] 결과에 유한하지 않은 값(nan/inf)이 있습니다: " + where +
-                      " — 출력 파일을 지웠습니다 / non-finite value in the result; output removed.");
-        return false;
+    bool bad = false;
+    for (const auto& w : written) { if (deckHasNonFinite(w, where)) { bad = true; break; } }
+    if (!bad) return true;
+
+    std::string removed;
+    for (const auto& w : written) {
+        if (std::remove(w.c_str()) == 0) {
+            if (!removed.empty()) removed += ", ";
+            removed += w;
+        }
     }
-    return true;
+    console.error(std::string("[") + tag + "] 결과에 유한하지 않은 값(nan/inf)이 있습니다: " + where +
+                  " — 지운 출력 파일: " + removed +
+                  " / non-finite value in the result; removed: " + removed);
+    return false;
 }
 
 // ── Standalone wrap ─────────────────────────────────────────────────────────
