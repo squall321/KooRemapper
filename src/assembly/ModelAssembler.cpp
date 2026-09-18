@@ -9523,6 +9523,22 @@ static MdResolvedDamping md_resolveDamping(const MatdbOperation& op) {
 bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& configDir) {
     // infoMessages is a public member of ModelAssembler (no underscore)
 
+    // 0. damping_preset 은 인식되는 값만 받는다 — 오타가 조용히 '프리셋 없음' 으로 떨어지면서도
+    //    묵은 감쇠 카드 제거(stripExistingDamping)는 촉발하던 것을 막는다(D1).
+    //    'off' 는 rescale 값을 바꾸지 않지만 AssemblyConfig.h 가 문서화한 값이고, 재실행 때 묵은
+    //    *DAMPING_PART_* 를 지우는 유일한 관용구라 목록에 남긴다. 키를 아예 빼면(빈 값) 무검사다.
+    if (!op.dampingPreset.empty()) {
+        std::string preset = op.dampingPreset;
+        for (auto& c : preset) c = (char)std::tolower((unsigned char)c);
+        if (preset != "smartphone_drop" && preset != "smartphone_drop_aggressive" &&
+            preset != "quasi_static" && preset != "off") {
+            errorMessage_ = "matdb: unsupported damping_preset '" + op.dampingPreset +
+                            "' (allowed: smartphone_drop, smartphone_drop_aggressive, "
+                            "quasi_static, off)";
+            return false;
+        }
+    }
+
     // 1. Resolve database path
     std::string dbPath = op.databasePath;
     if (dbPath.empty()) {
