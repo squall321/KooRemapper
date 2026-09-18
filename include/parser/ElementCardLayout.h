@@ -15,6 +15,7 @@
 // @lat: [[modules/parser]]
 
 #include <string>
+#include <vector>
 
 namespace KooRemapper {
 
@@ -43,6 +44,27 @@ struct ElementKeywordInfo {
 // 키워드 뒤에 붙는 설명 문구(LS-PrePost 의 "(ten nodes format)" 등)는 매뉴얼에 없는 관행이라
 // 첫 공백에서 잘라 버린다 — 줄 수 판정에 쓰지 않는다.
 ElementKeywordInfo parseElementKeyword(const std::string& keywordLine);
+
+// ── 칸 폭 ────────────────────────────────────────────────────────────────────
+// 매뉴얼이 정한 것은 셋뿐이다(Vol_I 19305-19360).
+//   표준      : 정수 8 칸, *NODE 는 (I8,3F16,2I8)                       19348
+//   i10=y / % : 8 칸짜리 정수 칸만 10 칸으로 — *NODE 는 (I10,3F16,2I10)  19356-19360
+//   long=y / +: 20 칸으로 — *NODE 는 (I20,3F20,2I20)                     19307, 19342-19345
+// long=s 는 "read standard … write long" 이므로 읽기 폭은 표준이다(19308).
+// 리더도 쓰기도 이 한 곳에서만 폭을 정한다 — 한쪽이 8 칸으로 쓰고 다른 쪽이 10 칸으로 읽으면
+// 새 층이 통째로 사라진다(현장 사고와 같은 모양).
+
+// *KEYWORD 줄 하나가 정하는 덱 기본 정수 칸 폭. 정하지 않으면 0.
+int keywordCardDeckWidth(const std::string& keywordLine);
+
+// 덱 전체의 기본 정수 칸 폭(*KEYWORD 가 없거나 말하지 않으면 8).
+int deckFieldWidth(const std::vector<std::string>& lines);
+
+// 키워드 줄 접미사('%'=10, '+'=20, '-'=8)가 덱 기본값을 덮어쓴다(19342-19360).
+int keywordFieldWidth(const std::string& keywordLine, int deckFw);
+
+// 같은 카드의 실수 칸 폭 — 표준·i10 은 16, long 은 20 (19345, 19348, 19360).
+int realFieldWidth(int intFw);
 
 // *SECTION_SOLID 의 ELFORM → 절점 수. 고차 정식이 아니면 0.
 // Vol_I 228671-228677: 23=20절점, 24=27, 25=21, 26=15, 27=20(cubic tet), 28=40, 29=64.

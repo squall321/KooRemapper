@@ -250,7 +250,10 @@ private:
     // 이관하지 못하고 남은 '지운 노드를 가리키는 자리' 를 실제로 정리한다.
     // LS-DYNA 는 세트에 정의되지 않은 노드가 있으면 하드 에러로 멈춘다(현장 실측 Error 10233 —
     // 이 문구는 R16 매뉴얼 세 권 어디에도 없어 매뉴얼 근거로는 쓸 수 없다). 남겨 두면 안 된다.
+    // subst 에 있는 노드는 지우지 않고 그 자리에서 새 층 노드로 바꾼다 — 옮길 수 있는데도
+    // 줄을 지우면 하중·초기속도가 조용히 사라진다(모델이 달라진다).
     void cleanupDeadNodeRefs(const std::set<int>& deadNodes,
+                             const std::map<int, int>& subst,
                              std::set<size_t>& handled,
                              std::vector<PidRefFinding>& moved);
     // 죽은 PID/EID/노드를 가리키는 카드를 3축으로 훑어 pidRefFindings_ 에 모으고 콘솔에 요약한다.
@@ -415,9 +418,11 @@ private:
     std::set<int> getPartExclusiveNodeIds(int pid) const;
     int parseNodeIdFromLine(const std::string& line) const;
     int parseElementIdFromLine(const std::string& line) const;
-    std::string formatNodeLine(int id, double x, double y, double z) const;
-    std::string formatElementLine(const AddedElement& elem) const;
-    std::string formatShellElementLine(const AddedShellElement& elem) const;
+    // fw = 그 줄이 들어갈 섹션의 정수 칸 폭(8 / 10 / 20). 덱이 i10 인데 8 칸으로 쓰면
+    // LS-DYNA 가 새 노드·새 요소를 통째로 다르게 읽는다(Vol_I 19342-19360).
+    std::string formatNodeLine(int id, double x, double y, double z, int fw) const;
+    std::string formatElementLine(const AddedElement& elem, int fw) const;
+    std::string formatShellElementLine(const AddedShellElement& elem, int fw) const;
     bool isKeywordLine(const std::string& line) const;
     bool isCommentLine(const std::string& line) const;
     std::string formatTet10ElementLine(int eid, int pid, const std::array<int, 10>& nodes) const;

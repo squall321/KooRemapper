@@ -62,10 +62,16 @@ private:
     Mesh mesh_;
     std::string errorMessage_;
     std::string currentKeyword_;
+    // 지금 섹션의 키워드 줄 원문 — 칸 폭 접미사('%','+','-')가 여기에만 남는다.
+    // currentKeyword_ 는 extractKeyword 가 접미사를 떼어 버려 폭 판정에 쓸 수 없다.
+    std::string currentKeywordLine_;
     int currentLine_;
     int linesProcessed_;
     long fileSize_;
     bool i10_ = false;  // i10=y flag: use 10-char integer fields
+    int  deckFw_ = 8;   // *KEYWORD 가 정한 덱 기본 정수 칸 폭(8/10/20) — Vol_I 19305-19360
+    // 지금 섹션의 정수 칸 폭. 키워드 접미사가 덱 기본값을 덮어쓴다(19342-19360).
+    int sectionFieldWidth() const;
     // PID → 그 파트 요소의 절점 수(고차 정식일 때만 채운다). *PART 의 SECID 를 풀어
     // *SECTION_SOLID 의 ELFORM 23-29 를 본다(Vol_I 228671-228677). 요소 줄만 보고는
     // 카드가 몇 줄인지 알 수 없어서, 요소를 읽기 전에 미리 훑어 둔다.

@@ -9,25 +9,36 @@ namespace KooRemapper {
 
 namespace {
 
-// 키워드 줄에서 키워드 토큰만 뽑는다(대문자, 앞뒤 공백·CR 제거, 첫 공백 뒤는 버린다).
-std::string normalizeKeyword(const std::string& line, ElementKeywordInfo& info) {
+// 키워드 줄에서 칸 폭 접미사를 떼어 내고 키워드 토큰만 돌려준다.
+// 매뉴얼이 정한 접미사는 '%'(i10) '+'(long) '-'(standard) 셋뿐이고, 매뉴얼 예시는
+// "*NODE %" 처럼 공백을 두고 쓴다(19342-19348, 19356-19360) — 붙여 쓴 형태도 같이 받는다.
+// 그 밖의 꼬리글(LS-PrePost 의 "(ten nodes format)" 같은 주석)은 매뉴얼에 없다 —
+// 공백에서 잘라 버리고 줄 수·칸 폭 판정에는 절대 쓰지 않는다.
+std::string stripKeyword(const std::string& line, bool* i10, bool* lng, bool* stdw) {
     size_t s = line.find_first_not_of(" \t");
     if (s == std::string::npos) return std::string();
     std::string kw = line.substr(s);
-    // 매뉴얼이 정한 키워드 줄 접미사는 '%'(i10), '+'(long), '-'(standard) 셋뿐이다(19342-19360).
-    // 그 밖의 꼬리글(LS-PrePost 의 "(ten nodes format)" 같은 주석)은 매뉴얼에 없다 —
-    // 공백에서 잘라 버리고 줄 수 판정에는 절대 쓰지 않는다.
+    while (!kw.empty() && (kw.back() == '\r' || kw.back() == '\n' || kw.back() == ' ' || kw.back() == '\t'))
+        kw.pop_back();
+    // 접미사는 줄 맨 끝에만 온다. 떼어 낸 나머지에 공백이 남으면 그건 꼬리글이지 접미사가 아니다.
+    while (!kw.empty() && (kw.back() == '%' || kw.back() == '+' || kw.back() == '-')) {
+        char suf = kw.back();
+        std::string head = kw.substr(0, kw.size() - 1);
+        while (!head.empty() && (head.back() == ' ' || head.back() == '\t')) head.pop_back();
+        if (head.find_first_of(" \t") != std::string::npos) break;   // 꼬리글이 붙은 줄
+        if (suf == '%' && i10)  *i10 = true;
+        if (suf == '+' && lng)  *lng = true;
+        if (suf == '-' && stdw) *stdw = true;
+        kw = head;
+    }
     size_t sp = kw.find_first_of(" \t");
     if (sp != std::string::npos) kw = kw.substr(0, sp);
-    while (!kw.empty() && (kw.back() == '\r' || kw.back() == '\n')) kw.pop_back();
-    while (!kw.empty() && (kw.back() == '%' || kw.back() == '+' || kw.back() == '-')) {
-        if (kw.back() == '%') info.i10Suffix = true;
-        else if (kw.back() == '+') info.longSuffix = true;
-        else info.stdSuffix = true;
-        kw.pop_back();
-    }
     for (auto& c : kw) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
     return kw;
+}
+
+std::string normalizeKeyword(const std::string& line, ElementKeywordInfo& info) {
+    return stripKeyword(line, &info.i10Suffix, &info.longSuffix, &info.stdSuffix);
 }
 
 // '_' 로 나눈 옵션 토큰들(키워드 본체 뒤)
@@ -64,6 +75,55 @@ int solidNodesFromElform(int elform) {
         default: return 0;
     }
 }
+
+// *KEYWORD 줄의 i10 / long 옵션 (Vol_I 19305-19312, 19356-19360).
+// "long=s" 는 표준을 읽고 long 으로 쓰라는 뜻이라 읽기 폭은 표준(8)이다(19308).
+int keywordCardDeckWidth(const std::string& keywordLine) {
+    std::string up = keywordLine;
+    for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    if (up.find("*KEYWORD") == std::string::npos) return 0;
+    auto optValue = [&](const char* name) -> char {
+        size_t p = up.find(name);
+        if (p == std::string::npos) return 0;
+        p += std::string(name).size();
+        while (p < up.size() && (up[p] == ' ' || up[p] == '\t')) ++p;
+        if (p >= up.size() || up[p] != '=') return 'Y';       // 값 없이 쓴 형태는 켠 것으로 본다
+        ++p;
+        while (p < up.size() && (up[p] == ' ' || up[p] == '\t')) ++p;
+        return p < up.size() ? up[p] : 'Y';
+    };
+    char lv = optValue("LONG");
+    if (lv == 'Y' || lv == 'K') return 20;
+    char iv = optValue("I10");
+    if (iv && iv != 'N') return 10;
+    if (lv == 'S') return 8;
+    return 0;
+}
+
+int deckFieldWidth(const std::vector<std::string>& lines) {
+    for (const auto& l : lines) {
+        size_t s = l.find_first_not_of(" \t");
+        if (s == std::string::npos || l[s] != '*') continue;
+        int w = keywordCardDeckWidth(l);
+        if (w > 0) return w;
+        // *KEYWORD 가 아무 말도 안 했으면 표준이다. 다른 키워드는 건너뛴다.
+        std::string up = l.substr(s, 8);
+        for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        if (up == "*KEYWORD") return 8;
+    }
+    return 8;
+}
+
+int keywordFieldWidth(const std::string& keywordLine, int deckFw) {
+    bool i10 = false, lng = false, stdw = false;
+    stripKeyword(keywordLine, &i10, &lng, &stdw);
+    if (lng)  return 20;
+    if (i10)  return 10;
+    if (stdw) return 8;
+    return deckFw > 0 ? deckFw : 8;
+}
+
+int realFieldWidth(int intFw) { return intFw >= 20 ? 20 : 16; }
 
 int solidCardLines(int nodes, int extraCards) {
     if (nodes < 1) nodes = 8;

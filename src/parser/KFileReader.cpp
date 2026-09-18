@@ -104,6 +104,8 @@ Mesh KFileReader::readFile(const std::string& filename) {
     currentLine_ = 0;
     linesProcessed_ = 0;
     i10_ = false;
+    deckFw_ = 8;
+    currentKeywordLine_.clear();
 
     std::ifstream file(filename, std::ios::binary);
     if (!file.is_open()) {
@@ -233,16 +235,16 @@ bool KFileReader::parseFile(std::ifstream& file) {
         // Check for keyword
         if (isKeywordLine(line)) {
             currentKeyword_ = extractKeyword(line);
+            currentKeywordLine_ = line;
 
             // Support both regular and _TITLE variants (e.g., *NODE, *PART_TITLE)
             // Skip metadata keywords that don't need processing
             if (currentKeyword_ == "KEYWORD" || currentKeyword_ == "TITLE") {
                 // Detect i10=y on *KEYWORD line (10-char integer fields)
-                std::string upLine = line;
-                for (auto& c : upLine) c = (char)std::toupper((unsigned char)c);
-                if (upLine.find("I10") != std::string::npos) {
-                    i10_ = true;
-                }
+                // 칸 폭은 매뉴얼 한 곳에서만 정한다(Vol_I 19305-19360) — 8 / 10(i10) / 20(long).
+                int w = keywordCardDeckWidth(line);
+                if (w > 0) deckFw_ = w;
+                i10_ = (deckFw_ == 10);
                 continue;
             }
             else if (currentKeyword_ == "NODE") {
@@ -351,6 +353,13 @@ bool KFileReader::parseFile(std::ifstream& file) {
     return true;
 }
 
+// 지금 섹션의 정수 칸 폭 — 덱 기본값(*KEYWORD i10/long)을 키워드 접미사가 덮어쓴다.
+// Vol_I 19342-19348: "*NODE +" 는 (I20,3F20,2I20), "*NODE -" 는 (I8,3F16,2I8),
+// 19356-19360: "*NODE %" 는 (I10,3F16,2I10).
+int KFileReader::sectionFieldWidth() const {
+    return keywordFieldWidth(currentKeywordLine_, deckFw_);
+}
+
 bool KFileReader::parseNodeSection(std::ifstream& file) {
     std::string line;
     std::streampos lastPos;
@@ -411,12 +420,15 @@ bool KFileReader::parseNodeSection(std::ifstream& file) {
             // Fallback to strict fixed format (for packed data without spaces)
             // Fixed format has 8-char ID, then 16-char coordinate fields
             // Coordinates may not have spaces between them (e.g., "-1.0e+00-2.0e+00")
-            if (!parsed && line.length() >= 56) {
-                // Standard fixed format: I8, 3E16.0, [2I8 for tc, rc]
-                int nid = parseInt(line.substr(0, 8));
-                double x = parseDouble(line.substr(8, 16));
-                double y = parseDouble(line.substr(24, 16));
-                double z = parseDouble(line.substr(40, 16));
+            // 칸이 붙어 있는 줄은 섹션이 선언한 폭 그대로 잘라야 한다 — 8 칸으로 자르면
+            // i10 덱의 NID 칸(1-10)이 좌표 첫 글자를 물어 22 가 220 이 된다.
+            const int nfw = sectionFieldWidth();
+            const int rfw = realFieldWidth(nfw);
+            if (!parsed && line.length() >= (size_t)(nfw + rfw * 3)) {
+                int nid = parseInt(line.substr(0, nfw));
+                double x = parseDouble(line.substr(nfw, rfw));
+                double y = parseDouble(line.substr(nfw + rfw, rfw));
+                double z = parseDouble(line.substr(nfw + rfw * 2, rfw));
                 // tc and rc at positions 56-64 and 64-72 are ignored (optional)
 
                 if (nid > 0) {
@@ -488,7 +500,7 @@ bool KFileReader::parseElementSolidSection(std::ifstream& file) {
             // i10=y: eid(10)+pid(10)+n1-n8(10*8) = 100 chars
             // normal: eid(8)+pid(8)+n1-n8(8*8) = 80 chars
             {
-                int fw = i10_ ? 10 : 8;
+                int fw = sectionFieldWidth();
                 int minLen = fw * 10;  // eid + pid + 8 nodes
                 if (line.length() >= (size_t)minLen) {
                     int eid = parseInt(line.substr(0, fw));
@@ -596,7 +608,7 @@ bool KFileReader::parseElementSolidSection(std::ifstream& file) {
                 // i10=y: 10-char fields, otherwise 8-char fields
                 bool parsedNodeLine = false;
                 {
-                    int fw = i10_ ? 10 : 8;
+                    int fw = sectionFieldWidth();
                     if (nodeLine.length() >= (size_t)(fw * 8)) {
                         std::array<int, 8> nodeIds;
                         for (int i = 0; i < 8; ++i) {
@@ -702,7 +714,9 @@ bool KFileReader::parseElementShellSection(std::ifstream& file) {
     bool hasTitle = (currentKeyword_.find("TITLE") != std::string::npos);
 
     // 이 섹션의 요소 한 장이 몇 줄인지 — 키워드 옵션으로 정해진다.
-    const ElementKeywordInfo kwInfo = parseElementKeyword("*" + currentKeyword_);
+    // 접미사('%','+','-')는 extractKeyword 가 떼어 버리므로 키워드 줄 원문을 푼다.
+    const ElementKeywordInfo kwInfo = parseElementKeyword(currentKeywordLine_);
+    const int fw = sectionFieldWidth();
     if (!kwInfo.supported) {
         // COMPOSITE 계열은 적층점 수에 따라 카드 수가 달라 요소 경계를 확정할 수 없다.
         // 반쯤 읽어 유령 요소를 만드는 대신 통째로 두고 지나간다 — 쓰기 쪽이 손대지 않고
@@ -722,7 +736,11 @@ bool KFileReader::parseElementShellSection(std::ifstream& file) {
                 currentLine_++;
                 linesProcessed_++;
                 if (!extra.empty() && extra.back() == '\r') extra.pop_back();
-                if (extra.empty() || isCommentLine(extra)) continue;
+                // 빈 줄도 카드 한 장이다 — Vol_I 162567-162571:
+                //   "If mid-side nodes are defined (N5 - N8), then a second line of thickness
+                //    values will be read. This line may be left blank, but cannot be omitted."
+                // 빈 줄을 건너뛰면 다음 요소의 Card 1 을 연결 카드로 먹어 요소가 조용히 사라진다.
+                if (isCommentLine(extra)) continue;
                 break;
             }
             if (isKeywordLine(extra)) {
@@ -742,9 +760,9 @@ bool KFileReader::parseElementShellSection(std::ifstream& file) {
             n += 1;
             bool midside = false;
             for (int q = 6; q < 10; ++q) {
-                size_t off = (size_t)q * 8;
+                size_t off = (size_t)q * (size_t)fw;
                 if (card1.length() < off + 1) break;
-                int v = parseInt(card1.substr(off, 8));
+                int v = parseInt(card1.substr(off, (size_t)fw));
                 if (v > 0) midside = true;
             }
             if (midside) n += 1;
@@ -787,16 +805,18 @@ bool KFileReader::parseElementShellSection(std::ifstream& file) {
         }
 
         try {
-            // Try fixed format first (8-char fields): EID(8) PID(8) N1(8) N2(8) N3(8) N4(8) = 48 chars min
-            if (line.length() >= 48) {
-                int eid = parseInt(line.substr(0, 8));
-                int pid = parseInt(line.substr(8, 8));
+            // 고정 칸: EID PID N1..N4 = 칸 6 개. 폭은 섹션이 선언한 값이다(8 / 10 / 20).
+            // 8 칸으로 못박으면 i10 덱에서 "      7001         4" 를 eid=70, pid=1 로 읽어
+            // 덱에 없던 유령 요소가 실제 파트에 들어간다.
+            if (line.length() >= (size_t)(fw * 6)) {
+                int eid = parseInt(line.substr(0, (size_t)fw));
+                int pid = parseInt(line.substr((size_t)fw, (size_t)fw));
                 if (eid > 0 && pid > 0) {
                     std::array<int, 8> nodeIds;
-                    nodeIds[0] = parseInt(line.substr(16, 8));
-                    nodeIds[1] = parseInt(line.substr(24, 8));
-                    nodeIds[2] = parseInt(line.substr(32, 8));
-                    nodeIds[3] = parseInt(line.substr(40, 8));
+                    nodeIds[0] = parseInt(line.substr((size_t)fw * 2, (size_t)fw));
+                    nodeIds[1] = parseInt(line.substr((size_t)fw * 3, (size_t)fw));
+                    nodeIds[2] = parseInt(line.substr((size_t)fw * 4, (size_t)fw));
+                    nodeIds[3] = parseInt(line.substr((size_t)fw * 5, (size_t)fw));
                     // Duplicate for 8-node compatibility
                     nodeIds[4] = nodeIds[0];
                     nodeIds[5] = nodeIds[1];
