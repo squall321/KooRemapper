@@ -3945,7 +3945,7 @@ merge:
 `pids:` / `name:` 을 op 항목에 바로 적는다(2026-09-18 실행 확인).
 
 ```yaml
-base_model: m2.k
+base_model: three_layer.k
 output: asm_merge
 operations:
   - type: merge
