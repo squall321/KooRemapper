@@ -482,8 +482,10 @@ def main():
     ctk = cat_key(ops, "assemble", "operations[].contact.actions[].type")
     check("카탈로그 assemble contact type 은 enum 으로 좁히지 않는다(전체 키워드 허용)",
           ctk["values"] is None, str(ctk["values"]))
-    check("카탈로그 assemble contact type desc 가 tied_thermal/thermal/tiebreak 비대칭을 적는다",
-          "NOT aliases here" in ctk["desc"], ctk["desc"][:200])
+    # 3단계에서 assemble 의 ca_getContactKeyword 가 단독 contact 와 같은 표(ct_getPreset)를 쓰게 통일됐다.
+    # 예전의 tied_thermal/thermal/tiebreak 비대칭은 사라졌다 — 카탈로그도 그렇게 적어야 한다.
+    check("카탈로그 assemble contact type desc 가 단독과 같은 별칭 표를 쓴다고 적는다",
+          "NOT aliases here" not in ctk["desc"] and "standalone" in ctk["desc"], ctk["desc"][:200])
 
     # detect 의 contact_type 은 create 의 type 과 값 공간이 다르다 — 약칭만 받는 닫힌 목록이라
     # 전체 LS-DYNA 키워드를 주면 rc=1 이다. 카탈로그가 'Same value space' 라고 적어 두면 틀린다.

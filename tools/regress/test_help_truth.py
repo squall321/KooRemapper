@@ -283,21 +283,21 @@ def main():
           rc == 0 and os.path.exists(os.path.join(tmp, "bom_out.k")), f"rc={rc} {out[-200:]}")
     # 두 규칙 모두 예외가 남아 있다(매뉴얼 §3.1 (d)(e)) — 문구와 실제 동작을 함께 잠근다.
     # 무조건문으로 적으면 윈도우 사용자가 --help 가 괜찮다고 한 입력으로 rc=1 을 맞는다.
-    check("공통 규칙: 탭 검사의 예외(map·되감을 수 없는 입력)를 적음",
-          "예외: map 과 되감을 수 없는 입력" in rules, rules[:1200])
-    check("공통 규칙: BOM 의 예외(map·squeeze)를 적음",
-          "squeeze <mesh> <config> <prefix> 는 아직 BOM 에서 실패" in rules, rules[:1200])
+    check("공통 규칙: 탭 검사의 예외(되감을 수 없는 입력)를 적음",
+          "예외: 되감을 수 없는 입력" in rules, rules[:1200])
+    check("공통 규칙: BOM 은 예외 없이 무시한다고 적음(map·squeeze 도 고쳐졌다)",
+          "BOM 에서 실패" not in rules, rules[:1200])
     open(os.path.join(tmp, "map_tab.yaml"), "w").write(
         "bent: bent.k\nflat: flat.k\noutput: map_tab_out.k\nnotes:\n\t- memo\n")
     rc, out = run(binary, tmp, "map", "map_tab.yaml")
-    check("규칙(d) 예외: map 은 탭 검사를 하지 않는다",
-          "탭을 쓸 수 없습니다" not in out, out[-200:])
+    check("규칙(d): map 도 탭 들여쓰기를 rc=1 로 거절한다",
+          rc == 1 and "탭을 쓸 수 없습니다" in out, f"rc={rc} {out[-200:]}")
     open(os.path.join(tmp, "sq_bom.yaml"), "wb").write(
         b"\xef\xbb\xbf" + b"parts:\n  - pid: 1\n    eps_x: -0.01\n"
         b"material:\n  E: 210000.0\n  nu: 0.3\n")
     rc, out = run(binary, tmp, "squeeze", "box.k", "sq_bom.yaml", "sq_bom")
-    check("규칙(e) 예외: squeeze 는 BOM 붙은 config 에서 rc=1",
-          rc == 1 and not os.path.exists(os.path.join(tmp, "sq_bom.k")), f"rc={rc} {out[-200:]}")
+    check("규칙(e): squeeze 도 BOM 붙은 config 를 그대로 읽는다",
+          rc == 0 and os.path.exists(os.path.join(tmp, "sq_bom.k")), f"rc={rc} {out[-200:]}")
 
     print("[열거값 표기 — help 가 적은 허용값이 바이너리와 같은가]")
     # boundary 와 load 의 select 는 값 집합이 다르다(boundary: all, load: tied). 한쪽 목록을 베껴 적으면
