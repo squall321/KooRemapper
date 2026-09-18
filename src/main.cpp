@@ -62,6 +62,7 @@
 #include "commands/core_ops.h"
 #include "commands/squeeze_assemble.h"
 #include "commands/cnrb2solid.h"
+#include "commands/cnrb2spring.h"
 #include "commands/hfdamp.h"
 #include "commands/battery.h"
 #include "commands/strip.h"
@@ -2645,6 +2646,17 @@ static int runMain(int argc, char* argv[]) {
         }
         printBanner(console);
         return runCnrb2Solid(argv[2], console);
+    }
+
+    // Cnrb2Spring command
+    // @lat: [[commands/cnrb2spring]]
+    if (command == "cnrb2spring") {
+        if (argc < 3) {
+            console.error("Usage: KooRemapper cnrb2spring <config.yaml>");
+            return 1;
+        }
+        printBanner(console);
+        return runCnrb2Spring(argv[2], console);
     }
 
     // HFDamp command

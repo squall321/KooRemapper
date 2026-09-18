@@ -48,6 +48,7 @@ const KO: Record<string, string> = {
   tetremesh: 'gmsh 기반 사면체 재메시',
   meshfix: 'gmsh 기반 결함 메시 보정',
   cnrb2solid: '구속 강체(CNRB)를 솔리드로 변환',
+  cnrb2spring: 'CNRB 체결점을 유격 스프링 조인트로 분할',
   merge: '메시·파트 병합',
   strip: '불필요 카드·요소 제거',
   load: '하중·초기속도 등 부여',

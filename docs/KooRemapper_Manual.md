@@ -232,6 +232,7 @@ Commands:
   load           하중 적용
   boundary       경계 조건 적용
   rbe            RBE 구속 조건
+  cnrb2spring    CNRB 체결점을 두 강체 + 3축 이산 스프링(자유유격) 조인트로 분할
 
   # 해석 설정
   implicit       Explicit → Implicit 해석 변환
@@ -4066,6 +4067,56 @@ keywords:
 ```
 
 **근거**: help(`Usage:` 한 줄), pyKooCAE `surface_remesh.md`, `examples/strip/strip_test.yaml`.
+
+---
+
+### 43.11 cnrb2spring — CNRB 체결점을 유격 스프링 조인트로 분할
+
+**용도**: `*CONSTRAINED_NODAL_RIGID_BODY`(CNRB)는 유격 0·강성 무한대라 나사-홀 반경 공차(측면 전단 방향 유격)를 표현하지 못한다. 측면 낙하는 체결부를 정확히 그 방향으로 가진한다. 이 op 은 CNRB 하나를 **Side A/Side B 두 개의 독립 강체**로 쪼개고, 그 사이를 팬텀 노드 4개와 `*ELEMENT_DISCRETE` 3개(X/Y/Z)로 잇는다. 축이 아닌 두 방향에는 ±`gap` 구간에서 힘이 0 인 자유유격 곡선을, 축 방향에는 거의 강체 수준의 선형 강성을 준다.
+
+**호출형태**: yaml-config op (모든 키를 최상위 flat 에 둠). assemble op 으로는 아직 내지 않았다.
+
+```bash
+KooRemapper cnrb2spring <config.yaml>
+```
+
+**주요 config 키** (`examples/cnrb2spring/two_plate_bolt.yaml`):
+**표 43-11. cnrb2spring config 키 — CNRB 체결점을 두 강체 + 3축 이산 스프링으로 바꾸는 파라미터.**
+
+| 키 | 기본값 | 설명 |
+|---|---|---|
+| `model` / `output` | (필수) | 입출력 K파일 (YAML 폴더 기준 상대 경로) |
+| `axis` | **(필수, auto 없음)** | 나사 축 `x|y|z`. 이 축에 `k_axial`, 나머지 두 축에 유격 곡선이 붙는다 |
+| `target_pids` | `[]`(전부) | 변환할 CNRB 의 PID 목록 |
+| `gap` | 0.1 | 반경 유격 ±[mm] |
+| `k_engage` | 1.0e5 | 유격 소진 후 전단 강성 [N/mm] |
+| `k_axial` | 1.0e7 | 축방향(나사 헤드 클램핑) 강성 [N/mm] |
+| `eps` | 0.001 | 팬텀 노드 오프셋 [mm] — 0 이면 스프링 축이 정의되지 않는다 |
+| `curve_range` | 1.0 | 곡선 가로축 반범위 [mm] (`gap` 보다 커야 한다) |
+| `node_id_start` / `elem_id_start` / `card_id_start` | 90000001 / 9900001 / 990001 | 새 ID 시작 번호. 원본과 겹치면 조용히 밀지 않고 rc=1 |
+| `pid_refs` | strict | 지운 CNRB PID·SET SID 를 가리키던 참조가 남았을 때 `strict`=rc=1, `warn`=경고만 |
+
+**`axis` 에 `auto` 를 두지 않은 이유**: 두 파트 무게중심 차로 축을 고르면 겹판 체결에서는 맞지만 브래킷 측면을 프레임에 붙인 체결점에서는 나사 축이 아니라 옆으로 난 방향을 가리킨다. 그러면 `k_axial` 이 전단 방향에 붙고 유격 곡선이 나사 축에 붙은, **의도와 정확히 반대인 덱이 rc=0 으로** 나온다. 대신 선언한 축이 무게중심 차의 최대 성분이 아니면 `[WARN]` 으로 성분값을 찍는다 — 판정은 사람이 한다.
+
+**카드 형식 함정**(LS-DYNA 라이선스가 없어 회귀가 덱 문자열로 못 박는 항목):
+
+- `*ELEMENT_DISCRETE` 는 **8칸** 고정폭이다(다른 카드는 10칸). 10칸으로 쓰면 7자리 EID 가 잘려 `beam element ... has an undefined PID` 가 난다.
+- `*ELEMENT_DISCRETE` 의 S(스케일, 41~56열)는 1.0 을 **명시**한다. 비워 0.0 으로 읽히면 모든 스프링이 에러 없이 무력화된다.
+- `*SECTION_DISCRETE` 는 2번째 줄(CDL, TDL)이 필수다. 빼면 다음 키워드 줄을 그 줄로 먹는다.
+- `*MAT_SPRING_GENERAL_NONLINEAR` 은 MID LCDL LCDU 세 칸만 쓴다(LCDL=로딩, LCDU=언로딩; 같으면 대칭). 다른 스프링 재질의 7칸 형식으로 쓰면 `MAT n is not found`.
+- 블록 사이에 **빈 줄을 만들지 않는다**. `*ELEMENT_DISCRETE` 가 다음 `*` 까지 데이터로 읽어 빈 줄을 요소로 오인하면 `discrete element id 0 is invalid` 가 난다(`$` 주석 줄은 안전하다).
+
+**동작 규칙**:
+
+- CNRB 가 잇는 두 파트는 **요소 연결성**으로만 판정한다(이름 패턴·가정 금지). `*ELEMENT_SOLID` 의 ten nodes format 은 한 요소가 두 줄이므로 원문 줄에서 직접 읽는다 — TET10 의 9·10번 중간절점이 CNRB 노드인 경우까지 잡는다.
+- 이 op 이 읽는 `*NODE`·`*ELEMENT_*`·`*SET_NODE*`·`*CONSTRAINED_NODAL_RIGID_BODY` 는 **고정폭으로만** 읽는다. 콤마 자유형식 줄이 섞여 있으면 칸 자리가 통째로 어긋나므로 조용히 읽지 않고 rc=1 이다.
+- 세트 안의 '실제 노드가 아닌 ID' 는 `*NODE` 목록과 대조해 거르고 몇 개를 걸렀는지 알린다('100 이하' 같은 값 규칙을 쓰지 않는다).
+- NSID=0 은 LS-DYNA 규칙대로 NSID=PID 로 읽는다. `_TITLE` 인데 제목 줄이 빠진 덱도 데이터 줄 모양 판정으로 가려낸다.
+- 원 CNRB 와 그 `*SET_NODE_LIST` 는 **통째로 삭제**한다. 그 PID 를 가리키던 카드는 restack/merge 와 같은 공용 죽은-참조 스캐너로, 그 SID 를 가리키던 카드는 이 op 이 같은 등급 어휘(manual/maybe)로 보고한다. 이관은 하지 않는다 — 강체 하나가 둘로 쪼개지므로 어느 쪽이 원 경계조건을 이어받을지는 사람이 정해야 한다.
+- 파라미터 기본값은 **실측이 아닌 가정값**이다(labeled assumption). 기본값을 쓰면 콘솔에 그 사실을 한 줄로 알린다.
+- rc 를 건드리지 않는 품질 경고: `eps < gap`(VID=0 이라 작동축이 현재 N1→N2 방향이다), 한 파트 쌍에 조인트가 1개뿐(병진 스프링 3개는 회전을 구속하지 않는다), 한쪽 노드가 3개 미만, `curve_range > 20*gap`.
+
+**근거**: 2026-09-18 T4_PV1/T4_DVR 6면 낙하 모델 21개 체결점 적용 절차(LS-DYNA Normal termination 확인), LS-DYNA R16 매뉴얼 Vol_I `*ELEMENT_DISCRETE`·`*SECTION_DISCRETE`·`*DEFINE_CURVE`, `examples/cnrb2spring/`, `tools/regress/test_cnrb2spring.py`.
 
 ---
 

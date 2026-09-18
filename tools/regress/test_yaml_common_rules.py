@@ -48,7 +48,8 @@ ONE_ARG_CMDS = [
     "load", "boundary", "rbe", "strip", "merge", "contact", "relax", "explicit", "implicit",
     "modal", "ale", "database", "optimize", "stabilize", "matdb", "cclip", "convert", "refine",
     "elform", "restack", "bend", "indent", "formstrain", "disconnect", "iga", "warpage",
-    "offset", "wrap", "update", "cnrb2solid", "hfdamp", "battery", "modelmeta", "assemble",
+    "offset", "wrap", "update", "cnrb2solid", "cnrb2spring", "hfdamp", "battery", "modelmeta",
+    "assemble",
     "matswap", "tetremesh", "meshfix",
 ]
 

@@ -3051,6 +3051,263 @@
       "presets": null
     },
     {
+      "name": "cnrb2spring",
+      "category": "bc",
+      "summary": "CNRB 체결점을 두 강체 + 3축 이산 스프링(자유유격) 조인트로 분할",
+      "description": "Splits a *CONSTRAINED_NODAL_RIGID_BODY fastener into two independent rigid bodies (Side A / Side B, determined by element connectivity) linked by three *ELEMENT_DISCRETE scalar springs through phantom nodes offset by eps along X/Y/Z. The two non-axis springs carry a free-play curve (zero force within +/-gap, then k_engage); the axis spring carries a near-rigid k_axial. The original CNRB and its *SET_NODE_LIST are deleted whole and references to them are reported. Generated cards: *DEFINE_CURVE x2, *MAT_SPRING_GENERAL_NONLINEAR x2, *SECTION_DISCRETE, *PART x2, phantom *NODE, *SET_NODE_LIST_TITLE x2 and *CONSTRAINED_NODAL_RIGID_BODY_TITLE x2 per joint, *ELEMENT_DISCRETE x3 per joint.",
+      "invocation": "yaml",
+      "config_style": "structured",
+      "takes_kfile": true,
+      "requires_gmsh": false,
+      "requires_tetgen": false,
+      "params": [
+        {
+          "name": "model",
+          "type": "file",
+          "role": "yaml_field",
+          "yaml_path": "model",
+          "required": true,
+          "description": "입력 K-파일 (*CONSTRAINED_NODAL_RIGID_BODY 포함)"
+        },
+        {
+          "name": "output",
+          "type": "output",
+          "role": "yaml_field",
+          "yaml_path": "output",
+          "required": true,
+          "description": "출력 K-파일"
+        },
+        {
+          "name": "axis",
+          "type": "enum",
+          "role": "yaml_field",
+          "yaml_path": "axis",
+          "required": true,
+          "enum": [
+            "x",
+            "y",
+            "z"
+          ],
+          "description": "나사 축 — 이 축에 k_axial 이, 나머지 두 축에 ±gap 유격 곡선이 붙는다. auto 없음(필수)"
+        },
+        {
+          "name": "target_pids",
+          "type": "array",
+          "role": "yaml_field",
+          "yaml_path": "target_pids",
+          "required": false,
+          "default": "[]",
+          "description": "변환할 CNRB 의 PID 목록. 생략하면 덱의 모든 CNRB"
+        },
+        {
+          "name": "gap",
+          "type": "number",
+          "role": "yaml_field",
+          "yaml_path": "gap",
+          "required": false,
+          "default": "0.1",
+          "description": "반경 유격 ±[mm] (가정값)"
+        },
+        {
+          "name": "k_engage",
+          "type": "number",
+          "role": "yaml_field",
+          "yaml_path": "k_engage",
+          "required": false,
+          "default": "100000.0",
+          "description": "유격 소진 후 전단 강성 [N/mm] (가정값)"
+        },
+        {
+          "name": "k_axial",
+          "type": "number",
+          "role": "yaml_field",
+          "yaml_path": "k_axial",
+          "required": false,
+          "default": "10000000.0",
+          "description": "축방향(나사 헤드 클램핑) 강성 [N/mm] (가정값)"
+        },
+        {
+          "name": "eps",
+          "type": "number",
+          "role": "yaml_field",
+          "yaml_path": "eps",
+          "required": false,
+          "default": "0.001",
+          "description": "팬텀 노드 오프셋 [mm] — 0 이면 스프링 축이 정의되지 않는다 (가정값)"
+        },
+        {
+          "name": "curve_range",
+          "type": "number",
+          "role": "yaml_field",
+          "yaml_path": "curve_range",
+          "required": false,
+          "default": "1.0",
+          "description": "곡선 가로축 반범위 [mm]. gap 보다 커야 한다"
+        },
+        {
+          "name": "node_id_start",
+          "type": "integer",
+          "role": "yaml_field",
+          "yaml_path": "node_id_start",
+          "required": false,
+          "default": "90000001",
+          "description": "팬텀 노드 시작 ID (조인트당 4개). 충돌하면 rc=1"
+        },
+        {
+          "name": "elem_id_start",
+          "type": "integer",
+          "role": "yaml_field",
+          "yaml_path": "elem_id_start",
+          "required": false,
+          "default": "9900001",
+          "description": "*ELEMENT_DISCRETE 시작 ID (조인트당 3개). 충돌하면 rc=1"
+        },
+        {
+          "name": "card_id_start",
+          "type": "integer",
+          "role": "yaml_field",
+          "yaml_path": "card_id_start",
+          "required": false,
+          "default": "990001",
+          "description": "곡선·재질·섹션·파트·세트 시작 ID. 충돌하면 rc=1"
+        },
+        {
+          "name": "pid_refs",
+          "type": "enum",
+          "role": "yaml_field",
+          "yaml_path": "pid_refs",
+          "required": false,
+          "default": "strict",
+          "enum": [
+            "strict",
+            "warn"
+          ],
+          "description": "지운 CNRB PID·SET SID 를 가리키던 참조가 남았을 때: strict=rc=1, warn=경고만"
+        }
+      ],
+      "example": {
+        "args": {
+          "model": "two_plate_bolt.k",
+          "output": "two_plate_bolt_spring.k",
+          "axis": "z",
+          "gap": 0.1,
+          "k_engage": 100000.0,
+          "k_axial": 10000000.0,
+          "eps": 0.001,
+          "curve_range": 1.0,
+          "target_pids": [
+            1201
+          ],
+          "node_id_start": 90000001,
+          "elem_id_start": 9900001,
+          "card_id_start": 990001,
+          "pid_refs": "strict"
+        },
+        "note": "예제 폴더의 two_plate_bolt.k 는 PID 500 하판과 PID 700 상판을 CNRB(PID 1201)로 묶은 모델이다. 실행하면 CNRB 가 사라지고 두 강체 + 3개의 *ELEMENT_DISCRETE 가 생긴다."
+      },
+      "example_folder": "/home/koopark/claude/KooRemapper/examples/cnrb2spring",
+      "notes": "GOTCHAS & DESIGN NOTES:\n\n1. **What it does**: one *CONSTRAINED_NODAL_RIGID_BODY (CNRB) fastener is split into TWO independent rigid bodies (Side A / Side B, decided by element connectivity), joined by three scalar springs (*ELEMENT_DISCRETE) through phantom nodes. The two non-axis directions get a free-play (clearance) curve: zero force within +/-gap, then stiffness k_engage. The axis direction gets a near-rigid linear stiffness k_axial. This reproduces the screw-hole radial clearance that a CNRB (zero play, infinite stiffness) cannot represent.\n\n2. **axis is REQUIRED, there is no `auto`**. Guessing the screw axis from the two part centroids is right for stacked plates but wrong for a bracket bolted to a frame side face — it would put k_axial on the shear direction and the clearance curve on the screw axis, producing exactly the opposite deck with rc=0. Instead the tool cross-checks: if the declared axis is not the largest component of centroid(B)-centroid(A), it prints a [WARN] with dx,dy,dz and leaves the decision to you.\n\n3. **Part detection is by ELEMENT CONNECTIVITY only** — never by name pattern. *ELEMENT_SOLID in the ten-nodes format is TWO lines per element (line 1: eid pid, line 2: 10 node ids); reading it as one line yields node ids read as PIDs. The op parses the raw deck lines itself for this reason.\n\n4. **Fake node ids in the set**: members of the CNRB's *SET_NODE_LIST that do not exist in *NODE are dropped, and the count is reported with a [WARN]. (Do not filter by \"id <= 100\"; that was one project's observation.)\n\n5. **NSID = 0 means NSID = PID** (LS-DYNA rule) and is handled.\n\n6. **Card widths differ per card.** *ELEMENT_DISCRETE is 8-column fixed width (10 fields of 8 chars); every other card written here is 10-column. Writing the discrete element in 10 columns truncates a 7-digit EID and LS-DYNA reports an undefined PID. *SECTION_DISCRETE must have its second card (CDL, TDL) or LS-DYNA eats the next keyword line as that card. *MAT_SPRING_GENERAL_NONLINEAR is written with MID LCDL LCDU only. The S (scale) field of *ELEMENT_DISCRETE is written explicitly as 1.0, because a blank read as 0.0 would silently disable every spring.\n\n7. **No blank line is emitted between the generated blocks** — *ELEMENT_DISCRETE reads up to the next '*', and a blank line there becomes 'discrete element id 0 is invalid'. ('$' comment lines are safe.)\n\n8. **The original CNRB and its *SET_NODE_LIST are deleted whole** (not left as an empty part). Cards that pointed at the dead CNRB PID are reported through the shared dead-reference scanner (the same one restack/merge use — so the report wording says \"restack/merge\"; a '$ cnrb2spring:' line is inserted just above it to say so). Cards that pointed at the deleted SET id are reported by this op with the same grade vocabulary (manual / maybe). With pid_refs: strict (default) either one left over ends the run with rc=1; pid_refs: warn lowers only those two to rc=0.\n\n9. **New ids use fixed ranges** (nodes 90000001+, elements 9900001+, cards 990001+) and the op checks them against the ids actually used in the input deck, per namespace (node / element / part / set / section / material / curve). A clash is rc=1 with the clashing ids and the key to change — it never silently shifts. Re-running the op on its own output therefore fails loudly instead of silently duplicating.\n\n10. **Phantom node self-check**: the generated *NODE lines are read back, and if the eps offset vanished in the %16.8e output (large model coordinates, 9 significant digits) the run stops with rc=1 instead of writing two coincident nodes with an undefined spring axis.\n\n11. **Refused inputs**: a comma free-format data line in *NODE / *ELEMENT_* / *SET_NODE* / *CONSTRAINED_NODAL_RIGID_BODY (this op reads those cards in fixed width only, so a free-format line would silently shift every field); DRFLAG/RRFLAG != 0 (a DOF release cannot be split between two rigid bodies); a CNRB block with more than one data line (_SPC / _INERTIA extra cards); a node set in _GENERATE/_COLUMN form; a set shared by more than one CNRB; a CNRB that joins 1 or 3+ parts, or whose two parts already share nodes. Named in target_pids these are rc=1; found automatically they are [WARN] + skipped. If nothing converts, rc=1 (no silent no-op).\n\n12. **Quality warnings that do not change rc**: eps < gap (VID=0 means the acting axis is the current N1->N2 direction); only one joint between a given part pair (three translational springs do not constrain rotation); a side with fewer than 3 real nodes; curve_range > 20*gap (LS-DYNA re-discretises the curve on a uniform grid).\n\n13. **Parameters are a labeled assumption, not measurements.** gap 0.1 mm, k_engage 1.0e5 N/mm, k_axial 1.0e7 N/mm, eps 0.001 mm, curve_range 1.0 mm. When a default is used the console says so.\n\n14. **Units**: t/mm/s (mm, N/mm, MPa).\n\n15. **Not provided on purpose**: axis auto-detection, VID axis forcing (it adds unwanted rotational constraint), custom curve points, per-axis gaps, damping. This op is standalone-only for now; it is not an `assemble` operation type.\n\nYAML INPUT — COMMON RULES:\n---\n- A leading UTF-8 BOM is ignored, so a config saved by a Windows editor (Notepad) works as-is.\n- A TAB used for INDENTATION anywhere in the file is rejected with rc=1 — `[ERROR] [<op>] YAML 들여쓰기에 탭을 쓸 수 없습니다 (공백을 쓰세요): <n>번째 줄: <line>`. The whole file is scanned, so a tab under a key this op never reads fails too; configs that used to run with rc=0 can now fail. Tabs inside a quoted value are kept, but a tab that starts a line inside a `|`/`>` literal block (material_card, czm_material_card, material_cards) is rejected, because the parser would otherwise drop that card line silently.\n- The tab scan is skipped when the config arrives on a stream that cannot be rewound (pipe, process substitution, /dev/stdin); such input reaches the parser unchecked.\n- RELATIVE PATHS: a path given on the COMMAND LINE is relative to the current working directory. A relative path INSIDE the YAML — with or without a folder part (`box.k` and `../data/box.k` alike) — is relative to the folder that holds that YAML file, and never falls back to the working directory. Absolute paths (leading `/` or `\\`, or an `X:` drive letter) are used as-is.",
+      "keys": [
+        {
+          "path": "model",
+          "type": "file",
+          "required": true,
+          "desc": "Input K-file containing one or more *CONSTRAINED_NODAL_RIGID_BODY definitions. Relative to the YAML folder."
+        },
+        {
+          "path": "output",
+          "type": "file",
+          "required": true,
+          "desc": "Output K-file path. Relative to the YAML folder. Nothing is written when the run ends with rc=1."
+        },
+        {
+          "path": "axis",
+          "type": "enum",
+          "required": true,
+          "values": [
+            "x",
+            "y",
+            "z"
+          ],
+          "desc": "Screw axis. REQUIRED — there is no 'auto'. k_axial is applied along this axis; the other two axes get the +/-gap free-play curve. If the declared axis is not the largest component of centroid(B)-centroid(A), a [WARN] prints dx,dy,dz and the run continues (the engineer decides, the tool only surfaces the typo)."
+        },
+        {
+          "path": "target_pids",
+          "type": "array",
+          "required": false,
+          "desc": "PIDs of the CNRBs to convert. Empty/omitted = every CNRB in the deck. A PID listed here that is not a CNRB in the deck is rc=1. For a named target, any rejection (1 or 3+ parts, shared nodes, unsupported set form, DRFLAG/RRFLAG != 0) is rc=1; for an automatically picked CNRB the same case is a [WARN] and a skip."
+        },
+        {
+          "path": "gap",
+          "type": "number",
+          "required": false,
+          "default": "0.1",
+          "desc": "Radial clearance +/- [mm] applied to the two non-axis springs. Must be > 0 and finite. Labeled assumption, not a measurement."
+        },
+        {
+          "path": "k_engage",
+          "type": "number",
+          "required": false,
+          "default": "100000.0",
+          "desc": "Shear stiffness [N/mm] after the clearance is taken up (slope of the curve outside +/-gap). Must be > 0 and finite."
+        },
+        {
+          "path": "k_axial",
+          "type": "number",
+          "required": false,
+          "default": "10000000.0",
+          "desc": "Axial stiffness [N/mm] (screw-head clamping approximation), a linear curve through the origin. Must be > 0 and finite."
+        },
+        {
+          "path": "eps",
+          "type": "number",
+          "required": false,
+          "default": "0.001",
+          "desc": "Phantom-node offset [mm]. Must be > 0: with eps = 0 the two nodes of *ELEMENT_DISCRETE coincide and the acting axis N1->N2 is undefined. VID is deliberately left 0 (forcing the axis with VID>0 adds unwanted rotational constraint), so the offset is what makes the spring axis X, Y or Z."
+        },
+        {
+          "path": "curve_range",
+          "type": "number",
+          "required": false,
+          "default": "1.0",
+          "desc": "Half-range of the curve abscissa [mm]. Must be > gap. curve_range > 20*gap is a [WARN]: LS-DYNA re-discretises the curve on a uniform grid, which can smear the flat free-play segment."
+        },
+        {
+          "path": "node_id_start",
+          "type": "integer",
+          "required": false,
+          "default": "90000001",
+          "desc": "First phantom node id; 4 nodes per joint (RA_x, RA_y, RA_z on Side A, RB on Side B). Checked against the node ids actually used in the deck — a clash is rc=1 naming the clashing ids, never a silent shift. The last assigned id must stay <= 99999999 (I8)."
+        },
+        {
+          "path": "elem_id_start",
+          "type": "integer",
+          "required": false,
+          "default": "9900001",
+          "desc": "First *ELEMENT_DISCRETE id; 3 per joint. Checked against every *ELEMENT_* id in the deck (discrete elements create null beams, so the id must not collide with *ELEMENT_BEAM / *ELEMENT_SEATBELT either)."
+        },
+        {
+          "path": "card_id_start",
+          "type": "integer",
+          "required": false,
+          "default": "990001",
+          "desc": "Base id B for the shared cards: curves B and B+1, materials B and B+1, section B, shear/axial parts B and B+1, and per joint k the two rigid-body parts B+10+2k / B+11+2k with node-set ids of the same numbers (NSID = PID convention; sets and parts are different namespaces)."
+        },
+        {
+          "path": "pid_refs",
+          "type": "enum",
+          "required": false,
+          "default": "strict",
+          "values": [
+            "strict",
+            "warn"
+          ],
+          "desc": "Policy for references left pointing at the deleted CNRB PID (scanned by the shared restack/merge dead-reference code) or at the deleted *SET_NODE_LIST SID (scanned by this op). 'strict' (default) reports them and ends with rc=1; 'warn' reports them and ends with rc=0. No other failure can be lowered by this key. Nothing is migrated automatically: splitting one rigid body into two means the tool cannot decide which half should inherit a boundary condition."
+        }
+      ],
+      "presets": null
+    },
+    {
       "name": "convert",
       "category": "mesh",
       "summary": "선형 요소를 2차 요소로 변환 (TET10/HEX20/QUAD8/TRIA6)",
