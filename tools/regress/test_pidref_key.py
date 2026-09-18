@@ -45,24 +45,30 @@ def write_run(binary, d, cmd, name, body):
     return run(binary, d, cmd, name + ".yaml")
 
 
-def asm_restack(name, pid_refs):
+def asm_restack(name, pid_refs, model="flat.k"):
     key = f"    pid_refs: {pid_refs}\n" if pid_refs is not None else ""
-    return (f"base_model: flat.k\noutput: o_{name}\noperations:\n"
+    return (f"base_model: {model}\noutput: o_{name}\noperations:\n"
             "  - type: restack\n    target_pid: 1\n    direction: z\n"
             + key +
             "    layers:\n      - thickness: 1.0\n        num_elements: 1\n" + MAT +
             "      - thickness: 1.0\n        num_elements: 1\n" + MAT)
 
 
-def asm_merge(name, pid_refs):
+def asm_merge(name, pid_refs, model="flat.k"):
     key = f"    pid_refs: {pid_refs}\n" if pid_refs is not None else ""
-    return (f"base_model: flat.k\noutput: o_{name}\noperations:\n"
+    return (f"base_model: {model}\noutput: o_{name}\noperations:\n"
             "  - type: merge\n    direction: z\n    method: voigt\n    target_pids: [1]\n" + key)
 
 
-def standalone_restack(name, pid_refs):
+def standalone_merge(name, pid_refs, model="flat.k"):
     key = f"pid_refs: {pid_refs}\n" if pid_refs is not None else ""
-    return (f"model: flat.k\noutput: s_{name}\ntarget_pid: 1\ndirection: z\n" + key +
+    return (f"model: {model}\noutput: sm_{name}.k\ndirection: z\nmethod: voigt\n" + key +
+            "merge:\n  - pids: [1]\n")
+
+
+def standalone_restack(name, pid_refs, model="flat.k"):
+    key = f"pid_refs: {pid_refs}\n" if pid_refs is not None else ""
+    return (f"model: {model}\noutput: s_{name}\ntarget_pid: 1\ndirection: z\n" + key +
             "layers:\n  - thickness: 1.0\n    num_elements: 1\n" + MAT_STANDALONE +
             "  - thickness: 1.0\n    num_elements: 1\n" + MAT_STANDALONE)
 
@@ -90,6 +96,8 @@ def main():
         check(f"assemble merge pid_refs: {label} → rc=0", rc == 0, f"rc={rc} {out[-300:]}")
         rc, out = write_run(binary, d, "restack", f"sr_{tag}", standalone_restack(f"sr_{tag}", val))
         check(f"단독 restack pid_refs: {label} → rc=0", rc == 0, f"rc={rc} {out[-300:]}")
+        rc, out = write_run(binary, d, "merge", f"sm_{tag}", standalone_merge(f"sm_{tag}", val))
+        check(f"단독 merge pid_refs: {label} → rc=0", rc == 0, f"rc={rc} {out[-300:]}")
 
     # ── 2. 허용값 밖은 조용히 기본값으로 떨어지지 않는다 ────────────────────
     print("[허용값 밖 — rc=1 + 허용값 안내(D1)]")
@@ -106,6 +114,12 @@ def main():
         check(f"단독 restack pid_refs: {bad} → rc=1 + 허용값(assemble 과 같은 문구)",
               rc == 1 and f"invalid pid_refs '{bad}'" in out and "strict, warn" in out,
               f"rc={rc} {out[-300:]}")
+        rc, out = write_run(binary, d, "merge", f"smb_{bad}", standalone_merge(f"smb_{bad}", bad))
+        check(f"단독 merge pid_refs: {bad} → rc=1 + 허용값(assemble 과 같은 문구)",
+              rc == 1 and f"invalid pid_refs '{bad}'" in out and "strict, warn" in out,
+              f"rc={rc} {out[-300:]}")
+        check(f"단독 merge pid_refs: {bad} → 덱을 내지 않는다",
+              not os.path.exists(os.path.join(d, f"sm_smb_{bad}.k")), "거부했는데 덱이 남았다")
 
     # ── 3. 주석·따옴표 — 다른 키와 같은 관례 ────────────────────────────────
     print("[값 뒤 주석·따옴표는 다른 키와 같게 벗겨진다]")
@@ -114,14 +128,23 @@ def main():
         check(f"assemble restack pid_refs: {label} → rc=0", rc == 0, f"rc={rc} {out[-300:]}")
         rc, out = write_run(binary, d, "restack", f"sc_{label}", standalone_restack(f"sc_{label}", form))
         check(f"단독 restack pid_refs: {label} → rc=0", rc == 0, f"rc={rc} {out[-300:]}")
+        rc, out = write_run(binary, d, "merge", f"smc_{label}", standalone_merge(f"smc_{label}", form))
+        check(f"단독 merge pid_refs: {label} → rc=0", rc == 0, f"rc={rc} {out[-300:]}")
 
     # ── 4. 키를 줘도 덱은 달라지지 않는다(아직 동작이 없다) ─────────────────
     print("[pid_refs 는 아직 덱을 바꾸지 않는다 — 키없음과 바이트 동일]")
     base = open(os.path.join(d, "o_ar_none.k")).read()
+    sbase = open(os.path.join(d, "s_sr_none.k")).read()
+    mbase = open(os.path.join(d, "sm_sm_none.k")).read()
     for val in ("strict", "warn"):
         other = open(os.path.join(d, f"o_ar_{val}.k")).read()
         check(f"assemble restack: pid_refs: {val} 덱 == 키없음 덱", base == other,
               "출력 덱이 달라졌다")
+        check(f"단독 restack: pid_refs: {val} 덱 == 키없음 덱",
+              sbase == open(os.path.join(d, f"s_sr_{val}.k")).read(), "출력 덱이 달라졌다")
+        check(f"단독 merge: pid_refs: {val} 덱 == 키없음 덱",
+              mbase == open(os.path.join(d, f"sm_sm_{val}.k")).read(), "출력 덱이 달라졌다")
+
 
     print()
     if FAILS:
