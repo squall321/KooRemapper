@@ -109,7 +109,8 @@ Get-ChildItem *.yaml | ForEach-Object {
               @MID@       2.0     12000      0.25
        - |
          *MAT_ELASTIC
-              @MID@       2.7      70000      0.33
+         $#     mid        ro         e        pr
+              @MID@       2.7     70000      0.33
      ```
 5. **TET4 Meshes**: Expect poor quality warnings; use HEX8 source for best results
 6. **Negative Directions**: -normal, -x, -y, -z all work correctly (fixed in v1.1.0+)
