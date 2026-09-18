@@ -340,6 +340,209 @@ def main():
           and "**`database` (matdb) is the one exception**" in notes,
           notes[:200])
 
+    # ── 6b. 2단계 A 가 새로 거절하는 값 / 새로 받는 값 ────────────────────────
+    print("[2단계 A — 새로 거절되는 열거값이 카탈로그와 맞는다]")
+    LAYER = ("    layers:\n      - name: A\n        num_elements: 1\n        thickness: 1.0\n"
+             "        material_card: |\n          *MAT_ELASTIC\n"
+             "                   9 7.850E-09  210000.0       0.3\n")
+    for val, want_ok in (("solid", True), ("tshell", True), ("shell", True),
+                         ("hex", False), ("SOLID", False)):
+        rc, out = asm(binary, d, "rs_" + val,
+                      f"  - type: restack\n    target_pid: 1\n    element_type: {val}\n" + LAYER)
+        if want_ok:
+            check(f"assemble restack element_type: {val} 는 rc=0", rc == 0, out[-200:])
+        else:
+            check(f"assemble restack element_type: {val} 는 rc=1",
+                  rc == 1 and "unsupported element_type" in out, out[-200:])
+    for path in ("element_type", "layers[].element_type"):
+        vals = cat_key(ops, "restack", path)["values"]
+        check(f"카탈로그 restack.{path} 는 solid/tshell/shell", vals == ["solid", "tshell", "shell"], str(vals))
+    vals = cat_key(ops, "assemble", "operations[].layers[].element_type")["values"]
+    check("카탈로그 assemble operations[].layers[].element_type 도 solid/tshell/shell",
+          vals == ["solid", "tshell", "shell"], str(vals))
+
+    dpm = os.path.join(d, "dp")
+    os.makedirs(dpm, exist_ok=True)
+    shutil.copy2(os.path.join(REPO, "materials", "smartphone_stack.k"), dpm)
+    shutil.copy2(os.path.join(REPO, "materials", "material_db.json"), dpm)
+
+    def dp_yaml(preset):
+        return ("model: smartphone_stack.k\noutput: dp_out.k\ndatabase: material_db.json\n"
+                f"mat_type: MAT_ELASTIC\ndamping_preset: {preset}\nmaterials:\n  - match: \"*\"\n")
+
+    for preset, want_ok in (("smartphone_drop", True), ("smartphone_drop_aggressive", True),
+                            ("quasi_static", True), ("off", True), ("OFF", True),
+                            ("light", False), ("custom", False)):
+        open(os.path.join(dpm, "p.yaml"), "w").write(dp_yaml(preset))
+        rc, out = run(binary, dpm, "matdb", "p.yaml")
+        if want_ok:
+            check(f"matdb damping_preset: {preset} 는 rc=0", rc == 0, out[-200:])
+        else:
+            check(f"matdb damping_preset: {preset} 는 rc=1",
+                  rc == 1 and "unsupported damping_preset" in out, out[-200:])
+    for op, path in (("matdb", "damping_preset"), ("assemble", "operations[].damping_preset")):
+        vals = cat_key(ops, op, path)["values"]
+        check(f"카탈로그 {op}.{path} 에 off 가 있고 3 프리셋도 있다",
+              set(vals) == {"smartphone_drop", "smartphone_drop_aggressive", "quasi_static", "off"},
+              str(vals))
+        desc = cat_key(ops, op, path)["desc"]
+        check(f"카탈로그 {op}.{path} desc 가 off 는 프리셋이 아니라고 적는다",
+              "'off' is NOT a preset" in desc, desc[:200])
+
+    print("[boundary / rbe 의 select — 서로 다른 허용값]")
+    mesh = os.path.join(REPO, "examples", "load", "mesh.k")
+    bd = os.path.join(d, "bd")
+    os.makedirs(bd, exist_ok=True)
+    shutil.copy2(mesh, bd)
+    for sel, want_ok in (("direction", True), ("all", True), ("set", True), ("bogus", False)):
+        open(os.path.join(bd, "b.yaml"), "w").write(
+            "model: mesh.k\noutput: b_out.k\nboundaries:\n  - part: 9\n    dof: all\n"
+            f"    select: {sel}\n    direction: [0, 0, -1]\n    angle: 45.0\n    set_id: 1\n")
+        rc, out = run(binary, bd, "boundary", "b.yaml")
+        if want_ok:
+            check(f"boundary select: {sel} 는 rc=0", rc == 0, out[-200:])
+        else:
+            check(f"boundary select: {sel} 는 rc=1 (allowed: direction, all, set)",
+                  rc == 1 and "unsupported select" in out and "direction, all, set" in out, out[-200:])
+    for sel, want_ok in (("direction", True), ("all", True), ("set", False), ("bogus", False)):
+        open(os.path.join(bd, "r.yaml"), "w").write(
+            "model: mesh.k\noutput: r_out.k\nrbe:\n  - part: 9\n"
+            f"    select: {sel}\n    direction: [0, 0, -1]\n    angle: 45.0\n")
+        rc, out = run(binary, bd, "rbe", "r.yaml")
+        if want_ok:
+            check(f"rbe select: {sel} 는 rc=0", rc == 0, out[-200:])
+        else:
+            check(f"rbe select: {sel} 는 rc=1 (allowed: direction, all)",
+                  rc == 1 and "unsupported select" in out and "direction, all)" in out, out[-200:])
+    for op, path in (("boundary", "boundaries[].select"),
+                     ("assemble", "operations[].boundaries[].select")):
+        vals = cat_key(ops, op, path)["values"]
+        check(f"카탈로그 {op}.{path} 는 direction/all/set", vals == ["direction", "all", "set"], str(vals))
+    for op, path in (("rbe", "rbe[].select"), ("assemble", "operations[].rbe[].select")):
+        vals = cat_key(ops, op, path)["values"]
+        check(f"카탈로그 {op}.{path} 는 direction/all (set 없음)",
+              vals == ["direction", "all"], str(vals))
+
+    print("[contact create 의 type — 모르는 값은 경고이지 거절이 아니다]")
+    ct = os.path.join(d, "ct")
+    os.makedirs(ct, exist_ok=True)
+    shutil.copy2(os.path.join(REPO, "examples", "contact", "model.k"), ct)
+
+    def ct_run(name, type_line):
+        open(os.path.join(ct, name + ".yaml"), "w").write(
+            "model: model.k\noutput: %s.k\ncontacts:\n  - action: create\n%s"
+            "    slave: { pid: 1 }\n    master: { pid: 3 }\n    title: ZZTAG\n" % (name, type_line))
+        rc, out = run(binary, ct, "contact", name + ".yaml")
+        kw = ""
+        path = os.path.join(ct, name + ".k")
+        if os.path.exists(path):
+            lines = open(path, encoding="utf-8", errors="ignore").read().splitlines()
+            for i, ln in enumerate(lines):
+                if ln.strip() == "ZZTAG" and i:
+                    kw = lines[i - 1].strip()
+        return rc, out, kw
+
+    SHORT = {"auto": "AUTOMATIC_SURFACE_TO_SURFACE", "automatic": "AUTOMATIC_SURFACE_TO_SURFACE",
+             "tied": "TIED_SURFACE_TO_SURFACE", "tied_thermal": "TIED_SURFACE_TO_SURFACE_THERMAL",
+             "thermal": "TIED_SURFACE_TO_SURFACE_THERMAL",
+             "tiebreak": "AUTOMATIC_SURFACE_TO_SURFACE_TIEBREAK",
+             "mortar": "AUTOMATIC_SURFACE_TO_SURFACE_MORTAR",
+             "tied_mortar": "TIED_SURFACE_TO_SURFACE_MORTAR",
+             "single": "AUTOMATIC_SINGLE_SURFACE", "eroding": "ERODING_SURFACE_TO_SURFACE",
+             "forming": "FORMING_SURFACE_TO_SURFACE"}
+    for short, full in SHORT.items():
+        rc, out, kw = ct_run("ct_" + short, f"    type: {short}\n")
+        check(f"contact type: {short} → *CONTACT_{full}",
+              rc == 0 and kw == f"*CONTACT_{full}_TITLE", f"rc={rc} kw={kw}")
+    rc, out, kw = ct_run("ct_omit", "")
+    check("contact type 생략 → *CONTACT_AUTOMATIC_SURFACE_TO_SURFACE (빈 이름 아님)",
+          rc == 0 and kw == "*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_TITLE", f"rc={rc} kw={kw}")
+    rc, out, kw = ct_run("ct_n2s", "    type: automatic_nodes_to_surface\n")
+    check("contact type: automatic_nodes_to_surface 는 통과(경고 없음)",
+          rc == 0 and kw == "*CONTACT_AUTOMATIC_NODES_TO_SURFACE_TITLE"
+          and "not a known contact keyword" not in out, f"rc={rc} kw={kw}")
+    rc, out, kw = ct_run("ct_bogus", "    type: bogus\n")
+    check("contact type: bogus 는 rc=0 + 경고 + *CONTACT_BOGUS (거절 아님)",
+          rc == 0 and kw == "*CONTACT_BOGUS_TITLE" and "not a known contact keyword" in out,
+          f"rc={rc} kw={kw} {out[-200:]}")
+    ctd = cat_key(ops, "contact", "contacts[].type")["desc"]
+    check("카탈로그 contact contacts[].type desc 가 약칭 표와 생략 기본값을 적는다",
+          "tied_thermal/thermal -> TIED_SURFACE_TO_SURFACE_THERMAL" in ctd
+          and "Omitting the key gives AUTOMATIC_SURFACE_TO_SURFACE" in ctd, ctd[:200])
+    ctk = cat_key(ops, "assemble", "operations[].contact.actions[].type")
+    check("카탈로그 assemble contact type 은 enum 으로 좁히지 않는다(전체 키워드 허용)",
+          ctk["values"] is None, str(ctk["values"]))
+    check("카탈로그 assemble contact type desc 가 tied_thermal/thermal/tiebreak 비대칭을 적는다",
+          "NOT aliases here" in ctk["desc"], ctk["desc"][:200])
+
+    # detect 의 contact_type 은 create 의 type 과 값 공간이 다르다 — 약칭만 받는 닫힌 목록이라
+    # 전체 LS-DYNA 키워드를 주면 rc=1 이다. 카탈로그가 'Same value space' 라고 적어 두면 틀린다.
+    def dt_run(name, ctype):
+        open(os.path.join(ct, name + ".yaml"), "w").write(
+            "model: model.k\noutput: %s.k\ncontacts:\n  - action: detect\n    scope: all\n"
+            "    tolerance: 0.5\n    auto_create: true\n    contact_type: %s\n" % (name, ctype))
+        return run(binary, ct, "contact", name + ".yaml")
+    dtv = cat_key(ops, "contact", "contacts[].contact_type")
+    for short in ["auto", "automatic", "tied", "tied_thermal", "thermal", "tiebreak",
+                  "mortar", "tied_mortar", "single", "eroding", "forming"]:
+        rc, out = dt_run("dt_" + short, short)
+        check("contact detect contact_type: %s 는 rc=0" % short, rc == 0, out[-200:])
+    for full in ["automatic_surface_to_surface", "automatic_nodes_to_surface", "bogus"]:
+        rc, out = dt_run("dt_x_" + full, full)
+        check("contact detect contact_type: %s 는 rc=1 로 거절(create 와 다르다)" % full,
+              rc == 1 and "unsupported contact_type" in out, f"rc={rc} {out[-200:]}")
+    check("카탈로그 contacts[].contact_type values 가 약칭 11개를 싣는다",
+          dtv["values"] == ["auto", "automatic", "tied", "tied_thermal", "thermal", "tiebreak",
+                            "mortar", "tied_mortar", "single", "eroding", "forming"],
+          str(dtv["values"]))
+    check("카탈로그 contacts[].contact_type desc 가 'type 과 같은 값 공간' 이라고 적지 않는다",
+          "Same value space" not in dtv["desc"] and "CLOSED whitelist" in dtv["desc"],
+          dtv["desc"][:200])
+
+    print("[contact slave/master pids — 블록 목록도 인라인과 같은 덱]")
+    open(os.path.join(ct, "p_inline.yaml"), "w").write(
+        "model: model.k\noutput: p_inline.k\ncontacts:\n  - action: create\n    type: tied\n"
+        "    slave:\n      pids: [1, 2]\n    master:\n      pids: [3]\n    title: ZZ\n")
+    open(os.path.join(ct, "p_block.yaml"), "w").write(
+        "model: model.k\noutput: p_block.k\ncontacts:\n  - action: create\n    type: tied\n"
+        "    slave:\n      pids:\n        - 1\n        - 2\n    master:\n      pids:\n"
+        "        - 3\n    title: ZZ\n")
+    run(binary, ct, "contact", "p_inline.yaml")
+    run(binary, ct, "contact", "p_block.yaml")
+    a = open(os.path.join(ct, "p_inline.k"), encoding="utf-8", errors="ignore").read()
+    b = open(os.path.join(ct, "p_block.k"), encoding="utf-8", errors="ignore").read()
+    check("pids 블록 목록 == 인라인 목록 (SET_PART 포함)",
+          a == b and a.count("*SET_PART") >= 1, f"len {len(a)}/{len(b)}")
+    for op, path in (("contact", "contacts[].slave.pids"),
+                     ("assemble", "operations[].contact.actions[].slave.pids")):
+        check(f"카탈로그 {op}.{path} desc 가 블록 목록을 적는다",
+              "block list" in cat_key(ops, op, path)["desc"])
+
+    # ── 6c. generate box 는 카탈로그에서 호출 가능하다 ─────────────────────────
+    print("[generate box 는 카탈로그 params 로 조립된다]")
+    sys.path.insert(0, os.path.join(REPO, "platform", "core"))
+    from kooremapper_core import build_command  # noqa: E402
+
+    gb = os.path.join(d, "gb")
+    os.makedirs(gb, exist_ok=True)
+    built = build_command("generate", {"subcommand": "box",
+                                       "box_config": {"output": "made.k", "lx": 20.0, "ly": 10.0,
+                                                      "lz": 2.0, "nx": 4, "ny": 2, "nz": 1}},
+                          __import__("pathlib").Path(gb))
+    check("build_command(generate, box) 가 argv ['generate','box','box_config.yaml'] 를 만든다",
+          built.error is None and built.argv == ["generate", "box", "box_config.yaml"],
+          f"{built.error} {built.argv}")
+    rc, out = run(binary, gb, *built.argv)
+    check("그 argv 로 실제 .k 가 나온다",
+          rc == 0 and os.path.exists(os.path.join(gb, "made.k")), out[-200:])
+    built = build_command("generate", {"type": "torus", "output_prefix": "tor"},
+                          __import__("pathlib").Path(gb))
+    check("type 모드 argv 는 그대로 ['generate','torus','tor']",
+          built.error is None and built.argv == ["generate", "torus", "tor"],
+          f"{built.error} {built.argv}")
+    rc, out = run(binary, gb, *built.argv)
+    check("type 모드도 실제로 돈다", rc == 0 and os.path.exists(os.path.join(gb, "tor_bent.k")), out[-200:])
+
     # ── 7. MCP 도구 수는 소스에서 도출된다 ──────────────────────────────────
     print("[MCP 도구 수]")
     tool_count = open(MCP_SERVER, encoding="utf-8").read().count("@mcp.tool(")
@@ -355,6 +558,15 @@ def main():
     check(f"TOOLS.md 표가 server.py 의 도구 {tool_count}개를 모두 싣는다",
           md_tools == py_tools, f"md-only={sorted(md_tools - py_tools)} py-only={sorted(py_tools - md_tools)}")
     check("TOOLS.md 에 '22개 도구' 문구가 없다", "22개 도구" not in md)
+    for rel in (("platform", "README.md"),
+                ("platform", "mcp_server", "CLAUDE_DESKTOP.md"),
+                ("platform", "mcp_server", "skill", "kooremapper", "SKILL.md")):
+        path = os.path.join(REPO, *rel)
+        txt = open(path, encoding="utf-8").read()
+        stale = [m for m in re.findall(r"(?:MCP )?도구 (\d+)개|(\d+)개 도구", txt)]
+        nums = {int(a or b) for a, b in stale}
+        check(f"{rel[-1]} 의 도구 수가 server.py 의 {tool_count} 와 같다",
+              not nums or nums == {tool_count}, str(sorted(nums)))
 
     print()
     if FAILS:
