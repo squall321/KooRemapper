@@ -11,6 +11,7 @@
   - '--help 공통 규칙' 의 '경로는 작업 폴더 기준' 이 거짓이었다(YAML 이 있는 폴더 기준).
   - 그 고침이 적은 '모두 YAML 폴더 기준' 도 거짓이었다 — load/boundary/contact/relax/database/
     implicit/modal/ale/cclip/matdb 는 폴더 없는 이름만 YAML 폴더 기준이다.
+  - 'generate-var --no-scale' 을 'use YAML lengths as-is' 라고 적었지만 J/K 는 1.0 이 된다.
   - 'prestress --strain' / 'strain --type' 이 모르는 값을 조용히 기본값으로 삼켰다.
 """
 import os
@@ -139,6 +140,20 @@ def main():
         check("generate-var: 예제 결과가 reference dimensions 100x10x2 (100x1x1 퇴화 아님)",
               rc == 0 and got is not None and all(abs(g - w) < 1e-3 for g, w in zip(got, want)),
               f"rc={rc} bbox={got}")
+        # --no-scale 설명이 실제와 같은가 — 'use YAML lengths as-is' 는 거짓이었다
+        # (예제 var.yaml 의 length_j 10 / length_k 2 를 쓰지 않고 J/K 가 1.0 이 된다)
+        check("generate-var: --no-scale 을 'use YAML lengths as-is' 라고 하지 않음",
+              "use YAML lengths as-is" not in gv,
+              [l for l in gv.splitlines() if "no-scale" in l])
+        check("generate-var: --no-scale 설명이 J/K 가 1.0 이 된다고 적음",
+              "J/K" in gv and "1.0" in gv,
+              [l for l in gv.splitlines() if "no-scale" in l or "J/K" in l])
+        rc, out = run(binary, tmp, "generate-var", "--no-scale", "var.yaml", "var_ns.k")
+        ns = bbox(os.path.join(tmp, "var_ns.k")) if os.path.exists(os.path.join(tmp, "var_ns.k")) else None
+        want_ns = [100.0, 1.0, 1.0]
+        check("generate-var: --no-scale 이 reference.dimensions 를 무시하고 J/K 1.0 (설명대로)",
+              rc == 0 and ns is not None and all(abs(g - w) < 1e-3 for g, w in zip(ns, want_ns)),
+              f"rc={rc} bbox={ns}")
         _ = var
 
     print("[help load — 지원하지 않는 값을 문서에 남기지 않는다]")

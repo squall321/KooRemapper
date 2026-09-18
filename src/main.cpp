@@ -284,7 +284,8 @@ static bool printLegacyHelp(ConsoleOutput& console, const std::string& helpCmd) 
         std::cout << "\n";
         console.println("Options:");
         console.println("  --ref <file>   Reference flat mesh for scaling");
-        console.println("  --no-scale     Don't scale to reference (use YAML lengths as-is)");
+        console.println("  --no-scale     Ignore the reference (--ref, reference.flat_mesh, reference.dimensions):");
+        console.println("                 I length = sum of variable_density zone lengths, J/K sizes become 1.0");
         std::cout << "\n";
         console.println("YAML Format (Flat Variable Density):");
         console.println("  type: flat  # Optional, default is flat");
