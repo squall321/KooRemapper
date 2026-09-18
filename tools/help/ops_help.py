@@ -493,7 +493,7 @@ material:
    notes=["operations[].type 는 각 op 이름(replace squeeze restack offset disconnect update generate ...)"])
 
 # ── 하중·경계·접촉 ──
-op("load", "하중·경계·접촉", "파트 면(방향/tied 선택)에 압력·힘·중력 하중 + 곡선", "하중 pressure 압력 force",
+op("load", "하중·경계·접촉", "파트 면(방향/tied/세그먼트셋 선택)에 압력·힘 하중 + 곡선", "하중 pressure 압력 force",
    "KooRemapper load <config.yaml>",
    files=boxed({"load.yaml": """model: box.k
 output: box_loaded.k
@@ -510,7 +510,8 @@ loads:
       - [0.01, 1.0]
 """}),
    cmds=[BOX_CMD, "KooRemapper load load.yaml"], outputs=["box_loaded.k"],
-   notes=["select: direction(법선과 direction 사이 angle 이내 면) | tied"])
+   notes=["mode: pressure | normal_pressure(direction 없이 노출면 전체) | force(총 힘 N 을 투영면적으로 나눠 압력화)",
+          "select: direction(법선과 direction 사이 angle 이내 면) | tied(tied 접촉 세그먼트) | set(기존 *SET_SEGMENT, set_id 필요)"])
 op("boundary", "하중·경계·접촉", "파트 면을 골라 SPC 구속 또는 강체벽", "구속 spc 경계조건 fixed",
    "KooRemapper boundary <config.yaml>",
    files=boxed({"bc.yaml": """model: box.k

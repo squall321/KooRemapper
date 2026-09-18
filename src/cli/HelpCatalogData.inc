@@ -631,7 +631,7 @@ material:
      {"KooRemapper generate box box.yaml", "KooRemapper assemble asm.yaml"},
      {},
      {"operations[].type 는 각 op 이름(replace squeeze restack offset disconnect update generate ...)"}},
-    {"load", "하중·경계·접촉", "파트 면(방향/tied 선택)에 압력·힘·중력 하중 + 곡선", "하중 pressure 압력 force", "KooRemapper load <config.yaml>",
+    {"load", "하중·경계·접촉", "파트 면(방향/tied/세그먼트셋 선택)에 압력·힘 하중 + 곡선", "하중 pressure 압력 force", "KooRemapper load <config.yaml>",
      {{"box.yaml", R"KRH(output: box.k
 lx: 20.0
 ly: 10.0
@@ -662,7 +662,7 @@ loads:
 )KRH"}},
      {"KooRemapper generate box box.yaml", "KooRemapper load load.yaml"},
      {},
-     {"select: direction(법선과 direction 사이 angle 이내 면) | tied"}},
+     {"mode: pressure | normal_pressure(direction 없이 노출면 전체) | force(총 힘 N 을 투영면적으로 나눠 압력화)", "select: direction(법선과 direction 사이 angle 이내 면) | tied(tied 접촉 세그먼트) | set(기존 *SET_SEGMENT, set_id 필요)"}},
     {"boundary", "하중·경계·접촉", "파트 면을 골라 SPC 구속 또는 강체벽", "구속 spc 경계조건 fixed", "KooRemapper boundary <config.yaml>",
      {{"box.yaml", R"KRH(output: box.k
 lx: 20.0

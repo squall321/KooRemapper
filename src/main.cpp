@@ -1083,7 +1083,7 @@ static bool printLegacyHelp(ConsoleOutput& console, const std::string& helpCmd) 
     } else if (helpCmd == "load") {
         console.println("Usage: KooRemapper load <config.yaml>");
         std::cout << "\n";
-        console.println("Apply loads (force/pressure/gravity) to parts from YAML config.");
+        console.println("Apply loads (pressure/normal_pressure/force) to parts from YAML config.");
         console.println("Inserts *LOAD_*, *DEFINE_CURVE, *SET_* keywords.");
         std::cout << "\n";
         console.println("YAML Config Format:");
@@ -1091,20 +1091,25 @@ static bool printLegacyHelp(ConsoleOutput& console, const std::string& helpCmd) 
         console.println("  output: mesh_loaded.k");
         console.println("  loads:");
         console.println("    - part: 1");
-        console.println("      mode: pressure          # pressure | force | gravity");
-        console.println("      value: 1.0              # Load magnitude");
-        console.println("      direction: [0, 0, 1]    # Load direction vector");
-        console.println("      select: direction        # direction | tied | all");
+        console.println("      mode: pressure          # pressure | normal_pressure | force");
+        console.println("      value: 1.0              # Load magnitude ([MPa], force mode: [N])");
+        console.println("      direction: [0, 0, 1]    # Load direction vector (normal_pressure 외 필수)");
+        console.println("      select: direction        # direction | tied | set");
         console.println("      angle: 45.0             # Face selection angle tolerance");
         console.println("      curve:                   # Optional time-load curve");
         console.println("        - [0.0, 0.0]");
         console.println("        - [0.001, 1.0]");
         console.println("        - [0.01, 1.0]");
         std::cout << "\n";
+        console.println("Load modes:");
+        console.println("  pressure         *LOAD_SEGMENT_SET with value as pressure");
+        console.println("  normal_pressure  Same, but no direction needed (all exposed faces)");
+        console.println("  force            Total force [N] spread over projected area");
+        std::cout << "\n";
         console.println("Select modes:");
-        console.println("  direction  Face normals within angle of direction vector");
-        console.println("  tied       Faces participating in tied contact");
-        console.println("  all        All exposed faces of the part");
+        console.println("  direction  Face normals within angle of direction vector (default)");
+        console.println("  tied       Faces participating in tied contact (contact_id: optional)");
+        console.println("  set        Existing *SET_SEGMENT (set_id: required)");
     } else if (helpCmd == "boundary") {
         console.println("Usage: KooRemapper boundary <config.yaml>");
         std::cout << "\n";
