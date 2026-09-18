@@ -15,6 +15,8 @@
   - matdb 의 damping_preset 설명은 '키를 빼면 감쇠 변화 없음' 이라고 했지만, 매칭된 DB 물성의
     감쇠 카드는 프리셋과 무관하게 항상 삽입되고 묵은 *DAMPING_PART_* 제거는 값이 있을 때만
     일어난다 — 프리셋 없이 두 번 돌리면 감쇠 카드가 중복된다.
+  - assemble 노트 5 는 database 도 config 폴더 기준이라고 했지만, database 만 슬래시 없는
+    파일명일 때만 config 폴더 기준이고 폴더가 붙은 상대경로는 CWD 기준이라 rc=1 로 죽는다.
 """
 import json
 import os
@@ -305,6 +307,30 @@ def main():
     check("카탈로그 damping_preset desc 가 삽입은 항상·값 주면 strip 을 적는다",
           "whether or not this key is present" in dp and "strips pre-existing *DAMPING_PART_*" in dp,
           dp[:300])
+
+    print("[matdb database 경로 — 슬래시가 있으면 CWD 기준]")
+    sub = os.path.join(d, "dbsub")
+    os.makedirs(os.path.join(sub, "mats"), exist_ok=True)
+    shutil.copy2(os.path.join(md, "smartphone_stack.k"), sub)
+    shutil.copy2(os.path.join(md, "material_db.json"), os.path.join(sub, "mats"))
+    shutil.copy2(os.path.join(md, "material_db.json"), os.path.join(sub, "mdb.json"))
+    open(os.path.join(sub, "slash.yaml"), "w").write(
+        matdb_yaml("smartphone_stack.k", "out_slash.k").replace(
+            "database: material_db.json", "database: mats/material_db.json"))
+    open(os.path.join(sub, "noslash.yaml"), "w").write(
+        matdb_yaml("smartphone_stack.k", "out_noslash.k").replace(
+            "database: material_db.json", "database: mdb.json"))
+    # 설정 폴더가 아닌 곳(d)에서 실행한다 — 노트 5 가 말하는 상황
+    rc, out = run(binary, d, "matdb", "dbsub/slash.yaml")
+    check("database: 'mats/material_db.json' (슬래시 있음) 은 CWD 기준이라 rc=1",
+          rc == 1 and "Cannot load database from: mats/material_db.json" in out, out[-200:])
+    rc, out = run(binary, d, "matdb", "dbsub/noslash.yaml")
+    check("database: 'mdb.json' (슬래시 없음) 은 YAML 폴더 기준이라 rc=0",
+          rc == 0 and "Loaded" in out, out[-200:])
+    check("assemble 노트 5 가 database 를 일반 목록에서 빼고 예외로 적는다",
+          "database, dynain" not in notes
+          and "**`database` (matdb) is the one exception**" in notes,
+          notes[:200])
 
     # ── 7. MCP 도구 수는 소스에서 도출된다 ──────────────────────────────────
     print("[MCP 도구 수]")
