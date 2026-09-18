@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <limits>
 #include <cmath>
+#include <cstdio>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -2110,6 +2111,57 @@ bool ModelAssembler::applyBend(const BendOperation& op, double E, double nu,
     return true;
 }
 
+// 비유한 값(nan/inf) 그물 — 단독 명령(standalone_ops.cpp)과 같은 규칙을 쓰되 '쓰기 전' 에 본다.
+// 덱 본문은 writeOutput 안에서 ostringstream 으로 다 만들어진 뒤에야 파일로 나가므로, 그 문자열을
+// 그대로 훑으면 기존 파일을 망가뜨리지 않고 막을 수 있다. 숫자만 들어가는 블록(*NODE·*ELEMENT·
+// *INITIAL)만 본다 — 제목 줄이 있는 키워드는 'Nan...' 같은 이름을 값으로 오해할 수 있다.
+static bool ma_textHasNonFinite(const std::string& text, const std::string& label, std::string& where) {
+    std::istringstream src(text);
+    bool numericBlock = false;
+    int lineNo = 0;
+    std::string ln;
+    while (std::getline(src, ln)) {
+        ++lineNo;
+        if (!ln.empty() && ln.back() == '\r') ln.pop_back();
+        if (!ln.empty() && ln[0] == '*') {
+            numericBlock = (ln.compare(0, 5, "*NODE") == 0 ||
+                            ln.compare(0, 8, "*ELEMENT") == 0 ||
+                            ln.compare(0, 8, "*INITIAL") == 0);
+            continue;
+        }
+        if (!numericBlock || ln.empty() || ln[0] == '$') continue;
+        // 숫자 줄에는 nan/inf 의 글자가 없다 — 빠른 걸러내기(큰 덱에서 줄마다 strtod 하지 않도록)
+        if (ln.find_first_of("nNiI") == std::string::npos) continue;
+        std::istringstream iss(ln);
+        std::string tok;
+        while (iss >> tok) {
+            const char* begin = tok.c_str();
+            char* end = nullptr;
+            double v = std::strtod(begin, &end);
+            if (end == begin + tok.size() && !std::isfinite(v)) {
+                where = label + ":" + std::to_string(lineNo) + " '" + tok + "'";
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// dynain 은 DynainWriter 가 직접 파일로 쓰는 갈래가 있어 문자열을 훑을 수 없다. 원본 값을 본다.
+static bool ma_resultsHaveNonFinite(const std::vector<ElementResult>& results) {
+    auto badTensor = [](const auto& t) {
+        return !std::isfinite(t.xx) || !std::isfinite(t.yy) || !std::isfinite(t.zz) ||
+               !std::isfinite(t.xy) || !std::isfinite(t.yz) || !std::isfinite(t.xz);
+    };
+    for (const auto& er : results) {
+        if (!er.isValid) continue;
+        if (badTensor(er.stress) || badTensor(er.strain)) return true;
+        if (er.isShell && (badTensor(er.stressTop) || badTensor(er.stressBottom) ||
+                           !std::isfinite(er.epsTop) || !std::isfinite(er.epsBottom))) return true;
+    }
+    return false;
+}
+
 bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
     std::string outputFile = outputPrefix + ".k";
     std::string dynainFile = outputPrefix + ".dynain";
@@ -2675,6 +2727,49 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
             }
         }
         continueMainLoop:;
+    }
+
+    // 비유한 값(nan/inf)이 든 덱은 LS-DYNA 가 읽지 못한다 — 쓰기 전에 막는다(D7).
+    // 단독 명령과 같은 결말(에러 + 결과 파일 없음 + rc=1)이면서, 아직 아무것도 쓰지 않았으므로
+    // 같은 경로에 있던 예전 출력 파일이 망가지지도 않는다.
+    {
+        std::vector<std::string> planned{outputFile};
+        bool writesDynain = (!accumulatedResults_.empty() && !dynainEmbed_);
+        if (writesDynain) planned.push_back(dynainFile);
+        for (const auto& igaf : igaFiles_) planned.push_back(igaf.fullpath);
+
+        std::string where;
+        bool bad = ma_textHasNonFinite(output.str(), outputFile, where);
+        if (!bad && writesDynain && ma_resultsHaveNonFinite(accumulatedResults_)) {
+            bad = true;
+            where = dynainFile + " (초기 응력/변형률)";
+        }
+        if (!bad) {
+            for (const auto& igaf : igaFiles_) {
+                if (ma_textHasNonFinite(igaf.content, igaf.fullpath, where)) { bad = true; break; }
+            }
+        }
+        if (bad) {
+            // 이번 실행이 쓰려던 경로에 남아 있는 지난 실행 결과는 치운다. 그대로 두면 사용자가
+            // 옛 .k/.dynain 을 이번 결과로 오해한다(단독 명령의 nan 정리와 같은 끝 상태다).
+            std::string stale;
+            for (const auto& f : planned) {
+                if (std::remove(f.c_str()) == 0) {
+                    if (!stale.empty()) stale += ", ";
+                    stale += f;
+                }
+            }
+            std::string list;
+            for (const auto& f : planned) { if (!list.empty()) list += ", "; list += f; }
+            errorMessage_ = "결과에 유한하지 않은 값(nan/inf)이 있습니다: " + where +
+                            " — 출력 파일을 쓰지 않았습니다: " + list +
+                            " / non-finite value in the result; no output written: " + list;
+            if (!stale.empty()) {
+                errorMessage_ += " (같은 경로의 지난 결과를 지웠습니다: " + stale +
+                                 " / removed stale files: " + stale + ")";
+            }
+            return false;
+        }
     }
 
     // Write output file
