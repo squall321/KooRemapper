@@ -18,6 +18,7 @@
 #include "analysis/MaterialModel.h"
 #include "validation/ElementQualityChecker.h"
 #include "validation/IntersectionDetector.h"
+#include "validation/MaterialCardValidator.h"
 #include "util/ContactKeywords.h"
 #include "util/YamlComment.h"          // yamlResolvePath — YAML 안 상대 경로 공통 규칙
 #include "commands/contact_helpers.h"   // ct_getPreset — 단독 contact 와 같은 짧은 이름 표
@@ -32,6 +33,7 @@
 #include <cstdio>
 #include <unordered_map>
 #include <unordered_set>
+#include <set>
 
 // Knowledge graph (lat.md):
 //   @lat: [[modules/assembly]]
@@ -728,6 +730,25 @@ bool matCardLineMidField(const std::string& line, size_t lineStart, MatMidField&
     size_t tokEnd = line.find_first_of(" \t", first);
     if (tokEnd == std::string::npos) tokEnd = line.size();
     size_t next = line.find_first_not_of(" \t", tokEnd);
+    if (first < 10 && tokEnd > 10) {
+        // 토큰이 10열을 넘어간다 = 다음 값이 MID 칸에 공백 없이 붙어 있다
+        // ('        902.3300E-09'). LS-DYNA 고정폭에서 MID 는 1~10열이므로 거기까지만 덮는다 —
+        // 토큰 끝까지 덮으면 뒤 필드(RO)가 통째로 지워졌다.
+        // 다만 10열 앞이 정수일 때만 그렇게 본다. '@MID@'·'MAT01' 처럼 10열을 걸치는 자리표시·라벨은
+        // 붙은 게 아니라 한 칸이므로 토큰 끝까지가 MID 칸이다.
+        size_t headEnd = line.find_last_not_of(" \t", 9);
+        if (headEnd != std::string::npos && headEnd >= first) {
+            std::string head = line.substr(first, headEnd - first + 1);
+            bool allDigit = std::all_of(head.begin(), head.end(),
+                                        [](unsigned char c) { return std::isdigit(c) != 0; });
+            if (allDigit) {
+                out.start = lineStart;
+                out.width = 10;
+                out.label = head;
+                return true;
+            }
+        }
+    }
     bool fieldTo10 = tokEnd <= 10 && (next == std::string::npos || next >= 10);
     out.start = lineStart;
     out.width = fieldTo10 ? std::min<size_t>(10, line.size()) : tokEnd;
@@ -735,36 +756,299 @@ bool matCardLineMidField(const std::string& line, size_t lineStart, MatMidField&
     return true;
 }
 
+// MID 칸에 들어갈 수 있는 토큰인가 — 정수이거나 자리표시·라벨(@MID@·MID001·MAT01).
+// '40.0'·'2.33E-09' 같은 실수는 MID 가 아니다. 제목 줄이 빠진 카드에서 둘째 데이터 줄을
+// MID 칸으로 잘못 잡은 경우를 여기서 걸러 조용한 물성 손상을 막는다.
+bool matCardMidTokenValid(const std::string& tok) {
+    if (tok.empty()) return false;
+    bool allDigit = true;
+    for (char c : tok) {
+        if (!std::isdigit(static_cast<unsigned char>(c))) { allDigit = false; break; }
+    }
+    if (allDigit) return true;
+    if (std::isdigit(static_cast<unsigned char>(tok[0]))) return false;  // 숫자로 시작하는데 정수가 아니면 값이다
+    for (char c : tok) {
+        if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_' && c != '@') return false;
+    }
+    return true;
+}
+
+// 카드 한 줄 — 본문(개행·CR 뺀 것)과 카드 안 오프셋
+struct MatCardLine {
+    std::string text;
+    size_t start = 0;
+};
+
+std::vector<MatCardLine> matCardSplitLines(const std::string& card) {
+    std::vector<MatCardLine> lines;
+    size_t lineStart = 0;
+    while (lineStart <= card.size()) {
+        size_t lineEnd = card.find('\n', lineStart);
+        bool last = (lineEnd == std::string::npos);
+        if (last) lineEnd = card.size();
+        std::string line = card.substr(lineStart, lineEnd - lineStart);
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        lines.push_back({line, lineStart});
+        if (last) break;
+        lineStart = lineEnd + 1;
+    }
+    return lines;
+}
+
+// 데이터 줄의 칸 수 — 콤마 자유 형식과 고정폭 공백 분리 둘 다 센다.
+// '칸이 하나뿐' 이면 데이터 줄이 아니라 제목 줄이다(제목만 있고 데이터 줄이 없는 카드를 가린다).
+size_t matCardCountFields(const std::string& line) {
+    size_t n = 0;
+    std::string tok;
+    auto flush = [&]() { if (!tok.empty()) { ++n; tok.clear(); } };
+    for (char c : line) {
+        if (c == '$') break;
+        if (c == ' ' || c == '\t' || c == ',' || c == '\r') { flush(); continue; }
+        tok += c;
+    }
+    flush();
+    return n;
+}
+
+// *MAT 블록 하나 — 키워드 줄·첫 데이터 줄·제목 줄이 빠졌는지
+struct MatCardBlock {
+    size_t keywordLine = 0;
+    size_t dataLine = 0;
+    bool titleMissing = false;
+};
+
+// *MAT 블록마다 키워드 줄·첫 데이터 줄·제목 줄 누락 여부.
+// LS-DYNA 는 *MAT_…_TITLE 다음 첫 줄을 제목으로 읽는다 — 그 줄이 비어 있어도 제목이다.
+// 그래서 내용 줄을 셀 때 빈 줄·공백만 있는 줄도 제목 줄 후보로 넣고 '$' 주석만 뺀다.
+// 블록 끝의 빈 줄은 카드 끝 개행이라 세지 않는다.
+// 내용 줄이 두 줄 이상이면 첫 줄이 제목이고 그 뒤 첫 비어 있지 않은 줄이 데이터 줄이다.
+// 한 줄뿐이면 제목 줄이 빠진 것이고 그 줄이 데이터 줄이다 — '제목처럼 보이는지' 로 나누면
+// '7075-T6 aluminum' 같은 진짜 제목에서 틀린다. 예전엔 무조건 한 줄을 제목으로 먹어
+// 제목 없는 카드의 유일한 데이터 줄이 사라지고 MID 0 이 덱에 써졌다.
+std::vector<MatCardBlock> matFindDataLines(const std::vector<MatCardLine>& lines) {
+    auto isBlank = [](const std::string& s) { return s.find_first_not_of(" \t") == std::string::npos; };
+    std::vector<MatCardBlock> out;
+    for (size_t i = 0; i < lines.size(); ++i) {
+        size_t first = lines[i].text.find_first_not_of(" \t");
+        if (first == std::string::npos || lines[i].text[first] != '*') continue;
+        std::string up = lines[i].text.substr(first);
+        for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        if (up.rfind("*MAT", 0) != 0) continue;
+        bool isTitle = up.find("_TITLE") != std::string::npos;
+        std::vector<size_t> content;
+        for (size_t j = i + 1; j < lines.size(); ++j) {
+            size_t f = lines[j].text.find_first_not_of(" \t");
+            if (f != std::string::npos && lines[j].text[f] == '$') continue;
+            if (f != std::string::npos && lines[j].text[f] == '*') break;
+            content.push_back(j);
+        }
+        while (!content.empty() && isBlank(lines[content.back()].text)) content.pop_back();
+        if (content.empty()) continue;
+        MatCardBlock b;
+        b.keywordLine = i;
+        b.titleMissing = isTitle && content.size() < 2;
+        size_t from = (isTitle && !b.titleMissing) ? 1 : 0;
+        bool found = false;
+        for (size_t k = from; k < content.size(); ++k) {
+            if (isBlank(lines[content[k]].text)) continue;
+            b.dataLine = content[k];
+            found = true;
+            break;
+        }
+        if (!found) continue;
+        out.push_back(b);
+    }
+    return out;
+}
+
 // 카드 안 *MAT 블록마다 첫 데이터 줄의 MID 칸. *MAT_…_TITLE 은 제목 줄을 건너뛴다.
 // (*MAT_ADD_EROSION 처럼 같은 MID 를 가리키는 뒤 블록도 함께 잡아야 참조가 끊기지 않는다)
 std::vector<MatMidField> matCardFindMidFields(const std::string& card) {
+    auto lines = matCardSplitLines(card);
     std::vector<MatMidField> fields;
-    bool inMat = false;
-    bool titlePending = false;
-    size_t lineStart = 0;
-    while (lineStart < card.size()) {
-        size_t lineEnd = card.find('\n', lineStart);
-        if (lineEnd == std::string::npos) lineEnd = card.size();
-        std::string line = card.substr(lineStart, lineEnd - lineStart);
-        if (!line.empty() && line.back() == '\r') line.pop_back();
-        size_t first = line.find_first_not_of(" \t");
-        if (first != std::string::npos && line[first] != '$') {
-            if (line[first] == '*') {
-                std::string up = line.substr(first);
-                for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-                inMat = up.rfind("*MAT", 0) == 0;
-                titlePending = inMat && up.find("_TITLE") != std::string::npos;
-            } else if (inMat && titlePending) {
-                titlePending = false;
-            } else if (inMat) {
-                MatMidField f;
-                if (matCardLineMidField(line, lineStart, f)) fields.push_back(f);
-                inMat = false;
-            }
-        }
-        lineStart = lineEnd + 1;
+    for (const auto& b : matFindDataLines(lines)) {
+        MatMidField f;
+        if (matCardLineMidField(lines[b.dataLine].text, lines[b.dataLine].start, f)) fields.push_back(f);
     }
     return fields;
+}
+
+// 그 카드의 첫 *MAT 블록에서 제목으로 먹힌 줄 — 데이터 줄 앞의 마지막 비주석 줄. 없으면 빈 문자열.
+// '제목 줄이 없다' 고 단정하는 대신 무엇을 제목으로 읽었는지 원문으로 보여 주려고 쓴다.
+std::string matCardTitleLineOf(const std::string& card) {
+    auto lines = matCardSplitLines(card);
+    auto blocks = matFindDataLines(lines);
+    if (blocks.empty()) return "";
+    const auto& b = blocks.front();
+    for (size_t j = b.dataLine; j-- > b.keywordLine + 1;) {
+        size_t f = lines[j].text.find_first_not_of(" \t");
+        if (f != std::string::npos && lines[j].text[f] == '$') continue;
+        return lines[j].text;
+    }
+    return "";
+}
+
+// 제목 줄이 빠진 *MAT_…_TITLE 블록에 제목 줄을 실제로 채운다.
+// 경고만 하고 원문을 그대로 내보내면 덱은 여전히 깨진 채다 — LS-DYNA 도 이 저장소의 리더도
+// (KFileReader.cpp 'Skip title line for _TITLE variants') _TITLE 다음 첫 줄을 제목으로 먹으므로
+// 제목 줄이 없으면 데이터 줄이 먹혀 그 재질이 등록되지 않는다(*PART 의 mid 칸만 고쳐도 소용없다).
+struct MatCardTitleFix {
+    std::string card;           // 제목 줄을 채운 카드
+    bool filled = false;        // 한 군데라도 채웠는가
+    bool noDataLine = false;    // *MAT 블록에 데이터 줄이 아예 없다
+    bool hasMatKeyword = false; // 카드에 *MAT 키워드 줄이 있기는 한가
+    bool titleOnly = false;     // 제목 줄만 있고 데이터 줄이 없다
+    std::string offendingLine;  // titleOnly 일 때 그 줄 원문
+};
+
+MatCardTitleFix matCardFillMissingTitles(const std::string& card, const std::string& title) {
+    MatCardTitleFix out;
+    out.card = card;
+    auto lines = matCardSplitLines(card);
+    for (const auto& l : lines) {
+        size_t f = l.text.find_first_not_of(" \t");
+        if (f == std::string::npos || l.text[f] != '*') continue;
+        std::string up = l.text.substr(f, 4);
+        for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        if (up == "*MAT") { out.hasMatKeyword = true; break; }
+    }
+    auto blocks = matFindDataLines(lines);
+    if (blocks.empty()) { out.noDataLine = true; return out; }
+    // '*MAT_…_TITLE' + 'JC_Steel' 처럼 제목만 있고 데이터 줄이 없는 카드는 그 라벨을 MID 로 덮어쓰면
+    // 사용자가 쓴 제목이 사라지고 데이터 줄 없는 *MAT 이 덱에 남는다 — 채우지 말고 멈춘다.
+    for (const auto& b : blocks) {
+        if (!b.titleMissing) continue;
+        if (matCardCountFields(lines[b.dataLine].text) < 2) {
+            out.titleOnly = true;
+            out.offendingLine = lines[b.dataLine].text;
+            return out;
+        }
+    }
+    for (auto it = blocks.rbegin(); it != blocks.rend(); ++it) {
+        if (!it->titleMissing) continue;
+        size_t at = lines[it->keywordLine + 1].start;  // 키워드 줄 다음 줄 머리
+        bool crlf = at >= 2 && out.card[at - 2] == '\r';
+        out.card.insert(at, title + (crlf ? "\r\n" : "\n"));
+        out.filled = true;
+    }
+    return out;
+}
+
+// 모델이 이미 쓰고 있는 MID 모음. 사용자가 재질 카드의 MID 칸에 숫자를 직접 적었을 때
+// 그 번호를 그대로 써도 되는지(=충돌하지 않는지) 보려고 쓴다. 파서가 모르는 *MAT 종류도
+// 번호는 차지하므로 raw 줄을 직접 훑는다.
+std::set<int> matCollectUsedMids(const std::vector<std::string>& rawLines) {
+    std::vector<MatCardLine> lines;
+    lines.reserve(rawLines.size());
+    for (const auto& raw : rawLines) {
+        std::string line = raw;
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        lines.push_back({line, 0});
+    }
+    std::set<int> used;
+    for (const auto& b : matFindDataLines(lines)) {
+        MatMidField f;
+        if (!matCardLineMidField(lines[b.dataLine].text, 0, f)) continue;
+        try {
+            int v = std::stoi(f.label);
+            if (v > 0) used.insert(v);
+        } catch (...) {}
+    }
+    return used;
+}
+
+// 덱 한 줄을 공백·콤마로 나눈 칸들('$' 뒤는 주석)
+std::vector<std::string> rsTokens(const std::string& line) {
+    std::vector<std::string> out;
+    std::string tok;
+    auto flush = [&]() { if (!tok.empty()) { out.push_back(tok); tok.clear(); } };
+    for (char c : line) {
+        if (c == '$') break;
+        if (c == ' ' || c == '\t' || c == ',' || c == '\r') { flush(); continue; }
+        tok += c;
+    }
+    flush();
+    return out;
+}
+
+// i 번째 칸이 정수면 그 값, 아니면 -1
+int rsIntField(const std::vector<std::string>& toks, size_t i) {
+    if (i >= toks.size() || toks[i].empty()) return -1;
+    for (char c : toks[i]) if (!std::isdigit(static_cast<unsigned char>(c))) return -1;
+    try { return std::stoi(toks[i]); } catch (...) { return -1; }
+}
+
+// 원본 덱에서 그 PID 를 가리키는 키워드 — restack 이 target_pid 를 비운 뒤에도 남는 참조를 찾는다.
+// 층을 나누면 요소는 새 PID 로 옮겨 가고 원래 파트는 요소 0 개로 남는데, 사용자가 걸어 둔
+// *SET_PART_LIST·*CONTACT 는 그대로 옛 PID 를 가리켜 tied 조건이 아무 일도 하지 않는 덱이 나갔다.
+// 자리를 정확히 아는 것만 센다 — *SET_PART* 의 구성원 목록과 *CONTACT_* 카드 1 의
+// SSID/MSID(SSTYP/MSTYP 가 3=파트, 2=파트 집합일 때). 그 밖의 키워드는 칸 뜻이 키워드마다 달라
+// 숫자만 보고 세면 엉뚱한 경고가 되므로 건드리지 않는다.
+std::vector<std::string> restackFindPidReferences(const std::vector<std::string>& rawLines, int pid) {
+    auto keywordOf = [](const std::string& line) -> std::string {
+        size_t f = line.find_first_not_of(" \t");
+        if (f == std::string::npos || line[f] != '*') return "";
+        std::string up = line.substr(f);
+        while (!up.empty() && (up.back() == '\r' || up.back() == ' ' || up.back() == '\t')) up.pop_back();
+        for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        return up;
+    };
+    auto blockData = [&](size_t kwLine) {
+        std::vector<std::string> data;
+        for (size_t j = kwLine + 1; j < rawLines.size(); ++j) {
+            size_t g = rawLines[j].find_first_not_of(" \t");
+            if (g == std::string::npos) continue;
+            if (rawLines[j][g] == '*') break;
+            if (rawLines[j][g] == '$') continue;
+            data.push_back(rawLines[j]);
+        }
+        return data;
+    };
+
+    std::vector<std::string> refs;
+    std::set<int> partSets;  // 그 PID 를 담은 파트 집합
+    for (size_t i = 0; i < rawLines.size(); ++i) {
+        std::string kw = keywordOf(rawLines[i]);
+        if (kw.rfind("*SET_PART", 0) != 0) continue;
+        auto data = blockData(i);
+        size_t k = 0;
+        if (kw.find("_TITLE") != std::string::npos && k < data.size()) ++k;  // 제목 카드
+        if (k >= data.size()) continue;
+        int sid = rsIntField(rsTokens(data[k]), 0);
+        bool found = false;
+        for (size_t m = k + 1; m < data.size() && !found; ++m)
+            for (const auto& t : rsTokens(data[m]))
+                if (rsIntField({t}, 0) == pid) { found = true; break; }
+        if (!found) continue;
+        partSets.insert(sid);
+        refs.push_back(kw + (sid > 0 ? " " + std::to_string(sid) : ""));
+    }
+    for (size_t i = 0; i < rawLines.size(); ++i) {
+        std::string kw = keywordOf(rawLines[i]);
+        if (kw.rfind("*CONTACT", 0) != 0) continue;
+        auto data = blockData(i);
+        size_t k = 0;
+        // *CONTACT_..._ID 는 CID+제목 카드가 먼저 온다
+        if (kw.size() >= 3 && kw.compare(kw.size() - 3, 3, "_ID") == 0 && k < data.size()) ++k;
+        if (k >= data.size()) continue;
+        auto t = rsTokens(data[k]);
+        int ssid = rsIntField(t, 0), msid = rsIntField(t, 1);
+        int sstyp = rsIntField(t, 2), mstyp = rsIntField(t, 3);
+        std::string how;
+        if (sstyp == 3 && ssid == pid) how = "slave part";
+        else if (mstyp == 3 && msid == pid) how = "master part";
+        else if (sstyp == 2 && partSets.count(ssid)) how = "slave part set " + std::to_string(ssid);
+        else if (mstyp == 2 && partSets.count(msid)) how = "master part set " + std::to_string(msid);
+        if (!how.empty()) refs.push_back(kw + " (" + how + ")");
+    }
+    return refs;
+}
+
+// 카드의 MID 칸이 숫자면 그 값, 아니면 0(자리표시·라벨)
+int matCardLiteralMid(const std::string& label) {
+    if (label.empty()) return 0;
+    for (char c : label) if (!std::isdigit(static_cast<unsigned char>(c))) return 0;
+    try { return std::stoi(label); } catch (...) { return 0; }
 }
 
 // label 이 같은 MID 칸을 value 로 오른쪽 정렬 치환. 뒤 칸부터 바꿔 앞 오프셋을 보존한다.
@@ -934,6 +1218,83 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
                 errorMessage_ = "restack: layers[" + std::to_string(li) +
                                 "]: unsupported element_type '" + lt +
                                 "' (allowed: solid, tshell, shell)";
+                return false;
+            }
+        }
+    }
+
+    // 0b. 제목 줄이 빠진 *MAT_…_TITLE 블록에 제목 줄을 채운다.
+    //     경고만 하고 원문을 그대로 내보내면 *PART 의 mid 칸만 고쳐지고 *MAT 블록은 여전히 한 줄씩
+    //     밀려 읽혀 그 재질이 등록되지 않는다(LS-DYNA 도, 이 저장소의 리더도 그렇다).
+    //     제목만 있고 데이터 줄이 없는 카드는 채우지 말고 거절한다 — 그 라벨을 MID 로 덮어쓰면
+    //     사용자가 쓴 제목이 조용히 사라진다.
+    std::vector<std::string> layerCards(op.layers.size());
+    for (size_t li = 0; li < op.layers.size(); ++li) {
+        layerCards[li] = op.layers[li].materialCard;
+        if (layerCards[li].empty()) continue;
+        std::string fillTitle = op.layers[li].title.empty()
+            ? ("Restack Layer " + std::to_string(li + 1))
+            : op.layers[li].title;
+        auto fix = matCardFillMissingTitles(layerCards[li], fillTitle);
+        if (fix.noDataLine) {
+            if (!fix.hasMatKeyword) {
+                // '|-'·'|2' 같은 블록 표기가 값으로 들어온 경우가 여기 걸린다 — 무엇을 카드로 읽었는지 보여 준다
+                std::string firstLine = layerCards[li].substr(0, layerCards[li].find('\n'));
+                errorMessage_ = "restack: layer " + std::to_string(li + 1) +
+                    " material_card has no *MAT keyword line (read as: '" + firstLine + "')";
+            } else {
+                errorMessage_ = "restack: layer " + std::to_string(li + 1) +
+                    " material_card has a *MAT keyword but no data line"
+                    " - add the material data line (a keyword-only card has no MID field)";
+            }
+            return false;
+        }
+        if (fix.titleOnly) {
+            errorMessage_ = "restack: layer " + std::to_string(li + 1) +
+                " material_card has only a title line ('" + fix.offendingLine +
+                "') and no data line - add the material data line";
+            return false;
+        }
+        layerCards[li] = fix.card;
+        if (fix.filled) {
+            infoMessages.push_back("  [WARN] Restack layer " + std::to_string(li + 1) +
+                ": *MAT_..._TITLE card had no title line -> filled it with '" + fillTitle +
+                "' (the line after *MAT_..._TITLE is read as the title, so the data line was being eaten)");
+        }
+    }
+
+    // 0c. 층 재질 카드도 offset·CZM 과 같은 검증을 거친다 — 예전엔 restack 만 빠져
+    //     깨진 카드가 검사 없이 그대로 덱으로 나갔다. 다만 이 검증기는 자문용이다 —
+    //     칸 수·값 범위 지적은 [WARN] 로만 내린다. *MAT_ELASTIC_FLUID(E·PR 칸이 0 인 게 정상),
+    //     PR 생략(LS-DYNA 기본값), PR=0 처럼 합법인 카드까지 rc=1 로 막으면
+    //     사용자가 임의의 물성 카드를 넣는 restack 이 아예 못 쓰인다.
+    //     구조가 깨진 경우('*MAT 키워드 없음'·'데이터 줄 없음')만 rc=1 로 남긴다.
+    {
+        MaterialCardValidator validator;
+        auto isStructural = [](const std::string& e) {
+            return e.find("No valid *MAT_ keyword found") != std::string::npos ||
+                   e.find("No data line found") != std::string::npos ||
+                   e.find("Material card is empty") != std::string::npos ||
+                   e.find("Material card has no content") != std::string::npos;
+        };
+        for (size_t li = 0; li < op.layers.size(); ++li) {
+            if (layerCards[li].empty()) continue;
+            auto result = validator.validate(layerCards[li]);
+            std::vector<std::string> hard;
+            std::vector<std::string> soft = result.warnings;
+            for (const auto& e : result.errors) (isStructural(e) ? hard : soft).push_back(e);
+            for (const auto& w : soft) {
+                // '검증기가 모르는 종류' 는 카드가 아니라 검증기 사정이라 사용자가 할 일이 없다.
+                // 층이 열 개가 넘는 적층에서는 이 한 줄이 진짜 경고를 덮는다.
+                if (w.rfind("Unknown material type", 0) == 0) continue;
+                infoMessages.push_back("  [WARN] Restack layer " + std::to_string(li + 1) +
+                                       " material_card: " + w);
+            }
+            if (!hard.empty()) {
+                std::string msg = "restack: layer " + std::to_string(li + 1) +
+                                  " material_card validation failed:";
+                for (const auto& e : hard) msg += "\n  - " + e;
+                errorMessage_ = msg;
                 return false;
             }
         }
@@ -1140,8 +1501,39 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
     std::map<std::pair<std::string, std::string>, int> midMapping;             // (자리표시, 카드) → MID
     std::vector<std::map<std::string, int>> layerMidMapping(op.layers.size()); // 층별 자리표시 → MID
     std::map<std::string, std::string> firstCardOfPlaceholder;
+
+    // 카드의 MID 칸에 숫자를 직접 적었으면 그 번호를 그대로 쓴다(사용자가 의도한 MID).
+    // 그래서 (1) 모델이 이미 쓰는 번호와 (2) 어느 층이든 카드에 적어 둔 숫자 MID 를 먼저 모아 두고,
+    // 자리표시(MIDnnn)·라벨 카드에는 그 둘을 피해서 새 번호를 준다.
+    std::set<int> usedMids = matCollectUsedMids(rawLines_);
+    for (const auto& [mid, mat] : baseMesh_.materials) {
+        (void)mat;
+        if (mid > 0) usedMids.insert(mid);
+    }
+    std::set<int> reservedMids;
     for (size_t li = 0; li < op.layers.size(); ++li) {
-        const auto& card = op.layers[li].materialCard;
+        if (restackHasMidPlaceholder(layerCards[li])) continue;
+        auto fields = matCardFindMidFields(layerCards[li]);
+        if (fields.empty()) continue;
+        int lit = matCardLiteralMid(fields.front().label);
+        if (lit > 0 && !usedMids.count(lit)) reservedMids.insert(lit);
+    }
+    // maxMaterialId_ 가 INT_MAX 면 ++ 가 부호 오버플로(UB)라 음수 MID 가 찍혔다 — 번호가 바닥나면
+    // 조용히 이상한 덱을 내지 말고 실패로 알린다.
+    bool midAllocExhausted = false;
+    auto allocMid = [&]() -> int {
+        while (maxMaterialId_ < std::numeric_limits<int>::max()) {
+            ++maxMaterialId_;
+            if (usedMids.count(maxMaterialId_) || reservedMids.count(maxMaterialId_)) continue;
+            usedMids.insert(maxMaterialId_);
+            return maxMaterialId_;
+        }
+        midAllocExhausted = true;
+        return 0;
+    };
+
+    for (size_t li = 0; li < op.layers.size(); ++li) {
+        const auto& card = layerCards[li];
         // Scan for MIDxxx patterns
         size_t pos = 0;
         while ((pos = card.find("MID", pos)) != std::string::npos) {
@@ -1154,13 +1546,13 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
                 auto key = std::make_pair(placeholder, card);
                 auto it = midMapping.find(key);
                 if (it == midMapping.end()) {
-                    it = midMapping.emplace(key, ++maxMaterialId_).first;
+                    it = midMapping.emplace(key, allocMid()).first;
                     auto [fit, fresh] = firstCardOfPlaceholder.emplace(placeholder, card);
                     if (!fresh && fit->second != card) {
                         infoMessages.push_back("  Restack layer " + std::to_string(li + 1) +
                                                ": material label '" + placeholder +
                                                "' reused with a different card -> separate MID " +
-                                               std::to_string(maxMaterialId_));
+                                               std::to_string(it->second));
                     }
                 }
                 layerMidMapping[li][placeholder] = it->second;
@@ -1178,21 +1570,67 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
     std::vector<std::vector<MatMidField>> labelFields(op.layers.size());
     std::vector<std::string> labelKeys(op.layers.size());
     for (size_t li = 0; li < op.layers.size(); ++li) {
-        const auto& card = op.layers[li].materialCard;
+        const auto& card = layerCards[li];
         if (restackHasMidPlaceholder(card)) continue;
         labelFields[li] = matCardFindMidFields(card);
-        if (labelFields[li].empty()) continue;
+        // MID 칸을 못 찾았으면 0 을 찍지 말고 멈춘다 — 예전엔 조용히 mid=0 인 *PART 가 나가고
+        // 둘째 층부터 재질 카드가 '이미 씀' 으로 버려졌다.
+        if (labelFields[li].empty()) {
+            errorMessage_ = "Restack layer " + std::to_string(li + 1) +
+                ": no *MAT data line found in material_card - cannot determine the MID field";
+            return false;
+        }
+        const std::string& midTok = labelFields[li].front().label;
+        if (!matCardMidTokenValid(midTok)) {
+            size_t ls = labelFields[li].front().start;
+            size_t le = card.find('\n', ls);
+            std::string dataLine = card.substr(ls, (le == std::string::npos ? card.size() : le) - ls);
+            // '제목 줄이 없다' 고 단정하지 말고 무엇을 제목으로 읽었는지 원문으로 보여 준다 —
+            // 제목 줄이 빈 줄일 수도, 사용자가 데이터 줄을 하나 더 쓴 것일 수도 있다.
+            std::string titleLine = matCardTitleLineOf(card);
+            errorMessage_ = "Restack layer " + std::to_string(li + 1) +
+                ": material_card MID field reads '" + midTok + "', which is not a material ID."
+                "\n  line read as the card title: '" + titleLine + "'"
+                "\n  line read as *MAT card 1 (data): '" + dataLine + "'"
+                "\n  a *MAT_..._TITLE block reads its first line as the title - check that title line"
+                " (or remove _TITLE)";
+            return false;
+        }
         const std::string& label = labelFields[li].front().label;
         std::string body = matCardReplaceMidFields(card, labelFields[li], label, "");
         labelKeys[li] = label + '\n' + body;
         if (labelMidMapping.count(labelKeys[li])) continue;
-        labelMidMapping[labelKeys[li]] = ++maxMaterialId_;
+        // 숫자 MID 는 그대로 존중한다 — 다만 모델이 이미 쓰는 번호이거나 다른 카드가 먼저 가져갔으면
+        // 새 번호를 주고 무엇을 왜 바꿨는지 알린다(조용히 바꾸면 사용자가 적은 MID 가 사라진다).
+        int literalMid = matCardLiteralMid(label);
+        int assignedMid;
+        if (literalMid > 0 && !usedMids.count(literalMid)) {
+            assignedMid = literalMid;
+            usedMids.insert(literalMid);
+            reservedMids.erase(literalMid);
+            if (literalMid > maxMaterialId_) maxMaterialId_ = literalMid;
+        } else {
+            assignedMid = allocMid();
+            if (literalMid > 0) {
+                infoMessages.push_back("  Restack layer " + std::to_string(li + 1) + ": material MID " +
+                                       std::to_string(literalMid) + " is already in use -> assigned MID " +
+                                       std::to_string(assignedMid));
+            }
+        }
+        labelMidMapping[labelKeys[li]] = assignedMid;
         auto [it, fresh] = firstBodyOfLabel.emplace(label, body);
         if (!fresh && it->second != body) {
             infoMessages.push_back("  Restack layer " + std::to_string(li + 1) + ": material label '" + label +
                                    "' reused with a different card -> separate MID " +
-                                   std::to_string(maxMaterialId_));
+                                   std::to_string(assignedMid));
         }
+    }
+
+    if (midAllocExhausted) {
+        errorMessage_ = "Restack: no free material ID left (existing MIDs reach " +
+            std::to_string(std::numeric_limits<int>::max()) +
+            ") - renumber the model's materials before restacking";
+        return false;
     }
 
     // 8. Generate new node planes
@@ -1314,7 +1752,7 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
         layerSegInfos.push_back({newPid, layerEtype, {}, {}});
 
         // Resolve material card with actual MID
-        std::string matCard = layerDef.materialCard;
+        std::string matCard = layerCards[layerIdx];
         int actualMid = 0;
         for (const auto& [placeholder, mid] : layerMidMapping[layerIdx]) {
             size_t pos = 0;
@@ -1339,11 +1777,20 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
         // Find which MID is used in this layer's card
         if (actualMid == 0) {
             for (const auto& [placeholder, mid] : layerMidMapping[layerIdx]) {
-                if (layerDef.materialCard.find(placeholder) != std::string::npos) {
+                if (layerCards[layerIdx].find(placeholder) != std::string::npos) {
                     actualMid = mid;
                     break;
                 }
             }
+        }
+
+        // MID 0 은 덱에서 '재질 없음' 이다 — 여기까지 와서 0 이면 카드에서 MID 칸을 못 찾은 것이다.
+        // 예전엔 그대로 *PART 에 0 을 찍고, emittedMids 가 0 을 키로 써서 둘째 층부터 카드를 버렸다.
+        if (actualMid <= 0) {
+            errorMessage_ = "Restack layer " + std::to_string(layerIdx + 1) +
+                ": could not resolve a material ID from material_card"
+                " (no *MAT data line, or its MID field is unreadable) - refusing to write MID 0";
+            return false;
         }
 
         // Generate keyword block for this layer
@@ -1520,6 +1967,30 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
 
     restackedParts_++;
 
+    // 11b. 층을 나누면 요소는 새 PID 로 옮겨 가고 원래 파트는 요소 0 개로 남는다.
+    //      사용자가 원안 PID 에 걸어 둔 tied 조건(*SET_PART_LIST·*CONTACT)은 그대로 빈 파트를 가리켜
+    //      아무 일도 하지 않는 덱이 rc=0·경고 0줄로 나갔다. 옮겨 붙이는 정책은 별도 과제지만
+    //      최소한 무엇이 끊겼는지는 알린다.
+    {
+        bool anyLeft = false;
+        for (const auto& [eid, elem] : baseMesh_.getElements()) {
+            if (elem.partId == op.targetPid && removedElementIds_.count(eid) == 0) { anyLeft = true; break; }
+        }
+        if (!anyLeft) {
+            auto refs = restackFindPidReferences(rawLines_, op.targetPid);
+            if (!refs.empty()) {
+                std::ostringstream rm;
+                rm << "  [WARN] Restack: PID " << op.targetPid << " is now empty but "
+                   << refs.size() << " keyword(s) still reference it (";
+                for (size_t r = 0; r < refs.size(); ++r) rm << (r ? ", " : "") << refs[r];
+                rm << ") - re-point them to the new layer PIDs ";
+                for (size_t r = 0; r < layerPidEtype.size(); ++r)
+                    rm << (r ? "," : "") << layerPidEtype[r].first;
+                infoMessages.push_back(rm.str());
+            }
+        }
+    }
+
     // 12. Auto-generate SET_SEGMENT + CONTACT_TIED_*
     // for shell-adjacent interfaces.
     // Rule: if at least one side is "shell" → tied contact needed.
@@ -1565,7 +2036,7 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
         double fd = (lyr.czmShear  >= 0.0) ? lyr.czmShear  : op.czmShear;
         double vc = 0.0;
         if (useCzmAuto)
-            vc = computeAutoVC(lyr.materialCard, op.dropHeight, lyr.thickness);
+            vc = computeAutoVC(layerCards[shellLayerIdx], op.dropHeight, lyr.thickness);
         return {fs, fd, vc};
     };
     int tiedCount = 0;

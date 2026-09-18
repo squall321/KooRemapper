@@ -51,13 +51,18 @@ MaterialCardValidator::ValidationResult MaterialCardValidator::validate(
 
     // MID 칸은 @MID@ 가 아니어도(10·MAT01·@CZM_MID@) 새 MID 로 바뀌므로 자리표시 유무는 검사하지 않는다
 
-    // Validate based on keyword type
-    if (keyword.find("MAT_ELASTIC") != std::string::npos) {
+    // Validate based on keyword type.
+    // 부분 문자열로 고르면 *MAT_ELASTIC_FLUID·*MAT_ELASTIC_PLASTIC_THERMAL·
+    // *MAT_ELASTIC_SPRING_DISCRETE_BEAM 처럼 칸 뜻이 전혀 다른 변종까지 평범한 ELASTIC 으로 검사해
+    // 합법 카드에 엉뚱한 오류를 냈다 — _TITLE 만 떼고 정확히 일치할 때만 그 검사를 쓴다.
+    std::string base = keyword;
+    if (base.size() > 6 && base.compare(base.size() - 6, 6, "_TITLE") == 0)
+        base.erase(base.size() - 6);
+    if (base == "*MAT_ELASTIC") {
         validateElastic(lines, result);
-    } else if (keyword.find("MAT_COHESIVE_MIXED_MODE") != std::string::npos) {
+    } else if (base == "*MAT_COHESIVE_MIXED_MODE") {
         validateCohesiveMixedMode(lines, result);
-    } else if (keyword.find("MAT_PLASTIC_KINEMATIC") != std::string::npos ||
-               keyword.find("MAT_024") != std::string::npos) {
+    } else if (base == "*MAT_PLASTIC_KINEMATIC" || base == "*MAT_024") {
         validatePlasticKinematic(lines, result);
     } else {
         // Generic validation for unknown types
@@ -240,17 +245,29 @@ void MaterialCardValidator::validatePlasticKinematic(
     } catch (...) {}
 }
 
-// *MAT 키워드 다음 첫 데이터 줄. *MAT_..._TITLE 은 키워드 바로 다음(주석 제외) 줄이 제목이라
-// 데이터 줄이 아니다 — 예전엔 제목을 데이터로 읽어 restack 이 받는 카드를 offset 이 거부했다.
+// *MAT 키워드 다음 첫 데이터 줄. *MAT_..._TITLE 은 제목 줄이 데이터 줄이 아니다 —
+// 예전엔 제목을 데이터로 읽어 restack 이 받는 카드를 offset 이 거부했다.
+// 다만 제목 줄을 무조건 하나 먹으면 제목이 빠진 카드(내용 줄이 하나뿐)에서는 유일한 데이터 줄이
+// 사라진다. 그래서 내용 줄('$' 주석·빈 줄 제외)이 두 줄 이상일 때만 첫 줄을 제목으로 본다 —
+// '제목처럼 보이는지' 로 나누면 '7075-T6 aluminum' 같은 진짜 제목에서 틀린다.
 int MaterialCardValidator::findFirstDataLine(const std::vector<std::string>& lines) const {
     for (size_t i = 0; i < lines.size(); ++i) {
         if (!isKeywordLine(lines[i])) continue;
-        bool titlePending = extractKeyword(lines[i]).find("_TITLE") != std::string::npos;
+        bool isTitle = extractKeyword(lines[i]).find("_TITLE") != std::string::npos;
+        std::vector<int> content;
         for (size_t j = i + 1; j < lines.size(); ++j) {
             if (isCommentLine(lines[j])) continue;
-            if (titlePending) { titlePending = false; continue; }  // 제목 줄(비어 있어도 제목)
-            if (isBlankLine(lines[j])) continue;
-            return static_cast<int>(j);
+            size_t f = lines[j].find_first_not_of(" \t");
+            if (f != std::string::npos && lines[j][f] == '*') break;  // 다음 키워드 = 블록 끝
+            content.push_back(static_cast<int>(j));
+        }
+        // 블록 끝의 빈 줄은 카드 끝 개행이라 내용 줄이 아니다
+        while (!content.empty() && isBlankLine(lines[content.back()])) content.pop_back();
+        if (content.empty()) break;
+        size_t from = (isTitle && content.size() >= 2) ? 1 : 0;
+        for (size_t k = from; k < content.size(); ++k) {
+            if (isBlankLine(lines[content[k]])) continue;  // 데이터 줄은 비어 있지 않다
+            return content[k];
         }
         break;
     }
@@ -259,6 +276,26 @@ int MaterialCardValidator::findFirstDataLine(const std::vector<std::string>& lin
 
 std::vector<std::string> MaterialCardValidator::parseDataLine(const std::string& line) const {
     std::vector<std::string> fields;
+
+    // 자유 형식(콤마 구분) 카드도 LS-DYNA 가 받는 정상 표기다 — 공백으로만 나누면
+    // '90,7.85E-09,2.10E+05,0.3' 이 한 칸으로 읽혀 칸 수가 모자라다고 잘못 짚었다.
+    if (line.find(',') != std::string::npos) {
+        size_t pos = 0;
+        while (pos <= line.size()) {
+            size_t c = line.find(',', pos);
+            std::string tok = line.substr(pos, (c == std::string::npos ? line.size() : c) - pos);
+            size_t b = tok.find_first_not_of(" \t\r");
+            if (b != std::string::npos && tok[b] == '$') break;
+            if (b != std::string::npos) {
+                size_t e = tok.find_last_not_of(" \t\r");
+                fields.push_back(tok.substr(b, e - b + 1));
+            }
+            if (c == std::string::npos) break;
+            pos = c + 1;
+        }
+        return fields;
+    }
+
     std::istringstream iss(line);
     std::string field;
 
@@ -266,6 +303,27 @@ std::vector<std::string> MaterialCardValidator::parseDataLine(const std::string&
         // Skip inline comments
         if (field[0] == '$') break;
         fields.push_back(field);
+    }
+
+    // 고정폭 카드에서 MID 칸(1~10열)에 다음 값이 공백 없이 붙어 있으면('        902.3300E-09')
+    // 공백 분리가 한 칸으로 읽어 필드 수가 모자란다. 10열 앞이 정수일 때만 거기서 잘라 둘로 본다.
+    if (!fields.empty() && line.find(',') == std::string::npos) {
+        size_t first = line.find_first_not_of(" \t");
+        size_t tokEnd = (first == std::string::npos) ? std::string::npos
+                                                     : line.find_first_of(" \t", first);
+        if (tokEnd == std::string::npos && first != std::string::npos) tokEnd = line.size();
+        if (first != std::string::npos && first < 10 && tokEnd > 10) {
+            std::string head = line.substr(first, 10 - first);
+            while (!head.empty() && std::isspace(static_cast<unsigned char>(head.back()))) head.pop_back();
+            bool allDigit = !head.empty() &&
+                std::all_of(head.begin(), head.end(),
+                            [](unsigned char c) { return std::isdigit(c) != 0; });
+            if (allDigit) {
+                std::string rest = line.substr(10, tokEnd - 10);
+                fields[0] = head;
+                fields.insert(fields.begin() + 1, rest);
+            }
+        }
     }
 
     return fields;

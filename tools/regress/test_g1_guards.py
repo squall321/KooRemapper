@@ -11,7 +11,9 @@
   - A36 목록 항목 안에 중첩 매핑(gauss:)이 있으면 그 다음 형제 항목 대시를 들여쓰기 오류로 보고
         정상 YAML 을 rc=1 로 거부했다(메시지도 'YAML 로 읽을 수 없는 파일' 이라고 단정했다).
   - A16 assemble 의 층 대시 줄 파서가 thickness/title 만 읽어, 단독 restack 과 같은 YAML 이 다른 덱을 냈다
-        (대시 줄 '- num_elements: 4', 한 줄 material_card).
+        (대시 줄 '- num_elements: 4').
+        둘째 층 fixture 는 원래 한 줄 카드 '*MAT_ELASTIC' 이었는데, 데이터 줄이 없는 카드는 MID 칸이
+        없어 두 경로 모두 mid 0 인 *PART 를 내고 있었다(조용히 틀린 덱). 데이터 줄 있는 카드로 바꿨다.
 """
 import os
 import shutil
@@ -38,7 +40,9 @@ layers:
   - num_elements: 2
     thickness: 0.3
     title: Adhesive
-    material_card: "*MAT_ELASTIC"
+    material_card: |
+      *MAT_ELASTIC
+               @MID@   1.1E-9      3000      0.40
 """
 
 
@@ -175,11 +179,23 @@ operations:
     check("restack 단독·assemble 둘 다 rc=0 (대시 줄 첫 키가 num_elements)", ok,
           f"rc={rc1}/{rc2} {o1[-200:]} {o2[-200:]}")
     if ok:
-        check("두 덱이 완전히 같다 (num_elements·한 줄 material_card 포함)",
+        check("두 덱이 완전히 같다 (num_elements·층 material_card 포함)",
               read(d, "rs_sa.k") == read(d, "rs_asm.k"), "덱이 다르다")
-        check("한 줄 material_card 도 층 카드로 들어간다",
+        check("두 층의 material_card 가 모두 층 카드로 들어간다",
               read(d, "rs_sa.k").count("*MAT_ELASTIC") >= 2,
               str(read(d, "rs_sa.k").count("*MAT_ELASTIC")))
+        kl = read(d, "rs_sa.k").splitlines()
+        partMids = []
+        for i, l in enumerate(kl):
+            if not l.strip().upper().startswith("*PART"):
+                continue
+            j = i + 2
+            while j < len(kl) and kl[j].startswith("$"):
+                j += 1
+            f = kl[j].split() if j < len(kl) else []
+            if len(f) >= 3 and f[2].lstrip("-").isdigit():
+                partMids.append(int(f[2]))
+        check("mid 0 인 *PART 가 없다", partMids and all(m != 0 for m in partMids), str(partMids))
 
     print()
     if FAILS:
