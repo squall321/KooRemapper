@@ -1071,6 +1071,21 @@ size_t rsFirstCard(const std::string& kw) {
     return (rsEnds(kw, "_TITLE") || rsEnds(kw, "_ID")) ? 1u : 0u;
 }
 
+// 이 접촉을 tied(운동학적으로 묶는 것)로 볼 것인가.
+// 이름에 TIED 가 없어도 묶는 계열이 있다 — *CONTACT_CONSTRAINT_* 는 슬레이브 노드를
+// 상대 표면에 구속한다. 그런 카드를 전 층으로 펴면 내부 계면까지 묶여 층간 상대 전단이
+// 죽는다(낙하 굽힘 응력 과대평가). 잘못 펴면 물리가 틀리고 잘못 안 펴면 한 층으로 가거나
+// 보고만 되므로 비대칭이다 — 그래서 미끄러지는 계열만 이름으로 추리고 나머지는 tied 로 본다.
+bool rsContactIsTied(const std::string& kw) {
+    if (rsHas(kw, "TIED") || rsHas(kw, "TIEBREAK") || rsHas(kw, "SPOTWELD")) return true;
+    if (rsHas(kw, "CONSTRAINT")) return true;
+    if (rsHas(kw, "AUTOMATIC") || rsHas(kw, "ERODING") || rsHas(kw, "SINGLE_SURFACE") ||
+        rsHas(kw, "SLIDING") || rsHas(kw, "FORMING") || rsHas(kw, "DRAWBEAD") ||
+        rsHas(kw, "ONE_WAY") || rsHas(kw, "SURFACE_TO_SURFACE") || rsHas(kw, "NODES_TO_SURFACE"))
+        return false;
+    return true;
+}
+
 // *MAT_RIGID(020) 가 쓰는 MID 들 — 강체 파트를 restack 하면 강체 구속이 통째로 사라진다
 std::set<int> rsCollectRigidMids(const std::vector<std::string>& rawLines) {
     std::set<int> out;
@@ -1438,7 +1453,7 @@ void ModelAssembler::migrateDeadReferences(const std::set<int>& deadPids,
         MContact c;
         c.cardLine = b.data[k];
         c.kw = b.kw;
-        c.tied = rsHas(b.kw, "TIED") || rsHas(b.kw, "TIEBREAK") || rsHas(b.kw, "SPOTWELD");
+        c.tied = rsContactIsTied(b.kw);
         c.comma = rawLines_[b.data[k]].find(',') != std::string::npos;
         c.id[0] = rsIntField(f, 0);
         c.id[1] = rsIntField(f, 1);
@@ -1851,7 +1866,7 @@ void ModelAssembler::scanDeadReferences(const std::string& opName,
         auto f = rsCardFields(rawLines_[b.data[k]]);
         int ssid = rsIntField(f, 0), msid = rsIntField(f, 1);
         int sstyp = rsIntField(f, 2), mstyp = rsIntField(f, 3);
-        bool tied = rsHas(b.kw, "TIED") || rsHas(b.kw, "TIEBREAK") || rsHas(b.kw, "SPOTWELD");
+        bool tied = rsContactIsTied(b.kw);
         std::string how;
         if (sstyp == 3 && isDead(deadPids, ssid)) how = "slave part";
         else if (mstyp == 3 && isDead(deadPids, msid)) how = "master part";
