@@ -4670,7 +4670,7 @@
             "smartphone_drop_aggressive",
             "quasi_static"
           ],
-          "desc": "Damping preset baseline (case-insensitive). Only these three are recognized; any other string (e.g. 'off') is not a preset — it still triggers damping re-emission with the baked alpha. Omit the key entirely for no damping changes. Explicit damping_* fields override the preset."
+          "desc": "Damping preset baseline (case-insensitive). Only these three are recognized, and they only change the damping_alpha_scale / damping_alpha_floor / damping_apply_to_all_parts defaults. The damping cards of matched DB materials are inserted whether or not this key is present, so omitting it does NOT mean 'no damping changes'. Any non-empty value (a preset, or an unrecognized string such as 'off') additionally strips pre-existing *DAMPING_PART_* blocks before re-emitting — as do explicit damping_* overrides. Without it a second matdb pass over an already-mapped model keeps the old cards and LS-DYNA applies both (duplicated damping), so when re-running matdb giving a value is the safer choice. To leave damping untouched, use a database/material that carries no damping card. Explicit damping_* fields override the preset."
         },
         {
           "path": "damping_alpha_scale",

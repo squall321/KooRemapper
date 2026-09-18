@@ -12,6 +12,9 @@
     기본값이 없어 빠지면 'depth must be non-zero'·'r1 and r2 must be positive' 로 거절된다.
   - meshfix 의 gmsh 경로 안내(dist/gmsh)는 바이너리가 찾는 곳이 아니었다.
   - mcp_server/smoke.py 는 도구 수를 22 로 박아둬 도구가 50개인 지금 항상 실패했다.
+  - matdb 의 damping_preset 설명은 '키를 빼면 감쇠 변화 없음' 이라고 했지만, 매칭된 DB 물성의
+    감쇠 카드는 프리셋과 무관하게 항상 삽입되고 묵은 *DAMPING_PART_* 제거는 값이 있을 때만
+    일어난다 — 프리셋 없이 두 번 돌리면 감쇠 카드가 중복된다.
 """
 import json
 import os
@@ -260,7 +263,50 @@ def main():
     else:
         print(f"  SKIP: gmsh 실행 파일 없음 ({gmsh}) — dist/gmsh 배치 확인 건너뜀")
 
-    # ── 6. MCP 도구 수는 소스에서 도출된다 ──────────────────────────────────
+    # ── 6. matdb 감쇠 설명 / database 경로 예외 ──────────────────────────────
+    print("[matdb damping_preset 설명 — 프리셋을 빼도 감쇠 카드는 들어간다]")
+    md = os.path.join(d, "md")
+    os.makedirs(md, exist_ok=True)
+    shutil.copy2(os.path.join(REPO, "materials", "smartphone_stack.k"), md)
+    shutil.copy2(os.path.join(REPO, "materials", "material_db.json"), md)
+
+    def matdb_yaml(model, out, preset=None):
+        body = (f"model: {model}\noutput: {out}\ndatabase: material_db.json\n"
+                "mat_type: MAT_ELASTIC\n")
+        if preset is not None:
+            body += f"damping_preset: {preset}\n"
+        return body + 'materials:\n  - match: "*"\n'
+
+    def damping_lines(path):
+        return sum(1 for ln in open(path, encoding="utf-8", errors="ignore")
+                   if ln.strip().upper().startswith("*DAMPING_PART"))
+
+    open(os.path.join(md, "np.yaml"), "w").write(matdb_yaml("smartphone_stack.k", "md_np.k"))
+    rc, out = run(binary, md, "matdb", "np.yaml")
+    check("matdb: damping_preset 없이도 DB 감쇠 카드가 삽입된다",
+          rc == 0 and "Inserted 3 damping sets" in out and damping_lines(os.path.join(md, "md_np.k")) == 6,
+          out[-200:])
+
+    open(os.path.join(md, "np2.yaml"), "w").write(matdb_yaml("md_np.k", "md_np2.k"))
+    rc, out = run(binary, md, "matdb", "np2.yaml")
+    check("matdb: 프리셋 없이 두 번 돌리면 묵은 카드가 남아 감쇠가 중복된다",
+          rc == 0 and "Stripped" not in out and damping_lines(os.path.join(md, "md_np2.k")) == 12,
+          out[-200:])
+
+    open(os.path.join(md, "off2.yaml"), "w").write(matdb_yaml("md_np.k", "md_off2.k", preset="off"))
+    rc, out = run(binary, md, "matdb", "off2.yaml")
+    check("matdb: 값을 주면(프리셋 아닌 'off' 라도) 묵은 카드를 지우고 다시 쓴다",
+          rc == 0 and "Stripped 6 pre-existing" in out and damping_lines(os.path.join(md, "md_off2.k")) == 6,
+          out[-200:])
+
+    dp = cat_key(ops, "matdb", "damping_preset")["desc"]
+    check("카탈로그 damping_preset desc 에 '키를 빼면 감쇠 변화 없음' 이라는 거짓말이 없다",
+          "Omit the key entirely for no damping changes" not in dp, dp[:200])
+    check("카탈로그 damping_preset desc 가 삽입은 항상·값 주면 strip 을 적는다",
+          "whether or not this key is present" in dp and "strips pre-existing *DAMPING_PART_*" in dp,
+          dp[:300])
+
+    # ── 7. MCP 도구 수는 소스에서 도출된다 ──────────────────────────────────
     print("[MCP 도구 수]")
     tool_count = open(MCP_SERVER, encoding="utf-8").read().count("@mcp.tool(")
     smoke_src = open(MCP_SMOKE, encoding="utf-8").read()
