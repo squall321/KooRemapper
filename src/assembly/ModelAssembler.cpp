@@ -1109,20 +1109,35 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
     for (int n : numElemsPerLayer) totalElements += n;
 
     // Build MID placeholder → actual ID mapping
-    std::map<std::string, int> midMapping;
-    for (const auto& layer : op.layers) {
+    // 공유 키는 자리표시+카드 본문 — 같은 MID001 이라도 물성이 다르면 MID 를 따로 준다
+    // (예전엔 자리표시만 보고 묶어 뒤 층 재질 카드가 조용히 사라졌다). 카드까지 같으면 예전처럼 공유한다.
+    std::map<std::pair<std::string, std::string>, int> midMapping;             // (자리표시, 카드) → MID
+    std::vector<std::map<std::string, int>> layerMidMapping(op.layers.size()); // 층별 자리표시 → MID
+    std::map<std::string, std::string> firstCardOfPlaceholder;
+    for (size_t li = 0; li < op.layers.size(); ++li) {
+        const auto& card = op.layers[li].materialCard;
         // Scan for MIDxxx patterns
         size_t pos = 0;
-        while ((pos = layer.materialCard.find("MID", pos)) != std::string::npos) {
+        while ((pos = card.find("MID", pos)) != std::string::npos) {
             size_t start = pos;
             pos += 3;
-            if (pos < layer.materialCard.size() && std::isdigit(layer.materialCard[pos])) {
+            if (pos < card.size() && std::isdigit(card[pos])) {
                 size_t end = pos;
-                while (end < layer.materialCard.size() && std::isdigit(layer.materialCard[end])) end++;
-                std::string placeholder = layer.materialCard.substr(start, end - start);
-                if (midMapping.find(placeholder) == midMapping.end()) {
-                    midMapping[placeholder] = ++maxMaterialId_;
+                while (end < card.size() && std::isdigit(card[end])) end++;
+                std::string placeholder = card.substr(start, end - start);
+                auto key = std::make_pair(placeholder, card);
+                auto it = midMapping.find(key);
+                if (it == midMapping.end()) {
+                    it = midMapping.emplace(key, ++maxMaterialId_).first;
+                    auto [fit, fresh] = firstCardOfPlaceholder.emplace(placeholder, card);
+                    if (!fresh && fit->second != card) {
+                        infoMessages.push_back("  Restack layer " + std::to_string(li + 1) +
+                                               ": material label '" + placeholder +
+                                               "' reused with a different card -> separate MID " +
+                                               std::to_string(maxMaterialId_));
+                    }
                 }
+                layerMidMapping[li][placeholder] = it->second;
                 pos = end;
             }
         }
@@ -1275,7 +1290,7 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
         // Resolve material card with actual MID
         std::string matCard = layerDef.materialCard;
         int actualMid = 0;
-        for (const auto& [placeholder, mid] : midMapping) {
+        for (const auto& [placeholder, mid] : layerMidMapping[layerIdx]) {
             size_t pos = 0;
             while ((pos = matCard.find(placeholder, pos)) != std::string::npos) {
                 std::string midStr = std::to_string(mid);
@@ -1297,7 +1312,7 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
 
         // Find which MID is used in this layer's card
         if (actualMid == 0) {
-            for (const auto& [placeholder, mid] : midMapping) {
+            for (const auto& [placeholder, mid] : layerMidMapping[layerIdx]) {
                 if (layerDef.materialCard.find(placeholder) != std::string::npos) {
                     actualMid = mid;
                     break;
