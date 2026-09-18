@@ -93,6 +93,8 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
     int pointsKeyIndent = 0;   // indent of "points:" key for indent shape
     bool inMaterialCardsList = false;
     int materialCardsKeyIndent = 0;
+    std::vector<size_t> materialCardsOps;  // material_cards 키를 쓴 offset op — 카드가 0개면 끝에서 오류
+
     bool readingMaterialCardsItem = false;
     bool inMatdbRulesList = false;
     bool inMatdbRuleItem = false;
@@ -1200,6 +1202,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                                 // Array of material cards
                                 inMaterialCardsList = true;
                                 materialCardsKeyIndent = indent;
+                                materialCardsOps.push_back(config.operations.size() - 1);
                             }
                         } else if (op.type == AssemblyOperation::MATSWAP) {
                             auto parseIntList = [&](const std::string& raw, std::vector<int>& out) {
@@ -1464,7 +1467,9 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                 }
 
                 // Material cards list items: "        - |"
-                if (inMaterialCardsList && indent > materialCardsKeyIndent &&
+                // 대시를 키와 같은 열에 쓰는 블록 목록도 YAML 에서 합법이다 — 예전엔 '>' 로 걸러
+                // 항목을 통째로 버려 *MAT 이 0개가 되고 층 PART 가 없는 MID 를 가리켰다(D4)
+                if (inMaterialCardsList && indent >= materialCardsKeyIndent &&
                     trimmed.size() >= 1 && trimmed[0] == '-' && trimmed.size() >= 2) {
                     // 주석을 떼지 않아 '- |   # 주석' 을 카드 시작으로 못 봤다
                     std::string afterDashRaw = trim(trimmed.substr(1));
@@ -1525,6 +1530,16 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
     }
     if (config.operations.empty()) {
         throw std::runtime_error("No operations defined in assembly config");
+    }
+    // material_cards 를 줬는데 항목이 하나도 안 읽혔으면 조용히 넘어가지 않는다 — 카드 없이 돌면
+    // 층 PART 가 덱에 없는 MID 를 가리켜 LS-DYNA 가 죽는다
+    for (size_t idx : materialCardsOps) {
+        if (idx < config.operations.size() &&
+            config.operations[idx].type == AssemblyOperation::OFFSET &&
+            config.operations[idx].offset.materialCards.empty()) {
+            throw std::runtime_error("Operation " + std::to_string(idx + 1) +
+                " (offset): material_cards has no '- |' block items");
+        }
     }
 
     // iga target_pids: 타겟 하나를 PID 마다 복제해 펼친다 (v1.3.1 동작 — PID 별 bbox, 나머지 설정 동일).

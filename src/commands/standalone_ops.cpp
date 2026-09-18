@@ -944,6 +944,7 @@ int runOffset(const std::string& yamlFile, ConsoleOutput& console) {
     bool inMatCardsList = false;
     bool readingMatCardsItem = false;
     int matCardsKeyIndent = 0;
+    bool sawMatCardsKey = false;   // material_cards 를 줬는데 카드가 0개면 조용히 넘기지 않는다
 
     std::string ln;
     while (std::getline(f, ln)) {
@@ -984,9 +985,10 @@ int runOffset(const std::string& yamlFile, ConsoleOutput& console) {
                 op.materialCards.back() += ln.substr(std::min(indent, matCardBaseIndent)) + "\n";
                 continue;
             }
-            // 예전엔 '- |   # 메모' 항목을 못 알아봐 목록이 끊기고 층 재질이 빠졌다
+            // 예전엔 '- |   # 메모' 항목을 못 알아봐 목록이 끊기고 층 재질이 빠졌다.
+            // 대시를 키와 같은 열에 쓰는 블록 목록도 YAML 에서 합법인데 '>' 로 걸러 통째로 버렸다(D4).
             std::string item = KooRemapper::yamlStripComment(tr);
-            if (indent > matCardsKeyIndent && (item == "- |" || item == "-|")) {
+            if (indent >= matCardsKeyIndent && (item == "- |" || item == "-|")) {
                 op.materialCards.emplace_back();
                 readingMatCardsItem = true;
                 matCardKeyIndent = indent;
@@ -1004,7 +1006,7 @@ int runOffset(const std::string& yamlFile, ConsoleOutput& console) {
 
         y.parseCommonKey(key, val);
         if      (key == "source_pid") { try { op.sourcePid = std::stoi(val); } catch(...) {} }
-        else if (key == "material_cards" && val.empty()) { inMatCardsList = true; matCardsKeyIndent = y.keyIndent(tr, indent); }
+        else if (key == "material_cards" && val.empty()) { inMatCardsList = true; sawMatCardsKey = true; matCardsKeyIndent = y.keyIndent(tr, indent); }
         else if (key == "offset_direction") op.offsetDirection = val;
         else if (key == "thickness") { try { op.thickness = std::stod(val); } catch(...) {} }
         else if (key == "thickness_formula") op.thicknessFormula = val;
@@ -1040,6 +1042,12 @@ int runOffset(const std::string& yamlFile, ConsoleOutput& console) {
     f.close();
 
     if (y.modelFile.empty()) { console.error("[offset] model not specified"); return 1; }
+    // 카드 없이 돌면 층 PART 가 덱에 없는 MID 를 가리켜 LS-DYNA 가 죽는다 — 파싱이 실패하면 오류로 알린다
+    if (sawMatCardsKey && op.materialCards.empty()) {
+        console.error("[offset] material_cards 에 '- |' 블록 항목이 하나도 없습니다 / "
+                      "material_cards has no '- |' block items.");
+        return 1;
+    }
     std::string modelPath = y.resolvePath(y.modelFile);
     if (rejectEmptyOutput(y, "offset", console)) return 1;
     std::string outputPrefix = y.getOutputPrefix();
