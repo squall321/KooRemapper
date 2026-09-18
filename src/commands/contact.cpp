@@ -115,6 +115,10 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
         std::string currentSide;  // "slave" or "master"
         // 'include:'/'exclude:' 뒤에 오는 블록 리스트(- 항목)를 담을 자리 (없으면 nullptr)
         std::vector<std::string>* pendingKeyList = nullptr;
+        // slave:/master: 밑 'pids:' 뒤에 오는 블록 리스트(- 1 항목)를 담을 자리 (없으면 nullptr).
+        // 예전엔 '- 1' 줄에 콜론이 없어 그냥 버려져, 인라인 'pids: [1]' 은 SET_PART 를 만드는데
+        // 같은 뜻의 블록 목록은 조용히 아무 세트도 안 만들었다.
+        std::vector<int>* pendingPidList = nullptr;
 
         auto flushAction = [&]() {
             if (hasAction) {
@@ -122,6 +126,7 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
                 curAction = ContactAction{};
                 hasAction = false;
                 currentSide.clear();
+                pendingPidList = nullptr;   // 새 항목 — 앞 항목의 pids 목록은 닫힌다
             }
         };
 
@@ -163,6 +168,17 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
                 }
             }
             pendingKeyList = nullptr;
+
+            // slave:/master: 밑 'pids:' 의 블록 리스트 항목 — 인라인 'pids: [1]' 과 같게 읽는다
+            if (pendingPidList && t[0] == '-') {
+                std::string item = kw_trim(yamlStripComment(t.substr(1)));
+                if (item.find(':') == std::string::npos) {
+                    item = stripQuotes(item);
+                    if (!item.empty()) { try { pendingPidList->push_back(std::stoi(item)); } catch(...){} }
+                    continue;
+                }
+            }
+            pendingPidList = nullptr;
 
             size_t colon = t.find(':');
             if (colon == std::string::npos) continue;
@@ -392,7 +408,12 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
             if (!currentSide.empty()) {
                 ContactAction::Side& side = (currentSide == "slave") ? curAction.slave : curAction.master;
                 if (key == "pid") { try { side.pid = std::stoi(val); } catch(...){} continue; }
-                if (key == "pids") { side.pids = parsePidList(val); continue; }
+                if (key == "pids") {
+                    // 값이 비면 다음 '- 1' 줄들이 목록이다 — 예전엔 빈 목록으로 두고 그 줄들을 버렸다
+                    if (val.empty()) { side.pids.clear(); pendingPidList = &side.pids; }
+                    else side.pids = parsePidList(val);
+                    continue;
+                }
                 if (key == "as_segment") { side.asSegment = (val=="true"||val=="yes"||val=="1"); continue; }
                 if (key == "facing") { side.facing = (val=="true"||val=="yes"||val=="1"); continue; }
             }
@@ -466,13 +487,46 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
         // ── create ──
         if (act.action == "create") {
             std::string ctype = act.type;
-            // Normalize type to uppercase with underscores
-            for (auto& c : ctype) { if (c == '-') c = '_'; c = static_cast<char>(toupper(static_cast<unsigned char>(c))); }
-            // 짧은 별칭 → 전체 키워드 (thermal/tiebreak). 전체 키워드로 쓴 경우는 그대로 통과.
-            if (ctype == "TIED_THERMAL" || ctype == "THERMAL")
-                ctype = "TIED_SURFACE_TO_SURFACE_THERMAL";
-            else if (ctype == "TIEBREAK")
-                ctype = "AUTOMATIC_SURFACE_TO_SURFACE_TIEBREAK";
+            for (auto& c : ctype) if (c == '-') c = '_';
+            // 짧은 이름 → 전체 키워드. assemble 의 contact create 가 쓰는 바로 그 표(ct_getPreset)를
+            // 같이 쓴다 — 예전엔 여기서만 별칭 tied_thermal/thermal/tiebreak 만 풀고 나머지는 대문자로
+            // 바꿔 그대로 붙여, 같은 'type: auto' 가 assemble 에선 AUTOMATIC_SURFACE_TO_SURFACE,
+            // 단독 contact 에선 없는 키워드 AUTO 가 됐다. 전체 키워드로 쓴 값은 그대로 통과한다.
+            ctype = ct_getPreset(ctype).keyword;
+
+            // 허용값 검증(D1) — 표에 없는 값은 ct_getPreset 이 대문자로 바꿔 그대로 돌려주므로,
+            // 예전엔 'type: bogus' 가 *CONTACT_BOGUS_TITLE 이라는 없는 키워드를 덱에 썼다.
+            // 아래 목록은 KooRemapper 가 실제로 쓰는 카드 구성(카드 1·2 + 선택 THERMAL/TIEBREAK)과
+            // 맞는 접촉 키워드 — ct_getPreset 의 프리셋 9종 + 자기 코드가 따로 쓰는 OFFSET/FAILURE 다.
+            {
+                static const char* kCreateTypes[] = {
+                    "AUTOMATIC_SURFACE_TO_SURFACE",
+                    "AUTOMATIC_SURFACE_TO_SURFACE_MORTAR",
+                    "AUTOMATIC_SURFACE_TO_SURFACE_TIEBREAK",
+                    "AUTOMATIC_SINGLE_SURFACE",
+                    "TIED_SURFACE_TO_SURFACE",
+                    "TIED_SURFACE_TO_SURFACE_OFFSET",
+                    "TIED_SURFACE_TO_SURFACE_FAILURE",
+                    "TIED_SURFACE_TO_SURFACE_MORTAR",
+                    "TIED_SURFACE_TO_SURFACE_THERMAL",
+                    "ERODING_SURFACE_TO_SURFACE",
+                    "FORMING_SURFACE_TO_SURFACE"
+                };
+                bool known = false;
+                for (const char* k : kCreateTypes) if (ctype == k) { known = true; break; }
+                if (!known) {
+                    console.error("[contact] create: unsupported type '" + act.type +
+                                  "' (allowed keywords: automatic_surface_to_surface, "
+                                  "automatic_surface_to_surface_mortar, automatic_surface_to_surface_tiebreak, "
+                                  "automatic_single_surface, tied_surface_to_surface, "
+                                  "tied_surface_to_surface_offset, tied_surface_to_surface_failure, "
+                                  "tied_surface_to_surface_mortar, tied_surface_to_surface_thermal, "
+                                  "eroding_surface_to_surface, forming_surface_to_surface; "
+                                  "short names: auto, automatic, tied, tied_thermal, thermal, tiebreak, "
+                                  "mortar, tied_mortar, single, eroding, forming)");
+                    return 1;
+                }
+            }
 
             int ssid = 0, msid = 0, sstyp = 0, mstyp = 0;
 
