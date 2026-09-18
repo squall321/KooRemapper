@@ -3685,6 +3685,7 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
             << " dangling reference(s) — restack/merge 가 비운 PID·지운 요소·지운 노드를 아직 가리킵니다\n";
         blk << "$ KOOREMAPPER-PIDREF: 등급 auto=다음 단계에서 옮길 대상, manual=직접 고치세요,"
                " unknown=칸 자리 미확정, maybe=화이트리스트 밖(칸 뜻 미확인)\n";
+        blk << "$ KOOREMAPPER-PIDREF: 줄 번호는 입력 덱 기준입니다(이 블록만큼 아래로 밀려 있습니다)\n";
         for (const auto& f : pidRefFindings_) {
             blk << "$ KOOREMAPPER-PIDREF [" << f.axis << "] line " << f.line << " "
                 << f.keyword << " (" << f.grade << "): " << f.advice << "\n";
