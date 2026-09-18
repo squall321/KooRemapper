@@ -1322,22 +1322,480 @@ double computeAutoVC(const std::string& matCard, double dropHeight_mm, double la
     return vc;
 }
 
+// 구성원 PID 목록을 *SET_PART_LIST 데이터 줄로 되돌린다 — 한 줄 8개, 10칸 고정폭.
+// 층이 늘어 구성원이 8개를 넘으면 줄을 더 쓴다(한 줄에 몰아 쓰면 LS-DYNA 가 9번째부터 못 읽는다).
+std::vector<std::string> rsFormatSetMembers(const std::vector<int>& members) {
+    std::vector<std::string> out;
+    for (size_t i = 0; i < members.size(); i += 8) {
+        std::ostringstream ln;
+        for (size_t j = i; j < members.size() && j < i + 8; ++j) ln << std::setw(10) << members[j];
+        out.push_back(ln.str());
+    }
+    return out;
+}
+
+// *SET_PART_LIST_TITLE 한 벌
+std::string rsMakePartSetBlock(int sid, const std::string& title, const std::vector<int>& members) {
+    std::ostringstream b;
+    b << "*SET_PART_LIST_TITLE\n" << title << "\n";
+    b << "$#     sid\n";
+    b << std::setw(10) << sid << "\n";
+    b << "$#    pid1      pid2      pid3      pid4      pid5      pid6      pid7      pid8\n";
+    for (const auto& ln : rsFormatSetMembers(members)) b << ln << "\n";
+    return b.str();
+}
+
 } // anonymous namespace
+
+// md_setField 는 아래쪽(카드 필드 고정폭 치환)에 정의돼 있다 — 이관에서 그대로 쓴다.
+static std::string md_setField(const std::string& line, int startCol, int width, int value);
+
+// ── 죽은 참조 이관 ───────────────────────────────────────────────────────────
+// 탐지만 하면 결국 사람이 손으로 고쳐야 한다. 옮길 수 있는 것은 옮긴다.
+//   · 체적 의미로 쓰이는 *SET_PART_* : 죽은 PID 를 층 PID 전부로 편다
+//   · tied 계열 접촉                 : 상대측 기하를 적층 축에 투영해 층이 유일할 때만 그 층으로
+//   · 한 세트를 tied 와 체적이 함께 쓰면 : 세트를 복제해 tied 쪽만 한 층으로 갈라 준다
+//   · 그 밖의 접촉(AUTOMATIC·ERODING…) : 모든 층이 solid 일 때만 전 층으로
+// 층을 하나로 정하지 못하거나 shell 층이 섞이면 옮기지 않고 이유와 함께 보고한다.
+// 전 층으로 펴면 내부 계면까지 묶여 층간 상대 전단이 죽는다 — 그래서 tied 는 층을 고른다.
+void ModelAssembler::migrateDeadReferences(const std::set<int>& deadPids,
+                                           const PidRefMigrateCtx& ctx,
+                                           std::set<size_t>& handled,
+                                           std::vector<PidRefFinding>& moved) {
+    if (deadPids.empty() || ctx.newPids.empty()) return;
+
+    const auto blocks = rsCollectBlocks(rawLines_);
+    std::map<size_t, std::string> cardEdit;      // 접촉 카드 1 한 줄 치환
+    std::vector<std::string> newSetBlocks;       // 새로 만드는 *SET_PART_LIST
+
+    bool anyShell = false;
+    for (const auto& e : ctx.layerEtypes) if (e == "shell") anyShell = true;
+
+    auto record = [&](const char* grade, const std::string& kw, size_t li, const std::string& text) {
+        PidRefFinding f;
+        f.axis = "PID";
+        f.keyword = kw;
+        f.line = static_cast<int>(li) + 1;
+        f.text = rawLines_[li];
+        f.grade = grade;
+        f.advice = text;
+        moved.push_back(f);
+        handled.insert(li);      // 스캐너가 같은 줄을 다른 말로 또 적지 않게 한다
+    };
+
+    // 1. 죽은 PID 를 담은 *SET_PART_* 를 모은다(_GENERATE·_ADD 는 칸 뜻이 달라 건드리지 않는다)
+    struct MSet {
+        int sid = 0;
+        std::string kw;
+        bool column = false;
+        bool comma = false;
+        std::vector<size_t> memberLines;
+        std::vector<int> members;              // LIST 형 구성원(순서 유지)
+    };
+    std::map<int, MSet> sets;
+    for (const auto& b : blocks) {
+        if (!rsStarts(b.kw, "*SET_PART")) continue;
+        if (rsHas(b.kw, "_GENERATE") || rsHas(b.kw, "_ADD") || rsHas(b.kw, "_INTERSECT")) continue;
+        size_t k = rsHas(b.kw, "_TITLE") ? 1u : 0u;
+        if (k >= b.data.size()) continue;
+        int sid = rsIntField(rsCardFields(rawLines_[b.data[k]]), 0);
+        if (sid <= 0) continue;
+        MSet s;
+        s.sid = sid;
+        s.kw = b.kw;
+        s.column = rsHas(b.kw, "_COLUMN");
+        bool hasDead = false;
+        for (size_t m = k + 1; m < b.data.size(); ++m) {
+            s.memberLines.push_back(b.data[m]);
+            if (rawLines_[b.data[m]].find(',') != std::string::npos) s.comma = true;
+            auto f = rsCardFields(rawLines_[b.data[m]]);
+            size_t n = s.column ? std::min<size_t>(1, f.size()) : f.size();
+            for (size_t q = 0; q < n; ++q) {
+                int v = rsIntField(f, q);
+                if (v <= 0) continue;
+                if (!s.column) s.members.push_back(v);
+                if (deadPids.count(v)) hasDead = true;
+            }
+        }
+        if (hasDead) sets[sid] = s;
+    }
+
+    // 2. 접촉 카드 1 을 읽는다(SSID MSID SSTYP MSTYP)
+    struct MContact {
+        size_t cardLine = 0;
+        std::string kw;
+        bool tied = false;
+        bool comma = false;
+        int id[2] = {0, 0};
+        int styp[2] = {0, 0};
+    };
+    std::vector<MContact> contacts;
+    for (const auto& b : blocks) {
+        if (!rsStarts(b.kw, "*CONTACT")) continue;
+        size_t k = rsFirstCard(b.kw);
+        if (k >= b.data.size()) continue;
+        auto f = rsCardFields(rawLines_[b.data[k]]);
+        MContact c;
+        c.cardLine = b.data[k];
+        c.kw = b.kw;
+        c.tied = rsHas(b.kw, "TIED") || rsHas(b.kw, "TIEBREAK") || rsHas(b.kw, "SPOTWELD");
+        c.comma = rawLines_[b.data[k]].find(',') != std::string::npos;
+        c.id[0] = rsIntField(f, 0);
+        c.id[1] = rsIntField(f, 1);
+        c.styp[0] = rsIntField(f, 2);
+        c.styp[1] = rsIntField(f, 3);
+        for (int s = 0; s < 2; ++s) if (c.styp[s] < 0) c.styp[s] = 0;   // 빈 칸은 0
+        contacts.push_back(c);
+    }
+
+    // 세트를 쓰는 접촉(소비자)
+    std::map<int, std::vector<std::pair<size_t, int>>> consumers;   // sid → (접촉 인덱스, 면 0=slave 1=master)
+    for (size_t ci = 0; ci < contacts.size(); ++ci)
+        for (int s = 0; s < 2; ++s)
+            if (contacts[ci].styp[s] == 2 && sets.count(contacts[ci].id[s]))
+                consumers[contacts[ci].id[s]].push_back({ci, s});
+
+    const char* sideName[2] = {"slave", "master"};
+    auto cardWhere = [&](const MContact& c) {
+        return c.kw + "(line " + std::to_string(c.cardLine + 1) + ")";
+    };
+
+    // 3. 세트별 판단
+    for (auto& [sid, s] : sets) {
+        auto& cons = consumers[sid];
+        bool anyTied = false;
+        for (const auto& [ci, side] : cons) { (void)side; if (contacts[ci].tied) anyTied = true; }
+
+        std::string why;
+        if (s.column && anyTied)
+            why = "*SET_PART_COLUMN 은 구성원마다 칸이 딸려 있어 tied 용으로 복제하지 않습니다";
+        else if (s.column && s.comma)
+            why = "콤마 자유 형식의 *SET_PART_COLUMN 은 칸 자리를 확정할 수 없습니다";
+        else if (ctx.isMerge && anyTied)
+            why = "merge 로 파트가 하나가 되어 원 파트의 면을 특정할 수 없습니다 —"
+                  " tied 접촉은 세그먼트 세트로 바꾸세요";
+        else if (!ctx.isMerge && anyShell && !cons.empty())
+            why = "shell 층이 섞여 접촉 외피를 확정할 수 없습니다";
+
+        // tied 소비자의 층을 먼저 다 정한다 — 하나라도 못 정하면 세트를 통째로 두고 보고만 한다.
+        // 한쪽만 옮기고 세트를 전 층으로 펴면 못 옮긴 tied 가 전 층에 붙어 내부 계면까지 묶인다.
+        std::map<size_t, int> tiedLayer;
+        if (why.empty() && !ctx.isMerge) {
+            for (const auto& [ci, side] : cons) {
+                if (!contacts[ci].tied) continue;
+                if (contacts[ci].comma) {
+                    why = "콤마 자유 형식의 접촉 카드 1 " + cardWhere(contacts[ci]) + " 은 칸 자리를 확정할 수 없습니다";
+                    break;
+                }
+                int other = 1 - side;
+                double lo = 0.0, hi = 0.0;
+                std::string w;
+                int layer = -1;
+                if (pidRefSideAxisRange(contacts[ci].styp[other], contacts[ci].id[other], ctx.axis, lo, hi, w))
+                    layer = pidRefPickLayer(ctx, lo, hi, w);
+                if (layer < 0) {
+                    why = "tied 접촉 " + cardWhere(contacts[ci]) + ": " + w;
+                    break;
+                }
+                tiedLayer[ci] = layer;
+            }
+        }
+
+        if (!why.empty()) {
+            for (size_t li : s.memberLines) {
+                auto f = rsCardFields(rawLines_[li]);
+                size_t n = s.column ? std::min<size_t>(1, f.size()) : f.size();
+                bool dead = false;
+                for (size_t q = 0; q < n; ++q) if (deadPids.count(rsIntField(f, q))) dead = true;
+                if (dead)
+                    record("left", s.kw, li,
+                           "세트 " + std::to_string(sid) + " 의 구성원입니다 — " + why + " (그대로 두었습니다)");
+            }
+            for (const auto& [ci, side] : cons)
+                record("left", contacts[ci].kw, contacts[ci].cardLine,
+                       std::string(sideName[side]) + " part set " + std::to_string(sid) + " — " + why);
+            continue;
+        }
+
+        // 3a. 원 세트를 편다 — 죽은 PID 자리에 새 PID(restack: 층 전부, merge: 합친 PID)를 넣는다
+        if (s.column) {
+            for (size_t li : s.memberLines) {
+                auto f = rsCardFields(rawLines_[li]);
+                if (f.empty() || !deadPids.count(rsIntField(f, 0))) continue;
+                std::vector<std::string> rep;
+                for (int np : ctx.newPids) rep.push_back(md_setField(rawLines_[li], 0, 10, np));
+                pidRefRewrites_[li] = rep;
+                record("moved", s.kw, li,
+                       "세트 " + std::to_string(sid) + ": 죽은 PID 줄을 새 PID " +
+                       std::to_string(ctx.newPids.front()) +
+                       (ctx.newPids.size() > 1 ? ".." + std::to_string(ctx.newPids.back()) : "") +
+                       " 줄로 바꿨습니다(딸린 칸은 그대로 복사)");
+            }
+        } else {
+            std::vector<int> out;
+            std::set<int> seen;
+            for (int m : s.members) {
+                if (deadPids.count(m)) {
+                    for (int np : ctx.newPids) if (seen.insert(np).second) out.push_back(np);
+                } else if (seen.insert(m).second) {
+                    out.push_back(m);
+                }
+            }
+            auto repl = rsFormatSetMembers(out);
+            if (repl.empty()) repl.push_back("");
+            pidRefRewrites_[s.memberLines.front()] = repl;
+            for (size_t i = 1; i < s.memberLines.size(); ++i)
+                pidRefRewrites_[s.memberLines[i]] = {};
+            std::ostringstream what;
+            what << "세트 " << sid << ": 죽은 PID 를 ";
+            if (ctx.isMerge) what << "합친 PID " << ctx.newPids.front();
+            else what << "층 PID " << ctx.newPids.size() << "개 전부로";
+            what << " 바꿨습니다(구성원 " << out.size() << "개)";
+            for (size_t li : s.memberLines) {
+                auto f = rsCardFields(rawLines_[li]);
+                bool dead = false;
+                for (size_t q = 0; q < f.size(); ++q) if (deadPids.count(rsIntField(f, q))) dead = true;
+                if (dead) record("moved", s.kw, li, what.str());
+                else handled.insert(li);
+            }
+        }
+
+        // 3b. tied 소비자는 그 층만 담은 복제 세트로 갈라 준다
+        std::map<int, int> dupSid;   // 층 → 새 세트 ID
+        for (const auto& [ci, side] : cons) {
+            if (!contacts[ci].tied) continue;
+            int layer = tiedLayer[ci];
+            auto dit = dupSid.find(layer);
+            if (dit == dupSid.end()) {
+                std::vector<int> mem;
+                std::set<int> seen;
+                for (int m : s.members) {
+                    int v = deadPids.count(m) ? ctx.newPids[layer] : m;
+                    if (seen.insert(v).second) mem.push_back(v);
+                }
+                int nsid = ++maxSetId_;
+                newSetBlocks.push_back(rsMakePartSetBlock(
+                    nsid, "KooRemapper tied layer " + std::to_string(layer + 1) +
+                          " (from set " + std::to_string(sid) + ")", mem));
+                dit = dupSid.emplace(layer, nsid).first;
+            }
+            std::string line = cardEdit.count(contacts[ci].cardLine)
+                             ? cardEdit[contacts[ci].cardLine] : rawLines_[contacts[ci].cardLine];
+            cardEdit[contacts[ci].cardLine] = md_setField(line, side * 10, 10, dit->second);
+            record("moved", contacts[ci].kw, contacts[ci].cardLine,
+                   std::string(sideName[side]) + " part set " + std::to_string(sid) +
+                   " → 층 " + std::to_string(layer + 1) + "(PID " + std::to_string(ctx.newPids[layer]) +
+                   ") 만 담은 새 세트 " + std::to_string(dit->second) +
+                   " 로 바꿨습니다(상대측 기하를 적층 축에 투영해 층이 하나로 정해졌습니다)");
+        }
+    }
+
+    // 4. 접촉 카드가 죽은 PID 를 직접 가리키는 경우(STYP=3)
+    for (size_t ci = 0; ci < contacts.size(); ++ci) {
+        auto& c = contacts[ci];
+        for (int side = 0; side < 2; ++side) {
+            if (c.styp[side] != 3 || !deadPids.count(c.id[side])) continue;
+            std::string how = std::string(sideName[side]) + " part " + std::to_string(c.id[side]);
+            if (c.comma) {
+                record("left", c.kw, c.cardLine,
+                       how + " — 콤마 자유 형식의 카드 1 은 칸 자리를 확정할 수 없습니다");
+                continue;
+            }
+            auto edit = [&](int startCol, int value) {
+                std::string line = cardEdit.count(c.cardLine) ? cardEdit[c.cardLine] : rawLines_[c.cardLine];
+                cardEdit[c.cardLine] = md_setField(line, startCol, 10, value);
+            };
+            if (ctx.isMerge) {
+                if (c.tied) {
+                    record("left", c.kw, c.cardLine,
+                           how + " — merge 로 파트가 하나가 되어 원 파트의 면을 특정할 수 없습니다"
+                                 " (세그먼트 세트로 바꾸세요)");
+                } else {
+                    edit(side * 10, ctx.newPids.front());
+                    record("moved", c.kw, c.cardLine,
+                           how + " → 합친 PID " + std::to_string(ctx.newPids.front()) + " 로 바꿨습니다");
+                }
+                continue;
+            }
+            if (anyShell) {
+                record("left", c.kw, c.cardLine, how + " — shell 층이 섞여 접촉 외피를 확정할 수 없습니다");
+                continue;
+            }
+            if (c.tied) {
+                int other = 1 - side;
+                double lo = 0.0, hi = 0.0;
+                std::string w;
+                int layer = -1;
+                if (pidRefSideAxisRange(c.styp[other], c.id[other], ctx.axis, lo, hi, w))
+                    layer = pidRefPickLayer(ctx, lo, hi, w);
+                if (layer < 0) {
+                    record("left", c.kw, c.cardLine, how + " — " + w);
+                    continue;
+                }
+                edit(side * 10, ctx.newPids[layer]);
+                record("moved", c.kw, c.cardLine,
+                       how + " → 층 " + std::to_string(layer + 1) + "(PID " +
+                       std::to_string(ctx.newPids[layer]) +
+                       ") 로 바꿨습니다(상대측 기하를 적층 축에 투영해 층이 하나로 정해졌습니다)");
+            } else {
+                int nsid = ++maxSetId_;
+                newSetBlocks.push_back(rsMakePartSetBlock(
+                    nsid, "KooRemapper restack layers (from part " + std::to_string(c.id[side]) + ")",
+                    ctx.newPids));
+                edit(side * 10, nsid);
+                edit((2 + side) * 10, 2);              // STYP 3(파트) → 2(파트 집합)
+                record("moved", c.kw, c.cardLine,
+                       how + " → 층 PID " + std::to_string(ctx.newPids.size()) +
+                       "개를 담은 새 세트 " + std::to_string(nsid) + " (STYP 3→2) 로 바꿨습니다");
+            }
+        }
+    }
+
+    for (const auto& [li, text] : cardEdit) pidRefRewrites_[li] = {text};
+    for (const auto& blk : newSetBlocks) addedKeywordBlocks_.push_back(blk);
+}
+
+// 접촉 상대측의 노드를 모아 적층 축 범위를 잰다.
+bool ModelAssembler::pidRefSideAxisRange(int styp, int id, int axis,
+                                         double& lo, double& hi, std::string& why) const {
+    if (axis < 0 || axis > 2) { why = "적층 축을 알 수 없습니다"; return false; }
+    if (id <= 0) { why = "상대측 ID 를 읽지 못했습니다"; return false; }
+
+    std::set<int> nodeIds;
+    auto addPartNodes = [&](int pid) {
+        for (const auto& [eid, elem] : baseMesh_.getElements()) {
+            if (elem.partId != pid || removedElementIds_.count(eid)) continue;
+            for (int n = 0; n < 8; ++n) if (elem.nodeIds[n] > 0) nodeIds.insert(elem.nodeIds[n]);
+        }
+        for (const auto& ae : addedElements_)
+            if (ae.pid == pid)
+                for (int n = 0; n < 8; ++n) if (ae.nodeIds[n] > 0) nodeIds.insert(ae.nodeIds[n]);
+        for (const auto& se : addedShellElements_)
+            if (se.pid == pid)
+                for (int n = 0; n < 4; ++n) if (se.nodeIds[n] > 0) nodeIds.insert(se.nodeIds[n]);
+    };
+    auto setMembers = [&](const char* prefix, int sid, size_t maxFields, std::vector<int>& out) {
+        for (const auto& b : rsCollectBlocks(rawLines_)) {
+            if (!rsStarts(b.kw, prefix)) continue;
+            if (rsHas(b.kw, "_GENERATE") || rsHas(b.kw, "_ADD")) continue;
+            size_t k = rsHas(b.kw, "_TITLE") ? 1u : 0u;
+            if (k >= b.data.size()) continue;
+            if (rsIntField(rsCardFields(rawLines_[b.data[k]]), 0) != sid) continue;
+            for (size_t m = k + 1; m < b.data.size(); ++m) {
+                auto f = rsCardFields(rawLines_[b.data[m]]);
+                size_t n = std::min(maxFields, f.size());
+                for (size_t q = 0; q < n; ++q) {
+                    int v = rsIntField(f, q);
+                    if (v > 0) out.push_back(v);
+                }
+            }
+        }
+    };
+
+    if (styp == 3) {
+        addPartNodes(id);
+    } else if (styp == 2) {
+        std::vector<int> pids;
+        setMembers("*SET_PART", id, 64, pids);
+        if (pids.empty()) { why = "상대측 파트 집합 " + std::to_string(id) + " 을 찾지 못했습니다"; return false; }
+        for (int p : pids) addPartNodes(p);
+    } else if (styp == 0) {
+        std::vector<int> nodes;
+        setMembers("*SET_SEGMENT", id, 4, nodes);
+        if (nodes.empty()) { why = "상대측 세그먼트 집합 " + std::to_string(id) + " 을 찾지 못했습니다"; return false; }
+        nodeIds.insert(nodes.begin(), nodes.end());
+    } else if (styp == 4) {
+        std::vector<int> nodes;
+        setMembers("*SET_NODE", id, 64, nodes);
+        if (nodes.empty()) { why = "상대측 노드 집합 " + std::to_string(id) + " 을 찾지 못했습니다"; return false; }
+        nodeIds.insert(nodes.begin(), nodes.end());
+    } else {
+        why = "상대측 STYP=" + std::to_string(styp) + " 는 기하를 읽는 방법을 정해 두지 않았습니다";
+        return false;
+    }
+
+    std::unordered_map<int, size_t> addedIdx;
+    for (size_t i = 0; i < addedNodes_.size(); ++i) addedIdx[addedNodes_[i].id] = i;
+
+    lo = std::numeric_limits<double>::max();
+    hi = std::numeric_limits<double>::lowest();
+    size_t seen = 0;
+    for (int nid : nodeIds) {
+        double c;
+        const auto* nd = baseMesh_.getNode(nid);
+        if (nd) {
+            c = getAxisCoord(nd->position, axis);
+        } else {
+            auto it = addedIdx.find(nid);
+            if (it == addedIdx.end()) continue;
+            const auto& an = addedNodes_[it->second];
+            c = (axis == 0) ? an.x : (axis == 1) ? an.y : an.z;
+        }
+        lo = std::min(lo, c);
+        hi = std::max(hi, c);
+        ++seen;
+    }
+    if (seen == 0) { why = "상대측 기하(노드 좌표)를 찾지 못했습니다"; return false; }
+    return true;
+}
+
+// 상대측 범위가 층 하나로만 정해지는가.
+int ModelAssembler::pidRefPickLayer(const PidRefMigrateCtx& ctx, double lo, double hi,
+                                    std::string& why) const {
+    size_t n = ctx.layerLo.size();
+    if (n == 0 || ctx.layerHi.size() != n) { why = "층 범위를 계산하지 못했습니다"; return -1; }
+    double tol = ctx.tol;
+    // 적층 바깥(위·아래)에 있는 상대는 닿는 층이 하나뿐이다 — 틈이 있어도 마찬가지다.
+    if (lo >= ctx.layerHi[n - 1] - tol) return static_cast<int>(n) - 1;
+    if (hi <= ctx.layerLo[0] + tol) return 0;
+    std::vector<size_t> hit;
+    for (size_t i = 0; i < n; ++i)
+        if (hi >= ctx.layerLo[i] - tol && lo <= ctx.layerHi[i] + tol) hit.push_back(i);
+    if (hit.size() == 1) return static_cast<int>(hit[0]);
+    if (hit.empty()) { why = "상대측이 적층과 만나지 않아 층을 정할 수 없습니다"; return -1; }
+    std::ostringstream w;
+    w << "상대측이 층 ";
+    for (size_t i = 0; i < hit.size(); ++i) w << (i ? "," : "") << (hit[i] + 1);
+    w << " 에 걸쳐 층이 하나로 정해지지 않습니다 — 전 층으로 펴면 내부 계면까지 묶입니다";
+    why = w.str();
+    return -1;
+}
+
+// 이관 결과를 rawLines_ 에 반영한다(스캔·보고가 끝난 뒤에 부른다).
+void ModelAssembler::applyPidRefRewrites() {
+    if (pidRefRewrites_.empty()) return;
+    std::vector<std::string> out;
+    out.reserve(rawLines_.size() + 8);
+    for (size_t i = 0; i < rawLines_.size(); ++i) {
+        auto it = pidRefRewrites_.find(i);
+        if (it == pidRefRewrites_.end()) { out.push_back(rawLines_[i]); continue; }
+        for (const auto& ln : it->second) out.push_back(ln);
+    }
+    rawLines_ = std::move(out);
+    pidRefRewrites_.clear();
+}
 
 void ModelAssembler::scanDeadReferences(const std::string& opName,
                                         const std::set<int>& deadPids,
                                         const std::set<int>& deadEids,
                                         const std::set<int>& deadNodes,
-                                        const std::vector<int>& newPids) {
-    if (deadPids.empty() && deadEids.empty() && deadNodes.empty()) return;
+                                        const std::vector<int>& newPids,
+                                        const std::set<size_t>& skip,
+                                        std::vector<PidRefFinding> moved) {
+    // 이관이 이미 적어 둔 것(moved/left)과 같은 목록에 담아 한 번에 보고한다
+    std::vector<PidRefFinding> found = std::move(moved);
+    if (deadPids.empty() && deadEids.empty() && deadNodes.empty()) {
+        reportPidRefFindings(opName, found, deadPids, newPids);
+        return;
+    }
 
     const auto blocks = rsCollectBlocks(rawLines_);
     std::vector<bool> handled(blocks.size(), false);
     std::set<std::pair<int, std::string>> seen;   // (줄, 축) 중복 방지
-    std::vector<PidRefFinding> found;
 
     auto add = [&](const std::string& axis, const std::string& kw, size_t li,
                    const char* grade, const std::string& advice) {
+        if (skip.count(li)) return;      // 이관이 이미 고치거나 이유를 적은 줄이다
         int lineNo = static_cast<int>(li) + 1;
         if (!seen.insert({lineNo, axis}).second) return;
         PidRefFinding f;
@@ -1555,6 +2013,14 @@ void ModelAssembler::scanDeadReferences(const std::string& opName,
         }
     }
 
+    reportPidRefFindings(opName, found, deadPids, newPids);
+}
+
+// 찾은 것을 pidRefFindings_ 에 담고 콘솔에 요약한다.
+void ModelAssembler::reportPidRefFindings(const std::string& opName,
+                                          std::vector<PidRefFinding>& found,
+                                          const std::set<int>& deadPids,
+                                          const std::vector<int>& newPids) {
     if (found.empty()) return;
     std::sort(found.begin(), found.end(),
               [](const PidRefFinding& a, const PidRefFinding& b) { return a.line < b.line; });
@@ -1569,7 +2035,10 @@ void ModelAssembler::scanDeadReferences(const std::string& opName,
         for (int dp : deadPids) { head << (first ? "" : ",") << dp; first = false; }
         head << " 가 빈 파트가 됐습니다 — ";
     }
-    head << "지워진 PID·요소·노드를 아직 가리키는 자리가 " << found.size() << " 건 남았습니다";
+    size_t movedCount = 0;
+    for (const auto& f : found) if (f.grade == "moved") ++movedCount;
+    head << "지워진 PID·요소·노드를 가리키던 자리 " << found.size() << " 건 — 옮긴 것 "
+         << movedCount << " 건, 못 옮긴 것 " << (found.size() - movedCount) << " 건";
     if (!newPids.empty()) {
         head << " (새 층 PID: ";
         for (size_t r = 0; r < newPids.size(); ++r) head << (r ? "," : "") << newPids[r];
@@ -1596,9 +2065,14 @@ void ModelAssembler::scanDeadReferences(const std::string& opName,
         infoMessages.push_back("    (그 중 모르는 자리 " + std::to_string(maybeCount) +
                                " 줄 — 화이트리스트 밖이라 칸 뜻을 확인하지 않았습니다)");
     }
-    infoMessages.push_back("    이번 판은 탐지만 합니다 — 옮기는 것은 다음 단계입니다."
-                           " pid_refs: warn 을 주면 같은 보고를 하고 rc=0 으로 끝냅니다.");
+    if (movedCount < found.size()) {
+        infoMessages.push_back("    못 옮긴 자리가 남아 rc=1 로 끝냅니다(덱은 씁니다)."
+                               " pid_refs: warn 을 주면 같은 보고를 하고 rc=0 으로 끝냅니다.");
+    } else {
+        infoMessages.push_back("    옮기지 못한 자리가 없습니다 — rc=0 으로 끝냅니다.");
+    }
 }
+
 
 bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double nu) {
     // 0-. pid_refs 는 strict|warn 둘뿐이다 — 오타를 조용히 strict 로 떨어뜨리면
@@ -2452,7 +2926,45 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
         if (!anyLeft) deadPids.insert(op.targetPid);
         std::vector<int> newPids;
         for (const auto& lp : layerPidEtype) newPids.push_back(lp.first);
-        scanDeadReferences("restack", deadPids, thisOpDeadElems, thisOpDeadNodes, newPids);
+
+        // 층별 적층 축 범위 — tied 접촉이 어느 층에 붙어야 하는지를 여기서 정한다.
+        // 기둥마다 아래·위 노드 좌표가 다를 수 있으므로 층 경계 평면의 최소·최대를 모두 본다.
+        PidRefMigrateCtx mctx;
+        mctx.isMerge = false;
+        mctx.axis = axis;
+        mctx.tol = originalThickness * 1e-6;
+        {
+            int pbase = 0;
+            for (int li = 0; li < newLayerCount; ++li) {
+                int p0 = pbase, p1 = pbase + numElemsPerLayer[li];
+                pbase = p1;
+                double lo = std::numeric_limits<double>::max();
+                double hi = std::numeric_limits<double>::lowest();
+                for (size_t c = 0; c < columns.size(); ++c) {
+                    const auto* bn = baseMesh_.getNode(columns[c].coordAndId[0].second);
+                    const auto* tn = baseMesh_.getNode(columns[c].coordAndId[nodesPerColumn - 1].second);
+                    if (!bn || !tn) continue;
+                    double b0 = getAxisCoord(bn->position, axis);
+                    double t0 = getAxisCoord(tn->position, axis);
+                    double a0 = b0 + planeFrac[p0] * (t0 - b0);
+                    double a1 = b0 + planeFrac[p1] * (t0 - b0);
+                    lo = std::min(lo, std::min(a0, a1));
+                    hi = std::max(hi, std::max(a0, a1));
+                }
+                mctx.layerLo.push_back(lo);
+                mctx.layerHi.push_back(hi);
+                mctx.newPids.push_back(layerPidEtype[li].first);
+                mctx.layerEtypes.push_back(layerPidEtype[li].second);
+            }
+        }
+
+        std::set<size_t> migrated;
+        std::vector<PidRefFinding> movedFindings;
+        migrateDeadReferences(deadPids, mctx, migrated, movedFindings);
+        scanDeadReferences("restack", deadPids, thisOpDeadElems, thisOpDeadNodes, newPids,
+                           migrated, std::move(movedFindings));
+        // 이관은 스캔·보고가 끝난 뒤에 반영한다 — 줄 번호가 이관 전 덱 기준이어야 한다
+        applyPidRefRewrites();
     }
 
     // 12. Auto-generate SET_SEGMENT + CONTACT_TIED_*
@@ -3680,12 +4192,16 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
     // '왜 tied 가 아무 일도 안 했는지' 를 파일 안에서 찾을 수 있어야 한다.
     // 발견이 0 건이면 한 줄도 쓰지 않는다(예전 출력과 바이트 그대로 같아야 한다).
     if (!pidRefFindings_.empty()) {
+        size_t movedN = 0;
+        for (const auto& f : pidRefFindings_) if (f.grade == "moved") ++movedN;
         std::ostringstream blk;
         blk << "$ KOOREMAPPER-PIDREF: " << pidRefFindings_.size()
-            << " dangling reference(s) — restack/merge 가 비운 PID·지운 요소·지운 노드를 아직 가리킵니다\n";
-        blk << "$ KOOREMAPPER-PIDREF: 등급 auto=다음 단계에서 옮길 대상, manual=직접 고치세요,"
-               " unknown=칸 자리 미확정, maybe=화이트리스트 밖(칸 뜻 미확인)\n";
-        blk << "$ KOOREMAPPER-PIDREF: 줄 번호는 입력 덱 기준입니다(이 블록만큼 아래로 밀려 있습니다)\n";
+            << " reference(s) — restack/merge 가 비운 PID·지운 요소·지운 노드를 가리키던 자리입니다"
+               " (옮김 " << movedN << ", 못 옮김 " << (pidRefFindings_.size() - movedN) << ")\n";
+        blk << "$ KOOREMAPPER-PIDREF: 등급 moved=이 덱에서 옮겼습니다, left=옮기지 못했습니다(이유가 붙습니다),"
+               " manual=직접 고치세요, unknown=칸 자리 미확정, maybe=화이트리스트 밖(칸 뜻 미확인)\n";
+        blk << "$ KOOREMAPPER-PIDREF: 줄 번호는 이 op 가 읽은 입력 덱 기준입니다"
+               "(이 블록과 이관으로 늘어난 줄만큼 아래로 밀려 있습니다)\n";
         for (const auto& f : pidRefFindings_) {
             blk << "$ KOOREMAPPER-PIDREF [" << f.axis << "] line " << f.line << " "
                 << f.keyword << " (" << f.grade << "): " << f.advice << "\n";
@@ -3881,19 +4397,21 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
     // 덱은 이미 다 썼다(위에서). 여기서 false 를 돌려주는 것은 '쓰기 실패' 가 아니라
     // '결과를 믿지 말라' 는 신호다 — pyKooCAE Runner 와 플랫폼 워커는 종료 코드로만 성공을 보고,
     // rc=0 이면 콘솔 경고가 자동화에 아예 안 보인 채 체인이 솔버까지 간다.
-    if (!pidRefFindings_.empty() && pidRefPolicy_ != "warn") {
-        size_t shown = std::min<size_t>(pidRefFindings_.size(), 3);
+    std::vector<const PidRefFinding*> pidRefLeft;
+    for (const auto& f : pidRefFindings_) if (f.grade != "moved") pidRefLeft.push_back(&f);
+    if (!pidRefLeft.empty() && pidRefPolicy_ != "warn") {
+        size_t shown = std::min<size_t>(pidRefLeft.size(), 3);
         std::ostringstream em;
         em << "restack/merge 가 비운 PID·지운 요소·지운 노드를 아직 가리키는 자리가 "
-           << pidRefFindings_.size() << " 건 남았습니다 — 덱은 " << outputFile
+           << pidRefLeft.size() << " 건 남았습니다 — 덱은 " << outputFile
            << " 에 썼지만 그대로 풀면 그 조건들이 아무 일도 하지 않습니다.";
         for (size_t r = 0; r < shown; ++r) {
-            const auto& f = pidRefFindings_[r];
+            const auto& f = *pidRefLeft[r];
             em << "\n  [" << f.axis << "] line " << f.line << " " << f.keyword
                << " (" << f.grade << "): " << f.advice;
         }
-        if (pidRefFindings_.size() > shown)
-            em << "\n  ... 그 밖 " << (pidRefFindings_.size() - shown) << " 건";
+        if (pidRefLeft.size() > shown)
+            em << "\n  ... 그 밖 " << (pidRefLeft.size() - shown) << " 건";
         em << "\n  전체 목록은 덱 머리의 $ KOOREMAPPER-PIDREF 블록에 있습니다."
               " 알고도 넘기려면 pid_refs: warn 을 주세요(같은 보고, rc=0).";
         errorMessage_ = em.str();
@@ -16010,7 +16528,15 @@ bool ModelAssembler::applyMerge(const MergeOperation& op) {
             }
             if (!anyLeft) deadPids.insert(pid);
         }
-        scanDeadReferences("merge", deadPids, mergeDeadElems, mergeDeadNodes, {newPid});
+        PidRefMigrateCtx mctx;
+        mctx.isMerge = true;
+        mctx.newPids.push_back(newPid);
+        std::set<size_t> migrated;
+        std::vector<PidRefFinding> movedFindings;
+        migrateDeadReferences(deadPids, mctx, migrated, movedFindings);
+        scanDeadReferences("merge", deadPids, mergeDeadElems, mergeDeadNodes, {newPid},
+                           migrated, std::move(movedFindings));
+        applyPidRefRewrites();
     }
 
     return true;

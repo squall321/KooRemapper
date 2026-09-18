@@ -208,12 +208,44 @@ private:
     bool dynamicRelaxation_;
     bool dynainEmbed_;
 
-    // 죽은 PID/EID/노드를 가리키는 카드를 3축으로 훑어 pidRefFindings_ 에 모으고 콘솔에 요약한다
+    // 옮길 수 있는 죽은 PID 참조를 실제로 옮길 때 쓰는 값들
+    struct PidRefMigrateCtx {
+        bool isMerge = false;                     // merge 는 새 PID 가 하나뿐이라 층 선택이 없다
+        std::vector<int> newPids;                 // restack: 층 PID(적층 축 최소측부터), merge: 새 PID 하나
+        std::vector<std::string> layerEtypes;     // 층별 solid|tshell|shell
+        std::vector<double> layerLo, layerHi;     // 층별 적층 축 범위
+        int axis = -1;                            // 0=X 1=Y 2=Z
+        double tol = 0.0;                         // 적층 축 비교 허용 오차
+    };
+    // 옮길 수 있는 참조를 실제로 옮긴다(세트 전 층 확장·tied 층 선택·세트 복제).
+    // rawLines_ 를 그 자리에서 고치고, 옮긴 줄 번호를 handled 에, 보고할 내용을 moved 에 담는다.
+    void migrateDeadReferences(const std::set<int>& deadPids,
+                               const PidRefMigrateCtx& ctx,
+                               std::set<size_t>& handled,
+                               std::vector<PidRefFinding>& moved);
+    // 죽은 PID/EID/노드를 가리키는 카드를 3축으로 훑어 pidRefFindings_ 에 모으고 콘솔에 요약한다.
+    // skip 에 든 줄은 이미 옮긴 자리라 다시 보고하지 않고, moved 는 같은 보고에 섞어 준다.
     void scanDeadReferences(const std::string& opName,
                             const std::set<int>& deadPids,
                             const std::set<int>& deadEids,
                             const std::set<int>& deadNodes,
-                            const std::vector<int>& newPids);
+                            const std::vector<int>& newPids,
+                            const std::set<size_t>& skip,
+                            std::vector<PidRefFinding> moved);
+    // 찾은 것을 pidRefFindings_ 에 담고 콘솔에 요약한다(스캔이 없을 때도 쓴다)
+    void reportPidRefFindings(const std::string& opName,
+                              std::vector<PidRefFinding>& found,
+                              const std::set<int>& deadPids,
+                              const std::vector<int>& newPids);
+    // 접촉 상대측(STYP,ID)의 노드를 모아 적층 축 최소·최대를 돌려준다. 못 읽으면 false + 이유
+    bool pidRefSideAxisRange(int styp, int id, int axis,
+                             double& lo, double& hi, std::string& why) const;
+    // 상대측 범위 [lo,hi] 가 층 하나로만 정해지면 그 층 번호, 아니면 -1 + 이유
+    int pidRefPickLayer(const PidRefMigrateCtx& ctx, double lo, double hi, std::string& why) const;
+    // 이관이 고친 줄(줄 인덱스 → 대체 줄들, 빈 벡터는 삭제). 스캔이 끝난 뒤에 rawLines_ 에 반영한다 —
+    // 스캔과 보고가 쓰는 줄 번호는 이관 전 덱 기준이어야 하기 때문이다.
+    std::map<size_t, std::vector<std::string>> pidRefRewrites_;
+    void applyPidRefRewrites();
     std::vector<PidRefFinding> pidRefFindings_;
     std::string pidRefPolicy_ = "strict";
 
