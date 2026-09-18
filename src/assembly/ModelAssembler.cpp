@@ -1095,6 +1095,31 @@ bool rsHasPartInertia(const std::vector<std::string>& rawLines, int pid) {
     return false;
 }
 
+// 그 PID 의 *PART 카드 1 칸들(PID SECID MID EOSID HGID GRAV ADPOPT TMID). 못 찾으면 빈 벡터.
+std::vector<std::string> rsFindPartCard(const std::vector<std::string>& rawLines, int pid) {
+    for (const auto& b : rsCollectBlocks(rawLines)) {
+        if (b.kw != "*PART" && b.kw != "*PART_TITLE") continue;
+        for (size_t m = 0; m < b.data.size(); ++m) {
+            auto f = rsCardFields(rawLines[b.data[m]]);
+            if (rsIntField(f, 0) == pid) return f;
+        }
+    }
+    return {};
+}
+
+// 그 SECID 의 ELFORM(칸 1). 못 찾으면 0.
+int rsFindSectionElform(const std::vector<std::string>& rawLines, int secid, const char* kwPrefix) {
+    for (const auto& b : rsCollectBlocks(rawLines)) {
+        if (!rsStarts(b.kw, kwPrefix)) continue;
+        size_t k = rsHas(b.kw, "_TITLE") ? 1u : 0u;
+        if (k >= b.data.size()) continue;
+        auto f = rsCardFields(rawLines[b.data[k]]);
+        if (rsIntField(f, 0) != secid) continue;
+        int ef = rsIntField(f, 1);
+        return ef > 0 ? ef : 0;
+    }
+    return 0;
+}
 
 const char* const kAdviceSetVariant =
     "`_SET` 변형으로 바꾸고 전 층 세트를 주세요";
@@ -2137,6 +2162,25 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
 
     // 10. Generate new elements and keyword cards per layer
 
+    // 원 파트에서 물려받을 값 — 지금까지 새 층은 ELFORM 1 로 태어나고 HGID·TMID 를 잃었다.
+    // ELFORM 은 같은 종류의 *SECTION 끼리만 물려준다(solid 의 2 와 tshell 의 2 는 다른 정식이다).
+    int inheritSolidElform = 0, inheritShellElform = 0, inheritHgid = 0, inheritTmid = 0;
+    {
+        auto pit = baseMesh_.parts.find(op.targetPid);
+        int origSecId = (pit != baseMesh_.parts.end()) ? pit->second.sectionId : 0;
+        if (origSecId > 0) {
+            inheritSolidElform = rsFindSectionElform(rawLines_, origSecId, "*SECTION_SOLID");
+            inheritShellElform = rsFindSectionElform(rawLines_, origSecId, "*SECTION_SHELL");
+        }
+        auto pf = rsFindPartCard(rawLines_, op.targetPid);
+        if (!pf.empty()) {
+            int hg = rsIntField(pf, 4);   // HGID
+            int tm = rsIntField(pf, 7);   // TMID
+            if (hg > 0) inheritHgid = hg;
+            if (tm > 0) inheritTmid = tm;
+        }
+    }
+
     std::set<int> emittedMids; // Track which MIDs have already been written
     std::vector<std::pair<int, std::string>> layerPidEtype; // (pid, effectiveEtype) per layer
 
@@ -2222,7 +2266,9 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
         if (isShell) {
             kwBlock << "*SECTION_SHELL\n";
             kwBlock << "$#  secid    elform      shrf       nip     propt\n";
-            kwBlock << std::setw(10) << newSecId << "         2       1.0         2       0.0\n";
+            kwBlock << std::setw(10) << newSecId
+                    << std::setw(10) << (inheritShellElform > 0 ? inheritShellElform : 2)
+                    << "       1.0         2       0.0\n";
             kwBlock << "$#     t1        t2        t3        t4      nloc\n";
             kwBlock << std::setw(10) << std::fixed << std::setprecision(6) << layerDef.thickness
                     << std::setw(10) << std::fixed << std::setprecision(6) << layerDef.thickness
@@ -2236,7 +2282,8 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
         } else {
             kwBlock << "*SECTION_SOLID\n";
             kwBlock << "$#  secid    elform\n";
-            kwBlock << std::setw(10) << newSecId << "         1\n";
+            kwBlock << std::setw(10) << newSecId
+                    << std::setw(10) << (inheritSolidElform > 0 ? inheritSolidElform : 1) << "\n";
         }
 
         // Part card
@@ -2245,8 +2292,18 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
             : layerDef.title;
         kwBlock << "*PART\n";
         kwBlock << partTitle << "\n";
-        kwBlock << "$#     pid     secid       mid\n";
-        kwBlock << std::setw(10) << newPid << std::setw(10) << newSecId << std::setw(10) << actualMid << "\n";
+        // HGID·TMID 를 물려받을 것이 없으면 예전과 같은 세 칸짜리 카드를 쓴다(출력이 바뀌지 않는다).
+        // EOSID 는 물려주지 않는다 — 상태방정식은 원 재질에 매인 것이고 새 층은 새 MID 를 받는다.
+        if (inheritHgid > 0 || inheritTmid > 0) {
+            kwBlock << "$#     pid     secid       mid     eosid      hgid      grav    adpopt      tmid\n";
+            kwBlock << std::setw(10) << newPid << std::setw(10) << newSecId << std::setw(10) << actualMid
+                    << std::setw(10) << 0 << std::setw(10) << inheritHgid
+                    << std::setw(10) << 0 << std::setw(10) << 0
+                    << std::setw(10) << inheritTmid << "\n";
+        } else {
+            kwBlock << "$#     pid     secid       mid\n";
+            kwBlock << std::setw(10) << newPid << std::setw(10) << newSecId << std::setw(10) << actualMid << "\n";
+        }
 
         addedKeywordBlocks_.push_back(kwBlock.str());
 
