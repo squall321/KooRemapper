@@ -9,8 +9,9 @@
   - 'help generate-var' 예제가 --no-scale 을 달아 100x1x1 퇴화 메시를 냈다.
   - 'help load' 가 압력을 내는 mode: gravity 와 없는 select: all 을 문서화했다.
   - '--help 공통 규칙' 의 '경로는 작업 폴더 기준' 이 거짓이었다(YAML 이 있는 폴더 기준).
-  - 그 고침이 적은 '모두 YAML 폴더 기준' 도 거짓이었다 — load/boundary/contact/relax/database/
-    implicit/modal/ale/cclip/matdb 는 폴더 없는 이름만 YAML 폴더 기준이다.
+  - 한때 '예외: load/boundary/contact/relax/… 는 폴더 없는 이름만 YAML 폴더 기준' 이라고 적었는데,
+    그 갈래가 모두 YAML 폴더 기준으로 고쳐진 뒤에도 문장이 남아 다시 거짓이 됐다.
+    지금 남은 예외는 matdb 의 database 키뿐이다(작업 폴더 기준).
   - 'generate-var --no-scale' 을 'use YAML lengths as-is' 라고 적었지만 J/K 는 1.0 이 된다.
   - 'prestress --strain' / 'strain --type' 이 모르는 값을 조용히 기본값으로 삼켰다.
   - 'prestress --strain log' 는 green 과 바이트 동일한 결과였다(help 에만 있던 값).
@@ -191,10 +192,12 @@ def main():
           os.path.exists(os.path.join(tmp, "data", "box_stripped.k")) and
           not os.path.exists(os.path.join(tmp, "box_stripped.k")), f"rc={rc} {out[-200:]}")
 
-    # 규칙(a) 의 예외 — load/boundary/contact/relax/database/implicit/modal/ale/cclip/matdb 는
-    # 폴더 없는 이름만 YAML 폴더 기준이다. help 가 그 예외를 적고 있는지, 실제로 그렇게 도는지 본다.
-    check("규칙(a): 폴더 붙은 상대 경로를 아직 작업 폴더에서 찾는 명령 목록을 적음",
-          "예외" in rules and "load/boundary" in rules, rules[:700])
+    # 규칙(a) 는 load/boundary/contact/relax/database/implicit/modal/ale/cclip/matdb 에도 똑같이 적용된다 —
+    # 폴더가 붙은 상대 경로까지 YAML 폴더 기준이다. help 가 그렇게 적고 있는지, 실제로 그렇게 도는지 본다.
+    check("공통 규칙: 폴더 붙은 상대 경로도 YAML 폴더 기준이라고 적음",
+          "폴더가 붙은 상대 경로" in rules and "load/boundary" not in rules, rules[:700])
+    check("공통 규칙: 남은 예외는 matdb 의 database 키라고 적음",
+          "matdb" in rules and "database" in rules, rules[:700])
     open(os.path.join(tmp, "cfg", "box.k"), "wb").write(
         open(os.path.join(tmp, "data", "box.k"), "rb").read())
     LOAD_CASE = "loads:\n  - part: 1\n    mode: normal_pressure\n    value: 1.0\n"
@@ -209,10 +212,11 @@ def main():
         open(os.path.join(tmp, "cfg", f"{cmd}_rel.yaml"), "w").write(
             f"model: ../data/box.k\noutput: ../data/{cmd}_rel_out.k\n" + case)
         rc, out = run(binary, tmp, cmd, f"cfg/{cmd}_rel.yaml")
-        # help 가 '예외' 라고 적은 그대로 — 작업 폴더에서 찾다 실패한다.
-        # 이 갈래를 YAML 폴더 기준으로 고치면 여기와 위 help 문장을 함께 바꿔야 한다.
-        check(f"규칙(a) 예외: {cmd} 의 '../data/box.k' 는 아직 작업 폴더 기준 (help 가 적은 그대로)",
-              "Cannot open file: ../data/box.k" in out or "Cannot open model: ../data/box.k" in out,
+        # 폴더가 붙은 상대 경로도 YAML 폴더 기준이다 — cfg/../data 로 풀려 실제로 산출물이 거기 생긴다.
+        check(f"규칙(a): {cmd} 의 '../data/box.k' 도 YAML 폴더(cfg) 기준으로 풀린다",
+              rc == 0 and f"[{cmd}] Model: cfg/../data/box.k" in out and
+              os.path.exists(os.path.join(tmp, "data", f"{cmd}_rel_out.k")) and
+              not os.path.exists(os.path.join(tmp, f"{cmd}_rel_out.k")),
               f"rc={rc} {out[-200:]}")
 
     # 규칙 (b)
