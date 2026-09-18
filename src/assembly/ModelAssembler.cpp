@@ -85,33 +85,39 @@ bool ModelAssembler::loadBaseModel(const std::string& filename) {
     // *SET_..._TITLE 은 키워드 다음 줄이 제목이다 — 예전엔 그 제목 줄을 SID 로 읽으려다 실패하고
     // inSet 을 꺼 버려 진짜 SID 줄을 영영 못 봤다. 그러면 maxSetId_ 가 0 으로 남아
     // 새로 만드는 *SET_SEGMENT 가 덱에 이미 있는 세트와 같은 번호로 난다.
-    maxSetId_ = 0;
-    {
-        bool inSet = false;
-        bool needTitle = false;
-        for (const auto& line : rawLines_) {
-            size_t g = line.find_first_not_of(" \t");
-            if (g != std::string::npos && line[g] == '*') {
-                std::string up = line.substr(g);
-                for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-                inSet = (up.rfind("*SET_", 0) == 0);
-                needTitle = inSet && (up.find("_TITLE") != std::string::npos);
-                continue;
-            }
-            if (!inSet) continue;
-            if (g != std::string::npos && line[g] == '$') continue;
-            // 제목 줄은 비어 있을 수 있다 — 건너뛰면 구성원 값을 SID 로 읽어
-            // maxSetId_ 가 어긋나고 새로 만드는 세트가 덱의 세트와 번호로 부딪친다.
-            if (needTitle) { needTitle = false; continue; }
-            try {
-                int sid = std::stoi(line);
-                if (sid > maxSetId_) maxSetId_ = sid;
-            } catch (...) {}
-            inSet = false;
-        }
-    }
+    initMaxSetIdFromRawLines();
 
     return true;
+}
+
+// rawLines_ 에서 *SET_* 의 SID 를 훑어 maxSetId_ 를 채운다.
+// *SET_..._TITLE 은 키워드 다음 줄이 제목이다 — 예전엔 그 제목 줄을 SID 로 읽으려다 실패하고
+// inSet 을 꺼 버려 진짜 SID 줄을 영영 못 봤다. 그러면 maxSetId_ 가 0 으로 남아
+// 새로 만드는 *SET_SEGMENT 가 덱에 이미 있는 세트와 같은 번호로 난다.
+void ModelAssembler::initMaxSetIdFromRawLines() {
+    maxSetId_ = 0;
+    bool inSet = false;
+    bool needTitle = false;
+    for (const auto& line : rawLines_) {
+        size_t g = line.find_first_not_of(" \t");
+        if (g != std::string::npos && line[g] == '*') {
+            std::string up = line.substr(g);
+            for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+            inSet = (up.rfind("*SET_", 0) == 0);
+            needTitle = inSet && (up.find("_TITLE") != std::string::npos);
+            continue;
+        }
+        if (!inSet) continue;
+        if (g != std::string::npos && line[g] == '$') continue;
+        // 제목 줄은 비어 있을 수 있다 — 건너뛰면 구성원 값을 SID 로 읽어
+        // maxSetId_ 가 어긋나고 새로 만드는 세트가 덱의 세트와 번호로 부딪친다.
+        if (needTitle) { needTitle = false; continue; }
+        try {
+            int sid = std::stoi(line);
+            if (sid > maxSetId_) maxSetId_ = sid;
+        } catch (...) {}
+        inSet = false;
+    }
 }
 
 bool ModelAssembler::loadRawOnly(const std::string& filename) {
@@ -1716,6 +1722,81 @@ void ModelAssembler::migrateDeadReferences(const std::set<int>& deadPids,
         }
     }
 
+    // 5. merge 는 새 PID 가 하나뿐이라 스칼라 PID 칸도 옮길 수 있다.
+    //    restack 에서 이 칸들을 '직접 고치세요' 로 남기는 이유는 칸 하나에 층 N 개를 못 담기 때문이다 —
+    //    merge 에는 그 문제가 없다. 그대로 두면 감쇠·이력·열팽창이 빈 파트에 걸린 채 해석이 돈다.
+    if (ctx.isMerge && ctx.newPids.size() == 1) {
+        const int mergedPid = ctx.newPids.front();
+        auto deadPid = [&](int v) { return v > 0 && deadPids.count(v) > 0; };
+
+        for (const auto& b : blocks) {
+            // 5a. 칸 자리가 확정된 스칼라 PID 키워드
+            for (const auto& sk : kScalarPidKws) {
+                if (!rsStarts(b.kw, sk.prefix)) continue;
+                if (sk.notSet && rsHas(b.kw, "_SET")) continue;
+                size_t k = rsFirstCard(b.kw);
+                if (k >= b.data.size()) break;
+                size_t li = b.data[k];
+                if (pidRefRewrites_.count(li) || cardEdit.count(li)) break;
+                auto f = rsCardFields(rawLines_[li]);
+                std::string line = rawLines_[li];
+                bool changed = false;
+                int hit = 0;
+                for (int q = 0; q < 2 && sk.fields[q] >= 0; ++q)
+                    if (deadPid(rsIntField(f, static_cast<size_t>(sk.fields[q])))) ++hit;
+                // 두 칸이 모두 죽었다면 합친 뒤 자기 자신을 가리키는 카드가 된다(강체 결합이 의미를 잃는다)
+                if (hit >= 2) {
+                    record("left", b.kw, li,
+                           "두 칸이 모두 이번 merge 로 사라진 파트입니다 — 합치면 자기 자신을 가리키게 되므로"
+                           " 그대로 두었습니다. 이 카드가 필요한지 확인하세요");
+                    break;
+                }
+                for (int q = 0; q < 2 && sk.fields[q] >= 0; ++q) {
+                    int col = sk.fields[q] * 10;
+                    if (!deadPid(rsIntField(f, static_cast<size_t>(sk.fields[q])))) continue;
+                    line = md_setField(line, col, 10, mergedPid);
+                    changed = true;
+                }
+                if (changed) {
+                    cardEdit[li] = line;
+                    record("moved", b.kw, li,
+                           "죽은 PID 를 합친 PID " + std::to_string(mergedPid) + " 로 바꿨습니다");
+                }
+                break;
+            }
+
+            // 5b. 목록형 *DATABASE_HISTORY_PART 와 *ELEMENT_MASS 의 PID 칸
+            bool histPart = rsStarts(b.kw, "*DATABASE_HISTORY_PART") && !rsHas(b.kw, "_SET");
+            bool elemMass = rsStarts(b.kw, "*ELEMENT_MASS");
+            if (!histPart && !elemMass) continue;
+            for (size_t m = 0; m < b.data.size(); ++m) {
+                size_t li = b.data[m];
+                if (pidRefRewrites_.count(li) || cardEdit.count(li)) continue;
+                auto f = rsCardFields(rawLines_[li]);
+                std::string line = rawLines_[li];
+                bool changed = false;
+                // *ELEMENT_MASS 는 PID 칸(2번째)만 옮긴다 — 노드·요소 축은 옮길 자리가 없다
+                size_t from = elemMass ? 1 : 0;
+                size_t to = elemMass ? 2 : f.size();
+                std::set<int> seen;   // 이력 목록에 같은 PID 가 두 번 들어가지 않게
+                for (size_t q = from; q < to && q < f.size(); ++q) {
+                    int v = rsIntField(f, q);
+                    if (!deadPid(v)) { if (v > 0) seen.insert(v); continue; }
+                    int put = mergedPid;
+                    if (histPart && seen.count(mergedPid)) put = 0;   // 이미 있으면 빈 칸으로
+                    line = md_setField(line, static_cast<int>(q) * 10, 10, put);
+                    if (put > 0) seen.insert(put);
+                    changed = true;
+                }
+                if (changed) {
+                    cardEdit[li] = line;
+                    record("moved", b.kw, li,
+                           "죽은 PID 를 합친 PID " + std::to_string(mergedPid) + " 로 바꿨습니다");
+                }
+            }
+        }
+    }
+
     for (const auto& [li, text] : cardEdit) pidRefRewrites_[li] = {text};
     for (const auto& blk : newSetBlocks) addedKeywordBlocks_.push_back(blk);
 }
@@ -1827,6 +1908,74 @@ int ModelAssembler::pidRefPickLayer(const PidRefMigrateCtx& ctx, double lo, doub
 }
 
 // 이관 결과를 rawLines_ 에 반영한다(스캔·보고가 끝난 뒤에 부른다).
+// 덱 머리에 넣을 $ KOOREMAPPER-PIDREF 블록을 만든다.
+// '왜 tied 가 아무 일도 안 했는지' 를 파일 안에서 찾을 수 있어야 한다 — 그래서 콘솔이 접더라도
+// 이 블록에는 발견을 전부 적는다. 발견이 0 건이면 빈 문자열이다(예전 출력과 바이트 그대로 같아야 한다).
+// assemble(writeOutput)과 자기 구현으로 덱을 쓰는 경로(단독 merge)가 같은 문구를 쓰게 하는 자리다.
+std::string ModelAssembler::buildPidRefHeaderBlock() const {
+    if (pidRefFindings_.empty()) return std::string();
+    size_t movedN = 0;
+    for (const auto& f : pidRefFindings_) if (f.grade == "moved") ++movedN;
+    std::ostringstream blk;
+    blk << "$ KOOREMAPPER-PIDREF: " << pidRefFindings_.size()
+        << " reference(s) — restack/merge 가 비운 PID·지운 요소·지운 노드를 가리키던 자리입니다"
+           " (옮김 " << movedN << ", 못 옮김 " << (pidRefFindings_.size() - movedN) << ")\n";
+    blk << "$ KOOREMAPPER-PIDREF: 등급 moved=이 덱에서 옮겼습니다, left=옮기지 못했습니다(이유가 붙습니다),"
+           " manual=직접 고치세요, unknown=칸 자리 미확정, maybe=화이트리스트 밖(칸 뜻 미확인 — rc 에는 넣지 않습니다)\n";
+    blk << "$ KOOREMAPPER-PIDREF: 줄 번호는 이 op 가 읽은 입력 덱 기준입니다"
+           "(이 블록과 이관으로 늘어난 줄만큼 아래로 밀려 있습니다)\n";
+    for (const auto& f : pidRefFindings_) {
+        blk << "$ KOOREMAPPER-PIDREF [" << f.axis << "] line " << f.line << " "
+            << f.keyword << " (" << f.grade << "): " << f.advice << "\n";
+        blk << "$ KOOREMAPPER-PIDREF   | " << f.text << "\n";
+    }
+    blk << "$ KOOREMAPPER-PIDREF-END\n";
+    return blk.str();
+}
+
+// 자기 구현으로 덱을 쓰는 경로(단독 merge)용 진입점 — assemble 과 같은 코드로 같은 결과를 낸다.
+// assemble 은 applyMerge 안에서 같은 세 호출(migrate → scan → applyPidRefRewrites)을 한다.
+bool ModelAssembler::processDeadReferences(std::vector<std::string>& lines,
+                                           const std::set<int>& deadPids,
+                                           const std::set<int>& deadEids,
+                                           const std::set<int>& deadNodes,
+                                           const std::vector<int>& newPids,
+                                           const std::string& opName,
+                                           const std::string& policy,
+                                           std::vector<std::string>& addedBlocks,
+                                           std::string& headerBlock,
+                                           std::vector<std::string>& consoleLines) {
+    rawLines_ = lines;
+    infoMessages.clear();
+    initMaxSetIdFromRawLines();
+    pidRefFindings_.clear();
+    pidRefRewrites_.clear();
+    addedKeywordBlocks_.clear();
+    pidRefPolicy_ = policy.empty() ? std::string("strict") : policy;
+
+    PidRefMigrateCtx mctx;
+    mctx.isMerge = true;           // 층 개념이 없다 — 죽은 PID 들이 새 PID 하나로 모인다
+    mctx.newPids = newPids;
+    std::set<size_t> migrated;
+    std::vector<PidRefFinding> movedFindings;
+    migrateDeadReferences(deadPids, mctx, migrated, movedFindings);
+    scanDeadReferences(opName, deadPids, deadEids, deadNodes, newPids,
+                       migrated, std::move(movedFindings));
+    applyPidRefRewrites();
+
+    lines = rawLines_;
+    addedBlocks = addedKeywordBlocks_;
+    headerBlock = buildPidRefHeaderBlock();
+    // assemble 은 infoMessages 를 드라이버가 찍는다 — 단독 경로도 같은 문구를 보게 돌려준다
+    consoleLines = infoMessages;
+
+    // maybe(화이트리스트 밖)는 칸 뜻을 확인하지 못한 것이라 rc 에 넣지 않는다 — assemble 과 같은 규칙.
+    size_t left = 0;
+    for (const auto& f : pidRefFindings_)
+        if (f.grade != "moved" && f.grade != "maybe") ++left;
+    return !(left > 0 && pidRefPolicy_ != "warn");
+}
+
 void ModelAssembler::applyPidRefRewrites() {
     if (pidRefRewrites_.empty()) return;
     std::vector<std::string> out;
@@ -4278,22 +4427,8 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
     // '왜 tied 가 아무 일도 안 했는지' 를 파일 안에서 찾을 수 있어야 한다.
     // 발견이 0 건이면 한 줄도 쓰지 않는다(예전 출력과 바이트 그대로 같아야 한다).
     if (!pidRefFindings_.empty()) {
-        size_t movedN = 0;
-        for (const auto& f : pidRefFindings_) if (f.grade == "moved") ++movedN;
         std::ostringstream blk;
-        blk << "$ KOOREMAPPER-PIDREF: " << pidRefFindings_.size()
-            << " reference(s) — restack/merge 가 비운 PID·지운 요소·지운 노드를 가리키던 자리입니다"
-               " (옮김 " << movedN << ", 못 옮김 " << (pidRefFindings_.size() - movedN) << ")\n";
-        blk << "$ KOOREMAPPER-PIDREF: 등급 moved=이 덱에서 옮겼습니다, left=옮기지 못했습니다(이유가 붙습니다),"
-               " manual=직접 고치세요, unknown=칸 자리 미확정, maybe=화이트리스트 밖(칸 뜻 미확인 — rc 에는 넣지 않습니다)\n";
-        blk << "$ KOOREMAPPER-PIDREF: 줄 번호는 이 op 가 읽은 입력 덱 기준입니다"
-               "(이 블록과 이관으로 늘어난 줄만큼 아래로 밀려 있습니다)\n";
-        for (const auto& f : pidRefFindings_) {
-            blk << "$ KOOREMAPPER-PIDREF [" << f.axis << "] line " << f.line << " "
-                << f.keyword << " (" << f.grade << "): " << f.advice << "\n";
-            blk << "$ KOOREMAPPER-PIDREF   | " << f.text << "\n";
-        }
-        blk << "$ KOOREMAPPER-PIDREF-END\n";
+        blk << buildPidRefHeaderBlock();
 
         std::string body = output.str();
         // *KEYWORD 는 덱의 첫 키워드여야 한다 — 그 바로 뒤에 넣는다(없으면 맨 앞).

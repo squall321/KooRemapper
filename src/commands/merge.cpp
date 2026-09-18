@@ -2,6 +2,7 @@
 #include "util/YamlComment.h"
 #include "cli/ConsoleOutput.h"
 #include "assembly/AssemblyConfig.h"   // pid_refs 허용값 표 — assemble 과 단독이 같은 표를 쓴다
+#include "assembly/ModelAssembler.h"  // 죽은 PID 참조 처리를 assemble 과 같은 코드로 한다
 
 #include <string>
 #include <vector>
@@ -1106,6 +1107,42 @@ int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
         for (int j = 0; j < 8; j++) usedNodeIds.insert(ne.nid[j]);
     }
 
+    // 합쳐진 원 파트는 요소가 0 개인 빈 파트로 남는다 — 그것을 가리키던 세트·접촉·이력 카드가
+    // 매달린 채 해석까지 조용히 통과한다. assemble 의 merge 와 **같은 코드**로 옮길 수 있는 것은
+    // 옮기고(세트 구성원·비-tied 접촉을 합친 PID 로), 못 옮긴 것은 덱 머리 블록과 콘솔로 알린다.
+    // 옮기지 못한 자리가 남으면 rc=1 (pid_refs: warn 이면 같은 보고를 하고 rc=0).
+    std::string pidRefBlock;
+    std::vector<std::string> pidRefAddedBlocks;
+    bool pidRefOk = true;
+    {
+        std::set<int> deadPids;
+        for (const auto& grp : cfg.groups) {
+            for (int pid : grp.pids) {
+                bool anyLeft = false;
+                for (const auto& [eid, el] : mdl.elems) {
+                    if (el.pid == pid && removeElemIds.count(eid) == 0) { anyLeft = true; break; }
+                }
+                if (!anyLeft) deadPids.insert(pid);
+            }
+        }
+        std::set<int> deadEids(removeElemIds.begin(), removeElemIds.end());
+        std::set<int> deadNodes;
+        for (const auto& [nid, pos] : mdl.nodes) {
+            (void)pos;
+            if (!usedNodeIds.count(nid)) deadNodes.insert(nid);
+        }
+        std::vector<int> newPids;
+        for (const auto& gr : results) newPids.push_back(gr.pid);
+
+        KooRemapper::ModelAssembler ma;
+        std::vector<std::string> pidRefLines;
+        pidRefOk = ma.processDeadReferences(
+            mdl.rawLines, deadPids, deadEids, deadNodes, newPids, "merge",
+            (cfg.pidRefs == KooRemapper::PidRefPolicy::WARN) ? "warn" : "strict",
+            pidRefAddedBlocks, pidRefBlock, pidRefLines);
+        for (const auto& ln : pidRefLines) console.info(ln);
+    }
+
     // Copy raw lines, filtering removed elements and orphan nodes
     bool inElemBlock = false;
     bool inNodeBlock = false;
@@ -1140,7 +1177,13 @@ int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
         }
 
         outf << rawLine << "\n";
+        // *KEYWORD 는 덱의 첫 키워드다 — 그 바로 뒤에 참조 보고 블록을 넣는다(assemble 과 같은 자리)
+        if (!pidRefBlock.empty() && up == "*KEYWORD") {
+            outf << pidRefBlock;
+            pidRefBlock.clear();
+        }
     }
+    if (!pidRefBlock.empty()) { outf << pidRefBlock; pidRefBlock.clear(); }   // *KEYWORD 가 없는 덱
 
     // Append new material, section, part, and elements for each group
     for (auto& gr : results) {
@@ -1200,6 +1243,8 @@ int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
         }
     }
 
+    for (const auto& blk : pidRefAddedBlocks) outf << blk;
+
     outf << "*END\n";
     outf.close();
 
@@ -1220,5 +1265,6 @@ int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
         }
     }
 
-    return 0;
+    // 옮기지 못한 참조가 남았으면 덱은 쓰되 rc=1 로 끝낸다 — 체인이 조용히 솔버까지 가지 않게(assemble 과 같다)
+    return pidRefOk ? 0 : 1;
 }

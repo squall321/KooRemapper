@@ -114,6 +114,21 @@ public:
     void setPidRefPolicy(const std::string& policy) { pidRefPolicy_ = policy; }
     const std::string& getPidRefPolicy() const { return pidRefPolicy_; }
 
+    // 자기 구현으로 덱을 쓰는 경로(단독 merge)도 assemble 과 똑같은 참조 처리를 쓰게 하는 진입점.
+    // lines 를 그 자리에서 고치고(옮길 수 있는 참조 이관), 덱 머리에 넣을 $ 블록을 headerBlock 에,
+    // 새로 만든 키워드 블록을 addedBlocks 에 담는다. 콘솔 보고는 이 안에서 한다.
+    // 옮기지 못한 자리가 남고 정책이 strict 면 false — 호출자는 덱을 쓴 뒤 rc=1 로 끝낸다.
+    bool processDeadReferences(std::vector<std::string>& lines,
+                               const std::set<int>& deadPids,
+                               const std::set<int>& deadEids,
+                               const std::set<int>& deadNodes,
+                               const std::vector<int>& newPids,
+                               const std::string& opName,
+                               const std::string& policy,
+                               std::vector<std::string>& addedBlocks,
+                               std::string& headerBlock,
+                               std::vector<std::string>& consoleLines);
+
 private:
     struct AddedNode { int id; double x, y, z; };
     struct AddedElement {
@@ -246,6 +261,10 @@ private:
     // 스캔과 보고가 쓰는 줄 번호는 이관 전 덱 기준이어야 하기 때문이다.
     std::map<size_t, std::vector<std::string>> pidRefRewrites_;
     void applyPidRefRewrites();
+    // rawLines_ 에서 *SET_* SID 를 훑어 maxSetId_ 를 채운다(loadBaseModel 과 단독 경로 공용)
+    void initMaxSetIdFromRawLines();
+    // 덱 머리에 넣을 $ KOOREMAPPER-PIDREF 블록(발견이 없으면 빈 문자열)
+    std::string buildPidRefHeaderBlock() const;
     std::vector<PidRefFinding> pidRefFindings_;
     std::string pidRefPolicy_ = "strict";
 
