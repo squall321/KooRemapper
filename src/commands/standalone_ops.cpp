@@ -352,12 +352,34 @@ int runRestack(const std::string& yamlFile, ConsoleOutput& console) {
 
         if (!inLayers) {
             y.parseCommonKey(key, val);
+            // op 수준 키도 assemble 과 같은 집합 — 예전엔 interface_contact·element_size·czm_* 를 몰라
+            // 같은 YAML 이 명령에 따라 다른 덱이 됐다(매뉴얼은 같은 알고리즘이라고 약속한다)
             if      (key == "target_pid") { try { op.targetPid = std::stoi(val); } catch(...) {} }
             else if (key == "direction") op.direction = val;
             else if (key == "element_type") op.elementType = val;
+            else if (key == "element_size") { try { op.elementSize = std::stod(val); } catch(...) {} }
+            else if (key == "interface_contact") op.interfaceContact = val;
+            else if (key == "czm_normal") { try { op.czmNormal = std::stod(val); } catch(...) {} }
+            else if (key == "czm_shear") { try { op.czmShear = std::stod(val); } catch(...) {} }
+            else if (key == "drop_height") { try { op.dropHeight = std::stod(val); } catch(...) {} }
             else if (key == "layers") { inLayers = true; layersIndent = y.keyIndent(tr, indent); }
             continue;
         }
+
+        // 층 키 — assemble 과 같은 집합을 읽는다. 예전엔 thickness·material_card 만 읽어
+        // title 은 'Restack Layer N' 으로, num_elements·element_type 은 무시돼 층 분할이 달라졌다.
+        auto applyLayerKey = [&](const std::string& k, const std::string& v, int blockKeyIndent) {
+            RestackLayer& L = op.layers.back();
+            if      (k == "thickness")    { try { L.thickness = std::stod(v); } catch(...) {} }
+            else if (k == "num_elements" || k == "nz") { try { L.numElements = std::stoi(v); } catch(...) {} }
+            else if (k == "element_type") L.elementType = v;
+            else if (k == "title" || k == "name") L.title = v;
+            else if (k == "czm_normal")   { try { L.czmNormal = std::stod(v); } catch(...) {} }
+            else if (k == "czm_shear")    { try { L.czmShear = std::stod(v); } catch(...) {} }
+            else if (k == "material_card" && v == "|") {
+                readingMatCard = true; matCardKeyIndent = blockKeyIndent; matCardBaseIndent = -1;
+            }
+        };
 
         // Layer list
         if (tr.substr(0,2) == "- ") {
@@ -368,17 +390,20 @@ int runRestack(const std::string& yamlFile, ConsoleOutput& console) {
                 std::string rk = y.trim(rest.substr(0, rcp));
                 // 예전엔 대시 줄 값의 주석을 안 떼 'material_card: |  # 메모' 층을 카드 없음으로, '"0.2"  # 메모' 를 잘못된 두께로 봤다
                 std::string rv = y.stripQuotes(y.trim(KooRemapper::yamlStripComment(rest.substr(rcp+1))));
-                if (rk == "thickness") { try { op.layers.back().thickness = std::stod(rv); } catch(...) {} }
-                else if (rk == "material_card" && rv == "|") { readingMatCard = true; matCardKeyIndent = y.keyIndent(tr, indent); matCardBaseIndent = -1; }
+                applyLayerKey(rk, rv, y.keyIndent(tr, indent));
             }
             continue;
         }
         if (!op.layers.empty()) {
-            if (key == "thickness") { try { op.layers.back().thickness = std::stod(val); } catch(...) {} }
-            else if (key == "material_card" && val == "|") { readingMatCard = true; matCardKeyIndent = indent; matCardBaseIndent = -1; }
+            applyLayerKey(key, val, indent);
         }
     }
     f.close();
+
+    // YAML '|' 블록은 끝 빈 줄을 버린다(clip) — assemble 쪽 AssemblyConfigReader 와 같게 맞춘다.
+    // 남겨 두면 층 카드 뒤 빈 줄이 덱에 그대로 찍혀 같은 YAML 인데 assemble 결과와 달라진다.
+    for (auto& layer : op.layers)
+        while (!layer.materialCard.empty() && layer.materialCard.back() == '\n') layer.materialCard.pop_back();
 
     if (y.modelFile.empty()) { console.error("[restack] model not specified"); return 1; }
     std::string modelPath = y.resolvePath(y.modelFile);
