@@ -5,6 +5,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <algorithm>
+#include <cmath>
 #include <iostream>
 
 // Knowledge graph (lat.md):
@@ -1613,7 +1614,8 @@ void AssemblyConfigReader::validateOperation(const AssemblyOperation& op, size_t
                     "' (must be one of auto, x, y, z, +x, -x, +y, -y, +z, -z)");
         }
         for (size_t j = 0; j < op.restack.layers.size(); ++j) {
-            if (op.restack.layers[j].thickness <= 0)
+            // nan 은 '<= 0' 도 '> 0' 도 아니어서 그대로 통과해 좌표가 nan 인 덱이 됐다(D7)
+            if (!std::isfinite(op.restack.layers[j].thickness) || op.restack.layers[j].thickness <= 0)
                 throw std::runtime_error("Operation " + std::to_string(i+1) +
                     ": layer " + std::to_string(j+1) + " has invalid thickness");
             if (op.restack.layers[j].materialCard.empty())
@@ -1669,6 +1671,8 @@ void AssemblyConfigReader::validateOperation(const AssemblyOperation& op, size_t
             throw std::runtime_error(pfx + "invalid plane '" + op.warpage.plane + "'");
         if (op.warpage.unit != "um" && op.warpage.unit != "mm" && op.warpage.unit != "m")
             throw std::runtime_error(pfx + "invalid unit '" + op.warpage.unit + "'");
+        if (!std::isfinite(op.warpage.morphFactor))
+            throw std::runtime_error(pfx + "morph_factor must be a finite number");
         if (op.warpage.morphFactor <= 0.0)
             throw std::runtime_error(pfx + "morph_factor must be positive");
         if (op.warpage.mode != "prestress" && op.warpage.mode != "deform")
@@ -1690,6 +1694,11 @@ void AssemblyConfigReader::validateOperation(const AssemblyOperation& op, size_t
             throw std::runtime_error(pfx + "source_pid required");
 
         // Prestress mode validation
+        // nan/inf 는 아래 부등호 검사를 모두 통과해 두께·좌표가 nan 인 덱이 됐다(D7)
+        if (!std::isfinite(op.offset.thickness) ||
+            !std::isfinite(op.offset.innerOffset) || !std::isfinite(op.offset.outerOffset))
+            throw std::runtime_error(pfx + "thickness/inner_offset/outer_offset must be finite numbers");
+
         bool isDualOffset = (op.offset.prestressMode == "dual_offset");
         if (isDualOffset) {
             // Dual offset mode: inner/outer required
@@ -1768,8 +1777,13 @@ void AssemblyConfigReader::validateOperation(const AssemblyOperation& op, size_t
         if (dir != "+z" && dir != "-z" && dir != "+x" && dir != "-x" &&
             dir != "+y" && dir != "-y")
             throw std::runtime_error(pfx + "invalid direction '" + dir + "'");
+        // nan/inf 는 부등호 검사를 모두 통과해 nan 좌표가 파일에 써졌다(D7)
+        if (!std::isfinite(op.indent.depth))
+            throw std::runtime_error(pfx + "depth must be a finite number");
         if (op.indent.depth == 0.0)
             throw std::runtime_error(pfx + "depth must be non-zero (positive=indent, negative=emboss)");
+        if (!std::isfinite(op.indent.r1) || !std::isfinite(op.indent.r2))
+            throw std::runtime_error(pfx + "r1 and r2 must be finite numbers");
         if (op.indent.r1 <= 0.0 || op.indent.r2 <= 0.0)
             throw std::runtime_error(pfx + "r1 and r2 must be positive");
         if (op.indent.shapeType != "polygon" && op.indent.shapeType != "spline")

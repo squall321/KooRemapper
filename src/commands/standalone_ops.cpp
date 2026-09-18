@@ -9,6 +9,9 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
 
 // Knowledge graph (lat.md):
 //   @lat: [[modules/commands]]
@@ -163,6 +166,58 @@ static bool rejectEmptyOutput(const StandaloneYamlBase& y, const char* tag, cons
     return true;
 }
 
+// 비유한 값 막기(D7) — 수식·입력이 nan/inf 를 만들면 좌표·두께가 'nan' 토큰으로 그대로 써지고 rc=0 이었다.
+// 숫자만 들어가는 블록(*NODE·*ELEMENT·*INITIAL)만 본다 — 제목 줄이 있는 키워드는 'Nan...' 같은 이름을
+// 값으로 오해할 수 있어 제외한다.
+static bool deckHasNonFinite(const std::string& path, std::string& where) {
+    std::ifstream f(path);
+    if (!f.is_open()) return false;
+    bool numericBlock = false;
+    int lineNo = 0;
+    std::string ln;
+    while (std::getline(f, ln)) {
+        ++lineNo;
+        if (!ln.empty() && ln.back() == '\r') ln.pop_back();
+        if (!ln.empty() && ln[0] == '*') {
+            numericBlock = (ln.compare(0, 5, "*NODE") == 0 ||
+                            ln.compare(0, 8, "*ELEMENT") == 0 ||
+                            ln.compare(0, 8, "*INITIAL") == 0);
+            continue;
+        }
+        if (!numericBlock || ln.empty() || ln[0] == '$') continue;
+        // 숫자 줄에는 nan/inf 의 글자가 없다 — 빠른 걸러내기(큰 덱에서 줄마다 strtod 하지 않도록)
+        if (ln.find_first_of("nNiI") == std::string::npos) continue;
+        std::istringstream iss(ln);
+        std::string tok;
+        while (iss >> tok) {
+            const char* begin = tok.c_str();
+            char* end = nullptr;
+            double v = std::strtod(begin, &end);
+            if (end == begin + tok.size() && !std::isfinite(v)) {
+                where = path + ":" + std::to_string(lineNo) + " '" + tok + "'";
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// 쓰기 + 비유한 값 확인. ModelAssembler 는 쓰기 전에 노드 좌표를 꺼낼 공개 접근자가 없어 쓴 직후에 보고,
+// 발견하면 그 파일을 지워 0 나누기 경로와 같은 결과(에러 메시지 + 결과 파일 없음 + rc=1)로 맞춘다.
+static bool writeOutputChecked(ModelAssembler& assembler, const std::string& outputPrefix,
+                               const char* tag, ConsoleOutput& console) {
+    if (!assembler.writeOutput(outputPrefix)) { console.error(assembler.getErrorMessage()); return false; }
+    std::string where;
+    std::string deck = outputPrefix + ".k";
+    if (deckHasNonFinite(deck, where)) {
+        std::remove(deck.c_str());
+        console.error(std::string("[") + tag + "] 결과에 유한하지 않은 값(nan/inf)이 있습니다: " + where +
+                      " — 출력 파일을 지웠습니다 / non-finite value in the result; output removed.");
+        return false;
+    }
+    return true;
+}
+
 // ── Standalone wrap ─────────────────────────────────────────────────────────
 int runWrap(const std::string& yamlFile, ConsoleOutput& console) {
     StandaloneYamlBase y;
@@ -227,9 +282,7 @@ int runWrap(const std::string& yamlFile, ConsoleOutput& console) {
         console.error(assembler.getErrorMessage()); return 1;
     }
     for (auto& msg : assembler.infoMessages) console.info(msg);
-    if (!assembler.writeOutput(y.getOutputPrefix())) {
-        console.error(assembler.getErrorMessage()); return 1;
-    }
+    if (!writeOutputChecked(assembler, y.getOutputPrefix(), "wrap", console)) return 1;
     console.success("Wrap output: " + y.getOutputPrefix() + ".k");
     return 0;
 }
@@ -282,9 +335,7 @@ int runUpdate(const std::string& yamlFile, ConsoleOutput& console) {
         console.error(assembler.getErrorMessage()); return 1;
     }
     for (auto& msg : assembler.infoMessages) console.info(msg);
-    if (!assembler.writeOutput(outputPrefix)) {
-        console.error(assembler.getErrorMessage()); return 1;
-    }
+    if (!writeOutputChecked(assembler, outputPrefix, "update", console)) return 1;
     console.success("Update output: " + outputPrefix + ".k");
     return 0;
 }
@@ -416,7 +467,7 @@ int runRestack(const std::string& yamlFile, ConsoleOutput& console) {
     if (!assembler.loadBaseModel(modelPath)) { console.error(assembler.getErrorMessage()); return 1; }
     if (!assembler.applyRestack(op, y.matE, y.matNu)) { console.error(assembler.getErrorMessage()); return 1; }
     for (const auto& msg : assembler.infoMessages) console.println(msg);
-    if (!assembler.writeOutput(outputPrefix)) { console.error(assembler.getErrorMessage()); return 1; }
+    if (!writeOutputChecked(assembler, outputPrefix, "restack", console)) return 1;
     console.println("[restack] Done -> " + outputPrefix + ".k");
     return 0;
 }
@@ -464,7 +515,7 @@ int runBend(const std::string& yamlFile, ConsoleOutput& console) {
     if (!assembler.loadBaseModel(modelPath)) { console.error(assembler.getErrorMessage()); return 1; }
     if (!assembler.applyBend(op, y.matE, y.matNu, y.configDir)) { console.error(assembler.getErrorMessage()); return 1; }
     for (const auto& msg : assembler.infoMessages) console.println(msg);
-    if (!assembler.writeOutput(outputPrefix)) { console.error(assembler.getErrorMessage()); return 1; }
+    if (!writeOutputChecked(assembler, outputPrefix, "bend", console)) return 1;
     console.println("[bend] Done -> " + outputPrefix + ".k");
     return 0;
 }
@@ -541,7 +592,7 @@ int runIndent(const std::string& yamlFile, ConsoleOutput& console) {
     if (!assembler.loadBaseModel(modelPath)) { console.error(assembler.getErrorMessage()); return 1; }
     if (!assembler.applyIndent(op, y.matE, y.matNu)) { console.error(assembler.getErrorMessage()); return 1; }
     for (const auto& msg : assembler.infoMessages) console.println(msg);
-    if (!assembler.writeOutput(outputPrefix)) { console.error(assembler.getErrorMessage()); return 1; }
+    if (!writeOutputChecked(assembler, outputPrefix, "indent", console)) return 1;
     console.println("[indent] Done -> " + outputPrefix + ".k");
     return 0;
 }
@@ -583,7 +634,7 @@ int runFormstrain(const std::string& yamlFile, ConsoleOutput& console) {
     if (!assembler.loadBaseModel(modelPath)) { console.error(assembler.getErrorMessage()); return 1; }
     if (!assembler.applyFormStrain(op)) { console.error(assembler.getErrorMessage()); return 1; }
     for (const auto& msg : assembler.infoMessages) console.println(msg);
-    if (!assembler.writeOutput(outputPrefix)) { console.error(assembler.getErrorMessage()); return 1; }
+    if (!writeOutputChecked(assembler, outputPrefix, "formstrain", console)) return 1;
     console.println("[formstrain] Done -> " + outputPrefix + ".k");
     return 0;
 }
@@ -626,7 +677,7 @@ int runConvert(const std::string& yamlFile, ConsoleOutput& console) {
     if (!assembler.loadBaseModel(modelPath)) { console.error(assembler.getErrorMessage()); return 1; }
     if (!assembler.applyTet10Convert(op)) { console.error(assembler.getErrorMessage()); return 1; }
     for (const auto& msg : assembler.infoMessages) console.println(msg);
-    if (!assembler.writeOutput(outputPrefix)) { console.error(assembler.getErrorMessage()); return 1; }
+    if (!writeOutputChecked(assembler, outputPrefix, "convert", console)) return 1;
     console.println("[convert] Done -> " + outputPrefix + ".k");
     return 0;
 }
@@ -667,7 +718,7 @@ int runRefine(const std::string& yamlFile, ConsoleOutput& console) {
     if (!assembler.loadBaseModel(modelPath)) { console.error(assembler.getErrorMessage()); return 1; }
     if (!assembler.applyRefine(op)) { console.error(assembler.getErrorMessage()); return 1; }
     for (const auto& msg : assembler.infoMessages) console.println(msg);
-    if (!assembler.writeOutput(outputPrefix)) { console.error(assembler.getErrorMessage()); return 1; }
+    if (!writeOutputChecked(assembler, outputPrefix, "refine", console)) return 1;
     console.println("[refine] Done -> " + outputPrefix + ".k");
     return 0;
 }
@@ -708,7 +759,7 @@ int runElform(const std::string& yamlFile, ConsoleOutput& console) {
     if (!assembler.loadBaseModel(modelPath)) { console.error(assembler.getErrorMessage()); return 1; }
     if (!assembler.applyElform(op)) { console.error(assembler.getErrorMessage()); return 1; }
     for (const auto& msg : assembler.infoMessages) console.println(msg);
-    if (!assembler.writeOutput(outputPrefix)) { console.error(assembler.getErrorMessage()); return 1; }
+    if (!writeOutputChecked(assembler, outputPrefix, "elform", console)) return 1;
     console.println("[elform] Done -> " + outputPrefix + ".k");
     return 0;
 }
@@ -751,7 +802,7 @@ int runDisconnect(const std::string& yamlFile, ConsoleOutput& console) {
     if (!assembler.loadBaseModel(modelPath)) { console.error(assembler.getErrorMessage()); return 1; }
     if (!assembler.applyDisconnect(op)) { console.error(assembler.getErrorMessage()); return 1; }
     for (const auto& msg : assembler.infoMessages) console.println(msg);
-    if (!assembler.writeOutput(outputPrefix)) { console.error(assembler.getErrorMessage()); return 1; }
+    if (!writeOutputChecked(assembler, outputPrefix, "disconnect", console)) return 1;
     console.println("[disconnect] Done -> " + outputPrefix + ".k");
     return 0;
 }
@@ -877,7 +928,7 @@ int runIga(const std::string& yamlFile, ConsoleOutput& console) {
     if (!assembler.loadBaseModel(modelPath)) { console.error(assembler.getErrorMessage()); return 1; }
     if (!assembler.applyIGA(igaOp, outputPrefix)) { console.error(assembler.getErrorMessage()); return 1; }
     for (const auto& msg : assembler.infoMessages) console.println(msg);
-    if (!assembler.writeOutput(outputPrefix)) { console.error(assembler.getErrorMessage()); return 1; }
+    if (!writeOutputChecked(assembler, outputPrefix, "iga", console)) return 1;
     console.println("[iga] Done -> " + outputPrefix + ".k");
     return 0;
 }
@@ -945,7 +996,7 @@ int runWarpage(const std::string& yamlFile, ConsoleOutput& console) {
     if (!assembler.loadBaseModel(modelPath)) { console.error(assembler.getErrorMessage()); return 1; }
     if (!assembler.applyWarpage(op, y.matE, y.matNu, y.configDir)) { console.error(assembler.getErrorMessage()); return 1; }
     for (const auto& msg : assembler.infoMessages) console.println(msg);
-    if (!assembler.writeOutput(outputPrefix)) { console.error(assembler.getErrorMessage()); return 1; }
+    if (!writeOutputChecked(assembler, outputPrefix, "warpage", console)) return 1;
     console.println("[warpage] Done -> " + outputPrefix + ".k");
     return 0;
 }
@@ -1083,7 +1134,7 @@ int runOffset(const std::string& yamlFile, ConsoleOutput& console) {
     if (!assembler.loadBaseModel(modelPath)) { console.error(assembler.getErrorMessage()); return 1; }
     if (!assembler.applyOffset(op, y.matE, y.matNu)) { console.error(assembler.getErrorMessage()); return 1; }
     for (const auto& msg : assembler.infoMessages) console.println(msg);
-    if (!assembler.writeOutput(outputPrefix)) { console.error(assembler.getErrorMessage()); return 1; }
+    if (!writeOutputChecked(assembler, outputPrefix, "offset", console)) return 1;
     console.println("[offset] Done -> " + outputPrefix + ".k");
     return 0;
 }
