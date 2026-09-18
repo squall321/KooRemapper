@@ -404,24 +404,36 @@ static bool printLegacyHelp(ConsoleOutput& console, const std::string& helpCmd) 
         console.println("    eps_x: -0.02  eps_y: 0.0  eps_z: 0.0");
         std::cout << "\n";
         console.println("  restack      Extrude/restack layers (solid rebuild)");
-        console.println("    source_pid: 2              # Source part to extrude from");
-        console.println("    layers:                    # Layer stack definition");
-        console.println("      - pid: 10  thickness: 0.3  secid: 1  mid: 1  hgid: 1");
-        console.println("      - pid: 11  thickness: 0.5  secid: 2  mid: 2  hgid: 1");
+        console.println("    target_pid: 1              # Source part to extrude from");
+        console.println("    direction: z               # Extrude axis (x/y/z)");
+        console.println("    element_type: solid        # solid | tshell | shell");
+        console.println("    layers:                    # Each layer: thickness + material_card");
+        console.println("      - thickness: 0.5");
+        console.println("        material_card: |");
+        console.println("          *MAT_ELASTIC");
+        console.println("              MID001  7.85E-09  2.10E+05       0.3");
         std::cout << "\n";
         console.println("  bend         Apply bending deformation + prestress");
-        console.println("    target_pid: 3");
-        console.println("    deflection_file: bend.dat  # Grid deflection data (CSV)");
-        console.println("    plane: xy                  # Bending plane (xy/xz/yz)");
-        console.println("    thickness: 0.5");
+        console.println("    target_pid: 1");
+        console.println("    plane: xy                  # Bending plane (xy, yz, or zx)");
+        console.println("    mode: deform               # deform | stress");
+        console.println("    source: formula            # formula | dat (dat_file) | dat_pair");
+        console.println("    expression: \"0.5 * sin(pi*x1/L1) * sin(pi*x2/L2)\"");
         std::cout << "\n";
         console.println("  indent       Apply indentation/embossing deformation + prestress");
-        console.println("    target_pid: 3");
+        console.println("    target_pid: 1");
+        console.println("    plane: xy                  # Shape plane (xy, yz, or zx)");
+        console.println("    direction: -z              # Indent axis (+x/-x/+y/-y/+z/-z)");
         console.println("    depth: 0.5                 # Indent depth (negative = emboss)");
-        console.println("    r1: 2.0  r2: 1.0           # Fillet radii");
-        console.println("    center_x: 50.0  center_y: 30.0");
-        console.println("    direction: z               # Indent axis (x/y/z)");
-        console.println("    thickness: 0.5");
+        console.println("    r1: 0.5                    # Top fillet radius");
+        console.println("    r2: 1.0                    # Bottom fillet radius");
+        console.println("    shape:");
+        console.println("      type: polygon            # polygon | spline");
+        console.println("      points:                  # 3 points or more");
+        console.println("        - [6, 3]");
+        console.println("        - [12, 3]");
+        console.println("        - [12, 7]");
+        console.println("        - [6, 7]");
         std::cout << "\n";
         console.println("  formstrain   Compute plastic strain from shell dihedral angles");
         console.println("    target_pid: 3");
@@ -1072,7 +1084,7 @@ static bool printLegacyHelp(ConsoleOutput& console, const std::string& helpCmd) 
     } else if (helpCmd == "load") {
         console.println("Usage: KooRemapper load <config.yaml>");
         std::cout << "\n";
-        console.println("Apply loads (force/pressure/normal_pressure) to parts from YAML config.");
+        console.println("Apply loads (pressure/normal_pressure/force) to parts from YAML config.");
         console.println("Inserts *LOAD_*, *DEFINE_CURVE, *SET_* keywords.");
         std::cout << "\n";
         console.println("YAML Config Format:");
@@ -1080,9 +1092,9 @@ static bool printLegacyHelp(ConsoleOutput& console, const std::string& helpCmd) 
         console.println("  output: mesh_loaded.k");
         console.println("  loads:");
         console.println("    - part: 1");
-        console.println("      mode: pressure          # pressure | force | normal_pressure");
-        console.println("      value: 1.0              # Load magnitude");
-        console.println("      direction: [0, 0, 1]    # Load direction vector");
+        console.println("      mode: pressure          # pressure | normal_pressure | force");
+        console.println("      value: 1.0              # Load magnitude ([MPa], force mode: [N])");
+        console.println("      direction: [0, 0, 1]    # Load direction vector (normal_pressure 외 필수)");
         console.println("      select: direction        # direction | tied | set");
         console.println("      angle: 45.0             # Face selection angle tolerance");
         console.println("      curve:                   # Optional time-load curve");
@@ -1090,10 +1102,15 @@ static bool printLegacyHelp(ConsoleOutput& console, const std::string& helpCmd) 
         console.println("        - [0.001, 1.0]");
         console.println("        - [0.01, 1.0]");
         std::cout << "\n";
+        console.println("Load modes:");
+        console.println("  pressure         *LOAD_SEGMENT_SET with value as pressure");
+        console.println("  normal_pressure  Same, but no direction needed (all exposed faces)");
+        console.println("  force            Total force [N] spread over projected area");
+        std::cout << "\n";
         console.println("Select modes:");
-        console.println("  direction  Face normals within angle of direction vector");
-        console.println("  tied       Faces participating in tied contact");
-        console.println("  set        Existing segment set given by 'set_id'");
+        console.println("  direction  Face normals within angle of direction vector (default)");
+        console.println("  tied       Faces participating in tied contact (contact_id: optional)");
+        console.println("  set        Existing *SET_SEGMENT (set_id: required)");
     } else if (helpCmd == "boundary") {
         console.println("Usage: KooRemapper boundary <config.yaml>");
         std::cout << "\n";
@@ -2055,6 +2072,11 @@ static int runMain(int argc, char* argv[]) {
         std::string output = parser.getPositional("output");
         std::string strainType = parser.getOption("type");
         if (strainType.empty()) strainType = "engineering";
+        // 모르는 값을 조용히 기본값으로 삼키지 않는다 — 오타가 다른 변형률로 계산되어 나갔다
+        if (strainType != "engineering" && strainType != "green" && strainType != "log") {
+            console.error("Unknown --type '" + strainType + "' (allowed: engineering, green, log)");
+            return 1;
+        }
 
         if (refFile.empty() || defFile.empty() || output.empty()) {
             console.error("Usage: KooRemapper strain [options] <ref_mesh> <def_mesh> <output.csv>");
@@ -2099,11 +2121,16 @@ static int runMain(int argc, char* argv[]) {
         std::string strainTypeStr = parser.getOption("strain");
         bool outputCSV = parser.hasFlag("csv");
 
+        if (strainTypeStr.empty()) strainTypeStr = "green";
         StrainType strainType = StrainType::GREEN_LAGRANGE;
         if (strainTypeStr == "engineering") {
             strainType = StrainType::ENGINEERING;
-        } else if (strainTypeStr == "log") {
-            strainType = StrainType::LOGARITHMIC;
+        } else if (strainTypeStr != "green") {
+            // 모르는 값을 조용히 Green-Lagrange 로 삼키지 않는다.
+            // log 는 prestress 경로에서 green 과 바이트 동일한 결과를 내므로(요약도 'Green-Lagrange')
+            // 매뉴얼·플랫폼 카탈로그와 같이 engineering/green 만 받는다.
+            console.error("Unknown --strain '" + strainTypeStr + "' (allowed: engineering, green)");
+            return 1;
         }
 
         printBanner(console);

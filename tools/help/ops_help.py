@@ -4,6 +4,8 @@
   files: {파일이름: 내용}  — 작업 폴더에 그대로 쓴다
   cmds : ["KooRemapper ..."] — 순서대로 실행 (앞 명령 산출물을 뒤 명령이 쓴다)
   outputs: 실행 후 반드시 생겨야 하는 파일 (검증 전용, 출력하지 않음)
+  invariants: {산출물: {"bbox": [dx, dy, dz], "elements": n, "keywords": ["*MAT_ELASTIC"]}} — 산출물이
+              만족해야 할 값 (검증 전용, 출력하지 않음). rc=0 만으로는 못 잡는 '돌지만 틀린' 사례를 막는다
   needs  : 사례 폴더에 미리 있어야 하는 저장소 파일 (검증 전용). 있으면 help 에 입력 조건으로 안내
 
 tools/help/run_help_examples.py 가 빌드된 바이너리의 `help <op>` 출력을 파싱해 실제로 돌려 본다.
@@ -30,10 +32,11 @@ BOX_CMD = "KooRemapper generate box box.yaml"
 OPS = []
 
 
-def op(name, category, summary, aliases, usage, files=None, cmds=None, outputs=None, needs=None, notes=None):
+def op(name, category, summary, aliases, usage, files=None, cmds=None, outputs=None, needs=None, notes=None,
+       invariants=None):
     OPS.append(dict(name=name, category=category, summary=summary, aliases=aliases, usage=usage,
                     files=files or {}, cmds=cmds or [], outputs=outputs or [], needs=needs or [],
-                    notes=notes or []))
+                    notes=notes or [], invariants=invariants or {}))
 
 
 def boxed(files):
@@ -99,8 +102,9 @@ variable_density:
     length: 10.0
     num_elements: 10
 """},
-   cmds=["KooRemapper generate-var --no-scale var.yaml var.k"],
+   cmds=["KooRemapper generate-var var.yaml var.k"],
    outputs=["var.k"],
+   invariants={"var.k": {"bbox": [100.0, 10.0, 2.0]}},
    notes=["구간 이름은 고정 5개: zone1_dense_start zone2_increasing zone3_sparse zone4_decreasing zone5_dense_end",
           "--ref flat.k 를 주면 기준 메시 크기에 맞춰 스케일한다. 곡선형은 type: curved + centerline_points"])
 op("battery", "메시 생성", "배터리 셀(적층·권취) 모델 + 스웰링 DR 덱 생성", "배터리 셀 pouch swelling 스웰링",
@@ -489,7 +493,7 @@ material:
    notes=["operations[].type 는 각 op 이름(replace squeeze restack offset disconnect update generate ...)"])
 
 # ── 하중·경계·접촉 ──
-op("load", "하중·경계·접촉", "파트 면(방향/tied 선택)에 압력·힘·중력 하중 + 곡선", "하중 pressure 압력 force",
+op("load", "하중·경계·접촉", "파트 면(방향/tied/세그먼트셋 선택)에 압력·힘 하중 + 곡선", "하중 pressure 압력 force",
    "KooRemapper load <config.yaml>",
    files=boxed({"load.yaml": """model: box.k
 output: box_loaded.k
@@ -506,7 +510,8 @@ loads:
       - [0.01, 1.0]
 """}),
    cmds=[BOX_CMD, "KooRemapper load load.yaml"], outputs=["box_loaded.k"],
-   notes=["select: direction(법선과 direction 사이 angle 이내 면) | tied"])
+   notes=["mode: pressure | normal_pressure(direction 없이 노출면 전체) | force(총 힘 N 을 투영면적으로 나눠 압력화)",
+          "select: direction(법선과 direction 사이 angle 이내 면) | tied(tied 접촉 세그먼트) | set(기존 *SET_SEGMENT, set_id 필요)"])
 op("boundary", "하중·경계·접촉", "파트 면을 골라 SPC 구속 또는 강체벽", "구속 spc 경계조건 fixed",
    "KooRemapper boundary <config.yaml>",
    files=boxed({"bc.yaml": """model: box.k
