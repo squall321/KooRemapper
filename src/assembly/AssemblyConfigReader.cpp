@@ -227,7 +227,16 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                 } else if (key == "material") {
                     section = Section::MATERIAL;
                     inOperationItem = false;
+                } else {
+                    // 모르는 최상위 키(notes·tags·version 등)도 앞 블록을 닫는다 — 예전엔 section 이
+                    // OPERATIONS 로 남아, operations 가 끝난 뒤 열 0 의 '- ' 줄이 유령 operation 으로 실행됐다
+                    section = Section::NONE;
+                    inOperationItem = false;
                 }
+            } else {
+                // 값 없는 최상위 스칼라 줄도 마찬가지로 앞 블록을 닫는다
+                section = Section::NONE;
+                inOperationItem = false;
             }
             continue;
         }
@@ -849,6 +858,11 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                         } else {
                             throw std::runtime_error("Unknown operation type: " + val);
                         }
+                    } else {
+                        // type 을 못 읽으면 op.type 이 초기화되지 않은 채 실행돼 '[ERROR] ' 빈 줄로 끝났다
+                        throw std::runtime_error("Operation " + std::to_string(config.operations.size() + 1) +
+                            ": 항목이 'type' 으로 시작하지 않습니다 ('" + key + "') — operations 항목은 "
+                            "'- type: <op>' 로 시작해야 합니다 / an operations item must start with '- type: <op>'");
                     }
                     config.operations.push_back(op);
                     inOperationItem = true;
