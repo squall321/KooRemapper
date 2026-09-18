@@ -18,6 +18,7 @@
 #include "analysis/MaterialModel.h"
 #include "validation/ElementQualityChecker.h"
 #include "validation/IntersectionDetector.h"
+#include "validation/MaterialCardValidator.h"
 #include "util/ContactKeywords.h"
 #include <filesystem>
 #include <fstream>
@@ -727,6 +728,25 @@ bool matCardLineMidField(const std::string& line, size_t lineStart, MatMidField&
     size_t tokEnd = line.find_first_of(" \t", first);
     if (tokEnd == std::string::npos) tokEnd = line.size();
     size_t next = line.find_first_not_of(" \t", tokEnd);
+    if (first < 10 && tokEnd > 10) {
+        // 토큰이 10열을 넘어간다 = 다음 값이 MID 칸에 공백 없이 붙어 있다
+        // ('        902.3300E-09'). LS-DYNA 고정폭에서 MID 는 1~10열이므로 거기까지만 덮는다 —
+        // 토큰 끝까지 덮으면 뒤 필드(RO)가 통째로 지워졌다.
+        // 다만 10열 앞이 정수일 때만 그렇게 본다. '@MID@'·'MAT01' 처럼 10열을 걸치는 자리표시·라벨은
+        // 붙은 게 아니라 한 칸이므로 토큰 끝까지가 MID 칸이다.
+        size_t headEnd = line.find_last_not_of(" \t", 9);
+        if (headEnd != std::string::npos && headEnd >= first) {
+            std::string head = line.substr(first, headEnd - first + 1);
+            bool allDigit = std::all_of(head.begin(), head.end(),
+                                        [](unsigned char c) { return std::isdigit(c) != 0; });
+            if (allDigit) {
+                out.start = lineStart;
+                out.width = 10;
+                out.label = head;
+                return true;
+            }
+        }
+    }
     bool fieldTo10 = tokEnd <= 10 && (next == std::string::npos || next >= 10);
     out.start = lineStart;
     out.width = fieldTo10 ? std::min<size_t>(10, line.size()) : tokEnd;
@@ -734,34 +754,84 @@ bool matCardLineMidField(const std::string& line, size_t lineStart, MatMidField&
     return true;
 }
 
-// 카드 안 *MAT 블록마다 첫 데이터 줄의 MID 칸. *MAT_…_TITLE 은 제목 줄을 건너뛴다.
-// (*MAT_ADD_EROSION 처럼 같은 MID 를 가리키는 뒤 블록도 함께 잡아야 참조가 끊기지 않는다)
-std::vector<MatMidField> matCardFindMidFields(const std::string& card) {
-    std::vector<MatMidField> fields;
-    bool inMat = false;
-    bool titlePending = false;
+// MID 칸에 들어갈 수 있는 토큰인가 — 정수이거나 자리표시·라벨(@MID@·MID001·MAT01).
+// '40.0'·'2.33E-09' 같은 실수는 MID 가 아니다. 제목 줄이 빠진 카드에서 둘째 데이터 줄을
+// MID 칸으로 잘못 잡은 경우를 여기서 걸러 조용한 물성 손상을 막는다.
+bool matCardMidTokenValid(const std::string& tok) {
+    if (tok.empty()) return false;
+    bool allDigit = true;
+    for (char c : tok) {
+        if (!std::isdigit(static_cast<unsigned char>(c))) { allDigit = false; break; }
+    }
+    if (allDigit) return true;
+    if (std::isdigit(static_cast<unsigned char>(tok[0]))) return false;  // 숫자로 시작하는데 정수가 아니면 값이다
+    for (char c : tok) {
+        if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_' && c != '@') return false;
+    }
+    return true;
+}
+
+// 카드 한 줄 — 본문(개행·CR 뺀 것)과 카드 안 오프셋
+struct MatCardLine {
+    std::string text;
+    size_t start = 0;
+};
+
+std::vector<MatCardLine> matCardSplitLines(const std::string& card) {
+    std::vector<MatCardLine> lines;
     size_t lineStart = 0;
-    while (lineStart < card.size()) {
+    while (lineStart <= card.size()) {
         size_t lineEnd = card.find('\n', lineStart);
-        if (lineEnd == std::string::npos) lineEnd = card.size();
+        bool last = (lineEnd == std::string::npos);
+        if (last) lineEnd = card.size();
         std::string line = card.substr(lineStart, lineEnd - lineStart);
         if (!line.empty() && line.back() == '\r') line.pop_back();
-        size_t first = line.find_first_not_of(" \t");
-        if (first != std::string::npos && line[first] != '$') {
-            if (line[first] == '*') {
-                std::string up = line.substr(first);
-                for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-                inMat = up.rfind("*MAT", 0) == 0;
-                titlePending = inMat && up.find("_TITLE") != std::string::npos;
-            } else if (inMat && titlePending) {
-                titlePending = false;
-            } else if (inMat) {
-                MatMidField f;
-                if (matCardLineMidField(line, lineStart, f)) fields.push_back(f);
-                inMat = false;
-            }
-        }
+        lines.push_back({line, lineStart});
+        if (last) break;
         lineStart = lineEnd + 1;
+    }
+    return lines;
+}
+
+// *MAT 블록마다 (첫 데이터 줄 인덱스, 제목 줄이 빠졌는지).
+// *MAT_…_TITLE 블록은 내용 줄('$' 주석·빈 줄 제외)이 두 줄 이상일 때만 첫 줄이 제목이다.
+// 한 줄뿐이면 제목 줄이 빠진 것이고 그 줄이 데이터 줄이다 — '제목처럼 보이는지' 로 나누면
+// '7075-T6 aluminum' 같은 진짜 제목에서 틀린다. 예전엔 무조건 한 줄을 제목으로 먹어
+// 제목 없는 카드의 유일한 데이터 줄이 사라지고 MID 0 이 덱에 써졌다.
+std::vector<std::pair<size_t, bool>> matFindDataLines(const std::vector<MatCardLine>& lines) {
+    std::vector<std::pair<size_t, bool>> out;
+    for (size_t i = 0; i < lines.size(); ++i) {
+        size_t first = lines[i].text.find_first_not_of(" \t");
+        if (first == std::string::npos || lines[i].text[first] != '*') continue;
+        std::string up = lines[i].text.substr(first);
+        for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        if (up.rfind("*MAT", 0) != 0) continue;
+        bool isTitle = up.find("_TITLE") != std::string::npos;
+        std::vector<size_t> content;
+        for (size_t j = i + 1; j < lines.size() && content.size() < 2; ++j) {
+            size_t f = lines[j].text.find_first_not_of(" \t");
+            if (f == std::string::npos || lines[j].text[f] == '$') continue;
+            if (lines[j].text[f] == '*') break;
+            content.push_back(j);
+        }
+        if (content.empty()) continue;
+        bool titleMissing = isTitle && content.size() < 2;
+        out.emplace_back(isTitle && !titleMissing ? content[1] : content[0], titleMissing);
+    }
+    return out;
+}
+
+// 카드 안 *MAT 블록마다 첫 데이터 줄의 MID 칸. *MAT_…_TITLE 은 제목 줄을 건너뛴다.
+// (*MAT_ADD_EROSION 처럼 같은 MID 를 가리키는 뒤 블록도 함께 잡아야 참조가 끊기지 않는다)
+// titleMissing 이 주어지면 _TITLE 카드에 제목 줄이 없었는지 알려 준다.
+std::vector<MatMidField> matCardFindMidFields(const std::string& card, bool* titleMissing = nullptr) {
+    if (titleMissing) *titleMissing = false;
+    auto lines = matCardSplitLines(card);
+    std::vector<MatMidField> fields;
+    for (const auto& [idx, missing] : matFindDataLines(lines)) {
+        if (missing && titleMissing) *titleMissing = true;
+        MatMidField f;
+        if (matCardLineMidField(lines[idx].text, lines[idx].start, f)) fields.push_back(f);
     }
     return fields;
 }
@@ -770,31 +840,22 @@ std::vector<MatMidField> matCardFindMidFields(const std::string& card) {
 // 그 번호를 그대로 써도 되는지(=충돌하지 않는지) 보려고 쓴다. 파서가 모르는 *MAT 종류도
 // 번호는 차지하므로 raw 줄을 직접 훑는다.
 std::set<int> matCollectUsedMids(const std::vector<std::string>& rawLines) {
-    std::set<int> used;
-    bool inMat = false;
-    bool titlePending = false;
+    std::vector<MatCardLine> lines;
+    lines.reserve(rawLines.size());
     for (const auto& raw : rawLines) {
         std::string line = raw;
         if (!line.empty() && line.back() == '\r') line.pop_back();
-        size_t first = line.find_first_not_of(" \t");
-        if (first == std::string::npos || line[first] == '$') continue;
-        if (line[first] == '*') {
-            std::string up = line.substr(first);
-            for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-            inMat = up.rfind("*MAT", 0) == 0;
-            titlePending = inMat && up.find("_TITLE") != std::string::npos;
-            continue;
-        }
-        if (!inMat) continue;
-        if (titlePending) { titlePending = false; continue; }
+        lines.push_back({line, 0});
+    }
+    std::set<int> used;
+    for (const auto& [idx, missing] : matFindDataLines(lines)) {
+        (void)missing;
         MatMidField f;
-        if (matCardLineMidField(line, 0, f)) {
-            try {
-                int v = std::stoi(f.label);
-                if (v > 0) used.insert(v);
-            } catch (...) {}
-        }
-        inMat = false;
+        if (!matCardLineMidField(lines[idx].text, 0, f)) continue;
+        try {
+            int v = std::stoi(f.label);
+            if (v > 0) used.insert(v);
+        } catch (...) {}
     }
     return used;
 }
@@ -973,6 +1034,30 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
                 errorMessage_ = "restack: layers[" + std::to_string(li) +
                                 "]: unsupported element_type '" + lt +
                                 "' (allowed: solid, tshell, shell)";
+                return false;
+            }
+        }
+    }
+
+    // 0b. 층 재질 카드도 offset·CZM 과 같은 검증을 거친다 — 예전엔 restack 만 빠져
+    //     깨진 카드가 검사 없이 그대로 덱으로 나갔다. 실패는 offset 과 같이 rc=1.
+    {
+        MaterialCardValidator validator;
+        for (size_t li = 0; li < op.layers.size(); ++li) {
+            if (op.layers[li].materialCard.empty()) continue;
+            auto result = validator.validate(op.layers[li].materialCard);
+            for (const auto& w : result.warnings) {
+                // '검증기가 모르는 종류' 는 카드가 아니라 검증기 사정이라 사용자가 할 일이 없다.
+                // 층이 열 개가 넘는 적층에서는 이 한 줄이 진짜 경고를 덮는다.
+                if (w.rfind("Unknown material type", 0) == 0) continue;
+                infoMessages.push_back("  [WARN] Restack layer " + std::to_string(li + 1) +
+                                       " material_card: " + w);
+            }
+            if (!result.errors.empty()) {
+                std::string msg = "restack: layer " + std::to_string(li + 1) +
+                                  " material_card validation failed:";
+                for (const auto& e : result.errors) msg += "\n  - " + e;
+                errorMessage_ = msg;
                 return false;
             }
         }
@@ -1196,10 +1281,18 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
         int lit = matCardLiteralMid(fields.front().label);
         if (lit > 0 && !usedMids.count(lit)) reservedMids.insert(lit);
     }
-    auto allocMid = [&]() {
-        do { ++maxMaterialId_; } while (usedMids.count(maxMaterialId_) || reservedMids.count(maxMaterialId_));
-        usedMids.insert(maxMaterialId_);
-        return maxMaterialId_;
+    // maxMaterialId_ 가 INT_MAX 면 ++ 가 부호 오버플로(UB)라 음수 MID 가 찍혔다 — 번호가 바닥나면
+    // 조용히 이상한 덱을 내지 말고 실패로 알린다.
+    bool midAllocExhausted = false;
+    auto allocMid = [&]() -> int {
+        while (maxMaterialId_ < std::numeric_limits<int>::max()) {
+            ++maxMaterialId_;
+            if (usedMids.count(maxMaterialId_) || reservedMids.count(maxMaterialId_)) continue;
+            usedMids.insert(maxMaterialId_);
+            return maxMaterialId_;
+        }
+        midAllocExhausted = true;
+        return 0;
     };
 
     for (size_t li = 0; li < op.layers.size(); ++li) {
@@ -1242,8 +1335,32 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
     for (size_t li = 0; li < op.layers.size(); ++li) {
         const auto& card = op.layers[li].materialCard;
         if (restackHasMidPlaceholder(card)) continue;
-        labelFields[li] = matCardFindMidFields(card);
-        if (labelFields[li].empty()) continue;
+        bool titleMissing = false;
+        labelFields[li] = matCardFindMidFields(card, &titleMissing);
+        if (titleMissing) {
+            infoMessages.push_back("  [WARN] Restack layer " + std::to_string(li + 1) +
+                                   ": *MAT_..._TITLE card has no title line -> its only data line was read"
+                                   " as the MID field (add the title line to be explicit)");
+        }
+        // MID 칸을 못 찾았으면 0 을 찍지 말고 멈춘다 — 예전엔 조용히 mid=0 인 *PART 가 나가고
+        // 둘째 층부터 재질 카드가 '이미 씀' 으로 버려졌다.
+        if (labelFields[li].empty()) {
+            errorMessage_ = "Restack layer " + std::to_string(li + 1) +
+                ": no *MAT data line found in material_card - cannot determine the MID field";
+            return false;
+        }
+        const std::string& midTok = labelFields[li].front().label;
+        if (!matCardMidTokenValid(midTok)) {
+            size_t ls = labelFields[li].front().start;
+            size_t le = card.find('\n', ls);
+            std::string dataLine = card.substr(ls, (le == std::string::npos ? card.size() : le) - ls);
+            errorMessage_ = "Restack layer " + std::to_string(li + 1) +
+                ": material_card MID field reads '" + midTok + "', which is not a material ID."
+                "\n  data line taken as *MAT card 1: '" + dataLine + "'"
+                "\n  a *MAT_..._TITLE card without its title line is read one line off -"
+                " add the title line (or remove _TITLE)";
+            return false;
+        }
         const std::string& label = labelFields[li].front().label;
         std::string body = matCardReplaceMidFields(card, labelFields[li], label, "");
         labelKeys[li] = label + '\n' + body;
@@ -1272,6 +1389,13 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
                                    "' reused with a different card -> separate MID " +
                                    std::to_string(assignedMid));
         }
+    }
+
+    if (midAllocExhausted) {
+        errorMessage_ = "Restack: no free material ID left (existing MIDs reach " +
+            std::to_string(std::numeric_limits<int>::max()) +
+            ") - renumber the model's materials before restacking";
+        return false;
     }
 
     // 8. Generate new node planes
@@ -1423,6 +1547,15 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
                     break;
                 }
             }
+        }
+
+        // MID 0 은 덱에서 '재질 없음' 이다 — 여기까지 와서 0 이면 카드에서 MID 칸을 못 찾은 것이다.
+        // 예전엔 그대로 *PART 에 0 을 찍고, emittedMids 가 0 을 키로 써서 둘째 층부터 카드를 버렸다.
+        if (actualMid <= 0) {
+            errorMessage_ = "Restack layer " + std::to_string(layerIdx + 1) +
+                ": could not resolve a material ID from material_card"
+                " (no *MAT data line, or its MID field is unreadable) - refusing to write MID 0";
+            return false;
         }
 
         // Generate keyword block for this layer

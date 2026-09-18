@@ -240,19 +240,25 @@ void MaterialCardValidator::validatePlasticKinematic(
     } catch (...) {}
 }
 
-// *MAT 키워드 다음 첫 데이터 줄. *MAT_..._TITLE 은 키워드 바로 다음(주석 제외) 줄이 제목이라
-// 데이터 줄이 아니다 — 예전엔 제목을 데이터로 읽어 restack 이 받는 카드를 offset 이 거부했다.
+// *MAT 키워드 다음 첫 데이터 줄. *MAT_..._TITLE 은 제목 줄이 데이터 줄이 아니다 —
+// 예전엔 제목을 데이터로 읽어 restack 이 받는 카드를 offset 이 거부했다.
+// 다만 제목 줄을 무조건 하나 먹으면 제목이 빠진 카드(내용 줄이 하나뿐)에서는 유일한 데이터 줄이
+// 사라진다. 그래서 내용 줄('$' 주석·빈 줄 제외)이 두 줄 이상일 때만 첫 줄을 제목으로 본다 —
+// '제목처럼 보이는지' 로 나누면 '7075-T6 aluminum' 같은 진짜 제목에서 틀린다.
 int MaterialCardValidator::findFirstDataLine(const std::vector<std::string>& lines) const {
     for (size_t i = 0; i < lines.size(); ++i) {
         if (!isKeywordLine(lines[i])) continue;
-        bool titlePending = extractKeyword(lines[i]).find("_TITLE") != std::string::npos;
-        for (size_t j = i + 1; j < lines.size(); ++j) {
-            if (isCommentLine(lines[j])) continue;
-            if (titlePending) { titlePending = false; continue; }  // 제목 줄(비어 있어도 제목)
-            if (isBlankLine(lines[j])) continue;
-            return static_cast<int>(j);
+        bool isTitle = extractKeyword(lines[i]).find("_TITLE") != std::string::npos;
+        std::vector<int> content;
+        for (size_t j = i + 1; j < lines.size() && content.size() < 2; ++j) {
+            if (isCommentLine(lines[j]) || isBlankLine(lines[j])) continue;
+            size_t f = lines[j].find_first_not_of(" \t");
+            if (f != std::string::npos && lines[j][f] == '*') break;  // 다음 키워드 = 블록 끝
+            content.push_back(static_cast<int>(j));
         }
-        break;
+        if (content.empty()) break;
+        if (isTitle && content.size() >= 2) return content[1];
+        return content[0];
     }
     return -1;
 }
@@ -266,6 +272,27 @@ std::vector<std::string> MaterialCardValidator::parseDataLine(const std::string&
         // Skip inline comments
         if (field[0] == '$') break;
         fields.push_back(field);
+    }
+
+    // 고정폭 카드에서 MID 칸(1~10열)에 다음 값이 공백 없이 붙어 있으면('        902.3300E-09')
+    // 공백 분리가 한 칸으로 읽어 필드 수가 모자란다. 10열 앞이 정수일 때만 거기서 잘라 둘로 본다.
+    if (!fields.empty() && line.find(',') == std::string::npos) {
+        size_t first = line.find_first_not_of(" \t");
+        size_t tokEnd = (first == std::string::npos) ? std::string::npos
+                                                     : line.find_first_of(" \t", first);
+        if (tokEnd == std::string::npos && first != std::string::npos) tokEnd = line.size();
+        if (first != std::string::npos && first < 10 && tokEnd > 10) {
+            std::string head = line.substr(first, 10 - first);
+            while (!head.empty() && std::isspace(static_cast<unsigned char>(head.back()))) head.pop_back();
+            bool allDigit = !head.empty() &&
+                std::all_of(head.begin(), head.end(),
+                            [](unsigned char c) { return std::isdigit(c) != 0; });
+            if (allDigit) {
+                std::string rest = line.substr(10, tokEnd - 10);
+                fields[0] = head;
+                fields.insert(fields.begin() + 1, rest);
+            }
+        }
     }
 
     return fields;
