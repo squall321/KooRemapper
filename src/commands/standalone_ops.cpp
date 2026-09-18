@@ -262,6 +262,9 @@ static std::vector<std::string> writtenOutputs(const ModelAssembler& assembler, 
 static bool writeOutputChecked(ModelAssembler& assembler, const std::string& outputPrefix,
                                const char* tag, ConsoleOutput& console) {
     if (!assembler.writeOutput(outputPrefix)) { console.error(assembler.getErrorMessage()); return false; }
+    // 쓰기 안에서 나온 말(파트별 요소 수 대조·왕복 검증)을 흘리지 않는다 — 부르는 쪽은 쓰기 전에 찍는다
+    for (const auto& msg : assembler.infoMessages) console.println(msg);
+    assembler.infoMessages.clear();
 
     std::vector<std::string> written = writtenOutputs(assembler, outputPrefix);
     std::string where;

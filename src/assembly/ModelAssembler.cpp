@@ -4931,6 +4931,98 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
         }
     }
 
+
+    // ── 왕복 검증 (파트별 요소 수) ────────────────────────────────────────────
+    // 현장 사고: LS-DYNA 도 KooMeshModifier 도 에러를 내지 않았고, AP 파트가 통째로 빠진 덱이
+    // "Normal termination" 하고 analysis_result.json 까지 냈다. 3자 대조(원본/출력/per-run)로
+    // 겨우 찾아냈다 — 도구가 스스로 잡아야 한다. 쓰기 직전 버퍼를 같은 카드 색인으로 다시 읽어
+    // 이번 op 가 건드린 파트의 요소 수가 기대와 맞는지 본다. 어긋나면 파일을 쓰지 않고 rc=1 이다
+    // (바로 위 nan/inf 관문과 같은 자리·같은 결말 — 틀린 덱을 디스크에 남기지 않는다).
+    {
+        std::set<int> touched;
+        std::map<int, long long> before = eidx.countByPid;
+        std::map<int, long long> expect = before;
+        for (size_t c = 0; c < rawLines_.size(); ++c) {
+            if (eidx.owner[c] != static_cast<int>(c)) continue;
+            int eid = eidx.eidOf[c];
+            if (eid > 0 && removedElementIds_.count(eid)) {
+                expect[eidx.pidOf[c]] -= 1;
+                touched.insert(eidx.pidOf[c]);
+            }
+        }
+        for (const auto& ae : addedElements_)      { expect[ae.pid] += 1; touched.insert(ae.pid); }
+        for (const auto& se : addedShellElements_) { expect[se.pid] += 1; touched.insert(se.pid); }
+        // op 가 통째로 끼워 넣는 키워드 블록에 요소 카드가 들어 있으면 그것도 기대에 넣는다
+        if (!touched.empty() && !addedKeywordBlocks_.empty()) {
+            std::vector<std::string> blkLines;
+            for (const auto& blk : addedKeywordBlocks_) {
+                std::istringstream bs(blk);
+                std::string bl;
+                while (std::getline(bs, bl)) blkLines.push_back(bl);
+            }
+            for (const auto& [pid, cnt] : ecBuildIndex(blkLines).countByPid) expect[pid] += cnt;
+        }
+
+        if (!touched.empty()) {
+            std::vector<std::string> outLines;
+            {
+                const std::string& body = output.str();
+                std::string cur;
+                for (char ch : body) {
+                    if (ch == '\n') { outLines.push_back(cur); cur.clear(); }
+                    else if (ch != '\r') cur += ch;
+                }
+                if (!cur.empty()) outLines.push_back(cur);
+            }
+            ElemCardIndex oidx = ecBuildIndex(outLines);
+
+            std::ostringstream table;
+            table << "  [요소 수 대조] 파트별 요소 수(입력 → 출력)";
+            long long beforeTot = 0, afterTot = 0;
+            for (const auto& [pid, cnt] : before) beforeTot += cnt;
+            for (const auto& [pid, cnt] : oidx.countByPid) afterTot += cnt;
+            std::vector<std::string> rows;
+            std::vector<std::string> bad;
+            for (int pid : touched) {
+                long long b = before.count(pid) ? before[pid] : 0;
+                long long e = expect.count(pid) ? expect[pid] : 0;
+                long long a = oidx.countByPid.count(pid) ? oidx.countByPid[pid] : 0;
+                std::ostringstream row;
+                row << "    PID " << pid << ": " << b << " → " << a
+                    << (b == 0 ? " (신규)" : (a == 0 ? " (삭제)" : ""));
+                if (a != e) {
+                    row << "  ← 기대 " << e << " 와 다릅니다";
+                    bad.push_back("PID " + std::to_string(pid) + ": 기대 " + std::to_string(e) +
+                                  ", 출력 덱 " + std::to_string(a));
+                }
+                rows.push_back(row.str());
+            }
+            infoMessages.push_back(table.str());
+            for (const auto& r : rows) infoMessages.push_back(r);
+            {
+                std::ostringstream tot;
+                tot << "    합계 " << beforeTot << " → " << afterTot;
+                if (!oidx.opaqueKws.empty()) {
+                    std::set<std::string> u(oidx.opaqueKws.begin(), oidx.opaqueKws.end());
+                    tot << " (줄 수를 확정하지 못한 섹션은 세지 않았습니다:";
+                    for (const auto& k : u) tot << " " << k;
+                    tot << ")";
+                }
+                infoMessages.push_back(tot.str());
+            }
+
+            if (!bad.empty()) {
+                std::string why;
+                for (const auto& b : bad) { if (!why.empty()) why += "; "; why += b; }
+                errorMessage_ =
+                    "왕복 검증 실패 — 출력 덱을 다시 읽으니 파트별 요소 수가 기대와 다릅니다: " + why +
+                    " — 출력 파일을 쓰지 않았습니다: " + outputFile +
+                    " / round-trip check failed (element count per part); no output written";
+                return false;
+            }
+            infoMessages.push_back("    왕복 검증: 출력 덱을 다시 읽어 파트별 요소 수가 기대와 같았습니다.");
+        }
+    }
     // Write output file
     std::ofstream outFile(outputFile, std::ios::binary);
     if (!outFile.is_open()) {
