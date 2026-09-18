@@ -54,6 +54,10 @@ __pycache__/
 # Presentations
 *.pptx
 
+# 벤더 gmsh 바이너리(87MB) — 커밋하지 않지만 지우면 안 된다.
+# platform/infra/apptainer/cli.def 가 %files 로 굽고 setup-gmsh.sh 가 여기로 심링크를 건다.
+dist/gmsh/
+
 # Large test files (>50MB)
 test_data/million_*.k
 test_data/large_*.k

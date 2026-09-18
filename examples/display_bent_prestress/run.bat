@@ -25,7 +25,7 @@ REM ============================================================
 
 setlocal
 
-set "EXE=%KOOREMAPPER%"
+set "EXE=%KOOREMAPPER_BIN%"
 if "%EXE%"=="" set "EXE=%~dp0..\..\build\bin\Release\KooRemapper.exe"
 if not exist "%EXE%" set "EXE=%~dp0..\..\build\windows\bin\Release\KooRemapper.exe"
 if not exist "%EXE%" set "EXE=KooRemapper.exe"
