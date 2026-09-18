@@ -1,6 +1,7 @@
 #include "merge.h"
 #include "util/YamlComment.h"
 #include "cli/ConsoleOutput.h"
+#include "assembly/AssemblyConfig.h"   // pid_refs 허용값 표 — assemble 과 단독이 같은 표를 쓴다
 
 #include <string>
 #include <vector>
@@ -109,7 +110,9 @@ struct mg_Config {
     int dir = 2;            // 0=x, 1=y, 2=z (default)
     int method = 2;         // 0=voigt, 1=reuss, 2=vrh
     std::vector<mg_MergeGroup> groups;
-    bool badValue = false;  // 지원하지 않는 direction/method 값을 만났다
+    // 옮기지 못한 PID 참조가 남았을 때의 정책(기본 strict) — 값은 assemble 의 merge op 과 같은 표에서 온다.
+    KooRemapper::PidRefPolicy pidRefs = KooRemapper::PidRefPolicy::STRICT;
+    bool badValue = false;  // 지원하지 않는 direction/method/pid_refs 값을 만났다
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -258,6 +261,13 @@ static mg_Config mg_parseConfig(const std::string& yamlFile, ConsoleOutput& cons
             else if (m == "VRH") cfg.method = 2;
             else {
                 console.error("merge: unsupported method '" + val + "' (allowed: voigt, reuss, vrh)");
+                cfg.badValue = true;
+            }
+        } else if (key == "pid_refs") {
+            // 예전엔 이 키를 아예 몰라 조용히 삼켰다 — assemble 의 merge op 이 rc=1 로 막는 값이
+            // 단독 merge 에서는 그냥 통과해, strict 게이트의 유일한 탈출구가 명령마다 달랐다.
+            if (!KooRemapper::parsePidRefPolicy(val, cfg.pidRefs)) {
+                console.error("merge: invalid pid_refs '" + val + "' (must be one of strict, warn)");
                 cfg.badValue = true;
             }
         } else if (key == "merge") {

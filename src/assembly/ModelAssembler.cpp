@@ -2165,7 +2165,7 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
     //     'warn 을 줬는데 rc=1' 이 되어 사용자가 이유를 못 찾는다.
     if (!op.pidRefs.empty()) {
         if (op.pidRefs != "strict" && op.pidRefs != "warn") {
-            errorMessage_ = "restack: unsupported pid_refs '" + op.pidRefs + "' (allowed: strict, warn)";
+            errorMessage_ = "restack: invalid pid_refs '" + op.pidRefs + "' (must be one of strict, warn)";
             return false;
         }
         pidRefPolicy_ = op.pidRefs;
@@ -16110,7 +16110,7 @@ bool ModelAssembler::applyMerge(const MergeOperation& op) {
 
     if (!op.pidRefs.empty()) {
         if (op.pidRefs != "strict" && op.pidRefs != "warn") {
-            errorMessage_ = "merge: unsupported pid_refs '" + op.pidRefs + "' (allowed: strict, warn)";
+            errorMessage_ = "merge: invalid pid_refs '" + op.pidRefs + "' (must be one of strict, warn)";
             return false;
         }
         pidRefPolicy_ = op.pidRefs;

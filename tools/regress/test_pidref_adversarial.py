@@ -202,7 +202,7 @@ def pid_refs_reader(binary):
         restack_yaml("sc.k", "s3.k", extra="pid_refs: nonsense\n"))
     rc, out = run(binary, d, "restack", "s3.yaml")
     check("단독 restack: 모르는 값은 조용히 strict 로 떨구지 않고 거부한다",
-          rc == 1 and "unsupported pid_refs" in out, out[-400:])
+          rc == 1 and "invalid pid_refs" in out, out[-400:])
 
     asm = ("base_model: sc.k\noutput: a1\noperations:\n  - type: restack\n"
            "    target_pid: 1\n    direction: z\n    pid_refs: warn\n    layers:\n")
