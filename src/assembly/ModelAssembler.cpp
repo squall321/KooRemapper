@@ -91,15 +91,17 @@ bool ModelAssembler::loadBaseModel(const std::string& filename) {
         bool needTitle = false;
         for (const auto& line : rawLines_) {
             size_t g = line.find_first_not_of(" \t");
-            if (g == std::string::npos) continue;
-            if (line[g] == '*') {
+            if (g != std::string::npos && line[g] == '*') {
                 std::string up = line.substr(g);
                 for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
                 inSet = (up.rfind("*SET_", 0) == 0);
                 needTitle = inSet && (up.find("_TITLE") != std::string::npos);
                 continue;
             }
-            if (!inSet || line[g] == '$') continue;
+            if (!inSet) continue;
+            if (g != std::string::npos && line[g] == '$') continue;
+            // 제목 줄은 비어 있을 수 있다 — 건너뛰면 구성원 값을 SID 로 읽어
+            // maxSetId_ 가 어긋나고 새로 만드는 세트가 덱의 세트와 번호로 부딪친다.
             if (needTitle) { needTitle = false; continue; }
             try {
                 int sid = std::stoi(line);
@@ -1050,11 +1052,18 @@ std::vector<RsBlock> rsCollectBlocks(const std::vector<std::string>& rawLines) {
         b.kw = up;
         for (size_t j = i + 1; j < rawLines.size(); ++j) {
             size_t h = rawLines[j].find_first_not_of(" \t");
-            if (h == std::string::npos) continue;
-            if (rawLines[j][h] == '*') break;
-            if (rawLines[j][h] == '$') continue;
+            if (h != std::string::npos) {
+                if (rawLines[j][h] == '*') break;
+                if (rawLines[j][h] == '$') continue;   // 주석은 LS-DYNA 도 건너뛴다
+            }
+            // 공백뿐인 줄도 데이터 줄이다 — *SET_..._TITLE 의 제목 줄은 비어 있을 수 있고,
+            // 버리면 SID 줄을 제목으로, 첫 구성원 줄을 SID 로 읽어 블록이 통째로 한 줄 밀린다.
             b.data.push_back(j);
         }
+        // 블록 끝에 붙은 빈 줄은 데이터가 아니라 여백이다 — 세어 두면 칸 훑기만 헛돈다.
+        while (!b.data.empty() &&
+               rawLines[b.data.back()].find_first_not_of(" \t") == std::string::npos)
+            b.data.pop_back();
         out.push_back(b);
     }
     return out;
