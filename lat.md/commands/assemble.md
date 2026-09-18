@@ -119,6 +119,7 @@ operations:
   target_pid: 2
   direction: z
   element_type: solid
+  pid_refs: strict          # strict(기본) | warn
   layers:
     - thickness: 0.3
       material_card: |
@@ -131,6 +132,13 @@ operations:
 ```
 
 → 독립 명령 [12. restack](#12-restack--레이어-재적층) 참조
+
+> **원 파트는 빈 파트로 남습니다** — 층마다 새 PID 가 생기므로 그 PID 를 가리키던 세트·접촉·이력은
+> 빈 파트를 가리키게 됩니다. `assemble` 도 단독 명령과 **같은 코드**로 옮길 수 있는 것을 옮기고,
+> 못 옮긴 자리가 남으면 **rc=1** 로 끝냅니다(덱은 씁니다). `pid_refs: warn` 이 유일한 탈출구입니다
+> ([§12](#pid_refs--못-옮긴-자리가-남았을-때의-종료-코드)).
+> 허용값 밖의 `pid_refs` 는 config 를 읽는 단계에서 거절합니다 —
+> `[ERROR] Failed to read config: Operation 1: invalid pid_refs 'loose' (must be one of strict, warn)`.
 
 ---
 
