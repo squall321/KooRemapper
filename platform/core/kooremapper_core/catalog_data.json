@@ -1176,9 +1176,10 @@
           "default": "green",
           "enum": [
             "engineering",
-            "green"
+            "green",
+            "log"
           ],
-          "description": "Strain type: engineering (small) or green (large/Green-Lagrange)"
+          "description": "Strain type: engineering (small), green (large/Green-Lagrange) or log (logarithmic/true strain)"
         },
         {
           "name": "csv",
@@ -1247,7 +1248,7 @@
             "green",
             "log"
           ],
-          "desc": "Strain type for computation. 'engineering' = symmetric small-strain tensor ε_ij = 0.5(∂u_i/∂x_j + ∂u_j/∂x_i); 'green' = Green-Lagrange large-deformation E_ij = 0.5(∂u_i/∂X_j + ∂u_j/∂X_i + (∂u_k/∂X_i)(∂u_k/∂X_j)); 'log' = logarithmic true strain ln(L/L_0). Note: current parser only accepts 'engineering' and 'green'; 'log' may not be implemented."
+          "desc": "Strain type for computation. 'engineering' = symmetric small-strain tensor ε_ij = 0.5(∂u_i/∂x_j + ∂u_j/∂x_i); 'green' = Green-Lagrange large-deformation E_ij = 0.5(∂u_i/∂X_j + ∂u_j/∂X_i + (∂u_k/∂X_i)(∂u_k/∂X_j)); 'log' = logarithmic true strain ln(L/L_0). All three are accepted; any other value falls back to 'green'."
         },
         {
           "path": "csv",
@@ -1731,9 +1732,9 @@
         {
           "path": "target_pid",
           "type": "integer",
-          "required": true,
-          "default": "null",
-          "desc": "Part ID to deform. 0 = all parts, positive integer = specific part ID. Mutually exclusive with target_pids array; if target_pids is non-empty, target_pid is ignored."
+          "required": false,
+          "default": "0",
+          "desc": "Part ID to deform. Optional — omitted (or 0) means all parts; positive integer = specific part ID. Mutually exclusive with target_pids array; if target_pids is non-empty, target_pid is ignored."
         },
         {
           "path": "target_pids",
@@ -1745,25 +1746,25 @@
         {
           "path": "plane",
           "type": "enum",
-          "required": true,
+          "required": false,
           "default": "\"xy\"",
           "values": [
             "xy",
             "yz",
             "zx"
           ],
-          "desc": "Bending plane in 3D mesh. xy = deform in Z (normal to XY plane); yz = deform in X (normal to YZ plane); zx = deform in Y (normal to ZX plane). Defines the in-plane axes (x1, x2) and normal-axis mapping for formula evaluation and curvature computation."
+          "desc": "Bending plane in 3D mesh. xy = deform in Z (normal to XY plane); yz = deform in X (normal to YZ plane); zx = deform in Y (normal to ZX plane). Defines the in-plane axes (x1, x2) and normal-axis mapping for formula evaluation and curvature computation. Optional — defaults to 'xy'. 'xz' is NOT accepted; use 'zx'."
         },
         {
           "path": "mode",
           "type": "enum",
-          "required": true,
+          "required": false,
           "default": "\"deform\"",
           "values": [
             "deform",
             "stress"
           ],
-          "desc": "deform = move nodes via deflection field + backward prestress (shape locked after dynamic relaxation); stress = forward prestress only (no node movement; dynamic relaxation flattens structure which bends back)."
+          "desc": "deform = move nodes via deflection field + backward prestress (shape locked after dynamic relaxation); stress = forward prestress only (no node movement; dynamic relaxation flattens structure which bends back). Optional — defaults to 'deform'."
         },
         {
           "path": "source",
@@ -2383,10 +2384,12 @@
         {
           "path": "offset_direction",
           "type": "enum",
-          "required": true,
+          "required": false,
+          "default": "+normal",
           "values": [
             "+normal",
             "-normal",
+            "both",
             "+x",
             "-x",
             "+y",
@@ -2394,13 +2397,13 @@
             "+z",
             "-z"
           ],
-          "desc": "Offset direction: +normal or -normal for adaptive surface normals; ±x/±y/±z for fixed global axes"
+          "desc": "Offset direction: +normal or -normal for adaptive surface normals; 'both' offsets to both sides (inner + outer); ±x/±y/±z for fixed global axes. Optional — defaults to '+normal'."
         },
         {
           "path": "thickness",
           "type": "number",
-          "required": true,
-          "desc": "Uniform extrusion distance in model units (mm). Ignored if thickness_formula is specified."
+          "required": false,
+          "desc": "Uniform extrusion distance in model units (mm). Ignored if thickness_formula is specified — give thickness OR thickness_formula (one of the two is required)."
         },
         {
           "path": "thickness_formula",
@@ -2443,9 +2446,10 @@
           "values": [
             "tied",
             "czm",
-            "contact"
+            "contact",
+            "none"
           ],
-          "desc": "Interface connection type between source and offset surfaces: tied (shared nodes), czm (cohesive zone elements), contact (duplicated nodes for user-defined *CONTACT)"
+          "desc": "Interface connection type between source and offset surfaces: tied (shared nodes), czm (cohesive zone elements), contact (duplicated nodes for user-defined *CONTACT), none (no interface treatment)."
         },
         {
           "path": "new_pid",
@@ -2745,7 +2749,8 @@
           "type": "number",
           "role": "yaml_field",
           "yaml_path": "E",
-          "required": true,
+          "required": false,
+          "default": "200000.0",
           "description": "Young의 탄성계수 [MPa]"
         },
         {
@@ -2753,7 +2758,8 @@
           "type": "number",
           "role": "yaml_field",
           "yaml_path": "PR",
-          "required": true,
+          "required": false,
+          "default": "0.3",
           "description": "Poisson 비율 (0.0~0.5)"
         },
         {
@@ -2761,7 +2767,8 @@
           "type": "number",
           "role": "yaml_field",
           "yaml_path": "RHO",
-          "required": true,
+          "required": false,
+          "default": "7.85e-9",
           "description": "재료 밀도 [t/mm³] (예: 강철 7.85e-9)"
         },
         {
@@ -2895,20 +2902,23 @@
         {
           "path": "E",
           "type": "number",
-          "required": true,
-          "desc": "Young's modulus [MPa]. Typical: 200000 (steel 200 GPa). Used to create *MAT_ELASTIC material for each converted CNRB."
+          "required": false,
+          "default": "200000.0",
+          "desc": "Young's modulus [MPa]. Optional — defaults to 200000 (steel 200 GPa). Used to create *MAT_ELASTIC material for each converted CNRB."
         },
         {
           "path": "PR",
           "type": "number",
-          "required": true,
-          "desc": "Poisson's ratio (0.0–0.5). Typical: 0.3 for steel. Used in *MAT_ELASTIC."
+          "required": false,
+          "default": "0.3",
+          "desc": "Poisson's ratio (0.0–0.5). Optional — defaults to 0.3 (steel). Used in *MAT_ELASTIC."
         },
         {
           "path": "RHO",
           "type": "number",
-          "required": true,
-          "desc": "Mass density [t/mm³]. For t/mm/s unit system: 7.85e-9 for steel (= 7850 kg/m³). Used in *MAT_ELASTIC."
+          "required": false,
+          "default": "7.85e-9",
+          "desc": "Mass density [t/mm³]. Optional — defaults to 7.85e-9 for steel (= 7850 kg/m³, t/mm/s unit system). Used in *MAT_ELASTIC."
         },
         {
           "path": "radius_scale",
@@ -4184,7 +4194,7 @@
         "note": "실행 검증된 예제 (입력: tetramesh.k)"
       },
       "example_folder": "/home/koopark/claude/KooRemapper/examples/mesh",
-      "notes": "\nCRITICAL REQUIREMENTS:\n- Gmsh executable must be placed at dist/gmsh/gmsh.exe or dist/gmsh-<ver>/gmsh.exe relative to KooRemapper executable. Without it, operation fails immediately.\n- Input must be TET4 elements or degenerate HEX8 (nodes[3..7] all equal node[3]).\n\nSECTION HEADERS (optional YAML organization):\nAll top-level keys can also be nested under optional section headers for readability: [material], [adaptive], [gmsh], [boundary], [quality]. Keys under sections use slightly different names:\n- Under [boundary]: use 'nodes' instead of 'boundary_nodes'\n- Other section keys match top-level names (e.g., 'min_dt', 'E', 'nu' under [material]).\n\nAUTO-DETECTION & GEOMETRY:\n- lc_min auto-calc: If lc_min < 0 AND all of (min_dt, density, E, nu) > 0, computed from wave speed. Otherwise: lc_min = min(edge_min*0.8, lc_target*0.2).\n- THIN SOLID DETECTION: If min_bbox_dimension < avg_bbox_dimension * 0.3, geomThin=true → Mesh 2 skipped, 4-corner in-plane field used, Netgen passes skipped, autoRefineSurface=1 if needed.\n- AUTO refine_surface: Only applies when refine_surface=-1. Disabled for normal geometry (Mesh 2 handles it); applies 1 level for thin geometry if edge_avg > lc_target*1.5.\n\nDISTANCE FIELD SCALING (when adaptive=true):\n- Normal geometry: 8-corner field. DistMin = lcMinField*2, DistMax = lcMinField * decay_factor.\n- Thin geometry (thin axis detected): 4-corner in-plane field. DistMin = lcMinField*2, DistMax = lcMinField*4 (smaller decay to avoid flooding thin dim).\n\nPOLISH MODE (experimental):\n- Requires polish=true.\n- Identifies connected components of bad elements (Jac < polish_jac).\n- Each component expanded 2 rings, then patch re-meshed independently.\n- DUAL QUALITY GATES (both must pass to accept):\n  1. Min Jacobian retention: new_min_jac >= orig_min_jac * 0.95\n  2. Bad-element reduction: new_bad_count < orig_bad_count\n- If either gate fails, patch is discarded and original elements kept.\n- Mesh 2 skipped for patches; uses serial Delaunay (safer for small patches).\n\nBOUNDARY NODES:\n- free: all Gmsh nodes receive new sequential IDs (maxNodeId+1, maxNodeId+2, ...). Useful for independent part re-meshes.\n- fixed: Gmsh surface nodes matched to original model boundary nodes by coordinate (within snap_tolerance). Interior nodes get new IDs. Preserves node IDs at the interface for contact definitions.\n- snap: All Gmsh nodes get new IDs, but boundary nodes near adjacent parts are snapped to those part's nodes (within snap_tolerance). Allows loose coupling without strict coordinate matching.\n\nGOTCHAS & MUTUALLY EXCLUSIVE:\n- lc_min AND (min_dt, density, E, nu): if lc_min >= 0, dt-based calculation is skipped (explicit value takes priority).\n- optimize_netgen & optimize_passes: both skipped automatically for thin geometry regardless of setting.\n- refine_surface=-1 AND geomThin: auto refinement only applies to thin geometry. Normal geometry uses Mesh 2 instead.\n- polish=true AND 90° corners: if geometry has unrounded 90° corners, polish often cannot reduce bad elements (theoretical min ~0.03), so patches will be rejected.\n\nGMSH TIMEOUT & FAILURES:\n- No explicit timeout; Gmsh may hang on malformed STL or recursive ClassifySurfaces. If hung, Ctrl+C and check STL for open edges / non-manifold geometry.\n- Exit code 1 from Gmsh is often OK (warnings like ClassifySurfaces recursion). Check if .msh file was written before failing.\n\nPERFORMANCE HINTS:\n- Large meshes (100k+ TET4) take minutes. Use lc_target wisely to control output size.\n- Thin geometry disables Mesh 2 and Netgen, speeding up processing significantly.\n- Polish mode adds significant time; use sparingly on already-good meshes.\n",
+      "notes": "\nCRITICAL REQUIREMENTS:\n- Gmsh executable is searched in this order: (0) $KOOREMAPPER_GMSH (full path to the executable), (1) <exe-dir>/gmsh/gmsh or gmsh.exe, (2) <exe-dir>/gmsh-<ver>/[bin/]gmsh(.exe), (3) PATH (Linux), (4) /opt/gmsh-*/bin/gmsh (Linux). Note 'dist/gmsh/' next to the executable is NOT searched. Without a hit, the operation fails immediately with 'Gmsh not found'.\n- Input must be TET4 elements or degenerate HEX8 (nodes[3..7] all equal node[3]).\n\nSECTION HEADERS (optional YAML organization):\nAll top-level keys can also be nested under optional section headers for readability: [material], [adaptive], [gmsh], [boundary], [quality]. Keys under sections use slightly different names:\n- Under [boundary]: use 'nodes' instead of 'boundary_nodes'\n- Other section keys match top-level names (e.g., 'min_dt', 'E', 'nu' under [material]).\n\nAUTO-DETECTION & GEOMETRY:\n- lc_min auto-calc: If lc_min < 0 AND all of (min_dt, density, E, nu) > 0, computed from wave speed. Otherwise: lc_min = min(edge_min*0.8, lc_target*0.2).\n- THIN SOLID DETECTION: If min_bbox_dimension < avg_bbox_dimension * 0.3, geomThin=true → Mesh 2 skipped, 4-corner in-plane field used, Netgen passes skipped, autoRefineSurface=1 if needed.\n- AUTO refine_surface: Only applies when refine_surface=-1. Disabled for normal geometry (Mesh 2 handles it); applies 1 level for thin geometry if edge_avg > lc_target*1.5.\n\nDISTANCE FIELD SCALING (when adaptive=true):\n- Normal geometry: 8-corner field. DistMin = lcMinField*2, DistMax = lcMinField * decay_factor.\n- Thin geometry (thin axis detected): 4-corner in-plane field. DistMin = lcMinField*2, DistMax = lcMinField*4 (smaller decay to avoid flooding thin dim).\n\nPOLISH MODE (experimental):\n- Requires polish=true.\n- Identifies connected components of bad elements (Jac < polish_jac).\n- Each component expanded 2 rings, then patch re-meshed independently.\n- DUAL QUALITY GATES (both must pass to accept):\n  1. Min Jacobian retention: new_min_jac >= orig_min_jac * 0.95\n  2. Bad-element reduction: new_bad_count < orig_bad_count\n- If either gate fails, patch is discarded and original elements kept.\n- Mesh 2 skipped for patches; uses serial Delaunay (safer for small patches).\n\nBOUNDARY NODES:\n- free: all Gmsh nodes receive new sequential IDs (maxNodeId+1, maxNodeId+2, ...). Useful for independent part re-meshes.\n- fixed: Gmsh surface nodes matched to original model boundary nodes by coordinate (within snap_tolerance). Interior nodes get new IDs. Preserves node IDs at the interface for contact definitions.\n- snap: All Gmsh nodes get new IDs, but boundary nodes near adjacent parts are snapped to those part's nodes (within snap_tolerance). Allows loose coupling without strict coordinate matching.\n\nGOTCHAS & MUTUALLY EXCLUSIVE:\n- lc_min AND (min_dt, density, E, nu): if lc_min >= 0, dt-based calculation is skipped (explicit value takes priority).\n- optimize_netgen & optimize_passes: both skipped automatically for thin geometry regardless of setting.\n- refine_surface=-1 AND geomThin: auto refinement only applies to thin geometry. Normal geometry uses Mesh 2 instead.\n- polish=true AND 90° corners: if geometry has unrounded 90° corners, polish often cannot reduce bad elements (theoretical min ~0.03), so patches will be rejected.\n\nGMSH TIMEOUT & FAILURES:\n- No explicit timeout; Gmsh may hang on malformed STL or recursive ClassifySurfaces. If hung, Ctrl+C and check STL for open edges / non-manifold geometry.\n- Exit code 1 from Gmsh is often OK (warnings like ClassifySurfaces recursion). Check if .msh file was written before failing.\n\nPERFORMANCE HINTS:\n- Large meshes (100k+ TET4) take minutes. Use lc_target wisely to control output size.\n- Thin geometry disables Mesh 2 and Netgen, speeding up processing significantly.\n- Polish mode adds significant time; use sparingly on already-good meshes.\n",
       "keys": [
         {
           "path": "model",
@@ -4633,8 +4643,8 @@
         {
           "path": "database",
           "type": "file",
-          "required": true,
-          "desc": "JSON material database file (e.g. materials/material_db.json or custom path). Relative path resolved vs config YAML directory."
+          "required": false,
+          "desc": "JSON material database file. OPTIONAL — omit it to use the bundled 525-material library: the binary looks for materials/material_db.json in the working directory, then <exe>/materials/ and <exe>/../materials/ (SIF: /opt/kooremapper/materials/material_db.json). A relative path with no / or \\ is resolved vs the config YAML directory."
         },
         {
           "path": "mat_type",
@@ -4658,10 +4668,9 @@
           "values": [
             "smartphone_drop",
             "smartphone_drop_aggressive",
-            "quasi_static",
-            "off"
+            "quasi_static"
           ],
-          "desc": "Named damping preset configuration. Sets baseline alpha_scale, alpha_floor, and apply_to_all_parts; explicit damping_* fields override when set."
+          "desc": "Damping preset baseline (case-insensitive). Only these three are recognized, and they only change the damping_alpha_scale / damping_alpha_floor / damping_apply_to_all_parts defaults. The damping cards of matched DB materials are inserted whether or not this key is present, so omitting it does NOT mean 'no damping changes'. Any non-empty value (a preset, or an unrecognized string such as 'off') additionally strips pre-existing *DAMPING_PART_* blocks before re-emitting — as do explicit damping_* overrides. Without it a second matdb pass over an already-mapped model keeps the old cards and LS-DYNA applies both (duplicated damping), so when re-running matdb giving a value is the safer choice. To leave damping untouched, use a database/material that carries no damping card. Explicit damping_* fields override the preset."
         },
         {
           "path": "damping_alpha_scale",
@@ -6234,12 +6243,12 @@
           "type": "enum",
           "role": "yaml_field",
           "yaml_path": "stabilize",
-          "required": true,
+          "required": false,
           "enum": [
             "explicit"
           ],
           "default": "explicit",
-          "description": "안정화 모드 (현재 'explicit'만 지원)"
+          "description": "안정화 모드 (생략하면 'explicit'. 현재 'explicit'만 지원)"
         },
         {
           "name": "level",
@@ -6532,8 +6541,8 @@
         {
           "path": "stabilize",
           "type": "enum",
-          "required": true,
-          "desc": "Stabilization mode; only 'explicit' supported",
+          "required": false,
+          "desc": "Stabilization mode. Optional — defaults to 'explicit' (the only supported mode).",
           "values": [
             "explicit"
           ],
@@ -7727,7 +7736,7 @@
         "note": "Real files from examples/assemble/: box.k (input), assemble_example.yaml (config). Output: assembled_box.k, optionally assembled_box.dynain if prestress is computed."
       },
       "example_folder": "/home/koopark/claude/KooRemapper/examples/assemble",
-      "notes": "CRITICAL FEATURES & GOTCHAS:\n\n1. **base_model required**: standalone `assemble` always needs base_model (even with a generate operation).\n\n2. **Operation Sequencing**: Operations are applied sequentially to the same mesh in-place. Later ops modify results of earlier ones. This enables complex multi-step transformations but requires careful ordering.\n\n3. **Prestress Accumulation**: All ops that compute stress (replace, squeeze, bend, indent, offset, wrap) accumulate results into a single *INITIAL_STRESS_SOLID block. Duplicate element IDs sum stresses (via std::map keying).\n\n4. **Material Sourcing**: Global material (E, nu) overrides per-part materials in K-file. For prestress ops without global material, K-file *MAT_ELASTIC is required. For squeeze swelling mode, no material needed.\n\n5. **Path Resolution**: All file paths (detail_flat, bundle, database, dynain, dat_file, config, etc.) are resolved relative to the config file directory, not CWD.\n\n6. **Batch Operations**: Many ops support both target_pid (single) and target_pids (array/loop). Internally, if target_pids is set, the op is applied once per PID (avoiding duplicate application). For ops with neither (like generate), they act globally.\n\n7. **Strain Modes (squeeze)**: Two mutually exclusive modes—(a) eps_x/y/z = node movement + dynain output, (b) swelling = thermal expansion cards, no node movement, no dynain for that part.\n\n8. **IGA NURBS**: Targets matching via target_pid (numeric) OR target_name/exclude_name (name pattern). Element size auto-computed if omitted. bbox_scale_r/s/t override uniform bbox_scale per axis.\n\n9. **Offset Material Cards**: Supports both single material_card (applies to all layers) AND per-layer material_cards array. If both present, material_cards takes precedence. czm_material_card is separate (cohesive interface layers).\n\n10. **Contact/Boundary/RBE**: These are raw LS-DYNA keyword insertion ops. They parse slave/master part IDs and face selectors but do NOT auto-detect surfaces (unlike standalone contact command). Manual part ID config required.\n\n11. **Control/Database**: These overwrite or create LS-DYNA control cards. Existing cards are modified in-place (field-by-field); missing cards are inserted before *END.\n\n12. **Thermal Expansion (swelling)**: When squeeze uses swelling, parser inserts *MAT_ADD_THERMAL_EXPANSION (CTE=swelling value) and *INITIAL_TEMPERATURE_NODE (T=1.0) for all nodes in the part. No dynain output for swelling parts.\n\n13. **Dynamic Relaxation**: If dynamic_relaxation: true, config.relax settings are read (defined globally, not per-op). Must be configured in global config section.\n\n14. **Update Operation**: dynain_file path resolution is special—if no '/' or '\\' found, it is resolved relative to config directory. Useful for applying node coordinate updates from previous analysis results.\n\n15. **Extract_surface**: Can be spelled 'extract_surface' or 'extract-surface' (parser accepts both, converts to underscore internally).\n\n16. **ID Auto-Management**: New nodes/elements/parts/materials get unique IDs to avoid collisions with existing entities in base model. This is automatic; users rarely configure.",
+      "notes": "CRITICAL FEATURES & GOTCHAS:\n\n1. **base_model required**: standalone `assemble` always needs base_model (even with a generate operation).\n\n2. **Operation Sequencing**: Operations are applied sequentially to the same mesh in-place. Later ops modify results of earlier ones. This enables complex multi-step transformations but requires careful ordering.\n\n3. **Prestress Accumulation**: All ops that compute stress (replace, squeeze, bend, indent, offset, wrap) accumulate results into a single *INITIAL_STRESS_SOLID block. Duplicate element IDs sum stresses (via std::map keying).\n\n4. **Material Sourcing**: Global material (E, nu) overrides per-part materials in K-file. For prestress ops without global material, K-file *MAT_ELASTIC is required. For squeeze swelling mode, no material needed.\n\n5. **Path Resolution**: File paths (base_model, detail_flat, bundle, dynain, dat_file, config, etc.) are resolved relative to the config file directory, not CWD. **`database` (matdb) is the one exception**: only a bare filename with no '/' or '\\' is joined to the config directory, while a folder-prefixed relative path such as 'mats/material_db.json' is left as-is and therefore resolved against the process CWD — it then fails with rc=1 '[ERROR] [matdb] ERROR: Cannot load database from: ...' whenever the job does not run from the config folder. Give `database` a bare filename or an absolute path.\n\n6. **Batch Operations**: Many ops support both target_pid (single) and target_pids (array/loop). Internally, if target_pids is set, the op is applied once per PID (avoiding duplicate application). For ops with neither (like generate), they act globally.\n\n7. **Strain Modes (squeeze)**: Two mutually exclusive modes—(a) eps_x/y/z = node movement + dynain output, (b) swelling = thermal expansion cards, no node movement, no dynain for that part.\n\n8. **IGA NURBS**: Targets matching via target_pid (numeric) OR target_name/exclude_name (name pattern). Element size auto-computed if omitted. bbox_scale_r/s/t override uniform bbox_scale per axis.\n\n9. **Offset Material Cards**: Supports both single material_card (applies to all layers) AND per-layer material_cards array. If both present, material_cards takes precedence. czm_material_card is separate (cohesive interface layers).\n\n10. **Contact/Boundary/RBE**: These are raw LS-DYNA keyword insertion ops. They parse slave/master part IDs and face selectors but do NOT auto-detect surfaces (unlike standalone contact command). Manual part ID config required.\n\n11. **Control/Database**: These overwrite or create LS-DYNA control cards. Existing cards are modified in-place (field-by-field); missing cards are inserted before *END.\n\n12. **Thermal Expansion (swelling)**: When squeeze uses swelling, parser inserts *MAT_ADD_THERMAL_EXPANSION (CTE=swelling value) and *INITIAL_TEMPERATURE_NODE (T=1.0) for all nodes in the part. No dynain output for swelling parts.\n\n13. **Dynamic Relaxation**: If dynamic_relaxation: true, config.relax settings are read (defined globally, not per-op). Must be configured in global config section.\n\n14. **Update Operation**: the key is `dynain` (not `dynain_file`). Its path is resolved the same way as base_model: anything that is not absolute (no leading '/' or '\\', no 'X:' drive letter) is taken relative to the config YAML directory — a folder-prefixed relative path like 'd/coords.k' included. Useful for applying node coordinate updates from previous analysis results.\n\n15. **Extract_surface**: Can be spelled 'extract_surface' or 'extract-surface' (parser accepts both, converts to underscore internally).\n\n16. **ID Auto-Management**: New nodes/elements/parts/materials get unique IDs to avoid collisions with existing entities in base model. This is automatic; users rarely configure.",
       "keys": [
         {
           "path": "base_model",
@@ -7961,11 +7970,10 @@
           "default": "solid",
           "values": [
             "solid",
-            "hex",
             "tshell",
             "shell"
           ],
-          "desc": "(restack, offset) Output element type: 'solid'/'hex' (HEX8), 'tshell', or 'shell'."
+          "desc": "(restack, offset) Output element type: 'solid' (HEX8), 'tshell' or 'shell'. 'hex' is NOT accepted (offset rejects it outright)."
         },
         {
           "path": "operations[].element_size",
@@ -8070,10 +8078,10 @@
           "default": "xy",
           "values": [
             "xy",
-            "xz",
-            "yz"
+            "yz",
+            "zx"
           ],
-          "desc": "(bend, indent, warpage) 2D projection plane for deflection field. The third axis is the out-of-plane direction."
+          "desc": "(bend, indent, warpage) 2D projection plane for deflection field. The third axis is the out-of-plane direction. 'xz' is NOT accepted — use 'zx'."
         },
         {
           "path": "operations[].mode",
@@ -8083,23 +8091,21 @@
           "values": [
             "deform",
             "stress",
-            "stress_only",
             "prestress"
           ],
-          "desc": "(bend) 'deform' = move nodes + compute prestress; 'stress_only' / 'stress' = compute stress without moving nodes. (warpage) 'prestress' or 'deform'."
+          "desc": "(bend) 'deform' = move nodes + compute prestress; 'stress' = compute stress without moving nodes. (warpage) 'prestress' or 'deform'. 'stress_only' is NOT accepted."
         },
         {
           "path": "operations[].source",
           "type": "string",
-          "required": false,
+          "required": true,
           "default": null,
           "values": [
-            "formula",
-            "file",
             "dat",
-            "dat_pair"
+            "dat_pair",
+            "formula"
           ],
-          "desc": "(bend) Source of deflection field: 'dat' (single grid file), 'dat_pair' (top/bottom grids), 'formula' (expression), or shell_bent reference."
+          "desc": "(bend) REQUIRED for bend: source of the deflection field — 'dat' (single grid file), 'dat_pair' (top/bottom grids) or 'formula' (expression). 'file' is NOT accepted."
         },
         {
           "path": "operations[].expression",
@@ -8150,23 +8156,23 @@
         {
           "path": "operations[].depth",
           "type": "number",
-          "required": false,
-          "default": "1.0",
-          "desc": "(indent) Maximum emboss/indent depth at profile center (mm, positive = into material, negative = emboss outward)."
+          "required": true,
+          "default": null,
+          "desc": "(indent) REQUIRED for indent — must be non-zero. Maximum emboss/indent depth at profile center (mm, positive = into material, negative = emboss outward)."
         },
         {
           "path": "operations[].r1",
           "type": "number",
-          "required": false,
-          "default": "1.0",
-          "desc": "(indent) Major radius (outer radius of indent profile area)."
+          "required": true,
+          "default": null,
+          "desc": "(indent) REQUIRED for indent — must be > 0. Major radius (outer radius of indent profile area)."
         },
         {
           "path": "operations[].r2",
           "type": "number",
-          "required": false,
-          "default": "0.5",
-          "desc": "(indent) Minor radius (inner radius or fillet radius of indent profile)."
+          "required": true,
+          "default": null,
+          "desc": "(indent) REQUIRED for indent — must be > 0. Minor radius (inner radius or fillet radius of indent profile)."
         },
         {
           "path": "operations[].bottom_ratio",
@@ -8522,9 +8528,16 @@
           "default": "+normal",
           "values": [
             "+normal",
-            "-normal"
+            "-normal",
+            "both",
+            "+x",
+            "-x",
+            "+y",
+            "-y",
+            "+z",
+            "-z"
           ],
-          "desc": "(offset) Direction of surface extrusion: '+normal' = outward, '-normal' = inward."
+          "desc": "(offset) Direction of surface extrusion: '+normal' = outward, '-normal' = inward, 'both' = both sides, ±x/±y/±z = fixed global axes."
         },
         {
           "path": "operations[].thickness",
@@ -8562,9 +8575,10 @@
           "values": [
             "tied",
             "czm",
-            "contact"
+            "contact",
+            "none"
           ],
-          "desc": "(offset) Layer connection mode: 'tied' = merged, 'czm' = cohesive zone, 'contact' = explicit contact."
+          "desc": "(offset) Interface connection type between source and offset surfaces: tied (shared nodes), czm (cohesive zone elements), contact (duplicated nodes for user-defined *CONTACT), none (no interface treatment)."
         },
         {
           "path": "operations[].czm_part_id",
@@ -8719,15 +8733,11 @@
           "required": false,
           "default": null,
           "values": [
-            "light",
-            "moderate",
-            "heavy",
-            "custom",
             "smartphone_drop",
             "smartphone_drop_aggressive",
             "quasi_static"
           ],
-          "desc": "(matdb) Preset damping curve: 'light' (1%), 'moderate' (2%), 'heavy' (5%), 'smartphone_drop', or 'custom'."
+          "desc": "(matdb) Damping preset baseline (case-insensitive): 'smartphone_drop', 'smartphone_drop_aggressive' or 'quasi_static'. Any other string is not a recognized preset. Explicit damping_* fields override the preset."
         },
         {
           "path": "operations[].materials",
@@ -8793,11 +8803,9 @@
           "values": [
             "force",
             "pressure",
-            "normal_pressure",
-            "velocity",
-            "acceleration"
+            "normal_pressure"
           ],
-          "desc": "(load case) Load type affecting *LOAD_* card selection."
+          "desc": "(load case) Load type: 'force' (total force spread over the projected area), 'pressure', 'normal_pressure' (no direction needed). Any other value falls back to the pressure path."
         },
         {
           "path": "operations[].loads[].value",
@@ -9508,13 +9516,13 @@
           "path": "operations[].method",
           "type": "enum",
           "required": false,
-          "default": "iso",
+          "default": "vrh",
           "values": [
-            "iso",
-            "adaptive",
-            "manual"
+            "voigt",
+            "reuss",
+            "vrh"
           ],
-          "desc": "(split) Splitting method: 'iso' = equal bbox regions, 'adaptive' = quality-balanced, 'manual' = explicit."
+          "desc": "(merge) Homogenization rule for the merged material (case-insensitive): 'voigt' (upper bound), 'reuss' (lower bound), 'vrh' (Voigt-Reuss-Hill average, the default for any unrecognized value). The split operation has no 'method' key — it takes 'direction' and 'divisions'."
         },
         {
           "path": "operations[].name",
@@ -11980,8 +11988,8 @@
           "type": "object",
           "role": "yaml_field",
           "yaml_path": "calibration",
-          "required": true,
-          "description": "F-δ calibration: {point: {deflection, force}} for a single operating point, or {curve: [[deflection, force], ...], operating_deflection: d}. Optional: tolerance (default 0.05), calibrate (thickness|modulus), t_min, t_max"
+          "required": false,
+          "description": "F-δ calibration: {point: {deflection, force}} for a single operating point, or {curve: [[deflection, force], ...], operating_deflection: d}. Optional at top level — every clip must end up with a calibration, so give it here OR per clip in clips[]. Optional sub-keys: tolerance (default 0.05), calibrate (thickness|modulus), t_min, t_max"
         },
         {
           "name": "material",

@@ -23,6 +23,7 @@ import asyncio
 import json
 import os
 import sys
+from pathlib import Path
 
 import httpx
 from mcp import ClientSession
@@ -33,7 +34,11 @@ API_BASE = os.environ.get("KOOREMAPPER_API_BASE", os.environ.get("KOORM_API_BASE
 API = f"{API_BASE}/api/v1"
 ADMIN_EMAIL = os.environ.get("KOORM_ADMIN_EMAIL", "admin@kooremapper.local")
 ADMIN_PASSWORD = os.environ.get("KOORM_ADMIN_PASSWORD", "admin")
-EXPECTED_TOOLS = 22
+# 도구 수는 하드코딩하지 않고 server.py 의 @mcp.tool( 수에서 뽑는다
+# (backend/tests/test_parity.py 와 system/routes._mcp_tool_count() 가 쓰는 방식과 동일 —
+#  22 로 박아둬 도구가 50개로 늘어난 뒤 스모크가 항상 실패했다).
+EXPECTED_TOOLS = (Path(__file__).with_name("server.py")
+                  .read_text(encoding="utf-8").count("@mcp.tool("))
 
 
 def _p(*a):
