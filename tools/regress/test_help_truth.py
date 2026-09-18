@@ -9,6 +9,8 @@
   - 'help generate-var' 예제가 --no-scale 을 달아 100x1x1 퇴화 메시를 냈다.
   - 'help load' 가 압력을 내는 mode: gravity 와 없는 select: all 을 문서화했다.
   - '--help 공통 규칙' 의 '경로는 작업 폴더 기준' 이 거짓이었다(YAML 이 있는 폴더 기준).
+  - 그 고침이 적은 '모두 YAML 폴더 기준' 도 거짓이었다 — load/boundary/contact/relax/database/
+    implicit/modal/ale/cclip/matdb 는 폴더 없는 이름만 YAML 폴더 기준이다.
   - 'prestress --strain' / 'strain --type' 이 모르는 값을 조용히 기본값으로 삼켰다.
 """
 import os
@@ -173,6 +175,30 @@ def main():
     check("규칙(a): strip cfg/strip.yaml 의 출력이 작업 폴더가 아니라 cfg/../data 로 감",
           os.path.exists(os.path.join(tmp, "data", "box_stripped.k")) and
           not os.path.exists(os.path.join(tmp, "box_stripped.k")), f"rc={rc} {out[-200:]}")
+
+    # 규칙(a) 의 예외 — load/boundary/contact/relax/database/implicit/modal/ale/cclip/matdb 는
+    # 폴더 없는 이름만 YAML 폴더 기준이다. help 가 그 예외를 적고 있는지, 실제로 그렇게 도는지 본다.
+    check("규칙(a): 폴더 붙은 상대 경로를 아직 작업 폴더에서 찾는 명령 목록을 적음",
+          "예외" in rules and "load/boundary" in rules, rules[:700])
+    open(os.path.join(tmp, "cfg", "box.k"), "wb").write(
+        open(os.path.join(tmp, "data", "box.k"), "rb").read())
+    LOAD_CASE = "loads:\n  - part: 1\n    mode: normal_pressure\n    value: 1.0\n"
+    BND_CASE = ("boundaries:\n  - part: 1\n    dof: all\n    direction: [0, 0, -1]\n"
+                "    select: direction\n    angle: 45.0\n")
+    for cmd, case in (("load", LOAD_CASE), ("boundary", BND_CASE)):
+        open(os.path.join(tmp, "cfg", f"{cmd}_name.yaml"), "w").write(
+            f"model: box.k\noutput: {cmd}_name_out.k\n" + case)
+        rc, out = run(binary, tmp, cmd, f"cfg/{cmd}_name.yaml")
+        check(f"규칙(a): {cmd} 의 폴더 없는 이름은 YAML 폴더(cfg) 기준으로 풀린다",
+              f"[{cmd}] Model: cfg/box.k" in out, f"rc={rc} {out[-200:]}")
+        open(os.path.join(tmp, "cfg", f"{cmd}_rel.yaml"), "w").write(
+            f"model: ../data/box.k\noutput: ../data/{cmd}_rel_out.k\n" + case)
+        rc, out = run(binary, tmp, cmd, f"cfg/{cmd}_rel.yaml")
+        # help 가 '예외' 라고 적은 그대로 — 작업 폴더에서 찾다 실패한다.
+        # 이 갈래를 YAML 폴더 기준으로 고치면 여기와 위 help 문장을 함께 바꿔야 한다.
+        check(f"규칙(a) 예외: {cmd} 의 '../data/box.k' 는 아직 작업 폴더 기준 (help 가 적은 그대로)",
+              "Cannot open file: ../data/box.k" in out or "Cannot open model: ../data/box.k" in out,
+              f"rc={rc} {out[-200:]}")
 
     # 규칙 (b)
     open(os.path.join(tmp, "multi.yaml"), "w").write(
