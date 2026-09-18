@@ -71,17 +71,25 @@ struct StandaloneYamlBase {
     }
 
     // operations 항목 수 — 단독 명령은 한 항목만 다루므로, 여러 개면 조용히 합치지 말고 거부해야 한다.
+    // 반환 -1 = 항목 대시 들여쓰기가 일관되지 않음(PyYAML 도 ParserError 로 거부하는 파일) — 예전엔 그런 대시를
+    // 세지 않아 항목 하나로 보고 뒤 항목만 조용히 적용했다(quad8 을 버리고 tria6 만 실행).
     static int countOperations(const std::string& yamlFile) {
         std::ifstream f(yamlFile);
         if (!f.is_open()) return 0;
         int opsIndent = -1;   // 'operations:' 키의 들여쓰기
         int itemIndent = -1;  // 항목 대시의 들여쓰기 — 하위 목록(layers·points·targets)은 더 깊어 세지 않는다
+        int blockIndent = -1; // 현재 항목 안에서 마지막으로 열린 블록 키(값이 빈 'layers:' 등)의 들여쓰기
+        int literalIndent = -1; // '|' 블록(material_card 등) 키의 들여쓰기 — 그 안의 카드 줄은 YAML 구조가 아니다
         int count = 0;
         std::string ln;
         while (std::getline(f, ln)) {
             if (!ln.empty() && ln.back() == '\r') ln.pop_back();
             int indent = countIndent(ln);
             std::string tr = trim(ln);
+            if (literalIndent >= 0) {
+                if (tr.empty() || indent > literalIndent) continue;
+                literalIndent = -1;
+            }
             if (tr.empty() || tr[0] == '#') continue;
             if (opsIndent < 0) {
                 size_t cp = tr.find(':');
@@ -91,10 +99,22 @@ struct StandaloneYamlBase {
             if (tr.substr(0,2) == "- " || tr == "-") {
                 if (indent < opsIndent) break;   // 바깥 목록으로 나감
                 if (itemIndent < 0) itemIndent = indent;
-                if (indent == itemIndent) ++count;
-                continue;
+                if (indent == itemIndent) { ++count; blockIndent = -1; continue; }
+                // 항목보다 깊은 대시는 블록 키가 열어 준 하위 목록일 때만 정상이다
+                if (blockIndent >= 0 && indent >= blockIndent) {
+                    std::string item = trim(KooRemapper::yamlStripComment(tr));
+                    if (item == "- |" || item == "-|" || item == "- >") literalIndent = indent;
+                    continue;
+                }
+                return -1;
             }
             if (indent <= opsIndent) break;      // operations 의 형제 키 — 블록 끝
+            size_t cp = tr.find(':');
+            if (cp != std::string::npos) {
+                std::string v = trim(KooRemapper::yamlStripComment(tr.substr(cp+1)));
+                if (v.empty()) blockIndent = keyIndent(tr, indent);   // 하위 목록/매핑을 여는 키
+                else if (v == "|" || v == ">") literalIndent = keyIndent(tr, indent);
+            }
         }
         return count;
     }
@@ -119,6 +139,12 @@ struct StandaloneYamlBase {
 // (quad8 다음 tria6 이면 tria6 만). 조용히 하나만 하지 말고 assemble 로 안내한다.
 static bool rejectMultiOperation(const std::string& yamlFile, const char* tag, const ConsoleOutput& console) {
     int n = StandaloneYamlBase::countOperations(yamlFile);
+    if (n < 0) {
+        console.error(std::string("[") + tag + "] " + yamlFile + " 의 operations 항목 대시 들여쓰기가 일관되지 않습니다 — "
+                      "YAML 로 읽을 수 없는 파일입니다 / inconsistent '-' indentation in the operations list; not valid YAML.");
+        console.error(std::string("[") + tag + "] 모든 항목의 '-' 를 같은 열에 맞추세요 / align every item's '-' at the same column.");
+        return true;
+    }
     if (n <= 1) return false;
     console.error(std::string("[") + tag + "] " + yamlFile + " 에 operations 항목이 " + std::to_string(n) +
                   "개 있습니다 — 단독 명령은 한 항목만 적용합니다 / has " + std::to_string(n) +
