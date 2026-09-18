@@ -25,7 +25,9 @@ SqueezeConfig SqueezeConfigReader::readFile(const std::string& filename) {
     }
     std::stringstream buffer;
     buffer << file.rdbuf();
-    return readString(buffer.str());
+    std::string content = buffer.str();
+    yamlStripBOM(content);   // 윈도우 편집기가 붙인 BOM 이 첫 키('parts')를 망가뜨렸다
+    return readString(content);
 }
 
 SqueezeConfig SqueezeConfigReader::readString(const std::string& yamlContent) {

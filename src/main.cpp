@@ -1114,8 +1114,8 @@ static bool printLegacyHelp(ConsoleOutput& console, const std::string& helpCmd) 
     } else if (helpCmd == "boundary") {
         console.println("Usage: KooRemapper boundary <config.yaml>");
         std::cout << "\n";
-        console.println("Apply boundary conditions (SPC/rigid wall) from YAML config.");
-        console.println("Inserts *BOUNDARY_SPC_NODE, *RIGIDWALL_PLANAR keywords.");
+        console.println("Apply boundary conditions (SPC) from YAML config.");
+        console.println("Inserts *SET_NODE_LIST + *BOUNDARY_SPC_SET keywords.");
         std::cout << "\n";
         console.println("YAML Config Format:");
         console.println("  model: mesh.k");
@@ -1124,8 +1124,15 @@ static bool printLegacyHelp(ConsoleOutput& console, const std::string& helpCmd) 
         console.println("    - part: 9");
         console.println("      dof: all                 # all | x | y | z | xy | xz | yz");
         console.println("      direction: [0, 0, -1]    # Face selection direction");
-        console.println("      select: direction         # direction | all");
+        console.println("      select: direction         # direction | all | set");
         console.println("      angle: 45.0              # Face selection angle tolerance");
+        console.println("      set_id: 0                # select: set only — existing *SET_NODE ID (required)");
+        std::cout << "\n";
+        console.println("Select modes:");
+        console.println("  direction  Face normals within angle of direction vector (default)");
+        console.println("  all        All exposed faces of the part (direction is ignored)");
+        console.println("  set        Existing *SET_NODE (set_id: required)");
+        console.println("  (rbe accepts direction | all only — set exists for boundary)");
         std::cout << "\n";
         console.println("DOF options:");
         console.println("  all  Fix all 6 DOF (tx,ty,tz,rx,ry,rz)");
@@ -1146,11 +1153,15 @@ static bool printLegacyHelp(ConsoleOutput& console, const std::string& helpCmd) 
         console.println("      direction: [0, 0, -1]");
         console.println("      angle: 45.0");
         console.println("      type: rbe3               # rbe2 | rbe3");
-        console.println("      mode: spider             # spider (one centroid master node)");
+        console.println("      mode: spider             # spider | face");
         std::cout << "\n";
         console.println("Types:");
         console.println("  rbe2  Rigid: slave nodes move exactly with master");
         console.println("  rbe3  Interpolation: master motion is weighted average of slaves");
+        std::cout << "\n";
+        console.println("Modes:");
+        console.println("  spider  One centroid master node for the whole selection");
+        console.println("  face    One centroid master node per selected face");
     } else if (helpCmd == "restack") {
         console.println("Usage: KooRemapper restack <config.yaml>");
         std::cout << "\n";
@@ -1654,11 +1665,19 @@ static int runMain(int argc, char* argv[]) {
             //     csv: false               # optional, write CSV instead of dynain
             //   )
             // Comments start with '#'. Unknown keys are ignored with a warning.
+            {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다
+                std::string tabLine;
+                if (KooRemapper::yamlScanTabIndent(positionalArgs[0], tabLine)) {
+                    console.error(KooRemapper::yamlTabIndentMessage("map", tabLine));
+                    return 1;
+                }
+            }
             std::ifstream yf(positionalArgs[0]);
             if (!yf.is_open()) {
                 console.error("Cannot open YAML config: " + positionalArgs[0]);
                 return 1;
             }
+            KooRemapper::yamlSkipBOM(yf);   // 윈도우 편집기가 붙인 BOM 이 첫 키를 망가뜨렸다
             auto trim = [](std::string s) {
                 size_t a = s.find_first_not_of(" \t\r\n");
                 size_t b = s.find_last_not_of(" \t\r\n");
