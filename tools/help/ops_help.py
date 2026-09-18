@@ -371,10 +371,12 @@ material:
   E: 210000.0
   nu: 0.3
 """}),
-   cmds=[BOX_CMD, "KooRemapper squeeze box.k sq.yaml box_sq"], outputs=["box_sq.k"],
+   cmds=[BOX_CMD, "KooRemapper squeeze box.k sq.yaml box_sq"], outputs=["box_sq.k", "box_sq.dynain"],
    invariants={"box_sq.k": {"bbox": [19.8, 9.9, 2.0]},
                "box_sq.dynain": {"keywords": ["*INITIAL_STRESS_SOLID"]}},
-   notes=["material 이 없으면 k 파일 재질을 쓴다 — 둘 다 없으면 실패. 등방 팽윤은 parts[].swelling"])
+   notes=["material 이 없으면 k 파일 재질을 쓴다 — 둘 다 없으면 실패. 등방 팽윤은 parts[].swelling",
+          "config YAML 은 BOM 없이 저장할 것 — 이 op 만은 아직 BOM 이 붙으면 "
+          "'No parts defined in squeeze config' 로 rc=1 이다(메모장은 BOM 을 붙인다)"])
 op("formstrain", "변형·초기응력", "셸 이면각으로 성형 소성변형률 추정 → *INITIAL_STRAIN_SHELL", "성형 forming 곡률",
    "KooRemapper formstrain <config.yaml>",
    needs=["examples/formstrain/bent_shell.k"],

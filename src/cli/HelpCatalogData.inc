@@ -449,7 +449,7 @@ material:
 )KRH"}},
      {"KooRemapper generate box box.yaml", "KooRemapper squeeze box.k sq.yaml box_sq"},
      {},
-     {"material 이 없으면 k 파일 재질을 쓴다 — 둘 다 없으면 실패. 등방 팽윤은 parts[].swelling"}},
+     {"material 이 없으면 k 파일 재질을 쓴다 — 둘 다 없으면 실패. 등방 팽윤은 parts[].swelling", "config YAML 은 BOM 없이 저장할 것 — 이 op 만은 아직 BOM 이 붙으면 'No parts defined in squeeze config' 로 rc=1 이다(메모장은 BOM 을 붙인다)"}},
     {"formstrain", "변형·초기응력", "셸 이면각으로 성형 소성변형률 추정 → *INITIAL_STRAIN_SHELL", "성형 forming 곡률", "KooRemapper formstrain <config.yaml>",
      {{"fs.yaml", R"KRH(base_model: examples/formstrain/bent_shell.k
 output: bent_formstrain

@@ -89,6 +89,8 @@ def _mesh_facts(path):
 
 def check_invariants(path, inv):
     """선언된 불변식 위반 목록 — rc=0 이어도 결과가 틀린 사례(퇴화 메시 등)를 잡는다."""
+    if not os.path.exists(path):
+        return ["파일 없음"]
     bbox, nelem, kws = _mesh_facts(path)
     bad = []
     want = inv.get("bbox")

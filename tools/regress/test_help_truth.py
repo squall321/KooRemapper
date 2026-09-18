@@ -273,6 +273,23 @@ def main():
     rc, out = run(binary, tmp, "strip", "bom.yaml")
     check("규칙(e): BOM 이 붙은 YAML 도 그대로 돌아감",
           rc == 0 and os.path.exists(os.path.join(tmp, "bom_out.k")), f"rc={rc} {out[-200:]}")
+    # 두 규칙 모두 예외가 남아 있다(매뉴얼 §3.1 (d)(e)) — 문구와 실제 동작을 함께 잠근다.
+    # 무조건문으로 적으면 윈도우 사용자가 --help 가 괜찮다고 한 입력으로 rc=1 을 맞는다.
+    check("공통 규칙: 탭 검사의 예외(map·되감을 수 없는 입력)를 적음",
+          "예외: map 과 되감을 수 없는 입력" in rules, rules[:1200])
+    check("공통 규칙: BOM 의 예외(map·squeeze)를 적음",
+          "squeeze <mesh> <config> <prefix> 는 아직 BOM 에서 실패" in rules, rules[:1200])
+    open(os.path.join(tmp, "map_tab.yaml"), "w").write(
+        "bent: bent.k\nflat: flat.k\noutput: map_tab_out.k\nnotes:\n\t- memo\n")
+    rc, out = run(binary, tmp, "map", "map_tab.yaml")
+    check("규칙(d) 예외: map 은 탭 검사를 하지 않는다",
+          "탭을 쓸 수 없습니다" not in out, out[-200:])
+    open(os.path.join(tmp, "sq_bom.yaml"), "wb").write(
+        b"\xef\xbb\xbf" + b"parts:\n  - pid: 1\n    eps_x: -0.01\n"
+        b"material:\n  E: 210000.0\n  nu: 0.3\n")
+    rc, out = run(binary, tmp, "squeeze", "box.k", "sq_bom.yaml", "sq_bom")
+    check("규칙(e) 예외: squeeze 는 BOM 붙은 config 에서 rc=1",
+          rc == 1 and not os.path.exists(os.path.join(tmp, "sq_bom.k")), f"rc={rc} {out[-200:]}")
 
     print("[열거값 표기 — help 가 적은 허용값이 바이너리와 같은가]")
     # boundary 와 load 의 select 는 값 집합이 다르다(boundary: all, load: tied). 한쪽 목록을 베껴 적으면
@@ -362,10 +379,19 @@ def main():
     open(os.path.join(tmp, "nomat", "md.yaml"), "w").write(
         "model: box.k\noutput: md_bundle.k\nmat_type: MAT_ELASTIC\n"
         'materials:\n  - mid: 1\n    match: "*"\n')
-    rc, out = run(binary, tmp, "matdb", "nomat/md.yaml")
-    check("matdb: database 를 생략하면 번들 DB 를 스스로 찾는다 (rc=0)",
-          rc == 0 and os.path.exists(os.path.join(tmp, "nomat", "md_bundle.k")),
-          f"rc={rc} {out[-250:]}")
+    # 번들 DB 는 작업 폴더 materials/ → 바이너리 옆 materials/·../materials/ 순으로 찾는다.
+    # 갓 빌드한 트리에는 build/dev/materials 가 없다(dist/materials 를 복사해야 생긴다) — 그때는 건너뛴다.
+    bindir = os.path.dirname(os.path.realpath(binary))
+    bundle = [os.path.join(bindir, "materials", "material_db.json"),
+              os.path.join(bindir, "..", "materials", "material_db.json")]
+    if not any(os.path.isfile(b) for b in bundle):
+        print("  SKIP: 바이너리 옆 materials/material_db.json 없음 "
+              "(cp -r dist/materials <빌드 트리>/ 후 다시 돌릴 것)")
+    else:
+        rc, out = run(binary, tmp, "matdb", "nomat/md.yaml")
+        check("matdb: database 를 생략하면 번들 DB 를 스스로 찾는다 (rc=0)",
+              rc == 0 and os.path.exists(os.path.join(tmp, "nomat", "md_bundle.k")),
+              f"rc={rc} {out[-250:]}")
 
     print("[HelpCatalogData.inc 가 ops_help.py 와 같은지]")
     p = subprocess.run([sys.executable, os.path.join(REPO, "tools", "help", "gen_help_cpp.py"), "--check"],
