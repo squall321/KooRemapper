@@ -42,50 +42,44 @@ KooRemapper.exe offset <config.yaml>
 ### YAML 형식
 
 ```yaml
-model: base.k
+base_model: model.k
 output: offset_result
-source_pid: 1
-offset_direction: +normal   # +normal|-normal|+x|-x|+y|-y|+z|-z
-thickness: 2.0
-thickness_formula: "1.0 + 0.01*x"   # 가변 두께 수식 (선택)
-num_layers: 1
-use_local_normals: true      # 곡면 법선 사용
-element_type: hex            # hex | tet
-connection_mode: shared      # shared | tied | czm
-new_pid: 0                   # 0=자동
-part_title: "Offset part"
-material:
-  E: 210000
-  nu: 0.3
+operations:
+  - type: offset
+    source_pid: 1
+    element_type: solid          # solid | tshell | shell
+    thickness: 2.0
+    thickness_formula: "1.0 + 0.01*x"   # 가변 두께 수식 (선택, x/y/z 변수)
+    num_layers: 1
+    offset_direction: +normal    # +normal|-normal|+x|-x|+y|-y|+z|-z
+    use_local_normals: true      # 곡면 노드별 법선 사용
+    connection_mode: tied        # tied | czm | contact | none (기본 tied)
+    new_pid: 10                  # 새 파트 ID
+    part_title: "Offset part"
+    material_card: |             # MID 칸(@MID@·숫자·라벨)은 새 MID 로 바뀜
+      *MAT_ELASTIC
+      $#     mid        ro         e        pr
+           @MID@       2.0     12000      0.25
 
-# CZM 연결 (connection_mode: czm)
-czm_part_id: 100
-czm_mid: 50
-czm_material_card: |
-  *MAT_COHESIVE_...
+    # CZM 연결 (connection_mode: czm)
+    czm_material_card: |         # MID 칸(@CZM_MID@ 등)은 새 CZM MID 로 바뀜
+      *MAT_COHESIVE_MIXED_MODE
+      $#     mid        ro     roflg   intfail        en        et       gic      giic
+       @CZM_MID@       2.0         0       1.0     20000     10000       0.5       0.5
+      $#     xmu         t         s       und       utd     gamma
+             2.0       1.0       1.0
 
-# 재료 카드 직접 지정 (선택)
-material_card: |
-  *MAT_ELASTIC
-  ...
-
-# 영역 선택 (선택)
-bbox_xmin: 0
-bbox_xmax: 100
-bbox_ymin: 0
-bbox_ymax: 100
-bbox_zmin: 0
-bbox_zmax: 100
-node_id_min: 1
-node_id_max: 999999
-element_id_min: 1
-element_id_max: 999999
+    # 영역(region) 필터 (선택): 소스 표면의 일부만 처리
+    # bbox_xmin/xmax/ymin/ymax/zmin/zmax
+    # node_id_min/max, element_id_min/max
 ```
+
+> **v1.8.0 정정**: (1) `connection_mode` 값 집합은 `tied | czm | contact | none` 이며 **기본값은 `tied`** 입니다(help·examples. 구버전의 `shared | tied | czm`/기본 `shared` 정정). `contact` 는 인터페이스 노드를 복제해 별도 표면을 만들고 사용자가 이후 `*CONTACT` 를 정의합니다. (2) `element_type` 값은 `solid | tshell | shell` 입니다(구버전의 `hex | tet` 정정). (3) config 는 최상위 `base_model`/`output` + `operations[].type: offset` 구조입니다. 재료는 `material_card` 로 지정하고, 층마다 다르면 `material_cards:` 목록(`- |` 항목)을 씁니다(단독·assemble 모두). (4) 카드 MID 칸의 값(`@MID@`·`@CZM_MID@`·숫자·라벨)은 새 MID 로 바뀌며, 값은 LS-DYNA 고정 폭 10열 칸 안에 두세요. (5) `new_pid`·`new_secid`·`new_mid` 를 지정해도 뒤이어 자동 발급되는 ID 와 겹치지 않습니다. (6) `connection_mode: none` 은 assemble 경로에서도 허용됩니다. 단독 `offset` 도 assemble 과 같은 값 검사를 거칩니다.
 
 ### 주요 파라미터
 
 
-**표 22-2. offset local_normals 효과 — 전역 평균 법선 대비 로컬 법선 사용 시 품질 개선.**
+**표 22-1. offset 주요 파라미터 — 소스 파트, 방향·두께, 요소 유형, 연결 방식.**
 
 | 파라미터 | 설명 | 기본값 |
 |----------|------|--------|
@@ -94,7 +88,8 @@ element_id_max: 999999
 | `thickness` | 균일 두께 | — |
 | `thickness_formula` | 가변 두께 수식 (x,y,z 변수) | — |
 | `use_local_normals` | 곡면 노드별 법선 사용 | `false` |
-| `connection_mode` | 연결 방식 (shared/tied/czm) | `shared` |
+| `element_type` | 요소 유형 (solid/tshell/shell) | `solid` |
+| `connection_mode` | 연결 방식 (tied/czm/contact/none) | `tied` |
 
 ### 품질 검증
 생성된 솔리드 요소의 품질을 자동 검증합니다:

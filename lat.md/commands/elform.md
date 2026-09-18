@@ -47,7 +47,7 @@ target_elform: "2"       # 숫자 또는 별칭
 ### 고체 요소 별칭
 
 
-**표 19-1. disconnect 모드 — full/czm/mefem 세 가지 노드 분리 모드와 생성 키워드.**
+**표 18-1. elform 고체 요소 별칭 — 별칭과 LS-DYNA ELFORM 번호.**
 
 | 별칭 | ELFORM | 설명 |
 |------|--------|------|
@@ -60,7 +60,7 @@ target_elform: "2"       # 숫자 또는 별칭
 ### 셸 요소 별칭
 
 
-**표 20-1. IGA 생성 파일 — 파트별 IGA NURBS 박스 파일과 메인 파일의 *INCLUDE 구조.**
+**표 18-2. elform 셸 요소 별칭 — 별칭과 LS-DYNA ELFORM 번호.**
 
 | 별칭 | ELFORM |
 |------|--------|

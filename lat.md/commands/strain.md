@@ -39,7 +39,7 @@ KooRemapper.exe strain <ref_mesh.k> <def_mesh.k> <output.csv> [--type engineerin
 ### 파라미터
 
 
-**표 8-1. generate-var 두께 분포 정의 — 영역(zone)별 lc와 두께를 지정하여 변밀도 메시를 생성한다.**
+**표 10-1. strain 인자 — 기준·변형 메시, 출력 CSV, 변형률 유형 옵션.**
 
 | 파라미터 | 설명 | 기본값 |
 |----------|------|--------|
@@ -51,7 +51,7 @@ KooRemapper.exe strain <ref_mesh.k> <def_mesh.k> <output.csv> [--type engineerin
 ### 변형률 유형
 
 
-**표 9-1. unfold 파라미터 — 굽힘 메시 전개 시 호(arc), 너비(width), 두께(thickness) 축 방향 설정.**
+**표 10-2. strain 변형률 유형 — engineering·green·log 정의.**
 
 | 유형 | 설명 |
 |------|------|
@@ -61,7 +61,26 @@ KooRemapper.exe strain <ref_mesh.k> <def_mesh.k> <output.csv> [--type engineerin
 
 ### 출력
 
-- `output.csv`: 요소별 6개 변형률 성분 (εxx, εyy, εzz, εxy, εyz, εxz)
+`output.csv` 는 **헤더 1줄 + 요소당 1줄, 11열** 입니다(확인).
+
+```
+ElementID,exx,eyy,ezz,exy,eyz,exz,VonMises,Volumetric,MaxShear,Jacobian
+```
+
+**표 10-3. strain 출력 CSV 열 구성 — 11열의 각 열이 담는 값.**
+
+| 열 | 내용 |
+|---|---|
+| `ElementID` | 요소 ID |
+| `exx`·`eyy`·`ezz`·`exy`·`eyz`·`exz` | 변형률 6성분 |
+| `VonMises` | 등가(von Mises) 변형률 |
+| `Volumetric` | 체적 변형률 |
+| `MaxShear` | 최대 전단 변형률 |
+| `Jacobian` | 요소 자코비안 |
+
+> **옵션 이름 주의**: `strain` 의 변형률 유형 옵션은 **`--type`** 입니다(`--strain` 은 `[ERROR] Unknown option: --strain`).
+> 반대로 `prestress` 는 **`--strain`** 이고 `engineering`/`green` 두 값만 받습니다([§6](#6-prestress--초기-응력변형률-계산)).
+> 모르는 값은 `[ERROR] Unknown --type 'xxx' (allowed: engineering, green, log)` 로 종료 코드 1 입니다.
 
 ---
 

@@ -57,6 +57,25 @@ operations:
 - **원본 키워드 보존**: `*CONTACT`, `*BOUNDARY`, `*LOAD` 등 미파싱 키워드 그대로 유지
 - **응력 누적**: 동일 요소에 여러 오퍼레이션 적용 시 응력 합산(`std::map` 기반)
 - **ID 자동 관리**: 파트/섹션/노드/요소 ID 자동 발급 (충돌 방지)
+- **출력 이름**: `output` 끝의 `.k` 는 있어도 없어도 같습니다(`result`·`result.k` → `result.k`, dynain 은 `result.dynain`).
+- **상대 경로**: `base_model`·`output`·`dat_file`·`bundle`·`dynain` 등 YAML 안의 모든 파일 경로는
+  **그 YAML 파일이 있는 폴더 기준**입니다 — 폴더가 붙은 `../data/box.k` 도 같고, 작업 폴더로 되돌아가지 않습니다
+  (YAML 이 현재 폴더에 있어도 같음). 절대 경로는 그대로 씁니다.
+  **유일한 예외는 `matdb` 의 `database` 키**로, 이것만 작업 폴더(CWD) 기준입니다([§3.1(a)](#31-yaml-공통-규칙-모든-op)·[§24](#24-matdb--재료-db-교체)).
+- **인라인 주석**: 값 뒤에 공백 + `#` 로 주석을 달 수 있습니다(따옴표 안의 `#` 는 값). 단독 YAML 명령도 같습니다.
+- **탭 들여쓰기 거절 / UTF-8 BOM 허용**: [§3.1(d)(e)](#31-yaml-공통-규칙-모든-op) 와 같습니다.
+- **값 검사**: 각 op 값을 읽을 때 검사하며, 단독 `bend`·`indent`·`offset`·`restack`·`iga` 도 같은 규칙을 씁니다.
+  열거값 오타는 **종료 코드 1 + 출력 파일 없음** 이고, 이 검증은 `assemble` 과 단독 명령 양쪽에 똑같이 걸립니다
+  (`restack` 의 `element_type`, `matdb` 의 `damping_preset`, `boundary`/`rbe` 의 `select` 등).
+- **nan/inf 방어(2026-09-18)**: 결과 덱(`.k`·`.dynain`·IGA include)에 유한하지 않은 값이 하나라도 있으면
+  **아무 파일도 쓰지 않고 종료 코드 1** 입니다. `assemble` 도 단독 명령과 같습니다(예전에는 `assemble` 만 조용히 nan 덱을 냈습니다).
+
+  ```
+  [ERROR] 출력 덱에 유한하지 않은 값(nan/inf)이 있습니다: out.k:17 '-nan' — 출력 파일을 쓰지 않았습니다: out.k, out.dynain
+  ```
+
+  **같은 경로에 있던 지난 실행 결과는 지우지 않습니다** — 실패해도 그 자리에 예전 파일이 그대로 남으니,
+  새 결과로 오해하지 않도록 종료 코드를 반드시 확인하세요. in-place 출력(`output` == `base_model`)에서는 입력 메시가 보존됩니다.
 
 > **참고**: 아래 각 오퍼레이션은 동일 이름의 독립 명령어(12~22장)와 동일한 알고리즘을 사용합니다.
 > assemble 내에서는 `- type: <이름>` 으로 지정하며, 여러 오퍼레이션을 순차 결합할 수 있습니다.
@@ -234,8 +253,9 @@ operations:
   target_pid: 1
   dat_file: warpage.dat
   plane: xy
-  deflection_axis: z
-  mode: curvature
+  deflection_axis: +z
+  unit: um
+  mode: prestress
   morph_factor: 1.0
 ```
 
@@ -251,7 +271,7 @@ operations:
   offset_direction: +normal
   thickness: 2.0
   use_local_normals: true
-  element_type: hex
+  element_type: solid
 ```
 
 → 독립 명령 [22. offset](#22-offset--셸-오프셋-솔리드-생성) 참조
@@ -274,10 +294,12 @@ operations:
 
 ```yaml
 - type: matdb
-  database: materials/material_db.json
-  mat_type: MAT_024
+  database: materials/material_db.json   # 작업 폴더 기준 (§3.1(a) 의 유일한 예외)
+  mat_type: MAT_024                      # 생략 시 기본값은 MAT_ELASTIC
   thermal: false
 ```
+
+`damping_preset` 은 `smartphone_drop` / `smartphone_drop_aggressive` / `quasi_static` / `off` 만 받습니다(그 밖의 값은 종료 코드 1).
 
 → 독립 명령 [24. matdb](#24-matdb--재료-db-교체) 참조
 
@@ -289,7 +311,7 @@ operations:
 - type: wrap
   target_pid: 1
   axis: z
-  axis_center: [0, 0]
+  center: [0, 0]
   tension: 100.0
 ```
 
@@ -364,10 +386,13 @@ dynain 또는 K 파일의 `*NODE` 블록에서 일치하는 NID만 좌표 갱신
 
 ```yaml
 - type: database
-  preset: crash     # crash / drop / nve / all
+  preset: crash     # all | drop | crash | static | thermal | forming | modal | minimal
   dt: 0.0001        # ASCII 출력 간격 (초)
   dt_plot: 0.001    # d3plot 출력 간격
 ```
+
+> **프리셋은 위 8종뿐입니다.** 예전 판이 적었던 **`nve` 는 없는 프리셋**이고,
+> 주면 `[ERROR] Unknown preset: nve` 와 함께 종료 코드 1 입니다(확인). 전체 목록은 [§37 표 37-1](#37-database--database-출력-제어) 참조.
 
 → 독립 명령 [37. database](#37-database--database-출력-제어) 참조
 

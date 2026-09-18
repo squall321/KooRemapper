@@ -55,7 +55,7 @@ strip: false            # true: 키워드 제거만
 ### 레벨 프리셋 (5단계)
 
 
-**표 37-1. database 프리셋 종류 — crash/drop/nve/all 프리셋별 출력 키워드 목록.**
+**표 31-1. relax 레벨 프리셋 — NRCYCK·DRTOL·DRFCTR 등 DR 설정.**
 
 | Lv | 이름 | NRCYCK | DRTOL | DRFCTR | TSSFDR | IRELAL | EDTTL |
 |----|------|--------|-------|--------|--------|--------|-------|
@@ -68,7 +68,7 @@ strip: false            # true: 키워드 제거만
 ### 모드
 
 
-**표 39-1. assemble 오퍼레이션 목록 — type 필드로 지정 가능한 전체 오퍼레이션과 주요 파라미터.**
+**표 31-2. relax 모드 — explicit·implicit DR 과 IDRFLG.**
 
 | mode | IDRFLG | 설명 |
 |------|--------|------|

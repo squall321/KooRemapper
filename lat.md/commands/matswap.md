@@ -74,6 +74,8 @@ Rubber_HG
 *END
 ```
 
+> **대상 PART 카드**: `*PART` 데이터 줄이 PID·SECID·MID 3칸뿐인 모델(예: `generate box` 출력)도 인식합니다(예전엔 `PID not found`).
+
 ### 파라미터 이름 접두사 규칙
 
 

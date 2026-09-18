@@ -2865,10 +2865,12 @@ operations:
 
 ```yaml
 - type: matdb
-  database: materials/material_db.json
-  mat_type: MAT_024
+  database: materials/material_db.json   # 작업 폴더 기준 (§3.1(a) 의 유일한 예외)
+  mat_type: MAT_024                      # 생략 시 기본값은 MAT_ELASTIC
   thermal: false
 ```
+
+`damping_preset` 은 `smartphone_drop` / `smartphone_drop_aggressive` / `quasi_static` / `off` 만 받습니다(그 밖의 값은 종료 코드 1).
 
 → 독립 명령 [24. matdb](#24-matdb--재료-db-교체) 참조
 

@@ -121,16 +121,74 @@ contacts:
 #### create에서 사용 가능한 type 값
 
 
-**표 24-1. matdb 재료 매칭 규칙 — 제목(title)/이름(name)/태그(tag) 우선순위 기반 자동 매칭.**
+약칭(short name)을 쓰면 전체 키워드로 풀립니다. `assemble` 의 `- type: contact` 도 **같은 표**를 씁니다(2026-09-18 확인).
 
-| type (YAML) | LS-DYNA 키워드 |
+**표 25-1. contact create 접촉 type 약칭 — YAML type 약칭과 LS-DYNA *CONTACT 키워드.**
+
+| type (YAML 약칭) | LS-DYNA 키워드 |
 |---|---|
-| `automatic_surface_to_surface` | `*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE` |
-| `tied_surface_to_surface` | `*CONTACT_TIED_SURFACE_TO_SURFACE` |
-| `automatic_single_surface` | `*CONTACT_AUTOMATIC_SINGLE_SURFACE` |
-| `eroding_surface_to_surface` | `*CONTACT_ERODING_SURFACE_TO_SURFACE` |
-| `forming_surface_to_surface` | `*CONTACT_FORMING_SURFACE_TO_SURFACE` |
-| (기타 직접 입력) | `*CONTACT_<입력값>` (대문자 변환) |
+| `auto` / `automatic` | `*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE` |
+| **키 생략** | `*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE` |
+| `tied` | `*CONTACT_TIED_SURFACE_TO_SURFACE` |
+| `tied_thermal` / `thermal` | `*CONTACT_TIED_SURFACE_TO_SURFACE_THERMAL` |
+| `tiebreak` | `*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_TIEBREAK` |
+| `mortar` | `*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_MORTAR` |
+| `tied_mortar` | `*CONTACT_TIED_SURFACE_TO_SURFACE_MORTAR` |
+| `single` | `*CONTACT_AUTOMATIC_SINGLE_SURFACE` |
+| `eroding` | `*CONTACT_ERODING_SURFACE_TO_SURFACE` |
+| `forming` | `*CONTACT_FORMING_SURFACE_TO_SURFACE` |
+
+> 실제로 쓰이는 카드는 `_TITLE` 붙은 형태입니다(`*CONTACT_TIED_SURFACE_TO_SURFACE_TITLE`).
+
+**약칭이 아닌 값**은 그대로 대문자로 바꿔 `*CONTACT_<입력값>` 으로 씁니다.
+즉 `automatic_nodes_to_surface`·`automatic_general`·`forming_one_way_surface_to_surface`·`tied_shell_edge_to_surface` 처럼
+표에 없는 LS-DYNA 접촉 키워드도 **그대로 통과**합니다(`KooRemapper` 자신이 `cclip` 에서 `automatic_nodes_to_surface` 를 씁니다).
+
+아래 27개 키워드는 KooRemapper 가 내는 카드 구성과 맞는다고 등록해 둔 목록이라 **조용히 통과**합니다.
+
+```
+SURFACE_TO_SURFACE                      ONE_WAY_SURFACE_TO_SURFACE
+NODES_TO_SURFACE                        SINGLE_SURFACE
+AUTOMATIC_SURFACE_TO_SURFACE            AUTOMATIC_SURFACE_TO_SURFACE_MORTAR
+AUTOMATIC_SURFACE_TO_SURFACE_TIEBREAK   AUTOMATIC_ONE_WAY_SURFACE_TO_SURFACE
+AUTOMATIC_SINGLE_SURFACE                AUTOMATIC_SINGLE_SURFACE_MORTAR
+AUTOMATIC_NODES_TO_SURFACE              AUTOMATIC_GENERAL
+TIED_SURFACE_TO_SURFACE                 TIED_SURFACE_TO_SURFACE_OFFSET
+TIED_SURFACE_TO_SURFACE_FAILURE         TIED_SURFACE_TO_SURFACE_MORTAR
+TIED_SURFACE_TO_SURFACE_THERMAL         TIED_NODES_TO_SURFACE
+TIED_NODES_TO_SURFACE_OFFSET            TIED_SHELL_EDGE_TO_SURFACE
+TIED_SHELL_EDGE_TO_SURFACE_OFFSET       ERODING_SURFACE_TO_SURFACE
+ERODING_SINGLE_SURFACE                  ERODING_NODES_TO_SURFACE
+FORMING_SURFACE_TO_SURFACE              FORMING_ONE_WAY_SURFACE_TO_SURFACE
+FORMING_NODES_TO_SURFACE
+```
+
+이 목록에도 없는 값은 **막지 않고 경고만** 합니다(종료 코드 0, 덱은 그대로 생성).
+
+```
+[WARN] [contact] create: type 'bogus' is not a known contact keyword — writing *CONTACT_BOGUS as-is
+       (LS-DYNA will reject it if the keyword does not exist). Short names: auto, automatic, tied,
+       tied_thermal, thermal, tiebreak, mortar, tied_mortar, single, eroding, forming
+```
+
+`assemble` 도 같은 문구를 찍습니다(그 파일 관례대로 접두어는 `[WARNING] `). 즉 **오타는 LS-DYNA 가 잡습니다.**
+
+> **`assemble` 쪽 약칭 비대칭**: `assemble` 의 약칭 표에는 `tied_thermal`/`thermal`/`tiebreak` 항목이 없어,
+> `assemble` 안에서 `type: thermal` 은 `*CONTACT_THERMAL` 을 내며 위 경고를 받습니다.
+> `assemble` 에서는 **전체 키워드(`tied_surface_to_surface_thermal`)를 적으세요.**
+
+#### `slave` / `master` 의 `pids` 표기
+
+인라인 목록과 블록 목록 **둘 다** 쓸 수 있고 **같은 덱**이 나옵니다(2026-09-18 확인 — 예전에는 블록 목록이 조용히 무시되어 `*SET_PART` 가 생기지 않았습니다).
+
+```yaml
+slave:
+  pids: [1, 2]        # 인라인
+slave:
+  pids:               # 블록 목록 — 위와 같다
+    - 1
+    - 2
+```
 
 ---
 
@@ -219,7 +277,7 @@ contacts:
 #### contact_type 프리셋
 
 
-**표 24-2. matdb 구조 카드 타입 — MAT_ELASTIC, MAT_024, MAT_RIGID 등 지원 카드 목록.**
+**표 25-2. contact detect 접촉 type — YAML 값, LS-DYNA 키워드, 용도.**
 
 | YAML 값 | LS-DYNA 키워드 | 용도 |
 |---|---|---|
@@ -233,7 +291,7 @@ contacts:
 #### detect 옵션
 
 
-**표 25-1. contact 접촉 type 값 목록 — YAML type 키워드와 LS-DYNA *CONTACT_* 키워드 대응.**
+**표 25-3. contact detect 옵션 — 탐지 범위, 포함·제외, 허용치, 법선 각, 자동 생성.**
 
 | 키 | 기본값 | 설명 |
 |---|---|---|
@@ -255,7 +313,7 @@ create, modify, detect(auto_create) 모든 액션에서 동일하게 사용 가�
 #### Card A (소프트닝/깊이)
 
 
-**표 25-2. contact modify 수정 가능 필드 — Card 1/2/A/C 필드명과 대응하는 LS-DYNA 필드.**
+**표 25-4. contact 세부 옵션 (soft·sofscl·depth·sbopt) — 키와 LS-DYNA 필드.**
 
 | 키 | 필드 | 설명 |
 |---|---|---|
@@ -267,7 +325,7 @@ create, modify, detect(auto_create) 모든 액션에서 동일하게 사용 가�
 #### Card B (두께)
 
 
-**표 25-3. contact Optional Card 지원 목록 — A~G 카드별 주요 파라미터와 기본값.**
+**표 25-5. contact 세부 옵션 (penmax·thkopt·shlthk) — 키와 LS-DYNA 필드.**
 
 | 키 | 필드 | 설명 |
 |---|---|---|
@@ -278,7 +336,7 @@ create, modify, detect(auto_create) 모든 액션에서 동일하게 사용 가�
 #### Card C (간격/에지)
 
 
-**표 26-1. load 유형 목록 — 지원하는 하중 종류와 각 하중의 적용 대상(노드/파트/세그먼트).**
+**표 25-6. contact 세부 옵션 (igap·ignore) — 키와 LS-DYNA 필드.**
 
 | 키 | 필드 | 설명 |
 |---|---|---|
