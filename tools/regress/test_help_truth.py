@@ -266,6 +266,141 @@ def main():
         check(f"{cmd} {flag} bogus: 결과 파일을 쓰지 않음",
               not os.path.exists(os.path.join(tmp, f"{cmd}_bogus{ext}")))
 
+    # 규칙 (d) 탭 / (e) BOM — 공통 규칙 블록에 적혀 있고 실제로 그렇게 도는가
+    check("공통 규칙: YAML 들여쓰기 탭 거절을 적음",
+          "탭" in rules and "종료 코드 1" in rules, rules[:900])
+    check("공통 규칙: UTF-8 BOM 무시를 적음", "BOM" in rules, rules[:900])
+    open(os.path.join(tmp, "tab.yaml"), "w").write(
+        'model: box.k\noutput: tab_out.k\nkeywords:\n\t- "*NODE"\n')
+    rc, out = run(binary, tmp, "strip", "tab.yaml")
+    check("규칙(d): 탭 들여쓰기 YAML 이 rc=1 + [ERROR] 이고 출력 파일이 없음",
+          rc == 1 and "[ERROR]" in out and not os.path.exists(os.path.join(tmp, "tab_out.k")),
+          f"rc={rc} {out[-200:]}")
+    open(os.path.join(tmp, "bom.yaml"), "wb").write(
+        b"\xef\xbb\xbf" + b'model: box.k\noutput: bom_out.k\nkeywords:\n  - "*NODE"\n')
+    rc, out = run(binary, tmp, "strip", "bom.yaml")
+    check("규칙(e): BOM 이 붙은 YAML 도 그대로 돌아감",
+          rc == 0 and os.path.exists(os.path.join(tmp, "bom_out.k")), f"rc={rc} {out[-200:]}")
+    # 두 규칙 모두 예외가 남아 있다(매뉴얼 §3.1 (d)(e)) — 문구와 실제 동작을 함께 잠근다.
+    # 무조건문으로 적으면 윈도우 사용자가 --help 가 괜찮다고 한 입력으로 rc=1 을 맞는다.
+    check("공통 규칙: 탭 검사의 예외(map·되감을 수 없는 입력)를 적음",
+          "예외: map 과 되감을 수 없는 입력" in rules, rules[:1200])
+    check("공통 규칙: BOM 의 예외(map·squeeze)를 적음",
+          "squeeze <mesh> <config> <prefix> 는 아직 BOM 에서 실패" in rules, rules[:1200])
+    open(os.path.join(tmp, "map_tab.yaml"), "w").write(
+        "bent: bent.k\nflat: flat.k\noutput: map_tab_out.k\nnotes:\n\t- memo\n")
+    rc, out = run(binary, tmp, "map", "map_tab.yaml")
+    check("규칙(d) 예외: map 은 탭 검사를 하지 않는다",
+          "탭을 쓸 수 없습니다" not in out, out[-200:])
+    open(os.path.join(tmp, "sq_bom.yaml"), "wb").write(
+        b"\xef\xbb\xbf" + b"parts:\n  - pid: 1\n    eps_x: -0.01\n"
+        b"material:\n  E: 210000.0\n  nu: 0.3\n")
+    rc, out = run(binary, tmp, "squeeze", "box.k", "sq_bom.yaml", "sq_bom")
+    check("규칙(e) 예외: squeeze 는 BOM 붙은 config 에서 rc=1",
+          rc == 1 and not os.path.exists(os.path.join(tmp, "sq_bom.k")), f"rc={rc} {out[-200:]}")
+
+    print("[열거값 표기 — help 가 적은 허용값이 바이너리와 같은가]")
+    # boundary 와 load 의 select 는 값 집합이 다르다(boundary: all, load: tied). 한쪽 목록을 베껴 적으면
+    # 사용자가 rc=1 을 맞는다.
+    bnd = help_text(binary, "boundary")
+    check("boundary: select 의 set (기존 *SET_NODE, set_id 필요)을 적음",
+          "set(기존 *SET_NODE, set_id 필요)" in bnd,
+          [l for l in bnd.splitlines() if "select" in l])
+    check("boundary: load 와 select 값 집합이 다름을 적음",
+          "load 의 select(direction|set|tied)와 값이 다르다" in bnd,
+          [l for l in bnd.splitlines() if "select" in l])
+    open(os.path.join(tmp, "bnd_tied.yaml"), "w").write(
+        "model: box.k\noutput: bnd_tied.k\nboundaries:\n  - part: 1\n    dof: xyz\n    select: tied\n")
+    rc, out = run(binary, tmp, "boundary", "bnd_tied.yaml")
+    check("boundary: select 'tied' 는 rc=1 + 허용목록 (direction, all, set)",
+          rc == 1 and "allowed: direction, all, set" in out, f"rc={rc} {out[-200:]}")
+    open(os.path.join(tmp, "bnd_all.yaml"), "w").write(
+        "model: box.k\noutput: bnd_all.k\nboundaries:\n  - part: 1\n    dof: xyz\n    select: all\n")
+    rc, out = run(binary, tmp, "boundary", "bnd_all.yaml")
+    check("boundary: select 'all' 은 실제로 동작 (rc=0)",
+          rc == 0 and os.path.exists(os.path.join(tmp, "bnd_all.k")), f"rc={rc} {out[-200:]}")
+
+    rst = help_text(binary, "restack")
+    check("restack: element_type 허용값(solid|tshell|shell)을 적음",
+          all(v in rst for v in ("solid", "tshell", "shell")),
+          [l for l in rst.splitlines() if "element_type" in l])
+    check("restack: direction 허용값(auto|x|y|z, +/- 부호)을 적음",
+          "auto" in rst and "direction" in rst,
+          [l for l in rst.splitlines() if "direction" in l])
+    RESTACK_LAYERS = ("    layers:\n      - thickness: 0.5\n        material_card: |\n"
+                      "          *MAT_ELASTIC\n          $#     mid        ro         e        pr\n"
+                      "              MID001  7.85E-09  2.10E+05       0.3\n")
+    open(os.path.join(tmp, "rs_bad.yaml"), "w").write(
+        "base_model: box.k\noutput: rs_bad\noperations:\n  - type: restack\n    target_pid: 1\n"
+        "    direction: z\n    element_type: hex\n" + RESTACK_LAYERS)
+    rc, out = run(binary, tmp, "restack", "rs_bad.yaml")
+    check("restack: element_type 'hex' 는 rc=1 + 허용목록 (solid, tshell, shell)",
+          rc == 1 and "allowed: solid, tshell, shell" in out, f"rc={rc} {out[-250:]}")
+    open(os.path.join(tmp, "rs_dir.yaml"), "w").write(
+        "base_model: box.k\noutput: rs_dir\noperations:\n  - type: restack\n    target_pid: 1\n"
+        "    direction: w\n" + RESTACK_LAYERS)
+    rc, out = run(binary, tmp, "restack", "rs_dir.yaml")
+    check("restack: direction 'w' 는 rc=1 + 허용목록 (auto, x, y, z, +x ...)",
+          rc == 1 and "auto, x, y, z" in out, f"rc={rc} {out[-250:]}")
+
+    stb = help_text(binary, "stabilize")
+    check("stabilize: level 범위 0~12 를 적음", "0~12" in stb,
+          [l for l in stb.splitlines() if "level" in l])
+    open(os.path.join(tmp, "stab13.yaml"), "w").write(
+        "model: box.k\noutput: stab13.k\nstabilize: explicit\nlevel: 13\n")
+    rc, out = run(binary, tmp, "stabilize", "stab13.yaml")
+    check("stabilize: level 13 은 rc=1 + 0~12 안내",
+          rc == 1 and "0~12" in out, f"rc={rc} {out[-200:]}")
+
+    mdb = help_text(binary, "matdb")
+    check("matdb: damping_preset 허용값을 적음",
+          "damping_preset" in mdb and "quasi_static" in mdb,
+          [l for l in mdb.splitlines() if "damping_preset" in l])
+    open(os.path.join(tmp, "md_bad.yaml"), "w").write(
+        "model: box.k\noutput: md_bad.k\nmat_type: MAT_ELASTIC\ndamping_preset: bogus\n"
+        'materials:\n  - mid: 1\n    match: "*"\n')
+    rc, out = run(binary, tmp, "matdb", "md_bad.yaml")
+    check("matdb: damping_preset 'bogus' 는 rc=1 + 허용목록",
+          rc == 1 and "smartphone_drop" in out and "quasi_static" in out, f"rc={rc} {out[-250:]}")
+
+    # contact 의 create type 만은 D1(rc=1)이 아니라 '경고 후 그대로 기록' 이다 — help 가 그렇게 적는가
+    ctc = help_text(binary, "contact")
+    check("contact: create 의 type 은 경고 후 그대로 쓴다고 적음",
+          "경고" in ctc and "type" in ctc, [l for l in ctc.splitlines() if "type" in l])
+    open(os.path.join(tmp, "ct_odd.yaml"), "w").write(
+        "model: box.k\noutput: ct_odd.k\ncontacts:\n  - action: create\n"
+        "    type: automatic_nodes_to_surface_bogus\n    slave: { pid: 1 }\n")
+    rc, out = run(binary, tmp, "contact", "ct_odd.yaml")
+    check("contact: 모르는 create type 은 rc=0 + 경고 + 그대로 기록",
+          rc == 0 and os.path.exists(os.path.join(tmp, "ct_odd.k")) and
+          "not a known contact keyword" in out and "[ERROR]" not in out,
+          f"rc={rc} {out[-250:]}")
+
+    print("[matdb 사례 — 컨테이너 밖에서도 그대로 돈다]")
+    check("matdb: 사례가 SIF 절대경로(/opt/kooremapper/...)를 박아 두지 않음",
+          "/opt/kooremapper/materials" not in mdb.split("-----8<----- 여기까지")[0],
+          [l for l in mdb.splitlines() if "/opt/kooremapper" in l])
+    # database 를 생략한 YAML 이 번들 DB 를 스스로 찾는가 — 작업 폴더에 materials/ 가 없는 자리에서
+    os.makedirs(os.path.join(tmp, "nomat"), exist_ok=True)
+    open(os.path.join(tmp, "nomat", "box.k"), "wb").write(
+        open(os.path.join(tmp, "box.k"), "rb").read())
+    open(os.path.join(tmp, "nomat", "md.yaml"), "w").write(
+        "model: box.k\noutput: md_bundle.k\nmat_type: MAT_ELASTIC\n"
+        'materials:\n  - mid: 1\n    match: "*"\n')
+    # 번들 DB 는 작업 폴더 materials/ → 바이너리 옆 materials/·../materials/ 순으로 찾는다.
+    # 갓 빌드한 트리에는 build/dev/materials 가 없다(dist/materials 를 복사해야 생긴다) — 그때는 건너뛴다.
+    bindir = os.path.dirname(os.path.realpath(binary))
+    bundle = [os.path.join(bindir, "materials", "material_db.json"),
+              os.path.join(bindir, "..", "materials", "material_db.json")]
+    if not any(os.path.isfile(b) for b in bundle):
+        print("  SKIP: 바이너리 옆 materials/material_db.json 없음 "
+              "(cp -r dist/materials <빌드 트리>/ 후 다시 돌릴 것)")
+    else:
+        rc, out = run(binary, tmp, "matdb", "nomat/md.yaml")
+        check("matdb: database 를 생략하면 번들 DB 를 스스로 찾는다 (rc=0)",
+              rc == 0 and os.path.exists(os.path.join(tmp, "nomat", "md_bundle.k")),
+              f"rc={rc} {out[-250:]}")
+
     print("[HelpCatalogData.inc 가 ops_help.py 와 같은지]")
     p = subprocess.run([sys.executable, os.path.join(REPO, "tools", "help", "gen_help_cpp.py"), "--check"],
                        capture_output=True, text=True)
