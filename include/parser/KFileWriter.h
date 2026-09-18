@@ -3,6 +3,7 @@
 #include "core/Mesh.h"
 #include <string>
 #include <fstream>
+#include <set>
 
 // Knowledge graph (lat.md):
 //   @lat: [[modules/parser]]
@@ -35,6 +36,10 @@ public:
      * (`*PART`, `*SECTION_*`, `*MAT_*`, `*CONTROL_*`, `*INCLUDE`, `*CONTACT_*`,
      * comments, blank lines) is copied verbatim. The output is a self-contained
      * LS-DYNA input that no longer needs the source file.
+     *
+     * `*ELEMENT_SHELL` / `*ELEMENT_TSHELL` are copied verbatim as well even
+     * though KFileReader loads them into `mesh.elements`; those EIDs are left
+     * out of the emitted `*ELEMENT_SOLID` block so no EID appears twice.
      *
      * Used by `map` / `shellmap` so the output `detail_bent.k` keeps the
      * material/part/section definitions that were authored on the flat
@@ -78,7 +83,10 @@ private:
 
     void writeHeader(std::ofstream& file);
     void writeNodeSection(std::ofstream& file, const Mesh& mesh, bool useMappedPositions);
-    void writeElementSection(std::ofstream& file, const Mesh& mesh);
+    // skipIds: EIDs whose source block is copied verbatim (shell / thick
+    // shell), so they must not be re-emitted as *ELEMENT_SOLID.
+    void writeElementSection(std::ofstream& file, const Mesh& mesh,
+                             const std::set<int>* skipIds = nullptr);
     void writeEnd(std::ofstream& file);
 
     std::string formatDouble(double value) const;
