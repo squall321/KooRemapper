@@ -155,6 +155,10 @@ private:
     std::vector<AddedShellElement> addedShellElements_;
     std::map<int, Vector3D> modifiedNodePositions_;
 
+    // restack 이 이번 실행에서 만든 층 PID — 한 assemble 안에서 restack 을 여러 번 할 때
+    // 사용자가 지정한 PID 가 앞 op 의 새 층과 겹치는지 본다(baseMesh_ 에는 없는 파트다).
+    std::set<int> restackCreatedPids_;
+
     // Keyword blocks to insert before *END (MAT, PART, SECTION cards)
     std::vector<std::string> addedKeywordBlocks_;
 

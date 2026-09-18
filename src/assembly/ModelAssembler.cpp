@@ -2940,6 +2940,19 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
         }
     }
 
+    // 새 층 PID — 지정이 없으면 예전대로 모델 최대 PID 다음 번호다. layers[].pid 를 주면 그 번호를,
+    // pid_start 를 주면 그 번호부터 쓴다(예약 대역을 피해 새 층을 원하는 대역에 모으는 수단).
+    // 이미 쓰는 번호를 조용히 다른 번호로 바꾸면 사용자가 그 PID 로 걸어 둔 접촉·세트가
+    // 엉뚱한 파트를 가리키므로 지정 PID 가 겹치면 rc=1 로 막는다.
+    std::set<int> reservedLayerPids;
+    for (const auto& L : op.layers) if (L.pid > 0) reservedLayerPids.insert(L.pid);
+    std::set<int> assignedLayerPids;
+    auto pidTaken = [&](int pid) {
+        return baseMesh_.parts.count(pid) > 0 || restackCreatedPids_.count(pid) > 0 ||
+               assignedLayerPids.count(pid) > 0;
+    };
+    int pidCursor = op.pidStart;   // 0 = 예전대로 maxPartId_ 에서 이어 간다
+
     std::set<int> emittedMids; // Track which MIDs have already been written
     std::vector<std::pair<int, std::string>> layerPidEtype; // (pid, effectiveEtype) per layer
 
@@ -2965,7 +2978,31 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
         bool isTshell = (layerEtype == "tshell");
 
         // Assign new PID and SECID for this layer
-        int newPid = ++maxPartId_;
+        int newPid;
+        if (layerDef.pid > 0) {
+            if (pidTaken(layerDef.pid)) {
+                errorMessage_ = "restack: layer " + std::to_string(layerIdx + 1) + " pid " +
+                    std::to_string(layerDef.pid) + " is already used by this model" +
+                    (layerDef.pid == op.targetPid ? " (it is the restacked part itself)" : "") +
+                    " - choose a free part ID";
+                return false;
+            }
+            newPid = layerDef.pid;
+        } else {
+            int cand = (pidCursor > 0) ? pidCursor : maxPartId_ + 1;
+            while (cand < std::numeric_limits<int>::max() &&
+                   (pidTaken(cand) || reservedLayerPids.count(cand))) ++cand;
+            if (cand >= std::numeric_limits<int>::max() || pidTaken(cand)) {
+                errorMessage_ = "restack: no free part ID left for layer " +
+                    std::to_string(layerIdx + 1) + " - renumber the model's parts before restacking";
+                return false;
+            }
+            newPid = cand;
+            if (pidCursor > 0) pidCursor = cand + 1;
+        }
+        assignedLayerPids.insert(newPid);
+        restackCreatedPids_.insert(newPid);
+        if (newPid > maxPartId_) maxPartId_ = newPid;
         int newSecId = ++maxSectionId_;
         layerPidEtype.push_back({newPid, layerEtype});
         layerSegInfos.push_back({newPid, layerEtype, {}, {}});

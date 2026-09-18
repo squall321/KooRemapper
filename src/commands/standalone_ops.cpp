@@ -554,6 +554,7 @@ int runRestack(const std::string& yamlFile, ConsoleOutput& console) {
             else if (key == "czm_normal") { try { op.czmNormal = std::stod(val); } catch(...) {} }
             else if (key == "czm_shear") { try { op.czmShear = std::stod(val); } catch(...) {} }
             else if (key == "drop_height") { try { op.dropHeight = std::stod(val); } catch(...) {} }
+            else if (key == "pid_start") { try { op.pidStart = std::stoi(val); } catch(...) {} }
             // pid_refs 는 rc=1 강제의 유일한 탈출구다 — 읽는 자리가 없어 'warn' 이 통하지 않았다.
             // op 구조체(ModelAssembler 가 읽는 자리)와 검증용 원문 둘 다 채운다.
             else if (key == "pid_refs") { op.pidRefs = val; pidRefsRaw = val; }
@@ -570,6 +571,7 @@ int runRestack(const std::string& yamlFile, ConsoleOutput& console) {
             else if (k == "num_elements" || k == "nz") { try { L.numElements = std::stoi(v); } catch(...) {} }
             else if (k == "element_type") L.elementType = v;
             else if (k == "title" || k == "name") L.title = v;
+            else if (k == "pid")          { try { L.pid = std::stoi(v); } catch(...) {} }
             else if (k == "czm_normal")   { try { L.czmNormal = std::stod(v); } catch(...) {} }
             else if (k == "czm_shear")    { try { L.czmShear = std::stod(v); } catch(...) {} }
             else if (k == "material_card") {
