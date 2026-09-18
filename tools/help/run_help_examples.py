@@ -113,11 +113,11 @@ def run_case(binary, spec, files, cmds, keep):
         src_dir = os.path.dirname(os.path.join(ROOT, need))
         # 필요한 파일이 속한 예제 폴더 통째로 (참조 파일 동반)
         shutil.copytree(src_dir, os.path.dirname(dst), dirs_exist_ok=True)
-    # 사례의 SIF 경로(/opt/kooremapper)를 검증 대상 바이너리 설치 위치로 바꿔 쓴다
-    prefix = os.path.dirname(os.path.dirname(binary))
+    # 사례는 컨테이너 밖에서도 그대로 돌아야 한다 — SIF 절대경로(/opt/kooremapper/...)를 치환해 주지
+    # 않는다. matdb 사례가 그 경로를 박아 두고 이 치환에 기대 겨우 넘어가고 있었다(지금은 database 생략).
     for name, content in files.items():
         with open(os.path.join(tmp, name), "w") as f:
-            f.write(content.replace("/opt/kooremapper/", prefix + "/"))
+            f.write(content)
     log = []
     for c in cmds:
         argv = c.split()

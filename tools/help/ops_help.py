@@ -203,6 +203,7 @@ operations:
     new_pid: 10
 """}),
    cmds=[BOX_CMD, "KooRemapper offset offset.yaml"], outputs=["box_offset.k"],
+   invariants={"box_offset.k": {"bbox": [20.0, 10.0, 3.0]}},
    notes=["connection_mode: tied(기본) | czm | contact | none (assemble 경로도 none 허용)",
           "material_card·czm_material_card 의 MID 칸(@MID@·@CZM_MID@·숫자·라벨)은 새 MID 로 바뀐다. 값은 10열 칸 안에 둘 것",
           "material_cards: 목록으로 층마다 다른 재질 (단독 offset·assemble 모두)"])
@@ -242,7 +243,9 @@ operations:
               MID002  1.20E-09  3.00E+03      0.45
 """}),
    cmds=[BOX_CMD, "KooRemapper restack restack.yaml"], outputs=["box_stack.k"],
-   notes=["material_card 의 mid 칸은 라벨이다 (MID001, MAT01, 11 모두 가능). 층마다 새 MID 로 바뀐다. 라벨과 카드 내용이 같으면 재질을 공유하고, 라벨이 같아도 물성이 다르면 MID 를 따로 준다",
+   invariants={"box_stack.k": {"bbox": [20.0, 10.0, 2.0], "elements": 100}},
+   notes=["element_type: solid(기본) | tshell | shell, direction: auto(기본, 자동 탐지) | x | y | z (+/- 부호도 같은 축). 모르는 값은 rc=1",
+          "material_card 의 mid 칸은 라벨이다 (MID001, MAT01, 11 모두 가능). 층마다 새 MID 로 바뀐다. 라벨과 카드 내용이 같으면 재질을 공유하고, 라벨이 같아도 물성이 다르면 MID 를 따로 준다",
           "*MAT_…_TITLE 의 제목 줄은 그대로 두고, 같은 MID 를 가리키는 *MAT_ADD_… 카드도 함께 새 MID 로 바뀐다",
           "카드는 10칸 고정폭 (블록 들여쓰기를 뺀 뒤 기준). 자유 형식(쉼표)도 된다. 새 PID·SECID 는 자동",
           "입력은 extrude 된 헥사 솔리드. 두께 방향 노드 수가 곳곳에서 같아야 하고, 아니면 not a valid extrusion 으로 멈춘다",
@@ -369,6 +372,8 @@ material:
   nu: 0.3
 """}),
    cmds=[BOX_CMD, "KooRemapper squeeze box.k sq.yaml box_sq"], outputs=["box_sq.k"],
+   invariants={"box_sq.k": {"bbox": [19.8, 9.9, 2.0]},
+               "box_sq.dynain": {"keywords": ["*INITIAL_STRESS_SOLID"]}},
    notes=["material 이 없으면 k 파일 재질을 쓴다 — 둘 다 없으면 실패. 등방 팽윤은 parts[].swelling"])
 op("formstrain", "변형·초기응력", "셸 이면각으로 성형 소성변형률 추정 → *INITIAL_STRAIN_SHELL", "성형 forming 곡률",
    "KooRemapper formstrain <config.yaml>",
@@ -454,15 +459,16 @@ op("matdb", "재료·어셈블리", "JSON 재료 DB(번들 525종)로 *MAT 카�
    "KooRemapper matdb <config.yaml>",
    files=boxed({"matdb.yaml": """model: box.k
 output: box_matdb.k
-database: /opt/kooremapper/materials/material_db.json
 mat_type: MAT_ELASTIC
 materials:
   - mid: 1
     match: "SUS304"
 """}),
    cmds=[BOX_CMD, "KooRemapper matdb matdb.yaml"], outputs=["box_matdb.k"],
-   notes=["database 를 생략하면 작업 폴더 materials/material_db.json → 실행 파일 기준 materials/·../materials/ 순으로 번들 DB 를 찾는다 (SIF: /opt/kooremapper/materials/material_db.json)",
-          "match: 파트/재질 제목 부분일치, \"*\" 는 나머지 전부. mid: 로 MID 직접 지정"])
+   notes=["사례처럼 database 를 생략하는 편이 이식성 있다 — 작업 폴더 materials/material_db.json → 실행 파일 기준 materials/·../materials/ 순으로 번들 DB 를 찾는다 (SIF 도 /opt/kooremapper/bin + /opt/kooremapper/materials 로 이 규칙에 걸린다)",
+          "database 를 적으면 폴더가 붙은 값은 작업 폴더 기준, 폴더 없는 홑이름은 YAML 폴더 기준이다 — 번들 이름만 주는 형태는 없으니 절대 경로나 생략을 쓸 것",
+          "match: 파트/재질 제목 부분일치, \"*\" 는 나머지 전부. mid: 로 MID 직접 지정",
+          "damping_preset: smartphone_drop | smartphone_drop_aggressive | quasi_static | off (모르는 값은 rc=1)"])
 op("matswap", "재료·어셈블리", "MAT+HOURGLASS+CURVE+SECTION 번들을 파트에 통째로 교체", "재질교체 bundle rubber",
    "KooRemapper matswap <config.yaml>\nKooRemapper matswap <model.k> <bundle.k> <pid> <output.k>",
    needs=["examples/matswap/two_cubes.k", "examples/matswap/rubber.k"],
@@ -510,6 +516,7 @@ loads:
       - [0.01, 1.0]
 """}),
    cmds=[BOX_CMD, "KooRemapper load load.yaml"], outputs=["box_loaded.k"],
+   invariants={"box_loaded.k": {"keywords": ["*LOAD_SEGMENT_SET", "*DEFINE_CURVE"]}},
    notes=["mode: pressure | normal_pressure(direction 없이 노출면 전체) | force(총 힘 N 을 투영면적으로 나눠 압력화)",
           "select: direction(법선과 direction 사이 angle 이내 면) | tied(tied 접촉 세그먼트) | set(기존 *SET_SEGMENT, set_id 필요)"])
 op("boundary", "하중·경계·접촉", "파트 면을 골라 SPC 구속 또는 강체벽", "구속 spc 경계조건 fixed",
@@ -524,7 +531,10 @@ boundaries:
     angle: 45.0
 """}),
    cmds=[BOX_CMD, "KooRemapper boundary bc.yaml"], outputs=["box_bc.k"],
-   notes=["dof: x y z xy xyz all ..."])
+   invariants={"box_bc.k": {"keywords": ["*BOUNDARY_SPC_SET", "*SET_NODE"]}},
+   notes=["dof: x y z xy xyz all ...",
+          "select: direction(법선과 direction 사이 angle 이내 면) | all(파트 노출면 전체) | set(기존 *SET_NODE, set_id 필요) "
+          "— load 의 select(direction|set|tied)와 값이 다르다"])
 op("rbe", "하중·경계·접촉", "파트 면에 RBE2(CNRB)/RBE3(INTERPOLATION) 강체 요소", "rbe2 rbe3 spider 강체요소",
    "KooRemapper rbe <config.yaml>",
    files=boxed({"rbe.yaml": """model: box.k
@@ -538,7 +548,8 @@ rbe:
     mode: spider
 """}),
    cmds=[BOX_CMD, "KooRemapper rbe rbe.yaml"], outputs=["box_rbe.k"],
-   notes=["mode: spider(면 전체 중심 1개) | face(면마다)"])
+   notes=["mode: spider(면 전체 중심 1개) | face(면마다)",
+          "select: direction | all(파트 노출면 전체) — boundary 와 달리 set 은 없다"])
 op("contact", "하중·경계·접촉", "접촉 정의 분석·생성·자동감지·변환·수정·삭제를 한 YAML 로 순차 실행", "접촉 contact tied detect",
    "KooRemapper contact <config.yaml>",
    files=boxed({"contact.yaml": """model: box.k
@@ -553,6 +564,8 @@ contacts:
 """}),
    cmds=[BOX_CMD, "KooRemapper contact contact.yaml"], outputs=["box_contact.k"],
    notes=["action: analyze | create | detect | convert | modify | remove",
+          "create 의 type: 짧은 이름(auto automatic tied tied_thermal thermal tiebreak mortar tied_mortar single eroding forming) "
+          "또는 *CONTACT_ 뒤 전체 키워드. 아는 키워드 밖이면 막지 않고 경고 후 그대로 쓴다(다른 열거형 키와 달리 rc=1 이 아니다)",
           "전체 자동: action: detect, scope: all, tolerance: 0.1, auto_create: true"])
 op("relax", "하중·경계·접촉", "초기응력 평형용 동적 이완(DR) 설정 (5단계 프리셋)", "dr dynamic relaxation 이완",
    "KooRemapper relax <config.yaml>",
@@ -572,7 +585,8 @@ stabilize: explicit
 level: 3
 """}),
    cmds=[BOX_CMD, "KooRemapper stabilize stab.yaml"], outputs=["box_lv03.k"],
-   notes=["level 1 에너지 진단 → 3 TSSFAC → 4+ 호글래스 → 6+ 접촉 soft ... (상위가 하위 포함)"])
+   notes=["level 은 0~12 (0 = manual, 그 밖의 값은 rc=1)",
+          "level 1 에너지 진단 → 3 TSSFAC → 4+ 호글래스 → 6+ 접촉 soft ... (상위가 하위 포함)"])
 op("database", "하중·경계·접촉", "*DATABASE 출력 카드 삽입 (프리셋·개별 토글)", "출력 d3plot database glstat",
    "KooRemapper database <config.yaml>",
    files=boxed({"db.yaml": """model: box.k

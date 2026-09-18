@@ -101,6 +101,8 @@ void printOverview(std::ostream& os, const std::string& version) {
     os << "  - 예외: matdb 의 database 키는 아직 작업 폴더 기준이다(생략하면 ./materials/material_db.json)\n";
     os << "  - 단독 op 명령은 operations 항목이 2개 이상인 YAML 을 거절하고 종료 코드 1 (assemble 로 실행할 것)\n";
     os << "  - 값 뒤 '# 주석' 은 떼어내고 값을 감싼 따옴표도 벗긴다. 따옴표 안의 '#' 는 값으로 남는다\n";
+    os << "  - YAML 들여쓰기에 탭은 못 쓴다 — [ERROR] + 종료 코드 1 (파일 전체 검사. '|' 블록 안 줄도 공백)\n";
+    os << "  - 파일 앞 UTF-8 BOM 은 무시한다 (윈도우 편집기가 붙여도 그대로 돈다)\n";
     os << "  - 실패하면 [ERROR] 줄을 찍고 종료 코드 1\n";
     os << "  - SIF 안 경로: /opt/kooremapper/bin/KooRemapper, 번들 재질 DB /opt/kooremapper/materials/material_db.json\n";
 }
