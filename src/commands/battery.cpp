@@ -605,6 +605,16 @@ int runBattery(const std::string& yamlFile, ConsoleOutput& console) {
         return 1;
     }
 
+    // YAML 안의 상대 경로 = 그 YAML 폴더 기준 (§3.1(a), 다른 op 과 같은 규칙).
+    // 예전엔 battery 만 작업 폴더 기준이라 'battery cfg/bat.yaml' 이 산출 덱을 작업 폴더에 떨궜다.
+    {
+        std::string configDir;
+        size_t lastSlash = yamlFile.find_last_of("/\\");
+        if (lastSlash != std::string::npos) configDir = yamlFile.substr(0, lastSlash);
+        cfg.output     = KooRemapper::yamlResolvePath(configDir, cfg.output);
+        cfg.dynainFile = KooRemapper::yamlResolvePath(configDir, cfg.dynainFile);
+    }
+
     // Batch mode?
     bool isBatch = !cfg.batch.tiers.empty() ||
                    !cfg.batch.phases.empty() ||

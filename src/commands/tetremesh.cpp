@@ -220,6 +220,16 @@ int runTetRemesh(const std::string& configPath,
         return 1;
     }
 
+    // YAML 안의 상대 경로 = 그 YAML 폴더 기준 (§3.1(a), 다른 op 과 같은 규칙).
+    // 예전엔 tetremesh 만 작업 폴더 기준이라 'tetremesh cfg/tr.yaml' 의 '../data/box.k' 를 열지 못했다.
+    {
+        std::string configDir;
+        size_t lastSlash = configPath.find_last_of("/\\");
+        if (lastSlash != std::string::npos) configDir = configPath.substr(0, lastSlash);
+        cfg.model  = KooRemapper::yamlResolvePath(configDir, cfg.model);
+        cfg.output = KooRemapper::yamlResolvePath(configDir, cfg.output);
+    }
+
     Timer timer;
 
     console.info("Loading mesh: " + cfg.model);

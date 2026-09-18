@@ -1973,6 +1973,17 @@ int runMeshFix(const char* configPath, ConsoleOutput& console) {
     std::string err;
     if (!readConfig(configPath, cfg, err)) { console.error("Config: "+err); return 1; }
 
+    // YAML 안의 상대 경로 = 그 YAML 폴더 기준 (§3.1(a), 다른 op 과 같은 규칙).
+    // 예전엔 meshfix 만 작업 폴더 기준이라 'meshfix cfg/mf.yaml' 의 '../data/box.k' 를 열지 못했다.
+    {
+        std::string cfgPath(configPath);
+        std::string configDir;
+        size_t lastSlash = cfgPath.find_last_of("/\\");
+        if (lastSlash != std::string::npos) configDir = cfgPath.substr(0, lastSlash);
+        cfg.model  = KooRemapper::yamlResolvePath(configDir, cfg.model);
+        cfg.output = KooRemapper::yamlResolvePath(configDir, cfg.output);
+    }
+
     // 2. Gmsh
     std::string gmshExe = findGmshExe();
     if (gmshExe.empty()) {
@@ -2028,8 +2039,16 @@ int runMeshFix(const char* configPath, ConsoleOutput& console) {
         console.warning("Input bad-Jac (J<0.15): " + std::to_string(ar.badElemCount));
 
     // Temp paths alongside output — use fs::path for native separator consistency
+    // gmsh 는 .geo 안 Merge/Save 의 상대 경로를 '.geo 파일이 있는 폴더' 기준으로 푸는다 —
+    // 그래서 outDir 이 상대 경로면 Save 가 'sub/sub/x.msh' 로 두 번 붙어 'Unable to open file' 로 끝났다
+    // (output 에 폴더가 붙은 설정은 전부 그랬다). 임시 파일 자리를 절대 경로로 고정한다.
     fs::path outDir = fs::path(cfg.output).parent_path();
     if (outDir.empty()) outDir = fs::path(".");
+    {
+        std::error_code oec;
+        fs::path abs = fs::absolute(outDir, oec);
+        if (!oec) outDir = abs.lexically_normal();
+    }
     std::string stem = fs::path(cfg.output).stem().string();
     // .geo 문자열에는 " 를 escape 할 방법이 없다 — 임시 파일 이름에서만 뺀다(출력 이름은 그대로)
     for (auto& c : stem) if (c == '"') c = '_';
