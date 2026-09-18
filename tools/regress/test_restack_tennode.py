@@ -293,6 +293,32 @@ def main():
         rc4, n4, e4, out4 = info_counts(binary, d, "mix_out.k")
         check("요소 3 개", e4 == 3, "elements=%d" % e4)
 
+        print("[F2 카드가 세 줄인 요소(HEX20 꼴) — 셋째 줄도 함께 지운다]")
+        three = """*ELEMENT_SOLID
+    5001       1
+    1001    1002    1003    1004    1005    1006    1007    1008
+       0       0       0       0       0       0       0       0       0       0       0       0
+    5002       2
+    1005    1006    1007    1008    1009    1010    1011    1012
+       0       0       0       0       0       0       0       0       0       0       0       0
+"""
+        open(os.path.join(d, "h3.k"), "w").write(deck(three))
+        open(os.path.join(d, "h3.yaml"), "w").write(yaml("h3.k", "h3_out.k"))
+        rc, out = run(binary, d, "restack", "h3.yaml")
+        check("rc=0", rc == 0, out[-400:])
+        body = open(os.path.join(d, "h3_out.k")).read()
+        # 지운 요소(5001)의 세 줄이 모두 사라지고, 남은 요소(5002)의 세 줄은 온전하다
+        lines = [l for l in body.splitlines() if l.strip() and not l.startswith("$")]
+        check("지운 요소 5001 의 헤더가 사라졌다",
+              not any(l.split()[:2] == ["5001", "1"] for l in lines), str(lines[:8]))
+        check("남은 요소 5002 의 헤더와 노드 줄이 온전하다",
+              any(l.split()[:2] == ["5002", "2"] for l in lines) and
+              any(l.split()[:3] == ["1005", "1006", "1007"] for l in lines), str(lines[:8]))
+        zero_rows = [l for l in body.splitlines()
+                     if l.strip() and set(l.split()) == {"0"}]
+        check("고아로 남은 셋째 줄이 없다(0 줄 1개 = 5002 것뿐)", len(zero_rows) == 1,
+              "zero_rows=%d" % len(zero_rows))
+
         print("[G *ELEMENT_TSHELL 섹션의 대상 요소도 지운다]")
         tshell = """*ELEMENT_TSHELL
     5001       1    1001    1002    1003    1004    1005    1006    1007    1008

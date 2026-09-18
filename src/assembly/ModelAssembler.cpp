@@ -4108,6 +4108,7 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
     // 노드 줄의 첫 칸은 노드 ID 라 eid 로 읽으면 안 되고, 요소를 지울 때는 두 줄을 함께 지워야 한다.
     bool elementTwoLineFormat = false;     // 지금 *ELEMENT_SOLID 섹션이 두 줄 포맷인가
     bool pendingNodeCard = false;          // 다음 데이터 줄은 방금 읽은 헤더의 노드 줄이다
+    bool pendingExtraCard = false;         // 노드 줄 뒤에 이어지는 줄(HEX20 셋째 줄 등)이 올 수 있다
     bool dropPendingNodeCard = false;      // 그 노드 줄을 버려야 하나(요소를 지웠거나 새로 썼다)
     bool tshellElementsInserted = false;   // 새 tshell 층을 이미 썼나(솔리드와 따로 센다)
 
@@ -4128,19 +4129,31 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
     // n1 칸이 공백 없이 붙어 한 줄 포맷 요소가 2 토큰으로 보이기 때문이다. 토큰 수만 보면
     // 그런 줄을 '두 줄 헤더' 로 오판해 멀쩡한 다음 요소를 노드 줄로 버리거나(대상 파트),
     // 지워야 할 다음 요소를 그냥 내보낸다(비대상 파트).
-    auto isTwoLineElementHeader = [&](const std::string& l) {
+    // 한 줄 포맷 요소 줄인가 — 고정폭이면 eid 칸과 n1 칸이 모두 양수, 자유 포맷이면 칸이 10개 이상이고
+    // 첫 칸(eid)과 셋째 칸(n1)이 양수. 이 판정이 서야 헤더·이어지는 줄과 구분된다.
+    auto isOneLineElement = [&](const std::string& l) {
         const size_t fw = (size_t)elemFieldWidth;
         if (l.length() >= fw * 10) {
             int eid = 0, n1 = 0;
             try { eid = std::stoi(l.substr(0, fw)); } catch (...) { eid = 0; }
             try { n1 = std::stoi(l.substr(fw * 2, fw)); } catch (...) { n1 = 0; }
-            if (eid > 0 && n1 > 0) return false;   // 고정폭 한 줄 포맷 요소다
+            if (eid > 0 && n1 > 0) return true;
         }
+        std::istringstream iss(l);
+        std::vector<std::string> toks;
+        std::string tok;
+        while (iss >> tok) toks.push_back(tok);
+        if (toks.size() < 10) return false;
+        int a = 0, c = 0;
+        try { a = std::stoi(toks[0]); c = std::stoi(toks[2]); } catch (...) { return false; }
+        return a > 0 && c > 0;
+    };
+    auto isTwoLineElementHeader = [&](const std::string& l) {
+        if (isOneLineElement(l)) return false;
         int tokenCount = 0;
         std::istringstream iss(l);
         std::string tok;
         while (iss >> tok) tokenCount++;
-        if (tokenCount >= 10) return false;        // 자유 포맷 한 줄 포맷 요소다
         return (tokenCount >= 2 && tokenCount <= 3);
     };
 
@@ -4460,18 +4473,32 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
             // (1) 노드 ID 가 지워진 요소 번호와 겹칠 때 남의 노드 줄이 사라지고
             // (2) 요소를 지울 때 'eid pid' 줄만 지워져 노드 줄이 고아로 남는다(두 줄 리더가
             //     그 줄을 다음 요소의 'eid pid' 로 읽어 덱 전체가 밀린다).
-            // 리더(KFileReader)와 같게 헤더 하나에 노드 줄 하나만 잇는다.
+            // 헤더 다음 줄은 그 요소의 노드 줄이다(리더와 같은 규칙). 그 뒤에 '요소로도 헤더로도
+            // 볼 수 없는 줄'(예: HEX20 카드의 셋째 줄처럼 첫 칸이 0 인 줄)이 이어지면 같은 카드로 본다 —
+            // 예전엔 노드 줄 하나만 이어 붙여 그런 줄이 고아로 남았다. 반대로 같은 섹션에 한 줄 요소가
+            // 섞여 있으면 그 줄은 요소로 판정되므로 삼키지 않는다.
             if (pendingNodeCard) {
                 pendingNodeCard = false;
+                pendingExtraCard = true;
                 bool dropIt = dropPendingNodeCard;
-                dropPendingNodeCard = false;
                 if (dropIt) continue;
                 output << line << "\n";
                 continue;
             }
+            if (pendingExtraCard) {
+                if (!isElementHeader && !isOneLineElement(line)) {
+                    bool dropIt = dropPendingNodeCard;
+                    if (dropIt) continue;
+                    output << line << "\n";
+                    continue;
+                }
+                pendingExtraCard = false;
+                dropPendingNodeCard = false;
+            }
             if (isElementHeader) {
                 elementTwoLineFormat = true;
                 pendingNodeCard = true;
+                pendingExtraCard = false;
                 dropPendingNodeCard = false;
             }
 
@@ -4573,6 +4600,7 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
             if (isElementHeader) {
                 elementTwoLineFormat = true;
                 pendingNodeCard = true;
+                pendingExtraCard = false;
                 dropPendingNodeCard = false;
             }
             int elemId = parseElementIdFromLine(line);
