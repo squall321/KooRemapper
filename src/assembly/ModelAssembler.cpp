@@ -30,6 +30,7 @@
 #include <cstdio>
 #include <unordered_map>
 #include <unordered_set>
+#include <set>
 
 // Knowledge graph (lat.md):
 //   @lat: [[modules/assembly]]
@@ -765,6 +766,46 @@ std::vector<MatMidField> matCardFindMidFields(const std::string& card) {
     return fields;
 }
 
+// 모델이 이미 쓰고 있는 MID 모음. 사용자가 재질 카드의 MID 칸에 숫자를 직접 적었을 때
+// 그 번호를 그대로 써도 되는지(=충돌하지 않는지) 보려고 쓴다. 파서가 모르는 *MAT 종류도
+// 번호는 차지하므로 raw 줄을 직접 훑는다.
+std::set<int> matCollectUsedMids(const std::vector<std::string>& rawLines) {
+    std::set<int> used;
+    bool inMat = false;
+    bool titlePending = false;
+    for (const auto& raw : rawLines) {
+        std::string line = raw;
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        size_t first = line.find_first_not_of(" \t");
+        if (first == std::string::npos || line[first] == '$') continue;
+        if (line[first] == '*') {
+            std::string up = line.substr(first);
+            for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+            inMat = up.rfind("*MAT", 0) == 0;
+            titlePending = inMat && up.find("_TITLE") != std::string::npos;
+            continue;
+        }
+        if (!inMat) continue;
+        if (titlePending) { titlePending = false; continue; }
+        MatMidField f;
+        if (matCardLineMidField(line, 0, f)) {
+            try {
+                int v = std::stoi(f.label);
+                if (v > 0) used.insert(v);
+            } catch (...) {}
+        }
+        inMat = false;
+    }
+    return used;
+}
+
+// 카드의 MID 칸이 숫자면 그 값, 아니면 0(자리표시·라벨)
+int matCardLiteralMid(const std::string& label) {
+    if (label.empty()) return 0;
+    for (char c : label) if (!std::isdigit(static_cast<unsigned char>(c))) return 0;
+    try { return std::stoi(label); } catch (...) { return 0; }
+}
+
 // label 이 같은 MID 칸을 value 로 오른쪽 정렬 치환. 뒤 칸부터 바꿔 앞 오프셋을 보존한다.
 std::string matCardReplaceMidFields(std::string card, const std::vector<MatMidField>& fields,
                                     const std::string& label, const std::string& value) {
@@ -1138,6 +1179,29 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
     std::map<std::pair<std::string, std::string>, int> midMapping;             // (자리표시, 카드) → MID
     std::vector<std::map<std::string, int>> layerMidMapping(op.layers.size()); // 층별 자리표시 → MID
     std::map<std::string, std::string> firstCardOfPlaceholder;
+
+    // 카드의 MID 칸에 숫자를 직접 적었으면 그 번호를 그대로 쓴다(사용자가 의도한 MID).
+    // 그래서 (1) 모델이 이미 쓰는 번호와 (2) 어느 층이든 카드에 적어 둔 숫자 MID 를 먼저 모아 두고,
+    // 자리표시(MIDnnn)·라벨 카드에는 그 둘을 피해서 새 번호를 준다.
+    std::set<int> usedMids = matCollectUsedMids(rawLines_);
+    for (const auto& [mid, mat] : baseMesh_.materials) {
+        (void)mat;
+        if (mid > 0) usedMids.insert(mid);
+    }
+    std::set<int> reservedMids;
+    for (const auto& layer : op.layers) {
+        if (restackHasMidPlaceholder(layer.materialCard)) continue;
+        auto fields = matCardFindMidFields(layer.materialCard);
+        if (fields.empty()) continue;
+        int lit = matCardLiteralMid(fields.front().label);
+        if (lit > 0 && !usedMids.count(lit)) reservedMids.insert(lit);
+    }
+    auto allocMid = [&]() {
+        do { ++maxMaterialId_; } while (usedMids.count(maxMaterialId_) || reservedMids.count(maxMaterialId_));
+        usedMids.insert(maxMaterialId_);
+        return maxMaterialId_;
+    };
+
     for (size_t li = 0; li < op.layers.size(); ++li) {
         const auto& card = op.layers[li].materialCard;
         // Scan for MIDxxx patterns
@@ -1152,13 +1216,13 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
                 auto key = std::make_pair(placeholder, card);
                 auto it = midMapping.find(key);
                 if (it == midMapping.end()) {
-                    it = midMapping.emplace(key, ++maxMaterialId_).first;
+                    it = midMapping.emplace(key, allocMid()).first;
                     auto [fit, fresh] = firstCardOfPlaceholder.emplace(placeholder, card);
                     if (!fresh && fit->second != card) {
                         infoMessages.push_back("  Restack layer " + std::to_string(li + 1) +
                                                ": material label '" + placeholder +
                                                "' reused with a different card -> separate MID " +
-                                               std::to_string(maxMaterialId_));
+                                               std::to_string(it->second));
                     }
                 }
                 layerMidMapping[li][placeholder] = it->second;
@@ -1184,12 +1248,29 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
         std::string body = matCardReplaceMidFields(card, labelFields[li], label, "");
         labelKeys[li] = label + '\n' + body;
         if (labelMidMapping.count(labelKeys[li])) continue;
-        labelMidMapping[labelKeys[li]] = ++maxMaterialId_;
+        // 숫자 MID 는 그대로 존중한다 — 다만 모델이 이미 쓰는 번호이거나 다른 카드가 먼저 가져갔으면
+        // 새 번호를 주고 무엇을 왜 바꿨는지 알린다(조용히 바꾸면 사용자가 적은 MID 가 사라진다).
+        int literalMid = matCardLiteralMid(label);
+        int assignedMid;
+        if (literalMid > 0 && !usedMids.count(literalMid)) {
+            assignedMid = literalMid;
+            usedMids.insert(literalMid);
+            reservedMids.erase(literalMid);
+            if (literalMid > maxMaterialId_) maxMaterialId_ = literalMid;
+        } else {
+            assignedMid = allocMid();
+            if (literalMid > 0) {
+                infoMessages.push_back("  Restack layer " + std::to_string(li + 1) + ": material MID " +
+                                       std::to_string(literalMid) + " is already in use -> assigned MID " +
+                                       std::to_string(assignedMid));
+            }
+        }
+        labelMidMapping[labelKeys[li]] = assignedMid;
         auto [it, fresh] = firstBodyOfLabel.emplace(label, body);
         if (!fresh && it->second != body) {
             infoMessages.push_back("  Restack layer " + std::to_string(li + 1) + ": material label '" + label +
                                    "' reused with a different card -> separate MID " +
-                                   std::to_string(maxMaterialId_));
+                                   std::to_string(assignedMid));
         }
     }
 
