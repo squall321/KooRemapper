@@ -8,6 +8,19 @@
 
 namespace KooRemapper {
 
+// pid_refs — restack·merge 가 죽은 PID 를 가리키는 카드를 다 옮기지 못했을 때의 정책.
+// strict: 덱은 그대로 쓰되 rc=1 로 끝낸다(체인이 솔버까지 가지 않게). warn: 같은 일을 하되 rc=0.
+// 기본이 strict 인 이유 — 파이프라인(Runner·워커)은 종료 코드로만 성공을 판정해서
+// rc=0 이면 콘솔 경고가 자동화에 전혀 안 보인다.
+enum class PidRefPolicy { STRICT, WARN };
+
+// 허용값은 strict|warn 둘뿐 — 두 파서(assemble·단독)가 같은 표를 쓴다.
+inline bool parsePidRefPolicy(const std::string& val, PidRefPolicy& out) {
+    if (val == "strict") { out = PidRefPolicy::STRICT; return true; }
+    if (val == "warn")   { out = PidRefPolicy::WARN;   return true; }
+    return false;
+}
+
 struct ReplaceOperation {
     int targetPid = 0;
     std::string detailFlat;    // flat detail mesh path
@@ -558,6 +571,12 @@ struct AssemblyOperation {
     MergeOperation merge;
     StripOperation strip;
     ExtractSurfaceOperation extractSurface;
+
+    // restack·merge 전용 — 옮기지 못한 PID 참조가 남았을 때 rc 를 어떻게 낼지(기본 strict).
+    PidRefPolicy pidRefs = PidRefPolicy::STRICT;
+    // YAML 원문. 비어 있으면 키를 안 준 것이다(= strict). 허용값 밖 값도 그대로 담아
+    // validateOperation 이 값을 찍어 거부한다 — assemble·단독이 같은 규칙을 쓰게 하는 자리다.
+    std::string pidRefsRaw;
 };
 
 struct AssemblyConfig {

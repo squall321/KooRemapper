@@ -1197,6 +1197,11 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             else if (key == "czm_normal") { try { op.restack.czmNormal = std::stod(val); } catch (...) {} }
                             else if (key == "czm_shear")  { try { op.restack.czmShear  = std::stod(val); } catch (...) {} }
                             else if (key == "drop_height") { try { op.restack.dropHeight = std::stod(val); } catch (...) {} }
+                            // 값 검사는 validateOperation 이 한다(단독 restack 과 같은 규칙)
+                            else if (key == "pid_refs") {
+                                op.pidRefsRaw = val;
+                                parsePidRefPolicy(val, op.pidRefs);
+                            }
                             else if (key == "layers") {
                                 inLayersList = true;
                                 inLayerItem = false;
@@ -1553,6 +1558,11 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             else if (key == "new_mid") op.merge.newMid = std::stoi(val);
                             else if (key == "layers")  op.merge.layers = std::max(1, std::stoi(val));
                             else if (key == "tolerance" || key == "tol") op.merge.tolerance = std::stod(val);
+                            // 값 검사는 validateOperation 이 한다(restack 과 같은 규칙)
+                            else if (key == "pid_refs") {
+                                op.pidRefsRaw = val;
+                                parsePidRefPolicy(val, op.pidRefs);
+                            }
                         } else if (op.type == AssemblyOperation::STRIP) {
                             if (key == "keywords" && !val.empty() && val[0] == '[') {
                                 // Inline array: ["*NODE", "*ELEMENT_SOLID"]
@@ -1694,6 +1704,14 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
 // 오퍼레이션 값 검증 — assemble 과 단독 명령(bend·indent·offset·restack·iga 등)이 같은 규칙을 쓴다.
 // 단독 명령은 검증 없이 적용 함수로 넘겨 bend(source 누락)는 SIGSEGV, indent(points·r1/r2 누락)는 abort 했다.
 void AssemblyConfigReader::validateOperation(const AssemblyOperation& op, size_t i) {
+    // pid_refs — 허용값 밖은 조용히 기본값(strict)으로 떨어지지 않게 값을 찍고 거부한다(D1).
+    // restack·merge 두 op 만 읽는 키라 그 두 파서만 원문을 채운다.
+    if (!op.pidRefsRaw.empty()) {
+        PidRefPolicy parsed;
+        if (!parsePidRefPolicy(op.pidRefsRaw, parsed))
+            throw std::runtime_error("Operation " + std::to_string(i+1) +
+                ": invalid pid_refs '" + op.pidRefsRaw + "' (must be one of strict, warn)");
+    }
     if (op.type == AssemblyOperation::REPLACE) {
         if (op.replace.targetPid <= 0)
             throw std::runtime_error("Operation " + std::to_string(i+1) + ": missing target_pid");

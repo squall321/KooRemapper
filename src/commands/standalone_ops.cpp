@@ -422,12 +422,16 @@ int runUpdate(const std::string& yamlFile, ConsoleOutput& console) {
 
 // 단독 명령도 assemble 과 같은 규칙으로 값을 검사한다 — 예전엔 검증 없이 적용해 bend(source 누락)는 SIGSEGV,
 // indent(points·r1/r2 누락)는 abort 했고, offset connection_mode: shared·iga element_size: 0 같은 값은 조용히 통과했다.
+// pidRefsRaw — op 구조체가 아니라 AssemblyOperation 에 있는 키(pid_refs)의 원문. 빈 값이면 키를 안 준 것이다.
 template <typename Op>
 static bool validateLikeAssemble(AssemblyOperation::Type type, Op AssemblyOperation::*member, const Op& op,
-                                 const char* tag, ConsoleOutput& console) {
+                                 const char* tag, ConsoleOutput& console,
+                                 const std::string& pidRefsRaw = std::string()) {
     AssemblyOperation aop;
     aop.type = type;
     aop.*member = op;
+    aop.pidRefsRaw = pidRefsRaw;
+    parsePidRefPolicy(pidRefsRaw, aop.pidRefs);
     try {
         AssemblyConfigReader::validateOperation(aop, 0);
     } catch (const std::exception& e) {
@@ -455,6 +459,9 @@ int runRestack(const std::string& yamlFile, ConsoleOutput& console) {
     KooRemapper::yamlSkipBOM(f);   // 윈도우 편집기가 붙인 BOM 이 첫 키를 망가뜨렸다
 
     RestackOperation op;
+    // pid_refs 는 AssemblyOperation 쪽 키라 RestackOperation 에 담을 자리가 없다 — 원문을 들고 있다가
+    // assemble 과 같은 검증(validateOperation)에 넘긴다. 빈 값 = 키 없음 = strict(기본).
+    std::string pidRefsRaw;
     bool inLayers = false;
     int layersIndent = 0;
     bool readingMatCard = false;
@@ -547,6 +554,7 @@ int runRestack(const std::string& yamlFile, ConsoleOutput& console) {
             else if (key == "czm_normal") { try { op.czmNormal = std::stod(val); } catch(...) {} }
             else if (key == "czm_shear") { try { op.czmShear = std::stod(val); } catch(...) {} }
             else if (key == "drop_height") { try { op.dropHeight = std::stod(val); } catch(...) {} }
+            else if (key == "pid_refs") pidRefsRaw = val;
             else if (key == "layers") { inLayers = true; layersIndent = y.keyIndent(tr, indent); }
             continue;
         }
@@ -618,7 +626,8 @@ int runRestack(const std::string& yamlFile, ConsoleOutput& console) {
     std::string outputPrefix = y.getOutputPrefix();
 
     console.println("[restack] Model: " + modelPath);
-    if (!validateLikeAssemble(AssemblyOperation::RESTACK, &AssemblyOperation::restack, op, "restack", console)) return 1;
+    if (!validateLikeAssemble(AssemblyOperation::RESTACK, &AssemblyOperation::restack, op, "restack", console,
+                              pidRefsRaw)) return 1;
     ModelAssembler assembler;
     if (!assembler.loadBaseModel(modelPath)) { console.error(assembler.getErrorMessage()); return 1; }
     if (!assembler.applyRestack(op, y.matE, y.matNu)) { console.error(assembler.getErrorMessage()); return 1; }
