@@ -342,6 +342,8 @@ static CgUsedIds cg_scanUsedIds(const std::vector<std::string>& lines) {
     bool firstDataTaken = false;
     bool titlePending = false;   // '_TITLE' 카드의 제목 줄 한 줄
     int pendingElem = 0;   // ten nodes format — 다음 데이터 줄은 노드 목록이라 EID 가 아니다
+    bool coordPaired = false;    // *DEFINE_COORDINATE_SYSTEM 은 (Card1, Card2) 두 줄이 한 좌표계다
+    int coordDataIdx = 0;        // 이 키워드 아래 몇 번째 데이터 줄인가
     for (const auto& ln : lines) {
         std::string tr = cg_trim(ln);
         if (tr.empty()) continue;
@@ -357,6 +359,8 @@ static CgUsedIds cg_scanUsedIds(const std::vector<std::string>& lines) {
             else if (up.rfind("*DEFINE_CURVE", 0) == 0)       kind = CURVE;
             else if (up.rfind("*DEFINE_COORDINATE", 0) == 0)  kind = COORD;
             else                                              kind = NONE;
+            coordPaired = (kind == COORD && up.find("_SYSTEM") != std::string::npos);
+            coordDataIdx = 0;
             titlePending = (up.find("_TITLE") != std::string::npos);
             continue;
         }
@@ -389,6 +393,19 @@ static CgUsedIds cg_scanUsedIds(const std::vector<std::string>& lines) {
             titlePending = false;
             if (!cg_looksLikeDataLine(ln)) continue;   // 진짜 제목 줄만 건넌다
         }
+        // *DEFINE_COORDINATE_* 는 한 키워드 아래 여러 좌표계를 쌓는 것이 정상 입력이라 '첫 데이터 줄만'
+        // 으로는 두 번째부터를 놓쳐 CID 가 중복된 덱이 조용히 나간다(CID 는 "A unique number must be
+        // defined"). 카드 길이를 아는 형식이므로 전부 등록한다 — _NODES/_VECTOR 는 한 줄이 한 좌표계,
+        // _SYSTEM 은 (Card1, Card2) 두 줄이 한 쌍이라 홀수번째 데이터 줄만 CID 다.
+        if (kind == COORD) {
+            bool isCid = !coordPaired || (coordDataIdx % 2 == 0);
+            ++coordDataIdx;
+            if (isCid) {
+                int cid = cg_toInt(cg_field10(ln, 0));
+                if (cid > 0) u.coord.insert(cid);
+            }
+            continue;
+        }
         if (firstDataTaken) continue;                  // 이 카드들은 첫 데이터 줄에만 ID 가 있다
         int id = cg_toInt(cg_field10(ln, 0));
         if (id <= 0) continue;
@@ -397,7 +414,6 @@ static CgUsedIds cg_scanUsedIds(const std::vector<std::string>& lines) {
             case SECT:  u.sect.insert(id);  break;
             case MAT:   u.mat.insert(id);   break;
             case CURVE: u.curve.insert(id); break;
-            case COORD: u.coord.insert(id); break;
             default: break;
         }
     }

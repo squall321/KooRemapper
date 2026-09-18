@@ -404,6 +404,31 @@ def body2(binary, d):
     check("좌표계(CID) 충돌도 rc=1 로 잡는다",
           rc == 1 and "좌표계 ID 가 원본 덱과 겹칩니다" in out and "990001" in out and
           not os.path.exists(os.path.join(d, "cs_out.k")), f"rc={rc} {out[-300:]}")
+    # *DEFINE_COORDINATE_* 는 한 키워드 아래 좌표계를 여러 개 쌓는 것이 정상 형식이다(*DEFINE_CURVE 와 다르다).
+    # '첫 데이터 줄만 ID' 로 훑으면 두 번째부터를 놓쳐 CID 가 두 번 정의된 덱이 rc=0 으로 나간다.
+    def coord_sys(cid):
+        return ("%10d%10.1f%10.1f%10.1f%10.1f%10.1f%10.1f%10d\n%10.1f%10.1f%10.1f"
+                % (cid, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0, 0.0, 1.0, 0.0))
+    stacked = (
+        ("_SYSTEM 두 개", "*DEFINE_COORDINATE_SYSTEM\n" + coord_sys(777) + "\n" + coord_sys(990001)),
+        ("_SYSTEM_TITLE 두 개",
+         "*DEFINE_COORDINATE_SYSTEM_TITLE\nmy frame\n" + coord_sys(777) + "\n" + coord_sys(990001)),
+        ("_NODES 두 줄", "*DEFINE_COORDINATE_NODES\n%s\n%s"
+         % ("%10d%10d%10d%10d%10d%10s" % (777, 1, 2, 4, 0, "X"),
+            "%10d%10d%10d%10d%10d%10s" % (990001, 1, 2, 4, 0, "X"))),
+        ("_VECTOR 두 줄", "*DEFINE_COORDINATE_VECTOR\n%s\n%s"
+         % ("%10d%10.1f%10.1f%10.1f%10.1f%10.1f%10.1f%10d" % (777, 1, 0, 0, 0, 1, 0, 0),
+            "%10d%10.1f%10.1f%10.1f%10.1f%10.1f%10.1f%10d" % (990001, 1, 0, 0, 0, 1, 0, 0))),
+    )
+    for form, card in stacked:
+        w(os.path.join(d, "cd.k"), shell_deck(extra_cards=card))
+        w(os.path.join(d, "cd.yaml"), "model: cd.k\noutput: cd_out.k\naxis: z\n")
+        if os.path.exists(os.path.join(d, "cd_out.k")):
+            os.remove(os.path.join(d, "cd_out.k"))
+        rc, out = run(binary, d, "cnrb2spring", "cd.yaml")
+        check(f"한 키워드 아래 쌓인 '{form}' 의 뒤쪽 CID 충돌도 rc=1 로 잡는다",
+              rc == 1 and "좌표계 ID 가 원본 덱과 겹칩니다" in out and "990001" in out and
+              not os.path.exists(os.path.join(d, "cd_out.k")), f"rc={rc} {out[-300:]}")
     w(os.path.join(d, "hi.yaml"), "model: m.k\noutput: hi_out.k\naxis: z\nnode_id_start: 99999999\n")
     rc, out = run(binary, d, "cnrb2spring", "hi.yaml")
     check("마지막 할당 ID 가 I8 상한(99999999)을 넘으면 rc=1",
