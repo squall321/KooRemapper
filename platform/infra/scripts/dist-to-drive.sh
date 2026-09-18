@@ -105,7 +105,10 @@ BIN_MD5="$(md5sum "$BIN" | cut -d' ' -f1)"
 BIN_SHA="$(sha256sum "$BIN" | cut -d' ' -f1)"
 BIN_SIZE="$(stat -c %s "$BIN")"
 BIN_MTIME="$(date -u -d "@$(stat -c %Y "$BIN")" +%Y-%m-%dT%H:%M:%SZ)"
-BIN_GLIBC="$(objdump -T "$BIN" 2>/dev/null | grep -oE 'GLIBC_[0-9.]+' | sort -uV | tail -1)"
+# objdump 미설치(127)나 GLIBC 심볼 없는 바이너리면 grep 이 1 을 돌려주고, pipefail 이 그 값을
+# 파이프라인 종료코드로 올려 set -e 가 여기서 스크립트를 아무 말 없이 끝냈다(폐쇄망 = binutils 없음).
+# 종료코드를 삼켜 빈 값으로 흘리고, 아래 BUILD_INFO 의 '알 수 없음' 기본값이 실제로 쓰이게 한다.
+BIN_GLIBC="$(objdump -T "$BIN" 2>/dev/null | grep -oE 'GLIBC_[0-9.]+' | sort -uV | tail -1 || true)"
 
 COMPAT_OUT="build/linux-compat/bin/KooRemapper"
 if [ "$DO_BUILD" = "1" ]; then
@@ -134,7 +137,7 @@ size          : $BIN_SIZE bytes
 mtime_utc     : $BIN_MTIME
 md5           : $BIN_MD5
 sha256        : $BIN_SHA
-glibc_max     : ${BIN_GLIBC:-알 수 없음 (objdump 없음)} (컨테이너 허용: <= GLIBC_2.36)
+glibc_max     : ${BIN_GLIBC:-알 수 없음 (objdump 없음 또는 GLIBC 심볼 없음)} (컨테이너 허용: <= GLIBC_2.36)
 build_method  : $BUILD_METHOD
 EOF
 
