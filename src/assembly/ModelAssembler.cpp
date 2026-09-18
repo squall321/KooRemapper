@@ -11558,13 +11558,14 @@ bool ModelAssembler::applyBoundary(const BoundaryOperation& op) {
         return true;
     }
 
-    // select 는 두 값뿐이다 — 아래 분기가 'set' 만 갈라내고 나머지를 전부 direction 으로 흘려서
-    // 'all' 같은 없는 값이 조용히 direction 으로 돌던 것을 막는다(D1, 단독 load 와 같은 규칙).
+    // select 는 세 값뿐이다 — 아래 분기가 'set' 만 갈라내고 나머지를 전부 direction 으로 흘려서
+    // 오타가 조용히 direction 으로 돌던 것을 막는다(D1, 단독 load 와 같은 규칙). 'all' 은 help·문서가
+    // 계속 안내해 온 값이므로 그 뜻대로('파트 노출면 전체') 정식으로 받는다.
     for (size_t i = 0; i < op.boundaries.size(); ++i) {
         const std::string& sel = op.boundaries[i].select;
-        if (sel != "direction" && sel != "set") {
+        if (sel != "direction" && sel != "all" && sel != "set") {
             errorMessage_ = "boundary: boundaries[" + std::to_string(i) +
-                            "]: unsupported select '" + sel + "' (allowed: direction, set)";
+                            "]: unsupported select '" + sel + "' (allowed: direction, all, set)";
             return false;
         }
     }
@@ -11608,7 +11609,8 @@ bool ModelAssembler::applyBoundary(const BoundaryOperation& op) {
                 continue;
             }
             std::vector<std::array<int,4>> selectedFaces;
-            if (hasDirection) {
+            // select: all 은 '파트 노출면 전체' 다 — direction 이 함께 적혀 있어도 방향으로 걸러내지 않는다.
+            if (hasDirection && bc.select != "all") {
                 auto faceInfos = ld_buildFaceInfo(allFaces, baseMesh_);
                 auto indices = ld_filterByDirection(faceInfos, dir, bc.angle);
                 if (indices.empty()) {

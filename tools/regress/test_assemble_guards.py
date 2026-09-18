@@ -9,8 +9,9 @@
         solid 로 떨어졌다. 층(layer)별 element_type 도 같았다.
   - Y3 damping_preset 이 인식되지 않는 문자열도 조용히 삼켰다(프리셋 없음으로 떨어지면서 묵은
         *DAMPING_PART_* 제거만 촉발했다).
-  - Y4 boundary/rbe 의 select 값 검증이 없어, boundary 는 'all' 같은 값이 조용히 direction 이 되고
-        rbe 는 반대로 오타가 조용히 'all'(면 전체)이 됐다.
+  - Y4 boundary/rbe 의 select 값 검증이 없어, boundary 는 오타가 조용히 direction 이 되고
+        rbe 는 반대로 오타가 조용히 'all'(면 전체)이 됐다. boundary 의 'all' 은 오타가 아니라
+        help·문서가 안내하는 값이므로('파트 노출면 전체') 거절하지 않고 그 뜻대로 받는다.
 
 적대적 검토에서 다시 잡힌 것(같은 그물의 뒷면)
   - 그물이 '쓰기 전' 으로 올라갔는데도 출력 경로의 기존 파일을 지웠다 — output 이 base_model 과
@@ -260,11 +261,17 @@ def main():
     write(d, "bc.yaml", BOUNDARY % "direction")
     rc, out = run(binary, d, "assemble", "bc.yaml")
     check("boundary: select 'direction' 은 그대로 rc=0", rc == 0, f"rc={rc} {out[-250:]}")
-    for val in ("all", "tied", "bogus"):
+    # 'all' 은 help·문서가 안내하는 값이다 — 거절하지 않고 '파트 노출면 전체' 로 받는다
+    write(d, "bc.yaml", BOUNDARY % "all")
+    rc, out = run(binary, d, "assemble", "bc.yaml")
+    check("boundary: select 'all' 은 노출면 전체로 rc=0", rc == 0, f"rc={rc} {out[-250:]}")
+    check("boundary: select 'all' 은 direction 으로 걸러내지 않는다",
+          "select=all" in out and "No faces match direction" not in out, out[-250:])
+    for val in ("tied", "bogus"):
         write(d, "bc.yaml", BOUNDARY % val)
         rc, out = run(binary, d, "assemble", "bc.yaml")
         check(f"boundary: select '{val}' 는 허용값 목록과 함께 rc=1",
-              rc == 1 and "select" in out and "direction, set" in out, f"rc={rc} {out[-250:]}")
+              rc == 1 and "select" in out and "direction, all, set" in out, f"rc={rc} {out[-250:]}")
     # select: set 은 값 자체는 허용값이다 — 거절 사유가 enum 이 아니라 set_id 여야 한다
     write(d, "bc.yaml", BOUNDARY % "set")
     rc, out = run(binary, d, "assemble", "bc.yaml")
@@ -281,12 +288,17 @@ def main():
         check(f"rbe: select '{val}' 는 허용값 목록과 함께 rc=1",
               rc == 1 and "select" in out and "direction, all" in out, f"rc={rc} {out[-250:]}")
 
-    # 단독 boundary/rbe 도 같은 경로를 지난다
+    # 단독 boundary 도 같은 경로를 지난다 — 같은 규칙으로 'all' 은 받고 오타는 거절한다
     write(d, "sbc.yaml", "model: flat.k\noutput: sbc\nboundaries:\n  - part: 1\n"
                          "    dof: xyz\n    select: all\n    direction: [0, 0, -1]\n")
     rc, out = run(binary, d, "boundary", "sbc.yaml")
-    check("단독 boundary: select 'all' 도 같은 규칙으로 rc=1",
-          rc == 1 and "direction, set" in out, f"rc={rc} {out[-250:]}")
+    check("단독 boundary: select 'all' 은 rc=0", rc == 0 and exists(d, "sbc.k"),
+          f"rc={rc} {out[-250:]}")
+    write(d, "sbcx.yaml", "model: flat.k\noutput: sbcx\nboundaries:\n  - part: 1\n"
+                          "    dof: xyz\n    select: bogus\n    direction: [0, 0, -1]\n")
+    rc, out = run(binary, d, "boundary", "sbcx.yaml")
+    check("단독 boundary: select 오타는 허용값 목록과 함께 rc=1",
+          rc == 1 and "direction, all, set" in out, f"rc={rc} {out[-250:]}")
 
     print()
     if FAILS:
