@@ -19,6 +19,8 @@
 #include "validation/ElementQualityChecker.h"
 #include "validation/IntersectionDetector.h"
 #include "util/ContactKeywords.h"
+#include "util/YamlComment.h"          // yamlResolvePath — YAML 안 상대 경로 공통 규칙
+#include "commands/contact_helpers.h"   // ct_getPreset — 단독 contact 와 같은 짧은 이름 표
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -9635,24 +9637,45 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
     }
 
     // 1. Resolve database path
-    std::string dbPath = op.databasePath;
-    if (dbPath.empty()) {
-        // 기본 번들 DB: 작업 폴더 materials/ (기존) → 없으면 실행 파일 기준 materials/, ../materials/
-        // (help 의 'relative to exe' 와 맞춘다. SIF 는 /opt/kooremapper/bin + /opt/kooremapper/materials)
-        dbPath = "materials/material_db.json";
-        if (!std::ifstream(dbPath).good()) {
-            std::error_code ec;
-            auto exe = std::filesystem::read_symlink("/proc/self/exe", ec);
-            if (!ec) {
-                for (const char* rel : {"materials/material_db.json", "../materials/material_db.json"}) {
-                    auto cand = (exe.parent_path() / rel).lexically_normal();
-                    if (std::ifstream(cand.string()).good()) { dbPath = cand.string(); break; }
-                }
+    //
+    // 번들 재질 DB 를 찾는 자리 — 작업 폴더 materials/, 실행 파일 옆 materials/ · ../materials/.
+    // (help 의 'relative to exe' 와 맞춘다. SIF 는 /opt/kooremapper/bin + /opt/kooremapper/materials)
+    auto md_findBundledDb = [](const std::string& name) -> std::string {
+        std::string cand = "materials/" + name;
+        if (std::ifstream(cand).good()) return cand;
+        std::error_code ec;
+        auto exe = std::filesystem::read_symlink("/proc/self/exe", ec);
+        if (!ec) {
+            for (const char* rel : {"materials/", "../materials/"}) {
+                auto c = (exe.parent_path() / (std::string(rel) + name)).lexically_normal();
+                if (std::ifstream(c.string()).good()) return c.string();
             }
         }
-    }
-    if (dbPath.find('/') == std::string::npos && dbPath.find('\\') == std::string::npos) {
-        if (!configDir.empty()) dbPath = configDir + "/" + dbPath;
+        return "";
+    };
+
+    std::string dbPath = op.databasePath;
+    if (dbPath.empty()) {
+        // 키를 아예 생략하면 번들 DB (예전과 같다)
+        dbPath = md_findBundledDb("material_db.json");
+        if (dbPath.empty()) dbPath = "materials/material_db.json";  // 실패 메시지에 쓸 기본 이름
+    } else {
+        // 적은 값은 다른 경로 키와 같은 규칙으로 푼다 — YAML 폴더 기준(§3.1(a)).
+        // 예전엔 이 키만 달랐다: '슬래시 없는 이름' 만 YAML 폴더, 폴더가 붙으면 작업 폴더.
+        // 그 자리에 파일이 없으면 같은 '파일 이름' 을 번들에서 찾는다 —
+        // 'database: material_db.json' 처럼 번들 DB 이름만 적던 기존 사용법을 지킨다.
+        // 절대 경로는 그대로 — 사용자가 집어 준 자리를 조용히 바꾸지 않는다.
+        std::string resolved = KooRemapper::yamlResolvePath(configDir, dbPath);
+        if (resolved == dbPath && (dbPath[0] == '/' || dbPath[0] == '\\' ||
+                                   (dbPath.size() >= 2 && dbPath[1] == ':'))) {
+            // 절대 경로
+        } else if (!std::ifstream(resolved).good()) {
+            size_t sp = dbPath.find_last_of("/\\");
+            std::string base = (sp == std::string::npos) ? dbPath : dbPath.substr(sp + 1);
+            std::string bundled = md_findBundledDb(base);
+            if (!bundled.empty()) resolved = bundled;
+        }
+        dbPath = resolved;
     }
 
     // 2. Load database
@@ -10999,24 +11022,18 @@ static std::vector<CaContactPair> ca_detectContacting(
 
 // Get LS-DYNA contact keyword from preset name
 static std::string ca_getContactKeyword(const std::string& type) {
+    // 짧은 이름 → 전체 키워드. 단독 contact 와 같은 표(ct_getPreset)를 그대로 쓴다 —
+    // 예전엔 여기에만 별칭 tied_thermal / thermal / tiebreak 이 없어, 같은 YAML 이
+    // 단독에선 *CONTACT_TIED_SURFACE_TO_SURFACE_THERMAL, assemble 에선 LS-DYNA 에 없는
+    // *CONTACT_TIED_THERMAL 이 됐다. '-' 를 '_' 로 바꾸는 것도 단독과 같다.
     std::string t = type;
-    for (auto& c : t) c = (char)std::tolower((unsigned char)c);
-    if (t == "auto" || t == "automatic" || t.empty()) return "AUTOMATIC_SURFACE_TO_SURFACE";
-    if (t == "tied") return "TIED_SURFACE_TO_SURFACE";
-    if (t == "mortar") return "AUTOMATIC_SURFACE_TO_SURFACE_MORTAR";
-    if (t == "tied_mortar") return "TIED_SURFACE_TO_SURFACE_MORTAR";
-    if (t == "single") return "AUTOMATIC_SINGLE_SURFACE";
-    if (t == "eroding") return "ERODING_SURFACE_TO_SURFACE";
-    if (t == "forming") return "FORMING_SURFACE_TO_SURFACE";
-    // Custom: uppercase as-is
-    std::string upper = type;
-    for (auto& c : upper) c = (char)std::toupper((unsigned char)c);
+    for (auto& c : t) if (c == '-') c = '_';
+    std::string keyword = ct_getPreset(t).keyword;
     // 아는 접촉 키워드 목록에 없으면 알린다 — 단독 contact 와 같은 목록·같은 문구다.
-    // 예전엔 assemble 만 아무 말 없이 'type: bogus' 를 *CONTACT_BOGUS 로 내보내, 같은 값이
-    // 단독 contact 에선 rc=1 이고 assemble 에선 조용히 통과하는 비대칭이 있었다.
-    if (!KooRemapper::ctKnownContactKeyword(upper))
-        std::cout << "[WARNING] " << KooRemapper::ctUnknownContactKeywordWarning(type, upper) << "\n";
-    return upper;
+    // 예전엔 assemble 만 아무 말 없이 'type: bogus' 를 *CONTACT_BOGUS 로 내보냈다.
+    if (!KooRemapper::ctKnownContactKeyword(keyword))
+        std::cout << "[WARNING] " << KooRemapper::ctUnknownContactKeywordWarning(type, keyword) << "\n";
+    return keyword;
 }
 
 // Generate *CONTACT card (Cards 1-3 only, no optional cards)
@@ -11798,6 +11815,14 @@ bool ModelAssembler::applyRbe(const RbeOperation& op) {
         if (sel != "direction" && sel != "all") {
             errorMessage_ = "rbe: constraints[" + std::to_string(i) +
                             "]: unsupported select '" + sel + "' (allowed: direction, all)";
+            return false;
+        }
+        // mode 도 두 값뿐이다 — 아래 분기가 'spider' 만 갈라내고 나머지를 전부 face 로 흘려서
+        // 'mode: bogus' 가 조용히 면마다 구속을 만들면서 rc=0 으로 끝났다(D1, select 와 같은 규칙).
+        const std::string& md = op.constraints[i].mode;
+        if (md != "spider" && md != "face") {
+            errorMessage_ = "rbe: constraints[" + std::to_string(i) +
+                            "]: unsupported mode '" + md + "' (allowed: spider, face)";
             return false;
         }
     }
