@@ -42,6 +42,16 @@ MCP 서버는 streamable-http로 뜨고, 들어온 `Authorization: Bearer kr_...
 | `cancel_job` | job_id | POST /jobs/{id}/cancel | 대기/실행 중 Job 취소 |
 | `get_job_outputs` | job_id | GET /jobs/{id}/outputs | Job이 만든 산출 파일 목록 |
 
+## 전사 코퍼스 (조직 전체 통계)
+개별 모델이 아니라 조직이 쌓아온 K파일·잡·리포트 전체를 집계한다(개인 식별 없음).
+| 도구 | 인자 | REST | 설명 |
+|---|---|---|---|
+| `corpus_summary` | — | GET /corpus/summary | 전사 모델 규모 — 세션·파일·잡 수와 메시 규모 분포 |
+| `material_usage` | limit? | GET /corpus/materials | 물성 카드별 사용 모델 수 — 어떤 `*MAT_` 가 몇 개 K파일에 실제로 쓰였나 |
+| `operation_usage` | — | GET /corpus/operations | 오퍼레이션 실행 이력 집계 — 실제 전처리 관행과 성공률 |
+| `section_contact_usage` | limit? | GET /corpus/sections-contacts | `*SECTION_`(요소 정식)·`*CONTACT_` 카드 사용 분포 |
+| `report_corpus` | — | GET /corpus/reports | 해석 결과 분포 — 리포트 종류·케이스 수·반복되는 findings |
+
 ## 낙하/충격 리포트
 SmartTwin 파이프라인이 만든 deep(단건 심층)·sphere(전각도 낙하)·impact(전위치 부분충격) 리포트 HTML 인제스트·분석.
 | 도구 | 인자 | REST | 설명 |
@@ -89,6 +99,7 @@ SmartTwin 파이프라인이 만든 deep(단건 심층)·sphere(전각도 낙하
 - **관리자 사용자 관리** (`/admin/*`)
 
 ## 검증
-- `mcp_server/smoke.py` — 22개 도구 노출 + 전체 op 파이프라인 + 신규 2개(`list_session_jobs`,
-  `system_capabilities`) + 에러 전파를 러닝 스택에 대고 확인(스택 없으면 자동 skip).
+- `mcp_server/smoke.py` — 도구 노출 수 + 전체 op 파이프라인 + 에러 전파를 러닝 스택에 대고
+  확인(스택 없으면 자동 skip). 기대 도구 수는 하드코딩하지 않고 `server.py` 의 `@mcp.tool(`
+  수에서 뽑는다 — 위 표의 도구 수(현재 50개)와 같아야 한다.
 - `backend/tests/test_parity.py` — 광고 카운트(`mcp_tools`)와 실제 `@mcp.tool` 수 일치 강제.
