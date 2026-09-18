@@ -260,7 +260,7 @@ static bool printLegacyHelp(ConsoleOutput& console, const std::string& helpCmd) 
         console.println("Options:");
         console.println("  --E <value>      Young's modulus (overrides K-file materials)");
         console.println("  --nu <value>     Poisson's ratio (overrides K-file materials)");
-        console.println("  --strain <type>  Strain type: engineering, green (default), log");
+        console.println("  --strain <type>  Strain type: engineering, green (default)");
         console.println("  --csv            Also output strain/stress CSV file");
         std::cout << "\n";
         console.println("Material Properties:");
@@ -2125,11 +2125,11 @@ static int runMain(int argc, char* argv[]) {
         StrainType strainType = StrainType::GREEN_LAGRANGE;
         if (strainTypeStr == "engineering") {
             strainType = StrainType::ENGINEERING;
-        } else if (strainTypeStr == "log") {
-            strainType = StrainType::LOGARITHMIC;
         } else if (strainTypeStr != "green") {
-            // 모르는 값을 조용히 Green-Lagrange 로 삼키지 않는다
-            console.error("Unknown --strain '" + strainTypeStr + "' (allowed: engineering, green, log)");
+            // 모르는 값을 조용히 Green-Lagrange 로 삼키지 않는다.
+            // log 는 prestress 경로에서 green 과 바이트 동일한 결과를 내므로(요약도 'Green-Lagrange')
+            // 매뉴얼·플랫폼 카탈로그와 같이 engineering/green 만 받는다.
+            console.error("Unknown --strain '" + strainTypeStr + "' (allowed: engineering, green)");
             return 1;
         }
 

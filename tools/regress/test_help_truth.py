@@ -13,6 +13,7 @@
     implicit/modal/ale/cclip/matdb 는 폴더 없는 이름만 YAML 폴더 기준이다.
   - 'generate-var --no-scale' 을 'use YAML lengths as-is' 라고 적었지만 J/K 는 1.0 이 된다.
   - 'prestress --strain' / 'strain --type' 이 모르는 값을 조용히 기본값으로 삼켰다.
+  - 'prestress --strain log' 는 green 과 바이트 동일한 결과였다(help 에만 있던 값).
 """
 import os
 import subprocess
@@ -233,14 +234,24 @@ def main():
 
     print("[prestress --strain / strain --type — 모르는 값을 삼키지 않는다]")
     run(binary, tmp, "generate", "--dim-i", "10", "--dim-j", "5", "arc", "demo")
-    for cmd, flag in (("prestress", "--strain"), ("strain", "--type")):
+    # prestress 의 log 는 green 과 바이트 동일한 결과를 냈다(요약도 'Green-Lagrange') —
+    # 구현될 때까지 help·허용목록에서 빼, 매뉴얼·플랫폼 카탈로그와 같은 값 집합(engineering/green)이 된다.
+    for cmd, flag, allowed in (("prestress", "--strain", ("engineering", "green")),
+                               ("strain", "--type", ("engineering", "green", "log"))):
         ext = ".dynain" if cmd == "prestress" else ".csv"
-        for v in ("engineering", "green", "log"):
+        listing = ", ".join(allowed)
+        hlp = help_text(binary, cmd)
+        check(f"{cmd} {flag}: help 가 적은 값 집합이 허용목록과 같음 ({listing})",
+              all(v in hlp for v in allowed) and
+              ("log" in allowed or "green (default), log" not in hlp),
+              [l for l in hlp.splitlines() if flag in l])
+        for v in allowed:
             rc, out = run(binary, tmp, cmd, flag, v, "demo_flat.k", "demo_bent.k", f"{cmd}_{v}{ext}")
             check(f"{cmd} {flag} {v}: 허용값은 그대로 동작 (rc=0)", rc == 0, f"rc={rc} {out[-200:]}")
-        rc, out = run(binary, tmp, cmd, flag, "bogus", "demo_flat.k", "demo_bent.k", f"{cmd}_bogus{ext}")
-        check(f"{cmd} {flag} bogus: rc=1 + 허용값 목록",
-              rc == 1 and "engineering, green, log" in out, f"rc={rc} {out[-300:]}")
+        for v in ("bogus",) + tuple(x for x in ("log",) if x not in allowed):
+            rc, out = run(binary, tmp, cmd, flag, v, "demo_flat.k", "demo_bent.k", f"{cmd}_bogus{ext}")
+            check(f"{cmd} {flag} {v}: rc=1 + 허용값 목록",
+                  rc == 1 and listing in out, f"rc={rc} {out[-300:]}")
         check(f"{cmd} {flag} bogus: 결과 파일을 쓰지 않음",
               not os.path.exists(os.path.join(tmp, f"{cmd}_bogus{ext}")))
 
