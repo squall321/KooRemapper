@@ -263,8 +263,14 @@ Commands:
   `cfg/strip.yaml` 의 `output: ../data/box.k` → `cfg/../data/box.k`.
 - 절대 경로(`/`·`\` 로 시작, 또는 `X:` 드라이브)는 그대로 씁니다.
 - 대상 키: `model`·`base_model`·`output`·`dat_file`·`dynain`·`bundle`·재료 번들 경로 등 **YAML 로 주는 모든 파일 경로**.
-- **유일한 예외**: `matdb` 의 `database` 키는 아직 **작업 폴더 기준**입니다(생략하면 `./materials/material_db.json`
-  → 실행 파일 옆 `materials/`·`../materials/` 순으로 번들 DB 를 찾습니다).
+- **예외 2개**:
+  - `matdb` 의 `database` 키는 아직 **작업 폴더 기준**입니다(생략하면 `./materials/material_db.json`
+    → 실행 파일 옆 `materials/`·`../materials/` 순으로 번들 DB 를 찾습니다).
+  - `map <config.yaml>` 은 **설정 전체가 작업 폴더 기준**입니다(파서가 별도 경로 — (d)(e) 의 예외와 같은 이유).
+    `bent`·`flat`·`output` 의 상대 경로가 YAML 폴더로 풀리지 않아, `KooRemapper map cfg/map.yaml` 의 `bent: bent.k` 는
+    `./bent.k` 를 찾고 `[ERROR] Failed to load bent mesh: Cannot open file: bent.k` 로 **종료 코드 1** 이 납니다(2026-09-18 실행 확인).
+    `output` 도 작업 폴더에 씁니다. YAML 을 둔 폴더에서 실행하거나 절대 경로를 쓰세요
+    (위치인자 호출형태 `KooRemapper map <bent> <flat> <output>`([§4](#4-map--hex8-구조화-메시-매핑))는 해당 없음).
 
 > 이 규칙은 예전에 op 마다 달랐습니다. `load`·`boundary`·`rbe`·`contact`·`relax`·`explicit`·`implicit`·`modal`·`ale`·`database`·`cclip`·`matdb`·`generate box` 는
 > "폴더 없는 이름(`box.k`)만 YAML 폴더 기준, 폴더가 붙은 상대 경로(`../data/box.k`)는 작업 폴더 기준" 이었으나 이제 위 한 가지 규칙으로 통일됐습니다.
