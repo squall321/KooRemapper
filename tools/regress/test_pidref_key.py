@@ -9,6 +9,8 @@
     파이프라인(Runner·플랫폼 워커)은 종료 코드로만 성공을 판정하므로 rc=0 이면 경고가 보이지 않는다.
   - 이 시험은 '키가 파싱되고 검증된다' 까지만 본다. strict/warn 의 동작 차이는 참조 재배치 구현이
     들어온 뒤 그쪽 시험이 맡는다.
+  - 5절은 '아직 동작이 없다'는 사실 자체를 못으로 박는다. 검증만 하고 값을 버리는 단절(단독 경로)은
+    컴파일 오류도 시험 실패도 내지 않아 조용히 남는다 — 동작이 들어오면 5절이 깨져 그 자리를 가리킨다.
 """
 import os
 import subprocess
@@ -145,6 +147,41 @@ def main():
         check(f"단독 merge: pid_refs: {val} 덱 == 키없음 덱",
               mbase == open(os.path.join(d, f"sm_sm_{val}.k")).read(), "출력 덱이 달라졌다")
 
+    # ── 5. 죽은 PID 참조가 있는 덱 — 지금 상태를 못으로 박는다 ──────────────
+    # 키는 파싱·검증까지만 되어 있고 값은 어디에도 닿지 않는다. 단독 restack 은 validateOperation 에
+    # 넘긴 뒤 원문을 버리고(applyRestack 은 RestackOperation 만 받는다), 단독 merge 도 cfg 에 담아만 둔다.
+    # 그래서 죽은 참조가 남은 덱에서도 strict 가 rc=0 이다 — 이게 지금의 사실이고, 아래 단언은 그 사실을
+    # 고정한다. 참조 재배치가 들어오면 단언이 깨지고, 그때 단독 경로까지 정책을 배선해야 다시 초록이 된다.
+    print("[죽은 PID 참조 덱 — 아직 정책이 rc 를 바꾸지 않는다(동작이 들어오면 이 절이 깨진다)]")
+    deck = open(os.path.join(d, "flat.k")).read()
+    dead = ("*SET_PART_LIST\n"
+            "         1         0         0         0         0\n"
+            "         1\n")
+    open(os.path.join(d, "flat_ref.k"), "w").write(deck.replace("*END", dead + "*END"))
+
+    rc_ar, _ = write_run(binary, d, "assemble", "xar", asm_restack("xar", "strict", "flat_ref.k"))
+    rc_sr, _ = write_run(binary, d, "restack", "xsr", standalone_restack("xsr", "strict", "flat_ref.k"))
+    rc_sw, _ = write_run(binary, d, "restack", "xsw", standalone_restack("xsw", "warn", "flat_ref.k"))
+    check("단독 restack strict: 죽은 참조가 남아도 아직 rc=0 (동작이 들어오면 1 이어야 한다)",
+          rc_sr == 0, f"rc={rc_sr}")
+    check("단독 restack: warn 이 아직 rc 를 바꾸지 않는다 (strict 와 같다)",
+          rc_sw == rc_sr, f"strict={rc_sr} warn={rc_sw}")
+    check("restack strict: assemble rc == 단독 rc (한쪽만 배선되면 깨진다)",
+          rc_ar == rc_sr, f"assemble={rc_ar} 단독={rc_sr}")
+    check("단독 restack: 죽은 *SET_PART_LIST 가 출력 덱에 그대로 남아 있다",
+          "*SET_PART_LIST" in open(os.path.join(d, "s_xsr.k")).read(), "카드가 사라졌다")
+
+    rc_am, _ = write_run(binary, d, "assemble", "xam", asm_merge("xam", "strict", "flat_ref.k"))
+    rc_sm, _ = write_run(binary, d, "merge", "xsm", standalone_merge("xsm", "strict", "flat_ref.k"))
+    rc_smw, _ = write_run(binary, d, "merge", "xsmw", standalone_merge("xsmw", "warn", "flat_ref.k"))
+    check("단독 merge strict: 죽은 참조가 남아도 아직 rc=0 (동작이 들어오면 1 이어야 한다)",
+          rc_sm == 0, f"rc={rc_sm}")
+    check("단독 merge: warn 이 아직 rc 를 바꾸지 않는다 (strict 와 같다)",
+          rc_smw == rc_sm, f"strict={rc_sm} warn={rc_smw}")
+    check("merge strict: assemble rc == 단독 rc (한쪽만 배선되면 깨진다)",
+          rc_am == rc_sm, f"assemble={rc_am} 단독={rc_sm}")
+    check("단독 merge: 죽은 *SET_PART_LIST 가 출력 덱에 그대로 남아 있다",
+          "*SET_PART_LIST" in open(os.path.join(d, "sm_xsm.k")).read(), "카드가 사라졌다")
 
     print()
     if FAILS:
