@@ -1,5 +1,7 @@
 #pragma once
 
+#include <map>
+
 #include "core/Mesh.h"
 #include <string>
 #include <fstream>
@@ -64,6 +66,12 @@ private:
     int linesProcessed_;
     long fileSize_;
     bool i10_ = false;  // i10=y flag: use 10-char integer fields
+    // PID → 그 파트 요소의 절점 수(고차 정식일 때만 채운다). *PART 의 SECID 를 풀어
+    // *SECTION_SOLID 의 ELFORM 23-29 를 본다(Vol_I 228671-228677). 요소 줄만 보고는
+    // 카드가 몇 줄인지 알 수 없어서, 요소를 읽기 전에 미리 훑어 둔다.
+    std::map<int, int> pidHighOrderNodes_;
+    // *PART·*SECTION_SOLID 만 훑어 pidHighOrderNodes_ 를 채운다(요소를 읽기 전에 한 번).
+    void prescanPartSections(std::ifstream& file);
     ProgressCallback progressCallback_;
     std::vector<std::pair<int, std::string>> unsupportedMaterials_;  // (MID, keyword)
 

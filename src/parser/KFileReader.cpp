@@ -1,4 +1,5 @@
 #include "parser/KFileReader.h"
+#include "parser/ElementCardLayout.h"
 #include "core/Platform.h"
 #include <sstream>
 #include <algorithm>
@@ -123,12 +124,92 @@ Mesh KFileReader::readFile(const std::string& filename) {
         file.seekg(0, std::ios::beg);
     }
 
+    // 요소를 읽기 전에 *PART·*SECTION_SOLID 만 먼저 훑는다 — 고차 정식(ELFORM 23-29) 파트는
+    // 요소 카드가 세 줄 이상이고, 그 사실은 요소 줄 안에 없다(Vol_I 228671-228677).
+    // 미리 알지 못하면 Card 3(N11..N20)을 새 요소 줄로 읽어 유령 요소가 생기고,
+    // 그 유령이 같은 EID 의 진짜 요소를 덮어써 파트가 통째로 사라진다.
+    pidHighOrderNodes_.clear();
+    {
+        std::streampos elemStart = file.tellg();
+        prescanPartSections(file);
+        file.clear();
+        file.seekg(elemStart);
+    }
+
     if (!parseFile(file)) {
         throw std::runtime_error(errorMessage_);
     }
 
     file.close();
     return std::move(mesh_);
+}
+
+// *PART 와 *SECTION_SOLID 만 훑어 '이 파트 요소는 절점이 몇 개인가' 를 채운다.
+// 요소·노드 줄은 건너뛰기만 하므로 파일을 한 번 더 읽는 비용뿐이다.
+void KFileReader::prescanPartSections(std::ifstream& file) {
+    std::map<int, int> secElform;   // SECID → ELFORM
+    std::map<int, int> partSec;     // PID → SECID
+
+    auto field = [](const std::string& l, size_t idx) -> int {
+        // *PART·*SECTION 카드는 10 칸 고정폭이다. 칸이 어긋난 덱은 공백 토큰으로 되돌린다.
+        std::string body = l;
+        size_t cm = body.find('$');
+        if (cm != std::string::npos) body = body.substr(0, cm);
+        while (!body.empty() && (body.back() == '\r' || body.back() == '\n')) body.pop_back();
+        std::string f;
+        if (body.find(',') == std::string::npos && body.size() > idx * 10) {
+            f = body.substr(idx * 10, 10);
+        } else {
+            std::vector<std::string> toks;
+            std::string tok;
+            for (char c : body) {
+                if (c == ' ' || c == '\t' || c == ',') { if (!tok.empty()) { toks.push_back(tok); tok.clear(); } }
+                else tok += c;
+            }
+            if (!tok.empty()) toks.push_back(tok);
+            if (idx >= toks.size()) return 0;
+            f = toks[idx];
+        }
+        size_t a = f.find_first_not_of(" \t");
+        if (a == std::string::npos) return 0;
+        size_t b = f.find_last_not_of(" \t");
+        f = f.substr(a, b - a + 1);
+        for (char c : f) if (!std::isdigit(static_cast<unsigned char>(c))) return 0;
+        try { return std::stoi(f); } catch (...) { return 0; }
+    };
+
+    std::string line;
+    int mode = 0;          // 0 = 관심 없음, 1 = *PART, 2 = *SECTION_SOLID
+    while (std::getline(file, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        size_t g = line.find_first_not_of(" \t");
+        if (g == std::string::npos) continue;
+        if (line[g] == '$') continue;
+        if (line[g] == '*') {
+            std::string up = line.substr(g);
+            for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+            if (up.rfind("*PART", 0) == 0 && up.rfind("*PART_ADAPTIVE", 0) != 0) mode = 1;
+            else if (up.rfind("*SECTION_SOLID", 0) == 0) mode = 2;
+            else mode = 0;
+            continue;
+        }
+        if (mode == 1) {
+            // *PART 는 '제목 줄 + 카드 2' 가 반복된다. 제목 줄은 비어 있을 수 있으므로
+            // PID·SECID 가 모두 양수인 줄만 카드 2 로 본다.
+            int pid = field(line, 0), sec = field(line, 1);
+            if (pid > 0 && sec > 0 && !partSec.count(pid)) partSec[pid] = sec;
+        } else if (mode == 2) {
+            int sid = field(line, 0), ef = field(line, 1);
+            if (sid > 0 && ef > 0 && !secElform.count(sid)) secElform[sid] = ef;
+        }
+    }
+
+    for (const auto& ps : partSec) {
+        auto it = secElform.find(ps.second);
+        if (it == secElform.end()) continue;
+        int n = solidNodesFromElform(it->second);
+        if (n > 0) pidHighOrderNodes_[ps.first] = n;
+    }
 }
 
 bool KFileReader::parseFile(std::ifstream& file) {
@@ -175,7 +256,11 @@ bool KFileReader::parseFile(std::ifstream& file) {
                     return false;
                 }
             }
-            else if (currentKeyword_ == "ELEMENT_SHELL" || currentKeyword_ == "ELEMENT_SHELL_TITLE") {
+            else if (currentKeyword_.rfind("ELEMENT_SHELL", 0) == 0) {
+                // *ELEMENT_SHELL_THICKNESS·_BETA·_MCID·_OFFSET·_DOF 도 읽는다 — 예전엔 키워드
+                // 분기에서 빠져 셸이 통째로 모델에 없었다(조용한 누락). 요소마다 따라오는
+                // 둘째·셋째 카드는 매뉴얼 표대로 세어 건너뛴다(Vol_I 162168-162169, 162567-162571).
+                // 줄 수를 확정할 수 없는 COMPOSITE 계열만 읽지 않고 그대로 둔다.
                 if (!parseElementShellSection(file)) {
                     return false;
                 }
@@ -559,6 +644,35 @@ bool KFileReader::parseElementSolidSection(std::ifstream& file) {
                         elementCount++;
                     }
                 }
+                // 고차 정식 파트(ELFORM 23-29)면 Card 3 이 더 온다 — 10 칸씩 반복한다
+                // (Vol_I 163632-163634: "Include as many of this card as needed").
+                // 여기서 먹지 않으면 그 줄을 새 요소의 Card 1 로 읽어 유령 요소가 생기고,
+                // 그 유령이 같은 EID 의 진짜 요소를 덮어써 파트가 통째로 사라진다.
+                {
+                    auto hoIt = pidHighOrderNodes_.find(pid);
+                    if (hoIt != pidHighOrderNodes_.end() && hoIt->second > 10) {
+                        int extraCards = (hoIt->second + 9) / 10 - 1;
+                        for (int ec = 0; ec < extraCards; ++ec) {
+                            std::string skipLine;
+                            std::streampos skipPos;
+                            while (true) {
+                                skipPos = file.tellg();
+                                if (!std::getline(file, skipLine)) break;
+                                currentLine_++;
+                                linesProcessed_++;
+                                if (!skipLine.empty() && skipLine.back() == '\r') skipLine.pop_back();
+                                if (isCommentLine(skipLine) || skipLine.empty()) continue;
+                                break;
+                            }
+                            if (skipLine.empty()) break;
+                            if (isKeywordLine(skipLine)) {   // 섹션이 끝났다 — 되돌린다
+                                file.seekg(skipPos);
+                                currentLine_--;
+                                return true;
+                            }
+                        }
+                    }
+                }
                 // After reading two-line element, continue to next iteration
                 // This ensures we don't fall through to other parsing cases
                 continue;
@@ -586,6 +700,57 @@ bool KFileReader::parseElementShellSection(std::ifstream& file) {
     int elementCount = 0;
 
     bool hasTitle = (currentKeyword_.find("TITLE") != std::string::npos);
+
+    // 이 섹션의 요소 한 장이 몇 줄인지 — 키워드 옵션으로 정해진다.
+    const ElementKeywordInfo kwInfo = parseElementKeyword("*" + currentKeyword_);
+    if (!kwInfo.supported) {
+        // COMPOSITE 계열은 적층점 수에 따라 카드 수가 달라 요소 경계를 확정할 수 없다.
+        // 반쯤 읽어 유령 요소를 만드는 대신 통째로 두고 지나간다 — 쓰기 쪽이 손대지 않고
+        // 그대로 내보내며, 그 섹션의 요소를 지워야 하는 op 는 rc=1 로 멈춘다.
+        return true;
+    }
+
+    // 요소 뒤에 따라오는 카드를 그 개수만큼 먹는다. 섹션이 끝나면 되돌리고 false 를 돌려준다.
+    bool sectionEnded = false;
+    auto eatExtraCards = [&](int count) {
+        for (int c = 0; c < count; ++c) {
+            std::string extra;
+            std::streampos pos;
+            while (true) {
+                pos = file.tellg();
+                if (!std::getline(file, extra)) { sectionEnded = true; return; }
+                currentLine_++;
+                linesProcessed_++;
+                if (!extra.empty() && extra.back() == '\r') extra.pop_back();
+                if (extra.empty() || isCommentLine(extra)) continue;
+                break;
+            }
+            if (isKeywordLine(extra)) {
+                file.seekg(pos);
+                file.clear();
+                currentLine_--;
+                linesProcessed_--;
+                sectionEnded = true;
+                return;
+            }
+        }
+    };
+    // Card 3(THIC5-8)은 중간절점 N5-N8 이 정의됐을 때만 온다(Vol_I 162168-162169, 162567-162571).
+    auto shellExtraCards = [&](const std::string& card1) {
+        int n = kwInfo.extraCards;
+        if (kwInfo.thicknessCard) {
+            n += 1;
+            bool midside = false;
+            for (int q = 6; q < 10; ++q) {
+                size_t off = (size_t)q * 8;
+                if (card1.length() < off + 1) break;
+                int v = parseInt(card1.substr(off, 8));
+                if (v > 0) midside = true;
+            }
+            if (midside) n += 1;
+        }
+        return n;
+    };
 
     while (true) {
         lastPos = file.tellg();
@@ -642,6 +807,9 @@ bool KFileReader::parseElementShellSection(std::ifstream& file) {
                     elem.type = ElementType::QUAD4;
                     mesh_.addElement(elem);
                     elementCount++;
+                    int extra = shellExtraCards(line);
+                    if (extra > 0) eatExtraCards(extra);
+                    if (sectionEnded) break;
                     continue;
                 }
             }
@@ -665,12 +833,15 @@ bool KFileReader::parseElementShellSection(std::ifstream& file) {
                 elem.type = ElementType::QUAD4;
                 mesh_.addElement(elem);
                 elementCount++;
+                int extra = kwInfo.extraCards + (kwInfo.thicknessCard ? 1 : 0);
+                if (extra > 0) eatExtraCards(extra);
             }
         }
         catch (const std::exception& e) {
             // Skip unparseable lines
             continue;
         }
+        if (sectionEnded) break;
 
         reportProgress(file.tellg());
     }

@@ -3103,6 +3103,58 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
             partElems.push_back(&elem);
         }
     }
+
+    // 1b. 덱의 요소 카드 수와 리더가 읽은 수를 대조한다 — 현장이 쓴 검증 방법 그대로다.
+    //     리더는 8 절점 모서리만 담는다. 그래서 20 절점(H20·T20·T15·P21…) 요소, *ELEMENT_SOLID_ORTHO,
+    //     *ELEMENT_SHELL_THICKNESS, COMPOSITE 계열은 읽지 못한다. 그런 파트를 restack 하면
+    //     '요소 0 개' 나 '일부만' 으로 조용히 흘러가 틀린 덱이 나간다 — 조용히 넘기지 않고 rc=1 이다.
+    {
+        // 고차 정식 파트(ELFORM 23-29 또는 H20 같은 키워드 옵션)는 아예 받지 않는다.
+        // 리더는 요소마다 8 절점 모서리만 담으므로 새 층을 만들면 중간 절점이 사라지고,
+        // 물려받은 *SECTION_SOLID ELFORM 은 그대로 23 이라 '20 절점이라고 적힌 8 절점 덱' 이 나간다.
+        {
+            auto hn = ecBuildPidNodes(rawLines_);
+            auto hit = hn.find(op.targetPid);
+            if (hit != hn.end() && hit->second > 10) {
+                errorMessage_ = "restack: PID " + std::to_string(op.targetPid) + " 는 " +
+                                std::to_string(hit->second) +
+                                " 절점 고차 요소 파트입니다(*SECTION_SOLID ELFORM) — 이 도구는 요소마다"
+                                " 8 절점 모서리만 담아 중간 절점을 다시 만들 수 없습니다."
+                                " 조용히 틀린 덱을 내는 대신 여기서 멈춥니다"
+                                " / cannot restack a higher-order solid part";
+                return false;
+            }
+        }
+        const ElemCardIndex ix = ecBuildIndex(rawLines_);
+        long long inDeck = 0;
+        for (size_t c = 0; c < rawLines_.size(); ++c) {
+            if (ix.owner[c] != static_cast<int>(c)) continue;
+            if (ix.pidOf[c] != op.targetPid) continue;
+            if (ix.eidOf[c] > 0 && removedElementIds_.count(ix.eidOf[c])) continue;
+            ++inDeck;
+        }
+        // 줄 수를 확정하지 못한 섹션(COMPOSITE 등)은 색인이 세지 않는다 — 그 안에 대상 파트가
+        // 들어 있으면 위 수가 0 이어도 '없다' 가 아니다. 그래서 그런 섹션이 있으면 먼저 알린다.
+        if (!ix.opaqueKws.empty() && inDeck != static_cast<long long>(partElems.size())) {
+            std::set<std::string> u(ix.opaqueKws.begin(), ix.opaqueKws.end());
+            std::string kws;
+            for (const auto& k : u) { if (!kws.empty()) kws += ", "; kws += k; }
+            errorMessage_ = "restack: 카드 줄 수를 확정할 수 없는 요소 섹션이 있습니다(" + kws + ") — " +
+                            ix.opaqueReason +
+                            " / element section with an undeterminable card length";
+            return false;
+        }
+        if (inDeck != static_cast<long long>(partElems.size())) {
+            errorMessage_ = "restack: PID " + std::to_string(op.targetPid) + " 의 요소 카드가 덱에는 " +
+                            std::to_string(inDeck) + " 개인데 " + std::to_string(partElems.size()) +
+                            " 개만 읽혔습니다 — 이 도구는 요소마다 8 절점 모서리만 담습니다."
+                            " 20 절점 같은 고차 요소나 *ELEMENT_SOLID_ORTHO·*ELEMENT_SHELL_THICKNESS 처럼"
+                            " 카드가 여러 장인 변형은 다시 만들 수 없습니다 — 조용히 틀린 덱을 내는 대신"
+                            " 여기서 멈춥니다 / element card count mismatch; refusing to restack";
+            return false;
+        }
+    }
+
     if (partElems.empty()) {
         errorMessage_ = "Part " + std::to_string(op.targetPid) + " not found for restack";
         return false;
@@ -4957,6 +5009,9 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
             output << line << "\n";
         }
         else if (currentSection == Section::ELEMENT) {
+            // 줄 수를 확정하지 못한 섹션(COMPOSITE 계열)은 손대지 않고 그대로 내보낸다 —
+            // 카드 경계를 모르는데 줄 하나를 지우면 나머지 줄이 고아로 남는다.
+            if (eidx.opaque[i]) { output << line << "\n"; continue; }
             // 카드 경계는 색인이 정한다 — 이어지는 줄(노드 줄·Card 3·ORTHO 카드…)은 여기서
             // 걷어내야 (1) 노드 ID 가 지워진 요소 번호와 겹칠 때 남의 줄이 사라지지 않고
             // (2) 요소를 지울 때 카드가 통째로 지워진다(예전엔 'eid pid' 줄만 지워져
@@ -5042,6 +5097,9 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
             output << line << "\n";
         }
         else if (currentSection == Section::TSHELL_ELEMENT) {
+            // 줄 수를 확정하지 못한 섹션(COMPOSITE 계열)은 손대지 않고 그대로 내보낸다 —
+            // 카드 경계를 모르는데 줄 하나를 지우면 나머지 줄이 고아로 남는다.
+            if (eidx.opaque[i]) { output << line << "\n"; continue; }
             // 지우기만 한다 — 새 요소는 예전처럼 *END 앞의 *ELEMENT_TSHELL 로 나간다.
             // TSHELL 은 Card 1 이 언제나 N1..N8 한 줄이고(Vol_I 165174-165184) _BETA 면 한 줄이 더 온다.
             if (eidx.owner[i] >= 0 && eidx.owner[i] != (int)i) {
@@ -5058,6 +5116,9 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
             output << line << "\n";
         }
         else if (currentSection == Section::SHELL_ELEMENT) {
+            // 줄 수를 확정하지 못한 섹션(COMPOSITE 계열)은 손대지 않고 그대로 내보낸다 —
+            // 카드 경계를 모르는데 줄 하나를 지우면 나머지 줄이 고아로 남는다.
+            if (eidx.opaque[i]) { output << line << "\n"; continue; }
             // *ELEMENT_SHELL_THICKNESS/_BETA/_MCID 는 요소마다 둘째 카드가 붙고, 중간절점(N5-N8)이
             // 정의돼 있으면 셋째 카드까지 온다(Vol_I 162168-162169, 162567-162571).
             // 예전에는 한 줄만 지워 두께 줄이 고아로 남았다.
@@ -5244,6 +5305,26 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
         }
     }
 
+
+    // 줄 수를 확정하지 못한 섹션 안에 '지워야 할 요소' 가 들어 있으면 손댈 수 없다 —
+    // 그대로 두면 지워진 노드를 무는 요소가 살아남는다. 조용히 넘기지 않고 rc=1 이다.
+    if (!removedElementIds_.empty()) {
+        for (size_t i = 0; i < rawLines_.size(); ++i) {
+            if (!eidx.opaque[i]) continue;
+            auto f = ecFields(rawLines_[i], 8);
+            int eid = ecInt(f, 0);
+            if (eid <= 0 || removedElementIds_.count(eid) == 0) continue;
+            std::set<std::string> u(eidx.opaqueKws.begin(), eidx.opaqueKws.end());
+            std::string kws;
+            for (const auto& k : u) { if (!kws.empty()) kws += ", "; kws += k; }
+            errorMessage_ =
+                "지워야 할 요소 " + std::to_string(eid) + " 가 카드 줄 수를 확정할 수 없는 섹션(" + kws +
+                ") 안에 있습니다 — " + eidx.opaqueReason +
+                " — 출력 파일을 쓰지 않았습니다: " + outputFile +
+                " / cannot delete an element inside a section with an undeterminable card length";
+            return false;
+        }
+    }
 
     // ── 왕복 검증 (파트별 요소 수) ────────────────────────────────────────────
     // 현장 사고: LS-DYNA 도 KooMeshModifier 도 에러를 내지 않았고, AP 파트가 통째로 빠진 덱이

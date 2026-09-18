@@ -52,8 +52,9 @@ std::string keywordToken(const std::string& line, size_t firstNonWs) {
 // *ELEMENT_SOLID). They stay in the output verbatim, so their EIDs must not
 // be written a second time inside our *ELEMENT_SOLID block.
 bool isVerbatimElementKeyword(const std::string& kw) {
-    return kw == "*ELEMENT_SHELL" || kw == "*ELEMENT_SHELL_TITLE" ||
-           kw == "*ELEMENT_TSHELL" || kw == "*ELEMENT_TSHELL_TITLE";
+    // 옵션 변형(*ELEMENT_SHELL_THICKNESS 등)까지 접두어로 잡는다 — 리더가 그 변형도 읽게 된 뒤로
+    // 정확히 같은 이름만 보면 그 EID 가 *ELEMENT_SOLID 블록에 한 번 더 적힌다.
+    return kw.rfind("*ELEMENT_SHELL", 0) == 0 || kw.rfind("*ELEMENT_TSHELL", 0) == 0;
 }
 
 // EID of one element data line — fixed 8-char field when the line is wide
