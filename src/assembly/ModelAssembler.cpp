@@ -1572,7 +1572,7 @@ void ModelAssembler::migrateDeadReferences(const std::set<int>& deadPids,
                 pidRefRewrites_[s.memberLines[i]] = {};
             std::ostringstream what;
             what << "세트 " << sid << ": 죽은 PID 를 ";
-            if (ctx.isMerge) what << "합친 PID " << ctx.newPids.front();
+            if (ctx.isMerge) what << "합친 PID " << ctx.newPids.front() << " 로";
             else what << "층 PID " << ctx.newPids.size() << "개 전부로";
             what << " 바꿨습니다(구성원 " << out.size() << "개)";
             for (size_t li : s.memberLines) {
@@ -1617,6 +1617,17 @@ void ModelAssembler::migrateDeadReferences(const std::set<int>& deadPids,
     // 4. 접촉 카드가 죽은 PID 를 직접 가리키는 경우(STYP=3)
     for (size_t ci = 0; ci < contacts.size(); ++ci) {
         auto& c = contacts[ci];
+        // merge 로 두 면이 한 덩어리가 되면 그 계면 접촉 자체가 없어진다. 양쪽을 합친 PID 로
+        // 바꾸면 자기 자신에 대한 surface-to-surface 가 되어 초기 관통·쓸데없는 자기접촉
+        // 비용만 남고 솔버에 따라 거부된다 — 고치지 말고 지우라고 알린다.
+        if (ctx.isMerge && c.styp[0] == 3 && c.styp[1] == 3 &&
+            deadPids.count(c.id[0]) && deadPids.count(c.id[1])) {
+            record("left", c.kw, c.cardLine,
+                   "두 면(part " + std::to_string(c.id[0]) + ", part " + std::to_string(c.id[1]) +
+                   ") 이 모두 이번 merge 로 합쳐집니다 — 계면이 사라졌으니 이 카드를 지우세요"
+                   " (합친 PID 로 바꾸면 자기 자신에 대한 접촉이 됩니다)");
+            continue;
+        }
         for (int side = 0; side < 2; ++side) {
             if (c.styp[side] != 3 || !deadPids.count(c.id[side])) continue;
             std::string how = std::string(sideName[side]) + " part " + std::to_string(c.id[side]);
