@@ -78,6 +78,40 @@ def test_dump_yaml_multiline_card_literal_block():
     assert "note: plain" in _dump_yaml({"note": "plain"})
 
 
+def test_dump_yaml_card_with_tab_stays_literal_block():
+    # TAB 이 있으면 PyYAML 이 블록 표기를 포기하고 따옴표 문자열을 냈다 → 덱에 쓰레기 한 줄이 써지고 mid=0.
+    # 고정 폭 카드에서 탭은 자리 표시일 뿐이라 8칸으로 펴서 내보낸다(칸 위치가 그대로 유지된다).
+    tabbed = "*MAT_ELASTIC_TITLE\nSubstrate\n\t90  7.85E-09  2.10E+05       0.3"
+    spaced = "*MAT_ELASTIC_TITLE\nSubstrate\n        90  7.85E-09  2.10E+05       0.3"
+    text = _dump_yaml({"layers": [{"thickness": 0.3, "material_card": tabbed}]})
+    assert "    material_card: |\n      *MAT_ELASTIC_TITLE\n" in text, text
+    assert "\\t" not in text and '"*MAT' not in text
+    # 탭을 편 결과가 같은 카드를 공백으로 쓴 것과 한 글자도 다르지 않아야 한다(10칸 정렬 유지).
+    assert text == _dump_yaml({"layers": [{"thickness": 0.3, "material_card": spaced}]})
+    assert yaml.safe_load(text)["layers"][0]["material_card"] == spaced + "\n"
+
+
+def test_dump_yaml_card_with_leading_blank_line_stays_plain_block():
+    # 카드 앞 빈 줄이 있으면 PyYAML 이 `|2` 명시 들여쓰기 헤더를 붙였고, C++ 파서는 그 '|2' 를
+    # 카드 본문으로 읽어 덱에 그대로 썼다(mid=0). 카드 앞뒤 빈 줄은 의미가 없으므로 떼고 낸다.
+    card = "\n\n*MAT_ELASTIC_TITLE\nSubstrate\n        90  7.85E-09  2.10E+05       0.3\n\n"
+    text = _dump_yaml({"layers": [{"thickness": 0.3, "material_card": card}]})
+    assert "    material_card: |\n      *MAT_ELASTIC_TITLE\n" in text, text
+    assert "|2" not in text
+    assert yaml.safe_load(text)["layers"][0]["material_card"] == card.strip("\n") + "\n"
+
+
+def test_dump_yaml_card_round_trip_preserves_columns():
+    # 왕복(dump → safe_load)이 원본 카드의 칸 위치를 그대로 돌려줘야 한다 —
+    # 정규화는 줄 끝 공백·탭·앞뒤 빈 줄만 건드리고 칸을 옮기지 않는다.
+    card = ("*MAT_PIECEWISE_LINEAR_PLASTICITY_TITLE\n"
+            "7075-T6 aluminum\n"
+            "$#     mid        ro         e        pr      sigy\n"
+            "        90  2.70E-09  7.10E+04      0.33  4.50E+02\n")
+    back = yaml.safe_load(_dump_yaml({"layers": [{"material_card": card}]}))
+    assert back["layers"][0]["material_card"] == card
+
+
 def test_validation_error_propagates():
     b = build_command("map", {"bent_mesh": "b.k"}, _wd())
     assert b.error and "flat_mesh" in b.error

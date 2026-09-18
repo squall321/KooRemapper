@@ -67,13 +67,26 @@ def _represent_dict(dumper, data):  # noqa: ANN001
 _KDumper.add_representer(dict, _represent_dict)
 
 
-# 여러 줄 문자열(material_card 등)은 리터럴 블록 `key: |` 로 쓴다. PyYAML 기본은 따옴표 문자열
-# ("*MAT_ELASTIC\n$#...")이라 C++ 파서가 블록으로 읽지 못해, 단독 restack 은 층 PART mid=0·카드 누락,
-# assemble 은 따옴표 문자열을 그대로 덱에 썼다. 줄 끝 공백이 있으면 PyYAML 이 블록을 포기하므로 떼고
-# (LS-DYNA 고정 폭 칸은 끝 공백에 의미 없음), 끝 줄바꿈을 하나로 맞춰 `|` (strip/keep 표시 없음)로 나오게 한다.
+# 여러 줄 문자열(material_card 등)을 리터럴 블록 `key: |` 로 내보내기 전에 정규화한다.
+# PyYAML 은 아래 세 경우에 블록 표기를 포기하거나 명시 들여쓰기 헤더를 붙이는데, 그러면 C++ 파서가
+# 카드를 못 읽어 조용히 mid=0 짜리 덱이 나온다(따옴표 문자열 한 줄이 그대로 덱에 써지기도 한다):
+#   - 줄 끝 공백  → 따옴표 문자열   (LS-DYNA 고정 폭 칸은 끝 공백에 의미 없음 → 뗀다)
+#   - TAB         → 따옴표 문자열   (고정 폭 카드에 탭은 자리 표시일 뿐 → 편집기 기준 8칸으로 편다)
+#   - 앞쪽 빈 줄  → `|2` 헤더       (카드 앞 빈 줄은 의미 없음 → 버린다)
+# 셋 다 칸 위치(10칸 정렬)를 바꾸지 않는다. 첫 줄이 공백으로 시작하는 카드는 YAML 규칙상 `|2` 를
+# 피할 수 없고, 선행 공백을 떼면 MID 칸이 망가지므로 여기서는 손대지 않는다.
+def _normalize_block_text(data: str) -> str:
+    lines = [line.rstrip() for line in data.expandtabs(8).split("\n")]
+    while lines and not lines[0]:
+        lines.pop(0)
+    while lines and not lines[-1]:
+        lines.pop()
+    return "\n".join(lines) + "\n" if lines else ""
+
+
 def _represent_str(dumper, data):  # noqa: ANN001
-    if "\n" in data.rstrip("\n"):
-        text = "\n".join(line.rstrip() for line in data.rstrip("\n").split("\n")) + "\n"
+    text = _normalize_block_text(data)
+    if "\n" in text.rstrip("\n"):
         return dumper.represent_scalar("tag:yaml.org,2002:str", text, style="|")
     return dumper.represent_scalar("tag:yaml.org,2002:str", data)
 

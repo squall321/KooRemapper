@@ -39,6 +39,33 @@ try:
         # parser then ignores (rules silently dropped → everything hits the '*').
         def increase_indent(self, flow=False, indentless=False):
             return super().increase_indent(flow, False)
+
+    def _normalize_block_text(data):
+        """Make a multi-line card safe to emit as a `|` literal block.
+
+        LS-DYNA cards are fixed-width, so trailing blanks, tabs (a placeholder for
+        columns) and blank lines around the card carry no meaning — but each of
+        them makes PyYAML drop the literal block (trailing blanks and tabs give a
+        quoted "*MAT_ELASTIC\n…" scalar, leading blank lines give a `|2` header).
+        KooRemapper's line-oriented parser then reads that one line as the card and
+        silently emits a deck with mid=0. None of this moves a column.
+        """
+        lines = [line.rstrip() for line in data.expandtabs(8).split("\n")]
+        while lines and not lines[0]:
+            lines.pop(0)
+        while lines and not lines[-1]:
+            lines.pop()
+        return "\n".join(lines) + "\n" if lines else ""
+
+    def _represent_str(dumper, data):
+        # Multi-line strings (restack layers' material_card, assemble cards) must go
+        # out as `key: |`; PyYAML's default quoted scalar is not a card to KooRemapper.
+        text = _normalize_block_text(data)
+        if "\n" in text.rstrip("\n"):
+            return dumper.represent_scalar("tag:yaml.org,2002:str", text, style="|")
+        return dumper.represent_scalar("tag:yaml.org,2002:str", data)
+
+    _IndentDumper.add_representer(str, _represent_str)
 except Exception:  # pragma: no cover
     yaml = None
     _IndentDumper = None
