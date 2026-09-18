@@ -2132,16 +2132,24 @@ static bool ma_textHasNonFinite(const std::string& text, const std::string& labe
         if (!numericBlock || ln.empty() || ln[0] == '$') continue;
         // 숫자 줄에는 nan/inf 의 글자가 없다 — 빠른 걸러내기(큰 덱에서 줄마다 strtod 하지 않도록)
         if (ln.find_first_of("nNiI") == std::string::npos) continue;
-        std::istringstream iss(ln);
-        std::string tok;
-        while (iss >> tok) {
-            const char* begin = tok.c_str();
+        // 고정 칸 서식에서는 음수 값이 앞 칸과 공백 없이 붙는다(*INITIAL_STRESS_* 의 setw(10) 에서
+        // '-0.000e+00' 이 딱 10글자다) — 공백으로 끊으면 '-nan-0.000e+00' 이 한 토큰이 돼 놓친다.
+        // 칸이 시작될 수 있는 자리마다 직접 수를 읽는다: 줄 처음, 공백 뒤, 그리고 숫자 바로 뒤의 부호.
+        for (size_t i = 0; i < ln.size(); ++i) {
+            if (std::isspace((unsigned char)ln[i])) continue;
+            bool fieldStart = (i == 0) ||
+                              std::isspace((unsigned char)ln[i-1]) ||
+                              (std::isdigit((unsigned char)ln[i-1]) && (ln[i] == '-' || ln[i] == '+'));
+            if (!fieldStart) continue;
+            const char* begin = ln.c_str() + i;
             char* end = nullptr;
             double v = std::strtod(begin, &end);
-            if (end == begin + tok.size() && !std::isfinite(v)) {
-                where = label + ":" + std::to_string(lineNo) + " '" + tok + "'";
-                return true;
-            }
+            if (end == begin || std::isfinite(v)) continue;
+            // 'nano' 같은 이름을 값으로 오해하지 않는다 — 읽은 수 뒤가 글자면 칸이 아니다
+            if (*end != '\0' && (std::isalpha((unsigned char)*end) || *end == '_')) continue;
+            where = label + ":" + std::to_string(lineNo) + " '" +
+                    ln.substr(i, (size_t)(end - begin)) + "'";
+            return true;
         }
     }
     return false;
@@ -2740,9 +2748,10 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
 
         std::string where;
         bool bad = ma_textHasNonFinite(output.str(), outputFile, where);
-        if (!bad && writesDynain && ma_resultsHaveNonFinite(accumulatedResults_)) {
+        // 초기 응력/변형률은 dynain_embed 에서 .k 본문으로 들어간다 — 쓰는 곳과 무관하게 원본 값을 본다.
+        if (!bad && !accumulatedResults_.empty() && ma_resultsHaveNonFinite(accumulatedResults_)) {
             bad = true;
-            where = dynainFile + " (초기 응력/변형률)";
+            where = (writesDynain ? dynainFile : outputFile) + " (초기 응력/변형률)";
         }
         if (!bad) {
             for (const auto& igaf : igaFiles_) {
@@ -2750,24 +2759,14 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
             }
         }
         if (bad) {
-            // 이번 실행이 쓰려던 경로에 남아 있는 지난 실행 결과는 치운다. 그대로 두면 사용자가
-            // 옛 .k/.dynain 을 이번 결과로 오해한다(단독 명령의 nan 정리와 같은 끝 상태다).
-            std::string stale;
-            for (const auto& f : planned) {
-                if (std::remove(f.c_str()) == 0) {
-                    if (!stale.empty()) stale += ", ";
-                    stale += f;
-                }
-            }
+            // 같은 경로에 있던 파일은 건드리지 않는다 — 이 시점엔 아직 아무것도 쓰지 않았으니
+            // 지울 수 있는 것은 언제나 '이번 실행이 만들지 않은 파일'(예전 결과, in-place 출력의
+            // 입력 메시, 사용자 파일)뿐이다. 값이 입력 덱에서 온 것일 수도 있어 '결과' 라고도 안 쓴다.
             std::string list;
             for (const auto& f : planned) { if (!list.empty()) list += ", "; list += f; }
-            errorMessage_ = "결과에 유한하지 않은 값(nan/inf)이 있습니다: " + where +
+            errorMessage_ = "출력 덱에 유한하지 않은 값(nan/inf)이 있습니다: " + where +
                             " — 출력 파일을 쓰지 않았습니다: " + list +
-                            " / non-finite value in the result; no output written: " + list;
-            if (!stale.empty()) {
-                errorMessage_ += " (같은 경로의 지난 결과를 지웠습니다: " + stale +
-                                 " / removed stale files: " + stale + ")";
-            }
+                            " / non-finite value in the output deck; no output written: " + list;
             return false;
         }
     }

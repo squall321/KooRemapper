@@ -11,8 +11,15 @@
         *DAMPING_PART_* 제거만 촉발했다).
   - Y4 boundary/rbe 의 select 값 검증이 없어, boundary 는 'all' 같은 값이 조용히 direction 이 되고
         rbe 는 반대로 오타가 조용히 'all'(면 전체)이 됐다.
+
+적대적 검토에서 다시 잡힌 것(같은 그물의 뒷면)
+  - 그물이 '쓰기 전' 으로 올라갔는데도 출력 경로의 기존 파일을 지웠다 — output 이 base_model 과
+        같으면 입력 메시가 사라지고, nan 이 입력 덱에서 온 경우엔 이 도구가 쓴 적 없는 파일이 지워졌다.
+  - 문자열 그물이 토큰 단위라서, 자기가 쓰는 *INITIAL_STRESS_* 의 고정 칸(setw(10))처럼 음수 값이
+        앞 칸에 붙으면('-nan-0.000e+00') nan 을 놓쳤다. dynain_embed 모드에는 텐서 검사도 없었다.
 """
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -23,7 +30,7 @@ FAILS = []
 BOX = ("output: flat.k\nlx: 10.0\nly: 10.0\nlz: 1.0\nnx: 10\nny: 10\nnz: 1\n"
        "pid: 1\nmid: 1\nsecid: 1\n")
 
-BEND = """base_model: flat.k
+BEND = """base_model: %s
 output: %s
 material:
   E: 210000
@@ -75,6 +82,18 @@ operations:
         direction: [0, 0, -1]
 """
 
+# 덱을 거의 그대로 통과시키는 op — 입력 덱에 있던 값이 출력으로 나가는 길을 본다
+PASSTHRU = """base_model: %s
+output: %s
+operations:
+  - type: boundary
+    boundaries:
+      - part: 1
+        dof: xyz
+        select: direction
+        direction: [0, 0, -1]
+"""
+
 RBE = """base_model: flat.k
 output: rb
 operations:
@@ -108,6 +127,28 @@ def exists(d, name):
     return os.path.exists(os.path.join(d, name))
 
 
+def read(d, name):
+    return open(os.path.join(d, name), "rb").read()
+
+
+# *INITIAL_STRESS_SOLID 한 줄 — 첫 칸 값과 둘째 칸 앞 구분자를 골라 넣는다.
+# 작성기(setw(10))가 내는 폭 그대로다: 음수 값은 정확히 10글자여서 앞 칸에 붙는다.
+STRESS_BLOCK = ("*INITIAL_STRESS_SOLID\n"
+                "$#    eid    nint   nhisv   large     ics   ncomp\n"
+                "         1       1       0       0       0       0\n"
+                "$#  sigxx     sigyy     sigzz     sigxy     sigyz     sigxz       eps\n"
+                "%10s%s0.000e+00-0.000e+00 0.000e+00-0.000e+00-0.000e+00 0.000e+00\n")
+
+
+def deck_with_stress(d, src, name, first, sep):
+    """flat.k 의 *END 앞에 *INITIAL_STRESS_SOLID 블록을 끼운 덱을 만든다."""
+    body = open(os.path.join(d, src)).read()
+    block = STRESS_BLOCK % (first, sep)
+    idx = body.rfind("*END")
+    open(os.path.join(d, name), "w").write(body[:idx] + block + body[idx:])
+    return name
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__)
@@ -122,12 +163,12 @@ def main():
 
     # ── Y1: assemble 도 nan/inf 를 쓰지 않는다 ────────────────────────────────
     print("[Y1] assemble 결과의 nan/inf 는 파일로 나가지 않는다")
-    write(d, "aok.yaml", BEND % ("aok", "0.01*x1"))
+    write(d, "aok.yaml", BEND % ("flat.k", "aok", "0.01*x1"))
     rc, out = run(binary, d, "assemble", "aok.yaml")
     check("assemble bend 정상: .k 와 .dynain 이 나온다 (rc=0)",
           rc == 0 and exists(d, "aok.k") and exists(d, "aok.dynain"), f"rc={rc} {out[-200:]}")
 
-    write(d, "anan.yaml", BEND % ("anan", "sqrt(-x1)"))
+    write(d, "anan.yaml", BEND % ("flat.k", "anan", "sqrt(-x1)"))
     rc, out = run(binary, d, "assemble", "anan.yaml")
     check("assemble bend nan: rc=1", rc == 1, f"rc={rc} {out[-250:]}")
     check("assemble bend nan: .k 가 만들어지지 않는다", not exists(d, "anan.k"))
@@ -135,12 +176,47 @@ def main():
     check("assemble bend nan: 쓰지 않은 파일 이름을 메시지에 적는다",
           "anan.k" in out and "anan.dynain" in out, out[-250:])
 
-    # 같은 이름으로 다시 돌리면 지난 실행의 결과가 남지 않는다(단독 nan 정리와 같은 끝 상태)
-    write(d, "anan2.yaml", BEND % ("aok", "sqrt(-x1)"))
+    # 쓰기 전에 막으므로 이번 실행이 만든 파일은 하나도 없다 — 같은 경로에 있던 남의 파일도 지우지 않는다
+    prev_k, prev_dyn = read(d, "aok.k"), read(d, "aok.dynain")
+    write(d, "anan2.yaml", BEND % ("flat.k", "aok", "sqrt(-x1)"))
     rc, out = run(binary, d, "assemble", "anan2.yaml")
-    check("assemble bend nan: 같은 경로의 지난 .k 가 남지 않는다",
-          rc == 1 and not exists(d, "aok.k"), f"rc={rc} {out[-250:]}")
-    check("assemble bend nan: 같은 경로의 지난 .dynain 도 남지 않는다", not exists(d, "aok.dynain"))
+    check("assemble bend nan: 같은 경로의 지난 .k 를 지우지 않는다",
+          rc == 1 and exists(d, "aok.k") and read(d, "aok.k") == prev_k, f"rc={rc} {out[-250:]}")
+    check("assemble bend nan: 같은 경로의 지난 .dynain 도 그대로다",
+          exists(d, "aok.dynain") and read(d, "aok.dynain") == prev_dyn)
+
+    # in-place 출력(output == base_model): 입력 메시가 사라지면 수식을 고쳐 다시 돌릴 수도 없다
+    shutil.copyfile(os.path.join(d, "flat.k"), os.path.join(d, "inplace.k"))
+    src = read(d, "inplace.k")
+    write(d, "ip.yaml", BEND % ("inplace.k", "inplace", "sqrt(-x1)"))
+    rc, out = run(binary, d, "assemble", "ip.yaml")
+    check("assemble bend nan: in-place 출력에서 입력 덱이 그대로 남는다",
+          rc == 1 and exists(d, "inplace.k") and read(d, "inplace.k") == src, f"rc={rc} {out[-250:]}")
+
+    # 고정 칸 서식(*INITIAL_STRESS_*)에서 음수 값은 앞 칸에 붙는다 — 붙어도 nan 을 잡아야 한다
+    for tag, first, sep, want in (("붙은 칸", "-nan", "-", 1),
+                                  ("떨어진 칸", "-nan", " ", 1),
+                                  ("정상 값(붙은 칸)", "-0.000e+00", "-", 0)):
+        name = "st_%d_%s" % (want, "abut" if sep == "-" else "sep")
+        deck_with_stress(d, "flat.k", name + ".k", first, sep)
+        write(d, name + ".yaml", PASSTHRU % (name + ".k", name + "out"))
+        rc, out = run(binary, d, "assemble", name + ".yaml")
+        if want:
+            check(f"*INITIAL_STRESS_SOLID 의 nan — {tag} 도 rc=1",
+                  rc == 1 and not exists(d, name + "out.k"), f"rc={rc} {out[-250:]}")
+        else:
+            check(f"*INITIAL_STRESS_SOLID — {tag} 은 그대로 rc=0",
+                  rc == 0 and exists(d, name + "out.k"), f"rc={rc} {out[-250:]}")
+
+    # dynain_embed 모드에도 같은 그물이 있다(초기 응력이 .k 본문으로 들어간다)
+    write(d, "emok.yaml", "dynain_embed: true\n" + BEND % ("flat.k", "emok", "0.01*x1"))
+    rc, out = run(binary, d, "assemble", "emok.yaml")
+    check("dynain_embed 정상: .k 가 나온다 (rc=0)",
+          rc == 0 and exists(d, "emok.k"), f"rc={rc} {out[-250:]}")
+    write(d, "emnan.yaml", "dynain_embed: true\n" + BEND % ("flat.k", "emnan", "sqrt(-x1)"))
+    rc, out = run(binary, d, "assemble", "emnan.yaml")
+    check("dynain_embed + nan: rc=1 이고 .k 가 만들어지지 않는다",
+          rc == 1 and not exists(d, "emnan.k"), f"rc={rc} {out[-250:]}")
 
     # ── Y2: restack element_type ──────────────────────────────────────────────
     print("[Y2] restack 의 element_type 은 허용값만 받는다")
