@@ -926,11 +926,18 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
     }
 
     // 2. Detect extrusion direction
+    // +x/-x 같은 부호 표기도 같은 축으로 받는다(예전엔 조용히 자동 탐지로 떨어져 다른 축을 썼다).
+    // 층은 언제나 축 최소 좌표 쪽부터 쌓으므로 부호는 축 선택에만 쓰고 적층 순서는 바꾸지 않는다.
     int axis = -1;
-    if (op.direction == "x") axis = 0;
-    else if (op.direction == "y") axis = 1;
-    else if (op.direction == "z") axis = 2;
-    else axis = detectExtrusionAxis(partElems);
+    {
+        std::string dirAxis = op.direction;
+        if (!dirAxis.empty() && (dirAxis.front() == '+' || dirAxis.front() == '-'))
+            dirAxis = dirAxis.substr(1);
+        if (dirAxis == "x") axis = 0;
+        else if (dirAxis == "y") axis = 1;
+        else if (dirAxis == "z") axis = 2;
+        else axis = detectExtrusionAxis(partElems);
+    }
 
     if (axis < 0) {
         errorMessage_ = "Part " + std::to_string(op.targetPid) +
