@@ -102,7 +102,18 @@ struct StandaloneYamlBase {
             if (tr.substr(0,2) == "- " || tr == "-") {
                 if (indent < opsIndent) break;   // 바깥 목록으로 나감
                 if (itemIndent < 0) itemIndent = indent;
-                if (indent == itemIndent) { ++count; blockIndent = -1; continue; }
+                if (indent == itemIndent) {
+                    ++count;
+                    blockIndent = -1;
+                    // '- layers:' 처럼 대시 줄이 바로 블록 키면 그 줄이 하위 목록을 연다
+                    size_t dcp = tr.find(':');
+                    if (dcp != std::string::npos) {
+                        std::string dv = trim(KooRemapper::yamlStripComment(tr.substr(dcp+1)));
+                        if (dv.empty()) blockIndent = keyIndent(tr, indent);
+                        else if (dv == "|" || dv == ">") literalIndent = keyIndent(tr, indent);
+                    }
+                    continue;
+                }
                 // 항목보다 깊은 대시는 블록 키가 열어 준 하위 목록일 때만 정상이다
                 if (blockIndent >= 0 && indent >= blockIndent) {
                     std::string item = trim(KooRemapper::yamlStripComment(tr));
