@@ -113,14 +113,17 @@ struct StandaloneYamlBase {
                     if (dcp != std::string::npos) {
                         std::string dv = trim(KooRemapper::yamlStripComment(tr.substr(dcp+1)));
                         if (dv.empty()) blockIndents.push_back(keyIndent(tr, indent));
-                        else if (dv == "|" || dv == ">") literalIndent = keyIndent(tr, indent);
+                        // '|-' '|+' '>2' 같은 지시자도 블록이다 — 예전엔 '|'·'>' 만 알아봐
+                        // 블록 안의 '- ' 카드 줄을 항목으로 세어 '여러 op' 로 거부했다
+                        else if (KooRemapper::yamlParseBlockHeader(dv).isBlock) literalIndent = keyIndent(tr, indent);
                     }
                     continue;
                 }
                 // 항목보다 깊은 대시는 블록 키가 열어 준 하위 목록일 때만 정상이다
                 if (!blockIndents.empty() && indent >= blockIndents.back()) {
                     std::string item = trim(KooRemapper::yamlStripComment(tr));
-                    if (item == "- |" || item == "-|" || item == "- >") literalIndent = indent;
+                    if (!item.empty() && item[0] == '-' &&
+                        KooRemapper::yamlParseBlockHeader(trim(item.substr(1))).isBlock) literalIndent = indent;
                     continue;
                 }
                 return -1;
@@ -132,7 +135,7 @@ struct StandaloneYamlBase {
                 while (!blockIndents.empty() && blockIndents.back() >= indent) blockIndents.pop_back();
                 std::string v = trim(KooRemapper::yamlStripComment(tr.substr(cp+1)));
                 if (v.empty()) blockIndents.push_back(keyIndent(tr, indent));   // 하위 목록/매핑을 여는 키
-                else if (v == "|" || v == ">") literalIndent = keyIndent(tr, indent);
+                else if (KooRemapper::yamlParseBlockHeader(v).isBlock) literalIndent = keyIndent(tr, indent);
             }
         }
         return count;
@@ -459,40 +462,78 @@ int runRestack(const std::string& yamlFile, ConsoleOutput& console) {
     // 끊겨 층 PART mid 가 0 이 됐고, 들여쓰기를 키+2칸으로 가정해 더 깊은 카드는 10열 칸이 밀렸다.
     int matCardKeyIndent = 0;
     int matCardBaseIndent = -1;  // 첫 내용 줄의 들여쓰기
+    std::string cardError;       // 카드 값 오류 — 발견 즉시 rc=1 로 끊는다
 
-    std::string ln;
-    while (std::getline(f, ln)) {
-        if (!ln.empty() && ln.back() == '\r') ln.pop_back();
+    // 따옴표 스칼라는 PyYAML 이 긴 값을 '\\' + 줄바꿈으로 접어 내보내므로 줄을 미리 모두 읽어 둔다
+    std::vector<std::string> lines;
+    {
+        std::string raw;
+        while (std::getline(f, raw)) {
+            if (!raw.empty() && raw.back() == '\r') raw.pop_back();
+            lines.push_back(raw);
+        }
+    }
+    f.close();
+
+    // 블록이 끝나는 자리에서 끝 빈 줄을 버린다(YAML clip) — 예전엔 파일 끝에서 한 번만 훑었다
+    auto closeMatCard = [&]() {
+        // 끝 빈 줄은 어느 chomping 지시자든 버린다 — assemble 과 같은 규칙(위 주석 참고)
+        if (readingMatCard && !op.layers.empty())
+            KooRemapper::yamlChompBlock(op.layers.back().materialCard, ' ');
+        readingMatCard = false;
+    };
+
+    for (size_t li = 0; li < lines.size(); ++li) {
+        if (!cardError.empty()) { console.error("[restack] " + cardError); return 1; }
+        const std::string& ln = lines[li];
         int indent = y.countIndent(ln);
         std::string tr = y.trim(ln);
-        // 블록 스칼라 안의 빈 줄(공백뿐인 줄 포함)은 카드의 한 줄이다 — *MAT_..._TITLE 의 제목 줄이
-        // 빈 줄일 수 있다. assemble 쪽(AssemblyConfigReader)은 이미 이렇게 읽는다. 예전엔 여기서
-        // 지워져 같은 YAML 이 명령에 따라 다른 카드가 됐고, 제목 줄이 사라져 데이터 줄이 한 줄 밀려 읽혔다.
-        // 블록 뒤에 붙은 빈 줄은 아래 clip 이 버린다(YAML '|' 규칙).
-        if (tr.empty() && readingMatCard) {
-            if (!op.layers.empty()) op.layers.back().materialCard += "\n";
-            continue;
+
+        // 블록 내용 판정은 assemble(AssemblyConfigReader)과 같은 규칙이다 — 예전엔 여기만
+        // '키 열보다 깊으면 내용' 으로 봐 '|4' 같은 명시 들여쓰기 지시자를 사실상 무시했고,
+        // 같은 YAML 이 단독은 rc=0 덱, assemble 은 rc=1 로 갈렸다. 빈 줄·'#' 줄 건너뛰기도
+        // 블록 읽기 뒤로 옮긴다('#' 로 시작하는 카드 줄은 주석이 아니라 내용이다).
+        if (readingMatCard) {
+            KooRemapper::YamlBlockLineKind kind =
+                KooRemapper::yamlClassifyBlockLine(tr, indent, matCardKeyIndent, matCardBaseIndent);
+            if (kind == KooRemapper::YamlBlockLineKind::BLANK) {
+                // *MAT_..._TITLE 의 제목 줄 자리면 남긴다(버리면 데이터 줄이 한 줄 밀려 읽힌다).
+                // 그 밖의 빈 줄은 버린다 — 남기면 LS-DYNA 가 칸이 모두 0 인 데이터 줄로 읽는다.
+                if (!op.layers.empty() &&
+                    KooRemapper::yamlCardBlankIsTitleSlot(op.layers.back().materialCard))
+                    op.layers.back().materialCard += "\n";
+                continue;
+            }
+            if (kind == KooRemapper::YamlBlockLineKind::TOO_SHALLOW) {
+                cardError = KooRemapper::yamlShallowBlockMessage("material_card", indent, matCardBaseIndent);
+                continue;
+            }
+            if (kind == KooRemapper::YamlBlockLineKind::CONTENT) {
+                if (matCardBaseIndent < 0) matCardBaseIndent = indent;
+                if (!op.layers.empty())
+                    op.layers.back().materialCard += ln.substr(matCardBaseIndent) + "\n";
+                continue;
+            }
+            closeMatCard();
         }
         if (tr.empty() || tr[0]=='#') continue;
 
-        if (readingMatCard) {
-            if (indent > matCardKeyIndent) {
-                if (matCardBaseIndent < 0) matCardBaseIndent = indent;
-                if (!op.layers.empty())
-                    op.layers.back().materialCard += ln.substr(std::min(indent, matCardBaseIndent)) + "\n";
-                continue;
-            }
-            readingMatCard = false;
+        if (inLayers && indent <= layersIndent && tr.substr(0,2) != "- " && tr != "-") {
+            inLayers = false;
         }
 
-        if (inLayers && indent <= layersIndent && tr.substr(0,2) != "- ") {
-            inLayers = false;
+        // '-' 만 있는 줄로 여는 층 항목도 정상 YAML 이다 — 키는 다음 줄부터 온다(예전엔
+        // '- ' 만 항목으로 보아 그런 층 목록을 하나도 못 읽고 'no layers defined' 로 거부했다)
+        if (inLayers && KooRemapper::yamlTrimEdges(KooRemapper::yamlStripComment(tr)) == "-") {
+            op.layers.push_back({});
+            continue;
         }
 
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
         std::string key = y.keyOf(tr, cp);
         std::string val = y.stripQuotes(y.trim(KooRemapper::yamlStripComment(tr.substr(cp+1))));
+        std::string rawVal = y.trim(tr.substr(cp+1));   // 카드 키는 따옴표를 스스로 푼다
 
         if (!inLayers) {
             y.parseCommonKey(key, val);
@@ -512,7 +553,8 @@ int runRestack(const std::string& yamlFile, ConsoleOutput& console) {
 
         // 층 키 — assemble 과 같은 집합을 읽는다. 예전엔 thickness·material_card 만 읽어
         // title 은 'Restack Layer N' 으로, num_elements·element_type 은 무시돼 층 분할이 달라졌다.
-        auto applyLayerKey = [&](const std::string& k, const std::string& v, int blockKeyIndent) {
+        auto applyLayerKey = [&](const std::string& k, const std::string& v,
+                                 const std::string& rawV, int blockKeyIndent) {
             RestackLayer& L = op.layers.back();
             if      (k == "thickness")    { try { L.thickness = std::stod(v); } catch(...) {} }
             else if (k == "num_elements" || k == "nz") { try { L.numElements = std::stoi(v); } catch(...) {} }
@@ -521,12 +563,29 @@ int runRestack(const std::string& yamlFile, ConsoleOutput& console) {
             else if (k == "czm_normal")   { try { L.czmNormal = std::stod(v); } catch(...) {} }
             else if (k == "czm_shear")    { try { L.czmShear = std::stod(v); } catch(...) {} }
             else if (k == "material_card") {
-                if (v == "|") {
-                    readingMatCard = true; matCardKeyIndent = blockKeyIndent; matCardBaseIndent = -1;
+                // assemble(AssemblyConfigReader)과 같은 규칙 — 블록 지시자 전 종류와 따옴표 스칼라를
+                // 똑같이 다룬다. 예전엔 v == "|" 정확 비교라 '|-' 나 따옴표 카드가 그대로 카드가 됐다.
+                std::string vv = y.trim(KooRemapper::yamlStripComment(rawV));
+                KooRemapper::YamlBlockHeader h = KooRemapper::yamlParseBlockHeader(vv);
+                if (h.isBlock) {
+                    if (h.folded) { cardError = KooRemapper::yamlFoldedCardMessage("material_card"); return; }
+                    readingMatCard = true; matCardKeyIndent = blockKeyIndent;
+                    matCardBaseIndent = (h.indent > 0) ? blockKeyIndent + h.indent : -1;
+                } else if (vv.empty()) {
+                    cardError = "material_card: 값이 비어 있습니다 — '|' 블록이나 따옴표 문자열로 "
+                                "카드를 주세요 / empty value";
+                } else if (rawV[0] == '"' || rawV[0] == '\'') {
+                    std::string joined; size_t endLine = li;
+                    if (!KooRemapper::yamlJoinQuotedScalar(lines, li, rawV, joined, endLine)) {
+                        cardError = "material_card: 따옴표가 닫히지 않았습니다 / unterminated quoted scalar";
+                        return;
+                    }
+                    li = endLine;
+                    L.materialCard = KooRemapper::yamlDecodeQuotedScalar(joined);
+                    KooRemapper::yamlChompBlock(L.materialCard, ' ');
                 } else {
-                    // 한 줄 카드('material_card: "*MAT_ELASTIC"')도 assemble 과 같게 값 그대로 쓴다 —
-                    // 예전엔 '|' 만 처리해 같은 YAML 이 단독에서만 'has no material_card' 로 실패했다
-                    L.materialCard = v;
+                    L.materialCard = vv;
+                    KooRemapper::yamlChompBlock(L.materialCard, ' ');
                 }
             }
         };
@@ -540,20 +599,18 @@ int runRestack(const std::string& yamlFile, ConsoleOutput& console) {
                 std::string rk = y.trim(rest.substr(0, rcp));
                 // 예전엔 대시 줄 값의 주석을 안 떼 'material_card: |  # 메모' 층을 카드 없음으로, '"0.2"  # 메모' 를 잘못된 두께로 봤다
                 std::string rv = y.stripQuotes(y.trim(KooRemapper::yamlStripComment(rest.substr(rcp+1))));
-                applyLayerKey(rk, rv, y.keyIndent(tr, indent));
+                applyLayerKey(rk, rv, y.trim(rest.substr(rcp+1)), y.keyIndent(tr, indent));
             }
             continue;
         }
         if (!op.layers.empty()) {
-            applyLayerKey(key, val, indent);
+            applyLayerKey(key, val, rawVal, indent);
         }
     }
-    f.close();
-
-    // YAML '|' 블록은 끝 빈 줄을 버린다(clip) — assemble 쪽 AssemblyConfigReader 와 같게 맞춘다.
+    // 파일 끝에서 끝난 블록도 chomping 을 적용한다(YAML '|' 는 clip — 끝 빈 줄을 버린다).
     // 남겨 두면 층 카드 뒤 빈 줄이 덱에 그대로 찍혀 같은 YAML 인데 assemble 결과와 달라진다.
-    for (auto& layer : op.layers)
-        while (!layer.materialCard.empty() && layer.materialCard.back() == '\n') layer.materialCard.pop_back();
+    closeMatCard();
+    if (!cardError.empty()) { console.error("[restack] " + cardError); return 1; }
 
     if (y.modelFile.empty()) { console.error("[restack] model not specified"); return 1; }
     std::string modelPath = y.resolvePath(y.modelFile);
@@ -1200,64 +1257,120 @@ int runOffset(const std::string& yamlFile, ConsoleOutput& console) {
     bool readingMatCardsItem = false;
     int matCardsKeyIndent = 0;
     bool sawMatCardsKey = false;   // material_cards 를 줬는데 카드가 0개면 조용히 넘기지 않는다
+    std::string cardError;         // 카드 값 오류 — 발견 즉시 rc=1 로 끊는다
 
-    std::string ln;
-    while (std::getline(f, ln)) {
-        if (!ln.empty() && ln.back() == '\r') ln.pop_back();
+    // 따옴표 스칼라는 PyYAML 이 긴 값을 '\\' + 줄바꿈으로 접어 내보내므로 줄을 미리 모두 읽어 둔다
+    std::vector<std::string> lines;
+    {
+        std::string raw;
+        while (std::getline(f, raw)) {
+            if (!raw.empty() && raw.back() == '\r') raw.pop_back();
+            lines.push_back(raw);
+        }
+    }
+    f.close();
+
+    size_t li = 0;   // 따옴표 스칼라가 여러 줄에 걸치면 아래 람다가 이 값을 건너뛴다
+
+    std::string matCardKeyName = "material_card";   // 얕은 내용 줄 메시지에 쓸 카드 키 이름
+    // 블록이 끝날 때 chomping 을 적용한다 — assemble 과 같게 끝 빈 줄을 버린다(clip/strip)
+    auto closeOffsetCard = [&]() {
+        // 끝 빈 줄은 어느 chomping 지시자든 버린다 — assemble 과 같은 규칙
+        if (readingMatCard)            KooRemapper::yamlChompBlock(op.materialCard, ' ');
+        else if (readingCzmMatCard)    KooRemapper::yamlChompBlock(op.czmMaterialCard, ' ');
+        else if (readingMatCardsItem && !op.materialCards.empty())
+            KooRemapper::yamlChompBlock(op.materialCards.back(), ' ');
+        readingMatCard = false;
+        readingCzmMatCard = false;
+        readingMatCardsItem = false;
+    };
+    // 카드 키 한 줄 — 블록 머리표 전 종류와 따옴표 스칼라를 assemble 과 같은 규칙으로 읽는다
+    auto startOffsetCard = [&](const char* keyName, const std::string& rawV, int blockKeyIndent,
+                               std::string& dst, bool& readingFlag) {
+        std::string vv = y.trim(KooRemapper::yamlStripComment(rawV));
+        KooRemapper::YamlBlockHeader h = KooRemapper::yamlParseBlockHeader(vv);
+        if (h.isBlock) {
+            if (h.folded) { cardError = KooRemapper::yamlFoldedCardMessage(keyName); return; }
+            readingFlag = true; matCardKeyIndent = blockKeyIndent;
+            matCardBaseIndent = (h.indent > 0) ? blockKeyIndent + h.indent : -1;
+            matCardKeyName = keyName;
+            return;
+        }
+        if (vv.empty()) {
+            cardError = std::string(keyName) + ": 값이 비어 있습니다 — '|' 블록이나 따옴표 문자열로 "
+                        "카드를 주세요 / empty value";
+            return;
+        }
+        if (rawV[0] == '"' || rawV[0] == '\'') {
+            std::string joined; size_t endLine = li;
+            if (!KooRemapper::yamlJoinQuotedScalar(lines, li, rawV, joined, endLine)) {
+                cardError = std::string(keyName) + ": 따옴표가 닫히지 않았습니다 / unterminated quoted scalar";
+                return;
+            }
+            li = endLine;
+            dst = KooRemapper::yamlDecodeQuotedScalar(joined);
+        } else {
+            dst = vv;
+        }
+        KooRemapper::yamlChompBlock(dst, ' ');
+    };
+
+    for (li = 0; li < lines.size(); ++li) {
+        if (!cardError.empty()) { console.error("[offset] " + cardError); return 1; }
+        const std::string& ln = lines[li];
         int indent = y.countIndent(ln);
         std::string tr = y.trim(ln);
-        if (tr.empty() || tr[0]=='#') {
-            // Multi-line material card may include comment-like lines
-            if (readingMatCard && matCardBaseIndent >= 0 && indent >= matCardBaseIndent) {
-                op.materialCard += ln.substr(std::min(indent, matCardBaseIndent)) + "\n";
-            } else if (readingCzmMatCard && matCardBaseIndent >= 0 && indent >= matCardBaseIndent) {
-                op.czmMaterialCard += ln.substr(std::min(indent, matCardBaseIndent)) + "\n";
-            } else if (readingMatCardsItem && matCardBaseIndent >= 0 && indent >= matCardBaseIndent) {
-                op.materialCards.back() += ln.substr(std::min(indent, matCardBaseIndent)) + "\n";
+        // 블록 내용 판정은 assemble(AssemblyConfigReader)·단독 restack 과 같은 규칙이다.
+        // '#' 로 시작하는 줄도 블록 안에서는 주석이 아니라 카드 내용이고, 빈 줄은 양쪽 다 버린다.
+        if (readingMatCard || readingCzmMatCard || readingMatCardsItem) {
+            KooRemapper::YamlBlockLineKind kind =
+                KooRemapper::yamlClassifyBlockLine(tr, indent, matCardKeyIndent, matCardBaseIndent);
+            if (kind == KooRemapper::YamlBlockLineKind::BLANK) continue;
+            if (kind == KooRemapper::YamlBlockLineKind::TOO_SHALLOW) {
+                cardError = KooRemapper::yamlShallowBlockMessage(matCardKeyName, indent, matCardBaseIndent);
+                continue;
             }
-            continue;
+            if (kind == KooRemapper::YamlBlockLineKind::CONTENT) {
+                if (matCardBaseIndent < 0) matCardBaseIndent = indent;
+                std::string content = ln.substr(matCardBaseIndent) + "\n";
+                if (readingMatCard)            op.materialCard += content;
+                else if (readingCzmMatCard)    op.czmMaterialCard += content;
+                else if (!op.materialCards.empty()) op.materialCards.back() += content;
+                continue;
+            }
+            // 블록 끝 — material_cards 항목은 아래 목록 처리가 다음 '- |' 를 보고 닫는다
+            if (!readingMatCardsItem) closeOffsetCard();
         }
 
-        if (readingMatCard) {
-            if (indent > matCardKeyIndent) {
-                if (matCardBaseIndent < 0) matCardBaseIndent = indent;
-                op.materialCard += ln.substr(std::min(indent, matCardBaseIndent)) + "\n";
-                continue;
-            }
-            readingMatCard = false;
-        }
-        if (readingCzmMatCard) {
-            if (indent > matCardKeyIndent) {
-                if (matCardBaseIndent < 0) matCardBaseIndent = indent;
-                op.czmMaterialCard += ln.substr(std::min(indent, matCardBaseIndent)) + "\n";
-                continue;
-            }
-            readingCzmMatCard = false;
-        }
+        if (tr.empty() || tr[0]=='#') continue;
+
         if (inMatCardsList) {
-            if (readingMatCardsItem && indent > matCardKeyIndent) {
-                if (matCardBaseIndent < 0) matCardBaseIndent = indent;
-                op.materialCards.back() += ln.substr(std::min(indent, matCardBaseIndent)) + "\n";
-                continue;
-            }
             // 예전엔 '- |   # 메모' 항목을 못 알아봐 목록이 끊기고 층 재질이 빠졌다.
             // 대시를 키와 같은 열에 쓰는 블록 목록도 YAML 에서 합법인데 '>' 로 걸러 통째로 버렸다(D4).
-            std::string item = KooRemapper::yamlStripComment(tr);
-            if (indent >= matCardsKeyIndent && (item == "- |" || item == "-|")) {
+            // '- |-' '- |2' 처럼 지시자가 붙은 항목도 같은 블록이다.
+            std::string item = y.trim(KooRemapper::yamlStripComment(tr));
+            KooRemapper::YamlBlockHeader ih;
+            if (!item.empty() && item[0] == '-')
+                ih = KooRemapper::yamlParseBlockHeader(y.trim(item.substr(1)));
+            if (indent >= matCardsKeyIndent && ih.isBlock) {
+                if (ih.folded) { console.error("[offset] " + KooRemapper::yamlFoldedCardMessage("material_cards")); return 1; }
+                closeOffsetCard();
                 op.materialCards.emplace_back();
                 readingMatCardsItem = true;
                 matCardKeyIndent = indent;
-                matCardBaseIndent = -1;
+                matCardBaseIndent = (ih.indent > 0) ? indent + ih.indent : -1;
+                matCardKeyName = "material_cards";
                 continue;
             }
+            closeOffsetCard();
             inMatCardsList = false;
-            readingMatCardsItem = false;
         }
 
         size_t cp = tr.find(':');
         if (cp == std::string::npos) continue;
         std::string key = y.keyOf(tr, cp);
         std::string val = y.stripQuotes(y.trim(KooRemapper::yamlStripComment(tr.substr(cp+1))));
+        std::string rawVal = y.trim(tr.substr(cp+1));   // 카드 키는 따옴표를 스스로 푼다
 
         y.parseCommonKey(key, val);
         if      (key == "source_pid") { try { op.sourcePid = std::stoi(val); } catch(...) {} }
@@ -1280,8 +1393,10 @@ int runOffset(const std::string& yamlFile, ConsoleOutput& console) {
         else if (key == "part_title") op.partTitle = val;
         else if (key == "shell_thickness") { try { op.shellThickness = std::stod(val); } catch(...) {} }
         else if (key == "shell_offset") { try { op.shellOffset = std::stod(val); } catch(...) {} }
-        else if (key == "material_card" && val == "|") { readingMatCard = true; matCardKeyIndent = y.keyIndent(tr, indent); matCardBaseIndent = -1; }
-        else if (key == "czm_material_card" && val == "|") { readingCzmMatCard = true; matCardKeyIndent = y.keyIndent(tr, indent); matCardBaseIndent = -1; }
+        // 예전엔 val == "|" 정확 비교라 '|-' 나 따옴표 카드가 else 로 빠져 아예 버려졌다 —
+        // 카드 없이 돌면 층 PART 가 덱에 없는 MID 를 가리킨다
+        else if (key == "material_card") { startOffsetCard("material_card", rawVal, y.keyIndent(tr, indent), op.materialCard, readingMatCard); }
+        else if (key == "czm_material_card") { startOffsetCard("czm_material_card", rawVal, y.keyIndent(tr, indent), op.czmMaterialCard, readingCzmMatCard); }
         // Region selection
         else if (key == "bbox_xmin") { try { op.region.xMin = std::stod(val); op.region.useBoundingBox = true; } catch(...) {} }
         else if (key == "bbox_xmax") { try { op.region.xMax = std::stod(val); op.region.useBoundingBox = true; } catch(...) {} }
@@ -1294,7 +1409,9 @@ int runOffset(const std::string& yamlFile, ConsoleOutput& console) {
         else if (key == "element_id_min") { try { op.region.elementIdMin = std::stoi(val); } catch(...) {} }
         else if (key == "element_id_max") { try { op.region.elementIdMax = std::stoi(val); } catch(...) {} }
     }
-    f.close();
+    // 파일 끝에서 끝난 블록도 chomping 을 적용한다(clip — 끝 빈 줄을 버린다)
+    closeOffsetCard();
+    if (!cardError.empty()) { console.error("[offset] " + cardError); return 1; }
 
     if (y.modelFile.empty()) { console.error("[offset] model not specified"); return 1; }
     // 카드 없이 돌면 층 PART 가 덱에 없는 MID 를 가리켜 LS-DYNA 가 죽는다 — 파싱이 실패하면 오류로 알린다

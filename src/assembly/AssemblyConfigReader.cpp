@@ -96,6 +96,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
     bool readingMaterialCard = false;
     bool readingCzmMaterialCard = false;
     int materialCardBaseIndent = 0;
+    int materialCardKeyIndent = 0;   // 블록을 연 키의 열 — 얕은 내용 줄을 가려내는 기준
     enum class MaterialCardTarget { NONE, RESTACK_LAYER, OFFSET, OFFSET_CZM, OFFSET_MULTI };
     MaterialCardTarget materialCardTarget = MaterialCardTarget::NONE;
     bool inShapeSection = false;
@@ -125,36 +126,148 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
     bool inRbeList = false;
     bool inRbeItem = false;
     int rbeListKeyIndent = 0;
+    int pendingOpDashIndent = -1;   // '-' 만 있는 줄로 연 operations 항목 — 키는 다음 줄부터다
+
+    // 카드류 키(material_card·czm_material_card·material_cards 항목)의 값을 한 규칙으로 읽는다.
+    // 예전엔 val == "|" 정확 비교라 '|-' '|+' '>' '|2' 와 따옴표 스칼라가 else 로 빠져 그 값 한 줄이
+    // 그대로 *MAT 카드가 됐다 — 덱에 쓰레기 한 줄이 찍히고 *PART 의 mid 가 0 이 됐다.
+    // chomping 지시자(-,+)는 머리표로 알아보되 끝 빈 줄은 어느 쪽이든 버린다(clip): *MAT 카드 뒤
+    // 빈 줄은 LS-DYNA 에 뜻이 없는 반면, 같은 내용 카드를 '다른 카드' 로 만들어 MID 를 쪼갠다.
+    // 카드 값 오류는 여기 담아 두고 다음 줄 처리 전에 던진다 — op 하위 키 분기가 catch(...) 로
+    // 감싸여 있어 거기서 던지면 예외가 조용히 먹히고 깨진 카드가 그대로 덱이 된다.
+    std::string cardError;
+    std::string materialCardKeyName;   // 얕은 내용 줄 메시지에 쓸 카드 키 이름
+    auto openCardBlock = [&](const YamlBlockHeader& h, MaterialCardTarget tgt, int keyCol, size_t at) {
+        readingMaterialCard      = (tgt == MaterialCardTarget::RESTACK_LAYER ||
+                                    tgt == MaterialCardTarget::OFFSET);
+        readingCzmMaterialCard   = (tgt == MaterialCardTarget::OFFSET_CZM);
+        readingMaterialCardsItem = (tgt == MaterialCardTarget::OFFSET_MULTI);
+        materialCardTarget = tgt;
+        materialCardKeyIndent = keyCol;
+        if (h.indent > 0) {                       // 명시 들여쓰기 지시자는 부모(키 열) 기준이다
+            materialCardBaseIndent = keyCol + h.indent;
+            return;
+        }
+        materialCardBaseIndent = keyCol + 2;      // 내용 줄을 못 찾으면 예전 기본값
+        for (size_t ahead = at + 1; ahead < lines.size(); ++ahead) {
+            std::string aheadTrimmed = trim(lines[ahead]);
+            if (aheadTrimmed.empty() || aheadTrimmed[0] == '#') continue;
+            int aheadIndent = countIndent(lines[ahead]);
+            if (aheadIndent <= keyCol) break;     // 블록이 비어 있다 — 그 줄은 다음 키다
+            materialCardBaseIndent = aheadIndent;
+            break;
+        }
+    };
+    // 블록이 끝나는 자리에서 끝 빈 줄을 버린다(위 주석의 clip 규칙)
+    auto closeCardBlock = [&]() {
+        if (!config.operations.empty()) {
+            auto& cop = config.operations.back();
+            std::string* dst = nullptr;
+            if (materialCardTarget == MaterialCardTarget::RESTACK_LAYER &&
+                cop.type == AssemblyOperation::RESTACK && !cop.restack.layers.empty())
+                dst = &cop.restack.layers.back().materialCard;
+            else if (materialCardTarget == MaterialCardTarget::OFFSET &&
+                     cop.type == AssemblyOperation::OFFSET)
+                dst = &cop.offset.materialCard;
+            else if (materialCardTarget == MaterialCardTarget::OFFSET_CZM &&
+                     cop.type == AssemblyOperation::OFFSET)
+                dst = &cop.offset.czmMaterialCard;
+            else if (materialCardTarget == MaterialCardTarget::OFFSET_MULTI &&
+                     cop.type == AssemblyOperation::OFFSET && !cop.offset.materialCards.empty())
+                dst = &cop.offset.materialCards.back();
+            if (dst) yamlChompBlock(*dst, ' ');
+        }
+        readingMaterialCard = false;
+        readingCzmMaterialCard = false;
+        readingMaterialCardsItem = false;
+        materialCardTarget = MaterialCardTarget::NONE;
+    };
+    // 블록이면 블록 읽기를 열고 "", 따옴표 스칼라면 이스케이프를 푼 카드를 돌려준다.
+    // 카드가 될 수 없는 값(빈 값, 접는 '>' 블록, 닫히지 않은 따옴표)은 여기서 rc=1 로 끊는다.
+    auto readCardValue = [&](const char* keyName, const std::string& rawVal, int keyCol,
+                             size_t& at, MaterialCardTarget tgt) -> std::string {
+        std::string val = trim(stripComment(rawVal));
+        YamlBlockHeader h = yamlParseBlockHeader(val);
+        if (h.isBlock) {
+            if (h.folded) { cardError = yamlFoldedCardMessage(keyName); return ""; }
+            materialCardKeyName = keyName;
+            openCardBlock(h, tgt, keyCol, at);
+            return "";
+        }
+        if (val.empty()) {
+            cardError = std::string(keyName) +
+                ": 값이 비어 있습니다 — '|' 블록이나 따옴표 문자열로 카드를 주세요 / empty value";
+            return "";
+        }
+        if (rawVal[0] == '"' || rawVal[0] == '\'') {
+            // 플랫폼(argbuild)·pyKooCAE 가 내보내는 따옴표 카드 — PyYAML 은 긴 값을 여러 줄로 접는다
+            std::string joined;
+            size_t endLine = at;
+            if (!yamlJoinQuotedScalar(lines, at, rawVal, joined, endLine)) {
+                cardError = std::string(keyName) +
+                    ": 따옴표가 닫히지 않았습니다 / unterminated quoted scalar";
+                return "";
+            }
+            at = endLine;
+            std::string card = yamlDecodeQuotedScalar(joined);
+            yamlChompBlock(card, ' ');
+            return card;
+        }
+        yamlChompBlock(val, ' ');
+        return val;   // 평문 한 줄 — 카드로 쓸 수 있는지는 validateOperation 이 본다
+    };
+
+    // 지금 읽고 있는 카드 문자열 — 블록 안 빈 줄이 *MAT_..._TITLE 의 제목 자리인지 볼 때 쓴다
+    auto currentCard = [&]() -> std::string* {
+        if (config.operations.empty()) return nullptr;
+        auto& op = config.operations.back();
+        switch (materialCardTarget) {
+            case MaterialCardTarget::RESTACK_LAYER:
+                if (op.type == AssemblyOperation::RESTACK && !op.restack.layers.empty())
+                    return &op.restack.layers.back().materialCard;
+                return nullptr;
+            case MaterialCardTarget::OFFSET:
+                if (op.type == AssemblyOperation::OFFSET) return &op.offset.materialCard;
+                return nullptr;
+            case MaterialCardTarget::OFFSET_CZM:
+                if (op.type == AssemblyOperation::OFFSET) return &op.offset.czmMaterialCard;
+                return nullptr;
+            case MaterialCardTarget::OFFSET_MULTI:
+                if (op.type == AssemblyOperation::OFFSET && !op.offset.materialCards.empty())
+                    return &op.offset.materialCards.back();
+                return nullptr;
+            default:
+                return nullptr;
+        }
+    };
 
     for (size_t li = 0; li < lines.size(); ++li) {
+        if (!cardError.empty()) throw std::runtime_error(cardError);
         const std::string& line = lines[li];
         std::string trimmed = trim(line);
         int indent = countIndent(line);
+        int keyCol = indent;   // 목록 항목 첫 줄('- key: v')이면 대시 다음이 키 열이다
 
         // Multi-line material_card block reading
         if (readingMaterialCard || readingCzmMaterialCard || readingMaterialCardsItem) {
-            if (trimmed.empty()) {
-                // Empty line inside block → include as blank line
-                if (!config.operations.empty()) {
-                    if (materialCardTarget == MaterialCardTarget::RESTACK_LAYER &&
-                        config.operations.back().type == AssemblyOperation::RESTACK &&
-                        !config.operations.back().restack.layers.empty()) {
-                        config.operations.back().restack.layers.back().materialCard += "\n";
-                    } else if (materialCardTarget == MaterialCardTarget::OFFSET &&
-                               config.operations.back().type == AssemblyOperation::OFFSET) {
-                        config.operations.back().offset.materialCard += "\n";
-                    } else if (materialCardTarget == MaterialCardTarget::OFFSET_CZM &&
-                               config.operations.back().type == AssemblyOperation::OFFSET) {
-                        config.operations.back().offset.czmMaterialCard += "\n";
-                    } else if (materialCardTarget == MaterialCardTarget::OFFSET_MULTI &&
-                               config.operations.back().type == AssemblyOperation::OFFSET &&
-                               !config.operations.back().offset.materialCards.empty()) {
-                        config.operations.back().offset.materialCards.back() += "\n";
-                    }
+            YamlBlockLineKind kind = yamlClassifyBlockLine(trimmed, indent, materialCardKeyIndent,
+                                                           materialCardBaseIndent);
+            // 카드 안 빈 줄은 버린다 — 남기면 LS-DYNA 가 칸이 모두 0 인 데이터 카드로 읽는다.
+            // 예외는 *MAT_..._TITLE 의 제목 줄 자리다(빈 제목도 합법). 그 한 줄을 버리면
+            // 데이터 줄이 한 줄 밀려 읽혀 MID 칸을 잘못 잡는다. 단독 경로도 같은 규칙이다.
+            if (kind == YamlBlockLineKind::BLANK) {
+                if (std::string* card = currentCard()) {
+                    if (yamlCardBlankIsTitleSlot(*card)) *card += "\n";
                 }
                 continue;
             }
-            if (indent >= materialCardBaseIndent) {
+            if (kind == YamlBlockLineKind::TOO_SHALLOW) {
+                cardError = yamlShallowBlockMessage(
+                    materialCardKeyName.empty() ? "material_card" : materialCardKeyName,
+                    indent, materialCardBaseIndent);
+                continue;   // 다음 줄 처리 전에 던진다(위 주석 참고)
+            }
+            if (kind == YamlBlockLineKind::CONTENT) {
                 // Part of the multi-line block - strip the block indentation
                 std::string content = line.substr(materialCardBaseIndent);
                 // Trim trailing spaces
@@ -189,10 +302,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                 continue;
             }
             // Indentation decreased → end of block
-            readingMaterialCard = false;
-            readingCzmMaterialCard = false;
-            readingMaterialCardsItem = false;
-            materialCardTarget = MaterialCardTarget::NONE;
+            closeCardBlock();
             // Fall through to process this line normally
         }
 
@@ -206,6 +316,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
 
         // Top-level keys (indent 0)
         if (indent == 0 && !zeroIndentOpItem) {
+            pendingOpDashIndent = -1;
             inLayersList = false;
             inLayerItem = false;
             inTargetsList = false;
@@ -331,8 +442,18 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
 
             // --- Layer list items: "      - thickness: 0.5" ---
             // Only match if indent is strictly greater than layers: key indent (to avoid matching next operation's "  - type:")
+            // '-' 만 있는 줄로 여는 층 항목도 정상 YAML 이다 — 키는 다음 줄부터 온다.
+            // 예전엔 '- ' 만 항목으로 보아 그런 층 목록을 하나도 못 읽고 'no layers defined' 로 거부했다.
+            if (inLayersList && indent > layersKeyIndent && trim(stripComment(trimmed)) == "-" &&
+                !config.operations.empty() &&
+                config.operations.back().type == AssemblyOperation::RESTACK) {
+                config.operations.back().restack.layers.push_back(RestackLayer());
+                inLayerItem = true;
+                continue;
+            }
             if (inLayersList && indent > layersKeyIndent && trimmed[0] == '-' && trimmed.size() >= 2 && trimmed[1] == ' ') {
                 std::string afterDash = trim(trimmed.substr(2));
+                keyCol = indent + (int)trimmed.find_first_not_of(" ", 1);
                 bool opened = false;
                 if (afterDash.find(':') != std::string::npos &&
                     !config.operations.empty() &&
@@ -356,6 +477,8 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                 size_t colonPos = trimmed.find(':');
                 if (colonPos != std::string::npos) {
                     std::string key = trim(trimmed.substr(0, colonPos));
+                    // 카드 키는 따옴표·이스케이프를 스스로 풀어야 해서 주석·따옴표를 떼기 전 원값도 남긴다
+                    std::string rawVal = trim(trimmed.substr(colonPos + 1));
                     std::string val = stripQuotes(trim(stripComment(trimmed.substr(colonPos + 1))));
 
                     if (!config.operations.empty() &&
@@ -375,24 +498,8 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                         } else if (key == "czm_shear") {
                             try { layer.czmShear = std::stod(val); } catch (...) {}
                         } else if (key == "material_card") {
-                            if (val == "|") {
-                                // Multi-line block: find indentation of first content line
-                                readingMaterialCard = true;
-                                materialCardTarget = MaterialCardTarget::RESTACK_LAYER;
-                                // Look ahead to find the indentation of the first content line
-                                materialCardBaseIndent = indent + 2; // default
-                                for (size_t ahead = li + 1; ahead < lines.size(); ++ahead) {
-                                    std::string aheadTrimmed = trim(lines[ahead]);
-                                    if (!aheadTrimmed.empty() && aheadTrimmed[0] != '#') {
-                                        materialCardBaseIndent = countIndent(lines[ahead]);
-                                        break;
-                                    }
-                                }
-                                layer.materialCard = "";
-                            } else {
-                                // Single-line value
-                                layer.materialCard = val;
-                            }
+                            layer.materialCard = readCardValue("material_card", rawVal, keyCol, li,
+                                                               MaterialCardTarget::RESTACK_LAYER);
                         }
                     }
                     continue;
@@ -764,6 +871,19 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                 inPointsList = false;
             }
 
+            // '-' 만 있는 줄로 여는 operations 항목도 정상 YAML 이다 — 키는 다음 줄부터 온다.
+            // 그 줄을 항목 첫 줄('- type: ...')처럼 다뤄 아래 분기가 그대로 op 을 만든다.
+            if (pendingOpDashIndent >= 0) {
+                if (indent > pendingOpDashIndent) trimmed = "- " + trimmed;
+                pendingOpDashIndent = -1;
+            }
+            if (!inPointsList && !inMatdbRulesList && !inLoadCasesList && !inContactActionsList &&
+                !inBoundaryList && !inRbeList && !inLayersList && !inMaterialCardsList &&
+                trim(stripComment(trimmed)) == "-") {
+                pendingOpDashIndent = indent;
+                continue;
+            }
+
             // --- Operation list item start: "  - type: replace" ---
             if (!inPointsList && !inMatdbRulesList && !inLoadCasesList && !inContactActionsList && !inBoundaryList && !inRbeList && trimmed[0] == '-' && trimmed.size() >= 2 && trimmed[1] == ' ') {
                 inLayersList = false;
@@ -929,6 +1049,8 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                     std::string key = trim(trimmed.substr(0, colonPos));
                     // 예전엔 따옴표를 남겨 'dat_file: "a.dat"' 같은 값이 따옴표째 경로·이름이 됐다
                     std::string val = stripQuotes(trim(stripComment(trimmed.substr(colonPos + 1))));
+                    // 카드 키는 따옴표·이스케이프를 스스로 풀어야 해서 손대기 전 원값도 남긴다
+                    std::string opRawVal = trim(trimmed.substr(colonPos + 1));
 
                     auto& op = config.operations.back();
                     try {
@@ -1182,40 +1304,12 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             else if (key == "shell_thickness") op.offset.shellThickness = std::stod(val);
                             else if (key == "shell_offset") op.offset.shellOffset = std::stod(val);
                             else if (key == "material_card") {
-                                // Multi-line block starts
-                                readingMaterialCard = true;
-                                materialCardTarget = MaterialCardTarget::OFFSET;
-                                materialCardBaseIndent = indent + 2;
-                                for (size_t ahead = li + 1; ahead < lines.size(); ++ahead) {
-                                    std::string aheadTrimmed = trim(lines[ahead]);
-                                    if (!aheadTrimmed.empty() && aheadTrimmed[0] != '#') {
-                                        materialCardBaseIndent = countIndent(lines[ahead]);
-                                        break;
-                                    }
-                                }
-                                if (val == "|") {
-                                    op.offset.materialCard = "";
-                                } else {
-                                    op.offset.materialCard = val;
-                                }
+                                op.offset.materialCard = readCardValue("material_card", opRawVal, keyCol, li,
+                                                                       MaterialCardTarget::OFFSET);
                             }
                             else if (key == "czm_material_card") {
-                                // Multi-line block starts
-                                readingCzmMaterialCard = true;
-                                materialCardTarget = MaterialCardTarget::OFFSET_CZM;
-                                materialCardBaseIndent = indent + 2;
-                                for (size_t ahead = li + 1; ahead < lines.size(); ++ahead) {
-                                    std::string aheadTrimmed = trim(lines[ahead]);
-                                    if (!aheadTrimmed.empty() && aheadTrimmed[0] != '#') {
-                                        materialCardBaseIndent = countIndent(lines[ahead]);
-                                        break;
-                                    }
-                                }
-                                if (val == "|") {
-                                    op.offset.czmMaterialCard = "";
-                                } else {
-                                    op.offset.czmMaterialCard = val;
-                                }
+                                op.offset.czmMaterialCard = readCardValue("czm_material_card", opRawVal, keyCol, li,
+                                                                          MaterialCardTarget::OFFSET_CZM);
                             }
                             else if (key == "material_cards") {
                                 // Array of material cards
@@ -1495,22 +1589,16 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                     std::string afterDash = trim(stripComment(afterDashRaw));
                     // 빈 항목 판정은 주석을 떼기 전 기준 — '- # 주석'(주석뿐인 항목)을 카드 시작으로 보면
                     // 다음 '- |' 줄까지 카드 본문으로 들어가 덱에 '- |' 가 그대로 찍힌다
-                    if (afterDash == "|" || afterDashRaw.empty()) {
+                    // 지시자가 붙은 '- |-' '- |2' 도 같은 블록이다 — 예전엔 '- |' 만 알아봤다
+                    YamlBlockHeader itemHdr = yamlParseBlockHeader(afterDash);
+                    if (itemHdr.isBlock && itemHdr.folded)
+                        throw std::runtime_error(yamlFoldedCardMessage("material_cards"));
+                    if (itemHdr.isBlock || afterDashRaw.empty()) {
                         // Start new material card
                         if (!config.operations.empty() &&
                             config.operations.back().type == AssemblyOperation::OFFSET) {
                             config.operations.back().offset.materialCards.push_back("");
-                            readingMaterialCardsItem = true;
-                            materialCardTarget = MaterialCardTarget::OFFSET_MULTI;
-                            materialCardBaseIndent = indent + 2;
-                            // Look ahead for actual content indentation
-                            for (size_t ahead = li + 1; ahead < lines.size(); ++ahead) {
-                                std::string aheadTrimmed = trim(lines[ahead]);
-                                if (!aheadTrimmed.empty() && aheadTrimmed[0] != '#') {
-                                    materialCardBaseIndent = countIndent(lines[ahead]);
-                                    break;
-                                }
-                            }
+                            openCardBlock(itemHdr, MaterialCardTarget::OFFSET_MULTI, indent, li);
                         }
                     }
                 }
@@ -1534,6 +1622,10 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
             }
         }
     }
+
+    // 파일 끝에서 끝난 블록도 chomping 을 적용한다 — 안 하면 마지막 층 카드만 끝 빈 줄이 남았다
+    if (materialCardTarget != MaterialCardTarget::NONE) closeCardBlock();
+    if (!cardError.empty()) throw std::runtime_error(cardError);
 
     // Validate
     if (config.baseModel.empty()) {
@@ -1639,6 +1731,14 @@ void AssemblyConfigReader::validateOperation(const AssemblyOperation& op, size_t
             if (op.restack.layers[j].materialCard.empty())
                 throw std::runtime_error("Operation " + std::to_string(i+1) +
                     ": layer " + std::to_string(j+1) + " has no material_card");
+            // 카드로 볼 수 없는 값은 조용히 넘기지 않는다 — MID 를 쓸 자리가 없으면 *PART 의 mid 가
+            // 0 으로 찍히고 2층부터 카드가 '이미 씀' 으로 버려진다
+            {
+                std::string why;
+                if (!yamlCardLooksUsable(op.restack.layers[j].materialCard, why))
+                    throw std::runtime_error("Operation " + std::to_string(i+1) +
+                        ": layer " + std::to_string(j+1) + " material_card " + why);
+            }
         }
     } else if (op.type == AssemblyOperation::BEND) {
         if (op.bend.targetPid <= 0 && op.bend.targetPid != 0 && op.bend.targetPids.empty())
@@ -1746,6 +1846,17 @@ void AssemblyConfigReader::validateOperation(const AssemblyOperation& op, size_t
             throw std::runtime_error(pfx + "connection_mode must be tied|czm|contact|none");
 
         // Material card validation
+        {   // 카드로 볼 수 없는 값(데이터 줄 없음, *MAT 줄 없음, 키워드 줄이 1열이 아님,
+            // _TITLE 인데 제목·데이터 둘 중 하나뿐)은 MID 를 쓸 자리가 없다
+            std::string why;
+            if (!op.offset.materialCard.empty() && !yamlCardLooksUsable(op.offset.materialCard, why))
+                throw std::runtime_error(pfx + "material_card " + why);
+            if (!op.offset.czmMaterialCard.empty() && !yamlCardLooksUsable(op.offset.czmMaterialCard, why))
+                throw std::runtime_error(pfx + "czm_material_card " + why);
+            for (size_t c = 0; c < op.offset.materialCards.size(); ++c)
+                if (!yamlCardLooksUsable(op.offset.materialCards[c], why))
+                    throw std::runtime_error(pfx + "material_cards[" + std::to_string(c + 1) + "] " + why);
+        }
         if (!op.offset.materialCard.empty()) {
             MaterialCardValidator validator;
             auto result = validator.validate(op.offset.materialCard);
