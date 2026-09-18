@@ -896,6 +896,50 @@ layers:
 > 지금은 두 줄을 함께 지우고, 새 층 요소는 **표준 한 줄 포맷 `*ELEMENT_SOLID` 섹션을 따로 열어** 씁니다
 > (한 섹션에 두 포맷을 섞지 않습니다). `*ELEMENT_TSHELL` 섹션의 요소도 이제 제대로 지워집니다.
 
+> **요소 카드 줄 수를 매뉴얼로 확정(2026-09-18 고침)**: 예전에는 카드가 세 줄인 요소를 '셋째 줄의 첫 칸이 0 인가'
+> 로 어림잡았습니다. 셋째 줄에 진짜 노드 번호가 든 20 절점 요소는 한 줄 요소와 구별하지 못했고,
+> 그 줄이 지워지는 요소 번호와 겹치면 멀쩡한 카드가 잘려 나갔습니다.
+> 지금은 LS-DYNA R16 Keyword Manual Vol_I 의 카드 표로 판정합니다 — ① 키워드 옵션
+> (`H20`·`T20`·`T15`·`P21`·`H27`·`P40`·`H64`·`ORTHO`·`DOF`, 셸의 `THICKNESS`·`BETA`·`MCID`·`OFFSET`·`DOF`),
+> ② 그 파트의 `*SECTION_SOLID` `ELFORM` 23-29, ③ 그래도 정해지지 않으면 줄 구조(마지막 안전망).
+> - `*ELEMENT_SHELL_THICKNESS` 계열은 두께 카드(중간절점 `N5-N8` 이 있으면 셋째 카드까지)를 한 카드로 묶습니다.
+> - `*ELEMENT_TSHELL` 은 `Card 1` 이 언제나 한 줄입니다(두 줄 포맷이 없습니다).
+> - **고차 정식 파트(ELFORM 23-29)의 restack 은 rc=1 로 거절합니다** — 이 도구는 요소마다 8 절점 모서리만
+>   담아 중간 절점을 다시 만들 수 없습니다. 덱의 요소 카드 수와 리더가 읽은 수가 다를 때도 rc=1 입니다.
+> - `COMPOSITE` 계열은 적층점 수에 따라 카드 줄 수가 달라 손대지 않고 그대로 내보냅니다.
+>   그 섹션의 요소를 지워야 하면 덱을 쓰지 않고 rc=1 입니다.
+
+> **지운 노드를 가리키는 자리 정리(2026-09-18 고침)**: 예전에는 좌표가 딱 맞는 새 층 노드가 있을 때만
+> 옮기고 나머지는 보고만 했습니다. 남은 자리는 LS-DYNA 가 하드 에러로 멈춥니다(현장 실측
+> `Error 10233 Set ID … contains node ID … which is undefined under *NODE input` — 이 문구는 R16 매뉴얼
+> 세 권에 없어 매뉴얼 근거로는 쓸 수 없습니다).
+> 지금은 옮기지 못한 자리를 **실제로 치웁니다**.
+> - 값을 빼는 것: `*SET_NODE`/`_LIST`/`_LIST_SMOOTH`, `*DATABASE_HISTORY_NODE`
+> - 줄을 지우는 것: `*SET_NODE_COLUMN`, `*SET_SEGMENT`(한 줄이 노드 4 개를 한 덩어리로 씁니다),
+>   `*BOUNDARY_SPC_NODE`, `*LOAD_NODE_POINT`, `*INITIAL_VELOCITY_NODE`,
+>   `*CONSTRAINED_EXTRA_NODES_NODE`, `*ELEMENT_MASS`
+> - 고치지 않는 것: `*SET_NODE_*_GENERATE` (Vol_I 234577-234581 이 "정의된 ID 만 들어가고 번호 구멍은
+>   문제가 아니다" 를 명시합니다 — 거절하면 멀쩡한 덱을 막습니다. 범위가 통째로 비면 `[WARN]`),
+>   `*SET_NODE_ADD`(구성원이 노드 세트 ID 입니다)
+> - 사람이 정해야 하는 것: `*CONSTRAINED_NODAL_RIGID_BODY` 의 `PNODE`, `*DEFINE_COORDINATE_NODES`,
+>   `*ELEMENT_BEAM`/`_DISCRETE`/`_SEATBELT` — 보고만 하고 strict 면 rc=1
+> - `*INCLUDE` 안의 카드는 읽지 않습니다. "이 덱에 없으니 없다" 를 결론으로 쓰지 마세요.
+
+> **파트별 요소 수 대조와 왕복 검증(2026-09-18 추가)**: 현장에서 AP 파트가 통째로 빠진 덱이
+> "Normal termination" 하고 `analysis_result.json` 까지 냈습니다. LS-DYNA 도 KooMeshModifier 도
+> 에러를 내지 않았고, 원본/출력/per-run 3자 대조로 겨우 찾았습니다.
+> 이제 요소를 지우거나 만든 op 는 끝날 때 파트별 요소 수를 찍습니다.
+> ```
+>   [요소 수 대조] 파트별 요소 수(입력 → 출력)
+>     PID 200271: 14840 → 0 (삭제)
+>     PID 600001: 0 → 22260 (신규)
+>     합계 4206457 → 4217587
+>     왕복 검증: 출력 덱을 다시 읽어 파트별 요소 수가 기대와 같았습니다.
+> ```
+> 그리고 **쓰기 직전에 출력 덱을 같은 규칙으로 다시 읽어** 기대 수와 대조합니다.
+> 어긋나면 파일을 쓰지 않고 rc=1 입니다(nan/inf 관문과 같은 자리·같은 결말).
+> **"Normal termination + analysis_result.json 존재" 는 모델이 맞다는 증거가 아닙니다.**
+
 ### 동작
 1. `target_pid` 파트의 요소 분석 → 두께 방향 결정
 2. 표면 메시(QUAD4) 추출
