@@ -9,6 +9,7 @@
 #include "assembly/ShellCurvature.h"
 #include "assembly/WarpageGrid.h"
 #include "parser/KFileReader.h"
+#include "parser/ElementCardLayout.h"   // 요소 카드 줄 수 판정 — 리더와 쓰기가 같은 표를 쓴다
 #include "parser/ShellReader.h"
 #include "parser/DynainWriter.h"
 #include "mapper/ShellMapper.h"
@@ -1229,6 +1230,230 @@ int rsFindSectionElform(const std::vector<std::string>& rawLines, int secid, con
         return ef > 0 ? ef : 0;
     }
     return 0;
+}
+
+// ── 요소 카드 색인 ────────────────────────────────────────────────────────────
+// 요소 카드 한 장이 몇 줄인지를 '매뉴얼로 확정한 순서' 로 판정해 줄 단위 색인을 만든다.
+// 판정 순서(근거는 include/parser/ElementCardLayout.h 의 인용):
+//   1) 키워드 옵션      — *ELEMENT_SOLID_H20 처럼 옵션 이름이 곧 절점 수다(Vol_I 164055-164057).
+//   2) *SECTION_SOLID ELFORM 23-29 — 옵션이 <BLANK> 여도 고차 정식이면 Card 3 이 온다(228671-228677).
+//   3) (마지막 안전망) 줄 구조 — Card 1 의 칸 3-10 에 노드가 있으면 구 포맷 한 줄(164122-164124).
+//      매뉴얼이 주는 것은 "구 포맷에는 Card 2 가 없다" 뿐이고 줄만 보고 가르는 규칙은 없다 —
+//      그래서 이건 규칙이 아니라 구현 추론이고, 1·2 가 아무것도 말해 주지 않을 때만 쓴다.
+// 셸은 2)가 필요 없다 — Card 2(두께) 유무가 키워드 옵션이고, Card 3 유무는 같은 요소의
+// Card 1 칸 7-10(N5-N8)에 있다(162168-162169, 162567-162571). 그래서 리더가 스스로 판정한다.
+struct ElemCardIndex {
+    std::vector<int> owner;      // 줄 인덱스 → 그 줄이 속한 카드의 시작 줄(-1 = 요소 카드 데이터가 아님)
+    std::vector<int> span;       // 카드 시작 줄 → 카드 줄 수(그 밖은 0)
+    std::vector<int> eidOf;      // 카드 시작 줄 → EID
+    std::vector<int> pidOf;      // 카드 시작 줄 → PID
+    std::vector<char> famOf;     // 카드 시작 줄 → 'S' solid / 'H' shell / 'T' tshell / 0
+    std::vector<char> opaque;    // 줄 인덱스 → 줄 수를 확정 못 한 섹션인가
+    std::map<int, long long> countByPid;          // 파트별 요소 수(솔리드+셸+티쉘)
+    std::vector<std::string> opaqueKws;           // 확정 못 한 섹션 키워드들
+    std::string opaqueReason;                     // 그 이유(첫 건)
+};
+
+// 요소 카드 한 줄을 칸으로 나눈다 — 고정폭(fw)이 맞으면 고정폭, 콤마가 있으면 자유 형식,
+// 그 밖에는 공백 토큰. 8 자리 노드 ID 는 칸이 공백 없이 붙으므로 고정폭을 먼저 본다.
+std::vector<std::string> ecFields(const std::string& line, int fw) {
+    std::string body = line;
+    size_t cm = body.find('$');
+    if (cm != std::string::npos) body = body.substr(0, cm);
+    while (!body.empty() && (body.back() == '\r' || body.back() == '\n')) body.pop_back();
+    auto trim = [](const std::string& s) {
+        size_t a = s.find_first_not_of(" \t");
+        if (a == std::string::npos) return std::string();
+        size_t b = s.find_last_not_of(" \t");
+        return s.substr(a, b - a + 1);
+    };
+    std::vector<std::string> out;
+    if (body.find(',') != std::string::npos) {
+        std::string tok;
+        for (char c : body) {
+            if (c == ',') { out.push_back(trim(tok)); tok.clear(); }
+            else tok += c;
+        }
+        out.push_back(trim(tok));
+        return out;
+    }
+    bool aligned = true;
+    for (size_t i = 0; i < body.size(); i += (size_t)fw) {
+        std::string f = trim(body.substr(i, (size_t)fw));
+        if (f.find(' ') != std::string::npos || f.find('\t') != std::string::npos) aligned = false;
+        out.push_back(f);
+    }
+    if (aligned) return out;
+    return rsTokens(line);
+}
+
+int ecInt(const std::vector<std::string>& f, size_t i) {
+    if (i >= f.size() || f[i].empty()) return 0;
+    const std::string& s = f[i];
+    size_t p = (s[0] == '-' || s[0] == '+') ? 1u : 0u;
+    if (p >= s.size()) return 0;
+    for (size_t q = p; q < s.size(); ++q)
+        if (!std::isdigit(static_cast<unsigned char>(s[q]))) return 0;
+    try { return std::stoi(s); } catch (...) { return 0; }
+}
+
+// Card 1 의 칸 3-10 에 노드가 들어 있는가 — 구 포맷(940-970) 한 줄 카드의 표시다.
+bool ecLooksLegacyOneLine(const std::vector<std::string>& f) {
+    if (f.size() < 3) return false;
+    for (size_t q = 2; q < f.size() && q < 10; ++q) if (ecInt(f, q) > 0) return true;
+    return false;
+}
+
+// 그 줄이 새 카드의 Card 1 로 읽힐 수 있는가(EID·PID 가 모두 양수).
+bool ecPlausibleCard1(const std::vector<std::string>& f) {
+    return ecInt(f, 0) > 0 && ecInt(f, 1) > 0;
+}
+
+bool ecIsData(const std::string& l) {
+    size_t g = l.find_first_not_of(" \t");
+    if (g == std::string::npos) return false;
+    return l[g] != '$' && l[g] != '*';
+}
+
+// PID → 그 파트 요소의 절점 수(고차 정식일 때만 > 0). *PART 카드 2 의 SECID 를 풀어
+// *SECTION_SOLID 의 ELFORM 을 본다(228671-228677).
+std::map<int, int> ecBuildPidNodes(const std::vector<std::string>& rawLines) {
+    std::map<int, int> secElform;      // SECID → ELFORM
+    std::map<int, int> partSec;        // PID → SECID
+    for (const auto& b : rsCollectBlocks(rawLines)) {
+        if (rsStarts(b.kw, "*SECTION_SOLID")) {
+            size_t k = rsHas(b.kw, "_TITLE") ? 1u : 0u;
+            if (k >= b.data.size()) continue;
+            auto f = rsCardFields(rawLines[b.data[k]]);
+            int sid = rsIntField(f, 0), ef = rsIntField(f, 1);
+            if (sid > 0 && ef > 0) secElform[sid] = ef;
+        } else if (b.kw == "*PART" || b.kw == "*PART_TITLE") {
+            // *PART 는 '제목 줄 + 카드 2' 가 반복된다 — 카드 2 의 칸 0 이 PID, 칸 1 이 SECID.
+            // 제목 줄이 비어 있을 수 있으므로 'PID·SECID 가 모두 양수인 줄' 만 카드 2 로 본다.
+            for (size_t m = 0; m < b.data.size(); ++m) {
+                auto f = rsCardFields(rawLines[b.data[m]]);
+                int pid = rsIntField(f, 0), sec = rsIntField(f, 1);
+                if (pid > 0 && sec > 0 && !partSec.count(pid)) partSec[pid] = sec;
+            }
+        }
+    }
+    std::map<int, int> out;
+    for (const auto& [pid, sec] : partSec) {
+        auto it = secElform.find(sec);
+        if (it == secElform.end()) continue;
+        int n = solidNodesFromElform(it->second);
+        if (n > 0) out[pid] = n;
+    }
+    return out;
+}
+
+ElemCardIndex ecBuildIndex(const std::vector<std::string>& rawLines) {
+    ElemCardIndex idx;
+    size_t n = rawLines.size();
+    idx.owner.assign(n, -1);
+    idx.span.assign(n, 0);
+    idx.eidOf.assign(n, 0);
+    idx.pidOf.assign(n, 0);
+    idx.famOf.assign(n, 0);
+    idx.opaque.assign(n, 0);
+
+    // 칸 폭 — *KEYWORD 의 i10=y 면 10 칸(19352-19360). 키워드 줄의 '%' 접미사도 같은 뜻이다.
+    int fw = 8;
+    for (const auto& rl : rawLines) {
+        size_t s = rl.find_first_not_of(" \t");
+        if (s == std::string::npos || rl[s] != '*') continue;
+        std::string up = rl.substr(s);
+        std::transform(up.begin(), up.end(), up.begin(), [](unsigned char c){ return (char)std::toupper(c); });
+        if (up.compare(0, 8, "*KEYWORD") != 0) continue;
+        if (up.find("I10") != std::string::npos) fw = 10;
+        break;
+    }
+
+    const std::map<int, int> pidNodes = ecBuildPidNodes(rawLines);
+
+    ElementKeywordInfo info;
+    bool inElem = false;
+    int sectionFw = fw;
+    for (size_t i = 0; i < n; ++i) {
+        const std::string& line = rawLines[i];
+        size_t g = line.find_first_not_of(" \t");
+        if (g != std::string::npos && line[g] == '*') {
+            info = parseElementKeyword(line);
+            inElem = (info.family != ElemFamily::NONE);
+            sectionFw = info.i10Suffix ? 10 : (info.longSuffix ? 20 : fw);
+            if (inElem && !info.supported) {
+                idx.opaqueKws.push_back(info.keyword);
+                if (idx.opaqueReason.empty()) idx.opaqueReason = info.reason;
+            }
+            continue;
+        }
+        if (!inElem || !ecIsData(line)) continue;
+        if (!info.supported) { idx.opaque[i] = 1; continue; }
+        if (idx.owner[i] >= 0) continue;          // 앞 카드가 이미 삼킨 줄
+
+        auto f = ecFields(line, sectionFw);
+        int eid = ecInt(f, 0), pid = ecInt(f, 1);
+        int lines = 1;
+        if (info.family == ElemFamily::SOLID) {
+            int nodes = info.optionNodes;
+            if (nodes == 0) {
+                auto pit = pidNodes.find(pid);
+                if (pit != pidNodes.end()) nodes = pit->second;
+            }
+            if (nodes >= 11) {
+                lines = solidCardLines(nodes, info.extraCards);          // 1) 2) 확정
+            } else if (nodes == 0 && ecLooksLegacyOneLine(f)) {
+                lines = 1 + info.extraCards;                             // 3) 안전망: 구 포맷
+            } else {
+                lines = 2 + info.extraCards;                             // Card 1 + Card 2
+            }
+        } else if (info.family == ElemFamily::SHELL) {
+            // Card 2 는 THICKNESS/BETA/MCID 일 때, Card 3 은 그 위에 중간절점(N5-N8)이 있을 때만이다.
+            lines = 1;
+            if (info.thicknessCard) {
+                lines += 1;
+                bool midside = false;
+                for (size_t q = 6; q < f.size() && q < 10; ++q) if (ecInt(f, q) > 0) midside = true;
+                if (midside) lines += 1;
+            }
+            lines += info.extraCards;
+        } else {   // TSHELL — Card 1 은 언제나 N1..N8 한 줄이다(165174-165184). 두 줄 포맷이 없다.
+            lines = 1 + info.extraCards;
+        }
+
+        // 이 카드가 차지하는 데이터 줄을 모은다(사이에 낀 주석·빈 줄은 카드에 넣지 않는다).
+        std::vector<size_t> own;
+        own.push_back(i);
+        size_t j = i + 1;
+        while ((int)own.size() < lines && j < n) {
+            size_t h = rawLines[j].find_first_not_of(" \t");
+            if (h != std::string::npos && rawLines[j][h] == '*') break;   // 섹션이 끝났다
+            if (ecIsData(rawLines[j])) own.push_back(j);
+            ++j;
+        }
+        // 마지막 안전망 — 위에서 정한 줄 수로 설명되지 않는 줄(카드 1 로도 요소로도 볼 수 없는 줄)이
+        // 이어지면 같은 카드로 삼킨다. 옵션·ELFORM 이 아무것도 말해 주지 않을 때만 여기 온다.
+        if (info.family == ElemFamily::SOLID && info.optionNodes == 0 && !pidNodes.count(pid)) {
+            while (j < n) {
+                size_t h = rawLines[j].find_first_not_of(" \t");
+                if (h != std::string::npos && rawLines[j][h] == '*') break;
+                if (!ecIsData(rawLines[j])) { ++j; continue; }
+                auto nf = ecFields(rawLines[j], sectionFw);
+                if (ecPlausibleCard1(nf)) break;
+                own.push_back(j);
+                ++j;
+            }
+        }
+
+        for (size_t o : own) idx.owner[o] = (int)i;
+        idx.span[i] = (int)own.size();
+        idx.eidOf[i] = eid;
+        idx.pidOf[i] = pid;
+        idx.famOf[i] = (info.family == ElemFamily::SOLID) ? 'S'
+                     : (info.family == ElemFamily::SHELL) ? 'H' : 'T';
+        if (eid > 0) idx.countByPid[pid] += 1;
+    }
+    return idx;
 }
 
 const char* const kAdviceSetVariant =
@@ -4102,60 +4327,14 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
     int sectionSolidDataLine = 0;          // data line counter within *SECTION_SOLID
     bool inSectionShell = false;           // tracking *SECTION_SHELL for ELFORM rewrite
     int sectionShellDataLine = 0;          // data line counter within *SECTION_SHELL
-    bool inDowngradeElement = false;        // true while inside a multi-line element being downgraded
     bool skipSectionSolidPeri = false;     // true when skipping SECTION_SOLID to be replaced by PERI
-    // 두 줄 포맷(*ELEMENT_SOLID (ten nodes format)) 추적 — 한 요소가 'eid pid' 줄과 노드 줄 둘이다.
-    // 노드 줄의 첫 칸은 노드 ID 라 eid 로 읽으면 안 되고, 요소를 지울 때는 두 줄을 함께 지워야 한다.
-    bool elementTwoLineFormat = false;     // 지금 *ELEMENT_SOLID 섹션이 두 줄 포맷인가
-    bool pendingNodeCard = false;          // 다음 데이터 줄은 방금 읽은 헤더의 노드 줄이다
-    bool pendingExtraCard = false;         // 노드 줄 뒤에 이어지는 줄(HEX20 셋째 줄 등)이 올 수 있다
-    bool dropPendingNodeCard = false;      // 그 노드 줄을 버려야 하나(요소를 지웠거나 새로 썼다)
+    // 요소 카드 경계는 어림짐작이 아니라 색인(ecBuildIndex)이 정한다 — 키워드 옵션과
+    // *SECTION_SOLID ELFORM 으로 카드 줄 수를 확정하고, 그 줄들을 통째로 지우거나 통째로 내보낸다.
+    bool elementTwoLineFormat = false;     // 지금 섹션의 카드가 두 줄 이상인가(새 층을 어디에 쓸지 정한다)
+    bool dropCurrentCard = false;          // 지금 카드의 나머지 줄을 버려야 하나
     bool tshellElementsInserted = false;   // 새 tshell 층을 이미 썼나(솔리드와 따로 센다)
 
-    // 고정폭 칸 너비 — *KEYWORD 의 i10=y 면 10 칸이다(리더와 같게 본다).
-    int elemFieldWidth = 8;
-    for (const std::string& rl : rawLines_) {
-        size_t s = rl.find_first_not_of(" \t");
-        if (s == std::string::npos || rl[s] != '*') continue;
-        std::string up = rl.substr(s);
-        std::transform(up.begin(), up.end(), up.begin(), [](unsigned char c){ return (char)std::toupper(c); });
-        if (up.compare(0, 8, "*KEYWORD") != 0) continue;
-        if (up.find("I10") != std::string::npos) elemFieldWidth = 10;
-        break;
-    }
-
-    // 리더(KFileReader::parseElementSolidSection)와 같은 순서로 판정한다 — 토큰을 세기 전에
-    // 고정폭 한 줄 해석을 먼저 시도한다. 8 칸 고정폭에 8 자리 노드 ID 가 들어가면 pid 칸과
-    // n1 칸이 공백 없이 붙어 한 줄 포맷 요소가 2 토큰으로 보이기 때문이다. 토큰 수만 보면
-    // 그런 줄을 '두 줄 헤더' 로 오판해 멀쩡한 다음 요소를 노드 줄로 버리거나(대상 파트),
-    // 지워야 할 다음 요소를 그냥 내보낸다(비대상 파트).
-    // 한 줄 포맷 요소 줄인가 — 고정폭이면 eid 칸과 n1 칸이 모두 양수, 자유 포맷이면 칸이 10개 이상이고
-    // 첫 칸(eid)과 셋째 칸(n1)이 양수. 이 판정이 서야 헤더·이어지는 줄과 구분된다.
-    auto isOneLineElement = [&](const std::string& l) {
-        const size_t fw = (size_t)elemFieldWidth;
-        if (l.length() >= fw * 10) {
-            int eid = 0, n1 = 0;
-            try { eid = std::stoi(l.substr(0, fw)); } catch (...) { eid = 0; }
-            try { n1 = std::stoi(l.substr(fw * 2, fw)); } catch (...) { n1 = 0; }
-            if (eid > 0 && n1 > 0) return true;
-        }
-        std::istringstream iss(l);
-        std::vector<std::string> toks;
-        std::string tok;
-        while (iss >> tok) toks.push_back(tok);
-        if (toks.size() < 10) return false;
-        int a = 0, c = 0;
-        try { a = std::stoi(toks[0]); c = std::stoi(toks[2]); } catch (...) { return false; }
-        return a > 0 && c > 0;
-    };
-    auto isTwoLineElementHeader = [&](const std::string& l) {
-        if (isOneLineElement(l)) return false;
-        int tokenCount = 0;
-        std::istringstream iss(l);
-        std::string tok;
-        while (iss >> tok) tokenCount++;
-        return (tokenCount >= 2 && tokenCount <= 3);
-    };
+    const ElemCardIndex eidx = ecBuildIndex(rawLines_);
 
     for (size_t i = 0; i < rawLines_.size(); ++i) {
         const std::string& line = rawLines_[i];
@@ -4198,8 +4377,7 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                 }
                 elementsInserted = true;
             }
-            pendingNodeCard = false;
-            dropPendingNodeCard = false;
+            dropCurrentCard = false;
 
             // Detect section type
             std::string upper = trimmed;
@@ -4255,7 +4433,8 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                 currentSection = Section::NODE;
             } else if (upper.substr(0, 14) == "*ELEMENT_SOLID") {
                 currentSection = Section::ELEMENT;
-                // 헤더 문자열은 힌트일 뿐이다 — 줄 구조(2~3 칸짜리 'eid pid' 줄)로도 확인한다.
+                // 헤더 꼬리글("(ten nodes format)")은 매뉴얼에 없는 관행이라 힌트로만 쓴다 —
+                // 실제 판정은 색인이 한 카드 줄 수다(아래에서 span>1 이면 두 줄 이상으로 본다).
                 elementTwoLineFormat = (upper.find("TEN NODE") != std::string::npos);
             } else if (upper.find("*ELEMENT_TSHELL") == 0) {
                 // 리더는 *ELEMENT_TSHELL 을 솔리드와 같은 칸(두 줄 포맷 포함)으로 읽는데
@@ -4465,58 +4644,22 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
             output << line << "\n";
         }
         else if (currentSection == Section::ELEMENT) {
-            // Detect if this line is an element header (eid+pid, short line)
-            // vs a continuation line (node IDs, many tokens)
-            bool isElementHeader = isTwoLineElementHeader(line);
-
-            // 두 줄 포맷 요소의 노드 줄 — 첫 칸은 노드 ID 다. 여기서 먼저 걷어내지 않으면
-            // (1) 노드 ID 가 지워진 요소 번호와 겹칠 때 남의 노드 줄이 사라지고
-            // (2) 요소를 지울 때 'eid pid' 줄만 지워져 노드 줄이 고아로 남는다(두 줄 리더가
-            //     그 줄을 다음 요소의 'eid pid' 로 읽어 덱 전체가 밀린다).
-            // 헤더 다음 줄은 그 요소의 노드 줄이다(리더와 같은 규칙). 그 뒤에 '요소로도 헤더로도
-            // 볼 수 없는 줄'(예: HEX20 카드의 셋째 줄처럼 첫 칸이 0 인 줄)이 이어지면 같은 카드로 본다 —
-            // 예전엔 노드 줄 하나만 이어 붙여 그런 줄이 고아로 남았다. 반대로 같은 섹션에 한 줄 요소가
-            // 섞여 있으면 그 줄은 요소로 판정되므로 삼키지 않는다.
-            if (pendingNodeCard) {
-                pendingNodeCard = false;
-                pendingExtraCard = true;
-                bool dropIt = dropPendingNodeCard;
-                if (dropIt) continue;
+            // 카드 경계는 색인이 정한다 — 이어지는 줄(노드 줄·Card 3·ORTHO 카드…)은 여기서
+            // 걷어내야 (1) 노드 ID 가 지워진 요소 번호와 겹칠 때 남의 줄이 사라지지 않고
+            // (2) 요소를 지울 때 카드가 통째로 지워진다(예전엔 'eid pid' 줄만 지워져
+            //     노드 줄이 고아로 남았고, 두 줄 리더가 그 줄을 다음 요소로 읽어 덱이 밀렸다).
+            if (eidx.owner[i] >= 0 && eidx.owner[i] != (int)i) {
+                if (dropCurrentCard) continue;
                 output << line << "\n";
                 continue;
             }
-            if (pendingExtraCard) {
-                if (!isElementHeader && !isOneLineElement(line)) {
-                    bool dropIt = dropPendingNodeCard;
-                    if (dropIt) continue;
-                    output << line << "\n";
-                    continue;
-                }
-                pendingExtraCard = false;
-                dropPendingNodeCard = false;
-            }
-            if (isElementHeader) {
-                elementTwoLineFormat = true;
-                pendingNodeCard = true;
-                pendingExtraCard = false;
-                dropPendingNodeCard = false;
-            }
+            dropCurrentCard = false;
+            if (eidx.owner[i] == (int)i && eidx.span[i] > 1) elementTwoLineFormat = true;
+            bool isElementHeader = (eidx.owner[i] == (int)i && eidx.span[i] > 1);
 
-            // If we're inside a downgraded multi-line element, skip continuation lines
-            if (inDowngradeElement) {
-                if (isElementHeader) {
-                    // New element header → end of previous downgraded element
-                    inDowngradeElement = false;
-                    // Fall through to process this new element header
-                } else {
-                    // Continuation line of downgraded element → skip
-                    continue;
-                }
-            }
-
-            int elemId = parseElementIdFromLine(line);
+            int elemId = (eidx.owner[i] == (int)i) ? eidx.eidOf[i] : parseElementIdFromLine(line);
             if (elemId > 0 && removedElementIds_.count(elemId) > 0) {
-                dropPendingNodeCard = pendingNodeCard;   // 두 줄 포맷이면 노드 줄도 함께 지운다
+                dropCurrentCard = true;   // 카드의 나머지 줄도 함께 지운다
                 continue;  // Skip removed element
             }
 
@@ -4553,8 +4696,7 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                     }
 
                     output << oss.str() << "\n";
-                    inDowngradeElement = true;  // Skip subsequent continuation lines
-                    dropPendingNodeCard = pendingNodeCard;   // 두 줄 포맷이면 옛 노드 줄을 버린다
+                    dropCurrentCard = true;   // 옛 카드의 나머지 줄을 버린다
                     continue;
                 }
             }
@@ -4563,14 +4705,14 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
             if (elemId > 0 && tet10Elements_.count(elemId)) {
                 int pid = parsePartIdFromLine(line);
                 output << formatTet10ElementLine(elemId, pid, tet10Elements_[elemId]) << "\n";
-                dropPendingNodeCard = pendingNodeCard;   // 두 줄 포맷이면 옛 노드 줄을 버린다
+                dropCurrentCard = true;   // 옛 카드의 나머지 줄을 버린다
                 continue;
             }
             // HEX20 conversion: replace single-line HEX8 with 3-line HEX20
             if (elemId > 0 && hex20Elements_.count(elemId)) {
                 int pid = parsePartIdFromLine(line);
                 output << formatHex20ElementLine(elemId, pid, hex20Elements_[elemId]) << "\n";
-                dropPendingNodeCard = pendingNodeCard;   // 두 줄 포맷이면 옛 노드 줄을 버린다
+                dropCurrentCard = true;   // 옛 카드의 나머지 줄을 버린다
                 continue;
             }
             // Disconnect: modified element nodes (CZM/MEFEM)
@@ -4581,38 +4723,40 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                 oss << std::setw(8) << elemId << std::setw(8) << pid;
                 for (int n = 0; n < 8; ++n) oss << std::setw(8) << newNodes[n];
                 output << oss.str() << "\n";
-                dropPendingNodeCard = pendingNodeCard;   // 두 줄 포맷이면 옛 노드 줄을 버린다
+                dropCurrentCard = true;   // 옛 카드의 나머지 줄을 버린다
                 continue;
             }
             output << line << "\n";
         }
         else if (currentSection == Section::TSHELL_ELEMENT) {
             // 지우기만 한다 — 새 요소는 예전처럼 *END 앞의 *ELEMENT_TSHELL 로 나간다.
-            bool isElementHeader = isTwoLineElementHeader(line);
-            if (pendingNodeCard) {
-                pendingNodeCard = false;
-                bool dropIt = dropPendingNodeCard;
-                dropPendingNodeCard = false;
-                if (dropIt) continue;
+            // TSHELL 은 Card 1 이 언제나 N1..N8 한 줄이고(Vol_I 165174-165184) _BETA 면 한 줄이 더 온다.
+            if (eidx.owner[i] >= 0 && eidx.owner[i] != (int)i) {
+                if (dropCurrentCard) continue;
                 output << line << "\n";
                 continue;
             }
-            if (isElementHeader) {
-                elementTwoLineFormat = true;
-                pendingNodeCard = true;
-                pendingExtraCard = false;
-                dropPendingNodeCard = false;
-            }
-            int elemId = parseElementIdFromLine(line);
+            dropCurrentCard = false;
+            int elemId = (eidx.owner[i] == (int)i) ? eidx.eidOf[i] : parseElementIdFromLine(line);
             if (elemId > 0 && removedElementIds_.count(elemId) > 0) {
-                dropPendingNodeCard = pendingNodeCard;   // 두 줄 포맷이면 노드 줄도 함께
+                dropCurrentCard = true;
                 continue;
             }
             output << line << "\n";
         }
         else if (currentSection == Section::SHELL_ELEMENT) {
-            int elemId = parseElementIdFromLine(line);
+            // *ELEMENT_SHELL_THICKNESS/_BETA/_MCID 는 요소마다 둘째 카드가 붙고, 중간절점(N5-N8)이
+            // 정의돼 있으면 셋째 카드까지 온다(Vol_I 162168-162169, 162567-162571).
+            // 예전에는 한 줄만 지워 두께 줄이 고아로 남았다.
+            if (eidx.owner[i] >= 0 && eidx.owner[i] != (int)i) {
+                if (dropCurrentCard) continue;
+                output << line << "\n";
+                continue;
+            }
+            dropCurrentCard = false;
+            int elemId = (eidx.owner[i] == (int)i) ? eidx.eidOf[i] : parseElementIdFromLine(line);
             if (elemId > 0 && removedElementIds_.count(elemId) > 0) {
+                dropCurrentCard = true;
                 continue;
             }
             // Shell downgrade: QUAD8→QUAD4 or TRIA6→TRIA3
@@ -4642,6 +4786,7 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                         for (int n = 2; n < 6; ++n) oss << std::setw(8) << tokens[n];
                     }
                     output << oss.str() << "\n";
+                    dropCurrentCard = true;   // 중간절점이 사라지면 딸린 두께 카드도 버린다
                     continue;
                 }
             }
@@ -4649,12 +4794,14 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
             if (elemId > 0 && quad8Elements_.count(elemId)) {
                 int pid = parsePartIdFromLine(line);
                 output << formatQuad8ElementLine(elemId, pid, quad8Elements_[elemId]) << "\n";
+                dropCurrentCard = true;
                 continue;
             }
             // TRIA6 conversion: replace TRIA3 line
             if (elemId > 0 && tria6Elements_.count(elemId)) {
                 int pid = parsePartIdFromLine(line);
                 output << formatTria6ElementLine(elemId, pid, tria6Elements_[elemId]) << "\n";
+                dropCurrentCard = true;
                 continue;
             }
             // Disconnect: modified shell element nodes (CZM/MEFEM)
