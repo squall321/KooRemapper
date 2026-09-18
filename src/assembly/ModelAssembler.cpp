@@ -1024,71 +1024,124 @@ int rsIntField(const std::vector<std::string>& toks, size_t i) {
     try { return std::stoi(toks[i]); } catch (...) { return -1; }
 }
 
-// 원본 덱에서 그 PID 를 가리키는 키워드 — restack 이 target_pid 를 비운 뒤에도 남는 참조를 찾는다.
-// 층을 나누면 요소는 새 PID 로 옮겨 가고 원래 파트는 요소 0 개로 남는데, 사용자가 걸어 둔
-// *SET_PART_LIST·*CONTACT 는 그대로 옛 PID 를 가리켜 tied 조건이 아무 일도 하지 않는 덱이 나갔다.
-// 자리를 정확히 아는 것만 센다 — *SET_PART* 의 구성원 목록과 *CONTACT_* 카드 1 의
-// SSID/MSID(SSTYP/MSTYP 가 3=파트, 2=파트 집합일 때). 그 밖의 키워드는 칸 뜻이 키워드마다 달라
-// 숫자만 보고 세면 엉뚱한 경고가 되므로 건드리지 않는다.
-std::vector<std::string> restackFindPidReferences(const std::vector<std::string>& rawLines, int pid) {
-    auto keywordOf = [](const std::string& line) -> std::string {
-        size_t f = line.find_first_not_of(" \t");
-        if (f == std::string::npos || line[f] != '*') return "";
-        std::string up = line.substr(f);
+// ── 죽은 참조 3축 스캐너 ──────────────────────────────────────────────────────
+// restack·merge 는 원 *PART 카드를 그대로 두고 그 파트의 요소만 지운다. 그러면
+//   PID  축 : 요소 0 개짜리 빈 파트를 가리키는 *SET_PART·*CONTACT·… 가 그대로 남고
+//   EID  축 : 지워진 요소를 가리키는 *SET_SOLID·*INITIAL_STRESS_SOLID·… 가 매달리고
+//   노드 축 : 두께 방향 2요소 이상이면 지워지는 중간면 노드를 가리키는
+//             *SET_NODE·*BOUNDARY_SPC_NODE·*SET_SEGMENT 가 매달린다.
+// 이번 판은 '옮기기' 가 아니라 '탐지와 보고' 다 — 무엇이 어디서 끊겼는지를 줄 번호·원문으로 남긴다.
+struct RsBlock {
+    size_t kwLine;              // 키워드 줄 인덱스
+    std::string kw;             // 대문자 키워드(뒤 공백 제거)
+    std::vector<size_t> data;   // 주석·빈 줄을 뺀 데이터 줄 인덱스
+};
+
+std::vector<RsBlock> rsCollectBlocks(const std::vector<std::string>& rawLines) {
+    std::vector<RsBlock> out;
+    for (size_t i = 0; i < rawLines.size(); ++i) {
+        size_t g = rawLines[i].find_first_not_of(" \t");
+        if (g == std::string::npos || rawLines[i][g] != '*') continue;
+        RsBlock b;
+        b.kwLine = i;
+        std::string up = rawLines[i].substr(g);
         while (!up.empty() && (up.back() == '\r' || up.back() == ' ' || up.back() == '\t')) up.pop_back();
         for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-        return up;
-    };
-    auto blockData = [&](size_t kwLine) {
-        std::vector<std::string> data;
-        for (size_t j = kwLine + 1; j < rawLines.size(); ++j) {
-            size_t g = rawLines[j].find_first_not_of(" \t");
-            if (g == std::string::npos) continue;
-            if (rawLines[j][g] == '*') break;
-            if (rawLines[j][g] == '$') continue;
-            data.push_back(rawLines[j]);
+        b.kw = up;
+        for (size_t j = i + 1; j < rawLines.size(); ++j) {
+            size_t h = rawLines[j].find_first_not_of(" \t");
+            if (h == std::string::npos) continue;
+            if (rawLines[j][h] == '*') break;
+            if (rawLines[j][h] == '$') continue;
+            b.data.push_back(j);
         }
-        return data;
-    };
-
-    std::vector<std::string> refs;
-    std::set<int> partSets;  // 그 PID 를 담은 파트 집합
-    for (size_t i = 0; i < rawLines.size(); ++i) {
-        std::string kw = keywordOf(rawLines[i]);
-        if (kw.rfind("*SET_PART", 0) != 0) continue;
-        auto data = blockData(i);
-        size_t k = 0;
-        if (kw.find("_TITLE") != std::string::npos && k < data.size()) ++k;  // 제목 카드
-        if (k >= data.size()) continue;
-        int sid = rsIntField(rsTokens(data[k]), 0);
-        bool found = false;
-        for (size_t m = k + 1; m < data.size() && !found; ++m)
-            for (const auto& t : rsTokens(data[m]))
-                if (rsIntField({t}, 0) == pid) { found = true; break; }
-        if (!found) continue;
-        partSets.insert(sid);
-        refs.push_back(kw + (sid > 0 ? " " + std::to_string(sid) : ""));
+        out.push_back(b);
     }
-    for (size_t i = 0; i < rawLines.size(); ++i) {
-        std::string kw = keywordOf(rawLines[i]);
-        if (kw.rfind("*CONTACT", 0) != 0) continue;
-        auto data = blockData(i);
-        size_t k = 0;
-        // *CONTACT_..._ID 는 CID+제목 카드가 먼저 온다
-        if (kw.size() >= 3 && kw.compare(kw.size() - 3, 3, "_ID") == 0 && k < data.size()) ++k;
-        if (k >= data.size()) continue;
-        auto t = rsCardFields(data[k]);
-        int ssid = rsIntField(t, 0), msid = rsIntField(t, 1);
-        int sstyp = rsIntField(t, 2), mstyp = rsIntField(t, 3);
-        std::string how;
-        if (sstyp == 3 && ssid == pid) how = "slave part";
-        else if (mstyp == 3 && msid == pid) how = "master part";
-        else if (sstyp == 2 && partSets.count(ssid)) how = "slave part set " + std::to_string(ssid);
-        else if (mstyp == 2 && partSets.count(msid)) how = "master part set " + std::to_string(msid);
-        if (!how.empty()) refs.push_back(kw + " (" + how + ")");
-    }
-    return refs;
+    return out;
 }
+
+bool rsStarts(const std::string& kw, const char* p) { return kw.rfind(p, 0) == 0; }
+bool rsHas(const std::string& kw, const char* p) { return kw.find(p) != std::string::npos; }
+bool rsEnds(const std::string& kw, const std::string& p) {
+    return kw.size() >= p.size() && kw.compare(kw.size() - p.size(), p.size(), p) == 0;
+}
+
+// _TITLE·_ID 는 카드 1 앞에 제목/ID 줄이 한 줄 더 온다
+size_t rsFirstCard(const std::string& kw) {
+    return (rsEnds(kw, "_TITLE") || rsEnds(kw, "_ID")) ? 1u : 0u;
+}
+
+// *MAT_RIGID(020) 가 쓰는 MID 들 — 강체 파트를 restack 하면 강체 구속이 통째로 사라진다
+std::set<int> rsCollectRigidMids(const std::vector<std::string>& rawLines) {
+    std::set<int> out;
+    for (const auto& b : rsCollectBlocks(rawLines)) {
+        if (!rsStarts(b.kw, "*MAT_RIGID") && !rsStarts(b.kw, "*MAT_020")) continue;
+        size_t k = rsHas(b.kw, "_TITLE") ? 1u : 0u;
+        if (k >= b.data.size()) continue;
+        int mid = rsIntField(rsCardFields(rawLines[b.data[k]]), 0);
+        if (mid > 0) out.insert(mid);
+    }
+    return out;
+}
+
+// 그 PID 에 *PART_INERTIA 가 걸려 있는가 — 질량·관성을 카드에 직접 박아 둔 파트다.
+// 제목 줄이 비어 있으면 블록 수집에서 빠지므로 앞 두 데이터 줄을 모두 본다.
+bool rsHasPartInertia(const std::vector<std::string>& rawLines, int pid) {
+    for (const auto& b : rsCollectBlocks(rawLines)) {
+        if (!rsStarts(b.kw, "*PART_INERTIA")) continue;
+        for (size_t m = 0; m < b.data.size() && m < 2; ++m)
+            if (rsIntField(rsCardFields(rawLines[b.data[m]]), 0) == pid) return true;
+    }
+    return false;
+}
+
+
+const char* const kAdviceSetVariant =
+    "`_SET` 변형으로 바꾸고 전 층 세트를 주세요";
+const char* const kAdviceDuplicate =
+    "층마다 카드를 복제하세요(`_SET` 변형이 없습니다)";
+const char* const kAdviceMass =
+    "집중질량을 층에 나눌 수 없습니다 — 직접 배분하세요";
+const char* const kAdviceUnknownField =
+    "칸 뜻이 카드마다 달라 자리를 확정하지 않았습니다 — 이 줄을 직접 확인하세요";
+const char* const kAdviceOutside =
+    "화이트리스트 밖입니다 — 이 줄에 죽은 PID 값이 있습니다(칸 뜻은 확인하지 않았습니다)";
+
+// 스칼라 PID 칸: 카드 1 의 정해진 칸만 본다
+struct RsScalarKw {
+    const char* prefix;
+    bool notSet;          // true 면 _SET 변형은 제외한다
+    int fields[2];        // -1 로 끝낸다
+    const char* advice;
+};
+
+const RsScalarKw kScalarPidKws[] = {
+    {"*DAMPING_PART_MASS",              true,  {0, -1}, kAdviceSetVariant},
+    {"*DAMPING_PART_STIFFNESS",         true,  {0, -1}, kAdviceSetVariant},
+    {"*PART_MOVE",                      false, {0, -1}, kAdviceSetVariant},
+    {"*BOUNDARY_PRESCRIBED_MOTION_RIGID", false, {0, -1}, kAdviceSetVariant},
+    {"*CONSTRAINED_RIGID_BODIES",       false, {0,  1}, kAdviceSetVariant},
+    {"*INITIAL_VELOCITY_GENERATION",    false, {0, -1}, kAdviceSetVariant},
+    {"*MAT_ADD_THERMAL_EXPANSION",      false, {0, -1}, kAdviceDuplicate},
+    {"*DEFORMABLE_TO_RIGID",            false, {0, -1}, kAdviceDuplicate},
+};
+
+// 칸 자리를 확정하지 않은 키워드 — 있다는 것만 한 줄로 알린다
+const char* const kUnknownFieldKws[] = {
+    "*DEFINE_FRICTION", "*ALE_", "*CONSTRAINED_LAGRANGE_IN_SOLID",
+    "*RIGIDWALL_", "*AIRBAG_",
+};
+
+// '모르는 자리' 훑기에서 뺄 키워드 — 정의·기하·물성·제어 카드의 숫자 칸은
+// 죽은 값과 우연히 같기만 해도 걸려 경고가 쓰레기가 된다.
+const char* const kMaybeSkipKws[] = {
+    "*NODE", "*ELEMENT", "*PART", "*MAT", "*SECTION", "*EOS", "*HOURGLASS",
+    "*DEFINE_CURVE", "*DEFINE_TABLE", "*DEFINE_COORDINATE", "*DEFINE_VECTOR",
+    "*CONTROL", "*DATABASE_BINARY", "*DATABASE_EXTENT", "*KEYWORD", "*END",
+    "*TITLE", "*INCLUDE", "*PARAMETER", "*COMMENT", "*INITIAL_STRESS",
+    "*INITIAL_STRAIN", "*SET_", "*CONTACT",
+};
+
 
 // 카드의 MID 칸이 숫자면 그 값, 아니면 0(자리표시·라벨)
 int matCardLiteralMid(const std::string& label) {
@@ -1246,7 +1299,319 @@ double computeAutoVC(const std::string& matCard, double dropHeight_mm, double la
 
 } // anonymous namespace
 
+void ModelAssembler::scanDeadReferences(const std::string& opName,
+                                        const std::set<int>& deadPids,
+                                        const std::set<int>& deadEids,
+                                        const std::set<int>& deadNodes,
+                                        const std::vector<int>& newPids) {
+    if (deadPids.empty() && deadEids.empty() && deadNodes.empty()) return;
+
+    const auto blocks = rsCollectBlocks(rawLines_);
+    std::vector<bool> handled(blocks.size(), false);
+    std::set<std::pair<int, std::string>> seen;   // (줄, 축) 중복 방지
+    std::vector<PidRefFinding> found;
+
+    auto add = [&](const std::string& axis, const std::string& kw, size_t li,
+                   const char* grade, const std::string& advice) {
+        int lineNo = static_cast<int>(li) + 1;
+        if (!seen.insert({lineNo, axis}).second) return;
+        PidRefFinding f;
+        f.axis = axis;
+        f.keyword = kw;
+        f.line = lineNo;
+        f.text = rawLines_[li];
+        f.grade = grade;
+        f.advice = advice;
+        found.push_back(f);
+    };
+    auto isDead = [](const std::set<int>& s, int v) { return v > 0 && s.count(v) > 0; };
+
+    // 1. *SET_PART* — 구성원 PID. 죽은 PID 를 담은 세트 번호도 모은다.
+    std::set<int> deadPartSets;
+    for (size_t bi = 0; bi < blocks.size(); ++bi) {
+        const auto& b = blocks[bi];
+        if (!rsStarts(b.kw, "*SET_PART")) continue;
+        handled[bi] = true;
+        if (rsHas(b.kw, "_GENERATE")) {          // 범위 표기 — 칸 뜻이 다르다
+            for (size_t m = 0; m < b.data.size(); ++m) {
+                auto f = rsCardFields(rawLines_[b.data[m]]);
+                for (size_t q = 0; q < f.size(); ++q)
+                    if (isDead(deadPids, rsIntField(f, q)))
+                        add("PID", b.kw, b.data[m], "unknown", kAdviceUnknownField);
+            }
+            continue;
+        }
+        size_t k = rsHas(b.kw, "_TITLE") ? 1u : 0u;   // 제목 줄
+        if (k >= b.data.size()) continue;
+        int sid = rsIntField(rsCardFields(rawLines_[b.data[k]]), 0);
+        bool column = rsHas(b.kw, "_COLUMN");
+        for (size_t m = k + 1; m < b.data.size(); ++m) {
+            auto f = rsCardFields(rawLines_[b.data[m]]);
+            size_t n = column ? std::min<size_t>(1, f.size()) : f.size();
+            for (size_t q = 0; q < n; ++q) {
+                if (!isDead(deadPids, rsIntField(f, q))) continue;
+                if (sid > 0) deadPartSets.insert(sid);
+                add("PID", b.kw, b.data[m], "auto",
+                    "세트 " + std::to_string(sid) + " 의 구성원입니다 — 소비자가 전부 체적 의미면 층 PID 전부로,"
+                    " tied 접촉도 같은 세트를 쓰면 세트를 복제해 나눠야 합니다");
+            }
+        }
+    }
+
+    // 2. *CONTACT_* 카드 1 — SSID/MSID (STYP=3 직접, STYP=2 파트 집합)
+    for (size_t bi = 0; bi < blocks.size(); ++bi) {
+        const auto& b = blocks[bi];
+        if (!rsStarts(b.kw, "*CONTACT")) continue;
+        handled[bi] = true;
+        size_t k = rsFirstCard(b.kw);
+        if (k >= b.data.size()) continue;
+        auto f = rsCardFields(rawLines_[b.data[k]]);
+        int ssid = rsIntField(f, 0), msid = rsIntField(f, 1);
+        int sstyp = rsIntField(f, 2), mstyp = rsIntField(f, 3);
+        bool tied = rsHas(b.kw, "TIED") || rsHas(b.kw, "TIEBREAK") || rsHas(b.kw, "SPOTWELD");
+        std::string how;
+        if (sstyp == 3 && isDead(deadPids, ssid)) how = "slave part";
+        else if (mstyp == 3 && isDead(deadPids, msid)) how = "master part";
+        else if (sstyp == 2 && ssid > 0 && deadPartSets.count(ssid))
+            how = "slave part set " + std::to_string(ssid);
+        else if (mstyp == 2 && msid > 0 && deadPartSets.count(msid))
+            how = "master part set " + std::to_string(msid);
+        if (how.empty()) continue;
+        add("PID", b.kw, b.data[k], "auto",
+            how + " — " + (tied
+                ? std::string("tied 계열입니다. 상대측 기하를 적층 축에 투영해 층이 유일할 때만 그 층으로 옮깁니다")
+                : std::string("모든 층이 solid 면 전 층으로 폅니다")));
+    }
+
+    // 3. 스칼라 PID 칸 — 보고만 한다
+    for (size_t bi = 0; bi < blocks.size(); ++bi) {
+        const auto& b = blocks[bi];
+        for (const auto& sk : kScalarPidKws) {
+            if (!rsStarts(b.kw, sk.prefix)) continue;
+            if (sk.notSet && rsHas(b.kw, "_SET")) continue;
+            handled[bi] = true;
+            size_t k = rsFirstCard(b.kw);
+            if (k >= b.data.size()) break;
+            auto f = rsCardFields(rawLines_[b.data[k]]);
+            for (int q = 0; q < 2 && sk.fields[q] >= 0; ++q)
+                if (isDead(deadPids, rsIntField(f, static_cast<size_t>(sk.fields[q]))))
+                    add("PID", b.kw, b.data[k], "manual", sk.advice);
+            break;
+        }
+    }
+
+    // 4. *DATABASE_HISTORY_PART (목록형) / *ELEMENT_MASS
+    for (size_t bi = 0; bi < blocks.size(); ++bi) {
+        const auto& b = blocks[bi];
+        bool histPart = rsStarts(b.kw, "*DATABASE_HISTORY_PART") && !rsHas(b.kw, "_SET");
+        bool elemMass = rsStarts(b.kw, "*ELEMENT_MASS");
+        if (!histPart && !elemMass) continue;
+        handled[bi] = true;
+        for (size_t m = 0; m < b.data.size(); ++m) {
+            auto f = rsCardFields(rawLines_[b.data[m]]);
+            for (size_t q = 0; q < f.size(); ++q) {
+                int v = rsIntField(f, q);
+                if (histPart && isDead(deadPids, v))
+                    add("PID", b.kw, b.data[m], "manual",
+                        "층 PID 를 목록에 더하거나 `_SET` 변형으로 바꾸세요");
+                if (elemMass) {
+                    if (isDead(deadPids, v)) add("PID", b.kw, b.data[m], "manual", kAdviceMass);
+                    if (isDead(deadNodes, v)) add("NODE", b.kw, b.data[m], "manual", kAdviceMass);
+                    if (isDead(deadEids, v))  add("EID", b.kw, b.data[m], "manual", kAdviceMass);
+                }
+            }
+        }
+    }
+
+    // 5. 칸 자리를 확정하지 않은 키워드 — 존재만 알린다
+    for (size_t bi = 0; bi < blocks.size(); ++bi) {
+        const auto& b = blocks[bi];
+        bool match = false;
+        for (const char* p : kUnknownFieldKws) if (rsStarts(b.kw, p)) { match = true; break; }
+        if (!match) continue;
+        handled[bi] = true;
+        for (size_t m = 0; m < b.data.size(); ++m) {
+            auto f = rsCardFields(rawLines_[b.data[m]]);
+            for (size_t q = 0; q < f.size(); ++q)
+                if (isDead(deadPids, rsIntField(f, q)))
+                    add("PID", b.kw, b.data[m], "unknown", kAdviceUnknownField);
+        }
+    }
+
+    // 6. EID 축 — 지워진 요소를 가리키는 카드
+    for (size_t bi = 0; bi < blocks.size(); ++bi) {
+        const auto& b = blocks[bi];
+        bool setElem = (rsStarts(b.kw, "*SET_SOLID") || rsStarts(b.kw, "*SET_SHELL") ||
+                        rsStarts(b.kw, "*SET_BEAM")  || rsStarts(b.kw, "*SET_TSHELL")) &&
+                       !rsHas(b.kw, "_GENERATE");
+        bool initStress = rsStarts(b.kw, "*INITIAL_STRESS_SOLID") ||
+                          rsStarts(b.kw, "*INITIAL_STRESS_SHELL") ||
+                          rsStarts(b.kw, "*INITIAL_STRAIN_SOLID");
+        bool histElem = rsStarts(b.kw, "*DATABASE_HISTORY_SOLID") ||
+                        rsStarts(b.kw, "*DATABASE_HISTORY_SHELL") ||
+                        rsStarts(b.kw, "*DATABASE_HISTORY_BEAM");
+        if (!setElem && !initStress && !histElem) continue;
+        handled[bi] = true;
+        size_t start = 0;
+        if (setElem) {                                    // 제목 + SID 줄을 건너뛴다
+            start = rsHas(b.kw, "_TITLE") ? 1u : 0u;
+            ++start;
+        }
+        for (size_t m = start; m < b.data.size(); ++m) {
+            auto f = rsCardFields(rawLines_[b.data[m]]);
+            // 초기응력은 EID 가 칸 0 뿐이다 — 나머지 칸은 응력 값이라 훑으면 오탐이 된다
+            size_t n = initStress ? std::min<size_t>(1, f.size()) : f.size();
+            for (size_t q = 0; q < n; ++q)
+                if (isDead(deadEids, rsIntField(f, q)))
+                    add("EID", b.kw, b.data[m], "manual",
+                        setElem ? "지워진 요소입니다 — 새 층 요소로 세트를 다시 만드세요"
+                                : "지워진 요소입니다 — 새 층 요소 번호로 다시 매핑하세요");
+        }
+    }
+
+    // 7. 노드 축 — restack 이 지운 중간면 노드를 가리키는 카드
+    std::set<int> deadNodeSets;
+    for (size_t bi = 0; bi < blocks.size(); ++bi) {
+        const auto& b = blocks[bi];
+        bool setNode = rsStarts(b.kw, "*SET_NODE") && !rsHas(b.kw, "_GENERATE");
+        bool setSeg  = rsStarts(b.kw, "*SET_SEGMENT");
+        bool spc     = rsStarts(b.kw, "*BOUNDARY_SPC_NODE");
+        if (!setNode && !setSeg && !spc) continue;
+        handled[bi] = true;
+        size_t start = 0;
+        int sid = 0;
+        if (setNode || setSeg) {
+            start = rsHas(b.kw, "_TITLE") ? 1u : 0u;
+            if (start < b.data.size()) sid = rsIntField(rsCardFields(rawLines_[b.data[start]]), 0);
+            ++start;
+        }
+        for (size_t m = start; m < b.data.size(); ++m) {
+            auto f = rsCardFields(rawLines_[b.data[m]]);
+            size_t n = spc ? std::min<size_t>(1, f.size())
+                           : (setSeg ? std::min<size_t>(4, f.size()) : f.size());
+            for (size_t q = 0; q < n; ++q) {
+                if (!isDead(deadNodes, rsIntField(f, q))) continue;
+                if (setNode && sid > 0) deadNodeSets.insert(sid);
+                add("NODE", b.kw, b.data[m], "manual",
+                    "restack 이 지운 중간면 노드입니다 — 새 층 노드로 다시 지정하세요");
+            }
+        }
+    }
+
+    // 7b. 지워진 노드가 든 노드 집합을 쓰는 강체 — NSID 는 카드 1 의 칸 2 다
+    if (!deadNodeSets.empty()) {
+        for (size_t bi = 0; bi < blocks.size(); ++bi) {
+            const auto& b = blocks[bi];
+            if (!rsStarts(b.kw, "*CONSTRAINED_NODAL_RIGID_BODY")) continue;
+            handled[bi] = true;
+            size_t k = rsFirstCard(b.kw);
+            if (k >= b.data.size()) continue;
+            int nsid = rsIntField(rsCardFields(rawLines_[b.data[k]]), 2);
+            if (nsid > 0 && deadNodeSets.count(nsid))
+                add("NODE", b.kw, b.data[k], "manual",
+                    "노드 집합 " + std::to_string(nsid) + " 에 지워진 노드가 있습니다 — 그 세트를 먼저 고치세요");
+        }
+    }
+
+    // 8. '모르는 자리' — 화이트리스트 밖에서 죽은 PID 값이 나오는 줄.
+    //    EID·노드 축까지 여기서 훑으면 *NODE·*ELEMENT 칸과 우연히 같은 값이 쏟아져
+    //    경고가 쓸모없어진다. 그래서 여기서는 죽은 PID 만 본다(파트 하나당 한 개뿐이다).
+    for (size_t bi = 0; bi < blocks.size(); ++bi) {
+        if (handled[bi]) continue;
+        const auto& b = blocks[bi];
+        bool skip = false;
+        for (const char* p : kMaybeSkipKws) if (rsStarts(b.kw, p)) { skip = true; break; }
+        if (skip) continue;
+        for (size_t m = 0; m < b.data.size(); ++m) {
+            auto f = rsCardFields(rawLines_[b.data[m]]);
+            for (size_t q = 0; q < f.size(); ++q)
+                if (isDead(deadPids, rsIntField(f, q)))
+                    add("PID", b.kw, b.data[m], "maybe", kAdviceOutside);
+        }
+    }
+
+    if (found.empty()) return;
+    std::sort(found.begin(), found.end(),
+              [](const PidRefFinding& a, const PidRefFinding& b) { return a.line < b.line; });
+    pidRefFindings_.insert(pidRefFindings_.end(), found.begin(), found.end());
+
+    // 콘솔 — 상위 20 건만 내고 나머지는 개수로 접는다
+    std::ostringstream head;
+    head << "  [WARN] " << opName << ": ";
+    if (!deadPids.empty()) {
+        head << "PID ";
+        bool first = true;
+        for (int dp : deadPids) { head << (first ? "" : ",") << dp; first = false; }
+        head << " 가 빈 파트가 됐습니다 — ";
+    }
+    head << "지워진 PID·요소·노드를 아직 가리키는 자리가 " << found.size() << " 건 남았습니다";
+    if (!newPids.empty()) {
+        head << " (새 층 PID: ";
+        for (size_t r = 0; r < newPids.size(); ++r) head << (r ? "," : "") << newPids[r];
+        head << ")";
+    }
+    infoMessages.push_back(head.str());
+
+    const size_t kShow = 20;
+    size_t maybeCount = 0;
+    for (const auto& f : found) if (f.grade == "maybe") ++maybeCount;
+    for (size_t r = 0; r < found.size() && r < kShow; ++r) {
+        const auto& f = found[r];
+        std::ostringstream ln;
+        ln << "    [" << f.axis << "] line " << f.line << " " << f.keyword
+           << " (" << f.grade << "): " << f.advice;
+        infoMessages.push_back(ln.str());
+        infoMessages.push_back("        | " + f.text);
+    }
+    if (found.size() > kShow) {
+        infoMessages.push_back("    ... 그 밖 " + std::to_string(found.size() - kShow) +
+                               " 건은 출력 덱 머리의 $ KOOREMAPPER-PIDREF 블록에 있습니다");
+    }
+    if (maybeCount > 0) {
+        infoMessages.push_back("    (그 중 모르는 자리 " + std::to_string(maybeCount) +
+                               " 줄 — 화이트리스트 밖이라 칸 뜻을 확인하지 않았습니다)");
+    }
+    infoMessages.push_back("    이번 판은 탐지만 합니다 — 옮기는 것은 다음 단계입니다."
+                           " pid_refs: warn 을 주면 같은 보고를 하고 rc=0 으로 끝냅니다.");
+}
+
 bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double nu) {
+    // 0-. pid_refs 는 strict|warn 둘뿐이다 — 오타를 조용히 strict 로 떨어뜨리면
+    //     'warn 을 줬는데 rc=1' 이 되어 사용자가 이유를 못 찾는다.
+    if (!op.pidRefs.empty()) {
+        if (op.pidRefs != "strict" && op.pidRefs != "warn") {
+            errorMessage_ = "restack: unsupported pid_refs '" + op.pidRefs + "' (allowed: strict, warn)";
+            return false;
+        }
+        pidRefPolicy_ = op.pidRefs;
+    }
+
+    // 0a. 강체 파트는 층을 나눌 수 없다. *MAT_RIGID(020) 파트는 요소가 아니라 한 덩어리로 움직이고,
+    //     *PART_INERTIA 는 질량·관성을 카드에 직접 박아 둔 파트다. 지금까지는 경고 한 줄 없이
+    //     변형체 여러 층이 되어 강체 구속도 박아 둔 질량도 통째로 사라진 덱이 나갔다.
+    {
+        auto pit = baseMesh_.parts.find(op.targetPid);
+        int targetMid = (pit != baseMesh_.parts.end()) ? pit->second.materialId : 0;
+        if (targetMid > 0) {
+            std::set<int> rigidMids = rsCollectRigidMids(rawLines_);
+            if (rigidMids.count(targetMid)) {
+                errorMessage_ = "restack: PID " + std::to_string(op.targetPid) +
+                    " 는 *MAT_RIGID(MID " + std::to_string(targetMid) + ") 강체 파트입니다 —"
+                    " 층을 나누면 강체 구속이 사라지고 변형체 여러 층이 됩니다."
+                    " 강체를 유지하려면 restack 대신 두께를 직접 바꾸세요"
+                    " / cannot restack a rigid part";
+                return false;
+            }
+        }
+        if (rsHasPartInertia(rawLines_, op.targetPid)) {
+            errorMessage_ = "restack: PID " + std::to_string(op.targetPid) +
+                " 에는 *PART_INERTIA 가 걸려 있습니다 — 그 카드의 질량·관성은 새 층으로 나눌 수 없습니다."
+                " 층을 나누려면 *PART_INERTIA 를 먼저 푸세요"
+                " / cannot restack a *PART_INERTIA part";
+            return false;
+        }
+    }
+
     // 0. element_type 은 세 값뿐이다 — 그 밖의 값(hex·오타)이 조용히 solid 로 떨어지던 것을 막는다(D1).
     //    층(layer)의 element_type 은 비워 두면 op 값을 물려받으므로 빈 값만 예외로 둔다.
     {
@@ -1754,14 +2119,19 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
     }
 
     // 9. Remove old elements and intermediate (exclusive) nodes
+    // removedElementIds_/removedNodeIds_ 는 op 를 거듭할수록 쌓인다 — 이번 op 가 지운 것만
+    // 따로 모아 둔다(죽은 참조 스캐너가 남의 op 결과까지 뒤지면 안 된다).
+    std::set<int> thisOpDeadElems, thisOpDeadNodes;
     std::set<int> partExclusive = getPartExclusiveNodeIds(op.targetPid);
     for (const auto* elem : partElems) {
         removedElementIds_.insert(elem->id);
+        thisOpDeadElems.insert(elem->id);
     }
     // Remove exclusive intermediate nodes (keep bottom and top plane nodes)
     for (int nid : partExclusive) {
         if (bottomPlaneNodes.count(nid) == 0 && topPlaneNodes.count(nid) == 0) {
             removedNodeIds_.insert(nid);
+            thisOpDeadNodes.insert(nid);
         }
     }
 
@@ -2014,27 +2384,18 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
     restackedParts_++;
 
     // 11b. 층을 나누면 요소는 새 PID 로 옮겨 가고 원래 파트는 요소 0 개로 남는다.
-    //      사용자가 원안 PID 에 걸어 둔 tied 조건(*SET_PART_LIST·*CONTACT)은 그대로 빈 파트를 가리켜
-    //      아무 일도 하지 않는 덱이 rc=0·경고 0줄로 나갔다. 옮겨 붙이는 정책은 별도 과제지만
-    //      최소한 무엇이 끊겼는지는 알린다.
+    //      사용자가 원안 PID·요소·중간면 노드에 걸어 둔 카드는 그대로 빈 자리를 가리켜
+    //      아무 일도 하지 않는 덱이 rc=0·경고 0줄로 나갔다. 세 축을 모두 훑어 보고한다.
     {
         bool anyLeft = false;
         for (const auto& [eid, elem] : baseMesh_.getElements()) {
             if (elem.partId == op.targetPid && removedElementIds_.count(eid) == 0) { anyLeft = true; break; }
         }
-        if (!anyLeft) {
-            auto refs = restackFindPidReferences(rawLines_, op.targetPid);
-            if (!refs.empty()) {
-                std::ostringstream rm;
-                rm << "  [WARN] Restack: PID " << op.targetPid << " is now empty but "
-                   << refs.size() << " keyword(s) still reference it (";
-                for (size_t r = 0; r < refs.size(); ++r) rm << (r ? ", " : "") << refs[r];
-                rm << ") - re-point them to the new layer PIDs ";
-                for (size_t r = 0; r < layerPidEtype.size(); ++r)
-                    rm << (r ? "," : "") << layerPidEtype[r].first;
-                infoMessages.push_back(rm.str());
-            }
-        }
+        std::set<int> deadPids;
+        if (!anyLeft) deadPids.insert(op.targetPid);
+        std::vector<int> newPids;
+        for (const auto& lp : layerPidEtype) newPids.push_back(lp.first);
+        scanDeadReferences("restack", deadPids, thisOpDeadElems, thisOpDeadNodes, newPids);
     }
 
     // 12. Auto-generate SET_SEGMENT + CONTACT_TIED_*
@@ -3257,6 +3618,41 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
         continueMainLoop:;
     }
 
+    // 죽은 PID/EID/노드를 아직 가리키는 자리가 있으면 덱 머리에 그 목록을 박는다.
+    // 콘솔 경고는 파이프라인 로그에 묻히지만 덱은 솔버까지 따라간다 — 나중에 이 덱을 여는 사람이
+    // '왜 tied 가 아무 일도 안 했는지' 를 파일 안에서 찾을 수 있어야 한다.
+    // 발견이 0 건이면 한 줄도 쓰지 않는다(예전 출력과 바이트 그대로 같아야 한다).
+    if (!pidRefFindings_.empty()) {
+        std::ostringstream blk;
+        blk << "$ KOOREMAPPER-PIDREF: " << pidRefFindings_.size()
+            << " dangling reference(s) — restack/merge 가 비운 PID·지운 요소·지운 노드를 아직 가리킵니다\n";
+        blk << "$ KOOREMAPPER-PIDREF: 등급 auto=다음 단계에서 옮길 대상, manual=직접 고치세요,"
+               " unknown=칸 자리 미확정, maybe=화이트리스트 밖(칸 뜻 미확인)\n";
+        for (const auto& f : pidRefFindings_) {
+            blk << "$ KOOREMAPPER-PIDREF [" << f.axis << "] line " << f.line << " "
+                << f.keyword << " (" << f.grade << "): " << f.advice << "\n";
+            blk << "$ KOOREMAPPER-PIDREF   | " << f.text << "\n";
+        }
+        blk << "$ KOOREMAPPER-PIDREF-END\n";
+
+        std::string body = output.str();
+        // *KEYWORD 는 덱의 첫 키워드여야 한다 — 그 바로 뒤에 넣는다(없으면 맨 앞).
+        size_t ins = 0;
+        {
+            size_t nl = body.find('\n');
+            std::string first = (nl == std::string::npos) ? body : body.substr(0, nl);
+            size_t g = first.find_first_not_of(" \t");
+            if (g != std::string::npos && first[g] == '*') {
+                std::string up = first.substr(g);
+                for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+                if (up.rfind("*KEYWORD", 0) == 0 && nl != std::string::npos) ins = nl + 1;
+            }
+        }
+        body.insert(ins, blk.str());
+        output.str(body);
+        output.seekp(0, std::ios::end);
+    }
+
     // 비유한 값(nan/inf)이 든 덱은 LS-DYNA 가 읽지 못한다 — 쓰기 전에 막는다(D7).
     // 단독 명령과 같은 결말(에러 + 결과 파일 없음 + rc=1)이면서, 아직 아무것도 쓰지 않았으므로
     // 같은 경로에 있던 예전 출력 파일이 망가지지도 않는다.
@@ -3421,6 +3817,29 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
         }
         igaOut << igaf.content;
         igaOut.close();
+    }
+
+    // pid_refs: strict — 옮기지 못한 참조가 하나라도 남으면 rc=1 로 끝낸다.
+    // 덱은 이미 다 썼다(위에서). 여기서 false 를 돌려주는 것은 '쓰기 실패' 가 아니라
+    // '결과를 믿지 말라' 는 신호다 — pyKooCAE Runner 와 플랫폼 워커는 종료 코드로만 성공을 보고,
+    // rc=0 이면 콘솔 경고가 자동화에 아예 안 보인 채 체인이 솔버까지 간다.
+    if (!pidRefFindings_.empty() && pidRefPolicy_ != "warn") {
+        size_t shown = std::min<size_t>(pidRefFindings_.size(), 3);
+        std::ostringstream em;
+        em << "restack/merge 가 비운 PID·지운 요소·지운 노드를 아직 가리키는 자리가 "
+           << pidRefFindings_.size() << " 건 남았습니다 — 덱은 " << outputFile
+           << " 에 썼지만 그대로 풀면 그 조건들이 아무 일도 하지 않습니다.";
+        for (size_t r = 0; r < shown; ++r) {
+            const auto& f = pidRefFindings_[r];
+            em << "\n  [" << f.axis << "] line " << f.line << " " << f.keyword
+               << " (" << f.grade << "): " << f.advice;
+        }
+        if (pidRefFindings_.size() > shown)
+            em << "\n  ... 그 밖 " << (pidRefFindings_.size() - shown) << " 건";
+        em << "\n  전체 목록은 덱 머리의 $ KOOREMAPPER-PIDREF 블록에 있습니다."
+              " 알고도 넘기려면 pid_refs: warn 을 주세요(같은 보고, rc=0).";
+        errorMessage_ = em.str();
+        return false;
     }
 
     return true;
@@ -15023,6 +15442,14 @@ struct MgFaceKeyHash {
 bool ModelAssembler::applyMerge(const MergeOperation& op) {
     infoMessages.clear();
 
+    if (!op.pidRefs.empty()) {
+        if (op.pidRefs != "strict" && op.pidRefs != "warn") {
+            errorMessage_ = "merge: unsupported pid_refs '" + op.pidRefs + "' (allowed: strict, warn)";
+            return false;
+        }
+        pidRefPolicy_ = op.pidRefs;
+    }
+
     if (op.pids.empty()) {
         errorMessage_ = "merge: no PIDs specified";
         return false;
@@ -15366,9 +15793,10 @@ bool ModelAssembler::applyMerge(const MergeOperation& op) {
 
     // Create merged elements — split each column into op.layers groups
     int nLayers = std::max(1, op.layers);
+    std::set<int> mergeDeadElems;
     for (auto& col : columns) {
         if (col.empty()) continue;
-        for (int eid : col) removedElementIds_.insert(eid);
+        for (int eid : col) { removedElementIds_.insert(eid); mergeDeadElems.insert(eid); }
 
         int colSize = (int)col.size();
         int actualLayers = std::min(nLayers, colSize);
@@ -15472,6 +15900,7 @@ bool ModelAssembler::applyMerge(const MergeOperation& op) {
     addedKeywordBlocks_.push_back(kb.str());
 
     // Remove orphan nodes: collect nodes still used, mark the rest for removal
+    std::set<int> mergeDeadNodes;
     {
         std::unordered_set<int> usedNodes;
         // Nodes from non-removed baseMesh elements (solid + shell are both in elements)
@@ -15490,6 +15919,7 @@ bool ModelAssembler::applyMerge(const MergeOperation& op) {
             for (int j = 0; j < 8; j++) {
                 if (e.nid[j] > 0 && !usedNodes.count(e.nid[j])) {
                     removedNodeIds_.insert(e.nid[j]);
+                    mergeDeadNodes.insert(e.nid[j]);
                     orphanCount++;
                 }
             }
@@ -15506,6 +15936,20 @@ bool ModelAssembler::applyMerge(const MergeOperation& op) {
     if (anyCte) {
         snprintf(buf, sizeof(buf), "[merge] CTE=%.4E", cte_mix);
         infoMessages.push_back(buf);
+    }
+
+    // merge 도 restack 과 같은 자리에 빈 파트를 남긴다 — 원 파트들의 요소를 모두 새 PID 로 옮기면서
+    // 원 *PART 카드와 그것을 가리키던 카드는 바이트 그대로 둔다. 세 축을 모두 훑어 보고한다.
+    {
+        std::set<int> deadPids;
+        for (int pid : op.pids) {
+            bool anyLeft = false;
+            for (const auto& [eid, elem] : baseMesh_.getElements()) {
+                if (elem.partId == pid && removedElementIds_.count(eid) == 0) { anyLeft = true; break; }
+            }
+            if (!anyLeft) deadPids.insert(pid);
+        }
+        scanDeadReferences("merge", deadPids, mergeDeadElems, mergeDeadNodes, {newPid});
     }
 
     return true;

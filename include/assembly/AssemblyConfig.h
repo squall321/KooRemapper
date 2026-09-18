@@ -55,6 +55,9 @@ struct RestackOperation {
     double czmShear  = 0.0;            // CZM: shear stress at failure [MPa]
     double dropHeight = 0.0;           // czm_auto: drop height [mm] for VC computation
     std::vector<RestackLayer> layers;
+    // pid_refs: strict(기본) | warn — 비운 PID/지운 요소·노드를 아직 가리키는 자리가 남으면
+    // strict 는 덱을 쓴 뒤 rc=1 로 끝낸다(자동화는 종료 코드로만 성공을 본다). warn 은 같은 보고에 rc=0.
+    std::string pidRefs = "strict";
 };
 
 struct IndentShapePoint {
@@ -507,6 +510,7 @@ struct MergeOperation {
     int newMid = 0;            // 0 = auto
     int layers = 1;            // output layers per column (1=fully merge, N=split into N)
     double tolerance = 0.0;    // node merge tolerance (0=disabled, >0=merge coincident nodes first)
+    std::string pidRefs = "strict";  // restack 과 같은 뜻 — strict | warn
 };
 
 struct StripOperation {
@@ -558,6 +562,8 @@ struct AssemblyOperation {
     MergeOperation merge;
     StripOperation strip;
     ExtractSurfaceOperation extractSurface;
+    // 연산 공통 키 — YAML 의 pid_refs 를 여기로 읽고, 리더가 restack/merge 쪽으로 내려 준다
+    std::string pidRefs = "strict";  // strict | warn
 };
 
 struct AssemblyConfig {

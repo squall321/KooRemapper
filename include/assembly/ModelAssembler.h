@@ -98,6 +98,22 @@ public:
     // Info strings for console output
     std::vector<std::string> infoMessages;
 
+    // restack·merge 가 비운 PID·지운 EID·지운 노드를 아직 가리키고 있는 카드 한 건.
+    // grade: auto(규칙표의 '자동으로 옮긴다' 대상) | manual(보고만) |
+    //        unknown(화이트리스트 키워드인데 칸 자리가 확정되지 않음) | maybe(화이트리스트 밖)
+    struct PidRefFinding {
+        std::string axis;      // "PID" | "EID" | "NODE"
+        std::string keyword;   // 그 줄이 속한 키워드
+        int line = 0;          // 원본 덱 줄 번호(1 부터)
+        std::string text;      // 원문
+        std::string grade;
+        std::string advice;
+    };
+    const std::vector<PidRefFinding>& getPidRefFindings() const { return pidRefFindings_; }
+    // pid_refs: strict(기본) | warn — strict 는 옮기지 못한 참조가 남으면 덱을 쓴 뒤 rc=1 로 끝낸다
+    void setPidRefPolicy(const std::string& policy) { pidRefPolicy_ = policy; }
+    const std::string& getPidRefPolicy() const { return pidRefPolicy_; }
+
 private:
     struct AddedNode { int id; double x, y, z; };
     struct AddedElement {
@@ -191,6 +207,15 @@ private:
     // Dynamic relaxation
     bool dynamicRelaxation_;
     bool dynainEmbed_;
+
+    // 죽은 PID/EID/노드를 가리키는 카드를 3축으로 훑어 pidRefFindings_ 에 모으고 콘솔에 요약한다
+    void scanDeadReferences(const std::string& opName,
+                            const std::set<int>& deadPids,
+                            const std::set<int>& deadEids,
+                            const std::set<int>& deadNodes,
+                            const std::vector<int>& newPids);
+    std::vector<PidRefFinding> pidRefFindings_;
+    std::string pidRefPolicy_ = "strict";
 
     // Restack helpers
     int detectExtrusionAxis(const std::vector<const Element*>& elems) const;
