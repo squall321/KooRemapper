@@ -173,6 +173,14 @@ def main():
     check("카탈로그 offset.thickness 는 required 아님(thickness_formula 대안)",
           cat_key(ops, "offset", "thickness")["required"] is False)
 
+    rc, out = yaml_run(binary, d, "bend", "b_nopid",
+                       "model: flat.k\noutput: b_nopid.k\nsource: formula\n"
+                       'expression: "0.1*x1"\n')
+    check("단독 bend: target_pid 없이 rc=0 (0 = 전체 파트)", rc == 0, out[-200:])
+    check("카탈로그 bend.target_pid 는 required 아님",
+          cat_key(ops, "bend", "target_pid")["required"] is False,
+          str(cat_key(ops, "bend", "target_pid")))
+
     rc, out = run(binary, d, "prestress", "--strain", "log", "flat.k", "flat.k", "pre_log.dynain")
     check("prestress --strain log 은 rc=0", rc == 0, out[-200:])
     check("카탈로그 prestress.params.strain enum 에 log 있음",

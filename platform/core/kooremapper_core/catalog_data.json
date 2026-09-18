@@ -1732,9 +1732,9 @@
         {
           "path": "target_pid",
           "type": "integer",
-          "required": true,
-          "default": "null",
-          "desc": "Part ID to deform. 0 = all parts, positive integer = specific part ID. Mutually exclusive with target_pids array; if target_pids is non-empty, target_pid is ignored."
+          "required": false,
+          "default": "0",
+          "desc": "Part ID to deform. Optional — omitted (or 0) means all parts; positive integer = specific part ID. Mutually exclusive with target_pids array; if target_pids is non-empty, target_pid is ignored."
         },
         {
           "path": "target_pids",
