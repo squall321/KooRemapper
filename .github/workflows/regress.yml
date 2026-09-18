@@ -25,12 +25,12 @@ jobs:
       - name: Unit tests
         run: ./build/bin/KooRemapper_tests
 
-      # help 의 matdb 사례는 database 를 SIF 경로로 직접 가리킨다.
-      # 번들 DB 를 그 자리에 두지 않으면 'Cannot load database from: ...' 로 rc=1 이 된다.
+      # help 의 matdb 사례는 database 를 SIF 경로(/opt/kooremapper/...)로 가리키지만,
+      # run_help_examples.py 가 실행 전에 그 앞부분을 '<바이너리의 조부모>/' 로 바꿔 쓴다.
+      # 즉 /opt 가 아니라 build/materials/material_db.json 을 읽으므로 그 자리에 둔다.
+      # (CMake 는 materials 를 build/bin/materials 에 놓아 조부모 자리에는 없다.)
       - name: Stage bundled material DB (for the matdb help example)
-        run: |
-          sudo mkdir -p /opt/kooremapper/materials
-          sudo cp dist/materials/material_db.json /opt/kooremapper/materials/
+        run: cp -r dist/materials build/
 
       # 러너에는 gmsh 가 없다. gmsh 를 쓰는 항목(meshfix 실행, gmsh 탐색)은 시험 쪽에서
       # 스스로 'SKIP: gmsh 실행 파일 없음' 을 찍고 넘어간다 — 아래 로그에 그대로 남는다.
