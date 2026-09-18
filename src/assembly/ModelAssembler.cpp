@@ -913,6 +913,28 @@ double computeAutoVC(const std::string& matCard, double dropHeight_mm, double la
 } // anonymous namespace
 
 bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double nu) {
+    // 0. element_type 은 세 값뿐이다 — 그 밖의 값(hex·오타)이 조용히 solid 로 떨어지던 것을 막는다(D1).
+    //    층(layer)의 element_type 은 비워 두면 op 값을 물려받으므로 빈 값만 예외로 둔다.
+    {
+        auto validEtype = [](const std::string& t) {
+            return t == "solid" || t == "tshell" || t == "shell";
+        };
+        if (!validEtype(op.elementType)) {
+            errorMessage_ = "restack: unsupported element_type '" + op.elementType +
+                            "' (allowed: solid, tshell, shell)";
+            return false;
+        }
+        for (size_t li = 0; li < op.layers.size(); ++li) {
+            const std::string& lt = op.layers[li].elementType;
+            if (!lt.empty() && !validEtype(lt)) {
+                errorMessage_ = "restack: layers[" + std::to_string(li) +
+                                "]: unsupported element_type '" + lt +
+                                "' (allowed: solid, tshell, shell)";
+                return false;
+            }
+        }
+    }
+
     // 1. Collect target part elements
     std::vector<const Element*> partElems;
     for (const auto& [eid, elem] : baseMesh_.getElements()) {
