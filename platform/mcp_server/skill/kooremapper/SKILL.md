@@ -40,6 +40,24 @@ LS-DYNA `.k` 파일을 다루는 KooRemapper 플랫폼을 Claude에서 사용하
   예) assemble → `{"config":{"base_model":"model.k","output":"result","operations":[...]}}`
 - 잘 모르면 `describe_operation(op)` 의 `example.args` 를 거의 그대로 쓰고 파일명만 바꾼다.
 
+### 모르는 열거값은 이제 rc=1 이다
+
+예전에 조용히 기본값으로 떨어지던 값들이 지금은 오류로 끝나고 산출물도 안 나온다.
+`describe_operation(op)` 의 `keys[].values` 를 그대로 따르라. 자주 틀리는 것들.
+
+- `restack` 의 `element_type`(층별 포함): `solid` / `tshell` / `shell` 만. 대소문자까지 맞춰야 한다(`SOLID` 도 거절).
+- `matdb` 의 `damping_preset`: `smartphone_drop` / `smartphone_drop_aggressive` / `quasi_static` / `off` 만(키 생략은 허용).
+- `boundary` 의 `select`: `direction` / `all` / `set`. `rbe` 의 `select`: `direction` / `all` (여기엔 `set` 이 없다).
+  `load` 의 `select`: `direction` / `set` / `tied` (여기엔 `all` 이 없다). 세 op 이 서로 다르다.
+- `contact` create 의 `type`: 약칭(`auto`·`tied`·`tied_thermal`·`tiebreak`·`mortar`·`tied_mortar`·`single`·`eroding`·`forming`)이나
+  전체 `*CONTACT_` 키워드를 쓴다. 모르는 값은 rc=0 이지만 대문자로 그대로 나가 LS-DYNA 가 거절하므로, job 로그의
+  `not a known contact keyword` 경고를 확인하라. `assemble` 안에서는 `tied_thermal`·`thermal`·`tiebreak` 가 약칭이 아니다 —
+  전체 키워드를 적어라.
+- 단독 op(`wrap`·`update`·`restack`·`bend`·`indent`·`formstrain`·`convert`·`refine`·`elform`·`disconnect`·`iga`·`warpage`·`offset`)는
+  `output` 이 비면 rc=1 이다.
+- 결과 덱에 `nan`/`inf` 가 있으면 파일을 쓰지 않고 rc=1 이다. 같은 이름의 지난 결과는 지워지지 않고 남으므로,
+  실패한 job 의 산출물 목록에 옛 파일이 보이면 새 결과로 오해하지 마라.
+
 ## 자주 쓰는 op
 
 - `map` / `shellmap` : flat → bent 매핑(코어)
