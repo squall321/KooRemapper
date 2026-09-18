@@ -153,6 +153,16 @@ static bool rejectMultiOperation(const std::string& yamlFile, const char* tag, c
     return true;
 }
 
+// output 이 비면 예전엔 입력 모델 경로를 그대로 출력 이름으로 써 사용자 원본을 그 자리에서 덮어썼다
+// (assemble 은 같은 설정을 'output not specified' 로 거부). 접미사 자동 생성 같은 기본 이름 규칙은
+// 코드 어디에도 없어 '덮어쓰기'가 유일한 동작이었으므로 D3 대로 거절한다.
+static bool rejectEmptyOutput(const StandaloneYamlBase& y, const char* tag, const ConsoleOutput& console) {
+    if (!y.outputFile.empty()) return false;
+    console.error(std::string("[") + tag + "] output 이 비어 있습니다 — 입력 모델을 덮어쓰게 되므로 output 을 지정하세요 / "
+                  "output not specified; it would overwrite the input model.");
+    return true;
+}
+
 // ── Standalone wrap ─────────────────────────────────────────────────────────
 int runWrap(const std::string& yamlFile, ConsoleOutput& console) {
     StandaloneYamlBase y;
@@ -205,6 +215,7 @@ int runWrap(const std::string& yamlFile, ConsoleOutput& console) {
     }
     f.close();
 
+    if (rejectEmptyOutput(y, "wrap", console)) return 1;
     if (op.targetPids.empty()) { console.error("No target_pid specified"); return 1; }
     if (op.tension == 0.0) { console.error("tension must be non-zero"); return 1; }
 
@@ -252,6 +263,8 @@ int runUpdate(const std::string& yamlFile, ConsoleOutput& console) {
 
     if (y.modelFile.empty()) { console.error("[update] model not specified"); return 1; }
     if (op.dynainFile.empty()) { console.error("[update] dynain not specified"); return 1; }
+
+    if (rejectEmptyOutput(y, "update", console)) return 1;
 
     // Resolve paths
     std::string modelPath = y.resolvePath(y.modelFile);
@@ -369,6 +382,7 @@ int runRestack(const std::string& yamlFile, ConsoleOutput& console) {
 
     if (y.modelFile.empty()) { console.error("[restack] model not specified"); return 1; }
     std::string modelPath = y.resolvePath(y.modelFile);
+    if (rejectEmptyOutput(y, "restack", console)) return 1;
     std::string outputPrefix = y.getOutputPrefix();
 
     console.println("[restack] Model: " + modelPath);
@@ -416,6 +430,7 @@ int runBend(const std::string& yamlFile, ConsoleOutput& console) {
 
     if (y.modelFile.empty()) { console.error("[bend] model not specified"); return 1; }
     std::string modelPath = y.resolvePath(y.modelFile);
+    if (rejectEmptyOutput(y, "bend", console)) return 1;
     std::string outputPrefix = y.getOutputPrefix();
 
     console.println("[bend] Model: " + modelPath);
@@ -492,6 +507,7 @@ int runIndent(const std::string& yamlFile, ConsoleOutput& console) {
 
     if (y.modelFile.empty()) { console.error("[indent] model not specified"); return 1; }
     std::string modelPath = y.resolvePath(y.modelFile);
+    if (rejectEmptyOutput(y, "indent", console)) return 1;
     std::string outputPrefix = y.getOutputPrefix();
 
     console.println("[indent] Model: " + modelPath);
@@ -534,6 +550,7 @@ int runFormstrain(const std::string& yamlFile, ConsoleOutput& console) {
 
     if (y.modelFile.empty()) { console.error("[formstrain] model not specified"); return 1; }
     std::string modelPath = y.resolvePath(y.modelFile);
+    if (rejectEmptyOutput(y, "formstrain", console)) return 1;
     std::string outputPrefix = y.getOutputPrefix();
 
     console.println("[formstrain] Model: " + modelPath);
@@ -575,6 +592,7 @@ int runConvert(const std::string& yamlFile, ConsoleOutput& console) {
 
     if (y.modelFile.empty()) { console.error("[convert] model not specified"); return 1; }
     std::string modelPath = y.resolvePath(y.modelFile);
+    if (rejectEmptyOutput(y, "convert", console)) return 1;
     std::string outputPrefix = y.getOutputPrefix();
 
     console.println("[convert] Model: " + modelPath);
@@ -616,6 +634,7 @@ int runRefine(const std::string& yamlFile, ConsoleOutput& console) {
 
     if (y.modelFile.empty()) { console.error("[refine] model not specified"); return 1; }
     std::string modelPath = y.resolvePath(y.modelFile);
+    if (rejectEmptyOutput(y, "refine", console)) return 1;
     std::string outputPrefix = y.getOutputPrefix();
 
     console.println("[refine] Model: " + modelPath);
@@ -656,6 +675,7 @@ int runElform(const std::string& yamlFile, ConsoleOutput& console) {
 
     if (y.modelFile.empty()) { console.error("[elform] model not specified"); return 1; }
     std::string modelPath = y.resolvePath(y.modelFile);
+    if (rejectEmptyOutput(y, "elform", console)) return 1;
     std::string outputPrefix = y.getOutputPrefix();
 
     console.println("[elform] Model: " + modelPath);
@@ -698,6 +718,7 @@ int runDisconnect(const std::string& yamlFile, ConsoleOutput& console) {
 
     if (y.modelFile.empty()) { console.error("[disconnect] model not specified"); return 1; }
     std::string modelPath = y.resolvePath(y.modelFile);
+    if (rejectEmptyOutput(y, "disconnect", console)) return 1;
     std::string outputPrefix = y.getOutputPrefix();
 
     console.println("[disconnect] Model: " + modelPath);
@@ -803,6 +824,7 @@ int runIga(const std::string& yamlFile, ConsoleOutput& console) {
 
     if (y.modelFile.empty()) { console.error("[iga] model not specified"); return 1; }
     std::string modelPath = y.resolvePath(y.modelFile);
+    if (rejectEmptyOutput(y, "iga", console)) return 1;
     std::string outputPrefix = y.getOutputPrefix();
 
     // Expand target_pids into individual single-pid targets
@@ -890,6 +912,7 @@ int runWarpage(const std::string& yamlFile, ConsoleOutput& console) {
 
     if (y.modelFile.empty()) { console.error("[warpage] model not specified"); return 1; }
     std::string modelPath = y.resolvePath(y.modelFile);
+    if (rejectEmptyOutput(y, "warpage", console)) return 1;
     std::string outputPrefix = y.getOutputPrefix();
 
     console.println("[warpage] Model: " + modelPath);
@@ -1018,6 +1041,7 @@ int runOffset(const std::string& yamlFile, ConsoleOutput& console) {
 
     if (y.modelFile.empty()) { console.error("[offset] model not specified"); return 1; }
     std::string modelPath = y.resolvePath(y.modelFile);
+    if (rejectEmptyOutput(y, "offset", console)) return 1;
     std::string outputPrefix = y.getOutputPrefix();
 
     console.println("[offset] Model: " + modelPath);
