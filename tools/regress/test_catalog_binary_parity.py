@@ -15,8 +15,9 @@
   - matdb 의 damping_preset 설명은 '키를 빼면 감쇠 변화 없음' 이라고 했지만, 매칭된 DB 물성의
     감쇠 카드는 프리셋과 무관하게 항상 삽입되고 묵은 *DAMPING_PART_* 제거는 값이 있을 때만
     일어난다 — 프리셋 없이 두 번 돌리면 감쇠 카드가 중복된다.
-  - assemble 노트 5 는 database 도 config 폴더 기준이라고 했지만, database 만 슬래시 없는
-    파일명일 때만 config 폴더 기준이고 폴더가 붙은 상대경로는 CWD 기준이라 rc=1 로 죽는다.
+  - assemble 노트 5 는 한때 database 만 예외라 폴더가 붙은 상대경로는 CWD 기준이라고 적었다.
+    지금은 database 도 설정 폴더 기준이고, 그 자리에 없는 '폴더 없는 이름' 만 번들 DB 로
+    넘어간다 — 폴더가 붙은 오타는 번들로 바꿔치기되지 않고 rc=1 로 죽어야 한다.
 """
 import json
 import os
@@ -316,28 +317,37 @@ def main():
           "whether or not this key is present" in dp and "strips pre-existing *DAMPING_PART_*" in dp,
           dp[:300])
 
-    print("[matdb database 경로 — 슬래시가 있으면 CWD 기준]")
+    print("[matdb database 경로 — YAML 폴더 기준, 번들 폴백은 폴더 없는 이름만]")
     sub = os.path.join(d, "dbsub")
     os.makedirs(os.path.join(sub, "mats"), exist_ok=True)
     shutil.copy2(os.path.join(md, "smartphone_stack.k"), sub)
     shutil.copy2(os.path.join(md, "material_db.json"), os.path.join(sub, "mats"))
     shutil.copy2(os.path.join(md, "material_db.json"), os.path.join(sub, "mdb.json"))
-    open(os.path.join(sub, "slash.yaml"), "w").write(
-        matdb_yaml("smartphone_stack.k", "out_slash.k").replace(
-            "database: material_db.json", "database: mats/material_db.json"))
-    open(os.path.join(sub, "noslash.yaml"), "w").write(
-        matdb_yaml("smartphone_stack.k", "out_noslash.k").replace(
-            "database: material_db.json", "database: mdb.json"))
-    # 설정 폴더가 아닌 곳(d)에서 실행한다 — 노트 5 가 말하는 상황
-    rc, out = run(binary, d, "matdb", "dbsub/slash.yaml")
-    check("database: 'mats/material_db.json' (슬래시 있음) 은 CWD 기준이라 rc=1",
-          rc == 1 and "Cannot load database from: mats/material_db.json" in out, out[-200:])
-    rc, out = run(binary, d, "matdb", "dbsub/noslash.yaml")
-    check("database: 'mdb.json' (슬래시 없음) 은 YAML 폴더 기준이라 rc=0",
-          rc == 0 and "Loaded" in out, out[-200:])
-    check("assemble 노트 5 가 database 를 일반 목록에서 빼고 예외로 적는다",
-          "database, dynain" not in notes
-          and "**`database` (matdb) is the one exception**" in notes,
+
+    def db_yaml(name, out, dbval):
+        open(os.path.join(sub, name + ".yaml"), "w").write(
+            matdb_yaml("smartphone_stack.k", out).replace(
+                "database: material_db.json", "database: " + dbval))
+        # 설정 폴더가 아닌 곳(d)에서 실행한다 — 규칙이 CWD 로 되돌아가지 않는지 본다
+        return run(binary, d, "matdb", "dbsub/" + name + ".yaml")
+
+    rc, out = db_yaml("slash", "out_slash.k", "mats/material_db.json")
+    check("database: 'mats/material_db.json' (폴더 붙음) 도 YAML 폴더 기준이라 rc=0",
+          rc == 0 and os.path.exists(os.path.join(sub, "out_slash.k")), f"rc={rc} {out[-200:]}")
+    check("database 로그가 실제로 읽은 파일 경로를 남긴다 (어느 DB 인지 추적 가능)",
+          "materials from dbsub/mats/material_db.json" in out, out[-300:])
+    rc, out = db_yaml("noslash", "out_noslash.k", "mdb.json")
+    check("database: 'mdb.json' (폴더 없음) 도 YAML 폴더 기준이라 rc=0",
+          rc == 0 and "materials from dbsub/mdb.json" in out, f"rc={rc} {out[-200:]}")
+    # 폴더가 붙은 오타는 번들로 넘어가지 않는다 — 틀린 DB 로 조용히 계산이 끝나면 안 된다
+    rc, out = db_yaml("typo", "out_typo.k", "../matz/material_db.json")
+    check("database: '../matz/material_db.json' (없는 폴더) 는 번들 폴백 없이 rc=1",
+          rc == 1 and "Cannot load database from: dbsub/../matz/material_db.json" in out
+          and not os.path.exists(os.path.join(sub, "out_typo.k")), f"rc={rc} {out[-300:]}")
+    check("assemble 노트 5 가 database 도 설정 폴더 기준이라 적고 번들 폴백 조건을 밝힌다",
+          "database, dynain" in notes
+          and "bare filename" in notes and "never falls back" in notes
+          and "is the one exception" not in notes,
           notes[:200])
 
     # ── 6b. 2단계 A 가 새로 거절하는 값 / 새로 받는 값 ────────────────────────

@@ -6,7 +6,7 @@
 # Usage: KooRemapper battery examples/battery/swell/wound/wound_swell_small.yaml
 # =============================================================
 
-output: examples/battery/swell/wound/battery_wound_swell_fr08
+output: battery_wound_swell_fr08
 model_type: wound
 tier: 0
 phase: 1

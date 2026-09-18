@@ -612,7 +612,9 @@ int runBattery(const std::string& yamlFile, ConsoleOutput& console) {
         size_t lastSlash = yamlFile.find_last_of("/\\");
         if (lastSlash != std::string::npos) configDir = yamlFile.substr(0, lastSlash);
         cfg.output     = KooRemapper::yamlResolvePath(configDir, cfg.output);
-        cfg.dynainFile = KooRemapper::yamlResolvePath(configDir, cfg.dynainFile);
+        // dynain_file 은 경로 해석 대상이 아니다 — KooRemapper 가 이 파일을 열지 않고
+        // *INCLUDE_DYNAIN 다음 줄에 적힌 문자열을 그대로 찍는다. 솔버는 그 줄을 덱이
+        // 있는 폴더 기준으로 읽으므로 configDir 을 붙이면 include 가 어긋난다.
     }
 
     // Batch mode?

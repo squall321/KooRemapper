@@ -67,7 +67,7 @@ variable_density:
      {},
      {"KooRemapper battery examples/battery/swell/stacked/stacked_swell.yaml"},
      {"examples/battery/swell/stacked/stacked_swell.yaml"},
-     {"설정 키가 많아 저장소 예제(examples/battery/swell/stacked|wound/*.yaml)를 복사해 고쳐 쓰는 편이 안전하다.", "output 경로의 폴더가 있어야 한다."}},
+     {"설정 키가 많아 저장소 예제(examples/battery/swell/stacked|wound/*.yaml)를 복사해 고쳐 쓰는 편이 안전하다.", "output 경로의 폴더가 있어야 한다.", "dynain_file 은 경로가 아니라 *INCLUDE_DYNAIN 에 그대로 찍히는 문자열이다 — 산출 덱 옆에서 솔버가 찾을 이름으로 적을 것"}},
     {"cclip", "메시 생성", "육면체 파트를 힘-변위로 보정한 C형 스프링 클립(눌린 상태 초기응력)으로 치환", "클립 spring 스프링 접점", "KooRemapper cclip <config.yaml>",
      {{"board.yaml", R"KRH(output: clip_board.k
 lx: 3.0
@@ -663,7 +663,7 @@ loads:
      {"KooRemapper generate box box.yaml", "KooRemapper load load.yaml"},
      {},
      {"mode: pressure | normal_pressure(direction 없이 노출면 전체) | force(총 힘 N 을 투영면적으로 나눠 압력화)", "select: direction(법선과 direction 사이 angle 이내 면) | tied(tied 접촉 세그먼트) | set(기존 *SET_SEGMENT, set_id 필요)"}},
-    {"boundary", "하중·경계·접촉", "파트 면을 골라 SPC 구속 또는 강체벽", "구속 spc 경계조건 fixed", "KooRemapper boundary <config.yaml>",
+    {"boundary", "하중·경계·접촉", "파트 면을 골라 SPC 구속", "구속 spc 경계조건 fixed", "KooRemapper boundary <config.yaml>",
      {{"box.yaml", R"KRH(output: box.k
 lx: 20.0
 ly: 10.0

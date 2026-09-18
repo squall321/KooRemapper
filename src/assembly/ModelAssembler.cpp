@@ -9662,18 +9662,22 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
     } else {
         // 적은 값은 다른 경로 키와 같은 규칙으로 푼다 — YAML 폴더 기준(§3.1(a)).
         // 예전엔 이 키만 달랐다: '슬래시 없는 이름' 만 YAML 폴더, 폴더가 붙으면 작업 폴더.
-        // 그 자리에 파일이 없으면 같은 '파일 이름' 을 번들에서 찾는다 —
-        // 'database: material_db.json' 처럼 번들 DB 이름만 적던 기존 사용법을 지킨다.
+        // 번들 폴백은 '폴더가 붙지 않은 순수 이름' 일 때만 — 'database: material_db.json'
+        // 처럼 번들 DB 이름만 적던 사용법은 지키되, 폴더가 붙은 오타(../matz/material_db.json)
+        // 를 조용히 다른 DB 로 바꿔치기하지 않는다. 그건 예전처럼 rc=1 로 실패해야 한다.
         // 절대 경로는 그대로 — 사용자가 집어 준 자리를 조용히 바꾸지 않는다.
         std::string resolved = KooRemapper::yamlResolvePath(configDir, dbPath);
         if (resolved == dbPath && (dbPath[0] == '/' || dbPath[0] == '\\' ||
                                    (dbPath.size() >= 2 && dbPath[1] == ':'))) {
             // 절대 경로
-        } else if (!std::ifstream(resolved).good()) {
-            size_t sp = dbPath.find_last_of("/\\");
-            std::string base = (sp == std::string::npos) ? dbPath : dbPath.substr(sp + 1);
-            std::string bundled = md_findBundledDb(base);
-            if (!bundled.empty()) resolved = bundled;
+        } else if (dbPath.find_last_of("/\\") == std::string::npos &&
+                   !std::ifstream(resolved).good()) {
+            std::string bundled = md_findBundledDb(dbPath);
+            if (!bundled.empty()) {
+                infoMessages.push_back("[matdb] WARNING: '" + resolved +
+                                       "' not found - using bundled '" + bundled + "'");
+                resolved = bundled;
+            }
         }
         dbPath = resolved;
     }
@@ -9684,7 +9688,9 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
         errorMessage_ = "[matdb] ERROR: Cannot load database from: " + dbPath;
         return false;
     }
-    infoMessages.push_back("[matdb] Loaded " + std::to_string(db.materials.size()) + " materials from DB");
+    // 어느 파일을 실제로 읽었는지 항상 남긴다 — 폴백이 끼어들 수 있어 경로 없이는 추적이 안 된다.
+    infoMessages.push_back("[matdb] Loaded " + std::to_string(db.materials.size()) +
+                           " materials from " + dbPath);
 
     // 2b. Resolve damping rescaling (preset + explicit fields).
     MdResolvedDamping dampCfg = md_resolveDamping(op);

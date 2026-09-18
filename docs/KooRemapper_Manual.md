@@ -1964,10 +1964,12 @@ boundaries:
     angle: 45.0              # 면 선택 각도 허용치(°)
 ```
 
-> **`*RIGIDWALL` 은 나오지 않습니다.** 바이너리의 `boundary` help 가 아직
-> `Inserts *BOUNDARY_SPC_NODE, *RIGIDWALL_PLANAR keywords.` 라고 찍지만, 소스에는 강체벽을 쓰는 코드가 없고
-> 실제 출력 덱에도 `*RIGIDWALL` 이 0건입니다. 노드 구속도 `*BOUNDARY_SPC_NODE` 가 아니라
-> **노드 세트 + `*BOUNDARY_SPC_SET`** 으로 나갑니다. 강체벽이 필요하면 `*RIGIDWALL_PLANAR` 를 직접 덱에 넣으세요.
+> **`*RIGIDWALL` 은 나오지 않습니다.** 소스에는 강체벽을 쓰는 코드가 없고 실제 출력 덱에도
+> `*RIGIDWALL` 이 0건입니다. 노드 구속도 `*BOUNDARY_SPC_NODE` 가 아니라
+> **노드 세트 + `*BOUNDARY_SPC_SET`** 으로 나갑니다. 바이너리 help 도 이제
+> `Inserts *SET_NODE_LIST + *BOUNDARY_SPC_SET keywords.` 로 찍고 한 줄 요약도 `파트 면을 골라 SPC 구속`
+> 입니다(예전 판은 `*BOUNDARY_SPC_NODE, *RIGIDWALL_PLANAR` 를 약속했습니다).
+> 강체벽이 필요하면 `*RIGIDWALL_PLANAR` 를 직접 덱에 넣으세요.
 
 ### 파라미터
 

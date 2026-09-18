@@ -98,7 +98,11 @@ void printOverview(std::ostream& os, const std::string& version) {
     os << "    (model/base_model/output/dat_file/dynain…)를 그 YAML 파일이 있는 폴더 기준으로 푼다 —\n";
     os << "    폴더가 붙은 상대 경로(../data/box.k)도 같고, 작업 폴더로 되돌아가지 않는다\n";
     os << "    (KooRemapper strip cfg/strip.yaml 의 output: ../data/box_stripped.k → cfg/../data/box_stripped.k)\n";
-    os << "  - 예외: matdb 의 database 키는 아직 작업 폴더 기준이다(생략하면 ./materials/material_db.json)\n";
+    os << "  - matdb 의 database 도 YAML 폴더 기준이다. 그 자리에 없고 폴더 없는 이름이면 번들에서 찾는다\n";
+    os << "    (키를 생략하면 번들 materials/material_db.json). 폴더가 붙은 상대 경로는 번들로 넘어가지 않는다\n";
+    os << "  - battery 의 dynain_file 은 경로가 아니라 *INCLUDE_DYNAIN 에 그대로 찍히는 문자열이다\n";
+    os << "    (KooRemapper 는 열지 않는다 — 산출 덱 옆에서 솔버가 찾을 이름으로 적을 것)\n";
+    os << "  - 남은 예외: map 의 bent/flat/output 은 아직 작업 폴더 기준이다\n";
     os << "  - 단독 op 명령은 operations 항목이 2개 이상인 YAML 을 거절하고 종료 코드 1 (assemble 로 실행할 것)\n";
     os << "  - 값 뒤 '# 주석' 은 떼어내고 값을 감싼 따옴표도 벗긴다. 따옴표 안의 '#' 는 값으로 남는다\n";
     os << "  - 실패하면 [ERROR] 줄을 찍고 종료 코드 1\n";

@@ -7,7 +7,7 @@
 # Usage: KooRemapper battery examples/battery/swell/stacked/stacked_swell.yaml
 # =============================================================
 
-output: examples/battery/swell/stacked/battery_stacked_swell
+output: battery_stacked_swell
 model_type: stacked
 tier: 0
 phase: 1

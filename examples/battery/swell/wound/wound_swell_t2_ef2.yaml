@@ -1,5 +1,5 @@
 # Wound Swell — Tier 2, ELFORM=2
-output: examples/battery/swell/wound/battery_wound_swell_t2_ef2
+output: battery_wound_swell_t2_ef2
 model_type: wound
 tier: 2
 phase: 1

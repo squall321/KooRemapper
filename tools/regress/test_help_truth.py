@@ -11,7 +11,8 @@
   - '--help 공통 규칙' 의 '경로는 작업 폴더 기준' 이 거짓이었다(YAML 이 있는 폴더 기준).
   - 한때 '예외: load/boundary/contact/relax/… 는 폴더 없는 이름만 YAML 폴더 기준' 이라고 적었는데,
     그 갈래가 모두 YAML 폴더 기준으로 고쳐진 뒤에도 문장이 남아 다시 거짓이 됐다.
-    지금 남은 예외는 matdb 의 database 키뿐이다(작업 폴더 기준).
+    matdb 의 database 도 같은 규칙으로 고쳐졌는데 '아직 작업 폴더 기준' 이라는 예외 문장이
+    또 남았다 — 없앤 예외를 계속 적지 않는지 아래에서 못 박는다. 지금 남은 예외는 map 뿐이다.
   - 'generate-var --no-scale' 을 'use YAML lengths as-is' 라고 적었지만 J/K 는 1.0 이 된다.
   - 'prestress --strain' / 'strain --type' 이 모르는 값을 조용히 기본값으로 삼켰다.
   - 'prestress --strain log' 는 green 과 바이트 동일한 결과였다(help 에만 있던 값).
@@ -196,8 +197,15 @@ def main():
     # 폴더가 붙은 상대 경로까지 YAML 폴더 기준이다. help 가 그렇게 적고 있는지, 실제로 그렇게 도는지 본다.
     check("공통 규칙: 폴더 붙은 상대 경로도 YAML 폴더 기준이라고 적음",
           "폴더가 붙은 상대 경로" in rules and "load/boundary" not in rules, rules[:700])
-    check("공통 규칙: 남은 예외는 matdb 의 database 키라고 적음",
-          "matdb" in rules and "database" in rules, rules[:700])
+    check("공통 규칙: matdb 의 database 도 YAML 폴더 기준이라고 적음",
+          "matdb" in rules and "database" in rules
+          and "database 키는 아직 작업 폴더 기준" not in rules, rules[:900])
+    check("공통 규칙: 남은 작업 폴더 기준 예외로 map 만 적음",
+          "남은 예외" in rules and "map" in rules, rules[:900])
+    # 없앤 예외를 다시 사실처럼 적지 않는지 — '예외' 로 시작하는 줄에 matdb/database 가 없어야 한다
+    exc_lines = [ln for ln in rules.splitlines() if "예외" in ln]
+    check("공통 규칙: '예외' 줄에 matdb·database 가 남아 있지 않다",
+          not any(("matdb" in ln or "database" in ln) for ln in exc_lines), exc_lines)
     open(os.path.join(tmp, "cfg", "box.k"), "wb").write(
         open(os.path.join(tmp, "data", "box.k"), "rb").read())
     LOAD_CASE = "loads:\n  - part: 1\n    mode: normal_pressure\n    value: 1.0\n"

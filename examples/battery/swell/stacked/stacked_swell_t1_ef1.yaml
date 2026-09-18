@@ -1,5 +1,5 @@
 # Stacked Swell — Tier 1, ELFORM=1
-output: examples/battery/swell/stacked/battery_stacked_swell_t1_ef1
+output: battery_stacked_swell_t1_ef1
 model_type: stacked
 tier: 1
 phase: 1

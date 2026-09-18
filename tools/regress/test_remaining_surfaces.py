@@ -16,10 +16,19 @@
         경로를 명령줄 인자로만 받으므로 §3.1(a) 의 대상이 아니다. 둘 다 여기서 함께 못박아 둔다.)
        meshfix 는 덤으로, gmsh 가 .geo 안 Save 의 상대 경로를 '.geo 가 있는 폴더' 기준으로 풀어
        output 에 폴더가 붙으면 임시 .msh 경로가 두 번 붙던 버그도 같이 막는다.
+       [H3b] 그 configDir 접두사가 동봉 battery 예제 19개를 전부 깨뜨렸다 — 예제의 output 이
+       저장소 루트 기준 경로(examples/battery/swell/wound/…)를 싣고 있어 폴더가 두 번 겹쳤다.
+       예제의 output 을 YAML 폴더 기준 이름으로 고쳤고, 여기서 예제 전수를 실제로 돌려 못박는다.
+       [H3c] battery 의 dynain_file 은 경로가 아니라 *INCLUDE_DYNAIN 다음 줄에 그대로 찍히는
+       문자열이다(KooRemapper 는 열지 않는다). configDir 을 붙이면 덱 폴더에서 솔버가 찾는
+       자리가 어긋나므로 이 키만 경로 해석에서 뺀다.
   [H4] matdb 의 database 키만 규칙이 달랐다 — '슬래시 없는 이름' 은 YAML 폴더, '폴더가 붙은 상대
        경로' 는 작업 폴더. 이제 다른 경로 키와 같다: **YAML 폴더 기준으로 먼저 찾고, 그 자리에
-       없으면 같은 파일 이름을 번들(작업 폴더 materials/, <exe>/materials/, <exe>/../materials/)에서
-       찾는다. 절대 경로는 그대로, 키를 생략하면 예전처럼 번들.**
+       없고 '폴더가 붙지 않은 이름' 이면 번들(작업 폴더 materials/, <exe>/materials/,
+       <exe>/../materials/)에서 같은 이름을 찾는다. 절대 경로는 그대로, 키를 생략하면 예전처럼 번들.**
+       폴백을 경로 모양 없이 허용하면 '../matz/material_db.json' 같은 오타가 조용히 번들 DB 로
+       바꿔치기되어 틀린 재질로 계산이 끝났다 — 폴더가 붙은 상대 경로는 예전처럼 rc=1 이고,
+       폴백이 일어나면 WARNING 을, 성공하면 읽은 파일 경로를 반드시 찍는다.
   [H5] rbe 의 mode 에 D1 검증이 없어 'mode: bogus' 가 조용히 face 모드로 돌며 rc=0 이었다
        (아래 분기가 'spider' 만 갈라내고 나머지를 전부 face 로 흘린다). select 와 같은 규칙으로 거절한다.
   [H6] assemble 의 contact create 에 단독 contact 가 가진 별칭 tied_thermal / thermal / tiebreak 가
@@ -29,6 +38,7 @@
        적었지만 실제 산출은 *SET_NODE_LIST + *BOUNDARY_SPC_SET 이고 *RIGIDWALL 은 소스 어디에도 없다.
        select 허용값도 'direction | all' 이라고 적었지만 실제로는 direction | all | set 이다(set 은 set_id 필수).
 """
+import glob
 import os
 import shutil
 import subprocess
@@ -169,6 +179,51 @@ def body(binary, gmsh, tmp):
           rc == 0 and os.path.exists(os.path.join(data, "bat_tier0_phase1.k")) and
           not os.path.exists(os.path.join(tmp, "bat_tier0_phase1.k")), f"rc={rc} {out[-250:]}")
 
+    # H3b. 동봉 예제 전수 — 임시 폴더 검사만으로는 '예제가 통째로 안 도는' 상황을 못 잡았다.
+    #      저장소 구조를 그대로 복사해 머리 주석의 사용법(저장소 루트에서 상대 경로)으로 돌린다.
+    print("[H3b] 동봉 battery 예제가 저장소 구조 그대로 rc=0 으로 돈다")
+    bex = os.path.join(REPO, "examples", "battery")
+    yamls = sorted(y for y in glob.glob(os.path.join(bex, "**", "*.yaml"), recursive=True)
+                   if os.path.getsize(y) > 0)
+    stacked = [y for y in yamls if "stacked" in os.path.basename(y)]
+    wound = [y for y in yamls if "wound" in os.path.basename(y)]
+    check("examples/battery 에 stacked·wound 예제가 모두 있다",
+          len(stacked) >= 1 and len(wound) >= 1, f"stacked={len(stacked)} wound={len(wound)}")
+    bwork = os.path.join(tmp, "bex")
+    shutil.copytree(os.path.join(REPO, "examples"), os.path.join(bwork, "examples"),
+                    dirs_exist_ok=True)
+    bad, empty = [], []
+    for y in yamls:
+        rel = os.path.relpath(y, REPO)
+        rc, out = run(binary, bwork, "battery", rel)
+        made = glob.glob(os.path.join(bwork, os.path.dirname(rel), "*.k"))
+        if rc != 0:
+            bad.append((rel, out.strip().splitlines()[-1] if out.strip() else f"rc={rc}"))
+        elif not made:
+            empty.append(rel)
+    check(f"battery 예제 {len(yamls)}개가 전부 rc=0 (output 이 두 번 겹치지 않는다)", not bad, bad[:3])
+    check("battery 예제의 덱이 YAML 과 같은 폴더에 생긴다", not empty, empty[:3])
+    check("예제 폴더 안에 중첩 'examples' 폴더가 생기지 않는다",
+          not glob.glob(os.path.join(bwork, "examples", "battery", "**", "examples"),
+                       recursive=True))
+
+    # H3c. dynain_file 은 덱에 그대로 찍히는 문자열이다 — configDir 을 붙이면 include 가 어긋난다
+    print("[H3c] battery 의 dynain_file 은 경로 해석 대상이 아니다 (덱에 적은 그대로)")
+    write(os.path.join(cfg, "bat_dyn.yaml"),
+          "output: cell\nmodel_type: stacked\ntier: 1\nphase: 1\n"
+          "use_dynain: true\ndynain_file: state.dynain\n"
+          "geometry:\n  n_unit_cells: 1\n")
+    write(os.path.join(cfg, "state.dynain"), "$ dummy\n")
+    rc, out = run(binary, tmp, "battery", "cfg/bat_dyn.yaml")
+    deck_path = os.path.join(cfg, "cell_tier1_phase1.k")
+    dl = open(deck_path, encoding="utf-8", errors="replace").read().splitlines() \
+        if os.path.exists(deck_path) else []
+    inc = dl[dl.index("*INCLUDE_DYNAIN") + 1].strip() if "*INCLUDE_DYNAIN" in dl else ""
+    check("battery: 덱은 YAML 폴더(cfg) 에 생기고 *INCLUDE_DYNAIN 줄은 적은 문자열 그대로다",
+          rc == 0 and inc == "state.dynain", f"rc={rc} include={inc!r} {out[-200:]}")
+    check("battery: include 줄에 configDir 이 덧붙지 않는다 (덱 옆 state.dynain 을 가리킨다)",
+          os.path.exists(os.path.join(os.path.dirname(deck_path), inc)) if inc else False, inc)
+
     write(os.path.join(cfg, "tr.yaml"),
           "model: ../data/box.k\noutput: ../data/tr_out.k\nreport_only: false\n")
     rc, out = run(binary, tmp, "tetremesh", "cfg/tr.yaml")
@@ -248,6 +303,20 @@ def body(binary, gmsh, tmp):
         rc, out = run(binary, tmp, "matdb", "cfg/md5.yaml")
         check("matdb: YAML 폴더에 없으면 번들(materials/) 에서 같은 이름을 찾는다",
               rc == 0 and os.path.exists(os.path.join(data, "md_bundle.k")), f"rc={rc} {out[-250:]}")
+        # (5a) 폴백은 조용히 일어나면 안 된다 — 어느 파일을 읽었는지 로그에 남아야 한다
+        check("matdb: 번들 폴백이 WARNING 으로 찍힌다 (적은 자리에 없었다는 단서)",
+              "[matdb] WARNING:" in out and "using bundled" in out
+              and "cfg/material_db.json" in out, out[-400:])
+        check("matdb: 성공 로그가 실제로 읽은 파일 경로를 남긴다",
+              "materials from materials/material_db.json" in out, out[-400:])
+        # (5b) 폴더가 붙은 상대 경로는 번들로 넘어가지 않는다 — 틀린 DB 로 조용히 끝나면 안 된다
+        write(os.path.join(cfg, "md5b.yaml"), MD.format("md_typo.k", "../matz/material_db.json"))
+        rc, out = run(binary, tmp, "matdb", "cfg/md5b.yaml")
+        check("matdb: 'database: ../matz/material_db.json' (없는 폴더) 는 번들 폴백 없이 rc=1",
+              rc == 1 and "Cannot load database from: cfg/../matz/material_db.json" in out
+              and not os.path.exists(os.path.join(data, "md_typo.k")), f"rc={rc} {out[-300:]}")
+        check("matdb: 폴더 붙은 오타에 폴백 WARNING 도 'Loaded' 도 찍히지 않는다",
+              "using bundled" not in out and "Loaded" not in out, out[-300:])
         # (6) 키를 생략하면 예전처럼 번들
         write(os.path.join(cfg, "md6.yaml"),
               "model: ../data/box.k\noutput: ../data/md_def.k\n" + MATRULE)
