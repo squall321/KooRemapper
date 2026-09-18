@@ -866,6 +866,8 @@ layers:
 | `direction` | 적층 방향 — `auto`·`x`·`y`·`z`·`+x`·`-x`·`+y`·`-y`·`+z`·`-z` | `auto` |
 | `element_type` | 요소 유형 — **`solid` / `tshell` / `shell` 만** (소문자) | `solid` |
 | `layers` | 레이어 리스트 (thickness + material_card) | — |
+| `pid_start` | 자동 PID 를 이 번호부터 발급 — 이미 쓰는 번호는 건너뜁니다(예약 대역 회피) | `0`(= 모델 최대 PID + 1) |
+| `layers[].pid` | 그 층 `*PART` 의 PID 를 직접 지정 — 이미 쓰는 번호면 **rc=1** | `0`(자동) |
 | `pid_refs` | 빈 파트를 가리키는 자리를 못 옮겼을 때의 종료 코드 — **`strict` / `warn` 만**. `strict` 는 rc=1(덱은 씁니다), `warn` 은 같은 보고 + rc=0 ([아래](#pid_refs--못-옮긴-자리가-남았을-때의-종료-코드)) | `strict` |
 
 > **`element_type` 허용값(2026-09-18 변경)**: `solid`·`tshell`·`shell` **세 값만** 받습니다. 대소문자도 구분해
@@ -878,6 +880,66 @@ layers:
 > - 라벨과 카드 내용(MID 칸 제외)이 같은 층끼리만 MID 하나를 공유합니다. 라벨이 같아도 물성이 다르면 따로 발급하고 `material label 'X' reused with a different card -> separate MID N` 을 안내합니다(위 예시의 두 층은 라벨은 같고 물성이 달라 MID 가 둘).
 > - 값은 LS-DYNA 고정 폭 10열 칸 안에 두세요(블록 들여쓰기를 뺀 뒤 기준). 쉼표 자유 형식도 됩니다.
 > - YAML `|` 블록은 키보다 깊게 들여쓴 줄까지이며 끝 빈 줄은 버립니다. 제목에 `:` 나 `-` 가 있어도 됩니다.
+
+> **새 층 PID 를 직접 정하기(2026-09-18 추가)**: 예전에는 층 PID 가 언제나 `모델 최대 PID + 1` 부터였습니다.
+> 사내 ID 관례(예약 대역)와 부딪히면 새 층만 다른 번호로 다시 매겨야 했습니다.
+> - `layers[].pid` 는 그 층의 PID 를 못박습니다. `pid_start` 는 **자동 발급의 시작 번호**만 옮깁니다
+>   (이미 쓰는 번호와 다른 층이 못박은 번호는 건너뜁니다).
+> - 지정한 번호를 모델이 이미 쓰고 있으면 조용히 다른 번호로 바꾸지 않고 **rc=1** 로 멈춥니다 —
+>   `[ERROR] restack: layer 1 pid 2 is already used by this model - choose a free part ID`.
+>   그 PID 로 걸어 둔 접촉·세트가 엉뚱한 파트를 가리키게 두지 않기 위해서입니다.
+> - 아무것도 주지 않으면 예전과 똑같이 `모델 최대 PID + 1` 부터입니다. `SECID` 는 늘 자동입니다.
+
+> **두 줄 포맷 덱(2026-09-18 고침)**: `*ELEMENT_SOLID (ten nodes format)` 은 한 요소가 두 줄입니다
+> (1줄 `eid pid`, 2줄 노드). 예전에는 요소를 지울 때 `eid pid` 줄만 지워 **노드 줄이 고아로 남았고**,
+> 새 층 요소는 그 섹션 안에 한 줄 포맷으로 적혔습니다 — 두 줄로 읽는 쪽에서는 남은 노드 줄이 다음 요소의
+> `eid pid` 로 읽혀 덱 전체가 밀리고 새 층 요소의 절반이 사라졌습니다.
+> 지금은 두 줄을 함께 지우고, 새 층 요소는 **표준 한 줄 포맷 `*ELEMENT_SOLID` 섹션을 따로 열어** 씁니다
+> (한 섹션에 두 포맷을 섞지 않습니다). `*ELEMENT_TSHELL` 섹션의 요소도 이제 제대로 지워집니다.
+
+> **요소 카드 줄 수를 매뉴얼로 확정(2026-09-18 고침)**: 예전에는 카드가 세 줄인 요소를 '셋째 줄의 첫 칸이 0 인가'
+> 로 어림잡았습니다. 셋째 줄에 진짜 노드 번호가 든 20 절점 요소는 한 줄 요소와 구별하지 못했고,
+> 그 줄이 지워지는 요소 번호와 겹치면 멀쩡한 카드가 잘려 나갔습니다.
+> 지금은 LS-DYNA R16 Keyword Manual Vol_I 의 카드 표로 판정합니다 — ① 키워드 옵션
+> (`H20`·`T20`·`T15`·`P21`·`H27`·`P40`·`H64`·`ORTHO`·`DOF`, 셸의 `THICKNESS`·`BETA`·`MCID`·`OFFSET`·`DOF`),
+> ② 그 파트의 `*SECTION_SOLID` `ELFORM` 23-29, ③ 그래도 정해지지 않으면 줄 구조(마지막 안전망).
+> - `*ELEMENT_SHELL_THICKNESS` 계열은 두께 카드(중간절점 `N5-N8` 이 있으면 셋째 카드까지)를 한 카드로 묶습니다.
+> - `*ELEMENT_TSHELL` 은 `Card 1` 이 언제나 한 줄입니다(두 줄 포맷이 없습니다).
+> - **고차 정식 파트(ELFORM 23-29)의 restack 은 rc=1 로 거절합니다** — 이 도구는 요소마다 8 절점 모서리만
+>   담아 중간 절점을 다시 만들 수 없습니다. 덱의 요소 카드 수와 리더가 읽은 수가 다를 때도 rc=1 입니다.
+> - `COMPOSITE` 계열은 적층점 수에 따라 카드 줄 수가 달라 손대지 않고 그대로 내보냅니다.
+>   그 섹션의 요소를 지워야 하면 덱을 쓰지 않고 rc=1 입니다.
+
+> **지운 노드를 가리키는 자리 정리(2026-09-18 고침)**: 예전에는 좌표가 딱 맞는 새 층 노드가 있을 때만
+> 옮기고 나머지는 보고만 했습니다. 남은 자리는 LS-DYNA 가 하드 에러로 멈춥니다(현장 실측
+> `Error 10233 Set ID … contains node ID … which is undefined under *NODE input` — 이 문구는 R16 매뉴얼
+> 세 권에 없어 매뉴얼 근거로는 쓸 수 없습니다).
+> 지금은 옮기지 못한 자리를 **실제로 치웁니다**.
+> - 값을 빼는 것: `*SET_NODE`/`_LIST`/`_LIST_SMOOTH`, `*DATABASE_HISTORY_NODE`
+> - 줄을 지우는 것: `*SET_NODE_COLUMN`, `*SET_SEGMENT`(한 줄이 노드 4 개를 한 덩어리로 씁니다),
+>   `*BOUNDARY_SPC_NODE`, `*LOAD_NODE_POINT`, `*INITIAL_VELOCITY_NODE`,
+>   `*CONSTRAINED_EXTRA_NODES_NODE`, `*ELEMENT_MASS`
+> - 고치지 않는 것: `*SET_NODE_*_GENERATE` (Vol_I 234577-234581 이 "정의된 ID 만 들어가고 번호 구멍은
+>   문제가 아니다" 를 명시합니다 — 거절하면 멀쩡한 덱을 막습니다. 범위가 통째로 비면 `[WARN]`),
+>   `*SET_NODE_ADD`(구성원이 노드 세트 ID 입니다)
+> - 사람이 정해야 하는 것: `*CONSTRAINED_NODAL_RIGID_BODY` 의 `PNODE`, `*DEFINE_COORDINATE_NODES`,
+>   `*ELEMENT_BEAM`/`_DISCRETE`/`_SEATBELT` — 보고만 하고 strict 면 rc=1
+> - `*INCLUDE` 안의 카드는 읽지 않습니다. "이 덱에 없으니 없다" 를 결론으로 쓰지 마세요.
+
+> **파트별 요소 수 대조와 왕복 검증(2026-09-18 추가)**: 현장에서 AP 파트가 통째로 빠진 덱이
+> "Normal termination" 하고 `analysis_result.json` 까지 냈습니다. LS-DYNA 도 KooMeshModifier 도
+> 에러를 내지 않았고, 원본/출력/per-run 3자 대조로 겨우 찾았습니다.
+> 이제 요소를 지우거나 만든 op 는 끝날 때 파트별 요소 수를 찍습니다.
+> ```
+>   [요소 수 대조] 파트별 요소 수(입력 → 출력)
+>     PID 200271: 14840 → 0 (삭제)
+>     PID 600001: 0 → 22260 (신규)
+>     합계 4206457 → 4217587
+>     왕복 검증: 출력 덱을 다시 읽어 파트별 요소 수가 기대와 같았습니다.
+> ```
+> 그리고 **쓰기 직전에 출력 덱을 같은 규칙으로 다시 읽어** 기대 수와 대조합니다.
+> 어긋나면 파일을 쓰지 않고 rc=1 입니다(nan/inf 관문과 같은 자리·같은 결말).
+> **"Normal termination + analysis_result.json 존재" 는 모델이 맞다는 증거가 아닙니다.**
 
 ### 동작
 1. `target_pid` 파트의 요소 분석 → 두께 방향 결정
@@ -905,7 +967,8 @@ layers:
 
 ### 층으로 나누면 원 파트가 빈 파트가 된다 — 그 참조를 이제 도구가 다룬다 (2026-09-18)
 
-restack 은 대상 파트를 층으로 나누면서 **층마다 새 PID·SECID·MID** 를 발급합니다.
+restack 은 대상 파트를 층으로 나누면서 **층마다 새 PID·SECID·MID** 를 발급합니다
+(PID 는 `layers[].pid`·`pid_start` 로 직접 정할 수 있습니다 — 위 표 12-1).
 원 `*PART` 카드는 지워지지 않고 **요소 0 개인 빈 파트**로 남습니다.
 그래서 원 PID 를 가리키던 tied 조건·세트·이력·감쇠는 전부 **빈 파트를 가리키게** 됩니다 —
 덱은 그대로 풀리지만 그 조건들이 아무 일도 하지 않습니다.
@@ -945,7 +1008,8 @@ restack 은 대상 파트를 층으로 나누면서 **층마다 새 PID·SECID·
 | `*ELEMENT_MASS` | `manual` — `집중질량을 층에 나눌 수 없습니다 — 직접 배분하세요` | merge 에서도 옮기지 않고 `manual` 로 남깁니다. LS-DYNA `*ELEMENT_MASS` 는 `EID, 노드 ID, MASS, PID` 이고 `*ELEMENT_MASS_PART` 는 `PID, MASS` 라 변형마다 PID 칸 자리가 다릅니다 — 잘못 짚으면 노드 ID 를 덮어쓰므로 집중질량은 직접 배분하세요 |
 | `*CONSTRAINED_RIGID_BODIES` 의 두 칸이 모두 죽은 경우 | `manual` | 옮기지 않고 보고만 합니다(`left`) — 합치면 자기 자신을 가리키게 됩니다 |
 | `EID` 축 — `*SET_SOLID`·`_SHELL`·`_BEAM`·`_TSHELL`, `*INITIAL_STRESS_*`, `*INITIAL_STRAIN_SOLID`, `*DATABASE_HISTORY_SOLID` 등 | `manual` | `manual` |
-| `NODE` 축 — `*SET_NODE`, `*SET_SEGMENT`, `*BOUNDARY_SPC_NODE`, 그 세트를 쓰는 `*CONSTRAINED_NODAL_RIGID_BODY` | `manual` | `manual` |
+| `NODE` 축 — `*SET_NODE_LIST`(`_TITLE` 포함) 의 구성원 | 지운 중간면 노드와 **좌표가 똑같은 새 층 노드가 딱 하나** 있을 때만 그 노드로 바꿉니다(`moved`). 그 밖에는 `manual` | `manual` |
+| `NODE` 축 — `*SET_SEGMENT`, `*BOUNDARY_SPC_NODE`, `*SET_NODE_LIST_GENERATE`, 그 세트를 쓰는 `*CONSTRAINED_NODAL_RIGID_BODY` | `manual` | `manual` |
 | 칸 뜻이 카드마다 다른 키워드 — `*DEFINE_FRICTION`, `*ALE_*`, `*CONSTRAINED_LAGRANGE_IN_SOLID`, `*RIGIDWALL_*`, `*AIRBAG_*`, `*SET_PART_*_GENERATE` | `unknown` | `unknown` |
 | 화이트리스트 밖의 그 밖 키워드 | `maybe` — **rc 에는 넣지 않습니다** | `maybe` |
 | 덱에 `*INCLUDE` 가 있는 경우 | 소비자를 다 볼 수 없어 세트를 펴지 않고 **보고만** 합니다(`left`) | 같습니다 |

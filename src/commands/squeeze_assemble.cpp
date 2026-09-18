@@ -711,6 +711,10 @@ int runAssemble(const std::string& configFile, const ConsoleOutput& console) {
         return 1;
     }
     console.success("Output written");
+    // writeOutput 안에서 나온 말(파트별 요소 수 대조·왕복 검증)도 보여 준다 — 위 반복문은
+    // 쓰기 전에 돌아 이 줄들을 놓쳤다. 무증상 결함은 이 표로만 드러난다.
+    for (const auto& msg : assembler.infoMessages) console.println(msg);
+    assembler.infoMessages.clear();
 
     // Summary
     if (assembler.getAddedNodeCount() > 0 || assembler.getAddedElementCount() > 0) {

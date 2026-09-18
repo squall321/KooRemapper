@@ -9,6 +9,7 @@
 #include "assembly/ShellCurvature.h"
 #include "assembly/WarpageGrid.h"
 #include "parser/KFileReader.h"
+#include "parser/ElementCardLayout.h"   // 요소 카드 줄 수 판정 — 리더와 쓰기가 같은 표를 쓴다
 #include "parser/ShellReader.h"
 #include "parser/DynainWriter.h"
 #include "mapper/ShellMapper.h"
@@ -1064,6 +1065,25 @@ std::vector<std::string> rsCardFields(const std::string& line) {
     return rsTokens(line);
 }
 
+// 그 줄이 10칸 고정폭으로 읽히는가 — 칸 자리를 그대로 두고 값만 바꿔도 되는 줄인지 본다.
+// 콤마 자유 형식이나 정렬이 어긋난 줄은 칸 경계가 없어 그 자리에 값을 써 넣으면 안 된다.
+bool rsCardFixed10(const std::string& line) {
+    std::string body = line;
+    size_t cm = body.find('$');
+    if (cm != std::string::npos) body = body.substr(0, cm);
+    while (!body.empty() && (body.back() == '\r' || body.back() == '\n')) body.pop_back();
+    if (body.find(',') != std::string::npos) return false;
+    for (size_t i = 0; i < body.size(); i += 10) {
+        std::string f = body.substr(i, 10);
+        size_t a = f.find_first_not_of(" \t");
+        if (a == std::string::npos) continue;
+        size_t b = f.find_last_not_of(" \t");
+        f = f.substr(a, b - a + 1);
+        if (f.find(' ') != std::string::npos || f.find('\t') != std::string::npos) return false;
+    }
+    return true;
+}
+
 // i 번째 칸이 정수면 그 값, 아니면 -1
 int rsIntField(const std::vector<std::string>& toks, size_t i) {
     if (i >= toks.size() || toks[i].empty()) return -1;
@@ -1210,6 +1230,236 @@ int rsFindSectionElform(const std::vector<std::string>& rawLines, int secid, con
         return ef > 0 ? ef : 0;
     }
     return 0;
+}
+
+// ── 요소 카드 색인 ────────────────────────────────────────────────────────────
+// 요소 카드 한 장이 몇 줄인지를 '매뉴얼로 확정한 순서' 로 판정해 줄 단위 색인을 만든다.
+// 판정 순서(근거는 include/parser/ElementCardLayout.h 의 인용):
+//   1) 키워드 옵션      — *ELEMENT_SOLID_H20 처럼 옵션 이름이 곧 절점 수다(Vol_I 164055-164057).
+//   2) *SECTION_SOLID ELFORM 23-29 — 옵션이 <BLANK> 여도 고차 정식이면 Card 3 이 온다(228671-228677).
+//   3) (마지막 안전망) 줄 구조 — Card 1 의 칸 3-10 에 노드가 있으면 구 포맷 한 줄(164122-164124).
+//      매뉴얼이 주는 것은 "구 포맷에는 Card 2 가 없다" 뿐이고 줄만 보고 가르는 규칙은 없다 —
+//      그래서 이건 규칙이 아니라 구현 추론이고, 1·2 가 아무것도 말해 주지 않을 때만 쓴다.
+// 셸은 2)가 필요 없다 — Card 2(두께) 유무가 키워드 옵션이고, Card 3 유무는 같은 요소의
+// Card 1 칸 7-10(N5-N8)에 있다(162168-162169, 162567-162571). 그래서 리더가 스스로 판정한다.
+struct ElemCardIndex {
+    std::vector<int> owner;      // 줄 인덱스 → 그 줄이 속한 카드의 시작 줄(-1 = 요소 카드 데이터가 아님)
+    std::vector<int> span;       // 카드 시작 줄 → 카드 줄 수(그 밖은 0)
+    std::vector<int> eidOf;      // 카드 시작 줄 → EID
+    std::vector<int> pidOf;      // 카드 시작 줄 → PID
+    std::vector<char> famOf;     // 카드 시작 줄 → 'S' solid / 'H' shell / 'T' tshell / 0
+    std::vector<char> opaque;    // 줄 인덱스 → 줄 수를 확정 못 한 섹션인가
+    std::map<int, long long> countByPid;          // 파트별 요소 수(솔리드+셸+티쉘)
+    std::vector<std::string> opaqueKws;           // 확정 못 한 섹션 키워드들
+    std::string opaqueReason;                     // 그 이유(첫 건)
+};
+
+// 요소 카드 한 줄을 칸으로 나눈다 — 고정폭(fw)이 맞으면 고정폭, 콤마가 있으면 자유 형식,
+// 그 밖에는 공백 토큰. 8 자리 노드 ID 는 칸이 공백 없이 붙으므로 고정폭을 먼저 본다.
+//
+// strict=true 면 공백 토큰 되돌림을 하지 않는다 — LS-DYNA 가 고정 칸 덱을 읽는 방식 그대로다.
+// 관대한 되돌림은 i10 덱에 8 칸으로 쓴 줄도 읽어 내므로, 그 줄을 '정상' 으로 통과시킨다.
+// 왕복 검증은 그래서 엄격 모드로 한 번 더 읽어 대조한다.
+std::vector<std::string> ecFields(const std::string& line, int fw, bool strict = false) {
+    std::string body = line;
+    size_t cm = body.find('$');
+    if (cm != std::string::npos) body = body.substr(0, cm);
+    while (!body.empty() && (body.back() == '\r' || body.back() == '\n')) body.pop_back();
+    auto trim = [](const std::string& s) {
+        size_t a = s.find_first_not_of(" \t");
+        if (a == std::string::npos) return std::string();
+        size_t b = s.find_last_not_of(" \t");
+        return s.substr(a, b - a + 1);
+    };
+    std::vector<std::string> out;
+    if (body.find(',') != std::string::npos) {
+        std::string tok;
+        for (char c : body) {
+            if (c == ',') { out.push_back(trim(tok)); tok.clear(); }
+            else tok += c;
+        }
+        out.push_back(trim(tok));
+        return out;
+    }
+    bool aligned = true;
+    for (size_t i = 0; i < body.size(); i += (size_t)fw) {
+        std::string f = trim(body.substr(i, (size_t)fw));
+        if (f.find(' ') != std::string::npos || f.find('\t') != std::string::npos) aligned = false;
+        out.push_back(f);
+    }
+    if (aligned || strict) return out;
+    return rsTokens(line);
+}
+
+int ecInt(const std::vector<std::string>& f, size_t i) {
+    if (i >= f.size() || f[i].empty()) return 0;
+    const std::string& s = f[i];
+    size_t p = (s[0] == '-' || s[0] == '+') ? 1u : 0u;
+    if (p >= s.size()) return 0;
+    for (size_t q = p; q < s.size(); ++q)
+        if (!std::isdigit(static_cast<unsigned char>(s[q]))) return 0;
+    try { return std::stoi(s); } catch (...) { return 0; }
+}
+
+// Card 1 의 칸 3-10 에 노드가 들어 있는가 — 구 포맷(940-970) 한 줄 카드의 표시다.
+bool ecLooksLegacyOneLine(const std::vector<std::string>& f) {
+    if (f.size() < 3) return false;
+    for (size_t q = 2; q < f.size() && q < 10; ++q) if (ecInt(f, q) > 0) return true;
+    return false;
+}
+
+// 그 줄이 새 카드의 Card 1 로 읽힐 수 있는가(EID·PID 가 모두 양수).
+bool ecPlausibleCard1(const std::vector<std::string>& f) {
+    return ecInt(f, 0) > 0 && ecInt(f, 1) > 0;
+}
+
+bool ecIsData(const std::string& l) {
+    size_t g = l.find_first_not_of(" \t");
+    if (g == std::string::npos) return false;
+    return l[g] != '$' && l[g] != '*';
+}
+
+// 연결 카드(Card 2, Card 3 …)를 셀 때만 쓰는 판정 — 빈 줄도 카드 한 장으로 센다.
+// Vol_I 162567-162571: "If mid-side nodes are defined (N5 - N8), then a second line of
+// thickness values will be read.  This line may be left blank, but cannot be omitted."
+// 빈 줄을 건너뛰면 다음 요소의 Card 1 을 이 카드의 연결 줄로 삼켜 요소가 조용히 사라진다.
+bool ecIsCardLine(const std::string& l) {
+    size_t g = l.find_first_not_of(" \t");
+    if (g == std::string::npos) return true;          // 빈 줄 = 비워 둔 카드
+    return l[g] != '$' && l[g] != '*';
+}
+
+// PID → 그 파트 요소의 절점 수(고차 정식일 때만 > 0). *PART 카드 2 의 SECID 를 풀어
+// *SECTION_SOLID 의 ELFORM 을 본다(228671-228677).
+std::map<int, int> ecBuildPidNodes(const std::vector<std::string>& rawLines) {
+    std::map<int, int> secElform;      // SECID → ELFORM
+    std::map<int, int> partSec;        // PID → SECID
+    for (const auto& b : rsCollectBlocks(rawLines)) {
+        if (rsStarts(b.kw, "*SECTION_SOLID")) {
+            size_t k = rsHas(b.kw, "_TITLE") ? 1u : 0u;
+            if (k >= b.data.size()) continue;
+            auto f = rsCardFields(rawLines[b.data[k]]);
+            int sid = rsIntField(f, 0), ef = rsIntField(f, 1);
+            if (sid > 0 && ef > 0) secElform[sid] = ef;
+        } else if (b.kw == "*PART" || b.kw == "*PART_TITLE") {
+            // *PART 는 '제목 줄 + 카드 2' 가 반복된다 — 카드 2 의 칸 0 이 PID, 칸 1 이 SECID.
+            // 제목 줄이 비어 있을 수 있으므로 'PID·SECID 가 모두 양수인 줄' 만 카드 2 로 본다.
+            for (size_t m = 0; m < b.data.size(); ++m) {
+                auto f = rsCardFields(rawLines[b.data[m]]);
+                int pid = rsIntField(f, 0), sec = rsIntField(f, 1);
+                if (pid > 0 && sec > 0 && !partSec.count(pid)) partSec[pid] = sec;
+            }
+        }
+    }
+    std::map<int, int> out;
+    for (const auto& [pid, sec] : partSec) {
+        auto it = secElform.find(sec);
+        if (it == secElform.end()) continue;
+        int n = solidNodesFromElform(it->second);
+        if (n > 0) out[pid] = n;
+    }
+    return out;
+}
+
+ElemCardIndex ecBuildIndex(const std::vector<std::string>& rawLines, bool strict = false) {
+    ElemCardIndex idx;
+    size_t n = rawLines.size();
+    idx.owner.assign(n, -1);
+    idx.span.assign(n, 0);
+    idx.eidOf.assign(n, 0);
+    idx.pidOf.assign(n, 0);
+    idx.famOf.assign(n, 0);
+    idx.opaque.assign(n, 0);
+
+    // 칸 폭은 매뉴얼 한 곳(ElementCardLayout)에서만 정한다 — *KEYWORD 의 i10/long(19305-19360)과
+    // 키워드 줄 접미사('%','+','-')다.
+    const int fw = deckFieldWidth(rawLines);
+
+    const std::map<int, int> pidNodes = ecBuildPidNodes(rawLines);
+
+    ElementKeywordInfo info;
+    bool inElem = false;
+    int sectionFw = fw;
+    for (size_t i = 0; i < n; ++i) {
+        const std::string& line = rawLines[i];
+        size_t g = line.find_first_not_of(" \t");
+        if (g != std::string::npos && line[g] == '*') {
+            info = parseElementKeyword(line);
+            inElem = (info.family != ElemFamily::NONE);
+            sectionFw = keywordFieldWidth(line, fw);
+            if (inElem && !info.supported) {
+                idx.opaqueKws.push_back(info.keyword);
+                if (idx.opaqueReason.empty()) idx.opaqueReason = info.reason;
+            }
+            continue;
+        }
+        if (!inElem || !ecIsData(line)) continue;
+        if (!info.supported) { idx.opaque[i] = 1; continue; }
+        if (idx.owner[i] >= 0) continue;          // 앞 카드가 이미 삼킨 줄
+
+        auto f = ecFields(line, sectionFw, strict);
+        int eid = ecInt(f, 0), pid = ecInt(f, 1);
+        int lines = 1;
+        if (info.family == ElemFamily::SOLID) {
+            int nodes = info.optionNodes;
+            if (nodes == 0) {
+                auto pit = pidNodes.find(pid);
+                if (pit != pidNodes.end()) nodes = pit->second;
+            }
+            if (nodes >= 11) {
+                lines = solidCardLines(nodes, info.extraCards);          // 1) 2) 확정
+            } else if (nodes == 0 && ecLooksLegacyOneLine(f)) {
+                lines = 1 + info.extraCards;                             // 3) 안전망: 구 포맷
+            } else {
+                lines = 2 + info.extraCards;                             // Card 1 + Card 2
+            }
+        } else if (info.family == ElemFamily::SHELL) {
+            // Card 2 는 THICKNESS/BETA/MCID 일 때, Card 3 은 그 위에 중간절점(N5-N8)이 있을 때만이다.
+            lines = 1;
+            if (info.thicknessCard) {
+                lines += 1;
+                bool midside = false;
+                for (size_t q = 6; q < f.size() && q < 10; ++q) if (ecInt(f, q) > 0) midside = true;
+                if (midside) lines += 1;
+            }
+            lines += info.extraCards;
+        } else {   // TSHELL — Card 1 은 언제나 N1..N8 한 줄이다(165174-165184). 두 줄 포맷이 없다.
+            lines = 1 + info.extraCards;
+        }
+
+        // 이 카드가 차지하는 데이터 줄을 모은다(사이에 낀 주석·빈 줄은 카드에 넣지 않는다).
+        std::vector<size_t> own;
+        own.push_back(i);
+        size_t j = i + 1;
+        while ((int)own.size() < lines && j < n) {
+            size_t h = rawLines[j].find_first_not_of(" \t");
+            if (h != std::string::npos && rawLines[j][h] == '*') break;   // 섹션이 끝났다
+            if (ecIsCardLine(rawLines[j])) own.push_back(j);              // 빈 줄도 카드다
+            ++j;
+        }
+        // 마지막 안전망 — 위에서 정한 줄 수로 설명되지 않는 줄(카드 1 로도 요소로도 볼 수 없는 줄)이
+        // 이어지면 같은 카드로 삼킨다. 옵션·ELFORM 이 아무것도 말해 주지 않을 때만 여기 온다.
+        if (info.family == ElemFamily::SOLID && info.optionNodes == 0 && !pidNodes.count(pid)) {
+            while (j < n) {
+                size_t h = rawLines[j].find_first_not_of(" \t");
+                if (h != std::string::npos && rawLines[j][h] == '*') break;
+                if (!ecIsData(rawLines[j])) { ++j; continue; }
+                auto nf = ecFields(rawLines[j], sectionFw, strict);
+                if (ecPlausibleCard1(nf)) break;
+                own.push_back(j);
+                ++j;
+            }
+        }
+
+        for (size_t o : own) idx.owner[o] = (int)i;
+        idx.span[i] = (int)own.size();
+        idx.eidOf[i] = eid;
+        idx.pidOf[i] = pid;
+        idx.famOf[i] = (info.family == ElemFamily::SOLID) ? 'S'
+                     : (info.family == ElemFamily::SHELL) ? 'H' : 'T';
+        if (eid > 0) idx.countByPid[pid] += 1;
+    }
+    return idx;
 }
 
 const char* const kAdviceSetVariant =
@@ -2034,6 +2284,486 @@ void ModelAssembler::applyPidRefRewrites() {
     pidRefRewrites_.clear();
 }
 
+// ── 지운 중간면 노드를 가리키는 노드 집합 옮기기 ─────────────────────────────
+// 층 두께 합이 원 두께와 같고 분할이 겹치면 새 층 노드가 지워진 노드와 같은 자리에 생긴다.
+// 그럴 때만(좌표가 딱 하나 일치할 때만) 세트를 새 노드로 바꾼다 — 그 밖에는 '어느 노드가
+// 그 노드인지' 가 정해지지 않으므로 옮기지 않고 예전처럼 보고만 한다.
+void ModelAssembler::migrateDeadNodeSets(const std::map<int, int>& subst,
+                                         std::set<size_t>& handled,
+                                         std::vector<PidRefFinding>& moved) {
+    if (subst.empty()) return;
+    const auto blocks = rsCollectBlocks(rawLines_);
+    for (const auto& b : blocks) {
+        if (!rsStarts(b.kw, "*SET_NODE_LIST")) continue;
+        // 범위·증분 표기는 칸 뜻이 달라 값만 바꿀 수 없다
+        if (rsHas(b.kw, "_GENERATE") || rsHas(b.kw, "_ADD") ||
+            rsHas(b.kw, "_INTERVAL") || rsHas(b.kw, "_COLUMN")) continue;
+        size_t start = rsHas(b.kw, "_TITLE") ? 1u : 0u;
+        int sid = 0;
+        if (start < b.data.size()) sid = rsIntField(rsCardFields(rawLines_[b.data[start]]), 0);
+        ++start;
+        for (size_t m = start; m < b.data.size(); ++m) {
+            size_t li = b.data[m];
+            if (!rsCardFixed10(rawLines_[li])) continue;   // 칸 경계가 없는 줄은 건드리지 않는다
+            auto f = rsCardFields(rawLines_[li]);
+            std::string out = rawLines_[li];
+            int changed = 0;
+            for (size_t q = 0; q < f.size(); ++q) {
+                auto it = subst.find(rsIntField(f, q));
+                if (it == subst.end()) continue;
+                out = md_setField(out, static_cast<int>(q) * 10, 10, it->second);
+                ++changed;
+            }
+            if (changed == 0) continue;
+            pidRefRewrites_[li] = { out };
+            PidRefFinding fd;
+            fd.axis = "NODE";
+            fd.keyword = b.kw;
+            fd.line = static_cast<int>(li) + 1;
+            fd.text = rawLines_[li];
+            fd.grade = "moved";
+            fd.advice = "세트 " + std::to_string(sid) + ": 지운 중간면 노드 " +
+                        std::to_string(changed) + " 개를 같은 자리에 생긴 새 층 노드로 바꿨습니다";
+            moved.push_back(fd);
+            handled.insert(li);
+        }
+    }
+}
+
+// ── 지운 노드를 가리키는 자리를 실제로 정리한다 ──────────────────────────────
+// 이관(migrateDeadNodeSets)이 먼저 돌고, 여기 오는 것은 '옮길 곳이 없는' 참조다.
+// 남겨 두면 LS-DYNA 가 하드 에러로 멈춘다(현장 실측 Error 10233
+// "Set ID … contains node ID … which is undefined under *NODE input").
+// 그 문구·번호는 R16 매뉴얼 세 권(Vol_I/II/III) 어디에도 없다 — grep 으로 0 건을 확인했다.
+// 그래서 이 주석은 '현장 실측' 이지 매뉴얼 인용이 아니다.
+//
+// 칸 자리는 전부 매뉴얼로 확정했다(Vol_I.txt 줄 번호):
+//   *SET_NODE / _LIST / _LIST_SMOOTH  Card 2a : 칸 1-8 전부 노드 ID        234448-234484
+//   *SET_NODE_COLUMN                  Card 2b : 칸 1 만 노드 ID(2-5 는 실수 속성) 234486-234512
+//   *SET_NODE_LIST_GENERATE(_INCREMENT)       : 노드 ID 가 아니라 범위 경계  234540-234632
+//   *SET_NODE_GENERAL                 Card 2e : 칸 1 은 문자 OPTION         234634-234779
+//   *SET_NODE_ADD                     Card 2a : 노드 세트 ID 지 노드 ID 아님 234828-234893
+//   *SET_SEGMENT                      Card 2a : 칸 1-4 = N1..N4             235953-236060
+//   *BOUNDARY_SPC_NODE                Card 1  : 칸 1 = NID                  46945-47012
+//   *CONSTRAINED_EXTRA_NODES_NODE     Card 1  : 칸 2 = NID                  52799-52849
+//   *ELEMENT_MASS                             : 칸 2 = 노드 ID              159866-159930
+//   *LOAD_NODE_POINT                  Card 1  : 칸 1 = NID                  207114-207168
+//   *INITIAL_VELOCITY_NODE                    : 칸 1 = NID                  192116-192161
+//   *DATABASE_HISTORY_NODE            Card 1a : 칸 1-8 = ID1..ID8           122112-122180
+//   *CONSTRAINED_NODAL_RIGID_BODY             : 칸 4 PNODE / SPC 칸 4 / INERTIA 칸 6  61032-61057
+//   *DEFINE_COORDINATE_NODES                  : 칸 2,3,4 = N1,N2,N3         128642-128690
+//   *ELEMENT_BEAM/_DISCRETE/_SEATBELT         : 155821-155830 / 157642-157661 / 160315-160344
+//
+// _GENERATE 는 고치지 않는다 — 매뉴얼이 면책을 명시한다(234577-234581):
+//   "All defined IDs between and including BnBEG to BnEND are added to the set. …
+//    gaps in the node numbering are not a problem. BnBEG and BnEND may simply be limits
+//    on the IDs and not nodal IDs."
+// 즉 범위 안 노드를 지워도 LS-DYNA 는 그냥 세트에 안 넣는다. 거절(rc=1)하면 멀쩡한 덱을 막게 된다.
+// 반대로 LIST 계열에는 같은 면책 문장이 없다 — 그 대비가 '정리해야 한다' 의 근거다(문장의 부재에
+// 기댄 추론이며, 현장 실측과 맞아떨어진다).
+void ModelAssembler::cleanupDeadNodeRefs(const std::set<int>& deadNodes,
+                                         const std::map<int, int>& subst,
+                                         std::set<size_t>& handled,
+                                         std::vector<PidRefFinding>& moved) {
+    if (deadNodes.empty()) return;
+    auto dead = [&](int v) { return v > 0 && deadNodes.count(v) > 0; };
+
+    size_t removedValues = 0, removedLines = 0, movedValues = 0;
+    std::vector<std::string> emptiedSets;
+
+    // 이관(migrateDeadNodeSets)이 먼저 고쳐 둔 줄이 있다 — 원본이 아니라 '이관 뒤의 줄' 을 봐야
+    // 옮겨 둔 새 노드를 다시 지우지 않는다. 이관은 한 줄을 한 줄로만 바꾼다.
+    auto effLine = [&](size_t li) -> std::string {
+        auto it = pidRefRewrites_.find(li);
+        if (it == pidRefRewrites_.end()) return rawLines_[li];
+        return it->second.empty() ? std::string() : it->second.front();
+    };
+
+    auto record = [&](const char* grade, const std::string& kw, size_t li,
+                      const std::string& advice) {
+        if (handled.count(li)) return;
+        PidRefFinding f;
+        f.axis = "NODE";
+        f.keyword = kw;
+        f.line = static_cast<int>(li) + 1;
+        f.text = rawLines_[li];
+        f.grade = grade;
+        f.advice = advice;
+        moved.push_back(f);
+        handled.insert(li);
+    };
+
+    // 줄 하나를 지운다(빈 대체 = 삭제)
+    auto dropLine = [&](const char* grade, const std::string& kw, size_t li,
+                        const std::string& what) {
+        if (pidRefRewrites_.count(li)) return;
+        pidRefRewrites_[li] = {};
+        ++removedLines;
+        record(grade, kw, li, what);
+    };
+
+    // ── 지우기 전에 '옮길 수 있나' 를 먼저 본다 ─────────────────────────────
+    // 같은 좌표에 새 층 노드가 생겼으면 그 값으로 바꾸면 모델이 그대로다. 옮길 수 있는데도
+    // 줄을 지우면 낙하 덱에서 *INITIAL_VELOCITY_NODE 가 사라져 모델이 가만히 선 채
+    // Normal termination 한다 — LS-DYNA 는 아무 에러도 내지 않는다.
+    //
+    // 칸 폭은 매뉴얼 카드 표에서 그대로 왔다: 표가 1-8 칸이면 10 칸 폭, 1-10 칸이면 8 칸 폭이다.
+    //   *BOUNDARY_SPC_NODE 46945- / *LOAD_NODE_POINT 207114- / *INITIAL_VELOCITY_NODE 192116-
+    //   *CONSTRAINED_EXTRA_NODES 52799- / *SET_SEGMENT 235953- / *DATABASE_HISTORY_NODE 122112-
+    //   *BOUNDARY_PRESCRIBED_MOTION 43405-43420  → 모두 1-8 칸 표 = 10 칸 폭
+    //   *ELEMENT_MASS 159866-159930             → 1-10 칸 표 = 8 칸 폭
+    // 칸 자리를 그대로 두고 값만 바꾸므로, 고정 칸으로 깨끗이 잘리지 않는 줄은 손대지 않는다.
+    auto fixedFieldsW = [](const std::string& line, int fw) {
+        std::vector<std::string> out;
+        std::string body = line;
+        size_t cm = body.find('$');
+        if (cm != std::string::npos) body = body.substr(0, cm);
+        while (!body.empty() && (body.back() == '\r' || body.back() == '\n')) body.pop_back();
+        if (body.find(',') != std::string::npos) return out;     // 자유 형식은 칸 자리가 없다
+        for (size_t i = 0; i < body.size(); i += (size_t)fw) {
+            std::string f = body.substr(i, (size_t)fw);
+            size_t a = f.find_first_not_of(" \t");
+            if (a == std::string::npos) { out.push_back(std::string()); continue; }
+            size_t b = f.find_last_not_of(" \t");
+            f = f.substr(a, b - a + 1);
+            if (f.find_first_of(" \t") != std::string::npos) { out.clear(); return out; }
+            out.push_back(f);
+        }
+        return out;
+    };
+    auto fieldInt = [](const std::vector<std::string>& f, size_t i) {
+        if (i >= f.size() || f[i].empty()) return -1;
+        for (char c : f[i]) if (!std::isdigit(static_cast<unsigned char>(c))) return -1;
+        try { return std::stoi(f[i]); } catch (...) { return -1; }
+    };
+    // 그 줄의 노드 칸에 든 죽은 값이 '전부' subst 에 있으면 값만 바꾸고 true.
+    auto trySubst = [&](const std::string& kw, size_t li,
+                        const std::vector<int>& fields, int fw) -> bool {
+        if (subst.empty() || handled.count(li) || pidRefRewrites_.count(li)) return false;
+        auto f = fixedFieldsW(effLine(li), fw);
+        if (f.empty()) return false;
+        bool anyDead = false;
+        for (int q : fields) {
+            int v = fieldInt(f, (size_t)q);
+            if (!dead(v)) continue;
+            anyDead = true;
+            if (!subst.count(v)) return false;          // 하나라도 못 옮기면 통째로 다른 길로
+        }
+        if (!anyDead) return false;
+        std::string out = effLine(li);
+        int n = 0;
+        for (int q : fields) {
+            int v = fieldInt(f, (size_t)q);
+            if (!dead(v)) continue;
+            out = md_setField(out, q * fw, fw, subst.at(v));
+            ++n;
+        }
+        pidRefRewrites_[li] = { out };
+        movedValues += (size_t)n;
+        record("moved", kw, li,
+               "지운 노드 " + std::to_string(n) + " 개를 같은 자리에 생긴 새 층 노드로 바꿨습니다");
+        return true;
+    };
+
+    for (const auto& b : rsCollectBlocks(rawLines_)) {
+        const std::string& kw = b.kw;
+
+        // ── 1. *SET_NODE 계열 ────────────────────────────────────────────────
+        if (rsStarts(kw, "*SET_NODE")) {
+            if (rsHas(kw, "_ADD")) continue;          // 구성원이 노드 세트 ID 다(234873-234875)
+            size_t k = rsHas(kw, "_TITLE") ? 1u : 0u;
+            int sid = 0;
+            if (k < b.data.size()) sid = rsIntField(rsCardFields(rawLines_[b.data[k]]), 0);
+            size_t first = k + 1;
+            if (rsHas(kw, "_GENERATE")) {
+                // 고칠 필요가 없다. 범위가 통째로 비면 그 세트를 쓰는 접촉·구속이 뜻을 잃으므로 알린다.
+                // 범위를 훑지 않는다 — 실제 덱의 범위는 수백만이다. 지운 노드와 남은 노드를 각각 훑는다.
+                bool anyLeft = false, anyDead = false;
+                std::vector<std::pair<int,int>> ranges;
+                for (size_t m = first; m < b.data.size(); ++m) {
+                    auto f = rsCardFields(rawLines_[b.data[m]]);
+                    for (size_t q = 0; q + 1 < f.size(); q += 2) {
+                        int lo = rsIntField(f, q), hi = rsIntField(f, q + 1);
+                        if (lo <= 0) continue;
+                        if (hi < lo) hi = lo;
+                        ranges.push_back({lo, hi});
+                    }
+                }
+                auto inRange = [&](int v) {
+                    for (const auto& r : ranges) if (v >= r.first && v <= r.second) return true;
+                    return false;
+                };
+                for (int dn : deadNodes) if (inRange(dn)) { anyDead = true; break; }
+                if (anyDead) {
+                    for (const auto& [nid, nd] : baseMesh_.getNodes()) {
+                        (void)nd;
+                        if (removedNodeIds_.count(nid)) continue;
+                        if (inRange(nid)) { anyLeft = true; break; }
+                    }
+                    if (!anyLeft)
+                        for (const auto& an : addedNodes_) if (inRange(an.id)) { anyLeft = true; break; }
+                }
+                if (anyDead && !anyLeft)
+                    emptiedSets.push_back(kw + " SID " + std::to_string(sid) +
+                                          " (범위가 통째로 지워졌습니다)");
+                continue;
+            }
+            if (rsHas(kw, "_GENERAL")) {
+                // 칸 1 은 문자 OPTION 이고 E1..E7 의 뜻이 OPTION 마다 다르다 — NODE/DNODE 줄만 노드다.
+                for (size_t m = first; m < b.data.size(); ++m) {
+                    size_t li = b.data[m];
+                    std::string eff = effLine(li);
+                    if (eff.empty()) continue;
+                    auto f = rsCardFields(eff);
+                    if (f.empty()) continue;
+                    std::string opt = f[0];
+                    for (auto& c : opt) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+                    if (opt != "NODE" && opt != "DNODE") continue;
+                    if (trySubst(kw, li, {1, 2, 3, 4, 5, 6, 7}, 10)) continue;
+                    bool any = false;
+                    for (size_t q = 1; q < f.size(); ++q) if (dead(rsIntField(f, q))) any = true;
+                    if (!any) continue;
+                    if (!rsCardFixed10(eff)) {
+                        record("left", kw, li, "칸 경계가 없는 줄이라 값만 뺄 수 없습니다 — 직접 지우세요");
+                        continue;
+                    }
+                    std::string out = eff;
+                    for (size_t q = 1; q < f.size(); ++q)
+                        if (dead(rsIntField(f, q))) { out = md_setField(out, (int)q * 10, 10, 0); ++removedValues; }
+                    pidRefRewrites_[li] = { out };
+                    record("moved", kw, li,
+                           "세트 " + std::to_string(sid) + ": 지운 노드 칸을 0 으로 비웠습니다(OPTION=" + opt + ")");
+                }
+                continue;
+            }
+            if (rsHas(kw, "_COLUMN")) {              // 노드당 한 줄 — 그 줄을 지운다
+                for (size_t m = first; m < b.data.size(); ++m) {
+                    size_t li = b.data[m];
+                    if (!dead(rsIntField(rsCardFields(effLine(li)), 0))) continue;
+                    if (trySubst(kw, li, {0}, 10)) continue;
+                    ++removedValues;
+                    dropLine("moved", kw, li,
+                             "세트 " + std::to_string(sid) + ": 지운 노드 줄을 뺐습니다");
+                }
+                continue;
+            }
+            // <BLANK> / LIST / LIST_SMOOTH — 칸 1-8 전부 노드 ID 다. 남은 것만 다시 채워 쓴다.
+            std::vector<int> keep;
+            size_t nDead = 0;
+            bool anyMember = false;
+            for (size_t m = first; m < b.data.size(); ++m) {
+                auto f = rsCardFields(effLine(b.data[m]));
+                for (size_t q = 0; q < f.size() && q < 8; ++q) {
+                    int v = rsIntField(f, q);
+                    if (v <= 0) continue;
+                    anyMember = true;
+                    if (deadNodes.count(v)) ++nDead;
+                    else keep.push_back(v);
+                }
+            }
+            if (nDead == 0 || !anyMember) continue;
+            auto repl = rsFormatSetMembers(keep);
+            if (repl.empty()) repl.push_back("");
+            for (size_t m = first; m < b.data.size(); ++m) {
+                size_t li = b.data[m];
+                if (m == first) pidRefRewrites_[li] = repl;
+                else pidRefRewrites_[li] = {};
+            }
+            removedValues += nDead;
+            if (first < b.data.size())
+                record("moved", kw, b.data[first],
+                       "세트 " + std::to_string(sid) + ": 지운 노드 " + std::to_string(nDead) +
+                       " 개를 세트에서 뺐습니다(남은 구성원 " + std::to_string(keep.size()) + " 개)");
+            for (size_t m = first + 1; m < b.data.size(); ++m) handled.insert(b.data[m]);
+            if (keep.empty())
+                emptiedSets.push_back(kw + " SID " + std::to_string(sid) + " (구성원이 하나도 남지 않았습니다)");
+            continue;
+        }
+
+        // ── 2. *SET_SEGMENT — 세그먼트 한 줄이 노드 4 개를 한 덩어리로 쓴다 ───
+        if (rsStarts(kw, "*SET_SEGMENT") && !rsHas(kw, "_ADD") && !rsHas(kw, "_GENERAL")) {
+            size_t k = rsHas(kw, "_TITLE") ? 1u : 0u;
+            int sid = 0;
+            if (k < b.data.size()) sid = rsIntField(rsCardFields(rawLines_[b.data[k]]), 0);
+            for (size_t m = k + 1; m < b.data.size(); ++m) {
+                size_t li = b.data[m];
+                auto f = rsCardFields(effLine(li));
+                bool any = false;
+                for (size_t q = 0; q < 4 && q < f.size(); ++q) if (dead(rsIntField(f, q))) any = true;
+                if (!any) continue;
+                if (trySubst(kw, li, {0, 1, 2, 3}, 10)) continue;
+                ++removedValues;
+                dropLine("warn", kw, li, "세그먼트 집합 " + std::to_string(sid) +
+                                 ": 지운 노드를 쓰는 세그먼트 줄을 통째로 뺐습니다"
+                                 "(한 줄이 노드 4 개를 한 덩어리로 써 칸 하나만 뺄 수 없습니다)"
+                                 " — 이 세그먼트를 쓰던 접촉이 그만큼 줄어듭니다");
+            }
+            continue;
+        }
+
+        // ── 3. 칸 1 이 노드 ID 인 한 줄짜리 카드 ─────────────────────────────
+        // fw = 매뉴얼 카드 표의 칸 수에서 온 폭(1-8 칸 표 = 10 칸, 1-10 칸 표 = 8 칸).
+        struct OneFieldKw { const char* kw; int field; int fw; const char* what; };
+        static const OneFieldKw kOneField[] = {
+            { "*BOUNDARY_SPC_NODE",              0, 10, "구속을 걸 노드가 사라졌습니다" },
+            { "*LOAD_NODE_POINT",                0, 10, "하중을 걸 노드가 사라졌습니다" },
+            { "*INITIAL_VELOCITY_NODE",          0, 10, "초기 속도를 줄 노드가 사라졌습니다" },
+            { "*CONSTRAINED_EXTRA_NODES_NODE",   1, 10, "강체에 더할 노드가 사라졌습니다" },
+            { "*ELEMENT_MASS",                   1,  8, "집중질량을 붙일 노드가 사라졌습니다" },
+            // Card 1 칸 1 = TYPEID, NODE 옵션에서는 노드 ID 다(Vol_I 43405-43420).
+            // 낙하 덱에 거의 항상 있는 카드라 '보고도 안 되는' 상태로 두면 안 된다.
+            { "*BOUNDARY_PRESCRIBED_MOTION_NODE", 0, 10, "강제 변위를 줄 노드가 사라졌습니다" },
+        };
+        bool didOne = false;
+        for (const auto& ok : kOneField) {
+            // 정확히 같은 이름만 받는다 — `_SET` 은 세트 ID 고, `_ID`·`_BIRTH_DEATH` 는 카드가
+            // 한 장 더 붙어 '줄 하나 = 카드 하나' 가 아니다. 그런 변형은 아래에서 보고만 한다.
+            if (!rsStarts(kw, ok.kw)) continue;
+            if (kw != ok.kw) {
+                for (size_t m = 0; m < b.data.size(); ++m) {
+                    auto f = rsCardFields(rawLines_[b.data[m]]);
+                    bool any = false;
+                    for (size_t q = 0; q < f.size(); ++q) if (dead(rsIntField(f, q))) any = true;
+                    if (any)
+                        record("manual", kw, b.data[m],
+                               "지운 노드를 가리킵니다 — 이 변형은 카드 구성이 달라 자동으로 빼지 않았습니다");
+                }
+                didOne = true;
+                break;
+            }
+            size_t first = 0;
+            for (size_t m = first; m < b.data.size(); ++m) {
+                size_t li = b.data[m];
+                auto cf = rsCardFields(effLine(li));
+                if (!dead(rsIntField(cf, (size_t)ok.field))) continue;
+                // *BOUNDARY_PRESCRIBED_MOTION 은 |DOF| = 9,10,11 이거나 VAD = 4 면 Card 3 이
+                // 더 붙어 '줄 하나 = 카드 하나' 가 아니다(Vol_I 43405-43420 Card Summary).
+                if (kw == "*BOUNDARY_PRESCRIBED_MOTION_NODE") {
+                    int dof = rsIntField(cf, 1), vad = rsIntField(cf, 2);
+                    if ((dof >= 9 && dof <= 11) || vad == 4) {
+                        record("manual", kw, li,
+                               "강제 변위를 줄 노드가 사라졌습니다 — 이 카드는 뒤에 카드가 한 장 더"
+                               " 붙어(|DOF|=9,10,11 또는 VAD=4) 줄만 뺄 수 없습니다");
+                        continue;
+                    }
+                }
+                if (trySubst(kw, li, {ok.field}, ok.fw)) continue;
+                ++removedValues;
+                dropLine("warn", kw, li, std::string(ok.what) +
+                         " — 이 카드 줄을 뺐습니다(모델이 달라집니다)");
+            }
+            didOne = true;
+            break;
+        }
+        if (didOne) continue;
+
+        // ── 4. 칸 1-8 이 모두 노드 ID 인 목록 카드 ───────────────────────────
+        if (kw == "*DATABASE_HISTORY_NODE") {
+            // Card 1a 는 칸 1-8 이 전부 노드 ID 인 목록이다 — 남은 것만 다시 채워 쓴다.
+            for (size_t m = 0; m < b.data.size(); ++m)
+                trySubst(kw, b.data[m], {0, 1, 2, 3, 4, 5, 6, 7}, 10);
+            std::vector<int> keep;
+            size_t nDead = 0;
+            for (size_t m = 0; m < b.data.size(); ++m) {
+                auto f = rsCardFields(effLine(b.data[m]));
+                for (size_t q = 0; q < f.size() && q < 8; ++q) {
+                    int v = rsIntField(f, q);
+                    if (v <= 0) continue;
+                    if (deadNodes.count(v)) ++nDead;
+                    else keep.push_back(v);
+                }
+            }
+            if (nDead == 0 || b.data.empty()) continue;
+            auto repl = rsFormatSetMembers(keep);
+            for (size_t m = 0; m < b.data.size(); ++m)
+                pidRefRewrites_[b.data[m]] = (m < repl.size()) ? std::vector<std::string>{repl[m]}
+                                                              : std::vector<std::string>{};
+            removedValues += nDead;
+            record("moved", kw, b.data[0],
+                   "지운 노드 " + std::to_string(nDead) + " 개를 출력 요청에서 뺐습니다(남은 " +
+                   std::to_string(keep.size()) + " 개)");
+            for (size_t m = 1; m < b.data.size(); ++m) handled.insert(b.data[m]);
+            continue;
+        }
+
+        // ── 5. 지울 수 없는 것 — 지우면 모델이 달라진다. 보고만 하고 strict 에서 rc=1 ──
+        struct KeepKw { const char* kw; int card; int field; const char* why; };
+        static const KeepKw kKeep[] = {
+            { "*CONSTRAINED_NODAL_RIGID_BODY", 0, 3, "PNODE 가 사라졌습니다 — 강체의 기준 노드라 그냥 뺄 수 없습니다" },
+            { "*DEFINE_COORDINATE_NODES",      0, 1, "좌표계를 정의하는 노드입니다 — 빼면 좌표계가 사라집니다" },
+            { "*DEFINE_COORDINATE_NODES",      0, 2, "좌표계를 정의하는 노드입니다 — 빼면 좌표계가 사라집니다" },
+            { "*DEFINE_COORDINATE_NODES",      0, 3, "좌표계를 정의하는 노드입니다 — 빼면 좌표계가 사라집니다" },
+        };
+        for (const auto& kk : kKeep) {
+            if (!rsStarts(kw, kk.kw)) continue;
+            size_t k = rsFirstCard(kw) + (size_t)kk.card;
+            if (k >= b.data.size()) continue;
+            if (!dead(rsIntField(rsCardFields(rawLines_[b.data[k]]), (size_t)kk.field))) continue;
+            if (trySubst(kw, b.data[k], {kk.field}, 10)) continue;   // 옮길 수 있으면 옮긴다
+            record("manual", kw, b.data[k], kk.why);
+        }
+        // 노드 칸은 매뉴얼로 확정했지만 옵션(ID·LOCAL·FILTERED_FORCE)이 카드를 더 붙여
+        // '줄 하나 = 카드 하나' 를 보장하지 못하는 카드 — 지우지 않고 manual 로 올린다.
+        //   *CONSTRAINED_JOINT_TYPE : Card 1 칸 1-6 = N1..N6 (Vol_I 55496-)
+        //   *CONSTRAINED_SPOTWELD   : Card 1 칸 1-2 = N1,N2 (Vol_I 65327-65410)
+        {
+            struct JointKw { const char* kw; int lastField; const char* why; };
+            static const JointKw kJoint[] = {
+                { "*CONSTRAINED_JOINT_", 5,
+                  "조인트가 무는 노드가 사라졌습니다 — 줄을 빼면 조인트가 통째로 없어집니다" },
+                { "*CONSTRAINED_SPOTWELD", 1,
+                  "스폿용접이 무는 노드가 사라졌습니다 — 줄을 빼면 용접이 통째로 없어집니다" },
+            };
+            for (const auto& jk : kJoint) {
+                if (!rsStarts(kw, jk.kw)) continue;
+                for (size_t m = 0; m < b.data.size(); ++m) {
+                    size_t li = b.data[m];
+                    auto f = rsCardFields(effLine(li));
+                    bool any = false;
+                    for (int q = 0; q <= jk.lastField; ++q)
+                        if (dead(rsIntField(f, (size_t)q))) any = true;
+                    if (!any) continue;
+                    std::vector<int> flds;
+                    for (int q = 0; q <= jk.lastField; ++q) flds.push_back(q);
+                    if (trySubst(kw, li, flds, 10)) continue;
+                    record("manual", kw, li, jk.why);
+                }
+            }
+        }
+        if (rsStarts(kw, "*ELEMENT_BEAM") || rsStarts(kw, "*ELEMENT_DISCRETE") ||
+            rsStarts(kw, "*ELEMENT_SEATBELT")) {
+            for (size_t m = 0; m < b.data.size(); ++m) {
+                auto f = rsCardFields(rawLines_[b.data[m]]);
+                bool any = false;
+                for (size_t q = 2; q < f.size() && q < 8; ++q) if (dead(rsIntField(f, q))) any = true;
+                if (any)
+                    record("manual", kw, b.data[m],
+                           "이 요소가 지운 노드를 뭅니다 — 요소를 지울지 노드를 살릴지는 사람이 정해야 합니다");
+            }
+        }
+    }
+
+    if (movedValues > 0) {
+        std::ostringstream m;
+        m << "  [정리] 지운 노드를 가리키던 자리 " << movedValues
+          << " 건을 같은 자리에 생긴 새 층 노드로 바꿨습니다(모델은 그대로입니다).";
+        infoMessages.push_back(m.str());
+    }
+    if (removedValues > 0 || removedLines > 0) {
+        std::ostringstream m;
+        m << "  [WARN] 옮길 곳이 없어 지운 노드를 가리키던 자리 " << removedValues
+          << " 건을 치웠습니다(줄 삭제 " << removedLines
+          << " 줄) — 하중·초기속도·질량·세그먼트가 그만큼 사라져 모델이 달라집니다."
+             " 위 [NODE] 목록에서 어느 카드인지 확인하세요.";
+        infoMessages.push_back(m.str());
+    }
+    for (const auto& es : emptiedSets)
+        infoMessages.push_back("  [WARN] " + es +
+                               " — 이 세트를 쓰는 접촉·구속이 아무 일도 하지 않게 됩니다."
+                               " (*_GENERATE 범위는 매뉴얼상 미정의 ID 를 그냥 건너뛰므로 고치지 않았습니다"
+                               " — Vol_I 234577-234581)");
+}
+
 void ModelAssembler::scanDeadReferences(const std::string& opName,
                                         const std::set<int>& deadPids,
                                         const std::set<int>& deadEids,
@@ -2235,8 +2965,12 @@ void ModelAssembler::scanDeadReferences(const std::string& opName,
     std::set<int> deadNodeSets;
     for (size_t bi = 0; bi < blocks.size(); ++bi) {
         const auto& b = blocks[bi];
-        bool setNode = rsStarts(b.kw, "*SET_NODE") && !rsHas(b.kw, "_GENERATE");
-        bool setSeg  = rsStarts(b.kw, "*SET_SEGMENT");
+        // `_ADD` 는 구성원이 노드 세트 ID 고(Vol_I 234873-234875), `_GENERAL` 은 칸 1 이 문자
+        // OPTION 이며 E1..E7 의 뜻이 OPTION 마다 다르다(234701-234779) — 노드로 훑으면 오탐이다.
+        bool setNode = rsStarts(b.kw, "*SET_NODE") && !rsHas(b.kw, "_GENERATE") &&
+                       !rsHas(b.kw, "_ADD") && !rsHas(b.kw, "_GENERAL");
+        bool setCol  = setNode && rsHas(b.kw, "_COLUMN");   // 칸 1 만 노드 ID(234498-234512)
+        bool setSeg  = rsStarts(b.kw, "*SET_SEGMENT") && !rsHas(b.kw, "_ADD");
         bool spc     = rsStarts(b.kw, "*BOUNDARY_SPC_NODE");
         if (!setNode && !setSeg && !spc) continue;
         handled[bi] = true;
@@ -2249,8 +2983,8 @@ void ModelAssembler::scanDeadReferences(const std::string& opName,
         }
         for (size_t m = start; m < b.data.size(); ++m) {
             auto f = rsCardFields(rawLines_[b.data[m]]);
-            size_t n = spc ? std::min<size_t>(1, f.size())
-                           : (setSeg ? std::min<size_t>(4, f.size()) : f.size());
+            size_t n = (spc || setCol) ? std::min<size_t>(1, f.size())
+                           : (setSeg ? std::min<size_t>(4, f.size()) : std::min<size_t>(8, f.size()));
             for (size_t q = 0; q < n; ++q) {
                 if (!isDead(deadNodes, rsIntField(f, q))) continue;
                 if (setNode && sid > 0) deadNodeSets.insert(sid);
@@ -2502,6 +3236,58 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
             partElems.push_back(&elem);
         }
     }
+
+    // 1b. 덱의 요소 카드 수와 리더가 읽은 수를 대조한다 — 현장이 쓴 검증 방법 그대로다.
+    //     리더는 8 절점 모서리만 담는다. 그래서 20 절점(H20·T20·T15·P21…) 요소, *ELEMENT_SOLID_ORTHO,
+    //     *ELEMENT_SHELL_THICKNESS, COMPOSITE 계열은 읽지 못한다. 그런 파트를 restack 하면
+    //     '요소 0 개' 나 '일부만' 으로 조용히 흘러가 틀린 덱이 나간다 — 조용히 넘기지 않고 rc=1 이다.
+    {
+        // 고차 정식 파트(ELFORM 23-29 또는 H20 같은 키워드 옵션)는 아예 받지 않는다.
+        // 리더는 요소마다 8 절점 모서리만 담으므로 새 층을 만들면 중간 절점이 사라지고,
+        // 물려받은 *SECTION_SOLID ELFORM 은 그대로 23 이라 '20 절점이라고 적힌 8 절점 덱' 이 나간다.
+        {
+            auto hn = ecBuildPidNodes(rawLines_);
+            auto hit = hn.find(op.targetPid);
+            if (hit != hn.end() && hit->second > 10) {
+                errorMessage_ = "restack: PID " + std::to_string(op.targetPid) + " 는 " +
+                                std::to_string(hit->second) +
+                                " 절점 고차 요소 파트입니다(*SECTION_SOLID ELFORM) — 이 도구는 요소마다"
+                                " 8 절점 모서리만 담아 중간 절점을 다시 만들 수 없습니다."
+                                " 조용히 틀린 덱을 내는 대신 여기서 멈춥니다"
+                                " / cannot restack a higher-order solid part";
+                return false;
+            }
+        }
+        const ElemCardIndex ix = ecBuildIndex(rawLines_);
+        long long inDeck = 0;
+        for (size_t c = 0; c < rawLines_.size(); ++c) {
+            if (ix.owner[c] != static_cast<int>(c)) continue;
+            if (ix.pidOf[c] != op.targetPid) continue;
+            if (ix.eidOf[c] > 0 && removedElementIds_.count(ix.eidOf[c])) continue;
+            ++inDeck;
+        }
+        // 줄 수를 확정하지 못한 섹션(COMPOSITE 등)은 색인이 세지 않는다 — 그 안에 대상 파트가
+        // 들어 있으면 위 수가 0 이어도 '없다' 가 아니다. 그래서 그런 섹션이 있으면 먼저 알린다.
+        if (!ix.opaqueKws.empty() && inDeck != static_cast<long long>(partElems.size())) {
+            std::set<std::string> u(ix.opaqueKws.begin(), ix.opaqueKws.end());
+            std::string kws;
+            for (const auto& k : u) { if (!kws.empty()) kws += ", "; kws += k; }
+            errorMessage_ = "restack: 카드 줄 수를 확정할 수 없는 요소 섹션이 있습니다(" + kws + ") — " +
+                            ix.opaqueReason +
+                            " / element section with an undeterminable card length";
+            return false;
+        }
+        if (inDeck != static_cast<long long>(partElems.size())) {
+            errorMessage_ = "restack: PID " + std::to_string(op.targetPid) + " 의 요소 카드가 덱에는 " +
+                            std::to_string(inDeck) + " 개인데 " + std::to_string(partElems.size()) +
+                            " 개만 읽혔습니다 — 이 도구는 요소마다 8 절점 모서리만 담습니다."
+                            " 20 절점 같은 고차 요소나 *ELEMENT_SOLID_ORTHO·*ELEMENT_SHELL_THICKNESS 처럼"
+                            " 카드가 여러 장인 변형은 다시 만들 수 없습니다 — 조용히 틀린 덱을 내는 대신"
+                            " 여기서 멈춥니다 / element card count mismatch; refusing to restack";
+            return false;
+        }
+    }
+
     if (partElems.empty()) {
         errorMessage_ = "Part " + std::to_string(op.targetPid) + " not found for restack";
         return false;
@@ -2940,6 +3726,19 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
         }
     }
 
+    // 새 층 PID — 지정이 없으면 예전대로 모델 최대 PID 다음 번호다. layers[].pid 를 주면 그 번호를,
+    // pid_start 를 주면 그 번호부터 쓴다(예약 대역을 피해 새 층을 원하는 대역에 모으는 수단).
+    // 이미 쓰는 번호를 조용히 다른 번호로 바꾸면 사용자가 그 PID 로 걸어 둔 접촉·세트가
+    // 엉뚱한 파트를 가리키므로 지정 PID 가 겹치면 rc=1 로 막는다.
+    std::set<int> reservedLayerPids;
+    for (const auto& L : op.layers) if (L.pid > 0) reservedLayerPids.insert(L.pid);
+    std::set<int> assignedLayerPids;
+    auto pidTaken = [&](int pid) {
+        return baseMesh_.parts.count(pid) > 0 || restackCreatedPids_.count(pid) > 0 ||
+               assignedLayerPids.count(pid) > 0;
+    };
+    int pidCursor = op.pidStart;   // 0 = 예전대로 maxPartId_ 에서 이어 간다
+
     std::set<int> emittedMids; // Track which MIDs have already been written
     std::vector<std::pair<int, std::string>> layerPidEtype; // (pid, effectiveEtype) per layer
 
@@ -2965,7 +3764,31 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
         bool isTshell = (layerEtype == "tshell");
 
         // Assign new PID and SECID for this layer
-        int newPid = ++maxPartId_;
+        int newPid;
+        if (layerDef.pid > 0) {
+            if (pidTaken(layerDef.pid)) {
+                errorMessage_ = "restack: layer " + std::to_string(layerIdx + 1) + " pid " +
+                    std::to_string(layerDef.pid) + " is already used by this model" +
+                    (layerDef.pid == op.targetPid ? " (it is the restacked part itself)" : "") +
+                    " - choose a free part ID";
+                return false;
+            }
+            newPid = layerDef.pid;
+        } else {
+            int cand = (pidCursor > 0) ? pidCursor : maxPartId_ + 1;
+            while (cand < std::numeric_limits<int>::max() &&
+                   (pidTaken(cand) || reservedLayerPids.count(cand))) ++cand;
+            if (cand >= std::numeric_limits<int>::max() || pidTaken(cand)) {
+                errorMessage_ = "restack: no free part ID left for layer " +
+                    std::to_string(layerIdx + 1) + " - renumber the model's parts before restacking";
+                return false;
+            }
+            newPid = cand;
+            if (pidCursor > 0) pidCursor = cand + 1;
+        }
+        assignedLayerPids.insert(newPid);
+        restackCreatedPids_.insert(newPid);
+        if (newPid > maxPartId_) maxPartId_ = newPid;
         int newSecId = ++maxSectionId_;
         layerPidEtype.push_back({newPid, layerEtype});
         layerSegInfos.push_back({newPid, layerEtype, {}, {}});
@@ -3243,8 +4066,36 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
             }
         }
 
+        // 지운 중간면 노드 → 좌표가 똑같은 새 층 노드. 두께 합과 분할이 원안과 겹칠 때만 생긴다.
+        // 대응은 좌표로만 정한다(같은 기둥의 새 평면 노드 중 tol 안에서 딱 하나 일치할 때).
+        std::map<int, int> nodeSubst;
+        {
+            double ntol = originalThickness * 1e-6;
+            for (int dn : thisOpDeadNodes) {
+                auto cit = nodeToColumn.find(dn);
+                if (cit == nodeToColumn.end()) continue;
+                const auto* on = baseMesh_.getNode(dn);
+                if (!on) continue;
+                const auto& nc = newColumns[cit->second];
+                int hit = 0, hitId = 0;
+                for (int p = 1; p < totalElements; ++p) {   // 양끝은 원 노드를 그대로 쓴다
+                    auto xit = colNodeXYZ.find(nc.nodeIds[p]);
+                    if (xit == colNodeXYZ.end()) continue;
+                    if (std::abs(xit->second[0] - on->position.x) <= ntol &&
+                        std::abs(xit->second[1] - on->position.y) <= ntol &&
+                        std::abs(xit->second[2] - on->position.z) <= ntol) {
+                        ++hit; hitId = nc.nodeIds[p];
+                    }
+                }
+                if (hit == 1) nodeSubst[dn] = hitId;   // 둘 이상이면 어느 것인지 정할 수 없다
+            }
+        }
+
         std::set<size_t> migrated;
         std::vector<PidRefFinding> movedFindings;
+        migrateDeadNodeSets(nodeSubst, migrated, movedFindings);
+        // 옮길 곳이 없는 참조는 실제로 치운다 — 남기면 LS-DYNA 가 하드 에러로 멈춘다(현장 실측).
+        cleanupDeadNodeRefs(thisOpDeadNodes, nodeSubst, migrated, movedFindings);
         migrateDeadReferences(deadPids, mctx, migrated, movedFindings);
         scanDeadReferences("restack", deadPids, thisOpDeadElems, thisOpDeadNodes, newPids,
                            migrated, std::move(movedFindings));
@@ -3964,7 +4815,7 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
     // Process raw lines
     std::ostringstream output;
 
-    enum class Section { NONE, NODE, ELEMENT, SHELL_ELEMENT };
+    enum class Section { NONE, NODE, ELEMENT, SHELL_ELEMENT, TSHELL_ELEMENT };
     Section currentSection = Section::NONE;
     bool nodesInserted = false;
     bool elementsInserted = false;
@@ -3974,8 +4825,30 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
     int sectionSolidDataLine = 0;          // data line counter within *SECTION_SOLID
     bool inSectionShell = false;           // tracking *SECTION_SHELL for ELFORM rewrite
     int sectionShellDataLine = 0;          // data line counter within *SECTION_SHELL
-    bool inDowngradeElement = false;        // true while inside a multi-line element being downgraded
     bool skipSectionSolidPeri = false;     // true when skipping SECTION_SOLID to be replaced by PERI
+    // 요소 카드 경계는 어림짐작이 아니라 색인(ecBuildIndex)이 정한다 — 키워드 옵션과
+    // *SECTION_SOLID ELFORM 으로 카드 줄 수를 확정하고, 그 줄들을 통째로 지우거나 통째로 내보낸다.
+    bool elementTwoLineFormat = false;     // 지금 섹션의 카드가 두 줄 이상인가(새 층을 어디에 쓸지 정한다)
+    bool dropCurrentCard = false;          // 지금 카드의 나머지 줄을 버려야 하나
+    bool tshellElementsInserted = false;   // 새 tshell 층을 이미 썼나(솔리드와 따로 센다)
+
+    const ElemCardIndex eidx = ecBuildIndex(rawLines_);
+
+    // 새 노드·새 요소를 덱과 같은 칸 폭으로 쓴다. 8 칸으로 못박으면 i10 덱에서 새 층이
+    // 통째로 다른 값으로 읽힌다(Vol_I 19342-19360) — 현장 사고와 같은 모양이다.
+    const int deckFw = deckFieldWidth(rawLines_);
+    int curSecFw = deckFw;                 // 지금 섹션의 칸 폭(키워드 접미사가 덮어쓴다)
+    if (deckFw >= 20 && (!addedNodes_.empty() || !addedElements_.empty() ||
+                         !addedShellElements_.empty() || !removedElementIds_.empty())) {
+        // long 포맷(20 칸)은 *PART·*SECTION·*MAT 카드도 20 칸이라 이 쓰기 경로 전체가
+        // 달라진다. 반쯤 맞는 덱을 내보내는 대신 거절한다(Vol_I 19305-19312).
+        errorMessage_ =
+            "long 포맷 덱(*KEYWORD long=y)입니다 — 요소·노드를 더하거나 지우는 op 는 이 덱의"
+            " 20 칸 서식을 확정하지 못했습니다. 표준(8 칸) 또는 i10 덱으로 주세요"
+            " — 출력 파일을 쓰지 않았습니다: " + outputPrefix +
+            " / long format deck is not supported by element/node editing ops";
+        return false;
+    }
 
     for (size_t i = 0; i < rawLines_.size(); ++i) {
         const std::string& line = rawLines_[i];
@@ -4002,17 +4875,28 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
             // Before leaving current section, insert added content
             if (currentSection == Section::NODE && !nodesInserted) {
                 for (const auto& an : addedNodes_) {
-                    output << formatNodeLine(an.id, an.x, an.y, an.z) << "\n";
+                    output << formatNodeLine(an.id, an.x, an.y, an.z, curSecFw) << "\n";
                 }
                 nodesInserted = true;
             }
             if (currentSection == Section::ELEMENT && !elementsInserted) {
                 // Only insert non-tshell (solid) elements here; tshell go before *END
+                // 두 줄 포맷 섹션에 한 줄 포맷을 섞으면 두 줄 리더가 새 요소의 절반을 노드 줄로
+                // 읽어 요소가 통째로 사라진다 — 표준 한 줄 포맷 *ELEMENT_SOLID 섹션을 새로 열어 쓴다.
+                bool anySolidAdded = false;
+                for (const auto& ae : addedElements_) if (!ae.isTshell) { anySolidAdded = true; break; }
+                // 새로 여는 섹션은 접미사가 없다 → 덱 기본 폭으로 쓴다.
+                const int addFw = (anySolidAdded && elementTwoLineFormat) ? deckFw : curSecFw;
+                if (anySolidAdded && elementTwoLineFormat) output << "*ELEMENT_SOLID\n";
                 for (const auto& ae : addedElements_) {
-                    if (!ae.isTshell) output << formatElementLine(ae) << "\n";
+                    if (!ae.isTshell) output << formatElementLine(ae, addFw) << "\n";
                 }
                 elementsInserted = true;
             }
+            dropCurrentCard = false;
+            // 이 키워드가 여는 섹션의 칸 폭(접미사 '%','+','-' 가 덱 기본값을 덮어쓴다).
+            // 위 삽입 블록은 '떠나는 섹션' 의 폭으로 이미 썼다 — 그래서 여기서 갱신한다.
+            curSecFw = keywordFieldWidth(trimmed, deckFw);
 
             // Detect section type
             std::string upper = trimmed;
@@ -4068,6 +4952,15 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                 currentSection = Section::NODE;
             } else if (upper.substr(0, 14) == "*ELEMENT_SOLID") {
                 currentSection = Section::ELEMENT;
+                // 헤더 꼬리글("(ten nodes format)")은 매뉴얼에 없는 관행이라 힌트로만 쓴다 —
+                // 실제 판정은 색인이 한 카드 줄 수다(아래에서 span>1 이면 두 줄 이상으로 본다).
+                elementTwoLineFormat = (upper.find("TEN NODE") != std::string::npos);
+            } else if (upper.find("*ELEMENT_TSHELL") == 0) {
+                // 리더는 *ELEMENT_TSHELL 을 솔리드와 같은 칸(두 줄 포맷 포함)으로 읽는데
+                // 출력에서는 어느 섹션도 아니어서 지운 요소가 그대로 남아 있었다 —
+                // 원 파트 요소와 새 층이 같은 자리에 겹쳐 질량이 두 배인 덱이 나갔다.
+                currentSection = Section::TSHELL_ELEMENT;
+                elementTwoLineFormat = (upper.find("TEN NODE") != std::string::npos);
             } else if (upper.find("*ELEMENT_SHELL") == 0) {
                 currentSection = Section::SHELL_ELEMENT;
                 shellElementsHandled = true;
@@ -4078,43 +4971,44 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                 if (!nodesInserted) {
                     output << "*NODE\n";
                     for (const auto& an : addedNodes_) {
-                        output << formatNodeLine(an.id, an.x, an.y, an.z) << "\n";
+                        output << formatNodeLine(an.id, an.x, an.y, an.z, curSecFw) << "\n";
                     }
                     nodesInserted = true;
                 }
-                if (!elementsInserted) {
+                if (!elementsInserted || !tshellElementsInserted) {
                     // Separate solid vs tshell elements
                     bool hasSolid = false, hasTshell = false;
                     for (const auto& ae : addedElements_) {
                         if (ae.isTshell) hasTshell = true;
                         else hasSolid = true;
                     }
-                    if (hasSolid) {
+                    if (hasSolid && !elementsInserted) {
                         output << "*ELEMENT_SOLID\n";
                         for (const auto& ae : addedElements_) {
-                            if (!ae.isTshell) output << formatElementLine(ae) << "\n";
+                            if (!ae.isTshell) output << formatElementLine(ae, curSecFw) << "\n";
                         }
                     }
-                    if (hasTshell) {
+                    if (hasTshell && !tshellElementsInserted) {
                         output << "*ELEMENT_TSHELL\n";
                         for (const auto& ae : addedElements_) {
-                            if (ae.isTshell) output << formatElementLine(ae) << "\n";
+                            if (ae.isTshell) output << formatElementLine(ae, curSecFw) << "\n";
                         }
                     }
-                    if (!hasSolid && !hasTshell && !addedElements_.empty()) {
+                    if (!hasSolid && !hasTshell && !addedElements_.empty() && !elementsInserted) {
                         output << "*ELEMENT_SOLID\n";
                         for (const auto& ae : addedElements_) {
-                            output << formatElementLine(ae) << "\n";
+                            output << formatElementLine(ae, curSecFw) << "\n";
                         }
                     }
                     elementsInserted = true;
+                    tshellElementsInserted = true;
                 }
 
                 // Insert shell elements if any
                 if (!addedShellElements_.empty()) {
                     output << "*ELEMENT_SHELL\n";
                     for (const auto& se : addedShellElements_) {
-                        output << formatShellElementLine(se) << "\n";
+                        output << formatShellElementLine(se, curSecFw) << "\n";
                     }
                 }
 
@@ -4262,37 +5156,32 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                 if (modifiedNodePositions_.count(nodeId) > 0) {
                     // Write modified position
                     const auto& pos = modifiedNodePositions_[nodeId];
-                    output << formatNodeLine(nodeId, pos.x, pos.y, pos.z) << "\n";
+                    output << formatNodeLine(nodeId, pos.x, pos.y, pos.z, curSecFw) << "\n";
                     continue;
                 }
             }
             output << line << "\n";
         }
         else if (currentSection == Section::ELEMENT) {
-            // Detect if this line is an element header (eid+pid, short line)
-            // vs a continuation line (node IDs, many tokens)
-            int tokenCount = 0;
-            {
-                std::istringstream iss(line);
-                std::string tok;
-                while (iss >> tok) tokenCount++;
+            // 줄 수를 확정하지 못한 섹션(COMPOSITE 계열)은 손대지 않고 그대로 내보낸다 —
+            // 카드 경계를 모르는데 줄 하나를 지우면 나머지 줄이 고아로 남는다.
+            if (eidx.opaque[i]) { output << line << "\n"; continue; }
+            // 카드 경계는 색인이 정한다 — 이어지는 줄(노드 줄·Card 3·ORTHO 카드…)은 여기서
+            // 걷어내야 (1) 노드 ID 가 지워진 요소 번호와 겹칠 때 남의 줄이 사라지지 않고
+            // (2) 요소를 지울 때 카드가 통째로 지워진다(예전엔 'eid pid' 줄만 지워져
+            //     노드 줄이 고아로 남았고, 두 줄 리더가 그 줄을 다음 요소로 읽어 덱이 밀렸다).
+            if (eidx.owner[i] >= 0 && eidx.owner[i] != (int)i) {
+                if (dropCurrentCard) continue;
+                output << line << "\n";
+                continue;
             }
-            bool isElementHeader = (tokenCount >= 2 && tokenCount <= 3);
+            dropCurrentCard = false;
+            if (eidx.owner[i] == (int)i && eidx.span[i] > 1) elementTwoLineFormat = true;
+            bool isElementHeader = (eidx.owner[i] == (int)i && eidx.span[i] > 1);
 
-            // If we're inside a downgraded multi-line element, skip continuation lines
-            if (inDowngradeElement) {
-                if (isElementHeader) {
-                    // New element header → end of previous downgraded element
-                    inDowngradeElement = false;
-                    // Fall through to process this new element header
-                } else {
-                    // Continuation line of downgraded element → skip
-                    continue;
-                }
-            }
-
-            int elemId = parseElementIdFromLine(line);
+            int elemId = (eidx.owner[i] == (int)i) ? eidx.eidOf[i] : parseElementIdFromLine(line);
             if (elemId > 0 && removedElementIds_.count(elemId) > 0) {
+                dropCurrentCard = true;   // 카드의 나머지 줄도 함께 지운다
                 continue;  // Skip removed element
             }
 
@@ -4329,7 +5218,7 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                     }
 
                     output << oss.str() << "\n";
-                    inDowngradeElement = true;  // Skip subsequent continuation lines
+                    dropCurrentCard = true;   // 옛 카드의 나머지 줄을 버린다
                     continue;
                 }
             }
@@ -4338,12 +5227,14 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
             if (elemId > 0 && tet10Elements_.count(elemId)) {
                 int pid = parsePartIdFromLine(line);
                 output << formatTet10ElementLine(elemId, pid, tet10Elements_[elemId]) << "\n";
+                dropCurrentCard = true;   // 옛 카드의 나머지 줄을 버린다
                 continue;
             }
             // HEX20 conversion: replace single-line HEX8 with 3-line HEX20
             if (elemId > 0 && hex20Elements_.count(elemId)) {
                 int pid = parsePartIdFromLine(line);
                 output << formatHex20ElementLine(elemId, pid, hex20Elements_[elemId]) << "\n";
+                dropCurrentCard = true;   // 옛 카드의 나머지 줄을 버린다
                 continue;
             }
             // Disconnect: modified element nodes (CZM/MEFEM)
@@ -4354,13 +5245,46 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                 oss << std::setw(8) << elemId << std::setw(8) << pid;
                 for (int n = 0; n < 8; ++n) oss << std::setw(8) << newNodes[n];
                 output << oss.str() << "\n";
+                dropCurrentCard = true;   // 옛 카드의 나머지 줄을 버린다
+                continue;
+            }
+            output << line << "\n";
+        }
+        else if (currentSection == Section::TSHELL_ELEMENT) {
+            // 줄 수를 확정하지 못한 섹션(COMPOSITE 계열)은 손대지 않고 그대로 내보낸다 —
+            // 카드 경계를 모르는데 줄 하나를 지우면 나머지 줄이 고아로 남는다.
+            if (eidx.opaque[i]) { output << line << "\n"; continue; }
+            // 지우기만 한다 — 새 요소는 예전처럼 *END 앞의 *ELEMENT_TSHELL 로 나간다.
+            // TSHELL 은 Card 1 이 언제나 N1..N8 한 줄이고(Vol_I 165174-165184) _BETA 면 한 줄이 더 온다.
+            if (eidx.owner[i] >= 0 && eidx.owner[i] != (int)i) {
+                if (dropCurrentCard) continue;
+                output << line << "\n";
+                continue;
+            }
+            dropCurrentCard = false;
+            int elemId = (eidx.owner[i] == (int)i) ? eidx.eidOf[i] : parseElementIdFromLine(line);
+            if (elemId > 0 && removedElementIds_.count(elemId) > 0) {
+                dropCurrentCard = true;
                 continue;
             }
             output << line << "\n";
         }
         else if (currentSection == Section::SHELL_ELEMENT) {
-            int elemId = parseElementIdFromLine(line);
+            // 줄 수를 확정하지 못한 섹션(COMPOSITE 계열)은 손대지 않고 그대로 내보낸다 —
+            // 카드 경계를 모르는데 줄 하나를 지우면 나머지 줄이 고아로 남는다.
+            if (eidx.opaque[i]) { output << line << "\n"; continue; }
+            // *ELEMENT_SHELL_THICKNESS/_BETA/_MCID 는 요소마다 둘째 카드가 붙고, 중간절점(N5-N8)이
+            // 정의돼 있으면 셋째 카드까지 온다(Vol_I 162168-162169, 162567-162571).
+            // 예전에는 한 줄만 지워 두께 줄이 고아로 남았다.
+            if (eidx.owner[i] >= 0 && eidx.owner[i] != (int)i) {
+                if (dropCurrentCard) continue;
+                output << line << "\n";
+                continue;
+            }
+            dropCurrentCard = false;
+            int elemId = (eidx.owner[i] == (int)i) ? eidx.eidOf[i] : parseElementIdFromLine(line);
             if (elemId > 0 && removedElementIds_.count(elemId) > 0) {
+                dropCurrentCard = true;
                 continue;
             }
             // Shell downgrade: QUAD8→QUAD4 or TRIA6→TRIA3
@@ -4390,6 +5314,7 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                         for (int n = 2; n < 6; ++n) oss << std::setw(8) << tokens[n];
                     }
                     output << oss.str() << "\n";
+                    dropCurrentCard = true;   // 중간절점이 사라지면 딸린 두께 카드도 버린다
                     continue;
                 }
             }
@@ -4397,12 +5322,14 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
             if (elemId > 0 && quad8Elements_.count(elemId)) {
                 int pid = parsePartIdFromLine(line);
                 output << formatQuad8ElementLine(elemId, pid, quad8Elements_[elemId]) << "\n";
+                dropCurrentCard = true;
                 continue;
             }
             // TRIA6 conversion: replace TRIA3 line
             if (elemId > 0 && tria6Elements_.count(elemId)) {
                 int pid = parsePartIdFromLine(line);
                 output << formatTria6ElementLine(elemId, pid, tria6Elements_[elemId]) << "\n";
+                dropCurrentCard = true;
                 continue;
             }
             // Disconnect: modified shell element nodes (CZM/MEFEM)
@@ -4532,6 +5459,162 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
         }
     }
 
+
+    // 줄 수를 확정하지 못한 섹션 안에 '지워야 할 요소' 가 들어 있으면 손댈 수 없다 —
+    // 그대로 두면 지워진 노드를 무는 요소가 살아남는다. 조용히 넘기지 않고 rc=1 이다.
+    if (!removedElementIds_.empty()) {
+        for (size_t i = 0; i < rawLines_.size(); ++i) {
+            if (!eidx.opaque[i]) continue;
+            auto f = ecFields(rawLines_[i], deckFw);
+            int eid = ecInt(f, 0);
+            if (eid <= 0 || removedElementIds_.count(eid) == 0) continue;
+            std::set<std::string> u(eidx.opaqueKws.begin(), eidx.opaqueKws.end());
+            std::string kws;
+            for (const auto& k : u) { if (!kws.empty()) kws += ", "; kws += k; }
+            errorMessage_ =
+                "지워야 할 요소 " + std::to_string(eid) + " 가 카드 줄 수를 확정할 수 없는 섹션(" + kws +
+                ") 안에 있습니다 — " + eidx.opaqueReason +
+                " — 출력 파일을 쓰지 않았습니다: " + outputFile +
+                " / cannot delete an element inside a section with an undeterminable card length";
+            return false;
+        }
+    }
+
+    // ── 왕복 검증 (파트별 요소 수) ────────────────────────────────────────────
+    // 현장 사고: LS-DYNA 도 KooMeshModifier 도 에러를 내지 않았고, AP 파트가 통째로 빠진 덱이
+    // "Normal termination" 하고 analysis_result.json 까지 냈다. 3자 대조(원본/출력/per-run)로
+    // 겨우 찾아냈다 — 도구가 스스로 잡아야 한다. 쓰기 직전 버퍼를 같은 카드 색인으로 다시 읽어
+    // 이번 op 가 건드린 파트의 요소 수가 기대와 맞는지 본다. 어긋나면 파일을 쓰지 않고 rc=1 이다
+    // (바로 위 nan/inf 관문과 같은 자리·같은 결말 — 틀린 덱을 디스크에 남기지 않는다).
+    {
+        std::set<int> touched;
+        std::map<int, long long> before = eidx.countByPid;
+        std::map<int, long long> expect = before;
+        for (size_t c = 0; c < rawLines_.size(); ++c) {
+            if (eidx.owner[c] != static_cast<int>(c)) continue;
+            int eid = eidx.eidOf[c];
+            if (eid > 0 && removedElementIds_.count(eid)) {
+                expect[eidx.pidOf[c]] -= 1;
+                touched.insert(eidx.pidOf[c]);
+            }
+        }
+        for (const auto& ae : addedElements_)      { expect[ae.pid] += 1; touched.insert(ae.pid); }
+        for (const auto& se : addedShellElements_) { expect[se.pid] += 1; touched.insert(se.pid); }
+        // op 가 통째로 끼워 넣는 키워드 블록에 요소 카드가 들어 있으면 그것도 기대에 넣는다
+        if (!touched.empty() && !addedKeywordBlocks_.empty()) {
+            std::vector<std::string> blkLines;
+            for (const auto& blk : addedKeywordBlocks_) {
+                std::istringstream bs(blk);
+                std::string bl;
+                while (std::getline(bs, bl)) blkLines.push_back(bl);
+            }
+            for (const auto& [pid, cnt] : ecBuildIndex(blkLines).countByPid) expect[pid] += cnt;
+        }
+
+        if (!touched.empty()) {
+            std::vector<std::string> outLines;
+            {
+                const std::string& body = output.str();
+                std::string cur;
+                for (char ch : body) {
+                    if (ch == '\n') { outLines.push_back(cur); cur.clear(); }
+                    else if (ch != '\r') cur += ch;
+                }
+                if (!cur.empty()) outLines.push_back(cur);
+            }
+            ElemCardIndex oidx = ecBuildIndex(outLines);
+            // 엄격 재독 — LS-DYNA 처럼 '그 섹션이 선언한 폭' 으로만 자르고 공백 토큰으로
+            // 되돌리지 않는다(Vol_I 19342-19360). 관대한 재독은 i10 덱에 8 칸으로 쓴 줄도
+            // 읽어 내므로 '층이 통째로 사라진 덱' 을 통과시킨다 — 그 구멍을 여기서 막는다.
+            ElemCardIndex sOut = ecBuildIndex(outLines, /*strict=*/true);
+            ElemCardIndex sIn  = ecBuildIndex(rawLines_, /*strict=*/true);
+
+            std::ostringstream table;
+            table << "  [요소 수 대조] 파트별 요소 수(입력 → 출력)";
+            long long beforeTot = 0, afterTot = 0;
+            for (const auto& [pid, cnt] : before) beforeTot += cnt;
+            for (const auto& [pid, cnt] : oidx.countByPid) afterTot += cnt;
+            // 건드린 파트만 보면 '건드리지도 않은 파트가 조용히 사라지는' 사고를 놓친다
+            // (현장에서 실제로 그렇게 AP 가 통째로 빠졌다). 입력·기대·출력에 나오는 모든 PID 를 본다.
+            std::set<int> allPids;
+            for (const auto& [pid, c] : before) { (void)c; allPids.insert(pid); }
+            for (const auto& [pid, c] : expect) { (void)c; allPids.insert(pid); }
+            for (const auto& [pid, c] : oidx.countByPid) { (void)c; allPids.insert(pid); }
+            std::vector<std::string> rows;
+            std::vector<std::string> bad;
+            for (int pid : allPids) {
+                long long b = before.count(pid) ? before[pid] : 0;
+                long long e = expect.count(pid) ? expect[pid] : 0;
+                long long a = oidx.countByPid.count(pid) ? oidx.countByPid[pid] : 0;
+                if (a != e) {
+                    bad.push_back("PID " + std::to_string(pid) + ": 기대 " + std::to_string(e) +
+                                  ", 출력 덱 " + std::to_string(a));
+                }
+                // 표는 변화가 있거나 어긋난 파트만 — 수백 파트짜리 덱에서 로그를 덮지 않게
+                if (b == a && a == e) continue;
+                std::ostringstream row;
+                row << "    PID " << pid << ": " << b << " → " << a
+                    << (b == 0 ? " (신규)" : (a == 0 ? " (삭제)" : ""));
+                if (a != e) row << "  ← 기대 " << e << " 와 다릅니다";
+                rows.push_back(row.str());
+            }
+            infoMessages.push_back(table.str());
+            for (const auto& r : rows) infoMessages.push_back(r);
+            {
+                long long expectTot = 0;
+                for (const auto& [pid, cnt] : expect) { (void)pid; expectTot += cnt; }
+                if (afterTot != expectTot) {
+                    bad.push_back("합계: 기대 " + std::to_string(expectTot) +
+                                  ", 출력 덱 " + std::to_string(afterTot));
+                }
+                std::ostringstream tot;
+                tot << "    합계 " << beforeTot << " → " << afterTot;
+                if (!oidx.opaqueKws.empty()) {
+                    std::set<std::string> u(oidx.opaqueKws.begin(), oidx.opaqueKws.end());
+                    tot << " (줄 수를 확정하지 못한 섹션은 세지 않았습니다:";
+                    for (const auto& k : u) tot << " " << k;
+                    tot << ")";
+                }
+                infoMessages.push_back(tot.str());
+            }
+
+            // 엄격 재독 대조 — 입력 덱이 이미 칸이 어긋나 있던 파트는 이번 op 탓이 아니므로
+            // 경고만 하고, 그렇지 않은 파트가 어긋나면 그건 우리가 쓴 줄이 덱의 폭과 다른 것이다.
+            std::vector<std::string> strictBad;
+            for (int pid : allPids) {
+                long long e  = expect.count(pid) ? expect[pid] : 0;
+                long long sa = sOut.countByPid.count(pid) ? sOut.countByPid[pid] : 0;
+                if (sa == e) continue;
+                long long b  = before.count(pid) ? before[pid] : 0;
+                long long sb = sIn.countByPid.count(pid) ? sIn.countByPid[pid] : 0;
+                if (sb != b) {
+                    infoMessages.push_back(
+                        "    [WARN] PID " + std::to_string(pid) +
+                        ": 입력 덱부터 고정 칸이 어긋나 있어 엄격 재독으로는 " + std::to_string(sa) +
+                        " 개로 읽힙니다(기대 " + std::to_string(e) + ") — 이번 op 가 만든 것이 아닙니다.");
+                    continue;
+                }
+                strictBad.push_back("PID " + std::to_string(pid) + ": 기대 " + std::to_string(e) +
+                                    ", 엄격 재독 " + std::to_string(sa));
+            }
+
+            if (!bad.empty() || !strictBad.empty()) {
+                std::string why;
+                for (const auto& b : bad) { if (!why.empty()) why += "; "; why += b; }
+                for (const auto& b : strictBad) { if (!why.empty()) why += "; "; why += b; }
+                errorMessage_ =
+                    "왕복 검증 실패 — 출력 덱을 다시 읽으니 파트별 요소 수가 기대와 다릅니다: " + why +
+                    (strictBad.empty() ? ""
+                     : " (엄격 재독 = 각 섹션이 선언한 고정 칸 폭으로만 읽은 결과입니다"
+                       " — LS-DYNA 가 읽는 방식입니다)") +
+                    " — 출력 파일을 쓰지 않았습니다: " + outputFile +
+                    " / round-trip check failed (element count per part); no output written";
+                return false;
+            }
+            infoMessages.push_back("    왕복 검증: 출력 덱을 다시 읽어 파트별 요소 수가 기대와 같았습니다"
+                                   "(각 섹션이 선언한 고정 칸 폭으로 엄격 재독한 결과도 같습니다).");
+        }
+    }
     // Write output file
     std::ofstream outFile(outputFile, std::ios::binary);
     if (!outFile.is_open()) {
@@ -4774,38 +5857,41 @@ int ModelAssembler::parseElementIdFromLine(const std::string& line) const {
     }
 }
 
-std::string ModelAssembler::formatNodeLine(int id, double x, double y, double z) const {
+// *NODE 는 표준 (I8,3F16,2I8), i10 은 (I10,3F16,2I10), long 은 (I20,3F20,2I20)
+// — Vol_I 19345, 19348, 19360. 정수 칸만 바뀌는 게 아니라 long 에서는 실수 칸도 20 이다.
+std::string ModelAssembler::formatNodeLine(int id, double x, double y, double z, int fw) const {
+    const int rw = realFieldWidth(fw);
     std::ostringstream oss;
-    oss << std::setw(8) << id
-        << std::setw(16) << std::scientific << std::setprecision(9) << x
-        << std::setw(16) << std::scientific << std::setprecision(9) << y
-        << std::setw(16) << std::scientific << std::setprecision(9) << z;
+    oss << std::setw(fw) << id
+        << std::setw(rw) << std::scientific << std::setprecision(9) << x
+        << std::setw(rw) << std::scientific << std::setprecision(9) << y
+        << std::setw(rw) << std::scientific << std::setprecision(9) << z;
     return oss.str();
 }
 
-std::string ModelAssembler::formatElementLine(const AddedElement& elem) const {
+std::string ModelAssembler::formatElementLine(const AddedElement& elem, int fw) const {
     std::ostringstream oss;
-    oss << std::setw(8) << elem.id
-        << std::setw(8) << elem.pid;
+    oss << std::setw(fw) << elem.id
+        << std::setw(fw) << elem.pid;
     if (elem.type == ElementType::TET4) {
         // TET4: N1, N2, N3, N4, N4, N4, N4, N4 (LS-DYNA Vol I *ELEMENT_SOLID — 이 순서가 아니면
         // negative volume 으로 종료). n1 n2 n3 n3 n4.. 는 KFileReader 도 TET4 로 못 읽는다.
-        for (int i = 0; i < 4; ++i) oss << std::setw(8) << elem.nodeIds[i];
-        for (int i = 0; i < 4; ++i) oss << std::setw(8) << elem.nodeIds[3];
+        for (int i = 0; i < 4; ++i) oss << std::setw(fw) << elem.nodeIds[i];
+        for (int i = 0; i < 4; ++i) oss << std::setw(fw) << elem.nodeIds[3];
     } else {
         for (int i = 0; i < 8; ++i) {
-            oss << std::setw(8) << elem.nodeIds[i];
+            oss << std::setw(fw) << elem.nodeIds[i];
         }
     }
     return oss.str();
 }
 
-std::string ModelAssembler::formatShellElementLine(const AddedShellElement& elem) const {
+std::string ModelAssembler::formatShellElementLine(const AddedShellElement& elem, int fw) const {
     std::ostringstream oss;
-    oss << std::setw(8) << elem.id
-        << std::setw(8) << elem.pid;
+    oss << std::setw(fw) << elem.id
+        << std::setw(fw) << elem.pid;
     for (int i = 0; i < 4; ++i) {
-        oss << std::setw(8) << elem.nodeIds[i];
+        oss << std::setw(fw) << elem.nodeIds[i];
     }
     return oss.str();
 }

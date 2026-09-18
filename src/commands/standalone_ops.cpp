@@ -261,7 +261,12 @@ static std::vector<std::string> writtenOutputs(const ModelAssembler& assembler, 
 // 멀쩡한 것으로 오해한다. 그래서 이번에 쓴 파일을 모두 보고, 하나라도 나쁘면 모두 지우고 목록을 찍는다.
 static bool writeOutputChecked(ModelAssembler& assembler, const std::string& outputPrefix,
                                const char* tag, ConsoleOutput& console) {
+    // 쓰기 안에서 나온 말(파트별 요소 수 대조·왕복 검증)을 흘리지 않는다 — 부르는 쪽은 쓰기 전에
+    // 찍고 비우지 않으므로, 이번 쓰기가 더한 것만 골라 찍는다(전부 찍으면 두 번 나온다).
+    size_t before = assembler.infoMessages.size();
     if (!assembler.writeOutput(outputPrefix)) { console.error(assembler.getErrorMessage()); return false; }
+    for (size_t m = before; m < assembler.infoMessages.size(); ++m)
+        console.println(assembler.infoMessages[m]);
 
     std::vector<std::string> written = writtenOutputs(assembler, outputPrefix);
     std::string where;
@@ -554,6 +559,7 @@ int runRestack(const std::string& yamlFile, ConsoleOutput& console) {
             else if (key == "czm_normal") { try { op.czmNormal = std::stod(val); } catch(...) {} }
             else if (key == "czm_shear") { try { op.czmShear = std::stod(val); } catch(...) {} }
             else if (key == "drop_height") { try { op.dropHeight = std::stod(val); } catch(...) {} }
+            else if (key == "pid_start") { try { op.pidStart = std::stoi(val); } catch(...) {} }
             // pid_refs 는 rc=1 강제의 유일한 탈출구다 — 읽는 자리가 없어 'warn' 이 통하지 않았다.
             // op 구조체(ModelAssembler 가 읽는 자리)와 검증용 원문 둘 다 채운다.
             else if (key == "pid_refs") { op.pidRefs = val; pidRefsRaw = val; }
@@ -570,6 +576,7 @@ int runRestack(const std::string& yamlFile, ConsoleOutput& console) {
             else if (k == "num_elements" || k == "nz") { try { L.numElements = std::stoi(v); } catch(...) {} }
             else if (k == "element_type") L.elementType = v;
             else if (k == "title" || k == "name") L.title = v;
+            else if (k == "pid")          { try { L.pid = std::stoi(v); } catch(...) {} }
             else if (k == "czm_normal")   { try { L.czmNormal = std::stod(v); } catch(...) {} }
             else if (k == "czm_shear")    { try { L.czmShear = std::stod(v); } catch(...) {} }
             else if (k == "material_card") {

@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <algorithm>
 #include <cmath>
+#include <set>
 #include <iostream>
 
 // Knowledge graph (lat.md):
@@ -493,6 +494,8 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             layer.elementType = val;
                         } else if (key == "title" || key == "name") {
                             layer.title = val;
+                        } else if (key == "pid") {
+                            try { layer.pid = std::stoi(val); } catch (...) {}
                         } else if (key == "czm_normal") {
                             try { layer.czmNormal = std::stod(val); } catch (...) {}
                         } else if (key == "czm_shear") {
@@ -1205,6 +1208,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             else if (key == "czm_normal") { try { op.restack.czmNormal = std::stod(val); } catch (...) {} }
                             else if (key == "czm_shear")  { try { op.restack.czmShear  = std::stod(val); } catch (...) {} }
                             else if (key == "drop_height") { try { op.restack.dropHeight = std::stod(val); } catch (...) {} }
+                            else if (key == "pid_start") { try { op.restack.pidStart = std::stoi(val); } catch (...) {} }
                             // 값 검사는 validateOperation 이 한다(단독 restack 과 같은 규칙)
                             else if (key == "pid_refs") {
                                 op.pidRefsRaw = val;
@@ -1750,6 +1754,24 @@ void AssemblyConfigReader::validateOperation(const AssemblyOperation& op, size_t
                 throw std::runtime_error("Operation " + std::to_string(i+1) +
                     " (restack): invalid direction '" + d +
                     "' (must be one of auto, x, y, z, +x, -x, +y, -y, +z, -z)");
+        }
+        // 사용자가 준 PID 는 여기서 모양만 본다(이미 쓰는 번호인지는 모델을 읽는 applyRestack 이 본다).
+        if (op.restack.pidStart < 0)
+            throw std::runtime_error("Operation " + std::to_string(i+1) +
+                " (restack): pid_start must be a positive part ID");
+        {
+            std::set<int> seenLayerPids;
+            for (size_t j = 0; j < op.restack.layers.size(); ++j) {
+                int lp = op.restack.layers[j].pid;
+                if (lp < 0)
+                    throw std::runtime_error("Operation " + std::to_string(i+1) +
+                        " (restack): layer " + std::to_string(j+1) +
+                        " pid must be a positive part ID");
+                if (lp > 0 && !seenLayerPids.insert(lp).second)
+                    throw std::runtime_error("Operation " + std::to_string(i+1) +
+                        " (restack): layer " + std::to_string(j+1) +
+                        " pid " + std::to_string(lp) + " is used by another layer");
+            }
         }
         for (size_t j = 0; j < op.restack.layers.size(); ++j) {
             // nan 은 '<= 0' 도 '> 0' 도 아니어서 그대로 통과해 좌표가 nan 인 덱이 됐다(D7)

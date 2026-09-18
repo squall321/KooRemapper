@@ -56,6 +56,7 @@ struct RestackLayer {
     std::string materialCard;          // raw LS-DYNA material keyword block
     double czmNormal = -1.0;          // per-layer CZM normal failure stress (-1 = use restack default)
     double czmShear  = -1.0;          // per-layer CZM shear failure stress  (-1 = use restack default)
+    int pid = 0;                       // 이 층 *PART 의 PID (0 = 자동). 모델이 이미 쓰는 번호면 rc=1
 };
 
 struct RestackOperation {
@@ -68,6 +69,9 @@ struct RestackOperation {
     double czmShear  = 0.0;            // CZM: shear stress at failure [MPa]
     double dropHeight = 0.0;           // czm_auto: drop height [mm] for VC computation
     std::vector<RestackLayer> layers;
+    // pid_start: 자동 부여를 이 번호부터 시작한다(0 = 예전대로 모델 최대 PID + 1).
+    // 이미 쓰는 번호는 건너뛴다 — 예약 대역을 피해 새 층을 원하는 대역에 모으는 수단이다.
+    int pidStart = 0;
     // pid_refs: strict(기본) | warn — 비운 PID/지운 요소·노드를 아직 가리키는 자리가 남으면
     // strict 는 덱을 쓴 뒤 rc=1 로 끝낸다(자동화는 종료 코드로만 성공을 본다). warn 은 같은 보고에 rc=0.
     std::string pidRefs = "strict";

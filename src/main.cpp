@@ -1177,9 +1177,11 @@ static bool printLegacyHelp(ConsoleOutput& console, const std::string& helpCmd) 
         console.println("      target_pid: 1            # Extruded solid part ID (HEX8)");
         console.println("      direction: z             # auto | x | y | z");
         console.println("      element_type: solid      # solid | tshell | shell");
+        console.println("      pid_start: 9000          # optional: auto PIDs start here (default: max PID + 1)");
         console.println("      layers:                  # first layer = lowest side");
         console.println("        - thickness: 0.5");
         console.println("          num_elements: 2      # elements through this layer");
+        console.println("          pid: 9001            # optional: this layer's PID (default: automatic)");
         console.println("          material_card: |");
         console.println("            *MAT_ELASTIC");
         console.println("            $#     mid        ro         e        pr");
@@ -1192,7 +1194,9 @@ static bool printLegacyHelp(ConsoleOutput& console, const std::string& helpCmd) 
         console.println("Notes:");
         console.println("  - Input must be an extrusion: same node count in every thickness column");
         console.println("  - thickness values act as ratios, scaled to the part's real thickness");
-        console.println("  - Each layer gets a new PID/MID automatically; the old PID stays as an empty part");
+        console.println("  - Each layer gets a new PID/MID; the old PID stays as an empty part");
+        console.println("  - PID: layers[].pid pins one layer, pid_start moves the automatic run to a free band");
+        console.println("    (default = max PID + 1). A pid already used by the model exits 1 — nothing is renumbered");
         console.println("  - References to that empty PID are migrated where possible; leftovers exit 1 (pid_refs: warn)");
         console.println("  - disconnect op can follow restack for CZM/Peri separation");
         console.println("  - See examples/assemble_display/restack_guide.md for full docs");
