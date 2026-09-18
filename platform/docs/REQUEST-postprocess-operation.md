@@ -161,69 +161,101 @@ SmartTwinMCP 서버가 `args.schema.json` enum 으로 **실행 전에** 거절�
 
 ---
 
-## 8. 2026-09-17 (같은 날, 나중) — 소속은 **헤더로 갑니다**. 받아만 주십시오
+## 8. 소속은 **헤더 + 서명**으로 갑니다 (2026-09-18 개정 — 앞 판은 구현하지 마십시오)
 
-§7-3 에서 "소속은 지금 게이트웨이가 넘기지 않습니다 — 전달 방식은 포털·게이트웨이가 제안하겠습니다" 라고
-적었습니다. **만들었습니다.** 이제 DynaForge 쪽에서 할 일은 헤더 하나를 읽는 것뿐입니다.
+> ⚠ **정정.** 2026-09-17 에 이 자리에 *"헤더 하나를 읽으면 된다"* 고 적어 보냈습니다. **그대로 구현하면
+> 권한 상승입니다.** 저희 쪽 검토에서 잡았습니다 — 사용자가 게이트웨이를 거치지 않고 자기 kr_ PAT 로
+> 앱 MCP(`:8443/mcp`)·REST 에 직접 붙어 `X-Heax-User-Affiliation: CAEG` 를 **스스로 적을 수 있고**,
+> HEAXHub Caddy 가 지워 주는 위조 헤더는 `X-Heax-User-Email`·`X-Heax-User-Name` **둘뿐**입니다
+> (`HEAXHub/backend/app/services/proxy_manager.py` `_IDENTITY_HEADERS`). 아래가 고친 계약입니다.
+> 아직 §8 을 구현하지 않으셨으면 이 판으로만 봐 주십시오.
 
-### 무엇이 오나
-
-게이트웨이가 사용자 위임 호출(`heax-kooremapper_mcp` 의 모든 MCP 도구 호출)에 이 헤더를 싣습니다.
+### 오는 것 — 헤더 **둘**
 
 ```
-X-Heax-User-Affiliation: CAEG
+X-Heax-User-Affiliation: CAEG            ← 소속 id(퍼센트 인코딩)
+X-Heax-Aff-Proof:        v1.<exp>.<hmac> ← "게이트웨이가 이 사람에게 찍었다" 는 증명
 ```
 
-- **값은 포털 원장의 소속 id** 입니다(라벨이 아닙니다 — `CAEG` 는 "CAE그룹"). **범위 판정은 id 로** 하십시오.
-  라벨은 바뀔 수 있고, id 는 포털 `backend/config/access.yaml` 의 통제 목록입니다.
-- **퍼센트 인코딩되어 옵니다.** 소속 id 에 한글이 올 수 있고 HTTP 헤더는 latin-1 만 담습니다 —
-  `urllib.parse.unquote` 로 푸십시오. 지금 쓰는 `CAEG` 는 인코딩해도 그대로입니다.
-- **소속을 모르면 헤더가 아예 없습니다.** 빈 문자열로 오지 않습니다. 없을 때 "소속 없음" 을 **하나의 소속으로
-  묶지 마십시오** — 소속 없는 사람끼리 서로의 문서를 읽는 길이 됩니다. 없으면 공유도 없습니다(소유자만).
-- **호출마다 새로 봅니다.** 포털 권한 조회(60초 캐시)와 같은 응답에서 나옵니다. SSO 발급 때만 넘기지 않은
-  이유가 이것입니다 — 사용자 PAT 캐시가 12시간이라, 발급 헤더로만 주면 소속이 바뀌거나 빠진 사람이 반나절
-  동안 남의 소속 문서를 읽습니다. 정지된 계정은 포털이 권한과 소속을 **함께** 빈 값으로 내립니다.
+- **소속 id** 입니다(라벨이 아닙니다 — `CAEG` 는 "CAE그룹"). 범위 판정은 **id 로** 하십시오.
+  라벨은 바뀌고, id 는 포털 `backend/config/access.yaml` 의 통제 목록입니다.
+- **퍼센트 인코딩되어 옵니다**(소속 id 에 한글이 올 수 있고 헤더는 latin-1 만 담습니다).
+  `urllib.parse.unquote` 로 먼저 푸십시오 — **서명 대상은 푼 값**입니다.
+- **소속을 모르면 두 헤더가 아예 없습니다.** 빈 문자열로 오지 않습니다. 없을 때 "소속 없음" 을
+  하나의 소속으로 **묶지 마십시오** — 소속 없는 사람끼리 서로의 문서를 읽는 길이 됩니다.
+- **호출마다 새로 봅니다**(포털 권한 조회와 같은 60초 캐시). 정지된 계정·표에서 사라진 소속·포털
+  조회 실패는 전부 "소속 없음" 으로 내려갑니다 — 저희 쪽에서 닫습니다.
 
-### 받는 자리 — 한 줄입니다
-
-`platform/mcp_server/server.py` 의 `_forward_headers(ctx)`(32행)가 지금 `Authorization` 만 백엔드로
-넘깁니다. 거기에 `x-heax-user-affiliation` 을 더해 주시면 백엔드 라우트가 읽을 수 있습니다.
+### 증명 검증 — 이것이 새로 부탁드리는 전부입니다
 
 ```python
-def _forward_headers(ctx: Context) -> dict:
-    headers: dict[str, str] = {}
-    req = getattr(getattr(ctx, "request_context", None), "request", None)
-    if req is not None:
-        v = req.headers.get("authorization")
-        if v:
-            headers["Authorization"] = v
-        aff = req.headers.get("x-heax-user-affiliation")      # ← 이 줄
-        if aff:
-            headers["X-Heax-User-Affiliation"] = aff
-    return headers
+import hashlib, hmac, time
+from urllib.parse import unquote
+
+def verified_affiliation(headers, user_email: str, secret: str) -> str:
+    """게이트웨이가 이 사람에게 찍은 소속. 하나라도 안 맞으면 "" (= 소속 없음, 소유자만 읽기)."""
+    aff = unquote(headers.get("x-heax-user-affiliation") or "")
+    proof = headers.get("x-heax-aff-proof") or ""
+    if not aff or not proof or not secret:
+        return ""
+    try:
+        ver, exp, sig = proof.split(".")
+        exp_i = int(exp)
+    except ValueError:
+        return ""
+    if ver != "v1" or exp_i < time.time():          # 만료된 증명은 안 받는다
+        return ""
+    msg = f"v1|{user_email.strip().lower()}|{aff}|{exp_i}"
+    want = hmac.new(secret.encode(), msg.encode(), hashlib.sha256).hexdigest()
+    return aff if hmac.compare_digest(sig, want) else ""
+```
+
+- **키는 새로 만들지 않습니다** — `settings.heax_gateway_secret`(SSO 에서 이미
+  `hmac.compare_digest` 로 쓰시는 그 값)입니다. 게이트웨이 쪽 `per_user_sso.kooremapper_mcp.secret`
+  과 같은 값입니다.
+- **`user_email` 은 지금 인증된 사용자(PAT 주인)의 이메일**입니다. 헤더에서 읽지 마십시오 —
+  이메일을 서명에 넣은 이유가 그것입니다. 증명을 가로채도 **남의 호출에는 못 씁니다.**
+- 시크릿이 미설정이면 항상 ""가 됩니다(SSO 와 같은 '닫히는' 자세).
+
+받는 자리는 여전히 `platform/mcp_server/server.py` 의 `_forward_headers(ctx)` 입니다 — 두 헤더를
+백엔드로 넘기고, **검증은 백엔드에서** 하십시오(MCP 서버는 나르기만).
+
+```python
+for h in ("x-heax-user-affiliation", "x-heax-aff-proof"):
+    v = req.headers.get(h)
+    if v:
+        headers[h] = v
 ```
 
 ### 두 값을 **다르게** 다뤄 주십시오 — 같은 소속 문자열이지만 뜻이 다릅니다
 
 | 무엇 | 언제의 값인가 | 왜 |
 |---|---|---|
-| **리포트에 박히는 소속**(공유 범위) | **예약 시점에 얼린다** | "이 일은 그때 CAEG 것이었다" 는 사실입니다. 나중에 소유자가 소속을 옮겼다고 과거 리포트의 공유 범위가 따라 움직이면, 그 리포트를 근거로 한 비교·보고가 조용히 달라집니다 |
-| **읽는 사람의 소속**(판정) | **요청마다 헤더의 지금 값** | 소속을 벗어난 사람이 계속 읽으면 안 됩니다. 그래서 60초짜리 지금 값을 보냅니다 |
+| **리포트에 박히는 소속**(공유 범위) | **예약 시점에 얼린다** | "이 일은 그때 CAEG 것이었다" 는 사실입니다. 소유자가 나중에 소속을 옮겼다고 과거 리포트의 공유 범위가 따라 움직이면, 그 리포트를 근거로 한 비교·보고가 조용히 달라집니다 |
+| **읽는 사람의 소속**(판정) | **요청마다 검증한 지금 값** | 소속을 벗어난 사람이 계속 읽으면 안 됩니다 |
 
-즉 `report.shared_affiliation`(예약 때 헤더 값을 적음) 과 요청 헤더 값을 비교해 읽기를 허용하는 모양입니다.
-수정·삭제는 §7 대로 소유자만입니다.
+즉 `report.shared_affiliation`(예약 때 검증한 값을 적음) 과 요청마다 `verified_affiliation(...)` 을
+비교해 읽기를 허용하는 모양입니다. 수정·삭제는 §7 대로 소유자만입니다.
+
+### 있으면 좋은 것(필수 아님)
+
+앱 nginx `location /mcp`·REST 라우트에서 클라이언트가 실어 보낸 두 헤더를 지우면 방어가 두 겹이 됩니다.
+서명이 있으니 없어도 뚫리지 않지만, 시크릿이 새는 날의 폭을 줄입니다.
+
+```
+proxy_set_header X-Heax-User-Affiliation "";
+proxy_set_header X-Heax-Aff-Proof        "";
+```
 
 ### 아직 안 실은 곳 — 필요하면 말씀해 주십시오
 
-- **REST 프록시 경로**(`/api/<site>/...`)에는 안 싣습니다. 그 길은 사이트 **서비스 자격증명**으로 나가고
-  신원은 `x-forwarded-user`(이메일) 힌트뿐입니다. 리포트 HTML 파일을 REST 로 내려받는 화면에서 소속
-  판정이 필요하면 알려 주십시오 — 같은 규칙으로 더하겠습니다.
-- **응답 캐시** — 게이트웨이는 읽기 도구 응답을 300초 캐시하고 키에 **호출자 이메일**이 들어갑니다.
-  남의 결과가 섞이지는 않지만, 소속이 방금 바뀐 사람은 최대 5분간 옛 소속 기준의 결과를 볼 수 있습니다.
-  더 짧아야 하면 말씀해 주십시오(도구 이름 단위로 캐시에서 뺄 수 있습니다).
+- **REST 프록시 경로**(게이트웨이 `/api/<site>/...`)에는 안 싣습니다. 그 길은 사이트 **서비스
+  자격증명**으로 나가고 신원은 `x-forwarded-user`(이메일) 힌트뿐입니다. 리포트 HTML 을 그 길로
+  내려받는 화면에서 소속 판정이 필요하면 알려 주십시오 — 같은 규칙(헤더+서명)으로 더하겠습니다.
 
 ### 확인하실 것
 
-포털 `/internal/access/entitlements` 가 이제 `{email, keys, affiliation, affiliation_label}` 을 냅니다
+포털 `/internal/access/entitlements` 가 `{email, keys, affiliation, affiliation_label}` 을 냅니다
 (게이트웨이 공유 시크릿으로만 열립니다 — DynaForge 가 직접 부를 자리는 아닙니다). 배선 시험은
-포털·게이트웨이 양쪽 테스트에 들어 있습니다(`test_access_control.py`·`test_gateway.py`, 되돌림 확인 완료).
+포털·게이트웨이 양쪽 테스트에 있고, **변이 시험 7종으로 확인**했습니다(증명 제거·이메일 미결속·
+`None` 이 헤더를 안 지움·낡은 소속 사용·캐시 키에서 소속 누락 등을 전부 빨갛게 잡습니다).
