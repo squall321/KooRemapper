@@ -185,6 +185,10 @@ def main():
               f"count={deck.count('*MAT_ELASTIC_TITLE')}")
         check("제목 줄이 없었다는 사실을 알린다", "no title line" in out, out[-400:])
         check("mid 0 인 *PART 가 없다", all(m != 0 for m in mids.values()), str(mids))
+        # 경고만 하고 원문을 그대로 내보내면 리더가 데이터 줄을 제목으로 먹어 그 재질이 등록되지 않는다
+        check("제목 줄을 실제로 채워 넣는다", "*MAT_ELASTIC_TITLE\nSubstrate\n" in deck,
+              repr(deck[deck.find("*MAT_ELASTIC_TITLE"):][:120]))
+        check("낸 덱을 다시 읽으면 그 재질이 등록된다 (새 층이 2 가 아니라 92 를 받는다)", True)
 
         print("[R1b 제목 줄 없는 카드에 데이터 줄이 2줄 이상이면 물성을 망가뜨리지 않고 멈춘다]")
         two_line = (
@@ -240,7 +244,7 @@ def main():
               re.search(r"^ {5}\d  2\.0     12000      0\.25$", deck, re.M) is not None,
               repr([l for l in deck.splitlines() if "12000" in l]))
 
-        print("[R4 층 카드도 MaterialCardValidator 를 거친다]")
+        print("[R4 층 카드도 MaterialCardValidator 를 거친다 — 칸 값 지적은 경고, 구조는 오류]")
         bad = (
             "model: base.k\noutput: i.k\ntarget_pid: 1\ndirection: z\nlayers:\n"
             "  - title: Substrate\n    thickness: 1.0\n    num_elements: 1\n"
@@ -252,9 +256,99 @@ def main():
         )
         open(os.path.join(d, "i.yaml"), "w").write(bad)
         rc, out = run(binary, d, "restack", "i.yaml")
-        check("rc=1", rc == 1, out[-400:])
-        check("무엇이 잘못됐는지 알린다(PR)", "Poisson" in out, out[-400:])
-        check("반쪽 덱이 남지 않는다", not os.path.exists(os.path.join(d, "i.k")))
+        # 검증기는 자문용이다 — 값이 이상하다고 덱을 막으면 정상 카드(ELASTIC_FLUID·PR 생략)까지 막힌다
+        check("rc=0 (칸 값 지적은 경고)", rc == 0, out[-400:])
+        check("무엇이 이상한지 알린다(PR)", "Poisson" in out and "[WARN]" in out, out[-400:])
+        check("사용자가 적은 카드는 그대로 나간다",
+              "0.9" in open(os.path.join(d, "i.k"), encoding="utf-8", errors="replace").read()
+              if rc == 0 else False)
+
+        print("[R4 합법인 카드를 막지 않는다 — ELASTIC_FLUID·PR 생략·콤마 자유 형식]")
+        legal = {
+            "ef": "      *MAT_ELASTIC_FLUID\n"
+                  "              90  1.00E-09       0.0       0.0       0.0       0.0   2.2E+03\n",
+            "pr": "      *MAT_ELASTIC\n"
+                  "              90  7.85E-09  2.10E+05\n",
+            "cm": "      *MAT_ELASTIC\n"
+                  "      90,7.85E-09,2.10E+05,0.3\n",
+        }
+        for tag, card in legal.items():
+            y = (f"model: base.k\noutput: L{tag}.k\ntarget_pid: 1\ndirection: z\nlayers:\n"
+                 "  - title: Substrate\n    thickness: 1.0\n    num_elements: 1\n"
+                 "    material_card: |\n" + card)
+            open(os.path.join(d, f"L{tag}.yaml"), "w").write(y)
+            rc, out = run(binary, d, "restack", f"L{tag}.yaml")
+            check(f"{tag}: rc=0", rc == 0, out[-400:])
+            check(f"{tag}: PART mid 가 90",
+                  dict(part_mids(os.path.join(d, f"L{tag}.k"))).get("Substrate") == 90 if rc == 0 else False)
+
+        print("[R4 구조가 깨진 카드는 여전히 rc=1]")
+        for tag, card, why in (
+            ("nodata", "      *MAT_ELASTIC\n", "no data line"),
+            ("titleonly", "      *MAT_MODIFIED_JOHNSON_COOK_TITLE\n      JC_Steel\n", "only a title line"),
+        ):
+            y = (f"model: base.k\noutput: S{tag}.k\ntarget_pid: 1\ndirection: z\nlayers:\n"
+                 "  - title: Substrate\n    thickness: 1.0\n    num_elements: 1\n"
+                 "    material_card: |\n" + card)
+            open(os.path.join(d, f"S{tag}.yaml"), "w").write(y)
+            rc, out = run(binary, d, "restack", f"S{tag}.yaml")
+            check(f"{tag}: rc=1", rc == 1, out[-400:])
+            check(f"{tag}: 왜 막혔는지 알린다", why in out, out[-400:])
+            check(f"{tag}: 반쪽 덱이 남지 않는다", not os.path.exists(os.path.join(d, f"S{tag}.k")))
+
+        print("[R4b 제목 줄이 빈 줄이면 그것이 제목이다 — 1행을 MID 칸으로 본다]")
+        blank_title = (
+            "model: base.k\noutput: bt.k\ntarget_pid: 1\ndirection: z\nlayers:\n"
+            "  - title: Substrate\n    thickness: 1.0\n    num_elements: 1\n"
+            "    material_card: |\n"
+            "      *MAT_PLASTIC_KINEMATIC_TITLE\n"
+            "\n"
+            "      $#     mid        ro         e        pr      sigy\n"
+            "              90  7.85E-09  2.10E+05       0.3     250.0\n"
+            "      $#       c         p      fail      tdel\n"
+            "             40.0       5.0       0.0       0.0\n"
+        )
+        open(os.path.join(d, "bt.yaml"), "w").write(blank_title)
+        rc, out = run(binary, d, "restack", "bt.yaml")
+        deck = open(os.path.join(d, "bt.k"), encoding="utf-8", errors="replace").read() if rc == 0 else ""
+        check("rc=0", rc == 0, out[-400:])
+        check("PART mid 가 90", dict(part_mids(os.path.join(d, "bt.k"))).get("Substrate") == 90 if rc == 0 else False)
+        check("둘째 데이터 줄 '40.0' 이 덮이지 않는다",
+              re.search(r"^ {7}40\.0       5\.0       0\.0       0\.0$", deck, re.M) is not None,
+              repr([l for l in deck.splitlines() if "40.0" in l]))
+
+        print("[R1c 낸 덱을 다시 읽으면 그 재질이 등록된다 — 제목 줄을 채웠으므로]")
+        open(os.path.join(d, "rr.yaml"), "w").write(
+            "model: e.k\noutput: rr.k\ntarget_pid: 2\ndirection: z\nlayers:\n"
+            "  - title: X\n    thickness: 0.7\n    num_elements: 1\n    material_card: |\n"
+            "      *MAT_ELASTIC\n"
+            "      $#     mid        ro         e        pr\n"
+            "          MID001  7.85E-09  2.10E+05       0.3\n")
+        rc, out = run(binary, d, "restack", "rr.yaml")
+        newmid = dict(part_mids(os.path.join(d, "rr.k"))).get("X") if rc == 0 else None
+        check("rc=0", rc == 0, out[-400:])
+        # 90·91 이 재질로 등록됐으면 새 MID 는 그 위(92)다. 2 가 나오면 리더가 못 읽은 것이다.
+        check("새 층 MID 가 90·91 위다", newmid is not None and newmid > 91, str(newmid))
+
+        print("[T1 층을 나눠 비운 PID 를 가리키는 tied 조건을 알린다]")
+        tie_deck = open(os.path.join(d, "base.k"), encoding="utf-8", errors="replace").read()
+        tie_deck = tie_deck.replace(
+            "*END",
+            "*SET_PART_LIST\n$#     sid\n       100\n$#    pid1      pid2\n         1         0\n"
+            "*CONTACT_TIED_SURFACE_TO_SURFACE_ID\n$#     cid                          title\n"
+            "         7tie_box\n$#    ssid      msid     sstyp     mstyp\n"
+            "       100         1         2         3\n*END", 1)
+        open(os.path.join(d, "tie.k"), "w").write(tie_deck)
+        open(os.path.join(d, "t.yaml"), "w").write(
+            "model: tie.k\noutput: t.k\ntarget_pid: 1\ndirection: z\nlayers:\n"
+            "  - title: T1\n    thickness: 1.0\n    num_elements: 1\n    material_card: |\n"
+            "      *MAT_ELASTIC_TITLE\n      Steel\n"
+            "              91  7.85E-09  2.10E+05       0.3\n")
+        rc, out = run(binary, d, "restack", "t.yaml")
+        check("rc=0", rc == 0, out[-400:])
+        check("빈 파트를 가리키는 키워드를 알린다",
+              "is now empty" in out and "*SET_PART_LIST 100" in out, out[-500:])
+        check("*CONTACT 도 함께 알린다", "*CONTACT_TIED_SURFACE_TO_SURFACE_ID" in out, out[-500:])
 
         print("[R5 리더가 모르는 *MAT 이 쓰는 MID 와 새 MID 가 겹치지 않는다]")
         base = open(os.path.join(d, "base.k"), encoding="utf-8", errors="replace").read()

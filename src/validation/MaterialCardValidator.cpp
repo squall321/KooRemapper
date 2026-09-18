@@ -51,13 +51,18 @@ MaterialCardValidator::ValidationResult MaterialCardValidator::validate(
 
     // MID 칸은 @MID@ 가 아니어도(10·MAT01·@CZM_MID@) 새 MID 로 바뀌므로 자리표시 유무는 검사하지 않는다
 
-    // Validate based on keyword type
-    if (keyword.find("MAT_ELASTIC") != std::string::npos) {
+    // Validate based on keyword type.
+    // 부분 문자열로 고르면 *MAT_ELASTIC_FLUID·*MAT_ELASTIC_PLASTIC_THERMAL·
+    // *MAT_ELASTIC_SPRING_DISCRETE_BEAM 처럼 칸 뜻이 전혀 다른 변종까지 평범한 ELASTIC 으로 검사해
+    // 합법 카드에 엉뚱한 오류를 냈다 — _TITLE 만 떼고 정확히 일치할 때만 그 검사를 쓴다.
+    std::string base = keyword;
+    if (base.size() > 6 && base.compare(base.size() - 6, 6, "_TITLE") == 0)
+        base.erase(base.size() - 6);
+    if (base == "*MAT_ELASTIC") {
         validateElastic(lines, result);
-    } else if (keyword.find("MAT_COHESIVE_MIXED_MODE") != std::string::npos) {
+    } else if (base == "*MAT_COHESIVE_MIXED_MODE") {
         validateCohesiveMixedMode(lines, result);
-    } else if (keyword.find("MAT_PLASTIC_KINEMATIC") != std::string::npos ||
-               keyword.find("MAT_024") != std::string::npos) {
+    } else if (base == "*MAT_PLASTIC_KINEMATIC" || base == "*MAT_024") {
         validatePlasticKinematic(lines, result);
     } else {
         // Generic validation for unknown types
@@ -250,21 +255,47 @@ int MaterialCardValidator::findFirstDataLine(const std::vector<std::string>& lin
         if (!isKeywordLine(lines[i])) continue;
         bool isTitle = extractKeyword(lines[i]).find("_TITLE") != std::string::npos;
         std::vector<int> content;
-        for (size_t j = i + 1; j < lines.size() && content.size() < 2; ++j) {
-            if (isCommentLine(lines[j]) || isBlankLine(lines[j])) continue;
+        for (size_t j = i + 1; j < lines.size(); ++j) {
+            if (isCommentLine(lines[j])) continue;
             size_t f = lines[j].find_first_not_of(" \t");
             if (f != std::string::npos && lines[j][f] == '*') break;  // 다음 키워드 = 블록 끝
             content.push_back(static_cast<int>(j));
         }
+        // 블록 끝의 빈 줄은 카드 끝 개행이라 내용 줄이 아니다
+        while (!content.empty() && isBlankLine(lines[content.back()])) content.pop_back();
         if (content.empty()) break;
-        if (isTitle && content.size() >= 2) return content[1];
-        return content[0];
+        size_t from = (isTitle && content.size() >= 2) ? 1 : 0;
+        for (size_t k = from; k < content.size(); ++k) {
+            if (isBlankLine(lines[content[k]])) continue;  // 데이터 줄은 비어 있지 않다
+            return content[k];
+        }
+        break;
     }
     return -1;
 }
 
 std::vector<std::string> MaterialCardValidator::parseDataLine(const std::string& line) const {
     std::vector<std::string> fields;
+
+    // 자유 형식(콤마 구분) 카드도 LS-DYNA 가 받는 정상 표기다 — 공백으로만 나누면
+    // '90,7.85E-09,2.10E+05,0.3' 이 한 칸으로 읽혀 칸 수가 모자라다고 잘못 짚었다.
+    if (line.find(',') != std::string::npos) {
+        size_t pos = 0;
+        while (pos <= line.size()) {
+            size_t c = line.find(',', pos);
+            std::string tok = line.substr(pos, (c == std::string::npos ? line.size() : c) - pos);
+            size_t b = tok.find_first_not_of(" \t\r");
+            if (b != std::string::npos && tok[b] == '$') break;
+            if (b != std::string::npos) {
+                size_t e = tok.find_last_not_of(" \t\r");
+                fields.push_back(tok.substr(b, e - b + 1));
+            }
+            if (c == std::string::npos) break;
+            pos = c + 1;
+        }
+        return fields;
+    }
+
     std::istringstream iss(line);
     std::string field;
 

@@ -465,6 +465,14 @@ int runRestack(const std::string& yamlFile, ConsoleOutput& console) {
         if (!ln.empty() && ln.back() == '\r') ln.pop_back();
         int indent = y.countIndent(ln);
         std::string tr = y.trim(ln);
+        // 블록 스칼라 안의 빈 줄(공백뿐인 줄 포함)은 카드의 한 줄이다 — *MAT_..._TITLE 의 제목 줄이
+        // 빈 줄일 수 있다. assemble 쪽(AssemblyConfigReader)은 이미 이렇게 읽는다. 예전엔 여기서
+        // 지워져 같은 YAML 이 명령에 따라 다른 카드가 됐고, 제목 줄이 사라져 데이터 줄이 한 줄 밀려 읽혔다.
+        // 블록 뒤에 붙은 빈 줄은 아래 clip 이 버린다(YAML '|' 규칙).
+        if (tr.empty() && readingMatCard) {
+            if (!op.layers.empty()) op.layers.back().materialCard += "\n";
+            continue;
+        }
         if (tr.empty() || tr[0]=='#') continue;
 
         if (readingMatCard) {
