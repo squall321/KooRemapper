@@ -10,7 +10,8 @@
     centerline_points 항목이 모두 깨졌다.
   - cclip 은 이미 trim 된 값 맨 앞 '#' 을 놓쳐 'material:   # 주석' 블록·calibration 의 'point:/curve:   # 주석' 블록을
     버렸다(rc=1 또는 재질 무시).
-  - generate-var --no-scale 은 기준 길이 0 으로 생성해 모든 노드가 원점(0,0,0)에 모였다.
+  - generate-var --no-scale 은 기준 길이 0 으로 생성해 모든 노드가 원점(0,0,0)에 모였다. 그 뒤에는
+    reference.dimensions 를 적어도 --no-scale 이면 무시해 length_j/length_k 가 1.0 으로 뭉개졌다.
   - map <config.yaml> 은 줄의 첫 '#' 에서 잘라 output: "map # kept.k" 가 '"map' 파일, map#1.k 가 'map' 파일이 됐다.
 """
 import os
@@ -220,8 +221,21 @@ def test_generate_var(binary):
     ext = [max(p[i] for p in pts) - min(p[i] for p in pts) for i in range(3)] if pts else [0, 0, 0]
     check("--no-scale: 노드가 원점에 모이지 않음 (I 길이 = zone 길이 합 100)", ok and abs(ext[0] - 100.0) < 1e-6,
           f"rc={rc} extent={ext}")
-    check("--no-scale: J/K 는 스케일 없음 기본값 1.0", ok and abs(ext[1] - 1.0) < 1e-6 and abs(ext[2] - 1.0) < 1e-6,
-          f"extent={ext}")
+    # 예전 단언은 'J/K 는 스케일 없음 기본값 1.0' 이었다 — 사용자가 적은 dimensions 를 무시하는 버그를 옳다고 봤다.
+    # --no-scale 은 '기준 모델에 맞춘 자동 스케일' 만 끄므로 명시된 length_j/length_k 는 그대로 나와야 한다.
+    check("--no-scale: 명시한 dimensions 를 그대로 지킴 (J=10, K=2)",
+          ok and abs(ext[1] - 10.0) < 1e-6 and abs(ext[2] - 2.0) < 1e-6, f"extent={ext}")
+
+    # dimensions 를 안 적은 설정에서는 여전히 J/K 기본값 1.0
+    write(d, "var_nodim.yaml", "\n".join(l for l in GV_CAT.split("\n")
+                                        if not (l.startswith("reference:") or l.startswith("  dimensions:")
+                                                or l.startswith("    length_"))))
+    rc, out = run(binary, d, "generate-var", "--no-scale", "var_nodim.yaml", "var_nd.k")
+    ok2 = rc == 0 and os.path.exists(os.path.join(d, "var_nd.k"))
+    pts2 = nodes(os.path.join(d, "var_nd.k")) if ok2 else []
+    ext2 = [max(p[i] for p in pts2) - min(p[i] for p in pts2) for i in range(3)] if pts2 else [0, 0, 0]
+    check("--no-scale + dimensions 없음: J/K 기본값 1.0 유지", ok2 and abs(ext2[0] - 100.0) < 1e-6
+          and abs(ext2[1] - 1.0) < 1e-6 and abs(ext2[2] - 1.0) < 1e-6, f"rc={rc} extent={ext2}")
 
 
 def test_cclip(binary):

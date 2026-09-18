@@ -1531,8 +1531,10 @@ int runGenerateVar(const std::string& configFile, const std::string& outputFile,
             console.error("Failed to load reference: " + std::string(e.what()));
             return 1;
         }
-    } else if (extConfig.reference.hasDimensions() && !noScale) {
+    } else if (extConfig.reference.hasDimensions()) {
         // Use config's direct dimensions
+        // --no-scale 은 '기준 모델에 맞춘 자동 스케일' 만 끈다 — 사용자가 적어 준 dimensions 는
+        // 예전엔 --no-scale 에서 무시돼 length_j/length_k 가 1.0 으로 뭉개졌다
         refLengthI = extConfig.reference.lengthI;
         refLengthJ = extConfig.reference.lengthJ;
         refLengthK = extConfig.reference.lengthK;
