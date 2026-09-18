@@ -260,7 +260,7 @@ static bool printLegacyHelp(ConsoleOutput& console, const std::string& helpCmd) 
         console.println("Options:");
         console.println("  --E <value>      Young's modulus (overrides K-file materials)");
         console.println("  --nu <value>     Poisson's ratio (overrides K-file materials)");
-        console.println("  --strain <type>  Strain type: engineering, green (default)");
+        console.println("  --strain <type>  Strain type: engineering, green (default), log");
         console.println("  --csv            Also output strain/stress CSV file");
         std::cout << "\n";
         console.println("Material Properties:");
@@ -2071,6 +2071,11 @@ static int runMain(int argc, char* argv[]) {
         std::string output = parser.getPositional("output");
         std::string strainType = parser.getOption("type");
         if (strainType.empty()) strainType = "engineering";
+        // 모르는 값을 조용히 기본값으로 삼키지 않는다 — 오타가 다른 변형률로 계산되어 나갔다
+        if (strainType != "engineering" && strainType != "green" && strainType != "log") {
+            console.error("Unknown --type '" + strainType + "' (allowed: engineering, green, log)");
+            return 1;
+        }
 
         if (refFile.empty() || defFile.empty() || output.empty()) {
             console.error("Usage: KooRemapper strain [options] <ref_mesh> <def_mesh> <output.csv>");
@@ -2115,11 +2120,16 @@ static int runMain(int argc, char* argv[]) {
         std::string strainTypeStr = parser.getOption("strain");
         bool outputCSV = parser.hasFlag("csv");
 
+        if (strainTypeStr.empty()) strainTypeStr = "green";
         StrainType strainType = StrainType::GREEN_LAGRANGE;
         if (strainTypeStr == "engineering") {
             strainType = StrainType::ENGINEERING;
         } else if (strainTypeStr == "log") {
             strainType = StrainType::LOGARITHMIC;
+        } else if (strainTypeStr != "green") {
+            // 모르는 값을 조용히 Green-Lagrange 로 삼키지 않는다
+            console.error("Unknown --strain '" + strainTypeStr + "' (allowed: engineering, green, log)");
+            return 1;
         }
 
         printBanner(console);
