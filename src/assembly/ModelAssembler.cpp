@@ -81,24 +81,31 @@ bool ModelAssembler::loadBaseModel(const std::string& filename) {
         if (mid > maxMaterialId_) maxMaterialId_ = mid;
     }
 
-    // Scan rawLines_ for *SET_* IDs to initialize maxSetId_
+    // Scan rawLines_ for *SET_* IDs to initialize maxSetId_.
+    // *SET_..._TITLE 은 키워드 다음 줄이 제목이다 — 예전엔 그 제목 줄을 SID 로 읽으려다 실패하고
+    // inSet 을 꺼 버려 진짜 SID 줄을 영영 못 봤다. 그러면 maxSetId_ 가 0 으로 남아
+    // 새로 만드는 *SET_SEGMENT 가 덱에 이미 있는 세트와 같은 번호로 난다.
     maxSetId_ = 0;
     {
         bool inSet = false;
+        bool needTitle = false;
         for (const auto& line : rawLines_) {
-            std::string up = line;
-            for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-            if (up.size() > 4 && up[0] == '*' && up.find("*SET_") == 0) {
-                inSet = true; continue;
+            size_t g = line.find_first_not_of(" \t");
+            if (g == std::string::npos) continue;
+            if (line[g] == '*') {
+                std::string up = line.substr(g);
+                for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+                inSet = (up.rfind("*SET_", 0) == 0);
+                needTitle = inSet && (up.find("_TITLE") != std::string::npos);
+                continue;
             }
-            if (inSet && !line.empty() && line[0] != '$' && line[0] != '*') {
-                try {
-                    int sid = std::stoi(line);
-                    if (sid > maxSetId_) maxSetId_ = sid;
-                } catch (...) {}
-                inSet = false;
-            }
-            if (!line.empty() && line[0] == '*') inSet = false;
+            if (!inSet || line[g] == '$') continue;
+            if (needTitle) { needTitle = false; continue; }
+            try {
+                int sid = std::stoi(line);
+                if (sid > maxSetId_) maxSetId_ = sid;
+            } catch (...) {}
+            inSet = false;
         }
     }
 
@@ -971,6 +978,45 @@ std::vector<std::string> rsTokens(const std::string& line) {
     return out;
 }
 
+// 카드 한 줄을 '칸' 단위로 나눈다 — 고정폭 덱의 빈 칸까지 세기 위해서다.
+// rsTokens 는 공백으로 나눠 빈 칸이 사라진다. *CONTACT 카드 1 의 MSID 칸이 비어 있으면
+// SSTYP 를 MSID 자리에서 읽어 STYP 를 통째로 한 칸씩 밀어 보고, 그 접촉은 탐지에서 빠졌다.
+// 콤마가 있으면 자유 형식이므로 콤마로 나누고(빈 칸을 남긴다), 아니면 10칸 고정폭으로 나눈다.
+// 고정폭으로 잘랐는데 칸 안에 공백이 남으면 정렬이 어긋난 덱이므로 예전 방식으로 되돌린다.
+std::vector<std::string> rsCardFields(const std::string& line) {
+    std::string body = line;
+    size_t cm = body.find('$');
+    if (cm != std::string::npos) body = body.substr(0, cm);
+    while (!body.empty() && (body.back() == '\r' || body.back() == '\n')) body.pop_back();
+
+    auto trim = [](const std::string& s) {
+        size_t a = s.find_first_not_of(" \t");
+        if (a == std::string::npos) return std::string();
+        size_t b = s.find_last_not_of(" \t");
+        return s.substr(a, b - a + 1);
+    };
+
+    std::vector<std::string> out;
+    if (body.find(',') != std::string::npos) {
+        std::string tok;
+        for (char c : body) {
+            if (c == ',') { out.push_back(trim(tok)); tok.clear(); }
+            else tok += c;
+        }
+        out.push_back(trim(tok));
+        return out;
+    }
+
+    bool aligned = true;
+    for (size_t i = 0; i < body.size(); i += 10) {
+        std::string f = trim(body.substr(i, 10));
+        if (f.find(' ') != std::string::npos || f.find('\t') != std::string::npos) aligned = false;
+        out.push_back(f);
+    }
+    if (aligned) return out;
+    return rsTokens(line);
+}
+
 // i 번째 칸이 정수면 그 값, 아니면 -1
 int rsIntField(const std::vector<std::string>& toks, size_t i) {
     if (i >= toks.size() || toks[i].empty()) return -1;
@@ -1031,7 +1077,7 @@ std::vector<std::string> restackFindPidReferences(const std::vector<std::string>
         // *CONTACT_..._ID 는 CID+제목 카드가 먼저 온다
         if (kw.size() >= 3 && kw.compare(kw.size() - 3, 3, "_ID") == 0 && k < data.size()) ++k;
         if (k >= data.size()) continue;
-        auto t = rsTokens(data[k]);
+        auto t = rsCardFields(data[k]);
         int ssid = rsIntField(t, 0), msid = rsIntField(t, 1);
         int sstyp = rsIntField(t, 2), mstyp = rsIntField(t, 3);
         std::string how;
