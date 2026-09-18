@@ -148,7 +148,7 @@ restack 은 대상 파트를 층으로 나누면서 **층마다 새 PID·SECID·
 | 한 세트를 tied 와 체적 소비자가 함께 쓰는 경우 | 세트를 **복제해 가릅니다**(새 SID 를 발급해 tied 쪽만 그 층을 담습니다) | 해당 없음(새 PID 가 하나뿐입니다) |
 | 그 밖의 접촉 — AUTOMATIC·ERODING·SINGLE_SURFACE 등 | 모든 층이 solid 일 때 **층 전부를 담은 새 세트**로 바꾸고 STYP 를 3→2 로 고칩니다 | 합친 PID 로 바꿉니다 |
 | 스칼라 PID 칸 — `*DAMPING_PART_MASS`·`_STIFFNESS`, `*DATABASE_HISTORY_PART`, `*MAT_ADD_THERMAL_EXPANSION`, `*PART_MOVE`, `*BOUNDARY_PRESCRIBED_MOTION_RIGID`, `*DEFORMABLE_TO_RIGID`, `*INITIAL_VELOCITY_GENERATION` 의 PID 칸 | **`manual`(직접 고치세요)** — 칸 하나에 층 N 개를 담을 수 없습니다 | **옮깁니다** — 새 PID 가 하나뿐이라 칸에 그대로 들어갑니다 |
-| `*ELEMENT_MASS` | `manual` — `집중질량을 층에 나눌 수 없습니다 — 직접 배분하세요` | `manual` 이 정상 동작입니다. **다만 2번째 칸이 죽은 PID 와 같은 번호면 그 칸을 합친 PID 로 덮어씁니다 — 미수정 결함입니다.** LS-DYNA `*ELEMENT_MASS` 는 `EID, 노드 ID, MASS, PID` 라 2번째 칸은 **노드 ID** 입니다. 노드 번호가 합쳐진 파트 번호와 겹치면 집중질량이 다른 노드로 옮겨 붙고 `moved` 로 보고되며 rc=0 으로 끝납니다 — merge 전에 `*ELEMENT_MASS` 의 노드 ID 를 확인하세요 |
+| `*ELEMENT_MASS` | `manual` — `집중질량을 층에 나눌 수 없습니다 — 직접 배분하세요` | merge 에서도 옮기지 않고 `manual` 로 남깁니다. LS-DYNA `*ELEMENT_MASS` 는 `EID, 노드 ID, MASS, PID` 이고 `*ELEMENT_MASS_PART` 는 `PID, MASS` 라 변형마다 PID 칸 자리가 다릅니다 — 잘못 짚으면 노드 ID 를 덮어쓰므로 집중질량은 직접 배분하세요 |
 | `*CONSTRAINED_RIGID_BODIES` 의 두 칸이 모두 죽은 경우 | `manual` | 옮기지 않고 보고만 합니다(`left`) — 합치면 자기 자신을 가리키게 됩니다 |
 | `EID` 축 — `*SET_SOLID`·`_SHELL`·`_BEAM`·`_TSHELL`, `*INITIAL_STRESS_*`, `*INITIAL_STRAIN_SOLID`, `*DATABASE_HISTORY_SOLID` 등 | `manual` | `manual` |
 | `NODE` 축 — `*SET_NODE`, `*SET_SEGMENT`, `*BOUNDARY_SPC_NODE`, 그 세트를 쓰는 `*CONSTRAINED_NODAL_RIGID_BODY` | `manual` | `manual` |

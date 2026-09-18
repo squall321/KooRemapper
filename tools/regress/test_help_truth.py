@@ -586,11 +586,11 @@ def main():
           "pid_refs: warn" in rules, rules[:1600])
 
     print("[재질 카드 제목 줄 자동 보충이 닿는 범위 — 문구의 조건과 실제가 같은가]")
-    # 데이터 줄이 하나뿐인 *MAT_..._TITLE 은 제목 줄을 채워 주지만, 두 줄 이상인 카드는 탐지하지 못한다.
-    # help·매뉴얼·카탈로그가 이 조건을 빼고 적으면 사용자가 *MAT_RIGID_TITLE 을 제목 없이 넣고
-    # *PART 의 mid 가 조용히 바뀐 덱을 솔버로 넘긴다. 문구와 실제 동작을 함께 잠근다.
-    check("restack help: 제목 줄 자동 보충이 '데이터 줄이 하나뿐인 카드' 로 한정됨",
-          "데이터 줄이 하나뿐인 카드에서만" in rst,
+    # 제목 자리 줄이 '빈 칸을 뺀 모든 칸이 수이고 두 칸 이상' 이면 데이터 줄로 보고 제목 누락으로 판정한다.
+    # 예전엔 '데이터 줄이 하나뿐인 카드' 로 한정돼 *MAT_RIGID_TITLE 을 제목 없이 넣으면
+    # *PART 의 mid 가 조용히 바뀌고 cmo 칸까지 덮여 나갔다. 문구와 실제 동작을 함께 잠근다.
+    check("restack help: 제목 줄 자동 보충 조건을 '모든 칸이 수' 로 적는다",
+          "하나뿐인 카드에서만" not in rst and ("모든 칸이 수" in rst or "칸이 수" in rst),
           [l for l in rst.splitlines() if "제목 줄" in l])
 
     MAT1 = ("*MAT_ELASTIC_TITLE\n$#     mid        ro         e        pr\n"
@@ -617,8 +617,9 @@ def main():
           "\n         3         3        72\n" in t1,
           f"rc={rc} cards={t1.count('*MAT_ELASTIC_TITLE')} {out[-200:]}")
 
-    # 데이터 줄 2 개 + 제목 줄 없음 → 지금은 탐지하지 못한다(미수정 결함). 고치면 이 단언이 깨지고
-    # help·매뉴얼·카탈로그의 '데이터 줄이 하나뿐인 카드에서만' 문구도 함께 고쳐야 한다.
+    # 데이터 줄 2 개 + 제목 줄 없음 → 제목 자리 줄이 '모든 칸이 수' 면 데이터 줄로 보고 제목 누락으로 판정한다.
+    # 예전엔 탐지하지 못해 첫 데이터 줄이 제목으로 먹히고 둘째 줄(cmo con1 con2)이 데이터로 읽혀
+    # cmo 칸이 새 MID 로 덮어써졌다(강체 구속이 조용히 깨졌다).
     RIG = ("*MAT_RIGID_TITLE\n$#     mid        ro         e        pr\n"
            "        90  7.85E-09  2.10E+05       0.3\n"
            "$#     cmo      con1      con2\n         1         7         7\n")
@@ -627,9 +628,20 @@ def main():
         "    target_pid: 1\n    direction: z\n" + layers(RIG, MAT2))
     rc, out = run(binary, tmp, "restack", "t2.yaml")
     t2 = open(os.path.join(tmp, "t2.k")).read() if rc == 0 else ""
-    check("데이터 줄 2 개 + 제목 줄 없음: 아직 탐지하지 못한다 (미수정 결함 — 고치면 문서도 고칠 것)",
+    check("데이터 줄 2 개 + 제목 줄 없음도 탐지해 제목을 채우고 숫자 MID 를 지킨다",
+          rc == 0 and "Restack layer 1: *MAT_..._TITLE card had no title line" in out and
+          "\n         2         2        90\n" in t2 and
+          "\n         1         7         7\n" in t2,   # cmo 칸이 덮이지 않았다
+          f"rc={rc} {out[-300:]}")
+    RIG_TITLED = RIG.replace("*MAT_RIGID_TITLE\n", "*MAT_RIGID_TITLE\n7075-T6 aluminum\n")
+    open(os.path.join(tmp, "t3.yaml"), "w").write(
+        "base_model: box.k\noutput: t3\noperations:\n  - type: restack\n"
+        "    target_pid: 1\n    direction: z\n" + layers(RIG_TITLED, MAT2))
+    rc, out = run(binary, tmp, "restack", "t3.yaml")
+    t3 = open(os.path.join(tmp, "t3.k")).read() if rc == 0 else ""
+    check("글자가 섞인 진짜 제목은 제목으로 남긴다 (오탐 없음)",
           rc == 0 and "Restack layer 1: *MAT_..._TITLE card had no title line" not in out and
-          "*MAT_RIGID_TITLE\n$#     mid" in t2,
+          "7075-T6 aluminum" in t3 and "\n         2         2        90\n" in t3,
           f"rc={rc} {out[-300:]}")
 
     print("[*SET_PART_COLUMN 은 8개/줄 규칙이 아니라 층마다 한 줄]")
@@ -681,14 +693,17 @@ def main():
         rc, out = run(binary, tmp, "merge", "em.yaml")
         em = open(os.path.join(tmp, "em_out.k")).read() if os.path.exists(
             os.path.join(tmp, "em_out.k")) else ""
-        moved = "*ELEMENT_MASS (moved)" in out
-        clob = "      9001         4      1.50000E-3       999" in em
-        check("merge: 2번째 칸이 죽은 PID 와 같으면 노드 ID 를 덮어쓴다 (미수정 결함 — 고치면 문서도 고칠 것)",
-              rc == 0 and moved and clob, f"rc={rc} moved={moved} clob={clob}")
-        check("매뉴얼·lat.md·help 가 그 덮어쓰기를 결함으로 적음",
-              "미수정 결함" in open(os.path.join(REPO, "docs", "KooRemapper_Manual.md")).read() and
-              "미수정 결함" in open(os.path.join(REPO, "lat.md", "commands", "restack.md")).read() and
-              "미수정 결함" in mrg)
+        # 2번째 칸(노드 ID)이 죽은 PID 와 같은 번호여도 건드리지 않는다 — 칸 자리가 변형마다 달라
+        # merge 에서도 옮기지 않기로 했다(예전엔 노드 ID 를 합친 PID 로 덮어썼다).
+        # manual 로 남으므로 strict 기본에서는 rc=1 이다(덱은 쓴다) — 조용히 옮기는 것보다 낫다
+        check("merge: 2번째 칸이 죽은 PID 와 같아도 노드 ID 를 덮어쓰지 않는다",
+              rc == 1 and "*ELEMENT_MASS (moved)" not in out and
+              "      9001        2       1.50000E-3       999" in em,
+              f"rc={rc} {out[-200:]}")
+        check("매뉴얼·lat.md·help 가 '두 op 모두 manual' 로 적음",
+              "미수정 결함" not in open(os.path.join(REPO, "docs", "KooRemapper_Manual.md")).read() and
+              "미수정 결함" not in open(os.path.join(REPO, "lat.md", "commands", "restack.md")).read() and
+              "미수정 결함" not in mrg)
 
     print("[HelpCatalogData.inc 가 ops_help.py 와 같은지]")
     p = subprocess.run([sys.executable, os.path.join(REPO, "tools", "help", "gen_help_cpp.py"), "--check"],

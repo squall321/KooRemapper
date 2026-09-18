@@ -1265,6 +1265,13 @@ int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
         }
     }
 
-    // 옮기지 못한 참조가 남았으면 덱은 쓰되 rc=1 로 끝낸다 — 체인이 조용히 솔버까지 가지 않게(assemble 과 같다)
-    return pidRefOk ? 0 : 1;
+    // 옮기지 못한 참조가 남았으면 덱은 쓰되 rc=1 로 끝낸다 — 체인이 조용히 솔버까지 가지 않게(assemble 과 같다).
+    // 플랫폼 워커는 stdout 마지막 줄들로 오류 요약을 만든다 — 마지막에 [ERROR] 한 줄을 남긴다.
+    if (!pidRefOk) {
+        console.error("[merge] 합친 파트를 가리키던 자리를 다 옮기지 못했습니다 — 덱은 썼습니다: " +
+                      cfg.outputPath + " (덱 머리의 $ KOOREMAPPER-PIDREF 블록을 보세요."
+                      " 알고도 넘기려면 pid_refs: warn)");
+        return 1;
+    }
+    return 0;
 }

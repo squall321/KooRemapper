@@ -837,9 +837,47 @@ struct MatCardBlock {
 // 그래서 내용 줄을 셀 때 빈 줄·공백만 있는 줄도 제목 줄 후보로 넣고 '$' 주석만 뺀다.
 // 블록 끝의 빈 줄은 카드 끝 개행이라 세지 않는다.
 // 내용 줄이 두 줄 이상이면 첫 줄이 제목이고 그 뒤 첫 비어 있지 않은 줄이 데이터 줄이다.
-// 한 줄뿐이면 제목 줄이 빠진 것이고 그 줄이 데이터 줄이다 — '제목처럼 보이는지' 로 나누면
-// '7075-T6 aluminum' 같은 진짜 제목에서 틀린다. 예전엔 무조건 한 줄을 제목으로 먹어
-// 제목 없는 카드의 유일한 데이터 줄이 사라지고 MID 0 이 덱에 써졌다.
+// *MAT_..._TITLE 카드에서 제목 줄이 빠졌는지 가린다.
+//  (1) 키워드 뒤 내용 줄이 하나뿐이면 그 줄이 데이터 줄이다.
+//  (2) 내용 줄이 둘 이상이어도 첫 줄이 '데이터 줄 모양'(빈 칸을 뺀 모든 칸이 수, 두 칸 이상)이면
+//      제목이 빠진 것이다. 이 검사가 없으면 *MAT_RIGID_TITLE 처럼 데이터가 두 줄인 카드에서
+//      첫 줄이 제목으로 먹히고 둘째 줄(cmo con1 con2)이 데이터로 읽혀 MID 를 잘못 잡고
+//      그 자리에 새 MID 를 덮어써 강체 구속이 조용히 망가졌다.
+//  '제목처럼 보이는지' 가 아니라 '데이터 줄 모양인지' 로 가리는 이유는 '7075-T6 aluminum' 이나
+//  '2024 T3' 같은 진짜 제목이 숫자로 시작해도 모든 칸이 수는 아니기 때문이다.
+// 줄이 '데이터 줄 모양' 인가 — 고정폭 10칸(또는 콤마 자유형식)에서 빈 칸을 뺀 모든 칸이 수이고
+// 칸이 둘 이상이면 데이터 줄로 본다. 재질 제목은 글자가 섞이므로('7075-T6 aluminum') 걸리지 않는다.
+bool matLineLooksLikeData(const std::string& raw) {
+    std::string line = raw;
+    if (!line.empty() && line.back() == '\r') line.pop_back();
+    if (line.find_first_not_of(" \t") == std::string::npos) return false;
+    std::vector<std::string> fields;
+    if (line.find(',') != std::string::npos) {
+        size_t pos = 0;
+        while (pos <= line.size()) {
+            size_t c = line.find(',', pos);
+            if (c == std::string::npos) { fields.push_back(line.substr(pos)); break; }
+            fields.push_back(line.substr(pos, c - pos));
+            pos = c + 1;
+        }
+    } else {
+        for (size_t c = 0; c < line.size(); c += 10) fields.push_back(line.substr(c, 10));
+    }
+    int numeric = 0;
+    for (const auto& f : fields) {
+        size_t b = f.find_first_not_of(" \t");
+        if (b == std::string::npos) continue;              // 빈 칸은 LS-DYNA 에서 0 이다
+        size_t e = f.find_last_not_of(" \t");
+        std::string tok = f.substr(b, e - b + 1);
+        const char* p = tok.c_str();
+        char* endp = nullptr;
+        std::strtod(p, &endp);
+        if (endp == p || *endp != '\0') return false;      // 글자가 섞였다 = 제목
+        ++numeric;
+    }
+    return numeric >= 2;
+}
+
 std::vector<MatCardBlock> matFindDataLines(const std::vector<MatCardLine>& lines) {
     auto isBlank = [](const std::string& s) { return s.find_first_not_of(" \t") == std::string::npos; };
     std::vector<MatCardBlock> out;
@@ -861,7 +899,8 @@ std::vector<MatCardBlock> matFindDataLines(const std::vector<MatCardLine>& lines
         if (content.empty()) continue;
         MatCardBlock b;
         b.keywordLine = i;
-        b.titleMissing = isTitle && content.size() < 2;
+        b.titleMissing = isTitle && (content.size() < 2 ||
+                                     matLineLooksLikeData(lines[content[0]].text));
         size_t from = (isTitle && !b.titleMissing) ? 1 : 0;
         bool found = false;
         for (size_t k = from; k < content.size(); ++k) {
@@ -1765,10 +1804,11 @@ void ModelAssembler::migrateDeadReferences(const std::set<int>& deadPids,
                 break;
             }
 
-            // 5b. 목록형 *DATABASE_HISTORY_PART 와 *ELEMENT_MASS 의 PID 칸
+            // 5b. 목록형 *DATABASE_HISTORY_PART 의 PID 칸
+            // (*ELEMENT_MASS 는 여기서 다루지 않는다 — 칸 자리가 변형마다 다르고(EID NID MASS PID /
+            //  *_PART 는 PID MASS) 잘못 짚으면 노드 ID 를 PID 로 덮어쓴다. 집중질량은 보고만 한다.)
             bool histPart = rsStarts(b.kw, "*DATABASE_HISTORY_PART") && !rsHas(b.kw, "_SET");
-            bool elemMass = rsStarts(b.kw, "*ELEMENT_MASS");
-            if (!histPart && !elemMass) continue;
+            if (!histPart) continue;
             for (size_t m = 0; m < b.data.size(); ++m) {
                 size_t li = b.data[m];
                 if (pidRefRewrites_.count(li) || cardEdit.count(li)) continue;
@@ -1776,8 +1816,8 @@ void ModelAssembler::migrateDeadReferences(const std::set<int>& deadPids,
                 std::string line = rawLines_[li];
                 bool changed = false;
                 // *ELEMENT_MASS 는 PID 칸(2번째)만 옮긴다 — 노드·요소 축은 옮길 자리가 없다
-                size_t from = elemMass ? 1 : 0;
-                size_t to = elemMass ? 2 : f.size();
+                size_t from = 0;
+                size_t to = f.size();
                 std::set<int> seen;   // 이력 목록에 같은 PID 가 두 번 들어가지 않게
                 for (size_t q = from; q < to && q < f.size(); ++q) {
                     int v = rsIntField(f, q);
@@ -1914,12 +1954,17 @@ int ModelAssembler::pidRefPickLayer(const PidRefMigrateCtx& ctx, double lo, doub
 // assemble(writeOutput)과 자기 구현으로 덱을 쓰는 경로(단독 merge)가 같은 문구를 쓰게 하는 자리다.
 std::string ModelAssembler::buildPidRefHeaderBlock() const {
     if (pidRefFindings_.empty()) return std::string();
-    size_t movedN = 0;
-    for (const auto& f : pidRefFindings_) if (f.grade == "moved") ++movedN;
+    size_t movedN = 0, maybeN = 0;
+    for (const auto& f : pidRefFindings_) {
+        if (f.grade == "moved") ++movedN;
+        else if (f.grade == "maybe") ++maybeN;
+    }
     std::ostringstream blk;
+    // maybe 는 rc 에 넣지 않으므로 '못 옮김' 에 섞으면 요약과 종료 코드가 어긋나 보인다 — 따로 센다
     blk << "$ KOOREMAPPER-PIDREF: " << pidRefFindings_.size()
         << " reference(s) — restack/merge 가 비운 PID·지운 요소·지운 노드를 가리키던 자리입니다"
-           " (옮김 " << movedN << ", 못 옮김 " << (pidRefFindings_.size() - movedN) << ")\n";
+           " (옮김 " << movedN << ", 못 옮김 " << (pidRefFindings_.size() - movedN - maybeN)
+        << ", 확인 안 함 " << maybeN << ")\n";
     blk << "$ KOOREMAPPER-PIDREF: 등급 moved=이 덱에서 옮겼습니다, left=옮기지 못했습니다(이유가 붙습니다),"
            " manual=직접 고치세요, unknown=칸 자리 미확정, maybe=화이트리스트 밖(칸 뜻 미확인 — rc 에는 넣지 않습니다)\n";
     blk << "$ KOOREMAPPER-PIDREF: 줄 번호는 이 op 가 읽은 입력 덱 기준입니다"
@@ -2301,8 +2346,13 @@ void ModelAssembler::reportPidRefFindings(const std::string& opName,
                                " 값이 우연히 같기만 해도 걸리므로 rc 는 올리지 않습니다)");
     }
     if (movedCount + maybeCount < found.size()) {
-        infoMessages.push_back("    못 옮긴 자리가 남아 rc=1 로 끝냅니다(덱은 씁니다)."
-                               " pid_refs: warn 을 주면 같은 보고를 하고 rc=0 으로 끝냅니다.");
+        if (pidRefPolicy_ == "warn") {
+            // 로그만 읽는 사람이 rc 를 잘못 읽지 않게 한다 — 예전엔 warn 으로 돌려도 'rc=1' 이라고 찍었다
+            infoMessages.push_back("    못 옮긴 자리가 남았지만 pid_refs: warn 이라 rc=0 으로 끝냅니다(덱은 씁니다).");
+        } else {
+            infoMessages.push_back("    못 옮긴 자리가 남아 rc=1 로 끝냅니다(덱은 씁니다)."
+                                   " pid_refs: warn 을 주면 같은 보고를 하고 rc=0 으로 끝냅니다.");
+        }
     } else {
         infoMessages.push_back("    옮기지 못한 자리가 없습니다 — rc=0 으로 끝냅니다.");
     }

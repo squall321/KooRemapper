@@ -248,7 +248,7 @@ operations:
    notes=["element_type: solid(기본) | tshell | shell, direction: auto(기본, 자동 탐지) | x | y | z (+/- 부호도 같은 축). 모르는 값은 rc=1",
           "material_card 의 mid 칸은 라벨로도 쓸 수 있다 (MID001, MAT01). 층마다 새 MID 로 바뀐다. 라벨과 카드 내용이 같으면 재질을 공유하고, 라벨이 같아도 물성이 다르면 MID 를 따로 준다",
           "그 칸에 숫자를 적으면 그 번호를 그대로 쓴다. 이미 쓰이는 번호면 'material MID 90 is already in use -> assigned MID 91' 을 찍고 새 번호를 준다",
-          "*MAT_…_TITLE 의 제목 줄은 그대로 두고, 같은 MID 를 가리키는 *MAT_ADD_… 카드도 함께 새 MID 로 바뀐다. 제목 줄이 없으면 [WARN] 을 내고 'Restack Layer N'(layers[].title 이 있으면 그 제목)을 채워 내보낸다 — 다만 데이터 줄이 하나뿐인 카드에서만 그렇다. 데이터 줄이 두 줄 이상인 카드(*MAT_RIGID·*MAT_PIECEWISE_LINEAR_PLASTICITY 등)에서 제목 줄을 빠뜨리면 탐지하지 못하고 첫 데이터 줄이 제목으로 먹힌다 — 제목 줄을 반드시 적어라. 데이터 줄 자체가 없는 카드는 rc=1",
+          "*MAT_…_TITLE 의 제목 줄은 그대로 두고, 같은 MID 를 가리키는 *MAT_ADD_… 카드도 함께 새 MID 로 바뀐다. 제목 줄이 없으면 [WARN] 을 내고 'Restack Layer N'(layers[].title 이 있으면 그 제목)을 채워 내보낸다. 데이터가 두 줄 이상인 카드(*MAT_RIGID·*MAT_PIECEWISE_LINEAR_PLASTICITY 등)도 마찬가지다 — 제목 자리의 줄이 '빈 칸을 뺀 모든 칸이 수이고 두 칸 이상' 이면 데이터 줄로 보고 제목이 빠진 것으로 판정한다('7075-T6 aluminum' 처럼 글자가 섞인 진짜 제목은 제목으로 남는다). 데이터 줄 자체가 없는 카드는 rc=1",
           "층 카드도 재질 카드 검사를 거친다 — 구조가 깨지면 rc=1, 물성 값 경고(예: PR 0.6)는 [WARN] 이고 그대로 진행한다",
           "카드는 10칸 고정폭 (블록 들여쓰기를 뺀 뒤 기준). 자유 형식(쉼표)도 된다. 새 PID·SECID 는 자동",
           "새 *SECTION 은 원 *SECTION 의 ELFORM 을, 새 *PART 는 원 *PART 의 HGID·TMID 를 물려받는다 (요소 종류가 같을 때만 — solid↔tshell 은 뜻이 달라 넘기지 않는다. EOSID 도 넘기지 않는다)",
@@ -354,7 +354,7 @@ merge:
           "합친 파트들은 요소 0 개인 빈 파트로 남고 새 PID 하나가 생긴다 (위 사례는 PID 1,2,3 → 4)",
           "그 죽은 PID·지워진 요소(EID)·지워진 노드(NODE)를 가리키던 자리를 훑어 옮긴다 — 세트·접촉은 물론, PID 칸이 하나뿐인 카드(*DAMPING_PART_MASS/_STIFFNESS, *DATABASE_HISTORY_PART, *MAT_ADD_THERMAL_EXPANSION, *PART_MOVE, *BOUNDARY_PRESCRIBED_MOTION_RIGID, *DEFORMABLE_TO_RIGID, *INITIAL_VELOCITY_GENERATION)도 새 PID 로 바꾼다. 새 PID 가 여럿인 restack 은 이 칸들을 manual 로 남긴다",
           "두 칸이 모두 이번 merge 로 사라지는 *CONSTRAINED_RIGID_BODIES 는 합치면 자기 자신을 가리키게 되므로 옮기지 않고 보고만 한다",
-          "*ELEMENT_MASS(_PART 포함)는 집중질량을 층에 나눌 수 없어 manual 로 남는다 — 다만 2번째 칸이 이번 merge 로 사라진 PID 와 같은 번호면 그 칸을 합친 PID 로 덮어쓴다. LS-DYNA *ELEMENT_MASS 의 2번째 칸은 노드 ID 라 집중질량이 다른 노드로 옮겨 붙고 rc=0 으로 끝난다 — merge 전에 *ELEMENT_MASS 의 노드 ID 를 확인해라 (미수정 결함)",
+          "*ELEMENT_MASS(_PART 포함)는 merge 에서도 옮기지 않고 manual 로 남긴다 — 변형마다 PID 칸 자리가 달라(EID·노드 ID·MASS·PID / _PART 는 PID·MASS) 잘못 짚으면 노드 ID 를 덮어쓴다. 집중질량은 직접 배분해라",
           "못 옮긴 자리가 하나라도 남으면 rc=1 이고 덱은 쓴다. 전체 목록은 덱 머리(*KEYWORD 바로 뒤)의 '$ KOOREMAPPER-PIDREF' 블록에 moved/left/manual/unknown/maybe 등급과 입력 덱 기준 줄 번호로 들어간다. maybe(화이트리스트 밖)는 rc 에 넣지 않는다",
           "pid_refs: strict(기본) | warn — warn 은 같은 보고를 하고 rc=0 으로 끝낸다. 그 밖의 값은 rc=1 + invalid pid_refs. assemble 은 operations[] 항목 안에, 단독 merge 는 YAML 에 그대로 적는다",
           "위 사례의 three_layer.k 는 *MAT_ADD_THERMAL_EXPANSION 2 건이 죽은 PID 를 가리켜 '옮김' 으로 보고된다 — 못 옮긴 자리가 없어 rc=0 이다"])

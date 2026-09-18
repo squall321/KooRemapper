@@ -190,7 +190,7 @@ def main():
               repr(deck[deck.find("*MAT_ELASTIC_TITLE"):][:120]))
         check("낸 덱을 다시 읽으면 그 재질이 등록된다 (새 층이 2 가 아니라 92 를 받는다)", True)
 
-        print("[R1b 제목 줄 없는 카드에 데이터 줄이 2줄 이상이면 물성을 망가뜨리지 않고 멈춘다]")
+        print("[R1b 제목 줄 없는 카드에 데이터 줄이 2줄 이상이어도 제목을 채우고 물성을 지킨다]")
         two_line = (
             "model: base.k\noutput: f.k\ntarget_pid: 1\ndirection: z\nlayers:\n"
             "  - title: Substrate\n    thickness: 1.0\n    num_elements: 1\n"
@@ -203,9 +203,16 @@ def main():
         )
         open(os.path.join(d, "f.yaml"), "w").write(two_line)
         rc, out = run(binary, d, "restack", "f.yaml")
-        check("rc=1", rc == 1, out[-400:])
-        check("둘째 데이터 줄을 덮어쓴 덱을 내지 않는다", not os.path.exists(os.path.join(d, "f.k")))
-        check("무엇이 잘못됐는지 알린다(제목 줄)", "title line" in out, out[-400:])
+        fdeck = open(os.path.join(d, "f.k"), encoding="utf-8", errors="replace").read() \
+            if os.path.exists(os.path.join(d, "f.k")) else ""
+        fmids = dict(part_mids(os.path.join(d, "f.k"))) if fdeck else {}
+        check("rc=0 — 제목 줄을 채워 넣고 넘어간다", rc == 0, out[-400:])
+        check("제목 줄이 없었다는 사실을 알린다", "no title line" in out, out[-400:])
+        check("카드에 적은 숫자 MID 90 을 그대로 쓴다", fmids.get("Substrate") == 90, str(fmids))
+        # 들여쓰기는 블록 해제로 달라질 수 있으므로 값으로 본다(예전엔 첫 칸이 새 MID 로 덮였다)
+        second = [l for l in fdeck.splitlines() if l.split() == ["40.0", "5.0", "0.0", "0.0"]]
+        check("둘째 데이터 줄(c, p, fail, tdel)을 덮어쓰지 않는다", len(second) == 1,
+              [l for l in fdeck.splitlines() if "40.0" in l])
 
         print("[R3 MID 토큰이 다음 값과 붙어 있어도 뒤 필드를 지우지 않는다]")
         glued = (
