@@ -186,8 +186,14 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
 
         if (trimmed.empty() || trimmed[0] == '#') continue;
 
+        // 'operations:' 아래 항목 대시를 열 0 에 쓰는 것도 YAML 에서 합법이다. 예전엔 열 0 줄을 무조건
+        // 최상위 키로 보고 '- type: quad8' 을 키 '- type' 으로 버려 'No operations defined' 로 끝났고,
+        // 단독 명령이 안내하는 'assemble <파일>' 도 그래서 함께 실패했다.
+        bool zeroIndentOpItem = (indent == 0 && section == Section::OPERATIONS &&
+                                 trimmed[0] == '-' && (trimmed.size() == 1 || trimmed[1] == ' '));
+
         // Top-level keys (indent 0)
-        if (indent == 0) {
+        if (indent == 0 && !zeroIndentOpItem) {
             inLayersList = false;
             inLayerItem = false;
             inTargetsList = false;
