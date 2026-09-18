@@ -1149,6 +1149,13 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                                     for (int pid : pids) pushMulti(pid);
                                 }
                             }
+                        } else if (key == "pid_refs") {
+                            // 연산 공통 키 — 여기서 읽어 restack/merge 쪽으로 내려 준다.
+                            // 예전엔 읽는 자리가 아예 없어 기본 strict 가 강제됐고,
+                            // 에러 메시지가 안내하는 'pid_refs: warn' 이 통하지 않았다.
+                            op.pidRefs = val;
+                            op.restack.pidRefs = val;
+                            op.merge.pidRefs = val;
                         } else if (key == "source_pid") {
                             int pid = std::stoi(val);
                             if (op.type == AssemblyOperation::OFFSET) {

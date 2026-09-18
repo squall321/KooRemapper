@@ -547,6 +547,8 @@ int runRestack(const std::string& yamlFile, ConsoleOutput& console) {
             else if (key == "czm_normal") { try { op.czmNormal = std::stod(val); } catch(...) {} }
             else if (key == "czm_shear") { try { op.czmShear = std::stod(val); } catch(...) {} }
             else if (key == "drop_height") { try { op.dropHeight = std::stod(val); } catch(...) {} }
+            // pid_refs 는 rc=1 강제의 유일한 탈출구다 — 읽는 자리가 없어 'warn' 이 통하지 않았다
+            else if (key == "pid_refs") op.pidRefs = val;
             else if (key == "layers") { inLayers = true; layersIndent = y.keyIndent(tr, indent); }
             continue;
         }
