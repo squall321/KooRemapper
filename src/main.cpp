@@ -284,7 +284,8 @@ static bool printLegacyHelp(ConsoleOutput& console, const std::string& helpCmd) 
         std::cout << "\n";
         console.println("Options:");
         console.println("  --ref <file>   Reference flat mesh for scaling");
-        console.println("  --no-scale     Don't scale to reference (use YAML lengths as-is)");
+        console.println("  --no-scale     Ignore the reference MESH FILE (--ref / reference.flat_mesh)");
+        console.println("                 reference.dimensions written in the YAML still apply");
         std::cout << "\n";
         console.println("YAML Format (Flat Variable Density):");
         console.println("  type: flat  # Optional, default is flat");
@@ -1071,7 +1072,7 @@ static bool printLegacyHelp(ConsoleOutput& console, const std::string& helpCmd) 
     } else if (helpCmd == "load") {
         console.println("Usage: KooRemapper load <config.yaml>");
         std::cout << "\n";
-        console.println("Apply loads (force/pressure/gravity) to parts from YAML config.");
+        console.println("Apply loads (force/pressure/normal_pressure) to parts from YAML config.");
         console.println("Inserts *LOAD_*, *DEFINE_CURVE, *SET_* keywords.");
         std::cout << "\n";
         console.println("YAML Config Format:");
@@ -1079,10 +1080,10 @@ static bool printLegacyHelp(ConsoleOutput& console, const std::string& helpCmd) 
         console.println("  output: mesh_loaded.k");
         console.println("  loads:");
         console.println("    - part: 1");
-        console.println("      mode: pressure          # pressure | force | gravity");
+        console.println("      mode: pressure          # pressure | force | normal_pressure");
         console.println("      value: 1.0              # Load magnitude");
         console.println("      direction: [0, 0, 1]    # Load direction vector");
-        console.println("      select: direction        # direction | tied | all");
+        console.println("      select: direction        # direction | tied | set");
         console.println("      angle: 45.0             # Face selection angle tolerance");
         console.println("      curve:                   # Optional time-load curve");
         console.println("        - [0.0, 0.0]");
@@ -1092,7 +1093,7 @@ static bool printLegacyHelp(ConsoleOutput& console, const std::string& helpCmd) 
         console.println("Select modes:");
         console.println("  direction  Face normals within angle of direction vector");
         console.println("  tied       Faces participating in tied contact");
-        console.println("  all        All exposed faces of the part");
+        console.println("  set        Existing segment set given by 'set_id'");
     } else if (helpCmd == "boundary") {
         console.println("Usage: KooRemapper boundary <config.yaml>");
         std::cout << "\n";
@@ -2008,7 +2009,7 @@ static int runMain(int argc, char* argv[]) {
         parser.addPositional("config", "YAML configuration file");
         parser.addPositional("output", "Output K-file");
         parser.addOption("", "ref", "Reference flat mesh for scaling", "");
-        parser.addFlag("", "no-scale", "Don't scale to reference");
+        parser.addFlag("", "no-scale", "Ignore the reference mesh file (reference.dimensions still apply)");
 
         int subArgc = argc - 1;
         char** subArgv = argv + 1;

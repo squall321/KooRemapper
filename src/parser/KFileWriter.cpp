@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <fstream>
 #include <cctype>
+#include <set>
 
 // Knowledge graph (lat.md):
 //   @lat: [[modules/parser]]
@@ -32,6 +33,47 @@ bool startsWithKeyword(const std::string& line, const char* keyword) {
     if (i >= line.size()) return true;
     char next = line[i];
     return next == ' ' || next == '\t' || next == '_' || next == '\r';
+}
+
+// Uppercased keyword token of a '*' line: "*ELEMENT_SHELL_TITLE" out of
+// "  *element_shell_title   $ comment".
+std::string keywordToken(const std::string& line, size_t firstNonWs) {
+    std::string up;
+    for (size_t i = firstNonWs; i < line.size(); ++i) {
+        char c = static_cast<char>(std::toupper(static_cast<unsigned char>(line[i])));
+        if (c == ' ' || c == '\t' || c == '\r') break;
+        up.push_back(c);
+    }
+    return up;
+}
+
+// Element blocks that KFileReader also loads into mesh.elements but that
+// writeElementSection cannot round-trip (a shell/thick-shell is not an
+// *ELEMENT_SOLID). They stay in the output verbatim, so their EIDs must not
+// be written a second time inside our *ELEMENT_SOLID block.
+bool isVerbatimElementKeyword(const std::string& kw) {
+    return kw == "*ELEMENT_SHELL" || kw == "*ELEMENT_SHELL_TITLE" ||
+           kw == "*ELEMENT_TSHELL" || kw == "*ELEMENT_TSHELL_TITLE";
+}
+
+// EID of one element data line — fixed 8-char field when the line is wide
+// enough (same assumption as KFileReader), otherwise the first token.
+int elementLineEid(const std::string& line) {
+    std::string field;
+    if (line.size() >= 48) {
+        field = line.substr(0, 8);
+    } else {
+        size_t i = 0;
+        while (i < line.size() && std::isspace(static_cast<unsigned char>(line[i]))) ++i;
+        size_t j = i;
+        while (j < line.size() && !std::isspace(static_cast<unsigned char>(line[j]))) ++j;
+        field = line.substr(i, j - i);
+    }
+    try {
+        return std::stoi(field);
+    } catch (...) {
+        return 0;
+    }
 }
 }  // namespace
 
@@ -85,6 +127,31 @@ bool KFileWriter::writeFileWithSource(const std::string& filename, const Mesh& m
         bool elemEmitted = false;
         bool endSuppressed = false;  // we'll emit our own *END
 
+        // Shell / thick-shell blocks are copied verbatim, but KFileReader put
+        // their elements into mesh.elements too. Collect their EIDs up front
+        // (they can appear after *ELEMENT_SOLID) so writeElementSection leaves
+        // them out instead of re-emitting them as *ELEMENT_SOLID — that used
+        // to produce a deck with the same EID twice.
+        std::set<int> verbatimElemIds;
+        {
+            bool inVerbatimElem = false;
+            for (const std::string& line : srcLines) {
+                size_t p = 0;
+                while (p < line.size() &&
+                       std::isspace(static_cast<unsigned char>(line[p]))) {
+                    ++p;
+                }
+                if (p >= line.size()) continue;
+                if (line[p] == '*') {
+                    inVerbatimElem = isVerbatimElementKeyword(keywordToken(line, p));
+                    continue;
+                }
+                if (!inVerbatimElem || line[p] == '$') continue;
+                int eid = elementLineEid(line);
+                if (eid > 0) verbatimElemIds.insert(eid);
+            }
+        }
+
         auto emitOurNodes = [&]() {
             if (nodeEmitted) return;
             writeNodeSection(out, mesh, useMappedPositions);
@@ -92,7 +159,7 @@ bool KFileWriter::writeFileWithSource(const std::string& filename, const Mesh& m
         };
         auto emitOurElems = [&]() {
             if (elemEmitted) return;
-            writeElementSection(out, mesh);
+            writeElementSection(out, mesh, &verbatimElemIds);
             elemEmitted = true;
         };
 
@@ -110,23 +177,18 @@ bool KFileWriter::writeFileWithSource(const std::string& filename, const Mesh& m
                 // Exiting the previous skip block (if any).
                 inSkipBlock = false;
 
-                if (startsWithKeyword(line, "*NODE")) {
+                const std::string up = keywordToken(line, firstNonWs);
+                if (up == "*NODE") {
                     // *NODE family — match exact *NODE only, not *NODE_*
                     // variants like *NODE_RIGID_SURFACE.
-                    std::string up;
-                    for (size_t i = firstNonWs; i < line.size(); ++i) {
-                        char c = static_cast<char>(std::toupper(
-                            static_cast<unsigned char>(line[i])));
-                        if (c == ' ' || c == '\t' || c == '\r') break;
-                        up.push_back(c);
-                    }
-                    if (up == "*NODE") {
-                        emitOurNodes();
-                        inSkipBlock = true;
-                        continue;
-                    }
+                    emitOurNodes();
+                    inSkipBlock = true;
+                    continue;
                 }
-                if (startsWithKeyword(line, "*ELEMENT_SOLID")) {
+                if (up == "*ELEMENT_SOLID" || up == "*ELEMENT_SOLID_TITLE") {
+                    // Exact match only: *ELEMENT_SOLID_ORTHO and friends are
+                    // not loaded into mesh.elements, so dropping their block
+                    // would lose those elements. Copy them verbatim instead.
                     emitOurElems();
                     inSkipBlock = true;
                     continue;
@@ -145,7 +207,7 @@ bool KFileWriter::writeFileWithSource(const std::string& filename, const Mesh& m
         // If the source somehow lacked the keyword we were planning to
         // substitute, emit it now so the output is still well-formed.
         if (!nodeEmitted) writeNodeSection(out, mesh, useMappedPositions);
-        if (!elemEmitted) writeElementSection(out, mesh);
+        if (!elemEmitted) writeElementSection(out, mesh, &verbatimElemIds);
         (void)endSuppressed;
         writeEnd(out);
 
@@ -228,17 +290,21 @@ void KFileWriter::writeNodeSection(std::ofstream& file, const Mesh& mesh,
     }
 }
 
-void KFileWriter::writeElementSection(std::ofstream& file, const Mesh& mesh) {
-    file << "*ELEMENT_SOLID" << std::endl;
-    file << "$#   eid     pid      n1      n2      n3      n4      n5      n6      n7      n8" << std::endl;
-
+void KFileWriter::writeElementSection(std::ofstream& file, const Mesh& mesh,
+                                      const std::set<int>* skipIds) {
     // Sort elements by ID
     std::vector<std::pair<int, const Element*>> sortedElements;
     for (const auto& [id, elem] : mesh.elements) {
+        if (skipIds && skipIds->count(id)) continue;
         sortedElements.push_back({id, &elem});
     }
+    // 쉘만 있는 덱이면 쓸 솔리드가 하나도 없다 — 빈 *ELEMENT_SOLID 블록을 남기지 않는다
+    if (sortedElements.empty()) return;
     std::sort(sortedElements.begin(), sortedElements.end(),
               [](const auto& a, const auto& b) { return a.first < b.first; });
+
+    file << "*ELEMENT_SOLID" << std::endl;
+    file << "$#   eid     pid      n1      n2      n3      n4      n5      n6      n7      n8" << std::endl;
 
     for (const auto& [id, elemPtr] : sortedElements) {
         const Element& elem = *elemPtr;

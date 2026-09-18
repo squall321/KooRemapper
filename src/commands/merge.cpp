@@ -109,6 +109,7 @@ struct mg_Config {
     int dir = 2;            // 0=x, 1=y, 2=z (default)
     int method = 2;         // 0=voigt, 1=reuss, 2=vrh
     std::vector<mg_MergeGroup> groups;
+    bool badValue = false;  // 지원하지 않는 direction/method 값을 만났다
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -239,15 +240,25 @@ static mg_Config mg_parseConfig(const std::string& yamlFile, ConsoleOutput& cons
         } else if (key == "output") {
             cfg.outputPath = val;
         } else if (key == "direction") {
+            // 예전엔 모르는 값을 조용히 Z 로 삼켰다
             std::string d = mg_toUpper(val);
             if (d == "X") cfg.dir = 0;
             else if (d == "Y") cfg.dir = 1;
-            else cfg.dir = 2;
+            else if (d == "Z") cfg.dir = 2;
+            else {
+                console.error("merge: unsupported direction '" + val + "' (allowed: x, y, z)");
+                cfg.badValue = true;
+            }
         } else if (key == "method") {
+            // 예전엔 모르는 값을 조용히 VRH 로 삼켰다
             std::string m = mg_toUpper(val);
             if (m == "VOIGT") cfg.method = 0;
             else if (m == "REUSS") cfg.method = 1;
-            else cfg.method = 2; // vrh
+            else if (m == "VRH") cfg.method = 2;
+            else {
+                console.error("merge: unsupported method '" + val + "' (allowed: voigt, reuss, vrh)");
+                cfg.badValue = true;
+            }
         } else if (key == "merge") {
             inMergeList = true;
             mergeListIndent = indent;
@@ -289,14 +300,15 @@ struct mg_KModel {
     std::map<int, mg_Elem> elems;      // solid elements only
     std::map<int, mg_PartInfo> parts;   // pid → {secid, mid, title}
     std::map<int, mg_MatProps> mats;    // mid → material props
+    std::map<int, std::string> unknownMats;  // mid → 재질 파서가 모르는 *MAT 키워드
     int maxElemId = 0, maxPartId = 0, maxMatId = 0, maxSecId = 0;
 };
 
-static void mg_parseKFile(const std::string& path, mg_KModel& mdl, ConsoleOutput& console) {
+static bool mg_parseKFile(const std::string& path, mg_KModel& mdl, ConsoleOutput& console) {
     std::ifstream inf(path);
     if (!inf.is_open()) {
         console.error("Cannot open model: " + path);
-        return;
+        return false;
     }
 
     std::string line;
@@ -312,6 +324,11 @@ static void mg_parseKFile(const std::string& path, mg_KModel& mdl, ConsoleOutput
     int matMid = 0;
     int matCardNum = 0;
     bool matTitleLine = false; // _TITLE suffix means next line is title
+
+    // 재질 파서가 모르는 *MAT 블록 — MID 만 주워 두었다가 그룹이 그 MID 를 쓰면 이유를 알려준다
+    bool inUnknownMat = false;
+    std::string unknownMatKw;
+    bool unknownMatTitleLine = false;
 
     // VE076 Prony series
     double veBulk = 0;
@@ -366,6 +383,7 @@ static void mg_parseKFile(const std::string& path, mg_KModel& mdl, ConsoleOutput
 
             std::string up = mg_toUpper(trimmed);
             inNode = inElemSolid = inPart = inMat = inThermalExp = inSection = false;
+            inUnknownMat = false;
 
             if (up.find("*NODE") == 0 && up.find("*NODE_") == std::string::npos) {
                 inNode = true;
@@ -412,8 +430,12 @@ static void mg_parseKFile(const std::string& path, mg_KModel& mdl, ConsoleOutput
                 thermalExpCard = 0;
                 matTitleLine = (up.find("TITLE") != std::string::npos);
             } else if (up.find("*MAT_") == 0) {
-                // Unrecognized MAT keyword — log it
+                // Unrecognized MAT keyword — log it, and remember its MID so the
+                // group that uses it can say *why* the material is missing
                 console.info("  [mat-parse] SKIP unrecognized: " + trimmed);
+                inUnknownMat = true;
+                unknownMatKw = mg_tokenWS(trimmed).empty() ? trimmed : mg_tokenWS(trimmed)[0];
+                unknownMatTitleLine = (up.find("TITLE") != std::string::npos);
             }
             continue;
         }
@@ -475,6 +497,23 @@ static void mg_parseKFile(const std::string& path, mg_KModel& mdl, ConsoleOutput
                 if (sid > mdl.maxSecId) mdl.maxSecId = sid;
             }
             inSection = false;
+            continue;
+        }
+
+        // 모르는 *MAT 의 첫 데이터 카드 첫 필드는 관례상 MID 다
+        if (inUnknownMat) {
+            if (unknownMatTitleLine) {
+                unknownMatTitleLine = false;
+                continue;
+            }
+            auto toks = mg_tok10(line);
+            if (toks.empty() || toks[0].empty()) toks = mg_tokenWS(trimmed);
+            if (!toks.empty()) {
+                int umid = mg_toInt(toks[0]);
+                if (umid > 0 && mdl.mats.find(umid) == mdl.mats.end())
+                    mdl.unknownMats[umid] = unknownMatKw;
+            }
+            inUnknownMat = false;
             continue;
         }
 
@@ -593,6 +632,7 @@ static void mg_parseKFile(const std::string& path, mg_KModel& mdl, ConsoleOutput
     if (inMat && matType == "VE076") finishVE();
 
     inf.close();
+    return true;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -787,6 +827,7 @@ static mg_MatProps mg_homogenize(
 
 int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
     mg_Config cfg = mg_parseConfig(yamlFile, console);
+    if (cfg.badValue) return 1;
     if (cfg.modelPath.empty() || cfg.groups.empty()) {
         console.error("Invalid config: model and merge groups required");
         return 1;
@@ -802,7 +843,9 @@ int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
 
     // --- Phase 1: Parse K-file ---
     mg_KModel mdl;
-    mg_parseKFile(cfg.modelPath, mdl, console);
+    // 모델을 못 읽으면 여기서 끝낸다 — 예전엔 [ERROR] 만 찍고 5바이트짜리 빈 덱을 rc=0 으로 남겼다
+    if (!mg_parseKFile(cfg.modelPath, mdl, console))
+        return 1;
 
     console.info("Nodes: " + std::to_string(mdl.nodes.size()) +
                  ", Elements: " + std::to_string(mdl.elems.size()) +
@@ -830,6 +873,7 @@ int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
         int nOrigElems;
     };
     std::vector<GroupResult> results;
+    bool groupFailed = false;   // [ERROR] 를 찍은 그룹이 하나라도 있으면 출력을 쓰지 않고 rc=1
 
     for (size_t gi = 0; gi < cfg.groups.size(); gi++) {
         const auto& grp = cfg.groups[gi];
@@ -847,6 +891,7 @@ int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
 
         if (grpElemIds.empty()) {
             console.error("  No elements found for PIDs");
+            groupFailed = true;
             continue;
         }
         console.info("  Elements: " + std::to_string(grpElemIds.size()));
@@ -859,6 +904,7 @@ int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
 
         if (columns.empty()) {
             console.error("  No columns detected — skipping");
+            groupFailed = true;
             continue;
         }
 
@@ -878,11 +924,23 @@ int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
         }
 
         std::vector<std::pair<mg_MatProps, double>> matsWithFrac;
+        bool matMissing = false;
         for (auto& [mid, cnt] : midCount) {
             double vf = (double)cnt / totalInGroup;
             auto mit = mdl.mats.find(mid);
             if (mit == mdl.mats.end()) {
-                console.error("  MID " + std::to_string(mid) + " not found in material DB");
+                auto uit = mdl.unknownMats.find(mid);
+                if (uit != mdl.unknownMats.end()) {
+                    // 'DB 에 없다' 가 아니라 '이 키워드를 merge 재질 파서가 모른다' 가 진짜 이유다
+                    console.error("  MID " + std::to_string(mid) + ": " + uit->second +
+                                  " is not understood by the merge material parser "
+                                  "(supported: *MAT_ELASTIC, *MAT_PIECEWISE_LINEAR_PLASTICITY/024, "
+                                  "*MAT_GENERAL_VISCOELASTIC/076, *MAT_RIGID/020)");
+                } else {
+                    console.error("  MID " + std::to_string(mid) + " not found in material DB");
+                }
+                groupFailed = true;   // 빠진 재질을 빼고 균질화하면 체적분율이 틀린다
+                matMissing = true;
                 continue;
             }
             matsWithFrac.push_back({mit->second, vf});
@@ -891,6 +949,13 @@ int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
                          " nu=" + std::to_string(mit->second.nu) +
                          " rho=" + std::to_string(mit->second.rho) +
                          " vf=" + std::to_string(vf));
+        }
+
+        // 재질이 빠진 그룹은 체적분율이 틀어져 있다 — 성공한 것처럼 보이는 Homogenized 요약을
+        // 찍지 않고 넘어간다(어차피 아래에서 출력 없이 rc=1 로 끝난다)
+        if (matMissing) {
+            console.error("  Skipping homogenization for this group");
+            continue;
         }
 
         // Homogenize
@@ -1002,6 +1067,11 @@ int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
     }
 
     // --- Phase 3: Write output ---
+    if (groupFailed) {
+        console.error("Merge failed — no output written: " + cfg.outputPath);
+        return 1;
+    }
+
     console.info("\nWriting output: " + cfg.outputPath);
 
     std::ofstream outf(cfg.outputPath);

@@ -34,6 +34,11 @@ int runLoad(const std::string& yamlFile, ConsoleOutput& console) {
     auto countIndent = [](const std::string& s) -> int {
         int n=0; while (n<(int)s.size() && s[n]==' ') ++n; return n;
     };
+    // 들여쓰기에 탭이 있으면 countIndent 가 0 을 돌려줘 블록 구조가 통째로 무너진다 — 조용히 넘기지 않는다
+    auto tabIndent = [](const std::string& s) -> bool {
+        for (char c : s) { if (c == '\t') return true; if (c != ' ') return false; }
+        return false;
+    };
     auto stripQuotes = [](const std::string& s) -> std::string {
         if (s.size() >= 2 && ((s.front()=='"' && s.back()=='"') || (s.front()=='\'' && s.back()=='\'')))
             return s.substr(1, s.size()-2);
@@ -55,6 +60,10 @@ int runLoad(const std::string& yamlFile, ConsoleOutput& console) {
         int indent = countIndent(ln);
         std::string tr = trim(ln);
         if (tr.empty() || tr[0]=='#') continue;
+        if (tabIndent(ln)) {
+            console.error("[load] YAML 들여쓰기에 탭을 쓸 수 없습니다 (공백을 쓰세요): " + tr);
+            return 1;
+        }
 
         // Exit loads list
         if (inLoadsList && indent <= loadsListIndent && tr.substr(0,2) != "- ") {
@@ -169,6 +178,23 @@ int runLoad(const std::string& yamlFile, ConsoleOutput& console) {
     if (outputFile.empty()) { console.error("[load] 'output' not specified"); return 1; }
     if (loadOp.loads.empty()) { console.error("[load] 'loads' list is empty"); return 1; }
 
+    // 실제로 구현된 값만 받는다 — 예전엔 mode: gravity 가 조용히 압력 하중(*LOAD_SEGMENT_SET)이 되고
+    // select: all 이 select: direction 과 똑같이 돌았다 (둘 다 구현된 적이 없는 값)
+    for (size_t i = 0; i < loadOp.loads.size(); ++i) {
+        const auto& lc = loadOp.loads[i];
+        std::string where = "[load] loads[" + std::to_string(i) + "]";
+        if (lc.mode != "pressure" && lc.mode != "force" && lc.mode != "normal_pressure") {
+            console.error(where + ": unsupported mode '" + lc.mode +
+                          "' (allowed: pressure, force, normal_pressure)");
+            return 1;
+        }
+        if (lc.select != "direction" && lc.select != "set" && lc.select != "tied") {
+            console.error(where + ": unsupported select '" + lc.select +
+                          "' (allowed: direction, set, tied)");
+            return 1;
+        }
+    }
+
     if (!configDir.empty() && modelFile.find('/') == std::string::npos && modelFile.find('\\') == std::string::npos)
         modelFile = configDir + "/" + modelFile;
 
@@ -224,6 +250,11 @@ int runBoundary(const std::string& yamlFile, ConsoleOutput& console) {
     auto countIndent = [](const std::string& s) -> int {
         int n=0; while (n<(int)s.size() && s[n]==' ') ++n; return n;
     };
+    // 들여쓰기에 탭이 있으면 countIndent 가 0 을 돌려줘 블록 구조가 통째로 무너진다 — 조용히 넘기지 않는다
+    auto tabIndent = [](const std::string& s) -> bool {
+        for (char c : s) { if (c == '\t') return true; if (c != ' ') return false; }
+        return false;
+    };
     auto stripQuotes = [](const std::string& s) -> std::string {
         if (s.size() >= 2 && ((s.front()=='"' && s.back()=='"') || (s.front()=='\'' && s.back()=='\'')))
             return s.substr(1, s.size()-2);
@@ -242,6 +273,10 @@ int runBoundary(const std::string& yamlFile, ConsoleOutput& console) {
         int indent = countIndent(ln);
         std::string tr = trim(ln);
         if (tr.empty() || tr[0]=='#') continue;
+        if (tabIndent(ln)) {
+            console.error("[boundary] YAML 들여쓰기에 탭을 쓸 수 없습니다 (공백을 쓰세요): " + tr);
+            return 1;
+        }
 
         // Exit boundaries list
         if (inBoundariesList && indent <= boundariesListIndent && tr.substr(0,2) != "- ") {
@@ -374,6 +409,11 @@ int runRbe(const std::string& yamlFile, ConsoleOutput& console) {
     auto countIndent = [](const std::string& s) -> int {
         int n=0; while (n<(int)s.size() && s[n]==' ') ++n; return n;
     };
+    // 들여쓰기에 탭이 있으면 countIndent 가 0 을 돌려줘 블록 구조가 통째로 무너진다 — 조용히 넘기지 않는다
+    auto tabIndent = [](const std::string& s) -> bool {
+        for (char c : s) { if (c == '\t') return true; if (c != ' ') return false; }
+        return false;
+    };
     auto stripQuotes = [](const std::string& s) -> std::string {
         if (s.size() >= 2 && ((s.front()=='"' && s.back()=='"') || (s.front()=='\'' && s.back()=='\'')))
             return s.substr(1, s.size()-2);
@@ -392,6 +432,10 @@ int runRbe(const std::string& yamlFile, ConsoleOutput& console) {
         int indent = countIndent(ln);
         std::string tr = trim(ln);
         if (tr.empty() || tr[0]=='#') continue;
+        if (tabIndent(ln)) {
+            console.error("[rbe] YAML 들여쓰기에 탭을 쓸 수 없습니다 (공백을 쓰세요): " + tr);
+            return 1;
+        }
 
         // Exit rbe list
         if (inRbeList && indent <= rbeListIndent && tr.substr(0,2) != "- ") {

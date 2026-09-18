@@ -434,7 +434,23 @@ int runStabilize(const std::string& yamlFile, ConsoleOutput& console) {
         if      (key == "model")           modelFile = val;
         else if (key == "output")          outputFile = val;
         else if (key == "stabilize")       cfg.mode = val;
-        else if (key == "level")           parseInt(cfg.level);
+        else if (key == "level") {
+            // 예전엔 -1 은 조용한 no-op, 13/99 는 stab_resolveLevel 에서 12 로 클램프됐다.
+            // 0 은 문서(examples/explicit/full_manual.yaml)에 적힌 수동 모드 —
+            // 레벨 기본값을 얹지 않고 여기 적은 값만 쓴다.
+            int lv = 0;
+            try { lv = std::stoi(val); }
+            catch (...) {
+                console.error("stabilize: level must be an integer 0~12 (got '" + val + "')");
+                return 1;
+            }
+            if (lv < 0 || lv > 12) {
+                console.error("stabilize: level must be 0~12, 0 = manual (got " +
+                              std::to_string(lv) + ")");
+                return 1;
+            }
+            cfg.level = lv;
+        }
         else if (key == "confirm_erosion") parseBool(cfg.confirmErosion);
         else if (key == "tssfac")          parseDbl(cfg.tssfac);
         else if (key == "erode")           parseInt(cfg.erode);

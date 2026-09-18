@@ -204,7 +204,10 @@ int runSqueeze(const std::string& meshFile, const std::string& configFile,
     std::string meshOutputFile = outputPrefix + ".k";
     console.info("Writing compressed mesh: " + meshOutputFile);
     KFileWriter writer;
-    if (!writer.writeFile(meshOutputFile, mesh, true)) {
+    // map/shellmap 과 같은 경로로 쓴다 — 예전엔 writeFile() 로 *NODE/*ELEMENT_SOLID 만 써서
+    // *KEYWORD/*PART/*SECTION/*MAT 이 빠진, 해석에 바로 못 쓰는 덱이 나왔다
+    // (swelling 의 *MAT_ADD_THERMAL_EXPANSION 이 없는 MID 를 가리켰다)
+    if (!writer.writeFileWithSource(meshOutputFile, mesh, meshFile, true)) {
         console.error("Failed to write mesh: " + writer.getErrorMessage());
         return 1;
     }

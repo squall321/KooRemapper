@@ -1799,6 +1799,21 @@ void AssemblyConfigReader::validateOperation(const AssemblyOperation& op, size_t
             throw std::runtime_error(pfx + "invalid shape type '" + op.indent.shapeType + "'");
         if (op.indent.points.size() < 3)
             throw std::runtime_error(pfx + "shape requires at least 3 points");
+
+    } else if (op.type == AssemblyOperation::LOAD) {
+        // 단독 load 와 같은 규칙 — 예전엔 assemble 경로에만 검증이 없어 mode: gravity 가
+        // 조용히 압력 하중이 되고 select: all 이 select: direction 과 똑같이 돌았다
+        std::string pfx = "Operation " + std::to_string(i+1) + " (load): ";
+        for (size_t k = 0; k < op.load.loads.size(); ++k) {
+            const auto& lc = op.load.loads[k];
+            std::string where = pfx + "loads[" + std::to_string(k) + "]: ";
+            if (lc.mode != "pressure" && lc.mode != "force" && lc.mode != "normal_pressure")
+                throw std::runtime_error(where + "unsupported mode '" + lc.mode +
+                    "' (allowed: pressure, force, normal_pressure)");
+            if (lc.select != "direction" && lc.select != "set" && lc.select != "tied")
+                throw std::runtime_error(where + "unsupported select '" + lc.select +
+                    "' (allowed: direction, set, tied)");
+        }
     }
 }
 
