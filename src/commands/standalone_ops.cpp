@@ -261,10 +261,12 @@ static std::vector<std::string> writtenOutputs(const ModelAssembler& assembler, 
 // 멀쩡한 것으로 오해한다. 그래서 이번에 쓴 파일을 모두 보고, 하나라도 나쁘면 모두 지우고 목록을 찍는다.
 static bool writeOutputChecked(ModelAssembler& assembler, const std::string& outputPrefix,
                                const char* tag, ConsoleOutput& console) {
+    // 쓰기 안에서 나온 말(파트별 요소 수 대조·왕복 검증)을 흘리지 않는다 — 부르는 쪽은 쓰기 전에
+    // 찍고 비우지 않으므로, 이번 쓰기가 더한 것만 골라 찍는다(전부 찍으면 두 번 나온다).
+    size_t before = assembler.infoMessages.size();
     if (!assembler.writeOutput(outputPrefix)) { console.error(assembler.getErrorMessage()); return false; }
-    // 쓰기 안에서 나온 말(파트별 요소 수 대조·왕복 검증)을 흘리지 않는다 — 부르는 쪽은 쓰기 전에 찍는다
-    for (const auto& msg : assembler.infoMessages) console.println(msg);
-    assembler.infoMessages.clear();
+    for (size_t m = before; m < assembler.infoMessages.size(); ++m)
+        console.println(assembler.infoMessages[m]);
 
     std::vector<std::string> written = writtenOutputs(assembler, outputPrefix);
     std::string where;

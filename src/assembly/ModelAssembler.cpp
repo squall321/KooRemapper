@@ -2324,6 +2324,313 @@ void ModelAssembler::migrateDeadNodeSets(const std::map<int, int>& subst,
     }
 }
 
+// ── 지운 노드를 가리키는 자리를 실제로 정리한다 ──────────────────────────────
+// 이관(migrateDeadNodeSets)이 먼저 돌고, 여기 오는 것은 '옮길 곳이 없는' 참조다.
+// 남겨 두면 LS-DYNA 가 하드 에러로 멈춘다(현장 실측 Error 10233
+// "Set ID … contains node ID … which is undefined under *NODE input").
+// 그 문구·번호는 R16 매뉴얼 세 권(Vol_I/II/III) 어디에도 없다 — grep 으로 0 건을 확인했다.
+// 그래서 이 주석은 '현장 실측' 이지 매뉴얼 인용이 아니다.
+//
+// 칸 자리는 전부 매뉴얼로 확정했다(Vol_I.txt 줄 번호):
+//   *SET_NODE / _LIST / _LIST_SMOOTH  Card 2a : 칸 1-8 전부 노드 ID        234448-234484
+//   *SET_NODE_COLUMN                  Card 2b : 칸 1 만 노드 ID(2-5 는 실수 속성) 234486-234512
+//   *SET_NODE_LIST_GENERATE(_INCREMENT)       : 노드 ID 가 아니라 범위 경계  234540-234632
+//   *SET_NODE_GENERAL                 Card 2e : 칸 1 은 문자 OPTION         234634-234779
+//   *SET_NODE_ADD                     Card 2a : 노드 세트 ID 지 노드 ID 아님 234828-234893
+//   *SET_SEGMENT                      Card 2a : 칸 1-4 = N1..N4             235953-236060
+//   *BOUNDARY_SPC_NODE                Card 1  : 칸 1 = NID                  46945-47012
+//   *CONSTRAINED_EXTRA_NODES_NODE     Card 1  : 칸 2 = NID                  52799-52849
+//   *ELEMENT_MASS                             : 칸 2 = 노드 ID              159866-159930
+//   *LOAD_NODE_POINT                  Card 1  : 칸 1 = NID                  207114-207168
+//   *INITIAL_VELOCITY_NODE                    : 칸 1 = NID                  192116-192161
+//   *DATABASE_HISTORY_NODE            Card 1a : 칸 1-8 = ID1..ID8           122112-122180
+//   *CONSTRAINED_NODAL_RIGID_BODY             : 칸 4 PNODE / SPC 칸 4 / INERTIA 칸 6  61032-61057
+//   *DEFINE_COORDINATE_NODES                  : 칸 2,3,4 = N1,N2,N3         128642-128690
+//   *ELEMENT_BEAM/_DISCRETE/_SEATBELT         : 155821-155830 / 157642-157661 / 160315-160344
+//
+// _GENERATE 는 고치지 않는다 — 매뉴얼이 면책을 명시한다(234577-234581):
+//   "All defined IDs between and including BnBEG to BnEND are added to the set. …
+//    gaps in the node numbering are not a problem. BnBEG and BnEND may simply be limits
+//    on the IDs and not nodal IDs."
+// 즉 범위 안 노드를 지워도 LS-DYNA 는 그냥 세트에 안 넣는다. 거절(rc=1)하면 멀쩡한 덱을 막게 된다.
+// 반대로 LIST 계열에는 같은 면책 문장이 없다 — 그 대비가 '정리해야 한다' 의 근거다(문장의 부재에
+// 기댄 추론이며, 현장 실측과 맞아떨어진다).
+void ModelAssembler::cleanupDeadNodeRefs(const std::set<int>& deadNodes,
+                                         std::set<size_t>& handled,
+                                         std::vector<PidRefFinding>& moved) {
+    if (deadNodes.empty()) return;
+    auto dead = [&](int v) { return v > 0 && deadNodes.count(v) > 0; };
+
+    size_t removedValues = 0, removedLines = 0;
+    std::vector<std::string> emptiedSets;
+
+    // 이관(migrateDeadNodeSets)이 먼저 고쳐 둔 줄이 있다 — 원본이 아니라 '이관 뒤의 줄' 을 봐야
+    // 옮겨 둔 새 노드를 다시 지우지 않는다. 이관은 한 줄을 한 줄로만 바꾼다.
+    auto effLine = [&](size_t li) -> std::string {
+        auto it = pidRefRewrites_.find(li);
+        if (it == pidRefRewrites_.end()) return rawLines_[li];
+        return it->second.empty() ? std::string() : it->second.front();
+    };
+
+    auto record = [&](const char* grade, const std::string& kw, size_t li,
+                      const std::string& advice) {
+        if (handled.count(li)) return;
+        PidRefFinding f;
+        f.axis = "NODE";
+        f.keyword = kw;
+        f.line = static_cast<int>(li) + 1;
+        f.text = rawLines_[li];
+        f.grade = grade;
+        f.advice = advice;
+        moved.push_back(f);
+        handled.insert(li);
+    };
+
+    // 줄 하나를 지운다(빈 대체 = 삭제)
+    auto dropLine = [&](const std::string& kw, size_t li, const std::string& what) {
+        if (pidRefRewrites_.count(li)) return;
+        pidRefRewrites_[li] = {};
+        ++removedLines;
+        record("moved", kw, li, what);
+    };
+
+    for (const auto& b : rsCollectBlocks(rawLines_)) {
+        const std::string& kw = b.kw;
+
+        // ── 1. *SET_NODE 계열 ────────────────────────────────────────────────
+        if (rsStarts(kw, "*SET_NODE")) {
+            if (rsHas(kw, "_ADD")) continue;          // 구성원이 노드 세트 ID 다(234873-234875)
+            size_t k = rsHas(kw, "_TITLE") ? 1u : 0u;
+            int sid = 0;
+            if (k < b.data.size()) sid = rsIntField(rsCardFields(rawLines_[b.data[k]]), 0);
+            size_t first = k + 1;
+            if (rsHas(kw, "_GENERATE")) {
+                // 고칠 필요가 없다. 범위가 통째로 비면 그 세트를 쓰는 접촉·구속이 뜻을 잃으므로 알린다.
+                // 범위를 훑지 않는다 — 실제 덱의 범위는 수백만이다. 지운 노드와 남은 노드를 각각 훑는다.
+                bool anyLeft = false, anyDead = false;
+                std::vector<std::pair<int,int>> ranges;
+                for (size_t m = first; m < b.data.size(); ++m) {
+                    auto f = rsCardFields(rawLines_[b.data[m]]);
+                    for (size_t q = 0; q + 1 < f.size(); q += 2) {
+                        int lo = rsIntField(f, q), hi = rsIntField(f, q + 1);
+                        if (lo <= 0) continue;
+                        if (hi < lo) hi = lo;
+                        ranges.push_back({lo, hi});
+                    }
+                }
+                auto inRange = [&](int v) {
+                    for (const auto& r : ranges) if (v >= r.first && v <= r.second) return true;
+                    return false;
+                };
+                for (int dn : deadNodes) if (inRange(dn)) { anyDead = true; break; }
+                if (anyDead) {
+                    for (const auto& [nid, nd] : baseMesh_.getNodes()) {
+                        (void)nd;
+                        if (removedNodeIds_.count(nid)) continue;
+                        if (inRange(nid)) { anyLeft = true; break; }
+                    }
+                    if (!anyLeft)
+                        for (const auto& an : addedNodes_) if (inRange(an.id)) { anyLeft = true; break; }
+                }
+                if (anyDead && !anyLeft)
+                    emptiedSets.push_back(kw + " SID " + std::to_string(sid) +
+                                          " (범위가 통째로 지워졌습니다)");
+                continue;
+            }
+            if (rsHas(kw, "_GENERAL")) {
+                // 칸 1 은 문자 OPTION 이고 E1..E7 의 뜻이 OPTION 마다 다르다 — NODE/DNODE 줄만 노드다.
+                for (size_t m = first; m < b.data.size(); ++m) {
+                    size_t li = b.data[m];
+                    std::string eff = effLine(li);
+                    if (eff.empty()) continue;
+                    auto f = rsCardFields(eff);
+                    if (f.empty()) continue;
+                    std::string opt = f[0];
+                    for (auto& c : opt) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+                    if (opt != "NODE" && opt != "DNODE") continue;
+                    bool any = false;
+                    for (size_t q = 1; q < f.size(); ++q) if (dead(rsIntField(f, q))) any = true;
+                    if (!any) continue;
+                    if (!rsCardFixed10(eff)) {
+                        record("left", kw, li, "칸 경계가 없는 줄이라 값만 뺄 수 없습니다 — 직접 지우세요");
+                        continue;
+                    }
+                    std::string out = eff;
+                    for (size_t q = 1; q < f.size(); ++q)
+                        if (dead(rsIntField(f, q))) { out = md_setField(out, (int)q * 10, 10, 0); ++removedValues; }
+                    pidRefRewrites_[li] = { out };
+                    record("moved", kw, li,
+                           "세트 " + std::to_string(sid) + ": 지운 노드 칸을 0 으로 비웠습니다(OPTION=" + opt + ")");
+                }
+                continue;
+            }
+            if (rsHas(kw, "_COLUMN")) {              // 노드당 한 줄 — 그 줄을 지운다
+                for (size_t m = first; m < b.data.size(); ++m) {
+                    size_t li = b.data[m];
+                    if (!dead(rsIntField(rsCardFields(effLine(li)), 0))) continue;
+                    ++removedValues;
+                    dropLine(kw, li, "세트 " + std::to_string(sid) + ": 지운 노드 줄을 뺐습니다");
+                }
+                continue;
+            }
+            // <BLANK> / LIST / LIST_SMOOTH — 칸 1-8 전부 노드 ID 다. 남은 것만 다시 채워 쓴다.
+            std::vector<int> keep;
+            size_t nDead = 0;
+            bool anyMember = false;
+            for (size_t m = first; m < b.data.size(); ++m) {
+                auto f = rsCardFields(effLine(b.data[m]));
+                for (size_t q = 0; q < f.size() && q < 8; ++q) {
+                    int v = rsIntField(f, q);
+                    if (v <= 0) continue;
+                    anyMember = true;
+                    if (deadNodes.count(v)) ++nDead;
+                    else keep.push_back(v);
+                }
+            }
+            if (nDead == 0 || !anyMember) continue;
+            auto repl = rsFormatSetMembers(keep);
+            if (repl.empty()) repl.push_back("");
+            for (size_t m = first; m < b.data.size(); ++m) {
+                size_t li = b.data[m];
+                if (m == first) pidRefRewrites_[li] = repl;
+                else pidRefRewrites_[li] = {};
+            }
+            removedValues += nDead;
+            if (first < b.data.size())
+                record("moved", kw, b.data[first],
+                       "세트 " + std::to_string(sid) + ": 지운 노드 " + std::to_string(nDead) +
+                       " 개를 세트에서 뺐습니다(남은 구성원 " + std::to_string(keep.size()) + " 개)");
+            for (size_t m = first + 1; m < b.data.size(); ++m) handled.insert(b.data[m]);
+            if (keep.empty())
+                emptiedSets.push_back(kw + " SID " + std::to_string(sid) + " (구성원이 하나도 남지 않았습니다)");
+            continue;
+        }
+
+        // ── 2. *SET_SEGMENT — 세그먼트 한 줄이 노드 4 개를 한 덩어리로 쓴다 ───
+        if (rsStarts(kw, "*SET_SEGMENT") && !rsHas(kw, "_ADD") && !rsHas(kw, "_GENERAL")) {
+            size_t k = rsHas(kw, "_TITLE") ? 1u : 0u;
+            int sid = 0;
+            if (k < b.data.size()) sid = rsIntField(rsCardFields(rawLines_[b.data[k]]), 0);
+            for (size_t m = k + 1; m < b.data.size(); ++m) {
+                size_t li = b.data[m];
+                auto f = rsCardFields(effLine(li));
+                bool any = false;
+                for (size_t q = 0; q < 4 && q < f.size(); ++q) if (dead(rsIntField(f, q))) any = true;
+                if (!any) continue;
+                ++removedValues;
+                dropLine(kw, li, "세그먼트 집합 " + std::to_string(sid) +
+                                 ": 지운 노드를 쓰는 세그먼트 줄을 통째로 뺐습니다"
+                                 "(한 줄이 노드 4 개를 한 덩어리로 써 칸 하나만 뺄 수 없습니다)");
+            }
+            continue;
+        }
+
+        // ── 3. 칸 1 이 노드 ID 인 한 줄짜리 카드 ─────────────────────────────
+        struct OneFieldKw { const char* kw; int field; const char* what; };
+        static const OneFieldKw kOneField[] = {
+            { "*BOUNDARY_SPC_NODE",           0, "구속을 걸 노드가 사라졌습니다" },
+            { "*LOAD_NODE_POINT",             0, "하중을 걸 노드가 사라졌습니다" },
+            { "*INITIAL_VELOCITY_NODE",       0, "초기 속도를 줄 노드가 사라졌습니다" },
+            { "*CONSTRAINED_EXTRA_NODES_NODE", 1, "강체에 더할 노드가 사라졌습니다" },
+            { "*ELEMENT_MASS",                1, "집중질량을 붙일 노드가 사라졌습니다" },
+        };
+        bool didOne = false;
+        for (const auto& ok : kOneField) {
+            // 정확히 같은 이름만 받는다 — `_SET` 은 세트 ID 고, `_ID`·`_BIRTH_DEATH` 는 카드가
+            // 한 장 더 붙어 '줄 하나 = 카드 하나' 가 아니다. 그런 변형은 아래에서 보고만 한다.
+            if (!rsStarts(kw, ok.kw)) continue;
+            if (kw != ok.kw) {
+                for (size_t m = 0; m < b.data.size(); ++m) {
+                    auto f = rsCardFields(rawLines_[b.data[m]]);
+                    bool any = false;
+                    for (size_t q = 0; q < f.size(); ++q) if (dead(rsIntField(f, q))) any = true;
+                    if (any)
+                        record("manual", kw, b.data[m],
+                               "지운 노드를 가리킵니다 — 이 변형은 카드 구성이 달라 자동으로 빼지 않았습니다");
+                }
+                didOne = true;
+                break;
+            }
+            size_t first = 0;
+            for (size_t m = first; m < b.data.size(); ++m) {
+                size_t li = b.data[m];
+                if (!dead(rsIntField(rsCardFields(effLine(li)), (size_t)ok.field))) continue;
+                ++removedValues;
+                dropLine(kw, li, std::string(ok.what) + " — 이 카드 줄을 뺐습니다");
+            }
+            didOne = true;
+            break;
+        }
+        if (didOne) continue;
+
+        // ── 4. 칸 1-8 이 모두 노드 ID 인 목록 카드 ───────────────────────────
+        if (kw == "*DATABASE_HISTORY_NODE") {
+            // Card 1a 는 칸 1-8 이 전부 노드 ID 인 목록이다 — 남은 것만 다시 채워 쓴다.
+            std::vector<int> keep;
+            size_t nDead = 0;
+            for (size_t m = 0; m < b.data.size(); ++m) {
+                auto f = rsCardFields(effLine(b.data[m]));
+                for (size_t q = 0; q < f.size() && q < 8; ++q) {
+                    int v = rsIntField(f, q);
+                    if (v <= 0) continue;
+                    if (deadNodes.count(v)) ++nDead;
+                    else keep.push_back(v);
+                }
+            }
+            if (nDead == 0 || b.data.empty()) continue;
+            auto repl = rsFormatSetMembers(keep);
+            for (size_t m = 0; m < b.data.size(); ++m)
+                pidRefRewrites_[b.data[m]] = (m < repl.size()) ? std::vector<std::string>{repl[m]}
+                                                              : std::vector<std::string>{};
+            removedValues += nDead;
+            record("moved", kw, b.data[0],
+                   "지운 노드 " + std::to_string(nDead) + " 개를 출력 요청에서 뺐습니다(남은 " +
+                   std::to_string(keep.size()) + " 개)");
+            for (size_t m = 1; m < b.data.size(); ++m) handled.insert(b.data[m]);
+            continue;
+        }
+
+        // ── 5. 지울 수 없는 것 — 지우면 모델이 달라진다. 보고만 하고 strict 에서 rc=1 ──
+        struct KeepKw { const char* kw; int card; int field; const char* why; };
+        static const KeepKw kKeep[] = {
+            { "*CONSTRAINED_NODAL_RIGID_BODY", 0, 3, "PNODE 가 사라졌습니다 — 강체의 기준 노드라 그냥 뺄 수 없습니다" },
+            { "*DEFINE_COORDINATE_NODES",      0, 1, "좌표계를 정의하는 노드입니다 — 빼면 좌표계가 사라집니다" },
+            { "*DEFINE_COORDINATE_NODES",      0, 2, "좌표계를 정의하는 노드입니다 — 빼면 좌표계가 사라집니다" },
+            { "*DEFINE_COORDINATE_NODES",      0, 3, "좌표계를 정의하는 노드입니다 — 빼면 좌표계가 사라집니다" },
+        };
+        for (const auto& kk : kKeep) {
+            if (!rsStarts(kw, kk.kw)) continue;
+            size_t k = rsFirstCard(kw) + (size_t)kk.card;
+            if (k >= b.data.size()) continue;
+            if (!dead(rsIntField(rsCardFields(rawLines_[b.data[k]]), (size_t)kk.field))) continue;
+            record("manual", kw, b.data[k], kk.why);
+        }
+        if (rsStarts(kw, "*ELEMENT_BEAM") || rsStarts(kw, "*ELEMENT_DISCRETE") ||
+            rsStarts(kw, "*ELEMENT_SEATBELT")) {
+            for (size_t m = 0; m < b.data.size(); ++m) {
+                auto f = rsCardFields(rawLines_[b.data[m]]);
+                bool any = false;
+                for (size_t q = 2; q < f.size() && q < 8; ++q) if (dead(rsIntField(f, q))) any = true;
+                if (any)
+                    record("manual", kw, b.data[m],
+                           "이 요소가 지운 노드를 뭅니다 — 요소를 지울지 노드를 살릴지는 사람이 정해야 합니다");
+            }
+        }
+    }
+
+    if (removedValues > 0 || removedLines > 0) {
+        std::ostringstream m;
+        m << "  [정리] 지운 노드를 가리키던 자리 " << removedValues << " 건을 치웠습니다(줄 삭제 "
+          << removedLines << " 줄).";
+        infoMessages.push_back(m.str());
+    }
+    for (const auto& es : emptiedSets)
+        infoMessages.push_back("  [WARN] " + es +
+                               " — 이 세트를 쓰는 접촉·구속이 아무 일도 하지 않게 됩니다."
+                               " (*_GENERATE 범위는 매뉴얼상 미정의 ID 를 그냥 건너뛰므로 고치지 않았습니다"
+                               " — Vol_I 234577-234581)");
+}
+
 void ModelAssembler::scanDeadReferences(const std::string& opName,
                                         const std::set<int>& deadPids,
                                         const std::set<int>& deadEids,
@@ -2525,8 +2832,12 @@ void ModelAssembler::scanDeadReferences(const std::string& opName,
     std::set<int> deadNodeSets;
     for (size_t bi = 0; bi < blocks.size(); ++bi) {
         const auto& b = blocks[bi];
-        bool setNode = rsStarts(b.kw, "*SET_NODE") && !rsHas(b.kw, "_GENERATE");
-        bool setSeg  = rsStarts(b.kw, "*SET_SEGMENT");
+        // `_ADD` 는 구성원이 노드 세트 ID 고(Vol_I 234873-234875), `_GENERAL` 은 칸 1 이 문자
+        // OPTION 이며 E1..E7 의 뜻이 OPTION 마다 다르다(234701-234779) — 노드로 훑으면 오탐이다.
+        bool setNode = rsStarts(b.kw, "*SET_NODE") && !rsHas(b.kw, "_GENERATE") &&
+                       !rsHas(b.kw, "_ADD") && !rsHas(b.kw, "_GENERAL");
+        bool setCol  = setNode && rsHas(b.kw, "_COLUMN");   // 칸 1 만 노드 ID(234498-234512)
+        bool setSeg  = rsStarts(b.kw, "*SET_SEGMENT") && !rsHas(b.kw, "_ADD");
         bool spc     = rsStarts(b.kw, "*BOUNDARY_SPC_NODE");
         if (!setNode && !setSeg && !spc) continue;
         handled[bi] = true;
@@ -2539,8 +2850,8 @@ void ModelAssembler::scanDeadReferences(const std::string& opName,
         }
         for (size_t m = start; m < b.data.size(); ++m) {
             auto f = rsCardFields(rawLines_[b.data[m]]);
-            size_t n = spc ? std::min<size_t>(1, f.size())
-                           : (setSeg ? std::min<size_t>(4, f.size()) : f.size());
+            size_t n = (spc || setCol) ? std::min<size_t>(1, f.size())
+                           : (setSeg ? std::min<size_t>(4, f.size()) : std::min<size_t>(8, f.size()));
             for (size_t q = 0; q < n; ++q) {
                 if (!isDead(deadNodes, rsIntField(f, q))) continue;
                 if (setNode && sid > 0) deadNodeSets.insert(sid);
@@ -3598,6 +3909,8 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
         std::set<size_t> migrated;
         std::vector<PidRefFinding> movedFindings;
         migrateDeadNodeSets(nodeSubst, migrated, movedFindings);
+        // 옮길 곳이 없는 참조는 실제로 치운다 — 남기면 LS-DYNA 가 하드 에러로 멈춘다(현장 실측).
+        cleanupDeadNodeRefs(thisOpDeadNodes, migrated, movedFindings);
         migrateDeadReferences(deadPids, mctx, migrated, movedFindings);
         scanDeadReferences("restack", deadPids, thisOpDeadElems, thisOpDeadNodes, newPids,
                            migrated, std::move(movedFindings));

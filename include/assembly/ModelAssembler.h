@@ -247,6 +247,12 @@ private:
     void migrateDeadNodeSets(const std::map<int, int>& subst,
                              std::set<size_t>& handled,
                              std::vector<PidRefFinding>& moved);
+    // 이관하지 못하고 남은 '지운 노드를 가리키는 자리' 를 실제로 정리한다.
+    // LS-DYNA 는 세트에 정의되지 않은 노드가 있으면 하드 에러로 멈춘다(현장 실측 Error 10233 —
+    // 이 문구는 R16 매뉴얼 세 권 어디에도 없어 매뉴얼 근거로는 쓸 수 없다). 남겨 두면 안 된다.
+    void cleanupDeadNodeRefs(const std::set<int>& deadNodes,
+                             std::set<size_t>& handled,
+                             std::vector<PidRefFinding>& moved);
     // 죽은 PID/EID/노드를 가리키는 카드를 3축으로 훑어 pidRefFindings_ 에 모으고 콘솔에 요약한다.
     // skip 에 든 줄은 이미 옮긴 자리라 다시 보고하지 않고, moved 는 같은 보고에 섞어 준다.
     void scanDeadReferences(const std::string& opName,
