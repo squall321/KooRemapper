@@ -10852,7 +10852,20 @@
           "type": "string",
           "required": false,
           "default": "\"auto\"",
-          "desc": "For action: detect only (used when auto_create=true). Same value space as contacts[].type — see that key for the short-name table. Default 'auto'."
+          "desc": "For action: detect only (used when auto_create=true). Default 'auto'. Unlike contacts[].type this is a CLOSED whitelist: only the short names auto, automatic, tied, tied_thermal, thermal, tiebreak, mortar, tied_mortar, single, eroding, forming are accepted (case-insensitive; an empty value is allowed too). A full LS-DYNA keyword that contacts[].type would happily write — automatic_surface_to_surface, automatic_nodes_to_surface, ... — is REJECTED here with rc=1: \"[ERROR] [contact] unsupported contact_type '<value>' (allowed: auto, tied, tied_thermal, tiebreak, mortar, tied_mortar, single, eroding, forming)\". Note the printed 'allowed' list omits automatic and thermal, which are in fact accepted. So detect does NOT share type's value space — use a short name here, and spell full keywords out only in create's type.",
+          "values": [
+            "auto",
+            "automatic",
+            "tied",
+            "tied_thermal",
+            "thermal",
+            "tiebreak",
+            "mortar",
+            "tied_mortar",
+            "single",
+            "eroding",
+            "forming"
+          ]
         },
         {
           "path": "contacts[].skip_existing",

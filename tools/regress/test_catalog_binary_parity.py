@@ -475,6 +475,30 @@ def main():
     check("카탈로그 assemble contact type desc 가 tied_thermal/thermal/tiebreak 비대칭을 적는다",
           "NOT aliases here" in ctk["desc"], ctk["desc"][:200])
 
+    # detect 의 contact_type 은 create 의 type 과 값 공간이 다르다 — 약칭만 받는 닫힌 목록이라
+    # 전체 LS-DYNA 키워드를 주면 rc=1 이다. 카탈로그가 'Same value space' 라고 적어 두면 틀린다.
+    def dt_run(name, ctype):
+        open(os.path.join(ct, name + ".yaml"), "w").write(
+            "model: model.k\noutput: %s.k\ncontacts:\n  - action: detect\n    scope: all\n"
+            "    tolerance: 0.5\n    auto_create: true\n    contact_type: %s\n" % (name, ctype))
+        return run(binary, ct, "contact", name + ".yaml")
+    dtv = cat_key(ops, "contact", "contacts[].contact_type")
+    for short in ["auto", "automatic", "tied", "tied_thermal", "thermal", "tiebreak",
+                  "mortar", "tied_mortar", "single", "eroding", "forming"]:
+        rc, out = dt_run("dt_" + short, short)
+        check("contact detect contact_type: %s 는 rc=0" % short, rc == 0, out[-200:])
+    for full in ["automatic_surface_to_surface", "automatic_nodes_to_surface", "bogus"]:
+        rc, out = dt_run("dt_x_" + full, full)
+        check("contact detect contact_type: %s 는 rc=1 로 거절(create 와 다르다)" % full,
+              rc == 1 and "unsupported contact_type" in out, f"rc={rc} {out[-200:]}")
+    check("카탈로그 contacts[].contact_type values 가 약칭 11개를 싣는다",
+          dtv["values"] == ["auto", "automatic", "tied", "tied_thermal", "thermal", "tiebreak",
+                            "mortar", "tied_mortar", "single", "eroding", "forming"],
+          str(dtv["values"]))
+    check("카탈로그 contacts[].contact_type desc 가 'type 과 같은 값 공간' 이라고 적지 않는다",
+          "Same value space" not in dtv["desc"] and "CLOSED whitelist" in dtv["desc"],
+          dtv["desc"][:200])
+
     print("[contact slave/master pids — 블록 목록도 인라인과 같은 덱]")
     open(os.path.join(ct, "p_inline.yaml"), "w").write(
         "model: model.k\noutput: p_inline.k\ncontacts:\n  - action: create\n    type: tied\n"
