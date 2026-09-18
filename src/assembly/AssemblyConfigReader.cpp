@@ -324,24 +324,19 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
             // Only match if indent is strictly greater than layers: key indent (to avoid matching next operation's "  - type:")
             if (inLayersList && indent > layersKeyIndent && trimmed[0] == '-' && trimmed.size() >= 2 && trimmed[1] == ' ') {
                 std::string afterDash = trim(trimmed.substr(2));
-                size_t colonPos = afterDash.find(':');
-                if (colonPos != std::string::npos) {
-                    std::string key = trim(afterDash.substr(0, colonPos));
-                    std::string val = stripQuotes(trim(stripComment(afterDash.substr(colonPos + 1))));
-
-                    if (!config.operations.empty() &&
-                        config.operations.back().type == AssemblyOperation::RESTACK) {
-                        RestackLayer layer;
-                        if (key == "thickness") {
-                            try { layer.thickness = std::stod(val); } catch (...) {}
-                        } else if (key == "title" || key == "name") {
-                            layer.title = val;
-                        }
-                        config.operations.back().restack.layers.push_back(layer);
-                        inLayerItem = true;
-                    }
+                bool opened = false;
+                if (afterDash.find(':') != std::string::npos &&
+                    !config.operations.empty() &&
+                    config.operations.back().type == AssemblyOperation::RESTACK) {
+                    config.operations.back().restack.layers.push_back(RestackLayer());
+                    inLayerItem = true;
+                    // 대시 줄 키도 하위 줄과 같은 집합으로 읽는다 — 예전엔 thickness·title 만 읽어
+                    // '- num_elements: 4' 가 조용히 버려졌고 단독 restack 과 결과가 갈렸다
+                    trimmed = afterDash;
+                    opened = true;
                 }
-                continue;
+                if (!opened) continue;
+                // 아래 층 하위 키 처리로 이어진다
             }
 
             // --- Layer item sub-keys: "        material_card: |" ---

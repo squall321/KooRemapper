@@ -490,8 +490,14 @@ int runRestack(const std::string& yamlFile, ConsoleOutput& console) {
             else if (k == "title" || k == "name") L.title = v;
             else if (k == "czm_normal")   { try { L.czmNormal = std::stod(v); } catch(...) {} }
             else if (k == "czm_shear")    { try { L.czmShear = std::stod(v); } catch(...) {} }
-            else if (k == "material_card" && v == "|") {
-                readingMatCard = true; matCardKeyIndent = blockKeyIndent; matCardBaseIndent = -1;
+            else if (k == "material_card") {
+                if (v == "|") {
+                    readingMatCard = true; matCardKeyIndent = blockKeyIndent; matCardBaseIndent = -1;
+                } else {
+                    // 한 줄 카드('material_card: "*MAT_ELASTIC"')도 assemble 과 같게 값 그대로 쓴다 —
+                    // 예전엔 '|' 만 처리해 같은 YAML 이 단독에서만 'has no material_card' 로 실패했다
+                    L.materialCard = v;
+                }
             }
         };
 
