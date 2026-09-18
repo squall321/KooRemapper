@@ -11464,6 +11464,17 @@ bool ModelAssembler::applyBoundary(const BoundaryOperation& op) {
         return true;
     }
 
+    // select 는 두 값뿐이다 — 아래 분기가 'set' 만 갈라내고 나머지를 전부 direction 으로 흘려서
+    // 'all' 같은 없는 값이 조용히 direction 으로 돌던 것을 막는다(D1, 단독 load 와 같은 규칙).
+    for (size_t i = 0; i < op.boundaries.size(); ++i) {
+        const std::string& sel = op.boundaries[i].select;
+        if (sel != "direction" && sel != "set") {
+            errorMessage_ = "boundary: boundaries[" + std::to_string(i) +
+                            "]: unsupported select '" + sel + "' (allowed: direction, set)";
+            return false;
+        }
+    }
+
     int maxSetNodeId = bc_findMaxSetNodeId(rawLines_);
     int nextSetId = maxSetNodeId + 1;
     std::vector<std::string> insertBlocks;
@@ -11676,6 +11687,17 @@ bool ModelAssembler::applyRbe(const RbeOperation& op) {
     if (op.constraints.empty()) {
         std::cout << "[rbe] No RBE constraints specified\n";
         return true;
+    }
+
+    // select 는 두 값뿐이다 — 아래 분기가 'direction' 만 갈라내므로 오타는 조용히 'all'(면 전체)이
+    // 된다. boundary 와 같은 규칙으로 거절한다(D1).
+    for (size_t i = 0; i < op.constraints.size(); ++i) {
+        const std::string& sel = op.constraints[i].select;
+        if (sel != "direction" && sel != "all") {
+            errorMessage_ = "rbe: constraints[" + std::to_string(i) +
+                            "]: unsupported select '" + sel + "' (allowed: direction, all)";
+            return false;
+        }
     }
 
     int maxSetNodeId = bc_findMaxSetNodeId(rawLines_);
