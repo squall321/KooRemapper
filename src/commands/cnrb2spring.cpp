@@ -696,8 +696,16 @@ int cnrb2spring_apply(std::vector<std::string>& lines,
     // RO=1.0 이라 VOL 이 곧 요소 질량이고 두 팬텀 노드에 반씩 실린다(Vol_I *SECTION_BEAM VOL 설명).
     const double DT_REF = 5.0e-7;   // [s] — 가정값(labeled assumption)
     const double DT_H = 0.5 * DT_REF;
-    double volMass = std::max(cfg.kAxial, cfg.kEngage) * DT_H * DT_H;              // [t]
-    double inerVal = std::max(std::max(cfg.kAxial, cfg.kEngage), cfg.kRot) * DT_H * DT_H;  // [t*mm^2]
+    // 병진과 회전은 단위가 다르다 — 섞어서 최대값을 취하면 차원이 맞지 않는다.
+    //   VOL(=질량, RO=1.0)  ← 병진 강성 [N/mm] × Δt² [s²] = [t]      (N = t·mm/s²)
+    //   INER              ← 회전 강성 [N·mm/rad] × Δt² [s²] = [t·mm²]
+    double volMass = std::max(cfg.kAxial, cfg.kEngage) * DT_H * DT_H;   // [t]
+    double inerVal = cfg.kRot * DT_H * DT_H;                            // [t*mm^2]
+    if (inerVal <= 0.0) {
+        // k_rot=0 (회전 자유)이라도 INER 은 0 이면 안 된다 — 매뉴얼이 'reasonable non-zero' 를 요구한다.
+        // 회전 강성이 없으니 회전 시간증분을 제약하지 않는 값으로, 병진 쪽 질량에 단위 길이(1mm)를 준다.
+        inerVal = volMass;
+    }
     if (!std::isfinite(volMass) || !std::isfinite(inerVal) || volMass <= 0.0 || inerVal <= 0.0) {
         console.error("[cnrb2spring] *SECTION_BEAM 의 VOL/INER 를 계산할 수 없습니다 "
                       "(k_axial·k_engage·k_rot 를 줄이세요) — 둘 다 0 이 아니어야 합니다");
