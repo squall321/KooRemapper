@@ -1064,6 +1064,25 @@ std::vector<std::string> rsCardFields(const std::string& line) {
     return rsTokens(line);
 }
 
+// 그 줄이 10칸 고정폭으로 읽히는가 — 칸 자리를 그대로 두고 값만 바꿔도 되는 줄인지 본다.
+// 콤마 자유 형식이나 정렬이 어긋난 줄은 칸 경계가 없어 그 자리에 값을 써 넣으면 안 된다.
+bool rsCardFixed10(const std::string& line) {
+    std::string body = line;
+    size_t cm = body.find('$');
+    if (cm != std::string::npos) body = body.substr(0, cm);
+    while (!body.empty() && (body.back() == '\r' || body.back() == '\n')) body.pop_back();
+    if (body.find(',') != std::string::npos) return false;
+    for (size_t i = 0; i < body.size(); i += 10) {
+        std::string f = body.substr(i, 10);
+        size_t a = f.find_first_not_of(" \t");
+        if (a == std::string::npos) continue;
+        size_t b = f.find_last_not_of(" \t");
+        f = f.substr(a, b - a + 1);
+        if (f.find(' ') != std::string::npos || f.find('\t') != std::string::npos) return false;
+    }
+    return true;
+}
+
 // i 번째 칸이 정수면 그 값, 아니면 -1
 int rsIntField(const std::vector<std::string>& toks, size_t i) {
     if (i >= toks.size() || toks[i].empty()) return -1;
@@ -2032,6 +2051,52 @@ void ModelAssembler::applyPidRefRewrites() {
     }
     rawLines_ = std::move(out);
     pidRefRewrites_.clear();
+}
+
+// ── 지운 중간면 노드를 가리키는 노드 집합 옮기기 ─────────────────────────────
+// 층 두께 합이 원 두께와 같고 분할이 겹치면 새 층 노드가 지워진 노드와 같은 자리에 생긴다.
+// 그럴 때만(좌표가 딱 하나 일치할 때만) 세트를 새 노드로 바꾼다 — 그 밖에는 '어느 노드가
+// 그 노드인지' 가 정해지지 않으므로 옮기지 않고 예전처럼 보고만 한다.
+void ModelAssembler::migrateDeadNodeSets(const std::map<int, int>& subst,
+                                         std::set<size_t>& handled,
+                                         std::vector<PidRefFinding>& moved) {
+    if (subst.empty()) return;
+    const auto blocks = rsCollectBlocks(rawLines_);
+    for (const auto& b : blocks) {
+        if (!rsStarts(b.kw, "*SET_NODE_LIST")) continue;
+        // 범위·증분 표기는 칸 뜻이 달라 값만 바꿀 수 없다
+        if (rsHas(b.kw, "_GENERATE") || rsHas(b.kw, "_ADD") ||
+            rsHas(b.kw, "_INTERVAL") || rsHas(b.kw, "_COLUMN")) continue;
+        size_t start = rsHas(b.kw, "_TITLE") ? 1u : 0u;
+        int sid = 0;
+        if (start < b.data.size()) sid = rsIntField(rsCardFields(rawLines_[b.data[start]]), 0);
+        ++start;
+        for (size_t m = start; m < b.data.size(); ++m) {
+            size_t li = b.data[m];
+            if (!rsCardFixed10(rawLines_[li])) continue;   // 칸 경계가 없는 줄은 건드리지 않는다
+            auto f = rsCardFields(rawLines_[li]);
+            std::string out = rawLines_[li];
+            int changed = 0;
+            for (size_t q = 0; q < f.size(); ++q) {
+                auto it = subst.find(rsIntField(f, q));
+                if (it == subst.end()) continue;
+                out = md_setField(out, static_cast<int>(q) * 10, 10, it->second);
+                ++changed;
+            }
+            if (changed == 0) continue;
+            pidRefRewrites_[li] = { out };
+            PidRefFinding fd;
+            fd.axis = "NODE";
+            fd.keyword = b.kw;
+            fd.line = static_cast<int>(li) + 1;
+            fd.text = rawLines_[li];
+            fd.grade = "moved";
+            fd.advice = "세트 " + std::to_string(sid) + ": 지운 중간면 노드 " +
+                        std::to_string(changed) + " 개를 같은 자리에 생긴 새 층 노드로 바꿨습니다";
+            moved.push_back(fd);
+            handled.insert(li);
+        }
+    }
 }
 
 void ModelAssembler::scanDeadReferences(const std::string& opName,
@@ -3280,8 +3345,34 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
             }
         }
 
+        // 지운 중간면 노드 → 좌표가 똑같은 새 층 노드. 두께 합과 분할이 원안과 겹칠 때만 생긴다.
+        // 대응은 좌표로만 정한다(같은 기둥의 새 평면 노드 중 tol 안에서 딱 하나 일치할 때).
+        std::map<int, int> nodeSubst;
+        {
+            double ntol = originalThickness * 1e-6;
+            for (int dn : thisOpDeadNodes) {
+                auto cit = nodeToColumn.find(dn);
+                if (cit == nodeToColumn.end()) continue;
+                const auto* on = baseMesh_.getNode(dn);
+                if (!on) continue;
+                const auto& nc = newColumns[cit->second];
+                int hit = 0, hitId = 0;
+                for (int p = 1; p < totalElements; ++p) {   // 양끝은 원 노드를 그대로 쓴다
+                    auto xit = colNodeXYZ.find(nc.nodeIds[p]);
+                    if (xit == colNodeXYZ.end()) continue;
+                    if (std::abs(xit->second[0] - on->position.x) <= ntol &&
+                        std::abs(xit->second[1] - on->position.y) <= ntol &&
+                        std::abs(xit->second[2] - on->position.z) <= ntol) {
+                        ++hit; hitId = nc.nodeIds[p];
+                    }
+                }
+                if (hit == 1) nodeSubst[dn] = hitId;   // 둘 이상이면 어느 것인지 정할 수 없다
+            }
+        }
+
         std::set<size_t> migrated;
         std::vector<PidRefFinding> movedFindings;
+        migrateDeadNodeSets(nodeSubst, migrated, movedFindings);
         migrateDeadReferences(deadPids, mctx, migrated, movedFindings);
         scanDeadReferences("restack", deadPids, thisOpDeadElems, thisOpDeadNodes, newPids,
                            migrated, std::move(movedFindings));

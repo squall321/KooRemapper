@@ -242,6 +242,11 @@ private:
                                const PidRefMigrateCtx& ctx,
                                std::set<size_t>& handled,
                                std::vector<PidRefFinding>& moved);
+    // restack 이 지운 중간면 노드를 좌표가 똑같은 새 층 노드로 바꾼다(*SET_NODE_LIST 만).
+    // subst 는 '좌표가 tol 안에서 딱 하나 일치' 로 확정한 것만 담는다 — 애매하면 옮기지 않는다.
+    void migrateDeadNodeSets(const std::map<int, int>& subst,
+                             std::set<size_t>& handled,
+                             std::vector<PidRefFinding>& moved);
     // 죽은 PID/EID/노드를 가리키는 카드를 3축으로 훑어 pidRefFindings_ 에 모으고 콘솔에 요약한다.
     // skip 에 든 줄은 이미 옮긴 자리라 다시 보고하지 않고, moved 는 같은 보고에 섞어 준다.
     void scanDeadReferences(const std::string& opName,
