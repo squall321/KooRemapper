@@ -59,6 +59,17 @@ LS-DYNA `.k` 파일을 다루는 KooRemapper 플랫폼을 Claude에서 사용하
 - 결과 덱에 `nan`/`inf` 가 있으면 파일을 쓰지 않고 rc=1 이다. 같은 이름의 지난 결과는 지워지지 않고 남으므로,
   실패한 job 의 산출물 목록에 옛 파일이 보이면 새 결과로 오해하지 마라.
 
+### `restack`·`merge` 의 rc=1 은 '설정이 틀렸다' 가 아닐 수 있다
+
+두 op 은 원 파트를 비우므로(층마다 새 PID / 합친 PID 하나) 그 파트·요소·노드를 가리키던
+`*SET_PART_*`·`*CONTACT_*`·`*DAMPING_PART_*`·`*BOUNDARY_SPC_NODE` 같은 카드가 붕 뜬다.
+옮길 수 있는 것은 옮기고, **옮기지 못한 자리가 남으면 덱은 쓴 채 rc=1** 로 끝난다(기본 `pid_refs: strict`).
+job 은 `failed` 로 보이지만 산출 덱은 있다 — `get_job(job_id, include_logs=true)` 로 설정을 고치기 전에,
+산출 덱 머리(`*KEYWORD` 바로 뒤)의 **`$ KOOREMAPPER-PIDREF` 블록에서 무엇을 못 옮겼는지 먼저 읽어라**
+(등급 `moved`/`left`/`manual`/`unknown`/`maybe`, 줄 번호는 입력 덱 기준). 알고도 넘기려면
+`pid_refs: warn` 을 주면 같은 보고를 하고 rc=0 이다(`strict`·`warn` 둘뿐, 그 밖의 값은 rc=1 + 산출물 없음).
+
+
 ## 자주 쓰는 op
 
 - `map` / `shellmap` : flat → bent 매핑(코어)
