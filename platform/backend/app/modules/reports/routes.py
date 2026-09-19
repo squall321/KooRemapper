@@ -5,7 +5,8 @@ import gzip
 import io
 import zlib
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import (APIRouter, Depends, File, Form, HTTPException, Query, Request,
+                     UploadFile, status)
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +17,7 @@ from app.modules.reports import services as svc
 from app.modules.reports.schemas import CaseRead, ReportListItem, ReportRead
 from app.modules.sessions import services as sess_svc
 from app.shared.auth import get_current_user
+from app.shared.affiliation import verified_affiliation
 from app.shared.ratelimit import rate_limit
 from app.shared.responses import ok
 
@@ -82,7 +84,23 @@ async def _require_session(db, user, session_id):
     return s
 
 
-async def _require_report(db, user, report_id):
+async def _require_report(db, user, report_id, request: Request | None = None):
+    """읽기 관문 — 소유자거나 같은 소속(게이트웨이 서명 검증)이면 연다.
+
+    소속은 요청마다 새로 검증한다. 리포트 쪽 값은 반입 때 얼린 것이라 소유자가 소속을 옮겨도
+    과거 리포트의 공유 범위는 움직이지 않는다(요청서 §8).
+    """
+    aff = ""
+    if request is not None:
+        aff = verified_affiliation(request.headers, user.email, settings.heax_gateway_secret)
+    r = await svc.get_readable_report(db, user.id, report_id, aff)
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "리포트를 찾을 수 없습니다.")
+    return r
+
+
+async def _require_owned_report(db, user, report_id):
+    """수정·삭제 관문 — 소유자만(요청서 §7)."""
     r = await svc.get_owned_report(db, user.id, report_id)
     if r is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "리포트를 찾을 수 없습니다.")
@@ -94,6 +112,7 @@ async def _require_report(db, user, report_id):
     dependencies=[Depends(rate_limit("upload", settings.ratelimit_upload_per_min))],
 )
 async def ingest_report(
+    request: Request,
     session_id: str,
     file: UploadFile = File(...),
     scenario: UploadFile | None = File(default=None),
@@ -131,6 +150,9 @@ async def ingest_report(
             scenario_filename=sc_name,
             kfile_id=kfile_id, project=project, dev_rev=dev_rev, variation=variation, doe=doe,
             focus=focus,
+            # 읽기 공유 범위는 반입 시점 값으로 얼린다(요청서 §8)
+            shared_affiliation=verified_affiliation(
+                request.headers, user.email, settings.heax_gateway_secret),
         )
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
@@ -146,6 +168,7 @@ async def ingest_report(
     dependencies=[Depends(rate_limit("upload", settings.ratelimit_upload_per_min))],
 )
 async def report_intake(
+    request: Request,
     file: UploadFile = File(...),                       # 리포트 HTML(.gz 가능) — 전각도/전위치/deep
     kfile: UploadFile | None = File(default=None),      # 원본 K파일(.gz 가능) — 리포트와 함께 올려 링크
     scenario: UploadFile | None = File(default=None),   # 시뮬 조건 scenario.json(.gz 가능)
@@ -201,6 +224,8 @@ async def report_intake(
             scenario_raw=scenario_raw, scenario_filename=sc_name,
             kfile_id=kfile_id, project=project, dev_rev=dev_rev, variation=variation, doe=doe,
             focus=focus,
+            shared_affiliation=verified_affiliation(
+                request.headers, user.email, settings.heax_gateway_secret),
         )
     except ValueError as exc:
         if created_here:
@@ -243,13 +268,14 @@ class ReportMetaPatch(BaseModel):
 
 @router.patch("/reports/{report_id}")
 async def patch_report_meta(
+    request: Request,
     report_id: str,
     body: ReportMetaPatch,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """과제명·rev·설계안·DOE·원본 K파일 링크를 수동 설정(부분 갱신)."""
-    r = await _require_report(db, user, report_id)
+    r = await _require_owned_report(db, user, report_id)
     try:
         r = await svc.update_report_meta(
             db, r, label=body.label, project=body.project, dev_rev=body.dev_rev,
@@ -265,13 +291,14 @@ async def patch_report_meta(
     dependencies=[Depends(rate_limit("upload", settings.ratelimit_upload_per_min))],
 )
 async def attach_report_scenario(
+    request: Request,
     report_id: str,
     file: UploadFile = File(...),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """리포트에 시뮬 조건(scenario.json)을 첨부 — 조건 요약 캐시 + K파일 자동매칭."""
-    r = await _require_report(db, user, report_id)
+    r = await _require_owned_report(db, user, report_id)   # 리포트를 바꾸는 일이라 소유자만
     raw = await file.read()
     if len(raw) > settings.max_upload_mb * 1024 * 1024:
         raise HTTPException(
@@ -287,12 +314,16 @@ async def attach_report_scenario(
 
 @router.get("/reports/facets")
 async def report_facets(
+    request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """리포트 검색 facet — 어떤 kind·과제·rev·설계안·방향컨셉·초점·심각도·높이가 있나 + 건수.
-    목표를 정하기 전 '먼저 뭐가 있나'를 보는 화면. 소유분(관리자는 전사)."""
-    return ok(await svc.report_facets(db, user.id, is_admin=user.is_system_admin))
+    목표를 정하기 전 '먼저 뭐가 있나'를 보는 화면. 소유분 + 같은 소속 공유분(관리자는 전사)."""
+    return ok(await svc.report_facets(
+        db, user.id, is_admin=user.is_system_admin,
+        affiliation=verified_affiliation(request.headers, user.email, settings.heax_gateway_secret),
+    ))
 
 
 def _parse_dt(v: str | None, field: str):
@@ -307,6 +338,7 @@ def _parse_dt(v: str | None, field: str):
 
 @router.get("/reports")
 async def find_reports(
+    request: Request,
     kind: str | None = Query(default=None, pattern="^(deep|sphere|impact)$"),
     project: str | None = Query(default=None, description="과제 (eng_meta 또는 임베드 project_name)"),
     dev_rev: str | None = Query(default=None, description="개발단계 (dv1 등)"),
@@ -333,13 +365,14 @@ async def find_reports(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """조건으로 리포트 검색(결과 폭증 대비 다축 서버 필터). 소유분(관리자는 전사).
+    """조건으로 리포트 검색(결과 폭증 대비 다축 서버 필터). 소유분 + 같은 소속 공유분(관리자는 전사).
 
     같은 전각도라도 방향 컨셉(doe_strategy)·초점(focus)·조건(scenario_type)·높이별로
     각기 골라낼 수 있다. 전부 서버에서 걸러 슬라이스만 반환.
     """
     rows = await svc.find_reports(
         db, user.id, is_admin=user.is_system_admin,
+        affiliation=verified_affiliation(request.headers, user.email, settings.heax_gateway_secret),
         sort=sort, order=order, limit=limit, offset=offset,
         session_id=session_id, kind=kind, project=project, dev_rev=dev_rev,
         variation=variation, doe=doe, kfile_id=kfile_id, focus=focus,
@@ -354,16 +387,18 @@ async def find_reports(
 
 @router.get("/reports/{report_id}")
 async def get_report(
+    request: Request,
     report_id: str,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    r = await _require_report(db, user, report_id)
+    r = await _require_report(db, user, report_id, request)
     return ok(ReportRead.model_validate(r).model_dump())
 
 
 @router.get("/reports/{report_id}/query")
 async def query_report_facts(
+    request: Request,
     report_id: str,
     part_id: int | None = Query(default=None),
     category: str | None = Query(default=None),
@@ -385,7 +420,7 @@ async def query_report_facts(
     "특정 부품이 특정 각도(±허용)에서 응력 상위 N" 같은 데이터 질의를 한 콜로.
     반환은 (case_key·각도·부품·물리량·값·at_time) 평탄 fact 리스트(정렬·limit 적용).
     """
-    r = await _require_report(db, user, report_id)
+    r = await _require_report(db, user, report_id, request)
     try:
         return ok(await svc.query_facts(
             db, r, part_id=part_id, category=category, angle_name=angle_name,
@@ -399,6 +434,7 @@ async def query_report_facts(
 
 @router.get("/reports/{report_id}/cases")
 async def list_report_cases(
+    request: Request,
     report_id: str,
     sort: str = Query("max_stress"),
     order: str = Query("desc", pattern="^(asc|desc)$"),
@@ -411,19 +447,20 @@ async def list_report_cases(
 
     sphere=최악 방향, impact=최악 위치, deep=단건.
     """
-    await _require_report(db, user, report_id)
+    await _require_report(db, user, report_id, request)
     rows = await svc.list_cases(db, report_id, sort=sort, order=order, limit=limit, offset=offset)
     return ok([CaseRead.model_validate(c).model_dump() for c in rows])
 
 
 @router.get("/reports/{report_id}/cases/{case_key}")
 async def get_report_case(
+    request: Request,
     report_id: str,
     case_key: str,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _require_report(db, user, report_id)
+    await _require_report(db, user, report_id, request)
     c = await svc.get_case(db, report_id, case_key)
     if c is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "케이스를 찾을 수 없습니다.")
@@ -432,30 +469,33 @@ async def get_report_case(
 
 @router.get("/reports/{report_id}/parts")
 async def report_part_risk(
+    request: Request,
     report_id: str,
     part_id: int | None = Query(default=None),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """파트별 최악값과 발생 케이스(각도/위치) + 최소 안전율."""
-    r = await _require_report(db, user, report_id)
+    r = await _require_report(db, user, report_id, request)
     return ok(await svc.part_risk(db, r, part_id))
 
 
 @router.get("/reports/{report_id}/directional")
 async def report_directional(
+    request: Request,
     report_id: str,
     part_id: int | None = Query(default=None),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """방향 취약도 — 방향 범주(면/엣지/코너·F1~F6)별 최악. part_id 로 파트 한정."""
-    r = await _require_report(db, user, report_id)
+    r = await _require_report(db, user, report_id, request)
     return ok(await svc.directional(db, r, part_id))
 
 
 @router.get("/reports/{report_id}/scatter")
 async def report_scatter(
+    request: Request,
     report_id: str,
     metric: str = Query("peak_stress"),
     part_id: int | None = Query(default=None),
@@ -463,7 +503,7 @@ async def report_scatter(
     db: AsyncSession = Depends(get_db),
 ):
     """방향 섭동 산포 분석(sphere) — 26 정준방향별 metric 산포(mean/std/CoV/최악)·민감도."""
-    r = await _require_report(db, user, report_id)
+    r = await _require_report(db, user, report_id, request)
     try:
         return ok(await svc.scatter(db, r, metric=metric, part_id=part_id))
     except ValueError as exc:
@@ -472,6 +512,7 @@ async def report_scatter(
 
 @router.get("/reports/{report_id}/part-energy")
 async def report_part_energy(
+    request: Request,
     report_id: str,
     part_id: int | None = Query(default=None),
     user: User = Depends(get_current_user),
@@ -479,7 +520,7 @@ async def report_part_energy(
 ):
     """파트별 에너지(내부/운동) 시계열 — deep matsum(있을 때). part_id 로 한 파트만.
     sphere/impact 는 파트별 에너지 시계열이 없어 note 반환(글로벌 에너지는 /energy)."""
-    r = await _require_report(db, user, report_id)
+    r = await _require_report(db, user, report_id, request)
     try:
         return ok(await svc.part_energy_series(db, r, part_id))
     except ValueError as exc:
@@ -488,6 +529,7 @@ async def report_part_energy(
 
 @router.get("/reports/{report_id}/angle-stats")
 async def report_angle_stats(
+    request: Request,
     report_id: str,
     metric: str = Query("peak_stress"),
     part_id: int | None = Query(default=None),
@@ -502,7 +544,7 @@ async def report_angle_stats(
 ):
     """특정 각도군 표준 통계 — 선택(near/angle_name/category/전체) × 분포(mean/std/CoV/
     백분위/IQR/최악) + 부품별 위험·민감도 분해. 있는 물리량은 available_metrics 로 안내."""
-    r = await _require_report(db, user, report_id)
+    r = await _require_report(db, user, report_id, request)
     try:
         return ok(await svc.angle_group_stats(
             db, r, metric=metric, part_id=part_id, category=category, angle_name=angle_name,
@@ -513,13 +555,14 @@ async def report_angle_stats(
 
 @router.get("/reports/{report_id}/geometry")
 async def report_geometry(
+    request: Request,
     report_id: str,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """공간 컨텍스트(부품 위치 시각화) — impact=디바이스 외곽선+파트 footprint(XY)+z범위.
     sphere/deep 은 각도 기반이라 부품 형상은 원본 렌더(iframe)에만 있다."""
-    r = await _require_report(db, user, report_id)
+    r = await _require_report(db, user, report_id, request)
     try:
         return ok(await svc.geometry(db, r))
     except ValueError as exc:
@@ -528,13 +571,14 @@ async def report_geometry(
 
 @router.get("/reports/{report_id}/energy")
 async def report_energy(
+    request: Request,
     report_id: str,
     case_key: str | None = Query(default=None),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """에너지/접촉 상세(원본 재파싱). deep=에너지밸런스·접촉력, sphere/impact=하중경로 그래프."""
-    r = await _require_report(db, user, report_id)
+    r = await _require_report(db, user, report_id, request)
     try:
         return ok(await svc.case_energy(db, r, case_key))
     except ValueError as exc:
@@ -543,6 +587,7 @@ async def report_energy(
 
 @router.get("/reports/{report_id}/cases/{case_key}/series")
 async def report_part_series(
+    request: Request,
     report_id: str,
     case_key: str,
     part_id: int = Query(...),
@@ -550,7 +595,7 @@ async def report_part_series(
     db: AsyncSession = Depends(get_db),
 ):
     """케이스·파트의 시계열(원본 재파싱, 다운샘플)."""
-    r = await _require_report(db, user, report_id)
+    r = await _require_report(db, user, report_id, request)
     try:
         return ok(await svc.part_series(db, r, case_key, part_id))
     except ValueError as exc:
@@ -559,12 +604,13 @@ async def report_part_series(
 
 @router.get("/reports/{report_id}/findings")
 async def report_findings(
+    request: Request,
     report_id: str,
     severity: str | None = Query(default=None),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    r = await _require_report(db, user, report_id)
+    r = await _require_report(db, user, report_id, request)
     items = r.findings or []
     if severity:
         sev = severity.upper()
@@ -584,6 +630,7 @@ class PublishDataHubBody(BaseModel):
 
 @router.post("/reports/{report_id}/publish-datahub")
 async def publish_report_to_datahub(
+    request: Request,
     report_id: str,
     body: PublishDataHubBody,
     user: User = Depends(get_current_user),
@@ -592,7 +639,8 @@ async def publish_report_to_datahub(
     """리포트를 AI Data Hub 의 범용 sim_report 레코드로 등재한다(과제/개발단계/BOM 연계)."""
     from app.reports.datahub import DataHubError, parse_stage
 
-    r = await _require_report(db, user, report_id)
+    # 외부(DataHub)에 이 리포트 명의로 레코드를 만드는 일이라 소유자만 — 읽기 공유와는 다르다.
+    r = await _require_owned_report(db, user, report_id)
     if not settings.datahub_url:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "datahub_url 이 설정되지 않았습니다.")
     # stage 형식 오류는 클라이언트 잘못 → 400 으로 먼저 걸러낸다.
@@ -617,10 +665,11 @@ async def publish_report_to_datahub(
 
 @router.delete("/reports/{report_id}")
 async def delete_report(
+    request: Request,
     report_id: str,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    r = await _require_report(db, user, report_id)
+    r = await _require_owned_report(db, user, report_id)
     await svc.delete_report(db, r)
     return ok(message="리포트가 삭제되었습니다.")

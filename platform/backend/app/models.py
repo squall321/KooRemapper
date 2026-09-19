@@ -134,6 +134,10 @@ class ImpactReport(Base):
         ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
     )
     kind: Mapped[str] = mapped_column(String(12), index=True, nullable=False)  # deep|sphere|impact
+    # 읽기 공유 범위 — 반입(예약) 시점에 검증한 소속 id 를 **얼려서** 적는다.
+    # 소유자가 나중에 소속을 옮겨도 과거 리포트의 공유 범위가 따라 움직이면, 그 리포트를 근거로 한
+    # 비교·보고가 조용히 달라진다(요청서 §8). 읽는 사람의 소속은 요청마다 새로 검증한다.
+    shared_affiliation: Mapped[str | None] = mapped_column(String(120), index=True)
     label: Mapped[str | None] = mapped_column(String(255))
     # 원본 HTML 을 담은 SessionFile — 온디맨드 시계열 재파싱용. 삭제돼도 리포트는 유지.
     source_file_id: Mapped[int | None] = mapped_column(

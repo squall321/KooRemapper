@@ -210,6 +210,7 @@ async def ingest_report(
     variation: str | None = None,
     doe: str | None = None,
     focus: str | None = None,
+    shared_affiliation: str = "",
 ) -> ImpactReport:
     """리포트 HTML 을 파싱·정규화해 ImpactReport + ImpactCase 로 저장한다.
 
@@ -264,6 +265,9 @@ async def ingest_report(
         kind=study["kind"],
         label=label or proj.get("name") or study["kind"],
         focus=focus or None,
+        # 반입 시점에 검증한 소속을 얼려 적는다 — 소유자가 나중에 소속을 옮겨도 이 리포트의
+        # 읽기 공유 범위는 움직이지 않는다(요청서 §8). 빈 값이면 소유자만 읽는다.
+        shared_affiliation=shared_affiliation or None,
         source_file_id=file_row.id,
         source_kfile_id=source_kfile_id,
         scenario_file_id=scenario_file_id,
@@ -394,10 +398,30 @@ async def attach_scenario(
 async def get_owned_report(
     db: AsyncSession, user_id: int, report_id: str
 ) -> Optional[ImpactReport]:
+    """소유자만. 수정·삭제는 이 자리를 쓴다(요청서 §7 — 수정·삭제는 소유자만)."""
     row = await db.get(ImpactReport, report_id)
     if row is None or row.user_id != user_id:
         return None
     return row
+
+
+async def get_readable_report(
+    db: AsyncSession, user_id: int, report_id: str, affiliation: str = ""
+) -> Optional[ImpactReport]:
+    """읽기(상세·판독·비교) 판정 — 소유자거나, 리포트에 얼린 소속과 읽는 사람의 소속이 같을 때.
+
+    ⚠ 빈 소속은 매칭하지 않는다. 소속 없는 사람끼리 서로의 리포트를 읽게 되면
+    '소속 공유' 가 사실상 전체 공개가 된다(shared/visibility.py 가 team·department 에서 지키는 규칙과 같다).
+    affiliation 은 **요청마다 서명을 검증한 지금 값**이어야 한다 — 헤더를 그대로 넘기지 마라.
+    """
+    row = await db.get(ImpactReport, report_id)
+    if row is None:
+        return None
+    if row.user_id == user_id:
+        return row
+    if affiliation and row.shared_affiliation and row.shared_affiliation == affiliation:
+        return row
+    return None
 
 
 async def list_cases(
@@ -661,10 +685,24 @@ _REPORT_SORTS = {
 }
 
 
+def _readable_scope(user_id: int, affiliation: str = ""):
+    """검색·facet 의 '읽을 수 있는 것' 범위 — 소유분 + 같은 소속으로 얼려 반입된 것.
+
+    빈 소속은 매칭하지 않는다(get_readable_report 와 같은 규칙). 상세를 열 수 있는 것과
+    찾을 수 있는 것이 어긋나면 비교가 안 되므로 두 자리가 같은 술어를 쓴다.
+    """
+    own = ImpactReport.user_id == user_id
+    if not affiliation:
+        return own
+    from sqlalchemy import or_ as _or
+    return _or(own, ImpactReport.shared_affiliation == affiliation)
+
+
 def _find_reports_query(
     user_id: int,
     *,
     is_admin: bool,
+    affiliation: str = "",
     session_id: str | None = None,
     kind: str | None = None,
     project: str | None = None,
@@ -689,7 +727,7 @@ def _find_reports_query(
     from sqlalchemy import func as _f, or_
     stmt = select(ImpactReport)
     if not is_admin:
-        stmt = stmt.where(ImpactReport.user_id == user_id)
+        stmt = stmt.where(_readable_scope(user_id, affiliation))
     if session_id:
         stmt = stmt.where(ImpactReport.session_id == session_id)
     if kind:
@@ -746,6 +784,7 @@ async def find_reports(
     user_id: int,
     *,
     is_admin: bool = False,
+    affiliation: str = "",
     sort: str = "created_at",
     order: str = "desc",
     limit: int = 100,
@@ -758,20 +797,22 @@ async def find_reports(
     kfile_id·focus·doe_strategy·scenario_type·drop_height(±height_tol)·severity·
     min_worst_stress·min_worst_g·has_part·q_text·since·until.
     """
-    stmt = _find_reports_query(user_id, is_admin=is_admin, **filters)
+    stmt = _find_reports_query(user_id, is_admin=is_admin, affiliation=affiliation, **filters)
     col = _REPORT_SORTS.get(sort, ImpactReport.created_at)
     direction = asc if order == "asc" else desc
     stmt = stmt.order_by(col.is_(None), direction(col), ImpactReport.id.desc()).limit(limit).offset(offset)
     return list((await db.execute(stmt)).scalars())
 
 
-async def report_facets(db: AsyncSession, user_id: int, *, is_admin: bool = False) -> dict:
+async def report_facets(
+    db: AsyncSession, user_id: int, *, is_admin: bool = False, affiliation: str = ""
+) -> dict:
     """리포트 검색 facet — 어떤 kind·과제·rev·설계안·방향컨셉·초점·심각도가 있나 + 건수.
 
     목표지향 접근의 '먼저 뭐가 있나' 화면. distinct 값과 개수를 서버 집계로 준다.
     """
     from sqlalchemy import func as _f
-    base = ImpactReport.user_id == user_id
+    base = _readable_scope(user_id, affiliation)
 
     async def _count_by(expr):
         q = select(expr, _f.count()).group_by(expr)

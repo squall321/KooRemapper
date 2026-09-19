@@ -36,6 +36,12 @@ def _forward_headers(ctx: Context) -> dict:
         v = req.headers.get("authorization")
         if v:
             headers["Authorization"] = v
+        # 소속 헤더 둘은 그대로 나르기만 한다 — 검증(서명·이메일 결속·만료)은 백엔드가 한다.
+        # 요청서 platform/docs/REQUEST-postprocess-operation.md §8(2026-09-18 개정).
+        for h in ("x-heax-user-affiliation", "x-heax-aff-proof"):
+            hv = req.headers.get(h)
+            if hv:
+                headers[h] = hv
     return headers
 
 
@@ -540,7 +546,7 @@ async def report_directional(report_id: str, ctx: Context, part_id: int | None =
 async def report_facets(ctx: Context) -> dict:
     """리포트 검색 facet — 어떤 kind·과제·rev·설계안·방향컨셉(doe_strategy)·조건종류·초점·
     심각도·높이가 있나 + 각 건수. 목표를 정하기 전 '먼저 뭐가 있나'를 보고 find_reports 로
-    좁힌다. 소유분(관리자는 전사)."""
+    좁힌다. 소유분 + 같은 소속으로 공유된 리포트(관리자는 전사)."""
     return await _get(ctx, "/reports/facets")
 
 
@@ -569,7 +575,7 @@ async def find_reports(
     order: str = "desc",
     limit: int = 100,
 ) -> list:
-    """조건으로 리포트 검색(전 세션, 결과 폭증 대비 다축 서버 필터) — 소유분(관리자는 전사).
+    """조건으로 리포트 검색(전 세션, 결과 폭증 대비 다축 서버 필터) — 소유분 + 같은 소속 공유분(관리자는 전사).
 
     같은 전각도라도 방향 컨셉·초점·조건·높이별로 각기 골라낸다. 필터는 서버(SQL)가 처리해
     리포트가 수천 개여도 슬라이스만. 축:
