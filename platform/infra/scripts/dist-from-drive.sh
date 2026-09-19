@@ -22,7 +22,13 @@ REMOTE="${KOORM_DRIVE_REMOTE:-}"
 REMOTE="${REMOTE%/}"
 
 SRC="$REMOTE/latest"
-if ! rclone lsf "$SRC/" 2>/dev/null | grep -q '^koorm-bin\.tar\.gz$'; then
+# 파이프+조기종료(grep -q)는 pipefail 아래서 SIGPIPE(141) 오판을 만든다 — 출력을 먼저 받는다(_common.sh:instance_running 주석).
+_listing="$(rclone lsf "$SRC/" 2>/dev/null || true)"
+case $'\n'"$_listing"$'\n' in
+  *$'\n'koorm-bin.tar.gz$'\n'*) _have_bin=1 ;;
+  *) _have_bin=0 ;;
+esac
+if [ "$_have_bin" = "0" ]; then
   NEWEST="$(rclone lsf --dirs-only "$REMOTE/" 2>/dev/null | sed 's#/$##' | grep -E '^dist-' | sort | tail -n 1 || true)"
   [ -n "$NEWEST" ] || { echo "✗ $REMOTE 에 dist 없음. 온라인 호스트에서: bash platform/infra/scripts/dist-to-drive.sh --build"; exit 1; }
   SRC="$REMOTE/$NEWEST"

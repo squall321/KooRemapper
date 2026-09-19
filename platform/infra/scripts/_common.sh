@@ -105,6 +105,38 @@ require_apptainer() {
   command -v "$APPTAINER" >/dev/null 2>&1 || { echo "✗ '$APPTAINER' not found"; exit 1; }
 }
 
+# 인스턴스가 떠 있는가 — **0 있음 · 1 없음 · 2 알 수 없음**(목록 조회 자체가 실패했다).
+#
+# ⚠ 예전 구현은 `"$APPTAINER" instance list --json | grep -q …` 였다. 이 파일을 읽는 스크립트들이
+# `pipefail` 을 켜는데, `grep -q` 는 **첫 매칭에서 바로 끝나고** 그러면 아직 쓰고 있던 apptainer 가
+# **SIGPIPE(141)** 로 죽는다. pipefail 이 파이프라인 전체를 실패로 만들므로 **떠 있는 인스턴스를
+# "없다"로** 판정했다. 감독자는 그 판정을 믿고 멀쩡한 API 를 stop/start 했다(09-18 하루 168회).
+#
+# 실측(2026-09-19, dev) — **유휴에서는 400회 중 0회**다. 하지만 같은 박스에서 다른 프로세스가
+# 동시에 `instance list` 를 부르는 동안(허브 워커가 45초마다, 배포 스크립트가 수시로) **600회 중
+# 81회(13.5%)** 가 rc=141 로 거짓 음성이었다. "유휴에서 재현 안 되니 원인이 아니다" 는 그래서 틀린
+# 판정이다 — 감독자는 30초마다 도니 하루 2,880회이고, 실제 관측치(하루 28~168회)와 자릿수가 맞는다.
+#
+# 고침은 둘이다.
+#   ㉮ **파이프를 없앤다** — 출력을 통째로 받으면 조기 종료가 없어 SIGPIPE 가 날 자리가 없다.
+#   ㉯ **조회 실패와 부재를 가른다** — 옛 구현은 둘을 같은 1 로 뭉갰고 그 뭉갬이 사고의 본질이다.
+#      한 번 더 시도해 보고도 실패하면 2(모름)를 낸다. 단순 호출부(`if ! instance_running …`)에서는
+#      2 도 0 이 아니라 종전과 똑같이 동작하고, **감독자만** 2 를 "이번 회차 건너뜀" 으로 다룬다.
+#      모르는 것을 "없다" 로 읽으면 재기동이라는 파괴적 행동이 따라붙기 때문이다.
 instance_running() {
-  "$APPTAINER" instance list --json 2>/dev/null | grep -q "\"instance\": *\"$1\"" || return 1
+  local out rc i
+  rc=1
+  for i in 1 2; do
+    if out="$("$APPTAINER" instance list --json 2>/dev/null)"; then rc=0; else rc=$?; fi
+    [ "$rc" -eq 0 ] && [ -n "$out" ] && break
+    [ "$i" -eq 1 ] && sleep 0.5
+  done
+  if [ "$rc" -ne 0 ] || [ -z "${out:-}" ]; then
+    return 2
+  fi
+  # apptainer 판에 따라 `"instance": "x"` 와 `"instance":"x"` 둘 다 나올 수 있다
+  case "$out" in
+    *"\"instance\": \"$1\""*|*"\"instance\":\"$1\""*) return 0 ;;
+    *) return 1 ;;
+  esac
 }

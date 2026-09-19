@@ -26,7 +26,9 @@ case "${_mcp_code:-000}" in
   2??|400|406)
     echo "  ✓ mcp responding (:${KOORM_MCP_PORT}, HTTP ${_mcp_code})" ;;
   000)
-    if ss -ltn 2>/dev/null | grep -q ":${KOORM_MCP_PORT}"; then
+    # 파이프+조기종료(grep -q)는 pipefail 아래서 SIGPIPE(141) 오판을 만든다 — 출력을 먼저 받는다(_common.sh:instance_running 주석).
+    _listening="$(ss -ltn 2>/dev/null || true)"
+    if [ -n "$_listening" ] && [ "${_listening#*:${KOORM_MCP_PORT}}" != "$_listening" ]; then
       echo "  ✗ mcp 포트는 열려 있으나 응답 없음 (:${KOORM_MCP_PORT}) — 프로세스가 먹통이다"
     else
       echo "  ✗ mcp not listening (:${KOORM_MCP_PORT})"

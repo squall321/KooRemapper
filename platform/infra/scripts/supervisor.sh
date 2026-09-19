@@ -11,9 +11,21 @@ require_apptainer
 INTERVAL="${KOORM_SUPERVISE_INTERVAL:-30}"
 ONCE=0; [ "${1:-}" = "--once" ] && ONCE=1
 
+# 인스턴스가 **확실히 없는가** — 재기동은 파괴적 행동이라 "모름" 을 근거로 삼으면 안 된다.
+# `instance_running` 은 0 있음 · 1 없음 · **2 알 수 없음**(목록 조회 실패)을 낸다(_common.sh 주석 참조).
+# 옛 코드는 1 과 2 를 같은 "없음" 으로 읽었고, 그래서 조회가 실패할 때마다 멀쩡한 API 를 내렸다.
+# 2 면 이번 회차는 건너뛴다 — 다음 회차(30초 뒤)에 다시 본다. 정말 죽었으면 그때도 1 이다.
+gone_for_sure() {
+  local rc
+  instance_running "$1"; rc=$?
+  [ "$rc" -eq 1 ] && return 0
+  [ "$rc" -eq 2 ] && echo "[$(date '+%F %T')] $1 판정 보류 — 인스턴스 목록 조회 실패(이번 회차 건너뜀)"
+  return 1
+}
+
 check_once() {
   # postgres (start full stack if its instance is gone — start.sh is idempotent)
-  if ! instance_running "$INST_POSTGRES"; then
+  if gone_for_sure "$INST_POSTGRES"; then
     echo "[$(date '+%F %T')] postgres down → start.sh"
     "$SCRIPT_DIR/start.sh" >/dev/null 2>&1 || true
     return
@@ -23,7 +35,7 @@ check_once() {
   # 재기동이 성공했는지 실패했는지가 로그에 없다. 그래서 5주간 1,459회가 원인 없이 쌓였고
   # 같은 실패를 매분 반복하는 상태와 정상 복구를 구분할 수 없었다.
   _api_reason=""
-  if ! instance_running "$INST_API"; then
+  if gone_for_sure "$INST_API"; then
     _api_reason="인스턴스 없음"
   elif ! _api_code="$(curl -s -o /dev/null -w '%{http_code}' -m3 "http://127.0.0.1:${KOORM_API_PORT}/api/health" 2>/dev/null)"; then
     _api_reason="헬스 조회 실패"
@@ -35,12 +47,15 @@ check_once() {
     if "$SCRIPT_DIR/restart-api-only.sh" >/tmp/koorm-restart-api.log 2>&1; then
       echo "[$(date '+%F %T')] api restart 성공"
     else
-      echo "[$(date '+%F %T')] api restart 실패(rc=$?) — /tmp/koorm-restart-api.log"
+      # ⚠ `rc=$?` 가 **첫 문장**이어야 한다 — `$(date …)` 가 먼저 돌면 그 종료코드(늘 0)가 찍힌다.
+      # 그래서 로그의 `실패(rc=0)` 436줄이 전부 거짓이었다(실패 가지인데 rc 가 0 일 수는 없다).
+      rc=$?
+      echo "[$(date '+%F %T')] api restart 실패(rc=$rc) — /tmp/koorm-restart-api.log"
       tail -5 /tmp/koorm-restart-api.log | sed 's/^/    /'
     fi
   fi
   # mcp: restart instance if gone
-  if ! instance_running "$INST_MCP"; then
+  if gone_for_sure "$INST_MCP"; then
     echo "[$(date '+%F %T')] mcp down → start"
     local net=(); [ "${KOORM_APPT_HOST_NET:-0}" = "1" ] && net=(--net --network=host)
     "$APPTAINER" instance start "${net[@]}" --bind "$REPO_ROOT:/workspace" \
@@ -48,10 +63,10 @@ check_once() {
       --env "KOORM_MCP_PORT=${KOORM_MCP_PORT}" --env "MCP_HOST=${MCP_HOST:-127.0.0.1}" \
       --env "MCP_ALLOWED_HOSTS=${MCP_ALLOWED_HOSTS:-}" "$MCP_SIF" "$INST_MCP" >/tmp/koorm-restart-mcp.log 2>&1 \
       && echo "[$(date '+%F %T')] mcp restart 성공" \
-      || { echo "[$(date '+%F %T')] mcp restart 실패 — /tmp/koorm-restart-mcp.log"; tail -5 /tmp/koorm-restart-mcp.log | sed 's/^/    /'; }
+      || { rc=$?; echo "[$(date '+%F %T')] mcp restart 실패(rc=$rc) — /tmp/koorm-restart-mcp.log"; tail -5 /tmp/koorm-restart-mcp.log | sed 's/^/    /'; }
   fi
   # nginx (only when enabled): restart instance if gone
-  if [ "${KOORM_ENABLE_NGINX:-0}" = "1" ] && ! instance_running "$INST_NGINX"; then
+  if [ "${KOORM_ENABLE_NGINX:-0}" = "1" ] && gone_for_sure "$INST_NGINX"; then
     echo "[$(date '+%F %T')] nginx down → start"
     local net2=(); [ "${KOORM_APPT_HOST_NET:-0}" = "1" ] && net2=(--net --network=host)
     [ -f "$PLATFORM_ROOT/infra/nginx/certs/server.crt" ] || "$SCRIPT_DIR/gen-certs.sh" >/dev/null 2>&1 || true
