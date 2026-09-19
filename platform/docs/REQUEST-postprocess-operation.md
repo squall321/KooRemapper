@@ -259,3 +259,60 @@ proxy_set_header X-Heax-Aff-Proof        "";
 (게이트웨이 공유 시크릿으로만 열립니다 — DynaForge 가 직접 부를 자리는 아닙니다). 배선 시험은
 포털·게이트웨이 양쪽 테스트에 있고, **변이 시험 7종으로 확인**했습니다(증명 제거·이메일 미결속·
 `None` 이 헤더를 안 지움·낡은 소속 사용·캐시 키에서 소속 누락 등을 전부 빨갛게 잡습니다).
+
+---
+
+## 9. 2026-09-19 — DynaForge 회신 (§8 구현 완료, §7-1 은 아직)
+
+브랜치 `integrate/defects-20260918`. 시험은 실 DB(dev postgres :5436) 기준 **107 passed, 3 skipped**.
+
+### 한 일 — §8 은 개정판 그대로 들어갔습니다
+
+| 요청 | 자리 | 비고 |
+|---|---|---|
+| 증명 검증 | `backend/app/shared/affiliation.py` `verified_affiliation()` | 주신 코드 그대로. 시크릿은 `settings.heax_gateway_secret`(SSO 와 같은 값), 키를 새로 만들지 않았습니다 |
+| 헤더 나르기 | `mcp_server/server.py` `_forward_headers()` | 두 헤더를 그대로 넘기고 **검증은 백엔드**. 이 함수는 MCP 도구 전체가 공유하므로 모든 도구 호출에 실립니다 |
+| 반입 시점에 얼린 소속 | `ImpactReport.shared_affiliation`(alembic `0006_report_shared_affiliation`) | 반입 두 라우트가 `verified_affiliation(...)` 결과를 적습니다. 빈 값은 `NULL` 로 |
+| 요청마다 검증한 지금 값으로 판정 | `services.get_readable_report(db, user_id, report_id, affiliation)` | 헤더 원문을 넘기는 길은 없습니다 — 라우트가 매번 검증한 값만 넘깁니다 |
+| 읽기/수정 분리 | `routes._require_report`(읽기 13곳) ↔ `_require_owned_report`(수정·삭제·scenario 첨부·DataHub 등재 4곳) | §7-3 대로 수정·삭제는 소유자만 |
+
+**빈 소속은 어느 자리에서도 매칭하지 않습니다.** 리포트 쪽 `NULL`·읽는 쪽 `""` 둘 다 불일치로 떨어집니다
+(`test_report_sharing.py::test_detail_empty_never_matches_empty`).
+
+### 요청서에 없던 자리 하나를 더 고쳤습니다 — **검색·facet**
+
+§8 대로 상세 라우트만 열면 **같은 소속 사람이 리포트를 찾을 수가 없습니다.** `find_reports`·`report_facets`
+가 `user_id` 로만 좁히고 있어서, 공유분은 *id 를 이미 아는 경우에만* 열립니다. 공유의 목적이 과제 간·사람 간
+비교(§7)이므로 찾는 자리도 같은 술어를 쓰게 했습니다(`services._readable_scope`). 필터는 그대로 걸립니다 —
+범위만 넓혔지 조건을 건너뛰지 않습니다(`test_search_filters_still_apply_to_shared`).
+
+### 안 한 것 하나 — nginx 헤더 지우기(§8 "있으면 좋은 것")
+
+**넣으면 기능이 죽습니다.** 그 두 헤더는 게이트웨이에서 **같은 nginx**(`infra/nginx/nginx.conf`
+`:8443` 의 `location /mcp`·`location /api/`)를 지나 들어옵니다. 여기서 비우면 정상 증명까지 지워집니다.
+위조 방어는 서명이 이미 합니다(가로챈 증명도 이메일에 묶여 남의 호출에는 안 붙습니다).
+게이트웨이가 **앱 nginx 를 거치지 않는** 별도 경로로 붙는 구성이라면 알려 주십시오 — 그때는 넣겠습니다.
+
+### 시험 — 변이 10종
+
+`backend/tests/test_affiliation.py`: 정상 / 한글 소속 퍼센트 인코딩 / 증명 없음 / **다른 사람 이메일로 서명된 증명**
+/ 만료 / 다른 시크릿 / 서명 뒤 소속만 바꿔치기 / 시크릿 미설정 / 버전 불일치 / 형식 깨짐.
+`backend/tests/test_report_sharing.py`: 상세 3종 + 검색·facet 3종(공유분이 보이나, 다른 소속·검증 실패면 안 보이나,
+필터가 살아 있나, facet 건수가 공유분만큼 늘어나나).
+
+### §7 의 나머지 — 지금 상태
+
+| 항목 | 상태 |
+|---|---|
+| 7-1 **후처리 예약 연산** | **아직입니다.** 클러스터 선행 셋(대시보드 파일 REST 인증·귀환 매니페스트·부분충격 리포트 생성)이 KooSlurm·pyKooCAE 쪽에 서기 전에는, 예약을 받아도 §4-1 "지어내지 않는다" 를 지킬 방법이 없습니다. 선행이 서면 착수합니다 |
+| 7-2 외부 잡 키 유일 제약 | 7-1 과 함께 (`external_job_key` 는 예약 원장과 같이 들어가는 게 맞습니다) |
+| 7-3 소속 단위 읽기 공유 | **됐습니다**(위) |
+| 7-4 과제 키 검증 | 아직 자유 문자열입니다. DataHub 과제 코드 목록을 어디서 받을지(엔드포인트·캐시 주기)만 정해 주시면 붙입니다 |
+| 7-5 해석 조건 메타 | 스키마는 이미 있습니다(`scenario`·`eng_meta`, `find_reports` 의 `drop_height`·`doe_strategy`·`scenario_type` 필터). 자동으로 채우는 것은 7-1 과 같이 옵니다 |
+
+### 확인 부탁드립니다
+
+1. **소속 id 길이** — `shared_affiliation` 을 120자로 잡았습니다. 포털 `access.yaml` 의 id 가 더 길 수 있으면 알려 주십시오.
+2. **반입 시점** — 지금은 "리포트가 실제로 반입되는 순간"에 얼립니다. 7-1 이 서면 §8 표의 "예약 시점" 과 갈릴 수
+   있습니다(예약과 반입 사이에 소속이 바뀌는 경우). 예약 시점 값을 쓰는 게 맞으면 예약 원장에 같이 적겠습니다.
+3. **증명 수명** — `exp` 만 보고 하한은 안 둡니다. 게이트웨이가 몇 초짜리로 찍는지 적어 주시면 문서에 남기겠습니다.
