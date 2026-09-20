@@ -116,14 +116,17 @@ if [ "$_tcp_id" != "$_sock_id" ]; then
     || echo "    (없음)"
   # 소유자가 안 보이면(=users: 가 비어 있으면) 남의 계정 프로세스다. 그 사실을 말해 주지 않으면
   # 사람이 ss 를 아무리 다시 돌려도 범인 이름을 못 본다(cae00 2026-08-19 실측).
-  if ! ss -lptnH "sport = :${POSTGRES_PORT}" 2>/dev/null | grep -q 'users:('; then
+  # 파이프+조기종료(grep -q)는 pipefail 아래서 SIGPIPE(141) 오판을 만든다 — 출력을 먼저 받는다(_common.sh:instance_running 주석).
+  _sock="$(ss -lptnH "sport = :${POSTGRES_PORT}" 2>/dev/null || true)"
+  if [ "${_sock#*users:(}" = "$_sock" ]; then
     echo "  ⚠ 소유자가 안 보인다 = 다른 사용자(root 등)의 프로세스다. 이름을 보려면:"
     echo "      sudo ss -lptn 'sport = :${POSTGRES_PORT}'"
   fi
   # 그 프로세스를 못 건드릴 수도 있으므로, 우리가 비켜 갈 포트를 바로 제안한다.
   _free=""
   for _p in $(seq $((POSTGRES_PORT+1)) $((POSTGRES_PORT+20))); do
-    ss -lntH "sport = :${_p}" 2>/dev/null | grep -q . && continue
+    _busy="$(ss -lntH "sport = :${_p}" 2>/dev/null || true)"
+    [ -n "$_busy" ] && continue
     _free="$_p"; break
   done
   if [ -n "$_free" ]; then

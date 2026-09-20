@@ -64,7 +64,13 @@ async def system_status(_user: User = Depends(get_current_user), db: AsyncSessio
         "worker": {"concurrency": settings.worker_concurrency, "queued": queued, "running": running},
         "binary": {"present": settings.kooremapper_bin.exists()},
         "gmsh": {"available": _gmsh_available(), "note": "meshfix 전용"},
-        "mcp": {"port": settings.mcp_port, "url": f"http://<host>:{settings.mcp_port}/mcp"},
+        # ⚠ 공개 주소는 **설정에 있을 때만** 낸다 — 예전엔 `http://<host>:<port>/mcp` 라는 자리표시자를
+        # 줬는데, 사람은 그것을 주소로 읽고 `<host>` 만 자기 호스트로 바꿔 붙였다(포트·경로가 틀린 채).
+        "mcp": {"port": settings.mcp_port,
+                "url": settings.mcp_public_url or None,
+                "url_note": None if settings.mcp_public_url
+                else "MCP_PUBLIC_URL 미설정 — 공개 주소를 모른다(지어내지 않는다). 토큰 발급 화면의 "
+                     "명령도 이 값이 있어야 나온다"},
         "rate_limit": {"enabled": settings.ratelimit_enabled},
         "signup": {"enabled": settings.allow_signup},
         "operations": len(catalog.operation_names()),
