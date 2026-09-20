@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
+from app.config import MCP_PUBLIC_URL_ENV, settings
 from app.database import get_db
 from app.models import User
 from app.modules.users import pat
@@ -16,49 +16,50 @@ router = APIRouter(tags=["tokens"])
 
 
 def mcp_public_url(request: Request) -> str:
-    """외부 클라이언트가 실제로 닿을 MCP 주소 — **모르면 빈 문자열이다(지어내지 않는다).**
+    """외부 클라이언트가 실제로 닿을 MCP 주소 — **설정에 없으면 빈 문자열이다(지어내지 않는다).**
 
-    포털/허브 프록시 경유 요청(X-Forwarded-* 존재)이면 그 오리진의 고정 라우트
-    /apps/kooremapper_mcp/mcp 가 정답이다 — raw host:port(8701)는 사외 PC 에서
-    안 닿는다(cae00 실사고: 힌트대로 등록하면 연결 불가). 설정이 있으면 그것이 정본.
+    요청서 REQUEST-deploy-fixes-20260919 ④. 예전에는 셋을 차례로 시도했고 **셋 다 틀린 값을 냈다**
+    (포털 쪽 dev 실측):
 
-    ⚠ 예전에는 마지막 폴백이 `http://127.0.0.1:<port>/mcp` 였다. 그 주소는 **이 서버에서 볼 때만**
-    참이라, 프록시를 안 거치고 직접 붙은 **원격** 사용자에게는 '틀렸는데 맞아 보이는' 주소가 된다
-    (붙여넣으면 자기 PC 의 8701 을 찌른다). 그래서 호출자가 루프백일 때만 그 값을 주고, 그 밖에는
-    **모른다고 말한다** — 부르는 쪽이 빈 값을 보고 "운영자가 MCP_PUBLIC_URL 을 설정해야 한다" 고
-    안내한다. 주소를 지어내는 것보다 모른다고 하는 편이 언제나 낫다.
+      · X-Forwarded-Host 파생 → 포털(:8088) 경유 시 **포트가 빠진다**(nginx 가 Host 를 포트 없이 넘긴다).
+        HEAX Caddy(:4180) 경유면 `127.0.0.1:4180` 이라는 **내부 주소**가 나온다(trusted_proxies 가 없어
+        Caddy 가 X-Forwarded-* 를 자기 Host 로 덮는다).
+      · 루프백 폴백 → 원격 사용자에게 '틀렸는데 맞아 보이는' 주소다. 게다가 request.client 는 **TCP 상대**라,
+        MCP 경유 호출은 사람이 어디 있든 늘 127.0.0.1 로 보인다 — 가드가 될 수 없다.
+
+    그래서 **설정만 정본으로 삼는다.** 모르면 모른다고 말하고, 부르는 쪽이 무엇을 설정해야 하는지 알린다
+    (형제 앱 StepForge D-272 와 같은 규율). 운영에서 증상을 없애려면 platform/.env 에
+    `KOORM_MCP_PUBLIC_URL=https://<포털오리진:포트>/apps/kooremapper_mcp/mcp` 를 넣고 api 를 재기동한다.
     """
-    if settings.mcp_public_url:
-        return settings.mcp_public_url
-    fwd_host = request.headers.get("x-forwarded-host")
-    if fwd_host:
-        proto = request.headers.get("x-forwarded-proto") or "http"
-        return f"{proto}://{fwd_host}/apps/kooremapper_mcp/mcp"
-    client = (request.client.host if request.client else "") or ""
-    if client in {"127.0.0.1", "::1", "localhost"}:
-        return f"http://127.0.0.1:{settings.mcp_port}/mcp"
-    return ""
+    return settings.mcp_public_url
 
 
 MCP_URL_UNKNOWN = (
-    "# MCP 공개 주소를 서버가 모른다 — 운영자가 MCP_PUBLIC_URL 을 설정하면 "
+    f"# MCP 공개 주소를 서버가 모른다 — 운영자가 {MCP_PUBLIC_URL_ENV} 를 설정하면 "
     "여기에 붙여넣을 `claude mcp add` 명령이 나온다. (토큰은 이미 발급됐다)"
 )
 
 
-def _mcp_add_snippet(plaintext: str, request: Request) -> str:
-    """Ready-to-paste `claude mcp add` command for the issued token.
+def mcp_add_command(request: Request, token: str) -> str:
+    """`claude mcp add` 붙여넣기 명령 — 주소를 모르면 **명령을 만들지 않는다.**
 
-    주소를 모르면 **명령을 만들지 않는다** — 반쯤 맞는 명령을 주면 사용자가 그대로 붙여넣고
-    "연결이 안 된다" 로 돌아온다(cae00 실사고가 그 모양이었다)."""
+    반쯤 맞는 명령을 주면 사용자가 그대로 붙여넣고 "연결이 안 된다" 로 돌아온다(cae00 실사고).
+    URL 칸만 빈 명령도 같은 부류다 — claude 가 `--header` 값을 URL 로 먹는다.
+    시스템 화면·토큰 화면·capabilities 가 **이 함수 하나**를 쓴다(요청서 ④ 고침 2).
+    """
     url = mcp_public_url(request)
     if not url:
         return MCP_URL_UNKNOWN
     return (
         f"claude mcp add --transport http kooremapper "
         f"{url} "
-        f'--header "Authorization: Bearer {plaintext}"'
+        f'--header "Authorization: Bearer {token}"'
     )
+
+
+def _mcp_add_snippet(plaintext: str, request: Request) -> str:
+    """발급된 토큰이 박힌 붙여넣기 명령(토큰 화면 전용 이름 — 본체는 mcp_add_command)."""
+    return mcp_add_command(request, plaintext)
 
 
 @router.get("/me/tokens")

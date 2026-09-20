@@ -9,12 +9,12 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
+from app.config import MCP_PUBLIC_URL_ENV, settings
 from app.database import get_db
 from app.models import Job, User
 from app.runner import catalog
 from app.shared.auth import get_current_user
-from app.modules.users.routes import mcp_public_url
+from app.modules.users.routes import mcp_add_command, mcp_public_url
 from app.shared.responses import ok
 
 router = APIRouter(tags=["system"])
@@ -47,7 +47,8 @@ def _gmsh_available() -> bool:
 
 
 @router.get("/system/status")
-async def system_status(_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def system_status(request: Request, _user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    _mcp_url = mcp_public_url(request)
     db_ok = True
     queued = running = 0
     try:
@@ -66,11 +67,12 @@ async def system_status(_user: User = Depends(get_current_user), db: AsyncSessio
         "gmsh": {"available": _gmsh_available(), "note": "meshfix 전용"},
         # ⚠ 공개 주소는 **설정에 있을 때만** 낸다 — 예전엔 `http://<host>:<port>/mcp` 라는 자리표시자를
         # 줬는데, 사람은 그것을 주소로 읽고 `<host>` 만 자기 호스트로 바꿔 붙였다(포트·경로가 틀린 채).
+        # 세 자리(여기·capabilities·토큰 화면)가 **같은 함수**를 써야 한 요청에서 서로 다른 답이 안 나온다.
         "mcp": {"port": settings.mcp_port,
-                "url": settings.mcp_public_url or None,
-                "url_note": None if settings.mcp_public_url
-                else "MCP_PUBLIC_URL 미설정 — 공개 주소를 모른다(지어내지 않는다). 토큰 발급 화면의 "
-                     "명령도 이 값이 있어야 나온다"},
+                "url": _mcp_url or None,
+                "url_note": None if _mcp_url
+                else f"{MCP_PUBLIC_URL_ENV} 미설정 — 공개 주소를 모른다(지어내지 않는다). "
+                     "토큰 발급 화면의 접속 명령도 이 값이 있어야 나온다"},
         "rate_limit": {"enabled": settings.ratelimit_enabled},
         "signup": {"enabled": settings.allow_signup},
         "operations": len(catalog.operation_names()),
@@ -99,9 +101,10 @@ async def capabilities(request: Request, _user: User = Depends(get_current_user)
         # 하드코딩 대신 MCP 소스의 @mcp.tool( 을 세어 산출(None 이면 프론트가 개수 생략).
         "mcp_tools": _mcp_tool_count(),
         "parity": _PARITY,
-        "mcp_add_hint": (
-            f"claude mcp add --transport http kooremapper "
-            f"{mcp_public_url(request)} --header \"Authorization: Bearer kr_...\""
-        ),
+        # ⚠ 주소를 모를 때 f-string 에 빈 값을 끼우면 **URL 칸만 빈 명령**이 나온다 — 화면이 그것을
+        # 복사 버튼과 함께 그리고, 붙여넣으면 claude 가 `--header` 값을 URL 로 먹는다. 토큰 화면과
+        # 같은 함수를 써서 그때는 명령 대신 '무엇을 설정해야 하는지' 를 낸다(요청서 ④ 고침 2).
+        "mcp_url": mcp_public_url(request) or None,
+        "mcp_add_hint": mcp_add_command(request, "kr_..."),
         "mcp_desktop_hint": "Claude Desktop은 mcp-remote 브리지 사용 (mcp_server/CLAUDE_DESKTOP.md)",
     })

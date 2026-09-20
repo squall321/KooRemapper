@@ -18,7 +18,7 @@ type SystemStatus = {
   worker: { concurrency: number; queued: number; running: number }
   binary: { present: boolean; path: string }
   gmsh: { available: boolean; note?: string }
-  mcp: { port: number; url: string }
+  mcp: { port: number; url: string | null; url_note?: string | null }
   rate_limit: { enabled: boolean }
   signup: { enabled: boolean }
   operations: number
@@ -28,6 +28,7 @@ type Capabilities = {
   operations: number
   mcp_tools?: number
   parity: ParityRow[]
+  mcp_url?: string | null
   mcp_add_hint: string
   mcp_desktop_hint: string
 }
@@ -238,7 +239,18 @@ export function SystemPage() {
             <div className="text-sm text-danger">연결 정보를 불러오지 못했습니다: {errorMessage(caps.error)}</div>
           ) : c ? (
             <>
-              <ConnectBlock icon={<Terminal size={13} />} title="Claude Code" cmd={c.mcp_add_hint} />
+              {/* 공개 주소를 모르면 붙여넣을 명령이 없다 — 복사 버튼이 달린 코드 블록 대신
+                  무엇을 설정해야 하는지 알린다(주소를 지어내지 않는다, 요청서 ④). */}
+              {c.mcp_url ? (
+                <ConnectBlock icon={<Terminal size={13} />} title="Claude Code" cmd={c.mcp_add_hint} />
+              ) : (
+                <div>
+                  <div className="flex items-center gap-1.5 text-xs font-medium text-muted mb-1.5">
+                    <Terminal size={13} />Claude Code
+                  </div>
+                  <div className="text-xs text-warning bg-bg rounded-md px-3 py-2">{c.mcp_add_hint}</div>
+                </div>
+              )}
               <ConnectBlock icon={<Monitor size={13} />} title="Claude Desktop" cmd={c.mcp_desktop_hint} />
               <p className="text-xs text-muted">
                 연결 후 MCP 도구를 Claude에서 바로 사용할 수 있습니다.

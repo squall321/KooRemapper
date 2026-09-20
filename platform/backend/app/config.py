@@ -16,6 +16,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 _PLATFORM_ROOT = Path(__file__).resolve().parents[2]
 
 
+# 안내 문구에 쓰는 **실제** 환경변수 이름. 문자열을 따로 적으면 접두사가 빠진 채 굳는다
+# (실제로 그랬다 — 안내는 `MCP_PUBLIC_URL` 이라 했는데 읽히는 키는 KOORM_ 접두사가 붙은 쪽이다).
+MCP_PUBLIC_URL_ENV = "KOORM_MCP_PUBLIC_URL"
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="KOORM_",
@@ -29,8 +34,10 @@ class Settings(BaseSettings):
     app_env: str = "development"  # development | production
     api_port: int = 8700
     mcp_port: int = 8701
-    # 외부 클라이언트 안내용 MCP 공개 주소(비우면 요청 헤더에서 파생). raw host:port 는
-    # 사외 PC 에서 안 닿는다 — 포털 라우트(/apps/kooremapper_mcp/mcp)가 공개 경로다.
+    # 외부 클라이언트 안내용 MCP 공개 주소. **비우면 안내를 내지 않는다**(지어내지 않는다 — 요청서
+    # REQUEST-deploy-fixes-20260919 ④). raw host:port 는 사외 PC 에서 안 닿고, X-Forwarded-Host 로
+    # 만든 값은 실측 세 경로 중 둘이 틀렸다(포트 유실·내부 주소). 포털 경유면
+    # https://<포털오리진:포트>/apps/kooremapper_mcp/mcp 가 정본이다.
     mcp_public_url: str = ""
 
     # --- database ---

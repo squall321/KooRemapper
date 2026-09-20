@@ -165,6 +165,88 @@ def test_the_restart_failure_logs_the_real_exit_code(fake_stack, tmp_path):
     assert "api restart 실패(rc=7)" in r.stdout, f"진짜 종료코드를 안 남겼다 — {r.stdout!r}"
 
 
+def _endpoint_data(coro):
+    """라우트 코루틴을 돌려 응답 봉투에서 data 만 꺼낸다(의존성 주입 없이 직접 부른다)."""
+    import asyncio
+    import json
+
+    return json.loads(asyncio.run(coro).body)["data"]
+
+
+# ── ④ 주소를 지어내지 않는다 ───────────────────────────────────────────────
+class _Req:
+    def __init__(self, headers=None, client_host="10.1.2.3"):
+        self.headers = headers or {}
+        self.client = type("C", (), {"host": client_host})()
+
+
+def test_the_hint_says_unknown_instead_of_making_an_address_up(monkeypatch):
+    """모르면 **명령을 만들지 않는다** — 반쯤 맞는 명령은 그대로 붙여넣어지고 "연결 안 된다"로 돌아온다."""
+    from app.config import MCP_PUBLIC_URL_ENV, settings
+    from app.modules.users import routes
+
+    monkeypatch.setattr(settings, "mcp_public_url", "", raising=False)
+    assert routes.mcp_public_url(_Req()) == ""
+    snippet = routes.mcp_add_command(_Req(), "kr_secret_token")
+    assert snippet == routes.MCP_URL_UNKNOWN
+    assert "kr_secret_token" not in snippet
+    # 그대로 붙여넣어도 **아무 일도 안 나야** 한다 — 주석 한 줄이고 인자가 없다
+    assert snippet.lstrip().startswith("#"), f"명령처럼 보이면 붙여넣는다 — {snippet!r}"
+    assert "--header" not in snippet and "--transport" not in snippet
+    # ⚠ 안내가 **실제로 읽히는 키 이름**을 말해야 한다. 접두사 없는 MCP_PUBLIC_URL 은 무시되므로,
+    # 그 이름을 안내하면 운영자가 시키는 대로 하고도 화면이 그대로인 닫힌 고리가 된다.
+    assert MCP_PUBLIC_URL_ENV == "KOORM_MCP_PUBLIC_URL"
+    assert MCP_PUBLIC_URL_ENV in snippet, "무엇을 설정해야 하는지 — 진짜 키 이름으로 말해야 한다"
+
+
+def test_the_address_comes_only_from_config(monkeypatch):
+    """프록시 헤더로 **지어내지 않는다** — 실측 세 경로 중 둘이 틀린 값을 냈다(포트 유실·내부 주소).
+
+    루프백 폴백도 없앴다: request.client 는 TCP 상대라, MCP 경유 호출은 사람이 어디 있든
+    늘 127.0.0.1 로 보인다 — 원격 사용자에게 자기 PC 주소를 건네게 된다."""
+    from app.config import settings
+    from app.modules.users import routes
+
+    monkeypatch.setattr(settings, "mcp_public_url",
+                        "https://set.example:8088/apps/kooremapper_mcp/mcp", raising=False)
+    assert routes.mcp_public_url(_Req()) == "https://set.example:8088/apps/kooremapper_mcp/mcp"
+
+    monkeypatch.setattr(settings, "mcp_public_url", "", raising=False)
+    fwd = _Req({"x-forwarded-host": "portal.example", "x-forwarded-proto": "https"})
+    assert routes.mcp_public_url(fwd) == "", "X-Forwarded-Host 로 만들면 포트가 빠진다"
+    assert routes.mcp_public_url(_Req(client_host="127.0.0.1")) == "", "루프백 상대는 사람의 위치가 아니다"
+
+
+def test_no_screen_hands_out_a_command_with_an_empty_url(monkeypatch):
+    """세 자리가 **같은 함수**를 써야 한 요청에서 서로 다른 답이 안 나온다(요청서 ④ 고침 2).
+
+    f-string 에 빈 주소를 끼우면 URL 칸만 빈 `claude mcp add … --header …` 가 나오고,
+    화면이 그것을 복사 버튼과 함께 그린다 — claude 는 `--header` 값을 URL 로 먹는다."""
+    from app.config import settings
+    from app.modules.system import routes as system_routes
+    from app.modules.users import routes as user_routes
+
+    monkeypatch.setattr(settings, "mcp_public_url", "", raising=False)
+    req = _Req()
+
+    # ⚠ **엔드포인트를 실제로 부른다.** 임포트한 함수만 부르면 엔드포인트가 f-string 으로 되돌아가도
+    # 시험이 초록이다(그 거짓 초록을 한 번 만들었다).
+    caps = _endpoint_data(system_routes.capabilities(req, _user=None))
+    for name, produced in (
+        ("토큰 화면", user_routes.mcp_add_command(req, "kr_x")),
+        ("capabilities", caps["mcp_add_hint"]),
+    ):
+        assert produced.lstrip().startswith("#"), f"{name}: 주소를 모르는데 명령을 만들었다 — {produced!r}"
+        assert "--header" not in produced, f"{name}: URL 칸만 빈 명령이다 — {produced!r}"
+    assert caps["mcp_url"] is None, "모르는데 주소가 있다고 한다"
+
+    monkeypatch.setattr(settings, "mcp_public_url", "https://ok.example/mcp", raising=False)
+    caps = _endpoint_data(system_routes.capabilities(req, _user=None))
+    assert caps["mcp_url"] == "https://ok.example/mcp"
+    assert "https://ok.example/mcp" in caps["mcp_add_hint"]
+    assert "kooremapper  --header" not in caps["mcp_add_hint"]
+
+
 # ── ③ 감시에 공백이 없다 ───────────────────────────────────────────────────
 def _install_tree(tmp_path):
     """install-autostart.sh 를 **스크립트째** 돌릴 수 있는 트리 — 크론과 감독자는 가짜다.
