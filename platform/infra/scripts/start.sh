@@ -27,6 +27,8 @@ start_instance() {
 
 # ── postgres ────────────────────────────────────────────────────────
 # Stale lock cleanup when the instance is not running but a dead PID holds the lock.
+# 여기는 "모름" 을 "없음" 으로 읽어도 안전한 유일한 자리다 — 블록 안에서 `kill -0` 로 그 pid 가
+# 실제로 살아 있는지 다시 보고, 살아 있으면 락을 건드리지 않는다. 판정이 아니라 pid 가 근거다.
 if ! instance_running "$INST_POSTGRES"; then
   for f in "$DATA_DIR/postgres-run/.s.PGSQL.${POSTGRES_PORT}.lock" \
            "$DATA_DIR/postgres/pgdata/postmaster.pid"; do

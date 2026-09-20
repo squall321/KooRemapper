@@ -379,6 +379,24 @@ def test_restart_api_only_stops_when_it_cannot_tell(tmp_path):
     assert "instance stop koorm_api" in log.read_text(encoding="utf-8"), "모른다고 stop 을 건너뛰었다"
 
 
+def test_status_does_not_report_unknown_as_not_running(tmp_path):
+    """status.sh 는 사람이 보고 판단하는 자리다 — 모르는 것을 '안 돌고 있다' 로 적으면
+    그 오해 위에서 다음 행동이 결정된다."""
+    root, scripts = _script_tree(tmp_path, "status.sh")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _stub(bin_dir / "curl", 'echo 000\nexit 0\n')
+    _stub(bin_dir / "ss", "exit 0\n")
+    appt = _stub(tmp_path / "apptainer", _LIST_FAILS)
+    env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "APPTAINER": str(appt),
+           "ALLOW_PLACEHOLDER_SECRETS": "1", "HOME": str(root), "STUB_LOG": str(tmp_path / "s.log"),
+           "KOORM_ENABLE_NGINX": "1"}
+    r = subprocess.run(["bash", str(scripts / "status.sh")], capture_output=True, text=True,
+                       cwd=str(root), env=env)
+    assert "판정 불가" in r.stdout, f"모르는 것을 단정했다 — {r.stdout!r}"
+    assert "nginx not running" not in r.stdout, f"모르는데 '안 돌고 있다' 고 적었다 — {r.stdout!r}"
+
+
 def test_stop_does_not_report_false_success_when_it_cannot_tell(tmp_path):
     """살아 있는 것을 `✓ not running` 으로 넘기면 배포가 옛 인스턴스 위에서 계속된다."""
     root, scripts = _script_tree(tmp_path, "stop.sh")

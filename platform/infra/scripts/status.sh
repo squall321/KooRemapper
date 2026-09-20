@@ -36,7 +36,12 @@ case "${_mcp_code:-000}" in
   *)
     echo "  ✗ mcp 이상 응답 (:${KOORM_MCP_PORT}, HTTP ${_mcp_code})" ;;
 esac
-if instance_running "$INST_NGINX"; then
+# 상태를 못 읽었으면 그렇게 말한다 — status.sh 는 사람이 보고 판단하는 자리라,
+# 모르는 것을 "안 돌고 있다" 로 적으면 그 오해 위에서 다음 행동이 결정된다.
+_ngx=0; instance_running "$INST_NGINX" || _ngx=$?
+if [ "$_ngx" -eq 2 ]; then
+  echo "  ⚠ nginx 판정 불가 — 인스턴스 목록 조회 실패(apptainer instance list 를 확인하라)"
+elif [ "$_ngx" -eq 0 ]; then
   if curl -fsSk -m3 -o /dev/null "https://127.0.0.1:${KOORM_HTTPS_PORT}/" 2>/dev/null; then
     echo "  ✓ nginx TLS ready (https://127.0.0.1:${KOORM_HTTPS_PORT})"
   else
