@@ -5,7 +5,12 @@ set -euo pipefail
 . "$(dirname "$0")/_common.sh"
 require_apptainer
 
-instance_running "$INST_POSTGRES" || { echo "✗ $INST_POSTGRES not running"; exit 1; }
+_rc=0; instance_running "$INST_POSTGRES" || _rc=$?   # `; _rc=$?` 는 set -e 아래서 여기서 끝난다
+case "$_rc" in
+  0) ;;
+  1) echo "✗ $INST_POSTGRES not running"; exit 1 ;;
+  *) echo "✗ 인스턴스 목록을 못 읽었다 — $INST_POSTGRES 상태를 알 수 없어 백업하지 않는다"; exit 1 ;;
+esac
 
 BACKUP_DIR="$DATA_DIR/backups"
 mkdir -p "$BACKUP_DIR"

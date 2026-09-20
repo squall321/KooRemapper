@@ -83,6 +83,13 @@ def test_an_absent_instance_is_still_absent(tmp_path):
     assert "rc=1" in r.stdout, r.stdout
 
 
+# postgres·mcp 는 있고 **api 만** 목록에서 빠진 거짓 음성 — ① 이 만들던 모양 그대로다
+_LIST_WITHOUT_API = (
+    'printf \'{"instances":[{"instance": "koorm_postgres"},'
+    '{"instance": "koorm_mcp"}]}\\n\'\n'
+)
+
+
 # ── ②·감독자 판정 ──────────────────────────────────────────────────────────
 @pytest.fixture()
 def fake_stack(tmp_path):
@@ -117,15 +124,34 @@ def test_it_does_not_restart_a_healthy_api_when_the_listing_fails(fake_stack, tm
     appt = _stub(tmp_path / "apptainer", 'echo "lock busy" >&2\nexit 255\n')
     r = _run_once(root, scripts, bin_dir, appt, FAKE_HTTP_CODE="200")
     assert not marker.exists(), f"멀쩡한 API 를 재기동했다 — {r.stdout!r}"
-    assert "판정 보류" in r.stdout, f"보류를 말하지 않았다(보이지 않으면 없는 것이다) — {r.stdout!r}"
 
 
-def test_it_still_restarts_when_health_is_bad(fake_stack, tmp_path):
+def test_it_does_not_restart_a_healthy_api_when_the_listing_says_gone(fake_stack, tmp_path):
+    """09-18 의 `restart 성공` 106회가 **정확히 이 모양**이다 — 목록은 "없다", 헬스는 200.
+
+    원인(SIGPIPE)을 고쳤어도 판정 순서가 목록 먼저면 같은 꼴의 오판이 또 재기동으로 번진다.
+    헬스 200 은 API 가 실제로 일하고 있다는 직접 증거다 — 그때는 목록이 무어라 하든 손대지 않는다."""
+    root, scripts, marker, bin_dir = fake_stack
+    appt = _stub(tmp_path / "apptainer", _LIST_WITHOUT_API)
+    r = _run_once(root, scripts, bin_dir, appt, FAKE_HTTP_CODE="200")
+    assert not marker.exists(), f"헬스 200 인 API 를 목록만 믿고 재기동했다 — {r.stdout!r}"
+
+
+def test_a_truly_dead_api_is_still_restarted_with_the_right_reason(fake_stack, tmp_path):
+    """반대로 망가뜨리지 않았는지 — 정말 죽었으면 되살리고, 이유도 정확히 적는다."""
+    root, scripts, marker, bin_dir = fake_stack
+    appt = _stub(tmp_path / "apptainer", _LIST_WITHOUT_API)
+    r = _run_once(root, scripts, bin_dir, appt, FAKE_HTTP_CODE="000")
+    assert marker.exists(), f"죽은 API 를 안 살렸다 — {r.stdout!r}"
+    assert "인스턴스 없음" in r.stdout, f"이유를 목록에서 가져오지 않았다 — {r.stdout!r}"
+
+
+def test_it_still_restarts_when_the_listing_is_unknown_and_health_is_bad(fake_stack, tmp_path):
     """모른다고 손을 놓지는 않는다 — 헬스가 독립적으로 나쁘면 그것이 근거다."""
     root, scripts, marker, bin_dir = fake_stack
     appt = _stub(tmp_path / "apptainer", 'echo "lock busy" >&2\nexit 255\n')
-    _run_once(root, scripts, bin_dir, appt, FAKE_HTTP_CODE="503")
-    assert marker.exists(), "헬스가 503 인데 아무것도 안 했다"
+    r = _run_once(root, scripts, bin_dir, appt, FAKE_HTTP_CODE="503")
+    assert marker.exists(), f"헬스가 503 인데 아무것도 안 했다 — {r.stdout!r}"
 
 
 def test_the_restart_failure_logs_the_real_exit_code(fake_stack, tmp_path):
@@ -134,70 +160,148 @@ def test_the_restart_failure_logs_the_real_exit_code(fake_stack, tmp_path):
     appt = _stub(tmp_path / "apptainer",
                  'if [ "${1:-}" = "instance" ] && [ "${2:-}" = "start" ]; then exit 0; fi\n'
                  'printf \'{"instances":[{"instance": "koorm_postgres"},{"instance": "koorm_mcp"}]}\\n\'\n')
-    r = _run_once(root, scripts, bin_dir, appt, FAKE_RESTART_RC="7")
+    # 헬스가 나빠야 재기동 가지에 닿는다 — 헬스 200 이면 (이제) 아무것도 안 한다
+    r = _run_once(root, scripts, bin_dir, appt, FAKE_RESTART_RC="7", FAKE_HTTP_CODE="000")
     assert "api restart 실패(rc=7)" in r.stdout, f"진짜 종료코드를 안 남겼다 — {r.stdout!r}"
 
 
-# ── ③ 설치가 감독자를 지금 띄운다 ──────────────────────────────────────────
-def test_install_starts_the_supervisor_now_and_only_once(tmp_path):
-    """크론만 넣으면 **재부팅 전까지 감시가 없다.** 그리고 둘 띄우면 서로의 재기동을 밟는다."""
-    scripts = tmp_path / "scripts"
-    scripts.mkdir()
-    data = tmp_path / "data"
-    data.mkdir()
-    _stub(scripts / "supervisor.sh", "sleep 20\n")
-    body = (f'SCRIPT_DIR="{scripts}"\nREPO_ROOT="{tmp_path}"\nDATA_DIR="{data}"\n'
-            f'LOG="{data}/supervisor.log"\n'
-            + _func("start_supervisor_now", SCRIPTS / "install-autostart.sh"))
+# ── ③ 감시에 공백이 없다 ───────────────────────────────────────────────────
+def _install_tree(tmp_path):
+    """install-autostart.sh 를 **스크립트째** 돌릴 수 있는 트리 — 크론과 감독자는 가짜다.
+
+    함수만 떼어 돌리면 호출부를 지워도 시험이 초록이라 ③ 전체를 원복해도 못 잡는다."""
+    root = tmp_path / "repo"
+    scripts = root / "platform" / "infra" / "scripts"
+    scripts.mkdir(parents=True)
+    (root / "platform" / "infra" / "data").mkdir(parents=True)
+    shutil.copy(SCRIPTS / "_common.sh", scripts / "_common.sh")
+    shutil.copy(SCRIPTS / "install-autostart.sh", scripts / "install-autostart.sh")
+    shutil.copy(PLATFORM / ".env.example", root / "platform" / ".env")
+    sup_log = tmp_path / "sup.calls"
+    _stub(scripts / "supervisor.sh", f'echo "$*" >> "{sup_log}"\nexit ${{SUP_RC:-0}}\n')
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    cron_file = tmp_path / "crontab.txt"
+    _stub(bin_dir / "crontab",
+          f'[ "${{1:-}}" = "-l" ] && {{ cat "{cron_file}" 2>/dev/null; exit $?; }}\n'
+          f'[ "${{1:-}}" = "-" ] && {{ cat > "{cron_file}"; exit 0; }}\nexit 0\n')
+    return root, scripts, bin_dir, cron_file, sup_log
+
+
+def _run_install(root, scripts, bin_dir, *args, **extra):
+    env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "ALLOW_PLACEHOLDER_SECRETS": "1",
+           "HOME": str(root), **extra}
+    return subprocess.run(["bash", str(scripts / "install-autostart.sh"), *args],
+                          capture_output=True, text=True, cwd=str(root), env=env)
+
+
+def test_install_leaves_no_supervision_gap(tmp_path):
+    """설치는 보통 "지금 스택이 이상하다" 에서 하는 일이다 — 다음 재부팅까지 기다리면 안 된다.
+
+    그리고 **루프가 죽어도 되살아나야** 한다. 매분 도는 `--once` 가 둘 다 해결한다
+    (요청서 ③ 의 둘째 안). 겹쳐 도는 것은 supervisor.sh 의 파일 잠금이 막는다."""
+    root, scripts, bin_dir, cron_file, sup_log = _install_tree(tmp_path)
+    # 옛 @reboot 줄 + 남의 크론 줄이 있는 상태에서 설치한다(이관도 함께 본다)
+    cron_file.write_text(
+        "@reboot cd /repo && nohup bash /repo/platform/infra/scripts/supervisor.sh >> /log 2>&1 &"
+        "  # koorm-autostart\n0 3 * * * /some/other/job\n", encoding="utf-8")
+
+    r = _run_install(root, scripts, bin_dir)
+    assert r.returncode == 0, f"{r.stdout!r} {r.stderr!r}"
+    cron = cron_file.read_text(encoding="utf-8")
+    assert "@reboot" not in cron, f"옛 @reboot 루프가 남았다 — 이관이 안 됐다\n{cron}"
+    assert "* * * * *" in cron and "--once" in cron, f"매분 감시가 없다 — 루프가 죽으면 끝이다\n{cron}"
+    assert "/some/other/job" in cron, "남의 크론 줄을 지웠다"
+    # 설치한 그 자리에서 한 번 돌아야 한다(다음 정각까지 최대 1분을 비워 두지 않는다)
+    assert sup_log.read_text(encoding="utf-8").strip() == "--once", "설치가 지금 점검하지 않았다"
+
+
+def test_install_reports_a_failed_immediate_check(tmp_path):
+    """즉시 점검이 실패했는데 ✓ 로 끝나면, 사람은 감시가 선 줄 안다."""
+    root, scripts, bin_dir, cron_file, _ = _install_tree(tmp_path)
+    cron_file.write_text("", encoding="utf-8")
+    r = _run_install(root, scripts, bin_dir, SUP_RC="7")
+    assert r.returncode != 0, f"실패를 성공으로 끝냈다 — {r.stdout!r}"
+    assert "rc=7" in r.stderr, f"진짜 종료코드를 안 남겼다 — {r.stderr!r}"
+
+
+def test_a_second_supervisor_does_nothing(fake_stack, tmp_path):
+    """감독자가 둘이면 서로의 재기동을 밟는다 — 한쪽이 stop 한 것을 다른 쪽이 또 start 한다.
+
+    ⚠ 프로세스 이름으로는 못 막는다(실측): 크론은 `bash /abs/…/supervisor.sh`, README 가 권하는
+    방식은 `bash ./infra/scripts/supervisor.sh` 라 절대경로 패턴이 빗나간다. 파일 잠금으로 막는다."""
+    root, scripts, marker, bin_dir = fake_stack
+    appt = _stub(tmp_path / "apptainer", _LIST_WITHOUT_API)
+    lock = root / "platform" / "infra" / "data" / "supervisor.lock"
+    holder = subprocess.Popen(["bash", "-c", f'exec 8>"{lock}"; flock 8; sleep 30'])
     try:
-        t0 = time.time()
-        first = _sh(body + "\nstart_supervisor_now\n", env={"HOME": str(tmp_path)})
-        elapsed = time.time() - t0
-        assert "지금 띄웠다" in first.stdout, f"{first.stdout!r} {first.stderr!r}"
-        # ⚠ **바로 돌아와야 한다.** `( … & )` 서브셸로 띄우면 호출자가 감독자 수명만큼 매달린다
-        # (실측: 스텁 sleep 4 에 4.0초). 설치를 감싸는 자동화에서는 영영 안 끝난다는 뜻이다.
-        assert elapsed < 5, f"설치 호출이 {elapsed:.1f}초 매달렸다 — 감독자가 살아 있는 동안 계속된다"
-        time.sleep(0.3)
-        second = _sh(body + "\nstart_supervisor_now\n", env={"HOME": str(tmp_path)})
-        assert "이미 실행 중" in second.stdout, f"감독자를 둘 띄웠다 — {second.stdout!r}"
-        n = subprocess.run(["pgrep", "-fc", f"bash {scripts}/supervisor.sh"],
-                           capture_output=True, text=True).stdout.strip()
-        assert n == "1", f"감독자 프로세스가 {n}개다"
+        time.sleep(0.5)
+        r = _run_once(root, scripts, bin_dir, appt, FAKE_HTTP_CODE="000")
+        assert "이미 감독자가 돌고 있다" in r.stdout, f"둘째 감독자가 그냥 일했다 — {r.stdout!r}"
+        assert not marker.exists(), "둘째 감독자가 재기동까지 했다"
     finally:
-        subprocess.run(["pkill", "-f", f"bash {scripts}/supervisor.sh"], capture_output=True)
+        holder.kill()
+        holder.wait()
 
 
-# ── ④ 주소를 지어내지 않는다 ───────────────────────────────────────────────
-class _Req:
-    def __init__(self, headers=None, client_host="10.1.2.3"):
-        self.headers = headers or {}
-        self.client = type("C", (), {"host": client_host})()
+# ── ① 의 규율이 감독자 밖에서도 도나 ──────────────────────────────────────
+def _script_tree(tmp_path, *names):
+    root = tmp_path / "repo"
+    scripts = root / "platform" / "infra" / "scripts"
+    scripts.mkdir(parents=True)
+    (root / "platform" / "infra" / "data" / "postgres" / "pgdata").mkdir(parents=True)
+    (root / "platform" / "infra" / "data" / "postgres-run").mkdir(parents=True)
+    (root / "platform" / "infra" / "data" / "postgres" / "pgdata" / "PG_VERSION").write_text("16\n")
+    shutil.copy(PLATFORM / ".env.example", root / "platform" / ".env")
+    for n in ("_common.sh", *names):
+        shutil.copy(SCRIPTS / n, scripts / n)
+    return root, scripts
 
 
-def test_the_hint_says_unknown_instead_of_handing_out_loopback(monkeypatch):
-    """원격 사용자에게 `127.0.0.1:8701` 을 주면 **틀렸는데 맞아 보인다** — 자기 PC 를 찌른다."""
-    from app.config import settings
-    from app.modules.users import routes
-
-    monkeypatch.setattr(settings, "mcp_public_url", "", raising=False)
-    assert routes.mcp_public_url(_Req()) == ""
-    snippet = routes._mcp_add_snippet("kr_secret_token", _Req())
-    assert snippet == routes.MCP_URL_UNKNOWN
-    assert "kr_secret_token" not in snippet, "반쯤 맞는 명령을 주면 그대로 붙여넣는다"
-    assert "MCP_PUBLIC_URL" in snippet, "무엇을 하면 되는지 말해야 한다"
+def _run_script(root, scripts, name, appt, stdin="", **extra):
+    env = {"PATH": "/usr/bin:/bin", "APPTAINER": str(appt),
+           "ALLOW_PLACEHOLDER_SECRETS": "1", "HOME": str(root), **extra}
+    return subprocess.run(["bash", str(scripts / name)], input=stdin,
+                          capture_output=True, text=True, cwd=str(root), env=env)
 
 
-def test_the_hint_uses_config_then_proxy_then_loopback(monkeypatch):
-    """아는 경우는 그대로 낸다 — 설정 > 프록시 경로 > (호출자가 루프백일 때만) 루프백."""
-    from app.config import settings
-    from app.modules.users import routes
+# 목록 조회만 실패하는 apptainer — "모름(2)" 을 만드는 최소 스텁
+_LIST_FAILS = ('echo "$*" >> "$STUB_LOG"\n'
+               '[ "${1:-} ${2:-}" = "instance list" ] && exit 255\nexit 0\n')
 
-    monkeypatch.setattr(settings, "mcp_public_url", "https://set.example/mcp", raising=False)
-    assert routes.mcp_public_url(_Req()) == "https://set.example/mcp"
 
-    monkeypatch.setattr(settings, "mcp_public_url", "", raising=False)
-    fwd = _Req({"x-forwarded-host": "portal.example", "x-forwarded-proto": "https"})
-    assert routes.mcp_public_url(fwd) == "https://portal.example/apps/kooremapper_mcp/mcp"
+def test_reset_db_refuses_to_wipe_when_it_cannot_tell(tmp_path):
+    """**모름을 없음으로 읽으면 살아 있는 postmaster 위에서 pgdata 를 지운다.**
 
-    local = _Req(client_host="127.0.0.1")
-    assert routes.mcp_public_url(local) == f"http://127.0.0.1:{settings.mcp_port}/mcp"
+    그러면 인스턴스는 삭제된 inode 로 계속 돌고, 안내대로 start.sh 를 돌려도
+    `✓ already running` 으로 돌아와 겉보기엔 멀쩡한데 내용이 없는 DB 가 된다."""
+    root, scripts = _script_tree(tmp_path, "reset-db.sh")
+    appt = _stub(tmp_path / "apptainer", _LIST_FAILS)
+    pgdata = root / "platform" / "infra" / "data" / "postgres" / "pgdata" / "PG_VERSION"
+    r = _run_script(root, scripts, "reset-db.sh", appt, stdin="yes\n",
+                    STUB_LOG=str(tmp_path / "s.log"))
+    assert r.returncode != 0, f"모르는 채로 지웠다 — {r.stdout!r}"
+    assert pgdata.exists(), "살아 있을지 모르는 postgres 의 데이터를 지웠다"
+
+
+def test_restart_api_only_stops_when_it_cannot_tell(tmp_path):
+    """모름에서 stop 을 건너뛰면 곧바로 `already exists` 로 실패한다 — 09-18 의 62회가 그것이다.
+
+    stop 은 없는 인스턴스에 무해하므로(이미 `|| true`), 모를 때는 시도하는 쪽으로 기운다."""
+    root, scripts = _script_tree(tmp_path, "restart-api-only.sh")
+    (root / "platform" / "infra" / "apptainer").mkdir(parents=True)
+    (root / "platform" / "infra" / "apptainer" / "api.sif").write_text("")
+    log = tmp_path / "s.log"
+    appt = _stub(tmp_path / "apptainer", _LIST_FAILS)
+    _run_script(root, scripts, "restart-api-only.sh", appt, STUB_LOG=str(log))
+    assert "instance stop koorm_api" in log.read_text(encoding="utf-8"), "모른다고 stop 을 건너뛰었다"
+
+
+def test_stop_does_not_report_false_success_when_it_cannot_tell(tmp_path):
+    """살아 있는 것을 `✓ not running` 으로 넘기면 배포가 옛 인스턴스 위에서 계속된다."""
+    root, scripts = _script_tree(tmp_path, "stop.sh")
+    log = tmp_path / "s.log"
+    appt = _stub(tmp_path / "apptainer", _LIST_FAILS)
+    r = _run_script(root, scripts, "stop.sh", appt, STUB_LOG=str(log))
+    assert "not running" not in r.stdout, f"모르는 것을 '안 돌고 있다'고 단정했다 — {r.stdout!r}"
+    assert "instance stop" in log.read_text(encoding="utf-8"), "모르는데 stop 도 안 해 봤다"

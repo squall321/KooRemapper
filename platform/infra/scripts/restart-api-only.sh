@@ -7,7 +7,10 @@ require_apptainer
 
 [ -f "$API_SIF" ] || { echo "✗ api.sif missing — run build.sh first"; exit 1; }
 
-if instance_running "$INST_API"; then
+# ⚠ 감독자가 API 를 되살리는 **유일한 경로**다. 모름을 "없음" 으로 읽어 stop 을 건너뛰면 곧바로
+# `instance koorm_api already exists` 로 실패한다 — 09-18 의 실패 62회가 그것이다.
+# stop 은 없는 인스턴스에 대해 무해하므로(이미 `|| true`), 모를 때는 시도하는 쪽으로 기운다.
+if ! instance_absent_for_sure "$INST_API"; then
   echo "→ stop $INST_API"
   "$APPTAINER" instance stop "$INST_API" || true
   sleep 1

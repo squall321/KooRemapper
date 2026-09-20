@@ -1,58 +1,41 @@
 #!/usr/bin/env bash
-# 재부팅 후 스택을 자동 기동+감시하도록 @reboot crontab 항목을 설치한다(멱등).
-# Install a @reboot crontab entry that brings the KooRemapper stack up after a
-# host reboot and keeps it supervised. Idempotent. Uninstall with --remove.
+# 스택을 자동 기동+감시하도록 crontab 항목을 설치한다(멱등). Uninstall with --remove.
+#
+# ⚠ 예전에는 `@reboot` 한 줄로 감독자 **루프**를 띄웠다. 두 구멍이 있었다(요청서 ③):
+#   · 설치~다음 재부팅 사이에는 감시가 없다. 설치는 보통 "지금 스택이 이상하다" 에서 하는 일이라,
+#     그 공백이 정확히 필요한 때에 비어 있었다.
+#   · 그 루프가 죽으면 **되살리는 주체가 없다.** 다음 재부팅까지 감시가 사라진다.
+# 그래서 매분 도는 `--once` 로 바꾼다 — 부팅과 루프 사망이 한 번에 해결되고, 다른 스택
+# (HEAXHub·AIDataHub)의 watchdog 크론과 모양이 같아진다. 겹쳐 도는 것은 supervisor.sh 의
+# 파일 잠금이 막는다(프로세스 이름 매칭은 기동 방식마다 빗나가서 못 쓴다).
 set -euo pipefail
 . "$(dirname "$0")/_common.sh"
 
 MARK="# koorm-autostart"
 LOG="$DATA_DIR/supervisor.log"
-# supervisor.sh start.sh's the full stack when it's down, then watches — so a
-# single @reboot entry covers both boot-start and ongoing restart.
-LINE="@reboot cd $REPO_ROOT && nohup bash $SCRIPT_DIR/supervisor.sh >> $LOG 2>&1 &  $MARK"
-
-# 지금 감독자를 띄운다 — **크론만 넣으면 다음 재부팅까지 감시가 없다.**
-# 설치는 보통 "지금 스택이 이상하다" 에서 하는 일이라, 그 공백이 정확히 필요한 때에 비어 있었다.
-# 이미 돌고 있으면 띄우지 않는다 — 감독자가 둘이면 서로의 재기동을 밟는다(30초 간격이 겹친다).
-start_supervisor_now() {
-  if pgrep -f "bash $SCRIPT_DIR/supervisor.sh" >/dev/null 2>&1; then
-    _pids="$(pgrep -f "bash $SCRIPT_DIR/supervisor.sh" || true)"
-    echo "✓ supervisor 이미 실행 중 — 중복 기동하지 않는다(pid ${_pids%%$'\n'*})"
-    return 0
-  fi
-  mkdir -p "$DATA_DIR"
-  # ⚠ **서브셸로 감싸지 않는다** — `( … & )` 는 호출자를 자식 수명만큼 붙든다(실측: 스텁 감독자
-  # sleep 4 에 호출이 4.0초, sleep 6 에 6.0초). 출력을 받아 가는 자동화·설치 래퍼에서는 그 말이
-  # **영원히 안 끝난다**는 뜻이다. `nohup … &` + `disown` 이면 즉시 돌아온다(실측 0.0초).
-  # cwd 는 걱정하지 않아도 된다 — `_common.sh` 가 자기 위치에서 REPO_ROOT 로 `cd` 한다.
-  nohup bash "$SCRIPT_DIR/supervisor.sh" >> "$LOG" 2>&1 &
-  disown
-  sleep 1
-  if pgrep -f "bash $SCRIPT_DIR/supervisor.sh" >/dev/null 2>&1; then
-    echo "✓ supervisor 지금 띄웠다 — 재부팅을 기다리지 않는다(로그: $LOG)"
-  else
-    echo "✗ supervisor 기동 실패 — $LOG 를 확인하라" >&2
-    return 1
-  fi
-}
+LINE="* * * * * cd $REPO_ROOT && bash $SCRIPT_DIR/supervisor.sh --once >> $LOG 2>&1  $MARK"
 
 current="$(crontab -l 2>/dev/null || true)"
 
 if [ "${1:-}" = "--remove" ]; then
   echo "$current" | grep -v "$MARK" | crontab - 2>/dev/null || true
   echo "✓ removed koorm autostart from crontab"
+  echo "  손으로 띄운 감독자 루프가 있으면 그것은 따로 멈춰야 한다: pkill -f supervisor.sh"
   exit 0
 fi
 
-if echo "$current" | grep -qF "$MARK"; then
-  echo "✓ autostart already installed (crontab has $MARK)"
-  # 크론이 있다고 감독자가 돌고 있는 것은 아니다(재부팅 전이거나 죽었을 수 있다) — 여기서도 확인한다
-  start_supervisor_now
-  exit $?
-fi
-
-printf '%s\n%s\n' "$current" "$LINE" | sed '/^$/d' | crontab -
-echo "✓ installed @reboot autostart → supervisor.sh (logs: $LOG)"
-echo "  the stack will come up automatically after a reboot and stay supervised."
+# 옛 @reboot 줄이 남아 있으면 함께 걷어낸다 — 같은 MARK 라 한 번에 갈린다(재설치가 곧 이관이다).
+printf '%s\n%s\n' "$(echo "$current" | grep -v "$MARK" || true)" "$LINE" | sed '/^$/d' | crontab -
+echo "✓ installed watchdog cron (매분 supervisor.sh --once, logs: $LOG)"
+echo "  재부팅 뒤에도, 감시가 멈춰도 다음 1분 안에 되살아난다."
 echo "  remove with: $0 --remove"
-start_supervisor_now
+
+# 다음 정각까지 최대 1분을 기다리지 않는다 — 설치한 그 자리에서 한 번 돌린다.
+mkdir -p "$DATA_DIR"
+if bash "$SCRIPT_DIR/supervisor.sh" --once >> "$LOG" 2>&1; then
+  echo "✓ 지금 한 번 점검했다 — 기다리지 않는다(로그: $LOG)"
+else
+  rc=$?   # ② 와 같은 이유로 **첫 문장**에서 받는다 — 앞에 무엇이든 끼면 그 종료코드가 찍힌다
+  echo "✗ 즉시 점검이 실패했다(rc=$rc) — $LOG 를 확인하라" >&2
+  exit 1
+fi

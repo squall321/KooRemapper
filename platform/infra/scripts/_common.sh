@@ -140,3 +140,17 @@ instance_running() {
     *) return 1 ;;
   esac
 }
+
+# 인스턴스가 **확실히 없는가** — 0 확실히 없음 · 1 그 밖(있거나 모른다).
+#
+# "없다" 를 근거로 삼는 행동은 대개 파괴적이다(stop·start·rm·재기동). `instance_running` 이
+# 모름(2)을 내는데도 `if ! instance_running …` 로 받으면 **모름이 곧 없음**이 되어 그 행동이 따라붙는다.
+# 감독자만 이 구분을 갖고 있었으나(이번 요청서 ①), 같은 뭉갬이 stop·restart·reset-db 에도 있었다.
+# 쓰는 쪽은 둘 중 하나를 고른다.
+#   · 없을 때만 해도 되는 일(로그 문구·건너뛰기) → `instance_absent_for_sure` 로 묻는다.
+#   · 있든 모르든 해도 무해한 일(stop 시도) → `! instance_absent_for_sure` 로 묻는다.
+instance_absent_for_sure() {
+  local rc
+  instance_running "$1"; rc=$?
+  [ "$rc" -eq 1 ]
+}

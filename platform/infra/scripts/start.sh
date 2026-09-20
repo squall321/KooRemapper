@@ -16,7 +16,11 @@ fi
 
 start_instance() {
   local name="$1" sif="$2"; shift 2
-  if instance_running "$name"; then echo "✓ $name already running"; return 0; fi
+  # 모를 때 "✓ already running" 이라고 단정하면 새 코드가 안 올라간 것을 성공으로 읽는다.
+  # 확실히 있을 때만 건너뛰고, 모르면 그렇게 말한 뒤 기동을 시도한다(있으면 apptainer 가 거절한다).
+  local _rc=0; instance_running "$name" || _rc=$?   # `; _rc=$?` 는 set -e 아래서 여기서 끝난다
+  if [ "$_rc" -eq 0 ]; then echo "✓ $name already running"; return 0; fi
+  [ "$_rc" -eq 2 ] && echo "  ⚠ $name 판정 불가(인스턴스 목록 조회 실패) — 기동을 시도한다"
   echo "→ start $name"
   "$APPTAINER" instance start "${NET_ARGS[@]}" "$@" "$sif" "$name"
 }

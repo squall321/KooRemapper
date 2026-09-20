@@ -82,8 +82,9 @@ uvicorn app.main:app --reload --port 8700
 | `migrate.sh` / `seed.sh` | 마이그레이션 / 관리자 시드 |
 | `build-frontend.sh` | SPA 빌드(dist) |
 | `backup-db.sh` | postgres 덤프(infra/data/backups, 최근 14개 보관) |
-| `supervisor.sh` | 와치독 — 죽은 인스턴스 자동 재기동(`--once` 또는 루프). 백그라운드 권장: `nohup infra/scripts/supervisor.sh >infra/logs/supervisor.log 2>&1 &` |
-| `reset-db.sh` | (파괴적) postgres 데이터 초기화 |
+| `supervisor.sh` | 와치독 — 죽은 인스턴스 자동 재기동(`--once` 또는 루프). **상시 감시는 `install-autostart.sh` 로 건다**(매분 `--once`, 루프가 죽어도 1분 안에 되살아난다). 손으로 띄워도 되지만 감독자는 파일 잠금으로 **하나만** 돈다 |
+| `install-autostart.sh` | 상시 감시 크론 설치(매분 `supervisor.sh --once`) + 그 자리에서 한 번 점검. `--remove` 로 해제 |
+| `reset-db.sh` | (파괴적) postgres 데이터 초기화 — 인스턴스 상태를 못 읽으면 **지우지 않고 멈춘다** |
 
 ## 트러블슈팅
 
