@@ -12,23 +12,42 @@ INTERVAL="${KOORM_SUPERVISE_INTERVAL:-30}"
 ONCE=0; [ "${1:-}" = "--once" ] && ONCE=1
 
 # 감독자는 **하나만** 돈다. 둘이면 서로의 재기동을 밟는다 — 한쪽이 stop 한 인스턴스를 다른 쪽이
-# "없음" 으로 보고 다시 start 해 `already exists` 가 난다.
+# "없음" 으로 보고 다시 start 해 `already exists` 가 난다. 매분 도는 --once 가 앞 회차와 겹치는 것도 막는다.
+#
 # ⚠ 프로세스 이름 매칭으로는 못 막는다(실측): 크론은 `bash /abs/…/supervisor.sh` 로 뜨는데
-# README 가 권하는 방식(`nohup infra/scripts/supervisor.sh &`)은 `bash ./infra/scripts/supervisor.sh`
-# 라서 절대경로 pgrep 패턴이 빗나간다. 파일 잠금은 **어떻게 띄우든** 통한다.
-# 매분 도는 `--once` 가 앞 회차와 겹치는 것도 이 잠금이 막는다.
+# README 가 권하는 방식은 `bash ./infra/scripts/supervisor.sh` 라서 절대경로 pgrep 패턴이 빗나간다.
+#
+# ⚠⚠ **flock 도 못 쓴다.** `exec 9>파일` 로 잡은 fd 는 **자식이 물려받는다.** 감독자가 띄운
+# apptainer 인스턴스는 영원히 살아 있으므로 그 fd 를 들고 잠금을 놓지 않는다 —
+# 2026-09-21 01:26 에 실제로 그렇게 됐다(koorm_mcp 가 fd 9 를 쥐고, 이후 모든 회차가
+# "이미 돌고 있다" 로 물러나 **감시가 멈췄다**). 잠금 하나 잘못 잡아 감시를 죽인 셈이다.
+#
+# 그래서 mkdir 로 잡는다 — 원자적이고 **fd 를 남기지 않아** 자식에게 새지 않는다.
+# 죽은 감독자가 남긴 잠금은 pid 로 알아보고 걷어낸다(이름이 아니라 우리가 적은 pid 가 근거다).
 mkdir -p "$DATA_DIR"
-# ⚠ `9>` 가 아니라 `9>>` 다 — `>` 는 **여는 순간 파일을 비운다.** 매분 도는 --once 가 잠금을 못 얻고
-# 물러나면서도 파일을 비워, 먼저 돌던 감독자가 적어 둔 것을 지워 버린다.
-exec 9>>"$DATA_DIR/supervisor.lock"
-if ! flock -n 9; then
-  echo "[$(date '+%F %T')] 이미 감독자가 돌고 있다 — 이번 호출은 아무것도 하지 않는다"
-  exit 0
+LOCK_DIR="$DATA_DIR/supervisor.lock.d"
+LOCK_PID="$LOCK_DIR/pid"
+
+lock_holder_alive() {
+  local p
+  p="$(head -n1 "$LOCK_PID" 2>/dev/null | tr -dc '0-9')"
+  [ -n "$p" ] || return 1
+  kill -0 "$p" 2>/dev/null || return 1
+  # pid 는 재사용된다 — 정말 감독자인지 명령줄로 확인한다
+  tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | grep -q 'supervisor\.sh'
+}
+
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+  if lock_holder_alive; then
+    echo "[$(date '+%F %T')] 이미 감독자가 돌고 있다 — 이번 호출은 아무것도 하지 않는다"
+    exit 0
+  fi
+  echo "[$(date '+%F %T')] 죽은 감독자가 남긴 잠금을 걷어낸다"
+  rm -rf "$LOCK_DIR"
+  mkdir "$LOCK_DIR" 2>/dev/null || { echo "[$(date '+%F %T')] 잠금 확보 실패 — 이번 회차 건너뜀"; exit 0; }
 fi
-# pid 는 별도 파일에 적는다 — `install-autostart.sh --remove` 가 돌고 있는 감독자를 찾는 근거다
-# (프로세스 이름 매칭은 기동 방식마다 빗나가고, 다른 리포의 같은 이름 스크립트까지 잡는다).
-printf '%s\n' "$$" > "$DATA_DIR/supervisor.pid"
-trap 'rm -f "$DATA_DIR/supervisor.pid"' EXIT
+printf '%s\n' "$$" > "$LOCK_PID"
+trap 'rm -rf "$LOCK_DIR"' EXIT
 
 # 인스턴스가 **확실히 없는가** — 재기동은 파괴적 행동이라 "모름" 을 근거로 삼으면 안 된다.
 # `instance_running` 은 0 있음 · 1 없음 · **2 알 수 없음**(목록 조회 실패)을 낸다(_common.sh 주석 참조).

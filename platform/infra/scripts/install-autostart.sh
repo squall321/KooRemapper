@@ -22,7 +22,7 @@ if [ "${1:-}" = "--remove" ]; then
   echo "✓ removed koorm autostart from crontab"
   # 크론만 떼고 끝내면 돌고 있는 루프가 남아 감시가 계속된다 — 해제라고 말했으면 실제로 멈춘다.
   # 근거는 잠금 파일에 적힌 pid 다(이름 매칭은 기동 방식마다 빗나가고 남의 스크립트까지 잡는다).
-  _pid="$(head -n1 "$DATA_DIR/supervisor.pid" 2>/dev/null | tr -dc '0-9')"
+  _pid="$(head -n1 "$DATA_DIR/supervisor.lock.d/pid" 2>/dev/null | tr -dc '0-9')"
   # pid 는 재사용된다 — 정말 우리 감독자인지 명령줄로 한 번 더 확인한 뒤에 죽인다.
   if [ -n "$_pid" ] && kill -0 "$_pid" 2>/dev/null \
      && tr '\0' ' ' < "/proc/$_pid/cmdline" 2>/dev/null | grep -q 'supervisor\.sh'; then

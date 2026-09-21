@@ -316,7 +316,8 @@ def test_remove_also_stops_a_running_supervisor(tmp_path):
     _stub(scripts / "supervisor.sh", "sleep 30\n")
     holder = subprocess.Popen(["bash", str(scripts / "supervisor.sh")])
     try:
-        (data / "supervisor.pid").write_text(f"{holder.pid}\n", encoding="utf-8")
+        (data / "supervisor.lock.d").mkdir(parents=True, exist_ok=True)
+        (data / "supervisor.lock.d" / "pid").write_text(f"{holder.pid}\n", encoding="utf-8")
         r = _run_install(root, scripts, bin_dir, "--remove")
         assert "감독자도 멈췄다" in r.stdout, f"돌고 있는 감독자를 남겼다 — {r.stdout!r}"
         holder.wait(timeout=5)
@@ -326,24 +327,6 @@ def test_remove_also_stops_a_running_supervisor(tmp_path):
             holder.wait()
 
 
-def test_the_lock_file_is_not_truncated_by_a_losing_run(fake_stack, tmp_path):
-    """⚠ `exec 9>` 는 여는 순간 파일을 비운다 — 잠금을 못 얻고 물러나는 회차가 먼저 돌던
-    감독자의 기록을 지워, `--remove` 가 죽일 대상을 못 찾게 된다. `9>>` 여야 한다."""
-    root, scripts, marker, bin_dir = fake_stack
-    appt = _stub(tmp_path / "apptainer", _LIST_WITHOUT_API)
-    lock = root / "platform" / "infra" / "data" / "supervisor.lock"
-    lock.parent.mkdir(parents=True, exist_ok=True)
-    lock.write_text("먼저-돌던-감독자의-기록\n", encoding="utf-8")
-    holder = subprocess.Popen(["bash", "-c", f'exec 8>>"{lock}"; flock 8; sleep 30'])
-    try:
-        time.sleep(0.5)
-        _run_once(root, scripts, bin_dir, appt, FAKE_HTTP_CODE="200")
-        assert lock.read_text(encoding="utf-8").strip() != "", "물러나는 회차가 잠금 파일을 비웠다"
-    finally:
-        holder.kill()
-        holder.wait()
-
-
 def test_a_second_supervisor_does_nothing(fake_stack, tmp_path):
     """감독자가 둘이면 서로의 재기동을 밟는다 — 한쪽이 stop 한 것을 다른 쪽이 또 start 한다.
 
@@ -351,10 +334,16 @@ def test_a_second_supervisor_does_nothing(fake_stack, tmp_path):
     방식은 `bash ./infra/scripts/supervisor.sh` 라 절대경로 패턴이 빗나간다. 파일 잠금으로 막는다."""
     root, scripts, marker, bin_dir = fake_stack
     appt = _stub(tmp_path / "apptainer", _LIST_WITHOUT_API)
-    lock = root / "platform" / "infra" / "data" / "supervisor.lock"
-    holder = subprocess.Popen(["bash", "-c", f'exec 8>"{lock}"; flock 8; sleep 30'])
+    lock_dir = root / "platform" / "infra" / "data" / "supervisor.lock.d"
+    lock_dir.mkdir(parents=True)
+    # 살아 있는 '감독자' 를 흉내낸다 — 잠금의 근거는 우리가 적은 pid 다
+    holder = subprocess.Popen(["bash", str(scripts / "supervisor.sh"), "--hold"],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                              env={"PATH": "/usr/bin:/bin", "KOORM_SUPERVISE_INTERVAL": "300",
+                                   "APPTAINER": str(appt), "ALLOW_PLACEHOLDER_SECRETS": "1",
+                                   "HOME": str(root)})
     try:
-        time.sleep(0.5)
+        (lock_dir / "pid").write_text(f"{holder.pid}\n", encoding="utf-8")
         r = _run_once(root, scripts, bin_dir, appt, FAKE_HTTP_CODE="000")
         assert "이미 감독자가 돌고 있다" in r.stdout, f"둘째 감독자가 그냥 일했다 — {r.stdout!r}"
         assert not marker.exists(), "둘째 감독자가 재기동까지 했다"
@@ -510,3 +499,47 @@ def test_the_socket_owner_check_keeps_its_meaning(tmp_path):
     assert not _warns('LISTEN 0 244 127.0.0.1:5436 0.0.0.0:* users:(("postgres",pid=1,fd=7))')
     assert _warns("LISTEN 0 244 127.0.0.1:5436 0.0.0.0:*")
     assert _warns(""), "빈 출력은 소유자를 못 본 것이다"
+
+
+def test_the_lock_is_not_inherited_by_a_long_lived_child(fake_stack, tmp_path):
+    """⚠ 이 결함으로 **운영 감시가 실제로 멈췄다**(2026-09-21 01:26).
+
+    `exec 9>파일` + flock 으로 잡으면 그 fd 를 **자식이 물려받는다.** 감독자가 띄운 apptainer
+    인스턴스는 영원히 살아 있으므로 잠금을 놓지 않고, 이후 모든 회차가 "이미 돌고 있다" 로
+    물러난다 — 잠금 하나 잘못 잡아 감시를 죽이는 것이다.
+
+    그래서 첫 회차가 오래 사는 자식을 남기고 끝난 뒤, 다음 회차가 **정상으로 일해야** 한다."""
+    root, scripts, marker, bin_dir = fake_stack
+    appt = _stub(tmp_path / "apptainer", _LIST_WITHOUT_API)
+    child_pid = tmp_path / "child.pid"
+    # 재기동 스텁이 '인스턴스처럼' 오래 사는 자식을 남긴다(감독자가 죽어도 살아 있다)
+    _stub(scripts / "restart-api-only.sh",
+          f'echo called >> "{marker}"\nnohup sleep 120 >/dev/null 2>&1 &\n'
+          f'echo $! > "{child_pid}"\ndisown\n')
+    try:
+        first = _run_once(root, scripts, bin_dir, appt, FAKE_HTTP_CODE="000")
+        assert marker.exists(), f"첫 회차가 일하지 않았다 — {first.stdout!r}"
+        marker.unlink()
+
+        second = _run_once(root, scripts, bin_dir, appt, FAKE_HTTP_CODE="000")
+        assert "이미 감독자가 돌고 있다" not in second.stdout, (
+            f"오래 사는 자식이 잠금을 물려받아 감시가 멈췄다 — {second.stdout!r}")
+        assert marker.exists(), f"둘째 회차가 일하지 않았다 — {second.stdout!r}"
+    finally:
+        pid = child_pid.read_text(encoding="utf-8").strip() if child_pid.exists() else ""
+        if pid.isdigit():
+            subprocess.run(["kill", pid], capture_output=True)
+
+
+def test_a_dead_supervisors_lock_is_cleared(fake_stack, tmp_path):
+    """잠금만 남기고 죽은 감독자가 있으면(kill -9 등) 다음 회차가 걷어내고 일해야 한다 —
+    안 그러면 한 번의 사고가 영구 정지가 된다."""
+    root, scripts, marker, bin_dir = fake_stack
+    appt = _stub(tmp_path / "apptainer", _LIST_WITHOUT_API)
+    lock_dir = root / "platform" / "infra" / "data" / "supervisor.lock.d"
+    lock_dir.mkdir(parents=True)
+    (lock_dir / "pid").write_text("999999\n", encoding="utf-8")   # 살아 있지 않은 pid
+
+    r = _run_once(root, scripts, bin_dir, appt, FAKE_HTTP_CODE="000")
+    assert "죽은 감독자가 남긴 잠금을 걷어낸다" in r.stdout, f"{r.stdout!r}"
+    assert marker.exists(), f"걷어내고도 일하지 않았다 — {r.stdout!r}"
