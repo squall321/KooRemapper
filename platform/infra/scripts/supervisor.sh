@@ -18,11 +18,17 @@ ONCE=0; [ "${1:-}" = "--once" ] && ONCE=1
 # 라서 절대경로 pgrep 패턴이 빗나간다. 파일 잠금은 **어떻게 띄우든** 통한다.
 # 매분 도는 `--once` 가 앞 회차와 겹치는 것도 이 잠금이 막는다.
 mkdir -p "$DATA_DIR"
-exec 9>"$DATA_DIR/supervisor.lock"
+# ⚠ `9>` 가 아니라 `9>>` 다 — `>` 는 **여는 순간 파일을 비운다.** 매분 도는 --once 가 잠금을 못 얻고
+# 물러나면서도 파일을 비워, 먼저 돌던 감독자가 적어 둔 것을 지워 버린다.
+exec 9>>"$DATA_DIR/supervisor.lock"
 if ! flock -n 9; then
   echo "[$(date '+%F %T')] 이미 감독자가 돌고 있다 — 이번 호출은 아무것도 하지 않는다"
   exit 0
 fi
+# pid 는 별도 파일에 적는다 — `install-autostart.sh --remove` 가 돌고 있는 감독자를 찾는 근거다
+# (프로세스 이름 매칭은 기동 방식마다 빗나가고, 다른 리포의 같은 이름 스크립트까지 잡는다).
+printf '%s\n' "$$" > "$DATA_DIR/supervisor.pid"
+trap 'rm -f "$DATA_DIR/supervisor.pid"' EXIT
 
 # 인스턴스가 **확실히 없는가** — 재기동은 파괴적 행동이라 "모름" 을 근거로 삼으면 안 된다.
 # `instance_running` 은 0 있음 · 1 없음 · **2 알 수 없음**(목록 조회 실패)을 낸다(_common.sh 주석 참조).

@@ -307,6 +307,43 @@ def test_install_reports_a_failed_immediate_check(tmp_path):
     assert "rc=7" in r.stderr, f"진짜 종료코드를 안 남겼다 — {r.stderr!r}"
 
 
+def test_remove_also_stops_a_running_supervisor(tmp_path):
+    """해제라고 말했으면 실제로 멈춘다 — 크론만 떼면 돌고 있는 루프가 남아 감시가 계속된다."""
+    root, scripts, bin_dir, cron_file, _ = _install_tree(tmp_path)
+    cron_file.write_text("* * * * * something  # koorm-autostart\n", encoding="utf-8")
+    data = root / "platform" / "infra" / "data"
+    # 돌고 있는 감독자를 흉내내고, pid 를 supervisor.sh 가 적는 자리에 적어 둔다
+    _stub(scripts / "supervisor.sh", "sleep 30\n")
+    holder = subprocess.Popen(["bash", str(scripts / "supervisor.sh")])
+    try:
+        (data / "supervisor.pid").write_text(f"{holder.pid}\n", encoding="utf-8")
+        r = _run_install(root, scripts, bin_dir, "--remove")
+        assert "감독자도 멈췄다" in r.stdout, f"돌고 있는 감독자를 남겼다 — {r.stdout!r}"
+        holder.wait(timeout=5)
+    finally:
+        if holder.poll() is None:
+            holder.kill()
+            holder.wait()
+
+
+def test_the_lock_file_is_not_truncated_by_a_losing_run(fake_stack, tmp_path):
+    """⚠ `exec 9>` 는 여는 순간 파일을 비운다 — 잠금을 못 얻고 물러나는 회차가 먼저 돌던
+    감독자의 기록을 지워, `--remove` 가 죽일 대상을 못 찾게 된다. `9>>` 여야 한다."""
+    root, scripts, marker, bin_dir = fake_stack
+    appt = _stub(tmp_path / "apptainer", _LIST_WITHOUT_API)
+    lock = root / "platform" / "infra" / "data" / "supervisor.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text("먼저-돌던-감독자의-기록\n", encoding="utf-8")
+    holder = subprocess.Popen(["bash", "-c", f'exec 8>>"{lock}"; flock 8; sleep 30'])
+    try:
+        time.sleep(0.5)
+        _run_once(root, scripts, bin_dir, appt, FAKE_HTTP_CODE="200")
+        assert lock.read_text(encoding="utf-8").strip() != "", "물러나는 회차가 잠금 파일을 비웠다"
+    finally:
+        holder.kill()
+        holder.wait()
+
+
 def test_a_second_supervisor_does_nothing(fake_stack, tmp_path):
     """감독자가 둘이면 서로의 재기동을 밟는다 — 한쪽이 stop 한 것을 다른 쪽이 또 start 한다.
 
@@ -405,3 +442,71 @@ def test_stop_does_not_report_false_success_when_it_cannot_tell(tmp_path):
     r = _run_script(root, scripts, "stop.sh", appt, STUB_LOG=str(log))
     assert "not running" not in r.stdout, f"모르는 것을 '안 돌고 있다'고 단정했다 — {r.stdout!r}"
     assert "instance stop" in log.read_text(encoding="utf-8"), "모르는데 stop 도 안 해 봤다"
+
+
+# ── ① 에서 함께 고친 나머지 판정도 옛 grep 과 의미가 같나 ────────────────────
+def _block(path, first, last):
+    """스크립트에서 연속된 줄 묶음의 **실제 텍스트**를 떼어 온다(함수가 아닌 블록용)."""
+    lines = path.read_text(encoding="utf-8").splitlines()
+    i = next(n for n, l in enumerate(lines) if first in l)
+    j = next(n for n, l in enumerate(lines[i:], i) if last in l)
+    return "\n".join(lines[i:j + 1]) + "\n"
+
+
+def test_the_drive_listing_check_keeps_line_exact_matching(tmp_path):
+    """옛 판정은 `grep -q '^koorm-bin\\.tar\\.gz$'` 였다 — **행 전체** 일치다.
+
+    부분 일치로 느슨해지면 `koorm-bin.tar.gz.part`(전송 중 파일)을 완성본으로 읽어
+    반쪽 아티팩트를 배포한다. 반대로 조기 종료가 남아 있으면 목록이 클 때 SIGPIPE 로
+    거짓 음성이 나서 **조용히 낡은 dist 로 강등**된다. 둘 다 본다."""
+    root = tmp_path / "repo"
+    scripts = root / "platform" / "infra" / "scripts"
+    scripts.mkdir(parents=True)
+    shutil.copy(SCRIPTS / "dist-from-drive.sh", scripts / "dist-from-drive.sh")
+    (root / "platform" / ".env").write_text("KOORM_DRIVE_REMOTE=Stub:KooRemapper/dist\n", encoding="utf-8")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    listing = tmp_path / "listing.txt"
+    _stub(bin_dir / "rclone",
+          'case "$*" in\n'
+          f'  *--dirs-only*) echo "dist-20260101/"; echo "dist-20260202/" ;;\n'
+          f'  lsf*) cat "{listing}" ;;\n'
+          '  *) exit 0 ;;\n'
+          'esac\n')
+
+    def _source_for(text):
+        listing.write_text(text, encoding="utf-8")
+        r = subprocess.run(["bash", str(scripts / "dist-from-drive.sh")],
+                           capture_output=True, text=True, cwd=str(root),
+                           env={"PATH": f"{bin_dir}:/usr/bin:/bin", "HOME": str(root)})
+        line = [l for l in r.stdout.splitlines() if l.startswith("→ source:")]
+        assert line, f"source 를 못 정했다 — {r.stdout!r} {r.stderr!r}"
+        return line[0].split("source:", 1)[1].strip()
+
+    # 정확히 그 이름이 있으면 latest 를 쓴다
+    assert _source_for("SHA256SUMS\nkoorm-bin.tar.gz\n").endswith("/latest")
+    # 닮은 이름만 있으면 latest 가 아니다 — 행 전체 일치여야 한다
+    assert _source_for("koorm-bin.tar.gz.part\nxkoorm-bin.tar.gz\n").endswith("/dist-20260202")
+    # 목록이 파이프 버퍼보다 커도 거짓 음성이 없다(찾는 이름을 맨 앞에 둔다)
+    big = "koorm-bin.tar.gz\n" + "".join(f"filler-{i:05d}.bin\n" for i in range(5000))
+    assert _source_for(big).endswith("/latest"), "큰 목록에서 조용히 낡은 dist 로 강등했다"
+
+
+def test_the_socket_owner_check_keeps_its_meaning(tmp_path):
+    """`users:(` 가 보이면 소유자를 안 것이다 — 보일 때 경고하면 거짓 경보,
+    안 보일 때 잠자면 사람이 ss 를 아무리 돌려도 범인 이름을 못 본다."""
+    # 닫는 `fi` 까지 떼어야 온전한 블록이다
+    block = _block(SCRIPTS / "start.sh", '_sock="$(ss -lptnH', 'fi')
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+
+    def _warns(ss_output):
+        _stub(bin_dir / "ss", f'cat <<\'EOF\'\n{ss_output}\nEOF\n')
+        r = _sh("set -euo pipefail\nPOSTGRES_PORT=5436\n" + block,
+                env={"PATH": f"{bin_dir}:/usr/bin:/bin"})
+        assert r.returncode == 0, f"{r.stdout!r} {r.stderr!r}"
+        return "소유자가 안 보인다" in r.stdout
+
+    assert not _warns('LISTEN 0 244 127.0.0.1:5436 0.0.0.0:* users:(("postgres",pid=1,fd=7))')
+    assert _warns("LISTEN 0 244 127.0.0.1:5436 0.0.0.0:*")
+    assert _warns(""), "빈 출력은 소유자를 못 본 것이다"

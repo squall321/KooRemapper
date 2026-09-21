@@ -64,10 +64,16 @@ export function TokensPage() {
             </div>
             <div>
               <div className="text-xs text-muted mb-1">Claude Code 등록 명령</div>
-              <div className="flex gap-2">
-                <code className="flex-1 mono text-xs bg-bg rounded-md px-3 py-2 break-all">{created.mcp_add}</code>
-                <CopyBtn text={created.mcp_add} />
-              </div>
+              {/* 주소를 모르면 백엔드가 명령 대신 '#' 로 시작하는 안내를 준다 — 그것을 복사 버튼과
+                  함께 그리면 명령으로 보인다(붙여넣어도 아무 일이 안 난다). 경고로 그린다. */}
+              {created.mcp_add.trimStart().startsWith('#') ? (
+                <div className="text-xs text-warning bg-bg rounded-md px-3 py-2">{created.mcp_add}</div>
+              ) : (
+                <div className="flex gap-2">
+                  <code className="flex-1 mono text-xs bg-bg rounded-md px-3 py-2 break-all">{created.mcp_add}</code>
+                  <CopyBtn text={created.mcp_add} />
+                </div>
+              )}
             </div>
             <Button size="sm" onClick={() => setCreated(null)}>닫기</Button>
           </CardBody>
