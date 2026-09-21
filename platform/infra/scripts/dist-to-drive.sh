@@ -86,6 +86,10 @@ tar -C platform/frontend -czf "$STAGE/koorm-frontend-dist.tar.gz" dist
 # (build.sh 는 멱등이라 SIF 존재 시 스킵). 있는 것만 올린다.
 shopt -s nullglob
 for s in platform/infra/apptainer/*.sif; do
+  # builder.sif 는 **빌드 전용**(debian:12 툴체인, 171MB)이라 prod 가 쓸 일이 없다. glob 이 그것까지
+  # 집어 가서 매 배포마다 폐쇄망 회선으로 171MB 가 헛나갔다(보관 3판이면 500MB). 위 주석이 적은
+  # 의도('서비스 SIF + cli.sif')대로 걸러낸다.
+  case "$(basename "$s")" in builder.sif) echo "  · builder.sif 제외(빌드 전용)"; continue ;; esac
   cp "$s" "$STAGE/"; echo "  · $(basename "$s") 포함"
 done
 shopt -u nullglob
