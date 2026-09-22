@@ -12,6 +12,7 @@ Entry contract (see catalog_data.json):
   config_style   : null | "structured" | "freeform"   (yaml only)
   takes_kfile, requires_gmsh, requires_tetgen : bool
   params[]       : ordered parameter definitions, each:
+      group        (선택, 화면에서 묶을 이름 — 칸이 많은 작업용)
       name, type ("file"|"output"|"string"|"number"|"integer"|"boolean"
                   |"enum"|"array"|"object"|"config"),
       role ("input_file"|"output"|"value"|"flag"|"yaml_field"|"config"),
@@ -125,6 +126,10 @@ def args_json_schema(name: str) -> dict | None:
             schema["default"] = _coerce_scalar(p["default"], p["type"])
         if p["type"] == "file":
             schema["x-kind"] = "session_file"  # hint: pick from session files
+        if p.get("group"):
+            # 화면이 칸을 묶을 수 있게 넘긴다. 작업 하나가 수십 칸이 되면 한 줄로 늘어놓은
+            # 폼은 아무도 못 쓴다 — 그렇다고 옵션을 빼면 있는 것을 못 쓰게 된다.
+            schema["x-group"] = p["group"]
         props[p["name"]] = schema
         if p.get("required"):
             required.append(p["name"])

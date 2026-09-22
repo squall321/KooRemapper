@@ -4,7 +4,7 @@
 // - freeform yaml ops (single `config` object param) render a JSON/YAML textarea
 import { useState } from 'react'
 import yaml from 'js-yaml'
-import type { OperationDetail, SessionFile } from '@/shared/api/types'
+import type { OperationDetail, PropDef, SessionFile } from '@/shared/api/types'
 import { Input, Label, Select, Textarea } from '@/shared/ui/ui'
 import { StcxPresetField } from './StcxPresetField'
 
@@ -36,9 +36,15 @@ export function SchemaForm({
   const props = schema.properties
   const required = new Set(schema.required)
 
-  return (
-    <div className="space-y-3">
-      {Object.entries(props).map(([name, def]) => {
+  // 칸을 묶는다 — 옵션이 수십 개인 작업(전각도 낙하 등)에서 한 줄로 늘어놓으면 아무도 못 쓴다.
+  // group 이 없는 작업은 예전처럼 평평하게 그린다(기존 48개 작업은 아무것도 안 바뀐다).
+  const entries = Object.entries(props)
+  const groups: string[] = []
+  for (const [, d] of entries) {
+    const g = d['x-group']
+    if (g && !groups.includes(g)) groups.push(g)
+  }
+  const field = ([name, def]: [string, PropDef]) => {
         const isFile = def['x-kind'] === 'session_file'
         const req = required.has(name)
         const label = (
@@ -112,6 +118,26 @@ export function SchemaForm({
               />
             )}
           </div>
+        )
+  }
+
+  if (groups.length === 0) {
+    return <div className="space-y-3">{entries.map((e) => field(e))}</div>
+  }
+  return (
+    <div className="space-y-2">
+      {groups.map((g, i) => {
+        const mine = entries.filter(([, d]) => d['x-group'] === g)
+        // 첫 묶음(필수·기본)은 펼쳐 둔다 — 아무것도 안 보이는 폼은 고장처럼 보인다.
+        const hasRequired = mine.some(([n]) => required.has(n))
+        return (
+          <details key={g} open={i === 0 || hasRequired}
+            className="rounded border border-muted/25 px-3 py-2">
+            <summary className="cursor-pointer text-sm font-medium">
+              {g} <span className="text-xs text-muted font-normal">({mine.length})</span>
+            </summary>
+            <div className="space-y-3 pt-2">{mine.map((e) => field(e))}</div>
+          </details>
         )
       })}
     </div>

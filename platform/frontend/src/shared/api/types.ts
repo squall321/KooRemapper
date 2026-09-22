@@ -157,9 +157,19 @@ export interface OperationParam {
   default?: unknown
 }
 
+// 폼 한 칸의 스키마. `x-group` 은 화면이 칸을 묶을 이름이다(칸이 수십 개인 작업용).
+export interface PropDef {
+  type: string
+  description?: string
+  enum?: unknown[]
+  default?: unknown
+  'x-kind'?: string
+  'x-group'?: string
+}
+
 export interface JsonSchema {
   type: string
-  properties: Record<string, { type: string; description?: string; enum?: unknown[]; default?: unknown; 'x-kind'?: string }>
+  properties: Record<string, PropDef>
   required: string[]
   additionalProperties: boolean
 }

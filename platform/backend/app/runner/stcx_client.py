@@ -119,14 +119,129 @@ def _angle(over: dict) -> dict:
     return scen[0].setdefault("angle_source", {})
 
 
-# 낱낱 옵션 → scenario.json 자리. 이름이 어긋나면 **조용히 무시된다**(도구가 모르는 키를
-# 그냥 병합해 두고 지나간다) — 그래서 이 표를 한자리에 두고 시험으로 고정한다.
-_SIM_PARAMS = {
-    "height": "height",
-    "t_final": "tFinal",
-    "dt": "dt",
-    "offset_distance": "offset_distance",
+# ── 낱낱 옵션 → scenario.json 자리 ────────────────────────────────────────
+#
+# ⚠ **여기가 조용히 틀리는 자리다.** 서버 도구는 모르는 키를 그냥 병합해 두고 지나가므로,
+#   이름이나 자리가 어긋나면 화면에서 고른 값이 해석에 **아무 영향을 안 주는데 잡은 성공한다.**
+#   그래서 표를 한자리에 두고, 서버의 권위 카탈로그와 대조하는 시험으로 박는다.
+#
+# 목적지 기호
+#   top     — scenario 최상위
+#   sim     — simulation_params
+#   surface — simulation_params.drop_surface
+#   dr      — simulation_params.dynamic_relaxation (객체 형태)
+#   angle   — scenarios[0].angle_source
+#   cum     — scenarios[0].cumulative
+#   mix     — scenarios[0].cumulative.angle_mixing
+#   env     — environment
+_SCENARIO_MAP: dict[str, tuple[str, str]] = {
+    # 최상위
+    "preserve_includes": ("top", "preserve_includes"),
+    # 전역 물리
+    "height": ("sim", "height"),
+    "t_final": ("sim", "tFinal"),
+    "dt": ("sim", "dt"),
+    "offset_distance": ("sim", "offset_distance"),
+    "density": ("sim", "density"),
+    "youngs_modulus": ("sim", "youngs_modulus"),
+    "poisson_ratio": ("sim", "poisson_ratio"),
+    # 접촉 고급
+    "convert_general_to_single_surface": ("sim", "convert_general_to_single_surface"),
+    "ensure_single_surface": ("sim", "ensure_single_surface"),
+    "decompose_general_contact": ("sim", "decompose_general_contact"),
+    "robust_contact": ("sim", "robust_contact"),
+    "include_wall_in_general": ("sim", "include_wall_in_general"),
+    "decompose_contact_margin": ("sim", "decompose_contact_margin"),
+    "decompose_contact_absolute_margin_x": ("sim", "decompose_contact_absolute_margin_x"),
+    "decompose_contact_absolute_margin_y": ("sim", "decompose_contact_absolute_margin_y"),
+    "decompose_contact_absolute_margin_z": ("sim", "decompose_contact_absolute_margin_z"),
+    # 바닥
+    "drop_surface": ("surface", "type"),
+    "surface_size": ("surface", "size"),
+    "surface_mesh": ("surface", "mesh"),
+    "num_outer_layers": ("surface", "num_outer_layers"),
+    "ratio": ("surface", "ratio"),
+    "roughness_mode": ("surface", "roughness_mode"),
+    "r_max": ("surface", "r_max"),
+    "shape_factor": ("surface", "shape_factor"),
+    "shape_factor2": ("surface", "shape_factor2"),
+    "deformable_to_rigid": ("surface", "deformable_to_rigid"),
+    # 동적 완화
+    "dr_nrcyck": ("dr", "nrcyck"),
+    "dr_drtol": ("dr", "drtol"),
+    "dr_drfctr": ("dr", "drfctr"),
+    "dr_drterm": ("dr", "drterm"),
+    # 각도원
+    "angle_source": ("angle", "source_type"),
+    "include_faces": ("angle", "include_faces"),
+    "include_edges": ("angle", "include_edges"),
+    "include_corners": ("angle", "include_corners"),
+    "num_directions": ("angle", "num_points"),
+    "progressive": ("angle", "progressive"),
+    "principal_directions": ("angle", "principal_directions"),
+    "sampling_space": ("angle", "sampling_space"),
+    "pitch_min": ("angle", "pitch_min"),
+    "pitch_max": ("angle", "pitch_max"),
+    "pitch_step": ("angle", "pitch_step"),
+    "pitch_fixed": ("angle", "pitch_fixed"),
+    "roll_min": ("angle", "roll_min"),
+    "roll_max": ("angle", "roll_max"),
+    "roll_step": ("angle", "roll_step"),
+    "roll_fixed": ("angle", "roll_fixed"),
+    "yaw_fixed": ("angle", "yaw_fixed"),
+    "selected_indices": ("angle", "selected_indices"),
+    # 연속 낙하
+    "cumulative_steps": ("cum", "num_steps"),
+    "mode_sequence": ("cum", "mode_sequence"),
+    "base_angle_index": ("cum", "base_angle_index"),
+    "angle_mixing": ("mix", "strategy"),
+    "cyclic_offset": ("mix", "cyclic_offset"),
+    "random_seed": ("mix", "random_seed"),
+    "custom_mapping": ("mix", "custom_mapping"),
+    # 자원
+    "ncpu": ("env", "ncpu"),
+    "nodes_per_job": ("env", "nodes_per_job"),
+    "mpi_enabled": ("env", "mpi_enabled"),
 }
+
+# `dynamic_relaxation` 은 **bool 또는 객체**다. 토글만 주면 bool, 세부를 주면 객체가 된다.
+_DR_TOGGLE = "dynamic_relaxation"
+
+# scenario 가 아니라 **도구 인자**로 가는 것들(여기서 덮어쓰기로 만들지 않는다).
+TOOL_ARGS = frozenset({"model", "job_name", "angle_preset", "case_txt", "memory",
+                       "time_limit", "scenario_overrides"})
+
+
+def _scen0(over: dict) -> dict:
+    scen = over.setdefault("scenarios", [{}])
+    if not scen:
+        scen.append({})
+    return scen[0]
+
+
+def _dest(over: dict, kind: str) -> dict:
+    if kind == "top":
+        return over
+    if kind == "sim":
+        return over.setdefault("simulation_params", {})
+    if kind == "surface":
+        return over.setdefault("simulation_params", {}).setdefault("drop_surface", {})
+    if kind == "dr":
+        dr = over.setdefault("simulation_params", {}).get(_DR_TOGGLE)
+        if not isinstance(dr, dict):
+            # 토글만 켜 뒀다면 객체로 승격한다(세부를 준 순간 객체 형태가 필요하다).
+            dr = {"enabled": True} if dr else {}
+            over["simulation_params"][_DR_TOGGLE] = dr
+        return dr
+    if kind == "angle":
+        return _scen0(over).setdefault("angle_source", {})
+    if kind == "cum":
+        return _scen0(over).setdefault("cumulative", {})
+    if kind == "mix":
+        return _scen0(over).setdefault("cumulative", {}).setdefault("angle_mixing", {})
+    if kind == "env":
+        return over.setdefault("environment", {})
+    raise KeyError(kind)                      # 표에 없는 기호 — 조용히 버리지 않는다
 
 
 def build_scenario_overrides(args: Mapping[str, Any], *, has_case_txt: bool = False) -> dict:
@@ -137,40 +252,29 @@ def build_scenario_overrides(args: Mapping[str, Any], *, has_case_txt: bool = Fa
     """
     over: dict = {}
 
-    sim: dict = {}
-    for arg_key, scen_key in _SIM_PARAMS.items():
-        if args.get(arg_key) is not None:
-            sim[scen_key] = args[arg_key]
-    if args.get("drop_surface"):
-        sim.setdefault("drop_surface", {})["type"] = args["drop_surface"]
-    if sim:
-        over["simulation_params"] = sim
+    # dynamic_relaxation 토글을 먼저 놓는다 — 세부(_dr)가 이 값을 보고 객체로 승격한다.
+    if args.get(_DR_TOGGLE) is not None:
+        over.setdefault("simulation_params", {})[_DR_TOGGLE] = bool(args[_DR_TOGGLE])
 
-    # 각도원 — 셋 중 하나라도 있으면 source_type 을 그에 맞춘다.
-    src = args.get("angle_source") or ""
+    for arg_key, (kind, scen_key) in _SCENARIO_MAP.items():
+        v = args.get(arg_key)
+        if v is None or v == "":
+            continue
+        _dest(over, kind)[scen_key] = v
+
+    # 각도원을 안 골랐으면, **실제로 준 값**으로 유추한다. 파일을 골랐으면 그것이 곧 의사표시다.
+    angle = _scen0(over).get("angle_source") if over.get("scenarios") else None
     if has_case_txt:
-        src = "case_txt_file"          # 파일을 골랐으면 그게 곧 의사표시다
-    elif not src and args.get("num_directions") is not None:
-        src = "fibonacci_lattice"
-    elif not src and args.get("pitch_step") is not None:
-        src = "pitching_sweep"
-    elif not src and args.get("roll_step") is not None:
-        src = "rolling_sweep"
-    if src:
-        _angle(over)["source_type"] = src
-    if args.get("num_directions") is not None:
-        _angle(over)["num_points"] = int(args["num_directions"])
-    if args.get("pitch_step") is not None:
-        _angle(over)["pitch_step"] = args["pitch_step"]
-    if args.get("roll_step") is not None:
-        _angle(over)["roll_step"] = args["roll_step"]
-
-    if args.get("cumulative_steps") is not None:
-        over.setdefault("scenarios", [{}])[0]["cumulative"] = {
-            "num_steps": int(args["cumulative_steps"])}
-
-    if args.get("ncpu") is not None:
-        over.setdefault("environment", {})["ncpu"] = int(args["ncpu"])
+        _dest(over, "angle")["source_type"] = "case_txt_file"
+    elif not (angle or {}).get("source_type"):
+        for key, src in (("num_directions", "fibonacci_lattice"),
+                         ("pitch_step", "pitching_sweep"), ("pitch_min", "pitching_sweep"),
+                         ("roll_step", "rolling_sweep"), ("roll_min", "rolling_sweep"),
+                         ("include_faces", "cuboid_geometry"), ("include_edges", "cuboid_geometry"),
+                         ("include_corners", "cuboid_geometry")):
+            if args.get(key) is not None:
+                _dest(over, "angle")["source_type"] = src
+                break
 
     user = args.get("scenario_overrides")
     if isinstance(user, dict) and user:
