@@ -78,6 +78,16 @@ class Settings(BaseSettings):
     # 대용량(GB) 리포트는 .gz 로 올리면 전송은 작고 여기서만 크기를 본다. 필요 시 KOORM_MAX_REPORT_MB.
     max_report_mb: int = 2048
 
+    # --- stcx(356대 클러스터) 전각도 낙하 — 게이트웨이 MCP 경유 ---
+    # 파일을 나르지 않는다. 서버측 절대경로를 넘긴다(경로 값은 박스마다 달라서 코드에 안 박는다).
+    # PAT 가 비면 이 작업은 **꺼진 것**이고, 제출은 조용히 성공하지 않고 명시적으로 실패한다.
+    gateway_mcp: str = "http://127.0.0.1:9110/mcp"
+    gateway_pat: str = ""
+    # 외부 잡 상태를 다시 보기까지의 간격(초). 시간 단위 잡이라 짧게 두드리지 않는다.
+    # 처음엔 자주, 그다음 늘린다 — _next_poll_delay 가 이 둘 사이를 지수로 오간다.
+    stcx_poll_min_sec: int = 30
+    stcx_poll_max_sec: int = 600
+
     # --- AI Data Hub (시뮬레이션 리포트 등재 대상) ---
     # 비우면 publish-datahub 비활성(400). 기본은 호스트 네트워크 공유 인스턴스.
     datahub_url: str = "http://127.0.0.1:8001"
