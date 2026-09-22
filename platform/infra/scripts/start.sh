@@ -204,6 +204,10 @@ start_instance "$INST_API" "$API_SIF" \
   --env "KOORM_MAX_UPLOAD_MB=${KOORM_MAX_UPLOAD_MB:-512}" \
   --env "KOORM_MAX_REPORT_MB=${KOORM_MAX_REPORT_MB:-2048}" \
   --env "KOORM_HEAX_GATEWAY_SECRET=${KOORM_HEAX_GATEWAY_SECRET:-}" \
+  `# stcx 전각도 낙하를 게이트웨이 MCP 로 부를 때 쓴다. PAT 가 비면 그 작업은 꺼진 것이고,` \
+  `# 제출이 조용히 성공하지 않고 명시적으로 실패한다(_common.sh 가 platform/.env 를 export 한다).` \
+  --env "KOORM_GATEWAY_MCP=${KOORM_GATEWAY_MCP:-http://127.0.0.1:9110/mcp}" \
+  --env "KOORM_GATEWAY_PAT=${KOORM_GATEWAY_PAT:-}" \
   --env "KOORM_APP_ENV=${KOORM_APP_ENV:-development}"
 
 # ── mcp ─────────────────────────────────────────────────────────────
