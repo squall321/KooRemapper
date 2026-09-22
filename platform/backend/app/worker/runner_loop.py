@@ -16,7 +16,7 @@ import os
 import signal
 import subprocess
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from sqlalchemy import select, text
@@ -24,11 +24,18 @@ from sqlalchemy import select, text
 from app.config import settings
 from app.database import SessionLocal
 from app.models import Job, Session, SessionFile
+from app.runner import catalog
 from app.runner.argbuild import build_command
 from app.runner.kfile_inspect import inspect_kfile
+from app.runner.stcx_client import StcxClient, parse_state, parse_submit
 from app.shared import storage
 
 logger = logging.getLogger("koorm.worker")
+
+# 외부 잡 표식. Job.external_kind 에 들어가고, 고아 회수·세션 직렬화가 이 값으로 갈린다.
+EXTERNAL_KIND = "stcx_mcp"
+# 한 번의 폴링 스캔에서 볼 잡 수. 많이 잡으면 게이트웨이를 한꺼번에 두드린다.
+_POLL_BATCH = 20
 
 # job_id -> Popen, for cancellation
 _running: dict[str, subprocess.Popen] = {}
@@ -96,6 +103,146 @@ def _run_blocking(job_id: str, argv: list[str], cwd: Path, out_path: Path, err_p
             _running.pop(job_id, None)
 
 
+def _is_external(op: str) -> bool:
+    entry = catalog.get_operation(op)
+    return bool(entry) and entry.get("invocation") == "external"
+
+
+def _stcx() -> StcxClient:
+    return StcxClient(settings.gateway_mcp, settings.gateway_pat)
+
+
+def _fail(job: Job, why: str) -> None:
+    job.status = "failed"
+    job.error_summary = why[:2000]
+    job.finished_at = datetime.now(timezone.utc)
+
+
+def _next_poll_delay(prev: int | None) -> int:
+    """처음엔 자주, 그다음 늘린다. 시간 단위 잡을 30초마다 두드리지 않는다."""
+    lo, hi = settings.stcx_poll_min_sec, settings.stcx_poll_max_sec
+    return lo if not prev else min(int(prev) * 2, hi)
+
+
+async def _submit_external(db, job: Job, work_dir: Path) -> None:
+    """다른 클러스터에 제출하고, 이 잡을 **running 인 채로** 둔다(폴링이 마무리한다).
+
+    파일을 나르지 않는다 — 세션 디렉터리의 절대경로를 그대로 넘긴다. 경로 값은
+    박스마다 다르므로 코드에 박지 않는다.
+    """
+    args = dict(job.args or {})
+    errs = catalog.validate_args(job.operation, args)
+    if errs:
+        _fail(job, "; ".join(errs))
+        await db.commit()
+        return
+
+    # 경로 탈출 방어 — 이름 성분만 남긴다(업로드 이름은 사용자가 준다).
+    name = Path(str(args.get("model") or "")).name
+    model_path = work_dir / name
+    if not name or not model_path.is_file():
+        _fail(job, f"모델 파일을 찾을 수 없다: {args.get('model')!r}")
+        await db.commit()
+        return
+
+    overrides: dict = {}
+    if args.get("height") is not None:
+        overrides.setdefault("simulation_params", {})["height"] = args["height"]
+    if args.get("num_directions") is not None:
+        overrides.setdefault("scenarios", [{}])
+        overrides["scenarios"][0].setdefault("angle_source", {})
+        overrides["scenarios"][0]["angle_source"]["source_type"] = "fibonacci_lattice"
+        overrides["scenarios"][0]["angle_source"]["num_points"] = int(args["num_directions"])
+
+    client = _stcx()
+    try:
+        res = await client.submit_fullangle_drop(
+            model_path=str(model_path),
+            job_name=str(args.get("job_name") or ""),
+            angle_preset=str(args.get("angle_preset") or ""),
+            scenario_overrides=overrides or None,
+            memory=str(args.get("memory") or ""),
+            time_limit=str(args.get("time_limit") or ""),
+            dry_run=False,
+        )
+    finally:
+        await client.close()
+
+    if not res.get("ok"):
+        _fail(job, f"제출 실패({res.get('error')}): {str(res.get('detail'))[:400]}")
+        await db.commit()
+        return
+
+    parsed = parse_submit(res.get("result"))
+    if not parsed.get("ok"):
+        # 응답을 못 읽었으면 **제출된 것으로 치지 않는다** — 없는 잡을 영영 폴링하게 된다.
+        _fail(job, f"제출 응답을 해석하지 못했다({parsed.get('error')}): {str(parsed.get('detail'))[:400]}")
+        await db.commit()
+        return
+
+    delay = _next_poll_delay(None)
+    job.external_kind = EXTERNAL_KIND
+    job.external_ref = {
+        "job_id": parsed["job_id"],
+        "model_path": str(model_path),
+        "submitted": parsed.get("detail", "")[:2000],
+        "poll_interval": delay,
+    }
+    job.external_poll_at = datetime.now(timezone.utc) + timedelta(seconds=delay)
+    job.progress = 5
+    job.resolved_cmd = {"external": EXTERNAL_KIND, "tool": "smarttwin_submit",
+                        "model_path": str(model_path)}
+    await db.commit()
+    logger.info("external job %s submitted → cluster job %s", job.id, parsed["job_id"])
+
+
+async def _poll_external_once() -> int:
+    """기한이 된 외부 잡의 상태를 한 번씩 본다. 돌본 개수를 돌려준다."""
+    now = datetime.now(timezone.utc)
+    async with SessionLocal() as db:
+        due = (await db.execute(
+            select(Job).where(Job.status == "running",
+                              Job.external_kind.is_not(None),
+                              Job.external_poll_at.is_not(None),
+                              Job.external_poll_at <= now)
+            .order_by(Job.external_poll_at).limit(_POLL_BATCH)
+        )).scalars().all()
+        if not due:
+            return 0
+        client = _stcx()
+        try:
+            for job in due:
+                ref = dict(job.external_ref or {})
+                res = await client.job_results(str(ref.get("job_id") or ""))
+                verdict = (parse_state(res.get("result")) if res.get("ok")
+                           else {"state": "unknown", "reason": res.get("error"),
+                                 "raw": str(res.get("detail"))[:500]})
+                state = verdict["state"]
+                if state == "succeeded":
+                    job.status, job.progress = "succeeded", 100
+                    job.finished_at = now
+                elif state == "failed":
+                    job.status = "failed"
+                    job.error_summary = f"클러스터 잡 {ref.get('job_id')} 상태 {verdict.get('slurm')}"
+                    job.finished_at = now
+                else:
+                    # **모르면 접지 않는다.** 도구가 고장 난 것과 잡이 끝난 것을 같은 모양으로
+                    # 만들지 않는다 — 다음에 다시 본다. 대신 왜 몰랐는지는 남겨 화면에 뜨게 한다.
+                    ref["last_unknown"] = verdict.get("reason") or "unparsed"
+                    ref["unknown_count"] = int(ref.get("unknown_count") or 0) + (
+                        1 if state == "unknown" else 0)
+                delay = _next_poll_delay(ref.get("poll_interval"))
+                ref["poll_interval"] = delay
+                ref["last_state"] = state
+                job.external_ref = ref
+                job.external_poll_at = (None if job.status != "running"
+                                        else now + timedelta(seconds=delay))
+        finally:
+            await client.close()
+        await db.commit()
+        return len(due)
+
+
 async def _execute(job_id: str) -> None:
     async with SessionLocal() as db:
         job = await db.get(Job, job_id)
@@ -110,6 +257,12 @@ async def _execute(job_id: str) -> None:
             return
 
         work_dir = storage.ensure_session_dir(session.user_id, session.id)
+
+        # 외부 작업은 여기서 갈라 나간다 — 로컬 바이너리를 부르지 않는다.
+        if _is_external(job.operation):
+            await _submit_external(db, job, work_dir)
+            return
+
         built = build_command(job.operation, job.args or {}, work_dir)
         if built.error:
             job.status = "failed"
@@ -277,7 +430,18 @@ async def _loop() -> None:
     tasks: set[asyncio.Task] = set()
     await reconcile_orphans()
     logger.info("worker loop started (concurrency=%d)", settings.worker_concurrency)
+    # 외부 잡 스캔은 **시간 기준**이다. "할 일이 없을 때만" 으로 하면 로컬 큐가 바쁜 동안
+    # 외부 잡이 영영 마무리되지 않는다(기다리는 쪽은 그게 제일 답답하다).
+    next_scan = 0.0
     while not _stop.is_set():
+        loop_now = asyncio.get_running_loop().time()
+        if loop_now >= next_scan:
+            next_scan = loop_now + max(5, settings.stcx_poll_min_sec // 2)
+            try:
+                await _poll_external_once()
+            except Exception:       # 폴링 실패가 워커를 멈추면 로컬 잡까지 선다
+                logger.exception("external job poll failed")
+
         async with SessionLocal() as db:
             job_id = await _claim_one(db)
         if job_id is None:

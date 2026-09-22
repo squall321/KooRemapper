@@ -18,6 +18,7 @@ DynaForge 가 클러스터 자격증명을 쥔 앱이 된다. 게이트웨이 �
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Mapping
 
 import httpx
@@ -33,6 +34,85 @@ TOOL_SUBMIT = f"{_PREFIX}_smarttwin_submit"
 TOOL_OPTIONS = f"{_PREFIX}_smarttwin_scenario_options"
 TOOL_RESULTS = f"{_PREFIX}_slurm_job_results"
 TOOL_LOG = f"{_PREFIX}_slurm_job_log"
+
+
+# ── 응답 해석 ──────────────────────────────────────────────────────────────
+# ⚠ 이 도구들은 **구조화 JSON 이 아니라 사람이 읽는 문자열**을 돌려준다. 그리고 실패도
+#   `isError` 가 아니라 "error: …" 로 시작하는 **성공 모양**으로 온다. 그대로 믿으면
+#   제출되지 않은 잡이 제출된 것으로 남고, 사용자는 몇 시간을 기다린 뒤에야 안다.
+#   그래서 해석을 여기 떼어 두고 시험으로 고정한다.
+_ERROR_HEAD = re.compile(r"^\s*(error|오류)\s*[:：]", re.I)
+_DRY_RUN_HEAD = re.compile(r"\[DRY-RUN\]")
+_JOB_ID = re.compile(r"job_id\s*=\s*(\d+)")
+_STATE = re.compile(r"상태\s*[:：]\s*(\S+)")
+
+# Slurm 상태. 여기 없는 값은 **모른다**로 둔다 — 임의로 성공·실패로 접지 않는다.
+STATES_ACTIVE = frozenset({
+    "PENDING", "RUNNING", "CONFIGURING", "COMPLETING", "REQUEUED", "REQUEUE_HOLD",
+    "RESIZING", "SUSPENDED", "SIGNALING", "STAGE_OUT", "PREEMPTED",
+})
+STATES_OK = frozenset({"COMPLETED"})
+STATES_BAD = frozenset({
+    "FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL", "OUT_OF_MEMORY", "BOOT_FAIL",
+    "DEADLINE", "REVOKED", "SPECIAL_EXIT",
+})
+
+
+def _as_text(result: Any) -> str:
+    """도구가 문자열을 돌려주는데, FastMCP 가 {'result': '...'} 로 감싸는 경우가 있다."""
+    if isinstance(result, str):
+        return result
+    if isinstance(result, Mapping):
+        for k in ("result", "text", "content"):
+            v = result.get(k)
+            if isinstance(v, str):
+                return v
+    return json.dumps(result, ensure_ascii=False) if result is not None else ""
+
+
+def parse_submit(result: Any) -> dict:
+    """제출 응답 → {"ok": True, "job_id": "123"} 또는 {"ok": False, "error": …}.
+
+    **판정 못 하면 실패다.** 못 읽은 응답을 성공으로 접으면 잡은 없는데 화면에는 도는
+    것으로 남고, 폴링이 영영 답을 못 찾는다.
+    """
+    text = _as_text(result).strip()
+    if not text:
+        return {"ok": False, "error": "empty_response", "detail": ""}
+    if _ERROR_HEAD.search(text):
+        return {"ok": False, "error": "tool_refused", "detail": text[:500]}
+    if _DRY_RUN_HEAD.search(text):
+        # 도구 기본값이 dry_run=True 다. 여기까지 왔다는 것은 우리가 False 를 못 실었다는 뜻이다.
+        return {"ok": False, "error": "dry_run",
+                "detail": "미리보기만 돌았다 — dry_run 이 꺼지지 않았다"}
+    m = _JOB_ID.search(text)
+    if not m:
+        return {"ok": False, "error": "no_job_id", "detail": text[:500]}
+    return {"ok": True, "job_id": m.group(1), "detail": text[:2000]}
+
+
+def parse_state(result: Any) -> dict:
+    """상태 응답 → {"state": "active"|"succeeded"|"failed"|"unknown", "raw": …}.
+
+    모르면 **모른다고 한다.** 임의로 성공이나 실패로 접으면, 도구가 고장 난 것과 잡이
+    끝난 것이 같은 모양이 된다.
+    """
+    text = _as_text(result).strip()
+    if not text:
+        return {"state": "unknown", "reason": "empty_response", "raw": ""}
+    if _ERROR_HEAD.search(text):
+        return {"state": "unknown", "reason": "tool_refused", "raw": text[:500]}
+    m = _STATE.search(text)
+    if not m:
+        return {"state": "unknown", "reason": "no_state_line", "raw": text[:500]}
+    slurm = m.group(1).upper().rstrip("+")          # CANCELLED+ 같은 꼬리표
+    if slurm in STATES_ACTIVE:
+        return {"state": "active", "slurm": slurm, "raw": text[:2000]}
+    if slurm in STATES_OK:
+        return {"state": "succeeded", "slurm": slurm, "raw": text[:2000]}
+    if slurm in STATES_BAD:
+        return {"state": "failed", "slurm": slurm, "raw": text[:2000]}
+    return {"state": "unknown", "reason": f"unmapped_state:{slurm}", "raw": text[:500]}
 
 
 class McpHttpClient:

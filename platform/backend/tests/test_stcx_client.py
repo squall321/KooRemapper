@@ -193,3 +193,4 @@ async def test_timeout_stays_under_the_gateway_budget():
     """게이트웨이가 먼저 끊으면 우리는 그것을 전송 오류로 읽어 원인을 잘못 짚는다."""
     from app.runner.stcx_client import DEFAULT_TIMEOUT
     assert DEFAULT_TIMEOUT < 120, "GATEWAY_CALL_TIMEOUT 기본값(120초) 아래여야 한다"
+

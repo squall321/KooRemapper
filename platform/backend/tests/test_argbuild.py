@@ -170,13 +170,23 @@ def test_all_catalog_examples_build():
     from app.runner import catalog
 
     failures = []
+    skipped = []
     for name in catalog.operation_names():
         op = catalog.get_operation(name)
+        # 외부 작업은 로컬 argv 를 만들지 **않는 것이 계약**이다(다른 클러스터에서 돈다).
+        # 여기서 제외하되, 제외한 것이 있다는 사실은 아래에서 단언한다 — 조용히 빠지면
+        # "전부 통과" 가 "아무것도 안 봤다" 를 가린다.
+        if op.get("invocation") == "external":
+            skipped.append(name)
+            continue
         args = (op.get("example") or {}).get("args") or {}
         b = build_command(name, args, _wd())
         if b.error:
             failures.append(f"{name}: {b.error}")
     assert not failures, "catalog examples that fail to build:\n" + "\n".join(failures)
+    # 제외 목록은 외부 작업과 정확히 일치해야 한다(엉뚱한 op 가 제외로 새지 않게).
+    assert skipped == [n for n in catalog.operation_names()
+                       if catalog.get_operation(n).get("invocation") == "external"]
 
 
 def test_matdb_defaults_to_bundled_db():

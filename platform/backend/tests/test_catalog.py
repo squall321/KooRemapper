@@ -21,11 +21,42 @@ def test_every_op_has_required_fields():
         op = catalog.get_operation(name)
         for field in ("category", "summary", "invocation", "params", "example"):
             assert field in op, f"{name} missing {field}"
-        assert op["invocation"] in ("positional", "yaml")
+        # "external" = 이 서버의 바이너리가 아니라 **다른 클러스터**에서 도는 작업.
+        # 세 번째 값이라 여기에 더하지만, 아래에서 그 갈래의 불변식을 따로 고정한다 —
+        # 안 그러면 "허용값을 늘린다" 가 검사를 느슨하게 만드는 일이 된다.
+        assert op["invocation"] in ("positional", "yaml", "external")
         if op["invocation"] == "yaml":
             assert op["config_style"] in ("structured", "freeform"), name
         else:
             assert op["config_style"] is None, name
+
+
+def test_external_ops_carry_no_local_invocation_machinery():
+    """외부 작업은 로컬 argv 를 만들지 않는다 — 만들기 시작하면 두 실행 경로가 갈린다."""
+    for name in catalog.operation_names():
+        op = catalog.get_operation(name)
+        if op["invocation"] != "external":
+            continue
+        for p in op["params"]:
+            assert "order" not in p, f"{name}.{p['name']}: 외부 작업에 positional order 가 있다"
+            assert "flag" not in p, f"{name}.{p['name']}: 외부 작업에 flag 가 있다"
+            assert "yaml_path" not in p, f"{name}.{p['name']}: 외부 작업에 yaml_path 가 있다"
+
+
+def test_the_local_builder_refuses_external_ops_clearly():
+    """빈 argv 로 조용히 돌지 않는다 — 어디서 도는 작업인지 오류에 적는다."""
+    from kooremapper_core.argbuild import build_command
+    from pathlib import Path
+
+    externals = [n for n in catalog.operation_names()
+                 if catalog.get_operation(n)["invocation"] == "external"]
+    assert externals, "외부 작업이 하나도 없다 — 이 검사가 아무것도 안 본다"
+    for name in externals:
+        # 스키마 검증이 먼저 돈다 — 그래서 **유효한** 인자로 불러야 external 분기까지 닿는다.
+        args = (catalog.get_operation(name).get("example") or {}).get("args") or {}
+        built = build_command(name, args, Path("/tmp"))
+        assert built.argv == []
+        assert built.error and "external" in built.error.lower(), built.error
 
 
 def test_every_schema_builds():

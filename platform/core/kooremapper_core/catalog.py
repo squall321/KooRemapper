@@ -6,7 +6,9 @@ exposes lookups, and derives a JSON Schema per op for (a) request validation,
 
 Entry contract (see catalog_data.json):
   name, category, summary, description
-  invocation     : "positional" | "yaml"
+  invocation     : "positional" | "yaml" | "external"
+                   external = 이 서버의 바이너리가 아니라 다른 클러스터에서 도는 작업.
+                   argv 를 만들지 않으므로 params 에 order/flag/yaml_path 를 두지 않는다.
   config_style   : null | "structured" | "freeform"   (yaml only)
   takes_kfile, requires_gmsh, requires_tetgen : bool
   params[]       : ordered parameter definitions, each:

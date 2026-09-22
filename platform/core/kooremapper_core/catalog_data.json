@@ -13001,6 +13001,80 @@
         }
       ],
       "presets": null
+    },
+    {
+      "name": "stcx_fullangle_drop",
+      "category": "analysis",
+      "summary": "Submit a full-angle (Fibonacci) LS-DYNA drop study to the stcx cluster",
+      "description": "stcx(356-node) 클러스터에 전각도 낙하 해석을 제출한다. 모델 하나를 구면상 여러 방향으로 떨어뜨려 방향별 결과를 모으고, 통합 sphere_report 까지 자동 생성된다.\n\n이 작업은 **이 서버에서 돌지 않는다.** 게이트웨이 MCP 를 거쳐 stcx 에 제출되고, 여기서는 상태만 따라간다. 그래서 몇 시간이 걸릴 수 있고, 그동안 이 세션의 다른 작업은 그대로 돌아간다.\n\n모델 파일은 전송하지 않는다 — 두 쪽이 같은 경로를 보므로 **서버측 절대경로**를 넘긴다.\n\nangle_preset 은 서버가 들고 있는 목록에서 고른다(`GET /api/v1/stcx/options`). 고르지 않으면 도구 기본값(26방향)이 쓰인다.",
+      "invocation": "external",
+      "config_style": null,
+      "takes_kfile": true,
+      "requires_gmsh": false,
+      "requires_tetgen": false,
+      "params": [
+        {
+          "name": "model",
+          "type": "file",
+          "role": "input_file",
+          "required": true,
+          "description": "낙하시킬 LS-DYNA K-file. 이 세션에 올린 파일을 고르면 그 서버측 경로가 그대로 넘어간다."
+        },
+        {
+          "name": "angle_preset",
+          "type": "string",
+          "role": "value",
+          "required": false,
+          "description": "각도 집합 프리셋. 서버가 들고 있는 목록에서 고른다(예: 26direction, 6face, fibonacci-100). 코드에 박지 않는다 — 서버에 프리셋이 늘면 바로 쓸 수 있어야 한다."
+        },
+        {
+          "name": "job_name",
+          "type": "string",
+          "role": "value",
+          "required": false,
+          "description": "클러스터에 남을 잡 이름. 비우면 서버가 정한다."
+        },
+        {
+          "name": "height",
+          "type": "number",
+          "role": "value",
+          "required": false,
+          "description": "낙하 높이(mm). 비우면 프리셋 값(기본 1500)."
+        },
+        {
+          "name": "num_directions",
+          "type": "integer",
+          "role": "value",
+          "required": false,
+          "description": "fibonacci 각도원을 쓸 때의 방향 수. angle_preset 과 함께 주면 프리셋 위에 덮인다."
+        },
+        {
+          "name": "memory",
+          "type": "string",
+          "role": "value",
+          "required": false,
+          "description": "LS-DYNA 메모리 지정(예: 2000m). 비우면 서버 기본값."
+        },
+        {
+          "name": "time_limit",
+          "type": "string",
+          "role": "value",
+          "required": false,
+          "description": "Slurm 시간 상한(예: 24:00:00). 비우면 서버 기본값."
+        }
+      ],
+      "example": {
+        "args": {
+          "model": "phone_assembly.k",
+          "angle_preset": "fibonacci-100",
+          "height": 1200
+        },
+        "note": "100방향 전각도 낙하를 1200mm 높이에서 제출한다. 제출 직후 잡은 running 으로 남고, 상태는 폴링으로 갱신된다 — 이 서버를 재기동해도 잡은 죽지 않는다."
+      },
+      "notes": [
+        "이 작업은 stcx(356대)에서 돈다. ste(24대)와는 다른 클러스터다.",
+        "제출에는 게이트웨이 PAT 가 필요하다(KOORM_GATEWAY_PAT). 없으면 제출이 명시적으로 실패한다."
+      ]
     }
   ]
 }

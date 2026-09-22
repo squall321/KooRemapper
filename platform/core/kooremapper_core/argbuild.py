@@ -178,6 +178,16 @@ def build_command(op: str, args: dict, work_dir: Path,
     params = entry.get("params", [])
     invocation = entry.get("invocation")
 
+    # 외부 작업(다른 클러스터에서 도는 것)은 여기서 argv 를 만들지 않는다. 워커가 그 앞에서
+    # 갈라 나가지만, 그 분기를 누가 빠뜨리면 여기로 떨어진다 — 빈 argv 로 조용히 "성공" 하는
+    # 대신 어디서 도는 작업인지 말한다.
+    if invocation == "external":
+        return BuiltCommand(
+            argv=[],
+            error=f"'{op}' is an external operation — it runs on another cluster, "
+                  f"not via the local binary",
+        )
+
     # 카드를 안전하게 직렬화할 수 없으면 덱을 내지 않고 오류로 돌려준다(조용한 mid=0 덱 방지).
     try:
         if invocation == "positional":
