@@ -91,6 +91,30 @@ def parse_submit(result: Any) -> dict:
     return {"ok": True, "job_id": m.group(1), "detail": text[:2000]}
 
 
+# 옵션 카탈로그 글 안의 프리셋 줄. 예:
+#   "■ 사용 가능한 각도 프리셋 (angle_preset, /data/scenario): 26direction, 6face, fibonacci-100"
+_PRESET_LINE = re.compile(r"각도 프리셋[^:：\n]*[:：]\s*([^\n]+)")
+_PRESET_TOKEN = re.compile(r"^[\w.\-]+$")
+
+
+def parse_presets(result: Any) -> list[str]:
+    """옵션 카탈로그 글에서 고를 수 있는 각도 프리셋 이름만 뽑는다.
+
+    **목록을 코드에 박지 않는 것이 요점이다.** 박으면 클러스터에 프리셋이 늘어도 화면에는
+    안 보이고, 사용자는 있는 것을 못 쓴다. 못 뽑으면 빈 목록이다 — 그때는 호출부가
+    "물어보지도 못했다" 와 "정말 없다" 를 갈라 보여 줘야 한다.
+    """
+    m = _PRESET_LINE.search(_as_text(result))
+    if not m:
+        return []
+    out = []
+    for token in re.split(r"[,、]", m.group(1)):
+        token = token.strip()
+        if _PRESET_TOKEN.match(token):
+            out.append(token)
+    return out
+
+
 def parse_state(result: Any) -> dict:
     """상태 응답 → {"state": "active"|"succeeded"|"failed"|"unknown", "raw": …}.
 

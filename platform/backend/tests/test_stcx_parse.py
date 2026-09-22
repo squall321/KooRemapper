@@ -81,3 +81,38 @@ def test_unknown_state_is_never_mistaken_for_done():
     """이 단언이 이 파일에서 가장 중요하다 — 모름이 완료로 새면 결과 없이 succeeded 가 뜬다."""
     for bad in ("", "error: x", "상태: NOPE", "아무 말"):
         assert parse_state(bad)["state"] not in ("succeeded", "failed")
+
+
+# ── 각도 프리셋 — 목록은 서버가 들고 있다 ──────────────────────────────────
+from app.runner.stcx_client import parse_presets  # noqa: E402
+
+# 실제로 도구를 불러 받은 원문의 해당 부분(2026-09-22 실측).
+_REAL_CATALOG_TAIL = (
+    "■ 사용 가능한 각도 프리셋 (angle_preset, /data/scenario): "
+    "26direction, 6face, fibonacci-100, fibonacci-1000, fibonacci-10000\n"
+    "  프리셋을 base 로 삼고 scenario_overrides 가 깊은 병합(dict 재귀, 리스트/스칼라 교체)됩니다.\n"
+)
+
+
+def test_presets_come_from_the_server_not_from_our_code():
+    got = parse_presets(_REAL_CATALOG_TAIL)
+    assert got == ["26direction", "6face", "fibonacci-100", "fibonacci-1000", "fibonacci-10000"]
+
+
+def test_a_new_preset_on_the_server_shows_up_without_a_code_change():
+    """이게 이 함수의 존재 이유다 — 박아 두면 있는 것을 못 쓴다."""
+    text = "■ 사용 가능한 각도 프리셋 (angle_preset): 26direction, fibonacci-250, my-new-preset\n"
+    assert "fibonacci-250" in parse_presets(text)
+    assert "my-new-preset" in parse_presets(text)
+
+
+def test_prose_around_the_line_is_not_mistaken_for_a_preset():
+    got = parse_presets(_REAL_CATALOG_TAIL)
+    assert all(" " not in p for p in got)
+    assert "프리셋을" not in " ".join(got)
+
+
+def test_no_preset_line_means_an_empty_list_not_a_crash():
+    assert parse_presets("옵션 카탈로그인데 프리셋 줄이 없다") == []
+    assert parse_presets("") == []
+    assert parse_presets({"result": "각도 프리셋: a, b"}) == ["a", "b"]
