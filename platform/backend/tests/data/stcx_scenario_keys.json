@@ -1,0 +1,398 @@
+{
+ "source": [
+  "pyKooCAE/Runner/cli_help_kcr.py K() 표",
+  "/data/scenario/*/scenario.json"
+ ],
+ "captured": "2026-09-22",
+ "k_table": [
+  "angle_source.case_txt_file.file_path",
+  "angle_source.case_txt_file.selected_indices",
+  "angle_source.cuboid_geometry.include_corners",
+  "angle_source.cuboid_geometry.include_edges",
+  "angle_source.cuboid_geometry.include_faces",
+  "angle_source.cuboid_geometry.only",
+  "angle_source.explicit.angles",
+  "angle_source.explicit.file",
+  "angle_source.fibonacci_lattice.angle_spacing",
+  "angle_source.fibonacci_lattice.num_points",
+  "angle_source.fibonacci_lattice.previous_stages",
+  "angle_source.fibonacci_lattice.principal_directions",
+  "angle_source.fibonacci_lattice.progressive",
+  "angle_source.fibonacci_lattice.sampling_space",
+  "angle_source.pitching_sweep.pitch_max",
+  "angle_source.pitching_sweep.pitch_min",
+  "angle_source.pitching_sweep.pitch_step",
+  "angle_source.pitching_sweep.roll_fixed",
+  "angle_source.pitching_sweep.yaw_fixed",
+  "angle_source.rolling_sweep.pitch_fixed",
+  "angle_source.rolling_sweep.roll_max",
+  "angle_source.rolling_sweep.roll_min",
+  "angle_source.rolling_sweep.roll_step",
+  "angle_source.source_type",
+  "cumulative.angle_mixing.custom_mapping",
+  "cumulative.angle_mixing.cyclic_offset",
+  "cumulative.angle_mixing.random_seed",
+  "cumulative.angle_mixing.strategy",
+  "cumulative.base_angle_index",
+  "cumulative.mode_sequence",
+  "cumulative.num_steps",
+  "environment.koomeshmodifier_path",
+  "environment.lsdyna_memory",
+  "environment.memory",
+  "environment.mpi_enabled",
+  "environment.ncpu",
+  "environment.nodes_per_job",
+  "environment.partition",
+  "environment.sif_path",
+  "environment.solver_command",
+  "environment.time_limit",
+  "preserve_includes",
+  "simulation_params.control_hourglass",
+  "simulation_params.control_timestep",
+  "simulation_params.convert_general_to_single_surface",
+  "simulation_params.decompose_contact_absolute_margin_x",
+  "simulation_params.decompose_contact_absolute_margin_y",
+  "simulation_params.decompose_contact_absolute_margin_z",
+  "simulation_params.decompose_contact_margin",
+  "simulation_params.decompose_general_contact",
+  "simulation_params.density",
+  "simulation_params.drop_contact",
+  "simulation_params.drop_surface.deformable_to_rigid",
+  "simulation_params.drop_surface.mesh",
+  "simulation_params.drop_surface.num_outer_layers",
+  "simulation_params.drop_surface.r_max",
+  "simulation_params.drop_surface.ratio",
+  "simulation_params.drop_surface.roughness_mode",
+  "simulation_params.drop_surface.shape_factor",
+  "simulation_params.drop_surface.shape_factor2",
+  "simulation_params.drop_surface.size",
+  "simulation_params.drop_surface.type",
+  "simulation_params.dt",
+  "simulation_params.dtmin",
+  "simulation_params.dynamic_relaxation",
+  "simulation_params.ensure_single_surface",
+  "simulation_params.gravity",
+  "simulation_params.height",
+  "simulation_params.include_wall_in_general",
+  "simulation_params.non_reflecting_boundary",
+  "simulation_params.offset_distance",
+  "simulation_params.poisson_ratio",
+  "simulation_params.rigidify_small_dt_threshold",
+  "simulation_params.robust_contact",
+  "simulation_params.robust_contact_tolerance",
+  "simulation_params.tFinal",
+  "simulation_params.youngs_modulus",
+  "tolerance.doe_count",
+  "tolerance.doe_type",
+  "tolerance.pitch",
+  "tolerance.roll",
+  "tolerance.yaw"
+ ],
+ "k_detail": [
+  {
+   "path": "angle_source.source_type",
+   "type": "문자",
+   "default": "cuboid_geometry",
+   "desc": "cuboid_geometry(면·모서리·꼭짓점 26) | fibonacci_lattice | pitching_sweep | rolling_sweep | case_txt_file"
+  },
+  {
+   "path": "angle_source.fibonacci_lattice.num_points",
+   "type": "정수",
+   "default": "26",
+   "desc": "피보나치 구면 점 수 (별칭 num_directions)"
+  },
+  {
+   "path": "angle_source.cuboid_geometry.include_faces",
+   "type": "bool",
+   "default": "true",
+   "desc": "육면체 방향 선택"
+  },
+  {
+   "path": "angle_source.cuboid_geometry.edges",
+   "type": "bool",
+   "default": "true",
+   "desc": "육면체 방향 선택"
+  },
+  {
+   "path": "angle_source.cuboid_geometry.corners",
+   "type": "bool",
+   "default": "true",
+   "desc": "육면체 방향 선택"
+  },
+  {
+   "path": "angle_source.fibonacci_lattice.sampling_space",
+   "type": "physical | latlon",
+   "default": "physical",
+   "desc": "physical = 실제 낙하 방향 등간격. latlon = 옛 방식(방향이 적도에 몰림)"
+  },
+  {
+   "path": "tolerance.roll",
+   "type": "객체",
+   "default": "lhs / 10",
+   "desc": "각도 공차 DOE 확장"
+  },
+  {
+   "path": "tolerance.pitch",
+   "type": "객체",
+   "default": "lhs / 10",
+   "desc": "각도 공차 DOE 확장"
+  },
+  {
+   "path": "tolerance.yaw + doe_type",
+   "type": "객체",
+   "default": "lhs / 10",
+   "desc": "각도 공차 DOE 확장"
+  },
+  {
+   "path": "tolerance.doe_count",
+   "type": "객체",
+   "default": "lhs / 10",
+   "desc": "각도 공차 DOE 확장"
+  },
+  {
+   "path": "cumulative.num_steps",
+   "type": "정수 / 배열",
+   "default": "1 / DROP×n",
+   "desc": "누적 스텝"
+  },
+  {
+   "path": "cumulative.mode_sequence",
+   "type": "정수 / 배열",
+   "default": "1 / DROP×n",
+   "desc": "누적 스텝"
+  },
+  {
+   "path": "cumulative.angle_mixing.strategy",
+   "type": "문자",
+   "default": "same_angle",
+   "desc": "same_angle | cyclic | random | opposite | custom_mapping"
+  },
+  {
+   "path": "simulation_params.height",
+   "type": "실수",
+   "default": "1500",
+   "desc": "낙하 높이 (모델 단위)"
+  },
+  {
+   "path": "simulation_params.gravity",
+   "type": "실수",
+   "default": "재질 밀도로 판정",
+   "desc": "자유낙하 g (모델 단위, --help units)"
+  },
+  {
+   "path": "simulation_params.tFinal",
+   "type": "실수",
+   "default": "0.005 / 1e-6",
+   "desc": "종료 시간 / d3plot 간격"
+  },
+  {
+   "path": "simulation_params.dt",
+   "type": "실수",
+   "default": "0.005 / 1e-6",
+   "desc": "종료 시간 / d3plot 간격"
+  },
+  {
+   "path": "simulation_params.density",
+   "type": "실수",
+   "default": "7.85e-9 / 2e5 / 0.3",
+   "desc": "바닥판 재질"
+  },
+  {
+   "path": "simulation_params.youngs_modulus",
+   "type": "실수",
+   "default": "7.85e-9 / 2e5 / 0.3",
+   "desc": "바닥판 재질"
+  },
+  {
+   "path": "simulation_params.poisson_ratio",
+   "type": "실수",
+   "default": "7.85e-9 / 2e5 / 0.3",
+   "desc": "바닥판 재질"
+  },
+  {
+   "path": "simulation_params.offset_distance",
+   "type": "실수",
+   "default": "0.05",
+   "desc": "바닥판 초기 간격"
+  },
+  {
+   "path": "simulation_params.drop_contact",
+   "type": "객체",
+   "default": "{}",
+   "desc": "바닥판 접촉 카드 필드 (SOFT, DTSTIF, FS ...)"
+  },
+  {
+   "path": "simulation_params.robust_contact",
+   "type": "bool / 실수",
+   "default": "false / 0.1",
+   "desc": "Tied 면 제외 SINGLE_SURFACE"
+  },
+  {
+   "path": "simulation_params.robust_contact_tolerance",
+   "type": "bool / 실수",
+   "default": "false / 0.1",
+   "desc": "Tied 면 제외 SINGLE_SURFACE"
+  },
+  {
+   "path": "simulation_params.rigidify_small_dt_threshold",
+   "type": "실수",
+   "default": "0",
+   "desc": "작은 dt 요소 강체화"
+  },
+  {
+   "path": "simulation_params.control_timestep",
+   "type": "객체",
+   "default": "{}",
+   "desc": "*CONTROL_TIMESTEP(DT2MS 등) / *CONTROL_HOURGLASS 덮어쓰기"
+  },
+  {
+   "path": "simulation_params.control_hourglass",
+   "type": "객체",
+   "default": "{}",
+   "desc": "*CONTROL_TIMESTEP(DT2MS 등) / *CONTROL_HOURGLASS 덮어쓰기"
+  },
+  {
+   "path": "simulation_params.dynamic_relaxation",
+   "type": "bool | 객체",
+   "default": "false",
+   "desc": "누적 스텝 사이 DR (nrcyck, drtol, drfctr, drterm)"
+  },
+  {
+   "path": "simulation_params.dtmin",
+   "type": "실수",
+   "default": "1e-10 (DR 이면 0.01)",
+   "desc": "CONTROL_TERMINATION DTMIN"
+  },
+  {
+   "path": "simulation_params.non_reflecting_boundary",
+   "type": "bool",
+   "default": "false",
+   "desc": "바닥판 옵션"
+  },
+  {
+   "path": "simulation_params.include_wall_in_general",
+   "type": "bool",
+   "default": "false",
+   "desc": "바닥판 옵션"
+  },
+  {
+   "path": "simulation_params.height",
+   "type": "실수",
+   "default": "100 / 5e-4 / 1e-5",
+   "desc": "검증 낙하 조건"
+  },
+  {
+   "path": "simulation_params.tFinal",
+   "type": "실수",
+   "default": "100 / 5e-4 / 1e-5",
+   "desc": "검증 낙하 조건"
+  },
+  {
+   "path": "simulation_params.dt",
+   "type": "실수",
+   "default": "100 / 5e-4 / 1e-5",
+   "desc": "검증 낙하 조건"
+  },
+  {
+   "path": "environment.koomeshmodifier_path",
+   "type": "-",
+   "default": "-",
+   "desc": "실행 환경"
+  },
+  {
+   "path": "environment.sif_path",
+   "type": "-",
+   "default": "-",
+   "desc": "실행 환경"
+  },
+  {
+   "path": "environment.solver_command",
+   "type": "-",
+   "default": "-",
+   "desc": "실행 환경"
+  },
+  {
+   "path": "environment.ncpu",
+   "type": "-",
+   "default": "-",
+   "desc": "실행 환경"
+  },
+  {
+   "path": "environment.memory",
+   "type": "-",
+   "default": "-",
+   "desc": "실행 환경"
+  },
+  {
+   "path": "environment.partition",
+   "type": "-",
+   "default": "-",
+   "desc": "실행 환경"
+  }
+ ],
+ "preset_keys": [
+  "base_dir",
+  "environment.apptainer_bind",
+  "environment.apptainer_env",
+  "environment.apptainer_sif",
+  "environment.apptainer_tmpdir",
+  "environment.koochainrun_path",
+  "environment.koomeshmodifier_path",
+  "environment.lsdyna_apptainer_bind",
+  "environment.lsdyna_apptainer_env.FI_PROVIDER",
+  "environment.lsdyna_apptainer_env.I_MPI_FABRICS",
+  "environment.lsdyna_apptainer_env.LD_LIBRARY_PATH",
+  "environment.lsdyna_apptainer_env.LSTC_FILE",
+  "environment.lsdyna_apptainer_env.LSTC_LICENSE_SERVER",
+  "environment.lsdyna_apptainer_sif",
+  "environment.lsdyna_memory",
+  "environment.lsdyna_path",
+  "environment.memory",
+  "environment.mpi_enabled",
+  "environment.mpi_launcher",
+  "environment.mpi_path",
+  "environment.ncpu",
+  "environment.nodes_per_job",
+  "environment.time_limit",
+  "postprocess.auto_deep",
+  "postprocess.auto_sphere",
+  "postprocess.deep_timeout_seconds",
+  "postprocess.enabled",
+  "postprocess.section_view_axes",
+  "postprocess.section_view_fields",
+  "postprocess.section_view_mode",
+  "postprocess.sphere_time_limit",
+  "postprocess.sv_threads",
+  "postprocess.ua_threads",
+  "postprocess.yield_stress_mpa",
+  "project_name",
+  "scenarios[].angle_source.cuboid_geometry.include_corners",
+  "scenarios[].angle_source.cuboid_geometry.include_edges",
+  "scenarios[].angle_source.cuboid_geometry.include_faces",
+  "scenarios[].angle_source.cuboid_geometry.only",
+  "scenarios[].angle_source.fibonacci_lattice.num_directions",
+  "scenarios[].angle_source.source_type",
+  "scenarios[].cumulative.angle_mixing.strategy",
+  "scenarios[].cumulative.base_angle_index",
+  "scenarios[].cumulative.mode_sequence",
+  "scenarios[].cumulative.num_steps",
+  "scenarios[].scenario_name",
+  "scenarios[].template",
+  "scenarios[].tolerance.doe_count",
+  "scenarios[].tolerance.doe_type",
+  "scenarios[].tolerance.include_nominal",
+  "scenarios[].tolerance.pitch.tolerance",
+  "scenarios[].tolerance.roll.tolerance",
+  "simulation_params.density",
+  "simulation_params.drop_surface.deformable_to_rigid",
+  "simulation_params.drop_surface.mesh",
+  "simulation_params.drop_surface.size",
+  "simulation_params.drop_surface.type",
+  "simulation_params.dt",
+  "simulation_params.height",
+  "simulation_params.poisson_ratio",
+  "simulation_params.tFinal",
+  "simulation_params.youngs_modulus"
+ ],
+ "preset_files": 6
+}

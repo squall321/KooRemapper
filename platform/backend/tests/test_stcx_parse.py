@@ -10,6 +10,8 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import pytest
+
 from app.runner.stcx_client import parse_state, parse_submit
 
 _REAL_OK = (
@@ -141,16 +143,32 @@ def test_nothing_given_means_nothing_overridden():
     assert build_scenario_overrides({"model": "m.k", "job_name": "x"}) == {}
 
 
-def test_the_angle_source_follows_what_you_actually_gave():
-    """방향 수만 주고 source_type 을 안 주면 fibonacci 가 아닌 프리셋 원에 num_points 만 얹힌다."""
-    ov = build_scenario_overrides({"num_directions": 162})
-    a = ov["scenarios"][0]["angle_source"]
-    assert a["source_type"] == "fibonacci_lattice" and a["num_points"] == 162
+def test_angle_params_nest_under_their_source_type():
+    """**파서는 한 단계 더 들어가서 읽는다** — 평평하면 값이 조용히 무시된다.
 
-    assert build_scenario_overrides({"pitch_step": 10})["scenarios"][0]["angle_source"] == {
-        "source_type": "pitching_sweep", "pitch_step": 10}
-    assert build_scenario_overrides({"roll_step": 15})["scenarios"][0]["angle_source"] == {
-        "source_type": "rolling_sweep", "roll_step": 15}
+    `Runner/CumulativeDesigner.py` 가 `angle_source["fibonacci_lattice"]["num_points"]`
+    를 본다. 이 시험은 예전에 평평한 구조를 고정하고 있었다 — 즉 버그를 지키고 있었다.
+    """
+    a = build_scenario_overrides({"num_directions": 162})["scenarios"][0]["angle_source"]
+    assert a["source_type"] == "fibonacci_lattice"
+    assert a["fibonacci_lattice"]["num_points"] == 162
+    assert "num_points" not in a, "한 단계 얕으면 파서가 못 읽는다"
+
+    a = build_scenario_overrides({"pitch_step": 10})["scenarios"][0]["angle_source"]
+    assert a == {"pitching_sweep": {"pitch_step": 10}, "source_type": "pitching_sweep"}
+    a = build_scenario_overrides({"roll_step": 15})["scenarios"][0]["angle_source"]
+    assert a == {"rolling_sweep": {"roll_step": 15}, "source_type": "rolling_sweep"}
+
+
+def test_two_angle_sources_at_once_are_refused():
+    """임의로 하나를 고르면 나머지 값이 조용히 무시된 채 잡이 성공한다."""
+    from app.runner.stcx_client import AmbiguousAngleSource
+    with pytest.raises(AmbiguousAngleSource):
+        build_scenario_overrides({"num_directions": 162, "include_faces": True})
+    # 직접 고르면 통과한다
+    a = build_scenario_overrides({"num_directions": 162, "include_faces": True,
+                                  "angle_source": "cuboid_geometry"})["scenarios"][0]["angle_source"]
+    assert a["source_type"] == "cuboid_geometry"
 
 
 def test_a_case_file_decides_the_angle_source_by_itself():
@@ -162,6 +180,30 @@ def test_a_case_file_decides_the_angle_source_by_itself():
 def test_an_explicit_angle_source_wins_over_the_guess():
     ov = build_scenario_overrides({"angle_source": "cuboid_geometry", "num_directions": 50})
     assert ov["scenarios"][0]["angle_source"]["source_type"] == "cuboid_geometry"
+
+
+def test_the_new_option_families_land_in_the_right_place():
+    """산문 카탈로그에 아예 없던 것들 — 파서·실제 프리셋에서 찾아낸 자리."""
+    ov = build_scenario_overrides({
+        "gravity": 9810, "dtmin": 0, "tolerance_roll": 3, "tolerance_doe_count": 20,
+        "auto_sphere": True, "yield_stress_mpa": 250})
+    assert ov["simulation_params"]["gravity"] == 9810
+    assert ov["simulation_params"]["dtmin"] == 0
+    scen = ov["scenarios"][0]
+    assert scen["tolerance"]["roll"]["tolerance"] == 3
+    assert scen["tolerance"]["doe_count"] == 20
+    assert ov["postprocess"] == {"auto_sphere": True, "yield_stress_mpa": 250}
+
+    # 각도원별 새 옵션은 **하나씩** 본다 — 섞어 주면(맞게) 거절당한다
+    for args, path in (
+        ({"cuboid_only": ["C1", "F5"]}, ("cuboid_geometry", "only")),
+        ({"sampling_space": "physical"}, ("fibonacci_lattice", "sampling_space")),
+        ({"explicit_file": "/srv/a.json"}, ("explicit", "file")),
+        ({"previous_stages": [120, 500]}, ("fibonacci_lattice", "previous_stages")),
+    ):
+        a = build_scenario_overrides(args)["scenarios"][0]["angle_source"]
+        assert a[path[0]][path[1]] == list(args.values())[0]
+        assert a["source_type"] in ("cuboid_geometry", "fibonacci_lattice", "explicit")
 
 
 def test_cumulative_and_resources():

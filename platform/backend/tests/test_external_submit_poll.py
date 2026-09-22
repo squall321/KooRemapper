@@ -180,8 +180,9 @@ async def test_num_directions_becomes_a_fibonacci_override(db, patched):
         await _submit(db, u.id, sid, wd, {"model": "model.k", "num_directions": 162, "height": 900})
         ov = fake.submits[-1]["scenario_overrides"]
         assert ov["simulation_params"]["height"] == 900
-        assert ov["scenarios"][0]["angle_source"]["num_points"] == 162
-        assert ov["scenarios"][0]["angle_source"]["source_type"] == "fibonacci_lattice"
+        a = ov["scenarios"][0]["angle_source"]
+        assert a["source_type"] == "fibonacci_lattice"
+        assert a["fibonacci_lattice"]["num_points"] == 162, "파서는 한 단계 더 들어가서 읽는다"
     finally:
         await _cleanup(u.id)
 

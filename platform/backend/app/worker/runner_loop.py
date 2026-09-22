@@ -157,7 +157,13 @@ async def _submit_external(db, job: Job, work_dir: Path) -> None:
             return
         case_txt_path = str(cpath)
 
-    overrides = build_scenario_overrides(args, has_case_txt=bool(case_txt_path))
+    try:
+        overrides = build_scenario_overrides(args, has_case_txt=bool(case_txt_path))
+    except ValueError as exc:
+        # 고를 수 없는 것을 골라 주지 않는다 — 여기서 막아야 몇 시간 뒤가 아니라 지금 안다.
+        _fail(job, str(exc))
+        await db.commit()
+        return
 
     client = _stcx()
     try:
