@@ -244,3 +244,52 @@ async def test_poll_backs_off(db, patched):
         assert job.external_ref["poll_interval"] <= settings.stcx_poll_max_sec
     finally:
         await _cleanup(u.id)
+
+
+# ── 각도 파일도 나르지 않는다 ───────────────────────────────────────────────
+async def test_a_case_file_is_passed_as_a_path(db, patched):
+    fake = patched(_Fake())
+    u, sid, wd = await _mk(db)
+    try:
+        (wd / "angles.txt").write_text("0 0 0\n90 0 0\n", encoding="utf-8")
+        await _submit(db, u.id, sid, wd, {"model": "model.k", "case_txt": "angles.txt"})
+        kw = fake.submits[-1]
+        assert kw["case_txt_path"] == str(wd / "angles.txt")
+        assert kw["scenario_overrides"]["scenarios"][0]["angle_source"]["source_type"] == "case_txt_file"
+    finally:
+        await _cleanup(u.id)
+
+
+async def test_a_missing_case_file_is_refused_before_calling_out(db, patched):
+    fake = patched(_Fake())
+    u, sid, wd = await _mk(db)
+    try:
+        job = await _submit(db, u.id, sid, wd, {"model": "model.k", "case_txt": "nope.txt"})
+        assert job.status == "failed" and not fake.submits
+    finally:
+        await _cleanup(u.id)
+
+
+async def test_a_path_escape_in_the_case_file_is_refused(db, patched):
+    fake = patched(_Fake())
+    u, sid, wd = await _mk(db)
+    try:
+        job = await _submit(db, u.id, sid, wd, {"model": "model.k", "case_txt": "../../etc/passwd"})
+        assert job.status == "failed" and not fake.submits
+    finally:
+        await _cleanup(u.id)
+
+
+async def test_the_submitted_scenario_is_recorded_on_the_job(db, patched):
+    """무엇으로 돌렸는지 잡에 남아야 한다 — 나중에 '왜 이 결과인가' 를 물을 수 있게."""
+    patched(_Fake())
+    u, sid, wd = await _mk(db)
+    try:
+        job = await _submit(db, u.id, sid, wd, {
+            "model": "model.k", "height": 900,
+            "scenario_overrides": {"simulation_params": {"dt": 5e-7}}})
+        ref = job.external_ref
+        assert ref["scenario_overrides"]["simulation_params"] == {"height": 900, "dt": 5e-7}
+        assert ref["case_txt_path"] is None
+    finally:
+        await _cleanup(u.id)

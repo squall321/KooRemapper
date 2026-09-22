@@ -97,6 +97,87 @@ _PRESET_LINE = re.compile(r"각도 프리셋[^:：\n]*[:：]\s*([^\n]+)")
 _PRESET_TOKEN = re.compile(r"^[\w.\-]+$")
 
 
+def deep_merge(base: dict, over: dict) -> dict:
+    """딕트는 재귀 병합, 리스트·스칼라는 교체 — 서버 도구가 쓰는 규칙 그대로다.
+
+    규칙이 서로 다르면 화면에서 본 것과 클러스터에서 도는 것이 달라진다.
+    """
+    out = dict(base)
+    for k, v in (over or {}).items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = deep_merge(out[k], v)
+        else:
+            out[k] = v
+    return out
+
+
+def _angle(over: dict) -> dict:
+    """scenarios[0].angle_source 자리를 만들어 돌려준다(없으면 만든다)."""
+    scen = over.setdefault("scenarios", [{}])
+    if not scen:
+        scen.append({})
+    return scen[0].setdefault("angle_source", {})
+
+
+# 낱낱 옵션 → scenario.json 자리. 이름이 어긋나면 **조용히 무시된다**(도구가 모르는 키를
+# 그냥 병합해 두고 지나간다) — 그래서 이 표를 한자리에 두고 시험으로 고정한다.
+_SIM_PARAMS = {
+    "height": "height",
+    "t_final": "tFinal",
+    "dt": "dt",
+    "offset_distance": "offset_distance",
+}
+
+
+def build_scenario_overrides(args: Mapping[str, Any], *, has_case_txt: bool = False) -> dict:
+    """폼에서 받은 낱낱 옵션을 scenario.json 구조로 옮긴다.
+
+    **우선순위** — 여기서 만든 것 위에 사용자의 `scenario_overrides` 가 마지막으로 덮인다.
+    그래야 서버에 새 옵션이 생겨도 이 표를 고치지 않고 바로 쓸 수 있다.
+    """
+    over: dict = {}
+
+    sim: dict = {}
+    for arg_key, scen_key in _SIM_PARAMS.items():
+        if args.get(arg_key) is not None:
+            sim[scen_key] = args[arg_key]
+    if args.get("drop_surface"):
+        sim.setdefault("drop_surface", {})["type"] = args["drop_surface"]
+    if sim:
+        over["simulation_params"] = sim
+
+    # 각도원 — 셋 중 하나라도 있으면 source_type 을 그에 맞춘다.
+    src = args.get("angle_source") or ""
+    if has_case_txt:
+        src = "case_txt_file"          # 파일을 골랐으면 그게 곧 의사표시다
+    elif not src and args.get("num_directions") is not None:
+        src = "fibonacci_lattice"
+    elif not src and args.get("pitch_step") is not None:
+        src = "pitching_sweep"
+    elif not src and args.get("roll_step") is not None:
+        src = "rolling_sweep"
+    if src:
+        _angle(over)["source_type"] = src
+    if args.get("num_directions") is not None:
+        _angle(over)["num_points"] = int(args["num_directions"])
+    if args.get("pitch_step") is not None:
+        _angle(over)["pitch_step"] = args["pitch_step"]
+    if args.get("roll_step") is not None:
+        _angle(over)["roll_step"] = args["roll_step"]
+
+    if args.get("cumulative_steps") is not None:
+        over.setdefault("scenarios", [{}])[0]["cumulative"] = {
+            "num_steps": int(args["cumulative_steps"])}
+
+    if args.get("ncpu") is not None:
+        over.setdefault("environment", {})["ncpu"] = int(args["ncpu"])
+
+    user = args.get("scenario_overrides")
+    if isinstance(user, dict) and user:
+        over = deep_merge(over, user)
+    return over
+
+
 def parse_presets(result: Any) -> list[str]:
     """옵션 카탈로그 글에서 고를 수 있는 각도 프리셋 이름만 뽑는다.
 
@@ -315,8 +396,8 @@ class StcxClient:
 
     async def submit_fullangle_drop(
         self, *, model_path: str, job_name: str = "", angle_preset: str = "",
-        scenario_overrides: dict | None = None, memory: str = "", time_limit: str = "",
-        dry_run: bool = False,
+        case_txt_path: str = "", scenario_overrides: dict | None = None,
+        memory: str = "", time_limit: str = "", dry_run: bool = False,
     ) -> dict:
         """전각도 낙하 제출.
 
@@ -332,6 +413,8 @@ class StcxClient:
             args["job_name"] = job_name
         if angle_preset:
             args["angle_preset"] = angle_preset
+        if case_txt_path:
+            args["case_txt_path"] = case_txt_path
         if scenario_overrides:
             args["scenario_overrides"] = scenario_overrides
         if memory:

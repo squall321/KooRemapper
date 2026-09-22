@@ -27,7 +27,8 @@ from app.models import Job, Session, SessionFile
 from app.runner import catalog
 from app.runner.argbuild import build_command
 from app.runner.kfile_inspect import inspect_kfile
-from app.runner.stcx_client import StcxClient, parse_state, parse_submit
+from app.runner.stcx_client import (StcxClient, build_scenario_overrides, parse_state,
+                                    parse_submit)
 from app.shared import storage
 
 logger = logging.getLogger("koorm.worker")
@@ -145,14 +146,18 @@ async def _submit_external(db, job: Job, work_dir: Path) -> None:
         await db.commit()
         return
 
-    overrides: dict = {}
-    if args.get("height") is not None:
-        overrides.setdefault("simulation_params", {})["height"] = args["height"]
-    if args.get("num_directions") is not None:
-        overrides.setdefault("scenarios", [{}])
-        overrides["scenarios"][0].setdefault("angle_source", {})
-        overrides["scenarios"][0]["angle_source"]["source_type"] = "fibonacci_lattice"
-        overrides["scenarios"][0]["angle_source"]["num_points"] = int(args["num_directions"])
+    # 각도 목록 파일도 **나르지 않는다** — 세션 경로를 그대로 넘긴다(모델과 같은 규칙).
+    case_txt_path = ""
+    if args.get("case_txt"):
+        cname = Path(str(args["case_txt"])).name
+        cpath = work_dir / cname
+        if not cname or not cpath.is_file():
+            _fail(job, f"각도 파일을 찾을 수 없다: {args.get('case_txt')!r}")
+            await db.commit()
+            return
+        case_txt_path = str(cpath)
+
+    overrides = build_scenario_overrides(args, has_case_txt=bool(case_txt_path))
 
     client = _stcx()
     try:
@@ -160,6 +165,7 @@ async def _submit_external(db, job: Job, work_dir: Path) -> None:
             model_path=str(model_path),
             job_name=str(args.get("job_name") or ""),
             angle_preset=str(args.get("angle_preset") or ""),
+            case_txt_path=case_txt_path,
             scenario_overrides=overrides or None,
             memory=str(args.get("memory") or ""),
             time_limit=str(args.get("time_limit") or ""),
@@ -185,6 +191,8 @@ async def _submit_external(db, job: Job, work_dir: Path) -> None:
     job.external_ref = {
         "job_id": parsed["job_id"],
         "model_path": str(model_path),
+        "case_txt_path": case_txt_path or None,
+        "scenario_overrides": overrides or None,
         "submitted": parsed.get("detail", "")[:2000],
         "poll_interval": delay,
     }

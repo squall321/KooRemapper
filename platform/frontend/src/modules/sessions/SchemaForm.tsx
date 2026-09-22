@@ -6,6 +6,7 @@ import { useState } from 'react'
 import yaml from 'js-yaml'
 import type { OperationDetail, SessionFile } from '@/shared/api/types'
 import { Input, Label, Select, Textarea } from '@/shared/ui/ui'
+import { StcxPresetField } from './StcxPresetField'
 
 export type ArgValues = Record<string, unknown>
 
@@ -46,6 +47,17 @@ export function SchemaForm({
             <span className="text-muted/70 font-normal">— {def.description}</span>
           </Label>
         )
+        // 각도 프리셋만은 목록이 **서버에 있다** — 평범한 문자열 칸으로 두면
+        // 사용자가 이름을 외워서 타이핑해야 하고, 서버에 새 프리셋이 생겨도 모른다.
+        if (name === 'angle_preset') {
+          return (
+            <div key={name}>
+              {label}
+              <StcxPresetField value={(value[name] as string) ?? ''}
+                onChange={(v) => setOpt(name, v)} />
+            </div>
+          )
+        }
         if (def.type === 'boolean') {
           return (
             <label key={name} className="flex items-center gap-2 text-sm">

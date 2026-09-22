@@ -106,6 +106,20 @@ export async function getOperation(op: string): Promise<OperationDetail> {
   return unwrap<OperationDetail>(data)
 }
 
+// stcx (전각도 낙하) — 각도 프리셋·옵션 카탈로그는 **서버가 정본**이다.
+// 여기 박아 두면 클러스터에 프리셋이 늘어도 화면에는 안 보이고, 사용자는 있는 것을 못 쓴다.
+export interface StcxOptions {
+  available: boolean
+  presets: string[]
+  catalog: string
+  reason?: string
+  detail?: string
+}
+export async function getStcxOptions(): Promise<StcxOptions> {
+  const { data } = await api.get('/stcx/options')
+  return unwrap<StcxOptions>(data)
+}
+
 // jobs
 export async function createJob(sessionId: string, operation: string, args: Record<string, unknown>): Promise<Job> {
   const { data } = await api.post(`/sessions/${sessionId}/jobs`, { operation, args })

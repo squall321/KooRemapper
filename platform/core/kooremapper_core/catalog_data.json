@@ -13006,7 +13006,7 @@
       "name": "stcx_fullangle_drop",
       "category": "analysis",
       "summary": "Submit a full-angle (Fibonacci) LS-DYNA drop study to the stcx cluster",
-      "description": "stcx(356-node) 클러스터에 전각도 낙하 해석을 제출한다. 모델 하나를 구면상 여러 방향으로 떨어뜨려 방향별 결과를 모으고, 통합 sphere_report 까지 자동 생성된다.\n\n이 작업은 **이 서버에서 돌지 않는다.** 게이트웨이 MCP 를 거쳐 stcx 에 제출되고, 여기서는 상태만 따라간다. 그래서 몇 시간이 걸릴 수 있고, 그동안 이 세션의 다른 작업은 그대로 돌아간다.\n\n모델 파일은 전송하지 않는다 — 두 쪽이 같은 경로를 보므로 **서버측 절대경로**를 넘긴다.\n\nangle_preset 은 서버가 들고 있는 목록에서 고른다(`GET /api/v1/stcx/options`). 고르지 않으면 도구 기본값(26방향)이 쓰인다.",
+      "description": "stcx(356대) 클러스터에 전각도 낙하 해석을 제출한다. 모델 하나를 구면상 여러 방향으로 떨어뜨려 방향별 결과를 모으고, 통합 sphere_report 까지 자동 생성된다.\n\n이 작업은 **이 서버에서 돌지 않는다.** 게이트웨이 MCP 를 거쳐 stcx 에 제출되고 여기서는 상태만 따라간다. 몇 시간이 걸릴 수 있고, 그동안 이 세션의 다른 작업은 그대로 돌아간다.\n\n모델·각도 파일은 전송하지 않는다 — 두 쪽이 같은 경로를 보므로 **서버측 절대경로**를 넘긴다.\n\n## 각도를 정하는 네 가지 길\n1. `angle_preset` — 서버가 들고 있는 프리셋에서 고른다(`GET /api/v1/stcx/options` 로 목록). 가장 쉽다.\n2. `angle_source` + 그 방식의 파라미터 — 프리셋 없이 직접 정한다.\n3. `case_txt` — 각도 목록 .txt 를 이 세션에서 고른다(그 경로가 서버로 넘어간다).\n4. `scenario_overrides` — 위 어느 것으로도 표현 못 하는 것. scenario.json 구조 그대로 깊은 병합된다.\n\n## 우선순위\n프리셋을 바닥에 깔고 → 아래 낱낱 옵션을 덮고 → **`scenario_overrides` 가 마지막에 이긴다.** 그래서 서버에 새 옵션이 생겨도 이 목록을 안 고치고 `scenario_overrides` 로 바로 쓸 수 있다.\n\n단위계는 LS-DYNA 덱과 같아야 한다 — 표준은 [tonne, mm, s, MPa].",
       "invocation": "external",
       "config_style": null,
       "takes_kfile": true,
@@ -13025,14 +13025,49 @@
           "type": "string",
           "role": "value",
           "required": false,
-          "description": "각도 집합 프리셋. 서버가 들고 있는 목록에서 고른다(예: 26direction, 6face, fibonacci-100). 코드에 박지 않는다 — 서버에 프리셋이 늘면 바로 쓸 수 있어야 한다."
+          "description": "각도 집합 프리셋(예: 26direction, 6face, fibonacci-100). 목록은 서버가 들고 있다 — 코드에 박지 않는다. 비우면 도구 기본값(26방향)."
         },
         {
-          "name": "job_name",
-          "type": "string",
+          "name": "angle_source",
+          "type": "enum",
           "role": "value",
           "required": false,
-          "description": "클러스터에 남을 잡 이름. 비우면 서버가 정한다."
+          "enum": [
+            "cuboid_geometry",
+            "fibonacci_lattice",
+            "pitching_sweep",
+            "rolling_sweep",
+            "case_txt_file"
+          ],
+          "description": "각도를 만드는 방식. 지정하면 프리셋의 source_type 을 덮는다. case_txt 를 고르면 자동으로 case_txt_file 이 된다."
+        },
+        {
+          "name": "num_directions",
+          "type": "integer",
+          "role": "value",
+          "required": false,
+          "description": "fibonacci_lattice 의 방향 수(num_points). 주면 source_type 도 fibonacci_lattice 로 맞춘다."
+        },
+        {
+          "name": "case_txt",
+          "type": "file",
+          "role": "input_file",
+          "required": false,
+          "description": "각도 목록 .txt (이 세션의 파일). 주면 그 경로가 서버로 넘어가고 각도원이 case_txt_file 이 된다."
+        },
+        {
+          "name": "pitch_step",
+          "type": "number",
+          "role": "value",
+          "required": false,
+          "description": "pitching_sweep 의 각도 간격(도). -90~90 을 이 간격으로 훑는다."
+        },
+        {
+          "name": "roll_step",
+          "type": "number",
+          "role": "value",
+          "required": false,
+          "description": "rolling_sweep 의 각도 간격(도). -180~170 을 이 간격으로 훑는다."
         },
         {
           "name": "height",
@@ -13042,11 +13077,59 @@
           "description": "낙하 높이(mm). 비우면 프리셋 값(기본 1500)."
         },
         {
-          "name": "num_directions",
+          "name": "t_final",
+          "type": "number",
+          "role": "value",
+          "required": false,
+          "description": "해석 종료 시간(s). 기본 0.005."
+        },
+        {
+          "name": "dt",
+          "type": "number",
+          "role": "value",
+          "required": false,
+          "description": "출력 간격(s). 기본 1e-6."
+        },
+        {
+          "name": "offset_distance",
+          "type": "number",
+          "role": "value",
+          "required": false,
+          "description": "모델과 바닥 사이 초기 간격(mm). 기본 0.05."
+        },
+        {
+          "name": "drop_surface",
+          "type": "enum",
+          "role": "value",
+          "required": false,
+          "enum": [
+            "Plane",
+            "RigidWall",
+            "PlaneGraded",
+            "PlanewithRoughness"
+          ],
+          "description": "바닥 종류. Plane(기본)·RigidWall(강체)·PlaneGraded(바깥층 점진 격자)·PlanewithRoughness(거칠기)."
+        },
+        {
+          "name": "cumulative_steps",
           "type": "integer",
           "role": "value",
           "required": false,
-          "description": "fibonacci 각도원을 쓸 때의 방향 수. angle_preset 과 함께 주면 프리셋 위에 덮인다."
+          "description": "각도당 연속 낙하 횟수. 1보다 크면 같은 방향으로 이어서 떨어뜨린다."
+        },
+        {
+          "name": "job_name",
+          "type": "string",
+          "role": "value",
+          "required": false,
+          "description": "클러스터에 남을 잡 이름. 비우면 서버가 정한다."
+        },
+        {
+          "name": "ncpu",
+          "type": "integer",
+          "role": "value",
+          "required": false,
+          "description": "케이스당 코어 수. 비우면 프리셋/서버 기본값."
         },
         {
           "name": "memory",
@@ -13061,19 +13144,33 @@
           "role": "value",
           "required": false,
           "description": "Slurm 시간 상한(예: 24:00:00). 비우면 서버 기본값."
+        },
+        {
+          "name": "scenario_overrides",
+          "type": "object",
+          "role": "value",
+          "required": false,
+          "description": "scenario.json 구조 그대로의 덮어쓰기. **맨 마지막에 깊은 병합되어 위 모든 옵션을 이긴다.** 서버에 새 옵션이 생기면 이 칸으로 바로 쓸 수 있다(딕트는 재귀 병합, 리스트·스칼라는 교체)."
         }
       ],
       "example": {
         "args": {
           "model": "phone_assembly.k",
           "angle_preset": "fibonacci-100",
-          "height": 1200
+          "height": 1200,
+          "drop_surface": "RigidWall",
+          "scenario_overrides": {
+            "simulation_params": {
+              "dynamic_relaxation": true
+            }
+          }
         },
-        "note": "100방향 전각도 낙하를 1200mm 높이에서 제출한다. 제출 직후 잡은 running 으로 남고, 상태는 폴링으로 갱신된다 — 이 서버를 재기동해도 잡은 죽지 않는다."
+        "note": "100방향 전각도 낙하를 1200mm 높이·강체 바닥에서 제출하고, 프리셋에 없는 DR 옵션은 scenario_overrides 로 덧붙인다. 제출 직후 잡은 running 으로 남고 상태는 폴링으로 갱신된다 — 이 서버를 재기동해도 잡은 죽지 않는다."
       },
       "notes": [
         "이 작업은 stcx(356대)에서 돈다. ste(24대)와는 다른 클러스터다.",
-        "제출에는 게이트웨이 PAT 가 필요하다(KOORM_GATEWAY_PAT). 없으면 제출이 명시적으로 실패한다."
+        "제출에는 게이트웨이 PAT 가 필요하다(KOORM_GATEWAY_PAT). 없으면 제출이 명시적으로 실패한다.",
+        "옵션 전체 카탈로그(단위·기본값·허용값)는 서버가 정본이다 — `GET /api/v1/stcx/options`."
       ]
     }
   ]

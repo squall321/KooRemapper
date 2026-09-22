@@ -116,3 +116,82 @@ def test_no_preset_line_means_an_empty_list_not_a_crash():
     assert parse_presets("옵션 카탈로그인데 프리셋 줄이 없다") == []
     assert parse_presets("") == []
     assert parse_presets({"result": "각도 프리셋: a, b"}) == ["a", "b"]
+
+
+# ── 시나리오 옵션 → scenario.json ──────────────────────────────────────────
+#
+# 여기가 틀리면 **조용히 틀린다.** 도구는 모르는 키를 그냥 병합해 두고 지나가므로,
+# 이름이 어긋나면 화면에서 고른 값이 해석에 아무 영향을 안 준다 — 그런데 잡은 성공한다.
+from app.runner.stcx_client import build_scenario_overrides, deep_merge  # noqa: E402
+
+
+def test_physics_options_land_in_simulation_params():
+    ov = build_scenario_overrides({"height": 1200, "t_final": 0.01, "dt": 2e-6,
+                                   "offset_distance": 0.1, "drop_surface": "RigidWall"})
+    sp = ov["simulation_params"]
+    assert sp["height"] == 1200
+    assert sp["tFinal"] == 0.01, "scenario.json 의 이름은 tFinal 이다(t_final 이 아니다)"
+    assert sp["dt"] == 2e-6
+    assert sp["offset_distance"] == 0.1
+    assert sp["drop_surface"]["type"] == "RigidWall"
+
+
+def test_nothing_given_means_nothing_overridden():
+    """빈 덮어쓰기를 보내면 프리셋 값을 건드린다 — 아무것도 안 주면 아무것도 안 만든다."""
+    assert build_scenario_overrides({"model": "m.k", "job_name": "x"}) == {}
+
+
+def test_the_angle_source_follows_what_you_actually_gave():
+    """방향 수만 주고 source_type 을 안 주면 fibonacci 가 아닌 프리셋 원에 num_points 만 얹힌다."""
+    ov = build_scenario_overrides({"num_directions": 162})
+    a = ov["scenarios"][0]["angle_source"]
+    assert a["source_type"] == "fibonacci_lattice" and a["num_points"] == 162
+
+    assert build_scenario_overrides({"pitch_step": 10})["scenarios"][0]["angle_source"] == {
+        "source_type": "pitching_sweep", "pitch_step": 10}
+    assert build_scenario_overrides({"roll_step": 15})["scenarios"][0]["angle_source"] == {
+        "source_type": "rolling_sweep", "roll_step": 15}
+
+
+def test_a_case_file_decides_the_angle_source_by_itself():
+    ov = build_scenario_overrides({"num_directions": 100}, has_case_txt=True)
+    assert ov["scenarios"][0]["angle_source"]["source_type"] == "case_txt_file", (
+        "각도 파일을 골랐다는 것이 곧 의사표시다")
+
+
+def test_an_explicit_angle_source_wins_over_the_guess():
+    ov = build_scenario_overrides({"angle_source": "cuboid_geometry", "num_directions": 50})
+    assert ov["scenarios"][0]["angle_source"]["source_type"] == "cuboid_geometry"
+
+
+def test_cumulative_and_resources():
+    ov = build_scenario_overrides({"cumulative_steps": 3, "ncpu": 64})
+    assert ov["scenarios"][0]["cumulative"]["num_steps"] == 3
+    assert ov["environment"]["ncpu"] == 64
+
+
+def test_user_overrides_win_last():
+    """**이 규칙이 이 함수의 요점이다** — 서버에 새 옵션이 생겨도 이 표를 안 고치고 쓸 수 있다."""
+    ov = build_scenario_overrides({
+        "height": 1500,
+        "scenario_overrides": {"simulation_params": {"height": 800, "density": 7.85e-9}},
+    })
+    sp = ov["simulation_params"]
+    assert sp["height"] == 800, "사용자가 직접 적은 값이 낱낱 옵션을 이겨야 한다"
+    assert sp["density"] == 7.85e-9, "표에 없는 키도 그대로 실려야 한다"
+
+
+def test_user_overrides_can_reach_places_the_form_has_no_field_for():
+    ov = build_scenario_overrides({"scenario_overrides": {
+        "preserve_includes": ["*.inc"],
+        "simulation_params": {"dynamic_relaxation": {"enabled": True, "nrcyck": 300}}}})
+    assert ov["preserve_includes"] == ["*.inc"]
+    assert ov["simulation_params"]["dynamic_relaxation"]["nrcyck"] == 300
+
+
+def test_deep_merge_follows_the_servers_rule():
+    """딕트는 재귀, 리스트·스칼라는 교체 — 규칙이 어긋나면 화면과 클러스터가 달라진다."""
+    base = {"a": {"x": 1, "y": 2}, "l": [1, 2], "s": "old"}
+    over = {"a": {"y": 9, "z": 3}, "l": [7], "s": "new"}
+    assert deep_merge(base, over) == {"a": {"x": 1, "y": 9, "z": 3}, "l": [7], "s": "new"}
+    assert base == {"a": {"x": 1, "y": 2}, "l": [1, 2], "s": "old"}, "원본을 건드리면 안 된다"
