@@ -237,3 +237,11 @@ class Job(Base):
     )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # ── 외부 잡(다른 클러스터에 던진 것) ───────────────────────────────────
+    # 로컬 잡은 워커의 자식 프로세스라 워커가 죽으면 같이 죽는다. 외부 잡은 아니다 —
+    # stcx 에 던진 4시간짜리는 API 를 재기동해도 계속 돈다. 그래서 수명 판정을
+    # **프로세스가 아니라 이 칸들로** 한다. 이걸 안 두면 재기동 한 번에 running 이
+    # 전부 failed 로 지워지고(reconcile_orphans), 잡은 멀쩡히 도는 채로 화면에서 사라진다.
+    external_kind: Mapped[str | None] = mapped_column(String(40), index=True)   # 예: "stcx_mcp"
+    external_ref: Mapped[dict | None] = mapped_column(JSONB)   # {registry_id, slurm_job_ids, work_dir, ...}
+    external_poll_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)

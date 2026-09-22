@@ -41,14 +41,19 @@ async def _claim_one(db) -> str | None:
     Jobs in the SAME session are serialized: they share one work_dir, so running
     two concurrently would let one overwrite the other's config.yaml and mis-
     attribute outputs. Different sessions still run concurrently (up to the
-    worker concurrency)."""
+    worker concurrency).
+
+    ⚠ 외부 잡은 그 직렬화의 **이유에 해당하지 않는다.** 그것은 세션 work_dir 에 쓰지
+    않고 다른 클러스터에서 돈다. 그런데도 막는 쪽에 세면, 몇 시간짜리 stcx 잡 하나가
+    그 세션의 모든 로컬 작업을 그 시간 내내 잠근다 — 사용자에게는 "큐에 걸린 채로
+    아무 일도 안 일어나는" 것으로 보인다."""
     row = (
         await db.execute(
             text(
                 "UPDATE jobs SET status='running', started_at=now() "
                 "WHERE id = (SELECT id FROM jobs q WHERE q.status='queued' "
                 "AND NOT EXISTS (SELECT 1 FROM jobs r WHERE r.status='running' "
-                "AND r.session_id = q.session_id) "
+                "AND r.session_id = q.session_id AND r.external_kind IS NULL) "
                 "ORDER BY q.created_at LIMIT 1 FOR UPDATE SKIP LOCKED) "
                 "RETURNING id"
             )
@@ -248,13 +253,18 @@ def request_cancel(job_id: str) -> bool:
 
 async def reconcile_orphans() -> None:
     """On startup, fail any job left 'running' by a previous (crashed/restarted)
-    worker — its subprocess is gone, so it can never complete."""
+    worker — its subprocess is gone, so it can never complete.
+
+    ⚠ 외부 잡(`external_kind IS NOT NULL`)은 **제외한다.** 그것은 이 워커의 자식이
+    아니라 다른 클러스터에서 도는 것이라, 워커가 죽었다는 사실과 잡의 생사가 무관하다.
+    빼지 않으면 API 재기동 한 번에 4시간짜리 stcx 잡이 화면에서 failed 로 사라지고,
+    정작 클러스터에서는 멀쩡히 계속 돈다 — 가장 나쁜 종류의 거짓말이다."""
     async with SessionLocal() as db:
         result = await db.execute(
             text(
                 "UPDATE jobs SET status='failed', "
                 "error_summary='worker restarted while job was running', "
-                "finished_at=now() WHERE status='running'"
+                "finished_at=now() WHERE status='running' AND external_kind IS NULL"
             )
         )
         await db.commit()

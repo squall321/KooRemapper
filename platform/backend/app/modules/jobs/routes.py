@@ -194,5 +194,13 @@ async def cancel_job(
     job = await _require_job(db, user, job_id)
     if job.status not in ("queued", "running"):
         raise HTTPException(status.HTTP_409_CONFLICT, f"취소할 수 없는 상태입니다: {job.status}")
+    # ⚠ 외부 잡은 **여기서 취소할 수 없다.** request_cancel 은 이 프로세스의 자식을
+    #    죽이는 것인데, 그 잡은 다른 클러스터에서 돈다. 그대로 두면 "취소됨" 이라고
+    #    답해 놓고 잡은 계속 도는 — 성공처럼 생긴 실패가 된다. 명시적으로 거절한다.
+    if job.status == "running" and job.external_kind:
+        raise HTTPException(
+            status.HTTP_501_NOT_IMPLEMENTED,
+            f"외부 잡({job.external_kind})은 여기서 취소할 수 없습니다 — 제출한 클러스터에서 취소하세요.",
+        )
     request_cancel(job_id)
     return ok(message="취소 요청됨")
