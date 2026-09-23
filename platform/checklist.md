@@ -43,9 +43,9 @@
       → 검증: 빠뜨린 채 실행하면 422, 플래그를 주면 통과
 
 ### ① 설정 파일 등록
-- [ ] `build_command` 산출 파일을 `kind="generated"` 로 명시 등록(origin_job_id 포함)
+- [x] `build_command` 산출 파일을 `kind="generated"` 로 명시 등록(origin_job_id 포함)
       → 검증: 잡 실행 후 파일 목록에 `config.yaml` 이 generated 로 뜨고 다운로드되는지
-- [ ] 산출물 스냅샷에 중복 등록되지 않는지
+- [x] 산출물 스냅샷에 중복 등록되지 않는지
       → 검증: 같은 파일이 output 으로 다시 안 잡히는지
 
 ### 마무리
@@ -55,7 +55,10 @@
 
 ### 실제 결과 (2026-09-23)
 - 백엔드 시험 **222 passed, 3 skipped** / C++ 회귀 **37/37** / MCP 문서 패리티 **ALL PASS**
-- 무력화 확인 3종: 업로드 평탄화 복귀 · 트래버설 방어 둘 다 제거 · 실행 관문 제거
+- 무력화 확인 4종: 업로드 평탄화 복귀 · 트래버설 방어 둘 다 제거 · 실행 관문 제거 · 설정 중복 등록
+- **dev 라이브 확인(2026-09-23)** — 업로드 경고 문구, `sub/part.k` 경로 보존, 인클루드 해소 후 ok=true,
+  실제 indent 잡 성공 후 파일 목록:
+  `input master.k / input sub/part.k / input block.k / generated config.yaml / output indent_live.{k,dynain}`
 - ⚠ 트래버설은 방어가 **두 겹**이다(`..` 구성요소 버리기 + `lstrip(".")`) — 하나만 빼면 시험이
   안 잡힌다. 둘 다 빼야 빨개진다는 것을 확인했다(시험이 헛돌지 않음을 증명).
 - ⚠ `test_a_second_supervisor_does_nothing` 이 간헐적으로 빨개지던 것을 함께 고쳤다 —
