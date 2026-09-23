@@ -149,7 +149,31 @@ async def upload_files(
             )
         row = await svc.add_uploaded_file(db, s, filename=uf.filename or "file", raw=raw)
         created.append(FileRead.model_validate(row).model_dump())
-    return ok(created, message=f"{len(created)}개 파일 업로드됨", status_code=201)
+    # 인클루드가 빠져 있으면 **여기서** 귀띔한다 — op 은 인클루드를 읽지 않아 그대로 성공하고,
+    # 깨진 것은 산출물이라 LS-DYNA 에 넣고 나서야 드러난다. 막지는 않는다(순서가 달라 아직 안
+    # 올라왔을 수 있다). 자세한 목록은 GET /sessions/{id}/includes, 강제는 잡 생성 때.
+    # ⚠ data 는 **리스트 그대로** 둔다 — 프론트·MCP·회귀가 `data[0]` 을 읽는다.
+    missing = await svc.include_status(db, session_id)
+    msg = f"{len(created)}개 파일 업로드됨"
+    if missing:
+        n = sum(len(v["missing"]) for v in missing.values())
+        msg += f" — ⚠ 참조된 *INCLUDE {n}개가 세션에 없습니다 (GET /sessions/{session_id}/includes)"
+    return ok(created, message=msg, status_code=201)
+
+
+@router.get("/sessions/{session_id}/includes")
+async def session_includes(
+    session_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """이 세션의 덱들이 참조하는 `*INCLUDE` 가 실제로 올라와 있나.
+
+    KooRemapper 는 `*INCLUDE` 를 읽지 않지만 **출력 덱에 그 줄을 보존한다** — 그래서 인클루드가
+    빠져도 op 은 성공하고, 산출물을 LS-DYNA 에 넣을 때 깨진다. 실행 전에 이걸로 확인하라."""
+    await _require_viewable(db, user, session_id)
+    st = await svc.include_status(db, session_id)
+    return ok({"ok": not st, "missing_by_file": st})
 
 
 @router.get("/sessions/{session_id}/files")

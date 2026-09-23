@@ -257,6 +257,50 @@ async def _poll_external_once() -> int:
         return len(due)
 
 
+async def _register_file(
+    db, session, name: str, fpath: Path, *, kind: str, job_id: str, inspect: bool = True
+) -> int:
+    """세션 디렉터리의 파일 하나를 session_files 에 등록(있으면 갱신)하고 id 를 돌려준다.
+
+    산출물 등록과 설정 파일 등록이 같은 일을 하므로 한 자리로 모은다.
+    `inspect=False` 는 K파일이 아닌 것(config.yaml 등)용 — `info` 를 돌려 봐야 실패만 한다.
+    """
+    # Offload hashing + the `info` subprocess off the event loop so registration
+    # doesn't stall the API (worker shares the loop).
+    sha = await asyncio.to_thread(storage.sha256_of, fpath)
+    meta = await asyncio.to_thread(inspect_kfile, fpath) if inspect else None
+    existing = (
+        await db.execute(
+            select(SessionFile).where(
+                SessionFile.session_id == session.id,
+                SessionFile.filename == name,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        existing.kind = kind
+        existing.origin_job_id = job_id
+        existing.size_bytes = fpath.stat().st_size
+        existing.sha256 = sha
+        if meta is not None:
+            existing.meta = meta
+        await db.flush()
+        return existing.id
+    row = SessionFile(
+        session_id=session.id,
+        filename=name,  # may include a subdir (posix) for nested files
+        rel_path=f"{session.storage_path}/{name}",
+        kind=kind,
+        origin_job_id=job_id,
+        size_bytes=fpath.stat().st_size,
+        sha256=sha,
+        meta=meta,
+    )
+    db.add(row)
+    await db.flush()
+    return row.id
+
+
 async def _execute(job_id: str) -> None:
     async with SessionLocal() as db:
         job = await db.get(Job, job_id)
@@ -291,6 +335,20 @@ async def _execute(job_id: str) -> None:
         err_path = work_dir / f".job_{job_id}.err"
         job.stdout_path = str(out_path)
         job.stderr_path = str(err_path)
+        await db.commit()
+
+        # 플랫폼이 만든 설정 파일(config.yaml 등)을 **파일 목록에 올린다.**
+        # ⚠ 아래 스냅샷에 맡기면 안 된다 — build_command 가 이미 썼으므로 `before` 에 들어가
+        # '새 파일'로 안 잡힌다. 그래서 디스크에는 있는데 목록·다운로드에는 영영 안 보였다.
+        # kind 는 output 이 아니라 **generated** 다. 바이너리의 산출물이 아니라 플랫폼이 만든 입력이다.
+        # (내용은 jobs.args 로도 복원되지만, 실제로 무엇이 실행됐는지는 이 파일이 정본이다.)
+        for wname in built.written_files:
+            wpath = work_dir / wname
+            if not wpath.is_file():
+                continue
+            await _register_file(
+                db, session, wname, wpath, kind="generated", job_id=job_id, inspect=False
+            )
         await db.commit()
 
         # snapshot existing files (name -> mtime) to detect outputs (recursive —
@@ -333,41 +391,10 @@ async def _execute(job_id: str) -> None:
             base = name.rsplit("/", 1)[-1]
             if base.startswith(".job_"):  # our log files
                 continue
-            fpath = work_dir / name
-            # Offload hashing + the `info` subprocess off the event loop so output
-            # registration doesn't stall the API (worker shares the loop).
-            sha = await asyncio.to_thread(storage.sha256_of, fpath)
-            meta = await asyncio.to_thread(inspect_kfile, fpath)
-            existing = (
-                await db.execute(
-                    select(SessionFile).where(
-                        SessionFile.session_id == session.id,
-                        SessionFile.filename == name,
-                    )
-                )
-            ).scalar_one_or_none()
-            if existing is not None:
-                existing.kind = "output"
-                existing.origin_job_id = job_id
-                existing.size_bytes = fpath.stat().st_size
-                existing.sha256 = sha
-                existing.meta = meta
-                await db.flush()
-                output_ids.append(existing.id)
-            else:
-                row = SessionFile(
-                    session_id=session.id,
-                    filename=name,  # may include a subdir (posix) for nested outputs
-                    rel_path=f"{session.storage_path}/{name}",
-                    kind="output",
-                    origin_job_id=job_id,
-                    size_bytes=fpath.stat().st_size,
-                    sha256=sha,
-                    meta=meta,
-                )
-                db.add(row)
-                await db.flush()
-                output_ids.append(row.id)
+            fid = await _register_file(
+                db, session, name, work_dir / name, kind="output", job_id=job_id
+            )
+            output_ids.append(fid)
 
         job.exit_code = exit_code
         job.output_file_ids = output_ids

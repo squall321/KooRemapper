@@ -28,6 +28,7 @@ MCP 서버는 streamable-http로 뜨고, 들어온 `Authorization: Bearer kr_...
 | `upload_kfile` | session_id, filename, content, base64_encoded? | POST /sessions/{id}/files | 내용(텍스트/base64)으로 업로드 |
 | `upload_local_path` | session_id, path, filename? | POST /sessions/{id}/files | 로컬 디스크 파일 업로드(대형 메쉬, 같은 머신) |
 | `list_session_files` | session_id | GET /sessions/{id}/files | 파일 목록 + meta(노드/요소/bbox/*INCLUDE) |
+| `session_includes` | session_id | GET /sessions/{id}/includes | 참조된 *INCLUDE 가 세션에 다 있나 — **op 전에 확인**(빠지면 산출물이 LS-DYNA 에서 깨진다) |
 | `inspect_file` | session_id, file_id | GET …/files/{id}/inspect | 단일 파일 상세 메타 |
 | `delete_file` | session_id, file_id | DELETE …/files/{id} | 파일 1건 삭제 |
 | `download_result` | session_id, file_id, as_base64? | GET …/files/{id}/download | 파일 내용 회수(5MB 상한, base64/미리보기) |

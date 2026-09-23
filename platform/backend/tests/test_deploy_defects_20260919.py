@@ -336,12 +336,13 @@ def test_a_second_supervisor_does_nothing(fake_stack, tmp_path):
     appt = _stub(tmp_path / "apptainer", _LIST_WITHOUT_API)
     lock_dir = root / "platform" / "infra" / "data" / "supervisor.lock.d"
     lock_dir.mkdir(parents=True)
-    # 살아 있는 '감독자' 를 흉내낸다 — 잠금의 근거는 우리가 적은 pid 다
-    holder = subprocess.Popen(["bash", str(scripts / "supervisor.sh"), "--hold"],
-                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                              env={"PATH": "/usr/bin:/bin", "KOORM_SUPERVISE_INTERVAL": "300",
-                                   "APPTAINER": str(appt), "ALLOW_PLACEHOLDER_SECRETS": "1",
-                                   "HOME": str(root)})
+    # ⚠ **진짜 supervisor.sh 를 holder 로 띄우면 안 된다** — 그것도 같은 잠금을 잡으려 들어
+    # 우리가 만든 잠금을 '죽은 것' 으로 보고 걷어낸 뒤 자기 pid 로 다시 쓴다(경쟁). 시험이
+    # 간헐적으로 빨개졌다. 살아 있고 cmdline 에 supervisor.sh 가 들어간 **가만있는** 프로세스면 된다.
+    dummy = tmp_path / "supervisor.sh"
+    _stub(dummy, "sleep 300\n")
+    holder = subprocess.Popen(["bash", str(dummy)],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         (lock_dir / "pid").write_text(f"{holder.pid}\n", encoding="utf-8")
         r = _run_once(root, scripts, bin_dir, appt, FAKE_HTTP_CODE="000")

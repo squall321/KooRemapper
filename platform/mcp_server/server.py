@@ -135,7 +135,12 @@ async def upload_kfile(
 ) -> dict:
     """세션에 파일 업로드. `content` 는 파일 내용(LS-DYNA .k 등 텍스트). 바이너리면
     base64 로 주고 base64_encoded=true. 업로드 즉시 백엔드가 `info` 로 노드/요소/파트/
-    bbox/*INCLUDE 를 파싱해 meta 에 캐시한다."""
+    bbox/*INCLUDE 를 파싱해 meta 에 캐시한다.
+
+    ⚠ `filename` 에 **하위 경로를 그대로 쓸 수 있고, 써야 한다** — 덱이 `*INCLUDE sub/part.k` 를
+    참조하면 그 파일도 `filename="sub/part.k"` 로 올려라. KooRemapper 는 인클루드를 읽지 않지만
+    **출력 덱에 그 줄을 보존**하므로, 경로가 어긋나면 산출물을 LS-DYNA 에 넣을 때 깨진다.
+    올린 뒤 `session_includes` 로 빠진 게 없는지 확인하라(`..`·절대경로는 서버가 제거한다)."""
     raw = base64.b64decode(content) if base64_encoded else content.encode("utf-8")
     files = {"files": (filename, raw, "application/octet-stream")}
     async with httpx.AsyncClient(base_url=API, timeout=120) as c:
@@ -193,6 +198,17 @@ async def list_session_files(session_id: str, ctx: Context) -> list:
     """세션 안의 파일 목록 + 각 파일의 meta(노드/요소/파트/bbox/*INCLUDE/키워드).
     "이 K파일 안에 뭐가 들어있는지" 를 여기서 확인한다."""
     return await _get(ctx, f"/sessions/{session_id}/files")
+
+
+@mcp.tool()
+async def session_includes(session_id: str, ctx: Context) -> dict:
+    """이 세션의 덱들이 참조하는 `*INCLUDE` 가 실제로 올라와 있나 — **op 을 돌리기 전에 확인하라.**
+
+    KooRemapper 는 `*INCLUDE` 를 읽지 않으므로 인클루드가 빠져도 op 은 **성공한다.** 대신 산출물에
+    그 `*INCLUDE` 줄이 그대로 남고, LS-DYNA 는 인클루드를 따라가므로 해석 단계에서 깨진다.
+    빠진 게 있으면 `run_operation` 이 422 로 막는다(정말 클러스터에 따로 두는 운용이면
+    `allow_missing_includes=true`). 반환: {ok, missing_by_file:{덱:{missing,satisfied}}}."""
+    return await _get(ctx, f"/sessions/{session_id}/includes")
 
 
 @mcp.tool()

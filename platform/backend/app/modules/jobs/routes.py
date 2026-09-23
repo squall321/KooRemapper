@@ -64,6 +64,25 @@ async def create_job(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "세션에 없는 입력 파일: " + ", ".join(missing) + " (먼저 업로드하세요)",
         )
+
+    # 참조된 `*INCLUDE` 가 세션에 있는지 — **여기서 막지 않으면 아무도 못 막는다.**
+    # KooRemapper 는 인클루드를 읽지 않으므로 op 은 그대로 성공하고, 산출물에는 그 `*INCLUDE` 줄이
+    # 보존된다(실측). 깨진 덱은 LS-DYNA 에 넣고 나서야 드러나고, 그때는 해석 시간을 이미 썼다.
+    # 다만 인클루드를 클러스터에 따로 두는 운용도 있으므로 `allow_missing_includes` 로 넘어갈 수 있다.
+    if not body.allow_missing_includes:
+        from app.modules.sessions.services import include_status
+
+        inc = await include_status(db, session_id)
+        used = {body.args.get(p["name"]) for p in entry.get("params", []) if p.get("type") == "file"}
+        hit = {k: v for k, v in inc.items() if k in used} or inc
+        if hit:
+            detail = "; ".join(f"{k} → {', '.join(v['missing'])}" for k, v in hit.items())
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "덱이 참조하는 *INCLUDE 가 세션에 없습니다: " + detail
+                + " — 그 파일도 올리세요(하위 폴더면 경로째로). "
+                  "클러스터에 따로 두는 운용이면 allow_missing_includes=true 로 넘어갈 수 있습니다.",
+            )
     job = Job(
         id=ulid.new().str,
         session_id=session_id,

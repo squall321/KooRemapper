@@ -135,20 +135,27 @@ async def add_uploaded_file(
     raw: bytes,
     kind: str = "input",
 ) -> SessionFile:
-    """Persist an uploaded file to disk, inspect it, and record metadata."""
-    safe = storage.safe_filename(filename)
+    """Persist an uploaded file to disk, inspect it, and record metadata.
+
+    ⚠ 하위 경로를 **살린다**(`safe_relpath`). 예전에는 `safe_filename` 으로 눕혀서 `sub/part.k` 가
+    `part.k` 가 됐는데, KooRemapper 는 `*INCLUDE` 줄을 출력 덱에 그대로 보존하므로 산출물이
+    존재하지 않는 `sub/part.k` 를 가리키게 됐다. LS-DYNA 는 인클루드를 따라가므로 그 덱은 깨진다.
+    """
+    safe = storage.safe_relpath(filename)
     sess_dir = storage.ensure_session_dir(session.user_id, session.id)
-    dest = sess_dir / safe
-    # de-dup name collisions: foo.k, foo_1.k, ...
+    dest = storage.resolve_within(sess_dir, safe)   # 쓰기 직전 두 번째 방어
+    # de-dup name collisions: foo.k, foo_1.k, ... (하위 폴더 안에서 센다)
     if dest.exists():
-        stem, suffix = Path(safe).stem, Path(safe).suffix
+        parent, base = safe.rsplit("/", 1) if "/" in safe else ("", safe)
+        stem, suffix = Path(base).stem, Path(base).suffix
         n = 1
-        while (sess_dir / f"{stem}_{n}{suffix}").exists():
+        while (sess_dir / (f"{parent}/{stem}_{n}{suffix}" if parent else f"{stem}_{n}{suffix}")).exists():
             n += 1
-        safe = f"{stem}_{n}{suffix}"
-        dest = sess_dir / safe
+        safe = f"{parent}/{stem}_{n}{suffix}" if parent else f"{stem}_{n}{suffix}"
+        dest = storage.resolve_within(sess_dir, safe)
     # Offload the blocking I/O + `info` subprocess (up to 120s) off the event loop
     # so one upload doesn't stall the single-process API for all other requests.
+    dest.parent.mkdir(parents=True, exist_ok=True)
     await asyncio.to_thread(dest.write_bytes, raw)
 
     rel = f"{session.storage_path}/{safe}"
@@ -167,6 +174,41 @@ async def add_uploaded_file(
     await db.commit()
     await db.refresh(row)
     return row
+
+
+def _norm_include(p: str) -> str:
+    """덱에 적힌 인클루드 경로를 세션 파일명과 견줄 수 있는 꼴로 normalize."""
+    return storage.safe_relpath(p)
+
+
+async def include_status(db: AsyncSession, session_id: str) -> dict:
+    """세션 안의 덱들이 참조하는 `*INCLUDE` 가 실제로 올라와 있나.
+
+    ⚠ 왜 필요한가 — KooRemapper 는 `*INCLUDE` 를 **읽지 않지만 출력 덱에 그 줄을 보존한다**.
+    그래서 인클루드가 빠져 있어도 op 은 **성공한다**. 깨진 것은 산출물이고, 그것을 LS-DYNA 에
+    넣는 순간 드러난다 — 도구가 말해 주지 않으면 사람은 해석을 돌리고 나서야 안다.
+
+    반환: {"<덱 파일명>": {"missing": [...], "satisfied": [...]}} — 빠진 게 없으면 항목을 내지 않는다.
+    """
+    files = await list_files(db, session_id)
+    have = {f.filename for f in files}
+    # 하위 경로 없이 올라온 것도 이름으로 맞춰 본다(옛 세션은 평탄화돼 있다)
+    have_basenames = {f.filename.rsplit("/", 1)[-1] for f in files}
+    out: dict[str, dict] = {}
+    for f in files:
+        incs = ((f.meta or {}).get("includes") or []) if isinstance(f.meta, dict) else []
+        if not incs:
+            continue
+        missing, satisfied = [], []
+        for raw in incs:
+            norm = _norm_include(raw)
+            if norm in have or norm.rsplit("/", 1)[-1] in have_basenames:
+                satisfied.append(raw)
+            else:
+                missing.append(raw)
+        if missing:
+            out[f.filename] = {"missing": missing, "satisfied": satisfied}
+    return out
 
 
 async def run_file_connectivity(
