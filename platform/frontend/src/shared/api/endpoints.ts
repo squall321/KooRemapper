@@ -67,9 +67,18 @@ export async function deleteSession(id: string): Promise<void> {
 // files
 export async function uploadFiles(sessionId: string, files: File[]): Promise<SessionFile[]> {
   const fd = new FormData()
-  for (const f of files) fd.append('files', f)
+  // 폴더로 고른 파일은 `webkitRelativePath` 에 하위 경로가 들어 있다. 그 경로를 파트 이름으로
+  // 실어 보내야 서버가 `sub/part.k` 를 그대로 저장한다 — 눕히면 산출물의 `*INCLUDE sub/part.k`
+  // 가 가리킬 곳이 없어지고, LS-DYNA 는 인클루드를 따라가므로 거기서 깨진다.
+  for (const f of files) fd.append('files', f, f.webkitRelativePath || f.name)
   const { data } = await api.post(`/sessions/${sessionId}/files`, fd)
   return unwrap<SessionFile[]>(data)
+}
+
+export type IncludeStatus = { ok: boolean; missing_by_file: Record<string, { missing: string[]; satisfied: string[] }> }
+export async function getIncludeStatus(sessionId: string): Promise<IncludeStatus> {
+  const { data } = await api.get(`/sessions/${sessionId}/includes`)
+  return unwrap<IncludeStatus>(data)
 }
 export async function listFiles(sessionId: string): Promise<SessionFile[]> {
   const { data } = await api.get(`/sessions/${sessionId}/files`)

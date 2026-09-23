@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Upload, Download, Trash2, ChevronRight, FileText } from 'lucide-react'
-import { deleteFile, downloadFile, uploadFiles } from '@/shared/api/endpoints'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Upload, Download, Trash2, ChevronRight, FileText, FolderUp, AlertTriangle } from 'lucide-react'
+import { deleteFile, downloadFile, getIncludeStatus, uploadFiles } from '@/shared/api/endpoints'
 import type { SessionFile } from '@/shared/api/types'
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Spinner } from '@/shared/ui/ui'
 import { fmtBytes } from '@/shared/lib/cn'
@@ -12,18 +12,23 @@ import { ConnectivityView } from './ConnectivityView'
 export function FilePanel({ sessionId, files }: { sessionId: string; files: SessionFile[] }) {
   const qc = useQueryClient()
   const inputRef = useRef<HTMLInputElement>(null)
+  const dirInputRef = useRef<HTMLInputElement>(null)
   const [expanded, setExpanded] = useState<number | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [pendingDelete, setPendingDelete] = useState<SessionFile | null>(null)
 
+  const inc = useQuery({
+    queryKey: ['session', sessionId, 'includes'],
+    queryFn: () => getIncludeStatus(sessionId),
+  })
   const upload = useMutation({
     mutationFn: (fl: File[]) => uploadFiles(sessionId, fl),
-    onSuccess: () => { setErr(null); qc.invalidateQueries({ queryKey: ['session', sessionId] }) },
+    onSuccess: () => { setErr(null); qc.invalidateQueries({ queryKey: ['session', sessionId] }); inc.refetch() },
     onError: (e) => setErr(errorMessage(e)),
   })
   const del = useMutation({
     mutationFn: (id: number) => deleteFile(sessionId, id),
-    onSuccess: () => { setErr(null); qc.invalidateQueries({ queryKey: ['session', sessionId] }) },
+    onSuccess: () => { setErr(null); qc.invalidateQueries({ queryKey: ['session', sessionId] }); inc.refetch() },
     onError: (e) => setErr(errorMessage(e)),
   })
 
@@ -31,17 +36,42 @@ export function FilePanel({ sessionId, files }: { sessionId: string; files: Sess
     <Card>
       <CardHeader className="flex items-center justify-between">
         <span className="font-medium text-sm">파일 ({files.length})</span>
-        <input ref={inputRef} type="file" multiple hidden onChange={(e) => {
-          const fl = Array.from(e.target.files ?? [])
-          if (fl.length) upload.mutate(fl)
-          e.target.value = ''
-        }} />
-        <Button size="sm" variant="primary" onClick={() => inputRef.current?.click()} disabled={upload.isPending}>
-          {upload.isPending ? <Spinner /> : <Upload size={14} />} 업로드
-        </Button>
+        <div className="flex items-center gap-1.5">
+          <input ref={inputRef} type="file" multiple hidden onChange={(e) => {
+            const fl = Array.from(e.target.files ?? [])
+            if (fl.length) upload.mutate(fl)
+            e.target.value = ''
+          }} />
+          {/* 폴더 업로드 — 하위 폴더에 인클루드를 둔 덱은 이쪽으로 올려야 경로가 보존된다.
+              webkitdirectory 는 표준 속성이 아니라 React 타입에 없어 확장 속성으로 넘긴다. */}
+          <input ref={dirInputRef} type="file" multiple hidden onChange={(e) => {
+            const fl = Array.from(e.target.files ?? [])
+            if (fl.length) upload.mutate(fl)
+            e.target.value = ''
+          }} {...({ webkitdirectory: '', directory: '' } as Record<string, string>)} />
+          <Button size="sm" variant="ghost" onClick={() => dirInputRef.current?.click()} disabled={upload.isPending}
+                  title="폴더째 올립니다 — *INCLUDE 가 하위 폴더를 가리키면 이쪽을 쓰세요">
+            <FolderUp size={14} /> 폴더
+          </Button>
+          <Button size="sm" variant="primary" onClick={() => inputRef.current?.click()} disabled={upload.isPending}>
+            {upload.isPending ? <Spinner /> : <Upload size={14} />} 업로드
+          </Button>
+        </div>
       </CardHeader>
       <CardBody className="p-0">
         {err && <div className="px-3 py-2 text-xs text-danger border-b border-border">{err}</div>}
+        {/* 인클루드가 빠져 있으면 op 은 성공하고 산출물이 깨진다 — 실행 전에 보이게 한다. */}
+        {inc.data && !inc.data.ok && (
+          <div className="px-3 py-2 text-xs text-warning border-b border-border flex gap-2">
+            <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+            <div className="space-y-0.5">
+              <div className="font-medium">참조된 *INCLUDE 가 세션에 없습니다 — 그 파일도 올리세요(하위 폴더면 '폴더' 버튼).</div>
+              {Object.entries(inc.data.missing_by_file).map(([f, v]) => (
+                <div key={f} className="mono">{f} → {v.missing.join(', ')}</div>
+              ))}
+            </div>
+          </div>
+        )}
         {!files.length ? (
           <EmptyState title="파일 없음" hint="K파일을 업로드하면 자동으로 정보를 분석합니다." />
         ) : (
