@@ -15229,28 +15229,51 @@ bool ModelAssembler::applyGenerate(const GenerateOperation& op) {
 }
 
 bool ModelAssembler::applyControl(const ControlOperation& op) {
-    // Right-align a value in a 10-char fixed-width field
-    auto fmt10d = [](double v) -> std::string {
-        char buf[32];
-        if (v == 0.0) {
-            snprintf(buf, sizeof(buf), "       0.0");
-        } else if (std::abs(v) < 0.001 || std::abs(v) >= 1e7) {
-            snprintf(buf, sizeof(buf), "%10.4E", v);
-        } else {
-            snprintf(buf, sizeof(buf), "%10g", v);
+    // 10칸 고정폭에 값을 **정보를 잃지 않고** 넣는다.
+    //
+    // ⚠ 예전 구현은 `s.substr(s.size() - 10)` 으로 **앞을 버렸다.** `dt2ms: -1.0e-7` 은
+    // `%10.4E` 로 `-1.0000E-07`(11자)이 되므로 음수 부호가 잘려 `1.0000E-07` 이 나갔다(재현함:
+    // 출력 `*CONTROL_TIMESTEP` 에 `0.01.0000E-07`). dt2ms 는 **음수가 선택적 질량스케일링,
+    // 양수가 고정 dt 스케일링**이라 부호 하나로 물리가 뒤바뀌는데 rc=0·경고 0 이었다.
+    // `fmt10i` 는 반대로 뒤를 버려(`substr(0,10)`) 자릿수를 조용히 줄였다.
+    //
+    // 지금은 10칸에 들어가는 표기를 **유효자리를 줄여 가며** 찾고, 그래도 안 되면 잘라내지 않고
+    // 실패로 기록한다(요청서 DF-03 "넘치면 자르지 말고 raise").
+    std::string overflowField_;
+    auto fmt10d = [&overflowField_](double v) -> std::string {
+        if (v == 0.0) return std::string("       0.0");
+        char buf[64];
+        const bool sci = (std::abs(v) < 0.001 || std::abs(v) >= 1e7);
+        for (int prec = sci ? 4 : 6; prec >= 0; --prec) {
+            snprintf(buf, sizeof(buf), sci ? "%.*E" : "%.*g", prec, v);
+            std::string s(buf);
+            size_t b = s.find_first_not_of(' ');
+            if (b != std::string::npos) s = s.substr(b);
+            if (s.size() > 10) continue;                 // 더 짧은 표기를 시도
+            while (s.size() < 10) s = " " + s;
+            return s;
         }
+        if (overflowField_.empty())
+            overflowField_ = "값 " + std::string(buf) + " 를 10칸에 넣을 수 없습니다";
+        return std::string("       0.0");
+    };
+    auto fmt10i = [&overflowField_](int v) -> std::string {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%d", v);
         std::string s(buf);
+        if (s.size() > 10) {                             // 자르지 않는다 — 자르면 자릿수가 바뀐다
+            if (overflowField_.empty())
+                overflowField_ = "정수 " + s + " 는 10칸을 넘칩니다";
+            return std::string("         0");
+        }
         while (s.size() < 10) s = " " + s;
-        return s.substr(s.size() - 10);
+        return s;
     };
-    auto fmt10i = [](int v) -> std::string {
-        char buf[16];
-        snprintf(buf, sizeof(buf), "%10d", v);
-        return std::string(buf).substr(0, 10);
-    };
-    auto setField = [](std::string& line, int fi, const std::string& val10) {
+    auto setField = [&overflowField_](std::string& line, int fi, const std::string& val10) {
         size_t needed = (size_t)(fi + 1) * 10;
         if (line.size() < needed) line.resize(needed, ' ');
+        if (val10.size() != 10 && overflowField_.empty())
+            overflowField_ = "칸 값 '" + val10 + "' 이 10자가 아닙니다";
         line.replace((size_t)fi * 10, 10, val10.substr(0, 10));
     };
 
@@ -15375,6 +15398,14 @@ bool ModelAssembler::applyControl(const ControlOperation& op) {
             addedKeywordBlocks_.push_back(card);
             affected++;
         }
+    }
+
+    // 10칸에 못 넣은 값이 있으면 **조용히 넘기지 않는다.** 자르면 부호나 자릿수가 사라지는데
+    // 그 덱은 구조 카운트가 전부 정상이라 아무도 못 알아본다(dt2ms 부호 소실이 그랬다).
+    if (!overflowField_.empty()) {
+        errorMessage_ = "control: " + overflowField_ +
+                        " — 고정폭 10칸을 넘겨 쓸 수 없습니다(자르면 값이 달라집니다)";
+        return false;
     }
 
     infoMessages.push_back("[control] " + std::to_string(affected) + " control card(s) applied");
