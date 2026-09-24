@@ -1000,8 +1000,17 @@ bool KFileReader::parsePartSection(std::ifstream& file) {
                 secid = parseInt(tokens[1]);
                 mid = parseInt(tokens[2]);
             }
+            else if (line.length() >= 30) {
+                // ⚠ `*PART` 의 데이터 카드는 **10칸**이다. 매뉴얼 룰러가
+                // `$---+--PID----+SECID----+--MID----` 로 10자 단위다(Vol_I, 각 그룹 정확히 10자).
+                // 예전에는 여기서 8칸으로 읽었다 — 칸을 꽉 채운 10칸 덱(공백이 없어 자유형식
+                // 분해가 실패해 이 폴백으로 오는 덱)에서 PID/SECID/MID 를 어긋나게 읽는다.
+                pid = parseInt(line.substr(0, 10));
+                secid = parseInt(line.substr(10, 10));
+                mid = parseInt(line.substr(20, 10));
+            }
             else if (line.length() >= 24) {
-                // Fixed format: 8-character fields
+                // 8칸으로 쓴 덱을 위한 2차 폴백 — 이 리포가 쓰는 "고정폭 우선 → 폴백" 규율이다.
                 pid = parseInt(line.substr(0, 8));
                 secid = parseInt(line.substr(8, 8));
                 mid = parseInt(line.substr(16, 8));

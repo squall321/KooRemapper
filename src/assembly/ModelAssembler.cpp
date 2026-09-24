@@ -2939,9 +2939,14 @@ void ModelAssembler::scanDeadReferences(const std::string& opName,
         bool initStress = rsStarts(b.kw, "*INITIAL_STRESS_SOLID") ||
                           rsStarts(b.kw, "*INITIAL_STRESS_SHELL") ||
                           rsStarts(b.kw, "*INITIAL_STRAIN_SOLID");
-        bool histElem = rsStarts(b.kw, "*DATABASE_HISTORY_SOLID") ||
-                        rsStarts(b.kw, "*DATABASE_HISTORY_SHELL") ||
-                        rsStarts(b.kw, "*DATABASE_HISTORY_BEAM");
+        // ⚠ `_SET` 변형은 값이 **세트 ID** 다(요소 번호가 아니다). 제외하지 않으면 세트 ID 를
+        // EID 로 읽어, 그 번호와 같은 요소가 지워졌을 때 "지워진 요소" 오탐 + rc=1 이 난다
+        // (재현함: `*DATABASE_HISTORY_SOLID_SET 1` + restack → 오탐 2건).
+        // 바로 위 PID 축의 histPart 에는 같은 제외가 이미 있다(:2898) — 그쪽 규약을 맞춘다.
+        bool histElem = (rsStarts(b.kw, "*DATABASE_HISTORY_SOLID") ||
+                         rsStarts(b.kw, "*DATABASE_HISTORY_SHELL") ||
+                         rsStarts(b.kw, "*DATABASE_HISTORY_BEAM")) &&
+                        !rsHas(b.kw, "_SET");
         if (!setElem && !initStress && !histElem) continue;
         handled[bi] = true;
         size_t start = 0;

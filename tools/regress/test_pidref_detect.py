@@ -421,6 +421,33 @@ def inherit(binary):
         os.path.join(d2, "p_out.k")).values()), str(section_elforms(os.path.join(d2, "p_out.k"))))
 
 
+def hist_set_variant(binary):
+    """`_SET` 변형의 값은 **세트 ID** 다 — 요소 번호로 읽으면 오탐 + rc=1 이 난다.
+
+    `*DATABASE_HISTORY_SOLID_SET 1` 에서 1 은 세트 ID 인데, EID 축이 그것을 요소 번호로 읽어
+    "지워진 요소입니다" 를 찍고 rc=1 을 냈다(재현됨). PID 축의 histPart 에는 같은 `_SET` 제외가
+    처음부터 있었다 — 한쪽만 빠져 있던 것이다.
+    ⚠ 개수만 보면 안 된다. `maybe` 등급(칸 뜻 미확인)은 남아야 정직하다 — rc 에 반영되지 않는다.
+    """
+    print("[I _SET 변형을 요소 번호로 오독하지 않는다]")
+    d = box_dir(binary, "histset")
+    with_cards(d, "ref.k", "*DATABASE_HISTORY_SOLID_SET\n         1\n")
+    open(os.path.join(d, "rs.yaml"), "w").write(RESTACK_YAML.format(model="ref.k", out="out.k"))
+    rc, out = run(binary, d, "restack", "rs.yaml")
+    eid = [ln for ln in axis_lines(out, "EID") if "DATABASE_HISTORY" in ln]
+    check("_SET 변형이 EID 축에 안 올라온다", not eid, "\n".join(eid)[:300])
+    check("그래서 rc=0", rc == 0, out[-300:])
+
+    # 대조군 — `_SET` 없는 정상형은 여전히 잡아야 한다(제외를 너무 넓히지 않았나)
+    d2 = box_dir(binary, "histplain")
+    with_cards(d2, "ref.k", "*DATABASE_HISTORY_SOLID\n         1\n")
+    open(os.path.join(d2, "rs.yaml"), "w").write(RESTACK_YAML.format(model="ref.k", out="out.k"))
+    rc2, out2 = run(binary, d2, "restack", "rs.yaml")
+    eid2 = [ln for ln in axis_lines(out2, "EID") if "DATABASE_HISTORY" in ln]
+    check("정상형은 EID 축에 올라온다", bool(eid2), out2[-400:])
+    check("그래서 rc=1", rc2 == 1, out2[-300:])
+
+
 def main():
     if len(sys.argv) < 2:
         print("usage: test_pidref_detect.py <KooRemapper 바이너리>")
@@ -437,6 +464,7 @@ def main():
     merge_path(binary)
     rigid_reject(binary)
     inherit(binary)
+    hist_set_variant(binary)
     print("")
     if FAILS:
         print("FAIL %d" % len(FAILS))
