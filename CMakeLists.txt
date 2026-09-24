@@ -140,6 +140,7 @@ set(VALIDATION_SOURCES
     src/validation/MaterialCardValidator.cpp
     src/validation/ElementQualityChecker.cpp
     src/validation/IntersectionDetector.cpp
+    src/validation/ReferenceIntegrity.cpp
 )
 
 # Local TET remesh module (Phase A self-contained; Phase B TetGen optional).
