@@ -63,3 +63,19 @@
   `relax` 는 한 파일 안에서 개행이 갈린다(최악). MSVC 텍스트 모드 결함도 같은 자리다.
 - **무편집 진입점 + 픽스처 5종 바이트 왕복**(SYS-02 완전형) — 지금 회귀는 개행만 본다
 - G EditGate 원장 / O-min 절대 참조 검사 / H kfile_inspect n_crlf / G11 ORTHO 거절 가드
+
+
+## 2차 완료 (2026-09-24 이어서)
+
+- [x] 자체 ofstream op 들의 개행 — `DeckWriter` 공용 계층으로 모음(d988740). **19개 op 보존, 깨짐 0**
+- [x] 전 op 개행 매트릭스 `test_newline_matrix.py` — 카탈로그 예제를 구동기로 씀(op 이 늘어도 따라옴)
+- [x] ORTHO/COMPOSITE 등 못 다루는 카드 배치 거절(d194c49)
+- [x] 세트 참조 절대 검사(814ff72) — TN4 사건. 오탐 0건 확인, `*INCLUDE` 면 단정 안 함
+- [x] `kfile_inspect` 개행 노출(f1b6d7d) — newline/n_crlf/n_lines/final_newline
+- [x] **회신 요청서** `deck-contract-reply-2026-09-24.md`
+
+회귀 **37 → 42개**, 전부 통과. 무력화 전 항목 확인.
+
+### 다음(요청 측 답을 기다리는 것)
+- DF-07 예약 대역 **실제 값** / DF-08 "템플릿" **정의** / 회귀 코퍼스 / dangling rc 정책 합의
+- DF-20 편집 게이트 원장 — 출력 복사 4회 제거와 **같은 유닛**이어야 한다
