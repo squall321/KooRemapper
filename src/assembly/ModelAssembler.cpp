@@ -58,6 +58,7 @@ bool ModelAssembler::loadBaseModel(const std::string& filename) {
         errorMessage_ = "Cannot open base model for raw read: " + filename;
         return false;
     }
+    deckNewline_ = deck_newline::detect(filename);   // 뗀 CR 을 쓸 때 되붙이기 위해 기억한다
     std::string line;
     while (std::getline(file, line)) {
         if (!line.empty() && line.back() == '\r') {
@@ -128,6 +129,7 @@ bool ModelAssembler::loadRawOnly(const std::string& filename) {
         errorMessage_ = "Cannot open model: " + filename;
         return false;
     }
+    deckNewline_ = deck_newline::detect(filename);   // 뗀 CR 을 쓸 때 되붙이기 위해 기억한다
     std::string line;
     while (std::getline(file, line)) {
         if (!line.empty() && line.back() == '\r') line.pop_back();
@@ -5626,7 +5628,9 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
         errorMessage_ = "Cannot write output: " + outputFile;
         return false;
     }
-    outFile << output.str();
+    // 입력 덱이 CRLF 였으면 그대로 되돌린다. 본문은 `\n` 으로 조립돼 있고 리더가 CR 을 뗐으므로
+    // 단순 치환이 안전하다. 이것이 없어서 CRLF 덱이 왕복마다 LF 로 바뀌었다(실측: CRLF 578 → 0).
+    outFile << deck_newline::apply(output.str(), deckNewline_);
     outFile.close();
 
     // Write accumulated dynain (separate file only if not embedded)

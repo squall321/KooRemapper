@@ -1,5 +1,6 @@
 #pragma once
 
+#include "parser/DeckNewline.h"
 #include "assembly/AssemblyConfig.h"
 #include "core/Mesh.h"
 #include "core/Vector3D.h"
@@ -146,6 +147,9 @@ private:
     // Base model
     Mesh baseMesh_;
     std::vector<std::string> rawLines_;
+    // 입력 덱의 개행. 읽을 때 기억했다가 최종 출력에서 되붙인다 — 리더가 CR 을 떼므로
+    // 이것이 없으면 CRLF 덱이 조용히 LF 로 바뀐다(구조 카운트는 전부 정상이라 안 보인다).
+    DeckNewline deckNewline_ = DeckNewline::LF;
 
     // Tracking changes
     std::set<int> removedNodeIds_;
