@@ -468,6 +468,33 @@ def body2(binary, d):
     return d
 
 
+def body_unsupported_cards(binary, d):
+    """다룰 수 없는 요소 카드 배치는 **추측하지 말고 거절**해야 한다.
+
+    이 op 의 요소 스캐너는 카드를 **토큰 수로** 가른다(1줄/2줄). 노드 카드 뒤에 고정 카드가 더
+    붙는 변형(`_ORTHO` 방향 카드 2장, `_DOF` 1장)이나 줄 수가 데이터로 정해지는 `_COMPOSITE` 는
+    그 방식으로 못 읽는다 — 방향 카드 `0.0 1.0 0.0` 은 토큰이 3개라 두 줄 형식 첫 줄과 구별이 안 된다.
+    그대로 두면 **엉뚱한 파트 쌍에 체결부를 달고 rc=0 으로 끝난다**(조용한 오답).
+
+    공용 계층 parseElementKeyword 는 그 변형들을 이미 안다. 사본을 거기 맞추는 것이 옳지만
+    파급이 크므로, 지금은 모르면 거절한다 — 조용한 오답보다 시끄러운 거절이 낫다.
+    """
+    print("[다룰 수 없는 요소 카드 배치는 거절한다]")
+    base = open(os.path.join(d, "m.k"), encoding="utf-8", errors="replace").read()
+    # 정상 덱은 그대로 돌아야 한다(거절을 너무 넓히지 않았나)
+    w(os.path.join(d, "ok.yaml"), "model: m.k\noutput: ok_out.k\naxis: z\n")
+    rc, out = run(binary, d, "cnrb2spring", "ok.yaml")
+    check("정상 덱은 그대로 변환된다", rc == 0 and os.path.exists(os.path.join(d, "ok_out.k")),
+          f"rc={rc} {out[-200:]}")
+
+    # 줄 수를 확정할 수 없는 변형 → 거절 + 파일 미생성
+    w(os.path.join(d, "comp.k"), base.replace("*ELEMENT_SHELL", "*ELEMENT_SHELL_COMPOSITE", 1))
+    w(os.path.join(d, "comp.yaml"), "model: comp.k\noutput: comp_out.k\naxis: z\n")
+    rc, out = run(binary, d, "cnrb2spring", "comp.yaml")
+    check("COMPOSITE 는 거절한다", rc != 0 and "다룰 수 없는 요소 카드" in out, f"rc={rc} {out[-300:]}")
+    check("거절했으면 출력 파일을 안 쓴다", not os.path.exists(os.path.join(d, "comp_out.k")))
+
+
 def body3(binary, d):
     # ── enum·값 검증 ──────────────────────────────────────────────────────
     w(os.path.join(d, "noax.yaml"), "model: m.k\noutput: na.k\n")
@@ -609,6 +636,7 @@ def main():
         body2(binary, d)
         print("[값 검증·쪼갤 수 없는 CNRB·경로]")
         body3(binary, d)
+        body_unsupported_cards(binary, d)
     print()
     if FAILS:
         print(f"FAIL {len(FAILS)}")

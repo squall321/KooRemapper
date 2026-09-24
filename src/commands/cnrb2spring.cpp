@@ -1,4 +1,5 @@
 // CNRB 체결점 하나를 Side A/B 두 강체로 쪼개고 그 사이를 제로길이 discrete beam(ELFORM=6) 하나로 잇는 op
+#include "parser/ElementCardLayout.h"
 #include "parser/DeckWriter.h"
 #include "cnrb2spring.h"
 #include "cli/ConsoleOutput.h"
@@ -284,8 +285,32 @@ static std::vector<CgCnrbDef> cg_parseCnrbs(const std::vector<std::string>& line
 // 노드 → 그 노드를 쓰는 PART PID 집합. 요소 연결성으로만 판정한다(이름 패턴·가정 금지).
 // *ELEMENT_SOLID 의 ten nodes format 은 한 요소가 두 줄이다 — 1줄 'eid pid', 2줄 노드 10개.
 // 한 줄짜리로 착각해 읽으면 노드 ID 를 PID 로 읽어 완전히 틀린다.
+// ⚠ 이 스캐너는 요소 카드를 **토큰 수로** 가른다(1줄/2줄). 그래서 노드 카드 뒤에 고정 카드가
+// 더 붙는 변형(`_ORTHO` 는 방향 카드 2장, `_DOF` 는 1장)을 만나면 그 카드를 "다음 요소의 첫 줄"
+// 로 오인한다 — 방향 카드 `0.0 1.0 0.0` 은 토큰이 3개라 두 줄 형식의 첫 줄과 구별되지 않는다.
+// 조용히 엉뚱한 PID 쌍을 내놓고 rc=0 으로 끝난다.
+//
+// 공용 계층(`parseElementKeyword`)은 그 변형들을 이미 정확히 안다. 사본을 거기에 맞추는 것이
+// 옳지만 파급이 크므로, 지금은 **모르는 배치를 만나면 추측하지 않고 거절**한다.
+// 조용한 오답보다 시끄러운 거절이 낫다.
+static bool cg_unsupportedElemSection(const std::string& keywordLine, std::string& why) {
+    auto info = KooRemapper::parseElementKeyword(keywordLine);
+    if (!info.supported) { why = info.reason; return true; }
+    if (info.extraCards > 0) {
+        why = keywordLine + " — 노드 카드 뒤에 고정 카드가 " + std::to_string(info.extraCards) +
+              "장 더 붙는 변형입니다. 이 op 의 요소 스캐너가 다루지 못합니다";
+        return true;
+    }
+    if (info.dataDependent) {
+        why = keywordLine + " — 카드 줄 수가 데이터로만 정해지는 변형입니다(COMPOSITE 계열)";
+        return true;
+    }
+    return false;
+}
+
 static std::map<int, std::set<int>> cg_parseElementOwners(const std::vector<std::string>& lines,
-                                                          const std::set<int>& needed) {
+                                                          const std::set<int>& needed,
+                                                          std::string* unsupportedWhy = nullptr) {
     std::map<int, std::set<int>> owners;
     bool inElem = false;
     int pendingPid = 0;       // 두 줄 형식의 첫 줄에서 읽은 PID (다음 데이터 줄이 노드 목록이다)
@@ -296,6 +321,10 @@ static std::map<int, std::set<int>> cg_parseElementOwners(const std::vector<std:
             std::string up = cg_keyword(tr);
             inElem = (up.rfind("*ELEMENT_SOLID", 0) == 0 || up.rfind("*ELEMENT_SHELL", 0) == 0 ||
                       up.rfind("*ELEMENT_TSHELL", 0) == 0 || up.rfind("*ELEMENT_BEAM", 0) == 0);
+            if (inElem && unsupportedWhy && unsupportedWhy->empty()) {
+                std::string why;
+                if (cg_unsupportedElemSection(tr, why)) *unsupportedWhy = why;
+            }
             pendingPid = 0;
             continue;
         }
@@ -823,7 +852,14 @@ int cnrb2spring_apply(std::vector<std::string>& lines,
         return -1;
     }
 
-    auto owners = cg_parseElementOwners(lines, neededNodes);
+    std::string elemUnsupported;
+    auto owners = cg_parseElementOwners(lines, neededNodes, &elemUnsupported);
+    if (!elemUnsupported.empty()) {
+        // 추측해서 엉뚱한 파트 쌍을 내놓느니 여기서 멈춘다 — 그 오답은 rc=0 으로 조용히 나간다.
+        console.error("[cnrb2spring] 다룰 수 없는 요소 카드 배치입니다: " + elemUnsupported);
+        console.error("[cnrb2spring] 이 덱은 변환하지 않습니다 — 추측하면 체결부를 엉뚱한 파트에 답니다.");
+        return -1;
+    }
 
     // ── 4. 두 파트 판정(요소 연결성) · 앵커 · 축 교차검증 ────────────────────
     std::vector<CgJoint> kept;
