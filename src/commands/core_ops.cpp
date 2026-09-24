@@ -1,3 +1,4 @@
+#include "parser/DeckWriter.h"
 #include "core_ops.h"
 #include "util/YamlComment.h"
 #include "core/Platform.h"
@@ -971,6 +972,7 @@ int runUnfold(const std::string& bentFile, const std::string& outputFile,
     // Write output
     console.info("Writing output: " + outputFile);
     KFileWriter writer;
+    writer.setNewline(deck_newline::detect(bentFile));   // 원본 덱의 개행을 따른다
     if (!writer.writeFile(outputFile, flatMesh)) {
         console.error("Failed to write output: " + writer.getErrorMessage());
         return 1;
@@ -1187,11 +1189,15 @@ int runPrestress(const std::string& refFile, const std::string& defFile,
             return 1;
         }
 
-        std::ofstream dstFile(meshOutputFile, std::ios::binary);
-        if (!dstFile.is_open()) {
+        // ⚠ 위 루프가 CR 을 **떼지 않아** 원본 줄은 `...\r` + `"\n"` 으로 CRLF 가 되는데,
+        // 아래에서 새로 넣는 `*INCLUDE` 두 줄만 LF 가 됐다 — **한 파일 안에서 개행이 갈렸다**.
+        // DeckWriter 는 홀로 선 `\n` 앞에만 CR 을 넣으므로 양쪽이 같은 개행으로 맞는다.
+        KooRemapper::DeckWriter dst_w(meshOutputFile, deck_newline::detect(defFile));
+        if (!dst_w.ok()) {
             console.error("Failed to create mesh output file: " + meshOutputFile);
             return 1;
         }
+        std::ostream& dstFile = dst_w.stream();
 
         // Copy original content, inserting *INCLUDE before *END.
         bool endFound = false;
@@ -1219,7 +1225,7 @@ int runPrestress(const std::string& refFile, const std::string& defFile,
             dstFile << "*END\n";
         }
 
-        dstFile.close();
+        dst_w.close();
 
         console.success("Deformed mesh with prestress: " + meshOutputFile);
     }

@@ -1,3 +1,4 @@
+#include "parser/DeckWriter.h"
 #include "contact.h"
 #include "contact_helpers.h"
 #include "kw_util.h"
@@ -1647,8 +1648,11 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
         return 1;
     }
 
-    std::ofstream outf(outPath);
-    if (!outf.is_open()) { console.error("Cannot write output: " + outPath); return 1; }
+    // 원본 덱의 개행을 따른다 — 안 그러면 CRLF 덱이 조용히 LF 로 바뀌거나,
+    // 원본 줄만 CRLF 로 남고 새로 넣은 줄이 LF 가 되어 **한 파일 안에서 개행이 갈린다**.
+    KooRemapper::DeckWriter outf_w(outPath, KooRemapper::deck_newline::detect(modelPath));
+    std::ostream& outf = outf_w.stream();
+    if (!outf_w.ok()) { console.error("Cannot write output: " + outPath); return 1; }
     for (const auto& ln : lines) outf << ln << "\n";
     console.println("[contact] Done -> " + outputFile);
     return 0;

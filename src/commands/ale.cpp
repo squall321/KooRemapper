@@ -1,3 +1,4 @@
+#include "parser/DeckWriter.h"
 #include "ale.h"
 #include "kw_util.h"
 #include "cli/ConsoleOutput.h"
@@ -758,8 +759,10 @@ int runAle(const std::string& yamlFile, ConsoleOutput& console) {
 
     kw_insertBeforeEnd(lines, insertCards);
 
-    std::ofstream outf(outPath);
-    if (!outf.is_open()) { console.error("Cannot write output: " + outPath); return 1; }
+    // 원본 덱의 개행을 따른다
+    KooRemapper::DeckWriter outf_w(outPath, KooRemapper::deck_newline::detect(modelPath));
+    std::ostream& outf = outf_w.stream();
+    if (!outf_w.ok()) { console.error("Cannot write output: " + outPath); return 1; }
     for (const auto& ln : lines) outf << ln << "\n";
     console.println("[ale] Done     -> " + outputFile);
     return 0;

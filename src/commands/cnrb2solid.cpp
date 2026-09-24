@@ -1,3 +1,4 @@
+#include "parser/DeckWriter.h"
 #include "cnrb2solid.h"
 #include "kw_util.h"
 #include "cli/ConsoleOutput.h"
@@ -1037,8 +1038,11 @@ int runCnrb2Solid(const std::string& yamlFile, ConsoleOutput& console) {
     char buf[64]; snprintf(buf, sizeof(buf), "[cnrb2solid] Converted %d CNRB(s)", n);
     console.println(buf);
 
-    std::ofstream out(outPath);
-    if (!out.is_open()) { console.error("Cannot write: " + outPath); return 1; }
+    // 원본 덱의 개행을 따른다 — 안 그러면 CRLF 덱이 조용히 LF 로 바뀌거나,
+    // 원본 줄만 CRLF 로 남고 새로 넣은 줄이 LF 가 되어 **한 파일 안에서 개행이 갈린다**.
+    KooRemapper::DeckWriter out_w(outPath, KooRemapper::deck_newline::detect(modelPath));
+    std::ostream& out = out_w.stream();
+    if (!out_w.ok()) { console.error("Cannot write: " + outPath); return 1; }
     for (const auto& ln : lines) out << ln << "\n";
     console.println("[cnrb2solid] Done   -> " + outPath);
     return 0;

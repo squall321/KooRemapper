@@ -1,3 +1,4 @@
+#include "parser/DeckWriter.h"
 #include "merge.h"
 #include "util/YamlComment.h"
 #include "cli/ConsoleOutput.h"
@@ -1091,8 +1092,11 @@ int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
 
     console.info("\nWriting output: " + cfg.outputPath);
 
-    std::ofstream outf(cfg.outputPath);
-    if (!outf.is_open()) {
+    // 원본 덱의 개행을 따른다 — 안 그러면 원본 줄만 CRLF 로 남고 새 줄이 LF 가 되어 갈린다.
+    KooRemapper::DeckWriter outf_w(cfg.outputPath,
+                                   KooRemapper::deck_newline::detect(cfg.modelPath));
+    std::ostream& outf = outf_w.stream();
+    if (!outf_w.ok()) {
         console.error("Cannot open output: " + cfg.outputPath);
         return 1;
     }
@@ -1246,7 +1250,7 @@ int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
     for (const auto& blk : pidRefAddedBlocks) outf << blk;
 
     outf << "*END\n";
-    outf.close();
+    outf_w.close();
 
     // Summary
     console.info("\nSummary:");

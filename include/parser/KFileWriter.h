@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/Mesh.h"
+#include "parser/DeckWriter.h"
 #include <string>
 #include <fstream>
 #include <set>
@@ -75,19 +76,27 @@ public:
      */
     void setIncludeHeader(bool include) { includeHeader_ = include; }
 
+    /**
+     * 출력 덱의 개행. `writeFileWithSource` 는 원본에서 **자동 판정**하므로 부를 필요가 없다.
+     * 원본이 없는 `writeFile` 경로에서만 호출자가 정해 준다(기본 LF).
+     */
+    void setNewline(DeckNewline nl) { newline_ = nl; }
+
 private:
     std::string errorMessage_;
     int precision_;
     int coordFieldWidth_;
     bool includeHeader_;
+    // 원본 덱의 개행. 이것이 없어서 CRLF 덱이 왕복마다 LF 로 바뀌었다.
+    DeckNewline newline_ = DeckNewline::LF;
 
-    void writeHeader(std::ofstream& file);
-    void writeNodeSection(std::ofstream& file, const Mesh& mesh, bool useMappedPositions);
+    void writeHeader(std::ostream& file);
+    void writeNodeSection(std::ostream& file, const Mesh& mesh, bool useMappedPositions);
     // skipIds: EIDs whose source block is copied verbatim (shell / thick
     // shell), so they must not be re-emitted as *ELEMENT_SOLID.
-    void writeElementSection(std::ofstream& file, const Mesh& mesh,
+    void writeElementSection(std::ostream& file, const Mesh& mesh,
                              const std::set<int>* skipIds = nullptr);
-    void writeEnd(std::ofstream& file);
+    void writeEnd(std::ostream& file);
 
     std::string formatDouble(double value) const;
     std::string formatInt(int value, int width) const;

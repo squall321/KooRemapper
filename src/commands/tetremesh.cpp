@@ -1,3 +1,4 @@
+#include "parser/DeckNewline.h"
 #include "commands/tetremesh.h"
 #include "core/Mesh.h"
 #include "parser/KFileReader.h"
@@ -370,6 +371,7 @@ int runTetRemesh(const std::string& configPath,
     } else {
         console.info("Writing: " + cfg.output);
         KFileWriter writer;
+        writer.setNewline(KooRemapper::deck_newline::detect(cfg.model));   // 원본 덱의 개행
         if (!writer.writeFile(cfg.output, mesh, /*useMappedPositions=*/false)) {
             console.error("Failed to write output: " + writer.getErrorMessage());
             return 1;

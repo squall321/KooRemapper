@@ -1,3 +1,4 @@
+#include "parser/DeckWriter.h"
 #include "surface_extract.h"
 #include "parser/KFileReader.h"
 #include "core/Mesh.h"
@@ -101,7 +102,7 @@ struct NodeHash2D {
 // Write a uniform `.k` file (used by both modes).
 // `nodes` is iterated in map order; `shells` are emitted as *ELEMENT_SHELL
 // with consecutive EIDs starting from 1.
-void writeShellKFile(std::ofstream& out,
+void writeShellKFile(std::ostream& out,
                      const std::string& sourceTag,
                      const ExtractSurfaceOptions& opts,
                      const std::map<int, Vector3D>& nodes,
@@ -322,13 +323,15 @@ int runExtractSurface(const std::string& solidFile,
             return 1;
         }
 
-        std::ofstream out(outputFile);
-        if (!out.is_open()) {
+        // 원본 솔리드 덱의 개행을 따른다
+        KooRemapper::DeckWriter out_w(outputFile, KooRemapper::deck_newline::detect(solidFile));
+        if (!out_w.ok()) {
             console.error("Cannot open output file: " + outputFile);
             return 1;
         }
+        std::ostream& out = out_w.stream();
         writeShellKFile(out, solidFile, opts, midPositions, midShells);
-        out.close();
+        out_w.close();
 
         console.info("Mid-surface: " + std::to_string(midShells.size()) + " shells, "
                      + std::to_string(midPositions.size()) + " new nodes "
@@ -367,13 +370,15 @@ int runExtractSurface(const std::string& solidFile,
         }
     }
 
-    std::ofstream out(outputFile);
-    if (!out.is_open()) {
+    // 원본 솔리드 덱의 개행을 따른다
+    KooRemapper::DeckWriter out_w(outputFile, KooRemapper::deck_newline::detect(solidFile));
+    if (!out_w.ok()) {
         console.error("Cannot open output file: " + outputFile);
         return 1;
     }
+    std::ostream& out = out_w.stream();
     writeShellKFile(out, solidFile, opts, usedNodes, outFaces);
-    out.close();
+    out_w.close();
 
     // Stats
     int triCount = 0, quadCount = 0;

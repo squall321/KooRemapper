@@ -103,6 +103,10 @@ bool DynainWriter::writeFile(
 
     buffer << "*END\n";
 
+    // 원본 메시의 개행을 따른다 — dynain 은 덱과 함께 풀리므로 개행이 갈리면 안 된다.
+    // (refFile 이 비어 있으면 setNewline 으로 받은 값, 기본 LF)
+    if (!refFile.empty()) newline_ = deck_newline::detect(refFile);
+
     // Write entire buffer to file at once
     std::ofstream file(filename, std::ios::binary);
     if (!file.is_open()) {
@@ -110,7 +114,7 @@ bool DynainWriter::writeFile(
         return false;
     }
 
-    file << buffer.str();
+    file << deck_newline::apply(buffer.str(), newline_);
     file.close();
     return true;
 }

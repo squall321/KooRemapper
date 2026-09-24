@@ -108,11 +108,15 @@ bool KFileWriter::writeFileWithSource(const std::string& filename, const Mesh& m
     }
     src.close();
 
-    std::ofstream out(filename);
-    if (!out.is_open()) {
+    // 원본의 개행을 그대로 따른다. 위 루프가 CR 을 떼므로(그 자체는 옳다 — 남기면 뒤의 파싱이
+    // 깨진다) 여기서 되붙이지 않으면 CRLF 덱이 조용히 LF 로 바뀐다. 호출부는 고칠 것이 없다.
+    newline_ = deck_newline::detect(sourceFile);
+    DeckWriter writer(filename, newline_);
+    if (!writer.ok()) {
         errorMessage_ = "Cannot create file: " + filename;
         return false;
     }
+    std::ostream& out = writer.stream();
 
     try {
         if (includeHeader_) writeHeader(out);
@@ -212,12 +216,12 @@ bool KFileWriter::writeFileWithSource(const std::string& filename, const Mesh& m
         (void)endSuppressed;
         writeEnd(out);
 
-        out.close();
+        writer.close();
         return true;
     }
     catch (const std::exception& e) {
         errorMessage_ = std::string("Error writing file: ") + e.what();
-        out.close();
+        writer.close();
         return false;
     }
 }
@@ -226,11 +230,13 @@ bool KFileWriter::writeFile(const std::string& filename, const Mesh& mesh,
                             bool useMappedPositions) {
     errorMessage_.clear();
 
-    std::ofstream file(filename);
-    if (!file.is_open()) {
+    // 원본 덱이 없는 경로 — 호출자가 setNewline 으로 정해 준 개행을 쓴다(기본 LF).
+    DeckWriter writer(filename, newline_);
+    if (!writer.ok()) {
         errorMessage_ = "Cannot create file: " + filename;
         return false;
     }
+    std::ostream& file = writer.stream();
 
     try {
         if (includeHeader_) {
@@ -241,17 +247,17 @@ bool KFileWriter::writeFile(const std::string& filename, const Mesh& mesh,
         writeElementSection(file, mesh);
         writeEnd(file);
 
-        file.close();
+        writer.close();
         return true;
     }
     catch (const std::exception& e) {
         errorMessage_ = std::string("Error writing file: ") + e.what();
-        file.close();
+        writer.close();
         return false;
     }
 }
 
-void KFileWriter::writeHeader(std::ofstream& file) {
+void KFileWriter::writeHeader(std::ostream& file) {
     // Get current time
     std::time_t now = std::time(nullptr);
     char timeStr[64];
@@ -264,7 +270,7 @@ void KFileWriter::writeHeader(std::ofstream& file) {
     file << "$" << std::endl;
 }
 
-void KFileWriter::writeNodeSection(std::ofstream& file, const Mesh& mesh,
+void KFileWriter::writeNodeSection(std::ostream& file, const Mesh& mesh,
                                    bool useMappedPositions) {
     file << "*NODE" << std::endl;
     file << "$#   nid               x               y               z" << std::endl;
@@ -291,7 +297,7 @@ void KFileWriter::writeNodeSection(std::ofstream& file, const Mesh& mesh,
     }
 }
 
-void KFileWriter::writeElementSection(std::ofstream& file, const Mesh& mesh,
+void KFileWriter::writeElementSection(std::ostream& file, const Mesh& mesh,
                                       const std::set<int>* skipIds) {
     // Sort elements by ID
     std::vector<std::pair<int, const Element*>> sortedElements;
@@ -331,7 +337,7 @@ void KFileWriter::writeElementSection(std::ofstream& file, const Mesh& mesh,
     }
 }
 
-void KFileWriter::writeEnd(std::ofstream& file) {
+void KFileWriter::writeEnd(std::ostream& file) {
     file << "*END" << std::endl;
 }
 

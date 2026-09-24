@@ -5727,7 +5727,8 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                 errorMessage_ = "Cannot write dynain: " + dynainFile;
                 return false;
             }
-            dynFile << dynBuf.str();
+            // 덱과 같은 개행으로 낸다 — dynain 은 덱이 `*INCLUDE` 로 물고 가므로 갈리면 안 된다.
+            dynFile << deck_newline::apply(dynBuf.str(), deckNewline_);
             dynFile.close();
         } else {
             // Solid-only: use existing DynainWriter
@@ -5737,6 +5738,7 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
             finalResult.validElements = static_cast<int>(accumulatedResults_.size());
 
             DynainWriter dynainWriter;
+            dynainWriter.setNewline(deckNewline_);   // refFile 이 비어 있어 자동 판정이 안 된다
             if (!dynainWriter.writeFile(dynainFile, finalResult, StrainType::ENGINEERING,
                                          "", "assemble")) {
                 errorMessage_ = "Failed to write dynain: " + dynainWriter.getErrorMessage();
@@ -5752,7 +5754,7 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
             errorMessage_ = "Cannot write IGA file: " + igaf.fullpath;
             return false;
         }
-        igaOut << igaf.content;
+        igaOut << deck_newline::apply(igaf.content, deckNewline_);   // 덱과 같은 개행으로
         igaOut.close();
     }
 

@@ -1,4 +1,5 @@
 // CNRB 체결점 하나를 Side A/B 두 강체로 쪼개고 그 사이를 제로길이 discrete beam(ELFORM=6) 하나로 잇는 op
+#include "parser/DeckWriter.h"
 #include "cnrb2spring.h"
 #include "cli/ConsoleOutput.h"
 #include "util/YamlComment.h"
@@ -1349,8 +1350,11 @@ int runCnrb2Spring(const std::string& yamlFile, ConsoleOutput& console) {
     int n = cnrb2spring_apply(lines, cfg, console);
     if (n < 0) { console.error("[cnrb2spring] 변환을 멈췄습니다 — 위 [ERROR] 줄을 보세요 (출력 파일을 쓰지 않았습니다)"); return 1; }
 
-    std::ofstream out(outPath);
-    if (!out.is_open()) { console.error("[cnrb2spring] 쓸 수 없습니다: " + outPath); return 1; }
+    // 원본 덱의 개행을 따른다 — 안 그러면 CRLF 덱이 조용히 LF 로 바뀌거나,
+    // 원본 줄만 CRLF 로 남고 새로 넣은 줄이 LF 가 되어 **한 파일 안에서 개행이 갈린다**.
+    KooRemapper::DeckWriter out_w(outPath, KooRemapper::deck_newline::detect(modelPath));
+    std::ostream& out = out_w.stream();
+    if (!out_w.ok()) { console.error("[cnrb2spring] 쓸 수 없습니다: " + outPath); return 1; }
     for (const auto& ln : lines) out << ln << "\n";
     console.println(cg_fmt("[cnrb2spring] 변환 %d개 -> %s", n, outPath.c_str()));
     return 0;

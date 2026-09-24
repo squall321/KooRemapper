@@ -1,5 +1,6 @@
 #pragma once
 
+#include "parser/DeckNewline.h"
 #include "analysis/ElementAnalyzer.h"
 #include "analysis/StrainTensor.h"
 #include "analysis/StressTensor.h"
@@ -50,6 +51,11 @@ public:
      * @param results   Element analysis results
      * @return true on success
      */
+    /**
+     * 출력 dynain 의 개행. `refFile` 을 주면 거기서 자동 판정하므로 보통 부를 필요가 없다.
+     */
+    void setNewline(DeckNewline nl) { newline_ = nl; }
+
     bool writeStrainCSV(
         const std::string& filename,
         const MeshAnalysisResult& results
@@ -66,6 +72,8 @@ public:
     void setLargeDeformation(bool large) { largeDeformation_ = large; }
 
 private:
+    // 원본 덱의 개행. 이것이 없어서 .dynain 이 늘 LF 로 나갔다(원본이 CRLF 여도).
+    DeckNewline newline_ = DeckNewline::LF;
     std::string errorMessage_;
     bool largeDeformation_;
 
