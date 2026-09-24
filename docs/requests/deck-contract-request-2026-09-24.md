@@ -6,6 +6,19 @@
 **한 줄**: 덱을 텍스트로 고치는 일에 **계약이 없어서** 3개월간 잃은 계산을, 그 계약을 도구가 강제하는 기능으로 옮긴다.
 **성격**: 기능 요청이다. 우선순위와 설계는 이 리포가 정한다 — 아래는 근거와 우리가 먹는 모양이다.
 
+> **정정 (2026-09-24, 회신 `deck-contract-reply-2026-09-24.md` 반영)** — 이 요청서의 **결론은 맞았고 기전 진단은 여러 곳이
+> 틀렸다.** 받는 쪽이 착수 전에 8개 항목을 실측 검증해서 잡았다. 원문은 지우지 않고 틀린 자리에 `⚠정정` 을 달았다.
+> · **CRLF 기전** — 리눅스 glibc 텍스트 모드 `ofstream` 은 개행을 **안 바꾼다**(`od -c` 실증). 진짜 원인은 리더가
+>   `line.pop_back()` 으로 CR 을 떼고 **되붙이지 않는 것**(78곳). 지목한 `KFileWriter` 는 MSVC 빌드에서만 별개 결함.
+> · **DF-20 ⑥(요소 수 대조)은 이미 완전히 있었다** — `ModelAssembler.cpp:5483-5616`, 어긋나면 파일을 안 쓰고 rc=1.
+> · **DF-06 은 "없다" 가 아니라 "델타 검사만 있고 절대 검사가 없다"** — 그리고 TN4 는 정확히 후자다.
+> · **재현 안 된 주장 셋** — 7자리 EID 잘림(실제 경계는 9자리) · `I10=Y LONG=S` 왕복 소실 · TIED 225→0. 손스크립트 사고로 보인다.
+> · **사실 오류** — `ElementCardLayout::optValue` 는 API 가 아니라 지역 람다 · `realFieldWidth` 는 ID 폭이 아니라 좌표 폭 ·
+>   커버리지에 `*NODE` 가 빠짐 · `ModelAssembler.cpp:4955` 는 카드 판정이 아니라 배치 힌트 · `9000001` 은 예약 번호가 아니라
+>   `hfdamp` 의 `max+1` 결과(StepForge `ID_BANDS.md` §5).
+> · **요청서가 못 짚은 더 나쁜 것** — `dt2ms` 음수 부호가 10칸 넘침으로 **양수가 되고 있었다**(물리가 뒤바뀌는데 rc=0) ·
+>   `contact modify` 가 `_ID` 카드의 **SSID 칸을 덮어쓰며 성공을 보고** · `_SET` 세트 ID 를 요소 번호로 오독.
+
 ---
 
 ## 1. 왜 — 잃은 것의 대부분은 에러가 아니었다
@@ -15,7 +28,7 @@
 | 사건 | 원인 | 손실 |
 |---|---|---|
 | A27 요소 소실 | `*ELEMENT_SOLID` 2줄 포맷을 1줄로 읽음 | 솔리드 922만 → 434만. **에러 없이 완주** |
-| CRLF 소실 | 텍스트 모드 I/O 가 700MB 덱을 LF 로 변환 | 바이트 −12MB · diff 2,433만 줄. 구조 카운트는 **전부 정상** |
+| CRLF 소실 | ⚠정정: 리더가 CR 을 떼고 쓸 때 되붙이지 않음(원문: 텍스트 모드 I/O 가 변환) — 700MB 덱이 LF 로 | 바이트 −12MB · diff 2,433만 줄. 구조 카운트는 **전부 정상** |
 | TN1 hang | `*KEYWORD` 의 `I10=Y LONG=S` 가 왕복에서 소실 | 10칸 데이터를 8칸으로 오독 |
 | TN4 전멸 | `*DATABASE_HISTORY_SOLID_SET` 이 없는 set 참조 | Error 10144, 키워드 단계 즉사 |
 | RBE3 480런 정지 | CNRB→`*CONSTRAINED_INTERPOLATION` 이 dt 를 303배 붕괴 | 350노드를 하루 넘게 점유. `energy ratio = 1.00000` 이라 **건강해 보였다** |
@@ -51,18 +64,18 @@
 
 | 요청 | 있는 부품 | 왜 답이 아닌가 |
 |---|---|---|
-| DF-02 방언 판별 | `ElementCardLayout::optValue("I10")`, `keywordCardDeckWidth`, `deckFieldWidth`, `keywordFieldWidth` | **요소 카드에 국한**된다. `*PART`/`*SET_*`/`*MAT_*`/`*CONTACT_*`/`*CONTROL_*` 은 I10 과 무관하게 항상 10칸인데 그 표가 없다. 그리고 "판별 후 스캔 0건이면 **실패**" 규약이 없어, 오프셋을 틀리면 오염 덱을 CLEAN 으로 오판한다(실측: bbox 세 축이 똑같이 99.000mm 로 떨어지는데 통과했다) |
-| DF-03 필드폭 표 | `ElementCardLayout`, `realFieldWidth(intFw)` | 요소용이다. 넘칠 때 **자르지 말고 raise** 하는 규약이 없다 — 7자리 EID `9900061` 이 `99000` 으로 잘려 PID 가 199/299 로 읽힌 적이 있다 |
-| DF-04 1줄/2줄 솔리드 | `solidCardLines()`, `solidNodesFromElform()` + `cnrb2spring.cpp:284~344` · `ModelAssembler.cpp:4955` 가 **각자** 처리 | 공용 계층이 아니라 **명령마다 재구현**이다. `(ten nodes format)` 을 **섹션 헤더마다 개별 판정**해야 하는데(T4 덱은 5섹션 중 3개가 2줄) 그 규약과 섹션별 총수 리포트가 공용에 없다 |
+| DF-02 방언 판별 | `keywordCardDeckWidth`, `deckFieldWidth`, `keywordFieldWidth` (⚠정정: `optValue` 는 API 가 아니라 `keywordCardDeckWidth` 안의 지역 람다) | ⚠정정: 커버리지는 **`*NODE` + `*ELEMENT_*`** 다. `*PART`/`*SET_*`/`*MAT_*`/`*CONTACT_*`/`*CONTROL_*` 은 I10 과 무관하게 항상 10칸인데 그 표가 없다. 그리고 "판별 후 스캔 0건이면 **실패**" 규약이 없어, 오프셋을 틀리면 오염 덱을 CLEAN 으로 오판한다(실측: bbox 세 축이 똑같이 99.000mm 로 떨어지는데 통과했다) |
+| DF-03 필드폭 표 | `ElementCardLayout` (⚠정정: `realFieldWidth` 는 ID 폭 표가 아니라 정수 칸 폭에 대응하는 **좌표 칸 폭**) | 요소용이다. 넘칠 때 **자르지 말고 raise** 하는 규약이 없다. ⚠정정: 7자리 EID 잘림은 **재현 안 됨**(7자리는 8칸에 들어간다, 실제 경계 9자리) — 대신 같은 결함이 **`*CONTROL` 값**에서 났다(`dt2ms` 음수 부호 소실, 고쳐짐) |
+| DF-04 1줄/2줄 솔리드 | `solidCardLines()`, `solidNodesFromElform()` + `cnrb2spring.cpp:284~344` (⚠정정: `ModelAssembler.cpp:4955` 는 카드 경계 판정이 아니라 섹션 배치 힌트고, 실제 판정 `ecBuildIndex` 는 요소 카드 줄마다 한다) | 공용 계층이 아니라 **명령마다 재구현**이다. `(ten nodes format)` 을 **섹션 헤더마다 개별 판정**해야 하는데(T4 덱은 5섹션 중 3개가 2줄) 그 규약과 섹션별 총수 리포트가 공용에 없다 |
 
 ### 없는 것
 
 | 없는 것 | 확인 방법 |
 |---|---|
-| **DF-01 바이트 보존 I/O** | `KFileWriter.cpp:111,229` 가 `std::ofstream out(filename)` — **텍스트 모드**다. 개행 감지·보존 계약이 없고, 편집 0회 round-trip 바이트 동일 단언도 없다 |
-| **DF-06 참조 무결성** | `include/validation/` 에 `ElementQualityChecker`·`IntersectionDetector`·`MaterialCardValidator` 뿐 — SET/DATABASE_HISTORY/CONTACT ssid·msid/CNRB NSID/PART→SECID·MID 의 dangling 검사가 없다 |
-| **DF-07 ID 발행** | 예약 대역 레지스트리가 없다. `max+1` 은 하위 전처리기 관례 번호와 충돌한다(KMM 낙하판 PID 500323, `sid 9000001` 은 감쇠용으로 이미 점유) |
-| **DF-20/21 편집 게이트·범위 단언** | 없다 |
+| **DF-01 바이트 보존 I/O** | ⚠정정: 리눅스 텍스트 모드 `ofstream` 은 개행을 안 바꾼다. 없던 것은 **뗀 CR 을 되붙이는 공용 쓰기 계층**이었다(→ `DeckWriter`, d988740). `strip` 은 원래 보존했고, 지목한 `KFileWriter` 는 MSVC 에서만 별개 결함. 편집 0회 round-trip 바이트 단언은 여전히 없다 |
+| **DF-06 참조 무결성** | ⚠정정: `scanDeadReferences` 가 있었다 — 단 **이번 op 이 지운 ID 만 보는 델타 검사**다. 없던 것은 **절대 검사**(애초에 없는 세트 참조)이고 TN4 가 정확히 그것이다(→ `ReferenceIntegrity`, 814ff72) |
+| **DF-07 ID 발행** | ⚠정정: 대역 개념은 `restack`(`pid_start`, 충돌 rc=1)·`cnrb2spring`(예약 대역 + exact-match 재검사)에 **있다** — 없는 것은 그것이 두 op 안에만 있는 것. `9000001` 은 예약 번호가 아니라 **`hfdamp` 의 `max+1` 결과**다(StepForge 확인) — 즉 대역표만으로는 반쪽이고 `max+1` 발행자가 대역을 인지해야 한다 |
+| **DF-20/21 편집 게이트·범위 단언** | ⚠정정: DF-20 ⑥(요소 수 증감)은 **이미 완전히 있다**(`ModelAssembler.cpp:5483-5616`, 파트별+합계, 어긋나면 파일 안 씀 rc=1). 없는 것은 ①②③④(Δbytes·범위·ΔCRLF·카드 수)와 발화 범위 |
 | **DF-25~30 영역·이미지 마스킹 일체** | 없다 |
 | **DF-32~34 갭 분포·유효면·결합 분류** | 없다 |
 | **DF-46/49 체결 그래프·dt 가드** | 없다 |
@@ -99,7 +112,7 @@
 
 #### DF-05 `iter_cards` — `_TITLE` / `_ID` 추가 줄
 - `_TITLE` 은 제목줄 1개. **`_ID` 접미사도 cid+title 카드가 1줄 더** 있다(`*CONTACT_TIED_SURFACE_TO_SURFACE_OFFSET_ID`).
-- 이걸 놓쳐 TIED 225개를 **0개로 오판**했다. 판정식: `has_id = kw.endswith("_ID") or "_ID_" in kw`
+- ⚠정정: "TIED 225→0 오판" 은 **재현 안 됨**(개수는 키워드 줄만 보므로 0 이 될 경로가 없다). 진짜 문제는 **쓰기**였다 — `contact modify` 가 `_ID` 의 cid 줄을 안 세어 **SSID 칸에 마찰계수를 덮어쓰며 성공을 보고**했다(63f50a7 로 고쳐짐). 판정식은 맞다: `has_id = kw.endswith("_ID") or "_ID_" in kw`
 
 #### DF-06 `check_reference_integrity` — 참조 무결성 **(치명)**
 - 대상: `SET_SOLID/NODE/PART/SEGMENT` · `DATABASE_HISTORY_*` · `CONTACT` ssid/msid + sstyp/mstyp 해석 · `CNRB` NSID · `BOUNDARY_SPC` · `DAMPING_PART_SET` · `PART→SECID/MID` · `ELEMENT→PID/NID`
@@ -108,6 +121,7 @@
 #### DF-07 `reserve_id_range` — ID 발행
 - `max+1` 금지. **외부 예약 대역 등록표를 도구가 보유**할 것. 발행 후 전역 exact-match 재검사 0건.
 - 세트 ID 도 같다.
+- ⚠정정: 등록표의 **실제 값은 이 요청서가 못 준다** — `500323`·`9000001` 의 유일한 출처가 이 문서 자신이었다. 캠페인 쪽(하위 도구 KMM 등)이 표를 줘야 한다. 그리고 `hfdamp` 자체가 `max+1` 발행자라 **이 리포 안의 발행자부터** 대역을 인지해야 표가 뜻이 있다.
 
 #### DF-08 `element_inventory` / `assert_counts` — 요소 수 원장
 - `{pid: {n_elem, n_node, bbox, volume, mass}}` + **원본/템플릿/per-run 3자 대조**
