@@ -53,10 +53,22 @@ def _scan_keywords(path: Path, max_bytes: int = 8_000_000) -> dict:
     keywords: dict[str, int] = {}
     try:
         size = path.stat().st_size
-        with path.open("r", errors="ignore") as fh:
-            text = fh.read(max_bytes)
+        # ⚠ 바이트로 읽는다. 예전에는 `open("r", errors="ignore")` 였는데 두 가지가 틀렸다 —
+        # (1) universal-newlines 가 CRLF 를 LF 로 바꿔 **개행 종류를 보고할 수 없었고**,
+        # (2) `errors="ignore"` 는 latin-1 바이트를 조용히 버려 원문과 어긋난다.
+        # LS-DYNA 덱은 latin-1 이 1:1 이라 손실이 없다.
+        with path.open("rb") as fh:
+            raw = fh.read(max_bytes)
+        text = raw.decode("latin-1")
     except OSError:
         return {}
+
+    # 개행 판정 — 규약은 count(CRLF)*2 > count(LF)(요청서 DF-01). 덱을 왕복시켰을 때
+    # 개행이 바뀌었는지 플랫폼에서 볼 수 있어야 한다.
+    n_crlf = raw.count(b"\r\n")
+    n_lf = raw.count(b"\n")
+    newline = "crlf" if n_crlf * 2 > n_lf else "lf"
+    final_newline = bool(raw) and raw.endswith(b"\n")
 
     lines = text.splitlines()
     i = 0
@@ -84,6 +96,10 @@ def _scan_keywords(path: Path, max_bytes: int = 8_000_000) -> dict:
         i += 1
 
     return {
+        "newline": newline,
+        "n_crlf": n_crlf,
+        "n_lines": n_lf,
+        "final_newline": final_newline,
         "includes": includes,
         "part_titles": part_titles[:50],
         "keyword_counts": keywords,
