@@ -46,15 +46,23 @@ std::vector<ContactDef> ct_parseContacts(const std::vector<std::string>& lines) 
                 typeStr = typeStr.substr(0, pos);
             }
         }
-        // Check _ID suffix (used in some variants)
+        // `_ID` 옵션. ⚠ 끝에만 오는 것이 아니다 — 매뉴얼 정규 철자에 `_ID_OFFSET`·`_ID_MPP`
+        // 처럼 뒤에 다른 옵션이 더 붙는 형태가 있다. 끝만 보면 그 덱에서 ID 줄을 Card 1 로 읽어
+        // 슬레이브/마스터와 마찰계수가 통째로 한 카드씩 밀린다.
         bool hasId = false;
         {
             size_t pos = typeStr.rfind("_ID");
-            if (pos != std::string::npos && pos == typeStr.size() - 3) {
+            bool atEnd = (pos != std::string::npos && pos == typeStr.size() - 3);
+            size_t mid = typeStr.find("_ID_");
+            if (atEnd) {
                 hasId = true;
                 typeStr = typeStr.substr(0, pos);
+            } else if (mid != std::string::npos) {
+                hasId = true;
+                typeStr = typeStr.substr(0, mid) + typeStr.substr(mid + 3);
             }
         }
+        c.hasId = hasId;   // 쓰기 쪽이 이것을 봐야 한다 — 지역 변수로 두면 편집이 줄을 잘못 센다
         c.type = typeStr;
 
         // Collect data lines until next keyword
@@ -1177,7 +1185,7 @@ void ct_modifyContactCard1(std::vector<std::string>& lines,
         const ContactDef& c,
         int newSsid, int newMsid, int newSstyp, int newMstyp) {
     // Find Card 1 data line in [startLine, endLine)
-    bool titleSkipped = !c.hasTitle;
+    bool titleSkipped = !(c.hasTitle || c.hasId);
     int cardNum = 0;
     for (int i = c.startLine + 1; i < c.endLine; ++i) {
         std::string dtr = kw_trim(lines[i]);
@@ -1200,7 +1208,7 @@ void ct_modifyContactCard1(std::vector<std::string>& lines,
 // Modify Card 2 FS field
 void ct_modifyContactFs(std::vector<std::string>& lines,
         const ContactDef& c, double newFs) {
-    bool titleSkipped = !c.hasTitle;
+    bool titleSkipped = !(c.hasTitle || c.hasId);
     int cardNum = 0;
     for (int i = c.startLine + 1; i < c.endLine; ++i) {
         std::string dtr = kw_trim(lines[i]);
@@ -1221,7 +1229,7 @@ void ct_modifyContactFs(std::vector<std::string>& lines,
 void ct_modifyOptionalCards(std::vector<std::string>& lines,
         ContactDef& ct, const ContactDef& newVals) {
     // Find position after Card 3
-    bool titleSkipped = !ct.hasTitle;
+    bool titleSkipped = !(ct.hasTitle || ct.hasId);
     int cardNum = 0;
     int card3Line = -1;
     for (int i = ct.startLine + 1; i < ct.endLine; ++i) {

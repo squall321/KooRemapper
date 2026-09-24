@@ -952,7 +952,7 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
             // For other Card 2 fields, we need to modify in-place too
             {
                 bool card2Modified = false;
-                bool titleSkipped2 = !ct.hasTitle;
+                bool titleSkipped2 = !(ct.hasTitle || ct.hasId);
                 int cn2 = 0;
                 for (int i = ct.startLine + 1; i < ct.endLine; ++i) {
                     std::string dtr = kw_trim(lines[i]);
@@ -986,7 +986,7 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
             // Card 3 modifications
             {
                 bool card3Modified = false;
-                bool titleSkipped3 = !ct.hasTitle;
+                bool titleSkipped3 = !(ct.hasTitle || ct.hasId);
                 int cn3 = 0;
                 for (int i = ct.startLine + 1; i < ct.endLine; ++i) {
                     std::string dtr = kw_trim(lines[i]);

@@ -12,6 +12,10 @@ struct ContactDef {
     std::string type;           // e.g. "AUTOMATIC_SURFACE_TO_SURFACE"
     std::string fullKeyword;    // e.g. "*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_TITLE"
     bool hasTitle = false;
+    // `_ID` 접미사도 카드 앞에 줄을 **1줄 더** 둔다(cid + 제목). 이것을 안 보면 편집이
+    // Card 1 자리를 한 줄 앞으로 잡아 **SSID 칸에 값을 덮어쓴다**(재현: modify friction 0.33 이
+    // 슬레이브 파트 ID 칸에 들어가고 FS 는 그대로, 그런데 "Modified: FS=0.33" 이라고 보고한다).
+    bool hasId = false;
     std::string title;
     // Card 1
     int ssid=0, msid=0, sstyp=0, mstyp=0, sboxid=0, mboxid=0, spr=0, mpr=0;
