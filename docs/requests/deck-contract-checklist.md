@@ -5,30 +5,30 @@
 수정 전에 떠 두고 매 단계 대조한다. 여기서 깨지면 개행 재적용이 틀린 것이다.
 
 ## P1-6 · D — 버그 2건 (선행 없음, 가장 작음)
-- [ ] `histElem` 에 `_SET` 제외 추가 (`ModelAssembler.cpp:2938`) — `histPart`(:2896)에는 이미 있다
+- [x] `histElem` 에 `_SET` 제외 추가 (`ModelAssembler.cpp:2938`) — `histPart`(:2896)에는 이미 있다
       → 검증: `*DATABASE_HISTORY_SOLID_SET 7` 심고 merge → rc=1 오탐 사라짐
-- [ ] `*PART` 고정폭 폴백 8 → 10 (`KFileReader.cpp` parsePartSection)
+- [x] `*PART` 고정폭 폴백 8 → 10 (`KFileReader.cpp` parsePartSection)
       → 검증: 폴백 경로 덱에서 PID/SECID/MID 가 10칸으로 읽힘
 
 ## P1-5 · B — 넘침/잘림 금지
-- [ ] `fmt10d`(`ModelAssembler.cpp:15239`) 앞을 버리는 `substr` 제거 → 10칸에 맞는 표기 재포맷, 안 되면 raise
+- [x] `fmt10d`(`ModelAssembler.cpp:15239`) 앞을 버리는 `substr` 제거 → 10칸에 맞는 표기 재포맷, 안 되면 raise
       → 검증: `dt2ms: -1.0e-7` 출력에 **음수 부호 보존**(지금 `1.0000E-07` — 물리가 뒤바뀐다)
-- [ ] `fmt10i`(:15243)·`kw_setField`(`kw_util.h:54`) 같은 규약
-- [ ] 우리가 새로 쓰는 값이 넘칠 때만 rc=1, 입력 덱부터 어긋난 것은 WARN(`5581-5598` 규약 따름)
+- [x] `fmt10i`(:15243)·`setField`(`kw_util.h:54`) 같은 규약
+- [x] 넘치면 rc=1 + errorMessage_, 입력 덱부터 어긋난 것은 WARN(`5581-5598` 규약 따름)
 
 ## P1-4 · C — `ContactDef.hasId` (읽기 + **쓰기 4곳**)
-- [ ] `contact_helpers.cpp:49-56` 판정을 endswith 전용 → `_ID` 끝 또는 `_ID_` 포함
-- [ ] `ContactDef` 에 `hasId` 추가, 편집 4곳(`contact_helpers.cpp:1203`·`1224`, `contact.cpp:955`·`989`)이 그것을 볼 것
+- [x] `contact_helpers.cpp:49-56` 판정을 endswith 전용 → `_ID` 끝 또는 `_ID_` 포함
+- [x] `ContactDef` 에 `hasId` 추가, 편집 4곳(`contact_helpers.cpp:1203`·`1224`, `contact.cpp:955`·`989`)이 그것을 볼 것
       → 검증: `modify friction:0.33` 후 **fs 칸**에 0.33 · **ssid 칸 불변**(지금 SSID 를 덮어쓴다)
       → 검증: `modify soft:2 depth:35` 후 **필수 Card 3 잔존**(지금 사라진다)
       → ⚠ 회귀에서 **개수를 단언하지 말 것** — 개수만 보면 이 버그가 전부 통과한다
-- [ ] `_ID` 예제 덱 추가(`examples/contact/model.k` 는 `_TITLE` 만 써서 이 경로를 안 밟는다)
+- [x] `_ID` 회귀 3종 추가(예제 덱 대신 회귀가 직접 만든다)(`examples/contact/model.k` 는 `_TITLE` 만 써서 이 경로를 안 밟는다)
 
 ## P1-1 · A — 개행 보존 (치명)
-- [ ] 읽을 때 개행 종류를 기억하고 쓸 때 되붙인다. **줄 문자열에 `\r` 을 남기지 말 것**
+- [x] 읽을 때 개행 종류를 기억하고 쓸 때 되붙인다. **줄 문자열에 `\r` 을 남기지 말 것**
       (78곳의 `stoi`/`substr`/`back()` 분기가 전부 깨진다)
-- [ ] 진입점: `ModelAssembler.cpp:62-67`(loadBaseModel)·`132-135`(loadRawOnly), `KFileReader`
-- [ ] 출력: `ModelAssembler.cpp:5619-5624`, `KFileWriter:111,229`, `strip:177,225`, `relax:175,271`, `database`
+- [x] 진입점: `ModelAssembler.cpp:62-67`(loadBaseModel)·`132-135`(loadRawOnly), `KFileReader`
+- [~] 출력: `ModelAssembler` 는 완료 / `KFileWriter`·`strip`·`relax`·`database` 는 다음 커밋, `KFileWriter:111,229`, `strip:177,225`, `relax:175,271`, `database`
       → 검증: CRLF 578 덱 → indent·database·relax·strip **4개 전부 CRLF=578**
         (지금 0 / 0 / **578 혼재** / 578 — relax 가 한 파일 안에서 개행이 갈린다)
       → 검증: LF 덱 전 op sha256 불변
@@ -42,3 +42,24 @@
 ## 남긴 것 (P2 이후)
 - G EditGate 원장 / O-min 절대 참조 검사 / H kfile_inspect n_crlf / G11 ORTHO 거절 가드
 - 이유는 계획서 §4.2. 특히 `kw_tok10` 8벌 흡수·ElemCardIndex 공용화는 회귀 신호가 묻힐 만큼 파급이 크다
+
+## 실제 결과 (2026-09-24)
+
+커밋 4건. 회귀 **37 → 40개**, 전부 통과. 매 항목 **무력화로 확인**했다.
+
+| 커밋 | 무엇 | 무력화 |
+|---|---|---|
+| `4d22441` | `_SET` 오독 rc=1 오탐 · `*PART` 폴백 8→10 | 제외를 빼면 FAIL 2 |
+| `e2281b3` | dt2ms 음수 부호 소실 | 옛 포매터로 되돌리면 FAIL 2 |
+| `63f50a7` | `_ID` 편집이 SSID 칸 덮어씀 | 쓰기가 hasId 를 안 보면 FAIL 6 |
+| `a25aa17` | CRLF 왕복 소실 | 되붙임을 빼면 FAIL 2 |
+
+**셋은 요청서에 없던 것이다** — `_SET` 오독, dt2ms 부호, `_ID` 쓰기. 요청서가 든 근거
+(7자리 EID 잘림 · TIED 225→0)는 재현되지 않았고, 대신 검증 중에 더 나쁜 것이 나왔다.
+
+## 아직 남은 것
+
+- **자체 ofstream op 들의 개행** — `strip`·`relax`·`database`·`KFileWriter` 등 25곳 이상.
+  `relax` 는 한 파일 안에서 개행이 갈린다(최악). MSVC 텍스트 모드 결함도 같은 자리다.
+- **무편집 진입점 + 픽스처 5종 바이트 왕복**(SYS-02 완전형) — 지금 회귀는 개행만 본다
+- G EditGate 원장 / O-min 절대 참조 검사 / H kfile_inspect n_crlf / G11 ORTHO 거절 가드
