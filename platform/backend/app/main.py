@@ -68,6 +68,15 @@ def create_app() -> FastAPI:
 
     @app.get("/api/health", tags=["health"])
     def health() -> dict:
+        # 기존 네 칸은 그대로 둔다 — 소비자(supervisor.sh·start.sh·nginx)는 상태코드만 보지만
+        # 칸 이름을 바꾸면 조용히 깨질 수 있는 자리다. **더하기만** 한다.
+        #
+        # 리비전·해시를 왜 여기 싣나 — 게시본이 21커밋 뒤에 멈춰 있었는데 **밖에서 볼 방법이
+        # 없었다.** 바이너리는 넷이 다 `version 1.8.0` 만 찍는다. 출처는 배포가 내려놓은
+        # bin/BUILD_INFO.txt 하나다(런타임에 git 을 부르지 않는다 — 폐쇄망에 git 실행 파일이 없다).
+        from app.shared.buildinfo import build_info
+
+        info = build_info(settings.kooremapper_bin)
         return {
             "success": True,
             "data": {
@@ -75,6 +84,7 @@ def create_app() -> FastAPI:
                 "env": settings.app_env,
                 "name": settings.app_name,
                 "binary_present": settings.kooremapper_bin.exists(),
+                **info,
             },
             "message": None,
             "errors": None,

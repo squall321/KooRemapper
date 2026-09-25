@@ -46,7 +46,18 @@ if [ -f "$STAGE/koorm-bin.tar.gz" ]; then
   chmod +x platform/backend/bin/KooRemapper 2>/dev/null || true
   # build/linux/bin 에도 사본 (build-cli.sh 등 참조 경로 호환)
   mkdir -p build/linux/bin && cp -f platform/backend/bin/KooRemapper build/linux/bin/KooRemapper 2>/dev/null || true
-  echo "  ✓ bin/KooRemapper 반입 ($(objdump -T platform/backend/bin/KooRemapper 2>/dev/null | grep -oE 'GLIBC_2\.[0-9]+' | sort -u | tail -1))"
+  # ⚠ `sort -uV` 다. 예전엔 `sort -u`(사전순)여서 GLIBC_2.38 을 요구하는 바이너리를 받고도
+  # "GLIBC_2.4" 라고 찍었다("2.38" < "2.4" 가 사전순이다). 받는 쪽 readout 이 거짓말을 하면
+  # 운영에서 되짚을 근거가 없다. 패턴도 올리는 쪽(dist-to-drive.sh)과 같은 것을 쓴다.
+  echo "  ✓ bin/KooRemapper 반입 ($(objdump -T platform/backend/bin/KooRemapper 2>/dev/null | grep -oE 'GLIBC_[0-9.]+' | sort -uV | tail -1))"
+fi
+# BUILD_INFO.txt — **바이너리와 같은 자리에 내려놓는다.** 예전에는 스테이지에만 받아 두고
+# 스테이지째로 지워서(mktemp + trap) 받는 쪽 디스크에 **한 번도 내려앉지 않았다.** 그래서
+# 운영에서 "지금 도는 바이너리가 어느 커밋인가" 를 물을 곳이 없었다. /api/health 가 이 파일을 읽는다.
+if [ -f "$STAGE/BUILD_INFO.txt" ]; then
+  mkdir -p platform/backend/bin
+  cp -f "$STAGE/BUILD_INFO.txt" platform/backend/bin/BUILD_INFO.txt
+  echo "  ✓ BUILD_INFO.txt 반입 ($(sed -n 's/^commit *: //p' platform/backend/bin/BUILD_INFO.txt | cut -c1-12))"
 fi
 # frontend dist
 if [ -f "$STAGE/koorm-frontend-dist.tar.gz" ]; then

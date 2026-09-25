@@ -4,7 +4,7 @@
 # 아티팩트를 받아 뜰 수 있게 한다.
 #
 # 올리는 것(모두 gitignore 라 git pull 로 안 감):
-#   - platform/backend/bin/KooRemapper   (glibc≤2.36 compat 바이너리 — debian:12 빌더 산출)
+#   - platform/backend/bin/KooRemapper   (glibc≤2.35 compat 바이너리 — debian:12 빌더 산출)
 #   - platform/frontend/dist             (standalone + portal(index.portal.html) 듀얼 빌드)
 #   - platform/infra/apptainer/cli.sif   (배치잡용 자체완결 CLI, 있으면)
 #
@@ -16,6 +16,7 @@
 #   bash platform/infra/scripts/dist-to-drive.sh --build   # compat 빌드+듀얼 프론트+cli.sif 후 publish
 #   bash platform/infra/scripts/dist-to-drive.sh           # 이미 빌드된 산출물만 publish
 #   bash platform/infra/scripts/dist-to-drive.sh --dry-run # 스테이지만 만들어 보여주고 업로드는 하지 않음
+#   (glibc 를 확인 못 하는 호스트에서 알고 넘기려면 --allow-unknown-glibc)
 #
 # platform/.env 필요:  KOORM_DRIVE_REMOTE=<rclone remote>:KooRemapper/dist
 set -euo pipefail
@@ -29,14 +30,28 @@ env_get() { [ -f platform/.env ] || return 0; sed -n "s/^$1=//p" platform/.env |
 KOORM_DRIVE_REMOTE="${KOORM_DRIVE_REMOTE:-$(env_get KOORM_DRIVE_REMOTE)}"
 KOORM_DRIVE_RETAIN="${KOORM_DRIVE_RETAIN:-$(env_get KOORM_DRIVE_RETAIN)}"
 
-DO_BUILD=0; DRY_RUN=0
+DO_BUILD=0; DRY_RUN=0; ALLOW_UNKNOWN_GLIBC=0
 for a in "$@"; do
   case "$a" in
     --build)   DO_BUILD=1 ;;
     --dry-run) DRY_RUN=1 ;;
-    *) echo "✗ 알 수 없는 인자: $a  (--build | --dry-run)"; exit 1 ;;
+    --allow-unknown-glibc) ALLOW_UNKNOWN_GLIBC=1 ;;
+    *) echo "✗ 알 수 없는 인자: $a  (--build | --dry-run | --allow-unknown-glibc)"; exit 1 ;;
   esac
 done
+
+# 컨테이너 허용 glibc 상한 — **실사용 소비자 중 최솟값**이다(2026-09-25 실측 `ldd --version`).
+#   SmartTwinPreprocessor.sif  2.35   ← pyKooCAE REMAP 체인이 돌리는 그것. 가장 낮다
+#   cli.sif                    2.36
+#   api.sif / mcp.sif          2.41   (Debian 13 trixie)
+# ⚠ 계획서가 적은 "2.37 이상 거절" 은 **두 칸 느슨하다.** 2.36 을 요구하는 바이너리는 그 관문을
+# 통과하고도 REMAP 체인에서 실행 자체가 안 된다. 그래서 최솟값을 택한다. 소비자가 바뀌면
+# 이 숫자와 위 표를 같이 고쳐야 한다 — 숫자만 조용히 바꾸지 마라.
+MAX_GLIBC="2.35"
+
+# "$1 <= $2" (둘 다 2.35 꼴). 글롭 비교(`GLIBC_2.3[7-9]*`)를 쓰지 않는 이유 — 2.40 처럼
+# minor 가 두 자리로 넘어가면 패턴이 통째로 빗나간다.
+glibc_le() { [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" = "$1" ]; }
 
 if [ "$DRY_RUN" = "0" ]; then
   command -v rclone >/dev/null 2>&1 || { echo "✗ rclone 미설치 (https://rclone.org/install/)"; exit 1; }
@@ -71,6 +86,33 @@ if [ ! -f platform/frontend/dist/index.portal.html ] && [ "${KOORM_DIST_ALLOW_NO
   exit 1
 fi
 
+# ── glibc 관문 ────────────────────────────────────────────────────────────
+# ⚠ 여기서 막지 않으면 아무도 막지 않는다. 09-24 에 다른 세션이 호스트 cmake 로 빌드해
+# 이 자리의 바이너리가 GLIBC_2.38 을 요구하고 있었다 — 그대로 게시했으면 폐쇄망 운영에
+# **실행 자체가 안 되는** 바이너리가 나갔다. 예전 구현은 값을 BUILD_INFO 에 적기만 했다.
+#
+# objdump 미설치(127)나 GLIBC 심볼 없는 바이너리면 grep 이 1 을 돌려주고, pipefail 이 그 값을
+# 파이프라인 종료코드로 올려 set -e 가 여기서 스크립트를 아무 말 없이 끝냈다(폐쇄망 = binutils 없음).
+# 종료코드를 삼켜 빈 값으로 흘리고, '알 수 없음' 을 **등급으로** 다룬다(커밋 b7e6bea 의 의도).
+BIN_GLIBC="$(objdump -T "$BIN" 2>/dev/null | grep -oE 'GLIBC_[0-9.]+' | sort -uV | tail -1 || true)"
+_bg="${BIN_GLIBC#GLIBC_}"
+if [ -z "$_bg" ]; then
+  if [ "$ALLOW_UNKNOWN_GLIBC" = "1" ]; then
+    echo "  ⚠ glibc 요구를 확인할 수 없다(objdump 없음 또는 GLIBC 심볼 없음) — --allow-unknown-glibc 로 넘어간다"
+  else
+    echo "✗ 바이너리의 glibc 요구를 확인할 수 없다 — objdump(binutils)가 없거나 GLIBC 심볼이 없다."
+    echo "  확인 못 한 것을 게시하지 않는다. binutils 를 깔거나, 알고 넘기려면 --allow-unknown-glibc."
+    exit 1
+  fi
+elif ! glibc_le "$_bg" "$MAX_GLIBC"; then
+  echo "✗ 이 바이너리는 GLIBC_$_bg 를 요구한다 — 실사용 컨테이너 상한은 $MAX_GLIBC 다."
+  echo "  그대로 게시하면 SmartTwinPreprocessor.sif(2.35)에서 실행 자체가 안 된다."
+  echo "  고치는 법: bash scripts/build_linux_compat.sh   (debian:12 빌더)"
+  exit 1
+else
+  echo "  · glibc 요구 GLIBC_$_bg <= $MAX_GLIBC ✓"
+fi
+
 TS="$(date -u +%Y%m%d-%H%M%SZ)"
 STAGE="$(mktemp -d)"; trap 'rm -rf "$STAGE"' EXIT
 
@@ -79,7 +121,10 @@ echo "  · binary + gmsh 번들 → koorm-bin.tar.gz"
 # 링크인데, -h 가 없으면 tar 가 '링크 자체'만 담는다. 받는 쪽엔 dist/gmsh 가 없으므로
 # 깨진 링크가 풀리고, meshfix 는 영영 못 쓴다 — 주석은 'gmsh 번들'이라 적혀 있는데 실제로는
 # 한 번도 실려 간 적이 없었다(cae00 이 매 배포마다 'gmsh not linked' 를 찍었다).
-tar -C platform/backend -chzf "$STAGE/koorm-bin.tar.gz" bin
+# BUILD_INFO.txt 는 제외한다 — 그것은 스테이지에 **따로** 올라가고 받는 쪽이 bin/ 에 내려놓는다.
+# 빼지 않으면 앞선 반입으로 bin/ 에 남은 **옛 것**이 tar 에 실려, 풀린 뒤 덮어쓰기 순서에 따라
+# 어느 쪽이 남을지 헷갈린다.
+tar -C platform/backend --exclude=bin/BUILD_INFO.txt -chzf "$STAGE/koorm-bin.tar.gz" bin
 echo "  · frontend/dist → koorm-frontend-dist.tar.gz"
 tar -C platform/frontend -czf "$STAGE/koorm-frontend-dist.tar.gz" dist
 # 서비스 SIF(postgres/api/mcp/nginx) + cli.sif — 오프라인 prod 가 build.sh 없이 뜨도록
@@ -109,11 +154,6 @@ BIN_MD5="$(md5sum "$BIN" | cut -d' ' -f1)"
 BIN_SHA="$(sha256sum "$BIN" | cut -d' ' -f1)"
 BIN_SIZE="$(stat -c %s "$BIN")"
 BIN_MTIME="$(date -u -d "@$(stat -c %Y "$BIN")" +%Y-%m-%dT%H:%M:%SZ)"
-# objdump 미설치(127)나 GLIBC 심볼 없는 바이너리면 grep 이 1 을 돌려주고, pipefail 이 그 값을
-# 파이프라인 종료코드로 올려 set -e 가 여기서 스크립트를 아무 말 없이 끝냈다(폐쇄망 = binutils 없음).
-# 종료코드를 삼켜 빈 값으로 흘리고, 아래 BUILD_INFO 의 '알 수 없음' 기본값이 실제로 쓰이게 한다.
-BIN_GLIBC="$(objdump -T "$BIN" 2>/dev/null | grep -oE 'GLIBC_[0-9.]+' | sort -uV | tail -1 || true)"
-
 COMPAT_OUT="build/linux-compat/bin/KooRemapper"
 if [ "$DO_BUILD" = "1" ]; then
   BUILD_METHOD="scripts/build_linux_compat.sh (이 실행의 --build)"
@@ -141,7 +181,7 @@ size          : $BIN_SIZE bytes
 mtime_utc     : $BIN_MTIME
 md5           : $BIN_MD5
 sha256        : $BIN_SHA
-glibc_max     : ${BIN_GLIBC:-알 수 없음 (objdump 없음 또는 GLIBC 심볼 없음)} (컨테이너 허용: <= GLIBC_2.36)
+glibc_max     : ${BIN_GLIBC:-알 수 없음 (objdump 없음 또는 GLIBC 심볼 없음)} (실사용 상한: <= GLIBC_$MAX_GLIBC — SmartTwinPreprocessor.sif 기준)
 build_method  : $BUILD_METHOD
 EOF
 
