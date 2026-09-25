@@ -544,3 +544,122 @@ def test_a_dead_supervisors_lock_is_cleared(fake_stack, tmp_path):
     r = _run_once(root, scripts, bin_dir, appt, FAKE_HTTP_CODE="000")
     assert "죽은 감독자가 남긴 잠금을 걷어낸다" in r.stdout, f"{r.stdout!r}"
     assert marker.exists(), f"걷어내고도 일하지 않았다 — {r.stdout!r}"
+
+
+# ── ⑤ DB 백업이 실제로 걸리고, 반쪽 덤프를 백업으로 세지 않는다 ─────────────
+# 2026-09-25 까지 `backup-db.sh` 는 **한 번도 돈 적이 없었다** — `infra/data/backups` 자체가
+# 없었다. 크론에 안 걸려 있었기 때문이다. 되돌릴 수 없는 DB 를 들고 운영하고 있었다.
+_LIST_WITH_POSTGRES = ('printf \'{"instances":[{"instance": "koorm_postgres"},'
+                       '{"instance": "koorm_api"}]}\\n\'\n')
+
+# 완료 표식이 있는 '멀쩡한' 덤프와 중간에 끊긴 덤프. pg18 처럼 표식 **뒤에** 줄이 더 붙는
+# 모양도 함께 낸다 — 꼬리를 몇 줄 보느냐에 시험이 걸리지 않게.
+#
+# ⚠ 본문을 `printf` 로 내면 안 된다 — 덤프 첫 줄이 `--` 로 시작해서 bash printf 가 그것을
+#   옵션으로 읽고 `invalid option` 으로 죽는다. 그러면 시험이 '표식 없음' 으로 **엉뚱하게**
+#   빨개진다(코드가 아니라 스텁이 틀린 것이다). 인용 히어독으로 낸다.
+_DUMP_OK = """-- PostgreSQL database dump
+CREATE TABLE t (i int);
+--
+-- PostgreSQL database dump complete
+--
+
+\\unrestrict AbCd"""
+_DUMP_CUT = """-- PostgreSQL database dump
+CREATE TABLE t (i int);
+COPY t FROM std"""
+
+
+def _backup_tree(tmp_path, dump_body, pg_rc=0):
+    """backup-db.sh 를 **스크립트째** 돌린다 — pg_dump 출력만 가짜다."""
+    root, scripts = _script_tree(tmp_path, "backup-db.sh")
+    appt = _stub(tmp_path / "apptainer",
+                 '[ "${1:-} ${2:-}" = "instance list" ] && { ' + _LIST_WITH_POSTGRES + ' exit 0; }\n'
+                 'if [ "${1:-}" = "exec" ]; then\n'
+                 "cat <<'DUMPEOF'\n" + dump_body + "\nDUMPEOF\n"
+                 f'exit {pg_rc}\nfi\n'
+                 'exit 0\n')
+    return root, scripts, appt
+
+
+def _backups(root):
+    d = root / "platform" / "infra" / "data" / "backups"
+    return (sorted(p.name for p in d.glob("koorm_*.sql.gz")) if d.exists() else [],
+            sorted(p.name for p in d.glob("*.part")) if d.exists() else [])
+
+
+def test_a_complete_dump_is_kept_as_a_backup(tmp_path):
+    """멀쩡한 덤프는 남고, `.part` 조각은 안 남는다(원자적 이름 바꾸기)."""
+    root, scripts, appt = _backup_tree(tmp_path, _DUMP_OK)
+    r = _run_script(root, scripts, "backup-db.sh", appt)
+    assert r.returncode == 0, f"{r.stdout!r} {r.stderr!r}"
+    kept, parts = _backups(root)
+    assert len(kept) == 1, f"백업이 안 남았다 — {kept} {r.stdout!r}"
+    assert not parts, f"조각이 남았다 — {parts}"
+
+
+def test_a_partial_dump_is_not_kept_as_a_backup(tmp_path):
+    """⚠ 이것이 이 시험의 핵심이다. pg_dump 가 중간에 죽으면 gzip 은 **정상 종료**하므로
+    `gzip -t` 로는 안 걸린다. 그 파일이 남으면 14개 보관 정책 아래서 **멀쩡한 백업을 밀어낸다** —
+    실패가 성공처럼 생기는 자리다. 완료 표식까지 봐야 잡힌다."""
+    root, scripts, appt = _backup_tree(tmp_path, _DUMP_CUT, pg_rc=0)   # rc 는 0 이다(더 나쁜 쪽)
+    r = _run_script(root, scripts, "backup-db.sh", appt)
+    assert r.returncode != 0, f"반쪽 덤프를 성공으로 끝냈다 — {r.stdout!r}"
+    kept, parts = _backups(root)
+    assert not kept, f"반쪽 덤프를 백업으로 남겼다 — {kept}"
+    assert not parts, f"조각을 안 치웠다 — {parts}"
+
+
+def test_pg_dump_failure_leaves_no_file(tmp_path):
+    """pg_dump 가 rc≠0 으로 죽으면 부분 파일도 남기지 않는다."""
+    root, scripts, appt = _backup_tree(tmp_path, _DUMP_CUT, pg_rc=3)
+    r = _run_script(root, scripts, "backup-db.sh", appt)
+    assert r.returncode != 0, f"{r.stdout!r}"
+    kept, parts = _backups(root)
+    assert not kept and not parts, f"파일이 남았다 — {kept} {parts}"
+
+
+def test_backup_refuses_when_it_cannot_tell(tmp_path):
+    """①의 규율 — 인스턴스 상태를 **모를 때** 덤프하지 않는다. 모름을 '돌고 있다' 로 읽으면
+    빈 덤프가 백업으로 남고, '안 돌고 있다' 로 읽으면 조용히 백업이 빠진다. 둘 다 나쁘다."""
+    root, scripts = _script_tree(tmp_path, "backup-db.sh")
+    appt = _stub(tmp_path / "apptainer", _LIST_FAILS)
+    r = _run_script(root, scripts, "backup-db.sh", appt, STUB_LOG=str(tmp_path / "s.log"))
+    assert r.returncode != 0, f"모르는 채로 덤프했다 — {r.stdout!r}"
+    assert "알 수 없어" in r.stdout, f"모름을 모름이라 안 했다 — {r.stdout!r}"
+    kept, _parts = _backups(root)
+    assert not kept, f"모르는 채로 백업을 남겼다 — {kept}"
+
+
+def test_install_also_schedules_the_backup(tmp_path):
+    """백업은 **여기서 걸지 않으면 아무도 안 건다.** 09-25 까지 정확히 그랬다."""
+    root, scripts, bin_dir, cron_file, _sup = _install_tree(tmp_path)
+    shutil.copy(SCRIPTS / "backup-db.sh", scripts / "backup-db.sh")
+    cron_file.write_text("0 3 * * * /some/other/job\n", encoding="utf-8")
+
+    r = _run_install(root, scripts, bin_dir)
+    assert r.returncode == 0, f"{r.stdout!r} {r.stderr!r}"
+    cron = cron_file.read_text(encoding="utf-8")
+    assert "# koorm-backup" in cron, f"백업 크론이 없다\n{cron}"
+    assert "backup-db.sh" in cron, f"백업 크론이 다른 것을 돌린다\n{cron}"
+    assert "# koorm-autostart" in cron, f"감시 크론이 사라졌다\n{cron}"
+    assert "/some/other/job" in cron, "남의 크론 줄을 지웠다"
+    # 멱등 — 두 번 설치해도 줄이 늘지 않는다
+    _run_install(root, scripts, bin_dir)
+    cron2 = cron_file.read_text(encoding="utf-8")
+    assert cron2.count("# koorm-backup") == 1, f"재설치가 백업 줄을 늘렸다\n{cron2}"
+    assert cron2.count("# koorm-autostart") == 1, f"재설치가 감시 줄을 늘렸다\n{cron2}"
+
+
+def test_remove_takes_the_backup_cron_too(tmp_path):
+    """해제라고 말했으면 둘 다 떼야 한다 — 백업 줄만 남으면 스택이 없는데 덤프를 시도한다."""
+    root, scripts, bin_dir, cron_file, _sup = _install_tree(tmp_path)
+    cron_file.write_text("* * * * * a  # koorm-autostart\n"
+                         "10 4 * * * b  # koorm-backup\n"
+                         "0 3 * * * /some/other/job\n", encoding="utf-8")
+    r = _run_install(root, scripts, bin_dir, "--remove")
+    assert r.returncode == 0, f"{r.stdout!r} {r.stderr!r}"
+    cron = cron_file.read_text(encoding="utf-8")
+    assert "# koorm-backup" not in cron, f"백업 줄을 남겼다\n{cron}"
+    assert "# koorm-autostart" not in cron, f"감시 줄을 남겼다\n{cron}"
+    assert "/some/other/job" in cron, "남의 크론 줄을 지웠다"

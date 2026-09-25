@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# 스택을 자동 기동+감시하도록 crontab 항목을 설치한다(멱등). Uninstall with --remove.
+# 스택의 crontab 항목을 설치한다(멱등). Uninstall with --remove.
+#   ① 매분 감시  — supervisor.sh --once
+#   ② 매일 백업  — backup-db.sh (04:10)
 #
 # ⚠ 예전에는 `@reboot` 한 줄로 감독자 **루프**를 띄웠다. 두 구멍이 있었다(요청서 ③):
 #   · 설치~다음 재부팅 사이에는 감시가 없다. 설치는 보통 "지금 스택이 이상하다" 에서 하는 일이라,
@@ -15,14 +17,25 @@ MARK="# koorm-autostart"
 LOG="$DATA_DIR/supervisor.log"
 LINE="* * * * * cd $REPO_ROOT && bash $SCRIPT_DIR/supervisor.sh --once >> $LOG 2>&1  $MARK"
 
+# ⚠ 백업은 **여기서 걸지 않으면 아무도 안 건다**. 2026-09-25 까지 `backup-db.sh` 는 한 번도
+# 돈 적이 없었고 `infra/data/backups` 자체가 없었다. 되돌릴 수 없는 DB 를 들고 운영하고 있었다.
+# 04:10 인 이유 — 이 박스의 다른 백업과 안 겹치게 둔다(HWAXPortal 03:30 · SignalForge 04:30 ·
+# AIDataHub 04:45). 보관은 스크립트가 14개로 자른다.
+BMARK="# koorm-backup"
+BLOG="$DATA_DIR/backup.log"
+BLINE="10 4 * * * cd $REPO_ROOT && bash $SCRIPT_DIR/backup-db.sh >> $BLOG 2>&1  $BMARK"
+
 current="$(crontab -l 2>/dev/null || true)"
 
 if [ "${1:-}" = "--remove" ]; then
-  echo "$current" | grep -v "$MARK" | crontab - 2>/dev/null || true
-  echo "✓ removed koorm autostart from crontab"
+  echo "$current" | grep -v "$MARK" | grep -v "$BMARK" | crontab - 2>/dev/null || true
+  echo "✓ removed koorm autostart + backup from crontab"
   # 크론만 떼고 끝내면 돌고 있는 루프가 남아 감시가 계속된다 — 해제라고 말했으면 실제로 멈춘다.
   # 근거는 잠금 파일에 적힌 pid 다(이름 매칭은 기동 방식마다 빗나가고 남의 스크립트까지 잡는다).
-  _pid="$(head -n1 "$DATA_DIR/supervisor.lock.d/pid" 2>/dev/null | tr -dc '0-9')"
+  # ⚠ `|| true` 가 필요하다 — 잠금 파일이 없으면(감독자가 안 돌고 있으면) `head` 가 rc=1 이고
+  # `pipefail` 이 그것을 물려 **크론을 이미 뗀 뒤에** `set -e` 로 rc=1 로 끝났다. 해제는 됐는데
+  # 실패처럼 보이고, 이 스크립트를 이어 쓰는 쪽은 거기서 멈춘다.
+  _pid="$(head -n1 "$DATA_DIR/supervisor.lock.d/pid" 2>/dev/null | tr -dc '0-9' || true)"
   # pid 는 재사용된다 — 정말 우리 감독자인지 명령줄로 한 번 더 확인한 뒤에 죽인다.
   if [ -n "$_pid" ] && kill -0 "$_pid" 2>/dev/null \
      && tr '\0' ' ' < "/proc/$_pid/cmdline" 2>/dev/null | grep -q 'supervisor\.sh'; then
@@ -34,8 +47,11 @@ if [ "${1:-}" = "--remove" ]; then
 fi
 
 # 옛 @reboot 줄이 남아 있으면 함께 걷어낸다 — 같은 MARK 라 한 번에 갈린다(재설치가 곧 이관이다).
-printf '%s\n%s\n' "$(echo "$current" | grep -v "$MARK" || true)" "$LINE" | sed '/^$/d' | crontab -
+printf '%s\n%s\n%s\n' \
+  "$(echo "$current" | grep -v "$MARK" | grep -v "$BMARK" || true)" "$LINE" "$BLINE" \
+  | sed '/^$/d' | crontab -
 echo "✓ installed watchdog cron (매분 supervisor.sh --once, logs: $LOG)"
+echo "✓ installed backup cron   (매일 04:10 backup-db.sh, logs: $BLOG)"
 echo "  재부팅 뒤에도, 감시가 멈춰도 다음 1분 안에 되살아난다."
 echo "  remove with: $0 --remove"
 
