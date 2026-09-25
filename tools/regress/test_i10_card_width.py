@@ -26,6 +26,7 @@ import sys
 import tempfile
 
 FAILS = []
+REPO = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 
 _PTS = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0),
         (0, 0, 1), (1, 0, 1), (1, 1, 1), (0, 1, 1)]
@@ -54,6 +55,23 @@ def write_deck(path, fw):
     open(path, "w").write("\n".join(L) + "\n")
 
 
+def write_shell_deck(path, fw):
+    """QUAD8 셸 하나(SECTION_SHELL elform 23). `elform` 강등이 이 카드를 다시 쓴다."""
+    ifmt = "%%%dd" % fw
+    head = "*KEYWORD I10=Y" if fw == 10 else "*KEYWORD"
+    pts = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0),
+           (0.5, 0, 0), (1, 0.5, 0), (0.5, 1, 0), (0, 0.5, 0)]
+    L = [head, "*PART", "plate", (ifmt * 3) % (10, 1, 1),
+         "*SECTION_SHELL", (ifmt * 2) % (1, 23),
+         "*MAT_ELASTIC", (ifmt % 1) + "%10.3g%10.3g%10.3g" % (7.85e-9, 210000.0, 0.3), "*NODE"]
+    for i, (x, y, z) in enumerate(pts, 1):
+        L.append((ifmt % i) + "%16.7f%16.7f%16.7f" % (x, y, z))
+    L.append("*ELEMENT_SHELL")
+    L.append((ifmt * 2) % (1, 10) + "".join(ifmt % n for n in range(1, 9)))
+    L.append("*END")
+    open(path, "w").write("\n".join(L) + "\n")
+
+
 def run(binary, cwd, *args):
     p = subprocess.run([binary, *args], cwd=cwd, capture_output=True, text=True, timeout=300)
     return p.returncode, p.stdout + p.stderr
@@ -68,6 +86,46 @@ def cards(path, keyword, n=1):
 def field_width(card, expect_fields):
     """카드 한 줄의 칸 폭을 되돌린다 — 길이가 칸 수로 나누어떨어져야 한다."""
     return len(card) // expect_fields if expect_fields and len(card) % expect_fields == 0 else -1
+
+
+def rewrite_deck_width(src, dst, fw):
+    """8칸 덱을 fw 칸으로 다시 서식한다(정수 칸만). fw=10 이면 `*KEYWORD I10=Y` 를 단다."""
+    lines = open(src, encoding="utf-8", errors="replace").read().splitlines()
+    out, sec = [], None
+    for l in lines:
+        if l.startswith("*"):
+            sec = l.strip().upper()
+            out.append("*KEYWORD I10=Y" if (sec == "*KEYWORD" and fw == 10) else l)
+            continue
+        if not l or l.startswith("$"):
+            out.append(l)
+            continue
+        if sec == "*NODE" and len(l) >= 8:
+            out.append(("%*s" % (fw, l[0:8].strip())) + l[8:])
+            continue
+        if sec and sec.startswith("*ELEMENT"):
+            toks = [l[i:i + 8].strip() for i in range(0, len(l), 8)]
+            if toks and all(t == "" or t.lstrip("-").isdigit() for t in toks):
+                out.append("".join("%*s" % (fw, t) for t in toks))
+                continue
+        out.append(l)
+    open(dst, "w").write("\n".join(out) + "\n")
+
+
+def section_line_lengths(path):
+    """{섹션: {줄 길이 집합}} — 한 섹션 안에서 폭이 갈리면 집합이 둘 이상이 된다."""
+    try:
+        lines = open(path, encoding="utf-8", errors="replace").read().splitlines()
+    except OSError:
+        return {}
+    out, sec = {}, None
+    for l in lines:
+        if l.startswith("*"):
+            sec = l.strip().upper()
+            continue
+        if sec and l and not l.startswith("$"):
+            out.setdefault(sec, set()).add(len(l))
+    return out
 
 
 def main():
@@ -121,6 +179,51 @@ def main():
             check("%s *PART 와 요소 카드의 칸 폭이 같다" % name,
                   field_width(pc[1], 3) == field_width(c1[0], 2),
                   "part=%d(%r) elem=%d" % (field_width(pc[1], 3), pc[1], field_width(c1[0], 2)))
+
+    print("[elform 강등(QUAD8→QUAD4)도 덱 폭을 따라간다]")
+    # ⚠ 이 갈래는 201e0c8 이 이웃(convert·disconnect)을 고칠 때 **빠졌다.** 같은 함수 안인데
+    # `setw(8)` 이 남아, I10 덱이 `*KEYWORD I10=Y` 를 단 채 8칸 요소 줄을 냈다.
+    for name, want_fw in (("s8", 8), ("s10", 10)):
+        write_shell_deck(os.path.join(d, name + ".k"), want_fw)
+        open(os.path.join(d, "e_%s.yaml" % name), "w").write(
+            "base_model: %s.k\noutput: e_%s\noperations:\n  - type: elform\n"
+            "    target_elform: 2\n" % (name, name))
+        rc, out = run(binary, d, "assemble", "e_%s.yaml" % name)
+        check("%s elform rc=0" % name, rc == 0, out[-250:])
+        ep = os.path.join(d, "e_%s.k" % name)
+        c = cards(ep, "*ELEMENT_SHELL", 1) if os.path.exists(ep) else []
+        check("%s 강등된 셸 카드가 %d칸이다" % (name, want_fw),
+              bool(c) and field_width(c[0], 6) == want_fw,
+              "len=%d %r" % (len(c[0]), c[0]) if c else "카드 없음")
+
+    print("[meshfix 도 덱 폭을 따라간다]")
+    # ⚠ `meshfix` 는 덱의 칸 폭을 **아예 읽지 않고** 언제나 8칸으로 썼다. `*KEYWORD I10=Y` 를
+    # 그대로 보존한 채 8칸 카드를 내보내므로 LS-DYNA 가 10칸으로 읽어 노드 번호가 뭉개진다.
+    # ⚠ gmsh 가 없으면 **skip 이 아니라 FAIL** 이다 — 그 skip 안에 실제 결함이 숨어 있었다.
+    g = os.environ.get("KOOREMAPPER_GMSH") or os.path.join(REPO, "dist", "gmsh", "gmsh")
+    if not os.path.exists(g):
+        check("gmsh 를 찾았다(KOOREMAPPER_GMSH 나 dist/gmsh/gmsh)", False,
+              "meshfix 갈래를 검사할 수 없다 — 건너뛰지 않는다")
+    else:
+        src = os.path.join(REPO, "examples", "mesh", "tetramesh.k")
+        if not os.path.exists(src):
+            check("meshfix 예제 덱이 있다", False, src)
+        else:
+            for name, fw in (("t8", 8), ("t10", 10)):
+                rewrite_deck_width(src, os.path.join(d, name + ".k"), fw)
+                open(os.path.join(d, "mf_%s.yaml" % name), "w").write(
+                    "model: %s.k\noutput: mf_%s.k\npid: 1\n" % (name, name))
+                e = dict(os.environ); e["KOOREMAPPER_GMSH"] = g
+                p = subprocess.run([binary, "meshfix", "mf_%s.yaml" % name], cwd=d,
+                                   capture_output=True, text=True, timeout=900, env=e)
+                check("%s meshfix rc=0" % name, p.returncode == 0,
+                      (p.stdout + p.stderr)[-250:])
+                op = os.path.join(d, "mf_%s.k" % name)
+                lens = section_line_lengths(op)
+                check("%s meshfix *NODE 가 %d칸이다" % (name, fw),
+                      lens.get("*NODE") == {fw + 16 * 3}, lens.get("*NODE"))
+                check("%s meshfix *ELEMENT_SOLID 가 %d칸이다" % (name, fw),
+                      lens.get("*ELEMENT_SOLID") == {fw * 10}, lens.get("*ELEMENT_SOLID"))
 
     print("[8칸 덱 산출물은 예전과 한 글자도 다르면 안 된다 — 모양으로 못 박는다]")
     op8 = os.path.join(d, "std8_out.k")

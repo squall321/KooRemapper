@@ -438,6 +438,12 @@ private:
     int parsePartIdFromLine(const std::string& line, int fw) const;
     // 못 읽으면 메시가 아는 PID 로 되돌린다 — 예전에는 -1 이 그대로 덱에 찍혔다.
     int partIdForCard(const std::string& line, int fw, int elemId) const;
+
+    // 고정폭 칸에 안 들어가는 ID 를 만났나. `std::setw` 은 **자르지 않고 칸을 늘리므로**,
+    // 그대로 두면 다음 칸을 침범한 덱이 rc=0 으로 나간다(실측: 8칸 덱에서 노드 16줄이
+    // 엄격 재독 시 고유 9개로 뭉쳤다). 여기 기록해 두고 writeOutput 이 rc≠0 으로 받는다.
+    mutable std::string widthOverflow_;
+    void noteWidth(int v, int fw, const char* what) const;
 };
 
 } // namespace KooRemapper

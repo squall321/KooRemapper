@@ -12,6 +12,7 @@
 #endif
 
 #include "parser/DeckWriter.h"
+#include "parser/ElementCardLayout.h"   // deckFieldWidth — 덱이 선언한 칸 폭을 따른다
 #include "parser/IncludeScan.h"
 #include "commands/meshfix.h"
 #include "core/Mesh.h"
@@ -1600,18 +1601,22 @@ static int parseFirstInt(const std::string& s) {
     std::istringstream iss(s); int v=-1; iss>>v; return v;
 }
 
-static std::string fmtNode(const FinalNode& n) {
-    char buf[128];
-    std::snprintf(buf,sizeof(buf),"%8d%16.8f%16.8f%16.8f", n.id, n.x, n.y, n.z);
+// ⚠ 칸 폭을 **덱에서 받는다**. 예전에는 `%8d` 로 못 박아, `*KEYWORD I10=Y` 를 그대로 보존한
+// 채 8칸 카드를 내보냈다 — LS-DYNA 는 그 줄을 10칸으로 읽으므로 노드 번호가 뭉개진다(실측:
+// `2596    26` / `94    1172` 처럼 붙는다). 산출 덱이 확정적으로 깨지는데 rc=0 이었다.
+static std::string fmtNode(const FinalNode& n, int fw) {
+    const int rw = KooRemapper::realFieldWidth(fw);
+    char buf[160];
+    std::snprintf(buf,sizeof(buf),"%*d%*.8f%*.8f%*.8f", fw, n.id, rw, n.x, rw, n.y, rw, n.z);
     return buf;
 }
-static std::string fmtElem(const FinalElem& e, int pid) {
+static std::string fmtElem(const FinalElem& e, int pid, int fw) {
     // TET4 as degenerate HEX8: n0 n1 n2 n3 n3 n3 n3 n3
-    char buf[128];
-    std::snprintf(buf,sizeof(buf),"%8d%8d%8d%8d%8d%8d%8d%8d%8d%8d",
-        e.id, pid,
-        e.nodes[0],e.nodes[1],e.nodes[2],e.nodes[3],
-        e.nodes[3],e.nodes[3],e.nodes[3],e.nodes[3]);
+    char buf[160];
+    std::snprintf(buf,sizeof(buf),"%*d%*d%*d%*d%*d%*d%*d%*d%*d%*d",
+        fw, e.id, fw, pid,
+        fw, e.nodes[0], fw, e.nodes[1], fw, e.nodes[2], fw, e.nodes[3],
+        fw, e.nodes[3], fw, e.nodes[3], fw, e.nodes[3], fw, e.nodes[3]);
     return buf;
 }
 
@@ -1635,6 +1640,17 @@ static bool spliceMesh(const std::string& modelPath,
         }
     }
 
+    // 덱이 선언한 칸 폭을 따른다(표준 8 · `I10=Y` 10). 예전에는 8 로 못 박아 I10 덱을 깨뜨렸다.
+    const int deckFw = KooRemapper::deckFieldWidth(rawLines);
+    if (deckFw >= 20) {
+        // long 포맷(20칸)은 노드·요소 말고도 `*PART`·`*SECTION` 카드까지 서식이 달라진다.
+        // 반쯤 맞는 덱을 내보내는 대신 거절한다 — `ModelAssembler.cpp` 의 같은 자리와 같은 규약이다.
+        err = "long 포맷 덱(*KEYWORD long=y)입니다 — meshfix 는 노드·요소를 다시 쓰므로 이 덱의"
+              " 20칸 서식을 확정하지 못했습니다. 표준(8칸) 또는 i10 덱으로 주세요"
+              " — 출력 파일을 쓰지 않았습니다: " + outputPath;
+        return false;
+    }
+
     // 원본 덱의 개행을 따른다. 위에서 리더가 CR 을 떼므로(그 자체는 옳다) 여기서 되붙이지 않으면
     // CRLF 덱이 조용히 LF 로 바뀐다 — 실사용 박스가 먼저 찾아 돌려준 결함이다(CRLF 0 / LF 2754).
     KooRemapper::DeckWriter out_w(outputPath, KooRemapper::deck_newline::detect(modelPath));
@@ -1648,9 +1664,9 @@ static bool spliceMesh(const std::string& modelPath,
         if (insertedNew) return;
         insertedNew = true;
         out << "*NODE\n";
-        for (auto& n : newNodes) out << fmtNode(n) << "\n";
+        for (auto& n : newNodes) out << fmtNode(n, deckFw) << "\n";
         out << "*ELEMENT_SOLID\n";
-        for (auto& e : newElems) out << fmtElem(e, pid) << "\n";
+        for (auto& e : newElems) out << fmtElem(e, pid, deckFw) << "\n";
     };
 
     // ⚠ 인덱스 순회다. `*ELEMENT_SOLID` 의 **2줄 포맷**(1줄 `eid pid`, 2줄 노드 목록)에서는

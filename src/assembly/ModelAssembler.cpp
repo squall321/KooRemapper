@@ -5312,15 +5312,18 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                     int eid = tokens[0], pid = tokens[1];
                     // TRIA6: 10 tokens with last 2 being 0
                     bool isTria = (tokens.size() >= 10 && tokens[8] == 0 && tokens[9] == 0);
+                    // ⚠ 201e0c8 이 이웃(convert·disconnect)의 폭을 고칠 때 **이 강등 경로만
+                    // 빠졌다.** I10 덱에서 8칸으로 나가면 `*KEYWORD I10=Y` 를 단 채 요소 줄만
+                    // 8칸이라, LS-DYNA 가 10칸으로 읽어 노드 번호가 뭉개진다(실측 확인).
                     std::ostringstream oss;
-                    oss << std::setw(8) << eid << std::setw(8) << pid;
+                    oss << std::setw(curSecFw) << eid << std::setw(curSecFw) << pid;
                     if (isTria) {
                         // Output n1 n2 n3 n3 (TRIA3)
-                        oss << std::setw(8) << tokens[2] << std::setw(8) << tokens[3]
-                            << std::setw(8) << tokens[4] << std::setw(8) << tokens[4];
+                        oss << std::setw(curSecFw) << tokens[2] << std::setw(curSecFw) << tokens[3]
+                            << std::setw(curSecFw) << tokens[4] << std::setw(curSecFw) << tokens[4];
                     } else {
                         // Output n1 n2 n3 n4 (QUAD4)
-                        for (int n = 2; n < 6; ++n) oss << std::setw(8) << tokens[n];
+                        for (int n = 2; n < 6; ++n) oss << std::setw(curSecFw) << tokens[n];
                     }
                     output << oss.str() << "\n";
                     dropCurrentCard = true;   // 중간절점이 사라지면 딸린 두께 카드도 버린다
@@ -5624,6 +5627,18 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                                    "(각 섹션이 선언한 고정 칸 폭으로 엄격 재독한 결과도 같습니다).");
         }
     }
+    // ⚠ 칸을 넘긴 ID 가 하나라도 있으면 **파일을 쓰지 않는다.** `std::setw` 은 자르지 않고
+    // 칸을 늘리므로, 그대로 내보내면 다음 칸을 침범한 덱이 rc=0 으로 나간다. 실측 —
+    // 8칸 덱에 노드 ID 가 100000000 까지 가면 `*NODE` 16줄이 엄격 8칸 재독에서 **고유 9개**로
+    // 뭉치고 요소가 없는 노드를 가리킨다. 구조 카운트는 정상이라 아무도 못 알아본다.
+    // `e2281b3`(control 칸)·`d194c49`(ORTHO 거절)와 같은 규약이다 — 반쯤 맞는 덱을 내느니 멈춘다.
+    if (!widthOverflow_.empty()) {
+        errorMessage_ = "고정폭 초과: " + widthOverflow_ +
+                        " — 이 덱은 " + std::to_string(deckFw) + "칸입니다."
+                        " 잘라 쓰면 다음 칸을 침범하므로 출력 파일을 쓰지 않았습니다: " + outputFile;
+        return false;
+    }
+
     // Write output file
     std::ofstream outFile(outputFile, std::ios::binary);
     if (!outFile.is_open()) {
@@ -5872,8 +5887,18 @@ int ModelAssembler::parseElementIdFromLine(const std::string& line) const {
 
 // *NODE 는 표준 (I8,3F16,2I8), i10 은 (I10,3F16,2I10), long 은 (I20,3F20,2I20)
 // — Vol_I 19345, 19348, 19360. 정수 칸만 바뀌는 게 아니라 long 에서는 실수 칸도 20 이다.
+void ModelAssembler::noteWidth(int v, int fw, const char* what) const {
+    if (fw <= 0) return;
+    const std::string s = std::to_string(v);
+    if (static_cast<int>(s.size()) <= fw) return;
+    if (widthOverflow_.empty())
+        widthOverflow_ = std::string(what) + " " + s + " 는 이 덱의 " +
+                         std::to_string(fw) + "칸에 들어가지 않습니다";
+}
+
 std::string ModelAssembler::formatNodeLine(int id, double x, double y, double z, int fw) const {
     const int rw = realFieldWidth(fw);
+    noteWidth(id, fw, "노드 ID");
     std::ostringstream oss;
     oss << std::setw(fw) << id
         << std::setw(rw) << std::scientific << std::setprecision(9) << x
@@ -5883,6 +5908,9 @@ std::string ModelAssembler::formatNodeLine(int id, double x, double y, double z,
 }
 
 std::string ModelAssembler::formatElementLine(const AddedElement& elem, int fw) const {
+    noteWidth(elem.id, fw, "요소 ID");
+    noteWidth(elem.pid, fw, "파트 ID");
+    for (int i = 0; i < 8; ++i) noteWidth(elem.nodeIds[i], fw, "요소가 가리키는 노드 ID");
     std::ostringstream oss;
     oss << std::setw(fw) << elem.id
         << std::setw(fw) << elem.pid;
@@ -5900,6 +5928,9 @@ std::string ModelAssembler::formatElementLine(const AddedElement& elem, int fw) 
 }
 
 std::string ModelAssembler::formatShellElementLine(const AddedShellElement& elem, int fw) const {
+    noteWidth(elem.id, fw, "셸 요소 ID");
+    noteWidth(elem.pid, fw, "파트 ID");
+    for (int i = 0; i < 4; ++i) noteWidth(elem.nodeIds[i], fw, "셸이 가리키는 노드 ID");
     std::ostringstream oss;
     oss << std::setw(fw) << elem.id
         << std::setw(fw) << elem.pid;
