@@ -157,5 +157,22 @@ M0 · 신뢰 회복 · **완료** / M3 · 게시 · **완료**
 - [x] **CI 에 gmsh**(bc2eba2) — 내가 skip 을 FAIL 로 바꿔 CI 가 빨갰다. `.github/workflows/` 는
   HTTPS+PAT 로 못 미는데(`workflow` 스코프) **SSH 로는 된다** → `docs/requests/ci-gmsh-2026-09-25.md`
 
+- [x] **SIF 재굽기**(외부라 적었으나 여기서 했다) — `SmartTwinPreprocessor.sif` 안 바이너리를
+  `168cc9d4`(GLIBC_2.34, P0-6 포함)로 갈아 `/opt/apptainers` 와 compute-node-images 양쪽에 배포
+  - 컨테이너(2.35) **안에서** 실행·P0-6 경고·CRLF 보존을 직접 확인했다
+  - ⚠ `BuildSmartTwinPreprocessor.sh` 는 지금 koopark 으로 돌리면 **2/5 에서 죽는다** —
+    샌드박스의 `KooDynaPostProcessor`(uid 100999)·`SmartTwinPreprocessor`(root)를 못 쓴다.
+    이번에는 마지막 빌드 이후 바뀐 것이 kooremapper 한 파일뿐이라 그 트리만 갈아 구웠다.
+    **그 스크립트 자체는 손대지 않았다**(다른 프로젝트다) — 소유권은 정리가 필요하다
+  - 되돌리려면 `appt313/opt/kooremapper/bin-backups/KooRemapper.bak.1790326466` 로 되돌려 다시 굽는다
+- [x] **재게시** — 첫 게시본(`dist-20260925-040105Z`)은 P0-6 이전이라 다시 올렸다
+
 ### 아직 남은 것
-- **SIF 재굽기 의뢰**(외부) — SmartTwinPreprocessor.sif 안 바이너리를 새 게시본으로
+- (없음 — plan2 의 P0 7건과 P1-8 완료)
+
+### 이번에 우리가 우리를 잡은 것
+빌드 덫 하나가 **오늘 실제로 발동했다.** `build/linux` 가 `-DKOOREMAPPER_PLATFORM_BIN` 으로
+설정돼 있어 평범한 `cmake --build` 가 배포용 바이너리를 GLIBC_2.38 로 덮어썼다(09-24 에
+"다른 세션이" 라고 적은 그 사건도 같은 기전일 가능성이 크다). **오늘 만든 관문 둘이 그것을
+잡았다** — `/api/health` 의 `revision_matches_binary: false`, 그리고 `dist-to-drive.sh` 의 거절.
+이제 빌드 때도 시끄럽게 말한다(`15fa18b`). 막지는 않는다 — 진짜 관문은 게시 쪽이다.
