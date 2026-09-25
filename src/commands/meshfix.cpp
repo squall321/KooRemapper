@@ -11,6 +11,7 @@
 #  endif
 #endif
 
+#include "parser/DeckWriter.h"
 #include "commands/meshfix.h"
 #include "core/Mesh.h"
 #include "core/Element.h"
@@ -1553,8 +1554,11 @@ static bool spliceMesh(const std::string& modelPath,
         }
     }
 
-    std::ofstream out(outputPath);
-    if (!out.is_open()) { err="Cannot write output: "+outputPath; return false; }
+    // 원본 덱의 개행을 따른다. 위에서 리더가 CR 을 떼므로(그 자체는 옳다) 여기서 되붙이지 않으면
+    // CRLF 덱이 조용히 LF 로 바뀐다 — 실사용 박스가 먼저 찾아 돌려준 결함이다(CRLF 0 / LF 2754).
+    KooRemapper::DeckWriter out_w(outputPath, KooRemapper::deck_newline::detect(modelPath));
+    if (!out_w.ok()) { err="Cannot write output: "+outputPath; return false; }
+    std::ostream& out = out_w.stream();
 
     enum { NONE, IN_NODE, IN_ELEM } sec = NONE;
     bool insertedNew = false;
@@ -1568,7 +1572,20 @@ static bool spliceMesh(const std::string& modelPath,
         for (auto& e : newElems) out << fmtElem(e, pid) << "\n";
     };
 
-    for (auto& line : rawLines) {
+    // ⚠ 인덱스 순회다. `*ELEMENT_SOLID` 의 **2줄 포맷**(1줄 `eid pid`, 2줄 노드 목록)에서는
+    // 카드 하나가 두 줄이므로 지울 때 둘을 **함께** 소비해야 한다.
+    // 예전에는 줄마다 첫 정수를 EID 로 보고 지웠는데, 2줄 카드의 둘째 줄 첫 정수는 **노드 번호**다.
+    // 그 노드 번호가 우연히 삭제 대상 EID 집합에 들어 있으면 **건드리지 말아야 할 파트의 노드 줄만**
+    // 지워져 요소 카드가 헤더만 남는다 — 그 요소는 통째로 사라지는데 `info` 는 `[OK] Mesh is valid`
+    // rc=0 을 낸다(재현: 2줄 포맷 2파트 덱에서 요소 28416 → 1908, PID 2 의 3개가 헤더만 남았다).
+    // 같은 판정의 올바른 구현이 `cclip.cpp:802 cc_removeSolidElements` 에 이미 있다.
+    auto wsTokCount = [](const std::string& ln) {
+        std::istringstream iss(ln); long v; size_t n = 0;
+        while (iss >> v) ++n;
+        return n;
+    };
+    for (size_t li = 0; li < rawLines.size(); ++li) {
+        const std::string& line = rawLines[li];
         // Keyword detection
         std::string trimmed = line;
         size_t p = trimmed.find_first_not_of(" \t");
@@ -1604,6 +1621,32 @@ static bool spliceMesh(const std::string& modelPath,
             int nid = parseFirstInt(line);
             if (nid>0 && removeNodes.count(nid)) continue; // skip removed
         } else if (sec==IN_ELEM) {
+            // 토큰이 2개면 2줄 포맷의 **헤더**다(`eid pid`). 다음 데이터 줄이 노드 목록이므로
+            // 지울 때도 남길 때도 두 줄을 함께 다룬다. 토큰이 6개 이상이면 1줄 포맷이다.
+            const size_t ntok = wsTokCount(line);
+            if (ntok == 2) {
+                // 다음 데이터 줄(주석·빈 줄은 건너뛴다)을 찾는다
+                size_t nodeLi = li + 1;
+                while (nodeLi < rawLines.size()) {
+                    const std::string& nx = rawLines[nodeLi];
+                    size_t q = nx.find_first_not_of(" \t");
+                    if (q == std::string::npos) { ++nodeLi; continue; }       // 빈 줄
+                    if (nx[q] == '$') { ++nodeLi; continue; }                 // 주석
+                    break;
+                }
+                const int eid = parseFirstInt(line);
+                const bool drop = (eid > 0 && removeElems.count(eid) > 0);
+                if (nodeLi < rawLines.size() && rawLines[nodeLi].find_first_not_of(" \t") != std::string::npos
+                    && rawLines[nodeLi][rawLines[nodeLi].find_first_not_of(" \t")] != '*') {
+                    // 헤더 + 노드 줄을 한 카드로 처리한다
+                    if (!drop) { out << line << "\n"; out << rawLines[nodeLi] << "\n"; }
+                    li = nodeLi;            // 노드 줄을 소비했다
+                    continue;
+                }
+                // 노드 줄이 없다(파일 끝 또는 다음 키워드) — 헤더만 판정한다
+                if (!drop) out << line << "\n";
+                continue;
+            }
             int eid = parseFirstInt(line);
             if (eid>0 && removeElems.count(eid)) continue; // skip removed
         }
