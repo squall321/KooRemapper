@@ -49,6 +49,23 @@ async def create_job(
     if errs:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "인자 검증 실패: " + "; ".join(errs))
 
+    # gmsh 가 필요한 op 은 **큐에 넣기 전에** 확인한다(P1-9). 예전에는 그냥 넣었고, 잡이 한참
+    # 돌다 `Gmsh failed (exit 32512)` 로 죽었다 — 사람은 자기 덱이 잘못된 줄 안다.
+    # ⚠ 파일이 있다고 gmsh 인 것은 아니다. 탐지기가 `--version` 을 실제로 돌린다.
+    if entry.get("requires_gmsh"):
+        from app.config import settings as _settings
+        from app.runner.gmsh_probe import probe as _gmsh_probe
+
+        g = _gmsh_probe(_settings.kooremapper_bin)
+        if not g["available"]:
+            detail = ("이 오퍼레이션(%s)은 gmsh 가 필요한데 이 서버에서 gmsh 를 실행할 수 없습니다."
+                      % body.operation)
+            if g["rejected"]:
+                detail += " 건너뛴 후보: " + "; ".join(g["rejected"])
+            detail += (" — 서버에 gmsh 를 설치하고 KOOREMAPPER_GMSH 를 가리키거나, "
+                       "바이너리 옆 bin/gmsh/ 에 두세요.")
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail)
+
     # Pre-check that file-typed args reference files that exist in the session,
     # so the user gets a clear error instead of a worker failure later.
     from app.modules.sessions.services import list_files

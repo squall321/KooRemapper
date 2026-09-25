@@ -74,9 +74,14 @@ def create_app() -> FastAPI:
         # 리비전·해시를 왜 여기 싣나 — 게시본이 21커밋 뒤에 멈춰 있었는데 **밖에서 볼 방법이
         # 없었다.** 바이너리는 넷이 다 `version 1.8.0` 만 찍는다. 출처는 배포가 내려놓은
         # bin/BUILD_INFO.txt 하나다(런타임에 git 을 부르지 않는다 — 폐쇄망에 git 실행 파일이 없다).
+        from app.runner.gmsh_probe import probe as gmsh_probe
         from app.shared.buildinfo import build_info
 
         info = build_info(settings.kooremapper_bin)
+        # gmsh 가용 여부 — `meshfix` 는 이것 없이는 못 돈다(P1-9).
+        # ⚠ 경로와 거절 목록은 **싣지 않는다.** 이 엔드포인트는 인증 없이 열린다 —
+        # 배치 구조를 밖에 알릴 이유가 없다. 그 둘은 잡 거절 메시지로 (인증된) 사용자에게 간다.
+        _g = gmsh_probe(settings.kooremapper_bin)
         return {
             "success": True,
             "data": {
@@ -85,6 +90,7 @@ def create_app() -> FastAPI:
                 "name": settings.app_name,
                 "binary_present": settings.kooremapper_bin.exists(),
                 **info,
+                "gmsh": {"available": _g["available"], "version": _g["version"]},
             },
             "message": None,
             "errors": None,

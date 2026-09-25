@@ -214,10 +214,39 @@ static bool readConfig(const std::string& path, Cfg& cfg, std::string& err) {
 // Gmsh detection
 // ─────────────────────────────────────────────────────────────────────────────
 
-static std::string findGmshExe() {
+// 탐색이 거절한 후보들(사람이 읽을 이유와 함께). 못 찾았을 때 메시지에 싣는다.
+static std::vector<std::string> g_gmshRejected;
+
+// 아래 둘은 이 파일 뒤쪽(shQuote 곁)에 정의돼 있다 — 탐색이 그것을 쓰므로 여기서 미리 알린다.
+static std::string shQuote(const std::string& p);
+static bool gmshResponds(const std::string& path, std::string* version);
+
+static std::string findGmshExe(std::string* versionOut = nullptr) {
+    g_gmshRejected.clear();
+    auto accept = [&](const std::string& p) -> bool {
+        std::string ver;
+        if (gmshResponds(p, &ver)) { if (versionOut) *versionOut = ver; return true; }
+        g_gmshRejected.push_back(p + " (--version 이 실패했다 — gmsh 가 아니거나 망가졌다)");
+        return false;
+    };
+
     // 0. 직접 지정 (KOOREMAPPER_GMSH=/path/to/gmsh)
+    //
+    // ⚠ **명시 지정은 검증하지 않는다.** `--version` 을 돌려 보는 것은 탐색이 **우리 마음대로**
+    // 고른 후보에만 정당하다. 사람이 지목한 명령을 시험 삼아 돌리면 부작용이 난다 — 실제로
+    // 났다. 회귀 시험이 `KOOREMAPPER_GMSH` 에 gmsh **래퍼 스크립트**를 주는데, 그 래퍼는
+    // `cp "$1" saved.geo` 를 먼저 한다. `--version` 을 주면 `cp --version` 이 돌아
+    // `cp (GNU coreutils) 8.32` 를 내고, 그것을 gmsh 가 아니라고 거절해 멀쩡한 설정이 막혔다.
+    //
+    // 지목한 것이 망가졌다면 실행할 때 실패하고 그 경로가 메시지에 찍힌다 — 그것으로 충분하다.
     if (const char* env = std::getenv("KOOREMAPPER_GMSH")) {
-        if (*env && fs::is_regular_file(env)) return env;
+        if (*env) {
+            if (!fs::is_regular_file(env)) {
+                g_gmshRejected.push_back(std::string(env) + " (KOOREMAPPER_GMSH 인데 파일이 없다)");
+                return "";
+            }
+            return env;
+        }
     }
 
     fs::path execDir;
@@ -245,7 +274,7 @@ static std::string findGmshExe() {
     // 1. simple: execDir/gmsh/<exe>
     for (const auto& name : bundledNames) {
         auto p = execDir / "gmsh" / name;
-        if (fs::is_regular_file(p)) return p.string();
+        if (fs::is_regular_file(p) && accept(p.string())) return p.string();
     }
     // 2. versioned dir: execDir/gmsh-*/<exe> 또는 execDir/gmsh-*/bin/<exe> (배포 tar 구조)
     std::error_code ec;
@@ -255,7 +284,7 @@ static std::string findGmshExe() {
         if (name.rfind("gmsh", 0) == 0) {
             for (const auto& exe : bundledNames) {
                 for (auto p : {entry.path() / exe, entry.path() / "bin" / exe}) {
-                    if (fs::is_regular_file(p)) return p.string();
+                    if (fs::is_regular_file(p) && accept(p.string())) return p.string();
                 }
             }
         }
@@ -271,7 +300,8 @@ static std::string findGmshExe() {
             std::string dir = paths.substr(start, end - start);
             if (!dir.empty()) {
                 fs::path p = fs::path(dir) / exeName;
-                if (fs::is_regular_file(p) && access(p.c_str(), X_OK) == 0) return p.string();
+                if (fs::is_regular_file(p) && access(p.c_str(), X_OK) == 0 && accept(p.string()))
+                    return p.string();
             }
             start = end + 1;
         }
@@ -281,7 +311,7 @@ static std::string findGmshExe() {
         std::string name = entry.path().filename().string();
         if (entry.is_directory() && name.rfind("gmsh", 0) == 0) {
             fs::path p = entry.path() / "bin" / exeName;
-            if (fs::is_regular_file(p)) return p.string();
+            if (fs::is_regular_file(p) && accept(p.string())) return p.string();
         }
     }
 #endif
@@ -1214,6 +1244,56 @@ static std::string shQuote(const std::string& p) {
     }
     return q + "'";
 }
+
+// 후보가 정말 gmsh 인가 — `--version` 을 **실제로 돌려** 확인한다.
+//
+// ⚠ 파일이 있다고 gmsh 인 것은 아니다(2026-09-25, P1-9). 개발 박스의 `~/.local/bin/gmsh` 는
+// 깨진 파이썬 래퍼인데 예전 탐색은 그것을 집었고, meshfix 는 한참 뒤에 `Gmsh failed
+// (exit 32512)` 라는 뜻 모를 코드로 죽었다. 실사용 컨테이너에서도 홈 바인드로 같은 일이 났다.
+// 여기서 한 번 돌려 보면 그 자리가 사라진다 — `--version` 은 즉시 끝나고 stdout 에 `4.14.1`
+// 같은 줄을 낸다.
+static bool gmshResponds(const std::string& path, std::string* version) {
+    std::string cmd = shQuote(path) + " --version 2>" +
+#ifdef _WIN32
+                      std::string("NUL");
+#else
+                      std::string("/dev/null");
+#endif
+#ifdef _WIN32
+    FILE* fp = _popen(cmd.c_str(), "r");
+#else
+    FILE* fp = popen(cmd.c_str(), "r");
+#endif
+    if (!fp) return false;
+    char buf[256] = {};
+    std::string first;
+    if (std::fgets(buf, sizeof(buf), fp)) first = buf;
+#ifdef _WIN32
+    int rc = _pclose(fp);
+#else
+    int rc = pclose(fp);
+#endif
+    while (!first.empty() && (first.back() == '\n' || first.back() == '\r' || first.back() == ' '))
+        first.pop_back();
+    // 판정은 느슨하게 — rc 가 0 이고 출력 어딘가에 `4.14.1` 같은 판번호가 있으면 받아들인다.
+    // 첫 글자가 숫자여야 한다고 못 박으면 **정상 래퍼**가 걸린다(`cp (GNU coreutils) 8.32`).
+    // 깨진 파이썬 래퍼는 rc≠0 이므로 이 느슨한 판정으로도 걸러진다.
+    if (rc != 0 || first.empty()) return false;
+    bool hasVer = false;
+    for (size_t k = 0; k + 1 < first.size(); ++k) {
+        if (std::isdigit(static_cast<unsigned char>(first[k])) && first[k + 1] == '.' &&
+            k + 2 < first.size() && std::isdigit(static_cast<unsigned char>(first[k + 2]))) {
+            hasVer = true;
+            break;
+        }
+    }
+    if (!hasVer) return false;
+    if (version) *version = first;
+    return true;
+}
+
+// 탐색이 거절한 후보들(사람이 읽을 이유와 함께). 못 찾았을 때 메시지에 싣는다.
+
 #else
 // 배치 파일 한 줄에 넣을 경로를 큰따옴표로 감싼다 — 공백·& ( ) ^ 는 따옴표 안에서 글자로 남지만
 // %는 따옴표 안에서도 변수로 풀리므로 배치 규칙대로 %% 로 escape 한다.
@@ -2029,12 +2109,17 @@ int runMeshFix(const char* configPath, ConsoleOutput& console) {
     }
 
     // 2. Gmsh
-    std::string gmshExe = findGmshExe();
+    std::string gmshVer;
+    std::string gmshExe = findGmshExe(&gmshVer);
     if (gmshExe.empty()) {
         console.error("Gmsh not found — set KOOREMAPPER_GMSH, or place gmsh(.exe) in gmsh/ or gmsh-<ver>/[bin/] next to KooRemapper, or put gmsh on PATH (Linux also checks /opt/gmsh-*/bin/gmsh)");
+        // 무엇을 보고 왜 물렸는지 말한다 — "not found" 만 내면 gmsh 가 PATH 에 있는데도 그
+        // 메시지가 나와 사람이 한참 헤맨다(깨진 래퍼가 정확히 그 상황이다).
+        for (const auto& r : g_gmshRejected) console.println("  건너뛴 후보: " + r);
         return 1;
     }
-    console.keyValue("Gmsh", gmshExe);
+    console.keyValue("Gmsh", gmshExe + (gmshVer.empty() ? "" : "  (v" + gmshVer + ")"));
+    for (const auto& r : g_gmshRejected) console.println("  건너뛴 후보: " + r);
 
     // 3. Load model
     console.info("Loading: " + cfg.model);
