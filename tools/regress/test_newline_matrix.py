@@ -212,7 +212,8 @@ def main():
             continue
         if o.get("requires_gmsh") and not g:
             # ⚠ skip 이 아니라 FAIL 이다. `meshfix` 의 CRLF 소실이 정확히 이 자리에 숨어 있었다.
-            fail(name, "requires_gmsh 인데 gmsh 가 없다 — KOOREMAPPER_GMSH 나 dist/gmsh/gmsh 가 필요하다")
+            fail(name, "requires_gmsh 인데 gmsh 가 없다 — apt install gmsh 뒤 "
+                       "KOOREMAPPER_GMSH=/usr/bin/gmsh, 또는 dist/gmsh/gmsh 를 두고 다시 돌린다")
             continue
 
         d = tempfile.mkdtemp(prefix="nlm_%s_" % name)

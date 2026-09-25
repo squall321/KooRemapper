@@ -119,7 +119,11 @@ def main():
     # 조용히 건너뛰면 이 결함이 정확히 그렇게 숨어 있었다(실사용 박스가 먼저 찾아 돌려줬다).
     if not g:
         print("  %-62s %s" % ("gmsh 를 찾았다(dist/gmsh/gmsh 또는 KOOREMAPPER_GMSH)", "FAIL"))
-        print("\nFAIL 1\n  - gmsh 가 없어 meshfix 를 검사할 수 없다 — 건너뛰지 않는다")
+        print("\nFAIL 1")
+        print("  - gmsh 가 없어 meshfix 를 검사할 수 없다 — **건너뛰지 않는다**")
+        print("    이 skip 안에 실제 결함이 숨어 있었고 실사용 박스가 먼저 찾아 돌려줬다.")
+        print("    고치는 법: apt install gmsh 뒤 KOOREMAPPER_GMSH=/usr/bin/gmsh,")
+        print("               또는 dist/gmsh/gmsh 를 두고(배포 아티팩트에 들어 있다) 다시 돌린다.")
         return 1
 
     d = tempfile.mkdtemp(prefix="mf2l_")
