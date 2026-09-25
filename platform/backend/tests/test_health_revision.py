@@ -144,3 +144,17 @@ def test_the_endpoint_actually_carries_the_fields(tmp_path, monkeypatch):
     assert data["revision"] == "1234567890abcdef1234567890abcdef12345678", data
     assert data["binary_sha256"] == hashlib.sha256(body).hexdigest()
     assert data["revision_matches_binary"] is True
+
+
+def test_the_cache_refreshes_when_only_build_info_changes(tmp_path):
+    """⚠ 바이너리만 열쇠로 쓰면, 배포가 BUILD_INFO 만 갈았을 때 재기동 전까지 **낡은 리비전**을
+    낸다 — 이 기능이 막으려던 바로 그 종류의 거짓말이다. 바이너리는 그대로 두고 확인한다."""
+    body = b"fake-binary"
+    sha = hashlib.sha256(body).hexdigest()
+    b = _mk(tmp_path, body)                       # BUILD_INFO 없음
+    assert buildinfo.build_info(b)["revision"] is None
+    (tmp_path / "BUILD_INFO.txt").write_text(_INFO.format(sha=sha), encoding="utf-8")
+    info = buildinfo.build_info(b)
+    assert info["revision"] == "1234567890abcdef1234567890abcdef12345678", (
+        "BUILD_INFO 가 내려앉았는데 여전히 모른다고 한다")
+    assert info["revision_matches_binary"] is True

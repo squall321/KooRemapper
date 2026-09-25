@@ -62,9 +62,18 @@ def build_info(binary: Path) -> dict:
     무효화 열쇠는 (경로, 크기, mtime_ns) 다. 배포가 파일을 갈면 다음 호출에서 갱신된다.
     """
     global _cache, _cache_key
+    # ⚠ 열쇠에 **BUILD_INFO 까지** 넣는다. 바이너리만 보면, 배포가 BUILD_INFO 만 갈았을 때
+    # (반입 스크립트를 두 번 돌리거나 운영자가 파일만 내려놓는 경우) 재기동 전까지 낡은
+    # 리비전을 낸다 — 이 기능이 막으려던 바로 그 종류의 거짓말이다.
+    info_path = binary.parent / "BUILD_INFO.txt"
+    try:
+        ist = info_path.stat()
+        ikey: tuple = (ist.st_size, ist.st_mtime_ns)
+    except OSError:
+        ikey = ()
     try:
         st = binary.stat()
-        key = (str(binary), st.st_size, st.st_mtime_ns)
+        key = (str(binary), st.st_size, st.st_mtime_ns, ikey)
     except OSError:
         # 바이너리가 없으면 캐시하지 않는다 — 나중에 생기면 바로 보여야 한다.
         return {"binary_present": False, "revision": None, "binary_sha256": None,
@@ -72,7 +81,7 @@ def build_info(binary: Path) -> dict:
     if _cache is not None and _cache_key == key:
         return _cache
 
-    meta = _parse(binary.parent / "BUILD_INFO.txt")
+    meta = _parse(info_path)
     recorded = meta.get("sha256")
     actual = _sha256(binary)
     info = {
