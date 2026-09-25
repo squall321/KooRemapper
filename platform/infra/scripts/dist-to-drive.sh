@@ -75,6 +75,7 @@ fi
 
 BIN="platform/backend/bin/KooRemapper"
 DIST="platform/frontend/dist/index.html"
+APPT_CLI_SIF="platform/infra/apptainer/cli.sif"
 [ -f "$BIN" ] || { echo "✗ $BIN 없음 — --build 로 먼저 빌드하라"; exit 1; }
 [ -f "$DIST" ] || { echo "✗ $DIST 없음 — --build 로 먼저 빌드하라"; exit 1; }
 
@@ -111,6 +112,28 @@ elif ! glibc_le "$_bg" "$MAX_GLIBC"; then
   exit 1
 else
   echo "  · glibc 요구 GLIBC_$_bg <= $MAX_GLIBC ✓"
+fi
+
+# ── 게시물 내부 정합 관문 ──────────────────────────────────────────────────
+# ⚠ `cli.sif` 는 바이너리를 **안에 굽는다**(`cli.def` 의 `%files`). 그런데 `--build` 없이
+# 게시하면 아무도 그것을 다시 굽지 않는다. 실제로 09-21 에 구운 cli.sif 가 그 뒤 모든
+# 게시본에 실려 나갔다 — 게시물 안에서 `koorm-bin.tar.gz` 의 바이너리와 `cli.sif` 안의
+# 바이너리가 **서로 달랐다.** 받는 쪽은 그것을 알 방법이 없다.
+#
+# 여기서 둘이 같은지 본다. apptainer 가 없는 호스트에서는 조용히 넘어간다(glibc 관문과 같은 규율).
+if [ -f "$APPT_CLI_SIF" ] && command -v apptainer >/dev/null 2>&1; then
+  _cli_md5="$(apptainer exec "$APPT_CLI_SIF" md5sum /opt/kooremapper/bin/KooRemapper 2>/dev/null \
+              | cut -d' ' -f1 || true)"
+  _bin_md5="$(md5sum "$BIN" | cut -d' ' -f1)"
+  if [ -n "$_cli_md5" ] && [ "$_cli_md5" != "$_bin_md5" ]; then
+    echo "✗ cli.sif 안의 바이너리가 게시할 바이너리와 다르다."
+    echo "    cli.sif : $_cli_md5"
+    echo "    $BIN : $_bin_md5"
+    echo "  이대로 게시하면 배치/HPC 잡은 **옛 바이너리**를 쓴다(받는 쪽은 알 수 없다)."
+    echo "  고치는 법: bash platform/infra/scripts/build-cli.sh"
+    exit 1
+  fi
+  [ -n "$_cli_md5" ] && echo "  · cli.sif 안 바이너리가 게시본과 같다 ✓"
 fi
 
 TS="$(date -u +%Y%m%d-%H%M%SZ)"

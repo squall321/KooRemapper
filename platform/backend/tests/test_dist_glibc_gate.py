@@ -12,6 +12,7 @@
 계획서의 "2.37 이상 거절" 은 두 칸 느슨하다 — 2.36 을 요구하는 바이너리는 그 관문을 통과하고도
 REMAP 체인에서 죽는다. 그래서 **2.36 도 거절**하는지를 여기서 못 박는다.
 """
+import hashlib
 import shutil
 import subprocess
 import sys
@@ -30,8 +31,12 @@ def _stub(path: Path, body: str) -> Path:
     return path
 
 
-def _tree(tmp_path, *, glibc: str | None):
-    """dist-to-drive.sh 를 **스크립트째** 돌릴 수 있는 가짜 리포. objdump·rclone 만 가짜다."""
+def _tree(tmp_path, *, glibc: str | None, cli_md5: str | None = None):
+    """dist-to-drive.sh 를 **스크립트째** 돌릴 수 있는 가짜 리포. objdump·rclone·apptainer 만 가짜다.
+
+    `cli_md5` 를 주면 `cli.sif` 가 있는 것처럼 꾸미고, 가짜 apptainer 가 그 안의 바이너리
+    md5 로 그 값을 내놓는다. None 이면 cli.sif 를 두지 않는다(관문이 조용해야 한다).
+    """
     root = tmp_path / "repo"
     scripts = root / "platform" / "infra" / "scripts"
     scripts.mkdir(parents=True)
@@ -46,8 +51,18 @@ def _tree(tmp_path, *, glibc: str | None):
     (dist / "index.html").write_text("<html></html>", encoding="utf-8")
     (dist / "index.portal.html").write_text("<html></html>", encoding="utf-8")
 
+    if cli_md5 is not None:
+        appt = root / "platform" / "infra" / "apptainer"
+        appt.mkdir(parents=True)
+        (appt / "cli.sif").write_bytes(b"fake-sif")
+
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
+    if cli_md5 is not None:
+        # `apptainer exec <sif> md5sum <path>` 만 흉내낸다.
+        _stub(bin_dir / "apptainer",
+              f'if [ "${{1:-}}" = "exec" ]; then echo "{cli_md5}  /opt/kooremapper/bin/KooRemapper"; fi\n'
+              'exit 0\n')
     rclone_log = tmp_path / "rclone.calls"
     # ⚠ 스텁이 스테이지를 **떠 둔다.** dist-to-drive.sh 는 mktemp + trap 으로 스테이지를 지우므로,
     # 올라간 tar 안을 열어 보려면 rclone 이 불린 그 순간에 사본을 남겨야 한다.
@@ -145,3 +160,36 @@ def test_build_info_is_not_duplicated_inside_the_binary_tar(tmp_path):
     published = capture / "BUILD_INFO.txt"
     assert published.is_file(), "BUILD_INFO.txt 가 게시물에 없다"
     assert "deadbeef_STALE" not in published.read_text(encoding="utf-8")
+
+
+# ── 게시물 내부 정합 — cli.sif 는 바이너리를 **안에 굽는다** ────────────────
+# ⚠ 이것은 실제로 일어난 일이다. 09-21 에 구운 cli.sif 가 그 뒤 모든 게시본에 실려 나갔다 —
+# 게시물 안에서 `koorm-bin.tar.gz` 의 바이너리와 `cli.sif` 안의 바이너리가 **서로 달랐고**,
+# 배치/HPC 잡은 옛 바이너리를 썼다. 받는 쪽은 그것을 알 방법이 없었다.
+_FAKE_BIN_MD5 = hashlib.md5(b"\x7fELF fake binary\n").hexdigest()
+
+
+def test_a_stale_cli_sif_is_refused(tmp_path):
+    root, scripts, bin_dir, rclone_log, _cap = _tree(
+        tmp_path, glibc="2.34", cli_md5="deadbeef" * 4)
+    r = _run(root, scripts, bin_dir)
+    assert r.returncode != 0, f"낡은 cli.sif 를 그대로 게시했다 — {r.stdout[-400:]}"
+    assert "cli.sif 안의 바이너리가" in r.stdout, r.stdout[-300:]
+    assert "build-cli.sh" in r.stdout, "고치는 법을 안 알려 준다"
+    assert not rclone_log.exists(), "거절했는데 업로드했다"
+
+
+def test_a_matching_cli_sif_passes(tmp_path):
+    root, scripts, bin_dir, rclone_log, _cap = _tree(
+        tmp_path, glibc="2.34", cli_md5=_FAKE_BIN_MD5)
+    r = _run(root, scripts, bin_dir)
+    assert r.returncode == 0, f"{r.stdout[-400:]} {r.stderr[-300:]}"
+    assert "cli.sif 안 바이너리가 게시본과 같다" in r.stdout, r.stdout[-300:]
+
+
+def test_no_cli_sif_is_not_an_error(tmp_path):
+    """cli.sif 는 선택이다(없으면 배치 SIF 를 안 쓰는 배포다) — 없다고 막으면 안 된다."""
+    root, scripts, bin_dir, rclone_log, _cap = _tree(tmp_path, glibc="2.34")
+    r = _run(root, scripts, bin_dir)
+    assert r.returncode == 0, f"cli.sif 가 없다고 막았다 — {r.stdout[-400:]}"
+    assert "cli.sif 안" not in r.stdout
