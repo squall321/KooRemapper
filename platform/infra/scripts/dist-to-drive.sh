@@ -148,7 +148,11 @@ GIT_BRANCH="$(git_or rev-parse --abbrev-ref HEAD)"
 if [ "$GIT_BRANCH" = "HEAD" ]; then GIT_BRANCH="(detached HEAD)"; fi
 GIT_DESCRIBE="$(git_or describe --tags --always --dirty)"
 GIT_REMOTE="$(git_or config --get remote.origin.url)"
-if [ -n "$(git_or status --porcelain)" ]; then GIT_STATE="dirty (커밋되지 않은 변경이 있다)"; else GIT_STATE="clean"; fi
+# `dirty` 만 적으면 읽는 쪽이 **무엇이** 더러운지 모른다. 실제로 이 리포의 더러움은 대부분
+# 툴 상태(.bkit/)나 임시 폴더라 소스와 무관한데, 그것을 구분할 방법이 없으면 게시본을 의심하게
+# 된다. 어느 갈래가 더러운지 두 단계까지 적는다(소스가 섞였는지가 한눈에 보인다).
+_DIRT="$(git_or status --porcelain | awk '{ print $NF }' | cut -d/ -f1-2 | sort -u | head -8 | paste -sd' ' -)"
+if [ -n "$_DIRT" ]; then GIT_STATE="dirty — $_DIRT"; else GIT_STATE="clean"; fi
 
 BIN_MD5="$(md5sum "$BIN" | cut -d' ' -f1)"
 BIN_SHA="$(sha256sum "$BIN" | cut -d' ' -f1)"
