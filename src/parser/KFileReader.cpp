@@ -360,6 +360,30 @@ int KFileReader::sectionFieldWidth() const {
     return keywordFieldWidth(currentKeywordLine_, deckFw_);
 }
 
+namespace {
+
+// 토큰 하나가 숫자 **여러 개**를 품고 있나 — 고정형식 칸이 부호로 붙어 버린 흔적이다.
+//
+// 판정은 좁게 한다. 부호(`+`/`-`)가 **토큰 맨 앞도 아니고 지수 표기(`E`/`D` 바로 뒤)도 아닌**
+// 자리에 나오면 그 토큰은 숫자 두 개가 붙은 것이다.
+//   `-1.5`            → 맨 앞 부호, 정상
+//   `1.0E-3`·`1.0D+3` → 지수 부호, 정상
+//   `1.23E+01-2.34E+01` → 붙었다
+bool nd_hasGluedNumbers(const std::vector<std::string>& toks, size_t from, size_t to) {
+    for (size_t i = from; i < to && i < toks.size(); ++i) {
+        const std::string& s = toks[i];
+        for (size_t k = 1; k < s.size(); ++k) {
+            if (s[k] != '+' && s[k] != '-') continue;
+            const char prev = s[k - 1];
+            if (prev == 'e' || prev == 'E' || prev == 'd' || prev == 'D') continue;
+            return true;
+        }
+    }
+    return false;
+}
+
+}  // namespace
+
 bool KFileReader::parseNodeSection(std::ifstream& file) {
     std::string line;
     std::streampos lastPos;
@@ -401,7 +425,18 @@ bool KFileReader::parseNodeSection(std::ifstream& file) {
             // Try free format first (comma or space separated)
             // This handles most real-world k-files where data is space-separated
             auto tokens = tokenize(line);
-            if (tokens.size() >= 4) {
+            // ⚠ 토큰이 4개여도 자유형식이 아닐 수 있다 — 칸이 꽉 찬 고정형식 줄에서 좌표가
+            // 부호로 **붙어 버리면** 한 토큰이 숫자 여러 개를 품는다. 그런데 TC/RC 칸의 `0` 두
+            // 개가 토큰 수를 4로 만들어 이 자유형식 가지가 이겼다(2026-09-25 실측).
+            //
+            //   `       2 1.234567890E+01-2.345678900E+01-3.456789000E+01       0       0`
+            //   → 토큰 ['2', '1.23…E+01-2.34…E+01-3.45…E+01', '0', '0']
+            //   → x=12.345679 · y=0 · z=0   (참값 y=-23.456789 · z=-34.567890)
+            //
+            // **rc=0 이고 아무 말도 안 했다.** 표준 Vol_I 카드인데 기하가 조용히 뭉개진다.
+            // 그래서 '붙은 숫자' 가 보이면 자유형식 결과를 채택하지 않고 고정폭으로 넘긴다.
+            // 자유형식 우선 자체는 그대로 둔다 — 리포의 자체 산출 덱들이 그 순서에 기대고 있다.
+            if (tokens.size() >= 4 && !nd_hasGluedNumbers(tokens, 1, 4)) {
                 int nid = parseInt(tokens[0]);
                 double x = parseDouble(tokens[1]);
                 double y = parseDouble(tokens[2]);
