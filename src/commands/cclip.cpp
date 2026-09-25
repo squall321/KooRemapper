@@ -1656,12 +1656,14 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
             emit(ins);
         } else {
             std::string dynainPath = outPrefixPath + ".dynain";
-            std::ofstream df(dynainPath);
-            if (!df.is_open()) { console.error("[cclip] cannot write: " + dynainPath); return 1; }
+            // 본 덱과 같은 개행을 쓴다 — dynain 은 *INCLUDE 로 함께 풀리므로 갈리면 안 된다.
+            KooRemapper::DeckWriter df_w(dynainPath, KooRemapper::deck_newline::detect(modelPath));
+            if (!df_w.ok()) { console.error("[cclip] cannot write: " + dynainPath); return 1; }
+            std::ostream& df = df_w.stream();
             df << "*KEYWORD\n";
             emit(df);
             df << "*END\n";
-            df.close();
+            df_w.close();
             ins << "*INCLUDE\n" << dynainName << "\n";
             console.info("[cclip] Initial stress → " + dynainPath);
         }
@@ -1681,10 +1683,11 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
             std::vector<std::string> freeLines = lines;
             kw_insertBeforeEnd(freeLines, insFree.str());
             std::string freePath = outPrefixPath + "_free.k";
-            std::ofstream ff(freePath);
-            if (!ff.is_open()) { console.error("[cclip] cannot write: " + freePath); return 1; }
+            KooRemapper::DeckWriter ff_w(freePath, KooRemapper::deck_newline::detect(modelPath));
+            if (!ff_w.ok()) { console.error("[cclip] cannot write: " + freePath); return 1; }
+            std::ostream& ff = ff_w.stream();
             for (const auto& l : freeLines) ff << l << "\n";
-            ff.close();
+            ff_w.close();
             console.info("[cclip] Free-state (as-designed) model → " + freePath);
         } else {
             console.info("[cclip] free_output: main output is already the free state (deck mode) — skipped");

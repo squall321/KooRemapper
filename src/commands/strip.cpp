@@ -1,4 +1,5 @@
 #include "strip.h"
+#include "parser/DeckWriter.h"
 #include "util/YamlComment.h"
 #include "cli/ConsoleOutput.h"
 
@@ -174,11 +175,12 @@ int runStrip(const std::string& yamlFile, ConsoleOutput& console)
         return 1;
     }
 
-    std::ofstream outf(outputPath);
-    if (!outf.is_open()) {
+    KooRemapper::DeckWriter outf_w(outputPath, KooRemapper::deck_newline::detect(modelPath));
+    if (!outf_w.ok()) {
         console.error("Cannot open output: " + outputPath);
         return 1;
     }
+    std::ostream& outf = outf_w.stream();
 
     // Line-by-line processing
     bool skipping = false;
@@ -228,7 +230,7 @@ int runStrip(const std::string& yamlFile, ConsoleOutput& console)
     }
 
     inf.close();
-    outf.close();
+    outf_w.close();
 
     console.info("Output: " + outputPath);
     console.info("  Total lines: " + std::to_string(totalLines));

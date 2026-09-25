@@ -229,8 +229,10 @@ int runSqueeze(const std::string& meshFile, const std::string& configFile,
     if (config.strainMode) {
         // strain_mode: write *INITIAL_STRAIN_SOLID directly — no material needed
         console.info("Writing strain dynain: " + dynainFile);
-        std::ofstream sf(dynainFile);
-        if (!sf.is_open()) { console.error("Cannot write dynain: " + dynainFile); return 1; }
+        // 메시 덱이 *INCLUDE 로 끌어가는 파일이다 — 개행을 메시와 맞춘다.
+        KooRemapper::DeckWriter sf_w(dynainFile, KooRemapper::deck_newline::detect(meshFile));
+        if (!sf_w.ok()) { console.error("Cannot write dynain: " + dynainFile); return 1; }
+        std::ostream& sf = sf_w.stream();
         sf << "*KEYWORD\n";
         sf << "$\n$ KooRemapper - Initial Strain File (strain_mode)\n";
         sf << "$ Source: " << configFile << "\n$\n";
