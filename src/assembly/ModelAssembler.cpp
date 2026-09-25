@@ -5200,7 +5200,7 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                 if (eit != baseMesh_.elements.end()) {
                     const auto& elem = eit->second;
                     std::ostringstream oss;
-                    oss << std::setw(8) << elemId << std::setw(8) << elem.partId;
+                    oss << std::setw(curSecFw) << elemId << std::setw(curSecFw) << elem.partId;
 
                     // Determine if target is TET-type ELFORM (13/10/60)
                     bool isTet = (elem.type == ElementType::TET4);
@@ -5219,11 +5219,11 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                     if (isTet) {
                         // TET4: N1, N2, N3, N4, N4, N4, N4, N4 (LS-DYNA Vol I *ELEMENT_SOLID — 이 순서가 아니면
                         // negative volume 으로 종료). n1 n2 n3 n3 n4.. 는 KFileReader 도 TET4 로 못 읽는다.
-                        for (int n = 0; n < 4; ++n) oss << std::setw(8) << elem.nodeIds[n];
-                        for (int n = 0; n < 4; ++n) oss << std::setw(8) << elem.nodeIds[3];
+                        for (int n = 0; n < 4; ++n) oss << std::setw(curSecFw) << elem.nodeIds[n];
+                        for (int n = 0; n < 4; ++n) oss << std::setw(curSecFw) << elem.nodeIds[3];
                     } else {
                         // HEX8/QUAD4: output first 8 node IDs
-                        for (int n = 0; n < 8; ++n) oss << std::setw(8) << elem.nodeIds[n];
+                        for (int n = 0; n < 8; ++n) oss << std::setw(curSecFw) << elem.nodeIds[n];
                     }
 
                     output << oss.str() << "\n";
@@ -5234,25 +5234,25 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
 
             // TET10 conversion: replace single-line TET4 with 2-line TET10
             if (elemId > 0 && tet10Elements_.count(elemId)) {
-                int pid = parsePartIdFromLine(line);
-                output << formatTet10ElementLine(elemId, pid, tet10Elements_[elemId]) << "\n";
+                int pid = partIdForCard(line, curSecFw, elemId);
+                output << formatTet10ElementLine(elemId, pid, tet10Elements_[elemId], curSecFw) << "\n";
                 dropCurrentCard = true;   // 옛 카드의 나머지 줄을 버린다
                 continue;
             }
             // HEX20 conversion: replace single-line HEX8 with 3-line HEX20
             if (elemId > 0 && hex20Elements_.count(elemId)) {
-                int pid = parsePartIdFromLine(line);
-                output << formatHex20ElementLine(elemId, pid, hex20Elements_[elemId]) << "\n";
+                int pid = partIdForCard(line, curSecFw, elemId);
+                output << formatHex20ElementLine(elemId, pid, hex20Elements_[elemId], curSecFw) << "\n";
                 dropCurrentCard = true;   // 옛 카드의 나머지 줄을 버린다
                 continue;
             }
             // Disconnect: modified element nodes (CZM/MEFEM)
             if (elemId > 0 && modifiedElementNodes_.count(elemId)) {
-                int pid = parsePartIdFromLine(line);
+                int pid = partIdForCard(line, curSecFw, elemId);
                 const auto& newNodes = modifiedElementNodes_[elemId];
                 std::ostringstream oss;
-                oss << std::setw(8) << elemId << std::setw(8) << pid;
-                for (int n = 0; n < 8; ++n) oss << std::setw(8) << newNodes[n];
+                oss << std::setw(curSecFw) << elemId << std::setw(curSecFw) << pid;
+                for (int n = 0; n < 8; ++n) oss << std::setw(curSecFw) << newNodes[n];
                 output << oss.str() << "\n";
                 dropCurrentCard = true;   // 옛 카드의 나머지 줄을 버린다
                 continue;
@@ -5329,25 +5329,25 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
             }
             // QUAD8 conversion: replace QUAD4 line
             if (elemId > 0 && quad8Elements_.count(elemId)) {
-                int pid = parsePartIdFromLine(line);
-                output << formatQuad8ElementLine(elemId, pid, quad8Elements_[elemId]) << "\n";
+                int pid = partIdForCard(line, curSecFw, elemId);
+                output << formatQuad8ElementLine(elemId, pid, quad8Elements_[elemId], curSecFw) << "\n";
                 dropCurrentCard = true;
                 continue;
             }
             // TRIA6 conversion: replace TRIA3 line
             if (elemId > 0 && tria6Elements_.count(elemId)) {
-                int pid = parsePartIdFromLine(line);
-                output << formatTria6ElementLine(elemId, pid, tria6Elements_[elemId]) << "\n";
+                int pid = partIdForCard(line, curSecFw, elemId);
+                output << formatTria6ElementLine(elemId, pid, tria6Elements_[elemId], curSecFw) << "\n";
                 dropCurrentCard = true;
                 continue;
             }
             // Disconnect: modified shell element nodes (CZM/MEFEM)
             if (elemId > 0 && modifiedShellElementNodes_.count(elemId)) {
-                int pid = parsePartIdFromLine(line);
+                int pid = partIdForCard(line, curSecFw, elemId);
                 const auto& nn = modifiedShellElementNodes_[elemId];
                 std::ostringstream oss;
-                oss << std::setw(8) << elemId << std::setw(8) << pid;
-                for (int n = 0; n < 4; ++n) oss << std::setw(8) << nn[n];
+                oss << std::setw(curSecFw) << elemId << std::setw(curSecFw) << pid;
+                for (int n = 0; n < 4; ++n) oss << std::setw(curSecFw) << nn[n];
                 output << oss.str() << "\n";
                 continue;
             }
@@ -7153,51 +7153,55 @@ bool ModelAssembler::applyRefine(const RefineOperation& op) {
     return true;
 }
 
-std::string ModelAssembler::formatTet10ElementLine(int eid, int pid, const std::array<int, 10>& nodes) const {
+std::string ModelAssembler::formatTet10ElementLine(int eid, int pid, const std::array<int, 10>& nodes,
+                                                   int fw) const {
     std::ostringstream oss;
     // Card 1: EID PID
-    oss << std::setw(8) << eid << std::setw(8) << pid << "\n";
+    oss << std::setw(fw) << eid << std::setw(fw) << pid << "\n";
     // Card 2: N1-N10
     for (int i = 0; i < 10; ++i) {
-        oss << std::setw(8) << nodes[i];
+        oss << std::setw(fw) << nodes[i];
     }
     return oss.str();
 }
 
-std::string ModelAssembler::formatHex20ElementLine(int eid, int pid, const std::array<int, 20>& nodes) const {
+std::string ModelAssembler::formatHex20ElementLine(int eid, int pid, const std::array<int, 20>& nodes,
+                                                   int fw) const {
     std::ostringstream oss;
     // Card 1: EID PID
-    oss << std::setw(8) << eid << std::setw(8) << pid << "\n";
+    oss << std::setw(fw) << eid << std::setw(fw) << pid << "\n";
     // Card 2: N1-N10 (first 10 nodes)
     for (int i = 0; i < 10; ++i) {
-        oss << std::setw(8) << nodes[i];
+        oss << std::setw(fw) << nodes[i];
     }
     oss << "\n";
     // Card 3: N11-N20 (remaining 10 nodes)
     for (int i = 10; i < 20; ++i) {
-        oss << std::setw(8) << nodes[i];
+        oss << std::setw(fw) << nodes[i];
     }
     return oss.str();
 }
 
-std::string ModelAssembler::formatQuad8ElementLine(int eid, int pid, const std::array<int, 8>& nodes) const {
+std::string ModelAssembler::formatQuad8ElementLine(int eid, int pid, const std::array<int, 8>& nodes,
+                                                   int fw) const {
     std::ostringstream oss;
     // Single line: EID PID N1-N8
-    oss << std::setw(8) << eid << std::setw(8) << pid;
+    oss << std::setw(fw) << eid << std::setw(fw) << pid;
     for (int i = 0; i < 8; ++i) {
-        oss << std::setw(8) << nodes[i];
+        oss << std::setw(fw) << nodes[i];
     }
     return oss.str();
 }
 
-std::string ModelAssembler::formatTria6ElementLine(int eid, int pid, const std::array<int, 6>& nodes) const {
+std::string ModelAssembler::formatTria6ElementLine(int eid, int pid, const std::array<int, 6>& nodes,
+                                                   int fw) const {
     std::ostringstream oss;
     // Single line: EID PID N1-N6 N7(0) N8(0)
-    oss << std::setw(8) << eid << std::setw(8) << pid;
+    oss << std::setw(fw) << eid << std::setw(fw) << pid;
     for (int i = 0; i < 6; ++i) {
-        oss << std::setw(8) << nodes[i];
+        oss << std::setw(fw) << nodes[i];
     }
-    oss << std::setw(8) << 0 << std::setw(8) << 0;
+    oss << std::setw(fw) << 0 << std::setw(fw) << 0;
     return oss.str();
 }
 
@@ -7904,11 +7908,27 @@ bool ModelAssembler::applyDisconnect(const DisconnectOperation& op) {
     return false;
 }
 
-int ModelAssembler::parsePartIdFromLine(const std::string& line) const {
-    // Extract second integer field from element line (8-char fixed width)
-    if (line.size() < 16) return -1;
+// 요소 카드에서 PID 를 읽되, 못 읽으면 메시가 아는 값으로 되돌린다.
+// ⚠ 예전에는 실패하면 -1 이 그대로 덱에 찍혔다(`      -1`). 메시는 그 요소의 PID 를 이미 알고
+// 있으므로 지어낼 필요가 없다 — 고정폭 우선, 실패하면 메시 폴백이다.
+int ModelAssembler::partIdForCard(const std::string& line, int fw, int elemId) const {
+    int pid = parsePartIdFromLine(line, fw);
+    if (pid > 0) return pid;
+    auto it = baseMesh_.elements.find(elemId);
+    return (it != baseMesh_.elements.end()) ? it->second.partId : pid;
+}
+
+int ModelAssembler::parsePartIdFromLine(const std::string& line, int fw) const {
+    // 요소 카드의 **둘째 정수 칸**(PID)을 고정폭으로 읽는다.
+    //
+    // ⚠ 예전에는 `substr(8, 8)` 로 못 박혀 있었다. I10 덱(정수 칸 10)에서는 그 자리가 EID 칸의
+    // 꼬리라 **EID 의 끝자리를 PID 로 읽었다** — 실측으로 PID 77 인 요소가 1 로 나갔고, 그
+    // 번호의 파트는 덱에 없으므로 LS-DYNA 가 키워드 단계에서 멈춘다. 8칸 덱에서는 fw=8 이라
+    // 예전과 결과가 한 글자도 다르지 않다.
+    if (fw <= 0) fw = 8;
+    if (line.size() <= static_cast<size_t>(fw)) return -1;
     try {
-        std::string field = line.substr(8, 8);
+        std::string field = line.substr(fw, fw);
         size_t start = 0;
         while (start < field.size() && std::isspace(field[start])) start++;
         if (start >= field.size() || !std::isdigit(field[start])) return -1;

@@ -429,11 +429,15 @@ private:
     std::string formatShellElementLine(const AddedShellElement& elem, int fw) const;
     bool isKeywordLine(const std::string& line) const;
     bool isCommentLine(const std::string& line) const;
-    std::string formatTet10ElementLine(int eid, int pid, const std::array<int, 10>& nodes) const;
-    std::string formatHex20ElementLine(int eid, int pid, const std::array<int, 20>& nodes) const;
-    std::string formatQuad8ElementLine(int eid, int pid, const std::array<int, 8>& nodes) const;
-    std::string formatTria6ElementLine(int eid, int pid, const std::array<int, 6>& nodes) const;
-    int parsePartIdFromLine(const std::string& line) const;
+    std::string formatTet10ElementLine(int eid, int pid, const std::array<int, 10>& nodes, int fw) const;
+    std::string formatHex20ElementLine(int eid, int pid, const std::array<int, 20>& nodes, int fw) const;
+    std::string formatQuad8ElementLine(int eid, int pid, const std::array<int, 8>& nodes, int fw) const;
+    std::string formatTria6ElementLine(int eid, int pid, const std::array<int, 6>& nodes, int fw) const;
+    // ⚠ 폭을 받는다. 예전에는 `substr(8, 8)` 로 못 박혀 있어 **I10 덱에서 EID 의 끝자리를
+    // PID 로 읽었다**(실측: PID 77 → 1). 8칸 덱에서는 fw=8 이라 결과가 한 글자도 안 바뀐다.
+    int parsePartIdFromLine(const std::string& line, int fw) const;
+    // 못 읽으면 메시가 아는 PID 로 되돌린다 — 예전에는 -1 이 그대로 덱에 찍혔다.
+    int partIdForCard(const std::string& line, int fw, int elemId) const;
 };
 
 } // namespace KooRemapper
