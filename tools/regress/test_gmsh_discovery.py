@@ -65,15 +65,21 @@ def main():
     open(os.path.join(fake, "gmsh"), "w").write("#!/usr/bin/env python\nimport nonexistent_module\n")
     os.chmod(os.path.join(fake, "gmsh"), 0o755)
     os.symlink(gmsh, os.path.join(real, "gmsh"))
+    # ⚠ 바이너리를 **그 자리에서 돌리면 안 된다.** 탐색은 PATH 보다 `<실행파일>/gmsh/` 를 먼저
+    # 보므로, `platform/backend/bin/KooRemapper` 처럼 옆에 번들 gmsh 가 있는 사본으로 돌리면
+    # 이 시험이 보려는 PATH 갈래에 **도달하지도 못한다**(처음에 그렇게 써서 회귀가 빨개졌다).
+    # 위 블록들과 같이 임시 폴더에 복사해 쓴다.
+    exe = os.path.join(d, "KooRemapper")
+    shutil.copy2(binary, exe)
     work = os.path.join(d, "work"); os.makedirs(work)
-    subprocess.run([binary, "generate", "--dim-i", "20", "--dim-j", "5", "arc", "demo"],
+    subprocess.run([exe, "generate", "--dim-i", "20", "--dim-j", "5", "arc", "demo"],
                    cwd=work, env=env, capture_output=True)
     open(os.path.join(work, "m.yaml"), "w").write(
         "model: demo_flat_tet.k\noutput: remeshed.k\npid: 1\nlc_target: 5.0\n")
 
     def run(extra_env, path):
         e = dict(env); e["PATH"] = path + ":/usr/bin:/bin"; e.update(extra_env)
-        p = subprocess.run([binary, "meshfix", "m.yaml"], cwd=work, env=e,
+        p = subprocess.run([exe, "meshfix", "m.yaml"], cwd=work, env=e,
                            capture_output=True, text=True, timeout=600)
         return p.stdout + p.stderr
 
