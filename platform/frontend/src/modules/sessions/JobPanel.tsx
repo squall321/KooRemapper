@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Download, FileText, ScrollText, X, Ban } from 'lucide-react'
+import { Download, FileText, ScrollText, X, Ban, AlertTriangle } from 'lucide-react'
 import { cancelJob, downloadFile, getJobLogs, getJobOutputs, listSessionJobs } from '@/shared/api/endpoints'
 import type { Job } from '@/shared/api/types'
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Spinner } from '@/shared/ui/ui'
@@ -71,6 +71,18 @@ function JobRow({ job, sessionId, onLogs }: { job: Job; sessionId: string; onLog
       {cancel.isError && <div className="text-xs text-danger mt-1">취소 실패: {errorMessage(cancel.error)}</div>}
       {job.status === 'failed' && job.error_summary && (
         <pre className="mono text-xs text-danger bg-bg rounded p-2 mt-1 max-h-24 overflow-auto whitespace-pre-wrap">{job.error_summary}</pre>
+      )}
+      {/* ⚠ status 조건을 걸지 않는다 — **성공한 잡**에 떠야 하는 경고다. rc=0 인데 산출 덱이
+          상한 것이 실제 사고의 모양이었다(요소 소실·개행 소실). 실패 자리에 숨기면 못 본다. */}
+      {!!job.warnings?.length && (
+        <ul className="mt-1 space-y-0.5">
+          {job.warnings.map((w, i) => (
+            <li key={i} className="flex items-start gap-1.5 text-xs text-warning bg-warning/10 rounded px-2 py-1">
+              <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+              <span className="break-all">{w}</span>
+            </li>
+          ))}
+        </ul>
       )}
       {job.status === 'succeeded' && !!outs.data?.length && (
         <div className="flex flex-wrap gap-1 mt-1">

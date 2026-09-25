@@ -27,6 +27,7 @@ from app.models import Job, Session, SessionFile
 from app.runner import catalog
 from app.runner.argbuild import build_command
 from app.runner.kfile_inspect import inspect_kfile
+from app.runner.newline_audit import audit_newlines
 from app.runner.stcx_client import (StcxClient, build_scenario_overrides, parse_state,
                                     parse_submit)
 from app.shared import storage
@@ -364,6 +365,17 @@ async def _execute(job_id: str) -> None:
 
         before = _snap()
 
+        # 개행 왕복 대조용 — 이 잡이 **덮어쓰기 전** 메타다. 디스크는 곧 바뀌지만 DB 행은
+        # `_register_file` 이 갱신하기 전까지 옛 값을 들고 있으므로, 여기서 떠 두면 된다.
+        nl_before = {
+            f.filename: (f.meta or {})
+            for f in (
+                await db.execute(
+                    select(SessionFile).where(SessionFile.session_id == session.id)
+                )
+            ).scalars()
+        }
+
         try:
             exit_code = await asyncio.to_thread(
                 _run_blocking, job_id, built.argv, work_dir, out_path, err_path
@@ -395,6 +407,19 @@ async def _execute(job_id: str) -> None:
                 db, session, name, work_dir / name, kind="output", job_id=job_id
             )
             output_ids.append(fid)
+
+        # 덱이 왕복에서 개행을 잃었나 — rc=0 인데 산출물이 상한 경우를 화면에 올린다(P1-8).
+        # ⚠ 판정(`newline`) 대조만으로는 **섞인 덱**을 놓친다. `newline_audit` 가 그 규칙까지 본다.
+        if output_ids:
+            nl_after = {
+                f.filename: (f.meta or {})
+                for f in (
+                    await db.execute(select(SessionFile).where(SessionFile.id.in_(output_ids)))
+                ).scalars()
+            }
+            nl_warns = audit_newlines(nl_before, nl_after)
+            if nl_warns:
+                job.warnings = nl_warns
 
         job.exit_code = exit_code
         job.output_file_ids = output_ids

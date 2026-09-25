@@ -232,6 +232,9 @@ class Job(Base):
     input_file_ids: Mapped[list | None] = mapped_column(JSONB)
     output_file_ids: Mapped[list | None] = mapped_column(JSONB)
     error_summary: Mapped[str | None] = mapped_column(Text)
+    # 성공한 잡에도 남기는 경고(개행 왕복 등). `error_summary` 는 실패 자리라 여기가 따로 있어야
+    # 한다 — rc=0 인데 산출 덱이 상한 경우가 실제 사고의 모양이었다(캠페인 사건 1·7).
+    warnings: Mapped[list | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True, nullable=False
     )

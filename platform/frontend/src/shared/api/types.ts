@@ -129,6 +129,8 @@ export interface Job {
   input_file_ids: number[] | null
   output_file_ids: number[] | null
   error_summary: string | null
+  // 성공한 잡에도 남는 경고(개행 왕복 등) — rc=0 인데 산출 덱이 상한 경우가 실제 사고의 모양이었다
+  warnings: string[] | null
   created_at: string
   started_at: string | null
   finished_at: string | null

@@ -26,6 +26,7 @@ class JobRead(BaseModel):
     input_file_ids: list | None
     output_file_ids: list | None
     error_summary: str | None
+    warnings: list | None = None
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
