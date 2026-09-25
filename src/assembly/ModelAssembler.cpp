@@ -1,4 +1,5 @@
 #include "assembly/ModelAssembler.h"
+#include "parser/IncludeScan.h"
 #include "commands/cnrb2solid.h"
 #include "commands/hfdamp.h"
 #include "commands/battery.h"
@@ -88,6 +89,17 @@ bool ModelAssembler::loadBaseModel(const std::string& filename) {
     // inSet 을 꺼 버려 진짜 SID 줄을 영영 못 봤다. 그러면 maxSetId_ 가 0 으로 남아
     // 새로 만드는 *SET_SEGMENT 가 덱에 이미 있는 세트와 같은 번호로 난다.
     initMaxSetIdFromRawLines();
+
+    // ── 못 본 것을 말한다 (2026-09-25, P0-6) ───────────────────────────────
+    // 위 72-90 이 정한 max ID 는 **이 덱 안에서만** 센 값이다. `KFileReader` 도 rawLines_ 도
+    // `*INCLUDE` 안을 읽지 않으므로, 인클루드에 이미 있는 번호를 아래 apply* 들이 다시
+    // 발급할 수 있다. 번호 정책은 바꾸지 않는다(하류가 바이트 동일을 기대한다) — 다만
+    // **모른다는 사실을 말한다.** 이 한 곳이 assembler 경로의 발행자 18곳을 전부 덮는다.
+    //
+    // ⚠ 콘솔 전용이다. 덱에 쓰면 출력 바이트가 변해 '번호 불변' 이 아니라 '바이트 변경' 이 된다.
+    // ⚠ rc 를 건드리지 않는다. 하류(플랫폼 워커·pyKooCAE REMAP 스텝)가 rc≠0 이면 체인을 멈춘다.
+    include_scan::warnUnread(ConsoleOutput(), rawLines_,
+                             "노드·요소·파트·섹션·재질·세트 ID 를 이 덱 안에서만 세었습니다");
 
     return true;
 }
@@ -1139,23 +1151,13 @@ std::vector<RsBlock> rsCollectBlocks(const std::vector<std::string>& rawLines) {
 // 읽지 않은 *INCLUDE 가 몇 개인가(첫 줄 인덱스도 돌려준다).
 // rawLines_ 에는 *INCLUDE 줄만 들어오고 그 안의 카드는 읽지 않는다 — 실제 낙하시험 덱은
 // 거의 언제나 나뉘어 있으므로 '이 덱에 없으니 없다' 를 사실로 쓰면 안 된다.
-// *INCLUDE_PATH 는 탐색 경로일 뿐 카드를 끌어오지 않는다.
+//
+// 판정 자체는 공용 스캐너(`parser/IncludeScan.h`)가 한다 — 같은 판정이 리포에 셋 있었고
+// 서로 달랐다(`ReferenceIntegrity` 는 `*INCLUDE_PATH` 를 파일로 세는 오탐이 있었다).
 size_t rsCountIncludes(const std::vector<std::string>& rawLines, size_t& firstLine) {
-    size_t n = 0;
-    bool got = false;
-    firstLine = 0;
-    for (size_t i = 0; i < rawLines.size(); ++i) {
-        size_t g = rawLines[i].find_first_not_of(" \t");
-        if (g == std::string::npos || rawLines[i][g] != '*') continue;
-        std::string up = rawLines[i].substr(g);
-        while (!up.empty() && (up.back() == '\r' || up.back() == ' ' || up.back() == '\t')) up.pop_back();
-        for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-        if (up.rfind("*INCLUDE", 0) != 0) continue;
-        if (up.rfind("*INCLUDE_PATH", 0) == 0) continue;
-        ++n;
-        if (!got) { firstLine = i; got = true; }
-    }
-    return n;
+    const auto u = KooRemapper::include_scan::scan(rawLines);
+    firstLine = u.firstLine;
+    return u.count;
 }
 
 bool rsStarts(const std::string& kw, const char* p) { return kw.rfind(p, 0) == 0; }

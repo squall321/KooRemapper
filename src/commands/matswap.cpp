@@ -1,4 +1,5 @@
 #include "matswap.h"
+#include "parser/IncludeScan.h"
 #include "parser/DeckWriter.h"
 #include "util/YamlComment.h"
 #include "kw_util.h"
@@ -286,6 +287,9 @@ int runMatswap(const std::string& modelFile, const std::string& bundleFile,
         if (!f.is_open()) { console.error("Cannot open model: " + modelFile); return 1; }
         std::string ln; while (std::getline(f,ln)) modelLines.push_back(ln);
     }
+
+    KooRemapper::include_scan::warnUnread(console, modelLines,
+        "재질·이력변수 ID(MID·HGID)를 이 덱 안에서만 세었습니다 — 인클루드에 있는 번호와 겹칠 수 있습니다");
 
     // 2. Parse bundle
     MswBundle bundle;

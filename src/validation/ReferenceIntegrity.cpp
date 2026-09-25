@@ -1,6 +1,8 @@
 // 덱이 가리키는 세트 ID 가 실제로 정의돼 있나 — 델타 검사가 못 보는 '애초에 없는' 참조를 잡는다
 #include "validation/ReferenceIntegrity.h"
 
+#include "parser/IncludeScan.h"
+
 #include <algorithm>
 #include <cctype>
 #include <set>
@@ -91,16 +93,15 @@ ReferenceReport checkSetReferences(const std::vector<std::string>& lines) {
     }
 
     // `*INCLUDE` — 세트가 그 안에 정의됐을 수 있다. 읽지 않으므로 0건을 단정하면 안 된다.
-    for (size_t i = 0; i < lines.size(); ++i) {
-        std::string t = trim(lines[i]);
-        if (!isKeyword(t) || upper(t).rfind("*INCLUDE", 0) != 0) continue;
-        for (size_t j = i + 1; j < lines.size(); ++j) {
-            std::string d = trim(lines[j]);
-            if (d.empty() || isComment(d)) continue;
-            if (isKeyword(d)) break;
+    //
+    // ⚠ 예전 구현은 `rfind("*INCLUDE", 0) == 0` 만 봐서 **`*INCLUDE_PATH` 를 파일로 셌다.**
+    // 그것은 탐색 경로일 뿐 카드를 끌어오지 않으므로, `*INCLUDE_PATH` 만 있는 덱에서
+    // "안 읽은 인클루드가 있다" 는 거짓 경고가 났다(실측 확인). 공용 스캐너가 그것을 제외한다.
+    {
+        const auto u = include_scan::scan(lines);
+        if (u.count > 0) {
             rep.hasUnreadIncludes = true;
-            if (rep.includeNames.size() < 8) rep.includeNames.push_back(d);
-            break;
+            rep.includeNames = u.names;
         }
     }
 

@@ -1,4 +1,5 @@
 #include "parser/DeckWriter.h"
+#include "parser/IncludeScan.h"
 #include "cnrb2solid.h"
 #include "kw_util.h"
 #include "cli/ConsoleOutput.h"
@@ -975,6 +976,8 @@ int runCnrb2Solid(const std::string& yamlFile, ConsoleOutput& console) {
 
     console.println("[cnrb2solid] Model  : " + modelPath);
     console.println("[cnrb2solid] Output : " + outPath);
+    KooRemapper::include_scan::warnUnread(console, lines,
+        "섹션·재질·세트·파트 ID 를 이 덱 안에서만 세었습니다 — 인클루드에 있는 번호와 겹칠 수 있습니다");
 
     int maxNodeId = 0, maxElemId = 0, maxSecId = 0, maxMatId = 0, maxSetId = 0, maxPartId = 0;
 

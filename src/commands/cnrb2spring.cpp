@@ -1,5 +1,6 @@
 // CNRB 체결점 하나를 Side A/B 두 강체로 쪼개고 그 사이를 제로길이 discrete beam(ELFORM=6) 하나로 잇는 op
 #include "parser/ElementCardLayout.h"
+#include "parser/IncludeScan.h"
 #include "parser/DeckWriter.h"
 #include "cnrb2spring.h"
 #include "cli/ConsoleOutput.h"
@@ -990,6 +991,11 @@ int cnrb2spring_apply(std::vector<std::string>& lines,
     }
     newPartIds.insert(pidBeam);
 
+    // ⚠ 이 op 은 '최대 ID + 1' 발행자가 **아니다** — 설정으로 받은 고정 번호대를 쓰고 겹침을
+    // 검사한다. 그래서 할 말이 다르다. "겹쳐 발급할 수 있다" 가 아니라 **"겹침 0건이라는 판정을
+    // 단정할 수 없다"** 다. 검사 코퍼스가 이 덱뿐이기 때문이다.
+    KooRemapper::include_scan::warnUnread(console, lines,
+        "충돌 검사가 이 덱 안만 봤습니다 — 인클루드에 같은 번호가 있어도 '겹침 없음' 으로 지나갑니다");
     CgUsedIds used = cg_scanUsedIds(lines);
     for (const auto& kv : sets) used.set.insert(kv.first);  // SID 는 세트 파싱 정본에서 그대로 받는다
     for (const auto& c : cnrbs) used.part.insert(c.pid);   // CNRB 의 PID 는 파트 네임스페이스다

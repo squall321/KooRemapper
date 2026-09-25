@@ -1,4 +1,5 @@
 #include "hfdamp.h"
+#include "parser/IncludeScan.h"
 #include "parser/DeckWriter.h"
 #include "cli/ConsoleOutput.h"
 #include "util/YamlComment.h"
@@ -601,6 +602,10 @@ int runHFDamp(const std::string& yamlFile, ConsoleOutput& console) {
 
     console.println("[hfdamp] Model  : " + modelPath);
     console.println("[hfdamp] Output : " + outPath);
+    // 자립 경로의 창구(P0-6). assemble 경로는 ModelAssembler::loadBaseModel 이 이미 찍는다 —
+    // 그쪽은 `hfdamp_apply` 를 rawLines_ 로 부르므로 여기와 겹치지 않는다.
+    KooRemapper::include_scan::warnUnread(console, lines,
+        "*SET_PART ID 를 이 덱 안에서만 세었습니다 — 인클루드에 있는 세트와 겹쳐 발급할 수 있습니다");
     console.println("[hfdamp] Mode   : " + cfg.mode);
 
     // Find max set ID in file (handles both plain and _TITLE variants)

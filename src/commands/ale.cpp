@@ -1,4 +1,5 @@
 #include "parser/DeckWriter.h"
+#include "parser/IncludeScan.h"
 #include "ale.h"
 #include "kw_util.h"
 #include "cli/ConsoleOutput.h"
@@ -628,6 +629,8 @@ int runAle(const std::string& yamlFile, ConsoleOutput& console) {
     }
 
     int maxMid = 0, maxEosid = 0, maxSecid = 0, maxHgid = 0;
+    KooRemapper::include_scan::warnUnread(console, lines,
+        "재질·EOS·섹션·이력변수 ID 를 이 덱 안에서만 세었습니다 — 인클루드에 있는 번호와 겹칠 수 있습니다");
     ale_findMaxIds(lines, maxMid, maxEosid, maxSecid, maxHgid);
     int nextMid = maxMid + 1;
     int nextEosid = maxEosid + 1;

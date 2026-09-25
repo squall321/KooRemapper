@@ -12,6 +12,7 @@
 #endif
 
 #include "parser/DeckWriter.h"
+#include "parser/IncludeScan.h"
 #include "commands/meshfix.h"
 #include "core/Mesh.h"
 #include "core/Element.h"
@@ -2037,6 +2038,8 @@ int runMeshFix(const char* configPath, ConsoleOutput& console) {
 
     // 3. Load model
     console.info("Loading: " + cfg.model);
+    KooRemapper::include_scan::warnUnreadFile(console, cfg.model,
+        "노드·요소 ID 를 이 덱 안에서만 세었습니다 — 인클루드에 있는 번호와 겹쳐 발급할 수 있습니다");
     KFileReader reader;
     Mesh mesh = reader.readFile(cfg.model);
     if (mesh.getNodeCount() == 0) {

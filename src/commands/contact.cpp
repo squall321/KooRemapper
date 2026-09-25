@@ -1,4 +1,5 @@
 #include "parser/DeckWriter.h"
+#include "parser/IncludeScan.h"
 #include "contact.h"
 #include "contact_helpers.h"
 #include "kw_util.h"
@@ -440,6 +441,9 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
         std::string ln;
         while (std::getline(mf, ln)) lines.push_back(ln);
     }
+
+    KooRemapper::include_scan::warnUnread(console, lines,
+        "*SET_SEGMENT ID 를 이 덱 안에서만 세었습니다 — 인클루드에 있는 세트와 겹쳐 발급할 수 있습니다");
 
     // 3. Optionally load Mesh (for surface extraction)
     bool needMesh = false;

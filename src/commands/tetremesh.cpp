@@ -1,4 +1,5 @@
 #include "parser/DeckNewline.h"
+#include "parser/IncludeScan.h"
 #include "commands/tetremesh.h"
 #include "core/Mesh.h"
 #include "parser/KFileReader.h"
@@ -234,6 +235,8 @@ int runTetRemesh(const std::string& configPath,
     Timer timer;
 
     console.info("Loading mesh: " + cfg.model);
+    KooRemapper::include_scan::warnUnreadFile(console, cfg.model,
+        "노드·요소 ID 를 이 덱 안에서만 세었습니다 — 인클루드에 있는 번호와 겹쳐 발급할 수 있습니다");
     KFileReader reader;
     Mesh mesh;
     try {
