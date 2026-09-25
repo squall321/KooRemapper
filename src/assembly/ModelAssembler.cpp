@@ -15152,17 +15152,31 @@ bool ModelAssembler::applyGenerate(const GenerateOperation& op) {
     };
 
     // Format helpers
-    auto fmt10d = [](double v) -> std::string {
-        char buf[32];
-        if (v == 0.0)
-            snprintf(buf, sizeof(buf), "       0.0");
-        else if (std::abs(v) < 1e-4 || std::abs(v) >= 1e8)
-            snprintf(buf, sizeof(buf), "%10.4E", v);
-        else
-            snprintf(buf, sizeof(buf), "%10g", v);
-        std::string s(buf);
-        while (s.size() < 10) s = " " + s;
-        return s.substr(s.size() - 10);
+    //
+    // ⚠ 예전 구현은 `s.substr(s.size() - 10)` 으로 **앞을 버렸다.** `applyControl` 에서 이미
+    // 고친 것(e2281b3)과 **글자 그대로 같은 코드**가 여기 남아 있었다. 실측으로 둘이 깨졌다.
+    //   · `rho: -7.85e-9` → `%10.4E` 가 `-7.8500E-09`(11자) → 앞의 `-` 가 잘려 **부호가 사라진다**
+    //   · `E: 12345678.0` → `%10g` 가 `1.23457e+07`(11자) → `.23457e+07` 가 되어 값이
+    //     12,345,678 에서 약 2,345,700 으로 바뀌고 칸 폭까지 9자로 깨진다
+    // 둘 다 rc=0 이고 경고가 없었다. 이제 **유효자리를 줄여 가며** 10칸에 넣고, 그래도 안 되면
+    // 자르지 않고 실패로 기록한다(요청서 DF-03 "넘치면 자르지 말고 raise").
+    std::string genOverflow;
+    auto fmt10d = [&genOverflow](double v) -> std::string {
+        if (v == 0.0) return std::string("       0.0");
+        char buf[64];
+        const bool sci = (std::abs(v) < 1e-4 || std::abs(v) >= 1e8);
+        for (int prec = sci ? 4 : 6; prec >= 0; --prec) {
+            snprintf(buf, sizeof(buf), sci ? "%.*E" : "%.*g", prec, v);
+            std::string s(buf);
+            size_t b = s.find_first_not_of(' ');
+            if (b != std::string::npos) s = s.substr(b);
+            if (s.size() > 10) continue;                 // 더 짧은 표기를 시도
+            while (s.size() < 10) s = " " + s;
+            return s;
+        }
+        if (genOverflow.empty())
+            genOverflow = "값 " + std::string(buf) + " 를 10칸에 넣을 수 없습니다";
+        return std::string("       0.0");
     };
 
     // Build rawLines_
@@ -15247,6 +15261,13 @@ bool ModelAssembler::applyGenerate(const GenerateOperation& op) {
     maxPartId_    = pid;
     maxSectionId_ = secid;
     maxMaterialId_= mid;
+
+    if (!genOverflow.empty()) {
+        // 자르고 넘어가면 부호나 자릿수가 조용히 바뀐 덱이 나간다 — 그 덱은 구조 카운트가
+        // 전부 정상이라 아무도 못 알아본다. 쓰지 않고 멈춘다.
+        errorMessage_ = "generate: " + genOverflow + " — 출력 파일을 쓰지 않았습니다";
+        return false;
+    }
 
     int totalNodes = npx * npy * npz;
     int totalElems = nx * ny * nz;

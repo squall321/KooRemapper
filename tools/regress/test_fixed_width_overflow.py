@@ -111,6 +111,52 @@ def positive_still_works(binary):
             check("endtim 을 읽을 수 있다", False, repr(tm[0]))
 
 
+
+def generate_material_fields(binary):
+    """`generate` 가 재료 값을 10칸에 넣을 때 **앞자리를 버리던 것**(2026-09-25, P1-2 곁).
+
+    ⚠ `applyControl` 에서 이미 고친 것(e2281b3)과 **글자 그대로 같은 코드**가
+    `applyGenerate` 에 남아 있었다. 실측으로 둘이 깨졌다.
+      · `rho: -7.85e-9` → `%10.4E` 가 `-7.8500E-09`(11자) → 앞의 `-` 가 잘려 **부호가 사라진다**
+      · `E: 12345678.0` → `%10g` 가 `1.23457e+07`(11자) → `.23457e+07` 가 되어 값이
+        12,345,678 에서 약 2,345,700 으로 바뀌고 칸 폭까지 9자로 깨진다
+    둘 다 rc=0 이고 경고가 없었다. **같은 결함을 한 곳만 고치면 다른 곳에 남는다.**
+    """
+    print("[C generate 의 재료 칸도 앞자리를 버리지 않는다]")
+    d = tempfile.mkdtemp(prefix="fw_gen_")
+
+    def gen(name, rho, E, nu):
+        open(os.path.join(d, name + ".yaml"), "w").write(
+            "output: %s\noperations:\n  - type: generate\n    shape: box\n"
+            "    lx: 10.0\n    ly: 10.0\n    lz: 10.0\n    nx: 1\n    ny: 1\n    nz: 1\n"
+            "    rho: %s\n    E: %s\n    nu: %s\n" % (name, rho, E, nu))
+        rc, out = run(binary, d, "assemble", name + ".yaml")
+        return rc, out, control_fields(os.path.join(d, name + ".k"), "*MAT_ELASTIC")
+
+    rc, out, f = gen("gneg", "-7.85e-9", "210000.0", "-1.0e-7")
+    check("음수 재료 rc=0", rc == 0, out[-250:])
+    check("*MAT_ELASTIC 데이터 줄을 찾았다", len(f) >= 4, str(f))
+    if len(f) >= 4:
+        # 칸 1=mid, 2=ro, 3=e, 4=pr
+        check("ro 의 음수 부호가 살아 있다", f[1].strip().startswith("-"), repr(f[1]))
+        check("pr 의 음수 부호가 살아 있다", f[3].strip().startswith("-"), repr(f[3]))
+        check("각 칸이 정확히 10자다", all(len(x) == 10 for x in f[:4]),
+              [len(x) for x in f[:4]])
+
+    rc, out, f = gen("gbig", "-7.85e-9", "12345678.0", "0.3")
+    check("큰 E 값 rc=0", rc == 0, out[-250:])
+    if len(f) >= 3:
+        # `.23457e+07`(앞 1 을 버린 것)이 아니라 값이 보존돼야 한다
+        check("E 가 1.2e7 규모로 보존된다(앞자리를 안 버린다)",
+              not f[2].strip().startswith("."), repr(f[2]))
+        try:
+            v = float(f[2].strip())
+            check("E 값이 12345678 의 1%% 안에 있다", abs(v - 12345678.0) / 12345678.0 < 0.01,
+                  "v=%r" % v)
+        except ValueError:
+            check("E 칸이 숫자로 읽힌다", False, repr(f[2]))
+
+
 def main():
     if len(sys.argv) < 2:
         print("usage: test_fixed_width_overflow.py <KooRemapper 바이너리>")
@@ -121,6 +167,7 @@ def main():
         return 2
     negative_dt2ms(binary)
     positive_still_works(binary)
+    generate_material_fields(binary)
     print("")
     if FAILS:
         print("FAIL %d" % len(FAILS))
