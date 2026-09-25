@@ -79,3 +79,39 @@
 ### 다음(요청 측 답을 기다리는 것)
 - DF-07 예약 대역 **실제 값** / DF-08 "템플릿" **정의** / 회귀 코퍼스 / dangling rc 정책 합의
 - DF-20 편집 게이트 원장 — 출력 복사 4회 제거와 **같은 유닛**이어야 한다
+
+## 3차 — 덱 계약 2차 계획(plan2) 착수 (2026-09-25)
+
+M1 · 시험이 눈을 뜬다 · **완료**
+
+- [x] **P0-3** 매트릭스가 건너뛰지 않는다(0704b79) — 49 op = **판정 42 + 선언된 제외 7 · 건너뜀 0**
+  - 건너뜀 29의 정체는 셋이었다. ① 예제 폴더에 입력 덱이 없다(16) ② **판정이 틀렸다**(6 —
+    바이트 동일 보존이 "안 바뀐 입력" 으로 걸러졌다) ③ 정말 덱을 안 쓴다(7)
+  - `FIXTURES`(어느 덱을 왜 갖다 놓나) · `PREP`(cclip 은 입력이 생성물) · mtime 기준선 + 내용 해시
+    **둘 다** · 리포 `materials/` 스테이징(`matdb` 가 바이너리 위치로 갈렸다) · 선언 드리프트 FAIL
+  - `requires_gmsh` 인데 gmsh 가 없으면 **skip 이 아니라 FAIL**. 실사용이 찾아 준 바로 그 구멍이다
+  - 카탈로그는 고치지 않았다 — `example.args` 는 프런트 폼 자리표시자다(SessionDetailPage.tsx:54)
+
+M2 · 덱 쓰기 정합 · **개행 부분 완료**
+
+- [x] **P0-1** meshfix 2줄 포맷 요소 소실 + CRLF(2e47878, 2차에서 이미 마침)
+- [x] **P0-2** 개행을 아직 잃던 op — **계획의 10개가 아니라 12곳**이었다(afbc154, e841e5a)
+  - `explicit`·`implicit`·`modal`·`stabilize`·`database`·`hfdamp`·`optimize`·`cclip`·`squeeze` 9개
+    (`implicit`·`squeeze` 는 **한 파일 안에서 갈렸다**)
+  - 예제가 **안 켜는 키** 뒤에 셋 더 — cclip `stress_output: include` 의 dynain ·
+    cclip `free_output` 의 `_free.k` · squeeze `strain_mode` 의 dynain.
+    dynain 이 갈리는 것이 특히 나쁘다 — `*INCLUDE` 로 **함께 풀리는 짝**이 어긋난다
+  - `strip`·`matswap` 은 리눅스에서 우연히 보존됐다(리더가 `\r` 을 안 뗀다). MSVC `\r\r\n` 때문에
+    옮겼다 — 우연에 기대는 자리를 계약으로 바꾼다
+  - 새 관문 `test_deck_ofstream_allowlist.py` — `src/`·`include/` 의 `std::ofstream` 을 파일별로
+    선언한다. 수가 달라지거나 선언에 없는 파일에서 나오면 FAIL. 분류는 덱(보존)·덱(신규)·덱 아님
+
+회귀 **42 → 45개**, 전부 통과 · ctest 1/1. 변이 **13 + 4 + 2 = 19건 중 18건 잡힘**
+(`strip` 하나는 리눅스에서 우연히 보존되어 안 죽는다 — 잠금용으로 남겼다).
+
+### 아직 남은 것 (plan2 P0)
+- **P0-4** 게시본이 15커밋 뒤(cb4e208)에 멈춰 있다 — glibc 게이트 · `/api/health` 리비전+sha256 ·
+  재게시 · SIF 재굽기 의뢰(외부)
+- **P0-5** DB 백업 크론이 한 번도 돈 적 없다(`infra/data/backups` 가 없다)
+- **P0-6** ID 발행이 `*INCLUDE` 를 못 봤다고 말하게 한다(번호는 그대로)
+- **P0-7** 답신 회신 — 정정 2 · 새 결함 3 · 아직 안 알린 동작 변경 3
