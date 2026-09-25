@@ -1,4 +1,5 @@
 #include "modal.h"
+#include "parser/DeckWriter.h"
 #include "kw_util.h"
 #include "cli/ConsoleOutput.h"
 #include "util/YamlComment.h"
@@ -158,9 +159,11 @@ int runModal(const std::string& yamlFile, ConsoleOutput& console) {
         removeAndLog("*CONTROL_IMPLICIT_SOLUTION");
         removeAndLog("*CONTROL_IMPLICIT_SOLVER");
 
-        std::ofstream out(outFullPath);
-        if (!out.is_open()) { console.error("Cannot write output: " + outFullPath); return 1; }
+        KooRemapper::DeckWriter out_w(outFullPath, KooRemapper::deck_newline::detect(modelFullPath));
+        if (!out_w.ok()) { console.error("Cannot write output: " + outFullPath); return 1; }
+        std::ostream& out = out_w.stream();
         for (const auto& ln : lines) out << ln << "\n";
+        out_w.close();
         console.println("[modal] Done    -> " + outPath);
         return 0;
     }
@@ -249,9 +252,11 @@ int runModal(const std::string& yamlFile, ConsoleOutput& console) {
         console.println("[modal] Inserted: *CONTROL_IMPLICIT_SOLVER (MUMPS)");
 
     // 9. Write output
-    std::ofstream out(outFullPath);
-    if (!out.is_open()) { console.error("Cannot write output: " + outFullPath); return 1; }
+    KooRemapper::DeckWriter out_w(outFullPath, KooRemapper::deck_newline::detect(modelFullPath));
+    if (!out_w.ok()) { console.error("Cannot write output: " + outFullPath); return 1; }
+    std::ostream& out = out_w.stream();
     for (const auto& ln : lines) out << ln << "\n";
+    out_w.close();
     console.println("[modal] Done    -> " + outPath);
     return 0;
 }

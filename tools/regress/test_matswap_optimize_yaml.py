@@ -151,6 +151,31 @@ def main():
           rc == 1 and "'pid' must be an integer" in out and "Unhandled error" not in out,
           f"rc={rc} {out[-300:]}")
 
+    print("[matswap+optimize 연쇄가 CRLF 를 잃지 않는다]")
+    # 왜 여기 있나 (2026-09-25, 덱 계약 2차 P0-2):
+    #   `matswap` YAML 에 `optimize:` 를 같이 적으면 한 호출 안에서 **덱을 두 번 쓴다** —
+    #   ModelAssembler 가 쓰고(개행 보존), 그 파일을 optimize 가 다시 읽어 덮어쓴다. 뒤쪽이
+    #   `\r` 을 떼고 `\n` 으로 써서 CRLF 가 전멸했다(CRLF 0 / LF단독 82).
+    #   전 op 매트릭스는 이 갈래를 못 본다 — 카탈로그 예제에 `optimize:` 를 쓰는 matswap 이 없고,
+    #   `optimize` op 은 별도 명령(optimize.cpp)이라 다른 경로다. 그래서 여기서 지킨다.
+    d2 = workdir("mswopt_crlf_")
+    for fn in ("two_cubes.k", "rubber.k"):
+        fp = os.path.join(d2, fn)
+        b = open(fp, "rb").read().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+        open(fp, "wb").write(b)
+    write(d2, "crlf_chain.yaml",
+          "model: two_cubes.k\noutput: crlf_chain.k\nswaps:\n  - bundle: rubber.k\n    pid: 1\n"
+          "optimize: rubber\ntssfac: 0.67\nanalysis_type: explicit\n")
+    rc, out = run(binary, d2, "matswap", "crlf_chain.yaml")
+    check("matswap+optimize rc=0", rc == 0, f"rc={rc} {out[-300:]}")
+    op2 = os.path.join(d2, "crlf_chain.k")
+    check("산출물이 생겼다", os.path.exists(op2), out[-200:])
+    if os.path.exists(op2):
+        b = open(op2, "rb").read()
+        crlf, lone = b.count(b"\r\n"), b.count(b"\n") - b.count(b"\r\n")
+        check("CRLF 가 살아 있고 LF 단독 줄이 없다", crlf > 0 and lone == 0,
+              f"CRLF {crlf} / LF단독 {lone}")
+
     print()
     if FAILS:
         print(f"FAIL {len(FAILS)}")

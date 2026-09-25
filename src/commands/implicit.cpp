@@ -1,4 +1,5 @@
 #include "implicit.h"
+#include "parser/DeckWriter.h"
 #include "kw_util.h"
 #include "cli/ConsoleOutput.h"
 #include "util/YamlComment.h"
@@ -206,9 +207,11 @@ int runExplicit(const std::string& yamlFile, ConsoleOutput& console) {
         }
     }
 
-    std::ofstream out(outPath);
-    if (!out.is_open()) { console.error("Cannot write output: " + outPath); return 1; }
+    KooRemapper::DeckWriter out_w(outPath, KooRemapper::deck_newline::detect(modelPath));
+    if (!out_w.ok()) { console.error("Cannot write output: " + outPath); return 1; }
+    std::ostream& out = out_w.stream();
     for (const auto& ln : lines) out << ln << "\n";
+    out_w.close();
     console.println("[explicit] Done    -> " + outPath);
     return 0;
 }
@@ -319,9 +322,11 @@ int runImplicit(const std::string& yamlFile, ConsoleOutput& console) {
         removeAndLog("*CONTROL_IMPLICIT_ROTATIONAL_DYNAMICS");
         removeAndLog("*CONTROL_IMPLICIT_EIGENVALUE");
 
-        std::ofstream out(outPath);
-        if (!out.is_open()) { console.error("Cannot write output: " + outPath); return 1; }
+        KooRemapper::DeckWriter out_w(outPath, KooRemapper::deck_newline::detect(modelPath));
+        if (!out_w.ok()) { console.error("Cannot write output: " + outPath); return 1; }
+        std::ostream& out = out_w.stream();
         for (const auto& ln : lines) out << ln << "\n";
+        out_w.close();
         console.println("[implicit] Done    -> " + outPath);
         return 0;
     }
@@ -451,9 +456,11 @@ int runImplicit(const std::string& yamlFile, ConsoleOutput& console) {
         console.println(msg);
     }
 
-    std::ofstream out(outPath);
-    if (!out.is_open()) { console.error("Cannot write output: " + outPath); return 1; }
+    KooRemapper::DeckWriter out_w(outPath, KooRemapper::deck_newline::detect(modelPath));
+    if (!out_w.ok()) { console.error("Cannot write output: " + outPath); return 1; }
+    std::ostream& out = out_w.stream();
     for (const auto& ln : lines) out << ln << "\n";
+    out_w.close();
     console.println("[implicit] Done    -> " + outPath);
     return 0;
 }

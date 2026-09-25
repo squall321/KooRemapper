@@ -1,5 +1,6 @@
 // C-clip(스프링 접점) 생성 op 구현 — 박스 파트 치환·Castigliano 캘리브레이션·모멘트일치 눌림·INITIAL_STRESS_SHELL 출력.
 #include "cclip.h"
+#include "parser/DeckWriter.h"
 #include "cli/ConsoleOutput.h"
 #include "parser/KFileReader.h"
 #include "core/Mesh.h"
@@ -1692,10 +1693,11 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
 
     kw_insertBeforeEnd(lines, ins.str());
 
-    std::ofstream of(outPath);
-    if (!of.is_open()) { console.error("[cclip] cannot write: " + outPath); return 1; }
+    KooRemapper::DeckWriter of_w(outPath, KooRemapper::deck_newline::detect(modelPath));
+    if (!of_w.ok()) { console.error("[cclip] cannot write: " + outPath); return 1; }
+    std::ostream& of = of_w.stream();
     for (const auto& l : lines) of << l << "\n";
-    of.close();
+    of_w.close();
     console.success("[cclip] Done → " + outPath);
 
     // ------------------------------------------------------------------

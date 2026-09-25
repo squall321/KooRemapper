@@ -1,4 +1,5 @@
 #include "squeeze_assemble.h"
+#include "parser/DeckWriter.h"
 #include "util/YamlComment.h"
 #include "relax.h"
 #include "core/Mesh.h"
@@ -381,6 +382,8 @@ int runSqueeze(const std::string& meshFile, const std::string& configFile,
         bool hasDynain = (dynainElementCount > 0);
 
         // Re-read the compressed mesh and insert before *END
+        // 자기 산출 덱을 다시 읽어 덮어쓴다 — 개행은 덮어쓰기 전에 봐 둔다.
+        const KooRemapper::DeckNewline meshNl = KooRemapper::deck_newline::detect(meshOutputFile);
         std::ifstream srcFile(meshOutputFile);
         if (!srcFile.is_open()) {
             console.error("Failed to re-read compressed mesh");
@@ -449,13 +452,13 @@ int runSqueeze(const std::string& meshFile, const std::string& configFile,
             meshContent += "*END\n";
         }
 
-        std::ofstream dstFile(meshOutputFile, std::ios::binary);
-        if (!dstFile.is_open()) {
+        KooRemapper::DeckWriter dstFile_w(meshOutputFile, meshNl);
+        if (!dstFile_w.ok()) {
             console.error("Failed to write mesh with additions");
             return 1;
         }
-        dstFile << meshContent;
-        dstFile.close();
+        dstFile_w.stream() << meshContent;
+        dstFile_w.close();
 
         if (hasDynain) {
             console.success("Added *INCLUDE to: " + meshOutputFile);

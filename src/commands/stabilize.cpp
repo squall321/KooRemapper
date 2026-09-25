@@ -1,4 +1,5 @@
 #include "stabilize.h"
+#include "parser/DeckWriter.h"
 #include "util/YamlComment.h"
 #include "contact_helpers.h"
 #include "kw_util.h"
@@ -541,9 +542,11 @@ int runStabilize(const std::string& yamlFile, ConsoleOutput& console) {
     for (const auto& m : msgs) console.println(m);
 
     {
-        std::ofstream fout(outputPath);
-        if (!fout.is_open()) { console.error("Cannot write: " + outputPath); return 1; }
+        KooRemapper::DeckWriter fout_w(outputPath, KooRemapper::deck_newline::detect(modelPath));
+        if (!fout_w.ok()) { console.error("Cannot write: " + outputPath); return 1; }
+        std::ostream& fout = fout_w.stream();
         for (const auto& l : lines) fout << l << "\n";
+        fout_w.close();
     }
 
     console.println("[stabilize] Done -> " + outputPath);

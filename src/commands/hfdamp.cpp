@@ -1,4 +1,5 @@
 #include "hfdamp.h"
+#include "parser/DeckWriter.h"
 #include "cli/ConsoleOutput.h"
 #include "util/YamlComment.h"
 
@@ -636,9 +637,11 @@ int runHFDamp(const std::string& yamlFile, ConsoleOutput& console) {
     if (rc != 0) return rc;
 
     // Write output
-    std::ofstream out(outPath);
-    if (!out.is_open()) { console.error("Cannot write output: " + outPath); return 1; }
+    KooRemapper::DeckWriter out_w(outPath, KooRemapper::deck_newline::detect(modelPath));
+    if (!out_w.ok()) { console.error("Cannot write output: " + outPath); return 1; }
+    std::ostream& out = out_w.stream();
     for (auto& l : lines) out << l << "\n";
+    out_w.close();
 
     console.println("[hfdamp] Done   -> " + outPath);
     return 0;

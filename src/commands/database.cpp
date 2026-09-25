@@ -1,4 +1,5 @@
 #include "database.h"
+#include "parser/DeckWriter.h"
 #include "util/YamlComment.h"
 #include "cli/ConsoleOutput.h"
 
@@ -400,8 +401,9 @@ int runDatabase(const std::string& yamlFile, ConsoleOutput& console) {
     insertBlock += "$\n";
 
     console.info("Writing output: " + outputPath);
-    std::ofstream out(outputPath);
-    if (!out.is_open()) { console.error("Cannot write: " + outputPath); return 1; }
+    KooRemapper::DeckWriter out_w(outputPath, KooRemapper::deck_newline::detect(modelPath));
+    if (!out_w.ok()) { console.error("Cannot write: " + outputPath); return 1; }
+    std::ostream& out = out_w.stream();
 
     bool endFound = false;
     for (const auto& ln : rawLines) {
@@ -420,7 +422,7 @@ int runDatabase(const std::string& yamlFile, ConsoleOutput& console) {
         out << insertBlock;
         out << "*END\n";
     }
-    out.close();
+    out_w.close();
 
     std::cout << "\n";
     console.success("Inserted: " + std::to_string(insertedCount) + " keyword(s)");

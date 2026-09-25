@@ -1,4 +1,5 @@
 #include "matswap.h"
+#include "parser/DeckWriter.h"
 #include "util/YamlComment.h"
 #include "kw_util.h"
 #include "optimize.h"
@@ -400,9 +401,11 @@ int runMatswap(const std::string& modelFile, const std::string& bundleFile,
 
     // 11. Write output file
     {
-        std::ofstream fout(outputFile);
-        if (!fout.is_open()) { console.error("Cannot write: " + outputFile); return 1; }
+        KooRemapper::DeckWriter fout_w(outputFile, KooRemapper::deck_newline::detect(modelFile));
+        if (!fout_w.ok()) { console.error("Cannot write: " + outputFile); return 1; }
+        std::ostream& fout = fout_w.stream();
         for (const auto& ln : output) fout << ln << "\n";
+        fout_w.close();
     }
     console.println("[matswap] Done -> " + outputFile);
     return 0;
@@ -643,6 +646,8 @@ int runMatswapYaml(const std::string& yamlFile, ConsoleOutput& console) {
         }
 
         std::string outputPath = outputPrefix + ".k";
+        // 이 op 은 **자기 입력 파일을 덮어쓴다** — 개행은 덮어쓰기 전에 봐 둬야 한다.
+        const KooRemapper::DeckNewline outNl = KooRemapper::deck_newline::detect(outputPath);
         std::vector<std::string> lines;
         {
             std::ifstream fin(outputPath);
@@ -664,9 +669,11 @@ int runMatswapYaml(const std::string& yamlFile, ConsoleOutput& console) {
         for (const auto& m : msgs) console.println(m);
 
         {
-            std::ofstream fout(outputPath);
-            if (!fout.is_open()) { console.error("Cannot write: " + outputPath); return 1; }
+            KooRemapper::DeckWriter fout_w(outputPath, outNl);
+            if (!fout_w.ok()) { console.error("Cannot write: " + outputPath); return 1; }
+            std::ostream& fout = fout_w.stream();
             for (const auto& l : lines) fout << l << "\n";
+            fout_w.close();
         }
         console.println("[optimize] Done -> " + outputPath);
     }
