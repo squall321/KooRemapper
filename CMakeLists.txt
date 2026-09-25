@@ -281,6 +281,16 @@ if(KOOREMAPPER_PLATFORM_BIN)
             "${KOOREMAPPER_PLATFORM_BIN}/materials"
         COMMENT "Copying KooRemapper binary + materials -> ${KOOREMAPPER_PLATFORM_BIN}"
         VERBATIM)
+    # ⚠ 이 복사는 **배포용 자리**를 덮어쓴다. 호스트 glibc 가 컨테이너보다 신형이면 그 순간
+    # 그 바이너리는 컨테이너에서 실행 자체가 안 된다 — 09-24 와 09-25 에 두 번, 두 번 다
+    # 아무 말 없이 일어났다. 빌드를 실패시키지는 않는다(순수 CLI 개발은 호스트 빌드로 해도
+    # 된다). 진짜 관문은 게시 쪽이다 — 여기서는 **시끄럽게 말하기만** 한다.
+    if(UNIX)
+        add_custom_command(TARGET KooRemapper POST_BUILD
+            COMMAND "${CMAKE_SOURCE_DIR}/scripts/warn_platform_bin_glibc.sh"
+                    "${KOOREMAPPER_PLATFORM_BIN}/$<TARGET_FILE_NAME:KooRemapper>" "2.35"
+            VERBATIM)
+    endif()
 endif()
 
 # ============================================================

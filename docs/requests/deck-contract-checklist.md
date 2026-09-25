@@ -154,9 +154,8 @@ M0 · 신뢰 회복 · **완료** / M3 · 게시 · **완료**
 - [x] **P1-8** 플랫폼 개행 경고(45de81c) — P0-2 가 끝나 풀린 항목
   - ⚠ 판정 대조만으로는 **혼재 덱을 놓친다**(`count(CRLF)*2 > count(LF)` 규약). 혼재를 규칙으로 넣었다
   - 변이 시험이 제 가드 하나가 **거꾸로**임을 알려 줬다(덮어쓴 파일의 왕복 전 개행도 입력이다)
-- [ ] **CI** — 내가 skip 을 FAIL 로 바꿔 **CI 가 빨갛다.** 패치는 만들었으나 워크플로 파일은
-  토큰 권한(`workflow` 스코프)으로 못 올린다 → `docs/requests/ci-gmsh-2026-09-25.md`
+- [x] **CI 에 gmsh**(bc2eba2) — 내가 skip 을 FAIL 로 바꿔 CI 가 빨갰다. `.github/workflows/` 는
+  HTTPS+PAT 로 못 미는데(`workflow` 스코프) **SSH 로는 된다** → `docs/requests/ci-gmsh-2026-09-25.md`
 
 ### 아직 남은 것
-- **CI 에 gmsh** — 위 패치 적용(토큰 권한 필요)
 - **SIF 재굽기 의뢰**(외부) — SmartTwinPreprocessor.sif 안 바이너리를 새 게시본으로
