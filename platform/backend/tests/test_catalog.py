@@ -16,6 +16,35 @@ def test_catalog_loads_all_ops():
     assert "map" in names and "assemble" in names and "meshfix" in names
 
 
+def test_example_folder_is_repo_relative_and_exists():
+    """`example_folder` 는 **리포 상대 경로**여야 하고 실제로 있어야 한다.
+
+    왜 이 시험이 있나 (2026-09-26) — 이 값이 49개 중 48개
+    `/home/koopark/claude/KooRemapper/examples/...` **절대 경로**였다. 그 경로는 CI 러너에도,
+    배포 컨테이너 안에도 없다. `tools/regress/test_newline_matrix.py` 와
+    `test_roundtrip_bytes.py` 가 그 값을 `os.path.isdir` 에 넣고 없으면 FAIL 하므로, 캠페인의
+    대표 관문 둘이 **개발 박스 한 대에서만** 돌았고 CI 는 28연속 빨강이었다. 로그가 403 으로
+    막혀 5일간 아무도 몰랐다.
+
+    절대 경로를 쓰고 싶으면 이 시험을 먼저 고쳐야 한다 — 그때는 "왜 이 기계에만 있는 경로가
+    카탈로그에 필요한가" 에 답이 있어야 한다.
+    """
+    repo = Path(__file__).resolve().parents[3]
+    missing, absolute = [], []
+    for name in catalog.operation_names():
+        op = catalog.get_operation(name)
+        folder = op.get("example_folder")
+        if not folder:
+            continue
+        if Path(folder).is_absolute():
+            absolute.append(f"{name}: {folder}")
+            continue
+        if not (repo / folder).is_dir():
+            missing.append(f"{name}: {folder}")
+    assert not absolute, "example_folder 가 절대 경로다(기계에 묶인다): " + ", ".join(absolute)
+    assert not missing, "example_folder 가 리포에 없다: " + ", ".join(missing)
+
+
 def test_every_op_has_required_fields():
     for name in catalog.operation_names():
         op = catalog.get_operation(name)

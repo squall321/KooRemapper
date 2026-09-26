@@ -52,6 +52,18 @@ from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.normpath(os.path.join(HERE, "..", ".."))
+
+# 카탈로그의 `example_folder` 를 **리포 루트 기준**으로 푼다.
+#
+# ⚠ 왜 이 함수가 있나 — 예전에는 카탈로그 값을 그대로 `os.path.isdir` 에 넣었다. 그 값이
+# 49개 중 48개 `/home/koopark/claude/KooRemapper/examples/...` **절대 경로**였고, 그래서 이
+# 시험은 **그 박스 한 대에서만** 돌았다. CI 러너(`/home/runner/work/...`)에서는 제외를 뺀
+# 42 op 전부가 "예제 폴더가 없다" 로 FAIL 했다 — 28연속 빨강의 원인이 이것이다.
+# (절대 경로 자체도 틀린 값이었다. 컨테이너 안에도 그 경로는 없다.)
+def resolve_folder(v):
+    if not v:
+        return None
+    return v if os.path.isabs(v) else os.path.join(REPO, v)
 CORE = os.path.join(REPO, "platform", "core")
 CATALOG = os.path.join(CORE, "kooremapper_core", "catalog_data.json")
 
@@ -205,7 +217,7 @@ def main():
         if name in EXCLUDE:
             EXCLUDED.append("%s — %s" % (name, EXCLUDE[name]))
             continue
-        folder = o.get("example_folder")
+        folder = resolve_folder(o.get("example_folder"))
         args = (o.get("example") or {}).get("args")
         if not folder or not os.path.isdir(folder) or not isinstance(args, dict):
             fail(name, "예제 폴더/인자가 없다 — 카탈로그를 고치거나 EXCLUDE 에 이유를 적어야 한다")
