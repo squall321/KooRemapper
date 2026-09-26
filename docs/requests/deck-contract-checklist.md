@@ -4,6 +4,25 @@
 **공통 선행 관문** — LF 덱은 바이트가 안 바뀌어야 한다. `examples/*/small/*.k` 전 op 출력 sha256 을
 수정 전에 떠 두고 매 단계 대조한다. 여기서 깨지면 개행 재적용이 틀린 것이다.
 
+## plan2 P1-6 · 절대 참조 검사 확장 + 손상 덱 탐지 (2026-09-26)
+- [x] `*ELEMENT`→PID, `*PART`→SECID/MID 를 `info` 가 보고한다 (`checkElementPartReferences`,
+      `ModelAssembler.cpp` — 카드 경계 판정(`ecBuildIndex`)이 있는 자리에 둔다. 베끼면 판정이 갈린다)
+      → 검증: 심은 결함 5종(요소→없는 파트 · 파트→없는 섹션 · 파트→없는 재질 · I10 덱 · **PID `-1`**)
+- [x] `*PART` 카드2 는 **읽는 쪽과 같은 순서**로 읽는다(자유형식 토큰 → 10칸 → 8칸)
+      → ⚠ 10칸부터 읽으면 칸이 어긋난 덱(`base_model_3part.k` 계열, 리포에 실재)에서 SECID 가 빈칸으로
+        읽혀 그 파트가 '정의된 적 없다' 가 되고 요소 전부가 **가짜 미정의 참조**로 뜬다. 실제로 그랬다.
+      → 고정폭 폴백은 칸을 **다듬어서** `rsIntField` 에 넘긴다(공백이 하나라도 있으면 -1 이다)
+- [x] `*CONTACT_*` 손상 탐지 — SSID/MSID 칸의 실수, 필수 카드 3장 미달 (`ReferenceIntegrity.cpp`)
+      → 표면 대 표면 **서명이 확인될 때만** 3장 규칙을 쓴다(SSTYP/MSTYP 0-6). `*CONTACT_1D` 처럼
+        카드 구성이 다른 변종에 들이대면 오탐이 난다
+- [x] 리포 덱 **275장 전수** 오탐 조사 — 손상 축 0건 / 참조 축 19장은 **전부 실제 결함**으로 확인
+      (offset 예제 13장은 기반 덱 `arc30_flat.k` 에 `*PART` 가 없다 · squeeze_interference 2장은
+       `*SECTION` 이 아예 없다 · wrap 2장은 섹션·재질 2번이 없다 · matdb 2장은 요소 카드가 8칸 덱에
+       10칸으로 적혀 LS-DYNA 가 PID 를 1 로 읽는다). **픽스처는 고치지 않았다** — 고치면 이 시험이
+       무엇을 지키는지 알 수 없게 된다
+- [x] `info` 의 rc 는 0 불변(상위 파이프라인 계약)
+- [x] 회귀 `test_element_part_references.py` — 돌연변이 13종 전부 사망
+
 ## P1-6 · D — 버그 2건 (선행 없음, 가장 작음)
 - [x] `histElem` 에 `_SET` 제외 추가 (`ModelAssembler.cpp:2938`) — `histPart`(:2896)에는 이미 있다
       → 검증: `*DATABASE_HISTORY_SOLID_SET 7` 심고 merge → rc=1 오탐 사라짐

@@ -14,8 +14,19 @@ struct DanglingRef {
     int id = 0;               // 가리킨 ID
 };
 
+// 참조가 아니라 **카드 자체가 망가진** 것 — LS-DYNA 가 읽을 수 없거나 우리와 다르게 읽는다.
+// 이 리포가 실제로 만들어 낸 손상들이다: `contact modify` 가 `_ID` 덱에서 줄을 한 칸 밀어
+// 마찰계수를 SSID 칸에 덮어썼고, 선택 카드를 다시 쓰면서 필수 Card 3 를 지웠다(P1-4 가 그
+// 쓰기를 고쳤다). 이 검사는 **이미 그렇게 망가진 덱을 알아보는** 쪽이다.
+struct DamagedCard {
+    int line = 0;             // 1-기반 줄 번호
+    std::string keyword;      // 그 카드의 키워드
+    std::string what;         // 사람이 읽을 한 문장
+};
+
 struct ReferenceReport {
     std::vector<DanglingRef> dangling;
+    std::vector<DamagedCard> damaged;
     // ⚠ `*INCLUDE` 가 있으면 세트가 그 안에 정의됐을 수 있다. 그때는 "0건" 이라고 **말하면 안 된다**.
     bool hasUnreadIncludes = false;
     std::vector<std::string> includeNames;

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""요소가 가리키는 **파트**, 파트가 가리키는 **섹션·재질** 이 정의돼 있나 (P1-6).
+"""요소→파트·파트→섹션·재질 참조와 **망가진 `*CONTACT_` 카드** 를 `info` 가 보는가 (P1-6).
 
 왜 이 시험이 있나 (2026-09-26):
 
@@ -202,6 +202,51 @@ def main():
         if "칸이 어긋났다" in why:
             # 조용한 것과 **못 본 것을 감추는 것**은 다르다 — 어긋난 카드는 세어서 말해야 한다.
             check("   C 어긋난 카드를 세어 말한다", "검사하지 않은 자리" in out, out[-400:])
+
+    print("[E 망가진 *CONTACT_ 카드 — 참조가 아니라 카드 자체가 깨진 축]")
+    # `_ID` 덱에서 줄이 한 칸 밀리면 마찰계수가 SSID 칸에 덮어써진다(P1-4 가 그 쓰기를 고쳤다).
+    # 이미 그렇게 망가진 덱을 알아보는 쪽이 이 검사다.
+    ID_HEAD = "*CONTACT_TIED_SURFACE_TO_SURFACE_OFFSET_ID\n        11Contact_1\n"
+    C1 = "         1         2         3         3         0         0         0         0\n"
+    C2 = "       0.2       0.1       0.0       0.0       0.0         0       0.0  1.00E+20\n"
+    C3 = "       1.0       1.0       0.0       0.0       1.0       1.0       1.0       1.0\n"
+    dmg = [
+        ("E-1 SSID 칸에 마찰계수가 덮어써졌다",
+         ID_HEAD + "      0.33       0.1       3         3         0         0         0         0\n" + C2 + C3,
+         r"SSID 칸에 실수 0\.33"),
+        ("E-2 필수 Card 3 가 사라졌다",
+         ID_HEAD + C1 + C2,
+         r"필수 카드가 2장뿐입니다"),
+    ]
+    for i, (name, cards, pat) in enumerate(dmg):
+        p = write("e%d.k" % i, CLEAN.replace("*END", cards + "*END", 1))
+        rc, out = info(binary, p)
+        hits = [l.strip() for l in out.splitlines() if re.search(r"^\s+line \d+ \*CONTACT", l)]
+        check(name, any(re.search(pat, h) for h in hits), "보고=%r" % hits)
+        check("   " + name.split()[0] + " rc 는 0 이다", rc == 0, out[-300:])
+    # 온전한 `_ID` 덱은 조용해야 한다 — 여기서 오탐이 나면 `_ID` 줄을 Card 1 로 센 것이다.
+    p = write("e_ok.k", CLEAN.replace("*END", ID_HEAD + C1 + C2 + C3 + "*END", 1))
+    rc, out = info(binary, p)
+    check("E-3 온전한 _ID 덱에는 조용하다",
+          not [l for l in out.splitlines() if re.search(r"^\s+line \d+ \*CONTACT", l)], out)
+    # 카드 구성이 **다른 변종**에 3장 규칙을 들이대면 안 된다. `*CONTACT_1D` 는 카드가 한 장이고
+    # 3·4번째 칸이 SSTYP/MSTYP 가 아니라 ID 다 — 그 칸이 0-6 을 벗어나면 서명이 아니라고 보고
+    # 검사를 접는다. 이 빗장을 빼면 이 덱이 "필수 카드가 1장뿐" 이라는 오탐으로 뜬다.
+    p = write("e_1d.k", CLEAN.replace(
+        "*END", "*CONTACT_1D\n         1         2        11        12\n*END", 1))
+    rc, out = info(binary, p)
+    check("E-4 카드 구성이 다른 변종에는 3장 규칙을 안 쓴다",
+          not [l for l in out.splitlines() if re.search(r"^\s+line \d+ \*CONTACT", l)], out)
+
+    # 리포의 접촉 덱 21장 전부에 손상 보고가 없어야 한다(전수는 느리니 대표 2장을 못 박는다)
+    for rel in ("examples/contact/model.k", "examples/replace_test/assembled_replace_result.k"):
+        path = os.path.join(ROOT, rel)
+        if not os.path.exists(path):
+            check("E " + rel, False, "덱이 없다 — 시험을 고쳐라")
+            continue
+        rc, out = info(binary, path)
+        check("E " + rel + " 에 손상 보고가 없다",
+              not [l for l in out.splitlines() if re.search(r"^\s+line \d+ \*CONTACT", l)], out)
 
     print("[D 리포의 진짜 결함 덱은 계속 보고한다]")
     for rel, pat, why in LOUD:

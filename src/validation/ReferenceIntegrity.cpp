@@ -65,6 +65,56 @@ bool hasParameterRef(const std::string& line) { return line.find('&') != std::st
 // `*SET_*` 정의의 제목줄 수. `_TITLE` 이면 SID 줄 앞에 제목이 한 줄 더 있다.
 int titleLines(const std::string& kw) { return has(kw, "_TITLE") ? 1 : 0; }
 
+// 정수 칸에 **실수**가 들어 있는가 — `0.33`, `1.0E+20` 같은 표기. LS-DYNA 는 정수 칸의
+// 그런 글자를 우리와 다르게 읽는다(대개 앞자리만, 또는 0 으로).
+bool looksReal(const std::string& s) {
+    bool digit = false, mark = false;
+    for (char c : s) {
+        if (std::isdigit((unsigned char)c)) { digit = true; continue; }
+        if (c == '.') { mark = true; continue; }
+        if ((c == 'e' || c == 'E' || c == 'd' || c == 'D') && digit) { mark = true; continue; }
+        if (c == '+' || c == '-') continue;
+        return false;                       // 그 밖의 글자는 우리가 아는 수가 아니다
+    }
+    return digit && mark;
+}
+
+// `*CONTACT_*` 의 **카드 자체 손상**을 본다(참조 무결성과는 다른 축이다).
+//   ① Card 1 의 SSID/MSID 칸에 실수가 들어 있다 — 정수 칸이다.
+//   ② 필수 카드가 모자란다 — 표준 접촉은 Card 1·2·3 이 **필수**다.
+// ②는 **표면 대 표면 서명이 확인될 때만** 센다. `*CONTACT_INTERIOR`·`*CONTACT_1D` 처럼
+// 카드 구성이 다른 변종을 3장으로 단정하면 오탐이 나고, 오탐이 나면 이 보고를 아무도 안 믿는다.
+void contactDamage(const std::vector<std::string>& lines, size_t i, const std::string& kw,
+                   ReferenceReport& rep) {
+    const bool hasId = (kw.size() >= 3 && kw.compare(kw.size() - 3, 3, "_ID") == 0) || has(kw, "_ID_");
+    int skip = (has(kw, "_TITLE") ? 1 : 0) + (hasId ? 1 : 0);
+    std::vector<size_t> data;
+    for (size_t j = i + 1; j < lines.size(); ++j) {
+        const std::string d = trim(lines[j]);
+        if (d.empty() || isComment(d)) continue;
+        if (isKeyword(d)) break;
+        if (skip > 0) { --skip; continue; }
+        data.push_back(j);
+    }
+    if (data.empty()) { ++rep.notChecked; return; }
+    if (hasParameterRef(lines[data[0]])) { ++rep.notChecked; return; }   // &name — 값이 기호다
+
+    const auto f1 = fields10(lines[data[0]]);
+    static const char* const kName[2] = {"SSID", "MSID"};
+    for (size_t c = 0; c < 2 && c < f1.size(); ++c)
+        if (looksReal(f1[c]))
+            rep.damaged.push_back({(int)data[0] + 1, kw,
+                std::string(kName[c]) + " 칸에 실수 " + f1[c] + " 가 들어 있습니다(정수 칸입니다)"});
+
+    int sstyp = 0, mstyp = 0;
+    const bool sig = f1.size() >= 4 && toInt(f1[2], sstyp) && toInt(f1[3], mstyp)
+                     && sstyp >= 0 && sstyp <= 6 && mstyp >= 0 && mstyp <= 6;
+    if (!sig) { ++rep.notChecked; return; }
+    if (data.size() < 3)
+        rep.damaged.push_back({(int)i + 1, kw,
+            "필수 카드가 " + std::to_string(data.size()) + "장뿐입니다 — 표준 접촉은 Card 1·2·3 이 필수입니다"});
+}
+
 }  // namespace
 
 ReferenceReport checkSetReferences(const std::vector<std::string>& lines) {
@@ -126,6 +176,8 @@ ReferenceReport checkSetReferences(const std::vector<std::string>& lines) {
         const bool contact  = starts(kw, "*CONTACT_");
 
         if (!(histSet || spcSet || dampSet || loadSet || cnrb || contact)) continue;
+
+        if (contact) contactDamage(lines, i, kw, rep);
 
         // 제목줄 건너뛰기. `_TITLE` 은 1줄, `_ID` 도 cid+제목 줄이 1줄 더 있다.
         int skip = (has(kw, "_TITLE") ? 1 : 0) + ((kw.size() >= 3 && kw.compare(kw.size() - 3, 3, "_ID") == 0) ||

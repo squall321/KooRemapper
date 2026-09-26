@@ -1337,6 +1337,19 @@ int runInfo(const std::string& meshFile, const ConsoleOutput& console) {
         } else {
             console.success("참조 무결성 OK (세트·파트·섹션·재질 미정의 참조 0건)");
         }
+        // 손상된 카드는 **참조와 다른 축**이다 — 가리킨 대상이 없는 것이 아니라 카드가 깨졌다.
+        // `*INCLUDE` 와 무관하게 단정할 수 있다(이 덱 안에서 본 것이 전부다).
+        if (!ref.damaged.empty()) {
+            console.error("망가진 카드 " + std::to_string(ref.damaged.size()) +
+                          "건 — LS-DYNA 가 이 칸을 우리와 다르게 읽습니다");
+            size_t shown = 0;
+            for (const auto& d : ref.damaged) {
+                if (shown++ >= 20) { console.println("  … 외 " +
+                    std::to_string(ref.damaged.size() - 20) + "건"); break; }
+                console.println("  line " + std::to_string(d.line) + " " + d.keyword + ": " + d.what,
+                                ConsoleOutput::Color::RED);
+            }
+        }
         if (ref.hasUnreadIncludes) {
             std::string names;
             for (size_t k = 0; k < ref.includeNames.size(); ++k)
