@@ -88,10 +88,13 @@ void contactDamage(const std::vector<std::string>& lines, size_t i, const std::s
                    ReferenceReport& rep) {
     const bool hasId = (kw.size() >= 3 && kw.compare(kw.size() - 3, 3, "_ID") == 0) || has(kw, "_ID_");
     int skip = (has(kw, "_TITLE") ? 1 : 0) + (hasId ? 1 : 0);
+    // ⚠ **빈 줄도 카드다.** Card 2·3 은 필수지만 칸을 전부 기본값으로 두는 접촉이 있어
+    // (`*CONTACT_FORCE_TRANSDUCER_PENALTY`) 빈 줄로 적힌다. 건너뛰면 그 덱이 "필수 카드가
+    // 1장뿐" 으로 뜬다. 리포의 카드 색인도 같은 규율이다("빈 줄도 카드다").
     std::vector<size_t> data;
     for (size_t j = i + 1; j < lines.size(); ++j) {
         const std::string d = trim(lines[j]);
-        if (d.empty() || isComment(d)) continue;
+        if (isComment(d)) continue;
         if (isKeyword(d)) break;
         if (skip > 0) { --skip; continue; }
         data.push_back(j);
@@ -99,17 +102,25 @@ void contactDamage(const std::vector<std::string>& lines, size_t i, const std::s
     if (data.empty()) { ++rep.notChecked; return; }
     if (hasParameterRef(lines[data[0]])) { ++rep.notChecked; return; }   // &name — 값이 기호다
 
+    // 표면 대 표면 **서명**부터 확인한다 — Card 1 의 3·4번째 칸이 SSTYP/MSTYP 로 읽히는가.
+    // 이것을 먼저 보는 이유가 둘이다.
+    //   · `*CONTACT_1D`·`*CONTACT_INTERIOR` 처럼 카드 구성이 다른 변종에 3장 규칙을 들이대면
+    //     그 덱이 통째로 오탐이 된다.
+    //   · `_ID`·`_MPP` 를 선언했는데 그 머리 카드가 **없는** 덱에서는 우리가 한 칸 밀려 Card 2
+    //     (실수가 든 줄)를 Card 1 로 보게 된다. 그때 실수 검사를 먼저 하면 그 덱 전부가
+    //     "SSID 칸에 실수" 로 뜬다. 서명이 안 맞으면 아무 말도 하지 않는 것이 맞다.
     const auto f1 = fields10(lines[data[0]]);
+    int sstyp = 0, mstyp = 0;
+    const bool sig = f1.size() >= 4 && toInt(f1[2], sstyp) && toInt(f1[3], mstyp)
+                     && sstyp >= 0 && sstyp <= 6 && mstyp >= 0 && mstyp <= 6;
+    if (!sig) { ++rep.notChecked; return; }
+
     static const char* const kName[2] = {"SSID", "MSID"};
     for (size_t c = 0; c < 2 && c < f1.size(); ++c)
         if (looksReal(f1[c]))
             rep.damaged.push_back({(int)data[0] + 1, kw,
                 std::string(kName[c]) + " 칸에 실수 " + f1[c] + " 가 들어 있습니다(정수 칸입니다)"});
 
-    int sstyp = 0, mstyp = 0;
-    const bool sig = f1.size() >= 4 && toInt(f1[2], sstyp) && toInt(f1[3], mstyp)
-                     && sstyp >= 0 && sstyp <= 6 && mstyp >= 0 && mstyp <= 6;
-    if (!sig) { ++rep.notChecked; return; }
     if (data.size() < 3)
         rep.damaged.push_back({(int)i + 1, kw,
             "필수 카드가 " + std::to_string(data.size()) + "장뿐입니다 — 표준 접촉은 Card 1·2·3 이 필수입니다"});

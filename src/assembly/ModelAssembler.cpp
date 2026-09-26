@@ -18135,27 +18135,31 @@ ReferenceReport checkElementPartReferences(const std::vector<std::string>& lines
     std::set<int> partIds, secIds, matIds;
     std::vector<std::pair<size_t, std::array<int, 3>>> partCards;   // 줄, {pid, secid, mid}
 
-    for (const auto& b : rsCollectBlocks(lines)) {
-        const bool titled = rsHas(b.kw, "_TITLE");
-        if (rsStarts(b.kw, "*SECTION_")) {
-            size_t k = titled ? 1u : 0u;
-            if (k < b.data.size()) {
-                auto f = rsCardFields(lines[b.data[k]]);
-                int id = rsIntField(f, 0);
-                if (id > 0) secIds.insert(id);
-            }
-            continue;
+    // ⚠ `*SECTION_*`·`*MAT_*` 는 **한 키워드 아래 정의가 여러 장** 올 수 있다. 매뉴얼이 못
+    // 박아 뒀다 — "Card Sets. For each … include one set of data cards. This input ends at the
+    // next keyword" (Vol_I `*SECTION_SHELL` 머리). `examples/wrap/cylinder_2layer.k` 가 실제로
+    // `*SECTION_SOLID` 하나 아래 섹션 1·2 를, `*MAT_ELASTIC` 하나 아래 재질 1·2 를 쓴다.
+    // 첫 카드만 읽으면 그 덱이 "섹션 2 미정의" 로 뜬다(그렇게 떴다).
+    //
+    // 카드 세트의 **길이는 키워드+옵션마다 다르고** 우리에겐 그 표가 없다. 그래서 정의 수집은
+    // **넘치게** 한다 — 데이터 줄 첫 칸의 양수를 전부 정의로 본다. 넘치면 **놓칠 뿐** 없는 것을
+    // 있다고 말하지 않는다. 오탐과 누락 중 오탐이 훨씬 비싸다(한 번 나면 보고를 아무도 안 믿는다).
+    auto collectFirstFields = [&lines](const RsBlock& b, std::set<int>& into) {
+        for (size_t m = 0; m < b.data.size(); ++m) {
+            const std::string& ln = lines[b.data[m]];
+            if (ln.find('&') != std::string::npos) continue;      // &name — 값이 기호다
+            int id = rsIntField(rsCardFields(ln), 0);
+            if (id > 0) into.insert(id);
         }
+    };
+
+    for (const auto& b : rsCollectBlocks(lines)) {
+        if (rsStarts(b.kw, "*SECTION_")) { collectFirstFields(b, secIds); continue; }
         if (rsStarts(b.kw, "*MAT_")) {
-            // `*MAT_ADD_*` 계열은 **재질을 새로 만들지 않는다** — 기존 MID 를 꾸민다.
+            // `*MAT_ADD_*` 계열은 **재질을 새로 만들지 않는다** — 기존 MID 를 꾸민다(첫 칸도 PID 다).
             // 정의 집합에 넣으면 없는 재질을 있다고 말하게 된다.
             if (rsStarts(b.kw, "*MAT_ADD_")) { ++rep.notChecked; continue; }
-            size_t k = titled ? 1u : 0u;
-            if (k < b.data.size()) {
-                auto f = rsCardFields(lines[b.data[k]]);
-                int id = rsIntField(f, 0);
-                if (id > 0) matIds.insert(id);
-            }
+            collectFirstFields(b, matIds);
             continue;
         }
         if (b.kw == "*PART" || b.kw == "*PART_TITLE") {
@@ -18176,7 +18180,10 @@ ReferenceReport checkElementPartReferences(const std::vector<std::string>& lines
             continue;
         }
         if (rsStarts(b.kw, "*PART")) {
-            // `*PART_INERTIA` 등 — Card 1 이 같은지 단정하지 않는다.
+            // `*PART_COMPOSITE`·`*PART_INERTIA` 등 — 칸 뜻이 변종마다 갈리므로 **섹션·재질은 안
+            // 본다**. 다만 PID 는 넘치게 모은다: `*PART_COMPOSITE` 는 진짜로 파트를 정의하므로
+            // 빼면 그 파트를 쓰는 요소 전부가 가짜 미정의 참조로 뜬다.
+            collectFirstFields(b, partIds);
             ++rep.notChecked;
         }
     }

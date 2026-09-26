@@ -15,11 +15,23 @@
 - [x] `*CONTACT_*` 손상 탐지 — SSID/MSID 칸의 실수, 필수 카드 3장 미달 (`ReferenceIntegrity.cpp`)
       → 표면 대 표면 **서명이 확인될 때만** 3장 규칙을 쓴다(SSTYP/MSTYP 0-6). `*CONTACT_1D` 처럼
         카드 구성이 다른 변종에 들이대면 오탐이 난다
-- [x] 리포 덱 **275장 전수** 오탐 조사 — 손상 축 0건 / 참조 축 19장은 **전부 실제 결함**으로 확인
+- [x] `*SECTION_*`·`*MAT_*` 는 **한 키워드 아래 정의가 여러 장** 온다(매뉴얼 "Card Sets. For each …
+      include one set of data cards. This input ends at the next keyword"). 카드 세트 길이 표가 없으니
+      정의는 **넘치게** 모은다 — 데이터 줄 첫 칸의 양수를 전부 정의로 본다. 넘치면 **놓칠 뿐** 없는 것을
+      있다고 말하지 않는다
+      → ⚠ 첫 판에서 이것을 놓쳐 `examples/wrap/cylinder_2layer.k`·`cylinder_wrapped.k` 2장을
+        **진짜 결함으로 잘못 세었다**(73ff163 · 0c85827). 회귀가 그 오탐을 '지켜야 할 것' 으로
+        못 박고 있었다 — 정정했다
+- [x] `*PART` 변종의 PID 도 넘치게 모은다 — `*PART_COMPOSITE` 는 진짜로 파트를 정의한다
+- [x] 접촉: **빈 줄도 카드다**(`*CONTACT_FORCE_TRANSDUCER_PENALTY` 는 필수 Card 2·3 을 빈 줄로 쓴다)
+- [x] 접촉: **서명 확인을 실수 검사보다 먼저** — `_ID`·`_MPP` 를 선언했는데 머리 카드가 없는 덱에서는
+      우리가 한 칸 밀려 Card 2(실수가 든 줄)를 Card 1 로 본다. 순서를 바꾸면 그 덱 전부가 오탐이 된다
+- [x] 리포 덱 **275장 전수** 오탐 조사 — 손상 축 0건 / 참조 축 17장은 **전부 실제 결함**으로 확인
       (offset 예제 13장은 기반 덱 `arc30_flat.k` 에 `*PART` 가 없다 · squeeze_interference 2장은
-       `*SECTION` 이 아예 없다 · wrap 2장은 섹션·재질 2번이 없다 · matdb 2장은 요소 카드가 8칸 덱에
-       10칸으로 적혀 LS-DYNA 가 PID 를 1 로 읽는다). **픽스처는 고치지 않았다** — 고치면 이 시험이
-       무엇을 지키는지 알 수 없게 된다
+       `*SECTION` 이 아예 없다 · matdb 2장은 요소 카드가 8칸 덱에 10칸으로 적혀 LS-DYNA 가 PID 를
+       1 로 읽는다). **픽스처는 고치지 않았다** — 고치면 이 시험이 무엇을 지키는지 알 수 없게 된다
+- [ ] 남은 한계 — Card 3 가 **Card A 로 치환**된 손상은 줄 수가 유지되므로 이 규칙이 못 잡는다.
+      카드별 칸 뜻 표가 있어야 잡힌다(P1-12 이후 판단)
 - [x] `info` 의 rc 는 0 불변(상위 파이프라인 계약)
 - [x] 회귀 `test_element_part_references.py` — 돌연변이 13종 전부 사망
 

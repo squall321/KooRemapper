@@ -42,13 +42,19 @@ QUIET = [
      "*PART 가 하나도 없는 메시 조각 — 대조할 표가 없다"),
     ("examples/indent/small/block.k",
      "평범한 온전한 덱"),
+    # ⚠ 이 둘은 처음에 **진짜 결함으로 잘못 세었다.** `*SECTION_SOLID` 하나 아래 섹션 1·2 가,
+    # `*MAT_ELASTIC` 하나 아래 재질 1·2 가 있다 — 매뉴얼이 "Card Sets. For each section,
+    # include one set of data cards. This input ends at the next keyword" 라고 못 박아 둔 형태다.
+    # 블록의 첫 카드만 읽으면 둘째 정의가 안 보여 그 파트가 미정의 참조로 뜬다.
+    ("examples/wrap/cylinder_2layer.k",
+     "한 키워드 아래 정의가 여러 장 — 섹션 1·2 와 재질 1·2 가 모두 정의돼 있다"),
+    ("examples/wrap/cylinder_wrapped.k",
+     "같은 형태 + *INCLUDE 가 있어 더더욱 단정할 수 없다"),
 ]
 # 진짜 결함이 있는 리포 덱 — 계속 보고해야 한다
 LOUD = [
     ("examples/squeeze_interference/interference_model.k", r"\*PART: 섹션 1",
      "*SECTION 이 덱에 아예 없는데 파트 둘이 섹션 1 을 가리킨다"),
-    ("examples/wrap/cylinder_2layer.k", r"\*PART: (섹션|재질) 2",
-     "*SECTION/*MAT 는 1번만 있는데 파트 2 가 2번을 가리킨다"),
 ]
 
 CLEAN = """*KEYWORD
@@ -191,6 +197,18 @@ def main():
     rc, out = info(binary, p)
     check("B-5 칸을 꽉 채운 덱도 파트를 찾는다", reports(out) == [], "보고=%r" % reports(out))
 
+    # 한 키워드 아래 **정의가 여러 장** — 카드 세트 길이는 키워드+옵션마다 달라 우리에겐 표가
+    # 없다. 그래서 정의는 넘치게 모은다(놓칠 뿐, 없는 것을 있다고 말하지 않는다).
+    multi = (CLEAN.replace("*SECTION_SOLID\n       1       1",
+                           "*SECTION_SOLID\n       1       1\n       2       1")
+                  .replace("*MAT_ELASTIC\n       1 7.85E-9  210000     0.3",
+                           "*MAT_ELASTIC\n       1 7.85E-9  210000     0.3\n       2 7.85E-9  210000     0.3")
+                  .replace("*PART\ncube\n       7       1       1",
+                           "*PART\ncube\n       7       1       1\n*PART\nouter\n       8       2       2"))
+    p = write("multi.k", multi)
+    rc, out = info(binary, p)
+    check("B-6 한 키워드 아래 둘째 정의도 본다", reports(out) == [], "보고=%r" % reports(out))
+
     print("[C 리포의 실제 덱에 오탐이 없다]")
     for rel, why in QUIET:
         path = os.path.join(ROOT, rel)
@@ -237,6 +255,20 @@ def main():
     rc, out = info(binary, p)
     check("E-4 카드 구성이 다른 변종에는 3장 규칙을 안 쓴다",
           not [l for l in out.splitlines() if re.search(r"^\s+line \d+ \*CONTACT", l)], out)
+
+    # **빈 줄도 카드다.** Card 2·3 은 필수지만 칸을 전부 기본값으로 두는 접촉이 있어 빈 줄로
+    # 적힌다. 건너뛰면 그 덱이 "필수 카드가 1장뿐" 으로 뜬다.
+    p = write("e_ft.k", CLEAN.replace(
+        "*END", "*CONTACT_FORCE_TRANSDUCER_PENALTY\n         1         0         2         0\n\n\n*END", 1))
+    rc, out = info(binary, p)
+    check("E-5 빈 Card 2·3 을 카드로 센다",
+          not [l for l in out.splitlines() if re.search(r"필수 카드가", l)], out)
+    # `_ID` 를 선언했는데 머리 카드가 **없는** 덱 — 우리가 한 칸 밀려 Card 2(실수가 든 줄)를
+    # Card 1 로 본다. 서명 확인을 실수 검사보다 **먼저** 하지 않으면 그 덱 전부가 오탐이 된다.
+    p = write("e_noid.k", CLEAN.replace("*END", ID_HEAD.split("\n")[0] + "\n" + C1 + C2 + C3 + "*END", 1))
+    rc, out = info(binary, p)
+    check("E-6 _ID 머리 카드가 없으면 아무 말도 하지 않는다",
+          not [l for l in out.splitlines() if re.search(r"^\s+line \d+ \*CONTACT.*(실수|필수 카드)", l)], out)
 
     # 리포의 접촉 덱 21장 전부에 손상 보고가 없어야 한다(전수는 느리니 대표 2장을 못 박는다)
     for rel in ("examples/contact/model.k", "examples/replace_test/assembled_replace_result.k"):
