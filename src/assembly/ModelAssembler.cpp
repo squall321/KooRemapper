@@ -18073,4 +18073,154 @@ bool ModelAssembler::applyStrip(const StripOperation& op) {
     return true;
 }
 
+// ── 요소·파트의 절대 참조 (P1-6) ─────────────────────────────────────────────
+// `*PART` 데이터 카드의 PID·SECID·MID — **읽는 쪽(`KFileReader::parsePartSection`)과 같은 순서**로 읽는다.
+// 자유형식 토큰 → 10칸 → 8칸. 이 순서를 바꾸면 같은 덱을 두 곳이 다르게 읽는다.
+// ⚠ 10칸 먼저 읽으면 칸이 어긋난 덱(리포 픽스처에 실재한다)에서 SECID 가 빈칸으로 읽혀
+// "그 파트는 정의된 적 없다" 가 되고, 그 파트를 쓰는 요소 전부가 가짜 미정의 참조로 뜬다.
+bool epPartCard3(const std::string& line, int& pid, int& sec, int& mid) {
+    auto toks = rsTokens(line);
+    if (toks.size() >= 3) {
+        pid = rsIntField(toks, 0); sec = rsIntField(toks, 1); mid = rsIntField(toks, 2);
+        return true;
+    }
+    std::string body = line;
+    size_t cm = body.find('$');
+    if (cm != std::string::npos) body = body.substr(0, cm);
+    while (!body.empty() && (body.back() == '\r' || body.back() == '\n')) body.pop_back();
+    const size_t fw = body.size() >= 30 ? 10u : (body.size() >= 24 ? 8u : 0u);
+    if (fw == 0) return false;
+    // ⚠ `rsIntField` 는 **공백이 하나라도 있으면 -1** 이다. 잘라낸 칸은 반드시 다듬어 넘긴다.
+    auto cut = [&body, fw](size_t k) {
+        std::string s = body.substr(k * fw, fw);
+        size_t a = s.find_first_not_of(" \t");
+        if (a == std::string::npos) return std::string();
+        size_t b = s.find_last_not_of(" \t");
+        return s.substr(a, b - a + 1);
+    };
+    std::vector<std::string> f{cut(0), cut(1), cut(2)};
+    pid = rsIntField(f, 0); sec = rsIntField(f, 1); mid = rsIntField(f, 2);
+    return true;
+}
+
+// 그 카드가 10칸 자리에 맞지 않는가 — 맞지 않으면 LS-DYNA 는 우리와 다르게 읽는다.
+// (LS-DYNA 는 콤마가 없으면 고정폭으로 읽는다. 우리는 토큰으로 되돌려 의도대로 읽는다.)
+bool epPartCardMisaligned(const std::string& line) {
+    std::string body = line;
+    size_t cm = body.find('$');
+    if (cm != std::string::npos) body = body.substr(0, cm);
+    while (!body.empty() && (body.back() == '\r' || body.back() == '\n')) body.pop_back();
+    if (body.find(',') != std::string::npos) return false;   // 콤마 자유형식은 LS-DYNA 도 자유형식이다
+    if (body.size() < 20) return false;                      // 칸이 하나뿐이면 어긋날 자리가 없다
+    const std::string sec = body.substr(10, 10);
+    return sec.find_first_not_of(" \t") == std::string::npos;   // SECID 칸이 비었다
+}
+
+ReferenceReport checkElementPartReferences(const std::vector<std::string>& lines) {
+    ReferenceReport rep;
+
+    // `*INCLUDE` 가 있으면 파트·섹션·재질이 그 안에 정의됐을 수 있다 — 0건을 단정하지 않는다.
+    {
+        const auto u = include_scan::scan(lines);
+        if (u.count > 0) {
+            rep.hasUnreadIncludes = true;
+            rep.includeNames = u.names;
+        }
+    }
+
+    // ── 정의된 것 모으기 ──────────────────────────────────────────────────
+    // ⚠ 칸 뜻이 확실한 것만 본다. `*PART` 변종(_INERTIA 등)은 Card 1 이 같다고 **단정하지
+    // 않고** 세어만 둔다 — 애매한 것을 검사하면 오탐이 나고, 오탐이 한 번 나면 아무도 이
+    // 보고를 믿지 않는다.
+    std::set<int> partIds, secIds, matIds;
+    std::vector<std::pair<size_t, std::array<int, 3>>> partCards;   // 줄, {pid, secid, mid}
+
+    for (const auto& b : rsCollectBlocks(lines)) {
+        const bool titled = rsHas(b.kw, "_TITLE");
+        if (rsStarts(b.kw, "*SECTION_")) {
+            size_t k = titled ? 1u : 0u;
+            if (k < b.data.size()) {
+                auto f = rsCardFields(lines[b.data[k]]);
+                int id = rsIntField(f, 0);
+                if (id > 0) secIds.insert(id);
+            }
+            continue;
+        }
+        if (rsStarts(b.kw, "*MAT_")) {
+            // `*MAT_ADD_*` 계열은 **재질을 새로 만들지 않는다** — 기존 MID 를 꾸민다.
+            // 정의 집합에 넣으면 없는 재질을 있다고 말하게 된다.
+            if (rsStarts(b.kw, "*MAT_ADD_")) { ++rep.notChecked; continue; }
+            size_t k = titled ? 1u : 0u;
+            if (k < b.data.size()) {
+                auto f = rsCardFields(lines[b.data[k]]);
+                int id = rsIntField(f, 0);
+                if (id > 0) matIds.insert(id);
+            }
+            continue;
+        }
+        if (b.kw == "*PART" || b.kw == "*PART_TITLE") {
+            // `*PART` 는 '제목 줄 + 데이터 카드' 가 반복된다. 제목이 비어 있을 수 있으므로
+            // **PID·SECID 가 모두 양수인 줄**만 데이터 카드로 본다(`ecBuildPidNodes` 와 같은 규칙).
+            for (size_t m = 0; m < b.data.size(); ++m) {
+                const std::string& ln = lines[b.data[m]];
+                if (ln.find('&') != std::string::npos) { ++rep.notChecked; continue; }
+                int pid = 0, sec = 0, mid = 0;
+                if (!epPartCard3(ln, pid, sec, mid)) continue;
+                if (pid > 0 && sec > 0) {
+                    // 제목 줄이 우연히 토큰 3개인 경우는 pid 가 0 이라 여기 오지 않는다.
+                    if (epPartCardMisaligned(ln)) ++rep.notChecked;
+                    partIds.insert(pid);
+                    partCards.push_back({b.data[m], {pid, sec, mid}});
+                }
+            }
+            continue;
+        }
+        if (rsStarts(b.kw, "*PART")) {
+            // `*PART_INERTIA` 등 — Card 1 이 같은지 단정하지 않는다.
+            ++rep.notChecked;
+        }
+    }
+
+    // ── ① 파트가 가리키는 섹션·재질 ────────────────────────────────────────
+    for (const auto& [li, v] : partCards) {
+        if (v[1] > 0 && !secIds.count(v[1]))
+            rep.dangling.push_back({(int)li + 1, "*PART", "섹션", v[1]});
+        // MID 가 0 이거나 못 읽었으면(-1) 넘어간다 — 0 은 관례, -1 은 칸 뜻을 모르는 것이다.
+        if (v[2] > 0 && !matIds.count(v[2]))
+            rep.dangling.push_back({(int)li + 1, "*PART", "재질", v[2]});
+        else if (v[2] < 0)
+            ++rep.notChecked;
+    }
+
+    // ── ② 요소가 가리키는 파트 ─────────────────────────────────────────────
+    // ⚠ 카드 경계와 PID 칸은 **색인이 정한다**. 어림짐작으로 줄을 세면 2줄 포맷·ORTHO 처럼
+    // 카드가 더 붙는 변종에서 노드 줄을 Card 1 로 읽는다(그 실수로 요소가 조용히 사라진
+    // 전례가 있다 — 2e47878). 색인은 solid·shell·tshell 만 다루므로 `*ELEMENT_MASS` 처럼
+    // PID 칸이 다른 변종은 **애초에 들어오지 않는다.**
+    const ElemCardIndex eidx = ecBuildIndex(lines);
+    // 파트 표가 아예 없는 덱(노드+요소만 있는 메시 조각)은 **대조할 표가 없다** — 모든 요소를
+    // 보고하게 되고 그건 소음이다. 반대로 파트 표가 있는데 자기 요소를 못 덮으면 그건 결함이다.
+    if (partIds.empty()) {
+        ++rep.notChecked;
+    } else {
+        std::set<int> reported;
+        for (size_t i = 0; i < lines.size(); ++i) {
+            if (eidx.owner[i] != (int)i) continue;          // 카드 시작 줄만
+            if (eidx.famOf[i] == 0) continue;               // solid/shell/tshell 이 아니다
+            const int pid = eidx.pidOf[i];
+            // `ecInt` 는 **못 읽으면 0**, 음수는 덱에 그렇게 적혀 있을 때만 나온다. 그래서 둘을
+            // 가를 수 있다 — 음수 PID 는 어떤 덱에서도 파트가 아니다(P1-2 의 convert 가 실제로
+            // `-1` 을 써 냈고 `info` 가 통과시켰다). 0 은 빈칸일 수 있으니 단정하지 않는다.
+            if (pid == 0) { ++rep.notChecked; continue; }
+            if (pid > 0 && partIds.count(pid)) continue;
+            // 같은 PID 를 수천 번 찍으면 보고가 쓸모없어진다 — PID 당 첫 건만 낸다.
+            if (!reported.insert(pid).second) continue;
+            rep.dangling.push_back({(int)i + 1, "*ELEMENT", "파트", pid});
+        }
+    }
+
+    return rep;
+}
+
+
 } // namespace KooRemapper

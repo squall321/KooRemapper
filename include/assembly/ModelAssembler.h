@@ -1,5 +1,7 @@
 #pragma once
 
+#include "validation/ReferenceIntegrity.h"
+
 #include "parser/DeckNewline.h"
 #include "assembly/AssemblyConfig.h"
 #include "core/Mesh.h"
@@ -445,5 +447,16 @@ private:
     mutable std::string widthOverflow_;
     void noteWidth(int v, int fw, const char* what) const;
 };
+
+// 요소·파트의 **절대 참조**를 본다 — 요소가 없는 파트를, 파트가 없는 섹션·재질을 가리키나.
+//
+// ⚠ 왜 `ReferenceIntegrity.cpp` 가 아니라 여기인가 — 요소 카드의 **경계와 PID 칸**을 정하는
+// 판정(`ecBuildIndex`)이 이 번역 단위에 있다. 그것을 베껴 가면 같은 판정이 둘이 되고, 둘이
+// 갈리면 한쪽은 틀린 채로 초록이 된다(이 리포는 `*INCLUDE` 판정이 셋으로 갈려 이미 당했다).
+// 베끼지 않으려고 검사를 판정 곁에 둔다.
+//
+// 강건성 원칙은 `validation/ReferenceIntegrity.h` 의 것과 같다 — 칸 뜻이 확실한 카드만 보고,
+// 애매하면 `notChecked` 로 세고, ID 0 은 dangling 이 아니며, `*INCLUDE` 가 있으면 단정하지 않는다.
+ReferenceReport checkElementPartReferences(const std::vector<std::string>& lines);
 
 } // namespace KooRemapper

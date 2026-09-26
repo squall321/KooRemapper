@@ -1,4 +1,5 @@
 #include "validation/ReferenceIntegrity.h"
+#include "assembly/ModelAssembler.h"
 #include "parser/DeckWriter.h"
 #include "core_ops.h"
 #include "util/YamlComment.h"
@@ -1302,16 +1303,25 @@ int runInfo(const std::string& meshFile, const ConsoleOutput& console) {
             }
         }
         auto ref = checkSetReferences(rawLines);
+        // 요소→파트 · 파트→섹션·재질 도 함께 본다(P1-6). 카드 경계 판정이 있는 자리에
+        // 구현이 있어 거기서 부른다 — 베끼면 판정이 둘이 되고 갈린다.
+        {
+            const auto ep = checkElementPartReferences(rawLines);
+            ref.dangling.insert(ref.dangling.end(), ep.dangling.begin(), ep.dangling.end());
+            ref.notChecked += ep.notChecked;
+            if (ep.hasUnreadIncludes) ref.hasUnreadIncludes = true;
+            if (ref.includeNames.empty()) ref.includeNames = ep.includeNames;
+        }
         std::cout << "\n";
         if (!ref.dangling.empty()) {
             // ⚠ 등급을 나눈다. `*INCLUDE` 가 있으면 그 안에 정의됐을 수 있으므로 **단정하면 오탐**이다.
             // 오탐을 한 번 내면 사람은 이 보고를 통째로 무시하게 된다 — 그러면 진짜를 놓친다.
             const bool certain = !ref.hasUnreadIncludes;
             if (certain)
-                console.error("정의되지 않은 세트를 가리키는 카드 " + std::to_string(ref.dangling.size()) +
+                console.error("정의되지 않은 것을 가리키는 카드 " + std::to_string(ref.dangling.size()) +
                               "건 — LS-DYNA 가 키워드 단계에서 멈춥니다");
             else
-                console.warning("이 덱 안에서 정의를 못 찾은 세트 참조 " + std::to_string(ref.dangling.size()) +
+                console.warning("이 덱 안에서 정의를 못 찾은 참조 " + std::to_string(ref.dangling.size()) +
                                 "건 — *INCLUDE 안에 있을 수 있어 단정하지 않습니다");
             size_t shown = 0;
             for (const auto& d : ref.dangling) {
@@ -1323,9 +1333,9 @@ int runInfo(const std::string& meshFile, const ConsoleOutput& console) {
                                 certain ? ConsoleOutput::Color::RED : ConsoleOutput::Color::YELLOW);
             }
         } else if (ref.hasUnreadIncludes) {
-            console.warning("미정의 세트 참조: 0건 — 다만 *INCLUDE 를 읽지 않았으므로 단정할 수 없습니다");
+            console.warning("미정의 참조 0건 — 다만 *INCLUDE 를 읽지 않았으므로 단정할 수 없습니다");
         } else {
-            console.success("세트 참조 무결성 OK (미정의 참조 0건)");
+            console.success("참조 무결성 OK (세트·파트·섹션·재질 미정의 참조 0건)");
         }
         if (ref.hasUnreadIncludes) {
             std::string names;
