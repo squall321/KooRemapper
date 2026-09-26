@@ -39,7 +39,44 @@ def _parse_info_stdout(text: str) -> dict:
     if m := _RE_SIZE.search(text):
         out["size"] = [float(m.group(i)) for i in (1, 2, 3)]
     out["valid"] = "[OK] Mesh is valid" in text
+    if ref := _parse_ref_dangling(text):
+        out["ref_dangling"] = ref
     return out
+
+
+# `info` 의 참조 무결성 보고를 업로드 메타로 옮긴다 (P1-5).
+#
+# ⚠ **등급을 지운 채 옮기면 안 된다.** `*INCLUDE` 를 못 읽었으면 그 안에 정의됐을 수 있어
+# 단정할 수 없다 — 바이너리가 `[ERROR] 정의되지 않은 …`(단정)과
+# `[WARN] … 정의를 못 찾은 …`(불확실)으로 나눠 말한다. 잡 제출 게이트는 **단정 등급만** 막는다.
+_RE_REF_CERTAIN = re.compile(r"^\[ERROR\] 정의되지 않은 것을 가리키는 카드 (\d+)건", re.M)
+_RE_REF_MAYBE = re.compile(r"^\[WARN\] 이 덱 안에서 정의를 못 찾은 참조 (\d+)건", re.M)
+_RE_REF_DAMAGED = re.compile(r"^\[ERROR\] 망가진 카드 (\d+)건", re.M)
+_RE_REF_ITEM = re.compile(r"^  line (\d+) (\*\S+): (.+)$", re.M)
+_RE_REF_UNREAD = re.compile(r"^  \*INCLUDE 안은 보지 않았습니다: (.+)$", re.M)
+
+
+def _parse_ref_dangling(text: str, top_n: int = 5) -> dict | None:
+    certain = int(m.group(1)) if (m := _RE_REF_CERTAIN.search(text)) else 0
+    maybe = int(m.group(1)) if (m := _RE_REF_MAYBE.search(text)) else 0
+    damaged = int(m.group(1)) if (m := _RE_REF_DAMAGED.search(text)) else 0
+    if not (certain or maybe or damaged):
+        return None
+    items = [
+        {"line": int(li), "keyword": kw, "what": what.strip()}
+        for li, kw, what in _RE_REF_ITEM.findall(text)[:top_n]
+    ]
+    unread = []
+    if m := _RE_REF_UNREAD.search(text):
+        unread = [s.strip() for s in m.group(1).split(",") if s.strip()]
+    return {
+        "count": certain or maybe,
+        # 단정할 수 있는가 — 잡 제출을 막을지 가르는 값이다. 망가진 카드는 인클루드와 무관하다.
+        "grade": "certain" if (certain or damaged) else "uncertain",
+        "damaged": damaged,
+        "top": items,
+        "unread_includes": unread,
+    }
 
 
 # Only scan files that look like keyword decks (skip binary/large blobs).

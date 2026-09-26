@@ -211,6 +211,31 @@ async def include_status(db: AsyncSession, session_id: str) -> dict:
     return out
 
 
+async def dangling_status(db: AsyncSession, session_id: str) -> dict:
+    """세션 안의 덱들이 **정의되지 않은 것을 가리키나** (P1-5).
+
+    ⚠ 왜 필요한가 — `info` 는 그것을 **보고만 하고 rc 를 올리지 않는다**(그 rc=0 은 계약이다).
+    실측: 추적 덱 489장 중 40장에 실제 결함이 들어 있고 40장 전부 rc=0 으로 나갔다. 하류는
+    rc 로만 판정하므로 LS-DYNA 에 가서야 터진다. 그래서 막는 자리는 **잡 제출**이다.
+
+    **단정 등급만 낸다.** `*INCLUDE` 를 못 읽었으면 그 안에 정의됐을 수 있어 단정할 수 없고,
+    그것을 막으면 오탐이다 — 오탐 한 번에 사람은 이 게이트를 통째로 끈다.
+
+    반환: {"<덱 파일명>": {"count": n, "damaged": n, "top": [...]}} — 단정할 게 없으면 안 낸다.
+    """
+    out: dict[str, dict] = {}
+    for f in await list_files(db, session_id):
+        ref = (f.meta or {}).get("ref_dangling") if isinstance(f.meta, dict) else None
+        if not isinstance(ref, dict) or ref.get("grade") != "certain":
+            continue
+        out[f.filename] = {
+            "count": ref.get("count") or 0,
+            "damaged": ref.get("damaged") or 0,
+            "top": ref.get("top") or [],
+        }
+    return out
+
+
 async def run_file_connectivity(
     db: AsyncSession, f: SessionFile, *, detect: bool = True
 ) -> dict:

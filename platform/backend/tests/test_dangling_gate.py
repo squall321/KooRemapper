@@ -1,0 +1,135 @@
+# 덱이 정의되지 않은 것을 가리키면 잡 제출을 막는다 — 업로드 메타 → 게이트 (P1-5)
+"""왜 이 시험이 있나 (2026-09-26).
+
+P1-6 이 검사를 넓혀 `info` 의 보고는 정확해졌는데 **막는 자리가 없었다.** 실측 — 추적 덱
+489장 중 **40장에 실제 결함**이 들어 있고 그 40장이 전부 `rc=0` 으로 나갔다. 하류
+(pyKooCAE REMAP 체인·플랫폼 워커)는 rc 로만 판정하므로 LS-DYNA 에 가서야 터진다.
+`info` 의 rc=0 은 **계약**이라 바꿀 수 없으므로(플랫폼이 업로드마다 돈다) 막는 자리는
+잡 제출이다.
+
+이 시험의 절반은 **등급을 지우지 않았는지**다. `*INCLUDE` 를 못 읽었으면 그 안에 정의됐을
+수 있어 단정할 수 없다. 그것까지 막으면 오탐이고, 오탐 한 번에 사람은 게이트를 통째로 끈다.
+그래서 바이너리가 두 문구로 나눠 말하고(`[ERROR] 정의되지 않은 …` / `[WARN] … 못 찾은 …`)
+파서가 그 구분을 `grade` 로 보존하고 게이트는 `certain` 만 본다.
+"""
+import sys
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import pytest
+
+from app.runner.kfile_inspect import _parse_ref_dangling
+
+# 실제 `info` 출력에서 그대로 떠 온 조각들 (2026-09-26, HEAD 바이너리).
+CERTAIN = """[INFO] Running validation...
+[ERROR] 정의되지 않은 것을 가리키는 카드 2건 — LS-DYNA 가 키워드 단계에서 멈춥니다
+  line 258 *PART: 섹션 1 이 정의되지 않았습니다
+  line 262 *PART: 섹션 1 이 정의되지 않았습니다
+  칸 뜻을 확신하지 못해 검사하지 않은 자리 2곳(오탐을 내지 않으려고 건너뜁니다)
+[OK] Mesh is valid
+"""
+UNCERTAIN = """[WARN] 이 덱 안에서 정의를 못 찾은 참조 2건 — *INCLUDE 안에 있을 수 있어 단정하지 않습니다
+  line 258 *PART: 섹션 1 의 정의를 이 덱에서 못 찾았습니다
+  line 262 *PART: 섹션 1 의 정의를 이 덱에서 못 찾았습니다
+  *INCLUDE 안은 보지 않았습니다: assembled_result.dynain
+"""
+DAMAGED = """[OK] 참조 무결성 OK (세트·파트·섹션·재질 미정의 참조 0건)
+[ERROR] 망가진 카드 2건 — LS-DYNA 가 이 칸을 우리와 다르게 읽습니다
+  line 22 *CONTACT_TIED_SURFACE_TO_SURFACE_OFFSET_ID: SSID 칸에 실수 0.33 가 들어 있습니다(정수 칸입니다)
+  line 22 *CONTACT_TIED_SURFACE_TO_SURFACE_OFFSET_ID: MSID 칸에 실수 0.1 가 들어 있습니다(정수 칸입니다)
+"""
+CLEAN = """[OK] 참조 무결성 OK (세트·파트·섹션·재질 미정의 참조 0건)
+[OK] Mesh is valid
+[OK] All elements have positive Jacobian
+"""
+
+
+def test_clean_deck_carries_no_ref_dangling():
+    """온전한 덱은 메타에 이 키를 아예 싣지 않는다 — 키가 있으면 볼 게 있다는 뜻이어야 한다."""
+    assert _parse_ref_dangling(CLEAN) is None
+
+
+def test_certain_grade_is_preserved():
+    ref = _parse_ref_dangling(CERTAIN)
+    assert ref is not None
+    assert ref["grade"] == "certain", "이 등급만 잡 제출을 막는다"
+    assert ref["count"] == 2
+    assert ref["top"][0] == {"line": 258, "keyword": "*PART", "what": "섹션 1 이 정의되지 않았습니다"}
+
+
+def test_uncertain_grade_is_not_promoted():
+    """⚠ 이것을 `certain` 으로 올리면 인클루드를 쓰는 정상 덱이 전부 막힌다."""
+    ref = _parse_ref_dangling(UNCERTAIN)
+    assert ref is not None
+    assert ref["grade"] == "uncertain"
+    assert ref["count"] == 2
+    assert ref["unread_includes"] == ["assembled_result.dynain"]
+
+
+def test_damaged_cards_are_certain_regardless_of_includes():
+    """망가진 카드는 이 덱 안에서 본 것이라 `*INCLUDE` 와 무관하게 단정할 수 있다."""
+    ref = _parse_ref_dangling(DAMAGED)
+    assert ref is not None
+    assert ref["grade"] == "certain"
+    assert ref["damaged"] == 2
+
+
+def test_top_is_capped():
+    """수천 건이 와도 메타가 부풀지 않아야 한다 — 상위 N 만 싣는다."""
+    many = "[ERROR] 정의되지 않은 것을 가리키는 카드 900건 — LS-DYNA 가 키워드 단계에서 멈춥니다\n"
+    many += "".join(f"  line {i} *ELEMENT: 파트 {i} 이 정의되지 않았습니다\n" for i in range(1, 40))
+    ref = _parse_ref_dangling(many)
+    assert ref["count"] == 900
+    assert len(ref["top"]) == 5
+
+
+def test_gate_only_blocks_certain():
+    """`dangling_status` 는 단정 등급만 낸다 — 게이트가 그것만 보고 막는다."""
+    from app.modules.sessions.services import dangling_status  # noqa: PLC0415
+
+    class F:
+        def __init__(self, name, meta):
+            self.filename, self.meta = name, meta
+
+    rows = [
+        F("bad.k", {"ref_dangling": {"grade": "certain", "count": 3, "damaged": 1, "top": []}}),
+        F("maybe.k", {"ref_dangling": {"grade": "uncertain", "count": 9, "top": []}}),
+        F("clean.k", {}),
+        F("nometa.k", None),
+    ]
+
+    import app.modules.sessions.services as svc
+
+    async def fake_list_files(db, session_id):
+        return rows
+
+    orig = svc.list_files
+    svc.list_files = fake_list_files
+    try:
+        import asyncio
+
+        out = asyncio.run(dangling_status(None, "s"))
+    finally:
+        svc.list_files = orig
+
+    assert set(out) == {"bad.k"}, "불확실 등급과 메타 없는 파일은 막지 않는다"
+    assert out["bad.k"]["count"] == 3 and out["bad.k"]["damaged"] == 1
+
+
+def test_job_create_has_the_escape_hatch():
+    """탈출구가 없으면 운용이 막힌다 — 인클루드 게이트와 같은 패턴이어야 한다."""
+    from app.modules.jobs.schemas import JobCreate  # noqa: PLC0415
+
+    body = JobCreate(operation="info", args={})
+    assert body.allow_dangling_refs is False, "기본은 막는 쪽이다"
+    assert JobCreate(operation="info", args={}, allow_dangling_refs=True).allow_dangling_refs is True
+
+
+def test_gate_message_tells_how_to_see_all_of_it():
+    """422 문구가 `--strict` 를 가리켜야 한다 — 건수만 보여 주면 사람이 다음에 뭘 할지 모른다."""
+    src = (Path(__file__).resolve().parents[1] / "app/modules/jobs/routes.py").read_text(encoding="utf-8")
+    assert "allow_dangling_refs" in src
+    assert "--strict" in src, "전부 보는 방법을 문구가 가리켜야 한다"
+    assert "키워드 단계" in src

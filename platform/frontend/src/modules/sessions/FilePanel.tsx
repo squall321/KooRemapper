@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Upload, Download, Trash2, ChevronRight, FileText, FolderUp, AlertTriangle } from 'lucide-react'
 import { deleteFile, downloadFile, getIncludeStatus, uploadFiles } from '@/shared/api/endpoints'
 import type { SessionFile } from '@/shared/api/types'
+import type { RefDangling } from '@/shared/api/endpoints'
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Spinner } from '@/shared/ui/ui'
 import { fmtBytes } from '@/shared/lib/cn'
 import { errorMessage } from '@/shared/api/client'
@@ -72,6 +73,52 @@ export function FilePanel({ sessionId, files }: { sessionId: string; files: Sess
             </div>
           </div>
         )}
+        {/* 덱이 정의되지 않은 것을 가리키면 LS-DYNA 가 **키워드 단계에서** 죽는다 — `info` 는
+            그것을 보고만 하고 rc=0 으로 끝내므로(그 rc 는 계약이다) 화면이 말해 줘야 한다.
+            등급이 '단정' 인 것만 빨강으로 낸다. 인클루드를 못 읽어 단정할 수 없는 것은
+            같은 자리에 주의색으로 낸다 — 오탐으로 보이면 사람은 배너를 통째로 무시한다. */}
+        {(() => {
+          const rows = files
+            .map((f) => ({ name: f.filename, ref: (f.meta ?? {}).ref_dangling as RefDangling | undefined }))
+            .filter((r) => r.ref && ((r.ref.count ?? 0) > 0 || (r.ref.damaged ?? 0) > 0))
+          if (!rows.length) return null
+          const certain = rows.filter((r) => r.ref!.grade === 'certain')
+          const maybe = rows.filter((r) => r.ref!.grade !== 'certain')
+          return (
+            <>
+              {certain.length > 0 && (
+                <div className="px-3 py-2 text-xs text-danger border-b border-border flex gap-2">
+                  <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                  <div className="space-y-0.5">
+                    <div className="font-medium">정의되지 않은 것을 가리키는 덱이 있습니다 — LS-DYNA 가 키워드 단계에서 멈춥니다.</div>
+                    {certain.map((r) => (
+                      <div key={r.name} className="mono">
+                        {r.name} → {r.ref!.count}건
+                        {r.ref!.damaged ? ` (망가진 카드 ${r.ref!.damaged}건 포함)` : ''}
+                        {r.ref!.top?.length ? ` · ${r.ref!.top.slice(0, 2).map((i) => `line ${i.line} ${i.keyword}`).join(', ')}` : ''}
+                      </div>
+                    ))}
+                    <div className="text-muted">잡 제출이 막힙니다. 강행하려면 allow_dangling_refs 를 켜세요.</div>
+                  </div>
+                </div>
+              )}
+              {maybe.length > 0 && (
+                <div className="px-3 py-2 text-xs text-warning border-b border-border flex gap-2">
+                  <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                  <div className="space-y-0.5">
+                    <div className="font-medium">이 덱 안에서 정의를 못 찾은 참조가 있습니다 — *INCLUDE 안에 있을 수 있어 단정하지 않습니다.</div>
+                    {maybe.map((r) => (
+                      <div key={r.name} className="mono">
+                        {r.name} → {r.ref!.count}건
+                        {r.ref!.unread_includes?.length ? ` · 안 읽은 인클루드: ${r.ref!.unread_includes.join(', ')}` : ''}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )
+        })()}
         {!files.length ? (
           <EmptyState title="파일 없음" hint="K파일을 업로드하면 자동으로 정보를 분석합니다." />
         ) : (

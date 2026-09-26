@@ -76,6 +76,14 @@ export async function uploadFiles(sessionId: string, files: File[]): Promise<Ses
 }
 
 export type IncludeStatus = { ok: boolean; missing_by_file: Record<string, { missing: string[]; satisfied: string[] }> }
+// 덱이 정의되지 않은 것을 가리키나 (P1-5). `grade` 가 게이트를 가른다 — `certain` 만 잡 제출을 막는다.
+export type RefDangling = {
+  count: number
+  grade: 'certain' | 'uncertain'
+  damaged: number
+  top: { line: number; keyword: string; what: string }[]
+  unread_includes: string[]
+}
 export async function getIncludeStatus(sessionId: string): Promise<IncludeStatus> {
   const { data } = await api.get(`/sessions/${sessionId}/includes`)
   return unwrap<IncludeStatus>(data)
