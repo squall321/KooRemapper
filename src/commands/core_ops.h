@@ -64,7 +64,11 @@ int runPrestress(const std::string& refFile, const std::string& defFile,
                  bool outputCSV,
                  const KooRemapper::ConsoleOutput& console);
 
-int runInfo(const std::string& meshFile, const KooRemapper::ConsoleOutput& console);
+// `strict=true` 면 **LS-DYNA 가 키워드 단계에서 죽을 것**을 찾으면 rc=1 을 낸다.
+// ⚠ 기본값 false 를 바꾸면 안 된다 — `info` 의 rc=0 은 계약이다(플랫폼의 업로드 검사와
+// pyKooCAE REMAP 체인이 그 값을 기대한다. `test_reference_integrity.py` 가 일부러 단언한다).
+int runInfo(const std::string& meshFile, const KooRemapper::ConsoleOutput& console,
+            bool strict = false);
 
 int runGenerateBox(const std::string& yamlFile, KooRemapper::ConsoleOutput& console);
 

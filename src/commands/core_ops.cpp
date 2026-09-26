@@ -1262,7 +1262,16 @@ int runPrestress(const std::string& refFile, const std::string& defFile,
 /**
  * Display mesh info
  */
-int runInfo(const std::string& meshFile, const ConsoleOutput& console) {
+int runInfo(const std::string& meshFile, const ConsoleOutput& console, bool strict) {
+    // `--strict` 가 rc 를 올릴 사유들. 무엇을 넣고 무엇을 뺐는지는 **실측으로** 정했다
+    // (추적 덱 489장 전수, 2026-09-26).
+    //   넣은 것 — 미정의 참조 39장(단정 등급만) · 망가진 카드 0장 · 없는 노드를 가리키는 요소 1장.
+    //             셋 다 LS-DYNA 가 **키워드 단계에서** 죽는 부류다.
+    //   뺀 것   — `Mesh has no nodes` 86장: 자재만 있는 덱·IGA 덱에서 **정상**이다. 결함이 아니다.
+    //             음수 자코비안 111장: 품질 경고이고 키워드 단계에서 죽지 않는다. 관문에 넣으면
+    //             정상 픽스처 111장이 막힌다 — 오탐 한 번에 아무도 이 관문을 안 쓴다.
+    std::vector<std::string> strictFails;
+    bool strictUnreadIncludes = false;
     console.info("Loading mesh: " + meshFile);
 
     KFileReader reader;
@@ -1323,6 +1332,9 @@ int runInfo(const std::string& meshFile, const ConsoleOutput& console) {
             else
                 console.warning("이 덱 안에서 정의를 못 찾은 참조 " + std::to_string(ref.dangling.size()) +
                                 "건 — *INCLUDE 안에 있을 수 있어 단정하지 않습니다");
+            if (certain)
+                strictFails.push_back("정의되지 않은 것을 가리키는 카드 " +
+                                      std::to_string(ref.dangling.size()) + "건");
             size_t shown = 0;
             for (const auto& d : ref.dangling) {
                 if (shown++ >= 20) { console.println("  … 외 " +
@@ -1340,6 +1352,7 @@ int runInfo(const std::string& meshFile, const ConsoleOutput& console) {
         // 손상된 카드는 **참조와 다른 축**이다 — 가리킨 대상이 없는 것이 아니라 카드가 깨졌다.
         // `*INCLUDE` 와 무관하게 단정할 수 있다(이 덱 안에서 본 것이 전부다).
         if (!ref.damaged.empty()) {
+            strictFails.push_back("망가진 카드 " + std::to_string(ref.damaged.size()) + "건");
             console.error("망가진 카드 " + std::to_string(ref.damaged.size()) +
                           "건 — LS-DYNA 가 이 칸을 우리와 다르게 읽습니다");
             size_t shown = 0;
@@ -1359,6 +1372,7 @@ int runInfo(const std::string& meshFile, const ConsoleOutput& console) {
         if (ref.notChecked > 0)
             console.println("  칸 뜻을 확신하지 못해 검사하지 않은 자리 " +
                             std::to_string(ref.notChecked) + "곳(오탐을 내지 않으려고 건너뜁니다)");
+        strictUnreadIncludes = ref.hasUnreadIncludes;
     }
 
     // Validation
@@ -1372,6 +1386,17 @@ int runInfo(const std::string& meshFile, const ConsoleOutput& console) {
         console.error("Mesh has validation errors:");
         for (const auto& err : result.errors) {
             console.println("  - " + err, ConsoleOutput::Color::RED);
+        }
+        // ⚠ 검증 오류 중 관문에 넣는 것은 **'없는 노드를 가리키는 요소'** 하나다.
+        // 노드가 `*INCLUDE` 안에 있을 수 있으므로 인클루드를 못 읽었으면 단정하지 않는다 —
+        // 참조 축과 같은 규율이다. (실측: 이 조합의 덱은 489장 중 1장이고 인클루드가 없었다.)
+        if (!strictUnreadIncludes) {
+            int missingNodeRefs = 0;
+            for (const auto& err : result.errors)
+                if (err.find("references non-existent node") != std::string::npos) ++missingNodeRefs;
+            if (missingNodeRefs > 0)
+                strictFails.push_back("없는 노드를 가리키는 요소 " +
+                                      std::to_string(missingNodeRefs) + "건");
         }
     }
 
@@ -1402,6 +1427,13 @@ int runInfo(const std::string& meshFile, const ConsoleOutput& console) {
         console.success("All elements have positive Jacobian");
     }
 
+    if (strict && !strictFails.empty()) {
+        std::cout << "\n";
+        std::string why;
+        for (size_t k = 0; k < strictFails.size(); ++k) why += (k ? " · " : "") + strictFails[k];
+        console.error("--strict: " + why + " — LS-DYNA 가 키워드 단계에서 멈춥니다");
+        return 1;
+    }
     return 0;
 }
 

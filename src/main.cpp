@@ -228,9 +228,17 @@ static bool printLegacyHelp(ConsoleOutput& console, const std::string& helpCmd) 
         console.println("Options:");
         console.println("  --type <t>  Strain type: engineering (default), green, log");
     } else if (helpCmd == "info") {
-        console.println("Usage: KooRemapper info <mesh_file>");
+        console.println("Usage: KooRemapper info <mesh_file> [--strict]");
         std::cout << "\n";
         console.println("Display information about a mesh file.");
+        std::cout << "\n";
+        console.println("Options:");
+        console.println("  --strict  LS-DYNA 가 키워드 단계에서 멈출 것을 찾으면 rc=1 로 끝낸다");
+        console.println("            (미정의 참조 · 망가진 카드 · 없는 노드를 가리키는 요소).");
+        console.println("            플래그가 없으면 rc 는 항상 0 이다 — 그것이 기존 계약이다.");
+        std::cout << "\n";
+        console.println("  자재만 있는 덱의 'no nodes' 와 음수 자코비안은 관문에 넣지 않는다 —");
+        console.println("  전수 실측에서 정상 덱 86장·111장이 걸렸다(키워드 단계에서 죽지 않는다).");
     } else if (helpCmd == "unfold") {
         console.println("Usage: KooRemapper unfold <bent_mesh> <output_flat>");
         std::cout << "\n";
@@ -2491,12 +2499,20 @@ static int runMain(int argc, char* argv[]) {
     // Info command
     // @lat: [[commands/info]]
     if (command == "info") {
-        if (argc < 3) {
-            console.error("Usage: KooRemapper info <mesh_file>");
+        // `--strict` 는 **옵션**이다. 없으면 rc 는 예전처럼 항상 0 이다(계약).
+        bool strict = false;
+        std::string infoFile;
+        for (int i = 2; i < argc; ++i) {
+            const std::string a = argv[i];
+            if (a == "--strict") strict = true;
+            else if (infoFile.empty()) infoFile = a;
+        }
+        if (infoFile.empty()) {
+            console.error("Usage: KooRemapper info <mesh_file> [--strict]");
             return 1;
         }
         printBanner(console);
-        return runInfo(argv[2], console);
+        return runInfo(infoFile, console, strict);
     }
 
     // Restack command
