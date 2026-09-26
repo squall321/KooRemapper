@@ -29,8 +29,11 @@ static bool opt_contactInvolvesPid(const ContactDef& ct,
         } else if (styp == 2) {
             for (const auto& s : sets) {
                 if (s.type == "PART" && s.id == sid) {
-                    for (int pid : s.ids) {
-                        if (targetPids.count(pid)) return true;
+                    // 이 op 은 메시를 안 읽으므로 `_GENERATE` 범위를 덱에 정의된 ID 로 좁힐
+                    // 수 없다. 다행히 물음은 "대상 파트가 이 세트에 드나" 뿐이라 **범위만으로
+                    // 답할 수 있다** — 그래서 `ct_setContains` 를 쓴다.
+                    for (int pid : targetPids) {
+                        if (ct_setContains(s, pid)) return true;
                     }
                 }
             }

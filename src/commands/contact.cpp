@@ -447,7 +447,12 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
 
     // 3. Optionally load Mesh (for surface extraction)
     bool needMesh = false;
+    bool onlyAnalyze = true;
     for (const auto& act : actions) {
+        if (act.action != "analyze") onlyAnalyze = false;
+        // `analyze` 도 메시가 필요하다 — `*SET_*_GENERATE` 의 범위는 **한계값**이라 덱에 정의된
+        // ID 로 좁혀야 멤버 수를 말할 수 있다. 못 읽으면 보고를 멈추지 않고 못 좁혔다고 말한다.
+        if (act.action == "analyze") needMesh = true;
         if (act.action == "create" && (act.slave.asSegment || act.master.asSegment)) needMesh = true;
         if (act.action == "convert") needMesh = true;
         if (act.action == "detect") needMesh = true;
@@ -459,14 +464,19 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
         try {
             mesh = reader.readFile(modelPath);
         } catch (const std::exception& e) {
-            console.error("Cannot parse mesh: " + modelPath + " (" + e.what() + ")");
-            return 1;
+            if (!onlyAnalyze) {
+                console.error("Cannot parse mesh: " + modelPath + " (" + e.what() + ")");
+                return 1;
+            }
+            // 읽기 전용 보고다 — 멈추지 않는다. 대신 무엇을 못 하게 됐는지 말한다.
+            console.warning("메시를 읽지 못해 세트 범위를 좁히지 못합니다: " + std::string(e.what()));
         }
     }
 
     // 4. Parse existing contacts and sets
     auto contacts = ct_parseContacts(lines);
     auto sets     = ct_parseSets(lines);
+    ct_resolveSetRanges(sets, mesh);   // `_GENERATE` 범위를 덱에 정의된 ID 로 좁힌다
     int nextSetId = ct_findMaxSetId(sets) + 1;
 
     console.println("[contact] Model: " + modelFile + " (" + std::to_string(lines.size()) + " lines)");
@@ -1130,6 +1140,7 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
                 // Re-parse since line numbers shifted
                 contacts = ct_parseContacts(lines);
                 sets = ct_parseSets(lines);
+                ct_resolveSetRanges(sets, mesh);
             }
 
             if (act.friction >= 0) modFields += " FS=" + std::to_string(act.friction);

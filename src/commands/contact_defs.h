@@ -65,7 +65,24 @@ struct ContactDef {
 
 struct SetDef {
     int id = 0;
-    std::string type;           // "SEGMENT"/"NODE"/"PART"/"SHELL"/"SOLID"
+    std::string type;           // "SEGMENT"/"NODE"/"PART"/"SHELL"/"SOLID" — **방언은 빼고** 종류만
+    // 방언(`GENERATE`·`GENERATE_INCREMENT`·`GENERAL`·`ADD`·`INTERSECT`·`COLUMN`·`COLLECT`).
+    // 빈 문자열이면 평범한 목록이다.
+    std::string dialect;
+    // 멤버의 **뜻을 확정했는가**. `_ADD`·`_INTERSECT` 는 멤버가 **세트 ID** 고 `_GENERAL` 은
+    // 옵션 코드(ALL·BOX·DELETE…)라 개체 ID 가 아니다. 그때는 `ids` 를 **비워 둔다** —
+    // 채워 두면 소비자(`resolvePids` 등)가 그것을 파트 ID 로 쓴다. 닫히는 쪽으로 실패한다.
+    bool membersKnown = true;
+    // `_GENERATE` 계열의 **범위**(beg, end, inc). 파서는 이것을 **펼치지 않는다** —
+    // 매뉴얼이 "All **defined** ID's between and including B[N]BEG to B[N]END are added to the
+    // set. B[N]BEG and B[N]END may simply be **limits on the ID's** and not element ID's" 라고
+    // 못 박았다. 그대로 펼치면 `1 999999` 짜리 덱에서 없는 파트 백만 개를 만들어 낸다.
+    // 무엇이 정의됐는지는 메시를 든 쪽이 안다 — `ct_resolveSetRanges` 가 채운다.
+    std::vector<std::array<int,3>> ranges;
+    // 그 범위를 **정의된 ID 로 좁혔는가**. 메시를 안 읽은 op 에서는 false 로 남는다 —
+    // 그때 `ids` 가 비어 있는 것은 "멤버가 없다" 가 아니라 "아직 못 셌다" 다. 화면이 그것을
+    // 구분해 말해야 한다(0건이라고 말하면 거짓이다).
+    bool rangesResolved = false;
     bool hasTitle = false;
     std::string title;
     double da1=0, da2=0, da3=0, da4=0;

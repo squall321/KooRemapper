@@ -44,6 +44,14 @@ std::vector<ContactDef> ct_parseContacts(const std::vector<std::string>& lines);
 
 std::vector<SetDef> ct_parseSets(const std::vector<std::string>& lines);
 
+// `_GENERATE` 범위를 **덱에 정의된 ID** 로 좁혀 `SetDef::ids` 를 채운다.
+// ⚠ 파싱 직후 반드시 한 번 부른다. 안 부르면 `_GENERATE` 세트의 멤버가 **빈 채로 남는다**
+// (일부러 그렇다 — 범위는 한계값이라 그대로 펼치면 없는 개체를 만들어 낸다).
+void ct_resolveSetRanges(std::vector<SetDef>& sets, const KooRemapper::Mesh& mesh);
+
+// 그 ID 가 이 세트에 드는가 — 정의 목록이 없어도 답할 수 있다(메시를 안 읽는 op 용).
+bool ct_setContains(const SetDef& s, int id);
+
 int ct_findMaxSetId(const std::vector<SetDef>& sets);
 
 std::vector<std::array<int,4>> ct_extractSurface(

@@ -681,6 +681,7 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
     // ── connectivity ──
     auto contacts = ct_parseContacts(rawLines);
     auto sets = ct_parseSets(rawLines);
+    ct_resolveSetRanges(sets, mesh);   // `_GENERATE` 범위를 덱에 정의된 ID 로 좁힌다
     std::vector<MmEdge> edges;
     std::vector<MmSingleSurface> singles;
     int unresolvedSides = 0;

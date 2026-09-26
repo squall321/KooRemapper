@@ -4,6 +4,29 @@
 **공통 선행 관문** — LF 덱은 바이트가 안 바뀌어야 한다. `examples/*/small/*.k` 전 op 출력 sha256 을
 수정 전에 떠 두고 매 단계 대조한다. 여기서 깨지면 개행 재적용이 틀린 것이다.
 
+## plan2 P1-12 · 세트 방언 `_GENERATE` (2026-09-26)
+- [x] `*SET_PART_LIST_GENERATE 7 / 1 5` 가 범위로 읽힌다(지금까지 **파트 1 과 5**, rc=0)
+      → ⚠ 더 나쁜 것은 type 판정이었다. 예전 코드는 `_LIST` 를 찾아 **그 앞만** 남겨 매뉴얼
+        정규 철자에서 방언이 통째로 사라지고 `type` 이 "PART" 가 됐다 — 그러면 소비자
+        (`resolvePids`·`mm_resolveSide`·`opt_contactInvolvesPid`)가 틀린 멤버를 **그대로 쓴다**.
+      → 실측: 그 세트를 가리키는 접촉의 `modelmeta` 연결 변이 2개가 아니라 **1개**로 나왔다
+- [x] 범위를 **펼치지 않는다** — 매뉴얼 "All **defined** ID's between and including B[N]BEG to
+      B[N]END are added to the set. B[N]BEG and B[N]END may simply be **limits on the ID's**".
+      그대로 펼치면 `1 999999` 짜리 덱에서 없는 파트 백만 개를 만들어 낸다.
+      `SetDef::ranges` 에 담고 `ct_resolveSetRanges(sets, mesh)` 가 정의된 ID 로 좁힌다
+- [x] `_GENERATE_INCREMENT`(BBEG BEND INCR) 도 같은 규칙
+- [x] `_ADD`·`_INTERSECT`(멤버가 **세트 ID**)·`_GENERAL`(옵션 코드)·`_COLUMN` 은 **`ids` 를 비워
+      둔다** — 채우면 소비자가 개체 ID 로 쓴다. 화면은 "멤버 뜻 미확정" 이라고 말한다
+- [x] 요소 종류(SHELL/SOLID/TSHELL/BEAM)는 ID 네임스페이스가 갈려 `Mesh` 의 한 통짜 요소 map
+      으로 좁힐 수 없다 → 미확정으로 말한다(넘겨짚어 펼치지 않는다)
+- [x] `analyze` 도 메시를 읽는다(범위를 좁히려면 필요). 못 읽으면 **멈추지 않고** 못 좁혔다고 말한다
+- [x] `optimize` 는 메시를 안 읽는다 — 물음이 "대상 파트가 이 세트에 드나" 뿐이라 `ct_setContains`
+      로 범위만 보고 답한다
+- [x] `examples/contact` 골든·`test_contact_id_option.py` 불변 / 회귀 `test_set_dialect.py` 신규
+- [x] 돌연변이 N1-N6 사망. **N7(방언 벗기는 순서 뒤집기)는 살아남았다** — 꼬리에만 맞추므로
+      순서가 무의미하다(주석을 사실에 맞게 고쳤다). `rangesResolved=false` 표시 갈래는 메시 읽기가
+      실패할 때만 닿아 시험이 없다 — 억지 픽스처를 만들지 않고 남겨 둔다
+
 ## plan2 P1-6 · 절대 참조 검사 확장 + 손상 덱 탐지 (2026-09-26)
 - [x] `*ELEMENT`→PID, `*PART`→SECID/MID 를 `info` 가 보고한다 (`checkElementPartReferences`,
       `ModelAssembler.cpp` — 카드 경계 판정(`ecBuildIndex`)이 있는 자리에 둔다. 베끼면 판정이 갈린다)

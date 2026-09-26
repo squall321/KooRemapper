@@ -1,3 +1,4 @@
+#include <cstring>
 #include "contact_helpers.h"
 #include "kw_util.h"
 #include "cli/ConsoleOutput.h"
@@ -232,19 +233,50 @@ std::vector<SetDef> ct_parseSets(const std::vector<std::string>& lines) {
         SetDef s;
         s.startLine = i;
 
-        // Determine set type and title
+        // `*SET_<종류>[_LIST][_방언…][_TITLE]` — 방언을 **버리지 않고 기록한다**.
+        //
+        // ⚠ 예전에는 `_LIST` 를 찾아 **그 앞만** 남겼다. 그러면 매뉴얼 정규 철자
+        //    `*SET_PART_LIST_GENERATE` 에서 방언이 통째로 사라져 `type` 이 "PART" 가 되고,
+        //    범위쌍 `1 5` 가 **파트 1 과 5** 로 읽혔다. 그 값을 소비자가 그대로 쓴다
+        //    (`resolvePids`·`mm_resolveSide`·`opt_contactInvolvesPid`) — 조용한 오답이다.
+        //    실측: `*SET_PART_LIST_GENERATE 7 / 1 5` → `SET_PART 7: 2 entries [1, 5]`, rc=0.
         std::string rest = up.substr(5);  // after "*SET_"
         s.hasTitle = (rest.find("_TITLE") != std::string::npos);
-        if (s.hasTitle) {
-            size_t pos = rest.find("_TITLE");
-            rest = rest.substr(0, pos);
-        }
-        // Also strip _LIST suffix (e.g., *SET_NODE_LIST)
+        if (s.hasTitle) rest = rest.substr(0, rest.find("_TITLE"));
         {
             size_t pos = rest.find("_LIST");
-            if (pos != std::string::npos) rest = rest.substr(0, pos);
+            if (pos != std::string::npos) rest = rest.substr(0, pos) + rest.substr(pos + 5);
+        }
+        // 꼬리에서 아는 방언을 벗긴다. **꼬리에만** 맞추므로 목록 순서는 상관없다
+        // (`_GENERATE` 가 `PART_GENERATE_INCREMENT` 의 꼬리에는 안 맞는다 — 돌연변이로 확인).
+        // 여러 번 도는 이유는 `_COLLECT` 가 다른 방언과 겹쳐 붙기 때문이다
+        // (매뉴얼이 `*SET_PART_LIST_GENERATE_COLLECT` 오류 함정을 언급한다).
+        static const char* const kDialects[] = {
+            "_GENERATE_INCREMENT", "_GENERATE", "_GENERAL", "_ADD", "_INTERSECT",
+            "_COLUMN", "_COLLECT",
+        };
+        for (bool peeled = true; peeled;) {
+            peeled = false;
+            for (const char* d : kDialects) {
+                const size_t dl = std::strlen(d);
+                if (rest.size() > dl && rest.compare(rest.size() - dl, dl, d) == 0) {
+                    const std::string name(d + 1);
+                    s.dialect = s.dialect.empty() ? name : (name + "_" + s.dialect);
+                    rest = rest.substr(0, rest.size() - dl);
+                    peeled = true;
+                    break;
+                }
+            }
         }
         s.type = rest;  // "SEGMENT", "NODE", "PART", "SHELL", "SOLID"
+        // 멤버가 개체 ID 가 **아닌** 방언 — `_ADD`·`_INTERSECT` 는 세트 ID, `_GENERAL` 은 옵션
+        // 코드, `_COLUMN` 은 첫 칸만 ID 고 뒤는 자료다. 뜻을 확정하지 못한다고 말하고 비워 둔다.
+        {
+            const std::string& dl = s.dialect;
+            if (dl.find("ADD") != std::string::npos || dl.find("INTERSECT") != std::string::npos ||
+                dl.find("GENERAL") != std::string::npos || dl.find("COLUMN") != std::string::npos)
+                s.membersKnown = false;
+        }
 
         // Collect data lines
         int j = i + 1;
@@ -292,6 +324,28 @@ std::vector<SetDef> ct_parseSets(const std::vector<std::string>& lines) {
                     try { seg[f] = std::stoi(toks[f]); } catch(...){}
                 }
                 if (seg[0] != 0) s.segments.push_back(seg);
+            } else if (!s.membersKnown) {
+                // 뜻을 확정하지 못한 방언 — 읽지 않는다(채우면 소비자가 개체 ID 로 쓴다).
+            } else if (s.dialect == "GENERATE") {
+                // Card 2b: B1BEG B1END B2BEG B2END … — 한 줄에 **범위쌍 4개**(Vol_I `*SET`).
+                // 펼치지 않고 범위로 들고 있는 이유는 `SetDef::ranges` 주석에 있다.
+                for (size_t f = 0; f < toks.size(); f += 2) {
+                    int b = 0, e = 0;
+                    try { b = std::stoi(toks[f]); } catch(...){ continue; }
+                    // END 칸이 비었거나 아예 없으면 홑개다(줄이 홀수 칸으로 끝나기도 한다).
+                    if (f + 1 < toks.size()) { try { e = std::stoi(toks[f + 1]); } catch(...){ e = 0; } }
+                    if (b <= 0) continue;
+                    s.ranges.push_back({b, (e < b ? b : e), 1});
+                }
+            } else if (s.dialect == "GENERATE_INCREMENT") {
+                // Card 2c: BBEG BEND INCR — 한 줄에 범위 하나다.
+                int b = 0, e = 0, inc = 1;
+                try { b = std::stoi(toks[0]); } catch(...){ continue; }
+                if (toks.size() >= 2) try { e = std::stoi(toks[1]); } catch(...){ e = 0; }
+                if (toks.size() >= 3) try { inc = std::stoi(toks[2]); } catch(...){ inc = 1; }
+                if (inc <= 0) inc = 1;
+                if (b <= 0) continue;
+                s.ranges.push_back({b, (e < b ? b : e), inc});
             } else {
                 // Up to 8 IDs per line
                 for (const auto& t : toks) {
@@ -307,6 +361,40 @@ std::vector<SetDef> ct_parseSets(const std::vector<std::string>& lines) {
         i = j - 1;
     }
     return result;
+}
+
+// 그 ID 가 이 세트에 드는가 — **정의 목록이 없어도** 답할 수 있는 물음이다.
+// `optimize` 처럼 메시를 안 읽는 op 이 쓴다(그 op 은 "이 접촉이 대상 파트를 건드리나" 만 묻는다).
+bool ct_setContains(const SetDef& s, int id) {
+    for (int v : s.ids) if (v == id) return true;
+    for (const auto& r : s.ranges)
+        if (id >= r[0] && id <= r[1] && (r[2] <= 1 || (id - r[0]) % r[2] == 0)) return true;
+    return false;
+}
+
+// `_GENERATE` 범위를 **덱에 정의된 ID** 로 좁혀 `ids` 를 채운다. 파싱한 직후 한 번 부른다.
+//
+// ⚠ 이것을 부르지 않으면 `_GENERATE` 세트의 `ids` 는 **빈 채로 남는다.** 그것이 의도다 —
+// 범위를 그대로 펼쳐 넘기면 소비자가 없는 파트를 진짜처럼 쓴다(`mm_resolveSide` 는 존재
+// 여부를 걸러 주지 않는다). 못 좁히면 닫히는 쪽으로 실패한다.
+//
+// 지금 좁힐 수 있는 종류는 **PART 와 NODE** 다. 요소 종류(SHELL/SOLID/TSHELL/BEAM)는 ID
+// 네임스페이스가 종류별로 갈려 `Mesh` 의 한 통짜 요소 map 으로는 정확히 좁힐 수 없다 —
+// 그때는 확정하지 못했다고 말한다(넘겨짚어 펼치는 것보다 낫다).
+void ct_resolveSetRanges(std::vector<SetDef>& sets, const KooRemapper::Mesh& mesh) {
+    std::vector<int> parts, nodes;
+    for (const auto& [pid, p] : mesh.getParts()) { (void)p; parts.push_back(pid); }
+    for (const auto& [nid, n] : mesh.getNodes()) { (void)n; nodes.push_back(nid); }
+
+    for (auto& s : sets) {
+        if (s.ranges.empty()) continue;
+        const std::vector<int>* def = (s.type == "PART") ? &parts
+                                    : (s.type == "NODE") ? &nodes : nullptr;
+        if (!def) { s.membersKnown = false; continue; }
+        for (int id : *def)
+            if (ct_setContains(s, id)) s.ids.push_back(id);
+        s.rangesResolved = true;
+    }
 }
 
 // Find max Set ID across all SET_* keywords
@@ -1469,8 +1557,31 @@ void ct_analyze(const std::vector<ContactDef>& contacts,
         console.println("  No sets found.");
     }
     for (const auto& s : sets) {
-        std::string info = "  SET_" + s.type + " " + std::to_string(s.id) + ": ";
-        if (s.type == "SEGMENT") {
+        std::string info = "  SET_" + s.type + (s.dialect.empty() ? "" : "_" + s.dialect) +
+                           " " + std::to_string(s.id) + ": ";
+        if (!s.membersKnown) {
+            // 조용히 0건이라고 말하면 거짓이다 — 왜 못 읽었는지 말한다.
+            info += "멤버 뜻 미확정(" + s.dialect + ")";
+        } else if (!s.ranges.empty()) {
+            // 범위는 **한계값**이다 — 실제 멤버는 그 사이에 덱이 정의한 ID 뿐이다.
+            info += (s.rangesResolved ? std::to_string(s.ids.size()) + " entries"
+                                      : std::string("멤버 수 미정(메시를 안 읽었습니다)"));
+            info += " (범위 ";
+            for (size_t k = 0; k < s.ranges.size(); ++k) {
+                if (k) info += ", ";
+                info += std::to_string(s.ranges[k][0]) + "-" + std::to_string(s.ranges[k][1]);
+                if (s.ranges[k][2] > 1) info += "/" + std::to_string(s.ranges[k][2]);
+            }
+            info += " — 한계값이라 정의된 ID 만 셉니다)";
+            if (!s.ids.empty() && s.ids.size() <= 10) {
+                info += " [";
+                for (size_t k = 0; k < s.ids.size(); ++k) {
+                    if (k) info += ", ";
+                    info += std::to_string(s.ids[k]);
+                }
+                info += "]";
+            }
+        } else if (s.type == "SEGMENT") {
             info += std::to_string(s.segments.size()) + " segments";
         } else {
             info += std::to_string(s.ids.size()) + " entries";
