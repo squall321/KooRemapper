@@ -49,7 +49,10 @@
 - [x] 접촉: **빈 줄도 카드다**(`*CONTACT_FORCE_TRANSDUCER_PENALTY` 는 필수 Card 2·3 을 빈 줄로 쓴다)
 - [x] 접촉: **서명 확인을 실수 검사보다 먼저** — `_ID`·`_MPP` 를 선언했는데 머리 카드가 없는 덱에서는
       우리가 한 칸 밀려 Card 2(실수가 든 줄)를 Card 1 로 본다. 순서를 바꾸면 그 덱 전부가 오탐이 된다
-- [x] 리포 덱 **275장 전수** 오탐 조사 — 손상 축 0건 / 참조 축 17장은 **전부 실제 결함**으로 확인
+- [x] 리포 덱 전수 오탐 조사 — 손상 축 0건 / 참조 축은 **전부 실제 결함**으로 확인
+      → ⚠ 2026-09-26 감사 정정 — "275장" 은 `examples`+`materials` 뿐이었다. `git ls-files '*.k'` 는
+        **489장**이고 나머지는 `tests/`(82)·`test_data/`(74) 다. 489장 전수는 **참조 축 40장 ·
+        손상 축 0장 · rc≠0 0건**. 17장이 아니라 40장이다(손상 축 오탐 0 은 유지)
       (offset 예제 13장은 기반 덱 `arc30_flat.k` 에 `*PART` 가 없다 · squeeze_interference 2장은
        `*SECTION` 이 아예 없다 · matdb 2장은 요소 카드가 8칸 덱에 10칸으로 적혀 LS-DYNA 가 PID 를
        1 로 읽는다). **픽스처는 고치지 않았다** — 고치면 이 시험이 무엇을 지키는지 알 수 없게 된다
@@ -82,7 +85,11 @@
 - [x] 읽을 때 개행 종류를 기억하고 쓸 때 되붙인다. **줄 문자열에 `\r` 을 남기지 말 것**
       (78곳의 `stoi`/`substr`/`back()` 분기가 전부 깨진다)
 - [x] 진입점: `ModelAssembler.cpp:62-67`(loadBaseModel)·`132-135`(loadRawOnly), `KFileReader`
-- [~] 출력: `ModelAssembler` 는 완료 / `KFileWriter`·`strip`·`relax`·`database` 는 다음 커밋, `KFileWriter:111,229`, `strip:177,225`, `relax:175,271`, `database`
+- [x] 출력: `ModelAssembler` · `strip` · `relax` · `database` 전부 `DeckWriter` 로 이관 완료
+      (`d988740` · `afbc154` · `e841e5a`). 이 줄은 오래 `[~]` 로 남아 있었는데 **이미 끝난 것이었다**
+      (2026-09-26 감사가 잡았다). ⚠ 다만 `KFileWriter` 는 **개행이 아닌 다른 결함**이 남아 있다 —
+      `*NODE` 를 id+x+y+z 로만 써서 TC/RC 칸을 버리고 ID 폭이 `setw(8)` 로 못 박혀 있다
+      (`src/parser/KFileWriter.cpp:292-296`). status-2026-09-26 §4-② 참조
       → 검증: CRLF 578 덱 → indent·database·relax·strip **4개 전부 CRLF=578**
         (지금 0 / 0 / **578 혼재** / 578 — relax 가 한 파일 안에서 개행이 갈린다)
       → 검증: LF 덱 전 op sha256 불변
@@ -90,7 +97,10 @@
 
 ## P1-2 · F — 무편집 진입점 + SYS-02 바이트 왕복 회귀
 - [ ] 무편집 진입점. **각 op 의 read 경로를 태우고 write 경로로 낼 것** — cat 복사식은 아무것도 못 잡는다
-- [ ] `tools/regress/test_roundtrip_bytes.py` — 픽스처 5종(LF / CRLF / 무-말미개행 / `I10=Y LONG=S` / 2줄 혼재)
+- [~] `tools/regress/test_roundtrip_bytes.py` — 픽스처 **3/5** (LF · CRLF · 무-말미개행 있음,
+      `I10=Y LONG=S` 와 2줄 혼재 **없음**). 파일은 `0b34072` 로 들어와 42 op 초록이다.
+      부분 보완 — I10 은 `test_i10_card_width.py`, 2줄은 `test_meshfix_two_line.py` 가 따로 본다.
+      그러나 **42 op 전수 축**으로는 안 돈다
       → 검증: sha256 + n_bytes + n_lines + n_crlf **4개 동시 일치**
 
 ## 남긴 것 (P2 이후)
@@ -131,7 +141,10 @@
 회귀 **37 → 42개**, 전부 통과. 무력화 전 항목 확인.
 
 ### 다음(요청 측 답을 기다리는 것)
-- DF-07 예약 대역 **실제 값** / DF-08 "템플릿" **정의** / 회귀 코퍼스 / dangling rc 정책 합의
+- DF-08 "템플릿" **정의** / 회귀 코퍼스 / dangling rc 정책 합의 / DF-20 편집 게이트 원장
+  → ⚠ **DF-07 예약 대역 값은 더 이상 차단 요인이 아니다** — `platform/context-notes.md:93-95` 와
+    plan2:155 가 SET id 축으로 좁혀져 값 없이 진행 가능하다고 확정했다. 이 줄이 그 정정을
+    반영하지 않아 오래 막힌 것처럼 읽혔다(2026-09-26 감사)
 - DF-20 편집 게이트 원장 — 출력 복사 4회 제거와 **같은 유닛**이어야 한다
 
 ## 3차 — 덱 계약 2차 계획(plan2) 착수 (2026-09-25)
@@ -208,7 +221,7 @@ M0 · 신뢰 회복 · **완료** / M3 · 게시 · **완료**
 - [x] **P1-8** 플랫폼 개행 경고(45de81c) — P0-2 가 끝나 풀린 항목
   - ⚠ 판정 대조만으로는 **혼재 덱을 놓친다**(`count(CRLF)*2 > count(LF)` 규약). 혼재를 규칙으로 넣었다
   - 변이 시험이 제 가드 하나가 **거꾸로**임을 알려 줬다(덮어쓴 파일의 왕복 전 개행도 입력이다)
-- [x] **CI 에 gmsh**(bc2eba2) — 내가 skip 을 FAIL 로 바꿔 CI 가 빨갰다. `.github/workflows/` 는
+- [~] **CI 에 gmsh**(bc2eba2) — 내가 skip 을 FAIL 로 바꿔 CI 가 빨갰다. `.github/workflows/` 는
   HTTPS+PAT 로 못 미는데(`workflow` 스코프) **SSH 로는 된다** → `docs/requests/ci-gmsh-2026-09-25.md`
 
 - [x] **SIF 재굽기**(외부라 적었으나 여기서 했다) — `SmartTwinPreprocessor.sif` 안 바이너리를
@@ -292,7 +305,11 @@ meshfix 가 그 덱에서 끝나지 않았다. `git checkout` 으로 되돌리�
 - `*NODE` **가운데 칸이 빈** 고정형식 카드 오독 — 자유형식 덱과 구분할 판별식을 못 찾았다
 
 ### 아직 남은 것
-- (없음 — plan2 의 P0 7건과 P1-8 완료)
+- (이 절의 P0 범위에서는 없음 — plan2 의 P0 7건과 P1-8 완료)
+
+> ⚠ **이 "없음" 을 전체 현황으로 읽지 마라.** 문서 맨 끝에 있어 그렇게 읽히는데, plan2 기준으로는
+> **P1 13건 중 7건 · P2 9건 전부가 남았다.** 전체 현황은 `deck-contract-status-2026-09-26.md`
+> 한 장에 실측으로 정리해 뒀다(항목별 판정 · 미결 28건 · 배포 지연 · 이 문서에서 고쳐야 할 줄).
 
 ### 이번에 우리가 우리를 잡은 것
 빌드 덫 하나가 **오늘 실제로 발동했다.** `build/linux` 가 `-DKOOREMAPPER_PLATFORM_BIN` 으로
@@ -300,3 +317,62 @@ meshfix 가 그 덱에서 끝나지 않았다. `git checkout` 으로 되돌리�
 "다른 세션이" 라고 적은 그 사건도 같은 기전일 가능성이 크다). **오늘 만든 관문 둘이 그것을
 잡았다** — `/api/health` 의 `revision_matches_binary: false`, 그리고 `dist-to-drive.sh` 의 거절.
 이제 빌드 때도 시끄럽게 말한다(`15fa18b`). 막지는 않는다 — 진짜 관문은 게시 쪽이다.
+
+---
+
+## 6차 (2026-09-26) — P1-6 · P1-12 + **전체 실측 감사**
+
+### 들어간 것
+- [x] **P1-6** 절대 참조 검사 확장 + 손상 덱 탐지 (`73ff163` · `0c85827` · `3a84739`)
+      요소→파트 · 파트→섹션·재질 · `*CONTACT_` 손상 2종(SSID/MSID 실수 · 필수 카드 미달).
+      돌연변이 13종 사망. 회귀 `test_element_part_references.py` 신규.
+      → ⚠ 첫 판이 **오탐 2장을 진짜 결함으로 잘못 세었다.** `*SECTION_`·`*MAT_` 는 **한 키워드 아래
+        정의가 여러 장** 온다(매뉴얼 "Card Sets … This input ends at the next keyword"). 회귀가 그
+        오탐을 "지켜야 할 것" 으로 못 박고 있었다 — `3a84739` 가 정정했다. 정의는 **넘치게** 모은다.
+- [x] **P1-12** 세트 방언 `_GENERATE` (`2876e66`)
+      `*SET_PART_LIST_GENERATE 7 / 1 5` 가 **파트 1 과 5** 로 읽혔고, `_LIST` 뒤를 버려 `type` 이
+      "PART" 가 되는 바람에 소비자가 그 틀린 멤버를 그대로 썼다(`modelmeta` 연결 변이 하나 빠졌다).
+      → ⚠ 고치면서 하마터면 더 나쁜 것을 만들 뻔했다. 매뉴얼은 BEG/END 가 **한계값**이고 멤버는
+        "그 사이에 **정의된** ID" 뿐이라고 한다. 그대로 펼치면 `1 999999` 덱에서 없는 파트 백만 개가
+        멤버가 된다. 파서는 범위를 들고만 있고 `ct_resolveSetRanges(sets, mesh)` 가 좁힌다.
+      → 돌연변이 N1-N6 사망. N7(방언 벗기는 순서)은 **살아남았다** — 꼬리에만 맞추므로 순서가
+        무의미하다(주석을 사실에 맞게 고쳤다).
+
+### 실측 감사 — 7갈래, 문서를 근거로 쓰지 않았다
+전체 현황은 **`deck-contract-status-2026-09-26.md`** 한 장에 있다(항목별 판정 · 미결 28건 ·
+배포 지연 · 이 문서에서 고쳐야 할 줄 · 감사 자신의 오류 6건). 아래는 그 감사가 **새로 찾은 것**만이다.
+
+- [ ] **CI 가 28연속 빨강이고, 그렇게 만든 것이 `0704b79`(내 P0-3 수정)다.** 카탈로그
+      `example_folder` 48/49 가 절대 경로(`/home/koopark/...`)인데 `test_newline_matrix.py:209` ·
+      `test_roundtrip_bytes.py:214` 가 그것을 `os.path.isdir` 에 넣고 없으면 **FAIL** 한다. 마지막
+      초록(`dafd117`)에서도 절대 경로는 48개였지만 그때는 **SKIP** 이었다. CI 로그는 403 으로 막혀
+      5일간 아무도 몰랐다.
+      → ⚠ **"이제 CI 가 막아 준다" 는 정정을 상대에게 보내면 안 된다.** 보낼 말은 "워크플로는
+        올라갔다. 그러나 카탈로그 절대 경로 때문에 `regress` 는 HEAD 에서도 빨갛다" 다.
+- [ ] **`KFileWriter` 가 `*NODE` 를 id+x+y+z 로 줄여 쓴다** (`src/parser/KFileWriter.cpp:292-296`).
+      TC/RC 칸이 애초에 쓰이지 않고(그 파일에 `tc|rc|constraint` grep **0건**) ID 폭이 `setw(8)` 로
+      못 박혀 있다. 원본의 `*KEYWORD I10=Y` 는 그대로 나가므로 선언 10칸·본문 8칸 덱이 된다.
+      생성 자리 9곳(map·shellmap·unfold·squeeze·tetremesh·generate·indent·bend 계열). rc=0.
+      → 왕복 회귀가 못 잡는 이유가 구조적이다 — LF 판과 CRLF 판을 **서로** 비교하므로 양쪽에서
+        똑같이 잃으면 초록이다. P1-2 아래로 넣어야 한다.
+- [ ] **백엔드 skip 3건은 "샘플이 없어서" 가 아니다.** `test_report_parser.py:23-24` ·
+      `test_reports_ingest.py:25-26` 에 **세션 스크래치패드 절대경로(UUID)가 HEAD 에 커밋돼** 있다.
+      어느 CI 에서도 영구 skip 이고, 실재 샘플에 대면 단언 4개가 깨진다(표본 하나에 과적합).
+- [ ] **누락 축이 1/40 만 잠겨 있다.** 오탐 축(QUIET)은 픽스처 7장으로 촘촘한데 실제 결함 40장 중
+      회귀가 이름으로 못 박은 것은 1장이다 — `3a84739` 사고의 **거울상**이다.
+- [ ] **`ctest 1/1` 은 덱 계약에 관해 신호가 아니다.** 단언 52개가 전부 기하이고
+      `KFileReader`·`DeckWriter`·`ModelAssembler`·`ReferenceIntegrity`·`SetDef` 단위 시험은 0건이다.
+- [ ] plan2 §9.3 이 약속한 **수신자별 회신 4장 중 1장만 존재한다.** StepForge·KooSlurm·pyKooCAE 앞
+      문서가 없다 — P2-7·P2-8 은 "답 대기" 가 아니라 **묻지 않은 상태**다. plan2 §6 의 포털 행
+      질문 3건도 `reply2` 에 없다(grep 0건).
+
+### 오늘 되돌린 것
+- [x] **배포용 자리 바이너리가 `GLIBC_2.38` 로 세 번째로 덮여 있었다.** 원인은 `build/linux` 의
+      `-DKOOREMAPPER_PLATFORM_BIN` — 즉 평범한 `cmake --build` 다(오늘 내가 여러 번 돌렸다).
+      2.35 관문 때문에 **재게시가 막힌 상태**였다. `scripts/build_linux_compat.sh` 로 `GLIBC_2.34`
+      복구 후 그 바이너리로 회귀 52/52 재확인. 아래 "우리가 우리를 잡은 것" 절은 두 번으로 적고
+      닫았는데 **세 번째가 일어났다** — 관문은 잡았지만 되돌리는 것은 여전히 사람 손이다.
+- [x] **"커밋 4건 미푸시" 는 거짓 경보였다.** `git push` 를 **URL 로** 해서 로컬 `origin/main`
+      참조만 낡아 있었고 실제 원격은 이미 HEAD 였다. `git fetch origin` 으로 맞췄다.
+      → 교훈 — **푸시 판정에 로컬 `origin/main` 을 쓰면 안 된다. `git ls-remote` 를 쓴다.**
+        감사 6갈래 중 둘이 이것으로 최우선 경보를 잘못 냈다.
