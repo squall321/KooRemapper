@@ -101,3 +101,5 @@ platform/storage
 
 # data-migrate 가 남기는 옛 경로 원본(유예 뒤 사람이 지운다). 미추적이면 deploy-all 의 git stash -u 가 치운다
 *.pre-move-*
+# Drive 산출물 영구 캐시(dist-from-drive)
+platform/infra/apptainer/.drive-cache/

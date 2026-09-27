@@ -35,7 +35,11 @@ if [ "$_have_bin" = "0" ]; then
 fi
 echo "→ source: $SRC"
 
-STAGE="$(mktemp -d)"; trap 'rm -rf "$STAGE"' EXIT
+# 같은 내용이면 손대지 않는다 — 살아 있는 apptainer 인스턴스 밑의 SIF 를 덮어쓰면 squashfs 가 깨지고, cp 는 mtime 을 리셋해 포털 update-all 의
+# 재기동 판정(지문: 이름·크기·mtime)이 매번 달라진다. 영구 캐시(rclone 이 안 바뀐 파일을 건너뛴다)와 짝이다. HWAXPortal docs/update-all-skip-unchanged.
+_install_if_changed() { if [ -f "$2" ] && cmp -s "$1" "$2"; then echo "  · $(basename "$2") 같음 — 그대로"; return 0; fi; cp -p "$1" "$2"; return 0; }
+# 영구 캐시 — 임시 디렉터리면 rclone 이 비교할 것이 없어 매번 전량 전송이다. 캐시에 받으면 안 바뀐 파일은 전송 0.
+STAGE="${KOORM_DRIVE_CACHE:-platform/infra/apptainer/.drive-cache}"; mkdir -p "$STAGE"
 rclone copy --progress "$SRC/" "$STAGE/"
 [ -f "$STAGE/SHA256SUMS" ] && { ( cd "$STAGE" && sha256sum -c SHA256SUMS ) && echo "  ✓ checksums OK" || { echo "✗ checksum 실패"; exit 1; }; }
 
@@ -69,7 +73,7 @@ fi
 mkdir -p platform/infra/apptainer
 shopt -s nullglob
 for s in "$STAGE"/*.sif; do
-  cp -f "$s" "platform/infra/apptainer/$(basename "$s")"; echo "  ✓ $(basename "$s") 반입"
+  _install_if_changed "$s" "platform/infra/apptainer/$(basename "$s")"; echo "  ✓ $(basename "$s") 반입"
 done
 shopt -u nullglob
 
