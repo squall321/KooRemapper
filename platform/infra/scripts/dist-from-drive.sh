@@ -37,10 +37,10 @@ echo "→ source: $SRC"
 
 # 같은 내용이면 손대지 않는다 — 살아 있는 apptainer 인스턴스 밑의 SIF 를 덮어쓰면 squashfs 가 깨지고, cp 는 mtime 을 리셋해 포털 update-all 의
 # 재기동 판정(지문: 이름·크기·mtime)이 매번 달라진다. 영구 캐시(rclone 이 안 바뀐 파일을 건너뛴다)와 짝이다. HWAXPortal docs/update-all-skip-unchanged.
-_install_if_changed() { if [ -f "$2" ] && cmp -s "$1" "$2"; then echo "  · $(basename "$2") 같음 — 그대로"; return 0; fi; cp -p "$1" "$2"; return 0; }
+_install_if_changed() { if [ -f "$2" ] && cmp -s "$1" "$2"; then echo "  · $(basename "$2") 같음 — 그대로"; return 0; fi; cp -p "$1" "$2" || { echo "  ✗ $(basename "$2") 설치 실패 — $2 에 쓸 수 없다(권한·소유자·디스크). 옛 파일이 그대로다" >&2; return 2; }; }
 # 영구 캐시 — 임시 디렉터리면 rclone 이 비교할 것이 없어 매번 전량 전송이다. 캐시에 받으면 안 바뀐 파일은 전송 0.
 STAGE="${KOORM_DRIVE_CACHE:-platform/infra/apptainer/.drive-cache}"; mkdir -p "$STAGE"
-rclone copy --progress "$SRC/" "$STAGE/"
+rclone sync --progress "$SRC/" "$STAGE/"    # sync — 원격에서 뺀 파일이 캐시에 남지 않게
 [ -f "$STAGE/SHA256SUMS" ] && { ( cd "$STAGE" && sha256sum -c SHA256SUMS ) && echo "  ✓ checksums OK" || { echo "✗ checksum 실패"; exit 1; }; }
 
 # 바이너리 + gmsh
@@ -60,7 +60,7 @@ fi
 # 운영에서 "지금 도는 바이너리가 어느 커밋인가" 를 물을 곳이 없었다. /api/health 가 이 파일을 읽는다.
 if [ -f "$STAGE/BUILD_INFO.txt" ]; then
   mkdir -p platform/backend/bin
-  cp -f "$STAGE/BUILD_INFO.txt" platform/backend/bin/BUILD_INFO.txt
+  _install_if_changed "$STAGE/BUILD_INFO.txt" platform/backend/bin/BUILD_INFO.txt   # cp -f 는 mtime 을 리셋해 포털의 재기동 판정 지문이 매번 달라졌다
   echo "  ✓ BUILD_INFO.txt 반입 ($(sed -n 's/^commit *: //p' platform/backend/bin/BUILD_INFO.txt | cut -c1-12))"
 fi
 # frontend dist
