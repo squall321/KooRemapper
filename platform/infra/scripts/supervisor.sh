@@ -11,6 +11,26 @@ require_apptainer
 INTERVAL="${KOORM_SUPERVISE_INTERVAL:-30}"
 ONCE=0; [ "${1:-}" = "--once" ] && ONCE=1
 
+# 로그 회전. 크론이 `>> supervisor.log` 로 **끝없이 붙이므로** 감독자 자신이 줄여야 한다
+# (실측 712KB / 18,216줄, 회전 장치 없음). logrotate 를 새로 걸지 않는 이유 — 이 스택의 다른
+# 크론들과 모양을 맞추고 루트 권한 없이 돌아야 한다.
+#
+# ⚠ 잠금을 잡기 **전에** 돌린다. 잠금 안에서 파일을 갈면 같은 회차의 뒷부분이 새 파일에 쓰이고
+# 앞부분이 옛 파일에 남아 한 회차가 두 파일로 갈린다.
+# ⚠ `cp` + `truncate` 로 한다. `mv` 하면 크론의 `>>` 가 **옛 inode 를 계속 붙잡아** 새 파일이
+# 비어 있게 된다(리다이렉션이 이미 열려 있다).
+KOORM_SUPERVISE_LOG_MAX="${KOORM_SUPERVISE_LOG_MAX:-2000000}"   # 2MB
+rotate_log() {
+  local log="${KOORM_SUPERVISE_LOG:-$REPO_ROOT/platform/infra/data/supervisor.log}"
+  [ -f "$log" ] || return 0
+  local sz
+  sz=$(stat -c %s "$log" 2>/dev/null) || return 0
+  [ "$sz" -le "$KOORM_SUPERVISE_LOG_MAX" ] && return 0
+  cp -p "$log" "$log.1" 2>/dev/null || return 0
+  : > "$log"
+  echo "[$(date '+%F %T')] 로그를 회전했다(${sz} bytes → $(basename "$log").1)"
+}
+
 # 감독자는 **하나만** 돈다. 둘이면 서로의 재기동을 밟는다 — 한쪽이 stop 한 인스턴스를 다른 쪽이
 # "없음" 으로 보고 다시 start 해 `already exists` 가 난다. 매분 도는 --once 가 앞 회차와 겹치는 것도 막는다.
 #
@@ -136,7 +156,14 @@ check_once() {
   fi
 }
 
-if [ "$ONCE" = 1 ]; then check_once; echo "✓ supervise check done"; exit 0; fi
+if [ "$ONCE" = 1 ]; then
+  check_once
+  # ⚠ 이 심장박동 줄에 **시각이 없었다.** 매분 크론이 붙이므로 로그의 59%(실측 10,695 / 18,216줄)가
+  # 같은 글자였고, "언제 죽었나" 를 로그에서 못 읽었다. 다른 echo 는 처음부터 시각이 있었다.
+  echo "[$(date '+%F %T')] ✓ supervise check done"
+  rotate_log
+  exit 0
+fi
 
-echo "→ supervisor started (interval ${INTERVAL}s). Ctrl-C to stop."
+echo "[$(date '+%F %T')] → supervisor started (interval ${INTERVAL}s). Ctrl-C to stop."
 while true; do check_once; sleep "$INTERVAL"; done
