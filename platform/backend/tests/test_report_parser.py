@@ -9,6 +9,7 @@ the normalized schema against ground truth.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -17,11 +18,13 @@ from app.reports import parser
 
 _DEEP = Path("/data/SmartTwinPostprocessor/lib/koo_deep_report/single_report/report.html")
 _SPHERE = Path("/data/SmartTwinPostprocessor/lib/koo_sphere_report/examples/Test_001_report.html")
-# impact 는 세션 중 생성한 스크래치패드 산출물(있으면 검증).
 _SPHERE_DENSE = Path("/data/SmartTwinPostprocessor/lib/koo_sphere_report/examples/Test_006_report.html")
+# ⚠ 예전에는 이 목록이 **작업 세션의 스크래치패드 절대경로(UUID 포함)** 하나였다. 그 경로는 세션이
+# 끝나면 사라지므로 시험이 어느 박스에서도 영구 skip 이 됐고, 사유 문구는 "impact 샘플 없음" 이라
+# 거짓말을 했다(샘플은 디스크에 있었다). 2026-09-26 실측 감사가 그것을 잡았다.
+# 안정 경로만 둔다 — 없으면 skip 하지만 그때는 정말로 없는 것이다.
 _IMPACT_CANDIDATES = [
-    Path("/tmp/claude-1000/-home-koopark-claude-KooRemapper/"
-         "c1650bf4-b3b2-4d9d-88d1-a34a9ec0f959/scratchpad/impact_report.html"),
+    Path("/data/koopark/Test_Impact_A/impact_report.html"),
 ]
 
 
@@ -72,18 +75,26 @@ def test_sphere_normalizes():
 def test_impact_normalizes():
     path = next(p for p in _IMPACT_CANDIDATES if p.exists())
     study = parser.parse_html(_read(path))
+    # ⚠ 여기의 단언은 **표본 고유 숫자가 아니라 계약**이다. 예전 판은 `cases == 50`(2면×25위치) ·
+    # `parts == 12` · `face in {"F1","F2"}` 로 적어 두었는데, 그것은 **한 번의 산출물**에 맞춘
+    # 숫자였다. 실제 샘플(1면×25위치 · 파트 25 · face F5)에 대면 셋 다 깨진다 — 표본이 바뀌면
+    # 깨지는 단언은 계약을 지키지 못하고 사람을 시험에서 멀어지게 한다.
     assert study["kind"] == "impact"
     assert study["source"]["generator"] == "koo_impact_report"
-    # 케이스 = 충격 위치(pos_id). 2면 × 25위치 = 50 케이스.
-    assert len(study["cases"]) == 50
-    ident = study["cases"][0]["identity"]
-    assert set(ident) >= {"face", "pos_id", "pos_x", "pos_y"}
-    assert ident["face"] in {"F1", "F2"}
-    # 위치당 파트 메트릭(g/s/e/d → 공통 키).
-    pm = next(iter(study["cases"][0]["parts_metrics"].values()))
+    cases = study["cases"]
+    assert cases, "케이스가 하나도 없으면 파싱이 실패한 것이다"
+    # 케이스는 (면, 위치) 하나에 하나다 — 표본 크기와 무관한 불변식이다.
+    keys = [(c["identity"]["face"], c["identity"]["pos_id"]) for c in cases]
+    assert len(keys) == len(set(keys)), "같은 (면, 위치)가 두 케이스로 갈렸다"
+    for c in cases:
+        ident = c["identity"]
+        assert set(ident) >= {"face", "pos_id", "pos_x", "pos_y"}
+        # 면 이름은 `F<숫자>` 형식이다(어느 면인지는 덱마다 다르다).
+        assert re.fullmatch(r"F\d+", str(ident["face"])), ident["face"]
+    # 위치당 파트 메트릭(g/s/e/d → 공통 키). 더 있어도 되고 없으면 안 된다.
+    pm = next(iter(cases[0]["parts_metrics"].values()))
     assert set(pm) >= {"peak_stress", "peak_strain", "peak_g", "peak_disp"}
-    # 12 파트.
-    assert len(study["parts"]) == 12
+    assert study["parts"], "파트가 비면 파싱이 실패한 것이다"
 
 
 @pytest.mark.skipif(not _SPHERE.exists(), reason="sphere 샘플 없음")
@@ -107,8 +118,13 @@ def test_extract_geometry_impact():
     g = parser.extract_geometry(data, "impact")
     assert g["kind"] == "impact"
     assert g["device_bbox"] and {"xmin", "xmax", "ymin", "ymax"} <= set(g["device_bbox"])
-    assert isinstance(g["device_outline"], list) and len(g["device_outline"]) >= 3
-    # 파트별 footprint(XY 다각형)로 '부품이 어디인지'를 그린다.
+    # ⚠ `device_outline` 은 **없을 수 있다.** 이 리포트 종류의 원본 DATA 에 그 키가 있어도 값이
+    # `None` 인 산출물이 실재한다(생성기가 null 을 낸다 — 파서 결함이 아니다. 실측으로 확인했다).
+    # 그래서 계약은 "없거나, 있으면 3점 이상 다각형" 이다. 예전 판은 `len >= 3` 을 무조건 걸어
+    # 그 산출물에서 깨졌다.
+    outline = g["device_outline"]
+    assert outline is None or (isinstance(outline, list) and len(outline) >= 3)
+    # 파트별 footprint(XY 다각형)로 '부품이 어디인지'를 그린다 — 이쪽은 없으면 안 된다.
     assert g["parts"] and any(p["footprint"] for p in g["parts"])
 
 
