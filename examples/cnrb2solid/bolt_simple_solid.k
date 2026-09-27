@@ -145,22 +145,22 @@ $$ --- CNRB2SOLID: PID=200 ---
       40     200      59      52      43      44      76      69      60      61
 *PART
 Bolt_M6_Solid
-       200       201       201
+       200         2         2
 *SECTION_SOLID_TITLE
 CNRB_200_Section
-       201         1
+         2         1
 *MAT_ELASTIC_TITLE
 CNRB_200_Material
-       2017.8500E-092.0000E+053.0000E-01
+         27.8500E-092.0000E+053.0000E-01
 *SET_NODE_LIST_TITLE
 Tied_CNRB_200
-       201       0.0       0.0       0.0       0.0
+        19       0.0       0.0       0.0       0.0
          2         3         4         5         6         7         8         9
         10        11        12        13        14        15        16        17
         18        19        20        21        22        23        24        25
 *CONTACT_TIED_SURFACE_TO_SURFACE_OFFSET_ID
          1                                            Tied_CNRB_200
-       201       200         4         3         0         0         0         0
+        19       200         4         3         0         0         0         0
        0.0       0.0       0.0       0.0       0.0         0      0.011.0000E+20
        1.0       1.0       0.0       0.0       1.0       1.0       1.0       1.0
 *END

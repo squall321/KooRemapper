@@ -357,7 +357,27 @@ static double cs_roundZ(double z, double tol) {
 // Format a fixed-width LS-DYNA node line
 // ============================================================
 
+// 8칸을 넘긴 ID 들. `snprintf("%8d", …)` 는 **잘라 주지 않고 칸을 넓힌다** — 다음 칸을 침범한
+// 줄이 조용히 나가고 LS-DYNA 는 엉뚱한 노드를 읽는다. 이 캠페인이 세 번 고친 부류다.
+// 그래서 세어 두고 **쓰기 전에 거절한다**(`ModelAssembler` 의 `widthOverflow_` 와 같은 규약).
+static std::string cs_widthOverflow;   // 사람이 읽을 요약(앞 몇 건만)
+static int cs_widthOverflowCount = 0;  // 전체 건수
+static int cs_widthOverflowMax = 0;    // 가장 큰 값
+
+static void cs_noteWidth(int v, const char* what) {
+    if (v <= 99999999) return;
+    ++cs_widthOverflowCount;
+    if (v > cs_widthOverflowMax) cs_widthOverflowMax = v;
+    // ⚠ 앞 3건만 적는다. 전부 적으면 한 줄이 수백 개가 되어 **읽을 수 없는 보고**가 된다
+    // (처음에 그렇게 만들어 봤다 — 노드 200여 개가 한 줄에 나왔다).
+    if (cs_widthOverflowCount <= 3) {
+        if (!cs_widthOverflow.empty()) cs_widthOverflow += ", ";
+        cs_widthOverflow += std::string(what) + " " + std::to_string(v);
+    }
+}
+
 static std::string cs_fmtNode(int nid, double x, double y, double z) {
+    cs_noteWidth(nid, "노드");
     char buf[128];
     snprintf(buf, sizeof(buf), "%8d%16.8e%16.8e%16.8e       0       0", nid, x, y, z);
     return std::string(buf);
@@ -369,6 +389,9 @@ static std::string cs_fmtNode(int nid, double x, double y, double z) {
 
 static std::string cs_fmtHex8(int eid, int pid,
     int n1,int n2,int n3,int n4, int n5,int n6,int n7,int n8) {
+    cs_noteWidth(eid, "요소");
+    cs_noteWidth(pid, "파트");
+    for (int v : {n1, n2, n3, n4, n5, n6, n7, n8}) cs_noteWidth(v, "노드");
     char buf[128];
     snprintf(buf, sizeof(buf),
         "%8d%8d%8d%8d%8d%8d%8d%8d%8d%8d",
@@ -1019,17 +1042,49 @@ int runCnrb2Solid(const std::string& yamlFile, ConsoleOutput& console) {
             if (!toks.empty()) maxNodeId = std::max(maxNodeId, cs_parseInt(toks[0]));
         }
     }
-    // Max section/mat IDs
-    for (const auto& ln : lines) {
-        std::string tr = cs_trim(ln);
-        if (tr.empty() || tr[0] == '$') continue;
-        if (tr[0] == '*') continue;
-        int id = cs_parseInt(cs_field10(ln, 0));
-        // We'll be conservative and use these as base
-        maxSecId  = std::max(maxSecId,  id);
-        maxMatId  = std::max(maxMatId,  id);
-        maxSetId  = std::max(maxSetId,  id);
-        maxPartId = std::max(maxPartId, id);
+    // 네임스페이스별 최대 ID (P1-13 ①).
+    //
+    // ⚠ 예전에는 **모든 비키워드 줄**의 첫 10칸을 읽어 네 네임스페이스에 **동시에** 밀어 넣었다
+    // (주석이 "We'll be conservative" 라고 적혀 있었다). 그러면 상관없는 번호가 전부를 밀어 올린다 —
+    // 실측: `examples/cnrb2solid/bolt_simple.k` 는 SECTION 최대 1 · MAT 1 · SET 18 인데
+    // `*CONSTRAINED_NODAL_RIGID_BODY` 의 첫 칸 **200**(그것은 파트 ID 다) 때문에 새 SECID·MID·SID 가
+    // 전부 **201** 로 나갔다. 노드 ID 가 9,900,001 대인 덱에서는 SECID 가 그 대역으로 뛴다.
+    //
+    // 그래서 자리마다 **그 네임스페이스의 카드만** 본다.
+    //
+    // ⚠ PART 는 세지 않는다. `cnrb2solid_convert` 의 `maxPartId` 매개변수는 **쓰이지 않고**
+    // (`int& /*maxPartId*/`) 새 `*PART` 는 `cnrb.pid` 를 그대로 재사용한다. 세어 두면 관찰할 수
+    // 없는 코드가 되고, 돌연변이 시험이 그것을 잡아냈다 — 그래서 넣지 않는다.
+    {
+        enum class Ns { None, Sec, Mat, Set };
+        Ns ns = Ns::None;
+        bool titleSkipped = true;
+        for (const auto& ln : lines) {
+            const std::string tr = cs_trim(ln);
+            if (tr.empty()) continue;
+            if (tr[0] == '*') {
+                const std::string up = cs_upper(tr);
+                if (up.rfind("*SECTION_", 0) == 0)                      ns = Ns::Sec;
+                // `*MAT_ADD_*` 는 재질을 새로 만들지 않는다 — 첫 칸이 **PID** 다.
+                else if (up.rfind("*MAT_ADD_", 0) == 0)                  ns = Ns::None;
+                else if (up.rfind("*MAT_", 0) == 0)                      ns = Ns::Mat;
+                else if (up.rfind("*SET_", 0) == 0)                      ns = Ns::Set;
+                else                                                     ns = Ns::None;
+                // `_TITLE` 은 데이터 카드 앞에 제목 줄이 한 줄 더 있다.
+                titleSkipped = (up.find("_TITLE") == std::string::npos);
+                continue;
+            }
+            if (ns == Ns::None || tr[0] == '$') continue;
+            if (!titleSkipped) { titleSkipped = true; continue; }
+            const int id = cs_parseInt(cs_field10(ln, 0));
+            if (id <= 0) continue;
+            switch (ns) {
+                case Ns::Sec:  maxSecId  = std::max(maxSecId,  id); break;
+                case Ns::Mat:  maxMatId  = std::max(maxMatId,  id); break;
+                case Ns::Set:  maxSetId  = std::max(maxSetId,  id); break;
+                default: break;
+            }
+        }
     }
 
     int n = cnrb2solid_convert(lines, cfg,
@@ -1043,6 +1098,15 @@ int runCnrb2Solid(const std::string& yamlFile, ConsoleOutput& console) {
 
     // 원본 덱의 개행을 따른다 — 안 그러면 CRLF 덱이 조용히 LF 로 바뀌거나,
     // 원본 줄만 CRLF 로 남고 새로 넣은 줄이 LF 가 되어 **한 파일 안에서 개행이 갈린다**.
+    // 8칸을 넘긴 ID 가 있으면 **파일을 쓰지 않는다.** 잘라 쓰면 다음 칸을 침범하고, 그 덱은
+    // LS-DYNA 가 엉뚱한 노드를 읽는다 — 성공을 보고하며 틀린 답을 내는 것보다 멈추는 것이 낫다.
+    if (!cs_widthOverflow.empty()) {
+        console.error("[cnrb2solid] 8칸을 넘긴 ID " + std::to_string(cs_widthOverflowCount) +
+                      "건(최대 " + std::to_string(cs_widthOverflowMax) + ") — 예: " + cs_widthOverflow +
+                      " — 이 자리는 8칸 고정이라 잘라 쓰면 다음 칸을 침범합니다. "
+                      "출력 파일을 쓰지 않았습니다: " + outPath);
+        return 1;
+    }
     KooRemapper::DeckWriter out_w(outPath, KooRemapper::deck_newline::detect(modelPath));
     std::ostream& out = out_w.stream();
     if (!out_w.ok()) { console.error("Cannot write: " + outPath); return 1; }
