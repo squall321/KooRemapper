@@ -151,3 +151,77 @@ def test_gate_message_tells_how_to_see_all_of_it():
     assert "allow_dangling_refs" in src
     assert "--strict" in src, "전부 보는 방법을 문구가 가리켜야 한다"
     assert "키워드 단계" in src
+
+
+def _run_dangling(rows):
+    """`dangling_status` 를 가짜 파일 목록으로 돌린다."""
+    import asyncio
+
+    import app.modules.sessions.services as svc
+    from app.modules.sessions.services import dangling_status
+
+    async def fake_list_files(db, session_id):
+        return rows
+
+    orig = svc.list_files
+    svc.list_files = fake_list_files
+    try:
+        return asyncio.run(dangling_status(None, "s"))
+    finally:
+        svc.list_files = orig
+
+
+class _F:
+    def __init__(self, name, meta):
+        self.filename, self.meta = name, meta
+
+
+def _certain(n=2):
+    return {"ref_dangling": {"grade": "certain", "count": n, "damaged": 0, "top": []}}
+
+
+def test_include_target_is_not_judged_standalone():
+    """다른 덱이 `*INCLUDE` 하는 파일은 **단독으로 판정하지 않는다.**
+
+    LS-DYNA 는 그 파일을 혼자 읽지 않으므로 "이 덱 안에 정의가 없다" 는 결함이 아니다.
+    실사용 1,967장 실측(2026-09-27) — 단정 등급 148장 중 **147장이 오탐**이고 그중 **122장이
+    바로 이 부류**다(같은/부모 폴더의 다른 덱이 인클루드하는 파일). 오탐율 99.3%.
+    """
+    rows = [
+        _F("master.k", {"includes": ["parts.k", "sub/mesh.k"]}),
+        _F("parts.k", _certain()),                       # 인클루드 대상 → 면제
+        _F("sub/mesh.k", _certain()),                    # 경로째로도 면제
+        _F("standalone.k", _certain(5)),                 # 아무도 인클루드하지 않는다 → 낸다
+    ]
+    out = _run_dangling(rows)
+    assert set(out) == {"standalone.k"}, out
+    assert out["standalone.k"]["count"] == 5
+
+
+def test_basename_match_also_exempts():
+    """옛 세션은 경로가 평탄화돼 올라온다 — 이름만으로도 맞춰야 한다(인클루드 게이트와 같은 규율)."""
+    rows = [
+        _F("master.k", {"includes": ["./sub/parts.k"]}),
+        _F("parts.k", _certain()),
+    ]
+    assert _run_dangling(rows) == {}
+
+
+def test_gate_does_not_fall_back_to_whole_session():
+    """⚠ 이 잡이 **쓰지도 않는 덱** 때문에 경고가 붙어서는 안 된다.
+
+    인클루드 게이트에는 `or inc` 폴백이 있다(빠진 인클루드는 세션 어디에 있어도 산출물을
+    깨뜨리므로 그쪽은 맞다). 이 축은 반대다 — 실사용 실측에서 막힌 덱이 1장이라도 있는 study
+    폴더가 51/230 이고 그 폴더의 덱 총수는 **515/938** 이다. 폴더 하나를 세션 하나로 올리는
+    정상 운용에서 개별로 걸리는 147장의 **3.5배**가 함께 물든다.
+    """
+    src = (Path(__file__).resolve().parents[1] / "app/modules/jobs/routes.py").read_text(encoding="utf-8")
+    # ⚠ 주석을 걷고 본다. 처음에 이 시험이 **내 주석 안의 문구**("`or dang` 폴백을 쓰지 않는다")를
+    # 잡아 빨갰다 — 코드는 맞았는데 시험이 글자만 봤다. 문서와 코드를 같은 잣대로 읽으면 안 된다.
+    code = "\n".join(l for l in src.splitlines() if not l.lstrip().startswith("#"))
+    dang_hit = [l for l in code.splitlines() if l.strip().startswith("hit = ") and "dang" in l]
+    inc_hit = [l for l in code.splitlines() if l.strip().startswith("hit = ") and "inc." in l]
+    assert len(dang_hit) == 1 and len(inc_hit) == 1, (dang_hit, inc_hit)
+    assert "or dang" not in dang_hit[0], "미정의 참조 축에는 세션 전체 폴백을 쓰지 않는다"
+    # 인클루드 축의 폴백은 **그대로 있어야 한다** — 서로 다른 판단이다.
+    assert "or inc" in inc_hit[0], "인클루드 축의 폴백은 건드리지 않는다"

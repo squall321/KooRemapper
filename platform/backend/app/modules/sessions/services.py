@@ -221,13 +221,31 @@ async def dangling_status(db: AsyncSession, session_id: str) -> dict:
     **단정 등급만 낸다.** `*INCLUDE` 를 못 읽었으면 그 안에 정의됐을 수 있어 단정할 수 없고,
     그것을 막으면 오탐이다 — 오탐 한 번에 사람은 이 게이트를 통째로 끈다.
 
+    ⚠ **다른 덱이 `*INCLUDE` 하는 파일은 단독으로 판정하지 않는다.** LS-DYNA 는 그 파일을 혼자
+    읽지 않으므로 "이 덱 안에 정의가 없다" 는 것이 결함이 아니다 — 정의는 마스터 덱에 있다.
+
+    실사용 1,967장 실측(2026-09-27): 단정 등급 **148장** 중 **147장이 오탐**이고 진성은 1장이다
+    (오탐율 **99.3%**). 그 147장의 정체 — 122장이 같은/부모 폴더의 다른 덱이 `*INCLUDE` 하는
+    파일, 13장이 마스터가 보관되지 않은 조각, 12장이 재료를 뒤에서 붙이는 파이프라인의 메시 전용
+    입력 덱(그게 바로 KooRemapper op 의 입력이다). 이 면제가 그중 122장을 걷어낸다.
+
     반환: {"<덱 파일명>": {"count": n, "damaged": n, "top": [...]}} — 단정할 게 없으면 안 낸다.
     """
+    files = await list_files(db, session_id)
+    # 이 세션 안에서 **누군가가 인클루드하는** 이름들. 그 파일은 조각이므로 단독 판정에서 뺀다.
+    included: set[str] = set()
+    for f in files:
+        for raw in (((f.meta or {}).get("includes") or []) if isinstance(f.meta, dict) else []):
+            norm = _norm_include(raw)
+            included.add(norm)
+            included.add(norm.rsplit("/", 1)[-1])
     out: dict[str, dict] = {}
-    for f in await list_files(db, session_id):
+    for f in files:
         ref = (f.meta or {}).get("ref_dangling") if isinstance(f.meta, dict) else None
         if not isinstance(ref, dict) or ref.get("grade") != "certain":
             continue
+        if f.filename in included or f.filename.rsplit("/", 1)[-1] in included:
+            continue     # 조각이다 — 정의는 이 파일을 인클루드하는 마스터에 있다
         out[f.filename] = {
             "count": ref.get("count") or 0,
             "damaged": ref.get("damaged") or 0,

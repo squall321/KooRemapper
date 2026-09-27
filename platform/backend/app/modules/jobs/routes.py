@@ -110,7 +110,12 @@ async def create_job(
 
     dang = await dangling_status(db, session_id)
     used = {body.args.get(p["name"]) for p in entry.get("params", []) if p.get("type") == "file"}
-    hit = {k: v for k, v in dang.items() if k in used} or dang
+    # ⚠ **`or dang` 폴백을 쓰지 않는다.** 위 인클루드 게이트에는 그 폴백이 있는데(빠진 인클루드는
+    # 세션 어디에 있어도 산출물을 깨뜨리므로 그쪽은 맞다) 이 축에서는 반대다 — 이 잡이 **쓰지도
+    # 않는 덱** 때문에 경고가 붙는다. 실사용 실측(2026-09-27): 막힌 덱이 1장이라도 있는 study
+    # 폴더가 51/230 이고 그 폴더의 덱 총수는 **515/938** 이다. 폴더 하나를 세션 하나로 올리는
+    # 정상 운용에서 개별로 걸리는 147장의 **3.5배**가 함께 물든다.
+    hit = {k: v for k, v in dang.items() if k in used}
     if hit:
         detail = "; ".join(
             f"{k} → {v['count']}건"
