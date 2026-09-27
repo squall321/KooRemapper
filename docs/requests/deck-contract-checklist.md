@@ -464,8 +464,14 @@ meshfix 가 그 덱에서 끝나지 않았다. `git checkout` 으로 되돌리�
 - 검증: 회귀 **54/54** · 단위 1/1 · 백엔드 282 통과 3 skip · 42 op 바이트 동일 · 픽스처 오염 0
 
 ### 남은 것 (이 라운드에서 확인했지만 안 고침)
-- [ ] `ShellReader` 는 TC/RC 를 읽지 않는다(`addNode(nid,x,y,z)`). `shellmap` 이 구속을 지키는 것은
-      그 경로가 `KFileReader` 를 타기 때문이다 — `ShellReader` 를 타는 op 은 아직 확인하지 않았다.
+- [x] `ShellReader` 는 TC/RC 를 읽지 않는다 — **측정으로 닫혔다(고칠 것이 없다).**
+      `ShellReader` 가 읽는 `ShellMesh` 는 **어디에서도 덱으로 쓰이지 않는다**(리포 전체에서
+      ShellMesh + write/ofstream/Deck 교집합 0건). 형상 참조로만 쓴다 —
+      `ShellMapper::build(bentShell)` · `ModelAssembler` 의 `shell_bent`.
+      그리고 `shellmap` 의 출력 노드는 `ShellMapper::mapMesh` 의 `resultMesh = flatDetail`
+      (메시 통째 복사 뒤 좌표만 변경)에서 오므로 TC/RC 가 자동으로 따라온다 —
+      그 flat detail 은 `KFileReader` 가 읽는다.
+      → 언젠가 ShellMesh 를 덱으로 쓰는 경로가 생기면 그때 이 구멍이 실재해진다. 이 줄을 근거로.
 - [ ] `examples/arc30/*.k` 에 `*KEYWORD` 줄이 없다. LS-DYNA 는 그것을 요구한다 — 픽스처를 고치면
       다른 시험의 기준선이 움직이므로 별 단위로 판단해야 한다.
 
@@ -505,3 +511,12 @@ meshfix 가 그 덱에서 끝나지 않았다. `git checkout` 으로 되돌리�
 ⚠ 배포 자리 바이너리가 **네 번째로** GLIBC_2.38 로 덮여 있었다(돌연변이 시험으로 `cmake --build`
 를 여러 번 돌린 탓). 호환 빌더로 되돌린 뒤 진행했다. 관문은 잡아 주지만 되돌리는 것은 여전히
 사람 손이다 — 캠페인 작업 뒤에는 `build_linux_compat.sh` 를 **끝에 한 번** 돌리는 것이 규율이다.
+
+### 9차 (2026-09-27) — 감사 후속 정리
+- [x] **impact 리포트 시험 3건이 세션 스크래치패드 경로에 묶여 영구 skip 이던 것** (`cfb347c`).
+      경로를 안정 경로로 옮기니 단언 4개가 깨졌다 — 표본 고유 숫자를 계약처럼 적어 둔 탓이다
+      (케이스 50↔25 · 파트 12↔25 · face F1/F2↔F5 · `device_outline` 3점↔None).
+      넷을 **계약**으로 바꿨다. `device_outline` 은 약하게 만든 것이 아니라 사실이다 — 원본 DATA 에
+      그 키가 **있고 값이 null** 이다(임베디드 데이터를 직접 열어 확인했다. 파서 결함이 아니다).
+      약해지지 않았다는 것을 돌연변이 3종(outline 2점 · parts 비움 · identity 에서 `pos_x` 제거)으로
+      확인했다. 백엔드 **287 통과 · skip 0**(직전 284 통과 3 skip).
