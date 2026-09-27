@@ -72,6 +72,14 @@ public:
     void setCoordinateFieldWidth(int width) { coordFieldWidth_ = width; }
 
     /**
+     * `*NODE`·`*ELEMENT` 의 **ID 칸 폭**(기본 8). `writeFileWithSource` 는 원본 덱의
+     * `*KEYWORD` 옵션에서 자동으로 정하므로 부를 필요가 없다.
+     * ⚠ 예전에는 8 로 못 박혀 있었다. 원본의 `*KEYWORD I10=Y` 는 그대로 베껴 나가므로
+     * **선언은 10칸인데 본문은 8칸인 덱**이 나왔고 rc=0 이었다.
+     */
+    void setIdFieldWidth(int width) { idFieldWidth_ = width; }
+
+    /**
      * Set whether to include header comment
      */
     void setIncludeHeader(bool include) { includeHeader_ = include; }
@@ -86,6 +94,7 @@ private:
     std::string errorMessage_;
     int precision_;
     int coordFieldWidth_;
+    int idFieldWidth_ = 8;
     bool includeHeader_;
     // 원본 덱의 개행. 이것이 없어서 CRLF 덱이 왕복마다 LF 로 바뀌었다.
     DeckNewline newline_ = DeckNewline::LF;

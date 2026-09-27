@@ -1,3 +1,4 @@
+#include "parser/ElementCardLayout.h"
 #include "parser/KFileWriter.h"
 #include <sstream>
 #include <iomanip>
@@ -111,6 +112,9 @@ bool KFileWriter::writeFileWithSource(const std::string& filename, const Mesh& m
     // 원본의 개행을 그대로 따른다. 위 루프가 CR 을 떼므로(그 자체는 옳다 — 남기면 뒤의 파싱이
     // 깨진다) 여기서 되붙이지 않으면 CRLF 덱이 조용히 LF 로 바뀐다. 호출부는 고칠 것이 없다.
     newline_ = deck_newline::detect(sourceFile);
+    // 원본 덱이 선언한 칸 폭을 따른다. 원본의 `*KEYWORD I10=Y` 는 그대로 베껴 나가므로
+    // 이것을 안 하면 **선언은 10칸인데 본문은 8칸인 덱**이 나간다(그 상태로 rc=0 이었다).
+    idFieldWidth_ = KooRemapper::deckFieldWidth(srcLines);
     DeckWriter writer(filename, newline_);
     if (!writer.ok()) {
         errorMessage_ = "Cannot create file: " + filename;
@@ -289,11 +293,15 @@ void KFileWriter::writeNodeSection(std::ostream& file, const Mesh& mesh,
                             ? node.mappedPosition
                             : node.position;
 
-        file << std::setw(8) << node.id
+        file << std::setw(idFieldWidth_) << node.id
              << formatDouble(pos.x)
              << formatDouble(pos.y)
-             << formatDouble(pos.z)
-             << std::endl;
+             << formatDouble(pos.z);
+        // TC/RC 는 **둘 중 하나라도 0 이 아닐 때만** 낸다. 그래야 구속이 없는 덱의 출력
+        // 바이트가 그대로 남는다(전 op sha256 불변 관문을 깨지 않는다).
+        if (node.tc != 0 || node.rc != 0)
+            file << std::setw(idFieldWidth_) << node.tc << std::setw(idFieldWidth_) << node.rc;
+        file << std::endl;
     }
 }
 
@@ -311,26 +319,35 @@ void KFileWriter::writeElementSection(std::ostream& file, const Mesh& mesh,
               [](const auto& a, const auto& b) { return a.first < b.first; });
 
     file << "*ELEMENT_SOLID" << std::endl;
-    file << "$#   eid     pid      n1      n2      n3      n4      n5      n6      n7      n8" << std::endl;
+    // 주석 눈금도 칸 폭을 따라야 한다 — 10칸 덱에 8칸 눈금을 달면 사람이 칸을 잘못 센다.
+    {
+        static const char* const kCols[10] = {"eid", "pid", "n1", "n2", "n3",
+                                              "n4", "n5", "n6", "n7", "n8"};
+        std::ostringstream hdr;
+        hdr << "$#";
+        for (int c = 0; c < 10; ++c)
+            hdr << std::setw(c == 0 ? idFieldWidth_ - 2 : idFieldWidth_) << kCols[c];
+        file << hdr.str() << std::endl;
+    }
 
     for (const auto& [id, elemPtr] : sortedElements) {
         const Element& elem = *elemPtr;
 
-        file << std::setw(8) << elem.id
-             << std::setw(8) << elem.partId;
+        file << std::setw(idFieldWidth_) << elem.id
+             << std::setw(idFieldWidth_) << elem.partId;
 
         if (elem.type == ElementType::TET4) {
             // TET4: write 4 nodes, then repeat n4 for n5-n8 (LS-DYNA convention)
             for (int i = 0; i < 4; ++i) {
-                file << std::setw(8) << elem.nodeIds[i];
+                file << std::setw(idFieldWidth_) << elem.nodeIds[i];
             }
             for (int i = 4; i < 8; ++i) {
-                file << std::setw(8) << elem.nodeIds[3];  // Repeat n4
+                file << std::setw(idFieldWidth_) << elem.nodeIds[3];  // Repeat n4
             }
         } else {
             // HEX8 and others: write all 8 nodes
             for (int i = 0; i < Element::NUM_NODES; ++i) {
-                file << std::setw(8) << elem.nodeIds[i];
+                file << std::setw(idFieldWidth_) << elem.nodeIds[i];
             }
         }
         file << std::endl;

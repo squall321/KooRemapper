@@ -109,6 +109,14 @@ public:
         nodes[node.id] = node;
     }
 
+    // TC/RC 를 함께 받는 갈래. 리더가 이것을 쓴다(구속을 버리지 않기 위해).
+    void addNode(int id, double x, double y, double z, int tc, int rc) {
+        Node n(id, x, y, z);
+        n.tc = tc;
+        n.rc = rc;
+        addNode(n);
+    }
+
     void addNode(int id, double x, double y, double z) {
         nodes[id] = Node(id, x, y, z);
     }

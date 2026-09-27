@@ -347,6 +347,10 @@ bool MeshRemapper::step4_MapNodes() {
         if (referencedNodes.count(flatNode.id) == 0) {
             Node passthrough(flatNode.id, flatNode.position);
             passthrough.setMappedPosition(flatNode.position);
+            // `*NODE` 의 TC/RC 구속을 들고 간다. 새 Node 를 만드는 자리라 안 옮기면 전 자유도
+            // 구속을 준 노드가 **구속 없는 노드로** 나간다(rc=0 으로 성공을 보고하면서).
+            passthrough.tc = flatNode.tc;
+            passthrough.rc = flatNode.rc;
             resultMesh_.addNode(passthrough);
             ++orphanCount;
             continue;
@@ -379,6 +383,8 @@ bool MeshRemapper::step4_MapNodes() {
 
         Node mappedNode(flatNode.id, bentPosition);
         mappedNode.setMappedPosition(bentPosition);
+        mappedNode.tc = flatNode.tc;   // 구속은 기하와 함께 옮긴다
+        mappedNode.rc = flatNode.rc;
         resultMesh_.addNode(mappedNode);
 
         stats_.nodesProcessed++;
@@ -444,6 +450,10 @@ bool MeshRemapper::step4_MapNodesParallel() {
             // Orphan — pass through.
             Node passthrough(flatNode.id, flatNode.position);
             passthrough.setMappedPosition(flatNode.position);
+            // `*NODE` 의 TC/RC 구속을 들고 간다. 새 Node 를 만드는 자리라 안 옮기면 전 자유도
+            // 구속을 준 노드가 **구속 없는 노드로** 나간다(rc=0 으로 성공을 보고하면서).
+            passthrough.tc = flatNode.tc;
+            passthrough.rc = flatNode.rc;
             mappedNodes[i] = passthrough;
             continue;
         }
@@ -472,6 +482,8 @@ bool MeshRemapper::step4_MapNodesParallel() {
 
         Node mappedNode(flatNode.id, bentPosition);
         mappedNode.setMappedPosition(bentPosition);
+        mappedNode.tc = flatNode.tc;   // 구속은 기하와 함께 옮긴다
+        mappedNode.rc = flatNode.rc;
         mappedNodes[i] = mappedNode;
     }
 

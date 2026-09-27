@@ -441,10 +441,12 @@ bool KFileReader::parseNodeSection(std::ifstream& file) {
                 double x = parseDouble(tokens[1]);
                 double y = parseDouble(tokens[2]);
                 double z = parseDouble(tokens[3]);
-                // tc and rc (tokens[4], tokens[5]) are ignored if present
+                // TC/RC — 예전에는 버렸다. 그러면 `KFileWriter` 경로가 구속을 지운 덱을 낸다.
+                const int tc = tokens.size() >= 5 ? parseInt(tokens[4]) : 0;
+                const int rc = tokens.size() >= 6 ? parseInt(tokens[5]) : 0;
 
                 if (nid > 0) {
-                    mesh_.addNode(nid, x, y, z);
+                    mesh_.addNode(nid, x, y, z, tc, rc);
                     nodeCount++;
                     parsed = true;
 
@@ -464,10 +466,17 @@ bool KFileReader::parseNodeSection(std::ifstream& file) {
                 double x = parseDouble(line.substr(nfw, rfw));
                 double y = parseDouble(line.substr(nfw + rfw, rfw));
                 double z = parseDouble(line.substr(nfw + rfw * 2, rfw));
-                // tc and rc at positions 56-64 and 64-72 are ignored (optional)
+                // TC/RC 는 좌표 뒤에 정수 칸 둘로 온다. **칸 폭은 섹션이 정한 것**을 쓴다 —
+                // 56/64 로 못 박으면 i10 덱에서 자리가 어긋난다.
+                int tc = 0, rc = 0;
+                {
+                    const size_t base = (size_t)(nfw + rfw * 3);
+                    if (line.length() >= base + (size_t)nfw) tc = parseInt(line.substr(base, nfw));
+                    if (line.length() >= base + (size_t)nfw * 2) rc = parseInt(line.substr(base + nfw, nfw));
+                }
 
                 if (nid > 0) {
-                    mesh_.addNode(nid, x, y, z);
+                    mesh_.addNode(nid, x, y, z, tc, rc);
                     nodeCount++;
                     parsed = true;
                 }
