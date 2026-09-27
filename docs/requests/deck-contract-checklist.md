@@ -480,3 +480,28 @@ meshfix 가 그 덱에서 끝나지 않았다. `git checkout` 으로 되돌리�
 - [x] 배너 문구도 정책에 맞췄다 — "잡 제출이 막힙니다" → "막지 않습니다(경고만)".
 - [ ] **다음 결정** — 실사용 덱에서 `info --strict` 가 몇 장을 막는지 세고 기본값을 뒤집을지 판단.
       그때 이 절·`schemas.py` 주석·`test_default_is_warn_not_block` 를 함께 고친다.
+
+### 배포 — 실사용에 반영 (2026-09-27)
+캠페인 시작 뒤 처음으로 **세 소비자 모두**에 같은 바이너리가 올라갔다.
+
+- [x] **Drive 재게시** `dist-20260927-113136Z` · commit `e450068` · GLIBC_2.34 · 바이너리 `05d320d7`
+      → 게시본이 18커밋 뒤였다(코드 16개). 09-25 10:31 이후 고친 것이 하나도 나가 있지 않았다.
+      → `dirty` 로 적힌 것은 전부 미추적 잡동사니(`.bkit`·`platform/scratch`·`sp7*.k`)다. 관문이
+        무엇이 더러운지 그대로 말해 준다.
+- [x] **배포 전 검증** — 기록된 절차대로 `api.sif` **안에서** 돌렸다. version OK ·
+      **meshfix 가 컨테이너 안에서 번들 gmsh 를 찾았다**(PATH 에 gmsh 가 없어 예전에 깨진 그 자리) ·
+      `info --strict` rc=0.
+- [x] **프론트엔드 dist 재빌드** — `FilePanel.tsx` 를 오늘 고쳤는데 dist 가 09-25 것이었다.
+      `build-frontend.sh` 듀얼 빌드(standalone + `index.portal.html`).
+- [x] **`koorm_api` 재기동** — health 가 `revision e450068` · `binary_sha256 05d320d7` ·
+      **`revision_matches_binary: true`**(직전엔 false) · `gmsh {available: true, version: 4.14.1}`.
+      → gmsh 필드가 보이는 것이 P1-9 가 실사용에 닿았다는 증거다.
+- [x] **pyKooCAE 의 `cli.sif` 교체** — `appt313/opt/kooremapper/cli.sif` 안이 **09-21 바이너리
+      (`81f630cf`)** 였다. 옆 `bin/KooRemapper` 만 09-25 판으로 갱신돼 있어 6차 감사가 "고친 것이
+      배포된 자리에 닿지 않았다" 고 적은 그 상태였다.
+      → 기존 관례대로 백업(`cli.sif.bak.<ts>`·`bin-backups/`) 뒤 교체. 셋 다 `05d320d7` 일치.
+      → `cli.sif` 로 `version`·`info`·`info --strict` 를 실제로 돌려 확인했다.
+
+⚠ 배포 자리 바이너리가 **네 번째로** GLIBC_2.38 로 덮여 있었다(돌연변이 시험으로 `cmake --build`
+를 여러 번 돌린 탓). 호환 빌더로 되돌린 뒤 진행했다. 관문은 잡아 주지만 되돌리는 것은 여전히
+사람 손이다 — 캠페인 작업 뒤에는 `build_linux_compat.sh` 를 **끝에 한 번** 돌리는 것이 규율이다.
