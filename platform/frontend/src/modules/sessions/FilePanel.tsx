@@ -98,7 +98,7 @@ export function FilePanel({ sessionId, files }: { sessionId: string; files: Sess
                         {r.ref!.top?.length ? ` · ${r.ref!.top.slice(0, 2).map((i) => `line ${i.line} ${i.keyword}`).join(', ')}` : ''}
                       </div>
                     ))}
-                    <div className="text-muted">잡 제출이 막힙니다. 강행하려면 allow_dangling_refs 를 켜세요.</div>
+                    <div className="text-muted">잡 제출은 막지 않습니다(경고만) — LS-DYNA 에 넣기 전에 고치세요. <span className="mono">info &lt;덱&gt; --strict</span> 로 전부 볼 수 있습니다.</div>
                   </div>
                 </div>
               )}

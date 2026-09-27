@@ -419,7 +419,9 @@ async def _execute(job_id: str) -> None:
             }
             nl_warns = audit_newlines(nl_before, nl_after)
             if nl_warns:
-                job.warnings = nl_warns
+                # ⚠ **이어 붙인다.** 덮어쓰면 제출 시점에 붙은 경고(미정의 참조 — 라우트에서
+                # 넣는다)가 사라진다. 경고는 축마다 쌓이는 것이고 마지막 것만 남을 이유가 없다.
+                job.warnings = (job.warnings or []) + nl_warns
 
         job.exit_code = exit_code
         job.output_file_ids = output_ids

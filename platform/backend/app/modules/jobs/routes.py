@@ -105,25 +105,28 @@ async def create_job(
     # 자리는 여기다. 실측: 추적 덱 489장 중 40장이 이 부류이고 40장 전부 rc=0 으로 나갔다.
     # 위 인클루드 게이트와 **같은 패턴**이다. 단정 등급만 막는다 — `*INCLUDE` 를 못 읽었으면
     # 그 안에 정의됐을 수 있어 단정하면 오탐이고, 오탐 한 번에 사람은 게이트를 통째로 끈다.
-    if not body.allow_dangling_refs:
-        from app.modules.sessions.services import dangling_status
+    dangling_warnings: list[str] = []
+    from app.modules.sessions.services import dangling_status
 
-        dang = await dangling_status(db, session_id)
-        used = {body.args.get(p["name"]) for p in entry.get("params", []) if p.get("type") == "file"}
-        hit = {k: v for k, v in dang.items() if k in used} or dang
-        if hit:
-            detail = "; ".join(
-                f"{k} → {v['count']}건"
-                + (f"(망가진 카드 {v['damaged']}건 포함)" if v.get("damaged") else "")
-                + (" · " + ", ".join(f"line {i['line']} {i['keyword']}" for i in v["top"][:3]) if v.get("top") else "")
-                for k, v in hit.items()
-            )
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
-                "덱이 정의되지 않은 것을 가리킵니다: " + detail
-                + " — LS-DYNA 가 키워드 단계에서 멈춥니다. `KooRemapper info <덱> --strict` 로 "
-                  "전부 볼 수 있습니다. 그래도 돌리려면 allow_dangling_refs=true 로 넘어갈 수 있습니다.",
-            )
+    dang = await dangling_status(db, session_id)
+    used = {body.args.get(p["name"]) for p in entry.get("params", []) if p.get("type") == "file"}
+    hit = {k: v for k, v in dang.items() if k in used} or dang
+    if hit:
+        detail = "; ".join(
+            f"{k} → {v['count']}건"
+            + (f"(망가진 카드 {v['damaged']}건 포함)" if v.get("damaged") else "")
+            + (" · " + ", ".join(f"line {i['line']} {i['keyword']}" for i in v["top"][:3]) if v.get("top") else "")
+            for k, v in hit.items()
+        )
+        msg = ("덱이 정의되지 않은 것을 가리킵니다: " + detail
+               + " — LS-DYNA 가 키워드 단계에서 멈춥니다. "
+                 "`KooRemapper info <덱> --strict` 로 전부 볼 수 있습니다.")
+        if body.allow_dangling_refs:
+            # 기본 경로 — 막지 않는다. 다만 **조용히 지나가지도 않는다.** P1-8 의 개행 경고와
+            # 같은 자리(`job.warnings`)에 남겨 화면에서 보이게 한다.
+            dangling_warnings.append(msg)
+        else:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, msg)
     job = Job(
         id=ulid.new().str,
         session_id=session_id,
@@ -131,6 +134,7 @@ async def create_job(
         operation=body.operation,
         args=body.args,
         status="queued",
+        warnings=dangling_warnings or None,
     )
     db.add(job)
     await db.commit()

@@ -118,13 +118,31 @@ def test_gate_only_blocks_certain():
     assert out["bad.k"]["count"] == 3 and out["bad.k"]["damaged"] == 1
 
 
-def test_job_create_has_the_escape_hatch():
-    """탈출구가 없으면 운용이 막힌다 — 인클루드 게이트와 같은 패턴이어야 한다."""
+def test_default_is_warn_not_block():
+    """⚠ 기본은 **통과**다(2026-09-27 캠페인 결정).
+
+    검사는 정확하지만 실사용 덱에 몇 장이 걸리는지 아직 안 세어 봤다. 첫날부터 막으면 멀쩡한
+    운용이 멈추고 사람은 게이트를 통째로 끈다 — 그 뒤엔 진짜를 놓친다. 그래서 경고로 시작한다.
+    기본값을 뒤집는 것은 실사용 숫자를 센 뒤의 결정이고, 그때 이 시험도 같이 고쳐야 한다.
+    """
     from app.modules.jobs.schemas import JobCreate  # noqa: PLC0415
 
-    body = JobCreate(operation="info", args={})
-    assert body.allow_dangling_refs is False, "기본은 막는 쪽이다"
-    assert JobCreate(operation="info", args={}, allow_dangling_refs=True).allow_dangling_refs is True
+    assert JobCreate(operation="info", args={}).allow_dangling_refs is True, "기본은 통과다"
+    assert JobCreate(operation="info", args={}, allow_dangling_refs=False).allow_dangling_refs is False
+
+
+def test_warning_path_does_not_pass_silently():
+    """막지 않는다는 것이 **조용히 지나간다**는 뜻이어서는 안 된다 — 잡 기록에 남아야 한다."""
+    src = (Path(__file__).resolve().parents[1] / "app/modules/jobs/routes.py").read_text(encoding="utf-8")
+    assert "dangling_warnings.append" in src, "통과 경로에서 경고를 남겨야 한다"
+    assert "warnings=dangling_warnings or None" in src, "그 경고가 Job 에 실려야 한다"
+    assert "HTTP_422_UNPROCESSABLE_ENTITY" in src, "막는 쪽도 남아 있어야 한다(allow=false)"
+
+
+def test_runner_does_not_clobber_submission_warnings():
+    """런너가 개행 경고를 **덮어쓰면** 제출 시점 경고가 사라진다 — 이어 붙여야 한다."""
+    src = (Path(__file__).resolve().parents[1] / "app/worker/runner_loop.py").read_text(encoding="utf-8")
+    assert "job.warnings = (job.warnings or []) + nl_warns" in src
 
 
 def test_gate_message_tells_how_to_see_all_of_it():
