@@ -355,3 +355,42 @@ keyword" 로 못 박아 뒀고 `examples/wrap/cylinder_2layer.k` 가 실제로 �
 풀려 CI 재현이 재현이 아니었던 것(24번 축), '새로 생긴 파일' 만 봐서 정작 바꾼 경로가 대조 밖이었던
 것, 그리고 이번. **숫자가 놀랍게 나오면 코드를 의심하기 전에 측정 장치를 의심한다.**
 관련: [[kooremapper-test-env-traps]]
+
+
+### 27. 게시(2026-09-28) — 배포 슬롯이 다섯 번째로 오염돼 있었고, 백업을 덮어써 하나 잃었다
+
+2026-09-28. `506f5a6` 을 Drive 에 게시했다(`dist-20260928-115353Z`, `latest/` 갱신). 순서는
+**cli.sif 재bake → `--dry-run` 확인 → 업로드 → 감독자 경유 API 재기동 → pyKooCAE 스테이징 교체**
+였고, 다섯 SIF 해시가 로컬과 원격에서 일치하는 것까지 확인했다. 되돌림 자리는
+`dist-20260927-113136Z`(`e450068`) 가 보관 3판 규칙 안에 남아 있다.
+
+**배포 슬롯이 또 GLIBC_2.38 이었다(다섯 번째).** 더 나쁜 것은 이전 세션이 측정용으로 떠 둔
+`/tmp/claude-1000/kr_stable` 이 **10:38 물건**이어서 겹침 탐지 커밋 `9b01ec6`(10:41) 보다
+앞섰다는 점이다 — 26번의 교훈대로 사본을 썼는데 **사본이 이미 낡은 것이었다.**
+
+**How to apply:** 사본을 뜨는 것만으로는 부족하다. 사본의 근거를 **커밋과 glibc 로 같이** 적는다.
+`scripts/build_linux_compat.sh` 로 빌드한 직후에 복사하고, `objdump` glibc 와 `sha256` 을 그
+자리에서 찍어 남긴다. 측정 결과를 보고할 때 그 두 값을 함께 말한다.
+
+**`tools/regress` 는 pytest 가 아니다.** `python3 <파일> <바이너리>` 로 도는 독립 스크립트이고
+`conftest.py` 가 없다. pytest 로 부르면 `fixture 'binary' not found` 로 26개가 에러 나는데,
+그것은 코드 회귀가 아니라 호출 착오다. CI(`.github/workflows/regress.yml:54`)가 정본이다.
+
+**백업을 덮어썼다 — 내 실수다.** pyKooCAE 스테이징(`appt313/opt/kooremapper`)의 관례를 따라
+`cli.sif.bak.<mtime epoch>` 로 백업했는데, 기존 파일이 **09-21 내용인데 09-27 시각으로** 이름
+붙어 있었다(이전 세션이 *교체 시각*으로 이름을 지었다). 그래서 이름이 충돌해 09-21 판 사본
+(140,288,000 bytes) 이 사라졌다. 그 시절 바이너리는 `bin-backups/KooRemapper.bak.1790326466`
+(md5 `e7e00ed6…`) 로 남아 있고 `cli.sif.bak.*` 를 읽는 코드는 없어 영향은 낮다.
+
+**How to apply:** 백업을 쓰기 전에 **대상이 이미 있는지 본다**(`[ -e "$dst" ] && 다른 이름`).
+이 트리의 기존 이름은 *교체 시각* 기준이라 내용 시각과 어긋난다 — 이름만 보고 내용을 믿지 마라.
+
+**SmartTwinPreprocessor.sif 는 굽지 않았다.** `BuildSmartTwinPreprocessor.sh` 는 KooRemapper 만
+바꾸는 스크립트가 아니다. gmsh·KooDynaPostProcessor·OpenCASCADE·SmartTwin 전체를 1.5GB SIF 로
+다시 굽고, `sudo` 로 Slurm 계산노드 이미지에 복사하고, `/data` 에 새 버전 tar 를 만들고,
+**Drive 업로드와 메일 발송까지** 한다. 그것은 다른 제품의 릴리스라 단독으로 당기지 않는다.
+스테이징 트리만 갱신해 **다음 bake 가 새 바이너리를 집게** 해 뒀다.
+
+**겹침 탐지 오탐 표면 최종.** 추적 489장 **0건** · 실사용 1,304장 **0건**(검증된 바이너리,
+빌드 동시 실행 없음). 26번이 무효화한 "실사용 5장" 은 폐기한다.
+관련: [[kooremapper-drive-deploy]] · [[kooremapper-build-glibc]] · [[kooremapper-test-env-traps]]
