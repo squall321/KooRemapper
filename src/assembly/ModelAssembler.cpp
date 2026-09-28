@@ -79,6 +79,37 @@ bool ModelAssembler::loadBaseModel(const std::string& filename) {
         if (pid > maxPartId_) maxPartId_ = pid;
         if (part.sectionId > maxSectionId_) maxSectionId_ = part.sectionId;
     }
+    // ⚠ **파트가 참조하지 않는 `*SECTION` 카드도 세어야 한다.** 위 루프는 `Part::sectionId` 만
+    // 보므로, 덱에 있지만 아무 파트도 안 쓰는 섹션을 놓친다. 그러면 `++maxSectionId_` 가 그
+    // 번호를 **다시 발행**하고 같은 종류 SECID 가 중복된다 — LS-DYNA 는 그 덱에서 멈춘다.
+    //
+    // 실측(2026-09-28): `restack_base.k` 에 아무도 안 쓰는 `*SECTION_SOLID 2` 를 넣고 restack 을
+    // 돌리면 산출 덱의 SECID 가 `[1, 2, 2, 3, 4]` 가 된다(47줄·53줄). rc=0 이었다.
+    for (size_t i = 0; i < rawLines_.size(); ++i) {
+        const std::string& l = rawLines_[i];
+        size_t s = l.find_first_not_of(" \t");
+        if (s == std::string::npos || l[s] != '*') continue;
+        std::string up = l.substr(s);
+        for (auto& c : up) c = (char)std::toupper((unsigned char)c);
+        if (up.rfind("*SECTION_", 0) != 0) continue;
+        // `_TITLE` 이면 제목줄이 한 줄 더 있다 — 그것을 SECID 로 읽으면 이 스캐너도 같은 맹점을
+        // 갖게 된다(`ld_findMaxSetSegmentId` 가 정확히 그래서 틀렸다).
+        int skip = (up.find("_TITLE") != std::string::npos) ? 1 : 0;
+        for (size_t j = i + 1; j < rawLines_.size(); ++j) {
+            const std::string& d = rawLines_[j];
+            size_t h = d.find_first_not_of(" \t");
+            if (h == std::string::npos) continue;
+            if (d[h] == '$') continue;
+            if (d[h] == '*') break;
+            if (skip > 0) { --skip; continue; }
+            // 첫 칸의 정수. `rsCardFields` 는 이 파일 뒤쪽에 있어 여기서 못 쓴다 — 첫 칸만
+            // 필요하므로 공백 토큰 하나로 충분하다(10칸 덱이든 8칸 덱이든 SECID 는 첫 칸이다).
+            std::istringstream iss(d);
+            int sid = 0;
+            if (iss >> sid && sid > maxSectionId_) maxSectionId_ = sid;
+            break;                      // 첫 데이터 카드만 본다
+        }
+    }
     maxMaterialId_ = 0;
     for (const auto& [mid, mat] : baseMesh_.materials) {
         if (mid > maxMaterialId_) maxMaterialId_ = mid;

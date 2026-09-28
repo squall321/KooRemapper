@@ -7,6 +7,7 @@
 #include <cctype>
 #include <map>
 #include <cstring>
+#include <sstream>
 #include <set>
 #include <string>
 #include <vector>
@@ -59,6 +60,21 @@ bool toInt(const std::string& s, int& v) {
 }
 
 bool starts(const std::string& kw, const char* p) { return kw.rfind(p, 0) == 0; }
+
+// 카드 첫 칸의 ID. **10칸 → 자유형식** 순서로 읽는다.
+//
+// ⚠ `fields10` 만으로는 안 된다. 그 함수는 첫 칸이 **비었을 때만** 자유형식으로 되돌리므로,
+// `       9 7.85E-9  210000     0.3` 같은 자유형식 줄에서 첫 칸이 `"9 7"` 이 되어 정수가 아니고
+// 조용히 아무 값도 내지 않는다. 실측으로 이 때문에 `*MAT` 중복 검사가 **통째로 죽어 있었다**
+// (10칸 정렬된 `*MAT_THERMAL_` 만 우연히 잡혀 오탐으로 보였다).
+bool firstFieldId(const std::string& line, int& out) {
+    auto f = fields10(line);
+    if (!f.empty() && toInt(f[0], out)) return true;
+    std::istringstream iss(line);
+    std::string tok;
+    if (iss >> tok && toInt(tok, out)) return true;
+    return false;
+}
 bool has(const std::string& kw, const char* p) { return kw.find(p) != std::string::npos; }
 
 // `&name` — *PARAMETER 참조가 있는 줄은 값이 기호라 숫자로 읽으면 안 된다.
@@ -143,6 +159,45 @@ ReferenceReport checkSetReferences(const std::vector<std::string>& lines) {
         std::string t = trim(lines[i]);
         if (!isKeyword(t)) continue;
         std::string kw = upper(t);
+        // `*SECTION_*`·`*MAT_*` 도 **같은 종류 안에서 ID 가 유일해야 한다.** 겹치면 LS-DYNA 가
+        // 키워드 단계에서 멈춘다. 실측(2026-09-28): `restack` 이 파트가 참조하지 않는 `*SECTION`
+        // 을 못 보고 그 번호를 재발행해 SECID 를 겹치게 만들었다(rc=0 이었다).
+        //
+        // ⚠ 첫 칸이 **구조 MID 가 아닌** `*MAT_` 변종을 빼야 한다. 실측으로 오탐 4장을 냈다 —
+        //    `*MAT_THERMAL_*` 의 첫 칸은 **TMID**(열 재질 ID)로 다른 네임스페이스다
+        //    (`materials/test_matdb_result.k` 등). `*MAT_ADD_*` 는 첫 칸이 **PID** 이고
+        //    `*MAT_NONLOCAL` 도 자기 ID 체계다.
+        // ⚠ 한 키워드 아래 정의가 **여러 장** 오므로 첫 카드만 보면 안 된다(매뉴얼 "Card Sets").
+        //    그래서 데이터 줄 전체를 훑되, **첫 칸이 정수인 줄만** 후보로 본다.
+        const bool matOtherNs = starts(kw, "*MAT_ADD_") || starts(kw, "*MAT_THERMAL_") ||
+                                starts(kw, "*MAT_NONLOCAL");
+        if (starts(kw, "*SECTION_") || (starts(kw, "*MAT_") && !matOtherNs)) {
+            const bool isSec = starts(kw, "*SECTION_");
+            std::string ns = isSec ? "SECTION" : "MAT";
+            int skip = titleLines(kw);
+            // ⚠ 한 키워드 아래 카드 세트가 여러 장이고 **세트 길이 표가 우리에겐 없다.** 그래서
+            // 여기서는 **첫 정의만** 본다 — 넘치게 세면 두 번째 카드(두께·물성 줄)의 첫 칸을 ID 로
+            // 오해해 오탐이 난다. 놓치는 쪽을 택한다.
+            for (size_t j = i + 1; j < lines.size(); ++j) {
+                std::string d = trim(lines[j]);
+                if (d.empty() || isComment(d)) continue;
+                if (isKeyword(d)) break;
+                if (skip > 0) { --skip; continue; }
+                if (hasParameterRef(lines[j])) break;
+                int id = 0;
+                if (firstFieldId(lines[j], id) && id > 0 && !has(kw, "_COLLECT")) {
+                    auto& slot = seenSetIds[ns][id];
+                    if (slot > 0)
+                        rep.damaged.push_back({(int)j + 1, "*" + ns,
+                            "ID " + std::to_string(id) + " 가 line " + std::to_string(slot) +
+                            " 과 겹칩니다 — 같은 종류의 ID 는 유일해야 합니다"});
+                    else
+                        slot = (int)j + 1;
+                }
+                break;
+            }
+            continue;
+        }
         if (!starts(kw, "*SET_")) continue;
         int skip = titleLines(kw);
         for (size_t j = i + 1; j < lines.size(); ++j) {

@@ -94,6 +94,56 @@ def main():
     rc, out = info(binary, deck(d, "c0.k", COLL + COLL))
     check("C-1 `_COLLECT` 중복은 보고하지 않는다", overlaps(out) == [], overlaps(out))
 
+    print("[F *SECTION·*MAT 도 같은 종류 안에서 유일해야 한다]")
+    SEC = "*SECTION_SOLID\n       %d         1\n"
+    MAT = "*MAT_ELASTIC\n       %d 7.85E-9  210000     0.3\n"
+    rc, out = info(binary, deck(d, "f0.k", SEC % 7 + SEC % 7))
+    check("F-1 SECID 중복을 잡는다", len(overlaps(out)) == 1, overlaps(out))
+    rc, out = info(binary, deck(d, "f1.k", MAT % 9 + MAT % 9))
+    check("F-2 MID 중복을 잡는다", len(overlaps(out)) == 1, overlaps(out))
+    rc, out = info(binary, deck(d, "f2.k", SEC % 4 + MAT % 4 + NODE % 4))
+    check("F-3 SECTION 4 · MAT 4 · SET_NODE 4 공존은 합법", overlaps(out) == [], overlaps(out))
+    # ⚠ 첫 칸이 **구조 MID 가 아닌** `*MAT_` 변종. 이것을 세면 리포 덱 4장에서 오탐이 났다
+    # (실측: `materials/test_matdb_result.k` 등). `*MAT_THERMAL_*` 의 첫 칸은 **TMID** 다.
+    THERM = "*MAT_THERMAL_ISOTROPIC\n       %d       0.0       0.0       0.0\n       1.0       1.0\n"
+    rc, out = info(binary, deck(d, "f3.k", MAT % 2 + THERM % 2))
+    check("F-4 *MAT_THERMAL_ 의 TMID 는 구조 MID 와 다른 대역", overlaps(out) == [], overlaps(out))
+    ADD = "*MAT_ADD_THERMAL_EXPANSION\n       %d     1.0E-5\n"
+    rc, out = info(binary, deck(d, "f4.k", MAT % 3 + ADD % 3))
+    check("F-5 *MAT_ADD_ 의 첫 칸은 PID — 재질로 세지 않는다", overlaps(out) == [], overlaps(out))
+
+    print("[G restack 이 파트가 안 쓰는 *SECTION 을 재발행하지 않는다]")
+    # ⚠ `maxSectionId_` 가 `Part::sectionId` 만 보면 아무 파트도 안 쓰는 섹션을 놓치고 그 번호를
+    # **다시 발행**한다. 실측: `restack_base.k` 에 `*SECTION_SOLID 2` 를 넣으면 산출 SECID 가
+    # `[1, 2, 2, 3, 4]` 가 됐다(rc=0).
+    rt = os.path.join(REPO, "examples", "replace_test")
+    yml = os.path.join(rt, "assemble_restack_test.yaml")
+    if not os.path.isfile(yml):
+        check("G 예제가 있다", False, "assemble_restack_test.yaml 이 없다")
+    else:
+        w = tempfile.mkdtemp(prefix="setid_rs_")
+        for fn in os.listdir(rt):
+            src = os.path.join(rt, fn)
+            if os.path.isfile(src):
+                shutil.copy(src, w)
+        base = open(os.path.join(w, "restack_base.k"), encoding="latin-1", newline="").read()
+        open(os.path.join(w, "trap.k"), "w", newline="\n").write(
+            base.replace("*END", "*SECTION_SOLID\n         2         1\n*END", 1))
+        cfg = open(yml, encoding="utf-8").read()
+        cfg = cfg.replace("base_model: restack_base.k", "base_model: trap.k")
+        cfg = cfg.replace("output: restack_result", "output: trap_result")
+        open(os.path.join(w, "trap.yaml"), "w", newline="\n").write(cfg)
+        p3 = subprocess.run([binary, "assemble", "trap.yaml"], capture_output=True, text=True,
+                            timeout=900, cwd=w)
+        check("G-1 assemble rc=0", p3.returncode == 0, (p3.stdout + p3.stderr)[-240:])
+        made = os.path.join(w, "trap_result.k")
+        if os.path.exists(made):
+            rc, out = info(binary, made)
+            check("G-2 산출 덱에 SECID 중복이 없다", overlaps(out) == [], overlaps(out))
+        else:
+            check("G-2 산출물이 생겼다", False, (p3.stdout + p3.stderr)[-240:])
+        shutil.rmtree(w, ignore_errors=True)
+
     print("[E 산출법 자체를 지킨다 — assemble 이 겹치는 SID 를 만들지 않는다]")
     # ⚠ 위 A~D 는 **탐지**만 본다. 결함의 원본은 `assemble` 의 발행 스캐너가 `_TITLE` 을 건너뛰지
     # 않은 것이었고, 그것을 되돌리면 이 자리에서만 잡힌다 — 그래서 실제로 돌린다.
