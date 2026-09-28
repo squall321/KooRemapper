@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <map>
+#include <cstring>
 #include <set>
 #include <string>
 #include <vector>
@@ -135,6 +137,8 @@ ReferenceReport checkSetReferences(const std::vector<std::string>& lines) {
     // `*SET_<종류>[_옵션][_TITLE]` 의 **첫 데이터 카드 첫 칸**이 SID 다. `_GENERATE`/`_ADD`/
     // `_COLUMN`/`_GENERAL` 은 멤버 해석만 바꾸고 SID 자리는 같다 — 그래서 정의 수집은 안전하다.
     std::set<int> definedSets;
+    // 종류 → (SID → 처음 본 줄). 같은 종류 안에서 SID 가 겹치는지 보려고 둔다.
+    std::map<std::string, std::map<int, int>> seenSetIds;
     for (size_t i = 0; i < lines.size(); ++i) {
         std::string t = trim(lines[i]);
         if (!isKeyword(t)) continue;
@@ -148,7 +152,36 @@ ReferenceReport checkSetReferences(const std::vector<std::string>& lines) {
             if (skip > 0) { --skip; continue; }
             auto f = fields10(lines[j]);
             int sid = 0;
-            if (!f.empty() && toInt(f[0], sid) && sid > 0) definedSets.insert(sid);
+            if (!f.empty() && toInt(f[0], sid) && sid > 0) {
+                definedSets.insert(sid);
+                // **같은 타입 안에서** SID 가 겹치나 — 겹치면 LS-DYNA 가 error termination 한다
+                // (`_COLLECT` 면 합법이라 그때는 세지 않는다).
+                //
+                // ⚠ **타입을 지우고 한 통으로 보면 안 된다.** SID 네임스페이스는 종류별로 갈리므로
+                // `*SET_PART 6` 과 `*SET_NODE 6` 의 공존은 **합법**이고, 실사용 덱 1,303장 중
+                // **312장(24%)** 이 그렇다(2026-09-27 실측). 한 통으로 보면 넷 중 하나가 오탐이다.
+                if (!has(kw, "_COLLECT")) {
+                    // `*SET_<종류>[_LIST][_방언][_TITLE]` 에서 **종류**만 남긴다.
+                    std::string ns = kw.substr(5);
+                    for (const char* suf : {"_TITLE", "_COLLECT", "_GENERATE_INCREMENT",
+                                            "_GENERATE", "_GENERAL", "_INTERSECT", "_ADD",
+                                            "_COLUMN", "_LIST"}) {
+                        const size_t sl = std::strlen(suf);
+                        size_t at = ns.find(suf);
+                        while (at != std::string::npos) {
+                            ns = ns.substr(0, at) + ns.substr(at + sl);
+                            at = ns.find(suf);
+                        }
+                    }
+                    auto& slot = seenSetIds[ns][sid];
+                    if (slot > 0)
+                        rep.damaged.push_back({(int)j + 1, "*SET_" + ns,
+                            "SID " + std::to_string(sid) + " 가 line " + std::to_string(slot) +
+                            " 과 겹칩니다 — 같은 종류의 세트 ID 는 유일해야 합니다"});
+                    else
+                        slot = (int)j + 1;
+                }
+            }
             break;                       // 첫 데이터 카드만 본다
         }
     }

@@ -13294,16 +13294,27 @@ static int ld_findMaxCurveId(const std::vector<std::string>& rawLines) {
 }
 
 // Find max *SET_SEGMENT ID
+// 기존 `*SET_SEGMENT` 의 최대 SID. 새 세그먼트 세트를 그 다음 번호부터 발행한다.
+//
+// ⚠ **`_TITLE` 을 건너뛰어야 한다.** 예전에는 그러지 않아 `*SET_SEGMENT_TITLE` 블록에 들어간 뒤
+// **제목줄**을 SID 줄로 읽었다. `iss >> id` 가 실패해 max 가 0 으로 남고, 새 세트가 1 부터 시작해
+// **같은 타입 SID 가 중복**된다. `_COLLECT` 가 없으면 LS-DYNA 는 error termination 한다.
+//
+// 실측(2026-09-28): 커밋된 `examples/load/mesh_contact_load.k` 에 `*SET_SEGMENT_TITLE` SID **1 이
+// 두 장**(26274줄 contact detect · 37535줄 load) 있었다. 우리 산출물이 불법 덱이었다.
+// 규약은 `bc_findMaxSetNodeId`(:14451) 를 그대로 따른다 — 새 판정을 만들지 않는다.
 static int ld_findMaxSetSegmentId(const std::vector<std::string>& rawLines) {
     int maxId = 0;
     bool inSet = false;
     bool needData = false;
+    bool needTitle = false;
     for (const auto& line : rawLines) {
         if (!line.empty() && line[0] == '*') {
             std::string up = line;
             for (auto& c : up) c = (char)std::toupper((unsigned char)c);
             if (up.find("*SET_SEGMENT") == 0) {
                 inSet = true;
+                needTitle = (up.find("_TITLE") != std::string::npos);
                 needData = true;
                 continue;
             }
@@ -13312,6 +13323,7 @@ static int ld_findMaxSetSegmentId(const std::vector<std::string>& rawLines) {
         }
         if (!inSet || !needData) continue;
         if (!line.empty() && line[0] == '$') continue;
+        if (needTitle) { needTitle = false; continue; }
         needData = false;
         inSet = false;
         std::istringstream iss(line);
