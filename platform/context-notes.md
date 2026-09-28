@@ -385,11 +385,27 @@ keyword" 로 못 박아 뒀고 `examples/wrap/cylinder_2layer.k` 가 실제로 �
 **How to apply:** 백업을 쓰기 전에 **대상이 이미 있는지 본다**(`[ -e "$dst" ] && 다른 이름`).
 이 트리의 기존 이름은 *교체 시각* 기준이라 내용 시각과 어긋난다 — 이름만 보고 내용을 믿지 마라.
 
-**SmartTwinPreprocessor.sif 는 굽지 않았다.** `BuildSmartTwinPreprocessor.sh` 는 KooRemapper 만
-바꾸는 스크립트가 아니다. gmsh·KooDynaPostProcessor·OpenCASCADE·SmartTwin 전체를 1.5GB SIF 로
-다시 굽고, `sudo` 로 Slurm 계산노드 이미지에 복사하고, `/data` 에 새 버전 tar 를 만들고,
-**Drive 업로드와 메일 발송까지** 한다. 그것은 다른 제품의 릴리스라 단독으로 당기지 않는다.
-스테이징 트리만 갱신해 **다음 bake 가 새 바이너리를 집게** 해 뒀다.
+**SmartTwinPreprocessor.sif 는 사용자 승인 뒤 전체 절차대로 다시 구웠다**(v104). `BuildSmartTwinPreprocessor.sh`
+는 KooRemapper 만 바꾸는 스크립트가 아니다 — gmsh·KooDynaPostProcessor·OpenCASCADE·SmartTwin 전체를
+1.5GB SIF 로 다시 굽고, `sudo` 로 Slurm 계산노드 이미지에 복사하고, `/data` 에 새 버전 tar 를 만들고,
+Drive 업로드와 **메일 발송까지** 한다. 그래서 먼저 물어보고 진행했다. 여기서 셋을 배웠다.
+
+ · **그 스크립트는 root 로 돌아야 한다.** 샌드박스의 `opt/KooDynaPostProcessor` 는 UID **100999**,
+   `opt/SmartTwinPreprocessor` 는 **root** 소유라 koopark 권한의 `cp -a` 가 2/5 단계에서 막힌다.
+   `sudo env HOME=/home/koopark bash …` 로 돌린다 — `HOME` 을 넘겨야 `notify_build.py` 가
+   `~/.config/smartTwinMailer.env` 와 사용자 rclone 설정을 찾는다(맨 `sudo` 면 알림이 조용히 스킵된다).
+   root 의 `cp -a` 는 소유권을 보존하므로 샌드박스가 망가지지 않는다.
+
+ · **그 스크립트는 `/opt/apptainers/SmartTwinPreprocessor.sif` 를 갱신하지 않는다.** 그런데 pyKooCAE 의
+   모든 소비자(`runner_config.json`·`scenario.json`·`build_glibc_guard.sh`)가 **그 경로**를 가리킨다.
+   스크립트는 `./SmartTwinPreprocessor.sif` 와 계산노드 이미지만 건드리므로, 그 복사를 따로 하지 않으면
+   **REMAP 체인은 옛 바이너리를 계속 쓴다.** 확인 방법 — 겹치는 SECID 덱을 만들어
+   `apptainer exec /opt/apptainers/SmartTwinPreprocessor.sif /opt/kooremapper/bin/KooRemapper info` 로
+   돌린다. 새 판은 "겹칩니다" 를 말하고 옛 판은 침묵한다.
+
+ · **파이프로 감싸면 `set -e` 실패가 종료코드에서 사라진다.** 첫 시도를 `bash … | grep | tail` 로
+   돌렸더니 스크립트가 2/5 에서 죽었는데 파이프라인 종료코드는 `tail` 것(0)이어서 **성공으로 보였다.**
+   길게 도는 스크립트는 파이프로 감싸지 말고 그대로 돌린다(필터는 나중에 출력 파일에 걸면 된다).
 
 **겹침 탐지 오탐 표면 최종.** 추적 489장 **0건** · 실사용 1,304장 **0건**(검증된 바이너리,
 빌드 동시 실행 없음). 26번이 무효화한 "실사용 5장" 은 폐기한다.
