@@ -592,6 +592,18 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
         int mid = 0;
         MmMatKfile kf;
         MmMatDb dbm;
+        // P1-7 에서 더한 것들. **전부 새 키다** — 기존 10키 값은 한 줄도 건드리지 않았다
+        // (plan2 조건: "기존 키 값 불변(하류 파서 보호)").
+        int nNode = 0;                      // 이 파트 요소가 참조하는 **고유** 절점 수
+        bool hasThickness = false;          // `*SECTION_SHELL` 의 T1 을 찾았나
+        double thickness = 0;
+        std::string thicknessWhy;           // 못 찾은 이유(찾았으면 빈 문자열)
+        bool hasMass = false;
+        double mass = 0;
+        std::string massBasis;              // "volume*rho" | "area*t*rho"
+        std::string massWhy;                // 유도 못 한 이유
+        bool hasEdge = false;
+        double edgeMin = 0, edgeP50 = 0, edgeMax = 0;
     };
     std::vector<PartOut> parts;
 
@@ -627,6 +639,76 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
             }
         }
         po.elemClass = (nSolid && nShell) ? "mixed" : (nShell ? "shell" : "solid");
+
+        // 고유 절점 수. `n_elems * 8` 이 아니다 — 요소가 절점을 공유하고 축퇴 요소는 같은 절점을
+        // 두 번 쓴다(TET4 를 HEX8 로 적을 때 n4 가 네 번 반복된다).
+        {
+            std::set<int> uniq;
+            for (const auto* e : byPart[pid])
+                for (int nid : e->nodeIds)
+                    if (nid > 0) uniq.insert(nid);
+            po.nNode = static_cast<int>(uniq.size());
+        }
+
+        // 에지 길이 — min·max 는 정확히, p50 은 **고정 버킷 히스토그램**으로.
+        // ⚠ 정렬하면 요소가 많은 덱에서 메모리가 터진다. 실측: 가장 큰 실덱이 요소 3,499,605개 ·
+        // modelmeta 가 36.5초 / 2.13GB 인데 업로드 timeout 이 120초다(여유 3.3배). 요소당
+        // `set<pair>` 를 쓰면 그 여유를 넘긴다. 그래서 두 번 훑고 상수 메모리로 낸다.
+        {
+            static const int kSolidEdges[12][2] = {{0,1},{1,2},{2,3},{3,0},{4,5},{5,6},{6,7},{7,4},
+                                                   {0,4},{1,5},{2,6},{3,7}};
+            static const int kShellEdges[4][2] = {{0,1},{1,2},{2,3},{3,0}};
+            auto forEachEdge = [&](const auto& fn) {
+                for (const auto* e : byPart[pid]) {
+                    const bool sh = (e->type == KooRemapper::ElementType::QUAD4);
+                    const int n = sh ? 4 : 12;
+                    for (int k = 0; k < n; ++k) {
+                        const int a = sh ? kShellEdges[k][0] : kSolidEdges[k][0];
+                        const int b = sh ? kShellEdges[k][1] : kSolidEdges[k][1];
+                        const int na = e->nodeIds[a], nb = e->nodeIds[b];
+                        // 축퇴 에지 이른 탈출. ⚠ 아래 `L > 0` 필터와 **중복**이다(같은 절점이면
+                        // 길이가 0 이다) — 돌연변이로 확인했다. 값이 아니라 비용만 줄인다.
+                        if (na <= 0 || nb <= 0 || na == nb) continue;
+                        V3 pa, pb;
+                        if (!mm_nodePos(mesh, na, pa) || !mm_nodePos(mesh, nb, pb)) continue;
+                        const double dx = pa.x - pb.x, dy = pa.y - pb.y, dz = pa.z - pb.z;
+                        const double L = std::sqrt(dx * dx + dy * dy + dz * dz);
+                        if (L > 0) fn(L);
+                    }
+                }
+            };
+            double lo = 0, hi = 0; long long cnt = 0;
+            forEachEdge([&](double L) {
+                if (!cnt || L < lo) lo = L;
+                if (!cnt || L > hi) hi = L;
+                ++cnt;
+            });
+            if (cnt) {
+                po.hasEdge = true;
+                po.edgeMin = lo;
+                po.edgeMax = hi;
+                if (hi <= lo) {
+                    po.edgeP50 = lo;
+                } else {
+                    // 버킷 2048개. 상수 메모리이고 폭이 (hi-lo)/2048 이라 p50 오차가 그 이하다.
+                    const int kB = 2048;
+                    std::vector<long long> h(kB, 0);
+                    const double w = (hi - lo) / kB;
+                    forEachEdge([&](double L) {
+                        int b = static_cast<int>((L - lo) / w);
+                        if (b < 0) b = 0;
+                        if (b >= kB) b = kB - 1;
+                        ++h[b];
+                    });
+                    long long acc = 0;
+                    const long long half = (cnt + 1) / 2;
+                    for (int b = 0; b < kB; ++b) {
+                        acc += h[b];
+                        if (acc >= half) { po.edgeP50 = lo + (b + 0.5) * w; break; }
+                    }
+                }
+            }
+        }
 
         // 솔리드: 자유면 기준 (닫힌 표면 → 정사영 /2)
         if (nSolid) {
@@ -674,6 +756,51 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
         }
         if (!db.empty())
             po.dbm = mm_matchDb(db, po.mid, po.kf.title, po.title, cfg.dbMidFallback);
+
+        // 두께 — 셸 파트의 `*SECTION_SHELL` Card 2 T1.
+        //
+        // ⚠ **TSHELL 은 두께를 내지 않는다.** `*SECTION_TSHELL` 에는 두께 칸이 **없다**(Card 1 은
+        // SECID ELFORM SHRF NIP PROPT QR/IRID ICOMP TSHEAR). 그 자리를 따라가면 이 리포가 만든
+        // 골든 3장에서 다음 섹션 세트의 Card 1 을 두께로 읽는다. 그래서 `null` + 이유다.
+        //
+        // ⚠ 파트가 `solid` 로 분류돼도 TSHELL 일 수 있다 — `elem_class` 는 **기하 기준**이고
+        // TSHELL 요소는 육면체다(`conventions.elem_class` 에 적었다).
+        if (po.elemClass == "shell" || po.elemClass == "mixed") {
+            if (pit != mesh.getParts().end()) {
+                auto sit = mesh.shellSections.find(pit->second.sectionId);
+                if (sit != mesh.shellSections.end() && sit->second.thickness > 0) {
+                    po.hasThickness = true;
+                    po.thickness = sit->second.thickness;
+                } else {
+                    po.thicknessWhy = "*SECTION_SHELL " + std::to_string(pit->second.sectionId) +
+                                      " 의 T1 을 찾지 못했다";
+                }
+            } else {
+                po.thicknessWhy = "이 PID 의 *PART 카드가 없어 SECID 를 모른다";
+            }
+        } else {
+            po.thicknessWhy = "이 파트는 " + po.elemClass + " 다 — 두께 칸이 없다";
+        }
+
+        // 질량. **0 으로 채우지 않는다** — 유도할 수 없으면 `null` 과 **이유**를 낸다.
+        // (plan2 가 그것을 명시로 금지했다. 지금 셸의 `volume: 0` 이 그 실수의 전례다.)
+        if (po.kf.rho <= 0) {
+            po.massWhy = "재질 밀도를 모른다(MID " + std::to_string(po.mid) + ")";
+        } else if (po.elemClass == "solid" && po.volume > 0) {
+            po.hasMass = true;
+            po.mass = po.volume * po.kf.rho;
+            po.massBasis = "volume*rho";
+        } else if (po.elemClass == "shell" && po.hasThickness && po.areaExt > 0) {
+            po.hasMass = true;
+            po.mass = po.areaExt * po.thickness * po.kf.rho;
+            po.massBasis = "area*t*rho";
+        } else if (po.elemClass == "mixed") {
+            po.massWhy = "솔리드와 셸이 섞인 파트다 — 한 기준으로 낼 수 없다";
+        } else if (po.elemClass == "shell") {
+            po.massWhy = "셸인데 두께를 모른다(" + po.thicknessWhy + ")";
+        } else {
+            po.massWhy = "부피가 0 이다(제로두께 코히시브 등)";
+        }
 
         parts.push_back(po);
     }
@@ -779,7 +906,25 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
     rf << "  \"conventions\": {\n"
        << "    \"area_ext\": \"solid: free-face sum; shell: one-sided element area\",\n"
        << "    \"proj\": \"solid: sum(area*|n.axis|)/2 (closed); shell: no /2 (open)\",\n"
-       << "    \"volume\": \"solid cell face-pyramid decomposition; shell: 0\"\n"
+       << "    \"volume\": \"solid cell face-pyramid decomposition; shell: 0\",\n"
+       // 아래는 P1-7 에서 더한 관례들. 값이 아니라 **무슨 기준으로 낸 값인가**를 적는다 —
+       // 같은 파일을 두고 `info` 와 여기가 다른 숫자를 말하던 것이 그 기준 차이였다.
+       << "    \"parts_basis\": \"요소가 참조한 PID 기준. *PART 카드만 있고 요소가 없는 PID 는 "
+          "세지 않는다 — `info` 의 파트 수와 다를 수 있고, 그것이 기준 차이다\",\n"
+       << "    \"bbox\": \"parts[].bbox_*: 그 파트 요소가 참조한 절점만. model.bbox_*: 같은 기준의 "
+          "합집합이라 덱의 고립 절점은 들어오지 않는다\",\n"
+       << "    \"elem_class\": \"**기하 기준**이다. TSHELL 요소는 육면체라 solid 로 센다 — "
+          "카드 키워드 기준이 아니다\",\n"
+       << "    \"n_node\": \"그 파트 요소가 참조한 **고유** 절점 수. 축퇴 요소는 같은 절점을 "
+          "여러 번 쓰므로 n_elems*8 이 아니다\",\n"
+       << "    \"thickness\": \"셸만. *SECTION_SHELL Card 2 의 T1. *SECTION_TSHELL 에는 두께 칸이 "
+          "**없어** TSHELL 은 null 이다\",\n"
+       << "    \"mass\": \"유도할 수 없으면 **0 이 아니라 null + reason** 이다. "
+          "solid: volume*rho, shell: area*t*rho\",\n"
+       << "    \"edge_len\": \"min/max 는 정확값, p50 은 버킷 2048개 히스토그램(오차 (max-min)/2048 "
+          "이하). 축퇴 에지는 빼고 센다\",\n"
+       << "    \"element_kinds\": \"BEAM/DISCRETE/SEATBELT 는 세지 않는다 — 추적 489장·실사용 "
+          "1,303장 전수에서 **0장**이라 확정할 근거가 없었다(2026-09-27 실측)\"\n"
        << "  },\n";
 
     rf << "  \"parts\": [\n";
@@ -795,7 +940,22 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
            << "      \"area_ext\": " << num(p.areaExt) << ",\n"
            << "      \"volume\": " << num(p.volume) << ",\n"
            << "      \"proj\": {\"x\": " << num(p.proj[0]) << ", \"y\": " << num(p.proj[1])
-           << ", \"z\": " << num(p.proj[2]) << "},\n";
+           << ", \"z\": " << num(p.proj[2]) << "},\n"
+           << "      \"n_node\": " << p.nNode << ",\n"
+           << "      \"thickness\": " << (p.hasThickness ? num(p.thickness) : std::string("null"))
+           << ",\n"
+           << "      \"thickness_reason\": "
+           << (p.hasThickness ? std::string("null") : "\"" + mm_jsonEsc(p.thicknessWhy) + "\"")
+           << ",\n"
+           << "      \"mass\": " << (p.hasMass ? num(p.mass) : std::string("null")) << ",\n"
+           << "      \"mass_basis\": "
+           << (p.hasMass ? "\"" + p.massBasis + "\"" : std::string("null")) << ",\n"
+           << "      \"mass_reason\": "
+           << (p.hasMass ? std::string("null") : "\"" + mm_jsonEsc(p.massWhy) + "\"") << ",\n"
+           << "      \"edge_len\": "
+           << (p.hasEdge ? "{\"min\": " + num(p.edgeMin) + ", \"p50\": " + num(p.edgeP50) +
+                           ", \"max\": " + num(p.edgeMax) + "}"
+                         : std::string("null")) << ",\n";
         rf << "      \"material\": {\n"
            << "        \"mid\": " << p.mid << ",\n"
            << "        \"kfile\": {";
