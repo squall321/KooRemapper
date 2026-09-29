@@ -80,22 +80,30 @@ def _env_snapshot() -> dict:
     }
 
 
-def _note_crash(job_id: str, exc: BaseException) -> None:
-    """크래시를 **잡 행이 없어도 남는 자리**(잡의 stderr 파일)에 적는다.
+def _note_crash(job_id: str, exc: BaseException) -> bool:
+    """크래시를 **잡 행이 없어도 남는 자리**에 적는다. 파일에 적었으면 True.
 
     행이 사라지는 경우가 실제로 있다 — 잡이 도는 중에 세션을 지우면 `ON DELETE CASCADE` 로
     행이 날아가고 `UPDATE` 가 `StaleDataError` 를 낸다. 그때 DB 에만 쓰려 하면 아무것도 남지
-    않는다(실측 4건). 파일은 세션 삭제와 별개로 남으므로 여기에 적는다.
+    않는다(실측 4건).
+
+    ⚠ **로그가 정본이다.** 처음 판은 "파일은 세션 삭제와 별개로 남는다" 고 보고 잡의 stderr
+    파일에만 적었는데 **그것이 틀렸다.** `delete_session` 이 세션 폴더를 `shutil.rmtree` 로
+    통째로 없앤다(`sessions/services.py:287-289`). 그러면 이 함수의 `open(path, "a")` 가
+    `FileNotFoundError` 로 실패해서, 정작 이 함수가 대비하려던 바로 그 부류에서 아무것도 남지
+    않는다(손으로 재현해 확인했다). 인스턴스 로그는 세션 삭제와 무관하게 남으므로 **먼저**
+    로그에 적고, 파일은 보조 수단으로 둔다(세션이 살아 있는 크래시에서는 잡 옆에 남는 편이 낫다).
     """
-    path = _err_paths.get(job_id)
-    if not path:
-        return
     stale = isinstance(exc, StaleDataError)
     why = (
         "잡이 도는 중에 이 잡의 행이 사라졌다 — 세션 삭제(ON DELETE CASCADE)가 가장 흔한 원인이다."
         if stale
         else "워커가 예외로 멈췄다."
     )
+    logger.error("job %s crash: %s | %s: %s", job_id, why, type(exc).__name__, exc)
+    path = _err_paths.get(job_id)
+    if not path:
+        return False
     stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
     try:
         with open(path, "a", encoding="utf-8", errors="replace") as fh:
@@ -106,8 +114,12 @@ def _note_crash(job_id: str, exc: BaseException) -> None:
                 f"error  : {type(exc).__name__}: {exc}\n"
                 f"=====================================\n"
             )
-    except OSError:
-        logger.warning("job %s: 크래시 기록을 %s 에 쓰지 못했다", job_id, path)
+        return True
+    except OSError as werr:
+        # 세션 폴더가 이미 지워진 경우가 여기다 — 조용히 넘기면 위 로그만 남는데, 그것이 정본이다.
+        logger.warning("job %s: 크래시 기록을 파일에 쓰지 못했다(%s) — 로그가 정본이다",
+                       job_id, type(werr).__name__)
+        return False
 
 
 async def _claim_one(db) -> str | None:
@@ -610,14 +622,17 @@ async def _loop() -> None:
                 # 실측 — 그렇게 사라진 잡 4건이 로그에만 있고 DB 에는 없었으며
                 # `error_summary='worker exception'` 인 잡은 **0건**이었다(복구가 한 번도 성공한
                 # 적이 없다). 그래서 파일에 **먼저** 적는다.
-                _note_crash(jid, exc)
+                noted = _note_crash(jid, exc)
                 async with SessionLocal() as db:
                     j = await db.get(Job, jid)
                     if j is None:
                         # 행이 없다는 사실 자체가 진단이다 — 조용히 넘기지 않는다.
+                        # ⚠ 파일에 남겼다고 **단정하지 않는다.** 세션 폴더가 지워졌으면 못 남긴다.
                         logger.error(
-                            "job %s crashed and its row is gone — 진단은 %s 파일에 남겼다",
-                            jid, _err_paths.get(jid) or "(경로 미지)",
+                            "job %s crashed and its row is gone — %s",
+                            jid,
+                            ("진단을 %s 에도 남겼다" % _err_paths.get(jid)) if noted
+                            else "세션 폴더까지 지워져 파일에는 못 남겼다 — 위 crash 로그가 정본이다",
                         )
                     elif j.status == "running":
                         j.status = "failed"

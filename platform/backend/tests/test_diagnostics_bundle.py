@@ -299,3 +299,32 @@ def test_a_crash_without_a_known_path_does_not_raise():
     """경로를 모를 때 예외를 내면 복구 경로 자체가 또 죽는다."""
     from app.worker import runner_loop
     runner_loop._note_crash("NOSUCHJOB", RuntimeError("boom"))
+
+
+@_aio
+async def test_a_crash_is_logged_when_the_session_folder_is_already_gone(db, sess, caplog):
+    """**첫 판이 여기서 틀렸다.** `delete_session` 은 세션 폴더를 `shutil.rmtree` 한다
+    (`sessions/services.py:287-289`). 그러면 잡의 stderr 파일도 사라져서 "파일에 남긴다" 는
+    설계가 정작 이 부류에서 아무것도 남기지 못한다. 그래서 **로그가 정본**이어야 한다."""
+    import shutil
+
+    from app.worker import runner_loop
+
+    u, s = sess
+    d = storage.session_abs_dir(u.id, s.id)
+    err = d / ".job_gone2.err"
+    err.write_text("이전 출력\n", encoding="utf-8")
+    shutil.rmtree(d)  # ← 세션 삭제가 하는 것
+    assert not err.exists()
+
+    jid = ulid.new().str
+    runner_loop._err_paths[jid] = str(err)
+    try:
+        with caplog.at_level(logging.ERROR, logger="koorm.worker"):
+            noted = runner_loop._note_crash(jid, StaleDataError("0 were matched."))
+    finally:
+        runner_loop._err_paths.pop(jid, None)
+
+    assert noted is False, "폴더가 없는데 파일에 남겼다고 보고했다 — 그 보고를 믿고 안심하게 된다"
+    joined = " ".join(r.getMessage() for r in caplog.records)
+    assert jid in joined and "행이 사라졌다" in joined, f"로그에 원인이 없다 — {joined}"
