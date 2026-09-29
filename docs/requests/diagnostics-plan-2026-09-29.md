@@ -19,7 +19,7 @@
 | 실제 실행한 argv + 생성된 yaml | `Job.resolved_cmd` (JSONB, `app/models.py:224`) |
 | `exit_code` · `error_summary` · `warnings` | `app/models.py:229-237` |
 | 로그 평문 엔드포인트 (경로 봉쇄 포함) | `GET /jobs/{job_id}/logs?which=stdout\|stderr\|both` (`routes.py:208`) |
-| 빌드 정체 계산기 | `app/runner/buildinfo.py` — 지금은 `/api/health` 에서만 쓴다 |
+| 빌드 정체 계산기 | `app/shared/buildinfo.py` — 지금은 `/api/health` 에서만 쓴다 |
 | 프런트 다운로드·복사 선례 | `endpoints.ts:106` (Blob) · `TokensPage.tsx:14` (clipboard) |
 | API 인스턴스 로그가 남고 일별 회전된다 | `~/.apptainer/instances/logs/<host>/<user>/koorm_api.{out,err}` |
 
@@ -31,10 +31,21 @@
 2. **로그 줄에 시각이 없다.** `logging.basicConfig(level=INFO)` 뿐이고(`main.py:24`) uvicorn 기본
    접근 포맷도 시각을 안 찍는다. "14:30 에 실패했다" 를 로그와 맞출 방법이 없다.
 3. **상관자가 없다.** 사용자가 본 에러와 서버 로그 줄을 잇는 id 가 없다.
-4. **접근 로그가 심장박동으로 덮여 있다.** `koorm_api.out` 93KB 가 거의 전부 감독자의 분당
-   `/api/health` 폴링이다. 감독자 로그가 59% 심장박동이던 것과 같은 병이고(P1-10 ②) 여기서는
-   아직 안 고쳤다. 읽을 수 없는 로그는 번들에 넣어도 쓸모가 없다.
+4. **접근 로그가 심장박동으로 덮여 있다.** `koorm_api.out` 의 `/api/health` 줄이 1,461개다 —
+   감독자가 분당 폴링한다. 감독자 로그가 59% 심장박동이던 것과 같은 병이다(P1-10 ②).
+   → ⚠ **정정(정독 실측).** 앱·워커 줄은 stderr 로 가서 `koorm_api.err` 에 따로 쌓인다
+     (`grep -c koorm.worker koorm_api.out` = 0). 그래서 이 소음은 **요청 갈래**를 못 읽게 만들고
+     **잡 갈래는 막지 않는다.** 처음 판에서 이것을 "번들 품질의 전제" 로 적었는데 과장이었다.
+     상관자로 요청을 되짚을 때 필요한 것이지, 잡 진단의 전제는 아니다.
 5. **한 덩어리로 내보내는 자리가 없다.** 사용자가 여러 화면을 돌며 긁어 모아야 한다.
+6. **잡이 흔적 없이 사라지는 부류가 있다.** 실사용 로그에 `ERROR:koorm.worker:job … crashed` 가
+   4건 있고 끝이 `sqlalchemy.orm.exc.StaleDataError: UPDATE statement on table 'jobs' expected to
+   update 1 row(s); 0 were matched.` 다 — 잡이 도는 중에 그 행이 사라졌다(세션 삭제 +
+   `ON DELETE CASCADE`). 복구 경로(`runner_loop.py:536-542`)가 `j = await db.get(Job, jid)` 뒤
+   `if j and j.status == "running"` 이라, **행이 없으면 아무것도 쓰지 않는다.**
+   → 실측 확인 — 그 4건은 DB 에 **한 건도 없고**, `error_summary = 'worker exception'` 인 잡은
+     전체에서 **0건**이다(현재 잡 11건: succeeded 8 · failed 3). 복구 경로가 한 번도 성공한 적이
+     없다. `grep -rn StaleDataError app/` 도 0건이다.
 
 ## 정한 것 (사용자 결정 2026-09-29)
 
@@ -50,15 +61,25 @@
 
 `Job` 에 `env_snapshot` JSONB **한 칸**을 더한다. 잡 시작 시 한 번 쓴다.
 
-```
-{ binary:  {sha256, md5, revision, glibc_max, mtime_utc, build_method},
-  gmsh:    {available, version},
-  platform:{app_env, api_revision},
-  host:    {nodename} }
+```json
+{ "binary":  {"sha256": "", "md5": "", "revision": "", "glibc_max": "", "mtime_utc": "", "build_method": ""},
+  "gmsh":    {"available": true, "version": ""},
+  "platform":{"app_env": "", "api_revision": ""},
+  "host":    {"nodename": ""} }
 ```
 
 `buildinfo` 와 `gmsh_probe` 가 이미 이 값을 낸다 — 새로 계산하지 않고 그대로 쓴다. 칸을 여러 개
 쪼개지 않는 이유는, 이 값들이 **함께 읽힐 때만** 뜻이 있고 개별 질의 대상이 아니기 때문이다.
+
+**⚠ 번들은 DB 행에만 의존할 수 없다.** 위 6번 때문이다 — 잡 행은 도는 중에 사라질 수 있다.
+그러면 남는 것은 디스크의 stdout·stderr 파일과 로그 줄뿐이다. 그래서 두 가지를 같이 한다.
+
+1. 크래시 기록을 **행이 없어도 남는 자리**에 쓴다. `StaleDataError` 를 그 자리에서 잡아 "도는 중에
+   잡 행이 지워졌다" 로 해석하고, 잡의 stderr 파일 끝에 그 사실을 적는다(파일은 세션 삭제와
+   별개로 남는다). 불투명한 `crashed` 예외 하나로 끝내지 않는다.
+2. 번들 조립은 **잡 id + 파일**만으로도 동작해야 한다. 행이 있으면 더 풍부해지고, 없으면 파일과
+   로그 줄로 최소 번들을 만든다. 행이 없을 때 404 로 끝내면 정작 가장 진단이 필요한 부류에서
+   진단이 불가능해진다.
 
 ### B. 상관자 — 사용자가 본 것과 서버 줄을 잇는다
 
