@@ -235,6 +235,11 @@ class Job(Base):
     # 성공한 잡에도 남기는 경고(개행 왕복 등). `error_summary` 는 실패 자리라 여기가 따로 있어야
     # 한다 — rc=0 인데 산출 덱이 상한 경우가 실제 사고의 모양이었다(캠페인 사건 1·7).
     warnings: Mapped[list | None] = mapped_column(JSONB)
+    # 이 잡이 **어느 빌드·어느 환경**에서 돌았나 — 진단 번들의 근거다.
+    # {binary:{revision,binary_sha256,…}, gmsh:{available,version}, platform:{app_env}, host:{nodename}}
+    # ⚠ `/api/health` 는 "지금" 만 말한다. 배포 자리 바이너리가 이 캠페인에서 다섯 번 덮였으므로
+    # (context-notes 27) 사흘 전 로그를 받아도 그때의 빌드를 알 방법이 없었다.
+    env_snapshot: Mapped[dict | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True, nullable=False
     )

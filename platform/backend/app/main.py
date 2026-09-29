@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -20,8 +21,11 @@ from fastapi.staticfiles import StaticFiles
 from app.config import settings
 from app.modules import register_routers
 from app.shared.errors import register_exception_handlers
+from app.shared.logctx import reset_correlator, sanitize, set_correlator, setup_logging
 
-logging.basicConfig(level=logging.INFO)
+# ⚠ `basicConfig(level=INFO)` 이던 자리다. 그 포맷에는 **시각이 없어서** "14:30 에 실패했다" 를
+# 로그와 맞출 수 없었다(진단 체계, context-notes 28). 상관자도 여기서 들어간다.
+setup_logging()
 logger = logging.getLogger(__name__)
 
 
@@ -63,6 +67,7 @@ def create_app() -> FastAPI:
     )
 
     _configure_cors(app)
+    _install_correlator(app)
     register_exception_handlers(app)
     register_routers(app)
 
@@ -111,7 +116,42 @@ def _configure_cors(app: FastAPI) -> None:
         allow_credentials=False,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["*"],
+        # 브라우저는 목록에 없는 응답 헤더를 스크립트에 **안 보여 준다.** 상관자를 화면에서
+        # 읽어 사용자가 넘기게 하려면 이것이 있어야 한다(같은 오리진이면 없어도 되지만,
+        # 개발에서는 프런트가 다른 포트다).
+        expose_headers=["X-Request-Id"],
     )
+
+
+def _install_correlator(app: FastAPI) -> None:
+    """요청마다 상관자를 세우고, 요청 한 줄을 **우리가** 찍는다.
+
+    ⚠ uvicorn 의 접근 로그에는 시각이 없고 포맷을 바꾸려면 `--log-config` 가 필요한데, 그 명령줄은
+    `api.def` 의 `%runscript` 에 있고 **SIF 에 구워진다.** 그래서 한 줄을 우리가 찍는다 — 어차피
+    상관자를 들고 있는 쪽이 우리다.
+
+    ⚠ `/api/health` 는 찍지 않는다. 감독자가 분당 폴링해서 그 줄만 1,461개였다(실측).
+    """
+
+    @app.middleware("http")
+    async def _correlate(request: Request, call_next):
+        corr = sanitize(request.headers.get("x-request-id") or "")
+        token = set_correlator(corr)
+        t0 = time.perf_counter()
+        try:
+            response = await call_next(request)
+            path = request.url.path
+            if path != "/api/health":
+                logger.info(
+                    "%s %s -> %s in %.0fms",
+                    request.method, path, response.status_code,
+                    (time.perf_counter() - t0) * 1000,
+                )
+            # 실패 응답에도 붙는다 — 사용자가 이 값을 넘기면 서버 줄을 바로 찾을 수 있다.
+            response.headers["X-Request-Id"] = corr
+            return response
+        finally:
+            reset_correlator(token)
 
 
 def _mount_frontend_if_configured(app: FastAPI) -> None:

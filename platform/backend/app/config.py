@@ -68,6 +68,10 @@ class Settings(BaseSettings):
     storage_dir: Path = _PLATFORM_ROOT / "storage"
     # The KooRemapper binary the runner executes (copied by CMake POST_BUILD).
     kooremapper_bin: Path = _PLATFORM_ROOT / "backend" / "bin" / "KooRemapper"
+    # 진단 번들이 서버 줄을 골라낼 API 인스턴스 로그 폴더. 비우면
+    # `~/.apptainer/instances/logs/<host>/<user>` 를 훑는다 — 컨테이너에서 홈이 안 보이는 배치는
+    # 이 값을 준다(KOORM_INSTANCE_LOG_DIR).
+    instance_log_dir: str = ""
     # Per-job wall-clock timeout (seconds).
     job_timeout_sec: int = 1800
     # Concurrent runner workers.

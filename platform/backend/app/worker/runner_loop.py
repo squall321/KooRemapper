@@ -20,17 +20,21 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from sqlalchemy import select, text
+from sqlalchemy.orm.exc import StaleDataError
 
 from app.config import settings
 from app.database import SessionLocal
 from app.models import Job, Session, SessionFile
 from app.runner import catalog
 from app.runner.argbuild import build_command
+from app.runner.gmsh_probe import probe as gmsh_probe
 from app.runner.kfile_inspect import inspect_kfile
 from app.runner.newline_audit import audit_newlines
 from app.runner.stcx_client import (StcxClient, build_scenario_overrides, parse_state,
                                     parse_submit)
 from app.shared import storage
+from app.shared.buildinfo import build_info
+from app.shared.logctx import reset_correlator, set_correlator
 
 logger = logging.getLogger("koorm.worker")
 
@@ -41,7 +45,69 @@ _POLL_BATCH = 20
 
 # job_id -> Popen, for cancellation
 _running: dict[str, subprocess.Popen] = {}
+# job_id -> stderr 파일 경로. **잡 행이 사라져도** 크래시를 적을 자리가 필요해서 둔다.
+# 실측(2026-09-29): 잡이 도는 중에 세션이 지워지면 `ON DELETE CASCADE` 로 행이 사라지고,
+# 복구가 `db.get(Job, jid)` 로 None 을 받아 아무것도 쓰지 못했다 — 잡 4건이 제품에서 흔적 없이
+# 사라졌고 `error_summary='worker exception'` 인 잡은 **0건**이었다. 행에서 경로를 되찾을 수
+# 없으므로 여기에 들고 있는다(`_running` 과 같은 규율).
+_err_paths: dict[str, str] = {}
 _stop = asyncio.Event()
+
+
+def _env_snapshot() -> dict:
+    """이 잡이 **어느 빌드·어느 환경**에서 돌았나. 기존 계산기를 그대로 쓴다 — 새로 세지 않는다.
+
+    ⚠ gmsh 의 **경로는 담지 않는다.** 호스트 절대 경로라 번들로 내보낼 때 접어야 하고, 정작 그
+    값은 이미 잡 stdout 에 찍힌다(`meshfix.cpp` 가 `Gmsh: <경로> (v…)` 를 낸다). 없는 정보를
+    만드는 칸이 아니라, **바이너리 리비전**을 남기는 칸이다 — 배너는 상수 `Version 1.8.0` 이어서
+    로그만으로는 어느 빌드였는지 알 수 없었다.
+    """
+    b = build_info(settings.kooremapper_bin)
+    g = gmsh_probe(settings.kooremapper_bin)
+    return {
+        "binary": {
+            "revision": b.get("revision"),
+            "revision_describe": b.get("revision_describe"),
+            "revision_matches_binary": b.get("revision_matches_binary"),
+            "sha256": b.get("binary_sha256"),
+            "mtime_utc": b.get("binary_mtime_utc"),
+            "published_utc": b.get("published_utc"),
+            "build_method": b.get("build_method"),
+        },
+        "gmsh": {"available": g.get("available"), "version": g.get("version")},
+        "platform": {"app_env": settings.app_env},
+        "host": {"nodename": os.uname().nodename},
+    }
+
+
+def _note_crash(job_id: str, exc: BaseException) -> None:
+    """크래시를 **잡 행이 없어도 남는 자리**(잡의 stderr 파일)에 적는다.
+
+    행이 사라지는 경우가 실제로 있다 — 잡이 도는 중에 세션을 지우면 `ON DELETE CASCADE` 로
+    행이 날아가고 `UPDATE` 가 `StaleDataError` 를 낸다. 그때 DB 에만 쓰려 하면 아무것도 남지
+    않는다(실측 4건). 파일은 세션 삭제와 별개로 남으므로 여기에 적는다.
+    """
+    path = _err_paths.get(job_id)
+    if not path:
+        return
+    stale = isinstance(exc, StaleDataError)
+    why = (
+        "잡이 도는 중에 이 잡의 행이 사라졌다 — 세션 삭제(ON DELETE CASCADE)가 가장 흔한 원인이다."
+        if stale
+        else "워커가 예외로 멈췄다."
+    )
+    stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    try:
+        with open(path, "a", encoding="utf-8", errors="replace") as fh:
+            fh.write(
+                f"\n===== KOORM WORKER CRASH {stamp} =====\n"
+                f"job    : {job_id}\n"
+                f"reason : {why}\n"
+                f"error  : {type(exc).__name__}: {exc}\n"
+                f"=====================================\n"
+            )
+    except OSError:
+        logger.warning("job %s: 크래시 기록을 %s 에 쓰지 못했다", job_id, path)
 
 
 async def _claim_one(db) -> str | None:
@@ -336,6 +402,9 @@ async def _execute(job_id: str) -> None:
         err_path = work_dir / f".job_{job_id}.err"
         job.stdout_path = str(out_path)
         job.stderr_path = str(err_path)
+        # 행이 사라져도 크래시를 적을 자리를 알아야 한다(`_err_paths` 주석 참조).
+        _err_paths[job_id] = str(err_path)
+        job.env_snapshot = _env_snapshot()
         await db.commit()
 
         # 플랫폼이 만든 설정 파일(config.yaml 등)을 **파일 목록에 올린다.**
@@ -529,18 +598,37 @@ async def _loop() -> None:
         await sem.acquire()
 
         async def _wrapped(jid=job_id):
+            # 이 잡 구간의 모든 로그 줄에 **잡 id** 를 붙인다. 그러면 잡 기록과 로그 줄이 같은
+            # 문자열로 만나고, 번들이 "이 잡의 서버 줄" 만 골라낼 수 있다.
+            token = set_correlator(jid)
             try:
                 await _execute(jid)
-            except Exception:
+            except Exception as exc:
                 logger.exception("job %s crashed", jid)
+                # ⚠ **DB 에만 쓰려 하면 안 된다.** 잡 행은 도는 중에 사라질 수 있고(세션 삭제 +
+                # ON DELETE CASCADE) 그러면 아래 복구가 None 을 받아 아무것도 남기지 못한다.
+                # 실측 — 그렇게 사라진 잡 4건이 로그에만 있고 DB 에는 없었으며
+                # `error_summary='worker exception'` 인 잡은 **0건**이었다(복구가 한 번도 성공한
+                # 적이 없다). 그래서 파일에 **먼저** 적는다.
+                _note_crash(jid, exc)
                 async with SessionLocal() as db:
                     j = await db.get(Job, jid)
-                    if j and j.status == "running":
+                    if j is None:
+                        # 행이 없다는 사실 자체가 진단이다 — 조용히 넘기지 않는다.
+                        logger.error(
+                            "job %s crashed and its row is gone — 진단은 %s 파일에 남겼다",
+                            jid, _err_paths.get(jid) or "(경로 미지)",
+                        )
+                    elif j.status == "running":
                         j.status = "failed"
-                        j.error_summary = "worker exception"
+                        j.error_summary = (
+                            "worker exception: %s: %s" % (type(exc).__name__, exc)
+                        )[:2000]
                         j.finished_at = datetime.now(timezone.utc)
                         await db.commit()
             finally:
+                reset_correlator(token)
+                _err_paths.pop(jid, None)
                 sem.release()
 
         t = asyncio.create_task(_wrapped())

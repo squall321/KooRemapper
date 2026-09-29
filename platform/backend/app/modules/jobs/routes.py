@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import ulid
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import PlainTextResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +13,7 @@ from app.models import Job, SessionFile, User
 from app.modules.jobs.schemas import JobCreate, JobRead
 from app.modules.sessions.services import get_owned_session
 from app.runner import catalog
+from app.shared import diagnostics, storage
 from app.shared.auth import get_current_user
 from app.shared.responses import ok
 from app.worker.runner_loop import request_cancel
@@ -235,6 +236,69 @@ async def get_job_logs(
     if which == "stderr":
         return _read(job.stderr_path)
     return f"===== STDOUT =====\n{_read(job.stdout_path)}\n===== STDERR =====\n{_read(job.stderr_path)}"
+
+
+async def _assemble_diagnostic(db: AsyncSession, job: Job, deck_lines: bool) -> dict:
+    """번들 본문을 만든다. 입력 파일은 `input_file_ids` 로만 고른다 — 세션의 다른 파일을 끌어오면
+    사용자가 켜지 않은 덱 본문이 섞일 수 있다."""
+    in_ids = list(job.input_file_ids or [])
+    out_ids = list(job.output_file_ids or [])
+    ids = in_ids + out_ids
+    rows = []
+    if ids:
+        rows = list(
+            (await db.execute(select(SessionFile).where(SessionFile.id.in_(ids)))).scalars()
+        )
+    by_id = {f.id: f for f in rows}
+    inputs: list[tuple[str, str]] = []
+    for fid in in_ids:
+        f = by_id.get(fid)
+        if f is None:
+            continue
+        try:
+            # ⚠ `rel_path` 는 **스토리지 루트 기준**(`<user>/<session>/<name>`) 이다.
+            # 세션 폴더에 다시 이어 붙이면 경로가 두 번 겹친다 — `abs_path` 가 정본이다.
+            inputs.append((f.filename, str(storage.abs_path(f.rel_path))))
+        except (ValueError, OSError):
+            continue
+    outputs = [by_id[fid].filename for fid in out_ids if fid in by_id]
+    return diagnostics.build(job, inputs=inputs, outputs=outputs, deck_lines=deck_lines)
+
+
+@router.get("/jobs/{job_id}/diagnostics")
+async def get_job_diagnostics(
+    job_id: str,
+    deck_lines: bool = Query(
+        False,
+        description="에러가 가리키는 덱 줄을 함께 담는다. 기본은 담지 않는다(고객 모델이 IP 다).",
+    ),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """이 잡 하나를 '재현 없이 고칠 수 있는' 한 덩어리로 낸다. `summary` 는 클립보드용이다."""
+    job = await _require_job(db, user, job_id)
+    diag = await _assemble_diagnostic(db, job, deck_lines)
+    return ok({"diagnostic": diag, "summary": diagnostics.summary_text(diag)})
+
+
+@router.get("/jobs/{job_id}/diagnostics.zip")
+async def get_job_diagnostics_zip(
+    job_id: str,
+    deck_lines: bool = Query(False),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    job = await _require_job(db, user, job_id)
+    diag = await _assemble_diagnostic(db, job, deck_lines)
+    blob = diagnostics.zip_bytes(job, diag)
+    return Response(
+        content=blob,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="koorm-diag-{job.id}.zip"',
+            "Content-Length": str(len(blob)),
+        },
+    )
 
 
 @router.get("/jobs/{job_id}/outputs")

@@ -154,6 +154,26 @@ export async function getJobLogs(jobId: string): Promise<string> {
   const { data } = await api.get(`/jobs/${jobId}/logs`, { responseType: 'text' })
   return data as string
 }
+/** 진단 요약(클립보드용)과 본문. `deckLines` 를 켜면 에러가 가리킨 덱 줄이 함께 담긴다 —
+ *  고객 모델이 IP 라 기본은 담지 않는다. */
+export async function getJobDiagnostics(
+  jobId: string, deckLines = false,
+): Promise<{ diagnostic: unknown; summary: string }> {
+  const { data } = await api.get(`/jobs/${jobId}/diagnostics`, { params: { deck_lines: deckLines } })
+  return unwrap<{ diagnostic: unknown; summary: string }>(data)
+}
+/** 진단 전문 .zip. 기존 downloadFile 과 같은 Blob 선례를 따른다. */
+export async function downloadJobDiagnostics(jobId: string, deckLines = false): Promise<void> {
+  const res = await api.get(`/jobs/${jobId}/diagnostics.zip`, {
+    params: { deck_lines: deckLines }, responseType: 'blob',
+  })
+  const url = URL.createObjectURL(res.data as Blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `koorm-diag-${jobId}.zip`
+  a.click()
+  URL.revokeObjectURL(url)
+}
 export async function getJobOutputs(jobId: string): Promise<SessionFile[]> {
   const { data } = await api.get(`/jobs/${jobId}/outputs`)
   return unwrap<SessionFile[]>(data)
