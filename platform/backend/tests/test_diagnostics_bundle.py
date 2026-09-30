@@ -360,6 +360,41 @@ async def test_a_crash_is_recorded_even_when_the_job_row_is_gone(db, sess):
     assert jid in text and "행이 사라졌다" in text, f"원인을 말하지 않는다 — {text[-300:]}"
 
 
+@_aio
+async def test_deleting_a_session_cancels_local_jobs_and_skips_external(db, sess, monkeypatch):
+    """**근본 원인 쪽 계약이다.** 예전 `delete_session` 은 `rmtree` + `db.delete` 두 줄이라 도는
+    잡을 보지 않았다 — 자식 프로세스가 신호를 못 받고 워커 자리를 최대 30분 물었고,
+    `ON DELETE CASCADE` 가 잡 행을 끌고 가 잡이 흔적 없이 사라졌다(실측 4건).
+
+    여기서 못 박는 것 셋 — 로컬 잡에는 취소가 들어간다 · **외부 잡은 건드리지 않는다**(다른
+    클러스터에서 도는 것이라 신호를 보낼 자리가 없고, 붙잡으면 4시간짜리 하나 때문에 삭제가
+    멈춘다) · 상한 안에 못 멈춰도 **삭제는 진행한다**(사용자가 삭제를 눌렀다)."""
+    from sqlalchemy import select as _select
+
+    from app.modules.sessions import services as svc
+
+    u, s = sess
+    local = Job(id=ulid.new().str, session_id=s.id, user_id=u.id, operation="database",
+                args=_DB_ARGS, status="running")
+    ext = Job(id=ulid.new().str, session_id=s.id, user_id=u.id, operation="stcx_fullangle_drop",
+              args={}, status="running", external_kind="stcx_mcp")
+    db.add_all([local, ext])
+    await db.commit()
+
+    called: list[str] = []
+    monkeypatch.setattr("app.worker.runner_loop.request_cancel",
+                        lambda jid: (called.append(jid), True)[1])
+    monkeypatch.setattr(svc, "_STOP_WAIT_SEC", 0.6)  # 시험을 빠르게 — 계약은 상한의 존재다
+
+    stuck = await svc._stop_live_jobs(s.id)
+    assert called == [local.id], f"로컬 잡에만 취소가 가야 한다 — {called}"
+    assert stuck == [local.id], f"멈추지 않은 잡을 보고해야 한다 — {stuck}"
+
+    await svc.delete_session(db, s)
+    gone = (await db.execute(_select(Session).where(Session.id == s.id))).scalars().first()
+    assert gone is None, "상한을 넘겼다고 삭제를 거부하면 사용자가 세션을 지울 수 없게 된다"
+
+
 def test_a_crash_without_a_known_path_does_not_raise():
     """경로를 모를 때 예외를 내면 복구 경로 자체가 또 죽는다."""
     from app.worker import runner_loop

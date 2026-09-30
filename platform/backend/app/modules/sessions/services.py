@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import shutil
 from pathlib import Path
 from typing import Optional
@@ -14,6 +15,8 @@ from app.shared import visibility as vis
 from app.runner.kfile_inspect import inspect_kfile
 from app.runner.kfile_modelmeta import run_modelmeta
 from app.shared import storage
+
+logger = logging.getLogger(__name__)
 
 
 async def create_session(
@@ -282,7 +285,77 @@ async def delete_file(db: AsyncSession, f: SessionFile) -> None:
     await db.commit()
 
 
+# 세션 삭제 시 도는 잡이 멈출 때까지 기다리는 상한. 사용자는 삭제를 눌렀으니 무한정 붙잡지
+# 않는다 — 상한을 넘기면 삭제를 진행하고, 못 멈춘 잡은 러너가 로그에 남긴다(`_note_crash`).
+# SIGTERM 뒤 5초에 SIGKILL 이 가므로(`request_cancel`) 8초면 프로세스가 죽고 러너가 상태를
+# 쓸 틈까지 든다.
+_STOP_WAIT_SEC = 8.0
+_STOP_POLL_SEC = 0.25
+_LIVE_STATUSES = ("queued", "running")
+
+
+async def _stop_live_jobs(session_id: str) -> list[str]:
+    """이 세션의 로컬 잡에 취소를 넣고 멈출 때까지 짧게 기다린다.
+
+    돌려주는 것은 **상한 안에 멈추지 않은** 잡 목록이다(빈 목록이면 다 멈췄다).
+    """
+    from app.database import SessionLocal
+    from app.worker.runner_loop import request_cancel  # 순환 임포트를 피해 함수 안에서 받는다
+
+    async with SessionLocal() as probe:
+        ids = list((await probe.execute(
+            select(Job.id).where(
+                Job.session_id == session_id,
+                Job.status.in_(_LIVE_STATUSES),
+                # ⚠ 외부 잡은 우리 자식이 아니라 다른 클러스터에서 돈다 — 신호를 보낼 자리가
+                # 없으므로 기다리지 않는다. 붙잡으면 4시간짜리 하나 때문에 삭제가 멈춘다.
+                Job.external_kind.is_(None),
+            )
+        )).scalars())
+    if not ids:
+        return []
+    for jid in ids:
+        request_cancel(jid)
+
+    left = ids
+    waited = 0.0
+    while waited < _STOP_WAIT_SEC:
+        await asyncio.sleep(_STOP_POLL_SEC)
+        waited += _STOP_POLL_SEC
+        # ⚠ **새 세션으로** 읽는다. 요청 세션의 트랜잭션 안에서 읽으면 워커가 커밋한 상태 변화를
+        # 언제 보게 될지가 격리 수준에 달린다 — 그 불확실성을 여기 두지 않는다.
+        async with SessionLocal() as probe:
+            left = list((await probe.execute(
+                select(Job.id).where(Job.id.in_(ids), Job.status.in_(_LIVE_STATUSES))
+            )).scalars())
+        if not left:
+            return []
+    return left
+
+
 async def delete_session(db: AsyncSession, session: Session) -> None:
+    """세션과 그 파일을 지운다. **도는 잡을 먼저 멈춘다.**
+
+    ⚠ 예전 판은 `rmtree` + `db.delete` 두 줄이라 도는 잡을 보지 않았고, 실측으로 두 가지가
+    일어났다.
+
+      · 자식 프로세스가 신호를 하나도 못 받는다. unlink 된 cwd 에서 계산을 계속하다 **끝에서**
+        산출물 쓰기가 깨지고, 그동안 `worker_concurrency` 자리 하나를 최대 `job_timeout_sec`
+        (기본 1800초) 물고 있어 다른 사용자의 큐가 좁아진다.
+      · `sessions.id` FK 가 `ON DELETE CASCADE` 라 잡 행이 함께 사라진다. 그러면 러너의 `UPDATE`
+        가 `StaleDataError` 를 내고 잡이 제품에서 **흔적 없이 사라진다** — 그렇게 사라진 잡 4건이
+        로그에만 있고 DB 에는 없었으며 `error_summary='worker exception'` 인 잡은 **0건**이었다.
+
+    이제 취소를 먼저 넣고 짧게 기다린다. 사용자 눈에는 그대로 지워지고 잡은 `canceled` 로 남는다.
+    """
+    stuck = await _stop_live_jobs(session.id)
+    if stuck:
+        # 상한 안에 못 멈춘 잡이 있다는 사실을 말한다 — 조용히 지우면 위의 옛 동작으로 되돌아간다.
+        logger.warning(
+            "session %s 삭제: 잡 %s 가 %.0f초 안에 멈추지 않았다 — 그대로 삭제한다"
+            "(그 잡은 러너가 크래시 로그로 남긴다)",
+            session.id, ",".join(stuck), _STOP_WAIT_SEC,
+        )
     # remove files on disk
     d = storage.session_abs_dir(session.user_id, session.id)
     if d.exists():
