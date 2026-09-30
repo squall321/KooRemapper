@@ -144,8 +144,14 @@ function DiagnosticsActions({ jobId }: { jobId: string }) {
         </Button>
         <label className="inline-flex items-center gap-1 text-xs text-muted cursor-pointer">
           <input type="checkbox" checked={deckLines} onChange={(e) => setDeckLines(e.target.checked)} />
-          덱의 문제 줄 포함
+          덱 발췌 더 담기
         </label>
+      </div>
+      {/* ⚠ 약속을 정확히 적는다. 처음엔 "덱의 문제 줄 포함" 이라고 써서 **끄면 덱 본문이 안
+          나간다**는 뜻으로 읽혔는데 그것이 거짓이었다 — 도구가 참조 문제를 보고할 때 덱 원문
+          줄을 stdout 에 그대로 찍고, 로그 꼬리는 이 체크박스와 무관하게 실린다. */}
+      <div className="text-[11px] text-muted mt-1">
+        로그에는 도구가 출력한 덱 줄이 이미 포함될 수 있습니다. 이 항목은 <b>그 밖의 발췌</b>를 더할지만 정합니다.
       </div>
       {err && <div className="text-xs text-danger mt-1">진단 정보를 가져오지 못했습니다: {err}</div>}
       {fallback && (

@@ -136,6 +136,10 @@ def _install_correlator(app: FastAPI) -> None:
     @app.middleware("http")
     async def _correlate(request: Request, call_next):
         corr = sanitize(request.headers.get("x-request-id") or "")
+        # ⚠ contextvar **와** `request.state` 둘 다에 둔다. 라우트가 터지면 이 미들웨어의 응답
+        # 후처리가 아예 안 돌고 `finally` 가 먼저 돌아 contextvar 는 이미 `-` 다 — 그때
+        # `ServerErrorMiddleware`(우리보다 바깥) 아래의 에러 핸들러가 읽을 자리가 필요하다.
+        request.state.correlator = corr
         token = set_correlator(corr)
         t0 = time.perf_counter()
         try:
@@ -150,6 +154,14 @@ def _install_correlator(app: FastAPI) -> None:
             # 실패 응답에도 붙는다 — 사용자가 이 값을 넘기면 서버 줄을 바로 찾을 수 있다.
             response.headers["X-Request-Id"] = corr
             return response
+        except Exception:
+            # 여기로 오면 위 요청 줄이 안 찍힌다. 최소한 **실패했다는 한 줄**은 남긴다 —
+            # 헤더는 이 자리에서 붙일 수 없으므로(응답이 아직 없다) 에러 핸들러가 붙인다.
+            logger.warning(
+                "%s %s -> 예외 in %.0fms",
+                request.method, request.url.path, (time.perf_counter() - t0) * 1000,
+            )
+            raise
         finally:
             reset_correlator(token)
 

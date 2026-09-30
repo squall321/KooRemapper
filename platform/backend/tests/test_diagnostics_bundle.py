@@ -150,29 +150,64 @@ async def test_the_bundle_carries_no_host_paths_no_email_no_token(db, sess):
 
 # ── 3. 덱 본문은 켜야 나온다 ───────────────────────────────────────────────────
 @_aio
-async def test_deck_body_is_absent_unless_asked(db, sess):
-    """고객 CAE 모델이 IP 다. 기본으로 나가면 사용자 동의 없이 형상이 밖으로 간다."""
+async def test_deck_excerpts_are_absent_unless_asked(db, sess):
+    """발췌는 켜야 담긴다. **다만 로그에는 이미 덱 줄이 있을 수 있다** — 아래 시험이 그 사실을
+    번들이 말하는지 확인한다. 여기서 "덱 본문이 하나도 안 나간다" 를 단언하지 않는 이유다."""
     from app.modules.sessions import services as svc
 
     u, s = sess
     row = await svc.add_uploaded_file(db, s, filename="model.k", raw=_DECK.encode("latin-1"))
     job = await _job_with_logs(db, u, s, err_text="exit 1: line 3 이 이상하다")
-    job.input_file_ids = [row.id]
-    await db.commit()
-    await db.refresh(job)
-
     # `rel_path` 는 스토리지 루트 기준이다 — `abs_path` 가 정본 접근자다.
     inputs = [(row.filename, str(storage.abs_path(row.rel_path)))]
 
     off = diagnostics.build(job, inputs=inputs, outputs=[], deck_lines=False)
-    assert off["deck_excerpts"] is None, "켜지 않았는데 덱 본문이 담겼다"
-    assert "10.0" not in json.dumps(off, ensure_ascii=False), "덱 좌표가 새어 나갔다"
+    assert off["deck_excerpts"] is None, "켜지 않았는데 발췌가 담겼다"
 
     on = diagnostics.build(job, inputs=inputs, outputs=[], deck_lines=True)
     ex = on["deck_excerpts"]
     assert ex and row.filename in ex, f"켰는데도 덱 줄이 없다 — {ex}"
     joined = "\n".join(ex[row.filename])
     assert "*NODE" in joined or "0.0" in joined, f"가리킨 줄 근처가 아니다 — {joined}"
+
+
+@_aio
+async def test_the_bundle_says_logs_may_contain_deck_lines(db, sess):
+    """**처음 판이 여기서 거짓을 말했다.** `merge`·`cnrb2spring` 은 참조 문제를 보고할 때 덱 원문
+    줄을 그대로 stdout 에 찍는다(`ModelAssembler.cpp:3111` 의 `f.text = rawLines_[li]`). 로그 꼬리는
+    `deck_lines` 와 무관하게 실리므로, "끄면 덱 본문이 안 나간다" 는 약속은 지킬 수 없다.
+    데이터를 지우면 진단이 죽으니 **사실을 적는다.**"""
+    u, s = sess
+    job = await _job_with_logs(db, u, s, err_text="exit 1: 무언가",
+                               stdout="    [PID] line 7 *SET_PART_LIST (dead): …\n        |        7       1\n")
+    diag = diagnostics.build(job, inputs=[], outputs=[], deck_lines=False)
+    joined = " ".join(diag["notes"])
+    assert "덱 원문 줄이 포함될 수 있다" in joined, f"로그에 덱 줄이 섞일 수 있다는 사실을 말하지 않는다 — {diag['notes']}"
+
+
+@_aio
+async def test_the_production_path_finds_the_input_deck(db, sess):
+    """**이 시험이 없어서 결함을 놓쳤다.** 앞 시험들은 `diagnostics.build` 를 직접 부르며
+    `inputs` 를 손으로 넘겼는데, 실사용은 `_assemble_diagnostic` 을 지난다. 그리고 그것이 보던
+    `job.input_file_ids` 는 **아무도 채우지 않는다**(실측: 잡 11건 중 0건). 그래서 `deck_lines` 가
+    아무것도 담지 못하고 번들이 `입력 : (없음)` 이라고 거짓을 적었다.
+    실사용이 쓰는 장치로 재야 한다."""
+    from app.modules.jobs.routes import _assemble_diagnostic
+    from app.modules.sessions import services as svc
+
+    u, s = sess
+    row = await svc.add_uploaded_file(db, s, filename="model.k", raw=_DECK.encode("latin-1"))
+    job = await _job_with_logs(db, u, s, err_text="exit 1: line 3 이 이상하다")
+    assert not job.input_file_ids, "전제가 바뀌었다 — 이제 누군가 input_file_ids 를 채운다"
+
+    diag = await _assemble_diagnostic(db, job, True)
+    assert row.filename in diag["files"]["inputs"], (
+        "실사용 경로가 입력 덱을 못 찾는다 — 번들이 '입력 (없음)' 이라고 거짓을 적는다"
+    )
+    assert diag["files"]["inputs_basis"] != "job.input_file_ids", "근거를 적지 않았다"
+    assert any("근거" in n for n in diag["notes"]), f"추측을 사실처럼 적었다 — {diag['notes']}"
+    ex = diag["deck_excerpts"]
+    assert ex and row.filename in ex, f"켰는데도 발췌가 비었다 — {ex}"
 
 
 # ── 4. 남의 잡은 못 본다 ───────────────────────────────────────────────────────
@@ -185,6 +220,36 @@ async def api(db):
     transport = ASGITransport(app=create_app())
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
+
+
+@_aio
+async def test_a_500_carries_the_correlator(db):
+    """**상관자가 필요한 바로 그 경우에 상관자가 없었다.** `@app.exception_handler(Exception)` 은
+    `ServerErrorMiddleware` 로 옮겨 달리고 그것은 우리 미들웨어보다 바깥이라, 라우트가 터지면
+    응답 후처리가 아예 안 돌아 헤더가 안 붙고 `finally` 가 먼저 돌아 로그가 `[-]` 였다.
+    실측으로 재현했다 — `/boom` → `X-Request-Id=None`, `ERROR app.shared.errors [-]`."""
+    import httpx
+    from httpx import ASGITransport
+
+    from app.main import create_app
+
+    app = create_app()
+
+    @app.get("/api/_probe_boom")
+    def _boom():  # noqa: ANN202
+        raise ZeroDivisionError("터짐")
+
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.get("/api/_probe_boom", headers={"X-Request-Id": "probe500x"})
+
+    assert r.status_code == 500, r.status_code
+    assert r.headers.get("X-Request-Id") == "probe500x", (
+        "500 에 상관자가 안 붙었다 — 사용자가 넘길 끈이 없다: %r" % r.headers.get("X-Request-Id")
+    )
+    assert "probe500x" in (r.json().get("message") or ""), (
+        "본문이 진단 번호를 말하지 않는다 — %r" % r.json()
+    )
 
 
 @_aio

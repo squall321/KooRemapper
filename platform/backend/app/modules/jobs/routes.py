@@ -239,30 +239,51 @@ async def get_job_logs(
 
 
 async def _assemble_diagnostic(db: AsyncSession, job: Job, deck_lines: bool) -> dict:
-    """번들 본문을 만든다. 입력 파일은 `input_file_ids` 로만 고른다 — 세션의 다른 파일을 끌어오면
-    사용자가 켜지 않은 덱 본문이 섞일 수 있다."""
+    """번들 본문을 만든다.
+
+    ⚠ `Job.input_file_ids` 는 **아무도 채우지 않는다.** 리포 전체에 쓰는 코드가 없고 실측으로도
+    잡 11건 중 **0건**이었다(`output_file_ids` 는 11건 다 있다). 처음 판이 그 칸만 보았기 때문에
+    번들이 `입력 : (없음)` 이라고 거짓을 적었고 `deck_lines` 옵션이 **아무것도 담지 못했다** —
+    사용자가 켤 수 있는 유일한 동의 장치가 죽어 있던 셈이다. 그래서 비어 있으면 세션의 `input`
+    파일로 되돌아가고, **그 근거를 번들에 적는다**(추측을 사실처럼 적지 않는다).
+    """
     in_ids = list(job.input_file_ids or [])
     out_ids = list(job.output_file_ids or [])
-    ids = in_ids + out_ids
-    rows = []
-    if ids:
-        rows = list(
-            (await db.execute(select(SessionFile).where(SessionFile.id.in_(ids)))).scalars()
+    basis = "job.input_file_ids"
+    if in_ids:
+        rows_in = list(
+            (await db.execute(select(SessionFile).where(SessionFile.id.in_(in_ids)))).scalars()
         )
-    by_id = {f.id: f for f in rows}
+    else:
+        rows_in = list(
+            (await db.execute(
+                select(SessionFile).where(
+                    SessionFile.session_id == job.session_id,
+                    SessionFile.kind == "input",
+                )
+            )).scalars()
+        )
+        basis = "세션의 input 파일 — `job.input_file_ids` 가 비어 있다(아무도 채우지 않는다)"
+
     inputs: list[tuple[str, str]] = []
-    for fid in in_ids:
-        f = by_id.get(fid)
-        if f is None:
-            continue
+    for f in rows_in:
         try:
             # ⚠ `rel_path` 는 **스토리지 루트 기준**(`<user>/<session>/<name>`) 이다.
             # 세션 폴더에 다시 이어 붙이면 경로가 두 번 겹친다 — `abs_path` 가 정본이다.
             inputs.append((f.filename, str(storage.abs_path(f.rel_path))))
         except (ValueError, OSError):
             continue
-    outputs = [by_id[fid].filename for fid in out_ids if fid in by_id]
-    return diagnostics.build(job, inputs=inputs, outputs=outputs, deck_lines=deck_lines)
+
+    outputs: list[str] = []
+    if out_ids:
+        rows_out = (
+            await db.execute(select(SessionFile).where(SessionFile.id.in_(out_ids)))
+        ).scalars()
+        by_id = {f.id: f for f in rows_out}
+        outputs = [by_id[fid].filename for fid in out_ids if fid in by_id]
+
+    return diagnostics.build(job, inputs=inputs, outputs=outputs, deck_lines=deck_lines,
+                             inputs_basis=basis)
 
 
 @router.get("/jobs/{job_id}/diagnostics")

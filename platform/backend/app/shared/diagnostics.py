@@ -202,7 +202,8 @@ def deck_line_excerpts(error_text: str, input_paths: list[tuple[str, str]]) -> d
     return out
 
 
-def build(job, *, inputs: list[tuple[str, str]], outputs: list[str], deck_lines: bool) -> dict:
+def build(job, *, inputs: list[tuple[str, str]], outputs: list[str], deck_lines: bool,
+          inputs_basis: str = "job.input_file_ids") -> dict:
     """번들의 본문. 이 dict 가 `diagnostic.json` 이고 요약 텍스트의 재료다."""
     corr = job.id
     stdout_tail = _read_contained(job.stdout_path, limit=TAIL_CHARS * 4)[-TAIL_CHARS:]
@@ -221,6 +222,17 @@ def build(job, *, inputs: list[tuple[str, str]], outputs: list[str], deck_lines:
         notes.append(
             "⚠ BUILD_INFO 의 해시와 실제 바이너리가 어긋난다 — 이 잡의 revision 을 믿을 수 없다."
         )
+    # ⚠ **여기서 약속을 바로잡는다.** 처음 판은 "덱 본문은 `deck_lines` 를 켤 때만 담긴다" 고
+    # 적었는데 그것이 거짓이었다 — `merge`·`cnrb2spring` 등은 참조 문제를 보고할 때 **덱 원문 줄을
+    # 그대로 stdout 에 찍고**(`ModelAssembler.cpp:3111` 의 `f.text = rawLines_[li]`), 로그 꼬리는
+    # 플래그와 무관하게 실린다. 데이터를 지우는 대신(그러면 진단이 죽는다) **사실을 적는다.**
+    if (stdout_tail or stderr_tail).strip():
+        notes.append(
+            "로그(stdout/stderr)에는 도구가 출력한 **덱 원문 줄이 포함될 수 있다** — 참조 문제를 "
+            "보고할 때 그 줄을 그대로 찍는다. `deck_lines` 는 그 밖의 발췌를 더할지만 정한다."
+        )
+    if inputs_basis != "job.input_file_ids":
+        notes.append("입력 파일 목록의 근거: " + inputs_basis)
 
     diag = {
         "schema": SCHEMA,
@@ -242,7 +254,8 @@ def build(job, *, inputs: list[tuple[str, str]], outputs: list[str], deck_lines:
             "external_kind": job.external_kind,
             "external_ref": _redact_deep(job.external_ref or {}),
         },
-        "files": {"inputs": [n for n, _ in inputs], "outputs": outputs},
+        "files": {"inputs": [n for n, _ in inputs], "outputs": outputs,
+                  "inputs_basis": inputs_basis},
         "logs": {
             "stdout_tail": redact(stdout_tail),
             "stderr_tail": redact(stderr_tail),
