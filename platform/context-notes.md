@@ -545,3 +545,30 @@ Drive 업로드와 **메일 발송까지** 한다. 그래서 먼저 물어보고
 **규율:** 새 관문을 만들면 **실사용이 그 관문에 들어가는 경로로** 시험한다. 헬퍼를 직접 부르는
 시험은 그 헬퍼만 지키고, 아무도 그 헬퍼를 그렇게 부르지 않으면 아무것도 지키지 않는다.
 관련: [[kooremapper-test-env-traps]]
+
+
+### 31. 배포 절차를 베끼면 뒤처진다 — 포털의 forge 갱신이 그랬다
+
+2026-09-30. "한 줄로 반입+재기동" 을 만들다가, 그것을 실제로 부르는 자리가 HWAXPortal 의
+`infra/scripts/update-forges.sh dynaforge` 임을 알았다. 그리고 그 함수가 update-all
+(`deploy-all-from-drive.sh` 의 `if want kooremapper` 절)을 **손으로 베낀 축약판**이었다.
+
+베낀 쪽에 없던 것 — `platform/.env` 부트스트랩 · `set_remote KOORM_DRIVE_REMOTE` · 리포 없을 때
+clone · 지문 기반 재기동(`hwax_restart_cycle`). 그리고 **프로브가 루트를 봤다**: `:8700/` 은 SPA 라
+백엔드가 고장나도 200 이고 `:8701/` 은 MCP 루트라 404 여서, '떠 있지만 고장난' 상태가 합격하고
+MCP 는 매 회 죽은 것처럼 보였다. 정본은 이미 `/api/health`·`/mcp` 짝을 쓰고 있었다.
+
+**How to apply:** 배포 절차를 두 군데 쓰지 마라. 대상 선택이 있는 정본이 있으면(`want`) **위임**한다
+(`deploy-all-from-drive.sh kooremapper`). 축약판은 처음엔 같아 보이고 시간이 지나면 조용히 갈라지는데,
+갈라진 쪽이 하필 '초록' 을 찍는다.
+
+⚠ 다만 **dev 박스로는 위임하지 않는다.** `git_update` 가 기본으로 `git stash push -u` +
+`git reset --hard origin/<branch>` 를 한다 — 타 세션 WIP 를 날리고 공용 stash 스택까지 건드린다
+(`NO_GIT_RESET=1` 이 escape hatch). 이 리포에 이미 적어 둔 두 위험(재부팅 reset · bare stash 금지)이
+바로 그 함수다.
+
+**이 리포 쪽에 더한 것** — `dist-from-drive.sh --restart`. 반입만 하고 `start.sh` 를 부르는 **수동**
+경로는 `start_instance` 가 살아 있는 api 를 `✓ already running` 으로 건너뛰어 **새 코드가 안
+올라간다.** `--restart` 는 `start.sh`(postgres → alembic upgrade head → api 순서다) 뒤
+`restart-api-only.sh` 까지 돌리고 `/api/health` 가 **200 인지** 확인한 다음 revision 을 찍는다.
+관련: [[kooremapper-drive-deploy]] · [[kooremapper-supervision]] · [[kooremapper-boot-reset-hazard]]

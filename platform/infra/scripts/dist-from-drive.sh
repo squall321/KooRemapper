@@ -6,7 +6,16 @@
 #           platform/infra/apptainer/cli.sif (있으면)
 #
 # platform/.env 필요:  KOORM_DRIVE_REMOTE=<rclone remote>:KooRemapper/dist
-# 이후:  bash platform/infra/scripts/start.sh
+#
+# 쓰는 법:
+#   bash platform/infra/scripts/dist-from-drive.sh            # 반입만
+#   bash platform/infra/scripts/dist-from-drive.sh --restart   # 반입 + 기동/마이그레이션 + API 재기동
+#
+# ⚠ `--restart` 가 있는 이유. 반입만 하면 **새 코드가 안 올라간다.** 반입 뒤 `start.sh` 를 돌려도
+# 그 안의 `start_instance` 는 이미 떠 있으면 `✓ already running` 으로 건너뛰므로, 아티팩트와 코드는
+# 새것인데 API 는 옛 코드로 계속 돈다. 그 상태는 겉으로 성공처럼 보이고(헬스 200) 새 기능만 조용히
+# 없어서, "게시가 안 됐다" 로 오해하기 쉽다. 세 줄을 순서대로, 그중 하나는 함정까지 기억해야 하는
+# 절차는 언젠가 틀린다 — 그래서 한 줄로 만든다.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLATFORM_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -15,6 +24,14 @@ cd "$REPO_ROOT"
 
 env_get() { [ -f platform/.env ] && sed -n "s/^$1=//p" platform/.env | tail -1 | sed 's/^["'"'"']//; s/["'"'"']$//'; }
 KOORM_DRIVE_REMOTE="${KOORM_DRIVE_REMOTE:-$(env_get KOORM_DRIVE_REMOTE)}"
+
+DO_RESTART=0
+for a in "$@"; do
+  case "$a" in
+    --restart) DO_RESTART=1 ;;
+    *) echo "✗ 알 수 없는 인자: $a  (--restart)"; exit 1 ;;
+  esac
+done
 
 command -v rclone >/dev/null 2>&1 || { echo "✗ rclone 미설치 (https://rclone.org/install/)"; exit 1; }
 REMOTE="${KOORM_DRIVE_REMOTE:-}"
@@ -77,4 +94,52 @@ for s in "$STAGE"/*.sif; do
 done
 shopt -u nullglob
 
-echo "✓ 아티팩트 반입 완료. 다음: bash platform/infra/scripts/start.sh"
+if [ "$DO_RESTART" = "0" ]; then
+  echo "✓ 아티팩트 반입 완료. 다음: bash platform/infra/scripts/start.sh"
+  echo "  ⚠ 그런데 그것만으로는 **새 코드가 안 올라간다** — `start.sh` 의 `start_instance` 는 이미"
+  echo "    떠 있으면 건너뛴다. 한 줄로 끝내려면: bash platform/infra/scripts/dist-from-drive.sh --restart"
+  exit 0
+fi
+
+# ── --restart: 반입 뒤 끝까지 세운다 ────────────────────────────────────────
+# 순서가 중요하다. `start.sh` 는 postgres → **alembic upgrade head** → api 순서라(start.sh:44·179·194)
+# 스키마가 API 보다 먼저 선다. 다만 api 가 **이미 떠 있으면 건너뛰므로**, 마이그레이션 뒤에
+# api 만 따로 재기동해야 새 컬럼과 새 코드가 같이 선다.
+echo "→ start.sh (없는 인스턴스 기동 + alembic upgrade head)"
+bash "$SCRIPT_DIR/start.sh"
+echo "→ restart-api-only.sh (start.sh 는 살아 있는 api 를 재기동하지 않는다)"
+bash "$SCRIPT_DIR/restart-api-only.sh"
+
+# ── 확인 — "성공했다" 를 스스로 말하지 않는다 ───────────────────────────────
+# ⚠ `/` 가 아니라 `/api/health` 를 보고 **200 을 요구한다.** `/` 는 SPA 라 백엔드가 고장나도
+# 200 을 준다. 그리고 로컬 헬스체크는 사내 프록시를 타면 안 된다(curl 000 오판).
+export NO_PROXY="127.0.0.1,localhost,::1${NO_PROXY:+,$NO_PROXY}"; export no_proxy="$NO_PROXY"
+PORT="$(env_get KOORM_API_PORT)"; PORT="${PORT:-8700}"
+_code=000
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  sleep 2
+  _code="$(curl -s -o /tmp/koorm-health.$$ -w '%{http_code}' -m 5 \
+           "http://127.0.0.1:$PORT/api/health" 2>/dev/null || echo 000)"
+  [ "$_code" = "200" ] && break
+done
+if [ "$_code" != "200" ]; then
+  echo "✗ /api/health → $_code — 반입은 됐지만 서비스가 서지 않았다."
+  echo "  볼 곳: ~/.apptainer/instances/logs/*/*/koorm_api.err (마지막 30줄)"
+  rm -f /tmp/koorm-health.$$
+  exit 1
+fi
+python3 - "/tmp/koorm-health.$$" <<'PY' || cat "/tmp/koorm-health.$$"
+import json, sys
+d = json.load(open(sys.argv[1], encoding="utf-8")).get("data", {})
+print("✓ /api/health 200")
+for k in ("revision", "published_utc", "binary_sha256", "revision_matches_binary"):
+    v = d.get(k)
+    print("    %-24s %s" % (k, (v[:12] if k == "binary_sha256" and isinstance(v, str) else v)))
+g = d.get("gmsh") or {}
+print("    %-24s available=%s version=%s" % ("gmsh", g.get("available"), g.get("version")))
+# ⚠ 이것이 어긋나면 revision 을 믿을 수 없다 — BUILD_INFO 와 실물 바이너리가 다른 상태다.
+if d.get("revision_matches_binary") is False:
+    print("  ⚠ BUILD_INFO 의 해시와 실제 바이너리가 어긋난다 — 반입이 반쪽이다.")
+PY
+rm -f /tmp/koorm-health.$$
+echo "✓ 반입 + 기동 + 확인 완료"
