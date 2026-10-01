@@ -53,6 +53,8 @@ void ct_resolveSetRanges(std::vector<SetDef>& sets, const KooRemapper::Mesh& mes
 bool ct_setContains(const SetDef& s, int id);
 
 int ct_findMaxSetId(const std::vector<SetDef>& sets);
+// 덱의 `*CONTACT_*_ID` CID 최대값 — 새 접촉 CID 를 그 위로 발행한다.
+int ct_findMaxContactId(const std::vector<std::string>& lines);
 
 std::vector<std::array<int,4>> ct_extractSurface(
         const KooRemapper::Mesh& mesh, int pid);

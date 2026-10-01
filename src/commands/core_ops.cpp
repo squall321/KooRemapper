@@ -1411,7 +1411,13 @@ int runInfo(const std::string& meshFile, const ConsoleOutput& console, bool stri
     double maxJ = std::numeric_limits<double>::lowest();
     int negativeCount = 0;
 
+    // ⚠ 야코비안은 **솔리드에만** 적용한다. 셸을 같이 세면 셸 덱이 전부 "음수 야코비안" 으로
+    // 나오고(실측: 공식 예제 `arc_shell.k` 8요소가 Min=Max=0 · 음수 8건), 그 노이즈가 정작
+    // **진짜** 음수 야코비안(솔리드)을 가린다 — 2026-10-02 현장 보고.
+    int solidCount = 0, shellSkipped = 0;
     for (const auto& [id, elem] : mesh.getElements()) {
+        if (!Validator::jacobianApplies(elem)) { ++shellSkipped; continue; }
+        ++solidCount;
         double j = Validator::calculateJacobian(mesh, elem);
         if (j < minJ) minJ = j;
         if (j > maxJ) maxJ = j;
@@ -1419,12 +1425,22 @@ int runInfo(const std::string& meshFile, const ConsoleOutput& console, bool stri
     }
 
     console.header("Element Quality");
-    console.keyValue("Min Jacobian", std::to_string(minJ));
-    console.keyValue("Max Jacobian", std::to_string(maxJ));
-    if (negativeCount > 0) {
-        console.warning("Negative Jacobian elements: " + std::to_string(negativeCount));
+    if (solidCount == 0) {
+        // 센 것이 없으면 숫자를 내지 않는다 — 앞선 판은 셸의 0.0 을 그대로 찍어 "Min=Max=0" 이
+        // 나왔고, 그것을 품질 수치로 읽을 수 있었다.
+        console.keyValue("Jacobian", "해당 없음 (셸 " + std::to_string(shellSkipped) +
+                                     "개 — 체적 야코비안이 정의되지 않습니다)");
     } else {
-        console.success("All elements have positive Jacobian");
+        console.keyValue("Min Jacobian", std::to_string(minJ));
+        console.keyValue("Max Jacobian", std::to_string(maxJ));
+        if (shellSkipped > 0)
+            console.keyValue("Jacobian 대상", std::to_string(solidCount) + "개 솔리드 (셸 " +
+                                              std::to_string(shellSkipped) + "개 제외)");
+        if (negativeCount > 0) {
+            console.warning("Negative Jacobian elements: " + std::to_string(negativeCount));
+        } else {
+            console.success("All elements have positive Jacobian");
+        }
     }
 
     if (strict && !strictFails.empty()) {

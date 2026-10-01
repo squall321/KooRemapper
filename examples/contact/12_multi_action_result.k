@@ -40,8 +40,8 @@ $#   secid    elform
 *MAT_ELASTIC
 $#     mid        ro         e        pr
          1  7.85E-09  2.10E+05       0.3
-*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_TITLE
-Contact_1_2
+*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_ID
+         1Contact_1_2
 $#    ssid      msid     sstyp     mstyp    sboxid    mboxid       spr       mpr
          1         2         3         3         0         0         0         0
 $#      fs        fd        dc        vc       vdc    penchk        bt        dt
@@ -77,8 +77,8 @@ $#      n1        n2        n3        n4
          2         9        11         6
          3        10        12         7
          6        11        12         7
-*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_MORTAR_TITLE
-Auto_Part_1_Left_Part_2_Center
+*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_MORTAR_ID
+         3Auto_Part_1_Left_Part_2_Center
 $#    ssid      msid     sstyp     mstyp    sboxid    mboxid       spr       mpr
         11        12         0         0         0         0         0         0
 $#      fs        fd        dc        vc       vdc    penchk        bt        dt
@@ -107,8 +107,8 @@ $#      n1        n2        n3        n4
          9        13        15        11
         10        14        16        12
         11        15        16        12
-*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_MORTAR_TITLE
-Auto_Part_2_Center_Part_3_Right
+*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_MORTAR_ID
+         4Auto_Part_2_Center_Part_3_Right
 $#    ssid      msid     sstyp     mstyp    sboxid    mboxid       spr       mpr
         13        14         0         0         0         0         0         0
 $#      fs        fd        dc        vc       vdc    penchk        bt        dt

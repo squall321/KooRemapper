@@ -26269,16 +26269,16 @@ $  (*BOUNDARY_SPC_), and load (*LOAD_) cards are in separate .k includes.
 $==========================================================================
 $
 $# Tied contacts between adjacent layers
-*CONTACT_TIED_SURFACE_TO_SURFACE_TITLE
-LAYER_1_to_LAYER_2
+*CONTACT_TIED_SURFACE_TO_SURFACE_ID
+         1LAYER_1_to_LAYER_2
 $#    ssid      msid     sstyp     mstyp    sboxid    mboxid       spr       mpr
         10         9         3         3         0         0         0         0
 $#      fs        fd        dc        vc       vdc    penchk        bt        dt
        0.0       0.0       0.0       0.0       0.0         0       0.0  1.00E+20
 $#     sfs       sfm       sst       mst      sfst      sfmt       fsf       vsf
        1.0       1.0       0.0       0.0       1.0       1.0       0.0       0.0
-*CONTACT_TIED_SURFACE_TO_SURFACE_TITLE
-LAYER_2_to_LAYER_3
+*CONTACT_TIED_SURFACE_TO_SURFACE_ID
+         2LAYER_2_to_LAYER_3
 $#    ssid      msid     sstyp     mstyp    sboxid    mboxid       spr       mpr
         11        10         3         3         0         0         0         0
 $#      fs        fd        dc        vc       vdc    penchk        bt        dt

@@ -47,8 +47,8 @@ $      PID     SECID       MID     EOSID      HGID      GRAV    ADPOPT      TMID
 *ELEMENT_SOLID
        1       1       1       2       3       4       5       6       7       8
        2       2       2       9      10       3       6      11      12       7
-*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_TITLE
-Steel_Rubber
+*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_ID
+         1Steel_Rubber
 $     SSID      MSID     SSTYP     MSTYP    SBOXID    MBOXID       SPR       MPR
          1         2         3         3         0         0         0         0
 $       FS        FD        DC        VC       VDC    PENCHK        BT        DT

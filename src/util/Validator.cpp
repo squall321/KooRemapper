@@ -108,13 +108,18 @@ ValidationResult Validator::validateElementQuality(const Mesh& mesh) {
     for (const auto& pair : mesh.getElements()) {
         const Element& elem = pair.second;
 
-        double jacobian = calculateJacobian(mesh, elem);
-        double aspectRatio = calculateAspectRatio(mesh, elem);
+        // ⚠ 야코비안은 **솔리드에만** 적용한다(`jacobianApplies` 주석 참조). 셸을 같이 세면
+        // 셸 덱이 통째로 "음수 야코비안" 에러가 되고, 그 노이즈가 진짜 결함을 가린다.
+        const bool jOk = jacobianApplies(elem);
+        double aspectRatio = calculateAspectRatio(mesh, elem);   // 종횡비는 셸에도 뜻이 있다
 
-        if (jacobian <= 0) {
-            ++negativeJacobian;
+        if (jOk) {
+            double jacobian = calculateJacobian(mesh, elem);
+            if (jacobian <= 0) {
+                ++negativeJacobian;
+            }
+            minJacobian = std::min(minJacobian, jacobian);
         }
-        minJacobian = std::min(minJacobian, jacobian);
 
         if (aspectRatio > 10.0) {
             ++highAspectRatio;
@@ -133,6 +138,11 @@ ValidationResult Validator::validateElementQuality(const Mesh& mesh) {
     }
 
     return result;
+}
+
+bool Validator::jacobianApplies(const Element& elem) {
+    // 셸은 체적이 없다. UNKNOWN 은 빼지 않는다 — 모르는 것을 조용히 넘기면 진짜 결함이 숨는다.
+    return elem.type != ElementType::QUAD4;
 }
 
 double Validator::calculateJacobian(const Mesh& mesh, const Element& elem) {

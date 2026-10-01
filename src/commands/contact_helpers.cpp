@@ -404,6 +404,34 @@ int ct_findMaxSetId(const std::vector<SetDef>& sets) {
     return maxId;
 }
 
+// 덱에 이미 있는 `*CONTACT_*_ID` 카드의 CID 최대값. 새 접촉의 CID 를 그 위로 발행한다 —
+// 같은 CID 가 둘이면 LS-DYNA 가 키워드 단계에서 멈춘다(이 리포의 ID 규율: 발행 전에 최대값을 본다).
+int ct_findMaxContactId(const std::vector<std::string>& lines) {
+    int maxId = 0;
+    for (size_t i = 0; i < lines.size(); ++i) {
+        const std::string tr = kw_trim(lines[i]);
+        if (tr.size() < 9 || tr[0] != '*') continue;
+        std::string up = kw_upper(tr);
+        if (up.compare(0, 9, "*CONTACT_") != 0) continue;
+        const bool hasId = (up.size() >= 3 && up.compare(up.size() - 3, 3, "_ID") == 0)
+                           || up.find("_ID_") != std::string::npos;
+        if (!hasId) continue;
+        // 첫 비주석 데이터 줄의 1~10칸이 CID 다.
+        for (size_t j = i + 1; j < lines.size(); ++j) {
+            const std::string d = kw_trim(lines[j]);
+            if (d.empty() || d[0] == '$') continue;
+            if (d[0] == '*') break;
+            auto toks = kw_tok10(lines[j]);
+            if (!toks.empty()) {
+                try { int v = std::stoi(kw_trim(toks[0])); if (v > maxId) maxId = v; }
+                catch (...) { /* CID 칸이 숫자가 아니면 건너뛴다 */ }
+            }
+            break;
+        }
+    }
+    return maxId;
+}
+
 // Extract outer surface from solid/shell elements of given PID
 // Reuses extractSourceSurface() algorithm
 std::vector<std::array<int,4>> ct_extractSurface(
@@ -1223,10 +1251,25 @@ static void ct_appendOptionalCards(std::ostringstream& ss, const ContactDef& d) 
 
 std::string ct_generateContact(const ContactDef& d) {
     std::ostringstream ss;
+    // ⚠ **`*CONTACT_*` 에는 `_TITLE` 옵션이 없다.** 제목을 붙이는 옵션은 `_ID` 이고, 그 카드는
+    // CID 1~10칸 + HEADING 11~80칸이다. 예전 판은 제목이 있으면 `_TITLE` 을 붙였고, 그러면
+    // LS-DYNA 가 제목줄을 **데이터 카드로 읽고** 키워드 단계에서 즉사한다 — 실측(2026-10-02,
+    // R16.1.1 MPP): `Error 10060 Unable to read line` / `10246 improperly formatted data` /
+    // `10450 in keyword command` → `Error termination (0 cycles)`. 그 덱의 다른 부분(166만 요소
+    // dynain 포함)은 전부 정상 로드됐고 **접촉 카드만** 죽었다.
     std::string kw = "*CONTACT_" + kw_upper(d.type);
-    if (!d.title.empty()) kw += "_TITLE";
-    ss << kw << "\n";
-    if (!d.title.empty()) ss << d.title << "\n";
+    if (d.hasId) {
+        // 덱에서 읽은 `_ID` 카드 — `title` 에 줄 전체(CID+제목)가 들어 있으므로 그대로 돌려준다.
+        ss << kw << "_ID\n";
+        if (!d.title.empty()) ss << d.title << "\n";
+    } else if (!d.title.empty()) {
+        ss << kw << "_ID\n";
+        char head[128];
+        snprintf(head, sizeof(head), "%10d%s", d.cid, d.title.c_str());
+        ss << head << "\n";
+    } else {
+        ss << kw << "\n";
+    }
 
     char buf[90];
     // Card 1: SSID MSID SSTYP MSTYP SBOXID MBOXID SPR MPR

@@ -431,6 +431,8 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
     std::string outPath;
     if (!outputFile.empty()) {
         outPath = resolvePath(outputFile);
+        if (const std::string note = KooRemapper::yamlOutputExtNote(outPath); !note.empty())
+            console.warning("[contact] " + note);
     }
 
     // 2. Read model as rawLines
@@ -478,6 +480,9 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
     auto sets     = ct_parseSets(lines);
     ct_resolveSetRanges(sets, mesh);   // `_GENERATE` 범위를 덱에 정의된 ID 로 좁힌다
     int nextSetId = ct_findMaxSetId(sets) + 1;
+    // 새 접촉의 CID 는 덱의 기존 `_ID` CID **위로** 발행한다. 같은 CID 가 둘이면 LS-DYNA 가
+    // 키워드 단계에서 멈춘다 — 이 리포의 ID 규율대로 발행 전에 최대값을 본다.
+    int nextContactId = ct_findMaxContactId(lines) + 1;
 
     console.println("[contact] Model: " + modelFile + " (" + std::to_string(lines.size()) + " lines)");
     console.println("[contact] Found " + std::to_string(contacts.size()) + " contacts, " +
@@ -636,6 +641,8 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
             newDef.ssid = ssid; newDef.msid = msid;
             newDef.sstyp = sstyp; newDef.mstyp = mstyp;
             newDef.title = act.title.empty() ? ("Contact_" + std::to_string(ai)) : act.title;
+            // 제목이 있으면 `_ID` 카드로 나가므로 CID 가 필요하다(`ct_generateContact` 참조).
+            newDef.cid = nextContactId++;
             // Card 1 optional
             if (act.sboxid >= 0) newDef.sboxid = act.sboxid;
             if (act.mboxid >= 0) newDef.mboxid = act.mboxid;
@@ -1292,6 +1299,7 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
                         def.fullKeyword = "*CONTACT_" + preset.keyword;
                         def.hasTitle = true;
                         def.title = prefix + "_" + nameA + "_" + nameB;
+                        def.cid = nextContactId++;   // `_ID` 카드로 나간다
                         def.ssid = slaveSid;
                         def.msid = preset.needMasterSide ? masterSid : 0;
                         def.sstyp = 0; // SET_SEGMENT
@@ -1501,6 +1509,7 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
                     def.hasTitle = true;
                     def.title = prefix + "_PID" + std::to_string(slavePid) +
                                 "_PID" + std::to_string(masterPid);
+                    def.cid = nextContactId++;   // `_ID` 카드로 나간다
                     def.ssid = slaveSid;
                     def.msid = masterSid;
                     def.sstyp = 0; def.mstyp = 0;

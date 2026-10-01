@@ -87,8 +87,11 @@ def main():
     if os.path.exists(ct_out):
         ls = open(ct_out).read().splitlines()
         for i, ln in enumerate(ls):
-            if ln.startswith("*CONTACT_AUTOMATIC_SINGLE_SURFACE_TITLE"):
-                title = ls[i + 1].strip()
+            if ln.startswith("*CONTACT_AUTOMATIC_SINGLE_SURFACE_ID"):
+                # `*CONTACT_*_ID` 카드는 CID 1~10칸 + HEADING 11~80칸이다 — 통째로 strip
+                # 하면 CID 가 제목에 붙어 보인다(접촉에는 `_TITLE` 옵션이 없다).
+                title = (ls[i + 1][10:] if ls[i].rstrip().endswith("_ID")
+                         else ls[i + 1]).strip()
     check("contact: title 의 따옴표 안 # 가 살아 있음", title == "Self # not-a-comment", f"title={title!r}")
 
     yaml(d, "rx.yaml", 'model: box.k\noutput: "rx # x.k"\nmode: "explicit"\nlevel: 2\n')

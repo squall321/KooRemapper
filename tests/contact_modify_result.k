@@ -40,8 +40,8 @@ $#   secid    elform
 *MAT_ELASTIC
 $#     mid        ro         e        pr
          1  7.85E-09  2.10E+05       0.3
-*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_TITLE
-Contact_1_2
+*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_ID
+         1Contact_1_2
 $#    ssid      msid     sstyp     mstyp    sboxid    mboxid       spr       mpr
          1         2         3         3         0         0         0         0
 $#      fs        fd        dc        vc       vdc    penchk        bt        dt
@@ -50,8 +50,8 @@ $#    sfsa      sfsb      sast      sbst     sfsat    sfsbt       fsf       vsf
        1.0       1.0       0.0       0.0       1.0       1.0       1.0       1.0
 $#    soft    sofscl    lcidab    maxpar     sbopt     depth     bsort    frcfrq
          2      0.10         0    1.0250         2         2         0         1
-*CONTACT_TIED_SURFACE_TO_SURFACE_TITLE
-Contact_2_3
+*CONTACT_TIED_SURFACE_TO_SURFACE_ID
+         2Contact_2_3
 $#    ssid      msid     sstyp     mstyp    sboxid    mboxid       spr       mpr
          2         3         3         3         0         0         0         0
 $#      fs        fd        dc        vc       vdc    penchk        bt        dt

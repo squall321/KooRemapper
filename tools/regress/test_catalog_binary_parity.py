@@ -543,7 +543,8 @@ def main():
         if os.path.exists(path):
             lines = open(path, encoding="utf-8", errors="ignore").read().splitlines()
             for i, ln in enumerate(lines):
-                if ln.strip() == "ZZTAG" and i:
+                # `_ID` 카드는 CID 1~10칸 + HEADING 11~80칸이라 제목만 strip 하면 못 찾는다.
+                if i and (ln.strip() == "ZZTAG" or ln[10:].strip() == "ZZTAG"):
                     kw = lines[i - 1].strip()
         return rc, out, kw
 
@@ -558,17 +559,17 @@ def main():
     for short, full in SHORT.items():
         rc, out, kw = ct_run("ct_" + short, f"    type: {short}\n")
         check(f"contact type: {short} → *CONTACT_{full}",
-              rc == 0 and kw == f"*CONTACT_{full}_TITLE", f"rc={rc} kw={kw}")
+              rc == 0 and kw == f"*CONTACT_{full}_ID", f"rc={rc} kw={kw}")
     rc, out, kw = ct_run("ct_omit", "")
     check("contact type 생략 → *CONTACT_AUTOMATIC_SURFACE_TO_SURFACE (빈 이름 아님)",
-          rc == 0 and kw == "*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_TITLE", f"rc={rc} kw={kw}")
+          rc == 0 and kw == "*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_ID", f"rc={rc} kw={kw}")
     rc, out, kw = ct_run("ct_n2s", "    type: automatic_nodes_to_surface\n")
     check("contact type: automatic_nodes_to_surface 는 통과(경고 없음)",
-          rc == 0 and kw == "*CONTACT_AUTOMATIC_NODES_TO_SURFACE_TITLE"
+          rc == 0 and kw == "*CONTACT_AUTOMATIC_NODES_TO_SURFACE_ID"
           and "not a known contact keyword" not in out, f"rc={rc} kw={kw}")
     rc, out, kw = ct_run("ct_bogus", "    type: bogus\n")
     check("contact type: bogus 는 rc=0 + 경고 + *CONTACT_BOGUS (거절 아님)",
-          rc == 0 and kw == "*CONTACT_BOGUS_TITLE" and "not a known contact keyword" in out,
+          rc == 0 and kw == "*CONTACT_BOGUS_ID" and "not a known contact keyword" in out,
           f"rc={rc} kw={kw} {out[-200:]}")
     ctd = cat_key(ops, "contact", "contacts[].type")["desc"]
     check("카탈로그 contact contacts[].type desc 가 약칭 표와 생략 기본값을 적는다",

@@ -16,6 +16,9 @@ struct ContactDef {
     // Card 1 자리를 한 줄 앞으로 잡아 **SSID 칸에 값을 덮어쓴다**(재현: modify friction 0.33 이
     // 슬레이브 파트 ID 칸에 들어가고 FS 는 그대로, 그런데 "Modified: FS=0.33" 이라고 보고한다).
     bool hasId = false;
+    // `_ID` 카드의 CID. **새로 만드는 접촉에만** 쓴다 — 덱에서 읽은 `_ID` 카드는 `title` 에 줄
+    // 전체(CID+제목)가 들어 있고 그쪽은 바이트를 보존해 되쓴다.
+    int cid = 0;
     std::string title;
     // Card 1
     int ssid=0, msid=0, sstyp=0, mstyp=0, sboxid=0, mboxid=0, spr=0, mpr=0;

@@ -4312,6 +4312,22 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
         msg << ", " << tiedCount << (useCzm ? " cohesive(CZM) contact(s)" : " tied contact(s)");
     infoMessages.push_back(msg.str());
 
+    // ⚠ 셸 층을 만들었는데 계면이 **0건**이면 그 셸은 아무것에도 묶이지 않는다. 계면은 **한 연산
+    // 안의 층 사이**에만 만드는 것이 설계인데, 이미 여러 파트로 나뉜 적층의 **요소 타입만** 바꾸려고
+    // 1층짜리 restack 을 층마다 돌리면 조용히 그 상태가 된다 — 실사고(2026-10-02 현장 보고):
+    // 산출에 CONTACT 0건·SET_SEGMENT 0건으로 셸이 떠 있었고 **아무 말도 없었다.**
+    if (tiedCount == 0) {
+        bool anyShell = false;
+        for (const auto& li : layerSegInfos)
+            if (li.etype == "shell") { anyShell = true; break; }
+        if (anyShell)
+            infoMessages.push_back(
+                "  ⚠ Restack Part " + std::to_string(op.targetPid) +
+                ": 셸 층을 만들었는데 계면(tied/CZM)이 0건입니다 — 이 셸은 아무것에도 묶이지 "
+                "않습니다. 계면은 한 연산 안의 층 사이에만 만듭니다. 이미 나뉜 파트와 묶으려면 "
+                "그 층들을 한 restack 연산에 함께 넣으세요.");
+    }
+
     return true;
 }
 
@@ -14026,12 +14042,23 @@ static std::string ca_getContactKeyword(const std::string& type) {
 static std::string ca_generateContact(const std::string& contactType,
         const std::string& title,
         int ssid, int msid, int sstyp, int mstyp,
-        double friction) {
+        double friction, int cid) {
     std::ostringstream ss;
+    // ⚠ **`*CONTACT_*` 에는 `_TITLE` 옵션이 없다** — `_ID`(CID 1~10칸 + HEADING 11~80칸)다.
+    // 단독 `contact` 와 **같은 규약**이다(`ct_generateContact`). 예전엔 둘 다 `_TITLE` 을 붙여
+    // LS-DYNA 가 제목줄을 데이터 카드로 읽고 키워드 단계에서 멈췄다 — 실측(2026-10-02,
+    // R16.1.1 MPP): Error 10060/10246/10450 → Error termination (0 cycles).
+    // `test_remaining_surfaces.py` 가 "단독·assemble 둘 다 같은 키워드" 를 지키므로 한쪽만
+    // 고치면 그 시험이 잡는다(실제로 잡았다).
     std::string kw = "*CONTACT_" + contactType;
-    if (!title.empty()) kw += "_TITLE";
-    ss << kw << "\n";
-    if (!title.empty()) ss << title << "\n";
+    if (!title.empty()) {
+        ss << kw << "_ID\n";
+        char head[128];
+        snprintf(head, sizeof(head), "%10d%s", cid, title.c_str());
+        ss << head << "\n";
+    } else {
+        ss << kw << "\n";
+    }
 
     char buf[90];
     // Card 1
@@ -14210,6 +14237,8 @@ bool ModelAssembler::applyContact(const ContactOperation& op) {
     }
 
     int nextSetId = ld_findMaxSetSegmentId(rawLines_) + 1;
+    // 새 접촉 CID 는 덱의 기존 `_ID` CID **위로** 발행한다(단독 contact 와 같은 규율).
+    int nextContactId = ct_findMaxContactId(rawLines_) + 1;
     std::vector<std::string> insertBlocks;
     int contactCount = 0;
 
@@ -14304,7 +14333,7 @@ bool ModelAssembler::applyContact(const ContactOperation& op) {
                     title = "PID" + std::to_string(slavePids[0]) + "_to_PID" + std::to_string(masterPids[0]);
                 }
                 insertBlocks.push_back(ca_generateContact(contactKw, title,
-                    ssid, msid, sstyp, mstyp, act.friction));
+                    ssid, msid, sstyp, mstyp, act.friction, nextContactId++));
                 contactCount++;
                 std::cout << "[contact] Created " << contactKw
                           << " (slave=" << ssid << " master=" << msid << ")\n";
@@ -14347,7 +14376,7 @@ bool ModelAssembler::applyContact(const ContactOperation& op) {
                         act.titlePrefix + "_PID" + std::to_string(act.slave.pid) +
                         "_PID" + std::to_string(act.master.pid);
                     insertBlocks.push_back(ca_generateContact(contactKw, title,
-                        sid1, sid2, 0, 0, act.friction));
+                        sid1, sid2, 0, 0, act.friction, nextContactId++));
                     contactCount++;
                 }
                 continue;
@@ -14416,7 +14445,7 @@ bool ModelAssembler::applyContact(const ContactOperation& op) {
                         if (!act.titlePrefix.empty())
                             title = act.titlePrefix + "_PID" + std::to_string(pidA) + "_PID" + std::to_string(pidB);
                         insertBlocks.push_back(ca_generateContact(contactKw, title,
-                            sid1, sid2, 0, 0, act.friction));
+                            sid1, sid2, 0, 0, act.friction, nextContactId++));
                         contactCount++;
                     }
                 }

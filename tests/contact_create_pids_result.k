@@ -40,16 +40,16 @@ $#   secid    elform
 *MAT_ELASTIC
 $#     mid        ro         e        pr
          1  7.85E-09  2.10E+05       0.3
-*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_TITLE
-Contact_1_2
+*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_ID
+         1Contact_1_2
 $#    ssid      msid     sstyp     mstyp    sboxid    mboxid       spr       mpr
          1         2         3         3         0         0         0         0
 $#      fs        fd        dc        vc       vdc    penchk        bt        dt
        0.2       0.1       0.0       0.0       0.0         0       0.0  1.00E+20
 $#    sfsa      sfsb      sast      sbst     sfsat    sfsbt       fsf       vsf
        1.0       1.0       0.0       0.0       1.0       1.0       1.0       1.0
-*CONTACT_TIED_SURFACE_TO_SURFACE_TITLE
-Contact_2_3
+*CONTACT_TIED_SURFACE_TO_SURFACE_ID
+         2Contact_2_3
 $#    ssid      msid     sstyp     mstyp    sboxid    mboxid       spr       mpr
          2         3         3         3         0         0         0         0
 $#      fs        fd        dc        vc       vdc    penchk        bt        dt
@@ -77,8 +77,8 @@ $#     sid
         12
 $#    pid1      pid2      pid3      pid4      pid5      pid6      pid7      pid8
          3
-*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_TITLE
-Contact_0
+*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_ID
+         3Contact_0
 $#    ssid      msid     sstyp     mstyp    sboxid    mboxid       spr       mpr
         11        12         2         2         0         0         0         0
 $#      fs        fd        dc        vc       vdc    penchk        bt        dt
@@ -91,8 +91,8 @@ $#     sid
         13
 $#    pid1      pid2      pid3      pid4      pid5      pid6      pid7      pid8
          1         2         3
-*CONTACT_AUTOMATIC_SINGLE_SURFACE_TITLE
-SelfContact_All
+*CONTACT_AUTOMATIC_SINGLE_SURFACE_ID
+         4SelfContact_All
 $#    ssid      msid     sstyp     mstyp    sboxid    mboxid       spr       mpr
         13         0         2         0         0         0         0         0
 $#      fs        fd        dc        vc       vdc    penchk        bt        dt

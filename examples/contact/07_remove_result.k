@@ -40,8 +40,8 @@ $#   secid    elform
 *MAT_ELASTIC
 $#     mid        ro         e        pr
          1  7.85E-09  2.10E+05       0.3
-*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_TITLE
-Contact_1_2
+*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_ID
+         1Contact_1_2
 $#    ssid      msid     sstyp     mstyp    sboxid    mboxid       spr       mpr
          1         2         3         3         0         0         0         0
 $#      fs        fd        dc        vc       vdc    penchk        bt        dt

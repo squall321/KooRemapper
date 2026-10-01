@@ -331,10 +331,21 @@ def body(binary, tmp):
               if l.startswith("*CONTACT_")] if os.path.exists(os.path.join(data, "ct_asm.k")) else []
     std_kw = [l for l in open(os.path.join(data, "ct_s_auto.k")).read().splitlines()
               if l.startswith("*CONTACT_")] if os.path.exists(os.path.join(data, "ct_s_auto.k")) else []
+    # ⚠ 접미사를 둘 다 떼고 비교한다. 제목 옵션이 붙는지는 **제목을 줬는지**에 달렸고 그것은
+    # 두 경로에서 정당하게 다르다(단독은 제목이 없으면 기본 제목을 만들고, assemble 은 안 만든다).
+    # 비교할 계약은 **밑 키워드**다. 그리고 접촉에는 `_TITLE` 옵션이 없으니 그쪽은 따로 못 박는다.
+    def base_kw(s):
+        for suf in ("_ID", "_TITLE"):
+            if s.endswith(suf):
+                return s[: -len(suf)]
+        return s
+
     check("contact: 'type: auto' 가 assemble 과 단독 contact 에서 같은 키워드를 만든다",
-          rc == 0 and asm_kw and std_kw and
-          asm_kw[0].replace("_TITLE", "") == std_kw[0].replace("_TITLE", ""),
+          rc == 0 and asm_kw and std_kw and base_kw(asm_kw[0]) == base_kw(std_kw[0]),
           f"rc={rc} asm={asm_kw[:1]} std={std_kw[:1]}")
+    check("contact: 어느 경로도 `_TITLE` 을 쓰지 않는다 (LS-DYNA 에 그 옵션이 없다)",
+          not [k for k in (asm_kw + std_kw) if k.endswith("_TITLE")],
+          f"asm={asm_kw} std={std_kw}")
 
     for alias, kw in (("tied_thermal", "TIED_SURFACE_TO_SURFACE_THERMAL"),
                       ("thermal", "TIED_SURFACE_TO_SURFACE_THERMAL"),

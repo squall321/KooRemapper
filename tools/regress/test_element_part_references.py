@@ -290,6 +290,66 @@ def main():
         hits = reports(out)
         check("D " + rel, any(re.search(pat, h) for h in hits), why + " / 보고=%r" % hits)
 
+    print("[F `*CONTACT_*` 에는 _TITLE 옵션이 없다 — _ID 다]")
+    # 2026-10-02 현장 보고: `contact create` 가 `*CONTACT_<TYPE>_TITLE` 을 써서 LS-DYNA 가
+    # 제목줄을 데이터 카드로 읽고 즉사했다(R16.1.1 MPP, Error 10060/10246/10450, 0 cycles).
+    # **우리가 그 형식을 만들어 왔고** 커밋된 덱 41장이 그 상태였다. 두 방향을 다 못 박는다 —
+    # 탐지가 살아 있는지, 그리고 만드는 쪽이 `_ID` 로 쓰는지.
+    bad = write("ct_title.k", CLEAN.replace("*END",
+        "*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_TITLE\nmy title\n"
+        "         1         2         3         3         0         0         0         0\n"
+        "       0.0       0.0       0.0       0.0       0.0         0       0.01.0000E+20\n"
+        "       1.0       1.0       0.0       0.0       1.0       1.0       1.0       1.0\n*END", 1))
+    def ct_lines(o):
+        return [l.strip() for l in o.splitlines() if re.search(r"^\s+line \d+ \*CONTACT", l)]
+
+    rc, out = info(binary, bad)
+    check("F-1 접촉 _TITLE 을 손상으로 보고한다",
+          any("_TITLE" in h and "_ID" in h for h in ct_lines(out)), ct_lines(out))
+
+    # 만드는 쪽 — 실제로 돌려서 산출 키워드를 본다(소스를 읽는 것으로는 부족하다. 이 결함이
+    # 조립 자리가 아니라 **쓰기 함수**에 있었고, 골든을 열어서야 잡혔다).
+    import shutil
+    ex = os.path.join(ROOT, "examples", "contact")
+    if not os.path.isfile(os.path.join(ex, "02_create_part.yaml")):
+        check("F 예제가 있다", False, "examples/contact/02_create_part.yaml 이 없다")
+    else:
+        w = tempfile.mkdtemp(prefix="ctid_")
+        for fn in os.listdir(ex):
+            src = os.path.join(ex, fn)
+            if os.path.isfile(src):
+                shutil.copy(src, w)
+        cfg = open(os.path.join(w, "02_create_part.yaml"), encoding="utf-8").read()
+        cfg = cfg.replace("output: 02_create_part_result.k", "output: ctid_out.k")
+        open(os.path.join(w, "ctid.yaml"), "w", newline="\n").write(cfg)
+        p2 = subprocess.run([binary, "contact", "ctid.yaml"], capture_output=True, text=True,
+                            timeout=600, cwd=w)
+        made = os.path.join(w, "ctid_out.k")
+        check("F-2 contact create rc=0", p2.returncode == 0, (p2.stdout + p2.stderr)[-200:])
+        if os.path.exists(made):
+            body = open(made, encoding="latin-1").read().splitlines()
+            kws = [l for l in body if l.startswith("*CONTACT")]
+            check("F-3 산출에 접촉 _TITLE 이 하나도 없다",
+                  not [k for k in kws if k.endswith("_TITLE")], kws)
+            check("F-4 새 접촉은 _ID 로 나간다", any(k.endswith("_ID") for k in kws), kws)
+            # CID 는 1~10칸이다. 제목이 그 칸을 먹으면 LS-DYNA 가 CID 를 못 읽는다.
+            cid_ok = False
+            for i, l in enumerate(body):
+                if l.startswith("*CONTACT") and l.endswith("_ID") and i + 1 < len(body):
+                    head = body[i + 1]
+                    cid_ok = len(head) > 10 and head[:10].strip().isdigit()
+                    break
+            check("F-5 CID 가 1~10칸에 오른쪽 정렬로 들어간다", cid_ok,
+                  body[body.index(next(k for k in body if k.endswith("_ID"))) + 1]
+                  if any(k.endswith("_ID") for k in kws) else "(_ID 카드 없음)")
+            rc2, out2 = info(binary, made)
+            # ⚠ `reports()` 로 쓰면 이 단언이 **공허하게 통과한다**(그 수집기는 *PART:/*ELEMENT:
+            # 만 고른다 — 처음 판이 그래서 틀린 이유로 초록이었다).
+            check("F-6 산출 덱에 접촉 손상 보고가 없다", not ct_lines(out2), ct_lines(out2))
+        else:
+            check("F-3 산출물이 생겼다", False, (p2.stdout + p2.stderr)[-200:])
+        shutil.rmtree(w, ignore_errors=True)
+
     print()
     if FAILS:
         print("--- 실패 %d건 ---" % len(FAILS))

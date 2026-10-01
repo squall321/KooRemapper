@@ -105,6 +105,16 @@ bool looksReal(const std::string& s) {
 void contactDamage(const std::vector<std::string>& lines, size_t i, const std::string& kw,
                    ReferenceReport& rep) {
     const bool hasId = (kw.size() >= 3 && kw.compare(kw.size() - 3, 3, "_ID") == 0) || has(kw, "_ID_");
+    // ⚠ **`*CONTACT_*` 에는 `_TITLE` 옵션이 없다.** 제목을 붙이는 옵션은 `_ID` 뿐이고, 그 카드는
+    // CID 1~10칸 + HEADING 11~80칸이다. `_TITLE` 로 적힌 접촉은 LS-DYNA 가 제목줄을 **데이터
+    // 카드로 읽고** 키워드 단계에서 멈춘다 — 실측(2026-10-02, R16.1.1 MPP):
+    //   Error 10060 Unable to read line / 10246 improperly formatted data /
+    //   10450 in keyword command → Error termination (0 cycles)
+    // 그런데 **우리가 그 형식을 만들어 왔다**(`ct_generateContact`) — 그래서 커밋된 예제 덱
+    // 17장이 그 상태였다. 고친 뒤 되돌아오지 못하게 여기서 소리 내어 말한다.
+    if (has(kw, "_TITLE"))
+        rep.damaged.push_back({(int)i + 1, kw,
+            "`*CONTACT_*` 에는 _TITLE 옵션이 없습니다 — _ID 로 쓰고 CID(1~10칸)+제목(11~80칸) 카드를 두세요"});
     int skip = (has(kw, "_TITLE") ? 1 : 0) + (hasId ? 1 : 0);
     // ⚠ **빈 줄도 카드다.** Card 2·3 은 필수지만 칸을 전부 기본값으로 두는 접촉이 있어
     // (`*CONTACT_FORCE_TRANSDUCER_PENALTY`) 빈 줄로 적힌다. 건너뛰면 그 덱이 "필수 카드가

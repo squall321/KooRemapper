@@ -149,6 +149,8 @@ int runRelax(const std::string& yamlFile, ConsoleOutput& console) {
     };
     std::string modelPath = resolvePath(modelFile);
     std::string outPath   = resolvePath(outputFile);
+    if (const std::string note = KooRemapper::yamlOutputExtNote(outPath); !note.empty())
+        console.warning("[relax] " + note);
 
     // 2. Read model file
     std::vector<std::string> lines;

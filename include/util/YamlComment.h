@@ -199,6 +199,22 @@ inline std::string yamlResolvePath(const std::string& configDir, const std::stri
     return configDir + "/" + p;
 }
 
+// 산출 파일명에 확장자가 없으면 **그 사실을 알린다 — 이름은 바꾸지 않는다.**
+//
+// ⚠ 몰래 `.k` 를 붙이면 사용자가 적은 파일명이 도구 때문에 달라지고, 그 사람의 스크립트가 조용히
+// 어긋난다. 그래서 고치는 쪽이 아니라 **말하는 쪽**을 택했다. 실사고(2026-10-02 현장 보고):
+// `output: Q8-Arm90-relax-c` 로 두니 확장자 없는 파일이 나오고 다음 op 이 `.k` 를 찾아 실패했다 —
+// 문제는 확장자가 없다는 것이 아니라 그때 **아무 말도 없었다**는 것이다.
+//
+// 빈 문자열이면 알릴 것이 없다.
+inline std::string yamlOutputExtNote(const std::string& outPath) {
+    const size_t slash = outPath.find_last_of("/\\");
+    const std::string base = (slash == std::string::npos) ? outPath : outPath.substr(slash + 1);
+    if (base.empty() || base.find('.') != std::string::npos) return "";
+    return "산출 파일명에 확장자가 없습니다: " + base +
+           " — 다음 op 이 `.k` 를 찾으면 못 찾습니다(이름은 적으신 대로 둡니다)";
+}
+
 // ── 블록 내용 줄 판정 ────────────────────────────────────────────────────────
 // 블록 스칼라 안의 한 줄이 내용인지·블록 끝인지·YAML 오류인지는 들여쓰기 하나로 갈린다.
 // 예전엔 단독(standalone_ops)은 '키 열보다 깊으면 내용' 으로만 보고 명시 들여쓰기 지시자를

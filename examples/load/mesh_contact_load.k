@@ -31678,8 +31678,8 @@ $#      n1        n2        n3        n4
       7800      7801      5197      5195
       7801      7802      5199      5197
       7802      7803      5201      5199
-*CONTACT_TIED_SURFACE_TO_SURFACE_TITLE
-AUTO_PID9_PID10
+*CONTACT_TIED_SURFACE_TO_SURFACE_ID
+         1AUTO_PID9_PID10
 $#    ssid      msid     sstyp     mstyp    sboxid    mboxid       spr       mpr
          1         2         0         0         0         0         0         0
 $#      fs        fd        dc        vc       vdc    penchk        bt        dt
@@ -32096,8 +32096,8 @@ $#      n1        n2        n3        n4
      10401     10402      7801      7800
      10402     10403      7802      7801
      10403     10404      7803      7802
-*CONTACT_TIED_SURFACE_TO_SURFACE_TITLE
-AUTO_PID9_PID11
+*CONTACT_TIED_SURFACE_TO_SURFACE_ID
+         2AUTO_PID9_PID11
 $#    ssid      msid     sstyp     mstyp    sboxid    mboxid       spr       mpr
          3         4         0         0         0         0         0         0
 $#      fs        fd        dc        vc       vdc    penchk        bt        dt
@@ -37514,8 +37514,8 @@ $#      n1        n2        n3        n4
      10401     10402      7801      7800
      10402     10403      7802      7801
      10403     10404      7803      7802
-*CONTACT_TIED_SURFACE_TO_SURFACE_TITLE
-AUTO_PID10_PID11
+*CONTACT_TIED_SURFACE_TO_SURFACE_ID
+         3AUTO_PID10_PID11
 $#    ssid      msid     sstyp     mstyp    sboxid    mboxid       spr       mpr
          5         6         0         0         0         0         0         0
 $#      fs        fd        dc        vc       vdc    penchk        bt        dt
