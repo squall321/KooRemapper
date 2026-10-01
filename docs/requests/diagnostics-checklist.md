@@ -106,8 +106,20 @@
       압축 전). 번들은 약 2주 전 실패까지 담을 수 있다.
 - [x] DB 쪽 보존 — `backup-db.sh:59` 가 일별 덤프 **14개**를 남긴다(`tail -n +15 | xargs rm`).
       세션을 지워 잡 행이 사라져도 최대 14일치 덤프에는 남아 있다.
-- [ ] 회전이 누구 손인지는 아직 모른다(apptainer 자체인지 시스템 logrotate 인지). 보존 세대 수를
-      우리가 조절할 수 있는지가 여기서 갈린다.
+- [x] 회전은 **우리 손**이다(2026-09-30 확인). 사용자 크론 `17 * * * *` 이
+      `/usr/sbin/logrotate -s ~/.local/state/hwax/logrotate.status ~/.config/hwax/logrotate.conf`
+      를 돌린다. 그 설정은 `HWAXPortal/infra/logrotate/hwax.conf.tmpl` 을
+      `install-logrotate.sh` 가 박스별 경로로 렌더한 것이고, 블록 (A) 가
+      `~/.apptainer/instances/logs/*/<user>/*.{out,err}` 를 덮는다 —
+      `daily` · **`rotate 14`** · `maxsize 200M` · `copytruncate` · `compress delaycompress`.
+      → 실측한 "14세대" 가 `rotate 14` 와 일치한다(추측이 아니라 확인).
+      → **바꿀 수 있다**(템플릿 수정 + `install-logrotate.sh` 재실행). 그러나 **바꾸지 않는다** —
+        14일은 사용자가 실패를 신고하기에 충분하고, 한 앱의 진단 창을 늘리려고 **모든 서비스가
+        공유하는** 회전 설정을 키우는 것은 잘못된 교환이다. 번들은 서버 줄이 없을 때 그 사실을
+        이미 말한다.
+      → ⚠ **보존은 순수 시간 기준이 아니다.** `maxsize 200M` 이 있어 로그가 시끄러우면 14일보다
+        일찍 잘린다. `koorm_api.out` 에 `/api/health` 폴링 줄이 1,461개 쌓이던 것이 그 압력이었고,
+        그것을 접은 변경(2단계)이 진단 창을 실제로 넓혔다 — 소음 정리가 미용이 아니었던 이유다.
 
 ## 착수 뒤 추가로 한 것
 
