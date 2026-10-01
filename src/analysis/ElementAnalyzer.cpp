@@ -383,6 +383,14 @@ void ElementAnalyzer::computeStatistics(MeshAnalysisResult& result)
         if (result.hasMaterial) {
             result.avgVonMisesStress = sumStress / validCount;
         }
+    } else {
+        // ⚠ **센티넬을 그대로 두면 안 된다.** 유효 요소가 하나도 없으면 위 min/max 가 초기값
+        // (`numeric_limits<double>::max()` / `lowest()`)으로 남아, 요약이 309자리 숫자
+        // (1.797693e+308 과 그 음수)를 "변형률" 이라고 찍는다 — 셸 전용 덱에 prestress 를 돌렸을 때
+        // 실제로 그렇게 나왔다(2026-10-02 검증 중 발견). 숫자처럼 보이는 쓰레기가 침묵보다 나쁘다.
+        result.minVonMisesStrain = result.maxVonMisesStrain = 0.0;
+        result.minVonMisesStress = result.maxVonMisesStress = 0.0;
+        result.avgVonMisesStrain = result.avgVonMisesStress = 0.0;
     }
 }
 

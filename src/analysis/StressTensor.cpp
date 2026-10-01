@@ -79,7 +79,16 @@ std::array<double, 3> StressTensor::principalStresses() const
     
     // Depressed cubic: t³ + pt + q = 0 where σ = t + I1/3
     double p = I2 - I1 * I1 / 3.0;
-    double q = 2.0 * I1 * I1 * I1 / 27.0 - I1 * I2 / 3.0 + I3;
+    // ⚠ **부호가 틀려 있었다.** λ³ - I1λ² + I2λ - I3 = 0 에 λ = t + I1/3 을 넣으면
+    //   t³ + Pt + Q = 0 이고 **Q = -2I1³/27 + I1I2/3 - I3** 다. 예전 판은 그 반대 부호를 썼고,
+    //   그러면 삼각해의 `acos` 인자가 뒤집혀 π-θ 가 나와 **편차 고유값이 음수로 뒤집힌다**
+    //   (Cardano 분기의 `cbrt(-q/2 ± √D)` 도 같이 틀린다).
+    //   손검산 — diag(2,1,1) 이면 I1=4·I2=5·I3=2 이고 정답은 {2,1,1} 인데 옛 식은
+    //   {1.667, 0.667, 1.667} 을 냈다. 실측에서도 같은 상태의 두 요소가 서로 다른 주응력을
+    //   보고했다(2026-10-02 검증 중 발견 — 현장 보고에는 없던 결함이다).
+    //   ⚠ `StrainTensor::principalStrains` 는 **다른 매개화**(p=I1/3 · r=(I1²-3I2)/9 ·
+    //   cosArg=+q/(2r√r))를 쓰고 그쪽 부호는 **맞다** — 손검산으로 확인했다. 건드리지 말 것.
+    double q = -2.0 * I1 * I1 * I1 / 27.0 + I1 * I2 / 3.0 - I3;
     
     std::array<double, 3> sigma;
     

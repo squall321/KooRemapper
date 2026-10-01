@@ -697,8 +697,63 @@ int runShellMapping(const std::string& bentShellFile, const std::string& flatFil
         return 1;
     }
 
+    // ── 정합이 **조용히 틀리는** 세 자리를 소리 내어 말한다 (2026-10-02 현장 보고 §1-4·1-5·1-6).
+    //    거동은 바꾸지 않는다 — 바꾸면 기존 산출물이 전부 달라진다. 대신 "정상처럼 보이는" 상태를
+    //    없앤다. 그 보고의 증상이 전부 `Max distortion 0.000000%` 와 함께 나왔다.
     if (mapper.isAxesSwapped()) {
-        console.info("Auto-alignment: axes swapped (flat X<->Y) to match unfolded shell");
+        // ⚠ 반사가 아니다 — 야코비 행렬 `[[0,-sy],[sx,0]]`, 행렬식 `+sx*sy > 0` 인 **90° 회전**이다.
+        //    다만 **flat Y 의 방향이 뒤집힌다.** 그 사실을 말하지 않으면 Y 비대칭 요소(카메라 홀·
+        //    끝단 캡)가 반대쪽에 놓여도 로그가 조용하다.
+        console.info("Auto-alignment: axes swapped (flat X -> unfold Y, flat Y -> unfold X) — "
+                     "90도 회전입니다(반사 아님). ⚠ flat Y 의 **방향이 뒤집힙니다** — Y 비대칭 "
+                     "형상은 좌우가 바뀝니다(대칭이면 보이지 않습니다).");
+    }
+
+    // §1-4 — bbox 정합은 디테일을 셸의 펴진 길이에 **맞춰 늘린다.** 길이가 어긋나면 그 차이가
+    //        그대로 가짜 변형률이 된다. 임계는 0.05%(보고가 제안한 값).
+    {
+        const double sx = mapper.getScaleX(), sy = mapper.getScaleY();
+        const double tol = 5e-4;
+        if (std::abs(sx - 1.0) > tol || std::abs(sy - 1.0) > tol) {
+            char buf[256];
+            snprintf(buf, sizeof(buf),
+                     "정합이 디테일을 늘렸습니다: %+.4f%% / %+.4f%% (두 축) — 디테일의 펴진 길이가 "
+                     "기준 셸과 다릅니다. 이 차이는 **가짜 변형률**로 남습니다.",
+                     (sx - 1.0) * 100.0, (sy - 1.0) * 100.0);
+            console.warning(buf);
+            console.info("  → 기준 셸의 펴진 길이를 디테일 실측 길이에 맞추면 0 에 가까워집니다.");
+        }
+    }
+
+    // §1-6 — `flat_detail` 의 z 가 **그대로 법선 오프셋**이다(`mapPoint`: surfacePos + normal*z).
+    //        그래서 중립축이 z=0 에 있어야 한다. 공식 예제 `arc_flat.k` 가 Z -0.1~+0.1 인 이유다.
+    //        보고 실측: 적층이 z≈-6.3 에 있어 그대로 넣으니 X 폭 17.75mm(정답 5.30)·음수 야코비안
+    //        4,125개가 나왔는데 로그는 "미매핑 0 · Max distortion 0.000000%" 였다.
+    {
+        double zmin = 0.0, zmax = 0.0; bool first = true;
+        for (const auto& [nid, nd] : flatMesh.getNodes()) {
+            const double z = nd.z();
+            if (first) { zmin = zmax = z; first = false; }
+            else { if (z < zmin) zmin = z; if (z > zmax) zmax = z; }
+        }
+        if (!first) {
+            const double zc = 0.5 * (zmin + zmax);
+            const double zspan = zmax - zmin;
+            char buf[256];
+            snprintf(buf, sizeof(buf), "flat_detail z 범위 %.4f ~ %.4f (중심 %+.4f, 두께 %.4f)",
+                     zmin, zmax, zc, zspan);
+            console.keyValue("중립축 위치", buf);
+            // 중심이 자기 두께의 절반을 넘게 벗어나 있으면 z=0 전제를 깬 것이다.
+            const double ref = (zspan > 1e-12) ? zspan : ((thickness > 1e-12) ? thickness : 1.0);
+            if (std::abs(zc) > 0.5 * ref) {
+                snprintf(buf, sizeof(buf),
+                         "flat_detail 의 중립축이 z=0 에서 %+.4f 벗어나 있습니다(두께 %.4f의 %.1f배) — "
+                         "z 는 **그대로 법선 오프셋**으로 쓰입니다. 기준면에서 그만큼 밀려 매핑되고, "
+                         "음수 야코비안이 생길 수 있습니다.", zc, ref, std::abs(zc) / ref);
+                console.warning(buf);
+                console.info("  → 디테일을 중립축이 z=0 이 되도록 옮긴 뒤 넣으세요.");
+            }
+        }
     }
 
     int unmapped = mapper.getUnmappedCount();
@@ -1037,6 +1092,37 @@ int runPrestress(const std::string& refFile, const std::string& defFile,
                 missingMaterialCount++;
             }
         }
+        // ⚠ **층별 강성비가 극단이면 말한다.** 운동학적 지정(절점 위치로 변형률을 박는 것)은
+        //   **완전접착 보**를 강제한다 — 층간 전단으로 풀릴 여지가 없다. 그래서 강성층의 응력이
+        //   **상한**으로 나온다. 현장 실측(2026-10-02, Q8 폴더블): PSA 단기 E 3.99 MPa 대 UTG
+        //   77,000 = **19,000배**. 그 결과 UTG 가 5043 MPa · 변형률 -8.0% 로 나왔는데 유리 파괴
+        //   변형률은 ~1% 다. 손계산도 일치했으므로 버그가 아니라 **지정의 결과**다. PSA 응력이
+        //   0.01~0.25 MPa 로 거의 0 인데 축방향 변형률이 6.3% 인 것이 증거다 — 전단으로 풀려야
+        //   할 것이 축방향으로 늘어나고 있었다. 그런데 **경고가 한 줄도 없었다.**
+        {
+            double eMin = 0.0, eMax = 0.0; bool first = true;
+            for (const auto& [partId, part] : parts) {
+                auto it = materials.find(part.materialId);
+                if (it == materials.end() || !(it->second.E > 0.0)) continue;
+                const double e = it->second.E;
+                if (first) { eMin = eMax = e; first = false; }
+                else { if (e < eMin) eMin = e; if (e > eMax) eMax = e; }
+            }
+            if (!first && eMin > 0.0) {
+                const double ratio = eMax / eMin;
+                if (ratio > 100.0) {
+                    char buf[320];
+                    snprintf(buf, sizeof(buf),
+                             "층별 탄성계수 비가 %.0f배입니다 (최소 %.4g / 최대 %.4g) — 운동학적"
+                             " 지정은 층간 전단을 금지하므로 **강성층의 응력은 상한**입니다.",
+                             ratio, eMin, eMax);
+                    console.warning(buf);
+                    console.info("  → 층간 미끄러짐이 본질인 문제(폴딩 등)라면 이 응력을 그대로 쓰지"
+                                 " 마세요. 경계를 고정한 채 `relax`(동적 완화)로 평형화하면 분배가"
+                                 " 바로잡힙니다 — 처방변위로 다시 성형할 필요는 없습니다.");
+                }
+            }
+        }
         if (missingMaterialCount > 0) {
             console.warning(std::to_string(missingMaterialCount) + " part(s) have missing materials - stress will be 0");
         }
@@ -1112,6 +1198,20 @@ int runPrestress(const std::string& refFile, const std::string& defFile,
     console.keyValue("Valid elements", std::to_string(results.validElements));
     if (results.invalidElements > 0) {
         console.warning("Invalid elements: " + std::to_string(results.invalidElements));
+    }
+
+    // ⚠ **유효 요소가 0이면 여기서 끊는다.** 예전엔 rc=0 으로 끝나며 요약을 찍고 **빈
+    // `*INITIAL_STRESS_SOLID` 블록**을 쓰고, 동반 `.k` 가 그것을 `*INCLUDE` 했다 — 셸 전용 덱
+    // (`*ELEMENT_SHELL` 만)에 돌렸을 때 실제로 그렇게 나왔다(2026-10-02 검증 중 발견).
+    // `prestress` 는 솔리드 네이티브다(`*INITIAL_STRESS_SOLID`). 셸은 `ElementAnalyzer` 가
+    // "Unsupported element type" 으로 전부 무효 처리하므로, 그 덱은 애초에 이 op 의 대상이 아니다.
+    // 성공처럼 생긴 실패를 내보내지 않는다.
+    if (results.validElements == 0) {
+        console.error("초기응력을 계산할 수 있는 요소가 하나도 없습니다(유효 0 / 무효 " +
+                      std::to_string(results.invalidElements) + ") — `prestress` 는 솔리드 전용"
+                      "입니다(*INITIAL_STRESS_SOLID). 셸만 있는 덱은 대상이 아닙니다.");
+        console.info("  → 솔리드 덱을 주거나, 셸 적층이라면 restack 으로 솔리드 층을 만든 뒤 쓰세요.");
+        return 1;
     }
     
     console.keyValue("Strain type", 
