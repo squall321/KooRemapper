@@ -14,14 +14,14 @@
 사용법
 
     # 지금 바이너리로 지문을 뜬다
-    python3 tools/regress/deck_manifest.py --emit before.json <바이너리>
+    python3 tools/deck_manifest.py --emit before.json <바이너리>
     # …고친 뒤…
-    python3 tools/regress/deck_manifest.py --emit after.json <바이너리>
+    python3 tools/deck_manifest.py --emit after.json <바이너리>
     # 대조 — 다르면 rc=1 이고 op·파일 단위로 찍는다
-    python3 tools/regress/deck_manifest.py --compare before.json after.json
+    python3 tools/deck_manifest.py --compare before.json after.json
 
     # 일부 op 만
-    python3 tools/regress/deck_manifest.py --emit a.json <바이너리> --only map shellmap
+    python3 tools/deck_manifest.py --emit a.json <바이너리> --only map shellmap
 
 ⚠ **날짜를 가린다.** 산출 덱 머리에 `$ Date: YYYY-MM-DD HH:MM:SS` 가 초 단위로 박히므로 가리지
 않으면 42 op 전부가 "바뀌었다" 로 나온다(`test_roundtrip_bytes.py` 의 `_DATE` 를 그대로 쓴다).
@@ -42,8 +42,9 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-REPO = os.path.normpath(os.path.join(HERE, "..", ".."))
-sys.path.insert(0, HERE)
+REPO = os.path.normpath(os.path.join(HERE, ".."))
+# 픽스처 표는 개행 매트릭스에서 빌려 쓴다 — 베끼면 둘이 갈린다.
+sys.path.insert(0, os.path.join(HERE, "regress"))
 sys.path.insert(0, os.path.join(REPO, "platform", "core"))
 
 import test_newline_matrix as nlm  # noqa: E402

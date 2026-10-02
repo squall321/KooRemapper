@@ -496,6 +496,9 @@ materials:
     match: "SUS304"
 """}),
    cmds=[BOX_CMD, "KooRemapper matdb matdb.yaml"], outputs=["box_matdb.k"],
+   # 번들 DB 는 작업 폴더나 **바이너리 이웃**에 있어야 한다 — 임시 폴더에는 둘 다 없어서
+   # 이 사례가 로컬·CI 양쪽에서 조용히 빨갰다. 작업 폴더에 깔아 주어 관문을 되살린다.
+   needs=["materials/material_db.json"],
    notes=["사례처럼 database 를 생략하는 편이 이식성 있다 — 작업 폴더 materials/material_db.json → 실행 파일 기준 materials/·../materials/ 순으로 번들 DB 를 찾는다 (SIF 도 /opt/kooremapper/bin + /opt/kooremapper/materials 로 이 규칙에 걸린다)",
           "database 를 적으면 폴더가 붙은 값은 작업 폴더 기준, 폴더 없는 홑이름은 YAML 폴더 기준이다 — 번들 이름만 주는 형태는 없으니 절대 경로나 생략을 쓸 것",
           "match: 파트/재질 제목 부분일치, \"*\" 는 나머지 전부. mid: 로 MID 직접 지정",

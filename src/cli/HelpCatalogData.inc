@@ -588,7 +588,7 @@ materials:
     match: "SUS304"
 )KRH"}},
      {"KooRemapper generate box box.yaml", "KooRemapper matdb matdb.yaml"},
-     {},
+     {"materials/material_db.json"},
      {"사례처럼 database 를 생략하는 편이 이식성 있다 — 작업 폴더 materials/material_db.json → 실행 파일 기준 materials/·../materials/ 순으로 번들 DB 를 찾는다 (SIF 도 /opt/kooremapper/bin + /opt/kooremapper/materials 로 이 규칙에 걸린다)", "database 를 적으면 폴더가 붙은 값은 작업 폴더 기준, 폴더 없는 홑이름은 YAML 폴더 기준이다 — 번들 이름만 주는 형태는 없으니 절대 경로나 생략을 쓸 것", "match: 파트/재질 제목 부분일치, \"*\" 는 나머지 전부. mid: 로 MID 직접 지정", "damping_preset: smartphone_drop | smartphone_drop_aggressive | quasi_static | off (모르는 값은 rc=1)"}},
     {"matswap", "재료·어셈블리", "MAT+HOURGLASS+CURVE+SECTION 번들을 파트에 통째로 교체", "재질교체 bundle rubber", "KooRemapper matswap <config.yaml>\nKooRemapper matswap <model.k> <bundle.k> <pid> <output.k>",
      {{"swap.yaml", R"KRH(model: examples/matswap/two_cubes.k
