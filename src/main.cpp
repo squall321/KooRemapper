@@ -74,6 +74,7 @@
 #include "commands/modelmeta.h"
 #include "commands/neutralaxis.h"
 #include "commands/foldsurface.h"
+#include "commands/refshell.h"
 
 #include <iostream>
 #include <fstream>
@@ -2808,6 +2809,26 @@ static int runMain(int argc, char* argv[]) {
         }
         printBanner(console);
         return runFoldSurface(argv[2], console);
+    }
+
+    // Reference shell from a 2D curve
+    // @lat: [[commands/refshell]]
+    if (command == "refshell") {
+        if (argc < 3) {
+            console.error("Usage: KooRemapper refshell <config.yaml>");
+            console.info("Sweeps a 2D curve (CSV with x,y columns) across a width into a");
+            console.info("QUAD4 reference shell deck — the surface `shellmap` maps onto.");
+            console.info("Minimal config:");
+            console.info("  curve: fold_curve.csv");
+            console.info("  output: refshell.k");
+            console.info("  width: 70.0");
+            console.info("  thickness: 0.05");
+            console.info("  divisions: 0          # 0 = use the CSV points as given");
+            console.info("  width_divisions: 0    # 0 = pick for a 1:1 aspect ratio");
+            return 1;
+        }
+        printBanner(console);
+        return runRefShell(argv[2], console);
     }
 
     // Unknown command

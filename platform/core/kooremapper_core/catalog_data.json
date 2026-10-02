@@ -1546,6 +1546,143 @@
       "presets": null
     },
     {
+      "name": "refshell",
+      "category": "mesh",
+      "summary": "2D 곡선을 폭 방향으로 쓸어 QUAD4 기준 셸 덱 생성 (shellmap 의 기준면).",
+      "description": "Sweep a 2D curve across a width into a structured QUAD4 shell deck — the reference surface that `shellmap` maps a flat detailed mesh onto. The curve is read from a CSV that has `x` and `y` columns (named, not positional — `foldsurface` writes exactly this), the curve lies in the x-y plane and the width runs along +z. With `divisions` set, the curve is resampled to equal chord lengths so the elements are uniform; with `width_divisions` left at 0, the width is divided to give a 1:1 aspect ratio. Element winding is (a, d, c, b) over the grid corners a=(i,j), b=(i+1,j), c=(i+1,j+1), d=(i,j+1), which puts the normal along w x u — exactly +y for a straight curve swept along +z. Writes *NODE, *ELEMENT_SHELL, *PART, *SECTION_SHELL and *MAT_ELASTIC, so the deck stands on its own with no undefined references.",
+      "invocation": "yaml",
+      "config_style": "structured",
+      "takes_kfile": false,
+      "requires_gmsh": false,
+      "requires_tetgen": false,
+      "params": [
+        {
+          "name": "curve",
+          "type": "file",
+          "role": "yaml_field",
+          "yaml_path": "curve",
+          "required": true,
+          "description": "Curve CSV with named `x` and `y` columns (e.g. foldsurface's <output>_curve.csv)"
+        },
+        {
+          "name": "output",
+          "type": "output",
+          "role": "yaml_field",
+          "yaml_path": "output",
+          "required": true,
+          "description": "Output deck path (.k)"
+        },
+        {
+          "name": "width",
+          "type": "number",
+          "role": "yaml_field",
+          "yaml_path": "width",
+          "required": true,
+          "description": "Width swept along +z"
+        },
+        {
+          "name": "thickness",
+          "type": "number",
+          "role": "yaml_field",
+          "yaml_path": "thickness",
+          "required": true,
+          "description": "Shell thickness written to *SECTION_SHELL"
+        },
+        {
+          "name": "divisions",
+          "type": "integer",
+          "role": "yaml_field",
+          "yaml_path": "divisions",
+          "required": false,
+          "description": "Elements along the curve; 0 uses the CSV points as given, otherwise the curve is resampled to equal chord lengths",
+          "default": 0
+        },
+        {
+          "name": "width_divisions",
+          "type": "integer",
+          "role": "yaml_field",
+          "yaml_path": "width_divisions",
+          "required": false,
+          "description": "Elements across the width; 0 picks the count that gives a 1:1 aspect ratio",
+          "default": 0
+        },
+        {
+          "name": "part_title",
+          "type": "string",
+          "role": "yaml_field",
+          "yaml_path": "part_title",
+          "required": false,
+          "description": "*PART title",
+          "default": "Reference shell"
+        },
+        {
+          "name": "pid",
+          "type": "integer",
+          "role": "yaml_field",
+          "yaml_path": "pid",
+          "required": false,
+          "description": "Part ID",
+          "default": 1
+        },
+        {
+          "name": "secid",
+          "type": "integer",
+          "role": "yaml_field",
+          "yaml_path": "secid",
+          "required": false,
+          "description": "Section ID",
+          "default": 1
+        },
+        {
+          "name": "mid",
+          "type": "integer",
+          "role": "yaml_field",
+          "yaml_path": "mid",
+          "required": false,
+          "description": "Material ID",
+          "default": 1
+        },
+        {
+          "name": "rho",
+          "type": "number",
+          "role": "yaml_field",
+          "yaml_path": "rho",
+          "required": false,
+          "description": "Density for *MAT_ELASTIC",
+          "default": 7.85e-09
+        },
+        {
+          "name": "E",
+          "type": "number",
+          "role": "yaml_field",
+          "yaml_path": "E",
+          "required": false,
+          "description": "Young's modulus for *MAT_ELASTIC",
+          "default": 210000.0
+        },
+        {
+          "name": "nu",
+          "type": "number",
+          "role": "yaml_field",
+          "yaml_path": "nu",
+          "required": false,
+          "description": "Poisson's ratio for *MAT_ELASTIC",
+          "default": 0.3
+        }
+      ],
+      "example": {
+        "args": {
+          "curve": "fold_curve.csv",
+          "output": "refshell.k",
+          "width": 2.0,
+          "thickness": 0.05,
+          "divisions": 20
+        },
+        "note": "Sweeps a foldsurface curve into a 20 x 4 QUAD4 grid (80 elements) with a 1:1 aspect ratio"
+      },
+      "notes": "The chord sum of the discretised curve is always shorter than the arc it approximates, so the op prints the deviation from the input polyline length and warns past 0.01 percent — raise `divisions` to close it. The aspect ratio is printed too and warned about outside 0.5..2. The deck is written through the shared DeckWriter layer with LF newlines; it creates a deck rather than editing one, so there is no original newline to preserve."
+    },
+    {
       "name": "squeeze",
       "category": "deform",
       "summary": "Compress parts with strain conditions and generate initial stress/strain for interference fit modeling",

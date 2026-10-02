@@ -240,6 +240,7 @@ set(COMMAND_SOURCES
     src/commands/modelmeta.cpp
     src/commands/neutralaxis.cpp
     src/commands/foldsurface.cpp
+    src/commands/refshell.cpp
     src/battery/BatteryWriter.cpp
     src/battery/BatteryMaterials.cpp
     src/battery/BatteryContacts.cpp

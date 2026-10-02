@@ -752,6 +752,28 @@ points: 201
           "fold_angle 이 L/min_radius 라디안을 넘으면 불가능하다(원호가 상한) — 필요한 R·L 을 찍고 rc=1",
           "arc_length 가 R*α 보다 많이 길면 해가 물결이 된다 — 뒤집힘 수를 찍고 경고한다",
           "덱을 읽지도 쓰지도 않는다. 산출물은 CSV 하나다"])
+op("refshell", "메시 생성", "2D 곡선을 폭으로 쓸어 QUAD4 기준 셸 생성", "기준셸 refshell 셸생성 shellmap 기준면 쓸기",
+   "KooRemapper refshell <config.yaml>",
+   files={"fold.yaml": """output: fold
+arc_length: 10.0
+fold_angle: 90.0
+min_radius: 3.0
+points: 201
+""", "ref.yaml": """curve: fold_curve.csv
+output: refshell.k
+width: 2.0
+thickness: 0.05
+divisions: 20
+"""},
+   cmds=["KooRemapper foldsurface fold.yaml", "KooRemapper refshell ref.yaml"],
+   outputs=["fold_curve.csv", "refshell.k"],
+   invariants={"refshell.k": {"elements": 80, "keywords": ["*ELEMENT_SHELL", "*SECTION_SHELL"]}},
+   notes=["곡선 CSV 는 `x`·`y` 칸을 **이름으로** 찾는다 — foldsurface 산출물이 그대로 맞는다",
+          "곡선은 x-y 평면, 폭은 +z 로 쓴다",
+          "divisions 를 주면 **등현 길이**로 다시 뽑는다. width_divisions 를 0 으로 두면 종횡비 1:1",
+          "감김은 (a, d, c, b) — 법선이 ŵ x û 쪽이다(직선 곡선이면 정확히 +y)",
+          "현은 호보다 짧다 — 입력 길이와의 편차를 찍고 0.01% 넘으면 경고한다",
+          "*PART·*SECTION_SHELL·*MAT_ELASTIC 까지 써서 덱이 혼자 선다(미정의 참조 0건)"])
 op("neutralaxis", "정보·메타", "적층의 EI 가중 중립축·굽힘강성 계산", "중립축 적층 EI 굽힘강성 stack 중립면",
    "KooRemapper neutralaxis <mesh_file> [--axis x|y|z]",
    files={"box.yaml": BOX}, cmds=[BOX_CMD, "KooRemapper neutralaxis box.k"], outputs=[],
