@@ -77,6 +77,7 @@ BASE_T = 946684800                                   # 2000-01-01 UTC
 # 이 목록에 있는 op 만 판정을 면제받는다. 조용히 빠지는 길은 없다.
 EXCLUDE = {
     "info": "읽기 전용 — 덱을 쓰지 않는다",
+    "neutralaxis": "읽기 전용 — 중립축을 콘솔에 보고만 한다",
     "modelmeta": "메타 JSON 만 낸다",
     "strain": "CSV 만 낸다(ref_mesh/def_mesh 를 읽고 변형률 표를 쓴다)",
     "stcx_fullangle_drop": "외부 클러스터 제출 op — 덱을 여기서 쓰지 않는다",

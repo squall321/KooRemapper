@@ -238,6 +238,7 @@ set(COMMAND_SOURCES
     src/commands/surface_extract.cpp
     src/commands/cclip.cpp
     src/commands/modelmeta.cpp
+    src/commands/neutralaxis.cpp
     src/battery/BatteryWriter.cpp
     src/battery/BatteryMaterials.cpp
     src/battery/BatteryContacts.cpp

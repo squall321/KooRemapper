@@ -1023,6 +1023,25 @@ gap_tol: 0.2
      {"KooRemapper generate box box.yaml", "KooRemapper modelmeta meta.yaml"},
      {},
      {}},
+    {"neutralaxis", "정보·메타", "적층의 EI 가중 중립축·굽힘강성 계산", "중립축 적층 EI 굽힘강성 stack 중립면", "KooRemapper neutralaxis <mesh_file> [--axis x|y|z]",
+     {{"box.yaml", R"KRH(output: box.k
+lx: 20.0
+ly: 10.0
+lz: 2.0
+nx: 10
+ny: 5
+nz: 2
+rho: 7.85e-9
+E: 210000.0
+nu: 0.3
+mid: 1
+secid: 1
+pid: 1
+part_title: PLATE
+)KRH"}},
+     {"KooRemapper generate box box.yaml", "KooRemapper neutralaxis box.k"},
+     {},
+     {"층 = 파트. 솔리드는 두께를 메시에서, 셸은 *SECTION_SHELL 에서 읽는다", "E 나 두께를 못 읽은 파트는 **제외하고 그렇게 말한다** — 0 으로 쓰지 않는다", "shellmap 은 평면 덱의 축=0 을 중립면으로 본다 — 이 op 의 오프셋이 그 전제를 재는 자다"}},
     {"version", "정보·메타", "버전 출력", "버전", "KooRemapper version",
      {},
      {"KooRemapper version"},

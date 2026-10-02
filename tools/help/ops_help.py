@@ -734,4 +734,10 @@ detect: true
 gap_tol: 0.2
 """}),
    cmds=[BOX_CMD, "KooRemapper modelmeta meta.yaml"], outputs=["box_modelmeta.json"])
+op("neutralaxis", "정보·메타", "적층의 EI 가중 중립축·굽힘강성 계산", "중립축 적층 EI 굽힘강성 stack 중립면",
+   "KooRemapper neutralaxis <mesh_file> [--axis x|y|z]",
+   files={"box.yaml": BOX}, cmds=[BOX_CMD, "KooRemapper neutralaxis box.k"], outputs=[],
+   notes=["층 = 파트. 솔리드는 두께를 메시에서, 셸은 *SECTION_SHELL 에서 읽는다",
+          "E 나 두께를 못 읽은 파트는 **제외하고 그렇게 말한다** — 0 으로 쓰지 않는다",
+          "shellmap 은 평면 덱의 축=0 을 중립면으로 본다 — 이 op 의 오프셋이 그 전제를 재는 자다"])
 op("version", "정보·메타", "버전 출력", "버전", "KooRemapper version", cmds=["KooRemapper version"])

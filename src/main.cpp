@@ -72,6 +72,7 @@
 #include "commands/surface_extract.h"
 #include "commands/cclip.h"
 #include "commands/modelmeta.h"
+#include "commands/neutralaxis.h"
 
 #include <iostream>
 #include <fstream>
@@ -2756,6 +2757,38 @@ static int runMain(int argc, char* argv[]) {
         }
         printBanner(console);
         return runCclip(argv[2], console);
+    }
+
+    // Neutral axis of a layered stack
+    // @lat: [[commands/neutralaxis]]
+    if (command == "neutralaxis") {
+        if (argc < 3) {
+            console.error("Usage: KooRemapper neutralaxis <mesh_file> [--axis x|y|z]");
+            console.info("Reports the EI-weighted neutral axis of a layered stack.");
+            console.info("One layer = one *PART. Solid thickness comes from the mesh,");
+            console.info("shell thickness from *SECTION_SHELL. Parts whose thickness or E");
+            console.info("cannot be read are excluded and reported, never treated as zero.");
+            return 1;
+        }
+        int axis = 2;  // 기본 z — 이 리포의 적층(shellmap·restack)은 z 로 쌓는다
+        for (int i = 3; i < argc; ++i) {
+            std::string a = argv[i];
+            if (a == "--axis" && i + 1 < argc) {
+                std::string v = argv[++i];
+                if (v == "x") axis = 0;
+                else if (v == "y") axis = 1;
+                else if (v == "z") axis = 2;
+                else {
+                    console.error("--axis must be x, y or z (got: " + v + ")");
+                    return 1;
+                }
+            } else {
+                console.error("Unknown option: " + a);
+                return 1;
+            }
+        }
+        printBanner(console);
+        return runNeutralAxis(argv[2], axis, console);
     }
 
     // Unknown command

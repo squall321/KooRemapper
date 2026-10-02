@@ -13003,6 +13003,48 @@
       "presets": null
     },
     {
+      "name": "neutralaxis",
+      "category": "inspect",
+      "summary": "적층 단면의 EI 가중 중립축·굽힘강성 계산 (읽기 전용 보고).",
+      "description": "Report the EI-weighted neutral axis of a layered cross-section. One layer = one *PART: solid thickness is measured from the mesh extent along the chosen axis, shell thickness is read from *SECTION_SHELL. Prints a per-layer table (thickness, center, E, E*t), the geometric mid-plane, the neutral axis z_n = sum(E*t*z)/sum(E*t), the stack extent, and the bending stiffness per unit width D = sum(E*(t^3/12 + t*d^2)). Parts whose thickness or Young's modulus cannot be read are excluded and reported, never treated as zero; if no layer is usable the command exits non-zero instead of printing a meaningless number. Read-only: no output file is written.",
+      "invocation": "positional",
+      "config_style": null,
+      "takes_kfile": true,
+      "requires_gmsh": false,
+      "requires_tetgen": false,
+      "params": [
+        {
+          "name": "mesh_file",
+          "type": "file",
+          "role": "input_file",
+          "order": 0,
+          "required": true,
+          "description": "Input mesh file (K-file format) containing the layered stack"
+        },
+        {
+          "name": "axis",
+          "type": "enum",
+          "role": "flag",
+          "flag": "--axis",
+          "required": false,
+          "enum": [
+            "x",
+            "y",
+            "z"
+          ],
+          "default": "z",
+          "description": "Stacking direction (default z, matching shellmap/restack conventions)"
+        }
+      ],
+      "example": {
+        "args": {
+          "mesh_file": "stack.k"
+        },
+        "note": "Reads stack.k and prints the per-layer table plus the EI-weighted neutral axis; add axis=x for a stack built along x"
+      },
+      "notes": "shellmap treats axis=0 of the flat deck as the neutral plane and uses that coordinate as the normal offset. This op measures that assumption: it prints the offset of the neutral axis from axis=0 and warns when axis=0 falls outside the stack, or lies more than half the total thickness away from the neutral axis. *MAT_VISCOELASTIC field 2 is BULK, not E — the reader converts (E = 9KG/(3K+G)) but registers nothing when GI = 0, in which case that part is listed as excluded rather than counted as zero stiffness."
+    },
+    {
       "name": "stcx_fullangle_drop",
       "category": "analysis",
       "summary": "Submit a full-angle (Fibonacci) LS-DYNA drop study to the stcx cluster",
