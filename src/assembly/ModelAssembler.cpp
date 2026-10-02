@@ -15717,6 +15717,32 @@ bool ModelAssembler::applyDatabase(const DatabaseOperation& op) {
 
 // ========== UPDATE: Apply node coordinates from dynain/k-file ==========
 
+bool ModelAssembler::applyTranslate(double dx, double dy, double dz) {
+    if (dx == 0.0 && dy == 0.0 && dz == 0.0) {
+        infoMessages.push_back("[translate] 이동량이 0 이라 아무것도 바꾸지 않았다");
+        return true;
+    }
+    // `applyUpdate` 와 같은 자리에 쓴다 — 앞선 연산이 만든 절점(addedNodes_)과 원본 절점을
+    // 모두 옮겨야 한다. 한쪽만 옮기면 모델이 찢어진다.
+    for (auto& an : addedNodes_) {
+        an.x += dx;
+        an.y += dy;
+        an.z += dz;
+    }
+    for (const auto& [nid, node] : baseMesh_.nodes) {
+        auto it = modifiedNodePositions_.find(nid);
+        const Vector3D base = (it != modifiedNodePositions_.end())
+                                  ? it->second
+                                  : Vector3D(node.position.x, node.position.y, node.position.z);
+        modifiedNodePositions_[nid] = Vector3D(base.x + dx, base.y + dy, base.z + dz);
+    }
+    std::ostringstream oss;
+    oss << "[translate] " << (addedNodes_.size() + baseMesh_.nodes.size())
+        << " nodes moved by (" << dx << ", " << dy << ", " << dz << ")";
+    infoMessages.push_back(oss.str());
+    return true;
+}
+
 bool ModelAssembler::applyUpdate(const UpdateOperation& op) {
     std::ifstream f(op.dynainFile);
     if (!f.is_open()) {

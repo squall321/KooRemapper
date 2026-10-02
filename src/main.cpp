@@ -75,6 +75,7 @@
 #include "commands/neutralaxis.h"
 #include "commands/foldsurface.h"
 #include "commands/refshell.h"
+#include "commands/stackwrap.h"
 
 #include <iostream>
 #include <fstream>
@@ -2829,6 +2830,24 @@ static int runMain(int argc, char* argv[]) {
         }
         printBanner(console);
         return runRefShell(argv[2], console);
+    }
+
+    // Stack wrap (neutral-axis aligned shell mapping)
+    // @lat: [[commands/stackwrap]]
+    if (command == "stackwrap") {
+        if (argc < 3) {
+            console.error("Usage: KooRemapper stackwrap <config.yaml>");
+            console.info("Shifts a layered flat stack so its EI neutral axis sits at axis=0,");
+            console.info("then maps it onto a bent QUAD4 reference shell. The mapping itself is");
+            console.info("`shellmap`'s path — this op fixes the neutral-plane assumption it makes.");
+            console.info("Minimal config:");
+            console.info("  bent_shell: refshell.k");
+            console.info("  flat_stack: stack.k");
+            console.info("  output: wrapped        # writes wrapped.k + wrapped_neutral.k");
+            return 1;
+        }
+        printBanner(console);
+        return runStackWrap(argv[2], console);
     }
 
     // Unknown command

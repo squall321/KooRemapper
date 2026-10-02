@@ -752,6 +752,22 @@ points: 201
           "fold_angle 이 L/min_radius 라디안을 넘으면 불가능하다(원호가 상한) — 필요한 R·L 을 찍고 rc=1",
           "arc_length 가 R*α 보다 많이 길면 해가 물결이 된다 — 뒤집힘 수를 찍고 경고한다",
           "덱을 읽지도 쓰지도 않는다. 산출물은 CSV 하나다"])
+op("stackwrap", "변형·초기응력", "적층을 EI 중립축 기준으로 기준 셸에 감기", "적층 감기 stackwrap 중립면 폴더블 wrap",
+   "KooRemapper stackwrap <config.yaml>",
+   needs=["examples/stackwrap/ref_shell.k"],
+   files={"sw.yaml": """bent_shell: examples/stackwrap/ref_shell.k
+flat_stack: examples/stackwrap/flat_stack.k
+output: wrapped
+"""},
+   cmds=["KooRemapper stackwrap sw.yaml"],
+   outputs=["wrapped.k", "wrapped_neutral.k"],
+   invariants={"wrapped.k": {"elements": 360, "keywords": ["*ELEMENT_SOLID", "*MAT_ELASTIC"]}},
+   notes=["shellmap 은 평면 덱의 축=0 을 중립면으로 본다 — 적층의 EI 중립축이 거기 없으면 전부 어긋난다(§1-6)",
+          "<output>_neutral.k 는 **매핑에 실제로 넣은** 덱이다 — 무엇이 들어갔는지 볼 수 있게 남긴다",
+          "매핑은 shellmap 과 **같은 경로**다. 두 번째 구현을 두지 않는다",
+          "평행이동은 덱의 칸폭·개행을 보존한다 — 좌표만 바뀐다",
+          "부호: (a,d,c,b) 감김의 법선이 오목한 쪽이라 **양수 z 가 곡률 중심 쪽**이다(반경 = R - z)",
+          "shift: false 면 옮기지 않고 감고, 그 사실을 경고한다 — 정렬 전후를 대조할 때 쓴다"])
 op("refshell", "메시 생성", "2D 곡선을 폭으로 쓸어 QUAD4 기준 셸 생성", "기준셸 refshell 셸생성 shellmap 기준면 쓸기",
    "KooRemapper refshell <config.yaml>",
    files={"fold.yaml": """output: fold

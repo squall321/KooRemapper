@@ -61,6 +61,9 @@ public:
     bool applyWrap(const WrapOperation& op, double E, double nu);
     bool applyGenerate(const GenerateOperation& op);
     bool applyUpdate(const UpdateOperation& op);
+    // 모델 전체를 평행이동한다. 노드 줄 다시 쓰기는 `formatNodeLine` 이 그 덱의 **칸폭을 따라가므로**
+    // 좌표만 바뀌고 나머지 바이트는 보존된다 — stackwrap 이 적층을 중립축으로 옮길 때 쓴다.
+    bool applyTranslate(double dx, double dy, double dz);
     bool applyDatabase(const DatabaseOperation& op);
     bool applyControl(const ControlOperation& op);
     bool applyFillet(const FilletOperation& op);

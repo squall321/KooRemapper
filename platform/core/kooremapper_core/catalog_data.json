@@ -1378,6 +1378,85 @@
       "notes": "The request is impossible when fold_angle exceeds L/min_radius radians — the circular arc is the hard upper bound on turn for a given length and radius — and the op then exits non-zero and prints the radius and length that would be needed, instead of returning a shape. When the arc length is much longer than min_radius*alpha the solution necessarily reverses curvature (a wavy strip); that is a property of the stated BVP, not a solver failure, so the op reports the sign-flip count and suggests the arc length for a single-direction bend. The minimum radius and the endpoint residual are both re-checked after solving and a failure of either exits non-zero rather than writing a curve."
     },
     {
+      "name": "stackwrap",
+      "category": "deform",
+      "summary": "적층을 EI 중립축 기준으로 옮겨 기준 셸에 감기 (shellmap 의 z=0 전제를 맞춘다).",
+      "description": "Wrap a layered flat stack onto a bent QUAD4 reference shell about the stack's EI-weighted neutral axis. `shellmap` treats axis=0 of the flat deck as the neutral plane and uses that coordinate as the normal offset; when the stack's neutral axis is elsewhere, every layer is offset by that much. This op measures the neutral axis (same computation as `neutralaxis`), translates the stack so the neutral plane sits at axis=0, and then maps it through `shellmap`'s own path — there is no second mapping implementation. It writes <output>_neutral.k (the translated stack that was fed to the mapper, kept so you can see what was mapped) and <output>.k (the wrapped stack). Parts whose thickness or Young's modulus cannot be read are reported and excluded from the neutral axis; if none is usable the op exits non-zero instead of wrapping about an arbitrary plane. Sign convention: a refshell built with the (a,d,c,b) winding has its normal on the concave side, so positive z in the flat deck ends up toward the centre of curvature (radius = R - z).",
+      "invocation": "yaml",
+      "config_style": "structured",
+      "takes_kfile": true,
+      "requires_gmsh": false,
+      "requires_tetgen": false,
+      "params": [
+        {
+          "name": "bent_shell",
+          "type": "file",
+          "role": "yaml_field",
+          "yaml_path": "bent_shell",
+          "required": true,
+          "description": "Bent QUAD4 reference shell (k-file), e.g. from `refshell`"
+        },
+        {
+          "name": "flat_stack",
+          "type": "file",
+          "role": "yaml_field",
+          "yaml_path": "flat_stack",
+          "required": true,
+          "description": "Flat layered stack deck (k-file) to wrap"
+        },
+        {
+          "name": "output",
+          "type": "string",
+          "role": "yaml_field",
+          "yaml_path": "output",
+          "required": true,
+          "description": "Output prefix — writes <output>.k and <output>_neutral.k"
+        },
+        {
+          "name": "thickness",
+          "type": "number",
+          "role": "yaml_field",
+          "yaml_path": "thickness",
+          "required": false,
+          "description": "Shell thickness passed to the mapper; 0 lets it auto-detect from the stack's z-range",
+          "default": 0.0
+        },
+        {
+          "name": "axis",
+          "type": "enum",
+          "role": "yaml_field",
+          "yaml_path": "axis",
+          "required": false,
+          "description": "Stacking direction used to measure the neutral axis",
+          "enum": [
+            "x",
+            "y",
+            "z"
+          ],
+          "default": "z"
+        },
+        {
+          "name": "shift",
+          "type": "boolean",
+          "role": "yaml_field",
+          "yaml_path": "shift",
+          "required": false,
+          "description": "false wraps without translating — for comparing against the unaligned result; the op says so",
+          "default": true
+        }
+      ],
+      "example": {
+        "args": {
+          "bent_shell": "ref_shell.k",
+          "flat_stack": "flat_stack.k",
+          "output": "wrapped"
+        },
+        "note": "Wraps the asymmetric 3-layer stack (EI neutral axis 0.350465, geometric mid-plane 0.3) onto a R=3 90-degree reference shell"
+      },
+      "example_folder": "examples/stackwrap",
+      "notes": "The translation goes through the shared ModelAssembler node-rewrite path, so the deck's own field widths and newlines are preserved and only the coordinates change. The mapping is `runShellMapping` — the same code `shellmap` runs — so a fix on one side applies to both. `neutralaxis` on the same stack reports the number this op aligns to."
+    },
+    {
       "name": "info",
       "category": "core",
       "summary": "Display comprehensive mesh information including node/element counts, bounding box, validation, and element quality metrics.",

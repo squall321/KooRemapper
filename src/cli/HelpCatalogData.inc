@@ -1033,6 +1033,14 @@ points: 201
      {"KooRemapper foldsurface fold.yaml"},
      {},
      {"fold_angle 은 **굽힘 영역의 접선 총회전**(도)이다 — 두 평판 사이각 φ 면 180-φ 다", "최소 곡률반경은 정점에서 **정확히** 걸린다. 미지수는 힘 매개변수 B 하나다", "elastica 는 다중해다 — [0, Bmax] 를 연속법으로 훑어 **첫 교차**를 집는다(뒤집힘이 가장 적은 해)", "fold_angle 이 L/min_radius 라디안을 넘으면 불가능하다(원호가 상한) — 필요한 R·L 을 찍고 rc=1", "arc_length 가 R*α 보다 많이 길면 해가 물결이 된다 — 뒤집힘 수를 찍고 경고한다", "덱을 읽지도 쓰지도 않는다. 산출물은 CSV 하나다"}},
+    {"stackwrap", "변형·초기응력", "적층을 EI 중립축 기준으로 기준 셸에 감기", "적층 감기 stackwrap 중립면 폴더블 wrap", "KooRemapper stackwrap <config.yaml>",
+     {{"sw.yaml", R"KRH(bent_shell: examples/stackwrap/ref_shell.k
+flat_stack: examples/stackwrap/flat_stack.k
+output: wrapped
+)KRH"}},
+     {"KooRemapper stackwrap sw.yaml"},
+     {"examples/stackwrap/ref_shell.k"},
+     {"shellmap 은 평면 덱의 축=0 을 중립면으로 본다 — 적층의 EI 중립축이 거기 없으면 전부 어긋난다(§1-6)", "<output>_neutral.k 는 **매핑에 실제로 넣은** 덱이다 — 무엇이 들어갔는지 볼 수 있게 남긴다", "매핑은 shellmap 과 **같은 경로**다. 두 번째 구현을 두지 않는다", "평행이동은 덱의 칸폭·개행을 보존한다 — 좌표만 바뀐다", "부호: (a,d,c,b) 감김의 법선이 오목한 쪽이라 **양수 z 가 곡률 중심 쪽**이다(반경 = R - z)", "shift: false 면 옮기지 않고 감고, 그 사실을 경고한다 — 정렬 전후를 대조할 때 쓴다"}},
     {"refshell", "메시 생성", "2D 곡선을 폭으로 쓸어 QUAD4 기준 셸 생성", "기준셸 refshell 셸생성 shellmap 기준면 쓸기", "KooRemapper refshell <config.yaml>",
      {{"fold.yaml", R"KRH(output: fold
 arc_length: 10.0
