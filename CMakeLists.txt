@@ -242,6 +242,8 @@ set(COMMAND_SOURCES
     src/commands/foldsurface.cpp
     src/commands/refshell.cpp
     src/commands/stackwrap.cpp
+    src/commands/linkage_fit.cpp
+    src/commands/applyfold.cpp
     src/battery/BatteryWriter.cpp
     src/battery/BatteryMaterials.cpp
     src/battery/BatteryContacts.cpp

@@ -15717,6 +15717,48 @@ bool ModelAssembler::applyDatabase(const DatabaseOperation& op) {
 
 // ========== UPDATE: Apply node coordinates from dynain/k-file ==========
 
+bool ModelAssembler::applyRigidTransform(const std::set<int>& pids, const Vector3D& axis,
+                                         double angleDeg, const Vector3D& pivot, double slide,
+                                         long long* movedOut) {
+    if (movedOut) *movedOut = 0;
+    const double am = axis.magnitude();
+    if (am < 1e-12) { errorMessage_ = "applyRigidTransform: 축 벡터가 0 이다"; return false; }
+    const Vector3D u = axis * (1.0 / am);
+    const double t = angleDeg * M_PI / 180.0;
+    const double c = std::cos(t), s = std::sin(t);
+
+    // Rodrigues 로 회전행렬을 만든다
+    auto rotate = [&](const Vector3D& v) {
+        return v * c + u.cross(v) * s + u * (u.dot(v) * (1.0 - c));
+    };
+
+    // 이 파트들에 속한 절점을 모은다 — 절점 자체에는 파트가 없어 요소에서 모아야 한다
+    std::set<int> nodeIds;
+    for (const auto& [eid, e] : baseMesh_.elements) {
+        (void)eid;
+        if (pids.count(e.partId) == 0) continue;
+        for (int nid : e.nodeIds)
+            if (nid > 0) nodeIds.insert(nid);
+    }
+    for (const auto& an : addedNodes_) {
+        (void)an;  // 앞선 연산이 만든 절점은 파트를 모르므로 건드리지 않는다
+    }
+
+    long long moved = 0;
+    for (int nid : nodeIds) {
+        const Node* n = baseMesh_.getNode(nid);
+        if (!n) continue;
+        auto it = modifiedNodePositions_.find(nid);
+        const Vector3D p = (it != modifiedNodePositions_.end())
+                               ? it->second
+                               : Vector3D(n->position.x, n->position.y, n->position.z);
+        modifiedNodePositions_[nid] = rotate(p - pivot) + pivot + u * slide;
+        ++moved;
+    }
+    if (movedOut) *movedOut = moved;
+    return true;
+}
+
 bool ModelAssembler::applyTranslate(double dx, double dy, double dz) {
     if (dx == 0.0 && dy == 0.0 && dz == 0.0) {
         infoMessages.push_back("[translate] 이동량이 0 이라 아무것도 바꾸지 않았다");

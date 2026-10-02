@@ -64,6 +64,10 @@ public:
     // 모델 전체를 평행이동한다. 노드 줄 다시 쓰기는 `formatNodeLine` 이 그 덱의 **칸폭을 따라가므로**
     // 좌표만 바뀌고 나머지 바이트는 보존된다 — stackwrap 이 적층을 중립축으로 옮길 때 쓴다.
     bool applyTranslate(double dx, double dy, double dz);
+    // 지정한 파트들의 절점에 강체변환(피벗을 지난 축 회전 + 축 방향 이동)을 찍는다.
+    // 옮긴 **서로 다른 절점 수**를 movedOut 에 돌려준다 — 조용히 빠지는 절점을 세기 위해서다.
+    bool applyRigidTransform(const std::set<int>& pids, const Vector3D& axis, double angleDeg,
+                             const Vector3D& pivot, double slide, long long* movedOut);
     bool applyDatabase(const DatabaseOperation& op);
     bool applyControl(const ControlOperation& op);
     bool applyFillet(const FilletOperation& op);

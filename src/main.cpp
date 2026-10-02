@@ -76,6 +76,8 @@
 #include "commands/foldsurface.h"
 #include "commands/refshell.h"
 #include "commands/stackwrap.h"
+#include "commands/linkage_fit.h"
+#include "commands/applyfold.h"
 
 #include <iostream>
 #include <fstream>
@@ -2848,6 +2850,44 @@ static int runMain(int argc, char* argv[]) {
         }
         printBanner(console);
         return runStackWrap(argv[2], console);
+    }
+
+    // Linkage fit (recover per-part rigid transforms from a folded deck)
+    // @lat: [[commands/linkage-fit]]
+    if (command == "linkage-fit") {
+        if (argc < 3) {
+            console.error("Usage: KooRemapper linkage-fit <config.yaml>");
+            console.info("Recovers the per-part rigid transform (axis, angle, pivot, axial");
+            console.info("slide) between a reference deck and a folded one, groups the parts");
+            console.info("that share a transform, and reports the PIVOT SCATTER of each group.");
+            console.info("Writes <output>.yaml for `applyfold`.");
+            console.info("Minimal config:");
+            console.info("  reference: flat.k");
+            console.info("  folded: folded.k");
+            console.info("  output: fold_groups");
+            return 1;
+        }
+        printBanner(console);
+        return runLinkageFit(argv[2], console);
+    }
+
+    // Apply fold (stamp linkage-fit's per-group transforms onto a deck)
+    // @lat: [[commands/applyfold]]
+    if (command == "applyfold") {
+        if (argc < 3) {
+            console.error("Usage: KooRemapper applyfold <config.yaml>");
+            console.info("Stamps the per-group rigid transforms written by `linkage-fit` onto a");
+            console.info("deck. Refuses rather than dropping anything: every part named in the");
+            console.info("groups file must exist, no two groups may share a node, every node of a");
+            console.info("group must move, and the result is read back and checked.");
+            console.info("Minimal config:");
+            console.info("  model: big.k");
+            console.info("  groups: fold_groups.yaml");
+            console.info("  output: big_folded");
+            return 1;
+        }
+        printBanner(console);
+        return runApplyFold(argv[2], console);
     }
 
     // Unknown command

@@ -1,0 +1,3 @@
+model: arm_flat.k
+groups: fold_groups.yaml
+output: arm_refolded

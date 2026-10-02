@@ -1171,6 +1171,71 @@
       "presets": null
     },
     {
+      "name": "linkage-fit",
+      "category": "analysis",
+      "summary": "접힌 덱에서 군별 강체변환(축·각·피벗·축이동) 역산 — 피벗 산포를 함께 보고.",
+      "description": "Recover the rigid-body transform each part underwent between a reference deck and a folded one, then group the parts that share a transform. Both decks must have the same node ids. For every part the optimal rotation is found by Horn's quaternion method (a self-contained Jacobi eigensolve, no external linear algebra), and from it the op reports the rotation axis, the angle, a pivot point on the axis, the axial slide (non-zero means a screw motion, not a plain hinge) and the RMS/max fit residual. A residual large relative to the model size means the part deformed as well as moved, which cannot be reduced to a hinge, and the op says so. Parts are grouped only when the angle, the axis, the pivot AND the axial slide all agree within tolerance, and each group's PIVOT SCATTER is printed; grouping by angle alone silently merges distinct hinges, so the op separately warns, with the number, whenever parts that share an angle have pivots further apart than pivot_tol. Writes <output>.yaml, which `applyfold` reads.",
+      "invocation": "yaml",
+      "config_style": "structured",
+      "takes_kfile": true,
+      "requires_gmsh": false,
+      "requires_tetgen": false,
+      "params": [
+        {
+          "name": "reference",
+          "type": "file",
+          "role": "yaml_field",
+          "yaml_path": "reference",
+          "required": true,
+          "description": "Reference (unfolded) deck (k-file)"
+        },
+        {
+          "name": "folded",
+          "type": "file",
+          "role": "yaml_field",
+          "yaml_path": "folded",
+          "required": true,
+          "description": "Folded deck (k-file) with the same node ids as the reference"
+        },
+        {
+          "name": "output",
+          "type": "string",
+          "role": "yaml_field",
+          "yaml_path": "output",
+          "required": true,
+          "description": "Output prefix — writes <output>.yaml for `applyfold`"
+        },
+        {
+          "name": "angle_tol",
+          "type": "number",
+          "role": "yaml_field",
+          "yaml_path": "angle_tol",
+          "required": false,
+          "description": "Angle tolerance in degrees for treating two parts as one group (also applied to the axis direction)",
+          "default": 0.5
+        },
+        {
+          "name": "pivot_tol",
+          "type": "number",
+          "role": "yaml_field",
+          "yaml_path": "pivot_tol",
+          "required": false,
+          "description": "Length tolerance for the pivot and the axial slide when grouping; also the threshold for the angle-only grouping warning",
+          "default": 0.5
+        }
+      ],
+      "example": {
+        "args": {
+          "reference": "arm_flat.k",
+          "folded": "arm_folded.k",
+          "output": "fold_groups"
+        },
+        "note": "Recovers the known transforms of the bundled foldable arm: PID 2 at 45 degrees about z through (30,0,0) and PID 3 and 4 at 90 degrees through (60,0,0), grouped together with zero pivot scatter"
+      },
+      "notes": "A pivot is only defined up to its position along the axis — any point on the axis gives the same transform — so the op reports the point whose axial coordinate matches the part's centroid. Compare recovered pivots by their distance to the expected axis line, not by coordinates. Parts with fewer than three nodes are skipped and reported, since three points are the minimum that fix a rigid transform. A part that did not move is reported with angle 0 and its translation.",
+      "example_folder": "examples/linkage_fit"
+    },
+    {
       "name": "prestress",
       "category": "deform",
       "summary": "변형 메시로부터 초기응력(초기변형률) 계산 및 dynain 출력.",
@@ -1455,6 +1520,53 @@
       },
       "example_folder": "examples/stackwrap",
       "notes": "The translation goes through the shared ModelAssembler node-rewrite path, so the deck's own field widths and newlines are preserved and only the coordinates change. The mapping is `runShellMapping` — the same code `shellmap` runs — so a fix on one side applies to both. `neutralaxis` on the same stack reports the number this op aligns to."
+    },
+    {
+      "name": "applyfold",
+      "category": "deform",
+      "summary": "linkage-fit 이 적은 군별 변환을 덱에 찍기 — 빠지는 절점이 하나도 없어야 한다.",
+      "description": "Stamp the per-group rigid transforms written by `linkage-fit` onto a deck. Only node coordinates change; the rewrite goes through the shared ModelAssembler path so the deck's own field widths and newlines are preserved and the output is normally byte-for-byte the same size. The op refuses rather than losing anything: every part named in the groups file must exist in the deck, no two groups may share a node (parts joined at their nodes have no well-defined fold — use `disconnect` first), every node of a group must be transformed, and the written deck is read back and each node compared against the position the requested transform demands. It reports the node counts, the worst deviation from the requested transform, the nodes that moved although no group claimed them, the bounding box before and after, and the byte size before and after.",
+      "invocation": "yaml",
+      "config_style": "structured",
+      "takes_kfile": true,
+      "requires_gmsh": false,
+      "requires_tetgen": false,
+      "params": [
+        {
+          "name": "model",
+          "type": "file",
+          "role": "yaml_field",
+          "yaml_path": "model",
+          "required": true,
+          "description": "Deck to fold (k-file)"
+        },
+        {
+          "name": "groups",
+          "type": "file",
+          "role": "yaml_field",
+          "yaml_path": "groups",
+          "required": true,
+          "description": "Groups YAML written by `linkage-fit`"
+        },
+        {
+          "name": "output",
+          "type": "string",
+          "role": "yaml_field",
+          "yaml_path": "output",
+          "required": true,
+          "description": "Output prefix — writes <output>.k"
+        }
+      ],
+      "example": {
+        "args": {
+          "model": "arm_flat.k",
+          "groups": "fold_groups.yaml",
+          "output": "arm_refolded"
+        },
+        "note": "Folds the bundled flat arm with the transforms linkage-fit recovered, reproducing arm_folded.k; the bbox goes from 120 x 20 to 60 x 60 and the byte size is unchanged"
+      },
+      "example_folder": "examples/linkage_fit",
+      "notes": "\"No node left behind\" is checked by counting, not assumed: the field report measured 712,103 nodes silently dropped because an id-indexed array had been sized by the node count rather than by the maximum id. This implementation looks nodes up in a map, so that particular trap does not exist, but the count is still verified and a mismatch fails. Note that \"no unmoved node\" is the wrong criterion on its own — nodes lying on a rotation axis stay put under a correct transform — so the readback compares against the computed target position instead."
     },
     {
       "name": "info",

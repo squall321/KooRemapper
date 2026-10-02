@@ -1,0 +1,3 @@
+reference: arm_flat.k
+folded: arm_folded.k
+output: fold_groups

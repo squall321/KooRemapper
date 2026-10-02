@@ -1041,6 +1041,22 @@ output: wrapped
      {"KooRemapper stackwrap sw.yaml"},
      {"examples/stackwrap/ref_shell.k"},
      {"shellmap 은 평면 덱의 축=0 을 중립면으로 본다 — 적층의 EI 중립축이 거기 없으면 전부 어긋난다(§1-6)", "<output>_neutral.k 는 **매핑에 실제로 넣은** 덱이다 — 무엇이 들어갔는지 볼 수 있게 남긴다", "매핑은 shellmap 과 **같은 경로**다. 두 번째 구현을 두지 않는다", "평행이동은 덱의 칸폭·개행을 보존한다 — 좌표만 바뀐다", "부호: (a,d,c,b) 감김의 법선이 오목한 쪽이라 **양수 z 가 곡률 중심 쪽**이다(반경 = R - z)", "shift: false 면 옮기지 않고 감고, 그 사실을 경고한다 — 정렬 전후를 대조할 때 쓴다"}},
+    {"applyfold", "변형·초기응력", "linkage-fit 의 군별 변환을 덱에 찍기", "접힘 적용 applyfold 강체 변환 찍기", "KooRemapper applyfold <config.yaml>",
+     {{"af.yaml", R"KRH(model: examples/linkage_fit/arm_flat.k
+groups: examples/linkage_fit/fold_groups.yaml
+output: arm_refolded
+)KRH"}},
+     {"KooRemapper applyfold af.yaml"},
+     {"examples/linkage_fit/arm_flat.k"},
+     {"좌표만 바꾼다 — 덱의 칸폭·개행을 보존하므로 보통 **바이트 크기가 같다**", "★버리지 않는다: 없는 파트를 가리키면 rc=1 · 두 군이 절점을 나눠 가지면 rc=1", "  (절점으로 붙은 파트는 접힘이 정의되지 않는다 — `disconnect` 로 떼라)", "★군의 절점을 **전부** 옮겼는지 세고, 되읽어 **요구한 변환과 대조**한다", "'미이동 0' 만 보면 틀린다 — 회전축 위 절점은 제대로 변환해도 제자리다", "bbox 와 바이트 크기를 전후로 찍는다 — 기대 범위를 눈으로 확인하라"}},
+    {"linkage-fit", "정보·메타", "접힌 덱에서 군별 강체변환 역산 (축·각·피벗·축이동)", "링키지 역산 힌지 피벗 강체 fit 접힘", "KooRemapper linkage-fit <config.yaml>",
+     {{"lf.yaml", R"KRH(reference: examples/linkage_fit/arm_flat.k
+folded: examples/linkage_fit/arm_folded.k
+output: fold_groups
+)KRH"}},
+     {"KooRemapper linkage-fit lf.yaml"},
+     {"examples/linkage_fit/arm_flat.k"},
+     {"두 덱의 **절점 번호가 같아야** 한다 — 짝이 없으면 몇 개인지 말하고 rc=1", "회전은 Horn 사원수법(자체 Jacobi)으로 최소제곱 적합한다. 외부 선형대수를 쓰지 않는다", "축이동(slide)이 0 이 아니면 **나사 운동**이다 — 단순 힌지가 아니라는 뜻이다", "잔차가 모델 치수에 견주어 크면 **강체가 아니다** — 변형이 섞인 파트는 힌지로 안 환원된다", "★군 묶기는 각·축·피벗·축이동이 **모두** 맞아야 한다. 각도만으로 묶으면 조용히 틀린다 —", "  같은 각 파트의 피벗이 pivot_tol 보다 흩어지면 그 산포를 **숫자로** 경고한다", "피벗은 축 위 어느 점이든 같다 — 파트 중심의 축 좌표를 가진 점으로 보고한다"}},
     {"refshell", "메시 생성", "2D 곡선을 폭으로 쓸어 QUAD4 기준 셸 생성", "기준셸 refshell 셸생성 shellmap 기준면 쓸기", "KooRemapper refshell <config.yaml>",
      {{"fold.yaml", R"KRH(output: fold
 arc_length: 10.0

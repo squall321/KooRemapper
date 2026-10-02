@@ -1,0 +1,23 @@
+# KooRemapper linkage-fit 산출 — applyfold 가 읽는다
+# reference: arm_flat.k
+# folded: arm_folded.k
+groups:
+  - parts: [1]
+    angle: 0
+    axis: [0, 0, 1]
+    pivot: [15, 10, 1]
+    slide: 0
+    translation: [0, 0, 0]
+    rms_residual: 0
+  - parts: [2]
+    angle: 44.9999999997
+    axis: [4.56525744819e-18, -4.58686808287e-19, 1]
+    pivot: [29.9999999999, 3.4088282008e-11, 1]
+    slide: 4.98442050382e-17
+    rms_residual: 3.59835e-10
+  - parts: [3, 4]
+    angle: 90
+    axis: [0, 0, 1]
+    pivot: [60, 0, 1]
+    slide: 0
+    rms_residual: 6.15348e-15
