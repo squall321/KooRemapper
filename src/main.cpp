@@ -73,6 +73,7 @@
 #include "commands/cclip.h"
 #include "commands/modelmeta.h"
 #include "commands/neutralaxis.h"
+#include "commands/foldsurface.h"
 
 #include <iostream>
 #include <fstream>
@@ -2789,6 +2790,24 @@ static int runMain(int argc, char* argv[]) {
         }
         printBanner(console);
         return runNeutralAxis(argv[2], axis, console);
+    }
+
+    // Fold surface (planar elastica centerline)
+    // @lat: [[commands/foldsurface]]
+    if (command == "foldsurface") {
+        if (argc < 3) {
+            console.error("Usage: KooRemapper foldsurface <config.yaml>");
+            console.info("Solves the planar elastica centerline of a symmetric fold.");
+            console.info("Writes <output>_curve.csv (s, x, y, theta_deg, curvature, radius).");
+            console.info("Minimal config:");
+            console.info("  output: fold");
+            console.info("  arc_length: 10.0      # bending region arc length L");
+            console.info("  fold_angle: 90.0      # total tangent turn [deg] (= 180 - panel angle)");
+            console.info("  min_radius: 3.0       # target minimum radius of curvature");
+            return 1;
+        }
+        printBanner(console);
+        return runFoldSurface(argv[2], console);
     }
 
     // Unknown command

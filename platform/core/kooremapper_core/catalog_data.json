@@ -1313,6 +1313,71 @@
       "presets": null
     },
     {
+      "name": "foldsurface",
+      "category": "deform",
+      "summary": "접힘 곡면(평면 elastica) 중심선 — 최소 곡률반경을 목표로 고정하고 B 를 푼다.",
+      "description": "Solve the centerline of a symmetric fold as a planar elastica and write it as a CSV. The state (x, y, theta, kappa) obeys (cos theta, sin theta, kappa, -B sin theta); the apex is pinned at kappa = 1/min_radius so the target minimum radius holds by construction, leaving the force parameter B as the single unknown. B is bounded above by kappa0^2/(2(1-cos(alpha/2))) — beyond that the tangent can never reach the requested turn — so the search interval is closed and finite. The elastica is multi-valued, so the solver sweeps that whole interval by continuation and bisects the FIRST sign change, which picks the branch with the fewest curvature reversals deterministically instead of depending on an initial guess. Writes <output>_curve.csv with s, x, y, theta_deg, curvature, radius over the full (mirrored) curve, and reports B, the achieved minimum radius, the endpoint residual, the curvature sign-flip count, the end separation, the apex-to-end height and the bending energy per EI. Reads no deck and writes no deck.",
+      "invocation": "yaml",
+      "config_style": "structured",
+      "takes_kfile": false,
+      "requires_gmsh": false,
+      "requires_tetgen": false,
+      "params": [
+        {
+          "name": "output",
+          "type": "string",
+          "role": "yaml_field",
+          "yaml_path": "output",
+          "required": true,
+          "description": "Output prefix — writes <output>_curve.csv"
+        },
+        {
+          "name": "arc_length",
+          "type": "number",
+          "role": "yaml_field",
+          "yaml_path": "arc_length",
+          "required": true,
+          "description": "Arc length L of the bending region"
+        },
+        {
+          "name": "fold_angle",
+          "type": "number",
+          "role": "yaml_field",
+          "yaml_path": "fold_angle",
+          "required": true,
+          "description": "Total tangent turn of the bending region [deg], 0 < angle < 360. For two flat halves meeting at an angle phi, the turn is 180 - phi (a fully folded panel turns 180)"
+        },
+        {
+          "name": "min_radius",
+          "type": "number",
+          "role": "yaml_field",
+          "yaml_path": "min_radius",
+          "required": true,
+          "description": "Target minimum radius of curvature — held exactly at the apex"
+        },
+        {
+          "name": "points",
+          "type": "integer",
+          "role": "yaml_field",
+          "yaml_path": "points",
+          "required": false,
+          "description": "Sample count written to the CSV (default 201, >= 3)",
+          "default": 201
+        }
+      ],
+      "example": {
+        "args": {
+          "output": "fold",
+          "arc_length": 10.0,
+          "fold_angle": 90.0,
+          "min_radius": 3.0,
+          "points": 201
+        },
+        "note": "Writes fold_curve.csv; a turn of exactly L/min_radius radians gives the circular-arc limit (B=0), and a longer arc_length makes the solution wavy, which the op warns about"
+      },
+      "notes": "The request is impossible when fold_angle exceeds L/min_radius radians — the circular arc is the hard upper bound on turn for a given length and radius — and the op then exits non-zero and prints the radius and length that would be needed, instead of returning a shape. When the arc length is much longer than min_radius*alpha the solution necessarily reverses curvature (a wavy strip); that is a property of the stated BVP, not a solver failure, so the op reports the sign-flip count and suggests the arc length for a single-direction bend. The minimum radius and the endpoint residual are both re-checked after solving and a failure of either exits non-zero rather than writing a curve."
+    },
+    {
       "name": "info",
       "category": "core",
       "summary": "Display comprehensive mesh information including node/element counts, bounding box, validation, and element quality metrics.",

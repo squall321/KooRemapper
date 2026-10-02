@@ -737,6 +737,21 @@ detect: true
 gap_tol: 0.2
 """}),
    cmds=[BOX_CMD, "KooRemapper modelmeta meta.yaml"], outputs=["box_modelmeta.json"])
+op("foldsurface", "변형·초기응력", "접힘 곡면(평면 elastica) 중심선 — 최소 곡률반경 고정", "접힘 fold elastica 곡률 중심선 폴더블",
+   "KooRemapper foldsurface <config.yaml>",
+   files={"fold.yaml": """output: fold
+arc_length: 10.0
+fold_angle: 90.0
+min_radius: 3.0
+points: 201
+"""},
+   cmds=["KooRemapper foldsurface fold.yaml"], outputs=["fold_curve.csv"],
+   notes=["fold_angle 은 **굽힘 영역의 접선 총회전**(도)이다 — 두 평판 사이각 φ 면 180-φ 다",
+          "최소 곡률반경은 정점에서 **정확히** 걸린다. 미지수는 힘 매개변수 B 하나다",
+          "elastica 는 다중해다 — [0, Bmax] 를 연속법으로 훑어 **첫 교차**를 집는다(뒤집힘이 가장 적은 해)",
+          "fold_angle 이 L/min_radius 라디안을 넘으면 불가능하다(원호가 상한) — 필요한 R·L 을 찍고 rc=1",
+          "arc_length 가 R*α 보다 많이 길면 해가 물결이 된다 — 뒤집힘 수를 찍고 경고한다",
+          "덱을 읽지도 쓰지도 않는다. 산출물은 CSV 하나다"])
 op("neutralaxis", "정보·메타", "적층의 EI 가중 중립축·굽힘강성 계산", "중립축 적층 EI 굽힘강성 stack 중립면",
    "KooRemapper neutralaxis <mesh_file> [--axis x|y|z]",
    files={"box.yaml": BOX}, cmds=[BOX_CMD, "KooRemapper neutralaxis box.k"], outputs=[],
