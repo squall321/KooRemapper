@@ -66,7 +66,7 @@ bool ShellUnfolder::unfold(const ShellMesh& bentShell) {
             }
 
             // Place the neighbor element
-            placeNeighborElement(bentShell, *neighborElem, sharedN0, sharedN1);
+            placeNeighborElement(bentShell, *neighborElem, *currentElem, sharedN0, sharedN1);
 
             processed.insert(neighborId);
             queue.push(neighborId);
@@ -150,14 +150,33 @@ void ShellUnfolder::placeStartElement(const ShellMesh& mesh, const ShellElement&
 
 void ShellUnfolder::placeNeighborElement(const ShellMesh& mesh,
                                           const ShellElement& elem,
+                                          const ShellElement& parent,
                                           int sharedNode0, int sharedNode1) {
     // The shared edge nodes already have flat positions
     const Vector2D& sp0 = flatPositions_[sharedNode0];
     const Vector2D& sp1 = flatPositions_[sharedNode1];
+    const Vector2D edgeDir = sp1 - sp0;
 
-    // Find which nodes of the neighbor are NOT on the shared edge
+    // 어느 쪽이 **이미 점유된 쪽**인가 — 부모 요소의 비공유 절점이 그 답이다.
+    //
+    // ⚠ 예전 구현은 `flatPositions_` 전체를 돌며 변 중점에서 가까운(2*변길이 안) **첫** 절점을
+    //   기준으로 썼다. 그 절점은 같은 쪽의 다른 요소에 속할 수 있고, 그러면 판정이 뒤집혀 새
+    //   요소가 공유 변 위로 **반사**된다. 변 길이는 접혀도 보존되므로 왜곡 지표는 0% 로 나오고,
+    //   전개 치수만 조용히 작아져 `shellmap` 의 bbox 정합이 디테일을 틀린 비율로 늘인다(가짜 변형률).
+    //   실측: 96x4 평면 셸의 폭 1.0 이 0.25 로 전개됐다. 격자 크기에 따라 1/2·1/4·5/8 로 들쭉날쭉했다.
+    double crossRef = 0.0;
+    for (int j = 0; j < ShellElement::NUM_NODES; ++j) {
+        const int pid = parent.nodeIds[j];
+        if (pid == sharedNode0 || pid == sharedNode1) continue;
+        auto it = flatPositions_.find(pid);
+        if (it == flatPositions_.end()) continue;
+        const double cr = edgeDir.cross(it->second - sp0);
+        // 변에 가장 또렷하게 떨어진 절점을 쓴다 — 변에 거의 붙은 절점은 부호가 불안정하다
+        if (std::fabs(cr) > std::fabs(crossRef)) crossRef = cr;
+    }
+
     for (int i = 0; i < ShellElement::NUM_NODES; ++i) {
-        int nodeId = elem.nodeIds[i];
+        const int nodeId = elem.nodeIds[i];
         if (flatPositions_.find(nodeId) != flatPositions_.end()) {
             continue;  // Already placed
         }
@@ -168,82 +187,24 @@ void ShellUnfolder::placeNeighborElement(const ShellMesh& mesh,
         const Node* sn1 = mesh.getNode(sharedNode1);
         if (!node || !sn0 || !sn1) continue;
 
-        double d0 = node->position.distanceTo(sn0->position);
-        double d1 = node->position.distanceTo(sn1->position);
+        const double d0 = node->position.distanceTo(sn0->position);
+        const double d1 = node->position.distanceTo(sn1->position);
 
         // Triangulate: compute position from sp0, sp1 and distances d0, d1
         Vector2D candidate = triangulate(sp0, sp1, d0, d1);
 
-        // The new node must be on the opposite side of the shared edge
-        // from the already-placed nodes of this element's neighbor
-        // Find a node that IS already placed and is NOT on the shared edge
-        // to determine which side is "taken"
-        bool needFlip = false;
-        for (int j = 0; j < ShellElement::NUM_NODES; ++j) {
-            int otherNodeId = elem.nodeIds[j];
-            if (otherNodeId == nodeId) continue;
-            if (otherNodeId == sharedNode0 || otherNodeId == sharedNode1) continue;
-
-            auto it = flatPositions_.find(otherNodeId);
-            if (it != flatPositions_.end()) {
-                // This is another new node of the same element that was already placed
-                // They should be on the same side
-                Vector2D edgeDir = sp1 - sp0;
-                double crossExisting = edgeDir.cross(it->second - sp0);
-                double crossCandidate = edgeDir.cross(candidate - sp0);
-
-                // If they're on opposite sides, don't flip (they should be on the same side
-                // since they're both "new" nodes of the neighbor element)
-                // Actually, for a quad, the two non-shared nodes should be on the same side
-                if (crossExisting * crossCandidate < 0) {
-                    needFlip = true;
-                }
-                break;
+        // 새 절점은 점유된 쪽의 **반대편**이다. crossRef 가 0 이면(부모가 변에 눌린 퇴화 사각형)
+        // 판정할 근거가 없으므로 triangulate 의 기본 반평면을 그대로 둔다.
+        if (crossRef != 0.0) {
+            const double crossCand = edgeDir.cross(candidate - sp0);
+            if (crossRef * crossCand > 0.0) {
+                // Reflect across the shared edge line
+                const Vector2D edgeNorm = edgeDir.normalized();
+                const Vector2D toCandidate = candidate - sp0;
+                const double projLen = toCandidate.dot(edgeNorm);
+                const Vector2D proj = sp0 + edgeNorm * projLen;
+                candidate = proj * 2.0 - candidate;
             }
-        }
-
-        // Check against already-placed elements' nodes to ensure we go to the "empty" side
-        // The neighbor element is on the opposite side of the shared edge from elements already processed
-        // We need to detect which side is already occupied
-        Vector2D edgeDir = sp1 - sp0;
-
-        // Find any node from the previously processed element that shared this edge
-        // It should be on the OPPOSITE side from our new nodes
-        // Use the centroid of already-placed adjacent elements as reference
-        // Simple heuristic: check if any already-placed node (not on edge) is on the same side
-        bool foundRef = false;
-        for (const auto& [nid, fp] : flatPositions_) {
-            if (nid == sharedNode0 || nid == sharedNode1) continue;
-            if (nid == nodeId) continue;
-            if (elem.containsNode(nid)) continue;  // Skip nodes of current element
-
-            // Check if this node belongs to a neighbor element that shares the same edge
-            // Simple: just check if it's close to the shared edge midpoint
-            Vector2D mid = (sp0 + sp1) * 0.5;
-            Vector2D toNode = fp - mid;
-            if (toNode.magnitude() < (sp1 - sp0).magnitude() * 2.0) {
-                double crossRef = edgeDir.cross(fp - sp0);
-                double crossCand = edgeDir.cross(candidate - sp0);
-                if (crossRef * crossCand > 0) {
-                    // Candidate is on same side as existing node - need flip
-                    needFlip = true;
-                    foundRef = true;
-                    break;
-                } else {
-                    foundRef = true;
-                    needFlip = false;
-                    break;
-                }
-            }
-        }
-
-        if (needFlip) {
-            // Reflect across the shared edge line
-            Vector2D edgeNorm = edgeDir.normalized();
-            Vector2D toCandidate = candidate - sp0;
-            double projLen = toCandidate.dot(edgeNorm);
-            Vector2D proj = sp0 + edgeNorm * projLen;
-            candidate = proj * 2.0 - candidate;
         }
 
         flatPositions_[nodeId] = candidate;

@@ -55,8 +55,12 @@ private:
     void placeStartElement(const ShellMesh& mesh, const ShellElement& elem);
 
     // Place a neighbor element across a shared edge
+    // `parent` 는 BFS 로 **이미 배치된** 쪽 요소다. 새 요소를 공유 변의 어느 쪽에 둘지는
+    // 그 요소의 비공유 절점으로만 결정할 수 있다 — 배치된 전 절점에서 '가까운' 것을 고르면
+    // 같은 쪽 요소를 기준으로 집어 시트가 공유 변 위로 접힌다(평면 셸의 전개가 항등이 아니게 된다).
     void placeNeighborElement(const ShellMesh& mesh,
                               const ShellElement& elem,
+                              const ShellElement& parent,
                               int sharedNode0, int sharedNode1);
 
     // Compute 2D position from two known points and distances
