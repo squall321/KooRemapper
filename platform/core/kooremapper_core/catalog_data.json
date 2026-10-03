@@ -13567,6 +13567,100 @@
       "notes": "Angular ordering is correct for a convex section. A flipped element (negative Jacobian) can order its crossings wrongly and the fill then lies, which is why the manifest carries the shell count excluded from Jacobian checks; 111 of this repo's 489 tracked fixtures contain negative Jacobians and are otherwise normal. The op asserts no units — LS-DYNA decks carry none. A section whose extent collapses in one direction is reported as 'close to a line' instead of printing an aspect ratio computed by dividing by ~0. The axis tie-break is the section's bounding area, not its polygon count: on a wrapped stack the y cut yields more polygons (90 vs 72) but fragments into 40 pieces because the plane crosses the arc repeatedly, while z gives the arc profile in 16 — and the areas (4.11 vs 6.66) pick z. Part titles are free text straight out of the *PART card, so they are XML-escaped and control characters become '?' with a note in the figure; XML 1.0 cannot carry them and one would otherwise make the whole SVG unreadable."
     },
     {
+      "name": "surfview",
+      "category": "inspect",
+      "summary": "자유면만 뽑아 직교투영·깊이정렬로 그린다 (전체 와이어프레임은 검은 덩어리가 된다).",
+      "description": "Extract the mesh's free faces and draw them orthographically with depth sorting into <output>_surface.svg. Only free faces are drawn because on a real stack they are a small minority: measured on a 286k-element battery deck, 57,098 of 855,575 faces are free (6.7%), so the rest is buried and costs time without showing anything. Faces are determined per element type — the shared hex-shaped face table presents two collapsed faces of a TET4 as real ones and its fourth face as a non-planar quad through all four vertices, which is why a tet's surface comes out wrong that way (a single TET4 yields 5 faces, 3 of them bogus). Quad faces are split into two triangles, which is also what makes the free-face set complete for tets. Shading is flat, from the absolute angle between the face normal and the view direction — the sign is deliberately not used because a flipped element would then shade backwards, and the count of back-facing triangles is reported instead. The view is isotropic: a 3D shape stretched anisotropically is simply the wrong shape, so a thin stack looks thin here and `section` is the op for layer thickness.",
+      "invocation": "yaml",
+      "config_style": "structured",
+      "takes_kfile": true,
+      "requires_gmsh": false,
+      "requires_tetgen": false,
+      "params": [
+        {
+          "name": "model",
+          "type": "file",
+          "role": "yaml_field",
+          "yaml_path": "model",
+          "required": true,
+          "description": "Deck to draw (k-file); a deck holding only *INCLUDE cards is refused rather than drawn empty"
+        },
+        {
+          "name": "output",
+          "type": "string",
+          "role": "yaml_field",
+          "yaml_path": "output",
+          "required": true,
+          "description": "Output prefix — writes <output>_surface.svg"
+        },
+        {
+          "name": "azimuth",
+          "type": "number",
+          "role": "yaml_field",
+          "yaml_path": "azimuth",
+          "required": false,
+          "description": "View azimuth in degrees",
+          "default": 35.0
+        },
+        {
+          "name": "elevation",
+          "type": "number",
+          "role": "yaml_field",
+          "yaml_path": "elevation",
+          "required": false,
+          "description": "View elevation in degrees",
+          "default": 25.0
+        },
+        {
+          "name": "wire",
+          "type": "boolean",
+          "role": "yaml_field",
+          "yaml_path": "wire",
+          "required": false,
+          "description": "true draws edges only instead of shaded faces. The op reports ink_ratio (drawn line length in px divided by canvas pixels) and warns past 1.0, where extra lines add nothing: measured 1.94 on the free faces of a 286k-element deck and 5.49 on all of its edges",
+          "default": false
+        },
+        {
+          "name": "width",
+          "type": "integer",
+          "role": "yaml_field",
+          "yaml_path": "width",
+          "required": false,
+          "description": "SVG width in px (>= 430)",
+          "default": 1200
+        },
+        {
+          "name": "height",
+          "type": "integer",
+          "role": "yaml_field",
+          "yaml_path": "height",
+          "required": false,
+          "description": "SVG height in px (>= 240)",
+          "default": 900
+        },
+        {
+          "name": "max_parts",
+          "type": "integer",
+          "role": "yaml_field",
+          "yaml_path": "max_parts",
+          "required": false,
+          "description": "Legend entries before the rest are counted as omitted",
+          "default": 60
+        }
+      ],
+      "example": {
+        "args": {
+          "model": "flat_stack.k",
+          "output": "flat_stack",
+          "azimuth": 35,
+          "elevation": 25
+        },
+        "note": "Draws the free faces of the bundled 3-layer stack; the footer carries the free-face share, the back-facing count and ink_ratio"
+      },
+      "example_folder": "examples/stackwrap",
+      "notes": "Triangles are never silently dropped — a shaded view with triangles removed has holes and is a lie — so the op reports the SVG size instead and warns past 5 MB, which is where MCP's download_result refuses to carry it through a conversation (measured 12.2 MB on a 286k-element deck; use save_result_to_path or narrow the view). Depth sorting is by triangle centroid, so triangles that pass through each other can be ordered wrongly; the figure says so. Part titles go through the same escaping as `section`, including the non-UTF-8 case that would otherwise make the whole SVG unparseable."
+    },
+    {
       "name": "stcx_fullangle_drop",
       "category": "analysis",
       "summary": "Submit a full-angle (Fibonacci) LS-DYNA drop study to the stcx cluster",

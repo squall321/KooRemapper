@@ -79,6 +79,7 @@
 #include "commands/linkage_fit.h"
 #include "commands/applyfold.h"
 #include "commands/section.h"
+#include "commands/surfview.h"
 
 #include <iostream>
 #include <fstream>
@@ -2909,6 +2910,26 @@ static int runMain(int argc, char* argv[]) {
         }
         printBanner(console);
         return runSection(argv[2], console);
+    }
+
+    // Free-surface view (orthographic, depth-sorted)
+    // @lat: [[commands/surfview]]
+    if (command == "surfview") {
+        if (argc < 3) {
+            console.error("Usage: KooRemapper surfview <config.yaml>");
+            console.info("Extracts the free faces and draws them orthographically with");
+            console.info("depth sorting into <output>_surface.svg. Free faces are ~5% of all");
+            console.info("faces on a real stack, so the other 95% is buried and not worth drawing.");
+            console.info("Minimal config:");
+            console.info("  model: stack.k");
+            console.info("  output: stack");
+            console.info("  azimuth: 35        # view direction, degrees");
+            console.info("  elevation: 25");
+            console.info("  wire: false        # true = edges only (warns when saturated)");
+            return 1;
+        }
+        printBanner(console);
+        return runSurfView(argv[2], console);
     }
 
     // Unknown command

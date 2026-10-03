@@ -845,6 +845,25 @@ axis: auto
           "  **확대 축과 배율을 그림 안에 적는다** — 적는 것이 기능의 일부다",
           "최소피처가 1.5 px 미만이면 '보이지 않는다' 고 말한다(획을 줄여도 안 보인다)",
           "파트 제목은 자유 텍스트다 — XML 이스케이프하고 제어문자는 ? 로 바꾸고 그 사실을 적는다"])
+op("surfview", "정보·메타", "자유면만 직교투영·깊이정렬로 그린다", "자유면 표면 surfview 음영 투영 와이어",
+   "KooRemapper surfview <config.yaml>",
+   needs=["examples/stackwrap/flat_stack.k"],
+   files={"sv.yaml": """model: examples/stackwrap/flat_stack.k
+output: stack
+azimuth: 35
+elevation: 25
+"""},
+   cmds=["KooRemapper surfview sv.yaml"], outputs=["stack_surface.svg"],
+   notes=["자유면만 그린다 — 실측 286k 요소 덱에서 전체 면 855,575 중 자유면 57,098(6.7%)뿐이다",
+          "★면도 **종류별 표**다 — 육면체 표로 세면 TET4 자유면이 4면이 아니라 5면(3개가 가짜)이 된다",
+          "사각면은 삼각형 둘로 쪼갠다 — 그래야 TET 의 자유면 집합이 완전해진다",
+          "음영은 법선과 보는 방향의 **절대** 각이다 — 부호를 쓰면 뒤집힌 요소에서 명암이 거꾸로 된다.",
+          "  대신 **등진 삼각형 수**를 보고한다(닫힌 볼록체면 정확히 절반이어야 한다)",
+          "★이 그림은 **등축**이다 — 3D 형상을 비등방으로 늘이면 모양 자체가 거짓이다.",
+          "  적층이 얇게 보이는 것이 사실이고, 층 두께를 보려면 `section` 을 쓴다",
+          "`wire: true` 면 모서리만. `ink_ratio` 가 1.0 을 넘으면 포화라고 경고한다(실측 1.94)",
+          "삼각형을 **솎지 않는다** — 구멍이 뚫리면 그림이 거짓이다. 대신 SVG 크기를 말하고",
+          "  5MB 를 넘으면 MCP 다운로드가 거절한다고 알린다(실측 12.2MB)"])
 op("neutralaxis", "정보·메타", "적층의 EI 가중 중립축·굽힘강성 계산", "중립축 적층 EI 굽힘강성 stack 중립면",
    "KooRemapper neutralaxis <mesh_file> [--axis x|y|z]",
    files={"box.yaml": BOX}, cmds=[BOX_CMD, "KooRemapper neutralaxis box.k"], outputs=[],
