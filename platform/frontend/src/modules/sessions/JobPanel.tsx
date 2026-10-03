@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Download, FileText, ScrollText, X, Ban, AlertTriangle, ClipboardCopy, LifeBuoy } from 'lucide-react'
+import { Download, FileText, ScrollText, X, Ban, AlertTriangle, ClipboardCopy, LifeBuoy, Image as ImageIcon } from 'lucide-react'
 import {
-  cancelJob, downloadFile, downloadJobDiagnostics, getJobDiagnostics, getJobLogs,
+  cancelJob, downloadFile, downloadJobDiagnostics, getJobDiagnostics, getJobLogs, svgBlobUrl,
   getJobOutputs, listSessionJobs,
 } from '@/shared/api/endpoints'
 import type { Job } from '@/shared/api/types'
@@ -40,6 +40,8 @@ export function JobPanel({ sessionId }: { sessionId: string }) {
 }
 
 function JobRow({ job, sessionId, onLogs }: { job: Job; sessionId: string; onLogs: () => void }) {
+  // 그림 산출물을 받기 전에 볼 수 있게 — blob URL 은 닫을 때 반드시 해제한다(누수).
+  const [figUrl, setFigUrl] = useState<string | null>(null)
   const qc = useQueryClient()
   const active = job.status === 'queued' || job.status === 'running'
   const outs = useQuery({
@@ -91,11 +93,35 @@ function JobRow({ job, sessionId, onLogs }: { job: Job; sessionId: string; onLog
       {job.status === 'succeeded' && !!outs.data?.length && (
         <div className="flex flex-wrap gap-1 mt-1">
           {outs.data.map((f) => (
-            <button key={f.id} onClick={() => downloadFile(sessionId, f.id, f.filename)}
-              className="inline-flex items-center gap-1 text-xs rounded bg-success/15 text-success px-2 py-0.5 hover:opacity-80">
-              <Download size={11} /> {f.filename}
-            </button>
+            <span key={f.id} className="inline-flex items-center gap-1">
+              <button onClick={() => downloadFile(sessionId, f.id, f.filename)}
+                className="inline-flex items-center gap-1 text-xs rounded bg-success/15 text-success px-2 py-0.5 hover:opacity-80">
+                <Download size={11} /> {f.filename}
+              </button>
+              {/* 그림 산출물은 받기 전에 **볼 수** 있어야 한다 — 지금까지 프런트에 서버가 구운
+                  그림을 띄울 자리가 아예 없었다(`<img` 태그 0건). */}
+              {/\.svg$/i.test(f.filename) && (
+                <button onClick={async () => setFigUrl(await svgBlobUrl(sessionId, f.id))}
+                  className="inline-flex items-center gap-1 text-xs rounded bg-accent/15 text-accent px-2 py-0.5 hover:opacity-80">
+                  <ImageIcon size={11} /> 그림 보기
+                </button>
+              )}
+            </span>
           ))}
+        </div>
+      )}
+      {figUrl && (
+        <div className="mt-2">
+          {/* ⚠ `<img>` 로만 띄운다 — SVG 안 스크립트가 실행되지 않는 유일한 경로다.
+              `dangerouslySetInnerHTML`·`<object>`·`<iframe>` 으로 바꾸면 저장형 XSS 가 된다. */}
+          <img src={figUrl} alt="단면 그림" className="max-w-full border border-border rounded bg-white" />
+          <div className="mt-1 flex items-center gap-2">
+            <button onClick={() => { URL.revokeObjectURL(figUrl); setFigUrl(null) }}
+              className="text-xs text-muted hover:underline">닫기</button>
+            <span className="text-[11px] text-muted">
+              그림 안의 확대 배율·최소피처·축 선택 근거를 함께 읽으라 — 그것이 그림이 거짓말하지 않게 하는 숫자다.
+            </span>
+          </div>
         </div>
       )}
     </li>

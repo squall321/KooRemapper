@@ -311,3 +311,16 @@ export async function reportHtmlBlobUrl(sessionId: string, fileId: number): Prom
   const html = new Blob([res.data as Blob], { type: 'text/html' })
   return URL.createObjectURL(html)
 }
+
+/** 산출 SVG(단면 그림)를 그림으로 띄울 blob URL. `reportHtmlBlobUrl` 과 같은 선례다.
+ *
+ * ⚠ 이것은 **`<img src>` 로만** 쓴다. SVG 는 스크립트를 실을 수 있고 파트 제목은 `*PART` 다음
+ * 줄의 자유 텍스트라 무엇이든 들어 있다(op 쪽이 이스케이프하지만 방어는 두 겹이어야 한다).
+ * `<img>` 로 불러들인 SVG 는 스크립트가 **실행되지 않는다** — `dangerouslySetInnerHTML` 이나
+ * `<object>`·`<iframe>` 으로 바꾸면 그 보호가 사라진다. 다운로드 엔드포인트가 MIME 을
+ * `application/octet-stream` 으로 주므로 타입은 여기서 정한다. */
+export async function svgBlobUrl(sessionId: string, fileId: number): Promise<string> {
+  const res = await api.get(`/sessions/${sessionId}/files/${fileId}/download`, { responseType: 'blob' })
+  const svg = new Blob([res.data as Blob], { type: 'image/svg+xml' })
+  return URL.createObjectURL(svg)
+}
