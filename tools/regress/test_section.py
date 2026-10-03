@@ -242,6 +242,85 @@ def main():
         check("I-2 빈 그림을 내지 않는다고 말한다", "빈 그림" in out, out[-300:])
         check("I-3 **어느 파일**을 지목해야 하는지 알려 준다",
               "mesh_geometry.k" in out, out[-400:])
+        # ── J: SVG — 그림이 거짓말하지 않게 하는 줄들이 **그림 안에** 있나 ──
+        write_cfg(os.path.join(d, "sv.yaml"), model="stk.k", output="sv", axis="auto")
+        rc, out = run(binary, d, "sv.yaml")
+        check("J-1 rc=0", rc == 0, out[-300:])
+        svgp = os.path.join(d, "sv_section.svg")
+        check("J-2 SVG 를 썼다", os.path.exists(svgp))
+        svg = open(svgp, encoding="utf-8").read() if os.path.exists(svgp) else ""
+        check("J-3 다각형을 그렸다", svg.count("<polygon") >= 3, svg.count("<polygon"))
+        for need, why in (("배 확대", "확대 배율을 적는다"), ("단위 없음", "단위를 주장하지 않는다"),
+                          ("최소피처", "최소 피처를 적는다"), ("눈금", "눈금자를 둔다"),
+                          ("단면 — 축", "무엇을 잘랐는지 적는다")):
+            check("J-4 그림 안에 '%s' — %s" % (need, why), need in svg,
+                  [l for l in svg.splitlines() if "text" in l][:2])
+        check("J-5 범례를 그림 안에 굽는다 (색 견본 + 파트)",
+              svg.count("<rect") >= 4, svg.count("<rect"))
+        check("J-6 가로·세로 눈금자가 **둘** 다 있다", svg.count("눈금") >= 2, svg.count("눈금"))
+
+        # ── K: ★등축으로 강제하면 "보이지 않는다" 고 말한다 ──
+        write_cfg(os.path.join(d, "iso.yaml"), model="stk.k", output="iso", axis="auto",
+                  isotropic="true", width=600, height=400)
+        rc, out = run(binary, d, "iso.yaml")
+        check("K-1 rc=0", rc == 0, out[-300:])
+        check("K-2 등축이면 확대 배율이 1 이다", "x1.000000" in out,
+              [l for l in out.splitlines() if "Magnified" in l])
+        # 너무 작은 캔버스는 **앞에서** 거른다 — JSON 을 먼저 쓰고 실패하면 반쪽 산출물이 남는다
+        write_cfg(os.path.join(d, "tiny.yaml"), model="stk.k", output="tiny", axis="z",
+                  at=0.1, width=300, height=300)
+        rc, out = run(binary, d, "tiny.yaml")
+        check("K-3 캔버스가 작으면 rc=1", rc == 1, out[-200:])
+        check("K-4 범례 자리가 필요하다고 말한다", "범례" in out, out[-200:])
+        check("K-5 반쪽 산출물을 남기지 않는다 (JSON 도 안 쓴다)",
+              not os.path.exists(os.path.join(d, "tiny_section.json")))
+        # ★등축이면 실제 적층에서 층이 안 보인다 — 그 사실을 말하는지
+        write_cfg(os.path.join(d, "thin.yaml"), model="stk.k", output="thin", axis="auto",
+                  isotropic="true", width=430, height=240)
+        rc, out = run(binary, d, "thin.yaml")
+        check("K-6 최소피처를 **픽셀로** 보고한다", "Min feature in px" in out,
+              [l for l in out.splitlines() if "px" in l][:2])
+
+        # ── L: ★SVG 안전 — 파트 제목은 자유 텍스트다 ──
+        evil = '<script>alert(1)</script>&"\'' + chr(1) + '한글 "따옴표"'
+        nodes2 = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0),
+                  (0, 0, 1), (1, 0, 1), (1, 1, 1), (0, 1, 1)]
+        L = ["*KEYWORD", "*NODE"]
+        for i, (x, y, z) in enumerate(nodes2, start=1):
+            L.append("%8d%16.9f%16.9f%16.9f" % (i, x, y, z))
+        L += ["*ELEMENT_SOLID", "%8d%8d" % (1, 1) + "".join("%8d" % v for v in range(1, 9)),
+              "*PART", evil, "%10d%10d%10d" % (1, 1, 1),
+              "*SECTION_SOLID", "%10d%10d" % (1, 1),
+              "*MAT_ELASTIC", "%10d%10.4g%10.6g%10.4g" % (1, 7.85e-9, 210000.0, 0.3), "*END"]
+        open(os.path.join(d, "evil.k"), "w", newline="\n", encoding="utf-8").write("\n".join(L) + "\n")
+        write_cfg(os.path.join(d, "m.yaml"), model="evil.k", output="m", axis="z", at=0.5)
+        rc, out = run(binary, d, "m.yaml")
+        check("L-1 rc=0 (악성 제목에도 돈다)", rc == 0, out[-300:])
+        ev = open(os.path.join(d, "m_section.svg"), encoding="utf-8").read()
+        for tok in ("<script", "</script", "onload=", "onerror=", "<foreignObject", "javascript:"):
+            check("L-2 SVG 에 '%s' 가 없다" % tok, tok not in ev,
+                  [l for l in ev.splitlines() if tok in l][:1])
+        check("L-3 `<` 를 이스케이프했다", "&lt;script" in ev, ev[:0])
+        check("L-4 제어문자를 보이는 기호로 바꿨다",
+              chr(1) not in ev and "제어문자" in ev, "제어문자" in ev)
+        check("L-5 한글 제목이 그대로 남았다", "한글" in ev)
+        # XML 로 실제 파싱되나 — 제어문자 하나로 SVG 가 통째로 안 읽히는 것을 막았는지
+        import xml.etree.ElementTree as ET
+        try:
+            ET.fromstring(ev)
+            parsed = True
+            why = ""
+        except Exception as e:
+            parsed = False
+            why = str(e)
+        check("L-6 **XML 로 파싱된다** (제어문자 하나로 통째로 깨지지 않는다)", parsed, why)
+        # JSON 쪽도 파싱되나
+        try:
+            json.load(open(os.path.join(d, "m_section.json"), encoding="utf-8"))
+            jok, jwhy = True, ""
+        except Exception as e:
+            jok, jwhy = False, str(e)
+        check("L-7 JSON 도 파싱된다", jok, jwhy)
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

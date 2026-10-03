@@ -36,6 +36,9 @@ struct Config {
     double at = 0.0;
     bool hasAt = false;
     int maxParts = 60;
+    int width = 1200, height = 900;
+    bool isotropic = false;   // true = 등축(배율 1). 기본은 비등방 + 배율을 **적는다**
+    bool svg = true;
 };
 
 struct P2 { double u = 0.0, v = 0.0; };
@@ -69,6 +72,43 @@ std::string jesc(const std::string& s) {
         }
     }
     return out;
+}
+
+// XML 이스케이프. 파트 제목은 `*PART` 다음 줄의 **자유 텍스트**라 무엇이든 들어 있다 —
+// STEP 라벨과 같은 노출이다. 그리고 XML 1.0 은 제어문자를 담지 못해 **이름에 \x01 하나면 SVG 가
+// 통째로 안 읽힌다**(StepForge 실측). 그래서 지우지 않고 보이는 기호로 바꾸고, 바꿨다는 사실을
+// 매니페스트에 싣는다.
+std::string xesc(const std::string& s, bool* stripped = nullptr) {
+    std::string out;
+    out.reserve(s.size() + 16);
+    for (char ch : s) {
+        const unsigned char u = static_cast<unsigned char>(ch);
+        switch (ch) {
+            case '&': out += "&amp;";  continue;
+            case '<': out += "&lt;";   continue;
+            case '>': out += "&gt;";   continue;
+            case '"': out += "&quot;"; continue;
+            case '\'': out += "&apos;"; continue;
+            default: break;
+        }
+        if (u < 0x20 || u == 0x7F) {
+            out += '?';                       // 보이는 자리표시 — 지우면 사라진 줄 모른다
+            if (stripped) *stripped = true;
+            continue;
+        }
+        out += ch;
+    }
+    return out;
+}
+
+// 색맹 안전 범주 색(Okabe-Ito). **pid 로 고정**한다 — 호출마다 바뀌면 두 그림을 견줄 수 없다.
+const char* colorFor(int pid) {
+    static const char* P[] = {"#0072B2","#E69F00","#009E73","#CC79A7",
+                              "#56B4E9","#D55E00","#F0E442","#999999"};
+    const int n = 8;
+    int k = pid % n;
+    if (k < 0) k += n;
+    return P[k];
 }
 
 double coordOf(const Node& n, int axis) {
@@ -125,6 +165,10 @@ int runSection(const std::string& yamlFile, ConsoleOutput& console) {
                 if      (key == "model")     c.model = val;
                 else if (key == "output")    c.output = val;
                 else if (key == "max_parts") c.maxParts = std::stoi(val);
+                else if (key == "width")     c.width = std::stoi(val);
+                else if (key == "height")    c.height = std::stoi(val);
+                else if (key == "isotropic") c.isotropic = (val == "true" || val == "yes" || val == "1");
+                else if (key == "svg")       c.svg = !(val == "false" || val == "no" || val == "0");
                 else if (key == "at")        { c.at = std::stod(val); c.hasAt = true; }
                 else if (key == "axis") {
                     if      (val == "x")    c.axis = 0;
@@ -143,6 +187,14 @@ int runSection(const std::string& yamlFile, ConsoleOutput& console) {
     if (c.model.empty())  { console.error("model: 이 필요하다"); return 1; }
     if (c.output.empty()) { console.error("output: 이 필요하다"); return 1; }
     if (c.maxParts < 1)   { console.error("max_parts 는 1 이상이어야 한다"); return 1; }
+    // 여백(70×2) + 범례(260) + 그림(최소 100) 이 들어가야 한다. **앞에서** 거른다 —
+    // 뒤에서 걸면 JSON 을 먼저 쓰고 실패해 반쪽 산출물이 남는다(내 첫 판이 그랬다).
+    if (c.width < 430 || c.height < 240) {
+        console.error("width 는 430 이상, height 는 240 이상이어야 한다 — "
+                      "여백 70x2 + 범례 260 + 그림 자리가 들어가야 한다. "
+                      "(받은 값: " + std::to_string(c.width) + "x" + std::to_string(c.height) + ")");
+        return 1;
+    }
 
     KFileReader reader;
     Mesh mesh;
@@ -562,5 +614,205 @@ int runSection(const std::string& yamlFile, ConsoleOutput& console) {
     o.close();
 
     console.success("Wrote: " + outPath);
+
+    // ── 그림(SVG). 구현을 **한 자리**에 둔다 — 프런트와 MCP 가 각각 그리면 둘이 갈린다.
+    //    외부 의존성 0: 문자열을 쓰지만 파트 제목은 전부 xesc 를 지난다.
+    if (!c.svg) return 0;
+    const std::string svgPath = c.output + "_section.svg";
+    std::ofstream g(svgPath);
+    if (!g.is_open()) { console.error("Cannot write: " + svgPath); return 1; }
+
+    const double M = 70.0;                       // 여백 — 눈금자·꼬리말 자리
+    const double legendW = 260.0;
+    const double plotW = c.width - M - legendW;
+    const double plotH = c.height - 2 * M;
+    if (plotW < 100 || plotH < 100) {
+        console.error("내부 오류: 그림 자리가 음수다 — width·height 검증이 새어 나왔다.");
+        return 1;
+    }
+    // ★비등방 축척이 **기본**이다. 실측 — 실제 적층은 가로:최박층이 1:9,375 라 등축으로 그리면
+    //   층이 보이지 않는다(1200px 에서 0.128 px). 그래서 두 축을 따로 잡고 **배율을 적는다.**
+    //   적지 않으면 두께를 과장한 그림이 그럴듯하게 나온다 — 그것이 가장 나쁜 실패다.
+    double sx = (uExt > 0) ? plotW / uExt : 1.0;
+    double sy = (vExt > 0) ? plotH / vExt : 1.0;
+    if (c.isotropic) { const double m2 = std::min(sx, sy); sx = sy = m2; }
+    // ★사람이 읽을 값으로 적는다. `sy/sx` 는 **역수**가 될 수 있다 — 실측 배터리 덱(축 y, 기저
+    //   (z,x))은 얇은 축이 u 이고 sy/sx = 0.0289 가 찍혔는데 실제로는 **u 가 34.6배 확대**된
+    //   것이다. 그래서 '어느 축이 몇 배 확대됐나' 로 적는다.
+    const int magAxisIdx = (sx >= sy) ? 0 : 1;                 // 0 = u(가로), 1 = v(세로)
+    const double magnify = (std::min(sx, sy) > 0) ? std::max(sx, sy) / std::min(sx, sy) : 1.0;
+    const char* magAxisName = UV[axis][magAxisIdx];
+
+    auto PX = [&](double u) { return M + (u - uMin) * sx; };
+    auto PY = [&](double v) { return (c.height - M) - (v - vMin) * sy; };   // y 를 위로
+
+    g << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
+    g << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" << c.width
+      << "\" height=\"" << c.height << "\" viewBox=\"0 0 " << c.width << " " << c.height
+      << "\" font-family=\"Malgun Gothic, Apple SD Gothic Neo, Noto Sans KR, NanumGothic, sans-serif\">\n";
+    g << "<rect width=\"" << c.width << "\" height=\"" << c.height << "\" fill=\"#ffffff\"/>\n";
+
+    // 다각형 — 선 굵기를 모델 단위로 환산해 최소 피처와 견준다
+    const double strokePx = 0.6;
+    const double mmPerPxX = (sx > 0) ? 1.0 / sx : 0.0;
+    const double mmPerPxY = (sy > 0) ? 1.0 / sy : 0.0;
+    // ★최소 피처가 **몇 픽셀**인가 — 그것이 판정 기준이다. 선 굵기를 **긴 축**의 해상도와
+    //   견주면 엉뚱한 답이 나온다(층을 덮는 획은 **얇은 축 방향**이다). 그래서 그 파트가 얇은
+    //   방향의 축척을 쓴다. 1.5px 미만이면 획을 줄여도 보이지 않는다.
+    double minFeaturePx = 0.0;
+    if (minFeature > 0.0) {
+        const PartInfo* mp = nullptr;
+        auto it = pinfo.find(minFeaturePid);
+        if (it != pinfo.end()) mp = &it->second;
+        const bool thinIsU = mp ? (mp->uExt() <= mp->vExt()) : (uExt <= vExt);
+        minFeaturePx = minFeature * (thinIsU ? sx : sy);
+    }
+    const bool featureTooThin = (minFeature > 0.0 && minFeaturePx < 1.5);
+    const bool strokeEatsFeature = (minFeature > 0.0 && strokePx >= minFeaturePx);
+
+    g << "<g stroke=\"#333333\" stroke-width=\"" << strokePx << "\" stroke-linejoin=\"round\">\n";
+    for (const Poly& p : polys) {
+        const char* col = colorFor(p.pid);
+        if (p.shell) {
+            // 셸은 두께가 메시에 없다 — 아는 경우에만 띠로, 모르면 **점선**으로 그린다.
+            const PartInfo& pi = pinfo[p.pid];
+            if (pi.thickness > 0 && p.pts.size() == 2) {
+                const double du = p.pts[1].u - p.pts[0].u, dv = p.pts[1].v - p.pts[0].v;
+                const double L = std::sqrt(du * du + dv * dv);
+                if (L > 0) {
+                    const double nu = -dv / L * 0.5 * pi.thickness;
+                    const double nv =  du / L * 0.5 * pi.thickness;
+                    char b[256];
+                    std::snprintf(b, sizeof(b),
+                        "<polygon points=\"%.3f,%.3f %.3f,%.3f %.3f,%.3f %.3f,%.3f\" fill=\"%s\" fill-opacity=\"0.85\"/>\n",
+                        PX(p.pts[0].u + nu), PY(p.pts[0].v + nv), PX(p.pts[1].u + nu), PY(p.pts[1].v + nv),
+                        PX(p.pts[1].u - nu), PY(p.pts[1].v - nv), PX(p.pts[0].u - nu), PY(p.pts[0].v - nv), col);
+                    g << b;
+                    continue;
+                }
+            }
+            char b[256];
+            std::snprintf(b, sizeof(b),
+                "<line x1=\"%.3f\" y1=\"%.3f\" x2=\"%.3f\" y2=\"%.3f\" stroke=\"%s\" stroke-width=\"1.4\" stroke-dasharray=\"4 3\"/>\n",
+                PX(p.pts[0].u), PY(p.pts[0].v), PX(p.pts[1].u), PY(p.pts[1].v), col);
+            g << b;
+            continue;
+        }
+        g << "<polygon fill=\"" << col << "\" points=\"";
+        for (size_t i = 0; i < p.pts.size(); ++i) {
+            char b[64];
+            std::snprintf(b, sizeof(b), "%s%.3f,%.3f", i ? " " : "", PX(p.pts[i].u), PY(p.pts[i].v));
+            g << b;
+        }
+        g << "\"/>\n";
+    }
+    g << "</g>\n";
+
+    // 눈금자를 **두 축에 각각** 둔다 — 하나만 두면 과장된 축에서 사람이 잘못 읽는다
+    auto niceStep = [](double span) {
+        if (span <= 0) return 1.0;
+        const double raw = span / 4.0;
+        const double mag = std::pow(10.0, std::floor(std::log10(raw)));
+        const double n = raw / mag;
+        const double m = (n < 1.5) ? 1.0 : (n < 3.5) ? 2.0 : (n < 7.5) ? 5.0 : 10.0;
+        return m * mag;
+    };
+    char b[512];
+    const double stepU = niceStep(uExt), stepV = niceStep(vExt);
+    g << "<g font-size=\"11\" fill=\"#444444\" stroke=\"none\">\n";
+    std::snprintf(b, sizeof(b),
+        "<line x1=\"%.2f\" y1=\"%.2f\" x2=\"%.2f\" y2=\"%.2f\" stroke=\"#444\" stroke-width=\"1\"/>\n",
+        PX(uMin), c.height - M + 14, PX(uMin + stepU), c.height - M + 14);
+    g << b;
+    std::snprintf(b, sizeof(b), "<text x=\"%.2f\" y=\"%.2f\">%s %.6g (%s)</text>\n",
+                  PX(uMin), c.height - M + 30, UV[axis][0], stepU, "가로 눈금");
+    g << b;
+    std::snprintf(b, sizeof(b),
+        "<line x1=\"%.2f\" y1=\"%.2f\" x2=\"%.2f\" y2=\"%.2f\" stroke=\"#444\" stroke-width=\"1\"/>\n",
+        M - 16, PY(vMin), M - 16, PY(vMin + stepV));
+    g << b;
+    std::snprintf(b, sizeof(b), "<text x=\"%.2f\" y=\"%.2f\" transform=\"rotate(-90 %.2f %.2f)\">%s %.6g (세로 눈금)</text>\n",
+                  M - 22, PY(vMin), M - 22, PY(vMin), UV[axis][1], stepV);
+    g << b;
+    g << "</g>\n";
+
+    // 범례를 **그림 안에 굽는다** — 따로 떨어지면 내보낸 SVG 가 혼자 못 선다
+    double ly = M;
+    const double lx = c.width - legendW + 10;
+    g << "<g font-size=\"12\" stroke=\"none\">\n";
+    std::snprintf(b, sizeof(b), "<text x=\"%.1f\" y=\"%.1f\" font-weight=\"bold\" fill=\"#222\">단면 — 축 %c = %.6g</text>\n",
+                  lx, ly, AX[axis], at);
+    g << b; ly += 20;
+    bool titleStripped = false;
+    int shown = 0, omitted = 0;
+    for (const auto& [pid, pi] : pinfo) {
+        if (shown >= c.maxParts) { omitted++; continue; }
+        ++shown;
+        std::snprintf(b, sizeof(b), "<rect x=\"%.1f\" y=\"%.1f\" width=\"12\" height=\"12\" fill=\"%s\"/>\n",
+                      lx, ly - 10, colorFor(pid));
+        g << b;
+        const std::string t = pi.title.empty() ? ("pid " + std::to_string(pid)) : xesc(pi.title, &titleStripped);
+        std::snprintf(b, sizeof(b), "<text x=\"%.1f\" y=\"%.1f\" fill=\"#222\">%d · %s</text>\n",
+                      lx + 18, ly, pid, t.c_str());
+        g << b; ly += 15;
+        if (pi.shell) {
+            if (pi.thickness > 0)
+                std::snprintf(b, sizeof(b), "<text x=\"%.1f\" y=\"%.1f\" font-size=\"10\" fill=\"#666\">셸 t=%.6g (*SECTION_SHELL)</text>\n",
+                              lx + 18, ly, pi.thickness);
+            else
+                std::snprintf(b, sizeof(b), "<text x=\"%.1f\" y=\"%.1f\" font-size=\"10\" fill=\"#a33\">셸 두께 없음 — 점선</text>\n",
+                              lx + 18, ly);
+            g << b; ly += 14;
+        } else {
+            std::snprintf(b, sizeof(b), "<text x=\"%.1f\" y=\"%.1f\" font-size=\"10\" fill=\"#666\">두께(단면) %.6g · E %.6g</text>\n",
+                          lx + 18, ly, pi.thin(), pi.E);
+            g << b; ly += 14;
+        }
+        if (ly > c.height - M - 90) { omitted = (int)pinfo.size() - shown; break; }
+    }
+    if (omitted > 0) {
+        std::snprintf(b, sizeof(b), "<text x=\"%.1f\" y=\"%.1f\" font-size=\"11\" fill=\"#a33\">… 파트 %d개를 뺐다 (전체 %zu)</text>\n",
+                      lx, ly + 4, omitted, pinfo.size());
+        g << b; ly += 18;
+    }
+    g << "</g>\n";
+
+    // ★꼬리말 — 그림이 거짓말하지 않게 하는 줄들. **배율을 적는 것이 기능의 일부다.**
+    double fy = c.height - 34;
+    g << "<g font-size=\"11\" fill=\"#333\" stroke=\"none\">\n";
+    std::snprintf(b, sizeof(b),
+        "<text x=\"%.1f\" y=\"%.1f\">%s 축 %.4g배 확대 (가로 %.6g/px · 세로 %.6g/px) · 단위 없음(LS-DYNA 덱)</text>\n",
+        M, fy, magAxisName, magnify, mmPerPxX, mmPerPxY);
+    g << b; fy += 14;
+    std::snprintf(b, sizeof(b),
+        "<text x=\"%.1f\" y=\"%.1f\">파트 %zu/%zu · 다각형 %zu · 최소피처 %.6g = %.2f px%s%s</text>\n",
+        M, fy, hitPids.size(), mesh.parts.size(), polys.size(), minFeature, minFeaturePx,
+        nudge > 0 ? " · 평면이 절점층에 걸려 ε 비켰다" : "",
+        titleStripped ? " · 제목에 제어문자가 있어 ? 로 바꿨다" : "");
+    g << b; fy += 14;
+    if (featureTooThin) {
+        std::snprintf(b, sizeof(b),
+            "<text x=\"%.1f\" y=\"%.1f\" fill=\"#a33\">⚠ 최소피처가 %.2f px 다 — 이 그림에서 그 층은 보이지 않는다(획을 줄여도 안 보인다)</text>\n",
+            M, fy, minFeaturePx);
+        g << b;
+    } else if (strokeEatsFeature) {
+        std::snprintf(b, sizeof(b),
+            "<text x=\"%.1f\" y=\"%.1f\" fill=\"#a33\">⚠ 선 굵기(%.2f px)가 최소피처(%.2f px)만 하다 — 층이 붙어 보이는 것은 획이다</text>\n",
+            M, fy, strokePx, minFeaturePx);
+        g << b;
+    }
+    g << "</g>\n</svg>\n";
+    g.close();
+
+    if (featureTooThin)
+        console.warning("최소 피처가 " + std::to_string(minFeaturePx) +
+                        " px 다 — 이 그림에서 그 층은 보이지 않는다. width·height 를 키우거나 "
+                        "범위를 좁히라(획을 줄여도 안 보인다).");
+    else if (strokeEatsFeature)
+        console.warning("선 굵기가 최소 피처만 하다 — 층이 붙어 보이는 것은 기하가 아니라 획이다.");
+    console.keyValue("Magnified axis", std::string(magAxisName) + "  x" +
+                     std::to_string(magnify) + (c.isotropic ? "  (등축이라 1)" : ""));
+    console.keyValue("Min feature in px", std::to_string(minFeaturePx));
+    console.success("Wrote: " + svgPath);
     return 0;
 }
