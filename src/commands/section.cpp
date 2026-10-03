@@ -39,6 +39,8 @@ struct Config {
     int width = 1200, height = 900;
     bool isotropic = false;   // true = 등축(배율 1). 기본은 비등방 + 배율을 **적는다**
     bool svg = true;
+    std::string compare;      // 두 번째 덱(접힘 전/후를 한 그림에)
+    std::string mode = "panels";   // panels | overlay
 };
 
 struct P2 { double u = 0.0, v = 0.0; };
@@ -111,6 +113,40 @@ const char* colorFor(int pid) {
     return P[k];
 }
 
+// 한 덱의 단면 결과. 두 덱을 한 그림에 올리려면(접힘 전/후) 이 단위가 있어야 한다.
+struct PartInfo {
+    int pid = 0;
+    std::string title;
+    long long polys = 0;
+    bool shell = false;
+    double thickness = 0.0;
+    std::string thickWhy;
+    double E = 0.0;
+    // 단면 안에서 이 파트가 차지하는 2D 범위 — 그리는 쪽이 **최소 피처**를 알아야
+    // 선 굵기가 층을 먹는지 판정할 수 있다(실측: 실제 셸 적층 두께 0.008~0.153).
+    double uMin = 1e300, uMax = -1e300, vMin = 1e300, vMax = -1e300;
+    double uExt() const { return (uMax > uMin) ? uMax - uMin : 0.0; }
+    double vExt() const { return (vMax > vMin) ? vMax - vMin : 0.0; }
+    double thin() const { return std::min(uExt(), vExt()); }
+};
+
+struct SecResult {
+    std::string deck;
+    int axis = 2;
+    double at = 0.0, nudge = 0.0;
+    std::string axisWhy;
+    std::vector<Poly> polys;
+    std::map<int, PartInfo> pinfo;
+    std::set<int> hitPids;
+    size_t partsTotal = 0;
+    long long nodeHits = 0, thinCuts = 0, shellsExcluded = 0;
+    double uMin = 1e300, uMax = -1e300, vMin = 1e300, vMax = -1e300;
+    double minFeature = 0.0;
+    int minFeaturePid = 0;
+    double uExt() const { return (uMax > uMin) ? uMax - uMin : 0.0; }
+    double vExt() const { return (vMax > vMin) ? vMax - vMin : 0.0; }
+};
+
 double coordOf(const Node& n, int axis) {
     return axis == 0 ? n.position.x : (axis == 1 ? n.position.y : n.position.z);
 }
@@ -145,64 +181,17 @@ const std::vector<std::pair<int,int>>& edgesFor(ElementType t) {
 
 }  // namespace
 
-int runSection(const std::string& yamlFile, ConsoleOutput& console) {
-    Config c;
-    {
-        std::ifstream f(yamlFile);
-        if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
-        KooRemapper::yamlSkipBOM(f);
-        std::string ln;
-        while (std::getline(f, ln)) {
-            if (!ln.empty() && ln.back() == '\r') ln.pop_back();
-            const std::string t = trim(ln);
-            if (t.empty() || t[0] == '#') continue;
-            const size_t cp = t.find(':');
-            if (cp == std::string::npos) continue;
-            const std::string key = trim(t.substr(0, cp));
-            const std::string val = trim(yamlStripComment(t.substr(cp + 1)));
-            if (val.empty()) continue;
-            try {
-                if      (key == "model")     c.model = val;
-                else if (key == "output")    c.output = val;
-                else if (key == "max_parts") c.maxParts = std::stoi(val);
-                else if (key == "width")     c.width = std::stoi(val);
-                else if (key == "height")    c.height = std::stoi(val);
-                else if (key == "isotropic") c.isotropic = (val == "true" || val == "yes" || val == "1");
-                else if (key == "svg")       c.svg = !(val == "false" || val == "no" || val == "0");
-                else if (key == "at")        { c.at = std::stod(val); c.hasAt = true; }
-                else if (key == "axis") {
-                    if      (val == "x")    c.axis = 0;
-                    else if (val == "y")    c.axis = 1;
-                    else if (val == "z")    c.axis = 2;
-                    else if (val == "auto") c.axis = -1;
-                    else { console.error("axis: 는 x, y, z, auto 중 하나여야 한다 (받은 값: " + val + ")"); return 1; }
-                }
-                else console.warning("모르는 키는 무시한다: " + key);
-            } catch (const std::exception&) {
-                console.error("숫자를 읽을 수 없다: " + key + ": " + val);
-                return 1;
-            }
-        }
-    }
-    if (c.model.empty())  { console.error("model: 이 필요하다"); return 1; }
-    if (c.output.empty()) { console.error("output: 이 필요하다"); return 1; }
-    if (c.maxParts < 1)   { console.error("max_parts 는 1 이상이어야 한다"); return 1; }
-    // 여백(70×2) + 범례(260) + 그림(최소 100) 이 들어가야 한다. **앞에서** 거른다 —
-    // 뒤에서 걸면 JSON 을 먼저 쓰고 실패해 반쪽 산출물이 남는다(내 첫 판이 그랬다).
-    if (c.width < 430 || c.height < 240) {
-        console.error("width 는 430 이상, height 는 240 이상이어야 한다 — "
-                      "여백 70x2 + 범례 260 + 그림 자리가 들어가야 한다. "
-                      "(받은 값: " + std::to_string(c.width) + "x" + std::to_string(c.height) + ")");
-        return 1;
-    }
-
+// 덱 하나를 자른다. 두 덱을 한 그림에 올리려면(접힘 전/후) 이 단위가 필요하다.
+//   axisPref: -1 = auto. hasAt/atIn: 평면 위치(없으면 bbox 중앙).
+bool computeSection(const Config& c, const std::string& deck, int axisPref,
+                    bool hasAt, double atIn, SecResult& R, ConsoleOutput& console) {
     KFileReader reader;
     Mesh mesh;
     try {
-        mesh = reader.readFile(c.model);
+        mesh = reader.readFile(deck);
     } catch (const std::exception& e) {
         console.error("Failed to load mesh: " + std::string(e.what()));
-        return 1;
+        return false;
     }
     if (mesh.elements.empty()) {
         console.error("요소가 없다 — 이 덱에는 기하가 없다. 빈 그림을 내지 않는다.");
@@ -212,7 +201,7 @@ int runSection(const std::string& yamlFile, ConsoleOutput& console) {
         // 셋으로 갈려 `*INCLUDE_PATH` 를 파일로 세는 오탐이 있었다.
         std::vector<std::string> rawLines;
         {
-            std::ifstream f(c.model);
+            std::ifstream f(deck);
             std::string ln;
             while (std::getline(f, ln)) {
                 if (!ln.empty() && ln.back() == '\r') ln.pop_back();
@@ -227,10 +216,9 @@ int runSection(const std::string& yamlFile, ConsoleOutput& console) {
             if (un.truncatedNames) console.info("    …");
             console.info("  기하가 든 파일(보통 `*NODE`·`*ELEMENT_*` 가 있는 메시 파일)을 model: 에 지목하라.");
         }
-        return 1;
+        return false;
     }
 
-    console.header("Section (plane cut): " + Platform::getFilename(c.model));
 
     auto [bmin, bmax] = mesh.getBoundingBox();
     const Vector3D ext = bmax - bmin;
@@ -363,7 +351,7 @@ int runSection(const std::string& yamlFile, ConsoleOutput& console) {
 
     // ── 축 선택. "적층 방향에 수직" 이 규칙이 아니다 — 이 덱에서 층이 어느 축으로 쌓였나다.
     //    실측: 배터리 덱은 z=const 가 61 파트 중 1개만 맞고 x·y 는 56개. 감긴 덱은 반대다. ──
-    int axis = c.axis;
+    int axis = axisPref;
     std::string axisWhy;
     const char* AX = "xyz";
     if (axis < 0) {
@@ -374,25 +362,31 @@ int runSection(const std::string& yamlFile, ConsoleOutput& console) {
         // z(48 다각형)가 쓸모 있는 호 단면이다.
         int best = -1;
         size_t bestHit = 0;
-        long long bestPolys = 0;
+        double bestArea = -1.0;
         std::string tally;
         CutStat stats[3];
         for (int a = 0; a < 3; ++a) {
             const double mid = minArr[a] + 0.5 * extArr[a];
             stats[a] = cut(a, mid, nullptr, nullptr, nullptr);
-            char t[128];
-            std::snprintf(t, sizeof(t), "%s%c=%zu파트/%lld다각형%s",
+            char t[160];
+            std::snprintf(t, sizeof(t), "%s%c=%zu파트/%lld다각형/넓이%.4g%s",
                           tally.empty() ? "" : " · ", AX[a], stats[a].pids.size(),
-                          stats[a].polys, stats[a].degenerate() ? "(선에 가깝다)" : "");
+                          stats[a].polys, stats[a].uExt() * stats[a].vExt(),
+                          stats[a].degenerate() ? "(선에 가깝다)" : "");
             tally += t;
         }
+        // 동점이면 **단면 bbox 넓이**가 큰 축 — 평면이 형상을 가장 넓게 가로지르는 쪽이다.
+        // 다각형 수로 재면 틀린다(실측: 감긴 덱에서 y 가 90다각형이지만 **조각 40개**로
+        // 호를 여러 번 가로지르고, z 는 72다각형·조각 16개로 호 단면이 제대로 나온다.
+        // 넓이는 z 6.66 > y 4.11 로 같은 답을 O(1) 에 준다).
         for (int pass = 0; pass < 2; ++pass) {
             for (int a = 0; a < 3; ++a) {
                 if (pass == 0 && stats[a].degenerate()) continue;   // 1차: 퇴화는 뺀다
                 const size_t hit = stats[a].pids.size();
                 if (hit == 0) continue;
-                if (hit > bestHit || (hit == bestHit && stats[a].polys > bestPolys)) {
-                    bestHit = hit; bestPolys = stats[a].polys; best = a;
+                const double area = stats[a].uExt() * stats[a].vExt();
+                if (hit > bestHit || (hit == bestHit && area > bestArea)) {
+                    bestHit = hit; bestArea = area; best = a;
                 }
             }
             if (best >= 0) break;   // 2차는 전부 퇴화일 때만 돈다
@@ -400,7 +394,7 @@ int runSection(const std::string& yamlFile, ConsoleOutput& console) {
         if (best < 0 || bestHit == 0) {
             console.error("세 축 어디로도 자를 수 없다 — 어느 평면도 요소를 만나지 않는다.");
             console.info("  축별 결과: " + tally);
-            return 1;
+            return false;
         }
         axis = best;
         axisWhy = "auto (" + tally + ")";
@@ -412,7 +406,7 @@ int runSection(const std::string& yamlFile, ConsoleOutput& console) {
         axisWhy = "config: axis 를 지정했다";
     }
     const double atDefault = minArr[axis] + 0.5 * extArr[axis];
-    double at = c.hasAt ? c.at : atDefault;
+    double at = hasAt ? atIn : atDefault;
 
     // ── ★평면이 절점층에 걸렸으면 ε 비켜 다시 자른다.
     //    실측: 배터리 z=0.528(층 경계)에서 다각형 4,800 → 9,600(두 배), 절점 적중 115,200.
@@ -435,25 +429,10 @@ int runSection(const std::string& yamlFile, ConsoleOutput& console) {
         console.error("이 평면은 아무 요소도 자르지 않는다 — 그림을 내지 않는다.");
         console.info("  축 " + std::string(1, AX[axis]) + " · 위치 " + std::to_string(at));
         console.info("  셸만 있는 덱을 셸 평면과 평행한 축으로 자르면 이렇게 된다. axis 를 바꿔 보라.");
-        return 1;
+        return false;
     }
 
     // ── 파트 메타 ──
-    struct PartInfo {
-        int pid = 0;
-        std::string title;
-        long long polys = 0;
-        bool shell = false;
-        double thickness = 0.0;
-        std::string thickWhy;
-        double E = 0.0;
-        // 단면 안에서 이 파트가 차지하는 2D 범위 — 그리는 쪽이 **최소 피처**를 알아야
-        // 선 굵기가 층을 먹는지 판정할 수 있다(실측: 실제 셸 적층 두께 0.008~0.153).
-        double uMin = 1e300, uMax = -1e300, vMin = 1e300, vMax = -1e300;
-        double uExt() const { return (uMax > uMin) ? uMax - uMin : 0.0; }
-        double vExt() const { return (vMax > vMin) ? vMax - vMin : 0.0; }
-        double thin() const { return std::min(uExt(), vExt()); }
-    };
     std::map<int, PartInfo> pinfo;
     for (const Poly& p : polys) {
         PartInfo& pi = pinfo[p.pid];
@@ -502,19 +481,125 @@ int runSection(const std::string& yamlFile, ConsoleOutput& console) {
         }
     const double uExt = uMax - uMin, vExt = vMax - vMin;
 
-    const char* UV[3][2] = {{"y","z"},{"z","x"},{"x","y"}};
-    console.keyValue("Axis", std::string(1, AX[axis]));
-    console.keyValue("Axis chosen", axisWhy);
-    console.keyValue("Position", std::to_string(at) + (nudge > 0 ? "  (ε 비켰다)" : ""));
-    console.keyValue("Plane 2D basis", std::string("(") + UV[axis][0] + ", " + UV[axis][1] + ")");
-    console.keyValue("Polygons", std::to_string(polys.size()));
-    console.keyValue("Parts hit / total", std::to_string(hitPids.size()) + " / " +
-                     std::to_string(mesh.parts.size()));
-    console.keyValue("Node-on-plane hits", std::to_string(nodeHits));
-    console.keyValue("Degenerate cuts (<3 pts)", std::to_string(thinCuts));
-    console.keyValue("Section extent", std::to_string(uExt) + " x " + std::to_string(vExt));
+    // 최소 피처 — 가장 얇은 파트의 얇은 쪽 범위. 그리는 쪽이 이것으로 과장 배율과
+    // 선 굵기 경고를 정한다. 셸은 두께가 메시에 없으니 *SECTION_SHELL 값을 쓴다.
+    // ⚠ 보고는 호출부의 `report()` 가 한다 — 여기서 또 찍으면 두 덱일 때 두 번 나온다.
+    double minFeature = 1e300;
+    int minFeaturePid = 0;
+    for (const auto& [pid, pi] : pinfo) {
+        const double t = pi.shell ? (pi.thickness > 0 ? pi.thickness : 0.0) : pi.thin();
+        if (t > 0.0 && t < minFeature) { minFeature = t; minFeaturePid = pid; }
+    }
+    if (minFeature >= 1e300) minFeature = 0.0;
+
+    // 결과를 담는다
+    R.deck = deck;
+    R.axis = axis;
+    R.at = at;
+    R.nudge = nudge;
+    R.axisWhy = axisWhy;
+    R.polys = polys;
+    R.pinfo = pinfo;
+    R.hitPids = hitPids;
+    R.partsTotal = mesh.parts.size();
+    R.nodeHits = nodeHits;
+    R.thinCuts = thinCuts;
+    R.shellsExcluded = shellsExcluded;
+    R.uMin = uMin; R.uMax = uMax; R.vMin = vMin; R.vMax = vMax;
+    R.minFeature = minFeature;
+    R.minFeaturePid = minFeaturePid;
+    return true;
+}
+
+int runSection(const std::string& yamlFile, ConsoleOutput& console) {
+    Config c;
     {
-        const double big = std::max(uExt, vExt), small = std::min(uExt, vExt);
+        std::ifstream f(yamlFile);
+        if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
+        KooRemapper::yamlSkipBOM(f);
+        std::string ln;
+        while (std::getline(f, ln)) {
+            if (!ln.empty() && ln.back() == '\r') ln.pop_back();
+            const std::string t = trim(ln);
+            if (t.empty() || t[0] == '#') continue;
+            const size_t cp = t.find(':');
+            if (cp == std::string::npos) continue;
+            const std::string key = trim(t.substr(0, cp));
+            const std::string val = trim(yamlStripComment(t.substr(cp + 1)));
+            if (val.empty()) continue;
+            try {
+                if      (key == "model")     c.model = val;
+                else if (key == "output")    c.output = val;
+                else if (key == "max_parts") c.maxParts = std::stoi(val);
+                else if (key == "width")     c.width = std::stoi(val);
+                else if (key == "height")    c.height = std::stoi(val);
+                else if (key == "isotropic") c.isotropic = (val == "true" || val == "yes" || val == "1");
+                else if (key == "svg")       c.svg = !(val == "false" || val == "no" || val == "0");
+                else if (key == "compare")   c.compare = val;
+                else if (key == "mode") {
+                    if (val != "panels" && val != "overlay") {
+                        console.error("mode: 는 panels 또는 overlay 여야 한다 (받은 값: " + val + ")");
+                        return 1;
+                    }
+                    c.mode = val;
+                }
+                else if (key == "at")        { c.at = std::stod(val); c.hasAt = true; }
+                else if (key == "axis") {
+                    if      (val == "x")    c.axis = 0;
+                    else if (val == "y")    c.axis = 1;
+                    else if (val == "z")    c.axis = 2;
+                    else if (val == "auto") c.axis = -1;
+                    else { console.error("axis: 는 x, y, z, auto 중 하나여야 한다 (받은 값: " + val + ")"); return 1; }
+                }
+                else console.warning("모르는 키는 무시한다: " + key);
+            } catch (const std::exception&) {
+                console.error("숫자를 읽을 수 없다: " + key + ": " + val);
+                return 1;
+            }
+        }
+    }
+    if (c.model.empty())  { console.error("model: 이 필요하다"); return 1; }
+    if (c.output.empty()) { console.error("output: 이 필요하다"); return 1; }
+    if (c.maxParts < 1)   { console.error("max_parts 는 1 이상이어야 한다"); return 1; }
+    // 여백(70×2) + 범례(260) + 그림(최소 100) 이 들어가야 한다. **앞에서** 거른다 —
+    // 뒤에서 걸면 JSON 을 먼저 쓰고 실패해 반쪽 산출물이 남는다(내 첫 판이 그랬다).
+    if (c.width < 430 || c.height < 240) {
+        console.error("width 는 430 이상, height 는 240 이상이어야 한다 — "
+                      "여백 70x2 + 범례 260 + 그림 자리가 들어가야 한다. "
+                      "(받은 값: " + std::to_string(c.width) + "x" + std::to_string(c.height) + ")");
+        return 1;
+    }
+
+    // ── 덱을 자른다. compare 를 주면 둘. overlay 는 **같은 평면**으로 자른다(그것이 겹침의 뜻이다) ──
+    std::vector<SecResult> R(c.compare.empty() ? 1 : 2);
+    if (!computeSection(c, c.model, c.axis, c.hasAt, c.at, R[0], console)) return 1;
+    if (!c.compare.empty()) {
+        const bool overlay = (c.mode == "overlay");
+        if (!computeSection(c, c.compare, overlay ? R[0].axis : c.axis,
+                            overlay ? true : c.hasAt, overlay ? R[0].at : c.at, R[1], console))
+            return 1;
+        if (overlay)
+            console.info("겹침: 두 덱을 **같은 평면**(" + std::string(1, "xyz"[R[0].axis]) +
+                         " = " + std::to_string(R[0].at) + ")으로 잘랐다.");
+    }
+
+    const char* AX = "xyz";
+    static const char* UV[3][2] = {{"y","z"},{"z","x"},{"x","y"}};
+
+    // ── 한 덱의 매니페스트를 콘솔에 찍는다 ──
+    auto report = [&](const SecResult& R, const char* label) {
+        if (label) console.keyValue("Deck", std::string(label) + "  " + Platform::getFilename(R.deck));
+        console.keyValue("Axis", std::string(1, AX[R.axis]));
+        console.keyValue("Axis chosen", R.axisWhy);
+        console.keyValue("Position", std::to_string(R.at) + (R.nudge > 0 ? "  (ε 비켰다)" : ""));
+        console.keyValue("Plane 2D basis", std::string("(") + UV[R.axis][0] + ", " + UV[R.axis][1] + ")");
+        console.keyValue("Polygons", std::to_string(R.polys.size()));
+        console.keyValue("Parts hit / total", std::to_string(R.hitPids.size()) + " / " +
+                         std::to_string(R.partsTotal));
+        console.keyValue("Node-on-plane hits", std::to_string(R.nodeHits));
+        console.keyValue("Degenerate cuts (<3 pts)", std::to_string(R.thinCuts));
+        console.keyValue("Section extent", std::to_string(R.uExt()) + " x " + std::to_string(R.vExt()));
+        const double big = std::max(R.uExt(), R.vExt()), small = std::min(R.uExt(), R.vExt());
         if (big <= 0.0) {
             console.warning("단면이 한 점이다 — 그릴 것이 없다.");
         } else if (small < 1e-6 * big) {
@@ -522,97 +607,93 @@ int runSection(const std::string& yamlFile, ConsoleOutput& console) {
             console.warning("단면이 **선에 가깝다** — 한 방향 범위가 " + std::to_string(small) +
                             " 다. 축을 바꾸면 2차원 단면이 나온다.");
         } else {
-            const double ar = big / small;
-            console.keyValue("Section aspect", std::to_string(ar) + " : 1");
-            if (ar > 20.0)
+            console.keyValue("Section aspect", std::to_string(big / small) + " : 1");
+            if (big / small > 20.0)
                 console.info("참고: 종횡비가 커서 등축으로 그리면 얇은 쪽이 보이지 않는다 — "
-                             "그리는 쪽이 축마다 축척을 따로 잡고 배율을 적어야 한다.");
+                             "축마다 축척을 따로 잡고 배율을 적는다.");
         }
-    }
-    // 최소 피처 — 가장 얇은 파트의 얇은 쪽 범위. 그리는 쪽이 이것으로 과장 배율과
-    // 선 굵기 경고를 정한다. 셸은 두께가 메시에 없으니 *SECTION_SHELL 값을 쓴다.
-    double minFeature = 1e300;
-    int minFeaturePid = 0;
-    for (const auto& [pid, pi] : pinfo) {
-        const double t = pi.shell ? (pi.thickness > 0 ? pi.thickness : 0.0) : pi.thin();
-        if (t > 0.0 && t < minFeature) { minFeature = t; minFeaturePid = pid; }
-    }
-    if (minFeature < 1e300) {
-        const double big = std::max(uExt, vExt);
-        console.keyValue("Min feature", std::to_string(minFeature) + "  (PID " +
-                         std::to_string(minFeaturePid) + ")");
-        if (big > 0.0)
-            console.keyValue("Min feature / extent", std::to_string(minFeature / big) +
-                             "  → 1200px 등축이면 " + std::to_string(minFeature / big * 1200.0) + " px");
-    } else {
-        minFeature = 0.0;
-        console.warning("최소 피처를 못 구했다 — 두께를 읽은 파트가 없다.");
-    }
+        if (R.minFeature > 0.0)
+            console.keyValue("Min feature", std::to_string(R.minFeature) + "  (PID " +
+                             std::to_string(R.minFeaturePid) + ")");
+        else
+            console.warning("최소 피처를 못 구했다 — 두께를 읽은 파트가 없다.");
+    };
+    report(R[0], R.size() > 1 ? "A" : nullptr);
+    if (R.size() > 1) report(R[1], "B");
     console.info("단위: 알 수 없다 — LS-DYNA 덱은 단위를 담지 않는다.");
 
-    // ── 산출 JSON ──
+    // ── 산출 JSON. 단일 덱 모양을 **그대로** 두고 compare 를 덧붙인다(기존 소비자 보호) ──
     const std::string outPath = c.output + "_section.json";
     std::ofstream o(outPath);
     if (!o.is_open()) { console.error("Cannot write: " + outPath); return 1; }
     char buf[512];
+    auto emitManifest = [&](const SecResult& R, const std::string& ind) {
+        o << ind << "\"deck\": \"" << jesc(R.deck) << "\",\n";
+        o << ind << "\"axis\": \"" << AX[R.axis] << "\",\n";
+        std::snprintf(buf, sizeof(buf), "%s\"at\": %.17g,\n", ind.c_str(), R.at); o << buf;
+        std::snprintf(buf, sizeof(buf), "%s\"nudge\": %.17g,\n", ind.c_str(), R.nudge); o << buf;
+        o << ind << "\"axis_chosen_because\": \"" << jesc(R.axisWhy) << "\",\n";
+        o << ind << "\"basis\": [\"" << UV[R.axis][0] << "\", \"" << UV[R.axis][1] << "\"],\n";
+        o << ind << "\"units\": \"unknown — LS-DYNA decks carry no units\",\n";
+        o << ind << "\"polygons\": " << R.polys.size() << ",\n";
+        o << ind << "\"parts_hit\": " << R.hitPids.size() << ",\n";
+        o << ind << "\"parts_total\": " << R.partsTotal << ",\n";
+        o << ind << "\"node_plane_hits\": " << R.nodeHits << ",\n";
+        o << ind << "\"degenerate_cuts\": " << R.thinCuts << ",\n";
+        o << ind << "\"shells_excluded_from_jacobian\": " << R.shellsExcluded << ",\n";
+        std::snprintf(buf, sizeof(buf), "%s\"extent\": [%.17g, %.17g],\n",
+                      ind.c_str(), R.uExt(), R.vExt()); o << buf;
+        std::snprintf(buf, sizeof(buf), "%s\"bounds\": [%.17g, %.17g, %.17g, %.17g],\n",
+                      ind.c_str(), R.uMin, R.vMin, R.uMax, R.vMax); o << buf;
+        std::snprintf(buf, sizeof(buf), "%s\"min_feature\": %.17g,\n",
+                      ind.c_str(), R.minFeature); o << buf;
+        o << ind << "\"min_feature_pid\": " << R.minFeaturePid << ",\n";
+        o << ind << "\"parts\": [\n";
+        bool firstP = true;
+        for (const auto& [pid, pi] : R.pinfo) {
+            if (!firstP) o << ",\n";
+            firstP = false;
+            o << ind << "  {\"pid\": " << pid
+              << ", \"title\": \"" << jesc(pi.title) << "\""
+              << ", \"polys\": " << pi.polys
+              << ", \"shell\": " << (pi.shell ? "true" : "false");
+            o << ", \"thickness\": ";
+            if (pi.thickness > 0) { std::snprintf(buf, sizeof(buf), "%.17g", pi.thickness); o << buf; }
+            else o << "null";
+            o << ", \"thickness_note\": \"" << jesc(pi.thickWhy) << "\"";
+            std::snprintf(buf, sizeof(buf), ", \"E\": %.17g", pi.E); o << buf;
+            std::snprintf(buf, sizeof(buf), ", \"extent\": [%.9g, %.9g], \"thin\": %.9g",
+                          pi.uExt(), pi.vExt(), pi.thin()); o << buf;
+            o << "}";
+        }
+        o << "\n" << ind << "],\n";
+        o << ind << "\"polys\": [\n";
+        bool first = true;
+        for (const Poly& p : R.polys) {
+            if (!first) o << ",\n";
+            first = false;
+            o << ind << "  {\"pid\": " << p.pid << ", \"shell\": " << (p.shell ? "true" : "false")
+              << ", \"pts\": [";
+            for (size_t i = 0; i < p.pts.size(); ++i) {
+                std::snprintf(buf, sizeof(buf), "%s[%.9g,%.9g]", i ? "," : "",
+                              p.pts[i].u, p.pts[i].v);
+                o << buf;
+            }
+            o << "]}";
+        }
+        o << "\n" << ind << "]";
+    };
     o << "{\n";
     o << "  \"model\": \"" << jesc(c.model) << "\",\n";
-    o << "  \"axis\": \"" << AX[axis] << "\",\n";
-    std::snprintf(buf, sizeof(buf), "  \"at\": %.17g,\n", at); o << buf;
-    std::snprintf(buf, sizeof(buf), "  \"nudge\": %.17g,\n", nudge); o << buf;
-    o << "  \"axis_chosen_because\": \"" << jesc(axisWhy) << "\",\n";
-    o << "  \"basis\": [\"" << UV[axis][0] << "\", \"" << UV[axis][1] << "\"],\n";
-    o << "  \"units\": \"unknown — LS-DYNA decks carry no units\",\n";
-    o << "  \"polygons\": " << polys.size() << ",\n";
-    o << "  \"parts_hit\": " << hitPids.size() << ",\n";
-    o << "  \"parts_total\": " << mesh.parts.size() << ",\n";
-    o << "  \"node_plane_hits\": " << nodeHits << ",\n";
-    o << "  \"degenerate_cuts\": " << thinCuts << ",\n";
-    o << "  \"shells_excluded_from_jacobian\": " << shellsExcluded << ",\n";
-    std::snprintf(buf, sizeof(buf), "  \"extent\": [%.17g, %.17g],\n", uExt, vExt); o << buf;
-    std::snprintf(buf, sizeof(buf), "  \"bounds\": [%.17g, %.17g, %.17g, %.17g],\n",
-                  uMin, vMin, uMax, vMax); o << buf;
-    std::snprintf(buf, sizeof(buf), "  \"min_feature\": %.17g,\n", minFeature); o << buf;
-    o << "  \"min_feature_pid\": " << minFeaturePid << ",\n";
-    o << "  \"parts\": [\n";
-    bool firstP = true;
-    for (const auto& [pid, pi] : pinfo) {
-        if (!firstP) o << ",\n";
-        firstP = false;
-        o << "    {\"pid\": " << pid
-          << ", \"title\": \"" << jesc(pi.title) << "\""
-          << ", \"polys\": " << pi.polys
-          << ", \"shell\": " << (pi.shell ? "true" : "false");
-        o << ", \"thickness\": ";
-        if (pi.thickness > 0) {
-            std::snprintf(buf, sizeof(buf), "%.17g", pi.thickness);
-            o << buf;
-        } else {
-            o << "null";
-        }
-        o << ", \"thickness_note\": \"" << jesc(pi.thickWhy) << "\"";
-        std::snprintf(buf, sizeof(buf), ", \"E\": %.17g", pi.E);
-        o << buf;
-        std::snprintf(buf, sizeof(buf), ", \"extent\": [%.9g, %.9g], \"thin\": %.9g",
-                      pi.uExt(), pi.vExt(), pi.thin());
-        o << buf << "}";
+    o << "  \"mode\": \"" << (R.size() > 1 ? c.mode : std::string("single")) << "\",\n";
+    emitManifest(R[0], "  ");
+    if (R.size() > 1) {
+        o << ",\n  \"compare\": {\n";
+        emitManifest(R[1], "    ");
+        o << "\n  }";
     }
-    o << "\n  ],\n";
-    o << "  \"polys\": [\n";
-    bool first = true;
-    for (const Poly& p : polys) {
-        if (!first) o << ",\n";
-        first = false;
-        o << "    {\"pid\": " << p.pid << ", \"shell\": " << (p.shell ? "true" : "false") << ", \"pts\": [";
-        for (size_t i = 0; i < p.pts.size(); ++i) {
-            std::snprintf(buf, sizeof(buf), "%s[%.9g,%.9g]", i ? "," : "", p.pts[i].u, p.pts[i].v);
-            o << buf;
-        }
-        o << "]}";
-    }
-    o << "\n  ]\n}\n";
+    o << "\n}\n";
     o.close();
-
     console.success("Wrote: " + outPath);
 
     // ── 그림(SVG). 구현을 **한 자리**에 둔다 — 프런트와 MCP 가 각각 그리면 둘이 갈린다.
@@ -622,29 +703,18 @@ int runSection(const std::string& yamlFile, ConsoleOutput& console) {
     std::ofstream g(svgPath);
     if (!g.is_open()) { console.error("Cannot write: " + svgPath); return 1; }
 
-    const double M = 70.0;                       // 여백 — 눈금자·꼬리말 자리
+    const double M = 70.0;
     const double legendW = 260.0;
-    const double plotW = c.width - M - legendW;
+    const bool overlayMode = (R.size() > 1 && c.mode == "overlay");
+    const int panelCount = (R.size() > 1 && !overlayMode) ? 2 : 1;
+    const double gutter = (panelCount == 2) ? 40.0 : 0.0;
+    const double plotWTotal = c.width - M - legendW;
+    const double plotW = (plotWTotal - gutter) / panelCount;
     const double plotH = c.height - 2 * M;
     if (plotW < 100 || plotH < 100) {
         console.error("내부 오류: 그림 자리가 음수다 — width·height 검증이 새어 나왔다.");
         return 1;
     }
-    // ★비등방 축척이 **기본**이다. 실측 — 실제 적층은 가로:최박층이 1:9,375 라 등축으로 그리면
-    //   층이 보이지 않는다(1200px 에서 0.128 px). 그래서 두 축을 따로 잡고 **배율을 적는다.**
-    //   적지 않으면 두께를 과장한 그림이 그럴듯하게 나온다 — 그것이 가장 나쁜 실패다.
-    double sx = (uExt > 0) ? plotW / uExt : 1.0;
-    double sy = (vExt > 0) ? plotH / vExt : 1.0;
-    if (c.isotropic) { const double m2 = std::min(sx, sy); sx = sy = m2; }
-    // ★사람이 읽을 값으로 적는다. `sy/sx` 는 **역수**가 될 수 있다 — 실측 배터리 덱(축 y, 기저
-    //   (z,x))은 얇은 축이 u 이고 sy/sx = 0.0289 가 찍혔는데 실제로는 **u 가 34.6배 확대**된
-    //   것이다. 그래서 '어느 축이 몇 배 확대됐나' 로 적는다.
-    const int magAxisIdx = (sx >= sy) ? 0 : 1;                 // 0 = u(가로), 1 = v(세로)
-    const double magnify = (std::min(sx, sy) > 0) ? std::max(sx, sy) / std::min(sx, sy) : 1.0;
-    const char* magAxisName = UV[axis][magAxisIdx];
-
-    auto PX = [&](double u) { return M + (u - uMin) * sx; };
-    auto PY = [&](double v) { return (c.height - M) - (v - vMin) * sy; };   // y 를 위로
 
     g << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
     g << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" << c.width
@@ -652,106 +722,149 @@ int runSection(const std::string& yamlFile, ConsoleOutput& console) {
       << "\" font-family=\"Malgun Gothic, Apple SD Gothic Neo, Noto Sans KR, NanumGothic, sans-serif\">\n";
     g << "<rect width=\"" << c.width << "\" height=\"" << c.height << "\" fill=\"#ffffff\"/>\n";
 
-    // 다각형 — 선 굵기를 모델 단위로 환산해 최소 피처와 견준다
+    bool titleStripped = false;
     const double strokePx = 0.6;
-    const double mmPerPxX = (sx > 0) ? 1.0 / sx : 0.0;
-    const double mmPerPxY = (sy > 0) ? 1.0 / sy : 0.0;
-    // ★최소 피처가 **몇 픽셀**인가 — 그것이 판정 기준이다. 선 굵기를 **긴 축**의 해상도와
-    //   견주면 엉뚱한 답이 나온다(층을 덮는 획은 **얇은 축 방향**이다). 그래서 그 파트가 얇은
-    //   방향의 축척을 쓴다. 1.5px 미만이면 획을 줄여도 보이지 않는다.
-    double minFeaturePx = 0.0;
-    if (minFeature > 0.0) {
-        const PartInfo* mp = nullptr;
-        auto it = pinfo.find(minFeaturePid);
-        if (it != pinfo.end()) mp = &it->second;
-        const bool thinIsU = mp ? (mp->uExt() <= mp->vExt()) : (uExt <= vExt);
-        minFeaturePx = minFeature * (thinIsU ? sx : sy);
-    }
-    const bool featureTooThin = (minFeature > 0.0 && minFeaturePx < 1.5);
-    const bool strokeEatsFeature = (minFeature > 0.0 && strokePx >= minFeaturePx);
 
-    g << "<g stroke=\"#333333\" stroke-width=\"" << strokePx << "\" stroke-linejoin=\"round\">\n";
-    for (const Poly& p : polys) {
-        const char* col = colorFor(p.pid);
-        if (p.shell) {
-            // 셸은 두께가 메시에 없다 — 아는 경우에만 띠로, 모르면 **점선**으로 그린다.
-            const PartInfo& pi = pinfo[p.pid];
-            if (pi.thickness > 0 && p.pts.size() == 2) {
-                const double du = p.pts[1].u - p.pts[0].u, dv = p.pts[1].v - p.pts[0].v;
-                const double L = std::sqrt(du * du + dv * dv);
-                if (L > 0) {
-                    const double nu = -dv / L * 0.5 * pi.thickness;
-                    const double nv =  du / L * 0.5 * pi.thickness;
-                    char b[256];
-                    std::snprintf(b, sizeof(b),
-                        "<polygon points=\"%.3f,%.3f %.3f,%.3f %.3f,%.3f %.3f,%.3f\" fill=\"%s\" fill-opacity=\"0.85\"/>\n",
-                        PX(p.pts[0].u + nu), PY(p.pts[0].v + nv), PX(p.pts[1].u + nu), PY(p.pts[1].v + nv),
-                        PX(p.pts[1].u - nu), PY(p.pts[1].v - nv), PX(p.pts[0].u - nu), PY(p.pts[0].v - nv), col);
-                    g << b;
+    // 한 칸을 그린다. overlay 면 같은 칸에 둘을 겹친다(A 채움 · B 점선).
+    struct PanelInfo { double magnify = 1.0; const char* magAxis = "?"; double minFeaturePx = 0.0; };
+    std::vector<PanelInfo> pans;
+
+    auto drawPanel = [&](const std::vector<const SecResult*>& group, int slot) {
+        // 칸의 좌표 범위는 그 칸에 올리는 것들의 합집합이다(겹침이면 둘 다 들어가야 한다)
+        double uMin = 1e300, uMax = -1e300, vMin = 1e300, vMax = -1e300;
+        for (const SecResult* r : group) {
+            uMin = std::min(uMin, r->uMin); uMax = std::max(uMax, r->uMax);
+            vMin = std::min(vMin, r->vMin); vMax = std::max(vMax, r->vMax);
+        }
+        const double uE = (uMax > uMin) ? uMax - uMin : 0.0;
+        const double vE = (vMax > vMin) ? vMax - vMin : 0.0;
+        const double x0 = M + slot * (plotW + gutter);
+        // ★비등방이 기본. 등축으로 그리면 실제 적층(1:9,375)은 층이 보이지 않는다.
+        double sx = (uE > 0) ? plotW / uE : 1.0;
+        double sy = (vE > 0) ? plotH / vE : 1.0;
+        if (c.isotropic) { const double m2 = std::min(sx, sy); sx = sy = m2; }
+        PanelInfo pi;
+        pi.magnify = (std::min(sx, sy) > 0) ? std::max(sx, sy) / std::min(sx, sy) : 1.0;
+        pi.magAxis = UV[group[0]->axis][(sx >= sy) ? 0 : 1];
+
+        auto PX = [&](double u) { return x0 + (u - uMin) * sx; };
+        auto PY = [&](double v) { return (c.height - M) - (v - vMin) * sy; };
+
+        for (size_t gi = 0; gi < group.size(); ++gi) {
+            const SecResult& R2 = *group[gi];
+            const bool second = (gi == 1);
+            g << "<g stroke=\"#333333\" stroke-width=\"" << strokePx << "\" stroke-linejoin=\"round\""
+              << (second ? " fill=\"none\" stroke-dasharray=\"5 3\"" : "") << ">\n";
+            for (const Poly& p : R2.polys) {
+                const char* col = colorFor(p.pid);
+                if (p.shell) {
+                    auto pit = R2.pinfo.find(p.pid);
+                    const double th = (pit != R2.pinfo.end()) ? pit->second.thickness : 0.0;
+                    if (th > 0 && p.pts.size() == 2 && !second) {
+                        const double du = p.pts[1].u - p.pts[0].u, dv = p.pts[1].v - p.pts[0].v;
+                        const double Ln = std::sqrt(du * du + dv * dv);
+                        if (Ln > 0) {
+                            const double nu = -dv / Ln * 0.5 * th, nv = du / Ln * 0.5 * th;
+                            char b2[256];
+                            std::snprintf(b2, sizeof(b2),
+                                "<polygon points=\"%.3f,%.3f %.3f,%.3f %.3f,%.3f %.3f,%.3f\" fill=\"%s\" fill-opacity=\"0.85\"/>\n",
+                                PX(p.pts[0].u + nu), PY(p.pts[0].v + nv), PX(p.pts[1].u + nu), PY(p.pts[1].v + nv),
+                                PX(p.pts[1].u - nu), PY(p.pts[1].v - nv), PX(p.pts[0].u - nu), PY(p.pts[0].v - nv), col);
+                            g << b2;
+                            continue;
+                        }
+                    }
+                    char b2[256];
+                    std::snprintf(b2, sizeof(b2),
+                        "<line x1=\"%.3f\" y1=\"%.3f\" x2=\"%.3f\" y2=\"%.3f\" stroke=\"%s\" stroke-width=\"1.4\" stroke-dasharray=\"4 3\"/>\n",
+                        PX(p.pts[0].u), PY(p.pts[0].v), PX(p.pts[1].u), PY(p.pts[1].v), col);
+                    g << b2;
                     continue;
                 }
+                g << "<polygon";
+                if (second) g << " fill=\"none\" stroke=\"" << col << "\" stroke-width=\"1\"";
+                else        g << " fill=\"" << col << "\"";
+                g << " points=\"";
+                for (size_t i = 0; i < p.pts.size(); ++i) {
+                    char b2[64];
+                    std::snprintf(b2, sizeof(b2), "%s%.3f,%.3f", i ? " " : "",
+                                  PX(p.pts[i].u), PY(p.pts[i].v));
+                    g << b2;
+                }
+                g << "\"/>\n";
             }
-            char b[256];
-            std::snprintf(b, sizeof(b),
-                "<line x1=\"%.3f\" y1=\"%.3f\" x2=\"%.3f\" y2=\"%.3f\" stroke=\"%s\" stroke-width=\"1.4\" stroke-dasharray=\"4 3\"/>\n",
-                PX(p.pts[0].u), PY(p.pts[0].v), PX(p.pts[1].u), PY(p.pts[1].v), col);
-            g << b;
-            continue;
+            g << "</g>\n";
         }
-        g << "<polygon fill=\"" << col << "\" points=\"";
-        for (size_t i = 0; i < p.pts.size(); ++i) {
-            char b[64];
-            std::snprintf(b, sizeof(b), "%s%.3f,%.3f", i ? " " : "", PX(p.pts[i].u), PY(p.pts[i].v));
-            g << b;
-        }
-        g << "\"/>\n";
-    }
-    g << "</g>\n";
 
-    // 눈금자를 **두 축에 각각** 둔다 — 하나만 두면 과장된 축에서 사람이 잘못 읽는다
-    auto niceStep = [](double span) {
-        if (span <= 0) return 1.0;
-        const double raw = span / 4.0;
-        const double mag = std::pow(10.0, std::floor(std::log10(raw)));
-        const double n = raw / mag;
-        const double m = (n < 1.5) ? 1.0 : (n < 3.5) ? 2.0 : (n < 7.5) ? 5.0 : 10.0;
-        return m * mag;
+        // ★최소 피처가 **몇 픽셀**인가 — 그것이 판정 기준이다. 층을 덮는 획은 얇은 축 방향이다.
+        const SecResult& R0 = *group[0];
+        if (R0.minFeature > 0.0) {
+            auto it = R0.pinfo.find(R0.minFeaturePid);
+            const bool thinIsU = (it != R0.pinfo.end())
+                                   ? (it->second.uExt() <= it->second.vExt()) : (uE <= vE);
+            pi.minFeaturePx = R0.minFeature * (thinIsU ? sx : sy);
+        }
+
+        // 눈금자를 **두 축에 각각** — 하나만 두면 과장된 축에서 사람이 잘못 읽는다
+        auto niceStep = [](double span) {
+            if (span <= 0) return 1.0;
+            const double raw = span / 4.0;
+            const double mag = std::pow(10.0, std::floor(std::log10(raw)));
+            const double n = raw / mag;
+            const double m = (n < 1.5) ? 1.0 : (n < 3.5) ? 2.0 : (n < 7.5) ? 5.0 : 10.0;
+            return m * mag;
+        };
+        char b[512];
+        g << "<g font-size=\"11\" fill=\"#444444\" stroke=\"none\">\n";
+        std::snprintf(b, sizeof(b),
+            "<line x1=\"%.2f\" y1=\"%.2f\" x2=\"%.2f\" y2=\"%.2f\" stroke=\"#444\" stroke-width=\"1\"/>\n",
+            PX(uMin), c.height - M + 14, PX(uMin + niceStep(uE)), c.height - M + 14);
+        g << b;
+        std::snprintf(b, sizeof(b), "<text x=\"%.2f\" y=\"%.2f\">%s %.6g (가로 눈금)</text>\n",
+                      PX(uMin), c.height - M + 30, UV[R0.axis][0], niceStep(uE));
+        g << b;
+        std::snprintf(b, sizeof(b),
+            "<line x1=\"%.2f\" y1=\"%.2f\" x2=\"%.2f\" y2=\"%.2f\" stroke=\"#444\" stroke-width=\"1\"/>\n",
+            x0 - 16, PY(vMin), x0 - 16, PY(vMin + niceStep(vE)));
+        g << b;
+        std::snprintf(b, sizeof(b),
+            "<text x=\"%.2f\" y=\"%.2f\" transform=\"rotate(-90 %.2f %.2f)\">%s %.6g (세로 눈금)</text>\n",
+            x0 - 22, PY(vMin), x0 - 22, PY(vMin), UV[R0.axis][1], niceStep(vE));
+        g << b;
+        // 칸 제목
+        std::string cap = Platform::getFilename(R0.deck);
+        if (group.size() > 1) cap += "  +  " + Platform::getFilename(group[1]->deck) + " (점선)";
+        std::snprintf(b, sizeof(b),
+            "<text x=\"%.2f\" y=\"%.2f\" font-size=\"12\" font-weight=\"bold\" fill=\"#222\">%s — 축 %c = %.6g</text>\n",
+            x0, M - 14, xesc(cap, &titleStripped).c_str(), AX[R0.axis], R0.at);
+        g << b;
+        g << "</g>\n";
+        pans.push_back(pi);
     };
-    char b[512];
-    const double stepU = niceStep(uExt), stepV = niceStep(vExt);
-    g << "<g font-size=\"11\" fill=\"#444444\" stroke=\"none\">\n";
-    std::snprintf(b, sizeof(b),
-        "<line x1=\"%.2f\" y1=\"%.2f\" x2=\"%.2f\" y2=\"%.2f\" stroke=\"#444\" stroke-width=\"1\"/>\n",
-        PX(uMin), c.height - M + 14, PX(uMin + stepU), c.height - M + 14);
-    g << b;
-    std::snprintf(b, sizeof(b), "<text x=\"%.2f\" y=\"%.2f\">%s %.6g (%s)</text>\n",
-                  PX(uMin), c.height - M + 30, UV[axis][0], stepU, "가로 눈금");
-    g << b;
-    std::snprintf(b, sizeof(b),
-        "<line x1=\"%.2f\" y1=\"%.2f\" x2=\"%.2f\" y2=\"%.2f\" stroke=\"#444\" stroke-width=\"1\"/>\n",
-        M - 16, PY(vMin), M - 16, PY(vMin + stepV));
-    g << b;
-    std::snprintf(b, sizeof(b), "<text x=\"%.2f\" y=\"%.2f\" transform=\"rotate(-90 %.2f %.2f)\">%s %.6g (세로 눈금)</text>\n",
-                  M - 22, PY(vMin), M - 22, PY(vMin), UV[axis][1], stepV);
-    g << b;
-    g << "</g>\n";
+
+    if (overlayMode) {
+        drawPanel({&R[0], &R[1]}, 0);
+    } else {
+        for (size_t i = 0; i < R.size(); ++i) drawPanel({&R[i]}, (int)i);
+    }
 
     // 범례를 **그림 안에 굽는다** — 따로 떨어지면 내보낸 SVG 가 혼자 못 선다
     double ly = M;
     const double lx = c.width - legendW + 10;
+    char b[512];
     g << "<g font-size=\"12\" stroke=\"none\">\n";
     std::snprintf(b, sizeof(b), "<text x=\"%.1f\" y=\"%.1f\" font-weight=\"bold\" fill=\"#222\">단면 — 축 %c = %.6g</text>\n",
-                  lx, ly, AX[axis], at);
+                  lx, ly, AX[R[0].axis], R[0].at);
     g << b; ly += 20;
-    bool titleStripped = false;
     int shown = 0, omitted = 0;
-    for (const auto& [pid, pi] : pinfo) {
-        if (shown >= c.maxParts) { omitted++; continue; }
+    for (const auto& [pid, pi] : R[0].pinfo) {
+        if (shown >= c.maxParts || ly > c.height - M - 90) { omitted = (int)R[0].pinfo.size() - shown; break; }
         ++shown;
         std::snprintf(b, sizeof(b), "<rect x=\"%.1f\" y=\"%.1f\" width=\"12\" height=\"12\" fill=\"%s\"/>\n",
                       lx, ly - 10, colorFor(pid));
         g << b;
-        const std::string t = pi.title.empty() ? ("pid " + std::to_string(pid)) : xesc(pi.title, &titleStripped);
+        const std::string t = pi.title.empty() ? ("pid " + std::to_string(pid))
+                                               : xesc(pi.title, &titleStripped);
         std::snprintf(b, sizeof(b), "<text x=\"%.1f\" y=\"%.1f\" fill=\"#222\">%d · %s</text>\n",
                       lx + 18, ly, pid, t.c_str());
         g << b; ly += 15;
@@ -762,57 +875,71 @@ int runSection(const std::string& yamlFile, ConsoleOutput& console) {
             else
                 std::snprintf(b, sizeof(b), "<text x=\"%.1f\" y=\"%.1f\" font-size=\"10\" fill=\"#a33\">셸 두께 없음 — 점선</text>\n",
                               lx + 18, ly);
-            g << b; ly += 14;
         } else {
             std::snprintf(b, sizeof(b), "<text x=\"%.1f\" y=\"%.1f\" font-size=\"10\" fill=\"#666\">두께(단면) %.6g · E %.6g</text>\n",
                           lx + 18, ly, pi.thin(), pi.E);
-            g << b; ly += 14;
         }
-        if (ly > c.height - M - 90) { omitted = (int)pinfo.size() - shown; break; }
+        g << b; ly += 14;
     }
     if (omitted > 0) {
         std::snprintf(b, sizeof(b), "<text x=\"%.1f\" y=\"%.1f\" font-size=\"11\" fill=\"#a33\">… 파트 %d개를 뺐다 (전체 %zu)</text>\n",
-                      lx, ly + 4, omitted, pinfo.size());
-        g << b; ly += 18;
+                      lx, ly + 4, omitted, R[0].pinfo.size());
+        g << b;
     }
     g << "</g>\n";
 
     // ★꼬리말 — 그림이 거짓말하지 않게 하는 줄들. **배율을 적는 것이 기능의 일부다.**
     double fy = c.height - 34;
+    bool anyTooThin = false;
     g << "<g font-size=\"11\" fill=\"#333\" stroke=\"none\">\n";
-    std::snprintf(b, sizeof(b),
-        "<text x=\"%.1f\" y=\"%.1f\">%s 축 %.4g배 확대 (가로 %.6g/px · 세로 %.6g/px) · 단위 없음(LS-DYNA 덱)</text>\n",
-        M, fy, magAxisName, magnify, mmPerPxX, mmPerPxY);
-    g << b; fy += 14;
-    std::snprintf(b, sizeof(b),
-        "<text x=\"%.1f\" y=\"%.1f\">파트 %zu/%zu · 다각형 %zu · 최소피처 %.6g = %.2f px%s%s</text>\n",
-        M, fy, hitPids.size(), mesh.parts.size(), polys.size(), minFeature, minFeaturePx,
-        nudge > 0 ? " · 평면이 절점층에 걸려 ε 비켰다" : "",
-        titleStripped ? " · 제목에 제어문자가 있어 ? 로 바꿨다" : "");
-    g << b; fy += 14;
-    if (featureTooThin) {
+    {
+        std::string mag;
+        for (size_t i = 0; i < pans.size(); ++i) {
+            char t[160];
+            std::snprintf(t, sizeof(t), "%s%s축 %.4g배 확대", i ? " · " : "",
+                          pans[i].magAxis, pans[i].magnify);
+            mag += t;
+        }
+        std::snprintf(b, sizeof(b), "<text x=\"%.1f\" y=\"%.1f\">%s · 단위 없음(LS-DYNA 덱)</text>\n",
+                      M, fy, mag.c_str());
+        g << b; fy += 14;
+    }
+    {
+        std::string line;
+        for (size_t i = 0; i < R.size(); ++i) {
+            char t[256];
+            std::snprintf(t, sizeof(t), "%s파트 %zu/%zu · 다각형 %zu · 최소피처 %.6g = %.2f px%s",
+                          i ? "  |  " : "", R[i].hitPids.size(), R[i].partsTotal,
+                          R[i].polys.size(), R[i].minFeature,
+                          i < pans.size() ? pans[i].minFeaturePx : pans[0].minFeaturePx,
+                          R[i].nudge > 0 ? " · ε 비켰다" : "");
+            line += t;
+            const double px = (i < pans.size() ? pans[i].minFeaturePx : pans[0].minFeaturePx);
+            if (R[i].minFeature > 0.0 && px < 1.5) anyTooThin = true;
+        }
+        if (titleStripped) line += " · 제목에 제어문자가 있어 ? 로 바꿨다";
+        std::snprintf(b, sizeof(b), "<text x=\"%.1f\" y=\"%.1f\">%s</text>\n", M, fy, line.c_str());
+        g << b; fy += 14;
+    }
+    if (anyTooThin) {
         std::snprintf(b, sizeof(b),
-            "<text x=\"%.1f\" y=\"%.1f\" fill=\"#a33\">⚠ 최소피처가 %.2f px 다 — 이 그림에서 그 층은 보이지 않는다(획을 줄여도 안 보인다)</text>\n",
-            M, fy, minFeaturePx);
-        g << b;
-    } else if (strokeEatsFeature) {
-        std::snprintf(b, sizeof(b),
-            "<text x=\"%.1f\" y=\"%.1f\" fill=\"#a33\">⚠ 선 굵기(%.2f px)가 최소피처(%.2f px)만 하다 — 층이 붙어 보이는 것은 획이다</text>\n",
-            M, fy, strokePx, minFeaturePx);
+            "<text x=\"%.1f\" y=\"%.1f\" fill=\"#a33\">⚠ 최소피처가 1.5 px 미만이다 — 이 그림에서 그 층은 보이지 않는다(획을 줄여도 안 보인다)</text>\n",
+            M, fy);
         g << b;
     }
     g << "</g>\n</svg>\n";
     g.close();
 
-    if (featureTooThin)
-        console.warning("최소 피처가 " + std::to_string(minFeaturePx) +
-                        " px 다 — 이 그림에서 그 층은 보이지 않는다. width·height 를 키우거나 "
-                        "범위를 좁히라(획을 줄여도 안 보인다).");
-    else if (strokeEatsFeature)
-        console.warning("선 굵기가 최소 피처만 하다 — 층이 붙어 보이는 것은 기하가 아니라 획이다.");
-    console.keyValue("Magnified axis", std::string(magAxisName) + "  x" +
-                     std::to_string(magnify) + (c.isotropic ? "  (등축이라 1)" : ""));
-    console.keyValue("Min feature in px", std::to_string(minFeaturePx));
+    if (anyTooThin)
+        console.warning("최소 피처가 1.5 px 미만이다 — 이 그림에서 그 층은 보이지 않는다. "
+                        "width·height 를 키우거나 범위를 좁히라(획을 줄여도 안 보인다).");
+    for (size_t i = 0; i < pans.size(); ++i)
+        console.keyValue(std::string("Magnified axis") + (pans.size() > 1 ? (i ? " [B]" : " [A]") : ""),
+                         std::string(pans[i].magAxis) + "  x" + std::to_string(pans[i].magnify) +
+                         (c.isotropic ? "  (등축이라 1)" : ""));
+    for (size_t i = 0; i < pans.size(); ++i)
+        console.keyValue(std::string("Min feature in px") + (pans.size() > 1 ? (i ? " [B]" : " [A]") : ""),
+                         std::to_string(pans[i].minFeaturePx));
     console.success("Wrote: " + svgPath);
     return 0;
 }

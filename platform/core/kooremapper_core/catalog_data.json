@@ -13441,7 +13441,7 @@
       "name": "section",
       "category": "inspect",
       "summary": "메시를 평면으로 잘라 요소 다각형 + 매니페스트를 낸다 (그림의 엔진).",
-      "description": "Cut the mesh with an axis-aligned plane and write the element polygons, plus a manifest, to <output>_section.json. Edge-based: each element's edges are intersected with the plane, coincident points are merged, and the crossings are ordered angularly about the element centroid in the plane's own 2D basis. This matters because the shared face table is hex-shaped and its degeneracy test only catches all-four-equal, so a TET4 (stored with n5..n8 = n4) presents two collapsed faces as real ones; a face-based cut gets tets wrong. The hex 12-edge list alone is also not enough — applied to tet storage it drops the edge (n0,n2) — so the edge table is per type. The manifest is what keeps the figure from lying: it carries the axis and why it was chosen (with the per-axis tally), the parts hit versus the deck total, the count of nodes lying exactly on the plane and the epsilon the plane was nudged by, the degenerate-cut count, the section's 2D extent and aspect, the smallest feature in the section and which part it belongs to, per-part titles, shell thickness with its source, and Young's modulus. Writes no deck and no image.",
+      "description": "Cut the mesh with an axis-aligned plane and write the element polygons, plus a manifest, to <output>_section.json. Edge-based: each element's edges are intersected with the plane, coincident points are merged, and the crossings are ordered angularly about the element centroid in the plane's own 2D basis. This matters because the shared face table is hex-shaped and its degeneracy test only catches all-four-equal, so a TET4 (stored with n5..n8 = n4) presents two collapsed faces as real ones; a face-based cut gets tets wrong. The hex 12-edge list alone is also not enough — applied to tet storage it drops the edge (n0,n2) — so the edge table is per type. The manifest is what keeps the figure from lying: it carries the axis and why it was chosen (with the per-axis tally), the parts hit versus the deck total, the count of nodes lying exactly on the plane and the epsilon the plane was nudged by, the degenerate-cut count, the section's 2D extent and aspect, the smallest feature in the section and which part it belongs to, per-part titles, shell thickness with its source, and Young's modulus. Writes no deck and no image. With `compare` a second deck is drawn in the same figure, either side by side or overlaid on the identical plane. The figure itself is written as SVG with no external dependency: colours are a colourblind-safe categorical set keyed by part id so two figures can be compared, the legend is baked into the image, both axes get their own scale bar, and the footer carries the magnified axis and its factor, the parts hit, the smallest feature and its size in pixels, whether the plane was nudged, and the fact that the deck carries no units. A feature under 1.5 px is called out as invisible rather than drawn and left to look solid.",
       "invocation": "yaml",
       "config_style": "structured",
       "takes_kfile": true,
@@ -13496,6 +13496,63 @@
           "required": false,
           "description": "Reserved for the drawing side; the op itself emits every part it cut",
           "default": 60
+        },
+        {
+          "name": "compare",
+          "type": "file",
+          "role": "yaml_field",
+          "yaml_path": "compare",
+          "required": false,
+          "description": "Optional second deck drawn in the same figure. With mode=panels each deck picks its own axis and scale; with mode=overlay both are cut by the SAME plane (that is what an overlay means) and the second is drawn dashed. Node numbering is the pairing in this repo — linkage-fit and applyfold require matching node ids — so an overlay costs nothing to align"
+        },
+        {
+          "name": "mode",
+          "type": "enum",
+          "role": "yaml_field",
+          "yaml_path": "mode",
+          "required": false,
+          "description": "panels = side by side, overlay = one frame",
+          "enum": [
+            "panels",
+            "overlay"
+          ],
+          "default": "panels"
+        },
+        {
+          "name": "width",
+          "type": "integer",
+          "role": "yaml_field",
+          "yaml_path": "width",
+          "required": false,
+          "description": "SVG width in px (>= 430: margins 70x2 + legend 260 + plot)",
+          "default": 1200
+        },
+        {
+          "name": "height",
+          "type": "integer",
+          "role": "yaml_field",
+          "yaml_path": "height",
+          "required": false,
+          "description": "SVG height in px (>= 240)",
+          "default": 900
+        },
+        {
+          "name": "isotropic",
+          "type": "boolean",
+          "role": "yaml_field",
+          "yaml_path": "isotropic",
+          "required": false,
+          "description": "true draws both axes at one scale. The default is anisotropic because a real stack is 1:9,375 across and its thinnest layer lands on 0.13 px isometrically; the magnified axis and its factor are always written into the figure",
+          "default": false
+        },
+        {
+          "name": "svg",
+          "type": "boolean",
+          "role": "yaml_field",
+          "yaml_path": "svg",
+          "required": false,
+          "description": "false writes only the JSON",
+          "default": true
         }
       ],
       "example": {
@@ -13507,7 +13564,7 @@
         "note": "Cuts the bundled 3-layer stack; auto picks y (3 parts, 72 polygons) over z (1 part) and says so in axis_chosen_because"
       },
       "example_folder": "examples/stackwrap",
-      "notes": "Angular ordering is correct for a convex section. A flipped element (negative Jacobian) can order its crossings wrongly and the fill then lies, which is why the manifest carries the shell count excluded from Jacobian checks; 111 of this repo's 489 tracked fixtures contain negative Jacobians and are otherwise normal. The op asserts no units — LS-DYNA decks carry none. A section whose extent collapses in one direction is reported as 'close to a line' instead of printing an aspect ratio computed by dividing by ~0."
+      "notes": "Angular ordering is correct for a convex section. A flipped element (negative Jacobian) can order its crossings wrongly and the fill then lies, which is why the manifest carries the shell count excluded from Jacobian checks; 111 of this repo's 489 tracked fixtures contain negative Jacobians and are otherwise normal. The op asserts no units — LS-DYNA decks carry none. A section whose extent collapses in one direction is reported as 'close to a line' instead of printing an aspect ratio computed by dividing by ~0. The axis tie-break is the section's bounding area, not its polygon count: on a wrapped stack the y cut yields more polygons (90 vs 72) but fragments into 40 pieces because the plane crosses the arc repeatedly, while z gives the arc profile in 16 — and the areas (4.11 vs 6.66) pick z. Part titles are free text straight out of the *PART card, so they are XML-escaped and control characters become '?' with a note in the figure; XML 1.0 cannot carry them and one would otherwise make the whole SVG unreadable."
     },
     {
       "name": "stcx_fullangle_drop",

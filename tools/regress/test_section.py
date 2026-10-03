@@ -321,6 +321,56 @@ def main():
         except Exception as e:
             jok, jwhy = False, str(e)
         check("L-7 JSON 도 파싱된다", jok, jwhy)
+        # ── M: 두 덱 — 두 칸(panels)과 겹침(overlay) ──
+        # 같은 적층을 z 로 0.05 옮긴 것을 '변형 후' 로 쓴다(절점 번호가 같다)
+        nodes3 = [(x, y, z + 0.05) for (x, y, z) in nodes]
+        deck(os.path.join(d, "stk2.k"), nodes3, elems, [1, 2, 3])
+        write_cfg(os.path.join(d, "pan.yaml"), model="stk.k", compare="stk2.k",
+                  mode="panels", output="pan")
+        rc, out = run(binary, d, "pan.yaml")
+        check("M-1 panels rc=0", rc == 0, out[-400:])
+        jp = load(d, "pan")
+        check("M-2 mode 가 panels", jp["mode"] == "panels", jp.get("mode"))
+        check("M-3 compare 매니페스트가 따로 있다", "compare" in jp and "polys" in jp["compare"],
+              list(jp.keys()))
+        check("M-4 두 덱 이름을 적는다",
+              jp["deck"].endswith("stk.k") and jp["compare"]["deck"].endswith("stk2.k"),
+              (jp.get("deck"), jp.get("compare", {}).get("deck")))
+        check("M-5 단일 덱 모양이 그대로다 (기존 소비자 보호)",
+              all(k in jp for k in ("axis", "at", "polygons", "parts", "polys", "min_feature")),
+              list(jp.keys()))
+        svgp = os.path.join(d, "pan_section.svg")
+        sp = open(svgp, encoding="utf-8").read()
+        check("M-6 두 칸에 두 덱 이름이 있다", "stk.k" in sp and "stk2.k" in sp)
+        check("M-7 칸마다 확대 배율을 적는다", sp.count("배 확대") >= 1 and "·" in sp)
+        check("M-8 두 칸의 보고가 각각 찍힌다 (A·B)",
+              "Deck:" in out and out.count("Deck:") == 2, out.count("Deck:"))
+
+        write_cfg(os.path.join(d, "ovl.yaml"), model="stk.k", compare="stk2.k",
+                  mode="overlay", output="ovl")
+        rc, out = run(binary, d, "ovl.yaml")
+        check("M-9 overlay rc=0", rc == 0, out[-400:])
+        jo = load(d, "ovl")
+        check("M-10 mode 가 overlay", jo["mode"] == "overlay", jo.get("mode"))
+        check("M-11 ★겹침은 **같은 평면**으로 자른다",
+              jo["axis"] == jo["compare"]["axis"] and near(jo["at"], jo["compare"]["at"], 1e-12),
+              (jo["axis"], jo["at"], jo["compare"]["axis"], jo["compare"]["at"]))
+        check("M-12 같은 평면으로 잘랐다고 **말한다**", "같은 평면" in out, out[-300:])
+        so = open(os.path.join(d, "ovl_section.svg"), encoding="utf-8").read()
+        check("M-13 겹침은 B 를 점선으로 그린다", "stroke-dasharray" in so)
+        check("M-14 겹침 SVG 에 두 덱 이름이 있다", "stk.k" in so and "stk2.k" in so)
+
+        for name, args in (("M-15 모르는 mode 는 rc=1",
+                            dict(model="stk.k", compare="stk2.k", mode="nope", output="x")),
+                           ("M-16 없는 compare 덱은 rc=1",
+                            dict(model="stk.k", compare="nope.k", output="x"))):
+            write_cfg(os.path.join(d, "mm.yaml"), **args)
+            rc, out = run(binary, d, "mm.yaml")
+            check(name, rc == 1, out[-200:])
+
+        # ── N: ★동점 규칙 — 다각형 수가 아니라 단면 넓이로 고른다 ──
+        check("N-1 축 선택 근거에 **넓이**가 들어 있다", "넓이" in jp["axis_chosen_because"],
+              jp["axis_chosen_because"])
     finally:
         shutil.rmtree(d, ignore_errors=True)
 
