@@ -13438,6 +13438,78 @@
       "notes": "shellmap treats axis=0 of the flat deck as the neutral plane and uses that coordinate as the normal offset. This op measures that assumption: it prints the offset of the neutral axis from axis=0 and warns when axis=0 falls outside the stack, or lies more than half the total thickness away from the neutral axis. *MAT_VISCOELASTIC field 2 is BULK, not E — the reader converts (E = 9KG/(3K+G)) but registers nothing when GI = 0, in which case that part is listed as excluded rather than counted as zero stiffness."
     },
     {
+      "name": "section",
+      "category": "inspect",
+      "summary": "메시를 평면으로 잘라 요소 다각형 + 매니페스트를 낸다 (그림의 엔진).",
+      "description": "Cut the mesh with an axis-aligned plane and write the element polygons, plus a manifest, to <output>_section.json. Edge-based: each element's edges are intersected with the plane, coincident points are merged, and the crossings are ordered angularly about the element centroid in the plane's own 2D basis. This matters because the shared face table is hex-shaped and its degeneracy test only catches all-four-equal, so a TET4 (stored with n5..n8 = n4) presents two collapsed faces as real ones; a face-based cut gets tets wrong. The hex 12-edge list alone is also not enough — applied to tet storage it drops the edge (n0,n2) — so the edge table is per type. The manifest is what keeps the figure from lying: it carries the axis and why it was chosen (with the per-axis tally), the parts hit versus the deck total, the count of nodes lying exactly on the plane and the epsilon the plane was nudged by, the degenerate-cut count, the section's 2D extent and aspect, the smallest feature in the section and which part it belongs to, per-part titles, shell thickness with its source, and Young's modulus. Writes no deck and no image.",
+      "invocation": "yaml",
+      "config_style": "structured",
+      "takes_kfile": true,
+      "requires_gmsh": false,
+      "requires_tetgen": false,
+      "params": [
+        {
+          "name": "model",
+          "type": "file",
+          "role": "yaml_field",
+          "yaml_path": "model",
+          "required": true,
+          "description": "Deck to cut (k-file). Must contain the geometry — a master deck that only holds *INCLUDE cards is refused, with the include list, rather than producing an empty figure"
+        },
+        {
+          "name": "output",
+          "type": "string",
+          "role": "yaml_field",
+          "yaml_path": "output",
+          "required": true,
+          "description": "Output prefix — writes <output>_section.json"
+        },
+        {
+          "name": "axis",
+          "type": "enum",
+          "role": "yaml_field",
+          "yaml_path": "axis",
+          "required": false,
+          "description": "Cut-plane normal. 'auto' excludes axes whose section collapses to a line, then takes the axis meeting the most parts, breaking ties on polygon count. Perpendicular-to-the-stack is NOT the rule: on a measured 61-part battery stack z meets 2 parts while x and y meet 59, and on a wrapped deck it is the other way round",
+          "enum": [
+            "auto",
+            "x",
+            "y",
+            "z"
+          ],
+          "default": "auto"
+        },
+        {
+          "name": "at",
+          "type": "number",
+          "role": "yaml_field",
+          "yaml_path": "at",
+          "required": false,
+          "description": "Plane position along the axis; omitted means the bounding-box centre. A plane landing exactly on a node layer — the layer boundary you most want to look at — is detected and nudged by epsilon, and both facts are reported",
+          "default": null
+        },
+        {
+          "name": "max_parts",
+          "type": "integer",
+          "role": "yaml_field",
+          "yaml_path": "max_parts",
+          "required": false,
+          "description": "Reserved for the drawing side; the op itself emits every part it cut",
+          "default": 60
+        }
+      ],
+      "example": {
+        "args": {
+          "model": "flat_stack.k",
+          "output": "flat_stack",
+          "axis": "auto"
+        },
+        "note": "Cuts the bundled 3-layer stack; auto picks y (3 parts, 72 polygons) over z (1 part) and says so in axis_chosen_because"
+      },
+      "example_folder": "examples/stackwrap",
+      "notes": "Angular ordering is correct for a convex section. A flipped element (negative Jacobian) can order its crossings wrongly and the fill then lies, which is why the manifest carries the shell count excluded from Jacobian checks; 111 of this repo's 489 tracked fixtures contain negative Jacobians and are otherwise normal. The op asserts no units — LS-DYNA decks carry none. A section whose extent collapses in one direction is reported as 'close to a line' instead of printing an aspect ratio computed by dividing by ~0."
+    },
+    {
       "name": "stcx_fullangle_drop",
       "category": "analysis",
       "summary": "Submit a full-angle (Fibonacci) LS-DYNA drop study to the stcx cluster",

@@ -38,6 +38,7 @@ DECLARED = {
     "src/commands/linkage_fit.cpp": (1, "덱 아님 — 군별 변환 YAML(applyfold 가 읽는다). 덱은 읽기만 한다"),
     "src/assembly/WarpageGrid.cpp": (3, "덱 아님 — 휨 진단용 _raw.dat / _curvature.dat / _warpage.vtk"),
     "src/commands/modelmeta.cpp": (1, "덱 아님 — 메타 JSON"),
+    "src/commands/section.cpp": (1, "덱 아님 — 단면 다각형 JSON(덱은 읽기만 한다)"),
     "src/util/Validator.cpp": (1, "덱 아님 — 검증 로그(append)"),
     "src/util/Logger.cpp": (1, "덱 아님 — 로그 파일"),
     "include/util/Logger.h": (1, "덱 아님 — 로그 스트림 멤버 선언"),

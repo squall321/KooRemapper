@@ -1072,6 +1072,14 @@ divisions: 20
      {"KooRemapper foldsurface fold.yaml", "KooRemapper refshell ref.yaml"},
      {},
      {"곡선 CSV 는 `x`·`y` 칸을 **이름으로** 찾는다 — foldsurface 산출물이 그대로 맞는다", "곡선은 x-y 평면, 폭은 +z 로 쓴다", "divisions 를 주면 **등현 길이**로 다시 뽑는다. width_divisions 를 0 으로 두면 종횡비 1:1", "감김은 (a, d, c, b) — 법선이 ŵ x û 쪽이다(직선 곡선이면 정확히 +y)", "현은 호보다 짧다 — 입력 길이와의 편차를 찍고 0.01% 넘으면 경고한다", "*PART·*SECTION_SHELL·*MAT_ELASTIC 까지 써서 덱이 혼자 선다(미정의 참조 0건)"}},
+    {"section", "정보·메타", "메시를 평면으로 잘라 요소 다각형 + 매니페스트", "단면 절단 section 적층 층 다각형 그림", "KooRemapper section <config.yaml>",
+     {{"sec.yaml", R"KRH(model: examples/stackwrap/flat_stack.k
+output: stack
+axis: auto
+)KRH"}},
+     {"KooRemapper section sec.yaml"},
+     {"examples/stackwrap/flat_stack.k"},
+     {"**모서리 기반**이다 — 면 테이블로 짜면 TET4 가 틀린다(면 0·3 이 가짜 면으로 통과한다)", "육면체 12 모서리 표를 TET 에 쓰면 모서리 (n0,n2) 가 빠진다 → 종류별 표를 쓴다", "★`axis: auto` 는 ① 선에 가까운 축을 빼고 ② 파트를 가장 많이 만나는 축 ③ 동점이면 다각형 수", "  '적층 방향에 수직' 이 규칙이 **아니다** — 실측 배터리 덱은 z 가 61 중 2파트, x·y 는 59파트", "★평면이 절점층에 정확히 걸리면(= 가장 보고 싶은 자리) **ε 비켜 다시 자르고 그 사실을 적는다**", "셸은 선분이 나온다 — 두께는 메시에 없고 *SECTION_SHELL 에서 읽으며 **출처를 적는다**", "매니페스트가 그림이 거짓말하지 않게 하는 장치다 — 축 선택 근거·맞은 파트 수/전체·절점 적중·", "  ε 비킴·퇴화 절단 수·단면 범위·종횡비·**최소 피처**·파트별 두께와 출처", "단위를 주장하지 않는다 — LS-DYNA 덱은 단위를 담지 않는다", "덱도 이미지도 쓰지 않는다. 산출은 JSON 하나다"}},
     {"neutralaxis", "정보·메타", "적층의 EI 가중 중립축·굽힘강성 계산", "중립축 적층 EI 굽힘강성 stack 중립면", "KooRemapper neutralaxis <mesh_file> [--axis x|y|z]",
      {{"box.yaml", R"KRH(output: box.k
 lx: 20.0

@@ -244,6 +244,7 @@ set(COMMAND_SOURCES
     src/commands/stackwrap.cpp
     src/commands/linkage_fit.cpp
     src/commands/applyfold.cpp
+    src/commands/section.cpp
     src/battery/BatteryWriter.cpp
     src/battery/BatteryMaterials.cpp
     src/battery/BatteryContacts.cpp

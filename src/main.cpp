@@ -78,6 +78,7 @@
 #include "commands/stackwrap.h"
 #include "commands/linkage_fit.h"
 #include "commands/applyfold.h"
+#include "commands/section.h"
 
 #include <iostream>
 #include <fstream>
@@ -2888,6 +2889,26 @@ static int runMain(int argc, char* argv[]) {
         }
         printBanner(console);
         return runApplyFold(argv[2], console);
+    }
+
+    // Plane section of a mesh (figure engine)
+    // @lat: [[commands/section]]
+    if (command == "section") {
+        if (argc < 3) {
+            console.error("Usage: KooRemapper section <config.yaml>");
+            console.info("Cuts the mesh with an axis-aligned plane and writes the element");
+            console.info("polygons plus a manifest to <output>_section.json.");
+            console.info("Edge-based, so TET4 (stored as a degenerate hex) is handled right.");
+            console.info("Minimal config:");
+            console.info("  model: stack.k");
+            console.info("  output: stack          # writes stack_section.json");
+            console.info("  axis: auto             # auto | x | y | z  (auto picks the axis");
+            console.info("                         #   that meets the most parts)");
+            console.info("  at: 0.5                # omit for the bbox centre");
+            return 1;
+        }
+        printBanner(console);
+        return runSection(argv[2], console);
     }
 
     // Unknown command
