@@ -320,6 +320,135 @@ async def download_result(
 
 
 @mcp.tool()
+async def mesh_section_figure(
+    session_id: str,
+    file_id: int,
+    ctx: Context,
+    axis: str = "auto",
+    at: float | None = None,
+    compare_file_id: int | None = None,
+    mode: str = "panels",
+    isotropic: bool = False,
+    width: int = 1200,
+    height: int = 900,
+    timeout_s: int = 180,
+) -> dict:
+    """격자(메시)를 평면으로 잘라 **단면 그림(SVG)** 과 그 매니페스트를 한 번에 돌려준다.
+    적층 덱의 층 경계·두께·재질을 눈으로 보려면 이것을 쓴다.
+
+    ⚠ **이 응답에 그림의 픽셀은 없다.** 챗·LLM 은 이미지 픽셀을 못 보므로, 그림의 요지가 되는
+    숫자를 **텍스트로** 함께 돌려준다 — 자른 축과 **왜 그 축인지**, 맞은 파트 수/전체, 평면이
+    절점층에 걸려 ε 비켰는지, 확대 축과 배율, 최소 피처와 그 픽셀값, 파트별 제목·두께·두께의
+    출처·E. 그림 자체는 `svg_file_id` 를 `download_result` 로 받으면 텍스트(SVG)로 온다.
+
+    축: `axis="auto"` 는 ① 단면이 선에 가까운 축을 빼고 ② 파트를 가장 많이 만나는 축 ③ 동점이면
+    단면 넓이가 큰 축을 고른다. **"적층 방향에 수직" 이 규칙이 아니다** — 실측으로 61파트 배터리
+    적층은 z 가 2파트뿐이고 x·y 가 59파트이며, 감긴 덱은 그 반대다. 고른 까닭이 응답에 들어온다.
+
+    축척: 기본은 **비등방**이고 확대 배율을 그림 안에 적는다. 실제 적층은 가로:최박층이 1:9,375
+    라 등축으로 그리면 층이 보이지 않는다(1200px 에서 0.13px). `isotropic=true` 를 주면 등축으로
+    그리고, 최소 피처가 1.5px 미만이면 "보이지 않는다" 고 말한다.
+
+    두 덱: `compare_file_id` 를 주면 한 그림에 둘을 올린다 — `mode="panels"` 는 칸마다 축과
+    축척을 따로(접힘 전/후에 맞다), `mode="overlay"` 는 **같은 평면**으로 잘라 겹친다(B 가 점선).
+    이 리포는 절점 번호 일치를 요구하므로 겹침 짝맞춤 비용이 0 이다.
+
+    단위는 주장하지 않는다 — LS-DYNA 덱은 단위를 담지 않는다.
+    """
+    import asyncio
+    import json as _json
+
+    if mode not in ("panels", "overlay"):
+        raise RuntimeError("mode 는 panels 또는 overlay 여야 합니다 (받은 값: %s)" % mode)
+    if axis not in ("auto", "x", "y", "z"):
+        raise RuntimeError("axis 는 auto, x, y, z 중 하나여야 합니다 (받은 값: %s)" % axis)
+
+    files = await _get(ctx, f"/sessions/{session_id}/files")
+    byid = {int(f["id"]): f for f in files}
+    if file_id not in byid:
+        raise RuntimeError(f"세션에 file_id={file_id} 가 없습니다. list_session_files 로 확인하세요.")
+    args: dict = {"model": byid[file_id]["filename"], "output": "section", "axis": axis,
+                  "isotropic": isotropic, "width": width, "height": height}
+    if at is not None:
+        args["at"] = at
+    if compare_file_id is not None:
+        if compare_file_id not in byid:
+            raise RuntimeError(f"세션에 compare_file_id={compare_file_id} 가 없습니다.")
+        args["compare"] = byid[compare_file_id]["filename"]
+        args["mode"] = mode
+
+    job = await _post(ctx, f"/sessions/{session_id}/jobs", {"operation": "section", "args": args})
+    job_id = job.get("id") or job.get("job_id")
+    if not job_id:
+        raise RuntimeError(f"잡을 만들지 못했습니다: {job}")
+
+    waited = 0.0
+    last = job
+    while waited < timeout_s:
+        await asyncio.sleep(1.0)
+        waited += 1.0
+        last = await _get(ctx, f"/jobs/{job_id}")
+        if last.get("status") in ("succeeded", "failed", "cancelled"):
+            break
+    if last.get("status") != "succeeded":
+        # 실패를 성공처럼 보이는 dict 로 돌려주지 않는다 — 다른 도구와 같은 규율이다.
+        raise RuntimeError(
+            "단면 잡이 끝나지 않았거나 실패했습니다: status=%s exit_code=%s job_id=%s "
+            "(get_job 으로 로그를 보세요)" % (last.get("status"), last.get("exit_code"), job_id))
+
+    outs = await _get(ctx, f"/jobs/{job_id}/outputs")
+    svg_id = json_id = None
+    for f in outs:
+        n = (f.get("filename") or "").lower()
+        if n.endswith(".svg"):
+            svg_id = int(f["id"])
+        elif n.endswith(".json"):
+            json_id = int(f["id"])
+    if json_id is None:
+        raise RuntimeError(f"단면 매니페스트(JSON)가 산출물에 없습니다: {[f.get('filename') for f in outs]}")
+
+    async with httpx.AsyncClient(base_url=API, timeout=120) as c:
+        r = await c.get(f"/sessions/{session_id}/files/{json_id}/download",
+                        headers=_forward_headers(ctx))
+    if r.status_code >= 400:
+        raise RuntimeError(f"매니페스트를 내려받지 못했습니다: HTTP {r.status_code}")
+    man = _json.loads(r.content.decode("utf-8"))
+
+    # ⚠ **다각형은 돌려주지 않는다.** 실측으로 286k 요소 덱의 단면 JSON 이 455KB 다 — 대화에
+    #   실으면 텍스트가 그림을 밀어낸다(챗은 텍스트를 이어 붙인 뒤 통째로 자른다).
+    def strip(m: dict, part_cap: int = 20) -> dict:
+        parts = m.get("parts") or []
+        out = {k: v for k, v in m.items() if k not in ("polys", "parts", "compare")}
+        out["parts"] = [
+            {"pid": p.get("pid"), "title": p.get("title"), "polys": p.get("polys"),
+             "shell": p.get("shell"), "thickness": p.get("thickness"),
+             "thickness_note": p.get("thickness_note"), "E": p.get("E"),
+             "thin": p.get("thin")}
+            for p in parts[:part_cap]
+        ]
+        if len(parts) > part_cap:
+            out["parts_omitted"] = len(parts) - part_cap
+        return out
+
+    res = {"job_id": job_id, "svg_file_id": svg_id, "manifest_file_id": json_id,
+           "section": strip(man)}
+    if "compare" in man:
+        res["compare_section"] = strip(man["compare"])
+    res["how_to_see_the_figure"] = (
+        "SVG 는 `download_result(session_id, svg_file_id)` 로 텍스트로 받을 수 있습니다. "
+        "Claude 의 시야에 그림을 넣는 PNG 경로는 아직 없습니다 — 지금은 사람이 브라우저에서 "
+        "보거나 SVG 를 저장해 엽니다(`save_result_to_path`)."
+    )
+    res["read_this_first"] = (
+        "그림이 거짓말하지 않게 하는 숫자들입니다. `axis_chosen_because` 로 축이 맞는지, "
+        "`parts_hit`/`parts_total` 로 층을 다 봤는지, `nudge`>0 이면 평면이 절점층에 걸려 ε "
+        "비킨 것, `min_feature` 가 작으면 그 층은 그림에서 보이지 않을 수 있습니다. "
+        "단위는 없습니다(LS-DYNA 덱)."
+    )
+    return res
+
+
+@mcp.tool()
 async def list_session_jobs(session_id: str, ctx: Context) -> list:
     """세션에서 실행된 Job 이력(상태/오퍼레이션/exit_code/생성시각).
     The job history of a session — status, operation, exit_code, timestamps."""

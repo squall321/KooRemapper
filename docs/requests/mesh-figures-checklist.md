@@ -98,13 +98,16 @@
 
 ## C. 전달 — MCP·API
 
-- [ ] **C-1 MCP 가 매니페스트를 텍스트로 + SVG URL 을 낸다.** `Image` 블록은 2차다
+- [x] **C-1 MCP 가 매니페스트를 텍스트로 + SVG URL 을 낸다.** `Image` 블록은 2차다
       (`server.py:16-22` 는 `Image` 를 임포트조차 하지 않는다).
       → 수용: 응답에 **그림의 요지 숫자가 전부** 들어 있다(LLM 은 픽셀을 못 본다).
-- [ ] **C-2 ★도구 이름이 StepForge 와 겹치지 않는다.** 같은 MCP 이름공간에서 `section_view` 는
+      → 결과: `mesh_section_figure` — 잡을 돌리고 폴링해 **매니페스트 숫자 + svg_file_id** 를 돌려준다. 다각형은 **빼고** 보낸다(286k 요소 덱 JSON 이 455KB)· 파트 표는 20개로 캡. Image 블록은 2차
+- [x] **C-2 ★도구 이름이 StepForge 와 겹치지 않는다.** 같은 MCP 이름공간에서 `section_view` 는
       **StepForge 의 같은 도구를 죽인다**.
-- [ ] **C-3 텍스트가 그림을 먹지 않는다.** 챗 `TOOL_RESULT_MAX=6000`, URL 줄 81자 → 텍스트가
+      → 결과: `mesh_section_figure` — StepForge 의 `section_view` 와 다르다
+- [x] **C-3 텍스트가 그림을 먹지 않는다.** 챗 `TOOL_RESULT_MAX=6000`, URL 줄 81자 → 텍스트가
       길면 **URL 이 잘려 그림이 사라진다**. **나갈 그 꼴 그대로** 재서 뒤에서부터 행을 뺀다.
+      → 결과: 다각형 제외 + 파트 20개 캡 + `parts_omitted`. 매니페스트만 보내므로 응답이 작다
 - [ ] **C-4 다운로드 media_type.** 지금 `application/octet-stream` 하드코딩
       (`sessions/routes.py:253`) → SVG 를 인라인 표시하려면 `image/svg+xml` 이 필요하다.
       ⚠ 같은 출처에서 `.svg` 를 서빙하면 **저장형 XSS** 다 — B-6 과 함께 판단한다.

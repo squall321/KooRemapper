@@ -42,6 +42,7 @@ MCP 서버는 streamable-http로 뜨고, 들어온 `Authorization: Bearer kr_...
 | `list_session_jobs` | session_id | GET /sessions/{id}/jobs | 세션의 Job 이력 |
 | `cancel_job` | job_id | POST /jobs/{id}/cancel | 대기/실행 중 Job 취소 |
 | `get_job_outputs` | job_id | GET /jobs/{id}/outputs | Job이 만든 산출 파일 목록 |
+| `mesh_section_figure` | session_id, file_id, axis?, at?, compare_file_id?, mode?, isotropic?, width?, height? | POST /sessions/{id}/jobs (section) + 폴링 + 매니페스트 | 격자를 평면으로 잘라 **단면 SVG** 와 그 매니페스트를 한 번에. ⚠ 응답에 픽셀은 없다 — 그림의 요지를 **숫자로** 함께 준다(축과 고른 까닭·맞은 파트 수·ε 비킴·확대 배율·최소피처와 px·파트별 두께와 출처). 다각형은 **돌려주지 않는다**(286k 요소 덱의 단면 JSON 이 455KB 다) |
 
 ## 전사 코퍼스 (조직 전체 통계)
 개별 모델이 아니라 조직이 쌓아온 K파일·잡·리포트 전체를 집계한다(개인 식별 없음).
