@@ -371,6 +371,77 @@ def main():
         # ── N: ★동점 규칙 — 다각형 수가 아니라 단면 넓이로 고른다 ──
         check("N-1 축 선택 근거에 **넓이**가 들어 있다", "넓이" in jp["axis_chosen_because"],
               jp["axis_chosen_because"])
+        # ── O: ★제목이 UTF-8 이 아닌 덱(CP949) — 그림이 **죽지 않아야** 한다 ──
+        # 실측 — 그대로 쓰면 UTF-8 선언 SVG 의 XML 파싱이 통째로 실패했다.
+        head = ["*KEYWORD", "*NODE"]
+        for i, (x, y, z) in enumerate(nodes2, start=1):
+            head.append("%8d%16.9f%16.9f%16.9f" % (i, x, y, z))
+        head += ["*ELEMENT_SOLID", "%8d%8d" % (1, 1) + "".join("%8d" % v for v in range(1, 9)),
+                 "*PART", "@T@", "%10d%10d%10d" % (1, 1, 1),
+                 "*SECTION_SOLID", "%10d%10d" % (1, 1),
+                 "*MAT_ELASTIC", "%10d%10.4g%10.6g%10.4g" % (1, 7.85e-9, 210000.0, 0.3), "*END"]
+        raw = ("\n".join(head) + "\n").encode("ascii").replace(
+            b"@T@", "알루미늄 집전체".encode("cp949"))
+        open(os.path.join(d, "cp949.k"), "wb").write(raw)
+        write_cfg(os.path.join(d, "cp.yaml"), model="cp949.k", output="cp", axis="z", at=0.5)
+        rc, out = run(binary, d, "cp.yaml")
+        check("O-1 rc=0 (CP949 제목에도 돈다)", rc == 0, out[-300:])
+        svgraw = open(os.path.join(d, "cp_section.svg"), "rb").read()
+        jsraw = open(os.path.join(d, "cp_section.json"), "rb").read()
+        try:
+            svgraw.decode("utf-8"); jsraw.decode("utf-8"); u8 = True
+        except UnicodeDecodeError:
+            u8 = False
+        check("O-2 산출이 **유효한 UTF-8** 이다", u8)
+        import xml.etree.ElementTree as ET
+        try:
+            ET.fromstring(svgraw); xok, xwhy = True, ""
+        except Exception as e:
+            xok, xwhy = False, str(e)
+        check("O-3 ★SVG 가 XML 로 파싱된다 (제목 하나로 그림이 죽지 않는다)", xok, xwhy)
+        jc = json.loads(jsraw.decode("utf-8"))
+        pc = jc["parts"][0]
+        check("O-4 UTF-8 이 아니었다고 **말한다**", pc.get("title_not_utf8") is True, pc)
+        check("O-5 원본 바이트를 16진으로 남겨 **복원할 수 있다**",
+              bytes.fromhex(pc.get("title_bytes_hex", "")).decode("cp949") == "알루미늄 집전체",
+              pc.get("title_bytes_hex"))
+        check("O-6 그림이 그 사실을 적는다", "UTF-8 이 아닌" in svgraw.decode("utf-8"),
+              [l for l in svgraw.decode("utf-8").splitlines() if "UTF-8" in l][:1])
+
+        # ── P: *PART 카드가 0개인 덱 — 범례가 조용히 비지 않게 ──
+        noP = ["*KEYWORD", "*NODE"]
+        for i, (x, y, z) in enumerate(nodes2, start=1):
+            noP.append("%8d%16.9f%16.9f%16.9f" % (i, x, y, z))
+        noP += ["*ELEMENT_SOLID", "%8d%8d" % (1, 7) + "".join("%8d" % v for v in range(1, 9)), "*END"]
+        open(os.path.join(d, "nopart.k"), "w", newline="\n").write("\n".join(noP) + "\n")
+        write_cfg(os.path.join(d, "np.yaml"), model="nopart.k", output="np", axis="z", at=0.5)
+        rc, out = run(binary, d, "np.yaml")
+        check("P-1 rc=0", rc == 0, out[-300:])
+        jn = load(d, "np")
+        check("P-2 *PART 수와 요소가 참조한 PID 수를 **둘 다** 낸다",
+              jn["parts_total"] == 0 and jn["parts_referenced_by_elements"] == 1,
+              (jn.get("parts_total"), jn.get("parts_referenced_by_elements")))
+        check("P-3 둘이 다르면 **경고한다**", "*PART 카드는" in out, out[-300:])
+        check("P-4 제목이 없으면 그 까닭을 적는다",
+              "*PART 카드가 없다" in (jn["parts"][0].get("thickness_note") or ""),
+              jn["parts"][0])
+
+        # ── Q: I10=Y (10칸) 덱 — 고정폭을 가정하지 않는다 ──
+        wide = ["*KEYWORD I10=Y", "*NODE"]
+        for i, (x, y, z) in enumerate(nodes2, start=1):
+            wide.append("%10d%16.9f%16.9f%16.9f" % (i, x, y, z))
+        wide += ["*ELEMENT_SOLID", "%10d%10d" % (1, 1) + "".join("%10d" % v for v in range(1, 9)),
+                 "*PART", "wide", "%10d%10d%10d" % (1, 1, 1),
+                 "*SECTION_SOLID", "%10d%10d" % (1, 1),
+                 "*MAT_ELASTIC", "%10d%10.4g%10.6g%10.4g" % (1, 7.85e-9, 210000.0, 0.3), "*END"]
+        open(os.path.join(d, "i10.k"), "w", newline="\n").write("\n".join(wide) + "\n")
+        write_cfg(os.path.join(d, "iw.yaml"), model="i10.k", output="iw", axis="z", at=0.5)
+        rc, out = run(binary, d, "iw.yaml")
+        check("Q-1 rc=0", rc == 0, out[-300:])
+        ji = load(d, "iw")
+        check("Q-2 I10=Y 덱의 단면 면적 = 1 (닫힌식)",
+              ji["polygons"] == 1 and near(poly_area(ji["polys"][0]["pts"]), 1.0),
+              (ji["polygons"], poly_area(ji["polys"][0]["pts"]) if ji["polygons"] else None))
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

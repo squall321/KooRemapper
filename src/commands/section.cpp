@@ -76,6 +76,54 @@ std::string jesc(const std::string& s) {
     return out;
 }
 
+// 문자열이 **유효한 UTF-8** 인가. 파트 제목은 덱 바이트 그대로이고 한국어 윈도 LS-DYNA 덱은
+// CP949 가 기본이다 — 그 바이트를 UTF-8 선언 SVG 에 그대로 쓰면 **XML 파싱이 통째로 실패해
+// 그림이 죽는다**(실측: 제목 "알루미늄 집전체" 를 CP949 로 넣으니 `not well-formed` 로 안 읽혔다).
+// 그래서 먼저 판정한다. 리포에 CP949 표를 싣지 않으므로 변환은 하지 않고, **읽을 수 있는 그림을
+// 내고 사실을 말한다** — 원본 바이트는 매니페스트에 16진으로 남겨 복원할 수 있게 한다.
+bool isUtf8(const std::string& s) {
+    size_t i = 0;
+    while (i < s.size()) {
+        const unsigned char c = static_cast<unsigned char>(s[i]);
+        size_t n = 0;
+        if (c < 0x80) n = 0;
+        else if ((c & 0xE0) == 0xC0) n = 1;
+        else if ((c & 0xF0) == 0xE0) n = 2;
+        else if ((c & 0xF8) == 0xF0) n = 3;
+        else return false;
+        if (i + n >= s.size() + (n ? 0 : 1)) { if (n) return false; }
+        for (size_t k = 1; k <= n; ++k) {
+            if (i + k >= s.size()) return false;
+            if ((static_cast<unsigned char>(s[i + k]) & 0xC0) != 0x80) return false;
+        }
+        i += n + 1;
+    }
+    return true;
+}
+
+std::string hexOf(const std::string& s) {
+    static const char* H = "0123456789abcdef";
+    std::string out;
+    out.reserve(s.size() * 2);
+    for (char ch : s) {
+        const unsigned char u = static_cast<unsigned char>(ch);
+        out += H[u >> 4];
+        out += H[u & 0xF];
+    }
+    return out;
+}
+
+// 비 ASCII 바이트를 `?` 로 바꾼다 — 읽을 수 있는 그림을 내기 위해서다(그리고 그 사실을 적는다).
+std::string asciiOnly(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    for (char ch : s) {
+        const unsigned char u = static_cast<unsigned char>(ch);
+        out += (u < 0x80) ? ch : '?';
+    }
+    return out;
+}
+
 // XML 이스케이프. 파트 제목은 `*PART` 다음 줄의 **자유 텍스트**라 무엇이든 들어 있다 —
 // STEP 라벨과 같은 노출이다. 그리고 XML 1.0 은 제어문자를 담지 못해 **이름에 \x01 하나면 SVG 가
 // 통째로 안 읽힌다**(StepForge 실측). 그래서 지우지 않고 보이는 기호로 바꾸고, 바꿨다는 사실을
@@ -122,6 +170,8 @@ struct PartInfo {
     double thickness = 0.0;
     std::string thickWhy;
     double E = 0.0;
+    bool titleNotUtf8 = false;    // 제목이 UTF-8 이 아니었다(CP949 등) — 그림을 죽이지 않으려면 알아야 한다
+    std::string titleHex;         // 그때의 원본 바이트(복원용)
     // 단면 안에서 이 파트가 차지하는 2D 범위 — 그리는 쪽이 **최소 피처**를 알아야
     // 선 굵기가 층을 먹는지 판정할 수 있다(실측: 실제 셸 적층 두께 0.008~0.153).
     double uMin = 1e300, uMax = -1e300, vMin = 1e300, vMax = -1e300;
@@ -138,7 +188,8 @@ struct SecResult {
     std::vector<Poly> polys;
     std::map<int, PartInfo> pinfo;
     std::set<int> hitPids;
-    size_t partsTotal = 0;
+    size_t partsTotal = 0;        // *PART 카드 수
+    size_t partsReferenced = 0;   // 요소가 **참조한** 서로 다른 PID 수 — 둘이 다를 수 있다
     long long nodeHits = 0, thinCuts = 0, shellsExcluded = 0;
     double uMin = 1e300, uMax = -1e300, vMin = 1e300, vMax = -1e300;
     double minFeature = 0.0;
@@ -450,7 +501,15 @@ bool computeSection(const Config& c, const std::string& deck, int axisPref,
             pi.thickWhy = "*PART 카드가 없다";
             continue;
         }
-        pi.title = pit->second.name;
+        // ★제목이 UTF-8 이 아니면 **그대로 쓰지 않는다** — UTF-8 선언 SVG 의 XML 파싱이
+        //   통째로 실패해 그림이 죽는다(실측). 읽을 수 있는 그림을 내고 사실을 적는다.
+        if (isUtf8(pit->second.name)) {
+            pi.title = pit->second.name;
+        } else {
+            pi.titleNotUtf8 = true;
+            pi.titleHex = hexOf(pit->second.name);
+            pi.title = asciiOnly(pit->second.name);
+        }
         auto mit = mesh.materials.find(pit->second.materialId);
         if (mit != mesh.materials.end()) pi.E = mit->second.E;
         if (pi.shell) {
@@ -502,6 +561,12 @@ bool computeSection(const Config& c, const std::string& deck, int axisPref,
     R.pinfo = pinfo;
     R.hitPids = hitPids;
     R.partsTotal = mesh.parts.size();
+    {   // 실측 — `foldable_flat.k` 는 요소 3,750개에 `*PART` **0개**다. 둘을 따로 세지 않으면
+        //   "파트 1/0" 처럼 버그로 읽히고, 범례가 조용히 비는 것도 못 알아챈다.
+        std::set<int> refd;
+        for (const auto& [eid2, e2] : mesh.elements) { (void)eid2; refd.insert(e2.partId); }
+        R.partsReferenced = refd.size();
+    }
     R.nodeHits = nodeHits;
     R.thinCuts = thinCuts;
     R.shellsExcluded = shellsExcluded;
@@ -596,6 +661,11 @@ int runSection(const std::string& yamlFile, ConsoleOutput& console) {
         console.keyValue("Polygons", std::to_string(R.polys.size()));
         console.keyValue("Parts hit / total", std::to_string(R.hitPids.size()) + " / " +
                          std::to_string(R.partsTotal));
+        if (R.partsReferenced != R.partsTotal) {
+            console.warning("*PART 카드는 " + std::to_string(R.partsTotal) + "개인데 요소가 참조한 PID 는 " +
+                            std::to_string(R.partsReferenced) +
+                            "개다 — 제목·재질·두께가 없는 파트가 있다(범례가 비는 까닭).");
+        }
         console.keyValue("Node-on-plane hits", std::to_string(R.nodeHits));
         console.keyValue("Degenerate cuts (<3 pts)", std::to_string(R.thinCuts));
         console.keyValue("Section extent", std::to_string(R.uExt()) + " x " + std::to_string(R.vExt()));
@@ -638,6 +708,7 @@ int runSection(const std::string& yamlFile, ConsoleOutput& console) {
         o << ind << "\"polygons\": " << R.polys.size() << ",\n";
         o << ind << "\"parts_hit\": " << R.hitPids.size() << ",\n";
         o << ind << "\"parts_total\": " << R.partsTotal << ",\n";
+        o << ind << "\"parts_referenced_by_elements\": " << R.partsReferenced << ",\n";
         o << ind << "\"node_plane_hits\": " << R.nodeHits << ",\n";
         o << ind << "\"degenerate_cuts\": " << R.thinCuts << ",\n";
         o << ind << "\"shells_excluded_from_jacobian\": " << R.shellsExcluded << ",\n";
@@ -661,6 +732,9 @@ int runSection(const std::string& yamlFile, ConsoleOutput& console) {
             if (pi.thickness > 0) { std::snprintf(buf, sizeof(buf), "%.17g", pi.thickness); o << buf; }
             else o << "null";
             o << ", \"thickness_note\": \"" << jesc(pi.thickWhy) << "\"";
+            if (pi.titleNotUtf8) {
+                o << ", \"title_not_utf8\": true, \"title_bytes_hex\": \"" << pi.titleHex << "\"";
+            }
             std::snprintf(buf, sizeof(buf), ", \"E\": %.17g", pi.E); o << buf;
             std::snprintf(buf, sizeof(buf), ", \"extent\": [%.9g, %.9g], \"thin\": %.9g",
                           pi.uExt(), pi.vExt(), pi.thin()); o << buf;
@@ -918,6 +992,17 @@ int runSection(const std::string& yamlFile, ConsoleOutput& console) {
             if (R[i].minFeature > 0.0 && px < 1.5) anyTooThin = true;
         }
         if (titleStripped) line += " · 제목에 제어문자가 있어 ? 로 바꿨다";
+        {
+            int notUtf8 = 0;
+            for (const auto& [pid2, pi2] : R[0].pinfo) { (void)pid2; if (pi2.titleNotUtf8) notUtf8++; }
+            if (notUtf8 > 0) {
+                char t2[160];
+                std::snprintf(t2, sizeof(t2),
+                    " · 제목이 UTF-8 이 아닌 파트 %d개(CP949 덱?) — 매니페스트의 title_bytes_hex 를 보라",
+                    notUtf8);
+                line += t2;
+            }
+        }
         std::snprintf(b, sizeof(b), "<text x=\"%.1f\" y=\"%.1f\">%s</text>\n", M, fy, line.c_str());
         g << b; fy += 14;
     }
