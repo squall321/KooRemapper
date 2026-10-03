@@ -442,6 +442,78 @@ def main():
         check("Q-2 I10=Y 덱의 단면 면적 = 1 (닫힌식)",
               ji["polygons"] == 1 and near(poly_area(ji["polys"][0]["pts"]), 1.0),
               (ji["polygons"], poly_area(ji["polys"][0]["pts"]) if ji["polygons"] else None))
+        # ── R: ★실제 비율(1:9,375) 픽스처 — `flat_stack.k` 로는 축척 결함이 안 잡힌다 ──
+        # 실측: 실제 적층은 가로 75 / 최박층 0.008 이다. 그 비율을 가진 픽스처를 따로 만든다.
+        LX, TH = 75.0, [0.012, 0.065, 0.020, 0.070, 0.008]
+        nodesR, elemsR, nid, idxR = [], [], 1, {}
+        zz = [0.0]
+        for t in TH:
+            zz.append(zz[-1] + t)
+        for k, z in enumerate(zz):
+            for j_ in (0, 1):
+                for i_ in (0, 1):
+                    nodesR.append((i_ * LX, j_ * 20.0, z))
+                    idxR[(i_, j_, k)] = nid
+                    nid += 1
+        for k in range(len(TH)):
+            c = [idxR[(0,0,k)], idxR[(1,0,k)], idxR[(1,1,k)], idxR[(0,1,k)],
+                 idxR[(0,0,k+1)], idxR[(1,0,k+1)], idxR[(1,1,k+1)], idxR[(0,1,k+1)]]
+            elemsR.append((k + 1, c))
+        deck(os.path.join(d, "thin.k"), nodesR, elemsR, list(range(1, len(TH) + 1)))
+        write_cfg(os.path.join(d, "r1.yaml"), model="thin.k", output="r1", axis="y")
+        rc, out = run(binary, d, "r1.yaml")
+        check("R-1 rc=0", rc == 0, out[-300:])
+        jr = load(d, "r1")
+        check("R-2 최소피처 = 0.008 (가장 얇은 층)", near(jr["min_feature"], 0.008, 1e-9),
+              jr.get("min_feature"))
+        ratio = max(jr["extent"]) / jr["min_feature"]
+        check("R-3 ★실제 비율을 가진 픽스처다 (1:%d)" % round(ratio), ratio > 5000, ratio)
+        check("R-4 비등방 기본이면 그 층이 **보인다** (경고 없음)",
+              "1.5 px 미만" not in out, [l for l in out.splitlines() if "px" in l][:2])
+        write_cfg(os.path.join(d, "r2.yaml"), model="thin.k", output="r2", axis="y",
+                  isotropic="true")
+        rc, out2 = run(binary, d, "r2.yaml")
+        check("R-5 ★등축으로 강제하면 **보이지 않는다고 말한다**", "1.5 px 미만" in out2,
+              [l for l in out2.splitlines() if "px" in l][:2])
+        sr = open(os.path.join(d, "r2_section.svg"), encoding="utf-8").read()
+        check("R-6 그림 안에도 그 사실을 적는다", "보이지 않는다" in sr,
+              [l for l in sr.splitlines() if "px" in l][:1])
+
+        # ── S: ★요소 종류가 **섞인** 덱 — 조사는 순수 HEX8 만 쟀다 ──
+        # HEX8 + TET4 + PENTA6 를 한 덱에, z=0.5 로 자른 면적을 각각 닫힌식과 맞춘다.
+        mix = ["*KEYWORD", "*NODE"]
+        mv = []
+        # HEX8 (x 0..1)
+        mv += [(0,0,0),(1,0,0),(1,1,0),(0,1,0),(0,0,1),(1,0,1),(1,1,1),(0,1,1)]
+        # TET4 (x 2..3) — 꼭짓점 (2,0,0)(3,0,0)(2,1,0)(2,0,1)
+        mv += [(2,0,0),(3,0,0),(2,1,0),(2,0,1)]
+        # PENTA6 (x 4..5)
+        mv += [(4,0,0),(5,0,0),(4,1,0),(4,0,1),(5,0,1),(4,1,1)]
+        for i, (x, y, z) in enumerate(mv, start=1):
+            mix.append("%8d%16.9f%16.9f%16.9f" % (i, x, y, z))
+        mix.append("*ELEMENT_SOLID")
+        mix.append("%8d%8d" % (1, 1) + "".join("%8d" % v for v in [1,2,3,4,5,6,7,8]))
+        mix.append("%8d%8d" % (2, 2) + "".join("%8d" % v for v in [9,10,11,12,12,12,12,12]))
+        mix.append("%8d%8d" % (3, 3) + "".join("%8d" % v for v in [13,14,15,15,16,17,18,18]))
+        for pid in (1, 2, 3):
+            mix += ["*PART", "mix%d" % pid, "%10d%10d%10d" % (pid, pid, pid),
+                    "*SECTION_SOLID", "%10d%10d" % (pid, 1),
+                    "*MAT_ELASTIC", "%10d%10.4g%10.6g%10.4g" % (pid, 7.85e-9, 210000.0, 0.3)]
+        mix.append("*END")
+        open(os.path.join(d, "mix.k"), "w", newline="\n").write("\n".join(mix) + "\n")
+        write_cfg(os.path.join(d, "s1.yaml"), model="mix.k", output="s1", axis="z", at=0.5)
+        rc, out = run(binary, d, "s1.yaml")
+        check("S-1 rc=0 (섞인 덱)", rc == 0, out[-300:])
+        js = load(d, "s1")
+        check("S-2 세 요소가 모두 잘렸다", js["polygons"] == 3 and js["parts_hit"] == 3,
+              (js["polygons"], js["parts_hit"]))
+        byp = {}
+        for pl in js["polys"]:
+            byp[pl["pid"]] = poly_area(pl["pts"])
+        # 닫힌식 — HEX8 1.0 · TET4 (1-0.5)^2/2 = 0.125 · PENTA6 0.5(z 로 일정)
+        for pid, want, nm in ((1, 1.0, "HEX8"), (2, 0.125, "TET4"), (3, 0.5, "PENTA6")):
+            check("S-3 %s 단면 면적 = %.6g (닫힌식)" % (nm, want),
+                  pid in byp and near(byp[pid], want), byp.get(pid))
     finally:
         shutil.rmtree(d, ignore_errors=True)
 
