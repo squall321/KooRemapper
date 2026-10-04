@@ -864,6 +864,25 @@ elevation: 25
           "`wire: true` 면 모서리만. `ink_ratio` 가 1.0 을 넘으면 포화라고 경고한다(실측 1.94)",
           "삼각형을 **솎지 않는다** — 구멍이 뚫리면 그림이 거짓이다. 대신 SVG 크기를 말하고",
           "  5MB 를 넘으면 MCP 다운로드가 거절한다고 알린다(실측 12.2MB)"])
+op("stackdiagram", "정보·메타", "파트 축범위로 층 모식도 + 중립축", "적층 모식도 층 다이어그램 stackdiagram 중립축 두께",
+   "KooRemapper stackdiagram <config.yaml>",
+   needs=["examples/stackwrap/flat_stack.k"],
+   files={"sd.yaml": """model: examples/stackwrap/flat_stack.k
+output: stack
+axis: z
+"""},
+   cmds=["KooRemapper stackdiagram sd.yaml"], outputs=["stack_stackdiagram.svg"],
+   notes=["격자를 자르지 않는다 — 파트별 **축 범위**(사실상 AABB)만 쓰는 **모식도**다.",
+          "  그래서 평평한 적층에서는 빠르고 또렷하지만, 쓸 수 있는 덱이 제한된다",
+          "★범위가 포개지는 적층(감긴 셀)은 **거절한다** — 포갠 것을 층처럼 쌓으면 층 순서가",
+          "  거짓이 되고 그림은 그럴듯해 보인다. 그 덱은 `section` 으로 잘라서 봐야 한다",
+          "  (`force: true` 로 넘길 수 있지만 그림에 '믿지 말라' 고 적는다)",
+          "적층 전체를 **품는** 파트(케이스·탭)는 갈라내서 점선 외곽으로만 그린다 —",
+          "  실측에서 '전체의 90% 이상' 같은 분수 문턱은 88.4% 에서 빗나갔다(셸 띠가 분모를 늘린다)",
+          "`*MAT` 을 못 읽으면(포함 파일에 있는 흔한 경우) 층은 그리고 **중립축만** 생략한다",
+          "중립축·굽힘강성은 `neutralaxis` 와 **같은 계산**이다 — 숫자가 서로 다르면 결함이다",
+          "얇은 층은 min_bar_px 로 바닥 처리하므로 두께가 과장된다 — 그 층은 **옆 숫자가 참**이고",
+          "  그림이 아니다. 몇 층을 바닥 처리했는지 말한다"])
 op("neutralaxis", "정보·메타", "적층의 EI 가중 중립축·굽힘강성 계산", "중립축 적층 EI 굽힘강성 stack 중립면",
    "KooRemapper neutralaxis <mesh_file> [--axis x|y|z]",
    files={"box.yaml": BOX}, cmds=[BOX_CMD, "KooRemapper neutralaxis box.k"], outputs=[],

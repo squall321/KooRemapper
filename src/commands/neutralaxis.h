@@ -21,7 +21,11 @@ struct NaLayer {
 
 struct NaResult {
     bool ok = false;                       // 쓸 층이 하나라도 있었나
-    std::vector<NaLayer> layers;           // 축 방향 중심 순으로 정렬
+    std::vector<NaLayer> layers;           // 축 방향 중심 순으로 정렬 (E 를 읽은 것만)
+    // 두께는 읽었지만 **E 를 못 읽은** 층(E = 0). 중립축 계산에는 쓰지 않는다 — 0 으로 쓰면
+    // 가중이 거짓이 된다. 다만 **층 모식도는 E 가 필요 없으므로** 그쪽이 쓸 수 있게 남긴다.
+    // 실측 — 실제 전지 과제는 `*MAT` 가 포함 파일에 있어 메시 덱만 보면 E 가 전부 비어 있다.
+    std::vector<NaLayer> geomOnly;
     std::vector<std::string> skipped;      // 제외한 파트와 그 이유
     double neutral = 0.0;                  // z_n = ΣEtz / ΣEt
     double geometric = 0.0;                // Σtz / Σt

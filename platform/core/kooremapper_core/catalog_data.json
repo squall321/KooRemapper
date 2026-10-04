@@ -13661,6 +13661,108 @@
       "notes": "Triangles are never silently dropped — a shaded view with triangles removed has holes and is a lie — so the op reports the SVG size instead and warns past 5 MB, which is where MCP's download_result refuses to carry it through a conversation (measured 12.2 MB on a 286k-element deck; use save_result_to_path or narrow the view). Depth sorting is by triangle centroid, so triangles that pass through each other can be ordered wrongly; the figure says so. Part titles go through the same escaping as `section`, including the non-UTF-8 case that would otherwise make the whole SVG unparseable."
     },
     {
+      "name": "stackdiagram",
+      "category": "inspect",
+      "summary": "파트별 축 범위로 층 모식도를 그리고 중립축·기하 중심면을 함께 긋는다 (포개지는 적층은 거절한다).",
+      "description": "Draw the stack as a schematic from each part's extent along one axis, into <output>_stackdiagram.svg, with the EI-weighted neutral axis, the geometric mid-plane and axis=0 drawn across it. This is a schematic, not a cut: unlike `section`, which intersects the real geometry with a plane, this op uses only the axis-aligned extent of each part — effectively its AABB. That trade buys two things. No plane has to be chosen (`section` on a 61-part deck meets only one part if the axis is wrong), and the neutral axis appears in the same picture as the layers it was computed from. It costs the ability to read wound or folded stacks: measured on the wound deck `wrapped.k`, all three parts span z 0..1.0, so all three pairs overlap and no layer order exists to draw. In that case the op refuses and points at `section` rather than stacking overlapping ranges, because a schematic that invents a layer order looks entirely plausible and is the worst kind of wrong figure. Parts that strictly contain other layers (a case, a tab, a pouch) are separated out and drawn as dashed outlines instead of bars; the test is containment, not a fraction of the span, because a fraction threshold measured 88.4% on the battery deck's case and its denominator was inflated by shell bands sticking out past both ends. Layers whose modulus could not be read still draw — only the neutral axis is omitted, and the figure says so — because on real decks the *MAT cards live in an *INCLUDE file.",
+      "invocation": "yaml",
+      "config_style": "structured",
+      "takes_kfile": true,
+      "requires_gmsh": false,
+      "requires_tetgen": false,
+      "params": [
+        {
+          "name": "model",
+          "type": "file",
+          "role": "yaml_field",
+          "yaml_path": "model",
+          "required": true,
+          "description": "Deck to read (k-file); a deck holding only *INCLUDE cards is refused rather than drawn empty"
+        },
+        {
+          "name": "output",
+          "type": "string",
+          "role": "yaml_field",
+          "yaml_path": "output",
+          "required": true,
+          "description": "Output prefix — writes <output>_stackdiagram.svg"
+        },
+        {
+          "name": "axis",
+          "type": "string",
+          "role": "yaml_field",
+          "yaml_path": "axis",
+          "required": false,
+          "description": "Stacking axis: x, y or z. This is the direction layers are measured along, the same axis `neutralaxis` takes",
+          "default": "z"
+        },
+        {
+          "name": "force",
+          "type": "boolean",
+          "role": "yaml_field",
+          "yaml_path": "force",
+          "required": false,
+          "description": "true draws the figure even when solid parts' ranges overlap along the axis. The figure then carries a warning not to trust the layer order; use `section` instead",
+          "default": false
+        },
+        {
+          "name": "enclosure_min_inside",
+          "type": "integer",
+          "role": "yaml_field",
+          "yaml_path": "enclosure_min_inside",
+          "required": false,
+          "description": "How many other layers a part must strictly contain before it counts as enclosing (drawn as a dashed outline) rather than as a layer. Must be >= 1",
+          "default": 2
+        },
+        {
+          "name": "min_bar_px",
+          "type": "number",
+          "role": "yaml_field",
+          "yaml_path": "min_bar_px",
+          "required": false,
+          "description": "Floor in px for a layer's bar so a thin layer stays visible. A floored layer's drawn thickness is exaggerated, so the op counts how many were floored and the figure says the printed number is the truth, not the bar",
+          "default": 3.0
+        },
+        {
+          "name": "width",
+          "type": "integer",
+          "role": "yaml_field",
+          "yaml_path": "width",
+          "required": false,
+          "description": "SVG width in px (>= 430)",
+          "default": 900
+        },
+        {
+          "name": "height",
+          "type": "integer",
+          "role": "yaml_field",
+          "yaml_path": "height",
+          "required": false,
+          "description": "SVG height in px (>= 240)",
+          "default": 700
+        },
+        {
+          "name": "max_parts",
+          "type": "integer",
+          "role": "yaml_field",
+          "yaml_path": "max_parts",
+          "required": false,
+          "description": "Layers labelled before the rest are counted as omitted",
+          "default": 60
+        }
+      ],
+      "example": {
+        "args": {
+          "model": "flat_stack.k",
+          "output": "flat_stack",
+          "axis": "z"
+        },
+        "note": "Draws the bundled 3-layer stack with its neutral axis at z = 0.350465116279 — the same value `neutralaxis` reports on the same deck, because both call one computation"
+      },
+      "example_folder": "examples/stackwrap",
+      "notes": "The neutral axis, geometric mid-plane and bending stiffness come from the same computeNeutralAxis() as the `neutralaxis` op, so the two ops disagreeing on a deck is a defect, not a difference of method. Shell parts are expected to overlap solids — a shell is a mid-surface with a thickness band around it — so shell overlaps are reported separately and never refuse the figure; only solid-solid overlap does. Part titles go through the same escaping as `section`, including the non-UTF-8 title that would otherwise make the whole SVG unparseable."
+    },
+    {
       "name": "stcx_fullangle_drop",
       "category": "analysis",
       "summary": "Submit a full-angle (Fibonacci) LS-DYNA drop study to the stcx cluster",

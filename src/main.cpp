@@ -80,6 +80,7 @@
 #include "commands/applyfold.h"
 #include "commands/section.h"
 #include "commands/surfview.h"
+#include "commands/stackdiagram.h"
 
 #include <iostream>
 #include <fstream>
@@ -2930,6 +2931,26 @@ static int runMain(int argc, char* argv[]) {
         }
         printBanner(console);
         return runSurfView(argv[2], console);
+    }
+
+    // Layer stack diagram (schematic, with the neutral axis drawn on it)
+    // @lat: [[commands/stackdiagram]]
+    if (command == "stackdiagram") {
+        if (argc < 3) {
+            console.error("Usage: KooRemapper stackdiagram <config.yaml>");
+            console.info("Draws the layer stack as a schematic with the EI neutral axis, the");
+            console.info("geometric mid-plane and axis=0 marked, into <output>_stackdiagram.svg.");
+            console.info("No cut plane to choose — only the stacking axis.");
+            console.info("Refuses when the parts' axis ranges overlap (a wound or folded stack");
+            console.info("cannot be separated by bounding boxes); use `section` for real geometry.");
+            console.info("Minimal config:");
+            console.info("  model: stack.k");
+            console.info("  output: stack");
+            console.info("  axis: z");
+            return 1;
+        }
+        printBanner(console);
+        return runStackDiagram(argv[2], console);
     }
 
     // Unknown command

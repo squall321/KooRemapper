@@ -107,15 +107,20 @@ NaResult computeNeutralAxis(const Mesh& mesh, int axis) {
             // `*MAT_VISCOELASTIC` 은 GI=0 이면 리더가 등록하지 않는다 — 조용히 0 으로 쓰지 않고 말한다.
             R.skipped.push_back("PID " + std::to_string(pid) + ": MID " +
                                 std::to_string(pit->second.materialId) + " 의 E 를 못 읽었다");
+            // 두께는 읽었다 — 중립축에는 못 쓰지만 **층 모식도는 E 가 필요 없다.** 버리지 않는다.
+            L.E = 0.0;
+            R.geomOnly.push_back(L);
             continue;
         }
         L.E = mit->second.E;
         R.layers.push_back(L);
     }
 
-    if (R.layers.empty()) return R;
+    if (R.layers.empty()) return R;   // ok=false. geomOnly 는 채워져 있을 수 있다(모식도용)
 
     std::sort(R.layers.begin(), R.layers.end(),
+              [](const NaLayer& a, const NaLayer& b) { return a.c < b.c; });
+    std::sort(R.geomOnly.begin(), R.geomOnly.end(),
               [](const NaLayer& a, const NaLayer& b) { return a.c < b.c; });
 
     double sumTz = 0.0, sumEtz = 0.0;

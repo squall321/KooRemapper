@@ -246,6 +246,7 @@ set(COMMAND_SOURCES
     src/commands/applyfold.cpp
     src/commands/section.cpp
     src/commands/surfview.cpp
+    src/commands/stackdiagram.cpp
     src/battery/BatteryWriter.cpp
     src/battery/BatteryMaterials.cpp
     src/battery/BatteryContacts.cpp

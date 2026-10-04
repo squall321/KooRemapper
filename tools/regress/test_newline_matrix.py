@@ -80,6 +80,7 @@ EXCLUDE = {
     "neutralaxis": "읽기 전용 — 중립축을 콘솔에 보고만 한다",
     "section": "JSON 만 낸다(덱을 읽고 단면 다각형을 적는다) — 덱을 쓰지 않는다",
     "surfview": "SVG 만 낸다(덱을 읽고 자유면을 그린다) — 덱을 쓰지 않는다",
+    "stackdiagram": "SVG 만 낸다(파트 축범위로 층 모식도를 그린다) — 덱을 쓰지 않는다",
     "modelmeta": "메타 JSON 만 낸다",
     "strain": "CSV 만 낸다(ref_mesh/def_mesh 를 읽고 변형률 표를 쓴다)",
     "foldsurface": "CSV 만 낸다 — 덱을 읽지도 쓰지도 않는 순수 수치다",
