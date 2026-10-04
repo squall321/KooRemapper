@@ -43,6 +43,8 @@ MCP 서버는 streamable-http로 뜨고, 들어온 `Authorization: Bearer kr_...
 | `cancel_job` | job_id | POST /jobs/{id}/cancel | 대기/실행 중 Job 취소 |
 | `get_job_outputs` | job_id | GET /jobs/{id}/outputs | Job이 만든 산출 파일 목록 |
 | `mesh_section_figure` | session_id, file_id, axis?, at?, compare_file_id?, mode?, isotropic?, width?, height? | POST /sessions/{id}/jobs (section) + 폴링 + 매니페스트 | 격자를 평면으로 잘라 **단면 SVG** 와 그 매니페스트를 한 번에. ⚠ 응답에 픽셀은 없다 — 그림의 요지를 **숫자로** 함께 준다(축과 고른 까닭·맞은 파트 수·ε 비킴·확대 배율·최소피처와 px·파트별 두께와 출처). 다각형은 **돌려주지 않는다**(286k 요소 덱의 단면 JSON 이 455KB 다) |
+| `mesh_surface_figure` | session_id, file_id, azimuth?, elevation?, wire?, width?, height? | POST /sessions/{id}/jobs (surfview) + 폴링 + 로그 | 자유면만 뽑아 직교투영·깊이정렬로 그린 **겉모습 SVG**. 매니페스트가 없으므로 요지 숫자는 `report`(콘솔)로 온다 — 자유면 비율·**등진 삼각형 수**·ink_ratio. ⚠ **등축**이다(3D 를 늘이면 모양이 거짓이다) — 층 두께는 `mesh_section_figure`. ⚠ 큰 덱은 SVG 가 5MB 상한을 넘어 `download_result` 가 거절한다(실측 12.2MB) → `svg_bytes`·`download_warning` 을 보고 `save_result_to_path` |
+| `mesh_stack_diagram` | session_id, file_id, axis?, force?, width?, height? | POST /sessions/{id}/jobs (stackdiagram) + 폴링 + 로그 | 적층을 **층 모식도 SVG** 로 그리고 **중립축·기하 중심면·굽힘강성을 같은 그림에** 긋는다. 평면을 고를 필요가 없다. ⚠ **감긴 적층은 거절한다** — 솔리드 축 범위가 포개지면 층 순서가 없고, 포갠 것을 층처럼 쌓은 그림은 완전히 그럴듯해 보인다(그때는 `mesh_section_figure`). `*MAT` 이 없으면 층은 그리고 중립축만 생략한다 |
 
 ## 전사 코퍼스 (조직 전체 통계)
 개별 모델이 아니라 조직이 쌓아온 K파일·잡·리포트 전체를 집계한다(개인 식별 없음).

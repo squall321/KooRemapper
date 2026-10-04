@@ -319,6 +319,58 @@ async def download_result(
                 "note": "binary content returned as base64"}
 
 
+async def _run_figure_job(ctx: Context, session_id: str, operation: str,
+                          args: dict, timeout_s: int) -> tuple:
+    """그림 잡을 돌리고 끝날 때까지 기다린 뒤 `(job_id, outputs)` 를 준다.
+
+    실패를 성공처럼 보이는 dict 로 돌려주지 않는다 — 다른 도구와 같은 규율이다. 다만
+    **로그 꼬리를 에러에 붙인다.** 그림 op 의 rc=1 은 고장이 아니라 **판정**인 경우가 있다 —
+    `stackdiagram` 은 솔리드 축 범위가 포개지면 일부러 거절하고 `section` 을 쓰라고 말한다.
+    그 까닭이 로그에만 있으므로, 붙이지 않으면 호출자는 "실패" 만 보고 **왜** 를 못 본다.
+    """
+    import asyncio
+
+    job = await _post(ctx, f"/sessions/{session_id}/jobs", {"operation": operation, "args": args})
+    job_id = job.get("id") or job.get("job_id")
+    if not job_id:
+        raise RuntimeError(f"잡을 만들지 못했습니다: {job}")
+
+    waited = 0.0
+    last = job
+    while waited < timeout_s:
+        await asyncio.sleep(1.0)
+        waited += 1.0
+        last = await _get(ctx, f"/jobs/{job_id}")
+        if last.get("status") in ("succeeded", "failed", "cancelled"):
+            break
+    if last.get("status") != "succeeded":
+        raise RuntimeError(
+            "%s 잡이 끝나지 않았거나 실패했습니다: status=%s exit_code=%s job_id=%s\n--- 로그 ---\n%s"
+            % (operation, last.get("status"), last.get("exit_code"), job_id,
+               await _job_log_tail(ctx, job_id)))
+    return job_id, await _get(ctx, f"/jobs/{job_id}/outputs")
+
+
+async def _job_log_tail(ctx: Context, job_id: str, limit: int = 2500) -> str:
+    """잡 로그의 꼬리. `surfview`·`stackdiagram` 은 JSON 매니페스트가 없고 **그림의 요지 숫자가
+    콘솔에만** 있으므로(자유면 비율·등진 삼각형 수·ink_ratio·바닥 처리한 층 수·겹침 쌍 수)
+    이것이 그 둘의 매니페스트 노릇을 한다."""
+    try:
+        async with httpx.AsyncClient(base_url=API, timeout=60) as c:
+            r = await c.get(f"/jobs/{job_id}/logs", headers=_forward_headers(ctx))
+        return r.text[-limit:] if r.status_code < 400 else f"(로그를 읽지 못했습니다: HTTP {r.status_code})"
+    except Exception as e:  # 로그를 못 읽는 것이 그림을 못 쓴 것은 아니다
+        return f"(로그를 읽지 못했습니다: {e})"
+
+
+def _pick_svg(outs: list) -> tuple:
+    """산출물에서 `.svg` 를 찾아 `(file_id, size_bytes)`. 없으면 에러를 던진다."""
+    for f in outs:
+        if (f.get("filename") or "").lower().endswith(".svg"):
+            return int(f["id"]), int(f.get("size_bytes") or 0)
+    raise RuntimeError("그림(SVG)이 산출물에 없습니다: %s" % [f.get("filename") for f in outs])
+
+
 @mcp.tool()
 async def mesh_section_figure(
     session_id: str,
@@ -355,7 +407,6 @@ async def mesh_section_figure(
 
     단위는 주장하지 않는다 — LS-DYNA 덱은 단위를 담지 않는다.
     """
-    import asyncio
     import json as _json
 
     if mode not in ("panels", "overlay"):
@@ -377,26 +428,7 @@ async def mesh_section_figure(
         args["compare"] = byid[compare_file_id]["filename"]
         args["mode"] = mode
 
-    job = await _post(ctx, f"/sessions/{session_id}/jobs", {"operation": "section", "args": args})
-    job_id = job.get("id") or job.get("job_id")
-    if not job_id:
-        raise RuntimeError(f"잡을 만들지 못했습니다: {job}")
-
-    waited = 0.0
-    last = job
-    while waited < timeout_s:
-        await asyncio.sleep(1.0)
-        waited += 1.0
-        last = await _get(ctx, f"/jobs/{job_id}")
-        if last.get("status") in ("succeeded", "failed", "cancelled"):
-            break
-    if last.get("status") != "succeeded":
-        # 실패를 성공처럼 보이는 dict 로 돌려주지 않는다 — 다른 도구와 같은 규율이다.
-        raise RuntimeError(
-            "단면 잡이 끝나지 않았거나 실패했습니다: status=%s exit_code=%s job_id=%s "
-            "(get_job 으로 로그를 보세요)" % (last.get("status"), last.get("exit_code"), job_id))
-
-    outs = await _get(ctx, f"/jobs/{job_id}/outputs")
+    job_id, outs = await _run_figure_job(ctx, session_id, "section", args, timeout_s)
     svg_id = json_id = None
     for f in outs:
         n = (f.get("filename") or "").lower()
@@ -446,6 +478,124 @@ async def mesh_section_figure(
         "단위는 없습니다(LS-DYNA 덱)."
     )
     return res
+
+
+@mcp.tool()
+async def mesh_surface_figure(
+    session_id: str,
+    file_id: int,
+    ctx: Context,
+    azimuth: float = 35.0,
+    elevation: float = 25.0,
+    wire: bool = False,
+    width: int = 1200,
+    height: int = 900,
+    timeout_s: int = 300,
+) -> dict:
+    """격자의 **자유면만** 뽑아 직교투영·깊이정렬로 그린 **3D 겉모습 그림(SVG)** 을 돌려준다.
+    "이 덱이 대체 어떻게 생겼나" 를 볼 때 쓴다. 층 두께는 `mesh_section_figure` 가 답한다.
+
+    ⚠ **이 응답에 그림의 픽셀은 없다.** `mesh_section_figure` 와 달리 이 op 은 JSON 매니페스트를
+    내지 않으므로, 그림의 요지 숫자는 **`report` 에 콘솔 텍스트로** 온다 — 자유면 수/전체 면 수,
+    등진 삼각형 수, ink_ratio, SVG 크기.
+
+    자유면만 그리는 것이 성능 꾀가 아니라 **그림의 요지**다. 실측 286k 요소 덱에서 전체 면
+    855,575 중 자유면이 **57,098(6.7%)** 뿐이고 나머지는 묻혀서 보이지 않는다.
+
+    **이 그림은 등축이다.** 3D 형상을 비등방으로 늘이면 모양 자체가 거짓이므로, 적층이 얇게
+    보이는 것이 사실이다. 층 두께를 재려면 `mesh_section_figure`(비등방·배율을 적는다) 또는
+    `mesh_stack_diagram`(모식도) 을 쓴다.
+
+    ⚠ **큰 덱에서는 SVG 가 download_result 로 안 나온다** — 삼각형을 솎지 않기 때문이다(솎으면
+    구멍이 뚫려 그림이 거짓이 된다). 실측 286k 요소 덱이 12.2MB 이고 다운로드 상한은 5MB 다.
+    응답의 `svg_bytes` 와 `download_warning` 을 보고, 크면 `save_result_to_path` 로 디스크에
+    저장하거나 `wire=true` 로 좁힌다.
+    """
+    files = await _get(ctx, f"/sessions/{session_id}/files")
+    byid = {int(f["id"]): f for f in files}
+    if file_id not in byid:
+        raise RuntimeError(f"세션에 file_id={file_id} 가 없습니다. list_session_files 로 확인하세요.")
+
+    args = {"model": byid[file_id]["filename"], "output": "surface",
+            "azimuth": azimuth, "elevation": elevation, "wire": wire,
+            "width": width, "height": height}
+    job_id, outs = await _run_figure_job(ctx, session_id, "surfview", args, timeout_s)
+    svg_id, svg_bytes = _pick_svg(outs)
+
+    res = {"job_id": job_id, "svg_file_id": svg_id, "svg_bytes": svg_bytes,
+           "report": await _job_log_tail(ctx, job_id)}
+    MAX = int(os.environ.get("KOORM_MCP_MAX_DOWNLOAD_BYTES", str(5 * 1024 * 1024)))
+    if svg_bytes > MAX:
+        res["download_warning"] = (
+            "SVG 가 %d bytes 로 다운로드 상한(%d)을 넘습니다 — `download_result` 가 거절합니다. "
+            "`save_result_to_path` 로 디스크에 저장하거나 `wire=true` 로 좁히세요. 삼각형을 "
+            "솎아서 줄이지는 않습니다(구멍이 뚫리면 그림이 거짓이 됩니다)." % (svg_bytes, MAX))
+    res["read_this_first"] = (
+        "`report` 가 그림이 거짓말하지 않게 하는 숫자들입니다. 자유면 비율이 그림에 무엇이 "
+        "담겼는지, **등진 삼각형 수**가 뒤집힌 요소를 말합니다(닫힌 볼록체면 정확히 절반이어야 "
+        "합니다). ink_ratio 가 1.0 을 넘으면 선이 포화돼 더 그려도 안 보입니다. "
+        "깊이정렬은 삼각형 무게중심 기준이므로 서로 관통하는 삼각형은 순서가 틀릴 수 있습니다. "
+        "단위는 없습니다(LS-DYNA 덱)."
+    )
+    return res
+
+
+@mcp.tool()
+async def mesh_stack_diagram(
+    session_id: str,
+    file_id: int,
+    ctx: Context,
+    axis: str = "z",
+    force: bool = False,
+    width: int = 900,
+    height: int = 700,
+    timeout_s: int = 180,
+) -> dict:
+    """적층을 **층 모식도(SVG)** 로 그리고 **중립축·기하 중심면·굽힘강성을 같은 그림에** 긋는다.
+    "층이 몇 개이고 중립축이 어디냐" 를 한 그림으로 볼 때 쓴다.
+
+    격자를 자르지 않는다 — 파트별 **축 방향 범위**(사실상 AABB)만 쓰는 **모식도**다. 그 거래로
+    평면을 고를 필요가 없고(단면은 축을 잘못 고르면 61파트 중 1개만 만난다) 중립축이 층과 같은
+    그림에 들어온다. 정확한 기하가 필요하면 `mesh_section_figure` 를 쓴다.
+
+    ⚠ **감긴/접힌 적층에서는 쓸 수 없고, 그 경우 이 도구는 거절한다.** 실측 감긴 덱의 세 파트가
+    z 범위가 전부 `0~1.0` 으로 **세 쌍 모두** 겹쳐 그릴 층 순서가 아예 없다. 포갠 것을 층처럼
+    쌓은 그림은 **완전히 그럴듯해 보이므로** 그것이 가장 나쁜 거짓이다. 거절 메시지에 그 까닭이
+    들어오고, 그때는 `mesh_section_figure` 로 잘라서 봐야 한다. `force=true` 로 넘길 수는 있고
+    그러면 그림에 "믿지 말라" 고 적힌다.
+
+    `*MAT` 을 못 읽어도(실제 덱은 `*INCLUDE` 안에 있다) 층은 그리고 **중립축만** 생략한다.
+    중립축·굽힘강성은 `neutralaxis` op 과 **같은 계산**이다 — 숫자가 다르면 결함이다.
+
+    ⚠ **이 응답에 그림의 픽셀은 없다.** JSON 매니페스트도 없으므로 요지 숫자는 **`report` 에
+    콘솔 텍스트로** 온다 — 층 수(E 읽음/두께만), 감싸는 파트, 겹침 쌍 수, 바닥 처리한 층 수,
+    중립축·기하 중심면·굽힘강성.
+    """
+    if axis not in ("x", "y", "z"):
+        raise RuntimeError("axis 는 x, y, z 중 하나여야 합니다 (받은 값: %s)" % axis)
+
+    files = await _get(ctx, f"/sessions/{session_id}/files")
+    byid = {int(f["id"]): f for f in files}
+    if file_id not in byid:
+        raise RuntimeError(f"세션에 file_id={file_id} 가 없습니다. list_session_files 로 확인하세요.")
+
+    args = {"model": byid[file_id]["filename"], "output": "stack", "axis": axis,
+            "force": force, "width": width, "height": height}
+    job_id, outs = await _run_figure_job(ctx, session_id, "stackdiagram", args, timeout_s)
+    svg_id, svg_bytes = _pick_svg(outs)
+
+    return {
+        "job_id": job_id, "svg_file_id": svg_id, "svg_bytes": svg_bytes,
+        "report": await _job_log_tail(ctx, job_id),
+        "read_this_first": (
+            "`report` 가 그림이 거짓말하지 않게 하는 숫자들입니다. `Layers drawn` 의 '두께만' 은 "
+            "E 를 못 읽어 중립축 계산에서 뺀 층이고, `Enclosing parts` 는 층이 아니라 적층을 "
+            "품는 것(케이스·탭)이어서 점선 외곽으로만 그린 파트이며, `Floored layers` 가 0 이 "
+            "아니면 **그 층의 두께는 그림이 아니라 옆에 적힌 숫자가 참**입니다. "
+            "`Overlapping (shell band)` 는 정상입니다 — 셸은 두께 띠를 가진 중간면입니다. "
+            "단위는 없습니다(LS-DYNA 덱)."
+        ),
+    }
 
 
 @mcp.tool()

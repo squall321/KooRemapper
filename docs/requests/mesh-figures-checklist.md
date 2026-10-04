@@ -148,6 +148,11 @@
       (`server.py:16-22` 는 `Image` 를 임포트조차 하지 않는다).
       → 수용: 응답에 **그림의 요지 숫자가 전부** 들어 있다(LLM 은 픽셀을 못 본다).
       → 결과: `mesh_section_figure` — 잡을 돌리고 폴링해 **매니페스트 숫자 + svg_file_id** 를 돌려준다. 다각형은 **빼고** 보낸다(286k 요소 덱 JSON 이 455KB)· 파트 표는 20개로 캡. Image 블록은 2차
+      → **③④ 도 나간다** — `mesh_surface_figure`·`mesh_stack_diagram` 추가(도구 54개). 처음엔
+        `section` 만 냈는데 사용자가 **네 그림을 다 고른** 요청이라 ③④ 를 MCP 로 부를 길이
+        없는 것이 빠진 자리였다. 그 둘은 JSON 매니페스트가 없어 **잡 로그를 `report` 로** 보낸다
+        (요지 숫자가 콘솔에만 있다). 그리고 **실패에 로그 꼬리를 붙였다** — `stackdiagram` 의
+        rc=1 은 고장이 아니라 판정이고 그 까닭이 로그에만 있다
 - [x] **C-2 ★도구 이름이 StepForge 와 겹치지 않는다.** 같은 MCP 이름공간에서 `section_view` 는
       **StepForge 의 같은 도구를 죽인다**.
       → 결과: `mesh_section_figure` — StepForge 의 `section_view` 와 다르다
