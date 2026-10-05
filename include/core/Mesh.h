@@ -89,6 +89,11 @@ public:
     std::map<int, Part> parts;              // Part ID -> Part
     std::map<int, MaterialData> materials;  // Material ID -> MaterialData
     std::map<int, SectionShellData> shellSections;  // Section ID -> Shell section data
+    // Part ID -> *SECTION_SOLID ELFORM. 리더가 고차 카드를 가르려고 이미 뜨는 값이다.
+    // **그림 op 들이 2차 솔리드를 거절하는 데 쓴다** — 실측으로 TET10(ELFORM 16) 덱은
+    // 중간절점이 코너 자리로 들어와 단면 면적이 0.12(참값 0.32)로 조용히 틀렸고, 중간절점
+    // 카드를 먹지 않아 요소 둘이 하나로 읽혔다. 그림이 조용히 거짓이 되는 자리다.
+    std::map<int, int> partSolidElform;
     std::string name_;                      // Mesh name
 
     // Grid dimensions (for structured meshes)
@@ -233,6 +238,7 @@ public:
     
     size_t getMaterialCount() const { return materials.size(); }
     const std::map<int, MaterialData>& getMaterials() const { return materials; }
+    const std::map<int, int>& getPartSolidElform() const { return partSolidElform; }
 
     // Get bounding box as pair
     std::pair<Vector3D, Vector3D> getBoundingBox() const {
@@ -324,6 +330,7 @@ public:
         elements.clear();
         parts.clear();
         materials.clear();
+        partSolidElform.clear();
         name_.clear();
         dimI = dimJ = dimK = 0;
         gridDimensionsSet = false;

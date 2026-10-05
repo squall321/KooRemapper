@@ -209,6 +209,8 @@ void KFileReader::prescanPartSections(std::ifstream& file) {
     for (const auto& ps : partSec) {
         auto it = secElform.find(ps.second);
         if (it == secElform.end()) continue;
+        // ELFORM 자체를 메시에 남긴다 — 고차 카드 가르기와 달리 **그림 op 이 거절 판단에** 쓴다.
+        mesh_.partSolidElform[ps.first] = it->second;
         int n = solidNodesFromElform(it->second);
         if (n > 0) pidHighOrderNodes_[ps.first] = n;
     }

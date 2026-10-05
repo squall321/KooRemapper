@@ -145,6 +145,16 @@ int runStackDiagram(const std::string& yamlFile, ConsoleOutput& console) {
         return 1;
     }
 
+    {
+        // ★2차 솔리드는 **그리지 않는다.** 같은 말을 세 그림 op 이 함께 쓴다(갈리면 못 믿는다).
+        const auto bad2nd = figure::secondOrderSolidPids(mesh);
+        if (!bad2nd.empty()) {
+            console.error(figure::secondOrderSolidWhy(bad2nd));
+            for (const auto& l : figure::secondOrderSolidAdvice()) console.info("  " + l);
+            return 1;
+        }
+    }
+
     const char* AX = "xyz";
     console.header("Stack diagram: " + Platform::getFilename(c.model));
     console.keyValue("Axis", std::string(1, AX[c.axis]));
@@ -239,9 +249,14 @@ int runStackDiagram(const std::string& yamlFile, ConsoleOutput& console) {
     }
     const long long overlapPairs = overlapSolid;
     const double worstOverlap = worstSolid;
+    // ★`na.layers`/`na.geomOnly` 는 **감싸는 파트를 빼기 전** 수다 — 그대로 적으면 합이 그린
+    //   층 수와 안 맞는다(실측 배터리 덱: 37 + 24 = 61 인데 그린 층은 59). 그린 것만 센다.
+    size_t drawnWithE = 0;
+    for (const auto& b : bars) if (b.E > 0) ++drawnWithE;
+    const size_t drawnGeomOnly = bars.size() - drawnWithE;
     console.keyValue("Layers drawn", std::to_string(bars.size()) + "  (E 읽음 " +
-                     std::to_string(na.layers.size()) + " · 두께만 " +
-                     std::to_string(na.geomOnly.size()) + ")");
+                     std::to_string(drawnWithE) + " · 두께만 " +
+                     std::to_string(drawnGeomOnly) + ")");
     console.keyValue("Overlapping (solid-solid)", std::to_string(overlapSolid));
     console.keyValue("Overlapping (shell band)", std::to_string(overlapShell));
     if (overlapShell > 0)
@@ -415,9 +430,11 @@ int runStackDiagram(const std::string& yamlFile, ConsoleOutput& console) {
             M, fy, barHi - barLo);
     }
     g << b; fy += 14;
+    // 그린 층 기준으로 적는다(콘솔과 같은 수). '제외' 는 **두께를 못 읽어 버린 것**만이고
+    // 감싸는 파트는 따로 적는다 — 한데 더하면 같은 층을 두 번 세게 된다.
     std::snprintf(b, sizeof(b),
-        "<text x=\"%.1f\" y=\"%.1f\">층 %zu개(E 읽음 %zu · 두께만 %zu) · 제외 %zu개%s%s%s</text>\n",
-        M, fy, bars.size(), na.layers.size(), na.geomOnly.size(), na.skipped.size() + encl.size(),
+        "<text x=\"%.1f\" y=\"%.1f\">층 %zu개(E 읽음 %zu · 두께만 %zu) · 두께 못 읽어 제외 %zu개 · 감싸는 파트 %zu개%s%s%s</text>\n",
+        M, fy, bars.size(), drawnWithE, drawnGeomOnly, na.skipped.size(), encl.size(),
         notUtf8 ? " · 제목이 UTF-8 이 아닌 층 있음" : "",
         stripped ? " · 제목 제어문자를 ? 로 바꿨다" : "",
         overlapSolid > 0 ? " · ⚠ 솔리드끼리 AABB 가 포개진다(층 순서를 믿지 말라)"

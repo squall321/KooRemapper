@@ -341,7 +341,9 @@ async def _run_figure_job(ctx: Context, session_id: str, operation: str,
         await asyncio.sleep(1.0)
         waited += 1.0
         last = await _get(ctx, f"/jobs/{job_id}")
-        if last.get("status") in ("succeeded", "failed", "cancelled"):
+        # 백엔드는 `canceled`(l 하나)로 쓴다 — `cancelled` 만 보면 취소된 잡을 끝난 것으로
+        # 알아보지 못해 `timeout_s`(최대 300초)를 꽉 채운 뒤에야 에러가 된다. 둘 다 본다.
+        if last.get("status") in ("succeeded", "failed", "canceled", "cancelled"):
             break
     if last.get("status") != "succeeded":
         raise RuntimeError(
@@ -361,6 +363,24 @@ async def _job_log_tail(ctx: Context, job_id: str, limit: int = 2500) -> str:
         return r.text[-limit:] if r.status_code < 400 else f"(로그를 읽지 못했습니다: HTTP {r.status_code})"
     except Exception as e:  # 로그를 못 읽는 것이 그림을 못 쓴 것은 아니다
         return f"(로그를 읽지 못했습니다: {e})"
+
+
+async def _figure_numbers(ctx: Context, job_id: str, limit: int = 900) -> str:
+    """로그에서 **그림의 요지 숫자 줄만** 뽑는다.
+
+    왜 전체 로그가 아닌가. `mesh_section_figure` 는 매니페스트(파트 표)를 이미 싣는다. 거기에
+    로그 2,500자를 더하면 응답이 불어 **챗이 URL 을 잘라 그림이 사라진다**(`TOOL_RESULT_MAX`).
+    실측으로 compare 를 준 61파트 덱 응답이 이미 9,273바이트였다.
+
+    왜 필요한가. **확대 배율과 최소피처 px 는 매니페스트에 없다** — 둘은 SVG 배치 단계에서
+    정해지므로 JSON 을 쓴 **뒤에** 계산되고 콘솔에만 찍힌다. 그런데 이 도구의 설명·TOOLS.md·
+    매뉴얼 §45.6 이 그 숫자를 응답에 준다고 적는다. 그 약속을 이 함수가 지킨다.
+    """
+    want = ("Magnified axis", "Min feature in px", "Axis chosen", "Section aspect")
+    log = await _job_log_tail(ctx, job_id, limit=6000)
+    keep = [l.strip() for l in log.splitlines() if any(w in l for w in want)]
+    out = "\n".join(keep)
+    return out[:limit] if out else "(로그에서 그림 숫자 줄을 찾지 못했습니다)"
 
 
 def _pick_svg(outs: list) -> tuple:
@@ -398,7 +418,7 @@ async def mesh_section_figure(
     적층은 z 가 2파트뿐이고 x·y 가 59파트이며, 감긴 덱은 그 반대다. 고른 까닭이 응답에 들어온다.
 
     축척: 기본은 **비등방**이고 확대 배율을 그림 안에 적는다. 실제 적층은 가로:최박층이 1:9,375
-    라 등축으로 그리면 층이 보이지 않는다(1200px 에서 0.13px). `isotropic=true` 를 주면 등축으로
+    라 등축으로 그리면 층이 보이지 않는다(1200px 에서 **0.081px** — 실측). `isotropic=true` 를 주면 등축으로
     그리고, 최소 피처가 1.5px 미만이면 "보이지 않는다" 고 말한다.
 
     두 덱: `compare_file_id` 를 주면 한 그림에 둘을 올린다 — `mode="panels"` 는 칸마다 축과
@@ -462,10 +482,16 @@ async def mesh_section_figure(
             out["parts_omitted"] = len(parts) - part_cap
         return out
 
+    # compare 가 붙으면 파트 표가 두 벌이 된다 — 캡을 절반으로 줄인다. 실측으로 61파트 덱에
+    # compare 를 주면 응답이 9,273바이트가 되어 `TOOL_RESULT_MAX=6000` 을 넘었고, 챗은 텍스트를
+    # 이어 붙인 **뒤** 통째로 자르므로 그때 **URL 이 잘려 그림이 사라진다.**
+    cap = 10 if "compare" in man else 20
     res = {"job_id": job_id, "svg_file_id": svg_id, "manifest_file_id": json_id,
-           "section": strip(man)}
+           "section": strip(man, cap)}
     if "compare" in man:
-        res["compare_section"] = strip(man["compare"])
+        res["compare_section"] = strip(man["compare"], cap)
+    # ★확대 배율·최소피처 px 는 매니페스트에 없다(SVG 배치 때 정해진다) — 로그에서 뽑아 싣는다.
+    res["figure_numbers"] = await _figure_numbers(ctx, job_id)
     res["how_to_see_the_figure"] = (
         "SVG 는 `download_result(session_id, svg_file_id)` 로 텍스트로 받을 수 있습니다. "
         "Claude 의 시야에 그림을 넣는 PNG 경로는 아직 없습니다 — 지금은 사람이 브라우저에서 "
@@ -475,6 +501,8 @@ async def mesh_section_figure(
         "그림이 거짓말하지 않게 하는 숫자들입니다. `axis_chosen_because` 로 축이 맞는지, "
         "`parts_hit`/`parts_total` 로 층을 다 봤는지, `nudge`>0 이면 평면이 절점층에 걸려 ε "
         "비킨 것, `min_feature` 가 작으면 그 층은 그림에서 보이지 않을 수 있습니다. "
+        "**확대 배율과 최소피처 px 는 `figure_numbers`** 에 있습니다 — 그 둘은 그림을 배치할 때 "
+        "정해지므로 매니페스트에는 없습니다. "
         "단위는 없습니다(LS-DYNA 덱)."
     )
     return res

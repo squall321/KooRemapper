@@ -137,6 +137,16 @@ int runSurfView(const std::string& yamlFile, ConsoleOutput& console) {
         return 1;
     }
 
+    {
+        // ★2차 솔리드는 **그리지 않는다.** 같은 말을 세 그림 op 이 함께 쓴다(갈리면 못 믿는다).
+        const auto bad2nd = figure::secondOrderSolidPids(mesh);
+        if (!bad2nd.empty()) {
+            console.error(figure::secondOrderSolidWhy(bad2nd));
+            for (const auto& l : figure::secondOrderSolidAdvice()) console.info("  " + l);
+            return 1;
+        }
+    }
+
     console.header("Surface view (free faces): " + Platform::getFilename(c.model));
 
     // ── 자유면. 면 키(정렬한 절점 목록)가 한 번만 나오면 자유면이다. ──

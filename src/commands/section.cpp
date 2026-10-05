@@ -207,6 +207,16 @@ bool computeSection(const Config& c, const std::string& deck, int axisPref,
     }
 
 
+    {
+        // ★2차 솔리드는 **그리지 않는다.** 같은 말을 세 그림 op 이 함께 쓴다(갈리면 못 믿는다).
+        const auto bad2nd = figure::secondOrderSolidPids(mesh);
+        if (!bad2nd.empty()) {
+            console.error(figure::secondOrderSolidWhy(bad2nd));
+            for (const auto& l : figure::secondOrderSolidAdvice()) console.info("  " + l);
+            return false;
+        }
+    }
+
     auto [bmin, bmax] = mesh.getBoundingBox();
     const Vector3D ext = bmax - bmin;
     const double extArr[3] = {ext.x, ext.y, ext.z};
@@ -344,7 +354,7 @@ bool computeSection(const Config& c, const std::string& deck, int axisPref,
     if (axis < 0) {
         // 규칙은 **"적층 방향에 수직" 이 아니다** — 이 덱에서 층이 어느 축으로 쌓였나다.
         //   ① 퇴화(단면이 선에 가까운) 축을 먼저 뺀다  ② 파트를 가장 많이 만나는 축
-        //   ③ 동점이면 다각형이 많은 축(정보가 더 많다)
+        //   ③ 동점이면 **단면 bbox 넓이**가 큰 축 (아래 주석대로 다각형 수로 재면 틀린다)
         // 실측 — 배터리 덱은 z 가 61 중 1파트. 호 셸은 세 축이 1파트 동점인데 x 는 extent 0 이고
         // z(48 다각형)가 쓸모 있는 호 단면이다.
         int best = -1;
