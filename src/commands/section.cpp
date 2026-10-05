@@ -65,7 +65,9 @@ std::string trim(const std::string& s) {
     return s.substr(a, b - a + 1);
 }
 
-std::string jesc(const std::string& s) {
+// `dropped` — 제어문자를 버렸나. **버렸다는 사실을 매니페스트에 싣는다.** 그림 꼬리말만
+// 적으면 매니페스트만 읽는 쪽(MCP·프런트)은 제목이 손질된 줄 모른다.
+std::string jesc(const std::string& s, bool* dropped = nullptr) {
     std::string out;
     out.reserve(s.size() + 8);
     for (char c : s) {
@@ -73,10 +75,12 @@ std::string jesc(const std::string& s) {
             case '"':  out += "\\\""; break;
             case '\\': out += "\\\\"; break;
             case '\n': out += "\\n"; break;
-            case '\r': break;
+            case '\r': if (dropped) *dropped = true; break;
             case '\t': out += "\\t"; break;
             default:
-                if (static_cast<unsigned char>(c) < 0x20) { /* 제어문자는 버린다 */ }
+                if (static_cast<unsigned char>(c) < 0x20) {   // XML 1.0 이 담지 못한다
+                    if (dropped) *dropped = true;
+                }
                 else out += c;
         }
     }
@@ -120,6 +124,10 @@ struct SecResult {
     std::string deck;
     int axis = 2;
     double at = 0.0, nudge = 0.0;
+    // 평면을 사용자가 주지 않아 bbox 중앙으로 잡았나. ★그 평면은 **거울 대칭의 거울면**이라
+    // Y 뒤집힘 같은 좌우 반전 결함이 **원리적으로 보이지 않는다**(두 단면이 완전히 같다).
+    // 그러므로 "중앙만 봤다" 를 말해야 한다 — 말하지 않으면 그림이 "괜찮다" 고 거짓말한다.
+    bool atWasDefault = false;
     std::string axisWhy;
     std::vector<Poly> polys;
     std::map<int, PartInfo> pinfo;
@@ -170,8 +178,13 @@ const std::vector<std::pair<int,int>>& edgesFor(ElementType t) {
 
 // 덱 하나를 자른다. 두 덱을 한 그림에 올리려면(접힘 전/후) 이 단위가 필요하다.
 //   axisPref: -1 = auto. hasAt/atIn: 평면 위치(없으면 bbox 중앙).
+// `axisWhyOverride` — 축을 **왜** 그것으로 잘랐나. 비우면 config/auto 로 적는다.
+// 겹침(overlay)에서 B 는 축을 A 에서 물려받는데, 그걸 "config: axis 를 지정했다" 로 적으면
+// **거짓**이다(사용자는 `axis: auto` 를 줬다). 매니페스트의 `axis_chosen_because` 는 그림이
+// 거짓말하지 않게 하는 숫자 중 하나이므로 그 자리가 거짓이면 장치가 무용해진다.
 bool computeSection(const Config& c, const std::string& deck, int axisPref,
-                    bool hasAt, double atIn, SecResult& R, ConsoleOutput& console) {
+                    bool hasAt, double atIn, SecResult& R, ConsoleOutput& console,
+                    const char* axisWhyOverride = nullptr) {
     KFileReader reader;
     Mesh mesh;
     try {
@@ -400,8 +413,9 @@ bool computeSection(const Config& c, const std::string& deck, int axisPref,
         if (stats[axis].degenerate())
             console.warning("고른 축의 단면이 선에 가깝다 — 세 축이 모두 그렇다. 축을 직접 주라.");
     } else {
-        axisWhy = "config: axis 를 지정했다";
+        axisWhy = axisWhyOverride ? axisWhyOverride : "config: axis 를 지정했다";
     }
+    if (axisWhyOverride) axisWhy = axisWhyOverride;
     const double atDefault = minArr[axis] + 0.5 * extArr[axis];
     double at = hasAt ? atIn : atDefault;
 
@@ -501,6 +515,7 @@ bool computeSection(const Config& c, const std::string& deck, int axisPref,
     R.deck = deck;
     R.axis = axis;
     R.at = at;
+    R.atWasDefault = !hasAt;
     R.nudge = nudge;
     R.axisWhy = axisWhy;
     R.polys = polys;
@@ -587,7 +602,9 @@ int runSection(const std::string& yamlFile, ConsoleOutput& console) {
     if (!c.compare.empty()) {
         const bool overlay = (c.mode == "overlay");
         if (!computeSection(c, c.compare, overlay ? R[0].axis : c.axis,
-                            overlay ? true : c.hasAt, overlay ? R[0].at : c.at, R[1], console))
+                            overlay ? true : c.hasAt, overlay ? R[0].at : c.at, R[1], console,
+                            overlay ? "겹침: A 가 고른 축과 평면을 그대로 쓴다(그것이 겹침의 뜻이다)"
+                                    : nullptr))
             return 1;
         if (overlay)
             console.info("겹침: 두 덱을 **같은 평면**(" + std::string(1, "xyz"[R[0].axis]) +
@@ -602,7 +619,12 @@ int runSection(const std::string& yamlFile, ConsoleOutput& console) {
         if (label) console.keyValue("Deck", std::string(label) + "  " + Platform::getFilename(R.deck));
         console.keyValue("Axis", std::string(1, AX[R.axis]));
         console.keyValue("Axis chosen", R.axisWhy);
-        console.keyValue("Position", std::to_string(R.at) + (R.nudge > 0 ? "  (ε 비켰다)" : ""));
+        console.keyValue("Position", std::to_string(R.at) +
+                         (R.nudge > 0 ? "  (ε 비켰다)" : "") +
+                         (R.atWasDefault ? "  (기본 = bbox 중앙)" : ""));
+        if (R.atWasDefault)
+            console.info("  이 평면은 **거울면**이다 — 좌우 반전 결함(예: `stackwrap` 의 Y 뒤집힘)은 "
+                         "여기서 두 단면이 같아 보이지 않는다. 폭 양 끝도 `at:` 으로 한 칸씩 보라.");
         console.keyValue("Plane 2D basis", std::string("(") + UV[R.axis][0] + ", " + UV[R.axis][1] + ")");
         console.keyValue("Polygons", std::to_string(R.polys.size()));
         console.keyValue("Parts hit / total", std::to_string(R.hitPids.size()) + " / " +
@@ -647,6 +669,7 @@ int runSection(const std::string& yamlFile, ConsoleOutput& console) {
         o << ind << "\"deck\": \"" << jesc(R.deck) << "\",\n";
         o << ind << "\"axis\": \"" << AX[R.axis] << "\",\n";
         std::snprintf(buf, sizeof(buf), "%s\"at\": %.17g,\n", ind.c_str(), R.at); o << buf;
+        o << ind << "\"at_is_default_mid_plane\": " << (R.atWasDefault ? "true" : "false") << ",\n";
         std::snprintf(buf, sizeof(buf), "%s\"nudge\": %.17g,\n", ind.c_str(), R.nudge); o << buf;
         o << ind << "\"axis_chosen_because\": \"" << jesc(R.axisWhy) << "\",\n";
         o << ind << "\"basis\": [\"" << UV[R.axis][0] << "\", \"" << UV[R.axis][1] << "\"],\n";
@@ -670,8 +693,10 @@ int runSection(const std::string& yamlFile, ConsoleOutput& console) {
         for (const auto& [pid, pi] : R.pinfo) {
             if (!firstP) o << ",\n";
             firstP = false;
+            bool titleDropped = false;
+            const std::string titleJson = jesc(pi.title, &titleDropped);
             o << ind << "  {\"pid\": " << pid
-              << ", \"title\": \"" << jesc(pi.title) << "\""
+              << ", \"title\": \"" << titleJson << "\""
               << ", \"polys\": " << pi.polys
               << ", \"shell\": " << (pi.shell ? "true" : "false");
             o << ", \"thickness\": ";
@@ -681,6 +706,7 @@ int runSection(const std::string& yamlFile, ConsoleOutput& console) {
             if (pi.titleNotUtf8) {
                 o << ", \"title_not_utf8\": true, \"title_bytes_hex\": \"" << pi.titleHex << "\"";
             }
+            if (titleDropped) o << ", \"title_control_chars_stripped\": true";
             std::snprintf(buf, sizeof(buf), ", \"E\": %.17g", pi.E); o << buf;
             std::snprintf(buf, sizeof(buf), ", \"extent\": [%.9g, %.9g], \"thin\": %.9g",
                           pi.uExt(), pi.vExt(), pi.thin()); o << buf;

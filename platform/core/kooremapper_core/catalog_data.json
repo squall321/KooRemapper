@@ -1612,7 +1612,7 @@
       "name": "extract-surface",
       "category": "mesh",
       "summary": "Extract free surface faces from solid HEX8/TET4 mesh as ELEMENT_SHELL (QUAD4)",
-      "description": "Extracts the free (outer) surface of a solid HEX8/TET4 mesh as shell QUAD4 elements. A free face is one shared by exactly one element (interior faces shared by 2+ elements are dropped). Supports directional filtering (top/bottom/all) using Z-centroid heuristics and optional mid-surface mode that pairs top/bottom nodes by XY proximity to create a single averaged shell layer.",
+      "description": "Extracts the free (outer) surface of a solid HEX8 mesh as shell QUAD4 elements. **Tetrahedra are not supported correctly**: the face table is hex-shaped, so one TET4 yields 5 faces instead of 4 — a bogus quad through all four vertices, two faces collapsed to lines, and only 2 of the 4 real triangles (measured 2026-10-05). For looking at a tet mesh's free surface use `surfview`, which keys the face table on element type and returns 4/4. A free face is one shared by exactly one element (interior faces shared by 2+ elements are dropped). Supports directional filtering (top/bottom/all) using Z-centroid heuristics and optional mid-surface mode that pairs top/bottom nodes by XY proximity to create a single averaged shell layer.",
       "invocation": "positional",
       "config_style": null,
       "takes_kfile": true,

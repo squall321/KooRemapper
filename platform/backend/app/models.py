@@ -104,7 +104,7 @@ class SessionFile(Base):
         ForeignKey("sessions.id", ondelete="CASCADE"), index=True, nullable=False
     )
     filename: Mapped[str] = mapped_column(String(512), nullable=False)
-    rel_path: Mapped[str] = mapped_column(String(1024), nullable=False)  # rel to session dir
+    rel_path: Mapped[str] = mapped_column(String(1024), nullable=False)  # rel to the storage root, not the session dir
     kind: Mapped[str] = mapped_column(String(16), default="input", nullable=False)  # input|output|generated
     origin_job_id: Mapped[str | None] = mapped_column(String(26), index=True)
     size_bytes: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)

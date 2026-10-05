@@ -125,7 +125,7 @@
       → 그래서 §2-6(`elformat`)과 같은 판정을 권한다 — **문제가 사라진 기능은 만들지 않는다.**
         사용자가 그래도 원하면 만든다(선택은 사용자 몫이다).
       → **사용자 판정: 만든다.** 그래서 위 권고의 각 항목을 **없애는 대신 기능에 박아 넣었다.**
-      → `src/commands/stackdiagram.cpp` · 회귀 `tools/regress/test_stackdiagram.py` 39항 통과.
+      → `src/commands/stackdiagram.cpp` · 회귀 `tools/regress/test_stackdiagram.py` 38항 통과.
       → **거절이 기능이다.** AABB 가 포개지면(감긴 덱 세 쌍 전부) 그림을 **내지 않고** rc=1 로
         `section` 을 쓰라고 말한다. 위에 적어 둔 "구조적으로 못 쓴다" 를 조용히 넘기지 않고
         **op 이 스스로 그 자리를 거절한다**(`force: true` 로 넘기면 그림에 "믿지 말라" 고 적는다).
@@ -162,6 +162,30 @@
 - [x] **C-4 다운로드 media_type.** 지금 `application/octet-stream` 하드코딩
       (`sessions/routes.py:253`) → SVG 를 인라인 표시하려면 `image/svg+xml` 이 필요하다.
       ⚠ 같은 출처에서 `.svg` 를 서빙하면 **저장형 XSS** 다 — B-6 과 함께 판단한다.
+
+## C'. 게시 — **이 절이 없어서 34/34 초록이 거짓이었다** (2026-10-05 추가)
+
+감사가 찾은 근본 원인이다. C 절은 "MCP 가 그림을 낸다" 까지만 보고 닫혔고, **그 MCP 가 실제로
+돌리는 바이너리**를 아무도 보지 않았다. `platform/backend/bin/KooRemapper` 가 10-02 게시본
+(`0dd2d26c`)이었고 세 op 은 10-03~04 커밋이다. 결과로 세 MCP 도구가 런타임에
+`Unknown command` 로 rc=1 이 되고, `.svg` 가 애초에 안 생겨 프런트 버튼도 뜨지 않았다.
+
+내 검증이 **카탈로그 `build_command` + `build/dev` 직접 실행**이었다는 것이 구멍이다. 그 경로는
+플랫폼 바이너리를 거치지 않는다.
+
+- [x] **C'-1 `platform/backend/bin/KooRemapper` 를 세 op 이 든 본으로 교체** —
+      `scripts/build_linux_compat.sh`(debian:12 빌더, glibc 2.35). sha `fe6ecba5…`
+- [x] **C'-2 `cli.sif` 재빌드** — 10-02 본은 세 op 을 몰랐다(`help` 매치 0 → 3)
+- [x] **C'-3 프런트 dist 재빌드** (캡션 수정 포함)
+- [x] **C'-4 API·MCP 프로세스 재시작** — API 가 카탈로그를 import 시점에 캐시하고(52 op),
+      MCP 프로세스는 51 도구를 내놓고 있었다. 재시작 후 58 op · 54 도구
+- [x] **C'-5 ★살아 있는 스택을 거치는 스모크를 남긴다** — `platform/mcp_server/figures_smoke.py`
+      20항. 바이너리·카탈로그·MCP 프로세스 셋 중 하나만 낡아도 빨개진다. **이것이 없어서
+      놓쳤으므로 이것을 관문으로 남기는 것이 수정의 핵심이다**
+- [x] **C'-6 Drive 게시** — `dist-20261005-083841Z`, `latest/` 가 그것을 가리킨다.
+      BUILD_INFO commit `a4fbe59`(origin/main 에 푸시됨) · binary `fe6ecba5…` · GLIBC_2.35
+
+교훈: **관문이 초록인 것과 플랫폼에서 도는 것은 다른 사실이다.** 전자를 재고 후자를 주장했다.
 
 ## D. 회귀 — 픽셀을 비교하지 않는다
 
