@@ -333,6 +333,16 @@ private:
     void validateWarpageResults(const WarpageOperation& op, const class WarpageGrid& grid) const;
     void exportStressDistribution(const std::string& filename) const;
     Vector3D getNodePosition(int nid) const;
+
+    /** 만든 HEX8 이 뒤집혔으면 **상·하 절점을 맞바꿔** 바로 세운다.
+     *
+     * 왜 재서 고치나 (실측 2026-10-05). 압출 코드가 "감김을 뒤집을까" 를 `direction` 의
+     * **우세 성분 부호**로 짐작했다 — 면 감김을 보지 않으므로 입력 감김이 바뀌면 조용히
+     * 뒤집힌다. 공용 면 테이블의 감김을 바깥으로 일관시키자 `offset` 이 **음의 야코비안
+     * 100개**를 냈다. 짐작을 없애고 `Validator` 와 **같은 잣대**로 재서 고치면 입력 감김이
+     * 무엇이든 결과가 바로 선다. 0-3 과 4-7 을 맞바꾸면 기하는 그대로이고 부호만 뒤집힌다
+     * (TRIA3 축퇴 패턴 `n3==n2, n7==n6` 도 보존된다). */
+    void uprightHex(AddedElement& elem);
     double getShellThickness(int pid) const;
 
     // Post-fillet Laplacian smoothing: relax interior nodes

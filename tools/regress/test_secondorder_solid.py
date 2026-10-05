@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # 2차 솔리드를 그림 op 이 거절하는지 — 중간절점이 코너로 읽히면 그림이 조용히 71% 틀린다
-"""세 그림 op 의 **2차 솔리드 거절** 계약 (2026-10-05).
+"""**2차 솔리드를 각 op 이 정직하게 다루나** (2026-10-05).
 
 왜 이 시험이 있나.
 
@@ -14,8 +14,9 @@
     · 같은 기하를 KooRemapper **자신의** `convert type: tet10` 으로 바꾸면 단면 총면적이
       0.665 → **0.19** 가 된다(오차 71%). **다각형 수는 둘 다 2개**라 알아볼 수가 없다.
     · 자유면이 6면/삼각형 12개로 나온다(TET4 참값 4면/4개).
-    · 10절점 카드를 **두 줄**로 적은 덱은 중간절점 줄을 다음 요소의 카드 1 로 읽어
-      **요소가 사라진다** — TET10 둘이 하나로 읽혔다.
+    · 표준 레이아웃(`eid pid` + 노드 10칸 **한 줄**)에서는 요소 수는 맞고 **기하만** 틀린다.
+      노드를 **8+2 로 쪼갠** 덱은 둘째 줄을 다음 요소의 카드 1 로 읽어 **요소가 사라진다** —
+      실측으로 TET10 둘이 하나로 읽혔다. 두 레이아웃을 모두 거절해야 한다.
 
   그림이 조용히 거짓이 되는 것을 막는 것이 이 캠페인의 원칙이므로 세 op 이 **거절한다.**
 
@@ -70,8 +71,13 @@ def tet4_deck(path, elform=10):
     write(path, "\n".join(L) + "\n")
 
 
-def tet10_two_line(path):
-    """★10절점 사면체 둘을 **두 줄 카드**로 적는다 — 중간절점 줄을 먹지 않으면 요소가 사라진다."""
+def tet10_two_line(path, split_8_2=True):
+    """10절점 사면체 둘.
+
+    `split_8_2=False` 가 **표준**이다 — `eid pid` 카드 뒤에 노드 10칸이 **한 줄**로 온다.
+    그 꼴에서는 요소 수가 맞고 **기하만** 틀린다.
+    `split_8_2=True` 는 노드를 8+2 로 쪼갠 덱이다 — 둘째 줄이 다음 요소의 카드 1 로 읽혀
+    **요소가 사라진다**(실측 둘 → 하나). 두 꼴을 모두 거절해야 한다."""
     corners = [(0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1), (1, 1, 1)]
     nodes = list(corners)
 
@@ -96,8 +102,11 @@ def tet10_two_line(path):
     L.append("*ELEMENT_SOLID (ten nodes format)")
     for e, ten in enumerate(els, 1):
         L.append("%8d%8d" % (e, 1))
-        L.append("".join("%8d" % n for n in ten[:8]))
-        L.append("".join("%8d" % n for n in ten[8:]))
+        if split_8_2:
+            L.append("".join("%8d" % n for n in ten[:8]))
+            L.append("".join("%8d" % n for n in ten[8:]))
+        else:
+            L.append("".join("%8d" % n for n in ten))      # 표준 — 10칸 한 줄
     L += ["*PART", "tet10x2", "%10d%10d%10d" % (1, 1, 1),
           "*SECTION_SOLID", "%10d%10d" % (1, 16),
           "*MAT_ELASTIC", "%10d%10.4g%10.6g%10.4g" % (1, 7.85e-9, 210000, 0.3), "*END"]
@@ -166,10 +175,22 @@ def main():
             check("C-1 %s 가 두 줄 카드 TET10(ELFORM 16)도 거절한다" % op, rc == 1, out[-250:])
             check("C-2 %s 가 ELFORM 16 을 지목한다" % op, "ELFORM 16" in out, out[-250:])
         rc, out = run(binary, d, "info", "two.k")
-        check("C-3 (근거) 리더가 TET10 둘을 **하나**로 읽는다 — 거절해야 하는 까닭",
+        check("C-3 (근거) 노드를 8+2 로 쪼갠 덱은 TET10 둘을 **하나**로 읽는다",
               "Elements:" in out and [l for l in out.splitlines()
                                       if l.strip().startswith("Elements:")][0].split()[-1] == "1",
               [l for l in out.splitlines() if "Elements:" in l][:1])
+
+        # ── C': ★표준 레이아웃(노드 10칸 한 줄) — 요소는 **안 잃지만** 그래도 거절한다 ──
+        tet10_two_line(os.path.join(d, "std.k"), split_8_2=False)
+        rc, out = run(binary, d, "info", "std.k")
+        got = [l for l in out.splitlines() if l.strip().startswith("Elements:")]
+        check("C'-1 ★표준 레이아웃은 요소를 **잃지 않는다**(둘 그대로) — 기하만 틀린다",
+              bool(got) and got[0].split()[-1] == "2", got[:1])
+        for op in OPS:
+            write(os.path.join(d, "cs.yaml"), "model: std.k\noutput: cs_%s\n" % op)
+            rc, out = run(binary, d, op, "cs.yaml")
+            check("C'-2 %s 는 요소를 안 잃는 꼴도 거절한다 (기하가 틀리므로)" % op,
+                  rc == 1 and "2차 솔리드" in out, out[-250:])
 
         # ── D: ★ELFORM 23(HEX20)은 거절하지 않고, 1차와 **같은** 단면을 낸다 ──
         if os.path.exists(flat):
@@ -199,6 +220,25 @@ def main():
                 check("D-3 두 단면 매니페스트를 읽었다", False, str(e))
         else:
             print("  (D 건너뜀 — examples/stackwrap/flat_stack.k 가 없다)")
+
+        # ── E: ★`restack` 이 **정확한 까닭**으로 거절한다 ──
+        #    ELFORM 16·17 이 `solidNodesFromElform` 표에 없어서 `0`(모름)으로 떨어졌고, 그래서
+        #    고차 거절 문턱(`> 10`)을 지나 뒤에서 "유효한 압출이 아니다" 라는 **엉뚱한 까닭**으로
+        #    멈췄다. 사유는 "요소마다 8 절점만 담는다" 이고 그것은 10절점 사면체에도 그대로다.
+        write(os.path.join(d, "rs.yaml"),
+              "base_model: std.k\noutput: rsout\noperations:\n  - type: restack\n"
+              "    target_pid: 1\n    layers:\n      - title: L1\n        thickness: 0.5\n"
+              "        num_elements: 1\n        material_card: |\n"
+              "          *MAT_ELASTIC_TITLE\n          L1\n"
+              "          $#     mid        ro         e        pr\n"
+              "                  90  7.85e-09   2.1e+05      0.30\n")
+        rc, out = run(binary, d, "restack", "rs.yaml")
+        check("E-1 restack 이 TET10 파트를 rc=1 로 거절한다", rc == 1, out[-250:])
+        check("E-2 ★'10 절점 고차 요소 파트' 라고 **정확한** 까닭을 댄다",
+              "10 절점 고차 요소 파트" in out, out[-300:])
+        check("E-3 '유효한 압출이 아니다' 라는 엉뚱한 까닭을 대지 않는다",
+              "valid extrusion" not in out and "압출" not in out, out[-300:])
+        check("E-4 틀린 덱을 내지 않는다", not os.path.exists(os.path.join(d, "rsout.k")))
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

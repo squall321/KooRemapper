@@ -74,6 +74,14 @@ public:
      */
     static double calculateJacobian(const Mesh& mesh, const Element& elem);
 
+    /** HEX8 중심 야코비안 — **좌표만** 받는 순수 함수.
+     *
+     * 메시가 없는 자리(요소를 **만드는 중**인 `ModelAssembler::extrudeToSolid`)도 같은 잣대로
+     * 뒤집힘을 판정해야 한다. 잣대가 둘이면 "만들 때는 괜찮다고 했는데 검증이 빨간" 상태가 된다.
+     * 실측 — 자유면 감김을 바깥으로 일관시키자 `offset` 이 음의 야코비안 **100개**를 냈다.
+     * 압출 코드가 방향 벡터의 **우세 성분 부호로 짐작**하고 있었기 때문이다. */
+    static double hex8CenterJacobian(const std::array<Vector3D, 8>& corners);
+
     /** 체적 야코비안이 **정의되는** 요소인가.
      *
      * ⚠ 셸(QUAD4)에는 정의되지 않는다. 그런데 `calculateJacobian` 은 TET4 가 아닌 것을 모두

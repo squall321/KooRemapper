@@ -171,6 +171,10 @@ double Validator::calculateJacobian(const Mesh& mesh, const Element& elem) {
         corners[i] = node->getEffectivePosition();
     }
 
+    return hex8CenterJacobian(corners);
+}
+
+double Validator::hex8CenterJacobian(const std::array<Vector3D, 8>& corners) {
     // Calculate Jacobian at element center
     Vector3D dxdu = (corners[1] + corners[2] + corners[5] + corners[6]) * 0.25 -
                     (corners[0] + corners[3] + corners[4] + corners[7]) * 0.25;

@@ -56,27 +56,11 @@ std::string trim(const std::string& s) {
     return s.substr(a, b - a + 1);
 }
 
-// ── 종류별 면 테이블. 각 면은 절점 3개(삼각형) 또는 4개(사각형)다. ──
-struct FaceDef { int n; int v[4]; };
-
-const std::vector<FaceDef>& facesFor(ElementType t) {
-    static const std::vector<FaceDef> hex = {
-        {4,{0,3,2,1}}, {4,{4,5,6,7}}, {4,{0,1,5,4}},
-        {4,{1,2,6,5}}, {4,{2,3,7,6}}, {4,{3,0,4,7}}};
-    static const std::vector<FaceDef> tet = {
-        {3,{0,2,1,0}}, {3,{0,1,3,0}}, {3,{1,2,3,0}}, {3,{2,0,3,0}}};
-    static const std::vector<FaceDef> wedge = {
-        {3,{0,2,1,0}}, {3,{4,5,6,0}},
-        {4,{0,1,5,4}}, {4,{1,2,6,5}}, {4,{2,0,4,6}}};
-    static const std::vector<FaceDef> quad = {{4,{0,1,2,3}}};
-    switch (t) {
-        case ElementType::TET4:
-        case ElementType::TET10:  return tet;
-        case ElementType::PENTA6: return wedge;
-        case ElementType::QUAD4:  return quad;
-        default:                  return hex;   // HEX8 · HEX20 (모서리 절점만)
-    }
-}
+// ── 면 테이블은 **위상 정본**(`topo::facesOf`, include/core/Element.h)을 쓴다. ──
+// 여기 사본이 따로 있었다. 공용 표(육면체 고정)가 TET4 에서 틀려서 이 op 만 제 표를 들고 있었는데,
+// 이제 공용 표가 종류별이므로 사본을 둘 이유가 없다 — 두 벌이면 언젠가 갈린다.
+using topo::Face;
+using topo::facesOf;
 
 bool parseYaml(const std::string& path, Config& c, ConsoleOutput& console) {
     std::ifstream f(path);
@@ -155,9 +139,9 @@ int runSurfView(const std::string& yamlFile, ConsoleOutput& console) {
     std::map<std::vector<int>, std::pair<int, std::pair<int, int>>> faceCount;  // key → (count, (eid, faceIdx))
     long long degenerateFaces = 0;
     for (const auto& [eid, elem] : mesh.elements) {
-        const auto& defs = facesFor(elem.type);
+        const auto& defs = facesOf(elem.type);
         for (size_t fi = 0; fi < defs.size(); ++fi) {
-            const FaceDef& fd = defs[fi];
+            const Face& fd = defs[fi];
             std::vector<int> ids;
             for (int k = 0; k < fd.n; ++k) {
                 const int nid = elem.nodeIds[fd.v[k]];
@@ -182,7 +166,7 @@ int runSurfView(const std::string& yamlFile, ConsoleOutput& console) {
         const auto eit = mesh.elements.find(v.second.first);
         if (eit == mesh.elements.end()) continue;
         const Element& e = eit->second;
-        const FaceDef& fd = facesFor(e.type)[v.second.second];
+        const Face& fd = facesOf(e.type)[v.second.second];
         int id[4] = {0, 0, 0, 0};
         for (int k = 0; k < fd.n; ++k) id[k] = e.nodeIds[fd.v[k]];
         if (fd.n == 3) {

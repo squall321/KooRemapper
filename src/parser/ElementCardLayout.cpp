@@ -65,6 +65,12 @@ std::vector<std::string> splitOptions(const std::string& kw, const std::string& 
 int solidNodesFromElform(int elform) {
     // Vol_I 228671-228677
     switch (elform) {
+        // 10절점 사면체. 표에 없어서 `0`(= 모름) 으로 떨어졌는데 **사실과 다르다** —
+        // 그래서 `restack` 이 TET10 파트를 '고차라 못 한다' 가 아니라 '유효한 압출이 아니다' 라는
+        // **엉뚱한 까닭**으로 거절했다. 카드 폭은 그대로다: solidCardLines(10,·) = 2 + extra 이고
+        // 등록 전 폴백도 2 + extra 였다(실측으로 덱 바이트가 바뀌지 않는다).
+        case 16: return 10;   // 10-node tetrahedron
+        case 17: return 10;   // 10-node composite tetrahedron
         case 23: return 20;   // 20-node solid
         case 24: return 27;   // 27-node solid
         case 25: return 21;   // 21-noded quadratic pentahedron

@@ -21,6 +21,7 @@
 #include "validation/ElementQualityChecker.h"
 #include "validation/IntersectionDetector.h"
 #include "validation/MaterialCardValidator.h"
+#include "util/Validator.h"
 #include "util/ContactKeywords.h"
 #include "util/YamlComment.h"          // yamlResolvePath — YAML 안 상대 경로 공통 규칙
 #include "commands/contact_helpers.h"   // ct_getPreset — 단독 contact 와 같은 짧은 이름 표
@@ -3282,13 +3283,16 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
     //     *ELEMENT_SHELL_THICKNESS, COMPOSITE 계열은 읽지 못한다. 그런 파트를 restack 하면
     //     '요소 0 개' 나 '일부만' 으로 조용히 흘러가 틀린 덱이 나간다 — 조용히 넘기지 않고 rc=1 이다.
     {
-        // 고차 정식 파트(ELFORM 23-29 또는 H20 같은 키워드 옵션)는 아예 받지 않는다.
+        // 고차 정식 파트(ELFORM 16·17 의 10절점 사면체, 23-29, H20 같은 키워드 옵션)는 받지 않는다.
         // 리더는 요소마다 8 절점 모서리만 담으므로 새 층을 만들면 중간 절점이 사라지고,
         // 물려받은 *SECTION_SOLID ELFORM 은 그대로 23 이라 '20 절점이라고 적힌 8 절점 덱' 이 나간다.
         {
             auto hn = ecBuildPidNodes(rawLines_);
             auto hit = hn.find(op.targetPid);
-            if (hit != hn.end() && hit->second > 10) {
+            // 문턱이 **8** 이다 — 사유("요소마다 8 절점만 담는다")가 10절점 사면체에도 그대로
+            // 적용된다. 10 으로 두면 TET10 파트가 여기를 지나 뒤에서 '유효한 압출이 아니다' 라는
+            // 엉뚱한 까닭으로 거절된다(실측).
+            if (hit != hn.end() && hit->second > 8) {
                 errorMessage_ = "restack: PID " + std::to_string(op.targetPid) + " 는 " +
                                 std::to_string(hit->second) +
                                 " 절점 고차 요소 파트입니다(*SECTION_SOLID ELFORM) — 이 도구는 요소마다"
@@ -7622,17 +7626,19 @@ bool ModelAssembler::applyDisconnect(const DisconnectOperation& op) {
     for (int eid : targetElems) {
         const auto& ed = activeElems.at(eid);
         if (ed.isTet) {
-            int n[4] = {ed.nodeIds[0], ed.nodeIds[1], ed.nodeIds[2], ed.nodeIds[3]};
-            std::array<std::array<int,3>, 4> tetFaces = {{
-                {n[0], n[2], n[1]}, {n[0], n[1], n[3]},
-                {n[1], n[2], n[3]}, {n[0], n[3], n[2]}
-            }};
-            for (int f = 0; f < 4; ++f) {
-                FaceKey key = {tetFaces[f][0], tetFaces[f][1], tetFaces[f][2], tetFaces[f][2]};
+            // 면 표는 **위상 정본**(`topo::facesOf`)을 쓴다. 여기 손으로 적은 사본이 있었는데
+            // 면마다 **같은 순환**이었다({0,3,2} ≡ {2,0,3}) — 아래 `f` 가 밖으로 새어 나가
+            // 뒤에서 다시 쓰이므로 그 동일성이 중요하다. 사본을 둘 이유는 없다.
+            const auto& TF = topo::facesOf(ElementType::TET4);
+            for (int f = 0; f < static_cast<int>(TF.size()); ++f) {
+                const int* v = TF[f].v;
+                FaceKey key = {ed.nodeIds[v[0]], ed.nodeIds[v[1]],
+                               ed.nodeIds[v[2]], ed.nodeIds[v[2]]};
                 std::sort(key.begin(), key.end());
                 faceToElements[key].push_back({eid, f});
             }
         } else {
+            // `getHexFaceNodes` 도 같은 정본을 탄다(`Element::getFaceLocalNodes` → topo 육면체).
             for (int f = 0; f < Element::NUM_FACES; ++f) {
                 auto faceNodes = getHexFaceNodes(ed.nodeIds, f);
                 // Skip degenerate faces (PENTA6 face 3: n2,n2,n6,n6)
@@ -10066,6 +10072,13 @@ Vector3D ModelAssembler::computeElementCenter(const Element& elem) const {
 
 // ========== PHASE 7: EXTRUDE TO SOLID ==========
 
+void ModelAssembler::uprightHex(AddedElement& elem) {
+    std::array<Vector3D, 8> c;
+    for (int i = 0; i < 8; ++i) c[i] = getNodePosition(elem.nodeIds[i]);
+    if (Validator::hex8CenterJacobian(c) >= 0.0) return;
+    for (int i = 0; i < 4; ++i) std::swap(elem.nodeIds[i], elem.nodeIds[i + 4]);
+}
+
 void ModelAssembler::extrudeToSolid(const std::vector<ShellElement>& surface,
                                    const Vector3D& direction,
                                    double thickness, int numLayers,
@@ -10157,6 +10170,7 @@ void ModelAssembler::extrudeToSolid(const std::vector<ShellElement>& surface,
                 elem.nodeIds[7] = elem.nodeIds[6];
             }
 
+            uprightHex(elem);   // 짐작이 아니라 **재서** 바로 세운다
             addedElements_.push_back(elem);
         }
     }
@@ -10271,6 +10285,7 @@ void ModelAssembler::extrudeToSolid(const std::vector<ShellElement>& surface,
                 elem.nodeIds[7] = elem.nodeIds[6];
             }
 
+            uprightHex(elem);   // 짐작이 아니라 **재서** 바로 세운다
             outElements.push_back(elem);
         }
     }
@@ -10396,6 +10411,7 @@ void ModelAssembler::extrudeToSolid(const std::vector<ShellElement>& surface,
                 elem.nodeIds[7] = elem.nodeIds[6];
             }
 
+            uprightHex(elem);   // 짐작이 아니라 **재서** 바로 세운다
             addedElements_.push_back(elem);
         }
     }
@@ -10506,6 +10522,7 @@ void ModelAssembler::extrudeToSolid(const std::vector<ShellElement>& surface,
                 elem.nodeIds[7] = elem.nodeIds[6];
             }
 
+            uprightHex(elem);   // 짐작이 아니라 **재서** 바로 세운다
             addedElements_.push_back(elem);
         }
     }
@@ -10638,6 +10655,7 @@ void ModelAssembler::extrudeToSolid(const std::vector<ShellElement>& surface,
                 elem.nodeIds[7] = elem.nodeIds[6];
             }
 
+            uprightHex(elem);   // 짐작이 아니라 **재서** 바로 세운다
             addedElements_.push_back(elem);
         }
     }
@@ -16809,20 +16827,19 @@ void ModelAssembler::laplacianSmoothInterior(const std::vector<int>& pids, int i
         for (int i = 0; i < 8; ++i) allNodes.insert(elem.nodeIds[i]);
 
         // 12 edges → adjacency
-        static const int edges[12][2] = {
-            {0,1},{1,2},{2,3},{3,0},{4,5},{5,6},{6,7},{7,4},{0,4},{1,5},{2,6},{3,7}};
-        for (auto& e : edges) {
-            int a = elem.nodeIds[e[0]], b = elem.nodeIds[e[1]];
+        // 모서리·면 표는 **위상 정본**(`topo::`)을 쓴다. 여기 사본이 있었다(이 함수에 두 벌,
+        // 모서리까지 네 벌). 이 블록은 HEX8 만 다루고 면 키를 **정렬**해 쓰므로 감김은 무관하다 —
+        // 정본과 바이트까지 같은 결과가 나온다. 사본을 두면 언젠가 갈린다.
+        for (const auto& e : topo::edgesOf(ElementType::HEX8)) {
+            int a = elem.nodeIds[e.first], b = elem.nodeIds[e.second];
             adj[a].push_back(b);
             adj[b].push_back(a);
         }
 
-        // 6 faces → face count for exterior detection
-        static const int faces[6][4] = {
-            {0,3,7,4},{1,2,6,5},{0,1,5,4},{3,2,6,7},{0,1,2,3},{4,5,6,7}};
-        for (auto& f : faces) {
-            auto key = sortedFace(elem.nodeIds[f[0]], elem.nodeIds[f[1]],
-                                   elem.nodeIds[f[2]], elem.nodeIds[f[3]]);
+        // 6 faces → face count for exterior detection (키를 정렬하므로 감김 무관)
+        for (const auto& f : topo::facesOf(ElementType::HEX8)) {
+            auto key = sortedFace(elem.nodeIds[f.v[0]], elem.nodeIds[f.v[1]],
+                                   elem.nodeIds[f.v[2]], elem.nodeIds[f.v[3]]);
             faceCount[key]++;
         }
     }
@@ -16834,19 +16851,18 @@ void ModelAssembler::laplacianSmoothInterior(const std::vector<int>& pids, int i
 
         for (int i = 0; i < 8; ++i) allNodes.insert(elem.nodeIds[i]);
 
-        static const int edges[12][2] = {
-            {0,1},{1,2},{2,3},{3,0},{4,5},{5,6},{6,7},{7,4},{0,4},{1,5},{2,6},{3,7}};
-        for (auto& e : edges) {
-            int a = elem.nodeIds[e[0]], b = elem.nodeIds[e[1]];
+        // 모서리·면 표는 **위상 정본**(`topo::`)을 쓴다. 여기 사본이 있었다(이 함수에 두 벌,
+        // 모서리까지 네 벌). 이 블록은 HEX8 만 다루고 면 키를 **정렬**해 쓰므로 감김은 무관하다 —
+        // 정본과 바이트까지 같은 결과가 나온다. 사본을 두면 언젠가 갈린다.
+        for (const auto& e : topo::edgesOf(ElementType::HEX8)) {
+            int a = elem.nodeIds[e.first], b = elem.nodeIds[e.second];
             adj[a].push_back(b);
             adj[b].push_back(a);
         }
 
-        static const int faces[6][4] = {
-            {0,3,7,4},{1,2,6,5},{0,1,5,4},{3,2,6,7},{0,1,2,3},{4,5,6,7}};
-        for (auto& f : faces) {
-            auto key = sortedFace(elem.nodeIds[f[0]], elem.nodeIds[f[1]],
-                                   elem.nodeIds[f[2]], elem.nodeIds[f[3]]);
+        for (const auto& f : topo::facesOf(ElementType::HEX8)) {
+            auto key = sortedFace(elem.nodeIds[f.v[0]], elem.nodeIds[f.v[1]],
+                                   elem.nodeIds[f.v[2]], elem.nodeIds[f.v[3]]);
             faceCount[key]++;
         }
     }

@@ -156,23 +156,8 @@ P2 to2d(const Vector3D& p, int axis) {
 
 // 종류별 모서리 표. 저장 규약: TET4 는 n4..n7=n3, PENTA6 는 n2=n3·n6=n7 로 정규화돼 있다
 // (`KFileReader::detectAndNormalizePenta6`).
-const std::vector<std::pair<int,int>>& edgesFor(ElementType t) {
-    static const std::vector<std::pair<int,int>> hex = {
-        {0,1},{1,2},{2,3},{3,0},{4,5},{5,6},{6,7},{7,4},{0,4},{1,5},{2,6},{3,7}};
-    static const std::vector<std::pair<int,int>> tet = {
-        {0,1},{1,2},{2,0},{0,3},{1,3},{2,3}};
-    static const std::vector<std::pair<int,int>> wedge = {
-        {0,1},{1,2},{2,0},{4,5},{5,6},{6,4},{0,4},{1,5},{2,6}};
-    static const std::vector<std::pair<int,int>> quad = {
-        {0,1},{1,2},{2,3},{3,0}};
-    switch (t) {
-        case ElementType::TET4:
-        case ElementType::TET10:   return tet;
-        case ElementType::PENTA6:  return wedge;
-        case ElementType::QUAD4:   return quad;
-        default:                   return hex;   // HEX8 · HEX20 (모서리 절점만 쓴다)
-    }
-}
+// 모서리 표는 **위상 정본**(`topo::edgesOf`, include/core/Element.h)을 쓴다 — 사본이 따로 있었다.
+using topo::edgesOf;
 
 }  // namespace
 
@@ -266,7 +251,7 @@ bool computeSection(const Config& c, const std::string& deck, int axisPref,
         }
         for (const auto& [eid, elem] : mesh.elements) {
             (void)eid;
-            const auto& edges = edgesFor(elem.type);
+            const auto& edges = edgesOf(elem.type);
             // 요소 크기로 중복 판정 공차를 잡는다 — 절대 공차를 박으면 단위가 다른 덱에서 틀린다
             double elemScale = 0.0;
             Vector3D cen(0, 0, 0);
