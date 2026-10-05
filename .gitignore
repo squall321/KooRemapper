@@ -103,3 +103,6 @@ platform/storage
 *.pre-move-*
 # Drive 산출물 영구 캐시(dist-from-drive)
 platform/infra/apptainer/.drive-cache/
+
+# 작업용 스크래치(회귀·진도 잔르기) — 추적하지 않는다
+platform/scratch/
