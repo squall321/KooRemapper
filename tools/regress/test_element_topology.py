@@ -156,6 +156,25 @@ def hex_box(path, nx=2, ny=2, nz=2):
     write(path, "\n".join(L) + "\n")
 
 
+def nonnormalized_wedge(path):
+    """★리더가 **정규화하지 않는** 쐐기 — 연결 `1 2 3 4 1 2 5 6`(n0==n4, n1==n5).
+
+    `detectAndNormalizePenta6` 는 8패턴을 쐐기로 알아보면서 **k축 둘만** `n2=n3, n6=n7` 로
+    정규화한다. 쐐기 면 표는 정규형만 맞으므로 이 꼴에 쓰면 요소의 면이 아닌 **대각 절단면**이
+    나온다 — 실측으로 면이 5개가 아니라 4개로 나왔다(하나를 잃었다). 그래서 `topoType()` 이
+    축퇴를 흡수하는 육면체 표로 떨군다."""
+    P = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0), (0, 0, 1), (1, 0, 1)]
+    L = ["*KEYWORD", "*NODE"]
+    for i, (x, y, z) in enumerate(P, 1):
+        L.append("%8d%16.9f%16.9f%16.9f" % (i, x, y, z))
+    L += ["*ELEMENT_SOLID",
+          "%8d%8d" % (1, 1) + "".join("%8d" % v for v in [1, 2, 3, 4, 1, 2, 5, 6]),
+          "*PART", "wedge", "%10d%10d%10d" % (1, 1, 1),
+          "*SECTION_SOLID", "%10d%10d" % (1, 1),
+          "*MAT_ELASTIC", "%10d%10.4g%10.6g%10.4g" % (1, 7.85e-9, 210000, 0.3), "*END"]
+    write(path, "\n".join(L) + "\n")
+
+
 def main():
     if len(sys.argv) < 2:
         print("usage: test_element_topology.py <KooRemapper 바이너리>")
@@ -304,6 +323,25 @@ def main():
                         neg += 1
                 check("D-3 ★뒤집힌 솔리드가 **0개**다 (요소 %d개 검사)" % len(solids),
                       neg == 0, neg)
+
+        # ── E: ★정규화되지 않은 쐐기 — 쐐기 표를 쓰면 **면을 잃는다** ──
+        nonnormalized_wedge(os.path.join(d, "wedge.k"))
+        write(os.path.join(d, "wg.yaml"), "model: wedge.k\noutput: wg\n")
+        rc, out = run(binary, d, "surfview", "wg.yaml")
+        check("E-1 surfview rc=0", rc == 0, out[-250:])
+        faces = [l for l in out.splitlines() if "Faces total / free" in l]
+        check("E-2 ★면이 **5개**다 (쐐기의 참값 — 쐐기 표를 쓰면 4개가 된다)",
+              bool(faces) and "5 / 5" in faces[0], faces[:1])
+        tri = [l for l in out.splitlines() if "Triangles drawn" in l]
+        check("E-3 삼각형이 8개다 (삼각면 2 + 사각면 3×2)",
+              bool(tri) and tri[0].split()[-1] == "8", tri[:1])
+        check("E-4 ★면적 0 삼각형을 솎고 **센다** (숫자가 부풀지 않는다)",
+              "Zero-area triangles dropped" in out,
+              [l for l in out.splitlines() if "Zero-area" in l][:1])
+        # 부피도 맞아야 한다 — 같은 폴백을 modelmeta 가 쓴다
+        write(os.path.join(d, "mm.yaml"), "model: wedge.k\noutput: mm\n")
+        rc, out = run(binary, d, "modelmeta", "mm.yaml")
+        check("E-5 modelmeta 가 같은 덱을 읽는다", rc == 0, out[-200:])
 
         # ── C: 육면체는 6면, 사면체는 4면 — 면 수가 종류를 따른다 ──
         write(os.path.join(d, "sb.yaml"), "model: box.k\noutput: sb\n")

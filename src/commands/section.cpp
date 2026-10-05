@@ -154,7 +154,10 @@ P2 to2d(const Vector3D& p, int axis) {
     return {p.z, p.x};
 }
 
-// 종류별 모서리 표. 저장 규약: TET4 는 n4..n7=n3, PENTA6 는 n2=n3·n6=n7 로 정규화돼 있다
+// 종류별 모서리 표. 저장 규약: TET4 는 n4..n7=n3.
+// ⚠ PENTA6 는 **언제나 정규화돼 있지 않다** — 리더는 8패턴을 쐐기로 알아보면서 k축 둘만
+//   n2=n3·n6=n7 로 정규화한다. 그래서 `elem.topoType()` 을 쓴다(정규형이 아니면 축퇴를
+//   흡수하는 육면체 표로 떨군다). 여기 적혀 있던 "정규화돼 있다" 는 사실이 아니었다.
 // (`KFileReader::detectAndNormalizePenta6`).
 // 모서리 표는 **위상 정본**(`topo::edgesOf`, include/core/Element.h)을 쓴다 — 사본이 따로 있었다.
 using topo::edgesOf;
@@ -251,7 +254,7 @@ bool computeSection(const Config& c, const std::string& deck, int axisPref,
         }
         for (const auto& [eid, elem] : mesh.elements) {
             (void)eid;
-            const auto& edges = edgesOf(elem.type);
+            const auto& edges = edgesOf(elem.topoType());
             // 요소 크기로 중복 판정 공차를 잡는다 — 절대 공차를 박으면 단위가 다른 덱에서 틀린다
             double elemScale = 0.0;
             Vector3D cen(0, 0, 0);

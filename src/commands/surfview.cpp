@@ -139,7 +139,7 @@ int runSurfView(const std::string& yamlFile, ConsoleOutput& console) {
     std::map<std::vector<int>, std::pair<int, std::pair<int, int>>> faceCount;  // key → (count, (eid, faceIdx))
     long long degenerateFaces = 0;
     for (const auto& [eid, elem] : mesh.elements) {
-        const auto& defs = facesOf(elem.type);
+        const auto& defs = facesOf(elem.topoType());   // 비정규 쐐기는 육면체 표로 떨군다
         for (size_t fi = 0; fi < defs.size(); ++fi) {
             const Face& fd = defs[fi];
             std::vector<int> ids;
@@ -166,7 +166,7 @@ int runSurfView(const std::string& yamlFile, ConsoleOutput& console) {
         const auto eit = mesh.elements.find(v.second.first);
         if (eit == mesh.elements.end()) continue;
         const Element& e = eit->second;
-        const Face& fd = facesOf(e.type)[v.second.second];
+        const Face& fd = facesOf(e.topoType())[v.second.second];
         int id[4] = {0, 0, 0, 0};
         for (int k = 0; k < fd.n; ++k) id[k] = e.nodeIds[fd.v[k]];
         if (fd.n == 3) {
@@ -195,7 +195,7 @@ int runSurfView(const std::string& yamlFile, ConsoleOutput& console) {
     std::vector<PTri> ptris;
     ptris.reserve(tris.size());
     long double uMin = 1e300, uMax = -1e300, vMin = 1e300, vMax = -1e300;
-    long long flippedCount = 0, missingNode = 0;
+    long long flippedCount = 0, missingNode = 0, zeroArea = 0;
     for (const Tri& t : tris) {
         Vector3D p[3];
         bool ok = true;
@@ -221,7 +221,13 @@ int runSurfView(const std::string& yamlFile, ConsoleOutput& console) {
         // 등진) 면 수를 세서 보고한다. 추적 덱 489장 중 111장이 정상 픽스처인데 음수 야코비안이다.
         const Vector3D n = (p[1] - p[0]).cross(p[2] - p[0]);
         const double nm = n.magnitude();
-        const double cosang = (nm > 0) ? (n.dot(dir) / nm) : 0.0;
+        // ★면적 0 삼각형은 **세지도 그리지도 않는다.** 축퇴한 사각면(예: 정규화되지 않은 쐐기를
+        // 육면체 표로 읽은 면 `[a,a,c,b]`)을 대각으로 쪼개면 한쪽이 면적 0 이 된다. 그것을
+        // 그리면 잉크는 0 인데 `Triangles drawn`·`Back-facing`·`ink_ratio` 가 조용히 부풀어
+        // 숫자가 거짓이 된다. **구멍이 뚫리지 않으므로**(면적이 0 이다) 솎아도 그림은 참이다 —
+        // "삼각형을 솎지 않는다" 는 규율은 **면적이 있는** 삼각형에 대한 것이다.
+        if (nm <= 0.0) { zeroArea++; continue; }
+        const double cosang = n.dot(dir) / nm;
         q.flipped = (cosang < 0.0);
         if (q.flipped) flippedCount++;
         q.shade = 0.35 + 0.65 * std::fabs(cosang);
@@ -246,6 +252,9 @@ int runSurfView(const std::string& yamlFile, ConsoleOutput& console) {
         console.keyValue("Free face share", b);
     }
     console.keyValue("Triangles drawn", std::to_string(ptris.size()));
+    if (zeroArea > 0)
+        console.keyValue("Zero-area triangles dropped", std::to_string(zeroArea) +
+                         "  (축퇴 사각면을 쪼갠 쪽 — 잉크가 0 이라 그림은 그대로다)");
     console.keyValue("Degenerate faces skipped", std::to_string(degenerateFaces));
     console.keyValue("Parts", std::to_string(pids.size()) + " / " + std::to_string(mesh.parts.size()));
     console.keyValue("Back-facing triangles", std::to_string(flippedCount));
