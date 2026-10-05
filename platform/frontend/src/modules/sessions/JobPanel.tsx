@@ -10,6 +10,27 @@ import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Spinner } from '
 import { fmtDate } from '@/shared/lib/cn'
 import { errorMessage } from '@/shared/api/client'
 
+// 그림마다 **있는 숫자가 다르다** — 한 캡션을 세 그림에 돌려 쓰면 없는 것을 읽으라고 말한다.
+//   · 단면: 확대 배율·최소피처가 그림에 있다. 축 선택 근거는 **매니페스트·콘솔**에 있다(그림 아님).
+//   · 자유면: **등축**이라 배율이 없다. 자유면 비율·등진 삼각형 수가 요지다.
+//   · 층 모식도: 배율도 최소피처도 없다. 바닥 처리한 층과 감싸는 파트가 요지다.
+function figAlt(name: string): string {
+  if (/_surface\.svg$/i.test(name)) return '자유면 뷰'
+  if (/_stackdiagram\.svg$/i.test(name)) return '층 모식도'
+  if (/_section\.svg$/i.test(name)) return '단면 그림'
+  return '그림'
+}
+
+function figCaption(name: string): string {
+  if (/_surface\.svg$/i.test(name))
+    return '이 뷰는 등축이다 — 배율이 없고, 얇은 적층은 얇게 보이는 것이 사실이다. 층 두께는 단면 그림이 답한다.'
+  if (/_stackdiagram\.svg$/i.test(name))
+    return '모식도다(파트 축 범위로 그린다) — 바닥 처리한 층은 두께가 과장되므로 옆에 적힌 숫자가 참이다.'
+  if (/_section\.svg$/i.test(name))
+    return '그림 안의 확대 배율·최소피처를 함께 읽으라 — 축을 고른 근거는 매니페스트(JSON)와 잡 로그에 있다.'
+  return '그림과 함께 잡 로그의 숫자를 읽으라 — 그것이 그림이 거짓말하지 않게 하는 장치다.'
+}
+
 export function JobPanel({ sessionId }: { sessionId: string }) {
   const { data, isLoading } = useQuery({
     queryKey: ['jobs', sessionId],
@@ -42,6 +63,7 @@ export function JobPanel({ sessionId }: { sessionId: string }) {
 function JobRow({ job, sessionId, onLogs }: { job: Job; sessionId: string; onLogs: () => void }) {
   // 그림 산출물을 받기 전에 볼 수 있게 — blob URL 은 닫을 때 반드시 해제한다(누수).
   const [figUrl, setFigUrl] = useState<string | null>(null)
+  const [figName, setFigName] = useState<string>('')
   const qc = useQueryClient()
   const active = job.status === 'queued' || job.status === 'running'
   const outs = useQuery({
@@ -101,7 +123,7 @@ function JobRow({ job, sessionId, onLogs }: { job: Job; sessionId: string; onLog
               {/* 그림 산출물은 받기 전에 **볼 수** 있어야 한다 — 지금까지 프런트에 서버가 구운
                   그림을 띄울 자리가 아예 없었다(`<img` 태그 0건). */}
               {/\.svg$/i.test(f.filename) && (
-                <button onClick={async () => setFigUrl(await svgBlobUrl(sessionId, f.id))}
+                <button onClick={async () => { setFigName(f.filename); setFigUrl(await svgBlobUrl(sessionId, f.id)) }}
                   className="inline-flex items-center gap-1 text-xs rounded bg-accent/15 text-accent px-2 py-0.5 hover:opacity-80">
                   <ImageIcon size={11} /> 그림 보기
                 </button>
@@ -114,13 +136,11 @@ function JobRow({ job, sessionId, onLogs }: { job: Job; sessionId: string; onLog
         <div className="mt-2">
           {/* ⚠ `<img>` 로만 띄운다 — SVG 안 스크립트가 실행되지 않는 유일한 경로다.
               `dangerouslySetInnerHTML`·`<object>`·`<iframe>` 으로 바꾸면 저장형 XSS 가 된다. */}
-          <img src={figUrl} alt="단면 그림" className="max-w-full border border-border rounded bg-white" />
+          <img src={figUrl} alt={figAlt(figName)} className="max-w-full border border-border rounded bg-white" />
           <div className="mt-1 flex items-center gap-2">
             <button onClick={() => { URL.revokeObjectURL(figUrl); setFigUrl(null) }}
               className="text-xs text-muted hover:underline">닫기</button>
-            <span className="text-[11px] text-muted">
-              그림 안의 확대 배율·최소피처·축 선택 근거를 함께 읽으라 — 그것이 그림이 거짓말하지 않게 하는 숫자다.
-            </span>
+            <span className="text-[11px] text-muted">{figCaption(figName)}</span>
           </div>
         </div>
       )}
