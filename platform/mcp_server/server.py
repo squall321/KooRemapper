@@ -1027,7 +1027,13 @@ async def report_energy_flow(report_id: str, ctx: Context, case_key: str | None 
 async def report_geometry(report_id: str, ctx: Context) -> dict:
     """공간 컨텍스트(부품 위치·시각화용) — impact=디바이스 외곽선(device_outline)+파트별
     footprint(XY 다각형)+z범위. "부품이 어디 있나"·충격 위치를 좌표로 안다. sphere/deep 은
-    각도 기반이라 부품 형상은 원본 렌더에만 있다(geometry 비어 있음)."""
+    각도 기반이라 부품 형상은 원본 렌더에만 있다(geometry 비어 있음).
+
+    ⚠ **footprint 가 지어낸 것일 수 있다.** 상류 생성기는 실제 형상이 없는 파트에 **파트 id
+    해시로 사각형을 합성**하고 `_synthetic_footprint` 를 단다. 응답의
+    `footprints_are_measured`(bool) · `synthetic_footprints`(개수) · 파트별
+    `synthetic_footprint` 를 **먼저 보라** — 실측으로 유일한 impact 샘플은 **25/25 가 합성**이고
+    `zmin`/`zmax` 도 전부 null 이다. 합성 footprint 를 부품 위치·크기로 쓰면 안 된다."""
     return await _get(ctx, f"/reports/{report_id}/geometry")
 
 

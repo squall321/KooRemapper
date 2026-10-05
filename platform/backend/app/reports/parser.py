@@ -661,15 +661,32 @@ def extract_geometry(data: dict, kind: str) -> dict:
         if not isinstance(p, dict):
             continue
         fp = p.get("footprint")
+        # ★`_synthetic_footprint` 를 **떼지 않는다.** 상류 생성기(`koo_impact_report`)는 실제
+        # footprint 가 없는 파트에 **파트 id 해시로 사각형을 지어내고**(황금비 각 + 해시 반지름,
+        # `report/payload/__init__.py`) 이 플래그를 달고 자기 HTML 에 "SYNTHETIC FOOTPRINTS
+        # n/전체" 배지를 띄운다. 여기서 플래그를 떼면 DynaForge 는 **지어낸 사각형을 실측 외곽선
+        # 처럼** 내려준다 — 실측으로 유일한 impact 픽스처에서 **25/25 파트가 합성**이었고
+        # zmin/zmax 도 전부 None 이다. 그림이 조용히 거짓이 되는 자리다.
         parts.append({
             "part_id": _to_int(p.get("id")),
             "name": p.get("name"),
             "group": p.get("group"),
             "footprint": fp if isinstance(fp, list) else None,
+            "synthetic_footprint": bool(p.get("_synthetic_footprint")),
             "zmin": _num(p.get("zmin")),
             "zmax": _num(p.get("zmax")),
         })
-    return {"kind": "impact", "device_outline": outline, "device_bbox": bbox, "parts": parts}
+    syn = sum(1 for p in parts if p["synthetic_footprint"])
+    return {
+        "kind": "impact", "device_outline": outline, "device_bbox": bbox, "parts": parts,
+        # 한눈에 보이는 요약 — 파트 표를 다 훑지 않아도 "이 외곽선을 믿어도 되나" 를 알 수 있다.
+        "synthetic_footprints": syn,
+        "footprints_are_measured": syn == 0,
+        **({"footprint_warning":
+            "파트 %d/%d 의 footprint 는 상류 생성기가 **파트 id 해시로 지어낸 사각형**이다"
+            "(실측 형상이 아니다). 부품 위치·크기로 쓰면 안 된다." % (syn, len(parts))}
+           if syn else {}),
+    }
 
 
 def _ts_with_max(ts: dict | None, alt_key: str) -> dict | None:

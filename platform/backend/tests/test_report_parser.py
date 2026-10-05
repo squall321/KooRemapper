@@ -128,6 +128,34 @@ def test_extract_geometry_impact():
     assert g["parts"] and any(p["footprint"] for p in g["parts"])
 
 
+@pytest.mark.skipif(not any(p.exists() for p in _IMPACT_CANDIDATES), reason="impact 샘플 없음")
+def test_extract_geometry_marks_synthetic_footprints():
+    """★지어낸 footprint 를 **실측처럼 내보내지 않는다.**
+
+    상류 생성기(`koo_impact_report/report/payload/__init__.py`)는 실제 형상이 없는 파트에
+    **파트 id 해시로 사각형을 합성**하고(황금비 각 + 해시 반지름) `_synthetic_footprint` 를
+    달며 자기 HTML 에 "SYNTHETIC FOOTPRINTS n/전체" 배지를 띄운다. 파서가 그 플래그를 떼면
+    DynaForge 는 **지어낸 사각형을 실측 외곽선처럼** 내려준다 — 실측으로 이 샘플은
+    **25/25 가 합성**이고 zmin/zmax 도 전부 None 이다. 그림이 조용히 거짓이 되는 자리다."""
+    path = next(p for p in _IMPACT_CANDIDATES if p.exists())
+    data = parser.extract_embedded_data(_read(path))
+    g = parser.extract_geometry(data, "impact")
+    src = [p for p in (data.get("parts") or []) if isinstance(p, dict)]
+    want = sum(1 for p in src if p.get("_synthetic_footprint"))
+
+    # 파트마다 플래그가 보존된다
+    assert all("synthetic_footprint" in p for p in g["parts"])
+    assert sum(1 for p in g["parts"] if p["synthetic_footprint"]) == want
+    # 한눈 요약이 원본과 맞는다
+    assert g["synthetic_footprints"] == want
+    assert g["footprints_are_measured"] == (want == 0)
+    # 합성이 있으면 **말한다** (요약만 보는 쪽도 알 수 있어야 한다)
+    if want:
+        assert "footprint_warning" in g and "지어낸" in g["footprint_warning"]
+    else:
+        assert "footprint_warning" not in g
+
+
 @pytest.mark.skipif(not _SPHERE.exists(), reason="sphere 샘플 없음")
 def test_extract_geometry_sphere_empty():
     data = parser.extract_embedded_data(_read(_SPHERE))

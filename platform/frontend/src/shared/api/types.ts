@@ -329,7 +329,12 @@ export interface ReportGeometry {
   kind: ReportKind
   device_outline: number[][] | null
   device_bbox: { xmin: number; xmax: number; ymin: number; ymax: number } | null
-  parts: Array<{ part_id: number; name: string | null; group: string | null; footprint: number[][] | null; zmin: number | null; zmax: number | null }>
+  // ⚠ `synthetic_footprint` — 상류 생성기가 **파트 id 해시로 지어낸** 사각형이라는 표시다
+  //   (실측 형상이 아니다). 그리는 쪽이 반드시 가려 보여야 한다.
+  parts: Array<{ part_id: number; name: string | null; group: string | null; footprint: number[][] | null; synthetic_footprint?: boolean; zmin: number | null; zmax: number | null }>
+  synthetic_footprints?: number
+  footprints_are_measured?: boolean
+  footprint_warning?: string
 }
 export interface ReportFact {
   case_key: string

@@ -110,7 +110,11 @@ function devicePlot(facts: ReportFact[], norm: (v: number) => number, worst: Rep
                     unit: string, fmt: (v: number) => string,
                     geom: ReportGeometry | undefined, partId: number): Plot {
   const W = 300, H = 240, pad = 16
-  const partFp = geom?.parts.find((p) => p.part_id === partId)?.footprint ?? null
+  const partRec = geom?.parts.find((p) => p.part_id === partId)
+  const partFp = partRec?.footprint ?? null
+  // ★합성 footprint 는 **실측 형상이 아니다** — 상류가 파트 id 해시로 지어낸 사각형이다.
+  //   같은 초록 채움으로 그리면 "부품이 여기 있다" 는 거짓이 된다. 점선 외곽 + 글자로 가린다.
+  const fpSynth = partRec?.synthetic_footprint === true
   const pos = (f: ReportFact) => {
     const id = f.identity as { pos_x?: number; pos_y?: number } | null
     return { x: id?.pos_x ?? 0, y: id?.pos_y ?? 0 }
@@ -142,7 +146,9 @@ function devicePlot(facts: ReportFact[], norm: (v: number) => number, worst: Rep
   const inner = (
     <g>
       {geom?.device_outline && <polygon points={poly(geom.device_outline)} fill="none" stroke="#bbb" strokeWidth={1} />}
-      {partFp && <polygon points={poly(partFp)} fill="#4ecca355" stroke="#2a9d78" strokeWidth={1} />}
+      {partFp && (fpSynth
+        ? <polygon points={poly(partFp)} fill="none" stroke="#a33" strokeWidth={1} strokeDasharray="3 2" />
+        : <polygon points={poly(partFp)} fill="#4ecca355" stroke="#2a9d78" strokeWidth={1} />)}
       {facts.map((f, i) => { const p = pos(f); return (
         <circle key={i} cx={sx(p.x)} cy={sy(p.y)} r={4} fill={heat(norm(f.value))} opacity={0.85}>
           <title>{factLbl(f)}</title>
@@ -154,7 +160,11 @@ function devicePlot(facts: ReportFact[], norm: (v: number) => number, worst: Rep
           <text x={Math.min(sx(p.x) + 9, W - 40)} y={Math.max(sy(p.y) - 7, 10)} fontSize="8" fill="#111">{fmt(worst.value)} {unit}</text>
         </g>
       )})()}
-      <text x={W / 2} y={H - 3} textAnchor="middle" fontSize="8" fill="#999">디바이스 XY · 초록=선택 부품 footprint</text>
+      <text x={W / 2} y={H - 3} textAnchor="middle" fontSize="8" fill={fpSynth ? '#a33' : '#999'}>
+        {fpSynth
+          ? '디바이스 XY · ⚠ 빨간 점선 = **지어낸** footprint (실측 형상 아님)'
+          : '디바이스 XY · 초록=선택 부품 footprint'}
+      </text>
     </g>
   )
   return {
