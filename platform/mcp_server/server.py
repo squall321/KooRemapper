@@ -365,6 +365,28 @@ async def _job_log_tail(ctx: Context, job_id: str, limit: int = 2500) -> str:
         return f"(로그를 읽지 못했습니다: {e})"
 
 
+def fit_to_budget(build, n_rows: int, budget: int, reserve: int = 1200):
+    """**나갈 그 꼴 그대로 재서** 표의 행을 뒤에서부터 뺀다. `build(cap)` 이 응답 dict 를 준다.
+
+    왜 고정 캡이 아닌가. 챗은 텍스트를 이어 붙인 **뒤** 통째로 자르므로, 응답이 길면
+    **URL 줄이 잘려 그림이 사라진다**. 고정 캡은 그 길이를 **재지 않는다** — 제목이 긴 덱은
+    행이 적어도 넘고, 짧은 덱은 더 실을 수 있는데 못 싣는다. 실측(61파트 배터리 덱) —
+    고정 캡 20 은 3,702바이트에 20행, 재서 빼면 같은 예산에 **25행**(4,413바이트)이 들어간다.
+
+    `reserve` 는 본문 뒤에 붙는 안내·URL 자리다. 그 줄이 잘리면 그림이 사라지므로 남겨 둔다.
+    돌려주는 것은 `(응답, 실은 행 수)` 이고, 뺀 수는 호출자가 `parts_omitted` 로 말한다.
+    """
+    import json as _j
+    cap = max(int(n_rows), 1)
+    res = build(cap)
+    limit = max(budget - reserve, 256)
+    while cap > 1 and len(_j.dumps(res, ensure_ascii=False)) > limit:
+        cap -= max(1, cap // 8)
+        cap = max(cap, 1)
+        res = build(cap)
+    return res, cap
+
+
 async def _figure_numbers(ctx: Context, job_id: str, limit: int = 900) -> str:
     """로그에서 **그림의 요지 숫자 줄만** 뽑는다.
 
@@ -482,14 +504,24 @@ async def mesh_section_figure(
             out["parts_omitted"] = len(parts) - part_cap
         return out
 
-    # compare 가 붙으면 파트 표가 두 벌이 된다 — 캡을 절반으로 줄인다. 실측으로 61파트 덱에
-    # compare 를 주면 응답이 9,273바이트가 되어 `TOOL_RESULT_MAX=6000` 을 넘었고, 챗은 텍스트를
-    # 이어 붙인 **뒤** 통째로 자르므로 그때 **URL 이 잘려 그림이 사라진다.**
-    cap = 10 if "compare" in man else 20
-    res = {"job_id": job_id, "svg_file_id": svg_id, "manifest_file_id": json_id,
-           "section": strip(man, cap)}
-    if "compare" in man:
-        res["compare_section"] = strip(man["compare"], cap)
+    # ★**나갈 그 꼴 그대로 재서** 파트 행을 뒤에서부터 뺀다 — 고정 캡이 아니다.
+    #
+    # 왜. 챗은 텍스트를 이어 붙인 **뒤** 통째로 자르므로, 응답이 길면 **URL 줄이 잘려 그림이
+    # 사라진다**(`TOOL_RESULT_MAX`, URL 줄 81자). 고정 캡은 그 길이를 **재지 않는다** — 실측으로
+    # 61파트 덱에 compare 를 주면 캡 20 에서 응답이 9,273바이트였다. 제목이 긴 덱이면 파트 수가
+    # 적어도 넘을 수 있고, 짧으면 20개보다 더 실을 수 있는데 못 싣는다. 그래서 **직렬화해 재고**
+    # 맞을 때까지 뒤에서 행을 뺀다. 뺀 수는 `parts_omitted` 로 **말한다**(조용히 자르지 않는다).
+    def fit(cap: int) -> dict:
+        r = {"job_id": job_id, "svg_file_id": svg_id, "manifest_file_id": json_id,
+             "section": strip(man, cap)}
+        if "compare" in man:
+            r["compare_section"] = strip(man["compare"], cap)
+        return r
+
+    nparts = max(len(man.get("parts") or []),
+                 len((man.get("compare") or {}).get("parts") or []))
+    res, _cap = fit_to_budget(fit, nparts,
+                              int(os.environ.get("KOORM_MCP_RESULT_BUDGET", "6000")))
     # ★확대 배율·최소피처 px 는 매니페스트에 없다(SVG 배치 때 정해진다) — 로그에서 뽑아 싣는다.
     res["figure_numbers"] = await _figure_numbers(ctx, job_id)
     res["how_to_see_the_figure"] = (

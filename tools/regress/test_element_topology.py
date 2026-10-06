@@ -343,6 +343,33 @@ def main():
         rc, out = run(binary, d, "modelmeta", "mm.yaml")
         check("E-5 modelmeta 가 같은 덱을 읽는다", rc == 0, out[-200:])
 
+        # ── F: ★부피가 **면 표의 시작 꼭짓점과 무관**해야 한다 ──
+        #    사변형 면을 `v0-v2` 대각으로 쪼개면 비평면 면에서 어느 대각이냐로 값이 달라진다 —
+        #    그래서 위상 표를 손댈 때마다 부피가 흔들렸다(실제로 한 번 31200.37 → 31995.26).
+        #    면중심 4분할은 시작점과 무관하고, 삼선형 육면체에서 **정확**하다.
+        #    참값은 8점 가우스 적분 31158.686789 이고, 대각 2분할은 31200.37(+0.134%)였다.
+        REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        bt = os.path.join(REPO, "examples", "bendtwist", "bendtwist_bent.k")
+        if os.path.exists(bt):
+            shutil.copy(bt, os.path.join(d, "bt.k"))
+            write(os.path.join(d, "bt.yaml"), "model: bt.k\noutput: bt\n")
+            rc, out = run(binary, d, "modelmeta", "bt.yaml")
+            check("F-1 modelmeta rc=0", rc == 0, out[-200:])
+            got = None
+            for fn in os.listdir(d):
+                if fn.startswith("bt") and fn.endswith(".json"):
+                    try:
+                        md = json.load(open(os.path.join(d, fn), encoding="utf-8"))
+                    except (OSError, ValueError):
+                        continue
+                    if isinstance(md, dict) and md.get("parts"):
+                        got = sum(p.get("volume") or 0 for p in md["parts"])
+                        break
+            check("F-2 ★부피가 8점 가우스 참값 31158.6868 과 맞는다 (대각 분할은 31200.37)",
+                  got is not None and abs(got - 31158.686789) < 1.0, got)
+        else:
+            print("  (F 건너뜀 — examples/bendtwist/bendtwist_bent.k 가 없다)")
+
         # ── C: 육면체는 6면, 사면체는 4면 — 면 수가 종류를 따른다 ──
         write(os.path.join(d, "sb.yaml"), "model: box.k\noutput: sb\n")
         rc, out = run(binary, d, "surfview", "sb.yaml")

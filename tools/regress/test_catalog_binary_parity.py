@@ -676,6 +676,19 @@ def main():
         check(f"{rel[-1]} 의 도구 수가 server.py 의 {tool_count} 와 같다",
               not nums or nums == {tool_count}, str(sorted(nums)))
 
+    # ★SKILL.md 는 **숫자만** 보면 안 된다. Claude 가 이 서버로 무엇을 할 수 있나를 배우는
+    #   파일인데, 도구가 통째로 빠져도 숫자 검사는 통과한다 — 실제로 그림 도구 셋이
+    #   `mesh_section_figure`·`mesh_surface_figure`·`mesh_stack_diagram` 모두 **한 글자도
+    #   없는** 채로 두 번의 전수 관문을 지나갔다. 사용자가 네 그림을 다 고른 요청이었는데
+    #   스킬에서는 그 기능이 존재하지 않는 것과 같았다.
+    #   전수로 걸면 새 도구마다 문서가 막히므로, **격자를 보는 길**처럼 "없으면 기능이 닿지
+    #   않는" 것만 못 박는다.
+    skill_md = open(os.path.join(REPO, "platform", "mcp_server", "skill",
+                                 "kooremapper", "SKILL.md"), encoding="utf-8").read()
+    for must in ("mesh_section_figure", "mesh_surface_figure", "mesh_stack_diagram"):
+        check(f"SKILL.md 가 `{must}` 를 적는다 (없으면 Claude 가 그 길을 모른다)",
+              must in skill_md)
+
     print()
     if FAILS:
         print(f"FAIL {len(FAILS)}")

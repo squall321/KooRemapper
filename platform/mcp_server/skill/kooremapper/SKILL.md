@@ -79,9 +79,36 @@ job 은 `failed` 로 보이지만 산출 덱은 있다 — `get_job(job_id, incl
 - `convert` / `refine` / `tetremesh` / `meshfix` : 메쉬 변환·재메쉬
 - `implicit` / `modal` / `relax` / `ale` / `stabilize` : 해석 셋업
 - `contact` / `load` / `boundary` / `rbe` : 접촉·하중·경계조건
-- `info` : 메쉬 정보 조회
+- `info` / `modelmeta` : 메쉬 정보 조회 · 파트 인벤토리(부피·면적·재질)
+- `section` / `surfview` / `stackdiagram` : **격자를 그림으로 본다**(아래)
+- `neutralaxis` : 적층의 EI 가중 중립축·굽힘강성
 
 > meshfix는 gmsh 바이너리가 필요할 수 있다(`requires_gmsh`). 실패 시 로그를 확인하라.
+
+## 격자를 **보는** 법 (그림 도구 셋)
+
+덱은 숫자로만 보이지 않는다 — 서버가 SVG 를 구워 준다. 의존성 0 이고 3D 렌더러가 없다.
+
+| 도구 | 무엇을 보나 | 언제 |
+|---|---|---|
+| `mesh_section_figure` | 평면으로 **잘라** 층 경계·두께·재질 | 적층의 층을 재고 싶을 때. `compare_file_id` 로 두 덱을 한 그림에(`panels`=칸마다 따로, `overlay`=같은 평면에 겹침) |
+| `mesh_surface_figure` | **자유면**만 직교투영(겉모습) | "이 덱이 어떻게 생겼나" |
+| `mesh_stack_diagram` | 층 **모식도** + 중립축·기하 중심면 | 층 수와 중립축을 한 그림에. 평면을 고를 필요가 없다 |
+
+⚠ **응답에 그림의 픽셀은 없다.** 챗·LLM 은 이미지를 못 보므로 그림의 요지를 **숫자로** 함께
+준다 — 단면은 매니페스트 + `figure_numbers`(확대 배율·최소피처 px), 나머지 둘은 `report`
+(콘솔 숫자). **그 숫자를 먼저 읽어라.** 그림 자체는 `download_result(session_id, svg_file_id)`
+로 받는다(사람이 브라우저로 본다).
+
+거절하는 자리가 있고, 거절이 기능이다.
+- `mesh_stack_diagram` 은 **감긴/접힌 적층을 거절한다** — 파트 축 범위가 포개지면 층 순서가
+  없는데 그려 놓으면 완전히 그럴듯해 보인다. 그때는 `mesh_section_figure` 로 잘라서 보라.
+- 셋 다 **2차 솔리드(ELFORM 16·17·25~28)를 거절한다** — 리더가 중간절점을 코너로 읽어
+  단면이 조용히 71% 틀린다. 1차 요소 덱으로 그려라(20절점 **육면체** 23 은 그린다).
+
+축은 `axis="auto"` 가 기본이고 **"적층 방향에 수직" 이 규칙이 아니다** — 응답의
+`axis_chosen_because` 에 고른 까닭이 들어온다. 축척은 기본이 **비등방**이고 배율을 그림에
+적는다(등축으로 그리면 실제 적층의 최박층이 1200px 에서 0.081px 라 안 보인다).
 
 ## 낙하/충격 리포트 분석
 

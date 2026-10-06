@@ -231,8 +231,20 @@ bool mm_faceGeom(const KooRemapper::Mesh& mesh, const std::array<int, 4>& f, MmF
     return true;
 }
 
-// 요소 부피 — 면-중심 피라미드 분해(각 삼각형 피라미드 |부호부피| 합; 와인딩 무관,
-// 볼록 셀 정확). HEX8/PENTA6/TET4/HEX20/TET10(코너 절점) 공통.
+// 요소 부피 — 셀 중심 피라미드 분해(각 삼각형 피라미드 |부호부피| 합; 와인딩 무관).
+// HEX8/PENTA6/TET4/HEX20/TET10(코너 절점) 공통.
+//
+// ★사변형 면은 **면중심 4분할**로 쪼갠다 — `v0-v2` 대각 2분할이 아니다.
+//
+// 왜 (실측 2026-10-06). 대각 2분할은 **면 표의 시작 꼭짓점에 값이 매달린다** — 비평면 면에서
+// 어느 대각으로 자르느냐로 부피가 달라진다. 그래서 위상 표를 손댈 때마다 이 숫자가 흔들렸다
+// (실제로 한 번 흔들려 `examples/bendtwist/bendtwist_bent.k` 가 31200.37 → 31995.26 이 됐다).
+// 면중심 4분할은 **시작점과 무관**하고, 게다가 삼선형 육면체의 **정확한** 부피가 된다.
+//
+//   같은 덱 250 요소 · 8점 가우스 적분을 참값으로 두고 재면
+//     대각 2분할   31200.367738   오차 **+0.1338 %**
+//     면중심 4분할 31158.686789   오차 **-0.0000 %**   ← 참값과 같다
+//     시작점을 돌려도 31158.686789 로 **같다**
 double mm_elementVolume(const KooRemapper::Mesh& mesh, const KooRemapper::Element& elem) {
     // 셀 중심
     V3 cc; int nc = 0;
@@ -257,10 +269,18 @@ double mm_elementVolume(const KooRemapper::Mesh& mesh, const KooRemapper::Elemen
         for (int k = 0; k < n; ++k)
             if (!mm_nodePos(mesh, f[k], v[k])) { ok = false; break; }
         if (!ok) continue;
-        int ntri = (n == 3) ? 1 : 2;
-        for (int t = 0; t < ntri; ++t) {
-            V3 a = mm_sub(v[0], cc), b = mm_sub(v[t + 1], cc), c = mm_sub(v[t + 2], cc);
+        if (n == 3) {
+            V3 a = mm_sub(v[0], cc), b = mm_sub(v[1], cc), c = mm_sub(v[2], cc);
             vol += std::fabs(mm_dot(mm_cross(a, b), c)) / 6.0;
+        } else {
+            const V3 fc = {(v[0].x + v[1].x + v[2].x + v[3].x) / 4.0,
+                           (v[0].y + v[1].y + v[2].y + v[3].y) / 4.0,
+                           (v[0].z + v[1].z + v[2].z + v[3].z) / 4.0};
+            const V3 h = mm_sub(fc, cc);
+            for (int k = 0; k < 4; ++k) {
+                V3 a = mm_sub(v[k], cc), b = mm_sub(v[(k + 1) % 4], cc);
+                vol += std::fabs(mm_dot(mm_cross(a, b), h)) / 6.0;
+            }
         }
     }
     return vol;
