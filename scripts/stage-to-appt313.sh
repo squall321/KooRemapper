@@ -40,6 +40,21 @@ done
 sha() { sha256sum "$1" | cut -d' ' -f1; }
 sha8() { sha "$1" | cut -c1-8; }
 
+# ── 0. 통합 셰임(kooremapper_module.py · README.md) — 바이너리와 같이 늙는다 ──
+#   실측 10-06: 바이너리는 자동 갱신됐지만 이 둘은 07-05 본이 석 달째 구워지고 있었다
+#   (리포는 09-21 카드 직렬화 경화본). run.sh 는 스테이징 전용(cli.sif 경로)이라 안 건드린다.
+SHIM_SRC="$REPO/platform/integrations/pykoocae"
+SHIM_STALE=0
+for f in kooremapper_module.py README.md; do
+  [ -f "$SHIM_SRC/$f" ] || continue
+  [ -f "$STAGE/$f" ] && [ "$(sha "$SHIM_SRC/$f")" = "$(sha "$STAGE/$f")" ] && continue
+  if [ "$CHECK_ONLY" = "1" ]; then
+    echo "→ --check: $f 갱신 필요($(sha8 "$STAGE/$f") → $(sha8 "$SHIM_SRC/$f"))"; SHIM_STALE=1
+  else
+    install -m 644 "$SHIM_SRC/$f" "$STAGE/$f"; echo "✓ $f 교체: $(sha8 "$STAGE/$f")"
+  fi
+done
+
 # ── 1. 소스 고르기. 명시 > 리포 compat 빌드 > 게시 슬롯 ──
 SRC="${KOOREMAPPER_BIN:-}"
 if [ -z "$SRC" ]; then
@@ -80,8 +95,8 @@ else
 fi
 
 if [ "$(sha "$SRC")" = "$(sha "$STAGED")" ]; then
-  echo "✓ 스테이징이 이미 최신이다 — 바꿀 것이 없다."
-  [ "$WITH_SIF" = "1" ] || exit 0
+  echo "✓ 바이너리 스테이징은 이미 최신이다 — 바꿀 것이 없다."
+  [ "$WITH_SIF" = "1" ] || exit "$(( SHIM_STALE ? 2 : 0 ))"
 fi
 
 if [ "$CHECK_ONLY" = "1" ]; then
