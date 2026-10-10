@@ -144,7 +144,19 @@ export function FilePanel({ sessionId, files }: { sessionId: string; files: Sess
                       <div>크기: {fmtBytes(f.size_bytes)}</div>
                       {m.parts !== undefined && <div>노드 {m.nodes} · 요소 {m.elements} · 파트 {m.parts}</div>}
                       {m.bbox_min && m.bbox_max && (
-                        <div>bbox: [{m.bbox_min.map((n) => n.toFixed(1)).join(', ')}] → [{m.bbox_max.map((n) => n.toFixed(1)).join(', ')}]</div>
+                        <div>bbox(요소 기준): [{m.bbox_min.map((n) => n.toFixed(1)).join(', ')}] → [{m.bbox_max.map((n) => n.toFixed(1)).join(', ')}]</div>
+                      )}
+                      {/* ★고아 절점이 있으면 **말한다.** bbox 로 낙하판을 놓는 쪽이 `*NODE`
+                          전체를 쓰면 기기 밖에 생긴다 — 현장에서 53mm 밖이었다. */}
+                      {!!m.modelmeta?.orphan_nodes && (
+                        <div className="text-[11px]" style={{ color: '#a33' }}>
+                          ⚠ 고아 절점 {m.modelmeta.orphan_nodes.toLocaleString()}개 — 위 bbox 는
+                          요소 기준이다. `*NODE` 전체는
+                          {m.modelmeta.bbox_all_min && m.modelmeta.bbox_all_max
+                            ? ` [${m.modelmeta.bbox_all_min.map((n) => n.toFixed(1)).join(', ')}] → [${m.modelmeta.bbox_all_max.map((n) => n.toFixed(1)).join(', ')}]`
+                            : ' 더 넓다'}
+                          . 낙하판·접촉면은 **요소 기준**으로 놓으라.
+                        </div>
                       )}
                       {!!m.includes?.length && <div>*INCLUDE: {m.includes.join(', ')}</div>}
                       {!!m.part_titles?.length && <div>파트: {m.part_titles.slice(0, 5).join(' · ')}</div>}

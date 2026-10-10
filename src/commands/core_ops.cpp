@@ -1398,6 +1398,59 @@ int runInfo(const std::string& meshFile, const ConsoleOutput& console, bool stri
     Vector3D size = maxBound - minBound;
     console.keyValue("Size", size.toString());
 
+    // ★위 세 줄이 **어느 기준**인지 말한다.
+    //
+    // 왜 (현장 보고 2026-10-10). "기기 두께가 14.55mm 인데 bbox 가 67.50mm" 로 낙하판이 기기에서
+    // 53mm 밖에 생겨 **충돌이 아예 없던** 사고가 있었다. 그 67.50 은 **이 도구가 낸 값이 아니다** —
+    // `Mesh::calculateBoundingBox()` 는 고아 절점을 이미 뺀다(그래야 `map`·`shellmap` 의 파라메트릭
+    // 비율이 안 틀어진다). 하류가 `*NODE` 에서 직접 뽑은 값이었다.
+    // 즉 이 도구는 함정을 피하는데 **그 사실을 말하지 않아서** 자기 bbox 를 계산하는 하류가
+    // 그대로 빠졌다. 그래서 기준을 적고, 다르면 **차이를 보인다.**
+    //
+    // ⚠ 위 세 라벨(`Min bound`·`Max bound`·`Size`)은 **바꾸지 않는다** —
+    //   `platform/backend/app/runner/kfile_inspect.py:22-24` 와
+    //   `tools/regress/test_packed_node.py:51` 이 정규식으로 파싱한다. 추가만 한다.
+    {
+        const auto br = mesh.bboxReport();
+        console.keyValue("bbox basis", br.hasElements
+            ? "요소가 쓰는 절점만 (고아 제외) — 낙하판·접촉면은 이 기준을 쓰라"
+            : "요소가 없어 *NODE 전체 (고아를 가릴 수 없다)");
+
+        // 고아가 없으면 더 적지 않는다 — 정상 덱 출력에 네 줄을 더하면 정작 비정상 신호가 묻힌다.
+        if (br.orphanNodes > 0) {
+            const Vector3D allSize = br.allMax - br.allMin;
+            console.keyValue("All-node min", br.allMin.toString());
+            console.keyValue("All-node max", br.allMax.toString());
+            console.keyValue("All-node size", allSize.toString());
+            char ob[96];
+            const double pct = mesh.getNodeCount()
+                ? 100.0 * (double)br.orphanNodes / (double)mesh.getNodeCount() : 0.0;
+            std::snprintf(ob, sizeof(ob), "%zu  (%.2f %%)", br.orphanNodes, pct);
+            console.keyValue("Orphan nodes", ob);
+
+            // 문턱은 **최대 요소 범위의 1%** 다 — 축척에 상대적이고, 범위가 0 인 평면 메시에서
+            // 0 으로 나누지 않는다.
+            const Vector3D used = br.usedMax - br.usedMin;
+            const double scale = std::max({used.x, used.y, used.z});
+            const double d[3] = {allSize.x - used.x, allSize.y - used.y, allSize.z - used.z};
+            const char* ax[3] = {"x", "y", "z"};
+            std::string worst;
+            double worstD = 0;
+            for (int i = 0; i < 3; ++i) if (d[i] > worstD) { worstD = d[i]; worst = ax[i]; }
+            if (worstD > 0.01 * std::max(scale, 1e-12)) {
+                char wb[256];
+                std::snprintf(wb, sizeof(wb),
+                    "두 bbox 가 %s 로 %.4g 다르다 — 고아 절점이 %s 를 %.4g 에서 %.4g 로 부풀린다. "
+                    "bbox 로 낙하판·접촉면을 놓는 도구는 **요소 사용 절점 기준**을 쓰라"
+                    "(`Min bound`/`Max bound` 가 그 값이다).",
+                    worst.c_str(), worstD, worst.c_str(),
+                    worst == "x" ? used.x : worst == "y" ? used.y : used.z,
+                    worst == "x" ? allSize.x : worst == "y" ? allSize.y : allSize.z);
+                console.warning(wb);
+            }
+        }
+    }
+
     // 참조 무결성 — **정의돼 있나** 를 본다(기존 스캐너는 '이번 op 이 지웠나' 만 보는 델타 검사다).
     // 미정의 세트를 가리키는 덱은 LS-DYNA 가 Error 10144 로 키워드 단계에서 즉사한다.
     // rc 는 건드리지 않는다 — 상위 파이프라인(플랫폼 워커·pyKooCAE 체인)이 info 의 rc=0 을 기대한다.

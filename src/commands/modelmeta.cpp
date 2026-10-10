@@ -886,20 +886,17 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
     }
 
     // ── 모델 bbox ──
-    double mb[6] = {0, 0, 0, 0, 0, 0};
-    bool mbFirst = true;
-    for (const auto& [nid, nd] : mesh.getNodes()) {
-        double p[3] = {nd.position.x, nd.position.y, nd.position.z};
-        if (mbFirst) {
-            mb[0] = mb[3] = p[0]; mb[1] = mb[4] = p[1]; mb[2] = mb[5] = p[2];
-            mbFirst = false;
-        } else {
-            for (int a = 0; a < 3; ++a) {
-                mb[a] = std::min(mb[a], p[a]);
-                mb[a + 3] = std::max(mb[a + 3], p[a]);
-            }
-        }
-    }
+    //
+    // ★기준을 **두 가지 다** 낸다. 한 JSON 안에서 `model.bbox_*`(전체 절점)과
+    //   `parts[].bbox_*`(요소 기준)이 **같은 이름으로 다른 기준**이었다 — 읽는 쪽이 구분할
+    //   방법이 없었다. 현장에서 그 혼동이 낙하판을 기기 밖 53mm 에 놓았다(요소 기준 14.55mm
+    //   vs 전체 절점 67.50mm). 그래서 `bbox_basis` 를 적고 요소 기준 값을 함께 싣는다.
+    //
+    // 전체-절점 루프를 여기 따로 두지 않는다 — `Mesh::bboxReport()` 가 정본이고
+    // 한 번 순회로 둘 다 낸다(실사용 덱이 절점 13,366,933개다).
+    const auto mmBox = mesh.bboxReport();
+    const double mb[6] = {mmBox.allMin.x, mmBox.allMin.y, mmBox.allMin.z,
+                          mmBox.allMax.x, mmBox.allMax.y, mmBox.allMax.z};
 
     // ── JSON 출력 ──
     std::string outPath = cfg.output + "_modelmeta.json";
@@ -921,7 +918,14 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
        << "    \"elements\": " << mesh.getElements().size() << ",\n"
        << "    \"parts\": " << parts.size() << ",\n"
        << "    \"bbox_min\": [" << num(mb[0]) << ", " << num(mb[1]) << ", " << num(mb[2]) << "],\n"
-       << "    \"bbox_max\": [" << num(mb[3]) << ", " << num(mb[4]) << ", " << num(mb[5]) << "]\n"
+       << "    \"bbox_max\": [" << num(mb[3]) << ", " << num(mb[4]) << ", " << num(mb[5]) << "],\n"
+       << "    \"bbox_basis\": \"all_nodes\",\n"
+       << "    \"bbox_used_min\": [" << num(mmBox.usedMin.x) << ", " << num(mmBox.usedMin.y)
+       << ", " << num(mmBox.usedMin.z) << "],\n"
+       << "    \"bbox_used_max\": [" << num(mmBox.usedMax.x) << ", " << num(mmBox.usedMax.y)
+       << ", " << num(mmBox.usedMax.z) << "],\n"
+       << "    \"bbox_used_basis\": \"nodes_referenced_by_elements\",\n"
+       << "    \"orphan_nodes\": " << mmBox.orphanNodes << "\n"
        << "  },\n";
     rf << "  \"conventions\": {\n"
        << "    \"area_ext\": \"solid: free-face sum; shell: one-sided element area\",\n"
@@ -931,8 +935,12 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
        // 같은 파일을 두고 `info` 와 여기가 다른 숫자를 말하던 것이 그 기준 차이였다.
        << "    \"parts_basis\": \"요소가 참조한 PID 기준. *PART 카드만 있고 요소가 없는 PID 는 "
           "세지 않는다 — `info` 의 파트 수와 다를 수 있고, 그것이 기준 차이다\",\n"
-       << "    \"bbox\": \"parts[].bbox_*: 그 파트 요소가 참조한 절점만. model.bbox_*: 같은 기준의 "
-          "합집합이라 덱의 고립 절점은 들어오지 않는다\",\n"
+       << "    \"bbox\": \"parts[].bbox_* 와 model.bbox_used_*: 요소가 참조한 절점만. "
+          "⚠ model.bbox_* 는 **`*NODE` 전체**다(고아 포함) — 전에 여기 '고립 절점은 들어오지 "
+          "않는다' 고 적혀 있었는데 **사실이 아니었다**(실측: 고아를 x=-40 에 둔 덱에서 "
+          "model.bbox_min.x = -40, bbox_used_min.x = 0). 낙하판·접촉면은 **used 기준**으로 "
+          "놓아라 — 현장 덱에서 두 기준이 14.55mm vs 67.50mm 로 갈려 낙하판이 기기 밖 53mm 에 "
+          "생겼다. 기준은 bbox_basis/bbox_used_basis 가 말한다\",\n"
        << "    \"elem_class\": \"**기하 기준**이다. TSHELL 요소는 육면체라 solid 로 센다 — "
           "카드 키워드 기준이 아니다\",\n"
        << "    \"n_node\": \"그 파트 요소가 참조한 **고유** 절점 수. 축퇴 요소는 같은 절점을 "

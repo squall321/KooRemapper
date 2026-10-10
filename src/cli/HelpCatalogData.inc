@@ -982,7 +982,7 @@ tssfac: 0.67
      {"KooRemapper generate box box.yaml", "KooRemapper optimize opt.yaml"},
      {},
      {}},
-    {"info", "정보·메타", "메시 정보(절점·요소·파트 수, bbox, 품질) 출력", "정보 조회 bbox 품질", "KooRemapper info <mesh_file>",
+    {"info", "정보·메타", "메시 정보(절점·요소·파트 수, bbox 두 기준, 품질) 출력", "정보 조회 bbox 품질 고아절점 orphan", "KooRemapper info <mesh_file>",
      {{"box.yaml", R"KRH(output: box.k
 lx: 20.0
 ly: 10.0
@@ -1000,7 +1000,7 @@ part_title: PLATE
 )KRH"}},
      {"KooRemapper generate box box.yaml", "KooRemapper info box.k"},
      {},
-     {}},
+     {"★`Min bound`·`Max bound`·`Size` 는 **요소가 쓰는 절점** 기준이다(고아 제외) —", "  낙하판·접촉면을 bbox 로 놓는 도구는 **이 값**을 써야 한다. `bbox basis` 가 그것을 적는다", "고아 절점(요소가 안 쓰는 절점)이 있으면 `*NODE` **전체** bbox 와 고아 수를 함께 내고,", "  두 bbox 가 최대 요소 범위의 1% 넘게 다르면 **축을 지목해 경고한다**", "실측 사고 — 현장 덱에서 요소 기준 14.55mm vs 전체 절점 67.50mm 로 갈려 낙하판이 기기", "  밖 53mm 에 생겨 **충돌이 아예 없었다**. 그 67.50 은 이 도구가 아니라 하류가 `*NODE`", "  에서 직접 뽑은 값이다 — 이 도구는 함정을 피하는데 **말하지 않아서** 하류가 빠졌다", "고아가 없으면 그 블록을 내지 않는다 — 정상 출력에 네 줄을 더하면 비정상 신호가 묻힌다"}},
     {"modelmeta", "정보·메타", "파트별 기하 메트릭·재질·연결성(접촉 탐지 포함) JSON 추출", "메타 json connectivity 연결성", "KooRemapper modelmeta <config.yaml>",
      {{"box.yaml", R"KRH(output: box.k
 lx: 20.0
@@ -1022,7 +1022,7 @@ gap_tol: 0.2
 )KRH"}},
      {"KooRemapper generate box box.yaml", "KooRemapper modelmeta meta.yaml"},
      {},
-     {}},
+     {"★bbox 가 **두 기준**이다. `model.bbox_*` 는 `*NODE` **전체**(고아 포함),", "  `model.bbox_used_*` 와 `parts[].bbox_*` 는 **요소가 쓰는 절점**이다.", "  `bbox_basis`·`bbox_used_basis` 가 어느 쪽인지 적고 `orphan_nodes` 가 수를 센다", "  (전에 `conventions` 가 '고립 절점은 들어오지 않는다' 고 적었는데 **사실이 아니었다**)", "낙하판·접촉면은 **used 기준**으로 놓아라 — 현장 덱에서 14.55mm vs 67.50mm 로 갈렸다"}},
     {"foldsurface", "변형·초기응력", "접힘 곡면(평면 elastica) 중심선 — 최소 곡률반경 고정", "접힘 fold elastica 곡률 중심선 폴더블", "KooRemapper foldsurface <config.yaml>",
      {{"fold.yaml", R"KRH(output: fold
 arc_length: 10.0

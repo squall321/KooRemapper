@@ -79,6 +79,16 @@ export interface ModelMeta {
   parts: ModelPart[]
   connectivity: ModelConnectivity
   conventions?: Record<string, string>
+  // ⚠ bbox 는 **두 기준**이다. `bbox_all_*` 는 `*NODE` 전체(고아 포함),
+  //   `bbox_used_*` 와 `parts[].bbox_*` 는 요소가 쓰는 절점이다.
+  //   낙하판·접촉면은 **used** 기준으로 놓아야 한다 — 현장에서 두 값이 14.55mm vs 67.50mm 로
+  //   갈려 낙하판이 기기 밖 53mm 에 생겼다. 선언이 없으면 이 신호가 조용히 사라진다.
+  orphan_nodes?: number
+  bbox_basis?: string
+  bbox_all_min?: number[]
+  bbox_all_max?: number[]
+  bbox_used_min?: number[]
+  bbox_used_max?: number[]
   detect?: boolean
   error?: string
 }

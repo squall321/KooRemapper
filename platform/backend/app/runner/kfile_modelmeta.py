@@ -39,11 +39,23 @@ def run_modelmeta(path: Path, *, detect: bool = False, timeout: int = 120) -> di
                 data = json.loads(out_json.read_text())
             except (OSError, ValueError) as exc:
                 return {"error": f"modelmeta JSON parse failed: {exc}"}
-            # 자기완결 메타만 남긴다 (model 카운트는 inspect 의 info 와 중복).
+            # 자기완결 메타만 남긴다 (model 의 절점·요소·파트 **카운트**는 inspect 의 info 와 중복).
+            #
+            # ★단 `model` 의 고아·bbox 기준 세 필드는 **버리지 않는다.** info 는 요소 기준
+            #   bbox 만 정규식으로 노출하고 고아 수는 하류가 받을 길이 없다. 그 신호가 없어서
+            #   현장에서 낙하판이 기기 밖 53mm 에 생겼다(요소 기준 14.55mm vs 전체 절점
+            #   67.50mm). 정규식이 아니라 **JSON 으로** 받으므로 깨지지 않는다.
+            model = data.get("model") or {}
             return {
                 "parts": data.get("parts", []),
                 "connectivity": data.get("connectivity", {}),
                 "conventions": data.get("conventions", {}),
+                "orphan_nodes": model.get("orphan_nodes"),
+                "bbox_basis": model.get("bbox_basis"),
+                "bbox_all_min": model.get("bbox_min"),
+                "bbox_all_max": model.get("bbox_max"),
+                "bbox_used_min": model.get("bbox_used_min"),
+                "bbox_used_max": model.get("bbox_used_max"),
                 "detect": detect,
             }
         return {"error": (res.stderr or res.stdout or "modelmeta produced no output")[-500:]}

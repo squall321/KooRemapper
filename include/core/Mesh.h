@@ -72,6 +72,23 @@ struct MeshStats {
 /**
  * Shell section data (from *SECTION_SHELL)
  */
+/**
+ * 두 bbox 와 고아 절점 수를 **함께** 담는다.
+ *
+ * 왜 한 구조체인가 (2026-10-10). 이 자리의 결함은 늘 **기준을 뒤섞는 것**이었다 —
+ * 현장 보고가 "기기 두께 14.55mm 인데 bbox 가 67.50mm" 로 왔고, 그 67.50 은 하류 도구가
+ * `*NODE` **전체**에서 뽑은 값이었다(KooRemapper 는 `calculateBoundingBox()` 에서 고아를
+ * 이미 뺀다). 낙하판을 그 bbox 로 놓으면 기기에서 53mm 밖에 생겨 **충돌이 아예 없다.**
+ *
+ * 기준을 따로 물으면 호출자가 라벨을 틀릴 수 있으므로, **이름에 기준을 박아 함께** 준다.
+ */
+struct BBoxReport {
+    Vector3D usedMin, usedMax;   // 요소가 **쓰는** 절점만 — `calculateBoundingBox()` 와 같은 값
+    Vector3D allMin, allMax;     // `*NODE` **전체** (고아 포함)
+    size_t orphanNodes = 0;      // 요소가 쓰지 않는 절점 수
+    bool hasElements = false;    // 요소가 없으면 두 bbox 가 같다(구분할 것이 없다)
+};
+
 struct SectionShellData {
     int id;
     double thickness;
@@ -245,6 +262,47 @@ public:
         Vector3D minP, maxP;
         calculateBoundingBox(minP, maxP);
         return {minP, maxP};
+    }
+
+    /** 두 bbox 와 고아 수를 **한 번 순회로** 낸다.
+     *
+     * ⚠ 한 번만 도는 것이 중요하다 — 실사용 덱이 절점 13,366,933개(2.32GB)다. 참조 집합을
+     * 두 번 만들면 그만큼 더 든다. `calculateBoundingBox()` 는 그대로 두었다(다른 호출자가
+     * 많고 동작이 맞다) — 여기서 그 값을 `usedMin/Max` 로 함께 낸다. */
+    BBoxReport bboxReport() const {
+        BBoxReport r;
+        if (nodes.empty()) return r;
+
+        std::set<int> refNodes;
+        for (const auto& [eid, elem] : elements) {
+            for (int i = 0; i < Element::NUM_NODES; ++i) {
+                const int nid = elem.nodeIds[i];
+                if (nid > 0) refNodes.insert(nid);
+            }
+        }
+        r.hasElements = !refNodes.empty();
+
+        bool firstAll = true, firstUsed = true;
+        for (const auto& [id, node] : nodes) {
+            const Vector3D& p = node.position;
+            if (firstAll) { r.allMin = r.allMax = p; firstAll = false; }
+            else {
+                r.allMin.x = std::min(r.allMin.x, p.x); r.allMax.x = std::max(r.allMax.x, p.x);
+                r.allMin.y = std::min(r.allMin.y, p.y); r.allMax.y = std::max(r.allMax.y, p.y);
+                r.allMin.z = std::min(r.allMin.z, p.z); r.allMax.z = std::max(r.allMax.z, p.z);
+            }
+            if (!r.hasElements) continue;
+            if (refNodes.count(id) == 0) { ++r.orphanNodes; continue; }
+            if (firstUsed) { r.usedMin = r.usedMax = p; firstUsed = false; }
+            else {
+                r.usedMin.x = std::min(r.usedMin.x, p.x); r.usedMax.x = std::max(r.usedMax.x, p.x);
+                r.usedMin.y = std::min(r.usedMin.y, p.y); r.usedMax.y = std::max(r.usedMax.y, p.y);
+                r.usedMin.z = std::min(r.usedMin.z, p.z); r.usedMax.z = std::max(r.usedMax.z, p.z);
+            }
+        }
+        // 요소가 없으면 `calculateBoundingBox()` 가 전체 절점으로 떨어진다 — 그 규약을 따른다.
+        if (!r.hasElements) { r.usedMin = r.allMin; r.usedMax = r.allMax; }
+        return r;
     }
 
     // Set grid dimensions
