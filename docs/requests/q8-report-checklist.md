@@ -172,7 +172,9 @@
 ## 아직 안 한 것
 
 - [ ] §3-1c 카드 폭(card1 을 `%8d`×5 에서 `%10d` 로 넓힐지) — LS-DYNA 쪽 확인이 먼저다.
-- [ ] **언급만** — `appt313/opt/kooremapper/cli.sif` 스테이징 사본이 09-28 자로 남아 있다
-      (sha `54167b2d…`, 게시본은 `c41d5498…`). bake 가 **굽지 않는** 파일이라 기능에는 영향이
-      없지만, 이름이 같은 구버전이 스테이징에 있는 것은 다음 사람에게 함정이다. 지우거나 갱신할지는
-      판단이 필요해 손대지 않았다.
+- [x] ~~**언급만** — `appt313/opt/kooremapper/cli.sif` 스테이징 사본이 09-28 자로 남아 있다~~
+      → **2026-10-06 해소.** `cli.sif` 를 `3844cc5d…` 로 갱신하고(백업 `cli.sif.bak.<epoch>`),
+      같은 폴더의 `bin/KooRemapper` 도 `0dd2d26c`(10-02) → `43084d35` 로 갱신했다. 그리고 그
+      함정의 **뿌리**를 없앴다 — `scripts/stage-to-appt313.sh` 가 스테이징을 갱신하고
+      `BuildSmartTwinPreprocessor.sh` 가 굽기 전에 그것을 부르며 **구운 뒤 sha 를 검증**한다
+      (불일치면 rc=1). 복원법은 `docs/infra/appt313-bake-hook.md`.
