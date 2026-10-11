@@ -1337,13 +1337,6 @@ int ecInt(const std::vector<std::string>& f, size_t i) {
     try { return std::stoi(s); } catch (...) { return 0; }
 }
 
-// Card 1 의 칸 3-10 에 노드가 들어 있는가 — 구 포맷(940-970) 한 줄 카드의 표시다.
-bool ecLooksLegacyOneLine(const std::vector<std::string>& f) {
-    if (f.size() < 3) return false;
-    for (size_t q = 2; q < f.size() && q < 10; ++q) if (ecInt(f, q) > 0) return true;
-    return false;
-}
-
 // 그 줄이 새 카드의 Card 1 로 읽힐 수 있는가(EID·PID 가 모두 양수).
 bool ecPlausibleCard1(const std::vector<std::string>& f) {
     return ecInt(f, 0) > 0 && ecInt(f, 1) > 0;
@@ -1435,33 +1428,15 @@ ElemCardIndex ecBuildIndex(const std::vector<std::string>& rawLines, bool strict
 
         auto f = ecFields(line, sectionFw, strict);
         int eid = ecInt(f, 0), pid = ecInt(f, 1);
-        int lines = 1;
-        if (info.family == ElemFamily::SOLID) {
-            int nodes = info.optionNodes;
-            if (nodes == 0) {
-                auto pit = pidNodes.find(pid);
-                if (pit != pidNodes.end()) nodes = pit->second;
-            }
-            if (nodes >= 11) {
-                lines = solidCardLines(nodes, info.extraCards);          // 1) 2) 확정
-            } else if (nodes == 0 && ecLooksLegacyOneLine(f)) {
-                lines = 1 + info.extraCards;                             // 3) 안전망: 구 포맷
-            } else {
-                lines = 2 + info.extraCards;                             // Card 1 + Card 2
-            }
-        } else if (info.family == ElemFamily::SHELL) {
-            // Card 2 는 THICKNESS/BETA/MCID 일 때, Card 3 은 그 위에 중간절점(N5-N8)이 있을 때만이다.
-            lines = 1;
-            if (info.thicknessCard) {
-                lines += 1;
-                bool midside = false;
-                for (size_t q = 6; q < f.size() && q < 10; ++q) if (ecInt(f, q) > 0) midside = true;
-                if (midside) lines += 1;
-            }
-            lines += info.extraCards;
-        } else {   // TSHELL — Card 1 은 언제나 N1..N8 한 줄이다(165174-165184). 두 줄 포맷이 없다.
-            lines = 1 + info.extraCards;
+        // 줄 수 사다리는 공용 판정기 한 곳에만 둔다(`parser/ElementCardLayout.h` 의
+        // `elementCardSpan`) — 여기 사본이 있었고 `cleanup-nodes` 가 **같은** 판정을 해야 했다.
+        // 갈리면 한쪽이 연결 줄로 본 줄을 다른 쪽이 Card 1 로 읽어 절점 참조를 놓친다.
+        int pidN = 0;
+        {
+            auto pit = pidNodes.find(pid);
+            if (pit != pidNodes.end()) pidN = pit->second;
         }
+        const int lines = elementCardSpan(info, f, pidN).lines;
 
         // 이 카드가 차지하는 데이터 줄을 모은다(사이에 낀 주석·빈 줄은 카드에 넣지 않는다).
         std::vector<size_t> own;

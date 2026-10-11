@@ -70,6 +70,29 @@ int realFieldWidth(int intFw);
 // Vol_I 228671-228677: 23=20절점, 24=27, 25=21, 26=15, 27=20(cubic tet), 28=40, 29=64.
 int solidNodesFromElform(int elform);
 
+// ── 카드 한 장의 줄 수 + **절점 칸이 어디인가** ─────────────────────────────
+// 왜 공용인가 (2026-10-11). 이 사다리(고차 정식 → `solidCardLines`, 구 포맷 → 한 줄,
+// 그 밖 → Card 1 + Card 2)는 `src/assembly/ModelAssembler.cpp` 의 `ecBuildIndex` **안에만**
+// 있었다. `cleanup-nodes` 는 절점 참조를 세려면 **같은 판정**이 필요하다 — 베끼면 둘이 갈리고,
+// 갈리면 한쪽이 '연결 줄' 로 본 줄을 다른 쪽이 'Card 1' 로 읽어 절점 참조를 통째로 놓친다.
+// 그러면 **쓰이는 절점이 지워진다.** 그래서 베끼지 않고 여기로 옮겼다.
+//
+// ⚠ 표준 포맷의 Card 1 에는 **절점이 없다** — EID·PID 뿐이고 절점은 Card 2 부터다
+// (163572-163667). 절점이 Card 1 에 있는 것은 구 포맷(164121-164158) 과 셸·티쉘뿐이다.
+// 그래서 '첫 줄의 칸 2 부터가 절점' 이라고 뭉개면 솔리드에서 전부 틀린다.
+struct ElementCardSpan {
+    int lines = 1;          // 카드 전체 데이터 줄 수(두께·재질축 등 고정 추가 카드 포함)
+    int nodeFirst = 0;      // 절점 칸이 시작하는 **카드 안 줄 번호**(0 = 카드 첫 줄)
+    int nodeLines = 1;      // 그 줄부터 **몇 줄**이 절점 칸인가
+    int nodeFieldSkip = 2;  // `nodeFirst` 줄에서 절점이 시작하는 칸 번호
+};
+
+// card1Fields  : 카드 첫 줄을 칸으로 나눈 것(칸 0=EID, 1=PID).
+// pidNodeCount : 그 PID 요소의 절점 수(모르면 0) — *PART → *SECTION_SOLID 의 ELFORM.
+ElementCardSpan elementCardSpan(const ElementKeywordInfo& info,
+                                const std::vector<std::string>& card1Fields,
+                                int pidNodeCount);
+
 // 솔리드 카드 줄 수 = Card 1(1줄) + 노드 카드 ceil(nodes/10) + 고정 추가 카드.
 // Card 3 은 "Include as many of this card as needed"(163632-163634)라 10 칸씩 반복한다.
 int solidCardLines(int nodes, int extraCards);

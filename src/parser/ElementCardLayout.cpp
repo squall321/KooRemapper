@@ -195,4 +195,73 @@ ElementKeywordInfo parseElementKeyword(const std::string& keywordLine) {
     return info;
 }
 
+namespace {
+
+int ecsInt(const std::vector<std::string>& f, size_t i) {
+    if (i >= f.size() || f[i].empty()) return 0;
+    const std::string& t = f[i];
+    size_t p = (t[0] == '-' || t[0] == '+') ? 1u : 0u;
+    if (p >= t.size()) return 0;
+    for (size_t q = p; q < t.size(); ++q)
+        if (!std::isdigit(static_cast<unsigned char>(t[q]))) return 0;
+    try { return std::stoi(t); } catch (...) { return 0; }
+}
+
+// Card 1 의 칸 3-10 에 절점이 들어 있는가 — 구 포맷(164121-164158) 한 줄 카드의 표시다.
+bool ecsLegacyOneLine(const std::vector<std::string>& f) {
+    if (f.size() < 3) return false;
+    for (size_t q = 2; q < f.size() && q < 10; ++q)
+        if (ecsInt(f, q) > 0) return true;
+    return false;
+}
+
+}  // namespace
+
+ElementCardSpan elementCardSpan(const ElementKeywordInfo& info,
+                                const std::vector<std::string>& f,
+                                int pidNodeCount) {
+    ElementCardSpan s;
+    if (info.family == ElemFamily::SOLID) {
+        int nodes = info.optionNodes;
+        if (nodes == 0) nodes = pidNodeCount;
+        if (nodes >= 11) {
+            s.lines = solidCardLines(nodes, info.extraCards);   // Card 1 + 노드 카드 + 추가
+            s.nodeFirst = 1;
+            s.nodeLines = s.lines - 1 - info.extraCards;
+            s.nodeFieldSkip = 0;
+        } else if (nodes == 0 && ecsLegacyOneLine(f)) {
+            s.lines = 1 + info.extraCards;                      // 구 포맷 — 절점이 Card 1 에 있다
+            s.nodeFirst = 0;
+            s.nodeLines = 1;
+            s.nodeFieldSkip = 2;
+        } else {
+            s.lines = 2 + info.extraCards;                      // Card 1(EID·PID) + Card 2(절점)
+            s.nodeFirst = 1;
+            s.nodeLines = 1;
+            s.nodeFieldSkip = 0;
+        }
+    } else if (info.family == ElemFamily::SHELL) {
+        // 절점은 Card 1 에만 있다(EID,PID,N1..N4 와 중간절점 N5..N8). Card 2·3 은 두께다.
+        s.lines = 1;
+        if (info.thicknessCard) {
+            s.lines += 1;
+            bool midside = false;
+            for (size_t q = 6; q < f.size() && q < 10; ++q)
+                if (ecsInt(f, q) > 0) midside = true;
+            if (midside) s.lines += 1;
+        }
+        s.lines += info.extraCards;
+        s.nodeFirst = 0;
+        s.nodeLines = 1;
+        s.nodeFieldSkip = 2;
+    } else {
+        s.lines = 1 + info.extraCards;   // TSHELL — Card 1 은 언제나 N1..N8 한 줄(165174-165184)
+        s.nodeFirst = 0;
+        s.nodeLines = 1;
+        s.nodeFieldSkip = 2;
+    }
+    if (s.nodeLines < 1) s.nodeLines = 1;
+    return s;
+}
+
 }  // namespace KooRemapper
