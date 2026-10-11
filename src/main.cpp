@@ -81,6 +81,7 @@
 #include "commands/section.h"
 #include "commands/surfview.h"
 #include "commands/stackdiagram.h"
+#include "commands/cleanup_nodes.h"
 
 #include <iostream>
 #include <fstream>
@@ -2951,6 +2952,28 @@ static int runMain(int argc, char* argv[]) {
         }
         printBanner(console);
         return runStackDiagram(argv[2], console);
+    }
+
+    // Delete nodes that nothing references — keyword-aware, reports before it writes
+    // @lat: [[commands/cleanup-nodes]]
+    if (command == "cleanup-nodes") {
+        if (argc < 3) {
+            console.error("Usage: KooRemapper cleanup-nodes <config.yaml>");
+            console.info("Finds nodes that nothing references and reports them (default) or");
+            console.info("deletes them, reading each keyword's fields instead of scraping numbers.");
+            console.info("*SET_NODE_* membership does NOT count as a reference (a deck's");
+            console.info("all-node set would make every orphan look used) — those sets are pruned");
+            console.info("instead, and a card naming such a set keeps its members transitively.");
+            console.info("*INCLUDE files are read for references; `mode: safe` refuses to write");
+            console.info("when one could not be read.");
+            console.info("Minimal config:");
+            console.info("  model: deck.k");
+            console.info("  report: cleanup_report.json");
+            console.info("  # mode: report | safe | force   (default report — writes no deck)");
+            return 1;
+        }
+        printBanner(console);
+        return runCleanupNodes(argv[2], console);
     }
 
     // Unknown command

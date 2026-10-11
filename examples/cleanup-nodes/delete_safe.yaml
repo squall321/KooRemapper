@@ -1,0 +1,6 @@
+# 지우는 모드 — 이해한 것만 지우고, 세트에서 그 절점을 빼고, 되읽어 검증한다
+model: cleanup_demo.k
+output: cleanup_demo_clean.k
+mode: safe
+prune_sets: true
+report: cleanup_report.json

@@ -247,6 +247,7 @@ set(COMMAND_SOURCES
     src/commands/section.cpp
     src/commands/surfview.cpp
     src/commands/stackdiagram.cpp
+    src/commands/cleanup_nodes.cpp
     src/battery/BatteryWriter.cpp
     src/battery/BatteryMaterials.cpp
     src/battery/BatteryContacts.cpp

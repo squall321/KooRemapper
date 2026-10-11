@@ -13763,6 +13763,104 @@
       "notes": "The neutral axis, geometric mid-plane and bending stiffness come from the same computeNeutralAxis() as the `neutralaxis` op, so the two ops disagreeing on a deck is a defect, not a difference of method. Shell parts are expected to overlap solids — a shell is a mid-surface with a thickness band around it — so shell overlaps are reported separately and never refuse the figure; only solid-solid overlap does. Part titles go through the same escaping as `section`, including the non-UTF-8 title that would otherwise make the whole SVG unparseable. Second-order solid parts are refused: ELFORM 16/17 (10-node tets) and 25-28 put mid-side nodes into the corner slots the reader keeps, so the figure is silently wrong — measured, the same geometry converted by this tool's own `convert type: tet10` yields a section of total area 0.19 against the linear original's 0.665, and both report 2 polygons, so a reader cannot tell. In the standard layout (an `eid pid` card followed by all ten node fields on one line) the element count survives and only the geometry is wrong; a deck that splits the node fields 8+2 across two lines also loses elements, because the second line is read as the next element's first card (measured: two TET10 read as one). ELFORM 23 (20-node hex) keeps its corners in the first eight slots and is drawn: measured, its section is identical to the linear original's (120 polygons, total area 4.712178200)."
     },
     {
+      "name": "cleanup-nodes",
+      "category": "mesh",
+      "summary": "Report (default) or delete nodes that nothing in the deck references, reading each keyword's fields instead of scraping numbers.",
+      "description": "Finds nodes that no element and no keyword references, reports the classification with the bounding box before and after, and deletes them only when asked. The problem this solves is not finding orphans — it is not being wrong about them. Scraping every integer out of every non-*NODE/non-*ELEMENT line makes every orphan look referenced, because a production deck normally carries an all-node *SET_NODE_LIST that spells out every node ID; measured on a 13.4M-node deck that approach reported all 118,568 orphans as used. So *SET_NODE_* membership is NOT counted as a reference here — those sets are pruned of the deleted nodes instead (LS-DYNA Error 10233 otherwise). The inverse mistake is just as bad: *CONSTRAINED_NODAL_RIGID_BODY points at nodes through NSID, so a card that names a node set keeps that set's members transitively, which is how the 71 CNRB-held nodes in that deck survive. 'Safe' means 'delete only what I understand': every keyword the op does not model is still scanned, and any node it could name is kept and listed in unknown_keyword_kept, so keep_referenced_by is about attribution, not about safety. *INCLUDE files are read for references — not reading them would silently delete nodes the include uses — and mode: safe refuses to write when one could not be opened. Nodes defined inside an *INCLUDE are never deleted, because only the main deck is rewritten. The op proves its own output by reading it back: every node an element references and every node set member must exist, and it exits non-zero if not. Default mode is report, which writes no deck at all.",
+      "invocation": "yaml",
+      "config_style": "structured",
+      "takes_kfile": true,
+      "requires_gmsh": false,
+      "requires_tetgen": false,
+      "params": [
+        {
+          "name": "model",
+          "type": "file",
+          "role": "yaml_field",
+          "yaml_path": "model",
+          "required": true,
+          "description": "Input LS-DYNA K-file (or use 'input' as alternative key name). *INCLUDE files are followed for reference counting."
+        },
+        {
+          "name": "output",
+          "type": "output",
+          "role": "yaml_field",
+          "yaml_path": "output",
+          "required": false,
+          "default": null,
+          "description": "Output K-file. Only written when mode is safe or force; defaults to the input name with a '_clean' suffix."
+        },
+        {
+          "name": "mode",
+          "type": "enum",
+          "role": "yaml_field",
+          "yaml_path": "mode",
+          "required": false,
+          "default": "report",
+          "choices": [
+            "report",
+            "safe",
+            "force"
+          ],
+          "description": "report (default) classifies and writes no deck. safe deletes only nodes no understood or unknown keyword could name, and refuses when an *INCLUDE could not be read. force additionally deletes nodes that only an unmodelled keyword named, and counts them in force_deleted_despite_unknown."
+        },
+        {
+          "name": "prune_sets",
+          "type": "boolean",
+          "role": "yaml_field",
+          "yaml_path": "prune_sets",
+          "required": false,
+          "default": true,
+          "description": "Remove deleted nodes from *SET_NODE / *SET_NODE_LIST / *SET_NODE_COLUMN member lists. Turning this off leaves set members pointing at nodes that no longer exist, which the read-back verification then reports as a failure."
+        },
+        {
+          "name": "verify",
+          "type": "boolean",
+          "role": "yaml_field",
+          "yaml_path": "verify",
+          "required": false,
+          "default": true,
+          "description": "Read the written deck back and confirm every element node reference and every node set member is defined. Non-zero exit if not."
+        },
+        {
+          "name": "keep_referenced_by",
+          "type": "array",
+          "role": "yaml_field",
+          "yaml_path": "keep_referenced_by",
+          "required": false,
+          "default": [
+            "CONSTRAINED_NODAL_RIGID_BODY",
+            "BOUNDARY_SPC_NODE",
+            "DATABASE_HISTORY_NODE",
+            "CONSTRAINED_EXTRA_NODES",
+            "INITIAL_VELOCITY_NODE"
+          ],
+          "description": "Keyword prefixes (without the leading '*') whose node references are attributed by name in the report and honoured even in mode: force. Keywords left out of this list are still scanned and still keep their nodes — they are just reported as unknown_keyword_kept."
+        },
+        {
+          "name": "report",
+          "type": "output",
+          "role": "yaml_field",
+          "yaml_path": "report",
+          "required": false,
+          "default": null,
+          "description": "Write the classification as JSON: node counts, kept_by per keyword, unknown_keyword_kept, sets_pruned, verify, and bbox_before/bbox_after."
+        }
+      ],
+      "example": {
+        "args": {
+          "model": "cleanup_demo.k",
+          "output": "cleanup_demo_clean.k",
+          "mode": "safe",
+          "prune_sets": true,
+          "report": "cleanup_report.json"
+        },
+        "note": "실행 검증된 예제 (입력: cleanup_demo.k — 고아 4개 중 2개는 CNRB 가 세트로 가리켜 남는다)"
+      },
+      "example_folder": "examples/cleanup-nodes",
+      "notes": "The bbox_before/bbox_after pair is the point of the report, not decoration: on the deck that prompted this op the device was 14.55 mm thick but the *NODE bounding box read 67.50 mm, so the drop plane was built 53 mm away from the device and nothing ever touched it. Deleting the orphans closes that gap, and the two boxes side by side say how much of it was never geometry. Field widths follow the deck: *NODE and *ELEMENT_* cards are read at the width *KEYWORD declares (8, i10=y 10, long=y 20) or the keyword-line suffix ('%', '+', '-') overrides, while *SET_* cards are I10 (I20 under long). Fixed width is read FIRST and whitespace splitting is used only when a field genuinely holds two numbers — an 8-digit node ID fills an 8-wide field exactly, and splitting on whitespace there reads one token instead of eight and deletes every node the element uses. *SET_NODE_LIST_GENERATE ranges are expanded and kept rather than pruned, because keeping only the endpoints would delete the interior of the range and empty the set. *ELEMENT_* families the op cannot size (beams, discrete, mass, seatbelt) are handled by treating every integer except the element ID as a node reference and listing the keyword in element_keywords_opaque — over-keeping, which is the safe direction. Original newlines are preserved through DeckWriter; CRLF stays CRLF. Relative paths in model/output/report resolve against the YAML file's directory."
+    },
+    {
       "name": "stcx_fullangle_drop",
       "category": "analysis",
       "summary": "Submit a full-angle (Fibonacci) LS-DYNA drop study to the stcx cluster",

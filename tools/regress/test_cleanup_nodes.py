@@ -1,0 +1,365 @@
+#!/usr/bin/env python3
+# cleanup-nodes 가 '전체 절점 세트' 함정에 빠지지 않고, 지운 뒤 덱이 멀쩡함을 스스로 증명하는지
+"""`cleanup-nodes` 계약 (2026-10-11).
+
+왜 이 시험이 있나.
+
+  요청자(CAE그룹 요청서 v1.0)는 이 일을 덱 밖에서 한 번 시도했고 **실패했다** —
+  "비-`*NODE`/`*ELEMENT_` 줄에서 8칸·10칸·공백 분리로 숫자를 전부 긁었더니 118,568개
+  **전부가 참조됨**으로 나왔다."
+
+  ★그 실패의 원인은 '숫자를 긁은 것' 이 아니라 **`*SET_NODE_*` 블록까지 긁은 것**이다.
+  운영 덱에는 보통 '전체 절점' 세트가 있고 그 블록은 모든 절점 ID 를 글자 그대로 담는다.
+  그래서 이 시험의 A 절은 **그 함정이 든 덱**을 만들어 고아가 가려지지 않는지 본다.
+
+  그리고 '세트 멤버십은 참조가 아니다' 로만 두면 반대로 깨진다 — CNRB 는 절점을 NSID 로
+  가리키므로(요청서의 71건) **세트를 이름하는 카드가 있으면 멤버를 전이로 남겨야** 한다.
+  A-4·H 절이 그 전이를 못 박는다.
+
+  ⚠ 이 시험의 픽스처는 **합성이다.** 요청서의 실측 분류(CNRB 71 · 다른 세트 3 ·
+  삭제 가능 118,529)는 2.32GB Q8 덱이 이 호스트에 없어 재현하지 못했다 — **실제 덱 미검증**.
+  여기서 못 박는 것은 분류의 *수*가 아니라 분류의 *규칙*이다.
+
+요청서 §6 함정을 그대로 채택한다.
+  · C 절 — 절점 ID 8자리가 8칸을 꽉 채워 공백이 사라진다(`split()` 이면 연결성이 뒤섞인다)
+  · D 절 — CRLF 보존(산출에 홀로 선 LF 0)
+  · E 절 — 고차 솔리드의 절점 카드가 **두 줄**이다(한 줄만 읽으면 12개가 고아로 보인다)
+  · F 절 — `*INCLUDE` 를 읽지 않으면 그 안이 쓰는 절점을 고아로 본다
+  · H 절 — `_TITLE` 제목줄이 SID 줄을 한 줄 밀어낸다
+
+usage: test_cleanup_nodes.py <KooRemapper 바이너리>
+"""
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+
+sys.dont_write_bytecode = True
+
+FAILS = []
+
+
+def check(name, cond, detail=""):
+    print("  %-70s %s" % (name, "OK" if cond else "FAIL"))
+    if not cond:
+        FAILS.append("%s%s" % (name, ("   " + str(detail).strip()[:300]) if detail else ""))
+
+
+def run(binary, cwd, *args):
+    p = subprocess.run([binary, *args], capture_output=True, text=True, timeout=600, cwd=cwd)
+    return p.returncode, p.stdout + p.stderr
+
+
+def write(path, text, newline="\n"):
+    with open(path, "w", newline=newline) as f:
+        f.write(text)
+
+
+def nodeline(nid, x, y, z):
+    return "%8d%16.7f%16.7f%16.7f" % (nid, x, y, z)
+
+
+def setlines(ids, fw=10):
+    out = []
+    for i in range(0, len(ids), 8):
+        out.append("".join("%*d" % (fw, n) for n in ids[i:i + 8]))
+    return out
+
+
+CUBE = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0),
+        (0, 0, 1), (1, 0, 1), (1, 1, 1), (0, 1, 1)]
+
+
+def cfg(d, name, **kv):
+    lines = []
+    for k, v in kv.items():
+        if isinstance(v, bool):
+            v = "true" if v else "false"
+        lines.append("%s: %s" % (k, v))
+    write(os.path.join(d, name), "\n".join(lines) + "\n")
+    return name
+
+
+def report(d, name="report.json"):
+    with open(os.path.join(d, name)) as f:
+        return json.load(f)
+
+
+def main():
+    if len(sys.argv) < 2:
+        print("usage: test_cleanup_nodes.py <KooRemapper 바이너리>")
+        return 2
+    binary = os.path.abspath(sys.argv[1])
+    d = tempfile.mkdtemp(prefix="cleanup_nodes_")
+    try:
+        # ── A: 전체 절점 세트 함정 + 전이 keep ────────────────────────────────
+        orph = {101: 2.0, 102: 2.0, 103: 3.0, 104: 4.0, 105: 5.0, 106: -500.0, 107: 6.0}
+        L = ["*KEYWORD", "*NODE"]
+        for i, (x, y, z) in enumerate(CUBE, start=1):
+            L.append(nodeline(i, x, y, z))
+        for nid in sorted(orph):
+            L.append(nodeline(nid, orph[nid], 0.0, 0.0))
+        L += ["*ELEMENT_SOLID", "%8d%8d" % (1, 1),
+              "".join("%8d" % n for n in range(1, 9)),
+              "*PART", "solid part", "%10d%10d%10d" % (1, 1, 1),
+              "*SECTION_SOLID", "%10d%10d" % (1, 1),
+              "*MAT_ELASTIC", "         1  7.85E-9  210000     0.3"]
+        # ★함정 — 덱 전체 절점을 담은 세트
+        L += ["*SET_NODE_LIST", "%10d" % 9000]
+        L += setlines(list(range(1, 9)) + sorted(orph))
+        L += ["*SET_NODE_LIST", "%10d" % 2001, "%10d%10d" % (101, 102)]
+        L += ["*SET_NODE_LIST", "%10d" % 2002, "%10d" % 103]
+        L += ["*CONSTRAINED_NODAL_RIGID_BODY", "%10d%10d%10d" % (1, 0, 2001)]
+        L += ["*BOUNDARY_SPC_NODE", "%10d%10d%10d%10d%10d%10d%10d%10d" % (104, 0, 1, 1, 1, 1, 1, 1)]
+        L += ["*DEFINE_SOMETHING_WE_DO_NOT_KNOW", "%10d" % 105]
+        L += ["*END"]
+        write(os.path.join(d, "trap.k"), "\n".join(L) + "\n")
+
+        cfg(d, "a.yaml", model="trap.k", report="ra.json")
+        rc, out = run(binary, d, "cleanup-nodes", "a.yaml")
+        check("A-0 rc=0", rc == 0, out[-400:])
+        r = report(d, "ra.json")
+        check("A-1 요소가 안 쓰는 절점 7개를 후보로 센다 (세트 블록이 요소 참조로 섞이지 않는다)",
+              r["nodes"]["unreferenced_candidates"] == 7, r["nodes"])
+        check("A-2 요소가 쓰는 절점은 8개", r["nodes"]["used_by_elements"] == 8, r["nodes"])
+        check("A-3 세트 멤버십 자체는 참조가 아니다 (9000 이 아무것도 살리지 않았다)",
+              "*SET_NODE_LIST" not in r["kept_by"], r["kept_by"])
+        check("A-4 ★CNRB 가 NSID 로 가리킨 세트의 멤버는 전이로 남는다 (요청서의 71건 경로)",
+              r["kept_by"].get("*CONSTRAINED_NODAL_RIGID_BODY") == 2, r["kept_by"])
+        check("A-5 직접 절점을 이름한 keep 키워드도 남긴다",
+              r["kept_by"].get("*BOUNDARY_SPC_NODE") == 1, r["kept_by"])
+        check("A-6 ★모르는 키워드가 가리킨 절점은 남기고 적는다 ('이해한 것만 지운다')",
+              any(x["keyword"] == "*DEFINE_SOMETHING_WE_DO_NOT_KNOW" and x["nodes"] == 1
+                  for x in r["unknown_keyword_kept"]), r["unknown_keyword_kept"])
+        # ★요청자의 실패를 잡는 칸은 여기다. `*SET_NODE_*` 를 보통 키워드로 두면 이 수가 **0**
+        # 이 된다(실측으로 확인: 그 분기를 끄면 deletable 0 · 이 시험 18항 빨강).
+        check("A-7 ★삭제 가능 3개 — 전체 절점 세트가 고아를 '참조됨' 으로 덮지 않는다",
+              r["nodes"]["deletable"] == 3, r["nodes"])
+        check("A-8 ★bbox_before 가 리포트에 있다", r["bbox_before"] is not None)
+        check("A-9 ★bbox_after 가 리포트에 있다", r["bbox_after"] is not None)
+        check("A-10 고아를 빼면 bbox 가 줄어든다 (낙하판 오배치를 사전에 드러낸다)",
+              r["bbox_before"]["min"][0] == -500.0 and r["bbox_after"]["min"][0] == 0.0,
+              (r["bbox_before"]["min"], r["bbox_after"]["min"]))
+        check("A-11 기본 mode 는 report", r["mode"] == "report", r["mode"])
+        check("A-12 report 모드는 덱을 쓰지 않는다", r["output"] is None, r["output"])
+
+        # ── B: 쓰기 + 세트 정리 + 되읽기 검증 ─────────────────────────────────
+        cfg(d, "b.yaml", model="trap.k", output="clean.k", mode="safe", report="rb.json")
+        rc, out = run(binary, d, "cleanup-nodes", "b.yaml")
+        check("B-0 rc=0", rc == 0, out[-400:])
+        rb = report(d, "rb.json")
+        check("B-1 *NODE 줄 3개를 지웠다", rb["nodes"]["deleted"] == 3, rb["nodes"])
+        check("B-2 ★되읽기 검증 — 요소 참조 미정의 0",
+              rb["verify"]["undefined_by_elements"] == 0, rb["verify"])
+        check("B-3 ★되읽기 검증 — 세트 멤버 미정의 0 (LS-DYNA Error 10233 자리)",
+              rb["verify"]["undefined_set_members"] == 0, rb["verify"])
+        clean = open(os.path.join(d, "clean.k")).read()
+        check("B-4 지운 절점이 *NODE 에서 사라졌다",
+              "\n     103 " not in clean and "\n     106 " not in clean, "")
+        check("B-5 남긴 절점은 그대로 있다", "\n     101 " in clean and "\n     104 " in clean, "")
+        check("B-6 전체 절점 세트에서 지운 멤버가 빠졌다",
+              any(x["sid"] == 9000 and x["removed"] == 3 for x in rb["sets_pruned"]),
+              rb["sets_pruned"])
+        check("B-7 건드릴 것 없는 세트는 정리 목록에 없다",
+              not any(x["sid"] == 2001 for x in rb["sets_pruned"]), rb["sets_pruned"])
+        check("B-8 멤버가 0 이 된 세트를 센다", rb["sets_emptied"] == 1, rb["sets_emptied"])
+        src = open(os.path.join(d, "trap.k")).read()
+        def block(text, kw, nxt):
+            a = text.index(kw); b = text.index(nxt, a)
+            return text[a:b]
+        check("B-9 ★손대지 않은 블록은 바이트가 같다 (*ELEMENT_SOLID)",
+              block(src, "*ELEMENT_SOLID", "*PART") == block(clean, "*ELEMENT_SOLID", "*PART"))
+        check("B-10 ★손대지 않은 블록은 바이트가 같다 (*MAT_ELASTIC)",
+              block(src, "*MAT_ELASTIC", "*SET_NODE") == block(clean, "*MAT_ELASTIC", "*SET_NODE"))
+
+        # ── B': prune_sets: false 면 **검증이 빨개져야 한다** ──────────────────
+        # 검증이 늘 0 을 내는 장식이 아님을 증명한다.
+        cfg(d, "bp.yaml", model="trap.k", output="noprune.k", mode="safe",
+            prune_sets=False, report="rbp.json")
+        rc, out = run(binary, d, "cleanup-nodes", "bp.yaml")
+        rbp = report(d, "rbp.json")
+        check("B-11 ★prune_sets: false 면 세트에 없는 절점이 남아 검증이 잡는다",
+              rbp["verify"]["undefined_set_members"] > 0, rbp["verify"])
+        check("B-12 ★그때 rc 는 0 이 아니다 (깨진 덱을 멀쩡하다고 하지 않는다)", rc != 0, rc)
+
+        # ── C: §6 — 절점 ID 8자리가 8칸을 꽉 채운다 ──────────────────────────
+        ids = list(range(10000001, 10000009))
+        L = ["*KEYWORD", "*NODE"]
+        for n, (x, y, z) in zip(ids, CUBE):
+            L.append(nodeline(n, x, y, z))
+        L.append(nodeline(10000009, 9.0, 0.0, 0.0))
+        L += ["*ELEMENT_SOLID", "%8d%8d" % (1, 1), "".join("%8d" % n for n in ids),
+              "*PART", "p", "%10d%10d%10d" % (1, 1, 1),
+              "*SECTION_SOLID", "%10d%10d" % (1, 1), "*END"]
+        write(os.path.join(d, "packed.k"), "\n".join(L) + "\n")
+        check("C-0 픽스처가 정말 공백 없이 붙어 있다",
+              "1000000110000002" in open(os.path.join(d, "packed.k")).read())
+        cfg(d, "c.yaml", model="packed.k", report="rc.json")
+        rc, out = run(binary, d, "cleanup-nodes", "c.yaml")
+        rcj = report(d, "rc.json")
+        check("C-1 ★8자리 ID 가 붙어도 8개를 요소 참조로 읽는다", rcj["nodes"]["used_by_elements"] == 8,
+              rcj["nodes"])
+        check("C-2 ★그래서 삭제 가능은 1개뿐이다 (공백 분해면 7개가 고아로 보인다)",
+              rcj["nodes"]["deletable"] == 1, rcj["nodes"])
+
+        # ── D: §6 — CRLF 보존 ────────────────────────────────────────────────
+        write(os.path.join(d, "crlf.k"), open(os.path.join(d, "trap.k")).read(), newline="\r\n")
+        cfg(d, "dd.yaml", model="crlf.k", output="crlf_out.k", mode="safe", report="rd.json")
+        rc, out = run(binary, d, "cleanup-nodes", "dd.yaml")
+        raw = open(os.path.join(d, "crlf_out.k"), "rb").read()
+        lone = raw.replace(b"\r\n", b"").count(b"\n")
+        check("D-1 rc=0", rc == 0, out[-300:])
+        check("D-2 ★산출에 홀로 선 LF 가 0", lone == 0, lone)
+        check("D-3 CRLF 가 실제로 있다", raw.count(b"\r\n") > 10, raw.count(b"\r\n"))
+        check("D-4 CRLF 덱에서도 같은 판정", report(d, "rd.json")["nodes"]["deletable"] == 3,
+              report(d, "rd.json")["nodes"])
+
+        # ── E: §6 — 고차 솔리드의 절점 카드가 두 줄이다 ───────────────────────
+        L = ["*KEYWORD", "*NODE"]
+        for n in range(1, 21):
+            L.append(nodeline(n, float(n), 0.0, 0.0))
+        L.append(nodeline(101, 99.0, 0.0, 0.0))
+        L += ["*ELEMENT_SOLID", "%8d%8d" % (1, 1),
+              "".join("%8d" % n for n in range(1, 11)),
+              "".join("%8d" % n for n in range(11, 21)),
+              "*PART", "hex20", "%10d%10d%10d" % (1, 1, 1),
+              "*SECTION_SOLID", "%10d%10d" % (1, 23), "*END"]
+        write(os.path.join(d, "hex20.k"), "\n".join(L) + "\n")
+        cfg(d, "e.yaml", model="hex20.k", report="re.json")
+        rc, out = run(binary, d, "cleanup-nodes", "e.yaml")
+        re_ = report(d, "re.json")
+        check("E-1 ★절점 카드 두 줄을 다 읽는다 (ELFORM 23 = 20절점)",
+              re_["nodes"]["used_by_elements"] == 20, re_["nodes"])
+        check("E-2 ★그래서 삭제 가능은 1개다 (한 줄만 읽으면 11개가 고아로 보인다)",
+              re_["nodes"]["deletable"] == 1, re_["nodes"])
+
+        # ── F: *INCLUDE 를 읽는다 ────────────────────────────────────────────
+        L = ["*KEYWORD", "*NODE"]
+        for i, (x, y, z) in enumerate(CUBE, start=1):
+            L.append(nodeline(i, x, y, z))
+        L.append(nodeline(101, 9.0, 0.0, 0.0))
+        L += ["*PART", "p", "%10d%10d%10d" % (1, 1, 1),
+              "*SECTION_SOLID", "%10d%10d" % (1, 1),
+              "*INCLUDE", "inc.k", "*END"]
+        write(os.path.join(d, "main.k"), "\n".join(L) + "\n")
+        write(os.path.join(d, "inc.k"), "*KEYWORD\n*ELEMENT_SOLID\n%8d%8d\n%s\n*END\n"
+              % (1, 1, "".join("%8d" % n for n in range(1, 9))))
+        cfg(d, "f.yaml", model="main.k", report="rf.json")
+        rc, out = run(binary, d, "cleanup-nodes", "f.yaml")
+        rf = report(d, "rf.json")
+        check("F-1 인클루드를 한 개 읽었다", rf["deck"]["includes_read"] == 1, rf["deck"])
+        check("F-2 ★인클루드가 쓰는 절점을 참조로 센다", rf["nodes"]["used_by_elements"] == 8,
+              rf["nodes"])
+        check("F-3 ★그래서 삭제 가능은 1개다 (안 읽으면 9개가 고아로 보인다)",
+              rf["nodes"]["deletable"] == 1, rf["nodes"])
+
+        # ── F': 못 읽는 인클루드에서 safe 는 쓰지 않는다 ──────────────────────
+        write(os.path.join(d, "miss.k"), "\n".join(
+            ["*KEYWORD", "*NODE", nodeline(1, 0, 0, 0), nodeline(2, 1, 0, 0),
+             "*INCLUDE", "nope.k", "*END"]) + "\n")
+        cfg(d, "fm.yaml", model="miss.k", output="miss_out.k", mode="safe")
+        rc, out = run(binary, d, "cleanup-nodes", "fm.yaml")
+        check("F-4 ★mode: safe 는 못 읽은 *INCLUDE 에서 거절한다", rc == 1, rc)
+        check("F-5 그때 덱을 만들지 않는다", not os.path.exists(os.path.join(d, "miss_out.k")))
+        cfg(d, "fr.yaml", model="miss.k", report="rfr.json")
+        rc, out = run(binary, d, "cleanup-nodes", "fr.yaml")
+        check("F-6 report 모드는 돌고 못 읽은 인클루드를 센다",
+              rc == 0 and report(d, "rfr.json")["deck"]["includes_unreadable"] == 1, out[-300:])
+
+        # ── G: *SET_NODE_LIST_GENERATE 범위는 펼쳐 남긴다 ─────────────────────
+        L = ["*KEYWORD", "*NODE"]
+        for i, (x, y, z) in enumerate(CUBE, start=1):
+            L.append(nodeline(i, x, y, z))
+        for n in range(201, 211):
+            L.append(nodeline(n, float(n), 0.0, 0.0))
+        L += ["*ELEMENT_SOLID", "%8d%8d" % (1, 1), "".join("%8d" % n for n in range(1, 9)),
+              "*PART", "p", "%10d%10d%10d" % (1, 1, 1),
+              "*SECTION_SOLID", "%10d%10d" % (1, 1),
+              "*SET_NODE_LIST_GENERATE", "%10d" % 3001, "%10d%10d" % (201, 210),
+              "*END"]
+        write(os.path.join(d, "gen.k"), "\n".join(L) + "\n")
+        cfg(d, "g.yaml", model="gen.k", report="rg.json")
+        rc, out = run(binary, d, "cleanup-nodes", "g.yaml")
+        rg = report(d, "rg.json")
+        check("G-1 ★범위를 끝점만 보지 않고 펼쳐서 전부 남긴다 (안쪽 8개가 지워지면 세트가 깨진다)",
+              rg["nodes"]["deletable"] == 0, rg["nodes"])
+        check("G-2 그 이유를 '못 읽는 세트 변종' 으로 적는다",
+              rg["kept_by"].get("(unreadable *SET_NODE_* variants)") == 10, rg["kept_by"])
+
+        # ── H: §6 — `_TITLE` 제목줄이 SID 줄을 한 줄 밀어낸다 ─────────────────
+        L = ["*KEYWORD", "*NODE"]
+        for i, (x, y, z) in enumerate(CUBE, start=1):
+            L.append(nodeline(i, x, y, z))
+        L.append(nodeline(101, 9.0, 0.0, 0.0))
+        L += ["*ELEMENT_SOLID", "%8d%8d" % (1, 1), "".join("%8d" % n for n in range(1, 9)),
+              "*PART", "p", "%10d%10d%10d" % (1, 1, 1),
+              "*SECTION_SOLID", "%10d%10d" % (1, 1),
+              "*SET_NODE_LIST_TITLE", "my spot weld nodes", "%10d" % 4001, "%10d" % 101,
+              "*CONSTRAINED_NODAL_RIGID_BODY", "%10d%10d%10d" % (1, 0, 4001),
+              "*END"]
+        write(os.path.join(d, "title.k"), "\n".join(L) + "\n")
+        cfg(d, "h.yaml", model="title.k", report="rh.json")
+        rc, out = run(binary, d, "cleanup-nodes", "h.yaml")
+        rh = report(d, "rh.json")
+        check("H-1 ★제목줄을 세어 SID 를 제 줄에서 읽는다 (못 읽으면 CNRB 전이가 끊긴다)",
+              rh["kept_by"].get("*CONSTRAINED_NODAL_RIGID_BODY") == 1, rh["kept_by"])
+        check("H-2 그래서 삭제 가능 0", rh["nodes"]["deletable"] == 0, rh["nodes"])
+
+        # ── I: mode: force 는 모르는 키워드를 존중하지 않는다 ─────────────────
+        cfg(d, "i.yaml", model="trap.k", output="forced.k", mode="force", report="ri.json")
+        rc, out = run(binary, d, "cleanup-nodes", "i.yaml")
+        ri = report(d, "ri.json")
+        check("I-1 force 는 모르는 키워드가 가리킨 절점도 지운다",
+              ri["nodes"]["deletable"] == 4, ri["nodes"])
+        check("I-2 ★그 사실을 수로 적는다", ri["force_deleted_despite_unknown"] == 1,
+              ri["force_deleted_despite_unknown"])
+        check("I-3 keep 목록이 가리킨 것은 force 에서도 남는다",
+              ri["kept_by"].get("*CONSTRAINED_NODAL_RIGID_BODY") == 2, ri["kept_by"])
+        check("I-4 force 도 되읽기 검증을 통과한다",
+              ri["verify"]["undefined_by_elements"] == 0 and
+              ri["verify"]["undefined_set_members"] == 0, ri["verify"])
+
+        # ── J: keep_referenced_by 를 사용자가 줄 수 있다 ──────────────────────
+        write(os.path.join(d, "j.yaml"),
+              "model: trap.k\nreport: rj.json\nkeep_referenced_by:\n"
+              "  - DEFINE_SOMETHING_WE_DO_NOT_KNOW\n")
+        rc, out = run(binary, d, "cleanup-nodes", "j.yaml")
+        rj = report(d, "rj.json")
+        check("J-1 사용자가 준 키워드는 'keep' 으로 귀속된다",
+              rj["kept_by"].get("*DEFINE_SOMETHING_WE_DO_NOT_KNOW") == 1, rj["kept_by"])
+        check("J-2 ★목록을 바꿔도 삭제 가능 수는 그대로다 (안전은 목록이 아니라 전수 훑기가 만든다)",
+              rj["nodes"]["deletable"] == 3, rj["nodes"])
+        check("J-3 목록에서 빠진 기본 키워드도 여전히 남긴다 (모르는 키워드로 훑힌다)",
+              any(x["keyword"] == "*CONSTRAINED_NODAL_RIGID_BODY"
+                  for x in rj["unknown_keyword_kept"]) or
+              rj["kept_by"].get("*CONSTRAINED_NODAL_RIGID_BODY"), rj)
+
+        # ── K: 가장자리 ──────────────────────────────────────────────────────
+        write(os.path.join(d, "noel.k"), "*KEYWORD\n*NODE\n" + nodeline(1, 0, 0, 0) + "\n*END\n")
+        cfg(d, "k1.yaml", model="noel.k", report="rk1.json")
+        rc, out = run(binary, d, "cleanup-nodes", "k1.yaml")
+        check("K-1 요소가 없는 덱도 돌고 그 절점을 후보로 센다",
+              rc == 0 and report(d, "rk1.json")["nodes"]["unreferenced_candidates"] == 1, out[-300:])
+        cfg(d, "k2.yaml", model="nosuch.k")
+        rc, out = run(binary, d, "cleanup-nodes", "k2.yaml")
+        check("K-2 없는 모델은 rc=1 로 말한다", rc == 1 and "Cannot open model" in out, out[-200:])
+        write(os.path.join(d, "k3.yaml"), "model: trap.k\n\treport: x.json\n")
+        rc, out = run(binary, d, "cleanup-nodes", "k3.yaml")
+        check("K-3 탭 들여쓰기를 거른다", rc == 1 and "cleanup-nodes" in out, out[-200:])
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+    print()
+    if FAILS:
+        print("--- 실패 %d건 ---" % len(FAILS))
+        for f in FAILS:
+            print("  " + f)
+        return 1
+    print("ALL PASS")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

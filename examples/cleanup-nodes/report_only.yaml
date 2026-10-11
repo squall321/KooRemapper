@@ -1,0 +1,3 @@
+# 기본 모드 — 덱을 쓰지 않고 분류만 보고한다
+model: cleanup_demo.k
+report: cleanup_report.json
