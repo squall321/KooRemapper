@@ -42,6 +42,7 @@ DECLARED = {
     "src/commands/surfview.cpp": (1, "덱 아님 — 자유면 그림 SVG(덱은 읽기만 한다)"),
     "src/commands/stackdiagram.cpp": (1, "덱 아님 — 층 모식도 SVG(덱은 읽기만 한다)"),
     "src/commands/cleanup_nodes.cpp": (1, "덱 아님 — 분류 리포트 JSON. 덱은 KooRemapper::DeckWriter 로 쓴다(rewriteDeck)"),
+    "src/commands/extract_parts.cpp": (2, "덱 아님 — 결과 리포트 JSON + 번호 매핑 표. 덱은 KooRemapper::DeckWriter 로 쓴다(Writer)"),
     "src/util/Validator.cpp": (1, "덱 아님 — 검증 로그(append)"),
     "src/util/Logger.cpp": (1, "덱 아님 — 로그 파일"),
     "include/util/Logger.h": (1, "덱 아님 — 로그 스트림 멤버 선언"),

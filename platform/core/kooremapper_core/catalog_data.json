@@ -13861,6 +13861,133 @@
       "notes": "The bbox_before/bbox_after pair is the point of the report, not decoration: on the deck that prompted this op the device was 14.55 mm thick but the *NODE bounding box read 67.50 mm, so the drop plane was built 53 mm away from the device and nothing ever touched it. Deleting the orphans closes that gap, and the two boxes side by side say how much of it was never geometry. Field widths follow the deck: *NODE and *ELEMENT_* cards are read at the width *KEYWORD declares (8, i10=y 10, long=y 20) or the keyword-line suffix ('%', '+', '-') overrides, while *SET_* cards are I10 (I20 under long). Fixed width is read FIRST and whitespace splitting is used only when a field genuinely holds two numbers — an 8-digit node ID fills an 8-wide field exactly, and splitting on whitespace there reads one token instead of eight and deletes every node the element uses. *SET_NODE_LIST_GENERATE ranges are expanded and kept rather than pruned, because keeping only the endpoints would delete the interior of the range and empty the set. *ELEMENT_* families the op cannot size (beams, discrete, mass, seatbelt) are handled by treating every integer except the element ID as a node reference and listing the keyword in element_keywords_opaque — over-keeping, which is the safe direction. Original newlines are preserved through DeckWriter; CRLF stays CRLF. Relative paths in model/output/report resolve against the YAML file's directory."
     },
     {
+      "name": "extract-parts",
+      "category": "mesh",
+      "summary": "Write a deck holding only the chosen parts, keeping every ID, the deck's field width and its newlines, then read it back and report any missing reference.",
+      "description": "Pulls selected parts out of a large deck into a smaller one that still runs. Parts are chosen by PID or by title wildcard, which matters on a 61-part deck where nobody remembers the numbers. The hard part is not the pulling — it is whether what is left is intact, because a deck that references a node, part, section or material it no longer contains dies somewhere else entirely and the cause is not obvious. So the op reads its own output back and reports undefined nodes, parts, sections and materials, exiting non-zero if any are found. *INCLUDE files are inlined rather than skipped: decks of this size are almost always split, and not reading them produces a deck with no elements at all for a part that lives in an include. The output is therefore one self-contained file, and an include that cannot be opened is refused rather than silently dropping the parts inside it. Element families the op cannot size (beam, discrete, mass, seatbelt) are refused when they hold elements of a chosen part, because a deck that quietly lost structure runs and looks plausible; when they only hold other parts they are dropped and counted. Everything dropped is listed by keyword in the report, so there is no invisible loss. IDs are preserved by default; renumber: true renumbers nodes and elements from 1 and writes the old-to-new map beside the deck, without which the extraction cannot be undone.",
+      "invocation": "yaml",
+      "config_style": "structured",
+      "takes_kfile": true,
+      "requires_gmsh": false,
+      "requires_tetgen": false,
+      "params": [
+        {
+          "name": "model",
+          "type": "file",
+          "role": "yaml_field",
+          "yaml_path": "model",
+          "required": true,
+          "description": "Input LS-DYNA K-file (or 'input'). *INCLUDE files are followed and inlined into the output."
+        },
+        {
+          "name": "output",
+          "type": "output",
+          "role": "yaml_field",
+          "yaml_path": "output",
+          "required": false,
+          "default": null,
+          "description": "Output K-file. Defaults to the input name with an '_extracted' suffix."
+        },
+        {
+          "name": "parts",
+          "type": "array",
+          "role": "yaml_field",
+          "yaml_path": "parts",
+          "required": false,
+          "description": "PIDs to extract. A PID that is not in the deck is refused rather than silently producing an empty deck. Either this or part_titles is required."
+        },
+        {
+          "name": "part_titles",
+          "type": "array",
+          "role": "yaml_field",
+          "yaml_path": "part_titles",
+          "required": false,
+          "description": "Part title patterns with '*' and '?' wildcards, matched case-insensitively against the *PART title line. A pattern that matches nothing is refused."
+        },
+        {
+          "name": "renumber",
+          "type": "boolean",
+          "role": "yaml_field",
+          "yaml_path": "renumber",
+          "required": false,
+          "default": false,
+          "description": "Renumber nodes and elements from 1 and write <output>_renumber_map.json with the old-to-new pairs. Only field 0 of each line is rewritten in place, so coordinate text is preserved byte for byte. Refused when two element families share an element ID."
+        },
+        {
+          "name": "verify",
+          "type": "boolean",
+          "role": "yaml_field",
+          "yaml_path": "verify",
+          "required": false,
+          "default": true,
+          "description": "Read the written deck back and report undefined nodes, parts, sections and materials. Non-zero exit if any."
+        },
+        {
+          "name": "include.nodes",
+          "type": "boolean",
+          "role": "yaml_field",
+          "yaml_path": "include.nodes",
+          "required": false,
+          "default": true,
+          "description": "Carry the *NODE lines the extracted elements use."
+        },
+        {
+          "name": "include.sets",
+          "type": "enum",
+          "role": "yaml_field",
+          "yaml_path": "include.sets",
+          "required": false,
+          "default": "referenced",
+          "choices": [
+            "referenced",
+            "none"
+          ],
+          "description": "referenced trims *SET_NODE / *SET_PART / *SET_SOLID / *SET_SHELL / *SET_TSHELL to what the output contains and keeps *SET_SEGMENT faces whose four nodes all survive. Variants whose members cannot be read as IDs (_GENERATE, _GENERAL, _ADD, _INTERSECT) are dropped and their SIDs listed."
+        },
+        {
+          "name": "include.materials",
+          "type": "boolean",
+          "role": "yaml_field",
+          "yaml_path": "include.materials",
+          "required": false,
+          "default": true,
+          "description": "Carry *MAT_*, *EOS_*, *HOURGLASS blocks the chosen parts name, plus *DEFINE_CURVE and *DEFINE_TABLE (pure numbers, no node references). A block holding several definitions is carried whole and counted."
+        },
+        {
+          "name": "include.sections",
+          "type": "boolean",
+          "role": "yaml_field",
+          "yaml_path": "include.sections",
+          "required": false,
+          "default": true,
+          "description": "Carry the *SECTION_* blocks the chosen parts name."
+        },
+        {
+          "name": "report",
+          "type": "output",
+          "role": "yaml_field",
+          "yaml_path": "report",
+          "required": false,
+          "default": null,
+          "description": "Write the result as JSON: selected parts, picked counts, needed section/material IDs, sets trimmed and dropped, dropped keywords, renumber map path and the read-back verification."
+        }
+      ],
+      "example": {
+        "args": {
+          "model": "assembly.k",
+          "output": "extracted.k",
+          "parts": [
+            1,
+            2
+          ],
+          "report": "extract_report.json"
+        },
+        "note": "실행 검증된 예제 (입력: assembly.k — 파트 2 는 *INCLUDE 안에 있어서 펼쳐 넣는다)"
+      },
+      "example_folder": "examples/extract-parts",
+      "notes": "What is carried: *KEYWORD, *TITLE, *PARAMETER*, *CONTROL_*, *DATABASE_ other than *DATABASE_HISTORY_*, the chosen parts' *PART pairs, their *SECTION_*/*MAT_*/*EOS_*/*HOURGLASS blocks, *DEFINE_CURVE/TABLE, the *NODE lines their elements use, their *ELEMENT_{SOLID,SHELL,TSHELL} cards and the trimmed sets. *DATABASE_HISTORY_* is dropped because it holds node and element IDs that may not survive. Everything else is dropped and counted by keyword in the report. A *PART_* variant the op cannot chunk (*PART_INERTIA and friends) is carried whole when one of its first-field PIDs was chosen, which may bring unselected parts along; LS-DYNA warns about a part with no elements, and that is far better than losing a rigid body silently. Card line counts come from the one shared judge, ElementCardLayout::elementCardSpan, so a higher-order solid's second node card is carried too. Field widths follow the deck: *NODE and *ELEMENT_* at the width *KEYWORD declares (8, i10=y 10, long=y 20) or the keyword suffix, *SET_* and *PART* at I10 (I20 under long). Lines are copied, not re-rendered, so fixed-width exponents are never truncated and original newlines survive; renumbering replaces single fields in place for the same reason. Relative paths resolve against the YAML file's directory."
+    },
+    {
       "name": "stcx_fullangle_drop",
       "category": "analysis",
       "summary": "Submit a full-angle (Fibonacci) LS-DYNA drop study to the stcx cluster",

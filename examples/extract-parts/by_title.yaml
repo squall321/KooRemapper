@@ -1,0 +1,11 @@
+# 제목 와일드카드로 고른다 — 61파트 덱에서 PID 를 외우지 않아도 된다
+model: assembly.k
+output: solids_only.k
+part_titles: ["part*solid*"]
+include:
+  nodes: true
+  sets: referenced
+  materials: true
+  sections: true
+renumber: false
+report: extract_report.json

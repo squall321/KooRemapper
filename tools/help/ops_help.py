@@ -906,6 +906,37 @@ axis: z
           "중립축·굽힘강성은 `neutralaxis` 와 **같은 계산**이다 — 숫자가 서로 다르면 결함이다",
           "얇은 층은 min_bar_px 로 바닥 처리하므로 두께가 과장된다 — 그 층은 **옆 숫자가 참**이고",
           "  그림이 아니다. 몇 층을 바닥 처리했는지 말한다"])
+op("extract-parts", "메시 편집", "고른 파트만 뽑아 **돌아가는** 덱으로 (ID·칸폭·CRLF 보존)",
+   "파트 추출 extract parts 분리 떼어내기 renumber 인클루드 펼치기",
+   "KooRemapper extract-parts <config.yaml>",
+   needs=["examples/extract-parts/assembly.k", "examples/extract-parts/part2_include.k"],
+   files={"ep.yaml": """model: examples/extract-parts/assembly.k
+output: extracted.k
+parts: [1, 2]
+report: extract_report.json
+"""},
+   cmds=["KooRemapper extract-parts ep.yaml"],
+   outputs=["extracted.k", "extract_report.json"],
+   notes=["★어려운 부분은 '뽑기' 가 아니라 **남은 것이 멀쩡한가** 다. 뽑은 덱이 없는 절점·파트·",
+          "  섹션·재질을 가리키면 LS-DYNA 는 **엉뚱한 자리**에서 죽고 원인이 추출이라는 걸 한참",
+          "  뒤에 안다. 그래서 산출 덱을 **되읽어** 미정의 참조를 세고, 0 이 아니면 rc≠0 이다",
+          "★`*INCLUDE` 를 **펼쳐 넣는다** — 2.32GB 급 덱은 거의 늘 인클루드로 쪼개져 있고,",
+          "  고른 파트의 요소가 그 안에 있으면 안 읽는 순간 **요소가 하나도 없는 덱**이 조용히",
+          "  나온다. 산출은 **홀로 서는 한 파일**이고, 못 읽는 인클루드는 **거절**한다",
+          "★줄 수를 모르는 `*ELEMENT_*` 변형(보·이산·질량·안전벨트)이 **고른 파트의** 요소를",
+          "  담고 있으면 **거절한다**. 조용히 빠뜨린 덱은 그럴듯하게 돌면서 틀린다.",
+          "  안 고른 파트의 것이면 버리고 **수로 적는다**",
+          "버린 것은 전부 `dropped_keywords` 에 키워드별로 적는다 — 안 보이는 손실을 만들지 않는다",
+          "`part_titles` 는 `*` `?` 와일드카드다(대소문자 무시) — 61파트 덱에서 PID 를 외우지",
+          "  않아도 된다. 덱에 없는 PID 는 **거절**한다(오타면 조용히 빈 덱이 나온다)",
+          "`renumber: false` 가 기본. `true` 면 절점·요소를 1 부터 매기고 **매핑 표를 함께**",
+          "  낸다(`<output>_renumber_map.json`) — 없으면 되돌릴 수 없다.",
+          "  칸만 **제자리에서** 갈아 끼우므로 좌표 글자는 바이트 그대로다(실수 왕복 오차 0)",
+          "`include.sets: referenced` 는 세트를 **자른다**(빼지 않는다) — 세트를 가리키는 접촉·",
+          "  경계 카드가 미정의 참조가 되면 덱이 안 돈다. `*SET_SEGMENT` 는 **네 절점이 다 남은**",
+          "  면만 싣는다(일부만 남은 면은 면이 아니다)",
+          "`*DATABASE_HISTORY_*` 는 버린다(절점·요소 ID 를 담는다). 그 밖 `*DATABASE_` 와",
+          "  `*CONTROL_*` 은 그대로 싣는다 — 안 싣으면 뽑은 덱이 애초에 안 돈다"])
 op("cleanup-nodes", "메시 편집", "아무도 참조하지 않는 절점을 보고(기본)·삭제 + 세트 정리",
    "고아 절점 미사용 절점 정리 cleanup nodes orphan 삭제 bbox",
    "KooRemapper cleanup-nodes <config.yaml>",

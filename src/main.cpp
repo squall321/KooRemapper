@@ -82,6 +82,7 @@
 #include "commands/surfview.h"
 #include "commands/stackdiagram.h"
 #include "commands/cleanup_nodes.h"
+#include "commands/extract_parts.h"
 
 #include <iostream>
 #include <fstream>
@@ -2974,6 +2975,27 @@ static int runMain(int argc, char* argv[]) {
         }
         printBanner(console);
         return runCleanupNodes(argv[2], console);
+    }
+
+    // Pull selected parts out into a deck that still runs
+    // @lat: [[commands/extract-parts]]
+    if (command == "extract-parts") {
+        if (argc < 3) {
+            console.error("Usage: KooRemapper extract-parts <config.yaml>");
+            console.info("Writes a deck holding only the chosen parts, keeping every ID, the");
+            console.info("deck's field width and its newlines. *INCLUDE files are inlined, so the");
+            console.info("output is one self-contained deck. It then reads that deck back and");
+            console.info("reports whether anything it references is missing (nodes, parts,");
+            console.info("sections, materials) — non-zero exit if so. Element families it cannot");
+            console.info("size are refused rather than silently dropped.");
+            console.info("Minimal config:");
+            console.info("  model: deck.k");
+            console.info("  output: extracted.k");
+            console.info("  parts: [1, 5, 9]        # or part_titles: [\"batt*\"]");
+            return 1;
+        }
+        printBanner(console);
+        return runExtractParts(argv[2], console);
     }
 
     // Unknown command

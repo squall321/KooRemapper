@@ -1,0 +1,5 @@
+# 파트 1·2 만 뽑는다. 파트 2 는 *INCLUDE 안에 있어서 인클루드를 펼쳐 넣는다.
+model: assembly.k
+output: extracted.k
+parts: [1, 2]
+report: extract_report.json
