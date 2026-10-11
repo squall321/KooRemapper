@@ -54,7 +54,15 @@
       `platform/backend/bin` 이 **게시본 `43084d35` 로 되돌아왔다**(게시 아티팩트 복원).
       `test_orphan_node_signal.py` 가 그것을 잡았다(2항 빨강).
       → **④·② 를 게시해야** 플랫폼에 남는다. 게시는 마무리가 아니라 **그 기능의 일부**다.
-- [ ] **A-12 게시** — ② 까지 끝낸 뒤 compat 빌드 → `dist-to-drive.sh` (한 번에)
+- [x] **A-12 게시 완료** — `dist-20261011-124511Z` · 커밋 `4551ba1` · 바이너리 `e9ec35bf`
+      (GLIBC_2.35 ✓, 상한 2.35). compat 빌드 → 듀얼 프런트 → cli.sif → publish.
+      API·MCP 재시작 뒤 **라이브 스택**에서 `ops=60` · `mcp_tools=54` 확인.
+- [x] **A-13 ★덱 op 플랫폼 관문을 남겼다** `platform/mcp_server/deckops_smoke.py` (9항).
+      그림 op 은 `figures_smoke.py` 가 지켰지만 **덱을 쓰는 op 은 지키는 것이 없었다** —
+      10-02 의 '게시본이 낡아 op 이 하나도 안 돌던' 사고와 10-10 재부팅 되돌림이 같은 자리다.
+      바이너리·카탈로그·API·MCP 넷 중 하나만 낡아도 빨개진다. 실측 PASS 9/9.
+- [x] **A-14 보고서** `docs/04-report/q8-drop-prep.report.md` — 요청자용(확인 없이 정한 둘과
+      **실제 덱 미검증**을 명시).
 
 ## ② `cleanup-nodes` — 진행 중 (기본 `mode: report` 로 정함)
 
