@@ -1603,6 +1603,18 @@ int runInfo(const std::string& meshFile, const ConsoleOutput& console, bool stri
         console.error("--strict: " + why + " — LS-DYNA 가 키워드 단계에서 멈춥니다");
         return 1;
     }
+    // ★사유가 있는데 `--strict` 를 안 줬으면 **그 길이 있다고 말한다.**
+    //   여기 적힌 것들은 LS-DYNA 가 키워드 단계에서 멈추는 사유인데, 기본 rc 는 0 이다
+    //   (기본을 1 로 바꾸면 이 op 을 부르는 플랫폼·pyKooCAE 체인 전부가 영향을 받는다).
+    //   그래서 기본값은 두고, **스크립트로 거를 길**을 한 줄로 알린다 — 안 알리면 화면을 보는
+    //   사람만 알고 자동화는 모르는 상태가 된다.
+    if (!strict && !strictFails.empty()) {
+        std::cout << "\n";
+        std::string why;
+        for (size_t k = 0; k < strictFails.size(); ++k) why += (k ? " · " : "") + strictFails[k];
+        console.warning("위 사유로 LS-DYNA 가 멈출 수 있습니다(" + why + "). "
+                        "스크립트에서 거르려면 `--strict` 를 주면 rc=1 이 됩니다.");
+    }
     return 0;
 }
 

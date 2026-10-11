@@ -148,17 +148,30 @@ def main():
     rc, out = run(binary, p, True, d)
     check("C-2 없는 노드 + 인클루드 → rc=0", rc == 0, "rc=%d / %s" % (rc, out[-260:]))
 
-    print("[D 리포의 실제 덱 — 막을 것과 막지 말 것]")
+    print("[D 비-strict 에서도 **그 길이 있다고 말한다** — 안 말하면 자동화만 모른다]")
+    # ⚠ 기본 rc 는 0 이 계약이다(A 절). 그러면 화면을 보는 사람은 결함을 알지만 스크립트는
+    #   모른다 — `--strict` 라는 길이 있다는 사실 자체가 전해지지 않기 때문이다. 그래서
+    #   사유가 있을 때만 한 줄 안내한다. **정상 덱에서는 조용해야 한다**(거짓 안내 금지).
+    for i, (name, text, should_block) in enumerate(planted):
+        p = deck("d%d.k" % i, text)
+        rc, out = run(binary, p, False, d)
+        hinted = "`--strict`" in out
+        check("D %s → %s" % (name, "안내한다" if should_block else "조용하다"),
+              hinted == should_block, "rc=%d / %s" % (rc, out[-240:]))
+        if should_block:
+            check("   D rc 는 여전히 0 이다 (안내가 계약을 바꾸지 않는다)", rc == 0, rc)
+
+    print("[E 리포의 실제 덱 — 막을 것과 막지 말 것]")
     for rel, should_block, why in REPO_CASES:
         path = os.path.join(REPO, rel)
         if not os.path.exists(path):
-            check("D " + rel, False, "덱이 없다 — 시험을 고쳐라")
+            check("E " + rel, False, "덱이 없다 — 시험을 고쳐라")
             continue
         rc0, _ = run(binary, path, False, d)
         rc1, out = run(binary, path, True, d)
-        check("D %s → %s" % (rel, "막는다" if should_block else "통과"),
+        check("E %s → %s" % (rel, "막는다" if should_block else "통과"),
               (rc1 != 0) == should_block, why + " / rc=%d %s" % (rc1, out[-200:]))
-        check("   D %s 는 플래그 없이는 rc=0" % os.path.basename(rel), rc0 == 0, "rc=%d" % rc0)
+        check("   E %s 는 플래그 없이는 rc=0" % os.path.basename(rel), rc0 == 0, "rc=%d" % rc0)
 
     shutil.rmtree(d, ignore_errors=True)
     print()

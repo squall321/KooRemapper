@@ -140,3 +140,17 @@
 - [x] `*SECTION_*_TITLE`·`*SET_*_TITLE` 제목줄 → ②H-1(제목줄을 세어 SID 를 제 줄에서 읽는다;
       못 읽으면 CNRB 전이가 끊긴다) · ①은 `*PART` 제목 쌍을 빈 줄까지 세어 읽는다
 - [x] `*SET_PART_LIST` SID 줄 위치 → ①F-2·F-3(자른 뒤 안 고른 PID 가 빠졌다)
+
+## 추가 지시 (2026-10-11, 사용자 선택)
+
+- [x] **D-1 `build/koorm-work` 삭제** — 16G → 0(여유 346G → 361G). worktree 31개를
+      `git worktree remove` 로 정식 제거(커밋·브랜치는 남는다. `integ` 의 `3501c6a` 는 이미
+      main 조상). git 밖 인수인계 메모 4개(280K)는 유일본이라 `build/koorm-notes/` 로 옮겼다.
+- [x] **D-2 보 족 5종을 공용 판정기에** — `auxElementCard`(`ElementCardLayout`).
+      ★`ElemFamily` 를 **넓히지 않고 축을 갈랐다** — 넓히면 `ecBuildIndex` 의 `famOf`(`else` 가
+      티쉘이다)·`countByPid`, `KFileReader`, `cnrb2spring` 이 조용히 바뀐다.
+      덱 바이트 불변 46/46 으로 무영향 확인. 회귀 `extract-parts` L·M 19항 ·
+      `cleanup-nodes` L 8항. 회귀가 내 버그를 **두 번** 잡았다(맥락 노트 참조).
+- [x] **D-3 `info` 안내 한 줄** — `--strict` 가 **이미** rc=1 을 냈다(앞선 보고를 정정했다).
+      기본 rc=0 은 계약이라 두고, 사유가 있을 때만 "스크립트로 거르려면 `--strict`" 를
+      한 줄 안내한다. 정상 덱에서는 조용하다. 회귀 `test_strict_gate.py` D절 13항.
