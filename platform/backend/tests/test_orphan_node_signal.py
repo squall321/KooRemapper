@@ -106,3 +106,58 @@ def test_clean_deck_reports_no_orphans():
         assert mm.get("orphan_nodes") == 0, mm.get("orphan_nodes")
     finally:
         shutil.rmtree(d, ignore_errors=True)
+
+
+def _tet_deck(path: Path, elform: int):
+    """TET4 둘을 LS-DYNA 관례(n5..n8 = n4)로 적는다. `elform` 만 바꿔 1차/2차를 가른다."""
+    pts = [(0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1), (1, 1, 1)]
+    els = [[1, 2, 3, 4], [2, 3, 4, 5]]
+    L = ["*KEYWORD", "*NODE"]
+    for i, (x, y, z) in enumerate(pts, 1):
+        L.append("%8d%16.9f%16.9f%16.9f" % (i, x, y, z))
+    L.append("*ELEMENT_SOLID")
+    for e, c in enumerate(els, 1):
+        L.append("%8d%8d" % (e, 1) + "".join("%8d" % v for v in c + [c[3]] * 4))
+    L += ["*PART", "tets", "%10d%10d%10d" % (1, 1, 1),
+          "*SECTION_SOLID", "%10d%10d" % (1, elform),
+          "*MAT_ELASTIC", "%10d%10.4g%10.6g%10.4g" % (1, 7.85e-9, 210000, 0.3), "*END"]
+    path.write_text("\n".join(L) + "\n", newline="\n")
+
+
+@pytest.mark.skipif(not _BIN.exists(), reason="KooRemapper 바이너리 없음")
+def test_second_order_signal_reaches_the_platform():
+    """★2차 솔리드 신호도 끊기지 않는다 — 그 파트의 부피는 실측 -48.4% 다.
+
+    고아 절점과 **같은 종류의 조용한 사고**다. `modelmeta` 는 인벤토리라 거절하지 않고 값을
+    내므로, 신호가 끊기면 프런트가 틀린 부피를 아무 표시 없이 그린다.
+    """
+    d = Path(tempfile.mkdtemp())
+    try:
+        p = d / "tet10.k"
+        _tet_deck(p, elform=16)
+        mm = (ki.inspect_kfile(p).get("modelmeta") or {})
+        bad = mm.get("second_order_solid_pids")
+        assert isinstance(bad, list) and len(bad) == 1, bad
+        assert bad[0].get("pid") == 1 and bad[0].get("elform") == 16, bad
+        # 파트 하나만 읽는 소비자도 알 수 있어야 한다
+        parts = mm.get("parts") or []
+        assert parts and parts[0].get("second_order") is True, parts[:1]
+        # 왜 쓰면 안 되는지 규약에 적혀 있다
+        assert "쓰지 말라" in (mm.get("conventions") or {}).get("second_order", "")
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+@pytest.mark.skipif(not _BIN.exists(), reason="KooRemapper 바이너리 없음")
+def test_first_order_deck_has_no_second_order_flag():
+    """1차 덱에서는 비어 있다 — 거짓 경보가 프런트에 뜨지 않아야 한다."""
+    d = Path(tempfile.mkdtemp())
+    try:
+        p = d / "tet4.k"
+        _tet_deck(p, elform=10)
+        mm = (ki.inspect_kfile(p).get("modelmeta") or {})
+        assert mm.get("second_order_solid_pids") == [], mm.get("second_order_solid_pids")
+        parts = mm.get("parts") or []
+        assert parts and parts[0].get("second_order") is False, parts[:1]
+    finally:
+        shutil.rmtree(d, ignore_errors=True)

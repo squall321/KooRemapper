@@ -17,6 +17,7 @@
 #include "parser/KFileReader.h"
 #include "core/Mesh.h"
 #include "core/Element.h"
+#include "util/FigureSvg.h"      // secondOrderSolidPids — 세 그림 op 과 **같은 판정**
 #include "util/YamlComment.h"
 
 #include <algorithm>
@@ -894,6 +895,21 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
     //
     // 전체-절점 루프를 여기 따로 두지 않는다 — `Mesh::bboxReport()` 가 정본이고
     // 한 번 순회로 둘 다 낸다(실사용 덱이 절점 13,366,933개다).
+    // ★2차 솔리드는 **기하를 믿을 수 없다** — 리더가 `*ELEMENT_SOLID` 절점 칸의 앞 8개만
+    //   저장하므로 10절점 사면체의 중간절점 넷이 코너 자리로 들어와 육면체로 읽힌다.
+    //   그림 op 셋은 이것을 **거절**한다. `modelmeta` 는 인벤토리라 거절하지 않지만
+    //   (TET10 덱의 메타 경로를 통째로 막게 된다) **말하지 않으면 안 된다**: 부피가 조용히
+    //   틀린다(실측 -48.4%). 판정은 세 그림 op 과 **같은 함수**를 쓴다 — 갈리면 못 믿는다.
+    const auto mmBad2nd = KooRemapper::figure::secondOrderSolidPids(mesh);
+    std::set<int> mmBad2ndPids;
+    for (const auto& pe : mmBad2nd) mmBad2ndPids.insert(pe.first);
+    if (!mmBad2nd.empty()) {
+        console.warning("[modelmeta] " + KooRemapper::figure::secondOrderSolidWhy(mmBad2nd));
+        console.warning("[modelmeta] 그 파트의 volume·area_ext·proj·edge_len 은 **코너 8개만** "
+                        "본 값이라 틀린다(실측 -48.4%). JSON 의 part.second_order=true 와 "
+                        "model.second_order_solid_pids 가 그 자리를 가리킨다.");
+    }
+
     const auto mmBox = mesh.bboxReport();
     const double mb[6] = {mmBox.allMin.x, mmBox.allMin.y, mmBox.allMin.z,
                           mmBox.allMax.x, mmBox.allMax.y, mmBox.allMax.z};
@@ -925,7 +941,12 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
        << "    \"bbox_used_max\": [" << num(mmBox.usedMax.x) << ", " << num(mmBox.usedMax.y)
        << ", " << num(mmBox.usedMax.z) << "],\n"
        << "    \"bbox_used_basis\": \"nodes_referenced_by_elements\",\n"
-       << "    \"orphan_nodes\": " << mmBox.orphanNodes << "\n"
+       << "    \"orphan_nodes\": " << mmBox.orphanNodes << ",\n"
+       << "    \"second_order_solid_pids\": [";
+    for (size_t i = 0; i < mmBad2nd.size(); ++i)
+        rf << (i ? ", " : "") << "{\"pid\": " << mmBad2nd[i].first
+           << ", \"elform\": " << mmBad2nd[i].second << "}";
+    rf << "]\n"
        << "  },\n";
     rf << "  \"conventions\": {\n"
        << "    \"area_ext\": \"solid: free-face sum; shell: one-sided element area\",\n"
@@ -941,6 +962,11 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
           "model.bbox_min.x = -40, bbox_used_min.x = 0). 낙하판·접촉면은 **used 기준**으로 "
           "놓아라 — 현장 덱에서 두 기준이 14.55mm vs 67.50mm 로 갈려 낙하판이 기기 밖 53mm 에 "
           "생겼다. 기준은 bbox_basis/bbox_used_basis 가 말한다\",\n"
+       << "    \"second_order\": \"part.second_order=true 면 그 파트의 volume·area_ext·proj·"
+          "edge_len 을 **쓰지 말라**. 리더가 `*ELEMENT_SOLID` 절점 칸의 앞 8개만 저장하므로 "
+          "10절점 사면체의 중간절점이 코너 자리로 들어와 육면체로 읽힌다(실측 부피 -48.4%). "
+          "`section`·`surfview`·`stackdiagram` 은 같은 판정으로 **거절**한다 — 여기는 "
+          "인벤토리라 값을 내지만 **틀렸다고 적는다**. 1차 요소 덱으로 다시 내라\",\n"
        << "    \"elem_class\": \"**기하 기준**이다. TSHELL 요소는 육면체라 solid 로 센다 — "
           "카드 키워드 기준이 아니다\",\n"
        << "    \"n_node\": \"그 파트 요소가 참조한 **고유** 절점 수. 축퇴 요소는 같은 절점을 "
@@ -962,6 +988,10 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
            << "      \"pid\": " << p.pid << ",\n"
            << "      \"title\": \"" << mm_jsonEsc(p.title) << "\",\n"
            << "      \"elem_class\": \"" << p.elemClass << "\",\n"
+           // ★이 파트의 기하 값을 믿을 수 있나. 플래그만 위(model)에 두면 파트 하나를
+           //   읽는 소비자가 못 본다 — ④ 에서 신호가 플랫폼까지 끊겨 있던 것과 같은 자리다.
+           << "      \"second_order\": "
+           << (mmBad2ndPids.count(p.pid) ? "true" : "false") << ",\n"
            << "      \"n_elems\": " << p.nElems << ",\n"
            << "      \"bbox_min\": [" << num(p.bbox[0]) << ", " << num(p.bbox[1]) << ", " << num(p.bbox[2]) << "],\n"
            << "      \"bbox_max\": [" << num(p.bbox[3]) << ", " << num(p.bbox[4]) << ", " << num(p.bbox[5]) << "],\n"

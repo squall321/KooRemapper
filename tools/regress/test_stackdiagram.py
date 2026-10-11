@@ -103,6 +103,27 @@ def stack_deck(path, layers, with_mat=True, enclose=None, same_range=False):
     open(path, "w", newline="\n").write("\n".join(L) + "\n")
 
 
+# ★그림 글자가 캔버스 **밖**에 찍히지 않는지. 2026-10-11 에 실제로 났다 — 꼬리말이
+# `height - 40` 에서 14px 씩 내려가서 '바닥 처리' 줄이 생기는 **네 줄짜리** 그림에서
+# 마지막 줄이 y=902(height 900)에 찍혀 **사라졌다**. 그림은 그대로 그려지고 rc=0 이므로
+# 수를 보는 관문으로는 절대 안 잡힌다. 좌표를 직접 재야 잡힌다.
+def svg_out_of_bounds(path):
+    import re as _re
+    t = open(path, encoding="utf-8").read()
+    m = _re.search(r'<svg[^>]*\bwidth="([\d.]+)"[^>]*\bheight="([\d.]+)"', t)
+    if not m:
+        return ["<svg> 의 width/height 를 못 읽었다"]
+    W, H = float(m.group(1)), float(m.group(2))
+    bad = []
+    for attr, lim, name in (("y", H, "height"), ("cy", H, "height"),
+                            ("x", W, "width"), ("cx", W, "width")):
+        for v in _re.findall(r'\b%s="(-?[\d.]+)"' % attr, t):
+            f = float(v)
+            if f < 0 or f > lim:
+                bad.append("%s=%s (%s=%g)" % (attr, v, name, lim))
+    return bad
+
+
 def main():
     if len(sys.argv) < 2:
         print("usage: test_stackdiagram.py <KooRemapper 바이너리>")
@@ -223,6 +244,23 @@ def main():
         rc, outh = run(binary, d, "h.yaml")
         check("F-6 기하가 없으면 rc=1 · 빈 그림을 내지 않는다",
               rc == 1 and "빈 그림" in outh, outh[-200:])
+
+        # ── G: ★글자가 캔버스 밖으로 나가지 않는다 ────────────────────────────
+        # 바닥 처리 줄까지 **네 줄** 꼬리말이 나오는 덱을 일부러 만든다(얇은 층을 섞는다).
+        # 얇은 층을 섞어 '바닥 처리' 줄까지 **네 줄** 꼬리말이 나오게 한다.
+        stack_deck(os.path.join(d, "foot.k"),
+                   [(1.0, 210000.0), (0.002, 210000.0), (0.002, 210000.0), (1.0, 210000.0)])
+        for nm, kwargs in (("기본 크기(1100x700)", {}),
+                           ("작은 500x400", {"width": 500, "height": 400}),
+                           ("넓은 1400x1000", {"width": 1400, "height": 1000})):
+            write_cfg(os.path.join(d, "gg.yaml"), model="foot.k", output="gg", **kwargs)
+            rc, outg = run(binary, d, "gg.yaml")
+            svg = os.path.join(d, "gg_stackdiagram.svg")
+            bad = svg_out_of_bounds(svg) if (rc == 0 and os.path.exists(svg)) else ["rc=%d" % rc]
+            check("G-1 ★캔버스 밖 좌표 0 — " + nm, not bad, bad[:4])
+        check("G-2 그 덱이 정말 바닥 처리 줄을 냈다 (시험이 네 줄 경로를 탔다)",
+              "바닥 처리" in open(os.path.join(d, "gg_stackdiagram.svg"), encoding="utf-8").read(),
+              "")
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

@@ -47,6 +47,10 @@ export interface ModelPart {
   title: string
   elem_class: string
   n_elems: number
+  // ⚠ true 면 아래 기하 값(area_ext·volume·proj)을 **쓰지 말라** — 2차 솔리드라서 코너 8개만
+  //   본 값이고 실측으로 부피가 -48.4% 다. 플래그를 파트에도 두는 이유는, 파트 하나만 읽는
+  //   소비자가 모델 수준 목록을 못 보기 때문이다.
+  second_order?: boolean
   area_ext: number
   volume: number
   proj: { x: number; y: number; z: number }
@@ -89,6 +93,10 @@ export interface ModelMeta {
   bbox_all_max?: number[]
   bbox_used_min?: number[]
   bbox_used_max?: number[]
+  // ★2차 솔리드(ELFORM 16·17·25~28)를 쓰는 파트. 그 파트의 volume·area_ext·proj·edge_len 은
+  //   코너 8개만 본 값이라 **틀리다**(실측 -48.4%) — 리더가 절점 칸의 앞 8개만 저장하므로
+  //   10절점 사면체의 중간절점이 코너 자리로 들어온다. 파트별로는 `ModelPart.second_order`.
+  second_order_solid_pids?: { pid: number; elform: number }[]
   detect?: boolean
   error?: string
 }

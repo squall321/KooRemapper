@@ -239,6 +239,39 @@ def main():
         check("E-3 '유효한 압출이 아니다' 라는 엉뚱한 까닭을 대지 않는다",
               "valid extrusion" not in out and "압출" not in out, out[-300:])
         check("E-4 틀린 덱을 내지 않는다", not os.path.exists(os.path.join(d, "rsout.k")))
+
+        # ── F: ★`modelmeta` 는 거절하지 않지만 **틀렸다고 적어야** 한다 ──────────
+        # 그림 셋은 거절한다. `modelmeta` 는 인벤토리라 거절하면 TET10 덱의 메타 경로를
+        # 통째로 막는다 — 그래서 값을 내되 **쓰지 말라고 적는다**. 적지 않으면 소비자가
+        # 부피를 그대로 읽고, 그 부피는 실측 -48.4% 다. (④ 에서 신호가 플랫폼까지 끊겨
+        # 있었던 것과 같은 자리라서, 파트별 플래그도 함께 둔다.)
+        import json as _json
+        tet4_deck(os.path.join(d, "mm_lin.k"))
+        tet4_deck(os.path.join(d, "mm_2nd.k"), elform=16)
+        for tag, model, want in (("1차", "mm_lin.k", False), ("2차(ELFORM 16)", "mm_2nd.k", True)):
+            write(os.path.join(d, "mm.yaml"),
+                  "model: %s\noutput: mm_%s\n" % (model, "2" if want else "1"))
+            rc, out = run(binary, d, "modelmeta", "mm.yaml")
+            jp = os.path.join(d, "mm_%s_modelmeta.json" % ("2" if want else "1"))
+            ok = (rc == 0 and os.path.exists(jp))
+            md = _json.load(open(jp)) if ok else {}
+            check("F-1 %s 덱에서 modelmeta 가 돈다 (거절하지 않는다)" % tag, ok, out[-250:])
+            if not ok:
+                continue
+            pids = md["model"].get("second_order_solid_pids")
+            check("F-2 %s — model.second_order_solid_pids 가 %s" % (tag, "있다" if want else "비었다"),
+                  isinstance(pids, list) and (len(pids) == 1) == want, pids)
+            check("F-3 %s — 파트에도 second_order 플래그가 붙는다 (파트만 읽는 소비자가 본다)" % tag,
+                  md["parts"] and md["parts"][0].get("second_order") is want,
+                  md["parts"][0].get("second_order") if md["parts"] else None)
+            check("F-4 %s — 콘솔이 %s" % (tag, "경고한다" if want else "조용하다"),
+                  ("코너 8개만" in out) is want, out[-250:])
+            if want:
+                check("F-5 ELFORM 을 수로 적는다 (어느 파트가 왜인지 보인다)",
+                      pids[0].get("elform") == 16 and pids[0].get("pid") == 1, pids)
+                check("F-6 conventions 가 '쓰지 말라' 고 적는다",
+                      "쓰지 말라" in md["conventions"].get("second_order", ""),
+                      md["conventions"].get("second_order"))
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

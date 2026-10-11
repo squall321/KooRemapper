@@ -158,6 +158,17 @@ export function FilePanel({ sessionId, files }: { sessionId: string; files: Sess
                           . 낙하판·접촉면은 **요소 기준**으로 놓으라.
                         </div>
                       )}
+                      {/* ★2차 솔리드면 **말한다.** 그 파트의 부피·면적은 코너 8개만 본 값이라
+                          실측 -48.4% 다. 플래그만 JSON 에 두면 화면을 보는 사람은 틀린 숫자를
+                          그대로 읽는다 — 고아 절점과 같은 종류의 조용한 사고다. */}
+                      {!!m.modelmeta?.second_order_solid_pids?.length && (
+                        <div className="text-[11px]" style={{ color: '#a33' }}>
+                          ⚠ 2차 솔리드 파트 {m.modelmeta.second_order_solid_pids.length}개
+                          (PID {m.modelmeta.second_order_solid_pids.slice(0, 6).map((p) => `${p.pid}/ELFORM ${p.elform}`).join(', ')}
+                          {m.modelmeta.second_order_solid_pids.length > 6 ? ' …' : ''})
+                          — 그 파트의 부피·면적은 코너 8개만 본 값이라 **틀리다**. 1차 요소 덱으로 재라.
+                        </div>
+                      )}
                       {!!m.includes?.length && <div>*INCLUDE: {m.includes.join(', ')}</div>}
                       {!!m.part_titles?.length && <div>파트: {m.part_titles.slice(0, 5).join(' · ')}</div>}
                       {m.keyword_counts && (

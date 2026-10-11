@@ -289,15 +289,23 @@ int runStackDiagram(const std::string& yamlFile, ConsoleOutput& console) {
 
     // ── 그림 ──
     const double M = 60.0, legendW = 300.0;
+    // ★꼬리말 자리를 **먼저** 뗀다. 전에는 꼬리말이 `c.height - 40` 에서 14px 씩 내려가서,
+    //   '바닥 처리' 줄이 생기는 **네 줄짜리** 그림에서 마지막 줄이 캔버스 **밖**
+    //   (y=902 > height 900)에 찍혀 **사라졌다**. 그리고 첫 줄이 맨 아래 막대와 겹쳤다.
+    //   줄 수에 따라 그림 높이가 달라지면 같은 덱의 그림이 미묘하게 달라지고 그 차이를
+    //   '모델이 달라졌다' 로 읽는 사람이 생기므로, **항상 네 줄 자리**를 비워 둔다.
+    const double footLineH = 14.0, footPad = 6.0;
+    const double footH = footLineH * 4.0 + footPad;
+    const double bottomM = (M > footH) ? M : footH;
     const double plotW = c.width - M - legendW;
-    const double plotH = c.height - 2 * M;
+    const double plotH = c.height - M - bottomM;
     if (plotW < 80 || plotH < 80) {
         console.error("내부 오류: 그림 자리가 음수다 — width·height 검증이 새어 나왔다.");
         return 1;
     }
     const double span = spanOf(bars);
     const double s = plotH / span;
-    auto PY = [&](double v) { return (c.height - M) - (v - barLo) * s; };
+    auto PY = [&](double v) { return (c.height - bottomM) - (v - barLo) * s; };
 
     // ★두께에 비례해 그리되 **바닥값**을 둔다. 바닥 처리한 층은 두께가 과장되므로 **적는다** —
     //   적지 않으면 0.008 층과 0.07 층이 같게 보이는 그림이 그럴듯하게 나온다.
@@ -383,7 +391,7 @@ int runStackDiagram(const std::string& yamlFile, ConsoleOutput& console) {
         lx, ly, AX[c.axis]);
     g << b; ly += 20;
     for (const NaLayer& L : bars) {
-        if (shown >= c.maxParts || ly > c.height - M - 70) { omitted = (int)bars.size() - shown; break; }
+        if (shown >= c.maxParts || ly > c.height - bottomM - 70) { omitted = (int)bars.size() - shown; break; }
         ++shown;
         std::snprintf(b, sizeof(b), "<rect x=\"%.1f\" y=\"%.1f\" width=\"12\" height=\"12\" fill=\"%s\"/>\n",
                       lx, ly - 10, colorFor(L.pid));
@@ -409,7 +417,7 @@ int runStackDiagram(const std::string& yamlFile, ConsoleOutput& console) {
         g << b; ly += 18;
     }
     for (const NaLayer& L : encl) {
-        if (ly > c.height - M - 60) break;
+        if (ly > c.height - bottomM - 60) break;
         std::snprintf(b, sizeof(b),
             "<text x=\"%.1f\" y=\"%.1f\" font-size=\"11\" fill=\"#666\">감싸는 파트 %d · t=%.6g (층이 아니다)</text>\n",
             lx, ly, L.pid, L.t);
@@ -418,7 +426,7 @@ int runStackDiagram(const std::string& yamlFile, ConsoleOutput& console) {
     g << "</g>\n";
 
     // ★꼬리말 — 그림이 거짓말하지 않게 하는 줄들
-    double fy = c.height - 40;
+    double fy = c.height - bottomM + footLineH - 2.0;
     g << "<g font-size=\"11\" fill=\"#333\" stroke=\"none\">\n";
     if (haveNeutral) {
         std::snprintf(b, sizeof(b),
@@ -429,7 +437,7 @@ int runStackDiagram(const std::string& yamlFile, ConsoleOutput& console) {
             "<text x=\"%.1f\" y=\"%.1f\" fill=\"#a33\">총두께 %.12g · **E 를 읽은 층이 없어 중립축을 긋지 않았다**(*MAT 가 포함 파일에 있나?) · 단위 없음</text>\n",
             M, fy, barHi - barLo);
     }
-    g << b; fy += 14;
+    g << b; fy += footLineH;
     // 그린 층 기준으로 적는다(콘솔과 같은 수). '제외' 는 **두께를 못 읽어 버린 것**만이고
     // 감싸는 파트는 따로 적는다 — 한데 더하면 같은 층을 두 번 세게 된다.
     std::snprintf(b, sizeof(b),
@@ -439,12 +447,12 @@ int runStackDiagram(const std::string& yamlFile, ConsoleOutput& console) {
         stripped ? " · 제목 제어문자를 ? 로 바꿨다" : "",
         overlapSolid > 0 ? " · ⚠ 솔리드끼리 AABB 가 포개진다(층 순서를 믿지 말라)"
                          : (overlapShell > 0 ? " · 셸 띠가 이웃을 먹는다(중립면 모델링이라 정상)" : ""));
-    g << b; fy += 14;
+    g << b; fy += footLineH;
     if (floored > 0) {
         std::snprintf(b, sizeof(b),
             "<text x=\"%.1f\" y=\"%.1f\" fill=\"#a33\">⚠ 층 %lld개는 %.0f px 로 **바닥 처리**했다 — 그 층의 두께는 그림이 아니라 **옆 숫자**가 참이다</text>\n",
             M, fy, floored, c.minBarPx);
-        g << b; fy += 14;
+        g << b; fy += footLineH;
     }
     std::snprintf(b, sizeof(b),
         "<text x=\"%.1f\" y=\"%.1f\" fill=\"#777\">모식도다 — 파트별 축 범위(AABB)만 쓴다. 실제 기하는 `section` 이 평면으로 잘라 보여 준다</text>\n",
