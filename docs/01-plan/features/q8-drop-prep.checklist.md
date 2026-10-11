@@ -67,16 +67,29 @@
       `fieldsFixed(line, fw)` 를 새로 넣었다(⚠ 공백으로 되돌리지 **않는다** — 절점 ID 8자리가
       칸을 꽉 채우면 `split()` 이 2토큰으로 읽어 연결성이 뒤섞인 사고가 요청서 §6 에 있다).
 
-- [ ] **B-0 ★요청자 확인**: 기본 `mode` (제안: `report`)
-- [ ] B-1 `ReferenceIntegrity` 에 **절점 축** 추가 (지금은 세트·파트·섹션·재질 ID 만)
-- [ ] B-2 keep 키워드 — 셋은 이미 안다. **둘을 새로**:
-      `CONSTRAINED_EXTRA_NODES` · `INITIAL_VELOCITY_NODE`
-      (`BOUNDARY_SPC_NODE` 는 `_SET` 변종만 아는지 확인 필요)
-- [ ] B-3 `prune_sets` — 삭제 절점을 `*SET_NODE_*` 멤버에서도 뺀다(LS-DYNA `Error 10233`)
-- [ ] B-4 리포트 JSON — 요청서 양식 + **`bbox_before`/`bbox_after` 필수**
-- [ ] B-5 ★`mode: safe` 의 뜻을 "내가 이해한 것만 지운다" 로 — 모르는 키워드가 절점처럼
-      보이는 필드를 가지면 **남기고 `unknown_keyword_kept` 에 적는다**
-- [ ] B-6 회귀 — 요청서 분류 재현(CNRB 71 · 세트 3 · 삭제 가능 118,529)은 **덱이 있어야** 한다
+- [x] **B-0 기본 `mode` = `report`** (요청자 확인 없이 진행한 가정 — 한 줄로 바뀐다)
+- [x] **B-1 절점 축** — `cleanup-nodes` 안에 키워드별 훑기로 넣었다. `ReferenceIntegrity` 를
+      고치지 않았다: 그쪽은 **세트·파트 ID 무결성**을 한 번에 보는 도구이고, 이쪽은 2.32GB 를
+      **스트리밍**해야 해서 전제가 다르다. 공유한 것은 `CardFields.h`(칸 읽기)와
+      `elementCardSpan`(카드 줄 수)이다 — 사본이 생길 자리는 둘 다 막았다.
+- [x] **B-2 keep 키워드 다섯** — 기본값으로 넣었다. ★다만 **목록이 안전을 만들지 않는다**:
+      모르는 키워드도 전수 훑어 남기므로, 목록은 **귀속**과 `mode: force` 분기만 바꾼다
+      (회귀 J-2 가 '목록을 바꿔도 삭제 수가 같다' 를 못 박는다).
+- [x] **B-3 `prune_sets`** — `_LIST` 는 다시 포장, `_COLUMN` 은 줄 제거,
+      `_GENERATE`/`_GENERAL`/`_ADD`/`_INTERSECT` 는 **정리하지 않고 전부 남긴다**
+      (범위를 끝점만 보면 안쪽이 지워져 세트가 조용히 빈다 — G-1).
+- [x] **B-4 리포트 JSON** — `bbox_before`/`bbox_after` 필수(A-8·A-9), `kept_by` ·
+      `unknown_keyword_kept` · `sets_pruned` · `verify` · `element_keywords_opaque`.
+- [x] **B-5 `mode: safe` = '이해한 것만 지운다'** + `force` 가 그 반대편.
+- [x] **B-6 회귀 57항** — 요청서 §6 함정 전부. ★**두 번 일부러 깨서** 판별력을 확인했다:
+      고정폭→공백 분해로 바꾸면 `used_by_elements` 8→**0**(C 절 빨강), `*SET_NODE` 를 보통
+      키워드로 두면 `deletable` 3→**0**(요청자의 결과, 18항 빨강).
+      ⚠ 요청서 실측(118,568 / 71 / 118,529)은 2.32GB 덱이 없어 **재현 못 했다 — 실제 덱 미검증**.
+- [x] **B-7 ★예정에 없던 것** — 요소 카드 줄 수 사다리가 `ModelAssembler::ecBuildIndex`
+      **안에만** 있었다. `elementCardSpan` 으로 올렸다(순수 이동, 덱 바이트 0건).
+- [x] **B-8 등록·문서** — 카탈로그 59 op · `ops_help` · `HelpCatalogData.inc` ·
+      CRLF 매트릭스(제외 아님, 보존 45) · `ofstream` 선언 · 매뉴얼 §47 · 예제 폴더.
+      커밋 `794d5ed`(공용 판정기) · `7032d6b`(op). 푸시 완료.
 
 ## ① `extract-parts` — 설계 확정 대기
 
