@@ -278,15 +278,15 @@ def main():
         rc, out = run(binary, d, "extract-parts", "j1.yaml")
         check("J-1 ★덱에 없는 PID 는 거절한다 (오타면 조용히 빈 덱이 나온다)",
               rc == 1 and "없는 PID" in out, out[-300:])
-        # 모르는 *ELEMENT_* 변형이 고른 파트의 요소를 담고 있다
+        # 모르는 *ELEMENT_* 변형이 고른 파트의 요소를 담고 있다.
+        # ⚠ `*ELEMENT_BEAM` 은 이제 **읽는다** — 그래서 여기서는 정말 모르는 변형을 쓴다.
+        #   `*ELEMENT_INERTIA` 는 보 족 5종에도 없고 카드 배치가 다르다.
         write(os.path.join(d, "beam.k"),
-              # ⚠ `*ELEMENT_*` 는 덱의 정수 칸 폭(여기서는 8)이다 — 10칸으로 쓰면 칸이 밀려
-              # PID 가 90 으로 읽히고, 그건 덱이 틀린 것이지 op 이 틀린 것이 아니다.
-              base_deck("inc_part2.k", extra=["*ELEMENT_BEAM", e8(90, 1, 1, 2, 0)]))
+              base_deck("inc_part2.k", extra=["*ELEMENT_INERTIA", e8(90, 1, 0, 0, 0)]))
         cfg(d, "j2.yaml", "model: beam.k\noutput: j2.k\nparts: [1]\n")
         rc, out = run(binary, d, "extract-parts", "j2.yaml")
         check("J-2 ★못 읽는 *ELEMENT_* 변형이 고른 파트를 담으면 거절한다",
-              rc == 1 and "*ELEMENT_BEAM" in out, out[-400:])
+              rc == 1 and "*ELEMENT_INERTIA" in out, out[-400:])
         cfg(d, "j3.yaml", "model: beam.k\noutput: j3.k\nparts: [3]\n")
         rc, out = run(binary, d, "extract-parts", "j3.yaml")
         check("J-3 안 고른 파트의 것이면 거절하지 않는다 (버리고 수로 적는다)", rc == 0, out[-300:])
@@ -304,6 +304,119 @@ def main():
         cfg(d, "j7.yaml", "model: nosuch.k\nparts: [1]\n")
         rc, out = run(binary, d, "extract-parts", "j7.yaml")
         check("J-7 없는 모델은 rc=1 로 말한다", rc == 1 and "Cannot open model" in out, out[-200:])
+
+        # ── L: ★보·질량·이산 족 5종 — 칸 자리를 **안다** ──────────────────────
+        # 매뉴얼(Vol_I R16)로 확정한 칸 배치를 그대로 못 박는다. 이 절의 요점은 '실린다' 가
+        # 아니라 **절점이 아닌 칸을 절점으로 세지 않는다** 다 — 세면 엉뚱한 절점이 영구히
+        # 남고, 번호를 다시 매길 때는 그 칸을 **덮어써 카드가 깨진다**.
+        #   BEAM     EID PID N1 N2 N3 RT1 RR1 RT2 RR2 LOCAL   → 절점은 칸 2·3·4
+        #   DISCRETE EID PID N1 N2 VID S PF OFFSET            → 절점은 칸 2·3
+        #   MASS     EID ID  MASS PID                         → 절점은 칸 1, **PID 는 칸 3**
+        #   SEATBELT EID PID N1 N2 SBRID SLEN N3 N4           → 절점이 **두 구간**(2·3, 6·7)
+        #   PLOTEL   EID N1 N2                                → **PID 칸이 없다**
+        L = ["*KEYWORD", "*NODE"]
+        for i in range(1, 9):
+            L.append(nl(i, i % 2, (i // 2) % 2, i // 4))
+        for n in (101, 102, 103, 104, 105, 106):
+            L.append(nl(n, float(n), 0.0, 0.0))
+        # ★덫: 절점이 아닌 칸에 **실제로 존재하는 절점 번호**를 넣는다.
+        #   잘못 읽으면 이 절점들이 산출 덱에 실린다.
+        L.append(nl(777, 77.0, 0.0, 0.0))     # BEAM 의 LOCAL 칸에 넣는다
+        L.append(nl(888, 88.0, 0.0, 0.0))     # SEATBELT 의 SBRID 칸에 넣는다
+        L.append(nl(999, 99.0, 0.0, 0.0))     # 아무도 안 쓴다
+        L += ["*ELEMENT_SOLID", e8(1, 1), e8(*range(1, 9))]
+        #                      EID PID  N1   N2   N3 RT1 RR1 RT2 RR2 LOCAL
+        L += ["*ELEMENT_BEAM", e8(10, 9, 101, 102, 0, 7, 7, 7, 7, 777)]
+        #                          EID PID  N1   N2  VID
+        L += ["*ELEMENT_DISCRETE", e8(11, 9, 103, 104, 0)]
+        #                      EID  ID  MASS(실수) PID    ← PID 가 칸 3 이다
+        L += ["*ELEMENT_MASS", "%8d%8d%8s%8d" % (12, 105, "0.5", 9)]
+        #                          EID PID  N1   N2 SBRID SLEN  N3  N4
+        L += ["*ELEMENT_SEATBELT", e8(13, 9, 101, 102, 888, 0, 103, 104)]
+        #                        EID  N1   N2     ← PID 가 없다
+        L += ["*ELEMENT_PLOTEL", e8(14, 101, 102)]
+        L += ["*PART", "solid part", s10(1, 1, 1), "aux part", s10(9, 9, 9)]
+        L += ["*SECTION_SOLID", s10(1, 1)]
+        L += ["*SECTION_BEAM", s10(9, 1), "       1.0       1.0"]
+        L += ["*MAT_ELASTIC", "         1  7.85E-9  210000     0.3"]
+        L += ["*MAT_ELASTIC", "         9  7.85E-9  210000     0.3", "*END"]
+        write(os.path.join(d, "aux.k"), "\n".join(L) + "\n")
+
+        cfg(d, "l.yaml", "model: aux.k\noutput: l.k\nparts: [9]\nreport: repl.json\n")
+        rc, out = run(binary, d, "extract-parts", "l.yaml")
+        rl = rep(d, "repl.json")
+        lk = open(os.path.join(d, "l.k")).read()
+        check("L-0 rc=0 — 보 족을 담은 파트도 거절하지 않는다", rc == 0, out[-500:])
+        check("L-1 다섯 족을 '칸 자리를 알고 읽었다' 로 적는다",
+              len(rl["aux_keywords_read"]) == 5, rl["aux_keywords_read"])
+        check("L-2 PID 9 의 카드 네 장을 실었다 (PLOTEL 은 PID 가 없어 따로 센다)",
+              rl["picked"]["aux_element_cards"] >= 4, rl["picked"])
+        check("L-3 ★BEAM 의 LOCAL 칸(777)을 절점으로 세지 않는다",
+              "\n     777 " not in lk, "777 이 실렸다 — LOCAL 을 절점으로 읽었다")
+        check("L-4 ★SEATBELT 의 SBRID 칸(888)을 절점으로 세지 않는다",
+              "\n     888 " not in lk, "888 이 실렸다 — SBRID 를 절점으로 읽었다")
+        check("L-5 ★MASS 의 PID 는 칸 3 이다 (칸 1 을 PID 로 읽으면 이 카드가 안 실린다)",
+              "*ELEMENT_MASS" in lk and "\n     105 " in lk, "105 또는 MASS 카드가 없다")
+        check("L-6 ★SEATBELT 의 둘째 절점 구간(N3·N4 = 103·104)도 읽는다",
+              "\n     103 " in lk and "\n     104 " in lk, "")
+        check("L-7 BEAM·DISCRETE 의 절점이 실렸다", "\n     101 " in lk and "\n     102 " in lk, "")
+        check("L-8 아무도 안 쓰는 999 는 안 실린다", "\n     999 " not in lk, "")
+        check("L-9 ★PLOTEL 은 두 절점이 다 남아서 실렸다", "*ELEMENT_PLOTEL" in lk, "")
+        check("L-10 ★되읽기 검증이 보 족까지 본다 — 미정의 0",
+              rl["verify"]["undefined_nodes"] == 0 and rl["verify"]["undefined_parts"] == 0,
+              rl["verify"])
+
+        # renumber — 절점 칸만 고치고 그 밖 칸은 바이트 그대로여야 한다
+        cfg(d, "lr.yaml", "model: aux.k\noutput: lr.k\nparts: [9]\nrenumber: true\n"
+                          "report: replr.json\n")
+        rc, out = run(binary, d, "extract-parts", "lr.yaml")
+        rlr = rep(d, "replr.json")
+        lr = open(os.path.join(d, "lr.k")).read()
+        beam = [x for x in lr.split("\n") if x.startswith("      10")]
+        check("L-11 renumber 에서도 미정의 0", rc == 0 and rlr["verify"]["undefined_nodes"] == 0,
+              rlr.get("verify"))
+        check("L-12 ★BEAM 의 LOCAL 칸(777)이 **그대로**다 (절점으로 덮어쓰지 않았다)",
+              beam and beam[0].endswith("     777"), beam[:1])
+        check("L-13 BEAM 의 절점 칸은 새 번호다 (101·102 → 1·2 꼴)",
+              beam and beam[0][16:32].strip().split() != ["101", "102"], beam[:1])
+
+        # `*ELEMENT_MASS_NODE_SET` — 칸 1 이 절점이 아니라 **세트** 라 추측하지 않는다
+        L2 = list(L)
+        L2.insert(len(L2) - 1, "*ELEMENT_MASS_NODE_SET")
+        L2.insert(len(L2) - 1, "%8d%8d%8s%8d" % (15, 500, "0.5", 9))
+        write(os.path.join(d, "auxset.k"), "\n".join(L2) + "\n")
+        cfg(d, "l2.yaml", "model: auxset.k\noutput: l2.k\nparts: [9]\n")
+        rc, out = run(binary, d, "extract-parts", "l2.yaml")
+        check("L-14 ★*ELEMENT_MASS_NODE_SET 은 거절한다 (칸 1 이 절점 세트 ID 다)",
+              rc == 1 and "MASS_NODE_SET" in out, out[-400:])
+
+        # ── M: ★옵션이 카드를 한 장 더 붙인다 (매뉴얼 Vol_I) ──────────────────
+        # `*ELEMENT_BEAM_{OPTION}` 은 옵션마다 카드 한 장, `*ELEMENT_DISCRETE_LCO` 는
+        # "a second card is read". 줄 수를 틀리면 **둘째 줄을 다음 요소의 Card 1 로 읽어**
+        # 요소가 조용히 사라지거나 엉뚱한 값이 절점으로 들어온다.
+        L3 = ["*KEYWORD", "*NODE"]
+        for n in (101, 102, 103, 104):
+            L3.append(nl(n, float(n), 0.0, 0.0))
+        #                                 EID PID  N1   N2  N3 RT.. LOCAL
+        L3 += ["*ELEMENT_BEAM_THICKNESS", e8(10, 9, 101, 102, 0, 0, 0, 0, 0, 0),
+               "       1.0       2.0       3.0       4.0       5.0"]          # Card 2(THICKNESS)
+        L3 += ["*ELEMENT_DISCRETE_LCO", e8(11, 9, 103, 104, 0),
+               e8(7, 0, 0, 0)]                                               # Card 2(LCO)
+        L3 += ["*PART", "aux", s10(9, 9, 9), "*SECTION_BEAM", s10(9, 1),
+               "*MAT_ELASTIC", "         9  7.85E-9  210000     0.3", "*END"]
+        write(os.path.join(d, "opt.k"), "\n".join(L3) + "\n")
+        cfg(d, "m.yaml", "model: opt.k\noutput: m.k\nparts: [9]\nreport: repm.json\n")
+        rc, out = run(binary, d, "extract-parts", "m.yaml")
+        rm_ = rep(d, "repm.json")
+        mk = open(os.path.join(d, "m.k")).read()
+        check("M-0 rc=0 · 미정의 0", rc == 0 and rm_["verify"]["undefined_nodes"] == 0,
+              (rc, rm_.get("verify")))
+        check("M-1 ★두 장짜리 카드를 **통째로** 싣는다 (THICKNESS Card 2)",
+              "       1.0       2.0       3.0       4.0       5.0" in mk, "")
+        check("M-2 ★LCO Card 2 도 함께 싣는다", "\n       7       0       0       0" in mk, "")
+        check("M-3 ★Card 2 의 값(7)을 절점으로 세지 않는다 — 절점은 네 개뿐이다",
+              rm_["picked"]["nodes"] == 4, rm_["picked"])
+        check("M-4 카드 두 장을 셌다", rm_["picked"]["aux_element_cards"] == 2, rm_["picked"])
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

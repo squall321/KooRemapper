@@ -4841,9 +4841,13 @@ KooRemapper cleanup-nodes <config.yaml>
 (§46 과 같은 교훈이다. 사본이 갈리면 한쪽이 '연결 줄' 로 본 줄을 다른 쪽이 'Card 1' 로 읽어
 **쓰이는 절점을 지운다**). 회귀 E-1·E-2 가 20절점 육면체로 그 자리를 지킨다.
 
-★`*ELEMENT_*` 중 줄 수를 모르는 변종(보·이산·질량·안전벨트)은 **칸 0(EID)만 빼고 전부
-절점으로 본다.** `*ELEMENT_MASS` 는 칸 1 이 NID 라서 '칸 1 은 PID' 로 뭉개면 질량을 든
-절점을 지운다. 모르는 변종은 `element_keywords_opaque` 에 적는다.
+★`*ELEMENT_*` 중 **보 족 다섯**(BEAM·DISCRETE·MASS·SEATBELT·PLOTEL)은 **칸 자리를 안다**
+(§48.7) — 그래서 보의 `RT1`·`LOCAL` 이나 안전벨트의 `SBRID` 를 절점으로 세지 않는다. 그 칸과
+번호가 같은 고아 절점이 영구히 남던 것이 그 때문이었다(회귀 L-2 가 그 자리를 지킨다).
+
+그 밖에 **아직도 줄 수를 모르는** 변형(`*ELEMENT_MASS_NODE_SET`·`*ELEMENT_INERTIA` 등)은
+**칸 0(EID)만 빼고 전부 절점으로 본다** — 과포함이 안전한 방향이다. 그 키워드를
+`element_keywords_opaque` 에 적는다.
 
 ### 47.8 `*SET_NODE_*` 변종
 
@@ -4912,6 +4916,8 @@ PID 나 **제목 와일드카드**로 고른 파트만 담은 덱을 쓴다. ID�
 | `*DATABASE_HISTORY_*` | **버린다** — 절점·요소 ID 를 담는다 |
 | `*NODE` | 고른 파트의 요소가 쓰는 줄만 |
 | `*ELEMENT_{SOLID,SHELL,TSHELL}` | 고른 PID 의 카드만(카드 전체 줄) |
+| `*ELEMENT_{BEAM,DISCRETE,MASS,SEATBELT}` | 고른 PID 의 카드만 — **PID 칸이 족마다 다르다**(§48.7) |
+| `*ELEMENT_PLOTEL` | PID 가 없다 — **두 절점이 다 남았을 때만** 싣는다 |
 | 그 밖 `*ELEMENT_*` | 고른 파트를 담으면 **거절**, 아니면 버리고 센다 |
 | `*PART` · `*PART_TITLE` | 고른 쌍만 |
 | 그 밖 `*PART_*` | 고른 PID 가 보이면 **통째로** 싣고 센다 |
@@ -4928,8 +4934,12 @@ LS-DYNA 에서 쓰지 않는 재질은 무해하고, 쪼개려면 재질 종류�
 그 지식이 없으므로 **과포함하고 수로 적는다**(`carried_whole`).
 
 ★줄 수를 모르는 `*ELEMENT_*` 변형이 **고른 파트의** 요소를 담으면 **거절한다.** 조용히
-빠뜨린 덱은 그럴듯하게 돌면서 틀리고, 그게 가장 나쁜 결과다. 지금 읽을 수 있는 것은
-`*ELEMENT_SOLID`·`*ELEMENT_SHELL`·`*ELEMENT_TSHELL` 뿐이다(`ElementCardLayout` 소관).
+빠뜨린 덱은 그럴듯하게 돌면서 틀리고, 그게 가장 나쁜 결과다. 읽을 수 있는 것은 격자 3족
+(`SOLID`·`SHELL`·`TSHELL`)과 **보 족 5종**(§48.7)이다.
+
+⚠ 그 판정은 **PID 칸을 1 로 가정하지 않는다.** 족은 알고 줄 수만 모르는 경우가 있고
+(`*ELEMENT_MASS_NODE_SET` 은 PID 가 칸 **3**), 1 로 가정하면 그 카드가 '안 고른 파트' 로
+분류돼 **조용히 버려진다** — 실측으로 회귀 L-14 가 그것을 잡았다.
 
 ### 48.4 ID 보존 — 줄을 **다시 쓰지 않는다**
 
@@ -4963,6 +4973,45 @@ LS-DYNA 에서 쓰지 않는 재질은 무해하고, 쪼개려면 재질 종류�
 
 `include.sets: none` 으로 전부 뺄 수 있지만, 그러면 세트를 쓰는 카드가 깨진다 — 그 판단은
 사용자의 몫이고 리포트가 수를 적는다.
+
+### 48.7 보 족 다섯 — 같은 판정기의 **별도 축**이다 (2026-10-11)
+
+`*ELEMENT_BEAM`·`DISCRETE`·`MASS`·`SEATBELT`·`PLOTEL` 의 칸 배치를
+`include/parser/ElementCardLayout.h` 의 `auxElementCard` 에 매뉴얼 근거로 넣었다.
+
+| 족 | Card 1 변수 | 절점 칸 | PID 칸 | 추가 카드 |
+|---|---|---|---|---|
+| `BEAM` | `EID PID N1 N2 N3 RT1 RR1 RT2 RR2 LOCAL` | 2·3·4 | 1 | 옵션마다 1장 |
+| `DISCRETE` | `EID PID N1 N2 VID S PF OFFSET` | 2·3 | 1 | `_LCO` 면 1장 |
+| `MASS` | `EID ID MASS PID` | **1** | **3** | 없음 |
+| `SEATBELT` | `EID PID N1 N2 SBRID SLEN N3 N4` | 2·3 **와** 6·7 | 1 | 없음 |
+| `PLOTEL` | `EID N1 N2` | 1·2 | **없음** | 없음 |
+
+★절점 칸 **개수**까지 적는 이유 — '칸 2부터 끝까지' 로 뭉개면 보의 `RT1`·`RR1`·`LOCAL` 과
+안전벨트의 `SBRID`·`SLEN` 이 절점이 된다. 세기만 하면 과포함(안전한 방향)이지만, **번호를
+다시 매길 때는 그 칸을 덮어써 카드가 깨진다.** 회귀 L-3·L-4·L-12 가 그 셋을 각각 지킨다.
+
+★`*ELEMENT_SEATBELT_*`(ACCELEROMETER·PRETENSIONER·RETRACTOR·SENSOR·SLIPRING)는 옵션이 아니라
+**다른 키워드**다 — 칸 배치가 통째로 다르므로 추측하지 않고 미지원으로 둔다.
+`*ELEMENT_MASS_NODE_SET` 도 미지원이다: 칸 1 이 절점이 아니라 **절점 세트 ID** 라서, 절점으로
+읽으면 엉뚱한 절점을 지키고 세트 멤버는 놓친다.
+
+#### 왜 `ElemFamily` 를 넓히지 않았나
+
+`ElemFamily`(격자 3족)를 보 족까지 넓히면 **그 값을 보는 소비자 셋이 조용히 바뀐다.**
+
+| 소비자 | 넓혔을 때 |
+|---|---|
+| `ModelAssembler::ecBuildIndex` | `famOf` 가 `'S'`/`'H'`/**`'T'`(그 밖 전부)** 라서 보가 **티쉘로 거짓 분류**되고, `countByPid` 가 보·질량까지 세어 **파트 요소 수가 바뀐다** |
+| `KFileReader` | 섹션별 카드 줄 수로 요소를 읽는다 |
+| `cnrb2spring` | `supported`/`extraCards` 로 거절을 판정한다 |
+
+그 셋은 격자만 다루면 된다. 그래서 지식은 **한 파일에 모으되**(사본을 만들지 않는다) 축을
+갈라, `cleanup-nodes`·`extract-parts` 만 `auxElementCard` 를 묻는다. 두 판정기는 **배타적**이다 —
+격자 족이면 `auxElementCard` 가 `NONE` 을 돌려준다.
+
+실측으로 확인했다: 이 변경 뒤 `test_roundtrip_bytes` **46 변형 통과·실패 0**(덱 바이트 불변),
+요소 관련 회귀 8개 전수 통과. 즉 기존 소비자는 **하나도** 영향을 받지 않았다.
 
 ### 48.6 카드 줄 수는 `elementCardSpan` 에서 온다
 

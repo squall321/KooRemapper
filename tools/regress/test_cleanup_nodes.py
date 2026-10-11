@@ -348,6 +348,53 @@ def main():
         write(os.path.join(d, "k3.yaml"), "model: trap.k\n\treport: x.json\n")
         rc, out = run(binary, d, "cleanup-nodes", "k3.yaml")
         check("K-3 탭 들여쓰기를 거른다", rc == 1 and "cleanup-nodes" in out, out[-200:])
+
+        # ── L: ★보 족의 **절점이 아닌 칸**을 참조로 세지 않는다 ────────────────
+        # 공용 판정기(`auxElementCard`)가 매뉴얼 근거로 칸 자리를 안다. 그 전에는 `*ELEMENT_*`
+        # 변형의 정수를 **전부** 절점으로 세서, 보의 LOCAL 칸이나 안전벨트의 SBRID 칸과 번호가
+        # 같은 고아 절점이 **영구히 남았다**(과포함은 안전한 방향이지만, 알 수 있으면 아는 게 낫다).
+        L = ["*KEYWORD", "*NODE"]
+        for i, (x, y, z) in enumerate(CUBE, start=1):
+            L.append(nodeline(i, x, y, z))
+        for n in (101, 102):
+            L.append(nodeline(n, float(n), 0.0, 0.0))
+        L.append(nodeline(777, 77.0, 0.0, 0.0))     # BEAM 의 LOCAL 칸 번호와 같다
+        L.append(nodeline(888, 88.0, 0.0, 0.0))     # SEATBELT 의 SBRID 칸 번호와 같다
+        e8 = lambda *v: "".join("%8d" % n for n in v)
+        s10 = lambda *v: "".join("%10d" % n for n in v)
+        L += ["*ELEMENT_SOLID", e8(1, 1), e8(*range(1, 9))]
+        #                      EID PID  N1   N2   N3 RT1 RR1 RT2 RR2 LOCAL
+        L += ["*ELEMENT_BEAM", e8(10, 9, 101, 102, 0, 7, 7, 7, 7, 777)]
+        #                          EID PID  N1   N2 SBRID SLEN N3 N4
+        L += ["*ELEMENT_SEATBELT", e8(13, 9, 101, 102, 888, 0, 0, 0)]
+        L += ["*PART", "solid", s10(1, 1, 1), "aux", s10(9, 9, 9),
+              "*SECTION_SOLID", s10(1, 1), "*SECTION_BEAM", s10(9, 1),
+              "*MAT_ELASTIC", "         1  7.85E-9  210000     0.3", "*END"]
+        write(os.path.join(d, "aux.k"), "\n".join(L) + "\n")
+        cfg(d, "l.yaml", model="aux.k", report="rl.json")
+        rc, out = run(binary, d, "cleanup-nodes", "l.yaml")
+        rl = report(d, "rl.json")
+        check("L-0 rc=0", rc == 0, out[-300:])
+        check("L-1 보 족의 절점(101·102)은 요소 참조로 센다",
+              rl["nodes"]["used_by_elements"] == 10, rl["nodes"])
+        check("L-2 ★LOCAL(777)·SBRID(888) 은 절점이 **아니다** → 삭제 가능 2개",
+              rl["nodes"]["deletable"] == 2, rl["nodes"])
+        check("L-3 그래서 '모르는 키워드가 살렸다' 목록에 보 족이 없다",
+              not any("BEAM" in x["keyword"] or "SEATBELT" in x["keyword"]
+                      for x in rl["unknown_keyword_kept"]), rl["unknown_keyword_kept"])
+        check("L-4 '줄 수를 모르는 *ELEMENT_*' 목록도 비었다",
+              rl["element_keywords_opaque"] == [], rl["element_keywords_opaque"])
+
+        # 지운 뒤 되읽기 검증이 보 족까지 본다
+        cfg(d, "l2.yaml", model="aux.k", output="auxclean.k", mode="safe", report="rl2.json")
+        rc, out = run(binary, d, "cleanup-nodes", "l2.yaml")
+        rl2 = report(d, "rl2.json")
+        check("L-5 쓰고 나서도 미정의 0", rc == 0 and rl2["verify"]["undefined_by_elements"] == 0,
+              rl2.get("verify"))
+        ac = open(os.path.join(d, "auxclean.k")).read()
+        check("L-6 보 족이 쓰는 절점은 남았다", "\n     101 " in ac and "\n     102 " in ac, "")
+        check("L-7 LOCAL·SBRID 와 번호가 같던 고아는 지워졌다",
+              "\n     777 " not in ac and "\n     888 " not in ac, "")
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

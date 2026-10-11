@@ -223,6 +223,9 @@ void scanRefsStream(std::istream& in, const std::string& baseDir, bool isMain, c
     int cardRemaining = 0, cardLineIdx = 0;
     std::vector<std::string> card1;
     bool elemOpaque = false;
+    // 보·질량·이산 족 — 공용 판정기의 **별도 축**이 칸 자리를 안다(헤더의 인용 참조).
+    KooRemapper::AuxElementCard aux;
+    int auxRemaining = 0, auxLineIdx = 0;
     SetKind setKind = SetKind::LIST;
     int setSid = 0, setDataIdx = 0, setTitleN = 0;
     bool setIncrement = false;
@@ -267,6 +270,8 @@ void scanRefsStream(std::istream& in, const std::string& baseDir, bool isMain, c
             if (starts(kw, "*ELEMENT")) {
                 info = KooRemapper::parseElementKeyword(line);
                 elemOpaque = (info.family == KooRemapper::ElemFamily::NONE || !info.supported);
+                aux = elemOpaque ? KooRemapper::auxElementCard(line) : KooRemapper::AuxElementCard();
+                auxRemaining = 0;
                 mode = Mode::ELEM;
                 continue;
             }
@@ -303,9 +308,31 @@ void scanRefsStream(std::istream& in, const std::string& baseDir, bool isMain, c
             const bool comment = (g != std::string::npos && line[g] == '$');
             if (comment) continue;
             if (g == std::string::npos && cardRemaining == 0) continue;   // 카드 밖의 빈 줄
+            if (elemOpaque && aux.supported) {
+                // ★보·질량·이산 족은 **칸 자리를 안다** — 추측하지 않는다.
+                //   그래서 `*ELEMENT_BEAM` 의 RT1·RR1·LOCAL 이나 `*ELEMENT_SEATBELT` 의
+                //   SBRID·SLEN 을 절점으로 세지 않는다(그것들을 절점으로 세면 엉뚱한 낮은
+                //   번호 절점이 영구히 남는다).
+                if (auxRemaining == 0) { auxLineIdx = 0; auxRemaining = aux.lines; }
+                if (auxLineIdx == 0) {
+                    auto f = cardFields(line, fw);
+                    auto take = [&](int from, int cnt) {
+                        if (from < 0) return;
+                        for (int q = 0; q < cnt; ++q) {
+                            int v = fieldInt(f, (size_t)(from + q));
+                            if (v > 0) sc.byElement.push_back(v);
+                        }
+                    };
+                    take(aux.nodeSkip, aux.nodeCount);
+                    take(aux.nodeSkip2, aux.nodeCount2);
+                }
+                ++auxLineIdx;
+                if (--auxRemaining <= 0) auxRemaining = 0;
+                continue;
+            }
             if (elemOpaque) {
-                // 우리가 줄 수를 모르는 `*ELEMENT_*` — **칸 0(EID) 만** 빼고 전부 절점으로 본다.
-                // `*ELEMENT_MASS` 는 칸 1 이 NID 라 칸 1 을 빼면 질량을 든 절점을 지운다.
+                // 아직도 모르는 `*ELEMENT_*` 변형 — **칸 0(EID) 만** 빼고 전부 절점으로 본다.
+                // (`*ELEMENT_MASS_NODE_SET` 처럼 칸 뜻이 갈리는 변형이 여기 온다.)
                 std::vector<int> v;
                 harvestInts(line, v);
                 auto f = cardFields(line, fw);

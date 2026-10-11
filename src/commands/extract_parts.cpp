@@ -190,6 +190,8 @@ struct Picked {
     std::vector<int> allElems;              // 세 가지 합집합(전역 번호 다시 매길 때)
     bool elemIdCollision = false;           // 종류가 달라도 EID 가 겹친다
     long long cards = 0;
+    long long auxCards = 0;                               // 보·질량·이산 족에서 고른 카드
+    std::vector<std::string> auxKws;                      // 그 중 **칸 자리를 아는** 키워드
     std::map<std::string, long long> opaqueElemTouched;   // 못 읽는 변형이 고른 파트를 담았다
     std::map<std::string, long long> opaqueElemOther;     // 담지 않았다(그냥 버린다)
 };
@@ -209,6 +211,11 @@ void scanElements(const std::string& path, const std::vector<int>& sel, const De
     int remaining = 0, lineIdx = 0;
     std::vector<std::string> card1;
     bool inElem = false, opaque = false, picked = false, inInclude = false;
+    // 보·질량·이산 족 — 공용 판정기의 별도 축이 칸 자리를 안다(ElementCardLayout.h 의 인용).
+    KooRemapper::AuxElementCard aux;
+    int auxRemaining = 0, auxLineIdx = 0;
+    bool auxPicked = false;
+    std::vector<std::string> auxCard1;
 
     while (std::getline(in, line)) {
         size_t g = line.find_first_not_of(" \t\r\n");
@@ -222,6 +229,11 @@ void scanElements(const std::string& path, const std::vector<int>& sel, const De
             if (inElem) {
                 info = KooRemapper::parseElementKeyword(line);
                 opaque = (info.family == KooRemapper::ElemFamily::NONE || !info.supported);
+                aux = opaque ? KooRemapper::auxElementCard(line) : KooRemapper::AuxElementCard();
+                auxRemaining = 0;
+                if (aux.supported &&
+                    std::find(pk.auxKws.begin(), pk.auxKws.end(), kw) == pk.auxKws.end())
+                    pk.auxKws.push_back(kw);
             }
             continue;
         }
@@ -237,11 +249,44 @@ void scanElements(const std::string& path, const std::vector<int>& sel, const De
         if (g != std::string::npos && line[g] == '$') continue;
         if (g == std::string::npos && remaining == 0) continue;     // 카드 밖의 빈 줄
 
+        if (opaque && aux.supported) {
+            // ★칸 자리를 **안다** — PID 칸도 족마다 다르다(`*ELEMENT_MASS` 는 칸 3).
+            //   `*ELEMENT_PLOTEL` 은 PID 가 없어 여기서 고르지 않고, 쓰기 쪽이 '두 절점이 다
+            //   남았나' 로 판정한다(그 줄은 표시용이고 파트에 속하지 않는다).
+            if (auxRemaining == 0) {
+                auxCard1 = cardFields(line, fw);
+                auxLineIdx = 0;
+                auxRemaining = aux.lines;
+                const int pid = (aux.partField >= 0) ? fieldInt(auxCard1, (size_t)aux.partField) : 0;
+                auxPicked = aux.hasPart && pid > 0 && inSorted(sel, pid);
+                if (auxPicked) ++pk.auxCards;
+            }
+            if (auxLineIdx == 0 && auxPicked) {
+                auto take = [&](int from, int cnt) {
+                    if (from < 0) return;
+                    for (int q = 0; q < cnt; ++q) {
+                        int v = fieldInt(auxCard1, (size_t)(from + q));
+                        if (v > 0) pk.nodes.push_back(v);
+                    }
+                };
+                take(aux.nodeSkip, aux.nodeCount);
+                take(aux.nodeSkip2, aux.nodeCount2);
+            }
+            ++auxLineIdx;
+            if (--auxRemaining <= 0) auxRemaining = 0;
+            continue;
+        }
         if (opaque) {
-            // 줄 수를 모르니 카드로 묶을 수 없다. 칸 1(PID)만 보고 **고른 파트를 담았는지**
-            // 판정한다 — 담았으면 거절해야 한다(조용히 빠뜨린 덱이 더 나쁘다).
+            // 아직도 줄 수를 모르는 변형. **고른 파트를 담았는지**만 판정한다 — 담았으면
+            // 거절해야 한다(조용히 빠뜨린 덱이 더 나쁘다).
+            //
+            // ⚠ PID 칸을 1 로 **가정하면 안 된다.** 족은 알고 줄 수만 모르는 경우가 있고
+            //   (`*ELEMENT_MASS_NODE_SET` 은 PID 가 칸 **3** 이다), 1 로 가정하면 그 카드가
+            //   '안 고른 파트' 로 분류돼 **조용히 버려진다**(실측으로 회귀 L-14 가 잡았다).
             auto f = cardFields(line, fw);
-            int pid = fieldInt(f, 1);
+            const int pf = (aux.family != KooRemapper::AuxFamily::NONE && aux.partField >= 0)
+                               ? aux.partField : 1;
+            int pid = fieldInt(f, (size_t)pf);
             if (pid > 0 && inSorted(sel, pid)) ++pk.opaqueElemTouched[kw];
             else                               ++pk.opaqueElemOther[kw];
             continue;
@@ -342,11 +387,12 @@ struct WriteStats {
     std::vector<int> setsDropped;                   // 못 자르는 변형의 SID
     std::map<std::string, long long> carriedWhole;  // 통째로 실은 ID 블록(과포함)
     long long includesInlined = 0;                  // 펼친 `*INCLUDE` 파일 수
+    long long auxCards = 0;                         // 보·질량·이산 족에서 실은 카드
 };
 
-enum class Act { VERBATIM, NODE, ELEM, PART, PART_VARIANT, IDBLOCK, SETS, DROP };
+enum class Act { VERBATIM, NODE, ELEM, ELEM_AUX, PART, PART_VARIANT, IDBLOCK, SETS, DROP };
 
-Act classify(const std::string& kw, const Opts& o, bool elemSupported) {
+Act classify(const std::string& kw, const Opts& o, bool elemSupported, bool auxSupported) {
     if (kw == "*KEYWORD" || kw == "*TITLE" || kw == "*END" || starts(kw, "*PARAMETER") ||
         starts(kw, "*COMMENT") || starts(kw, "*CONTROL"))
         return Act::VERBATIM;
@@ -354,7 +400,8 @@ Act classify(const std::string& kw, const Opts& o, bool elemSupported) {
     // 가리킨다. 그 밖의 `*DATABASE_` 는 순수 설정이라 그대로 싣는다.
     if (starts(kw, "*DATABASE")) return has(kw, "_HISTORY") ? Act::DROP : Act::VERBATIM;
     if (kw == "*NODE") return o.incNodes ? Act::NODE : Act::DROP;
-    if (starts(kw, "*ELEMENT")) return elemSupported ? Act::ELEM : Act::DROP;
+    if (starts(kw, "*ELEMENT"))
+        return elemSupported ? Act::ELEM : (auxSupported ? Act::ELEM_AUX : Act::DROP);
     if (kw == "*PART" || kw == "*PART_TITLE") return Act::PART;
     if (starts(kw, "*PART")) return Act::PART_VARIANT;
     if (starts(kw, "*SECTION")) return o.incSections ? Act::IDBLOCK : Act::DROP;
@@ -407,9 +454,11 @@ struct Writer {
     Act act = Act::VERBATIM;
     KooRemapper::ElementKeywordInfo info;
     KooRemapper::ElementCardSpan span;
+    KooRemapper::AuxElementCard aux;
     int remaining = 0, lineIdx = 0;
     bool picked = false;
     std::vector<std::string> card1;
+    std::vector<std::string> auxBuf;      // 보 족 카드 한 장(줄 수가 2 이상일 수 있다)
     std::vector<std::string> buf;
     std::vector<size_t> cardIdx;
     // 하나도 안 실은 `*NODE`·`*ELEMENT_*` 블록은 키워드 줄도 내지 않는다 — 빈 블록은 소음이고,
@@ -527,15 +576,20 @@ struct Writer {
     void onKeyword(const std::string& line) {
         flushBlock();
         remaining = 0;
+        auxBuf.clear();
         kwLine = line;
         kw = kwBare(keywordToken(line));
         fw = KooRemapper::keywordFieldWidth(line, idx.fieldWidth);
-        bool supported = false;
+        bool supported = false, auxOk = false;
         if (starts(kw, "*ELEMENT")) {
             info = KooRemapper::parseElementKeyword(line);
             supported = (info.family != KooRemapper::ElemFamily::NONE && info.supported);
+            if (!supported) {
+                aux = KooRemapper::auxElementCard(line);
+                auxOk = aux.supported;
+            }
         }
-        act = classify(kw, o, supported);
+        act = classify(kw, o, supported, auxOk);
         if (act == Act::SETS) {
             subj = setSubject(kw);
             const auto sk = KooRemapper::deckscan::classifySetNode(kw);   // 변형 규칙은 같다
@@ -554,7 +608,8 @@ struct Writer {
             return;
         }
         if (act == Act::VERBATIM) *out << line << "\n";
-        else if (act == Act::NODE || act == Act::ELEM) pendingKw = line;   // 첫 줄이 실릴 때 낸다
+        else if (act == Act::NODE || act == Act::ELEM || act == Act::ELEM_AUX)
+            pendingKw = line;                                 // 첫 줄이 실릴 때 낸다
         else if (act == Act::DROP) st.dropped[kw] += 1;
     }
 
@@ -628,6 +683,51 @@ struct Writer {
                                 }
                             }
                         }
+                    }
+                    emitLine(o2);
+                }
+                ++lineIdx;
+                if (--remaining <= 0) remaining = 0;
+                break;
+            }
+            case Act::ELEM_AUX: {
+                // 보·질량·이산 족. 칸 자리는 공용 판정기가 알고, **PID 칸도 족마다 다르다**.
+                if (g != std::string::npos && line[g] == '$') break;
+                if (g == std::string::npos && remaining == 0) break;
+                if (remaining == 0) {
+                    card1 = cardFields(line, fw);
+                    lineIdx = 0;
+                    remaining = aux.lines;
+                    if (aux.hasPart) {
+                        const int pid = (aux.partField >= 0)
+                                            ? fieldInt(card1, (size_t)aux.partField) : 0;
+                        picked = (pid > 0 && inSorted(sel, pid));
+                    } else {
+                        // PID 칸이 없다(`*ELEMENT_PLOTEL`) — 표시용이고 파트에 속하지 않는다.
+                        // **두 절점이 다 남았을 때만** 싣는다(한쪽만 남은 선은 선이 아니다).
+                        picked = (aux.nodeCount > 0);
+                        for (int q = 0; q < aux.nodeCount; ++q) {
+                            const int v = fieldInt(card1, (size_t)(aux.nodeSkip + q));
+                            if (v <= 0 || !inSorted(pk.nodes, v)) { picked = false; break; }
+                        }
+                    }
+                    if (picked) ++st.auxCards;
+                }
+                if (picked) {
+                    std::string o2 = line;
+                    // ⚠ 번호를 다시 매길 때 **절점 칸만** 고친다. 보의 RT1·RR1·LOCAL 이나
+                    //   안전벨트의 SBRID·SLEN 을 같이 고치면 카드가 깨진다. 요소 ID 는
+                    //   건드리지 않는다 — 번호 표는 격자 요소만 담는다(족별로 번호가 따로다).
+                    if (rm.on && lineIdx == 0) {
+                        auto put = [&](int from, int cnt) {
+                            if (from < 0) return;
+                            for (int q = 0; q < cnt; ++q) {
+                                const int v = fieldInt(card1, (size_t)(from + q));
+                                if (v > 0) putField(o2, fw, (size_t)(from + q), rm.node(v));
+                            }
+                        };
+                        put(aux.nodeSkip, aux.nodeCount);
+                        put(aux.nodeSkip2, aux.nodeCount2);
                     }
                     emitLine(o2);
                 }
@@ -779,6 +879,10 @@ Verify verifyOutput(const std::string& path) {
     int remaining = 0, lineIdx = 0, dataIdx = 0;
     bool inElem = false, opaque = false;
     std::vector<std::string> card1;
+    // ★보·질량·이산 족도 검증한다. 안 하면 실은 보가 **없는 절점**을 가리켜도 통과하고,
+    //   "되읽어 증명한다" 가 거짓이 된다.
+    KooRemapper::AuxElementCard vaux;
+    int vAuxRemaining = 0, vAuxLineIdx = 0;
     while (std::getline(in, line)) {
         while (!line.empty() && line.back() == '\r') line.pop_back();
         size_t g = line.find_first_not_of(" \t");
@@ -791,7 +895,33 @@ Verify verifyOutput(const std::string& path) {
             if (inElem) {
                 info = KooRemapper::parseElementKeyword(line);
                 opaque = (info.family == KooRemapper::ElemFamily::NONE || !info.supported);
+                vaux = opaque ? KooRemapper::auxElementCard(line) : KooRemapper::AuxElementCard();
+                vAuxRemaining = 0;
             }
+            continue;
+        }
+        if (inElem && opaque && vaux.supported) {
+            if (g != std::string::npos && line[g] == '$') continue;
+            if (g == std::string::npos && vAuxRemaining == 0) continue;
+            if (vAuxRemaining == 0) { vAuxLineIdx = 0; vAuxRemaining = vaux.lines; }
+            if (vAuxLineIdx == 0) {
+                auto f = cardFields(line, fw);
+                if (vaux.partField >= 0) {
+                    const int pid = fieldInt(f, (size_t)vaux.partField);
+                    if (pid > 0) elemPids.push_back(pid);
+                }
+                auto take = [&](int from, int cnt) {
+                    if (from < 0) return;
+                    for (int q = 0; q < cnt; ++q) {
+                        const int v = fieldInt(f, (size_t)(from + q));
+                        if (v > 0) elemNodes.push_back(v);
+                    }
+                };
+                take(vaux.nodeSkip, vaux.nodeCount);
+                take(vaux.nodeSkip2, vaux.nodeCount2);
+            }
+            ++vAuxLineIdx;
+            if (--vAuxRemaining <= 0) vAuxRemaining = 0;
             continue;
         }
         if (inElem) {
@@ -1056,7 +1186,9 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
     { std::set<std::string> vis; scanElements(o.model, sel, idx, pidNodes, pk, vis); }
     if (idx.fieldWidth != 8)
         console.info("  deck field width: " + std::to_string(idx.fieldWidth));
-    if (pk.cards == 0) {
+    // ⚠ 보·질량·이산 족도 센다. 격자 카드만 세면 **보만으로 된 파트**(볼트·용접점 묶음)가
+    //   "요소가 없다" 로 거절된다 — 회귀 L-0 이 그 자리를 지킨다.
+    if (pk.cards == 0 && pk.auxCards == 0) {
         console.error("고른 파트에 요소가 없다 — PID 는 맞는데 그 파트의 요소를 못 읽었다는 뜻이다");
         return 1;
     }
@@ -1067,11 +1199,15 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
             console.error(kv.first + " 가 고른 파트의 요소 " + std::to_string(kv.second) +
                           " 줄을 담고 있는데 이 op 은 그 카드의 줄 수를 모른다 — "
                           "조용히 빠뜨리지 않기 위해 거절한다");
-        console.info("지금 읽을 수 있는 것은 *ELEMENT_SOLID · *ELEMENT_SHELL · *ELEMENT_TSHELL 뿐이다");
+        console.info("읽을 수 있는 것은 격자 3족(*ELEMENT_SOLID·SHELL·TSHELL)과 "
+                     "보 족 5종(*ELEMENT_BEAM·DISCRETE·MASS·SEATBELT·PLOTEL)이다");
         return 1;
     }
     console.info("  element cards: " + std::to_string(pk.cards) +
+                 (pk.auxCards > 0 ? " (+보·질량·이산 " + std::to_string(pk.auxCards) + ")" : "") +
                  "  nodes: " + std::to_string(pk.nodes.size()));
+    for (const auto& k : pk.auxKws)
+        console.info("    " + k + " — 칸 자리를 알고 읽었다(추측이 아니다)");
 
     Needed nd;
     for (int p : sel) {
@@ -1203,6 +1339,7 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
            << ", \"materials\": " << (o.incMaterials ? "true" : "false")
            << ", \"sections\": " << (o.incSections ? "true" : "false") << "},\n";
         jf << "  \"picked\": {\"element_cards\": " << pk.cards
+           << ", \"aux_element_cards\": " << st.auxCards
            << ", \"nodes\": " << pk.nodes.size()
            << ", \"node_lines_written\": " << st.nodeLines
            << ", \"parts_emitted\": " << st.partsEmitted << "},\n";
@@ -1212,6 +1349,10 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
            << ", \"hourglass\": " << intList(nd.hgids) << "},\n";
         jf << "  \"sets_trimmed\": " << kwMap(st.setsTrimmed) << ",\n";
         jf << "  \"sets_dropped_sids\": " << intList(st.setsDropped) << ",\n";
+        jf << "  \"aux_keywords_read\": [";
+        for (size_t i = 0; i < pk.auxKws.size(); ++i)
+            jf << (i ? ", " : "") << jsonStr(pk.auxKws[i]);
+        jf << "],\n";
         jf << "  \"carried_whole\": " << kwMap(st.carriedWhole) << ",\n";
         jf << "  \"part_variant_blocks_carried_whole\": " << st.partVariantBlocks << ",\n";
         jf << "  \"dropped_keywords\": " << kwMap(st.dropped) << ",\n";

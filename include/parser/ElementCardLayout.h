@@ -66,6 +66,51 @@ int keywordFieldWidth(const std::string& keywordLine, int deckFw);
 // 같은 카드의 실수 칸 폭 — 표준·i10 은 16, long 은 20 (19345, 19348, 19360).
 int realFieldWidth(int intFw);
 
+// ── 보·질량·이산 족 — **격자 요소가 아닌** `*ELEMENT_*` ──────────────────────
+//
+// 왜 `ElemFamily` 를 넓히지 않고 **별도 축**인가 (2026-10-11).
+//   `ElemFamily` 는 격자(솔리드·셸·티쉘)를 뜻하고, 그 값을 보는 소비자가 셋 더 있다.
+//     · `ModelAssembler::ecBuildIndex` — `famOf` 를 'S'/'H'/**'T'(그 밖 전부)** 로 적고
+//       `countByPid` 를 센다. 보를 끼우면 보가 **티쉘로 거짓 분류**되고 파트 요소 수가 바뀐다.
+//     · `KFileReader` — 섹션별 카드 줄 수로 요소를 읽는다.
+//     · `cnrb2spring` — `supported`/`extraCards` 로 거절을 판정한다.
+//   그 셋은 격자만 다루면 되고, 넓히면 **조용히** 동작이 바뀐다. 그래서 지식은 이 한 파일에
+//   모으되(사본을 만들지 않는다) 축을 갈라, `cleanup-nodes`·`extract-parts` 만 이쪽을 묻는다.
+//
+// 근거: Vol_I (R16@e545952c7 03/21/25)
+//   *ELEMENT_BEAM     : `*ELEMENT_BEAM_{OPTION}_{OPTION}`, 옵션마다 카드 **한 장**씩
+//                       (THICKNESS/SCALAR/SCALR/SECTION/PID/OFFSET/ORIENTATION/WARPAGE/ELBOW).
+//                       Card 1 = EID PID N1 N2 N3 RT1 RR1 RT2 RR2 LOCAL → 절점은 칸 2·3·4 **셋만**.
+//   *ELEMENT_DISCRETE : Card 1 = EID PID N1 N2 VID S PF OFFSET → 절점은 칸 2·3.
+//                       `_LCO` 는 "a second card is read" → +1 장.
+//   *ELEMENT_MASS     : Card 1 = EID ID MASS PID → 절점은 칸 **1** 하나.
+//                       ⚠ `_NODE_SET` 변형은 그 칸이 **절점 세트 ID** 다 — 절점으로 읽으면
+//                         엉뚱한 절점을 지키고 세트 멤버는 놓친다. 그래서 **미지원**으로 둔다.
+//   *ELEMENT_SEATBELT : Card 1 = EID PID N1 N2 SBRID SLEN N3 N4 → 절점이 **두 구간**이다
+//                       (칸 2·3 과 칸 6·7). 사이의 SBRID·SLEN 을 절점으로 읽으면 번호를 다시
+//                       매길 때 그 칸을 **덮어써 카드가 깨진다**.
+//   *ELEMENT_PLOTEL   : Card 1 = EID N1 N2 → **PID 칸이 없다**. 'PID 는 칸 1' 로 뭉개면
+//                       N1 을 파트로 읽는다.
+enum class AuxFamily { NONE, BEAM, DISCRETE, MASS, SEATBELT, PLOTEL };
+
+struct AuxElementCard {
+    AuxFamily family = AuxFamily::NONE;
+    std::string keyword;
+    int  lines = 1;            // 카드 한 장의 데이터 줄 수(옵션 카드 포함)
+    int  nodeSkip = 2;         // 절점 칸이 시작하는 자리(Card 1 기준)
+    int  nodeCount = 0;        // 그 구간의 칸 수
+    int  nodeSkip2 = -1;       // 둘째 절점 구간(없으면 -1) — `*ELEMENT_SEATBELT`
+    int  nodeCount2 = 0;
+    bool hasPart = true;       // false = PID 칸이 없다(`*ELEMENT_PLOTEL`)
+    int  partField = 1;        // PID 가 든 칸. ⚠ `*ELEMENT_MASS` 는 **3** 이다(EID ID MASS PID)
+    bool supported = false;    // false 면 이 변형을 추측하지 않는다
+    std::string reason;        // supported=false 일 때 댈 이유
+};
+
+// 키워드 줄을 푼다. 격자 족(`parseElementKeyword` 가 아는 것)이면 family=NONE 을 돌려준다 —
+// 두 판정기는 **배타적**이다. 모르는 `*ELEMENT_*` 변형도 family=NONE 이다.
+AuxElementCard auxElementCard(const std::string& keywordLine);
+
 // *SECTION_SOLID 의 ELFORM → 절점 수. 고차 정식이 아니면 0.
 // Vol_I 228671-228677: 23=20절점, 24=27, 25=21, 26=15, 27=20(cubic tet), 28=40, 29=64.
 int solidNodesFromElform(int elform);

@@ -264,4 +264,98 @@ ElementCardSpan elementCardSpan(const ElementKeywordInfo& info,
     return s;
 }
 
+// ── 보·질량·이산 족 (헤더의 인용 참조) ───────────────────────────────────────
+//
+// ★여기서 `supported=false` 를 내는 것은 "읽을 수 없다" 가 아니라 **"추측하지 않는다"** 다.
+//   부르는 쪽(`cleanup-nodes`·`extract-parts`)은 그때 보수적으로 남기거나 거절한다.
+AuxElementCard auxElementCard(const std::string& keywordLine) {
+    AuxElementCard a;
+    ElementKeywordInfo dummy;
+    const std::string kw = normalizeKeyword(keywordLine, dummy);
+    a.keyword = kw;
+    if (kw.rfind("*ELEMENT_", 0) != 0) return a;
+    // 격자 족은 `parseElementKeyword` 소관이다 — 두 판정기는 배타적이다.
+    if (kw.rfind("*ELEMENT_SOLID", 0) == 0 || kw.rfind("*ELEMENT_SHELL", 0) == 0 ||
+        kw.rfind("*ELEMENT_TSHELL", 0) == 0)
+        return a;
+
+    const char* base = nullptr;
+    if      (kw.rfind("*ELEMENT_BEAM", 0) == 0)     { a.family = AuxFamily::BEAM;     base = "*ELEMENT_BEAM"; }
+    else if (kw.rfind("*ELEMENT_DISCRETE", 0) == 0) { a.family = AuxFamily::DISCRETE; base = "*ELEMENT_DISCRETE"; }
+    else if (kw.rfind("*ELEMENT_MASS", 0) == 0)     { a.family = AuxFamily::MASS;     base = "*ELEMENT_MASS"; }
+    else if (kw.rfind("*ELEMENT_SEATBELT", 0) == 0) { a.family = AuxFamily::SEATBELT; base = "*ELEMENT_SEATBELT"; }
+    else if (kw.rfind("*ELEMENT_PLOTEL", 0) == 0)   { a.family = AuxFamily::PLOTEL;   base = "*ELEMENT_PLOTEL"; }
+    else return a;                                  // 그 밖 변형은 이 축도 모른다
+
+    const auto opts = splitOptions(kw, base);
+    auto unsupported = [&](const std::string& why) {
+        a.supported = false;
+        if (a.reason.empty()) a.reason = why;
+    };
+    a.supported = true;
+
+    switch (a.family) {
+        case AuxFamily::BEAM:
+            // Card 1 = EID PID N1 N2 N3 RT1 RR1 RT2 RR2 LOCAL — 절점은 셋**만**이다.
+            a.nodeSkip = 2; a.nodeCount = 3;
+            for (const auto& o : opts) {
+                if (o == "TITLE") continue;
+                if (o == "THICKNESS" || o == "SCALAR" || o == "SCALR" || o == "SECTION" ||
+                    o == "PID" || o == "OFFSET" || o == "ORIENTATION" || o == "WARPAGE" ||
+                    o == "ELBOW")
+                    a.lines += 1;                   // 옵션마다 카드 한 장
+                else
+                    unsupported("*ELEMENT_BEAM 의 옵션 '" + o + "' 은 카드 줄 수를 확정할 수 없습니다");
+            }
+            break;
+        case AuxFamily::DISCRETE:
+            // Card 1 = EID PID N1 N2 VID S PF OFFSET
+            a.nodeSkip = 2; a.nodeCount = 2;
+            for (const auto& o : opts) {
+                if (o == "TITLE") continue;
+                if (o == "LCO") a.lines += 1;       // "If the LCO option is active, a second card is read"
+                else unsupported("*ELEMENT_DISCRETE 의 옵션 '" + o + "' 은 카드 줄 수를 확정할 수 없습니다");
+            }
+            break;
+        case AuxFamily::MASS:
+            // Card 1 = EID ID MASS PID. ⚠ PID 는 칸 **3** 이다(칸 1 이 아니다).
+            a.nodeSkip = 1; a.nodeCount = 1;
+            a.partField = 3;
+            for (const auto& o : opts) {
+                if (o == "TITLE") continue;
+                // `_NODE_SET` 은 칸 1 이 **절점 세트 ID** 다 — 절점으로 읽으면 엉뚱한 절점을
+                // 지키고 세트 멤버는 놓친다. 추측하지 않는다.
+                if (o == "NODE" || o == "SET")
+                    unsupported("*ELEMENT_MASS_NODE_SET 은 칸 1 이 절점이 아니라 **절점 세트 ID** 입니다");
+                else
+                    unsupported("*ELEMENT_MASS 의 옵션 '" + o + "' 은 칸 뜻을 확정할 수 없습니다");
+            }
+            break;
+        case AuxFamily::SEATBELT:
+            // Card 1 = EID PID N1 N2 SBRID SLEN N3 N4 — 절점이 **두 구간**이다.
+            a.nodeSkip = 2; a.nodeCount = 2;
+            a.nodeSkip2 = 6; a.nodeCount2 = 2;
+            for (const auto& o : opts) {
+                if (o == "TITLE") continue;
+                // `_ACCELEROMETER`·`_PRETENSIONER`·`_RETRACTOR`·`_SENSOR`·`_SLIPRING` 은
+                // 변형이 아니라 **다른 키워드**다 — 칸 배치가 통째로 다르다.
+                unsupported("*ELEMENT_SEATBELT_" + o + " 은 별개 키워드이고 칸 배치가 다릅니다");
+            }
+            break;
+        case AuxFamily::PLOTEL:
+            // Card 1 = EID N1 N2 — **PID 칸이 없다**.
+            a.nodeSkip = 1; a.nodeCount = 2;
+            a.hasPart = false;
+            a.partField = -1;
+            for (const auto& o : opts) {
+                if (o == "TITLE") continue;
+                unsupported("*ELEMENT_PLOTEL 의 옵션 '" + o + "' 은 확정할 수 없습니다");
+            }
+            break;
+        default:
+            break;
+    }
+    return a;
+}
+
 }  // namespace KooRemapper
