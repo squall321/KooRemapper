@@ -232,4 +232,26 @@ rclone copy --progress "$STAGE/" "$REMOTE/latest/"   # prod 는 latest/ 를 먼�
 mapfile -t OLD < <(rclone lsf --dirs-only "$REMOTE/" 2>/dev/null | sed 's#/$##' | grep -E '^dist-' | sort | head -n -"$RETAIN")
 for d in "${OLD[@]:-}"; do [ -n "$d" ] && { rclone purge "$REMOTE/$d" 2>/dev/null && echo "  · 정리: $d"; }; done
 
+# ★게시한 박스 **자기 자신**에도 BUILD_INFO 를 내려놓는다.
+#
+# ⚠ 2026-10-11 실측 — 게시 직후 이 박스의 `/api/health` 가 `revision` 을 **10-06 커밋**으로,
+#   `published_utc` 를 10-06 으로 내놓았다. 바이너리는 방금 구운 것인데 그 옆 BUILD_INFO 가
+#   지난 **반입분**이었다. 받는 쪽(`dist-from-drive.sh`)만 bin/ 에 내려놓게 되어 있어서,
+#   **게시하는 박스는 영원히 뒤처진 BUILD_INFO 를 들고 서비스한다.**
+#   `revision_matches_binary=False` 로 어긋남 자체는 드러나지만, 그때 보이는 revision 은
+#   거짓이고 "지금 무엇이 도는가" 를 물을 곳이 없어진다 — BUILD_INFO 를 둔 목적 그 자체다.
+#   게시 박스도 서비스 박스다(여기 dev 가 :8700 을 띄운다). 같은 파일을 같은 자리에 둔다.
+if [ -f "$STAGE/BUILD_INFO.txt" ]; then
+  mkdir -p platform/backend/bin
+  if [ -f platform/backend/bin/BUILD_INFO.txt ] && \
+     cmp -s "$STAGE/BUILD_INFO.txt" platform/backend/bin/BUILD_INFO.txt; then
+    echo "  · BUILD_INFO.txt 같음 — 그대로"
+  else
+    # cp -p 로 mtime 을 보존한다 — 포털 update-all 의 재기동 판정 지문이 이름·크기·mtime 이다.
+    cp -p "$STAGE/BUILD_INFO.txt" platform/backend/bin/BUILD_INFO.txt \
+      && echo "  ✓ BUILD_INFO.txt 를 이 박스 bin/ 에도 설치 (health 의 revision 이 실물과 맞는다)" \
+      || echo "  ⚠ BUILD_INFO.txt 로컬 설치 실패 — 이 박스의 /api/health 는 옛 revision 을 말한다" >&2
+  fi
+fi
+
 echo "✓ publish 완료 ($TS). prod: bash platform/infra/scripts/dist-from-drive.sh"

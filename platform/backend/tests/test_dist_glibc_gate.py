@@ -193,3 +193,45 @@ def test_no_cli_sif_is_not_an_error(tmp_path):
     r = _run(root, scripts, bin_dir)
     assert r.returncode == 0, f"cli.sif 가 없다고 막았다 — {r.stdout[-400:]}"
     assert "cli.sif 안" not in r.stdout
+
+
+# ── 게시한 박스 자신의 BUILD_INFO ────────────────────────────────────────────
+# ⚠ 2026-10-11 실측 — 게시 직후 이 박스의 `/api/health` 가 `revision` 을 **닷새 전 커밋**으로,
+#   `published_utc` 를 그 날짜로 내놓았다. 바이너리는 방금 구운 것인데 그 옆 BUILD_INFO 가
+#   지난 **반입분**이었다. BUILD_INFO 를 bin/ 에 내려놓는 것이 받는 쪽(`dist-from-drive.sh`)
+#   에만 있었기 때문이다 — 그래서 **게시하는 박스는 영원히 뒤처진 revision 으로 서비스한다.**
+#   게시 박스도 서비스 박스다(dev 가 :8700 을 띄운다). "지금 무엇이 도는가" 를 물을 곳이
+#   없어지는 것은 BUILD_INFO 를 둔 목적 그 자체를 잃는 것이다.
+
+def test_publishing_box_gets_its_own_build_info(tmp_path):
+    """게시가 끝나면 **이 박스의** bin/BUILD_INFO.txt 도 방금 올린 것과 같아야 한다."""
+    root, scripts, bin_dir, _log, capture = _tree(tmp_path, glibc="2.34")
+    stale = root / "platform" / "backend" / "bin" / "BUILD_INFO.txt"
+    stale.write_text("published_utc : 2000-01-01T00:00:00Z\ncommit        : deadbeef\n",
+                     encoding="utf-8")
+    r = _run(root, scripts, bin_dir)
+    assert r.returncode == 0, r.stdout + r.stderr
+    got = stale.read_text(encoding="utf-8")
+    assert "deadbeef" not in got, "옛 BUILD_INFO 가 그대로 남았다 — health 가 거짓 revision 을 말한다"
+    uploaded = (capture / "BUILD_INFO.txt")
+    assert uploaded.exists(), "스텁이 업로드분을 못 잡았다(시험 하네스 문제)"
+    assert got == uploaded.read_text(encoding="utf-8"), "올린 것과 박스에 둔 것이 다르다"
+
+
+def test_build_info_install_is_idempotent(tmp_path):
+    """이미 같으면 손대지 않는다 — `cp` 가 mtime 을 리셋하면 포털 update-all 의 재기동 판정
+    지문(이름·크기·mtime)이 매번 달라져 '바뀌었다' 로 오판한다.
+
+    ⚠ `date` 를 고정한다. BUILD_INFO 에 `published_utc` 가 들어가므로, 고정하지 않으면 두
+    실행이 **같은 초 안에 끝날 때만** 내용이 같아 이 시험이 초 경계에서 깜빡인다."""
+    root, scripts, bin_dir, _log, _cap = _tree(tmp_path, glibc="2.34")
+    _stub(bin_dir / "date",
+          'for a in "$@"; do case "$a" in +*) printf "%s\\n" "${a#+}" ; exit 0 ;; esac; done\n'
+          'exit 0\n')
+    assert _run(root, scripts, bin_dir).returncode == 0
+    info = root / "platform" / "backend" / "bin" / "BUILD_INFO.txt"
+    first = info.stat().st_mtime_ns
+    r = _run(root, scripts, bin_dir)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "같음" in r.stdout, r.stdout[-400:]
+    assert info.stat().st_mtime_ns == first, "내용이 같은데 mtime 이 바뀌었다"
