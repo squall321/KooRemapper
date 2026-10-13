@@ -19,6 +19,7 @@ from app.modules.sessions import services as sess_svc
 from app.shared.auth import get_current_user
 from app.shared.affiliation import verified_affiliation
 from app.shared.ratelimit import rate_limit
+from app.reports import bundle as bundle_mod
 from app.shared.responses import ok
 
 router = APIRouter(tags=["reports"])
@@ -169,7 +170,7 @@ async def ingest_report(
 )
 async def report_intake(
     request: Request,
-    file: UploadFile = File(...),                       # 리포트 HTML(.gz 가능) — 전각도/전위치/deep
+    file: UploadFile = File(...),                       # 리포트 HTML(.gz) 또는 **번들**(.zip/.tar(.gz))
     kfile: UploadFile | None = File(default=None),      # 원본 K파일(.gz 가능) — 리포트와 함께 올려 링크
     scenario: UploadFile | None = File(default=None),   # 시뮬 조건 scenario.json(.gz 가능)
     session_id: str | None = Form(default=None),        # 기존 세션에 넣을 때
@@ -196,6 +197,22 @@ async def report_intake(
     # ① 모든 업로드를 먼저 읽고 검증(전송상한+gz 해제) — 아무것도 영속되기 전에 크기/gz 실패를
     #    반려해 orphan 세션·파일을 안 남긴다(원샷 원자성). K파일·scenario 는 작은 해제 상한.
     raw, up_name = await _read_upload(file, what="리포트")
+    # ★번들이면 리포트 HTML 과 **사이드카 미디어**를 함께 푼다. 결과 이미지는 HTML 안에
+    #   임베드되지 않으므로(옆에 딸린 파일이다), HTML 하나만 올리면 그림이 애초에 들어오지
+    #   않는다 — LLM 도 화면도 결과를 볼 수 없다. 가드는 전부 `app/reports/bundle.py` 에 있다.
+    bundle_media: list[dict] = []
+    bundle_info: dict | None = None
+    if bundle_mod.looks_like_bundle(up_name, raw):
+        try:
+            b = bundle_mod.extract(raw, up_name)
+        except bundle_mod.BundleError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
+        raw, up_name = b["html"], b["html_name"]
+        bundle_media = b["media"]
+        bundle_info = {"html_name": b["html_name"], "n_html": b["n_html"],
+                       "n_media": len(b["media"]), "skipped": b["skipped"]}
+        if b.get("note"):
+            bundle_info["note"] = b["note"]
     k_raw, k_name = (None, None)
     if kfile is not None:
         k_raw, k_name = await _read_upload(kfile, what="K파일", decompress_cap_mb=settings.max_upload_mb)
@@ -227,16 +244,26 @@ async def report_intake(
             shared_affiliation=verified_affiliation(
                 request.headers, user.email, settings.heax_gateway_secret),
         )
+        media_summary: dict | None = None
+        if bundle_media:
+            # 매핑 정본은 리포트 자신(`set_report.media`)이다 — 서비스가 읽는다.
+            media_summary = await svc.attach_media(
+                db, s, report, media=bundle_media, html=raw)
     except ValueError as exc:
         if created_here:
             await sess_svc.delete_session(db, s)          # 신규 세션+K 통째로 정리(cascade+rmtree)
         elif krow is not None:
             await sess_svc.delete_file(db, krow)          # 기존 세션엔 방금 넣은 K만 회수
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
+    payload = {"session_id": s.id, "report_id": report.id, "kfile_id": kfile_id,
+               "kind": report.kind, "n_cases": report.n_cases, "label": report.label,
+               "source_kfile_id": report.source_kfile_id}
+    if bundle_info:
+        payload["bundle"] = bundle_info
+    if media_summary:
+        payload["media"] = media_summary
     return ok(
-        {"session_id": s.id, "report_id": report.id, "kfile_id": kfile_id,
-         "kind": report.kind, "n_cases": report.n_cases, "label": report.label,
-         "source_kfile_id": report.source_kfile_id},
+        payload,
         message=f"{report.kind} 리포트 반입 완료 ({report.n_cases} 케이스"
                 + ("· K파일 링크" if kfile_id else "") + ")",
         status_code=201,
@@ -567,6 +594,117 @@ async def report_geometry(
         return ok(await svc.geometry(db, r))
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
+
+
+@router.get("/reports/{report_id}/blocks")
+async def report_blocks(
+    request: Request,
+    report_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """임베드 블록 **전수** 목록(원본 재파싱) — 이름·형태·크기·`read_by_parser`.
+
+    ★`read_by_parser=false` 는 "쓸 수 없다" 가 아니라 "정규화가 아직 해석하지 않는다" 다.
+    `/blocks/{name}` 으로 꺼낼 수 있다. 그 칸을 두는 이유는 **해석 여부를 숨기지 않으려는**
+    것이다 — 전에는 생성기가 키를 늘려도 플랫폼이 조용히 뒤처졌다(핫스팟 군집이 그랬다).
+    """
+    r = await _require_report(db, user, report_id, request)
+    return ok(await svc.blocks(db, r))
+
+
+@router.get("/reports/{report_id}/blocks/{name}")
+async def report_block(
+    request: Request,
+    report_id: str,
+    name: str,
+    path: str | None = Query(default=None, description="하위 경로 `a.b.0.c`"),
+    limit: int | None = Query(default=None, ge=1, description="배열 앞에서 n 개"),
+    max_bytes: int = Query(default=200_000, ge=1_000, le=4_000_000),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """블록 하나(또는 하위 경로). 크면 **잘랐다고 말한다** — 조용히 자르지 않는다."""
+    r = await _require_report(db, user, report_id, request)
+    return ok(await svc.block(db, r, name, path=path, limit=limit, max_bytes=max_bytes))
+
+
+@router.get("/reports/{report_id}/hotspots")
+async def report_hotspots(
+    request: Request,
+    report_id: str,
+    criterion: str | None = Query(default=None, description="von_mises · max_principal · …"),
+    part_id: int | None = Query(default=None),
+    top: int = Query(default=20, ge=1, le=500),
+    order: str = Query(default="stress_max"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """핫스팟 군집(deep) — 어디가 뜨거운가. 중심·반경·요소수·부피·피크요소·피크시각.
+
+    ★`stress_*` 정렬은 **절대값**이다(`min_principal` 기준의 값은 음수다).
+    ★`uniform=true` 레코드의 군집은 '가장 뜨거운 곳' 이 아니다(값이 고르다는 뜻) — 그렇게 적는다.
+    """
+    r = await _require_report(db, user, report_id, request)
+    return ok(await svc.hotspots(db, r, criterion=criterion, part_id=part_id,
+                                 top=top, order=order))
+
+
+@router.get("/reports/{report_id}/clusters")
+async def report_behavior_clusters(
+    request: Request,
+    report_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """거동 아키타입 군집(impact) — 위치를 몇 가지 거동으로 묶은 결과.
+
+    ★선언한 군집 수와 **실제로 쓰인** 수가 다르면 `degenerate` 로 말한다(실측 4 선언/1 사용).
+    ★`is_mock=true` 면 합성이다 — 결론의 근거로 쓰면 안 된다.
+    """
+    r = await _require_report(db, user, report_id, request)
+    return ok(await svc.behavior_clusters(db, r))
+
+
+@router.get("/reports/{report_id}/analytics")
+async def report_analytics(
+    request: Request,
+    report_id: str,
+    block: str | None = Query(default=None, description="한 블록만 — doe_analysis 등"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """큰 분석 블록 요약 — `doe_analysis`·`deep_analytics`·`insights`·`physics` 등.
+
+    ★요약을 **다시 계산하지 않는다**: 하위 분석이 들고 있는 생성기 `summary` 를 그대로 올린다
+    (다시 계산하면 HTML 화면의 숫자와 조용히 갈린다).
+    ★`available=false`·`empty=true` 는 "값이 0" 이 아니라 **계산되지 않았다**는 뜻으로 적는다.
+    원본은 `/blocks/{name}?path=…` 로 끝까지 되짚을 수 있다.
+    """
+    r = await _require_report(db, user, report_id, request)
+    return ok(await svc.analytics(db, r, block))
+
+
+@router.get("/reports/{report_id}/media")
+async def report_media(
+    request: Request,
+    report_id: str,
+    case_key: str | None = Query(default=None),
+    kind: str | None = Query(default=None, description="image | video"),
+    role: str | None = Query(default=None, description="peak | view"),
+    images_only: bool = Query(default=False, description="모델이 볼 수 있는 것만"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """리포트에 붙은 **결과 이미지·영상** 목록. 내용은 세션 파일 다운로드로 받는다.
+
+    ★결과 이미지는 리포트 HTML 안에 없고 **옆에 딸린 파일**이다 — 리포트를 번들(.zip/.tar.gz)로
+    올려야 함께 들어온다. 비어 있으면 그렇게 말한다.
+    ★`can_llm_view` 가 모델이 볼 수 있는지를 가른다(png/jpeg/gif/webp 는 보고 mp4 는 못 본다).
+    """
+    r = await _require_report(db, user, report_id, request)
+    return ok(svc.media_list(r, case_key=case_key, kind=kind, role=role,
+                             images_only=images_only))
 
 
 @router.get("/reports/{report_id}/energy")

@@ -67,6 +67,14 @@ SmartTwin 파이프라인이 만든 deep(단건 심층)·sphere(전각도 낙하
 | `report_facets` | — | GET /reports/facets | 검색 facet — 어떤 kind·과제·rev·방향컨셉·초점·심각도·높이가 있나 + 건수(먼저 '뭐가 있나') |
 | `find_reports` | kind?·project?·dev_rev?·variation?·doe?·focus?·doe_strategy?·scenario_type?·drop_height?·severity?·min_worst_stress?·min_worst_g?·has_part?·q?·since/until?·session_id?·kfile_id?·sort·order·limit | GET /reports | 조건으로 리포트 검색(전 세션, 서버 다축 필터). 목표→리포트 특정 |
 | `report_query` | report_id, part_id?·category?·angle_name?·near_roll/pitch+angle_tol_deg?(yaw 무시)·metric?·min/max_value?·sort·limit | GET /reports/{id}/query | 리포트 내부 fact 드릴다운(부품×각도×물리량×값, 서버 필터) |
+| `report_blocks` | report_id | GET /reports/{id}/blocks | 임베드 블록 **전수** 목록 — 이름·형태·크기·`read_by_parser`(정규화가 아직 해석 안 하는 것도 다 보인다) |
+| `report_block` | report_id, name, path?·limit?·max_bytes? | GET /reports/{id}/blocks/{name} | 블록 하나(또는 `a.b.0.c` 하위) — 무엇이든 끝까지 되짚는다. 크면 잘라서 **잘랐다고 말한다** |
+| `report_hotspots` | report_id, criterion?·part_id?·top·order | GET /reports/{id}/hotspots | ★핫스팟 군집(deep) — **어디가 뜨거운가**. 중심·반경·요소수·부피·피크요소·피크시각. 정렬은 **절대값** |
+| `report_behavior_clusters` | report_id | GET /reports/{id}/clusters | 거동 아키타입 군집(impact). `degenerate`(선언≠사용)·`is_mock` 를 숨기지 않는다 |
+| `report_analytics` | report_id, block? | GET /reports/{id}/analytics | 큰 분석 블록 요약(doe_analysis·deep_analytics·insights·physics…). 생성기 `summary` **그대로** |
+| `report_media` | report_id, case_key?·kind?·role?·images_only? | GET /reports/{id}/media | 결과 이미지·영상 **목록**. `can_llm_view` 가 모델이 볼 수 있는지를 가른다(mp4 는 못 본다) |
+| `report_image` | report_id, case_key?·path?·role | (media + 파일 다운로드) | ★결과 이미지를 **그림으로** 돌려준다 — 모델이 실제로 보고 판단한다 |
+| `report_compare` | report_id, case_keys[], metrics?·max_images? | (cases + media) | ★케이스 여러 개를 **지표 표 + 이미지**로 한 번에 비교 — 리포트 쓸 때 쓴다. 장수 상한, 넘으면 **뺀 수를 말한다** |
 | `report_angle_stats` | report_id, metric?·part_id?·category?/angle_name?/near_lon+near_lat+tol_deg?·top_parts? | GET /reports/{id}/angle-stats | 특정 각도군 표준 통계(분포 n/mean/std/CoV/백분위/IQR/최악 + 부품별 위험·민감도). available_metrics 자동 감지 |
 | `update_report_meta` | report_id, label?·project?·dev_rev?·variation?·doe?·focus?·kfile_id? | PATCH /reports/{id} | 과제명·rev·초점·K파일 링크 수동 설정(""=삭제) |
 | `attach_report_scenario` | report_id, scenario_content | POST /reports/{id}/scenario | 시뮬 조건 scenario.json 첨부 — 요약 캐시 + K파일 자동매칭 |

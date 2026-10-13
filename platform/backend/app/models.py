@@ -154,6 +154,11 @@ class ImpactReport(Base):
         ForeignKey("session_files.id", ondelete="SET NULL")
     )
     scenario: Mapped[dict | None] = mapped_column(JSONB)
+    # 결과 이미지 — 번들로 함께 반입한 그림·영상. `[{path, file_id, kind, role, case_key,
+    # set_name, bytes, can_llm_view}]`. ★`can_llm_view` 로 png/jpeg/gif/webp 와 mp4 를 가른다:
+    # 모델은 영상을 못 본다. 매핑 정본은 리포트 자신(`set_report.media`)이고, 선언이 없는 종류
+    # (deep)는 케이스에 묶지 않고 목록으로만 둔다 — 파일명으로 추측한 매핑은 틀려도 그럴듯하다.
+    media: Mapped[list | None] = mapped_column(JSONB)
     # 과제/개발단계 수동 메타 — {project, dev_revision:{phase,round?}, design_variation?, doe?}.
     # DataHub 등재 폼의 기본값으로도 쓰인다.
     eng_meta: Mapped[dict | None] = mapped_column(JSONB)

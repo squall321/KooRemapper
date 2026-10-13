@@ -145,3 +145,28 @@ impact 전위치 부분충격)을 인제스트해 구조화 분석한다.
 7. **리비전 비교** — `compare_reports([id1, id2, ...])` 로 조건/리비전 간 파트별 최악값을 나란히 본다.
 8. **DataHub 등재** — `publish_report_to_datahub(report_id, project, stage)` 로 구조화 요약을
    AI Data Hub 데이터 자산(sim_report)으로 올린다(과제/개발단계/BOM 연계, 검색·리비전 비교용).
+
+### 결과 이미지로 비교하기 (`report_image` · `report_compare`)
+
+리포트의 **결과 그림을 직접 보고** 비교·서술할 수 있다. 중요한 전제 셋.
+
+- 결과 이미지는 리포트 HTML 안에 **없다** — 옆에 딸린 파일이라, 리포트를 **번들**
+  (`.zip`/`.tar.gz`)로 올려야 함께 들어온다. 무엇이 붙어 있는지는 `report_media` 로 본다.
+- `report_image` 는 그림을 **이미지로** 돌려준다(그래서 실제로 보인다). `download_result` 로
+  받으면 base64 **글자**로 와서 보는 것이 아니다.
+- **mp4 는 볼 수 없다.** `can_llm_view` 가 false 인 것을 고르면 거절하고 `role=peak` png 를
+  권한다. 비교에는 `images_only=true` 를 쓴다.
+
+여러 케이스를 쓸 때는 `report_compare(report_id, case_keys=[…])` 가 **지표 표 + 각 케이스
+이미지**를 한 번에 준다. 장수 상한이 있으므로 `report_worst_cases` 로 먼저 좁히고 몇 개만 보라.
+
+### 핫스팟·군집·블록
+
+- `report_hotspots` — deep 리포트의 **공간 핫스팟 군집**(어디가 뜨거운가). 중심·반경·요소수·
+  피크요소까지. ⚠ `stress_*` 정렬은 **절대값**이고(min 기준은 음수), `uniform=true` 의 군집은
+  '가장 뜨거운 곳' 이 아니다.
+- `report_behavior_clusters` — impact 의 거동 아키타입. ⚠ `degenerate=true` 면 선언한 군집
+  수와 **실제로 쓰인** 수가 다르다("N 가지 거동" 으로 읽으면 안 된다). `is_mock=true` 면 합성이다.
+- `report_analytics` / `report_blocks` / `report_block` — 리포트에 들어 있는 **모든** 분석 블록.
+  요약으로 보고, 원본은 `report_block(name, path=…)` 으로 끝까지 되짚는다.
+

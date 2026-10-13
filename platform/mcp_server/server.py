@@ -19,7 +19,7 @@ import base64
 import os
 
 import httpx
-from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.fastmcp import Context, FastMCP, Image
 
 API_BASE = os.environ.get("KOOREMAPPER_API_BASE", "http://127.0.0.1:8700").rstrip("/")
 API = f"{API_BASE}/api/v1"
@@ -848,6 +848,236 @@ async def list_reports(session_id: str, ctx: Context, kfile_id: int | None = Non
     (개인 식별 없는 집계)로 물어라. 심의 좌석이 빈 배열을 부재 증거로 오독한 실사례 있음."""
     params = {"kfile_id": kfile_id} if kfile_id is not None else None
     return await _get(ctx, f"/sessions/{session_id}/reports", params=params)
+
+
+@mcp.tool()
+async def report_blocks(report_id: str, ctx: Context) -> dict:
+    """리포트 임베드 블록 **전수** 목록 — 이름·형태·크기·`read_by_parser`.
+
+    정규화가 해석하지 않는 블록도 여기 다 뜬다(`read_by_parser=false`). 그 블록은
+    `report_block` 으로 꺼내 쓴다. **무엇이 들어 있는지부터 여기서 보라** — 리포트 종류마다
+    블록 구성이 다르다(deep 21 · sphere 12 · impact 27 가 실측값이다)."""
+    return await _get(ctx, f"/reports/{report_id}/blocks")
+
+
+@mcp.tool()
+async def report_block(
+    report_id: str, name: str, ctx: Context,
+    path: str = "", limit: int = 0, max_bytes: int = 60000,
+) -> dict:
+    """블록 하나(또는 하위 경로)를 꺼낸다 — 무엇이든 끝까지 되짚을 수 있다.
+
+    `path` 는 `a.b.0.c` 꼴(dict 키와 list 인덱스를 점으로). 경로가 끊기면 **그 자리에서 쓸 수
+    있는 키/인덱스를 알려 준다**. 큰 블록은 `limit`·`max_bytes` 로 좁혀라 — 넘으면 잘라서
+    **잘랐다고 말한다**(조용히 자르지 않는다)."""
+    q = {"max_bytes": max_bytes}
+    if path:
+        q["path"] = path
+    if limit:
+        q["limit"] = limit
+    return await _get(ctx, f"/reports/{report_id}/blocks/{name}", q)
+
+
+@mcp.tool()
+async def report_hotspots(
+    report_id: str, ctx: Context, criterion: str = "", part_id: int | None = None,
+    top: int = 20, order: str = "stress_max",
+) -> dict:
+    """★핫스팟 군집(deep) — **어디가 뜨거운가**. 중심좌표·둘러싼 반경·요소수·부피·
+    피크 요소 ID·피크 시각까지 온다.
+
+    `criterion` ∈ {von_mises, max_principal, min_principal, …} (비우면 전부).
+    주의 둘 — `stress_*` 정렬은 **절대값**이다(`min_principal` 값은 음수다).
+    `uniform=true` 레코드의 군집은 '가장 뜨거운 곳' 이 **아니다**(값이 고르다는 뜻이다)."""
+    q = {"top": top, "order": order}
+    if criterion:
+        q["criterion"] = criterion
+    if part_id is not None:
+        q["part_id"] = part_id
+    return await _get(ctx, f"/reports/{report_id}/hotspots", q)
+
+
+@mcp.tool()
+async def report_behavior_clusters(report_id: str, ctx: Context) -> dict:
+    """거동 아키타입 군집(impact) — 낙하/충격 위치를 몇 가지 거동으로 묶은 결과.
+
+    ★`degenerate=true` 면 선언한 군집 수와 **실제로 쓰인** 수가 다르다 — 거동이 갈리지 않은
+    것이고, 그때 "N 가지 거동" 으로 읽으면 안 된다(실측으로 4 선언/1 사용인 리포트가 있다).
+    ★`is_mock=true` 면 **합성**이다 — 결론의 근거로 쓰지 말라."""
+    return await _get(ctx, f"/reports/{report_id}/clusters")
+
+
+@mcp.tool()
+async def report_analytics(report_id: str, ctx: Context, block: str = "") -> dict:
+    """큰 분석 블록 요약 — `doe_analysis`·`deep_analytics`·`insights`·`physics`·
+    `solver_quality`·`contact_profile`·`set_report`.
+
+    각 하위 분석의 `summary` 는 **생성기가 계산한 값 그대로**다(여기서 다시 계산하지 않는다 —
+    다시 계산하면 리포트 화면의 숫자와 조용히 갈린다).
+    ★`not_computed` 가 붙은 하위는 "값이 0" 이 아니라 **계산되지 않았다**는 뜻이다.
+    원본은 `report_block(name, path=…)` 으로 끝까지 되짚어라."""
+    return await _get(ctx, f"/reports/{report_id}/analytics", {"block": block} if block else None)
+
+
+@mcp.tool()
+async def report_media(
+    report_id: str, ctx: Context, case_key: str = "", kind: str = "",
+    role: str = "", images_only: bool = False,
+) -> dict:
+    """리포트에 붙은 **결과 이미지·영상 목록**(내용은 `report_image` 로 본다).
+
+    ★결과 이미지는 리포트 HTML 안에 없고 **옆에 딸린 파일**이다 — 리포트를 번들(.zip/.tar.gz)로
+    올려야 함께 들어온다. 비어 있으면 그렇게 말한다.
+    ★`can_llm_view` 가 **네가 볼 수 있는지**를 가른다 — png/jpeg/gif/webp 는 보고 **mp4 는
+    못 본다**. 비교에는 `images_only=true` 를 써라."""
+    q = {}
+    for k, v in (("case_key", case_key), ("kind", kind), ("role", role)):
+        if v:
+            q[k] = v
+    if images_only:
+        q["images_only"] = True
+    return await _get(ctx, f"/reports/{report_id}/media", q or None)
+
+
+# ── 결과 이미지 — **네가 볼 수 있게** 돌려준다 ────────────────────────────────
+#
+# ★왜 따로 있나 (2026-10-13). `download_result` 는 base64 를 **dict 안에** 넣어 돌려준다.
+# 그러면 모델에게는 **글자**로 온다 — 그림을 본 것이 아니다. 이미지를 실제로 보려면
+# `Image` 로 돌려줘서 이미지 콘텐츠 블록이 되어야 한다. 그 길이 이 서버에 한 곳도 없었다.
+#
+# ★mp4 는 모델이 못 본다. `can_llm_view=false` 인 것을 이미지로 내려 하면 아무것도 못 보고
+# 응답만 불어난다 — 그래서 **거절하고 대안(peak png)을 말한다.**
+
+_IMAGE_MIME = {".png": "png", ".jpg": "jpeg", ".jpeg": "jpeg",
+               ".gif": "gif", ".webp": "webp"}
+#: 비교 한 번에 보낼 이미지 장수 상한. 넘으면 **뺀 수를 말한다**(조용히 자르지 않는다).
+#: 상한이 있는 이유 — 이미지는 응답을 금방 불린다(`TOOL_RESULT_MAX`). 실측 png 한 장 ≈ 15KB.
+MAX_COMPARE_IMAGES = 8
+
+
+async def _fetch_media(ctx: Context, report_id: str, *, case_key: str = "",
+                       role: str = "", images_only: bool = True) -> list:
+    q = {"images_only": True} if images_only else {}
+    for k, v in (("case_key", case_key), ("role", role)):
+        if v:
+            q[k] = v
+    got = await _get(ctx, f"/reports/{report_id}/media", q or None)
+    return (got or {}).get("media") or []
+
+
+async def _download_bytes(ctx: Context, session_id: str, file_id: int) -> bytes:
+    async with httpx.AsyncClient(base_url=API, timeout=120) as c:
+        r = await c.get(f"/sessions/{session_id}/files/{file_id}/download",
+                        headers=_forward_headers(ctx))
+    if r.status_code >= 400:
+        raise RuntimeError(f"미디어 다운로드 실패: HTTP {r.status_code}")
+    return r.content
+
+
+@mcp.tool()
+async def report_image(
+    report_id: str, ctx: Context, case_key: str = "", path: str = "", role: str = "peak",
+):
+    """★결과 이미지를 **그림으로** 돌려준다 — 네가 실제로 보고 판단·비교할 수 있다.
+
+    `case_key` 로 그 케이스의 그림을, 또는 `path` 로 정확히 한 장을 지정한다
+    (경로는 `report_media` 가 알려 준다). `role` 은 보통 `peak`(피크 상태 렌더)다.
+
+    ★mp4 는 **모델이 못 본다** — 그것을 고르면 거절하고 대신 쓸 png 를 알려 준다.
+    ★여러 케이스를 **한 번에 비교**하려면 `report_compare` 를 써라(지표 표까지 같이 온다)."""
+    # ⚠ `path` 로 한 장을 지정했으면 `role` 로 **걸러서는 안 된다** — 예컨대 mp4(role=view)를
+    #   지정했는데 기본 `role=peak` 가 먼저 걸러 버리면 "그림이 없다" 라는 **엉뚱한 까닭**을
+    #   대고, 정작 "영상은 못 본다" 를 말하지 못한다(실측으로 그랬다).
+    rows = await _fetch_media(ctx, report_id, case_key=case_key,
+                              role=("" if path else role), images_only=False)
+    if not rows:
+        return {"error": "그림이 없다",
+                "hint": "결과 이미지는 리포트 HTML 안에 없고 **옆에 딸린 파일**이다 — "
+                        "리포트를 번들(.zip/.tar.gz)로 올려야 함께 들어온다. "
+                        "`report_media` 로 무엇이 붙어 있는지 먼저 보라"}
+    if path:
+        rows = [r for r in rows if r.get("path") == path or r.get("stored_as") == path]
+        if not rows:
+            raise RuntimeError(f"그 경로의 그림이 없다: {path} — `report_media` 로 경로를 확인하라")
+    pick = next((r for r in rows if r.get("can_llm_view")), None)
+    if pick is None:
+        vids = [r.get("path") for r in rows][:5]
+        return {"error": "고른 것이 영상(mp4)이라 **모델이 볼 수 없다**",
+                "videos": vids,
+                "hint": "같은 케이스의 `role=peak` png 를 써라 — `report_media(role='peak')`"}
+    sess = (await _get(ctx, f"/reports/{report_id}")) or {}
+    session_id = sess.get("session_id")
+    if not session_id:
+        raise RuntimeError("리포트의 세션을 알 수 없다")
+    data = await _download_bytes(ctx, session_id, pick["file_id"])
+    ext = "." + (pick.get("path") or "").rsplit(".", 1)[-1].lower()
+    return Image(data=data, format=_IMAGE_MIME.get(ext, "png"))
+
+
+@mcp.tool()
+async def report_compare(
+    report_id: str, case_keys: list[str], ctx: Context,
+    metrics: list[str] | None = None, max_images: int = MAX_COMPARE_IMAGES,
+) -> list:
+    """★케이스 여러 개를 **그림 + 지표**로 한 번에 비교한다 — 리포트를 쓸 때 쓰라.
+
+    돌려주는 것: ① 케이스별 지표 표(텍스트) ② 각 케이스의 피크 렌더 **이미지**.
+    그래서 그림을 **보면서** "어느 방향이 왜 더 나쁜가" 를 쓸 수 있다.
+
+    `metrics` 를 비우면 기본(peak_stress·peak_g·peak_disp)을 쓴다.
+    ★이미지 장수에 상한이 있다(기본 8) — 넘으면 **몇 장을 뺐는지 말한다**. 그림은 응답을
+    금방 불리므로, 많은 케이스는 지표로 먼저 좁히고(`report_worst_cases`) 그중 몇 개만 보라."""
+    metrics = metrics or ["peak_stress", "peak_g", "peak_disp"]
+    rep = (await _get(ctx, f"/reports/{report_id}")) or {}
+    session_id = rep.get("session_id")
+    lines = ["# 비교 — report %s (%s)" % (report_id, rep.get("kind")),
+             "",
+             "| case | " + " | ".join(metrics) + " |",
+             "|---" * (len(metrics) + 1) + "|"]
+    for ck in case_keys:
+        case = (await _get(ctx, f"/reports/{report_id}/cases/{ck}")) or {}
+        roll = case.get("rollup") or {}
+        cells = []
+        for m in metrics:
+            v = roll.get(m)
+            if v is None:
+                v = (case.get("summary") or {}).get(m)
+            cells.append("—" if v is None else ("%g" % v if isinstance(v, (int, float)) else str(v)))
+        lines.append("| %s | %s |" % (ck, " | ".join(cells)))
+
+    out: list = []
+    picks: list[tuple[str, dict]] = []
+    missing: list[str] = []
+    for ck in case_keys:
+        rows = await _fetch_media(ctx, report_id, case_key=ck, role="peak", images_only=True)
+        if rows:
+            picks.append((ck, rows[0]))
+        else:
+            missing.append(ck)
+    dropped = 0
+    if len(picks) > max_images:
+        dropped = len(picks) - max_images
+        picks = picks[:max_images]
+    if missing:
+        lines += ["", "⚠ 그림이 없는 케이스: %s" % ", ".join(missing[:12]),
+                  "   (결과 이미지는 번들로 올려야 들어온다 — `report_media` 로 확인하라)"]
+    if dropped:
+        lines += ["", "⚠ 이미지 %d 장을 **뺐다**(상한 %d) — 케이스를 줄여 다시 부르거나 "
+                      "`max_images` 를 올려라" % (dropped, max_images)]
+    if not picks:
+        lines += ["", "그림이 하나도 없어 **표만** 돌려준다."]
+    out.append("\n".join(lines))
+    for ck, row in picks:
+        if not session_id:
+            break
+        try:
+            data = await _download_bytes(ctx, session_id, row["file_id"])
+        except RuntimeError:
+            continue
+        ext = "." + (row.get("path") or "").rsplit(".", 1)[-1].lower()
+        out.append("## %s — %s" % (ck, row.get("path", "").rsplit("/", 1)[-1]))
+        out.append(Image(data=data, format=_IMAGE_MIME.get(ext, "png")))
+    return out
 
 
 @mcp.tool()

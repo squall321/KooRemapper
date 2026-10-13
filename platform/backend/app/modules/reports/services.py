@@ -21,6 +21,7 @@ import json
 from app.models import ImpactCase, ImpactReport, Session, SessionFile
 from app.reports import analyze, parser
 from app.reports.scenario import ScenarioParseError, summarize_scenario
+from app.modules.sessions import services as sess_svc
 from app.shared import storage
 
 # 케이스 랭킹에 허용되는 정렬 키(승격 컬럼) — 그 외 값은 거부해 임의 컬럼 정렬을 막는다.
@@ -310,6 +311,87 @@ async def ingest_report(
     await db.commit()
     await db.refresh(report)
     return report
+
+
+async def attach_media(
+    db: AsyncSession,
+    session: Session,
+    report: ImpactReport,
+    *,
+    media: list[dict],
+    html: bytes,
+) -> dict:
+    """번들로 함께 온 결과 이미지·영상을 저장하고 리포트에 **붙인다**.
+
+    `media` = `bundle.extract()` 의 `media` 항목들(`{path, data, kind, can_llm_view, bytes}`).
+    `html` = 리포트 HTML 바이트 — 매핑 정본(`set_report.media`)을 **여기서** 읽는다.
+    (인제스트가 안에서 이미 파싱하지만 그 결과를 돌려주지 않는다. 반입은 뜨거운 경로가
+     아니므로 중복 파싱을 감수하고 **라우트가 파싱을 모르게** 둔다 — 경계가 단순해진다.)
+
+    ★매핑은 **리포트가 선언한 것만** 쓴다. 선언이 없는 종류(deep)의 그림은 케이스에 묶지 않고
+    목록으로만 둔다 — 파일명으로 추측한 매핑은 틀려도 그럴듯해서 가장 나쁘다.
+
+    ★선언됐는데 번들에 없는 그림은 `missing_in_bundle` 로 **센다.** 조용히 빼면 받는 쪽이
+    "그 위치는 그림이 없다" 로 읽는다(사실은 안 올라온 것이다).
+    """
+    try:
+        data = parser.extract_embedded_data(html.decode("utf-8", "replace"))
+    except Exception:          # noqa: BLE001 — 매핑을 못 읽어도 저장은 한다(목록으로만 둔다)
+        data = {}
+    decl = parser.report_media_map(data, report.kind)
+    by_path = {d["path"]: d for d in decl["declared"]}
+    rows: list[dict] = []
+    stored_paths: set[str] = set()
+    for item in media:
+        path = item["path"]
+        # ⚠ 하위 경로를 살려 저장한다 — 선언된 상대경로와 **같은 문자열**이어야 조인이 된다.
+        f = await sess_svc.add_uploaded_file(
+            db, session, filename=path, raw=item["data"], kind="media")
+        d = by_path.get(path) or {}
+        rows.append({
+            "path": path,
+            "stored_as": f.filename,
+            "file_id": f.id,
+            "bytes": item["bytes"],
+            "kind": item["kind"],
+            "can_llm_view": item["can_llm_view"],
+            "case_key": d.get("case_key"),
+            "set_name": d.get("set_name"),
+            "set_title": d.get("set_title"),
+            "role": d.get("role"),
+            "face": d.get("face"),
+            "declared": bool(d),
+        })
+        stored_paths.add(path)
+    missing = [d for d in decl["declared"] if d["path"] not in stored_paths]
+    report.media = rows
+    # ⚠ **커밋**해야 한다. `ingest_report` 가 이미 커밋하고 돌아오므로, 여기서 flush 만 하면
+    #   미디어 칸이 트랜잭션에 남아 **사라진다**(실측: 반입 응답은 16장 저장이라고 말하는데
+    #   `/media` 가 0 을 냈다). 이 모듈의 다른 쓰기 함수들과 같은 규율이다.
+    await db.commit()
+    summary = {
+        "n_stored": len(rows),
+        "n_images": sum(1 for r in rows if r["can_llm_view"]),
+        "n_videos": sum(1 for r in rows if not r["can_llm_view"]),
+        "n_declared": decl["n_declared"],
+        "n_mapped": sum(1 for r in rows if r["declared"]),
+        "n_unmapped": sum(1 for r in rows if not r["declared"]),
+        "n_empty_slots": decl["n_empty_slots"],
+        "mapped_by": decl.get("mapped_by"),
+    }
+    if missing:
+        summary["missing_in_bundle"] = [m["path"] for m in missing[:40]]
+        summary["n_missing_in_bundle"] = len(missing)
+        summary["missing_note"] = (
+            "리포트가 선언한 그림 %d 장이 번들에 없다 — '그 위치는 그림이 없다' 가 아니라 "
+            "**안 올라왔다**는 뜻이다" % len(missing))
+    if decl.get("generator_note"):
+        summary["generator_note"] = decl["generator_note"]
+    if summary["n_unmapped"]:
+        summary["unmapped_note"] = (
+            "그림 %d 장은 리포트가 케이스를 선언하지 않아 목록으로만 둔다(파일명으로 "
+            "추측하지 않는다)" % summary["n_unmapped"])
+    return summary
 
 
 async def list_reports(
@@ -902,6 +984,79 @@ async def part_energy_series(db: AsyncSession, report: ImpactReport, part_id: in
     """파트별 에너지(IE/KE) 시계열(원본 재파싱) — deep matsum. part_id 로 한정."""
     data, kind = await _load_html_data(db, report)
     return await asyncio.to_thread(parser.part_energy_series, data, kind, part_id)
+
+
+async def blocks(db: AsyncSession, report: ImpactReport) -> dict:
+    """임베드 블록 전수 목록(원본 재파싱) — `read_by_parser` 로 해석 여부를 숨기지 않는다."""
+    data, _kind = await _load_html_data(db, report)
+    return await asyncio.to_thread(parser.list_blocks, data)
+
+
+async def block(db: AsyncSession, report: ImpactReport, name: str, *,
+                path: str | None = None, limit: int | None = None,
+                max_bytes: int = 200_000) -> dict:
+    """블록 하나(또는 하위 경로)를 꺼낸다 — 무엇이든 끝까지 되짚을 수 있게."""
+    data, _kind = await _load_html_data(db, report)
+    return await asyncio.to_thread(parser.get_block, data, name, path, max_bytes, limit)
+
+
+async def hotspots(db: AsyncSession, report: ImpactReport, *, criterion: str | None = None,
+                   part_id: int | None = None, top: int = 20,
+                   order: str = "stress_max") -> dict:
+    """핫스팟 군집(deep) — 파트·판정기준별 공간 군집."""
+    data, _kind = await _load_html_data(db, report)
+    return await asyncio.to_thread(
+        parser.hotspot_clusters, data, criterion=criterion, part_id=part_id,
+        top=top, order=order)
+
+
+async def behavior_clusters(db: AsyncSession, report: ImpactReport) -> dict:
+    """거동 아키타입 군집(impact)."""
+    data, _kind = await _load_html_data(db, report)
+    return await asyncio.to_thread(parser.behavior_clusters, data)
+
+
+async def analytics(db: AsyncSession, report: ImpactReport, block_name: str | None = None) -> dict:
+    """큰 분석 블록 요약 — 생성기 `summary` 를 그대로 올린다(다시 계산하지 않는다)."""
+    data, _kind = await _load_html_data(db, report)
+    return await asyncio.to_thread(parser.analytics_summary, data, block_name)
+
+
+def media_list(report: ImpactReport, *, case_key: str | None = None,
+               kind: str | None = None, role: str | None = None,
+               images_only: bool = False) -> dict:
+    """리포트에 붙은 결과 이미지·영상 목록 — DB 칸만 읽는다(재파싱 없음).
+
+    ★`can_llm_view` 를 그대로 낸다. 모델은 png/jpeg/gif/webp 를 보고 **mp4 는 못 본다** —
+    그 구분을 숨기면 "영상을 보여 줬는데 못 봤다" 가 된다.
+    """
+    rows = list(report.media or [])
+    total = len(rows)
+    if case_key:
+        rows = [r for r in rows if r.get("case_key") == case_key]
+    if kind:
+        rows = [r for r in rows if r.get("kind") == kind]
+    if role:
+        rows = [r for r in rows if r.get("role") == role]
+    if images_only:
+        rows = [r for r in rows if r.get("can_llm_view")]
+    cases = sorted({r.get("case_key") for r in (report.media or []) if r.get("case_key")})
+    out = {
+        "report_id": report.id,
+        "kind": report.kind,
+        "n_total": total,
+        "n_returned": len(rows),
+        "n_images": sum(1 for r in rows if r.get("can_llm_view")),
+        "n_videos": sum(1 for r in rows if not r.get("can_llm_view")),
+        "cases_with_media": cases,
+        "filter": {"case_key": case_key, "kind": kind, "role": role,
+                   "images_only": images_only},
+        "media": rows,
+    }
+    if not total:
+        out["note"] = ("이 리포트에는 붙은 그림이 없다 — 결과 이미지는 HTML 안에 없고 **옆에 "
+                       "딸린 파일**이라, 리포트를 번들(.zip/.tar.gz)로 올려야 함께 들어온다")
+    return out
 
 
 async def geometry(db: AsyncSession, report: ImpactReport) -> dict:

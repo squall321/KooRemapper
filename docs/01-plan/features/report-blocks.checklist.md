@@ -11,16 +11,16 @@
 - [x] **B-1 `list_blocks`** — 이름·형태·크기·`read_by_parser`
 - [x] **B-2 `get_block`** — `path=a.b.0.c` 로 하위 선택, 끊기면 **쓸 수 있는 키를 알려준다**
 - [x] **B-3 크기 가드** — 배열은 잘라서 **잘랐다고 말하고**, 스칼라/dict 가 너무 크면 거절하며 `path` 를 권한다
-- [ ] B-4 API `GET /reports/{id}/blocks`, `/blocks/{name}`
-- [ ] B-5 MCP `report_blocks`, `report_block`
+- [x] **B-4 API** `/blocks` · `/blocks/{name}`(`path`·`limit`·`max_bytes`)
+- [x] **B-5 MCP** `report_blocks` · `report_block`
 
 ## C. 일급 — 핫스팟·군집
 - [x] **C-1 `hotspot_clusters`** — 실측 102 레코드 → 105 군집, 34파트 × 3기준.
       ★`stress_*` 정렬은 **절대값**이다(direction=min 기준은 음수다) · `uniform` 레코드를 적는다
 - [x] **C-2 `behavior_clusters`** — ★선언 4 군집 중 **쓰인 것은 1**(실측)을 `degenerate` 로
       적는다. `is_mock` 도 그대로 올린다(합성을 실측으로 읽으면 결론이 거짓이다)
-- [ ] C-3 API `/hotspots`, `/clusters` + MCP 도구 둘
-- [ ] C-4 프런트 표(핫스팟 상위 군집 · 군집 아키타입)
+- [x] **C-3 API·MCP** `/hotspots` · `/clusters` · `/analytics` + 도구 셋
+- [ ] C-4 프런트 표(핫스팟 상위 군집 · 군집 아키타입) — **남음**
 
 ## D. 시계열 비대칭
 - [x] **D-1 시계열 7종** `DEEP_SERIES_BLOCKS` — 전에는 `stress` **하나만** 읽어 주응력·
@@ -28,8 +28,10 @@
 - [x] **D-2 회귀** — 시계열에 `unit`·`time_of_max`·`global_min` 도 같이 싣는다
 
 ## E. 관문
-- [ ] E-1 backend 전수 · 회귀 전수
-- [ ] E-2 라이브 스택에서 실제 리포트로 끝까지
+- [x] **E-1 backend 344** (회귀 `test_report_blocks.py` 13 + `test_report_media.py` 10)
+- [x] **E-2 라이브 스택 관문** `platform/mcp_server/reports_smoke.py` **23항 PASS**.
+      ★`ImageContent` **종류**를 본다 — 수를 세는 관문으로는 절대 안 잡힌다(dict 안의
+      base64 도 '성공' 이다). `smoke`·`figures_smoke`·`deckops_smoke` 도 전부 초록
 
 ## F. 큰 분석 블록 해석 (사용자 지시)
 - [x] **F-1~F-5 `analytics_summary`** — 7 블록 전수. ★요약을 **다시 계산하지 않는다**:
@@ -43,11 +45,17 @@
 - [x] **F-6 요약이 원본을 가리지 않는다** — `raw_access_note` + `get_block(path=…)` 회귀
 
 ## G. ★결과 이미지 (사용자 지시 — LLM 이 보고 비교)
-- [ ] G-1 `/reports/intake` 가 **번들**(.zip/.tar.gz) 반입 — HTML + 사이드카
-- [ ] G-2 미디어를 SessionFile 로 저장하고 리포트·케이스에 연결(`set_report.media` 정본)
-- [ ] G-3 `GET /reports/{id}/media` — 케이스·뷰·물리량·종류 필터
-- [ ] G-4 ★MCP `report_image` 가 **ImageContent** 로 — 지금은 base64 를 dict 에 넣어
-      Claude 에게 **글자**로 온다(실측). 이게 "이미지로 비교" 의 핵심 공백이다
-- [ ] G-5 ★MCP `report_compare` — 이미지 N장 + 지표 표를 한 번에
-- [ ] G-6 크기 규율 — 장수 상한·축소, 넘으면 **뺀 수를 말한다**
-- [ ] G-7 프런트 이미지 갤러리(케이스별)
+- [x] **G-1 번들 반입** `app/reports/bundle.py`(순수 함수). 가드: 트래버설·링크/장치·
+      멤버 수·멤버 크기·합계 크기·확장자. 실측으로 탈출 2건·비미디어 1건을 **거부하고 셌다**
+- [x] **G-2 저장·연결** 마이그레이션 `0010_report_media`(JSONB). `add_uploaded_file` 이
+      하위 경로를 살려서 선언 경로와 **같은 문자열**로 조인된다.
+      ⚠ `ingest_report` 가 이미 커밋하므로 뒤에서 **커밋해야** 한다(flush 만 하면 사라진다 —
+      반입 응답은 16장인데 `/media` 가 0 을 냈다. 회귀가 다시 읽어 확인한다)
+- [x] **G-3 `/media`** — `case_key`·`kind`·`role`·`images_only` 필터. 비면 **왜 비었는지** 말한다
+- [x] **G-4 `report_image` → ImageContent** (실측 `mimeType=image/png`). mp4 는 모델이
+      못 보므로 **거절하고 peak png 를 권한다**(`path` 를 주면 `role` 로 걸러선 안 된다 —
+      그러면 '그림이 없다' 는 엉뚱한 까닭을 댄다. 실측으로 그랬다)
+- [x] **G-5 `report_compare`** — 지표 표(TextContent) + 케이스별 **ImageContent**.
+      실측: `['TextContent','TextContent','ImageContent',…]` 이미지 3장
+- [x] **G-6 장수 상한 8** — 넘으면 **뺀 수를 말하고** 좁히는 법을 알려 준다
+- [ ] G-7 프런트 이미지 갤러리(케이스별) — **남음**

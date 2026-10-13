@@ -685,7 +685,11 @@ def main():
     #   않는" 것만 못 박는다.
     skill_md = open(os.path.join(REPO, "platform", "mcp_server", "skill",
                                  "kooremapper", "SKILL.md"), encoding="utf-8").read()
-    for must in ("mesh_section_figure", "mesh_surface_figure", "mesh_stack_diagram"):
+    #   같은 규율로 **결과 이미지의 길**도 못 박는다 — `report_image`/`report_compare` 가
+    #   없으면 Claude 는 "결과 그림을 볼 수 있다" 를 모르고, `download_result` 로 base64
+    #   **글자**를 받아 본 줄로 착각한다(그 길이 이 서버에 원래 없었다).
+    for must in ("mesh_section_figure", "mesh_surface_figure", "mesh_stack_diagram",
+                 "report_image", "report_compare", "report_hotspots"):
         check(f"SKILL.md 가 `{must}` 를 적는다 (없으면 Claude 가 그 길을 모른다)",
               must in skill_md)
 

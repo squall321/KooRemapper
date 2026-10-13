@@ -812,6 +812,75 @@ def part_energy_series(data: dict, kind: str, part_id: int | None = None) -> dic
 # ── 스캐터링/섭동 분석 (sphere 전용) ────────────────────────────────
 # 26면 낙하 주변의 방향 섭동에 대한 응답 산포. 케이스를 최근접 26 정준방향으로 묶어
 # 방향별 통계(mean/std/CoV/최악)와 민감도를 낸다. sphere 리포트에서 도출한다.
+# ── 결과 이미지 매핑 ─────────────────────────────────────────────────────────
+#
+# 결과 이미지는 HTML 안에 임베드되지 **않는다** — 옆에 딸린 파일이다(`app/reports/bundle.py`).
+# 그 파일을 **어느 케이스의 그림인지** 아는 정본은 리포트 자신의 구조다.
+#
+#   impact: `set_report.media[set_i][pos_i] = {png, mp4}`
+#           ↔ `set_report.positions[pos_i].id`(케이스) · `set_report.sets[set_i]`(세트)
+#
+# ⚠ 실측 — 25 위치 중 **8 개만** 미디어가 있고 나머지 17 항목은 **빈 항목**(null)이다
+#   (리포트 자신도 `note: "세트 산출물이 있는 위치: 8 / 25."` 로 적는다). 빈 항목을 건너뛰지
+#   않으면 그림이 없는 위치에 그림이 있다고 말하게 된다.
+#
+# ⚠ deep 리포트에는 이 매핑이 **없다**. 그 그림은 형제 `custom_report/` 안에 있고 별개
+#   산출물이다. 그래서 deep 번들의 미디어는 **매핑 없이** 목록만 낸다 — 파일명 규칙으로
+#   케이스를 **추측하지 않는다**(추측한 매핑은 틀려도 그럴듯해 보인다).
+
+def report_media_map(data: dict, kind: str) -> dict:
+    """리포트가 선언한 (미디어 경로 → 케이스·세트) 매핑. 선언이 없으면 빈 매핑.
+
+    반환 `{"declared": [...], "n_declared", "n_empty_slots", "note", "mapped_by"}`
+    """
+    out = {"declared": [], "n_declared": 0, "n_empty_slots": 0,
+           "mapped_by": None, "note": None}
+    if kind != "impact":
+        out["note"] = ("이 리포트 종류는 미디어 매핑을 선언하지 않는다 — 번들에 들어온 그림은 "
+                       "케이스에 묶지 않고 목록으로만 낸다(파일명으로 추측하지 않는다)")
+        return out
+    sr = data.get("set_report")
+    if not isinstance(sr, dict):
+        out["note"] = "`set_report` 가 없다 — 선언된 미디어가 없다"
+        return out
+    media = sr.get("media")
+    positions = sr.get("positions") or []
+    sets = sr.get("sets") or []
+    if not isinstance(media, list):
+        out["note"] = "`set_report.media` 가 없다"
+        return out
+    out["mapped_by"] = "set_report.media[set][position]"
+    for si, per_set in enumerate(media):
+        if not isinstance(per_set, list):
+            continue
+        sinfo = sets[si] if si < len(sets) and isinstance(sets[si], dict) else {}
+        for pi, ent in enumerate(per_set):
+            # ★빈 항목 — 그 위치는 그림이 **없다**. 건너뛰되 센다.
+            if not isinstance(ent, dict) or not (ent.get("png") or ent.get("mp4")):
+                out["n_empty_slots"] += 1
+                continue
+            pinfo = positions[pi] if pi < len(positions) and isinstance(positions[pi], dict) else {}
+            case_key = pinfo.get("id")
+            for role, path in (("peak", ent.get("png")), ("view", ent.get("mp4"))):
+                if not path:
+                    continue
+                out["declared"].append({
+                    "path": path,
+                    "case_key": case_key,
+                    "set_index": si,
+                    "set_name": sinfo.get("name"),
+                    "set_title": sinfo.get("title"),
+                    "role": role,
+                    "kind": "image" if role == "peak" else "video",
+                    "face": pinfo.get("face"),
+                    "x": _num(pinfo.get("x")), "y": _num(pinfo.get("y")),
+                })
+    out["n_declared"] = len(out["declared"])
+    if sr.get("note"):
+        out["generator_note"] = sr["note"]
+    return out
+
+
 # ── 큰 분석 블록 요약 ────────────────────────────────────────────────────────
 #
 # `doe_analysis`(하위 14) · `deep_analytics`(6) · `insights`(6) · `physics`(4) ·
