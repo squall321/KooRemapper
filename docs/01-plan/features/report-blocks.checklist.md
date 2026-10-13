@@ -40,10 +40,14 @@
       하위 분석이 들고 있는 생성기 `summary` 를 그대로 올린다(다시 계산하면 HTML 화면 숫자와
       조용히 갈린다). `available=false`·`empty=true`·`is_mock=true` 를 **미계산**으로 크게 적는다.
 - [x] ~~F-1~~ `doe_analysis` 요약 — 격자·지표·`peak_g_matrix` 최악 셀·거동 분류 수
-- [ ] F-2 `deep_analytics` 요약 — anomaly·fft·pca_modal·safe_drop_zone
-- [ ] F-3 `insights` 요약 — DamageIndex·ReboundField·Symmetry·ContactPulse
-- [ ] F-4 `physics` 요약 — RestitutionMap·StressWaveVelocity·worst_combinations
-- [ ] F-5 `solver_quality`·`trajectories`·`part_motion` 요약
+- [x] F-2 `deep_analytics` — anomaly_detection·fft·pca_modal·per_part_drilldown·
+      safe_drop_zone·srs (라이브 확인)
+- [x] F-3 `insights` — ContactPulse·DamageIndex·ReboundField·Symmetry·Trajectory3D·
+      auto_recommend (라이브 확인)
+- [x] F-4 `physics` — RecoveryDamping·RestitutionMap·StressWaveVelocity·worst_combinations
+      (라이브 확인 — `reports_smoke` 가 못 박는다)
+- [x] F-5 `solver_quality`·`contact_profile`·`set_report` 도 같은 함수가 덮는다.
+      `trajectories`·`part_motion` 은 큰 원본이라 `/blocks` 로 꺼낸다(요약할 `summary` 가 없다)
 - [x] **F-6 요약이 원본을 가리지 않는다** — `raw_access_note` + `get_block(path=…)` 회귀
 
 ## G. ★결과 이미지 (사용자 지시 — LLM 이 보고 비교)
