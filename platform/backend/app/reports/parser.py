@@ -703,13 +703,35 @@ def part_series(data: dict, kind: str, case_key: str, part_id: int) -> dict:
     """한 케이스·한 파트의 시계열(다운샘플). DB 미저장분을 원본에서 복원."""
     pid = str(part_id)
     if kind == "deep":
-        out: dict = {"kind": "deep", "part_id": part_id, "stress": {}, "motion": {}}
-        for entry in data.get("stress") or []:
-            if str(entry.get("part_id")) == pid:
-                out["stress"][entry.get("quantity") or "von_mises"] = {
+        # ⚠ 전에는 `stress` **하나만** 읽었다. 같은 모양의 배열이 일곱 개인데 여섯이 끊겨
+        #   주응력·주변형·변형 **시계열**이 어디에도 도달하지 않았다(피크값만 살아 있었다).
+        #   실측: `max_principal`·`min_principal`·`max_principal_strain`·
+        #   `min_principal_strain`·`strain`·`vm_strain` 이 리포트에 있는데 버려졌다.
+        out: dict = {"kind": "deep", "part_id": part_id, "stress": {}, "motion": {},
+                     "series_blocks": []}
+        for block in DEEP_SERIES_BLOCKS:
+            entries = data.get(block)
+            if not isinstance(entries, list) or not entries:
+                continue
+            bucket = {}
+            for entry in entries:
+                if not isinstance(entry, dict) or str(entry.get("part_id")) != pid:
+                    continue
+                bucket[entry.get("quantity") or block] = {
                     "t": entry.get("t"), "max": entry.get("max_vals"), "avg": entry.get("avg_vals"),
                     "global_max": _num(entry.get("global_max")),
+                    "global_min": _num(entry.get("global_min")),
+                    "time_of_max": _num(entry.get("time_of_max")),
+                    "unit": entry.get("unit"),
                 }
+            if not bucket:
+                continue
+            out["series_blocks"].append(block)
+            # `stress` 는 종전 소비자가 그 자리를 쓰므로 모양을 유지한다(하위 호환).
+            if block == "stress":
+                out["stress"] = bucket
+            else:
+                out[block] = bucket
         m = (data.get("motion") or {}).get(pid)
         if isinstance(m, dict):
             out["motion"] = {k: m.get(k) for k in ("t", "disp_mag", "vel_mag", "acc_mag") if m.get(k) is not None}
@@ -790,6 +812,384 @@ def part_energy_series(data: dict, kind: str, part_id: int | None = None) -> dic
 # ── 스캐터링/섭동 분석 (sphere 전용) ────────────────────────────────
 # 26면 낙하 주변의 방향 섭동에 대한 응답 산포. 케이스를 최근접 26 정준방향으로 묶어
 # 방향별 통계(mean/std/CoV/최악)와 민감도를 낸다. sphere 리포트에서 도출한다.
+# ── 큰 분석 블록 요약 ────────────────────────────────────────────────────────
+#
+# `doe_analysis`(하위 14) · `deep_analytics`(6) · `insights`(6) · `physics`(4) ·
+# `solver_quality`(2) 는 꺼낼 수는 있어도 그대로는 쓰기 어렵다. 그래서 요약을 얹는다.
+#
+# ★요약을 **내가 다시 계산하지 않는다.** 하위 분석은 거의 모두 생성기가 계산한 `summary` 를
+#   들고 있고(실측), 그것이 HTML 화면과 같은 숫자다. 내가 per_position 을 다시 집계하면 그
+#   숫자가 화면과 **조용히 갈릴** 수 있다 — 이 리포가 사본 문제로 이미 여러 번 치른 값이다.
+#   그래서 `summary` 는 **그대로 올리고**, 상세는 **형태만** 적는다(원본은 `/blocks` 로).
+#
+# ★`available=false` · `empty=true` 를 **크게** 적는다. 그 플래그를 빼고 요약만 내면 받는 쪽이
+#   "계산됐는데 값이 0" 으로 읽는다 — 사실은 **계산되지 않았다**.
+
+#: 요약 대상 블록. 생성기가 늘리면 여기 한 줄 더한다(그리고 `list_blocks` 가 늘 전수를 본다).
+ANALYTICS_BLOCKS = ("doe_analysis", "deep_analytics", "insights", "physics",
+                    "solver_quality", "contact_profile", "set_report")
+
+#: "계산되지 않았다" 를 뜻하는 플래그 — 이름만 보고 뜻을 뒤집지 않도록 둘을 나눠 적는다.
+_NEGATIVE_FLAGS = {"empty": True, "available": False, "ok": False, "is_mock": True}
+
+
+def _sub_shape(v) -> dict:
+    if isinstance(v, dict):
+        return {"type": "object", "count": len(v), "keys": sorted(v)[:24]}
+    if isinstance(v, list):
+        return {"type": "array", "count": len(v),
+                "keys": sorted(v[0])[:24] if v and isinstance(v[0], dict) else []}
+    return {"type": type(v).__name__, "value": v if isinstance(v, (int, float, str, bool)) else None}
+
+
+def _summarize_sub(name: str, v) -> dict:
+    """하위 분석 하나 — 생성기의 `summary` 는 그대로, 나머지는 형태만."""
+    if not isinstance(v, dict):
+        return {"name": name, "shape": _sub_shape(v)}
+    out: dict = {"name": name}
+    caveats = []
+    for flag, bad in _NEGATIVE_FLAGS.items():
+        if flag in v and bool(v[flag]) is bad:
+            caveats.append(flag)
+    if caveats:
+        out["not_computed"] = caveats
+        out["not_computed_note"] = ("%s — 이 분석은 **계산되지 않았다**(값이 0 인 것이 아니다)"
+                                    % ", ".join("%s=%s" % (f, v.get(f)) for f in caveats))
+    if isinstance(v.get("summary"), (dict, list)):
+        out["summary"] = v["summary"]          # ★생성기 값 그대로 — 다시 계산하지 않는다
+    # 요약 밖의 쓸모 있는 스칼라·소형 dict 는 같이 올린다(큰 것은 형태만).
+    detail = {}
+    for k, sv in v.items():
+        if k in ("summary",) or k in _NEGATIVE_FLAGS:
+            continue
+        if isinstance(sv, (int, float, str, bool)) or sv is None:
+            out.setdefault("values", {})[k] = sv
+        elif isinstance(sv, (dict, list)) and _rough_bytes(sv) <= 1200:
+            out.setdefault("values", {})[k] = sv
+        else:
+            detail[k] = _sub_shape(sv)
+    if detail:
+        out["detail_shape"] = detail
+    return out
+
+
+def analytics_summary(data: dict, block: str | None = None) -> dict:
+    """큰 분석 블록의 요약 — 하위 분석별 `summary` + 상세의 형태.
+
+    원본은 가리지 않는다: 같은 데이터를 `get_block(name, path=…)` 로 끝까지 꺼낼 수 있다.
+    """
+    names = [block] if block else list(ANALYTICS_BLOCKS)
+    out: dict = {"blocks": [], "requested": block,
+                 "raw_access_note": "원본은 `/blocks/{name}` (path= 로 하위 선택)로 꺼낸다"}
+    for name in names:
+        v = data.get(name)
+        if v is None:
+            out["blocks"].append({"name": name, "available": False,
+                                  "note": "이 리포트에 없는 블록이다"})
+            continue
+        entry: dict = {"name": name, "available": True, "bytes": _rough_bytes(v)}
+        if isinstance(v, dict):
+            entry["subs"] = [_summarize_sub(k, v[k]) for k in sorted(v)]
+            entry["n_subs"] = len(entry["subs"])
+        else:
+            entry["shape"] = _sub_shape(v)
+        out["blocks"].append(entry)
+    out["n_blocks"] = len(out["blocks"])
+    return out
+
+
+# ── 핫스팟 군집 (deep) ───────────────────────────────────────────────────────
+#
+# 생성기: `koo_deep_report` 를 `unified_analyzer --hotspot-clusters` 산출물로 돌리면
+# `DATA.hotspot` 에 (파트 × 판정기준) 레코드가 실린다. 실측 34파트 × 3기준 = 102 레코드.
+#
+# 레코드 스칼라 — top_percent(상위 몇 %를 뽑았나) · threshold_value(그 문턱) ·
+#   distance_threshold / element_size_ref(군집 묶는 거리) · element_count_{selected,clustered,total} ·
+#   direction(max|min) · uniform(값이 고르면 군집이 뜻없다) · bbox_min/max · weight_measure
+# 군집 항 — rank · center · radius_enclosing / radius_rms · element_count · volume ·
+#   stress_max / stress_mean · strain_max / strain_mean · peak_element_id · peak_time
+#
+# ★`uniform=true` 는 "값이 고르다" 는 뜻이다 — 그때의 군집은 **핫스팟이 아니다**. 숨기지 않고
+#   적어서 내보낸다(숨기면 받는 쪽이 '가장 뜨거운 곳' 으로 읽는다).
+
+_HOTSPOT_ORDERS = ("stress_max", "stress_mean", "volume", "element_count",
+                   "radius_enclosing", "rank")
+
+
+def hotspot_clusters(data: dict, *, criterion: str | None = None,
+                     part_id: int | None = None, top: int = 20,
+                     order: str = "stress_max") -> dict:
+    """deep 리포트의 핫스팟 군집 — 평탄화해서 정렬·상한을 둔 목록으로 낸다."""
+    recs = data.get("hotspot")
+    if not isinstance(recs, list) or not recs:
+        return {"available": False, "n_records": 0, "clusters": [],
+                "note": "이 리포트에는 핫스팟 군집이 없다 — 생성기를 "
+                        "`unified_analyzer --hotspot-clusters` 로 돌려야 실린다"}
+    if order not in _HOTSPOT_ORDERS:
+        order = "stress_max"
+
+    criteria, parts, flat = set(), set(), []
+    n_uniform = 0
+    for rec in recs:
+        if not isinstance(rec, dict):
+            continue
+        crit = rec.get("criterion")
+        pid = _to_int(rec.get("part_id"))
+        criteria.add(crit)
+        parts.add(pid)
+        if rec.get("uniform"):
+            n_uniform += 1
+        if criterion and crit != criterion:
+            continue
+        if part_id is not None and pid != part_id:
+            continue
+        ctx = {
+            "part_id": pid, "part_name": rec.get("part_name"), "criterion": crit,
+            "direction": rec.get("direction"), "element_type": rec.get("element_type"),
+            # ★군집이 뜻을 갖는 전제들 — 같이 실어 보낸다
+            "uniform": bool(rec.get("uniform")),
+            "top_percent": _num(rec.get("top_percent")),
+            "threshold_value": _num(rec.get("threshold_value")),
+            "value_extreme": _num(rec.get("value_extreme")),
+            "distance_threshold": _num(rec.get("distance_threshold")),
+            "element_size_ref": _num(rec.get("element_size_ref")),
+            "element_count_selected": rec.get("element_count_selected"),
+            "element_count_clustered": rec.get("element_count_clustered"),
+            "element_count_total": rec.get("element_count_total"),
+            "bbox_min": rec.get("bbox_min"), "bbox_max": rec.get("bbox_max"),
+            "strain_available": bool(rec.get("strain_available")),
+            "strain_measure": rec.get("strain_measure"),
+            "weight_measure": rec.get("weight_measure"),
+        }
+        for c in rec.get("clusters") or []:
+            if not isinstance(c, dict):
+                continue
+            flat.append({**ctx,
+                         "rank": c.get("rank"),
+                         "center": c.get("center"),
+                         "radius_enclosing": _num(c.get("radius_enclosing")),
+                         "radius_rms": _num(c.get("radius_rms")),
+                         "element_count": c.get("element_count"),
+                         "volume": _num(c.get("volume")),
+                         "stress_max": _num(c.get("stress_max")),
+                         "stress_mean": _num(c.get("stress_mean")),
+                         "strain_max": _num(c.get("strain_max")),
+                         "strain_mean": _num(c.get("strain_mean")),
+                         "peak_element_id": c.get("peak_element_id"),
+                         "peak_time": _num(c.get("peak_time"))})
+
+    # ⚠ direction=min 인 기준은 값이 **음수**다 — 절대값으로 줄을 세워야 '가장 센 곳' 이 된다.
+    def key(x):
+        v = x.get(order)
+        if v is None:
+            return (1, 0.0)
+        return (0, -abs(v)) if order in ("stress_max", "stress_mean") else (0, -v)
+
+    flat.sort(key=key)
+    total = len(flat)
+    shown = flat[: max(0, top)] if top else flat
+    out = {
+        "available": True,
+        "n_records": len(recs),
+        "n_clusters": total,
+        "criteria": sorted(c for c in criteria if c),
+        "parts": sorted(p for p in parts if p is not None),
+        "order": order,
+        "order_note": "stress_* 는 **절대값** 기준이다 — direction=min 기준의 값은 음수다",
+        "filter": {"criterion": criterion, "part_id": part_id},
+        "clusters": shown,
+    }
+    if n_uniform:
+        out["uniform_records"] = n_uniform
+        out["uniform_note"] = ("값이 고른(uniform) 레코드가 %d 개다 — 그 군집은 '가장 뜨거운 곳' "
+                               "이 아니다" % n_uniform)
+    if total > len(shown):
+        out["truncated"] = {"returned": len(shown), "total": total}
+    return out
+
+
+# ── 거동 군집 (impact) ───────────────────────────────────────────────────────
+
+def behavior_clusters(data: dict) -> dict:
+    """impact 리포트의 거동 아키타입 군집 — 위치를 몇 가지 거동으로 묶은 결과.
+
+    ★`is_mock` 을 **그대로 올린다.** 합성 군집을 실측으로 읽으면 결론이 거짓이 된다
+    (같은 부류의 사고를 `synthetic_footprint` 에서 이미 치렀다).
+    """
+    c = data.get("clusters")
+    if not isinstance(c, dict) or not c:
+        return {"available": False, "note": "이 리포트에는 거동 군집이 없다"}
+    arche = c.get("archetypes") or []
+    labels = c.get("labels") if isinstance(c.get("labels"), dict) else {}
+    members: dict[str, list] = {}
+    for pos, idx in labels.items():
+        i = _to_int(idx)
+        name = arche[i] if isinstance(i, int) and 0 <= i < len(arche) else str(idx)
+        members.setdefault(str(name), []).append(pos)
+    groups = [{"archetype": k, "index": arche.index(k) if k in arche else None,
+               "n_positions": len(v), "positions": sorted(v)}
+              for k, v in members.items()]
+    groups.sort(key=lambda g: -g["n_positions"])
+    out = {
+        "available": True,
+        "n_clusters": _to_int(c.get("n")),
+        "archetypes": arche,
+        "features_used": c.get("features_used") or [],
+        "n_positions_labeled": len(labels),
+        "groups": groups,
+    }
+    # ★선언한 군집 수와 **실제로 쓰인** 아키타입 수가 다를 수 있다. 실측: n=4 인데 25위치가
+    #   전부 한 아키타입(`slow-decay`)이었다 — 군집이 **분리되지 않은** 것이다. 그것을 적지
+    #   않으면 받는 쪽이 "거동이 네 가지" 로 읽는다.
+    n_used = len(groups)
+    out["n_archetypes_used"] = n_used
+    if out["n_clusters"] and n_used < out["n_clusters"]:
+        out["degenerate"] = True
+        out["degenerate_note"] = (
+            "선언 %s 군집 중 **실제로 쓰인 것은 %d 개**다 — 거동이 갈리지 않았다는 뜻이고, "
+            "'%s' 가지 거동으로 읽으면 안 된다"
+            % (out["n_clusters"], n_used, out["n_clusters"]))
+    else:
+        out["degenerate"] = False
+
+    if c.get("is_mock"):
+        out["is_mock"] = True
+        out["mock_note"] = ("★이 군집은 **합성(mock)** 이다 — 실측 거동이 아니므로 결론의 "
+                            "근거로 쓰지 말라")
+    else:
+        out["is_mock"] = False
+    return out
+
+
+# ── 일반 블록 접근 ───────────────────────────────────────────────────────────
+#
+# ★왜 이것이 있나 (2026-10-13). 정규화(`normalize_*`)는 **허용 목록**이다. 생성기가 임베드
+# 키를 늘리면 플랫폼은 가만히 있어도 뒤처지고, 뒤처진 것이 **보이지 않는다**(에러도 경고도
+# 없다). 실측으로 그 상태였다 — deep 21키 중 11, impact 27키 중 18 이 어디에도 도달하지
+# 않았고 그중에 핫스팟 군집 102건과 거동 군집이 있었다.
+#
+# 그래서 허용 목록을 늘리는 대신 **모든 최상위 블록을 이름으로 꺼낼 수 있게** 한다.
+# 원본 HTML 은 이미 보관된다(`ImpactReport.source_file_id` — 온디맨드 재파싱용).
+
+#: 정규화·전용 함수가 **원본에서 읽는** 최상위 키. 이 목록은 `list_blocks` 가
+#: `read_by_parser` 를 적는 근거이고, 회귀가 '새 키가 생겼다' 를 알려 주는 기준이다.
+#: ⚠ 출력 필드명과 **섞어 세지 말라** — `"min_principal"` 은 `parts_metrics` 의 출력 키이기도
+#: 해서, 이름만 grep 하면 읽지도 않는 키가 '읽힘' 으로 세어진다(실측으로 속았다).
+PARSER_READS = frozenset({
+    # 공통/정규화
+    "parts", "findings", "summary", "metadata", "sim", "yield_stress", "meta",
+    # sphere
+    "results", "sim_params", "project_name", "doe_strategy", "total_runs",
+    "successful_runs", "failed_runs", "sphere_coverage", "angular_spacing_deg",
+    # deep
+    "glstat", "contact_metrics", "binout", "motion", "stress", "test_dir",
+    # deep 시계열(DEEP_SERIES_BLOCKS 로 넓혔다)
+    "strain", "vm_strain", "max_principal", "min_principal",
+    "max_principal_strain", "min_principal_strain",
+    # impact
+    "kpi", "unit_labels", "generated_by", "device_bbox", "device_outline", "energy_flows",
+})
+
+
+def _rough_bytes(v) -> int:
+    """직렬화 크기 어림 — 응답을 불리기 전에 재려는 용도다(정확할 필요는 없다)."""
+    try:
+        return len(json.dumps(v, ensure_ascii=False, default=str))
+    except Exception:
+        return -1
+
+
+def _block_shape(v) -> dict:
+    if isinstance(v, dict):
+        return {"type": "object", "count": len(v), "sub_keys": sorted(v)[:40]}
+    if isinstance(v, list):
+        first = v[0] if v else None
+        return {"type": "array", "count": len(v),
+                "sub_keys": sorted(first)[:40] if isinstance(first, dict) else [],
+                "item_type": type(first).__name__ if first is not None else None}
+    return {"type": type(v).__name__, "count": None, "sub_keys": []}
+
+
+def list_blocks(data: dict) -> dict:
+    """임베드 데이터의 최상위 블록 목록 — 이름·형태·크기·`read_by_parser`.
+
+    `read_by_parser=False` 가 "쓸 수 없다" 는 뜻은 아니다. `get_block` 으로 꺼낼 수 있다.
+    그 칸은 **정규화가 아직 해석하지 않는다**는 사실을 숨기지 않기 위해 있다.
+    """
+    blocks = []
+    for name in sorted(data):
+        v = data[name]
+        sh = _block_shape(v)
+        blocks.append({"name": name, **sh,
+                       "bytes": _rough_bytes(v),
+                       "read_by_parser": name in PARSER_READS})
+    return {
+        "n_blocks": len(blocks),
+        "n_unread": sum(1 for b in blocks if not b["read_by_parser"]),
+        "blocks": blocks,
+    }
+
+
+def get_block(data: dict, name: str, path: str | None = None,
+              max_bytes: int = 200_000, limit: int | None = None) -> dict:
+    """최상위 블록(또는 그 하위 경로)을 꺼낸다.
+
+    `path` 는 `a.b.0.c` 꼴 — dict 키와 list 인덱스를 점으로 잇는다.
+    `limit` 는 배열을 앞에서 몇 개만. 크기가 `max_bytes` 를 넘으면 **잘랐다고 말한다** —
+    조용히 자르면 받는 쪽이 전체를 본 줄로 안다.
+    """
+    if name not in data:
+        return {"name": name, "found": False,
+                "available": sorted(data)[:80],
+                "note": "그런 블록이 없다 — list_blocks 로 목록을 보라"}
+    cur = data[name]
+    walked = []
+    for seg in (path or "").split(".") if path else []:
+        if seg == "":
+            continue
+        if isinstance(cur, dict) and seg in cur:
+            cur = cur[seg]
+        elif isinstance(cur, list) and seg.lstrip("-").isdigit() and -len(cur) <= int(seg) < len(cur):
+            cur = cur[int(seg)]
+        else:
+            return {"name": name, "found": False, "path": path, "walked": ".".join(walked),
+                    "note": "경로가 끊겼다 — 여기서 쓸 수 있는 키/인덱스: %s"
+                            % (sorted(cur)[:30] if isinstance(cur, dict)
+                               else ("0..%d" % (len(cur) - 1) if isinstance(cur, list) else "(스칼라)"))}
+        walked.append(seg)
+
+    truncated = None
+    if isinstance(cur, list) and limit is not None and len(cur) > limit:
+        truncated = {"kind": "limit", "returned": limit, "total": len(cur)}
+        cur = cur[:limit]
+    nbytes = _rough_bytes(cur)
+    if nbytes > max_bytes:
+        if isinstance(cur, list) and cur:
+            keep = max(1, int(len(cur) * max_bytes / max(nbytes, 1)))
+            truncated = {"kind": "bytes", "returned": keep, "total": len(cur),
+                         "bytes": nbytes, "max_bytes": max_bytes}
+            cur = cur[:keep]
+        else:
+            return {"name": name, "found": True, "path": path, "value": None,
+                    "shape": _block_shape(cur), "bytes": nbytes,
+                    "truncated": {"kind": "too_big", "bytes": nbytes, "max_bytes": max_bytes},
+                    "note": "통째로는 너무 크다 — `path` 로 하위를 좁히거나 max_bytes 를 올려라"}
+    out = {"name": name, "found": True, "path": path, "value": cur,
+           "shape": _block_shape(cur), "bytes": _rough_bytes(cur),
+           "read_by_parser": name in PARSER_READS}
+    if truncated:
+        out["truncated"] = truncated
+        out["note"] = "배열을 잘라서 돌려줬다 — 전체 %d 중 %d" % (truncated["total"], truncated["returned"])
+    return out
+
+
+#: deep 리포트의 **같은 모양** 시계열 배열들 — `[{part_id, quantity, t, max_vals, avg_vals,
+#: global_max, global_min, time_of_max, unit}, …]`. 전에는 `stress` 하나만 읽어 나머지 여섯이
+#: 끊겨 있었다. 생성기가 늘리면 여기 한 줄만 더한다.
+DEEP_SERIES_BLOCKS = ("stress", "strain", "vm_strain",
+                      "max_principal", "min_principal",
+                      "max_principal_strain", "min_principal_strain")
+
 _SCATTER_METRICS = ("peak_stress", "peak_strain", "peak_plastic_strain", "peak_g",
                     "peak_disp", "peak_vel", "peak_ie", "peak_ke")
 _CUBE_BASES: list[tuple[tuple[int, int, int], tuple[float, float, float]]] | None = None
