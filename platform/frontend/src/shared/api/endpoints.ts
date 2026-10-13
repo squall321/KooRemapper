@@ -5,6 +5,7 @@ import type {
   ReportCase, ReportDirectional, ReportEnergy, ReportFactQuery, ReportGeometry, ReportListItem,
   ReportKind, ReportPartRisk, ReportPartSeries, ReportScatter, ScatterMetric, SessionDetail,
   SessionFile, SessionSummary, TokenCreated, TokenInfo, User,
+  ReportAnalytics, ReportBehaviorClusters, ReportBlocks, ReportHotspots, ReportMedia,
 } from './types'
 
 // auth
@@ -323,4 +324,54 @@ export async function svgBlobUrl(sessionId: string, fileId: number): Promise<str
   const res = await api.get(`/sessions/${sessionId}/files/${fileId}/download`, { responseType: 'blob' })
   const svg = new Blob([res.data as Blob], { type: 'image/svg+xml' })
   return URL.createObjectURL(svg)
+}
+
+/** 리포트 임베드 블록 전수 — 무엇이 들어 있나 / 무엇이 아직 해석 안 되나. */
+export async function reportBlocks(reportId: string): Promise<ReportBlocks> {
+  const { data } = await api.get(`/reports/${reportId}/blocks`)
+  return unwrap<ReportBlocks>(data)
+}
+/** 핫스팟 군집(deep) — 어디가 뜨거운가. */
+export async function reportHotspots(
+  reportId: string, opts: { criterion?: string; part_id?: number; top?: number; order?: string } = {},
+): Promise<ReportHotspots> {
+  const { data } = await api.get(`/reports/${reportId}/hotspots`, { params: opts })
+  return unwrap<ReportHotspots>(data)
+}
+/** 거동 아키타입 군집(impact). */
+export async function reportBehaviorClusters(reportId: string): Promise<ReportBehaviorClusters> {
+  const { data } = await api.get(`/reports/${reportId}/clusters`)
+  return unwrap<ReportBehaviorClusters>(data)
+}
+/** 큰 분석 블록 요약 — 생성기 summary 를 그대로 싣는다. */
+export async function reportAnalytics(reportId: string, block?: string): Promise<ReportAnalytics> {
+  const { data } = await api.get(`/reports/${reportId}/analytics`, { params: block ? { block } : {} })
+  return unwrap<ReportAnalytics>(data)
+}
+/** 결과 이미지·영상 목록. 내용은 `mediaBlobUrl` 로 받는다. */
+export async function reportMedia(
+  reportId: string, opts: { case_key?: string; kind?: string; role?: string; images_only?: boolean } = {},
+): Promise<ReportMedia> {
+  const { data } = await api.get(`/reports/${reportId}/media`, { params: opts })
+  return unwrap<ReportMedia>(data)
+}
+
+/** 결과 이미지를 `<img src>` 로 띄울 blob URL.
+ *
+ * ⚠ `svgBlobUrl` 과 같은 선례이고 같은 이유로 **`<img>` 로만** 쓴다. 다운로드 엔드포인트가
+ * MIME 을 `application/octet-stream` 으로 주므로 타입을 여기서 정한다. 확장자로 정하되
+ * 모르는 것은 png 로 두지 않고 그대로 octet-stream 을 쓴다 — 틀린 타입을 억지로 붙이면
+ * 브라우저가 깨진 그림을 조용히 보여 준다. */
+export function mediaMime(path: string): string {
+  const ext = path.toLowerCase().slice(path.lastIndexOf('.'))
+  const m: Record<string, string> = {
+    '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif', '.webp': 'image/webp',
+    '.mp4': 'video/mp4', '.webm': 'video/webm',
+  }
+  return m[ext] ?? 'application/octet-stream'
+}
+export async function mediaBlobUrl(sessionId: string, fileId: number, path: string): Promise<string> {
+  const res = await api.get(`/sessions/${sessionId}/files/${fileId}/download`, { responseType: 'blob' })
+  return URL.createObjectURL(new Blob([res.data as Blob], { type: mediaMime(path) }))
 }

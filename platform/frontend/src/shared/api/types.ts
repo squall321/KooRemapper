@@ -427,3 +427,137 @@ export interface ReportCase {
   max_disp: number | null
   min_safety_factor: number | null
 }
+
+// ── 리포트 블록·핫스팟·군집·미디어 (2026-10-13) ──────────────────────────────
+// ★왜 이 타입들이 있나 — 리포트 임베드 데이터의 블록 상당수가 플랫폼에서 **버려지고** 있었다
+//   (실측: deep 21키 중 11, impact 27키 중 18). 그중에 핫스팟 군집 102레코드와 거동 군집이
+//   있었다. 선언이 없으면 신호가 조용히 사라지므로 여기에 적어 둔다.
+
+export interface ReportBlock {
+  name: string
+  type: string
+  count: number | null
+  sub_keys: string[]
+  item_type?: string | null
+  bytes: number
+  /** 정규화가 해석하는가. false 는 "쓸 수 없다" 가 아니라 "아직 해석 안 한다" 다. */
+  read_by_parser: boolean
+}
+export interface ReportBlocks {
+  n_blocks: number
+  n_unread: number
+  blocks: ReportBlock[]
+}
+
+export interface HotspotCluster {
+  part_id: number
+  part_name?: string | null
+  criterion?: string | null
+  direction?: string | null
+  /** ⚠ true 면 값이 고르다 — 그 군집은 '가장 뜨거운 곳' 이 **아니다**. */
+  uniform: boolean
+  top_percent?: number | null
+  threshold_value?: number | null
+  distance_threshold?: number | null
+  element_count_selected?: number | null
+  element_count_total?: number | null
+  rank?: number | null
+  center?: number[] | null
+  radius_enclosing?: number | null
+  radius_rms?: number | null
+  element_count?: number | null
+  volume?: number | null
+  /** ⚠ `min_principal` 기준의 값은 **음수**다 — 크기는 절대값으로 비교해야 한다. */
+  stress_max?: number | null
+  stress_mean?: number | null
+  strain_max?: number | null
+  peak_element_id?: number | null
+  peak_time?: number | null
+}
+export interface ReportHotspots {
+  available: boolean
+  n_records?: number
+  n_clusters?: number
+  criteria?: string[]
+  parts?: number[]
+  order?: string
+  order_note?: string
+  clusters: HotspotCluster[]
+  uniform_records?: number
+  uniform_note?: string
+  truncated?: { returned: number; total: number }
+  note?: string
+}
+
+export interface BehaviorClusterGroup {
+  archetype: string
+  index: number | null
+  n_positions: number
+  positions: string[]
+}
+export interface ReportBehaviorClusters {
+  available: boolean
+  n_clusters?: number | null
+  n_archetypes_used?: number
+  /** ⚠ true 면 선언한 군집 수와 **실제로 쓰인** 수가 다르다 — "N 가지 거동" 으로 읽으면 안 된다. */
+  degenerate?: boolean
+  degenerate_note?: string
+  /** ⚠ true 면 **합성**이다 — 결론의 근거로 쓰면 안 된다. */
+  is_mock?: boolean
+  mock_note?: string
+  archetypes?: string[]
+  features_used?: string[]
+  n_positions_labeled?: number
+  groups?: BehaviorClusterGroup[]
+  note?: string
+}
+
+export interface AnalyticsSub {
+  name: string
+  summary?: unknown
+  values?: Record<string, unknown>
+  detail_shape?: Record<string, unknown>
+  /** "값이 0" 이 아니라 **계산되지 않았다**는 뜻. */
+  not_computed?: string[]
+  not_computed_note?: string
+  shape?: unknown
+}
+export interface ReportAnalyticsBlock {
+  name: string
+  available: boolean
+  bytes?: number
+  n_subs?: number
+  subs?: AnalyticsSub[]
+  note?: string
+}
+export interface ReportAnalytics {
+  n_blocks: number
+  requested?: string | null
+  raw_access_note?: string
+  blocks: ReportAnalyticsBlock[]
+}
+
+export interface ReportMediaItem {
+  path: string
+  stored_as?: string
+  file_id: number
+  bytes: number
+  kind: 'image' | 'video'
+  /** ⚠ 모델이 볼 수 있는지 — png/jpeg/gif/webp 는 보고 **mp4 는 못 본다**. */
+  can_llm_view: boolean
+  case_key?: string | null
+  set_name?: string | null
+  role?: string | null
+  declared?: boolean
+}
+export interface ReportMedia {
+  report_id: string
+  kind: string
+  n_total: number
+  n_returned: number
+  n_images: number
+  n_videos: number
+  cases_with_media: string[]
+  media: ReportMediaItem[]
+  note?: string
+}

@@ -7,14 +7,17 @@
 // 색은 전부 테마 토큰(currentColor/text-*)으로 잡아 라이트·다크가 자동으로 따라온다.
 import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Activity, AlertTriangle, Compass, Layers, LineChart, Sigma, Zap } from 'lucide-react'
+import { Activity, AlertTriangle, Compass, Flame, Image as ImageIcon, Layers, LineChart, Network, Sigma, Table2, Zap } from 'lucide-react'
 import {
-  reportAngleStats, reportDirectional, reportEnergy, reportPartEnergy, reportPartRisk,
+  mediaBlobUrl, reportAnalytics, reportAngleStats, reportBehaviorClusters, reportBlocks,
+  reportDirectional,
+  reportEnergy, reportHotspots, reportMedia, reportPartEnergy, reportPartRisk,
   reportPartSeries, reportScatter,
 } from '@/shared/api/endpoints'
 import type {
-  AngleGroupStats, PartEnergySeries, Report, ReportCase, ReportDirectional, ReportEnergy,
-  ReportPartRisk, ReportPartSeries, ReportScatter, ScatterMetric,
+  AngleGroupStats, PartEnergySeries, Report, ReportAnalytics, ReportBehaviorClusters, ReportCase,
+  ReportDirectional, ReportEnergy, ReportHotspots, ReportMedia, ReportMediaItem, ReportPartRisk,
+  ReportPartSeries, ReportScatter, ScatterMetric,
 } from '@/shared/api/types'
 import { Badge, EmptyState, Spinner } from '@/shared/ui/ui'
 
@@ -143,7 +146,8 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: 'ok
 }
 
 // ── 탭 ───────────────────────────────────────────────────────────────────────
-type TabKey = 'parts' | 'directional' | 'scatter' | 'anglestats' | 'energy' | 'partenergy' | 'series'
+type TabKey = 'parts' | 'directional' | 'scatter' | 'anglestats' | 'energy' | 'partenergy'
+  | 'series' | 'hotspots' | 'clusters' | 'analytics' | 'media'
 const TABS: Array<{ key: TabKey; label: string; icon: typeof Layers; kinds?: string[] }> = [
   { key: 'parts', label: '파트 위험도', icon: Layers },
   { key: 'directional', label: '방향 취약도', icon: Compass },
@@ -152,6 +156,12 @@ const TABS: Array<{ key: TabKey; label: string; icon: typeof Layers; kinds?: str
   { key: 'energy', label: '에너지·접촉', icon: AlertTriangle },
   { key: 'partenergy', label: '파트 에너지', icon: Zap, kinds: ['deep'] },
   { key: 'series', label: '파트 시계열', icon: LineChart },
+  // ★아래 넷은 리포트에 **있었는데 플랫폼이 버리고 있던** 것들이다(실측: deep 21키 중 11,
+  //   impact 27키 중 18). 그중에 핫스팟 군집 102레코드와 거동 군집이 있었다.
+  { key: 'hotspots', label: '핫스팟 군집', icon: Flame, kinds: ['deep'] },
+  { key: 'clusters', label: '거동 군집', icon: Network, kinds: ['impact'] },
+  { key: 'media', label: '결과 이미지', icon: ImageIcon },
+  { key: 'analytics', label: '분석 블록', icon: Table2 },
 ]
 
 export function ReportAnalysis({ report, cases }: { report: Report; cases: ReportCase[] }) {
@@ -186,6 +196,10 @@ export function ReportAnalysis({ report, cases }: { report: Report; cases: Repor
         {tab === 'energy' && <EnergyView reportId={report.id} cases={cases} />}
         {tab === 'partenergy' && <PartEnergyView reportId={report.id} />}
         {tab === 'series' && <SeriesView report={report} cases={cases} />}
+        {tab === 'hotspots' && <HotspotsView reportId={report.id} />}
+        {tab === 'clusters' && <ClustersView reportId={report.id} />}
+        {tab === 'media' && <MediaView report={report} />}
+        {tab === 'analytics' && <AnalyticsView reportId={report.id} />}
       </div>
     </div>
   )
@@ -533,6 +547,298 @@ function PartEnergyView({ reportId }: { reportId: string }) {
             : <span className="text-muted">—</span>}
         </div>
       </div>
+    </div>
+  )
+}
+
+// ── 핫스팟 군집 (deep) ───────────────────────────────────────────────────────
+// 생성기(`unified_analyzer --hotspot-clusters`)가 만든 **공간 군집**이다. 리포트에 있었는데
+// 플랫폼이 읽지 않아 어디에도 도달하지 않았다(실측 102 레코드 · 105 군집 · 34파트 × 3기준).
+function HotspotsView({ reportId }: { reportId: string }) {
+  const [criterion, setCriterion] = useState<string>('')
+  const q = useQuery<ReportHotspots>({
+    queryKey: ['report-hotspots', reportId, criterion],
+    queryFn: () => reportHotspots(reportId, { criterion: criterion || undefined, top: 50 }),
+  })
+  if (q.isLoading) return <Spinner />
+  const d = q.data
+  if (!d?.available) {
+    return (
+      <EmptyState
+        title="핫스팟 군집 없음"
+        hint={d?.note ?? '이 리포트에는 핫스팟 군집이 없습니다.'}
+      />
+    )
+  }
+  const rows = d.clusters ?? []
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2 text-[11px]">
+        <span className="text-muted">
+          레코드 {d.n_records} · 군집 {d.n_clusters} · 파트 {d.parts?.length ?? 0}개
+        </span>
+        <select
+          value={criterion}
+          onChange={(e) => setCriterion(e.target.value)}
+          className="bg-bg border border-border rounded px-1 py-0.5"
+        >
+          <option value="">판정기준 전체</option>
+          {(d.criteria ?? []).map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+      </div>
+      {/* ★크기 비교는 절대값이다 — min 기준의 값은 음수다. 그 사실을 화면에도 적는다. */}
+      {d.order_note && <div className="text-[10px] text-muted">{d.order_note}</div>}
+      {/* ★값이 고른 레코드의 군집은 '가장 뜨거운 곳' 이 아니다. */}
+      {d.uniform_note && (
+        <div className="text-[11px]" style={{ color: '#a33' }}>⚠ {d.uniform_note}</div>
+      )}
+      <div className="overflow-x-auto">
+        <table className="w-full text-[11px]">
+          <thead className="text-muted">
+            <tr className="text-left">
+              <th className="py-1 pr-2">파트</th>
+              <th className="pr-2">기준</th>
+              <th className="pr-2">순위</th>
+              <th className="pr-2 text-right">|응력| 최대</th>
+              <th className="pr-2 text-right">요소</th>
+              <th className="pr-2 text-right">부피</th>
+              <th className="pr-2 text-right">반경</th>
+              <th className="pr-2">중심 (x, y, z)</th>
+              <th className="pr-2 text-right">피크 시각</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((c, i) => (
+              <tr key={i} className="border-t border-border/60">
+                <td className="py-1 pr-2">
+                  {c.part_id}
+                  {c.uniform && <span style={{ color: '#a33' }} title="값이 고르다 — 핫스팟이 아니다"> ⚠</span>}
+                </td>
+                <td className="pr-2 mono">{c.criterion}</td>
+                <td className="pr-2">{c.rank ?? '—'}</td>
+                <td className="pr-2 text-right mono">{smart(c.stress_max == null ? null : Math.abs(c.stress_max))}</td>
+                <td className="pr-2 text-right">{c.element_count ?? '—'}</td>
+                <td className="pr-2 text-right mono">{smart(c.volume)}</td>
+                <td className="pr-2 text-right mono">{fmt(c.radius_enclosing, 2)}</td>
+                <td className="pr-2 mono">
+                  {c.center ? c.center.map((v) => fmt(v, 1)).join(', ') : '—'}
+                </td>
+                <td className="pr-2 text-right mono">{c.peak_time == null ? '—' : c.peak_time.toExponential(2)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {d.truncated && (
+        <div className="text-[10px] text-muted">
+          전체 {d.truncated.total} 중 {d.truncated.returned} 만 표시했습니다.
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── 거동 군집 (impact) ───────────────────────────────────────────────────────
+function ClustersView({ reportId }: { reportId: string }) {
+  const q = useQuery<ReportBehaviorClusters>({
+    queryKey: ['report-clusters', reportId], queryFn: () => reportBehaviorClusters(reportId),
+  })
+  if (q.isLoading) return <Spinner />
+  const d = q.data
+  if (!d?.available) return <EmptyState title="거동 군집 없음" hint={d?.note ?? ''} />
+  return (
+    <div className="space-y-2 text-[11px]">
+      {/* ★합성 군집을 실측으로 읽으면 결론이 거짓이 된다 — 가장 먼저 크게 적는다. */}
+      {d.is_mock && (
+        <div className="rounded border px-2 py-1" style={{ color: '#a33', borderColor: '#a33' }}>
+          ★ {d.mock_note ?? '이 군집은 합성(mock)입니다 — 결론의 근거로 쓰지 마세요.'}
+        </div>
+      )}
+      {/* ★선언 수와 쓰인 수가 다르면 "N 가지 거동" 으로 읽어선 안 된다. */}
+      {d.degenerate && (
+        <div className="rounded border px-2 py-1" style={{ color: '#a33', borderColor: '#a33' }}>
+          ★ {d.degenerate_note}
+        </div>
+      )}
+      <div className="text-muted">
+        선언 {d.n_clusters ?? '—'} · 실제 사용 {d.n_archetypes_used ?? '—'} · 라벨된 위치{' '}
+        {d.n_positions_labeled ?? 0}
+      </div>
+      {!!d.features_used?.length && (
+        <div className="flex flex-wrap gap-1">
+          <span className="text-muted">군집에 쓴 특징:</span>
+          {d.features_used.map((f) => (
+            <span key={f} className="rounded bg-bg px-1.5 py-0.5 mono">{f}</span>
+          ))}
+        </div>
+      )}
+      <div className="space-y-1 pt-1">
+        {(d.groups ?? []).map((g) => (
+          <div key={g.archetype} className="border border-border rounded p-2">
+            <div className="flex items-center justify-between">
+              <span className="font-medium">{g.archetype}</span>
+              <Badge>{g.n_positions} 위치</Badge>
+            </div>
+            <div className="text-muted mono pt-1 break-all">
+              {g.positions.slice(0, 24).join(' · ')}
+              {g.positions.length > 24 && ` … (+${g.positions.length - 24})`}
+            </div>
+          </div>
+        ))}
+      </div>
+      {!!d.archetypes?.length && d.archetypes.length !== (d.groups ?? []).length && (
+        <div className="text-[10px] text-muted">
+          선언된 아키타입: {d.archetypes.join(' · ')} — 위에 안 보이는 것은 **쓰이지 않았다**는 뜻입니다.
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── 결과 이미지 갤러리 ───────────────────────────────────────────────────────
+// ★결과 이미지는 리포트 HTML 안에 **없다** — 옆에 딸린 파일이라, 번들(.zip/.tar.gz)로 올려야
+//   함께 들어온다. 비어 있을 때 그 사실을 말하지 않으면 "그림이 없는 리포트" 로 오해한다.
+function MediaView({ report }: { report: Report }) {
+  const [caseKey, setCaseKey] = useState<string>('')
+  const q = useQuery<ReportMedia>({
+    queryKey: ['report-media', report.id, caseKey],
+    queryFn: () => reportMedia(report.id, { case_key: caseKey || undefined }),
+  })
+  if (q.isLoading) return <Spinner />
+  const d = q.data
+  if (!d || d.n_total === 0) {
+    return <EmptyState title="결과 이미지 없음" hint={d?.note ?? ''} />
+  }
+  const images = d.media.filter((m) => m.kind === 'image')
+  const videos = d.media.filter((m) => m.kind === 'video')
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2 text-[11px]">
+        <span className="text-muted">
+          이미지 {d.n_images} · 영상 {d.n_videos} · 그림 있는 케이스 {d.cases_with_media.length}
+        </span>
+        <select
+          value={caseKey}
+          onChange={(e) => setCaseKey(e.target.value)}
+          className="bg-bg border border-border rounded px-1 py-0.5"
+        >
+          <option value="">케이스 전체</option>
+          {d.cases_with_media.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+      </div>
+      <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
+        {images.map((m) => (
+          <MediaTile key={m.file_id} sessionId={report.session_id} item={m} />
+        ))}
+      </div>
+      {!!videos.length && (
+        <div className="text-[10px] text-muted pt-1">
+          영상 {videos.length}개도 함께 들어왔습니다(목록만) — 다운로드로 보세요:{' '}
+          <span className="mono">{videos.slice(0, 3).map((v) => v.path.split('/').pop()).join(', ')}</span>
+          {videos.length > 3 && ' …'}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** 한 장 — blob URL 은 쓰고 나서 **반드시 해제**한다(안 하면 탭을 오래 열어 둘수록 샌다). */
+function MediaTile({ sessionId, item }: { sessionId: string; item: ReportMediaItem }) {
+  const [url, setUrl] = useState<string | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  useEffect(() => {
+    let dead = false
+    let made: string | null = null
+    mediaBlobUrl(sessionId, item.file_id, item.path)
+      .then((u) => {
+        made = u
+        if (dead) URL.revokeObjectURL(u)
+        else setUrl(u)
+      })
+      .catch((e) => !dead && setErr(String(e?.message ?? e)))
+    return () => {
+      dead = true
+      if (made) URL.revokeObjectURL(made)
+    }
+  }, [sessionId, item.file_id, item.path])
+  const name = item.path.split('/').pop()
+  return (
+    <figure className="border border-border rounded overflow-hidden">
+      {/* ⚠ `<img>` 로만 띄운다 — `svgBlobUrl` 과 같은 규율(스크립트가 실행되지 않는다). */}
+      {url ? (
+        <img src={url} alt={name} className="w-full block" />
+      ) : (
+        <div className="h-32 flex items-center justify-center text-[10px] text-muted">
+          {err ? `불러오기 실패: ${err}` : '불러오는 중…'}
+        </div>
+      )}
+      <figcaption className="px-2 py-1 text-[10px] text-muted">
+        <div className="flex items-center justify-between gap-1">
+          <span className="mono truncate" title={item.path}>{name}</span>
+          {item.role && <Badge>{item.role}</Badge>}
+        </div>
+        <div className="truncate">
+          {item.case_key ?? '케이스 미지정'}
+          {item.set_name ? ` · ${item.set_name}` : ''}
+          {!item.declared && ' · 리포트가 케이스를 선언하지 않음'}
+        </div>
+      </figcaption>
+    </figure>
+  )
+}
+
+// ── 분석 블록 요약 ───────────────────────────────────────────────────────────
+// 요약은 **생성기가 계산한 값 그대로**다(여기서 다시 계산하면 리포트 화면 숫자와 갈린다).
+function AnalyticsView({ reportId }: { reportId: string }) {
+  const q = useQuery<ReportAnalytics>({
+    queryKey: ['report-analytics', reportId], queryFn: () => reportAnalytics(reportId),
+  })
+  const bq = useQuery({ queryKey: ['report-blocks', reportId], queryFn: () => reportBlocks(reportId) })
+  if (q.isLoading) return <Spinner />
+  const blocks = (q.data?.blocks ?? []).filter((b) => b.available)
+  if (!blocks.length) return <EmptyState title="분석 블록 없음" hint="이 리포트에는 큰 분석 블록이 없습니다." />
+  return (
+    <div className="space-y-2 text-[11px]">
+      {bq.data && (
+        <div className="text-muted">
+          임베드 블록 {bq.data.n_blocks}개 · 아직 해석하지 않는 것 {bq.data.n_unread}개
+          <span className="text-[10px]"> (아래 요약 + API `/blocks/{'{name}'}` 로 원본까지 볼 수 있습니다)</span>
+        </div>
+      )}
+      {blocks.map((b) => (
+        <details key={b.name} className="border border-border rounded">
+          <summary className="px-2 py-1 cursor-pointer">
+            <span className="font-medium mono">{b.name}</span>
+            <span className="text-muted"> · 하위 {b.n_subs ?? 0}</span>
+          </summary>
+          <div className="px-2 pb-2 space-y-1">
+            {(b.subs ?? []).map((sub) => (
+              <div key={sub.name} className="border-t border-border/60 pt-1">
+                <div className="flex items-center gap-2">
+                  <span className="mono">{sub.name}</span>
+                  {sub.not_computed && (
+                    <span style={{ color: '#a33' }} title={sub.not_computed_note}>
+                      ★미계산 ({sub.not_computed.join(', ')})
+                    </span>
+                  )}
+                </div>
+                {/* ★'미계산' 은 "값이 0" 이 아니다 — 그 문구를 그대로 보인다. */}
+                {sub.not_computed_note && (
+                  <div className="text-[10px]" style={{ color: '#a33' }}>{sub.not_computed_note}</div>
+                )}
+                {sub.summary != null && (
+                  <pre className="text-[10px] mono whitespace-pre-wrap break-all text-muted">
+                    {JSON.stringify(sub.summary, null, 1).slice(0, 1200)}
+                  </pre>
+                )}
+              </div>
+            ))}
+          </div>
+        </details>
+      ))}
+      {q.data?.raw_access_note && (
+        <div className="text-[10px] text-muted">{q.data.raw_access_note}</div>
+      )}
     </div>
   )
 }
