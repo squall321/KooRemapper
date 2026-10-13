@@ -417,6 +417,53 @@ def main():
         check("M-3 ★Card 2 의 값(7)을 절점으로 세지 않는다 — 절점은 네 개뿐이다",
               rm_["picked"]["nodes"] == 4, rm_["picked"])
         check("M-4 카드 두 장을 셌다", rm_["picked"]["aux_element_cards"] == 2, rm_["picked"])
+
+        # ── N: ★초기상태를 버렸으면 **크게** 말한다 ──────────────────────────
+        # 조용히 빠지면 프리스트레스된 모델에서 파트를 뽑아 그대로 돌리고 "응력이 왜 0 인가" 를
+        # 한참 뒤에 묻는다. `dropped_keywords` 안에 섞으면 수십 개 중 한 줄이라 아무도 안 본다.
+        #
+        # ⚠ 왜 자동으로 잘라 싣지 않나 — `*INITIAL_STRESS_SOLID` 는 카드 수가 **데이터로**
+        #   정해진다(Vol_I 190149-: NINT·NHISV·LARGE·NTHINT·NTHHSV, "LARGE=1 이면 수십 장").
+        #   그 규칙을 틀리면 **응력이 요소끼리 섞인다** — 조용한 오답이 손실보다 나쁘다.
+        L4 = ["*KEYWORD", "*NODE"]
+        for i in range(1, 9):
+            L4.append(nl(i, i % 2, (i // 2) % 2, i // 4))
+        L4 += ["*ELEMENT_SOLID", e8(1, 1), e8(*range(1, 9))]
+        L4 += ["*PART", "body", s10(1, 1, 1), "*SECTION_SOLID", s10(1, 1),
+               "*MAT_ELASTIC", "         1  7.85E-9  210000     0.3"]
+        L4 += ["*INITIAL_STRESS_SOLID", s10(1, 1, 0, 0),
+               "      10.0      20.0      30.0       0.0       0.0       0.0"]
+        L4 += ["*INITIAL_STRAIN_SOLID", s10(1),
+               "      0.01      0.02      0.00      0.00      0.00      0.00"]
+        L4 += ["*END"]
+        write(os.path.join(d, "pre.k"), "\n".join(L4) + "\n")
+        cfg(d, "n.yaml", "model: pre.k\noutput: n.k\nparts: [1]\nreport: repn.json\n")
+        rc, out = run(binary, d, "extract-parts", "n.yaml")
+        rn_ = rep(d, "repn.json")
+        nk = open(os.path.join(d, "n.k")).read()
+        check("N-0 rc=0 (상태가 없다고 거절하지는 않는다)", rc == 0, out[-300:])
+        check("N-1 ★초기상태를 버렸다고 **경고**한다 (dropped_keywords 에 묻지 않는다)",
+              "초기상태" in out and "초기응력이 없다" in out, out[-500:])
+        check("N-2 ★왜 자르지 않았는지 말한다 (응력이 섞일 수 있다)",
+              "요소끼리 섞" in out, out[-400:])
+        check("N-3 ★이어 가는 법을 말한다 (dynain → update/prestress · ID 보존)",
+              "dynain" in out and ("update" in out or "prestress" in out) and "ID" in out,
+              out[-400:])
+        check("N-4 리포트에 따로 적는다",
+              set(rn_["dropped_initial_state"]) == {"*INITIAL_STRESS_SOLID", "*INITIAL_STRAIN_SOLID"},
+              rn_["dropped_initial_state"])
+        check("N-5 그 note 가 리포트에도 있다",
+              "요소끼리 섞" in (rn_.get("dropped_initial_state_note") or ""),
+              rn_.get("dropped_initial_state_note"))
+        check("N-6 실제로 산출 덱에 초기상태가 없다 (경고가 사실이다)",
+              "*INITIAL_STRESS" not in nk and "*INITIAL_STRAIN" not in nk)
+        # (거짓 경보 금지는 N-8·N-9 가 실제로 본다 — 여기 중복 항을 두지 않는다)
+        cfg(d, "n2.yaml", "model: aux.k\noutput: n2.k\nparts: [9]\nreport: repn2.json\n")
+        rc, out2 = run(binary, d, "extract-parts", "n2.yaml")
+        check("N-8 상태가 없는 덱은 조용하다", "초기상태" not in out2, out2[-200:])
+        check("N-9 그때 리포트 칸은 비어 있다",
+              rep(d, "repn2.json")["dropped_initial_state"] == {},
+              rep(d, "repn2.json")["dropped_initial_state"])
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

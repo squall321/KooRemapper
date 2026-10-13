@@ -383,6 +383,9 @@ struct Needed {
 struct WriteStats {
     long long nodeLines = 0, elemCards = 0, partsEmitted = 0, partVariantBlocks = 0;
     std::map<std::string, long long> dropped;       // 버린 키워드 → 버린 줄 수
+    // ★버린 것 중 **조용하면 치명적인** 것 — 초기상태·이력이다. `dropped_keywords` 안에
+    //   섞어 두면 수십 개 중 한 줄이 되어 아무도 안 본다. 따로 세어 **크게** 말한다.
+    std::map<std::string, long long> droppedState;
     std::map<std::string, long long> setsTrimmed;   // 키워드 → 자른 블록 수
     std::vector<int> setsDropped;                   // 못 자르는 변형의 SID
     std::map<std::string, long long> carriedWhole;  // 통째로 실은 ID 블록(과포함)
@@ -391,6 +394,15 @@ struct WriteStats {
 };
 
 enum class Act { VERBATIM, NODE, ELEM, ELEM_AUX, PART, PART_VARIANT, IDBLOCK, SETS, DROP };
+
+// 버리면 **조용하면 치명적인** 키워드 — 초기상태·이력. 자르려면 카드 수를 알아야 하고
+// `*INITIAL_STRESS_SOLID` 는 그것이 **데이터로** 정해진다(Vol_I 190149-: NINT·NHISV·LARGE·
+// NTHINT·NTHHSV 가 한 요소당 줄 수를 정하고 "LARGE=1 이면 수십 장" 이다). 틀리면 응력이
+// 요소끼리 **섞인다** — 조용한 오답이 손실보다 나쁘다. 그래서 자르지 않고 버렸다고 말한다.
+bool isStateKeyword(const std::string& kw) {
+    return starts(kw, "*INITIAL_") || starts(kw, "*STRESS_") ||
+           starts(kw, "*INTERFACE_SPRINGBACK");
+}
 
 Act classify(const std::string& kw, const Opts& o, bool elemSupported, bool auxSupported) {
     if (kw == "*KEYWORD" || kw == "*TITLE" || kw == "*END" || starts(kw, "*PARAMETER") ||
@@ -610,7 +622,10 @@ struct Writer {
         if (act == Act::VERBATIM) *out << line << "\n";
         else if (act == Act::NODE || act == Act::ELEM || act == Act::ELEM_AUX)
             pendingKw = line;                                 // 첫 줄이 실릴 때 낸다
-        else if (act == Act::DROP) st.dropped[kw] += 1;
+        else if (act == Act::DROP) {
+            st.dropped[kw] += 1;
+            if (isStateKeyword(kw)) st.droppedState[kw] += 1;
+        }
     }
 
     void onData(const std::string& line, size_t g, const std::string& baseDir, int depth) {
@@ -625,6 +640,7 @@ struct Writer {
                     break;
                 }
                 st.dropped[kw] += 1;
+                if (isStateKeyword(kw)) st.droppedState[kw] += 1;
                 break;
             }
             case Act::NODE: {
@@ -1271,6 +1287,23 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
     if (st.partVariantBlocks > 0)
         console.warning("*PART_* 변형 블록 " + std::to_string(st.partVariantBlocks) +
                         " 개를 통째로 실었다 — 안 고른 파트가 같이 왔을 수 있다(요소 없는 파트는 경고다)");
+    // ★초기상태를 버렸으면 **크게** 말한다. 조용히 빠지면 프리스트레스된 모델에서 파트를
+    //   뽑아 그대로 돌리고 "응력이 왜 0 인가" 를 한참 뒤에 묻는다.
+    if (!st.droppedState.empty()) {
+        long long n = 0;
+        std::string kws;
+        for (const auto& kv : st.droppedState) {
+            n += kv.second;
+            kws += (kws.empty() ? "" : ", ") + kv.first;
+        }
+        console.warning("★초기상태·이력을 버렸다 — " + kws + " (" + std::to_string(n) +
+                        " 줄). 뽑은 덱은 **초기응력이 없다.**");
+        console.info("  카드 수가 데이터로 정해지는 꼴이라(NINT·NHISV·LARGE) 자르면 응력이 "
+                     "요소끼리 섞일 수 있어 **자르지 않았다**.");
+        console.info("  상태를 이어가려면 전체 모델 해석의 dynain 을 `update`(좌표)·"
+                     "`prestress`(초기응력)로 **뽑은 덱에 다시** 적용하라 — `renumber: false` 가 "
+                     "기본이라 절점·요소 ID 가 그대로여서 ID 로 맞는다.");
+    }
     if (!st.dropped.empty()) {
         long long total = 0;
         for (const auto& kv : st.dropped) total += kv.second;
@@ -1356,6 +1389,14 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
         jf << "  \"carried_whole\": " << kwMap(st.carriedWhole) << ",\n";
         jf << "  \"part_variant_blocks_carried_whole\": " << st.partVariantBlocks << ",\n";
         jf << "  \"dropped_keywords\": " << kwMap(st.dropped) << ",\n";
+        jf << "  \"dropped_initial_state\": " << kwMap(st.droppedState) << ",\n";
+        if (!st.droppedState.empty())
+            jf << "  \"dropped_initial_state_note\": "
+               << jsonStr("뽑은 덱에는 초기응력·이력이 없다. 카드 수가 데이터로 정해지는 꼴이라"
+                          "(NINT·NHISV·LARGE) 자르면 응력이 요소끼리 섞일 수 있어 자르지 않았다. "
+                          "전체 모델의 dynain 을 update/prestress 로 다시 적용하라 — "
+                          "ID 가 보존되므로 ID 로 맞는다")
+               << ",\n";
         jf << "  \"renumber\": {\"on\": " << (rm.on ? "true" : "false") << ", \"map\": "
            << (mapPath.empty() ? std::string("null") : jsonStr(mapPath)) << "},\n";
         jf << "  \"verify\": "

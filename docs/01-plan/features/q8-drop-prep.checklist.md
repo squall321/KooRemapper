@@ -154,3 +154,20 @@
 - [x] **D-3 `info` 안내 한 줄** — `--strict` 가 **이미** rc=1 을 냈다(앞선 보고를 정정했다).
       기본 rc=0 은 계약이라 두고, 사유가 있을 때만 "스크립트로 거르려면 `--strict`" 를
       한 줄 안내한다. 정상 덱에서는 조용하다. 회귀 `test_strict_gate.py` D절 13항.
+
+## 추가 (2026-10-13, "다 진행해")
+
+- [x] **D-4 ★규모 주장을 실측으로 바꿨다** — 합성 Q8 급 덱(1.9GB · 절점 13,368,568 ·
+      요소 13,082,211 · `*INCLUDE` 분할)으로 쟀다. `cleanup-nodes` 16.7초/686MB(report) ·
+      37.0초/1.28GB(safe) · `extract-parts` 34.0초/1.18GB. 전부 되읽기 미정의 0.
+      생성기 `/data/koorm_scale/gen.py`. 매뉴얼 §48.9 · 보고서 §6 에 기록.
+      ⚠ 아직 **남는 것**: 요청서 수치(118,529)와의 대조 — 그쪽 덱이나 report JSON 이 와야 한다.
+- [x] **D-5 ★③ `map-state` 의 전제를 검증했다 — 절반만 맞았다**
+      맞는 절반: `renumber: false` 로 ID 가 보존되므로 `update`(§43.6, ID 기준)·`prestress`
+      로 **ID 로** 상태를 얹을 수 있다 → 공간 보간 op 은 필요 없다.
+      틀린 절반: `extract-parts` 가 `*INITIAL_STRESS_*` 를 **버리고 있었다**(`classify` 의
+      DROP 으로 떨어져 `dropped_keywords` 에 묻혔다).
+- [x] **D-6 그 손실을 크게 말한다** — `dropped_initial_state` 로 따로 세고 전용 WARN +
+      이어 가는 법(dynain → `update`/`prestress`)을 적는다. 회귀 `extract-parts` N절 **9항**.
+      ★자르지 않은 이유도 적는다: `*INITIAL_STRESS_SOLID` 는 카드 수가 **데이터로** 정해져
+      (NINT·NHISV·LARGE) 틀리면 **응력이 요소끼리 밀린다** — 조용한 오답이 손실보다 나쁘다.
