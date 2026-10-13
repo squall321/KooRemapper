@@ -160,7 +160,8 @@
 - [x] **D-4 ★규모 주장을 실측으로 바꿨다** — 합성 Q8 급 덱(1.9GB · 절점 13,368,568 ·
       요소 13,082,211 · `*INCLUDE` 분할)으로 쟀다. `cleanup-nodes` 16.7초/686MB(report) ·
       37.0초/1.28GB(safe) · `extract-parts` 34.0초/1.18GB. 전부 되읽기 미정의 0.
-      생성기 `/data/koorm_scale/gen.py`. 매뉴얼 §48.9 · 보고서 §6 에 기록.
+      생성기를 **리포에 넣었다**: `tools/scale/gen_scale_deck.py`(회귀에는 넣지 않았다 —
+      전수 관문이 매번 5GB 를 쓰면 안 된다). 매뉴얼 §48.9 · 보고서 §6 에 기록.
       ⚠ 아직 **남는 것**: 요청서 수치(118,529)와의 대조 — 그쪽 덱이나 report JSON 이 와야 한다.
 - [x] **D-5 ★③ `map-state` 의 전제를 검증했다 — 절반만 맞았다**
       맞는 절반: `renumber: false` 로 ID 가 보존되므로 `update`(§43.6, ID 기준)·`prestress`
