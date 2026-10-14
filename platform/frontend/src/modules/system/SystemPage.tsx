@@ -24,9 +24,17 @@ type SystemStatus = {
   operations: number
 }
 type ParityRow = { feature: string; web: boolean; mcp: boolean; note?: string }
+type OntologyState = {
+  enabled: boolean
+  source: 'option' | 'inferred'
+  reason: string
+  missing: string[]
+}
 type Capabilities = {
   operations: number
   mcp_tools?: number
+  /** 과제·개정 기능의 스위치 상태. 서버가 **사유까지** 준다 — 꺼졌으면 왜 꺼졌는지. */
+  ontology?: OntologyState
   parity: ParityRow[]
   mcp_url?: string | null
   mcp_add_hint: string
@@ -183,6 +191,44 @@ export function SystemPage() {
           />
         </div>
       ) : null}
+
+      {/* ---------- 과제·개정 기능 스위치 ----------
+          ★여기가 없으면 "켰는데 안 보인다" 를 `curl` 없이 확인할 방법이 없다. 포탈의 설정
+          항목(dynaforge-ontology)이 "켜졌는지 여기서 보라" 고 가리키는 자리다.
+          꺼짐은 **사유와 함께** 보인다 — 꺼짐과 고장을 같은 모양으로 만들지 않는다. */}
+      {c?.ontology && (
+        <Card className="mb-6">
+          <CardHeader className="flex items-center justify-between">
+            <span className="font-medium text-sm">과제·개정 (온톨로지)</span>
+            <span className="flex items-center gap-2 text-xs text-muted">
+              <OkBadge ok={c.ontology.enabled} on="켜짐" off="꺼짐" />
+              <Badge tone="default">{c.ontology.source === 'option' ? '옵션이 정함' : '있는 것으로 정함'}</Badge>
+            </span>
+          </CardHeader>
+          <CardBody className="space-y-2 text-sm">
+            <div className={c.ontology.enabled ? 'text-muted' : 'text-warning'}>{c.ontology.reason}</div>
+            {!!c.ontology.missing.length && (
+              <div className="text-xs text-muted">
+                비어 있는 설정 —{' '}
+                {/* ★구분자를 글자로 넣는다 — 여백(mr-2)만으로는 복사·낭독에서 두 이름이
+                    `KOORM_SP_CORE_URLKOORM_SP_CORE_TOKEN` 한 덩어리로 읽힌다(Playwright
+                    접근성 스냅샷에서 실제로 그렇게 보였다). */}
+                {c.ontology.missing.map((m, i) => (
+                  <span key={m}>
+                    {i > 0 && <span className="text-muted"> · </span>}
+                    <span className="mono">{m}</span>
+                  </span>
+                ))}
+                <span className="block mt-1">
+                  DynaForge 박스 <span className="mono">platform/.env</span> 에 넣고{' '}
+                  <span className="mono">./infra/scripts/start.sh</span> — 마이그레이션까지 같이 돕니다.
+                  강제로 켜려면 <span className="mono">KOORM_ONTOLOGY=1</span>.
+                </span>
+              </div>
+            )}
+          </CardBody>
+        </Card>
+      )}
 
       {/* ---------- Parity matrix ---------- */}
       <Card className="mb-6">
