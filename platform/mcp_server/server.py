@@ -1388,7 +1388,10 @@ async def list_tasks(ctx: Context, q: str = "", limit: int = 100) -> dict:
     """허브에서 받은 **과제 목록**(과제코드·과제명). `q` 로 코드·이름 일부 검색.
     ★목록이 비면 `reason` 을 본다 — 「수신이 꺼져 있다」 와 「받았지만 없다」 는 다르다.
     / Mirrored PLM tasks. An empty list carries a `reason`."""
-    return await _get(ctx, "/ontology/tasks", {"q": q or None, "limit": limit})
+    params: dict = {"limit": limit}
+    if q:
+        params["q"] = q      # ★빈 값을 None 으로 실으면 httpx 가 `q=` 를 보낸다 — 키를 뺀다
+    return await _get(ctx, "/ontology/tasks", params)
 
 
 @mcp.tool()
@@ -1409,7 +1412,7 @@ async def report_revision(report_id: str, ctx: Context, task_key: str = "") -> d
     **버리지 않고** 보여 주는 것이다.
     / The linked revision, any mismatch, and unchosen candidates with evidence."""
     return await _get(ctx, f"/reports/{report_id}/revision",
-                      {"task_key": task_key or None})
+                      {"task_key": task_key} if task_key else None)
 
 
 @mcp.tool()
@@ -1442,7 +1445,9 @@ async def plan_task_links(ctx: Context, limit: int = 0) -> dict:
     ★**아무것도 쓰지 않는다.** `links`(붙는다)·`proposal`(후보 있음)·`unmatched`(없음)로
     갈라서 주고, **이름조차 없는 리포트 수**를 따로 센다. 짐작으로 붙이지 마라.
     / A dry plan for attaching legacy free-text task names. Writes nothing."""
-    return await _get(ctx, "/ontology/task-links", {"limit": limit or None})
+    # ⚠`{"limit": None}` 을 넘기면 httpx 가 `limit=` 를 빈 값으로 보내고 `int` 쿼리가
+    #   **422 로 거절한다**(실측 — 기본 호출이 그래서 깨져 있었다). 키를 아예 뺀다.
+    return await _get(ctx, "/ontology/task-links", {"limit": limit} if limit > 0 else None)
 
 
 if __name__ == "__main__":
