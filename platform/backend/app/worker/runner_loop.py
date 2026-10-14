@@ -33,6 +33,7 @@ from app.runner.newline_audit import audit_newlines
 from app.runner.stcx_client import (StcxClient, StcxUploader, parse_status, parse_submit,
                                     registry_id_of)
 from app.shared import storage
+from app.worker import plm_sync
 from app.shared.buildinfo import build_info
 from app.shared.logctx import reset_correlator, set_correlator
 
@@ -702,6 +703,10 @@ async def _loop() -> None:
     # 외부 잡 스캔은 **시간 기준**이다. "할 일이 없을 때만" 으로 하면 로컬 큐가 바쁜 동안
     # 외부 잡이 영영 마무리되지 않는다(기다리는 쪽은 그게 제일 답답하다).
     next_scan = 0.0
+    # 기준정보 수신도 **시간 기준**이다(외부 잡 스캔과 같은 자리·같은 모양). 끄면 아예 안 돈다.
+    # 첫 틱을 0 으로 두지 않는 이유 — 기동 직후에 바깥을 두드리면 기동 실패와 수신 실패가
+    # 같은 순간에 섞여 로그에서 갈라지지 않는다.
+    next_plm = asyncio.get_running_loop().time() + 30.0
     while not _stop.is_set():
         loop_now = asyncio.get_running_loop().time()
         if loop_now >= next_scan:
@@ -710,6 +715,13 @@ async def _loop() -> None:
                 await _poll_external_once()
             except Exception:       # 폴링 실패가 워커를 멈추면 로컬 잡까지 선다
                 logger.exception("external job poll failed")
+
+        if plm_sync.enabled() and loop_now >= next_plm:
+            next_plm = loop_now + max(60, settings.sp_core_sync_sec)
+            try:
+                await plm_sync.sync_once()
+            except Exception:       # 수신 실패가 워커를 멈추면 로컬 잡까지 선다
+                logger.exception("plm sync poll failed")
 
         async with SessionLocal() as db:
             job_id = await _claim_one(db)

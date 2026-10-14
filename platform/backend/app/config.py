@@ -108,6 +108,9 @@ class Settings(BaseSettings):
     sp_core_token: str = ""        # `core:read` 범위 PAT. `.env` 에 둔다(§7 ④)
     # 한 쪽에 몇 건을 받나. 허브가 더 작게 줄 수 있다 — 그때는 허브가 준 `next` 를 따른다.
     sp_core_page_size: int = 500
+    # 주기 수신 간격(초). **0 이면 끈다** — 기본이 꺼짐인 이유는 허브가 아직 없기 때문이다.
+    # 없는 곳을 주기적으로 두드리면 로그가 실패로 가득 차고, 진짜 실패가 그 속에 묻힌다.
+    sp_core_sync_sec: int = 0
 
     # --- AI Data Hub (시뮬레이션 리포트 등재 대상) ---
     # 비우면 publish-datahub 비활성(400). 기본은 호스트 네트워크 공유 인스턴스.

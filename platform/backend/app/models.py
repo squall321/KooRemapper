@@ -309,6 +309,9 @@ class OntoRelationType(Base):
     directed: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     transitive: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     acyclic: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # `many_to_one`·`one_to_many`·`many_to_many`·`one_to_one`. **정의 파일에만 있고 코어 API
+    # 응답에는 없다** — 그래서 받은 것은 비어 있고, 자체 정의에서만 채워진다(0012).
+    cardinality: Mapped[str | None] = mapped_column(String(20))
     src: Mapped[list | None] = mapped_column(JSONB)            # 허용 출발 타입(비면 제약 없음)
     dst: Mapped[list | None] = mapped_column(JSONB)
     source: Mapped[str] = mapped_column(String(20), default=SOURCE_SELF, nullable=False)

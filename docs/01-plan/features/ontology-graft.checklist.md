@@ -56,8 +56,12 @@
 - [x] **S1-2 표 다섯** `onto_types`·`onto_relation_types`·`onto_objects`·`onto_relations`·
       `onto_sync_state` — StepForge 와 **같은 이름·칸**, `properties` 는 **JSONB**.
       마이그레이션 `0011_ontology`(개발 DB 에 올렸다)
-- [ ] **S1-7 부서는 `system` 거울로** 행 복제 0 — 포탈 소속 헤더가 정본(A-15)
-- [ ] **S1-3 잡 `plm_sync`** 기존 워커에 — 네트워크만, 바이너리 없음
+- [x] **S1-7 부서는 행을 만들지 않는다** 받은 선의 **먼 끝**으로만 산다(SP `object_links` 와
+      같은 자리). `test_a_relation_to_a_system_type_never_creates_an_object_row` 가 지킨다
+- [x] **S1-3 `plm_sync`** `app/worker/plm_sync.py` — 잡이 아니라 **주기 작업**이다(잡은 세션에
+      매달리고 기준정보는 세션의 일이 아니다). 외부 잡 스캔과 같은 자리·같은 모양.
+      **기본 꺼짐**(`sp_core_sync_sec=0`) — 없는 허브를 두드리면 진짜 실패가 로그에 묻힌다.
+      배선이 지워지지 않게 구조 시험까지(`test_the_worker_still_calls_it`)
 - [x] **S1-4 설정** `sp_core_url`·`sp_core_token`·`sp_core_page_size` — 기본값 빈 문자열,
       주소나 토큰이 비면 **아무것도 부르지 않고** `unavailable` 로 실패한다
 - [x] **S1-5 수신 규칙 열하나 전수 회귀** `tests/test_sp_core_rules.py` **23항**(가짜 허브) —
@@ -75,11 +79,17 @@
 - [ ] **S1-6 실제 허브에서 한 번 받기**(§7 ② 뒤) — 관문이 초록인 것과 도는 것은 다르다
 
 ## S2. 자체 온톨로지 정의
-- [ ] **S2-1 `platform/core/ontology/dynaforge-core.json`** — `dev_revision`·`revision_of`·
-      `supersedes`·`measured_at`
-- [ ] **S2-2 작은 검증기** 값 종류·필수·카디널리티·참조 타입·순환 금지
-- [ ] **S2-3 왕복** 허브의 `plm-core` 를 그대로 읽어 통과 · 우리 정의가 SP import 꼴로 왕복
-- [ ] **S2-4 `rev_seq` 는 데이터다** — 정규식 나열 순서에 암묵이던 것을 꺼낸다
+- [x] **S2-1 `platform/core/ontology/dynaforge-core.json`** — `dev_revision`(속성 11) +
+      `revision_of`·`supersedes`·`measured_at`. SP import 꼴 그대로.
+      ★`code` 의 정규식이 리포트 쪽 `_STAGE_RE` 와 **같은지** 시험이 대조한다(두 벌이 되면
+      한쪽만 고쳐진다). `rev_seq` 는 **데이터**다
+- [x] **S2-2 검증기** `app/runner/ontology_def.py` — 값 종류 10 · 필수 · 카디널리티 4 ·
+      참조 타입 · **순환 금지**(자기를 가리키면 `acyclic` 필수 · 끝이 안 겹치는데 `acyclic`
+      이면 **막는 것이 없다**고 흠). 모르는 키는 **알림**이고 흠이 아니다(수신 규칙 5 자세).
+      판별력 시험 12항 — 통과만 보는 검증기는 아무것도 안 보는 것과 구별되지 않는다
+- [x] **S2-3 왕복** ★허브의 `plm-core.json`·`work-core.json` 을 **바꾸지 않고** 읽어 흠 0 ·
+      알림 0(`section` 키까지 아는 것으로 올렸다). 그것이 「꼴을 맞췄다」 의 증거다
+- [x] **S2-4 `rev_seq` 는 데이터다** — 정규식 나열 순서에 암묵이던 것을 꺼냈다
 
 ## S3. 개정 잇기
 - [ ] **S3-1 `set_revision`** 과제·모델·개정 코드·앞 판
