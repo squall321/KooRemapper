@@ -8,7 +8,8 @@
    이라 `tools/list` 에는 안 보인다(`gateway.py:718-726`·`:3419`). 맨이름으로 부르면
    나중에 다른 백엔드에 같은 이름이 생기는 순간 조용히 사라진다.
 3. **반입** — stcx 는 이 서버의 경로를 못 연다. 올려야 하고, 올린 이름은 `.k` 로 끝나야
-   하고(`model_file_path` 패턴 `^/.+\\.k$`), `job_id` 를 실어 **잡마다 경로를 갈라야** 한다.
+   하고(`model_file_path` 패턴 `^/.+\\.k$`), 이름 앞에 잡 id 를 붙여 **잡마다 이름을 갈라야**
+   한다. `job_id` 를 실으면 jobs/ 아래로 가서 받는 쪽이 그 경로를 거절한다.
 """
 import json
 import re
@@ -239,7 +240,7 @@ class _Dashboard:
             total = (size + self.chunk_size - 1) // self.chunk_size
             body = self.init_body if self.init_body is not None else {
                 "upload_id": "up-1", "chunk_size": self.chunk_size, "total_chunks": total,
-                "storage_path": "/shared/uploads/jobs/x/data", "file_info": {"type": "data"}}
+                "storage_path": "/shared/uploads/users/admin/data", "file_info": {"type": "data"}}
             return httpx.Response(self.init_status, json=body)
 
         if path.endswith("/upload/chunk"):
@@ -265,8 +266,10 @@ class _Dashboard:
             if self.complete_status >= 400:
                 return httpx.Response(self.complete_status, json={"error": "nope"})
             name = self.init_payload.get("filename", "m.k")
-            jid = self.init_payload.get("job_id") or "none"
-            fp = self.file_path or f"/shared/uploads/jobs/{jid}/data/{name}"
+            # 받는 쪽 그대로 — `job_id` 가 있으면 jobs/ 아래, 없으면 사용자 폴더(SSO 꺼짐 → admin)
+            jid = self.init_payload.get("job_id")
+            fp = self.file_path or (f"/shared/uploads/jobs/{jid}/data/{name}" if jid
+                                    else f"/shared/uploads/users/admin/data/{name}")
             return httpx.Response(200, json={"message": "ok", "file_path": fp,
                                              "file_info": {"type": "data"}})
 
@@ -291,15 +294,27 @@ async def test_the_three_steps_happen_in_order_and_the_bytes_arrive_whole(tmp_pa
     assert dash.merged() == deck.read_bytes(), "조각을 다시 이어 붙이면 원본이어야 한다"
 
 
-async def test_the_job_id_is_sent_so_two_jobs_do_not_overwrite_each_other(tmp_path):
-    """★SSO 가 꺼져 모든 요청이 `admin` 이다 — `job_id` 없이 올리면 같은 이름의 덱이
-    `/shared/uploads/users/admin/data/` 한 자리에서 **서로를 덮는다**."""
+async def test_the_job_id_goes_into_the_name_not_the_init_so_the_path_stays_readable(tmp_path):
+    """★`job_id` 를 실으면 `/shared/uploads/jobs/<id>/` 에 저장되고 fullangle 1.1.2 가 그
+    경로를 **허용 범위 밖** 이라 거절한다(`stmc_exec.py:76`·`:204`). 그런데 빼기만 하면 SSO 가
+    꺼져 모든 요청이 `admin` 이라 같은 이름의 덱이 `users/admin/data/` 한 자리에서 **서로를
+    덮는다** — 그래서 이름에 잡 id 를 넣는다."""
     deck = tmp_path / "model.k"
     deck.write_bytes(b"x" * 5)
     dash = _Dashboard()
     got = await _uploader(dash).upload(deck, job_id="01JOB")
-    assert dash.init_payload["job_id"] == "01JOB"
-    assert "/jobs/01JOB/" in got["file_path"]
+    assert "job_id" not in dash.init_payload
+    assert dash.init_payload["filename"] == "01JOB_model.k"
+    assert got["file_path"] == "/shared/uploads/users/admin/data/01JOB_model.k"
+
+
+async def test_two_jobs_with_the_same_deck_name_land_on_different_paths(tmp_path):
+    deck = tmp_path / "model.k"
+    deck.write_bytes(b"x" * 5)
+    a = await _uploader(_Dashboard()).upload(deck, job_id="01AAA")
+    b = await _uploader(_Dashboard()).upload(deck, job_id="01BBB")
+    assert a["ok"] and b["ok"]
+    assert a["file_path"] != b["file_path"]
 
 
 async def test_the_chunk_fields_are_the_ones_the_server_reads(tmp_path):
@@ -315,7 +330,7 @@ async def test_the_chunk_fields_are_the_ones_the_server_reads(tmp_path):
 
 
 @pytest.mark.parametrize("given,sent", [
-    ("model.key", "model.k"), ("model.dyn", "model.k"), ("model.k", "model.k"),
+    ("model.key", "j_model.k"), ("model.dyn", "j_model.k"), ("model.k", "j_model.k"),
 ])
 async def test_the_deck_is_renamed_to_dot_k_on_the_way_up(tmp_path, given, sent):
     """받는 쪽 패턴이 `^/.+\\.k$` 다. **원본 파일은 건드리지 않는다.**"""

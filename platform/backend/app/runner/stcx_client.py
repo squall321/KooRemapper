@@ -611,11 +611,16 @@ class McpHttpClient:
 #                       · form `checksum`(선택, MD5 — 받는 쪽이 맞춰 본다)
 #   complete JSON       {upload_id} → 200 {file_path, file_info}
 #
-# ★**`job_id` 를 반드시 싣는다.** 안 싣으면 저장 경로가
-#   `/shared/uploads/users/<user>/data/` 로 모이는데(`file_classifier.py:302`), SSO 가 꺼져
-#   **모든 요청이 `admin`** 이고(`jwt_middleware.py:61-67`) `complete` 는
-#   `storage_path/filename` 에 그냥 쓴다(`:368`) — 같은 이름의 덱을 올린 두 잡이 **서로를
-#   덮는다.** `job_id` 를 주면 `/shared/uploads/jobs/<job_id>/data/` 로 갈린다(`:297-299`).
+# ★**`job_id` 를 싣지 않는다 — 잡은 파일 이름으로 가른다.** (2026-10-14 에 뒤집혔다.)
+#   `job_id` 를 주면 `/shared/uploads/jobs/<job_id>/data/` 에 저장되는데(`:297-299`),
+#   `fullangle_drop_simulation` 1.1.2 는 `model_file_path` 를 **호출자 영역 안**
+#   (`/data/single/<user>`·`/shared/uploads/users/<user>`·`/data/scenario`)에서만 읽는다
+#   (`stmc_exec.py:76`·`:204`) — 제출이 "허용 범위 밖의 경로다" 로 떨어진다. jobs/ 경로는
+#   올린 사람과 묶여 있지 않아 받는 쪽이 일부러 열지 않았다.
+#   `job_id` 없이 올리면 `/shared/uploads/users/<user>/data/` 한 자리에 모이고
+#   (`file_classifier.py:302`), SSO 가 꺼져 **모든 요청이 `admin`** 이며
+#   (`jwt_middleware.py:61-67`) `complete` 는 `storage_path/filename` 에 그냥 쓴다(`:368`)
+#   — 같은 이름이면 두 잡이 **서로를 덮는다.** 그래서 이름 앞에 잡 id 를 붙인다(`upload_name`).
 #
 # 청크 재전송은 안전하다 — `complete` 가 인덱스별 파일 존재를 다시 확인하므로
 # (`:371-381`) 카운터가 부풀어도 병합 결과는 맞다.
@@ -630,14 +635,16 @@ _CHUNK_RETRY = 3                                # 분당 2000 청크 제한(`:19
 _CHUNK_BACKOFF_S = 5.0
 
 
-def upload_name(name: str) -> str:
-    """올릴 때 쓸 이름. 받는 쪽 패턴이 `^/.+\\.k$` 라 **`.k` 로 끝나야 한다**.
+def upload_name(name: str, job_id: str) -> str:
+    """올릴 때 쓸 이름 `<잡 id>_<이름>.k`. 받는 쪽 패턴이 `^/.+\\.k$` 라 **`.k` 로 끝나야 한다**.
 
+    잡 id 를 앞에 붙여 한 사용자 폴더 안에서 잡끼리 갈린다(위 ★ 참고).
     `.key`·`.dyn`·`.K` 는 이름만 바꾼다 — **원본 파일은 건드리지 않는다.**
     패턴이 대소문자를 가리므로 `.K` 도 바꿔야 한다(`model_file_path` 스키마).
     """
     base = Path(name).name
-    return base if base.endswith(".k") else Path(base).stem + ".k"
+    stem = base[:-2] if base.endswith(".k") else Path(base).stem
+    return f"{job_id}_{stem}.k"
 
 
 class StcxUploader:
@@ -715,9 +722,9 @@ class StcxUploader:
             return {"ok": False, "error": "too_large",
                     "detail": f"{size}B — 받는 쪽 상한 {MAX_UPLOAD_BYTES}B 를 넘는다"}
 
-        name = upload_name(src.name)
+        name = upload_name(src.name, str(job_id))
         init = await self._json("/api/v2/files/upload/init",
-                                {"filename": name, "file_size": size, "job_id": str(job_id)})
+                                {"filename": name, "file_size": size})
         if not init["ok"]:
             return init
         body = init.get("body") or {}

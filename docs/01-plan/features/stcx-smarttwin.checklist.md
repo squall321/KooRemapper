@@ -117,3 +117,16 @@
 
 ★ 아직 **안 돈 것** — 라이브 제출. PAT·터널·stcx 등재가 서버 쪽에서 끝나야 한다.
 그때까지 이 변경은 "시험으로만 녹색" 이다([[kooremapper-green-gates-lie]] 의 교훈 그대로).
+
+## SmartTwinMCP 요청서 반영 (2026-10-14)
+
+`docs/requests/smarttwinmcp-contract-request-2026-10-14.md` — 받는 쪽이 접근 통제를 넣었다(`5aa61b67`).
+
+- [x] §1 업로드 init 에서 `job_id` 를 뺀다 — 1.1.2 가 jobs/ 경로를 "허용 범위 밖" 으로 거절한다
+- [x] §1 ★A 는 **이름**으로 가른다 — `upload_name(name, job_id)` → `<job.id>_<이름>.k`
+- [x] 관문 — `test_the_job_id_goes_into_the_name_not_the_init_so_the_path_stays_readable` ·
+      `test_two_jobs_with_the_same_deck_name_land_on_different_paths`. **backend 전체 491 녹색**
+- [x] §2 `KOORM_STCX_WORK_ROOT=/data/koopark/dynaforge` 그대로 — 코드 변경 없음
+      (받는 쪽 운영에 `STMC_WORK_ROOTS` 가 들어가야 한다. 안 들어가면 제출이 "허용 범위 밖의 경로다")
+- [ ] §5 ★B(`model_source`)·★C(`job_status` 에 `slurm_job_ids`) — 받을지 사용자 답 대기
+- [ ] 라이브 제출 — 여전히 안 돌았다

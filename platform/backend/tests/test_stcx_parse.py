@@ -222,4 +222,5 @@ def test_registry_id_comes_from_the_job_id_field_of_the_status_reply():
     ("noext", "noext.k"),
 ])
 def test_the_upload_name_always_ends_in_lowercase_k(given, want):
-    assert upload_name(given) == want
+    """잡 id 가 앞에 붙는다 — 한 사용자 폴더 안에서 잡끼리 갈린다."""
+    assert upload_name(given, "01JOB") == "01JOB_" + want

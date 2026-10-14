@@ -41,6 +41,11 @@ SSO 가 꺼져 있어 **모든 DynaForge 사용자가 `admin`** 이다. 따라�
 
 → **`init` 에 `job_id = DynaForge job id` 를 싣는다.** API 가 이미 받는 선택 필드다.
 
+⚠ **2026-10-14 에 뒤집혔다** — fullangle 1.1.2 가 `model_file_path` 를 호출자 영역
+(`/shared/uploads/users/<user>` 등) 안에서만 읽어, jobs/ 경로는 제출이 거절된다
+(`docs/requests/smarttwinmcp-contract-request-2026-10-14.md` §1). 이제 `job_id` 는 싣지 않고
+**이름 앞에 잡 id 를 붙여** `users/<user>/data/<job.id>_<이름>.k` 로 가른다(`upload_name`).
+
 ### ★B. `model_file` 이 이미 있으면 올린 덱이 **조용히 무시된다**
 
 `fullangle_drop_simulation/latest/script.sh:46-52` —

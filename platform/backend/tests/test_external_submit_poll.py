@@ -30,7 +30,7 @@ from app.shared.storage import session_rel_dir
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 
 OP = "stcx_fullangle_drop"
-UPLOADED = "/shared/uploads/jobs/J/data/model.k"
+UPLOADED = "/shared/uploads/users/admin/data/J_model.k"
 
 _BODY = {"ok": True, "registry_id": 12, "job_id": "98765",
          "work_dir": "/data/df/J", "output_dir": "/data/df/J/output",
@@ -194,7 +194,7 @@ async def test_the_deck_is_uploaded_before_submitting_and_its_path_is_what_we_se
         job = await _submit(db, u.id, sid, wd, {"model": "model.k"})
         assert fake.uploader.calls, "반입이 아예 일어나지 않았다"
         assert fake.uploader.calls[-1]["src"] == str(wd / "model.k")
-        assert fake.uploader.calls[-1]["job_id"] == job.id, "잡마다 경로를 갈라야 한다"
+        assert fake.uploader.calls[-1]["job_id"] == job.id, "잡 id 로 반입 이름을 갈라야 한다"
         assert fake.submits[-1]["args"]["model_file_path"] == UPLOADED
         assert job.external_ref["uploaded_path"] == UPLOADED
     finally:
