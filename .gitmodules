@@ -1,0 +1,3 @@
+[submodule "external/StandardPlatform"]
+	path = external/StandardPlatform
+	url = https://github.com/4leaf321-nox321/StandardPlatform.git

@@ -326,18 +326,24 @@ accounts 31회, permissions 20회). 그런데 —
 
 ## 7. 사람이 정할 것
 
-1. **`vendor/StandardPlatform` 보관 방식** — ㉠ git submodule(커밋 고정 · StepForge §7 ① 의 권장) ㉡
-   `.gitignore` 로 빼고 참고본으로만(**지금 이 상태**) ㉢ 옮길 파일만 복사.
-   ★**StepForge 와 같은 답이어야 한다** — 한 번만 정하면 둘에 다 적용된다.
-2. **과제 정보의 원천** — 허브가 어느 인스턴스인가(MatNexus? TestScope? 아직 없음?). 주소와
-   `core:read` 토큰. 허브가 아직 없으면 PLM 을 직접(OData) 읽을지.
+1. ~~보관 방식~~ → **정해졌다(2026-10-14): git submodule.** StepForge 와 **같은 경로·같은 주소·
+   같은 커밋** — `external/StandardPlatform` @ `f7485c0`(v0.4.52) · **브랜치 추적 없음**.
+   런타임(`platform`·`tools`·`scripts`·`materials`)은 import 하지 않는다 —
+   `platform/backend/tests/test_external_boundary.py` 4항이 지킨다.
+2. **과제 정보의 원천** → StepForge 가 **운영 중인 SP 허브의 코어 API** 로 정했다(D-525 ②).
+   같은 답으로 간다. **주소와 `core:read` 토큰은 아직 없다** — 그것이 S1 을 라이브로 닫는 조건이다.
 3. **개정 단위** — 리포트 하나에 개정 하나(지금 `eng_meta` 그대로 · 권장) 대 세션/잡에도 매달기.
    세션에 매달면 **제출 화면이 바뀐다**(해석 전부터 과제를 알아야 한다).
-4. **토큰을 어디 두나** — DynaForge 의 `.env` 관례를 유지할지, StepForge 처럼 파일 경로로만 할지.
+4. ~~토큰을 어디 두나~~ → **정해졌다(2026-10-14): `.env`.** DynaForge 의 기존 관례를 유지한다
+   (`gateway_pat` 과 같은 자리). `.gitignore` 의 `platform/**/.env` 가 리포 밖에 둔다 —
+   StepForge 의 「비밀은 리포·DB 에 두지 않는다」 와 어긋나지 않는다.
+   ⚠ StepForge 는 `/data/hwax/secrets` 아래 **파일 경로만** 앱에 준다(D-525 ②). 그쪽이
+   규격을 `.env` 로 맞출지는 거기서 정한다 — 적어만 둔다.
 5. **허브로 내보내기** — `dev_revision` 을 허브 온톨로지에 올릴지(허브 쪽 정의 합의가 든다).
    올린다면 StepForge `cad_revision` 과 **나란히** 서야 한다.
 6. **`design_variation`·`doe` 도 축으로 올리나** — 지금은 `eng_meta` 의 문자열이다.
-7. **코드 복사 허락** — SP 에 라이선스 파일이 없다(사내 저장소로 보인다). 출처를 달아 옮겨도 되나.
+7. ~~코드 복사 허락~~ → **허락됐다**(D-525 ⑥ — 요청이 "심어" 였다). 출처를 머리 주석에
+   `StandardPlatform <경로>@f7485c0` 로 단다.
 8. ★**StepForge 를 Postgres 로 옮기는 시점과 방식**(§2-b) — 새 인스턴스 `5437` 대 `5436` 에 DB 분리
    (SP 포크 지침은 「DB 두 개 — 이름은 `APP_SLUG` 그대로」). 기존 `.db` 이관을 한 번에 할지
    읽기 전용 병행 기간을 둘지. **StepForge 의 판단이지만 규격은 공통이므로 한 번에 정한다.**

@@ -113,3 +113,34 @@ SP 처럼 `object_types` 를 데이터로 두면 화면 자동생성·권한·`l
 **StepForge 쪽에 생기는 질문** — 「엔진이 아니라 꼴만」 의 근거가 "StepForge 는 SQLite 다" 였다
 (그 문서 §2). PG 가 되면 SP 의 엔진(JSONB·pg_trgm·재귀 CTE·advisory lock·`SKIP LOCKED`·`COPY`)이
 **쓸 수 있는 것**이 된다. 그것은 StepForge 의 판단이고, 여기서는 사실만 적는다(§7 ⑨).
+
+
+## 결정 6 — 보관은 **submodule**, 토큰은 **`.env`** (2026-10-14 · 사용자 "`.env` 서브모듈")
+
+StepForge 가 먼저 S0 을 닫았다(`d8f5bed`) — `external/StandardPlatform` submodule,
+`f7485c0` 고정, 브랜치 추적 없음, 런타임 import 금지 구조 시험. **같은 경로·같은 주소·같은
+커밋**으로 맞췄다. 같은 참고본을 봐야 두 쌍둥이의 결이 맞는다 — 판이 갈리면 「그 문서 §4.2」
+같은 인용이 서로 다른 것을 가리킨다.
+
+경로를 `vendor/` 에서 `external/` 로 옮겼다. DynaForge 에 `third_party/tetgen` 이 있지만
+그것은 **베껴 넣은 소스**이고, submodule 참조는 성질이 다르다 — StepForge 의 `external/` 을 따른다.
+
+토큰은 **`.env`** 다. 제가 드린 양자택일("`.env` 관례 유지 \| 파일 경로로만")에 대한 답이다.
+`platform/**/.env` 가 `.gitignore` 에 있으므로 「비밀은 리포에 두지 않는다」 와 어긋나지 않는다.
+StepForge 는 `/data/hwax/secrets` 아래 **경로만** 앱에 준다(D-525 ②) — 그쪽이 규격을 `.env` 로
+맞출지는 거기서 정할 일이고, 여기서는 적어만 둔다.
+
+### ★관문이 안 무는데 초록이었다 — 범위를 0으로 훑고 있었다
+
+경계 시험을 쓰고 `tools/_boundary_probe.py` 에 `sys.path.insert(0, "external/…")` 를 **일부러**
+심었는데 **4항 전부 초록**이었다. 원인은 `git ls-files` 가 **추적된 것만** 보는 것이었다 —
+방금 쓴 파일은 미추적이라 목록에 아예 없었다. 초록이었던 이유가 "깨끗해서" 가 아니라
+**"안 봐서"** 다.
+
+`--cached --others --exclude-standard` 로 고쳤다(추적된 것 + add 안 한 것, `.gitignore` 가
+`.venv`·`venv` 를 막아 준다). 고친 뒤 다시 심으니 빨갛고, 지우니 초록이다.
+
+그리고 그 실수가 다시 안 나오게 **관문 자신에게 관문을 달았다** —
+`test_the_scan_actually_covers_the_runtime` 이 훑은 파일 수가 50을 넘는지 본다.
+[[kooremapper-green-gates-lie]] 의 "수를 세는 관문은 자리를 못 본다" 와 같은 성질이다.
+**세는 관문이 0을 세면 언제나 초록이다.**

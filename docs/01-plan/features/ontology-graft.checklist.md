@@ -38,10 +38,17 @@
       SP 스스로 "부서를 `objects` 에 복제하면 두 벌이 되고 **반드시 갈린다**" 고 적었다(§3.6)
       → `kind_class=system` **거울**(행 복제 0)
 
-## S0. 받기와 고정
-- [ ] **S0-1 보관 방식 결정**(§7 ① — submodule \| gitignore \| 복사만). ★StepForge 와 **같은 답**
-- [ ] **S0-2 출처 메모** 옮긴 파일 첫 줄에 `StandardPlatform <경로>@f7485c0`
-- [ ] **S0-3 런타임 import 0 가드** — 구조 시험이 `platform/` → `vendor/` import 를 빨갛게 만든다
+## S0. 받기와 고정 — **끝**
+- [x] **S0-1 보관 = git submodule** `external/StandardPlatform` @ `f7485c0`(v0.4.52) ·
+      브랜치 추적 없음 · StepForge 와 **같은 경로·주소·커밋**. `.gitignore` 의 `vendor/` 는 뺐다
+- [x] **S0-2 출처 규약** 옮긴 파일 머리에 `StandardPlatform <경로>@f7485c0`
+- [x] **S0-3 런타임 import 0 가드** `platform/backend/tests/test_external_boundary.py` **4항** —
+      import · `sys.path` 우회 · **훑는 범위가 0이 아닌지** · submodule 이 그 커밋에 고정됐는지
+- [x] **S0-4 관문이 무는지 증명** `tools/_boundary_probe.py` 에 `sys.path.insert(…external…)` 를
+      심어 **빨개지는 것**을 보고 지웠다.
+      ★처음엔 **안 물었다** — `git ls-files` 가 추적된 것만 봐서 방금 쓴 파일이 목록에 없었다.
+      `--cached --others --exclude-standard` 로 고쳤다(`.gitignore` 가 `.venv` 를 막아 준다).
+      **세는 관문이 0을 세면 언제나 초록이다**
 
 ## S1. 과제 정보 수신
 - [ ] **S1-1 키트 이식** `app/runner/sp_core.py` — `requests`+`sqlite3` → **httpx + SQLAlchemy**
@@ -88,12 +95,12 @@
 - [ ] **S6-1** `dev_revision` 을 허브에 — StepForge `cad_revision` 과 **나란히** 서야 한다
 
 ## 사람이 정할 것 (§7)
-- [ ] ① 보관 방식 (★StepForge 와 같은 답)
-- [ ] ② 허브가 어느 인스턴스인가 · 주소 · `core:read` 토큰
+- [x] ① 보관 방식 — **git submodule**(StepForge 와 같은 경로·주소·커밋)
+- [x] ② 원천 — **운영 중인 SP 허브의 코어 API**(D-525 ②). ⚠ 주소·`core:read` 토큰은 **아직 없다**
 - [ ] ③ 개정 단위 — 리포트에만 \| 세션·잡에도
-- [ ] ④ 토큰을 어디 두나 — `.env` 유지 \| 파일 경로만(StepForge 쪽)
+- [x] ④ 토큰 — **`.env`**(DynaForge 기존 관례 유지 · `platform/**/.env` 로 리포 밖)
 - [ ] ⑤ 허브로 내보내기
 - [ ] ⑥ `design_variation`·`doe` 도 축으로
-- [ ] ⑦ 코드 복사 허락(SP 에 라이선스 파일이 없다)
+- [x] ⑦ 코드 복사 — **허락됐다**(D-525 ⑥). 출처를 머리 주석에 단다
 - [ ] ⑧ ★**StepForge 를 PG 로** — 새 인스턴스 5437 \| 5436 에 DB 분리 · 이관 방식 · 시점
 - [ ] ⑨ StepForge 가 PG 가 되면 「엔진이 아니라 꼴만」 을 다시 보나(DynaForge 는 부서 때문에 사정이 다르다)
