@@ -16,6 +16,7 @@
 | 4 | 제출 응답의 `work_dir` 이 registry 와 달라 `job_status(work_dir=…)` 복구가 늘 실패 | **우리 결함 — 고침** | 알림 |
 | 5 | `job_status` 에 `slurm_job_ids` 추가(★C) · 모델 재사용을 응답에 표시(★B) | 우리 제안 | 선택 |
 | 6 | 버전·도구 목록 변화, SSO 꺼짐 환경의 의미 | 알림 | — |
+| 7 | 제출이 성공하면 업로드를 지운다 (§1 회신 뒤 추가) | DynaForge | 개통 전 권장 |
 
 ---
 
@@ -116,3 +117,34 @@ DynaForge 는 `output_dir`·`sphere_report_path` 를 `external_ref` 에 기록�
 - **SSO 꺼짐 환경** — `/api/me` 가 아무 토큰(토큰이 없어도)에 `admin` 을 돌려준다(이 서버 dev 에서 실측).
   그런 환경에서는 사용자 간 격리가 의미가 없고, 경로 허용 루트만 실제로 범위를 좁힌다.
 - 회신 문서(운영용)는 `SmartTwinCluster: dashboard/smarttwin_mcp/deploy/STCX_DYNAFORGE_REPLY.md`.
+
+## 7. 추가 (2026-10-14, §1 회신 뒤) — 제출이 성공하면 업로드를 지운다
+
+**왜** — §1 이후 업로드는 `<ULID>_<이름>.k` 로 잡마다 따로 저장되고 덮이지 않으므로 stcx 의
+`/shared/uploads/users/<사용자>/data/` 에 **계속 쌓인다.** 그런데 잡은 업로드 원본을 다시 보지 않는다.
+
+- fullangle 도구가 제출 전에 원본을 스테이징 폴더로 복사한다(`stmc_exec.prepare_model_workdir`).
+- backend 는 받은 파일을 자기 임시 폴더 `$SHARED_BASE/slurm_uploads/` 에 두고(`job_submit_api.py:151`),
+  잡이 시작할 때 그것을 잡의 `input/` 으로 복사한다(`:856-867`).
+
+그래서 큰 덱이면 같은 덱이 stcx 에 적어도 네 벌 남는다(업로드·스테이징·backend 임시·잡 폴더). 그중 업로드는
+**DynaForge 만 지울 수 있다**(올린 사람 소유).
+
+**요청** — 제출에서 `registry_id` 를 받으면(응답이든 `recovered_by_work_dir` 복구든) 그 자리에서 업로드를 지운다.
+
+```
+DELETE {KOORM_STCX_BACKEND_URL}/api/v2/files/uploads/<upload_id>
+→ 200 {"message": "Upload cancelled successfully", "upload_id": "…"}     (없으면 404)
+```
+
+- `upload_id` 는 `StcxUploader.upload()` 가 성공 반환에 이미 싣는다. runner_loop 는 지금 `external_ref` 에
+  `uploaded_path`·`uploaded_bytes` 만 남기므로, 지우기를 나중으로 미루려면 `upload_id` 도 남길 것.
+- 완료된 파일과 청크 폴더를 지우고 상태를 `cancelled` 로 바꾼다(`file_upload_api.py` `cancel_upload`).
+  **본인 업로드만** 지울 수 있다(관리자 그룹 `HPC-Admins` 예외). SSO 가 꺼진 지금은 올린 쪽과 지우는 쪽이 같은
+  `admin` 이라 맞고, SSO 를 켜면 §3 처럼 업로드·삭제에도 같은 PAT 를 실어야 한다.
+- **`registry_id` 를 못 받았으면 지우지 않는다.** 응답만 끊겼을 뿐 서버의 도구가 아직 복사 전일 수 있다.
+  그런 업로드는 드물므로 사람이 정리하거나, 오래된 실패 잡의 것을 주기적으로 지운다.
+- 지우기가 실패해도 잡에는 영향이 없다 — 경고만 남기고 넘어가면 된다.
+
+나머지 사본(스테이징 `/data/koopark/dynaforge/<job.id>/`, backend 임시, 잡 폴더)은 우리·운영 쪽에서 따로 정리한다.
+
