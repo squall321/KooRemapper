@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Check, GitBranch } from 'lucide-react'
 
 import {
-  reportRevision, setReportRevision, taskRevisions,
+  ontologyState, reportRevision, setReportRevision, taskRevisions,
   type RevisionCandidate,
 } from '@/shared/api/endpoints'
 import { Badge, Button, Input, Spinner } from '@/shared/ui/ui'
@@ -26,9 +26,14 @@ export function RevisionPanel({ reportId }: { reportId: string }) {
   const [code, setCode] = useState('')
   const [err, setErr] = useState<string | null>(null)
 
+  // ★기능이 꺼져 있으면 **없어진다**(포탈 옵션이 정한다). 상태는 한 번만 받아 공유한다.
+  const feat = useQuery({ queryKey: ['ontology-state'], queryFn: ontologyState, staleTime: 60_000 })
+  const on = feat.data?.enabled === true
+
   const info = useQuery({
     queryKey: ['report-revision', reportId],
     queryFn: () => reportRevision(reportId),
+    enabled: on,        // 꺼져 있으면 **부르지도 않는다** — 409 를 받아 숨기는 것과 다르다
   })
 
   const save = useMutation({
@@ -42,8 +47,19 @@ export function RevisionPanel({ reportId }: { reportId: string }) {
     onError: (e) => setErr(errorMessage(e)),
   })
 
+  if (feat.isLoading) return null
+  if (!on) return null          // 꺼짐 — 조용히 없어진다(그것이 「없어져야」의 뜻이다)
   if (info.isLoading) return <div className="text-xs text-muted"><Spinner /> 개정 확인…</div>
-  if (info.isError || !info.data) return null
+  // ★꺼짐과 **고장**을 같은 모양으로 만들지 않는다. 기능이 켜져 있는데 못 읽었으면
+  //   사라지지 않고 **말한다** — 조용히 사라지면 "왜 안 보이나" 를 아무 데서도 알 수 없다.
+  if (info.isError) {
+    return (
+      <div className="flex items-center gap-1.5 text-xs text-danger">
+        <AlertTriangle size={13} /> 개정을 읽지 못했다 — {errorMessage(info.error)}
+      </div>
+    )
+  }
+  if (!info.data) return null
   const d = info.data
 
   const start = (c?: RevisionCandidate) => {

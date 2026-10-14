@@ -35,10 +35,17 @@ def on(monkeypatch):
 
 
 async def test_it_is_off_by_default():
-    """허브 주소를 코드에 박지 않았으므로 **기본은 꺼짐**이다."""
+    """허브 주소를 코드에 박지 않았으므로 **기본은 꺼짐**이다.
+
+    ★2026-10-14 에 간격의 기본값이 0 → 3600 으로 바뀌었다. 꺼짐을 간격으로 만들지 않고
+    **주소·토큰의 부재**로 만든다 — 주소·토큰을 넣은 사람이 간격까지 또 설정해야 하면
+    그 둘째를 잊고, 그러면 "설정했는데 안 받는다" 가 된다. 간격 0 은 기능을 켜 둔 채
+    주기 수신만 끄는 뜻이다(`test_clearing_the_interval_stops_only_the_scheduler`).
+    """
     from app.config import settings
-    assert settings.sp_core_sync_sec == 0
     assert settings.sp_core_url == "" and settings.sp_core_token == ""
+    assert plm_sync.enabled() is False, "주소·토큰이 없으면 안 돌아야 한다"
+    assert settings.sp_core_sync_sec > 0, "간격은 쓸 수 있는 기본값을 갖는다"
 
 
 @pytest.mark.parametrize("blank", ["sp_core_url", "sp_core_token", "sp_core_sync_sec"])

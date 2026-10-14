@@ -141,28 +141,42 @@ async def main():
                 # ★**쓰지 않는다.** 개정 객체를 지우는 API 가 없어서(일부러 — 과제·개정은
                 #   전사 축이다) 쓰면 관문이 돌 때마다 잔재가 쌓인다. 그래서 읽는 길과
                 #   **거절하는 길**만 본다. 거절은 쓰지 않고도 확인된다.
-                tk = S._data(await s.call_tool("list_tasks", {}))
-                chk("과제 목록이 비면 **왜 비었는지** 말한다(빈 목록은 「없다」로 읽힌다)",
-                    isinstance(tk, dict) and "sync_enabled" in tk
-                    and bool(tk.get("items") or tk.get("reason") is not None), tk)
-                rv = S._data(await s.call_tool("report_revision", {"report_id": rid}))
-                shaped = isinstance(rv, dict) and {"mismatch", "candidates", "free_task"} <= set(rv)
-                chk("개정 조회가 **어긋남·후보를 함께** 준다", shaped, rv)
-                # 기능이 없는 스택에서는 위가 FAIL 이고, 그러면 아래는 **묻지 않는다** —
-                # 없는 것에 `.get` 을 걸면 관문이 역추적으로 죽어 다른 항까지 못 본다.
-                chk("아무것도 안 이었으니 어긋남이 없다(없는 것을 있다고 하지 않는다)",
-                    shaped and rv.get("mismatch") is None, rv if not shaped else rv.get("mismatch"))
-                # ⚠`call_tool` 은 **예외를 던지지 않는다** — `isError` 로 알려 준다(실측).
-                #   예외만 보면 "거절됐다" 를 영영 못 보고 관문이 조용히 통과한다.
-                bad = await s.call_tool("set_report_revision",
-                                        {"report_id": rid, "task_key": "SMOKE-NOPE", "code": "dv"})
-                chk("형식이 아닌 개정 코드는 **거절된다**(dv/pv 는 차수 필수)",
-                    bool(bad.isError), str(bad.content)[:200])
-                pl = S._data(await s.call_tool("plan_task_links", {}))
-                chk("과거 붙이기 계획이 **붙는 것·후보·못 붙인 것**을 갈라 준다",
-                    isinstance(pl, dict) and isinstance(pl.get("counts"), dict)
-                    and {"links", "proposal", "unmatched", "reports_without_a_name"}
-                    <= set(pl["counts"]), pl)
+                # ★기능 스위치가 꺼져 있을 수도 있다(허브 설정이 없는 박스가 정상이다).
+                #   그때는 **꺼졌다고 거절하는 것**이 맞는 동작이므로 그쪽을 판정한다 —
+                #   꺼짐을 "통과" 로 접으면 켜졌을 때 깨진 것을 영영 못 본다.
+                caps = S._data(await s.call_tool("system_capabilities", {})) \
+                    if any(t.name == "system_capabilities"
+                           for t in (await s.list_tools()).tools) else {}
+                onto_on = bool((caps.get("ontology") or {}).get("enabled")) \
+                    if isinstance(caps, dict) else False
+                if not onto_on:
+                    off = await s.call_tool("list_tasks", {})
+                    chk("기능이 꺼져 있으면 **꺼졌다고 사유와 함께 거절한다**(조용히 빈 답 금지)",
+                        bool(off.isError) and "꺼져" in str(off.content), str(off.content)[:200])
+                    print("  (과제·개정 기능이 꺼져 있다 — 켜진 뒤의 항은 건너뛴다)")
+                if onto_on:
+                  tk = S._data(await s.call_tool("list_tasks", {}))
+                  chk("과제 목록이 비면 **왜 비었는지** 말한다(빈 목록은 「없다」로 읽힌다)",
+                      isinstance(tk, dict) and "sync_enabled" in tk
+                      and bool(tk.get("items") or tk.get("reason") is not None), tk)
+                  rv = S._data(await s.call_tool("report_revision", {"report_id": rid}))
+                  shaped = isinstance(rv, dict) and {"mismatch", "candidates", "free_task"} <= set(rv)
+                  chk("개정 조회가 **어긋남·후보를 함께** 준다", shaped, rv)
+                  # 기능이 없는 스택에서는 위가 FAIL 이고, 그러면 아래는 **묻지 않는다** —
+                  # 없는 것에 `.get` 을 걸면 관문이 역추적으로 죽어 다른 항까지 못 본다.
+                  chk("아무것도 안 이었으니 어긋남이 없다(없는 것을 있다고 하지 않는다)",
+                      shaped and rv.get("mismatch") is None, rv if not shaped else rv.get("mismatch"))
+                  # ⚠`call_tool` 은 **예외를 던지지 않는다** — `isError` 로 알려 준다(실측).
+                  #   예외만 보면 "거절됐다" 를 영영 못 보고 관문이 조용히 통과한다.
+                  bad = await s.call_tool("set_report_revision",
+                                          {"report_id": rid, "task_key": "SMOKE-NOPE", "code": "dv"})
+                  chk("형식이 아닌 개정 코드는 **거절된다**(dv/pv 는 차수 필수)",
+                      bool(bad.isError), str(bad.content)[:200])
+                  pl = S._data(await s.call_tool("plan_task_links", {}))
+                  chk("과거 붙이기 계획이 **붙는 것·후보·못 붙인 것**을 갈라 준다",
+                      isinstance(pl, dict) and isinstance(pl.get("counts"), dict)
+                      and {"links", "proposal", "unmatched", "reports_without_a_name"}
+                      <= set(pl["counts"]), pl)
 
                 hs = S._data(await s.call_tool("report_hotspots", {"report_id": rid}))
                 chk("핫스팟이 없는 종류에서는 **없다고 말한다**(빈 목록으로 넘기지 않는다)",

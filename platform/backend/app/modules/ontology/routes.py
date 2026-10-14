@@ -19,9 +19,24 @@ from app.models import OntoAlias, OntoObject, OntoSyncState, User
 from app.modules.ontology import services as svc
 from app.modules.reports import services as rsvc
 from app.shared.auth import get_current_user, require_system_admin
+from app.shared.features import ontology_state
 from app.shared.responses import ok
 
-router = APIRouter(tags=["ontology"])
+def require_ontology() -> dict:
+    """기능이 꺼져 있으면 **거절한다.** 화면에서만 숨기고 API 가 계속 답하면 그것은 꺼진 것이
+    아니라 **숨긴 것**이다.
+
+    ★404 가 아니라 **409 + 사유**다. 404 는 "그런 길이 없다"로 읽히고, 그러면 꺼진 것인지
+    주소를 잘못 쳤는지 부르는 쪽이 못 가린다. 꺼짐은 **왜 꺼졌는지 말한다.**
+    """
+    st = ontology_state()
+    if not st["enabled"]:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f"과제·개정 기능이 꺼져 있습니다 — {st['reason']}")
+    return st
+
+
+router = APIRouter(tags=["ontology"], dependencies=[Depends(require_ontology)])
 
 
 # ── 과제 거울 ──────────────────────────────────────────────────────────────
@@ -133,7 +148,8 @@ async def set_report_revision(
 
 # ── 과거 붙이기 · 별칭 · 수신 (관리자) ────────────────────────────────────
 
-admin = APIRouter(tags=["ontology"], dependencies=[Depends(require_system_admin)])
+admin = APIRouter(tags=["ontology"],
+                  dependencies=[Depends(require_ontology), Depends(require_system_admin)])
 
 
 @admin.get("/ontology/task-links")

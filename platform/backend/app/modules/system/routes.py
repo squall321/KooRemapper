@@ -14,6 +14,7 @@ from app.database import get_db
 from app.models import Job, User
 from app.runner import catalog
 from app.shared.auth import get_current_user
+from app.shared.features import ontology_state
 from app.modules.users.routes import mcp_add_command, mcp_public_url
 from app.shared.responses import ok
 
@@ -100,6 +101,10 @@ async def capabilities(request: Request, _user: User = Depends(get_current_user)
         "operations": len(catalog.operation_names()),
         # 하드코딩 대신 MCP 소스의 @mcp.tool( 을 세어 산출(None 이면 프론트가 개수 생략).
         "mcp_tools": _mcp_tool_count(),
+        # 과제·개정 기능의 **스위치 상태**. 화면이 이것으로 숨기고, 포탈의 설정 항목이
+        # 「켜졌나」를 여기서 확인한다. 꺼짐은 **사유와 함께** 낸다 — 꺼짐과 고장을 같은
+        # 모양으로 만들지 않는다. 판정은 `shared/features.py` 한 곳에서만 한다.
+        "ontology": ontology_state(),
         "parity": _PARITY,
         # ⚠ 주소를 모를 때 f-string 에 빈 값을 끼우면 **URL 칸만 빈 명령**이 나온다 — 화면이 그것을
         # 복사 버튼과 함께 그리고, 붙여넣으면 claude 가 `--header` 값을 URL 로 먹는다. 토큰 화면과

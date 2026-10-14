@@ -140,6 +140,22 @@ export async function getStcxOptions(): Promise<StcxOptions> {
   return unwrap<StcxOptions>(data)
 }
 
+// 기능 스위치 — 포탈이 앱 `.env` 로 내려 주는 값의 **판정 결과**다(판정은 서버 한 곳에서).
+// ★화면이 이것으로 숨긴다. 꺼짐과 고장을 같은 모양으로 만들지 않는다 — 꺼짐은 사유가 있다.
+export interface OntologyState {
+  enabled: boolean
+  source: 'option' | 'inferred'
+  reason: string
+  missing: string[]
+}
+export async function ontologyState(): Promise<OntologyState> {
+  const { data } = await api.get('/system/capabilities')
+  const caps = unwrap<{ ontology?: OntologyState }>(data)
+  // 서버가 아직 이 칸을 안 주는 판(배포 전)이면 **켜진 것으로 치지 않는다** — 없는 기능을
+  // 보여 주면 누르는 사람이 409 를 본다.
+  return caps.ontology ?? { enabled: false, source: 'inferred', reason: '서버가 상태를 주지 않는다(배포 전일 수 있다)', missing: [] }
+}
+
 // 온톨로지 — 과제 거울과 개발 개정. **과제는 읽기만**이다(정본은 허브).
 export interface TaskMirror {
   key: string; label: string; status: string; deleted: boolean
