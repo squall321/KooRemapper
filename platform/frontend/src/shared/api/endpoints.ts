@@ -124,8 +124,10 @@ export async function getOperation(op: string): Promise<OperationDetail> {
   return unwrap<OperationDetail>(data)
 }
 
-// stcx (전각도 낙하) — 각도 프리셋·옵션 카탈로그는 **서버가 정본**이다.
-// 여기 박아 두면 클러스터에 프리셋이 늘어도 화면에는 안 보이고, 사용자는 있는 것을 못 쓴다.
+// stcx (전각도 낙하) — 2026-10-14 부터 **프리셋이라는 개념이 없다.** 제출이
+// SmartTwinMCP 로 옮겨지면서 각도는 방향 수(num_directions)로만 정한다. 그래서 이
+// 엔드포인트는 빈 목록과 **사유**를 돌려준다(빈 목록만 주면 "없다" 처럼 보인다).
+// ⚠ 이 함수는 지금 **부르는 곳이 없다**(제출 전부터 그랬다).
 export interface StcxOptions {
   available: boolean
   presets: string[]

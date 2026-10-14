@@ -13991,7 +13991,7 @@
       "name": "stcx_fullangle_drop",
       "category": "analysis",
       "summary": "Submit a full-angle (Fibonacci) LS-DYNA drop study to the stcx cluster",
-      "description": "stcx(356대) 클러스터에 전각도 낙하 해석을 제출한다. 모델 하나를 구면상 여러 방향으로 떨어뜨려 방향별 결과를 모으고, 통합 sphere_report 까지 자동 생성된다.\n\n이 작업은 **이 서버에서 돌지 않는다.** 게이트웨이 MCP 를 거쳐 stcx 에 제출되고 여기서는 상태만 따라간다. 몇 시간이 걸릴 수 있고, 그동안 이 세션의 다른 작업은 그대로 돌아간다.\n\n모델·각도 파일은 전송하지 않는다 — 두 쪽이 같은 경로를 보므로 **서버측 절대경로**를 넘긴다.\n\n## 각도를 정하는 네 가지 길\n1. `angle_preset` — 서버가 들고 있는 프리셋에서 고른다(`GET /api/v1/stcx/options` 로 목록). 가장 쉽다.\n2. `angle_source` + 그 방식의 파라미터 — 프리셋 없이 직접 정한다.\n3. `case_txt` — 각도 목록 .txt 를 이 세션에서 고른다(그 경로가 서버로 넘어간다).\n4. `scenario_overrides` — 위 어느 것으로도 표현 못 하는 것. scenario.json 구조 그대로 깊은 병합된다.\n\n## 우선순위\n프리셋을 바닥에 깔고 → 아래 낱낱 옵션을 덮고 → **`scenario_overrides` 가 마지막에 이긴다.** 그래서 서버에 새 옵션이 생겨도 이 목록을 안 고치고 `scenario_overrides` 로 바로 쓸 수 있다.\n\n단위계는 LS-DYNA 덱과 같아야 한다 — 표준은 [tonne, mm, s, MPa].",
+      "description": "stcx(356대) 클러스터에 전각도 낙하 해석을 제출한다. 모델 하나를 피보나치 격자로 고른 N 방향으로 떨어뜨려 방향별 결과를 모으고, 통합 sphere_report 까지 자동 생성된다.\n\n이 작업은 **이 서버에서 돌지 않는다.** 게이트웨이 MCP 를 거쳐 stcx 에 제출되고 여기서는 상태만 따라간다. 몇 시간이 걸릴 수 있고, 그동안 이 세션의 다른 작업은 그대로 돌아간다.\n\n**덱을 stcx 로 올린다.** cae00 `/data` 와 stcx `/data` 는 다른 저장소다 — stcx 는 이 서버의 경로를 못 연다. 그래서 제출 전에 세션의 덱을 stcx 대시보드로 올리고 그쪽 절대경로를 넘긴다. 큰 파일도 청크로 나눠 올라간다(상한 50GB).\n\n⚠ **`*INCLUDE` 가 있는 덱은 아직 못 보낸다** — 받는 쪽은 모델 파일 하나만 받는다. `extract-parts` 로 인클루드를 펼쳐 **홀로 서는 덱**을 만들어 올려라.\n\n## 각도\n이번 판은 **피보나치 N 방향 하나**다 — `num_directions` 로 수만 정한다. 프리셋·육면체(면·모서리·꼭지점)·스윕·각도 파일·공차 DOE 는 다음 판이다. 그 값들이 들어오면 **조용히 버리지 않고 거절한다.**\n\n단위계는 LS-DYNA 덱과 같아야 한다 — 표준은 [tonne, mm, s, MPa].",
       "invocation": "external",
       "config_style": null,
       "takes_kfile": true,
@@ -14015,60 +14015,12 @@
           "description": "시나리오 이름(결과 폴더·보고서 표기)."
         },
         {
-          "name": "angle_preset",
+          "name": "job_name",
           "type": "string",
           "role": "value",
           "required": false,
-          "group": "각도 — 고르기",
-          "description": "각도 집합 프리셋(서버 목록). 비우면 도구 기본값."
-        },
-        {
-          "name": "angle_source",
-          "type": "enum",
-          "role": "value",
-          "required": false,
-          "group": "각도 — 고르기",
-          "description": "각도를 만드는 방식. 지정하면 프리셋의 source_type 을 덮는다.",
-          "enum": [
-            "cuboid_geometry",
-            "fibonacci_lattice",
-            "pitching_sweep",
-            "rolling_sweep",
-            "case_txt_file",
-            "explicit"
-          ]
-        },
-        {
-          "name": "include_faces",
-          "type": "boolean",
-          "role": "value",
-          "required": false,
-          "group": "각도 — 육면체",
-          "description": "6면 방향(F1~F6) 포함. 기본 참."
-        },
-        {
-          "name": "include_edges",
-          "type": "boolean",
-          "role": "value",
-          "required": false,
-          "group": "각도 — 육면체",
-          "description": "12모서리 방향(E1~E12) 포함. 기본 참."
-        },
-        {
-          "name": "include_corners",
-          "type": "boolean",
-          "role": "value",
-          "required": false,
-          "group": "각도 — 육면체",
-          "description": "8꼭짓점 방향(C1~C8) 포함. 기본 참. 셋 다면 26방향."
-        },
-        {
-          "name": "cuboid_only",
-          "type": "array",
-          "role": "value",
-          "required": false,
-          "group": "각도 — 육면체",
-          "description": "특정 자세만(예: [\"C1\",\"F5\"]). **설정하면 위 include_* 는 무시된다.** 오타는 오류로 막힌다."
+          "group": "자원",
+          "description": "클러스터에 남을 잡 이름. 비우면 서버가 정한다."
         },
         {
           "name": "num_directions",
@@ -14079,212 +14031,6 @@
           "description": "구면 점 수(기본 26). scenario.json 의 num_points."
         },
         {
-          "name": "angle_spacing",
-          "type": "number",
-          "role": "value",
-          "required": false,
-          "group": "각도 — 피보나치",
-          "description": "각도 간격(도) — 점 수 대신 쓸 수 있다."
-        },
-        {
-          "name": "progressive",
-          "type": "boolean",
-          "role": "value",
-          "required": false,
-          "group": "각도 — 피보나치",
-          "description": "점진(farthest-point) 순서로 재정렬 — 앞 k개만 써도 전구면 균일."
-        },
-        {
-          "name": "principal_directions",
-          "type": "enum",
-          "role": "value",
-          "required": false,
-          "group": "각도 — 피보나치",
-          "description": "표준 낙하자세를 먼저 배치하고 나머지를 그 사이에 채운다.",
-          "enum": [
-            "faces",
-            "faces_corners",
-            "cuboid26"
-          ]
-        },
-        {
-          "name": "sampling_space",
-          "type": "enum",
-          "role": "value",
-          "required": false,
-          "group": "각도 — 피보나치",
-          "description": "physical=실제 낙하방향 등간격(권장) · latlon=옛 방식(적도 쏠림).",
-          "enum": [
-            "physical",
-            "latlon"
-          ]
-        },
-        {
-          "name": "previous_stages",
-          "type": "array",
-          "role": "value",
-          "required": false,
-          "group": "각도 — 피보나치",
-          "description": "이미 돌린 단계의 누적 개수(오름차순). 그 위치를 빼고 나머지만 낸다."
-        },
-        {
-          "name": "pitch_min",
-          "type": "number",
-          "role": "value",
-          "required": false,
-          "group": "각도 — 스윕",
-          "description": "pitching_sweep 시작각(도, 기본 -90)."
-        },
-        {
-          "name": "pitch_max",
-          "type": "number",
-          "role": "value",
-          "required": false,
-          "group": "각도 — 스윕",
-          "description": "pitching_sweep 끝각(도, 기본 90)."
-        },
-        {
-          "name": "pitch_step",
-          "type": "number",
-          "role": "value",
-          "required": false,
-          "group": "각도 — 스윕",
-          "description": "pitching_sweep 간격(도, 기본 10)."
-        },
-        {
-          "name": "pitch_roll_fixed",
-          "type": "number",
-          "role": "value",
-          "required": false,
-          "group": "각도 — 스윕",
-          "description": "pitching_sweep 중 고정할 roll(도, 기본 0)."
-        },
-        {
-          "name": "pitch_yaw_fixed",
-          "type": "number",
-          "role": "value",
-          "required": false,
-          "group": "각도 — 스윕",
-          "description": "pitching_sweep 중 고정할 yaw(도, 기본 0)."
-        },
-        {
-          "name": "roll_min",
-          "type": "number",
-          "role": "value",
-          "required": false,
-          "group": "각도 — 스윕",
-          "description": "rolling_sweep 시작각(도, 기본 -180)."
-        },
-        {
-          "name": "roll_max",
-          "type": "number",
-          "role": "value",
-          "required": false,
-          "group": "각도 — 스윕",
-          "description": "rolling_sweep 끝각(도, 기본 170)."
-        },
-        {
-          "name": "roll_step",
-          "type": "number",
-          "role": "value",
-          "required": false,
-          "group": "각도 — 스윕",
-          "description": "rolling_sweep 간격(도, 기본 10)."
-        },
-        {
-          "name": "roll_pitch_fixed",
-          "type": "number",
-          "role": "value",
-          "required": false,
-          "group": "각도 — 스윕",
-          "description": "rolling_sweep 중 고정할 pitch(도, 기본 0)."
-        },
-        {
-          "name": "case_txt",
-          "type": "file",
-          "role": "input_file",
-          "required": false,
-          "group": "각도 — 파일·직접",
-          "description": "각도 목록 .txt(이 세션의 파일). 고르면 각도원이 case_txt_file 이 된다."
-        },
-        {
-          "name": "selected_indices",
-          "type": "array",
-          "role": "value",
-          "required": false,
-          "group": "각도 — 파일·직접",
-          "description": "각도 파일에서 쓸 줄 번호만 고른다(비우면 전부)."
-        },
-        {
-          "name": "explicit_angles",
-          "type": "array",
-          "role": "value",
-          "required": false,
-          "group": "각도 — 파일·직접",
-          "description": "각도를 직접 열거([{name,roll,pitch,yaw}, ...]). 취약각도 재조사용."
-        },
-        {
-          "name": "explicit_file",
-          "type": "string",
-          "role": "value",
-          "required": false,
-          "group": "각도 — 파일·직접",
-          "description": "각도를 적어 둔 JSON 파일 경로(서버측)."
-        },
-        {
-          "name": "tolerance_doe_type",
-          "type": "enum",
-          "role": "value",
-          "required": false,
-          "group": "각도 공차",
-          "description": "공차 DOE 방식(기본 lhs).",
-          "enum": [
-            "lhs",
-            "full",
-            "random"
-          ]
-        },
-        {
-          "name": "tolerance_doe_count",
-          "type": "integer",
-          "role": "value",
-          "required": false,
-          "group": "각도 공차",
-          "description": "공차 DOE 개수(기본 10)."
-        },
-        {
-          "name": "tolerance_include_nominal",
-          "type": "boolean",
-          "role": "value",
-          "required": false,
-          "group": "각도 공차",
-          "description": "공차 없는 기준각도 케이스를 함께 포함."
-        },
-        {
-          "name": "tolerance_roll",
-          "type": "number",
-          "role": "value",
-          "required": false,
-          "group": "각도 공차",
-          "description": "roll 공차(±도)."
-        },
-        {
-          "name": "tolerance_pitch",
-          "type": "number",
-          "role": "value",
-          "required": false,
-          "group": "각도 공차",
-          "description": "pitch 공차(±도)."
-        },
-        {
-          "name": "tolerance_yaw",
-          "type": "number",
-          "role": "value",
-          "required": false,
-          "group": "각도 공차",
-          "description": "yaw 공차(±도)."
-        },
-        {
           "name": "height",
           "type": "number",
           "role": "value",
@@ -14293,108 +14039,12 @@
           "description": "낙하 높이(모델 단위, 기본 1500mm)."
         },
         {
-          "name": "gravity",
-          "type": "number",
-          "role": "value",
-          "required": false,
-          "group": "낙하 물리",
-          "description": "자유낙하 g(모델 단위). 비우면 재질 밀도로 판정한다."
-        },
-        {
           "name": "t_final",
           "type": "number",
           "role": "value",
           "required": false,
           "group": "낙하 물리",
           "description": "해석 종료 시간(기본 0.005s). scenario.json 의 tFinal."
-        },
-        {
-          "name": "dt",
-          "type": "number",
-          "role": "value",
-          "required": false,
-          "group": "낙하 물리",
-          "description": "d3plot 출력 간격(기본 1e-6s)."
-        },
-        {
-          "name": "dtmin",
-          "type": "number",
-          "role": "value",
-          "required": false,
-          "group": "낙하 물리",
-          "description": "CONTROL_TERMINATION DTMIN(기본 1e-10, DR 이면 0)."
-        },
-        {
-          "name": "offset_distance",
-          "type": "number",
-          "role": "value",
-          "required": false,
-          "group": "낙하 물리",
-          "description": "모델-바닥 초기 간격(기본 0.05mm)."
-        },
-        {
-          "name": "dynamic_relaxation",
-          "type": "boolean",
-          "role": "value",
-          "required": false,
-          "group": "낙하 물리",
-          "description": "누적 스텝 사이 동적 완화(DR) 켜기. 세부는 아래 dr_* 칸."
-        },
-        {
-          "name": "dr_nrcyck",
-          "type": "integer",
-          "role": "value",
-          "required": false,
-          "group": "낙하 물리",
-          "description": "DR 수렴 검사 주기(기본 250)."
-        },
-        {
-          "name": "dr_drtol",
-          "type": "number",
-          "role": "value",
-          "required": false,
-          "group": "낙하 물리",
-          "description": "DR 수렴 허용오차(기본 0.01)."
-        },
-        {
-          "name": "dr_drfctr",
-          "type": "number",
-          "role": "value",
-          "required": false,
-          "group": "낙하 물리",
-          "description": "DR 감쇠 계수(기본 0.995)."
-        },
-        {
-          "name": "dr_drterm",
-          "type": "number",
-          "role": "value",
-          "required": false,
-          "group": "낙하 물리",
-          "description": "DR 종료 시간(기본 tFinal)."
-        },
-        {
-          "name": "control_timestep",
-          "type": "object",
-          "role": "value",
-          "required": false,
-          "group": "낙하 물리",
-          "description": "*CONTROL_TIMESTEP 덮어쓰기(DT2MS 등)."
-        },
-        {
-          "name": "control_hourglass",
-          "type": "object",
-          "role": "value",
-          "required": false,
-          "group": "낙하 물리",
-          "description": "*CONTROL_HOURGLASS 덮어쓰기."
-        },
-        {
-          "name": "rigidify_small_dt_threshold",
-          "type": "number",
-          "role": "value",
-          "required": false,
-          "group": "낙하 물리",
-          "description": "이 dt 보다 작은 요소를 강체화(기본 0=끔)."
         },
         {
           "name": "drop_surface",
@@ -14411,259 +14061,28 @@
           ]
         },
         {
-          "name": "surface_size",
-          "type": "array",
-          "role": "value",
-          "required": false,
-          "group": "바닥",
-          "description": "바닥판 크기 [x, y, z](기본 300,300,20)."
-        },
-        {
-          "name": "surface_mesh",
-          "type": "array",
-          "role": "value",
-          "required": false,
-          "group": "바닥",
-          "description": "바닥판 격자 [nx, ny, nz](기본 30,30,2)."
-        },
-        {
-          "name": "num_outer_layers",
+          "name": "ncpu",
           "type": "integer",
           "role": "value",
           "required": false,
-          "group": "바닥",
-          "description": "PlaneGraded — 바깥 점진 층 수(기본 5)."
+          "group": "자원",
+          "description": "케이스당 코어 수."
         },
         {
-          "name": "ratio",
-          "type": "number",
-          "role": "value",
-          "required": false,
-          "group": "바닥",
-          "description": "PlaneGraded — 층 증가 비(기본 1.5)."
-        },
-        {
-          "name": "roughness_mode",
+          "name": "memory",
           "type": "string",
           "role": "value",
           "required": false,
-          "group": "바닥",
-          "description": "PlanewithRoughness — 거칠기 방식(기본 Random)."
+          "group": "자원",
+          "description": "LS-DYNA 메모리(예: 2000m). 도구 인자로 간다."
         },
         {
-          "name": "r_max",
-          "type": "number",
+          "name": "time_limit",
+          "type": "string",
           "role": "value",
           "required": false,
-          "group": "바닥",
-          "description": "PlanewithRoughness — 최대 거칠기 높이."
-        },
-        {
-          "name": "shape_factor",
-          "type": "number",
-          "role": "value",
-          "required": false,
-          "group": "바닥",
-          "description": "PlanewithRoughness — 형상 계수."
-        },
-        {
-          "name": "shape_factor2",
-          "type": "number",
-          "role": "value",
-          "required": false,
-          "group": "바닥",
-          "description": "PlanewithRoughness — 형상 계수 2."
-        },
-        {
-          "name": "deformable_to_rigid",
-          "type": "boolean",
-          "role": "value",
-          "required": false,
-          "group": "바닥",
-          "description": "해석 중 변형체→강체 전환(D2R, 기본 거짓)."
-        },
-        {
-          "name": "density",
-          "type": "number",
-          "role": "value",
-          "required": false,
-          "group": "바닥",
-          "description": "바닥판 밀도(기본 7.85e-9 tonne/mm³). 변형체 바닥일 때만 뜻이 있다."
-        },
-        {
-          "name": "youngs_modulus",
-          "type": "number",
-          "role": "value",
-          "required": false,
-          "group": "바닥",
-          "description": "바닥판 탄성계수(기본 2.0e5 MPa)."
-        },
-        {
-          "name": "poisson_ratio",
-          "type": "number",
-          "role": "value",
-          "required": false,
-          "group": "바닥",
-          "description": "바닥판 포아송비(기본 0.3)."
-        },
-        {
-          "name": "non_reflecting_boundary",
-          "type": "boolean",
-          "role": "value",
-          "required": false,
-          "group": "바닥",
-          "description": "무반사 경계(기본 거짓)."
-        },
-        {
-          "name": "drop_contact",
-          "type": "object",
-          "role": "value",
-          "required": false,
-          "group": "접촉",
-          "description": "바닥판 접촉 카드 필드(SOFT, DTSTIF, FS ...)."
-        },
-        {
-          "name": "robust_contact",
-          "type": "boolean",
-          "role": "value",
-          "required": false,
-          "group": "접촉",
-          "description": "Tied 면을 제외한 SINGLE_SURFACE(기본 거짓)."
-        },
-        {
-          "name": "robust_contact_tolerance",
-          "type": "number",
-          "role": "value",
-          "required": false,
-          "group": "접촉",
-          "description": "robust_contact 허용오차(기본 0.1)."
-        },
-        {
-          "name": "convert_general_to_single_surface",
-          "type": "boolean",
-          "role": "value",
-          "required": false,
-          "group": "접촉",
-          "description": "일반 접촉을 단일면 접촉으로 변환(기본 참)."
-        },
-        {
-          "name": "ensure_single_surface",
-          "type": "boolean",
-          "role": "value",
-          "required": false,
-          "group": "접촉",
-          "description": "단일면 접촉 보장(기본 거짓)."
-        },
-        {
-          "name": "decompose_general_contact",
-          "type": "boolean",
-          "role": "value",
-          "required": false,
-          "group": "접촉",
-          "description": "일반 접촉 분해(기본 거짓)."
-        },
-        {
-          "name": "include_wall_in_general",
-          "type": "boolean",
-          "role": "value",
-          "required": false,
-          "group": "접촉",
-          "description": "바닥을 일반 접촉에 포함(기본 거짓)."
-        },
-        {
-          "name": "decompose_contact_margin",
-          "type": "number",
-          "role": "value",
-          "required": false,
-          "group": "접촉",
-          "description": "접촉 분해 여유(기본 1.5)."
-        },
-        {
-          "name": "decompose_contact_absolute_margin_x",
-          "type": "number",
-          "role": "value",
-          "required": false,
-          "group": "접촉",
-          "description": "접촉 분해 절대 여유 X(기본 5)."
-        },
-        {
-          "name": "decompose_contact_absolute_margin_y",
-          "type": "number",
-          "role": "value",
-          "required": false,
-          "group": "접촉",
-          "description": "접촉 분해 절대 여유 Y(기본 5)."
-        },
-        {
-          "name": "decompose_contact_absolute_margin_z",
-          "type": "number",
-          "role": "value",
-          "required": false,
-          "group": "접촉",
-          "description": "접촉 분해 절대 여유 Z(기본 0.5)."
-        },
-        {
-          "name": "cumulative_steps",
-          "type": "integer",
-          "role": "value",
-          "required": false,
-          "group": "연속 낙하",
-          "description": "각도당 연속 낙하 횟수(기본 1)."
-        },
-        {
-          "name": "mode_sequence",
-          "type": "array",
-          "role": "value",
-          "required": false,
-          "group": "연속 낙하",
-          "description": "스텝별 모드(기본 [\"DROP\"]). DROP·IMPACT·THERM·STAT·VIB 조합."
-        },
-        {
-          "name": "base_angle_index",
-          "type": "integer",
-          "role": "value",
-          "required": false,
-          "group": "연속 낙하",
-          "description": "기준 각도 인덱스(기본 0)."
-        },
-        {
-          "name": "angle_mixing",
-          "type": "enum",
-          "role": "value",
-          "required": false,
-          "group": "연속 낙하",
-          "description": "스텝마다 각도를 바꾸는 방식(기본 same_angle).",
-          "enum": [
-            "same_angle",
-            "cyclic",
-            "random",
-            "opposite",
-            "custom_mapping"
-          ]
-        },
-        {
-          "name": "cyclic_offset",
-          "type": "integer",
-          "role": "value",
-          "required": false,
-          "group": "연속 낙하",
-          "description": "cyclic — 스텝마다 더할 인덱스(기본 1)."
-        },
-        {
-          "name": "random_seed",
-          "type": "integer",
-          "role": "value",
-          "required": false,
-          "group": "연속 낙하",
-          "description": "random — 재현을 위한 씨앗."
-        },
-        {
-          "name": "custom_mapping",
-          "type": "object",
-          "role": "value",
-          "required": false,
-          "group": "연속 낙하",
-          "description": "custom_mapping — {스텝: 각도인덱스}."
+          "group": "자원",
+          "description": "Slurm 시간 상한(예: 24:00:00). 도구 인자로 간다."
         },
         {
           "name": "postprocess_enabled",
@@ -14690,153 +14109,32 @@
           "description": "통합 sphere_report(Mollweide) 자동 생성."
         },
         {
-          "name": "deep_timeout_seconds",
-          "type": "integer",
-          "role": "value",
-          "required": false,
-          "group": "후처리",
-          "description": "deep_report 제한 시간(초)."
-        },
-        {
-          "name": "sphere_time_limit",
-          "type": "string",
-          "role": "value",
-          "required": false,
-          "group": "후처리",
-          "description": "sphere_report 잡의 Slurm 시간 상한."
-        },
-        {
-          "name": "section_view_mode",
-          "type": "string",
-          "role": "value",
-          "required": false,
-          "group": "후처리",
-          "description": "단면 보기 방식."
-        },
-        {
-          "name": "section_view_axes",
-          "type": "array",
-          "role": "value",
-          "required": false,
-          "group": "후처리",
-          "description": "단면 축 목록."
-        },
-        {
-          "name": "section_view_fields",
-          "type": "array",
-          "role": "value",
-          "required": false,
-          "group": "후처리",
-          "description": "단면에 그릴 물리량."
-        },
-        {
-          "name": "sv_threads",
-          "type": "integer",
-          "role": "value",
-          "required": false,
-          "group": "후처리",
-          "description": "단면 보기 스레드 수."
-        },
-        {
-          "name": "ua_threads",
-          "type": "integer",
-          "role": "value",
-          "required": false,
-          "group": "후처리",
-          "description": "통합 분석 스레드 수."
-        },
-        {
           "name": "yield_stress_mpa",
           "type": "number",
           "role": "value",
           "required": false,
           "group": "후처리",
           "description": "안전율 판정에 쓸 항복강도(MPa)."
-        },
-        {
-          "name": "job_name",
-          "type": "string",
-          "role": "value",
-          "required": false,
-          "group": "자원",
-          "description": "클러스터에 남을 잡 이름. 비우면 서버가 정한다."
-        },
-        {
-          "name": "ncpu",
-          "type": "integer",
-          "role": "value",
-          "required": false,
-          "group": "자원",
-          "description": "케이스당 코어 수."
-        },
-        {
-          "name": "nodes_per_job",
-          "type": "integer",
-          "role": "value",
-          "required": false,
-          "group": "자원",
-          "description": "잡당 노드 수."
-        },
-        {
-          "name": "mpi_enabled",
-          "type": "boolean",
-          "role": "value",
-          "required": false,
-          "group": "자원",
-          "description": "MPI 실행 여부."
-        },
-        {
-          "name": "memory",
-          "type": "string",
-          "role": "value",
-          "required": false,
-          "group": "자원",
-          "description": "LS-DYNA 메모리(예: 2000m). 도구 인자로 간다."
-        },
-        {
-          "name": "time_limit",
-          "type": "string",
-          "role": "value",
-          "required": false,
-          "group": "자원",
-          "description": "Slurm 시간 상한(예: 24:00:00). 도구 인자로 간다."
-        },
-        {
-          "name": "preserve_includes",
-          "type": "array",
-          "role": "value",
-          "required": false,
-          "group": "고급",
-          "description": "보존할 *INCLUDE 패턴(멀티스케일·IGA)."
-        },
-        {
-          "name": "scenario_overrides",
-          "type": "object",
-          "role": "value",
-          "required": false,
-          "group": "고급",
-          "description": "scenario.json 구조 그대로의 덮어쓰기. **맨 마지막에 깊은 병합되어 위 모든 옵션을 이긴다.**"
         }
       ],
       "example": {
         "args": {
           "model": "phone_assembly.k",
-          "angle_preset": "fibonacci-100",
+          "num_directions": 162,
           "height": 1200,
+          "t_final": 0.005,
           "drop_surface": "RigidWall",
-          "sampling_space": "physical",
-          "scenario_overrides": {
-            "simulation_params": {
-              "gravity": 9810
-            }
-          }
+          "ncpu": 2,
+          "memory": "4G",
+          "time_limit": "12:00:00"
         },
-        "note": "100방향 전각도 낙하를 1200mm·강체 바닥에서 제출한다. 폼에 칸이 없는 것은 scenario_overrides 로 덧붙인다 — 그것이 맨 마지막에 이긴다."
+        "note": "162방향 전각도 낙하를 1200mm·강체 바닥에서 제출한다. 덱은 제출 전에 stcx 로 올라간다."
       },
       "notes": [
         "이 작업은 stcx(356대)에서 돈다. ste(24대)와는 다른 클러스터다.",
-        "제출에는 게이트웨이 PAT 가 필요하다(KOORM_GATEWAY_PAT). 없으면 제출이 명시적으로 실패한다.",
-        "옵션 전체 카탈로그(단위·기본값·허용값)는 서버가 정본이다 — `GET /api/v1/stcx/options`."
+        "설정 넷이 모두 필요하다 — KOORM_GATEWAY_PAT · KOORM_STCX_BACKEND_URL · KOORM_STCX_WORK_ROOT · KOORM_STCX_LSTC_IP. 하나라도 비면 제출이 명시적으로 실패한다.",
+        "덱은 제출 전에 stcx 로 올라간다(청크 업로드, 상한 50GB). *INCLUDE 가 있는 덱은 아직 못 보낸다 — extract-parts 로 펼쳐서 올려라.",
+        "각도 프리셋·육면체·스윕·각도 파일·공차·DR·접촉·연속 낙하는 다음 판이다. GET /api/v1/stcx/options 는 빈 목록과 사유를 돌려준다."
       ]
     }
   ]

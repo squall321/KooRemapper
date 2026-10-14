@@ -9,8 +9,6 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.models import User
 from app.runner import catalog
-from app.runner.stcx_client import StcxClient, parse_presets
-from app.config import settings
 from app.shared.auth import get_current_user
 from app.shared.responses import ok
 
@@ -30,23 +28,20 @@ async def describe_operation(op: str, _user: User = Depends(get_current_user)):
     return ok({**entry, "args_schema": catalog.args_json_schema(op)})
 
 
-# 각도 프리셋 목록은 **서버가 들고 있다.** 여기 박아 두면 클러스터에 프리셋이 늘어도
-# 화면에는 안 보이고, 사용자는 있는 것을 못 쓴다. 그래서 물어서 그대로 보여 준다.
+# ★2026-10-14 — **물어볼 곳이 없어졌다.** 제출이 SmartTwinMCP(:5013)로 옮겨졌고, 그쪽
+# `fullangle_drop_simulation` 은 각도를 **피보나치 N개**로만 받는다(`num_angles`). 프리셋을
+# 내주던 :5012 의 `smarttwin_scenario_options` 는 쓰지 않는다.
+#
+# 그래서 빈 목록을 돌려주는데, **빈 목록만 돌려주지는 않는다** — 빈 목록은 "프리셋이 없다"
+# 처럼 보이는데 실제로는 "이번 판에서 프리셋이라는 개념이 없다" 다. 사유를 같이 보낸다.
 @router.get("/stcx/options")
 async def stcx_options(_user: User = Depends(get_current_user)):
-    """stcx 전각도 낙하의 옵션 카탈로그(원문) + 고를 수 있는 각도 프리셋.
-
-    게이트웨이가 안 닿거나 PAT 가 없으면 **빈 목록이 아니라 사유를 돌려준다** — 빈 목록은
-    "프리셋이 없다" 처럼 보이는데, 실제로는 물어보지도 못한 것이다.
-    """
-    client = StcxClient(settings.gateway_mcp, settings.gateway_pat)
-    try:
-        res = await client.scenario_options("fullangle_drop")
-    finally:
-        await client.close()
-    if not res.get("ok"):
-        return ok({"available": False, "reason": res.get("error"),
-                   "detail": str(res.get("detail"))[:300], "presets": [], "catalog": ""})
-    raw = res.get("result")
-    text = raw if isinstance(raw, str) else str((raw or {}).get("result", "") if isinstance(raw, dict) else raw)
-    return ok({"available": True, "presets": parse_presets(raw), "catalog": text})
+    """각도 프리셋 목록 — 이번 판에서는 **비어 있고, 왜 비었는지**를 함께 돌려준다."""
+    return ok({
+        "available": False,
+        "reason": "presets_not_supported",
+        "detail": "stcx 제출이 SmartTwinMCP 로 옮겨졌다 — 각도는 방향 수(num_directions)로만"
+                  " 정한다. 프리셋·육면체·스윕·각도 파일은 다음 판이다.",
+        "presets": [],
+        "catalog": "",
+    })

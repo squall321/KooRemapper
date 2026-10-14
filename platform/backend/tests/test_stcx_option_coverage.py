@@ -134,10 +134,51 @@ def test_angle_params_are_nested_under_their_source_type():
     assert "angle_source.cuboid_geometry.include_faces" in _covered_paths()
 
 
-def test_every_mapped_arg_is_a_real_form_field():
+# ★2026-10-14 — SmartTwinMCP(:5013)로 옮기면서 **폼 칸을 12개로 줄였다.** 받는 쪽
+#   `fullangle_drop_simulation` 이 피보나치 N 방향만 받고, `extra_scenario_overrides` 는
+#   리스트를 통째로 바꿔 기본 시나리오를 지우므로 보내지 않는다(요청서 §2).
+#   아래 매핑은 **지운 것이 아니라 파킹한 것**이다 — 각도 방식·공차·DR·접촉·연속 낙하를
+#   다시 여는 다음 판(요청서 §5)을 위해 표째로 남겼다.
+#   **이름으로 못박는다.** 그래야 (a) 매핑을 새로 더하고 칸을 안 만들면 빨개지고,
+#   (b) 다음 판에 칸을 열면서 이 목록에서 지우는 것을 잊으면 빨개진다.
+PARKED_FOR_NEXT_ROUND = frozenset({
+    "angle_mixing", "angle_source", "angle_spacing", "base_angle_index",
+    "control_hourglass", "control_timestep", "convert_general_to_single_surface", "cuboid_only",
+    "cumulative_steps", "custom_mapping", "cyclic_offset", "decompose_contact_absolute_margin_x",
+    "decompose_contact_absolute_margin_y", "decompose_contact_absolute_margin_z", "decompose_contact_margin", "decompose_general_contact",
+    "deep_timeout_seconds", "deformable_to_rigid", "density", "dr_drfctr",
+    "dr_drterm", "dr_drtol", "dr_nrcyck", "drop_contact",
+    "dt", "dtmin", "ensure_single_surface", "explicit_angles",
+    "explicit_file", "gravity", "include_corners", "include_edges",
+    "include_faces", "include_wall_in_general", "mode_sequence", "mpi_enabled",
+    "nodes_per_job", "non_reflecting_boundary", "num_outer_layers", "offset_distance",
+    "pitch_max", "pitch_min", "pitch_roll_fixed", "pitch_step",
+    "pitch_yaw_fixed", "poisson_ratio", "preserve_includes", "previous_stages",
+    "principal_directions", "progressive", "r_max", "random_seed",
+    "ratio", "rigidify_small_dt_threshold", "robust_contact", "robust_contact_tolerance",
+    "roll_max", "roll_min", "roll_pitch_fixed", "roll_step",
+    "roughness_mode", "sampling_space", "section_view_axes", "section_view_fields",
+    "section_view_mode", "selected_indices", "shape_factor", "shape_factor2",
+    "sphere_time_limit", "surface_mesh", "surface_size", "sv_threads",
+    "tolerance_doe_count", "tolerance_doe_type", "tolerance_include_nominal", "tolerance_pitch",
+    "tolerance_roll", "tolerance_yaw", "ua_threads", "youngs_modulus",
+})
+
+
+def test_every_mapped_arg_is_a_real_form_field_or_explicitly_parked():
     names = {p["name"] for p in _params()}
-    orphan = sorted(k for k in _SCENARIO_MAP if k not in names)
-    assert not orphan, f"매핑은 있는데 폼에 칸이 없다(영영 못 고른다): {orphan}"
+    orphan = sorted(k for k in _SCENARIO_MAP
+                    if k not in names and k not in PARKED_FOR_NEXT_ROUND)
+    assert not orphan, f"매핑은 있는데 폼에 칸이 없고 파킹 목록에도 없다: {orphan}"
+
+
+def test_no_stale_parked_names():
+    """파킹 목록이 현실과 어긋나면 빨개진다 — 목록이 조용히 거짓말하는 것을 막는다."""
+    names = {p["name"] for p in _params()}
+    reopened = sorted(k for k in PARKED_FOR_NEXT_ROUND if k in names)
+    assert not reopened, f"칸이 다시 열렸다 — 파킹 목록에서 지워라: {reopened}"
+    gone = sorted(k for k in PARKED_FOR_NEXT_ROUND if k not in _SCENARIO_MAP)
+    assert not gone, f"매핑이 없어졌다 — 파킹 목록에서 지워라: {gone}"
 
 
 def test_every_form_field_goes_somewhere():
