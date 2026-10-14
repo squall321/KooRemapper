@@ -133,10 +133,18 @@
       `plan_task_links()` 의 `counts` 를 그대로 보고한다
 
 ## S5. API · MCP · 화면
-- [ ] **S5-1 API** 과제·개정 목록, 개정 간 리포트 비교
-- [ ] **S5-2 MCP** 기존 도구에 축을 더하는 쪽 먼저
-- [ ] **S5-3 화면** 리포트 목록의 과제·개정 필터
-- [ ] **S5-4 관문** `reports_smoke` 에 항 추가 · Playwright 실동작
+- [x] **S5-1 API** `app/modules/ontology/routes.py` — 과제 목록 · 개정 줄 · 리포트의 개정
+      (조회/확정) · 과거 붙이기 계획/적용 · 별칭 · 수신 상태/실행.
+      ★**과제를 만들거나 고치는 길이 없다**(정본은 허브다) — 시험이 쓰기 경로 집합을 못박는다
+- [x] **S5-1a 관문** 전사 데이터를 움직이는 여섯 길은 **시스템 관리자**다.
+      ★그 결함은 **아무 시험도 빨개지지 않는다**(동작은 되니까) → 라우트 시험 23항이
+      의존을 직접 본다 + 읽기 길에는 **없는지** 판별 항까지
+- [x] **S5-2 MCP 도구 여섯** `list_tasks`·`task_revisions`·`report_revision`·
+      `set_report_revision`·`ontology_sync_state`·`plan_task_links`. 62 → **68**.
+      도구 수는 양쪽 다 **산출**이라(`_mcp_tool_count`·`smoke.EXPECTED_TOOLS`) 고칠 리터럴이 없다.
+      도구 설명에 「짐작으로 부르지 마라」·「비면 `reason` 을 보라」 를 적었다
+- [ ] **S5-3 화면** 리포트 목록의 과제·개정 필터 · 개정 줄
+- [ ] **S5-4 관문** `reports_smoke` 에 항 추가(살아 있는 스택 필요) · Playwright 실동작
 
 ## S6. 허브로 내보내기 (선택 · §7 ⑤)
 - [ ] **S6-1** `dev_revision` 을 허브에 — StepForge `cad_revision` 과 **나란히** 서야 한다

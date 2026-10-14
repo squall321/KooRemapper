@@ -75,6 +75,11 @@ async def _post(ctx, path, json_body=None):
         return _unwrap(await c.post(path, json=json_body, headers=_forward_headers(ctx)))
 
 
+async def _put(ctx, path, json_body=None):
+    async with httpx.AsyncClient(base_url=API, timeout=120) as c:
+        return _unwrap(await c.put(path, json=json_body, headers=_forward_headers(ctx)))
+
+
 async def _delete(ctx, path):
     async with httpx.AsyncClient(base_url=API, timeout=60) as c:
         return _unwrap(await c.delete(path, headers=_forward_headers(ctx)))
@@ -1373,6 +1378,71 @@ async def publish_report_to_datahub(
 async def delete_report(report_id: str, ctx: Context) -> dict:
     """인제스트된 리포트를 삭제한다(원본 HTML 포함). / Delete an ingested report."""
     return await _delete(ctx, f"/reports/{report_id}")
+
+
+# ── 과제 · 개발 개정 (온톨로지) ──────────────────────────────────────
+# 과제의 정본은 **허브**다 — 여기에 과제를 만들거나 고치는 도구는 **없다**(있으면 다음 받기가
+# 덮어쓰고 그 사실이 고친 사람에게 안 보인다). 쓰는 것은 **우리 것**(개정)뿐이다.
+@mcp.tool()
+async def list_tasks(ctx: Context, q: str = "", limit: int = 100) -> dict:
+    """허브에서 받은 **과제 목록**(과제코드·과제명). `q` 로 코드·이름 일부 검색.
+    ★목록이 비면 `reason` 을 본다 — 「수신이 꺼져 있다」 와 「받았지만 없다」 는 다르다.
+    / Mirrored PLM tasks. An empty list carries a `reason`."""
+    return await _get(ctx, "/ontology/tasks", {"q": q or None, "limit": limit})
+
+
+@mcp.tool()
+async def task_revisions(task_key: str, ctx: Context) -> dict:
+    """한 과제의 **개발 개정 줄** — rev_seq 순, 각 판에 달린 리포트와 앞 판(supersedes).
+    같은 과제의 판끼리 결과를 견주려면 여기서 리포트 id 를 얻어 report_compare 로 넘긴다.
+    / The revision chain of one task, with the reports on each."""
+    return await _get(ctx, f"/ontology/tasks/{task_key}/revisions")
+
+
+@mcp.tool()
+async def report_revision(report_id: str, ctx: Context, task_key: str = "") -> dict:
+    """이 리포트가 어느 과제·개정인가 + **어긋남** + **후보와 근거**.
+
+    ★`mismatch` 가 비어 있지 않으면 수동 메타(eng_meta)와 이어진 개정이 다르다는 뜻이다 —
+    **관계가 정본**이지만 서버는 조용히 맞추지 않는다. 사람에게 보여 주고 고르게 하라.
+    `candidates` 는 고르지 않은 후보다(근거 포함). `valid: false` 인 것은 형식이 아니지만
+    **버리지 않고** 보여 주는 것이다.
+    / The linked revision, any mismatch, and unchosen candidates with evidence."""
+    return await _get(ctx, f"/reports/{report_id}/revision",
+                      {"task_key": task_key or None})
+
+
+@mcp.tool()
+async def set_report_revision(report_id: str, task_key: str, code: str, ctx: Context,
+                              model_key: str = "", supersedes: str = "",
+                              note: str = "") -> dict:
+    """리포트를 과제의 한 개정에 **확정한다**(사람의 판정으로 기록된다).
+
+    `code` 는 `pre|dv1..dvr|pv1..pvr|pra|mp` — dv/pv 는 차수 필수, pre/pra/mp 는 차수 금지.
+    `supersedes` 는 앞 판의 개정 키(`<과제코드>@<code>`)다 — 순환은 거절된다.
+    ★이 확정은 **재인제스트에 지워지지 않는다.** 그래서 짐작으로 부르지 마라 —
+    `report_revision` 의 후보와 근거를 사람에게 보여 주고 고른 값을 넣어라.
+    / Confirm the revision of a report. Survives re-ingest; do not guess."""
+    return await _put(ctx, f"/reports/{report_id}/revision", {
+        "task_key": task_key, "code": code, "model_key": model_key,
+        "supersedes": supersedes, "note": note})
+
+
+@mcp.tool()
+async def ontology_sync_state(ctx: Context) -> dict:
+    """허브 수신 상태 — 타입별 시계·마지막 결과·받은 객체 수(시스템 관리자).
+    `last_status` 가 `stopped` 면 그 타입이 **공개 안 된 것**이라 수신을 멈춘 것이다
+    (고칠 곳은 허브 관리자다). / Hub sync state. `stopped` means the hub does not publish it."""
+    return await _get(ctx, "/ontology/sync")
+
+
+@mcp.tool()
+async def plan_task_links(ctx: Context, limit: int = 0) -> dict:
+    """과거 리포트의 자유 문자열 과제를 정본에 붙이는 **계획**(시스템 관리자).
+    ★**아무것도 쓰지 않는다.** `links`(붙는다)·`proposal`(후보 있음)·`unmatched`(없음)로
+    갈라서 주고, **이름조차 없는 리포트 수**를 따로 센다. 짐작으로 붙이지 마라.
+    / A dry plan for attaching legacy free-text task names. Writes nothing."""
+    return await _get(ctx, "/ontology/task-links", {"limit": limit or None})
 
 
 if __name__ == "__main__":

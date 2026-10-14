@@ -12,6 +12,8 @@ def register_routers(app: FastAPI) -> None:
     from app.modules.auth.routes import router as auth_router
     from app.modules.corpus.routes import router as corpus_router
     from app.modules.jobs.routes import router as jobs_router
+    from app.modules.ontology.routes import admin as ontology_admin_router
+    from app.modules.ontology.routes import router as ontology_router
     from app.modules.operations.routes import router as operations_router
     from app.modules.reports.routes import router as reports_router
     from app.modules.sessions.routes import router as sessions_router
@@ -26,6 +28,9 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(operations_router, prefix=API_PREFIX)
     app.include_router(jobs_router, prefix=API_PREFIX)
     app.include_router(admin_router, prefix=API_PREFIX)
+    # 과제·개정 — 읽기는 로그인만, 과거 붙이기·별칭·수신은 시스템 관리자.
+    app.include_router(ontology_router, prefix=API_PREFIX)
+    app.include_router(ontology_admin_router, prefix=API_PREFIX)
     app.include_router(system_router, prefix=API_PREFIX)
     # 전사 통계 — 개인 식별 없는 집계라 인증만 되면 누구나(심의 근거용).
     app.include_router(corpus_router, prefix=API_PREFIX)
