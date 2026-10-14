@@ -1,24 +1,33 @@
-# stcx(356대 클러스터) 전각도 낙하를 **게이트웨이 MCP 로** 제출·조회하는 래퍼
+# stcx(356대 클러스터) 전각도 낙하를 **SmartTwinMCP(:5013)로** 제출·조회하는 래퍼 + 덱 반입
 """왜 게이트웨이를 거치나 — 직접 ssh 를 하려면 이 컨테이너에 ssh·키·클러스터 자격이
 들어와야 하고, 시나리오 생성·파티션 오토튠을 통째로 중복 구현해야 한다. 그 순간
 DynaForge 가 클러스터 자격증명을 쥔 앱이 된다. 게이트웨이 뒤에는 이미 그 일을 하는
 도구가 있고, 제출이 대시보드를 거치므로 **웹 제출과 같은 인증·권한·이력**이 붙는다.
 
-**파일을 나르지 않는다.** `model_path` 는 서버측 절대경로다 — ste 든 여기든, 올린 쪽이
-알려 준 경로를 그대로 넘긴다. 경로 값을 코드에 박지 않는 것이 요점이다(박스마다 다르다).
+**파일을 나른다 — 2026-10-14 에 뒤집혔다.** 예전 전제는 "두 쪽이 같은 경로를 본다" 였는데
+사실이 아니었다. cae00 `/data` 는 로컬 디스크이고 stcx `/data` 는 다른 NFS 다 — stcx 는 이
+서버의 경로를 **못 연다.** 그래서 제출 전에 stcx 대시보드(:5010)의 청크 업로드로 덱을 올리고,
+그것이 돌려준 **헤드노드 절대경로**를 `model_file_path` 로 넘긴다(`StcxUploader`).
+머리말의 다른 금지는 그대로다 — 이 컨테이너에 ssh·키·클러스터 자격은 들이지 않는다
+(반입은 인증 없는 HTTP 이고, 제출은 여전히 게이트웨이 PAT 하나뿐이다).
 
 **도구 이름은 접두사 붙은 별칭을 쓴다.** 게이트웨이는 이름 충돌 여부와 무관하게
-`<백엔드키에서 하이픈 뺀 것>_<도구이름>` 별칭을 **항상** 등록하고, 맨이름은 그 이름이
-유일할 때만 노출한다. 맨이름으로 부르면 나중에 다른 백엔드에 같은 이름이 생기는 순간
-조용히 사라진다.
+`<백엔드키에서 하이픈 뺀 것>_<도구이름>` 별칭을 **항상** 등록하고(`gateway.py:718-726`),
+맨이름은 그 이름이 유일할 때만 노출한다. 맨이름으로 부르면 나중에 다른 백엔드에 같은
+이름이 생기는 순간 조용히 사라진다.
+⚠ 그 별칭은 **호출 전용**이라 `tools/list`·`/tools-map` 에는 **안 보인다** — 목록은 `route`
+만 싣고 호출은 `route` 다음에 `alias_route` 를 본다(`gateway.py:3419`). 목록에서 못 찾았다고
+없는 이름이 아니다.
 
 어떤 실패도 예외로 올리지 않는다 — `{"ok": False, "error": …}` 로 돌려준다. 잡 하나가
 실패하는 것과 워커가 죽는 것은 다르다.
 """
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import json
-import re
+from pathlib import Path
 from typing import Any, Mapping
 
 import httpx
@@ -28,23 +37,28 @@ import httpx
 DEFAULT_TIMEOUT = 60.0
 PROTOCOL_VERSION = "2025-06-18"
 
-# 백엔드 키 `smart-twin-cluster` → 별칭 접두사 `smarttwincluster`(하이픈 제거).
-_PREFIX = "smarttwincluster"
-TOOL_SUBMIT = f"{_PREFIX}_smarttwin_submit"
-TOOL_OPTIONS = f"{_PREFIX}_smarttwin_scenario_options"
-TOOL_RESULTS = f"{_PREFIX}_slurm_job_results"
-TOOL_LOG = f"{_PREFIX}_slurm_job_log"
+# 백엔드 키 `smart-twin-mcp` → 별칭 접두사 `smarttwinmcp`(하이픈 제거).
+# 예전에는 `smart-twin-cluster`(:5012 mcp_slurm)를 불렀다 — 그쪽은 쓰지 않는다.
+_PREFIX = "smarttwinmcp"
+TOOL_SUBMIT = f"{_PREFIX}_fullangle_drop_simulation"
+TOOL_STATUS = f"{_PREFIX}_job_status"
+# ★상태만으로는 끝났는지 알 수 없다 — `job_status` 응답에 `slurm_job_ids` 가 없고,
+#   `squeue` 는 예외가 나도 `{}` 라 "다 끝났다"·"아직 큐에 안 올랐다"·"squeue 가 실패했다" 가
+#   같은 모양이다. 레지스트리 행 전체를 주는 이 도구로 id 목록을 함께 받는다.
+TOOL_DETAILS = f"{_PREFIX}_get_job_details"
 
 
 # ── 응답 해석 ──────────────────────────────────────────────────────────────
-# ⚠ 이 도구들은 **구조화 JSON 이 아니라 사람이 읽는 문자열**을 돌려준다. 그리고 실패도
-#   `isError` 가 아니라 "error: …" 로 시작하는 **성공 모양**으로 온다. 그대로 믿으면
-#   제출되지 않은 잡이 제출된 것으로 남고, 사용자는 몇 시간을 기다린 뒤에야 안다.
-#   그래서 해석을 여기 떼어 두고 시험으로 고정한다.
-_ERROR_HEAD = re.compile(r"^\s*(error|오류)\s*[:：]", re.I)
-_DRY_RUN_HEAD = re.compile(r"\[DRY-RUN\]")
-_JOB_ID = re.compile(r"job_id\s*=\s*(\d+)")
-_STATE = re.compile(r"상태\s*[:：]\s*(\S+)")
+# SmartTwinMCP 는 **JSON 봉투**를 돌려준다(`runner.py:40-49`) —
+#   {"tool": …, "ok": bool, "exit_code": int|None, "stdout": str, "stderr": str,
+#    "result": <stdout 이 JSON 이면 그것, 아니면 null>, "transport": …, "command": …}
+#
+# ⚠ 그런데 **인자 검증 실패는 봉투가 아니다** — `{"ok": false, "error": …, "tool": …}` 로
+#   온다(`server.py:223-225` 가 도구를 돌리기 **전에** 막는다). `exit_code`·`stdout` 이
+#   아예 없다. 두 모양을 다 받아야 한다.
+#
+# 예전 :5012 는 사람이 읽는 **글**을 돌려주고 실패도 성공 모양이었다. 그 텍스트 파서는
+# 지웠다 — 프로토콜이 통째로 바뀌었으므로 되살릴 자리가 없다.
 
 # Slurm 상태. 여기 없는 값은 **모른다**로 둔다 — 임의로 성공·실패로 접지 않는다.
 STATES_ACTIVE = frozenset({
@@ -58,43 +72,60 @@ STATES_BAD = frozenset({
 })
 
 
-def _as_text(result: Any) -> str:
-    """도구가 문자열을 돌려주는데, FastMCP 가 {'result': '...'} 로 감싸는 경우가 있다."""
-    if isinstance(result, str):
-        return result
-    if isinstance(result, Mapping):
-        for k in ("result", "text", "content"):
-            v = result.get(k)
-            if isinstance(v, str):
-                return v
-    return json.dumps(result, ensure_ascii=False) if result is not None else ""
+def _envelope(result: Any) -> dict:
+    """응답을 딕트로 본다. 딕트가 아니면 빈 딕트다(사유는 호출부가 붙인다)."""
+    return dict(result) if isinstance(result, Mapping) else {}
+
+
+def _why(env: Mapping[str, Any]) -> str:
+    """실패 사유를 **요청서가 정한 순서**로 뽑는다 — result.reason → error → stderr 꼬리.
+
+    순서가 중요하다. 스크립트가 쓴 `reason` 이 가장 구체적이고, `error` 는 인자 검증이
+    막은 것이고, `stderr` 는 둘 다 없을 때의 마지막 단서다.
+    """
+    inner = env.get("result")
+    if isinstance(inner, Mapping) and inner.get("reason"):
+        return str(inner["reason"])[:500]
+    if env.get("error"):
+        return str(env["error"])[:500]
+    tail = str(env.get("stderr") or "").strip()
+    if tail:
+        return tail[-500:]
+    return ""
 
 
 def parse_submit(result: Any) -> dict:
-    """제출 응답 → {"ok": True, "job_id": "123"} 또는 {"ok": False, "error": …}.
+    """제출 응답 → {"ok": True, "registry_id": N, "job_id": …, …} 또는 실패.
 
-    **판정 못 하면 실패다.** 못 읽은 응답을 성공으로 접으면 잡은 없는데 화면에는 도는
-    것으로 남고, 폴링이 영영 답을 못 찾는다.
+    **성공의 조건은 셋 다다** — 봉투의 `ok` · `result.ok` · `registry_id` 가 있다.
+    하나라도 없으면 실패로 닫는다. 못 읽은 응답을 성공으로 접으면 잡은 없는데 화면에는
+    도는 것으로 남고, 폴링이 영영 답을 못 찾는다.
     """
-    text = _as_text(result).strip()
-    if not text:
+    env = _envelope(result)
+    if not env:
         return {"ok": False, "error": "empty_response", "detail": ""}
-    if _ERROR_HEAD.search(text):
-        return {"ok": False, "error": "tool_refused", "detail": text[:500]}
-    if _DRY_RUN_HEAD.search(text):
-        # 도구 기본값이 dry_run=True 다. 여기까지 왔다는 것은 우리가 False 를 못 실었다는 뜻이다.
+    inner = env.get("result")
+    inner = inner if isinstance(inner, Mapping) else {}
+    if env.get("dry_run") or inner.get("dry_run"):
+        # 스키마 기본값이 False 라 여기까지 오면 우리가 True 를 실었다는 뜻이다.
         return {"ok": False, "error": "dry_run",
-                "detail": "미리보기만 돌았다 — dry_run 이 꺼지지 않았다"}
-    m = _JOB_ID.search(text)
-    if not m:
-        return {"ok": False, "error": "no_job_id", "detail": text[:500]}
-    return {"ok": True, "job_id": m.group(1), "detail": text[:2000]}
-
-
-# 옵션 카탈로그 글 안의 프리셋 줄. 예:
-#   "■ 사용 가능한 각도 프리셋 (angle_preset, /data/scenario): 26direction, 6face, fibonacci-100"
-_PRESET_LINE = re.compile(r"각도 프리셋[^:：\n]*[:：]\s*([^\n]+)")
-_PRESET_TOKEN = re.compile(r"^[\w.\-]+$")
+                "detail": "미리보기만 돌았다 — dry_run 이 켜져 있다"}
+    if not env.get("ok") or not inner.get("ok"):
+        return {"ok": False, "error": "tool_refused",
+                "detail": _why(env) or json.dumps(env, ensure_ascii=False)[:500]}
+    if inner.get("registry_id") in (None, ""):
+        # registry_id 가 없으면 폴링이 지목할 손잡이가 없다 — 제출된 것으로 치지 않는다.
+        return {"ok": False, "error": "no_registry_id",
+                "detail": json.dumps(inner, ensure_ascii=False)[:500]}
+    return {
+        "ok": True,
+        "registry_id": inner["registry_id"],
+        "job_id": str(inner.get("job_id") or ""),
+        "work_dir": inner.get("work_dir") or "",
+        "output_dir": inner.get("output_dir") or "",
+        "sphere_report_path": inner.get("sphere_report_path") or "",
+        "detail": json.dumps(inner, ensure_ascii=False)[:2000],
+    }
 
 
 class AmbiguousAngleSource(ValueError):
@@ -124,6 +155,13 @@ def _angle(over: dict) -> dict:
 
 
 # ── 낱낱 옵션 → scenario.json 자리 ────────────────────────────────────────
+#
+# ★2026-10-14 — **이 아래는 지금 살아 있는 경로가 아니다.** SmartTwinMCP 로 옮기면서
+#   `extra_scenario_overrides` 를 **보내지 않기로** 했다(요청서 §2). 받는 쪽 병합이
+#   **리스트를 통째로 바꾸므로**(`scenario_builder.py:88-89` "Lists in overrides REPLACE
+#   base lists") `scenarios[0]…` 를 넘기면 기본 시나리오(피보나치 각도·후처리)가 **지워진다.**
+#   그래서 `build_scenario_overrides` 는 호출되지 않는다 — 각도 방식·공차·DR·접촉·연속 낙하를
+#   다시 여는 **다음 판(요청서 §5)**을 위해 표와 시험째로 남겨 둔다. 지우지 말 것.
 #
 # ⚠ **여기가 조용히 틀리는 자리다.** 서버 도구는 모르는 키를 그냥 병합해 두고 지나가므로,
 #   이름이나 **자리**가 어긋나면 화면에서 고른 값이 해석에 **아무 영향을 안 주는데 잡은
@@ -346,46 +384,87 @@ def build_scenario_overrides(args: Mapping[str, Any], *, has_case_txt: bool = Fa
     return over
 
 
-def parse_presets(result: Any) -> list[str]:
-    """옵션 카탈로그 글에서 고를 수 있는 각도 프리셋 이름만 뽑는다.
+def slurm_ids_of(details: Any) -> list[str]:
+    """`get_job_details` 응답에서 slurm id 목록을 뽑는다(집계 잡까지 포함).
 
-    **목록을 코드에 박지 않는 것이 요점이다.** 박으면 클러스터에 프리셋이 늘어도 화면에는
-    안 보이고, 사용자는 있는 것을 못 쓴다. 못 뽑으면 빈 목록이다 — 그때는 호출부가
-    "물어보지도 못했다" 와 "정말 없다" 를 갈라 보여 줘야 한다.
+    `job_status` 가 squeue 에 물을 때 `sphere_job_id` 를 목록에 더하므로
+    (`job_status/latest/script.sh:19-21`) 여기서도 같이 센다 — 안 세면 본 잡이 끝나고
+    집계만 남은 구간을 "다 끝났다" 로 읽는다.
     """
-    m = _PRESET_LINE.search(_as_text(result))
-    if not m:
+    env = _envelope(details)
+    inner = env.get("result")
+    job = (inner or {}).get("job") if isinstance(inner, Mapping) else None
+    if not isinstance(job, Mapping):
         return []
-    out = []
-    for token in re.split(r"[,、]", m.group(1)):
-        token = token.strip()
-        if _PRESET_TOKEN.match(token):
-            out.append(token)
-    return out
+    ids = [str(x) for x in (job.get("slurm_job_ids") or []) if str(x).strip()]
+    if job.get("sphere_job_id"):
+        ids.append(str(job["sphere_job_id"]))
+    return ids
 
 
-def parse_state(result: Any) -> dict:
-    """상태 응답 → {"state": "active"|"succeeded"|"failed"|"unknown", "raw": …}.
+def registry_id_of(status: Any) -> Any:
+    """상태 응답에서 레지스트리 행 id 를 꺼낸다(없으면 None).
+
+    ⚠ 그 칸의 **이름이 `job_id`** 다(`job_status/latest/script.sh:16`) — 제출 응답의
+    `job_id`(slurm job id)와 **같은 이름, 다른 것**이다. 섞으면 영영 못 찾는 잡이 된다.
+    """
+    env = _envelope(status)
+    inner = env.get("result")
+    if not env.get("ok") or not isinstance(inner, Mapping) or not inner.get("ok"):
+        return None
+    return inner.get("job_id")
+
+
+def parse_status(status: Any, details: Any) -> dict:
+    """두 응답을 합쳐 → {"state": "active"|"succeeded"|"failed"|"unknown", …}.
+
+    **왜 둘인가** — `job_status` 응답에 `slurm_job_ids` 가 없다. 있는 것은 `squeue` 뿐인데
+    `slurm_queue_for` 는 예외가 나도 `{}` 를 돌려주므로(`job_helpers.py:197-198`) 빈 `{}`
+    하나가 세 가지를 뜻한다. 다 끝났다 · 아직 큐에 안 올랐다 · squeue 가 실패했다.
+    빈 것을 그냥 성공으로 접으면 **제출 직후에 바로 끝난 것이 된다.**
+    그래서 레지스트리 행을 주는 `get_job_details` 로 id 목록을 함께 받아 가른다.
 
     모르면 **모른다고 한다.** 임의로 성공이나 실패로 접으면, 도구가 고장 난 것과 잡이
     끝난 것이 같은 모양이 된다.
     """
-    text = _as_text(result).strip()
-    if not text:
-        return {"state": "unknown", "reason": "empty_response", "raw": ""}
-    if _ERROR_HEAD.search(text):
-        return {"state": "unknown", "reason": "tool_refused", "raw": text[:500]}
-    m = _STATE.search(text)
-    if not m:
-        return {"state": "unknown", "reason": "no_state_line", "raw": text[:500]}
-    slurm = m.group(1).upper().rstrip("+")          # CANCELLED+ 같은 꼬리표
-    if slurm in STATES_ACTIVE:
-        return {"state": "active", "slurm": slurm, "raw": text[:2000]}
-    if slurm in STATES_OK:
-        return {"state": "succeeded", "slurm": slurm, "raw": text[:2000]}
-    if slurm in STATES_BAD:
-        return {"state": "failed", "slurm": slurm, "raw": text[:2000]}
-    return {"state": "unknown", "reason": f"unmapped_state:{slurm}", "raw": text[:500]}
+    env_s, env_d = _envelope(status), _envelope(details)
+    inner_s = env_s.get("result")
+    inner_s = inner_s if isinstance(inner_s, Mapping) else {}
+    if not env_s or not env_s.get("ok") or not inner_s.get("ok"):
+        return {"state": "unknown", "reason": _why(env_s) or "status_unreadable",
+                "raw": json.dumps(env_s, ensure_ascii=False)[:500]}
+    if not env_d or not env_d.get("ok"):
+        return {"state": "unknown", "reason": _why(env_d) or "details_unreadable",
+                "raw": json.dumps(env_d, ensure_ascii=False)[:500]}
+
+    ids = slurm_ids_of(details)
+    squeue = inner_s.get("squeue")
+    squeue = squeue if isinstance(squeue, Mapping) else {}
+    raw = json.dumps({"squeue": squeue, "slurm_job_ids": ids}, ensure_ascii=False)[:2000]
+
+    if not ids:
+        # 제출은 됐는데 아직 slurm id 가 레지스트리에 안 적혔다 — 끝난 것이 아니다.
+        return {"state": "active", "reason": "no_slurm_ids_yet", "raw": raw}
+
+    states = []
+    for v in squeue.values():
+        s = str((v or {}).get("state") or "").upper().rstrip("+")   # CANCELLED+ 꼬리표
+        if s:
+            states.append(s)
+
+    # **하나라도 실패면 실패다** — 방향 하나가 죽은 연구를 성공으로 넘기지 않는다.
+    bad = [s for s in states if s in STATES_BAD]
+    if bad:
+        return {"state": "failed", "slurm": sorted(set(bad)), "raw": raw}
+    if any(s in STATES_ACTIVE for s in states):
+        return {"state": "active", "raw": raw}
+    if states and all(s in STATES_OK for s in states):
+        return {"state": "succeeded", "raw": raw}
+    if not states:
+        # id 는 있는데 큐에 하나도 없다 — 요청서가 정한 잠정 규칙으로 끝으로 본다.
+        # ⚠ squeue 호출 실패와 구분이 안 된다. 실제 응답 원문을 받으면 여기를 고친다.
+        return {"state": "succeeded", "reason": "all_gone_from_squeue", "raw": raw}
+    return {"state": "unknown", "reason": f"unmapped_states:{sorted(set(states))}", "raw": raw}
 
 
 class McpHttpClient:
@@ -523,6 +602,162 @@ class McpHttpClient:
             self._client = None
 
 
+# ── 덱 반입 ────────────────────────────────────────────────────────────────
+# stcx 대시보드(:5010)의 청크 업로드. 3단계다 — init → chunk ×N → complete.
+# 필드 이름은 **코드에서 읽어 맞췄다**(`file_upload_api.py:104-118`·`:210-223`·`:326-331`) —
+#   init     JSON       {filename, file_size, job_id?, chunk_size?}
+#                       → 201 {upload_id, chunk_size, total_chunks, storage_path, file_info}
+#   chunk    multipart  form `upload_id` · form `chunk_index`(0부터) · file `chunk`
+#                       · form `checksum`(선택, MD5 — 받는 쪽이 맞춰 본다)
+#   complete JSON       {upload_id} → 200 {file_path, file_info}
+#
+# ★**`job_id` 를 반드시 싣는다.** 안 싣으면 저장 경로가
+#   `/shared/uploads/users/<user>/data/` 로 모이는데(`file_classifier.py:302`), SSO 가 꺼져
+#   **모든 요청이 `admin`** 이고(`jwt_middleware.py:61-67`) `complete` 는
+#   `storage_path/filename` 에 그냥 쓴다(`:368`) — 같은 이름의 덱을 올린 두 잡이 **서로를
+#   덮는다.** `job_id` 를 주면 `/shared/uploads/jobs/<job_id>/data/` 로 갈린다(`:297-299`).
+#
+# 청크 재전송은 안전하다 — `complete` 가 인덱스별 파일 존재를 다시 확인하므로
+# (`:371-381`) 카운터가 부풀어도 병합 결과는 맞다.
+
+UPLOAD_CHUNK_BYTES = 5 * 1024 * 1024
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024 * 1024      # 받는 쪽 상한(`file_upload_api.py:43`)
+UPLOAD_TIMEOUT = 300.0
+# `complete` 는 청크 전부를 **서버에서 이어 붙인다**(`:370-384`) — 파일 크기에 비례하는
+# 디스크 작업이라 GB 급에서는 분 단위다. init·chunk 와 같은 시한을 주면 거기서 끊긴다.
+COMPLETE_TIMEOUT = 1800.0
+_CHUNK_RETRY = 3                                # 분당 2000 청크 제한(`:190`)에 걸릴 수 있다
+_CHUNK_BACKOFF_S = 5.0
+
+
+def upload_name(name: str) -> str:
+    """올릴 때 쓸 이름. 받는 쪽 패턴이 `^/.+\\.k$` 라 **`.k` 로 끝나야 한다**.
+
+    `.key`·`.dyn`·`.K` 는 이름만 바꾼다 — **원본 파일은 건드리지 않는다.**
+    패턴이 대소문자를 가리므로 `.K` 도 바꿔야 한다(`model_file_path` 스키마).
+    """
+    base = Path(name).name
+    return base if base.endswith(".k") else Path(base).stem + ".k"
+
+
+class StcxUploader:
+    """세션의 덱 하나를 stcx 헤드노드로 올리고 **그쪽 절대경로**를 돌려준다.
+
+    실패를 예외로 올리지 않는다 — 이 파일의 다른 것들과 같은 규약이다.
+    """
+
+    def __init__(self, base_url: str, *, client: httpx.AsyncClient | None = None,
+                 timeout: float = UPLOAD_TIMEOUT) -> None:
+        self._base = (base_url or "").strip().rstrip("/")
+        self._timeout = timeout
+        self._client = client
+        self._owns_client = client is None
+
+    @property
+    def available(self) -> bool:
+        return bool(self._base)
+
+    def _http(self) -> httpx.AsyncClient:
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=self._timeout)
+        return self._client
+
+    async def _json(self, path: str, payload: dict, *, timeout: float | None = None) -> dict:
+        try:
+            res = await self._http().post(self._base + path, json=payload,
+                                          timeout=timeout or self._timeout)
+        except httpx.HTTPError as exc:
+            return {"ok": False, "error": "transport_error",
+                    "detail": f"{type(exc).__name__}: {exc}"}
+        if res.status_code >= 400:
+            return {"ok": False, "error": f"http_{res.status_code}", "detail": res.text[:400]}
+        try:
+            return {"ok": True, "body": res.json()}
+        except ValueError:
+            return {"ok": False, "error": "unparsable_reply", "detail": res.text[:400]}
+
+    async def _chunk(self, upload_id: str, index: int, name: str, blob: bytes) -> dict:
+        digest = hashlib.md5(blob).hexdigest()      # 전송 무결성용 — 받는 쪽이 맞춰 본다
+        for attempt in range(_CHUNK_RETRY):
+            try:
+                res = await self._http().post(
+                    self._base + "/api/v2/files/upload/chunk",
+                    data={"upload_id": upload_id, "chunk_index": str(index),
+                          "checksum": digest},
+                    files={"chunk": (name, blob, "application/octet-stream")},
+                    timeout=self._timeout)
+            except httpx.HTTPError as exc:
+                return {"ok": False, "error": "transport_error",
+                        "detail": f"{type(exc).__name__}: {exc} (chunk {index})"}
+            if res.status_code < 400:
+                return {"ok": True}
+            if res.status_code == 429 and attempt + 1 < _CHUNK_RETRY:
+                await asyncio.sleep(_CHUNK_BACKOFF_S * (attempt + 1))
+                continue
+            return {"ok": False, "error": f"http_{res.status_code}",
+                    "detail": f"chunk {index}: {res.text[:300]}"}
+        return {"ok": False, "error": "chunk_retries_exhausted", "detail": f"chunk {index}"}
+
+    async def upload(self, src: Path, *, job_id: str) -> dict:
+        """→ {"ok": True, "file_path": "<헤드노드 절대경로>", …} 또는 실패."""
+        if not self.available:
+            return {"ok": False, "error": "unavailable",
+                    "detail": "반입 주소가 설정되지 않았다(KOORM_STCX_BACKEND_URL)"}
+        src = Path(src)
+        try:
+            size = src.stat().st_size
+        except OSError as exc:
+            return {"ok": False, "error": "unreadable_model",
+                    "detail": f"{type(exc).__name__}: {exc}"}
+        if size <= 0:
+            return {"ok": False, "error": "empty_model", "detail": str(src)}
+        if size > MAX_UPLOAD_BYTES:
+            return {"ok": False, "error": "too_large",
+                    "detail": f"{size}B — 받는 쪽 상한 {MAX_UPLOAD_BYTES}B 를 넘는다"}
+
+        name = upload_name(src.name)
+        init = await self._json("/api/v2/files/upload/init",
+                                {"filename": name, "file_size": size, "job_id": str(job_id)})
+        if not init["ok"]:
+            return init
+        body = init.get("body") or {}
+        upload_id = str(body.get("upload_id") or "")
+        chunk_size = int(body.get("chunk_size") or UPLOAD_CHUNK_BYTES)
+        total = int(body.get("total_chunks") or 0)
+        if not upload_id or chunk_size <= 0 or total <= 0:
+            return {"ok": False, "error": "bad_init_reply",
+                    "detail": json.dumps(body, ensure_ascii=False)[:400]}
+
+        with src.open("rb") as fh:
+            for index in range(total):
+                blob = fh.read(chunk_size)
+                if not blob:
+                    # 파일이 전송 중에 줄었다. 반쪽 덱을 올려 두고 성공으로 넘기지 않는다.
+                    return {"ok": False, "error": "short_read",
+                            "detail": f"chunk {index}/{total} 에서 읽을 것이 없다"}
+                sent = await self._chunk(upload_id, index, name, blob)
+                if not sent["ok"]:
+                    return sent
+
+        done = await self._json("/api/v2/files/upload/complete", {"upload_id": upload_id},
+                                timeout=COMPLETE_TIMEOUT)
+        if not done["ok"]:
+            return done
+        path = str((done.get("body") or {}).get("file_path") or "")
+        # 받는 쪽 도구의 패턴(`^/.+\.k$`)을 **여기서** 본다 — 제출이 거절되고 나서
+        # "왜 안 됐지" 를 되짚는 것보다 반입 단계에서 말하는 편이 훨씬 싸다.
+        if not path.startswith("/") or not path.endswith(".k"):
+            return {"ok": False, "error": "bad_file_path",
+                    "detail": f"반입 응답의 file_path 가 `^/.+\\.k$` 가 아니다: {path[:200]!r}"}
+        return {"ok": True, "file_path": path, "bytes": size, "chunks": total,
+                "upload_id": upload_id}
+
+    async def close(self) -> None:
+        if self._owns_client and self._client is not None:
+            await self._client.aclose()
+            self._client = None
+
+
 class StcxClient:
     """DynaForge → 게이트웨이 → stcx. 자격이 없으면 **아무것도 부르지 않는다**."""
 
@@ -558,44 +793,42 @@ class StcxClient:
                     "detail": "게이트웨이 주소 또는 PAT 가 설정되지 않았다(KOORM_GATEWAY_MCP/KOORM_GATEWAY_PAT)"}
         return await mcp.call(tool, args)
 
-    async def scenario_options(self, sim_type: str = "fullangle_drop") -> dict:
-        """각도 프리셋·옵션 카탈로그. **live 다** — 코드에 프리셋을 박지 않는다."""
-        return await self._call(TOOL_OPTIONS, {"sim_type": sim_type})
+    @staticmethod
+    def _locator(registry_id: Any, work_dir: str) -> dict:
+        """잡을 지목하는 인자. `registry_id` 가 정석이고 `work_dir` 는 그것을 모를 때다.
 
-    async def submit_fullangle_drop(
-        self, *, model_path: str, job_name: str = "", angle_preset: str = "",
-        case_txt_path: str = "", scenario_overrides: dict | None = None,
-        memory: str = "", time_limit: str = "", dry_run: bool = False,
-    ) -> dict:
-        """전각도 낙하 제출.
-
-        ⚠ `dry_run` 의 **도구 기본값은 True** 다. 우리가 명시하지 않으면 미리보기만 하고
-        아무것도 돌지 않는데, 응답은 성공처럼 생겼다. 그래서 여기서 언제나 실어 보낸다.
+        받는 쪽 스키마가 `additionalProperties: False` 라 둘 다 실으면 안 되는 것이 아니고
+        둘 다 허용되지만, **하나만** 보낸다 — 두 값이 어긋났을 때 어느 쪽이 이겼는지
+        모르는 상태를 만들지 않는다.
         """
-        args: dict[str, Any] = {
-            "sim_type": "fullangle_drop",
-            "model_path": model_path,
-            "dry_run": dry_run,
-        }
-        if job_name:
-            args["job_name"] = job_name
-        if angle_preset:
-            args["angle_preset"] = angle_preset
-        if case_txt_path:
-            args["case_txt_path"] = case_txt_path
-        if scenario_overrides:
-            args["scenario_overrides"] = scenario_overrides
-        if memory:
-            args["memory"] = memory
-        if time_limit:
-            args["time_limit"] = time_limit
-        return await self._call(TOOL_SUBMIT, args)
+        if registry_id not in (None, ""):
+            return {"registry_id": int(registry_id)}
+        return {"work_dir": work_dir} if work_dir else {}
 
-    async def job_results(self, job_id: str) -> dict:
-        return await self._call(TOOL_RESULTS, {"job_id": str(job_id)})
+    async def submit_fullangle_drop(self, args: Mapping[str, Any], *,
+                                    dry_run: bool = False) -> dict:
+        """전각도 낙하 제출. `args` 는 **이미 받는 쪽 이름으로 옮겨진** 것이다(매핑은 호출부).
 
-    async def job_log(self, job_id: str, tail: int = 100) -> dict:
-        return await self._call(TOOL_LOG, {"job_id": str(job_id), "tail": tail})
+        직접 노출 도구는 `args` **한 겹**을 받는다(`server.py:218-219`). 평평하게 보내면
+        스키마 검증에서 통째로 떨어진다.
+
+        `dry_run` 은 스키마 기본값이 이미 False 지만 **언제나 명시한다** — 기본값이 바뀌어도
+        우리 뜻이 남는다. 예전 :5012 는 기본값이 True 였고, 그래서 미리보기만 돌았는데
+        응답은 성공처럼 생긴 적이 있다.
+        """
+        return await self._call(TOOL_SUBMIT, {"args": {**dict(args), "dry_run": bool(dry_run)}})
+
+    async def job_status(self, registry_id: Any = None, *, work_dir: str = "") -> dict:
+        """squeue + KooChainRun 상태.
+
+        ⚠ 응답의 `job_id` 는 **레지스트리 행 id** 다 — 제출 응답의 `job_id`(slurm job id)와
+        **같은 이름, 다른 것**이다. 지목은 `registry_id` 로만 한다.
+        """
+        return await self._call(TOOL_STATUS, {"args": self._locator(registry_id, work_dir)})
+
+    async def job_details(self, registry_id: Any = None, *, work_dir: str = "") -> dict:
+        """레지스트리 행 전체 — **`slurm_job_ids` 가 여기 있다**(상태 응답에는 없다)."""
+        return await self._call(TOOL_DETAILS, {"args": self._locator(registry_id, work_dir)})
 
     async def close(self) -> None:
         if self._mcp is not None:

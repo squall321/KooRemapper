@@ -30,8 +30,8 @@ from app.runner.argbuild import build_command
 from app.runner.gmsh_probe import probe as gmsh_probe
 from app.runner.kfile_inspect import inspect_kfile
 from app.runner.newline_audit import audit_newlines
-from app.runner.stcx_client import (StcxClient, build_scenario_overrides, parse_state,
-                                    parse_submit)
+from app.runner.stcx_client import (StcxClient, StcxUploader, parse_status, parse_submit,
+                                    registry_id_of)
 from app.shared import storage
 from app.shared.buildinfo import build_info
 from app.shared.logctx import reset_correlator, set_correlator
@@ -204,16 +204,105 @@ def _next_poll_delay(prev: int | None) -> int:
     return lo if not prev else min(int(prev) * 2, hi)
 
 
-async def _submit_external(db, job: Job, work_dir: Path) -> None:
-    """다른 클러스터에 제출하고, 이 잡을 **running 인 채로** 둔다(폴링이 마무리한다).
+# ── stcx 인자 매핑 (요청서 §2) ─────────────────────────────────────────────
+# 우리 폼 이름 → 받는 쪽(`fullangle_drop_simulation`) 이름.
+# **여기 없는 것은 보내지 않는다** — 받는 쪽 스키마가 `additionalProperties: False` 라
+# 모르는 인자를 보내면 제출이 통째로 거절된다(조용히 버려지지는 않는다).
+STCX_ARG_MAP: dict[str, str] = {
+    "num_directions": "num_angles",
+    "height": "drop_height_mm",
+    "t_final": "simulation_time_s",
+    "drop_surface": "drop_surface_type",
+    "ncpu": "ncpu",
+    "memory": "memory",
+    "time_limit": "time_limit",
+    "postprocess_enabled": "enable_postprocess",
+    "auto_deep": "auto_deep",
+    "auto_sphere": "auto_sphere",
+    "yield_stress_mpa": "yield_stress_mpa",
+}
+# `project_name` 은 이 중 먼저 값이 있는 것을 쓴다.
+STCX_PROJECT_KEYS = ("scenario_name", "job_name")
+# 이번 판에 보낼 수 있는 폼 칸 전부. 나머지가 값으로 들어오면 **거절**한다.
+STCX_SUPPORTED = frozenset({"model", *STCX_ARG_MAP, *STCX_PROJECT_KEYS})
 
-    파일을 나르지 않는다 — 세션 디렉터리의 절대경로를 그대로 넘긴다. 경로 값은
-    박스마다 다르므로 코드에 박지 않는다.
+_INCLUDE_TOKEN = b"*INCLUDE"
+
+
+def _deck_has_include(path: Path, chunk: int = 4 << 20) -> bool:
+    """덱 **전체**에서 줄머리의 `*INCLUDE` 를 찾는다.
+
+    ⚠ `session_files.meta["includes"]` 를 쓰지 않는다 — 그것은 **앞 8MB 만** 본다
+    (`kfile_inspect.py:86` 의 `max_bytes`). 큰 덱에서 뒤쪽 `*INCLUDE` 를 놓치면 **반쪽
+    모델이 stcx 로 올라가 조용히 틀린 결과**가 나온다. 제출 한 번에 GB 를 나르는 길이므로
+    전수 훑는 값은 싸다.
+
+    `$` 로 주석 처리된 줄은 넘긴다. `*INCLUDE_PATH`·`*INCLUDE_TRANSFORM` 도 걸리는데,
+    그것들도 바깥 파일을 전제하므로 막는 쪽이 맞다. 청크 경계에서는 안전한 방향으로
+    (막는 쪽으로) 틀릴 수 있다.
+    """
+    tail = b""
+    with path.open("rb") as fh:
+        while True:
+            buf = fh.read(chunk)
+            if not buf:
+                return False
+            hay = (tail + buf).upper()
+            pos = hay.find(_INCLUDE_TOKEN)
+            while pos != -1:
+                head = hay.rfind(b"\n", 0, pos) + 1
+                if hay[head:pos].strip(b" \t") == b"":      # 줄머리에서 공백만 지나왔다
+                    return True
+                pos = hay.find(_INCLUDE_TOKEN, pos + 1)
+            tail = hay[-(len(_INCLUDE_TOKEN) - 1):]
+
+
+def _stcx_tool_args(args: dict, *, job: Job, model_file_path: str) -> dict:
+    """폼 값을 받는 쪽 이름으로 옮긴다. `work_dir` 는 **잡마다 고유**해야 한다."""
+    out: dict = {
+        # ★고유해야 하는 이유 — 받는 쪽은 `work_dir/<model_file>` 이 이미 있으면 새 덱을
+        #   조용히 무시한다(`fullangle_drop_simulation/latest/script.sh:46-52`).
+        "work_dir": f"{settings.stcx_work_root.rstrip('/')}/{job.id}",
+        "lstc_license_ip": settings.stcx_lstc_ip.strip(),
+        "model_file_path": model_file_path,
+    }
+    for ours, theirs in STCX_ARG_MAP.items():
+        v = args.get(ours)
+        if v not in (None, ""):
+            out[theirs] = v
+    for key in STCX_PROJECT_KEYS:
+        if args.get(key):
+            out["project_name"] = str(args[key])
+            break
+    return out
+
+
+def _stcx_disabled() -> list[str]:
+    """비어서 이 작업을 꺼 놓는 설정 이름들. 비면 **조용히 성공하지 않고** 실패한다."""
+    return [name for name, value in (
+        ("KOORM_GATEWAY_PAT", settings.gateway_pat),
+        ("KOORM_STCX_BACKEND_URL", settings.stcx_backend_url),
+        ("KOORM_STCX_WORK_ROOT", settings.stcx_work_root),
+        ("KOORM_STCX_LSTC_IP", settings.stcx_lstc_ip),
+    ) if not str(value or "").strip()]
+
+
+async def _submit_external(db, job: Job, work_dir: Path) -> None:
+    """stcx 로 **덱을 올린 뒤** 제출하고, 이 잡을 **running 인 채로** 둔다(폴링이 마무리한다).
+
+    ★예전에는 파일을 나르지 않고 이 서버의 절대경로를 넘겼다 — 두 쪽이 같은 경로를 본다는
+    전제였는데 사실이 아니다. cae00 `/data` 는 로컬 디스크, stcx `/data` 는 다른 NFS 다.
     """
     args = dict(job.args or {})
     errs = catalog.validate_args(job.operation, args)
     if errs:
         _fail(job, "; ".join(errs))
+        await db.commit()
+        return
+
+    off = _stcx_disabled()
+    if off:
+        _fail(job, "stcx 제출이 꺼져 있다 — " + " · ".join(off) + " 가 비었다")
         await db.commit()
         return
 
@@ -225,68 +314,86 @@ async def _submit_external(db, job: Job, work_dir: Path) -> None:
         await db.commit()
         return
 
-    # 각도 목록 파일도 **나르지 않는다** — 세션 경로를 그대로 넘긴다(모델과 같은 규칙).
-    case_txt_path = ""
-    if args.get("case_txt"):
-        cname = Path(str(args["case_txt"])).name
-        cpath = work_dir / cname
-        if not cname or not cpath.is_file():
-            _fail(job, f"각도 파일을 찾을 수 없다: {args.get('case_txt')!r}")
-            await db.commit()
-            return
-        case_txt_path = str(cpath)
-
-    try:
-        overrides = build_scenario_overrides(args, has_case_txt=bool(case_txt_path))
-    except ValueError as exc:
-        # 고를 수 없는 것을 골라 주지 않는다 — 여기서 막아야 몇 시간 뒤가 아니라 지금 안다.
-        _fail(job, str(exc))
+    # 이번 판이 못 보내는 옵션 — **조용히 버리지 않는다.** 화면에서 고른 값이 해석에 아무
+    # 영향을 안 주는데 잡은 성공하는 것이 가장 나쁘다(실제로 한 번 그랬다).
+    extra = sorted(k for k, v in args.items()
+                   if k not in STCX_SUPPORTED and v not in (None, "", [], {}))
+    if extra:
+        _fail(job, "이번 판에서 stcx 가 받지 않는 옵션이다 — " + " · ".join(extra)
+                   + ". 각도 방식·공차·DR·접촉·연속 낙하는 다음 판이다(조용히 버리지 않는다)")
         await db.commit()
         return
 
+    # 받는 쪽은 **모델 파일 하나**만 받는다 — 인클루드가 있으면 반쪽 모델이 올라간다.
+    if await asyncio.to_thread(_deck_has_include, model_path):
+        _fail(job, "*INCLUDE 가 있는 덱은 아직 stcx 로 못 보낸다 — 받는 쪽은 모델 파일 하나만"
+                   " 받는다. `extract-parts` 로 인클루드를 펼쳐 **홀로 서는 덱**을 만들어 올려라")
+        await db.commit()
+        return
+
+    # ① 반입 — stcx 는 이 서버의 경로를 못 연다.
+    uploader = StcxUploader(settings.stcx_backend_url)
+    try:
+        up = await uploader.upload(model_path, job_id=str(job.id))
+    finally:
+        await uploader.close()
+    if not up.get("ok"):
+        _fail(job, f"덱 반입 실패({up.get('error')}): {str(up.get('detail'))[:400]}")
+        await db.commit()
+        return
+
+    # ② 제출
+    tool_args = _stcx_tool_args(args, job=job, model_file_path=up["file_path"])
     client = _stcx()
     try:
-        res = await client.submit_fullangle_drop(
-            model_path=str(model_path),
-            job_name=str(args.get("job_name") or ""),
-            angle_preset=str(args.get("angle_preset") or ""),
-            case_txt_path=case_txt_path,
-            scenario_overrides=overrides or None,
-            memory=str(args.get("memory") or ""),
-            time_limit=str(args.get("time_limit") or ""),
-            dry_run=False,
-        )
+        res = await client.submit_fullangle_drop(tool_args, dry_run=False)
+        parsed = parse_submit(res.get("result")) if res.get("ok") else {"ok": False}
+        if not parsed.get("ok"):
+            # ★**다시 제출하지 않는다.** 끊긴 것은 응답뿐이고 제출은 됐을 수 있다. 그리고 더
+            #   나쁜 것 — 두 번째 제출은 첫 번째가 `work_dir` 에 둔 **묵은 덱**으로 돈다
+            #   (`script.sh:46-52` 가 이미 있는 파일을 그냥 쓴다). 그래서 먼저 찾아본다.
+            found = await client.job_status(work_dir=tool_args["work_dir"])
+            recovered = registry_id_of(found.get("result")) if found.get("ok") else None
+            if recovered in (None, ""):
+                why = (f"제출 실패({res.get('error')}): {str(res.get('detail'))[:300]}"
+                       if not res.get("ok")
+                       else f"제출 응답을 해석하지 못했다({parsed.get('error')}):"
+                            f" {str(parsed.get('detail'))[:300]}")
+                _fail(job, why)
+                await db.commit()
+                return
+            logger.warning("job %s: 제출 응답은 못 받았지만 레지스트리 %s 를 찾았다 — 재제출하지 않는다",
+                           job.id, recovered)
+            parsed = {"ok": True, "registry_id": recovered, "job_id": "",
+                      "work_dir": tool_args["work_dir"], "output_dir": "",
+                      "sphere_report_path": "", "detail": "recovered_by_work_dir"}
     finally:
         await client.close()
-
-    if not res.get("ok"):
-        _fail(job, f"제출 실패({res.get('error')}): {str(res.get('detail'))[:400]}")
-        await db.commit()
-        return
-
-    parsed = parse_submit(res.get("result"))
-    if not parsed.get("ok"):
-        # 응답을 못 읽었으면 **제출된 것으로 치지 않는다** — 없는 잡을 영영 폴링하게 된다.
-        _fail(job, f"제출 응답을 해석하지 못했다({parsed.get('error')}): {str(parsed.get('detail'))[:400]}")
-        await db.commit()
-        return
 
     delay = _next_poll_delay(None)
     job.external_kind = EXTERNAL_KIND
     job.external_ref = {
-        "job_id": parsed["job_id"],
+        # ⚠ `registry_id` 가 지목용이다. `slurm_job_id` 는 사람이 보는 값일 뿐이다 —
+        #   받는 쪽 `job_status` 응답의 `job_id` 는 **레지스트리 행 id** 라 이름이 겹친다.
+        "registry_id": parsed["registry_id"],
+        "slurm_job_id": parsed.get("job_id") or None,
+        "work_dir": parsed.get("work_dir") or tool_args["work_dir"],
+        "output_dir": parsed.get("output_dir") or None,
+        "sphere_report_path": parsed.get("sphere_report_path") or None,
         "model_path": str(model_path),
-        "case_txt_path": case_txt_path or None,
-        "scenario_overrides": overrides or None,
-        "submitted": parsed.get("detail", "")[:2000],
+        "uploaded_path": up["file_path"],
+        "uploaded_bytes": up.get("bytes"),
+        "submitted": str(parsed.get("detail", ""))[:2000],
         "poll_interval": delay,
     }
     job.external_poll_at = datetime.now(timezone.utc) + timedelta(seconds=delay)
     job.progress = 5
-    job.resolved_cmd = {"external": EXTERNAL_KIND, "tool": "smarttwin_submit",
-                        "model_path": str(model_path)}
+    job.resolved_cmd = {"external": EXTERNAL_KIND, "tool": "fullangle_drop_simulation",
+                        "work_dir": tool_args["work_dir"],
+                        "model_file_path": up["file_path"]}
     await db.commit()
-    logger.info("external job %s submitted → cluster job %s", job.id, parsed["job_id"])
+    logger.info("external job %s submitted → registry %s (slurm %s)",
+                job.id, parsed["registry_id"], parsed.get("job_id") or "-")
 
 
 async def _poll_external_once() -> int:
@@ -306,17 +413,28 @@ async def _poll_external_once() -> int:
         try:
             for job in due:
                 ref = dict(job.external_ref or {})
-                res = await client.job_results(str(ref.get("job_id") or ""))
-                verdict = (parse_state(res.get("result")) if res.get("ok")
-                           else {"state": "unknown", "reason": res.get("error"),
-                                 "raw": str(res.get("detail"))[:500]})
+                rid = ref.get("registry_id")
+                where = str(ref.get("work_dir") or "")
+                # **두 번 부른다.** 끝났는지 판정할 근거(`slurm_job_ids`)가 상태 응답에
+                # 없다 — 자세한 이유는 `parse_status` 의 주석에 있다.
+                status = await client.job_status(rid, work_dir=where)
+                details = await client.job_details(rid, work_dir=where)
+                if not status.get("ok") or not details.get("ok"):
+                    verdict = {
+                        "state": "unknown",
+                        "reason": status.get("error") or details.get("error") or "call_failed",
+                        "raw": str(status.get("detail") or details.get("detail") or "")[:500],
+                    }
+                else:
+                    verdict = parse_status(status["result"], details["result"])
                 state = verdict["state"]
                 if state == "succeeded":
                     job.status, job.progress = "succeeded", 100
                     job.finished_at = now
                 elif state == "failed":
                     job.status = "failed"
-                    job.error_summary = f"클러스터 잡 {ref.get('job_id')} 상태 {verdict.get('slurm')}"
+                    job.error_summary = (f"클러스터 잡 {rid} 실패 — slurm 상태"
+                                         f" {verdict.get('slurm')}")
                     job.finished_at = now
                 else:
                     # **모르면 접지 않는다.** 도구가 고장 난 것과 잡이 끝난 것을 같은 모양으로
@@ -327,6 +445,8 @@ async def _poll_external_once() -> int:
                 delay = _next_poll_delay(ref.get("poll_interval"))
                 ref["poll_interval"] = delay
                 ref["last_state"] = state
+                # 요청서 §4 — 종료 판정을 고치려면 **실제 응답**이 필요하다. 매번 남긴다.
+                ref["last_raw"] = verdict.get("raw") or ""
                 job.external_ref = ref
                 job.external_poll_at = (None if job.status != "running"
                                         else now + timedelta(seconds=delay))
