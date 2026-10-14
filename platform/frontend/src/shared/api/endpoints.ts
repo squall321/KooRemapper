@@ -140,6 +140,64 @@ export async function getStcxOptions(): Promise<StcxOptions> {
   return unwrap<StcxOptions>(data)
 }
 
+// 온톨로지 — 과제 거울과 개발 개정. **과제는 읽기만**이다(정본은 허브).
+export interface TaskMirror {
+  key: string; label: string; status: string; deleted: boolean
+  properties: Record<string, unknown>; updated_at: string | null
+}
+export interface TaskListOut {
+  items: TaskMirror[]
+  sync_enabled: boolean
+  last_status: string | null
+  last_error: string | null
+  last_run_at: string | null
+  /** 목록이 빈 **이유**. 빈 목록만 주면 「과제가 없다」로 읽히는데 실제로는 물어보지도 못한 것이다. */
+  reason: string | null
+}
+export async function listTasks(q?: string, limit = 100): Promise<TaskListOut> {
+  const { data } = await api.get('/ontology/tasks', { params: { q: q || undefined, limit } })
+  return unwrap<TaskListOut>(data)
+}
+
+export interface RevisionRow {
+  key: string; code: string | null; phase: string | null; round: string | null
+  rev_seq: number | null; rev_source: string | null; status: string | null
+  decided_by: string | null; decided_at: string | null
+  model: string | null; supersedes: string | null; reports: string[]
+}
+export async function taskRevisions(taskKey: string): Promise<{ task: string; revisions: RevisionRow[] }> {
+  const { data } = await api.get(`/ontology/tasks/${encodeURIComponent(taskKey)}/revisions`)
+  return unwrap<{ task: string; revisions: RevisionRow[] }>(data)
+}
+
+export interface RevisionCandidate {
+  code: string; source: string; evidence: string; valid: boolean
+  why?: string; phase?: string; round?: string | null; rev_seq?: number
+}
+export interface TaskCandidate { key: string; label: string; why: string }
+export interface ReportRevisionOut {
+  report_id: string
+  eng_meta: Record<string, unknown>
+  free_task: string
+  resolved_task: string | null
+  resolved_how: string | null
+  /** 비어 있지 않으면 수동 메타와 이어진 개정이 **다르다**. 서버는 조용히 맞추지 않는다 —
+   *  화면이 보여 주고 사람이 고른다. */
+  mismatch: { kind: string; linked: string; eng_meta?: string; said: string } | null
+  candidates: RevisionCandidate[]
+  task_candidates: TaskCandidate[]
+}
+export async function reportRevision(reportId: string, taskKey?: string): Promise<ReportRevisionOut> {
+  const { data } = await api.get(`/reports/${reportId}/revision`, { params: { task_key: taskKey || undefined } })
+  return unwrap<ReportRevisionOut>(data)
+}
+export async function setReportRevision(reportId: string, body: {
+  task_key: string; code: string; model_key?: string; supersedes?: string; note?: string
+}): Promise<{ key: string; rev_seq: number; task_unverified: boolean; detail: string }> {
+  const { data } = await api.put(`/reports/${reportId}/revision`, body)
+  return unwrap<{ key: string; rev_seq: number; task_unverified: boolean; detail: string }>(data)
+}
+
 // jobs
 export async function createJob(sessionId: string, operation: string, args: Record<string, unknown>): Promise<Job> {
   const { data } = await api.post(`/sessions/${sessionId}/jobs`, { operation, args })

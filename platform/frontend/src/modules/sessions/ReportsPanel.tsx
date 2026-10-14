@@ -11,6 +11,7 @@ import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Input, Spinner }
 import { errorMessage } from '@/shared/api/client'
 import { ConfirmDialog } from '@/shared/components/ConfirmDialog'
 import { ReportAnalysis } from './ReportAnalysis'
+import { RevisionPanel } from './RevisionPanel'
 import { ReportVisuals } from './ReportVisuals'
 
 const KIND_LABEL: Record<string, string> = {
@@ -211,6 +212,10 @@ function ReportDetail({ sessionId, reportId, files }: { sessionId: string; repor
       <ReportVisuals report={r} />
 
       <ReportAnalysis report={r} cases={cases.data ?? []} />
+
+      {/* 개정 — 어긋남을 보여 주고 사람이 확정한다. 서버가 조용히 맞추지 않은 것을
+          화면이 받아 보여 주는 자리다(안 보여 주면 "말했다" 는 사실에 의미가 없다). */}
+      <RevisionPanel reportId={reportId} />
 
       <div className="flex items-center gap-2 flex-wrap">
         {r.source_file_id != null && (
