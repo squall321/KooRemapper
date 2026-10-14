@@ -12,10 +12,12 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     SmallInteger,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -258,3 +260,141 @@ class Job(Base):
     external_kind: Mapped[str | None] = mapped_column(String(40), index=True)   # 예: "stcx_mcp"
     external_ref: Mapped[dict | None] = mapped_column(JSONB)   # {registry_id, slurm_job_ids, work_dir, ...}
     external_poll_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+
+
+# ── 온톨로지 — 허브 거울과 자체 정의를 **한 꼴로** ─────────────────────────
+# 표 이름·칸·타입을 StepForge 와 **같게** 둔다(계획서 §4). 둘을 맞댈 날이 오는데 이름이
+# 다르면 그 일부터 해야 한다. `properties` 는 양쪽 다 **JSONB** 다(§2-b).
+#
+# `source` 가 「누가 이것의 정본인가」 다 — `hub` 는 받은 것이라 **우리가 고치지 않는다**
+# (SP `managed_by` 와 같은 뜻 · `objects/routes.py:2268` 이 허브 쪽에서 만들기까지 거절한다).
+# `dynaforge` 는 우리 것이다.
+
+SOURCE_HUB = "hub"
+SOURCE_SELF = "dynaforge"
+
+
+class OntoType(Base):
+    """객체 타입 정의 — 허브 카탈로그 스냅샷(`plm_task` 등)과 자체 정의(`dev_revision`)."""
+
+    __tablename__ = "onto_types"
+    __table_args__ = (UniqueConstraint("slug", name="uq_onto_types_slug"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    slug: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    label: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    # `CorePropertyOut` 목록 그대로 — key·label·data_type·unit·required·multi·enum_options·
+    # ref_type_slug·help. **우리가 해석해서 줄이지 않는다**(규칙 5: 모르는 칸은 무시한다).
+    properties: Mapped[list | None] = mapped_column(JSONB)
+    relations: Mapped[list | None] = mapped_column(JSONB)      # 이 타입에 걸리는 관계 slug 들
+    source: Mapped[str] = mapped_column(String(20), default=SOURCE_SELF, nullable=False)
+    # 허브 카탈로그의 `revision` 지문. 바뀌면 정의가 바뀐 것이다 — 알린다(계획서 §6).
+    catalog_revision: Mapped[str | None] = mapped_column(String(120))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class OntoRelationType(Base):
+    """관계 종류 정의 — 방향·전이·순환 금지·끝점 제약이 **데이터**로 있어야 한다."""
+
+    __tablename__ = "onto_relation_types"
+    __table_args__ = (UniqueConstraint("slug", name="uq_onto_relation_types_slug"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    slug: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    label: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    inverse_label: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    directed: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    transitive: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    acyclic: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    src: Mapped[list | None] = mapped_column(JSONB)            # 허용 출발 타입(비면 제약 없음)
+    dst: Mapped[list | None] = mapped_column(JSONB)
+    source: Mapped[str] = mapped_column(String(20), default=SOURCE_SELF, nullable=False)
+    catalog_revision: Mapped[str | None] = mapped_column(String(120))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class OntoObject(Base):
+    """객체 — 허브 거울과 자체 객체가 **한 표**에 산다.
+
+    ★`key` 가 정체성이다(uuid 가 아니다 — 받는 쪽의 id 는 허브 것과 다르다). 그래서
+    `(type_slug, key)` 가 유일하고, 선도 `key` 로 잇는다.
+
+    ⚠**지우지 않는다** — 허브에서 사라진 것은 `deleted` 로 표시만 한다(규칙 4). 우리 선이
+    그것을 가리키고 있을 수 있고, 지우면 그 선이 끊긴 채 조용히 남는다.
+    """
+
+    __tablename__ = "onto_objects"
+    __table_args__ = (
+        UniqueConstraint("type_slug", "key", name="uq_onto_objects_type_key"),
+        Index("ix_onto_objects_label", "label"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    type_slug: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    key: Mapped[str] = mapped_column(String(300), nullable=False)
+    label: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="active", nullable=False)
+    properties: Mapped[dict | None] = mapped_column(JSONB)
+    # ★`renamed_from` 이 올 때 옮긴 옛 식별자들. **키트에는 이 처리가 없다**(ENVELOPE 에도
+    #   없다) — 규칙 4 가 요구하므로 우리가 채웠다. 없으면 개명 뒤 같은 것이 둘이 된다.
+    previous_keys: Mapped[list | None] = mapped_column(JSONB)
+    deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    # 지운 것이 아니라 **이 자격으로 더 이상 안 보이는 것**(소유 부서가 옮겨 갔다). 이름·칸이
+    # 안 오므로 가진 값은 두고 비활성만 한다 — 없던 것은 만들지 않는다(규칙 4).
+    hidden: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    merged_into: Mapped[str | None] = mapped_column(String(300))
+    source: Mapped[str] = mapped_column(String(20), default=SOURCE_SELF, nullable=False)
+    updated_at: Mapped[str | None] = mapped_column(String(40))   # 허브가 준 ISO 문자열 그대로
+    synced_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class OntoRelation(Base):
+    """선 — **끝점은 `key` 로** 잇는다(`CoreRelationOut` 이 그렇게 생겼다)."""
+
+    __tablename__ = "onto_relations"
+    __table_args__ = (
+        UniqueConstraint("relation", "src_type", "src_key", "dst_type", "dst_key",
+                         name="uq_onto_relations_edge"),
+        Index("ix_onto_relations_dst", "dst_type", "dst_key"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    relation: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    src_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    src_key: Mapped[str] = mapped_column(String(300), nullable=False, index=True)
+    dst_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    dst_key: Mapped[str] = mapped_column(String(300), nullable=False)
+    properties: Mapped[dict | None] = mapped_column(JSONB)
+    deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    source: Mapped[str] = mapped_column(String(20), default=SOURCE_SELF, nullable=False)
+    synced_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class OntoSyncState(Base):
+    """타입별 수신 시계. ★**규칙 1·2 가 사는 자리다.**
+
+    `as_of` 는 **서버가 준 값을 그대로** 둔다(우리 시계로 만들면 몇 초 차이로 그 사이 행이
+    샌다). 그리고 쪽이 남아 있는 동안(`next` 가 있는 동안)에는 **옮기지 않는다** — 중간에서
+    멈춘 쪽이 남은 쪽을 영영 안 받는다.
+    """
+
+    __tablename__ = "onto_sync_state"
+
+    type_slug: Mapped[str] = mapped_column(String(80), primary_key=True)
+    objects_as_of: Mapped[str | None] = mapped_column(String(40))
+    relations_as_of: Mapped[str | None] = mapped_column(String(40))
+    catalog_revision: Mapped[str | None] = mapped_column(String(120))
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # ok | reset | stopped | error — `stopped` 는 규칙 11 의 `APP-CORE-0001`(공개 안 된 타입)
+    # 이다. 그때는 **그 타입 수신을 멈추고 알린다** — 계속 두드리지 않는다.
+    last_status: Mapped[str | None] = mapped_column(String(20))
+    last_error: Mapped[str | None] = mapped_column(Text)

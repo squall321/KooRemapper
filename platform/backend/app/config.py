@@ -100,6 +100,15 @@ class Settings(BaseSettings):
     stcx_poll_min_sec: int = 30
     stcx_poll_max_sec: int = 600
 
+    # --- SP 허브 코어 API (과제·개발모델 기준정보 수신) ---
+    # **받기만 한다.** 과제의 정본은 허브다 — 우리 화면에서 고치면 다음 받기가 덮어쓰고
+    # 그 사실은 고친 사람에게 안 보인다(SP `ontology/managed.py`).
+    # 주소가 비면 수신은 **꺼진 것**이고, 조용히 성공하지 않고 명시적으로 실패한다.
+    sp_core_url: str = ""          # 예 `https://<허브>/api` — 끝의 `/` 는 있어도 없어도 된다
+    sp_core_token: str = ""        # `core:read` 범위 PAT. `.env` 에 둔다(§7 ④)
+    # 한 쪽에 몇 건을 받나. 허브가 더 작게 줄 수 있다 — 그때는 허브가 준 `next` 를 따른다.
+    sp_core_page_size: int = 500
+
     # --- AI Data Hub (시뮬레이션 리포트 등재 대상) ---
     # 비우면 publish-datahub 비활성(400). 기본은 호스트 네트워크 공유 인스턴스.
     datahub_url: str = "http://127.0.0.1:8001"

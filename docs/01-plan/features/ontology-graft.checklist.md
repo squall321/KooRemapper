@@ -51,17 +51,27 @@
       **세는 관문이 0을 세면 언제나 초록이다**
 
 ## S1. 과제 정보 수신
-- [ ] **S1-1 키트 이식** `app/runner/sp_core.py` — `requests`+`sqlite3` → **httpx + SQLAlchemy**
-- [ ] **S1-2 표 넷** `onto_types`·`onto_relation_types`·`onto_objects`·`onto_relations`·`onto_sync_state`
-      (StepForge 와 **같은 이름·칸·타입** — `properties` 는 **JSONB**. 이름만 같고 타입이 다르면
-      맞대는 날 그 일부터 해야 한다)
+- [x] **S1-1 키트 이식** `app/runner/sp_core.py` 413줄 — `requests`+`sqlite3` → **httpx + SQLAlchemy**.
+      머리에 출처(`…/kit/sp_core_pull.py@f7485c0`)를 달았다
+- [x] **S1-2 표 다섯** `onto_types`·`onto_relation_types`·`onto_objects`·`onto_relations`·
+      `onto_sync_state` — StepForge 와 **같은 이름·칸**, `properties` 는 **JSONB**.
+      마이그레이션 `0011_ontology`(개발 DB 에 올렸다)
 - [ ] **S1-7 부서는 `system` 거울로** 행 복제 0 — 포탈 소속 헤더가 정본(A-15)
 - [ ] **S1-3 잡 `plm_sync`** 기존 워커에 — 네트워크만, 바이너리 없음
-- [ ] **S1-4 설정** `KOORM_SP_CORE_URL` · 토큰(§7 ④) — **코드에 기본값을 박지 않는다**
-- [ ] **S1-5 수신 규칙 열하나 전수 회귀** (가짜 코어 서버)
-      → `as_of` 되돌림 · `next` 중 `as_of` 미저장 · `key` 저장 · `deleted`/`merged_into` ·
-      모르는 칸 무시 · 같은 행 두 번 · `since` 없을 때 **부재 대조** · 되살림 ·
-      합쳐진 쪽의 선 · 참조 칸의 옛 `key` · **404 두 가지**(`APP-CORE-0001` 과 그 외)
+- [x] **S1-4 설정** `sp_core_url`·`sp_core_token`·`sp_core_page_size` — 기본값 빈 문자열,
+      주소나 토큰이 비면 **아무것도 부르지 않고** `unavailable` 로 실패한다
+- [x] **S1-5 수신 규칙 열하나 전수 회귀** `tests/test_sp_core_rules.py` **23항**(가짜 허브) —
+      규칙 1·2(시계 · 쪽이 남으면 안 옮긴다 · 중간에 끊기면 옛 시계 유지) · 3 · 4(deleted ·
+      merged_into · **renamed_from** · hidden) · 5·10 · 6(행·**선** 둘 다) · 7(전량 쓸어내기 ·
+      **0건이면 아무것도 안 한다** · 증분은 안 쓸어낸다) · 8 · 9 · 11(둘로 가른다)
+      + reset · reset 루프 거절 · 토큰 없으면 호출 0 · 공개 안 된 타입 요청 거절 · 카탈로그 판 기록
+- [x] **S1-5a ★키트의 구멍을 채웠다** `renamed_from` 을 키트가 **전혀 다루지 않는다**
+      (`ENVELOPE` 에도 없다). 규칙 4 가 요구하므로 구현하고 회귀로 박았다 — 없으면 개명 뒤
+      **같은 것이 둘이 된다**
+- [x] **S1-5b 회귀가 결함 둘을 잡았다** ① 한 쪽에 같은 key 가 두 번 오면
+      `CardinalityViolationError`(Postgres 는 한 문장에서 같은 행을 두 번 못 고친다) →
+      보내기 전에 접는다(나중 것이 이긴다). 선도 같다. ② 규칙 11 의 사유에 **코드가 안
+      들어갔다** → `[APP-CORE-0001]` 을 넣는다(고칠 곳을 가르는 값이다)
 - [ ] **S1-6 실제 허브에서 한 번 받기**(§7 ② 뒤) — 관문이 초록인 것과 도는 것은 다르다
 
 ## S2. 자체 온톨로지 정의
