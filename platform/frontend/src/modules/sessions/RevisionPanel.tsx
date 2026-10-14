@@ -1,11 +1,11 @@
 // 리포트가 어느 과제의 어느 **개발 개정**인가 — 어긋남을 보여 주고 사람이 확정한다
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Check, GitBranch } from 'lucide-react'
+import { AlertTriangle, Check, GitBranch, Unlink } from 'lucide-react'
 
 import {
-  ontologyState, reportRevision, setReportRevision, taskRevisions,
-  type RevisionCandidate,
+  compareTaskRevisions, ontologyState, reportRevision, setReportRevision,
+  unlinkReportRevision, type RevisionCandidate,
 } from '@/shared/api/endpoints'
 import { Badge, Button, Input, Spinner } from '@/shared/ui/ui'
 import { errorMessage } from '@/shared/api/client'
@@ -34,6 +34,16 @@ export function RevisionPanel({ reportId }: { reportId: string }) {
     queryKey: ['report-revision', reportId],
     queryFn: () => reportRevision(reportId),
     enabled: on,        // 꺼져 있으면 **부르지도 않는다** — 409 를 받아 숨기는 것과 다르다
+  })
+
+  const drop = useMutation({
+    mutationFn: () => unlinkReportRevision(reportId),
+    onSuccess: () => {
+      setErr(null)
+      qc.invalidateQueries({ queryKey: ['report-revision', reportId] })
+      qc.invalidateQueries({ queryKey: ['task-revisions'] })
+    },
+    onError: (e) => setErr(errorMessage(e)),
   })
 
   const save = useMutation({
@@ -90,6 +100,13 @@ export function RevisionPanel({ reportId }: { reportId: string }) {
         {!open && (
           <Button size="sm" variant="ghost" onClick={() => start()}>
             {d.mismatch ? '다시 확정' : '확정'}
+          </Button>
+        )}
+        {/* ★확정하는 기능에 되돌리는 길이 없으면 반쪽이다. 개정 **객체는 남는다** —
+            그 판에 다른 리포트가 달려 있을 수 있다. */}
+        {!open && d.mismatch && (
+          <Button size="sm" variant="ghost" onClick={() => drop.mutate()} disabled={drop.isPending}>
+            {drop.isPending ? <Spinner /> : <><Unlink size={13} /> 연결 끊기</>}
           </Button>
         )}
       </div>
@@ -165,24 +182,54 @@ export function RevisionPanel({ reportId }: { reportId: string }) {
 function Chain({ taskKey, here }: { taskKey: string; here: string }) {
   const line = useQuery({
     queryKey: ['task-revisions', taskKey],
-    queryFn: () => taskRevisions(taskKey),
+    queryFn: () => compareTaskRevisions(taskKey),
   })
   if (line.isLoading || !line.data || line.data.revisions.length === 0) return null
   return (
     <div className="space-y-1">
-      <div className="text-muted">이 과제의 개정 줄</div>
-      <div className="flex flex-wrap items-center gap-1.5">
-        {line.data.revisions.map((r, i) => (
-          <span key={r.key} className="flex items-center gap-1.5">
-            {i > 0 && <span className="text-muted">→</span>}
-            <span className={`rounded px-1.5 py-0.5 border ${
-              r.reports.includes(here) ? 'border-accent text-accent' : 'border-border text-muted'}`}>
-              {r.code}
-              <span className="ml-1 text-muted">{r.reports.length}건</span>
-              {r.rev_source === 'manual' && <span className="ml-1" title="사람이 확정">✓</span>}
-            </span>
-          </span>
-        ))}
+      <div className="text-muted">이 과제의 개정 줄 — 판끼리 견준다</div>
+      <div className="overflow-x-auto">
+        <table className="text-xs">
+          <thead className="text-muted">
+            <tr>
+              <th className="pr-3 text-left">판</th>
+              <th className="pr-3 text-right">최악 응력</th>
+              <th className="pr-3 text-right">앞 판 대비</th>
+              <th className="pr-3 text-right">최악 G</th>
+              <th className="pr-3 text-left">심각도</th>
+              <th className="pr-3 text-right">케이스</th>
+              <th className="pr-3 text-right">리포트</th>
+            </tr>
+          </thead>
+          <tbody>
+            {line.data.revisions.map((r) => {
+              const mine = r.reports.includes(here)
+              return (
+                <tr key={r.key} className={mine ? 'text-accent' : 'text-muted'}>
+                  <td className="pr-3 py-0.5">
+                    {r.code}
+                    {r.rev_source === 'manual' && <span className="ml-1" title="사람이 확정">✓</span>}
+                    {mine && <span className="ml-1" title="이 리포트">◂</span>}
+                  </td>
+                  {/* ★`null` 을 0 으로 그리지 않는다 — 0 은 「쟀는데 0」 으로 읽힌다 */}
+                  <td className="pr-3 text-right mono">{r.worst_stress ?? '—'}</td>
+                  <td className={`pr-3 text-right mono ${
+                    r.d_worst_stress == null ? '' : r.d_worst_stress > 0 ? 'text-danger' : 'text-success'}`}>
+                    {r.d_worst_stress == null ? '—'
+                      : `${r.d_worst_stress > 0 ? '+' : ''}${r.d_worst_stress}`}
+                  </td>
+                  <td className="pr-3 text-right mono">{r.worst_g ?? '—'}</td>
+                  <td className="pr-3">{r.max_severity ?? '—'}</td>
+                  <td className="pr-3 text-right mono">{r.n_cases || '—'}</td>
+                  <td className="pr-3 text-right mono" title={`최악값을 ${r.measured_from}건에서 모았다`}>
+                    {r.n_reports}
+                    {r.measured_from !== r.n_reports && <span className="text-warning"> (읽은 것 {r.measured_from})</span>}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
       </div>
     </div>
   )

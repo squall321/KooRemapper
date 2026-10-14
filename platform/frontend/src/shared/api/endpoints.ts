@@ -207,6 +207,28 @@ export async function reportRevision(reportId: string, taskKey?: string): Promis
   const { data } = await api.get(`/reports/${reportId}/revision`, { params: { task_key: taskKey || undefined } })
   return unwrap<ReportRevisionOut>(data)
 }
+export interface RevisionCompareRow extends RevisionRow {
+  n_reports: number
+  /** ★안 잰 것은 `null` 이고 **0 이 아니다** — 0 은 「쟀는데 0」 으로 읽힌다. */
+  worst_stress: number | null
+  worst_g: number | null
+  max_severity: string | null
+  n_cases: number
+  /** 그 판의 **몇 건에서** 최악값을 모았나. 한 건과 열 건의 최악값은 같은 뜻이 아니다. */
+  measured_from: number
+  missing_reports: string[]
+  /** 앞 판 대비 변화. **양쪽에 값이 있을 때만** 온다. */
+  d_worst_stress: number | null
+}
+export async function compareTaskRevisions(taskKey: string): Promise<{ task: string; revisions: RevisionCompareRow[]; note?: string }> {
+  const { data } = await api.get(`/ontology/tasks/${encodeURIComponent(taskKey)}/compare`)
+  return unwrap<{ task: string; revisions: RevisionCompareRow[]; note?: string }>(data)
+}
+export async function unlinkReportRevision(reportId: string): Promise<{ was: string[]; detail: string }> {
+  const { data } = await api.delete(`/reports/${reportId}/revision`)
+  return unwrap<{ was: string[]; detail: string }>(data)
+}
+
 export async function setReportRevision(reportId: string, body: {
   task_key: string; code: string; model_key?: string; supersedes?: string; note?: string
 }): Promise<{ key: string; rev_seq: number; task_unverified: boolean; detail: string }> {

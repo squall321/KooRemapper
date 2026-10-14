@@ -45,12 +45,15 @@ def _dep_names(route) -> set:
 @pytest.mark.parametrize("method,path", [
     ("GET", f"{P}/ontology/tasks"),
     ("GET", f"{P}/ontology/tasks/{{task_key}}/revisions"),
+    ("GET", f"{P}/ontology/tasks/{{task_key}}/compare"),
     ("GET", f"{P}/reports/{{report_id}}/revision"),
     ("PUT", f"{P}/reports/{{report_id}}/revision"),
+    ("DELETE", f"{P}/reports/{{report_id}}/revision"),
     ("GET", f"{P}/ontology/task-links"),
     ("POST", f"{P}/ontology/task-links/apply"),
     ("GET", f"{P}/ontology/aliases"),
     ("POST", f"{P}/ontology/aliases"),
+    ("DELETE", f"{P}/ontology/aliases"),
     ("GET", f"{P}/ontology/sync"),
     ("POST", f"{P}/ontology/sync"),
 ])
@@ -100,9 +103,12 @@ def test_there_is_no_way_to_create_or_edit_a_task():
 def test_the_write_paths_are_only_our_own_things():
     """쓰기는 **우리 것**에만 닿는다 — 개정 · 별칭 · 수신 실행."""
     writes = sorted(p for (m, p) in _routes() if m in {"POST", "PUT", "PATCH", "DELETE"})
-    allowed = {f"{P}/reports/{{report_id}}/revision",
+    # ★2026-10-14 에 **되돌리는 길 둘**이 늘었다(개정 해제 · 별칭 떼기). 확정하는 기능에
+    #   되돌릴 길이 없으면 반쪽이고, `confirm_alias` 는 이미 "먼저 떼야 한다" 고 말하고
+    #   있었다. 이 집합은 그대로 **과제를 쓰는 길이 안 생겼음**을 지킨다.
+    allowed = {f"{P}/reports/{{report_id}}/revision",      # PUT 확정 · DELETE 해제
                f"{P}/ontology/task-links/apply",
-               f"{P}/ontology/aliases",
+               f"{P}/ontology/aliases",                    # POST 붙이기 · DELETE 떼기
                f"{P}/ontology/sync"}
     assert set(writes) == allowed, writes
 

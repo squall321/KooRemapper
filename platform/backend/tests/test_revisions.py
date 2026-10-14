@@ -411,3 +411,158 @@ async def test_patching_the_meta_moves_the_link(db, task):
     finally:
         await _drop_user_session(db, u, s)
         await _clean(db, task)
+
+
+# ── 되돌리기 — 확정에 되돌릴 길이 없으면 반쪽이다 ─────────────────────────
+
+async def test_unlinking_leaves_the_revision_object(db, task):
+    """★개정 객체를 지우면 그 판에 달린 다른 리포트와 `supersedes` 줄이 끊긴다 —
+    되돌릴 수 없는 일이다. 선만 끊으면 다시 이을 수 있다."""
+    try:
+        r1, r2 = _report(), _report()
+        await onto.set_revision(db, r1, task_key=task, code="dv1")
+        await onto.set_revision(db, r2, task_key=task, code="dv1")
+        await db.commit()
+        got = await onto.unlink_revision(db, r1)
+        await db.commit()
+        assert got["ok"] and got["was"] == [f"{task}@dv1"]
+        line = await onto.history(db, task)
+        assert [x["code"] for x in line] == ["dv1"], "개정 객체가 사라졌다"
+        assert line[0]["reports"] == [r2.id], "남은 리포트까지 끊겼다"
+        # 다시 이을 수 있다
+        await onto.set_revision(db, r1, task_key=task, code="dv1")
+        await db.commit()
+        assert sorted((await onto.history(db, task))[0]["reports"]) == sorted([r1.id, r2.id])
+    finally:
+        await _clean(db, task)
+
+
+async def test_unlinking_what_is_not_linked_says_so(db, task):
+    got = await onto.unlink_revision(db, _report())
+    assert got["ok"] is False and got["error"] == "not_linked"
+
+
+async def test_an_alias_can_actually_be_removed(db, task):
+    """★`confirm_alias` 가 "먼저 떼야 한다" 고 말하는데 뗄 길이 없었다 —
+    **불가능한 것을 지시하는 오류 메시지**가 가장 나쁘다."""
+    from app.models import OntoAlias, SOURCE_HUB
+    a, b = f"A-{task}", f"B-{task}"
+    try:
+        db.add(OntoObject(type_slug="plm_task", key=a, label="가", source=SOURCE_HUB,
+                          properties={}))
+        db.add(OntoObject(type_slug="plm_task", key=b, label="나", source=SOURCE_HUB,
+                          properties={}))
+        await db.flush()
+        await onto.confirm_alias(db, alias="같은말", key=a, by="x")
+        await db.commit()
+        refused = await onto.confirm_alias(db, alias="같은말", key=b, by="y")
+        assert refused["error"] == "already_bound"
+        # 오류가 지시한 대로 뗀다 — 그 길이 **있어야** 한다
+        off = await onto.remove_alias(db, alias="같은말")
+        await db.commit()
+        assert off["ok"] and off["was"] == a
+        again = await onto.confirm_alias(db, alias="같은말", key=b, by="y")
+        await db.commit()
+        assert again["ok"] and again["key"] == b
+    finally:
+        await db.execute(delete(OntoAlias).where(OntoAlias.alias == "같은말"))
+        await db.execute(delete(OntoObject).where(OntoObject.key.in_([a, b])))
+        await db.commit()
+
+
+async def test_removing_an_alias_does_not_break_what_was_already_linked(db, task):
+    """별칭은 "다음부터 이렇게 붙여라" 는 규칙이고, 과거에 붙인 것은 **사람이 확정한 사실**이다."""
+    from app.models import OntoAlias, SOURCE_HUB
+    try:
+        db.add(OntoObject(type_slug="plm_task", key=task, label="과제", source=SOURCE_HUB,
+                          properties={}))
+        await db.flush()
+        await onto.confirm_alias(db, alias="우리말", key=task, by="x")
+        rep = _report()
+        await onto.set_revision(db, rep, task_key=task, code="dv1")
+        await db.commit()
+        await onto.remove_alias(db, alias="우리말")
+        await db.commit()
+        line = await onto.history(db, task)
+        assert line and line[0]["reports"] == [rep.id], "별칭을 떼면서 이어 둔 것까지 끊었다"
+    finally:
+        await db.execute(delete(OntoAlias).where(OntoAlias.alias == "우리말"))
+        await _clean(db, task)
+
+
+async def test_removing_a_missing_alias_is_not_a_quiet_success(db):
+    got = await onto.remove_alias(db, alias="없는말")
+    assert got["ok"] is False and got["error"] == "not_found"
+
+
+# ── 개정 간 비교 — 이 기능의 목적 ────────────────────────────────────────
+
+async def _rep_with(db, s, *, code, stress=None, g=None, sev=None, cases=0):
+    from app.models import ImpactReport as IR
+    r = IR(id=ulid.new().str, session_id=s.id, user_id=s.user_id, kind="sphere",
+           worst_stress=stress, worst_g=g, max_severity=sev, n_cases=cases,
+           eng_meta={"dev_revision": {"code": code}})
+    db.add(r)
+    await db.flush()
+    return r
+
+
+async def test_compare_puts_the_revisions_side_by_side(db, task):
+    u, s = await _mk_user_session(db)
+    try:
+        a = await _rep_with(db, s, code="dv1", stress=800, g=120, sev="WARNING", cases=10)
+        b = await _rep_with(db, s, code="pv1", stress=950, g=140, sev="CRITICAL", cases=12)
+        await onto.set_revision(db, a, task_key=task, code="dv1")
+        await onto.set_revision(db, b, task_key=task, code="pv1",
+                                supersedes=f"{task}@dv1")
+        await db.commit()
+        got = await onto.compare(db, task)
+        assert [r["code"] for r in got["revisions"]] == ["dv1", "pv1"]
+        first, second = got["revisions"]
+        assert (first["worst_stress"], first["worst_g"]) == (800, 120)
+        assert second["max_severity"] == "CRITICAL"
+        assert second["d_worst_stress"] == 150, "앞 판 대비 변화를 내야 한다"
+        assert first["d_worst_stress"] is None, "첫 판에는 앞이 없다"
+    finally:
+        await _drop_user_session(db, u, s)
+        await _clean(db, task)
+
+
+async def test_compare_gathers_from_every_report_on_a_revision(db, task):
+    """★판마다 리포트가 여럿일 수 있다 — 하나를 골라 대표로 삼으면 비교가 거짓이 된다.
+    몇 건에서 모았는지를 함께 낸다(한 건과 열 건의 최악값은 같은 뜻이 아니다)."""
+    u, s = await _mk_user_session(db)
+    try:
+        a = await _rep_with(db, s, code="dv1", stress=700, sev="INFO", cases=4)
+        b = await _rep_with(db, s, code="dv1", stress=910, sev="CRITICAL", cases=6)
+        await onto.set_revision(db, a, task_key=task, code="dv1")
+        await onto.set_revision(db, b, task_key=task, code="dv1")
+        await db.commit()
+        rev = (await onto.compare(db, task))["revisions"][0]
+        assert rev["worst_stress"] == 910 and rev["max_severity"] == "CRITICAL"
+        assert rev["n_cases"] == 10
+        assert rev["measured_from"] == 2, "몇 건에서 모았는지 말해야 한다"
+    finally:
+        await _drop_user_session(db, u, s)
+        await _clean(db, task)
+
+
+async def test_compare_never_turns_a_missing_number_into_zero(db, task):
+    """★0 은 「쟀는데 0」 으로 읽힌다 — 안 잰 것과 다르다."""
+    u, s = await _mk_user_session(db)
+    try:
+        a = await _rep_with(db, s, code="pre")        # 숫자가 전부 None
+        await onto.set_revision(db, a, task_key=task, code="pre")
+        await db.commit()
+        rev = (await onto.compare(db, task))["revisions"][0]
+        assert rev["worst_stress"] is None and rev["worst_g"] is None
+        assert rev["max_severity"] is None
+        assert rev["d_worst_stress"] is None
+    finally:
+        await _drop_user_session(db, u, s)
+        await _clean(db, task)
+
+
+async def test_compare_on_an_unknown_task_says_so(db, task):
+    got = await onto.compare(db, task)
+    assert got["revisions"] == [] and "없다" in got["note"]

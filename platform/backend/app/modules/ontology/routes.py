@@ -75,6 +75,20 @@ async def list_tasks(
     })
 
 
+@router.get("/ontology/tasks/{task_key}/compare")
+async def compare_revisions(
+    task_key: str,
+    _user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """한 과제의 개정을 **나란히** — 판마다 최악값·심각도·케이스 수와 앞 판 대비 변화.
+
+    숫자는 리포트에 **이미 승격된 칸**을 그대로 쓴다(다시 계산하지 않는다 — 같은 값을 두
+    곳에서 계산하면 반드시 갈린다). 안 잰 것은 **`null` 이고 0 이 아니다.**
+    """
+    return ok(await svc.compare(db, task_key))
+
+
 @router.get("/ontology/tasks/{task_key}/revisions")
 async def task_revisions(
     task_key: str,
@@ -146,6 +160,28 @@ async def set_report_revision(
     return ok(got, message="개정을 확정했습니다.")
 
 
+@router.delete("/reports/{report_id}/revision")
+async def unlink_report_revision(
+    report_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """이어 둔 개정을 **끊는다**(개정 객체는 남는다).
+
+    확정하는 기능에 되돌리는 길이 없으면 반쪽이다. 객체를 지우지 않는 이유는 그 판에 다른
+    리포트가 달려 있거나 `supersedes` 줄의 가운데일 수 있어서다 — 지우면 되돌릴 수 없다.
+    """
+    rep = await rsvc.get_owned_report(db, user.id, report_id)
+    if rep is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "리포트를 찾을 수 없습니다.")
+    got = await svc.unlink_revision(db, rep)
+    if not got.get("ok"):
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f"{got.get('error')}: {got.get('detail') or ''}")
+    await db.commit()
+    return ok(got, message="개정 연결을 끊었습니다.")
+
+
 # ── 과거 붙이기 · 별칭 · 수신 (관리자) ────────────────────────────────────
 
 admin = APIRouter(tags=["ontology"],
@@ -201,6 +237,26 @@ async def list_aliases(limit: int = Query(default=200, ge=1, le=2000),
     return ok([{"alias": a.alias, "key": a.key, "type_slug": a.type_slug,
                 "confirmed_by": a.confirmed_by, "confirmed_at": a.confirmed_at,
                 "note": a.note} for a in rows])
+
+
+@admin.delete("/ontology/aliases")
+async def drop_alias(
+    alias: str = Query(min_length=1, max_length=500, description="뗄 자유 문자열"),
+    db: AsyncSession = Depends(get_db),
+):
+    """붙여 둔 별칭을 뗀다.
+
+    ★`POST` 가 "먼저 떼야 한다" 고 말하는데 뗄 길이 없으면 **불가능한 것을 지시하는 오류
+    메시지**가 된다 — 사람이 그 말을 믿고 찾아다닌다. 그래서 이 길이 있다.
+    이미 이어 둔 개정은 **건드리지 않는다**(별칭은 다음부터의 규칙이고, 과거에 붙인 것은
+    사람이 확정한 사실이다).
+    """
+    got = await svc.remove_alias(db, alias=alias)
+    if not got.get("ok"):
+        raise HTTPException(status.HTTP_404_NOT_FOUND,
+                            f"{got.get('error')}: {got.get('detail') or ''}")
+    await db.commit()
+    return ok(got, message="별칭을 뗐습니다.")
 
 
 @admin.get("/ontology/sync")

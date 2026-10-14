@@ -80,9 +80,11 @@ async def _put(ctx, path, json_body=None):
         return _unwrap(await c.put(path, json=json_body, headers=_forward_headers(ctx)))
 
 
-async def _delete(ctx, path):
+async def _delete(ctx, path, params=None):
+    # ⚠쿼리를 **문자열로 이어 붙이지 않는다** — 값에 공백·`&`·`=` 가 들어오면 조용히
+    #   다른 요청이 된다(별칭은 사람이 쓰는 자유 문자열이라 그런 글자가 들어온다).
     async with httpx.AsyncClient(base_url=API, timeout=60) as c:
-        return _unwrap(await c.delete(path, headers=_forward_headers(ctx)))
+        return _unwrap(await c.delete(path, params=params, headers=_forward_headers(ctx)))
 
 
 # ── 오퍼레이션 카탈로그 ──────────────────────────────────────────────
@@ -1448,6 +1450,49 @@ async def plan_task_links(ctx: Context, limit: int = 0) -> dict:
     # ⚠`{"limit": None}` 을 넘기면 httpx 가 `limit=` 를 빈 값으로 보내고 `int` 쿼리가
     #   **422 로 거절한다**(실측 — 기본 호출이 그래서 깨져 있었다). 키를 아예 뺀다.
     return await _get(ctx, "/ontology/task-links", {"limit": limit} if limit > 0 else None)
+
+
+@mcp.tool()
+async def compare_task_revisions(task_key: str, ctx: Context) -> dict:
+    """한 과제의 개정을 **나란히** — 판마다 최악 응력·최악 G·심각도·케이스 수와 **앞 판 대비 변화**.
+
+    이것이 "같은 과제의 판끼리 견준다" 의 자리다. 숫자는 리포트에 이미 승격된 칸을 그대로
+    쓴다(다시 계산하지 않는다).
+    ★**안 잰 것은 `null` 이고 0 이 아니다** — 0 으로 읽으면 "쟀는데 0" 이 된다.
+    ★`measured_from` 은 그 판의 **몇 건에서** 최악값을 모았는지다. 한 건과 열 건의 최악값은
+    같은 뜻이 아니다. 그림까지 견주려면 `reports` 의 id 를 `report_compare` 로 넘긴다.
+    / Revisions of one task side by side, with the delta against the previous one."""
+    return await _get(ctx, f"/ontology/tasks/{task_key}/compare")
+
+
+@mcp.tool()
+async def unlink_report_revision(report_id: str, ctx: Context) -> dict:
+    """리포트와 개정 사이의 **연결을 끊는다**(개정 객체는 남는다).
+
+    잘못 확정했을 때 쓴다. 객체를 안 지우는 이유는 그 판에 다른 리포트가 달려 있거나
+    `supersedes` 줄의 가운데일 수 있어서다 — 지우면 되돌릴 수 없다.
+    / Unlink a report from its revision. The revision object stays."""
+    return await _delete(ctx, f"/reports/{report_id}/revision")
+
+
+@mcp.tool()
+async def confirm_task_alias(alias: str, task_key: str, ctx: Context,
+                             note: str = "") -> dict:
+    """자유 문자열을 정본 과제에 **붙인다**(시스템 관리자). 한 번 붙이면 다음부터 자동이다.
+
+    ★짐작으로 부르지 마라 — `plan_task_links` 의 후보와 **근거**를 사람에게 보여 주고 고른
+    값을 넣어라. 한 문자열은 **한 과제만** 가리킨다(다른 곳에 붙어 있으면 거절된다).
+    / Bind a legacy free-text name to a canonical task. Do not guess."""
+    return await _post(ctx, "/ontology/aliases",
+                       {"alias": alias, "key": task_key, "note": note})
+
+
+@mcp.tool()
+async def remove_task_alias(alias: str, ctx: Context) -> dict:
+    """붙여 둔 별칭을 **뗀다**(시스템 관리자). **이미 이어 둔 개정은 건드리지 않는다** —
+    별칭은 「다음부터 이렇게 붙여라」 는 규칙이고, 과거에 붙인 것은 사람이 확정한 사실이다.
+    / Remove an alias. Already-linked revisions are left alone."""
+    return await _delete(ctx, "/ontology/aliases", {"alias": alias})
 
 
 if __name__ == "__main__":

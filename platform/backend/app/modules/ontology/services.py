@@ -500,3 +500,101 @@ async def apply_task_links(db, *, only: list[str] | None = None,
             else:
                 done["refused"].append({"report": rid, "why": got.get("error")})
     return done
+
+
+# ── 되돌리기 ───────────────────────────────────────────────────────────────
+# ★사람이 확정하는 기능에 **되돌리는 길이 없으면 반쪽**이다. 그리고 `confirm_alias` 는
+#   이미 "먼저 떼야 한다" 고 말하는데 뗄 길이 없었다 — **불가능한 것을 지시하는 오류 메시지**가
+#   가장 나쁘다(사람이 그 말을 믿고 찾아다닌다).
+
+async def remove_alias(db, *, alias: str, type_slug: str = TYPE_TASK) -> dict:
+    """붙여 둔 별칭을 뗀다. 없으면 **없다고 말한다**(조용히 성공하지 않는다)."""
+    alias = (alias or "").strip()
+    if not alias:
+        return {"ok": False, "error": "missing", "detail": "뗄 문자열이 필요하다"}
+    found = (await db.execute(
+        select(OntoAlias).where(OntoAlias.type_slug == type_slug,
+                                OntoAlias.alias == alias))).scalar_one_or_none()
+    if found is None:
+        return {"ok": False, "error": "not_found", "detail": f"{alias!r} 에 붙은 것이 없다"}
+    was = found.key
+    await db.delete(found)
+    await db.flush()
+    # ⚠**이미 이어 둔 개정은 건드리지 않는다.** 별칭은 "다음부터 이렇게 붙여라" 는 규칙이고,
+    #   과거에 그 규칙으로 붙인 것은 사람이 확정한 사실이다. 함께 끊으면 되돌릴 수 없다.
+    return {"ok": True, "alias": alias, "was": was,
+            "detail": "이미 이어 둔 개정은 그대로 둔다 — 끊으려면 리포트마다 해제한다"}
+
+
+async def unlink_revision(db, report: ImpactReport) -> dict:
+    """리포트와 개정 사이의 선을 끊는다. **개정 객체는 지우지 않는다.**
+
+    왜 객체를 남기나 — 그 판에 다른 리포트가 달려 있을 수 있고, `supersedes` 줄의 가운데일
+    수도 있다. 지우면 줄이 끊기고 그것은 되돌릴 수 없다. 선만 끊으면 다시 이을 수 있다.
+    """
+    edges = (await db.execute(
+        select(OntoRelation).where(OntoRelation.relation == REL_MEASURED,
+                                   OntoRelation.src_type == TYPE_REPORT,
+                                   OntoRelation.src_key == str(report.id),
+                                   OntoRelation.deleted.is_(False)))).scalars().all()
+    if not edges:
+        return {"ok": False, "error": "not_linked", "detail": "이어진 개정이 없다"}
+    keys = sorted({e.dst_key for e in edges})
+    for e in edges:
+        await db.delete(e)
+    await db.flush()
+    return {"ok": True, "was": keys,
+            "detail": "개정 객체는 남긴다 — 다른 리포트가 달려 있거나 줄의 가운데일 수 있다"}
+
+
+# ── 개정 간 비교 ───────────────────────────────────────────────────────────
+
+async def compare(db, task_key: str) -> dict:
+    """한 과제의 개정을 **나란히** 놓는다 — 그것이 이 기능의 목적이다.
+
+    숫자는 **리포트에 이미 승격된 칸**(`worst_stress`·`worst_g`·`max_severity`·`n_cases`)을
+    그대로 쓴다. 다시 계산하지 않는다 — 같은 값을 두 곳에서 계산하면 반드시 갈린다.
+
+    ★**판마다 리포트가 여럿일 수 있다.** 그때 하나를 골라 대표로 삼지 않는다 — 어느 것을
+    골랐는지가 안 보이면 비교가 거짓이 된다. 최악값은 **그 판의 리포트 전부에서** 모으고,
+    몇 건에서 모았는지를 함께 낸다.
+    """
+    line = await history(db, task_key)
+    if not line:
+        return {"task": task_key, "revisions": [], "note": "이 과제에 이어진 개정이 없다"}
+
+    ids = sorted({rid for r in line for rid in r["reports"]})
+    rows = {}
+    if ids:
+        for rep in (await db.execute(
+                select(ImpactReport).where(ImpactReport.id.in_(ids)))).scalars():
+            rows[rep.id] = rep
+
+    out = []
+    for rev in line:
+        reps = [rows[i] for i in rev["reports"] if i in rows]
+        stresses = [r.worst_stress for r in reps if r.worst_stress is not None]
+        gs = [r.worst_g for r in reps if r.worst_g is not None]
+        sev = [r.max_severity for r in reps if r.max_severity]
+        out.append({
+            **rev,
+            "n_reports": len(rev["reports"]),
+            # ★없는 것을 0 으로 만들지 않는다 — 0 은 "쟀는데 0" 으로 읽힌다.
+            "worst_stress": max(stresses) if stresses else None,
+            "worst_g": max(gs) if gs else None,
+            "max_severity": ("CRITICAL" if "CRITICAL" in sev else
+                             "WARNING" if "WARNING" in sev else
+                             sev[0] if sev else None),
+            "n_cases": sum(r.n_cases or 0 for r in reps),
+            # 몇 건에서 모았나 — 한 건과 열 건의 최악값은 같은 뜻이 아니다.
+            "measured_from": len(reps),
+            "missing_reports": sorted(set(rev["reports"]) - set(rows)),
+        })
+    # 앞 판 대비 변화 — **양쪽에 값이 있을 때만** 낸다(한쪽이 비면 변화를 말할 수 없다).
+    for i, cur in enumerate(out):
+        prev = out[i - 1] if i else None
+        if prev and cur["worst_stress"] is not None and prev["worst_stress"] is not None:
+            cur["d_worst_stress"] = round(cur["worst_stress"] - prev["worst_stress"], 3)
+        else:
+            cur["d_worst_stress"] = None
+    return {"task": task_key, "revisions": out}
