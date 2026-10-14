@@ -9,6 +9,7 @@ Query helpers back the routes and the MCP analysis tools.
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 from typing import Optional
 
@@ -32,6 +33,9 @@ _SORT_COLS = {
     "min_safety_factor": ImpactCase.min_safety_factor,
 }
 
+
+
+logger = logging.getLogger("koorm.reports")
 
 async def _store_report_html(session: Session, filename: str, raw: bytes) -> SessionFile:
     """리포트 HTML 을 세션 디렉토리에 저장하고 SessionFile(kind=report) 로 기록.
@@ -308,6 +312,11 @@ async def ingest_report(
             min_safety_factor=roll.get("min_safety_factor"),
         ))
 
+    # 개정 자동 잇기 — `eng_meta` 에 과제·코드가 있으면 찾거나 만들어 잇는다.
+    # 커밋 **전에** 해서 한 트랜잭션으로 묶는다 — 리포트는 들어갔는데 선이 없는
+    # 중간 상태를 만들지 않는다. 이을 것이 없으면(수동 메타 미기입) 조용히 지나간다.
+    # ★이미 사람이 확정한 개정은 **건드리지 않는다**(`set_revision` 의 manual 보호).
+    await _link_revision(db, report)
     await db.commit()
     await db.refresh(report)
     return report
@@ -443,6 +452,10 @@ async def update_report_meta(
         report.eng_meta = cur or None
     if kfile_id is not None:
         report.source_kfile_id = (await _resolve_session_kfile(db, report.session_id, kfile_id)).id
+    if any(v is not None for _, (_, v) in field_map.items()):
+        # 과제·개정이 손으로 바뀌었다 — 선을 다시 본다. 사람이 개정 화면에서 확정한 것은
+        # 그대로 두고(manual 보호), `eng_meta` 만 고친 경우에 선이 뒤처지지 않게 한다.
+        await _link_revision(db, report)
     await db.commit()
     await db.refresh(report)
     return report
@@ -1101,3 +1114,20 @@ def _isint(v) -> bool:
         return True
     except (TypeError, ValueError):
         return False
+
+
+async def _link_revision(db, report) -> None:
+    """`eng_meta` 로 개발 개정에 잇는다. **실패가 인제스트를 죽이지 않는다.**
+
+    리포트가 들어오는 길은 여럿이고(업로드 · 번들 · MCP) 과제 메타는 **선택**이다. 여기서
+    예외를 올리면 메타를 안 채운 리포트가 **아예 안 들어온다** — 그것이 훨씬 비싸다.
+    흠은 로그로만 남긴다(화면은 `ontology.services.mismatch` 가 따로 말한다).
+    """
+    from app.modules.ontology import services as onto
+    try:
+        got = await onto.link_from_eng_meta(db, report)
+    except Exception:                       # noqa: BLE001
+        logger.exception("개정 잇기 실패 — report %s", report.id)
+        return
+    if not got.get("ok") and got.get("error") != "nothing_to_link":
+        logger.warning("개정 잇기 거절 — report %s: %s", report.id, got.get("detail"))
