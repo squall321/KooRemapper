@@ -19,7 +19,8 @@ from typing import Any
 
 from sqlalchemy import select
 
-from app.models import (SOURCE_HUB, SOURCE_SELF, ImpactReport, OntoObject, OntoRelation)
+from app.models import (SOURCE_HUB, SOURCE_SELF, ImpactReport, OntoAlias,
+                        OntoObject, OntoRelation)
 from app.reports.datahub import DataHubError, parse_stage
 
 TYPE_REVISION = "dev_revision"
@@ -307,3 +308,195 @@ async def history(db, task_key: str) -> list[dict]:
             "reports": sorted(by_rev.get(r.key, [])),
         })
     return out
+
+
+# ── 과거 붙이기 (S4) ───────────────────────────────────────────────────────
+# 과거 리포트의 과제는 **자유 문자열**이다. 정본은 허브의 `plm_task.key` 다. 둘을 잇는 일이
+# 남는데 ★**짐작으로 붙이지 않는다** — 틀려도 그럴듯하고, 그럴듯한 오류는 몇 달 뒤 결과를
+# 비교할 때 발견된다. 그래서 계획을 먼저 내고(쓰지 않는다) 사람이 고른 것만 적용한다
+# (SP 의 계획 → 확인 → 적용 꼴).
+
+_STRIP = str.maketrans("", "", " \t-_./()[]")
+
+
+def normalize(text: str) -> str:
+    """비교용으로만 쓰는 정규화 — 대소문자·공백·구분기호를 지운다.
+
+    ⚠**저장에는 쓰지 않는다.** 정규화한 값을 저장하면 원문이 사라지고, 원문이 사라지면
+    "무엇을 보고 붙였나" 를 되짚을 수 없다.
+    """
+    return (text or "").strip().lower().translate(_STRIP)
+
+
+async def resolve_task(db, free: str) -> tuple[str, str]:
+    """자유 문자열 → (과제코드, 어떻게). 못 풀면 `("", "")`.
+
+    **짐작이 없는 두 길만** 여기서 푼다 —
+      `exact` 과제코드와 글자 그대로 같다
+      `alias` 사람이 이미 붙인 기록이 있다
+    정규화해서 같아 보이는 것은 **여기서 풀지 않는다**(후보일 뿐이다 — `task_candidates`).
+    """
+    free = (free or "").strip()
+    if not free:
+        return "", ""
+    hit = (await db.execute(
+        select(OntoObject).where(OntoObject.type_slug == TYPE_TASK,
+                                 OntoObject.key == free,
+                                 OntoObject.deleted.is_(False)))).scalar_one_or_none()
+    if hit is not None:
+        return hit.key, "exact"
+    al = (await db.execute(
+        select(OntoAlias).where(OntoAlias.type_slug == TYPE_TASK,
+                                OntoAlias.alias == free))).scalar_one_or_none()
+    if al is not None:
+        return al.key, "alias"
+    return "", ""
+
+
+async def task_candidates(db, free: str, *, limit: int = 5) -> list[dict]:
+    """붙일 만한 과제 **후보와 근거**. 고르지 않는다.
+
+    근거를 함께 내는 것이 요점이다 — 근거 없는 후보 목록은 사람이 검증할 수 없고,
+    검증할 수 없는 목록은 결국 맨 위를 누르게 된다.
+    """
+    free = (free or "").strip()
+    if not free:
+        return []
+    norm = normalize(free)
+    rows = (await db.execute(
+        select(OntoObject).where(OntoObject.type_slug == TYPE_TASK,
+                                 OntoObject.deleted.is_(False)))).scalars().all()
+    out: list[dict] = []
+    for t in rows:
+        if normalize(t.key) == norm:
+            out.append({"key": t.key, "label": t.label, "why": "과제코드가 구분기호만 다르다",
+                        "rank": 0})
+        elif normalize(t.label) == norm:
+            out.append({"key": t.key, "label": t.label, "why": "과제명이 구분기호만 다르다",
+                        "rank": 1})
+        elif norm and norm in normalize(t.label):
+            out.append({"key": t.key, "label": t.label, "why": "과제명이 이 말을 품고 있다",
+                        "rank": 2})
+        elif norm and normalize(t.key) and normalize(t.key) in norm:
+            out.append({"key": t.key, "label": t.label, "why": "이 말이 과제코드를 품고 있다",
+                        "rank": 3})
+    out.sort(key=lambda c: (c["rank"], c["key"]))
+    return out[:limit]
+
+
+def report_free_task(report: ImpactReport) -> str:
+    """리포트가 말하는 과제 — 수동 메타가 먼저, 없으면 리포트에 박힌 이름.
+
+    `services.py:232` 의 폴백과 **같은 순서**다. 두 벌이 되면 한쪽만 고쳐진다.
+    """
+    em = report.eng_meta or {}
+    return str(em.get("project") or report.project_name or "").strip()
+
+
+async def plan_task_links(db, *, limit: int | None = None) -> dict:
+    """★**계획이다 — 아무것도 쓰지 않는다.**
+
+    자유 문자열별로 묶어서 「붙는 것」·「후보가 있는 것」·「못 붙인 것」 을 가른다.
+    못 붙인 것을 **목록으로 돌려주는 것이 요점**이다 — 조용히 건너뛰면 "다 붙었다" 로 읽힌다.
+    """
+    reps = (await db.execute(select(ImpactReport))).scalars().all()
+    groups: dict[str, list[ImpactReport]] = {}
+    no_name: list[str] = []
+    for r in reps:
+        free = report_free_task(r)
+        if not free:
+            no_name.append(r.id)
+            continue
+        groups.setdefault(free, []).append(r)
+
+    plan: list[dict] = []
+    for free in sorted(groups):
+        rows = groups[free]
+        key, how = await resolve_task(db, free)
+        codes = sorted({str((r.eng_meta or {}).get("dev_revision", {}).get("code") or "")
+                        for r in rows} - {""})
+        entry = {
+            "free": free,
+            "reports": sorted(r.id for r in rows),
+            "n_reports": len(rows),
+            "codes": codes,
+            "task_key": key,
+            "how": how or None,
+        }
+        if key:
+            entry["verdict"] = "links"
+        else:
+            cands = await task_candidates(db, free)
+            entry["candidates"] = cands
+            entry["verdict"] = "proposal" if cands else "unmatched"
+        plan.append(entry)
+        if limit and len(plan) >= limit:
+            break
+
+    counts = {
+        "reports": len(reps),
+        "reports_without_a_name": len(no_name),
+        "strings": len(groups),
+        "links": sum(1 for e in plan if e["verdict"] == "links"),
+        "proposal": sum(1 for e in plan if e["verdict"] == "proposal"),
+        "unmatched": sum(1 for e in plan if e["verdict"] == "unmatched"),
+    }
+    # ★붙은 수만 말하지 않는다. 못 붙인 수와 **이름조차 없는 리포트 수**를 같이 말한다 —
+    #   그것을 빼면 "다 붙었다" 가 거짓이 된다.
+    return {"counts": counts, "plan": plan, "reports_without_a_name": sorted(no_name)}
+
+
+async def confirm_alias(db, *, alias: str, key: str, by: str = "", note: str = "",
+                        type_slug: str = TYPE_TASK) -> dict:
+    """사람이 "이 문자열은 저 과제다" 를 적는다. **한 문자열은 한 과제만** 가리킨다."""
+    alias, key = (alias or "").strip(), (key or "").strip()
+    if not alias or not key:
+        return {"ok": False, "error": "missing", "detail": "문자열과 식별자가 둘 다 필요하다"}
+    found = (await db.execute(
+        select(OntoAlias).where(OntoAlias.type_slug == type_slug,
+                                OntoAlias.alias == alias))).scalar_one_or_none()
+    if found is not None and found.key != key:
+        # 조용히 갈아치우지 않는다 — 앞서 붙인 사람의 판단을 덮는 일이다.
+        return {"ok": False, "error": "already_bound", "existing": found.key,
+                "detail": f"{alias!r} 는 이미 {found.key!r} 에 붙어 있다 — 먼저 떼야 한다"}
+    if found is None:
+        db.add(OntoAlias(type_slug=type_slug, alias=alias, key=key, source="manual",
+                         confirmed_by=by or "", note=note or ""))
+    else:
+        found.confirmed_by = by or found.confirmed_by
+        found.note = note or found.note
+    await db.flush()
+    return {"ok": True, "alias": alias, "key": key}
+
+
+async def apply_task_links(db, *, only: list[str] | None = None,
+                           decided_by: str = "") -> dict:
+    """계획 중 **붙는 것만** 실제로 잇는다(후보·못 붙인 것은 건드리지 않는다).
+
+    `only` 를 주면 그 자유 문자열만. 각 리포트는 자기 `dev_revision` 코드로 이어진다 —
+    코드가 없는 리포트는 **과제만 알고 개정은 모르는 것**이므로 건너뛰고 그 수를 돌려준다.
+    """
+    planned = await plan_task_links(db)
+    done = {"linked": 0, "skipped_no_code": 0, "strings": 0, "refused": []}
+    for entry in planned["plan"]:
+        if entry["verdict"] != "links":
+            continue
+        if only is not None and entry["free"] not in only:
+            continue
+        done["strings"] += 1
+        task_key = entry["task_key"]
+        for rid in entry["reports"]:
+            rep = await db.get(ImpactReport, rid)
+            if rep is None:
+                continue
+            code = str((rep.eng_meta or {}).get("dev_revision", {}).get("code") or "")
+            if not code:
+                done["skipped_no_code"] += 1
+                continue
+            got = await set_revision(db, rep, task_key=task_key, code=code,
+                                     decided_by=decided_by, source="manual")
+            if got.get("ok"):
+                done["linked"] += 1
+            else:
+                done["refused"].append({"report": rid, "why": got.get("error")})
+    return done

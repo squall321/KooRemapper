@@ -401,3 +401,31 @@ class OntoSyncState(Base):
     # 이다. 그때는 **그 타입 수신을 멈추고 알린다** — 계속 두드리지 않는다.
     last_status: Mapped[str | None] = mapped_column(String(20))
     last_error: Mapped[str | None] = mapped_column(Text)
+
+
+class OntoAlias(Base):
+    """자유 문자열 → 정본 식별자. **사람이 붙인 기록**이다.
+
+    ★`(type_slug, alias)` 가 유일하다 — 한 문자열이 두 과제를 가리키면 그 데이터로는 아무
+    질문에도 답할 수 없다(SP §4.1 이 `key_scope` 에서 같은 말을 한다).
+
+    누가 언제 붙였는지 남긴다 — 틀린 것을 되짚을 수 있어야 한다. 자동으로 붙인 것은 여기
+    안 적는다(그것은 별칭이 아니라 그냥 일치다).
+    """
+
+    __tablename__ = "onto_aliases"
+    __table_args__ = (
+        UniqueConstraint("type_slug", "alias", name="uq_onto_aliases_alias"),
+        Index("ix_onto_aliases_key", "type_slug", "key"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    type_slug: Mapped[str] = mapped_column(String(80), nullable=False)
+    alias: Mapped[str] = mapped_column(String(500), nullable=False)
+    key: Mapped[str] = mapped_column(String(300), nullable=False)
+    source: Mapped[str] = mapped_column(String(20), default="manual", nullable=False)
+    confirmed_by: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    confirmed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    note: Mapped[str] = mapped_column(Text, default="", nullable=False)
