@@ -128,5 +128,9 @@
       `test_two_jobs_with_the_same_deck_name_land_on_different_paths`. **backend 전체 491 녹색**
 - [x] §2 `KOORM_STCX_WORK_ROOT=/data/koopark/dynaforge` 그대로 — 코드 변경 없음
       (받는 쪽 운영에 `STMC_WORK_ROOTS` 가 들어가야 한다. 안 들어가면 제출이 "허용 범위 밖의 경로다")
+- [x] §7 제출이 `registry_id` 를 받으면(응답·`recovered_by_work_dir` 둘 다) 업로드를 지운다
+      — `StcxUploader.delete` → `DELETE /api/v2/files/uploads/<upload_id>`. 잡을 **먼저 커밋**하고
+      지우며, 실패는 경고뿐. `external_ref.upload_id` 를 남긴다. 시험 6항, **backend 전체 542 녹색**
 - [ ] §5 ★B(`model_source`)·★C(`job_status` 에 `slurm_job_ids`) — 받을지 사용자 답 대기
+- [ ] §4 `result_dir` 을 `external_ref` 에 남길지 — 사용자 답 대기
 - [ ] 라이브 제출 — 여전히 안 돌았다

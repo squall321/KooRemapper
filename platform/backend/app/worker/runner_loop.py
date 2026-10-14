@@ -384,6 +384,7 @@ async def _submit_external(db, job: Job, work_dir: Path) -> None:
         "model_path": str(model_path),
         "uploaded_path": up["file_path"],
         "uploaded_bytes": up.get("bytes"),
+        "upload_id": up.get("upload_id") or None,     # 지우기가 실패했을 때 사람이 다시 지울 손잡이
         "submitted": str(parsed.get("detail", ""))[:2000],
         "poll_interval": delay,
     }
@@ -395,6 +396,21 @@ async def _submit_external(db, job: Job, work_dir: Path) -> None:
     await db.commit()
     logger.info("external job %s submitted → registry %s (slurm %s)",
                 job.id, parsed["registry_id"], parsed.get("job_id") or "-")
+
+    # ③ 반입 정리 — 업로드는 잡마다 따로 쌓이는데 잡은 그것을 **다시 보지 않는다.** 받는 쪽
+    #   도구가 스테이징으로 복사하고(`prepare_model_workdir`), backend 에는 그 **사본**을
+    #   보낸다(`fullangle_drop_simulation/latest/script.sh`). `registry_id` 는 그 뒤에야 생기므로
+    #   그것이 있다는 것이 복사가 끝났다는 근거다 — 못 받았으면 위에서 실패로 닫혀 여기 안 온다.
+    #   잡을 **먼저 커밋하고** 지운다. 지우기가 걸리거나 실패해도 제출 기록은 남고, 경고뿐이다.
+    uploader = StcxUploader(settings.stcx_backend_url)
+    try:
+        gone = await uploader.delete(str(up.get("upload_id") or ""))
+    finally:
+        await uploader.close()
+    if not gone.get("ok"):
+        logger.warning("job %s: stcx 업로드 %s 를 지우지 못했다(%s): %s — 잡에는 영향 없음",
+                       job.id, up.get("upload_id") or "-", gone.get("error"),
+                       str(gone.get("detail"))[:200])
 
 
 async def _poll_external_once() -> int:

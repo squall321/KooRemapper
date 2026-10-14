@@ -137,3 +137,17 @@ PAT·터널·stcx 등재가 서버 쪽에서 끝나야 한다. 그때까지 이 
 남은 함정 — 업로드는 지금 **인증 없이** 간다. SSO 가 꺼져 업로드도 MCP `/api/me` 도 `admin`
 이라 맞물리지만, SSO 가 켜지면 업로드 사용자와 PAT 사용자가 갈려 이 경로도 거절된다
 (요청서 §3). 그때 업로드에 같은 PAT 를 실어야 한다.
+
+### 제출이 성공하면 업로드를 지운다 — 근거는 `registry_id` (요청서 §7)
+
+§1 이후 업로드는 잡마다 따로 쌓인다. 잡이 그 원본을 다시 읽지 않는다는 것을 받는 쪽 코드에서
+직접 확인했다. `script.sh` 는 `prepare_model_workdir` 로 스테이징에 복사한 뒤 `backend_submit` 에
+**그 사본(`model_target`)** 을 파일로 보낸다. backend 는 그것을 `slurm_uploads/` 에 두고
+잡 스크립트가 거기서 `input/` 으로 `cp` 한다(`job_submit_api.py:151`·`:856-867`). `registry_id` 는
+`backend_submit` **뒤에** 생긴다. 그래서 그것을 받았다는 것이 "원본이 더는 필요 없다" 의 근거다.
+`recovered_by_work_dir` 도 registry 행이 있어야 찾히므로 같다.
+
+순서는 **커밋 → 지우기** 다. 지우기를 먼저 하면 그것이 걸린 동안 잡의 제출 기록이 DB 에 없다.
+그 사이 워커가 죽으면 stcx 에서는 돌고 DynaForge 에는 흔적이 없는 잡이 된다.
+삭제 API 는 init·chunk·complete 와 같은 데코레이터(`jwt_required`·`permission_required('dashboard')`)
+라 업로드가 되는 신원이면 지우기도 된다. 이미 지운 것을 다시 지워도 200 이다(상태만 `cancelled`).

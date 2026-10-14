@@ -61,14 +61,20 @@ def _q(**by_id):
 class _FakeUploader:
     """StcxUploader 대역 — 올렸는지, 무엇을 올렸는지 들고 있다."""
 
-    def __init__(self, reply=None):
+    def __init__(self, reply=None, delete_reply=None):
         self.reply = reply if reply is not None else {
             "ok": True, "file_path": UPLOADED, "bytes": 14, "chunks": 1, "upload_id": "up-1"}
+        self.delete_reply = delete_reply if delete_reply is not None else {"ok": True}
         self.calls: list[dict] = []
+        self.deleted: list[str] = []
 
     async def upload(self, src, *, job_id):
         self.calls.append({"src": str(src), "job_id": job_id})
         return self.reply
+
+    async def delete(self, upload_id):
+        self.deleted.append(upload_id)
+        return self.delete_reply
 
     async def close(self):
         pass
@@ -197,6 +203,32 @@ async def test_the_deck_is_uploaded_before_submitting_and_its_path_is_what_we_se
         assert fake.uploader.calls[-1]["job_id"] == job.id, "잡 id 로 반입 이름을 갈라야 한다"
         assert fake.submits[-1]["args"]["model_file_path"] == UPLOADED
         assert job.external_ref["uploaded_path"] == UPLOADED
+    finally:
+        await _cleanup(u.id)
+
+
+async def test_the_upload_is_deleted_once_the_registry_id_is_back(db, patched):
+    """잡은 업로드 원본을 다시 보지 않는다 — 받는 쪽이 스테이징으로 복사한 **사본**을 backend 에
+    보낸다. 안 지우면 `<잡 id>_<이름>.k` 가 잡마다 stcx 에 쌓인다(요청서 §7)."""
+    fake = patched(_Fake())
+    u, sid, wd = await _mk(db)
+    try:
+        job = await _submit(db, u.id, sid, wd, {"model": "model.k"})
+        assert job.status == "running"
+        assert fake.uploader.deleted == ["up-1"]
+        assert job.external_ref["upload_id"] == "up-1", "지우기가 실패하면 사람이 쓸 손잡이"
+    finally:
+        await _cleanup(u.id)
+
+
+async def test_a_failed_delete_does_not_touch_the_submitted_job(db, patched):
+    fake = patched(_Fake(), uploader=_FakeUploader(delete_reply={"ok": False,
+                                                                 "error": "http_403"}))
+    u, sid, wd = await _mk(db)
+    try:
+        job = await _submit(db, u.id, sid, wd, {"model": "model.k"})
+        assert fake.uploader.deleted == ["up-1"]
+        assert job.status == "running" and job.external_ref["registry_id"] == 12
     finally:
         await _cleanup(u.id)
 
@@ -359,12 +391,13 @@ async def test_an_upload_failure_fails_the_job_without_submitting(db, patched):
 
 
 async def test_a_tool_refusal_fails_the_job(db, patched):
-    patched(_Fake(submit={"ok": True, "result": _env({"ok": False, "reason": "backend 제출 실패"},
+    fake = patched(_Fake(submit={"ok": True, "result": _env({"ok": False, "reason": "backend 제출 실패"},
                                                      ok=False, exit_code=1)}))
     u, sid, wd = await _mk(db)
     try:
         job = await _submit(db, u.id, sid, wd, {"model": "model.k"})
         assert job.status == "failed" and job.external_kind is None
+        assert fake.uploader.deleted == []
     finally:
         await _cleanup(u.id)
 
@@ -406,6 +439,7 @@ async def test_a_timeout_does_not_resubmit_and_recovers_the_registry_id(db, patc
         assert job.status == "running"
         assert job.external_ref["registry_id"] == 12
         assert fake.status_calls[-1][1] == f"/data/df/{job.id}", "work_dir 로 찾아야 한다"
+        assert fake.uploader.deleted == ["up-1"], "찾았으면 registry 가 있다 — 복사는 끝났다"
     finally:
         await _cleanup(u.id)
 
@@ -418,6 +452,7 @@ async def test_a_timeout_with_nothing_found_fails_the_job(db, patched):
         job = await _submit(db, u.id, sid, wd, {"model": "model.k"})
         assert len(fake.submits) == 1
         assert job.status == "failed" and job.external_kind is None
+        assert fake.uploader.deleted == [], "registry 가 없으면 받는 쪽이 아직 복사 전일 수 있다"
     finally:
         await _cleanup(u.id)
 

@@ -633,6 +633,8 @@ UPLOAD_TIMEOUT = 300.0
 COMPLETE_TIMEOUT = 1800.0
 _CHUNK_RETRY = 3                                # 분당 2000 청크 제한(`:190`)에 걸릴 수 있다
 _CHUNK_BACKOFF_S = 5.0
+# 지우기는 파일 하나를 지우는 일이고 잡에는 영향이 없는 정리다 — 오래 기다리지 않는다.
+DELETE_TIMEOUT = 30.0
 
 
 def upload_name(name: str, job_id: str) -> str:
@@ -758,6 +760,24 @@ class StcxUploader:
                     "detail": f"반입 응답의 file_path 가 `^/.+\\.k$` 가 아니다: {path[:200]!r}"}
         return {"ok": True, "file_path": path, "bytes": size, "chunks": total,
                 "upload_id": upload_id}
+
+    async def delete(self, upload_id: str) -> dict:
+        """올린 덱을 지운다(`file_upload_api.py` `cancel_upload`) → {"ok": True} 또는 실패.
+
+        **본인 업로드만** 지워진다(`HPC-Admins` 예외) — 올린 쪽과 같은 신원으로 불러야 한다.
+        """
+        if not self.available or not upload_id:
+            return {"ok": False, "error": "unavailable",
+                    "detail": "반입 주소 또는 upload_id 가 없다"}
+        try:
+            res = await self._http().delete(
+                f"{self._base}/api/v2/files/uploads/{upload_id}", timeout=DELETE_TIMEOUT)
+        except httpx.HTTPError as exc:
+            return {"ok": False, "error": "transport_error",
+                    "detail": f"{type(exc).__name__}: {exc}"}
+        if res.status_code >= 400:
+            return {"ok": False, "error": f"http_{res.status_code}", "detail": res.text[:400]}
+        return {"ok": True}
 
     async def close(self) -> None:
         if self._owns_client and self._client is not None:

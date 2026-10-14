@@ -215,13 +215,16 @@ class _Dashboard:
     """stcx 대시보드(:5010) 대역."""
 
     def __init__(self, *, chunk_size=8, file_path=None, chunk_status=200,
-                 init_status=201, complete_status=200, init_body=None, flaky_429=0):
+                 init_status=201, complete_status=200, init_body=None, flaky_429=0,
+                 delete_status=200):
         self.chunk_size = chunk_size
         self.file_path = file_path
         self.chunk_status, self.init_status = chunk_status, init_status
         self.complete_status = complete_status
         self.init_body = init_body
         self.flaky_429 = flaky_429
+        self.delete_status = delete_status
+        self.deleted: list[str] = []
         self.steps: list[str] = []
         self.init_payload: dict = {}
         self.chunks: dict[int, bytes] = {}
@@ -231,6 +234,13 @@ class _Dashboard:
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
+        if request.method == "DELETE" and path.startswith("/api/v2/files/uploads/"):
+            self.steps.append("delete")
+            self.deleted.append(path.rsplit("/", 1)[-1])
+            if self.delete_status >= 400:
+                return httpx.Response(self.delete_status, json={"error": "nope"})
+            return httpx.Response(200, json={"message": "Upload cancelled successfully",
+                                             "upload_id": self.deleted[-1]})
         if path.endswith("/upload/init"):
             self.steps.append("init")
             self.init_payload = json.loads(request.content)
@@ -413,6 +423,28 @@ async def test_without_a_backend_url_nothing_is_called(tmp_path):
     deck.write_bytes(b"x")
     dash = _Dashboard()
     got = await _uploader(dash, base="").upload(deck, job_id="j")
+    assert got["ok"] is False and got["error"] == "unavailable"
+    assert dash.steps == []
+
+
+async def test_delete_calls_the_cancel_route_with_the_upload_id():
+    """`DELETE /api/v2/files/uploads/<upload_id>` — 받는 쪽 `cancel_upload` 그대로."""
+    dash = _Dashboard()
+    got = await _uploader(dash).delete("up-1")
+    assert got == {"ok": True}
+    assert dash.deleted == ["up-1"]
+
+
+async def test_a_refused_delete_is_an_error_not_an_exception():
+    dash = _Dashboard(delete_status=403)
+    got = await _uploader(dash).delete("up-1")
+    assert got["ok"] is False and got["error"] == "http_403"
+
+
+@pytest.mark.parametrize("base,upload_id", [("", "up-1"), ("http://stcx.test", "")])
+async def test_delete_without_a_url_or_an_id_calls_nothing(base, upload_id):
+    dash = _Dashboard()
+    got = await _uploader(dash, base=base).delete(upload_id)
     assert got["ok"] is False and got["error"] == "unavailable"
     assert dash.steps == []
 
