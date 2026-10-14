@@ -161,6 +161,71 @@ DynaForge 는 그보다 멀리 가 있다 — `ImpactReport.eng_meta`(JSONB, `ap
 런타임은 거기서 import 하지 않는다. 옮긴 코드는 DynaForge 안의 파일이 되고 첫 줄에 출처
 (`StandardPlatform <경로>@f7485c0`)를 적는다.
 
+## 2-b. 규격을 전체 플랫폼과 맞춘다 — **Postgres**
+
+★2026-10-14 사용자 지시. 처음 판에서 저는 저장소를 「맞추면 안 되는 것」 에 넣었다 —
+StepForge 의 SQLite 를 **주어진 것**으로 놓은 탓이다. 그것 자체가 선택이었다.
+
+### 왜 맞춰야 하나
+
+| | 저장소 |
+|---|---|
+| StandardPlatform | **PostgreSQL 필수** |
+| 그 포크 넷(MatNexus·TestScope·AutoJig·SimEngBay) | Postgres |
+| DynaForge | Postgres (5436) |
+| StepForge | **SQLite** ← 혼자 다르다 |
+
+그리고 **StepForge 자기 계획서가 이미 그렇게 적어 뒀다** —
+`StepForge/docs/PLAN.md:51` `| DB | SQLite(WAL) → **필요 시 PG** | 초기 규모에 충분 |`.
+PG 는 처음부터 예정된 종착지였고, **규격을 맞출 필요가 생긴 지금이 그 「필요 시」** 다.
+
+### 지금 구조가 Postgres 가 주는 것을 흉내 내고 있다
+
+`StepForge/app/db.py` 머리말 — "**WAL 단일 라이터**가 원자성을 준다" ·
+`:604` — "`BEGIN IMMEDIATE` 트랜잭션 — 잡 원자 클레임에 쓴다(**`SKIP LOCKED` 대용**)".
+
+DynaForge 는 그 자리에서 `FOR UPDATE SKIP LOCKED` 를 쓴다(진짜를 쓴다). 그리고 StepForge 는
+`PRAGMA journal_mode=WAL` 이 잠금과 부딪혀 `database is locked` 가 나는 자리를 따로 다뤄야 했다
+(D-506, `db.py:295-310`). **없는 것을 흉내 내는 비용**이다.
+
+### 옮기는 비용 — 실측
+
+| 무엇 | 실측 | 비고 |
+|---|---|---|
+| `sqlite3` 를 부르는 자리 | 12파일, 집중 — `app/db.py`(10)·`app/jobs.py`(5)·`core/sidecar.py`(1) | ORM 이 없다(생 SQL) |
+| 스키마 | `app/db.py` 620줄 · `CREATE TABLE` **18** | 한 파일 |
+| SQLite 전용 문법 | `PRAGMA` 14(3파일) · `json_extract` 11(3) · `AUTOINCREMENT` 8(1) · `rowid` 7(5) · `strftime` 3(3) · `INSERT OR IGNORE` 1 | ~44 지점 |
+| 자리표시자 | `?` **256회** → `%s` 또는 이름 인자 | 기계적이지만 많다 |
+| 운영 | 인스턴스(5432~5436 사용 중 → **5437**) 또는 5436 에 DB 분리 · SIF 에 PG 클라이언트 · 기존 `.db` 이관 · 백업/복구 | **DynaForge 에 그대로 쓸 수 있는 선례가 있다**(`platform/infra/scripts/start.sh` → postgres → migrate → api · `backup-db.sh`) |
+
+### 맞추면 생기는 것
+
+1. **표가 이름만 같은 게 아니라 DDL 이 같아진다** — `properties` 가 양쪽 다 **JSONB**(SQLite 의
+   JSON 텍스트가 아니다). 같은 색인, 같은 타입. 그래야 **두 쌍둥이 사이에 데이터가 실제로 옮겨진다.**
+2. SP 의 수신 키트가 전제하는 것과 가까워진다 — 키트는 `sqlite3` 로 쓰여 있지만 **허브는 Postgres**다.
+3. ★**StepForge 쪽에서는 「엔진이 아니라 꼴만」 결정을 다시 봐야 한다.** 그 결정의 근거가
+   "StepForge 는 SQLite 다" 였다(그 문서 §2). Postgres 가 되면 SP 의 온톨로지 엔진(JSONB·pg_trgm·
+   재귀 CTE·advisory lock·`SKIP LOCKED`·`COPY` 에 묶인)이 **쓸 수 있는 것**이 된다.
+   **그것은 StepForge 의 판단이다** — 여기서는 그 사실만 적는다.
+
+### ★DynaForge 쪽은 Postgres 가 되어도 엔진이 안 풀린다 — 막는 것이 DB 가 아니다
+
+막는 것은 **부서(`workspaces`)** 다. `objects` 는 부서 소유를 전제로 짜여 있다
+(`visible_owner_clause`·`require_owner_edit`·`resolve_owner_workspace` · import 실측 workspaces 6회,
+accounts 31회, permissions 20회). 그런데 —
+
+**DynaForge 는 부서 표를 들이면 안 된다. 이미 있다.** 게이트웨이가 **서명해서** 보낸다 —
+`X-Heax-User-Affiliation` + `X-Heax-Aff-Proof`(`v1.<exp>.<hmac>`), 검증은
+`app/shared/affiliation.py`, 가시성 판정은 `app/shared/visibility.py`. 정본은 **포탈**이다.
+
+그리고 그렇게 하라고 **SP 가 스스로 적어 뒀다**(`온톨로지-메타모델-설계.md` §3.6) —
+
+> `system` 이 핵심이다. 부서를 온톨로지에 넣겠다고 `objects` 에 행을 복제하면 두 벌이 되고
+> **반드시 갈린다.** 행을 만들지 않고 `ObjectRef` 해석기가 원 표에서 라벨을 읽는다.
+
+→ 부서는 `kind_class=system` **거울**로 둔다(행 복제 0). 끝단의 선은 `object_links` 자리에.
+이것이 "규격을 맞춘다" 의 올바른 적용이다 — **표를 베끼는 것이 아니라 규칙을 따르는 것**이다.
+
 ## 3. 개정 모델 — DynaForge 자체 온톨로지
 
 ### 3-1. StepForge 와 **같은 꼴, 다른 축**이다 — 섞으면 안 된다
@@ -210,8 +275,8 @@ DynaForge 는 그보다 멀리 가 있다 — `ImpactReport.eng_meta`(JSONB, `ap
 
 ## 4. 저장 — Postgres (StepForge 의 표 꼴을 그대로)
 
-StepForge 는 SQLite, DynaForge 는 Postgres다. **표 이름과 칸은 같게 둔다** — 둘을 나중에 맞대야
-할 때 이름이 다르면 그 일부터 해야 한다.
+**양쪽 다 Postgres 다**(§2-b). 표 이름·칸뿐 아니라 **타입까지** 같게 둔다 — `properties` 는
+**JSONB** 다. 이름만 같고 타입이 다르면 맞대는 날 그 일부터 해야 한다.
 
 | 표 | 칸 | 비고 |
 |---|---|---|
@@ -273,6 +338,11 @@ StepForge 는 SQLite, DynaForge 는 Postgres다. **표 이름과 칸은 같게 �
    올린다면 StepForge `cad_revision` 과 **나란히** 서야 한다.
 6. **`design_variation`·`doe` 도 축으로 올리나** — 지금은 `eng_meta` 의 문자열이다.
 7. **코드 복사 허락** — SP 에 라이선스 파일이 없다(사내 저장소로 보인다). 출처를 달아 옮겨도 되나.
+8. ★**StepForge 를 Postgres 로 옮기는 시점과 방식**(§2-b) — 새 인스턴스 `5437` 대 `5436` 에 DB 분리
+   (SP 포크 지침은 「DB 두 개 — 이름은 `APP_SLUG` 그대로」). 기존 `.db` 이관을 한 번에 할지
+   읽기 전용 병행 기간을 둘지. **StepForge 의 판단이지만 규격은 공통이므로 한 번에 정한다.**
+9. **StepForge 가 PG 가 되면 「엔진이 아니라 꼴만」 을 다시 보나**(§2-b 3) — 다시 보기로 하면
+   DynaForge 도 그 결론을 따라가야 할지(우리는 부서 때문에 사정이 다르다 — §2-b 끝).
 
 ## 부록. 참조한 자리 (전부 `vendor/StandardPlatform@f7485c0`)
 

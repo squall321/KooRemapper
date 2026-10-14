@@ -40,8 +40,10 @@
 `onto_sync_state` · `source`∈{hub, 자기}) · 끝점을 **`key` 로** 잇는 것 ·
 "엔진이 아니라 꼴을 가져온다" · "개정 이름은 사람이 정하고 기계는 후보를 낸다".
 
-안 맞춘 것(**맞추면 안 되는 것**) — 저장소(StepForge SQLite / DynaForge Postgres) ·
-HTTP 클라이언트(`requests` / **httpx**, 우리 관례) · **개정 타입의 slug**.
+안 맞춘 것 — HTTP 클라이언트(`requests` / **httpx**, 우리 관례) · **개정 타입의 slug**.
+
+★**저장소를 여기 넣은 것이 틀렸다**(아래 결정 5). 처음엔 「맞추면 안 되는 것」 에 저장소를
+넣었다 — StepForge 의 SQLite 를 **주어진 것**으로 놓은 탓이다. 그것 자체가 선택이었다.
 
 ## 결정 2 — 개정 타입을 **`dev_revision`** 으로, StepForge 와 **가른다**
 
@@ -80,3 +82,34 @@ SP 처럼 `object_types` 를 데이터로 두면 화면 자동생성·권한·`l
   리포트 블록 작업에서 "빈 목록은 데이터가 없다 로 읽힌다" 로 같은 결론에 닿았다.
 
 받는 코드를 쓸 때 이 둘을 **회귀로** 먼저 박는다.
+
+
+## 결정 5 — 저장소는 **Postgres 로 맞춘다** (2026-10-14 · 사용자 지시)
+
+처음 판에서 저장소를 「맞추면 안 되는 것」 에 넣었다. 사용자가 "postgres로 바꿔야하지 않을까?
+전체 플랫폼들과 규격을 맞춰야지" 라고 했고, 그것이 맞다. 재보니 —
+
+- SP 는 **PG 필수**, 그 포크 넷도 PG, DynaForge 도 PG(5436). **StepForge 만 SQLite** 다.
+- 그리고 **StepForge 자기 계획서가 이미 그렇게 적어 뒀다** — `StepForge/docs/PLAN.md:51`
+  `| DB | SQLite(WAL) → **필요 시 PG** | 초기 규모에 충분 |`. 새 결정이 아니라 **예정된
+  전환의 「필요 시」가 온 것**이다.
+- 지금 구조는 PG 가 기본으로 주는 것을 흉내 내고 있다 — `db.py:604` 가 `BEGIN IMMEDIATE` 를
+  "`SKIP LOCKED` **대용**" 이라고 스스로 적고, `PRAGMA journal_mode=WAL` 잠금 충돌을 따로
+  다뤄야 했다(D-506). DynaForge 는 같은 자리에서 **진짜** `FOR UPDATE SKIP LOCKED` 를 쓴다.
+- 비용은 실측으로 **모여** 있다 — `sqlite3` 12파일(집중 3) · 스키마 620줄/18표 · 전용 문법
+  ~44지점 · `?` 256회. 운영 선례가 DynaForge 에 그대로 있다(`infra/scripts/start.sh`·`backup-db.sh`).
+
+**이 결정이 바꾸는 것** — 표가 이름만 같은 게 아니라 **DDL 이 같아진다**(`properties` 가 양쪽
+다 JSONB). 그래야 두 쌍둥이 사이에 데이터가 **실제로** 옮겨진다. "규격을 맞춘다" 의 뜻이
+거기다.
+
+**이 결정이 안 바꾸는 것** — DynaForge 의 「엔진을 작게 다시 짓는다」. 막는 것이 DB 가 아니라
+**부서**였다. 그리고 ★**부서 표는 들이면 안 된다** — DynaForge 는 게이트웨이가 HMAC 로 서명한
+`X-Heax-User-Affiliation`+`X-Heax-Aff-Proof` 를 받고 `shared/affiliation.py`·
+`shared/visibility.py` 가 판정한다(정본은 포탈). SP 스스로 §3.6 에 적었다 —
+"부서를 `objects` 에 복제하면 두 벌이 되고 **반드시 갈린다**". 그래서 `kind_class=system`
+거울(행 복제 0)이다. **규격을 맞추는 것은 표를 베끼는 것이 아니라 규칙을 따르는 것이다.**
+
+**StepForge 쪽에 생기는 질문** — 「엔진이 아니라 꼴만」 의 근거가 "StepForge 는 SQLite 다" 였다
+(그 문서 §2). PG 가 되면 SP 의 엔진(JSONB·pg_trgm·재귀 CTE·advisory lock·`SKIP LOCKED`·`COPY`)이
+**쓸 수 있는 것**이 된다. 그것은 StepForge 의 판단이고, 여기서는 사실만 적는다(§7 ⑨).

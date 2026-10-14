@@ -26,6 +26,17 @@
       `coreapi` 모듈을 안 보고 썼다
 - [x] **A-11 줄번호 오기 수정** 수신 규칙을 126~157행으로 적었는데 그것은 `awk` 로 잘라낸 블록의
       **상대 번호**였다 → 실제 **311~343행**
+- [x] **A-12 규격은 Postgres 다**(사용자 지시 · 계획서 §2-b) — SP 는 PG 필수, 포크 넷도 PG,
+      DynaForge 도 PG(5436). **StepForge 만 SQLite** 이고 그 자기 계획서가 이미
+      `SQLite(WAL) → 필요 시 PG`(`StepForge/docs/PLAN.md:51`) 라고 적어 뒀다
+- [x] **A-13 옮기는 비용 실측** `sqlite3` 12파일(집중: `db.py` 10·`jobs.py` 5) · 스키마 620줄
+      `CREATE TABLE` 18 · 전용 문법 ~44지점 · `?` 자리표시자 **256** · 포트는 **5437** 이 빈다
+- [x] **A-14 지금이 흉내다** `db.py:604` 가 `BEGIN IMMEDIATE` 를 **`SKIP LOCKED` 대용**이라 적는다 ·
+      `PRAGMA journal_mode=WAL` 잠금 충돌을 따로 다뤄야 했다(D-506)
+- [x] **A-15 ★부서는 베끼지 않는다** DynaForge 는 `X-Heax-User-Affiliation`+`X-Heax-Aff-Proof`
+      (HMAC)를 받고 `shared/affiliation.py`·`shared/visibility.py` 가 판정한다 — 정본은 포탈이다.
+      SP 스스로 "부서를 `objects` 에 복제하면 두 벌이 되고 **반드시 갈린다**" 고 적었다(§3.6)
+      → `kind_class=system` **거울**(행 복제 0)
 
 ## S0. 받기와 고정
 - [ ] **S0-1 보관 방식 결정**(§7 ① — submodule \| gitignore \| 복사만). ★StepForge 와 **같은 답**
@@ -35,7 +46,9 @@
 ## S1. 과제 정보 수신
 - [ ] **S1-1 키트 이식** `app/runner/sp_core.py` — `requests`+`sqlite3` → **httpx + SQLAlchemy**
 - [ ] **S1-2 표 넷** `onto_types`·`onto_relation_types`·`onto_objects`·`onto_relations`·`onto_sync_state`
-      (StepForge 와 **같은 이름·칸**)
+      (StepForge 와 **같은 이름·칸·타입** — `properties` 는 **JSONB**. 이름만 같고 타입이 다르면
+      맞대는 날 그 일부터 해야 한다)
+- [ ] **S1-7 부서는 `system` 거울로** 행 복제 0 — 포탈 소속 헤더가 정본(A-15)
 - [ ] **S1-3 잡 `plm_sync`** 기존 워커에 — 네트워크만, 바이너리 없음
 - [ ] **S1-4 설정** `KOORM_SP_CORE_URL` · 토큰(§7 ④) — **코드에 기본값을 박지 않는다**
 - [ ] **S1-5 수신 규칙 열하나 전수 회귀** (가짜 코어 서버)
@@ -82,3 +95,5 @@
 - [ ] ⑤ 허브로 내보내기
 - [ ] ⑥ `design_variation`·`doe` 도 축으로
 - [ ] ⑦ 코드 복사 허락(SP 에 라이선스 파일이 없다)
+- [ ] ⑧ ★**StepForge 를 PG 로** — 새 인스턴스 5437 \| 5436 에 DB 분리 · 이관 방식 · 시점
+- [ ] ⑨ StepForge 가 PG 가 되면 「엔진이 아니라 꼴만」 을 다시 보나(DynaForge 는 부서 때문에 사정이 다르다)
