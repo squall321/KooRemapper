@@ -247,6 +247,10 @@ static bool printLegacyHelp(ConsoleOutput& console, const std::string& helpCmd) 
         console.println("  --strict  LS-DYNA 가 키워드 단계에서 멈출 것을 찾으면 rc=1 로 끝낸다");
         console.println("            (미정의 참조 · 망가진 카드 · 없는 노드를 가리키는 요소).");
         console.println("            플래그가 없으면 rc 는 항상 0 이다 — 그것이 기존 계약이다.");
+        console.println("            *INCLUDE 는 주 덱 폴더에서 찾아 끝까지 읽고 정의를 모아 판정한다.");
+        console.println("            하나라도 못 읽으면(없는 파일 · *INCLUDE_TRANSFORM 등) 참조는 단정하지");
+        console.println("            않고 그 파일만 이름으로 말한다. 인클루드 조각을 혼자 넣으면 주 덱의");
+        console.println("            정의를 모르므로 미정의로 보일 수 있다 — 주 덱을 넣어라.");
         std::cout << "\n";
         console.println("  자재만 있는 덱의 'no nodes' 와 음수 자코비안은 관문에 넣지 않는다 —");
         console.println("  전수 실측에서 정상 덱 86장·111장이 걸렸다(키워드 단계에서 죽지 않는다).");

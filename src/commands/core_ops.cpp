@@ -11,6 +11,8 @@
 #include "parser/KFileReader.h"
 #include "parser/KFileWriter.h"
 #include "parser/ElementCardLayout.h"   // hasKeywordCard — 첫 카드 판정 정본
+#include "parser/IncludeClosure.h"     // info 가 주 덱을 인클루드까지 읽어 판정한다
+#include "parser/DeckScan.h"
 #include "parser/DynainWriter.h"
 #include "parser/ShellReader.h"
 #include "mapper/MeshRemapper.h"
@@ -1471,15 +1473,58 @@ int runInfo(const std::string& meshFile, const ConsoleOutput& console, bool stri
                 rawLines.push_back(ln);
             }
         }
-        auto ref = checkSetReferences(rawLines);
+        // ★인클루드 닫힘을 읽는다 — 주 덱을 **실제로** 판정하려고(2026-10-15).
+        //   예전에는 `*INCLUDE` 가 하나라도 있으면 「단정 불가」로 끝냈다. 그래서 `--strict` 가 인클루드
+        //   조각은 막으면서 **주 덱은 한 장도 안 봤다**(실사용 study 덱 1,683장 실측 — 인클루드를 가진
+        //   83장 전부가 「단정 불가」였다). 닫힘을 다 읽었으면 정의를 모두 모아 **단정한다.** 못 읽은
+        //   것이 있으면 **그것만** 이름으로 말하고 예전처럼 단정하지 않는다.
+        //   ⚠ 인클루드가 없으면 아래는 예전 그대로다(출력 바이트 동일 — 합친 줄을 만들지 않는다).
+        auto inclClosure = include_closure::read(meshFile, rawLines);
+        const bool deckHasIncludes = inclClosure.cards > 0 || !inclClosure.notFollowed.empty();
+        // 합친 줄 — 주 덱 다음에 인클루드 파일을 **읽는 차례**로 붙인다(같은 종류 ID 가 파일을 건너
+        // 겹치는 것도 LS-DYNA 는 거절하므로 한 덩어리로 봐야 잡힌다). 줄 번호를 되돌리려고 구간을 적는다.
+        struct InclSeg { size_t start; std::string file; };
+        std::vector<InclSeg> inclSegs;
+        std::vector<std::string> combined;
+        if (!inclClosure.files.empty()) {
+            combined = rawLines;
+            for (auto& f : inclClosure.files) {
+                // 보이는 이름은 주 덱 폴더에 대한 상대경로 — 하위 폴더를 잃지 않으려고(이름만 쓰면 잃는다).
+                const std::string mdir = KooRemapper::deckscan::dirOf(meshFile) + "/";
+                const std::string shown = f.path.compare(0, mdir.size(), mdir) == 0
+                                          ? f.path.substr(mdir.size()) : f.path;
+                inclSegs.push_back({combined.size(), shown});
+                combined.insert(combined.end(), std::make_move_iterator(f.lines.begin()),
+                                std::make_move_iterator(f.lines.end()));
+            }
+        }
+        const std::vector<std::string>& refLines = inclSegs.empty() ? rawLines : combined;
+        // 합친 줄의 1-기반 번호 → (그 파일 안의 줄, 파일 이름). 주 덱이면 파일 이름이 빈다.
+        auto inclWhere = [&](int line1) -> std::pair<int, std::string> {
+            for (size_t k = inclSegs.size(); k-- > 0;)
+                if (static_cast<size_t>(line1) > inclSegs[k].start)
+                    return {line1 - static_cast<int>(inclSegs[k].start), inclSegs[k].file};
+            return {line1, ""};
+        };
+        auto ref = checkSetReferences(refLines);
         // 요소→파트 · 파트→섹션·재질 도 함께 본다(P1-6). 카드 경계 판정이 있는 자리에
         // 구현이 있어 거기서 부른다 — 베끼면 판정이 둘이 되고 갈린다.
         {
-            const auto ep = checkElementPartReferences(rawLines);
+            const auto ep = checkElementPartReferences(refLines);
             ref.dangling.insert(ref.dangling.end(), ep.dangling.begin(), ep.dangling.end());
             ref.notChecked += ep.notChecked;
             if (ep.hasUnreadIncludes) ref.hasUnreadIncludes = true;
             if (ref.includeNames.empty()) ref.includeNames = ep.includeNames;
+        }
+        if (deckHasIncludes) {
+            // 검사기는 합친 줄 안의 `*INCLUDE` 카드를 보고 「못 읽었다」고 한다 — 우리는 **읽었다.**
+            // 단정 여부는 닫힘이 정한다. 못 본 것만 이름으로 남긴다.
+            ref.hasUnreadIncludes = !inclClosure.complete();
+            ref.includeNames.clear();
+            for (const auto& u : inclClosure.unresolved) ref.includeNames.push_back(u.name + "(" + u.why + ")");
+            for (const auto& n : inclClosure.notFollowed)
+                ref.includeNames.push_back(n.keyword + (n.name.empty() ? "" : " " + n.name) + "(따라가지 않았다)");
+            if (inclClosure.depthCut) ref.includeNames.push_back("(깊이 상한)");
         }
         std::cout << "\n";
         if (!ref.dangling.empty()) {
@@ -1499,13 +1544,22 @@ int runInfo(const std::string& meshFile, const ConsoleOutput& console, bool stri
             for (const auto& d : ref.dangling) {
                 if (shown++ >= 20) { console.println("  … 외 " +
                     std::to_string(ref.dangling.size() - 20) + "건"); break; }
-                console.println("  line " + std::to_string(d.line) + " " + d.keyword +
+                // ⚠ 줄 꼴(`  line N *KW: …`)은 플랫폼이 정규식으로 읽는 계약이다(`kfile_inspect.py`).
+                //   인클루드 파일 안의 항목은 그 꼴을 지키고 **끝에** 파일 이름을 붙인다.
+                const auto w = inclWhere(d.line);
+                console.println("  line " + std::to_string(w.first) + " " + d.keyword +
                                 ": " + d.what + " " + std::to_string(d.id) +
-                                (certain ? " 이 정의되지 않았습니다" : " 의 정의를 이 덱에서 못 찾았습니다"),
+                                (certain ? " 이 정의되지 않았습니다" : " 의 정의를 이 덱에서 못 찾았습니다") +
+                                (w.second.empty() ? "" : " — 인클루드 " + w.second),
                                 certain ? ConsoleOutput::Color::RED : ConsoleOutput::Color::YELLOW);
             }
         } else if (ref.hasUnreadIncludes) {
-            console.warning("미정의 참조 0건 — 다만 *INCLUDE 를 읽지 않았으므로 단정할 수 없습니다");
+            console.warning(deckHasIncludes && !inclClosure.files.empty()
+                ? "미정의 참조 0건 — 다만 *INCLUDE 일부를 읽지 못해 단정할 수 없습니다"
+                : "미정의 참조 0건 — 다만 *INCLUDE 를 읽지 않았으므로 단정할 수 없습니다");
+        } else if (!inclSegs.empty()) {
+            console.success("참조 무결성 OK (세트·파트·섹션·재질 미정의 참조 0건 — 인클루드 " +
+                            std::to_string(inclSegs.size()) + "개를 함께 읽었습니다)");
         } else {
             console.success("참조 무결성 OK (세트·파트·섹션·재질 미정의 참조 0건)");
         }
@@ -1519,7 +1573,27 @@ int runInfo(const std::string& meshFile, const ConsoleOutput& console, bool stri
             for (const auto& d : ref.damaged) {
                 if (shown++ >= 20) { console.println("  … 외 " +
                     std::to_string(ref.damaged.size() - 20) + "건"); break; }
-                console.println("  line " + std::to_string(d.line) + " " + d.keyword + ": " + d.what,
+                const auto w = inclWhere(d.line);
+                std::string what = d.what;
+                if (!inclSegs.empty()) {
+                    // 설명 속 「line N」(겹친 상대 줄)도 합친 번호다 — 그 파일 안의 번호로 바꾼다.
+                    const std::string tag = "line ";
+                    size_t at = what.find(tag);
+                    if (at != std::string::npos) {
+                        size_t e = at + tag.size();
+                        while (e < what.size() && std::isdigit(static_cast<unsigned char>(what[e]))) ++e;
+                        if (e > at + tag.size()) {
+                            const auto o = inclWhere(std::stoi(what.substr(at + tag.size(), e - at - tag.size())));
+                            // 상대가 주 덱이면 그렇다고 적는다 — 이 카드가 인클루드 안이면 「line 3」만으론
+                            // 어느 파일인지 모른다.
+                            what = what.substr(0, at) + tag + std::to_string(o.first) +
+                                   (o.second.empty() ? (w.second.empty() ? "" : "(주 덱)")
+                                                     : "(인클루드 " + o.second + ")") + what.substr(e);
+                        }
+                    }
+                }
+                console.println("  line " + std::to_string(w.first) + " " + d.keyword + ": " + what +
+                                (w.second.empty() ? "" : " — 인클루드 " + w.second),
                                 ConsoleOutput::Color::RED);
             }
         }
@@ -1532,7 +1606,10 @@ int runInfo(const std::string& meshFile, const ConsoleOutput& console, bool stri
         if (ref.notChecked > 0)
             console.println("  칸 뜻을 확신하지 못해 검사하지 않은 자리 " +
                             std::to_string(ref.notChecked) + "곳(오탐을 내지 않으려고 건너뜁니다)");
-        strictUnreadIncludes = ref.hasUnreadIncludes;
+        // ⚠ 아래 「없는 노드를 가리키는 요소」 검사는 `KFileReader` 의 메시를 쓰는데 그 리더는 인클루드를
+        //   **안 읽는다.** 참조 축을 닫힘으로 단정하게 됐다고 그 축까지 단정하면, 노드가 인클루드에 있는
+        //   덱이 오탐으로 막힌다. 그래서 메시 축은 예전 그대로 「인클루드가 있으면 단정하지 않는다」다.
+        strictUnreadIncludes = deckHasIncludes || ref.hasUnreadIncludes;
     }
 
     // Validation
