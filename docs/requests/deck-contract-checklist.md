@@ -221,7 +221,7 @@ M0 · 신뢰 회복 · **완료** / M3 · 게시 · **완료**
 - [x] **P1-8** 플랫폼 개행 경고(45de81c) — P0-2 가 끝나 풀린 항목
   - ⚠ 판정 대조만으로는 **혼재 덱을 놓친다**(`count(CRLF)*2 > count(LF)` 규약). 혼재를 규칙으로 넣었다
   - 변이 시험이 제 가드 하나가 **거꾸로**임을 알려 줬다(덮어쓴 파일의 왕복 전 개행도 입력이다)
-- [~] **CI 에 gmsh**(bc2eba2) — 내가 skip 을 FAIL 로 바꿔 CI 가 빨갰다. `.github/workflows/` 는
+- [x] **CI 에 gmsh**(bc2eba2) — 내가 skip 을 FAIL 로 바꿔 CI 가 빨갰다. **적용 완료 — 2026-10-15 에 칸만 낡아 있던 것을 닫는다**(`regress.yml:20` 이 `gmsh` 를 깔고 요청서 머리가 「적용 완료」다). `.github/workflows/` 는
   HTTPS+PAT 로 못 미는데(`workflow` 스코프) **SSH 로는 된다** → `docs/requests/ci-gmsh-2026-09-25.md`
 
 - [x] **SIF 재굽기**(외부라 적었으나 여기서 했다) — `SmartTwinPreprocessor.sif` 안 바이너리를
@@ -778,6 +778,14 @@ plan2 는 `IdAllocator` 로 발행자를 통합하라고 했다. 정찰이 그 �
 
 ### 경계 합의로 새로 진 것 (2026-10-15 · StepForge 답신 §5)
 세 가지 다 **지금 0건**이다. 숨기지 않고 저쪽 문서에 적었으므로 여기에도 칸으로 둔다.
+- [ ] ★**삽입 `cad_solid_merge_to_deck` — 우리 몫으로 확정됐는데 칸이 없었다(2026-10-15 추가).**
+      StepForge 표 5행(Q1). 저쪽이 내는 조각 `.k` + 대응표 JSON 을 **읽어** 기존 덱에 들인다.
+      지금 **0건**. 아래 `unit`·`frame` 읽기와 `IdAllocator` 의 번호 대조가 이 op 안에서 만난다.
+      과도기에는 저쪽 `ranges`(1부터)를 우리가 옮긴다(답신 §5 ①).
+- [ ] **재결속 `rebind_entities_after_remesh` — 우리 몫, 칸이 없었다(2026-10-15 추가).**
+      StepForge 표 11행 · plan2 P2-6 의 「meshfix 참조 재결속」. 지금 **0건**. 입력 꼴은 저쪽 답이
+      정했다(Q12) — 구간 표(`range_diff`) + 좌표 기준 재결속 + `coord_sha` 를 검증 관문으로.
+      `resized` 파트에서 절점 수·자리가 같다고 가정하지 않는다.
 - [ ] **조각의 `unit`·`frame` 읽기**(Q6 — 좌표계·단위는 **삽입 쪽**인 우리가 맞춘다).
       실측 — 덱 수준 `frame` **0건**, `unit` 은 warpage 격자 값 단위(`um|mm|m`) 하나뿐이다
       (`standalone_ops.cpp:1222`). 조각이 `unit: mm-t-s`·`frame: world` 를 명시해 오면 읽는
@@ -800,6 +808,10 @@ plan2 는 `IdAllocator` 로 발행자를 통합하라고 했다. 정찰이 그 �
       ★**사용자 판단으로 넘긴다** — 같은 뿌리의 `mass` 가 DataHub 적재 경로로 나간다.
         2차 솔리드 덱이면 **−48.4% 틀린 질량이 그럴듯한 숫자로** 카드에 실린다. 그것을
         `null + reason` 으로 바꿀지는 적재 소비자를 건드리는 결정이다.
+- [ ] **사용자 판단 — 2차 솔리드 파트의 `mass`(그리고 `volume`·`area_ext`·`proj`·`edge_len`)를
+      `null + reason` 으로 바꿀지.** 지금은 값을 내고 `second_order: true` 로 표시한다. 그 `mass` 가
+      DataHub 적재로 나가므로 TET10 덱이면 **−48.4% 틀린 질량이 그럴듯한 숫자로** 카드에 실린다.
+      바꾸면 적재 소비자가 그 파트의 질량을 잃는다. 두 길 다 근거가 있어 혼자 정하지 않는다.
 - [ ] **Q13 관문 `check_mask_resolution_feasibility`** — 값은 있고 **관문이 없다**(0건).
       어느 값(min·p50·max)을 쓸지는 **임계와 함께** 정한다 — 임계 없이 고르면 짐작이다.
 - [ ] **`assess_edit_impact` 개명**(Q11 — 우리가 바꾸기로 했다. 저쪽 도구는 이미 배포됐고
