@@ -51,7 +51,60 @@ QUIET = [
     ("examples/wrap/cylinder_wrapped.k",
      "같은 형태 + *INCLUDE 가 있어 더더욱 단정할 수 없다"),
 ]
-# 진짜 결함이 있는 리포 덱 — 계속 보고해야 한다
+# ★**누락 축의 재고** — 리포의 추적 덱 전수에서 이 검사가 실제로 보고하는 덱 **전부**를
+#   이름으로 적는다(2026-10-15 실측: 추적 496장 중 41장).
+#
+#   왜 이름으로 적나 — 전에는 아래 `LOUD` 한 장뿐이었다. 오탐 축(`QUIET`)은 7장으로 촘촘한데
+#   **진짜를 못 보게 되는 쪽**은 1/41 만 잠겨 있었다. 검출이 조용히 멎어도 40장은 아무도
+#   빨갛게 만들지 않는다 — `3a84739`(오탐 2장을 회귀가 지키고 있던 사고)의 **거울상**이다.
+#
+#   양방향으로 본다. 여기 있는데 조용해지면 **검출이 멎은 것**이고, 여기 없는데 보고되면
+#   **새 결함 덱이 들어온 것**이다(둘 다 사람이 봐야 한다 — 목록을 고치든 덱을 고치든).
+DEFECT_DECKS = [
+    "examples/extract-parts/part2_include.k",
+    "examples/offset/01_basic_result.k",
+    "examples/offset/02_multi_layer_result.k",
+    "examples/offset/03_tshell_result.k",
+    "examples/offset/04_shell_result.k",
+    "examples/offset/05_normal_result.k",
+    "examples/offset/06_czm_result.k",
+    "examples/offset/07_contact_result.k",
+    "examples/offset/08_local_normals_result.k",
+    "examples/offset/09_region_result.k",
+    "examples/offset/10_variable_thickness_result.k",
+    "examples/offset/11_combined_result.k",
+    "examples/offset/12_dual_prestress_result.k",
+    "examples/offset/solid_tied_result.k",
+    "examples/squeeze_interference/assembled_result.k",
+    "examples/squeeze_interference/interference_model.k",
+    "materials/test_matdb_pidmid.k",
+    "materials/test_matdb_pidmid_result.k",
+    "test_data/missing_mat_test_bent.k",
+    "test_data/sample_packed.k",
+    "test_data/sample_two_line_element.k",
+    "test_data/sample_two_line_lf.k",
+    "tests/offset/comprehensive_test_result.k",
+    "tests/offset/local_normal_result.k",
+    "tests/offset/region_bbox_result.k",
+    "tests/offset/region_node_range_result.k",
+    "tests/offset/regression/01_solid_tied.k",
+    "tests/offset/regression/02_tshell_multi.k",
+    "tests/offset/regression/03_shell_offset.k",
+    "tests/offset/regression/04_czm_mode.k",
+    "tests/offset/regression/05_contact_mode.k",
+    "tests/offset/regression/06_dual_prestress.k",
+    "tests/offset/regression/07_normal_direction.k",
+    "tests/offset/regression/08_multi_layer_solid.k",
+    "tests/offset/test_multi_material_result.k",
+    "tests/offset/test_negative_normal_result.k",
+    "tests/offset/test_negative_z_result.k",
+    "tests/offset/variable_thickness_result.k",
+    "tests/offset_shell_result.k",
+    "tests/offset_test_result.k",
+    "tests/offset_tshell_result.k",
+]
+
+# 진짜 결함이 있는 리포 덱 — 계속 보고해야 한다(여기는 **메시지**까지 본다)
 LOUD = [
     ("examples/squeeze_interference/interference_model.k", r"\*PART: 섹션 1",
      "*SECTION 이 덱에 아예 없는데 파트 둘이 섹션 1 을 가리킨다"),
@@ -220,6 +273,25 @@ def main():
         if "칸이 어긋났다" in why:
             # 조용한 것과 **못 본 것을 감추는 것**은 다르다 — 어긋난 카드는 세어서 말해야 한다.
             check("   C 어긋난 카드를 세어 말한다", "검사하지 않은 자리" in out, out[-400:])
+
+    print("[D 누락 축 재고 — 추적 덱 전수에서 보고되는 집합이 그대로인가]")
+    tracked = subprocess.run(["git", "ls-files", "*.k", "*.key", "*.dyn"],
+                             capture_output=True, text=True, cwd=ROOT).stdout.split()
+    check("D 추적 덱을 찾았다", len(tracked) > 400, "%d장" % len(tracked))
+    seen, rc_bad = [], []
+    for rel in tracked:
+        rc, out = info(binary, os.path.join(ROOT, rel))
+        if rc != 0:
+            rc_bad.append("%s rc=%d" % (rel, rc))
+        if reports(out):
+            seen.append(rel)
+    want, got = set(DEFECT_DECKS), set(seen)
+    # ★`info` 의 rc 는 이 검사와 무관하게 **언제나 0** 이다(상위 파이프라인 계약).
+    check("D rc 는 전수 0 이다", not rc_bad, "; ".join(rc_bad[:5]))
+    check("D 검출이 멎은 덱이 없다", not (want - got),
+          "조용해졌다: %s" % sorted(want - got)[:8])
+    check("D 목록에 없는 새 결함 덱이 없다", not (got - want),
+          "새로 보고된다: %s — 고쳤거나 목록에 더해야 한다" % sorted(got - want)[:8])
 
     print("[E 망가진 *CONTACT_ 카드 — 참조가 아니라 카드 자체가 깨진 축]")
     # `_ID` 덱에서 줄이 한 칸 밀리면 마찰계수가 SSID 칸에 덮어써진다(P1-4 가 그 쓰기를 고쳤다).
