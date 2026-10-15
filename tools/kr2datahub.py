@@ -7,12 +7,16 @@
   2. 재료명으로 DataHub 재료 카드(MaterialTwin sync, DOC-MX-MAT-*) 매칭
   3. SIM 레코드 조립 — components/connectivity/eng_meta + 검색 승격
      (파트명·재료명 → subject_keywords/tags) + 첨부(K파일 kind=cae)
-  4. ZIP 번들로 POST /api/ingest/bundle
+  4. ZIP 번들로 POST /api/ingest/bundle — --upload 를 줄 때만
 
 사용:
   python3 tools/kr2datahub.py model.k --project S26-X --stage dv1 \
       [--variation antA] [--doe study:case] [--unit mm-t-s] [--detect] \
-      [--title "..."] [--datahub http://localhost:8001] [--dry-run]
+      [--title "..."] [--datahub http://localhost:8001] [--upload]
+
+기본은 미리보기다 — 번들(<레코드ID>.zip)만 만들어 현재 폴더에 저장하고 올리지 않는다.
+허브에 올릴 때만 --upload 를 준다. --datahub 기본값(AIDH_URL, 없으면 localhost:8001)은 운영
+박스에서는 운영 허브다 — 시험 업로드(S26-DEMO 3장, 2026-07-31)가 그렇게 운영 허브에 쌓였다.
 
 stdlib 전용 (requests 불필요).
 """
@@ -33,6 +37,10 @@ from pathlib import Path
 
 DEF_HUB = "http://localhost:8001"
 TEAM, GROUP = "MX", "CAE"
+# 레코드를 붙일 AIDataHub 전문가 — 허브에 등록된 키여야 한다. 예전 키 kooremapper-modelmeta 는
+# 등록된 적이 없어 적재가 이름=키·설명 0자의 빈 전문가를 말없이 만들었다(2026-07-31). 허브가
+# strict(STRICT_AGENT_VALIDATION, 2026-10-15)로 바뀐 뒤로는 없는 키면 업로드가 거절된다.
+HUB_AGENT = "sim-drop-impact"
 
 
 def http_json(url: str, data: bytes | None = None, headers: dict | None = None,
@@ -105,7 +113,8 @@ def main() -> None:
     ap.add_argument("--datahub", default=os.environ.get("AIDH_URL", DEF_HUB))
     ap.add_argument("--binary", default=str(Path(__file__).resolve().parents[1]
                                             / "build/linux/bin/KooRemapper"))
-    ap.add_argument("--dry-run", action="store_true", help="번들만 만들고 업로드 생략")
+    ap.add_argument("--upload", action="store_true",
+                    help="허브에 올린다(없으면 번들만 만들어 저장하는 미리보기)")
     a = ap.parse_args()
 
     if not a.model.is_file():
@@ -198,7 +207,7 @@ def main() -> None:
             "subject_keywords": list(dict.fromkeys(kw))[:50],
             "related_record_ids": related,
             "source_system": "KooRemapper",
-            "agents": ["kooremapper-modelmeta"],
+            "agents": [HUB_AGENT],
             "content": {
                 "solver": "LS-DYNA",
                 "inputs": {"model_file": a.model.name, "op": "modelmeta"},
@@ -217,10 +226,10 @@ def main() -> None:
             z.write(a.model, f"{rid}/{a.model.name}")
             z.write(tmp / "meta_modelmeta.json", f"{rid}/modelmeta.json")
 
-        if a.dry_run:
+        if not a.upload:
             out = Path(f"{rid}.zip")
             out.write_bytes(zpath.read_bytes())
-            print(f"[dry-run] 번들 저장: {out}")
+            print(f"[미리보기] 번들 저장: {out} — 허브에 올리려면 --upload")
             return
 
         print(f"[4/4] 업로드: {a.datahub}/api/ingest/bundle")
