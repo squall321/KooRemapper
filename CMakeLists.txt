@@ -53,6 +53,7 @@ set(CORE_SOURCES
 # Source files - Parser
 set(PARSER_SOURCES
     src/parser/ElementCardLayout.cpp
+    src/parser/IncludeClosure.cpp
     src/parser/KFileReader.cpp
     src/parser/KFileWriter.cpp
     src/parser/DynainWriter.cpp
