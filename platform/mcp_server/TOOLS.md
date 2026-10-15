@@ -93,6 +93,25 @@ SmartTwin 파이프라인이 만든 deep(단건 심층)·sphere(전각도 낙하
 | `publish_report_to_datahub` | report_id, project, stage, variation?, doe?, unit?, title? | POST /reports/{id}/publish-datahub | AI Data Hub 에 범용 sim_report 레코드로 등재(eng_meta 연계) |
 | `delete_report` | report_id | DELETE /reports/{id} | 리포트 삭제(원본 HTML 포함) |
 
+## 과제 · 개발 개정 (온톨로지)
+
+과제의 정본은 **SP 허브**다 — 여기에 과제를 만들거나 고치는 도구는 **없다**(있으면 다음
+받기가 덮어쓰고 그 사실이 고친 사람에게 안 보인다). 쓰는 것은 **우리 것**(개정 · 별칭)뿐이다.
+기능이 꺼져 있으면 모든 도구가 **꺼졌다고 사유와 함께** 거절한다(409).
+
+| 도구 | 인자 | REST | 메모 |
+| --- | --- | --- | --- |
+| `list_tasks` | q?·limit? | GET /ontology/tasks | 허브에서 받은 과제 목록. ★목록이 비면 `reason` 을 본다 — 「수신이 꺼졌다」와 「받았지만 없다」는 다르다 |
+| `task_revisions` | task_key | GET /ontology/tasks/{k}/revisions | 개정 줄 — `rev_seq` 순, 각 판의 리포트와 앞 판 |
+| `compare_task_revisions` | task_key | GET /ontology/tasks/{k}/compare | ★판끼리 **견준다** — 최악응력·최악G·심각도·케이스와 **앞 판 대비 변화**. 안 잰 것은 `null` 이고 0 이 아니다 |
+| `report_revision` | report_id, task_key? | GET /reports/{id}/revision | 이어진 개정 + **어긋남** + 후보와 근거. `mismatch` 가 있으면 수동 메타와 다르다는 뜻이다 |
+| `set_report_revision` | report_id, task_key, code, model_key?·supersedes?·note? | PUT /reports/{id}/revision | ★사람의 확정으로 기록된다(재인제스트에 안 지워진다) — **짐작으로 부르지 마라** |
+| `unlink_report_revision` | report_id | DELETE /reports/{id}/revision | 연결을 끊는다. **개정 객체는 남는다**(다른 리포트가 달려 있거나 줄의 가운데일 수 있다) |
+| `confirm_task_alias` | alias, task_key, note? | POST /ontology/aliases | 자유 문자열을 정본 과제에 붙인다(관리자). 한 문자열은 **한 과제만** 가리킨다 |
+| `remove_task_alias` | alias | DELETE /ontology/aliases | 별칭을 뗀다(관리자). **이미 이어 둔 개정은 안 건드린다** |
+| `plan_task_links` | limit? | GET /ontology/task-links | 과거 붙이기 **계획**(관리자) — 아무것도 쓰지 않는다. 붙는 것·후보·못 붙인 것을 가른다 |
+| `ontology_sync_state` | — | GET /ontology/sync | 허브 수신 상태(관리자). `stopped` 는 **공개 안 된 타입**이라 멈춘 것이다 |
+
 ## 시스템 / 신원
 | 도구 | 인자 | REST | 설명 |
 |---|---|---|---|

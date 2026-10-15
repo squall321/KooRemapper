@@ -342,20 +342,30 @@ meshfix 가 그 덱에서 끝나지 않았다. `git checkout` 으로 되돌리�
 전체 현황은 **`deck-contract-status-2026-09-26.md`** 한 장에 있다(항목별 판정 · 미결 28건 ·
 배포 지연 · 이 문서에서 고쳐야 할 줄 · 감사 자신의 오류 6건). 아래는 그 감사가 **새로 찾은 것**만이다.
 
-- [ ] **CI 가 28연속 빨강이고, 그렇게 만든 것이 `0704b79`(내 P0-3 수정)다.** 카탈로그
+- [x] ~~CI 가 28연속 빨강~~ → **끝났다(2026-10-15 재판정).** 카탈로그 `example_folder` 56개 중
+      절대 경로 **0개**이고, `test_newline_matrix` rc=0(보존 46·깨짐 0) ·
+      `test_roundtrip_bytes` rc=0(통과 46·실패 0)이다. 아래는 당시 기록이다.
+      ★덧 — 이것을 `pytest` 로 돌려 "no tests ran" 을 보고 "안 돈다" 고 결론 낼 뻔했다.
+      `tools/regress/*.py` 는 **pytest 가 아니라 스크립트**이고 CI 는
+      `python3 <t> build/bin/KooRemapper` 로 부른다(`regress.yml:54-56`). 바이너리를 줘야 돈다.
+- [x] (당시 기록) 카탈로그
       `example_folder` 48/49 가 절대 경로(`/home/koopark/...`)인데 `test_newline_matrix.py:209` ·
       `test_roundtrip_bytes.py:214` 가 그것을 `os.path.isdir` 에 넣고 없으면 **FAIL** 한다. 마지막
       초록(`dafd117`)에서도 절대 경로는 48개였지만 그때는 **SKIP** 이었다. CI 로그는 403 으로 막혀
       5일간 아무도 몰랐다.
       → ⚠ **"이제 CI 가 막아 준다" 는 정정을 상대에게 보내면 안 된다.** 보낼 말은 "워크플로는
         올라갔다. 그러나 카탈로그 절대 경로 때문에 `regress` 는 HEAD 에서도 빨갛다" 다.
-- [ ] **`KFileWriter` 가 `*NODE` 를 id+x+y+z 로 줄여 쓴다** (`src/parser/KFileWriter.cpp:292-296`).
+- [x] ~~`KFileWriter` 가 `*NODE` 를 줄여 쓴다~~ → **끝났다(재판정).** 지금 `idFieldWidth_` 를
+      쓰고(`:296`·`:303`) TC/RC 처리가 31건이다("둘 중 하나라도 0 이 아닐 때만 낸다").
+      당시 기록 — (`src/parser/KFileWriter.cpp:292-296`).
       TC/RC 칸이 애초에 쓰이지 않고(그 파일에 `tc|rc|constraint` grep **0건**) ID 폭이 `setw(8)` 로
       못 박혀 있다. 원본의 `*KEYWORD I10=Y` 는 그대로 나가므로 선언 10칸·본문 8칸 덱이 된다.
       생성 자리 9곳(map·shellmap·unfold·squeeze·tetremesh·generate·indent·bend 계열). rc=0.
       → 왕복 회귀가 못 잡는 이유가 구조적이다 — LF 판과 CRLF 판을 **서로** 비교하므로 양쪽에서
         똑같이 잃으면 초록이다. P1-2 아래로 넣어야 한다.
-- [ ] **백엔드 skip 3건은 "샘플이 없어서" 가 아니다.** `test_report_parser.py:23-24` ·
+- [x] ~~백엔드 skip 3건이 스크래치패드 절대경로 때문~~ → **끝났다(재판정).** 그 두 파일에
+      `claude-1000`·`scratchpad` 경로 **0건**이고, 왜 그랬는지가 주석으로 남아 있다.
+      당시 기록 — `test_report_parser.py:23-24` ·
       `test_reports_ingest.py:25-26` 에 **세션 스크래치패드 절대경로(UUID)가 HEAD 에 커밋돼** 있다.
       어느 CI 에서도 영구 skip 이고, 실재 샘플에 대면 단언 4개가 깨진다(표본 하나에 과적합).
 - [ ] **누락 축이 1/40 만 잠겨 있다.** 오탐 축(QUIET)은 픽스처 7장으로 촘촘한데 실제 결함 40장 중
@@ -579,9 +589,16 @@ meshfix 가 그 덱에서 끝나지 않았다. `git checkout` 으로 되돌리�
            재사용한다. 관찰 불가능한 코드였으므로 **시험을 맞추지 않고 코드를 뺐다.**
         ② 기본 픽스처의 세 네임스페이스 최대가 1·1·18 로 가까워 **섞여도 티가 안 났다.**
            섹션 ID 만 500 으로 올린 픽스처(B2)를 넣어 관찰 가능하게 만들었다.
-- [ ] 남은 것 — `cs_fmtNode`/`cs_fmtHex8` 이 **덱 폭을 안 본다**(`%8d` 고정). i10 덱에서도 8칸으로
-      쓴다. `KFileWriter` 에서 고친 것과 같은 축이고 `cnrb2spring` 의 `99999999` 상한도 같은 부류다 —
-      한 단위로 묶어 판단해야 한다.
+- [x] **끝났다(2026-10-15).** `cs_fmtNode`/`cs_fmtHex8`/`cg_nodeLine`/`cg_elementBeamLine` 이
+      `KooRemapper::deckFieldWidth(lines)` 를 따른다(`KFileWriter` 와 **같은 정본 함수**).
+      `cnrb2spring` 의 `99999999` 상한도 폭에서 유도한다(`cg_idCap()`) — 전에는 i10 덱의
+      멀쩡한 ID 를 거절했다.
+      ★`*PART`·`*SET_NODE_LIST` 의 `%10d` 는 **건드리지 않았다** — LS-DYNA 표준이 10칸이라
+      폭 옵션과 무관하다. 둘을 섞어 고치면 맞던 것이 틀려진다.
+      ★증명 — 같은 `I10=Y` 덱에서 옛 바이너리는 `      17     200      26`(8칸), 새 것은
+      `        17       200        26`(10칸)이다. 150줄이 달라진다.
+      ★8칸 덱은 **바이트 동일** — `test_newline_matrix`(46 op)·`test_roundtrip_bytes`(46)·
+      `test_i10_card_width`("8칸 산출물은 한 글자도 다르면 안 된다") 전부 rc=0.
 
 ### P1-7 재고(modelmeta) 확장 (2026-09-28)
 `parts[]` 에 `n_node`·`thickness`(+reason)·`mass`·`mass_basis`(+reason)·`edge_len` 을 더했다.

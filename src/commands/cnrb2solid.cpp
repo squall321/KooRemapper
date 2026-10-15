@@ -1,4 +1,5 @@
 #include "parser/DeckWriter.h"
+#include "parser/ElementCardLayout.h"   // deckFieldWidth — 덱이 선언한 칸 폭을 따른다
 #include "parser/IncludeScan.h"
 #include "cnrb2solid.h"
 #include "kw_util.h"
@@ -360,12 +361,23 @@ static double cs_roundZ(double z, double tol) {
 // 8칸을 넘긴 ID 들. `snprintf("%8d", …)` 는 **잘라 주지 않고 칸을 넓힌다** — 다음 칸을 침범한
 // 줄이 조용히 나가고 LS-DYNA 는 엉뚱한 노드를 읽는다. 이 캠페인이 세 번 고친 부류다.
 // 그래서 세어 두고 **쓰기 전에 거절한다**(`ModelAssembler` 의 `widthOverflow_` 와 같은 규약).
+// 덱이 선언한 정수 칸 폭(`*KEYWORD I10=Y` 면 10, 없으면 8). 정본은 `deckFieldWidth` 하나다 —
+// 리더와 쓰기가 다른 폭을 쓰면 새 층이 통째로 사라진다(ElementCardLayout.h:54 의 그 사고).
+// ⚠ `*PART`·`*SET_NODE_LIST` 는 **표준이 10칸**이라 이 값과 무관하다(이미 `%10d` 다).
+static int cs_fieldWidth = 8;
+
 static std::string cs_widthOverflow;   // 사람이 읽을 요약(앞 몇 건만)
 static int cs_widthOverflowCount = 0;  // 전체 건수
 static int cs_widthOverflowMax = 0;    // 가장 큰 값
 
+static long long cs_idCap() {
+    long long cap = 1;
+    for (int i = 0; i < cs_fieldWidth; ++i) cap *= 10;
+    return cap - 1;          // 폭 8 → 99999999 · 폭 10 → 9999999999
+}
+
 static void cs_noteWidth(int v, const char* what) {
-    if (v <= 99999999) return;
+    if (v <= cs_idCap()) return;
     ++cs_widthOverflowCount;
     if (v > cs_widthOverflowMax) cs_widthOverflowMax = v;
     // ⚠ 앞 3건만 적는다. 전부 적으면 한 줄이 수백 개가 되어 **읽을 수 없는 보고**가 된다
@@ -379,7 +391,9 @@ static void cs_noteWidth(int v, const char* what) {
 static std::string cs_fmtNode(int nid, double x, double y, double z) {
     cs_noteWidth(nid, "노드");
     char buf[128];
-    snprintf(buf, sizeof(buf), "%8d%16.8e%16.8e%16.8e       0       0", nid, x, y, z);
+    // id 와 TC/RC 만 폭을 따른다 — 좌표는 그대로다(`KFileWriter.cpp:296-303` 과 같은 규칙).
+    snprintf(buf, sizeof(buf), "%*d%16.8e%16.8e%16.8e%*d%*d",
+             cs_fieldWidth, nid, x, y, z, cs_fieldWidth, 0, cs_fieldWidth, 0);
     return std::string(buf);
 }
 
@@ -392,11 +406,17 @@ static std::string cs_fmtHex8(int eid, int pid,
     cs_noteWidth(eid, "요소");
     cs_noteWidth(pid, "파트");
     for (int v : {n1, n2, n3, n4, n5, n6, n7, n8}) cs_noteWidth(v, "노드");
-    char buf[128];
-    snprintf(buf, sizeof(buf),
-        "%8d%8d%8d%8d%8d%8d%8d%8d%8d%8d",
-        eid, pid, n1, n2, n3, n4, n5, n6, n7, n8);
-    return std::string(buf);
+    // ⚠`%*d` 는 **폭을 인자로 먼저** 받는다 — 값만 나열하면 개수가 어긋나 쓰레기가 찍힌다.
+    //   열 쌍을 손으로 늘어놓는 대신 모아서 돈다(한 쌍을 빠뜨려도 티가 안 나는 자리다).
+    const int ids[10] = {eid, pid, n1, n2, n3, n4, n5, n6, n7, n8};
+    std::string out;
+    out.reserve(static_cast<size_t>(cs_fieldWidth) * 10);
+    char cell[32];
+    for (int v : ids) {
+        snprintf(cell, sizeof(cell), "%*d", cs_fieldWidth, v);
+        out += cell;
+    }
+    return out;
 }
 
 // ============================================================
@@ -835,6 +855,14 @@ int cnrb2solid_convert(std::vector<std::string>& lines,
                        int& maxSetId,  int& /*maxPartId*/,
                        ConsoleOutput& console)
 {
+    // ★덱이 선언한 칸 폭을 **여기서 한 번** 정한다. 전에는 `%8d` 로 못 박혀 있어서
+    //   `*KEYWORD I10=Y` 덱에 8칸으로 써 넣었다 — 선언 10칸·본문 8칸 덱이 되고, 그것을
+    //   다시 읽는 쪽은 칸을 어긋나게 자른다(ElementCardLayout.h:54 가 경고한 그 사고).
+    cs_fieldWidth = KooRemapper::deckFieldWidth(lines);
+    cs_widthOverflow.clear();
+    cs_widthOverflowCount = 0;
+    cs_widthOverflowMax = 0;
+
     // Build lookup structures
     auto allNodes  = cs_parseNodes(lines);
     auto nodeSets  = cs_parseNodeSets(lines);

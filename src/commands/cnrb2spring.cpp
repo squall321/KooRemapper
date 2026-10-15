@@ -600,9 +600,21 @@ static void cg_emitPart(std::vector<std::string>& out, const std::string& title,
     out.push_back(cg_fmt("%10d%10d%10d", pid, secid, mid));
 }
 
-// *NODE — 8칸 + 3×F16 (cnrb2solid 와 같은 형식)
+// 덱이 선언한 정수 칸 폭(`*KEYWORD I10=Y` 면 10, 없으면 8). 정본은 `deckFieldWidth` 하나다.
+// ⚠ `*PART`·`*SET_NODE_LIST` 는 **표준이 10칸**이라 이 값과 무관하다(이미 `%10d` 다).
+static int cg_fieldWidth = 8;
+
+static long long cg_idCap() {
+    long long cap = 1;
+    for (int i = 0; i < cg_fieldWidth; ++i) cap *= 10;
+    return cap - 1;          // 폭 8 → 99999999 · 폭 10 → 9999999999
+}
+
+// *NODE — 덱 폭 + 3×F16 (cnrb2solid 와 같은 형식)
 static std::string cg_nodeLine(int nid, const CgVec3& p) {
-    return cg_fmt("%8d%16.8e%16.8e%16.8e       0       0", nid, p.x, p.y, p.z);
+    // id 와 TC/RC 만 폭을 따른다 — 좌표는 그대로다(`KFileWriter.cpp:296-303` 과 같은 규칙).
+    return cg_fmt("%*d%16.8e%16.8e%16.8e%*d%*d",
+                  cg_fieldWidth, nid, p.x, p.y, p.z, cg_fieldWidth, 0, cg_fieldWidth, 0);
 }
 
 // *SET_NODE_LIST_TITLE — 10칸 (ModelAssembler 의 bc_generateSetNode 와 같은 형식)
@@ -636,7 +648,8 @@ static void cg_emitCnrb(std::vector<std::string>& out, const std::string& title,
 // RT1/RR1/RT2/RR2(릴리즈)는 반드시 0(빈칸)이다 — 릴리즈를 건 노드는 nodal rigid body 에 넣을 수
 // 없는데(Vol_I *ELEMENT_BEAM Remark 2) 우리 팬텀 노드 둘은 양쪽 CNRB 에 들어간다.
 static std::string cg_elementBeamLine(int eid, int pid, int n1, int n2) {
-    return cg_fmt("%8d%8d%8d%8d", eid, pid, n1, n2);
+    return cg_fmt("%*d%*d%*d%*d", cg_fieldWidth, eid, cg_fieldWidth, pid,
+                  cg_fieldWidth, n1, cg_fieldWidth, n2);
 }
 
 // ============================================================
@@ -675,6 +688,9 @@ int cnrb2spring_apply(std::vector<std::string>& lines,
                       const Cnrb2SpringConfig& cfg,
                       ConsoleOutput& console)
 {
+    // ★덱이 선언한 칸 폭을 **여기서 한 번** 정한다(cnrb2solid 와 같은 자리·같은 이유).
+    cg_fieldWidth = KooRemapper::deckFieldWidth(lines);
+
     // ── 1. 값 검증 (덱을 건드리기 전에 끝낸다) ──────────────────────────────
     if (cfg.axis != 'x' && cfg.axis != 'y' && cfg.axis != 'z') {
         console.error("[cnrb2spring] axis 를 반드시 지정해야 합니다. 허용값: x, y, z "
@@ -1025,9 +1041,13 @@ int cnrb2spring_apply(std::vector<std::string>& lines,
                           " — " + n.key + " 를 바꾸세요");
         }
         int mx = n.mine->empty() ? 0 : *n.mine->rbegin();
-        if (mx > 99999999) {
+        if (mx > cg_idCap()) {
             clash = true;
-            console.error(std::string("[cnrb2spring] ") + n.name + " ID 가 I8 상한(99999999)을 넘습니다: " +
+            // ★상한은 **덱이 선언한 폭**이 정한다. 전에는 99999999 로 못 박혀 있어서
+            //   i10 덱에서 멀쩡한 ID 를 거절했다(쓰는 쪽이 8칸이었으니 그때는 맞는 거절이었다).
+            console.error(std::string("[cnrb2spring] ") + n.name + " ID 가 I" +
+                          std::to_string(cg_fieldWidth) + " 상한(" + std::to_string(cg_idCap()) +
+                          ")을 넘습니다: " +
                           std::to_string(mx) + " — " + n.key + " 를 낮추세요");
         }
     }
