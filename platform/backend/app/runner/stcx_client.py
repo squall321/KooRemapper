@@ -42,9 +42,11 @@ PROTOCOL_VERSION = "2025-06-18"
 _PREFIX = "smarttwinmcp"
 TOOL_SUBMIT = f"{_PREFIX}_fullangle_drop_simulation"
 TOOL_STATUS = f"{_PREFIX}_job_status"
-# ★상태만으로는 끝났는지 알 수 없다 — `job_status` 응답에 `slurm_job_ids` 가 없고,
+# ★상태만으로는 끝났는지 알 수 없었다 — `job_status` 응답에 `slurm_job_ids` 가 없고,
 #   `squeue` 는 예외가 나도 `{}` 라 "다 끝났다"·"아직 큐에 안 올랐다"·"squeue 가 실패했다" 가
 #   같은 모양이다. 레지스트리 행 전체를 주는 이 도구로 id 목록을 함께 받는다.
+#   2026-10-15 에 받는 쪽이 `job_status` 에도 `slurm_job_ids` 를 실었다(SmartTwinCluster
+#   `bffd4e50`, dev 반영). 운영 반영을 확인하기 전까지는 이 도구를 계속 부른다.
 TOOL_DETAILS = f"{_PREFIX}_get_job_details"
 
 
@@ -124,6 +126,10 @@ def parse_submit(result: Any) -> dict:
         "work_dir": inner.get("work_dir") or "",
         "output_dir": inner.get("output_dir") or "",
         "sphere_report_path": inner.get("sphere_report_path") or "",
+        # 실제 결과 폴더 = registry 의 work_dir. `work_dir` 은 우리가 준 스테이징이다(받는 쪽 b1274d04).
+        "result_dir": inner.get("result_dir") or "",
+        # "copied" | "existing" — existing 이면 받는 쪽이 작업 폴더의 **묵은 덱**을 썼다(bffd4e50).
+        "model_source": inner.get("model_source") or "",
         "detail": json.dumps(inner, ensure_ascii=False)[:2000],
     }
 
@@ -415,10 +421,21 @@ def registry_id_of(status: Any) -> Any:
     return inner.get("job_id")
 
 
+def result_dir_of(status: Any) -> str:
+    """상태 응답의 `work_dir` — registry 의 **결과 폴더**다(제출 응답의 `result_dir` 과 같다).
+
+    제출 응답이 끊겨 `work_dir`(스테이징)로 찾았을 때 결과 폴더를 여기서 얻는다.
+    """
+    if registry_id_of(status) in (None, ""):
+        return ""
+    return str(_envelope(status)["result"].get("work_dir") or "")
+
+
 def parse_status(status: Any, details: Any) -> dict:
     """두 응답을 합쳐 → {"state": "active"|"succeeded"|"failed"|"unknown", …}.
 
-    **왜 둘인가** — `job_status` 응답에 `slurm_job_ids` 가 없다. 있는 것은 `squeue` 뿐인데
+    **왜 둘인가** — `job_status` 응답에 `slurm_job_ids` 가 없었다(dev 는 10-15 부터 있다 —
+    `TOOL_DETAILS` 주석). 있는 것은 `squeue` 뿐인데
     `slurm_queue_for` 는 예외가 나도 `{}` 를 돌려주므로(`job_helpers.py:197-198`) 빈 `{}`
     하나가 세 가지를 뜻한다. 다 끝났다 · 아직 큐에 안 올랐다 · squeue 가 실패했다.
     빈 것을 그냥 성공으로 접으면 **제출 직후에 바로 끝난 것이 된다.**

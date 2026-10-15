@@ -32,9 +32,11 @@ pytestmark = pytest.mark.asyncio(loop_scope="session")
 OP = "stcx_fullangle_drop"
 UPLOADED = "/shared/uploads/users/admin/data/J_model.k"
 
+RESULT = "/data/single/admin/drop_98765"
 _BODY = {"ok": True, "registry_id": 12, "job_id": "98765",
-         "work_dir": "/data/df/J", "output_dir": "/data/df/J/output",
-         "sphere_report_path": "/data/df/J/output/sphere_report.html"}
+         "work_dir": "/data/df/J", "output_dir": f"{RESULT}/output",
+         "sphere_report_path": f"{RESULT}/output/sphere_report.html",
+         "result_dir": RESULT, "model_source": "copied"}
 
 
 def _env(body, *, ok=True, exit_code=0, stderr=""):
@@ -44,8 +46,9 @@ def _env(body, *, ok=True, exit_code=0, stderr=""):
 
 
 def _status_env(squeue):
+    # 상태 응답의 work_dir 은 registry 의 것 = 결과 폴더다(받는 쪽 b1274d04)
     return _env({"ok": True, "job_id": 12, "tool": "fullangle_drop_simulation",
-                 "work_dir": "/data/df/J", "output_dir": "/data/df/J/output",
+                 "work_dir": RESULT, "output_dir": f"{RESULT}/output",
                  "squeue": squeue})
 
 
@@ -186,6 +189,8 @@ async def test_submit_keeps_the_job_running_and_records_the_handle(db, patched):
         assert job.external_ref["registry_id"] == 12
         assert job.external_ref["slurm_job_id"] == "98765"
         assert job.external_ref["sphere_report_path"].endswith("sphere_report.html")
+        assert job.external_ref["result_dir"] == RESULT, "결과를 가져올 때의 기준"
+        assert job.external_ref["model_source"] == "copied"
         assert job.external_poll_at is not None
         assert fake.submits[-1]["dry_run"] is False
     finally:
@@ -229,6 +234,22 @@ async def test_a_failed_delete_does_not_touch_the_submitted_job(db, patched):
         job = await _submit(db, u.id, sid, wd, {"model": "model.k"})
         assert fake.uploader.deleted == ["up-1"]
         assert job.status == "running" and job.external_ref["registry_id"] == 12
+    finally:
+        await _cleanup(u.id)
+
+
+async def test_a_stale_deck_is_warned_about_but_the_job_still_runs(db, patched, caplog):
+    """★B — `work_dir` 이 잡마다 고유하니 늘 "copied" 여야 한다. "existing" 이면 받는 쪽이
+    올린 덱 대신 작업 폴더에 있던 덱을 썼다. 잡은 이미 돌고 있으니 **경고로 남긴다.**"""
+    import logging
+    patched(_Fake(submit={"ok": True, "result": _env({**_BODY, "model_source": "existing"})}))
+    u, sid, wd = await _mk(db)
+    try:
+        with caplog.at_level(logging.WARNING, logger="koorm.worker"):
+            job = await _submit(db, u.id, sid, wd, {"model": "model.k"})
+        assert job.status == "running"
+        assert job.external_ref["model_source"] == "existing"
+        assert any("model_source=existing" in r.getMessage() for r in caplog.records)
     finally:
         await _cleanup(u.id)
 
@@ -440,6 +461,7 @@ async def test_a_timeout_does_not_resubmit_and_recovers_the_registry_id(db, patc
         assert job.external_ref["registry_id"] == 12
         assert fake.status_calls[-1][1] == f"/data/df/{job.id}", "work_dir 로 찾아야 한다"
         assert fake.uploader.deleted == ["up-1"], "찾았으면 registry 가 있다 — 복사는 끝났다"
+        assert job.external_ref["result_dir"] == RESULT, "복구해도 결과 폴더는 상태 응답에 있다"
     finally:
         await _cleanup(u.id)
 

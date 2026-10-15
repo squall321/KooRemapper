@@ -31,7 +31,7 @@ from app.runner.gmsh_probe import probe as gmsh_probe
 from app.runner.kfile_inspect import inspect_kfile
 from app.runner.newline_audit import audit_newlines
 from app.runner.stcx_client import (StcxClient, StcxUploader, parse_status, parse_submit,
-                                    registry_id_of)
+                                    registry_id_of, result_dir_of)
 from app.shared import storage
 from app.worker import plm_sync
 from app.shared.buildinfo import build_info
@@ -367,7 +367,9 @@ async def _submit_external(db, job: Job, work_dir: Path) -> None:
                            job.id, recovered)
             parsed = {"ok": True, "registry_id": recovered, "job_id": "",
                       "work_dir": tool_args["work_dir"], "output_dir": "",
-                      "sphere_report_path": "", "detail": "recovered_by_work_dir"}
+                      "sphere_report_path": "",
+                      "result_dir": result_dir_of(found.get("result")),
+                      "detail": "recovered_by_work_dir"}
     finally:
         await client.close()
 
@@ -381,6 +383,8 @@ async def _submit_external(db, job: Job, work_dir: Path) -> None:
         "work_dir": parsed.get("work_dir") or tool_args["work_dir"],
         "output_dir": parsed.get("output_dir") or None,
         "sphere_report_path": parsed.get("sphere_report_path") or None,
+        "result_dir": parsed.get("result_dir") or None,      # 결과를 가져올 때의 기준
+        "model_source": parsed.get("model_source") or None,
         "model_path": str(model_path),
         "uploaded_path": up["file_path"],
         "uploaded_bytes": up.get("bytes"),
@@ -396,6 +400,11 @@ async def _submit_external(db, job: Job, work_dir: Path) -> None:
     await db.commit()
     logger.info("external job %s submitted → registry %s (slurm %s)",
                 job.id, parsed["registry_id"], parsed.get("job_id") or "-")
+    if parsed.get("model_source") == "existing":
+        # `work_dir` 이 잡마다 고유하니 늘 "copied" 여야 한다. existing 이면 받는 쪽이 올린 덱 대신
+        # 작업 폴더에 이미 있던 덱으로 돌았다 — 결과가 이 잡의 덱 것이 아닐 수 있다.
+        logger.warning("job %s: stcx 가 작업 폴더 %s 에 이미 있던 덱을 썼다(model_source=existing)"
+                       " — 올린 덱이 아닐 수 있다", job.id, tool_args["work_dir"])
 
     # ③ 반입 정리 — 업로드는 잡마다 따로 쌓이는데 잡은 그것을 **다시 보지 않는다.** 받는 쪽
     #   도구가 스테이징으로 복사하고(`prepare_model_workdir`), backend 에는 그 **사본**을

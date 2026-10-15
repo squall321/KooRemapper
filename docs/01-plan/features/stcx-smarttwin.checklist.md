@@ -131,6 +131,10 @@
 - [x] §7 제출이 `registry_id` 를 받으면(응답·`recovered_by_work_dir` 둘 다) 업로드를 지운다
       — `StcxUploader.delete` → `DELETE /api/v2/files/uploads/<upload_id>`. 잡을 **먼저 커밋**하고
       지우며, 실패는 경고뿐. `external_ref.upload_id` 를 남긴다. 시험 6항, **backend 전체 542 녹색**
-- [ ] §5 ★B(`model_source`)·★C(`job_status` 에 `slurm_job_ids`) — 받을지 사용자 답 대기
-- [ ] §4 `result_dir` 을 `external_ref` 에 남길지 — 사용자 답 대기
+- [x] §4 `result_dir` 을 `external_ref` 에 남긴다(사용자 결정 2026-10-15, pykoocae-53 경유).
+      복구 경로에서는 상태 응답의 `work_dir`(= registry 결과 폴더)에서 얻는다(`result_dir_of`)
+- [x] §5 ★B — `model_source` 를 `external_ref` 에 남기고, `"existing"` 이면 경고(잡은 그대로)
+- [x] §5 ★C — 받는 쪽이 `job_status` 에 `slurm_job_ids` 를 실었다(dev 반영). **판정은 그대로**
+      `get_job_details` 를 함께 부른다 — 운영 반영 확인 전에 떼면 종료 판정이 깨진다. 주석만 고쳤다
+- [ ] ★C 운영 반영 확인 뒤 `get_job_details` 호출을 뗄지 결정
 - [ ] 라이브 제출 — 여전히 안 돌았다

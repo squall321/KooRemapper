@@ -151,3 +151,17 @@ PAT·터널·stcx 등재가 서버 쪽에서 끝나야 한다. 그때까지 이 
 그 사이 워커가 죽으면 stcx 에서는 돌고 DynaForge 에는 흔적이 없는 잡이 된다.
 삭제 API 는 init·chunk·complete 와 같은 데코레이터(`jwt_required`·`permission_required('dashboard')`)
 라 업로드가 되는 신원이면 지우기도 된다. 이미 지운 것을 다시 지워도 200 이다(상태만 `cancelled`).
+
+### §5 반영 — ★C 는 받기만 하고 판정은 안 바꿨다 (2026-10-15)
+
+받는 쪽이 ★B·★C 를 넣었다(SmartTwinCluster `bffd4e50`). `result_dir` 기록은 사용자 결정이다.
+이 결정은 pykoocae-53 세션을 거쳐 전해 받았다.
+
+★C 를 쓰면 폴링 한 번에 `get_job_details` 호출 하나를 덜 수 있다. 그래도 지금은 떼지 않았다.
+새 칸은 **dev 에만** 반영됐다. 운영이 옛 `job_status` 인 채로 우리가 그 칸에 기대면 id 목록이
+비어 보이고, 잡은 `no_slurm_ids_yet` 로 영영 "active" 에 머문다.
+같이 불러도 깨지지 않는다고 받는 쪽이 말했으니 두 번 부르는 값이 더 싸다.
+
+복구 경로(`recovered_by_work_dir`)에는 제출 응답이 없으므로 `result_dir` 을 **상태 응답의
+`work_dir`** 에서 얻는다. 그 칸은 우리가 준 스테이징이 아니라 registry 의 결과 폴더다(받는 쪽 `b1274d04`
+이후). 이름이 같아 헷갈리기 쉬운 자리라 시험 픽스처도 그 값으로 바꿨다.

@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import pytest
 
 from app.runner.stcx_client import (parse_status, parse_submit, registry_id_of,
-                                    slurm_ids_of, upload_name)
+                                    result_dir_of, slurm_ids_of, upload_name)
 
 # ── 실제 모양 ──────────────────────────────────────────────────────────────
 
@@ -76,6 +76,18 @@ def test_parse_submit_reads_the_real_success_envelope():
     assert r["job_id"] == "924"
     assert r["work_dir"] == "/data/koopark/df/01JABC"
     assert r["sphere_report_path"].endswith("sphere_report.html")
+
+
+def test_parse_submit_carries_the_result_dir_and_the_model_source():
+    """1.1.2 부터 — `result_dir` 은 실제 결과 폴더, `model_source` 는 덱이 어디서 왔나."""
+    body = {**_SUBMIT_BODY, "result_dir": "/data/single/admin/Fullangle_Fib162_924",
+            "model_source": "copied"}
+    r = parse_submit(_envelope(body))
+    assert r["result_dir"] == "/data/single/admin/Fullangle_Fib162_924"
+    assert r["model_source"] == "copied"
+    # 옛 응답(칸 없음)도 성공이다 — 칸은 더해졌을 뿐이다.
+    old = parse_submit(_envelope(_SUBMIT_BODY))
+    assert old["ok"] and old["result_dir"] == "" and old["model_source"] == ""
 
 
 def test_a_script_failure_is_not_a_success():
@@ -209,6 +221,12 @@ def test_registry_id_comes_from_the_job_id_field_of_the_status_reply():
     """⚠ 상태 응답의 `job_id` 는 **레지스트리 행 id** 다 — 제출 응답의 것(slurm)과 다르다."""
     assert registry_id_of(_status({})) == 12
     assert registry_id_of({"ok": False, "error": "x"}) is None
+
+
+def test_the_result_dir_comes_from_the_work_dir_of_the_status_reply():
+    """상태 응답의 `work_dir` 은 registry 의 것 = 결과 폴더다(우리가 준 스테이징이 아니다)."""
+    assert result_dir_of(_status({})) == "/w"
+    assert result_dir_of({"ok": False, "error": "x"}) == ""
 
 
 # ── 반입 이름 ──────────────────────────────────────────────────────────────
