@@ -165,3 +165,5 @@ PAT·터널·stcx 등재가 서버 쪽에서 끝나야 한다. 그때까지 이 
 복구 경로(`recovered_by_work_dir`)에는 제출 응답이 없으므로 `result_dir` 을 **상태 응답의
 `work_dir`** 에서 얻는다. 그 칸은 우리가 준 스테이징이 아니라 registry 의 결과 폴더다(받는 쪽 `b1274d04`
 이후). 이름이 같아 헷갈리기 쉬운 자리라 시험 픽스처도 그 값으로 바꿨다.
+받는 쪽도 이 계약을 시험으로 고정했다(`test_owner_gates.py`, SmartTwinCluster `d42a17e7`).
+바꿀 일이 생기면 먼저 알리기로 했다.
