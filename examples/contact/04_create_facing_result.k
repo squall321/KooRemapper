@@ -70,20 +70,20 @@ Slave_PID1_facing
 $#     sid       da1       da2       da3       da4
         11  0.000000  0.000000  0.000000  0.000000
 $#      n1        n2        n3        n4
-         1         2         3         4
+         1         4         3         2
          1         2         6         5
          2         3         7         6
-         4         3         7         8
+         4         8         7         3
          5         6         7         8
 *SET_SEGMENT_TITLE
 Master_PID2_facing
 $#     sid       da1       da2       da3       da4
         12  0.000000  0.000000  0.000000  0.000000
 $#      n1        n2        n3        n4
-         2         3         7         6
-         2         9        10         3
+         2         6         7         3
+         2         3        10         9
          2         9        11         6
-         3        10        12         7
+         3         7        12        10
          6        11        12         7
 *CONTACT_TIED_SURFACE_TO_SURFACE_ID
          3Contact_0

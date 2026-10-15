@@ -70,20 +70,20 @@ Auto_S_Part_1_Left
 $#     sid       da1       da2       da3       da4
         11  0.000000  0.000000  0.000000  0.000000
 $#      n1        n2        n3        n4
-         1         2         3         4
+         1         4         3         2
          1         2         6         5
          2         3         7         6
-         4         3         7         8
+         4         8         7         3
          5         6         7         8
 *SET_SEGMENT_TITLE
 Auto_M_Part_2_Center
 $#     sid       da1       da2       da3       da4
         12  0.000000  0.000000  0.000000  0.000000
 $#      n1        n2        n3        n4
-         2         3         7         6
-         2         9        10         3
+         2         6         7         3
+         2         3        10         9
          2         9        11         6
-         3        10        12         7
+         3         7        12        10
          6        11        12         7
 *CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_ID
          3Auto_Part_1_Left_Part_2_Center
@@ -104,9 +104,9 @@ Auto_S_Part_2_Center
 $#     sid       da1       da2       da3       da4
         13  0.000000  0.000000  0.000000  0.000000
 $#      n1        n2        n3        n4
-         2         9        10         3
+         2         3        10         9
          2         9        11         6
-         3        10        12         7
+         3         7        12        10
          6        11        12         7
          9        10        12        11
 *SET_SEGMENT_TITLE
@@ -114,10 +114,10 @@ Auto_M_Part_3_Right
 $#     sid       da1       da2       da3       da4
         14  0.000000  0.000000  0.000000  0.000000
 $#      n1        n2        n3        n4
-         9        10        12        11
-         9        13        14        10
+         9        11        12        10
+         9        10        14        13
          9        13        15        11
-        10        14        16        12
+        10        12        16        14
         11        15        16        12
 *CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_ID
          4Auto_Part_2_Center_Part_3_Right
