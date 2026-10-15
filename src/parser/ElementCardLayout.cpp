@@ -120,6 +120,17 @@ int deckFieldWidth(const std::vector<std::string>& lines) {
     return 8;
 }
 
+bool hasKeywordCard(const std::vector<std::string>& lines) {
+    for (const auto& l : lines) {
+        size_t s = l.find_first_not_of(" \t");
+        if (s == std::string::npos || l[s] != '*') continue;
+        std::string up = l.substr(s, 8);
+        for (auto& ch : up) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+        if (up == "*KEYWORD") return true;
+    }
+    return false;
+}
+
 int keywordFieldWidth(const std::string& keywordLine, int deckFw) {
     bool i10 = false, lng = false, stdw = false;
     stripKeyword(keywordLine, &i10, &lng, &stdw);

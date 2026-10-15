@@ -4885,6 +4885,14 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
         return false;
     }
 
+    // ★원본에 `*KEYWORD` 가 없으면 맨 앞에 넣는다. 매뉴얼이 「*KEYWORD 가 **첫 카드**가
+    //   아니면 옛 structured 입력으로 읽는다」고 못박았다(Vol_I 18086-18087, 18566-18568).
+    //   그 덱은 해석에 바로 못 쓴다 — `squeeze` 가 예전에 걸렸던 모양 그대로다
+    //   (`squeeze_assemble.cpp:217` 주석). 있는 덱 **앞에** 끼우지 않는 이유는
+    //   `deckFieldWidth` 가 첫 `*KEYWORD` 에서 멈추기 때문이다 — 맨 `*KEYWORD` 를 앞세우면
+    //   `I10=Y` 덱이 8칸으로 읽힌다. 없는 덱은 지금도 8 이라 폭은 안 움직인다.
+    if (!hasKeywordCard(rawLines_)) output << "*KEYWORD\n";
+
     for (size_t i = 0; i < rawLines_.size(); ++i) {
         const std::string& line = rawLines_[i];
         std::string trimmed = line;

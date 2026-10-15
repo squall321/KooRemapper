@@ -60,6 +60,12 @@ int keywordCardDeckWidth(const std::string& keywordLine);
 // 덱 전체의 기본 정수 칸 폭(*KEYWORD 가 없거나 말하지 않으면 8).
 int deckFieldWidth(const std::vector<std::string>& lines);
 
+// 덱에 `*KEYWORD` 카드가 있나. 매뉴얼은 「*KEYWORD 가 **첫 카드**가 아니면 옛 structured
+// 입력으로 읽는다」고 못박았다(Vol_I 18086-18087, 18566-18568) — 쓰는 쪽은 없으면 넣어야
+// 하고, **있으면 앞세우면 안 된다**(deckFieldWidth 가 첫 것에서 멈추므로 i10 덱이 8칸으로
+// 읽힌다). 그 판정을 세 쓰기 경로가 따로 베끼지 않도록 여기 하나로 둔다.
+bool hasKeywordCard(const std::vector<std::string>& lines);
+
 // 키워드 줄 접미사('%'=10, '+'=20, '-'=8)가 덱 기본값을 덮어쓴다(19342-19360).
 int keywordFieldWidth(const std::string& keywordLine, int deckFw);
 

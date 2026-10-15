@@ -123,6 +123,12 @@ bool KFileWriter::writeFileWithSource(const std::string& filename, const Mesh& m
     std::ostream& out = writer.stream();
 
     try {
+        // ★원본에 `*KEYWORD` 가 **없을 때만** 넣는다. 있는 덱 앞에 맨 `*KEYWORD` 를 끼우면
+        //   `deckFieldWidth` 가 **첫 번째** 것에서 멈추므로 `*KEYWORD I10=Y` 덱이 8칸으로
+        //   읽힌다 — 선언 10칸·본문 8칸이라는 cnrb2 의 그 결함을 쓰는 쪽에서 되살리는 꼴이다.
+        //   없는 덱은 지금도 8 이므로(`deckFieldWidth` 의 마지막 `return 8`) 폭은 안 움직인다.
+        //   `includeHeader_` 밖에 둔다 — 이건 머리말 장식이 아니라 **있어야 읽히는 카드**다.
+        if (!KooRemapper::hasKeywordCard(srcLines)) out << "*KEYWORD\n";
         if (includeHeader_) writeHeader(out);
 
         // Block-skipping state machine. When we enter a NODE or ELEMENT_SOLID
@@ -243,6 +249,11 @@ bool KFileWriter::writeFile(const std::string& filename, const Mesh& mesh,
     std::ostream& file = writer.stream();
 
     try {
+        // ★이 경로는 메시 하나로 **덱 전체를 지어낸다** — 원본이 없으니 `*KEYWORD` 도
+        //   아무도 안 준다. 빠지면 LS-DYNA 가 키워드 덱으로 안 읽는다.
+        //   `includeHeader_` 밖에 둔다(위와 같은 이유). DynainWriter·IGA·surface_extract 와
+        //   같은 차례 — 카드가 먼저, `$` 머리말이 뒤다.
+        file << "*KEYWORD\n";
         if (includeHeader_) {
             writeHeader(file);
         }

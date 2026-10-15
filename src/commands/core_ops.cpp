@@ -10,6 +10,7 @@
 #include "core/ShellMesh.h"
 #include "parser/KFileReader.h"
 #include "parser/KFileWriter.h"
+#include "parser/ElementCardLayout.h"   // hasKeywordCard — 첫 카드 판정 정본
 #include "parser/DynainWriter.h"
 #include "parser/ShellReader.h"
 #include "mapper/MeshRemapper.h"
@@ -1300,6 +1301,12 @@ int runPrestress(const std::string& refFile, const std::string& defFile,
             return 1;
         }
         std::ostream& dstFile = dst_w.stream();
+
+        // ★변형 메시에 `*KEYWORD` 가 없으면 넣는다. 이 동반 `.k` 는 사용자가 LS-DYNA 에
+        //   **그대로 던지는 덱**이다(dynain 을 *INCLUDE 한다) — 첫 카드가 아니면 옛
+        //   structured 입력으로 읽힌다(Vol_I 18086-18087). 있으면 앞세우지 않는다:
+        //   `deckFieldWidth` 가 첫 `*KEYWORD` 에서 멈추므로 i10 덱이 8칸으로 읽힌다.
+        if (!KooRemapper::hasKeywordCard(defLines)) dstFile << "*KEYWORD\n";
 
         // Copy original content, inserting *INCLUDE before *END.
         bool endFound = false;
