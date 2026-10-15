@@ -79,3 +79,19 @@ def test_build_record_without_doe():
     assert "doe" not in rec["content"]["eng_meta"]
     # doe_strategy 는 inputs 에 항상 보존.
     assert rec["content"]["inputs"]["doe_strategy"] == "cuboid_26"
+
+
+def test_build_record_attaches_a_registered_hub_expert():
+    """등재 레코드는 허브에 등록된 전문가 밑으로 간다(HWAX 요청서 10-15 K6-1 나).
+
+    예전 키 dynaforge-report 는 허브에 등록된 적이 없어, 적재가 이름=키·설명 0자의 빈 전문가를
+    말없이 만들었다(2026-08-15 스모크 등재). 이 등재는 낙하 해석이라 있는 전문가로 돌린다.
+    """
+    r, cases = _report()
+    rec = datahub.build_record(
+        r, cases, sim_id="SIM-MX-CAE-2026-0000000003",
+        project="P", stage="dv1", variation=None, doe=None, unit="mm-t-s",
+        title=None, html_name="r.html",
+    )
+    assert rec["agents"] == ["sim-drop-impact"]
+    assert datahub.HUB_AGENT == "sim-drop-impact"

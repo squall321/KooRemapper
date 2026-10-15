@@ -16,7 +16,12 @@ DynaForge 는 "여러 시뮬레이션의 forge" 로 확장된다(툴마다 forge
 - `eng_meta.doe` 는 **DoeRef 규격**만 허용: `study`(필수)·`case`·`factors`(dict).
   DOE 전략 같은 부가정보는 `factors` 에 넣는다(예 `{"strategy":"cuboid_26"}`). study 가
   없으면 `doe` 자체를 만들지 않는다(빈 doe 금지).
-- `source_system` = forge 이름(현재 "DynaForge"), `agents` = 등재 주체.
+- `source_system` = forge 이름(현재 "DynaForge").
+- `agents` = 레코드를 붙일 **허브 전문가 키 — 허브에 등록된 것**(낙하 forge 는 `sim-drop-impact`,
+  `datahub.py` `HUB_AGENT`). 등재 주체 이름(`<forge>-report`)을 쓰지 않는다. 허브에 없는 키를 주면
+  적재가 이름=키·설명 0자의 빈 전문가를 말없이 만들었고(2026-08-15 `dynaforge-report`), 허브가
+  strict(2026-10-15)로 바뀐 뒤로는 등재가 거절된다. 새 forge 는 붙일 전문가를 허브에 먼저 등록하거나
+  있는 전문가를 고른다.
 - 첨부 규약: 원본 리포트 HTML 은 `kind="document"`, `file_path="{record_id}/{파일명}"`,
   zip 번들 안에 같은 경로로 담는다.
 
@@ -33,7 +38,7 @@ DynaForge 는 "여러 시뮬레이션의 forge" 로 확장된다(툴마다 forge
   "subject_keywords": ["<파트명>", ...],
   "related_record_ids": [],
   "source_system": "<forge>",
-  "agents": ["<forge>-report"],
+  "agents": ["<허브에 등록된 전문가 키>"],
   "content": {
     "solver": "LS-DYNA",
     "inputs": { "sim_domain": "...", "report_kind": "...", "generator": "...",
@@ -63,4 +68,5 @@ record.id 는 클라이언트가 생성한다(서버 자동부여 아님). seq �
 ## 새 forge 추가 절차
 1. 파서에 새 `sim_domain`/`report_kind` 노멀라이저 추가(공통 NormalizedStudy 반환).
 2. 등재 시 위 판별자 3곳만 채우면 이 양식 그대로 재사용 — 스키마 변경 불필요.
+   `agents` 에 붙일 허브 전문가는 허브에 등록된 키여야 한다(위 원칙).
 3. 검색: `tags=sim:<domain>` 또는 `kind:<report_kind>` 로 도메인 슬라이스 질의.

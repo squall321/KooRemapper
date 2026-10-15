@@ -26,6 +26,10 @@ from app.models import ImpactCase, ImpactReport
 
 # 현재 이 파서 계열이 다루는 시뮬레이션 도메인. 새 도메인 추가 시 여기 확장.
 SIM_DOMAIN = "drop_impact"
+# 등재 레코드를 붙일 AIDataHub 전문가 — 허브에 등록된 키여야 한다. 없는 키를 주면 적재가
+# 이름=키·설명 0자의 빈 전문가를 말없이 만든다(dynaforge-report 가 2026-08-15 그렇게 생겼다).
+# 허브가 strict 로 바뀐 뒤(STRICT_AGENT_VALIDATION, 2026-10-15)에는 없는 키면 등재가 거절된다.
+HUB_AGENT = "sim-drop-impact"
 _TEAM, _GROUP = "MX", "CAE"
 # 개발단계 코드 분해 규칙(kr2datahub 와 동일) — dv/pv 는 차수 필수.
 _STAGE_RE = re.compile(r"(pre|dv|pv|pra|mp)([123r])?$")
@@ -157,7 +161,7 @@ def build_record(
         "subject_keywords": list(dict.fromkeys(kw))[:50],
         "related_record_ids": [],
         "source_system": "DynaForge",
-        "agents": ["dynaforge-report"],
+        "agents": [HUB_AGENT],
         "content": {
             "solver": "LS-DYNA",
             # sim_domain·report_kind 은 SimContent 정의 필드가 아니라 정규화에서 떨어지므로
