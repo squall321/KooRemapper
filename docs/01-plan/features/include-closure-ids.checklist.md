@@ -18,18 +18,34 @@
       `battery_study/debug_archive/case01_run70_normal_term/` — 보관하면서 `02_mesh` 를 **뺀** 폴더라
       LS-DYNA 도 못 돈다. 리더가 옳게 말한 것이다.
 
-## U2 `UsedIds`
-- [ ] SET 한 통 · CONTACT CID — 닫힘 전체 최대값
-- [ ] contact 기존 스캐너와 **추적 덱 전수 차분 0**(같은 덱에서 같은 최대값)
-
-## U3 `IdAllocator`
-- [ ] 빈 대역표 → `max+1` · `issue(ns)` 가 커서를 올린다 · `verify`
-- [ ] 단위 시험
+## U2 `UsedIds` · U3 `IdAllocator` (한 헤더 `include/parser/IdAllocator.h`)
+- [x] SET 한 통 · CONTACT CID — `raise(ns, v)` 로 닫힘 전체 최대값을 올린다
+- [x] ★**스캐너는 발행자 것을 그대로 쓴다**(계획을 고쳤다). 공용 스캐너로 바꾸면 첫 채택에서 번호가
+      움직일 수 있다 — 그래서 contact 가 자기 `ct_parseSets`·`ct_findMaxContactId` 로 주 덱과
+      **인클루드 파일마다** 세어 올린다. 스캐너를 하나로 모으는 것은 다음 단계(발행자마다 차분 0 증명)
+- [x] `noteClosure` — 못 읽은 이름 · 따라가지 않은 카드 · 깊이 상한을 `blind` 에 사람이 읽을 문장으로
+- [x] 대역표·`verify` 는 **넣지 않았다**(계획을 고쳤다) — 대역표는 값도 소비자도 없고(P1-4 스코프
+      대기), 사후 중복 검사는 `info` 의 `ReferenceIntegrity` 가 이미 한다
+- [x] 단위 시험 5개(`tests/test_IdAllocator.cpp`) — 88 → **93**
 
 ## U4 contact 첫 채택
-- [ ] 커서 둘을 `issue` 로 — 동작 불변
-- [ ] contact 골든 10장 **바이트 동일**
-- [ ] 새 픽스처 — 인클루드에 SET 5 가 있으면 6 을 낸다(고치기 전엔 5 — 재현 먼저)
+- [x] **재현 먼저** — `examples/contact/model.k`(세트 최대 10)에 인클루드로 `*SET_SEGMENT 11` 을 붙이면
+      새 `*SET_SEGMENT` 를 **11**·12 로 냈다. 펼친 덱을 `info` 로 보면 「SID 11 가 line 70 과
+      겹칩니다」. ⚠ 처음엔 `*SET_PART 11` 로 재현했는데 그것은 **종류가 달라 합법**이었다 — 다시 했다
+- [x] 커서 둘(`nextSetId` 17곳 · `nextContactId` 3곳)을 `ids.issue` 로. 경고만 하던 `warnUnread` 를
+      「닫힘을 읽고, 못 본 자리만 이름으로 말한다」로 바꿨다
+- [x] ★**바이트 동일 — 옛 대 새 바이너리 차분으로 증명했다.** contact 예제 yaml 전부를 두 바이너리로
+      돌려 산출 **15장 15장 동일**(날짜 줄만 가림)
+- [x] ★**「골든 10장이 관문」은 사실이 아니었다.** 커밋된 `examples/contact/*_result.k` 13장 중
+      **10장이 이미 지금 산출과 다르다** — 옛 바이너리도 똑같이 다르다. 차이는 세그먼트 절점 순서
+      (`1 2 3 4` → `1 4 3 2`)로, 2026-10-05 `f1b3709` 가 면 순회 방향을 뒤집었을 때 다시 만들지
+      않은 것이다(ctest 를 10일 빨갛게 한 그 변경). 그리고 그 골든을 맞대는 시험이 **없다** — 회귀가
+      초록이었던 이유다. → 골든 정리는 별 커밋으로
+- [x] 회귀 `tools/regress/test_contact_include_ids.py` — A 인클루드의 SID 11·CID 3 위로(12·13 · 4)
+      · B 펼친 덱에 같은 종류 SID 중복 0 · C 인클루드 없으면 번호 그대로 · D 못 읽은 인클루드를 이름으로
+      · E `_TRANSFORM` 은 따라가지 않았다고. **13항.** ★**옛 바이너리에서 FAIL 6**(A 넷 · D · E) —
+      옛 판은 **CID 3 도** 겹쳐 냈다. C 는 양쪽 다 초록(바뀐 것은 인클루드가 있을 때뿐)
+- [x] 관문 — ctest 93/93 · tools/regress **75/75** · help ALL PASS
 
 ## U5 주 덱 `--strict`
 - [ ] `checkSetReferences` 를 닫힘 위에서

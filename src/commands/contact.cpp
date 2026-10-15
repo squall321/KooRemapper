@@ -1,5 +1,6 @@
 #include "parser/DeckWriter.h"
-#include "parser/IncludeScan.h"
+#include "parser/IdAllocator.h"
+#include "parser/IncludeClosure.h"
 #include "contact.h"
 #include "contact_helpers.h"
 #include "kw_util.h"
@@ -444,8 +445,14 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
         while (std::getline(mf, ln)) lines.push_back(ln);
     }
 
-    KooRemapper::include_scan::warnUnread(console, lines,
-        "*SET_SEGMENT ID 를 이 덱 안에서만 세었습니다 — 인클루드에 있는 세트와 겹쳐 발급할 수 있습니다");
+    // 인클루드 닫힘을 읽는다 — 새 세트·접촉 번호를 **그 안의 최대값 위로** 내려고.
+    // ⚠ 예전에는 이 덱 하나만 세고 경고만 했다. 그래서 인클루드에 `*SET_SEGMENT 11` 이 있는 덱에
+    //   새 `*SET_SEGMENT 11` 을 냈다(재현 — 같은 종류의 SID 가 둘이면 LS-DYNA 가 키워드 단계에서
+    //   멈춘다). 못 읽은 인클루드가 있으면 **그 자리만** 말한다 — 그 안의 번호는 못 봤다.
+    const auto inclClosure = KooRemapper::include_closure::read(modelPath, lines);
+    if (!inclClosure.files.empty())
+        console.info("[contact] 인클루드 " + std::to_string(inclClosure.files.size()) +
+                     "개를 읽어 세트·접촉 번호를 그 위로 냅니다");
 
     // 3. Optionally load Mesh (for surface extraction)
     bool needMesh = false;
@@ -479,10 +486,22 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
     auto contacts = ct_parseContacts(lines);
     auto sets     = ct_parseSets(lines);
     ct_resolveSetRanges(sets, mesh);   // `_GENERATE` 범위를 덱에 정의된 ID 로 좁힌다
-    int nextSetId = ct_findMaxSetId(sets) + 1;
-    // 새 접촉의 CID 는 덱의 기존 `_ID` CID **위로** 발행한다. 같은 CID 가 둘이면 LS-DYNA 가
+    // 새 번호는 한 길(`IdAllocator`)로 낸다. 최대값은 **지금까지와 같은 스캐너**로 센다 — 주 덱은
+    // 그대로이고(인클루드가 없으면 번호가 한 글자도 안 바뀐다) 인클루드 파일마다 같은 스캐너를 더
+    // 돌려 올린다. SET 은 모든 종류를 한 통으로 센다(이 op 의 규약 — 겹칠 수 없게 보수적으로).
+    // 새 접촉의 CID 는 덱의 기존 `_ID` CID **위로** 낸다. 같은 CID 가 둘이면 LS-DYNA 가
     // 키워드 단계에서 멈춘다 — 이 리포의 ID 규율대로 발행 전에 최대값을 본다.
-    int nextContactId = ct_findMaxContactId(lines) + 1;
+    KooRemapper::ids::UsedIds usedIds;
+    usedIds.raise(KooRemapper::ids::Ns::Set, ct_findMaxSetId(sets));
+    usedIds.raise(KooRemapper::ids::Ns::Contact, ct_findMaxContactId(lines));
+    for (const auto& f : inclClosure.files) {
+        usedIds.raise(KooRemapper::ids::Ns::Set, ct_findMaxSetId(ct_parseSets(f.lines)));
+        usedIds.raise(KooRemapper::ids::Ns::Contact, ct_findMaxContactId(f.lines));
+    }
+    usedIds.noteClosure(inclClosure);
+    for (const auto& b : usedIds.blind)
+        console.warning("[contact] 못 본 인클루드가 있어 그 안의 세트·접촉 번호와 겹쳐 낼 수 있습니다 — " + b);
+    KooRemapper::ids::IdAllocator ids(usedIds);
 
     console.println("[contact] Model: " + modelFile + " (" + std::to_string(lines.size()) + " lines)");
     console.println("[contact] Found " + std::to_string(contacts.size()) + " contacts, " +
@@ -552,11 +571,11 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
                         for (int idx : sIdxSet) sFaces.push_back(slaveFacesAll[idx]);
                         for (int idx : mIdxSet) mFaces.push_back(masterFacesAll[idx]);
 
-                        ssid = nextSetId++;
+                        ssid = ids.issue(KooRemapper::ids::Ns::Set);
                         insertBlocks.push_back(ct_generateSetSegment(ssid, sFaces,
                             "Slave_PID" + std::to_string(act.slave.pid) + "_facing"));
                         sstyp = 0;
-                        msid = nextSetId++;
+                        msid = ids.issue(KooRemapper::ids::Ns::Set);
                         insertBlocks.push_back(ct_generateSetSegment(msid, mFaces,
                             "Master_PID" + std::to_string(act.master.pid) + "_facing"));
                         mstyp = 0;
@@ -575,7 +594,7 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
                     console.warning("[contact] No surface found for slave PID " +
                                 std::to_string(act.slave.pid));
                 } else {
-                    ssid = nextSetId++;
+                    ssid = ids.issue(KooRemapper::ids::Ns::Set);
                     insertBlocks.push_back(ct_generateSetSegment(ssid, faces,
                         "Slave_PID" + std::to_string(act.slave.pid)));
                     sstyp = 0;
@@ -585,7 +604,7 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
                 }
             } else if (!act.slave.pids.empty()) {
                 // Multiple PIDs → SET_PART
-                ssid = nextSetId++;
+                ssid = ids.issue(KooRemapper::ids::Ns::Set);
                 insertBlocks.push_back(ct_generateSetPart(ssid, act.slave.pids, "Slave_parts"));
                 sstyp = 2;
                 console.println("[contact] Created SET_PART " + std::to_string(ssid) +
@@ -603,7 +622,7 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
                     console.warning("[contact] No surface found for master PID " +
                                 std::to_string(act.master.pid));
                 } else {
-                    msid = nextSetId++;
+                    msid = ids.issue(KooRemapper::ids::Ns::Set);
                     insertBlocks.push_back(ct_generateSetSegment(msid, faces,
                         "Master_PID" + std::to_string(act.master.pid)));
                     mstyp = 0;
@@ -612,7 +631,7 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
                                   std::to_string(act.master.pid));
                 }
             } else if (!act.master.pids.empty()) {
-                msid = nextSetId++;
+                msid = ids.issue(KooRemapper::ids::Ns::Set);
                 insertBlocks.push_back(ct_generateSetPart(msid, act.master.pids, "Master_parts"));
                 mstyp = 2;
                 console.println("[contact] Created SET_PART " + std::to_string(msid) +
@@ -628,7 +647,7 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
             if (isSingle) {
                 // Slave only — if pids given, use SET_PART
                 if (!act.slave.pids.empty() && sstyp != 2) {
-                    ssid = nextSetId++;
+                    ssid = ids.issue(KooRemapper::ids::Ns::Set);
                     insertBlocks.push_back(ct_generateSetPart(ssid, act.slave.pids, "SingleSurf_parts"));
                     sstyp = 2;
                 }
@@ -642,7 +661,7 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
             newDef.sstyp = sstyp; newDef.mstyp = mstyp;
             newDef.title = act.title.empty() ? ("Contact_" + std::to_string(ai)) : act.title;
             // 제목이 있으면 `_ID` 카드로 나가므로 CID 가 필요하다(`ct_generateContact` 참조).
-            newDef.cid = nextContactId++;
+            newDef.cid = ids.issue(KooRemapper::ids::Ns::Contact);
             // Card 1 optional
             if (act.sboxid >= 0) newDef.sboxid = act.sboxid;
             if (act.mboxid >= 0) newDef.mboxid = act.mboxid;
@@ -841,10 +860,10 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
                         for (int idx : sIdxSet) sFaces.push_back(slaveFacesAll[idx]);
                         for (int idx : mIdxSet) mFaces.push_back(masterFacesAll[idx]);
 
-                        int newSsid = nextSetId++;
+                        int newSsid = ids.issue(KooRemapper::ids::Ns::Set);
                         insertBlocks.push_back(ct_generateSetSegment(newSsid, sFaces,
                             "Slave_facing"));
-                        int newMsid = nextSetId++;
+                        int newMsid = ids.issue(KooRemapper::ids::Ns::Set);
                         insertBlocks.push_back(ct_generateSetSegment(newMsid, mFaces,
                             "Master_facing"));
                         ct_modifyContactCard1(lines, ct, newSsid, newMsid, 0, 0);
@@ -867,7 +886,7 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
                 if (faces.empty()) {
                     console.warning("[contact] No surface for slave PID " + std::to_string(ct.ssid));
                 } else {
-                    int newSid = nextSetId++;
+                    int newSid = ids.issue(KooRemapper::ids::Ns::Set);
                     insertBlocks.push_back(ct_generateSetSegment(newSid, faces,
                         "Slave_PID" + std::to_string(ct.ssid)));
                     ct_modifyContactCard1(lines, ct, newSid, ct.msid, 0, ct.mstyp);
@@ -890,7 +909,7 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
                             allFaces.insert(allFaces.end(), faces.begin(), faces.end());
                         }
                         if (!allFaces.empty()) {
-                            int newSid = nextSetId++;
+                            int newSid = ids.issue(KooRemapper::ids::Ns::Set);
                             insertBlocks.push_back(ct_generateSetSegment(newSid, allFaces,
                                 "Slave_expanded"));
                             ct_modifyContactCard1(lines, ct, newSid, ct.msid, 0, ct.mstyp);
@@ -913,7 +932,7 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
                 if (faces.empty()) {
                     console.warning("[contact] No surface for master PID " + std::to_string(ct.msid));
                 } else {
-                    int newSid = nextSetId++;
+                    int newSid = ids.issue(KooRemapper::ids::Ns::Set);
                     insertBlocks.push_back(ct_generateSetSegment(newSid, faces,
                         "Master_PID" + std::to_string(ct.msid)));
                     ct_modifyContactCard1(lines, ct, ct.ssid, newSid, ct.sstyp, 0);
@@ -934,7 +953,7 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
                             allFaces.insert(allFaces.end(), faces.begin(), faces.end());
                         }
                         if (!allFaces.empty()) {
-                            int newSid = nextSetId++;
+                            int newSid = ids.issue(KooRemapper::ids::Ns::Set);
                             insertBlocks.push_back(ct_generateSetSegment(newSid, allFaces,
                                 "Master_expanded"));
                             ct_modifyContactCard1(lines, ct, ct.ssid, newSid, ct.sstyp, 0);
@@ -1283,8 +1302,8 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
                         " segments, " + gapBuf);
 
                     // Create SET_SEGMENTs
-                    int slaveSid = nextSetId++;
-                    int masterSid = nextSetId++;
+                    int slaveSid = ids.issue(KooRemapper::ids::Ns::Set);
+                    int masterSid = ids.issue(KooRemapper::ids::Ns::Set);
                     insertBlocks.push_back(ct_generateSetSegment(slaveSid,
                         facesA,
                         prefix + "_S_" + nameA));
@@ -1299,7 +1318,7 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
                         def.fullKeyword = "*CONTACT_" + preset.keyword;
                         def.hasTitle = true;
                         def.title = prefix + "_" + nameA + "_" + nameB;
-                        def.cid = nextContactId++;   // `_ID` 카드로 나간다
+                        def.cid = ids.issue(KooRemapper::ids::Ns::Contact);   // `_ID` 카드로 나간다
                         def.ssid = slaveSid;
                         def.msid = preset.needMasterSide ? masterSid : 0;
                         def.sstyp = 0; // SET_SEGMENT
@@ -1494,8 +1513,8 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
                     std::to_string(sFaces.size()) + " slave / " +
                     std::to_string(mFaces.size()) + " master segments, " + gapBuf);
 
-                int slaveSid = nextSetId++;
-                int masterSid = nextSetId++;
+                int slaveSid = ids.issue(KooRemapper::ids::Ns::Set);
+                int masterSid = ids.issue(KooRemapper::ids::Ns::Set);
                 insertBlocks.push_back(ct_generateSetSegment(slaveSid, sFaces,
                     prefix + "_Slave"));
                 insertBlocks.push_back(ct_generateSetSegment(masterSid, mFaces,
@@ -1509,7 +1528,7 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
                     def.hasTitle = true;
                     def.title = prefix + "_PID" + std::to_string(slavePid) +
                                 "_PID" + std::to_string(masterPid);
-                    def.cid = nextContactId++;   // `_ID` 카드로 나간다
+                    def.cid = ids.issue(KooRemapper::ids::Ns::Contact);   // `_ID` 카드로 나간다
                     def.ssid = slaveSid;
                     def.msid = masterSid;
                     def.sstyp = 0; def.mstyp = 0;
