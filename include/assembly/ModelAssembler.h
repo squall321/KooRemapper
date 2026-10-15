@@ -156,6 +156,7 @@ private:
     // Base model
     Mesh baseMesh_;
     std::vector<std::string> rawLines_;
+    std::string baseModelPath_;   // 인클루드 닫힘을 주 덱 폴더 기준으로 읽으려고(loadBaseModel)
     // 입력 덱의 개행. 읽을 때 기억했다가 최종 출력에서 되붙인다 — 리더가 CR 을 떼므로
     // 이것이 없으면 CRLF 덱이 조용히 LF 로 바뀐다(구조 카운트는 전부 정상이라 안 보인다).
     DeckNewline deckNewline_ = DeckNewline::LF;

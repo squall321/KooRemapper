@@ -10,6 +10,7 @@
 #include "assembly/ShellCurvature.h"
 #include "assembly/WarpageGrid.h"
 #include "parser/KFileReader.h"
+#include "parser/IdAllocator.h"   // 번호를 한 길로 — 인클루드 닫힘까지 본 최대값 위로
 #include "parser/ElementCardLayout.h"   // 요소 카드 줄 수 판정 — 리더와 쓰기가 같은 표를 쓴다
 #include "parser/ShellReader.h"
 #include "parser/DynainWriter.h"
@@ -43,6 +44,10 @@
 
 namespace KooRemapper {
 
+// 정의는 아래 익명 이름공간에 있다 — 한 번역 단위의 익명 이름공간은 하나라 여기 선언도 그 안에 둬야
+// 같은 함수를 가리킨다(밖에 두면 다른 함수가 되어 호출이 모호해진다).
+namespace { static int bc_findMaxSetNodeId(const std::vector<std::string>& rawLines); }
+
 bool ModelAssembler::loadBaseModel(const std::string& filename) {
     // 1. Parse with KFileReader for structural queries
     KFileReader reader;
@@ -55,6 +60,7 @@ bool ModelAssembler::loadBaseModel(const std::string& filename) {
 
     // 2. Read raw lines for text preservation
     rawLines_.clear();
+    baseModelPath_ = filename;
     std::ifstream file(filename);
     if (!file.is_open()) {
         errorMessage_ = "Cannot open base model for raw read: " + filename;
@@ -7931,13 +7937,31 @@ bool ModelAssembler::applyDisconnect(const DisconnectOperation& op) {
         }
         else {
             // MEFEM mode
-            int setIdBase = maxPartId_ + 1000;
+            //
+            // ★세트 번호. 이 op 의 관례 — `*SET_NODE_LIST` 를 **PID 최대 + 1000** 부터 낸다 — 는 바닥으로
+            //   남기되, 덱(과 인클루드)의 기존 `*SET_NODE` **위로** 올린다. 예전에는 SET 네임스페이스를
+            //   **전혀 안 봐서** 인라인 `*SET_NODE_LIST 1002` 가 있는 덱에 1002 를 또 냈다(재현 — `info` 가
+            //   「SID 1002 가 line 44 과 겹칩니다」). 같은 종류의 SID 가 둘이면 LS-DYNA 가 키워드 단계에서
+            //   멈춘다. 안 겹치는 덱에서는 번호가 한 글자도 안 바뀐다(바닥이 그대로라서).
+            //   입도는 **SET_NODE 만**이다 — 매뉴얼상 SET 네임스페이스는 종류별이라 다른 종류의 큰 번호에
+            //   끌려갈 이유가 없다.
+            ids::UsedIds setUse;
+            setUse.raise(ids::Ns::SetNode, maxPartId_ + 999);           // 관례의 바닥 — 그 아래는 쓴 것으로 친다
+            setUse.raise(ids::Ns::SetNode, bc_findMaxSetNodeId(rawLines_));
+            const auto setClosure = include_closure::read(baseModelPath_, rawLines_);
+            for (const auto& f : setClosure.files)
+                setUse.raise(ids::Ns::SetNode, bc_findMaxSetNodeId(f.lines));
+            setUse.noteClosure(setClosure);
+            for (const auto& b : setUse.blind)
+                infoMessages.push_back("  [WARN] Disconnect (mefem): 못 본 인클루드가 있어 그 안의 "
+                                       "*SET_NODE 번호와 겹쳐 낼 수 있습니다 — " + b);
+            ids::IdAllocator setIds(setUse);
             int constraintCount = 0;
             std::ostringstream kwBlock;
 
             for (const auto& [nid, pids] : nodeToPartIds) {
                 if (pids.size() <= 1) continue;
-                int setId = setIdBase + constraintCount;
+                int setId = setIds.issue(ids::Ns::SetNode);
                 kwBlock << "*SET_NODE_LIST\n";
                 kwBlock << "$#     sid\n";
                 kwBlock << std::setw(10) << setId << "\n";

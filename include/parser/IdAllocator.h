@@ -31,9 +31,15 @@ namespace ids {
 //     네임스페이스는 종류별이지만 한 통이 더 보수적이고(겹칠 수 없다), 입도를 바꾸면 번호가 달라진다.
 
 // 네임스페이스 — 지금 발행자가 쓰는 것만 둔다. 필요해질 때 더한다.
-enum class Ns { Set, Contact };
+//   Set     — 모든 SET 종류를 한 통으로(contact 의 규약 — 보수적이다)
+//   SetNode — `*SET_NODE*` 만(disconnect mefem). 매뉴얼상 SET 네임스페이스는 **종류별**이라 이것이
+//             정확한 입도다. 한 통으로 세면 다른 종류의 큰 번호에 끌려 번호가 이유 없이 움직인다.
+//   Contact — `*CONTACT_*_ID` 의 CID
+enum class Ns { Set, SetNode, Contact };
 
-inline const char* nameOf(Ns ns) { return ns == Ns::Set ? "SET" : "CONTACT"; }
+inline const char* nameOf(Ns ns) {
+    return ns == Ns::Set ? "SET" : ns == Ns::SetNode ? "SET_NODE" : "CONTACT";
+}
 
 // 이미 쓰인 번호와, 다 보지 못한 자리.
 struct UsedIds {
