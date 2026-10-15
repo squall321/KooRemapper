@@ -14,7 +14,7 @@
 | 2 | `KOORM_STCX_WORK_ROOT` 를 허용 루트와 맞추기 | DynaForge + 운영 | 🔴 개통 전 필수 |
 | 3 | 제출·조회에 PAT 신원이 붙는다 | 알림 | — |
 | 4 | 제출 응답의 `work_dir` 이 registry 와 달라 `job_status(work_dir=…)` 복구가 늘 실패 | **우리 결함 — 고침** | 알림 |
-| 5 | `job_status` 에 `slurm_job_ids` 추가(★C) · 모델 재사용을 응답에 표시(★B) | 우리 제안 | 선택 |
+| 5 | `job_status` 에 `slurm_job_ids` 추가(★C) · 모델 재사용을 응답에 표시(★B) | **우리 — 반영함** | 알림 |
 | 6 | 버전·도구 목록 변화, SSO 꺼짐 환경의 의미 | 알림 | — |
 | 7 | 제출이 성공하면 업로드를 지운다 (§1 회신 뒤 추가) | DynaForge | 개통 전 권장 |
 
@@ -99,15 +99,19 @@ DynaForge 는 `output_dir`·`sphere_report_path` 를 `external_ref` 에 기록�
 없다. `result_dir` 을 `external_ref` 에 같이 남겨 두면 나중에 결과를 가져올 때 기준이 된다(선택).
 복구 조회는 소유 검사를 그대로 지난다 — 같은 게이트웨이 PAT 로 부르면 찾히고 다른 사용자에게는 거절된다.
 
-## 5. 우리 제안 — ★B·★C (설계 문서 `stcx-smarttwin.plan.md` §1)
+## 5. 우리 제안 — ★B·★C → 반영함 (`bffd4e50`, 사용자 결정 2026-10-15)
 
-- **★C** — `job_status` 응답에 `slurm_job_ids`(+`sphere_job_id`)를 넣겠다. 그러면 종료 판정에 `get_job_details` 를
-  따로 부르지 않아도 된다(같이 불러도 깨지지 않는다).
-- **★B** — 1.1.2 도 `work_dir/<model_file>` 이 이미 있으면 그것을 쓰고 `model_file_path` 를 읽지 않는다
-  (예전 동작 유지). 응답에 `model_source: "existing" | "copied"` 를 더해 조용히 묵은 덱을 쓰는 일을 드러내겠다.
-  DynaForge 는 잡마다 `work_dir` 이 고유해서 지금도 해당 없다.
+응답에 칸만 더했다. 기존 칸은 그대로라 DynaForge 코드가 깨지지 않는다.
 
-원하는 것을 알려 주면 넣는다.
+- **★C** — `job_status` 응답 최상위에 `slurm_job_ids`(문자열 목록)와 `sphere_job_id`(없으면 `null`).
+  squeue 결과가 비어도(끝났거나 조회 실패) 무엇을 물었는지 남으므로, 종료 판정에 `get_job_details` 를 따로
+  부르지 않아도 된다(같이 불러도 된다).
+- **★B** — fullangle·single 1.1.2 응답(드라이런 포함)에 `model_source` — `"copied"` 면 `model_file_path` 에서
+  복사했고, `"existing"` 이면 작업 폴더에 이미 있던 모델을 그대로 써서 `model_file_path` 를 읽지 않았다
+  (묵은 덱 신호). DynaForge 는 잡마다 `work_dir` 이 고유하므로 늘 `"copied"` 여야 한다 — `"existing"` 이 오면
+  경고로 남길 것을 권한다.
+
+`result_dir` 을 `external_ref` 에 남기는 것은 **남기기로 했다**(사용자 결정 2026-10-15).
 
 ## 6. 알림
 
