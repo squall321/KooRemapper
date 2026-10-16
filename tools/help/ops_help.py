@@ -941,7 +941,7 @@ fragment_map: examples/cad_solid_merge_to_deck/stepforge_fragment.json
           "  (조각은 셋을 같은 번호로 쓴다 — 삽입도 한 이동량으로 옮긴다)",
           "`fragment_map` 을 주면 그 `ranges` 가 바닥 위인지 대조한다 — 아래에 걸치면 rc 1(그 조각은 넣을 때 옮겨진다)",
           "경계 문서의 `id_floor`(Q7 — 대응표의 `ranges` 를 읽어 대조한다)가 이 op 이다"])
-op("rebind_entities_after_remesh", "메시 편집", "재메시 뒤 덧붙인 블록의 절점 번호를 (파트 이름, 좌표)로 새 덱 번호에 **다시 묶는다**",
+op("rebind_entities_after_remesh", "메시 편집", "재메시 뒤 덧붙인 블록의 절점·파트·요소 번호를 새 덱 번호에 **다시 묶는다** — 절점은 (파트 이름, 좌표) · 파트는 제목 · 요소는 (파트, 절점 좌표)",
    "재결속 rebind remesh 재메시 번호 밀림 stepforge range_diff coord_sha 세트 SPC 이력 위치",
    "KooRemapper rebind_entities_after_remesh <config.yaml>",
    needs=["examples/rebind_entities_after_remesh/v1.k", "examples/rebind_entities_after_remesh/v2.k",

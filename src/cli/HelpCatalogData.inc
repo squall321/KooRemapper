@@ -1105,7 +1105,7 @@ fragment_map: examples/cad_solid_merge_to_deck/stepforge_fragment.json
      {"KooRemapper id_floor f.yaml"},
      {"examples/cad_solid_merge_to_deck/deck.k", "examples/cad_solid_merge_to_deck/stepforge_fragment.json"},
      {"★**요청 때 발행**(2026-10-16) — 대역표를 두지 않는다. 조각을 요청할 때 이 op 이 낸 네 번호를", "  StepForge `export_part_fragment` 의 인자(`node_start`·`elem_start`·`pid_start`·`sid_start` — 이름 그대로)로 주면", "  조각이 그 번호로 쓰이고 `cad_solid_merge_to_deck` 가 **옮기지 않고** 넣는다(대응표 번호 = 덱 번호)", "바닥 = assemble 과 같은 커서(**인클루드 닫힘까지**)의 최대값 + 1. pid_start 는 PID·SECID·MID 셋의 최대값 위다", "  (조각은 셋을 같은 번호로 쓴다 — 삽입도 한 이동량으로 옮긴다)", "`fragment_map` 을 주면 그 `ranges` 가 바닥 위인지 대조한다 — 아래에 걸치면 rc 1(그 조각은 넣을 때 옮겨진다)", "경계 문서의 `id_floor`(Q7 — 대응표의 `ranges` 를 읽어 대조한다)가 이 op 이다"}},
-    {"rebind_entities_after_remesh", "메시 편집", "재메시 뒤 덧붙인 블록의 절점 번호를 (파트 이름, 좌표)로 새 덱 번호에 **다시 묶는다**", "재결속 rebind remesh 재메시 번호 밀림 stepforge range_diff coord_sha 세트 SPC 이력 위치", "KooRemapper rebind_entities_after_remesh <config.yaml>",
+    {"rebind_entities_after_remesh", "메시 편집", "재메시 뒤 덧붙인 블록의 절점·파트·요소 번호를 새 덱 번호에 **다시 묶는다** — 절점은 (파트 이름, 좌표) · 파트는 제목 · 요소는 (파트, 절점 좌표)", "재결속 rebind remesh 재메시 번호 밀림 stepforge range_diff coord_sha 세트 SPC 이력 위치", "KooRemapper rebind_entities_after_remesh <config.yaml>",
      {{"rb.yaml", R"KRH(old_deck: examples/rebind_entities_after_remesh/v1.k
 new_deck: examples/rebind_entities_after_remesh/v2.k
 entities: examples/rebind_entities_after_remesh/ours.k

@@ -13471,7 +13471,7 @@
           "role": "yaml_field",
           "yaml_path": "output",
           "required": true,
-          "description": "Output prefix — writes <output>_section.json — writes <output>_section.json and <output>_section.svg"
+          "description": "Output prefix — writes <output>_section.json and <output>_section.svg"
         },
         {
           "name": "axis",
