@@ -50,7 +50,13 @@ def _part_mid_zero(path):
     i = 0
     while i < len(lines):
         if lines[i].upper().startswith("*PART") and not lines[i].upper().startswith("*PART_"):
-            j = i + 2 if not lines[i].upper().startswith("*PART_") else i + 1
+            # 제목 줄 **앞**의 주석도 건넌다 — `$` 줄은 어디에나 올 수 있다. 예전에는 *PART 다음 줄을 곧장
+            # 제목으로 봐서, 제목 앞에 `$# 이름` 주석을 다는 StepForge 조각(2026-10-16)의 제목을 카드로 읽고
+            # 「MID 0」으로 잘못 짚었다
+            j = i + 1
+            while j < len(lines) and lines[j].startswith("$"):
+                j += 1
+            j += 1                                    # 제목 줄
             while j < len(lines) and lines[j].startswith("$"):
                 j += 1
             if j < len(lines) and not lines[j].startswith("*"):
