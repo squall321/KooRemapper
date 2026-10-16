@@ -272,6 +272,54 @@ def main():
                 check("F-6 conventions 가 '쓰지 말라' 고 적는다",
                       "쓰지 말라" in md["conventions"].get("second_order", ""),
                       md["conventions"].get("second_order"))
+            # ★틀린 줄 아는 값은 숫자로 내지 않는다(2026-10-16) — 플래그를 안 읽는 소비자
+            #   (DataHub 적재 · 리스크 앱 어댑터)가 그 부피를 그대로 실었다. null + 까닭이다.
+            p0 = md["parts"][0]
+            geo = ("volume", "area_ext", "proj", "edge_len", "n_node", "mass")
+            if want:
+                check("F-7 ★2차 — 기하 여섯 칸이 null 이다 (틀린 숫자를 내지 않는다)",
+                      all(p0.get(k, "없음") is None for k in geo), {k: p0.get(k, "없음") for k in geo})
+                check("F-8 2차 — geometry_reason·mass_reason 이 ELFORM 과 함께 까닭을 댄다",
+                      "ELFORM 16" in (p0.get("geometry_reason") or "") and
+                      "ELFORM 16" in (p0.get("mass_reason") or "") and p0.get("mass_basis") is None,
+                      (p0.get("geometry_reason"), p0.get("mass_reason"), p0.get("mass_basis")))
+                check("F-9 2차 — 맞는 칸(n_elems·bbox)은 그대로 낸다",
+                      p0.get("n_elems") == 2 and p0.get("bbox_min") == [0, 0, 0] and
+                      p0.get("bbox_max") == [1, 1, 1], (p0.get("n_elems"), p0.get("bbox_min")))
+                check("F-10 2차지만 센 고아가 0 이면 0 은 참이라 그대로 낸다",
+                      md["model"].get("orphan_nodes") == 0 and
+                      md["model"].get("orphan_nodes_reason") is None,
+                      (md["model"].get("orphan_nodes"), md["model"].get("orphan_nodes_reason")))
+            else:
+                check("F-7 1차 — 기하 여섯 칸이 숫자다 · geometry_reason 은 null",
+                      all(isinstance(p0.get(k), (int, float, dict)) for k in geo) and
+                      p0.get("geometry_reason", "없음") is None,
+                      {k: p0.get(k, "없음") for k in geo + ("geometry_reason",)})
+
+        # ── G: ★매뉴얼 꼴 TET10 — 잘라 읽기가 중간절점을 **거짓 고아**로 만든다 ──────────
+        # 참값은 절점 14 · 고아 0 인데 n9·n10 을 못 봐 고아 2 로 셌다(실측). 센 값은 상한일 뿐이다.
+        tet10_two_line(os.path.join(d, "mm_t10.k"), split_8_2=False)
+        write(os.path.join(d, "mm.yaml"), "model: mm_t10.k\noutput: mm_t10\n")
+        rc, out = run(binary, d, "modelmeta", "mm.yaml")
+        jp = os.path.join(d, "mm_t10_modelmeta.json")
+        md = _json.load(open(jp)) if rc == 0 and os.path.exists(jp) else {}
+        m = md.get("model", {})
+        check("G-1 TET10 덱에서 고아 수를 null 로 낸다 (거짓 고아 2 를 숫자로 내지 않는다)",
+              "orphan_nodes" in m and m["orphan_nodes"] is None, m.get("orphan_nodes", "없음"))
+        check("G-2 고아 사유가 상한과 센 값을 적는다",
+              "상한" in (m.get("orphan_nodes_reason") or "") and "2개" in (m.get("orphan_nodes_reason") or ""),
+              m.get("orphan_nodes_reason"))
+        check("G-3 TET10 의 n_node 를 null 로 낸다 (12 는 틀렸다 — 참값 14)",
+              md.get("parts") and md["parts"][0].get("n_node", "없음") is None,
+              md["parts"][0].get("n_node", "없음") if md.get("parts") else md)
+        tet4_deck(os.path.join(d, "mm_lin2.k"))
+        write(os.path.join(d, "mm.yaml"), "model: mm_lin2.k\noutput: mm_lin2\n")
+        rc, out = run(binary, d, "modelmeta", "mm.yaml")
+        jp = os.path.join(d, "mm_lin2_modelmeta.json")
+        m = (_json.load(open(jp)) if rc == 0 and os.path.exists(jp) else {}).get("model", {})
+        check("G-4 1차 덱의 고아 수는 숫자이고 사유는 null",
+              m.get("orphan_nodes") == 0 and m.get("orphan_nodes_reason", "없음") is None,
+              (m.get("orphan_nodes"), m.get("orphan_nodes_reason", "없음")))
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

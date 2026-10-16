@@ -750,7 +750,10 @@ gap_tol: 0.2
           "  `model.bbox_used_*` 와 `parts[].bbox_*` 는 **요소가 쓰는 절점**이다.",
           "  `bbox_basis`·`bbox_used_basis` 가 어느 쪽인지 적고 `orphan_nodes` 가 수를 센다",
           "  (전에 `conventions` 가 '고립 절점은 들어오지 않는다' 고 적었는데 **사실이 아니었다**)",
-          "낙하판·접촉면은 **used 기준**으로 놓아라 — 현장 덱에서 14.55mm vs 67.50mm 로 갈렸다"])
+          "낙하판·접촉면은 **used 기준**으로 놓아라 — 현장 덱에서 14.55mm vs 67.50mm 로 갈렸다",
+          "★2차 솔리드(ELFORM 16·17·25~28) 파트는 거절하지 않고 volume·area_ext·proj·edge_len·n_node·mass 를",
+          "  **null** 로 낸다 — 까닭은 `geometry_reason`·`mass_reason`(코너 8개만 본 값이라 부피 실측 −48.4%).",
+          "  그런 덱의 `orphan_nodes` 는 상한이라 0 이 아니면 null + `orphan_nodes_reason` 이다"])
 op("foldsurface", "변형·초기응력", "접힘 곡면(평면 elastica) 중심선 — 최소 곡률반경 고정", "접힘 fold elastica 곡률 중심선 폴더블",
    "KooRemapper foldsurface <config.yaml>",
    files={"fold.yaml": """output: fold

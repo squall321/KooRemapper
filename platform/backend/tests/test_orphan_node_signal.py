@@ -161,3 +161,34 @@ def test_first_order_deck_has_no_second_order_flag():
         assert parts and parts[0].get("second_order") is False, parts[:1]
     finally:
         shutil.rmtree(d, ignore_errors=True)
+
+
+def test_second_order_nulls_pass_through_with_reasons(tmp_path, monkeypatch):
+    """2차 솔리드 덱에서 바이너리는 틀린 숫자 대신 null + 까닭을 낸다(2026-10-16) — 플랫폼이 **까닭까지**
+    넘기는가. null 만 넘기면 프런트가 「왜 비었나」를 말할 수 없다. 바이너리 없이 통과만 본다
+    (`bin/KooRemapper` 는 Drive 게시본이라 새 동작은 게시 뒤에 그 사본에서 보인다)."""
+    import json
+    from types import SimpleNamespace
+
+    from app.runner import kfile_modelmeta as km
+
+    deck = tmp_path / "t10.k"
+    deck.write_text("*KEYWORD\n*END\n")
+    why_o = "2차 솔리드 파트의 중간절점(n9·n10)을 고아로 잘못 센다 — 센 값은 상한일 뿐이다(2개)"
+    why_g = "2차 솔리드(ELFORM 16) — 앞 8개만 저장한다"
+
+    def fake(args, *, cwd=None, timeout=None):
+        (Path(cwd) / ".mm_t10_modelmeta.json").write_text(json.dumps({
+            "model": {"orphan_nodes": None, "orphan_nodes_reason": why_o,
+                      "second_order_solid_pids": [{"pid": 1, "elform": 16}]},
+            "parts": [{"pid": 1, "second_order": True, "geometry_reason": why_g,
+                       "volume": None, "area_ext": None, "proj": None, "n_node": None}],
+            "connectivity": {}, "conventions": {}}))
+        return SimpleNamespace(exit_code=0, stdout="", stderr="", timed_out=False)
+
+    monkeypatch.setattr(km, "run_kooremapper", fake)
+    mm = km.run_modelmeta(deck)
+    assert mm["orphan_nodes"] is None and mm["orphan_nodes_reason"] == why_o, mm
+    p = mm["parts"][0]
+    assert p["volume"] is None and p["geometry_reason"] == why_g, p
+

@@ -163,6 +163,10 @@ def main() -> None:
                     "record_id": rid,
                 },
             }
+            # 2차 솔리드 파트는 기하 값이 null 로 온다(틀린 숫자라서) — 까닭도 싣는다. null 만 실으면
+            # 허브에서 「왜 비었나」가 끊긴다. 1차 파트에는 칸을 더하지 않는다(레코드 꼴 불변).
+            if p.get("geometry_reason"):
+                comp["geometry_reason"] = p["geometry_reason"]
             components.append(comp)
             if p["title"]:
                 kw.append(p["title"])

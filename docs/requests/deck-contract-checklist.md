@@ -939,13 +939,25 @@ plan2 는 `IdAllocator` 로 발행자를 통합하라고 했다. 정찰이 그 �
         골랐다(`:900-902` — 거절하면 TET10 덱의 메타 경로가 통째로 막힌다). `volume`·`mass`·
         `area_ext`·`proj` 도 **같은 뿌리**라 `edge_len` 하나만 바꾸면 설계가 갈린다.
         → 대신 Q13 관문을 지을 때 그림 op 셋과 **같은 함수**(`secondOrderSolidPids`)로 거절한다.
-      ★**사용자 판단으로 넘긴다** — 같은 뿌리의 `mass` 가 DataHub 적재 경로로 나간다.
+      ★**사용자 판단으로 넘긴다** — 같은 뿌리의 `mass` 가 DataHub 적재 경로로 나간다(→ 10-16 바꿨다, 아래 칸).
         2차 솔리드 덱이면 **−48.4% 틀린 질량이 그럴듯한 숫자로** 카드에 실린다. 그것을
         `null + reason` 으로 바꿀지는 적재 소비자를 건드리는 결정이다.
-- [ ] **사용자 판단 — 2차 솔리드 파트의 `mass`(그리고 `volume`·`area_ext`·`proj`·`edge_len`)를
+- [x] **사용자 판단 — 2차 솔리드 파트의 `mass`(그리고 `volume`·`area_ext`·`proj`·`edge_len`)를
       `null + reason` 으로 바꿀지.** 지금은 값을 내고 `second_order: true` 로 표시한다. 그 `mass` 가
       DataHub 적재로 나가므로 TET10 덱이면 **−48.4% 틀린 질량이 그럴듯한 숫자로** 카드에 실린다.
       바꾸면 적재 소비자가 그 파트의 질량을 잃는다. 두 길 다 근거가 있어 혼자 정하지 않는다.
+      → **(2026-10-16) 바꿨다 — 추천안으로 정했다.** 직전 보고에 추천 없이 질문으로 올렸고, 사용자가
+        「다 끝까지 마무리해」라고 한 뒤 「정해 달라던 것은 추천안으로 정한다」고 알렸다. 근거와 되돌리는 법은
+        `docs/01-plan/features/modelmeta-second-order-null.context-notes.md`(한 커밋이다).
+        · 근거 — 이 파일의 질량 규약(유도 못 하면 null + reason)과 같다 · 플래그를 **안 읽는** 소비자 둘
+          (`kr2datahub` · hwax-risk 어댑터)이 숫자를 그대로 실었다 · 「잃는」 것은 −48.4% 틀린 숫자다.
+          소비자 다섯이 null 을 견디는지 먼저 읽었다(kr2datahub · DataHub `components` 자유 dict ·
+          hwax-risk `_as_float(None)` · 프런트 `p.volume ? … : '–'` · 플랫폼 러너).
+        · 실측이 칸을 늘렸다 — 매뉴얼 꼴 TET10 에서 `n_node` 12(참 14) · **`orphan_nodes` 2(참 0, 거짓 고아)**
+          도 틀렸다. `n_elems`·`bbox` 는 맞다. 고아 수는 상한이라 0 이 아닐 때만 null + 까닭.
+        · 저장소 덱 500장 옛/새 — **1차 498장 동일**(새 null 칸 둘 빼고), 다른 둘은 2차 덱의 그 칸뿐.
+          회귀 `test_secondorder_solid.py` F·G 절(옛 바이너리 FAIL 7) · 플랫폼 통과 시험 · kr2datahub 시험.
+        ⚠ `platform/backend/bin/KooRemapper` 는 Drive 게시본(10-13)이라 플랫폼에서는 **게시 뒤에** 보인다.
 - [ ] **Q13 관문 `check_mask_resolution_feasibility`** — 값은 있고 **관문이 없다**(0건).
       어느 값(min·p50·max)을 쓸지는 **임계와 함께** 정한다 — 임계 없이 고르면 짐작이다.
 - [ ] **`assess_edit_impact` 개명**(Q11 — 우리가 바꾸기로 했다. 저쪽 도구는 이미 배포됐고

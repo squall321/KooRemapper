@@ -47,13 +47,15 @@ export interface ModelPart {
   title: string
   elem_class: string
   n_elems: number
-  // ⚠ true 면 아래 기하 값(area_ext·volume·proj)을 **쓰지 말라** — 2차 솔리드라서 코너 8개만
-  //   본 값이고 실측으로 부피가 -48.4% 다. 플래그를 파트에도 두는 이유는, 파트 하나만 읽는
-  //   소비자가 모델 수준 목록을 못 보기 때문이다.
+  // ⚠ true 면 아래 기하 값(area_ext·volume·proj)이 **null** 로 온다 — 2차 솔리드라서 코너 8개만
+  //   본 값이었고 실측으로 부피가 -48.4% 였다(2026-10-16 부터 숫자를 내지 않는다). 까닭은
+  //   `geometry_reason`. 플래그를 파트에도 두는 이유는, 파트 하나만 읽는 소비자가 모델 수준
+  //   목록을 못 보기 때문이다.
   second_order?: boolean
-  area_ext: number
-  volume: number
-  proj: { x: number; y: number; z: number }
+  geometry_reason?: string | null
+  area_ext: number | null
+  volume: number | null
+  proj: { x: number; y: number; z: number } | null
   material: {
     mid: number
     kfile?: { keyword?: string; name?: string; E?: number; nu?: number; rho?: number }
@@ -87,14 +89,16 @@ export interface ModelMeta {
   //   `bbox_used_*` 와 `parts[].bbox_*` 는 요소가 쓰는 절점이다.
   //   낙하판·접촉면은 **used** 기준으로 놓아야 한다 — 현장에서 두 값이 14.55mm vs 67.50mm 로
   //   갈려 낙하판이 기기 밖 53mm 에 생겼다. 선언이 없으면 이 신호가 조용히 사라진다.
-  orphan_nodes?: number
+  // 2차 솔리드 파트가 있으면 센 고아는 상한일 뿐이라 0 이 아닐 때 null 로 온다 — 까닭은 `orphan_nodes_reason`.
+  orphan_nodes?: number | null
+  orphan_nodes_reason?: string | null
   bbox_basis?: string
   bbox_all_min?: number[]
   bbox_all_max?: number[]
   bbox_used_min?: number[]
   bbox_used_max?: number[]
   // ★2차 솔리드(ELFORM 16·17·25~28)를 쓰는 파트. 그 파트의 volume·area_ext·proj·edge_len 은
-  //   코너 8개만 본 값이라 **틀리다**(실측 -48.4%) — 리더가 절점 칸의 앞 8개만 저장하므로
+  //   코너 8개만 본 값이라 **틀려서** null 로 온다(실측 -48.4%) — 리더가 절점 칸의 앞 8개만 저장하므로
   //   10절점 사면체의 중간절점이 코너 자리로 들어온다. 파트별로는 `ModelPart.second_order`.
   second_order_solid_pids?: { pid: number; elform: number }[]
   detect?: boolean

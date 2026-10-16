@@ -76,3 +76,28 @@ def test_upload_flag_posts_the_bundle(kr, tmp_path):
     assert kr.run("--upload") == 0
     assert _posts(kr) == [f"{_HUB}/api/ingest/bundle"]
     assert list(tmp_path.glob("SIM-*.zip")) == []   # 올릴 때는 미리보기 번들을 남기지 않는다
+
+
+def test_second_order_part_carries_null_geometry_with_reason(kr, tmp_path, monkeypatch):
+    """2차 솔리드 파트의 기하는 null 로 오고 까닭이 함께 실린다 — 1차 파트의 칸 꼴은 그대로다."""
+    why = "2차 솔리드(ELFORM 16) — 앞 8개만 저장한다"
+
+    def fake_modelmeta(binary, model, outdir, detect):
+        meta = {"parts": [
+            {"pid": 1, "title": "Tet", "elem_class": "solid", "n_elems": 2, "second_order": True,
+             "geometry_reason": why, "area_ext": None, "volume": None, "proj": None,
+             "material": {"mid": 1, "kfile": {"name": "AL"}}},
+            {"pid": 2, "title": "Board", "elem_class": "shell", "n_elems": 10, "second_order": False,
+             "geometry_reason": None, "area_ext": 1.0, "volume": 0.1, "proj": {},
+             "material": {"mid": 2, "kfile": {"name": "FR4"}}}],
+            "connectivity": {}, "model": {"nodes": 4, "elements": 1, "parts": 2}}
+        (outdir / "meta_modelmeta.json").write_text(json.dumps(meta))
+        return meta
+
+    monkeypatch.setattr(kr, "run_modelmeta", fake_modelmeta)
+    assert kr.run() == 0
+    rec = json.loads(zipfile.ZipFile(next(tmp_path.glob("SIM-*.zip"))).read("record.json"))
+    tet, board = rec["content"]["components"]
+    assert tet["volume"] is None and tet["area_ext"] is None and tet["geometry_reason"] == why
+    assert "geometry_reason" not in board and board["volume"] == 0.1
+

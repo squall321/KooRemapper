@@ -630,6 +630,7 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
         std::string massWhy;                // 유도 못 한 이유
         bool hasEdge = false;
         double edgeMin = 0, edgeP50 = 0, edgeMax = 0;
+        std::string geomWhy;                // 기하 값을 낼 수 없는 이유(2차 솔리드) — 비었으면 냈다
     };
     std::vector<PartOut> parts;
 
@@ -905,17 +906,36 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
     //   그림 op 셋은 이것을 **거절**한다. `modelmeta` 는 인벤토리라 거절하지 않지만
     //   (TET10 덱의 메타 경로를 통째로 막게 된다) **말하지 않으면 안 된다**: 부피가 조용히
     //   틀린다(실측 -48.4%). 판정은 세 그림 op 과 **같은 함수**를 쓴다 — 갈리면 못 믿는다.
+    const auto mmBox = mesh.bboxReport();
     const auto mmBad2nd = KooRemapper::figure::secondOrderSolidPids(mesh);
     std::set<int> mmBad2ndPids;
     for (const auto& pe : mmBad2nd) mmBad2ndPids.insert(pe.first);
     if (!mmBad2nd.empty()) {
         console.warning("[modelmeta] " + KooRemapper::figure::secondOrderSolidWhy(mmBad2nd));
-        console.warning("[modelmeta] 그 파트의 volume·area_ext·proj·edge_len 은 **코너 8개만** "
-                        "본 값이라 틀린다(실측 -48.4%). JSON 의 part.second_order=true 와 "
-                        "model.second_order_solid_pids 가 그 자리를 가리킨다.");
+        console.warning("[modelmeta] 그 파트의 volume·area_ext·proj·edge_len·n_node·mass 는 **코너 8개만** "
+                        "본 값이라 틀린다(실측 부피 -48.4%) — JSON 에는 null 과 까닭(geometry_reason·"
+                        "mass_reason)으로 낸다. part.second_order=true 와 model.second_order_solid_pids 가 "
+                        "그 자리를 가리킨다.");
     }
+    // ★틀린 줄 아는 값은 숫자로 내지 않는다(2026-10-16). 처음에는 값을 내고 `second_order` 로
+    //   표시만 했는데, 플래그를 **안 읽는** 소비자(DataHub 적재 `kr2datahub` · 리스크 앱 어댑터)가
+    //   그 부피를 그대로 실었다. 질량 규약과 같은 규율이다 — 유도 못 하면 null + reason.
+    //   `n_elems`·`bbox` 는 맞으므로 그대로 둔다(코너 넷은 앞 8칸에 다 있다).
+    for (auto& p : parts) {
+        for (const auto& pe : mmBad2nd) {
+            if (pe.first != p.pid) continue;
+            p.geomWhy = "2차 솔리드(ELFORM " + std::to_string(pe.second) + ") — 리더가 `*ELEMENT_SOLID` "
+                        "절점 칸의 앞 8개만 저장해 중간절점이 코너 자리로 들어온다. 그 기하로 잰 값이라 "
+                        "틀린다(실측 부피 -48.4%)";
+            p.hasMass = false;
+            p.massBasis.clear();
+            p.massWhy = "부피를 믿을 수 없어 질량도 낼 수 없다. " + p.geomWhy;
+        }
+    }
+    // 고아 수는 **상한**이 된다 — 잘라 읽기는 참조를 줄이기만 하므로 n9·n10 이 고아로 잡힌다.
+    // 센 값이 0 이면 그것은 참이다(참조가 줄어도 참 고아가 사라지지는 않는다).
+    const bool mmOrphanUnsure = !mmBad2nd.empty() && mmBox.orphanNodes > 0;
 
-    const auto mmBox = mesh.bboxReport();
     const double mb[6] = {mmBox.allMin.x, mmBox.allMin.y, mmBox.allMin.z,
                           mmBox.allMax.x, mmBox.allMax.y, mmBox.allMax.z};
 
@@ -946,7 +966,12 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
        << "    \"bbox_used_max\": [" << num(mmBox.usedMax.x) << ", " << num(mmBox.usedMax.y)
        << ", " << num(mmBox.usedMax.z) << "],\n"
        << "    \"bbox_used_basis\": \"nodes_referenced_by_elements\",\n"
-       << "    \"orphan_nodes\": " << mmBox.orphanNodes << ",\n"
+       << "    \"orphan_nodes\": "
+       << (mmOrphanUnsure ? std::string("null") : std::to_string(mmBox.orphanNodes)) << ",\n"
+       << "    \"orphan_nodes_reason\": "
+       << (mmOrphanUnsure ? "\"2차 솔리드 파트의 중간절점(n9·n10)을 리더가 저장하지 않아 고아로 잘못 "
+                            "센다 — 센 값은 상한일 뿐이다(" + std::to_string(mmBox.orphanNodes) + "개)\""
+                          : std::string("null")) << ",\n"
        << "    \"second_order_solid_pids\": [";
     for (size_t i = 0; i < mmBad2nd.size(); ++i)
         rf << (i ? ", " : "") << "{\"pid\": " << mmBad2nd[i].first
@@ -968,10 +993,13 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
           "놓아라 — 현장 덱에서 두 기준이 14.55mm vs 67.50mm 로 갈려 낙하판이 기기 밖 53mm 에 "
           "생겼다. 기준은 bbox_basis/bbox_used_basis 가 말한다\",\n"
        << "    \"second_order\": \"part.second_order=true 면 그 파트의 volume·area_ext·proj·"
-          "edge_len 을 **쓰지 말라**. 리더가 `*ELEMENT_SOLID` 절점 칸의 앞 8개만 저장하므로 "
-          "10절점 사면체의 중간절점이 코너 자리로 들어와 육면체로 읽힌다(실측 부피 -48.4%). "
+          "edge_len·n_node·mass 를 **쓰지 말라** — null 로 내고 까닭을 geometry_reason·mass_reason 에 "
+          "적는다. 리더가 `*ELEMENT_SOLID` 절점 칸의 앞 8개만 저장하므로 10절점 사면체의 중간절점이 "
+          "코너 자리로 들어와 육면체로 읽힌다(실측 부피 -48.4%). n_elems 는 맞고, bbox 는 코너가 앞 "
+          "8칸에 다 있어 직선 변이면 맞다(곡선 변의 중간절점은 보지 않는다). 그런 파트가 있으면 "
+          "model.orphan_nodes 는 상한이라 0 이 아닐 때 null + orphan_nodes_reason 이다. "
           "`section`·`surfview`·`stackdiagram` 은 같은 판정으로 **거절**한다 — 여기는 "
-          "인벤토리라 값을 내지만 **틀렸다고 적는다**. 1차 요소 덱으로 다시 내라\",\n"
+          "인벤토리라 거절하지 않는다. 1차 요소 덱으로 다시 내라\",\n"
        << "    \"elem_class\": \"**기하 기준**이다. TSHELL 요소는 육면체라 solid 로 센다 — "
           "카드 키워드 기준이 아니다\",\n"
        << "    \"n_node\": \"그 파트 요소가 참조한 **고유** 절점 수. 축퇴 요소는 같은 절점을 "
@@ -989,6 +1017,7 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
     rf << "  \"parts\": [\n";
     for (size_t i = 0; i < parts.size(); ++i) {
         const auto& p = parts[i];
+        const bool geomOk = p.geomWhy.empty();
         rf << "    {\n"
            << "      \"pid\": " << p.pid << ",\n"
            << "      \"title\": \"" << mm_jsonEsc(p.title) << "\",\n"
@@ -997,14 +1026,18 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
            //   읽는 소비자가 못 본다 — ④ 에서 신호가 플랫폼까지 끊겨 있던 것과 같은 자리다.
            << "      \"second_order\": "
            << (mmBad2ndPids.count(p.pid) ? "true" : "false") << ",\n"
+           << "      \"geometry_reason\": "
+           << (geomOk ? std::string("null") : "\"" + mm_jsonEsc(p.geomWhy) + "\"") << ",\n"
            << "      \"n_elems\": " << p.nElems << ",\n"
            << "      \"bbox_min\": [" << num(p.bbox[0]) << ", " << num(p.bbox[1]) << ", " << num(p.bbox[2]) << "],\n"
            << "      \"bbox_max\": [" << num(p.bbox[3]) << ", " << num(p.bbox[4]) << ", " << num(p.bbox[5]) << "],\n"
-           << "      \"area_ext\": " << num(p.areaExt) << ",\n"
-           << "      \"volume\": " << num(p.volume) << ",\n"
-           << "      \"proj\": {\"x\": " << num(p.proj[0]) << ", \"y\": " << num(p.proj[1])
-           << ", \"z\": " << num(p.proj[2]) << "},\n"
-           << "      \"n_node\": " << p.nNode << ",\n"
+           << "      \"area_ext\": " << (geomOk ? num(p.areaExt) : std::string("null")) << ",\n"
+           << "      \"volume\": " << (geomOk ? num(p.volume) : std::string("null")) << ",\n"
+           << "      \"proj\": "
+           << (geomOk ? "{\"x\": " + num(p.proj[0]) + ", \"y\": " + num(p.proj[1]) +
+                        ", \"z\": " + num(p.proj[2]) + "}"
+                      : std::string("null")) << ",\n"
+           << "      \"n_node\": " << (geomOk ? std::to_string(p.nNode) : std::string("null")) << ",\n"
            << "      \"thickness\": " << (p.hasThickness ? num(p.thickness) : std::string("null"))
            << ",\n"
            << "      \"thickness_reason\": "
@@ -1016,7 +1049,7 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
            << "      \"mass_reason\": "
            << (p.hasMass ? std::string("null") : "\"" + mm_jsonEsc(p.massWhy) + "\"") << ",\n"
            << "      \"edge_len\": "
-           << (p.hasEdge ? "{\"min\": " + num(p.edgeMin) + ", \"p50\": " + num(p.edgeP50) +
+           << (p.hasEdge && geomOk ? "{\"min\": " + num(p.edgeMin) + ", \"p50\": " + num(p.edgeP50) +
                            ", \"max\": " + num(p.edgeMax) + "}"
                          : std::string("null")) << ",\n";
         rf << "      \"material\": {\n"

@@ -51,14 +51,16 @@ def run_modelmeta(path: Path, *, detect: bool = False, timeout: int = 120) -> di
                 "connectivity": data.get("connectivity", {}),
                 "conventions": data.get("conventions", {}),
                 "orphan_nodes": model.get("orphan_nodes"),
+                # 2차 솔리드가 있으면 위 값이 null(상한일 뿐)이고 까닭이 여기 온다 — null 만 넘기면 까닭이 끊긴다.
+                "orphan_nodes_reason": model.get("orphan_nodes_reason"),
                 "bbox_basis": model.get("bbox_basis"),
                 "bbox_all_min": model.get("bbox_min"),
                 "bbox_all_max": model.get("bbox_max"),
                 "bbox_used_min": model.get("bbox_used_min"),
                 "bbox_used_max": model.get("bbox_used_max"),
                 # ★2차 솔리드 신호도 같은 이유로 통과시킨다 — 그 파트의 volume·area_ext 는
-                #   코너 8개만 본 값이라 틀린다(실측 -48.4%). 여기서 버리면 프런트가 그 부피를
-                #   아무 표시 없이 그린다. 파트별 `second_order` 는 `parts` 안에 이미 있다.
+                #   코너 8개만 본 값이라 틀려서 null 로 온다(실측 -48.4%). 여기서 버리면 프런트가
+                #   왜 비었는지 말할 수 없다. 파트별 `second_order`·`geometry_reason` 은 `parts` 안에 있다.
                 "second_order_solid_pids": model.get("second_order_solid_pids") or [],
                 "detect": detect,
             }
