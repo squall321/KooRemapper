@@ -95,6 +95,10 @@ struct Cfg {
     bool   qualityCheck = true;
     double warnMinJac   = 0.15;
 
+    // preview — gmsh 를 돌리지 않고, 다시 짜면 지워질 절점을 가리키는 카드를 미리 짚는다(2026-10-16 · StepForge Q11 —
+    // 별도 사전 조회 op 대신 이 옵션으로 짓기로 했다. 이름이 겹칠 일이 없다)
+    bool   preview       = false;
+
     // Polish: post-remesh bad-patch iteration
     bool   polish        = false; // off by default (experimental)
     double polishJac     = 0.10;  // re-mesh patches with Jac < this
@@ -177,6 +181,7 @@ static bool readConfig(const std::string& path, Cfg& cfg, std::string& err) {
             if (key=="smooth_surface") { cfg.smoothSurface   = std::stoi(val); continue; }
             if (key=="decay_factor")   { cfg.decayFactor     = std::stod(val); continue; }
             if (key=="polish")         { cfg.polish          = mf_bool(val); continue; }
+            if (key=="preview")        { cfg.preview         = mf_bool(val); continue; }
             if (key=="polish_jac")     { cfg.polishJac       = std::stod(val); continue; }
             if (key=="polish_max_iter"){ cfg.polishMaxIter   = std::stoi(val); continue; }
             // section headers (val empty)
@@ -1420,10 +1425,8 @@ struct FinalNode { int id; double x,y,z; };
 struct FinalElem { int id; std::array<int,4> nodes; };
 
 // For fixed mode: match Gmsh surface nodes to original model nodes by coordinate
-static std::map<int,int> matchBoundaryNodes(const Mesh& mesh, int pid,
-                                             const std::vector<MshNode>& gmshNodes,
-                                             double tol) {
-    // Build set of boundary node IDs (nodes in boundary faces of PID)
+// 그 파트의 경계(표면) 절점 — 파트 안에서 요소 하나만 쓰는 면의 절점. `fixed` 의 짝 찾기와 `preview` 가 같이 쓴다.
+static std::set<int> partBoundaryNodes(const Mesh& mesh, int pid) {
     using FaceKey = std::array<int,3>;
     std::map<FaceKey,int> fc;
     for (auto& [eid,e] : mesh.elements) {
@@ -1438,6 +1441,132 @@ static std::map<int,int> matchBoundaryNodes(const Mesh& mesh, int pid,
     std::set<int> bndIds;
     for (auto& [key,cnt] : fc)
         if (cnt==1) for (int n : key) bndIds.insert(n);
+    return bndIds;
+}
+
+// 다시 짜면 지워질 절점 — 그 파트 TET4 의 절점 가운데 다른 파트가 쓰지 않는 것. `fixed` 면 이 가운데 gmsh 가 짝을
+// 찾은 표면 절점은 남는다(그것은 gmsh 를 돌려야 안다). 실제 실행(11.)과 `preview` 가 같은 판정을 쓴다.
+static std::set<int> removalCandidates(const Mesh& mesh, int pid) {
+    std::set<int> out;
+    for (auto& [eid,e] : mesh.elements) {
+        if (e.partId!=pid||!isTet4(e)) continue;
+        int t[4]; getTet(e,t);
+        for (int i=0;i<4;++i) out.insert(t[i]);
+    }
+    for (auto& [eid,e] : mesh.elements) {
+        if (e.partId==pid) continue;
+        for (int i=0;i<Element::NUM_NODES;++i) out.erase(e.nodeIds[i]);
+    }
+    return out;
+}
+
+// 절점 `nodes` 를 가리키는 칸 — 주 덱과 인클루드 닫힘. 칸 자리는 정본(`parser/NodeRefs` — `info --strict` 와 같은 함수).
+// 원문을 통째로 들지 않고 절점을 가리킬 수 있는 블록만 담는다(700MB 덱). 줄 번호는 원래 번호(1-기반)다.
+struct NodeRefHit {
+    std::string file;   // 비었으면 주 덱
+    size_t line = 0;    // 1-기반
+    std::string kw;
+    int node = 0;
+    int col = -1, width = 0;   // col < 0 — 자유형식·어긋난 줄이라 제자리에 바꿔 쓸 수 없다
+};
+static std::vector<NodeRefHit> refsToNodes(const std::string& model, const std::set<int>& nodes) {
+    std::vector<NodeRefHit> hits;
+    int deckFw = 8;
+    bool seenKeyword = false;
+    auto scanStream = [&](std::istream& in, const std::string& shown, bool isMain) {
+        std::vector<std::string> L;
+        std::vector<size_t> orig;
+        bool on = false;
+        size_t no = 0;
+        for (std::string ln; std::getline(in, ln);) {
+            ++no;
+            if (!ln.empty() && ln.back() == '\r') ln.pop_back();
+            const size_t g = ln.find_first_not_of(" \t");
+            if (g != std::string::npos && ln[g] == '*') {
+                const std::string kw = KooRemapper::deckscan::kwBare(KooRemapper::deckscan::keywordToken(ln));
+                if (isMain && kw == "*KEYWORD" && !seenKeyword) {   // 덱 폭은 첫 `*KEYWORD` 가 정한다
+                    deckFw = KooRemapper::deckFieldWidth({ln});
+                    seenKeyword = true;
+                }
+                on = KooRemapper::noderefs::mayReference(kw);
+            }
+            if (on) { L.push_back(ln); orig.push_back(no); }
+        }
+        const auto sc = KooRemapper::noderefs::find(L, deckFw, [&nodes](int v) { return nodes.count(v) > 0; });
+        for (const auto& r : sc.refs)
+            hits.push_back({shown, orig[r.line], KooRemapper::noderefs::keywordOf(L, r), r.value, r.col, r.width});
+    };
+    {
+        std::ifstream mf(model);
+        scanStream(mf, "", true);
+    }
+    if (KooRemapper::include_scan::scanFile(model).count > 0) {
+        std::vector<std::string> mainLines;
+        std::ifstream mf(model);
+        for (std::string ln; std::getline(mf, ln);) {
+            if (!ln.empty() && ln.back() == '\r') ln.pop_back();
+            mainLines.push_back(ln);
+        }
+        const auto incl = KooRemapper::include_closure::read(model, mainLines);
+        for (const auto& f : incl.files) {
+            std::string text;
+            for (const auto& ln : f.lines) { text += ln; text += '\n'; }
+            std::istringstream is(text);
+            scanStream(is, f.path, false);
+        }
+    }
+    return hits;
+}
+
+// `preview: true` — gmsh 를 돌리지 않고, 다시 짜면 지워질 절점을 가리키는 카드를 미리 짚는다. 실제 실행이
+// 멈출 칸(인클루드 안 · 자유형식 줄 · 내부 절점)이 하나라도 있으면 rc 1. 표면 절점은 gmsh 가 그 자리에 절점을
+// 두는지에 달려 있어 단정하지 않는다(`fixed` 면 짝을 찾은 표면 절점은 원래 번호가 남는다).
+static int previewReferences(const Cfg& cfg, const Mesh& mesh, ConsoleOutput& console) {
+    const auto cand = removalCandidates(mesh, cfg.pid);
+    const auto bnd = partBoundaryNodes(mesh, cfg.pid);
+    const auto hits = refsToNodes(cfg.model, cand);
+    console.header("Preview — 다시 짜면 지워질 절점을 가리키는 카드");
+    console.keyValue("지울 후보 절점", std::to_string(cand.size()) + "  (그중 표면 " +
+                     std::to_string(std::count_if(cand.begin(), cand.end(), [&](int n) { return bnd.count(n) > 0; })) + ")");
+    if (hits.empty()) {
+        console.success("가리키는 카드가 없다 — 이 재메시는 절점 참조를 깨지 않는다");
+        return 0;
+    }
+    size_t stop = 0, maybe = 0;
+    const bool fixed = (cfg.boundaryNodes == "fixed");
+    size_t shown = 0;
+    for (size_t k = 0; k < hits.size(); ++k) {
+        const auto& h = hits[k];
+        std::string why;
+        bool certain = true;
+        if (!h.file.empty()) why = "인클루드 안이라 바꿔 쓸 수 없다 — 멈춘다";
+        else if (h.col < 0) why = "자유형식 줄이라 바꿔 쓸 수 없다 — 멈춘다";
+        else if (!bnd.count(h.node)) why = "내부 절점 — 다시 짠 메시에 같은 자리 절점이 거의 없다 — 멈춘다";
+        else {
+            certain = false;
+            why = fixed ? "표면 절점 — gmsh 가 짝을 찾으면 원래 번호가 남는다"
+                        : "표면 절점 — gmsh 가 같은 자리(snap_tolerance)에 절점을 두면 새 번호로 바꿔 쓴다";
+        }
+        (certain ? stop : maybe)++;
+        if (shown++ < 20)
+            console.println("  line " + std::to_string(h.line) + " " + h.kw + ": 절점 " + std::to_string(h.node) +
+                            " — " + why + (h.file.empty() ? "" : " — 인클루드 " + h.file));
+    }
+    if (shown > 20) console.println("  … 외 " + std::to_string(shown - 20) + "곳");
+    console.println("  모두 " + std::to_string(hits.size()) + "곳 — 멈출 칸 " + std::to_string(stop) +
+                    " · gmsh 에 달린 칸 " + std::to_string(maybe));
+    if (stop > 0) {
+        console.error("이대로 돌리면 멈춘다 — 그 카드를 남는 절점이나 세트로 옮기거나, 표면 절점이면 boundary_nodes: fixed");
+        return 1;
+    }
+    console.success("멈출 칸은 없다 — 표면 절점 칸은 gmsh 결과에 따라 바꿔 쓰거나(같은 자리) 멈춘다");
+    return 0;
+}
+
+static std::map<int,int> matchBoundaryNodes(const Mesh& mesh, int pid,
+                                             const std::vector<MshNode>& gmshNodes,
+                                             double tol) {
+    const std::set<int> bndIds = partBoundaryNodes(mesh, pid);
 
     double tol2=tol*tol;
     std::map<int,int> result; // gmsh_id → orig_model_id
@@ -1634,7 +1763,10 @@ static bool spliceMesh(const std::string& modelPath,
                         const std::set<int>& removeElems,
                         const std::vector<FinalNode>& newNodes,
                         const std::vector<FinalElem>& newElems,
+                        const std::map<size_t, std::vector<std::array<int,3>>>& fieldEdits,
                         std::string& err) {
+    // `fieldEdits` — 주 덱 줄(0-기반) → 바꿀 칸들 {열, 폭, 새 절점 번호}. 재결속(11b)이 지울 절점을 가리키던 칸을
+    // 같은 자리의 새 절점으로 바꾼다. 칸 폭 그대로 오른쪽에 붙여 쓰고 나머지 글자는 건드리지 않는다.
     // Buffer all input lines first (handles model==output case safely)
     std::vector<std::string> rawLines;
     {
@@ -1644,6 +1776,17 @@ static bool spliceMesh(const std::string& modelPath,
         while (std::getline(f, line)) {
             while (!line.empty()&&line.back()=='\r') line.pop_back();
             rawLines.push_back(line);
+        }
+    }
+    for (const auto& [li, fields] : fieldEdits) {
+        if (li >= rawLines.size()) { err = "재결속 칸이 덱 밖을 가리킨다(이 op 의 결함)"; return false; }
+        std::string& ln = rawLines[li];
+        for (const auto& f : fields) {
+            const size_t col = (size_t)f[0], w = (size_t)f[1];
+            if (ln.size() < col + w) ln.resize(col + w, ' ');
+            char b[32];
+            std::snprintf(b, sizeof(b), "%*d", f[1], f[2]);
+            ln.replace(col, w, b);
         }
     }
 
@@ -2131,9 +2274,9 @@ int runMeshFix(const char* configPath, ConsoleOutput& console) {
         cfg.output = KooRemapper::yamlResolvePath(configDir, cfg.output);
     }
 
-    // 2. Gmsh
+    // 2. Gmsh — `preview` 는 gmsh 를 돌리지 않으므로 찾지도 않는다
     std::string gmshVer;
-    std::string gmshExe = findGmshExe(&gmshVer);
+    std::string gmshExe = cfg.preview ? std::string("(preview — 쓰지 않는다)") : findGmshExe(&gmshVer);
     if (gmshExe.empty()) {
         console.error("Gmsh not found — set KOOREMAPPER_GMSH, or place gmsh(.exe) in gmsh/ or gmsh-<ver>/[bin/] next to KooRemapper, or put gmsh on PATH (Linux also checks /opt/gmsh-*/bin/gmsh)");
         // 무엇을 보고 왜 물렸는지 말한다 — "not found" 만 내면 gmsh 가 PATH 에 있는데도 그
@@ -2176,6 +2319,7 @@ int runMeshFix(const char* configPath, ConsoleOutput& console) {
         }
         console.keyValue("PID "+std::to_string(cfg.pid)+" TET4", std::to_string(cnt));
     }
+    if (cfg.preview) return previewReferences(cfg, mesh, console);
 
     // 4. Analyze
     console.header("Mesh Analysis");
@@ -2333,101 +2477,112 @@ int runMeshFix(const char* configPath, ConsoleOutput& console) {
     console.keyValue("Nodes added to model",    std::to_string(nodesAdded));
     console.keyValue("Elements added to model", std::to_string(elemsAdded));
 
-    // 11. Collect IDs to remove from model
-    std::set<int> removeNodes, removeElems;
-    for (auto& [eid,e] : mesh.elements) {
-        if (e.partId!=cfg.pid||!isTet4(e)) continue;
-        removeElems.insert(eid);
-        int t[4]; getTet(e,t);
-        for (int i=0;i<4;++i) removeNodes.insert(t[i]);
-    }
-    // Keep nodes shared with other parts
-    for (auto& [eid,e] : mesh.elements) {
-        if (e.partId==cfg.pid) continue;
-        for (int i=0;i<Element::NUM_NODES;++i)
-            removeNodes.erase(e.nodeIds[i]);
-    }
+    // 11. Collect IDs to remove from model — 다른 파트가 쓰는 절점은 남긴다(`preview` 와 같은 판정)
+    std::set<int> removeElems;
+    for (auto& [eid,e] : mesh.elements)
+        if (e.partId==cfg.pid&&isTet4(e)) removeElems.insert(eid);
+    std::set<int> removeNodes = removalCandidates(mesh, cfg.pid);
     // In fixed mode, keep original boundary nodes (they stay in model untouched)
     if (cfg.boundaryNodes=="fixed") {
         auto bndMap = matchBoundaryNodes(mesh, cfg.pid, gmshNodes, cfg.snapTolerance);
         for (auto& [gid,oid] : bndMap) removeNodes.erase(oid);
     }
 
-    // 11b. ★지울 절점을 가리키는 카드가 있으면 **쓰지 않는다**(2026-10-16). 예전에는 다시 짠 파트의 옛 절점을
-    //      `*SET_NODE_LIST`·`*BOUNDARY_SPC_NODE`·`*DATABASE_HISTORY_NODE` 가 그대로 가리킨 덱을 rc 0 으로 냈다(실측) —
-    //      LS-DYNA 는 세트가 없는 절점을 가리키면 키워드 단계에서 멈춘다(현장 실측 Error 10233). plan2 P2-6 이 적은
-    //      「하나도 고치지 않는다」가 그 자리다. 위치로 바꿔 쓰는 재결속은 아직 없다 — 먼저 틀린 덱을 내지 않는다.
-    //      주 덱과 인클루드 닫힘을 다 본다. 원문을 통째로 들지 않고 절점을 가리킬 수 있는 블록만 담는다(700MB 덱).
+    // 11b. ★지울 절점을 가리키는 칸 — **같은 자리의 새 절점으로 바꿔 쓴다**(재결속 · plan2 P2-6). 못 풀면 쓰지 않는다.
+    //      예전에는 다시 짠 파트의 옛 절점을 `*SET_NODE_LIST`·`*BOUNDARY_SPC_NODE`·`*DATABASE_HISTORY_NODE` 가 그대로
+    //      가리킨 덱을 rc 0 으로 냈다(실측 2026-10-16) — LS-DYNA 는 세트가 없는 절점을 가리키면 키워드 단계에서 멈춘다
+    //      (현장 실측 Error 10233). 짝은 그 파트의 **새 절점** 가운데 옛 자리에서 `snap_tolerance` 안의 가장 가까운 것이다
+    //      (`fixed` 의 경계 짝 찾기와 같은 공차). 이웃 파트의 절점으로는 옮기지 않는다 — 다른 물체로 옮겨 가면 안 된다.
+    //      인클루드 안 · 자유형식 줄 · 짝 없음(내부 절점은 거의 언제나 그렇다)은 못 푼 것이다.
+    std::map<size_t, std::vector<std::array<int,3>>> fieldEdits;   // 주 덱 0-기반 줄 → {열, 폭, 새 번호}
+    size_t rebound = 0;
     {
-        struct Hit { std::string file; size_t line; std::string kw; int node; };
-        std::vector<Hit> hits;
-        int deckFw = 8;
-        bool seenKeyword = false;
-        auto scanStream = [&](std::istream& in, const std::string& shown, bool isMain) {
-            std::vector<std::string> L;
-            std::vector<size_t> orig;
-            bool on = false;
-            size_t no = 0;
-            for (std::string ln; std::getline(in, ln);) {
-                ++no;
-                if (!ln.empty() && ln.back() == '\r') ln.pop_back();
-                const size_t g = ln.find_first_not_of(" \t");
-                if (g != std::string::npos && ln[g] == '*') {
-                    const std::string kw = KooRemapper::deckscan::kwBare(KooRemapper::deckscan::keywordToken(ln));
-                    if (isMain && kw == "*KEYWORD" && !seenKeyword) {   // 덱 폭은 첫 `*KEYWORD` 가 정한다
-                        deckFw = KooRemapper::deckFieldWidth({ln});
-                        seenKeyword = true;
-                    }
-                    on = KooRemapper::noderefs::mayReference(kw);
-                }
-                if (on) { L.push_back(ln); orig.push_back(no); }
-            }
-            const auto sc = KooRemapper::noderefs::find(L, deckFw, [&removeNodes](int v) { return removeNodes.count(v) > 0; });
-            for (const auto& r : sc.refs)
-                if (hits.empty() || hits.back().line != orig[r.line] || hits.back().file != shown)
-                    hits.push_back({shown, orig[r.line], KooRemapper::noderefs::keywordOf(L, r), r.value});
-        };
-        {
-            std::ifstream mf(cfg.model);
-            scanStream(mf, "", true);
-        }
-        if (KooRemapper::include_scan::scanFile(cfg.model).count > 0) {
-            std::vector<std::string> mainLines;
-            std::ifstream mf(cfg.model);
-            for (std::string ln; std::getline(mf, ln);) {
-                if (!ln.empty() && ln.back() == '\r') ln.pop_back();
-                mainLines.push_back(ln);
-            }
-            const auto incl = KooRemapper::include_closure::read(cfg.model, mainLines);
-            for (const auto& f : incl.files) {
-                std::string text;
-                for (const auto& ln : f.lines) { text += ln; text += '\n'; }
-                std::istringstream is(text);
-                scanStream(is, f.path, false);
-            }
-        }
+        const auto hits = refsToNodes(cfg.model, removeNodes);
         if (!hits.empty()) {
-            console.error("다시 짠 PID " + std::to_string(cfg.pid) + " 에서 지울 절점을 가리키는 카드가 " +
-                          std::to_string(hits.size()) + "줄 있다 — 그대로 쓰면 LS-DYNA 가 키워드 단계에서 "
-                          "멈춘다. 덱을 쓰지 않았다");
-            for (size_t k = 0; k < hits.size() && k < 20; ++k)
-                console.println("  line " + std::to_string(hits[k].line) + " " + hits[k].kw + ": 절점 " +
-                                std::to_string(hits[k].node) +
-                                (hits[k].file.empty() ? "" : " — 인클루드 " + hits[k].file));
-            if (hits.size() > 20) console.println("  … 외 " + std::to_string(hits.size() - 20) + "줄");
-            console.println("  · 표면 절점이면 `boundary_nodes: fixed` 가 원래 번호를 지킨다");
-            console.println("  · 내부 절점이면 그 카드를 남는 절점이나 세트로 옮긴 뒤 다시 돌린다");
-            for (auto& p : {stlPath, geoPath, mshPath, logPath}) { std::error_code ec; fs::remove(p, ec); }
-            return 1;
+            const double tol = std::max(cfg.snapTolerance, 0.0);
+            const double cell = std::max(tol, 1e-9);
+            auto keyOf = [cell](double x, double y, double z) {
+                const long long ix = (long long)std::floor(x / cell), iy = (long long)std::floor(y / cell),
+                                iz = (long long)std::floor(z / cell);
+                return std::array<long long,3>{ix, iy, iz};
+            };
+            std::map<std::array<long long,3>, std::vector<size_t>> grid;
+            for (size_t k = 0; k < finalNodes.size(); ++k)
+                if (finalNodes[k].id > 0) grid[keyOf(finalNodes[k].x, finalNodes[k].y, finalNodes[k].z)].push_back(k);
+            struct Unres { NodeRefHit h; std::string why; };
+            std::vector<Unres> unresolved;
+            for (const auto& h : hits) {
+                if (!h.file.empty()) { unresolved.push_back({h, "인클루드 안이라 바꿔 쓸 수 없다"}); continue; }
+                if (h.col < 0) { unresolved.push_back({h, "자유형식·칸이 어긋난 줄이라 제자리에 바꿔 쓸 수 없다"}); continue; }
+                const Node* on = mesh.getNode(h.node);
+                if (!on) { unresolved.push_back({h, "그 절점을 읽지 못했다"}); continue; }
+                const auto k0 = keyOf(on->position.x, on->position.y, on->position.z);
+                double best = tol * tol;
+                int bestId = 0, ties = 0;
+                for (long long dx = -1; dx <= 1; ++dx)
+                    for (long long dy = -1; dy <= 1; ++dy)
+                        for (long long dz = -1; dz <= 1; ++dz) {
+                            auto it = grid.find({k0[0] + dx, k0[1] + dy, k0[2] + dz});
+                            if (it == grid.end()) continue;
+                            for (size_t k : it->second) {
+                                const auto& fn = finalNodes[k];
+                                const double ex = fn.x - on->position.x, ey = fn.y - on->position.y,
+                                             ez = fn.z - on->position.z;
+                                const double d2 = ex * ex + ey * ey + ez * ez;
+                                if (d2 < best) { best = d2; bestId = fn.id; ties = 1; }
+                                else if (d2 == best && bestId != 0 && fn.id != bestId) ++ties;
+                            }
+                        }
+                if (bestId == 0) {
+                    unresolved.push_back({h, "다시 짠 메시에 같은 자리(공차 " + std::to_string(tol) + ") 절점이 없다"});
+                    continue;
+                }
+                if (ties > 1) { unresolved.push_back({h, "같은 거리의 새 절점이 여럿이다"}); continue; }
+                if ((int)std::to_string(bestId).size() > h.width) {
+                    unresolved.push_back({h, "새 번호 " + std::to_string(bestId) + " 가 칸 폭을 넘는다"});
+                    continue;
+                }
+                fieldEdits[h.line - 1].push_back({h.col, h.width, bestId});
+                ++rebound;
+            }
+            if (!unresolved.empty()) {
+                console.error("다시 짠 PID " + std::to_string(cfg.pid) + " 에서 지울 절점을 가리키는 칸 " +
+                              std::to_string(hits.size()) + "곳 가운데 " + std::to_string(unresolved.size()) +
+                              "곳을 같은 자리의 새 절점으로 옮기지 못했다 — 그대로 쓰면 LS-DYNA 가 키워드 단계에서 "
+                              "멈춘다. 덱을 쓰지 않았다");
+                size_t shown = 0;
+                for (size_t k = 0; k < unresolved.size(); ++k) {
+                    const auto& u = unresolved[k];
+                    if (k > 0 && u.h.line == unresolved[k - 1].h.line && u.h.file == unresolved[k - 1].h.file) continue;
+                    if (shown++ >= 20) { console.println("  …"); break; }
+                    console.println("  line " + std::to_string(u.h.line) + " " + u.h.kw + ": 절점 " +
+                                    std::to_string(u.h.node) + " — " + u.why +
+                                    (u.h.file.empty() ? "" : " — 인클루드 " + u.h.file));
+                }
+                console.println("  · 표면 절점이면 `boundary_nodes: fixed` 가 원래 번호를 지킨다");
+                console.println("  · 내부 절점이면 그 카드를 남는 절점이나 세트로 옮긴 뒤 다시 돌린다");
+                console.println("  · gmsh 를 돌리기 전에 보려면 `preview: true`");
+                for (auto& p : {stlPath, geoPath, mshPath, logPath}) { std::error_code ec; fs::remove(p, ec); }
+                return 1;
+            }
+            console.println("  재결속 — 지울 절점을 가리키던 칸 " + std::to_string(rebound) +
+                            "곳을 같은 자리(공차 " + std::to_string(tol) + ")의 새 절점으로 바꿨다");
         }
     }
 
     // 12. Splice
     console.info("Writing output: " + cfg.output);
     if (!spliceMesh(cfg.model, cfg.output, cfg.pid,
-                    removeNodes, removeElems, finalNodes, finalElems, err)) {
+                    removeNodes, removeElems, finalNodes, finalElems, fieldEdits, err)) {
         console.error(err);
         for (auto& p : {stlPath,geoPath,mshPath,logPath}) { std::error_code ec; fs::remove(p,ec); }
+        return 1;
+    }
+    // 쓰기 뒤 재검사 — 쓴 덱이 지운 절점을 아직 가리키면 이 op 의 결함이다(같은 정본 함수로 본다)
+    if (!refsToNodes(cfg.output, removeNodes).empty()) {
+        console.error("쓴 덱이 지운 절점을 아직 가리킨다 — 이 op 의 결함이다. 산출을 지웠다: " + cfg.output);
+        std::error_code ec; fs::remove(cfg.output, ec);
+        for (auto& p : {stlPath,geoPath,mshPath,logPath}) { std::error_code ec2; fs::remove(p,ec2); }
         return 1;
     }
     console.success("Output written");

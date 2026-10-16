@@ -360,7 +360,7 @@ warn_min_jac: 0.15
 )KRH"}},
      {"KooRemapper generate --dim-i 20 --dim-j 5 arc demo", "KooRemapper meshfix meshfix.yaml"},
      {},
-     {"gmsh 탐색: KOOREMAPPER_GMSH 환경변수 → 실행 파일 옆 gmsh/·gmsh-<ver>/[bin/] → PATH → /opt/gmsh-*/bin/gmsh (SIF 는 그대로 동작)", "★지울 절점을 세트·SPC·이력 등이 가리키면 **덱을 쓰지 않고** rc 1 — 그 줄을 짚는다(`info --strict` 와 같은 함수).", "  표면 절점이면 `boundary_nodes: fixed` 가 원래 번호를 지킨다. 위치로 바꿔 쓰는 재결속은 아직 없다"}},
+     {"gmsh 탐색: KOOREMAPPER_GMSH 환경변수 → 실행 파일 옆 gmsh/·gmsh-<ver>/[bin/] → PATH → /opt/gmsh-*/bin/gmsh (SIF 는 그대로 동작)", "★지울 절점을 세트·SPC·이력 등이 가리키면 **같은 자리(snap_tolerance)의 새 절점으로 바꿔 쓴다**(재결속) —", "  못 풀면(내부 절점 · 인클루드 안 · 자유형식 줄) 덱을 쓰지 않고 rc 1 · 그 줄을 짚는다(`info --strict` 와 같은 칸 표)", "`preview: true` — gmsh 없이 그 카드를 미리 짚는다(표면 = gmsh 에 달림 · 내부 = 멈춘다). 덱을 쓰지 않는다", "  표면 절점이면 `boundary_nodes: fixed` 가 짝을 찾은 원래 번호를 지킨다"}},
     {"cnrb2solid", "표면·재메시", "CNRB(절점 강체) 볼트를 HEX8 솔리드 원통 + tied 접촉으로 변환", "볼트 bolt cnrb 원통", "KooRemapper cnrb2solid <config.yaml>",
      {{"cnrb.yaml", R"KRH(model: examples/cnrb2solid/bolt_simple.k
 output: bolt_simple_solid.k
