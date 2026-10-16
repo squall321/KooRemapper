@@ -86,7 +86,7 @@ async def create_job(
         )
 
     # 참조된 `*INCLUDE` 가 세션에 있는지 — **여기서 막지 않으면 아무도 못 막는다.**
-    # KooRemapper 는 인클루드를 읽지 않으므로 op 은 그대로 성공하고, 산출물에는 그 `*INCLUDE` 줄이
+    # 덱을 고쳐 쓰는 op 은 주 덱만 고치므로(분석 op 은 2026-10-16 부터 함께 읽는다) 그대로 성공하고, 산출물에는 그 `*INCLUDE` 줄이
     # 보존된다(실측). 깨진 덱은 LS-DYNA 에 넣고 나서야 드러나고, 그때는 해석 시간을 이미 썼다.
     # 다만 인클루드를 클러스터에 따로 두는 운용도 있으므로 `allow_missing_includes` 로 넘어갈 수 있다.
     if not body.allow_missing_includes:
@@ -101,7 +101,8 @@ async def create_job(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
                 "덱이 참조하는 *INCLUDE 가 세션에 없습니다: " + detail
                 + " — 그 파일도 올리세요(하위 폴더면 경로째로). "
-                  "클러스터에 따로 두는 운용이면 allow_missing_includes=true 로 넘어갈 수 있습니다.",
+                  "클러스터에 따로 두는 운용이면 잡 생성 요청 본문에 allow_missing_includes=true 를 주면 넘어갈 수 "
+                  "있습니다(REST 전용 — MCP run_operation 에는 없습니다).",
             )
     # 덱이 정의되지 않은 것을 가리키면 LS-DYNA 가 **키워드 단계에서** 죽는다 — 해석 시간을
     # 쓰기도 전에다. `info` 는 그것을 보고만 하고 rc=0 으로 끝내므로(그 rc 는 계약이다) 막는

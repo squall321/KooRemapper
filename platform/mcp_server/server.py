@@ -145,8 +145,12 @@ async def upload_kfile(
     bbox/*INCLUDE 를 파싱해 meta 에 캐시한다.
 
     ⚠ `filename` 에 **하위 경로를 그대로 쓸 수 있고, 써야 한다** — 덱이 `*INCLUDE sub/part.k` 를
-    참조하면 그 파일도 `filename="sub/part.k"` 로 올려라. KooRemapper 는 인클루드를 읽지 않지만
+    참조하면 그 파일도 `filename="sub/part.k"` 로 올려라. 덱을 고쳐 쓰는 op 은 주 덱만 고치고
     **출력 덱에 그 줄을 보존**하므로, 경로가 어긋나면 산출물을 LS-DYNA 에 넣을 때 깨진다.
+    ⚠ **인클루드를 먼저 올려라** — meta 는 업로드하는 순간 한 번, 그때 세션에 있는 인클루드 닫힘까지
+    잰다. 마스터를 먼저 올리면 그 meta 가 절점 0 으로 남는다(실측). 순서가 뒤집혔으면 마스터를
+    `delete_file` 로 지우고 다시 올린다(같은 이름으로 또 올리면 `_1` 이 붙은 새 파일이 된다). op 은
+    실행할 때 닫힘을 다시 읽으므로 잡 결과는 순서와 무관하다.
     올린 뒤 `session_includes` 로 빠진 게 없는지 확인하라(`..`·절대경로는 서버가 제거한다)."""
     raw = base64.b64decode(content) if base64_encoded else content.encode("utf-8")
     files = {"files": (filename, raw, "application/octet-stream")}
@@ -162,7 +166,7 @@ async def upload_kfile(
 async def upload_local_path(session_id: str, path: str, ctx: Context, filename: str | None = None) -> dict:
     """로컬 디스크의 파일을 그대로 세션에 업로드한다(대형 메쉬에 적합). MCP 서버가 그 파일을
     읽을 수 있는 같은 머신에서 돌 때만 동작한다(예: Claude Desktop + 로컬 실행). 대화로
-    내용을 실어나르지 않으므로 수십 MB도 OK.
+    내용을 실어나르지 않으므로 수십 MB도 OK. 인클루드 순서 규칙은 `upload_kfile` 과 같다(인클루드를 먼저).
     Upload a file straight from local disk (best for large meshes). Only works when the
     MCP server can read `path` (server runs on the same machine, e.g. Claude Desktop local)."""
     import os as _os
@@ -211,10 +215,11 @@ async def list_session_files(session_id: str, ctx: Context) -> list:
 async def session_includes(session_id: str, ctx: Context) -> dict:
     """이 세션의 덱들이 참조하는 `*INCLUDE` 가 실제로 올라와 있나 — **op 을 돌리기 전에 확인하라.**
 
-    KooRemapper 는 `*INCLUDE` 를 읽지 않으므로 인클루드가 빠져도 op 은 **성공한다.** 대신 산출물에
-    그 `*INCLUDE` 줄이 그대로 남고, LS-DYNA 는 인클루드를 따라가므로 해석 단계에서 깨진다.
-    빠진 게 있으면 `run_operation` 이 422 로 막는다(정말 클러스터에 따로 두는 운용이면
-    `allow_missing_includes=true`). 반환: {ok, missing_by_file:{덱:{missing,satisfied}}}."""
+    덱을 고쳐 쓰는 op 은 주 덱만 고치므로 인클루드가 빠져도 **성공한다.** 대신 산출물에 그 `*INCLUDE`
+    줄이 그대로 남고, LS-DYNA 는 인클루드를 따라가므로 해석 단계에서 깨진다(분석 op — info·modelmeta·
+    그림 셋 — 은 인클루드를 함께 읽고, 빠진 파일은 못 읽었다고 말한다). 빠진 게 있으면 `run_operation`
+    이 422 로 막는다 — 그 파일을 올려라. 넘김값 `allow_missing_includes` 는 REST(`POST /sessions/{id}/jobs`
+    본문)에만 있고 **이 MCP 도구로는 줄 수 없다**. 반환: {ok, missing_by_file:{덱:{missing,satisfied}}}."""
     return await _get(ctx, f"/sessions/{session_id}/includes")
 
 
@@ -238,7 +243,9 @@ async def run_operation(session_id: str, operation: str, args: dict, ctx: Contex
 
 @mcp.tool()
 async def get_job(job_id: str, ctx: Context, include_logs: bool = False) -> dict:
-    """Job 상태/진행/exit_code/산출 파일. include_logs=true 면 stdout/stderr 일부도."""
+    """Job 상태/진행/exit_code/산출 파일. include_logs=true 면 stdout/stderr 일부도.
+    `warnings` 가 있으면 읽어라 — 입력 덱이 정의되지 않은 세트·파트·섹션·재질·절점을 가리킨다는 경고 등이다
+    (막지 않고 남긴다 · LS-DYNA 는 키워드 단계에서 멈춘다)."""
     job = await _get(ctx, f"/jobs/{job_id}")
     if include_logs and isinstance(job, dict):
         async with httpx.AsyncClient(base_url=API, timeout=60) as c:
