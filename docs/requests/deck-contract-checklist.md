@@ -846,7 +846,8 @@ plan2 는 `IdAllocator` 로 발행자를 통합하라고 했다. 정찰이 그 �
           인자판)·`cclip` 의 노드·요소. 셋 다 경고는 한다.
         → 따로 올린 것(이 커밋 아님) — `maxShellElementId_` 가 0 에서 시작(extract_surface·TSHELL 압출·오프셋
           셸이 덱의 셸·솔리드와 **같은 EID** 를 낸다, 실측) · 주 덱 MID 맹점(리더가 아는 재질 다섯 종류만 센다) ·
-          `ld_findMaxCurveId` 의 `_TITLE` 맹점 · ~~identity 가 `*NODE` 없는 마스터 덱에 빈 `*NODE` 를 끼운다~~(고쳤다 — P1-2).
+          ~~`ld_findMaxCurveId` 의 `_TITLE` 맹점~~(고쳤다 — 제목줄을 LCID 로 읽어 `*DEFINE_CURVE_TITLE` 의 LCID 를
+          다시 냈다, 재현 rc 0. `test_curve_title_ids.py` 8항 · 옛 FAIL 3) · ~~identity 가 `*NODE` 없는 마스터 덱에 빈 `*NODE` 를 끼운다~~(고쳤다 — P1-2).
       ★**2026-10-15 에 선행이 됐다** — StepForge 답신에서 Q5 를 「**우리가 번호를 준다**」로
       확정했다(`stepforge-boundary-reply-2026-10-15.md` §5 ①). 즉 저쪽 조각 내보내기(표 4행)의
       시작 번호가 여기 매달린다. **과도기 길을 함께 보냈다** — 그동안 StepForge 가 `ranges` 를

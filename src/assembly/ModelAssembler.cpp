@@ -13464,10 +13464,14 @@ static int ld_resolvePid(const std::vector<std::string>& rawLines,
 }
 
 // Find max *DEFINE_CURVE ID
+// ⚠ **`_TITLE` 을 건너뛰어야 한다**(`ld_findMaxSetSegmentId` 와 같은 맹점이었다, 2026-10-16). 제목줄을
+// LCID 줄로 읽어 `*DEFINE_CURVE_TITLE` 의 LCID 를 못 셌다 — 새 곡선이 그 번호를 **다시** 냈다(재현: 덱의
+// `*DEFINE_CURVE_TITLE` LCID 1 옆에 load 가 LCID 1 을 또 냈다, rc 0). 같은 파일의 `mw_scanMaxId` 는 이미 건넌다.
 static int ld_findMaxCurveId(const std::vector<std::string>& rawLines) {
     int maxId = 0;
     bool inCurve = false;
     bool needData = false;
+    bool needTitle = false;
     for (const auto& line : rawLines) {
         if (!line.empty() && line[0] == '*') {
             std::string up = line;
@@ -13475,6 +13479,7 @@ static int ld_findMaxCurveId(const std::vector<std::string>& rawLines) {
             if (up.find("*DEFINE_CURVE") == 0) {
                 inCurve = true;
                 needData = true;
+                needTitle = (up.find("_TITLE") != std::string::npos);
                 continue;
             }
             inCurve = false;
@@ -13482,6 +13487,7 @@ static int ld_findMaxCurveId(const std::vector<std::string>& rawLines) {
         }
         if (!inCurve || !needData) continue;
         if (!line.empty() && line[0] == '$') continue;
+        if (needTitle) { needTitle = false; continue; }
         needData = false;
         inCurve = false;
         std::istringstream iss(line);
