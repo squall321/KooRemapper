@@ -848,7 +848,11 @@ plan2 는 `IdAllocator` 로 발행자를 통합하라고 했다. 정찰이 그 �
           셸이 덱의 셸·솔리드와 **같은 EID** 를 낸다, 실측) · ~~주 덱 MID 맹점(리더가 아는 재질 다섯 종류만 센다)~~
           (고쳤다 — 재현: `*MAT_PLASTIC_KINEMATIC 2` 옆에 czm 이 MID 2 를 냈다. 실사용 6,053장 중 **781장(13%)**이
           리더가 모르는 재질을 가진다. `*MAT_THERMAL_*`(TMID 독립 — Vol II 159546)·`*MAT_ADD_*` 는 뺀다.
-          `test_mid_unknown_types.py` 14항 · 옛 FAIL 5 · 제외 무력화 FAIL 2) ·
+          `test_mid_unknown_types.py` 14항 · 옛 FAIL 5 · 제외 무력화 FAIL 2) · ~~주 덱 PID 맹점(리더가 맨 `*PART`
+          만 읽는다)~~(고쳤다 — 재현: `*PART_CONTACT 3` 옆에 czm 이 PID 3 을 냈다. 정의 꼴 셋(옵션형·COMPOSITE 의
+          `OPTCARD`·STACKED 층)을 매뉴얼대로 읽고 `_MODES`·`_MOVE` 등 가리키는 키워드는 뺀다. 옵션형 블록의 여러
+          파트는 첫 파트만(INERTIA Card 6 이 선택이라 줄 수 미확정 — 실사용 0). `test_pid_part_variants.py` 14항 ·
+          옛 FAIL 6 · 무력화 둘 다 문다 — ⚠ 첫 판 E 는 무력화를 **못 잡아** 두 줄로 고쳤다) ·
           ~~`ld_findMaxCurveId` 의 `_TITLE` 맹점~~(고쳤다 — 제목줄을 LCID 로 읽어 `*DEFINE_CURVE_TITLE` 의 LCID 를
           다시 냈다, 재현 rc 0. `test_curve_title_ids.py` 8항 · 옛 FAIL 3) · ~~identity 가 `*NODE` 없는 마스터 덱에 빈 `*NODE` 를 끼운다~~(고쳤다 — P1-2).
       ★**2026-10-15 에 선행이 됐다** — StepForge 답신에서 Q5 를 「**우리가 번호를 준다**」로

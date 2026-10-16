@@ -112,6 +112,60 @@ int cur_scanMaxMaterialId(const std::vector<std::string>& lines) {
     return maxId;
 }
 
+// 줄들에서 `*PART` **변형** 키워드가 정의하는 PID 최대값. 맨 `*PART`(·`_TITLE`)는 리더가 읽어 담는다 —
+// 변형은 리더가 건너뛰는데 번호는 차지한다(재현: `*PART_CONTACT 3` 옆에 czm 이 PID 3 을 냈다, rc 0).
+// 정의 꼴(Vol_I 215905-216095 · 217025-217100 · 218569-218680).
+//   `*PART_{INERTIA·REPOSITION·CONTACT·PRINT·ATTACHMENT_NODES·AVERAGED·FIELD}` — Card 1 제목 · Card 2 첫 칸 PID
+//   `*PART_COMPOSITE_*` — Card 1 제목 · (첫 칸이 `OPTCARD` 면 선택 Card 2) · Card 3 첫 칸 PID
+//   `*PART_STACKED_ELEMENTS` — Card 1 제목 · Card 2 PIDREF · Card 3 마다 PIDi(층마다 새 파트)
+// 가리키기만 하는 것(`_MODES`·`_MOVE`·`_SENSOR`·`_ANNEAL`·`_ADAPTIVE_FAILURE`)은 세지 않는다.
+// ⚠ 옵션형 블록 하나에 파트가 여럿이면 **첫 파트만** 센다 — 옵션 카드 수가 옵션마다 다르고 INERTIA 의 Card 6 은
+//    선택이라(216041) 줄 수를 확정 못 한다. 실사용 6,053장에서 변형으로 파트를 정의한 것은 `*PART_COMPOSITE` 1건,
+//    여러 파트 블록은 0이다. `*PART_DUPLICATE` 가 오프셋으로 만드는 번호도 세지 않는다(실사용 0).
+int cur_scanMaxPartVariantId(const std::vector<std::string>& lines) {
+    static const char* const kDefOpts[] = {"INERTIA", "REPOSITION", "CONTACT", "PRINT", "ATTACHMENT", "NODES",
+                                           "AVERAGED", "FIELD"};
+    enum class Form { None, Opts, Composite, Stacked };
+    int maxId = 0;
+    const int deckFw = deckFieldWidth(lines);
+    for (size_t i = 0; i < lines.size(); ++i) {
+        if (deckscan::isDataLine(lines[i])) continue;
+        const std::string kw = deckscan::kwBare(deckscan::keywordToken(lines[i]));
+        if (kw.rfind("*PART_", 0) != 0) continue;
+        const std::string rest = kw.substr(6);
+        Form form = Form::None;
+        if (rest.rfind("COMPOSITE", 0) == 0) {
+            form = Form::Composite;
+        } else if (rest == "STACKED_ELEMENTS") {
+            form = Form::Stacked;
+        } else {
+            bool all = !rest.empty();
+            std::istringstream ss(rest);
+            std::string tok;
+            while (all && std::getline(ss, tok, '_'))
+                all = std::any_of(std::begin(kDefOpts), std::end(kDefOpts),
+                                  [&](const char* o) { return tok == o; });
+            if (all) form = Form::Opts;
+        }
+        if (form == Form::None) continue;
+        const int fw = keywordFieldWidth(lines[i], deckFw) == 20 ? 20 : 10;
+        bool heading = true;
+        bool first = true;
+        for (size_t j = i + 1; j < lines.size(); ++j) {
+            const std::string& d = lines[j];
+            size_t h = d.find_first_not_of(" \t");
+            if (h != std::string::npos && d[h] == '*') break;
+            if (h != std::string::npos && d[h] == '$') continue;
+            if (heading) { heading = false; continue; }          // Card 1 제목(비어 있을 수 있다)
+            if (form == Form::Composite && first && d.rfind("OPTCARD", 0) == 0) continue;   // 선택 Card 2
+            first = false;
+            maxId = std::max(maxId, deckscan::fieldInt(deckscan::cardFields(d, fw), 0));
+            if (form != Form::Stacked) break;                    // 첫 파트의 PID 만
+        }
+    }
+    return maxId;
+}
+
 // 줄들에서 `*SET_*` 의 SID 최대값(모든 종류를 한 통으로).
 // *SET_..._TITLE 은 키워드 다음 줄이 제목이다 — 예전엔 그 제목 줄을 SID 로 읽으려다 실패하고
 // inSet 을 꺼 버려 진짜 SID 줄을 영영 못 봤다. 그러면 maxSetId_ 가 0 으로 남아
@@ -183,6 +237,8 @@ bool ModelAssembler::loadBaseModel(const std::string& filename) {
         if (pid > maxPartId_) maxPartId_ = pid;
         if (part.sectionId > maxSectionId_) maxSectionId_ = part.sectionId;
     }
+    // 리더가 건너뛰는 `*PART` 변형도 번호를 차지한다(`cur_scanMaxPartVariantId` 머리말).
+    maxPartId_ = std::max(maxPartId_, cur_scanMaxPartVariantId(rawLines_));
     // ⚠ **파트가 참조하지 않는 `*SECTION` 카드도 세어야 한다.** 위 루프는 `Part::sectionId` 만
     // 보므로, 덱에 있지만 아무 파트도 안 쓰는 섹션을 놓친다. 그러면 `++maxSectionId_` 가 그
     // 번호를 **다시 발행**하고 같은 종류 SECID 가 중복된다 — LS-DYNA 는 그 덱에서 멈춘다.
@@ -304,6 +360,7 @@ void ModelAssembler::raiseMaxIdsOverIncludes() {
         } catch (const std::exception& e) {
             unsure.push_back(path + " — 메시로 읽지 못해 노드·요소·파트·재질 번호를 세지 못했다: " + e.what());
         }
+        maxPartId_ = std::max(maxPartId_, cur_scanMaxPartVariantId(lines));
         maxSectionId_ = std::max(maxSectionId_, cur_scanMaxSectionId(lines));
         maxMaterialId_ = std::max(maxMaterialId_, cur_scanMaxMaterialId(lines));
         maxSetId_ = std::max(maxSetId_, cur_scanMaxSetId(lines));
