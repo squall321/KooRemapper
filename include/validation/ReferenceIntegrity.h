@@ -27,6 +27,10 @@ struct DamagedCard {
 struct ReferenceReport {
     std::vector<DanglingRef> dangling;
     std::vector<DamagedCard> damaged;
+    // **단정하지 않는** 손상 의심 — 표기로만 알아보는 것이라 사람이 일부러 그렇게 썼을 수 있다.
+    // `damaged` 와 달리 rc·`--strict` 와 무관하고, `info` 는 플랫폼 정규식이 미정의 참조로 집어 가지 않는
+    // 꼴로 적는다.
+    std::vector<DamagedCard> suspect;
     // ⚠ `*INCLUDE` 가 있으면 세트가 그 안에 정의됐을 수 있다. 그때는 "0건" 이라고 **말하면 안 된다**.
     bool hasUnreadIncludes = false;
     std::vector<std::string> includeNames;

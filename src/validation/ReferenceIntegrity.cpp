@@ -76,6 +76,33 @@ void contactDamage(const std::vector<std::string>& lines, size_t i, const std::s
     if (data.size() < 3)
         rep.damaged.push_back({(int)i + 1, kw,
             "필수 카드가 " + std::to_string(data.size()) + "장뿐입니다 — 표준 접촉은 Card 1·2·3 이 필수입니다"});
+
+    // ★Card 3 자리에 선택 카드 Card A 가 **밀려 올라온** 손상 — 줄 수가 그대로라 위 규칙이 못 잡는다.
+    //   옛 `contact modify` 가 필수 Card 3 을 지우며 선택 카드를 다시 썼다(P1-4 가 그 쓰기를 고쳤다). 이미 그렇게
+    //   망가진 덱은 LS-DYNA 가 Card A 의 값(SOFT·DEPTH…)을 Card 3(SFS·SFM…)으로 읽는다.
+    //   Card 3 은 여덟 칸이 **전부 실수**(SFS SFM SST MST SFST SFMT FSF VSF)이고 Card A 는 정수 칸이 많다(SOFT
+    //   LCIDAB DEPTH BSORT FRCFRQ). LS-DYNA 는 정수 꼴도 실수 칸에서 받아 문법 오류가 안 나므로 **표기**가
+    //   유일한 실마리다.
+    //   신호 — **Card A 의 정수 칸 자리**(1 SOFT · 3 LCIDAB · 6 DEPTH · 7 BSORT · 8 FRCFRQ)에 **0 아닌 정수 표기**가
+    //   있다. Card 3 이면 그 자리도 실수 칸이다.
+    //   ⚠ 첫 판은 「줄 전체에 소수점이 없다」를 봤는데 그러면 **실제 꼴의 Card A 를 놓친다** — SOFSCL(0.1)·
+    //   MAXPAR(1.025) 같은 실수 칸은 소수점이 있다(합성 덱으로 확인).
+    //   실측(2026-10-16) — 실사용 덱의 접촉 93,435개에서 이 신호에 걸린 것은 6개이고 **전부 `*PARAMETER`
+    //   참조(`&SFS`)가 든 줄**이라 아래에서 건너뛴다 — 즉 오탐 **0**. 리포 덱 106개도 0. 「정수 0 뿐」(4.5%)은
+    //   Card 3 으로도 Card A 로도 기본값이라 가릴 수 없고 해롭지도 않아 신호에서 뺀다. 사람이 SFS 를 `2` 로 쓸
+    //   수도 있으므로 **단정하지 않는다**(`suspect`).
+    if (data.size() >= 3 && !hasParameterRef(lines[data[2]])) {
+        const auto f3 = fields10(lines[data[2]]);
+        bool hit = false;
+        for (size_t q : {0u, 2u, 5u, 6u, 7u}) {
+            int v = 0;
+            if (q < f3.size() && toInt(f3[q], v) && v != 0) { hit = true; break; }
+        }
+        if (hit)
+            rep.suspect.push_back({(int)data[2] + 1, kw,
+                "Card 3 자리(SFS SFM SST MST …, 전부 실수 칸)에 정수만 있습니다 — 선택 카드 Card A(SOFT SOFSCL "
+                "LCIDAB …)가 밀려 올라온 손상일 수 있습니다. 일부러 그렇게 썼다면 무시하세요"});
+    }
 }
 
 }  // namespace

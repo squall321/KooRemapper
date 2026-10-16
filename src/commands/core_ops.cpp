@@ -1597,6 +1597,21 @@ int runInfo(const std::string& meshFile, const ConsoleOutput& console, bool stri
                                 ConsoleOutput::Color::RED);
             }
         }
+        // 의심(단정하지 않음) — rc·--strict 와 무관하다. ⚠ 항목 줄을 `  line N …` 꼴로 쓰면 플랫폼이 미정의
+        // 참조로 집어 간다(`kfile_inspect._RE_REF_ITEM`) — 그래서 `  의심 line N …` 으로 쓴다.
+        if (!ref.suspect.empty()) {
+            console.warning("손상이 의심되는 카드 " + std::to_string(ref.suspect.size()) +
+                            "건 — 표기로만 알아본 것이라 단정하지 않습니다");
+            size_t shown = 0;
+            for (const auto& d : ref.suspect) {
+                if (shown++ >= 20) { console.println("  … 외 " +
+                    std::to_string(ref.suspect.size() - 20) + "건"); break; }
+                const auto w = inclWhere(d.line);
+                console.println("  의심 line " + std::to_string(w.first) + " " + d.keyword + ": " + d.what +
+                                (w.second.empty() ? "" : " — 인클루드 " + w.second),
+                                ConsoleOutput::Color::YELLOW);
+            }
+        }
         if (ref.hasUnreadIncludes) {
             std::string names;
             for (size_t k = 0; k < ref.includeNames.size(); ++k)
