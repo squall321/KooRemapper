@@ -7,6 +7,7 @@
 // Units: t/mm/s throughout (MPa, N, ton).
 // =============================================================
 
+#include "parser/ElementCardLayout.h"   // realFieldWidth — 칸 폭 정본
 #include <ostream>
 #include <string>
 #include <vector>
@@ -117,10 +118,13 @@ inline void writeNodeHeader(std::ostream& out) {
         << "$#   nid               x               y               z\n";
 }
 
-// Write a single node line (free-format, 16-char fields)
-inline void writeNode(std::ostream& out, int nid, double x, double y, double z) {
-    char buf[128];
-    snprintf(buf, sizeof(buf), "%8d%16.6f%16.6f%16.6f\n", nid, x, y, z);
+// Write a single node line. `fw` = 덱의 정수 칸 폭(8 표준 · 10 i10 · 20 long — `deckFieldWidth`).
+// ⚠ 예전에는 `%8d` 로 박혀 있어 i10 덱에 8칸 노드를 끼웠다(i10 폭 훑기 실측 — cclip). 좌표 칸은 long 이면
+//   20 으로 같이 넓어진다(`realFieldWidth`).
+inline void writeNode(std::ostream& out, int nid, double x, double y, double z, int fw = 8) {
+    const int rw = KooRemapper::realFieldWidth(fw);
+    char buf[256];
+    snprintf(buf, sizeof(buf), "%*d%*.6f%*.6f%*.6f\n", fw, nid, rw, x, rw, y, rw, z);
     out << buf;
 }
 
@@ -130,12 +134,12 @@ inline void writeShellHeader(std::ostream& out) {
         << "$#   eid     pid      n1      n2      n3      n4\n";
 }
 
-// Write a single SHELL element (8-char fields)
+// Write a single SHELL element. `fw` = 덱의 정수 칸 폭(위 `writeNode` 와 같은 까닭).
 inline void writeShell(std::ostream& out, int eid, int pid,
-                        int n1, int n2, int n3, int n4) {
-    char buf[128];
-    snprintf(buf, sizeof(buf), "%8d%8d%8d%8d%8d%8d\n",
-             eid, pid, n1, n2, n3, n4);
+                        int n1, int n2, int n3, int n4, int fw = 8) {
+    char buf[256];
+    snprintf(buf, sizeof(buf), "%*d%*d%*d%*d%*d%*d\n",
+             fw, eid, fw, pid, fw, n1, fw, n2, fw, n3, fw, n4);
     out << buf;
 }
 
@@ -149,11 +153,11 @@ inline void writeSolidHeader(std::ostream& out) {
 // Write a single SOLID (HEX8) element
 inline void writeSolid(std::ostream& out, int eid, int pid,
                         int n1, int n2, int n3, int n4,
-                        int n5, int n6, int n7, int n8) {
-    char buf[128];
+                        int n5, int n6, int n7, int n8, int fw = 8) {
+    char buf[256];
     snprintf(buf, sizeof(buf),
-             "%8d%8d%8d%8d%8d%8d%8d%8d%8d%8d\n",
-             eid, pid, n1, n2, n3, n4, n5, n6, n7, n8);
+             "%*d%*d%*d%*d%*d%*d%*d%*d%*d%*d\n",
+             fw, eid, fw, pid, fw, n1, fw, n2, fw, n3, fw, n4, fw, n5, fw, n6, fw, n7, fw, n8);
     out << buf;
 }
 

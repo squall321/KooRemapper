@@ -1,3 +1,4 @@
+#include "parser/ElementCardLayout.h"   // deckFieldWidth — 칸 폭 정본
 #include "parser/DeckWriter.h"
 #include "merge.h"
 #include "util/YamlComment.h"
@@ -1182,7 +1183,8 @@ int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
 
         outf << rawLine << "\n";
         // *KEYWORD 는 덱의 첫 키워드다 — 그 바로 뒤에 참조 보고 블록을 넣는다(assemble 과 같은 자리)
-        if (!pidRefBlock.empty() && up == "*KEYWORD") {
+        // ⚠ 옵션이 붙은 `*KEYWORD I10=Y` 도 그 카드다 — 예전 `up == "*KEYWORD"` 는 그것을 못 찾고 맨 끝에 붙였다.
+        if (!pidRefBlock.empty() && up.rfind("*KEYWORD", 0) == 0) {
             outf << pidRefBlock;
             pidRefBlock.clear();
         }
@@ -1237,12 +1239,15 @@ int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
         outf << "$ === Merged Elements ===\n";
         outf << "$\n";
         outf << "*ELEMENT_SOLID\n";
+        // 새 요소를 **이 덱의 칸 폭**으로 쓴다(정본 `deckFieldWidth`). 예전에는 `%8d` 로 박혀 있어 i10 덱에
+        // 8칸 요소를 끼웠다(i10 폭 훑기 실측). 원본 줄은 위에서 그대로 베끼므로 폭이 이미 맞다.
+        const int mgFw = KooRemapper::deckFieldWidth(mdl.rawLines);
         for (auto& ne : newElems) {
             char buf2[256];
-            snprintf(buf2, sizeof(buf2), "%8d%8d%8d%8d%8d%8d%8d%8d%8d%8d",
-                     ne.id, ne.pid,
-                     ne.nid[0], ne.nid[1], ne.nid[2], ne.nid[3],
-                     ne.nid[4], ne.nid[5], ne.nid[6], ne.nid[7]);
+            snprintf(buf2, sizeof(buf2), "%*d%*d%*d%*d%*d%*d%*d%*d%*d%*d",
+                     mgFw, ne.id, mgFw, ne.pid,
+                     mgFw, ne.nid[0], mgFw, ne.nid[1], mgFw, ne.nid[2], mgFw, ne.nid[3],
+                     mgFw, ne.nid[4], mgFw, ne.nid[5], mgFw, ne.nid[6], mgFw, ne.nid[7]);
             outf << buf2 << "\n";
         }
     }

@@ -1,6 +1,7 @@
 // C-clip(스프링 접점) 생성 op 구현 — 박스 파트 치환·Castigliano 캘리브레이션·모멘트일치 눌림·INITIAL_STRESS_SHELL 출력.
 #include "cclip.h"
 #include "parser/IncludeScan.h"
+#include "parser/ElementCardLayout.h"   // deckFieldWidth — 칸 폭 정본
 #include "parser/IncludeClosure.h"   // 충돌 코퍼스 — 인클루드 닫힘(정본)
 #include "parser/DeckWriter.h"
 #include "cli/ConsoleOutput.h"
@@ -1089,6 +1090,11 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
     // covering keywords KFileReader may not track (and include-file id spaces)
     std::vector<std::string> unopenedIncludes;
     std::vector<std::string> scanLines = cc_collectScanLines(lines, modelPath, &unopenedIncludes);
+    // 새 노드·요소 카드를 **이 덱의 칸 폭**으로 쓴다(정본 `deckFieldWidth`). 예전에는 `bat::` 도우미가
+    // `%8d` 로 박혀 있어 i10 덱에 8칸 노드·셸을 끼웠다 — LS-DYNA 는 10칸으로 읽어 넷째 칸이 `61      62`
+    // 가 된다(i10 폭 훑기 실측). 우리 `info` 는 공백 토큰을 먼저 보는 관대한 리더라 그것을 못 잡았다.
+    // 독립 압축 덱(`dk`)은 자기 `*KEYWORD`(표준)를 달므로 8 그대로다.
+    const int ccFw = KooRemapper::deckFieldWidth(lines);
     // ⚠ 이 op 은 인클루드를 **실제로 읽는다**(닫힘 전부 — 중첩 포함). 그래서 할 말이 다르다 — 세트·
     // 파트·섹션·재질은 인클루드까지 세었지만, 노드·요소 ID 는 KFileReader 가 준 Mesh 에서 오므로
     // 여전히 이 덱 안에서만 센 값이다. 문구를 다른 op 과 뭉개면 읽는 쪽이 과신한다.
@@ -1314,12 +1320,12 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
                     double y = y0 + W * j / nW;
                     if (!solid) {
                         double g[3]; cc_toGlobal(fr, pts[i].x, y, pts[i].z, g);
-                        bat::writeNode(out, nid(i,j,0), g[0], g[1], g[2]);
+                        bat::writeNode(out, nid(i,j,0), g[0], g[1], g[2], ccFw);
                     } else for (int kk = 0; kk <= nT; ++kk) {
                         double off = ((double)kk/nT - 0.5) * t;
                         double g[3];
                         cc_toGlobal(fr, pts[i].x + off*nx, y, pts[i].z + off*nz, g);
-                        bat::writeNode(out, nid(i,j,kk), g[0], g[1], g[2]);
+                        bat::writeNode(out, nid(i,j,kk), g[0], g[1], g[2], ccFw);
                     }
                 }
             }
@@ -1335,7 +1341,7 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
             for (int i = 0; i < nP - 1; ++i)
                 for (int j = 0; j < nW; ++j)
                     bat::writeShell(elSS, baseEid + i*nW + j, pid,
-                                    nid(i,j,0), nid(i+1,j,0), nid(i+1,j+1,0), nid(i,j+1,0));
+                                    nid(i,j,0), nid(i+1,j,0), nid(i+1,j+1,0), nid(i,j+1,0), ccFw);
             b.nElems = (nP - 1) * nW;
         } else {
             // pick winding so hex volume is positive (frame handedness varies with signs)
@@ -1357,8 +1363,8 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
                         int b1=nid(i,j,kk),   b2=nid(i+1,j,kk),   b3=nid(i+1,j+1,kk),   b4=nid(i,j+1,kk);
                         int t1=nid(i,j,kk+1), t2=nid(i+1,j,kk+1), t3=nid(i+1,j+1,kk+1), t4=nid(i,j+1,kk+1);
                         int eid = baseEid + (i*nW + j)*nT + kk;
-                        if (!flip) bat::writeSolid(elSS, eid, pid, b1,b2,b3,b4, t1,t2,t3,t4);
-                        else       bat::writeSolid(elSS, eid, pid, t1,t2,t3,t4, b1,b2,b3,b4);
+                        if (!flip) bat::writeSolid(elSS, eid, pid, b1,b2,b3,b4, t1,t2,t3,t4, ccFw);
+                        else       bat::writeSolid(elSS, eid, pid, t1,t2,t3,t4, b1,b2,b3,b4, ccFw);
                     }
             b.nElems = (nP - 1) * nW * nT;
         }
