@@ -30,9 +30,11 @@ struct Cnrb2SolidConfig {
 };
 
 // Returns number of CNRBs converted, or -1 on error.
+// `maxContactId` — 덱(과 인클루드)의 기존 `*CONTACT_*_ID` CID 최대값. 새 tied 접촉의 CID 를 그 위로 낸다.
 int cnrb2solid_convert(std::vector<std::string>& lines,
                        const Cnrb2SolidConfig& cfg,
                        int& maxNodeId, int& maxElemId,
                        int& maxSecId,  int& maxMatId,
                        int& maxSetId,  int& maxPartId,
+                       int& maxContactId,
                        KooRemapper::ConsoleOutput& console);

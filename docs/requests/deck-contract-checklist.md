@@ -852,8 +852,11 @@ plan2 는 `IdAllocator` 로 발행자를 통합하라고 했다. 정찰이 그 �
           지웠다. 회귀 `test_assembler_include_ids.py` 에 단독 레인 여덟(hfdamp·cnrb2solid·ale·matswap 위치 인자·
           tetremesh·cclip·meshfix(gmsh)·cnrb2spring 충돌 검사) — 102항, **옛 바이너리에서 여덟 다 문다.**
           `extract-surface` 는 원 덱에 들이지 않는 별도 덱을 내므로 발행자가 아니다(매뉴얼 §3.1(h)에 적었다).
-          → 따로 올린 것 — cnrb2solid 의 접촉 CID 가 함수 안 `static int contactId = 0` 에서 1 부터 나온다(덱의
-            기존 `_ID` CID 를 안 본다).
+          → ~~따로 올린 것 — cnrb2solid 의 접촉 CID 가 함수 안 `static int contactId = 0` 에서 1 부터 나온다(덱의
+            기존 `_ID` CID 를 안 본다)~~ **(고쳤다)** — 재현: 덱의 `*CONTACT_..._ID` CID 1 옆에 새 tied 접촉도 CID 1
+            (rc 0). 두 호출처(단독·assemble)가 주 덱 + 인클루드의 최대 CID 를 단독 contact 와 같은 스캐너
+            (`ct_findMaxContactId`)로 세어 넘긴다. `test_cnrb2solid_ids.py` D-1~3(주 덱·인클루드·assemble) ·
+            옛 바이너리 셋 다 CID 1. 예제 덱은 기존 접촉이 없어 산출 바이트 그대로
         → 따로 올린 것(이 커밋 아님) — ~~`maxShellElementId_` 가 0 에서 시작(extract_surface·TSHELL 압출·오프셋
           셸이 덱의 셸·솔리드와 **같은 EID** 를 낸다, 실측)~~(고쳤다 — 셸도 요소 공용 커서로. 매뉴얼 Vol_I 162384
           「unique number with respect to other elements」— 어느 해석에서도 합법인 꼴. 솔버로 재려 했으나 **LS-DYNA

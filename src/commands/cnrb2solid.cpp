@@ -1,6 +1,7 @@
 #include "parser/DeckWriter.h"
 #include "parser/ElementCardLayout.h"   // deckFieldWidth — 덱이 선언한 칸 폭을 따른다
 #include "parser/IdAllocator.h"   // 인클루드 닫힘까지 센 최대값 · 못 본 자리 경고
+#include "commands/contact_helpers.h"   // ct_findMaxContactId — 단독 contact 와 같은 CID 스캐너
 #include "cnrb2solid.h"
 #include "kw_util.h"
 #include "cli/ConsoleOutput.h"
@@ -455,7 +456,7 @@ static bool cs_convertOneCnrb(
     const std::map<int, NodeXYZ>& allNodes,
     const std::map<int, std::vector<int>>& nodeSets,
     const Cnrb2SolidConfig& cfg,
-    int& nodeId, int& elemId, int& secId, int& matId, int& setId,
+    int& nodeId, int& elemId, int& secId, int& matId, int& setId, int& contactCursor,
     CnrbConvResult& result,
     ConsoleOutput& console)
 {
@@ -822,9 +823,10 @@ static bool cs_convertOneCnrb(
         result.setLines.push_back(ln);
     }
 
-    // CONTACT_TIED_SURFACE_TO_SURFACE_OFFSET
-    static int contactId = 0;
-    ++contactId;
+    // CONTACT_TIED_SURFACE_TO_SURFACE_OFFSET — CID 는 덱(과 인클루드)의 기존 `_ID` CID **위로** 낸다.
+    // 예전에는 함수 안 `static` 카운터가 1 부터 냈다 — 덱의 기존 접촉 CID 1 과 겹쳤다(재현 rc 0). 같은 CID 가
+    // 둘이면 LS-DYNA 가 키워드 단계에서 멈춘다(단독 contact 와 같은 규율).
+    const int contactId = ++contactCursor;
     result.contactLines.push_back("*CONTACT_TIED_SURFACE_TO_SURFACE_OFFSET_ID");
     {
         char buf[64]; snprintf(buf, sizeof(buf), "%10d", contactId);
@@ -853,6 +855,7 @@ int cnrb2solid_convert(std::vector<std::string>& lines,
                        int& maxNodeId, int& maxElemId,
                        int& maxSecId,  int& maxMatId,
                        int& maxSetId,  int& /*maxPartId*/,
+                       int& maxContactId,
                        ConsoleOutput& console)
 {
     // ★덱이 선언한 칸 폭을 **여기서 한 번** 정한다. 전에는 `%8d` 로 못 박혀 있어서
@@ -889,7 +892,7 @@ int cnrb2solid_convert(std::vector<std::string>& lines,
 
         CnrbConvResult res;
         bool ok = cs_convertOneCnrb(cnrb, allNodes, nodeSets, cfg,
-                                     maxNodeId, maxElemId, maxSecId, maxMatId, maxSetId,
+                                     maxNodeId, maxElemId, maxSecId, maxMatId, maxSetId, maxContactId,
                                      res, console);
         if (!ok) continue;
 
@@ -1121,9 +1124,10 @@ int runCnrb2Solid(const std::string& yamlFile, ConsoleOutput& console) {
     scanMaxIds(lines);
     for (const auto& f : inclClosure.files) scanMaxIds(f.lines);
 
+    int maxContactId = KooRemapper::ids::maxOverClosure(lines, inclClosure, ct_findMaxContactId);
     int n = cnrb2solid_convert(lines, cfg,
                                 maxNodeId, maxElemId, maxSecId, maxMatId, maxSetId, maxPartId,
-                                console);
+                                maxContactId, console);
 
     if (n < 0) { console.error("[cnrb2solid] Conversion failed"); return 1; }
 

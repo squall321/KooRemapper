@@ -17,6 +17,10 @@
 그리고 `%8d` 는 넘치면 **잘라 주지 않고 칸을 넓힌다** — 다음 칸을 침범한 줄이 조용히 나가고
 LS-DYNA 가 엉뚱한 노드를 읽는다. 그래서 8칸을 넘기면 **파일을 쓰지 않고 rc=1** 이다.
 
+D 새 tied 접촉의 CID 가 덱(·인클루드)의 기존 `_ID` CID **위로** 난다(2026-10-16). 예전에는 함수 안
+  `static int contactId = 0` 이 1 부터 냈다 — 덱의 기존 접촉 CID 1 과 겹쳤다(재현 rc 0). 같은 CID 가
+  둘이면 LS-DYNA 가 키워드 단계에서 멈춘다. assemble 안의 cnrb2solid 도 같은 커서를 받는다.
+
 usage: test_cnrb2solid_ids.py <KooRemapper 바이너리>
 """
 import os
@@ -183,6 +187,44 @@ def main():
     check("C-4 보고가 한 줄에 수백 건을 나열하지 않는다", not long_lines,
           "긴 줄 길이=%r" % [len(l) for l in long_lines])
     shutil.rmtree(d, ignore_errors=True)
+
+    print("[D 새 접촉 CID 는 기존 _ID CID 위로]")
+    existing = ("*CONTACT_AUTOMATIC_SINGLE_SURFACE_ID\n         %d existing contact\n"
+                "         0         0         2         0\n\n\n")
+
+    def new_cids(path):
+        L = open(path, encoding="latin-1").read().splitlines()
+        return [int(L[i + 1][:10]) for i, l in enumerate(L) if l.upper().startswith("*CONTACT_TIED")]
+
+    def with_end(text, extra):
+        i = text.upper().rfind("*END")
+        return text[:i] + extra + text[i:]
+    for label, deck, files, cmd, want in (
+            ("D-1 주 덱의 CID 1", with_end(base_deck(), existing % 1), {}, "cnrb2solid", [2]),
+            ("D-2 인클루드의 CID 5", with_end(base_deck(), "*INCLUDE\ncon.k\n"),
+             {"con.k": "*KEYWORD\n" + existing % 5 + "*END\n"}, "cnrb2solid", [6]),
+            ("D-3 assemble 안의 cnrb2solid", with_end(base_deck(), existing % 3), {}, "assemble", [4])):
+        d = tempfile.mkdtemp(prefix="c2s_cid_")
+        try:
+            op = stage(d, deck)
+            for name, body in files.items():
+                open(os.path.join(d, name), "w").write(body)
+            if cmd == "assemble":
+                cfg = open(os.path.join(d, "cfg.yaml"), encoding="utf-8").read().splitlines()
+                keys = [l for l in cfg if l.strip() and not l.lstrip().startswith("#") and
+                        not l.startswith(("model:", "output:"))]
+                open(os.path.join(d, "asm.yaml"), "w").write(
+                    "base_model: in.k\noutput: out\noperations:\n  - type: cnrb2solid\n" +
+                    "".join("    " + l.split("#")[0].rstrip() + "\n" for l in keys))
+                p = subprocess.run([binary, "assemble", "asm.yaml"], capture_output=True, text=True,
+                                   timeout=900, cwd=d)
+                rc, out = p.returncode, p.stdout + p.stderr
+            else:
+                rc, out = run(binary, d, "cfg.yaml")
+            got = new_cids(op) if rc == 0 and os.path.exists(op) else None
+            check("%s → 새 CID %s" % (label, want), got == want, "rc=%d got=%s %s" % (rc, got, out[-200:]))
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
 
     print()
     if FAILS:

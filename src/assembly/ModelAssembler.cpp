@@ -17267,11 +17267,13 @@ bool ModelAssembler::applyCnrb2Solid(const Cnrb2SolidOperation& op) {
     cfg.headPosition     = op.headPosition;
 
     ConsoleOutput console;
+    // 새 tied 접촉의 CID 는 덱과 인클루드의 기존 `_ID` CID 위로(같은 스캐너)
+    int maxContactId = std::max(ct_findMaxContactId(rawLines_), inclMax(ct_findMaxContactId));
     int n = cnrb2solid_convert(rawLines_, cfg,
                                 maxNodeId_, maxElementId_,
                                 maxSectionId_, maxMaterialId_,
                                 maxSetId_, maxPartId_,
-                                console);
+                                maxContactId, console);
     if (n < 0) {
         errorMessage_ = "[cnrb2solid] Conversion failed";
         return false;
