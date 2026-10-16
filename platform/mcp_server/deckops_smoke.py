@@ -34,7 +34,8 @@ from mcp.client.streamable_http import streamablehttp_client
 
 REPO = Path(__file__).resolve().parents[2]
 
-# (op, 주 입력 덱, 함께 올릴 파일들, args) — `model` 은 주 덱의 파일명으로 자동 채운다.
+# (op, 주 입력 덱, 함께 올릴 파일들, args) — `model` 은 주 덱의 파일명으로 자동 채운다
+# (args 가 주 덱을 이미 다른 키로 가리키면 채우지 않는다).
 CASES = [
     ("cleanup-nodes",
      REPO / "examples" / "cleanup-nodes" / "cleanup_demo.k", [],
@@ -43,6 +44,20 @@ CASES = [
      REPO / "examples" / "extract-parts" / "assembly.k",
      [REPO / "examples" / "extract-parts" / "part2_include.k"],
      {"output": "extracted.k", "parts": [1, 2], "report": "extract_report.json"}),
+    # 삽입 흐름 — 바닥을 내고(id_floor 는 덱 대신 JSON 을 쓴다) StepForge 조각을 넣는다
+    ("id_floor",
+     REPO / "examples" / "cad_solid_merge_to_deck" / "deck.k",
+     [REPO / "examples" / "cad_solid_merge_to_deck" / "stepforge_fragment.json"],
+     {"output": "floor.json", "fragment_map": "stepforge_fragment.json"}),
+    ("cad_solid_merge_to_deck",
+     REPO / "examples" / "cad_solid_merge_to_deck" / "deck.k",
+     [REPO / "examples" / "cad_solid_merge_to_deck" / f for f in ("stepforge_fragment.k", "stepforge_fragment.json")],
+     {"output": "merged.k", "fragment": "stepforge_fragment.k", "fragment_map": "stepforge_fragment.json"}),
+    ("rebind_entities_after_remesh",
+     REPO / "examples" / "rebind_entities_after_remesh" / "ours.k",
+     [REPO / "examples" / "rebind_entities_after_remesh" / f for f in ("v1.k", "v2.k", "range_diff.json")],
+     {"old_deck": "v1.k", "new_deck": "v2.k", "entities": "ours.k", "output": "ours_rebound.k",
+      "range_diff": "range_diff.json"}),
 ]
 
 OK = []
@@ -81,7 +96,9 @@ async def main():
                         S._data(await s.call_tool("upload_local_path",
                                                   {"session_id": sid, "path": str(p)}))
                     a = dict(args)
-                    a["model"] = os.path.basename(str(deck))
+                    # 구조화 op 은 모르는 키를 거절한다 — `rebind_entities_after_remesh` 에는 `model` 이 없다
+                    if os.path.basename(str(deck)) not in a.values():
+                        a["model"] = os.path.basename(str(deck))
                     job = S._data(await s.call_tool("run_operation",
                                                     {"session_id": sid, "operation": op, "args": a}))
                     jid = job.get("id") if isinstance(job, dict) else None
