@@ -891,9 +891,13 @@ plan2 는 `IdAllocator` 로 발행자를 통합하라고 했다. 정찰이 그 �
 - [x] 회귀 `test_offset_tshell_deck.py` 13항(사각 1층 · 2층 절점 공유 · 사면체의 삼각 바닥) · **옛 바이너리 FAIL 6**.
       커밋된 TSHELL 산출 셋을 다시 구웠다(`examples/offset/03` · `tests/offset/regression/02` · `tests/offset_tshell_result`).
       42 op 산출 덱 동일 · 회귀 90
-- [ ] ★**남은 것(설계 질문 — 혼자 정하지 않는다)** — TSHELL 갈래는 `connection_mode` 를 **처리하지 않는다.** 압출의
+- [x] ★**남은 것(설계 질문 — 혼자 정하지 않는다)** — TSHELL 갈래는 `connection_mode` 를 **처리하지 않는다.** 압출의
       층 0 이 원본 면과 **겹치는 새 절점**이라, `tied` 를 줘도 TSHELL 층이 원본에서 떨어져 있다(솔리드 갈래는 연결을
       처리한다). 덱은 합법이지만 물리는 사용자가 기대한 것과 다를 수 있다. 원본 절점을 공유할지·묶을지는 사용 의도의 일이다
+      → **(2026-10-16) 사용자 결정 「솔리드와 같은 뜻」 — 고쳤다.** TSHELL 0층 = 원본 면 절점(tied·none) · czm 은 복제 +
+        코히시브 · contact 는 복제 + 접촉 안내(솔리드와 같은 처리 블록). 회귀 `test_offset_tshell_deck.py` 28항(D 절 모드 넷 ·
+        옛 바이너리 FAIL 7) · 커밋된 TSHELL 산출 셋 재굽기. ⚠ 그 산출의 `--strict` 「파트 1 미정의」는 옛 산출에도 있었다 —
+        입력 `arc30_flat.k` 가 `*PART` 없는 메시 전용 덱이고 offset 이 새 파트(PID 10) 정의만 붙이기 때문이다(예제 꼴).
 - ⚠ `tests/offset/README_REGRESSION.md` 는 「02: TSHELL 1200개」를 적었지만 면이 580개라 2층은 1160개다(문서가 솔리드 수를
   적었다). 손대지 않았다 — PowerShell 시절 묶음이고 실행기가 리포에 없다
 

@@ -19,6 +19,10 @@
     서로 다르고 그 거리가 층 두께 · `*SECTION_TSHELL` 데이터 줄 하나 · ELFORM ∈ {1,2,3,5,6,7}
   B 2층 — 요소 수 = 면 × 2 · 1층 윗면 = 2층 아랫면(절점 공유)
   C 삼각 바닥(사면체 하나 — 바깥면이 전부 삼각) — 쐐기 꼴 N4 = N3 · N8 = N7, 바닥 셋은 서로 다르다
+  D ★연결 모드가 솔리드와 같은 뜻이다(2026-10-16 · 사용자 결정) — 예전에는 TSHELL 이 `connection_mode` 를 건너뛰어
+    기본값 tied 로 만든 층이 원본 면 위의 **겹친 새 절점**에 떠 있었다.
+    tied(기본) = 아랫면이 **원래 절점** · czm = 아랫면이 새 복제 절점이고 원본 면과 그것을 잇는 코히시브가 면 수만큼 ·
+    contact = 아랫면이 새 복제 절점이고 접촉 안내가 붙는다
 
 usage: test_offset_tshell_deck.py <KooRemapper 바이너리>
 """
@@ -47,6 +51,17 @@ def blocks(path):
         if l.startswith("*"):
             kw = l.split()[0].upper().rstrip("%+-")
             out.append((kw, []))
+        elif out and l.strip() and not l.lstrip().startswith("$"):
+            out[-1][1].append(l)
+    return out
+
+
+def blocks_text(text):
+    """글에서 바로 — 입력 덱의 절점 집합을 보려고."""
+    out = []
+    for l in text.splitlines():
+        if l.startswith("*"):
+            out.append((l.split()[0].upper().rstrip("%+-"), []))
         elif out and l.strip() and not l.lstrip().startswith("$"):
             out[-1][1].append(l)
     return out
@@ -89,16 +104,28 @@ tet
 """
 
 
-def run(binary, deck_body, layers):
+CZM_CARD = ("    czm_material_card: |\n      *MAT_COHESIVE_MIXED_MODE\n"
+            "      $#     mid        ro     roflg   intfail        en        et       gic      giic\n"
+            "       @CZM_MID@       2.0         0       1.0     20000     10000       0.5       0.5\n"
+            "      $#     xmu         t         s       und       utd     gamma\n"
+            "             2.0       1.0       1.0\n")
+
+
+def run(binary, deck_body, layers, mode=None, raw=False):
     d = tempfile.mkdtemp(prefix="otd_")
     try:
         open(os.path.join(d, "deck.k"), "w", encoding="utf-8").write(deck_body)
-        open(os.path.join(d, "c.yaml"), "w", encoding="utf-8").write(YAML % layers)
+        y = YAML % layers
+        if mode:
+            y += "    connection_mode: %s\n" % mode + (CZM_CARD if mode == "czm" else "")
+        open(os.path.join(d, "c.yaml"), "w", encoding="utf-8").write(y)
         r = subprocess.run([binary, "assemble", "c.yaml"], cwd=d, capture_output=True, text=True, timeout=300,
                            encoding="utf-8", errors="replace")
         out = os.path.join(d, "out.k")
         if r.returncode != 0 or not os.path.exists(out):
             return None, (r.stdout + r.stderr)[-300:]
+        if raw:
+            return blocks(out), open(out, encoding="utf-8", errors="replace").read()
         return blocks(out), ""
     finally:
         shutil.rmtree(d, ignore_errors=True)
@@ -153,6 +180,38 @@ def main():
         check("C 쐐기 꼴 N4 = N3 · N8 = N7 · 바닥 셋이 서로 다르다",
               ts3 and all(t[5] == t[4] and t[9] == t[8] and len({t[2], t[3], t[4]}) == 3 and all(t[2:]) for t in ts3),
               ts3[:2])
+
+
+    print("[D 연결 모드 — 솔리드와 같은 뜻]")
+    src_nodes = set(nodes_of(blocks_text(arc)))
+    for mode in (None, "tied", "czm", "contact"):
+        tag = mode or "기본(tied)"
+        bl_m, text = run(binary, arc, 1, mode=mode, raw=True)
+        if not check("D %-10s rc 0" % tag, bl_m is not None, text):
+            continue
+        ts_m, _ = tshell_lines(bl_m)
+        bottoms = {n for t in ts_m for n in t[2:6]}
+        new_nodes = set(nodes_of(bl_m)) - src_nodes
+        if mode in (None, "tied"):
+            check("D %-10s ★아랫면이 원래 절점이다(층이 원본 면에 붙는다)" % tag,
+                  bottoms and bottoms <= src_nodes, len(bottoms - src_nodes))
+            check("D %-10s 새 절점은 윗면 몫뿐이다(겹친 절점을 만들지 않는다)" % tag,
+                  {n for t in ts_m for n in t[6:10]} == new_nodes, (len(new_nodes)))
+        else:
+            check("D %-10s 아랫면이 새 복제 절점이다(원본에서 뗀다)" % tag,
+                  bottoms and not (bottoms & src_nodes), len(bottoms & src_nodes))
+            xyz = nodes_of(bl_m)
+            coincide = all(any(xyz[b] == xyz[o] for o in src_nodes) for b in list(bottoms)[:50])
+            check("D %-10s 복제 절점은 원본 면과 같은 자리다" % tag, coincide)
+        if mode == "czm":
+            czm = [ints(l) for kw, data in bl_m if kw == "*ELEMENT_SOLID" for l in data]
+            czm_pids = {c[1] for c in czm if len(c) >= 10} - {1}
+            cz = [c for c in czm if len(c) >= 10 and c[1] in czm_pids]
+            check("D czm        코히시브가 면 수만큼(TSHELL 1층 = 면 수)", len(cz) == len(ts_m), (len(cz), len(ts_m)))
+            check("D czm        코히시브 아랫면 = 원래 절점 · 윗면 = TSHELL 아랫면",
+                  cz and all(set(c[2:6]) <= src_nodes and set(c[6:10]) <= bottoms for c in cz))
+        if mode == "contact":
+            check("D contact    접촉 안내가 붙는다", "connection_mode: contact" in text)
 
     print()
     if FAILS:

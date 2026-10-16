@@ -1876,6 +1876,13 @@ operations:
 
 > **v1.8.0 정정**: (1) `connection_mode` 값 집합은 `tied | czm | contact | none` 이며 **기본값은 `tied`** 입니다(help·examples. 구버전의 `shared | tied | czm`/기본 `shared` 정정). `contact` 는 인터페이스 노드를 복제해 별도 표면을 만들고 사용자가 이후 `*CONTACT` 를 정의합니다. (2) `element_type` 값은 `solid | tshell | shell` 입니다(구버전의 `hex | tet` 정정). (3) config 는 최상위 `base_model`/`output` + `operations[].type: offset` 구조입니다. 재료는 `material_card` 로 지정하고, 층마다 다르면 `material_cards:` 목록(`- |` 항목)을 씁니다(단독·assemble 모두). (4) 카드 MID 칸의 값(`@MID@`·`@CZM_MID@`·숫자·라벨)은 새 MID 로 바뀌며, 값은 LS-DYNA 고정 폭 10열 칸 안에 두세요. (5) `new_pid`·`new_secid`·`new_mid` 를 지정해도 뒤이어 자동 발급되는 ID 와 겹치지 않습니다. (6) `connection_mode: none` 은 assemble 경로에서도 허용됩니다. 단독 `offset` 도 assemble 과 같은 값 검사를 거칩니다.
 
+> **TSHELL 도 `connection_mode` 를 솔리드와 같은 뜻으로 받는다(2026-10-16).** `tied`(기본)·`none` 이면 TSHELL 0층이
+> **원본 면 절점 그대로**다(공유 — 층이 붙는다). `czm` 은 그 절점을 복제해 원본 면과 복제본 사이에 코히시브(ELFORM 20)를
+> 면 수만큼 만들고, `contact` 는 복제해 떼고 접촉 안내를 붙인다. 예전에는 TSHELL 갈래가 이 칸을 **건너뛰어** 0층이 원본 면
+> 위의 겹친 새 절점이었다 — 기본값으로 만든 층이 떠 있었다(덱은 합법이라 아무 말이 없었다). 커밋된 TSHELL 산출 셋
+> (`examples/offset/03` · `tests/offset/regression/02` · `tests/offset_tshell_result.k`)을 다시 구웠다. 회귀
+> `test_offset_tshell_deck.py` D 절(모드 넷 · 옛 바이너리 FAIL 7).
+
 ### 주요 파라미터
 
 

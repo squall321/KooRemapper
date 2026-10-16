@@ -9640,8 +9640,11 @@ bool ModelAssembler::applyOffset(const OffsetOperation& op, double E, double nu)
 
     } else if (op.elementType == "tshell") {
         double thickness = (op.shellThickness > 0) ? op.shellThickness : op.thickness;
+        const size_t startCount = addedElements_.size();
         extrudeToTShell(sourceSurface, offsetDir, thickness,
                        op.numLayers, actualPid, actualSecid);
+        // 연결 모드가 솔리드와 같은 뜻이 되도록 같은 목록을 넘긴다(아래 6.) — 0층이 원본 면 절점이다
+        for (size_t i = startCount; i < addedElements_.size(); ++i) offsetElements.push_back(addedElements_[i]);
         std::cout << "[INFO] TSHELL extrusion completed\n";
 
     } else if (op.elementType == "shell") {
@@ -9656,8 +9659,10 @@ bool ModelAssembler::applyOffset(const OffsetOperation& op, double E, double nu)
         return false;
     }
 
-    // 6. Apply connection mode (only for solid elements)
-    if (op.elementType == "solid") {
+    // 6. Apply connection mode — 솔리드와 TSHELL(2026-10-16 · 사용자 결정 「솔리드와 같은 뜻」). 예전에는 TSHELL 이
+    //    이 블록을 건너뛰어, 기본값 tied 로 만든 층이 원본 면 위의 **겹친 새 절점**에 떠 있었다(덱은 합법 · 물리는
+    //    떨어져 있다). 지금 TSHELL 0층은 원본 면 절점이고(tied = 공유), czm·contact 는 솔리드처럼 그 절점을 복제해 뗀다.
+    if (op.elementType == "solid" || op.elementType == "tshell") {
         if (op.connectionMode == "tied") {
             applyConnectionTied(sourceSurface, offsetElements);
 
@@ -10918,7 +10923,8 @@ void ModelAssembler::extrudeToTShell(const std::vector<ShellElement>& surface,
     std::cout << "[INFO] Extruding to TSHELL: " << numLayers
               << " layers, thickness=" << layerThickness << " mm each\n";
 
-    // Create offset node layers
+    // Create offset node layers — 0층은 **원본 면 절점 그대로**다(솔리드 압출과 같다 · tied = 공유).
+    // 예전에는 0층부터 새 절점을 만들어 층이 원본 면에서 떨어져 있었다(같은 자리의 겹친 절점).
     std::map<int, std::vector<int>> nodeLayerMap;
 
     for (const auto& shell : surface) {
@@ -10927,9 +10933,9 @@ void ModelAssembler::extrudeToTShell(const std::vector<ShellElement>& surface,
             if (nodeLayerMap.count(nid)) continue;
 
             Vector3D basePos = getNodePosition(nid);
-            std::vector<int> layerNodes;
+            std::vector<int> layerNodes{nid};
 
-            for (int layer = 0; layer <= numLayers; ++layer) {
+            for (int layer = 1; layer <= numLayers; ++layer) {
                 int newNid = ++maxNodeId_;
                 Vector3D offsetPos = basePos + direction * (layer * layerThickness);
 
