@@ -505,6 +505,11 @@ static bool printLegacyHelp(ConsoleOutput& console, const std::string& helpCmd) 
         console.println("    pids: [1, 2, 3]            # Multiple PIDs");
         console.println("    swap_all: true             # All parts in model");
         std::cout << "\n";
+        console.println("  identity     Read the deck and write it back unchanged (no-edit entry)");
+        console.println("    # 읽기→쓰기 왕복을 그대로 태운다 — 산출이 입력과 바이트로 같아야 한다");
+        console.println("    # (개행 종류 · 말미 개행 · 칸 폭을 원본대로). 왕복 검증용 — cat 복사와 달리");
+        console.println("    # 리더가 떼고 되붙이는 것을 시험한다");
+        std::cout << "\n";
         console.println("Examples: see examples/ directory");
         console.println("  examples/offset/   examples/iga/   examples/matswap/");
         console.println("  examples/disconnect/   examples/formstrain/");

@@ -160,6 +160,7 @@ private:
     // 입력 덱의 개행. 읽을 때 기억했다가 최종 출력에서 되붙인다 — 리더가 CR 을 떼므로
     // 이것이 없으면 CRLF 덱이 조용히 LF 로 바뀐다(구조 카운트는 전부 정상이라 안 보인다).
     DeckNewline deckNewline_ = DeckNewline::LF;
+    bool deckFinalNewline_ = true;   // 원본이 개행으로 끝났나 — 쓸 때 그대로 따른다
 
     // Tracking changes
     std::set<int> removedNodeIds_;

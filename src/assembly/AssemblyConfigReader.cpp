@@ -982,6 +982,10 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             op.type = AssemblyOperation::STRIP;
                         } else if (val == "extract_surface" || val == "extract-surface") {
                             op.type = AssemblyOperation::EXTRACT_SURFACE;
+                        } else if (val == "identity") {
+                            // 무편집 진입점 — 이 op 의 읽기→쓰기를 **그대로** 태운다. `cat` 복사는 리더가
+                            // 떼고 되붙이는 것(CR · 칸 폭)을 하나도 시험하지 못한다(plan2 P1-1 ③).
+                            op.type = AssemblyOperation::IDENTITY;
                         } else {
                             throw std::runtime_error("Unknown operation type: " + val);
                         }

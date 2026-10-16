@@ -40,6 +40,22 @@ inline DeckNewline detect(const std::string& path) {
     return (crlf * 2 > lf) ? DeckNewline::CRLF : DeckNewline::LF;
 }
 
+// 파일이 개행으로 끝나나. 리더는 `getline` 으로 읽으므로 **마지막 줄에 개행이 있었는지를 잃는다** —
+// 쓰는 쪽이 줄마다 `\n` 을 붙이면 말미 개행이 없던 덱에 하나가 생긴다(무편집 진입점 실측 — 그것만으로
+// sha256 이 달라진다). CR 을 기억했다가 되붙이는 것과 같은 규율로, 이것도 기억했다가 따른다.
+// 빈 파일은 참으로 본다(뗄 것이 없다).
+inline bool endsWithNewline(const std::string& path) {
+    std::FILE* f = std::fopen(path.c_str(), "rb");
+    if (!f) return true;
+    bool ends = true;
+    if (std::fseek(f, -1, SEEK_END) == 0) {
+        const int c = std::fgetc(f);
+        ends = (c == EOF) || (c == '\n');
+    }                                          // fseek 이 실패하면 빈 파일이다 — 뗄 것이 없다
+    std::fclose(f);
+    return ends;
+}
+
 // `\n` 으로 조립된 본문을 그 덱의 개행으로 바꾼다.
 // 본문에는 CR 이 없다(리더가 이미 뗐다) — 그래서 단순 치환이 안전하다.
 inline std::string apply(const std::string& text, DeckNewline nl) {

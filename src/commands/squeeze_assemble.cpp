@@ -694,6 +694,8 @@ int runAssemble(const std::string& configFile, const ConsoleOutput& console) {
             ok = assembler.applyStrip(op.strip);
         } else if (op.type == AssemblyOperation::EXTRACT_SURFACE) {
             ok = assembler.applyExtractSurface(op.extractSurface);
+        } else if (op.type == AssemblyOperation::IDENTITY) {
+            ok = true;   // 아무것도 바꾸지 않는다 — 읽은 덱이 쓰기 경로를 그대로 지나간다
         }
 
         if (!ok) {

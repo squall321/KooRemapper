@@ -67,6 +67,7 @@ bool ModelAssembler::loadBaseModel(const std::string& filename) {
         return false;
     }
     deckNewline_ = deck_newline::detect(filename);   // 뗀 CR 을 쓸 때 되붙이기 위해 기억한다
+    deckFinalNewline_ = deck_newline::endsWithNewline(filename);   // 말미 개행 유무도 기억한다
     std::string line;
     while (std::getline(file, line)) {
         if (!line.empty() && line.back() == '\r') {
@@ -180,6 +181,7 @@ bool ModelAssembler::loadRawOnly(const std::string& filename) {
         return false;
     }
     deckNewline_ = deck_newline::detect(filename);   // 뗀 CR 을 쓸 때 되붙이기 위해 기억한다
+    deckFinalNewline_ = deck_newline::endsWithNewline(filename);   // 말미 개행 유무도 기억한다
     std::string line;
     while (std::getline(file, line)) {
         if (!line.empty() && line.back() == '\r') line.pop_back();
@@ -5687,7 +5689,12 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
     }
     // 입력 덱이 CRLF 였으면 그대로 되돌린다. 본문은 `\n` 으로 조립돼 있고 리더가 CR 을 뗐으므로
     // 단순 치환이 안전하다. 이것이 없어서 CRLF 덱이 왕복마다 LF 로 바뀌었다(실측: CRLF 578 → 0).
-    outFile << deck_newline::apply(output.str(), deckNewline_);
+    // ★말미 개행도 원본을 따른다. 리더(`getline`)는 마지막 줄에 개행이 있었는지를 잃고 위 조립은 줄마다
+    //   `\n` 을 붙이므로, 개행 없이 끝나던 덱에 하나가 생겼다 — 무편집 진입점(`identity`)으로 재보니
+    //   그것 하나로 sha256 이 달랐다(plan2 P1-1 ③). 원본에 없었으면 마지막 하나를 뗀다.
+    std::string outBody = output.str();
+    if (!deckFinalNewline_ && !outBody.empty() && outBody.back() == '\n') outBody.pop_back();
+    outFile << deck_newline::apply(outBody, deckNewline_);
     outFile.close();
 
     // Write accumulated dynain (separate file only if not embedded)
