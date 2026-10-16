@@ -2,6 +2,7 @@
 #include "util/StrictJson.h"
 
 #include <cerrno>
+#include <cstdio>
 #include <cstdlib>
 
 namespace KooRemapper {
@@ -206,6 +207,30 @@ bool parse(const std::string& text, Value& out, std::string& err) {
     r.ws();
     if (r.p != text.size()) { r.fail("값 뒤에 다른 글이 있다"); err = r.err; return false; }
     return true;
+}
+
+std::string quote(const std::string& s) {
+    std::string o = "\"";
+    for (unsigned char c : s) {
+        switch (c) {
+            case '"': o += "\\\""; break;
+            case '\\': o += "\\\\"; break;
+            case '\n': o += "\\n"; break;
+            case '\r': o += "\\r"; break;
+            case '\t': o += "\\t"; break;
+            case '\b': o += "\\b"; break;
+            case '\f': o += "\\f"; break;
+            default:
+                if (c < 0x20) {
+                    char buf[8];
+                    std::snprintf(buf, sizeof(buf), "\\u%04x", c);
+                    o += buf;
+                } else {
+                    o += static_cast<char>(c);
+                }
+        }
+    }
+    return o + "\"";
 }
 
 }  // namespace json

@@ -2613,6 +2613,21 @@ static int runMain(int argc, char* argv[]) {
     }
 
     // StepForge 조각을 기존 덱에 넣는다(경계 합의 §3-3 — 조각을 쓰는 것은 StepForge, 넣는 것은 우리)
+    if (command == "id_floor") {
+        if (argc < 3) {
+            console.error("Usage: KooRemapper id_floor <config.yaml>");
+            console.info("Issues the start numbers for a StepForge part fragment: the deck's maxima (include closure");
+            console.info("counted) plus one, named exactly like export_part_fragment's arguments (node_start, elem_start,");
+            console.info("pid_start, sid_start). A fragment written from these numbers is inserted by");
+            console.info("cad_solid_merge_to_deck without renumbering. With fragment_map, its ranges are checked");
+            console.info("against the floor (rc 1 if any range starts below it).");
+            console.info("Minimal config:");
+            console.info("  model: deck.k");
+            console.info("  output: floor.json");
+            return 1;
+        }
+        return runIdFloor(argv[2], console);
+    }
     if (command == "rebind_entities_after_remesh") {
         if (argc < 3) {
             console.error("Usage: KooRemapper rebind_entities_after_remesh <config.yaml>");

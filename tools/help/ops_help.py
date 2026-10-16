@@ -916,6 +916,23 @@ axis: z
           "중립축·굽힘강성은 `neutralaxis` 와 **같은 계산**이다 — 숫자가 서로 다르면 결함이다",
           "얇은 층은 min_bar_px 로 바닥 처리하므로 두께가 과장된다 — 그 층은 **옆 숫자가 참**이고",
           "  그림이 아니다. 몇 층을 바닥 처리했는지 말한다"])
+op("id_floor", "메시 편집", "덱(인클루드 닫힘)의 번호 **바닥** — StepForge 조각을 요청할 때 줄 시작 번호 · 대응표 대조",
+   "번호 바닥 시작 번호 발행 id floor stepforge 조각 node_start elem_start pid_start sid_start 대역",
+   "KooRemapper id_floor <config.yaml>",
+   needs=["examples/cad_solid_merge_to_deck/deck.k", "examples/cad_solid_merge_to_deck/stepforge_fragment.json"],
+   files={"f.yaml": """model: examples/cad_solid_merge_to_deck/deck.k
+output: floor.json
+fragment_map: examples/cad_solid_merge_to_deck/stepforge_fragment.json
+"""},
+   cmds=["KooRemapper id_floor f.yaml"],
+   outputs=["floor.json"],
+   notes=["★**요청 때 발행**(2026-10-16) — 대역표를 두지 않는다. 조각을 요청할 때 이 op 이 낸 네 번호를",
+          "  StepForge `export_part_fragment` 의 인자(`node_start`·`elem_start`·`pid_start`·`sid_start` — 이름 그대로)로 주면",
+          "  조각이 그 번호로 쓰이고 `cad_solid_merge_to_deck` 가 **옮기지 않고** 넣는다(대응표 번호 = 덱 번호)",
+          "바닥 = assemble 과 같은 커서(**인클루드 닫힘까지**)의 최대값 + 1. pid_start 는 PID·SECID·MID 셋의 최대값 위다",
+          "  (조각은 셋을 같은 번호로 쓴다 — 삽입도 한 이동량으로 옮긴다)",
+          "`fragment_map` 을 주면 그 `ranges` 가 바닥 위인지 대조한다 — 아래에 걸치면 rc 1(그 조각은 넣을 때 옮겨진다)",
+          "경계 문서의 `id_floor`(Q7 — 대응표의 `ranges` 를 읽어 대조한다)가 이 op 이다"])
 op("rebind_entities_after_remesh", "메시 편집", "재메시 뒤 덧붙인 블록의 절점 번호를 (파트 이름, 좌표)로 새 덱 번호에 **다시 묶는다**",
    "재결속 rebind remesh 재메시 번호 밀림 stepforge range_diff coord_sha 세트 SPC 이력 위치",
    "KooRemapper rebind_entities_after_remesh <config.yaml>",
@@ -957,8 +974,9 @@ fragment_map: examples/cad_solid_merge_to_deck/stepforge_fragment.json
           "★넣기 전에 조각을 대응표와 **대조**한다 — 번호가 ranges 안이고 lo·hi 가 실제 최소·최대인가 · 파트",
           "  집합 · 파트마다 요소 수·구간 · 그 요소가 쓰는 절점 = 절점 구간 · **coord_sha**(저쪽과 같은 식 —",
           "  `%16.9e` 셋씩 이은 줄을 정렬해 sha256 앞 16자). 하나라도 어긋나면 넣지 않는다(rc=1)",
-          "번호는 이 덱(**인클루드 닫힘까지** 센 최대값) 위로 옮긴다 — 과도기 번호 길(Q5). PID·SECID·MID 는",
-          "  **한 이동량**이다(저쪽이 셋을 같은 번호로 쓴다 — 넣은 뒤에도 그 규약이 선다)",
+          "★조각 번호가 이 덱(**인클루드 닫힘까지** 센 최대값) **위에 있으면 옮기지 않는다** — 대응표 번호 = 덱 번호",
+          "  (요청 때 발행 — `id_floor` 가 낸 시작 번호로 받은 조각). 최대값 이하에 걸치면 그 위로 옮긴다(과도기 길 —",
+          "  저쪽 기본값 1 로 받은 조각). PID·SECID·MID 는 **한 이동량**이다(저쪽이 셋을 같은 번호로 쓴다)",
           "좌표 글자는 **바이트 그대로** 두고 번호 칸만 이 덱의 폭(8 · i10 이면 10)으로 쓴다. 넣을 블록을",
           "  **다시 읽어** coord_sha 를 한 번 더 잰다. long 덱은 받지 않는다",
           "unit 은 `deck_unit`(기본 mm-t-s)과 같아야 하고 frame 은 world 여야 한다 — 환산·변환은 하지 않는다",

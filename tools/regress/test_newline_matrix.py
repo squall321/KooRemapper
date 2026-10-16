@@ -82,6 +82,7 @@ EXCLUDE = {
     "surfview": "SVG 만 낸다(덱을 읽고 자유면을 그린다) — 덱을 쓰지 않는다",
     "stackdiagram": "SVG 만 낸다(파트 축범위로 층 모식도를 그린다) — 덱을 쓰지 않는다",
     "modelmeta": "메타 JSON 만 낸다",
+    "id_floor": "번호 바닥 JSON 만 낸다(덱을 읽고 시작 번호를 적는다) — 덱을 쓰지 않는다",
     "strain": "CSV 만 낸다(ref_mesh/def_mesh 를 읽고 변형률 표를 쓴다)",
     "foldsurface": "CSV 만 낸다 — 덱을 읽지도 쓰지도 않는 순수 수치다",
     "linkage-fit": "YAML 만 낸다(두 덱을 읽고 군별 변환을 적는다) — 덱을 쓰지 않는다",

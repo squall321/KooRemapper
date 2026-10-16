@@ -40,6 +40,11 @@ public:
     // StepForge 조각을 덱 번호 위로 옮겨 `*END` 앞에 넣는다. 성공하면 옮긴 대응표(덱 번호)를 `mergedMaps()` 에 둔다.
     bool applyCadSolidMerge(const CadSolidMergeOperation& op);
     const std::vector<fragment::Map>& mergedMaps() const { return mergedMaps_; }
+    // 이 덱(인클루드 닫힘까지 센 커서)의 번호 최대값 — `id_floor` 가 StepForge 조각의 시작 번호로 낸다(요청 때 발행)
+    struct IdMaxima { int node = 0, elem = 0, part = 0, section = 0, material = 0, set = 0; };
+    IdMaxima idMaxima() const {
+        return {maxNodeId_, maxElementId_, maxPartId_, maxSectionId_, maxMaterialId_, maxSetId_};
+    }
     bool loadRawOnly(const std::string& filename);
     bool applyReplace(const ReplaceOperation& op, double E, double nu,
                       const std::string& configDir);

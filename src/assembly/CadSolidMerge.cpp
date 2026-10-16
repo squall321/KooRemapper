@@ -233,14 +233,17 @@ bool ModelAssembler::applyCadSolidMerge(const CadSolidMergeOperation& op) {
         for (const auto& p : problems) errorMessage_ += "\n  " + p;
         return false;
     }
-    // ④ 번호 이동 — 대상 덱(인클루드 닫힘까지 센 커서) 위로
+    // ④ 번호 — 대상 덱(인클루드 닫힘까지 센 커서)의 최대값 **위에 이미 있으면 옮기지 않는다**(2026-10-16 · 요청 때
+    //   발행 — `id_floor` 가 낸 시작 번호로 조각을 받으면 대응표 번호가 곧 덱 번호다). 최대값 이하에 걸치면 지금처럼
+    //   그 위로 옮긴다(과도기 길 — 저쪽 기본값 1 로 받은 조각). 번호 종류(절점·요소·PID)마다 따로 정한다.
+    //   ⚠ 최대값 아래의 빈 번호에 들어맞는 조각도 옮긴다 — 겹치지 않음을 닫힘 전체에서 세트로 따지지 않는 보수 쪽이다.
     const int fw = deckFieldWidth(rawLines_);
     if (fw == 20) { errorMessage_ = tag + "long 폭 덱은 받지 않는다 — 좌표 칸도 넓어져 조각 글자를 그대로 둘 수 없다"; return false; }
+    const long long pidFloor = std::max({maxPartId_, maxSectionId_, maxMaterialId_});
     Shift sh;
-    if (m.node.used) sh.node = (long long)maxNodeId_ + 1 - m.node.lo;
-    if (m.elem.used) sh.elem = (long long)maxElementId_ + 1 - m.elem.lo;
-    if (m.pid.used)
-        sh.pid = (long long)std::max({maxPartId_, maxSectionId_, maxMaterialId_}) + 1 - m.pid.lo;
+    if (m.node.used && m.node.lo <= maxNodeId_) sh.node = (long long)maxNodeId_ + 1 - m.node.lo;
+    if (m.elem.used && m.elem.lo <= maxElementId_) sh.elem = (long long)maxElementId_ + 1 - m.elem.lo;
+    if (m.pid.used && m.pid.lo <= pidFloor) sh.pid = pidFloor + 1 - m.pid.lo;
     const long long idCap = fw == 8 ? 99999999LL : (long long)std::numeric_limits<int>::max();
     const long long cardCap = (long long)std::numeric_limits<int>::max();
     if ((m.node.used && m.node.hi + sh.node > idCap) || (m.elem.used && m.elem.hi + sh.elem > idCap) ||
@@ -311,6 +314,12 @@ bool ModelAssembler::applyCadSolidMerge(const CadSolidMergeOperation& op) {
                            " · unit " + m.unit + " · frame " + m.frame + " · 대조 통과(coord_sha " +
                            std::to_string(m.parts.size()) + "/" + std::to_string(m.parts.size()) + ")");
     infoMessages.push_back("  번호(조각 → 이 덱) — " + moves);
+    if (sh.node == 0 && sh.elem == 0 && sh.pid == 0)
+        infoMessages.push_back("  옮기지 않았다 — 조각 번호가 이미 이 덱의 최대값 위에 있다(대응표 번호 = 덱 번호)");
+    else
+        infoMessages.push_back(std::string("  옮겼다 — ") + (sh.node ? "절점 " : "") + (sh.elem ? "요소 " : "") +
+                               (sh.pid ? "PID " : "") + "번호가 이 덱의 최대값 이하에 걸쳤다(`id_floor` 가 낸 시작 번호로 "
+                               "받으면 옮기지 않는다)");
     for (size_t k = 0; k < m.parts.size(); ++k) {
         const auto& a = m.parts[k];
         const auto& b = rebased.parts[k];

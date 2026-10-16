@@ -5,6 +5,8 @@
 #include "assembly/AssemblyConfigReader.h"
 #include "cli/ConsoleOutput.h"
 #include "commands/rebind.h"
+#include "parser/FragmentMap.h"
+#include "util/StrictJson.h"
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -1458,6 +1460,113 @@ int runOffset(const std::string& yamlFile, ConsoleOutput& console) {
 // StepForge 조각(.k + 대응표 JSON)을 기존 덱에 넣는다 — 규칙과 검증은 `ModelAssembler::applyCadSolidMerge`.
 // 산출 둘 — <output>.k(조각을 덱 번호로 옮겨 `*END` 앞에 넣은 덱) · <output>_fragment_map.json(같은 칸 집합의
 // 대응표를 **덱 번호로** 옮긴 것 — 번호 이동을 되짚고, 뒤에 재결속·대조가 읽는다).
+// ★요청 때 발행(2026-10-16 · 사용자 결정) — 번호 대역표를 두지 않는다. StepForge 조각을 요청할 때 대상 덱의 최대값 위
+//   번호를 시작 번호로 주면(`export_part_fragment` 의 인자 이름 그대로) 조각이 덱 번호 그대로 들어온다 —
+//   `cad_solid_merge_to_deck` 는 최대값 위에 있는 조각을 옮기지 않는다. 경계 문서의 `id_floor`(Q7 — 대응표의 `ranges` 를
+//   읽어 대조한다)가 이 op 이다. 바닥은 assemble 과 같은 커서다 — 인클루드 닫힘까지 센다.
+int runIdFloor(const std::string& yamlFile, ConsoleOutput& console) {
+    const char* tag = "id_floor";
+    {
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(yamlFile, tabLine)) {
+            console.error(KooRemapper::yamlTabIndentMessage(tag, tabLine));
+            return 1;
+        }
+    }
+    StandaloneYamlBase y;
+    y.resolveFiles(yamlFile);
+    if (rejectMultiOperation(yamlFile, tag, console)) return 1;
+    std::ifstream f(yamlFile);
+    if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
+    KooRemapper::yamlSkipBOM(f);
+    std::string mapPath;
+    std::vector<std::string> unknown;
+    for (std::string ln; std::getline(f, ln);) {
+        if (!ln.empty() && ln.back() == '\r') ln.pop_back();
+        std::string tr = y.trim(ln);
+        if (tr.empty() || tr[0] == '#') continue;
+        size_t cp = tr.find(':');
+        if (cp == std::string::npos) continue;
+        const std::string key = y.keyOf(tr, cp);
+        const std::string val = y.stripQuotes(y.trim(KooRemapper::yamlStripComment(tr.substr(cp + 1))));
+        if (key == "model" || key == "output") y.parseCommonKey(key, val);
+        else if (key == "fragment_map") mapPath = val;
+        else unknown.push_back(key);
+    }
+    if (!unknown.empty()) {
+        std::string ks;
+        for (const auto& k : unknown) ks += (ks.empty() ? "" : ", ") + k;
+        console.error(std::string("[") + tag + "] 모르는 키: " + ks + " — model · output · fragment_map(선택)만 받는다");
+        return 1;
+    }
+    if (y.modelFile.empty() || y.outputFile.empty()) {
+        console.error(std::string("[") + tag + "] model(조각을 넣을 덱)과 output(바닥 JSON)이 있어야 합니다");
+        return 1;
+    }
+    const std::string modelPath = y.resolvePath(y.modelFile);
+    std::string outPath = y.resolvePath(y.outputFile);
+    if (outPath.size() < 5 || outPath.substr(outPath.size() - 5) != ".json") outPath += ".json";
+
+    ModelAssembler assembler;
+    if (!assembler.loadBaseModel(modelPath)) { console.error(assembler.getErrorMessage()); return 1; }
+    const auto mx = assembler.idMaxima();
+    // PID·SECID·MID 는 한 번호다(저쪽 라이터가 셋을 같은 번호로 쓴다 — 삽입도 한 이동량으로 옮긴다)
+    const long long nodeStart = (long long)mx.node + 1, elemStart = (long long)mx.elem + 1;
+    const long long pidStart = (long long)std::max({mx.part, mx.section, mx.material}) + 1;
+    const long long sidStart = (long long)mx.set + 1;
+    console.println(std::string("[") + tag + "] " + modelPath + " — 인클루드 닫힘까지 센 최대값 위");
+    console.println("  node_start " + std::to_string(nodeStart) + " · elem_start " + std::to_string(elemStart) +
+                    " · pid_start " + std::to_string(pidStart) + " · sid_start " + std::to_string(sidStart));
+
+    // 대응표를 주면 그 `ranges` 가 바닥 위인지 대조한다(Q7) — 위면 넣을 때 옮기지 않는다(대응표 번호 = 덱 번호)
+    std::string checkJson;
+    bool below = false;
+    if (!mapPath.empty()) {
+        mapPath = y.resolvePath(mapPath);
+        std::ifstream mf(mapPath, std::ios::binary);
+        if (!mf.is_open()) { console.error(std::string("[") + tag + "] 대응표를 열 수 없다: " + mapPath); return 1; }
+        std::stringstream ss;
+        ss << mf.rdbuf();
+        KooRemapper::fragment::Map m;
+        std::string err;
+        if (!KooRemapper::fragment::parseMap(ss.str(), m, err)) {
+            console.error(std::string("[") + tag + "] 대응표 — " + err);
+            return 1;
+        }
+        std::string rows;
+        auto one = [&](const char* name, const KooRemapper::fragment::Range& r, long long start) {
+            std::string verdict = "unused";
+            if (r.used) {
+                verdict = r.lo >= start ? "above" : "below";
+                if (r.lo < start) below = true;
+                console.println(std::string("  ") + name + " " + std::to_string(r.lo) + "~" + std::to_string(r.hi) +
+                                (r.lo >= start ? " — 바닥 위(옮기지 않는다)" : " — 바닥 아래에 걸친다(넣을 때 옮긴다)"));
+            }
+            rows += std::string(rows.empty() ? "" : ", ") + "\"" + name + "\": \"" + verdict + "\"";
+        };
+        one("node", m.node, nodeStart);
+        one("elem", m.elem, elemStart);
+        one("pid", m.pid, pidStart);
+        one("sid", m.sid, sidStart);
+        checkJson = ",\n  \"check\": {\"fragment_map\": " + KooRemapper::json::quote(mapPath) + ", " + rows + "}";
+    }
+    {
+        std::ofstream o(outPath, std::ios::binary);
+        if (!o.is_open()) { console.error(std::string("[") + tag + "] 쓸 수 없다: " + outPath); return 1; }
+        o << "{\n  \"deck\": " << KooRemapper::json::quote(modelPath) << ",\n"
+          << "  \"basis\": \"인클루드 닫힘까지 센 최대값 + 1. 이름은 StepForge export_part_fragment 의 시작 번호 인자 그대로. "
+             "pid_start 는 PID·SECID·MID 셋의 최대값 위(조각은 셋을 같은 번호로 쓴다)\",\n"
+          << "  \"node_start\": " << nodeStart << ",\n  \"elem_start\": " << elemStart << ",\n"
+          << "  \"pid_start\": " << pidStart << ",\n  \"sid_start\": " << sidStart << checkJson << "\n}\n";
+    }
+    console.println(std::string("[") + tag + "] -> " + outPath);
+    if (below) {
+        console.error(std::string("[") + tag + "] 대응표의 번호가 이 덱의 바닥 아래에 걸친다 — 이 바닥으로 발행한 조각이 아니다");
+        return 1;
+    }
+    return 0;
+}
+
 int runRebindAfterRemesh(const std::string& yamlFile, ConsoleOutput& console) {
     const char* tag = "rebind_entities_after_remesh";
     {   // 탭 들여쓰기는 파싱 전에 거른다(다른 단독 op 과 같다)

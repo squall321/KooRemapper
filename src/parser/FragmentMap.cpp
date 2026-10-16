@@ -253,29 +253,6 @@ std::vector<std::string> checkParts(const Map& m, const Mesh& mesh) {
 }
 
 namespace {
-std::string jsonString(const std::string& s) {
-    std::string o = "\"";
-    for (unsigned char c : s) {
-        switch (c) {
-            case '"': o += "\\\""; break;
-            case '\\': o += "\\\\"; break;
-            case '\n': o += "\\n"; break;
-            case '\r': o += "\\r"; break;
-            case '\t': o += "\\t"; break;
-            case '\b': o += "\\b"; break;
-            case '\f': o += "\\f"; break;
-            default:
-                if (c < 0x20) {
-                    char buf[8];
-                    std::snprintf(buf, sizeof(buf), "\\u%04x", c);
-                    o += buf;
-                } else {
-                    o += (char)c;
-                }
-        }
-    }
-    return o + "\"";
-}
 std::string jsonRange(const Range& r, const std::string& ind) {
     if (!r.used) return "null";
     return "[\n" + ind + "  " + std::to_string(r.lo) + ",\n" + ind + "  " + std::to_string(r.hi) + "\n" + ind + "]";
@@ -284,8 +261,8 @@ std::string jsonRange(const Range& r, const std::string& ind) {
 
 std::string toJson(const Map& m) {
     std::string o = "{\n";
-    o += "  \"unit\": " + jsonString(m.unit) + ",\n";
-    o += "  \"frame\": " + jsonString(m.frame) + ",\n";
+    o += "  \"unit\": " + json::quote(m.unit) + ",\n";
+    o += "  \"frame\": " + json::quote(m.frame) + ",\n";
     o += "  \"ranges\": {\n";
     o += "    \"node\": " + jsonRange(m.node, "    ") + ",\n";
     o += "    \"elem\": " + jsonRange(m.elem, "    ") + ",\n";
@@ -299,14 +276,14 @@ std::string toJson(const Map& m) {
         for (size_t k = 0; k < m.parts.size(); ++k) {
             const Part& p = m.parts[k];
             o += "    {\n";
-            o += "      \"path\": " + jsonString(p.path) + ",\n";
-            o += "      \"name\": " + jsonString(p.name) + ",\n";
+            o += "      \"path\": " + json::quote(p.path) + ",\n";
+            o += "      \"name\": " + json::quote(p.name) + ",\n";
             o += "      \"pid\": " + std::to_string(p.pid) + ",\n";
             o += "      \"node_start\": " + std::to_string(p.nodeStart) + ",\n";
             o += "      \"node_count\": " + std::to_string(p.nodeCount) + ",\n";
             o += "      \"elem_start\": " + std::to_string(p.elemStart) + ",\n";
             o += "      \"elem_count\": " + std::to_string(p.elemCount) + ",\n";
-            o += "      \"coord_sha\": " + jsonString(p.coordSha) + "\n";
+            o += "      \"coord_sha\": " + json::quote(p.coordSha) + "\n";
             o += (k + 1 < m.parts.size()) ? "    },\n" : "    }\n";
         }
         o += "  ]\n";

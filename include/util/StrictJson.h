@@ -30,5 +30,9 @@ struct Value {
 // (앞 0 · `+` · `.5` · `1.`) · int64 를 넘는 정수 · 짝이 맞지 않는 서로게이트 `\u` · 깊이 64 초과.
 bool parse(const std::string& text, Value& out, std::string& err);
 
+// 문자열을 JSON 문자열 글자(따옴표 포함)로 — `"` `\` 와 제어 문자(< 0x20)만 이스케이프하고 UTF-8 은 그대로 둔다
+// (대응표 쓰기 `fragment::toJson` 과 `id_floor` 가 같이 쓴다).
+std::string quote(const std::string& s);
+
 }  // namespace json
 }  // namespace KooRemapper

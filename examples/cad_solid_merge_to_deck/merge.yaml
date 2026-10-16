@@ -1,6 +1,7 @@
 # StepForge 조각을 기존 덱에 넣는다 — 경계 합의 §3-3(조각을 쓰는 것은 StepForge, 그 조각을 넣는 것은 우리)
 # stepforge_fragment.k/.json 은 StepForge `export_part_fragment` 의 실물 산출이다(합성 과제 K2라이브-B, 2026-10-16 —
-# 시작 번호 node 500001 · elem 600001 · pid 900). 삽입은 그 번호를 이 덱의 번호 위로 옮긴다(과도기 번호 길 — Q5).
+# 시작 번호 node 500001 · elem 600001 · pid 900). 그 번호가 이 덱의 최대값 위에 있어 **옮기지 않고** 넣는다
+# (요청 때 발행 — `id_floor` 가 낸 시작 번호로 받은 조각도 같다). 최대값 이하에 걸치면 그 위로 옮긴다.
 model: deck.k
 output: merged
 fragment: stepforge_fragment.k

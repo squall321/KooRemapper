@@ -11,13 +11,15 @@
 신탁.
   · 넣은 뒤 산출 덱에서 파트마다 `coord_sha` 를 **이 시험이 따로** 잰다 — 저쪽 식(`f"{v:16.9e}"` 셋 · 사전순 ·
     sha256 앞 16자)을 파이썬으로 그대로 옮겼다. 대응표의 값과 같아야 한다(좌표 글자가 바이트 그대로인가)
-  · 새 번호가 대상 덱(인클루드 닫힘까지)의 최대값 바로 위이고, 원래 덱의 줄은 차례대로 그대로 남는다
+  · 조각 번호가 대상 덱(인클루드 닫힘까지)의 최대값 **위에 있으면 그대로**(요청 때 발행 — `id_floor` · 2026-10-16),
+    최대값 이하에 걸치면 최대값 바로 위로 옮긴다. 원래 덱의 줄은 차례대로 그대로 남는다
   · `info --strict` 가 산출 덱을 받아들인다(미정의 참조 0)
   · 계약 밖은 rc 1 이고 산출 덱이 없다
 
 무엇을 보나.
-  A 표준 폭 덱 — 번호 이동 · 원본 줄 보존 · coord_sha · 옮긴 대응표 · 자리표시 물성 경고 · info --strict
-  B 인클루드에 더 큰 번호가 있는 덱 — 그 위로 옮긴다
+  A 표준 폭 덱 — 실물 조각(500001/600001/900)이 덱 위에 있어 **옮기지 않는다** · 원본 줄 보존 · coord_sha ·
+    대응표 = 덱 번호 · 자리표시 물성 경고 · info --strict
+  B 인클루드에 조각보다 큰 번호가 있는 덱 — 그 위로 옮긴다(과도기 길)
   C i10 덱 — 넣은 절점·요소 번호 칸이 10칸이다
   D 거절 — 모르는 칸 · 빠진 칸 · 단위 불일치 · frame · 옮긴 절점(coord_sha) · sid 비-null · 계약 밖 키워드 ·
     ranges 가 실제와 다름 · long 덱
@@ -193,10 +195,11 @@ def main():
     try:
         rc, out = run(binary, d)
         if check("A rc 0", rc == 0 and os.path.exists(os.path.join(d, "merged.k")), out[-500:]):
-            verify_merged("A", d, deck, 13, 3, 3, 8)        # 덱 최대 — 절점 12 · 요소 2 · PID 2
+            verify_merged("A", d, deck, 500001, 600001, 900, 8)   # 덱 최대 12 · 2 · 2 — 조각이 위에 있다
+            check("A ★옮기지 않았다고 말한다(대응표 번호 = 덱 번호)", "옮기지 않았다" in out, out[-400:])
             check("A 자리표시 물성을 MID 마다 경고한다", out.count("자리표시 물성") == 4, out.count("자리표시 물성"))
             # 쓰기 뒤 요소 수 대조가 넣은 블록의 파트까지 본다(블록만 넣는 op 은 예전에 이 대조를 건너뛰었다)
-            check("A 쓰기 뒤 요소 수 대조가 넣은 파트를 본다", "PID 3: 0 → 100 (신규)" in out and "왕복 검증" in out,
+            check("A 쓰기 뒤 요소 수 대조가 넣은 파트를 본다", "PID 900: 0 → 100 (신규)" in out and "왕복 검증" in out,
                   out[-400:])
             p = subprocess.run([binary, "info", os.path.join(d, "merged.k"), "--strict"], capture_output=True,
                                text=True, encoding="utf-8", errors="replace")
@@ -206,16 +209,18 @@ def main():
         shutil.rmtree(d, ignore_errors=True)
 
     print("[B 인클루드에 더 큰 번호]")
+    # 인클루드의 번호가 조각(500001/600001/900)보다 크다 — 조각이 바닥 아래에 걸치므로 그 위로 옮긴다
     inc = ("*KEYWORD\n*NODE\n%8d%16.9e%16.9e%16.9e\n*PART\nfar part\n%10d%10d%10d\n"
            "*SECTION_SOLID\n%10d%10d\n*MAT_ELASTIC\n%10d%10s%10s%10s\n*ELEMENT_SOLID\n%8d%8d" % (
-               5000, 9e3, 9e3, 9e3, 70, 80, 90, 80, 1, 90, "7.85E-9", "210000.", "0.3", 400, 70) +
-           "%8d" * 8 % ((5000,) * 8) + "\n*END\n")
+               550000, 9e3, 9e3, 9e3, 950, 960, 970, 960, 1, 970, "7.85E-9", "210000.", "0.3", 650000, 950) +
+           "%8d" * 8 % ((550000,) * 8) + "\n*END\n")
     deck_b = deck.replace("*END", "*INCLUDE\nfar.k\n*END")
     d = stage(deck_b, inc={"far.k": inc})
     try:
         rc, out = run(binary, d)
         if check("B rc 0", rc == 0, out[-500:]):
-            verify_merged("B", d, deck_b, 5001, 401, 91, 8)   # 인클루드 — 절점 5000 · 요소 400 · PID 70 · SECID 80 · MID 90
+            verify_merged("B", d, deck_b, 550001, 650001, 971, 8)   # 인클루드 — 절점 550000 · 요소 650000 · PID 950 · SECID 960 · MID 970
+            check("B 옮겼다고 말한다(바닥 아래에 걸쳤다)", "옮겼다" in out and "id_floor" in out, out[-400:])
     finally:
         shutil.rmtree(d, ignore_errors=True)
 
@@ -226,7 +231,8 @@ def main():
         rc, out = run(binary, d)
         if check("C rc 0", rc == 0, out[-500:]):
             nodes0, elems0, _fw, _L = read_mesh(os.path.join(d, "deck.k"))
-            verify_merged("C", d, mesh, max(nodes0) + 1, max(elems0) + 1, max_card_ids(mesh) + 1, 10)
+            assert max(nodes0) < 500001 and max(elems0) < 600001 and max_card_ids(mesh) < 900
+            verify_merged("C", d, mesh, 500001, 600001, 900, 10)   # i10 덱 — 조각이 위에 있어 그대로 · 칸은 10
     finally:
         shutil.rmtree(d, ignore_errors=True)
 
