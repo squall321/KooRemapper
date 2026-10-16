@@ -958,6 +958,10 @@ plan2 는 `IdAllocator` 로 발행자를 통합하라고 했다. 정찰이 그 �
         · 저장소 덱 500장 옛/새 — **1차 498장 동일**(새 null 칸 둘 빼고), 다른 둘은 2차 덱의 그 칸뿐.
           회귀 `test_secondorder_solid.py` F·G 절(옛 바이너리 FAIL 7) · 플랫폼 통과 시험 · kr2datahub 시험.
         ⚠ `platform/backend/bin/KooRemapper` 는 Drive 게시본(10-13)이라 플랫폼에서는 **게시 뒤에** 보인다.
+      → **같은 뿌리의 두 번째 자리 — `info`(같은 날 따로 커밋).** 저장소 예제 TET10 에 「Orphan nodes: 4」 ·
+        「Negative Jacobian elements: 2」(코너 부피 둘 다 +1/6)를 말없이 냈다 → 같은 판정으로 경고 · 고아 줄에
+        「상한」 · 그 파트 야코비안 제외(셸과 같은 규율). 저장소 덱 500장 `info` 출력 옛/새 — 498장 글자 그대로 같음.
+        회귀 H 절(옛 바이너리 FAIL 3).
 - [ ] **Q13 관문 `check_mask_resolution_feasibility`** — 값은 있고 **관문이 없다**(0건).
       어느 값(min·p50·max)을 쓸지는 **임계와 함께** 정한다 — 임계 없이 고르면 짐작이다.
 - [ ] **`assess_edit_impact` 개명**(Q11 — 우리가 바꾸기로 했다. 저쪽 도구는 이미 배포됐고

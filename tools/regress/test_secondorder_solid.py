@@ -320,6 +320,22 @@ def main():
         check("G-4 1차 덱의 고아 수는 숫자이고 사유는 null",
               m.get("orphan_nodes") == 0 and m.get("orphan_nodes_reason", "없음") is None,
               (m.get("orphan_nodes"), m.get("orphan_nodes_reason", "없음")))
+
+        # ── H: ★`info` 도 같은 뿌리다 — 거짓 고아와 거짓 「음의 야코비안」을 말없이 냈다 ──
+        # 매뉴얼 꼴 TET10 둘은 코너 부피가 둘 다 양수인데 「Negative Jacobian elements: 2」,
+        # 고아 0 인데 「Orphan nodes: 2」 였다(실측). 판정은 같은 함수다.
+        tet10_two_line(os.path.join(d, "info_t10.k"), split_8_2=False)
+        tet4_deck(os.path.join(d, "info_lin.k"))
+        rc, out = run(binary, d, "info", "info_t10.k")
+        check("H-1 info 가 TET10 덱에서 2차 솔리드라고 경고한다", rc == 0 and "**2차 솔리드**" in out, out[-300:])
+        orph = [l for l in out.splitlines() if l.startswith("Orphan nodes")]
+        check("H-2 고아 줄에 '상한' 을 단다 (2 는 참값이 아니다)", orph and "상한" in orph[0], orph)
+        check("H-3 ★2차 솔리드의 야코비안을 재지 않는다 — 거짓 '음수' 를 내지 않는다",
+              "Negative Jacobian" not in out and "2차 솔리드 2개" in out,
+              [l for l in out.splitlines() if "Jacobian" in l])
+        rc, out = run(binary, d, "info", "info_lin.k")
+        check("H-4 1차 덱에서는 경고·표시가 없고 야코비안을 잰다",
+              rc == 0 and "2차 솔리드" not in out and "Min Jacobian" in out, out[-300:])
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

@@ -3,6 +3,7 @@
 #include "parser/DeckWriter.h"
 #include "core_ops.h"
 #include "util/YamlComment.h"
+#include "util/FigureSvg.h"          // secondOrderSolidPids — 그림 op·modelmeta 와 **같은 판정**
 #include "core/Platform.h"
 #include <cstdio>
 #include <cmath>
@@ -1419,6 +1420,16 @@ int runInfo(const std::string& meshFile, const ConsoleOutput& console, bool stri
     // ⚠ 위 세 라벨(`Min bound`·`Max bound`·`Size`)은 **바꾸지 않는다** —
     //   `platform/backend/app/runner/kfile_inspect.py:22-24` 와
     //   `tools/regress/test_packed_node.py:51` 이 정규식으로 파싱한다. 추가만 한다.
+    //
+    // ★2차 솔리드 파트가 있으면 고아 수와 야코비안을 **믿을 수 없다**(2026-10-16 실측). 리더가
+    //   `*ELEMENT_SOLID` 절점 칸의 앞 8개만 저장해서 TET10 의 n9·n10 은 아무도 안 쓰는 절점이 되고
+    //   (예제 `examples/tet10/tet10_result.k` — 고아 0 인데 4 로 셌다), 중간절점이 코너 자리로
+    //   들어온 육면체의 야코비안을 잰다(코너 부피 +1/6 둘인데 「음수 2」). 그 말이 없었다.
+    const auto bad2nd = KooRemapper::figure::secondOrderSolidPids(mesh);
+    if (!bad2nd.empty())
+        console.warning(KooRemapper::figure::secondOrderSolidWhy(bad2nd) +
+                        " — 리더가 절점 칸의 앞 8개만 저장한다. 그 파트는 고아 수·야코비안을 "
+                        "코너 8개만 보고 잰 것이라 아래에서 그렇게 표시한다");
     {
         const auto br = mesh.bboxReport();
         console.keyValue("bbox basis", br.hasElements
@@ -1435,7 +1446,9 @@ int runInfo(const std::string& meshFile, const ConsoleOutput& console, bool stri
             const double pct = mesh.getNodeCount()
                 ? 100.0 * (double)br.orphanNodes / (double)mesh.getNodeCount() : 0.0;
             std::snprintf(ob, sizeof(ob), "%zu  (%.2f %%)", br.orphanNodes, pct);
-            console.keyValue("Orphan nodes", ob);
+            // 잘라 읽기는 참조를 줄이기만 하므로 센 값은 **상한**이다(0 이면 0 이 참이다).
+            console.keyValue("Orphan nodes", std::string(ob) + (bad2nd.empty() ? "" :
+                             "  ⚠ 상한 — 2차 솔리드의 중간절점(n9·n10)을 고아로 센다"));
 
             // 문턱은 **최대 요소 범위의 1%** 다 — 축척에 상대적이고, 범위가 0 인 평면 메시에서
             // 0 으로 나누지 않는다.
@@ -1666,9 +1679,13 @@ int runInfo(const std::string& meshFile, const ConsoleOutput& console, bool stri
     // ⚠ 야코비안은 **솔리드에만** 적용한다. 셸을 같이 세면 셸 덱이 전부 "음수 야코비안" 으로
     // 나오고(실측: 공식 예제 `arc_shell.k` 8요소가 Min=Max=0 · 음수 8건), 그 노이즈가 정작
     // **진짜** 음수 야코비안(솔리드)을 가린다 — 2026-10-02 현장 보고.
-    int solidCount = 0, shellSkipped = 0;
+    int solidCount = 0, shellSkipped = 0, secondSkipped = 0;
+    std::set<int> bad2ndPids;
+    for (const auto& pe : bad2nd) bad2ndPids.insert(pe.first);
     for (const auto& [id, elem] : mesh.getElements()) {
         if (!Validator::jacobianApplies(elem)) { ++shellSkipped; continue; }
+        // 2차 솔리드는 셸과 같은 까닭으로 뺀다 — 잴 기하가 없다(코너 자리에 중간절점이 있다).
+        if (bad2ndPids.count(elem.partId)) { ++secondSkipped; continue; }
         ++solidCount;
         double j = Validator::calculateJacobian(mesh, elem);
         if (j < minJ) minJ = j;
@@ -1677,17 +1694,22 @@ int runInfo(const std::string& meshFile, const ConsoleOutput& console, bool stri
     }
 
     console.header("Element Quality");
+    const std::string secondNote = secondSkipped > 0
+        ? "2차 솔리드 " + std::to_string(secondSkipped) + "개 — 앞 8칸만 읽어 잴 수 없습니다" : "";
     if (solidCount == 0) {
         // 센 것이 없으면 숫자를 내지 않는다 — 앞선 판은 셸의 0.0 을 그대로 찍어 "Min=Max=0" 이
         // 나왔고, 그것을 품질 수치로 읽을 수 있었다.
-        console.keyValue("Jacobian", "해당 없음 (셸 " + std::to_string(shellSkipped) +
-                                     "개 — 체적 야코비안이 정의되지 않습니다)");
+        std::string why = "셸 " + std::to_string(shellSkipped) + "개 — 체적 야코비안이 정의되지 않습니다";
+        if (!secondNote.empty()) why = shellSkipped > 0 ? why + " · " + secondNote : secondNote;
+        console.keyValue("Jacobian", "해당 없음 (" + why + ")");
     } else {
         console.keyValue("Min Jacobian", std::to_string(minJ));
         console.keyValue("Max Jacobian", std::to_string(maxJ));
-        if (shellSkipped > 0)
-            console.keyValue("Jacobian 대상", std::to_string(solidCount) + "개 솔리드 (셸 " +
-                                              std::to_string(shellSkipped) + "개 제외)");
+        if (shellSkipped > 0 || secondSkipped > 0)
+            console.keyValue("Jacobian 대상", std::to_string(solidCount) + "개 솔리드 (" +
+                             (shellSkipped > 0 ? "셸 " + std::to_string(shellSkipped) + "개 제외" : std::string()) +
+                             (shellSkipped > 0 && secondSkipped > 0 ? " · " : "") +
+                             (secondSkipped > 0 ? secondNote + " — 제외" : std::string()) + ")");
         if (negativeCount > 0) {
             console.warning("Negative Jacobian elements: " + std::to_string(negativeCount));
         } else {
