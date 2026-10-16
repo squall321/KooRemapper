@@ -956,7 +956,9 @@ range_diff: examples/rebind_entities_after_remesh/range_diff.json
           "  칸 뜻을 단정 못 한 자리 · 자유형식 줄 · 블록이 정의한 번호가 새 덱과 겹침 — 하나라도 있으면 **쓰지 않는다**(rc 1)",
           "`range_diff` 를 주면 파트마다 `coords.before`/`after` 를 두 덱에서 **다시 재어** 대조한다 — 다르면 거절",
           "번호 칸만 같은 폭으로 바꾸고 나머지 바이트는 그대로다. 산출을 새 덱과 함께 `*INCLUDE` 해 쓴다",
-          "v1 은 한 파일 덱만 받는다(인클루드가 있으면 거절) · 칸 자리는 `info --strict` 와 같은 정본(`parser/NodeRefs`)"])
+          "v1 은 한 파일 덱만 받는다(인클루드가 있으면 거절) · 칸 자리는 `info --strict` 와 같은 정본(`parser/NodeRefs`)",
+          "★v2 — 파트는 `*PART` 제목으로, 요소는 (파트 제목, 요소 절점 좌표 집합)으로 옮긴다(`*SET_PART` · 접촉 SSTYP 3 ·",
+          "  강체 묶음 · 요소 세트 · 요소 이력 — 정본 `parser/IdRefs`). 초기응력·파트 감쇠 같은 갈래는 아직 거절한다"])
 op("cad_solid_merge_to_deck", "메시 편집", "StepForge 조각(.k + 대응표)을 기존 덱에 **넣는다** — 계약 대조 · 번호 이동 · coord_sha 검산",
    "조각 삽입 fragment merge insert stepforge 대응표 coord_sha cad solid 넣기 경계",
    "KooRemapper cad_solid_merge_to_deck <config.yaml>",

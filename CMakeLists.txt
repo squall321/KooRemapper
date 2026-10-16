@@ -56,6 +56,7 @@ set(PARSER_SOURCES
     src/parser/FragmentMap.cpp
     src/parser/IncludeClosure.cpp
     src/parser/NodeRefs.cpp
+    src/parser/IdRefs.cpp
     src/parser/KFileReader.cpp
     src/parser/KFileWriter.cpp
     src/parser/DynainWriter.cpp

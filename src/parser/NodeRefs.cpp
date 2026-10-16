@@ -1,6 +1,7 @@
 // 절점을 가리키는 카드 칸 — 매뉴얼로 확정한 갈래만 보는 정본 탐지기(오탐을 내느니 세어만 둔다)
 #include "parser/NodeRefs.h"
 
+#include "parser/CardCut.h"
 #include "parser/CardFields.h"
 #include "parser/DeckScan.h"
 #include "parser/ElementCardLayout.h"
@@ -17,38 +18,11 @@ using cards::has;
 using cards::starts;
 using cards::toInt;
 
-bool isKeywordLine(const std::string& l) {
-    const size_t g = l.find_first_not_of(" \t");
-    return g != std::string::npos && l[g] == '*';
-}
-bool isCommentLine(const std::string& l) {
-    const size_t g = l.find_first_not_of(" \t");
-    return g != std::string::npos && l[g] == '$';
-}
-bool isBlank(const std::string& l) { return l.find_first_not_of(" \t\r\n") == std::string::npos; }
-
-// 카드 줄을 칸으로 — 콤마면 자유형식, 아니면 **고정폭**(칸 안에 공백이 남으면 어긋난 줄이라 공백 토큰).
-// 규율은 `deckscan::cardFields` 와 같다. `fixed` 가 참일 때만 칸 자리(열)가 뜻을 가진다.
-struct Cut { std::vector<std::string> f; bool fixed = false; };
-Cut cut(const std::string& line, int w) {
-    std::string body = line;
-    const size_t cm = body.find('$');
-    if (cm != std::string::npos) body = body.substr(0, cm);
-    while (!body.empty() && (body.back() == '\r' || body.back() == '\n')) body.pop_back();
-    Cut c;
-    if (body.find(',') != std::string::npos) { c.f = deckscan::cardFields(body, w); return c; }
-    c.f = cards::fieldsFixed(body, w);
-    for (const auto& s : c.f) {
-        if (s.find(' ') == std::string::npos && s.find('\t') == std::string::npos) continue;
-        c.f.clear();
-        std::istringstream iss(body);
-        std::string t;
-        while (iss >> t) c.f.push_back(t);
-        return c;
-    }
-    c.fixed = true;
-    return c;
-}
+using cardcut::Cut;
+using cardcut::cut;
+using cardcut::isBlank;
+using cardcut::isCommentLine;
+using cardcut::isKeywordLine;
 
 struct Walker {
     const std::vector<std::string>& L;

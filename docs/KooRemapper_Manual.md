@@ -5303,17 +5303,25 @@ range_diff: range_diff.json   # (선택) StepForge 구간 표 — 두 덱을 coo
 | 거절(rc 1 · 산출 없음) | 까닭 |
 |---|---|
 | 짝이 없다 · 여럿이다 | 다시 구운 파트의 사라진 자리 — 구간 표를 주면 그 파트가 `resized` 라고 말한다 |
-| 블록에 접촉 · `*SET_PART`·`*SET_SHELL` · 요소 · 파트 카드 | 요소·파트 번호를 가리킨다 — v1 은 절점만 옮긴다 |
+| 블록에 v2 가 모르는 요소·파트 카드(초기응력 · 파트 감쇠 · `_GENERATE` 세트 …) | 칸 뜻을 단정하지 못한다 |
 | 정본이 칸 뜻을 단정 못 한 자리(`_ID` 변종 · 강제운동 Card 3 …) | 「모르는 칸은 거절」 |
 | 자유형식(콤마) 줄 | 제자리에 같은 폭으로 바꿔 쓸 수 없다 |
 | 블록이 정의한 번호가 새 덱과 겹친다 | `*NODE` · 세트 SID · CNRB PID · `*ELEMENT_MASS` EID · LCID · CID |
 | 구간 표의 `coords.before`/`after` 가 두 덱에서 다시 잰 값과 다르다 | 이 표의 이전·이후 덱이 아니다 |
 | 덱에 `*INCLUDE` · 두 덱의 정수 칸 폭이 다르다 · 모르는 YAML 키 · output = entities | v1 범위 밖 · 원본을 덮어쓰지 않는다 |
 
+**v2(2026-10-16) — 파트와 요소도 옮긴다.** 파트는 `*PART` **제목**으로(저쪽은 메시 잡마다 PID 도 밀 수 있다 —
+`pid_renumber_possible`), 요소는 **(파트 제목, 요소 절점들의 좌표 집합)** 정확 일치로 짝을 찾는다. 칸 자리는 정본
+`parser/IdRefs`(파트·요소 축)다 — `*SET_PART` · 접촉 Card 1 의 SSID/MSID(SSTYP/MSTYP = 3 일 때만 · STYP 서명이 맞을 때) ·
+`*CONSTRAINED_RIGID_BODIES` · `*SET_SOLID`·`*SET_SHELL`·`*SET_BEAM`·`*SET_TSHELL` · `*DATABASE_HISTORY_SOLID`·`_SHELL`·`_BEAM`·`_TSHELL`.
+접촉의 세트 ID(SSTYP 0·1·2·4)는 우리 세트라 그대로다. 블록이 정의한 접촉 ID·`*DEFINE_BOX` 번호도 새 덱과 겹치면 거절한다.
+
 받는 블록 — `*SET_NODE`(LIST·LIST_SMOOTH·COLUMN · GENERAL 의 NODE/DNODE 줄 · ADD) · `*SET_SEGMENT`(·ADD) ·
 `*BOUNDARY_SPC_NODE`·`_SET` · `*LOAD_NODE_POINT`·`*LOAD_NODE_SET` · `*INITIAL_VELOCITY_NODE`·`*INITIAL_VELOCITY` ·
 `*CONSTRAINED_EXTRA_NODES_NODE` · `*ELEMENT_MASS` · `*BOUNDARY_PRESCRIBED_MOTION_NODE` · `*DATABASE_HISTORY_NODE`·`_SET` ·
-`*CONSTRAINED_NODAL_RIGID_BODY` · `*DEFINE_COORDINATE_NODES` · `*DEFINE_CURVE`(·`_TITLE`) · `*NODE`(블록 자신의 절점).
+`*CONSTRAINED_NODAL_RIGID_BODY` · `*DEFINE_COORDINATE_NODES` · `*DEFINE_CURVE`(·`_TITLE`) · `*NODE`(블록 자신의 절점) ·
+(v2) `*SET_PART`·`*SET_SOLID`·`*SET_SHELL`·`*SET_BEAM`·`*SET_TSHELL`(목록·칸·ADD) · `*DATABASE_HISTORY_SOLID`·`_SHELL`·`_BEAM`·`_TSHELL`(·`_SET`) ·
+`*CONSTRAINED_RIGID_BODIES` · `*CONTACT_*` · `*DEFINE_BOX`.
 
 번호 칸만 같은 폭으로 바꾸고 나머지 바이트는 그대로다. 쓰기 전에 바꾼 글을 같은 정본으로 다시 보아, 가리키는 절점이
 전부 새 덱이나 블록 자신에 있는지 확인한다.
@@ -5324,7 +5332,8 @@ range_diff: range_diff.json   # (선택) StepForge 구간 표 — 두 덱을 coo
 `resized`·`coords{before, after, same}`) 그대로이고 `coord_sha` 는 저쪽 식이다. 회귀 `tools/regress/test_rebind_after_remesh.py`
 20항(변이 둘 — 파트 이름을 빼면 맞닿은 자리에서 못 풀고, 구간 표 대조를 빼면 불일치를 놓친다).
 
-**아직 아닌 것.** 요소·파트 참조 · 공차 · 인클루드가 있는 덱 · 자유형식 줄 바꿔 쓰기. (meshfix 안의 재결속은 §40 에 따로
+**아직 아닌 것.** 위에 없는 요소·파트 카드(초기응력·변형률 · 파트 감쇠 · 강체 강제운동 …) · 공차 · 인클루드가 있는 덱 ·
+자유형식 줄 바꿔 쓰기. (meshfix 안의 재결속은 §40 에 따로
 있다 — 그쪽은 같은 덱 안에서 gmsh 가 만든 새 절점으로 `snap_tolerance` 공차를 두고 옮긴다.)
 
 ---

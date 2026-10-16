@@ -21,6 +21,7 @@
 #include "parser/DeckWriter.h"
 #include "parser/ElementCardLayout.h"
 #include "parser/FragmentMap.h"    // coordSha — 저쪽 `coord_sha` 와 같은 값(실물 조각 4/4 로 확인)
+#include "parser/IdRefs.h"         // 파트·요소를 가리키는 칸 — 정본(v2)
 #include "parser/IncludeScan.h"
 #include "parser/KFileReader.h"
 #include "parser/NodeRefs.h"
@@ -120,6 +121,11 @@ void collectDefinedIds(const std::vector<std::string>& L, std::map<std::string, 
             if (firstCardFirstField(L, i, cards::titleLines(kw), id) && id > 0) curves.insert(id);
         } else if (starts(kw, "*DEFINE_COORDINATE_")) {
             if (firstCardFirstField(L, i, cards::titleLines(kw), id) && id > 0) coords.insert(id);
+        } else if (starts(kw, "*CONTACT_") && ((kw.size() >= 3 && kw.compare(kw.size() - 3, 3, "_ID") == 0) ||
+                                               has(kw, "_ID_"))) {
+            if (firstCardFirstField(L, i, 0, id) && id > 0) sets["#CONTACT"].insert(id);   // 접촉 ID 도 겹치면 안 된다
+        } else if (kw == "*DEFINE_BOX") {
+            if (firstCardFirstField(L, i, 0, id) && id > 0) sets["#BOX"].insert(id);
         }
     }
 }
@@ -196,6 +202,20 @@ bool allowedKeyword(const std::string& kw, std::string& why) {
         if (has(kw, "_GENERAL") || has(kw, "_INTERSECT")) { why = "옵션 줄이 파트·상자를 가리킨다"; return false; }
         return true;
     }
+    // v2 — 파트·요소 세트(목록 · 칸 · ADD). 범위(_GENERATE)·옵션(_GENERAL)은 옛 번호의 꼴이라 옮길 수 없다
+    for (const char* p : {"*SET_PART", "*SET_SOLID", "*SET_SHELL", "*SET_BEAM", "*SET_TSHELL"})
+        if (starts(kw, p)) {
+            if (has(kw, "_GENERATE") || has(kw, "_GENERAL") || has(kw, "_INTERSECT")) {
+                why = "옛 번호의 범위·옵션이라 하나씩 옮길 수 없다";
+                return false;
+            }
+            return true;
+        }
+    // v2 — 요소 이력(맨 키워드 · _SET) · 강체 묶음 · 접촉(Card 1 의 PID 칸만 메시 번호다 — 정본이 서명으로 확인한다)
+    for (const char* p : {"*DATABASE_HISTORY_SOLID", "*DATABASE_HISTORY_SHELL", "*DATABASE_HISTORY_BEAM",
+                          "*DATABASE_HISTORY_TSHELL"})
+        if (kw == p || kw == std::string(p) + "_SET") return true;
+    if (kw == "*CONSTRAINED_RIGID_BODIES" || starts(kw, "*CONTACT_") || kw == "*DEFINE_BOX") return true;
     static const char* const kExact[] = {
         "*BOUNDARY_SPC_NODE", "*LOAD_NODE_POINT", "*INITIAL_VELOCITY_NODE", "*CONSTRAINED_EXTRA_NODES_NODE",
         "*ELEMENT_MASS", "*BOUNDARY_PRESCRIBED_MOTION_NODE", "*DATABASE_HISTORY_NODE",
@@ -210,7 +230,7 @@ bool allowedKeyword(const std::string& kw, std::string& why) {
     return false;
 }
 
-struct Unresolved { size_t line; std::string kw; int node; std::string why; };
+struct Unresolved { size_t line; std::string kw; int node; std::string why; const char* what = "절점"; };
 
 }  // namespace
 
@@ -385,7 +405,8 @@ int run(const Input& in, ConsoleOutput& console) {
     }
 
     std::vector<Unresolved> unresolved;
-    std::map<size_t, std::vector<std::pair<const noderefs::Ref*, int>>> edits;   // 줄 → (칸, 새 번호)
+    // 줄 → {열, 폭, 새 번호} — 절점·파트·요소 칸을 한 곳에 모은다
+    std::map<size_t, std::vector<std::array<int, 3>>> edits;
     std::map<std::string, int> movedBy;    // 키워드 → 바꾼 칸 수
     int unchanged = 0, own = 0;
     for (const auto& r : sc.refs) {
@@ -419,7 +440,85 @@ int run(const Input& in, ConsoleOutput& console) {
             continue;
         }
         if (it->second == r.value) ++unchanged;
-        else { edits[r.line].push_back({&r, it->second}); ++movedBy[kw]; }
+        else { edits[r.line].push_back({r.col, r.width, it->second}); ++movedBy[kw]; }
+    }
+
+    // ── 4b. 파트·요소 참조(v2) — 파트는 `*PART` 제목, 요소는 (파트 제목, 요소 절점들의 좌표 집합) 정확 일치 ─────
+    const auto ir = idrefs::find(E, fw);
+    if (ir.notChecked > 0) {
+        std::string ks;
+        for (const auto& k : ir.notCheckedKeywords) ks += (ks.empty() ? "" : ", ") + k;
+        refused.push_back("칸 뜻을 단정하지 못한 파트·요소 자리 " + std::to_string(ir.notChecked) + "곳(" + ks + ")");
+    }
+    auto elemKey = [](const Deck& d, const Element& e) {
+        std::set<std::string> ks;
+        for (int n : e.nodeIds) {
+            if (n <= 0) continue;
+            auto nt = d.mesh.getNodes().find(n);
+            if (nt == d.mesh.getNodes().end()) return std::string();
+            ks.insert(coordKey(nt->second.position));
+        }
+        auto pt = d.mesh.getParts().find(e.partId);
+        std::string k = (pt == d.mesh.getParts().end() ? "#" + std::to_string(e.partId) : cards::trim(pt->second.name));
+        for (const auto& c : ks) { k += '\x1e'; k += c; }
+        return k;
+    };
+    std::unordered_map<std::string, int> newElemIdx;
+    bool elemIndexed = false;
+    for (const auto& r : ir.refs) {
+        const std::string kw = idrefs::keywordOf(E, r);
+        int target = 0;
+        std::string why;
+        if (r.axis == idrefs::Axis::Part) {
+            auto op = oldD.mesh.getParts().find(r.value);
+            if (op == oldD.mesh.getParts().end()) why = "old_deck 에 없는 PID 다";
+            else {
+                auto np = newD.pidByTitle.find(cards::trim(op->second.name));
+                if (np == newD.pidByTitle.end()) why = "new_deck 에 같은 제목(「" + cards::trim(op->second.name) + "」)의 파트가 없다";
+                else if (np->second < 0) why = "new_deck 에 같은 제목의 파트가 여럿이다";
+                else target = np->second;
+            }
+        } else {
+            if (!elemIndexed) {
+                for (const auto& [eid, e] : newD.mesh.getElements()) {
+                    const std::string k = elemKey(newD, e);
+                    if (k.empty()) continue;
+                    auto it = newElemIdx.find(k);
+                    if (it == newElemIdx.end()) newElemIdx[k] = eid;
+                    else it->second = -1;
+                }
+                elemIndexed = true;
+            }
+            auto oe = oldD.mesh.getElements().find(r.value);
+            if (oe == oldD.mesh.getElements().end()) why = "old_deck 에 없는 요소다(격자 리더가 읽는 솔리드·셸만 옮긴다)";
+            else {
+                const std::string k = elemKey(oldD, oe->second);
+                auto it = k.empty() ? newElemIdx.end() : newElemIdx.find(k);
+                if (it == newElemIdx.end()) {
+                    auto pt = oldD.mesh.getParts().find(oe->second.partId);
+                    const std::string title = pt == oldD.mesh.getParts().end() ? std::string() : cards::trim(pt->second.name);
+                    why = "new_deck 에 같은 파트·같은 절점 자리의 요소가 없다" +
+                          (title.empty() ? std::string() : " (파트 「" + title + "」" +
+                           (resizedParts.count(title) ? " — 구간 표: 다시 구웠다(resized)" : "") + ")");
+                } else if (it->second < 0) why = "new_deck 에 같은 자리의 요소가 여럿이다";
+                else target = it->second;
+            }
+        }
+        const char* what = r.axis == idrefs::Axis::Part ? "파트" : "요소";
+        if (!why.empty()) {
+            unresolved.push_back({r.line, kw, r.value, why, what});
+            continue;
+        }
+        if (r.col < 0) {
+            unresolved.push_back({r.line, kw, r.value, "자유형식·칸이 어긋난 줄이라 제자리에 바꿔 쓸 수 없다", what});
+            continue;
+        }
+        if (static_cast<int>(std::to_string(target).size()) > r.width) {
+            unresolved.push_back({r.line, kw, r.value, "새 번호 " + std::to_string(target) + " 가 칸 폭을 넘는다", what});
+            continue;
+        }
+        if (target == r.value) ++unchanged;
+        else { edits[r.line].push_back({r.col, r.width, target}); ++movedBy[kw]; }
     }
 
     // ── 5. 하나라도 거절·충돌·불일치·못 풂이면 쓰지 않는다 ─────────────────────
@@ -437,9 +536,9 @@ int run(const Input& in, ConsoleOutput& console) {
     {
         std::vector<std::string> items;
         for (const auto& u : unresolved)
-            items.push_back("line " + std::to_string(u.line + 1) + " " + u.kw + ": 절점 " + std::to_string(u.node) +
-                            " — " + u.why);
-        list("못 푼 절점 참조", items);
+            items.push_back("line " + std::to_string(u.line + 1) + " " + u.kw + ": " + u.what + " " +
+                            std::to_string(u.node) + " — " + u.why);
+        list("못 푼 참조(절점·파트·요소)", items);
     }
     if (fail) {
         console.println("  산출을 쓰지 않았다. 위치로 짝을 찾는 재결속이라 다시 구운 파트의 절점은 옮길 수 없다 —");
@@ -451,11 +550,12 @@ int run(const Input& in, ConsoleOutput& console) {
     std::vector<std::string> out = E;
     for (auto& [li, es] : edits) {
         std::string& s = out[li];
-        for (const auto& [ref, nid] : es) {
-            if (static_cast<int>(s.size()) < ref->col + ref->width) s.resize(static_cast<size_t>(ref->col + ref->width), ' ');
+        for (const auto& e : es) {
+            const size_t col = static_cast<size_t>(e[0]), w = static_cast<size_t>(e[1]);
+            if (s.size() < col + w) s.resize(col + w, ' ');
             char b[32];
-            std::snprintf(b, sizeof(b), "%*d", ref->width, nid);
-            s.replace(static_cast<size_t>(ref->col), static_cast<size_t>(ref->width), b);
+            std::snprintf(b, sizeof(b), "%*d", e[1], e[2]);
+            s.replace(col, w, b);
         }
     }
     // 쓰기 전 재검사 — 바꾼 덱의 절점 참조가 전부 새 덱이나 블록 자신에 있는가(같은 정본으로)
@@ -463,9 +563,12 @@ int run(const Input& in, ConsoleOutput& console) {
         const auto chk = noderefs::find(out, fw, [&](int v) {
             return !ownNodes.count(v) && !newD.mesh.getNodes().count(v);
         });
-        if (!chk.refs.empty()) {
-            console.error(tag + "바꿔 쓴 블록을 다시 보니 new_deck 에 없는 절점 " + std::to_string(chk.refs.size()) +
-                          "곳 — 쓰지 않는다(이 op 의 결함이다)");
+        const auto chk2 = idrefs::find(out, fw, [&](idrefs::Axis ax, int v) {
+            return ax == idrefs::Axis::Part ? !newD.pids.count(v) : !newD.elemIds.count(v);
+        });
+        if (!chk.refs.empty() || !chk2.refs.empty()) {
+            console.error(tag + "바꿔 쓴 블록을 다시 보니 new_deck 에 없는 번호 " +
+                          std::to_string(chk.refs.size() + chk2.refs.size()) + "곳 — 쓰지 않는다(이 op 의 결함이다)");
             return 1;
         }
     }
@@ -477,7 +580,7 @@ int run(const Input& in, ConsoleOutput& console) {
 
     int moved = 0;
     for (const auto& [k, n] : movedBy) moved += n;
-    console.success(tag + "다 묶었다 — 절점 칸 " + std::to_string(moved) + "곳을 새 번호로 · 번호가 그대로인 칸 " +
+    console.success(tag + "다 묶었다 — 절점·파트·요소 칸 " + std::to_string(moved) + "곳을 새 번호로 · 번호가 그대로인 칸 " +
                     std::to_string(unchanged) + " · 블록 자신의 절점 " + std::to_string(own));
     for (const auto& [k, n] : movedBy) console.println("  " + k + " " + std::to_string(n) + "곳");
     console.println("  → " + in.output + " — new_deck 과 함께 `*INCLUDE` 해 쓴다");
