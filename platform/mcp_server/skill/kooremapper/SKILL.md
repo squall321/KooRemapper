@@ -21,12 +21,18 @@ LS-DYNA `.k` 파일을 다루는 KooRemapper 플랫폼을 Claude에서 사용하
 3. **파일 업로드** — `upload_kfile(session_id, filename, content)`.
    업로드 즉시 백엔드가 `info`로 노드/요소/파트/bbox/`*INCLUDE`를 파싱한다.
    "이 파일 안에 뭐가 있나"는 `list_session_files(session_id)` 또는 `inspect_file(...)`.
+   덱이 `*INCLUDE` 로 나뉘어 있으면 **인클루드를 먼저** 올린다(하위 폴더면 `filename="sub/part.k"`).
+   meta 는 올리는 순간 그때 세션에 있는 닫힘까지 한 번 재므로, 마스터를 먼저 올리면 절점 0 으로 남는다
+   (그때는 마스터를 `delete_file` 로 지우고 다시 올린다). 빠진 것은 `session_includes(session_id)` 로 본다 —
+   빠진 채로는 `run_operation` 이 422 로 막는다.
 4. **실행** — `run_operation(session_id, op, args)` → `job_id`.
    - 파일 인자(예: bent_mesh, flat_mesh, model)는 **세션 내 파일명**을 그대로 쓴다.
    - YAML 계열 op는 args가 곧 설정 키다. `config_style: "freeform"` op는
      `args = {"config": { ... }}` 형태로 전체 설정 객체를 넣는다.
 5. **대기/확인** — `get_job(job_id)` 로 status가 `succeeded`/`failed`가 될 때까지 폴링.
    실패면 `get_job(job_id, include_logs=true)` 로 stderr를 보고 args를 고쳐 재시도.
+   `warnings` 가 붙어 있으면 읽는다 — 입력 덱이 정의되지 않은 세트·파트·섹션·재질·절점을 가리킨다는
+   경고다(막지는 않는다. LS-DYNA 는 그런 덱을 키워드 단계에서 멈춘다).
 6. **결과 회수** — `get_job_outputs(job_id)` 로 산출 file_id 확인 →
    `download_result(session_id, file_id)` 로 내용을 받는다.
 
@@ -39,6 +45,8 @@ LS-DYNA `.k` 파일을 다루는 KooRemapper 플랫폼을 Claude에서 사용하
 - **freeform yaml op**(assemble/contact/ale/offset/merge/battery 등): 전체 설정을 config로.
   예) assemble → `{"config":{"base_model":"model.k","output":"result","operations":[...]}}`
 - 잘 모르면 `describe_operation(op)` 의 `example.args` 를 거의 그대로 쓰고 파일명만 바꾼다.
+- **구조화 op 은 스키마에 없는 키를 422 로 거절한다**(`Additional properties are not allowed`). 키를 덧붙이지
+  마라 — 예) `rebind_entities_after_remesh` 에는 `model` 이 없다(`old_deck`·`new_deck`·`entities` 를 쓴다).
 
 ### 모르는 열거값은 이제 rc=1 이다
 
@@ -79,11 +87,44 @@ job 은 `failed` 로 보이지만 산출 덱은 있다 — `get_job(job_id, incl
 - `convert` / `refine` / `tetremesh` / `meshfix` : 메쉬 변환·재메쉬
 - `implicit` / `modal` / `relax` / `ale` / `stabilize` : 해석 셋업
 - `contact` / `load` / `boundary` / `rbe` : 접촉·하중·경계조건
-- `info` / `modelmeta` : 메쉬 정보 조회 · 파트 인벤토리(부피·면적·재질)
+- `info` / `modelmeta` : 메쉬 정보 조회 · 파트 인벤토리(부피·면적·재질) — 인클루드 닫힘까지 읽는다
+- `id_floor` / `cad_solid_merge_to_deck` : StepForge 조각을 덱에 넣는다(아래)
+- `rebind_entities_after_remesh` : 재메시 뒤 덧붙인 블록을 새 번호에 다시 묶는다(아래)
 - `section` / `surfview` / `stackdiagram` : **격자를 그림으로 본다**(아래)
 - `neutralaxis` : 적층의 EI 가중 중립축·굽힘강성
 
 > meshfix는 gmsh 바이너리가 필요할 수 있다(`requires_gmsh`). 실패 시 로그를 확인하라.
+> `preview: true` 는 gmsh 를 부르지 않고 미리 짚기만 한다(아래).
+
+> `modelmeta` 는 2차 솔리드(ELFORM 16·17·25~28) 파트의 `volume`·`area_ext`·`proj`·`edge_len`·`n_node`·`mass`
+> 를 숫자 대신 `null` + `geometry_reason`/`mass_reason` 으로 낸다 — 리더가 앞 8칸만 읽어 그 값이 틀린다(부피 실측
+> −48.4%). `null` 을 0 으로 읽지 마라. 그런 덱은 `model.orphan_nodes` 도 상한이라 `null` + `orphan_nodes_reason` 이다.
+
+## 덱을 고치는 op 이 **쓰지 않고** 멈추는 자리
+
+조용히 틀린 덱을 내느니 멈춘다. rc=1(이나 0 이 아닌 값)이면 로그에서 까닭과 줄 번호를 먼저 읽어라.
+
+- `meshfix` — 지울 절점을 세트·SPC·하중·이력·CNRB 가 가리키면 같은 파트의 새 절점(옛 자리에서 `snap_tolerance`
+  안)으로 바꿔 쓴다. 못 풀면(내부 절점 · 인클루드 안 · 자유형식 줄) 덱을 쓰지 않는다. `preview: true` 로 gmsh 없이
+  그 카드를 미리 짚을 수 있다(덱을 쓰지 않는다). 표면 절점이면 `boundary_nodes: fixed` 가 원래 번호를 지킨다.
+- `hfdamp` 선택형 — 인클루드를 다 못 읽었는데 대상 파트가 없으면 전체 감쇠로 바꾸지 않고 멈춘다(rc 255).
+- `ale` — 주 덱만 고치므로 `*PART` 가 인클루드 안에 있으면 「PID … not found in model」로 멈춘다.
+
+## StepForge 조각 넣기 · 재메시 뒤 다시 묶기
+
+두 앱은 서로를 부르지 않고 파일로만 주고받는다. 이미 있는 덱의 바이트를 바꾸는 일은 이쪽이, STEP 형상과
+거기서 짓는 조각은 StepForge 가 맡는다.
+
+1. **번호 바닥** — `id_floor`(`model`·`output`). 산출의 `node_start`·`elem_start`·`pid_start`·`sid_start` 를
+   StepForge `export_part_fragment` 에 **이름 그대로** 넘긴다(대역표는 없다 — 요청할 때 발행한다). 받은 대응표를
+   `fragment_map` 으로 다시 주면 범위마다 `above`/`below`/`unused` 를 말한다(`below` 면 rc 1).
+2. **넣기** — `cad_solid_merge_to_deck`(`model`·`output`·`fragment`·`fragment_map`). 대응표 칸 집합·`unit`·
+   `frame: world`·`coord_sha` 가 하나라도 계약과 다르면 아무것도 쓰지 않는다(rc 1). 바닥 위 조각은 번호를 옮기지
+   않아 대응표 번호가 곧 덱 번호다. 세트가 든 조각(`ranges.sid` 가 null 이 아님)은 아직 받지 않는다.
+3. **재메시 뒤** — StepForge 는 메시 잡마다 덱 전체를 다시 번호 매긴다. 그 위에 덧붙인 블록(세트·SPC·하중·이력·
+   접촉·CNRB …)은 `rebind_entities_after_remesh`(`old_deck`·`new_deck`·`entities`·`output`, 선택 `range_diff`)로
+   새 번호에 다시 묶는다. 절점은 (파트 제목, 좌표) · 파트는 `*PART` 제목 · 요소는 (파트 제목, 절점 좌표 집합)으로
+   **정확히** 짝짓고 공차는 없다. 하나라도 못 풀면 쓰지 않는다. 한 파일 덱만 받는다.
 
 ## 격자를 **보는** 법 (그림 도구 셋)
 
@@ -105,6 +146,8 @@ job 은 `failed` 로 보이지만 산출 덱은 있다 — `get_job(job_id, incl
   없는데 그려 놓으면 완전히 그럴듯해 보인다. 그때는 `mesh_section_figure` 로 잘라서 보라.
 - 셋 다 **2차 솔리드(ELFORM 16·17·25~28)를 거절한다** — 리더가 중간절점을 코너로 읽어
   단면이 조용히 71% 틀린다. 1차 요소 덱으로 그려라(20절점 **육면체** 23 은 그린다).
+- 셋 다 **인클루드 닫힘까지** 읽는다 — 마스터 덱도 그린다. 인클루드를 못 찾아 요소가 없으면 그리지 않고
+  어느 파일을 못 읽었는지 말한다.
 
 축은 `axis="auto"` 가 기본이고 **"적층 방향에 수직" 이 규칙이 아니다** — 응답의
 `axis_chosen_because` 에 고른 까닭이 들어온다. 축척은 기본이 **비등방**이고 배율을 그림에

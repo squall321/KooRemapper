@@ -132,5 +132,7 @@ SmartTwin 파이프라인이 만든 deep(단건 심층)·sphere(전각도 낙하
 ## 검증
 - `mcp_server/smoke.py` — 도구 노출 수 + 전체 op 파이프라인 + 에러 전파를 러닝 스택에 대고
   확인(스택 없으면 자동 skip). 기대 도구 수는 하드코딩하지 않고 `server.py` 의 `@mcp.tool(`
-  수에서 뽑는다 — 위 표의 도구 수(현재 54개)와 같아야 한다.
+  수에서 뽑는다 — 위 표의 도구 수(현재 72개)와 같아야 한다.
+- `mcp_server/figures_smoke.py` · `mcp_server/deckops_smoke.py` — 그림 도구와 **덱을 쓰는 op**(새 op 은 `CASES` 에
+  한 줄 더한다)을 살아 있는 스택에서 끝까지 부른다. 게시 바이너리·API·MCP 가 하나라도 낡으면 빨개진다.
 - `backend/tests/test_parity.py` — 광고 카운트(`mcp_tools`)와 실제 `@mcp.tool` 수 일치 강제.
