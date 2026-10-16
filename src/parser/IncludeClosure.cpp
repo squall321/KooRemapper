@@ -37,19 +37,6 @@ std::string keyOf(const std::string& p) {
     return ec ? p : c.string();
 }
 
-// Vol_I 181591 — 로컬 디렉터리(= 주 덱 폴더) 먼저. 못 찾고 이름에 경로가 없을 때만
-// `*INCLUDE_PATH` 디렉터리를 적힌 차례로 본다.
-std::string resolve(const std::string& name, const std::string& mainDir,
-                    const std::vector<std::string>& searchDirs) {
-    const std::string local = deckscan::joinPath(mainDir, name);
-    if (isFile(local)) return local;
-    if (hasPathPart(name)) return "";
-    for (const auto& d : searchDirs) {
-        const std::string c = deckscan::joinPath(d, name);
-        if (isFile(c)) return c;
-    }
-    return "";
-}
 
 struct Walker {
     static constexpr size_t kMain = static_cast<size_t>(-1);
@@ -93,7 +80,7 @@ struct Walker {
             }
             for (const auto& n : names) {
                 ++out.cards;
-                const std::string p = resolve(n.name, mainDir, searchDirs);
+                const std::string p = resolvePath(n.name, mainDir, searchDirs);
                 if (p.empty()) {
                     out.unresolved.push_back({file, n.line + 1, n.name, "없다"});
                     continue;
@@ -127,6 +114,20 @@ struct Walker {
 };
 
 }  // namespace
+
+// Vol_I 181591 — 로컬 디렉터리(= 주 덱 폴더) 먼저. 못 찾고 이름에 경로가 없을 때만
+// `*INCLUDE_PATH` 디렉터리를 적힌 차례로 본다.
+std::string resolvePath(const std::string& name, const std::string& mainDir,
+                        const std::vector<std::string>& searchDirs) {
+    const std::string local = deckscan::joinPath(mainDir, name);
+    if (isFile(local)) return local;
+    if (hasPathPart(name)) return "";
+    for (const auto& d : searchDirs) {
+        const std::string c = deckscan::joinPath(d, name);
+        if (isFile(c)) return c;
+    }
+    return "";
+}
 
 std::vector<NameAt> namesFrom(const std::vector<std::string>& lines, size_t i) {
     std::vector<NameAt> out;

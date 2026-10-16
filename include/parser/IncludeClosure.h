@@ -80,6 +80,12 @@ struct Closure {
 struct NameAt { std::string name; size_t line = 0; size_t last = 0; };   // line·last 는 0-기반(`␣+` 이음이면 last > line)
 std::vector<NameAt> namesFrom(const std::vector<std::string>& lines, size_t i);
 
+// 이름 하나를 찾는다 — 로컬 디렉터리(= `mainDir`) 먼저, 못 찾고 이름에 경로가 없을 때만 `searchDirs`
+// (`*INCLUDE_PATH` 디렉터리, 적힌 차례)(Vol_I 181591). 못 찾으면 빈 문자열. 파일을 **담지 않는** 흘려
+// 읽는 리더(`cleanup_nodes` — 2.32GB 덱 전제)도 이 규칙만은 같이 쓴다 — 규칙이 둘이면 갈린다.
+std::string resolvePath(const std::string& name, const std::string& mainDir,
+                        const std::vector<std::string>& searchDirs);
+
 // 주 덱(`mainPath` 에서 읽은 `mainLines`)의 인클루드 닫힘을 읽는다.
 Closure read(const std::string& mainPath, const std::vector<std::string>& mainLines,
              size_t maxDepth = 16);

@@ -268,6 +268,38 @@ def main():
         check("F-6 report 모드는 돌고 못 읽은 인클루드를 센다",
               rc == 0 and report(d, "rfr.json")["deck"]["includes_unreadable"] == 1, out[-300:])
 
+        # ── F'': *INCLUDE_PATH 는 탐색 경로다(2026-10-16) ───────────────────────
+        # 예전에는 `*INCLUDE_PATH` 를 「못 읽은 변종 인클루드」로 세어 safe 가 **거절**했다 —
+        # 같은 덱에 그 카드 한 장만 더해도 rc=1. 끌어오는 본문이 없는 카드다.
+        L = ["*KEYWORD", "*INCLUDE_PATH", "libdir", "*NODE"]
+        for i, (x, y, z) in enumerate(CUBE, start=1):
+            L.append(nodeline(i, x, y, z))
+        L += ["*PART", "p", "%10d%10d%10d" % (1, 1, 1), "*SECTION_SOLID", "%10d%10d" % (1, 1),
+              "*ELEMENT_SOLID", "%8d%8d" % (1, 1), "".join("%8d" % n for n in range(1, 9)), "*END"]
+        write(os.path.join(d, "path_only.k"), "\n".join(L) + "\n")
+        cfg(d, "fp.yaml", model="path_only.k", output="path_only_out.k", mode="safe")
+        rc, out = run(binary, d, "cleanup-nodes", "fp.yaml")
+        check("F-7 ★*INCLUDE_PATH 만 있는 덱을 safe 가 쓴다(거절하지 않는다)",
+              rc == 0 and os.path.exists(os.path.join(d, "path_only_out.k")), out[-300:])
+        # 탐색 경로로 찾은 인클루드는 **읽는다** — 그 안의 요소가 쓰는 절점을 남긴다.
+        os.makedirs(os.path.join(d, "libdir"), exist_ok=True)
+        L = ["*KEYWORD", "*INCLUDE_PATH", "libdir", "*NODE"]
+        for i, (x, y, z) in enumerate(CUBE, start=1):
+            L.append(nodeline(i, x, y, z))
+        L.append(nodeline(101, 9.0, 0.0, 0.0))
+        L += ["*PART", "p", "%10d%10d%10d" % (1, 1, 1), "*SECTION_SOLID", "%10d%10d" % (1, 1),
+              "*INCLUDE", "elems_in_lib.k", "*END"]
+        write(os.path.join(d, "via_path.k"), "\n".join(L) + "\n")
+        write(os.path.join(d, "libdir", "elems_in_lib.k"), "*KEYWORD\n*ELEMENT_SOLID\n%8d%8d\n%s\n*END\n"
+              % (1, 1, "".join("%8d" % n for n in range(1, 9))))
+        cfg(d, "fv.yaml", model="via_path.k", report="rfv.json")
+        rc, out = run(binary, d, "cleanup-nodes", "fv.yaml")
+        rv = report(d, "rfv.json")
+        check("F-8 ★탐색 경로로 찾은 인클루드를 읽는다",
+              rv["deck"]["includes_read"] == 1 and rv["deck"]["includes_unreadable"] == 0, rv["deck"])
+        check("F-9 ★그 안의 요소가 쓰는 절점 8개를 남긴다(삭제 가능 1)",
+              rv["nodes"]["used_by_elements"] == 8 and rv["nodes"]["deletable"] == 1, rv["nodes"])
+
         # ── G: *SET_NODE_LIST_GENERATE 범위는 펼쳐 남긴다 ─────────────────────
         L = ["*KEYWORD", "*NODE"]
         for i, (x, y, z) in enumerate(CUBE, start=1):

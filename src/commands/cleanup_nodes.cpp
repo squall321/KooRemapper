@@ -30,6 +30,7 @@
 //   @lat: [[modules/commands]]
 //   @lat: [[commands/cleanup-nodes]]
 
+#include "parser/IncludeClosure.h"   // 인클루드를 찾는 규칙 — 정본(흘려 읽기는 그대로)
 #include "cleanup_nodes.h"
 
 #include "cli/ConsoleOutput.h"
@@ -115,6 +116,7 @@ struct Scan {
     bool anyNode = false;
     // 인클루드
     std::vector<std::string> includeRead, includeMissing, includeVariant;
+    std::vector<std::string> includeSearchDirs;               // `*INCLUDE_PATH` — 찾는 자리(본문 없음)
     // 덱
     int fieldWidth = 8;
 };
@@ -129,6 +131,9 @@ struct Scan {
 struct SectionMap {
     std::map<int, int> secElform;   // SECID → ELFORM
     std::map<int, int> partSec;     // PID → SECID
+    // 인클루드 찾기 — 정본 규칙(`include_closure::resolvePath`)에 넘길 것. 주 덱 폴더와 `*INCLUDE_PATH`.
+    std::string mainDir;
+    std::vector<std::string> searchDirs;
 };
 
 void scanSections(const std::string& path, int fw, SectionMap& sm,
@@ -139,20 +144,31 @@ void scanSectionsStream(std::istream& in, const std::string& baseDir, int fw, Se
     std::string line, kw;
     int dataIdx = 0;
     bool pendingInclude = false;
+    bool pendingPath = false;
+    (void)baseDir;   // 찾는 기준은 포함하는 파일의 폴더가 아니라 **주 덱 폴더**다(sm.mainDir)
     while (std::getline(in, line)) {
         size_t g = line.find_first_not_of(" \t\r\n");
         if (g != std::string::npos && line[g] == '*') {
             kw = keywordToken(line);
             dataIdx = 0;
             pendingInclude = (kw == "*INCLUDE");
+            pendingPath = starts(kw, "*INCLUDE_PATH");
             continue;
         }
         if (!isDataLine(line)) continue;
+        if (pendingPath) {
+            std::string dir = trim(line);
+            while (!dir.empty() && dir.back() == '\r') dir.pop_back();
+            if (!dir.empty()) sm.searchDirs.push_back(joinPath(sm.mainDir, dir));
+            continue;
+        }
         if (pendingInclude) {
             std::string rel = trim(line);
             while (!rel.empty() && rel.back() == '\r') rel.pop_back();
-            if (!rel.empty() && depth < 8)
-                scanSections(joinPath(baseDir, rel), fw, sm, visited, depth + 1);
+            // 찾는 규칙은 정본 하나(Vol_I 181591) — 주 덱 폴더 먼저, 경로 없는 이름만 탐색 경로.
+            const std::string full = KooRemapper::include_closure::resolvePath(rel, sm.mainDir, sm.searchDirs);
+            if (!rel.empty() && !full.empty() && depth < 8)
+                scanSections(full, fw, sm, visited, depth + 1);
             continue;   // *INCLUDE 는 줄마다 파일 하나다
         }
         if (starts(kw, "*SECTION_SOLID")) {
@@ -176,6 +192,7 @@ void scanSectionsStream(std::istream& in, const std::string& baseDir, int fw, Se
 
 void scanSections(const std::string& path, int fw, SectionMap& sm,
                   std::set<std::string>& visited, int depth) {
+    if (depth == 0) sm.mainDir = dirOf(path);   // 로컬 디렉터리 = 주 덱 폴더
     if (visited.count(path)) return;
     visited.insert(path);
     std::ifstream in(path);
@@ -214,7 +231,10 @@ void scanRefs(const std::string& path, bool isMain, const Opts& o,
 void scanRefsStream(std::istream& in, const std::string& baseDir, bool isMain, const Opts& o,
                     const std::map<int, int>& pidNodes, Scan& sc,
                     std::set<std::string>& visited, int depth, long long& paramRefLines) {
-    enum class Mode { OTHER, NODE, ELEM, SETNODE, KEEP, TEXT, INCLUDE };
+    enum class Mode { OTHER, NODE, ELEM, SETNODE, KEEP, TEXT, INCLUDE, INCLUDE_PATH };
+    // 찾는 기준은 포함하는 파일의 폴더가 아니라 **주 덱 폴더**다(Vol_I 181591 — local directory).
+    const std::string mainDir = dirOf(o.model);
+    (void)baseDir;
     Mode mode = Mode::OTHER;
     std::string kw;
     int fw = sc.fieldWidth;
@@ -250,6 +270,11 @@ void scanRefsStream(std::istream& in, const std::string& baseDir, bool isMain, c
             }
             if (kw == "*NODE") { mode = Mode::NODE; continue; }
             if (kw == "*INCLUDE") { mode = Mode::INCLUDE; continue; }
+            // ⚠ `*INCLUDE_PATH` 는 **탐색 경로**다 — 끌어오는 카드가 없으니 「못 읽은 변종」이 아니다.
+            //   예전에는 변종으로 세어 `safe` 가 그 덱을 **거절**했다(재현 — 같은 덱에 `*INCLUDE_PATH`
+            //   한 장만 더하면 rc=1 「읽지 못한 *INCLUDE 가 있어 덱을 쓰지 않는다」). 디렉터리를 모아
+            //   경로 없는 이름을 찾는 데 쓴다.
+            if (starts(kw, "*INCLUDE_PATH")) { mode = Mode::INCLUDE_PATH; continue; }
             if (starts(kw, "*INCLUDE")) {
                 sc.includeVariant.push_back(kw);
                 mode = Mode::TEXT;                 // 변종 본문은 경로·변환값이라 정수로 읽지 않는다
@@ -281,11 +306,20 @@ void scanRefsStream(std::istream& in, const std::string& baseDir, bool isMain, c
 
         if (mode == Mode::TEXT) continue;
 
+        if (mode == Mode::INCLUDE_PATH) {
+            if (!isDataLine(line)) continue;
+            std::string dir = trim(line);
+            if (!dir.empty()) sc.includeSearchDirs.push_back(joinPath(mainDir, dir));
+            continue;
+        }
+
         if (mode == Mode::INCLUDE) {
             if (!isDataLine(line)) continue;
             std::string rel = trim(line);
             if (rel.empty()) continue;
-            std::string full = joinPath(baseDir, rel);
+            // 찾는 규칙은 정본 하나 — 주 덱 폴더 먼저, 경로 없는 이름만 `*INCLUDE_PATH`.
+            std::string full = KooRemapper::include_closure::resolvePath(rel, mainDir, sc.includeSearchDirs);
+            if (full.empty()) full = joinPath(mainDir, rel);   // 못 찾았다 — 아래가 missing 으로 적는다
             std::ifstream probe(full);
             if (probe.is_open()) {
                 probe.close();
@@ -534,12 +568,12 @@ struct Box {
 };
 
 void bboxAfterFile(const std::string& path, int deckFw, const std::vector<int>& del, Box& box,
-                   std::set<std::string>& visited, int depth) {
+                   std::set<std::string>& visited, int depth,
+                   const std::string& mainDir, const std::vector<std::string>& searchDirs) {
     if (visited.count(path)) return;
     visited.insert(path);
     std::ifstream in(path);
     if (!in.is_open()) return;
-    const std::string baseDir = dirOf(path);
     std::string line, kw;
     int fw = deckFw;
     bool node = false, incl = false;
@@ -559,8 +593,10 @@ void bboxAfterFile(const std::string& path, int deckFw, const std::vector<int>& 
         if (!isDataLine(line)) continue;
         if (incl) {
             std::string rel = trim(line);
-            if (!rel.empty() && depth < 8)
-                bboxAfterFile(joinPath(baseDir, rel), deckFw, del, box, visited, depth + 1);
+            // 찾는 규칙은 정본 하나 — 패스 0·1 과 같아야 한다(갈리면 bbox 가 다른 파일을 본다).
+            const std::string full = KooRemapper::include_closure::resolvePath(rel, mainDir, searchDirs);
+            if (!rel.empty() && !full.empty() && depth < 8)
+                bboxAfterFile(full, deckFw, del, box, visited, depth + 1, mainDir, searchDirs);
             continue;
         }
         if (!node) continue;
@@ -909,7 +945,8 @@ int runCleanupNodes(const std::string& yamlFile, ConsoleOutput& console) {
 
     // ── bbox(후) ─────────────────────────────────────────────────────────────
     Box after;
-    { std::set<std::string> vis; bboxAfterFile(o.model, sc.fieldWidth, res.deletable, after, vis, 0); }
+    { std::set<std::string> vis; bboxAfterFile(o.model, sc.fieldWidth, res.deletable, after, vis, 0,
+                                               dirOf(o.model), sc.includeSearchDirs); }
 
     // ── 보고 ─────────────────────────────────────────────────────────────────
     console.info("  nodes defined (main deck): " + std::to_string(sc.definedMain.size()));
