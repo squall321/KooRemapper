@@ -53,6 +53,7 @@ set(CORE_SOURCES
 # Source files - Parser
 set(PARSER_SOURCES
     src/parser/ElementCardLayout.cpp
+    src/parser/FragmentMap.cpp
     src/parser/IncludeClosure.cpp
     src/parser/KFileReader.cpp
     src/parser/KFileWriter.cpp
@@ -134,6 +135,8 @@ set(UTIL_SOURCES
     src/util/Timer.cpp
     src/util/Validator.cpp
     src/util/SpatialHash2D.cpp
+    src/util/Sha256.cpp
+    src/util/StrictJson.cpp
 )
 
 # Source files - Validation

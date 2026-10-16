@@ -9,6 +9,8 @@
 #include "test_DeckContract.cpp"
 #include "test_IncludeClosure.cpp"
 #include "test_IdAllocator.cpp"
+// StepForge 조각 계약 — 2026-10-16
+#include "test_FragmentMap.cpp"
 
 int main(int argc, char* argv[]) {
     (void)argc;
