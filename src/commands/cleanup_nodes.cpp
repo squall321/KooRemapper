@@ -887,6 +887,7 @@ int runCleanupNodes(const std::string& yamlFile, ConsoleOutput& console) {
                 inKeepList = true;
             }
         }
+        else console.warning("[cleanup-nodes] 모르는 키는 무시한다: " + key);   // 조용히 넘어가지 않는다(오타면 기본값으로 돈다)
     }
     yf.close();
 

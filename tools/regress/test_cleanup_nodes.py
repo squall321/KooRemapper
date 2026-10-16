@@ -116,6 +116,10 @@ def main():
         L += ["*DEFINE_SOMETHING_WE_DO_NOT_KNOW", "%10d" % 105]
         L += ["*END"]
         write(os.path.join(d, "trap.k"), "\n".join(L) + "\n")
+        # 모르는 키는 경고하고 무시한다(조용히 넘어가지 않는다) — `mod: safe` 오타는 기본 report 로 돈다
+        write(os.path.join(d, "uk.yaml"), "model: trap.k\nmod: safe\n")
+        rc, out = run(binary, d, "cleanup-nodes", "uk.yaml")
+        check("A-uk 모르는 키(mod 오타)는 경고하고 무시한다 — rc 0", rc == 0 and "모르는 키는 무시한다: mod" in out, out[-300:])
 
         cfg(d, "a.yaml", model="trap.k", report="ra.json")
         rc, out = run(binary, d, "cleanup-nodes", "a.yaml")

@@ -265,6 +265,16 @@ def main():
               out[-300:])
     finally:
         shutil.rmtree(d, ignore_errors=True)
+    # 모르는 YAML 키는 거절한다 — `deck_units` 오타를 조용히 넘기면 기본 단위(mm-t-s)로 넣는다
+    d = stage(deck)
+    try:
+        with open(os.path.join(d, "m.yaml"), "a", encoding="utf-8") as f:
+            f.write("deck_units: m-kg-s\n")
+        rc, out = run(binary, d)
+        check("D10 모르는 YAML 키(deck_units 오타) — rc 1 · 산출 없음 · 그 키를 말한다",
+              rc == 1 and not os.path.exists(os.path.join(d, "merged.k")) and "모르는 키: deck_units" in out, out[-300:])
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
 
     print()
     if FAILS:

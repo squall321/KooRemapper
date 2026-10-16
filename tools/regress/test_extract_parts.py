@@ -133,6 +133,11 @@ def main():
         check("A-7 안 고른 재질은 없다 (MID 3)", "         3  2.70E-9" not in o)
         check("A-8 필요한 섹션·재질은 둘 다 있다",
               r["needed"]["sections"] == [1, 2] and r["needed"]["materials"] == [1, 2], r["needed"])
+        # 모르는 키는 경고하고 무시한다(조용히 넘어가지 않는다)
+        cfg(d, "uk.yaml", "model: main.k\noutput: out_uk.k\nparts: [1, 2]\nrenumbr: true\n")
+        rc, out = run(binary, d, "extract-parts", "uk.yaml")
+        check("A-uk 모르는 키(renumbr 오타)는 경고하고 무시한다 — rc 0", rc == 0 and "모르는 키는 무시한다: renumbr" in out,
+              out[-300:])
         check("A-9 ID 를 그대로 둔다 (renumber 기본 false)",
               r["renumber"]["on"] is False and "\n       1       2       3       4" in o)
         check("A-10 *CONTROL_* 은 그대로 싣는다 (안 싣으면 덱이 안 돈다)",

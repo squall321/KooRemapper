@@ -1647,6 +1647,8 @@ int runCadSolidMerge(const std::string& yamlFile, ConsoleOutput& console) {
     KooRemapper::yamlSkipBOM(f);
 
     CadSolidMergeOperation op;
+    // 모르는 키는 거절한다 — 형제 op(id_floor · 재결속)과 같다. `deck_units:` 같은 오타를 조용히 넘기면 기본 단위로 넣게 된다
+    std::vector<std::string> unknown;
     std::string ln;
     while (std::getline(f, ln)) {
         if (!ln.empty() && ln.back() == '\r') ln.pop_back();
@@ -1656,12 +1658,20 @@ int runCadSolidMerge(const std::string& yamlFile, ConsoleOutput& console) {
         if (cp == std::string::npos) continue;
         std::string key = y.keyOf(tr, cp);
         std::string val = y.stripQuotes(y.trim(KooRemapper::yamlStripComment(tr.substr(cp + 1))));
-        y.parseCommonKey(key, val);
-        if      (key == "fragment")     op.fragment = val;
+        if (key == "model" || key == "base_model" || key == "output") y.parseCommonKey(key, val);
+        else if (key == "fragment")     op.fragment = val;
         else if (key == "fragment_map") op.fragmentMap = val;
         else if (key == "deck_unit")    op.deckUnit = val;
+        else unknown.push_back(key);
     }
     f.close();
+    if (!unknown.empty()) {
+        std::string ks;
+        for (const auto& k : unknown) ks += (ks.empty() ? "" : ", ") + k;
+        console.error(std::string("[") + tag + "] 모르는 키: " + ks +
+                      " — model · output · fragment · fragment_map · deck_unit(선택)만 받는다");
+        return 1;
+    }
 
     if (y.modelFile.empty()) { console.error(std::string("[") + tag + "] model 이 없습니다 — 조각을 넣을 덱"); return 1; }
     if (op.fragment.empty() || op.fragmentMap.empty()) {

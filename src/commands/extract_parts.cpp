@@ -1104,6 +1104,7 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
             else if (key == "materials") o.incMaterials = boolOf(val);
             else if (key == "sections") o.incSections = boolOf(val);
             else if (key == "sets") o.incSets = (upper(val) != "NONE" && upper(val) != "FALSE");
+            else console.warning("[extract-parts] include 아래 모르는 키는 무시한다: " + key);
             continue;
         }
         inInclude = false;
@@ -1131,6 +1132,7 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
                 inList = isParts ? List::PARTS : List::TITLES;
             }
         }
+        else console.warning("[extract-parts] 모르는 키는 무시한다: " + key);   // 조용히 넘어가지 않는다(오타면 기본값으로 돈다)
     }
     yf.close();
 
