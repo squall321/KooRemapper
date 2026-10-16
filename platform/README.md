@@ -97,7 +97,7 @@ uvicorn app.main:app --reload --port 8700
 | Job이 `running`에 멈춤 | api 재기동 시 워커가 startup에서 자동으로 `failed` 처리(reconcile). 재기동만 하면 됨 |
 | 업로드 413 | 파일이 `KOORM_MAX_UPLOAD_MB`(기본 512MB) 초과 |
 | op 실행 422 "세션에 없는 입력 파일" | 파일 인자가 세션에 업로드되지 않음 → 먼저 업로드 |
-| `meshfix` 실패 | gmsh 바이너리 필요(`requires_gmsh`) — `dist/gmsh/` 배치 필요 |
+| `meshfix` 실패 | gmsh 바이너리 필요(`requires_gmsh`) — `dist/gmsh/` 배치 필요. `preview: true`(미리 짚기)는 gmsh 없이 돈다 |
 | api가 `--reload`로 계속 죽음 | 의도적으로 비활성(번들 마운트 .pyc churn). 코드 변경은 `restart-api-only.sh` |
 
 ## 진행 상태
@@ -106,7 +106,7 @@ uvicorn app.main:app --reload --port 8700
 - ✅ Phase 1 — Apptainer Postgres + FastAPI 뼈대 + 마이그레이션 + /health
 - ✅ Phase 2 — 인증(JWT) & PAT(`kr_`) 발급/조회/취소 (`/api/v1/auth/login`, `/me`, `/me/tokens`)
 - ✅ Phase 3 — 세션 CRUD + 파일 업로드/목록/다운로드/삭제 + `info` 파싱(nodes/elems/parts/bbox/`*INCLUDE`/keyword) (`/api/v1/sessions/...`)
-- ✅ Phase 4 — op 카탈로그 **47개** (JSON Schema 인자, 예제, 매뉴얼) (`/api/v1/operations`, `/operations/{op}`)
+- ✅ Phase 4 — op 카탈로그 **47개**(그때 수 · 2026-10-16 지금 **63개** — `GET /operations` 가 정본) (JSON Schema 인자, 예제, 매뉴얼) (`/api/v1/operations`, `/operations/{op}`)
 - ✅ Phase 5 — 비동기 Job 큐 & runner (`/sessions/{id}/jobs`, `/jobs/{id}`/logs/outputs/cancel) — 업로드→op 실행→산출물 자동등록·다운로드 e2e 9/9
 - ✅ Phase 6 — 전 op 통합 테스트. **라이브 API/워커로 45/45 op end-to-end 검증**(업로드→실행→산출물). 과정에서 실버그 수정: JSONB가 key 순서 미보존→argbuild가 type/action 키 우선 출력, config 절대경로(warpage 등 동반파일), 예제 12건 실제 실행가능화, meshfix gmsh 라이브러리/링크
 - ✅ Phase 7 — MCP 서버 (`mcp_server/server.py`, FastMCP streamable-http, 72개 도구, PAT 전달) — Claude 전체 사이클 e2e 통과

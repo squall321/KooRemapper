@@ -7,7 +7,7 @@
 - [x] 백엔드 주석·API 설명 — `sessions/routes.py` · `jobs/routes.py`(422 문구에 「REST 전용」) · `jobs/schemas.py`
 - [x] SKILL.md — 조각 넣기 흐름 · 재결속 · 멈추는 자리(meshfix · hfdamp · ale) · 인클루드 순서 · 2차 null · `warnings` · 모르는 키 422 · 자주 쓰는 op
 - [x] TOOLS.md — 도구 수 54 → 72 · 검증에 그림·덱 op 스모크 · 패리티 ALL PASS
-- [ ] 매뉴얼 · platform README 낡은 자리
+- [x] 매뉴얼(§50 재결속 두 줄 · §45.4 `*MAT` 닫힘 덧말 · §35 ale 인클루드 마스터 소절) · platform README(op 수 · meshfix preview)
 - [ ] API · MCP 재기동 → `describe_operation` 이 새 글을 내는지 살아 있는 스택으로 확인
 - [ ] 보고서 `docs/04-report/deck-contract-1016.report.md` — 수치 재측정
 - [ ] 관문 — 회귀 · 단위 · 도움말 · 플랫폼 pytest · 스모크 셋
