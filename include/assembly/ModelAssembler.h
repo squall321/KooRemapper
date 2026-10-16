@@ -24,7 +24,7 @@ namespace KooRemapper {
 
 class ModelAssembler {
 public:
-    ModelAssembler() : maxNodeId_(0), maxElementId_(0), maxShellElementId_(0),
+    ModelAssembler() : maxNodeId_(0), maxElementId_(0),
                        maxPartId_(0), maxSectionId_(0), maxMaterialId_(0), maxSetId_(0),
                        replacedParts_(0), squeezedParts_(0), restackedParts_(0), bentParts_(0), indentedParts_(0), formStrainParts_(0),
                        tet10ConvertedCount_(0), hex20ConvertedCount_(0),
@@ -188,7 +188,6 @@ private:
     // ID management
     int maxNodeId_;
     int maxElementId_;
-    int maxShellElementId_;
     int maxPartId_;
     int maxSectionId_;
     int maxMaterialId_;

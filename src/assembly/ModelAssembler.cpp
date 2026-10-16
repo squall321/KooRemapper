@@ -8685,7 +8685,7 @@ bool ModelAssembler::applyExtractSurface(const ExtractSurfaceOperation& op) {
         int emitted = 0, skipped = 0;
         for (const auto& tf : topFaces) {
             AddedShellElement s;
-            s.id = ++maxShellElementId_;
+            s.id = ++maxElementId_;
             s.pid = outPid;
             for (int& n : s.nodeIds) n = 0;
             bool ok = true;
@@ -8700,7 +8700,7 @@ bool ModelAssembler::applyExtractSurface(const ExtractSurfaceOperation& op) {
                 s.nodeIds[i] = it->second;
             }
             if (ok) { addedShellElements_.push_back(s); ++emitted; }
-            else    { --maxShellElementId_; ++skipped; }
+            else    { --maxElementId_; ++skipped; }
         }
 
         infoMessages.push_back("  extract_surface(mid): " + std::to_string(emitted) +
@@ -8712,6 +8712,9 @@ bool ModelAssembler::applyExtractSurface(const ExtractSurfaceOperation& op) {
     }
 
     // ---- 5. Filter mode (top / bottom / all) ----------------------------
+    // 셸 EID 도 요소 공용 커서로 낸다. 셸 전용 커서(`maxShellElementId_`)는 덱에서 한 번도 안 채워져 0 에서
+    // 시작했다 — 덱의 솔리드·셸과 같은 EID 를 냈다(2026-10-16 재현). 매뉴얼은 셸 EID 를 「다른 요소들과
+    // 겹치지 않는 번호」로 요구한다(Vol_I 162384). restack·refine 도 이미 이 커서로 셸을 낸다.
     std::vector<FaceKey>* chosen = nullptr;
     if      (op.face == "top")    chosen = &topFaces;
     else if (op.face == "bottom") chosen = &bottomFaces;
@@ -8725,7 +8728,7 @@ bool ModelAssembler::applyExtractSurface(const ExtractSurfaceOperation& op) {
     int triCount = 0, quadCount = 0;
     for (const auto& f : *chosen) {
         AddedShellElement s;
-        s.id = ++maxShellElementId_;
+        s.id = ++maxElementId_;
         s.pid = outPid;
         for (int& n : s.nodeIds) n = 0;
         bool tri = (f[3] == f[2] || f[3] == 0 || f[3] == f[0]);
@@ -11013,7 +11016,7 @@ void ModelAssembler::extrudeToTShell(const std::vector<ShellElement>& surface,
 
         for (int layer = 0; layer < numLayers; ++layer) {
             AddedShellElement tshell;
-            tshell.id = ++maxShellElementId_;
+            tshell.id = ++maxElementId_;
             tshell.pid = newPid;
             tshell.elform = isTria ? 17 : 16;  // TSHELL3 : TSHELL4
 
@@ -11082,7 +11085,7 @@ void ModelAssembler::createOffsetShell(const std::vector<ShellElement>& surface,
     // Create shell elements
     for (const auto& shell : surface) {
         AddedShellElement newShell;
-        newShell.id = ++maxShellElementId_;
+        newShell.id = ++maxElementId_;
         newShell.pid = newPid;
         newShell.elform = 2;  // Standard QUAD4/TRIA3
 

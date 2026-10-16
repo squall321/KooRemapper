@@ -844,8 +844,11 @@ plan2 는 `IdAllocator` 로 발행자를 통합하라고 했다. 정찰이 그 �
         빠진 파일) · 폭 단정 불가 0장.
         → 남은 발행자 — 단독 `hfdamp`·`cnrb2solid`·`cnrb2spring`·`tetremesh`·`meshfix`·`ale`·`matswap`(위치
           인자판)·`cclip` 의 노드·요소. 셋 다 경고는 한다.
-        → 따로 올린 것(이 커밋 아님) — `maxShellElementId_` 가 0 에서 시작(extract_surface·TSHELL 압출·오프셋
-          셸이 덱의 셸·솔리드와 **같은 EID** 를 낸다, 실측) · ~~주 덱 MID 맹점(리더가 아는 재질 다섯 종류만 센다)~~
+        → 따로 올린 것(이 커밋 아님) — ~~`maxShellElementId_` 가 0 에서 시작(extract_surface·TSHELL 압출·오프셋
+          셸이 덱의 셸·솔리드와 **같은 EID** 를 낸다, 실측)~~(고쳤다 — 셸도 요소 공용 커서로. 매뉴얼 Vol_I 162384
+          「unique number with respect to other elements」— 어느 해석에서도 합법인 꼴. 솔버로 재려 했으나 **LS-DYNA
+          라이선스 만료**(2026-10-16). `test_shell_eid_unique.py` 18항 · 옛 FAIL 5. 커밋된 offset 셸 산출 셋은 원래
+          낡아 있어(오늘 이전 바이너리와도 739줄 차이) 다시 구웠다) · ~~주 덱 MID 맹점(리더가 아는 재질 다섯 종류만 센다)~~
           (고쳤다 — 재현: `*MAT_PLASTIC_KINEMATIC 2` 옆에 czm 이 MID 2 를 냈다. 실사용 6,053장 중 **781장(13%)**이
           리더가 모르는 재질을 가진다. `*MAT_THERMAL_*`(TMID 독립 — Vol II 159546)·`*MAT_ADD_*` 는 뺀다.
           `test_mid_unknown_types.py` 14항 · 옛 FAIL 5 · 제외 무력화 FAIL 2) · ~~주 덱 PID 맹점(리더가 맨 `*PART`
