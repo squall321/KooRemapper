@@ -944,6 +944,11 @@ plan2 는 `IdAllocator` 로 발행자를 통합하라고 했다. 정찰이 그 �
         회귀 `test_hfdamp_include_closure.py` 7항(옛 바이너리 FAIL 5). 42 op 지문 불변.
       → 같은 주장의 다른 반 — **ale 은 조용하지 않다**: 마스터 덱에서 「PID 1 not found in model」 rc 1 로 멈춘다(파트 카드가
         인클루드 안이라 주 덱만 고치는 op 이 손댈 수 없다). 고치지 않았다 — 리더가 인클루드를 읽는 큰 일(XL)과 같은 뿌리다.
+      → **(같은 날) 리더가 인클루드를 읽는다 — 분석 전용**(`KFileReader::readFileWithIncludes` · info · modelmeta · section ·
+        surfview · stackdiagram). 닫힘을 정본으로 펼쳐 같은 파서로 읽는다 · 폭은 주 덱 `*KEYWORD` · `*INCLUDE ±` 면 펼치지 않음.
+        실사용 인클루드 덱 88장 — `info --strict` rc 모두 0→0 · 83장이 기하를 더 본다 · 충돌 0. 저장소 500장 — 인클루드 없는 덱
+        출력 그대로. 회귀 `test_reader_include_closure.py` 10항(옛 바이너리 FAIL 10). ale 처럼 **고쳐 쓰는** op 은 그대로 주 덱만 —
+        인클루드 안의 카드를 고쳐 쓸 길이 없어서다(ale 은 rc 1 로 멈춘다).
 - [x] **재결속 `rebind_entities_after_remesh` — 우리 몫, 칸이 없었다(2026-10-15 추가). v1 을 지었다(2026-10-16).**
       StepForge 표 11행 · plan2 P2-6 의 「meshfix 참조 재결속」. 지금 **0건**. 입력 꼴은 저쪽 답이
       정했다(Q12) — 구간 표(`range_diff`) + 좌표 기준 재결속 + `coord_sha` 를 검증 관문으로.

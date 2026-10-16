@@ -747,7 +747,9 @@ op("info", "정보·메타", "메시 정보(절점·요소·파트 수, bbox 두
           "  TET10 의 n9·n10 이 고아로 잡히므로 `Orphan nodes` 에 **상한**이라고 달고, 그 파트의",
           "  야코비안은 재지 않는다(실측 — 코너 부피가 양수인 덱에서 「음수 2」를 냈다)",
           "`--strict` 는 세트·SPC·하중·이력·CNRB PNODE 등이 가리키는 **절점**도 본다 — 없으면 미정의 참조(줄마다 한 건).",
-          "  `*NODE` 가 하나도 없는 조각 덱은 단정하지 않는다. 실사용 6,053장에서 거짓 경보 0"])
+          "  `*NODE` 가 하나도 없는 조각 덱은 단정하지 않는다. 실사용 6,053장에서 거짓 경보 0",
+          "★메시를 **인클루드 닫힘까지** 읽는다(2026-10-16) — 마스터 덱의 절점·요소·파트·bbox 가 실제 값이다(예전엔 0).",
+          "  닫힘을 다 읽었으면 「없는 노드를 가리키는 요소」도 단정한다. `*INCLUDE ±` 면 펼치지 않고 주 덱만"])
 op("modelmeta", "정보·메타", "파트별 기하 메트릭·재질·연결성(접촉 탐지 포함) JSON 추출", "메타 json connectivity 연결성",
    "KooRemapper modelmeta <config.yaml>",
    files=boxed({"meta.yaml": """model: box.k
@@ -762,7 +764,8 @@ gap_tol: 0.2
           "낙하판·접촉면은 **used 기준**으로 놓아라 — 현장 덱에서 14.55mm vs 67.50mm 로 갈렸다",
           "★2차 솔리드(ELFORM 16·17·25~28) 파트는 거절하지 않고 volume·area_ext·proj·edge_len·n_node·mass 를",
           "  **null** 로 낸다 — 까닭은 `geometry_reason`·`mass_reason`(코너 8개만 본 값이라 부피 실측 −48.4%).",
-          "  그런 덱의 `orphan_nodes` 는 상한이라 0 이 아니면 null + `orphan_nodes_reason` 이다"])
+          "  그런 덱의 `orphan_nodes` 는 상한이라 0 이 아니면 null + `orphan_nodes_reason` 이다",
+          "메시도 인클루드 닫힘까지 읽는다(2026-10-16) — 마스터 덱의 파트가 비지 않는다(재질·접촉 원문은 원래 닫힘까지 모았다)"])
 op("foldsurface", "변형·초기응력", "접힘 곡면(평면 elastica) 중심선 — 최소 곡률반경 고정", "접힘 fold elastica 곡률 중심선 폴더블",
    "KooRemapper foldsurface <config.yaml>",
    files={"fold.yaml": """output: fold

@@ -176,7 +176,7 @@ bool computeSection(const Config& c, const std::string& deck, int axisPref,
     KFileReader reader;
     Mesh mesh;
     try {
-        mesh = reader.readFile(deck);
+        mesh = reader.readFileWithIncludes(deck);   // 인클루드 닫힘까지 — 마스터 덱도 그린다(2026-10-16)
     } catch (const std::exception& e) {
         console.error("Failed to load mesh: " + std::string(e.what()));
         return false;

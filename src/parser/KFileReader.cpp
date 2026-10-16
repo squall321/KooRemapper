@@ -1,5 +1,8 @@
 #include "parser/KFileReader.h"
 #include "parser/ElementCardLayout.h"
+#include "parser/IncludeClosure.h"   // readFileWithIncludes — 닫힘을 펼치는 정본
+#include <cstdint>
+#include <filesystem>
 #include "core/Platform.h"
 #include <sstream>
 #include <algorithm>
@@ -97,6 +100,90 @@ KFileReader::KFileReader()
     , fileSize_(0)
     , progressCallback_(nullptr)
 {}
+
+Mesh KFileReader::readFileWithIncludes(const std::string& filename, std::string* note, bool* complete) {
+    if (note) note->clear();
+    if (complete) *complete = true;
+    std::vector<std::string> mainLines;
+    {
+        std::ifstream f(filename, std::ios::binary);
+        if (!f.is_open()) return readFile(filename);   // 여는 실패는 readFile 이 같은 말로 던진다
+        for (std::string ln; std::getline(f, ln);) {
+            if (!ln.empty() && ln.back() == '\r') ln.pop_back();
+            if (mainLines.empty() && ln.size() >= 3 && ln.compare(0, 3, "\xEF\xBB\xBF") == 0) ln.erase(0, 3);
+            mainLines.push_back(ln);
+        }
+    }
+    const auto clo = include_closure::read(filename, mainLines);
+    if (complete) *complete = clo.complete();
+    if (clo.files.empty()) {
+        if (note && !clo.complete())
+            *note = "*INCLUDE 를 하나도 읽지 못했다 — 주 덱만 읽었다";
+        return readFile(filename);
+    }
+    // 폭을 바꾸는 인클루드(`*INCLUDE +`·`*INCLUDE -`)가 있으면 한 폭으로 펼칠 수 없다 — 주 덱만 읽는다
+    auto changesWidth = [](const std::vector<std::string>& L) {
+        for (const auto& l : L) {
+            const size_t g = l.find_first_not_of(" \t");
+            if (g == std::string::npos || l[g] != '*') continue;
+            std::string up = l.substr(g);
+            for (auto& c : up) c = (char)std::toupper((unsigned char)c);
+            if (up.rfind("*INCLUDE", 0) != 0) continue;
+            const size_t sp = up.find_first_of(" \t");
+            const std::string tok = up.substr(0, sp);
+            const std::string rest = sp == std::string::npos ? std::string() : up.substr(sp);
+            if (tok.back() == '+' || tok.back() == '-' || rest.find_first_of("+-") != std::string::npos) return true;
+        }
+        return false;
+    };
+    bool widthMix = changesWidth(mainLines);
+    for (const auto& fl : clo.files) widthMix = widthMix || changesWidth(fl.lines);
+    if (widthMix) {
+        if (note) *note = "*INCLUDE + / *INCLUDE - (그 파일의 칸 폭을 바꾼다)가 있어 인클루드를 펼치지 않고 주 덱만 읽었다";
+        if (complete) *complete = false;
+        return readFile(filename);
+    }
+    auto flat = include_closure::flatten(mainLines, filename, clo);
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path tmp = fs::temp_directory_path(ec) /
+        ("koorm_closure_" + std::to_string(std::hash<std::string>{}(filename)) + "_" +
+         std::to_string(reinterpret_cast<std::uintptr_t>(this)) + ".k");
+    {
+        std::ofstream o(tmp, std::ios::binary);
+        if (!o.is_open()) {
+            if (note) *note = "펼친 덱을 임시 파일에 쓰지 못해 주 덱만 읽었다";
+            if (complete) *complete = false;
+            return readFile(filename);
+        }
+        bool seenKeyword = false;
+        for (const auto& l : flat) {
+            const size_t g = l.find_first_not_of(" \t");
+            if (g != std::string::npos && l[g] == '*') {
+                std::string up = l.substr(g, 8);
+                for (auto& c : up) c = (char)std::toupper((unsigned char)c);
+                if (up == "*KEYWORD") {
+                    if (seenKeyword) continue;   // 인클루드 안의 *KEYWORD — 폭은 주 덱이 정한다
+                    seenKeyword = true;
+                }
+            }
+            o << l << "\n";
+        }
+    }
+    Mesh m;
+    try {
+        m = readFile(tmp.string());
+    } catch (...) {
+        fs::remove(tmp, ec);
+        throw;
+    }
+    fs::remove(tmp, ec);
+    if (note) {
+        *note = "인클루드 " + std::to_string(clo.files.size()) + "개를 함께 읽었다";
+        if (!clo.complete()) *note += " — 다만 일부를 못 읽었다(그 안의 기하는 빠졌다)";
+    }
+    return m;
+}
 
 Mesh KFileReader::readFile(const std::string& filename) {
     mesh_.clear();

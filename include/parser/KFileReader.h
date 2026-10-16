@@ -41,6 +41,15 @@ public:
      */
     Mesh readFile(const std::string& filename);
 
+    // 인클루드 닫힘까지 읽는다 — **분석 전용**(info · modelmeta · 그림 셋). 덱을 고쳐 쓰는 op 은 주 덱만 읽는
+    // `readFile` 을 쓴다(인클루드 안의 카드를 고쳐 쓸 길이 없다). 닫힘은 정본(`include_closure`)으로 LS-DYNA 가 읽는
+    // 차례대로 펼치고, 펼친 줄을 임시 파일에 써 **같은 파서로** 읽는다(파서를 둘로 두지 않는다).
+    //   · 인클루드가 없으면 `readFile` 과 똑같다.
+    //   · 정수 칸 폭은 주 덱 `*KEYWORD` 가 정한다 — 인클루드 파일 안의 `*KEYWORD` 줄은 뺀다(LS-DYNA 규칙 · 실사용 88장에서
+    //     갈린 덱 0). `*INCLUDE +`·`*INCLUDE -`(그 파일의 폭을 바꾼다)가 있으면 펼치지 않고 주 덱만 읽는다.
+    // `note` 에는 사람이 읽을 한 줄(무엇을 읽었나 · 왜 주 덱만 읽었나)을, `complete` 에는 닫힘을 다 읽었는지를 돌려준다.
+    Mesh readFileWithIncludes(const std::string& filename, std::string* note = nullptr, bool* complete = nullptr);
+
     /**
      * Set progress callback
      */

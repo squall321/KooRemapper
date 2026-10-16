@@ -1387,12 +1387,17 @@ int runInfo(const std::string& meshFile, const ConsoleOutput& console, bool stri
 
     KFileReader reader;
     Mesh mesh;
+    // ★인클루드 닫힘까지 읽는다(2026-10-16) — 예전에는 주 덱만 읽어 마스터 덱의 절점·요소·파트가 0 으로 나왔다
+    //   (실사용: 마스터가 737바이트에 INCLUDE 7 · PART 0 · NODE 0). 인클루드가 없으면 예전과 같다.
+    std::string closureNote;
+    bool closureComplete = true;
     try {
-        mesh = reader.readFile(meshFile);
+        mesh = reader.readFileWithIncludes(meshFile, &closureNote, &closureComplete);
     } catch (const std::exception& e) {
         console.error("Failed to load mesh: " + std::string(e.what()));
         return 1;
     }
+    if (!closureNote.empty()) console.info(closureNote);
 
     console.header("Mesh Information: " + Platform::getFilename(meshFile));
 
@@ -1666,7 +1671,8 @@ int runInfo(const std::string& meshFile, const ConsoleOutput& console, bool stri
         // ⚠ 아래 「없는 노드를 가리키는 요소」 검사는 `KFileReader` 의 메시를 쓰는데 그 리더는 인클루드를
         //   **안 읽는다.** 참조 축을 닫힘으로 단정하게 됐다고 그 축까지 단정하면, 노드가 인클루드에 있는
         //   덱이 오탐으로 막힌다. 그래서 메시 축은 예전 그대로 「인클루드가 있으면 단정하지 않는다」다.
-        strictUnreadIncludes = deckHasIncludes || ref.hasUnreadIncludes;
+        // 메시가 인클루드 닫힘까지 읽혔으면 「없는 노드를 가리키는 요소」도 단정할 수 있다 — 다 못 읽었을 때만 미룬다
+        strictUnreadIncludes = (deckHasIncludes && !closureComplete) || ref.hasUnreadIncludes;
     }
 
     // Validation

@@ -572,11 +572,15 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
 
     KooRemapper::KFileReader reader;
     KooRemapper::Mesh mesh;
-    try { mesh = reader.readFile(cfg.model); }
+    // 메시도 인클루드 닫힘까지 읽는다(2026-10-16) — 재질·접촉 원문(mm_collectLines)은 이미 닫힘까지 모았는데 메시만
+    // 주 덱이라 마스터 덱의 파트가 비었다. 인클루드가 없으면 예전과 같다.
+    std::string closureNote;
+    try { mesh = reader.readFileWithIncludes(cfg.model, &closureNote); }
     catch (const std::exception& e) {
         console.error("[modelmeta] read failed: " + std::string(e.what()));
         return 1;
     }
+    if (!closureNote.empty()) console.info("[modelmeta] " + closureNote);
 
     auto collected = mm_collectLines(cfg.model);
     for (const auto& b : collected.blind)

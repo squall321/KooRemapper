@@ -135,7 +135,7 @@ int runStackDiagram(const std::string& yamlFile, ConsoleOutput& console) {
     KFileReader reader;
     Mesh mesh;
     try {
-        mesh = reader.readFile(c.model);
+        mesh = reader.readFileWithIncludes(c.model);   // 인클루드 닫힘까지 — 마스터 덱도 그린다(2026-10-16)
     } catch (const std::exception& e) {
         console.error("Failed to load mesh: " + std::string(e.what()));
         return 1;

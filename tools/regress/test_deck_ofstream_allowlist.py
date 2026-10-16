@@ -53,6 +53,8 @@ DECLARED = {
     # ── 덱(신규) ────────────────────────────────────────────────────────────
     "src/commands/core_ops.cpp": (1, "덱(신규) — `generate box` 가 덱을 새로 만든다. 입력 덱이 없다"),
     "src/commands/battery.cpp": (2, "덱(신규) — 배터리 덱을 새로 만든다. 입력 덱을 읽지 않는다"),
+    "src/parser/KFileReader.cpp": (1, "덱(임시) — 인클루드 닫힘을 펼친 **읽기용** 임시 덱(readFileWithIncludes). 같은 파서로 "
+                                      "읽고 곧 지운다 — 산출 덱이 아니다"),
     "src/assembly/CadSolidMerge.cpp": (1, "덱(신규) — 넣을 조각 블록만 담은 검산용 임시 덱(다시 읽어 coord_sha 를 재고 곧 지운다). "
                                           "본 덱은 ModelAssembler::writeOutput 이 쓴다"),
     "src/commands/cclip.cpp": (2, "덱(신규) — F-δ 검증용 독립 압축 덱 1곳 + 리포트 1곳. "
