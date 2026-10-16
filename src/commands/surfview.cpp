@@ -110,14 +110,16 @@ int runSurfView(const std::string& yamlFile, ConsoleOutput& console) {
 
     KFileReader reader;
     Mesh mesh;
+    std::string closureNote;   // 닫힘을 어떻게 읽었나 — 요소가 없을 때 그 까닭으로 그대로 말한다
     try {
-        mesh = reader.readFileWithIncludes(c.model);   // 인클루드 닫힘까지 — 마스터 덱도 그린다(2026-10-16)
+        mesh = reader.readFileWithIncludes(c.model, &closureNote);   // 인클루드 닫힘까지 — 마스터 덱도 그린다(2026-10-16)
     } catch (const std::exception& e) {
         console.error("Failed to load mesh: " + std::string(e.what()));
         return 1;
     }
     if (mesh.elements.empty()) {
         console.error("요소가 없다 — 이 덱에는 기하가 없다. 빈 그림을 내지 않는다.");
+        if (!closureNote.empty()) console.info("  " + closureNote);
         return 1;
     }
 

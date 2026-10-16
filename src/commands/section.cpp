@@ -175,18 +175,20 @@ bool computeSection(const Config& c, const std::string& deck, int axisPref,
                     const char* axisWhyOverride = nullptr) {
     KFileReader reader;
     Mesh mesh;
+    std::string closureNote;   // 닫힘을 어떻게 읽었나 — 요소가 없을 때 그 까닭으로 그대로 말한다
     try {
-        mesh = reader.readFileWithIncludes(deck);   // 인클루드 닫힘까지 — 마스터 덱도 그린다(2026-10-16)
+        mesh = reader.readFileWithIncludes(deck, &closureNote);   // 인클루드 닫힘까지 — 마스터 덱도 그린다(2026-10-16)
     } catch (const std::exception& e) {
         console.error("Failed to load mesh: " + std::string(e.what()));
         return false;
     }
     if (mesh.elements.empty()) {
         console.error("요소가 없다 — 이 덱에는 기하가 없다. 빈 그림을 내지 않는다.");
-        // 리더는 `*INCLUDE` 안을 **읽지 않는다**(의도된 것이다). 실사용 덱은 거의 언제나
-        // 나뉘어 있으므로(실측: 마스터가 737바이트에 INCLUDE 7 · PART 0 · NODE 0) 어느 파일을
-        // 지목해야 하는지까지 말해 준다. 판정은 공용 스캐너를 쓴다 — 이 리포에서 같은 판정이
-        // 셋으로 갈려 `*INCLUDE_PATH` 를 파일로 세는 오탐이 있었다.
+        if (!closureNote.empty()) console.info("  " + closureNote);
+        // 리더는 인클루드 닫힘까지 읽는다(2026-10-16). 그래도 요소가 없으면 인클루드를 못 찾았거나(덱이 가리키는
+        // 자리에 없다 · 플랫폼이면 세션에 안 올렸다) `*INCLUDE ±` 라 펼치지 않은 것이다 — 위 안내가 어느 쪽인지 말한다.
+        // 실사용 덱은 거의 언제나 나뉘어 있으므로(실측: 마스터가 737바이트에 INCLUDE 7 · PART 0 · NODE 0) 어느 파일인지까지
+        // 말해 준다. 판정은 공용 스캐너를 쓴다 — 이 리포에서 같은 판정이 셋으로 갈려 `*INCLUDE_PATH` 를 파일로 세는 오탐이 있었다.
         std::vector<std::string> rawLines;
         {
             std::ifstream f(deck);
@@ -198,11 +200,12 @@ bool computeSection(const Config& c, const std::string& deck, int axisPref,
         }
         const auto un = include_scan::scan(rawLines);
         if (un.count > 0) {
-            console.info("  이 덱은 `*INCLUDE` 로 쪼개져 있고 리더는 그 안을 읽지 않는다 — " +
+            console.info("  이 덱은 `*INCLUDE` 로 쪼개져 있는데 그 닫힘에서도 요소를 찾지 못했다 — " +
                          std::to_string(un.count) + "개:");
             for (const auto& nm : un.names) console.info("    " + nm);
             if (un.truncatedNames) console.info("    …");
-            console.info("  기하가 든 파일(보통 `*NODE`·`*ELEMENT_*` 가 있는 메시 파일)을 model: 에 지목하라.");
+            console.info("  그 파일을 덱이 가리키는 자리(플랫폼이면 같은 세션)에 두면 함께 읽는다 — 아니면 기하가 든 파일"
+                         "(보통 `*NODE`·`*ELEMENT_*` 가 있는 메시 파일)을 model: 에 지목하라.");
         }
         return false;
     }

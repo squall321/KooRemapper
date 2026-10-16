@@ -262,8 +262,8 @@ bool ModelAssembler::loadBaseModel(const std::string& filename) {
     initMaxSetIdFromRawLines();
 
     // ── 인클루드 닫힘까지 센다 (2026-10-16) ─────────────────────────────────
-    // 위 3번이 정한 max ID 는 **이 덱 안에서만** 센 값이다. `KFileReader` 도 rawLines_ 도 `*INCLUDE`
-    // 안을 읽지 않는다. 실사용 인클루드 덱 88장 중 83장에서 그 값이 닫힘의 최대값보다 작았다(NODE·ELEM,
+    // 위 3번이 정한 max ID 는 **이 덱 안에서만** 센 값이다. assemble 이 쓰는 `KFileReader::readFile` 도
+    // rawLines_ 도 `*INCLUDE` 안을 읽지 않는다(주 덱을 고쳐 쓰는 op 이라서다). 실사용 인클루드 덱 88장 중 83장에서 그 값이 닫힘의 최대값보다 작았다(NODE·ELEM,
     // SET 은 38장) — 아래 apply* 들이 인클루드에 이미 있는 번호를 다시 낼 수 있었다. 같은 종류의 ID 가
     // 둘이면 LS-DYNA 는 키워드 단계에서 멈춘다. 그래서 닫힘을 읽어 **같은 규칙으로** 센 값 위로 올린다.
     // 인클루드가 없으면 아무것도 안 바뀐다(번호·바이트 그대로).

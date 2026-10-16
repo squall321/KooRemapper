@@ -1602,7 +1602,7 @@ int runInfo(const std::string& meshFile, const ConsoleOutput& console, bool stri
         } else if (ref.hasUnreadIncludes) {
             console.warning(deckHasIncludes && !inclClosure.files.empty()
                 ? "미정의 참조 0건 — 다만 *INCLUDE 일부를 읽지 못해 단정할 수 없습니다"
-                : "미정의 참조 0건 — 다만 *INCLUDE 를 읽지 않았으므로 단정할 수 없습니다");
+                : "미정의 참조 0건 — 다만 *INCLUDE 를 읽지 못해 단정할 수 없습니다");
         } else if (!inclSegs.empty()) {
             console.success(std::string("참조 무결성 OK (세트·파트·섹션·재질") + (nodeRefsChecked ? "·절점" : "") +
                             " 미정의 참조 0건 — 인클루드 " + std::to_string(inclSegs.size()) + "개를 함께 읽었습니다)");
@@ -1668,10 +1668,8 @@ int runInfo(const std::string& meshFile, const ConsoleOutput& console, bool stri
         if (ref.notChecked > 0)
             console.println("  칸 뜻을 확신하지 못해 검사하지 않은 자리 " +
                             std::to_string(ref.notChecked) + "곳(오탐을 내지 않으려고 건너뜁니다)");
-        // ⚠ 아래 「없는 노드를 가리키는 요소」 검사는 `KFileReader` 의 메시를 쓰는데 그 리더는 인클루드를
-        //   **안 읽는다.** 참조 축을 닫힘으로 단정하게 됐다고 그 축까지 단정하면, 노드가 인클루드에 있는
-        //   덱이 오탐으로 막힌다. 그래서 메시 축은 예전 그대로 「인클루드가 있으면 단정하지 않는다」다.
-        // 메시가 인클루드 닫힘까지 읽혔으면 「없는 노드를 가리키는 요소」도 단정할 수 있다 — 다 못 읽었을 때만 미룬다
+        // 아래 「없는 노드를 가리키는 요소」 검사는 `KFileReader` 의 메시를 쓴다. 그 메시가 인클루드 닫힘까지 읽혔으면
+        // (2026-10-16) 단정할 수 있다 — 다 못 읽었을 때만 미룬다(노드가 못 읽은 인클루드에 있으면 오탐이 된다)
         strictUnreadIncludes = (deckHasIncludes && !closureComplete) || ref.hasUnreadIncludes;
     }
 
