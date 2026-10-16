@@ -1,4 +1,5 @@
-#include "parser/ElementCardLayout.h"   // deckFieldWidth — 칸 폭 정본
+#include "parser/ElementCardLayout.h"   // deckFieldWidth · elementCardSpan — 칸 폭·카드 줄 수 정본
+#include "parser/DeckScan.h"            // cardFields · fieldInt — 칸 읽기 정본
 #include "parser/DeckWriter.h"
 #include "merge.h"
 #include "util/YamlComment.h"
@@ -380,6 +381,17 @@ static bool mg_parseKFile(const std::string& path, mg_KModel& mdl, ConsoleOutput
         veRho = 0;
     };
 
+    // ★요소 카드의 줄 수는 정본(`elementCardSpan`)이 정한다. 예전에는 공백 토큰이 10개 이상인 줄만 요소로
+    //   봐서 **2줄 카드**(머리 줄 `EID PID` + 절점 줄)가 통째로 보이지 않았다 — 2줄 혼재 덱을 합치면 그 요소들이
+    //   합쳐지지 않고 원래 PID 에 그대로 남았다(rc=0, 2줄 혼재 훑기 실측). 8자리 ID 가 붙은 고정폭 줄도 토큰이
+    //   모자라 안 보였다. 칸은 `cardFields`(고정폭 → 자유형식)로 읽는다.
+    int mgDeckFw = 8, mgKwFw = 8;
+    KooRemapper::ElementKeywordInfo mgElemInfo;
+    KooRemapper::ElementCardSpan mgSpan;
+    std::vector<std::string> mgCard1;
+    int mgCardLine = 0, mgCardRemaining = 0, mgNodeK = 0;
+    mg_Elem mgCur;
+
     while (std::getline(inf, line)) {
         mdl.rawLines.push_back(line);
         std::string trimmed = mg_trim(line);
@@ -396,11 +408,18 @@ static bool mg_parseKFile(const std::string& path, mg_KModel& mdl, ConsoleOutput
             std::string up = mg_toUpper(trimmed);
             inNode = inElemSolid = inPart = inMat = inThermalExp = inSection = false;
             inUnknownMat = false;
+            mgCardRemaining = 0;                      // 끝나지 않은 카드는 버린다(덱이 깨진 것이다)
+            if (up.rfind("*KEYWORD", 0) == 0) {
+                const int w = KooRemapper::keywordCardDeckWidth(trimmed);
+                if (w > 0) mgDeckFw = w;
+            }
 
             if (up.find("*NODE") == 0 && up.find("*NODE_") == std::string::npos) {
                 inNode = true;
             } else if (up.find("*ELEMENT_SOLID") == 0) {
                 inElemSolid = true;
+                mgElemInfo = KooRemapper::parseElementKeyword(trimmed);
+                mgKwFw = KooRemapper::keywordFieldWidth(trimmed, mgDeckFw);
             } else if (up.find("*PART") == 0 && up.find("*PART_CONTACT") == std::string::npos) {
                 inPart = true;
                 partTitleRead = false;
@@ -464,18 +483,30 @@ static bool mg_parseKFile(const std::string& path, mg_KModel& mdl, ConsoleOutput
             continue;
         }
 
-        // *ELEMENT_SOLID data
+        // *ELEMENT_SOLID data — 카드 단위로 읽는다(1줄 구 포맷 · 2줄 현대 포맷 · 추가 카드)
         if (inElemSolid) {
-            auto toks = mg_tokenWS(trimmed);
-            if (toks.size() >= 10) {
-                mg_Elem e;
-                e.id = mg_toInt(toks[0]);
-                e.pid = mg_toInt(toks[1]);
-                for (int i = 0; i < 8; i++) e.nid[i] = mg_toInt(toks[2 + i]);
-                if (e.id > 0) {
-                    mdl.elems[e.id] = e;
-                    if (e.id > mdl.maxElemId) mdl.maxElemId = e.id;
-                }
+            std::string raw = line;
+            if (!raw.empty() && raw.back() == '\r') raw.pop_back();
+            if (mgCardRemaining == 0) {
+                mgCard1 = KooRemapper::deckscan::cardFields(raw, mgKwFw);
+                mgSpan = KooRemapper::elementCardSpan(mgElemInfo, mgCard1, 0);
+                mgCardLine = 0;
+                mgCardRemaining = mgSpan.lines;
+                mgCur = mg_Elem();
+                mgCur.id = KooRemapper::deckscan::fieldInt(mgCard1, 0);
+                mgCur.pid = KooRemapper::deckscan::fieldInt(mgCard1, 1);
+                mgNodeK = 0;
+            }
+            if (mgCardLine >= mgSpan.nodeFirst && mgCardLine < mgSpan.nodeFirst + mgSpan.nodeLines) {
+                const auto f = (mgCardLine == 0) ? mgCard1 : KooRemapper::deckscan::cardFields(raw, mgKwFw);
+                const size_t from = (mgCardLine == mgSpan.nodeFirst) ? (size_t)mgSpan.nodeFieldSkip : 0u;
+                for (size_t q = from; q < f.size() && mgNodeK < 8; ++q)
+                    mgCur.nid[mgNodeK++] = KooRemapper::deckscan::fieldInt(f, q);
+            }
+            ++mgCardLine;
+            if (--mgCardRemaining == 0 && mgCur.id > 0) {
+                mdl.elems[mgCur.id] = mgCur;
+                if (mgCur.id > mdl.maxElemId) mdl.maxElemId = mgCur.id;
             }
             continue;
         }
@@ -1152,6 +1183,13 @@ int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
     bool inElemBlock = false;
     bool inNodeBlock = false;
     bool atEnd = false;
+    // ★지울 요소는 **카드 단위로** 지운다 — 읽을 때와 같은 정본(`cardFields`·`elementCardSpan`)으로 경계를
+    //   정한다. 예전에는 줄마다 공백 토큰 첫 칸을 EID 로 봐서, 2줄 카드면 머리 줄만 지우고 절점 줄을 남겼다
+    //   (그 줄의 첫 칸 N1 이 우연히 지울 EID 와 같으면 **엉뚱한 줄**을 지웠다).
+    const int cpDeckFw = KooRemapper::deckFieldWidth(mdl.rawLines);
+    int cpKwFw = cpDeckFw, cpRemaining = 0;
+    bool cpDrop = false;
+    KooRemapper::ElementKeywordInfo cpInfo;
 
     for (auto& rawLine : mdl.rawLines) {
         std::string up = mg_toUpper(mg_trim(rawLine));
@@ -1159,18 +1197,29 @@ int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
         if (!rawLine.empty() && rawLine[0] == '*') {
             inElemBlock = (up.find("*ELEMENT_SOLID") == 0);
             inNodeBlock = (up.find("*NODE") == 0 && up.find("*NODE_") == std::string::npos);
+            cpRemaining = 0;
+            cpDrop = false;
+            if (inElemBlock) {
+                cpInfo = KooRemapper::parseElementKeyword(mg_trim(rawLine));
+                cpKwFw = KooRemapper::keywordFieldWidth(mg_trim(rawLine), cpDeckFw);
+            }
             if (up == "*END") {
                 atEnd = true;
                 break;
             }
         }
 
-        if (inElemBlock && !rawLine.empty() && rawLine[0] != '*' && rawLine[0] != '$') {
-            auto toks = mg_tokenWS(rawLine);
-            if (toks.size() >= 2) {
-                int eid = mg_toInt(toks[0]);
-                if (removeElemIds.count(eid)) continue;
+        if (inElemBlock && !rawLine.empty() && rawLine[0] != '*' && rawLine[0] != '$' &&
+            !mg_trim(rawLine).empty()) {
+            if (cpRemaining == 0) {
+                std::string raw = rawLine;
+                if (!raw.empty() && raw.back() == '\r') raw.pop_back();
+                const auto c1 = KooRemapper::deckscan::cardFields(raw, cpKwFw);
+                cpRemaining = KooRemapper::elementCardSpan(cpInfo, c1, 0).lines;
+                cpDrop = removeElemIds.count(KooRemapper::deckscan::fieldInt(c1, 0)) > 0;
             }
+            --cpRemaining;
+            if (cpDrop) continue;
         }
 
         if (inNodeBlock && !rawLine.empty() && rawLine[0] != '*' && rawLine[0] != '$') {

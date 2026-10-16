@@ -107,7 +107,16 @@
         치환), 연산 없는 설정은 여전히 거절.
       → ★**무력화로 증명했다**(plan2 의 요구 그대로) — CR 되붙이기를 빼면 FAIL 4, 말미 개행 처리를 빼면
         FAIL 1, 되돌리면 14/14.
-- [~] `tools/regress/test_roundtrip_bytes.py` — 픽스처 **3/5** (LF · CRLF · 무-말미개행 있음,
+- [x] **픽스처 5/5 가 op 전수 축으로 돈다(2026-10-16)** — LF·CRLF·무-말미개행은 `test_roundtrip_bytes.py`,
+      `I10=Y` 는 `test_i10_width_sweep.py`, 2줄 혼재는 `test_twoline_mix_sweep.py`(아래). 그리고 셋 다 무편집
+      진입점(`test_identity_roundtrip.py`)으로도 돈다.
+      ★2줄 혼재 훑기 — `*ELEMENT_SOLID` 묶음을 둘로 갈라 뒤 절반을 2줄 카드로 만들고, 산출의 **카드 꼴 일관성**과
+      **PID 별 EID 집합**(표준 판과 같아야 한다)을 본다. 37 op 판정. ★처음 돌리자 `merge` 가 걸렸다 — 2줄
+      카드를 **요소로 인식조차 못 했다**(공백 토큰 10개 이상인 줄만 봤다). 2줄 혼재 덱을 합치면 그 요소들이
+      원래 PID 에 그대로 남았다(rc=0). 지우는 쪽도 머리 줄만 지우고 절점 줄을 남기는 꼴이었다. 읽기·지우기를
+      정본(`cardFields`·`elementCardSpan`)으로 카드 단위로 고쳤다. 옛 바이너리 FAIL 1 · 표준 예제 바이트 동일.
+      (아래는 이 칸의 옛 기록)
+      `tools/regress/test_roundtrip_bytes.py` — 픽스처 **3/5** (LF · CRLF · 무-말미개행 있음,
       `I10=Y LONG=S` 와 2줄 혼재 **없음**). 파일은 `0b34072` 로 들어와 42 op 초록이다.
       → (2026-10-16) 픽스처 **5/5 는 무편집 진입점으로 돈다**(위 칸 — 공용 읽기→쓰기 길).
       → ★(2026-10-16) **`I10=Y` 를 42 op 전수 축으로 돌린다** — `tools/regress/test_i10_width_sweep.py`.
