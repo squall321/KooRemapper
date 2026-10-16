@@ -8,6 +8,6 @@
 - [x] SKILL.md — 조각 넣기 흐름 · 재결속 · 멈추는 자리(meshfix · hfdamp · ale) · 인클루드 순서 · 2차 null · `warnings` · 모르는 키 422 · 자주 쓰는 op
 - [x] TOOLS.md — 도구 수 54 → 72 · 검증에 그림·덱 op 스모크 · 패리티 ALL PASS
 - [x] 매뉴얼(§50 재결속 두 줄 · §45.4 `*MAT` 닫힘 덧말 · §35 ale 인클루드 마스터 소절) · platform README(op 수 · meshfix preview)
-- [ ] API · MCP 재기동 → `describe_operation` 이 새 글을 내는지 살아 있는 스택으로 확인
-- [ ] 보고서 `docs/04-report/deck-contract-1016.report.md` — 수치 재측정
-- [ ] 관문 — 회귀 · 단위 · 도움말 · 플랫폼 pytest · 스모크 셋
+- [x] API · MCP 재기동(API 는 stop 만 — 감독자가 띄움) → 살아 있는 MCP 가 고친 설명을 낸다 **11/11**(`describe_operation` 8 · 도구 설명 3)
+- [x] 보고서 `docs/04-report/deck-contract-1016.report.md` — 다시 잰 수치와 커밋 기록 수치를 갈라 적었다 · 결함 수를 다시 세어 31 → 34 로 고쳤다
+- [x] 관문 — 회귀 97/97 · 단위 104 · 도움말 ALL PASS · 백엔드 562 · 패리티 ALL PASS · smoke PASS · 그림 20/20 · 덱 op 21/21
