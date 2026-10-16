@@ -1174,4 +1174,8 @@ plan2 는 이 항목의 전제를 P1-4(대역표)로 잡았다. 그런데 대역
 - [x] 살아 있는 관문 — smoke PASS(op 63 · 도구 72) · 그림 20/20 · 덱 op 21/21 · MCP 설명 반영 11/11 · 새 op 플랫폼 경유 PASS.
 - [x] pyKooCAE 스테이징 — 바이너리 `43aa5d5c → e37fdf4f` · `cli.sif` → `13d9c3b4`(백업 `bin-backups/` · `cli.sif.bak.*`).
 - [x] pyKooCAE 매뉴얼 `6879624` — 63/63 op 항목 · info 다시 씀 · REMAP 판정 표(러너 배선 실측).
-- [ ] SmartTwinPreprocessor.sif 굽기 — 결과를 아래에 적는다.
+- [x] SmartTwinPreprocessor.sif 굽기 — `bake rc=0` · SIF 22:31 · 구워진 sha = 스테이징 sha `e37fdf4f`(그림 op 3/3) · 계산노드 복사 ·
+      tar `SmartTwinPreprocessor_20261016_v115.tar.gz` · Drive 업로드 둘 · 메일 「sent OK」 → `/opt/apptainers` 손 복사 → **세 사본 바이트 동일**.
+      그 SIF 안에서 — 재결속 도움말 v2 요약 · `id_floor` 13 · 3 · 3 · 1 · 마스터 덱 절점 198 · 삽입이 `deck_units` 오타를 거절 ·
+      **배포 SIF 로 REMAP 배선을 다시 흉내 내 applyfold · stackwrap · cnrb2spring · 삽입이 체인 통과**. `rclone.conf` 소유자 그대로.
+      ⚠ 이번에는 굽기 시작은 통과했고 **굽기 로그를 읽는 명령**이 「Production Deploy」로 막혔다 — 끝났다는 알림을 기다려 읽었다.

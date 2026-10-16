@@ -16,6 +16,6 @@
 - [x] pyKooCAE 매뉴얼 `docs/manual/04_KooRemapper` — 새 항목 15 · info 다시 씀 · 기존 18개에 「2026-10 정본 대조」 · README(63 op · 색인 · REMAP 판정 표) · 곁 문서 넷 · COVERAGE §8 → pyKooCAE `6879624`(63/63 op 항목 · 낡은 말 0)
       → 쓰다 찾아 고친 것 — applyfold·stackwrap `.k.k`(`7a13f72`) · 모르는 키 말없음 셋(`888f578`) · 재결속 도움말 v1 요약 · section 카탈로그 겹친 구절(`e0e2b3f`) · info 사용법 `[--strict]`(`36ded26`) · offset 카탈로그 「TSHELL NO czm」(`d8ed0d9`) · 매뉴얼(`110327d`)
 - [x] 릴리스 빌드 `e37fdf4f`(888f578 · GLIBC_2.35) → 회귀 97/97 · 단위 104/104 · 도움말 · 패리티 ALL PASS · 백엔드 562 · 42 op 지문 = 게시본 `43aa5d5c` 와 덱 바이트 동일(늘 달라지는 리포트 JSON 둘만)
-- [ ] 프런트 · `cli.sif` → Drive 게시 → API · MCP 재기동 → 플랫폼 경유 스모크 셋
-- [ ] 스테이징 → SmartTwinPreprocessor.sif 굽기 → `/opt/apptainers` → 세 사본 · SIF 안 실행
-- [ ] 장부 · 보고서 · 메모리 갱신(미게시 → 게시)
+- [x] 프런트 · `cli.sif` `13d9c3b4` → Drive `dist-20261016-222746Z` → API · MCP 재기동(health `e37fdf4f` 일치) → smoke · 그림 20/20 · 덱 op 21/21 · 설명 11/11 · 새 op 경유
+- [x] 스테이징 → SmartTwinPreprocessor.sif 굽기(tar v115 · 메일) → `/opt/apptainers` → 세 사본 바이트 동일 · SIF 안 실행 · 배포 SIF 로 REMAP 배선 재실측
+- [x] 장부(2차 배포 칸) · 보고서(2차 절 · 결함 38 · 결정 셋 갱신) · 메모리
