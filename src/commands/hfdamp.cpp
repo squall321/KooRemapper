@@ -430,7 +430,9 @@ static std::vector<int> hf_findTargetParts(
 int hfdamp_apply(std::vector<std::string>& lines,
                  const HFDampConfig& cfg,
                  int& maxSetId,
-                 ConsoleOutput& console)
+                 ConsoleOutput& console,
+                 const std::vector<std::string>* analysis,
+                 bool analysisComplete)
 {
     if (cfg.dtTarget <= 0.0) {
         console.error("hfdamp: dt_target must be > 0");
@@ -460,11 +462,19 @@ int hfdamp_apply(std::vector<std::string>& lines,
     std::vector<int> targetPids;
 
     if (cfg.mode == "selective") {
-        HFParseResult pr = hf_parseKFile(lines);
+        HFParseResult pr = hf_parseKFile(analysis ? *analysis : lines);
         // Update maxSetId from what we found in the file
         if (pr.maxSetId > maxSetId) maxSetId = pr.maxSetId;
         targetPids = hf_findTargetParts(pr, cfg, console);
 
+        if (targetPids.empty() && !analysisComplete) {
+            // 못 본 인클루드 안에 대상 파트가 있을 수 있다 — 그때 전체로 바꾸면 요청과 다른 덱이 조용히 나간다
+            console.error("[hfdamp] Selective mode: *INCLUDE 를 다 읽지 못해 파트를 다 보지 못했다 — "
+                          "전체 감쇠(PSID=0)로 바꾸지 않는다. 인클루드를 찾게 하거나 mode: global 로 주라");
+            return -1;
+        }
+        if (!targetPids.empty() && !analysisComplete)
+            console.warning("[hfdamp] Selective mode: 읽지 못한 *INCLUDE 안의 파트는 보지 않았다");
         if (targetPids.empty()) {
             console.println("[hfdamp] Selective mode: no parts found with dt <= dt_target");
             console.println("[hfdamp] Falling back to global (PSID=0)");
@@ -640,8 +650,11 @@ int runHFDamp(const std::string& yamlFile, ConsoleOutput& console) {
     };
     int maxSetId = KooRemapper::ids::maxOverClosure(lines, inclClosure, scanMaxSetId);
 
-    // Apply damping
-    int rc = hfdamp_apply(lines, cfg, maxSetId, console);
+    // Apply damping — 선택형은 인클루드 닫힘을 펼친 줄에서 파트를 본다(키워드는 주 덱에 넣는다)
+    std::vector<std::string> flat;
+    if (!inclClosure.files.empty()) flat = KooRemapper::include_closure::flatten(lines, modelPath, inclClosure);
+    int rc = hfdamp_apply(lines, cfg, maxSetId, console, inclClosure.files.empty() ? nullptr : &flat,
+                          inclClosure.complete());
     if (rc != 0) return rc;
 
     // Write output

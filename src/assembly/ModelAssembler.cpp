@@ -17284,7 +17284,11 @@ bool ModelAssembler::applyHFDamp(const HFDampOperation& op) {
     cfg.tssfac     = op.tssfac;
 
     ConsoleOutput console;
-    int rc = hfdamp_apply(rawLines_, cfg, maxSetId_, console);
+    // 선택형은 인클루드 닫힘을 펼친 줄에서 파트를 본다 — 독립 op 과 같은 규칙(키워드는 주 덱에 넣는다)
+    std::vector<std::string> flat;
+    if (!incl_.files.empty()) flat = include_closure::flatten(rawLines_, baseModelPath_, incl_);
+    int rc = hfdamp_apply(rawLines_, cfg, maxSetId_, console, incl_.files.empty() ? nullptr : &flat,
+                          incl_.complete());
     if (rc != 0) {
         errorMessage_ = "[hfdamp] Failed to apply damping";
         return false;
