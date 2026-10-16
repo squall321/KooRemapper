@@ -5713,15 +5713,17 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
         }
         for (const auto& ae : addedElements_)      { expect[ae.pid] += 1; touched.insert(ae.pid); }
         for (const auto& se : addedShellElements_) { expect[se.pid] += 1; touched.insert(se.pid); }
-        // op 가 통째로 끼워 넣는 키워드 블록에 요소 카드가 들어 있으면 그것도 기대에 넣는다
-        if (!touched.empty() && !addedKeywordBlocks_.empty()) {
+        // op 가 통째로 끼워 넣는 키워드 블록에 요소 카드가 들어 있으면 그것도 기대에 넣고, 그 파트도 **건드린
+        // 것**으로 친다. 예전에는 블록만 넣는 op(StepForge 조각 삽입 — 2026-10-16)이면 건드린 파트가 비어 이
+        // 대조가 통째로 건너뛰어졌다 — 블록이 요소를 잃어도 아무도 몰랐을 것이다.
+        if (!addedKeywordBlocks_.empty()) {
             std::vector<std::string> blkLines;
             for (const auto& blk : addedKeywordBlocks_) {
                 std::istringstream bs(blk);
                 std::string bl;
                 while (std::getline(bs, bl)) blkLines.push_back(bl);
             }
-            for (const auto& [pid, cnt] : ecBuildIndex(blkLines).countByPid) expect[pid] += cnt;
+            for (const auto& [pid, cnt] : ecBuildIndex(blkLines).countByPid) { expect[pid] += cnt; touched.insert(pid); }
         }
 
         if (!touched.empty()) {
