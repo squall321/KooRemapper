@@ -1888,6 +1888,9 @@ operations:
 > 위의 겹친 새 절점이었다 — 기본값으로 만든 층이 떠 있었다(덱은 합법이라 아무 말이 없었다). 커밋된 TSHELL 산출 셋
 > (`examples/offset/03` · `tests/offset/regression/02` · `tests/offset_tshell_result.k`)을 다시 구웠다. 회귀
 > `test_offset_tshell_deck.py` D 절(모드 넷 · 옛 바이너리 FAIL 7).
+>
+> ⚠ `element_type: shell` + `connection_mode: czm` 은 **적용되지 않는다** — rc 0 인데 코히시브를 만들지 않고 말도 하지
+> 않는다(2026-10-16 실측 · TSHELL 은 같은 설정으로 코히시브 4개). 셸 층에는 czm 을 주지 마라 — 거절로 바꿀지는 결정 대기다.
 
 ### 주요 파라미터
 
@@ -4464,6 +4467,9 @@ B ≤ κ₀² / (2(1 - cos(α/2)))
 - 부호 규약: `refshell` 의 `(a,d,c,b)` 법선이 오목한 쪽이므로 평면 덱의 **양수 z 가 곡률 중심
   쪽**으로 간다. 원호 기준면이면 감긴 절점의 반경이 `R - z` 다.
 
+> `output` 은 접두사다 — 끝의 `.k` 는 먼저 뗀다(2026-10-16 · 다른 접두사 op 과 같다). 그 전에는 `output: x.k` 가 `x.k.k` ·
+> `x.k_neutral.k` 를 써서 pyKooCAE REMAP 스텝(`output: Remap_dti.k` 를 넣는다)이 덱을 못 찾았다. 회귀 `test_stackwrap.py` D-2.
+
 ### 44.6 `linkage-fit` — 접힌 덱에서 힌지를 되찾기
 
 펴진 덱과 접힌 덱(절점 번호가 같아야 한다)에서 **파트별 강체변환**을 역산한다. 회전은 Horn
@@ -4495,6 +4501,8 @@ B ≤ κ₀² / (2(1 - cos(α/2)))
 
 **"미이동 0" 은 그대로 쓰면 틀린 기준이다.** 회전축 위의 절점은 제대로 변환해도 제자리에 남는다.
 그래서 '움직였나' 가 아니라 '요구한 변환과 같은가' 를 본다 — 더 센 검사다.
+
+> `output` 은 접두사다 — 끝의 `.k` 는 먼저 뗀다(2026-10-16). 그 전에는 `output: x.k` 가 `x.k.k` 를 썼다. 회귀 `test_applyfold.py` F-1.
 
 ### 44.8 `elformat` 을 만들지 않은 이유
 
@@ -5007,6 +5015,9 @@ KooRemapper cleanup-nodes <config.yaml>
 
 ---
 
+> 모르는 YAML 키는 경고하고 무시한다(2026-10-16) — `[WARN] [cleanup-nodes] 모르는 키는 무시한다: <키>`. 그 전에는 아무 말이 없어
+> `mod: safe` 같은 오타가 기본 `report` 로 돌았다. 회귀 `test_cleanup_nodes.py` A-uk.
+
 ## 48. `extract-parts` — 고른 파트만 뽑기
 
 ```
@@ -5219,6 +5230,9 @@ several (even tens of) cards per set" 이라고 적는다. 그 규칙을 틀리�
 
 ---
 
+> 모르는 YAML 키는 경고하고 무시한다(2026-10-16) — `[WARN] [extract-parts] 모르는 키는 무시한다: <키>`(`include:` 아래도 같다).
+> 그 전에는 아무 말이 없었다. 회귀 `test_extract_parts.py` A-uk.
+
 ## 49. `cad_solid_merge_to_deck` — StepForge 조각을 기존 덱에 넣기
 
 ```
@@ -5291,6 +5305,9 @@ StepForge 와의 경계 합의(저쪽 `docs/BOUNDARY-DYNAFORGE.md` §1·§3-3)�
   `ranges` 를 발행한 대역과 **대조**해 다르면 거절하게 된다(경계 Q7). 그 표는 아직 없다.
 
 ---
+
+> **모르는 YAML 키는 거절한다**(2026-10-16 · rc 1) — 형제 op(`id_floor` · 재결속)과 같다. 그 전에는 아무 말 없이 넘겨 `deck_units:`
+> 같은 오타가 기본 단위(`mm-t-s`)로 넣게 했다. 회귀 `test_cad_solid_merge.py` D10.
 
 ## 50. `rebind_entities_after_remesh` — 재메시 뒤 덧붙인 블록을 새 덱 번호로 다시 묶기
 
