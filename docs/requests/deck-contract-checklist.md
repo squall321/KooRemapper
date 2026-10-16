@@ -903,7 +903,7 @@ plan2 는 `IdAllocator` 로 발행자를 통합하라고 했다. 정찰이 그 �
 
 ### 경계 합의로 새로 진 것 (2026-10-15 · StepForge 답신 §5)
 세 가지 다 **지금 0건**이다. 숨기지 않고 저쪽 문서에 적었으므로 여기에도 칸으로 둔다.
-- [ ] ★**삽입 `cad_solid_merge_to_deck` — 우리 몫으로 확정됐는데 칸이 없었다(2026-10-15 추가).**
+- [x] ★**삽입 `cad_solid_merge_to_deck` — 우리 몫으로 확정됐는데 칸이 없었다(2026-10-15 추가). 지었고 게시했다(2026-10-16).**
       StepForge 표 5행(Q1). 저쪽이 내는 조각 `.k` + 대응표 JSON 을 **읽어** 기존 덱에 들인다.
       지금 **0건**. 아래 `unit`·`frame` 읽기와 `IdAllocator` 의 번호 대조가 이 op 안에서 만난다.
       과도기에는 저쪽 `ranges`(1부터)를 우리가 옮긴다(답신 §5 ①).
@@ -921,6 +921,11 @@ plan2 는 `IdAllocator` 로 발행자를 통합하라고 했다. 정찰이 그 �
           발행으로 정했다 — `id_floor` 가 대조하고 삽입은 바닥 위 조각을 옮기지 않는다(아래 P1-4) · 세트가 든 조각
         → 저쪽 새 질문 다섯에 답했다 — `docs/requests/stepforge-boundary-reply-2026-10-16.md`(새 2·4·5 받음 ·
           새 1·3 지금은 필요 없음 — DF-28 때 다시). 열린 우리 몫 — Q11 사전 조회 이름 · Q13 마스크 관문 · 발행표 범위
+        → (10-16 저녁) Q11 은 meshfix `preview: true` 로 닫혔고 발행표는 「요청 때 발행」(`id_floor`)으로 정했다. 남은 것은 조건부
+          하나 — **세트가 든 조각**(`ranges.sid` 가 null 이 아님)을 아직 받지 않는다. 저쪽 경계 문서가 「`ranges.sid` 는 지금 늘
+          null · `*SET_*` 은 쓰지 않는다」고 적었고 우리 답신(새 4)도 그렇게 합의했다 — 저쪽이 세트를 쓰게 되면 짓는다.
+          (저쪽 코드 실측 — 같은 라이터가 메시 잡에서는 `add_segment_set`·`add_part_set` 으로 세트를 쓰지만, 조각을 짓는
+          `core/export/fragment.py` 의 `assemble` 은 그 둘을 부르지 않는다. 그래서 조각의 `ranges.sid` 는 코드로도 늘 null 이다.)
 - [x] ★**meshfix 가 지운 절점을 가리키는 덱을 rc 0 으로 냈다 · `info --strict` 도 못 잡았다 — 끝났다(2026-10-16).**
       plan2 P2-6 이 적은 「meshfix 는 세트·SPC·CNRB·이력을 하나도 고치지 않는다」가 **지금도 사실**이었다(실측 —
       `demo_flat_tet.k` 에 PID 1 절점을 가리키는 세트·SPC·이력을 붙여 `meshfix pid: 1` → rc 0 · 그 절점이 없는 덱 ·
@@ -974,7 +979,10 @@ plan2 는 `IdAllocator` 로 발행자를 통합하라고 했다. 정찰이 그 �
           좌표 집합) 정확 일치 · 정본 `parser/IdRefs`(`*SET_PART` · 접촉 Card 1 SSTYP 3 · 강체 묶음 · 요소 세트 · 요소 이력) ·
           접촉 ID·`*DEFINE_BOX` 충돌도 거절 · 회귀 23항(새 덱 PID 도 바꿔 1→5·2→4 · 다시 구운 B 의 요소는 짝 없음 · 파트 짝 변이를
           자기 재검사가 막는다). 남은 것 — 초기응력·파트 감쇠 등 · 공차 · 인클루드 덱 · ~~meshfix 안의 같은 재결속~~(지었다).
-- [ ] **조각의 `unit`·`frame` 읽기**(Q6 — 좌표계·단위는 **삽입 쪽**인 우리가 맞춘다).
+- [x] **조각의 `unit`·`frame` 읽기**(Q6 — 좌표계·단위는 **삽입 쪽**인 우리가 맞춘다). → **삽입 op 안에 지었다**(`1be9c8d` ·
+      `CadSolidMerge.cpp` ② — 칸을 놓친 채 빈칸으로 남아 있었다. 10-16 저녁 장부 대조에서 찾았다). 대응표의 `unit` 이 덱 단위
+      (`deck_unit`, 기본 `mm-t-s`)와 다르면 **환산하지 않고** 거절 · `frame` 은 `world` 만 받는다(좌표 변환 없음) · 빠진 칸은
+      대응표 칸 집합 검사가 거절. 회귀 `test_cad_solid_merge.py` D2(빠진 frame) · D3(단위 불일치) · D4(frame 이 world 가 아님).
       실측 — 덱 수준 `frame` **0건**, `unit` 은 warpage 격자 값 단위(`um|mm|m`) 하나뿐이다
       (`standalone_ops.cpp:1222`). 조각이 `unit: mm-t-s`·`frame: world` 를 명시해 오면 읽는
       쪽을 짓는다. ★모르는 칸은 **거절**한다 — 조용히 무시하지 않는다(저쪽에 그렇게 적었다).
@@ -1116,3 +1124,32 @@ plan2 는 이 항목의 전제를 P1-4(대역표)로 잡았다. 그런데 대역
 ⚠ **파이프로 감싸면 `set -e` 실패가 종료코드에서 사라진다.** 재bake 첫 시도를 `bash … | grep | tail`
 로 돌렸더니 2/5 에서 죽었는데 종료코드가 `tail` 것(0)이어서 성공으로 보였다. 길게 도는 스크립트는
 감싸지 말고 그대로 돌린다 — 필터는 나중에 출력 파일에 걸면 된다.
+
+### 배포 — 실사용에 반영 (2026-10-16)
+사용자 결정 「다 끝낸 뒤 게시」(남은 개발 · 관문 뒤 게시 · 낡을 수 있는 네 자리를 맞춘다 · **sudo 단계는 부탁드린다**).
+게시본은 `de31002` 다(그 뒤 커밋 `60b1c2e` 는 스모크 스크립트뿐 — `src`·`include` 동일).
+
+- [x] **glibc 호환 빌드** — `scripts/build_linux_compat.sh` → `43aa5d5c…`(GLIBC_2.35) · `build/linux/bin` = `platform/backend/bin`.
+      그 바이너리로 관문 — 회귀 97/97 · 단위 52(릴리스 시험 바이너리) · 도움말 예제 ALL PASS · 플랫폼 562.
+- [x] **프런트·`cli.sif`** — 프런트 빌드(`index.portal.html` 포함) · `cli.sif` 재bake `6076ef3d`(안의 바이너리 `43aa5d5c`).
+- [x] **Drive 게시** `dist-20261016-094323Z`(`latest/`) · BUILD_INFO commit `de31002` · sha256 `43aa5d5c`.
+- [x] **API·MCP 재기동** — API 는 stop 만, 감독자가 35초 뒤 올렸다 · health `revision_matches_binary: true` ·
+      MCP 는 `apptainer instance stop koorm_mcp` + `start.sh`.
+- [x] **플랫폼을 거쳐서**(MCP → API → 워커 → 게시 바이너리) — 새 op 셋 · meshfix `preview` · 마스터 덱 inspect(절점 198)
+      모두 succeeded. 관문 셋 — `smoke` PASS(op 63 · 도구 72 = 카탈로그·`server.py`) · `figures_smoke` 20/20 ·
+      `deckops_smoke` 21/21. 새 op 셋은 살아 있는 관문에 **없었다** — `deckops_smoke` 에 넣었다(`60b1c2e`).
+      → 재결속에는 `model` 이 없어 스모크가 덧붙인 `model` 을 구조화 op 검증이 「Additional properties are not allowed」로
+        거절한다(실측) — args 가 주 덱을 이미 가리키면 채우지 않게 했다.
+- [x] **pyKooCAE 스테이징**(`appt313/opt/kooremapper`) — `scripts/stage-to-appt313.sh --with-cli-sif` ·
+      바이너리 `5cd1df82 → 43aa5d5c`(백업 `bin-backups/KooRemapper.bak-5cd1df82-20261016095442`) ·
+      `cli.sif` `3844cc5d → 6076ef3d`(백업 `cli.sif.bak.1792144483`, 10-06 판 — 굽기 훅은 `--with-cli-sif` 없이 불러
+      10-13 에 안 갈렸다). 스테이징 사본이 새 op 셋을 안다(`help`).
+      ⚠ BUILD_INFO 의 커밋 칸은 그 순간의 HEAD(`60b1c2e`)다 — 위 이유로 소스는 같다.
+- [ ] **`SmartTwinPreprocessor.sif` 재bake — 사용자 말씀을 기다린다.** 세 사본(빌드 · 계산노드
+      `KooSlurmInstallAutomationRefactory/apptainer/compute-node-images` · `/opt/apptainers`)이 모두 10-14 판으로 같고 안의
+      바이너리는 `5cd1df82`(10-13 게시본)이다 — **pyKooCAE REMAP 체인은 오늘 고친 것을 아직 모른다.**
+      굽기는 root 이고 끝에 Drive 업로드 · 메일 발송을 한다(09-28 에도 사용자 승인으로 돌렸다). 순서 —
+      `cd ~/serviceApptainers && sudo HOME=/home/koopark bash ./BuildSmartTwinPreprocessor.sh`(훅이 스테이징을 보고 sha 를
+      검증한다 — 이미 최신이라 바꿀 것 없음) → `sudo cp SmartTwinPreprocessor.sif /opt/apptainers/`(스크립트가 안 한다) →
+      `apptainer exec /opt/apptainers/SmartTwinPreprocessor.sif sha256sum /opt/kooremapper/bin/KooRemapper` 가 `43aa5d5c`.
+      메일 없이 굽으려면 `SKIP_NOTIFY=1`. 파이프로 감싸지 않는다(위 09-28 ⚠).
