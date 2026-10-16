@@ -1,6 +1,7 @@
 // C-clip(스프링 접점) 생성 op 구현 — 박스 파트 치환·Castigliano 캘리브레이션·모멘트일치 눌림·INITIAL_STRESS_SHELL 출력.
 #include "cclip.h"
 #include "parser/IncludeScan.h"
+#include "parser/IncludeClosure.h"   // 충돌 코퍼스 — 인클루드 닫힘(정본)
 #include "parser/DeckWriter.h"
 #include "cli/ConsoleOutput.h"
 #include "parser/KFileReader.h"
@@ -662,38 +663,25 @@ int cc_scanMaxId(const std::vector<std::string>& lines, const std::string& prefi
     return maxId;
 }
 
-// scan corpus = model lines + one level of *INCLUDE file contents (IDs allocated
-// against includes too, so new SECID/MID/SET/CNRB ids cannot collide with them)
+// 충돌 검사 코퍼스 = 주 덱 줄 + **인클루드 닫힘 전부**의 줄. 새 SECID·MID·SET·CNRB 번호가 인클루드에
+// 이미 있는 번호와 겹치지 않게 한다(차례는 상관없다 — 최대값을 셀 뿐이다).
+//
+// ⚠ 예전 구현은 따로 읽었고 셋이 틀렸다(재현 — 둘 다 새 SECID 를 인클루드의 것과 **같은 3** 으로 냈다).
+//   · 한 `*INCLUDE` 카드의 **첫 이름만** 읽었다 — 매뉴얼은 이름 카드를 여러 장 받는다(Vol_I 179253)
+//   · 하위 폴더 이름(`sub/x.k`)을 덱 폴더가 아니라 **작업 폴더** 기준으로 풀었다
+//   · 한 단계만 따라갔고, `*INCLUDE_TRANSFORM` 파일을 오프셋 없이 코퍼스에 넣었다
+//   지금은 정본(`include_closure`)으로 읽는다. 못 읽은 것·따라가지 않은 것은 `unopened` 로 돌려준다.
 std::vector<std::string> cc_collectScanLines(const std::vector<std::string>& lines,
-                                             const std::string& baseDir,
+                                             const std::string& modelPath,
                                              std::vector<std::string>* unopened = nullptr) {
+    const auto c = KooRemapper::include_closure::read(modelPath, lines);
     std::vector<std::string> all = lines;
-    for (size_t i = 0; i < lines.size(); ++i) {
-        const std::string up = kw_upper(kw_trim(lines[i]));
-        if (up.rfind("*INCLUDE",0) != 0) continue;
-        // ⚠ `*INCLUDE_PATH` 는 탐색 경로일 뿐 카드를 끌어오지 않는다 — 예전엔 그것까지 열려 들었다.
-        if (up.rfind("*INCLUDE_PATH",0) == 0) continue;
-        for (size_t j = i+1; j < lines.size(); ++j) {
-            std::string ft = kw_trim(lines[j]);
-            if (ft.empty() || ft[0]=='$') continue;
-            if (ft[0]=='*') break;
-            std::string path = ft;
-            if (!baseDir.empty() && path.find('/')==std::string::npos && path.find('\\')==std::string::npos)
-                path = baseDir + "/" + path;
-            std::ifstream inc(path);
-            // ⚠ 못 열면 예전엔 **조용히 넘어갔다.** 그러면 그 파일의 ID 는 충돌 검사 코퍼스에
-            // 안 들어가는데 결과는 "겹침 없음" 처럼 보인다. 못 연 사실을 돌려준다.
-            if (!inc.is_open()) {
-                if (unopened) unopened->push_back(path);
-                break;
-            }
-            std::string l;
-            while (std::getline(inc, l)) {
-                if (!l.empty() && l.back()=='\r') l.pop_back();
-                all.push_back(l);
-            }
-            break;
-        }
+    for (const auto& f : c.files) all.insert(all.end(), f.lines.begin(), f.lines.end());
+    if (unopened) {
+        for (const auto& u : c.unresolved) unopened->push_back(u.name + "(" + u.why + ")");
+        for (const auto& n : c.notFollowed)
+            unopened->push_back(n.keyword + (n.name.empty() ? "" : " " + n.name) + "(따라가지 않았다)");
+        if (c.depthCut) unopened->push_back("(인클루드 깊이 상한)");
     }
     return all;
 }
@@ -1097,27 +1085,22 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
     if (targets.empty()) { console.error("[cclip] no target parts resolved"); return 1; }
     console.info("[cclip] Targets: " + std::to_string(targets.size()) + " part(s)");
 
-    // ID bases — raw-scan over model lines PLUS one level of *INCLUDE contents,
+    // ID bases — raw-scan over model lines PLUS the whole *INCLUDE closure,
     // covering keywords KFileReader may not track (and include-file id spaces)
-    std::string modelDir;
-    {
-        size_t sl = modelPath.find_last_of("/\\");
-        if (sl != std::string::npos) modelDir = modelPath.substr(0, sl);
-    }
     std::vector<std::string> unopenedIncludes;
-    std::vector<std::string> scanLines = cc_collectScanLines(lines, modelDir, &unopenedIncludes);
-    // ⚠ 이 op 만 인클루드를 **한 단계 실제로 읽는다.** 그래서 할 말이 다르다 — 세트·파트·섹션·
-    // 재질은 그 한 단계까지 세었지만, 노드·요소 ID 는 KFileReader 가 준 Mesh 에서 오므로
+    std::vector<std::string> scanLines = cc_collectScanLines(lines, modelPath, &unopenedIncludes);
+    // ⚠ 이 op 은 인클루드를 **실제로 읽는다**(닫힘 전부 — 중첩 포함). 그래서 할 말이 다르다 — 세트·
+    // 파트·섹션·재질은 인클루드까지 세었지만, 노드·요소 ID 는 KFileReader 가 준 Mesh 에서 오므로
     // 여전히 이 덱 안에서만 센 값이다. 문구를 다른 op 과 뭉개면 읽는 쪽이 과신한다.
     KooRemapper::include_scan::warnUnreadFile(console, modelPath,
-        "세트·파트·섹션·재질은 인클루드 한 단계까지 세었지만 **노드·요소 ID 는 이 덱 안에서만** 세었습니다");
+        "세트·파트·섹션·재질은 인클루드까지 세었지만 **노드·요소 ID 는 이 덱 안에서만** 세었습니다");
     if (!unopenedIncludes.empty()) {
         std::string names;
         for (size_t k = 0; k < unopenedIncludes.size() && k < 8; ++k)
             names += (k ? ", " : "") + unopenedIncludes[k];
         if (unopenedIncludes.size() > 8) names += ", …";
         console.warning("*INCLUDE " + std::to_string(unopenedIncludes.size()) +
-                        "개를 열지 못했습니다 — 그 파일의 ID 는 충돌 검사에 안 들어갔습니다");
+                        "개를 열지 못했거나 따라가지 않았습니다 — 그 파일의 ID 는 충돌 검사에 안 들어갔습니다");
         console.println("  열지 못한 파일: " + names);
     }
     int nextNid  = mesh.getMaxNodeId() + 1;
