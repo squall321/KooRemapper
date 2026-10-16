@@ -18,6 +18,9 @@
   F4 `*KEYWORD I10=Y LONG=S` — `examples/load/mesh.k`(i10) 의 머리를 바꿨다. 읽기 폭은 10이다
      (`LONG=S` 는 「표준을 읽고 long 으로 쓴다」라 읽기 폭을 바꾸지 않는다 — Vol_I 19308)
   F5 2줄 요소 카드 — `examples/mesh/tetramesh.k`(WB-LSDYNA 산출 실덱, 요소 카드가 두 줄)
+  F6 마스터 덱 — 주 덱에 `*NODE` 가 없고 메시는 인클루드에 있다(실사용 인클루드 덱의 꼴).
+     ★처음 재 보니 `*END` 앞에 **빈 `*NODE`** 가 끼었다 — 실사용 인클루드 덱 88장 중 84장의 무편집
+     산출이 입력과 달랐다(2026-10-16). 쓰는 쪽이 「더할 노드가 없어도」 키워드를 썼다
 
 무엇을 보나.
   ① 산출이 입력과 **sha256 동일**(5종 전부)
@@ -60,11 +63,19 @@ def fixtures():
         ("F3 무-말미개행", lf.rstrip(b"\n")),
         ("F4 I10=Y LONG=S", i10.replace(b"*KEYWORD i10=y", b"*KEYWORD I10=Y LONG=S", 1)),
         ("F5 2줄 요소 카드", two),
+        ("F6 마스터 덱(*NODE 는 인클루드에)", MASTER),
     ]
+
+
+# F6 — 주 덱은 제어 카드와 인클루드뿐이다. 인클루드 파일은 `identity` 가 함께 만든다.
+MASTER = (b"*KEYWORD\n*TITLE\nmaster deck\n*CONTROL_TERMINATION\n       1.0\n"
+          b"$\n$ ===== mesh =====\n*INCLUDE\nmesh_inc.k\n*END\n")
+MASTER_INC = open(os.path.join(REPO, "examples", "contact", "model.k"), "rb").read().replace(b"\r\n", b"\n")
 
 
 def identity(binary, d, name, body):
     open(os.path.join(d, name + ".k"), "wb").write(body)
+    open(os.path.join(d, "mesh_inc.k"), "wb").write(MASTER_INC)   # F6 의 인클루드(다른 픽스처는 안 가리킨다)
     open(os.path.join(d, name + ".yaml"), "w", encoding="utf-8").write(
         "base_model: %s.k\noutput: %s_out\noperations:\n  - type: identity\n" % (name, name))
     r = subprocess.run([binary, "assemble", name + ".yaml"], cwd=d, capture_output=True, text=True,

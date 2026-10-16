@@ -5130,9 +5130,14 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
 
                 // Insert remaining additions if not yet done
                 if (!nodesInserted) {
-                    output << "*NODE\n";
-                    for (const auto& an : addedNodes_) {
-                        output << formatNodeLine(an.id, an.x, an.y, an.z, curSecFw) << "\n";
+                    // 더할 노드가 없으면 키워드도 쓰지 않는다. 주 덱에 `*NODE` 가 없는 마스터 덱(메시가
+                    // 인클루드에 있다)에 빈 `*NODE` 가 끼어, 무편집 산출이 입력과 달랐다 — 실사용 인클루드
+                    // 덱 88장 중 84장(2026-10-16). 요소 쪽은 이미 「더할 것이 있을 때만」 쓴다.
+                    if (!addedNodes_.empty()) {
+                        output << "*NODE\n";
+                        for (const auto& an : addedNodes_) {
+                            output << formatNodeLine(an.id, an.x, an.y, an.z, curSecFw) << "\n";
+                        }
                     }
                     nodesInserted = true;
                 }
