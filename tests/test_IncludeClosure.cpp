@@ -195,3 +195,50 @@ TEST(IncludeClosure_인클루드가_없으면_빈_닫힘이고_완전하다) {
     ASSERT_EQ(c.cards, (size_t)0);
     ASSERT_TRUE(c.complete());
 }
+
+// ── 펼치기 — LS-DYNA 가 읽는 차례 ───────────────────────────────────────────
+
+TEST(IncludeClosure_펼치기는_이름_줄_바로_뒤에_중첩까지) {
+    Scratch s("flat");
+    s.put("a.k", "*KEYWORD\n*SET_PART\nA\n*INCLUDE\nc.k\n*SET_PART\nA2\n*END\nAFTER_END\n");
+    s.put("b.k", "*KEYWORD\n*SET_PART\nB\n*END\n");
+    s.put("c.k", "*KEYWORD\n*SET_PART\nC\n*END\n");
+    const std::string body = "*KEYWORD\n*INCLUDE\na.k\nb.k\n*SET_PART\nM\n*END\n";
+    const std::string mp = s.put("main.k", body);
+    const auto L = splitLines(body);
+    const auto c = include_closure::read(mp, L);
+    const auto f = include_closure::flatten(L, mp, c);
+    const std::vector<std::string> want = {
+        "*KEYWORD", "*INCLUDE",
+        "a.k", "*KEYWORD", "*SET_PART", "A", "*INCLUDE",
+               "c.k", "*KEYWORD", "*SET_PART", "C",          // a 안의 c 는 그 이름 줄 뒤에
+               "*SET_PART", "A2",                             // a 의 *END 뒤(AFTER_END)는 없다
+        "b.k", "*KEYWORD", "*SET_PART", "B",
+        "*SET_PART", "M", "*END"};
+    ASSERT_EQ(f.size(), want.size());
+    for (size_t i = 0; i < want.size() && i < f.size(); ++i) ASSERT_EQ(f[i], want[i]);
+}
+
+TEST(IncludeClosure_펼치기는_이음_이름의_마지막_줄_뒤에) {
+    Scratch s("flatcont");
+    s.put("sub/long_name.k", "*KEYWORD\n*SET_PART\nX\n*END\n");
+    const std::string body = "*KEYWORD\n*INCLUDE\nsub/long_ +\nname.k\n*END\n";
+    const std::string mp = s.put("main.k", body);
+    const auto L = splitLines(body);
+    const auto c = include_closure::read(mp, L);
+    ASSERT_EQ(c.files.size(), (size_t)1);
+    ASSERT_EQ(c.files[0].afterLine, (size_t)4);    // 둘째 줄("name.k") 뒤
+    const auto f = include_closure::flatten(L, mp, c);
+    ASSERT_EQ(f[3], std::string("name.k"));
+    ASSERT_EQ(f[4], std::string("*KEYWORD"));
+}
+
+TEST(IncludeClosure_못_읽은_이름은_펼치지_않고_줄을_지킨다) {
+    Scratch s("flatmiss");
+    const std::string body = "*KEYWORD\n*INCLUDE\nnope.k\n*SET_PART\nM\n*END\n";
+    const std::string mp = s.put("main.k", body);
+    const auto L = splitLines(body);
+    const auto f = include_closure::flatten(L, mp, include_closure::read(mp, L));
+    ASSERT_EQ(f.size(), L.size());
+    for (size_t i = 0; i < L.size(); ++i) ASSERT_EQ(f[i], L[i]);
+}

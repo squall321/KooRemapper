@@ -11,6 +11,7 @@
 //   - 솔리드 파트: 자유면(공유 1회 면) 기준 외부 표면적, 정사영 = sum(area*|n·e|)/2
 //     (닫힌 표면 왕복 상쇄). 부피 = 면-중심 피라미드 분해(와인딩 무관 |dot| 합).
 //   - 쉘 파트: 요소면 단면 기준(단측), 정사영 /2 없음, 부피 0.
+#include "parser/IncludeClosure.h"   // 인클루드 닫힘 — 정본
 #include "modelmeta.h"
 #include "contact_helpers.h"
 #include "cli/ConsoleOutput.h"
@@ -151,34 +152,35 @@ bool mm_parseConfig(const std::string& path, MmConfig& cfg, ConsoleOutput& conso
     return true;
 }
 
-// ── 원시 라인 수집 (*INCLUDE 1단계 추적 — cclip 전례) ───────────────────────
+// ── 원시 라인 수집 — 인클루드 닫힘을 LS-DYNA 가 읽는 차례대로 펼친다 ─────────────────
+//
+// ⚠ 예전 구현은 **한 단계만** 따라가고 `*INCLUDE_*` 를 전부 맨 `*INCLUDE` 처럼 읽었다 —
+//   `*INCLUDE_PATH` 의 디렉터리 이름을 파일로 열려 하고(조용히 실패), `*INCLUDE_TRANSFORM` 파일을
+//   **ID 오프셋 없이** 읽어 그 안의 PID·MID·SID 를 그럴듯하게 틀린 값으로 셌다(이 산출은 DataHub
+//   적재로 나간다). 인클루드 파일의 `*END` 뒤까지 읽었고, 못 연 파일은 말하지 않았다.
+//   지금은 정본(`include_closure`)을 쓴다 — 중첩 · 파일별 `*END` · 주 덱 폴더 기준 ·
+//   맨 `*INCLUDE` 가 아닌 것은 **따라가지 않고** `blind` 로 돌려준다(호출자가 경고한다).
+struct MmLines {
+    std::vector<std::string> lines;      // 펼친 줄
+    std::vector<std::string> blind;      // 못 본 인클루드 — 사람이 읽을 문장
+};
 
-std::vector<std::string> mm_collectLines(const std::string& modelPath) {
-    std::vector<std::string> lines;
+MmLines mm_collectLines(const std::string& modelPath) {
+    MmLines out;
+    std::vector<std::string> mainLines;
     std::ifstream f(modelPath);
-    if (!f.is_open()) return lines;
-    std::string dir = mm_dirOf(modelPath);
+    if (!f.is_open()) return out;
     std::string line;
-    bool inInclude = false;
-    while (std::getline(f, line)) {
-        std::string s = mm_trim(line);
-        std::string up = mm_lower(s);
-        if (!s.empty() && s[0] == '*') {
-            inInclude = (up == "*include" || up.rfind("*include_", 0) == 0);
-            lines.push_back(line);
-            continue;
-        }
-        lines.push_back(line);
-        if (inInclude && !s.empty() && s[0] != '$') {
-            std::string inc = s;
-            if (inc[0] != '/' && !(inc.size() > 1 && inc[1] == ':'))
-                inc = dir + "/" + inc;
-            std::ifstream g(inc);
-            std::string l2;
-            while (g.is_open() && std::getline(g, l2)) lines.push_back(l2);
-        }
-    }
-    return lines;
+    while (std::getline(f, line)) mainLines.push_back(line);
+    const auto c = KooRemapper::include_closure::read(modelPath, mainLines);
+    out.lines = KooRemapper::include_closure::flatten(mainLines, modelPath, c);
+    for (const auto& u : c.unresolved)
+        out.blind.push_back(u.file + ":" + std::to_string(u.line) + " 의 *INCLUDE '" + u.name + "' — " + u.why);
+    for (const auto& n : c.notFollowed)
+        out.blind.push_back(n.file + ":" + std::to_string(n.line) + " 의 " + n.keyword +
+                            (n.name.empty() ? "" : " '" + n.name + "'") + " — 따라가지 않았다(ID 오프셋 등)");
+    if (c.depthCut) out.blind.push_back("인클루드 깊이 상한에 걸려 더 따라가지 않았다");
+    return out;
 }
 
 // ── 기하 ─────────────────────────────────────────────────────────────────────
@@ -576,7 +578,10 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
         return 1;
     }
 
-    auto rawLines = mm_collectLines(cfg.model);
+    auto collected = mm_collectLines(cfg.model);
+    for (const auto& b : collected.blind)
+        console.warning("[modelmeta] 못 본 인클루드 — 그 안의 파트·재질·접촉은 이 보고에 없다: " + b);
+    auto rawLines = std::move(collected.lines);
 
     // 파트별 요소 분류
     std::map<int, std::vector<const KooRemapper::Element*>> byPart;

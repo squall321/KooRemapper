@@ -60,6 +60,7 @@ struct File {
     size_t depth = 1;                 // 주 덱이 0, 주 덱이 직접 끌어온 파일이 1
     std::string from;                 // 끌어온 파일
     size_t fromLine = 0;              // 그 `*INCLUDE` 카드의 줄(1-기반)
+    size_t afterLine = 0;             // `from` 에서 이 파일 이름의 **마지막** 줄(1-기반) — 펼칠 때 그 뒤에 넣는다
 };
 
 struct Closure {
@@ -76,12 +77,19 @@ struct Closure {
 
 // 이름 카드를 모은다 — `lines[i]` 부터 다음 키워드 앞까지. `␣+` 이음은 한 이름으로 붙인다.
 // `$` 주석과 빈 줄은 건너뛴다. 각 이름과 그 첫 줄(0-기반)을 돌려준다.
-struct NameAt { std::string name; size_t line = 0; };
+struct NameAt { std::string name; size_t line = 0; size_t last = 0; };   // line·last 는 0-기반(`␣+` 이음이면 last > line)
 std::vector<NameAt> namesFrom(const std::vector<std::string>& lines, size_t i);
 
 // 주 덱(`mainPath` 에서 읽은 `mainLines`)의 인클루드 닫힘을 읽는다.
 Closure read(const std::string& mainPath, const std::vector<std::string>& mainLines,
              size_t maxDepth = 16);
+
+// 닫힘을 **LS-DYNA 가 읽는 차례대로** 한 줄 벡터로 펼친다 — 각 인클루드 파일의 줄을 그 이름 줄 **바로
+// 뒤에** 넣는다(중첩도 같은 규칙으로). 키워드를 훑는 소비자가 인클루드 안의 카드도 보게 하려는 것이다.
+// `*INCLUDE` 카드와 이름 줄은 그대로 남긴다(줄을 지우면 소비자가 「이 덱에 인클루드가 있다」를 잃는다).
+// 주 덱 줄은 전부, 인클루드 파일 줄은 그 파일의 첫 `*END` 앞까지(`read` 가 이미 그렇게 담았다).
+std::vector<std::string> flatten(const std::vector<std::string>& mainLines, const std::string& mainPath,
+                                 const Closure& c);
 
 }  // namespace include_closure
 }  // namespace KooRemapper

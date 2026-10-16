@@ -112,6 +112,7 @@ struct Walker {
                 f.depth = depth + 1;
                 f.from = file;
                 f.fromLine = i + 1;
+                f.afterLine = n.last + 1;
                 std::string l;
                 while (std::getline(in, l)) {
                     if (!l.empty() && l.back() == '\r') l.pop_back();
@@ -146,6 +147,7 @@ std::vector<NameAt> namesFrom(const std::vector<std::string>& lines, size_t i) {
             ++i;
         }
         n.name += part;
+        n.last = i;
         out.push_back(std::move(n));
         ++i;
     }
@@ -162,6 +164,34 @@ Closure read(const std::string& mainPath, const std::vector<std::string>& mainLi
     w.visited.insert(keyOf(mainPath));
     w.walk(Walker::kMain, 0);
     return std::move(w.out);
+}
+
+namespace {
+
+void spliceInto(std::vector<std::string>& out, const std::vector<std::string>& lines,
+                const std::string& path, const Closure& c, size_t depth) {
+    // 이 파일에서 끌어온 파일들 — 이름의 마지막 줄 뒤에 넣는다.
+    std::vector<const File*> kids;
+    for (const auto& f : c.files)
+        if (f.depth == depth + 1 && f.from == path) kids.push_back(&f);
+    size_t k = 0;
+    for (size_t i = 0; i < lines.size(); ++i) {
+        out.push_back(lines[i]);
+        while (k < kids.size() && kids[k]->afterLine == i + 1) {
+            spliceInto(out, kids[k]->lines, kids[k]->path, c, depth + 1);
+            ++k;
+        }
+    }
+}
+
+}  // namespace
+
+std::vector<std::string> flatten(const std::vector<std::string>& mainLines, const std::string& mainPath,
+                                 const Closure& c) {
+    std::vector<std::string> out;
+    out.reserve(mainLines.size());
+    spliceInto(out, mainLines, mainPath, c, 0);
+    return out;
 }
 
 }  // namespace include_closure
