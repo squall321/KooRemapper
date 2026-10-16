@@ -906,6 +906,34 @@ axis: z
           "중립축·굽힘강성은 `neutralaxis` 와 **같은 계산**이다 — 숫자가 서로 다르면 결함이다",
           "얇은 층은 min_bar_px 로 바닥 처리하므로 두께가 과장된다 — 그 층은 **옆 숫자가 참**이고",
           "  그림이 아니다. 몇 층을 바닥 처리했는지 말한다"])
+op("cad_solid_merge_to_deck", "메시 편집", "StepForge 조각(.k + 대응표)을 기존 덱에 **넣는다** — 계약 대조 · 번호 이동 · coord_sha 검산",
+   "조각 삽입 fragment merge insert stepforge 대응표 coord_sha cad solid 넣기 경계",
+   "KooRemapper cad_solid_merge_to_deck <config.yaml>",
+   needs=["examples/cad_solid_merge_to_deck/deck.k", "examples/cad_solid_merge_to_deck/stepforge_fragment.k",
+          "examples/cad_solid_merge_to_deck/stepforge_fragment.json"],
+   files={"m.yaml": """model: examples/cad_solid_merge_to_deck/deck.k
+output: merged.k
+fragment: examples/cad_solid_merge_to_deck/stepforge_fragment.k
+fragment_map: examples/cad_solid_merge_to_deck/stepforge_fragment.json
+"""},
+   cmds=["KooRemapper cad_solid_merge_to_deck m.yaml"],
+   outputs=["merged.k", "merged_fragment_map.json"],
+   notes=["경계 합의(StepForge `docs/BOUNDARY-DYNAFORGE.md` §3-3) — 조각을 **쓰는** 것은 StepForge, 기존 덱에",
+          "  **넣는** 것은 이 op 이다(이미 있는 덱의 바이트를 바꾸는 일이라서)",
+          "★대응표는 **계약의 칸 그대로** 읽는다 — 맨 위 넷(unit·frame·ranges·parts) · ranges 넷 · parts 여덟.",
+          "  모르는 칸·빠진 칸은 **거절**한다. `ranges` 의 `null`(그 번호를 안 썼다)은 받는다",
+          "★넣기 전에 조각을 대응표와 **대조**한다 — 번호가 ranges 안이고 lo·hi 가 실제 최소·최대인가 · 파트",
+          "  집합 · 파트마다 요소 수·구간 · 그 요소가 쓰는 절점 = 절점 구간 · **coord_sha**(저쪽과 같은 식 —",
+          "  `%16.9e` 셋씩 이은 줄을 정렬해 sha256 앞 16자). 하나라도 어긋나면 넣지 않는다(rc=1)",
+          "번호는 이 덱(**인클루드 닫힘까지** 센 최대값) 위로 옮긴다 — 과도기 번호 길(Q5). PID·SECID·MID 는",
+          "  **한 이동량**이다(저쪽이 셋을 같은 번호로 쓴다 — 넣은 뒤에도 그 규약이 선다)",
+          "좌표 글자는 **바이트 그대로** 두고 번호 칸만 이 덱의 폭(8 · i10 이면 10)으로 쓴다. 넣을 블록을",
+          "  **다시 읽어** coord_sha 를 한 번 더 잰다. long 덱은 받지 않는다",
+          "unit 은 `deck_unit`(기본 mm-t-s)과 같아야 하고 frame 은 world 여야 한다 — 환산·변환은 하지 않는다",
+          "계약 밖 키워드(`*SET_*`·`*MAT_ADD_*`·`*MAT_THERMAL_*` …)가 든 조각·`ranges.sid` 가 null 이 아닌 조각은 거절",
+          "저쪽 자리표시 물성(RO = E = 1.0)은 그대로 넣되 MID 마다 **경고**한다 — 해석 전에 바꿀 것",
+          "산출 둘 — `<output>.k` · `<output>_fragment_map.json`(같은 칸 집합의 대응표를 **덱 번호**로 옮긴 것)"])
+
 op("extract-parts", "메시 편집", "고른 파트만 뽑아 **돌아가는** 덱으로 (ID·칸폭·CRLF 보존)",
    "파트 추출 extract parts 분리 떼어내기 renumber 인클루드 펼치기",
    "KooRemapper extract-parts <config.yaml>",

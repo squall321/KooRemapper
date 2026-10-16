@@ -1097,6 +1097,15 @@ axis: z
      {"KooRemapper stackdiagram sd.yaml"},
      {"examples/stackwrap/flat_stack.k"},
      {"★**2차 솔리드는 거절한다**(ELFORM 16·17·25~28) — 리더가 앞 8칸만 저장해 중간절점이", "  코너로 들어온다. 실측: `convert type: tet10` 덱의 단면 총면적이 0.19(1차 원본 0.665)인데", "  다각형 수는 둘 다 2개라 **알아볼 수가 없다.** 20절점 육면체(ELFORM 23)는 그린다", "격자를 자르지 않는다 — 파트별 **축 범위**(사실상 AABB)만 쓰는 **모식도**다.", "  그래서 평평한 적층에서는 빠르고 또렷하지만, 쓸 수 있는 덱이 제한된다", "★범위가 포개지는 적층(감긴 셀)은 **거절한다** — 포갠 것을 층처럼 쌓으면 층 순서가", "  거짓이 되고 그림은 그럴듯해 보인다. 그 덱은 `section` 으로 잘라서 봐야 한다", "  (`force: true` 로 넘길 수 있지만 그림에 '믿지 말라' 고 적는다)", "적층 전체를 **품는** 파트(케이스·탭)는 갈라내서 점선 외곽으로만 그린다 —", "  실측에서 '전체의 90% 이상' 같은 분수 문턱은 88.4% 에서 빗나갔다(셸 띠가 분모를 늘린다)", "`*MAT` 을 못 읽으면(포함 파일에 있는 흔한 경우) 층은 그리고 **중립축만** 생략한다", "중립축·굽힘강성은 `neutralaxis` 와 **같은 계산**이다 — 숫자가 서로 다르면 결함이다", "얇은 층은 min_bar_px 로 바닥 처리하므로 두께가 과장된다 — 그 층은 **옆 숫자가 참**이고", "  그림이 아니다. 몇 층을 바닥 처리했는지 말한다"}},
+    {"cad_solid_merge_to_deck", "메시 편집", "StepForge 조각(.k + 대응표)을 기존 덱에 **넣는다** — 계약 대조 · 번호 이동 · coord_sha 검산", "조각 삽입 fragment merge insert stepforge 대응표 coord_sha cad solid 넣기 경계", "KooRemapper cad_solid_merge_to_deck <config.yaml>",
+     {{"m.yaml", R"KRH(model: examples/cad_solid_merge_to_deck/deck.k
+output: merged.k
+fragment: examples/cad_solid_merge_to_deck/stepforge_fragment.k
+fragment_map: examples/cad_solid_merge_to_deck/stepforge_fragment.json
+)KRH"}},
+     {"KooRemapper cad_solid_merge_to_deck m.yaml"},
+     {"examples/cad_solid_merge_to_deck/deck.k", "examples/cad_solid_merge_to_deck/stepforge_fragment.k", "examples/cad_solid_merge_to_deck/stepforge_fragment.json"},
+     {"경계 합의(StepForge `docs/BOUNDARY-DYNAFORGE.md` §3-3) — 조각을 **쓰는** 것은 StepForge, 기존 덱에", "  **넣는** 것은 이 op 이다(이미 있는 덱의 바이트를 바꾸는 일이라서)", "★대응표는 **계약의 칸 그대로** 읽는다 — 맨 위 넷(unit·frame·ranges·parts) · ranges 넷 · parts 여덟.", "  모르는 칸·빠진 칸은 **거절**한다. `ranges` 의 `null`(그 번호를 안 썼다)은 받는다", "★넣기 전에 조각을 대응표와 **대조**한다 — 번호가 ranges 안이고 lo·hi 가 실제 최소·최대인가 · 파트", "  집합 · 파트마다 요소 수·구간 · 그 요소가 쓰는 절점 = 절점 구간 · **coord_sha**(저쪽과 같은 식 —", "  `%16.9e` 셋씩 이은 줄을 정렬해 sha256 앞 16자). 하나라도 어긋나면 넣지 않는다(rc=1)", "번호는 이 덱(**인클루드 닫힘까지** 센 최대값) 위로 옮긴다 — 과도기 번호 길(Q5). PID·SECID·MID 는", "  **한 이동량**이다(저쪽이 셋을 같은 번호로 쓴다 — 넣은 뒤에도 그 규약이 선다)", "좌표 글자는 **바이트 그대로** 두고 번호 칸만 이 덱의 폭(8 · i10 이면 10)으로 쓴다. 넣을 블록을", "  **다시 읽어** coord_sha 를 한 번 더 잰다. long 덱은 받지 않는다", "unit 은 `deck_unit`(기본 mm-t-s)과 같아야 하고 frame 은 world 여야 한다 — 환산·변환은 하지 않는다", "계약 밖 키워드(`*SET_*`·`*MAT_ADD_*`·`*MAT_THERMAL_*` …)가 든 조각·`ranges.sid` 가 null 이 아닌 조각은 거절", "저쪽 자리표시 물성(RO = E = 1.0)은 그대로 넣되 MID 마다 **경고**한다 — 해석 전에 바꿀 것", "산출 둘 — `<output>.k` · `<output>_fragment_map.json`(같은 칸 집합의 대응표를 **덱 번호**로 옮긴 것)"}},
     {"extract-parts", "메시 편집", "고른 파트만 뽑아 **돌아가는** 덱으로 (ID·칸폭·CRLF 보존)", "파트 추출 extract parts 분리 떼어내기 renumber 인클루드 펼치기", "KooRemapper extract-parts <config.yaml>",
      {{"ep.yaml", R"KRH(model: examples/extract-parts/assembly.k
 output: extracted.k

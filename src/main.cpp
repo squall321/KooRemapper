@@ -2612,6 +2612,27 @@ static int runMain(int argc, char* argv[]) {
         return runElform(argv[2], console);
     }
 
+    // StepForge 조각을 기존 덱에 넣는다(경계 합의 §3-3 — 조각을 쓰는 것은 StepForge, 넣는 것은 우리)
+    if (command == "cad_solid_merge_to_deck") {
+        if (argc < 3) {
+            console.error("Usage: KooRemapper cad_solid_merge_to_deck <config.yaml>");
+            console.info("Inserts a StepForge part fragment (.k + map JSON) into an existing deck. The map is read");
+            console.info("exactly as the boundary contract defines it (unknown fields are refused), the fragment is");
+            console.info("checked against it (ID ranges, parts, per-part element/node ranges, coord_sha), and the");
+            console.info("fragment is renumbered above the deck's IDs (include closure counted) and placed before");
+            console.info("*END. Coordinates stay byte-identical; the inserted block is re-read and its coord_sha");
+            console.info("re-checked. Writes <output>.k and <output>_fragment_map.json (the map in deck numbers).");
+            console.info("Minimal config:");
+            console.info("  model: deck.k");
+            console.info("  output: merged.k");
+            console.info("  fragment: fragment_abc.k");
+            console.info("  fragment_map: fragment_abc.json");
+            return 1;
+        }
+        printBanner(console);
+        return runCadSolidMerge(argv[2], console);
+    }
+
     // Disconnect command
     // @lat: [[commands/disconnect]]
     if (command == "disconnect") {

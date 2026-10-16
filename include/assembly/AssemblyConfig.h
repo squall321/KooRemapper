@@ -139,6 +139,14 @@ struct ElformOperation {
     std::string targetElform;
 };
 
+// StepForge 조각을 기존 덱에 넣는다(`cad_solid_merge_to_deck` — 경계 문서 §3-3 의 우리 몫).
+// 경로는 부르는 쪽이 YAML 폴더 기준으로 이미 푼 것이다.
+struct CadSolidMergeOperation {
+    std::string fragment;              // 조각 .k
+    std::string fragmentMap;           // 대응표 JSON
+    std::string deckUnit = "mm-t-s";   // 대상 덱의 단위 — 조각 unit 과 다르면 거절한다(환산하지 않는다)
+};
+
 struct DisconnectOperation {
     int targetPid = 0;           // 0 = all parts
     std::string mode = "full";   // full | czm | mefem

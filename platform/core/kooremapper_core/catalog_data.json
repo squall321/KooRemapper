@@ -13988,6 +13988,71 @@
       "notes": "What is carried: *KEYWORD, *TITLE, *PARAMETER*, *CONTROL_*, *DATABASE_ other than *DATABASE_HISTORY_*, the chosen parts' *PART pairs, their *SECTION_*/*MAT_*/*EOS_*/*HOURGLASS blocks, *DEFINE_CURVE/TABLE, the *NODE lines their elements use, their *ELEMENT_{SOLID,SHELL,TSHELL} cards and the trimmed sets. *DATABASE_HISTORY_* is dropped because it holds node and element IDs that may not survive. Everything else is dropped and counted by keyword in the report. A *PART_* variant the op cannot chunk (*PART_INERTIA and friends) is carried whole when one of its first-field PIDs was chosen, which may bring unselected parts along; LS-DYNA warns about a part with no elements, and that is far better than losing a rigid body silently. Card line counts come from the one shared judge, ElementCardLayout::elementCardSpan, so a higher-order solid's second node card is carried too. Field widths follow the deck: *NODE and *ELEMENT_* at the width *KEYWORD declares (8, i10=y 10, long=y 20) or the keyword suffix, *SET_* and *PART* at I10 (I20 under long). Lines are copied, not re-rendered, so fixed-width exponents are never truncated and original newlines survive; renumbering replaces single fields in place for the same reason. Relative paths resolve against the YAML file's directory."
     },
     {
+      "name": "cad_solid_merge_to_deck",
+      "category": "mesh",
+      "summary": "Insert a StepForge part fragment (.k + map JSON) into an existing deck: check it against the boundary contract, renumber it above the deck's IDs and re-verify each part's coord_sha.",
+      "description": "The boundary agreement with StepForge splits the work: StepForge writes a part fragment, and inserting it into an existing deck is ours because it changes that deck's bytes. The fragment map is read exactly as the contract defines it — unit, frame, ranges (node, elem, pid, sid; each [lo, hi] or null) and parts (path, name, pid, node_start, node_count, elem_start, elem_count, coord_sha) — and any unknown or missing field is refused. Before anything is written the fragment is checked against its map: every ID lies in its range and each range is the actual minimum and maximum, the part sets match, and for every part the element count and range, the nodes its elements use and the coord_sha (the same function StepForge uses: each node as three %16.9e values, rows sorted, SHA-256, first 16 hex characters) agree. Any disagreement refuses the insert. IDs are moved above the deck's own maxima, counting the whole *INCLUDE closure, which is the agreed transitional numbering path; PID, SECID and MID share one shift so the fragment's convention that the three are equal still holds in the deck. Coordinates are kept byte for byte and only the ID fields are rewritten, at the deck's field width (8, or 10 for i10 decks); long-format decks are refused. The block to be inserted is re-read and its coord_sha measured again before it is placed before *END. The unit must equal deck_unit (default mm-t-s) and the frame must be world — nothing is converted. Fragments holding keywords outside the contract (*SET_*, *MAT_ADD_*, *MAT_THERMAL_*, …) or a non-null ranges.sid are refused. StepForge placeholder materials (RO = E = 1.0) are inserted as they are and reported per MID.",
+      "invocation": "yaml",
+      "config_style": "structured",
+      "takes_kfile": true,
+      "requires_gmsh": false,
+      "requires_tetgen": false,
+      "params": [
+        {
+          "name": "model",
+          "type": "file",
+          "role": "yaml_field",
+          "yaml_path": "model",
+          "required": true,
+          "description": "The existing deck the fragment goes into. Its *INCLUDE closure is read so the new IDs stay clear of IDs defined in included files."
+        },
+        {
+          "name": "output",
+          "type": "output",
+          "role": "yaml_field",
+          "yaml_path": "output",
+          "required": true,
+          "description": "Output deck. <output>_fragment_map.json is written beside it: the same map with the deck numbers the fragment received."
+        },
+        {
+          "name": "fragment",
+          "type": "file",
+          "role": "yaml_field",
+          "yaml_path": "fragment",
+          "required": true,
+          "description": "StepForge fragment .k (export_part_fragment)."
+        },
+        {
+          "name": "fragment_map",
+          "type": "file",
+          "role": "yaml_field",
+          "yaml_path": "fragment_map",
+          "required": true,
+          "description": "StepForge fragment map JSON. Unknown or missing fields are refused."
+        },
+        {
+          "name": "deck_unit",
+          "type": "string",
+          "role": "yaml_field",
+          "yaml_path": "deck_unit",
+          "required": false,
+          "default": "mm-t-s",
+          "description": "Unit system of the target deck. The fragment's unit must be the same; nothing is converted."
+        }
+      ],
+      "example": {
+        "args": {
+          "model": "deck.k",
+          "output": "merged.k",
+          "fragment": "stepforge_fragment.k",
+          "fragment_map": "stepforge_fragment.json"
+        },
+        "note": "실행 검증된 예제 (조각·대응표는 StepForge export_part_fragment 의 실물 산출 — 파트 4 · 시작 번호 500001/600001/900)"
+      },
+      "example_folder": "examples/cad_solid_merge_to_deck",
+      "notes": "Relative paths resolve against the YAML file's directory. The insert is refused with exit code 1 and no output when the map or the fragment breaks the contract; the console lists every disagreement. After writing, the deck is read back and the element count of every part, including the inserted ones, is compared with the expected count."
+    },
+    {
       "name": "stcx_fullangle_drop",
       "category": "analysis",
       "summary": "Submit a full-angle (Fibonacci) LS-DYNA drop study to the stcx cluster",

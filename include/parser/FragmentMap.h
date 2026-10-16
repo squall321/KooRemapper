@@ -6,6 +6,7 @@
 #include <vector>
 
 namespace KooRemapper {
+class Mesh;
 namespace fragment {
 
 // 정본 — `StepForge/docs/BOUNDARY-DYNAFORGE.md` §3-3(확정본 `540f89f`). 칸은 이것뿐이다(저쪽이 「여러분이 모르는
@@ -46,6 +47,13 @@ std::string coordSha(const std::vector<std::array<double, 3>>& xyz);
 //   · 파트마다 요소 수 · 요소 구간 · 그 요소가 쓰는 절점 = 절점 구간 · `coord_sha`
 //   · `ranges.sid` 가 null 이면 `*SET_*` 가 없다
 std::vector<std::string> check(const Map& m, const std::string& fragmentPath);
+
+// 파트마다만 본다(요소 수·구간 · 그 요소가 쓰는 절점 = 절점 구간 · `coord_sha`) — 덱 전체의 번호 집합은 보지 않는다.
+// `check` 가 쓰고, 삽입이 덱 번호로 옮긴 대응표를 넣은 블록에 대어 본다(넣은 것이 조각 그대로인가).
+std::vector<std::string> checkParts(const Map& m, const Mesh& mesh);
+
+// 대응표를 같은 칸 집합·같은 꼴(들여쓰기 2 · UTF-8 그대로 — 저쪽 파일과 같다)의 JSON 으로 쓴다.
+std::string toJson(const Map& m);
 
 }  // namespace fragment
 }  // namespace KooRemapper

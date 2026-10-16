@@ -112,6 +112,7 @@ set(SQUEEZE_SOURCES
 
 # Source files - Assembly
 set(ASSEMBLY_SOURCES
+    src/assembly/CadSolidMerge.cpp
     src/assembly/AssemblyConfigReader.cpp
     src/assembly/ModelAssembler.cpp
     src/assembly/DeflectionGrid.cpp

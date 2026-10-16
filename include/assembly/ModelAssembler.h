@@ -4,6 +4,7 @@
 
 #include "parser/DeckNewline.h"
 #include "parser/IncludeClosure.h"
+#include "parser/FragmentMap.h"
 #include "assembly/AssemblyConfig.h"
 #include "core/Mesh.h"
 #include "core/Vector3D.h"
@@ -36,6 +37,9 @@ public:
                        warnedExtrapolation_(false), deflSign_(1.0) {}
 
     bool loadBaseModel(const std::string& filename);
+    // StepForge 조각을 덱 번호 위로 옮겨 `*END` 앞에 넣는다. 성공하면 옮긴 대응표(덱 번호)를 `mergedMaps()` 에 둔다.
+    bool applyCadSolidMerge(const CadSolidMergeOperation& op);
+    const std::vector<fragment::Map>& mergedMaps() const { return mergedMaps_; }
     bool loadRawOnly(const std::string& filename);
     bool applyReplace(const ReplaceOperation& op, double E, double nu,
                       const std::string& configDir);
@@ -162,6 +166,7 @@ private:
     // 주 덱의 인클루드 닫힘(파일마다 경로·줄, LS-DYNA 가 읽는 차례). 번호 커서가 주 덱과 **같은 스캐너**로
     // 인클루드에 이미 있는 번호까지 세려고 든다 — 쪼개지 않은 같은 덱이면 rawLines_ 에 들어 있었을 줄이다.
     include_closure::Closure incl_;
+    std::vector<fragment::Map> mergedMaps_;   // applyCadSolidMerge 가 옮긴 대응표(덱 번호) — 부르는 쪽이 파일로 쓴다
     // 입력 덱의 개행. 읽을 때 기억했다가 최종 출력에서 되붙인다 — 리더가 CR 을 떼므로
     // 이것이 없으면 CRLF 덱이 조용히 LF 로 바뀐다(구조 카운트는 전부 정상이라 안 보인다).
     DeckNewline deckNewline_ = DeckNewline::LF;

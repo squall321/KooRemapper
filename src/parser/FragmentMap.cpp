@@ -207,6 +207,12 @@ std::vector<std::string> check(const Map& m, const std::string& fragmentPath) {
         if (!deckPids.count(pid)) bad.push_back("대응표의 PID " + std::to_string(pid) + " 가 조각에 없다");
 
     // ③ 파트마다 — 요소 수·구간, 그 요소가 쓰는 절점 = 절점 구간, coord_sha
+    for (auto& b : checkParts(m, mesh)) bad.push_back(std::move(b));
+    return bad;
+}
+
+std::vector<std::string> checkParts(const Map& m, const Mesh& mesh) {
+    std::vector<std::string> bad;
     std::map<long long, std::vector<int>> elemsOf;
     std::map<long long, std::set<int>> nodesOf;
     for (const auto& kv : mesh.elements) {
@@ -244,6 +250,69 @@ std::vector<std::string> check(const Map& m, const std::string& fragmentPath) {
             bad.push_back(w + " — coord_sha " + got + " 가 대응표 " + p.coordSha + " 와 다르다(좌표가 바뀌었다)");
     }
     return bad;
+}
+
+namespace {
+std::string jsonString(const std::string& s) {
+    std::string o = "\"";
+    for (unsigned char c : s) {
+        switch (c) {
+            case '"': o += "\\\""; break;
+            case '\\': o += "\\\\"; break;
+            case '\n': o += "\\n"; break;
+            case '\r': o += "\\r"; break;
+            case '\t': o += "\\t"; break;
+            case '\b': o += "\\b"; break;
+            case '\f': o += "\\f"; break;
+            default:
+                if (c < 0x20) {
+                    char buf[8];
+                    std::snprintf(buf, sizeof(buf), "\\u%04x", c);
+                    o += buf;
+                } else {
+                    o += (char)c;
+                }
+        }
+    }
+    return o + "\"";
+}
+std::string jsonRange(const Range& r, const std::string& ind) {
+    if (!r.used) return "null";
+    return "[\n" + ind + "  " + std::to_string(r.lo) + ",\n" + ind + "  " + std::to_string(r.hi) + "\n" + ind + "]";
+}
+}  // namespace
+
+std::string toJson(const Map& m) {
+    std::string o = "{\n";
+    o += "  \"unit\": " + jsonString(m.unit) + ",\n";
+    o += "  \"frame\": " + jsonString(m.frame) + ",\n";
+    o += "  \"ranges\": {\n";
+    o += "    \"node\": " + jsonRange(m.node, "    ") + ",\n";
+    o += "    \"elem\": " + jsonRange(m.elem, "    ") + ",\n";
+    o += "    \"pid\": " + jsonRange(m.pid, "    ") + ",\n";
+    o += "    \"sid\": " + jsonRange(m.sid, "    ") + "\n";
+    o += "  },\n";
+    if (m.parts.empty()) {
+        o += "  \"parts\": []\n";
+    } else {
+        o += "  \"parts\": [\n";
+        for (size_t k = 0; k < m.parts.size(); ++k) {
+            const Part& p = m.parts[k];
+            o += "    {\n";
+            o += "      \"path\": " + jsonString(p.path) + ",\n";
+            o += "      \"name\": " + jsonString(p.name) + ",\n";
+            o += "      \"pid\": " + std::to_string(p.pid) + ",\n";
+            o += "      \"node_start\": " + std::to_string(p.nodeStart) + ",\n";
+            o += "      \"node_count\": " + std::to_string(p.nodeCount) + ",\n";
+            o += "      \"elem_start\": " + std::to_string(p.elemStart) + ",\n";
+            o += "      \"elem_count\": " + std::to_string(p.elemCount) + ",\n";
+            o += "      \"coord_sha\": " + jsonString(p.coordSha) + "\n";
+            o += (k + 1 < m.parts.size()) ? "    },\n" : "    }\n";
+        }
+        o += "  ]\n";
+    }
+    o += "}";
+    return o;
 }
 
 }  // namespace fragment

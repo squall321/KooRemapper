@@ -1,0 +1,61 @@
+{
+  "unit": "mm-t-s",
+  "frame": "world",
+  "ranges": {
+    "node": [
+      500001,
+      501248
+    ],
+    "elem": [
+      600001,
+      600605
+    ],
+    "pid": [
+      900,
+      903
+    ],
+    "sid": null
+  },
+  "parts": [
+    {
+      "path": "/K2라이브-B/stack_b.step/STACK/BASE",
+      "name": "BASE#1",
+      "pid": 900,
+      "node_start": 500001,
+      "node_count": 250,
+      "elem_start": 600001,
+      "elem_count": 100,
+      "coord_sha": "d60efba752ad677c"
+    },
+    {
+      "path": "/K2라이브-B/stack_b.step/STACK/TIM",
+      "name": "TIM#2",
+      "pid": 901,
+      "node_start": 500251,
+      "node_count": 236,
+      "elem_start": 600101,
+      "elem_count": 97,
+      "coord_sha": "220e0d4381a42eff"
+    },
+    {
+      "path": "/K2라이브-B/shape_ops/FILL",
+      "name": "FILL#4",
+      "pid": 902,
+      "node_start": 500487,
+      "node_count": 384,
+      "elem_start": 600198,
+      "elem_count": 206,
+      "coord_sha": "d2db3934582078a2"
+    },
+    {
+      "path": "/K2라이브-B/shape_ops/EXT",
+      "name": "EXT#5",
+      "pid": 903,
+      "node_start": 500871,
+      "node_count": 378,
+      "elem_start": 600404,
+      "elem_count": 202,
+      "coord_sha": "a0f296fd880c26b7"
+    }
+  ]
+}

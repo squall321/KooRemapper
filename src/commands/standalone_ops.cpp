@@ -1452,3 +1452,70 @@ int runOffset(const std::string& yamlFile, ConsoleOutput& console) {
     console.println("[offset] Done -> " + outputPrefix + ".k");
     return 0;
 }
+
+// ── Standalone cad_solid_merge_to_deck ──────────────────────────────────────
+// StepForge 조각(.k + 대응표 JSON)을 기존 덱에 넣는다 — 규칙과 검증은 `ModelAssembler::applyCadSolidMerge`.
+// 산출 둘 — <output>.k(조각을 덱 번호로 옮겨 `*END` 앞에 넣은 덱) · <output>_fragment_map.json(같은 칸 집합의
+// 대응표를 **덱 번호로** 옮긴 것 — 번호 이동을 되짚고, 뒤에 재결속·대조가 읽는다).
+int runCadSolidMerge(const std::string& yamlFile, ConsoleOutput& console) {
+    const char* tag = "cad_solid_merge_to_deck";
+    {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(yamlFile, tabLine)) {
+            console.error(KooRemapper::yamlTabIndentMessage(tag, tabLine));
+            return 1;
+        }
+    }
+    StandaloneYamlBase y;
+    y.resolveFiles(yamlFile);
+    if (rejectMultiOperation(yamlFile, tag, console)) return 1;
+
+    std::ifstream f(yamlFile);
+    if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
+    KooRemapper::yamlSkipBOM(f);
+
+    CadSolidMergeOperation op;
+    std::string ln;
+    while (std::getline(f, ln)) {
+        if (!ln.empty() && ln.back() == '\r') ln.pop_back();
+        std::string tr = y.trim(ln);
+        if (tr.empty() || tr[0] == '#') continue;
+        size_t cp = tr.find(':');
+        if (cp == std::string::npos) continue;
+        std::string key = y.keyOf(tr, cp);
+        std::string val = y.stripQuotes(y.trim(KooRemapper::yamlStripComment(tr.substr(cp + 1))));
+        y.parseCommonKey(key, val);
+        if      (key == "fragment")     op.fragment = val;
+        else if (key == "fragment_map") op.fragmentMap = val;
+        else if (key == "deck_unit")    op.deckUnit = val;
+    }
+    f.close();
+
+    if (y.modelFile.empty()) { console.error(std::string("[") + tag + "] model 이 없습니다 — 조각을 넣을 덱"); return 1; }
+    if (op.fragment.empty() || op.fragmentMap.empty()) {
+        console.error(std::string("[") + tag + "] fragment(조각 .k)와 fragment_map(대응표 JSON)이 둘 다 있어야 합니다");
+        return 1;
+    }
+    if (rejectEmptyOutput(y, tag, console)) return 1;
+    const std::string modelPath = y.resolvePath(y.modelFile);
+    op.fragment = y.resolvePath(op.fragment);
+    op.fragmentMap = y.resolvePath(op.fragmentMap);
+    const std::string outputPrefix = y.getOutputPrefix();
+
+    console.println(std::string("[") + tag + "] Model   : " + modelPath);
+    console.println(std::string("[") + tag + "] Fragment: " + op.fragment + "  (map " + op.fragmentMap + ")");
+    ModelAssembler assembler;
+    if (!assembler.loadBaseModel(modelPath)) { console.error(assembler.getErrorMessage()); return 1; }
+    if (!assembler.applyCadSolidMerge(op)) { console.error(assembler.getErrorMessage()); return 1; }
+    for (const auto& msg : assembler.infoMessages) console.println(msg);
+    if (!writeOutputChecked(assembler, outputPrefix, tag, console)) return 1;
+
+    const std::string mapOut = outputPrefix + "_fragment_map.json";
+    {
+        std::ofstream mo(mapOut, std::ios::binary);
+        if (!mo.is_open()) { console.error(std::string("[") + tag + "] 옮긴 대응표를 쓰지 못했다: " + mapOut); return 1; }
+        mo << KooRemapper::fragment::toJson(assembler.mergedMaps().front()) << "\n";
+    }
+    console.println(std::string("[") + tag + "] Done -> " + outputPrefix + ".k · " + mapOut);
+    return 0;
+}

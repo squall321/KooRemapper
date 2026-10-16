@@ -43,6 +43,7 @@ DECLARED = {
     "src/commands/stackdiagram.cpp": (1, "덱 아님 — 층 모식도 SVG(덱은 읽기만 한다)"),
     "src/commands/cleanup_nodes.cpp": (1, "덱 아님 — 분류 리포트 JSON. 덱은 KooRemapper::DeckWriter 로 쓴다(rewriteDeck)"),
     "src/commands/extract_parts.cpp": (2, "덱 아님 — 결과 리포트 JSON + 번호 매핑 표. 덱은 KooRemapper::DeckWriter 로 쓴다(Writer)"),
+    "src/commands/standalone_ops.cpp": (1, "덱 아님 — 옮긴 조각 대응표 JSON(cad_solid_merge_to_deck). 덱은 ModelAssembler 가 쓴다"),
     "src/util/Validator.cpp": (1, "덱 아님 — 검증 로그(append)"),
     "src/util/Logger.cpp": (1, "덱 아님 — 로그 파일"),
     "include/util/Logger.h": (1, "덱 아님 — 로그 스트림 멤버 선언"),
@@ -51,6 +52,8 @@ DECLARED = {
     # ── 덱(신규) ────────────────────────────────────────────────────────────
     "src/commands/core_ops.cpp": (1, "덱(신규) — `generate box` 가 덱을 새로 만든다. 입력 덱이 없다"),
     "src/commands/battery.cpp": (2, "덱(신규) — 배터리 덱을 새로 만든다. 입력 덱을 읽지 않는다"),
+    "src/assembly/CadSolidMerge.cpp": (1, "덱(신규) — 넣을 조각 블록만 담은 검산용 임시 덱(다시 읽어 coord_sha 를 재고 곧 지운다). "
+                                          "본 덱은 ModelAssembler::writeOutput 이 쓴다"),
     "src/commands/cclip.cpp": (2, "덱(신규) — F-δ 검증용 독립 압축 덱 1곳 + 리포트 1곳. "
                                   "본 덱·dynain·_free.k 는 DeckWriter 로 쓴다"),
     # ── 덱(보존) — 개행을 스스로 되붙이는 자리 ───────────────────────────────
