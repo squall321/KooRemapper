@@ -287,88 +287,42 @@ void ModelAssembler::initMaxSetIdFromRawLines() {
 // 못 본 자리(찾지 못한 이름 · 따라가지 않은 `*INCLUDE_*` · 깊이 상한)는 **여기서 한 번** 말한다.
 // 발급은 op 마다 일어나지만 경고를 거기 두면 한 실행에 여러 번 찍힌다(사람이 센다).
 void ModelAssembler::readIncludeClosure() {
-    inclLines_.clear();
-    inclPaths_.clear();
-    auto closure = include_closure::read(baseModelPath_, rawLines_);
-    for (auto& f : closure.files) {
-        inclPaths_.push_back(f.path);
-        inclLines_.push_back(std::move(f.lines));
-    }
-    ids::UsedIds gaps;
-    gaps.noteClosure(closure);
-    if (gaps.blind.empty()) return;
+    incl_ = include_closure::read(baseModelPath_, rawLines_);
     ConsoleOutput console;
-    console.warning("*INCLUDE " + std::to_string(gaps.blind.size()) + "곳을 읽지 않았습니다 — "
-                    "그 안의 번호(노드·요소·파트·섹션·재질·세트·곡선·접촉)와 겹쳐 낼 수 있습니다");
-    for (const auto& b : gaps.blind) console.println("  못 본 인클루드: " + b);
+    ids::warnGaps(console, incl_, "그 안의 번호(노드·요소·파트·섹션·재질·세트·곡선·접촉)와 겹쳐 낼 수 있습니다");
 }
 
 // 같은 스캐너를 인클루드 파일마다 돌린 최대값. 주 덱 값과의 max 는 부르는 쪽이 한다 —
 // 주 덱 줄은 op 이 앞에서 고쳤을 수 있어(새 블록 삽입) 부르는 시점의 rawLines_ 를 봐야 한다.
 int ModelAssembler::inclMax(const std::function<int(const std::vector<std::string>&)>& scan) const {
     int m = 0;
-    for (const auto& lines : inclLines_) m = std::max(m, scan(lines));
+    for (const auto& f : incl_.files) m = std::max(m, scan(f.lines));
     return m;
 }
 
 // 멤버 커서를 인클루드 파일마다 **주 덱과 같은 규칙으로** 센 값 위로 올린다 — 같은 `KFileReader`
 // (노드·요소·파트·파트의 SECID·재질), 같은 `*SECTION_` 첫 카드 훑기, 같은 `*SET_` 훑기.
-// 그래야 「덱을 인클루드로 쪼갠 것」과 「쪼개지 않은 것」의 커서가 같다.
-//
-// 칸 폭 — LS-DYNA 는 폭을 실행줄·주 덱 `*KEYWORD` 로 전체에 정하고 `*INCLUDE ±`·키워드 접미사로만
-// 바꾼다(Vol_I 19343-19353). `KFileReader` 는 파일마다 자기 `*KEYWORD` 를 본다. 인클루드 파일 자신의
-// `*KEYWORD` 옵션이 먹는지는 매뉴얼에 없다. 둘이 갈리는 덱(실사용 88장에서 0장)에서는 8칸·10칸 중 어느
-// 쪽으로 읽었어야 하는지 모른다 — 노드·요소 번호를 **단정하지 못한다고 말한다**(추측하지 않는다).
+// 그래야 「덱을 인클루드로 쪼갠 것」과 「쪼개지 않은 것」의 커서가 같다. 칸 폭이 갈리는 파일을 단정하지
+// 않는 규칙은 `include_closure::readerMax` 머리말에 있다.
 void ModelAssembler::raiseMaxIdsOverIncludes() {
-    if (inclLines_.empty()) return;
-    ConsoleOutput console;
-    std::vector<std::string> unsure;
-    const int mainFw = deckFieldWidth(rawLines_);
-    auto plusMinusCard = [](const std::vector<std::string>& lines, const std::string& file,
-                            std::vector<std::string>& out) {
-        for (size_t i = 0; i < lines.size(); ++i) {
-            if (deckscan::isDataLine(lines[i]) || deckscan::keywordToken(lines[i]) != "*INCLUDE") continue;
-            const std::string& l = lines[i];
-            size_t a = l.find_first_not_of(" \t");
-            size_t b = l.find_first_not_of(" \t", a + 8);          // "*INCLUDE" 뒤
-            if (b != std::string::npos && (l[b] == '+' || l[b] == '-'))
-                out.push_back(file + ":" + std::to_string(i + 1) + " 의 `*INCLUDE " + l[b] +
-                              "` — 그 파일의 폭을 바꾼다");
-        }
-    };
-    plusMinusCard(rawLines_, baseModelPath_, unsure);
-    for (size_t k = 0; k < inclLines_.size(); ++k) {
-        const auto& lines = inclLines_[k];
-        const std::string& path = inclPaths_[k];
-        plusMinusCard(lines, path, unsure);
-        if (deckFieldWidth(lines) != mainFw)
-            unsure.push_back(path + " — `*KEYWORD` 의 폭(" + std::to_string(deckFieldWidth(lines)) +
-                             ")이 주 덱(" + std::to_string(mainFw) + ")과 다르다");
-        try {
-            KFileReader reader;
-            const Mesh m = reader.readFile(path);
-            maxNodeId_ = std::max(maxNodeId_, m.getMaxNodeId());
-            maxElementId_ = std::max(maxElementId_, m.getMaxElementId());
-            for (const auto& [pid, part] : m.parts) {
-                maxPartId_ = std::max(maxPartId_, pid);
-                maxSectionId_ = std::max(maxSectionId_, part.sectionId);
-            }
-            for (const auto& [mid, mat] : m.materials) {
-                (void)mat;
-                maxMaterialId_ = std::max(maxMaterialId_, mid);
-            }
-        } catch (const std::exception& e) {
-            unsure.push_back(path + " — 메시로 읽지 못해 노드·요소·파트·재질 번호를 세지 못했다: " + e.what());
-        }
-        maxPartId_ = std::max(maxPartId_, cur_scanMaxPartVariantId(lines));
-        maxSectionId_ = std::max(maxSectionId_, cur_scanMaxSectionId(lines));
-        maxMaterialId_ = std::max(maxMaterialId_, cur_scanMaxMaterialId(lines));
-        maxSetId_ = std::max(maxSetId_, cur_scanMaxSetId(lines));
+    if (incl_.files.empty()) return;
+    // 리더로 세는 것(노드·요소·파트·파트의 SECID·재질)과 「단정 못 함」 판정은 정본 한 곳에서 한다 —
+    // 단독 발행자(tetremesh·meshfix·cclip)도 같은 것을 쓴다(`include_closure::readerMax`).
+    const auto rm = include_closure::readerMax(rawLines_, baseModelPath_, incl_);
+    maxNodeId_ = std::max(maxNodeId_, rm.node);
+    maxElementId_ = std::max(maxElementId_, rm.elem);
+    maxPartId_ = std::max(maxPartId_, rm.part);
+    maxSectionId_ = std::max(maxSectionId_, rm.partSection);
+    maxMaterialId_ = std::max(maxMaterialId_, rm.material);
+    // 리더가 건너뛰는 것(파트 변형·섹션 카드·모르는 재질·세트)은 주 덱과 같은 raw 훑기로
+    for (const auto& f : incl_.files) {
+        maxPartId_ = std::max(maxPartId_, cur_scanMaxPartVariantId(f.lines));
+        maxSectionId_ = std::max(maxSectionId_, cur_scanMaxSectionId(f.lines));
+        maxMaterialId_ = std::max(maxMaterialId_, cur_scanMaxMaterialId(f.lines));
+        maxSetId_ = std::max(maxSetId_, cur_scanMaxSetId(f.lines));
     }
-    if (unsure.empty()) return;
-    console.warning("인클루드 " + std::to_string(unsure.size()) + "곳의 노드·요소 번호를 단정하지 "
-                    "못했습니다 — 그 번호와 겹쳐 낼 수 있습니다");
-    for (const auto& u : unsure) console.println("  " + u);
+    ConsoleOutput console;
+    ids::warnUnsure(console, rm.unsure);
 }
 
 bool ModelAssembler::loadRawOnly(const std::string& filename) {

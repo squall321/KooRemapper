@@ -1,5 +1,5 @@
 #include "parser/DeckWriter.h"
-#include "parser/IncludeScan.h"
+#include "parser/IdAllocator.h"   // 인클루드 닫힘까지 센 최대값 · 못 본 자리 경고
 #include "ale.h"
 #include "kw_util.h"
 #include "cli/ConsoleOutput.h"
@@ -629,9 +629,20 @@ int runAle(const std::string& yamlFile, ConsoleOutput& console) {
     }
 
     int maxMid = 0, maxEosid = 0, maxSecid = 0, maxHgid = 0;
-    KooRemapper::include_scan::warnUnread(console, lines,
-        "재질·EOS·섹션·이력변수 ID 를 이 덱 안에서만 세었습니다 — 인클루드에 있는 번호와 겹칠 수 있습니다");
-    ale_findMaxIds(lines, maxMid, maxEosid, maxSecid, maxHgid);
+    // 인클루드 닫힘을 읽어 그 안의 번호까지 센다(2026-10-16) — 못 본 자리만 말한다. 주 덱과 인클루드
+    // 파일마다 **같은 훑기**로 센다(`ale_findMaxIds` 는 값을 덮어쓰므로 파일마다 받아 올린다).
+    const auto inclClosure = KooRemapper::include_closure::read(modelPath, lines);
+    KooRemapper::ids::warnGaps(console, inclClosure, "그 안의 재질·EOS·섹션·이력변수 번호와 겹칠 수 있습니다");
+    auto raiseFrom = [&](const std::vector<std::string>& L) {
+        int m = 0, e = 0, s = 0, h = 0;
+        ale_findMaxIds(L, m, e, s, h);
+        maxMid = std::max(maxMid, m);
+        maxEosid = std::max(maxEosid, e);
+        maxSecid = std::max(maxSecid, s);
+        maxHgid = std::max(maxHgid, h);
+    };
+    raiseFrom(lines);
+    for (const auto& f : inclClosure.files) raiseFrom(f.lines);
     int nextMid = maxMid + 1;
     int nextEosid = maxEosid + 1;
     int nextSecid = maxSecid + 1;

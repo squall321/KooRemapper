@@ -21,6 +21,9 @@
   czm(NODE·ELEM·PART·SECTION·MAT) · mefem(SET_NODE) · contact+load(SET_SEGMENT·CONTACT·CURVE) ·
   boundary(SET_NODE) · rbe2(SET_NODE·CNRB) · rbe3(SET_NODE·ICID) · matswap(HOURGLASS·CURVE·SECTION·MAT) ·
   matdb(MAT, `loadRawOnly` 길) · restack(NODE·ELEM·PART·SECTION·MAT·SET 한 통)
+  단독 발행자(자기 덱을 직접 읽는다) — hfdamp(SET_PART, selective) · cnrb2solid(NODE·ELEM·SECTION·MAT) ·
+  ale(MAT·EOS·HGID) · matswap 위치 인자판(HGID·LCID·SECID·MID) · tetremesh(NODE·ELEM) · cclip(NODE·ELEM) ·
+  cnrb2spring(고정 대역 — 인클루드의 대역 안 번호를 쪼갠 덱에서도 거절하나) · meshfix(NODE·ELEM, gmsh 있을 때)
 덧붙여 보는 것.
   W 인클루드 `*KEYWORD` 의 폭이 주 덱과 다르면 노드·요소 번호를 단정하지 못한다고 말한다(rc 0)
   P `*INCLUDE +` 도 같다(그 파일의 폭을 바꾼다 — Vol_I 19350)
@@ -103,6 +106,8 @@ def deck_ids(lines):
             put("CONTACT", first)
         elif tok.startswith("*HOURGLASS"):
             put("HOURGLASS", first)
+        elif tok.startswith("*EOS_"):
+            put("EOS", first)
         elif tok.startswith("*CONSTRAINED_NODAL_RIGID_BODY"):
             put("CNRB", first)
         elif tok.startswith("*CONSTRAINED_INTERPOLATION") and "SPOTWELD" not in tok:
@@ -141,19 +146,23 @@ def blockers(ids, kinds, extra_set_node=(), kw="*KEYWORD"):
     if "MAT" in kinds and "mesh" not in kinds:
         L += ["*MAT_ELASTIC", "%10d%10s%10s%10s" % (mx("MAT") + 1, "7.85E-9", "210000.", "0.3")]
     member = 1   # 세트 구성원 — 주 덱 절점 1..4 를 쓴다(인클루드도 주 덱 절점을 가리킬 수 있다)
-    for ns, kwd in (("SET_NODE", "*SET_NODE_LIST"), ("SET_SEGMENT", "*SET_SEGMENT")):
+    for ns, kwd in (("SET_NODE", "*SET_NODE_LIST"), ("SET_SEGMENT", "*SET_SEGMENT"), ("SET_PART", "*SET_PART_LIST")):
         if ns not in kinds:
             continue
         sids = {mx(ns) + 1, mx("SET") + 1} | (set(extra_set_node) if ns == "SET_NODE" else set())
         for sid in sorted(sids):
             L += [kwd, "%10d" % sid]
-            L.append("%10d%10d%10d%10d" % (member, member + 1, member + 2, member + 3))
+            # 세트 구성원 — 절점·세그먼트는 주 덱 절점 1..4, 파트 세트는 주 덱 파트 1
+            L.append("%10d" % 1 if ns == "SET_PART" else
+                     "%10d%10d%10d%10d" % (member, member + 1, member + 2, member + 3))
     if "CURVE" in kinds:
         L += ["*DEFINE_CURVE", "%10d" % (mx("CURVE") + 1), "%20.6f%20.6f" % (0.0, 0.0), "%20.6f%20.6f" % (1.0, 1.0)]
     if "CONTACT" in kinds:
         seg = mx("SET_SEGMENT") + 1
         L += ["*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_ID", "%10d%s" % (mx("CONTACT") + 1, "include blocker"),
               "%10d%10d%10d%10d" % (seg, seg, 0, 0), "", ""]
+    if "EOS" in kinds:
+        L += ["*EOS_LINEAR_POLYNOMIAL", "%10d%10s%10s" % (mx("EOS") + 1, "0.0", "0.0"), "%10s%10s" % ("0.0", "1.0")]
     if "HOURGLASS" in kinds:
         L += ["*HOURGLASS", "%10d%10d%10s" % (mx("HOURGLASS") + 1, 5, "0.05")]
     if "CNRB" in kinds:
@@ -196,9 +205,12 @@ def lane(binary, label, cmd, base_lines, yaml_tmpl, kinds, extra_files=(), extra
         open(os.path.join(d, "x.k"), "w", encoding="utf-8").write("\n".join(x) + "\n")
         for tag, lines in (("M", m_lines), ("U", u_lines)):
             open(os.path.join(d, tag + ".k"), "w", encoding="utf-8").write("\n".join(lines) + "\n")
-            open(os.path.join(d, tag + ".yaml"), "w", encoding="utf-8").write(
-                yaml_tmpl.replace("@MODEL@", tag + ".k").replace("@OUT@", "o" + tag))
-            rc, log = run(binary, d, *(cmd + [tag + ".yaml"]))
+            sub = lambda s: s.replace("@MODEL@", tag + ".k").replace("@OUT@", "o" + tag)
+            if yaml_tmpl is None:                    # 위치 인자 op — 명령줄 틀에 그대로 넣는다
+                rc, log = run(binary, d, *[sub(a) for a in cmd])
+            else:
+                open(os.path.join(d, tag + ".yaml"), "w", encoding="utf-8").write(sub(yaml_tmpl))
+                rc, log = run(binary, d, *(cmd + [tag + ".yaml"]))
             op = out_path(d, "o" + tag)
             if not check("%s %s — rc 0 · 산출" % (label, tag), rc == 0 and op, log[-400:]):
                 return
@@ -234,6 +246,14 @@ LANE_ISSUES = {
     "matswap": ["HOURGLASS", "CURVE", "SECTION", "MAT"],
     "matdb": ["MAT"],
     "restack": ["NODE", "ELEMENT", "PART", "SECTION", "MAT", "SET"],
+    # ── 단독 발행자(자기 덱을 직접 읽는다) ──
+    "hfdamp": ["SET_PART"],
+    "cnrb2solid": ["NODE", "ELEMENT", "SECTION", "MAT"],
+    "ale": ["MAT", "EOS", "HOURGLASS"],
+    "matswap(위치 인자)": ["HOURGLASS", "CURVE", "SECTION", "MAT"],
+    "tetremesh": ["NODE", "ELEMENT"],
+    "cclip": ["NODE", "ELEMENT"],
+    "meshfix": ["NODE", "ELEMENT"],
 }
 
 BOX = ("output: flat.k\nlx: 20.0\nly: 10.0\nlz: 2.0\nnx: 10\nny: 5\nnz: 2\n"
@@ -326,6 +346,80 @@ def main():
     finally:
         shutil.rmtree(g, ignore_errors=True)
     lane(binary, "restack", asm, flat, RESTACK, ["mesh", "SET_SEGMENT"])
+
+    # ── 단독 발행자 — 자기 덱을 직접 읽는 op 도 같은 신탁으로 본다(2026-10-16) ──
+    box = read_lines(os.path.join(EX, "assemble", "box.k"))
+    lane(binary, "hfdamp", ["hfdamp"], box,
+         "model: @MODEL@\noutput: @OUT@\ndt_target: 1.0e-3\ncdamp: 0.99\nfhigh_ratio: 100.0\n"
+         "mode: selective\ntssfac: 0.9\n", ["SET_PART"])
+    bolt = read_lines(os.path.join(EX, "cnrb2solid", "bolt_simple.k"))
+    lane(binary, "cnrb2solid", ["cnrb2solid"], bolt,
+         "model: @MODEL@\noutput: @OUT@\nE: 200000.0\nPR: 0.3\nRHO: 7.85e-9\nradius_scale: 0.999\n"
+         "num_circum_nodes: 8\ninner_radius_ratio: 0.3\naxis_direction: auto\nz_tolerance: 0.1\n"
+         "r_tolerance: 0.5\n", ["mesh"])
+    ale_deck = read_lines(os.path.join(EX, "ale", "explicit.k"))
+    lane(binary, "ale", ["ale"], ale_deck,
+         "model: @MODEL@\noutput: @OUT@\nale_parts:\n  - pid: 3\n    material: air\n",
+         ["MAT", "EOS", "HOURGLASS", "SECTION"])
+    lane(binary, "matswap(위치 인자)", ["matswap", "@MODEL@", "rubber.k", "1", "@OUT@.k"], cubes, None,
+         ["HOURGLASS", "CURVE", "SECTION", "MAT"], extra_files=[rubber])
+    tet_src = open(os.path.join(HERE, "test_misc_ops_yaml_parsing.py"), encoding="utf-8").read()
+    s = tet_src.index('TET_MODEL = """') + len('TET_MODEL = """')
+    tet = tet_src[s:tet_src.index('"""', s)].splitlines()
+    lane(binary, "tetremesh", ["tetremesh"], tet,
+         "model: @MODEL@\noutput: @OUT@.k\nbackend: localimprove\nquality:\n  min_jacobian: 0.9\n", ["mesh"])
+    g = tempfile.mkdtemp(prefix="aii_cc_")
+    try:
+        shutil.copy2(os.path.join(EX, "cclip", "gen_board.yaml"), g)
+        run(binary, g, "generate", "box", "gen_board.yaml")
+        board = read_lines(os.path.join(g, "clip_board.k"))
+    finally:
+        shutil.rmtree(g, ignore_errors=True)
+    cc_yaml = open(os.path.join(EX, "cclip", "cclip.yaml"), encoding="utf-8").read().replace(
+        "model: clip_board.k", "model: @MODEL@").replace("output: clip_board_cclip", "output: @OUT@")
+    lane(binary, "cclip", ["cclip"], board, cc_yaml, ["mesh"])
+
+    # meshfix — gmsh 가 있어야 돈다(없으면 건너뛰고 그렇다고 말한다)
+    gm = os.path.join(REPO, "dist", "gmsh", "gmsh")
+    if os.path.exists(gm):
+        os.environ["KOOREMAPPER_GMSH"] = gm
+    if os.path.exists(gm) or shutil.which("gmsh"):
+        g = tempfile.mkdtemp(prefix="aii_mf_")
+        try:
+            run(binary, g, "generate", "--dim-i", "20", "--dim-j", "5", "arc", "demo")
+            arc_tet = read_lines(os.path.join(g, "demo_flat_tet.k"))
+        finally:
+            shutil.rmtree(g, ignore_errors=True)
+        lane(binary, "meshfix", ["meshfix"], arc_tet,
+             "model: @MODEL@\noutput: @OUT@.k\npid: 1\nlc_target: 5.0\n", ["mesh"])
+    else:
+        print("[meshfix] SKIP — gmsh 실행 파일이 없다(dist/gmsh/gmsh · PATH)")
+
+    # ── cnrb2spring — 「최대 + 1」이 아니라 **고정 대역 + 충돌 검사**다 ─────────────────
+    # 신탁이 다르다 — 인클루드에 대역 안 번호가 있으면 쪼갠 덱도 쪼개지 않은 덱처럼 **거절**해야 한다
+    # (옛 판은 인클루드를 검사 코퍼스에 안 넣어 「겹침 없음」으로 지나갔다).
+    print("[cnrb2spring — 고정 대역 충돌 검사]")
+    sys.path.insert(0, HERE)
+    from test_cnrb2spring import shell_deck                     # 그 시험이 쓰는 덱 그대로
+    d = tempfile.mkdtemp(prefix="aii_c2sp_")
+    try:
+        base_cs = shell_deck().splitlines()
+        x_cs = ["*KEYWORD", "*NODE", "%8d%16.6f%16.6f%16.6f" % (90000001, 5.0e3, 5.0e3, 5.0e3), "*END"]
+        m_cs, u_cs = split_and_inline(base_cs, x_cs)
+        open(os.path.join(d, "x.k"), "w").write("\n".join(x_cs) + "\n")
+        res_cs = {}
+        for tag, lines in (("M", m_cs), ("U", u_cs)):
+            open(os.path.join(d, tag + ".k"), "w").write("\n".join(lines) + "\n")
+            open(os.path.join(d, tag + ".yaml"), "w").write(
+                "model: %s.k\noutput: o%s.k\naxis: z\ntarget_pids: [1201]\n" % (tag, tag))
+            res_cs[tag] = run(binary, d, "cnrb2spring", tag + ".yaml")
+        clash = lambda out: "노드 ID 가 원본 덱과 겹칩니다" in out
+        check("cnrb2spring U — 인라인 대역 충돌을 거절한다(rc 1)", res_cs["U"][0] == 1 and clash(res_cs["U"][1]),
+              res_cs["U"][1][-300:])
+        check("cnrb2spring ① 쪼갠 덱도 같은 이유로 거절한다", res_cs["M"][0] == 1 and clash(res_cs["M"][1]),
+              res_cs["M"][1][-300:])
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
 
     # ── W · P · B — 단정 못 하는 자리를 말하나 ───────────────────────────────
     print("[W·P·B 경고]")

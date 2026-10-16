@@ -1,5 +1,5 @@
 #include "matswap.h"
-#include "parser/IncludeScan.h"
+#include "parser/IdAllocator.h"   // 인클루드 닫힘까지 센 최대값 · 못 본 자리 경고
 #include "parser/DeckWriter.h"
 #include "util/YamlComment.h"
 #include "kw_util.h"
@@ -288,8 +288,9 @@ int runMatswap(const std::string& modelFile, const std::string& bundleFile,
         std::string ln; while (std::getline(f,ln)) modelLines.push_back(ln);
     }
 
-    KooRemapper::include_scan::warnUnread(console, modelLines,
-        "재질·이력변수 ID(MID·HGID)를 이 덱 안에서만 세었습니다 — 인클루드에 있는 번호와 겹칠 수 있습니다");
+    // 인클루드 닫힘을 읽어 그 안의 번호까지 센다(2026-10-16) — 못 본 자리만 말한다.
+    const auto inclClosure = KooRemapper::include_closure::read(modelFile, modelLines);
+    KooRemapper::ids::warnGaps(console, inclClosure, "그 안의 재질·이력변수·곡선·섹션 번호와 겹칠 수 있습니다");
 
     // 2. Parse bundle
     MswBundle bundle;
@@ -321,11 +322,15 @@ int runMatswap(const std::string& modelFile, const std::string& bundleFile,
                     "  SECID:" + std::string(secidShared?"shared":"orphan") +
                     "  HGID:" + std::string(hgidShared?"shared":"orphan"));
 
-    // 5. Scan model for max IDs (for new ID allocation)
-    int maxHGID  = msw_scanMaxId(modelLines, "*HOURGLASS");
-    int maxLCID  = msw_scanMaxId(modelLines, "*DEFINE_CURVE");
-    int maxSECID = msw_scanMaxId(modelLines, "*SECTION");
-    int maxMID   = msw_scanMaxId(modelLines, "*MAT_");
+    // 5. Scan model for max IDs (for new ID allocation) — 주 덱과 인클루드 파일마다 같은 훑기
+    auto scanMax = [&](const char* prefix) {
+        return KooRemapper::ids::maxOverClosure(modelLines, inclClosure,
+            [prefix](const std::vector<std::string>& L) { return msw_scanMaxId(L, prefix); });
+    };
+    int maxHGID  = scanMax("*HOURGLASS");
+    int maxLCID  = scanMax("*DEFINE_CURVE");
+    int maxSECID = scanMax("*SECTION");
+    int maxMID   = scanMax("*MAT_");
     console.println("[matswap] Model max IDs -> HGID=" + std::to_string(maxHGID) +
                     " LCID=" + std::to_string(maxLCID) +
                     " SECID=" + std::to_string(maxSECID) +

@@ -1,5 +1,6 @@
 #include "parser/DeckNewline.h"
-#include "parser/IncludeScan.h"
+#include "parser/IncludeScan.h"   // scanFile — 흘려 읽어 인클루드가 있나만 본다
+#include "parser/IdAllocator.h"   // 인클루드 닫힘 · 못 본 자리 경고
 #include "commands/tetremesh.h"
 #include "core/Mesh.h"
 #include "parser/KFileReader.h"
@@ -235,8 +236,22 @@ int runTetRemesh(const std::string& configPath,
     Timer timer;
 
     console.info("Loading mesh: " + cfg.model);
-    KooRemapper::include_scan::warnUnreadFile(console, cfg.model,
-        "노드·요소 ID 를 이 덱 안에서만 세었습니다 — 인클루드에 있는 번호와 겹쳐 발급할 수 있습니다");
+    // 인클루드 닫힘을 읽어 그 안의 노드·요소 번호까지 센다(2026-10-16) — 주 덱과 같은 리더로, 못 본 자리만 말한다.
+    KooRemapper::include_closure::ReaderMax inclMax;
+    // ⚠ 이 op 은 원문을 들지 않는다(700MB 덱 — `IncludeScan.h` scanFile 머리말). 그래서 인클루드가 **있을 때만**
+    //   주 덱 줄을 담는다 — 흘려 읽는 `scanFile` 로 먼저 보고, 인클루드 없는 흔한 덱은 예전처럼 한 번만 읽는다.
+    if (KooRemapper::include_scan::scanFile(cfg.model).count > 0) {
+        std::vector<std::string> mainLines;
+        std::ifstream mf(cfg.model);
+        for (std::string ln; std::getline(mf, ln);) {
+            if (!ln.empty() && ln.back() == '\r') ln.pop_back();
+            mainLines.push_back(ln);
+        }
+        const auto incl = KooRemapper::include_closure::read(cfg.model, mainLines);
+        KooRemapper::ids::warnGaps(console, incl, "그 안의 노드·요소 번호와 겹쳐 발급할 수 있습니다");
+        inclMax = KooRemapper::include_closure::readerMax(mainLines, cfg.model, incl);
+        KooRemapper::ids::warnUnsure(console, inclMax.unsure);
+    }
     KFileReader reader;
     Mesh mesh;
     try {
@@ -302,6 +317,7 @@ int runTetRemesh(const std::string& configPath,
                  (fallback ? std::string("  fallback=") + fallback->name() : ""));
 
     RemeshOrchestrator orch(pc, backend, fallback);
+    orch.setIdFloor(inclMax.node, inclMax.elem);   // 인클루드에 이미 있는 번호 위로 낸다
     RemeshSummary summary;
     if (cfg.reportOnly) {
         console.info("Report-only mode: scanning quality, no mesh changes will be written.");

@@ -109,10 +109,16 @@ public:
 
     IterativeResult runIterative(Mesh& mesh, const IterativeOptions& opts);
 
+    // 새 노드·요소 번호의 바닥 — 메시 밖(인클루드 닫힘)에 이미 쓰인 최대값. 새 번호는 메시 최대값과 이 값
+    // 둘 다의 위로 낸다(쪼갠 덱 = 쪼개지 않은 덱). 0 이면 메시 최대값만 본다(예전과 같다).
+    void setIdFloor(int node, int elem) { nodeFloor_ = node; elemFloor_ = elem; }
+
 private:
     PatchExtractor::Config       patchCfg_;
     std::shared_ptr<Remesher>    backend_;
     std::shared_ptr<Remesher>    fallback_;
+    int nodeFloor_ = 0;
+    int elemFloor_ = 0;
 };
 
 }  // namespace remesh

@@ -2,7 +2,10 @@
 #include "parser/IncludeClosure.h"
 
 #include "parser/DeckScan.h"
+#include "parser/ElementCardLayout.h"   // deckFieldWidth — 폭이 주 덱과 갈리는지
+#include "parser/KFileReader.h"         // 주 덱과 같은 리더로 센다
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <set>
@@ -193,6 +196,48 @@ std::vector<std::string> flatten(const std::vector<std::string>& mainLines, cons
     out.reserve(mainLines.size());
     spliceInto(out, mainLines, mainPath, c, 0);
     return out;
+}
+
+ReaderMax readerMax(const std::vector<std::string>& mainLines, const std::string& mainPath, const Closure& c) {
+    ReaderMax r;
+    const int mainFw = deckFieldWidth(mainLines);
+    auto plusMinusCard = [&r](const std::vector<std::string>& lines, const std::string& file) {
+        for (size_t i = 0; i < lines.size(); ++i) {
+            if (deckscan::isDataLine(lines[i]) || deckscan::keywordToken(lines[i]) != "*INCLUDE") continue;
+            const std::string& l = lines[i];
+            const size_t a = l.find_first_not_of(" \t");
+            const size_t b = l.find_first_not_of(" \t", a + 8);          // "*INCLUDE" 뒤
+            if (b != std::string::npos && (l[b] == '+' || l[b] == '-'))
+                r.unsure.push_back(file + ":" + std::to_string(i + 1) + " 의 `*INCLUDE " + l[b] +
+                                   "` — 그 파일의 폭을 바꾼다");
+        }
+    };
+    if (c.files.empty()) return r;
+    plusMinusCard(mainLines, mainPath);
+    for (const auto& f : c.files) {
+        plusMinusCard(f.lines, f.path);
+        const int fw = deckFieldWidth(f.lines);
+        if (fw != mainFw)
+            r.unsure.push_back(f.path + " — `*KEYWORD` 의 폭(" + std::to_string(fw) + ")이 주 덱(" +
+                               std::to_string(mainFw) + ")과 다르다");
+        try {
+            KFileReader reader;
+            const Mesh m = reader.readFile(f.path);
+            r.node = std::max(r.node, m.getMaxNodeId());
+            r.elem = std::max(r.elem, m.getMaxElementId());
+            for (const auto& [pid, part] : m.parts) {
+                r.part = std::max(r.part, pid);
+                r.partSection = std::max(r.partSection, part.sectionId);
+            }
+            for (const auto& [mid, mat] : m.materials) {
+                (void)mat;
+                r.material = std::max(r.material, mid);
+            }
+        } catch (const std::exception& e) {
+            r.unsure.push_back(f.path + " — 메시로 읽지 못해 노드·요소·파트·재질 번호를 세지 못했다: " + e.what());
+        }
+    }
+    return r;
 }
 
 }  // namespace include_closure

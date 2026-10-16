@@ -1,5 +1,6 @@
 // CNRB 체결점을 '두 강체 + 제로길이 discrete beam(ELFORM=6)' 유격 조인트로 쪼개는 op 의 공개 인터페이스
 #pragma once
+#include "parser/IncludeClosure.h"
 #include "cli/ConsoleOutput.h"
 #include <string>
 #include <vector>
@@ -28,6 +29,8 @@ struct Cnrb2SpringConfig {
 // 핵심 변환 — 원문 줄 버퍼를 그 자리에서 고친다.
 // 단독 경로와 (뒷날) assemble 경로가 같은 함수를 불러 같은 알고리즘·같은 출력을 내게 하는 자리다.
 // 변환한 조인트 수를 돌려주고, 오류면 -1(이때 lines 는 고치지 않는다).
+// `incl` — 주 덱의 인클루드 닫힘. 충돌 검사가 그 안의 번호도 쓰인 것으로 친다(쪼갠 덱 = 쪼개지 않은 덱).
 int cnrb2spring_apply(std::vector<std::string>& lines,
                       const Cnrb2SpringConfig& cfg,
+                      const KooRemapper::include_closure::Closure& incl,
                       KooRemapper::ConsoleOutput& console);

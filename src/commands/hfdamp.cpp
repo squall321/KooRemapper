@@ -1,5 +1,5 @@
 #include "hfdamp.h"
-#include "parser/IncludeScan.h"
+#include "parser/IdAllocator.h"   // 인클루드 닫힘까지 센 최대값 · 못 본 자리 경고
 #include "parser/DeckWriter.h"
 #include "cli/ConsoleOutput.h"
 #include "util/YamlComment.h"
@@ -602,15 +602,16 @@ int runHFDamp(const std::string& yamlFile, ConsoleOutput& console) {
 
     console.println("[hfdamp] Model  : " + modelPath);
     console.println("[hfdamp] Output : " + outPath);
-    // 자립 경로의 창구(P0-6). assemble 경로는 ModelAssembler::loadBaseModel 이 이미 찍는다 —
+    // 자립 경로의 창구(P0-6). assemble 경로는 ModelAssembler::loadBaseModel 이 이미 읽고 말한다 —
     // 그쪽은 `hfdamp_apply` 를 rawLines_ 로 부르므로 여기와 겹치지 않는다.
-    KooRemapper::include_scan::warnUnread(console, lines,
-        "*SET_PART ID 를 이 덱 안에서만 세었습니다 — 인클루드에 있는 세트와 겹쳐 발급할 수 있습니다");
+    // 인클루드 닫힘을 읽어 그 안의 세트 번호까지 센다(2026-10-16) — 못 본 자리만 말한다.
+    const auto inclClosure = KooRemapper::include_closure::read(modelPath, lines);
+    KooRemapper::ids::warnGaps(console, inclClosure, "그 안의 *SET_PART 번호와 겹쳐 발급할 수 있습니다");
     console.println("[hfdamp] Mode   : " + cfg.mode);
 
-    // Find max set ID in file (handles both plain and _TITLE variants)
-    int maxSetId = 0;
-    {
+    // Find max set ID in file (handles both plain and _TITLE variants) — 주 덱과 인클루드 파일마다 같은 훑기
+    auto scanMaxSetId = [](const std::vector<std::string>& lines) {
+        int maxSetId = 0;
         bool inSetSection = false;
         bool setHasTitle  = false;
         for (auto& l : lines) {
@@ -635,7 +636,9 @@ int runHFDamp(const std::string& yamlFile, ConsoleOutput& console) {
             } catch (...) {}
             inSetSection = false;
         }
-    }
+        return maxSetId;
+    };
+    int maxSetId = KooRemapper::ids::maxOverClosure(lines, inclClosure, scanMaxSetId);
 
     // Apply damping
     int rc = hfdamp_apply(lines, cfg, maxSetId, console);

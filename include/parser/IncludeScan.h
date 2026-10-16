@@ -6,8 +6,6 @@
 #include <string>
 #include <vector>
 
-#include "cli/ConsoleOutput.h"
-
 namespace KooRemapper {
 namespace include_scan {
 
@@ -68,23 +66,6 @@ inline Unread scan(const std::vector<std::string>& lines, size_t maxNames = 8) {
     return out;
 }
 
-// 경고 문구. 첫 줄은 `[WARN]` 으로, 둘째 줄은 들여쓴 본문으로 내보내라는 뜻으로 둘을 돌려준다.
-//
-// `scope` 는 **이 op 이 무엇을 이 덱 안에서만 세었나**다. op 마다 다르다 —
-// `cclip` 은 인클루드 한 단계를 실제로 읽으므로 세트·파트는 보지만 노드·요소는 못 보고,
-// `cnrb2spring` 은 최대+1 발행자가 아니라 고정 번호대의 **충돌 검사**라 문제의 모양이 다르다.
-// 문구를 한 종류로 뭉개면 그 차이가 사라져 읽는 쪽이 잘못된 결론을 낸다.
-inline std::vector<std::string> warnLines(const Unread& u, const std::string& scope) {
-    if (u.count == 0) return {};
-    std::string names;
-    for (size_t k = 0; k < u.names.size(); ++k) names += (k ? ", " : "") + u.names[k];
-    if (u.truncatedNames) names += ", …";
-    std::vector<std::string> out;
-    out.push_back("*INCLUDE " + std::to_string(u.count) + "개를 읽지 않았습니다 — " + scope);
-    out.push_back("  보지 않은 파일: " + (names.empty() ? std::string("(이름 없음)") : names));
-    return out;
-}
-
 // 덱을 **줄 벡터로 들고 있지 않은** op 용. `meshfix`·`tetremesh` 는 KFileReader 로 Mesh 만
 // 만들고 원문을 보관하지 않는다 — 그때 스캔하려고 전문을 또 읽어 벡터에 담으면 700MB 덱에서
 // 메모리가 곱으로 든다. 여기서는 한 줄씩 흘려 읽는다(상수 메모리).
@@ -124,32 +105,6 @@ inline Unread scanFile(const std::string& path, size_t maxNames = 8) {
         ++idx;
     }
     return out;
-}
-
-// 경고를 콘솔에 낸다 — 자리가 아홉이라 여섯 줄을 베끼면 문구가 갈린다.
-//
-// ⚠ **콘솔 전용이다.** 덱(`rawLines_`·`addedKeywordBlocks_` 등)에 문자열을 넣으면 출력 바이트가
-//   변해 이 단계의 목표('번호 불변')가 '바이트 변경' 으로 바뀐다.
-// ⚠ **rc 를 건드리지 않는다.** 하류(플랫폼 워커·pyKooCAE REMAP 스텝)가 rc≠0 이면 체인을 멈춘다.
-//   `ConsoleOutput` 의 모든 출력은 stdout 이고 rc 와 무관하다(전수 확인).
-inline void warnUnread(const ConsoleOutput& console,
-                       const std::vector<std::string>& lines,
-                       const std::string& scope) {
-    const auto u = scan(lines);
-    if (u.count == 0) return;
-    const auto msg = warnLines(u, scope);
-    console.warning(msg[0]);
-    for (size_t k = 1; k < msg.size(); ++k) console.println(msg[k]);
-}
-
-// 파일 경로로 스캔하는 판(`scanFile`) — 문구·규율은 `warnUnread` 와 같다.
-inline void warnUnreadFile(const ConsoleOutput& console, const std::string& path,
-                           const std::string& scope) {
-    const auto u = scanFile(path);
-    if (u.count == 0) return;
-    const auto msg = warnLines(u, scope);
-    console.warning(msg[0]);
-    for (size_t k = 1; k < msg.size(); ++k) console.println(msg[k]);
 }
 
 }  // namespace include_scan

@@ -1,6 +1,6 @@
 #include "parser/DeckWriter.h"
 #include "parser/ElementCardLayout.h"   // deckFieldWidth — 덱이 선언한 칸 폭을 따른다
-#include "parser/IncludeScan.h"
+#include "parser/IdAllocator.h"   // 인클루드 닫힘까지 센 최대값 · 못 본 자리 경고
 #include "cnrb2solid.h"
 #include "kw_util.h"
 #include "cli/ConsoleOutput.h"
@@ -1027,93 +1027,99 @@ int runCnrb2Solid(const std::string& yamlFile, ConsoleOutput& console) {
 
     console.println("[cnrb2solid] Model  : " + modelPath);
     console.println("[cnrb2solid] Output : " + outPath);
-    KooRemapper::include_scan::warnUnread(console, lines,
-        "섹션·재질·세트·파트 ID 를 이 덱 안에서만 세었습니다 — 인클루드에 있는 번호와 겹칠 수 있습니다");
+    // 인클루드 닫힘을 읽어 그 안의 번호까지 센다(2026-10-16) — 못 본 자리만 말한다.
+    const auto inclClosure = KooRemapper::include_closure::read(modelPath, lines);
+    KooRemapper::ids::warnGaps(console, inclClosure, "그 안의 노드·요소·섹션·재질·세트 번호와 겹쳐 낼 수 있습니다");
 
     int maxNodeId = 0, maxElemId = 0, maxSecId = 0, maxMatId = 0, maxSetId = 0, maxPartId = 0;
 
-    // Scan for existing max IDs
-    bool inElem = false;
-    for (const auto& ln : lines) {
-        std::string tr = cs_trim(ln);
-        if (tr.empty()) continue;
-        if (tr[0] == '*') {
-            std::string up = cs_upper(tr);
-            inElem = (up.rfind("*ELEMENT_SOLID", 0) == 0 || up.rfind("*ELEMENT_SHELL", 0) == 0);
-            continue;
-        }
-        if (tr[0] == '$') continue;
-        auto toks = cs_splitWS(ln);
-        if (toks.empty()) continue;
-        int id = cs_parseInt(toks[0]);
-        if (id <= 0) continue;
-
-        if (inElem) maxElemId = std::max(maxElemId, id);
-
-        if (toks.size() >= 2) {
-            std::string up2 = cs_upper(cs_trim(lines[&ln - &lines[0] > 0 ? 0 : 0]));
-            (void)up2;
-        }
-    }
-    // Simple pass: max node ID
-    {
-        bool inN = false;
+    // 주 덱과 인클루드 파일마다 **같은 훑기**로 센다 — 쪼갠 덱 = 쪼개지 않은 덱. 블록마다 올리기만 한다.
+    auto scanMaxIds = [&](const std::vector<std::string>& lines) {
+        // Scan for existing max IDs
+        bool inElem = false;
         for (const auto& ln : lines) {
             std::string tr = cs_trim(ln);
             if (tr.empty()) continue;
             if (tr[0] == '*') {
-                inN = (cs_upper(tr).rfind("*NODE", 0) == 0 && cs_upper(tr).find("SET") == std::string::npos);
+                std::string up = cs_upper(tr);
+                inElem = (up.rfind("*ELEMENT_SOLID", 0) == 0 || up.rfind("*ELEMENT_SHELL", 0) == 0);
                 continue;
             }
-            if (!inN || tr[0] == '$') continue;
+            if (tr[0] == '$') continue;
             auto toks = cs_splitWS(ln);
-            if (!toks.empty()) maxNodeId = std::max(maxNodeId, cs_parseInt(toks[0]));
-        }
-    }
-    // 네임스페이스별 최대 ID (P1-13 ①).
-    //
-    // ⚠ 예전에는 **모든 비키워드 줄**의 첫 10칸을 읽어 네 네임스페이스에 **동시에** 밀어 넣었다
-    // (주석이 "We'll be conservative" 라고 적혀 있었다). 그러면 상관없는 번호가 전부를 밀어 올린다 —
-    // 실측: `examples/cnrb2solid/bolt_simple.k` 는 SECTION 최대 1 · MAT 1 · SET 18 인데
-    // `*CONSTRAINED_NODAL_RIGID_BODY` 의 첫 칸 **200**(그것은 파트 ID 다) 때문에 새 SECID·MID·SID 가
-    // 전부 **201** 로 나갔다. 노드 ID 가 9,900,001 대인 덱에서는 SECID 가 그 대역으로 뛴다.
-    //
-    // 그래서 자리마다 **그 네임스페이스의 카드만** 본다.
-    //
-    // ⚠ PART 는 세지 않는다. `cnrb2solid_convert` 의 `maxPartId` 매개변수는 **쓰이지 않고**
-    // (`int& /*maxPartId*/`) 새 `*PART` 는 `cnrb.pid` 를 그대로 재사용한다. 세어 두면 관찰할 수
-    // 없는 코드가 되고, 돌연변이 시험이 그것을 잡아냈다 — 그래서 넣지 않는다.
-    {
-        enum class Ns { None, Sec, Mat, Set };
-        Ns ns = Ns::None;
-        bool titleSkipped = true;
-        for (const auto& ln : lines) {
-            const std::string tr = cs_trim(ln);
-            if (tr.empty()) continue;
-            if (tr[0] == '*') {
-                const std::string up = cs_upper(tr);
-                if (up.rfind("*SECTION_", 0) == 0)                      ns = Ns::Sec;
-                // `*MAT_ADD_*` 는 재질을 새로 만들지 않는다 — 첫 칸이 **PID** 다.
-                else if (up.rfind("*MAT_ADD_", 0) == 0)                  ns = Ns::None;
-                else if (up.rfind("*MAT_", 0) == 0)                      ns = Ns::Mat;
-                else if (up.rfind("*SET_", 0) == 0)                      ns = Ns::Set;
-                else                                                     ns = Ns::None;
-                // `_TITLE` 은 데이터 카드 앞에 제목 줄이 한 줄 더 있다.
-                titleSkipped = (up.find("_TITLE") == std::string::npos);
-                continue;
-            }
-            if (ns == Ns::None || tr[0] == '$') continue;
-            if (!titleSkipped) { titleSkipped = true; continue; }
-            const int id = cs_parseInt(cs_field10(ln, 0));
+            if (toks.empty()) continue;
+            int id = cs_parseInt(toks[0]);
             if (id <= 0) continue;
-            switch (ns) {
-                case Ns::Sec:  maxSecId  = std::max(maxSecId,  id); break;
-                case Ns::Mat:  maxMatId  = std::max(maxMatId,  id); break;
-                case Ns::Set:  maxSetId  = std::max(maxSetId,  id); break;
-                default: break;
+
+            if (inElem) maxElemId = std::max(maxElemId, id);
+
+            if (toks.size() >= 2) {
+                std::string up2 = cs_upper(cs_trim(lines[&ln - &lines[0] > 0 ? 0 : 0]));
+                (void)up2;
             }
         }
-    }
+        // Simple pass: max node ID
+        {
+            bool inN = false;
+            for (const auto& ln : lines) {
+                std::string tr = cs_trim(ln);
+                if (tr.empty()) continue;
+                if (tr[0] == '*') {
+                    inN = (cs_upper(tr).rfind("*NODE", 0) == 0 && cs_upper(tr).find("SET") == std::string::npos);
+                    continue;
+                }
+                if (!inN || tr[0] == '$') continue;
+                auto toks = cs_splitWS(ln);
+                if (!toks.empty()) maxNodeId = std::max(maxNodeId, cs_parseInt(toks[0]));
+            }
+        }
+        // 네임스페이스별 최대 ID (P1-13 ①).
+        //
+        // ⚠ 예전에는 **모든 비키워드 줄**의 첫 10칸을 읽어 네 네임스페이스에 **동시에** 밀어 넣었다
+        // (주석이 "We'll be conservative" 라고 적혀 있었다). 그러면 상관없는 번호가 전부를 밀어 올린다 —
+        // 실측: `examples/cnrb2solid/bolt_simple.k` 는 SECTION 최대 1 · MAT 1 · SET 18 인데
+        // `*CONSTRAINED_NODAL_RIGID_BODY` 의 첫 칸 **200**(그것은 파트 ID 다) 때문에 새 SECID·MID·SID 가
+        // 전부 **201** 로 나갔다. 노드 ID 가 9,900,001 대인 덱에서는 SECID 가 그 대역으로 뛴다.
+        //
+        // 그래서 자리마다 **그 네임스페이스의 카드만** 본다.
+        //
+        // ⚠ PART 는 세지 않는다. `cnrb2solid_convert` 의 `maxPartId` 매개변수는 **쓰이지 않고**
+        // (`int& /*maxPartId*/`) 새 `*PART` 는 `cnrb.pid` 를 그대로 재사용한다. 세어 두면 관찰할 수
+        // 없는 코드가 되고, 돌연변이 시험이 그것을 잡아냈다 — 그래서 넣지 않는다.
+        {
+            enum class Ns { None, Sec, Mat, Set };
+            Ns ns = Ns::None;
+            bool titleSkipped = true;
+            for (const auto& ln : lines) {
+                const std::string tr = cs_trim(ln);
+                if (tr.empty()) continue;
+                if (tr[0] == '*') {
+                    const std::string up = cs_upper(tr);
+                    if (up.rfind("*SECTION_", 0) == 0)                      ns = Ns::Sec;
+                    // `*MAT_ADD_*` 는 재질을 새로 만들지 않는다 — 첫 칸이 **PID** 다.
+                    else if (up.rfind("*MAT_ADD_", 0) == 0)                  ns = Ns::None;
+                    else if (up.rfind("*MAT_", 0) == 0)                      ns = Ns::Mat;
+                    else if (up.rfind("*SET_", 0) == 0)                      ns = Ns::Set;
+                    else                                                     ns = Ns::None;
+                    // `_TITLE` 은 데이터 카드 앞에 제목 줄이 한 줄 더 있다.
+                    titleSkipped = (up.find("_TITLE") == std::string::npos);
+                    continue;
+                }
+                if (ns == Ns::None || tr[0] == '$') continue;
+                if (!titleSkipped) { titleSkipped = true; continue; }
+                const int id = cs_parseInt(cs_field10(ln, 0));
+                if (id <= 0) continue;
+                switch (ns) {
+                    case Ns::Sec:  maxSecId  = std::max(maxSecId,  id); break;
+                    case Ns::Mat:  maxMatId  = std::max(maxMatId,  id); break;
+                    case Ns::Set:  maxSetId  = std::max(maxSetId,  id); break;
+                    default: break;
+                }
+            }
+        }
+    };
+    scanMaxIds(lines);
+    for (const auto& f : inclClosure.files) scanMaxIds(f.lines);
 
     int n = cnrb2solid_convert(lines, cfg,
                                 maxNodeId, maxElemId, maxSecId, maxMatId, maxSetId, maxPartId,

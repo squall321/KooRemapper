@@ -46,8 +46,8 @@ RemeshSummary RemeshOrchestrator::run(Mesh& mesh) {
     }
 
     // 2. Per-patch process.
-    int nextNodeId = findMaxNodeId(mesh) + 1;
-    int nextElemId = findMaxElemId(mesh) + 1;
+    int nextNodeId = std::max(findMaxNodeId(mesh), nodeFloor_) + 1;
+    int nextElemId = std::max(findMaxElemId(mesh), elemFloor_) + 1;
 
     for (auto& patch : patches) {
         RemeshResult r = backend_->run(patch.task);

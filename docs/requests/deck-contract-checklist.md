@@ -842,8 +842,18 @@ plan2 는 `IdAllocator` 로 발행자를 통합하라고 했다. 정찰이 그 �
         (mefem 만 초록 — 앞 커밋에서 고친 자리). 42 op 산출 덱 옛 대 새 **바이트 동일**(보고서 JSON 둘은 같은
         바이너리로 두 번 떠도 매번 다르다). 실사용 인클루드 덱 88장 identity — rc 0 전부 · 못 본 자리 1장(알던
         빠진 파일) · 폭 단정 불가 0장.
-        → 남은 발행자 — 단독 `hfdamp`·`cnrb2solid`·`cnrb2spring`·`tetremesh`·`meshfix`·`ale`·`matswap`(위치
-          인자판)·`cclip` 의 노드·요소. 셋 다 경고는 한다.
+        → ~~남은 발행자 — 단독 `hfdamp`·`cnrb2solid`·`cnrb2spring`·`tetremesh`·`meshfix`·`ale`·`matswap`(위치
+          인자판)·`cclip` 의 노드·요소~~ **(같은 날 끝났다)** — 공용 도우미 셋(`ids::maxOverClosure` 같은 스캐너를
+          파일마다 · `ids::warnGaps` 못 본 자리 한 번 · `include_closure::readerMax` 리더로 센 노드·요소·파트·재질 +
+          폭이 갈리는 파일의 「단정 못 함」)으로 모았다 — assemble 로더도 같은 것을 쓴다. tetremesh 는 오케스트레이터에
+          번호 바닥(`setIdFloor`), meshfix 는 `Cfg` 바닥, cnrb2spring 은 충돌 검사 코퍼스에 인클루드를 넣는다.
+          ⚠ tetremesh·meshfix 는 원문을 들지 않는 op 이라(700MB 덱) **인클루드가 있을 때만** 주 덱 줄을 담는다 —
+          흘려 읽는 `scanFile` 로 먼저 본다. 쓰이지 않게 된 `include_scan::warnUnread`·`warnUnreadFile`·`warnLines` 를
+          지웠다. 회귀 `test_assembler_include_ids.py` 에 단독 레인 여덟(hfdamp·cnrb2solid·ale·matswap 위치 인자·
+          tetremesh·cclip·meshfix(gmsh)·cnrb2spring 충돌 검사) — 102항, **옛 바이너리에서 여덟 다 문다.**
+          `extract-surface` 는 원 덱에 들이지 않는 별도 덱을 내므로 발행자가 아니다(매뉴얼 §3.1(h)에 적었다).
+          → 따로 올린 것 — cnrb2solid 의 접촉 CID 가 함수 안 `static int contactId = 0` 에서 1 부터 나온다(덱의
+            기존 `_ID` CID 를 안 본다).
         → 따로 올린 것(이 커밋 아님) — ~~`maxShellElementId_` 가 0 에서 시작(extract_surface·TSHELL 압출·오프셋
           셸이 덱의 셸·솔리드와 **같은 EID** 를 낸다, 실측)~~(고쳤다 — 셸도 요소 공용 커서로. 매뉴얼 Vol_I 162384
           「unique number with respect to other elements」— 어느 해석에서도 합법인 꼴. 솔버로 재려 했으나 **LS-DYNA

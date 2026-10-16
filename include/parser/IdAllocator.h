@@ -1,6 +1,7 @@
 // 새 ID 를 한 길로 낸다 — 인클루드 닫힘까지 본 최대값 위로, 못 본 자리가 있으면 그렇다고 말한다
 #pragma once
 
+#include <algorithm>
 #include <map>
 #include <string>
 #include <vector>
@@ -68,6 +69,35 @@ struct UsedIds {
         if (c.depthCut) blind.push_back("인클루드 깊이 상한에 걸려 더 따라가지 않았다");
     }
 };
+
+// 같은 스캐너를 주 덱과 닫힘의 파일마다 돌린 최대값 — 「쪼갠 덱 = 쪼개지 않은 덱」(LS-DYNA 는 인클루드를 그
+// 자리에 펼쳐 읽는다). 인클루드용 스캐너를 따로 쓰지 않는다 — 규칙이 갈리면 쪼갠 덱의 번호가 달라진다.
+template <class Scan>
+int maxOverClosure(const std::vector<std::string>& mainLines, const include_closure::Closure& c, Scan&& scan) {
+    int m = scan(mainLines);
+    for (const auto& f : c.files) m = std::max(m, scan(f.lines));
+    return m;
+}
+
+// 닫힘을 다 읽지 못한 자리를 **한 번** 말한다 — 문구는 모든 발행자가 같다(assemble 로더 포함).
+// 다 읽었으면 조용하다. 콘솔 전용이고 rc 를 건드리지 않는다(하류가 rc≠0 이면 체인을 멈춘다).
+template <class Console>
+void warnGaps(Console& console, const include_closure::Closure& c, const std::string& scope) {
+    UsedIds g;
+    g.noteClosure(c);
+    if (g.blind.empty()) return;
+    console.warning("*INCLUDE " + std::to_string(g.blind.size()) + "곳을 읽지 않았습니다 — " + scope);
+    for (const auto& b : g.blind) console.println("  못 본 인클루드: " + b);
+}
+
+// 노드·요소 번호를 단정하지 못한 자리(`include_closure::readerMax` 의 `unsure`)를 **한 번** 말한다.
+template <class Console>
+void warnUnsure(Console& console, const std::vector<std::string>& unsure) {
+    if (unsure.empty()) return;
+    console.warning("인클루드 " + std::to_string(unsure.size()) + "곳의 노드·요소 번호를 단정하지 "
+                    "못했습니다 — 그 번호와 겹쳐 낼 수 있습니다");
+    for (const auto& u : unsure) console.println("  " + u);
+}
 
 // 한 길로 낸다 — 네임스페이스마다 본 최대값 위로 하나씩.
 class IdAllocator {

@@ -97,5 +97,19 @@ Closure read(const std::string& mainPath, const std::vector<std::string>& mainLi
 std::vector<std::string> flatten(const std::vector<std::string>& mainLines, const std::string& mainPath,
                                  const Closure& c);
 
+// 닫힘의 인클루드 파일마다 주 덱과 **같은 리더**(`KFileReader`)로 센 최대값 — 노드·요소·파트(·파트의 SECID)·재질.
+// 번호 발행자가 「쪼갠 덱 = 쪼개지 않은 덱」이 되게 쓴다(주 덱은 부르는 쪽이 이미 같은 리더로 셌다).
+// 노드·요소 번호를 단정할 수 없는 파일은 `unsure` 에 사람이 읽을 문장으로 적는다 —
+//   · 그 파일 `*KEYWORD` 의 폭이 주 덱과 다르다(리더는 파일마다 자기 `*KEYWORD` 를 본다. LS-DYNA 는 폭을 실행줄·
+//     주 덱 `*KEYWORD` 로 전체에 정하고 `*INCLUDE ±`·키워드 접미사로만 바꾼다 — Vol_I 19343-19353. 인클루드 자신의
+//     `*KEYWORD` 옵션이 먹는지는 매뉴얼에 없다. 실사용 88장에서 갈린 덱 0)
+//   · `*INCLUDE +`·`*INCLUDE -` 카드가 있다(그 파일의 폭을 바꾼다 — Vol_I 19350)
+//   · 리더가 그 파일을 읽지 못했다
+struct ReaderMax {
+    int node = 0, elem = 0, part = 0, partSection = 0, material = 0;
+    std::vector<std::string> unsure;
+};
+ReaderMax readerMax(const std::vector<std::string>& mainLines, const std::string& mainPath, const Closure& c);
+
 }  // namespace include_closure
 }  // namespace KooRemapper

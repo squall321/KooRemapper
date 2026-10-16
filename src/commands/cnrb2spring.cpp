@@ -1,6 +1,6 @@
 // CNRB 체결점 하나를 Side A/B 두 강체로 쪼개고 그 사이를 제로길이 discrete beam(ELFORM=6) 하나로 잇는 op
 #include "parser/ElementCardLayout.h"
-#include "parser/IncludeScan.h"
+#include "parser/IdAllocator.h"   // 인클루드 닫힘 · 못 본 자리 경고
 #include "parser/DeckWriter.h"
 #include "cnrb2spring.h"
 #include "cli/ConsoleOutput.h"
@@ -686,6 +686,7 @@ static std::string cg_idList(const std::set<int>& s, size_t maxN) {
 
 int cnrb2spring_apply(std::vector<std::string>& lines,
                       const Cnrb2SpringConfig& cfg,
+                      const KooRemapper::include_closure::Closure& incl,
                       ConsoleOutput& console)
 {
     // ★덱이 선언한 칸 폭을 **여기서 한 번** 정한다(cnrb2solid 와 같은 자리·같은 이유).
@@ -1009,13 +1010,24 @@ int cnrb2spring_apply(std::vector<std::string>& lines,
 
     // ⚠ 이 op 은 '최대 ID + 1' 발행자가 **아니다** — 설정으로 받은 고정 번호대를 쓰고 겹침을
     // 검사한다. 그래서 할 말이 다르다. "겹쳐 발급할 수 있다" 가 아니라 **"겹침 0건이라는 판정을
-    // 단정할 수 없다"** 다. 검사 코퍼스가 이 덱뿐이기 때문이다.
-    KooRemapper::include_scan::warnUnread(console, lines,
-        "충돌 검사가 이 덱 안만 봤습니다 — 인클루드에 같은 번호가 있어도 '겹침 없음' 으로 지나갑니다");
+    // 단정할 수 없다"** 다. 인클루드 닫힘은 읽어 검사 코퍼스에 넣는다(2026-10-16) — 못 본 자리만 말한다.
+    KooRemapper::ids::warnGaps(console, incl,
+        "충돌 검사가 그 안의 번호를 못 봤습니다 — 같은 번호가 있어도 '겹침 없음' 으로 지나갈 수 있습니다");
     CgUsedIds used = cg_scanUsedIds(lines);
     for (const auto& kv : sets) used.set.insert(kv.first);  // SID 는 세트 파싱 정본에서 그대로 받는다
     for (const auto& c : cnrbs) used.part.insert(c.pid);   // CNRB 의 PID 는 파트 네임스페이스다
     for (const auto& j : joints) { used.part.erase(j.origPid); used.set.erase(j.origNsid); }
+    // 인클루드 파일의 번호도 쓰인 것으로 친다 — 주 덱과 같은 스캐너로. 지우는 CNRB 는 주 덱 것이라 위에서
+    // 이미 뺐다(인클루드에 같은 번호가 있으면 그것은 다른 개체다 — 쓰인 채로 둔다).
+    for (const auto& f : incl.files) {
+        const CgUsedIds u = cg_scanUsedIds(f.lines);
+        for (auto [dst, src] : {std::pair{&used.node, &u.node}, {&used.elem, &u.elem}, {&used.part, &u.part},
+                                {&used.sect, &u.sect}, {&used.mat, &u.mat}, {&used.curve, &u.curve},
+                                {&used.set, &u.set}, {&used.coord, &u.coord}})
+            dst->insert(src->begin(), src->end());
+        for (const auto& kv : cg_parseNodeSets(f.lines)) used.set.insert(kv.first);
+        for (const auto& c : cg_parseCnrbs(f.lines)) used.part.insert(c.pid);
+    }
 
     struct Ns { const char* name; const std::set<int>* mine; const std::set<int>* used; const char* key; };
     std::set<int> mySect{secId}, myMat{matId}, myCurve{lcAxial, lcShear}, myCoord{coordId};
@@ -1409,7 +1421,8 @@ int runCnrb2Spring(const std::string& yamlFile, ConsoleOutput& console) {
             console.println("[cnrb2spring] 기본값 사용: " + dflt + " (실측 아님 — labeled assumption)");
     }
 
-    int n = cnrb2spring_apply(lines, cfg, console);
+    const auto inclClosure = KooRemapper::include_closure::read(modelPath, lines);
+    int n = cnrb2spring_apply(lines, cfg, inclClosure, console);
     if (n < 0) { console.error("[cnrb2spring] 변환을 멈췄습니다 — 위 [ERROR] 줄을 보세요 (출력 파일을 쓰지 않았습니다)"); return 1; }
 
     // 원본 덱의 개행을 따른다 — 안 그러면 CRLF 덱이 조용히 LF 로 바뀌거나,

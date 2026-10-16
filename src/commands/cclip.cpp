@@ -1,6 +1,6 @@
 // C-clip(스프링 접점) 생성 op 구현 — 박스 파트 치환·Castigliano 캘리브레이션·모멘트일치 눌림·INITIAL_STRESS_SHELL 출력.
 #include "cclip.h"
-#include "parser/IncludeScan.h"
+#include "parser/IdAllocator.h"   // 못 본 자리 · 단정 못 함 경고
 #include "parser/ElementCardLayout.h"   // deckFieldWidth — 칸 폭 정본
 #include "parser/IncludeClosure.h"   // 충돌 코퍼스 — 인클루드 닫힘(정본)
 #include "parser/DeckWriter.h"
@@ -674,8 +674,10 @@ int cc_scanMaxId(const std::vector<std::string>& lines, const std::string& prefi
 //   지금은 정본(`include_closure`)으로 읽는다. 못 읽은 것·따라가지 않은 것은 `unopened` 로 돌려준다.
 std::vector<std::string> cc_collectScanLines(const std::vector<std::string>& lines,
                                              const std::string& modelPath,
-                                             std::vector<std::string>* unopened = nullptr) {
+                                             std::vector<std::string>* unopened = nullptr,
+                                             KooRemapper::include_closure::Closure* closureOut = nullptr) {
     const auto c = KooRemapper::include_closure::read(modelPath, lines);
+    if (closureOut) *closureOut = c;   // 노드·요소를 같은 닫힘에서 세려고(`readerMax`)
     std::vector<std::string> all = lines;
     for (const auto& f : c.files) all.insert(all.end(), f.lines.begin(), f.lines.end());
     if (unopened) {
@@ -1089,17 +1091,17 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
     // ID bases — raw-scan over model lines PLUS the whole *INCLUDE closure,
     // covering keywords KFileReader may not track (and include-file id spaces)
     std::vector<std::string> unopenedIncludes;
-    std::vector<std::string> scanLines = cc_collectScanLines(lines, modelPath, &unopenedIncludes);
+    KooRemapper::include_closure::Closure inclClosure;
+    std::vector<std::string> scanLines = cc_collectScanLines(lines, modelPath, &unopenedIncludes, &inclClosure);
     // 새 노드·요소 카드를 **이 덱의 칸 폭**으로 쓴다(정본 `deckFieldWidth`). 예전에는 `bat::` 도우미가
     // `%8d` 로 박혀 있어 i10 덱에 8칸 노드·셸을 끼웠다 — LS-DYNA 는 10칸으로 읽어 넷째 칸이 `61      62`
     // 가 된다(i10 폭 훑기 실측). 우리 `info` 는 공백 토큰을 먼저 보는 관대한 리더라 그것을 못 잡았다.
     // 독립 압축 덱(`dk`)은 자기 `*KEYWORD`(표준)를 달므로 8 그대로다.
     const int ccFw = KooRemapper::deckFieldWidth(lines);
-    // ⚠ 이 op 은 인클루드를 **실제로 읽는다**(닫힘 전부 — 중첩 포함). 그래서 할 말이 다르다 — 세트·
-    // 파트·섹션·재질은 인클루드까지 세었지만, 노드·요소 ID 는 KFileReader 가 준 Mesh 에서 오므로
-    // 여전히 이 덱 안에서만 센 값이다. 문구를 다른 op 과 뭉개면 읽는 쪽이 과신한다.
-    KooRemapper::include_scan::warnUnreadFile(console, modelPath,
-        "세트·파트·섹션·재질은 인클루드까지 세었지만 **노드·요소 ID 는 이 덱 안에서만** 세었습니다");
+    // 이 op 은 인클루드를 **실제로 읽는다**(닫힘 전부 — 중첩 포함). 세트·파트·섹션·재질은 위 코퍼스로,
+    // 노드·요소는 같은 닫힘을 주 덱과 같은 리더로 센다(2026-10-16 — 예전에는 노드·요소만 이 덱 안이었다).
+    const auto inclReaderMax = KooRemapper::include_closure::readerMax(lines, modelPath, inclClosure);
+    KooRemapper::ids::warnUnsure(console, inclReaderMax.unsure);
     if (!unopenedIncludes.empty()) {
         std::string names;
         for (size_t k = 0; k < unopenedIncludes.size() && k < 8; ++k)
@@ -1109,8 +1111,8 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
                         "개를 열지 못했거나 따라가지 않았습니다 — 그 파일의 ID 는 충돌 검사에 안 들어갔습니다");
         console.println("  열지 못한 파일: " + names);
     }
-    int nextNid  = mesh.getMaxNodeId() + 1;
-    int nextEid  = mesh.getMaxElementId() + 1;
+    int nextNid  = std::max(mesh.getMaxNodeId(), inclReaderMax.node) + 1;
+    int nextEid  = std::max(mesh.getMaxElementId(), inclReaderMax.elem) + 1;
     int nextSec  = std::max(cc_scanMaxId(scanLines, "*SECTION"), 0) + 1;
     int nextMid  = std::max(cc_scanMaxId(scanLines, "*MAT"), 0) + 1;
     int nextSet  = std::max(cc_scanMaxId(scanLines, "*SET"), 0) + 1;
