@@ -11,3 +11,11 @@
 - [x] API · MCP 재기동(API 는 stop 만 — 감독자가 띄움) → 살아 있는 MCP 가 고친 설명을 낸다 **11/11**(`describe_operation` 8 · 도구 설명 3)
 - [x] 보고서 `docs/04-report/deck-contract-1016.report.md` — 다시 잰 수치와 커밋 기록 수치를 갈라 적었다 · 결함 수를 다시 세어 31 → 34 로 고쳤다
 - [x] 관문 — 회귀 97/97 · 단위 104 · 도움말 ALL PASS · 백엔드 562 · 패리티 ALL PASS · smoke PASS · 그림 20/20 · 덱 op 21/21
+
+## 2차 — 사용자 「그것도 다 갱신해야하고 업데이트 되었으면 당연히 빌드도 다 해야한다」
+- [x] pyKooCAE 매뉴얼 `docs/manual/04_KooRemapper` — 새 항목 15 · info 다시 씀 · 기존 18개에 「2026-10 정본 대조」 · README(63 op · 색인 · REMAP 판정 표) · 곁 문서 넷 · COVERAGE §8 → pyKooCAE `6879624`(63/63 op 항목 · 낡은 말 0)
+      → 쓰다 찾아 고친 것 — applyfold·stackwrap `.k.k`(`7a13f72`) · 모르는 키 말없음 셋(`888f578`) · 재결속 도움말 v1 요약 · section 카탈로그 겹친 구절(`e0e2b3f`) · info 사용법 `[--strict]`(`36ded26`) · offset 카탈로그 「TSHELL NO czm」(`d8ed0d9`) · 매뉴얼(`110327d`)
+- [x] 릴리스 빌드 `e37fdf4f`(888f578 · GLIBC_2.35) → 회귀 97/97 · 단위 104/104 · 도움말 · 패리티 ALL PASS · 백엔드 562 · 42 op 지문 = 게시본 `43aa5d5c` 와 덱 바이트 동일(늘 달라지는 리포트 JSON 둘만)
+- [ ] 프런트 · `cli.sif` → Drive 게시 → API · MCP 재기동 → 플랫폼 경유 스모크 셋
+- [ ] 스테이징 → SmartTwinPreprocessor.sif 굽기 → `/opt/apptainers` → 세 사본 · SIF 안 실행
+- [ ] 장부 · 보고서 · 메모리 갱신(미게시 → 게시)

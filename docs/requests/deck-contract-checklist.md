@@ -1160,3 +1160,18 @@ plan2 는 이 항목의 전제를 P1-4(대역표)로 잡았다. 그런데 대역
         rc 0 · 절점 198(「인클루드 1개를 함께 읽었다」). `rclone.conf` 소유자는 그대로(koopark:koopark 600 — 09-28 ④ 재발 없음).
       ⚠ 첫 시도는 자동 모드 분류기가 「Production Deploy」로 **막았다**(사용자 승인 뒤에도). 우회하지 않고 명령을 건넸고,
         사용자가 다시 「ㄱㄱㄱ」한 뒤 같은 명령이 돌았다.
+
+### 배포 — 실사용에 반영 2차 (2026-10-16 밤)
+사용자 「그것도 다 갱신해야하고 업데이트 되었으면 당연히 빌드도 다 해야한다」 — pyKooCAE 매뉴얼을 63 op 로 갱신하고, 1차 게시 뒤
+고친 것(문구 `4f25e27` · applyfold·stackwrap `7a13f72` · 모르는 키 `888f578` · 도움말 `e0e2b3f`·`36ded26`)을 다시 게시했다.
+
+- [x] 릴리스 빌드 `e37fdf4f`(888f578 · GLIBC_2.35) — 회귀 97/97 · 단위 104/104 · 도움말 · 패리티 ALL PASS · 백엔드 562 ·
+      42 op 지문은 게시본 `43aa5d5c` 와 **덱 바이트 동일**(리포트 JSON 둘만 다르다 — 늘 다르다).
+- [x] 프런트(`index.portal.html` 포함) · `cli.sif` `13d9c3b4`(안의 바이너리 `e37fdf4f`).
+- [x] Drive `dist-20261016-222746Z`(`latest/` · 보관 4 — 10-11 판 정리) · BUILD_INFO commit `110327d`(소스는 888f578 과 같다 —
+      그 뒤는 매뉴얼뿐).
+- [x] API(감독자가 15초 뒤 기동) · MCP 재기동 — health `e37fdf4f` · `revision_matches_binary: true`.
+- [x] 살아 있는 관문 — smoke PASS(op 63 · 도구 72) · 그림 20/20 · 덱 op 21/21 · MCP 설명 반영 11/11 · 새 op 플랫폼 경유 PASS.
+- [x] pyKooCAE 스테이징 — 바이너리 `43aa5d5c → e37fdf4f` · `cli.sif` → `13d9c3b4`(백업 `bin-backups/` · `cli.sif.bak.*`).
+- [x] pyKooCAE 매뉴얼 `6879624` — 63/63 op 항목 · info 다시 씀 · REMAP 판정 표(러너 배선 실측).
+- [ ] SmartTwinPreprocessor.sif 굽기 — 결과를 아래에 적는다.
