@@ -86,6 +86,8 @@ int runStackWrap(const std::string& yamlFile, ConsoleOutput& console) {
     if (c.bentShell.empty()) { console.error("bent_shell: 이 필요하다"); return 1; }
     if (c.flatStack.empty()) { console.error("flat_stack: 이 필요하다"); return 1; }
     if (c.output.empty())    { console.error("output: 이 필요하다"); return 1; }
+    // 다른 접두사 op 과 같이 끝의 `.k` 는 뗀다 — `output: x.k` 가 `x.k.k` · `x.k_neutral.k` 를 쓰지 않게
+    if (c.output.size() > 2 && c.output.compare(c.output.size() - 2, 2, ".k") == 0) c.output.resize(c.output.size() - 2);
 
     const char* axisName = c.axis == 0 ? "x" : (c.axis == 1 ? "y" : "z");
 

@@ -1475,7 +1475,7 @@
           "role": "yaml_field",
           "yaml_path": "output",
           "required": true,
-          "description": "Output prefix — writes <output>.k and <output>_neutral.k"
+          "description": "Output prefix — writes <output>.k and <output>_neutral.k (a trailing .k is dropped first, so output: x.k writes x.k)"
         },
         {
           "name": "thickness",
@@ -1554,7 +1554,7 @@
           "role": "yaml_field",
           "yaml_path": "output",
           "required": true,
-          "description": "Output prefix — writes <output>.k"
+          "description": "Output prefix — writes <output>.k (a trailing .k is dropped first, so output: x.k writes x.k)"
         }
       ],
       "example": {

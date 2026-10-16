@@ -254,6 +254,13 @@ def main():
               all(math.dist(dn[n], src[n]) < 1e-12 for n in untouched), len(untouched))
         check("D-3 bbox 를 찍는다", kv(out, "bbox before") and kv(out, "bbox after"),
               (kv(out, "bbox before"), kv(out, "bbox after")))
+
+        # ── F: `output` 끝의 `.k` 는 뗀다 — 다른 접두사 op 과 같다(pyKooCAE REMAP 스텝은 output: Remap_dti.k 를 넣는다) ──
+        write_cfg(os.path.join(d, "f.yaml"), model="flat.k", groups="only2.yaml", output="ffold.k")
+        rc, out = run(binary, d, "applyfold", "f.yaml")
+        check("F-1 output: ffold.k → ffold.k 를 쓴다(ffold.k.k 가 아니다)",
+              rc == 0 and os.path.exists(os.path.join(d, "ffold.k"))
+              and not os.path.exists(os.path.join(d, "ffold.k.k")), (rc, out[-200:]))
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

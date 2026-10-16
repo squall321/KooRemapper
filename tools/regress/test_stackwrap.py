@@ -216,6 +216,12 @@ def main():
         run(binary, d, "stackwrap", "sw.yaml")
         check("D-1 입력 덱이 바이트 그대로다",
               open(os.path.join(d, "stack.k"), "rb").read() == before)
+        # `output` 끝의 `.k` 는 뗀다 — 다른 접두사 op 과 같다(pyKooCAE REMAP 스텝은 output: Remap_dti.k 를 넣는다)
+        write_cfg(os.path.join(d, "swk.yaml"), bent_shell="ref.k", flat_stack="stack.k", output="swk.k")
+        rc, out = run(binary, d, "stackwrap", "swk.yaml")
+        check("D-2 output: swk.k → swk.k · swk_neutral.k 를 쓴다(`.k.k` 가 아니다)",
+              rc == 0 and os.path.exists(os.path.join(d, "swk.k")) and os.path.exists(os.path.join(d, "swk_neutral.k"))
+              and not os.path.exists(os.path.join(d, "swk.k.k")), (rc, out[-200:]))
 
         # ── E: 잘못된 입력은 숫자를 내지 않는다 ──
         make_stack(os.path.join(d, "nomat.k"), chord, 1.0, 4, 2, with_mat=False)

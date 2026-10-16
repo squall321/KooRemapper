@@ -179,6 +179,9 @@ int runApplyFold(const std::string& yamlFile, ConsoleOutput& console) {
     if (model.empty())      { console.error("model: 이 필요하다"); return 1; }
     if (groupsFile.empty()) { console.error("groups: (linkage-fit 산출 yaml)이 필요하다"); return 1; }
     if (output.empty())     { console.error("output: 이 필요하다"); return 1; }
+    // 다른 접두사 op(matdb · load · matswap · cclip · assemble …)과 같이 끝의 `.k` 는 뗀다 — `output: x.k` 가 `x.k.k` 를
+    // 쓰지 않게(pyKooCAE REMAP 스텝은 `output: Remap_dti.k` 를 넣고 그 이름의 덱을 찾는다)
+    if (output.size() > 2 && output.compare(output.size() - 2, 2, ".k") == 0) output.resize(output.size() - 2);
 
     std::vector<Group> groups;
     if (!readGroups(groupsFile, groups, console)) return 1;
