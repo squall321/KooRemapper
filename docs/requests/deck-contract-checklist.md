@@ -1145,11 +1145,18 @@ plan2 는 이 항목의 전제를 P1-4(대역표)로 잡았다. 그런데 대역
       `cli.sif` `3844cc5d → 6076ef3d`(백업 `cli.sif.bak.1792144483`, 10-06 판 — 굽기 훅은 `--with-cli-sif` 없이 불러
       10-13 에 안 갈렸다). 스테이징 사본이 새 op 셋을 안다(`help`).
       ⚠ BUILD_INFO 의 커밋 칸은 그 순간의 HEAD(`60b1c2e`)다 — 위 이유로 소스는 같다.
-- [ ] **`SmartTwinPreprocessor.sif` 재bake — 사용자 말씀을 기다린다.** 세 사본(빌드 · 계산노드
-      `KooSlurmInstallAutomationRefactory/apptainer/compute-node-images` · `/opt/apptainers`)이 모두 10-14 판으로 같고 안의
-      바이너리는 `5cd1df82`(10-13 게시본)이다 — **pyKooCAE REMAP 체인은 오늘 고친 것을 아직 모른다.**
+- [x] **`SmartTwinPreprocessor.sif` 재bake — 사용자 승인(「그래 ㄱㄱ」)으로 돌렸다.** 그 전에는 세 사본(빌드 · 계산노드
+      `KooSlurmInstallAutomationRefactory/apptainer/compute-node-images` · `/opt/apptainers`)이 모두 10-14 판으로 같았고 안의
+      바이너리는 `5cd1df82`(10-13 게시본)였다 — **pyKooCAE REMAP 체인은 오늘 고친 것을 몰랐다.**
       굽기는 root 이고 끝에 Drive 업로드 · 메일 발송을 한다(09-28 에도 사용자 승인으로 돌렸다). 순서 —
       `cd ~/serviceApptainers && sudo HOME=/home/koopark bash ./BuildSmartTwinPreprocessor.sh`(훅이 스테이징을 보고 sha 를
       검증한다 — 이미 최신이라 바꿀 것 없음) → `sudo cp SmartTwinPreprocessor.sif /opt/apptainers/`(스크립트가 안 한다) →
       `apptainer exec /opt/apptainers/SmartTwinPreprocessor.sif sha256sum /opt/kooremapper/bin/KooRemapper` 가 `43aa5d5c`.
       메일 없이 굽으려면 `SKIP_NOTIFY=1`. 파이프로 감싸지 않는다(위 09-28 ⚠).
+      → **결과** — `bake rc=0` · SIF 10-16 10:31 · 구워진 sha = 스테이징 sha `43aa5d5c`(그림 op 3/3) · 계산노드 복사 ·
+        `/data/SmartTwinPreprocessor/SmartTwinPreprocessor_20261016_v114.tar.gz` · Drive 업로드 둘(SIF · tar) · 메일 「sent OK」.
+        `/opt/apptainers` 로 손 복사 → **세 사본 바이트 동일**. 그 SIF 안에서 — `help` 가 새 op 셋을 안다 · `id_floor` 가
+        예제 덱에 13 · 3 · 3 · 1(대조 above · above · above · unused — 회귀 기댓값 그대로) · 인클루드 마스터 덱 `info --strict`
+        rc 0 · 절점 198(「인클루드 1개를 함께 읽었다」). `rclone.conf` 소유자는 그대로(koopark:koopark 600 — 09-28 ④ 재발 없음).
+      ⚠ 첫 시도는 자동 모드 분류기가 「Production Deploy」로 **막았다**(사용자 승인 뒤에도). 우회하지 않고 명령을 건넸고,
+        사용자가 다시 「ㄱㄱㄱ」한 뒤 같은 명령이 돌았다.
