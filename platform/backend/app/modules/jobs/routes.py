@@ -53,7 +53,9 @@ async def create_job(
     # gmsh 가 필요한 op 은 **큐에 넣기 전에** 확인한다(P1-9). 예전에는 그냥 넣었고, 잡이 한참
     # 돌다 `Gmsh failed (exit 32512)` 로 죽었다 — 사람은 자기 덱이 잘못된 줄 안다.
     # ⚠ 파일이 있다고 gmsh 인 것은 아니다. 탐지기가 `--version` 을 실제로 돌린다.
-    if entry.get("requires_gmsh"):
+    # meshfix `preview: true` 는 gmsh 를 부르지 않는다(지울 절점을 가리키는 카드를 미리 짚기만 한다) — 그 잡까지 막으면
+    # 카탈로그의 약속(「gmsh 없이」)과 어긋난다.
+    if entry.get("requires_gmsh") and not (body.operation == "meshfix" and bool(body.args.get("preview"))):
         from app.config import settings as _settings
         from app.runner.gmsh_probe import probe as _gmsh_probe
 

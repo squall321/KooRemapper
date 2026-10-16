@@ -222,6 +222,13 @@ async def test_a_gmsh_job_is_refused_before_it_is_queued(api, db, monkeypatch):
         assert "gmsh" in r.text
         assert "건너뛴 후보" in r.text, "무엇을 왜 못 썼는지 안 알려 준다 — %s" % r.text[:300]
 
+        # `preview: true` 는 gmsh 를 부르지 않는다 — gmsh 가 없어도 큐에 들어가야 한다(카탈로그가 「gmsh 없이」라고 약속한다)
+        rp = await api.post("/api/v1/sessions/%s/jobs" % sid,
+                            json={"operation": "meshfix",
+                                  "args": {"model": "m.k", "output": "o.k", "pid": 1, "preview": True}},
+                            headers=h)
+        assert rp.status_code == 201, rp.text
+
         # gmsh 가 있으면 그대로 통과한다(관문이 길을 막아서는 안 된다)
         monkeypatch.setattr(gp, "probe", lambda _b: {
             "available": True, "version": "4.14.1", "path": "/x/gmsh", "rejected": []})
