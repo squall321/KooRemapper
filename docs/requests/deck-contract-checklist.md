@@ -845,7 +845,10 @@ plan2 는 `IdAllocator` 로 발행자를 통합하라고 했다. 정찰이 그 �
         → 남은 발행자 — 단독 `hfdamp`·`cnrb2solid`·`cnrb2spring`·`tetremesh`·`meshfix`·`ale`·`matswap`(위치
           인자판)·`cclip` 의 노드·요소. 셋 다 경고는 한다.
         → 따로 올린 것(이 커밋 아님) — `maxShellElementId_` 가 0 에서 시작(extract_surface·TSHELL 압출·오프셋
-          셸이 덱의 셸·솔리드와 **같은 EID** 를 낸다, 실측) · 주 덱 MID 맹점(리더가 아는 재질 다섯 종류만 센다) ·
+          셸이 덱의 셸·솔리드와 **같은 EID** 를 낸다, 실측) · ~~주 덱 MID 맹점(리더가 아는 재질 다섯 종류만 센다)~~
+          (고쳤다 — 재현: `*MAT_PLASTIC_KINEMATIC 2` 옆에 czm 이 MID 2 를 냈다. 실사용 6,053장 중 **781장(13%)**이
+          리더가 모르는 재질을 가진다. `*MAT_THERMAL_*`(TMID 독립 — Vol II 159546)·`*MAT_ADD_*` 는 뺀다.
+          `test_mid_unknown_types.py` 14항 · 옛 FAIL 5 · 제외 무력화 FAIL 2) ·
           ~~`ld_findMaxCurveId` 의 `_TITLE` 맹점~~(고쳤다 — 제목줄을 LCID 로 읽어 `*DEFINE_CURVE_TITLE` 의 LCID 를
           다시 냈다, 재현 rc 0. `test_curve_title_ids.py` 8항 · 옛 FAIL 3) · ~~identity 가 `*NODE` 없는 마스터 덱에 빈 `*NODE` 를 끼운다~~(고쳤다 — P1-2).
       ★**2026-10-15 에 선행이 됐다** — StepForge 답신에서 Q5 를 「**우리가 번호를 준다**」로

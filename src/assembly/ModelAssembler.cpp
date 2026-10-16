@@ -82,6 +82,36 @@ int cur_scanMaxSectionId(const std::vector<std::string>& lines) {
     return maxId;
 }
 
+// 줄들에서 `*MAT_*` 의 MID 최대값. 리더(`KFileReader`)는 재질 **다섯 종류**만 읽어 `baseMesh_.materials` 에
+// 담는다 — 그 밖의 재질(`*MAT_PLASTIC_KINEMATIC` 등)도 번호는 차지한다. 그것을 못 세어 새 재질이 그 MID 를
+// **다시** 냈다(재현: `*MAT_PLASTIC_KINEMATIC 2` 가 있는 덱에 czm 이 `*MAT_COHESIVE_MIXED_MODE 2` 를 냈다, rc 0).
+// 빼는 것 — `*MAT_THERMAL_*`(TMID 는 MID 와 **독립된** 번호다, Vol II 159546-159548)와 `*MAT_ADD_*`(새 MID 를
+// 정의하지 않고 있는 재질에 덧붙인다 — 몇몇은 첫 칸이 PID 다).
+// MID 칸은 표준·I10 에서 10칸, long 에서 20칸이다(I10 은 8칸만 넓힌다 — Vol_I 19353). 공백 토큰이 아니라
+// 칸으로 읽는다 — `         17.8500E-09` 처럼 붙은 칸을 17 로 읽지 않게.
+int cur_scanMaxMaterialId(const std::vector<std::string>& lines) {
+    int maxId = 0;
+    const int deckFw = deckFieldWidth(lines);
+    for (size_t i = 0; i < lines.size(); ++i) {
+        if (deckscan::isDataLine(lines[i])) continue;
+        const std::string kw = deckscan::kwBare(deckscan::keywordToken(lines[i]));
+        if (kw.rfind("*MAT_", 0) != 0 || kw.rfind("*MAT_THERMAL_", 0) == 0 || kw.rfind("*MAT_ADD_", 0) == 0)
+            continue;
+        const int fw = keywordFieldWidth(lines[i], deckFw) == 20 ? 20 : 10;
+        bool needTitle = kw.find("_TITLE") != std::string::npos;
+        for (size_t j = i + 1; j < lines.size(); ++j) {
+            const std::string& d = lines[j];
+            size_t h = d.find_first_not_of(" \t");
+            if (h != std::string::npos && d[h] == '*') break;
+            if (h != std::string::npos && d[h] == '$') continue;
+            if (needTitle) { needTitle = false; continue; }   // 제목 줄은 비어 있을 수 있다
+            maxId = std::max(maxId, deckscan::fieldInt(deckscan::cardFields(d, fw), 0));
+            break;                                             // 첫 데이터 카드만 본다
+        }
+    }
+    return maxId;
+}
+
 // 줄들에서 `*SET_*` 의 SID 최대값(모든 종류를 한 통으로).
 // *SET_..._TITLE 은 키워드 다음 줄이 제목이다 — 예전엔 그 제목 줄을 SID 로 읽으려다 실패하고
 // inSet 을 꺼 버려 진짜 SID 줄을 영영 못 봤다. 그러면 maxSetId_ 가 0 으로 남아
@@ -164,6 +194,8 @@ bool ModelAssembler::loadBaseModel(const std::string& filename) {
     for (const auto& [mid, mat] : baseMesh_.materials) {
         if (mid > maxMaterialId_) maxMaterialId_ = mid;
     }
+    // 리더가 모르는 재질 종류도 번호를 차지한다(`cur_scanMaxMaterialId` 머리말).
+    maxMaterialId_ = std::max(maxMaterialId_, cur_scanMaxMaterialId(rawLines_));
 
     // Scan rawLines_ for *SET_* IDs to initialize maxSetId_.
     // *SET_..._TITLE 은 키워드 다음 줄이 제목이다 — 예전엔 그 제목 줄을 SID 로 읽으려다 실패하고
@@ -273,6 +305,7 @@ void ModelAssembler::raiseMaxIdsOverIncludes() {
             unsure.push_back(path + " — 메시로 읽지 못해 노드·요소·파트·재질 번호를 세지 못했다: " + e.what());
         }
         maxSectionId_ = std::max(maxSectionId_, cur_scanMaxSectionId(lines));
+        maxMaterialId_ = std::max(maxMaterialId_, cur_scanMaxMaterialId(lines));
         maxSetId_ = std::max(maxSetId_, cur_scanMaxSetId(lines));
     }
     if (unsure.empty()) return;
