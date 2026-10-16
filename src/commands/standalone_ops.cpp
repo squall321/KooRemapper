@@ -4,6 +4,7 @@
 #include "assembly/AssemblyConfig.h"
 #include "assembly/AssemblyConfigReader.h"
 #include "cli/ConsoleOutput.h"
+#include "commands/rebind.h"
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -1457,6 +1458,68 @@ int runOffset(const std::string& yamlFile, ConsoleOutput& console) {
 // StepForge 조각(.k + 대응표 JSON)을 기존 덱에 넣는다 — 규칙과 검증은 `ModelAssembler::applyCadSolidMerge`.
 // 산출 둘 — <output>.k(조각을 덱 번호로 옮겨 `*END` 앞에 넣은 덱) · <output>_fragment_map.json(같은 칸 집합의
 // 대응표를 **덱 번호로** 옮긴 것 — 번호 이동을 되짚고, 뒤에 재결속·대조가 읽는다).
+int runRebindAfterRemesh(const std::string& yamlFile, ConsoleOutput& console) {
+    const char* tag = "rebind_entities_after_remesh";
+    {   // 탭 들여쓰기는 파싱 전에 거른다(다른 단독 op 과 같다)
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(yamlFile, tabLine)) {
+            console.error(KooRemapper::yamlTabIndentMessage(tag, tabLine));
+            return 1;
+        }
+    }
+    StandaloneYamlBase y;
+    y.resolveFiles(yamlFile);
+    if (rejectMultiOperation(yamlFile, tag, console)) return 1;
+    std::ifstream f(yamlFile);
+    if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
+    KooRemapper::yamlSkipBOM(f);
+
+    KooRemapper::rebind::Input in;
+    std::string output;
+    std::vector<std::string> unknown;
+    for (std::string ln; std::getline(f, ln);) {
+        if (!ln.empty() && ln.back() == '\r') ln.pop_back();
+        std::string tr = y.trim(ln);
+        if (tr.empty() || tr[0] == '#') continue;
+        size_t cp = tr.find(':');
+        if (cp == std::string::npos) continue;
+        const std::string key = y.keyOf(tr, cp);
+        const std::string val = y.stripQuotes(y.trim(KooRemapper::yamlStripComment(tr.substr(cp + 1))));
+        if      (key == "old_deck")   in.oldDeck = val;
+        else if (key == "new_deck")   in.newDeck = val;
+        else if (key == "entities")   in.entities = val;
+        else if (key == "output")     output = val;
+        else if (key == "range_diff") in.rangeDiff = val;
+        else unknown.push_back(key);
+    }
+    // 모르는 키는 거절한다 — `model:` 을 적으면 조용히 무시되어 다른 덱을 기준으로 삼을 수 있다
+    if (!unknown.empty()) {
+        std::string ks;
+        for (const auto& k : unknown) ks += (ks.empty() ? "" : ", ") + k;
+        console.error(std::string("[") + tag + "] 모르는 키: " + ks +
+                      " — old_deck · new_deck · entities · output · range_diff(선택)만 받는다");
+        return 1;
+    }
+    if (in.oldDeck.empty() || in.newDeck.empty() || in.entities.empty() || output.empty()) {
+        console.error(std::string("[") + tag + "] old_deck(블록이 가리키던 덱) · new_deck(다시 구운 덱) · "
+                      "entities(덧붙인 블록) · output 이 모두 있어야 합니다");
+        return 1;
+    }
+    in.oldDeck = y.resolvePath(in.oldDeck);
+    in.newDeck = y.resolvePath(in.newDeck);
+    in.entities = y.resolvePath(in.entities);
+    in.output = y.resolvePath(output);
+    if (!in.rangeDiff.empty()) in.rangeDiff = y.resolvePath(in.rangeDiff);
+    if (in.output == in.entities) {
+        console.error(std::string("[") + tag + "] output 이 entities 와 같다 — 원본 블록을 덮어쓰지 않는다");
+        return 1;
+    }
+    console.println(std::string("[") + tag + "] old " + in.oldDeck + " → new " + in.newDeck);
+    console.println(std::string("[") + tag + "] entities " + in.entities +
+                    (in.rangeDiff.empty() ? "" : "  (range_diff " + in.rangeDiff + ")"));
+    return KooRemapper::rebind::run(in, console);
+}
+
 int runCadSolidMerge(const std::string& yamlFile, ConsoleOutput& console) {
     const char* tag = "cad_solid_merge_to_deck";
     {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다

@@ -5254,3 +5254,56 @@ StepForge 와의 경계 합의(저쪽 `docs/BOUNDARY-DYNAFORGE.md` §1·§3-3)�
 - 단위 환산 · 좌표 변환 — 다르면 거절한다.
 - 번호 발행표(`IdAllocator` 대역표)가 서면 저쪽이 우리가 발행한 시작 번호로 쓰고, 이 op 은 옮기지 않고
   `ranges` 를 발행한 대역과 **대조**해 다르면 거절하게 된다(경계 Q7). 그 표는 아직 없다.
+
+---
+
+## 50. `rebind_entities_after_remesh` — 재메시 뒤 덧붙인 블록을 새 덱 번호로 다시 묶기
+
+```
+KooRemapper rebind_entities_after_remesh <config.yaml>
+```
+
+```yaml
+old_deck: v1.k                # 덧붙인 블록이 가리키던 덱(그 번호의 정본)
+new_deck: v2.k                # 다시 구운 덱
+entities: ours.k              # 우리가 덧붙인 블록만 든 .k — 바뀌지 않는다
+output: ours_rebound.k        # 새 덱 번호로 옮긴 블록 — new_deck 과 함께 *INCLUDE 해 쓴다
+range_diff: range_diff.json   # (선택) StepForge 구간 표 — 두 덱을 coord_sha 로 대조한다
+```
+
+**왜(2026-10-16).** StepForge 덱은 메시 잡마다 파트 순서대로 **전역 재번호**해 통째로 다시 쓴다. 그 위에 덧붙인
+세트·SPC·이력·CNRB 는 다음 메시 잡에서 번호가 어긋난다(StepForge `BOUNDARY-DYNAFORGE.md` §3-6). 재결속은 경계 합의로
+우리 몫이고, 입력은 구간 표 + 좌표 기준이다(Q12). 이름은 경계 문서의 이름 그대로다.
+
+**짝 찾기.** 옛 절점마다 (그 절점을 쓰는 파트의 `*PART` **제목**, 좌표 `%16.9e`×3 — `coord_sha` 와 같은 표기)가
+**정확히** 같은 새 절점을 찾는다. 공차와 「가장 가까운 절점」은 쓰지 않는다 — 다시 굽지 않은 파트는 좌표가 바이트
+그대로이고(저쪽 `coords.same`), 가까운 절점으로 옮기면 물리가 조용히 바뀐다. 맞닿은 두 파트는 같은 자리에 절점을
+따로 두므로(저쪽 덱 꼴) 파트 제목으로 가른다. 칸 자리는 `info --strict` 와 같은 정본(`parser/NodeRefs`)이다.
+
+| 거절(rc 1 · 산출 없음) | 까닭 |
+|---|---|
+| 짝이 없다 · 여럿이다 | 다시 구운 파트의 사라진 자리 — 구간 표를 주면 그 파트가 `resized` 라고 말한다 |
+| 블록에 접촉 · `*SET_PART`·`*SET_SHELL` · 요소 · 파트 카드 | 요소·파트 번호를 가리킨다 — v1 은 절점만 옮긴다 |
+| 정본이 칸 뜻을 단정 못 한 자리(`_ID` 변종 · 강제운동 Card 3 …) | 「모르는 칸은 거절」 |
+| 자유형식(콤마) 줄 | 제자리에 같은 폭으로 바꿔 쓸 수 없다 |
+| 블록이 정의한 번호가 새 덱과 겹친다 | `*NODE` · 세트 SID · CNRB PID · `*ELEMENT_MASS` EID · LCID · CID |
+| 구간 표의 `coords.before`/`after` 가 두 덱에서 다시 잰 값과 다르다 | 이 표의 이전·이후 덱이 아니다 |
+| 덱에 `*INCLUDE` · 두 덱의 정수 칸 폭이 다르다 · 모르는 YAML 키 · output = entities | v1 범위 밖 · 원본을 덮어쓰지 않는다 |
+
+받는 블록 — `*SET_NODE`(LIST·LIST_SMOOTH·COLUMN · GENERAL 의 NODE/DNODE 줄 · ADD) · `*SET_SEGMENT`(·ADD) ·
+`*BOUNDARY_SPC_NODE`·`_SET` · `*LOAD_NODE_POINT`·`*LOAD_NODE_SET` · `*INITIAL_VELOCITY_NODE`·`*INITIAL_VELOCITY` ·
+`*CONSTRAINED_EXTRA_NODES_NODE` · `*ELEMENT_MASS` · `*BOUNDARY_PRESCRIBED_MOTION_NODE` · `*DATABASE_HISTORY_NODE`·`_SET` ·
+`*CONSTRAINED_NODAL_RIGID_BODY` · `*DEFINE_COORDINATE_NODES` · `*DEFINE_CURVE`(·`_TITLE`) · `*NODE`(블록 자신의 절점).
+
+번호 칸만 같은 폭으로 바꾸고 나머지 바이트는 그대로다. 쓰기 전에 바꾼 글을 같은 정본으로 다시 보아, 가리키는 절점이
+전부 새 덱이나 블록 자신에 있는지 확인한다.
+
+예제는 `examples/rebind_entities_after_remesh/` 에 있다 — 합성이다(A 는 번호만 밀리고 B 는 3칸으로 다시 구웠다 · 두
+파트는 x=2 에서 맞닿고 절점이 따로다). StepForge 작업 폴더에는 `range_diff` 는 많아도 덱이 메시 잡마다 덮어써져 **전후
+쌍이 남지 않아** 실물 쌍으로는 아직 못 쟀다. 구간 표는 저쪽 꼴(`parts[]` 의 `part`·`before`·`after`·`state`·`moved`·
+`resized`·`coords{before, after, same}`) 그대로이고 `coord_sha` 는 저쪽 식이다. 회귀 `tools/regress/test_rebind_after_remesh.py`
+20항(변이 둘 — 파트 이름을 빼면 맞닿은 자리에서 못 풀고, 구간 표 대조를 빼면 불일치를 놓친다).
+
+**아직 아닌 것.** 요소·파트 참조 · 공차 · 인클루드가 있는 덱 · 자유형식 줄 바꿔 쓰기 · meshfix 안의 같은 재결속(plan2 P2-6 —
+지금 meshfix 는 지울 절점을 가리키면 쓰지 않고 멈춘다, §40).
+

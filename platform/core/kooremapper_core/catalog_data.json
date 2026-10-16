@@ -13988,6 +13988,71 @@
       "notes": "What is carried: *KEYWORD, *TITLE, *PARAMETER*, *CONTROL_*, *DATABASE_ other than *DATABASE_HISTORY_*, the chosen parts' *PART pairs, their *SECTION_*/*MAT_*/*EOS_*/*HOURGLASS blocks, *DEFINE_CURVE/TABLE, the *NODE lines their elements use, their *ELEMENT_{SOLID,SHELL,TSHELL} cards and the trimmed sets. *DATABASE_HISTORY_* is dropped because it holds node and element IDs that may not survive. Everything else is dropped and counted by keyword in the report. A *PART_* variant the op cannot chunk (*PART_INERTIA and friends) is carried whole when one of its first-field PIDs was chosen, which may bring unselected parts along; LS-DYNA warns about a part with no elements, and that is far better than losing a rigid body silently. Card line counts come from the one shared judge, ElementCardLayout::elementCardSpan, so a higher-order solid's second node card is carried too. Field widths follow the deck: *NODE and *ELEMENT_* at the width *KEYWORD declares (8, i10=y 10, long=y 20) or the keyword suffix, *SET_* and *PART* at I10 (I20 under long). Lines are copied, not re-rendered, so fixed-width exponents are never truncated and original newlines survive; renumbering replaces single fields in place for the same reason. Relative paths resolve against the YAML file's directory."
     },
     {
+      "name": "rebind_entities_after_remesh",
+      "category": "mesh",
+      "summary": "Re-bind the node IDs in blocks added on top of a deck (sets, SPC, loads, history, CNRB PNODE …) to a re-meshed deck by matching each node's part name and exact coordinates.",
+      "description": "StepForge renumbers its whole deck in part order on every mesh job, so sets, constraints and outputs we added on top of an earlier deck point at the wrong nodes afterwards. The boundary agreement makes re-binding ours, with the range table and coordinates as input (Q12). Each node referenced by the added blocks is matched to the node of the new deck that belongs to the same part (by *PART title) and sits at exactly the same coordinates, written as %16.9e like coord_sha; there is no tolerance and no nearest-node fallback, because that would change the physics silently. Nodes on a touching interface, which StepForge keeps separate per part, are told apart by the part name. The field positions are the same canonical table that info --strict uses (parser/NodeRefs). The op refuses, with exit code 1 and no output, when a referenced node has no single match (a re-meshed part's vanished position, or several candidates), when the blocks hold cards that point at elements or parts (contacts, *SET_PART, *SET_SHELL …) or cards whose node fields cannot be pinned down, when a line is free-format, or when an ID the blocks define themselves (*NODE, set SID, CNRB PID, *ELEMENT_MASS EID, LCID, CID) already exists in the new deck. With range_diff, every coords.before / coords.after is measured again on the two decks and any difference refuses the run; unmatched nodes of a part the table marks as resized are reported as such. Only the node ID fields change, at their width; every other byte is kept.",
+      "invocation": "yaml",
+      "config_style": "structured",
+      "takes_kfile": true,
+      "requires_gmsh": false,
+      "requires_tetgen": false,
+      "params": [
+        {
+          "name": "old_deck",
+          "type": "file",
+          "role": "yaml_field",
+          "yaml_path": "old_deck",
+          "required": true,
+          "description": "The deck the added blocks were written against (its numbering is what they point at). Single-file decks only."
+        },
+        {
+          "name": "new_deck",
+          "type": "file",
+          "role": "yaml_field",
+          "yaml_path": "new_deck",
+          "required": true,
+          "description": "The re-meshed deck. Single-file decks only; its integer field width must equal old_deck's."
+        },
+        {
+          "name": "entities",
+          "type": "file",
+          "role": "yaml_field",
+          "yaml_path": "entities",
+          "required": true,
+          "description": "A .k file holding only the blocks we added (sets, SPC, loads, history, CNRB, mass, coordinate nodes, curves). It is not changed."
+        },
+        {
+          "name": "output",
+          "type": "output",
+          "role": "yaml_field",
+          "yaml_path": "output",
+          "required": true,
+          "description": "The re-bound blocks, to be *INCLUDEd together with new_deck. Must differ from entities."
+        },
+        {
+          "name": "range_diff",
+          "type": "file",
+          "role": "yaml_field",
+          "yaml_path": "range_diff",
+          "required": false,
+          "description": "Optional StepForge range table (range_diff JSON). Each part's coord_sha is checked on both decks."
+        }
+      ],
+      "example": {
+        "args": {
+          "old_deck": "v1.k",
+          "new_deck": "v2.k",
+          "entities": "ours.k",
+          "output": "ours_rebound.k",
+          "range_diff": "range_diff.json"
+        },
+        "note": "실행 검증된 예제 (합성 — A 는 번호만 밀리고 B 는 다시 구웠다. 구간 표는 StepForge range_diff 꼴 그대로)"
+      },
+      "example_folder": "examples/rebind_entities_after_remesh",
+      "notes": "Relative paths resolve against the YAML file's directory. Unknown YAML keys are refused so that a stray model: key cannot silently pick another deck. The re-bound text is checked again with the same table before it is written: every referenced node must exist in new_deck or in the blocks themselves."
+    },
+    {
       "name": "cad_solid_merge_to_deck",
       "category": "mesh",
       "summary": "Insert a StepForge part fragment (.k + map JSON) into an existing deck: check it against the boundary contract, renumber it above the deck's IDs and re-verify each part's coord_sha.",

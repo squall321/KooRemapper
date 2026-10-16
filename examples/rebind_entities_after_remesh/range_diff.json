@@ -1,0 +1,72 @@
+{
+  "parts": [
+    {
+      "part": "A#1",
+      "before": {
+        "node_start": 1,
+        "node_count": 12,
+        "elem_start": 1,
+        "elem_count": 2,
+        "pid": 1
+      },
+      "after": {
+        "node_start": 21,
+        "node_count": 12,
+        "elem_start": 4,
+        "elem_count": 2,
+        "pid": 1
+      },
+      "state": "moved",
+      "moved": true,
+      "resized": false,
+      "delta_nodes": 0,
+      "delta_elems": 0,
+      "coords": {
+        "before": "2ebd7cd0505032fa",
+        "after": "2ebd7cd0505032fa",
+        "same": true
+      }
+    },
+    {
+      "part": "B#2",
+      "before": {
+        "node_start": 13,
+        "node_count": 12,
+        "elem_start": 3,
+        "elem_count": 2,
+        "pid": 2
+      },
+      "after": {
+        "node_start": 1,
+        "node_count": 16,
+        "elem_start": 1,
+        "elem_count": 3,
+        "pid": 2
+      },
+      "state": "resized",
+      "moved": true,
+      "resized": true,
+      "delta_nodes": 4,
+      "delta_elems": 1,
+      "coords": {
+        "before": "edc7e7f0f71cdba2",
+        "after": "64740e5a88f8912a",
+        "same": false
+      }
+    }
+  ],
+  "counts": {
+    "same": 0,
+    "moved": 2,
+    "resized": 1,
+    "added": 0,
+    "removed": 0
+  },
+  "coords": {
+    "identical": 1,
+    "changed": 1,
+    "unknown": 0
+  },
+  "snapshot": {},
+  "basis": "예제 — StepForge range_diff 꼴(§3-6)을 합성했다. coord_sha 는 저쪽 식 그대로"
+}

@@ -916,6 +916,28 @@ axis: z
           "중립축·굽힘강성은 `neutralaxis` 와 **같은 계산**이다 — 숫자가 서로 다르면 결함이다",
           "얇은 층은 min_bar_px 로 바닥 처리하므로 두께가 과장된다 — 그 층은 **옆 숫자가 참**이고",
           "  그림이 아니다. 몇 층을 바닥 처리했는지 말한다"])
+op("rebind_entities_after_remesh", "메시 편집", "재메시 뒤 덧붙인 블록의 절점 번호를 (파트 이름, 좌표)로 새 덱 번호에 **다시 묶는다**",
+   "재결속 rebind remesh 재메시 번호 밀림 stepforge range_diff coord_sha 세트 SPC 이력 위치",
+   "KooRemapper rebind_entities_after_remesh <config.yaml>",
+   needs=["examples/rebind_entities_after_remesh/v1.k", "examples/rebind_entities_after_remesh/v2.k",
+          "examples/rebind_entities_after_remesh/ours.k", "examples/rebind_entities_after_remesh/range_diff.json"],
+   files={"rb.yaml": """old_deck: examples/rebind_entities_after_remesh/v1.k
+new_deck: examples/rebind_entities_after_remesh/v2.k
+entities: examples/rebind_entities_after_remesh/ours.k
+output: ours_rebound.k
+range_diff: examples/rebind_entities_after_remesh/range_diff.json
+"""},
+   cmds=["KooRemapper rebind_entities_after_remesh rb.yaml"],
+   outputs=["ours_rebound.k"],
+   notes=["경계 합의(StepForge §3-6 · Q12) — StepForge 덱은 메시 잡마다 파트 순서대로 **전역 재번호**한다. 그 위에",
+          "  덧붙인 세트·SPC·이력·CNRB 를 새 덱 번호로 옮기는 것이 이 op 이다(구간 표 + 좌표 기준)",
+          "★짝은 옛 절점의 (그 절점을 쓰는 파트 **이름**, 좌표 `%16.9e`×3)와 **정확히** 같은 새 절점이다 — 공차·가장",
+          "  가까운 절점은 쓰지 않는다(물리가 조용히 바뀐다). 맞닿은 두 파트의 같은 자리 절점은 파트 이름으로 가른다",
+          "다시 구운 파트의 사라진 자리 · 짝이 여럿 · 블록에 요소·파트를 가리키는 카드(접촉 · `*SET_PART` …) · 정본이",
+          "  칸 뜻을 단정 못 한 자리 · 자유형식 줄 · 블록이 정의한 번호가 새 덱과 겹침 — 하나라도 있으면 **쓰지 않는다**(rc 1)",
+          "`range_diff` 를 주면 파트마다 `coords.before`/`after` 를 두 덱에서 **다시 재어** 대조한다 — 다르면 거절",
+          "번호 칸만 같은 폭으로 바꾸고 나머지 바이트는 그대로다. 산출을 새 덱과 함께 `*INCLUDE` 해 쓴다",
+          "v1 은 한 파일 덱만 받는다(인클루드가 있으면 거절) · 칸 자리는 `info --strict` 와 같은 정본(`parser/NodeRefs`)"])
 op("cad_solid_merge_to_deck", "메시 편집", "StepForge 조각(.k + 대응표)을 기존 덱에 **넣는다** — 계약 대조 · 번호 이동 · coord_sha 검산",
    "조각 삽입 fragment merge insert stepforge 대응표 coord_sha cad solid 넣기 경계",
    "KooRemapper cad_solid_merge_to_deck <config.yaml>",

@@ -1097,6 +1097,16 @@ axis: z
      {"KooRemapper stackdiagram sd.yaml"},
      {"examples/stackwrap/flat_stack.k"},
      {"★**2차 솔리드는 거절한다**(ELFORM 16·17·25~28) — 리더가 앞 8칸만 저장해 중간절점이", "  코너로 들어온다. 실측: `convert type: tet10` 덱의 단면 총면적이 0.19(1차 원본 0.665)인데", "  다각형 수는 둘 다 2개라 **알아볼 수가 없다.** 20절점 육면체(ELFORM 23)는 그린다", "격자를 자르지 않는다 — 파트별 **축 범위**(사실상 AABB)만 쓰는 **모식도**다.", "  그래서 평평한 적층에서는 빠르고 또렷하지만, 쓸 수 있는 덱이 제한된다", "★범위가 포개지는 적층(감긴 셀)은 **거절한다** — 포갠 것을 층처럼 쌓으면 층 순서가", "  거짓이 되고 그림은 그럴듯해 보인다. 그 덱은 `section` 으로 잘라서 봐야 한다", "  (`force: true` 로 넘길 수 있지만 그림에 '믿지 말라' 고 적는다)", "적층 전체를 **품는** 파트(케이스·탭)는 갈라내서 점선 외곽으로만 그린다 —", "  실측에서 '전체의 90% 이상' 같은 분수 문턱은 88.4% 에서 빗나갔다(셸 띠가 분모를 늘린다)", "`*MAT` 을 못 읽으면(포함 파일에 있는 흔한 경우) 층은 그리고 **중립축만** 생략한다", "중립축·굽힘강성은 `neutralaxis` 와 **같은 계산**이다 — 숫자가 서로 다르면 결함이다", "얇은 층은 min_bar_px 로 바닥 처리하므로 두께가 과장된다 — 그 층은 **옆 숫자가 참**이고", "  그림이 아니다. 몇 층을 바닥 처리했는지 말한다"}},
+    {"rebind_entities_after_remesh", "메시 편집", "재메시 뒤 덧붙인 블록의 절점 번호를 (파트 이름, 좌표)로 새 덱 번호에 **다시 묶는다**", "재결속 rebind remesh 재메시 번호 밀림 stepforge range_diff coord_sha 세트 SPC 이력 위치", "KooRemapper rebind_entities_after_remesh <config.yaml>",
+     {{"rb.yaml", R"KRH(old_deck: examples/rebind_entities_after_remesh/v1.k
+new_deck: examples/rebind_entities_after_remesh/v2.k
+entities: examples/rebind_entities_after_remesh/ours.k
+output: ours_rebound.k
+range_diff: examples/rebind_entities_after_remesh/range_diff.json
+)KRH"}},
+     {"KooRemapper rebind_entities_after_remesh rb.yaml"},
+     {"examples/rebind_entities_after_remesh/v1.k", "examples/rebind_entities_after_remesh/v2.k", "examples/rebind_entities_after_remesh/ours.k", "examples/rebind_entities_after_remesh/range_diff.json"},
+     {"경계 합의(StepForge §3-6 · Q12) — StepForge 덱은 메시 잡마다 파트 순서대로 **전역 재번호**한다. 그 위에", "  덧붙인 세트·SPC·이력·CNRB 를 새 덱 번호로 옮기는 것이 이 op 이다(구간 표 + 좌표 기준)", "★짝은 옛 절점의 (그 절점을 쓰는 파트 **이름**, 좌표 `%16.9e`×3)와 **정확히** 같은 새 절점이다 — 공차·가장", "  가까운 절점은 쓰지 않는다(물리가 조용히 바뀐다). 맞닿은 두 파트의 같은 자리 절점은 파트 이름으로 가른다", "다시 구운 파트의 사라진 자리 · 짝이 여럿 · 블록에 요소·파트를 가리키는 카드(접촉 · `*SET_PART` …) · 정본이", "  칸 뜻을 단정 못 한 자리 · 자유형식 줄 · 블록이 정의한 번호가 새 덱과 겹침 — 하나라도 있으면 **쓰지 않는다**(rc 1)", "`range_diff` 를 주면 파트마다 `coords.before`/`after` 를 두 덱에서 **다시 재어** 대조한다 — 다르면 거절", "번호 칸만 같은 폭으로 바꾸고 나머지 바이트는 그대로다. 산출을 새 덱과 함께 `*INCLUDE` 해 쓴다", "v1 은 한 파일 덱만 받는다(인클루드가 있으면 거절) · 칸 자리는 `info --strict` 와 같은 정본(`parser/NodeRefs`)"}},
     {"cad_solid_merge_to_deck", "메시 편집", "StepForge 조각(.k + 대응표)을 기존 덱에 **넣는다** — 계약 대조 · 번호 이동 · coord_sha 검산", "조각 삽입 fragment merge insert stepforge 대응표 coord_sha cad solid 넣기 경계", "KooRemapper cad_solid_merge_to_deck <config.yaml>",
      {{"m.yaml", R"KRH(model: examples/cad_solid_merge_to_deck/deck.k
 output: merged.k

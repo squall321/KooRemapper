@@ -1,0 +1,6 @@
+# 재메시 뒤 덧붙인 블록(ours.k)의 절점 번호를 다시 구운 덱(v2.k) 번호로 다시 묶는다
+old_deck: v1.k
+new_deck: v2.k
+entities: ours.k
+output: ours_rebound.k
+range_diff: range_diff.json

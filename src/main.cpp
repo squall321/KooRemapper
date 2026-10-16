@@ -2613,6 +2613,23 @@ static int runMain(int argc, char* argv[]) {
     }
 
     // StepForge 조각을 기존 덱에 넣는다(경계 합의 §3-3 — 조각을 쓰는 것은 StepForge, 넣는 것은 우리)
+    if (command == "rebind_entities_after_remesh") {
+        if (argc < 3) {
+            console.error("Usage: KooRemapper rebind_entities_after_remesh <config.yaml>");
+            console.info("Re-binds the node IDs in blocks we added on top of a deck (sets, SPC, loads, history,");
+            console.info("CNRB PNODE, ...) to a re-meshed deck: each old node is matched to the new node of the");
+            console.info("same part (by *PART title) at exactly the same coordinates (%16.9e, like coord_sha).");
+            console.info("Unmatched references, cards that point at elements/parts, and ID clashes are refused");
+            console.info("(rc 1, nothing written). With range_diff, both decks are checked against its coord_sha.");
+            console.info("Minimal config:");
+            console.info("  old_deck: v1.k");
+            console.info("  new_deck: v2.k");
+            console.info("  entities: ours.k");
+            console.info("  output: ours_rebound.k");
+            return 1;
+        }
+        return runRebindAfterRemesh(argv[2], console);
+    }
     if (command == "cad_solid_merge_to_deck") {
         if (argc < 3) {
             console.error("Usage: KooRemapper cad_solid_merge_to_deck <config.yaml>");

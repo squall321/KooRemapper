@@ -241,6 +241,7 @@ set(COMMAND_SOURCES
     src/commands/merge.cpp
     src/commands/tetremesh.cpp
     src/commands/meshfix.cpp
+    src/commands/rebind.cpp
     src/commands/surface_extract.cpp
     src/commands/cclip.cpp
     src/commands/modelmeta.cpp
