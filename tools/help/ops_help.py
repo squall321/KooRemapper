@@ -733,7 +733,7 @@ tssfac: 0.67
 # ── 정보 ──
 op("info", "정보·메타", "메시 정보(절점·요소·파트 수, bbox 두 기준, 품질) 출력",
    "정보 조회 bbox 품질 고아절점 orphan",
-   "KooRemapper info <mesh_file>",
+   "KooRemapper info <mesh_file> [--strict]",
    files={"box.yaml": BOX}, cmds=[BOX_CMD, "KooRemapper info box.k"], outputs=[],
    notes=["★`Min bound`·`Max bound`·`Size` 는 **요소가 쓰는 절점** 기준이다(고아 제외) —",
           "  낙하판·접촉면을 bbox 로 놓는 도구는 **이 값**을 써야 한다. `bbox basis` 가 그것을 적는다",

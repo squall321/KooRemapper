@@ -982,7 +982,7 @@ tssfac: 0.67
      {"KooRemapper generate box box.yaml", "KooRemapper optimize opt.yaml"},
      {},
      {}},
-    {"info", "정보·메타", "메시 정보(절점·요소·파트 수, bbox 두 기준, 품질) 출력", "정보 조회 bbox 품질 고아절점 orphan", "KooRemapper info <mesh_file>",
+    {"info", "정보·메타", "메시 정보(절점·요소·파트 수, bbox 두 기준, 품질) 출력", "정보 조회 bbox 품질 고아절점 orphan", "KooRemapper info <mesh_file> [--strict]",
      {{"box.yaml", R"KRH(output: box.k
 lx: 20.0
 ly: 10.0
