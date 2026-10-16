@@ -60,7 +60,9 @@ struct Walker {
 }  // namespace
 
 // 칸 자리는 `ModelAssembler::cleanupDeadNodeRefs` 머리말의 매뉴얼 확정표(Vol_I 줄 번호)를 그대로 옮겼다.
-// 그 장치는 **고치는** 쪽(빼기·옮기기·보고)이고 이것은 **찾는** 쪽이다 — 두 곳이 같은 칸을 말해야 한다.
+// 그 장치는 **고치는** 쪽(빼기·옮기기·보고)이고 이것은 **찾는** 쪽이다. 한 줄짜리 카드 표와 정의 카드 표는 이제
+// 두 곳이 **같은 표**(`oneFieldCards`·`definitionNodeCards`)를 쓴다(2026-10-16). 세트·세그먼트·이력 목록의 칸 범위는
+// 고치는 동작이 갈래마다 달라 그쪽에 남아 있다 — 같은 범위(1-8 · 1-4)를 말해야 한다.
 Scan find(const std::vector<std::string>& L, int deckFw, const std::function<bool(int)>& keep) {
     Scan s;
     Walker w{L, keep, s};
@@ -105,23 +107,14 @@ Scan find(const std::vector<std::string>& L, int deckFw, const std::function<boo
             for (size_t m = first; m < data.size(); ++m) w.take(data[m], kw, {0, 1, 2, 3}, w10);
             continue;
         }
-        // ── 칸 하나가 절점인 한 줄짜리 카드 — 이름이 **정확히** 같을 때만 ─────────────
+        // ── 칸 하나가 절점인 한 줄짜리 카드 — 이름이 **정확히** 같을 때만(정본 표 `oneFieldCards`) ─────
         //   `_ID`·`_BIRTH_DEATH` 등은 카드가 한 장 더 붙어 「줄 하나 = 카드 하나」가 아니다 → 세어만 둔다.
-        struct One { const char* kw; int field; bool eight; };
-        static const One kOne[] = {
-            {"*BOUNDARY_SPC_NODE", 0, false},                // NID              46945-47012
-            {"*LOAD_NODE_POINT", 0, false},                  // NID              207114-207168
-            {"*INITIAL_VELOCITY_NODE", 0, false},            // NID              192116-192161
-            {"*CONSTRAINED_EXTRA_NODES_NODE", 1, false},     // PID NID          52799-52849
-            {"*ELEMENT_MASS", 1, true},                      // EID NID(8칸 표)  159866-159930
-            {"*BOUNDARY_PRESCRIBED_MOTION_NODE", 0, false},  // TYPEID           43306-43420
-        };
         bool done = false;
-        for (const auto& o : kOne) {
-            if (!starts(kw, o.kw)) continue;
+        for (const auto& o : oneFieldCards()) {
+            if (!starts(kw, o.keyword)) continue;
             done = true;
-            if (kw != o.kw) { w.skipped(kw); break; }
-            const int wd = o.eight ? ifw : w10;
+            if (kw != o.keyword) { w.skipped(kw); break; }
+            const int wd = o.eightWide ? ifw : w10;
             const bool prescribed = (kw == "*BOUNDARY_PRESCRIBED_MOTION_NODE");
             for (size_t m = 0; m < data.size(); ++m) {
                 w.take(data[m], kw, {o.field}, wd);
@@ -152,17 +145,19 @@ Scan find(const std::vector<std::string>& L, int deckFw, const std::function<boo
         // ── CNRB 의 PNODE(칸 4 · 61032-61057) · 좌표계 절점(칸 2-4 · 128642-128690) ──────────────
         //   옵션이 없는 맨 키워드는 Card 1 만 있어 **줄마다 정의 하나**다 — 모든 줄을 본다(재결속이 뒤 정의의 PNODE 를
         //   놓치면 조용히 틀린다). 옵션(TITLE·SPC·INERTIA)이 붙으면 카드 세트 길이가 달라 **첫 정의만** 본다(놓치는 쪽).
-        if (starts(kw, "*CONSTRAINED_NODAL_RIGID_BODY") || starts(kw, "*DEFINE_COORDINATE_NODES")) {
-            const bool cnrb = starts(kw, "*CONSTRAINED_NODAL_RIGID_BODY");
-            const std::vector<int> idx = cnrb ? std::vector<int>{3} : std::vector<int>{1, 2, 3};
-            if (kw == "*CONSTRAINED_NODAL_RIGID_BODY" || kw == "*DEFINE_COORDINATE_NODES") {
-                for (size_t m = 0; m < data.size(); ++m) w.take(data[m], kw, idx, w10);
+        bool defDone = false;
+        for (const auto& dc : definitionNodeCards()) {
+            if (!starts(kw, dc.keyword)) continue;
+            defDone = true;
+            if (kw == dc.keyword) {
+                for (size_t m = 0; m < data.size(); ++m) w.take(data[m], kw, dc.fields, w10);
             } else {
                 const size_t k = static_cast<size_t>(cards::titleLines(kw));
-                if (k < data.size()) w.take(data[k], kw, idx, w10);
+                if (k < data.size()) w.take(data[k], kw, dc.fields, w10);
             }
-            continue;
+            break;
         }
+        if (defDone) continue;
         // ── 절점을 무는 줄 알지만 칸 뜻이 변종마다 갈리는 카드 — 세어만 둔다 ──────────
         //   `*CONSTRAINED_JOINT_STIFFNESS_*` 의 첫 칸은 JSID 다 · `_ID`·`_FAILURE` 가 카드를 더 붙인다 ·
         //   보 족은 격자 리더가 담지 않는다.
@@ -173,6 +168,26 @@ Scan find(const std::vector<std::string>& L, int deckFw, const std::function<boo
         }
     }
     return s;
+}
+
+const std::vector<OneFieldCard>& oneFieldCards() {
+    static const std::vector<OneFieldCard> t = {
+        {"*BOUNDARY_SPC_NODE", 0, false},                // NID              Vol_I 46945-47012
+        {"*LOAD_NODE_POINT", 0, false},                  // NID              207114-207168
+        {"*INITIAL_VELOCITY_NODE", 0, false},            // NID              192116-192161
+        {"*CONSTRAINED_EXTRA_NODES_NODE", 1, false},     // PID NID          52799-52849
+        {"*ELEMENT_MASS", 1, true},                      // EID NID(8칸 표)  159866-159930
+        {"*BOUNDARY_PRESCRIBED_MOTION_NODE", 0, false},  // TYPEID           43306-43420
+    };
+    return t;
+}
+
+const std::vector<DefinitionNodeCard>& definitionNodeCards() {
+    static const std::vector<DefinitionNodeCard> t = {
+        {"*CONSTRAINED_NODAL_RIGID_BODY", {3}},          // PID CID NSID PNODE … 61032-61057
+        {"*DEFINE_COORDINATE_NODES", {1, 2, 3}},         // CID N1 N2 N3 …      128642-128690
+    };
+    return t;
 }
 
 bool mayReference(const std::string& kw) {

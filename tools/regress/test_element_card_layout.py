@@ -480,6 +480,50 @@ def main():
             check("지운 것이 아니라 옮겼다고 보고한다",
                   "새 층 노드로 바꿨습니다" in out, out[-1500:])
 
+        print("[J2 정본 표로 옮긴 뒤 — i10 덱의 집중질량 · 맨 CNRB 의 둘째 정의 PNODE]")
+        # (2026-10-16) 정리 장치가 칸 표를 정본(`noderefs::oneFieldCards`·`definitionNodeCards`)에서 읽는다.
+        # 예전 사본은 `*ELEMENT_MASS` 칸을 8 로 못 박아 i10 덱(칸 10)에서 칸을 잘못 잘랐고, 맨 CNRB 는 첫 정의의
+        # PNODE 만 봐 뒤 정의의 PNODE 를 지운 절점 그대로 두었다.
+        def stack_deck_i10(tail=""):
+            rows = []
+            n = 500001
+            for z in [0.0, 2.5, 5.0]:
+                for y in [0.0, 10.0]:
+                    for x in [0.0, 10.0]:
+                        rows.append("%10d%16.6f%16.6f%16.6f" % (n, x, y, z))
+                        n += 1
+            el = ["*ELEMENT_SOLID"]
+            for k in range(2):
+                base = 500001 + 4 * k
+                nn = [base, base + 1, base + 3, base + 2, base + 4, base + 5, base + 7, base + 6]
+                el.append("%10d%10d" % (k + 1, 1) + "".join("%10d" % v for v in nn))
+            return ("*KEYWORD I10=Y\n*NODE\n" + "\n".join(rows) + "\n" + "\n".join(el) + "\n"
+                    + "*PART\nSTACK\n         1         1         1\n"
+                    + "*SECTION_SOLID\n         1         1\n"
+                    + "*MAT_ELASTIC\n         1  7.85e-09    210000       0.3\n"
+                    + tail + "*END\n")
+        w("bi.k", stack_deck_i10("*ELEMENT_MASS\n%10d%10d%16.6f%10d\n" % (9001, 500006, 1.0, 0)))
+        w("bi.yaml", yaml("bi.k", "bi_out.k", pid=1).replace("thickness: 1.25", "thickness: 2.5"))
+        rc, out = run(binary, d, "restack", "bi.yaml")
+        check("J2 i10 덱 restack rc=0", rc == 0, out[-800:])
+        if rc == 0:
+            mass = [l for l in section(P("bi_out.k"), "*ELEMENT_MASS") if l.strip() and not l.startswith("$")]
+            ok = len(mass) == 1 and len(mass[0]) >= 20 and int(mass[0][:10]) == 9001
+            nid = int(mass[0][10:20]) if ok else None
+            check("J2 ★i10 집중질량 — 칸 10 그대로 · 절점이 지운 500006 이 아닌 새 층 절점",
+                  ok and nid not in (500005, 500006, 500007, 500008) and nid > 0, mass)
+        cn = ("*SET_NODE_LIST\n        77\n    500001    500002\n"
+              "*CONSTRAINED_NODAL_RIGID_BODY\n       901         0        77         0\n"
+              "       902         0        77    500007\n")
+        w("cn.k", stack_deck(cn))
+        w("cn.yaml", yaml("cn.k", "cn_out.k", pid=1).replace("thickness: 1.25", "thickness: 2.5"))
+        rc, out = run(binary, d, "restack", "cn.yaml")
+        check("J2 CNRB 두 정의 restack rc=0", rc == 0, out[-800:])
+        if rc == 0:
+            rows = [l for l in section(P("cn_out.k"), "*CONSTRAINED_NODAL_RIGID_BODY") if l.strip() and not l.startswith("$")]
+            pn = int(rows[1][30:40]) if len(rows) == 2 and len(rows[1]) >= 40 else None
+            check("J2 ★둘째 정의의 PNODE(지운 500007)를 같은 자리 새 층 절점으로", pn not in (None, 0, 500007), rows)
+
         print("[K 확정한 카드는 정리, 확정 못 한 카드는 manual — strict 에서 rc=1]")
         pm = ("*BOUNDARY_PRESCRIBED_MOTION_NODE\n"
               "    500005         3         2         1       1.0\n"

@@ -35,6 +35,15 @@ Scan find(const std::vector<std::string>& lines, int deckFw,
 // 이 블록만 담으려고 쓴다(`*NODE`·`*ELEMENT_` 를 통째로 들지 않는다).
 bool mayReference(const std::string& kw);
 
+// ── 정본 표 — `find` 와 `ModelAssembler::cleanupDeadNodeRefs`(지운 절점을 고치는 쪽)가 **같은 표**를 본다 ──
+// 칸 하나가 절점인 한 줄짜리 카드(이름이 정확히 같을 때만 — `_ID` 등 변종은 카드가 한 장 더 붙는다).
+// `eightWide` — 매뉴얼 표가 1-10 칸(8칸 폭)이라 i10·long 덱에서 덱 정수 폭을 따른다. 나머지는 1-8 칸 표(10칸 폭).
+struct OneFieldCard { const char* keyword; int field; bool eightWide; };
+const std::vector<OneFieldCard>& oneFieldCards();
+// 정의 카드의 정해진 칸이 절점인 카드 — CNRB 의 PNODE · 좌표계 절점. 옵션 없는 맨 키워드는 줄마다 정의 하나다.
+struct DefinitionNodeCard { const char* keyword; std::vector<int> fields; };
+const std::vector<DefinitionNodeCard>& definitionNodeCards();
+
 // 그 참조의 키워드(대문자 · 칸폭 접미사 뗌).
 std::string keywordOf(const std::vector<std::string>& lines, const Ref& r);
 

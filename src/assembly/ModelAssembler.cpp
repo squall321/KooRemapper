@@ -1,4 +1,5 @@
 #include "assembly/ModelAssembler.h"
+#include "parser/NodeRefs.h"   // 지운 절점을 가리키는 칸의 정본 표(oneFieldCards · definitionNodeCards)
 #include "parser/InitialStressCard.h"   // *INITIAL_STRESS_SOLID 카드 1 정본(I10×8)
 #include "parser/IncludeScan.h"
 #include "commands/cnrb2solid.h"
@@ -2775,19 +2776,24 @@ void ModelAssembler::cleanupDeadNodeRefs(const std::set<int>& deadNodes,
             continue;
         }
 
-        // ── 3. 칸 1 이 노드 ID 인 한 줄짜리 카드 ─────────────────────────────
-        // fw = 매뉴얼 카드 표의 칸 수에서 온 폭(1-8 칸 표 = 10 칸, 1-10 칸 표 = 8 칸).
-        struct OneFieldKw { const char* kw; int field; int fw; const char* what; };
-        static const OneFieldKw kOneField[] = {
-            { "*BOUNDARY_SPC_NODE",              0, 10, "구속을 걸 노드가 사라졌습니다" },
-            { "*LOAD_NODE_POINT",                0, 10, "하중을 걸 노드가 사라졌습니다" },
-            { "*INITIAL_VELOCITY_NODE",          0, 10, "초기 속도를 줄 노드가 사라졌습니다" },
-            { "*CONSTRAINED_EXTRA_NODES_NODE",   1, 10, "강체에 더할 노드가 사라졌습니다" },
-            { "*ELEMENT_MASS",                   1,  8, "집중질량을 붙일 노드가 사라졌습니다" },
+        // ── 3. 칸 1 이 노드 ID 인 한 줄짜리 카드 — 표는 정본(`noderefs::oneFieldCards`)이다 ─────────────
+        // 예전에는 여기 표의 사본이 있었다(2026-10-16 옮김). 안내 문구만 여기 둔다. 8칸 표 카드(`*ELEMENT_MASS`)는
+        // 덱 정수 폭을 따른다 — 예전 사본은 8 로 못 박아 i10 덱에서 칸을 잘못 잘랐다.
+        auto oneFieldWhat = [](const std::string& k) -> const char* {
+            if (k == "*BOUNDARY_SPC_NODE") return "구속을 걸 노드가 사라졌습니다";
+            if (k == "*LOAD_NODE_POINT") return "하중을 걸 노드가 사라졌습니다";
+            if (k == "*INITIAL_VELOCITY_NODE") return "초기 속도를 줄 노드가 사라졌습니다";
+            if (k == "*CONSTRAINED_EXTRA_NODES_NODE") return "강체에 더할 노드가 사라졌습니다";
+            if (k == "*ELEMENT_MASS") return "집중질량을 붙일 노드가 사라졌습니다";
             // Card 1 칸 1 = TYPEID, NODE 옵션에서는 노드 ID 다(Vol_I 43405-43420).
             // 낙하 덱에 거의 항상 있는 카드라 '보고도 안 되는' 상태로 두면 안 된다.
-            { "*BOUNDARY_PRESCRIBED_MOTION_NODE", 0, 10, "강제 변위를 줄 노드가 사라졌습니다" },
+            return "강제 변위를 줄 노드가 사라졌습니다";
         };
+        const int deckIntFw = deckFieldWidth(rawLines_);
+        struct OneFieldKw { const char* kw; int field; int fw; const char* what; };
+        std::vector<OneFieldKw> kOneField;
+        for (const auto& c : noderefs::oneFieldCards())
+            kOneField.push_back({c.keyword, c.field, c.eightWide ? deckIntFw : 10, oneFieldWhat(c.keyword)});
         bool didOne = false;
         for (const auto& ok : kOneField) {
             // 정확히 같은 이름만 받는다 — `_SET` 은 세트 ID 고, `_ID`·`_BIRTH_DEATH` 는 카드가
@@ -2861,20 +2867,26 @@ void ModelAssembler::cleanupDeadNodeRefs(const std::set<int>& deadNodes,
         }
 
         // ── 5. 지울 수 없는 것 — 지우면 모델이 달라진다. 보고만 하고 strict 에서 rc=1 ──
-        struct KeepKw { const char* kw; int card; int field; const char* why; };
-        static const KeepKw kKeep[] = {
-            { "*CONSTRAINED_NODAL_RIGID_BODY", 0, 3, "PNODE 가 사라졌습니다 — 강체의 기준 노드라 그냥 뺄 수 없습니다" },
-            { "*DEFINE_COORDINATE_NODES",      0, 1, "좌표계를 정의하는 노드입니다 — 빼면 좌표계가 사라집니다" },
-            { "*DEFINE_COORDINATE_NODES",      0, 2, "좌표계를 정의하는 노드입니다 — 빼면 좌표계가 사라집니다" },
-            { "*DEFINE_COORDINATE_NODES",      0, 3, "좌표계를 정의하는 노드입니다 — 빼면 좌표계가 사라집니다" },
-        };
-        for (const auto& kk : kKeep) {
-            if (!rsStarts(kw, kk.kw)) continue;
-            size_t k = rsFirstCard(kw) + (size_t)kk.card;
-            if (k >= b.data.size()) continue;
-            if (!dead(rsIntField(rsCardFields(rawLines_[b.data[k]]), (size_t)kk.field))) continue;
-            if (trySubst(kw, b.data[k], {kk.field}, 10)) continue;   // 옮길 수 있으면 옮긴다
-            record("manual", kw, b.data[k], kk.why);
+        //   표는 정본(`noderefs::definitionNodeCards`) — CNRB 의 PNODE · 좌표계 절점. 옵션 없는 맨 키워드는 줄마다
+        //   정의 하나라 모든 줄을 본다(정본과 같은 규칙 — 예전 사본은 첫 정의만 봐 뒤 정의의 PNODE 를 놓쳤다).
+        //   옮길 수 있으면 그 줄의 죽은 칸을 **한 번에** 옮긴다(예전에는 칸마다 따로 시도해 둘째 칸부터 실패했다).
+        for (const auto& dc : noderefs::definitionNodeCards()) {
+            if (!rsStarts(kw, dc.keyword)) continue;
+            const char* why = std::string(dc.keyword) == "*CONSTRAINED_NODAL_RIGID_BODY"
+                ? "PNODE 가 사라졌습니다 — 강체의 기준 노드라 그냥 뺄 수 없습니다"
+                : "좌표계를 정의하는 노드입니다 — 빼면 좌표계가 사라집니다";
+            std::vector<size_t> defs;
+            if (kw == dc.keyword) for (size_t m = 0; m < b.data.size(); ++m) defs.push_back(m);
+            else defs.push_back(rsFirstCard(kw));
+            for (size_t k : defs) {
+                if (k >= b.data.size()) continue;
+                const auto f = rsCardFields(rawLines_[b.data[k]]);
+                bool anyDead = false;
+                for (int field : dc.fields) if (dead(rsIntField(f, (size_t)field))) anyDead = true;
+                if (!anyDead) continue;
+                if (trySubst(kw, b.data[k], dc.fields, 10)) continue;   // 옮길 수 있으면 옮긴다
+                record("manual", kw, b.data[k], why);
+            }
         }
         // 노드 칸은 매뉴얼로 확정했지만 옵션(ID·LOCAL·FILTERED_FORCE)이 카드를 더 붙여
         // '줄 하나 = 카드 하나' 를 보장하지 못하는 카드 — 지우지 않고 manual 로 올린다.
