@@ -330,7 +330,9 @@ warn_min_jac: 0.15
 """},
    cmds=["KooRemapper generate --dim-i 20 --dim-j 5 arc demo", "KooRemapper meshfix meshfix.yaml"],
    outputs=["remeshed.k"],
-   notes=["gmsh 탐색: KOOREMAPPER_GMSH 환경변수 → 실행 파일 옆 gmsh/·gmsh-<ver>/[bin/] → PATH → /opt/gmsh-*/bin/gmsh (SIF 는 그대로 동작)"])
+   notes=["gmsh 탐색: KOOREMAPPER_GMSH 환경변수 → 실행 파일 옆 gmsh/·gmsh-<ver>/[bin/] → PATH → /opt/gmsh-*/bin/gmsh (SIF 는 그대로 동작)",
+          "★지울 절점을 세트·SPC·이력 등이 가리키면 **덱을 쓰지 않고** rc 1 — 그 줄을 짚는다(`info --strict` 와 같은 함수).",
+          "  표면 절점이면 `boundary_nodes: fixed` 가 원래 번호를 지킨다. 위치로 바꿔 쓰는 재결속은 아직 없다"])
 op("cnrb2solid", "표면·재메시", "CNRB(절점 강체) 볼트를 HEX8 솔리드 원통 + tied 접촉으로 변환", "볼트 bolt cnrb 원통",
    "KooRemapper cnrb2solid <config.yaml>",
    needs=["examples/cnrb2solid/bolt_simple.k"],
@@ -741,7 +743,9 @@ op("info", "정보·메타", "메시 정보(절점·요소·파트 수, bbox 두
           "고아가 없으면 그 블록을 내지 않는다 — 정상 출력에 네 줄을 더하면 비정상 신호가 묻힌다",
           "★2차 솔리드(ELFORM 16·17·25~28) 파트가 있으면 경고한다 — 리더가 절점 칸의 앞 8개만 저장해",
           "  TET10 의 n9·n10 이 고아로 잡히므로 `Orphan nodes` 에 **상한**이라고 달고, 그 파트의",
-          "  야코비안은 재지 않는다(실측 — 코너 부피가 양수인 덱에서 「음수 2」를 냈다)"])
+          "  야코비안은 재지 않는다(실측 — 코너 부피가 양수인 덱에서 「음수 2」를 냈다)",
+          "`--strict` 는 세트·SPC·하중·이력·CNRB PNODE 등이 가리키는 **절점**도 본다 — 없으면 미정의 참조(줄마다 한 건).",
+          "  `*NODE` 가 하나도 없는 조각 덱은 단정하지 않는다. 실사용 6,053장에서 거짓 경보 0"])
 op("modelmeta", "정보·메타", "파트별 기하 메트릭·재질·연결성(접촉 탐지 포함) JSON 추출", "메타 json connectivity 연결성",
    "KooRemapper modelmeta <config.yaml>",
    files=boxed({"meta.yaml": """model: box.k

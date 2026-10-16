@@ -360,7 +360,7 @@ warn_min_jac: 0.15
 )KRH"}},
      {"KooRemapper generate --dim-i 20 --dim-j 5 arc demo", "KooRemapper meshfix meshfix.yaml"},
      {},
-     {"gmsh 탐색: KOOREMAPPER_GMSH 환경변수 → 실행 파일 옆 gmsh/·gmsh-<ver>/[bin/] → PATH → /opt/gmsh-*/bin/gmsh (SIF 는 그대로 동작)"}},
+     {"gmsh 탐색: KOOREMAPPER_GMSH 환경변수 → 실행 파일 옆 gmsh/·gmsh-<ver>/[bin/] → PATH → /opt/gmsh-*/bin/gmsh (SIF 는 그대로 동작)", "★지울 절점을 세트·SPC·이력 등이 가리키면 **덱을 쓰지 않고** rc 1 — 그 줄을 짚는다(`info --strict` 와 같은 함수).", "  표면 절점이면 `boundary_nodes: fixed` 가 원래 번호를 지킨다. 위치로 바꿔 쓰는 재결속은 아직 없다"}},
     {"cnrb2solid", "표면·재메시", "CNRB(절점 강체) 볼트를 HEX8 솔리드 원통 + tied 접촉으로 변환", "볼트 bolt cnrb 원통", "KooRemapper cnrb2solid <config.yaml>",
      {{"cnrb.yaml", R"KRH(model: examples/cnrb2solid/bolt_simple.k
 output: bolt_simple_solid.k
@@ -1000,7 +1000,7 @@ part_title: PLATE
 )KRH"}},
      {"KooRemapper generate box box.yaml", "KooRemapper info box.k"},
      {},
-     {"★`Min bound`·`Max bound`·`Size` 는 **요소가 쓰는 절점** 기준이다(고아 제외) —", "  낙하판·접촉면을 bbox 로 놓는 도구는 **이 값**을 써야 한다. `bbox basis` 가 그것을 적는다", "고아 절점(요소가 안 쓰는 절점)이 있으면 `*NODE` **전체** bbox 와 고아 수를 함께 내고,", "  두 bbox 가 최대 요소 범위의 1% 넘게 다르면 **축을 지목해 경고한다**", "실측 사고 — 현장 덱에서 요소 기준 14.55mm vs 전체 절점 67.50mm 로 갈려 낙하판이 기기", "  밖 53mm 에 생겨 **충돌이 아예 없었다**. 그 67.50 은 이 도구가 아니라 하류가 `*NODE`", "  에서 직접 뽑은 값이다 — 이 도구는 함정을 피하는데 **말하지 않아서** 하류가 빠졌다", "고아가 없으면 그 블록을 내지 않는다 — 정상 출력에 네 줄을 더하면 비정상 신호가 묻힌다", "★2차 솔리드(ELFORM 16·17·25~28) 파트가 있으면 경고한다 — 리더가 절점 칸의 앞 8개만 저장해", "  TET10 의 n9·n10 이 고아로 잡히므로 `Orphan nodes` 에 **상한**이라고 달고, 그 파트의", "  야코비안은 재지 않는다(실측 — 코너 부피가 양수인 덱에서 「음수 2」를 냈다)"}},
+     {"★`Min bound`·`Max bound`·`Size` 는 **요소가 쓰는 절점** 기준이다(고아 제외) —", "  낙하판·접촉면을 bbox 로 놓는 도구는 **이 값**을 써야 한다. `bbox basis` 가 그것을 적는다", "고아 절점(요소가 안 쓰는 절점)이 있으면 `*NODE` **전체** bbox 와 고아 수를 함께 내고,", "  두 bbox 가 최대 요소 범위의 1% 넘게 다르면 **축을 지목해 경고한다**", "실측 사고 — 현장 덱에서 요소 기준 14.55mm vs 전체 절점 67.50mm 로 갈려 낙하판이 기기", "  밖 53mm 에 생겨 **충돌이 아예 없었다**. 그 67.50 은 이 도구가 아니라 하류가 `*NODE`", "  에서 직접 뽑은 값이다 — 이 도구는 함정을 피하는데 **말하지 않아서** 하류가 빠졌다", "고아가 없으면 그 블록을 내지 않는다 — 정상 출력에 네 줄을 더하면 비정상 신호가 묻힌다", "★2차 솔리드(ELFORM 16·17·25~28) 파트가 있으면 경고한다 — 리더가 절점 칸의 앞 8개만 저장해", "  TET10 의 n9·n10 이 고아로 잡히므로 `Orphan nodes` 에 **상한**이라고 달고, 그 파트의", "  야코비안은 재지 않는다(실측 — 코너 부피가 양수인 덱에서 「음수 2」를 냈다)", "`--strict` 는 세트·SPC·하중·이력·CNRB PNODE 등이 가리키는 **절점**도 본다 — 없으면 미정의 참조(줄마다 한 건).", "  `*NODE` 가 하나도 없는 조각 덱은 단정하지 않는다. 실사용 6,053장에서 거짓 경보 0"}},
     {"modelmeta", "정보·메타", "파트별 기하 메트릭·재질·연결성(접촉 탐지 포함) JSON 추출", "메타 json connectivity 연결성", "KooRemapper modelmeta <config.yaml>",
      {{"box.yaml", R"KRH(output: box.k
 lx: 20.0

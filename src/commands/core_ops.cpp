@@ -13,6 +13,7 @@
 #include "parser/KFileWriter.h"
 #include "parser/ElementCardLayout.h"   // hasKeywordCard — 첫 카드 판정 정본
 #include "parser/IncludeClosure.h"     // info 가 주 덱을 인클루드까지 읽어 판정한다
+#include "parser/NodeRefs.h"           // 세트·경계조건이 가리키는 절점 — 칸 자리 정본
 #include "parser/DeckScan.h"
 #include "parser/DynainWriter.h"
 #include "parser/ShellReader.h"
@@ -1529,6 +1530,33 @@ int runInfo(const std::string& meshFile, const ConsoleOutput& console, bool stri
             if (ep.hasUnreadIncludes) ref.hasUnreadIncludes = true;
             if (ref.includeNames.empty()) ref.includeNames = ep.includeNames;
         }
+        // 세트·경계조건·이력이 가리키는 **절점**이 정의돼 있나(2026-10-16). 요소→절점은 검증기가 보지만 이쪽은
+        // 아무도 안 봤다 — meshfix 가 다시 짠 파트의 옛 절점을 `*SET_NODE_LIST`·`*BOUNDARY_SPC_NODE`·
+        // `*DATABASE_HISTORY_NODE` 가 그대로 가리킨 덱이 「참조 무결성 OK」 · rc 0 으로 지나갔다(실측). LS-DYNA 는
+        // 세트가 없는 절점을 가리키면 키워드 단계에서 멈춘다(현장 실측 Error 10233). 칸 자리는 `parser/NodeRefs` 하나다.
+        // ⚠ 맨 `*NODE` 가 하나도 없는 덱은 경계조건만 든 **조각**이다 — 그 덱의 절점 참조는 단정하지 않는다.
+        // 한 줄에 없는 절점이 여럿이어도 **한 건**으로 센다(「카드 N건」이 부풀지 않게) — 첫 번호와 개수를 적는다.
+        bool nodeRefsChecked = false;
+        {
+            bool anyNode = false;
+            const auto defNodes = noderefs::defined(refLines, deckFieldWidth(rawLines), &anyNode);
+            if (anyNode) {
+                nodeRefsChecked = true;
+                const auto nr = noderefs::find(refLines, deckFieldWidth(rawLines), [&defNodes](int v) {
+                    return !std::binary_search(defNodes.begin(), defNodes.end(), v);
+                });
+                for (size_t k = 0; k < nr.refs.size();) {
+                    size_t e = k;
+                    while (e < nr.refs.size() && nr.refs[e].line == nr.refs[k].line) ++e;
+                    const size_t n = e - k;
+                    ref.dangling.push_back({(int)nr.refs[k].line + 1, noderefs::keywordOf(refLines, nr.refs[k]),
+                                            n > 1 ? "절점 " + std::to_string(n) + "개 — 첫째" : std::string("절점"),
+                                            nr.refs[k].value});
+                    k = e;
+                }
+                ref.notChecked += nr.notChecked;
+            }
+        }
         if (deckHasIncludes) {
             // 검사기는 합친 줄 안의 `*INCLUDE` 카드를 보고 「못 읽었다」고 한다 — 우리는 **읽었다.**
             // 단정 여부는 닫힘이 정한다. 못 본 것만 이름으로 남긴다.
@@ -1571,10 +1599,11 @@ int runInfo(const std::string& meshFile, const ConsoleOutput& console, bool stri
                 ? "미정의 참조 0건 — 다만 *INCLUDE 일부를 읽지 못해 단정할 수 없습니다"
                 : "미정의 참조 0건 — 다만 *INCLUDE 를 읽지 않았으므로 단정할 수 없습니다");
         } else if (!inclSegs.empty()) {
-            console.success("참조 무결성 OK (세트·파트·섹션·재질 미정의 참조 0건 — 인클루드 " +
-                            std::to_string(inclSegs.size()) + "개를 함께 읽었습니다)");
+            console.success(std::string("참조 무결성 OK (세트·파트·섹션·재질") + (nodeRefsChecked ? "·절점" : "") +
+                            " 미정의 참조 0건 — 인클루드 " + std::to_string(inclSegs.size()) + "개를 함께 읽었습니다)");
         } else {
-            console.success("참조 무결성 OK (세트·파트·섹션·재질 미정의 참조 0건)");
+            console.success(std::string("참조 무결성 OK (세트·파트·섹션·재질") + (nodeRefsChecked ? "·절점" : "") +
+                            " 미정의 참조 0건)");
         }
         // 손상된 카드는 **참조와 다른 축**이다 — 가리킨 대상이 없는 것이 아니라 카드가 깨졌다.
         // `*INCLUDE` 와 무관하게 단정할 수 있다(이 덱 안에서 본 것이 전부다).

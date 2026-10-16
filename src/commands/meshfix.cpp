@@ -12,9 +12,11 @@
 #endif
 
 #include "parser/DeckWriter.h"
+#include "parser/DeckScan.h"          // keywordToken·kwBare — 흘려 읽으며 블록을 고른다
 #include "parser/ElementCardLayout.h"   // deckFieldWidth — 덱이 선언한 칸 폭을 따른다
 #include "parser/IncludeScan.h"   // scanFile — 흘려 읽어 인클루드가 있나만 본다
 #include "parser/IdAllocator.h"   // 인클루드 닫힘 · 못 본 자리 경고
+#include "parser/NodeRefs.h"      // 지울 절점을 가리키는 카드 — 칸 자리 정본(`info --strict` 와 같은 함수)
 #include "commands/meshfix.h"
 #include "core/Mesh.h"
 #include "core/Element.h"
@@ -2349,6 +2351,75 @@ int runMeshFix(const char* configPath, ConsoleOutput& console) {
     if (cfg.boundaryNodes=="fixed") {
         auto bndMap = matchBoundaryNodes(mesh, cfg.pid, gmshNodes, cfg.snapTolerance);
         for (auto& [gid,oid] : bndMap) removeNodes.erase(oid);
+    }
+
+    // 11b. ★지울 절점을 가리키는 카드가 있으면 **쓰지 않는다**(2026-10-16). 예전에는 다시 짠 파트의 옛 절점을
+    //      `*SET_NODE_LIST`·`*BOUNDARY_SPC_NODE`·`*DATABASE_HISTORY_NODE` 가 그대로 가리킨 덱을 rc 0 으로 냈다(실측) —
+    //      LS-DYNA 는 세트가 없는 절점을 가리키면 키워드 단계에서 멈춘다(현장 실측 Error 10233). plan2 P2-6 이 적은
+    //      「하나도 고치지 않는다」가 그 자리다. 위치로 바꿔 쓰는 재결속은 아직 없다 — 먼저 틀린 덱을 내지 않는다.
+    //      주 덱과 인클루드 닫힘을 다 본다. 원문을 통째로 들지 않고 절점을 가리킬 수 있는 블록만 담는다(700MB 덱).
+    {
+        struct Hit { std::string file; size_t line; std::string kw; int node; };
+        std::vector<Hit> hits;
+        int deckFw = 8;
+        bool seenKeyword = false;
+        auto scanStream = [&](std::istream& in, const std::string& shown, bool isMain) {
+            std::vector<std::string> L;
+            std::vector<size_t> orig;
+            bool on = false;
+            size_t no = 0;
+            for (std::string ln; std::getline(in, ln);) {
+                ++no;
+                if (!ln.empty() && ln.back() == '\r') ln.pop_back();
+                const size_t g = ln.find_first_not_of(" \t");
+                if (g != std::string::npos && ln[g] == '*') {
+                    const std::string kw = KooRemapper::deckscan::kwBare(KooRemapper::deckscan::keywordToken(ln));
+                    if (isMain && kw == "*KEYWORD" && !seenKeyword) {   // 덱 폭은 첫 `*KEYWORD` 가 정한다
+                        deckFw = KooRemapper::deckFieldWidth({ln});
+                        seenKeyword = true;
+                    }
+                    on = KooRemapper::noderefs::mayReference(kw);
+                }
+                if (on) { L.push_back(ln); orig.push_back(no); }
+            }
+            const auto sc = KooRemapper::noderefs::find(L, deckFw, [&removeNodes](int v) { return removeNodes.count(v) > 0; });
+            for (const auto& r : sc.refs)
+                if (hits.empty() || hits.back().line != orig[r.line] || hits.back().file != shown)
+                    hits.push_back({shown, orig[r.line], KooRemapper::noderefs::keywordOf(L, r), r.value});
+        };
+        {
+            std::ifstream mf(cfg.model);
+            scanStream(mf, "", true);
+        }
+        if (KooRemapper::include_scan::scanFile(cfg.model).count > 0) {
+            std::vector<std::string> mainLines;
+            std::ifstream mf(cfg.model);
+            for (std::string ln; std::getline(mf, ln);) {
+                if (!ln.empty() && ln.back() == '\r') ln.pop_back();
+                mainLines.push_back(ln);
+            }
+            const auto incl = KooRemapper::include_closure::read(cfg.model, mainLines);
+            for (const auto& f : incl.files) {
+                std::string text;
+                for (const auto& ln : f.lines) { text += ln; text += '\n'; }
+                std::istringstream is(text);
+                scanStream(is, f.path, false);
+            }
+        }
+        if (!hits.empty()) {
+            console.error("다시 짠 PID " + std::to_string(cfg.pid) + " 에서 지울 절점을 가리키는 카드가 " +
+                          std::to_string(hits.size()) + "줄 있다 — 그대로 쓰면 LS-DYNA 가 키워드 단계에서 "
+                          "멈춘다. 덱을 쓰지 않았다");
+            for (size_t k = 0; k < hits.size() && k < 20; ++k)
+                console.println("  line " + std::to_string(hits[k].line) + " " + hits[k].kw + ": 절점 " +
+                                std::to_string(hits[k].node) +
+                                (hits[k].file.empty() ? "" : " — 인클루드 " + hits[k].file));
+            if (hits.size() > 20) console.println("  … 외 " + std::to_string(hits.size() - 20) + "줄");
+            console.println("  · 표면 절점이면 `boundary_nodes: fixed` 가 원래 번호를 지킨다");
+            console.println("  · 내부 절점이면 그 카드를 남는 절점이나 세트로 옮긴 뒤 다시 돌린다");
+            for (auto& p : {stlPath, geoPath, mshPath, logPath}) { std::error_code ec; fs::remove(p, ec); }
+            return 1;
+        }
     }
 
     // 12. Splice
