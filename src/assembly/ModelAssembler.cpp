@@ -1,4 +1,5 @@
 #include "assembly/ModelAssembler.h"
+#include "parser/InitialStressCard.h"   // *INITIAL_STRESS_SOLID 카드 1 정본(I10×8)
 #include "parser/IncludeScan.h"
 #include "commands/cnrb2solid.h"
 #include "commands/hfdamp.h"
@@ -5247,15 +5248,8 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                             bool firstElem = true;
                             output << std::scientific << std::setprecision(3);
                             for (const auto* er : solidResults) {
-                                if (firstElem) {
-                                    output << "$#    eid    nint   nhisv   large     ics   ncomp\n";
-                                }
-                                output << std::setw(10) << er->elementId
-                                       << std::setw(8) << 1
-                                       << std::setw(8) << 0
-                                       << std::setw(8) << 0
-                                       << std::setw(8) << 0
-                                       << std::setw(8) << 0 << "\n";
+                                if (firstElem) output << initial_stress::card1Comment() << "\n";
+                                output << initial_stress::card1(er->elementId) << "\n";   // I10×8 — InitialStressCard.h
                                 if (firstElem) {
                                     output << "$#  sigxx     sigyy     sigzz     sigxy     sigyz     sigxz       eps\n";
                                     firstElem = false;
@@ -5887,13 +5881,8 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                 bool firstElem = true;
                 for (const auto& er : accumulatedResults_) {
                     if (!er.isValid || er.isShell) continue;
-                    if (firstElem) {
-                        dynBuf << "$#    eid    nint   nhisv   large     ics   ncomp\n";
-                    }
-                    dynBuf << std::setw(10) << er.elementId
-                           << std::setw(8) << 1 << std::setw(8) << 0
-                           << std::setw(8) << 0 << std::setw(8) << 0
-                           << std::setw(8) << 0 << "\n";
+                    if (firstElem) dynBuf << initial_stress::card1Comment() << "\n";
+                    dynBuf << initial_stress::card1(er.elementId) << "\n";   // I10×8 — InitialStressCard.h
                     if (firstElem) {
                         dynBuf << "$#  sigxx     sigyy     sigzz     sigxy     sigyz     sigxz       eps\n";
                         firstElem = false;

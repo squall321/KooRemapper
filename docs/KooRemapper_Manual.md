@@ -3786,11 +3786,17 @@ $$\overline{\varepsilon}^p = \frac{2}{\sqrt{3}} |\varepsilon_{max}|$$
 
 ```
 *INITIAL_STRESS_SOLID
-$#    eid    nint   nhisv   large     ics   ncomp
-         3       1       0       0       0       0
+$#     eid      nint     nhisv     large    iveflg    ialegp    nthint    nthhsv
+         3         1         0         0         0         0         0         0
 $#  sigxx     sigyy     sigzz     sigxy     sigyz     sigxz       eps
  5.654e+03 2.423e+03 2.423e+03 0.000e+00 0.000e+00 0.000e+00 0.000e+00
 ```
+
+카드 1 은 매뉴얼 그대로 **I10×8**(EID NINT NHISV LARGE IVEFLG IALEGP NTHINT NTHHSV)이다(2026-10-16). 그 전에는
+`I10 + I8×5` 로 썼다 — 지금 값(NINT=1 · 나머지 0)은 10칸 창에 우연히 들어가 맞게 읽혔지만, 다섯째·여섯째 칸이
+0 이 아니게 되는 날 IVEFLG 가 틀리게 읽힐 꼴이었다. **값은 같고 바이트만 다르다** — 옛 판으로 만든 `.dynain` 도
+LS-DYNA 는 같은 값으로 읽는다. 이 카드를 쓰는 자리 넷(prestress · assemble 의 `.dynain`·덱 내장 · cclip)이 한 곳
+(`include/parser/InitialStressCard.h`)에서 쓴다.
 
 ### 사면체 요소 연결 순서
 

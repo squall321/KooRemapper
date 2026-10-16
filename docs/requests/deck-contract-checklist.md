@@ -144,10 +144,11 @@
         ⚠ 처음 판 검사기는 `*INITIAL_STRESS_SOLID` 첫 카드를 8칸으로 **가정**해 `.dynain` 5건을 거짓으로
         물었다 — 매뉴얼(Vol_I 190153)로 확인하니 그 카드는 원래 10칸(80열 표준 카드)이라 I10 과 무관했다.
         → 남은 것 — 2줄 혼재 픽스처를 42 op 축으로(같은 틀에 변환기 하나 — 1줄 요소 카드를 2줄로)
-      ★덤으로 드러난 것(별 결함 — 판단 대기) — `DynainWriter` 가 `*INITIAL_STRESS_SOLID` 첫 카드를
-        `I10 + I8×5` 로 쓴다. 매뉴얼은 `I10×8` 이다. 지금 값(0·1·작은 수)은 창 안에 우연히 들어가 맞게 읽히지만
-        IALEGP(여섯째)는 다섯째 창에 걸친다 — 0 이 아니게 되면 IVEFLG 가 틀리게 읽힌다. 고치면 모든 `.dynain`
-        바이트가 바뀐다.
+      ★~~덤으로 드러난 것(별 결함 — 판단 대기) — `DynainWriter` 가 `*INITIAL_STRESS_SOLID` 첫 카드를
+        `I10 + I8×5` 로 쓴다~~ **(2026-10-16 고쳤다 — 매뉴얼 I10×8)**. 쓰는 자리가 넷(DynainWriter · ModelAssembler 의
+        `.dynain`·덱 내장 · cclip)이라 한 곳(`InitialStressCard.h`)으로 모았다. 옛·새 바이너리 대조 — 네 자리 모두 줄 수가
+        같고 다른 줄은 카드 1(EID·값 동일)과 머리 주석뿐이다. 회귀 `test_initial_stress_card.py` 20항. 커밋된 예제
+        `.dynain` 36장은 다시 굽지 않았다 — 값이 같고 LS-DYNA 가 같은 값으로 읽는다(불법 덱이 아니다).
       부분 보완 — I10 은 `test_i10_card_width.py`, 2줄은 `test_meshfix_two_line.py` 가 따로 본다.
       그러나 **42 op 전수 축**으로는 안 돈다
       → 검증: sha256 + n_bytes + n_lines + n_crlf **4개 동시 일치**

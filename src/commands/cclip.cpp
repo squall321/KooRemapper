@@ -1,5 +1,6 @@
 // C-clip(스프링 접점) 생성 op 구현 — 박스 파트 치환·Castigliano 캘리브레이션·모멘트일치 눌림·INITIAL_STRESS_SHELL 출력.
 #include "cclip.h"
+#include "parser/InitialStressCard.h"   // *INITIAL_STRESS_SOLID 카드 1 정본(I10×8)
 #include "parser/IdAllocator.h"   // 못 본 자리 · 단정 못 함 경고
 #include "parser/ElementCardLayout.h"   // deckFieldWidth — 칸 폭 정본
 #include "parser/IncludeClosure.h"   // 충돌 코퍼스 — 인클루드 닫힘(정본)
@@ -897,9 +898,8 @@ void cc_writeInitialStressSolid(std::ostream& out,
     out << std::scientific << std::setprecision(3);
     bool first = true;
     for (const auto& [eid, s] : rows) {
-        if (first) out << "$#    eid    nint   nhisv   large     ics   ncomp\n";
-        out << std::setw(10) << eid << std::setw(8) << 1 << std::setw(8) << 0
-            << std::setw(8) << 0 << std::setw(8) << 0 << std::setw(8) << 0 << "\n";
+        if (first) out << KooRemapper::initial_stress::card1Comment() << "\n";
+        out << KooRemapper::initial_stress::card1(eid) << "\n";   // I10×8 — InitialStressCard.h
         if (first) { out << "$#  sigxx     sigyy     sigzz     sigxy     sigyz     sigxz       eps\n"; first = false; }
         for (int k = 0; k < 6; ++k) out << std::setw(10) << s[k];
         out << std::setw(10) << 0.0 << "\n";

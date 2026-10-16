@@ -1,4 +1,5 @@
 #include "parser/DynainWriter.h"
+#include "parser/InitialStressCard.h"   // *INITIAL_STRESS_SOLID 카드 1 정본(I10×8)
 #include <iomanip>
 #include <sstream>
 #include <ctime>
@@ -74,17 +75,9 @@ bool DynainWriter::writeFile(
     for (const auto& result : results.elementResults) {
         if (!result.isValid || !results.hasMaterial) continue;
 
-        // Card 1: eid, nint, nhisv, large, ics, ncomp
-        if (firstElement) {
-            buffer << "$#    eid    nint   nhisv   large     ics   ncomp\n";
-        }
-        buffer << std::setw(10) << result.elementId
-               << std::setw(8) << 1
-               << std::setw(8) << 0
-               << std::setw(8) << 0
-               << std::setw(8) << 0
-               << std::setw(8) << 0
-               << "\n";
+        // Card 1 — 매뉴얼 그대로 I10×8(규칙은 InitialStressCard.h)
+        if (firstElement) buffer << initial_stress::card1Comment() << "\n";
+        buffer << initial_stress::card1(result.elementId) << "\n";
 
         // Card 2: sigxx, sigyy, sigzz, sigxy, sigyz, sigxz, eps
         if (firstElement) {
