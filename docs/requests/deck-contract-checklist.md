@@ -864,6 +864,25 @@ plan2 는 `IdAllocator` 로 발행자를 통합하라고 했다. 정찰이 그 �
       1부터 쓰고 우리 삽입이 옮긴다(저쪽은 지금 방식을 바꾸지 않고 착수할 수 있다). 발행표가
       서면 (가)로 바꾸고 저쪽 `ranges` 와 **대조**해 다르면 **거절**한다 — 조용히 옮기지 않는다.
 
+### offset `element_type: tshell` 산출이 TSHELL 덱이 아니었다 (2026-10-16)
+셸 EID 커서를 고치다 커밋된 예제 `examples/offset/03_tshell_result.k` 를 열어 보고 찾았다. 매뉴얼로 재면 넷이 틀렸다.
+- [x] 요소를 **4절점 `*ELEMENT_SHELL`** 로 썼다 — 압출은 8절점 TSHELL 을 만들었는데 셸 목록에 넣어 셸 서식으로 나갔다.
+      윗면 절점 넷이 빠지고 `*SECTION_TSHELL` 파트를 셸 요소가 썼다 → restack 의 TSHELL 층과 같은 길(`AddedElement`
+      `isTshell` → `*ELEMENT_TSHELL` 8절점, 요소 공용 커서)로
+- [x] `*SECTION_TSHELL` 에 **ELFORM 16** — TSHELL 정식은 1·2·3·5·6·7 뿐이다(Vol_I 229493-229500) → 1(매뉴얼 기본값,
+      restack 과 같다)
+- [x] 셸 섹션처럼 **두께 줄(T1~T4)** 을 붙였다 — TSHELL 섹션에는 두께 카드가 없고 Card 2 는 ICOMP=1 의 각도 카드다.
+      ICOMP=0 이면 그 줄은 **새 섹션 세트**로 읽힌다 → Card 1 만(쓰이지 않게 된 두께 인자를 지웠다)
+- [x] 삼각 바닥이 `[b0,b1,b2,t0,t1,t2,0,0]` — 매뉴얼의 쐐기 꼴 n1,n2,n3,n3,n4,n5,n6,n6(`*ELEMENT_TSHELL` Remark)으로
+- [x] 회귀 `test_offset_tshell_deck.py` 13항(사각 1층 · 2층 절점 공유 · 사면체의 삼각 바닥) · **옛 바이너리 FAIL 6**.
+      커밋된 TSHELL 산출 셋을 다시 구웠다(`examples/offset/03` · `tests/offset/regression/02` · `tests/offset_tshell_result`).
+      42 op 산출 덱 동일 · 회귀 90
+- [ ] ★**남은 것(설계 질문 — 혼자 정하지 않는다)** — TSHELL 갈래는 `connection_mode` 를 **처리하지 않는다.** 압출의
+      층 0 이 원본 면과 **겹치는 새 절점**이라, `tied` 를 줘도 TSHELL 층이 원본에서 떨어져 있다(솔리드 갈래는 연결을
+      처리한다). 덱은 합법이지만 물리는 사용자가 기대한 것과 다를 수 있다. 원본 절점을 공유할지·묶을지는 사용 의도의 일이다
+- ⚠ `tests/offset/README_REGRESSION.md` 는 「02: TSHELL 1200개」를 적었지만 면이 580개라 2층은 1160개다(문서가 솔리드 수를
+  적었다). 손대지 않았다 — PowerShell 시절 묶음이고 실행기가 리포에 없다
+
 ### 경계 합의로 새로 진 것 (2026-10-15 · StepForge 답신 §5)
 세 가지 다 **지금 0건**이다. 숨기지 않고 저쪽 문서에 적었으므로 여기에도 칸으로 둔다.
 - [ ] ★**삽입 `cad_solid_merge_to_deck` — 우리 몫으로 확정됐는데 칸이 없었다(2026-10-15 추가).**

@@ -9751,9 +9751,7 @@ bool ModelAssembler::applyOffset(const OffsetOperation& op, double E, double nu)
     if (op.elementType == "solid") {
         createSectionSolid(actualSecid);
     } else if (op.elementType == "tshell") {
-        double thickness = (op.shellThickness > 0) ? op.shellThickness : op.thickness;
-        int elform = 16;  // Default TSHELL4 (user can override with ELFORM operation)
-        createSectionTShell(actualSecid, thickness, elform);
+        createSectionTShell(actualSecid, 1);   // ELFORM 1 — 매뉴얼 기본값(restack 의 TSHELL 층과 같다)
     } else if (op.elementType == "shell") {
         double thickness = (op.shellThickness > 0) ? op.shellThickness : op.thickness;
         createSectionShell(actualSecid, thickness);
@@ -10928,22 +10926,15 @@ void ModelAssembler::createSectionSolid(int secid) {
     addedKeywordBlocks_.push_back(oss.str());
 }
 
-void ModelAssembler::createSectionTShell(int secid, double thickness, int elform) {
+// `*SECTION_TSHELL` 은 Card 1 하나다(SECID ELFORM SHRF NIP PROPT QR ICOMP TSHEAR) — Card 2 는 ICOMP=1 일 때의
+// 각도 카드이고 **두께 카드가 없다**(두께는 아랫면·윗면 절점이 정한다). 예전에는 셸 섹션처럼 T1~T4 줄을 붙여
+// ICOMP=0 인 리더가 그 줄을 **새 섹션 세트**로 읽게 됐고, ELFORM 16 을 썼다 — TSHELL 의 정식은 1·2·3·5·6·7 뿐이다
+// (Vol_I 229437-229500). restack 의 TSHELL 층과 같은 꼴(SECID·ELFORM, 나머지는 매뉴얼 기본값)로 쓴다.
+void ModelAssembler::createSectionTShell(int secid, int elform) {
     std::ostringstream oss;
     oss << "*SECTION_TSHELL\n";
-    oss << "$#   secid    elform      shrf       nip     propt   qr/irid     icomp     setyp\n";
-    oss << std::setw(10) << secid
-        << std::setw(10) << elform  // 16=TSHELL4, 17=TSHELL3
-        << std::setw(10) << 0.0
-        << std::setw(10) << 3
-        << "\n";
-    oss << "$#      t1        t2        t3        t4      nloc     marea      idof    edgset\n";
-    oss << std::scientific << std::setprecision(3);
-    oss << std::setw(10) << thickness
-        << std::setw(10) << thickness
-        << std::setw(10) << thickness
-        << std::setw(10) << thickness
-        << "\n";
+    oss << "$#   secid    elform\n";
+    oss << std::setw(10) << secid << std::setw(10) << elform << "\n";
     addedKeywordBlocks_.push_back(oss.str());
 }
 
@@ -11010,44 +11001,33 @@ void ModelAssembler::extrudeToTShell(const std::vector<ShellElement>& surface,
         }
     }
 
-    // Create TSHELL elements
+    // Create TSHELL elements — 8절점 `*ELEMENT_TSHELL` 로 쓴다(restack 의 TSHELL 층과 같은 길).
+    // 예전에는 셸 목록에 넣어 **4절점 `*ELEMENT_SHELL`** 로 나갔다 — 윗면 절점 넷이 빠지고 `*SECTION_TSHELL`
+    // 파트를 셸 요소가 썼다(커밋된 예제 `03_tshell_result.k` 가 그 꼴이었다). 삼각 바닥은 매뉴얼의 쐐기 꼴
+    // n1,n2,n3,n3,n4,n5,n6,n6 이다(`*ELEMENT_TSHELL` Remark 「Orientation」) — 예전에는 뒤 두 칸이 0 이었다.
+    size_t created = 0;
     for (const auto& shell : surface) {
-        bool isTria = isTria3(shell);
-
+        const bool isTria = isTria3(shell);
         for (int layer = 0; layer < numLayers; ++layer) {
-            AddedShellElement tshell;
-            tshell.id = ++maxElementId_;
-            tshell.pid = newPid;
-            tshell.elform = isTria ? 17 : 16;  // TSHELL3 : TSHELL4
-
+            auto bot = [&](int k) { return nodeLayerMap[shell.nodeIds[k]][layer]; };
+            auto top = [&](int k) { return nodeLayerMap[shell.nodeIds[k]][layer + 1]; };
+            AddedElement ae;
+            ae.id = ++maxElementId_;
+            ae.pid = newPid;
+            ae.isTshell = true;
             if (isTria) {
-                // TSHELL3: 6 nodes (3 bottom + 3 top)
-                tshell.nodeIds[0] = nodeLayerMap[shell.nodeIds[0]][layer];
-                tshell.nodeIds[1] = nodeLayerMap[shell.nodeIds[1]][layer];
-                tshell.nodeIds[2] = nodeLayerMap[shell.nodeIds[2]][layer];
-                tshell.nodeIds[3] = nodeLayerMap[shell.nodeIds[0]][layer+1];
-                tshell.nodeIds[4] = nodeLayerMap[shell.nodeIds[1]][layer+1];
-                tshell.nodeIds[5] = nodeLayerMap[shell.nodeIds[2]][layer+1];
-                tshell.nodeIds[6] = 0;
-                tshell.nodeIds[7] = 0;
+                ae.type = ElementType::PENTA6;
+                ae.nodeIds = {bot(0), bot(1), bot(2), bot(2), top(0), top(1), top(2), top(2)};
             } else {
-                // TSHELL4: 8 nodes (4 bottom + 4 top)
-                tshell.nodeIds[0] = nodeLayerMap[shell.nodeIds[0]][layer];
-                tshell.nodeIds[1] = nodeLayerMap[shell.nodeIds[1]][layer];
-                tshell.nodeIds[2] = nodeLayerMap[shell.nodeIds[2]][layer];
-                tshell.nodeIds[3] = nodeLayerMap[shell.nodeIds[3]][layer];
-                tshell.nodeIds[4] = nodeLayerMap[shell.nodeIds[0]][layer+1];
-                tshell.nodeIds[5] = nodeLayerMap[shell.nodeIds[1]][layer+1];
-                tshell.nodeIds[6] = nodeLayerMap[shell.nodeIds[2]][layer+1];
-                tshell.nodeIds[7] = nodeLayerMap[shell.nodeIds[3]][layer+1];
+                ae.type = ElementType::HEX8;
+                ae.nodeIds = {bot(0), bot(1), bot(2), bot(3), top(0), top(1), top(2), top(3)};
             }
-
-            addedShellElements_.push_back(tshell);
+            addedElements_.push_back(ae);
+            ++created;
         }
     }
 
-    std::cout << "[INFO] Created " << addedShellElements_.size()
-              << " TSHELL elements\n";
+    std::cout << "[INFO] Created " << created << " TSHELL elements\n";
 }
 
 // ========== PHASE 9: SHELL OFFSET ==========

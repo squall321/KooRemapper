@@ -422,7 +422,7 @@ private:
     void insertMaterialCard(const std::string& materialCard, int actualMid);
     void createPartKeyword(int pid, int secid, int mid, const std::string& title);
     void createSectionSolid(int secid);
-    void createSectionTShell(int secid, double thickness, int elform);
+    void createSectionTShell(int secid, int elform);
     void createSectionShell(int secid, double thickness);
     std::string formatPartBlock(int pid, int secid, int mid, const std::string& title);
     std::string formatCzmSectionBlock(int secid);
