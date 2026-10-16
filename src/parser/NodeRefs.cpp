@@ -175,16 +175,18 @@ Scan find(const std::vector<std::string>& L, int deckFw, const std::function<boo
             if (!has(kw, "_SET")) w.skipped(kw);   // _SET 은 세트 ID 다 · _ID/_LOCAL 은 카드 꼴이 다르다
             continue;
         }
-        // ── 첫 카드의 정해진 칸 — CNRB 의 PNODE(칸 4 · 61032-61057) · 좌표계 절점(칸 2-4 · 128642-128690) ──
-        //   한 키워드 아래 정의가 여러 장일 수 있지만 카드 세트 길이가 옵션마다 달라 **첫 정의만** 본다(놓치는 쪽).
-        if (starts(kw, "*CONSTRAINED_NODAL_RIGID_BODY")) {
-            const size_t k = static_cast<size_t>(cards::titleLines(kw));
-            if (k < data.size()) w.take(data[k], kw, {3}, w10);
-            continue;
-        }
-        if (starts(kw, "*DEFINE_COORDINATE_NODES")) {
-            const size_t k = static_cast<size_t>(cards::titleLines(kw));
-            if (k < data.size()) w.take(data[k], kw, {1, 2, 3}, w10);
+        // ── CNRB 의 PNODE(칸 4 · 61032-61057) · 좌표계 절점(칸 2-4 · 128642-128690) ──────────────
+        //   옵션이 없는 맨 키워드는 Card 1 만 있어 **줄마다 정의 하나**다 — 모든 줄을 본다(재결속이 뒤 정의의 PNODE 를
+        //   놓치면 조용히 틀린다). 옵션(TITLE·SPC·INERTIA)이 붙으면 카드 세트 길이가 달라 **첫 정의만** 본다(놓치는 쪽).
+        if (starts(kw, "*CONSTRAINED_NODAL_RIGID_BODY") || starts(kw, "*DEFINE_COORDINATE_NODES")) {
+            const bool cnrb = starts(kw, "*CONSTRAINED_NODAL_RIGID_BODY");
+            const std::vector<int> idx = cnrb ? std::vector<int>{3} : std::vector<int>{1, 2, 3};
+            if (kw == "*CONSTRAINED_NODAL_RIGID_BODY" || kw == "*DEFINE_COORDINATE_NODES") {
+                for (size_t m = 0; m < data.size(); ++m) w.take(data[m], kw, idx, w10);
+            } else {
+                const size_t k = static_cast<size_t>(cards::titleLines(kw));
+                if (k < data.size()) w.take(data[k], kw, idx, w10);
+            }
             continue;
         }
         // ── 절점을 무는 줄 알지만 칸 뜻이 변종마다 갈리는 카드 — 세어만 둔다 ──────────

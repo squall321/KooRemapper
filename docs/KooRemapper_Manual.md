@@ -889,7 +889,7 @@ KooRemapper.exe info <mesh_file.k>
 | `*BOUNDARY_SPC_NODE` · `*LOAD_NODE_POINT` · `*INITIAL_VELOCITY_NODE` · `*BOUNDARY_PRESCRIBED_MOTION_NODE` | 칸 1 |
 | `*CONSTRAINED_EXTRA_NODES_NODE` · `*ELEMENT_MASS` | 칸 2 |
 | `*DATABASE_HISTORY_NODE` | 칸 1-8 |
-| `*CONSTRAINED_NODAL_RIGID_BODY` 의 PNODE · `*DEFINE_COORDINATE_NODES` | 첫 정의의 칸 4 · 칸 2-4 |
+| `*CONSTRAINED_NODAL_RIGID_BODY` 의 PNODE · `*DEFINE_COORDINATE_NODES` | 칸 4 · 칸 2-4 — 옵션 없는 맨 키워드는 모든 줄(줄마다 정의 하나), 옵션이 붙으면 첫 정의만 |
 
 오탐을 막는 규율 — 위 이름이 **정확히** 같을 때만 본다(`_ID` 등 카드가 더 붙는 변종 · 조인트 · 스폿용접 · 보 족은
 「검사하지 않은 자리」로 센다 — 예: `*CONSTRAINED_JOINT_STIFFNESS` 의 첫 칸은 절점이 아니다). `_GENERATE` 범위는
