@@ -11,6 +11,7 @@
 #include "assembly/WarpageGrid.h"
 #include "parser/KFileReader.h"
 #include "parser/IdAllocator.h"   // 번호를 한 길로 — 인클루드 닫힘까지 본 최대값 위로
+#include "parser/DeckScan.h"      // keywordToken — `*INCLUDE ±` 를 알아보려고
 #include "parser/ElementCardLayout.h"   // 요소 카드 줄 수 판정 — 리더와 쓰기가 같은 표를 쓴다
 #include "parser/ShellReader.h"
 #include "parser/DynainWriter.h"
@@ -47,6 +48,71 @@ namespace KooRemapper {
 // 정의는 아래 익명 이름공간에 있다 — 한 번역 단위의 익명 이름공간은 하나라 여기 선언도 그 안에 둬야
 // 같은 함수를 가리킨다(밖에 두면 다른 함수가 되어 호출이 모호해진다).
 namespace { static int bc_findMaxSetNodeId(const std::vector<std::string>& rawLines); }
+
+namespace {
+// 줄들에서 `*SECTION_*` 첫 데이터 카드의 SECID 최대값 — 파트가 참조하지 않는 섹션도 번호를 차지한다.
+// 주 덱과 인클루드 파일이 **같은 규칙**으로 센다(loadBaseModel · raiseMaxIdsOverIncludes).
+int cur_scanMaxSectionId(const std::vector<std::string>& lines) {
+    int maxId = 0;
+    for (size_t i = 0; i < lines.size(); ++i) {
+        const std::string& l = lines[i];
+        size_t s = l.find_first_not_of(" \t");
+        if (s == std::string::npos || l[s] != '*') continue;
+        std::string up = l.substr(s);
+        for (auto& c : up) c = (char)std::toupper((unsigned char)c);
+        if (up.rfind("*SECTION_", 0) != 0) continue;
+        // `_TITLE` 이면 제목줄이 한 줄 더 있다 — 그것을 SECID 로 읽으면 이 스캐너도 같은 맹점을
+        // 갖게 된다(`ld_findMaxSetSegmentId` 가 정확히 그래서 틀렸다).
+        int skip = (up.find("_TITLE") != std::string::npos) ? 1 : 0;
+        for (size_t j = i + 1; j < lines.size(); ++j) {
+            const std::string& d = lines[j];
+            size_t h = d.find_first_not_of(" \t");
+            if (h == std::string::npos) continue;
+            if (d[h] == '$') continue;
+            if (d[h] == '*') break;
+            if (skip > 0) { --skip; continue; }
+            // 첫 칸의 정수. `rsCardFields` 는 이 파일 뒤쪽에 있어 여기서 못 쓴다 — 첫 칸만
+            // 필요하므로 공백 토큰 하나로 충분하다(10칸 덱이든 8칸 덱이든 SECID 는 첫 칸이다).
+            std::istringstream iss(d);
+            int sid = 0;
+            if (iss >> sid && sid > maxId) maxId = sid;
+            break;                      // 첫 데이터 카드만 본다
+        }
+    }
+    return maxId;
+}
+
+// 줄들에서 `*SET_*` 의 SID 최대값(모든 종류를 한 통으로).
+// *SET_..._TITLE 은 키워드 다음 줄이 제목이다 — 예전엔 그 제목 줄을 SID 로 읽으려다 실패하고
+// inSet 을 꺼 버려 진짜 SID 줄을 영영 못 봤다. 그러면 maxSetId_ 가 0 으로 남아
+// 새로 만드는 *SET_SEGMENT 가 덱에 이미 있는 세트와 같은 번호로 난다.
+int cur_scanMaxSetId(const std::vector<std::string>& lines) {
+    int maxId = 0;
+    bool inSet = false;
+    bool needTitle = false;
+    for (const auto& line : lines) {
+        size_t g = line.find_first_not_of(" \t");
+        if (g != std::string::npos && line[g] == '*') {
+            std::string up = line.substr(g);
+            for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+            inSet = (up.rfind("*SET_", 0) == 0);
+            needTitle = inSet && (up.find("_TITLE") != std::string::npos);
+            continue;
+        }
+        if (!inSet) continue;
+        if (g != std::string::npos && line[g] == '$') continue;
+        // 제목 줄은 비어 있을 수 있다 — 건너뛰면 구성원 값을 SID 로 읽어
+        // maxSetId_ 가 어긋나고 새로 만드는 세트가 덱의 세트와 번호로 부딪친다.
+        if (needTitle) { needTitle = false; continue; }
+        try {
+            int sid = std::stoi(line);
+            if (sid > maxId) maxId = sid;
+        } catch (...) {}
+        inSet = false;
+    }
+    return maxId;
+}
+}  // namespace
 
 bool ModelAssembler::loadBaseModel(const std::string& filename) {
     // 1. Parse with KFileReader for structural queries
@@ -93,31 +159,7 @@ bool ModelAssembler::loadBaseModel(const std::string& filename) {
     //
     // 실측(2026-09-28): `restack_base.k` 에 아무도 안 쓰는 `*SECTION_SOLID 2` 를 넣고 restack 을
     // 돌리면 산출 덱의 SECID 가 `[1, 2, 2, 3, 4]` 가 된다(47줄·53줄). rc=0 이었다.
-    for (size_t i = 0; i < rawLines_.size(); ++i) {
-        const std::string& l = rawLines_[i];
-        size_t s = l.find_first_not_of(" \t");
-        if (s == std::string::npos || l[s] != '*') continue;
-        std::string up = l.substr(s);
-        for (auto& c : up) c = (char)std::toupper((unsigned char)c);
-        if (up.rfind("*SECTION_", 0) != 0) continue;
-        // `_TITLE` 이면 제목줄이 한 줄 더 있다 — 그것을 SECID 로 읽으면 이 스캐너도 같은 맹점을
-        // 갖게 된다(`ld_findMaxSetSegmentId` 가 정확히 그래서 틀렸다).
-        int skip = (up.find("_TITLE") != std::string::npos) ? 1 : 0;
-        for (size_t j = i + 1; j < rawLines_.size(); ++j) {
-            const std::string& d = rawLines_[j];
-            size_t h = d.find_first_not_of(" \t");
-            if (h == std::string::npos) continue;
-            if (d[h] == '$') continue;
-            if (d[h] == '*') break;
-            if (skip > 0) { --skip; continue; }
-            // 첫 칸의 정수. `rsCardFields` 는 이 파일 뒤쪽에 있어 여기서 못 쓴다 — 첫 칸만
-            // 필요하므로 공백 토큰 하나로 충분하다(10칸 덱이든 8칸 덱이든 SECID 는 첫 칸이다).
-            std::istringstream iss(d);
-            int sid = 0;
-            if (iss >> sid && sid > maxSectionId_) maxSectionId_ = sid;
-            break;                      // 첫 데이터 카드만 본다
-        }
-    }
+    maxSectionId_ = std::max(maxSectionId_, cur_scanMaxSectionId(rawLines_));
     maxMaterialId_ = 0;
     for (const auto& [mid, mat] : baseMesh_.materials) {
         if (mid > maxMaterialId_) maxMaterialId_ = mid;
@@ -129,16 +171,18 @@ bool ModelAssembler::loadBaseModel(const std::string& filename) {
     // 새로 만드는 *SET_SEGMENT 가 덱에 이미 있는 세트와 같은 번호로 난다.
     initMaxSetIdFromRawLines();
 
-    // ── 못 본 것을 말한다 (2026-09-25, P0-6) ───────────────────────────────
-    // 위 72-90 이 정한 max ID 는 **이 덱 안에서만** 센 값이다. `KFileReader` 도 rawLines_ 도
-    // `*INCLUDE` 안을 읽지 않으므로, 인클루드에 이미 있는 번호를 아래 apply* 들이 다시
-    // 발급할 수 있다. 번호 정책은 바꾸지 않는다(하류가 바이트 동일을 기대한다) — 다만
-    // **모른다는 사실을 말한다.** 이 한 곳이 assembler 경로의 발행자 18곳을 전부 덮는다.
+    // ── 인클루드 닫힘까지 센다 (2026-10-16) ─────────────────────────────────
+    // 위 3번이 정한 max ID 는 **이 덱 안에서만** 센 값이다. `KFileReader` 도 rawLines_ 도 `*INCLUDE`
+    // 안을 읽지 않는다. 실사용 인클루드 덱 88장 중 83장에서 그 값이 닫힘의 최대값보다 작았다(NODE·ELEM,
+    // SET 은 38장) — 아래 apply* 들이 인클루드에 이미 있는 번호를 다시 낼 수 있었다. 같은 종류의 ID 가
+    // 둘이면 LS-DYNA 는 키워드 단계에서 멈춘다. 그래서 닫힘을 읽어 **같은 규칙으로** 센 값 위로 올린다.
+    // 인클루드가 없으면 아무것도 안 바뀐다(번호·바이트 그대로).
+    // (2026-09-25 P0-6 은 「모른다고 말하기」까지였다 — 이제 읽고, 못 본 자리만 말한다.)
     //
-    // ⚠ 콘솔 전용이다. 덱에 쓰면 출력 바이트가 변해 '번호 불변' 이 아니라 '바이트 변경' 이 된다.
+    // ⚠ 경고는 콘솔 전용이다. 덱에 쓰면 출력 바이트가 변한다.
     // ⚠ rc 를 건드리지 않는다. 하류(플랫폼 워커·pyKooCAE REMAP 스텝)가 rc≠0 이면 체인을 멈춘다.
-    include_scan::warnUnread(ConsoleOutput(), rawLines_,
-                             "노드·요소·파트·섹션·재질·세트 ID 를 이 덱 안에서만 세었습니다");
+    readIncludeClosure();
+    raiseMaxIdsOverIncludes();
 
     return true;
 }
@@ -148,33 +192,98 @@ bool ModelAssembler::loadBaseModel(const std::string& filename) {
 // inSet 을 꺼 버려 진짜 SID 줄을 영영 못 봤다. 그러면 maxSetId_ 가 0 으로 남아
 // 새로 만드는 *SET_SEGMENT 가 덱에 이미 있는 세트와 같은 번호로 난다.
 void ModelAssembler::initMaxSetIdFromRawLines() {
-    maxSetId_ = 0;
-    bool inSet = false;
-    bool needTitle = false;
-    for (const auto& line : rawLines_) {
-        size_t g = line.find_first_not_of(" \t");
-        if (g != std::string::npos && line[g] == '*') {
-            std::string up = line.substr(g);
-            for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-            inSet = (up.rfind("*SET_", 0) == 0);
-            needTitle = inSet && (up.find("_TITLE") != std::string::npos);
-            continue;
-        }
-        if (!inSet) continue;
-        if (g != std::string::npos && line[g] == '$') continue;
-        // 제목 줄은 비어 있을 수 있다 — 건너뛰면 구성원 값을 SID 로 읽어
-        // maxSetId_ 가 어긋나고 새로 만드는 세트가 덱의 세트와 번호로 부딪친다.
-        if (needTitle) { needTitle = false; continue; }
-        try {
-            int sid = std::stoi(line);
-            if (sid > maxSetId_) maxSetId_ = sid;
-        } catch (...) {}
-        inSet = false;
+    maxSetId_ = cur_scanMaxSetId(rawLines_);
+}
+
+// 주 덱의 인클루드 닫힘을 읽는다 — 정본(`include_closure`)으로, 주 덱 폴더 기준.
+// 못 본 자리(찾지 못한 이름 · 따라가지 않은 `*INCLUDE_*` · 깊이 상한)는 **여기서 한 번** 말한다.
+// 발급은 op 마다 일어나지만 경고를 거기 두면 한 실행에 여러 번 찍힌다(사람이 센다).
+void ModelAssembler::readIncludeClosure() {
+    inclLines_.clear();
+    inclPaths_.clear();
+    auto closure = include_closure::read(baseModelPath_, rawLines_);
+    for (auto& f : closure.files) {
+        inclPaths_.push_back(f.path);
+        inclLines_.push_back(std::move(f.lines));
     }
+    ids::UsedIds gaps;
+    gaps.noteClosure(closure);
+    if (gaps.blind.empty()) return;
+    ConsoleOutput console;
+    console.warning("*INCLUDE " + std::to_string(gaps.blind.size()) + "곳을 읽지 않았습니다 — "
+                    "그 안의 번호(노드·요소·파트·섹션·재질·세트·곡선·접촉)와 겹쳐 낼 수 있습니다");
+    for (const auto& b : gaps.blind) console.println("  못 본 인클루드: " + b);
+}
+
+// 같은 스캐너를 인클루드 파일마다 돌린 최대값. 주 덱 값과의 max 는 부르는 쪽이 한다 —
+// 주 덱 줄은 op 이 앞에서 고쳤을 수 있어(새 블록 삽입) 부르는 시점의 rawLines_ 를 봐야 한다.
+int ModelAssembler::inclMax(const std::function<int(const std::vector<std::string>&)>& scan) const {
+    int m = 0;
+    for (const auto& lines : inclLines_) m = std::max(m, scan(lines));
+    return m;
+}
+
+// 멤버 커서를 인클루드 파일마다 **주 덱과 같은 규칙으로** 센 값 위로 올린다 — 같은 `KFileReader`
+// (노드·요소·파트·파트의 SECID·재질), 같은 `*SECTION_` 첫 카드 훑기, 같은 `*SET_` 훑기.
+// 그래야 「덱을 인클루드로 쪼갠 것」과 「쪼개지 않은 것」의 커서가 같다.
+//
+// 칸 폭 — LS-DYNA 는 폭을 실행줄·주 덱 `*KEYWORD` 로 전체에 정하고 `*INCLUDE ±`·키워드 접미사로만
+// 바꾼다(Vol_I 19343-19353). `KFileReader` 는 파일마다 자기 `*KEYWORD` 를 본다. 인클루드 파일 자신의
+// `*KEYWORD` 옵션이 먹는지는 매뉴얼에 없다. 둘이 갈리는 덱(실사용 88장에서 0장)에서는 8칸·10칸 중 어느
+// 쪽으로 읽었어야 하는지 모른다 — 노드·요소 번호를 **단정하지 못한다고 말한다**(추측하지 않는다).
+void ModelAssembler::raiseMaxIdsOverIncludes() {
+    if (inclLines_.empty()) return;
+    ConsoleOutput console;
+    std::vector<std::string> unsure;
+    const int mainFw = deckFieldWidth(rawLines_);
+    auto plusMinusCard = [](const std::vector<std::string>& lines, const std::string& file,
+                            std::vector<std::string>& out) {
+        for (size_t i = 0; i < lines.size(); ++i) {
+            if (deckscan::isDataLine(lines[i]) || deckscan::keywordToken(lines[i]) != "*INCLUDE") continue;
+            const std::string& l = lines[i];
+            size_t a = l.find_first_not_of(" \t");
+            size_t b = l.find_first_not_of(" \t", a + 8);          // "*INCLUDE" 뒤
+            if (b != std::string::npos && (l[b] == '+' || l[b] == '-'))
+                out.push_back(file + ":" + std::to_string(i + 1) + " 의 `*INCLUDE " + l[b] +
+                              "` — 그 파일의 폭을 바꾼다");
+        }
+    };
+    plusMinusCard(rawLines_, baseModelPath_, unsure);
+    for (size_t k = 0; k < inclLines_.size(); ++k) {
+        const auto& lines = inclLines_[k];
+        const std::string& path = inclPaths_[k];
+        plusMinusCard(lines, path, unsure);
+        if (deckFieldWidth(lines) != mainFw)
+            unsure.push_back(path + " — `*KEYWORD` 의 폭(" + std::to_string(deckFieldWidth(lines)) +
+                             ")이 주 덱(" + std::to_string(mainFw) + ")과 다르다");
+        try {
+            KFileReader reader;
+            const Mesh m = reader.readFile(path);
+            maxNodeId_ = std::max(maxNodeId_, m.getMaxNodeId());
+            maxElementId_ = std::max(maxElementId_, m.getMaxElementId());
+            for (const auto& [pid, part] : m.parts) {
+                maxPartId_ = std::max(maxPartId_, pid);
+                maxSectionId_ = std::max(maxSectionId_, part.sectionId);
+            }
+            for (const auto& [mid, mat] : m.materials) {
+                (void)mat;
+                maxMaterialId_ = std::max(maxMaterialId_, mid);
+            }
+        } catch (const std::exception& e) {
+            unsure.push_back(path + " — 메시로 읽지 못해 노드·요소·파트·재질 번호를 세지 못했다: " + e.what());
+        }
+        maxSectionId_ = std::max(maxSectionId_, cur_scanMaxSectionId(lines));
+        maxSetId_ = std::max(maxSetId_, cur_scanMaxSetId(lines));
+    }
+    if (unsure.empty()) return;
+    console.warning("인클루드 " + std::to_string(unsure.size()) + "곳의 노드·요소 번호를 단정하지 "
+                    "못했습니다 — 그 번호와 겹쳐 낼 수 있습니다");
+    for (const auto& u : unsure) console.println("  " + u);
 }
 
 bool ModelAssembler::loadRawOnly(const std::string& filename) {
     rawLines_.clear();
+    baseModelPath_ = filename;
     std::ifstream file(filename);
     if (!file.is_open()) {
         errorMessage_ = "Cannot open model: " + filename;
@@ -188,6 +297,7 @@ bool ModelAssembler::loadRawOnly(const std::string& filename) {
         rawLines_.push_back(line);
     }
     file.close();
+    readIncludeClosure();   // 지역 커서(matdb 의 MID)가 인클루드까지 센다 — 멤버 커서는 이 길에서 안 쓴다
     return true;
 }
 
@@ -7955,13 +8065,7 @@ bool ModelAssembler::applyDisconnect(const DisconnectOperation& op) {
             ids::UsedIds setUse;
             setUse.raise(ids::Ns::SetNode, maxPartId_ + 999);           // 관례의 바닥 — 그 아래는 쓴 것으로 친다
             setUse.raise(ids::Ns::SetNode, bc_findMaxSetNodeId(rawLines_));
-            const auto setClosure = include_closure::read(baseModelPath_, rawLines_);
-            for (const auto& f : setClosure.files)
-                setUse.raise(ids::Ns::SetNode, bc_findMaxSetNodeId(f.lines));
-            setUse.noteClosure(setClosure);
-            for (const auto& b : setUse.blind)
-                infoMessages.push_back("  [WARN] Disconnect (mefem): 못 본 인클루드가 있어 그 안의 "
-                                       "*SET_NODE 번호와 겹쳐 낼 수 있습니다 — " + b);
+            setUse.raise(ids::Ns::SetNode, inclMax(bc_findMaxSetNodeId));   // 못 본 자리는 로더가 말했다
             ids::IdAllocator setIds(setUse);
             int constraintCount = 0;
             std::ostringstream kwBlock;
@@ -11756,11 +11860,15 @@ bool ModelAssembler::applyMatswap(const MatswapOperation& op, const std::string&
         if (info.hgid  > 0) oldHgids.insert(info.hgid);
     }
 
-    // 6. Scan model for max IDs
-    int maxHGID  = mw_scanMaxId(rawLines_, "*HOURGLASS");
-    int maxLCID  = mw_scanMaxId(rawLines_, "*DEFINE_CURVE");
-    int maxSECID = mw_scanMaxId(rawLines_, "*SECTION");
-    int maxMID   = mw_scanMaxId(rawLines_, "*MAT_");
+    // 6. Scan model for max IDs — 인클루드 파일도 같은 스캐너로 센다(이미 있는 번호를 다시 내지 않게)
+    auto scanMax = [&](const char* prefix) {
+        return std::max(mw_scanMaxId(rawLines_, prefix),
+                        inclMax([prefix](const std::vector<std::string>& L) { return mw_scanMaxId(L, prefix); }));
+    };
+    int maxHGID  = scanMax("*HOURGLASS");
+    int maxLCID  = scanMax("*DEFINE_CURVE");
+    int maxSECID = scanMax("*SECTION");
+    int maxMID   = scanMax("*MAT_");
 
     // Reuse orphan MID if all target parts share a single MID that is orphaned
     int reuseableMid = -1;
@@ -12780,6 +12888,12 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
     {
         int maxMid = 0;
         for (auto& blk : matBlocks) if (blk.mid > maxMid) maxMid = blk.mid;
+        // 인클루드 파일의 재질도 같은 스캐너로 센다 — 이미 있는 MID 를 다시 내지 않게
+        maxMid = std::max(maxMid, inclMax([](const std::vector<std::string>& L) {
+            int m = 0;
+            for (const auto& b : md_scanMatBlocks(L)) m = std::max(m, b.mid);
+            return m;
+        }));
         // Also scan all known part data lines for max MID
         for (auto& kv : partDataLineByTitle) {
             size_t j = kv.second;
@@ -13611,8 +13725,9 @@ bool ModelAssembler::applyLoad(const LoadOperation& op) {
         return true;
     }
 
-    int nextSetId = ld_findMaxSetSegmentId(rawLines_) + 1;
-    int nextCurveId = ld_findMaxCurveId(rawLines_) + 1;
+    // 인클루드 파일도 같은 스캐너로 센다(`inclMax`) — 이미 있는 번호를 다시 내지 않게
+    int nextSetId = std::max(ld_findMaxSetSegmentId(rawLines_), inclMax(ld_findMaxSetSegmentId)) + 1;
+    int nextCurveId = std::max(ld_findMaxCurveId(rawLines_), inclMax(ld_findMaxCurveId)) + 1;
     std::vector<std::string> insertBlocks;
     int loadCount = 0;
 
@@ -14268,9 +14383,10 @@ bool ModelAssembler::applyContact(const ContactOperation& op) {
         return true;
     }
 
-    int nextSetId = ld_findMaxSetSegmentId(rawLines_) + 1;
+    // 인클루드 파일도 같은 스캐너로 센다(`inclMax`) — 이미 있는 번호를 다시 내지 않게
+    int nextSetId = std::max(ld_findMaxSetSegmentId(rawLines_), inclMax(ld_findMaxSetSegmentId)) + 1;
     // 새 접촉 CID 는 덱의 기존 `_ID` CID **위로** 발행한다(단독 contact 와 같은 규율).
-    int nextContactId = ct_findMaxContactId(rawLines_) + 1;
+    int nextContactId = std::max(ct_findMaxContactId(rawLines_), inclMax(ct_findMaxContactId)) + 1;
     std::vector<std::string> insertBlocks;
     int contactCount = 0;
 
@@ -14640,7 +14756,8 @@ bool ModelAssembler::applyBoundary(const BoundaryOperation& op) {
         }
     }
 
-    int maxSetNodeId = bc_findMaxSetNodeId(rawLines_);
+    // 인클루드 파일도 같은 스캐너로 센다(`inclMax`) — 이미 있는 번호를 다시 내지 않게
+    int maxSetNodeId = std::max(bc_findMaxSetNodeId(rawLines_), inclMax(bc_findMaxSetNodeId));
     int nextSetId = maxSetNodeId + 1;
     std::vector<std::string> insertBlocks;
     int bcCount = 0;
@@ -14874,10 +14991,11 @@ bool ModelAssembler::applyRbe(const RbeOperation& op) {
         }
     }
 
-    int maxSetNodeId = bc_findMaxSetNodeId(rawLines_);
+    // 인클루드 파일도 같은 스캐너로 센다(`inclMax`) — 이미 있는 번호를 다시 내지 않게
+    int maxSetNodeId = std::max(bc_findMaxSetNodeId(rawLines_), inclMax(bc_findMaxSetNodeId));
     int nextSetId = maxSetNodeId + 1;
-    int nextCnrbPid = rbe_findMaxCnrbPid(rawLines_) + 1;
-    int nextIcid = rbe_findMaxIcid(rawLines_) + 1;
+    int nextCnrbPid = std::max(rbe_findMaxCnrbPid(rawLines_), inclMax(rbe_findMaxCnrbPid)) + 1;
+    int nextIcid = std::max(rbe_findMaxIcid(rawLines_), inclMax(rbe_findMaxIcid)) + 1;
     std::vector<std::string> insertBlocks;
     int rbeCount = 0;
     int nodesCreated = 0;

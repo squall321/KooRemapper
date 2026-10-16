@@ -825,6 +825,23 @@ plan2 는 `IdAllocator` 로 발행자를 통합하라고 했다. 정찰이 그 �
       **관문을 세웠다**(낡은 채로 돌리면 정확히 12개를 문다).
       → 남은 것 — 나머지 발행자(hfdamp · ModelAssembler 커서 넷 · disconnect · matswap · merge ·
         cnrb2solid · ale · surface_extract)와 **스캐너를 하나로 모으기**(발행자마다 차분 0 증명).
+      ★**ModelAssembler 커서 — 인클루드 닫힘까지(2026-10-16).** 멤버 커서 여섯(NODE·ELEM·PART·SECTION·MAT·SET)과
+        op 안의 지역 커서(load·contact·boundary·rbe·matdb·matswap — 곡선·SET_SEGMENT·SET_NODE·CID·CNRB·ICID·
+        HGID·SECID·MID)를 **주 덱과 같은 스캐너**로 인클루드 파일마다 센 값 위로 낸다(`KFileReader` 를 파일마다,
+        `*SECTION_`·`*SET_` 훑기는 함수로 뽑아 주 덱도 그것을 쓴다). assemble 안의 hfdamp·cnrb2solid 는 멤버
+        커서를 받으므로 같이 덮인다. mefem 이 따로 읽던 닫힘은 중앙 것으로(두 번째 읽기 제거).
+        경고는 「모두 못 읽었다」에서 **못 본 자리만**으로 — 다 읽었으면 조용하다. 폭이 주 덱과 갈리는 인클루드
+        (`*KEYWORD` 옵션 · `*INCLUDE ±`)는 노드·요소 번호를 단정 못 한다고 말한다(실사용 0장).
+        회귀 `test_assembler_include_ids.py` 58항 — 신탁 「쪼갠 덱 = 쪼개지 않은 덱」 + 「인클루드 번호와 안 겹침」,
+        레인 9개(czm·mefem·contact+load·boundary·rbe2·rbe3·matswap·matdb·restack). **옛 바이너리 FAIL 18**
+        (mefem 만 초록 — 앞 커밋에서 고친 자리). 42 op 산출 덱 옛 대 새 **바이트 동일**(보고서 JSON 둘은 같은
+        바이너리로 두 번 떠도 매번 다르다). 실사용 인클루드 덱 88장 identity — rc 0 전부 · 못 본 자리 1장(알던
+        빠진 파일) · 폭 단정 불가 0장.
+        → 남은 발행자 — 단독 `hfdamp`·`cnrb2solid`·`cnrb2spring`·`tetremesh`·`meshfix`·`ale`·`matswap`(위치
+          인자판)·`cclip` 의 노드·요소. 셋 다 경고는 한다.
+        → 따로 올린 것(이 커밋 아님) — `maxShellElementId_` 가 0 에서 시작(extract_surface·TSHELL 압출·오프셋
+          셸이 덱의 셸·솔리드와 **같은 EID** 를 낸다, 실측) · 주 덱 MID 맹점(리더가 아는 재질 다섯 종류만 센다) ·
+          `ld_findMaxCurveId` 의 `_TITLE` 맹점 · identity 가 `*NODE` 없는 마스터 덱에 빈 `*NODE` 를 끼운다.
       ★**2026-10-15 에 선행이 됐다** — StepForge 답신에서 Q5 를 「**우리가 번호를 준다**」로
       확정했다(`stepforge-boundary-reply-2026-10-15.md` §5 ①). 즉 저쪽 조각 내보내기(표 4행)의
       시작 번호가 여기 매달린다. **과도기 길을 함께 보냈다** — 그동안 StepForge 가 `ranges` 를

@@ -14,6 +14,7 @@
 #include <set>
 #include <map>
 #include <array>
+#include <functional>
 #include <string>
 
 // Knowledge graph (lat.md):
@@ -156,7 +157,11 @@ private:
     // Base model
     Mesh baseMesh_;
     std::vector<std::string> rawLines_;
-    std::string baseModelPath_;   // 인클루드 닫힘을 주 덱 폴더 기준으로 읽으려고(loadBaseModel)
+    std::string baseModelPath_;   // 인클루드 닫힘을 주 덱 폴더 기준으로 읽으려고(두 로더)
+    // 인클루드 닫힘 파일들의 줄(주 덱 제외, LS-DYNA 가 읽는 차례). 번호 커서가 주 덱과 **같은 스캐너**로
+    // 인클루드에 이미 있는 번호까지 세려고 든다 — 쪼개지 않은 같은 덱이면 rawLines_ 에 들어 있었을 줄이다.
+    std::vector<std::vector<std::string>> inclLines_;
+    std::vector<std::string> inclPaths_;   // inclLines_ 와 같은 차례의 파일 경로
     // 입력 덱의 개행. 읽을 때 기억했다가 최종 출력에서 되붙인다 — 리더가 CR 을 떼므로
     // 이것이 없으면 CRLF 덱이 조용히 LF 로 바뀐다(구조 카운트는 전부 정상이라 안 보인다).
     DeckNewline deckNewline_ = DeckNewline::LF;
@@ -296,6 +301,12 @@ private:
     void applyPidRefRewrites();
     // rawLines_ 에서 *SET_* SID 를 훑어 maxSetId_ 를 채운다(loadBaseModel 과 단독 경로 공용)
     void initMaxSetIdFromRawLines();
+    // 주 덱의 인클루드 닫힘을 읽어 inclLines_ 를 채우고, 못 본 자리를 **한 번** 말한다(두 로더 공용).
+    void readIncludeClosure();
+    // 멤버 커서(NODE·ELEM·PART·SECTION·MAT·SET)를 인클루드 파일마다 주 덱과 같은 규칙으로 센 값 위로 올린다.
+    void raiseMaxIdsOverIncludes();
+    // 같은 스캐너를 인클루드 파일마다 돌린 최대값(인클루드가 없으면 0) — op 안에서 따로 세는 지역 커서용.
+    int inclMax(const std::function<int(const std::vector<std::string>&)>& scan) const;
     // 덱 머리에 넣을 $ KOOREMAPPER-PIDREF 블록(발견이 없으면 빈 문자열)
     std::string buildPidRefHeaderBlock() const;
     std::vector<PidRefFinding> pidRefFindings_;
