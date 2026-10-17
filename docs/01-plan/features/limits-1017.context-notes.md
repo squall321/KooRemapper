@@ -17,3 +17,11 @@
   같다: contact · relax · stabilize · database · hfdamp · implicit · modal · optimize · 분석 op 전부 · id_floor · extract-parts.
 - **(10-17) 정본이 하나 더 갈려 있다 — extract-parts 의 인클루드 펼치기**(`joinPath(baseDir, rel)` — 포함하는 파일의 폴더 기준).
   정본은 주 덱 폴더 기준이다. 이번 범위 밖이라 고치지 않고 알린다.
+- **(10-17) S3 에서 결함이 하나 더 나왔다 — 맨 `*SET_NODE`.** 옮기기 장치(`migrateDeadNodeSets`)가 이름이 `*SET_NODE_LIST` 로
+  시작할 때만 봐서, 매뉴얼상 같은 카드인 맨 `*SET_NODE` 의 멤버는 같은 자리 새 절점으로 옮기지 않고 **지웠다**. 보고 장치
+  (`scanDeadReferences`)도 세 번째 사본이었다 — `_INTERSECT` 를 「지운 중간면 노드」로 적었다. 셋 다 정본 표로 모았다.
+- **(10-17) S2 — 정본 닫힘을 그대로 쓰면 큰 덱에서 메모리가 터진다.** `include_closure::read` 는 인클루드 파일의 줄을 담는다.
+  2.32GB 급 덱은 메시가 인클루드 안에 있는 경우가 많아 그대로 쓰면 수 GB 를 담는다. 그래서 같은 걸음(`card`)을 쓰는
+  **흘려 읽기 판**(`readPaths` — 차례와 경로만)을 정본 안에 더했다. 규칙이 둘로 갈리지 않는다(단위 시험이 두 판을 대조한다).
+- **(10-17) 인클루드 안 `*END` 뒤의 카드는 이제 참조로 세지 않는다**(정본 규칙 — Vol_I 179654). 예전에는 세어서 절점을 더
+  남겼다(보수적). LS-DYNA 가 읽지 않는 카드라 지워도 덱이 깨지지 않는다.

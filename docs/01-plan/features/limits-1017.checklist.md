@@ -1,9 +1,9 @@
 # 체크리스트 — 한계 여섯 (10-17)
 
 ## 작은 셋
-- [ ] S1 hfdamp 거절 rc 255 → 1 — 시험(rc 1 단정) · 카탈로그 · 매뉴얼 · pyKooCAE 문구
-- [ ] S3 `cleanupDeadNodeRefs` 목록 칸 → 정본 표 · 세트 분류 정본 — `_INTERSECT` 실측(돌려서) · 시험 · 단위 시험
-- [ ] S2 cleanup-nodes 인클루드 → 정본 닫힘 — `␣+` 이음 · 인클루드 안 `*END` · 깊이 상한을 「못 봤다」로 · 시험
+- [x] S1 hfdamp 거절 rc 255 → 1 — 시험(rc 1 단정 · C-1b 값 검사도) · 카탈로그 · SKILL · 매뉴얼 · pyKooCAE 문구(커밋은 문서 묶음에서) → `19c265d`
+- [x] S3 목록 칸 → 정본 `noderefs::listCardOf`·`listCardFields` — 옮기기·치우기·보고 세 장치 · 실측 결함 둘(`_INTERSECT` 세트 ID 를 절점으로 · 맨 `*SET_NODE` 를 안 옮김) · `test_dead_node_list_cards`(배포본 FAIL 4) · 단위 2 → `f7ad8c0`
+- [x] S2 cleanup-nodes → 정본 `include_closure::readPaths`(흘려 읽기 판) — 실측: 9단째 파일의 절점을 지웠다(rc 0) · F-10~14(배포본 FAIL 5) · 단위 2 → `5871e5d`
 
 ## 큰 셋
 - [ ] B1 2차 솔리드 — 리더(전체 절점 · TET10 코너) · Writer · bboxReport · modelmeta(`geometry_basis`) · info · 그림 셋 · rebind 소속
