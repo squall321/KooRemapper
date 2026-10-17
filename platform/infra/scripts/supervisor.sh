@@ -83,20 +83,84 @@ gone_for_sure() {
 # 같은 구분이 감독자 밖에서도 필요해 `_common.sh:instance_absent_for_sure` 로 올렸다.
 # 여기 gone_for_sure 는 "이번 회차 건너뜀" 을 **로그로 남기는** 얇은 겹이다(감독자만 그 로그가 쓸모 있다).
 
+# postgres 가 **실제로 접속을 받는가** — 인스턴스 목록에 있다는 것만으로는 모른다. 10-17 09:32 ~ 10-18 03:53, 같은 이름의 셸이
+# 겹친 뒤 postgres 없는 셸이 목록에 남아 감독자가 18시간 동안 매분 ✓ 를 찍었고 :5436 은 비어 있었다(사람별 로그인 500 31건 — HWAX
+# 포털 수정 제안서 K1). 인스턴스 안의 pg_isready 로 유닉스소켓을 본다(그 소켓은 우리 데이터 폴더라 남의 postmaster 가 아니다 — start.sh
+# 의 pg_id 와 같은 근거).  0 받는다 · 1 기동·종료 중(이번 회차는 기다린다) · 2 응답 없음 · 3 판정 불가(목록 실패처럼 '모름' — 손대지 않는다).
+KOORM_PG_RECHECK_S="${KOORM_PG_RECHECK_S:-5}"   # 응답 없음을 한 번 더 볼 때까지(초) — 한 번의 깜박임으로 내리지 않는다
+pg_state() {
+  local rc=0
+  "$APPTAINER" exec instance://"$INST_POSTGRES" pg_isready -q -h /var/run/postgresql -p "$POSTGRES_PORT" >/dev/null 2>&1 || rc=$?
+  case "$rc" in
+    0) return 0 ;;
+    1) return 1 ;;
+    2) return 2 ;;
+    *) return 3 ;;    # 3(인자 오류) · 126/127(pg_isready 없음) · 255(인스턴스에 못 붙음) — 죽었다는 증거가 아니다
+  esac
+}
+# 같은 이름의 인스턴스 셸 수 — 둘 이상이면 apptainer 의 인스턴스 기록이 하나만 가리켜, 무엇을 내리든 다른 셸이 남는다(10-17 사고의 시작).
+pg_shells() {
+  local n
+  n="$(pgrep -c -f "Apptainer instance: $(id -un) \\[$INST_POSTGRES\\]" 2>/dev/null || true)"
+  printf '%s' "${n:-0}" | tr -dc '0-9'
+}
+# start.sh 가 rc 0 이어도 postgres 가 받는지 다시 본다 — '복구 성공' 은 그 뒤에만 적는다(K1 ②).
+pg_ready_after_start() {
+  local _i rc
+  for _i in 1 2 3 4 5 6; do
+    rc=0; pg_state || rc=$?   # ⚠ `f; rc=$?` 는 set -e(_common.sh) 아래서 f 가 0 이 아니면 거기서 끝난다
+    [ "$rc" -eq 0 ] && return 0
+    sleep "$KOORM_PG_RECHECK_S"
+  done
+  return 1
+}
+pg_start() {   # $1: 까닭 — start.sh 로 띄우고 postgres 가 받는지까지 확인해 결과를 적는다
+  if "$SCRIPT_DIR/start.sh" >/tmp/koorm-supervise-start.log 2>&1; then
+    if pg_ready_after_start; then
+      echo "[$(date '+%F %T')] postgres 복구 성공($1 — 접속 확인)"
+    else
+      echo "[$(date '+%F %T')] postgres 복구 실패($1) — start.sh 는 rc 0 인데 postgres 가 접속을 받지 않는다 · /tmp/koorm-supervise-start.log"
+    fi
+  else
+    local rc=$?
+    echo "[$(date '+%F %T')] postgres 복구 실패($1 · rc=$rc) — /tmp/koorm-supervise-start.log"
+    tail -5 /tmp/koorm-supervise-start.log | sed 's/^/    /'
+  fi
+}
+
 check_once() {
-  # postgres (start full stack if its instance is gone — start.sh is idempotent)
-  if gone_for_sure "$INST_POSTGRES"; then
+  # postgres — 같은 이름의 셸이 겹쳤으면 알리고 손대지 않는다(K1 ④). 무엇을 내리든 다른 셸이 남아 다음 회차가 또 겹쳐 띄운다.
+  local _shells _pg
+  _shells="$(pg_shells)"
+  if [ "${_shells:-0}" -ge 2 ] 2>/dev/null; then
+    echo "[$(date '+%F %T')] ⚠ $INST_POSTGRES 인스턴스 셸이 ${_shells}개다 — 손대지 않는다. 사람이: 감시 cron 을 빼고 stop.sh 로 등록된 것을" \
+         "내린 뒤 남은 빈 셸을 치우고 start.sh, 그다음 cron 을 되돌린다(같은 이름의 빈 셸을 먼저 끝내면 기록이 지워져 감시가 겹쳐 띄운다)"
+  elif gone_for_sure "$INST_POSTGRES"; then
+    # start full stack if its instance is gone — start.sh is idempotent
     echo "[$(date '+%F %T')] postgres down → start.sh"
     # ② 와 같은 이유로 결과를 남긴다 — 옛 코드는 `|| true` 로 성공·실패를 똑같이 삼켜,
     # 매번 같은 이유로 실패하는 상태와 정상 복구를 로그로 구분할 수 없었다.
-    if "$SCRIPT_DIR/start.sh" >/tmp/koorm-supervise-start.log 2>&1; then
-      echo "[$(date '+%F %T')] postgres 복구 성공"
-    else
-      rc=$?
-      echo "[$(date '+%F %T')] postgres 복구 실패(rc=$rc) — /tmp/koorm-supervise-start.log"
-      tail -5 /tmp/koorm-supervise-start.log | sed 's/^/    /'
-    fi
+    pg_start "인스턴스 없음"
     return
+  else
+    # 인스턴스는 있다 — 접속을 받는가(K1 ①). 응답 없음은 KOORM_PG_RECHECK_S 뒤 한 번 더 보고도 그러면 내리고 다시 띄운다.
+    # ⚠ `pg_state; _pg=$?` 로 받지 않는다 — _common.sh 가 set -e 라 0 이 아닌 답에서 감독자가 말없이 끝난다(if 조건 안의
+    #   gone_for_sure 는 errexit 가 쉬어 괜찮았다). 시험이 잡았다(10-18).
+    _pg=0; pg_state || _pg=$?
+    if [ "$_pg" -eq 2 ]; then
+      sleep "$KOORM_PG_RECHECK_S"
+      _pg=0; pg_state || _pg=$?
+    fi
+    case "$_pg" in
+      0) : ;;
+      1) echo "[$(date '+%F %T')] postgres 기동·종료 중(pg_isready 1) — 다음 회차에 다시 본다" ;;
+      2) echo "[$(date '+%F %T')] postgres 무응답(인스턴스는 있다 — ${KOORM_PG_RECHECK_S}초 간격 두 번) → stop → start.sh"
+         "$APPTAINER" instance stop "$INST_POSTGRES" >/tmp/koorm-supervise-pgstop.log 2>&1 \
+           || echo "[$(date '+%F %T')] postgres 인스턴스 stop 실패 — /tmp/koorm-supervise-pgstop.log(그래도 start.sh 를 부른다)"
+         pg_start "인스턴스는 있는데 무응답"
+         return ;;
+      *) echo "[$(date '+%F %T')] postgres 판정 보류 — 인스턴스 안에서 pg_isready 를 못 돌렸다(이번 회차 건너뜀)" ;;
+    esac
   fi
   # api: restart if instance gone OR health endpoint not answering
   # 재기동 '이유'와 '결과'를 전부 버리고 있었다 — 인스턴스가 없어서인지 헬스가 안 붙어서인지,
@@ -117,6 +181,15 @@ check_once() {
   # 인스턴스 유무는 **이유를 정확히 적기 위해서만** 본다 — 행동(재기동)은 헬스로 이미 정해졌다.
   if [ -n "$_api_reason" ] && gone_for_sure "$INST_API"; then
     _api_reason="인스턴스 없음"
+  fi
+  # 헬스가 DB 를 본다(K1 ③ — DB 가 죽으면 503 · database.ok=false). 그때 API 를 다시 띄워도 고쳐지지 않는다 — 위 postgres 판정이 맡는다.
+  if [ "${_api_code:-}" = "503" ] && [ "$_api_reason" = "헬스 HTTP 503" ]; then
+    _api_body="$(curl -s -m3 "http://127.0.0.1:${KOORM_API_PORT}/api/health" 2>/dev/null || true)"
+    case "$_api_body" in
+      *'"database":{"ok":false'*)
+        echo "[$(date '+%F %T')] api 는 떠 있고 DB 가 응답하지 않는다(헬스 503 · database.ok=false) — api 는 다시 띄우지 않는다"
+        _api_reason="" ;;
+    esac
   fi
   if [ -n "$_api_reason" ]; then
     echo "[$(date '+%F %T')] api down ($_api_reason) → restart-api-only.sh"

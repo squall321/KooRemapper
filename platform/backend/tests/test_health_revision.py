@@ -135,15 +135,25 @@ def test_the_endpoint_actually_carries_the_fields(tmp_path, monkeypatch):
     b = _mk(tmp_path, body, _INFO.format(sha=hashlib.sha256(body).hexdigest()))
     monkeypatch.setattr(settings, "kooremapper_bin", b)
 
+    import asyncio
+
+    from fastapi import Response
+
+    import app.main as m
+    monkeypatch.setattr(m, "_db_ping", lambda: _ok_ping())    # DB 핑은 따로 본다(test_health_db_ping) — 여기는 빌드 칸
     app = create_app()
     route = next(r for r in app.routes if getattr(r, "path", None) == "/api/health")
-    data = route.endpoint()["data"]
+    data = asyncio.run(route.endpoint(response=Response()))["data"]
     # 기존 네 칸이 그대로 있어야 한다 — 소비자가 셋 있다(supervisor.sh·start.sh·nginx).
     for k in ("status", "env", "name", "binary_present"):
         assert k in data, f"{k} 칸이 사라졌다 — {sorted(data)}"
     assert data["revision"] == "1234567890abcdef1234567890abcdef12345678", data
     assert data["binary_sha256"] == hashlib.sha256(body).hexdigest()
     assert data["revision_matches_binary"] is True
+
+
+async def _ok_ping():
+    return {"ok": True}
 
 
 def test_the_cache_refreshes_when_only_build_info_changes(tmp_path):

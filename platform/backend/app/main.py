@@ -13,7 +13,7 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -72,7 +72,7 @@ def create_app() -> FastAPI:
     register_routers(app)
 
     @app.get("/api/health", tags=["health"])
-    def health() -> dict:
+    async def health(response: Response) -> dict:
         # 기존 네 칸은 그대로 둔다 — 소비자(supervisor.sh·start.sh·nginx)는 상태코드만 보지만
         # 칸 이름을 바꾸면 조용히 깨질 수 있는 자리다. **더하기만** 한다.
         #
@@ -82,27 +82,55 @@ def create_app() -> FastAPI:
         from app.runner.gmsh_probe import probe as gmsh_probe
         from app.shared.buildinfo import build_info
 
-        info = build_info(settings.kooremapper_bin)
+        # 파일 · 하위 프로세스를 보는 확인은 이벤트 루프 밖에서 — 헬스가 비동기가 된 것은 아래 DB 핑 때문이다.
+        info = await asyncio.to_thread(build_info, settings.kooremapper_bin)
         # gmsh 가용 여부 — `meshfix` 는 이것 없이는 못 돈다(P1-9).
         # ⚠ 경로와 거절 목록은 **싣지 않는다.** 이 엔드포인트는 인증 없이 열린다 —
         # 배치 구조를 밖에 알릴 이유가 없다. 그 둘은 잡 거절 메시지로 (인증된) 사용자에게 간다.
-        _g = gmsh_probe(settings.kooremapper_bin)
+        _g = await asyncio.to_thread(gmsh_probe, settings.kooremapper_bin)
+        # DB 핑 — 종전엔 DB 가 죽어도 200 이라 감독자 · 게이트웨이 · 포털 update-all 의 헬스게이트가 못 잡았다(10-17 ~ 10-18 18시간 —
+        # HWAX 포털 수정 제안서 K1 ③). 죽었으면 503 이고 칸 이름은 그대로 둔다(더하기만). 감독자는 이 503 으로 API 를 다시 띄우지 않는다.
+        db = await _db_ping()
+        if not db["ok"]:
+            response.status_code = 503
         return {
-            "success": True,
+            "success": db["ok"],
             "data": {
-                "status": "ok",
+                "status": "ok" if db["ok"] else "degraded",
+                "database": db,
                 "env": settings.app_env,
                 "name": settings.app_name,
                 "binary_present": settings.kooremapper_bin.exists(),
                 **info,
                 "gmsh": {"available": _g["available"], "version": _g["version"]},
             },
-            "message": None,
+            "message": None if db["ok"] else "database 가 응답하지 않는다",
             "errors": None,
         }
 
     _mount_frontend_if_configured(app)
     return app
+
+
+_DB_PING_TIMEOUT_S = 3.0
+
+
+async def _db_ping() -> dict:
+    """DB 에 SELECT 1 — {"ok": True} 또는 {"ok": False, "error": 예외 이름}. /api/health 는 인증 없이 열리므로 주소 · 메시지는 싣지
+    않는다(예외 이름만 — 'ConnectionRefusedError' 면 postgres 가 내려간 것이다). 한도를 넘기면 TimeoutError 다."""
+    from sqlalchemy import text
+
+    from app.database import engine
+
+    async def _q() -> None:
+        async with engine.connect() as c:
+            await c.execute(text("SELECT 1"))
+
+    try:
+        await asyncio.wait_for(_q(), _DB_PING_TIMEOUT_S)
+        return {"ok": True}
+    except Exception as exc:  # noqa: BLE001 — 핑 실패는 헬스의 답이지 오류가 아니다
+        return {"ok": False, "error": type(exc).__name__}
 
 
 def _configure_cors(app: FastAPI) -> None:
