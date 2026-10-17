@@ -242,3 +242,46 @@ TEST(IncludeClosure_못_읽은_이름은_펼치지_않고_줄을_지킨다) {
     ASSERT_EQ(f.size(), L.size());
     for (size_t i = 0; i < L.size(); ++i) ASSERT_EQ(f[i], L[i]);
 }
+
+// ── 차례와 경로만(`readPaths`) — 흘려 읽는 소비자(cleanup-nodes)용 · 2026-10-17 ─────────────────
+// 담는 판(`read`)과 **같은 규칙**이어야 한다 — 갈리면 두 소비자가 다른 파일을 본다. 예전 cleanup-nodes 의 자기 재귀는
+// 9단째 인클루드를 훑지 않아 거기 요소가 쓰는 절점을 지웠다.
+
+TEST(IncludeClosure_readPaths_는_read_와_같은_파일_같은_차례) {
+    Scratch s("paths");
+    s.put("a.k", "*KEYWORD\n*INCLUDE\nb.k\n*END\n*INCLUDE\nghost.k\n");
+    s.put("b.k", "*KEYWORD\n*SET_PART\n1\n*END\n");
+    s.put("long_name.k", "*KEYWORD\n*END\n");
+    const std::string body = "*KEYWORD\n*INCLUDE\na.k\nlong_ +\nname.k\nmissing.k\n*INCLUDE_TRANSFORM\nt.k\n*END\n";
+    const std::string mp = s.put("main.k", body);
+    const auto c1 = include_closure::read(mp, splitLines(body));
+    const auto c2 = include_closure::readPaths(mp);
+    ASSERT_EQ(c2.files.size(), c1.files.size());
+    for (size_t k = 0; k < c1.files.size(); ++k) {
+        ASSERT_EQ(c2.files[k].path, c1.files[k].path);
+        ASSERT_EQ(c2.files[k].depth, c1.files[k].depth);
+        ASSERT_EQ(c2.files[k].fromLine, c1.files[k].fromLine);
+        ASSERT_EQ(c2.files[k].afterLine, c1.files[k].afterLine);
+        ASSERT_TRUE(c2.files[k].lines.empty());           // 줄은 담지 않는다
+    }
+    ASSERT_EQ(c2.unresolved.size(), c1.unresolved.size());  // missing.k (ghost.k 는 *END 뒤라 찾지도 않는다)
+    ASSERT_EQ(c2.unresolved[0].line, c1.unresolved[0].line);
+    ASSERT_EQ(c2.notFollowed.size(), (size_t)1);
+    ASSERT_EQ(c2.notFollowed[0].line, c1.notFollowed[0].line);
+    ASSERT_EQ(c2.cards, c1.cards);
+}
+
+TEST(IncludeClosure_readPaths_깊이_상한을_말한다) {
+    Scratch s("pdeep");
+    for (int k = 1; k <= 3; ++k)
+        s.put("d" + std::to_string(k) + ".k", "*KEYWORD\n*INCLUDE\nd" + std::to_string(k + 1) + ".k\n*END\n");
+    s.put("d4.k", "*KEYWORD\n*END\n");
+    const std::string mp = s.put("main.k", "*KEYWORD\n*INCLUDE\nd1.k\n*END\n");
+    const auto ok = include_closure::readPaths(mp, 4);
+    ASSERT_EQ(ok.files.size(), (size_t)4);
+    ASSERT_FALSE(ok.depthCut);
+    const auto cut = include_closure::readPaths(mp, 3);
+    ASSERT_EQ(cut.files.size(), (size_t)3);
+    ASSERT_TRUE(cut.depthCut);
+    ASSERT_FALSE(cut.complete());
+}

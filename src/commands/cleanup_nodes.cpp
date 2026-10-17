@@ -115,8 +115,7 @@ struct Scan {
     double bmax[3] = {-1e300, -1e300, -1e300};
     bool anyNode = false;
     // 인클루드
-    std::vector<std::string> includeRead, includeMissing, includeVariant;
-    std::vector<std::string> includeSearchDirs;               // `*INCLUDE_PATH` — 찾는 자리(본문 없음)
+    std::vector<std::string> includeRead, includeMissing, includeVariant;   // 정본 닫힘(`include_closure::readPaths`)에서 채운다
     // 덱
     int fieldWidth = 8;
 };
@@ -131,46 +130,21 @@ struct Scan {
 struct SectionMap {
     std::map<int, int> secElform;   // SECID → ELFORM
     std::map<int, int> partSec;     // PID → SECID
-    // 인클루드 찾기 — 정본 규칙(`include_closure::resolvePath`)에 넘길 것. 주 덱 폴더와 `*INCLUDE_PATH`.
-    std::string mainDir;
-    std::vector<std::string> searchDirs;
 };
 
-void scanSections(const std::string& path, int fw, SectionMap& sm,
-                  std::set<std::string>& visited, int depth);
-
-void scanSectionsStream(std::istream& in, const std::string& baseDir, int fw, SectionMap& sm,
-                        std::set<std::string>& visited, int depth) {
+// 파일 하나만 훑는다 — 인클루드는 따라가지 않는다(닫힘은 정본 `include_closure::readPaths` 가 정하고 호출자가 파일마다 부른다).
+void scanSectionsStream(std::istream& in, SectionMap& sm) {
     std::string line, kw;
     int dataIdx = 0;
-    bool pendingInclude = false;
-    bool pendingPath = false;
-    (void)baseDir;   // 찾는 기준은 포함하는 파일의 폴더가 아니라 **주 덱 폴더**다(sm.mainDir)
     while (std::getline(in, line)) {
         size_t g = line.find_first_not_of(" \t\r\n");
         if (g != std::string::npos && line[g] == '*') {
             kw = keywordToken(line);
             dataIdx = 0;
-            pendingInclude = (kw == "*INCLUDE");
-            pendingPath = starts(kw, "*INCLUDE_PATH");
+            if (kw == "*END") return;   // 그 파일은 여기서 끝난다(Vol_I 179654) — 정본 닫힘과 같은 규칙
             continue;
         }
         if (!isDataLine(line)) continue;
-        if (pendingPath) {
-            std::string dir = trim(line);
-            while (!dir.empty() && dir.back() == '\r') dir.pop_back();
-            if (!dir.empty()) sm.searchDirs.push_back(joinPath(sm.mainDir, dir));
-            continue;
-        }
-        if (pendingInclude) {
-            std::string rel = trim(line);
-            while (!rel.empty() && rel.back() == '\r') rel.pop_back();
-            // 찾는 규칙은 정본 하나(Vol_I 181591) — 주 덱 폴더 먼저, 경로 없는 이름만 탐색 경로.
-            const std::string full = KooRemapper::include_closure::resolvePath(rel, sm.mainDir, sm.searchDirs);
-            if (!rel.empty() && !full.empty() && depth < 8)
-                scanSections(full, fw, sm, visited, depth + 1);
-            continue;   // *INCLUDE 는 줄마다 파일 하나다
-        }
         if (starts(kw, "*SECTION_SOLID")) {
             // 제목줄(_TITLE) 뒤에 Card 1 = SECID, ELFORM …
             int want = titleLines(kw);
@@ -187,17 +161,19 @@ void scanSectionsStream(std::istream& in, const std::string& baseDir, int fw, Se
             if (pid > 0 && sec > 0 && !sm.partSec.count(pid)) sm.partSec[pid] = sec;
         }
     }
-    (void)fw;
 }
 
-void scanSections(const std::string& path, int fw, SectionMap& sm,
-                  std::set<std::string>& visited, int depth) {
-    if (depth == 0) sm.mainDir = dirOf(path);   // 로컬 디렉터리 = 주 덱 폴더
-    if (visited.count(path)) return;
-    visited.insert(path);
+void scanSections(const std::string& path, SectionMap& sm) {
     std::ifstream in(path);
     if (!in.is_open()) return;
-    scanSectionsStream(in, dirOf(path), fw, sm, visited, depth);
+    scanSectionsStream(in, sm);
+}
+
+// 주 덱과 닫힘의 파일들 — 정본이 LS-DYNA 가 읽는 차례(깊이 우선)로 낸다. 주 덱이 맨 앞이다.
+std::vector<std::string> deckFiles(const std::string& mainPath, const KooRemapper::include_closure::Closure& c) {
+    std::vector<std::string> out{mainPath};
+    for (const auto& f : c.files) out.push_back(f.path);
+    return out;
 }
 
 std::map<int, int> buildPidNodes(const SectionMap& sm) {
@@ -224,17 +200,11 @@ bool matchesKeepList(const std::string& kw, const std::vector<std::string>& keep
     return false;
 }
 
-void scanRefs(const std::string& path, bool isMain, const Opts& o,
-              const std::map<int, int>& pidNodes, Scan& sc,
-              std::set<std::string>& visited, int depth, long long& paramRefLines);
-
-void scanRefsStream(std::istream& in, const std::string& baseDir, bool isMain, const Opts& o,
-                    const std::map<int, int>& pidNodes, Scan& sc,
-                    std::set<std::string>& visited, int depth, long long& paramRefLines) {
-    enum class Mode { OTHER, NODE, ELEM, SETNODE, KEEP, TEXT, INCLUDE, INCLUDE_PATH };
-    // 찾는 기준은 포함하는 파일의 폴더가 아니라 **주 덱 폴더**다(Vol_I 181591 — local directory).
-    const std::string mainDir = dirOf(o.model);
-    (void)baseDir;
+// 파일 하나만 훑는다 — 인클루드는 따라가지 않는다(정본 닫힘의 파일마다 호출자가 부른다).
+void scanRefsStream(std::istream& in, bool isMain, const Opts& o,
+                    const std::map<int, int>& pidNodes, Scan& sc, long long& paramRefLines) {
+    enum class Mode { OTHER, NODE, ELEM, SETNODE, KEEP, TEXT };
+    (void)o.model;
     Mode mode = Mode::OTHER;
     std::string kw;
     int fw = sc.fieldWidth;
@@ -269,19 +239,12 @@ void scanRefsStream(std::istream& in, const std::string& baseDir, bool isMain, c
                 continue;
             }
             if (kw == "*NODE") { mode = Mode::NODE; continue; }
-            if (kw == "*INCLUDE") { mode = Mode::INCLUDE; continue; }
-            // ⚠ `*INCLUDE_PATH` 는 **탐색 경로**다 — 끌어오는 카드가 없으니 「못 읽은 변종」이 아니다.
-            //   예전에는 변종으로 세어 `safe` 가 그 덱을 **거절**했다(재현 — 같은 덱에 `*INCLUDE_PATH`
-            //   한 장만 더하면 rc=1 「읽지 못한 *INCLUDE 가 있어 덱을 쓰지 않는다」). 디렉터리를 모아
-            //   경로 없는 이름을 찾는 데 쓴다.
-            if (starts(kw, "*INCLUDE_PATH")) { mode = Mode::INCLUDE_PATH; continue; }
-            if (starts(kw, "*INCLUDE")) {
-                sc.includeVariant.push_back(kw);
-                mode = Mode::TEXT;                 // 변종 본문은 경로·변환값이라 정수로 읽지 않는다
-                continue;
-            }
-            if (starts(kw, "*PARAMETER") || starts(kw, "*COMMENT") || kw == "*TITLE" ||
-                kw == "*END") { mode = Mode::TEXT; continue; }
+            // `*INCLUDE` 계열 — 이름·경로·변환값이라 정수로 읽지 않는다. 따라가기(이름 · 찾는 차례 · 변종 · 깊이)는 정본 닫힘이
+            // 맡는다. ⚠ `*INCLUDE_PATH` 는 **탐색 경로**라 「못 읽은 변종」이 아니다 — 정본도 그렇게 본다(예전에 변종으로 세어
+            // `safe` 가 멀쩡한 덱을 거절했다).
+            if (starts(kw, "*INCLUDE")) { mode = Mode::TEXT; continue; }
+            if (kw == "*END") return;              // 그 파일은 여기서 끝난다(Vol_I 179654) — 정본 닫힘과 같은 규칙
+            if (starts(kw, "*PARAMETER") || starts(kw, "*COMMENT") || kw == "*TITLE") { mode = Mode::TEXT; continue; }
             if (starts(kw, "*SET_NODE")) {
                 mode = Mode::SETNODE;
                 setKind = classifySetNode(kw);
@@ -305,36 +268,6 @@ void scanRefsStream(std::istream& in, const std::string& baseDir, bool isMain, c
         }
 
         if (mode == Mode::TEXT) continue;
-
-        if (mode == Mode::INCLUDE_PATH) {
-            if (!isDataLine(line)) continue;
-            std::string dir = trim(line);
-            if (!dir.empty()) sc.includeSearchDirs.push_back(joinPath(mainDir, dir));
-            continue;
-        }
-
-        if (mode == Mode::INCLUDE) {
-            if (!isDataLine(line)) continue;
-            std::string rel = trim(line);
-            if (rel.empty()) continue;
-            // 찾는 규칙은 정본 하나 — 주 덱 폴더 먼저, 경로 없는 이름만 `*INCLUDE_PATH`.
-            std::string full = KooRemapper::include_closure::resolvePath(rel, mainDir, sc.includeSearchDirs);
-            if (full.empty()) full = joinPath(mainDir, rel);   // 못 찾았다 — 아래가 missing 으로 적는다
-            std::ifstream probe(full);
-            if (probe.is_open()) {
-                probe.close();
-                sc.includeRead.push_back(full);
-                if (depth < 8) {
-                    // 인클루드가 선언한 칸 폭이 부모로 새지 않게 복원한다(그 파일 안에서만 유효).
-                    const int savedFw = sc.fieldWidth;
-                    scanRefs(full, false, o, pidNodes, sc, visited, depth + 1, paramRefLines);
-                    sc.fieldWidth = savedFw;
-                }
-            } else {
-                sc.includeMissing.push_back(full);
-            }
-            continue;
-        }
 
         if (mode == Mode::ELEM) {
             // ⚠ 빈 줄도 카드 한 장으로 센다(셸 두께 Card 는 비워 둘 수 있으나 생략은 못 한다).
@@ -460,13 +393,21 @@ void scanRefsStream(std::istream& in, const std::string& baseDir, bool isMain, c
 }
 
 void scanRefs(const std::string& path, bool isMain, const Opts& o,
-              const std::map<int, int>& pidNodes, Scan& sc,
-              std::set<std::string>& visited, int depth, long long& paramRefLines) {
-    if (visited.count(path)) return;
-    visited.insert(path);
+              const std::map<int, int>& pidNodes, Scan& sc, long long& paramRefLines) {
     std::ifstream in(path);
     if (!in.is_open()) return;
-    scanRefsStream(in, dirOf(path), isMain, o, pidNodes, sc, visited, depth, paramRefLines);
+    scanRefsStream(in, isMain, o, pidNodes, sc, paramRefLines);
+}
+
+// 닫힘 전체를 훑는다 — 주 덱(지울 수 있는 정의) 다음 인클루드 파일마다. 인클루드가 선언한 칸 폭이 다음 파일로 새지 않게
+// 파일마다 주 덱의 폭으로 되돌린다(그 파일 안에서만 유효 — 예전 재귀의 저장·복원과 같다).
+void scanRefsClosure(const std::vector<std::string>& files, const Opts& o,
+                     const std::map<int, int>& pidNodes, Scan& sc, long long& paramRefLines) {
+    for (size_t k = 0; k < files.size(); ++k) {
+        const int savedFw = sc.fieldWidth;
+        scanRefs(files[k], k == 0, o, pidNodes, sc, paramRefLines);
+        if (k > 0) sc.fieldWidth = savedFw;
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -567,16 +508,13 @@ struct Box {
     }
 };
 
-void bboxAfterFile(const std::string& path, int deckFw, const std::vector<int>& del, Box& box,
-                   std::set<std::string>& visited, int depth,
-                   const std::string& mainDir, const std::vector<std::string>& searchDirs) {
-    if (visited.count(path)) return;
-    visited.insert(path);
+// 파일 하나만 본다 — 닫힘의 파일마다 호출자가 부른다(정본 닫힘과 같은 파일 · 같은 차례).
+void bboxAfterFile(const std::string& path, int deckFw, const std::vector<int>& del, Box& box) {
     std::ifstream in(path);
     if (!in.is_open()) return;
     std::string line, kw;
     int fw = deckFw;
-    bool node = false, incl = false;
+    bool node = false;
     while (std::getline(in, line)) {
         size_t g = line.find_first_not_of(" \t\r\n");
         if (g != std::string::npos && line[g] == '*') {
@@ -586,19 +524,11 @@ void bboxAfterFile(const std::string& path, int deckFw, const std::vector<int>& 
                 if (w > 0) deckFw = w;
             }
             fw = KooRemapper::keywordFieldWidth(line, deckFw);
+            if (kw == "*END") return;   // 그 파일은 여기서 끝난다
             node = (kw == "*NODE");
-            incl = (kw == "*INCLUDE");
             continue;
         }
         if (!isDataLine(line)) continue;
-        if (incl) {
-            std::string rel = trim(line);
-            // 찾는 규칙은 정본 하나 — 패스 0·1 과 같아야 한다(갈리면 bbox 가 다른 파일을 본다).
-            const std::string full = KooRemapper::include_closure::resolvePath(rel, mainDir, searchDirs);
-            if (!rel.empty() && !full.empty() && depth < 8)
-                bboxAfterFile(full, deckFw, del, box, visited, depth + 1, mainDir, searchDirs);
-            continue;
-        }
         if (!node) continue;
         int nid = 0;
         double xyz[3];
@@ -759,20 +689,16 @@ struct VerifyResult {
 
 VerifyResult verifyDeck(const std::string& path, const Opts& o) {
     VerifyResult vr;
+    // 산출 덱의 닫힘 — 쓴 덱이 가리키는 인클루드를 같은 정본으로 다시 찾는다(주 덱 폴더가 다를 수 있다)
+    const std::vector<std::string> files = deckFiles(path, KooRemapper::include_closure::readPaths(path));
     SectionMap sm;
-    {
-        std::set<std::string> vis;
-        scanSections(path, 8, sm, vis, 0);
-    }
+    for (const auto& f : files) scanSections(f, sm);
     const std::map<int, int> pidNodes = buildPidNodes(sm);
     Scan sc;
     Opts probe = o;
     probe.model = path;
     long long paramRefs = 0;
-    {
-        std::set<std::string> vis;
-        scanRefs(path, true, probe, pidNodes, sc, vis, 0, paramRefs);
-    }
+    scanRefsClosure(files, probe, pidNodes, sc, paramRefs);
     sortUnique(sc.definedAll);
     sortUnique(sc.byElement);
     for (int v : sc.byElement)
@@ -913,14 +839,25 @@ int runCleanupNodes(const std::string& yamlFile, ConsoleOutput& console) {
     console.info("cleanup-nodes: " + o.model);
     console.info("  mode: " + o.mode + (o.mode == "report" ? "  (덱을 쓰지 않는다)" : ""));
 
+    // ── 인클루드 닫힘 — 정본(`include_closure::readPaths`)이 이름(`␣+` 이음 · 여러 장) · 찾는 차례 · 인클루드 안 `*END` ·
+    //    깊이 상한 · 순환을 정한다. 이 op 은 덱을 담지 않으므로 차례와 경로만 받아 파일마다 흘려 읽는다.
+    //    예전 자기 재귀(8단)는 9단째 인클루드를 「읽었다」고 세면서 훑지 않아 거기 요소가 쓰는 절점을 **지웠다**(rc 0 실측).
+    const auto clo = KooRemapper::include_closure::readPaths(o.model);
+    const std::vector<std::string> files = deckFiles(o.model, clo);
+
     // ── 패스 0·1 ─────────────────────────────────────────────────────────────
     SectionMap sm;
-    { std::set<std::string> vis; scanSections(o.model, 8, sm, vis, 0); }
+    for (const auto& f : files) scanSections(f, sm);
     const std::map<int, int> pidNodes = buildPidNodes(sm);
 
     Scan sc;
     long long paramRefLines = 0;
-    { std::set<std::string> vis; scanRefs(o.model, true, o, pidNodes, sc, vis, 0, paramRefLines); }
+    scanRefsClosure(files, o, pidNodes, sc, paramRefLines);
+    for (const auto& f : clo.files) sc.includeRead.push_back(f.path);
+    for (const auto& u : clo.unresolved)
+        sc.includeMissing.push_back(u.file + ":" + std::to_string(u.line) + " '" + u.name + "' — " + u.why);
+    for (const auto& n : clo.notFollowed)
+        sc.includeVariant.push_back(n.keyword + " (" + n.file + ":" + std::to_string(n.line) + ")");
 
     if (!sc.anyNode) { console.error("No *NODE definitions found in: " + o.model); return 1; }
 
@@ -932,7 +869,7 @@ int runCleanupNodes(const std::string& yamlFile, ConsoleOutput& console) {
 
     // ── 인클루드 판정 ────────────────────────────────────────────────────────
     std::vector<std::string> warnings;
-    const bool includeProblem = !sc.includeMissing.empty() || !sc.includeVariant.empty();
+    const bool includeProblem = !sc.includeMissing.empty() || !sc.includeVariant.empty() || clo.depthCut;
     if (!sc.includeRead.empty())
         console.info("  *INCLUDE read: " + std::to_string(sc.includeRead.size()) +
                      " (참조를 함께 세었다 — 안 읽으면 인클루드가 쓰는 절점을 고아로 본다)");
@@ -940,14 +877,17 @@ int runCleanupNodes(const std::string& yamlFile, ConsoleOutput& console) {
         warnings.push_back("*INCLUDE 를 열 수 없다: " + m);
     for (const auto& v : sc.includeVariant)
         warnings.push_back(v + " 는 본문을 읽지 않았다 — 그 안의 절점 참조를 모른다");
+    if (clo.depthCut)
+        warnings.push_back("*INCLUDE 가 깊이 상한(16단)을 넘어 더 따라가지 않았다 — 그 아래 파일의 절점 참조를 모른다");
+    for (const auto& c : clo.cycles)
+        warnings.push_back("*INCLUDE 가 이미 읽은 파일로 돌아온다(순환) — 한 번만 읽었다: " + c);
     if (paramRefLines > 0)
         warnings.push_back("*PARAMETER 참조(&)가 있는 줄 " + std::to_string(paramRefLines) +
                            " — 기호로 적힌 절점 ID 는 읽을 수 없다");
 
     // ── bbox(후) ─────────────────────────────────────────────────────────────
     Box after;
-    { std::set<std::string> vis; bboxAfterFile(o.model, sc.fieldWidth, res.deletable, after, vis, 0,
-                                               dirOf(o.model), sc.includeSearchDirs); }
+    for (const auto& f : files) bboxAfterFile(f, sc.fieldWidth, res.deletable, after);
 
     // ── 보고 ─────────────────────────────────────────────────────────────────
     console.info("  nodes defined (main deck): " + std::to_string(sc.definedMain.size()));
@@ -1041,7 +981,8 @@ int runCleanupNodes(const std::string& yamlFile, ConsoleOutput& console) {
         jf << "  \"deck\": {\"field_width\": " << sc.fieldWidth
            << ", \"includes_read\": " << sc.includeRead.size()
            << ", \"includes_unreadable\": " << sc.includeMissing.size()
-           << ", \"include_variants_unread\": " << sc.includeVariant.size() << "},\n";
+           << ", \"include_variants_unread\": " << sc.includeVariant.size()
+           << ", \"include_depth_cut\": " << (clo.depthCut ? "true" : "false") << "},\n";
         jf << "  \"nodes\": {\n";
         jf << "    \"defined_main\": " << sc.definedMain.size() << ",\n";
         jf << "    \"defined_all\": " << sc.definedAll.size() << ",\n";

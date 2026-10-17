@@ -90,6 +90,12 @@ std::string resolvePath(const std::string& name, const std::string& mainDir,
 Closure read(const std::string& mainPath, const std::vector<std::string>& mainLines,
              size_t maxDepth = 16);
 
+// 같은 규칙으로 닫힘의 **차례와 경로만** 읽는다 — 주 덱과 인클루드 파일을 흘려 읽고 줄은 담지 않는다(`files[].lines` 는
+// 비어 있다 — `flatten`·`readerMax` 에 넘기지 말라). 덱을 담지 않는 흘려 읽기 소비자(`cleanup_nodes` — 2.32GB 덱 전제)가
+// 쓴다. 예전에는 그 소비자가 자기 재귀(8단)를 돌아 `␣+` 이음 이름을 못 읽고, **9단째 인클루드를 「읽었다」고 세면서 훑지
+// 않아** 거기 요소가 쓰는 절점을 고아로 지웠다(2026-10-17 실측 — rc 0).
+Closure readPaths(const std::string& mainPath, size_t maxDepth = 16);
+
 // 닫힘을 **LS-DYNA 가 읽는 차례대로** 한 줄 벡터로 펼친다 — 각 인클루드 파일의 줄을 그 이름 줄 **바로
 // 뒤에** 넣는다(중첩도 같은 규칙으로). 키워드를 훑는 소비자가 인클루드 안의 카드도 보게 하려는 것이다.
 // `*INCLUDE` 카드와 이름 줄은 그대로 남긴다(줄을 지우면 소비자가 「이 덱에 인클루드가 있다」를 잃는다).

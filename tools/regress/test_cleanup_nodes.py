@@ -24,7 +24,7 @@
   · C 절 — 절점 ID 8자리가 8칸을 꽉 채워 공백이 사라진다(`split()` 이면 연결성이 뒤섞인다)
   · D 절 — CRLF 보존(산출에 홀로 선 LF 0)
   · E 절 — 고차 솔리드의 절점 카드가 **두 줄**이다(한 줄만 읽으면 12개가 고아로 보인다)
-  · F 절 — `*INCLUDE` 를 읽지 않으면 그 안이 쓰는 절점을 고아로 본다
+  · F 절 — `*INCLUDE` 를 읽지 않으면 그 안이 쓰는 절점을 고아로 본다(닫힘은 정본 — 깊이 · `␣+` 이음 · 인클루드 안 `*END`)
   · H 절 — `_TITLE` 제목줄이 SID 줄을 한 줄 밀어낸다
 
 usage: test_cleanup_nodes.py <KooRemapper 바이너리>
@@ -303,6 +303,82 @@ def main():
               rv["deck"]["includes_read"] == 1 and rv["deck"]["includes_unreadable"] == 0, rv["deck"])
         check("F-9 ★그 안의 요소가 쓰는 절점 8개를 남긴다(삭제 가능 1)",
               rv["nodes"]["used_by_elements"] == 8 and rv["nodes"]["deletable"] == 1, rv["nodes"])
+
+        # ── F3: 인클루드 닫힘은 정본(`include_closure::readPaths`)이 정한다(2026-10-17) ─────────
+        # 예전에는 이 op 이 자기 재귀(8단)를 돌았다 — 9단째 인클루드를 「read: 9」로 세면서 **훑지 않아** 거기 요소가 쓰는
+        # 절점을 고아로 지웠다(safe · rc 0 실측). `␣+` 로 이은 이름은 못 찾아 거절했고, 인클루드 안 `*END` 뒤도 읽었다.
+        def chain_deck(tag, depth):
+            L = ["*KEYWORD", "*NODE"]
+            for i, (x, y, z) in enumerate(CUBE, start=1):
+                L.append(nodeline(i, x, y, z))
+            L += [nodeline(9, 5, 0, 0), nodeline(10, 6, 0, 0), nodeline(11, 5, 1, 0), nodeline(12, 5, 0, 1),
+                  nodeline(13, 9, 9, 9)]
+            L += ["*PART", "p", "%10d%10d%10d" % (1, 1, 1), "*SECTION_SOLID", "%10d%10d" % (1, 1),
+                  "*ELEMENT_SOLID", "%8d%8d%s" % (1, 1, "".join("%8d" % n for n in range(1, 9))),
+                  "*INCLUDE", "%s_1.k" % tag, "*END"]
+            write(os.path.join(d, "%s.k" % tag), "\n".join(L) + "\n")
+            for k in range(1, depth):
+                write(os.path.join(d, "%s_%d.k" % (tag, k)), "*KEYWORD\n*INCLUDE\n%s_%d.k\n*END\n" % (tag, k + 1))
+            write(os.path.join(d, "%s_%d.k" % (tag, depth)),
+                  "*KEYWORD\n*PART\nt\n%10d%10d%10d\n*SECTION_SOLID\n%10d%10d\n*ELEMENT_SOLID\n%8d%8d%s\n*END\n"
+                  % (2, 2, 1, 2, 10, 2, 2, "".join("%8d" % n for n in [9, 10, 11, 12, 12, 12, 12, 12])))
+
+        def kept_nodes(path):
+            out, on = [], False
+            for l in open(path).read().splitlines():
+                if l.startswith("*"):
+                    on = l.strip().upper() == "*NODE"
+                    continue
+                if on and l.strip() and not l.startswith("$"):
+                    out.append(int(l[:8]))
+            return out
+
+        chain_deck("deep", 9)
+        cfg(d, "dp.yaml", model="deep.k", output="deep_out.k", mode="safe", report="rdp.json")
+        rc, out = run(binary, d, "cleanup-nodes", "dp.yaml")
+        check("F-10 ★9단째 인클루드의 요소가 쓰는 절점 9-12 를 지우지 않는다(지우는 것은 고아 13 뿐)",
+              rc == 0 and os.path.exists(os.path.join(d, "deep_out.k"))
+              and kept_nodes(os.path.join(d, "deep_out.k")) == list(range(1, 13)), (rc, out[-300:]))
+        chain_deck("toodeep", 18)
+        cfg(d, "td.yaml", model="toodeep.k", output="toodeep_out.k", mode="safe", report="rtd.json")
+        rc, out = run(binary, d, "cleanup-nodes", "td.yaml")
+        check("F-11 ★깊이 상한(16)을 넘으면 safe 는 쓰지 않는다 — 「못 봤다」를 말한다",
+              rc == 1 and "깊이 상한" in out and not os.path.exists(os.path.join(d, "toodeep_out.k")), (rc, out[-300:]))
+        cfg(d, "tdr.yaml", model="toodeep.k", report="rtdr.json")
+        run(binary, d, "cleanup-nodes", "tdr.yaml")
+        check("F-12 보고서에 include_depth_cut 이 참으로 실린다",
+              report(d, "rtdr.json")["deck"].get("include_depth_cut") is True, report(d, "rtdr.json")["deck"])
+        # `␣+` 이음 이름(Vol_I 179670) — 정본은 한 이름으로 붙여 찾는다
+        L = ["*KEYWORD", "*NODE"]
+        for i, (x, y, z) in enumerate(CUBE, start=1):
+            L.append(nodeline(i, x, y, z))
+        L.append(nodeline(101, 9.0, 0.0, 0.0))
+        L += ["*PART", "p", "%10d%10d%10d" % (1, 1, 1), "*SECTION_SOLID", "%10d%10d" % (1, 1),
+              "*INCLUDE", "long_name_ +", "elements.k", "*END"]
+        write(os.path.join(d, "cont.k"), "\n".join(L) + "\n")
+        write(os.path.join(d, "long_name_elements.k"), "*KEYWORD\n*ELEMENT_SOLID\n%8d%8d\n%s\n*END\n"
+              % (1, 1, "".join("%8d" % n for n in range(1, 9))))
+        cfg(d, "ct.yaml", model="cont.k", output="cont_out.k", mode="safe", report="rct.json")
+        rc, out = run(binary, d, "cleanup-nodes", "ct.yaml")
+        # 예전 판은 이름을 못 찾아 safe 가 거절하고 보고서를 쓰지 않는다 — 시험이 죽지 않게 비어 있으면 빈 값으로 본다
+        rct = report(d, "rct.json") if os.path.exists(os.path.join(d, "rct.json")) else {"deck": {}, "nodes": {}}
+        check("F-13 ★`␣+` 로 이은 인클루드 이름을 찾아 읽는다(삭제 가능 1 — 고아 101)",
+              rc == 0 and rct["deck"].get("includes_read") == 1 and rct["nodes"].get("deletable") == 1, (rc, rct))
+        # 인클루드 안의 `*END` 는 그 파일만 끝낸다(179654) — 뒤의 카드는 LS-DYNA 가 읽지 않는다
+        L = ["*KEYWORD", "*NODE"]
+        for i, (x, y, z) in enumerate(CUBE, start=1):
+            L.append(nodeline(i, x, y, z))
+        L.append(nodeline(101, 9.0, 0.0, 0.0))
+        L += ["*PART", "p", "%10d%10d%10d" % (1, 1, 1), "*SECTION_SOLID", "%10d%10d" % (1, 1),
+              "*INCLUDE", "endmid.k", "*END"]
+        write(os.path.join(d, "endmain.k"), "\n".join(L) + "\n")
+        write(os.path.join(d, "endmid.k"), "*KEYWORD\n*ELEMENT_SOLID\n%8d%8d\n%s\n*END\n*ELEMENT_SOLID\n%8d%8d%s\n"
+              % (1, 1, "".join("%8d" % n for n in range(1, 9)), 2, 1, "".join("%8d" % n for n in [101] * 8)))
+        cfg(d, "em.yaml", model="endmain.k", report="rem.json")
+        rc, out = run(binary, d, "cleanup-nodes", "em.yaml")
+        rem = report(d, "rem.json")
+        check("F-14 인클루드 안 `*END` 뒤의 요소는 참조로 세지 않는다(고아 101 은 삭제 가능)",
+              rc == 0 and rem["nodes"]["used_by_elements"] == 8 and rem["nodes"]["deletable"] == 1, (rc, rem["nodes"]))
 
         # ── G: *SET_NODE_LIST_GENERATE 범위는 펼쳐 남긴다 ─────────────────────
         L = ["*KEYWORD", "*NODE"]

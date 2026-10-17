@@ -47,6 +47,7 @@ struct Walker {
     std::string mainDir;
     const std::vector<std::string>* mainLines = nullptr;
     size_t maxDepth = 16;
+    bool keepLines = true;                 // false = 차례와 경로만(`readPaths`) — 파일을 흘려 읽고 줄은 담지 않는다
     Closure out;
     std::vector<std::string> searchDirs;   // `*INCLUDE_PATH` — 읽은 차례로 쌓인다
     std::set<std::string> visited;
@@ -56,6 +57,59 @@ struct Walker {
     //   색인으로 매번 다시 집는다.
     const std::vector<std::string>& linesOf(size_t idx) const {
         return idx == kMain ? *mainLines : out.files[idx].lines;
+    }
+
+    // `*INCLUDE` 계열 카드 하나 — `lines[at]` 이 키워드 줄이고 그 파일에서의 줄 번호는 `base + 색인`(0-기반)이다.
+    // 이름을 먼저 다 뽑고 나서 따라간다(따라가면 `out.files` 가 늘어 `lines` 가 무효가 될 수 있다).
+    void card(const std::string& file, const std::vector<std::string>& lines, size_t at, size_t base,
+              size_t depth, const std::string& kw) {
+        const auto names = namesFrom(lines, at + 1);
+        if (kw.rfind("*INCLUDE_PATH", 0) == 0) {
+            // 탐색 경로 — 카드를 끌어오지 않는다. `_RELATIVE` 는 입력 파일 위치 기준이고 맨
+            // `_PATH` 의 상대경로도 로컬 디렉터리 기준이라 둘 다 주 덱 폴더에 붙는다.
+            for (const auto& n : names) searchDirs.push_back(deckscan::joinPath(mainDir, n.name));
+            return;
+        }
+        if (kw != "*INCLUDE") {
+            out.notFollowed.push_back({file, base + at + 1, kw, names.empty() ? "" : names[0].name});
+            return;
+        }
+        for (const auto& n : names) {
+            ++out.cards;
+            const std::string p = resolvePath(n.name, mainDir, searchDirs);
+            if (p.empty()) {
+                out.unresolved.push_back({file, base + n.line + 1, n.name, "없다"});
+                continue;
+            }
+            if (depth + 1 > maxDepth) { out.depthCut = true; continue; }
+            const std::string k = keyOf(p);
+            if (visited.count(k)) { out.cycles.push_back(p); continue; }
+            std::ifstream in(p);
+            if (!in.is_open()) {
+                out.unresolved.push_back({file, base + n.line + 1, n.name, "열 수 없다"});
+                continue;
+            }
+            visited.insert(k);
+            File f;
+            f.path = p;
+            f.depth = depth + 1;
+            f.from = file;
+            f.fromLine = base + at + 1;
+            f.afterLine = base + n.last + 1;
+            if (!keepLines) {
+                out.files.push_back(std::move(f));
+                walkStream(in, p, depth + 1);
+                continue;
+            }
+            std::string l;
+            while (std::getline(in, l)) {
+                if (!l.empty() && l.back() == '\r') l.pop_back();
+                if (!deckscan::isDataLine(l) && deckscan::keywordToken(l) == "*END") break;
+                f.lines.push_back(std::move(l));
+            }
+            out.files.push_back(std::move(f));
+            walk(out.files.size() - 1, depth + 1);
+        }
     }
 
     // 첫 `*END` 앞까지 훑으며 인클루드를 따라간다(깊이 우선 — LS-DYNA 가 읽는 차례).
@@ -69,50 +123,35 @@ struct Walker {
             if (kw.empty() || kw[0] != '*') continue;
             if (kw == "*END") return;                       // 이 파일은 여기서 끝난다(179654)
             if (kw.rfind("*INCLUDE", 0) != 0) continue;
-
-            const auto names = namesFrom(linesOf(idx), i + 1);
-            if (kw.rfind("*INCLUDE_PATH", 0) == 0) {
-                // 탐색 경로 — 카드를 끌어오지 않는다. `_RELATIVE` 는 입력 파일 위치 기준이고 맨
-                // `_PATH` 의 상대경로도 로컬 디렉터리 기준이라 둘 다 주 덱 폴더에 붙는다.
-                for (const auto& n : names) searchDirs.push_back(deckscan::joinPath(mainDir, n.name));
-                continue;
-            }
-            if (kw != "*INCLUDE") {
-                out.notFollowed.push_back({file, i + 1, kw, names.empty() ? "" : names[0].name});
-                continue;
-            }
-            for (const auto& n : names) {
-                ++out.cards;
-                const std::string p = resolvePath(n.name, mainDir, searchDirs);
-                if (p.empty()) {
-                    out.unresolved.push_back({file, n.line + 1, n.name, "없다"});
-                    continue;
-                }
-                if (depth + 1 > maxDepth) { out.depthCut = true; continue; }
-                const std::string k = keyOf(p);
-                if (visited.count(k)) { out.cycles.push_back(p); continue; }
-                std::ifstream in(p);
-                if (!in.is_open()) {
-                    out.unresolved.push_back({file, n.line + 1, n.name, "열 수 없다"});
-                    continue;
-                }
-                visited.insert(k);
-                File f;
-                f.path = p;
-                f.depth = depth + 1;
-                f.from = file;
-                f.fromLine = i + 1;
-                f.afterLine = n.last + 1;
-                std::string l;
-                while (std::getline(in, l)) {
-                    if (!l.empty() && l.back() == '\r') l.pop_back();
-                    if (!deckscan::isDataLine(l) && deckscan::keywordToken(l) == "*END") break;
-                    f.lines.push_back(std::move(l));
-                }
-                out.files.push_back(std::move(f));
-                walk(out.files.size() - 1, depth + 1);
-            }
+            card(file, linesOf(idx), i, 0, depth, kw);
         }
+    }
+
+    // 같은 걸음을 **흘려 읽기**로 — 파일을 담지 않고 `*INCLUDE` 계열 카드 줄만 잠깐 모아 `card` 에 넘긴다.
+    // 규칙(이름 · 찾는 차례 · `*END` · 깊이 · 순환)은 `walk` 와 하나다(`card` 를 같이 쓴다).
+    void walkStream(std::istream& in, const std::string& file, size_t depth) {
+        std::vector<std::string> blk;    // [키워드 줄, 그 뒤 줄들…] — 다음 키워드에서 넘긴다
+        std::string blkKw;
+        size_t blkAt = 0, ln = 0;
+        auto flush = [&]() {
+            if (!blk.empty()) card(file, blk, 0, blkAt, depth, blkKw);
+            blk.clear();
+        };
+        std::string l;
+        while (std::getline(in, l)) {
+            if (!l.empty() && l.back() == '\r') l.pop_back();
+            if (ln == 0 && l.size() >= 3 && l.compare(0, 3, "\xEF\xBB\xBF") == 0) l.erase(0, 3);
+            const std::string kw = deckscan::isDataLine(l) ? std::string() : deckscan::keywordToken(l);
+            if (!kw.empty() && kw[0] == '*') {
+                flush();
+                if (kw == "*END") return;                   // 이 파일은 여기서 끝난다(179654)
+                if (kw.rfind("*INCLUDE", 0) == 0) { blk.push_back(l); blkKw = kw; blkAt = ln; }
+            } else if (!blk.empty()) {
+                blk.push_back(l);                           // 이름 줄 · 주석 · 빈 줄(`namesFrom` 이 가른다)
+            }
+            ++ln;
+        }
+        flush();
     }
 };
 
@@ -167,6 +206,22 @@ Closure read(const std::string& mainPath, const std::vector<std::string>& mainLi
     w.maxDepth = maxDepth;
     w.visited.insert(keyOf(mainPath));
     w.walk(Walker::kMain, 0);
+    return std::move(w.out);
+}
+
+Closure readPaths(const std::string& mainPath, size_t maxDepth) {
+    Walker w;
+    w.mainPath = mainPath;
+    w.mainDir = deckscan::dirOf(mainPath);
+    w.maxDepth = maxDepth;
+    w.keepLines = false;
+    w.visited.insert(keyOf(mainPath));
+    std::ifstream in(mainPath);
+    if (!in.is_open()) {
+        w.out.unresolved.push_back({mainPath, 0, mainPath, "열 수 없다"});
+        return std::move(w.out);
+    }
+    w.walkStream(in, mainPath, 0);
     return std::move(w.out);
 }
 
