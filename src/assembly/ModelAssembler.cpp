@@ -9476,11 +9476,6 @@ bool ModelAssembler::applyOffset(const OffsetOperation& op, double E, double nu)
     }
 
     // Normal offset mode
-    // tied(기본값)도 셸에는 적용되지 않는다 — 층이 원본 면에 묶이지 않고 뜬다. 기본값이라 거절하면 셸 offset 이 전부 막히므로
-    // 말만 한다(2026-10-16).
-    if (op.elementType == "shell" && op.connectionMode == "tied")
-        std::cout << "[WARNING] offset: 셸 층은 원본 면에 묶이지 않는다 — connection_mode(기본 tied)는 셸에 적용되지 않는다. "
-                     "묶으려면 tied 접촉 카드를 따로 더하라\n";
     // 1. Validation - check if any elements exist with this PID
     bool foundPid = false;
     for (const auto& pair : baseMesh_.getElements()) {
@@ -9675,9 +9670,49 @@ bool ModelAssembler::applyOffset(const OffsetOperation& op, double E, double nu)
     } else if (op.elementType == "shell") {
         double thickness = (op.shellThickness > 0) ? op.shellThickness : op.thickness;
         double offset = (op.shellOffset >= 0) ? op.shellOffset : (thickness / 2.0);
+        const size_t shellStart = addedShellElements_.size();
         createOffsetShell(sourceSurface, offsetDir, offset,
                          actualPid, actualSecid, thickness);
         std::cout << "[INFO] Shell offset completed\n";
+        // 셸 층은 원본 면과 떨어진 별도 면이다 — 절점을 공유할 수 없으니 tied(기본)는 **묶음 접촉**으로 묶는다(2026-10-17 ·
+        // 사용자 「다 만들고 배포해서 테스트할거야」). 꼴은 restack 의 셸 계면과 같다 — slave = 새 셸 층 세그먼트,
+        // master = 원본 면 세그먼트, *CONTACT_TIED_SURFACE_TO_SURFACE_OFFSET(sstyp = mstyp = 0). 솔버 확인은 사용자 시험이다.
+        // `both` 는 원본 면 절점을 옮긴 뒤 짓는 모드라 master 가 원본에 붙어 있지 않다 — 묶지 않고 말한다.
+        if (op.connectionMode == "tied" && !isBothMode) {
+            auto seg = [](const auto& n) {   // ShellElement(4칸) · AddedShellElement(8칸) 둘 다 앞 넷을 쓴다
+                return std::array<int, 4>{n[0], n[1], n[2], n[3] > 0 ? n[3] : n[2]};   // 삼각형은 n4 = n3
+            };
+            const int ssid = ++maxSetId_;
+            const int msid = ++maxSetId_;
+            auto setBlock = [](int sid, const std::vector<std::array<int, 4>>& segs) {
+                std::ostringstream ss;
+                ss << "*SET_SEGMENT\n$#     sid\n" << std::setw(10) << sid << "\n";
+                ss << "$#      n1        n2        n3        n4\n";
+                for (const auto& g : segs)
+                    ss << std::setw(10) << g[0] << std::setw(10) << g[1] << std::setw(10) << g[2] << std::setw(10) << g[3] << "\n";
+                return ss.str();
+            };
+            std::vector<std::array<int, 4>> slave, master;
+            for (size_t i = shellStart; i < addedShellElements_.size(); ++i) slave.push_back(seg(addedShellElements_[i].nodeIds));
+            for (const auto& s : sourceSurface) master.push_back(seg(s.nodeIds));
+            addedKeywordBlocks_.push_back(setBlock(ssid, slave));
+            addedKeywordBlocks_.push_back(setBlock(msid, master));
+            std::ostringstream ct;
+            ct << "*CONTACT_TIED_SURFACE_TO_SURFACE_OFFSET\n";
+            ct << "$#     ssid      msid     sstyp     mstyp    sboxid    mboxid       spr       mpr\n";
+            ct << std::setw(10) << ssid << std::setw(10) << msid
+               << "         0         0         0         0         1         1\n";
+            ct << "$#       fs        fd        dc        vc       vdc    penchk        bt        dt\n";
+            ct << "       0.0       0.0       0.0       0.0       0.0         0       0.0  1.0000E+20\n";
+            ct << "$#     sfsa      sfsb      sast      sbst     sfsat     sfsbt       fsf       vsf\n";
+            ct << "       1.0       1.0       0.0       0.0       1.0       1.0       1.0       1.0\n";
+            addedKeywordBlocks_.push_back(ct.str());
+            std::cout << "[INFO] 셸 층을 원본 면에 묶었다 — *CONTACT_TIED_SURFACE_TO_SURFACE_OFFSET (slave SET_SEGMENT " << ssid
+                      << " · 세그먼트 " << slave.size() << " / master SET_SEGMENT " << msid << " · 세그먼트 " << master.size() << ")\n";
+        } else if (op.connectionMode == "tied") {
+            std::cout << "[WARNING] offset: offset_direction: both 의 셸 층은 묶지 않는다 — 원본 면 절점을 옮긴 뒤 짓는 모드라 "
+                         "붙일 면이 없다. 묶으려면 tied 접촉 카드를 따로 더하라\n";
+        }
 
     } else {
         errorMessage_ = "Unknown element_type: " + op.elementType;

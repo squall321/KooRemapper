@@ -1889,10 +1889,12 @@ operations:
 > (`examples/offset/03` · `tests/offset/regression/02` · `tests/offset_tshell_result.k`)을 다시 구웠다. 회귀
 > `test_offset_tshell_deck.py` D 절(모드 넷 · 옛 바이너리 FAIL 7).
 >
-> ⚠ **셸 층은 연결 모드를 타지 않는다**(2026-10-16 실측 — 모드 다섯이 같은 산출). 셸 층은 원본 면과 떨어진 별도 면이다.
-> 그래서 `czm` 은 **거절**한다(rc 1 · 2026-10-17 · 사용자 결정 「권장대로」 — 그 전에는 rc 0 · 코히시브 0개). `tied`(기본)는
-> 층이 원본 면에 묶이지 않는다고 **경고**한다 — 묶으려면 tied 접촉 카드를 따로 더한다. `contact`·`none` 은 떨어진 층이
-> 그 뜻과 같아 그대로다. 회귀 `test_offset_tshell_deck.py` E 절.
+> **셸 층은 원본 면과 떨어진 별도 면이다**(절점을 공유하지 않는다). 그래서 연결 모드가 셸에서는 이렇게 갈린다(2026-10-17).
+> `tied`(기본) — 원본 면에 **묶음 접촉**으로 묶는다: 새 `*SET_SEGMENT` 둘(slave = 셸 층 · master = 원본 면 · 삼각형은 n4 = n3)과
+> `*CONTACT_TIED_SURFACE_TO_SURFACE_OFFSET`(sstyp = mstyp = 0) — restack 이 셸 계면에 쓰는 꼴 그대로다. `czm` — **거절**(rc 1 ·
+> 그 전에는 rc 0 · 코히시브 0개). `contact`·`none` — 묶지 않는다. `offset_direction: both` 는 원본 면 절점을 옮긴 뒤 짓는 모드라
+> 묶지 않고 경고한다. 예전(2026-10-16 까지)에는 셸이 연결 모드를 통째로 건너뛰어 기본 tied 층이 원본 면에서 떠 있었다.
+> ⚠ 솔버 확인은 아직이다(라이선스 만료) — 사용자 시험으로 본다. 회귀 `test_offset_tshell_deck.py` E 절.
 
 ### 주요 파라미터
 

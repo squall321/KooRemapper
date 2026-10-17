@@ -214,7 +214,7 @@ def main():
             check("D contact    접촉 안내가 붙는다", "connection_mode: contact" in text)
 
     print("[E 셸 층 — 연결 모드를 타지 않는다(2026-10-16 · 사용자 결정 「권장대로」)]")
-    def run_shell(mode):
+    def run_shell(mode, keep=False):
         d = tempfile.mkdtemp(prefix="otd_sh_")
         try:
             open(os.path.join(d, "deck.k"), "w", encoding="utf-8").write(TET)
@@ -224,18 +224,38 @@ def main():
             open(os.path.join(d, "c.yaml"), "w", encoding="utf-8").write(y)
             r = subprocess.run([binary, "assemble", "c.yaml"], cwd=d, capture_output=True, text=True, timeout=300,
                                encoding="utf-8", errors="replace")
-            return r.returncode, r.stdout + r.stderr, os.path.exists(os.path.join(d, "out.k"))
+            out_k = os.path.join(d, "out.k")
+            made = os.path.exists(out_k)
+            if keep:
+                return r.returncode, r.stdout + r.stderr, made, open(out_k, encoding="utf-8").read() if made else ""
+            return r.returncode, r.stdout + r.stderr, made
         finally:
             shutil.rmtree(d, ignore_errors=True)
     rc, out, made = run_shell("czm")
     check("E 셸 + czm — rc 1 · 산출 없음 · 까닭을 말한다(예전엔 rc 0 · 코히시브 0개)",
           rc == 1 and not made and "셸 층은 원본 면과 떨어진" in out, (rc, made, out[-200:]))
-    rc, out, made = run_shell(None)
-    check("E 셸 + 기본(tied) — rc 0 · 「묶이지 않는다」고 경고한다", rc == 0 and made and "셸 층은 원본 면에 묶이지 않는다" in out,
-          (rc, out[-200:]))
-    rc, out, made = run_shell("contact")
-    check("E 셸 + contact — rc 0 · 경고 없음(떨어진 층이 contact 의 뜻과 같다)", rc == 0 and made and "묶이지 않는다" not in out,
-          (rc, out[-200:]))
+    rc, out, made, text = run_shell(None, keep=True)
+    tied = [blk for blk in text.split("\n*") if blk.startswith("CONTACT_TIED_SURFACE_TO_SURFACE_OFFSET")]
+    check("E 셸 + 기본(tied) — ★원본 면과 묶음 접촉 하나(*CONTACT_TIED_SURFACE_TO_SURFACE_OFFSET · 2026-10-17)",
+          rc == 0 and made and len(tied) == 1 and "셸 층을 원본 면에 묶었다" in out, (rc, len(tied), out[-200:]))
+    if tied:
+        sets = {}
+        for blk in text.split("\n*SET_SEGMENT\n")[1:]:
+            rows = [ln for ln in blk.split("\n*")[0].splitlines() if ln.strip() and not ln.startswith("$")]
+            sets[int(rows[0])] = [[int(ln[k:k + 10]) for k in range(0, 40, 10)] for ln in rows[1:]]
+        c1 = [ln for ln in tied[0].splitlines()[1:] if ln.strip() and not ln.startswith("$")][0]
+        ssid, msid = int(c1[0:10]), int(c1[10:20])
+        src = {1, 2, 3, 4}
+        sl, ms = sets.get(ssid, []), sets.get(msid, [])
+        check("E 셸 tied — slave 세트는 새 셸 층 절점뿐 · master 세트는 원본 면 절점뿐 · 세그먼트 수가 같다",
+              sl and ms and len(sl) == len(ms) and all(n not in src for g in sl for n in g)
+              and all(n in src for g in ms for n in g), (len(sl), len(ms), sl[:1], ms[:1]))
+        check("E 셸 tied — sstyp = mstyp = 0(세그먼트 세트) · 새 세트 번호가 덱 세트와 겹치지 않는다",
+              c1[20:30].strip() == "0" and c1[30:40].strip() == "0" and ssid != msid, c1)
+    for mode in ("contact", "none"):
+        rc, out, made, text = run_shell(mode, keep=True)
+        check("E 셸 + %s — rc 0 · 묶음 접촉 없음(떨어진 층이 그 뜻과 같다)" % mode,
+              rc == 0 and made and "CONTACT_TIED_SURFACE_TO_SURFACE_OFFSET" not in text, (rc, out[-200:]))
 
     print()
     if FAILS:

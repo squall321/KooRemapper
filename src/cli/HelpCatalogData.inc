@@ -212,7 +212,7 @@ operations:
 )KRH"}},
      {"KooRemapper generate box box.yaml", "KooRemapper offset offset.yaml"},
      {},
-     {"connection_mode: tied(기본) | czm | contact | none (assemble 경로도 none 허용)", "셸 층(`element_type: shell`)은 원본 면과 떨어진 별도 면이라 연결 모드를 타지 않는다 — czm 은 거절(rc 1) · tied(기본)는 묶이지 않는다고 경고", "material_card·czm_material_card 의 MID 칸(@MID@·@CZM_MID@·숫자·라벨)은 새 MID 로 바뀐다. 값은 10열 칸 안에 둘 것", "material_cards: 목록으로 층마다 다른 재질 (단독 offset·assemble 모두)"}},
+     {"connection_mode: tied(기본) | czm | contact | none (assemble 경로도 none 허용)", "셸 층(`element_type: shell`)은 원본 면과 떨어진 별도 면이다 — tied(기본)는 *CONTACT_TIED_SURFACE_TO_SURFACE_OFFSET 으로 원본 면에 묶는다(2026-10-17) · czm 은 거절(rc 1) · contact·none 은 묶지 않는다", "material_card·czm_material_card 의 MID 칸(@MID@·@CZM_MID@·숫자·라벨)은 새 MID 로 바뀐다. 값은 10열 칸 안에 둘 것", "material_cards: 목록으로 층마다 다른 재질 (단독 offset·assemble 모두)"}},
     {"wrap", "메시 편집", "원통 파트에 와인딩 인장 초기응력(후프+반경) 부여", "와인딩 인장 hoop 압입", "KooRemapper wrap <config.yaml>",
      {{"wrap.yaml", R"KRH(model: examples/wrap/cylinder_2layer.k
 output: cylinder_wrapped
