@@ -1179,3 +1179,17 @@ plan2 는 이 항목의 전제를 P1-4(대역표)로 잡았다. 그런데 대역
       그 SIF 안에서 — 재결속 도움말 v2 요약 · `id_floor` 13 · 3 · 3 · 1 · 마스터 덱 절점 198 · 삽입이 `deck_units` 오타를 거절 ·
       **배포 SIF 로 REMAP 배선을 다시 흉내 내 applyfold · stackwrap · cnrb2spring · 삽입이 체인 통과**. `rclone.conf` 소유자 그대로.
       ⚠ 이번에는 굽기 시작은 통과했고 **굽기 로그를 읽는 명령**이 「Production Deploy」로 막혔다 — 끝났다는 알림을 기다려 읽었다.
+
+### 배포 — 실사용에 반영 3차 (2026-10-17)
+사용자 「다 권장대로 해」 — 결정 셋(① 업로드 순서 → 다시 잰다 `c25bd2a` · ② `allow_missing_includes` 는 MCP 에 열지 않는다 ·
+③ 셸 + czm 거절 · 기본 tied 경고 `de2a798`)을 지어 다시 게시했다.
+
+- [x] 릴리스 빌드 `2ddc2e44`(c25bd2a · GLIBC_2.35) — 회귀 97/97 · 단위 104/104 · 도움말 · 패리티 ALL PASS · 백엔드 563 ·
+      42 op 지문은 1차 게시본 `43aa5d5c` 와 **덱 바이트 동일**(리포트 JSON 둘만).
+- [x] 프런트 · `cli.sif` `afe61c33`(안의 바이너리 `2ddc2e44`) · Drive `dist-20261017-031631Z`(보관 4 — 10-13 판 정리).
+- [x] API(감독자가 33초 뒤 기동) · MCP 재기동 — health `2ddc2e44` · `revision_matches_binary: true`.
+- [x] 살아 있는 관문 — smoke PASS(op 63 · 도구 72) · 그림 20/20 · 덱 op 21/21 · MCP 설명 11/11 · 새 op 플랫폼 경유 PASS ·
+      ★**업로드 순서 재실측 — 인클루드 먼저 198 · 마스터 먼저 198**(예전엔 0).
+      ⚠ 스모크를 연달아 돌린 직후 토큰 발급이 잠깐 실패했다(`_mint_token` 이 None — 연속 로그인이 몰렸다). 조금 뒤 다시 돌려 통과.
+- [x] pyKooCAE 스테이징 — `e37fdf4f → 2ddc2e44` · `cli.sif` → `afe61c33` · pyKooCAE 문서 offset 문장(`0b59d2d`).
+- [ ] SmartTwinPreprocessor.sif 굽기 — 결과를 아래에 적는다.
