@@ -1192,4 +1192,7 @@ plan2 는 이 항목의 전제를 P1-4(대역표)로 잡았다. 그런데 대역
       ★**업로드 순서 재실측 — 인클루드 먼저 198 · 마스터 먼저 198**(예전엔 0).
       ⚠ 스모크를 연달아 돌린 직후 토큰 발급이 잠깐 실패했다(`_mint_token` 이 None — 연속 로그인이 몰렸다). 조금 뒤 다시 돌려 통과.
 - [x] pyKooCAE 스테이징 — `e37fdf4f → 2ddc2e44` · `cli.sif` → `afe61c33` · pyKooCAE 문서 offset 문장(`0b59d2d`).
-- [ ] SmartTwinPreprocessor.sif 굽기 — 결과를 아래에 적는다.
+- [x] SmartTwinPreprocessor.sif 굽기 — `bake rc=0` · SIF 03:21 · 구워진 sha = 스테이징 sha `2ddc2e44`(그림 op 3/3) · 계산노드 복사 ·
+      tar `SmartTwinPreprocessor_20261017_v116.tar.gz` · Drive 업로드 둘 · 메일 「sent OK」 → `/opt/apptainers` 손 복사 → 세 사본 바이트 동일.
+      그 SIF 안에서 — 셸 + czm rc 1(까닭) · 셸 기본 tied 경고 · TSHELL + czm 코히시브 · REMAP 배선(applyfold · stackwrap ·
+      cnrb2spring · 삽입) 체인 통과 · `rclone.conf` 그대로.

@@ -24,4 +24,4 @@
 - [x] ③ offset 셸 + czm 거절 · 기본 tied 경고(`de2a798`) — 회귀 E 절 셋(옛 바이너리 FAIL 둘) · 카탈로그 · 매뉴얼 · 도움말
 - [x] ① 인클루드가 들어오면 가리키는 덱 meta 를 다시 잰다 — 시험(돌연변이 FAIL 확인) · 백엔드 563 · MCP 설명 · SKILL.md
 - [x] ② `allow_missing_includes` 는 MCP 에 열지 않는다 — 결정 기록(코드 변경 없음)
-- [ ] 다시 빌드 → 관문 → 게시 → API · MCP → 스모크 → 스테이징 → SIF → 장부 · 보고서 · 메모리 · pyKooCAE 문서(offset 문장)
+- [x] 다시 빌드 `2ddc2e44` → 관문 → `dist-20261017-031631Z` → API · MCP → 스모크 · 업로드 순서 198/198 → 스테이징 → SIF(v116 · 세 사본) → 장부 · 보고서 · 메모리 · pyKooCAE(`0b59d2d`)
