@@ -1889,8 +1889,10 @@ operations:
 > (`examples/offset/03` · `tests/offset/regression/02` · `tests/offset_tshell_result.k`)을 다시 구웠다. 회귀
 > `test_offset_tshell_deck.py` D 절(모드 넷 · 옛 바이너리 FAIL 7).
 >
-> ⚠ `element_type: shell` + `connection_mode: czm` 은 **적용되지 않는다** — rc 0 인데 코히시브를 만들지 않고 말도 하지
-> 않는다(2026-10-16 실측 · TSHELL 은 같은 설정으로 코히시브 4개). 셸 층에는 czm 을 주지 마라 — 거절로 바꿀지는 결정 대기다.
+> ⚠ **셸 층은 연결 모드를 타지 않는다**(2026-10-16 실측 — 모드 다섯이 같은 산출). 셸 층은 원본 면과 떨어진 별도 면이다.
+> 그래서 `czm` 은 **거절**한다(rc 1 · 2026-10-17 · 사용자 결정 「권장대로」 — 그 전에는 rc 0 · 코히시브 0개). `tied`(기본)는
+> 층이 원본 면에 묶이지 않는다고 **경고**한다 — 묶으려면 tied 접촉 카드를 따로 더한다. `contact`·`none` 은 떨어진 층이
+> 그 뜻과 같아 그대로다. 회귀 `test_offset_tshell_deck.py` E 절.
 
 ### 주요 파라미터
 

@@ -9454,6 +9454,14 @@ double ModelAssembler::getShellThickness(int pid) const {
 bool ModelAssembler::applyOffset(const OffsetOperation& op, double E, double nu) {
     std::cout << "[INFO] Applying offset operation on PID " << op.sourcePid << "\n";
 
+    // 셸 층은 원본 면과 떨어진 별도 면이다 — 아래 6. 연결 모드 블록을 타지 않는다(2026-10-16 실측: 모드 다섯이 같은 산출).
+    // czm 을 달라고 했는데 코히시브 없이 rc 0 을 내면 요청과 다른 덱이 조용히 나간다 → 거절(사용자 결정 「권장대로」).
+    if (op.elementType == "shell" && op.connectionMode == "czm") {
+        errorMessage_ = "offset: element_type: shell 에는 connection_mode: czm 을 적용할 수 없다 — 셸 층은 원본 면과 떨어진 "
+                        "별도 면이라 코히시브를 만들 자리가 없다. solid · tshell 로 만들거나 연결 모드를 바꿔라";
+        return false;
+    }
+
     // Check for dual offset mode
     bool isDualOffset = (op.prestressMode == "dual_offset");
     if (isDualOffset) {
@@ -9468,6 +9476,11 @@ bool ModelAssembler::applyOffset(const OffsetOperation& op, double E, double nu)
     }
 
     // Normal offset mode
+    // tied(기본값)도 셸에는 적용되지 않는다 — 층이 원본 면에 묶이지 않고 뜬다. 기본값이라 거절하면 셸 offset 이 전부 막히므로
+    // 말만 한다(2026-10-16).
+    if (op.elementType == "shell" && op.connectionMode == "tied")
+        std::cout << "[WARNING] offset: 셸 층은 원본 면에 묶이지 않는다 — connection_mode(기본 tied)는 셸에 적용되지 않는다. "
+                     "묶으려면 tied 접촉 카드를 따로 더하라\n";
     // 1. Validation - check if any elements exist with this PID
     bool foundPid = false;
     for (const auto& pair : baseMesh_.getElements()) {
