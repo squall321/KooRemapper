@@ -1196,3 +1196,13 @@ plan2 는 이 항목의 전제를 P1-4(대역표)로 잡았다. 그런데 대역
       tar `SmartTwinPreprocessor_20261017_v116.tar.gz` · Drive 업로드 둘 · 메일 「sent OK」 → `/opt/apptainers` 손 복사 → 세 사본 바이트 동일.
       그 SIF 안에서 — 셸 + czm rc 1(까닭) · 셸 기본 tied 경고 · TSHELL + czm 코히시브 · REMAP 배선(applyfold · stackwrap ·
       cnrb2spring · 삽입) 체인 통과 · `rclone.conf` 그대로.
+
+### 배포 — 실사용에 반영 4차 (2026-10-17) — 셸 층 묶기
+사용자 「다 만들고 배포해서 테스트할거야」 — offset 셸 층을 원본 면에 묶는 것(`5a0fbd6`)을 지어 배포한다. **솔버 시험은 사용자 몫이다.**
+
+- [ ] 릴리스 빌드 → 관문 → 게시 → API · MCP → 스모크 → 스테이징 → SIF → 결과를 아래에 적는다.
+- ⚠ **시험 때 볼 것** — 기본 배치는 셸 **중간면이 원본 면에서 t/2** 떨어져 있다(restack 의 셸 계면은 면 위 · 거리 0). OFFSET 묶음 접촉이
+  그 거리를 탐색 거리 안에서 잡아야 묶인다. d3hsp 의 접촉 요약에서 **묶인 slave 절점 수**(= 셸 층 절점 수인가)와 messag 의
+  「not tied / too far」 경고를 본다. 묶이지 않은 절점이 있으면 접촉 Card 3 의 SST(셋째 칸 — 지금 0 = 요소 두께)를 키우거나
+  `shell_offset` 을 줄여 다시 본다. 시험 덱 — `examples/offset/04_shell_offset.yaml`(원본이 메시만 든 `arc30_flat.k` 라 재질·제어를
+  더해야 돈다) 또는 실제 모델에 `element_type: shell` offset.
