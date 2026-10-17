@@ -37,6 +37,17 @@ public:
                        warnedExtrapolation_(false), deflSign_(1.0) {}
 
     bool loadBaseModel(const std::string& filename);
+    // ★`flatten_includes: true`(2026-10-17 · 사용자 결정) — 두 로더가 인클루드 닫힘을 **홀로 서는 한 덱**으로 펼쳐 읽는다
+    //   (`include_closure::inlined`). 고친 덱도 한 파일로 나간다. 로드 **전에** 정한다.
+    void setFlattenIncludes(bool on) { flattenIncludes_ = on; }
+    bool flattenIncludes() const { return flattenIncludes_; }
+    // ★대상 파트의 요소가 **인클루드 안에만** 있으면 멈춘다(flatten 이 꺼졌을 때) — 고쳐 쓰는 op 은 주 덱만 고친다.
+    //   예전에는 rc 0 으로 아무것도 안 바꾼 덱을 내거나(convert·refine·elform·load·boundary·rbe) 「not found」만 말했다.
+    //   `pids` 가 비었거나 양수가 없으면 「모든 파트」 — 인클루드에 요소가 하나라도 있으면 멈춘다(일부만 고친 덱이 된다).
+    //   false 면 errorMessage_ 에 까닭과 `flatten_includes: true` 안내가 있다.
+    bool targetsReachable(const std::vector<int>& pids, const std::string& opName);
+    // 같은 규칙의 재질 축 — 대상 MID 가 인클루드에만 정의돼 있으면 멈춘다(matdb · matswap).
+    bool materialsReachable(const std::vector<int>& mids, const std::string& opName);
     // StepForge 조각을 덱 번호 위로 옮겨 `*END` 앞에 넣는다. 성공하면 옮긴 대응표(덱 번호)를 `mergedMaps()` 에 둔다.
     bool applyCadSolidMerge(const CadSolidMergeOperation& op);
     const std::vector<fragment::Map>& mergedMaps() const { return mergedMaps_; }
@@ -171,6 +182,8 @@ private:
     // 주 덱의 인클루드 닫힘(파일마다 경로·줄, LS-DYNA 가 읽는 차례). 번호 커서가 주 덱과 **같은 스캐너**로
     // 인클루드에 이미 있는 번호까지 세려고 든다 — 쪼개지 않은 같은 덱이면 rawLines_ 에 들어 있었을 줄이다.
     include_closure::Closure incl_;
+    bool flattenIncludes_ = false;
+    std::map<int, std::string> includeElemPidFile_;   // 인클루드 안에 요소가 있는 PID → 첫 파일(`readerMax`)
     std::vector<fragment::Map> mergedMaps_;   // applyCadSolidMerge 가 옮긴 대응표(덱 번호) — 부르는 쪽이 파일로 쓴다
     // 입력 덱의 개행. 읽을 때 기억했다가 최종 출력에서 되붙인다 — 리더가 CR 을 떼므로
     // 이것이 없으면 CRLF 덱이 조용히 LF 로 바뀐다(구조 카운트는 전부 정상이라 안 보인다).

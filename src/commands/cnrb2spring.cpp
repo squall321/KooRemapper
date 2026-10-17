@@ -1,5 +1,6 @@
 // CNRB 체결점 하나를 Side A/B 두 강체로 쪼개고 그 사이를 제로길이 discrete beam(ELFORM=6) 하나로 잇는 op
 #include "parser/ElementCardLayout.h"
+#include "parser/IncludeClosure.h"   // FlatDeck — flatten_includes(2026-10-17)
 #include "parser/IdAllocator.h"   // 인클루드 닫힘 · 못 본 자리 경고
 #include "parser/DeckWriter.h"
 #include "cnrb2spring.h"
@@ -1272,7 +1273,7 @@ int cnrb2spring_apply(std::vector<std::string>& lines,
 // 'eps 가 아직 뭔가 한다' 는 거짓 안내가 되지 않게 전용 [WARN] 을 내기 위해서다.
 static const char* CG_KEYS[] = {
     "model", "output", "axis", "target_pids", "gap", "k_engage", "k_axial", "k_rot", "eps",
-    "curve_range", "node_id_start", "elem_id_start", "card_id_start", "pid_refs"};
+    "curve_range", "node_id_start", "elem_id_start", "card_id_start", "pid_refs", "flatten_includes"};
 
 int runCnrb2Spring(const std::string& yamlFile, ConsoleOutput& console) {
     {   // 탭으로 들여쓴 YAML 은 블록이 통째로 무너져 조용히 아무 일도 안 했다 — 파싱 전에 거른다
@@ -1291,6 +1292,7 @@ int runCnrb2Spring(const std::string& yamlFile, ConsoleOutput& console) {
     if (lastSlash != std::string::npos) configDir = yamlFile.substr(0, lastSlash);
 
     std::string modelFile, outputFile;
+    bool flattenIncludes = false;   // `flatten_includes: true` — 인클루드 닫힘을 펼쳐 한 덱으로(2026-10-17)
     Cnrb2SpringConfig cfg;
     std::set<std::string> seen;
     // 줄을 통째로 담아 둔다 — 'target_pids:' 뒤에 오는 블록 목록('- 1201')을 이어 읽어야 한다.
@@ -1333,6 +1335,7 @@ int runCnrb2Spring(const std::string& yamlFile, ConsoleOutput& console) {
         if (val.empty() && key != "target_pids") continue;
         if      (key == "model")  modelFile  = val;
         else if (key == "output") outputFile = val;
+        else if (key == "flatten_includes") { bool ok = true; flattenIncludes = KooRemapper::yamlBoolValue(val, ok); if (!ok) console.warning("flatten_includes 값 「" + val + "」 을 참·거짓으로 읽지 못했다 — true 로 주라(지금은 펼치지 않는다)"); }
         else if (key == "axis") {
             std::string a = cg_upper(val);
             if (a == "X" || a == "Y" || a == "Z") cfg.axis = (char)(a[0] - 'X' + 'x');
@@ -1393,6 +1396,18 @@ int runCnrb2Spring(const std::string& yamlFile, ConsoleOutput& console) {
 
     std::string modelPath = KooRemapper::yamlResolvePath(configDir, modelFile);
     std::string outPath   = KooRemapper::yamlResolvePath(configDir, outputFile);
+    // ★`flatten_includes`(2026-10-17) — 인클루드 닫힘을 펼친 덱(주 덱 옆 임시 파일)을 읽고 고친다 · 산출은 홀로 선다
+    const std::string modelOrig = modelPath;
+    KooRemapper::include_closure::FlatDeck flat;
+    if (flattenIncludes) {
+        std::string why;
+        if (!flat.make(modelPath, why)) { console.error("[cnrb2spring] flatten_includes: " + why); return 1; }
+        if (flat.active()) {
+            console.info("[cnrb2spring] flatten_includes: 인클루드 " + std::to_string(flat.files()) +
+                         "개를 펼쳐 한 덱으로 고친다 — 산출은 홀로 선다");
+            modelPath = flat.path();
+        }
+    }
 
     std::vector<std::string> lines;
     {
@@ -1424,11 +1439,17 @@ int runCnrb2Spring(const std::string& yamlFile, ConsoleOutput& console) {
 
     const auto inclClosure = KooRemapper::include_closure::read(modelPath, lines);
     int n = cnrb2spring_apply(lines, cfg, inclClosure, console);
-    if (n < 0) { console.error("[cnrb2spring] 변환을 멈췄습니다 — 위 [ERROR] 줄을 보세요 (출력 파일을 쓰지 않았습니다)"); return 1; }
+    if (n < 0) {
+        console.error("[cnrb2spring] 변환을 멈췄습니다 — 위 [ERROR] 줄을 보세요 (출력 파일을 쓰지 않았습니다)");
+        if (!flat.active() && !inclClosure.files.empty())
+            console.info("[cnrb2spring] 이 덱은 *INCLUDE " + std::to_string(inclClosure.files.size()) + "개로 쪼개져 있다 — "
+                         "CNRB 나 그 파트가 인클루드 안에 있으면 `flatten_includes: true` 로 펼쳐 한 덱으로 고친다");
+        return 1;
+    }
 
     // 원본 덱의 개행을 따른다 — 안 그러면 CRLF 덱이 조용히 LF 로 바뀌거나,
     // 원본 줄만 CRLF 로 남고 새로 넣은 줄이 LF 가 되어 **한 파일 안에서 개행이 갈린다**.
-    KooRemapper::DeckWriter out_w(outPath, KooRemapper::deck_newline::detect(modelPath));
+    KooRemapper::DeckWriter out_w(outPath, KooRemapper::deck_newline::detect(modelOrig));
     std::ostream& out = out_w.stream();
     if (!out_w.ok()) { console.error("[cnrb2spring] 쓸 수 없습니다: " + outPath); return 1; }
     for (const auto& ln : lines) out << ln << "\n";

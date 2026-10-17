@@ -1,4 +1,6 @@
 #include "parser/ElementCardLayout.h"   // deckFieldWidth · elementCardSpan — 칸 폭·카드 줄 수 정본
+#include "parser/IncludeClosure.h"   // FlatDeck — flatten_includes(2026-10-17)
+#include "parser/IncludeScan.h"      // 덱이 쪼개져 있나 — 안내·거절
 #include "parser/DeckScan.h"            // cardFields · fieldInt — 칸 읽기 정본
 #include "parser/DeckWriter.h"
 #include "merge.h"
@@ -111,6 +113,7 @@ struct mg_MergeGroup {
 
 struct mg_Config {
     std::string modelPath, outputPath;
+    bool flattenIncludes = false;   // `flatten_includes: true` — 인클루드 닫힘을 펼쳐 한 덱으로(2026-10-17)
     int dir = 2;            // 0=x, 1=y, 2=z (default)
     int method = 2;         // 0=voigt, 1=reuss, 2=vrh
     std::vector<mg_MergeGroup> groups;
@@ -245,6 +248,10 @@ static mg_Config mg_parseConfig(const std::string& yamlFile, ConsoleOutput& cons
 
         if (key == "model" || key == "input") {
             cfg.modelPath = val;
+        } else if (key == "flatten_includes") {
+            bool ok = true;
+            cfg.flattenIncludes = KooRemapper::yamlBoolValue(val, ok);
+            if (!ok) console.warning("flatten_includes 값 「" + val + "」 을 참·거짓으로 읽지 못했다 — true 로 주라(지금은 펼치지 않는다)");
         } else if (key == "output") {
             cfg.outputPath = val;
         } else if (key == "direction") {
@@ -891,10 +898,26 @@ int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
     console.info("Method: " + std::string(methName[cfg.method]));
     console.info("Merge groups: " + std::to_string(cfg.groups.size()));
 
+    // ★`flatten_includes`(2026-10-17) — 인클루드 닫힘을 펼친 덱(주 덱 옆 임시 파일)을 읽고 고친다 · 산출은 홀로 선다.
+    //   기본 산출 이름은 위에서 원본 이름으로 이미 정했다(임시 이름이 산출로 새지 않는다).
+    const bool flattenIncludes = cfg.flattenIncludes;
+    std::string modelPathRun = cfg.modelPath;
+    // ★`flatten_includes`(2026-10-17) — 인클루드 닫힘을 펼친 덱(주 덱 옆 임시 파일)을 읽고 고친다 · 산출은 홀로 선다
+    KooRemapper::include_closure::FlatDeck flat;
+    if (flattenIncludes) {
+        std::string why;
+        if (!flat.make(modelPathRun, why)) { console.error("flatten_includes: " + why); return 1; }
+        if (flat.active()) {
+            console.info("flatten_includes: 인클루드 " + std::to_string(flat.files()) +
+                         "개를 펼쳐 한 덱으로 고친다 — 산출은 홀로 선다");
+            modelPathRun = flat.path();
+        }
+    }
+
     // --- Phase 1: Parse K-file ---
     mg_KModel mdl;
     // 모델을 못 읽으면 여기서 끝낸다 — 예전엔 [ERROR] 만 찍고 5바이트짜리 빈 덱을 rc=0 으로 남겼다
-    if (!mg_parseKFile(cfg.modelPath, mdl, console))
+    if (!mg_parseKFile(modelPathRun, mdl, console))
         return 1;
 
     console.info("Nodes: " + std::to_string(mdl.nodes.size()) +
@@ -941,6 +964,9 @@ int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
 
         if (grpElemIds.empty()) {
             console.error("  No elements found for PIDs");
+            if (!flat.active() && KooRemapper::include_scan::scanFile(cfg.modelPath).count > 0)
+                console.info("  이 덱은 *INCLUDE 로 쪼개져 있다 — 그 파트가 인클루드 안에 있으면 `flatten_includes: true` 로 "
+                             "펼쳐 한 덱으로 고친다");
             groupFailed = true;
             continue;
         }

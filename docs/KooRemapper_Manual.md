@@ -391,6 +391,32 @@ BOM 을 붙인 설정으로 둘 다 **종료 코드 0** 으로 정상 산출물�
 
 ## 4. map — HEX8 구조화 메시 매핑
 
+#### (i) 인클루드로 쪼갠 덱 — 고쳐 쓰는 op 은 주 덱만 고친다 · `flatten_includes: true` 로 펼친다 (2026-10-17)
+
+덱을 **고쳐 쓰는** op 은 주 덱만 고친다(인클루드 안의 카드를 고쳐 쓸 길이 없다). 그래서 대상이 인클루드 안에만 있으면
+**종료 코드 1** 로 멈추고 이 키를 안내한다. `flatten_includes: true` 를 주면 인클루드 닫힘을 **펼쳐** — 맨 `*INCLUDE` 카드를 그
+파일의 본문으로 바꾸고(LS-DYNA 가 읽는 차례 · 중첩도 같다) 인클루드 파일의 `*KEYWORD` 줄은 뺀다 — 고친 덱을 `*INCLUDE` 없는
+**한 파일**로 낸다. 펼친 덱은 주 덱 옆 임시 파일(`.<이름>.kr_flat_….k`)로 읽고 op 이 끝나면 지운다(상대 경로 기준이 같다).
+
+```yaml
+model: master.k            # *INCLUDE mesh.k · bc.k …
+output: master_ale.k       # *INCLUDE 없는 한 덱
+flatten_includes: true
+```
+
+- **실측(이 규칙을 세운 까닭).** 모든 op 의 도움말 사례를 모델 덱 = `*KEYWORD` + `*INCLUDE body.k` 로 쪼개 다시 돌렸더니 14개가
+  rc 1(까닭은 맞지만 길을 말하지 않았다), 10여 개가 rc 0 인데 **아무것도 안 바꾼 덱**을 냈다(convert·refine·elform·update·load·
+  boundary·rbe·matdb · tetremesh 는 메시도 `*INCLUDE` 도 없는 **빈 덱** · explicit 은 인클루드의 `*CONTROL_IMPLICIT_*` 를 남겼다).
+  지금은 27개 op 이 쪼갠 덱에서 멈추고 안내하며, 옵션을 주면 안 쪼갠 덱과 **같은 산출**을 낸다(회귀 `test_flatten_includes.py`).
+- **멈추는 자리.** 대상 파트의 요소 · 대상 재질(matswap·matdb) · CNRB(cnrb2spring·cnrb2solid) · 지울 카드(explicit) · 남길 키워드
+  (strip)가 인클루드 안에만 있을 때. 「모든 파트」 op 은 주 덱에 요소가 하나도 없을 때만 멈추고, 주 덱에 파트가 있으면 예전처럼
+  그것을 고치되 **인클루드 안의 파트는 고치지 않았다고** `[WARN]` 으로 말한다(마스터 덱 + 다른 파트 인클루드는 흔한 꼴이다).
+- **펼치지 않는 것** — 못 읽는 인클루드(없는 파일) · `*INCLUDE_TRANSFORM` 등 따라가지 않는 변종 · 깊이 상한 · 순환 · 그 파일의 폭을
+  바꾸는 `*INCLUDE +`·`-` · 인클루드 `*KEYWORD` 의 폭이 주 덱과 다를 때. 까닭을 말하고 쓰지 않는다(짐작해 펼치지 않는다).
+- 값은 true·yes·1 / false·no·0 이다. 그 밖이면 「참·거짓으로 읽지 못했다」고 말하고 펼치지 않는다.
+- 분석 op(info·modelmeta·section·surfview·stackdiagram)은 이 키가 없어도 닫힘을 읽는다(§45). 제어 카드만 더하는 op(implicit·
+  relax·stabilize·database·contact·hfdamp …)은 쪼갠 덱에서도 예전과 같다 — 이 키를 받지 않는다.
+
 ### 용도
 평면(flat) 상세 메시(HEX8)를 굽힘(bent) 참조 구조화 메시에 등매개변수 방법으로 매핑.
 참조 메시는 **구조화된 HEX8**이어야 하며, 상세 메시는 임의 형상이어도 무방합니다.

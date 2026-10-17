@@ -214,10 +214,12 @@ async def list_session_files(session_id: str, ctx: Context) -> list:
 async def session_includes(session_id: str, ctx: Context) -> dict:
     """이 세션의 덱들이 참조하는 `*INCLUDE` 가 실제로 올라와 있나 — **op 을 돌리기 전에 확인하라.**
 
-    덱을 고쳐 쓰는 op 은 주 덱만 고치므로 인클루드가 빠져도 **성공한다.** 대신 산출물에 그 `*INCLUDE`
+    덱을 고쳐 쓰는 op 은 주 덱만 고치므로 인클루드가 빠져도 **성공할 수 있다.** 대신 산출물에 그 `*INCLUDE`
     줄이 그대로 남고, LS-DYNA 는 인클루드를 따라가므로 해석 단계에서 깨진다(분석 op — info·modelmeta·
     그림 셋 — 은 인클루드를 함께 읽고, 빠진 파일은 못 읽었다고 말한다). 빠진 게 있으면 `run_operation`
-    이 422 로 막는다 — 그 파일을 올려라. 넘김값 `allow_missing_includes` 는 REST(`POST /sessions/{id}/jobs`
+    이 422 로 막는다 — 그 파일을 올려라. 대상 파트가 인클루드 안에만 있으면 op 이 rc 1 로 멈추고
+    `flatten_includes` 를 안내한다 — 사용자가 원하면 config 에 `flatten_includes: true` 를 넣어 다시 돌린다
+    (닫힘을 펼쳐 `*INCLUDE` 없는 한 덱으로 고친다 · 2026-10-17). 넘김값 `allow_missing_includes` 는 REST(`POST /sessions/{id}/jobs`
     본문)에만 있고 **이 MCP 도구로는 줄 수 없다**. 반환: {ok, missing_by_file:{덱:{missing,satisfied}}}."""
     return await _get(ctx, f"/sessions/{session_id}/includes")
 

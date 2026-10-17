@@ -605,6 +605,7 @@ struct AssemblyConfig {
     double nu = 0.0;
     bool dynamicRelaxation = false;
     bool dynainEmbed = false;        // true: embed *INITIAL_STRESS_SOLID inline (no separate .dynain)
+    bool flattenIncludes = false;    // true: base_model 의 *INCLUDE 닫힘을 펼쳐 한 덱으로 고친다(2026-10-17)
     bool hasMaterial() const { return E > 0 && nu > 0 && nu < 0.5; }
 };
 

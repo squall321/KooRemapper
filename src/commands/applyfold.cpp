@@ -1,5 +1,7 @@
 // linkage-fit 이 적은 군별 변환을 큰 덱에 찍는 op — 조용히 빠지는 절점이 하나도 없어야 한다.
 #include "applyfold.h"
+#include "parser/IncludeClosure.h"   // FlatDeck — flatten_includes
+#include "parser/IncludeScan.h"      // 거절 안내 — 덱이 쪼개져 있나
 
 #include "assembly/ModelAssembler.h"
 #include "cli/ConsoleOutput.h"
@@ -156,6 +158,7 @@ bool readGroups(const std::string& path, std::vector<Group>& groups, ConsoleOutp
 
 int runApplyFold(const std::string& yamlFile, ConsoleOutput& console) {
     std::string model, groupsFile, output;
+    bool flattenIncludes = false;   // `flatten_includes: true` — 인클루드 닫힘을 펼쳐 한 덱으로(2026-10-17)
     {
         std::ifstream f(yamlFile);
         if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
@@ -173,6 +176,7 @@ int runApplyFold(const std::string& yamlFile, ConsoleOutput& console) {
             if      (key == "model")  model = val;
             else if (key == "groups") groupsFile = val;
             else if (key == "output") output = val;
+            else if (key == "flatten_includes") { bool ok = true; flattenIncludes = KooRemapper::yamlBoolValue(val, ok); if (!ok) console.warning("flatten_includes 값 「" + val + "」 을 참·거짓으로 읽지 못했다 — true 로 주라(지금은 펼치지 않는다)"); }
             else console.warning("모르는 키는 무시한다: " + key);
         }
     }
@@ -191,6 +195,16 @@ int runApplyFold(const std::string& yamlFile, ConsoleOutput& console) {
     console.keyValue("Groups file", groupsFile);
     console.keyValue("Groups", std::to_string(groups.size()));
 
+    // `flatten_includes` — 펼친 덱(주 덱 옆 임시 파일)을 읽고 고친다. 이 op 은 메시와 엔진 둘 다 덱을 읽으므로 경로째 바꾼다.
+    KooRemapper::include_closure::FlatDeck flat;
+    if (flattenIncludes) {
+        std::string why;
+        if (!flat.make(model, why)) { console.error("flatten_includes: " + why); return 1; }
+        if (flat.active()) {
+            console.info("flatten_includes: 인클루드 " + std::to_string(flat.files()) + "개를 펼쳐 한 덱으로 고친다 — 산출은 홀로 선다");
+            model = flat.path();
+        }
+    }
     KFileReader reader;
     Mesh mesh;
     try {
@@ -218,6 +232,8 @@ int runApplyFold(const std::string& yamlFile, ConsoleOutput& console) {
         for (int pid : missingParts) s += (s.empty() ? "" : ", ") + std::to_string(pid);
         console.error("groups 가 가리키는 파트가 덱에 없다: " + s);
         console.info("  변환을 조용히 버리지 않는다 — 덱과 groups 가 맞는지 보라.");
+        if (!flattenIncludes && KooRemapper::include_scan::scanFile(model).count > 0)
+            console.info("  이 덱은 *INCLUDE 로 쪼개져 있다 — 파트가 인클루드 안에 있으면 `flatten_includes: true` 로 펼쳐 한 덱으로 고친다");
         return 1;
     }
 

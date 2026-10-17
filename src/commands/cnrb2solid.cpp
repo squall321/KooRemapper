@@ -1,4 +1,6 @@
 #include "parser/DeckWriter.h"
+#include <cctype>
+#include "parser/IncludeClosure.h"   // FlatDeck — flatten_includes(2026-10-17)
 #include "parser/ElementCardLayout.h"   // deckFieldWidth — 덱이 선언한 칸 폭을 따른다
 #include "parser/IdAllocator.h"   // 인클루드 닫힘까지 센 최대값 · 못 본 자리 경고
 #include "commands/contact_helpers.h"   // ct_findMaxContactId — 단독 contact 와 같은 CID 스캐너
@@ -976,6 +978,7 @@ int runCnrb2Solid(const std::string& yamlFile, ConsoleOutput& console) {
     if (lastSlash != std::string::npos) configDir = yamlFile.substr(0, lastSlash);
 
     std::string modelFile, outputFile;
+    bool flattenIncludes = false;   // `flatten_includes: true` — 인클루드 닫힘을 펼쳐 한 덱으로(2026-10-17)
     Cnrb2SolidConfig cfg;
 
     std::string line;
@@ -992,6 +995,7 @@ int runCnrb2Solid(const std::string& yamlFile, ConsoleOutput& console) {
         if (val.empty()) continue;
         try {
             if      (key == "model")               modelFile        = val;
+            else if (key == "flatten_includes") { bool ok = true; flattenIncludes = KooRemapper::yamlBoolValue(val, ok); if (!ok) console.warning("flatten_includes 값 「" + val + "」 을 참·거짓으로 읽지 못했다 — true 로 주라(지금은 펼치지 않는다)"); }
             else if (key == "output")              outputFile       = val;
             else if (key == "E")                   cfg.E            = std::stod(val);
             else if (key == "PR" || key == "pr")   cfg.PR           = std::stod(val);
@@ -1016,6 +1020,18 @@ int runCnrb2Solid(const std::string& yamlFile, ConsoleOutput& console) {
     };
     std::string modelPath = resolvePath(modelFile);
     std::string outPath   = resolvePath(outputFile);
+    // ★`flatten_includes`(2026-10-17) — 인클루드 닫힘을 펼친 덱(주 덱 옆 임시 파일)을 읽고 고친다 · 산출은 홀로 선다
+    const std::string modelOrig = modelPath;
+    KooRemapper::include_closure::FlatDeck flat;
+    if (flattenIncludes) {
+        std::string why;
+        if (!flat.make(modelPath, why)) { console.error("[cnrb2solid] flatten_includes: " + why); return 1; }
+        if (flat.active()) {
+            console.info("[cnrb2solid] flatten_includes: 인클루드 " + std::to_string(flat.files()) +
+                         "개를 펼쳐 한 덱으로 고친다 — 산출은 홀로 선다");
+            modelPath = flat.path();
+        }
+    }
 
     std::vector<std::string> lines;
     {
@@ -1033,6 +1049,28 @@ int runCnrb2Solid(const std::string& yamlFile, ConsoleOutput& console) {
     // 인클루드 닫힘을 읽어 그 안의 번호까지 센다(2026-10-16) — 못 본 자리만 말한다.
     const auto inclClosure = KooRemapper::include_closure::read(modelPath, lines);
     KooRemapper::ids::warnGaps(console, inclClosure, "그 안의 노드·요소·섹션·재질·세트 번호와 겹쳐 낼 수 있습니다");
+    // ★CNRB 가 인클루드 안에만 있으면 멈춘다(2026-10-17) — 주 덱만 보면 「CNRB 없음」 으로 아무것도 안 바꾼 덱을 rc 0 으로
+    //   냈다(실측). 고쳐 쓰는 op 은 주 덱만 고치므로 펼치라고 말한다.
+    if (!flat.active()) {
+        auto hasCnrb = [](const std::vector<std::string>& L) {
+            for (const auto& l : L) {
+                const std::string t = cs_trim(l);
+                if (t.size() > 1 && t[0] == '*') {
+                    std::string up = t;
+                    for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+                    if (up.rfind("*CONSTRAINED_NODAL_RIGID_BODY", 0) == 0) return true;
+                }
+            }
+            return false;
+        };
+        if (!hasCnrb(lines))
+            for (const auto& f : inclClosure.files)
+                if (hasCnrb(f.lines)) {
+                    console.error("[cnrb2solid] *CONSTRAINED_NODAL_RIGID_BODY 가 인클루드 「" + f.path + "」 안에만 있다 — "
+                                  "고쳐 쓰는 op 은 주 덱만 고친다. `flatten_includes: true` 를 주면 닫힘을 펼쳐 한 덱으로 고친다");
+                    return 1;
+                }
+    }
 
     int maxNodeId = 0, maxElemId = 0, maxSecId = 0, maxMatId = 0, maxSetId = 0, maxPartId = 0;
 
@@ -1145,7 +1183,7 @@ int runCnrb2Solid(const std::string& yamlFile, ConsoleOutput& console) {
                       "출력 파일을 쓰지 않았습니다: " + outPath);
         return 1;
     }
-    KooRemapper::DeckWriter out_w(outPath, KooRemapper::deck_newline::detect(modelPath));
+    KooRemapper::DeckWriter out_w(outPath, KooRemapper::deck_newline::detect(modelOrig));
     std::ostream& out = out_w.stream();
     if (!out_w.ok()) { console.error("Cannot write: " + outPath); return 1; }
     for (const auto& ln : lines) out << ln << "\n";

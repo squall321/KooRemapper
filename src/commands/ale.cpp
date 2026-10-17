@@ -1,5 +1,6 @@
 #include "parser/DeckWriter.h"
 #include "parser/IdAllocator.h"   // 인클루드 닫힘까지 센 최대값 · 못 본 자리 경고
+#include "parser/IncludeClosure.h" // FlatDeck · partFile — flatten_includes(2026-10-17)
 #include "ale.h"
 #include "kw_util.h"
 #include "cli/ConsoleOutput.h"
@@ -413,6 +414,7 @@ int runAle(const std::string& yamlFile, ConsoleOutput& console) {
         }
     }
     std::string modelFile, outputFile;
+    bool flattenIncludes = false;   // `flatten_includes: true` — 인클루드 닫힘을 펼쳐 한 덱으로(2026-10-17)
     std::vector<AlePartEntry> aleEntries;
     std::vector<int> fsiPids;
     int    elform  = 11;
@@ -538,6 +540,7 @@ int runAle(const std::string& yamlFile, ConsoleOutput& console) {
 
             if (key == "model")    modelFile  = val;
             else if (key == "output")   outputFile = val;
+            else if (key == "flatten_includes") { bool ok = true; flattenIncludes = KooRemapper::yamlBoolValue(val, ok); if (!ok) console.warning("flatten_includes 값 「" + val + "」 을 참·거짓으로 읽지 못했다 — true 로 주라(지금은 펼치지 않는다)"); }
             else if (key == "fsi_pids") { if (val.empty()) inFsiPids = true; else fsiPids = ale_parsePidList(val); }
             else if (key == "elform")   try { elform = std::stoi(val); } catch (...) {}
             else if (key == "dct")      try { dct    = std::stoi(val); } catch (...) {}
@@ -560,6 +563,19 @@ int runAle(const std::string& yamlFile, ConsoleOutput& console) {
     };
     std::string modelPath = resolvePath(modelFile);
     std::string outPath   = resolvePath(outputFile);
+    const std::string modelOrig = modelPath;   // 개행은 원본을 따른다
+
+    // ★`flatten_includes`(2026-10-17) — 인클루드 닫힘을 펼친 덱(주 덱 옆 임시 파일)을 읽고 고친다 · 산출은 홀로 선다.
+    KooRemapper::include_closure::FlatDeck flat;
+    if (flattenIncludes) {
+        std::string why;
+        if (!flat.make(modelPath, why)) { console.error("[ale] flatten_includes: " + why); return 1; }
+        if (flat.active()) {
+            console.println("[ale] flatten_includes: 인클루드 " + std::to_string(flat.files()) +
+                            "개를 펼쳐 한 덱으로 고친다 — 산출은 홀로 선다");
+            modelPath = flat.path();
+        }
+    }
 
     std::vector<std::string> lines;
     {
@@ -600,8 +616,17 @@ int runAle(const std::string& yamlFile, ConsoleOutput& console) {
 
     {
         std::vector<AlePartEntry> validEntries;
+        // 그 PID 가 인클루드 안에 있으면 까닭과 길을 말한다(고쳐 쓰는 op 은 주 덱만 고친다)
+        const auto preClo = KooRemapper::include_closure::read(modelPath, lines);
         for (const auto& e : aleEntries) {
             if (partMap.find(e.pid) == partMap.end()) {
+                const std::string inc = KooRemapper::include_closure::partFile(preClo, e.pid);
+                if (!inc.empty()) {
+                    console.error("[ale] PID " + std::to_string(e.pid) + " 의 *PART 가 인클루드 「" + inc +
+                                  "」 안에 있다 — 고쳐 쓰는 op 은 주 덱만 고친다. `flatten_includes: true` 를 주면 닫힘을 "
+                                  "펼쳐 한 덱으로 고친다");
+                    return 1;
+                }
                 console.error("[ale] PID " + std::to_string(e.pid) + " not found in model. Skipping.");
             } else {
                 validEntries.push_back(e);
@@ -774,7 +799,7 @@ int runAle(const std::string& yamlFile, ConsoleOutput& console) {
     kw_insertBeforeEnd(lines, insertCards);
 
     // 원본 덱의 개행을 따른다
-    KooRemapper::DeckWriter outf_w(outPath, KooRemapper::deck_newline::detect(modelPath));
+    KooRemapper::DeckWriter outf_w(outPath, KooRemapper::deck_newline::detect(modelOrig));
     std::ostream& outf = outf_w.stream();
     if (!outf_w.ok()) { console.error("Cannot write output: " + outPath); return 1; }
     for (const auto& ln : lines) outf << ln << "\n";

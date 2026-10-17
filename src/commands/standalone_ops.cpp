@@ -144,6 +144,9 @@ struct StandaloneYamlBase {
         return count;
     }
 
+    bool flattenIncludes = false;   // `flatten_includes: true`
+    std::string flattenBad;         // 참·거짓으로 못 읽은 값(비면 없음)
+
     std::string getOutputPrefix() const {
         std::string op = outputFile.empty() ? modelFile : outputFile;
         op = resolvePath(op);
@@ -154,6 +157,12 @@ struct StandaloneYamlBase {
 
     void parseCommonKey(const std::string& key, const std::string& val) {
         if      (key == "model" || key == "base_model")  modelFile = val;
+        else if (key == "flatten_includes") {
+            // ★인클루드 닫힘을 펼쳐 홀로 서는 한 덱으로 고친다(2026-10-17 · 사용자 결정 — 줄 때만). 로드 전에 setFlattenIncludes.
+            bool ok = true;
+            flattenIncludes = KooRemapper::yamlBoolValue(val, ok);
+            if (!ok) flattenBad = val;
+        }
         else if (key == "output") outputFile = val;
         else if (key == "E")  { try { matE = std::stod(val); } catch(...) {} }
         else if (key == "nu") { try { matNu = std::stod(val); } catch(...) {} }
@@ -355,6 +364,8 @@ int runWrap(const std::string& yamlFile, ConsoleOutput& console) {
     if (op.tension == 0.0) { console.error("tension must be non-zero"); return 1; }
 
     ModelAssembler assembler;
+    assembler.setFlattenIncludes(y.flattenIncludes);   // `flatten_includes` — 로드 전에
+    if (!y.flattenBad.empty()) console.warning("flatten_includes 값 「" + y.flattenBad + "」 을 참·거짓으로 읽지 못했다 — true 로 주라(지금은 펼치지 않는다)");
     if (!assembler.loadBaseModel(y.resolvePath(y.modelFile))) {
         console.error(assembler.getErrorMessage()); return 1;
     }
@@ -416,6 +427,8 @@ int runUpdate(const std::string& yamlFile, ConsoleOutput& console) {
     console.println("[update] Dynain: " + op.dynainFile);
 
     ModelAssembler assembler;
+    assembler.setFlattenIncludes(y.flattenIncludes);   // `flatten_includes` — 로드 전에
+    if (!y.flattenBad.empty()) console.warning("flatten_includes 값 「" + y.flattenBad + "」 을 참·거짓으로 읽지 못했다 — true 로 주라(지금은 펼치지 않는다)");
     if (!assembler.loadBaseModel(modelPath)) {
         console.error(assembler.getErrorMessage()); return 1;
     }
@@ -641,6 +654,8 @@ int runRestack(const std::string& yamlFile, ConsoleOutput& console) {
     if (!validateLikeAssemble(AssemblyOperation::RESTACK, &AssemblyOperation::restack, op, "restack", console,
                               pidRefsRaw)) return 1;
     ModelAssembler assembler;
+    assembler.setFlattenIncludes(y.flattenIncludes);   // `flatten_includes` — 로드 전에
+    if (!y.flattenBad.empty()) console.warning("flatten_includes 값 「" + y.flattenBad + "」 을 참·거짓으로 읽지 못했다 — true 로 주라(지금은 펼치지 않는다)");
     if (!assembler.loadBaseModel(modelPath)) { console.error(assembler.getErrorMessage()); return 1; }
     if (!assembler.applyRestack(op, y.matE, y.matNu)) { console.error(assembler.getErrorMessage()); return 1; }
     for (const auto& msg : assembler.infoMessages) console.println(msg);
@@ -697,6 +712,8 @@ int runBend(const std::string& yamlFile, ConsoleOutput& console) {
     console.println("[bend] Model: " + modelPath);
     if (!validateLikeAssemble(AssemblyOperation::BEND, &AssemblyOperation::bend, op, "bend", console)) return 1;
     ModelAssembler assembler;
+    assembler.setFlattenIncludes(y.flattenIncludes);   // `flatten_includes` — 로드 전에
+    if (!y.flattenBad.empty()) console.warning("flatten_includes 값 「" + y.flattenBad + "」 을 참·거짓으로 읽지 못했다 — true 로 주라(지금은 펼치지 않는다)");
     if (!assembler.loadBaseModel(modelPath)) { console.error(assembler.getErrorMessage()); return 1; }
     if (!assembler.applyBend(op, y.matE, y.matNu, y.configDir)) { console.error(assembler.getErrorMessage()); return 1; }
     for (const auto& msg : assembler.infoMessages) console.println(msg);
@@ -782,6 +799,8 @@ int runIndent(const std::string& yamlFile, ConsoleOutput& console) {
     console.println("[indent] Model: " + modelPath);
     if (!validateLikeAssemble(AssemblyOperation::INDENT, &AssemblyOperation::indent, op, "indent", console)) return 1;
     ModelAssembler assembler;
+    assembler.setFlattenIncludes(y.flattenIncludes);   // `flatten_includes` — 로드 전에
+    if (!y.flattenBad.empty()) console.warning("flatten_includes 값 「" + y.flattenBad + "」 을 참·거짓으로 읽지 못했다 — true 로 주라(지금은 펼치지 않는다)");
     if (!assembler.loadBaseModel(modelPath)) { console.error(assembler.getErrorMessage()); return 1; }
     if (!assembler.applyIndent(op, y.matE, y.matNu)) { console.error(assembler.getErrorMessage()); return 1; }
     for (const auto& msg : assembler.infoMessages) console.println(msg);
@@ -832,6 +851,8 @@ int runFormstrain(const std::string& yamlFile, ConsoleOutput& console) {
 
     console.println("[formstrain] Model: " + modelPath);
     ModelAssembler assembler;
+    assembler.setFlattenIncludes(y.flattenIncludes);   // `flatten_includes` — 로드 전에
+    if (!y.flattenBad.empty()) console.warning("flatten_includes 값 「" + y.flattenBad + "」 을 참·거짓으로 읽지 못했다 — true 로 주라(지금은 펼치지 않는다)");
     if (!assembler.loadBaseModel(modelPath)) { console.error(assembler.getErrorMessage()); return 1; }
     if (!assembler.applyFormStrain(op)) { console.error(assembler.getErrorMessage()); return 1; }
     for (const auto& msg : assembler.infoMessages) console.println(msg);
@@ -883,6 +904,8 @@ int runConvert(const std::string& yamlFile, ConsoleOutput& console) {
     console.println("[convert] Model: " + modelPath);
     console.println("[convert] Type: " + op.convertType);
     ModelAssembler assembler;
+    assembler.setFlattenIncludes(y.flattenIncludes);   // `flatten_includes` — 로드 전에
+    if (!y.flattenBad.empty()) console.warning("flatten_includes 값 「" + y.flattenBad + "」 을 참·거짓으로 읽지 못했다 — true 로 주라(지금은 펼치지 않는다)");
     if (!assembler.loadBaseModel(modelPath)) { console.error(assembler.getErrorMessage()); return 1; }
     if (!assembler.applyTet10Convert(op)) { console.error(assembler.getErrorMessage()); return 1; }
     for (const auto& msg : assembler.infoMessages) console.println(msg);
@@ -932,6 +955,8 @@ int runRefine(const std::string& yamlFile, ConsoleOutput& console) {
 
     console.println("[refine] Model: " + modelPath);
     ModelAssembler assembler;
+    assembler.setFlattenIncludes(y.flattenIncludes);   // `flatten_includes` — 로드 전에
+    if (!y.flattenBad.empty()) console.warning("flatten_includes 값 「" + y.flattenBad + "」 을 참·거짓으로 읽지 못했다 — true 로 주라(지금은 펼치지 않는다)");
     if (!assembler.loadBaseModel(modelPath)) { console.error(assembler.getErrorMessage()); return 1; }
     if (!assembler.applyRefine(op)) { console.error(assembler.getErrorMessage()); return 1; }
     for (const auto& msg : assembler.infoMessages) console.println(msg);
@@ -981,6 +1006,8 @@ int runElform(const std::string& yamlFile, ConsoleOutput& console) {
 
     console.println("[elform] Model: " + modelPath);
     ModelAssembler assembler;
+    assembler.setFlattenIncludes(y.flattenIncludes);   // `flatten_includes` — 로드 전에
+    if (!y.flattenBad.empty()) console.warning("flatten_includes 값 「" + y.flattenBad + "」 을 참·거짓으로 읽지 못했다 — true 로 주라(지금은 펼치지 않는다)");
     if (!assembler.loadBaseModel(modelPath)) { console.error(assembler.getErrorMessage()); return 1; }
     if (!assembler.applyElform(op)) { console.error(assembler.getErrorMessage()); return 1; }
     for (const auto& msg : assembler.infoMessages) console.println(msg);
@@ -1032,6 +1059,8 @@ int runDisconnect(const std::string& yamlFile, ConsoleOutput& console) {
 
     console.println("[disconnect] Model: " + modelPath);
     ModelAssembler assembler;
+    assembler.setFlattenIncludes(y.flattenIncludes);   // `flatten_includes` — 로드 전에
+    if (!y.flattenBad.empty()) console.warning("flatten_includes 값 「" + y.flattenBad + "」 을 참·거짓으로 읽지 못했다 — true 로 주라(지금은 펼치지 않는다)");
     if (!assembler.loadBaseModel(modelPath)) { console.error(assembler.getErrorMessage()); return 1; }
     if (!assembler.applyDisconnect(op)) { console.error(assembler.getErrorMessage()); return 1; }
     for (const auto& msg : assembler.infoMessages) console.println(msg);
@@ -1166,6 +1195,8 @@ int runIga(const std::string& yamlFile, ConsoleOutput& console) {
     console.println("[iga] Targets: " + std::to_string(igaOp.targets.size()));
     if (!validateLikeAssemble(AssemblyOperation::IGA, &AssemblyOperation::iga, igaOp, "iga", console)) return 1;
     ModelAssembler assembler;
+    assembler.setFlattenIncludes(y.flattenIncludes);   // `flatten_includes` — 로드 전에
+    if (!y.flattenBad.empty()) console.warning("flatten_includes 값 「" + y.flattenBad + "」 을 참·거짓으로 읽지 못했다 — true 로 주라(지금은 펼치지 않는다)");
     if (!assembler.loadBaseModel(modelPath)) { console.error(assembler.getErrorMessage()); return 1; }
     if (!assembler.applyIGA(igaOp, outputPrefix)) { console.error(assembler.getErrorMessage()); return 1; }
     for (const auto& msg : assembler.infoMessages) console.println(msg);
@@ -1242,6 +1273,8 @@ int runWarpage(const std::string& yamlFile, ConsoleOutput& console) {
 
     console.println("[warpage] Model: " + modelPath);
     ModelAssembler assembler;
+    assembler.setFlattenIncludes(y.flattenIncludes);   // `flatten_includes` — 로드 전에
+    if (!y.flattenBad.empty()) console.warning("flatten_includes 값 「" + y.flattenBad + "」 을 참·거짓으로 읽지 못했다 — true 로 주라(지금은 펼치지 않는다)");
     if (!assembler.loadBaseModel(modelPath)) { console.error(assembler.getErrorMessage()); return 1; }
     if (!assembler.applyWarpage(op, y.matE, y.matNu, y.configDir)) { console.error(assembler.getErrorMessage()); return 1; }
     for (const auto& msg : assembler.infoMessages) console.println(msg);
@@ -1448,6 +1481,8 @@ int runOffset(const std::string& yamlFile, ConsoleOutput& console) {
     console.println("[offset] Model: " + modelPath);
     if (!validateLikeAssemble(AssemblyOperation::OFFSET, &AssemblyOperation::offset, op, "offset", console)) return 1;
     ModelAssembler assembler;
+    assembler.setFlattenIncludes(y.flattenIncludes);   // `flatten_includes` — 로드 전에
+    if (!y.flattenBad.empty()) console.warning("flatten_includes 값 「" + y.flattenBad + "」 을 참·거짓으로 읽지 못했다 — true 로 주라(지금은 펼치지 않는다)");
     if (!assembler.loadBaseModel(modelPath)) { console.error(assembler.getErrorMessage()); return 1; }
     if (!assembler.applyOffset(op, y.matE, y.matNu)) { console.error(assembler.getErrorMessage()); return 1; }
     for (const auto& msg : assembler.infoMessages) console.println(msg);
@@ -1508,6 +1543,8 @@ int runIdFloor(const std::string& yamlFile, ConsoleOutput& console) {
     if (outPath.size() < 5 || outPath.substr(outPath.size() - 5) != ".json") outPath += ".json";
 
     ModelAssembler assembler;
+    assembler.setFlattenIncludes(y.flattenIncludes);   // `flatten_includes` — 로드 전에
+    if (!y.flattenBad.empty()) console.warning("flatten_includes 값 「" + y.flattenBad + "」 을 참·거짓으로 읽지 못했다 — true 로 주라(지금은 펼치지 않는다)");
     if (!assembler.loadBaseModel(modelPath)) { console.error(assembler.getErrorMessage()); return 1; }
     const auto mx = assembler.idMaxima();
     // PID·SECID·MID 는 한 번호다(저쪽 라이터가 셋을 같은 번호로 쓴다 — 삽입도 한 이동량으로 옮긴다)
@@ -1697,6 +1734,8 @@ int runCadSolidMerge(const std::string& yamlFile, ConsoleOutput& console) {
     console.println(std::string("[") + tag + "] Model   : " + modelPath);
     console.println(std::string("[") + tag + "] Fragment: " + op.fragment + "  (map " + op.fragmentMap + ")");
     ModelAssembler assembler;
+    assembler.setFlattenIncludes(y.flattenIncludes);   // `flatten_includes` — 로드 전에
+    if (!y.flattenBad.empty()) console.warning("flatten_includes 값 「" + y.flattenBad + "」 을 참·거짓으로 읽지 못했다 — true 로 주라(지금은 펼치지 않는다)");
     if (!assembler.loadBaseModel(modelPath)) { console.error(assembler.getErrorMessage()); return 1; }
     if (!assembler.applyCadSolidMerge(op)) { console.error(assembler.getErrorMessage()); return 1; }
     for (const auto& msg : assembler.infoMessages) console.println(msg);

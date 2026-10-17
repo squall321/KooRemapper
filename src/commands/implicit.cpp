@@ -1,4 +1,6 @@
 #include "implicit.h"
+#include "parser/IncludeClosure.h"   // FlatDeck — flatten_includes(2026-10-17)
+#include <cctype>
 #include "parser/DeckWriter.h"
 #include "kw_util.h"
 #include "cli/ConsoleOutput.h"
@@ -139,6 +141,7 @@ int runExplicit(const std::string& yamlFile, ConsoleOutput& console) {
 
     std::string modelFile, outputFile;
     bool keepDrCurves = false;
+    bool flattenIncludes = false;   // `flatten_includes: true` — 인클루드 닫힘을 펼쳐 한 덱으로(2026-10-17)
 
     std::string line;
     while (std::getline(f, line)) {
@@ -153,6 +156,7 @@ int runExplicit(const std::string& yamlFile, ConsoleOutput& console) {
         if      (key == "model")           modelFile  = val;
         else if (key == "output")          outputFile = val;
         else if (key == "keep_dr_curves")  keepDrCurves = (val == "true" || val == "yes" || val == "1");
+        else if (key == "flatten_includes") { bool ok = true; flattenIncludes = KooRemapper::yamlBoolValue(val, ok); if (!ok) console.warning("flatten_includes 값 「" + val + "」 을 참·거짓으로 읽지 못했다 — true 로 주라(지금은 펼치지 않는다)"); }
     }
 
     if (modelFile.empty())  { console.error("explicit YAML: 'model' not specified");  return 1; }
@@ -163,6 +167,18 @@ int runExplicit(const std::string& yamlFile, ConsoleOutput& console) {
     };
     std::string modelPath = resolvePath(modelFile);
     std::string outPath   = resolvePath(outputFile);
+    // ★`flatten_includes`(2026-10-17) — 인클루드 닫힘을 펼친 덱을 읽어 거기서 지운다 · 산출은 홀로 선다
+    const std::string modelOrig = modelPath;
+    KooRemapper::include_closure::FlatDeck flat;
+    if (flattenIncludes) {
+        std::string why;
+        if (!flat.make(modelPath, why)) { console.error("[explicit] flatten_includes: " + why); return 1; }
+        if (flat.active()) {
+            console.println("[explicit] flatten_includes: 인클루드 " + std::to_string(flat.files()) +
+                            "개를 펼쳐 한 덱으로 고친다 — 산출은 홀로 선다");
+            modelPath = flat.path();
+        }
+    }
 
     std::vector<std::string> lines;
     {
@@ -173,6 +189,23 @@ int runExplicit(const std::string& yamlFile, ConsoleOutput& console) {
             if (!ln.empty() && ln.back() == '\r') ln.pop_back();
             lines.push_back(ln);
         }
+    }
+    // ★지울 카드가 인클루드 안에 있으면 주 덱만 지운 덱이 「explicit 덱」이 아니다(2026-10-17 실측 — 인클루드의
+    //   *CONTROL_IMPLICIT_* 다섯 장이 그대로 남았다). 펼치지 않았으면 그 카드를 찾아 멈춘다.
+    if (!flat.active()) {
+        const auto clo = KooRemapper::include_closure::read(modelPath, lines);
+        for (const auto& fl : clo.files)
+            for (const auto& l : fl.lines) {
+                if (l.empty() || l[0] != '*') continue;
+                std::string up = kw_trim(l);
+                for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+                if (up.rfind("*CONTROL_IMPLICIT", 0) == 0 || up.rfind("*CONTROL_DYNAMIC_RELAXATION", 0) == 0 ||
+                    up.rfind("*DATABASE_BINARY_D3DRLF", 0) == 0) {
+                    console.error("[explicit] 지울 카드 " + up + " 가 인클루드 「" + fl.path + "」 안에 있다 — 주 덱만 "
+                                  "고치면 그대로 남는다. `flatten_includes: true` 를 주면 닫힘을 펼쳐 한 덱에서 지운다");
+                    return 1;
+                }
+            }
     }
 
     console.println("[explicit] Model   : " + modelPath);
@@ -207,7 +240,7 @@ int runExplicit(const std::string& yamlFile, ConsoleOutput& console) {
         }
     }
 
-    KooRemapper::DeckWriter out_w(outPath, KooRemapper::deck_newline::detect(modelPath));
+    KooRemapper::DeckWriter out_w(outPath, KooRemapper::deck_newline::detect(modelOrig));
     if (!out_w.ok()) { console.error("Cannot write output: " + outPath); return 1; }
     std::ostream& out = out_w.stream();
     for (const auto& ln : lines) out << ln << "\n";

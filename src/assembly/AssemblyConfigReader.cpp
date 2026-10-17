@@ -342,6 +342,11 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                 } else if (key == "dynain_embed") {
                     config.dynainEmbed = (val == "true" || val == "yes" || val == "1");
                     section = Section::NONE;
+                } else if (key == "flatten_includes") {
+                    bool ok = true;
+                    config.flattenIncludes = KooRemapper::yamlBoolValue(val, ok);
+                    if (!ok) throw std::runtime_error("flatten_includes 값 '" + val + "' 을 참·거짓으로 읽지 못했다 — true 또는 false 로 주라");
+                    section = Section::NONE;
                 } else if (key == "operations") {
                     section = Section::OPERATIONS;
                     inOperationItem = false;

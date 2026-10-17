@@ -1,5 +1,6 @@
 #include "parser/DeckNewline.h"
 #include "parser/IncludeScan.h"   // scanFile — 흘려 읽어 인클루드가 있나만 본다
+#include "parser/IncludeClosure.h"   // FlatDeck — flatten_includes(2026-10-17)
 #include "parser/IdAllocator.h"   // 인클루드 닫힘 · 못 본 자리 경고
 #include "commands/tetremesh.h"
 #include "core/Mesh.h"
@@ -46,6 +47,8 @@ namespace {
 
 struct Cfg {
     std::string model;
+    bool flattenIncludes = false;   // `flatten_includes: true` — 인클루드 닫힘을 펼쳐 한 덱으로(2026-10-17)
+    std::string flattenBad;         // 참·거짓으로 못 읽은 값(실행할 때 말한다)
     std::string output;
     std::string backend = "localimprove";   // "localimprove" | "tetgen"
     std::string fallback = "";              // "" | "localimprove" | "tetgen"
@@ -149,6 +152,7 @@ bool readConfig(const std::string& path, Cfg& cfg, std::string& err) {
         // Top-level keys
         if (section.empty()) {
             if      (key == "model")        cfg.model = val;
+            else if (key == "flatten_includes") { bool ok = true; cfg.flattenIncludes = KooRemapper::yamlBoolValue(val, ok); if (!ok) cfg.flattenBad = val; }
             else if (key == "output")       cfg.output = val;
             else if (key == "backend")      cfg.backend = val;
             else if (key == "fallback")     cfg.fallback = val;
@@ -235,6 +239,22 @@ int runTetRemesh(const std::string& configPath,
 
     Timer timer;
 
+    // ★인클루드(2026-10-17) — 이 op 은 리더가 본 메시만 다시 쓴다(`KFileWriter::writeFile`). 메시가 인클루드 안에 있으면
+    //   **빈 덱**이 rc 0 으로 나갔다(실측 — 절점·요소·*INCLUDE 가 다 없다). 펼치거나 멈춘다.
+    const std::string modelOrig = cfg.model;
+    if (!cfg.flattenBad.empty())
+        console.warning("flatten_includes 값 「" + cfg.flattenBad + "」 을 참·거짓으로 읽지 못했다 — true 로 주라(지금은 펼치지 않는다)");
+    KooRemapper::include_closure::FlatDeck flat;
+    if (cfg.flattenIncludes) {
+        std::string why;
+        if (!flat.make(cfg.model, why)) { console.error("flatten_includes: " + why); return 1; }
+        if (flat.active()) {
+            console.info("flatten_includes: 인클루드 " + std::to_string(flat.files()) + "개를 펼쳐 한 덱으로 고친다 — 산출은 홀로 선다");
+            cfg.model = flat.path();
+        }
+    }
+    const bool splitDeck = !flat.active() && KooRemapper::include_scan::scanFile(cfg.model).count > 0;
+
     console.info("Loading mesh: " + cfg.model);
     // 인클루드 닫힘을 읽어 그 안의 노드·요소 번호까지 센다(2026-10-16) — 주 덱과 같은 리더로, 못 본 자리만 말한다.
     KooRemapper::include_closure::ReaderMax inclMax;
@@ -262,6 +282,17 @@ int runTetRemesh(const std::string& configPath,
     }
     console.success("Loaded " + std::to_string(mesh.getNodeCount()) + " nodes, " +
                    std::to_string(mesh.getElementCount()) + " elements");
+    if (splitDeck && !cfg.reportOnly) {
+        // 이 op 은 리더가 본 메시만 다시 쓴다 — 메시가 인클루드 안에만 있으면 **빈 덱**이 나간다(실측 rc 0). 주 덱에 메시가
+        // 있으면 그것을 고치되 인클루드 안의 메시·카드는 산출에 없다고 말한다.
+        if (mesh.getElementCount() == 0) {
+            console.error("주 덱에 요소가 하나도 없다 — 메시는 *INCLUDE 안에 있다. tetremesh 는 주 덱에서 읽은 메시만 다시 쓰므로 "
+                          "빈 덱이 나간다. `flatten_includes: true` 를 주면 닫힘을 펼쳐 한 덱으로 고친다");
+            return 1;
+        }
+        console.warning("이 덱은 *INCLUDE 로 쪼개져 있다 — 산출은 주 덱의 메시만 담는다(인클루드 안의 메시·카드는 없다). "
+                        "같이 고치려면 `flatten_includes: true`");
+    }
 
     PatchExtractor::Config pc;
     pc.targetPids            = cfg.targetPids;
@@ -390,7 +421,7 @@ int runTetRemesh(const std::string& configPath,
     } else {
         console.info("Writing: " + cfg.output);
         KFileWriter writer;
-        writer.setNewline(KooRemapper::deck_newline::detect(cfg.model));   // 원본 덱의 개행
+        writer.setNewline(KooRemapper::deck_newline::detect(modelOrig));   // 원본 덱의 개행
         if (!writer.writeFile(cfg.output, mesh, /*useMappedPositions=*/false)) {
             console.error("Failed to write output: " + writer.getErrorMessage());
             return 1;

@@ -109,7 +109,10 @@ job 은 `failed` 로 보이지만 산출 덱은 있다 — `get_job(job_id, incl
   안)으로 바꿔 쓴다. 못 풀면(내부 절점 · 인클루드 안 · 자유형식 줄) 덱을 쓰지 않는다. `preview: true` 로 gmsh 없이
   그 카드를 미리 짚을 수 있다(덱을 쓰지 않는다). 표면 절점이면 `boundary_nodes: fixed` 가 원래 번호를 지킨다.
 - `hfdamp` 선택형 — 인클루드를 다 못 읽었는데 대상 파트가 없으면 전체 감쇠로 바꾸지 않고 멈춘다(rc 1).
-- `ale` — 주 덱만 고치므로 `*PART` 가 인클루드 안에 있으면 「PID … not found in model」로 멈춘다.
+- **덱을 고쳐 쓰는 op 은 주 덱만 고친다** — 대상(파트의 요소 · 재질 · CNRB · 지울 카드 · 남길 키워드)이 인클루드 안에만 있으면
+  rc 1 로 멈추고 `flatten_includes` 를 안내한다(ale·convert·restack·load·tetremesh … 27개 op). 사용자가 원하면 config 에
+  `flatten_includes: true` 를 넣어 다시 돌려라 — 닫힘을 펼쳐 `*INCLUDE` 없는 한 덱으로 고친다(안 쪼갠 덱과 같은 산출).
+  「모든 파트」 op 은 주 덱에 파트가 있으면 그것만 고치고 인클루드 파트는 고치지 않았다고 `[WARN]` 으로 말한다 — 그 줄을 사용자에게 전하라.
 
 ## StepForge 조각 넣기 · 재메시 뒤 다시 묶기
 

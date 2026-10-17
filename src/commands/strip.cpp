@@ -1,4 +1,6 @@
 #include "strip.h"
+#include "parser/IncludeClosure.h"   // FlatDeck — flatten_includes(2026-10-17)
+#include "parser/IncludeScan.h"      // 덱이 쪼개져 있나 — 안내·거절
 #include "parser/DeckWriter.h"
 #include "util/YamlComment.h"
 #include "cli/ConsoleOutput.h"
@@ -63,6 +65,7 @@ int runStrip(const std::string& yamlFile, ConsoleOutput& console)
     KooRemapper::yamlSkipBOM(yf);   // 윈도우 편집기가 붙인 BOM 이 첫 키를 망가뜨렸다
 
     std::string modelPath, outputPath;
+    bool flattenIncludes = false;   // `flatten_includes: true` — 인클루드 닫힘을 펼쳐 한 덱으로(2026-10-17)
     std::vector<std::string> stripKeywords;
     bool inKeywordsList = false;
 
@@ -94,7 +97,11 @@ int runStrip(const std::string& yamlFile, ConsoleOutput& console)
         std::string val = st_trim(KooRemapper::yamlStripComment(trimmed.substr(colon + 1)));
         val = st_stripQuotes(val);
 
-        if (key == "model" || key == "input") {
+        if (key == "flatten_includes") {
+            bool ok = true;
+            flattenIncludes = KooRemapper::yamlBoolValue(val, ok);
+            if (!ok) console.warning("flatten_includes 값 「" + val + "」 을 참·거짓으로 읽지 못했다 — true 로 주라(지금은 펼치지 않는다)");
+        } else if (key == "model" || key == "input") {
             modelPath = val;
         } else if (key == "output") {
             outputPath = val;
@@ -168,6 +175,41 @@ int runStrip(const std::string& yamlFile, ConsoleOutput& console)
     for (auto& kw : stripKeywords)
         console.info("  strip: " + kw);
 
+    // ★인클루드(2026-10-17) — strip 은 주 덱 줄만 거른다. 인클루드 안의 카드는 걸러지지 않고 *INCLUDE 줄로 남거나(그 줄을
+    //   지우면) 통째로 사라진다 — 어느 쪽이든 「이 키워드를 뺀 덱」이 아니다. 펼치지 않으면 멈춘다.
+    // ★`flatten_includes`(2026-10-17) — 인클루드 닫힘을 펼친 덱(주 덱 옆 임시 파일)을 읽고 고친다 · 산출은 홀로 선다
+    const std::string modelOrig = modelPath;
+    KooRemapper::include_closure::FlatDeck flat;
+    if (flattenIncludes) {
+        std::string why;
+        if (!flat.make(modelPath, why)) { console.error("flatten_includes: " + why); return 1; }
+        if (flat.active()) {
+            console.info("flatten_includes: 인클루드 " + std::to_string(flat.files()) +
+                         "개를 펼쳐 한 덱으로 고친다 — 산출은 홀로 선다");
+            modelPath = flat.path();
+        }
+    }
+    if (!flat.active() && KooRemapper::include_scan::scanFile(modelPath).count > 0) {
+        // 남길 키워드가 인클루드 안에도 있을 때만 멈춘다 — 그 밖의 인클루드 카드는 strip 이 어차피 버리는 것이다
+        std::vector<std::string> mainLines;
+        {
+            std::ifstream mf(modelPath);
+            for (std::string l; std::getline(mf, l);) { if (!l.empty() && l.back() == '\r') l.pop_back(); mainLines.push_back(l); }
+        }
+        const auto clo = KooRemapper::include_closure::read(modelPath, mainLines);
+        for (const auto& fl : clo.files)
+            for (const auto& l : fl.lines) {
+                if (l.empty() || l[0] != '*') continue;
+                const std::string up = st_toUpper(l.substr(0, l.find_first_of(" \t")));
+                for (const auto& want : stripSet) {
+                    if (up.rfind(want, 0) != 0) continue;
+                    console.error("남길 키워드 " + want + " 가 인클루드 「" + fl.path + "」 안에도 있다 — 주 덱만 거르면 그 카드가 "
+                                  "조용히 빠진다. `flatten_includes: true` 를 주면 닫힘을 펼쳐 한 덱에서 거른다");
+                    return 1;
+                }
+            }
+    }
+
     // --- Read input file ---
     std::ifstream inf(modelPath);
     if (!inf.is_open()) {
@@ -175,7 +217,7 @@ int runStrip(const std::string& yamlFile, ConsoleOutput& console)
         return 1;
     }
 
-    KooRemapper::DeckWriter outf_w(outputPath, KooRemapper::deck_newline::detect(modelPath));
+    KooRemapper::DeckWriter outf_w(outputPath, KooRemapper::deck_newline::detect(modelOrig));
     if (!outf_w.ok()) {
         console.error("Cannot open output: " + outputPath);
         return 1;

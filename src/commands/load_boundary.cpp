@@ -49,6 +49,7 @@ int runLoad(const std::string& yamlFile, ConsoleOutput& console) {
     };
 
     std::string modelFile, outputFile;
+    bool flattenIncludes = false;   // `flatten_includes: true` — 인클루드 닫힘을 펼쳐 한 덱으로(2026-10-17)
     LoadOperation loadOp;
     bool inLoadsList = false;
     int loadsListIndent = 0;
@@ -103,6 +104,7 @@ int runLoad(const std::string& yamlFile, ConsoleOutput& console) {
 
         if (!inLoadsList) {
             if      (key == "model")  modelFile = val;
+            else if (key == "flatten_includes") { bool ok = true; flattenIncludes = KooRemapper::yamlBoolValue(val, ok); if (!ok) console.warning("flatten_includes 값 「" + val + "」 을 참·거짓으로 읽지 못했다 — true 로 주라(지금은 펼치지 않는다)"); }
             else if (key == "output") outputFile = val;
             else if (key == "loads") {
                 inLoadsList = true;
@@ -206,6 +208,7 @@ int runLoad(const std::string& yamlFile, ConsoleOutput& console) {
     console.println("[load] Load cases: " + std::to_string(loadOp.loads.size()));
 
     ModelAssembler assembler;
+    assembler.setFlattenIncludes(flattenIncludes);
     if (!assembler.loadBaseModel(modelFile)) {
         console.error(assembler.getErrorMessage());
         return 1;
@@ -262,6 +265,7 @@ int runBoundary(const std::string& yamlFile, ConsoleOutput& console) {
     };
 
     std::string modelFile, outputFile;
+    bool flattenIncludes = false;   // `flatten_includes: true` — 인클루드 닫힘을 펼쳐 한 덱으로(2026-10-17)
     BoundaryOperation boundaryOp;
     bool inBoundariesList = false;
     int boundariesListIndent = 0;
@@ -287,6 +291,7 @@ int runBoundary(const std::string& yamlFile, ConsoleOutput& console) {
 
         if (!inBoundariesList) {
             if      (key == "model")  modelFile = val;
+            else if (key == "flatten_includes") { bool ok = true; flattenIncludes = KooRemapper::yamlBoolValue(val, ok); if (!ok) console.warning("flatten_includes 값 「" + val + "」 을 참·거짓으로 읽지 못했다 — true 로 주라(지금은 펼치지 않는다)"); }
             else if (key == "output") outputFile = val;
             else if (key == "boundaries") {
                 inBoundariesList = true;
@@ -359,6 +364,7 @@ int runBoundary(const std::string& yamlFile, ConsoleOutput& console) {
     console.println("[boundary] Boundary cases: " + std::to_string(boundaryOp.boundaries.size()));
 
     ModelAssembler assembler;
+    assembler.setFlattenIncludes(flattenIncludes);
     if (!assembler.loadBaseModel(modelFile)) {
         console.error(assembler.getErrorMessage());
         return 1;
@@ -415,6 +421,7 @@ int runRbe(const std::string& yamlFile, ConsoleOutput& console) {
     };
 
     std::string modelFile, outputFile;
+    bool flattenIncludes = false;   // `flatten_includes: true` — 인클루드 닫힘을 펼쳐 한 덱으로(2026-10-17)
     RbeOperation rbeOp;
     bool inRbeList = false;
     int rbeListIndent = 0;
@@ -440,6 +447,7 @@ int runRbe(const std::string& yamlFile, ConsoleOutput& console) {
 
         if (!inRbeList) {
             if      (key == "model")  modelFile = val;
+            else if (key == "flatten_includes") { bool ok = true; flattenIncludes = KooRemapper::yamlBoolValue(val, ok); if (!ok) console.warning("flatten_includes 값 「" + val + "」 을 참·거짓으로 읽지 못했다 — true 로 주라(지금은 펼치지 않는다)"); }
             else if (key == "output") outputFile = val;
             else if (key == "rbe") {
                 inRbeList = true;
@@ -507,6 +515,7 @@ int runRbe(const std::string& yamlFile, ConsoleOutput& console) {
     console.println("[rbe] Constraints: " + std::to_string(rbeOp.constraints.size()));
 
     ModelAssembler assembler;
+    assembler.setFlattenIncludes(flattenIncludes);
     if (!assembler.loadBaseModel(modelFile)) {
         console.error(assembler.getErrorMessage());
         return 1;

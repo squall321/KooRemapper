@@ -547,6 +547,7 @@ int runAssemble(const std::string& configFile, const ConsoleOutput& console) {
     ModelAssembler assembler;
     assembler.setDynamicRelaxation(config.dynamicRelaxation);
     assembler.setDynainEmbed(config.dynainEmbed);
+    assembler.setFlattenIncludes(config.flattenIncludes);   // 로드 전에 — base_model 의 닫힘을 펼쳐 읽는다
     bool firstIsGenerate = !config.operations.empty() &&
                            config.operations[0].type == AssemblyOperation::GENERATE;
     if (!firstIsGenerate) {

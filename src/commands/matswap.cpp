@@ -469,6 +469,7 @@ int runMatswapYaml(const std::string& yamlFile, ConsoleOutput& console) {
     };
 
     std::string modelFile, outputFile;
+    bool flattenIncludes = false;   // `flatten_includes: true` — 인클루드 닫힘을 펼쳐 한 덱으로(2026-10-17)
     std::string optimizeMode;
     double optimizeTssfac = 0.67;
     std::string optimizeAnalysisType;
@@ -564,6 +565,7 @@ int runMatswapYaml(const std::string& yamlFile, ConsoleOutput& console) {
                 while (std::getline(ss,tok,',')) { std::string t=trim(tok); if(!t.empty()) try{ out.push_back(std::stoi(t)); }catch(...){} }
             };
             if      (key=="model")  modelFile  = val;
+            else if (key=="flatten_includes") { bool ok = true; flattenIncludes = KooRemapper::yamlBoolValue(val, ok); if (!ok) console.warning("flatten_includes 값 「" + val + "」 을 참·거짓으로 읽지 못했다 — true 로 주라(지금은 펼치지 않는다)"); }
             else if (key=="output") outputFile = val;
             else if (key=="swaps")  { inSwapsList=true; swapsIndent=indent; }
             else if (key=="bundle") {
@@ -616,6 +618,7 @@ int runMatswapYaml(const std::string& yamlFile, ConsoleOutput& console) {
     console.println("[matswap] Swaps  : " + std::to_string(swaps.size()));
 
     ModelAssembler assembler;
+    assembler.setFlattenIncludes(flattenIncludes);
     if (!assembler.loadBaseModel(modelFile)) {
         console.error(assembler.getErrorMessage()); return 1;
     }

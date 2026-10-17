@@ -91,8 +91,10 @@ int cur_scanMaxSectionId(const std::vector<std::string>& lines) {
 // 정의하지 않고 있는 재질에 덧붙인다 — 몇몇은 첫 칸이 PID 다).
 // MID 칸은 표준·I10 에서 10칸, long 에서 20칸이다(I10 은 8칸만 넓힌다 — Vol_I 19353). 공백 토큰이 아니라
 // 칸으로 읽는다 — `         17.8500E-09` 처럼 붙은 칸을 17 로 읽지 않게.
-int cur_scanMaxMaterialId(const std::vector<std::string>& lines) {
-    int maxId = 0;
+// 줄들에서 `*MAT_*` 가 **정의하는** MID 들 — `_THERMAL_`·`_ADD_` 는 정의가 아니다. 최대값(`cur_scanMaxMaterialId`)과
+// 「그 재질이 인클루드에만 있나」(`materialsReachable` · 2026-10-17)가 같은 규칙을 본다.
+std::set<int> cur_scanMaterialIds(const std::vector<std::string>& lines) {
+    std::set<int> ids;
     const int deckFw = deckFieldWidth(lines);
     for (size_t i = 0; i < lines.size(); ++i) {
         if (deckscan::isDataLine(lines[i])) continue;
@@ -107,11 +109,17 @@ int cur_scanMaxMaterialId(const std::vector<std::string>& lines) {
             if (h != std::string::npos && d[h] == '*') break;
             if (h != std::string::npos && d[h] == '$') continue;
             if (needTitle) { needTitle = false; continue; }   // 제목 줄은 비어 있을 수 있다
-            maxId = std::max(maxId, deckscan::fieldInt(deckscan::cardFields(d, fw), 0));
+            const int mid = deckscan::fieldInt(deckscan::cardFields(d, fw), 0);
+            if (mid > 0) ids.insert(mid);
             break;                                             // 첫 데이터 카드만 본다
         }
     }
-    return maxId;
+    return ids;
+}
+
+int cur_scanMaxMaterialId(const std::vector<std::string>& lines) {
+    const auto ids = cur_scanMaterialIds(lines);
+    return ids.empty() ? 0 : *ids.rbegin();
 }
 
 // 줄들에서 `*PART` **변형** 키워드가 정의하는 PID 최대값. 맨 `*PART`(·`_TITLE`)는 리더가 읽어 담는다 —
@@ -201,10 +209,22 @@ int cur_scanMaxSetId(const std::vector<std::string>& lines) {
 }  // namespace
 
 bool ModelAssembler::loadBaseModel(const std::string& filename) {
+    // 0. `flatten_includes` — 닫힘을 펼친 덱(주 덱 옆 임시 파일)을 읽는다. 경로 기준(baseModelPath_)과 개행은 원본이다.
+    include_closure::FlatDeck flat;
+    if (flattenIncludes_) {
+        std::string why;
+        if (!flat.make(filename, why)) { errorMessage_ = "flatten_includes: " + why; return false; }
+        if (flat.active()) {
+            ConsoleOutput fc;
+            fc.info("flatten_includes: 인클루드 " + std::to_string(flat.files()) +
+                    "개를 펼쳐 한 덱으로 고친다 — 산출은 홀로 선다(*INCLUDE 없음)");
+        }
+    }
+    const std::string src = flat.active() ? flat.path() : filename;
     // 1. Parse with KFileReader for structural queries
     KFileReader reader;
     try {
-        baseMesh_ = reader.readFile(filename);
+        baseMesh_ = reader.readFile(src);
     } catch (const std::exception& e) {
         errorMessage_ = "Failed to load base model: " + std::string(e.what());
         return false;
@@ -213,7 +233,7 @@ bool ModelAssembler::loadBaseModel(const std::string& filename) {
     // 2. Read raw lines for text preservation
     rawLines_.clear();
     baseModelPath_ = filename;
-    std::ifstream file(filename);
+    std::ifstream file(src);
     if (!file.is_open()) {
         errorMessage_ = "Cannot open base model for raw read: " + filename;
         return false;
@@ -285,6 +305,67 @@ void ModelAssembler::initMaxSetIdFromRawLines() {
     maxSetId_ = cur_scanMaxSetId(rawLines_);
 }
 
+// ★대상이 인클루드 안에만 있는가(헤더의 주석 참조). 판정 자료는 `raiseMaxIdsOverIncludes` 가 같은 리더로 센 것이다.
+static std::string ma_flattenHint() {
+    return " — 고쳐 쓰는 op 은 주 덱만 고친다. `flatten_includes: true` 를 주면 인클루드 닫힘을 펼쳐 홀로 서는 한 덱으로 "
+           "고친다. 아니면 그 파일을 model 로 직접 주라";
+}
+
+bool ModelAssembler::targetsReachable(const std::vector<int>& pids, const std::string& opName) {
+    if (flattenIncludes_ || includeElemPidFile_.empty()) return true;
+    std::set<int> mainPids;
+    for (const auto& [eid, e] : baseMesh_.elements) { (void)eid; mainPids.insert(e.partId); }
+    std::vector<int> want;
+    for (int p : pids) if (p > 0) want.push_back(p);
+    if (want.empty()) {
+        // 「모든 파트」 — 주 덱에 고칠 요소가 하나도 없으면 아무것도 안 바꾼 덱이 나간다 → 멈춘다. 주 덱에 요소가 있으면 예전처럼
+        // 그것을 고치되, 인클루드 안의 파트는 손대지 않았다고 **말한다**(마스터 덱 + 다른 파트 인클루드는 흔한 꼴이다).
+        const auto& f = *includeElemPidFile_.begin();
+        if (mainPids.empty()) {
+            errorMessage_ = opName + ": 주 덱에 요소가 하나도 없다 — 요소는 인클루드 안에 있다(PID " + std::to_string(f.first) +
+                            " — " + f.second + ")" + ma_flattenHint();
+            return false;
+        }
+        std::string inc;
+        size_t n = 0;
+        for (const auto& [pid, file] : includeElemPidFile_) {
+            if (mainPids.count(pid)) continue;
+            if (n++ < 6) inc += (inc.empty() ? "" : ", ") + std::to_string(pid);
+        }
+        if (n > 0) {
+            ConsoleOutput wc;
+            wc.warning(opName + ": 인클루드 안의 파트 " + std::to_string(n) + "개(PID " + inc + (n > 6 ? " …" : "") +
+                       ")는 고치지 않는다 — 주 덱의 파트만 고친다. 그것까지 고치려면 `flatten_includes: true`");
+        }
+        return true;
+    }
+    for (int p : want) {
+        if (mainPids.count(p)) continue;
+        auto it = includeElemPidFile_.find(p);
+        if (it == includeElemPidFile_.end()) continue;   // 어디에도 없다 — 각 op 의 「not found」가 말한다
+        errorMessage_ = opName + ": PID " + std::to_string(p) + " 의 요소가 인클루드 「" + it->second + "」 안에 있다" +
+                        ma_flattenHint();
+        return false;
+    }
+    return true;
+}
+
+bool ModelAssembler::materialsReachable(const std::vector<int>& mids, const std::string& opName) {
+    if (flattenIncludes_ || incl_.files.empty()) return true;
+    // 리더의 재질 표는 몇 종류만 담는다 — 정의 카드를 줄에서 직접 본다(`cur_scanMaterialIds` · 주 덱과 같은 규칙)
+    const auto mainIds = cur_scanMaterialIds(rawLines_);
+    for (int m : mids) {
+        if (m <= 0 || mainIds.count(m)) continue;
+        for (const auto& f : incl_.files) {
+            if (!cur_scanMaterialIds(f.lines).count(m)) continue;
+            errorMessage_ = opName + ": MID " + std::to_string(m) + " 이 인클루드 「" + f.path + "」 안에 정의돼 있다" +
+                            ma_flattenHint();
+            return false;
+        }
+    }
+    return true;
+}
+
 // 주 덱의 인클루드 닫힘을 읽는다 — 정본(`include_closure`)으로, 주 덱 폴더 기준.
 // 못 본 자리(찾지 못한 이름 · 따라가지 않은 `*INCLUDE_*` · 깊이 상한)는 **여기서 한 번** 말한다.
 // 발급은 op 마다 일어나지만 경고를 거기 두면 한 실행에 여러 번 찍힌다(사람이 센다).
@@ -311,6 +392,7 @@ void ModelAssembler::raiseMaxIdsOverIncludes() {
     // 리더로 세는 것(노드·요소·파트·파트의 SECID·재질)과 「단정 못 함」 판정은 정본 한 곳에서 한다 —
     // 단독 발행자(tetremesh·meshfix·cclip)도 같은 것을 쓴다(`include_closure::readerMax`).
     const auto rm = include_closure::readerMax(rawLines_, baseModelPath_, incl_);
+    includeElemPidFile_ = rm.elemPidFile;
     maxNodeId_ = std::max(maxNodeId_, rm.node);
     maxElementId_ = std::max(maxElementId_, rm.elem);
     maxPartId_ = std::max(maxPartId_, rm.part);
@@ -328,9 +410,19 @@ void ModelAssembler::raiseMaxIdsOverIncludes() {
 }
 
 bool ModelAssembler::loadRawOnly(const std::string& filename) {
+    include_closure::FlatDeck flat;                // `flatten_includes` — loadBaseModel 과 같은 길
+    if (flattenIncludes_) {
+        std::string why;
+        if (!flat.make(filename, why)) { errorMessage_ = "flatten_includes: " + why; return false; }
+        if (flat.active()) {
+            ConsoleOutput fc;
+            fc.info("flatten_includes: 인클루드 " + std::to_string(flat.files()) +
+                    "개를 펼쳐 한 덱으로 고친다 — 산출은 홀로 선다(*INCLUDE 없음)");
+        }
+    }
     rawLines_.clear();
     baseModelPath_ = filename;
-    std::ifstream file(filename);
+    std::ifstream file(flat.active() ? flat.path() : filename);
     if (!file.is_open()) {
         errorMessage_ = "Cannot open model: " + filename;
         return false;
@@ -669,6 +761,8 @@ bool ModelAssembler::applyReplace(const ReplaceOperation& op, double E, double n
 }
 
 bool ModelAssembler::applySqueeze(const SqueezeOperation& op, double E, double nu) {
+    // 대상이 인클루드 안에만 있으면 멈춘다 — 주 덱만 고쳐 아무것도 안 바뀐 덱을 내지 않는다(`targetsReachable` · 2026-10-17)
+    if (!targetsReachable({op.targetPid}, "squeeze")) return false;
     // --- Gather nodes/elements from both base model and added (replaced) data ---
 
     // 1a. Base model nodes/elements (excluding already-removed ones from prior replace)
@@ -3303,6 +3397,8 @@ void ModelAssembler::reportPidRefFindings(const std::string& opName,
 
 
 bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double nu) {
+    // 대상이 인클루드 안에만 있으면 멈춘다 — 주 덱만 고쳐 아무것도 안 바뀐 덱을 내지 않는다(`targetsReachable` · 2026-10-17)
+    if (!targetsReachable({op.targetPid}, "restack")) return false;
     // 0-. pid_refs 는 strict|warn 둘뿐이다 — 오타를 조용히 strict 로 떨어뜨리면
     //     'warn 을 줬는데 rc=1' 이 되어 사용자가 이유를 못 찾는다.
     if (!op.pidRefs.empty()) {
@@ -4505,6 +4601,8 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
 
 bool ModelAssembler::applyBend(const BendOperation& op, double E, double nu,
                                 const std::string& configDir) {
+    // 대상이 인클루드 안에만 있으면 멈춘다 — 주 덱만 고쳐 아무것도 안 바뀐 덱을 내지 않는다(`targetsReachable` · 2026-10-17)
+    if (!targetsReachable(op.targetPid > 0 ? std::vector<int>{op.targetPid} : op.targetPids, "bend")) return false;
     // Resolve file paths relative to config directory
     auto resolvePath = [&](const std::string& path) -> std::string {
         if (path.empty()) return path;
@@ -6181,6 +6279,8 @@ bool ModelAssembler::isCommentLine(const std::string& line) const {
 }
 
 bool ModelAssembler::applyIndent(const IndentOperation& op, double E, double nu) {
+    // 대상이 인클루드 안에만 있으면 멈춘다 — 주 덱만 고쳐 아무것도 안 바뀐 덱을 내지 않는다(`targetsReachable` · 2026-10-17)
+    if (!targetsReachable({op.targetPid}, "indent")) return false;
     // 1. Determine axis mapping from plane + direction
     int inAxis1, inAxis2, normalAxis;
     if (op.plane == "xy") {
@@ -6597,6 +6697,8 @@ bool ModelAssembler::applyIndent(const IndentOperation& op, double E, double nu)
 }
 
 bool ModelAssembler::applyFormStrain(const FormStrainOperation& op) {
+    // 대상이 인클루드 안에만 있으면 멈춘다 — 주 덱만 고쳐 아무것도 안 바뀐 덱을 내지 않는다(`targetsReachable` · 2026-10-17)
+    if (!targetsReachable(op.targetPid > 0 ? std::vector<int>{op.targetPid} : op.targetPids, "formstrain")) return false;
     // Formstrain: compute plastic strain from mesh curvature for shell parts
     // Auto-detect eligible parts: QUAD4 elements + SECTION_SHELL + MAT_024 with SIGY > 0
 
@@ -6732,6 +6834,8 @@ bool ModelAssembler::applyFormStrain(const FormStrainOperation& op) {
 }
 
 bool ModelAssembler::applyTet10Convert(const Tet10ConvertOperation& op) {
+    // 대상이 인클루드 안에만 있으면 멈춘다 — 주 덱만 고쳐 아무것도 안 바뀐 덱을 내지 않는다(`targetsReachable` · 2026-10-17)
+    if (!targetsReachable(op.targetPid > 0 ? std::vector<int>{op.targetPid} : op.targetPids, "convert")) return false;
     // Build shared edge map: sorted(nA, nB) → midNodeId
     auto getOrCreateMidNode = [&](int nA, int nB) -> int {
         auto key = std::make_pair(std::min(nA, nB), std::max(nA, nB));
@@ -6912,6 +7016,8 @@ bool ModelAssembler::applyTet10Convert(const Tet10ConvertOperation& op) {
 }
 
 bool ModelAssembler::applyRefine(const RefineOperation& op) {
+    // 대상이 인클루드 안에만 있으면 멈춘다 — 주 덱만 고쳐 아무것도 안 바뀐 덱을 내지 않는다(`targetsReachable` · 2026-10-17)
+    if (!targetsReachable(op.targetPid > 0 ? std::vector<int>{op.targetPid} : op.targetPids, "refine")) return false;
     if (op.ratio != 2 && op.ratio != 3) {
         errorMessage_ = "Refine ratio must be 2 or 3, got " + std::to_string(op.ratio);
         return false;
@@ -7464,6 +7570,8 @@ std::string ModelAssembler::formatTria6ElementLine(int eid, int pid, const std::
 }
 
 bool ModelAssembler::applyElform(const ElformOperation& op) {
+    // 대상이 인클루드 안에만 있으면 멈춘다 — 주 덱만 고쳐 아무것도 안 바뀐 덱을 내지 않는다(`targetsReachable` · 2026-10-17)
+    if (!targetsReachable(op.targetPid > 0 ? std::vector<int>{op.targetPid} : op.targetPids, "elform")) return false;
     // ELFORM alias mapping: string → int
     static const std::map<std::string, int> solidElformAliases = {
         // HEX8 linear
@@ -7672,6 +7780,8 @@ bool ModelAssembler::applyElform(const ElformOperation& op) {
 // Disconnect operation
 // ============================================================================
 bool ModelAssembler::applyDisconnect(const DisconnectOperation& op) {
+    // 대상이 인클루드 안에만 있으면 멈춘다 — 주 덱만 고쳐 아무것도 안 바뀐 덱을 내지 않는다(`targetsReachable` · 2026-10-17)
+    if (!targetsReachable({op.targetPid}, "disconnect")) return false;
     // --- Build active element map (baseMesh_ not-removed + addedElements_ not-removed) ---
     struct ElemData {
         int pid;
@@ -8511,6 +8621,8 @@ std::string ModelAssembler::generateIGAContent(
 // emits new mid nodes into addedNodes_.
 // =====================================================================
 bool ModelAssembler::applyExtractSurface(const ExtractSurfaceOperation& op) {
+    // 대상이 인클루드 안에만 있으면 멈춘다 — 주 덱만 고쳐 아무것도 안 바뀐 덱을 내지 않는다(`targetsReachable` · 2026-10-17)
+    if (!targetsReachable({op.targetPid}, "extract-surface")) return false;
     using FaceKey = std::array<int,4>;
     struct FaceVal { int count; FaceKey winding; double elemZ; };
 
@@ -8724,6 +8836,10 @@ bool ModelAssembler::applyExtractSurface(const ExtractSurfaceOperation& op) {
 }
 
 bool ModelAssembler::applyIGA(const IGAOperation& op, const std::string& outputPrefix) {
+    // 대상이 인클루드 안에만 있으면 멈춘다 — 주 덱만 고쳐 아무것도 안 바뀐 덱을 내지 않는다(`targetsReachable` · 2026-10-17)
+    for (const auto& t : op.targets)
+        if (t.targetName.empty() && !targetsReachable(t.targetPid > 0 ? std::vector<int>{t.targetPid} : t.targetPids, "iga"))
+            return false;
     // Derive output basename (no directory, no extension)
     std::string basename = outputPrefix;
     size_t slash = basename.find_last_of("/\\");
@@ -8885,6 +9001,8 @@ bool ModelAssembler::applyIGA(const IGAOperation& op, const std::string& outputP
 }
 
 bool ModelAssembler::applyWarpage(const WarpageOperation& op, double E, double nu, const std::string& configDir) {
+    // 대상이 인클루드 안에만 있으면 멈춘다 — 주 덱만 고쳐 아무것도 안 바뀐 덱을 내지 않는다(`targetsReachable` · 2026-10-17)
+    if (!targetsReachable(op.targetPid > 0 ? std::vector<int>{op.targetPid} : op.targetPids, "warpage")) return false;
     // 1. Input validation
     if (!validateWarpageOperation(op, configDir)) {
         return false;
@@ -9470,6 +9588,8 @@ double ModelAssembler::getShellThickness(int pid) const {
 // ========== OFFSET OPERATION ==========
 
 bool ModelAssembler::applyOffset(const OffsetOperation& op, double E, double nu) {
+    // 대상이 인클루드 안에만 있으면 멈춘다 — 주 덱만 고쳐 아무것도 안 바뀐 덱을 내지 않는다(`targetsReachable` · 2026-10-17)
+    if (!targetsReachable({op.sourcePid}, "offset")) return false;
     std::cout << "[INFO] Applying offset operation on PID " << op.sourcePid << "\n";
 
     // 셸 층은 원본 면과 떨어진 별도 면이다 — 아래 6. 연결 모드 블록을 타지 않는다(2026-10-16 실측: 모드 다섯이 같은 산출).
@@ -11904,6 +12024,10 @@ static std::vector<int> mw_getPidsByMid(const std::vector<std::string>& lines,
 //  ModelAssembler::applyMatswap
 // ============================================================
 bool ModelAssembler::applyMatswap(const MatswapOperation& op, const std::string& configDir) {
+    // 대상이 인클루드 안에만 있으면 멈춘다 — 주 덱만 고쳐 아무것도 안 바뀐 덱을 내지 않는다(`targetsReachable` · 2026-10-17)
+    if (!op.swapAll && !op.pids.empty() && !targetsReachable(op.pids, "matswap")) return false;
+    if (op.swapAll && !targetsReachable({}, "matswap")) return false;
+    if (!materialsReachable(op.mids, "matswap")) return false;
     // 1. Resolve bundle path relative to configDir
     std::string bundlePath = op.bundleFile;
     if (!configDir.empty() && !bundlePath.empty() &&
@@ -12849,6 +12973,12 @@ static MdResolvedDamping md_resolveDamping(const MatdbOperation& op) {
 
 // ── applyMatdb() main ────────────────────────────────────────
 bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& configDir) {
+    // 대상이 인클루드 안에만 있으면 멈춘다 — 주 덱만 고쳐 아무것도 안 바뀐 덱을 내지 않는다(`targetsReachable` · 2026-10-17)
+    {
+        std::vector<int> mids;
+        for (const auto& r : op.rules) mids.push_back(r.mid);
+        if (!materialsReachable(mids, "matdb")) return false;
+    }
     // infoMessages is a public member of ModelAssembler (no underscore)
 
     // 0. damping_preset 은 인식되는 값만 받는다 — 오타가 조용히 '프리셋 없음' 으로 떨어지면서도
@@ -13833,6 +13963,12 @@ static std::vector<std::array<int,4>> ld_parseSetSegmentFaces(
 
 // ── applyLoad() main ────────────────────────────────────────
 bool ModelAssembler::applyLoad(const LoadOperation& op) {
+    // 대상이 인클루드 안에만 있으면 멈춘다 — 주 덱만 고쳐 아무것도 안 바뀐 덱을 내지 않는다(`targetsReachable` · 2026-10-17)
+    {
+        std::vector<int> pids;
+        for (const auto& c : op.loads) if (c.pid > 0) pids.push_back(c.pid);
+        if (!pids.empty() && !targetsReachable(pids, "load")) return false;
+    }
     if (op.loads.empty()) {
         std::cout << "[load] No load cases specified\n";
         return true;
@@ -14852,6 +14988,12 @@ static std::string bc_generateSpcSet(int nsid, const int dof[6]) {
 
 // ── applyBoundary() main ────────────────────────────────────────
 bool ModelAssembler::applyBoundary(const BoundaryOperation& op) {
+    // 대상이 인클루드 안에만 있으면 멈춘다 — 주 덱만 고쳐 아무것도 안 바뀐 덱을 내지 않는다(`targetsReachable` · 2026-10-17)
+    {
+        std::vector<int> pids;
+        for (const auto& c : op.boundaries) if (c.pid > 0) pids.push_back(c.pid);
+        if (!pids.empty() && !targetsReachable(pids, "boundary")) return false;
+    }
     if (op.boundaries.empty()) {
         std::cout << "[boundary] No boundary cases specified\n";
         return true;
@@ -15080,6 +15222,12 @@ static std::string rbe_generateCnrb(int pid, int nsid, const std::string& title)
 // ── applyRbe() main ─────────────────────────────────────────────────────────
 
 bool ModelAssembler::applyRbe(const RbeOperation& op) {
+    // 대상이 인클루드 안에만 있으면 멈춘다 — 주 덱만 고쳐 아무것도 안 바뀐 덱을 내지 않는다(`targetsReachable` · 2026-10-17)
+    {
+        std::vector<int> pids;
+        for (const auto& c : op.constraints) if (c.pid > 0) pids.push_back(c.pid);
+        if (!pids.empty() && !targetsReachable(pids, "rbe")) return false;
+    }
     if (op.constraints.empty()) {
         std::cout << "[rbe] No RBE constraints specified\n";
         return true;
@@ -15272,6 +15420,8 @@ bool ModelAssembler::applyRbe(const RbeOperation& op) {
 // ── applyWrap() ─────────────────────────────────────────────────────────────
 
 bool ModelAssembler::applyWrap(const WrapOperation& op, double E, double nu) {
+    // 대상이 인클루드 안에만 있으면 멈춘다 — 주 덱만 고쳐 아무것도 안 바뀐 덱을 내지 않는다(`targetsReachable` · 2026-10-17)
+    if (!op.targetPids.empty() && !targetsReachable(op.targetPids, "wrap")) return false;
     if (op.targetPids.empty()) {
         errorMessage_ = "wrap: no target PIDs specified";
         return false;
@@ -16049,6 +16199,8 @@ bool ModelAssembler::applyTranslate(double dx, double dy, double dz) {
 }
 
 bool ModelAssembler::applyUpdate(const UpdateOperation& op) {
+    // 대상이 인클루드 안에만 있으면 멈춘다 — 주 덱만 고쳐 아무것도 안 바뀐 덱을 내지 않는다(`targetsReachable` · 2026-10-17)
+    if (!targetsReachable({}, "update")) return false;   // dynain 은 덱 전체 절점·요소를 고친다
     std::ifstream f(op.dynainFile);
     if (!f.is_open()) {
         errorMessage_ = "update: cannot open dynain file: " + op.dynainFile;
@@ -16188,6 +16340,8 @@ static const int HEX8_TO_TET4[5][4] = {
 //   faces empty     → auto-detect sharp exterior edges and fillet them
 
 bool ModelAssembler::applyFillet(const FilletOperation& op) {
+    // 대상이 인클루드 안에만 있으면 멈춘다 — 주 덱만 고쳐 아무것도 안 바뀐 덱을 내지 않는다(`targetsReachable` · 2026-10-17)
+    if (!targetsReachable(op.targetPid > 0 ? std::vector<int>{op.targetPid} : op.targetPids, "fillet")) return false;
     // Resolve which PIDs to process
     std::vector<int> pidsToProcess;
     if (!op.targetPids.empty()) {
@@ -17447,6 +17601,8 @@ bool ModelAssembler::applyBattery(const BatteryOperation& op, const std::string&
 // ========== SPLIT: Subdivide extruded HEX8/PENTA6 along extrude direction ==========
 
 bool ModelAssembler::applySplit(const SplitOperation& op) {
+    // 대상이 인클루드 안에만 있으면 멈춘다 — 주 덱만 고쳐 아무것도 안 바뀐 덱을 내지 않는다(`targetsReachable` · 2026-10-17)
+    if (!targetsReachable(op.targetPid > 0 ? std::vector<int>{op.targetPid} : op.targetPids, "split")) return false;
     int N = op.divisions;
     if (N < 2) {
         errorMessage_ = "split: divisions must be >= 2";
@@ -17900,6 +18056,8 @@ struct MgFaceKeyHash {
 };
 
 bool ModelAssembler::applyMerge(const MergeOperation& op) {
+    // 대상이 인클루드 안에만 있으면 멈춘다 — 주 덱만 고쳐 아무것도 안 바뀐 덱을 내지 않는다(`targetsReachable` · 2026-10-17)
+    if (!targetsReachable(op.pids, "merge")) return false;
     infoMessages.clear();
 
     if (!op.pidRefs.empty()) {
@@ -18431,6 +18589,24 @@ bool ModelAssembler::applyMerge(const MergeOperation& op) {
 // ─────────────────────────────────────────────────────────────
 
 bool ModelAssembler::applyStrip(const StripOperation& op) {
+    // strip 은 남길 키워드만 남긴다 — 인클루드 안의 카드는 주 덱의 *INCLUDE 줄과 함께 사라진다(2026-10-17 실측: 산출에
+    //   메시가 없다). 인클루드가 있으면 펼치지 않는 한 멈춘다.
+    if (!flattenIncludes_) {
+        for (const auto& f : incl_.files)
+            for (const auto& l : f.lines) {
+                if (deckscan::isDataLine(l)) continue;
+                const std::string kw = deckscan::kwBare(deckscan::keywordToken(l));
+                for (const auto& want : op.keywords) {
+                    std::string up = want;
+                    for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+                    if (!up.empty() && up[0] != '*') up = "*" + up;
+                    if (kw.rfind(up, 0) != 0) continue;
+                    errorMessage_ = "strip: 남길 키워드 " + up + " 가 인클루드 「" + f.path + "」 안에도 있다 — 주 덱에서만 고르면 "
+                                    "그 카드가 조용히 빠진다. `flatten_includes: true` 를 주면 닫힘을 펼쳐 한 덱에서 고른다";
+                    return false;
+                }
+            }
+    }
     infoMessages.clear();
 
     if (op.keywords.empty()) {

@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstddef>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -103,6 +104,40 @@ Closure readPaths(const std::string& mainPath, size_t maxDepth = 16);
 std::vector<std::string> flatten(const std::vector<std::string>& mainLines, const std::string& mainPath,
                                  const Closure& c);
 
+// ★닫힘을 **홀로 서는 한 덱**으로 펼친다(2026-10-17 · 고쳐 쓰는 op 의 `flatten_includes: true`). `flatten` 과 달리
+// 맨 `*INCLUDE` 카드(키워드 줄 + 이름 줄 · 그 사이 주석)를 **지우고** 그 자리에 끌어온 파일의 본문을 LS-DYNA 가 읽는
+// 차례로 넣는다(중첩도 같다). 인클루드 파일의 `*KEYWORD` 줄은 뺀다(폭은 주 덱이 정한다 — `readFileWithIncludes` 와 같은
+// 규칙). 인클루드 파일 안의 `*END` 뒤는 이미 닫힘이 담지 않았다. 주 덱의 `*INCLUDE_PATH` 는 남긴다(가리킬 파일이 없어 무해).
+// 펼칠 수 없으면 false 와 까닭 — 닫힘이 불완전하다(없는 파일 · `_TRANSFORM` 등 · 깊이) · 순환이 있다 · `*INCLUDE +`·`-`
+// (그 파일의 폭을 바꾼다) · 인클루드 파일 `*KEYWORD` 의 폭이 주 덱과 다르다. 짐작해 펼치지 않는다.
+bool inlined(const std::vector<std::string>& mainLines, const std::string& mainPath, const Closure& c,
+             std::vector<std::string>& out, std::string& why);
+
+// 닫힘의 인클루드 파일 가운데 그 PID 의 `*PART` 카드를 가진 첫 파일(없으면 빈 문자열) — 줄을 읽는 op 이 「대상이 인클루드
+// 안에 있다 — `flatten_includes: true`」를 말하려고 쓴다(2026-10-17). `*PART` 계열 블록에서 PID·SECID 가 둘 다 양수인 줄을
+// 카드 2 로 본다(리더의 `prescanPartSections` 와 같은 규칙). `read` 가 담은 줄을 본다(`readPaths` 판은 줄이 없다).
+std::string partFile(const Closure& c, int pid);
+
+// 펼친 덱을 **주 덱 옆** 임시 파일로 쓴다 — 줄을 읽는 op 이 그 경로를 그대로 읽게 하려는 것이다(상대 경로 기준인 폴더가 같다).
+// 이름은 `.<줄기>.kr_flat_<시각>_<주소>.k` · 개행은 주 덱을 따른다. 소멸자가 지운다. 인클루드가 없으면 `active()` 가 거짓이고
+// `path()` 는 주 덱 그대로다(파일을 쓰지 않는다). ⚠ `make` 를 부르기 전의 `path()` 는 비어 있다 — 부르는 쪽은
+// `active()` 일 때만 경로를 바꿔 쓴다(2026-10-17 — 엔진 로더가 그 빈 경로를 열어 모든 op 이 멈춘 적이 있다).
+class FlatDeck {
+public:
+    FlatDeck() = default;
+    FlatDeck(const FlatDeck&) = delete;
+    FlatDeck& operator=(const FlatDeck&) = delete;
+    ~FlatDeck();
+    // 주 덱을 읽어 닫힘을 펼친다. 펼칠 것이 없으면 true(활성 아님). 펼칠 수 없으면 false 와 까닭.
+    bool make(const std::string& mainPath, std::string& why);
+    bool active() const { return !tmp_.empty(); }
+    const std::string& path() const { return active() ? tmp_ : main_; }
+    size_t files() const { return files_; }     // 펼쳐 넣은 인클루드 파일 수
+private:
+    std::string main_, tmp_;
+    size_t files_ = 0;
+};
+
 // 닫힘의 인클루드 파일마다 주 덱과 **같은 리더**(`KFileReader`)로 센 최대값 — 노드·요소·파트(·파트의 SECID)·재질.
 // 번호 발행자가 「쪼갠 덱 = 쪼개지 않은 덱」이 되게 쓴다(주 덱은 부르는 쪽이 이미 같은 리더로 셌다).
 // 노드·요소 번호를 단정할 수 없는 파일은 `unsure` 에 사람이 읽을 문장으로 적는다 —
@@ -114,6 +149,8 @@ std::vector<std::string> flatten(const std::vector<std::string>& mainLines, cons
 struct ReaderMax {
     int node = 0, elem = 0, part = 0, partSection = 0, material = 0;
     std::vector<std::string> unsure;
+    // 인클루드 파일 안에 요소가 있는 PID → 그 첫 파일(2026-10-17) — 고쳐 쓰는 op 이 「대상이 인클루드 안에만 있다」를 알아보게
+    std::map<int, std::string> elemPidFile;
 };
 ReaderMax readerMax(const std::vector<std::string>& mainLines, const std::string& mainPath, const Closure& c);
 

@@ -4,11 +4,15 @@
 #include "parser/DeckScan.h"
 #include "parser/ElementCardLayout.h"   // deckFieldWidth — 폭이 주 덱과 갈리는지
 #include "parser/KFileReader.h"         // 주 덱과 같은 리더로 센다
+#include "parser/DeckNewline.h"         // 펼친 덱은 주 덱의 개행을 따른다
+#include "parser/DeckWriter.h"
 
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <set>
+#include <chrono>
+#include <cstdint>
 #include <system_error>
 
 namespace KooRemapper {
@@ -253,6 +257,138 @@ std::vector<std::string> flatten(const std::vector<std::string>& mainLines, cons
     return out;
 }
 
+namespace {
+
+// 이 파일의 줄을 펼쳐 담는다 — 맨 `*INCLUDE` 카드는 지우고 그 자리에 끌어온 파일들을(이 카드에서 끌어온 차례로) 넣는다.
+void inlineInto(std::vector<std::string>& out, const std::vector<std::string>& lines, const std::string& path,
+                const Closure& c, size_t depth, bool isMain) {
+    std::vector<const File*> kids;
+    for (const auto& f : c.files)
+        if (f.depth == depth + 1 && f.from == path) kids.push_back(&f);
+    size_t i = 0;
+    while (i < lines.size()) {
+        const std::string& l = lines[i];
+        const std::string kw = deckscan::isDataLine(l) ? std::string() : deckscan::keywordToken(l);
+        if (!kw.empty() && kw[0] == '*' && kw == "*INCLUDE") {
+            const size_t card = i + 1;            // 1-기반 — `File::fromLine` 과 같은 자리
+            size_t j = i + 1;
+            while (j < lines.size()) {
+                const std::string k2 = deckscan::isDataLine(lines[j]) ? std::string() : deckscan::keywordToken(lines[j]);
+                if (!k2.empty() && k2[0] == '*') break;
+                ++j;
+            }
+            for (const File* f : kids)
+                if (f->fromLine == card) inlineInto(out, f->lines, f->path, c, depth + 1, false);
+            i = j;
+            continue;
+        }
+        if (!isMain && !kw.empty() && kw.rfind("*KEYWORD", 0) == 0) { ++i; continue; }   // 폭은 주 덱이 정한다
+        out.push_back(l);
+        ++i;
+    }
+}
+
+}  // namespace
+
+bool inlined(const std::vector<std::string>& mainLines, const std::string& mainPath, const Closure& c,
+             std::vector<std::string>& out, std::string& why) {
+    out.clear();
+    if (!c.complete()) {
+        if (!c.unresolved.empty())
+            why = "*INCLUDE 를 찾지 못했다 — " + c.unresolved[0].file + ":" + std::to_string(c.unresolved[0].line) + " '" +
+                  c.unresolved[0].name + "' (" + c.unresolved[0].why + ")";
+        else if (!c.notFollowed.empty())
+            why = c.notFollowed[0].keyword + " 는 따라가지 않는다(" + c.notFollowed[0].file + ":" +
+                  std::to_string(c.notFollowed[0].line) + ") — 오프셋·변환을 모른 채 펼치면 번호가 그럴듯하게 틀린다";
+        else why = "*INCLUDE 중첩이 깊이 상한을 넘었다";
+        return false;
+    }
+    if (!c.cycles.empty()) { why = "*INCLUDE 가 이미 읽은 파일로 돌아온다(순환): " + c.cycles[0]; return false; }
+    const int mainFw = deckFieldWidth(mainLines);
+    auto widthCard = [](const std::vector<std::string>& L) {
+        for (const auto& l : L) {
+            if (deckscan::isDataLine(l) || deckscan::keywordToken(l) != "*INCLUDE") continue;
+            const size_t a = l.find_first_not_of(" \t");
+            const size_t b = l.find_first_not_of(" \t", a + 8);
+            if (b != std::string::npos && (l[b] == '+' || l[b] == '-')) return true;
+        }
+        return false;
+    };
+    if (widthCard(mainLines)) { why = "*INCLUDE + / *INCLUDE - (그 파일의 칸 폭을 바꾼다)가 있다 — 한 폭으로 펼칠 수 없다"; return false; }
+    for (const auto& f : c.files) {
+        if (widthCard(f.lines)) { why = f.path + " 에 *INCLUDE + / - 가 있다 — 한 폭으로 펼칠 수 없다"; return false; }
+        bool hasKw = false;
+        for (const auto& l : f.lines)
+            if (!deckscan::isDataLine(l) && deckscan::keywordToken(l).rfind("*KEYWORD", 0) == 0) { hasKw = true; break; }
+        if (hasKw && deckFieldWidth(f.lines) != mainFw) {
+            why = f.path + " 의 *KEYWORD 폭(" + std::to_string(deckFieldWidth(f.lines)) + ")이 주 덱(" + std::to_string(mainFw) +
+                  ")과 다르다 — 펼치면 그 파일의 칸을 다른 폭으로 읽는다";
+            return false;
+        }
+    }
+    out.reserve(mainLines.size());
+    inlineInto(out, mainLines, mainPath, c, 0, true);
+    return true;
+}
+
+std::string partFile(const Closure& c, int pid) {
+    for (const auto& f : c.files) {
+        bool inPart = false;
+        for (const auto& l : f.lines) {
+            if (!deckscan::isDataLine(l)) {
+                const std::string kw = deckscan::keywordToken(l);
+                if (!kw.empty() && kw[0] == '*')
+                    inPart = kw.rfind("*PART", 0) == 0 && kw.rfind("*PART_ADAPTIVE", 0) != 0;
+                continue;
+            }
+            if (!inPart) continue;
+            const auto fl = deckscan::cardFields(l, 10);
+            if (deckscan::fieldInt(fl, 0) == pid && deckscan::fieldInt(fl, 1) > 0) return f.path;
+        }
+    }
+    return std::string();
+}
+
+FlatDeck::~FlatDeck() {
+    if (tmp_.empty()) return;
+    std::error_code ec;
+    fs::remove(tmp_, ec);
+}
+
+bool FlatDeck::make(const std::string& mainPath, std::string& why) {
+    main_ = mainPath;
+    std::vector<std::string> L;
+    {
+        std::ifstream in(mainPath, std::ios::binary);
+        if (!in.is_open()) { why = "덱을 열 수 없다: " + mainPath; return false; }
+        for (std::string l; std::getline(in, l);) {
+            if (!l.empty() && l.back() == '\r') l.pop_back();
+            if (L.empty() && l.size() >= 3 && l.compare(0, 3, "\xEF\xBB\xBF") == 0) l.erase(0, 3);
+            L.push_back(std::move(l));
+        }
+    }
+    const Closure c = read(mainPath, L);
+    if (c.files.empty() && c.complete()) return true;          // 펼칠 것이 없다 — 주 덱 그대로
+    std::vector<std::string> flat;
+    if (!inlined(L, mainPath, c, flat, why)) return false;
+    const fs::path mp(mainPath);
+    std::string stem = mp.stem().string();
+    // 이름이 겹치지 않게 — 같은 폴더에서 잡이 겹쳐도(플랫폼 잡 폴더) 갈리도록 시각과 이 객체의 주소를 붙인다(Windows 도 같다)
+    const auto tick = static_cast<unsigned long long>(std::chrono::steady_clock::now().time_since_epoch().count());
+    const fs::path tmp = mp.parent_path() /
+        ("." + stem + ".kr_flat_" + std::to_string(tick % 1000000007ULL) + "_" +
+         std::to_string(reinterpret_cast<std::uintptr_t>(this) % 100000ULL) + ".k");
+    {
+        DeckWriter w(tmp.string(), deck_newline::detect(mainPath));
+        if (!w.ok()) { why = "펼친 덱을 쓸 수 없다: " + tmp.string(); return false; }
+        for (const auto& l : flat) w.stream() << l << "\n";
+        w.close();
+    }
+    tmp_ = tmp.string();
+    files_ = c.files.size();
+    return true;
+}
+
 ReaderMax readerMax(const std::vector<std::string>& mainLines, const std::string& mainPath, const Closure& c) {
     ReaderMax r;
     const int mainFw = deckFieldWidth(mainLines);
@@ -287,6 +423,10 @@ ReaderMax readerMax(const std::vector<std::string>& mainLines, const std::string
             for (const auto& [mid, mat] : m.materials) {
                 (void)mat;
                 r.material = std::max(r.material, mid);
+            }
+            for (const auto& [eid, e] : m.getElements()) {
+                (void)eid;
+                r.elemPidFile.emplace(e.partId, f.path);
             }
         } catch (const std::exception& e) {
             r.unsure.push_back(f.path + " — 메시로 읽지 못해 노드·요소·파트·재질 번호를 세지 못했다: " + e.what());

@@ -51,6 +51,7 @@ int runMatdb(const std::string& yamlFile, ConsoleOutput& console) {
     };
 
     std::string modelFile, outputFile;
+    bool flattenIncludes = false;   // `flatten_includes: true` — 인클루드 닫힘을 펼쳐 한 덱으로(2026-10-17)
     MatdbOperation op;
     bool inMaterialsList = false;
     int materialsIndent = 0;
@@ -76,6 +77,7 @@ int runMatdb(const std::string& yamlFile, ConsoleOutput& console) {
 
         if (!inMaterialsList) {
             if      (key == "model")    modelFile = val;
+            else if (key == "flatten_includes") { bool ok = true; flattenIncludes = KooRemapper::yamlBoolValue(val, ok); if (!ok) console.warning("flatten_includes 값 「" + val + "」 을 참·거짓으로 읽지 못했다 — true 로 주라(지금은 펼치지 않는다)"); }
             else if (key == "output")   outputFile = val;
             else if (key == "database") op.databasePath = val;
             else if (key == "mat_type") op.globalMatType = val;
@@ -151,6 +153,7 @@ int runMatdb(const std::string& yamlFile, ConsoleOutput& console) {
         console.println("[matdb] Material rules: " + std::to_string(op.rules.size()));
 
     ModelAssembler assembler;
+    assembler.setFlattenIncludes(flattenIncludes);
     if (!assembler.loadRawOnly(modelFile)) {
         console.error(assembler.getErrorMessage());
         return 1;

@@ -82,6 +82,7 @@ struct CcRule {
 
 struct CcConfig {
     std::string modelFile, outputFile;
+    bool flattenIncludes = false;   // `flatten_includes: true` — 인클루드 닫힘을 펼쳐 한 덱으로(2026-10-17)
     std::string mode = "analytic";        // analytic | deck
     std::string attach = "none";          // none | cnrb
     std::string stressOutput = "embed";   // embed | include
@@ -294,6 +295,7 @@ bool parseCclipYaml(const std::string& yamlFile, CcConfig& cfg, ConsoleOutput& c
             }
 
             if      (key == "model")         cfg.modelFile = val;
+            else if (key == "flatten_includes") { bool ok = true; cfg.flattenIncludes = KooRemapper::yamlBoolValue(val, ok); if (!ok) console.warning("flatten_includes 값 「" + val + "」 을 참·거짓으로 읽지 못했다 — true 로 주라(지금은 펼치지 않는다)"); }
             else if (key == "output")        cfg.outputFile = val;
             else if (key == "mode")          cfg.mode = val;
             else if (key == "attach")        cfg.attach = val;
@@ -1025,6 +1027,18 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
 
     console.info("[cclip] Model: " + cfg.modelFile);
     console.info("[cclip] Mode: " + cfg.mode + ", stress_output: " + cfg.stressOutput + ", attach: " + cfg.attach);
+    // ★`flatten_includes`(2026-10-17) — 인클루드 닫힘을 펼친 덱(주 덱 옆 임시 파일)을 읽고 고친다 · 산출은 홀로 선다
+    const std::string modelOrig = modelPath;
+    KooRemapper::include_closure::FlatDeck flat;
+    if (cfg.flattenIncludes) {
+        std::string why;
+        if (!flat.make(modelPath, why)) { console.error("[cclip] flatten_includes: " + why); return 1; }
+        if (flat.active()) {
+            console.info("[cclip] flatten_includes: 인클루드 " + std::to_string(flat.files()) +
+                         "개를 펼쳐 한 덱으로 고친다 — 산출은 홀로 선다");
+            modelPath = flat.path();
+        }
+    }
 
     // Parse mesh (nodes/elements/parts/materials)
     KFileReader reader;
@@ -1049,8 +1063,17 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
     std::set<int> seen;
     for (const auto& r : cfg.clips) {
         if (r.pid > 0) {
-            if (mesh.getParts().count(r.pid) == 0)
-                { console.error("[cclip] pid " + std::to_string(r.pid) + " not found"); return 1; }
+            if (mesh.getParts().count(r.pid) == 0) {
+                // 인클루드 안에 있으면 까닭과 길을 말한다(고쳐 쓰는 op 은 주 덱만 고친다)
+                const std::string inc = KooRemapper::include_closure::partFile(
+                    KooRemapper::include_closure::read(modelPath, lines), r.pid);
+                if (!inc.empty())
+                    console.error("[cclip] pid " + std::to_string(r.pid) + " 의 *PART 가 인클루드 「" + inc + "」 안에 있다 — "
+                                  "고쳐 쓰는 op 은 주 덱만 고친다. `flatten_includes: true` 를 주면 닫힘을 펼쳐 한 덱으로 고친다");
+                else
+                    console.error("[cclip] pid " + std::to_string(r.pid) + " not found");
+                return 1;
+            }
             if (seen.insert(r.pid).second) targets.push_back({r.pid, &r});
         } else if (!r.matchPart.empty()) {
             bool any = false;
@@ -1674,7 +1697,7 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
         } else {
             std::string dynainPath = outPrefixPath + ".dynain";
             // 본 덱과 같은 개행을 쓴다 — dynain 은 *INCLUDE 로 함께 풀리므로 갈리면 안 된다.
-            KooRemapper::DeckWriter df_w(dynainPath, KooRemapper::deck_newline::detect(modelPath));
+            KooRemapper::DeckWriter df_w(dynainPath, KooRemapper::deck_newline::detect(modelOrig));
             if (!df_w.ok()) { console.error("[cclip] cannot write: " + dynainPath); return 1; }
             std::ostream& df = df_w.stream();
             df << "*KEYWORD\n";
@@ -1700,7 +1723,7 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
             std::vector<std::string> freeLines = lines;
             kw_insertBeforeEnd(freeLines, insFree.str());
             std::string freePath = outPrefixPath + "_free.k";
-            KooRemapper::DeckWriter ff_w(freePath, KooRemapper::deck_newline::detect(modelPath));
+            KooRemapper::DeckWriter ff_w(freePath, KooRemapper::deck_newline::detect(modelOrig));
             if (!ff_w.ok()) { console.error("[cclip] cannot write: " + freePath); return 1; }
             std::ostream& ff = ff_w.stream();
             for (const auto& l : freeLines) ff << l << "\n";
@@ -1713,7 +1736,7 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
 
     kw_insertBeforeEnd(lines, ins.str());
 
-    KooRemapper::DeckWriter of_w(outPath, KooRemapper::deck_newline::detect(modelPath));
+    KooRemapper::DeckWriter of_w(outPath, KooRemapper::deck_newline::detect(modelOrig));
     if (!of_w.ok()) { console.error("[cclip] cannot write: " + outPath); return 1; }
     std::ostream& of = of_w.stream();
     for (const auto& l : lines) of << l << "\n";

@@ -285,3 +285,78 @@ TEST(IncludeClosure_readPaths_깊이_상한을_말한다) {
     ASSERT_TRUE(cut.depthCut);
     ASSERT_FALSE(cut.complete());
 }
+
+// ── 홀로 서는 한 덱으로 펼치기(`inlined`) — 고쳐 쓰는 op 의 `flatten_includes` · 2026-10-17 ─────────────────
+
+TEST(IncludeClosure_inlined_는_카드를_지우고_본문을_차례대로_넣는다) {
+    Scratch s("inl");
+    s.put("a.k", "*KEYWORD\n*NODE\n1\n*INCLUDE\nb.k\n*END\n*NODE\n99\n");
+    s.put("b.k", "*KEYWORD\n*NODE\n2\n*END\n");
+    s.put("c.k", "*NODE\n3\n");
+    const std::string body = "*KEYWORD\n*TITLE\nt\n*INCLUDE\na.k\n$ 주석\nc.k\n*PART\np\n*END\n";
+    const std::string mp = s.put("main.k", body);
+    const auto L = splitLines(body);
+    const auto c = include_closure::read(mp, L);
+    std::vector<std::string> out;
+    std::string why;
+    ASSERT_TRUE(include_closure::inlined(L, mp, c, out, why));
+    // *KEYWORD 하나(주 덱 것) · a 의 *NODE 1 · b 의 *NODE 2(a 의 *INCLUDE 자리) · c 의 *NODE 3 · *PART — *INCLUDE 와 이름 줄은 없다
+    const std::vector<std::string> want = {"*KEYWORD", "*TITLE", "t", "*NODE", "1", "*NODE", "2", "*NODE", "3",
+                                           "*PART", "p", "*END"};
+    ASSERT_EQ(out.size(), want.size());
+    for (size_t i = 0; i < want.size(); ++i) ASSERT_EQ(out[i], want[i]);
+}
+
+TEST(IncludeClosure_inlined_는_펼칠_수_없으면_까닭을_댄다) {
+    Scratch s("inlbad");
+    s.put("w.k", "*KEYWORD I10=Y\n*NODE\n1\n");
+    s.put("cyc.k", "*INCLUDE\nmain.k\n");
+    {
+        const std::string body = "*KEYWORD\n*INCLUDE\nnope.k\n*END\n";
+        const std::string mp = s.put("main.k", body);
+        std::vector<std::string> out;
+        std::string why;
+        ASSERT_FALSE(include_closure::inlined(splitLines(body), mp, include_closure::read(mp, splitLines(body)), out, why));
+        ASSERT_TRUE(why.find("nope.k") != std::string::npos);
+    }
+    {
+        const std::string body = "*KEYWORD\n*INCLUDE\nw.k\n*END\n";             // 인클루드의 *KEYWORD 폭이 다르다
+        const std::string mp = s.put("main.k", body);
+        std::vector<std::string> out;
+        std::string why;
+        ASSERT_FALSE(include_closure::inlined(splitLines(body), mp, include_closure::read(mp, splitLines(body)), out, why));
+        ASSERT_TRUE(why.find("폭") != std::string::npos);
+    }
+    {
+        const std::string body = "*KEYWORD\n*INCLUDE\ncyc.k\n*END\n";           // 순환
+        const std::string mp = s.put("main.k", body);
+        std::vector<std::string> out;
+        std::string why;
+        ASSERT_FALSE(include_closure::inlined(splitLines(body), mp, include_closure::read(mp, splitLines(body)), out, why));
+        ASSERT_TRUE(why.find("순환") != std::string::npos);
+    }
+}
+
+TEST(IncludeClosure_FlatDeck_는_인클루드가_없으면_쓰지_않고_있으면_지운다) {
+    Scratch s("flat");
+    const std::string plain = s.put("plain.k", "*KEYWORD\n*NODE\n1\n*END\n");
+    s.put("b.k", "*NODE\n2\n");
+    const std::string mp = s.put("m.k", "*KEYWORD\n*INCLUDE\nb.k\n*END\n");
+    std::string why, tmp;
+    {
+        include_closure::FlatDeck f;
+        ASSERT_TRUE(f.make(plain, why));
+        ASSERT_FALSE(f.active());
+        ASSERT_EQ(f.path(), plain);
+    }
+    {
+        include_closure::FlatDeck f;
+        ASSERT_TRUE(f.make(mp, why));
+        ASSERT_TRUE(f.active());
+        ASSERT_EQ(f.files(), (size_t)1);
+        tmp = f.path();
+        ASSERT_TRUE(fs::exists(tmp));
+        ASSERT_EQ(fs::path(tmp).parent_path(), fs::path(mp).parent_path());   // 주 덱 옆 — 상대 경로 기준이 같다
+    }
+    ASSERT_FALSE(fs::exists(tmp));                                            // 소멸자가 지웠다
+}

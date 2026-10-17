@@ -75,6 +75,18 @@ inline void yamlSkipBOM(std::istream& in) {
 
 // 줄 앞 여백(첫 비공백 글자 앞)에 탭이 있는가 — 들여쓰기만 본다. 값 안의 탭(따옴표 문자열,
 // '|' 블록 카드 줄)은 보지 않는다.
+// ★참/거짓 키(2026-10-17 — `flatten_includes`) — true·yes·1 은 참, false·no·0 은 거짓(대소문자 무관). 그 밖이면 `ok` 가
+//   거짓이다 — 부르는 쪽이 「참으로 읽지 못했다」고 말한다(오타를 조용히 거짓으로 읽으면 사용자는 펼쳤다고 믿는다).
+inline bool yamlBoolValue(const std::string& raw, bool& ok) {
+    std::string v;
+    for (char c : raw) v += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    ok = true;
+    if (v == "true" || v == "yes" || v == "1") return true;
+    if (v == "false" || v == "no" || v == "0") return false;
+    ok = false;
+    return false;
+}
+
 inline bool yamlTabIndent(const std::string& s) {
     for (char c : s) {
         if (c == '\t') return true;
