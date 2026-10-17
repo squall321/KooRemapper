@@ -30,9 +30,12 @@ struct Scan {
 // 덱 줄에서 파트·요소를 가리키는 칸을 모은다. `keep(axis, value)` 가 있으면 참인 것만 담는다.
 //   파트 — `*SET_PART`(목록 · `_COLUMN` 칸 1) · `*CONTACT_*` Card 1 의 SSID/MSID(SSTYP/MSTYP = 3 일 때만 —
 //          서명 STYP 0..6 이 맞을 때) · `*CONSTRAINED_RIGID_BODIES`(PIDL PIDC)
+//          `*DAMPING_PART_MASS`·`*DAMPING_PART_STIFFNESS`(Card 1 칸 1 · MASS 의 FLAG=1 Card 2 는 건넌다 · 2026-10-17)
 //   요소 — `*SET_SOLID`·`*SET_SHELL`·`*SET_BEAM`·`*SET_TSHELL`(목록 · `_COLUMN` 칸 1) ·
-//          `*DATABASE_HISTORY_SOLID`·`_SHELL`·`_BEAM`·`_TSHELL`(맨 키워드 · 칸 1-8)
-//   세어만 둔다 — `_GENERATE`·`_GENERAL` 세트 · 이력 `_ID`·`_LOCAL` · 초기응력·변형률 · 파트 감쇠 · 강체 강제운동 ·
+//          `*DATABASE_HISTORY_SOLID`·`_SHELL`·`_BEAM`·`_TSHELL`(맨 키워드 · 칸 1-8) ·
+//          `*INITIAL_STRESS_SOLID`·`*INITIAL_STRESS_SHELL`(카드 세트마다 Card 1 칸 1 — 세트 길이는 NINT·NHISV·LARGE…가
+//          정한다 · 블록과 맞지 않으면 단정하지 않는다 · 2026-10-17). 위 넷의 `_SET` 은 세트 번호라 옮기지 않는다
+//   세어만 둔다 — `_GENERATE`·`_GENERAL` 세트 · 이력 `_ID`·`_LOCAL` · 초기변형률 · 강체 강제운동 ·
 //          `*ELEMENT_MASS` 의 0 아닌 PID · 서명이 안 맞는 접촉
 Scan find(const std::vector<std::string>& lines, int deckFw,
           const std::function<bool(Axis, int)>& keep = nullptr);

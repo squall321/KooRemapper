@@ -15,6 +15,7 @@ struct Input {
     std::string entities;    // 우리가 덧붙인 블록만 든 .k — old_deck 번호를 가리킨다
     std::string output;      // new_deck 번호로 옮긴 블록(.k)
     std::string rangeDiff;   // (선택) StepForge 구간 표 JSON — 두 덱을 `coord_sha` 로 대조한다
+    double tolerance = 0.0;  // (선택) 0 = 정확 일치. 양수면 같은 파트 제목 안 그 거리의 새 절점이 하나일 때만 짝짓는다
 };
 
 // rc 0 = 다 묶어 썼다. rc 1 = 하나라도 못 풀었거나 거절했다(산출을 쓰지 않는다).

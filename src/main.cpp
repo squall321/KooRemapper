@@ -2631,11 +2631,12 @@ static int runMain(int argc, char* argv[]) {
     if (command == "rebind_entities_after_remesh") {
         if (argc < 3) {
             console.error("Usage: KooRemapper rebind_entities_after_remesh <config.yaml>");
-            console.info("Re-binds the node IDs in blocks we added on top of a deck (sets, SPC, loads, history,");
-            console.info("CNRB PNODE, ...) to a re-meshed deck: each old node is matched to the new node of the");
-            console.info("same part (by *PART title) at exactly the same coordinates (%16.9e, like coord_sha).");
-            console.info("Unmatched references, cards that point at elements/parts, and ID clashes are refused");
-            console.info("(rc 1, nothing written). With range_diff, both decks are checked against its coord_sha.");
+            console.info("Re-binds the node, part and element IDs in blocks we added on top of a deck (sets, SPC,");
+            console.info("loads, history, CNRB PNODE, contacts, part damping, initial stress ...) to a re-meshed deck:");
+            console.info("each old node is matched to the new node of the same part (by *PART title) at exactly the");
+            console.info("same coordinates (%16.9e, like coord_sha); 'tolerance: <d>' allows a single match within d.");
+            console.info("Unmatched references, undecidable fields and ID clashes are refused (rc 1, nothing written).");
+            console.info("Both decks may *INCLUDE other files. With range_diff, both decks are checked against its coord_sha.");
             console.info("Minimal config:");
             console.info("  old_deck: v1.k");
             console.info("  new_deck: v2.k");

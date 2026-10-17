@@ -15,6 +15,8 @@
   v2(2026-10-16) — 파트(`*SET_PART` · 접촉 SSTYP 3 · `*CONSTRAINED_RIGID_BODIES`)는 `*PART` 제목으로, 요소
   (`*SET_SOLID` · `*DATABASE_HISTORY_SOLID`)는 (파트 제목, 요소 절점들의 좌표 집합)으로 짝을 찾는다.
   D절(2026-10-17) — 리더가 2차 솔리드의 절점 칸을 다 읽으므로 TET10 덱도 받는다(중간절점의 소속까지 본다).
+  E·F·G절(2026-10-17) — `tolerance`(줄 때만 · 같은 파트 안 하나뿐인 짝) · 인클루드로 쪼갠 덱(닫힘을 다 읽어야) ·
+  파트 감쇠·초기응력 카드(칸 자리는 정본 `IdRefs`).
 
 usage: test_rebind_after_remesh.py <KooRemapper 바이너리>
 """
@@ -283,6 +285,74 @@ def main():
         write(os.path.join(d, "c.yaml"), "old_deck: v1.k\nnew_deck: v2.k\nentities: c.k\noutput: c.k\n")
         rc, out = run(binary, d, OP, "c.yaml")
         check("C-9 output 이 entities 와 같으면 거절(원본을 덮어쓰지 않는다)", rc == 1 and "덮어쓰지" in out, out[-200:])
+        print("[E 공차 — 줄 때만(2026-10-17) · 정확 일치가 기본]")
+        # 새 덱의 A 를 x 로 2e-4 밀었다(재메시가 남긴 미세한 어긋남) — 정확 일치로는 못 푼다
+        A_sh = ([(n, x + 2e-4, y, z) for n, x, y, z in A_new[0]], A_new[1])
+        deck(os.path.join(d, "v2s.k"), [(B_new[0], B_new[1], 4, "B#2"), (A_sh[0], A_sh[1], 5, "A#1")])
+        tol_ours = ["*KEYWORD", "*BOUNDARY_SPC_NODE", card(a_ids[0], 0, 1, 1, 1), card(a_ids[5], 0, 1, 1, 1),
+                    "*DATABASE_HISTORY_SOLID", card(a_eids[0]), "*END"]
+        write(os.path.join(d, "tol.k"), "\n".join(tol_ours) + "\n")
+        write(os.path.join(d, "e0.yaml"), "old_deck: v1.k\nnew_deck: v2s.k\nentities: tol.k\noutput: e0_out.k\n")
+        rc, out = run(binary, d, OP, "e0.yaml")
+        check("E-1 공차 없이는 못 푼다(rc 1 · 같은 자리 절점이 없다)", rc == 1 and "같은 자리 절점이 없다" in out, out[-300:])
+        write(os.path.join(d, "e1.yaml"), "old_deck: v1.k\nnew_deck: v2s.k\nentities: tol.k\noutput: e1_out.k\ntolerance: 1.0e-3\n")
+        rc, out = run(binary, d, OP, "e1.yaml")
+        got = open(os.path.join(d, "e1_out.k")).read().splitlines() if os.path.exists(os.path.join(d, "e1_out.k")) else []
+        check("E-2 ★tolerance 1e-3 이면 같은 파트 안 하나뿐인 짝으로 묶는다(절점 · 요소 둘 다)",
+              rc == 0 and card(m[a_ids[0]], 0, 1, 1, 1) in got and card(m[a_ids[5]], 0, 1, 1, 1) in got and
+              card(emap[a_eids[0]]) in got, (rc, got, out[-300:]))
+        check("E-3 공차로 짝지은 수와 가장 큰 거리를 말한다", "공차로 짝지은 절점 2곳" in out and "0.0002" in out, out[-300:])
+        write(os.path.join(d, "e2.yaml"), "old_deck: v1.k\nnew_deck: v2s.k\nentities: tol.k\noutput: e2_out.k\ntolerance: 1.5\n")
+        rc, out = run(binary, d, OP, "e2.yaml")
+        check("E-4 공차가 격자보다 크면 짝이 여럿이라 못 푼다(rc 1 · 쓰지 않는다)",
+              rc == 1 and "공차 1.5 안 절점이" in out and not os.path.exists(os.path.join(d, "e2_out.k")), out[-300:])
+        write(os.path.join(d, "e3.yaml"), "old_deck: v1.k\nnew_deck: v2s.k\nentities: tol.k\noutput: e3_out.k\ntolerance: -1\n")
+        rc, out = run(binary, d, OP, "e3.yaml")
+        check("E-5 음수 공차는 거절한다", rc == 1 and "tolerance 는 0 이상" in out, out[-200:])
+
+        print("[F 인클루드로 쪼갠 덱 — 닫힘을 다 읽으면 받는다(2026-10-17)]")
+        for tag, src_ in (("v1", "v1.k"), ("v2", "v2.k")):
+            body = [l for l in open(os.path.join(d, src_)).read().splitlines() if l.strip() not in ("*KEYWORD", "*END")]
+            write(os.path.join(d, "%s_body.k" % tag), "\n".join(body) + "\n")
+            write(os.path.join(d, "%s_master.k" % tag), "*KEYWORD\n*INCLUDE\n%s_body.k\n*END\n" % tag)
+        write(os.path.join(d, "f.yaml"), "old_deck: v1_master.k\nnew_deck: v2_master.k\nentities: ours.k\noutput: f_out.k\n")
+        rc, out = run(binary, d, OP, "f.yaml")
+        same = (os.path.exists(os.path.join(d, "f_out.k")) and os.path.exists(os.path.join(d, "ours_rebound.k")) and
+                open(os.path.join(d, "f_out.k")).read() == open(os.path.join(d, "ours_rebound.k")).read())
+        check("F-1 ★인클루드 마스터 둘로 돌려도 한 파일 덱과 산출이 **바이트로 같다**", rc == 0 and same, out[-300:])
+        check("F-2 인클루드를 함께 읽었다고 말한다", "인클루드 닫힘을 함께 읽었다" in out, out[-200:])
+        write(os.path.join(d, "v1_broken.k"), "*KEYWORD\n*INCLUDE\nv1_body.k\n*INCLUDE\nnope.k\n*END\n")
+        write(os.path.join(d, "f2.yaml"), "old_deck: v1_broken.k\nnew_deck: v2_master.k\nentities: ours.k\noutput: f2_out.k\n")
+        rc, out = run(binary, d, OP, "f2.yaml")
+        check("F-3 닫힘을 다 못 읽으면 거절한다(못 본 파일의 절점을 「없다」로 읽지 않는다)",
+              rc == 1 and "닫힘을 다 읽지 못했다" in out and "nope.k" in out and not os.path.exists(os.path.join(d, "f2_out.k")),
+              out[-300:])
+
+        print("[G 파트 감쇠 · 초기응력 카드 — 칸 자리는 정본 IdRefs(2026-10-17)]")
+        g_ours = ["*KEYWORD",
+                  "*DAMPING_PART_STIFFNESS", card(1, "0.05"),
+                  "*DAMPING_PART_MASS", card(1, 31, "1.0", 1), card("1.0", "1.0", "0.0", "0.0", "0.0", "0.0"),
+                  "*INITIAL_STRESS_SOLID", card(a_eids[0], 1, 0, 0, 0, 0, 0, 0),
+                  card("1.0", "2.0", "3.0", "0.0", "0.0", "0.0", "0.0"),
+                  "*DEFINE_CURVE", card(31), "%20.6f%20.6f" % (0.0, 1.0), "%20.6f%20.6f" % (1.0, 1.0),
+                  "*END"]
+        write(os.path.join(d, "g.k"), "\n".join(g_ours) + "\n")
+        write(os.path.join(d, "g.yaml"), "old_deck: v1.k\nnew_deck: v2.k\nentities: g.k\noutput: g_out.k\n")
+        rc, out = run(binary, d, OP, "g.yaml")
+        got = open(os.path.join(d, "g_out.k")).read().splitlines() if os.path.exists(os.path.join(d, "g_out.k")) else []
+        check("G-1 ★파트 감쇠 둘의 PID 1 → 5(제목으로) · MASS 의 Card 2 는 손대지 않는다",
+              rc == 0 and card(5, "0.05") in got and card(5, 31, "1.0", 1) in got and
+              card("1.0", "1.0", "0.0", "0.0", "0.0", "0.0") in got, (rc, got, out[-300:]))
+        check("G-2 ★초기응력의 EID 가 같은 자리 새 요소로 · 응력 줄은 그대로",
+              card(emap[a_eids[0]], 1, 0, 0, 0, 0, 0, 0) in got and
+              card("1.0", "2.0", "3.0", "0.0", "0.0", "0.0", "0.0") in got, got)
+        bad = ["*KEYWORD", "*INITIAL_STRESS_SOLID", card(a_eids[0], 2, 0, 0, 0, 0, 0, 0),
+               card("1.0", "2.0", "3.0", "0.0", "0.0", "0.0", "0.0"), "*END"]   # NINT 2 인데 응력 줄이 하나 — 세트가 모자란다
+        write(os.path.join(d, "g2.k"), "\n".join(bad) + "\n")
+        write(os.path.join(d, "g2.yaml"), "old_deck: v1.k\nnew_deck: v2.k\nentities: g2.k\noutput: g2_out.k\n")
+        rc, out = run(binary, d, OP, "g2.yaml")
+        check("G-3 카드 세트 길이가 맞지 않는 초기응력은 단정하지 않고 거절한다",
+              rc == 1 and "*INITIAL_STRESS_SOLID" in out and not os.path.exists(os.path.join(d, "g2_out.k")), out[-300:])
         print("[D 2차 솔리드 덱 — 중간절점의 소속까지 본다(2026-10-17 · 그 전에는 2차 덱을 거절했다)]")
         # 10절점 사면체 하나 — 옛 덱은 절점 1..10, 새 덱은 같은 자리를 101..110 으로 거꾸로 매겼다(파트 제목 그대로 · PID 3)
         cs = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)]

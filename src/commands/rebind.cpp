@@ -22,6 +22,7 @@
 #include "parser/ElementCardLayout.h"
 #include "parser/FragmentMap.h"    // coordSha — 저쪽 `coord_sha` 와 같은 값(실물 조각 4/4 로 확인)
 #include "parser/IdRefs.h"         // 파트·요소를 가리키는 칸 — 정본(v2)
+#include "parser/IncludeClosure.h" // old_deck·new_deck 의 인클루드 닫힘 — 정본(2026-10-17)
 #include "parser/IncludeScan.h"
 #include "parser/KFileReader.h"
 #include "parser/NodeRefs.h"
@@ -29,6 +30,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdio>
 #include <fstream>
 #include <iterator>
@@ -84,6 +86,7 @@ struct Deck {
     std::map<std::string, int> pidByTitle;            // 제목 → PID(겹치면 -1)
     std::set<int> elemIds, pids, curveIds, coordIds;
     std::map<std::string, std::set<int>> setIds;      // 종류(NODE·SEGMENT·PART …) → SID
+    size_t includes = 0;                              // 함께 읽은 인클루드 파일 수
 };
 
 // `*SET_<종류>…` 에서 종류만 — `ReferenceIntegrity` 의 네임스페이스와 같은 뜻(옵션 접미사를 뗀다).
@@ -132,13 +135,34 @@ void collectDefinedIds(const std::vector<std::string>& L, std::map<std::string, 
 bool loadDeck(const std::string& path, const char* role, Deck& d, std::string& err) {
     d.path = path;
     if (!readLines(path, d.lines)) { err = std::string(role) + " 를 열 수 없다: " + path; return false; }
-    if (include_scan::scan(d.lines).count > 0) {
-        err = std::string(role) + " 에 `*INCLUDE` 가 있다 — v1 은 한 파일 덱만 받는다(저쪽 덱은 한 파일이다): " + path;
+    d.fw = deckFieldWidth(d.lines);
+    // ★인클루드로 쪼갠 덱(2026-10-17) — 닫힘을 **다** 읽어야 받는다. 절점·요소·파트는 닫힘 전체에서, 블록과 겹치면 안 되는
+    //   번호(세트·곡선·좌표계 …)도 닫힘 전체에서 모은다. 하나라도 못 읽으면 거절한다 — 못 본 파일의 절점을 「없다」로 읽으면
+    //   엉뚱한 짝을 짓거나 번호 충돌을 놓친다. (v1 은 한 파일 덱만 받았다 — 저쪽 덱은 한 파일이지만 우리 덱은 아니다.)
+    const auto clo = include_closure::read(path, d.lines);
+    if (!clo.complete()) {
+        std::string why;
+        if (!clo.unresolved.empty())
+            why = clo.unresolved[0].file + ":" + std::to_string(clo.unresolved[0].line) + " '" + clo.unresolved[0].name +
+                  "' — " + clo.unresolved[0].why;
+        else if (!clo.notFollowed.empty())
+            why = clo.notFollowed[0].keyword + " 는 따라가지 않는다(" + clo.notFollowed[0].file + ":" +
+                  std::to_string(clo.notFollowed[0].line) + ")";
+        else why = "깊이 상한을 넘었다";
+        err = std::string(role) + " 의 *INCLUDE 닫힘을 다 읽지 못했다 — " + why + ": " + path;
         return false;
     }
-    d.fw = deckFieldWidth(d.lines);
     KFileReader reader;
-    d.mesh = reader.readFile(path);
+    if (clo.files.empty()) {
+        d.mesh = reader.readFile(path);
+    } else {
+        std::string note;
+        bool complete = true;
+        d.mesh = reader.readFileWithIncludes(path, &note, &complete);
+        if (!complete) { err = std::string(role) + " — " + note + ": " + path; return false; }
+        d.lines = include_closure::flatten(d.lines, path, clo);   // 번호 모으기도 닫힘 전체에서
+        d.includes = clo.files.size();
+    }
     if (d.mesh.getNodeCount() == 0) { err = std::string(role) + " 에서 절점을 읽지 못했다: " + path; return false; }
     // 2차 솔리드 — 리더가 절점 칸을 다 읽는다(2026-10-17) · 소속은 중간절점까지 본다. 칸이 모자란 카드가 든 덱만
     // 소속을 다 못 본다(2026-10-16 까지는 리더가 앞 8칸만 담아 2차 덱을 전부 거절했다).
@@ -217,6 +241,10 @@ bool allowedKeyword(const std::string& kw, std::string& why) {
                           "*DATABASE_HISTORY_TSHELL"})
         if (kw == p || kw == std::string(p) + "_SET") return true;
     if (kw == "*CONSTRAINED_RIGID_BODIES" || starts(kw, "*CONTACT_") || kw == "*DEFINE_BOX") return true;
+    // (2026-10-17) 파트 감쇠(Card 1 칸 1 = PID) · 초기응력(카드 세트마다 Card 1 칸 1 = EID) — 칸 자리는 정본 `IdRefs`.
+    //   `_SET` 은 블록의 세트 번호를 가리켜 그대로 둔다(그 `*SET_PART`·`*SET_SOLID` 가 위에서 옮겨진다).
+    for (const char* p : {"*DAMPING_PART_MASS", "*DAMPING_PART_STIFFNESS", "*INITIAL_STRESS_SOLID", "*INITIAL_STRESS_SHELL"})
+        if (kw == p || kw == std::string(p) + "_SET") return true;
     static const char* const kExact[] = {
         "*BOUNDARY_SPC_NODE", "*LOAD_NODE_POINT", "*INITIAL_VELOCITY_NODE", "*CONSTRAINED_EXTRA_NODES_NODE",
         "*ELEMENT_MASS", "*BOUNDARY_PRESCRIBED_MOTION_NODE", "*DATABASE_HISTORY_NODE",
@@ -405,43 +433,99 @@ int run(const Input& in, ConsoleOutput& console) {
         else it->second = -1;
     }
 
+    // ★공차(선택 · 2026-10-17) — 정확히 같은 자리가 없을 때만, **같은 파트 제목** 안에서 거리 `tolerance` 안의 새 절점이
+    //   **하나**일 때 짝짓는다(둘 이상이면 못 푼다). 기본은 0(정확 일치) — 가장 가까운 절점으로 옮기면 물리가 조용히 바뀐다.
+    //   격자 칸 = 공차라 이웃 27칸만 본다.
+    const double tol = in.tolerance;
+    std::unordered_map<std::string, std::vector<std::pair<int, Vector3D>>> tolCells;
+    auto cellOf = [&](const std::string& qual, const Vector3D& p, long long dx, long long dy, long long dz) {
+        const long long ix = static_cast<long long>(std::floor(p.x / tol)) + dx;
+        const long long iy = static_cast<long long>(std::floor(p.y / tol)) + dy;
+        const long long iz = static_cast<long long>(std::floor(p.z / tol)) + dz;
+        return qual + '\x1e' + std::to_string(ix) + ',' + std::to_string(iy) + ',' + std::to_string(iz);
+    };
+    if (tol > 0)
+        for (const auto& [n, nd] : newD.mesh.getNodes()) {
+            auto q = newD.qualifier.find(n);
+            tolCells[cellOf(q == newD.qualifier.end() ? std::string() : q->second, nd.position, 0, 0, 0)].push_back({n, nd.position});
+        }
+    // 옛 절점 하나의 새 짝 — 정확 일치 먼저, 그다음 공차. `moved` 는 짝까지의 거리(정확 일치면 0).
+    auto matchNode = [&](int oldId, int& target, double& moved, std::string& why) -> bool {
+        auto on = oldD.mesh.getNodes().find(oldId);
+        if (on == oldD.mesh.getNodes().end()) { why = "old_deck 에도 블록에도 없는 절점이다"; return false; }
+        auto q = oldD.qualifier.find(oldId);
+        const std::string qual = q == oldD.qualifier.end() ? std::string() : q->second;
+        const std::string first = qual.substr(0, qual.find('\x1f'));
+        const std::string partNote = qual.empty() ? std::string()
+            : " (파트 「" + first + "」" + (resizedParts.count(first) ? " — 구간 표: 다시 구웠다(resized)" : "") + ")";
+        auto it = newIdx.find(qual + '\x1e' + coordKey(on->second.position));
+        if (it != newIdx.end() && it->second > 0) { target = it->second; moved = 0; return true; }
+        if (it != newIdx.end()) { why = "new_deck 에 같은 파트·같은 자리 절점이 여럿이다" + partNote; return false; }
+        if (tol <= 0) { why = "new_deck 에 같은 파트·같은 자리 절점이 없다" + partNote; return false; }
+        int hit = 0, hitId = 0;
+        double hitD = 0;
+        for (long long dx = -1; dx <= 1; ++dx)
+            for (long long dy = -1; dy <= 1; ++dy)
+                for (long long dz = -1; dz <= 1; ++dz) {
+                    auto c = tolCells.find(cellOf(qual, on->second.position, dx, dy, dz));
+                    if (c == tolCells.end()) continue;
+                    for (const auto& [nid, np] : c->second) {
+                        const Vector3D dv = np - on->second.position;
+                        const double dd = std::sqrt(dv.x * dv.x + dv.y * dv.y + dv.z * dv.z);
+                        if (dd <= tol) { ++hit; hitId = nid; hitD = dd; }
+                    }
+                }
+        if (hit == 1) { target = hitId; moved = hitD; return true; }
+        char b[48];
+        std::snprintf(b, sizeof(b), "%g", tol);
+        why = (hit == 0 ? std::string("new_deck 에 같은 파트 · 공차 ") + b + " 안 절점이 없다"
+                        : std::string("new_deck 에 같은 파트 · 공차 ") + b + " 안 절점이 " + std::to_string(hit) + "개다") + partNote;
+        return false;
+    };
+
     std::vector<Unresolved> unresolved;
     // 줄 → {열, 폭, 새 번호} — 절점·파트·요소 칸을 한 곳에 모은다
     std::map<size_t, std::vector<std::array<int, 3>>> edits;
     std::map<std::string, int> movedBy;    // 키워드 → 바꾼 칸 수
     int unchanged = 0, own = 0;
+    // 공차로 짝지은 것 — 새 절점 하나에 옛 절점 둘 이상이 몰리면 못 푼다(공차가 격자보다 크다는 뜻이다)
+    struct NodeHit { const noderefs::Ref* r; std::string kw; int target; double moved; };
+    std::vector<NodeHit> hits;
+    std::map<int, std::set<int>> tolInto;
+    int tolMatched = 0;
+    double tolMax = 0;
     for (const auto& r : sc.refs) {
         const std::string kw = noderefs::keywordOf(E, r);
         if (ownNodes.count(r.value)) { ++own; continue; }            // 블록이 스스로 정의한 절점
-        auto on = oldD.mesh.getNodes().find(r.value);
-        if (on == oldD.mesh.getNodes().end()) {
-            unresolved.push_back({r.line, kw, r.value, "old_deck 에도 블록에도 없는 절점이다"});
-            continue;
-        }
-        auto q = oldD.qualifier.find(r.value);
-        const std::string qual = q == oldD.qualifier.end() ? std::string() : q->second;
-        auto it = newIdx.find(qual + '\x1e' + coordKey(on->second.position));
-        if (it == newIdx.end() || it->second < 0) {
-            std::string why = it == newIdx.end() ? "new_deck 에 같은 파트·같은 자리 절점이 없다"
-                                                 : "new_deck 에 같은 파트·같은 자리 절점이 여럿이다";
-            if (!qual.empty()) {
-                const std::string first = qual.substr(0, qual.find('\x1f'));
-                why += " (파트 「" + first + "」" + (resizedParts.count(first) ? " — 구간 표: 다시 구웠다(resized)" : "") + ")";
-            }
+        int target = 0;
+        double moved = 0;
+        std::string why;
+        if (!matchNode(r.value, target, moved, why)) {
             unresolved.push_back({r.line, kw, r.value, why});
             continue;
         }
-        if (r.col < 0) {
-            unresolved.push_back({r.line, kw, r.value, "자유형식·칸이 어긋난 줄이라 제자리에 바꿔 쓸 수 없다"});
+        if (moved > 0) tolInto[target].insert(r.value);
+        hits.push_back({&r, kw, target, moved});
+    }
+    for (const auto& h : hits) {
+        const auto& r = *h.r;
+        if (h.moved > 0 && tolInto[h.target].size() > 1) {
+            unresolved.push_back({r.line, h.kw, r.value, "공차 안 짝이 겹친다 — 옛 절점 " +
+                                  std::to_string(tolInto[h.target].size()) + "개가 새 절점 " + std::to_string(h.target) + " 하나로 간다"});
             continue;
         }
-        if (static_cast<int>(std::to_string(it->second).size()) > r.width) {
-            unresolved.push_back({r.line, kw, r.value, "새 번호 " + std::to_string(it->second) + " 가 칸 폭 " +
+        if (r.col < 0) {
+            unresolved.push_back({r.line, h.kw, r.value, "자유형식·칸이 어긋난 줄이라 제자리에 바꿔 쓸 수 없다"});
+            continue;
+        }
+        if (static_cast<int>(std::to_string(h.target).size()) > r.width) {
+            unresolved.push_back({r.line, h.kw, r.value, "새 번호 " + std::to_string(h.target) + " 가 칸 폭 " +
                                   std::to_string(r.width) + " 을 넘는다"});
             continue;
         }
-        if (it->second == r.value) ++unchanged;
-        else { edits[r.line].push_back({r.col, r.width, it->second}); ++movedBy[kw]; }
+        if (h.moved > 0) { ++tolMatched; tolMax = std::max(tolMax, h.moved); }
+        if (h.target == r.value) ++unchanged;
+        else { edits[r.line].push_back({r.col, r.width, h.target}); ++movedBy[h.kw]; }
     }
 
     // ── 4b. 파트·요소 참조(v2) — 파트는 `*PART` 제목, 요소는 (파트 제목, 요소 절점들의 좌표 집합) 정확 일치 ─────
@@ -465,6 +549,24 @@ int run(const Input& in, ConsoleOutput& console) {
         for (const auto& c : ks) { k += '\x1e'; k += c; }
         return k;
     };
+    // 공차를 주면 요소는 (파트 제목, **짝지은 새 절점 번호 집합**)으로 찾는다 — 좌표가 조금 움직였으므로 좌표 집합은 못 쓴다.
+    auto elemKeyTol = [&](const Element& e, bool isOld) {
+        std::set<int> ids;
+        bool fail = false;
+        const Deck& dk = isOld ? oldD : newD;
+        dk.mesh.forEachElementNode(e, [&](int n) {
+            if (!isOld) { ids.insert(n); return; }
+            int t = 0;
+            double mv = 0;
+            std::string w;
+            if (matchNode(n, t, mv, w)) ids.insert(t); else fail = true;
+        });
+        if (fail) return std::string();
+        auto pt = dk.mesh.getParts().find(e.partId);
+        std::string k = (pt == dk.mesh.getParts().end() ? "#" + std::to_string(e.partId) : cards::trim(pt->second.name));
+        for (int i : ids) { k += '\x1e'; k += std::to_string(i); }
+        return k;
+    };
     std::unordered_map<std::string, int> newElemIdx;
     bool elemIndexed = false;
     for (const auto& r : ir.refs) {
@@ -483,7 +585,7 @@ int run(const Input& in, ConsoleOutput& console) {
         } else {
             if (!elemIndexed) {
                 for (const auto& [eid, e] : newD.mesh.getElements()) {
-                    const std::string k = elemKey(newD, e);
+                    const std::string k = tol > 0 ? elemKeyTol(e, false) : elemKey(newD, e);
                     if (k.empty()) continue;
                     auto it = newElemIdx.find(k);
                     if (it == newElemIdx.end()) newElemIdx[k] = eid;
@@ -494,7 +596,7 @@ int run(const Input& in, ConsoleOutput& console) {
             auto oe = oldD.mesh.getElements().find(r.value);
             if (oe == oldD.mesh.getElements().end()) why = "old_deck 에 없는 요소다(격자 리더가 읽는 솔리드·셸만 옮긴다)";
             else {
-                const std::string k = elemKey(oldD, oe->second);
+                const std::string k = tol > 0 ? elemKeyTol(oe->second, true) : elemKey(oldD, oe->second);
                 auto it = k.empty() ? newElemIdx.end() : newElemIdx.find(k);
                 if (it == newElemIdx.end()) {
                     auto pt = oldD.mesh.getParts().find(oe->second.partId);
@@ -585,6 +687,14 @@ int run(const Input& in, ConsoleOutput& console) {
     console.success(tag + "다 묶었다 — 절점·파트·요소 칸 " + std::to_string(moved) + "곳을 새 번호로 · 번호가 그대로인 칸 " +
                     std::to_string(unchanged) + " · 블록 자신의 절점 " + std::to_string(own));
     for (const auto& [k, n] : movedBy) console.println("  " + k + " " + std::to_string(n) + "곳");
+    if (tolMatched > 0) {
+        char b[96];
+        std::snprintf(b, sizeof(b), "%d곳 · 가장 큰 거리 %.6g (공차 %g)", tolMatched, tolMax, tol);
+        console.warning(tag + "공차로 짝지은 절점 " + b + " — 그 절점은 자리가 조금 다르다(물리가 그만큼 바뀐다)");
+    }
+    if (oldD.includes || newD.includes)
+        console.println("  인클루드 닫힘을 함께 읽었다 — old " + std::to_string(oldD.includes) + "개 · new " +
+                        std::to_string(newD.includes) + "개");
     console.println("  → " + in.output + " — new_deck 과 함께 `*INCLUDE` 해 쓴다");
     return 0;
 }

@@ -123,9 +123,11 @@ job 은 `failed` 로 보이지만 산출 덱은 있다 — `get_job(job_id, incl
    `frame: world`·`coord_sha` 가 하나라도 계약과 다르면 아무것도 쓰지 않는다(rc 1). 바닥 위 조각은 번호를 옮기지
    않아 대응표 번호가 곧 덱 번호다. 세트가 든 조각(`ranges.sid` 가 null 이 아님)은 아직 받지 않는다.
 3. **재메시 뒤** — StepForge 는 메시 잡마다 덱 전체를 다시 번호 매긴다. 그 위에 덧붙인 블록(세트·SPC·하중·이력·
-   접촉·CNRB …)은 `rebind_entities_after_remesh`(`old_deck`·`new_deck`·`entities`·`output`, 선택 `range_diff`)로
-   새 번호에 다시 묶는다. 절점은 (파트 제목, 좌표) · 파트는 `*PART` 제목 · 요소는 (파트 제목, 절점 좌표 집합)으로
-   **정확히** 짝짓고 공차는 없다. 하나라도 못 풀면 쓰지 않는다. 한 파일 덱만 받는다.
+   접촉·CNRB·파트 감쇠·초기응력 …)은 `rebind_entities_after_remesh`(`old_deck`·`new_deck`·`entities`·`output`, 선택
+   `range_diff`·`tolerance`)로 새 번호에 다시 묶는다. 절점은 (파트 제목, 좌표) · 파트는 `*PART` 제목 · 요소는 (파트 제목,
+   절점 좌표 집합)으로 **정확히** 짝짓는다 — `tolerance` 는 **사용자가 줄 때만** 넣어라(같은 파트 안 그 거리의 새 절점이
+   하나일 때만 짝짓는다 · 물리가 그만큼 바뀐다). 하나라도 못 풀면 쓰지 않는다. 두 덱은 인클루드로 쪼개져 있어도 된다
+   (닫힘을 다 읽어야 받는다).
 
 ## 격자를 **보는** 법 (그림 도구 셋)
 

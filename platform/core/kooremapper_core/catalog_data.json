@@ -14047,7 +14047,7 @@
       "name": "rebind_entities_after_remesh",
       "category": "mesh",
       "summary": "Re-bind the node, part and element IDs in blocks added on top of a deck (sets, SPC, loads, history, contacts, CNRB …) to a re-meshed deck: nodes by part title and exact coordinates, parts by title, elements by part title and node coordinates.",
-      "description": "StepForge renumbers its whole deck in part order on every mesh job, so sets, constraints and outputs we added on top of an earlier deck point at the wrong nodes afterwards. The boundary agreement makes re-binding ours, with the range table and coordinates as input (Q12). Each node referenced by the added blocks is matched to the node of the new deck that belongs to the same part (by *PART title) and sits at exactly the same coordinates, written as %16.9e like coord_sha; there is no tolerance and no nearest-node fallback, because that would change the physics silently. Nodes on a touching interface, which StepForge keeps separate per part, are told apart by the part name. The field positions are the same canonical table that info --strict uses (parser/NodeRefs). Parts and elements are re-bound too (v2): a PID by its *PART title in the new deck (StepForge may renumber PIDs), an element by its part title plus the exact coordinate set of its nodes; the field positions come from the canonical parser/IdRefs table (*SET_PART, contact Card 1 SSID/MSID when SSTYP/MSTYP is 3 and the STYP signature reads, *CONSTRAINED_RIGID_BODIES, *SET_SOLID/SHELL/BEAM/TSHELL, *DATABASE_HISTORY_SOLID/SHELL/BEAM/TSHELL). The op refuses, with exit code 1 and no output, when a referenced node, part or element has no single match (a re-meshed part's vanished position, a part title missing from new_deck, a PID that is not a *PART of old_deck, or several candidates), when the blocks hold cards whose node, part or element fields cannot be pinned down (initial stress, part damping, _GENERATE sets, a contact whose STYP fields do not read …), when a line is free-format, or when an ID the blocks define themselves (*NODE, set SID, CNRB PID, *ELEMENT_MASS EID, LCID, CID) already exists in the new deck. With range_diff, every coords.before / coords.after is measured again on the two decks and any difference refuses the run; unmatched nodes of a part the table marks as resized are reported as such. Only the node, part and element ID fields change, at their width; every other byte is kept.",
+      "description": "StepForge renumbers its whole deck in part order on every mesh job, so sets, constraints and outputs we added on top of an earlier deck point at the wrong nodes afterwards. The boundary agreement makes re-binding ours, with the range table and coordinates as input (Q12). Each node referenced by the added blocks is matched to the node of the new deck that belongs to the same part (by *PART title) and sits at exactly the same coordinates, written as %16.9e like coord_sha. By default there is no tolerance and no nearest-node fallback, because that would change the physics silently; an optional tolerance (since 2026-10-17) matches a node that has no exact partner to the single new node of the same part within that distance — none or several candidates leave it unmatched, two old nodes landing on one new node are refused, and the console reports how many nodes were matched that way and the largest distance. Nodes on a touching interface, which StepForge keeps separate per part, are told apart by the part name. The field positions are the same canonical table that info --strict uses (parser/NodeRefs). Parts and elements are re-bound too (v2): a PID by its *PART title in the new deck (StepForge may renumber PIDs), an element by its part title plus the exact coordinate set of its nodes; the field positions come from the canonical parser/IdRefs table (*SET_PART, contact Card 1 SSID/MSID when SSTYP/MSTYP is 3 and the STYP signature reads, *CONSTRAINED_RIGID_BODIES, *SET_SOLID/SHELL/BEAM/TSHELL, *DATABASE_HISTORY_SOLID/SHELL/BEAM/TSHELL, and since 2026-10-17 *DAMPING_PART_MASS/STIFFNESS Card 1 PID — the MASS Card 2 that FLAG = 1 adds is left alone — and *INITIAL_STRESS_SOLID/SHELL Card 1 EID of every card set, whose length NINT, NHISV, LARGE, NPLANE, NTHICK, NTENSR, NTHINT and NTHHSV fix; the _SET variants point at a set number and are kept). With tolerance, an element is matched by its part title plus the set of new node IDs its nodes were matched to. Both decks may be split with *INCLUDE (since 2026-10-17): the whole closure is read for nodes, elements, parts and the IDs that must not clash, and a closure that cannot be read completely is refused. Second-order solids are read with every node field, so a mid-side node's part is known. The op refuses, with exit code 1 and no output, when a referenced node, part or element has no single match (a re-meshed part's vanished position, a part title missing from new_deck, a PID that is not a *PART of old_deck, or several candidates), when the blocks hold cards whose node, part or element fields cannot be pinned down (initial strain, an initial-stress block whose card sets do not add up to its lines, _GENERATE sets, a contact whose STYP fields do not read …), when a line is free-format, or when an ID the blocks define themselves (*NODE, set SID, CNRB PID, *ELEMENT_MASS EID, LCID, CID) already exists in the new deck. With range_diff, every coords.before / coords.after is measured again on the two decks and any difference refuses the run; unmatched nodes of a part the table marks as resized are reported as such. Only the node, part and element ID fields change, at their width; every other byte is kept.",
       "invocation": "yaml",
       "config_style": "structured",
       "takes_kfile": true,
@@ -14060,7 +14060,7 @@
           "role": "yaml_field",
           "yaml_path": "old_deck",
           "required": true,
-          "description": "The deck the added blocks were written against (its numbering is what they point at). Single-file decks only."
+          "description": "The deck the added blocks were written against (its numbering is what they point at). It may *INCLUDE other files; the whole closure must be readable."
         },
         {
           "name": "new_deck",
@@ -14068,7 +14068,7 @@
           "role": "yaml_field",
           "yaml_path": "new_deck",
           "required": true,
-          "description": "The re-meshed deck. Single-file decks only; its integer field width must equal old_deck's."
+          "description": "The re-meshed deck. It may *INCLUDE other files; the whole closure must be readable. Its integer field width must equal old_deck's."
         },
         {
           "name": "entities",
@@ -14076,7 +14076,7 @@
           "role": "yaml_field",
           "yaml_path": "entities",
           "required": true,
-          "description": "A .k file holding only the blocks we added (sets of nodes, segments, parts and elements, SPC, loads, history, CNRB, rigid-body merges, contacts, mass, coordinate nodes, curves, boxes). It is not changed."
+          "description": "A .k file holding only the blocks we added (sets of nodes, segments, parts and elements, SPC, loads, history, CNRB, rigid-body merges, contacts, mass, coordinate nodes, curves, boxes, part damping, initial stress). It is not changed."
         },
         {
           "name": "output",
@@ -14093,6 +14093,14 @@
           "yaml_path": "range_diff",
           "required": false,
           "description": "Optional StepForge range table (range_diff JSON). Each part's coord_sha is checked on both decks."
+        },
+        {
+          "name": "tolerance",
+          "type": "number",
+          "role": "yaml_field",
+          "yaml_path": "tolerance",
+          "required": false,
+          "description": "Optional coordinate tolerance (model length unit). 0 or absent means exact match only. A positive value matches a node without an exact partner to the single new node of the same part within this distance; it must be at least 0."
         }
       ],
       "example": {

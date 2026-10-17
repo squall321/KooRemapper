@@ -1599,6 +1599,16 @@ int runRebindAfterRemesh(const std::string& yamlFile, ConsoleOutput& console) {
         else if (key == "entities")   in.entities = val;
         else if (key == "output")     output = val;
         else if (key == "range_diff") in.rangeDiff = val;
+        else if (key == "tolerance") {
+            // 공차는 **줄 때만**(사용자 결정 2026-10-17) — 숫자가 아니거나 음수면 거절한다(조용히 0 으로 읽지 않는다)
+            char* end = nullptr;
+            const double t = std::strtod(val.c_str(), &end);
+            if (val.empty() || end == val.c_str() || *end != '\0' || !(t >= 0) || !std::isfinite(t)) {
+                console.error(std::string("[") + tag + "] tolerance 는 0 이상의 수여야 합니다: " + val);
+                return 1;
+            }
+            in.tolerance = t;
+        }
         else unknown.push_back(key);
     }
     // 모르는 키는 거절한다 — `model:` 을 적으면 조용히 무시되어 다른 덱을 기준으로 삼을 수 있다
@@ -1606,7 +1616,7 @@ int runRebindAfterRemesh(const std::string& yamlFile, ConsoleOutput& console) {
         std::string ks;
         for (const auto& k : unknown) ks += (ks.empty() ? "" : ", ") + k;
         console.error(std::string("[") + tag + "] 모르는 키: " + ks +
-                      " — old_deck · new_deck · entities · output · range_diff(선택)만 받는다");
+                      " — old_deck · new_deck · entities · output · range_diff(선택) · tolerance(선택)만 받는다");
         return 1;
     }
     if (in.oldDeck.empty() || in.newDeck.empty() || in.entities.empty() || output.empty()) {
