@@ -1212,3 +1212,23 @@ plan2 는 이 항목의 전제를 P1-4(대역표)로 잡았다. 그런데 대역
   「not tied / too far」 경고를 본다. 묶이지 않은 절점이 있으면 접촉 Card 3 의 SST(셋째 칸 — 지금 0 = 요소 두께)를 키우거나
   `shell_offset` 을 줄여 다시 본다. 시험 덱 — `examples/offset/04_shell_offset.yaml`(원본이 메시만 든 `arc30_flat.k` 라 재질·제어를
   더해야 돈다) 또는 실제 모델에 `element_type: shell` offset.
+
+### 배포 — 실사용에 반영 5차 (2026-10-17) — 한계 여섯
+사용자 「셋다 고치는게.낫겠는데」 — 작은 셋(hfdamp rc · 목록 카드 정본 · cleanup-nodes 닫힘 정본)과 큰 셋(2차 솔리드 리더 · 재결속
+확장 · `flatten_includes`)을 지어 배포한다. 결정 넷은 권장안. 보고서 `docs/04-report/limits-1017.report.md`.
+
+- [x] 코드 — `19c265d` hfdamp · `f7ad8c0` 목록 카드(실측 결함 셋) · `5871e5d` cleanup-nodes(9단째 인클루드의 절점을 지웠다) ·
+      `0193459` 2차 솔리드(코너 · geometry_basis · 사면체 edge_len) · `ea3e994` 재결속(tolerance · 인클루드 · 감쇠·초기응력) ·
+      `0b7daf8` flatten_includes(27 op) · `143543d` 백엔드 시험(옛 바이너리를 재던 관문).
+- [x] 릴리스 빌드 `cd07c327`(0b7daf8 · GLIBC_2.35) — 회귀 99/99 · 단위 112/112 · 도움말 · 패리티 ALL PASS · 백엔드 564 · 42 op 지문은
+      4차 게시본 `1164d8ed` 와 **덱 바이트 동일**(리포트 JSON 둘만 — 늘 다르다).
+- [x] 프런트(FilePanel — ⚠ 는 geometry_basis null 만) · `cli.sif` `d8213999` · Drive `dist-20261017-082514Z`(보관 4 — 10-16 1차 판 정리).
+- [x] API · MCP 재기동 — health `cd07c327` · `revision_matches_binary: true` · smoke(op 63 · 도구 72) · 그림 20/20 · 덱 op 21/21 ·
+      MCP 설명 14/14(새 글귀 — 재결속 tolerance · 그림 셋 코너 · modelmeta geometry_basis · info 고아 정확 · hfdamp rc 1 · ale·convert
+      인클루드 · cleanup-nodes 16단 · strip · session_includes) · ★플랫폼 경유 3/3 — TET10 업로드 meta `corners`·고아 0 · 쪼갠 덱 ale
+      옵션 없음 failed / `flatten_includes` succeeded(산출 `*INCLUDE` 없음 · AMMG 있음) · 재결속 `tolerance` 가 구조화 검증을 지난다.
+- [x] 스테이징 `1164d8ed → cd07c327`(백업 `KooRemapper.bak-1164d8ed-20261017083104`) · `cli.sif` → `d8213999`.
+- [x] pyKooCAE 매뉴얼 `15e5e8f` — 2차 솔리드 · 재결속 · flatten_includes(REMAP 체인은 미리 펼친 한 파일로) · ale · cleanup-nodes · hfdamp.
+- [x] StepForge 답신 §0-1(`44f16c9`) — geometry_basis · second_order 의 뜻 · 사면체 edge_len · 재결속 선택 넷.
+- [ ] SmartTwinPreprocessor.sif 굽기 → `/opt/apptainers` → 세 사본 sha · SIF 안 실행(아래에 채운다).
+

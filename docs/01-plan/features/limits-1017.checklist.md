@@ -6,13 +6,15 @@
 - [x] S2 cleanup-nodes → 정본 `include_closure::readPaths`(흘려 읽기 판) — 실측: 9단째 파일의 절점을 지웠다(rc 0) · F-10~14(배포본 FAIL 5) · 단위 2 → `5871e5d`
 
 ## 큰 셋
-- [ ] B1 2차 솔리드 — 리더(전체 절점 · TET10 코너) · Writer · bboxReport · modelmeta(`geometry_basis`) · info · 그림 셋 · rebind 소속
-      · 25–28 과 모자란 카드는 그대로 거절 · 시험(test_secondorder_solid 갈래 뒤집기 + 새 단정) · 낡은 말 쓸기
-- [ ] B2 재결속 — `tolerance` · 인클루드 덱 · 초기응력·파트 감쇠 카드 · 시험
-- [ ] B3 `flatten_includes` — 정본 펼치기 · 엔진 훅 · 줄 기반 op · 옵션 없을 때 거절 · 시험(쪼갠 덱 = 안 쪼갠 덱)
+- [x] B1 2차 솔리드 — 리더(전체 절점 · TET10 코너) · Writer · bboxReport · modelmeta(`geometry_basis`) · info · 그림 셋 · rebind 소속
+      · 25–28 과 모자란 카드는 그대로 거절 · test_secondorder_solid 다시 씀(배포본 FAIL 40) · 사면체 edge_len · 낡은 말 쓸기 → `0193459`
+- [x] B2 재결속 — `tolerance` · 인클루드 덱 · 초기응력·파트 감쇠 카드 · 시험 E·F·G(배포본 FAIL 9) → `ea3e994`
+- [x] B3 `flatten_includes` — 정본 펼치기 · 엔진 훅 · 줄 기반 op · 옵션 없을 때 거절 · test_flatten_includes 114항(배포본 FAIL 56) → `0b7daf8`
 
 ## 문서
-- [ ] 카탈로그 · ops_help(→ HelpCatalogData.inc) · SKILL.md · 매뉴얼 · README · 보고서 5차 · 장부 · pyKooCAE · StepForge 답신 · 메모리
+- [x] 카탈로그 · ops_help(→ HelpCatalogData.inc) · SKILL.md · 매뉴얼 · 보고서 `limits-1017.report.md` · 장부 5차 · pyKooCAE `15e5e8f` · StepForge 답신 `44f16c9`
+- [ ] 메모리
 
 ## 배포
-- [ ] compat 빌드 · 관문 전부 · cli.sif · Drive · API/MCP · 스모크 셋 · 스테이징 · SIF · /opt/apptainers · 네 자리 sha
+- [x] compat 빌드 `cd07c327` · 관문 전부(회귀 99 · 단위 112 · 도움말 · 패리티 · backend 564 · 덱 바이트) · cli.sif `d8213999` · Drive `dist-20261017-082514Z` · API/MCP · 스모크 셋 · 설명 14/14 · 플랫폼 경유 3/3 · 스테이징
+- [ ] SIF · /opt/apptainers · 네 자리 sha
