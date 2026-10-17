@@ -106,7 +106,7 @@ job 은 `failed` 로 보이지만 산출 덱은 있다 — `get_job(job_id, incl
 - `meshfix` — 지울 절점을 세트·SPC·하중·이력·CNRB 가 가리키면 같은 파트의 새 절점(옛 자리에서 `snap_tolerance`
   안)으로 바꿔 쓴다. 못 풀면(내부 절점 · 인클루드 안 · 자유형식 줄) 덱을 쓰지 않는다. `preview: true` 로 gmsh 없이
   그 카드를 미리 짚을 수 있다(덱을 쓰지 않는다). 표면 절점이면 `boundary_nodes: fixed` 가 원래 번호를 지킨다.
-- `hfdamp` 선택형 — 인클루드를 다 못 읽었는데 대상 파트가 없으면 전체 감쇠로 바꾸지 않고 멈춘다(rc 255).
+- `hfdamp` 선택형 — 인클루드를 다 못 읽었는데 대상 파트가 없으면 전체 감쇠로 바꾸지 않고 멈춘다(rc 1).
 - `ale` — 주 덱만 고치므로 `*PART` 가 인클루드 안에 있으면 「PID … not found in model」로 멈춘다.
 
 ## StepForge 조각 넣기 · 재메시 뒤 다시 묶기

@@ -95,8 +95,14 @@ def main():
         write(os.path.join(d, "master2.k"), "*KEYWORD\n*INCLUDE\nbox.k\n*INCLUDE\nmissing.k\n*END\n")
         write(os.path.join(d, "c.yaml"), hf_yaml("master2.k", "hf_m2.k", dt="1.0e-12"))
         rc, out = run(binary, d, "hfdamp", "c.yaml")
-        check("C-1 파트를 못 찾았으면 전체로 바꾸지 않고 멈춘다(rc≠0 · 산출 없음)",
-              rc != 0 and "바꾸지 않는다" in out and not os.path.exists(os.path.join(d, "hf_m2.k")), (rc, out[-300:]))
+        # ★종료 코드는 **1** 이다 — 다른 op 의 거절과 같다. 예전에는 `hfdamp_apply` 의 −1 을 그대로 돌려 셸이 255 로
+        #   받았다(2026-10-16 실측). 그래서 「rc≠0」 이 아니라 값을 단정한다.
+        check("C-1 파트를 못 찾았으면 전체로 바꾸지 않고 멈춘다(rc 1 · 산출 없음)",
+              rc == 1 and "바꾸지 않는다" in out and not os.path.exists(os.path.join(d, "hf_m2.k")), (rc, out[-300:]))
+        write(os.path.join(d, "c1b.yaml"), hf_yaml("box.k", "hf_bad.k").replace("cdamp: 0.99", "cdamp: 2.0"))
+        rc, out = run(binary, d, "hfdamp", "c1b.yaml")
+        check("C-1b 값 검사(cdamp 범위 밖)로 거절해도 rc 1 · 산출 없음",
+              rc == 1 and "cdamp must be in" in out and not os.path.exists(os.path.join(d, "hf_bad.k")), (rc, out[-300:]))
         write(os.path.join(d, "c2.yaml"), hf_yaml("master2.k", "hf_m2b.k"))
         rc, out = run(binary, d, "hfdamp", "c2.yaml")
         check("C-2 파트를 찾았으면 쓰되 못 본 인클루드가 있다고 말한다",

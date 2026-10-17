@@ -4019,7 +4019,7 @@ KooRemapper hfdamp <config.yaml>
 | `mode` | global | `global`(PSID=0 전 파트) / `selective`(요소 dt ≤ dt_target 파트만, 재료 E·PR·RHO 필요) |
 | `tssfac` | 0.9 | selective 전용. 요소 dt 추정 안전계수 |
 
-**선택형은 인클루드 닫힘 안의 파트를 본다(2026-10-16).** 예전에는 분석이 주 덱만 봐서, 메시를 `*INCLUDE` 한 마스터 덱에서 「dt 조건을 만족하는 파트가 없다」며 **전체 감쇠(PSID=0)로 조용히 바꿨다**(rc 0 — 독립 op 과 `assemble` 의 `type: hfdamp` 둘 다 실측). 지금은 닫힘을 펼친 줄에서 파트·요소·재질을 읽고, 감쇠 키워드와 세트는 주 덱에 넣는다. 닫힘을 다 못 읽었는데(없는 파일 · `*INCLUDE_TRANSFORM` 등) 대상 파트를 못 찾으면 **전체로 바꾸지 않고 멈춘다** — 찾았으면 쓰되 못 본 인클루드가 있다고 말한다. 인클루드가 없는 덱은 예전과 바이트가 같다(회귀 `test_hfdamp_include_closure.py`).
+**선택형은 인클루드 닫힘 안의 파트를 본다(2026-10-16).** 예전에는 분석이 주 덱만 봐서, 메시를 `*INCLUDE` 한 마스터 덱에서 「dt 조건을 만족하는 파트가 없다」며 **전체 감쇠(PSID=0)로 조용히 바꿨다**(rc 0 — 독립 op 과 `assemble` 의 `type: hfdamp` 둘 다 실측). 지금은 닫힘을 펼친 줄에서 파트·요소·재질을 읽고, 감쇠 키워드와 세트는 주 덱에 넣는다. 닫힘을 다 못 읽었는데(없는 파일 · `*INCLUDE_TRANSFORM` 등) 대상 파트를 못 찾으면 **전체로 바꾸지 않고 멈춘다**(종료 코드 1 · 산출 없음 — 값 검사 거절도 1 이다. 2026-10-17 전에는 255 였다) — 찾았으면 쓰되 못 본 인클루드가 있다고 말한다. 인클루드가 없는 덱은 예전과 바이트가 같다(회귀 `test_hfdamp_include_closure.py`).
 
 **근거**: pyKooCAE `load_bc_contact.md`, `examples/hfdamp/{basic,selective,hfdamp_full}.yaml`. DEFORM 옵션은 요소 응력/힘을 감쇠하고 강체 운동은 감쇠하지 않으며 동적 강성을 약 CDAMP% 높인다. `--help` 는 인자를 config 경로로 해석해 에러를 내므로 근거는 예제·README.
 

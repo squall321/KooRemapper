@@ -655,7 +655,8 @@ int runHFDamp(const std::string& yamlFile, ConsoleOutput& console) {
     if (!inclClosure.files.empty()) flat = KooRemapper::include_closure::flatten(lines, modelPath, inclClosure);
     int rc = hfdamp_apply(lines, cfg, maxSetId, console, inclClosure.files.empty() ? nullptr : &flat,
                           inclClosure.complete());
-    if (rc != 0) return rc;
+    // `hfdamp_apply` 는 거절을 −1 로 알린다 — 그대로 돌려주면 셸이 255 로 받는다(2026-10-16 실측). 다른 op 처럼 1 이다.
+    if (rc != 0) return 1;
 
     // Write output
     KooRemapper::DeckWriter out_w(outPath, KooRemapper::deck_newline::detect(modelPath));
