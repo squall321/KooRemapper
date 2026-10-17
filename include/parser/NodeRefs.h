@@ -44,6 +44,25 @@ const std::vector<OneFieldCard>& oneFieldCards();
 struct DefinitionNodeCard { const char* keyword; std::vector<int> fields; };
 const std::vector<DefinitionNodeCard>& definitionNodeCards();
 
+// ── 정본 표 ③ — 멤버 줄의 칸이 절점인 **목록** 카드(세트 · 세그먼트 · 이력) ──
+// 고치는 동작(다시 채우기 · 줄 빼기 · 칸 비우기)은 갈래마다 달라 `cleanupDeadNodeRefs` 에 둔다 — **어느 블록이 목록인가**와
+// **어느 칸이 절점인가**만 여기서 정한다(2026-10-17). 예전에는 그 장치에 범위 사본이 있었고 세트 분류도 따로 해서
+// `_ADD` 만 건너뛰었다 — `*SET_NODE_INTERSECT`·`*SET_SEGMENT_INTERSECT` 의 멤버(**세트 ID**)를 절점으로 읽어, restack 이
+// 지운 절점과 번호가 같은 세트 ID 를 교집합에서 빼 세트를 **비웠다**(실측).
+//   SetNodeList    — `*SET_NODE`·`_LIST`·`_LIST_SMOOTH` Card 2a 칸 1-8                       Vol_I 234448-234512
+//   SetNodeColumn  — `*SET_NODE_COLUMN` Card 2b 칸 1                                        234448-234512
+//   SetNodeGeneral — `*SET_NODE_GENERAL` 의 OPTION 이 NODE·DNODE 인 줄의 E1..E7(칸 2-8)          234634-234779
+//   SetSegment     — `*SET_SEGMENT` 멤버 줄 칸 1-4 = N1..N4                                    235953-236060
+//   HistoryNode    — `*DATABASE_HISTORY_NODE` Card 1a 칸 1-8                                  122112-122180
+//   None           — 목록이 아니다. `_ADD`·`_INTERSECT`(멤버가 세트 ID) · `_GENERATE`(범위) · `_GENERAL` 세그먼트(옵션 줄) …
+enum class ListCard { None, SetNodeList, SetNodeColumn, SetNodeGeneral, SetSegment, HistoryNode };
+// 이 키워드(대문자 · 칸폭 접미사 뗌)가 어느 목록 카드인가 — 세트 분류는 `deckscan::classifySetNode` 를 따른다.
+ListCard listCardOf(const std::string& kw);
+// 그 목록 카드의 멤버 줄에서 절점인 칸(0-기반).
+const std::vector<int>& listCardFields(ListCard c);
+// 첫 멤버 줄 앞에 오는 데이터 줄 수 — 세트·세그먼트는 [제목] + Card 1(SID …), 이력은 0.
+size_t listCardHeader(ListCard c, const std::string& kw);
+
 // 그 참조의 키워드(대문자 · 칸폭 접미사 뗌).
 std::string keywordOf(const std::vector<std::string>& lines, const Ref& r);
 

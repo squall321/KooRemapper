@@ -1,5 +1,5 @@
 #include "assembly/ModelAssembler.h"
-#include "parser/NodeRefs.h"   // 지운 절점을 가리키는 칸의 정본 표(oneFieldCards · definitionNodeCards)
+#include "parser/NodeRefs.h"   // 지운 절점을 가리키는 칸의 정본 표(oneFieldCards · definitionNodeCards · listCardOf)
 #include "parser/InitialStressCard.h"   // *INITIAL_STRESS_SOLID 카드 1 정본(I10×8)
 #include "parser/IncludeScan.h"
 #include "commands/cnrb2solid.h"
@@ -2469,10 +2469,10 @@ void ModelAssembler::migrateDeadNodeSets(const std::map<int, int>& subst,
     if (subst.empty()) return;
     const auto blocks = rsCollectBlocks(rawLines_);
     for (const auto& b : blocks) {
-        if (!rsStarts(b.kw, "*SET_NODE_LIST")) continue;
-        // 범위·증분 표기는 칸 뜻이 달라 값만 바꿀 수 없다
-        if (rsHas(b.kw, "_GENERATE") || rsHas(b.kw, "_ADD") ||
-            rsHas(b.kw, "_INTERVAL") || rsHas(b.kw, "_COLUMN")) continue;
+        // 목록 세트만 옮긴다 — 분류는 정본(`noderefs::listCardOf`). 예전에는 이름이 `*SET_NODE_LIST` 로 시작할 때만 봐서,
+        // 매뉴얼상 같은 카드인 맨 `*SET_NODE`(<BLANK>)는 옮기지 않고 아래 정리가 **지웠다**(2026-10-17 실측 — 같은 세트가
+        // `_LIST` 면 67·68 → 199·200 으로 옮겨지고 맨 이름이면 둘 다 빠졌다). 범위·증분·칸·세트 ID 표기는 값만 바꿀 수 없다.
+        if (noderefs::listCardOf(b.kw) != noderefs::ListCard::SetNodeList) continue;
         size_t start = rsHas(b.kw, "_TITLE") ? 1u : 0u;
         int sid = 0;
         if (start < b.data.size()) sid = rsIntField(rsCardFields(rawLines_[b.data[start]]), 0);
@@ -2483,7 +2483,9 @@ void ModelAssembler::migrateDeadNodeSets(const std::map<int, int>& subst,
             auto f = rsCardFields(rawLines_[li]);
             std::string out = rawLines_[li];
             int changed = 0;
-            for (size_t q = 0; q < f.size(); ++q) {
+            for (int qi : noderefs::listCardFields(noderefs::ListCard::SetNodeList)) {
+                const size_t q = static_cast<size_t>(qi);
+                if (q >= f.size()) break;
                 auto it = subst.find(rsIntField(f, q));
                 if (it == subst.end()) continue;
                 out = md_setField(out, static_cast<int>(q) * 10, 10, it->second);
@@ -2643,9 +2645,12 @@ void ModelAssembler::cleanupDeadNodeRefs(const std::set<int>& deadNodes,
     for (const auto& b : rsCollectBlocks(rawLines_)) {
         const std::string& kw = b.kw;
 
-        // ── 1. *SET_NODE 계열 ────────────────────────────────────────────────
+        // ── 1. *SET_NODE 계열 — 어느 블록이 목록이고 어느 칸이 절점인가는 정본(`noderefs::listCardOf`·`listCardFields`) ──
         if (rsStarts(kw, "*SET_NODE")) {
-            if (rsHas(kw, "_ADD")) continue;          // 구성원이 노드 세트 ID 다(234873-234875)
+            const noderefs::ListCard lc = noderefs::listCardOf(kw);
+            // `_GENERATE`(범위)만 아래가 따로 본다. `_ADD`·`_INTERSECT` 는 구성원이 **세트 ID** 다(234873-234875) — 예전에는
+            // `_ADD` 만 건너뛰어, 교집합의 세트 ID 가 지운 절점과 번호가 같으면 그것을 빼 세트를 비웠다(2026-10-17 실측).
+            if (lc == noderefs::ListCard::None && !rsHas(kw, "_GENERATE")) continue;
             size_t k = rsHas(kw, "_TITLE") ? 1u : 0u;
             int sid = 0;
             if (k < b.data.size()) sid = rsIntField(rsCardFields(rawLines_[b.data[k]]), 0);
@@ -2683,8 +2688,9 @@ void ModelAssembler::cleanupDeadNodeRefs(const std::set<int>& deadNodes,
                                           " (범위가 통째로 지워졌습니다)");
                 continue;
             }
-            if (rsHas(kw, "_GENERAL")) {
+            if (lc == noderefs::ListCard::SetNodeGeneral) {
                 // 칸 1 은 문자 OPTION 이고 E1..E7 의 뜻이 OPTION 마다 다르다 — NODE/DNODE 줄만 노드다.
+                const std::vector<int>& F = noderefs::listCardFields(lc);
                 for (size_t m = first; m < b.data.size(); ++m) {
                     size_t li = b.data[m];
                     std::string eff = effLine(li);
@@ -2694,41 +2700,44 @@ void ModelAssembler::cleanupDeadNodeRefs(const std::set<int>& deadNodes,
                     std::string opt = f[0];
                     for (auto& c : opt) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
                     if (opt != "NODE" && opt != "DNODE") continue;
-                    if (trySubst(kw, li, {1, 2, 3, 4, 5, 6, 7}, 10)) continue;
+                    if (trySubst(kw, li, F, 10)) continue;
                     bool any = false;
-                    for (size_t q = 1; q < f.size(); ++q) if (dead(rsIntField(f, q))) any = true;
+                    for (int q : F) if (dead(rsIntField(f, (size_t)q))) any = true;
                     if (!any) continue;
                     if (!rsCardFixed10(eff)) {
                         record("left", kw, li, "칸 경계가 없는 줄이라 값만 뺄 수 없습니다 — 직접 지우세요");
                         continue;
                     }
                     std::string out = eff;
-                    for (size_t q = 1; q < f.size(); ++q)
-                        if (dead(rsIntField(f, q))) { out = md_setField(out, (int)q * 10, 10, 0); ++removedValues; }
+                    for (int q : F)
+                        if (dead(rsIntField(f, (size_t)q))) { out = md_setField(out, q * 10, 10, 0); ++removedValues; }
                     pidRefRewrites_[li] = { out };
                     record("moved", kw, li,
                            "세트 " + std::to_string(sid) + ": 지운 노드 칸을 0 으로 비웠습니다(OPTION=" + opt + ")");
                 }
                 continue;
             }
-            if (rsHas(kw, "_COLUMN")) {              // 노드당 한 줄 — 그 줄을 지운다
+            if (lc == noderefs::ListCard::SetNodeColumn) {   // 노드당 한 줄 — 그 줄을 지운다
+                const std::vector<int>& F = noderefs::listCardFields(lc);
                 for (size_t m = first; m < b.data.size(); ++m) {
                     size_t li = b.data[m];
-                    if (!dead(rsIntField(rsCardFields(effLine(li)), 0))) continue;
-                    if (trySubst(kw, li, {0}, 10)) continue;
+                    if (!dead(rsIntField(rsCardFields(effLine(li)), (size_t)F[0]))) continue;
+                    if (trySubst(kw, li, F, 10)) continue;
                     ++removedValues;
                     dropLine("moved", kw, li,
                              "세트 " + std::to_string(sid) + ": 지운 노드 줄을 뺐습니다");
                 }
                 continue;
             }
-            // <BLANK> / LIST / LIST_SMOOTH — 칸 1-8 전부 노드 ID 다. 남은 것만 다시 채워 쓴다.
+            // <BLANK> / LIST / LIST_SMOOTH — 칸 1-8 전부 노드 ID 다(정본 표). 남은 것만 다시 채워 쓴다.
             std::vector<int> keep;
             size_t nDead = 0;
             bool anyMember = false;
             for (size_t m = first; m < b.data.size(); ++m) {
                 auto f = rsCardFields(effLine(b.data[m]));
-                for (size_t q = 0; q < f.size() && q < 8; ++q) {
+                for (int qi : noderefs::listCardFields(noderefs::ListCard::SetNodeList)) {
+                    const size_t q = static_cast<size_t>(qi);
+                    if (q >= f.size()) break;
                     int v = rsIntField(f, q);
                     if (v <= 0) continue;
                     anyMember = true;
@@ -2755,8 +2764,11 @@ void ModelAssembler::cleanupDeadNodeRefs(const std::set<int>& deadNodes,
             continue;
         }
 
-        // ── 2. *SET_SEGMENT — 세그먼트 한 줄이 노드 4 개를 한 덩어리로 쓴다 ───
-        if (rsStarts(kw, "*SET_SEGMENT") && !rsHas(kw, "_ADD") && !rsHas(kw, "_GENERAL")) {
+        // ── 2. *SET_SEGMENT — 세그먼트 한 줄이 노드 4 개를 한 덩어리로 쓴다(칸은 정본 표) ───
+        //   `_INTERSECT`·`_ADD`(세트 ID) · `_GENERAL`(옵션 줄)은 목록이 아니다 — 예전에는 `_INTERSECT` 를 빼지 않아 세트 ID 가
+        //   지운 절점과 번호가 같으면 그 줄을 통째로 뺐다(2026-10-17 실측).
+        if (noderefs::listCardOf(kw) == noderefs::ListCard::SetSegment) {
+            const std::vector<int>& F = noderefs::listCardFields(noderefs::ListCard::SetSegment);
             size_t k = rsHas(kw, "_TITLE") ? 1u : 0u;
             int sid = 0;
             if (k < b.data.size()) sid = rsIntField(rsCardFields(rawLines_[b.data[k]]), 0);
@@ -2764,9 +2776,9 @@ void ModelAssembler::cleanupDeadNodeRefs(const std::set<int>& deadNodes,
                 size_t li = b.data[m];
                 auto f = rsCardFields(effLine(li));
                 bool any = false;
-                for (size_t q = 0; q < 4 && q < f.size(); ++q) if (dead(rsIntField(f, q))) any = true;
+                for (int q : F) if ((size_t)q < f.size() && dead(rsIntField(f, (size_t)q))) any = true;
                 if (!any) continue;
-                if (trySubst(kw, li, {0, 1, 2, 3}, 10)) continue;
+                if (trySubst(kw, li, F, 10)) continue;
                 ++removedValues;
                 dropLine("warn", kw, li, "세그먼트 집합 " + std::to_string(sid) +
                                  ": 지운 노드를 쓰는 세그먼트 줄을 통째로 뺐습니다"
@@ -2837,16 +2849,19 @@ void ModelAssembler::cleanupDeadNodeRefs(const std::set<int>& deadNodes,
         }
         if (didOne) continue;
 
-        // ── 4. 칸 1-8 이 모두 노드 ID 인 목록 카드 ───────────────────────────
-        if (kw == "*DATABASE_HISTORY_NODE") {
+        // ── 4. 칸 1-8 이 모두 노드 ID 인 목록 카드(정본 표) ───────────────────
+        if (noderefs::listCardOf(kw) == noderefs::ListCard::HistoryNode) {
             // Card 1a 는 칸 1-8 이 전부 노드 ID 인 목록이다 — 남은 것만 다시 채워 쓴다.
+            const std::vector<int>& F = noderefs::listCardFields(noderefs::ListCard::HistoryNode);
             for (size_t m = 0; m < b.data.size(); ++m)
-                trySubst(kw, b.data[m], {0, 1, 2, 3, 4, 5, 6, 7}, 10);
+                trySubst(kw, b.data[m], F, 10);
             std::vector<int> keep;
             size_t nDead = 0;
             for (size_t m = 0; m < b.data.size(); ++m) {
                 auto f = rsCardFields(effLine(b.data[m]));
-                for (size_t q = 0; q < f.size() && q < 8; ++q) {
+                for (int qi : F) {
+                    const size_t q = static_cast<size_t>(qi);
+                    if (q >= f.size()) break;
                     int v = rsIntField(f, q);
                     if (v <= 0) continue;
                     if (deadNodes.count(v)) ++nDead;
@@ -3156,12 +3171,13 @@ void ModelAssembler::scanDeadReferences(const std::string& opName,
     std::set<int> deadNodeSets;
     for (size_t bi = 0; bi < blocks.size(); ++bi) {
         const auto& b = blocks[bi];
-        // `_ADD` 는 구성원이 노드 세트 ID 고(Vol_I 234873-234875), `_GENERAL` 은 칸 1 이 문자
-        // OPTION 이며 E1..E7 의 뜻이 OPTION 마다 다르다(234701-234779) — 노드로 훑으면 오탐이다.
-        bool setNode = rsStarts(b.kw, "*SET_NODE") && !rsHas(b.kw, "_GENERATE") &&
-                       !rsHas(b.kw, "_ADD") && !rsHas(b.kw, "_GENERAL");
-        bool setCol  = setNode && rsHas(b.kw, "_COLUMN");   // 칸 1 만 노드 ID(234498-234512)
-        bool setSeg  = rsStarts(b.kw, "*SET_SEGMENT") && !rsHas(b.kw, "_ADD");
+        // 어느 블록이 목록이고 어느 칸이 절점인가는 정본(`noderefs::listCardOf`·`listCardFields`)이다. `_ADD`·`_INTERSECT` 는
+        // 구성원이 세트 ID 고(Vol_I 234873-234875), `_GENERAL` 은 칸 1 이 문자 OPTION 이며 E1..E7 의 뜻이 OPTION 마다
+        // 다르다(234701-234779) — 노드로 훑으면 오탐이다. 예전 사본은 `_INTERSECT` 를 빼지 않아 교집합의 세트 ID 를
+        // 「지운 중간면 노드」로 보고했다(2026-10-17 실측).
+        const noderefs::ListCard lc = noderefs::listCardOf(b.kw);
+        bool setNode = lc == noderefs::ListCard::SetNodeList || lc == noderefs::ListCard::SetNodeColumn;
+        bool setSeg  = lc == noderefs::ListCard::SetSegment;
         bool spc     = rsStarts(b.kw, "*BOUNDARY_SPC_NODE");
         if (!setNode && !setSeg && !spc) continue;
         handled[bi] = true;
@@ -3172,11 +3188,13 @@ void ModelAssembler::scanDeadReferences(const std::string& opName,
             if (start < b.data.size()) sid = rsIntField(rsCardFields(rawLines_[b.data[start]]), 0);
             ++start;
         }
+        static const std::vector<int> kSpcField = {0};                // *BOUNDARY_SPC_NODE 칸 1 = NID
+        const std::vector<int>& F = spc ? kSpcField : noderefs::listCardFields(lc);
         for (size_t m = start; m < b.data.size(); ++m) {
             auto f = rsCardFields(rawLines_[b.data[m]]);
-            size_t n = (spc || setCol) ? std::min<size_t>(1, f.size())
-                           : (setSeg ? std::min<size_t>(4, f.size()) : std::min<size_t>(8, f.size()));
-            for (size_t q = 0; q < n; ++q) {
+            for (int qi : F) {
+                const size_t q = static_cast<size_t>(qi);
+                if (q >= f.size()) break;
                 if (!isDead(deadNodes, rsIntField(f, q))) continue;
                 if (setNode && sid > 0) deadNodeSets.insert(sid);
                 add("NODE", b.kw, b.data[m], "manual",

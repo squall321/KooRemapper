@@ -20,6 +20,7 @@
 #include "parser/DeckNewline.h"
 #include "parser/DeckWriter.h"
 #include "parser/ElementCardLayout.h"
+#include "parser/NodeRefs.h"
 
 #include <sstream>
 #include <vector>
@@ -128,6 +129,39 @@ TEST(classifySetNode_가_세_갈래를_가른다) {
 }
 
 // ── 요소 카드 줄 수 — 한 줄 틀리면 그 뒤 전부가 밀린다 ──────────────────
+
+// ── 목록 카드 정본 — 찾는 쪽(`noderefs::find`)과 고치는 쪽(`cleanupDeadNodeRefs`)이 같은 표를 본다(2026-10-17) ──
+// 고치는 쪽은 `_ADD` 만 건너뛰어 `_INTERSECT` 의 세트 ID 를 절점으로 읽었고(restack 이 교집합 세트를 비웠다),
+// 맨 `*SET_NODE` 를 목록으로 옮기지 않았다(같은 세트가 `_LIST` 면 옮겨지고 맨 이름이면 빠졌다).
+TEST(listCardOf_세트_ID_와_범위는_목록이_아니다) {
+    using noderefs::ListCard;
+    ASSERT_TRUE(noderefs::listCardOf("*SET_NODE") == ListCard::SetNodeList);
+    ASSERT_TRUE(noderefs::listCardOf("*SET_NODE_LIST_TITLE") == ListCard::SetNodeList);
+    ASSERT_TRUE(noderefs::listCardOf("*SET_NODE_LIST_SMOOTH") == ListCard::SetNodeList);
+    ASSERT_TRUE(noderefs::listCardOf("*SET_NODE_COLUMN") == ListCard::SetNodeColumn);
+    ASSERT_TRUE(noderefs::listCardOf("*SET_NODE_GENERAL") == ListCard::SetNodeGeneral);
+    ASSERT_TRUE(noderefs::listCardOf("*SET_NODE_INTERSECT") == ListCard::None);
+    ASSERT_TRUE(noderefs::listCardOf("*SET_NODE_ADD") == ListCard::None);
+    ASSERT_TRUE(noderefs::listCardOf("*SET_NODE_LIST_GENERATE") == ListCard::None);
+    ASSERT_TRUE(noderefs::listCardOf("*SET_SEGMENT") == ListCard::SetSegment);
+    ASSERT_TRUE(noderefs::listCardOf("*SET_SEGMENT_INTERSECT") == ListCard::None);
+    ASSERT_TRUE(noderefs::listCardOf("*SET_SEGMENT_GENERAL") == ListCard::None);
+    ASSERT_TRUE(noderefs::listCardOf("*DATABASE_HISTORY_NODE") == ListCard::HistoryNode);
+    ASSERT_TRUE(noderefs::listCardOf("*DATABASE_HISTORY_NODE_SET") == ListCard::None);
+}
+
+TEST(listCardFields_는_매뉴얼_칸_범위다) {
+    using noderefs::ListCard;
+    ASSERT_EQ(noderefs::listCardFields(ListCard::SetNodeList).size(), (size_t)8);      // 칸 1-8
+    ASSERT_EQ(noderefs::listCardFields(ListCard::SetNodeColumn).size(), (size_t)1);    // 칸 1
+    ASSERT_EQ(noderefs::listCardFields(ListCard::SetNodeGeneral).front(), 1);          // 칸 2-8 (칸 1 은 OPTION)
+    ASSERT_EQ(noderefs::listCardFields(ListCard::SetNodeGeneral).size(), (size_t)7);
+    ASSERT_EQ(noderefs::listCardFields(ListCard::SetSegment).size(), (size_t)4);       // N1..N4
+    ASSERT_EQ(noderefs::listCardFields(ListCard::HistoryNode).size(), (size_t)8);
+    ASSERT_EQ(noderefs::listCardHeader(ListCard::SetNodeList, "*SET_NODE_LIST_TITLE"), (size_t)2);
+    ASSERT_EQ(noderefs::listCardHeader(ListCard::SetSegment, "*SET_SEGMENT"), (size_t)1);
+    ASSERT_EQ(noderefs::listCardHeader(ListCard::HistoryNode, "*DATABASE_HISTORY_NODE"), (size_t)0);
+}
 
 TEST(elementCardSpan_솔리드의_두_포맷을_가른다) {
     // ★`*ELEMENT_SOLID` 는 **두 꼴**이 있다. 섞으면 그 뒤 카드 전부가 밀린다.

@@ -60,9 +60,9 @@ struct Walker {
 }  // namespace
 
 // 칸 자리는 `ModelAssembler::cleanupDeadNodeRefs` 머리말의 매뉴얼 확정표(Vol_I 줄 번호)를 그대로 옮겼다.
-// 그 장치는 **고치는** 쪽(빼기·옮기기·보고)이고 이것은 **찾는** 쪽이다. 한 줄짜리 카드 표와 정의 카드 표는 이제
-// 두 곳이 **같은 표**(`oneFieldCards`·`definitionNodeCards`)를 쓴다(2026-10-16). 세트·세그먼트·이력 목록의 칸 범위는
-// 고치는 동작이 갈래마다 달라 그쪽에 남아 있다 — 같은 범위(1-8 · 1-4)를 말해야 한다.
+// 그 장치는 **고치는** 쪽(빼기·옮기기·보고)이고 이것은 **찾는** 쪽이다. 두 곳이 **같은 표**를 쓴다 — 한 줄짜리 카드
+// (`oneFieldCards`) · 정의 카드(`definitionNodeCards`)는 2026-10-16, 세트·세그먼트·이력 목록(`listCardOf`·`listCardFields`)은
+// 2026-10-17 에 모았다.
 Scan find(const std::vector<std::string>& L, int deckFw, const std::function<bool(int)>& keep) {
     Scan s;
     Walker w{L, keep, s};
@@ -79,32 +79,21 @@ Scan find(const std::vector<std::string>& L, int deckFw, const std::function<boo
         while (!data.empty() && isBlank(L[data.back()])) data.pop_back();
         i = j;
 
-        // ── `*SET_NODE` 계열 — [제목] · Card 1(SID …) 다음이 멤버 ─────────────────
-        //   <BLANK>/_LIST/_LIST_SMOOTH Card 2a 칸 1-8 전부 · _COLUMN Card 2b 칸 1 (234448-234512)
-        //   _GENERAL 은 OPTION 이 NODE·DNODE 인 줄의 E1..E7 (234634-234779)
-        //   _GENERATE(범위 — 매뉴얼이 빈 번호를 허용한다 234577-234581) · _ADD/_INTERSECT(세트 ID) — 절점이 아니다
-        if (starts(kw, "*SET_NODE")) {
-            const size_t first = static_cast<size_t>(cards::titleLines(kw)) + 1;
-            const auto kind = deckscan::classifySetNode(kw);
-            if (kind == deckscan::SetKind::LIST) {
-                for (size_t m = first; m < data.size(); ++m) w.take(data[m], kw, {0, 1, 2, 3, 4, 5, 6, 7}, w10);
-            } else if (kind == deckscan::SetKind::COLUMN) {
-                for (size_t m = first; m < data.size(); ++m) w.take(data[m], kw, {0}, w10);
-            } else if (has(kw, "_GENERAL")) {
-                for (size_t m = first; m < data.size(); ++m) {
+        // ── `*SET_NODE`·`*SET_SEGMENT` — [제목] · Card 1(SID …) 다음이 멤버(정본 표 `listCardOf` — 헤더의 인용) ──
+        //   `_GENERATE`(범위 — 매뉴얼이 빈 번호를 허용한다 234577-234581) · `_ADD`·`_INTERSECT`(세트 ID)는 절점이 아니다
+        if (starts(kw, "*SET_NODE") || starts(kw, "*SET_SEGMENT")) {
+            const ListCard lc = listCardOf(kw);
+            if (lc == ListCard::None) continue;
+            const size_t first = listCardHeader(lc, kw);
+            for (size_t m = first; m < data.size(); ++m) {
+                if (lc == ListCard::SetNodeGeneral) {
                     const Cut c = cut(L[data[m]], w10);
                     if (c.f.empty()) continue;
                     const std::string opt = cards::upper(c.f[0]);
-                    if (opt == "NODE" || opt == "DNODE") w.take(data[m], kw, {1, 2, 3, 4, 5, 6, 7}, w10);
+                    if (opt != "NODE" && opt != "DNODE") continue;
                 }
+                w.take(data[m], kw, listCardFields(lc), w10);
             }
-            continue;
-        }
-        // ── `*SET_SEGMENT` — 멤버 줄 칸 1-4 = N1..N4 (235953-236060) ────────────────
-        if (starts(kw, "*SET_SEGMENT")) {
-            if (has(kw, "_GENERAL") || has(kw, "_ADD") || has(kw, "_INTERSECT")) continue;
-            const size_t first = static_cast<size_t>(cards::titleLines(kw)) + 1;
-            for (size_t m = first; m < data.size(); ++m) w.take(data[m], kw, {0, 1, 2, 3}, w10);
             continue;
         }
         // ── 칸 하나가 절점인 한 줄짜리 카드 — 이름이 **정확히** 같을 때만(정본 표 `oneFieldCards`) ─────
@@ -133,9 +122,9 @@ Scan find(const std::vector<std::string>& L, int deckFw, const std::function<boo
             break;
         }
         if (done) continue;
-        // ── 칸 1-8 이 모두 절점인 목록 — `*DATABASE_HISTORY_NODE` Card 1a (122112-122180) ──
-        if (kw == "*DATABASE_HISTORY_NODE") {
-            for (size_t m = 0; m < data.size(); ++m) w.take(data[m], kw, {0, 1, 2, 3, 4, 5, 6, 7}, w10);
+        // ── 칸 1-8 이 모두 절점인 목록 — `*DATABASE_HISTORY_NODE` Card 1a (정본 표 `listCardOf`) ──
+        if (listCardOf(kw) == ListCard::HistoryNode) {
+            for (size_t m = 0; m < data.size(); ++m) w.take(data[m], kw, listCardFields(ListCard::HistoryNode), w10);
             continue;
         }
         if (starts(kw, "*DATABASE_HISTORY_NODE")) {
@@ -168,6 +157,45 @@ Scan find(const std::vector<std::string>& L, int deckFw, const std::function<boo
         }
     }
     return s;
+}
+
+ListCard listCardOf(const std::string& kw) {
+    if (starts(kw, "*SET_NODE")) {
+        if (has(kw, "_GENERAL")) return ListCard::SetNodeGeneral;   // 분류기는 OPAQUE 로 본다 — 줄마다 OPTION 을 본다
+        switch (deckscan::classifySetNode(kw)) {
+            case deckscan::SetKind::LIST:   return ListCard::SetNodeList;
+            case deckscan::SetKind::COLUMN: return ListCard::SetNodeColumn;
+            default:                        return ListCard::None;       // _GENERATE · _ADD · _INTERSECT · _INTERVAL
+        }
+    }
+    if (starts(kw, "*SET_SEGMENT")) {
+        if (has(kw, "_GENERAL") || has(kw, "_ADD") || has(kw, "_INTERSECT")) return ListCard::None;
+        return ListCard::SetSegment;
+    }
+    if (kw == "*DATABASE_HISTORY_NODE") return ListCard::HistoryNode;
+    return ListCard::None;
+}
+
+const std::vector<int>& listCardFields(ListCard c) {
+    static const std::vector<int> eight = {0, 1, 2, 3, 4, 5, 6, 7};
+    static const std::vector<int> one = {0};
+    static const std::vector<int> general = {1, 2, 3, 4, 5, 6, 7};
+    static const std::vector<int> segment = {0, 1, 2, 3};
+    static const std::vector<int> none = {};
+    switch (c) {
+        case ListCard::SetNodeList:    return eight;
+        case ListCard::SetNodeColumn:  return one;
+        case ListCard::SetNodeGeneral: return general;
+        case ListCard::SetSegment:     return segment;
+        case ListCard::HistoryNode:    return eight;
+        case ListCard::None:           return none;
+    }
+    return none;
+}
+
+size_t listCardHeader(ListCard c, const std::string& kw) {
+    if (c == ListCard::HistoryNode || c == ListCard::None) return 0;
+    return static_cast<size_t>(cards::titleLines(kw)) + 1;
 }
 
 const std::vector<OneFieldCard>& oneFieldCards() {
