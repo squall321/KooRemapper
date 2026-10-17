@@ -30,4 +30,4 @@
 - [x] 셸 층 묶기 — `tied`(기본)면 `*SET_SEGMENT` 둘 + `*CONTACT_TIED_SURFACE_TO_SURFACE_OFFSET`(restack 셸 계면과 같은 꼴) · both 는 경고 ·
       회귀 E 절(묶음 하나 · slave/master 절점 · sstyp/mstyp) · 단독 offset 경로도 같다 · 산출 `info --strict` OK ·
       커밋된 셸 결과 셋 다시 구움(지운 줄 0 · 묶음 블록만 +1,175) · 그 덱을 읽는 시험 넷 FAIL 0
-- [ ] 다시 빌드 → 관문 → 게시 → API · MCP → 스모크 → 스테이징 → SIF → 장부 · 보고서 · 메모리 · pyKooCAE 문서
+- [x] 다시 빌드 `1164d8ed` → 관문 → `dist-20261017-035440Z` → API · MCP → 스모크 · 플랫폼 경유 셸 묶음 → 스테이징 → SIF(v117) → 장부 · 보고서 · 메모리 · pyKooCAE(`2680a22`)
