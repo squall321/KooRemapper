@@ -156,6 +156,19 @@ async def test_flattened_legacy_upload_still_counts_as_satisfied(db, sess):
     assert await svc.include_status(db, s.id) == {}
 
 
+@_aio
+async def test_master_meta_is_remeasured_when_its_include_arrives(db, sess):
+    """마스터를 인클루드보다 먼저 올려도 meta 가 주 덱만 본 값으로 굳지 않는다 — 인클루드가 들어오면 그것을 가리키는
+    덱을 다시 잰다(2026-10-17). 예전에는 업로드 순간 한 번만 재서 마스터 meta 가 절점 1(주 덱만)로 남았다."""
+    _u, s = sess
+    m = await svc.add_uploaded_file(db, s, filename="master.k", raw=_MASTER)
+    before = (m.meta or {}).get("nodes")
+    await svc.add_uploaded_file(db, s, filename="sub/part.k", raw=_PART)
+    await db.refresh(m)
+    after = (m.meta or {}).get("nodes")
+    assert before == 1 and after == 2, (before, after)
+
+
 # ── 실행 직전 관문 (API 수준) ──────────────────────────────────────────────
 # 여기서 막지 않으면 아무도 못 막는다 — op 은 인클루드를 읽지 않아 성공하고,
 # 깨진 산출물은 LS-DYNA 에 넣고 나서야 드러난다.

@@ -21,10 +21,9 @@ LS-DYNA `.k` 파일을 다루는 KooRemapper 플랫폼을 Claude에서 사용하
 3. **파일 업로드** — `upload_kfile(session_id, filename, content)`.
    업로드 즉시 백엔드가 `info`로 노드/요소/파트/bbox/`*INCLUDE`를 파싱한다.
    "이 파일 안에 뭐가 있나"는 `list_session_files(session_id)` 또는 `inspect_file(...)`.
-   덱이 `*INCLUDE` 로 나뉘어 있으면 **인클루드를 먼저** 올린다(하위 폴더면 `filename="sub/part.k"`).
-   meta 는 올리는 순간 그때 세션에 있는 닫힘까지 한 번 재므로, 마스터를 먼저 올리면 절점 0 으로 남는다
-   (그때는 마스터를 `delete_file` 로 지우고 다시 올린다). 빠진 것은 `session_includes(session_id)` 로 본다 —
-   빠진 채로는 `run_operation` 이 422 로 막는다.
+   덱이 `*INCLUDE` 로 나뉘어 있으면 인클루드 파일도 올린다(하위 폴더면 `filename="sub/part.k"`). 순서는
+   상관없다 — 인클루드가 나중에 들어오면 그것을 가리키는 덱의 meta 를 다시 잰다. 빠진 것은
+   `session_includes(session_id)` 로 본다 — 빠진 채로는 `run_operation` 이 422 로 막는다.
 4. **실행** — `run_operation(session_id, op, args)` → `job_id`.
    - 파일 인자(예: bent_mesh, flat_mesh, model)는 **세션 내 파일명**을 그대로 쓴다.
    - YAML 계열 op는 args가 곧 설정 키다. `config_style: "freeform"` op는

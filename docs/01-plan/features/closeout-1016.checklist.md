@@ -19,3 +19,9 @@
 - [x] 프런트 · `cli.sif` `13d9c3b4` → Drive `dist-20261016-222746Z` → API · MCP 재기동(health `e37fdf4f` 일치) → smoke · 그림 20/20 · 덱 op 21/21 · 설명 11/11 · 새 op 경유
 - [x] 스테이징 → SmartTwinPreprocessor.sif 굽기(tar v115 · 메일) → `/opt/apptainers` → 세 사본 바이트 동일 · SIF 안 실행 · 배포 SIF 로 REMAP 배선 재실측
 - [x] 장부(2차 배포 칸) · 보고서(2차 절 · 결함 38 · 결정 셋 갱신) · 메모리
+
+## 3차 — 사용자 「다 권장대로 해」(2026-10-17)
+- [x] ③ offset 셸 + czm 거절 · 기본 tied 경고(`de2a798`) — 회귀 E 절 셋(옛 바이너리 FAIL 둘) · 카탈로그 · 매뉴얼 · 도움말
+- [x] ① 인클루드가 들어오면 가리키는 덱 meta 를 다시 잰다 — 시험(돌연변이 FAIL 확인) · 백엔드 563 · MCP 설명 · SKILL.md
+- [x] ② `allow_missing_includes` 는 MCP 에 열지 않는다 — 결정 기록(코드 변경 없음)
+- [ ] 다시 빌드 → 관문 → 게시 → API · MCP → 스모크 → 스테이징 → SIF → 장부 · 보고서 · 메모리 · pyKooCAE 문서(offset 문장)

@@ -147,10 +147,9 @@ async def upload_kfile(
     ⚠ `filename` 에 **하위 경로를 그대로 쓸 수 있고, 써야 한다** — 덱이 `*INCLUDE sub/part.k` 를
     참조하면 그 파일도 `filename="sub/part.k"` 로 올려라. 덱을 고쳐 쓰는 op 은 주 덱만 고치고
     **출력 덱에 그 줄을 보존**하므로, 경로가 어긋나면 산출물을 LS-DYNA 에 넣을 때 깨진다.
-    ⚠ **인클루드를 먼저 올려라** — meta 는 업로드하는 순간 한 번, 그때 세션에 있는 인클루드 닫힘까지
-    잰다. 마스터를 먼저 올리면 그 meta 가 절점 0 으로 남는다(실측). 순서가 뒤집혔으면 마스터를
-    `delete_file` 로 지우고 다시 올린다(같은 이름으로 또 올리면 `_1` 이 붙은 새 파일이 된다). op 은
-    실행할 때 닫힘을 다시 읽으므로 잡 결과는 순서와 무관하다.
+    올리는 **순서는 상관없다** — meta 는 그때 세션에 있는 인클루드 닫힘까지 재고, 인클루드가 나중에 들어오면
+    그것을 가리키는 덱의 meta 를 다시 잰다(2026-10-17 — 예전에는 마스터를 먼저 올리면 meta 가 절점 0 으로 남았다).
+    큰 마스터면 그 인클루드 업로드가 다시 재는 만큼 더 걸린다. 같은 이름으로 또 올리면 `_1` 이 붙은 새 파일이 된다.
     올린 뒤 `session_includes` 로 빠진 게 없는지 확인하라(`..`·절대경로는 서버가 제거한다)."""
     raw = base64.b64decode(content) if base64_encoded else content.encode("utf-8")
     files = {"files": (filename, raw, "application/octet-stream")}
@@ -166,7 +165,7 @@ async def upload_kfile(
 async def upload_local_path(session_id: str, path: str, ctx: Context, filename: str | None = None) -> dict:
     """로컬 디스크의 파일을 그대로 세션에 업로드한다(대형 메쉬에 적합). MCP 서버가 그 파일을
     읽을 수 있는 같은 머신에서 돌 때만 동작한다(예: Claude Desktop + 로컬 실행). 대화로
-    내용을 실어나르지 않으므로 수십 MB도 OK. 인클루드 순서 규칙은 `upload_kfile` 과 같다(인클루드를 먼저).
+    내용을 실어나르지 않으므로 수십 MB도 OK. 인클루드는 어느 순서로 올려도 된다(`upload_kfile` 과 같다).
     Upload a file straight from local disk (best for large meshes). Only works when the
     MCP server can read `path` (server runs on the same machine, e.g. Claude Desktop local)."""
     import os as _os

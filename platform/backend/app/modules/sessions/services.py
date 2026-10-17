@@ -176,6 +176,7 @@ async def add_uploaded_file(
     db.add(row)
     await db.commit()
     await db.refresh(row)
+    await _reinspect_includers(db, session, safe, row.id)
     return row
 
 
@@ -184,11 +185,34 @@ def _norm_include(p: str) -> str:
     return storage.safe_relpath(p)
 
 
+async def _reinspect_includers(db: AsyncSession, session: Session, new_filename: str, skip_id: int) -> list[str]:
+    """방금 올라온 파일을 `*INCLUDE` 하는 덱의 meta 를 다시 잰다(2026-10-17 · 사용자 결정 「권장대로」).
+
+    meta 는 업로드 순간 한 번, 그때 세션에 있는 인클루드 닫힘까지 잰다. 그래서 마스터를 인클루드보다 먼저 올리면 그
+    meta 가 주 덱만 본 값으로 굳었다(살아 있는 스택 실측 — 절점 0 vs 198). 잡 결과는 실행 때 닫힘을 다시 읽어 맞았지만
+    파일 목록 · inspect · 화면 · 업로드 때 잰 `ref_dangling` 이 틀렸다. 가리키는 덱만 다시 재므로 비용은 그 덱의 검사
+    한 번이다(큰 마스터면 그 업로드가 그만큼 걸린다). 맞춤 규칙은 `include_status` 와 같다(경로 · 이름).
+    """
+    base = new_filename.rsplit("/", 1)[-1]
+    redone: list[str] = []
+    for f in await list_files(db, session.id):
+        if f.id == skip_id or not isinstance(f.meta, dict):
+            continue
+        incs = f.meta.get("includes") or []
+        if not any(_norm_include(r) == new_filename or _norm_include(r).rsplit("/", 1)[-1] == base for r in incs):
+            continue
+        f.meta = await asyncio.to_thread(inspect_kfile, storage.abs_path(f.rel_path))
+        redone.append(f.filename)
+    if redone:
+        await db.commit()
+    return redone
+
+
 async def include_status(db: AsyncSession, session_id: str) -> dict:
     """세션 안의 덱들이 참조하는 `*INCLUDE` 가 실제로 올라와 있나.
 
-    ⚠ 왜 필요한가 — KooRemapper 는 `*INCLUDE` 를 **읽지 않지만 출력 덱에 그 줄을 보존한다**.
-    그래서 인클루드가 빠져 있어도 op 은 **성공한다**. 깨진 것은 산출물이고, 그것을 LS-DYNA 에
+    ⚠ 왜 필요한가 — 덱을 고쳐 쓰는 op 은 주 덱만 고치고 **출력 덱에 그 `*INCLUDE` 줄을 보존한다**(분석 op 은 함께 읽는다).
+    그래서 인클루드가 빠져 있어도 그 op 은 **성공한다**. 깨진 것은 산출물이고, 그것을 LS-DYNA 에
     넣는 순간 드러난다 — 도구가 말해 주지 않으면 사람은 해석을 돌리고 나서야 안다.
 
     반환: {"<덱 파일명>": {"missing": [...], "satisfied": [...]}} — 빠진 게 없으면 항목을 내지 않는다.
