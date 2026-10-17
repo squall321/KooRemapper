@@ -124,13 +124,16 @@ int runSurfView(const std::string& yamlFile, ConsoleOutput& console) {
     }
 
     {
-        // ★2차 솔리드는 **그리지 않는다.** 같은 말을 세 그림 op 이 함께 쓴다(갈리면 못 믿는다).
+        // ★기하를 믿을 수 없는 2차 솔리드(코너 차례를 모르는 ELFORM · 칸이 모자란 카드)는 **그리지 않는다.**
+        //   같은 말을 세 그림 op 이 함께 쓴다(갈리면 못 믿는다). 코너를 아는 2차 솔리드는 코너로 그리고 그렇다고 말한다.
         const auto bad2nd = figure::secondOrderSolidPids(mesh);
         if (!bad2nd.empty()) {
-            console.error(figure::secondOrderSolidWhy(bad2nd));
+            console.error(figure::secondOrderSolidWhy(bad2nd, mesh));
             for (const auto& l : figure::secondOrderSolidAdvice()) console.info("  " + l);
             return 1;
         }
+        const auto corner2nd = figure::secondOrderCornerPids(mesh);
+        if (!corner2nd.empty()) console.info(figure::secondOrderCornerNote(corner2nd));
     }
 
     console.header("Surface view (free faces): " + Platform::getFilename(c.model));

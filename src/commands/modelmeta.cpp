@@ -592,8 +592,7 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
     std::map<int, std::set<int>> nodeOwners;   // nid → {pid}
     for (const auto& [eid, elem] : mesh.getElements()) {
         byPart[elem.partId].push_back(&elem);
-        for (int nid : elem.nodeIds)
-            if (nid > 0) nodeOwners[nid].insert(elem.partId);
+        mesh.forEachElementNode(elem, [&](int nid) { nodeOwners[nid].insert(elem.partId); });   // 2차는 중간절점까지
     }
     std::vector<int> allPids;
     for (const auto& [pid, _] : byPart) allPids.push_back(pid);
@@ -653,10 +652,10 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
         for (const auto* e : byPart[pid]) {
             bool shell = (e->type == KooRemapper::ElementType::QUAD4);
             (shell ? nShell : nSolid)++;
-            for (int nid : e->nodeIds) {
-                if (nid <= 0) continue;
+            // 요소가 **참조하는** 절점 — 2차 솔리드는 중간절점까지(휜 모서리가 bbox 를 넓힐 수 있다)
+            mesh.forEachElementNode(*e, [&](int nid) {
                 V3 p;
-                if (!mm_nodePos(mesh, nid, p)) continue;
+                if (!mm_nodePos(mesh, nid, p)) return;
                 if (first) {
                     po.bbox[0] = po.bbox[3] = p.x;
                     po.bbox[1] = po.bbox[4] = p.y;
@@ -667,17 +666,16 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
                     po.bbox[1] = std::min(po.bbox[1], p.y); po.bbox[4] = std::max(po.bbox[4], p.y);
                     po.bbox[2] = std::min(po.bbox[2], p.z); po.bbox[5] = std::max(po.bbox[5], p.z);
                 }
-            }
+            });
         }
         po.elemClass = (nSolid && nShell) ? "mixed" : (nShell ? "shell" : "solid");
 
         // 고유 절점 수. `n_elems * 8` 이 아니다 — 요소가 절점을 공유하고 축퇴 요소는 같은 절점을
-        // 두 번 쓴다(TET4 를 HEX8 로 적을 때 n4 가 네 번 반복된다).
+        // 두 번 쓴다(TET4 를 HEX8 로 적을 때 n4 가 네 번 반복된다). 2차 솔리드는 중간절점까지 센다.
         {
             std::set<int> uniq;
             for (const auto* e : byPart[pid])
-                for (int nid : e->nodeIds)
-                    if (nid > 0) uniq.insert(nid);
+                mesh.forEachElementNode(*e, [&](int nid) { uniq.insert(nid); });
             po.nNode = static_cast<int>(uniq.size());
         }
 
@@ -685,18 +683,15 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
         // ⚠ 정렬하면 요소가 많은 덱에서 메모리가 터진다. 실측: 가장 큰 실덱이 요소 3,499,605개 ·
         // modelmeta 가 36.5초 / 2.13GB 인데 업로드 timeout 이 120초다(여유 3.3배). 요소당
         // `set<pair>` 를 쓰면 그 여유를 넘긴다. 그래서 두 번 훑고 상수 메모리로 낸다.
+        //
+        // ★모서리 표는 위상 정본(`topo::edgesOf`)이다(2026-10-17). 예전에는 여기 육면체 12모서리 사본을 모든 솔리드에 썼다 —
+        //   사면체(TET4 꼴 `[n1,n2,n3,n4,n4,n4,n4,n4]`)에서 n1–n3 모서리가 **빠지고** 둘이 겹쳤다(실측: 가장 긴 모서리가
+        //   n1–n3 = 10.0 인 사면체의 max 가 9.055). 2차 사면체를 코너로 재게 되면서 그대로 둘 수 없었다.
         {
-            static const int kSolidEdges[12][2] = {{0,1},{1,2},{2,3},{3,0},{4,5},{5,6},{6,7},{7,4},
-                                                   {0,4},{1,5},{2,6},{3,7}};
-            static const int kShellEdges[4][2] = {{0,1},{1,2},{2,3},{3,0}};
             auto forEachEdge = [&](const auto& fn) {
                 for (const auto* e : byPart[pid]) {
-                    const bool sh = (e->type == KooRemapper::ElementType::QUAD4);
-                    const int n = sh ? 4 : 12;
-                    for (int k = 0; k < n; ++k) {
-                        const int a = sh ? kShellEdges[k][0] : kSolidEdges[k][0];
-                        const int b = sh ? kShellEdges[k][1] : kSolidEdges[k][1];
-                        const int na = e->nodeIds[a], nb = e->nodeIds[b];
+                    for (const auto& ed : KooRemapper::topo::edgesOf(e->topoType())) {
+                        const int na = e->nodeIds[ed.first], nb = e->nodeIds[ed.second];
                         // 축퇴 에지 이른 탈출. ⚠ 아래 `L > 0` 필터와 **중복**이다(같은 절점이면
                         // 길이가 0 이다) — 돌연변이로 확인했다. 값이 아니라 비용만 줄인다.
                         if (na <= 0 || nb <= 0 || na == nb) continue;
@@ -905,40 +900,45 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
     //
     // 전체-절점 루프를 여기 따로 두지 않는다 — `Mesh::bboxReport()` 가 정본이고
     // 한 번 순회로 둘 다 낸다(실사용 덱이 절점 13,366,933개다).
-    // ★2차 솔리드는 **기하를 믿을 수 없다** — 리더가 `*ELEMENT_SOLID` 절점 칸의 앞 8개만
-    //   저장하므로 10절점 사면체의 중간절점 넷이 코너 자리로 들어와 육면체로 읽힌다.
-    //   그림 op 셋은 이것을 **거절**한다. `modelmeta` 는 인벤토리라 거절하지 않지만
-    //   (TET10 덱의 메타 경로를 통째로 막게 된다) **말하지 않으면 안 된다**: 부피가 조용히
-    //   틀린다(실측 -48.4%). 판정은 세 그림 op 과 **같은 함수**를 쓴다 — 갈리면 못 믿는다.
+    // ★2차 솔리드(2026-10-17) — 리더가 절점 칸을 다 읽고 코너를 제자리에 놓는다. 그래서 값은 **코너로 잰 값**이다
+    //   (`geometry_basis: corners` — 모서리가 곧으면 정확하고, 중간절점이 휜 모서리는 곧게 본다). n_node·bbox·고아는
+    //   중간절점까지 세어 정확하다. 기하를 믿을 수 없는 파트(코너 차례를 모르는 ELFORM 25-28 · 칸이 모자란 카드)만
+    //   null + 까닭이다 — 판정은 세 그림 op 과 **같은 함수**다(갈리면 못 믿는다).
+    //   (2026-10-16 까지는 앞 8칸만 담아 TET10 이 육면체로 읽혔고 — 부피 -48.4% — 2차 파트 전부를 null 로 냈다.
+    //    처음에는 값을 내고 `second_order` 만 표시했는데, 플래그를 **안 읽는** 소비자(`kr2datahub` · 리스크 앱 어댑터)가
+    //    그 부피를 그대로 실었다. 그래서 틀린 줄 아는 값은 지금도 숫자로 내지 않는다.)
     const auto mmBox = mesh.bboxReport();
     const auto mmBad2nd = KooRemapper::figure::secondOrderSolidPids(mesh);
     std::set<int> mmBad2ndPids;
     for (const auto& pe : mmBad2nd) mmBad2ndPids.insert(pe.first);
+    std::map<int, int> mm2ndElform;                     // 2차 파트 → ELFORM(요소가 있는 파트만)
+    for (const auto& pe : mesh.getPartSolidElform())
+        if (KooRemapper::figure::isSecondOrderElform(pe.second) && byPart.count(pe.first)) mm2ndElform[pe.first] = pe.second;
     if (!mmBad2nd.empty()) {
-        console.warning("[modelmeta] " + KooRemapper::figure::secondOrderSolidWhy(mmBad2nd));
-        console.warning("[modelmeta] 그 파트의 volume·area_ext·proj·edge_len·n_node·mass 는 **코너 8개만** "
-                        "본 값이라 틀린다(실측 부피 -48.4%) — JSON 에는 null 과 까닭(geometry_reason·"
-                        "mass_reason)으로 낸다. part.second_order=true 와 model.second_order_solid_pids 가 "
-                        "그 자리를 가리킨다.");
+        console.warning("[modelmeta] " + KooRemapper::figure::secondOrderSolidWhy(mmBad2nd, mesh));
+        console.warning("[modelmeta] 그 파트의 volume·area_ext·proj·edge_len·mass 는 JSON 에 null 과 까닭(geometry_reason·"
+                        "mass_reason)으로 낸다.");
     }
-    // ★틀린 줄 아는 값은 숫자로 내지 않는다(2026-10-16). 처음에는 값을 내고 `second_order` 로
-    //   표시만 했는데, 플래그를 **안 읽는** 소비자(DataHub 적재 `kr2datahub` · 리스크 앱 어댑터)가
-    //   그 부피를 그대로 실었다. 질량 규약과 같은 규율이다 — 유도 못 하면 null + reason.
-    //   `n_elems`·`bbox` 는 맞으므로 그대로 둔다(코너 넷은 앞 8칸에 다 있다).
+    {
+        const auto mmCorner = KooRemapper::figure::secondOrderCornerPids(mesh);
+        if (!mmCorner.empty())
+            console.info("[modelmeta] " + KooRemapper::figure::secondOrderCornerNote(mmCorner) +
+                         " — 기하 값은 코너로 잰다(part.geometry_basis = corners)");
+    }
     for (auto& p : parts) {
         for (const auto& pe : mmBad2nd) {
             if (pe.first != p.pid) continue;
-            p.geomWhy = "2차 솔리드(ELFORM " + std::to_string(pe.second) + ") — 리더가 `*ELEMENT_SOLID` "
-                        "절점 칸의 앞 8개만 저장해 중간절점이 코너 자리로 들어온다. 그 기하로 잰 값이라 "
-                        "틀린다(실측 부피 -48.4%)";
+            p.geomWhy = "2차 솔리드(ELFORM " + std::to_string(pe.second) + ") — " +
+                        KooRemapper::figure::secondOrderSolidReason(mesh, pe.first, pe.second) +
+                        "(그 기하로 잰 값은 믿을 수 없다)";
             p.hasMass = false;
             p.massBasis.clear();
             p.massWhy = "부피를 믿을 수 없어 질량도 낼 수 없다. " + p.geomWhy;
         }
     }
-    // 고아 수는 **상한**이 된다 — 잘라 읽기는 참조를 줄이기만 하므로 n9·n10 이 고아로 잡힌다.
+    // 고아 수는 칸이 모자란 2차 카드가 있을 때만 **상한**이다 — 못 읽은 칸의 절점이 고아로 잡힌다.
     // 센 값이 0 이면 그것은 참이다(참조가 줄어도 참 고아가 사라지지는 않는다).
-    const bool mmOrphanUnsure = !mmBad2nd.empty() && mmBox.orphanNodes > 0;
+    const bool mmOrphanUnsure = !mesh.getPartIncompleteSolids().empty() && mmBox.orphanNodes > 0;
 
     const double mb[6] = {mmBox.allMin.x, mmBox.allMin.y, mmBox.allMin.z,
                           mmBox.allMax.x, mmBox.allMax.y, mmBox.allMax.z};
@@ -973,13 +973,16 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
        << "    \"orphan_nodes\": "
        << (mmOrphanUnsure ? std::string("null") : std::to_string(mmBox.orphanNodes)) << ",\n"
        << "    \"orphan_nodes_reason\": "
-       << (mmOrphanUnsure ? "\"2차 솔리드 파트의 중간절점(n9·n10)을 리더가 저장하지 않아 고아로 잘못 "
-                            "센다 — 센 값은 상한일 뿐이다(" + std::to_string(mmBox.orphanNodes) + "개)\""
+       << (mmOrphanUnsure ? "\"절점 칸이 모자란 2차 카드가 있어 못 읽은 칸의 절점을 고아로 센다 — 센 값은 "
+                            "상한일 뿐이다(" + std::to_string(mmBox.orphanNodes) + "개)\""
                           : std::string("null")) << ",\n"
        << "    \"second_order_solid_pids\": [";
-    for (size_t i = 0; i < mmBad2nd.size(); ++i)
-        rf << (i ? ", " : "") << "{\"pid\": " << mmBad2nd[i].first
-           << ", \"elform\": " << mmBad2nd[i].second << "}";
+    {
+        size_t i = 0;
+        for (const auto& [pid, ef] : mm2ndElform)
+            rf << (i++ ? ", " : "") << "{\"pid\": " << pid << ", \"elform\": " << ef
+               << ", \"geometry_basis\": " << (mmBad2ndPids.count(pid) ? "null" : "\"corners\"") << "}";
+    }
     rf << "]\n"
        << "  },\n";
     rf << "  \"conventions\": {\n"
@@ -996,18 +999,20 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
           "model.bbox_min.x = -40, bbox_used_min.x = 0). 낙하판·접촉면은 **used 기준**으로 "
           "놓아라 — 현장 덱에서 두 기준이 14.55mm vs 67.50mm 로 갈려 낙하판이 기기 밖 53mm 에 "
           "생겼다. 기준은 bbox_basis/bbox_used_basis 가 말한다\",\n"
-       << "    \"second_order\": \"part.second_order=true 면 그 파트의 volume·area_ext·proj·"
-          "edge_len·n_node·mass 를 **쓰지 말라** — null 로 내고 까닭을 geometry_reason·mass_reason 에 "
-          "적는다. 리더가 `*ELEMENT_SOLID` 절점 칸의 앞 8개만 저장하므로 10절점 사면체의 중간절점이 "
-          "코너 자리로 들어와 육면체로 읽힌다(실측 부피 -48.4%). n_elems 는 맞고, bbox 는 코너가 앞 "
-          "8칸에 다 있어 직선 변이면 맞다(곡선 변의 중간절점은 보지 않는다). 그런 파트가 있으면 "
-          "model.orphan_nodes 는 상한이라 0 이 아닐 때 null + orphan_nodes_reason 이다. "
-          "`section`·`surfview`·`stackdiagram` 은 같은 판정으로 **거절**한다 — 여기는 "
-          "인벤토리라 거절하지 않는다. 1차 요소 덱으로 다시 내라\",\n"
+       << "    \"second_order\": \"part.second_order=true 면 2차(고차) 솔리드 파트다(ELFORM 16·17·23-29). "
+          "리더가 절점 칸을 다 읽고 코너를 제자리에 놓으므로 volume·area_ext·proj·edge_len·mass 는 **코너로 잰 값**이다 — "
+          "part.geometry_basis = corners. 모서리가 곧으면 정확하고, 중간절점이 휜 모서리는 곧게 본다. n_node·bbox·"
+          "model.orphan_nodes 는 중간절점까지 세어 정확하다. 코너 차례를 매뉴얼 본문이 적지 않은 ELFORM(25·26·27·28)과 "
+          "절점 칸이 모자란 카드(노드를 8+2 로 쪼갠 덱 등)가 든 파트만 기하가 null(geometry_basis = null)이고 까닭을 "
+          "geometry_reason·mass_reason 에 적는다 — `section`·`surfview`·`stackdiagram` 은 같은 판정으로 그 파트를 "
+          "**거절**한다. 칸이 모자란 카드가 있으면 model.orphan_nodes 는 상한이라 0 이 아닐 때 null + "
+          "orphan_nodes_reason 이다. (2026-10-16 까지는 리더가 앞 8칸만 담아 2차 파트 전부가 null 이었다)\",\n"
+       << "    \"geometry_basis\": \"그 파트의 기하 값을 무엇으로 쟀나 — nodes(1차 요소 · 절점 전부가 코너다) · "
+          "corners(2차 솔리드 · 코너만 — 휜 모서리는 곧게 본다) · null(기하를 믿을 수 없어 내지 않았다)\",\n"
        << "    \"elem_class\": \"**기하 기준**이다. TSHELL 요소는 육면체라 solid 로 센다 — "
           "카드 키워드 기준이 아니다\",\n"
        << "    \"n_node\": \"그 파트 요소가 참조한 **고유** 절점 수. 축퇴 요소는 같은 절점을 "
-          "여러 번 쓰므로 n_elems*8 이 아니다\",\n"
+          "여러 번 쓰므로 n_elems*8 이 아니다 2차 솔리드는 중간절점까지 센다(절점 칸이 모자란 카드가 든 파트는 null)\",\n"
        << "    \"thickness\": \"셸만. *SECTION_SHELL Card 2 의 T1. *SECTION_TSHELL 에는 두께 칸이 "
           "**없어** TSHELL 은 null 이다\",\n"
        << "    \"mass\": \"유도할 수 없으면 **0 이 아니라 null + reason** 이다. "
@@ -1029,7 +1034,10 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
            // ★이 파트의 기하 값을 믿을 수 있나. 플래그만 위(model)에 두면 파트 하나를
            //   읽는 소비자가 못 본다 — ④ 에서 신호가 플랫폼까지 끊겨 있던 것과 같은 자리다.
            << "      \"second_order\": "
-           << (mmBad2ndPids.count(p.pid) ? "true" : "false") << ",\n"
+           << (mm2ndElform.count(p.pid) ? "true" : "false") << ",\n"
+           << "      \"geometry_basis\": "
+           << (!geomOk ? std::string("null") : mm2ndElform.count(p.pid) ? std::string("\"corners\"") : std::string("\"nodes\""))
+           << ",\n"
            << "      \"geometry_reason\": "
            << (geomOk ? std::string("null") : "\"" + mm_jsonEsc(p.geomWhy) + "\"") << ",\n"
            << "      \"n_elems\": " << p.nElems << ",\n"
@@ -1041,7 +1049,9 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
            << (geomOk ? "{\"x\": " + num(p.proj[0]) + ", \"y\": " + num(p.proj[1]) +
                         ", \"z\": " + num(p.proj[2]) + "}"
                       : std::string("null")) << ",\n"
-           << "      \"n_node\": " << (geomOk ? std::to_string(p.nNode) : std::string("null")) << ",\n"
+           // 2차 솔리드도 중간절점까지 세어 정확하다 — 칸이 모자란 카드가 든 파트만 셀 수 없다(못 읽은 칸이 있다)
+           << "      \"n_node\": "
+           << (mesh.getPartIncompleteSolids().count(p.pid) ? std::string("null") : std::to_string(p.nNode)) << ",\n"
            << "      \"thickness\": " << (p.hasThickness ? num(p.thickness) : std::string("null"))
            << ",\n"
            << "      \"thickness_reason\": "

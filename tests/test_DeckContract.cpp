@@ -21,6 +21,11 @@
 #include "parser/DeckWriter.h"
 #include "parser/ElementCardLayout.h"
 #include "parser/NodeRefs.h"
+#include "parser/KFileWriter.h"
+#include "core/Mesh.h"
+
+#include <filesystem>
+#include <fstream>
 
 #include <sstream>
 #include <vector>
@@ -303,4 +308,41 @@ TEST(dirOf_와_joinPath) {
     ASSERT_EQ(deckscan::joinPath("/a/b", "d.k"), std::string("/a/b/d.k"));
     // 절대 경로는 그대로 둔다 — 붙이면 `/a/b//x/y.k` 가 된다.
     ASSERT_EQ(deckscan::joinPath("/a/b", "/x/y.k"), std::string("/x/y.k"));
+}
+
+// ── 2차 솔리드 쓰기 — 전체 절점으로 쓰고, 없으면 쓰지 않는다(2026-10-17) ─────────────────────
+// 예전 쓰기는 모든 솔리드를 옛 한 줄 꼴(EID PID N1..N8)로 썼다 — 2차 요소는 중간절점이 사라졌다.
+TEST(KFileWriter_TET10_은_두_카드_꼴로_전체_절점을_쓴다) {
+    namespace fs = std::filesystem;
+    Mesh m;
+    for (int i = 1; i <= 10; ++i) m.addNode(Node(i, 0.1 * i, 0.0, 0.0));
+    Element e(1, 1, {1, 2, 3, 4, 4, 4, 4, 4});
+    e.type = ElementType::TET10;
+    m.addElement(e);
+    const fs::path tmp = fs::temp_directory_path() / "koorm_writer_tet10.k";
+    {
+        KFileWriter w;
+        ASSERT_FALSE(w.writeFile(tmp.string(), m));                    // 중간절점 목록이 없다 — 쓰지 않는다
+        ASSERT_TRUE(w.getErrorMessage().find("중간절점") != std::string::npos);
+    }
+    m.solidAllNodes[1] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    {
+        KFileWriter w;
+        ASSERT_TRUE(w.writeFile(tmp.string(), m));
+    }
+    std::ifstream in(tmp);
+    std::vector<std::string> L;
+    for (std::string l; std::getline(in, l);) L.push_back(l);
+    std::error_code ec;
+    fs::remove(tmp, ec);
+    size_t k = 0;
+    while (k < L.size() && L[k].rfind("*ELEMENT_SOLID", 0) != 0) ++k;
+    ASSERT_TRUE(k + 3 < L.size());
+    // 주석 눈금 다음이 Card 1(EID PID) · Card 2(N1..N10)다
+    size_t c1 = k + 1;
+    while (c1 < L.size() && L[c1].rfind("$", 0) == 0) ++c1;
+    ASSERT_EQ(deckscan::cardFields(L[c1], 8).size(), (size_t)2);
+    const auto n = deckscan::cardFields(L[c1 + 1], 8);
+    ASSERT_EQ(n.size(), (size_t)10);
+    ASSERT_EQ(deckscan::fieldInt(n, 9), 10);
 }

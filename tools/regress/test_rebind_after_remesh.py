@@ -14,6 +14,7 @@
   번호만 밀렸다. **PID 도 바뀌었다**(A 1 → 5 · B 2 → 4 — 저쪽 `pid_renumber_possible`).
   v2(2026-10-16) — 파트(`*SET_PART` · 접촉 SSTYP 3 · `*CONSTRAINED_RIGID_BODIES`)는 `*PART` 제목으로, 요소
   (`*SET_SOLID` · `*DATABASE_HISTORY_SOLID`)는 (파트 제목, 요소 절점들의 좌표 집합)으로 짝을 찾는다.
+  D절(2026-10-17) — 리더가 2차 솔리드의 절점 칸을 다 읽으므로 TET10 덱도 받는다(중간절점의 소속까지 본다).
 
 usage: test_rebind_after_remesh.py <KooRemapper 바이너리>
 """
@@ -282,6 +283,45 @@ def main():
         write(os.path.join(d, "c.yaml"), "old_deck: v1.k\nnew_deck: v2.k\nentities: c.k\noutput: c.k\n")
         rc, out = run(binary, d, OP, "c.yaml")
         check("C-9 output 이 entities 와 같으면 거절(원본을 덮어쓰지 않는다)", rc == 1 and "덮어쓰지" in out, out[-200:])
+        print("[D 2차 솔리드 덱 — 중간절점의 소속까지 본다(2026-10-17 · 그 전에는 2차 덱을 거절했다)]")
+        # 10절점 사면체 하나 — 옛 덱은 절점 1..10, 새 덱은 같은 자리를 101..110 으로 거꾸로 매겼다(파트 제목 그대로 · PID 3)
+        cs = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)]
+        pts = list(cs) + [tuple((cs[a][k] + cs[b][k]) / 2 for k in range(3))
+                          for a, b in ((0, 1), (1, 2), (2, 0), (0, 3), (1, 3), (2, 3))]
+
+        def tet10_deck(path, ids, eid, pid, split=False):
+            L = ["*KEYWORD", "*NODE"] + ["%8d%16.6f%16.6f%16.6f" % (ids[i], *pts[i]) for i in range(10)]
+            L += ["*ELEMENT_SOLID", "%8d%8d" % (eid, pid)]
+            conn = "".join("%8d" % ids[i] for i in range(10))
+            L += [conn[:64], conn[64:]] if split else [conn]
+            L += ["*PART", "T#1", "%10d%10d%10d" % (pid, 1, 1), "*SECTION_SOLID", "%10d%10d" % (1, 16),
+                  "*MAT_ELASTIC", "%10d%10.4g%10.6g%10.4g" % (1, 7.85e-9, 210000, 0.3), "*END"]
+            write(os.path.join(d, path), "\n".join(L) + "\n")
+        old_ids = list(range(1, 11))
+        new_ids = list(range(110, 100, -1))
+        tet10_deck("t_v1.k", old_ids, 1, 1)
+        tet10_deck("t_v2.k", new_ids, 7, 3)
+        # SPC 를 중간절점 5(n1–n2 가운데 · 다섯째 칸)와 코너 1 에 건다 — 새 덱에서는 같은 자리 106 · 110 이다
+        write(os.path.join(d, "t_ours.k"), "*KEYWORD\n*BOUNDARY_SPC_NODE\n" + card(5, 0, 1, 1, 1, 0, 0, 0) + "\n" +
+              card(1, 0, 1, 1, 1, 0, 0, 0) + "\n*END\n")
+        write(os.path.join(d, "t.yaml"), "old_deck: t_v1.k\nnew_deck: t_v2.k\nentities: t_ours.k\noutput: t_out.k\n")
+        rc, out = run(binary, d, OP, "t.yaml")
+        check("D-1 ★TET10 덱을 받는다(rc 0 — 예전에는 「2차 솔리드」 로 거절)", rc == 0, out[-300:])
+        spc = []
+        if os.path.exists(os.path.join(d, "t_out.k")):
+            on = False
+            for l in open(os.path.join(d, "t_out.k")).read().splitlines():
+                if l.startswith("*"):
+                    on = l.strip() == "*BOUNDARY_SPC_NODE"
+                    continue
+                if on and l.strip() and not l.startswith("$"):
+                    spc.append(int(l[:10]))
+        check("D-2 ★중간절점 5 → 같은 자리 새 중간절점 106 · 코너 1 → 110", spc == [106, 110], spc)
+        tet10_deck("t_split.k", old_ids, 1, 1, split=True)
+        write(os.path.join(d, "ts.yaml"), "old_deck: t_split.k\nnew_deck: t_v2.k\nentities: t_ours.k\noutput: ts_out.k\n")
+        rc, out = run(binary, d, OP, "ts.yaml")
+        check("D-3 노드를 8+2 로 쪼갠 덱은 거절한다(절점 칸이 모자란 2차 요소)",
+              rc == 1 and "모자란" in out and not os.path.exists(os.path.join(d, "ts_out.k")), out[-300:])
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

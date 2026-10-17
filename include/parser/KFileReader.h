@@ -85,6 +85,8 @@ private:
     // *SECTION_SOLID 의 ELFORM 23-29 를 본다(Vol_I 228671-228677). 요소 줄만 보고는
     // 카드가 몇 줄인지 알 수 없어서, 요소를 읽기 전에 미리 훑어 둔다.
     std::map<int, int> pidHighOrderNodes_;
+    // 2차 솔리드 하나 — 코너를 위상 표 자리에, 전체 절점을 `Mesh::solidAllNodes` 에 담는다(정의의 주석 참조).
+    void addSecondOrderSolid(int eid, int pid, const std::vector<int>& all);
     // *PART·*SECTION_SOLID 만 훑어 pidHighOrderNodes_ 를 채운다(요소를 읽기 전에 한 번).
     void prescanPartSections(std::ifstream& file);
     ProgressCallback progressCallback_;

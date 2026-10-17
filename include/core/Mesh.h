@@ -5,6 +5,7 @@
 #include "core/Vector3D.h"
 #include <map>
 #include <set>
+#include <unordered_map>
 #include <vector>
 #include <string>
 #include <utility>
@@ -106,11 +107,19 @@ public:
     std::map<int, Part> parts;              // Part ID -> Part
     std::map<int, MaterialData> materials;  // Material ID -> MaterialData
     std::map<int, SectionShellData> shellSections;  // Section ID -> Shell section data
-    // Part ID -> *SECTION_SOLID ELFORM. 리더가 고차 카드를 가르려고 이미 뜨는 값이다.
-    // **그림 op 들이 2차 솔리드를 거절하는 데 쓴다** — 실측으로 TET10(ELFORM 16) 덱은
-    // 중간절점이 코너 자리로 들어와 단면 면적이 0.12(참값 0.32)로 조용히 틀렸고, 중간절점
-    // 카드를 먹지 않아 요소 둘이 하나로 읽혔다. 그림이 조용히 거짓이 되는 자리다.
+    // Part ID -> *SECTION_SOLID ELFORM. 리더가 고차 카드를 가르고 코너를 제자리에 놓는 데 쓴다.
+    // 2026-10-17 전에는 리더가 절점 칸의 앞 8개만 담아 TET10(ELFORM 16) 의 중간절점이 코너 자리로 들어왔다 —
+    // 단면 면적이 0.12(참값 0.32)로 조용히 틀려 그림 op 이 이 값으로 **거절**했다. 지금은 코너를 제자리에 놓고
+    // 코너 차례를 매뉴얼이 적지 않은 ELFORM(25·26·27·28)과 칸이 모자란 카드만 거절한다(`figure::secondOrderSolidPids`).
     std::map<int, int> partSolidElform;
+    // ★2차 솔리드의 **덱 순서 전체 절점**(2026-10-17) — EID → N1..Nn(ELFORM 이 정한 n 칸, 못 읽은 칸은 0).
+    // **2차 요소만** 담는다 — `Element` 에 벡터를 두면 1차 덱도 요소마다 24바이트가 는다(실사용 덱은 요소 수백만).
+    // `Element::nodeIds` 는 위상 표가 기대하는 **코너 자리**만 담는다 — TET10(ELFORM 16·17)은 `[n1,n2,n3,n4,n4,n4,n4,n4]`
+    // · 20·27·64절점 육면체는 앞 8칸 그대로. 절점 **참조**(고아 · 소속 · 쓰기)는 여기를 보고, **기하**는 코너를 본다.
+    std::unordered_map<int, std::vector<int>> solidAllNodes;
+    // 절점 칸이 모자란 2차 요소 수 — PID → 수. 매뉴얼 Card 2 는 N1..N10 열 칸 한 장이다(노드를 8+2 로 쪼갠 덱은 둘째 줄이
+    // 다음 요소의 Card 1 로 읽힌다 — LS-DYNA 도 그렇게 읽는다). 그 파트는 기하를 믿을 수 없다.
+    std::map<int, int> partIncompleteSolids;
     std::string name_;                      // Mesh name
 
     // Grid dimensions (for structured meshes)
@@ -256,6 +265,17 @@ public:
     size_t getMaterialCount() const { return materials.size(); }
     const std::map<int, MaterialData>& getMaterials() const { return materials; }
     const std::map<int, int>& getPartSolidElform() const { return partSolidElform; }
+    const std::map<int, int>& getPartIncompleteSolids() const { return partIncompleteSolids; }
+    // 그 요소의 덱 순서 전체 절점 — 2차 솔리드가 아니면 nullptr(그때는 `nodeIds` 가 전부다).
+    const std::vector<int>* allNodesOf(int eid) const {
+        auto it = solidAllNodes.find(eid);
+        return it == solidAllNodes.end() ? nullptr : &it->second;
+    }
+    // 요소가 **참조하는** 절점마다 `f(nid)` — 2차 솔리드는 중간절점까지, 그 밖은 `nodeIds`(0 은 건너뛴다 · 축퇴는 겹친다).
+    template <class F> void forEachElementNode(const Element& e, F&& f) const {
+        if (const auto* all = allNodesOf(e.id)) { for (int n : *all) if (n > 0) f(n); return; }
+        for (int n : e.nodeIds) if (n > 0) f(n);
+    }
 
     // Get bounding box as pair
     std::pair<Vector3D, Vector3D> getBoundingBox() const {
@@ -274,12 +294,8 @@ public:
         if (nodes.empty()) return r;
 
         std::set<int> refNodes;
-        for (const auto& [eid, elem] : elements) {
-            for (int i = 0; i < Element::NUM_NODES; ++i) {
-                const int nid = elem.nodeIds[i];
-                if (nid > 0) refNodes.insert(nid);
-            }
-        }
+        for (const auto& [eid, elem] : elements)
+            forEachElementNode(elem, [&](int nid) { refNodes.insert(nid); });   // 2차 솔리드는 중간절점까지
         r.hasElements = !refNodes.empty();
 
         bool firstAll = true, firstUsed = true;
@@ -389,6 +405,8 @@ public:
         parts.clear();
         materials.clear();
         partSolidElform.clear();
+        solidAllNodes.clear();
+        partIncompleteSolids.clear();
         name_.clear();
         dimI = dimJ = dimK = 0;
         gridDimensionsSet = false;

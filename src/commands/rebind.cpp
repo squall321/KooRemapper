@@ -25,7 +25,6 @@
 #include "parser/IncludeScan.h"
 #include "parser/KFileReader.h"
 #include "parser/NodeRefs.h"
-#include "util/FigureSvg.h"        // secondOrderSolidPids — 절점 칸을 앞 8개만 저장하는 파트는 소속을 다 못 본다
 #include "util/StrictJson.h"
 
 #include <algorithm>
@@ -141,10 +140,13 @@ bool loadDeck(const std::string& path, const char* role, Deck& d, std::string& e
     KFileReader reader;
     d.mesh = reader.readFile(path);
     if (d.mesh.getNodeCount() == 0) { err = std::string(role) + " 에서 절점을 읽지 못했다: " + path; return false; }
-    const auto bad2nd = figure::secondOrderSolidPids(d.mesh);
-    if (!bad2nd.empty()) {
-        err = std::string(role) + " — " + figure::secondOrderSolidWhy(bad2nd) +
-              ". 리더가 절점 칸의 앞 8개만 저장해 절점의 소속 파트를 다 못 본다";
+    // 2차 솔리드 — 리더가 절점 칸을 다 읽는다(2026-10-17) · 소속은 중간절점까지 본다. 칸이 모자란 카드가 든 덱만
+    // 소속을 다 못 본다(2026-10-16 까지는 리더가 앞 8칸만 담아 2차 덱을 전부 거절했다).
+    if (!d.mesh.getPartIncompleteSolids().empty()) {
+        std::string pids;
+        for (const auto& [pid, n] : d.mesh.getPartIncompleteSolids())
+            pids += (pids.empty() ? "" : ", ") + std::string("PID ") + std::to_string(pid) + " " + std::to_string(n) + "개";
+        err = std::string(role) + " — 절점 칸이 모자란 2차 요소가 있다(" + pids + ") — 그 요소의 절점 소속을 다 못 본다";
         return false;
     }
     std::map<int, std::string> title;
@@ -159,12 +161,11 @@ bool loadDeck(const std::string& path, const char* role, Deck& d, std::string& e
     for (const auto& [eid, e] : d.mesh.getElements()) {
         d.elemIds.insert(eid);
         d.pids.insert(e.partId);
-        for (int n : e.nodeIds) {
-            if (n <= 0) continue;
+        d.mesh.forEachElementNode(e, [&](int n) {          // 2차 솔리드는 중간절점까지
             d.partNodes[e.partId].insert(n);
             auto t = title.find(e.partId);
             owners[n].insert(t == title.end() ? "#" + std::to_string(e.partId) : t->second);
-        }
+        });
     }
     for (auto& [n, s] : owners) {
         std::string q;
@@ -452,12 +453,13 @@ int run(const Input& in, ConsoleOutput& console) {
     }
     auto elemKey = [](const Deck& d, const Element& e) {
         std::set<std::string> ks;
-        for (int n : e.nodeIds) {
-            if (n <= 0) continue;
+        bool missing = false;
+        d.mesh.forEachElementNode(e, [&](int n) {          // 2차 솔리드는 중간절점까지 — 같은 코너의 다른 요소와 가른다
             auto nt = d.mesh.getNodes().find(n);
-            if (nt == d.mesh.getNodes().end()) return std::string();
+            if (nt == d.mesh.getNodes().end()) { missing = true; return; }
             ks.insert(coordKey(nt->second.position));
-        }
+        });
+        if (missing) return std::string();
         auto pt = d.mesh.getParts().find(e.partId);
         std::string k = (pt == d.mesh.getParts().end() ? "#" + std::to_string(e.partId) : cards::trim(pt->second.name));
         for (const auto& c : ks) { k += '\x1e'; k += c; }

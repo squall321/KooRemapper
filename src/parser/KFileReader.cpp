@@ -233,6 +233,40 @@ Mesh KFileReader::readFile(const std::string& filename) {
     return std::move(mesh_);
 }
 
+// 2차 솔리드 하나를 담는다 — 코너는 위상 표 자리에, 덱 순서 전체 절점은 `Mesh::solidAllNodes` 에.
+//   · ELFORM 16·17(10절점 사면체) — 코너는 N1..N4 다(매뉴얼 Fig 19-31 · 중간절점 N5..N10). TET4 와 같은 꼴
+//     `[n1,n2,n3,n4,n4,n4,n4,n4]` 로 담고 종류를 `TET10` 으로 둔다 — 위상 정본(`topo::facesOf(TET10)`)이 사면체 면을 준다.
+//   · 23·24·29(20·27·64절점 육면체) — 앞 8칸이 코너다(예전과 같다 — 실측으로 1차와 단면이 같았다).
+//   · 25·26·27·28 — 매뉴얼 본문에 코너 차례가 없다(「그림을 보라」뿐 · `*SECTION_SOLID` Remark 16 「개발 중」). 예전처럼
+//     앞 8칸을 담고 기하는 거절한다(`figure::secondOrderSolidPids`). 짐작한 코너로 그럴듯한 값을 내는 것이 가장 나쁘다.
+// 칸이 하나라도 0 이면 모자란 카드다 — `partIncompleteSolids` 에 센다(그 파트의 기하도 거절된다).
+void KFileReader::addSecondOrderSolid(int eid, int pid, const std::vector<int>& all) {
+    const auto efIt = mesh_.partSolidElform.find(pid);
+    const int ef = efIt == mesh_.partSolidElform.end() ? 0 : efIt->second;
+    const auto hoIt = pidHighOrderNodes_.find(pid);
+    const size_t want = hoIt == pidHighOrderNodes_.end() ? all.size() : static_cast<size_t>(hoIt->second);
+    std::vector<int> full = all;
+    full.resize(want, 0);
+    bool complete = full.size() >= 4;
+    for (int v : full) if (v <= 0) { complete = false; break; }
+
+    std::array<int, 8> c{};
+    for (size_t i = 0; i < 8 && i < full.size(); ++i) c[i] = full[i];
+    Element elem(eid, pid, c);
+    if ((ef == 16 || ef == 17) && full.size() >= 4) {
+        elem.nodeIds = {full[0], full[1], full[2], full[3], full[3], full[3], full[3], full[3]};
+        elem.type = ElementType::TET10;
+    } else if (c[4] == c[3] && c[5] == c[3] && c[6] == c[3] && c[7] == c[3]) {
+        elem.type = ElementType::TET4;                 // 앞 8칸 판정은 예전과 같다(코너 차례를 모르는 ELFORM)
+    } else if (detectAndNormalizePenta6(c)) {
+        elem.nodeIds = c;
+        elem.type = ElementType::PENTA6;
+    }
+    mesh_.addElement(elem);
+    mesh_.solidAllNodes[eid] = std::move(full);
+    if (!complete) mesh_.partIncompleteSolids[pid]++;
+}
+
 // *PART 와 *SECTION_SOLID 만 훑어 '이 파트 요소는 절점이 몇 개인가' 를 채운다.
 // 요소·노드 줄은 건너뛰기만 하므로 파일을 한 번 더 읽는 비용뿐이다.
 void KFileReader::prescanPartSections(std::ifstream& file) {
@@ -296,7 +330,7 @@ void KFileReader::prescanPartSections(std::ifstream& file) {
     for (const auto& ps : partSec) {
         auto it = secElform.find(ps.second);
         if (it == secElform.end()) continue;
-        // ELFORM 자체를 메시에 남긴다 — 고차 카드 가르기와 달리 **그림 op 이 거절 판단에** 쓴다.
+        // ELFORM 자체를 메시에 남긴다 — 리더가 코너를 제자리에 놓고(`addSecondOrderSolid`), 그림 op 이 거절 판단에도 쓴다.
         mesh_.partSolidElform[ps.first] = it->second;
         int n = solidNodesFromElform(it->second);
         if (n > 0) pidHighOrderNodes_[ps.first] = n;
@@ -643,6 +677,13 @@ bool KFileReader::parseElementSolidSection(std::ifstream& file) {
                         nodeIds[i] = parseInt(line.substr(fw * 2 + i * fw, fw));
                     }
 
+                    if (eid > 0 && nodeIds[0] > 0 && pidHighOrderNodes_.count(pid)) {
+                        // 2차 파트에 옛 한 줄 꼴(EID PID N1..N8) — 그 꼴은 4-8절점 요소만 받는다(Vol_I 163995 Remark 4).
+                        // 칸이 모자란 2차 카드로 담는다(기하는 거절된다 · 짐작해 잇지 않는다).
+                        addSecondOrderSolid(eid, pid, std::vector<int>(nodeIds.begin(), nodeIds.end()));
+                        elementCount++;
+                        continue;
+                    }
                     if (eid > 0 && nodeIds[0] > 0) {
                         Element elem(eid, pid, nodeIds);
                         // Detect TET4: n5=n6=n7=n8=n4 (LS-DYNA convention)
@@ -673,6 +714,12 @@ bool KFileReader::parseElementSolidSection(std::ifstream& file) {
                 std::array<int, 8> nodeIds;
                 for (int i = 0; i < 8; ++i) {
                     nodeIds[i] = parseInt(tokens[2 + i]);
+                }
+                if (pidHighOrderNodes_.count(pid)) {
+                    // 2차 파트에 한 줄 꼴 — 위 고정폭 갈래와 같은 규칙(칸이 모자란 2차 카드)
+                    addSecondOrderSolid(eid, pid, std::vector<int>(nodeIds.begin(), nodeIds.end()));
+                    elementCount++;
+                    continue;
                 }
 
                 Element elem(eid, pid, nodeIds);
@@ -737,6 +784,68 @@ bool KFileReader::parseElementSolidSection(std::ifstream& file) {
                     continue;
                 }
 
+                // ★2차 솔리드(그 파트의 ELFORM 이 고차) — 절점 카드를 **다** 읽는다(2026-10-17).
+                //   예전에는 Card 2 의 앞 8칸만 담고 나머지 카드는 건너뛰었다 — TET10 의 중간절점 넷이 코너 자리로 들어와
+                //   육면체로 읽혔다(그림 셋 거절 · modelmeta null · info 고아 상한 · 재결속 거절의 뿌리).
+                //   Card 2 = N1..N10 · Card 3 은 「필요한 만큼」 열 칸씩(Vol_I 163632-163634, 163787-163790).
+                {
+                    auto hoIt = pidHighOrderNodes_.find(pid);
+                    if (hoIt != pidHighOrderNodes_.end()) {
+                        const int n = hoIt->second;
+                        const int fwN = sectionFieldWidth();
+                        std::vector<int> all;
+                        all.reserve(static_cast<size_t>(n));
+                        auto take = [&](const std::string& ln) {
+                            const int want = std::min(10, n - static_cast<int>(all.size()));
+                            if (want <= 0) return;
+                            // 고정폭을 먼저 본다(붙은 절점 번호는 공백으로 가를 수 없다) — 쉼표가 없고 그 카드의 마지막 칸이
+                            // 시작하는 길이면 고정폭이다. 모자란 칸은 0 으로 둔다(카드가 모자랐다는 표시).
+                            const bool fixed = ln.find(',') == std::string::npos &&
+                                               ln.length() > static_cast<size_t>(fwN * (want - 1));
+                            if (fixed) {
+                                for (int q = 0; q < want; ++q) {
+                                    const size_t off = static_cast<size_t>(q * fwN);
+                                    all.push_back(off < ln.length() ? parseInt(ln.substr(off, static_cast<size_t>(fwN))) : 0);
+                                }
+                            } else {
+                                const auto toks = tokenize(ln);
+                                for (int q = 0; q < want; ++q)
+                                    all.push_back(q < static_cast<int>(toks.size()) ? parseInt(toks[static_cast<size_t>(q)]) : 0);
+                            }
+                        };
+                        take(nodeLine);
+                        bool sectionEnded = false;
+                        const int cards = (n + 9) / 10;
+                        for (int ec = 1; ec < cards; ++ec) {
+                            std::string more;
+                            std::streampos morePos;
+                            while (true) {
+                                morePos = file.tellg();
+                                if (!std::getline(file, more)) { more.clear(); break; }
+                                currentLine_++;
+                                linesProcessed_++;
+                                if (!more.empty() && more.back() == '\r') more.pop_back();
+                                if (isCommentLine(more) || more.empty()) continue;
+                                break;
+                            }
+                            if (more.empty()) break;                 // 파일 끝
+                            if (isKeywordLine(more)) {               // 섹션이 끝났다 — 되돌린다(카드가 모자란 요소다)
+                                file.seekg(morePos);
+                                file.clear();
+                                currentLine_--;
+                                sectionEnded = true;
+                                break;
+                            }
+                            take(more);
+                        }
+                        while (static_cast<int>(all.size()) < n) all.push_back(0);
+                        addSecondOrderSolid(eid, pid, all);
+                        elementCount++;
+                        if (sectionEnded) return true;
+                        continue;
+                    }
+                }
+
                 // Try fixed format first (nodes may be packed without spaces)
                 // i10=y: 10-char fields, otherwise 8-char fields
                 bool parsedNodeLine = false;
@@ -787,35 +896,6 @@ bool KFileReader::parseElementSolidSection(std::ifstream& file) {
                         }
                         mesh_.addElement(elem);
                         elementCount++;
-                    }
-                }
-                // 고차 정식 파트(ELFORM 23-29)면 Card 3 이 더 온다 — 10 칸씩 반복한다
-                // (Vol_I 163632-163634: "Include as many of this card as needed").
-                // 여기서 먹지 않으면 그 줄을 새 요소의 Card 1 로 읽어 유령 요소가 생기고,
-                // 그 유령이 같은 EID 의 진짜 요소를 덮어써 파트가 통째로 사라진다.
-                {
-                    auto hoIt = pidHighOrderNodes_.find(pid);
-                    if (hoIt != pidHighOrderNodes_.end() && hoIt->second > 10) {
-                        int extraCards = (hoIt->second + 9) / 10 - 1;
-                        for (int ec = 0; ec < extraCards; ++ec) {
-                            std::string skipLine;
-                            std::streampos skipPos;
-                            while (true) {
-                                skipPos = file.tellg();
-                                if (!std::getline(file, skipLine)) break;
-                                currentLine_++;
-                                linesProcessed_++;
-                                if (!skipLine.empty() && skipLine.back() == '\r') skipLine.pop_back();
-                                if (isCommentLine(skipLine) || skipLine.empty()) continue;
-                                break;
-                            }
-                            if (skipLine.empty()) break;
-                            if (isKeywordLine(skipLine)) {   // 섹션이 끝났다 — 되돌린다
-                                file.seekg(skipPos);
-                                currentLine_--;
-                                return true;
-                            }
-                        }
                     }
                 }
                 // After reading two-line element, continue to next iteration

@@ -85,10 +85,23 @@ KFileWriter::KFileWriter()
     , includeHeader_(true)
 {}
 
+// 2차 솔리드를 쓸 수 있나 — TET10 인데 덱 순서 전체 절점(`Mesh::solidAllNodes`)이 없으면 쓸 수 없다. 코너 넷만 쓰면
+// ELFORM 16·17 파트에 TET4 카드가 들어간다(중간절점이 조용히 사라진다). 리더가 읽은 요소는 늘 전체 절점을 갖는다 —
+// 요소를 하나씩 옮겨 담은 새 메시에서만 생긴다. 파일을 열기 **전에** 본다(반쯤 쓴 산출을 남기지 않는다).
+static bool secondOrderWritable(const Mesh& mesh, std::string& why) {
+    for (const auto& [id, e] : mesh.elements) {
+        if (e.type != ElementType::TET10 || mesh.allNodesOf(id)) continue;
+        why = "요소 " + std::to_string(id) + " 는 10절점 사면체인데 중간절점 목록이 없다 — 코너만 쓰면 2차 요소가 사라진다";
+        return false;
+    }
+    return true;
+}
+
 bool KFileWriter::writeFileWithSource(const std::string& filename, const Mesh& mesh,
                                       const std::string& sourceFile,
                                       bool useMappedPositions) {
     errorMessage_.clear();
+    if (!secondOrderWritable(mesh, errorMessage_)) return false;
 
     // Slurp source so we can stream it out while substituting NODE/ELEMENT
     // blocks. Reading first guards against the case where filename and
@@ -239,6 +252,7 @@ bool KFileWriter::writeFileWithSource(const std::string& filename, const Mesh& m
 bool KFileWriter::writeFile(const std::string& filename, const Mesh& mesh,
                             bool useMappedPositions) {
     errorMessage_.clear();
+    if (!secondOrderWritable(mesh, errorMessage_)) return false;
 
     // 원본 덱이 없는 경로 — 호출자가 setNewline 으로 정해 준 개행을 쓴다(기본 LF).
     DeckWriter writer(filename, newline_);
@@ -330,6 +344,32 @@ void KFileWriter::writeElementSection(std::ostream& file, const Mesh& mesh,
               [](const auto& a, const auto& b) { return a.first < b.first; });
 
     file << "*ELEMENT_SOLID" << std::endl;
+
+    // ★2차 솔리드가 하나라도 있으면 블록 전체를 **표준 두 카드 꼴**로 쓴다 — Card 1 = EID PID · Card 2 이후 = 절점 열 칸씩
+    //   (Vol_I 163572-163667). 아래 한 줄 꼴(EID PID N1..N8)은 4-8절점 요소만 받는 옛 꼴이다(Remark 4) — 2차 요소를 그
+    //   꼴로 쓰면 중간절점이 사라진다(2026-10-17 전에는 TET10 이 앞 8칸만 써졌다). 한 블록에 두 꼴을 섞지 않는다.
+    bool anySecond = false;
+    for (const auto& [id, elemPtr] : sortedElements)
+        if (mesh.allNodesOf(id) || elemPtr->type == ElementType::TET10) { anySecond = true; break; }
+    if (anySecond) {
+        file << "$#" << std::setw(idFieldWidth_ - 2) << "eid" << std::setw(idFieldWidth_) << "pid" << std::endl;
+        for (const auto& [id, elemPtr] : sortedElements) {
+            const Element& elem = *elemPtr;
+            file << std::setw(idFieldWidth_) << elem.id << std::setw(idFieldWidth_) << elem.partId << std::endl;
+            std::vector<int> nodes;
+            if (const auto* all = mesh.allNodesOf(id)) nodes = *all;
+            else if (elem.type == ElementType::TET4)
+                nodes = {elem.nodeIds[0], elem.nodeIds[1], elem.nodeIds[2], elem.nodeIds[3],
+                         elem.nodeIds[3], elem.nodeIds[3], elem.nodeIds[3], elem.nodeIds[3]};
+            else nodes.assign(elem.nodeIds.begin(), elem.nodeIds.end());
+            for (size_t k = 0; k < nodes.size(); ++k) {
+                file << std::setw(idFieldWidth_) << nodes[k];
+                if (k % 10 == 9 || k + 1 == nodes.size()) file << std::endl;
+            }
+        }
+        return;
+    }
+
     // 주석 눈금도 칸 폭을 따라야 한다 — 10칸 덱에 8칸 눈금을 달면 사람이 칸을 잘못 센다.
     {
         static const char* const kCols[10] = {"eid", "pid", "n1", "n2", "n3",

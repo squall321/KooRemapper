@@ -146,7 +146,8 @@ bool Validator::jacobianApplies(const Element& elem) {
 }
 
 double Validator::calculateJacobian(const Mesh& mesh, const Element& elem) {
-    if (elem.type == ElementType::TET4) {
+    // TET10 은 리더가 코너를 TET4 꼴로 놓는다 — 코너 사면체의 야코비안이다(휜 모서리는 보지 않는다).
+    if (elem.type == ElementType::TET4 || elem.type == ElementType::TET10) {
         // TET4 Jacobian: 6 * volume = det([v1-v0, v2-v0, v3-v0])
         std::array<Vector3D, 4> verts;
         for (int i = 0; i < 4; ++i) {

@@ -94,23 +94,21 @@ inline std::string xesc(const std::string& s, bool* stripped = nullptr) {
     return out;
 }
 
-// ★그릴 수 없는 **2차 솔리드** 파트를 골라낸다 — `(pid, elform)` 목록.
-//
-// 왜 거절해야 하나(실측 2026-10-05). 리더는 `*ELEMENT_SOLID` 카드 2 에서 **앞 8칸만** 저장하고
-// TET4/PENTA6 만 판정한다. 그래서 10절점 사면체(ELFORM 16·17)는 **중간절점 넷이 코너 자리로**
-// 들어온 육면체가 된다. 증상이 조용하다 —
-//   · 단위 사면체 z=0.2 단면 면적이 **0.12** 로 나온다(참값 0.32). 오류 없이 통과한다.
-//   · 자유면이 **6면/삼각형 12개** 로 나온다(TET4 참값 4면/4개).
-//   · 게다가 ELFORM 16·17 은 `solidNodesFromElform` 이 모르므로 **중간절점 카드를 먹지 않아**
-//     그 줄이 다음 요소의 카드 1 로 읽힌다 — TET10 둘이 **하나로** 읽혔다.
-//
-// 어느 ELFORM 이 위험한가. 기준은 "**앞 8칸이 육면체 코너 여덟인가**" 다.
-//   · 23·24·29 (20·27·64절점 **육면체**) — 코너가 앞 8칸이다. ELFORM 23 은 실측으로
-//     단면 면적 1.0(참값 1.0)·자유면 6면/12삼각이 맞게 나왔다. 그래서 거절하지 않는다.
-//   · 16·17 (10절점 사면체) · 25·28 (21·40절점 오면체) · 26·27 (15·20절점 사면체) —
-//     앞 8칸에 중간절점이 섞인다. **거절한다.**
-//   · 그 밖의 값은 1차 요소이므로 손대지 않는다.
-//
+// ★2차(고차) 솔리드의 ELFORM — 16·17(10절점 사면체) · 23·24·29(20·27·64절점 육면체) · 25·26·27·28(오면체·사면체).
+inline bool isSecondOrderElform(int ef) { return ef == 16 || ef == 17 || (ef >= 23 && ef <= 29); }
+
+// 리더가 **코너 차례를 아는** 2차 ELFORM — 그 파트는 코너로 그리고 잰다(휜 모서리는 곧게 본다).
+//   · 16·17 — 코너는 N1..N4(매뉴얼 Fig 19-31). 리더가 TET4 꼴로 놓는다(2026-10-17 — 그 전에는 앞 8칸을 담아
+//     중간절점 넷이 코너 자리로 들어왔고, 단위 사면체 z=0.2 단면 0.12(참값 0.32)·자유면 6면/12삼각(참 4면/4개)이
+//     **조용히** 나와 그림 셋이 거절했다).
+//   · 23·24·29 — 앞 8칸이 코너다. ELFORM 23 은 실측으로 단면 1.0(참값 1.0)·자유면 6면/12삼각이 맞았다.
+inline bool cornersKnownElform(int ef) { return ef == 16 || ef == 17 || ef == 23 || ef == 24 || ef == 29; }
+
+// ★기하를 **믿을 수 없는** 2차 솔리드 파트 — `(pid, elform)` 목록. 세 그림 op 은 거절하고 modelmeta 는 null 로 낸다.
+//   · ELFORM 25·26·27·28 — 매뉴얼 본문에 코너 차례가 없다(Remark 2 는 「그림을 보라」뿐 · `*SECTION_SOLID` Remark 16
+//     「개발 중」). 짐작한 코너로 그럴듯한 값을 내는 것이 가장 나쁘다.
+//   · 절점 칸이 **모자란** 2차 요소가 든 파트 — 매뉴얼 Card 2 는 N1..N10 열 칸 한 장이다. 노드를 8+2 로 쪼갠 덱은 둘째
+//     줄을 다음 요소의 Card 1 로 읽어 요소가 사라진다(LS-DYNA 도 그렇게 읽는다 — 실측 TET10 둘 → 하나).
 // 요소가 **실제로 있는** 파트만 센다 — 덱에 선언만 있고 안 쓰는 파트로 거절하면 거짓 거절이다.
 inline std::vector<std::pair<int, int>> secondOrderSolidPids(const Mesh& mesh) {
     std::map<int, bool> used;
@@ -119,36 +117,71 @@ inline std::vector<std::pair<int, int>> secondOrderSolidPids(const Mesh& mesh) {
     std::vector<std::pair<int, int>> out;
     for (const auto& pe : mesh.getPartSolidElform()) {
         const int ef = pe.second;
-        const bool unsafe = (ef == 16 || ef == 17 || ef == 25 || ef == 26 || ef == 27 || ef == 28);
-        if (unsafe && used.count(pe.first)) out.push_back(pe);
+        if (!isSecondOrderElform(ef) || !used.count(pe.first)) continue;
+        const bool incomplete = mesh.getPartIncompleteSolids().count(pe.first) > 0;
+        if (!cornersKnownElform(ef) || incomplete) out.push_back(pe);
     }
     return out;
 }
 
+// 코너로 그리고 재는 2차 솔리드 파트 — `(pid, elform)`. 거절 목록에 든 파트는 빼고 센다.
+inline std::vector<std::pair<int, int>> secondOrderCornerPids(const Mesh& mesh) {
+    std::map<int, bool> used;
+    for (const auto& e : mesh.getElements()) used[e.second.partId] = true;
+    std::vector<std::pair<int, int>> out;
+    for (const auto& pe : mesh.getPartSolidElform()) {
+        const int ef = pe.second;
+        if (!cornersKnownElform(ef) || !used.count(pe.first)) continue;
+        if (mesh.getPartIncompleteSolids().count(pe.first)) continue;
+        out.push_back(pe);
+    }
+    return out;
+}
+
+// 그 파트를 왜 믿을 수 없나 — 한 마디.
+inline std::string secondOrderSolidReason(const Mesh& mesh, int pid, int elform) {
+    auto it = mesh.getPartIncompleteSolids().find(pid);
+    if (it != mesh.getPartIncompleteSolids().end())
+        return "절점 칸이 모자란 2차 요소 " + std::to_string(it->second) + "개";
+    (void)elform;
+    return "매뉴얼 본문에 코너 차례가 없다";
+}
+
 // 거절 문구 — 세 그림 op 이 **같은 말**을 해야 한다(갈리면 어느 쪽을 믿을지 알 수 없다).
-inline std::string secondOrderSolidWhy(const std::vector<std::pair<int, int>>& bad) {
+inline std::string secondOrderSolidWhy(const std::vector<std::pair<int, int>>& bad, const Mesh& mesh) {
     std::string pids;
     for (size_t i = 0; i < bad.size() && i < 8; ++i) {
         if (i) pids += ", ";
-        pids += "PID " + std::to_string(bad[i].first) + "(ELFORM " + std::to_string(bad[i].second) + ")";
+        pids += "PID " + std::to_string(bad[i].first) + "(ELFORM " + std::to_string(bad[i].second) + " — " +
+                secondOrderSolidReason(mesh, bad[i].first, bad[i].second) + ")";
     }
     if (bad.size() > 8) pids += ", ... 총 " + std::to_string(bad.size()) + "개";
-    return "**2차 솔리드**를 쓰는 파트가 있다 — " + pids;
+    return "기하를 믿을 수 없는 **2차 솔리드** 파트가 있다 — " + pids;
 }
 
 // 거절한 뒤 무엇을 하라고 할지 — 숫자를 함께 적는다. 그래야 읽는 사람이 **왜** 를 안다.
 inline std::vector<std::string> secondOrderSolidAdvice() {
     return {
-        "리더는 `*ELEMENT_SOLID` 노드 칸의 **앞 8개만** 저장한다. 10절점 사면체는 중간절점 넷이",
-        "  코너 자리(n5..n8)로 들어와 **육면체로 읽힌다.**",
-        "실측 — 같은 기하를 `convert type: tet10` 으로 바꾼 덱의 단면 총면적이 **0.19** 다",
-        "  (1차 원본 0.665 · 오차 71%). 다각형 수는 둘 다 2개로 같아서 **알아볼 수가 없다.**",
-        "표준 레이아웃(`eid pid` + 노드 10칸 **한 줄**)에서는 요소 수는 맞다 — **기하만** 틀린다.",
-        "  노드를 8+2 로 **쪼갠** 덱은 둘째 줄을 다음 요소의 카드 1 로 읽어 **요소가 사라진다**",
-        "  (실측 TET10 둘 → 하나). `info` 가 '정의되지 않은 카드' 로 그 신호를 준다.",
-        "→ **1차 요소 덱으로 그려라.** 20절점 **육면체**(ELFORM 23)는 코너가 앞 8칸이라 그릴 수",
-        "  있다 — 실측으로 단면 면적 1.0(참값 1.0)·자유면 6면/12삼각이 맞게 나왔다.",
+        "리더는 2차 솔리드의 절점 칸을 **다** 읽고 코너를 제자리에 놓는다 — 10절점 사면체(ELFORM 16·17)와",
+        "  20·27·64절점 육면체(23·24·29)는 코너로 그린다(휜 모서리는 곧게 본다).",
+        "ELFORM 25·26·27·28(21·40절점 오면체 · 15·20절점 사면체)은 매뉴얼 본문에 코너 차례가 없다",
+        "  (「그림을 보라」뿐 · *SECTION_SOLID Remark 16 「개발 중」) — 짐작한 코너로 그리지 않는다.",
+        "절점 칸이 모자란 2차 카드는 매뉴얼 꼴이 아니다 — Card 2 는 N1..N10 열 칸 **한 장**이다.",
+        "  노드를 8+2 로 쪼갠 덱은 둘째 줄을 다음 요소의 Card 1 로 읽어 **요소가 사라진다**(LS-DYNA 도 그렇게",
+        "  읽는다 · 실측 TET10 둘 → 하나). `info` 가 그 파트와 수를 말한다.",
+        "→ **1차 요소 덱**이나 표준 꼴(Card 2 열 칸 한 줄)로 다시 내라.",
     };
+}
+
+// 코너로 그린다는 알림 — 그림이 휜 모서리를 곧게 보인다는 것을 **말한다**.
+inline std::string secondOrderCornerNote(const std::vector<std::pair<int, int>>& ok) {
+    std::string pids;
+    for (size_t i = 0; i < ok.size() && i < 8; ++i) {
+        if (i) pids += ", ";
+        pids += "PID " + std::to_string(ok[i].first) + "(ELFORM " + std::to_string(ok[i].second) + ")";
+    }
+    if (ok.size() > 8) pids += ", ... 총 " + std::to_string(ok.size()) + "개";
+    return "2차 솔리드 " + pids + " 는 코너로 그린다 — 중간절점이 휜 모서리는 곧게 보인다";
 }
 
 // 색맹 안전 범주 색(Okabe-Ito). **pid 로 고정**한다 — 호출마다 바뀌면 두 그림을 견줄 수 없다.

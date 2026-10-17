@@ -1427,15 +1427,22 @@ int runInfo(const std::string& meshFile, const ConsoleOutput& console, bool stri
     //   `platform/backend/app/runner/kfile_inspect.py:22-24` 와
     //   `tools/regress/test_packed_node.py:51` 이 정규식으로 파싱한다. 추가만 한다.
     //
-    // ★2차 솔리드 파트가 있으면 고아 수와 야코비안을 **믿을 수 없다**(2026-10-16 실측). 리더가
-    //   `*ELEMENT_SOLID` 절점 칸의 앞 8개만 저장해서 TET10 의 n9·n10 은 아무도 안 쓰는 절점이 되고
-    //   (예제 `examples/tet10/tet10_result.k` — 고아 0 인데 4 로 셌다), 중간절점이 코너 자리로
-    //   들어온 육면체의 야코비안을 잰다(코너 부피 +1/6 둘인데 「음수 2」). 그 말이 없었다.
+    // ★2차 솔리드 — 리더가 절점 칸을 다 읽고 코너를 제자리에 놓는다(2026-10-17). 고아 수는 중간절점까지 세어 **정확**하고
+    //   야코비안은 코너로 잰다. 2026-10-16 까지는 앞 8칸만 담아 TET10 의 n9·n10 을 고아로 셌고(예제
+    //   `examples/tet10/tet10_result.k` — 고아 0 인데 4), 중간절점이 코너 자리로 들어온 육면체의 야코비안을 쟀다(「음수 2」).
+    //   기하를 믿을 수 없는 파트(코너 차례를 모르는 ELFORM 25-28 · 칸이 모자란 카드)만 따로 말한다.
     const auto bad2nd = KooRemapper::figure::secondOrderSolidPids(mesh);
+    const bool incomplete2nd = !mesh.getPartIncompleteSolids().empty();
     if (!bad2nd.empty())
-        console.warning(KooRemapper::figure::secondOrderSolidWhy(bad2nd) +
-                        " — 리더가 절점 칸의 앞 8개만 저장한다. 그 파트는 고아 수·야코비안을 "
-                        "코너 8개만 보고 잰 것이라 아래에서 그렇게 표시한다");
+        console.warning(KooRemapper::figure::secondOrderSolidWhy(bad2nd, mesh) +
+                        " — 그 파트는 야코비안을 재지 않는다" +
+                        (incomplete2nd ? std::string(" · 고아 수는 상한이다(모자란 칸의 절점을 고아로 센다)") : std::string()));
+    {
+        const auto corner2nd = KooRemapper::figure::secondOrderCornerPids(mesh);
+        if (!corner2nd.empty())
+            console.info(KooRemapper::figure::secondOrderCornerNote(corner2nd) +
+                         " — 야코비안도 코너로 잰다 · 고아 수는 중간절점까지 센다");
+    }
     {
         const auto br = mesh.bboxReport();
         console.keyValue("bbox basis", br.hasElements
@@ -1453,8 +1460,8 @@ int runInfo(const std::string& meshFile, const ConsoleOutput& console, bool stri
                 ? 100.0 * (double)br.orphanNodes / (double)mesh.getNodeCount() : 0.0;
             std::snprintf(ob, sizeof(ob), "%zu  (%.2f %%)", br.orphanNodes, pct);
             // 잘라 읽기는 참조를 줄이기만 하므로 센 값은 **상한**이다(0 이면 0 이 참이다).
-            console.keyValue("Orphan nodes", std::string(ob) + (bad2nd.empty() ? "" :
-                             "  ⚠ 상한 — 2차 솔리드의 중간절점(n9·n10)을 고아로 센다"));
+            console.keyValue("Orphan nodes", std::string(ob) + (!incomplete2nd ? "" :
+                             "  ⚠ 상한 — 칸이 모자란 2차 카드의 절점을 고아로 센다"));
 
             // 문턱은 **최대 요소 범위의 1%** 다 — 축척에 상대적이고, 범위가 0 인 평면 메시에서
             // 0 으로 나누지 않는다.
@@ -1717,7 +1724,7 @@ int runInfo(const std::string& meshFile, const ConsoleOutput& console, bool stri
     for (const auto& pe : bad2nd) bad2ndPids.insert(pe.first);
     for (const auto& [id, elem] : mesh.getElements()) {
         if (!Validator::jacobianApplies(elem)) { ++shellSkipped; continue; }
-        // 2차 솔리드는 셸과 같은 까닭으로 뺀다 — 잴 기하가 없다(코너 자리에 중간절점이 있다).
+        // 기하를 믿을 수 없는 2차 솔리드는 셸과 같은 까닭으로 뺀다 — 잴 기하가 없다(코너 차례를 모르거나 칸이 모자라다).
         if (bad2ndPids.count(elem.partId)) { ++secondSkipped; continue; }
         ++solidCount;
         double j = Validator::calculateJacobian(mesh, elem);
@@ -1728,7 +1735,7 @@ int runInfo(const std::string& meshFile, const ConsoleOutput& console, bool stri
 
     console.header("Element Quality");
     const std::string secondNote = secondSkipped > 0
-        ? "2차 솔리드 " + std::to_string(secondSkipped) + "개 — 앞 8칸만 읽어 잴 수 없습니다" : "";
+        ? "기하를 믿을 수 없는 2차 솔리드 " + std::to_string(secondSkipped) + "개 — 잴 수 없습니다" : "";
     if (solidCount == 0) {
         // 센 것이 없으면 숫자를 내지 않는다 — 앞선 판은 셸의 0.0 을 그대로 찍어 "Min=Max=0" 이
         // 나왔고, 그것을 품질 수치로 읽을 수 있었다.

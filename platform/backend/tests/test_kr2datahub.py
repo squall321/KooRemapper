@@ -80,7 +80,7 @@ def test_upload_flag_posts_the_bundle(kr, tmp_path):
 
 def test_second_order_part_carries_null_geometry_with_reason(kr, tmp_path, monkeypatch):
     """2차 솔리드 파트의 기하는 null 로 오고 까닭이 함께 실린다 — 1차 파트의 칸 꼴은 그대로다."""
-    why = "2차 솔리드(ELFORM 16) — 앞 8개만 저장한다"
+    why = "2차 솔리드(ELFORM 26) — 매뉴얼 본문에 코너 차례가 없다(그 기하로 잰 값은 믿을 수 없다)"
 
     def fake_modelmeta(binary, model, outdir, detect):
         meta = {"parts": [

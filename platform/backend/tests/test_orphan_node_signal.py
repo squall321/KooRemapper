@@ -174,8 +174,8 @@ def test_second_order_nulls_pass_through_with_reasons(tmp_path, monkeypatch):
 
     deck = tmp_path / "t10.k"
     deck.write_text("*KEYWORD\n*END\n")
-    why_o = "2차 솔리드 파트의 중간절점(n9·n10)을 고아로 잘못 센다 — 센 값은 상한일 뿐이다(2개)"
-    why_g = "2차 솔리드(ELFORM 16) — 앞 8개만 저장한다"
+    why_o = "절점 칸이 모자란 2차 카드가 있어 못 읽은 칸의 절점을 고아로 센다 — 센 값은 상한일 뿐이다(2개)"
+    why_g = "2차 솔리드(ELFORM 16) — 절점 칸이 모자란 2차 요소 2개(그 기하로 잰 값은 믿을 수 없다)"
 
     def fake(args, *, cwd=None, timeout=None):
         (Path(cwd) / ".mm_t10_modelmeta.json").write_text(json.dumps({

@@ -47,11 +47,13 @@ export interface ModelPart {
   title: string
   elem_class: string
   n_elems: number
-  // ⚠ true 면 아래 기하 값(area_ext·volume·proj)이 **null** 로 온다 — 2차 솔리드라서 코너 8개만
-  //   본 값이었고 실측으로 부피가 -48.4% 였다(2026-10-16 부터 숫자를 내지 않는다). 까닭은
-  //   `geometry_reason`. 플래그를 파트에도 두는 이유는, 파트 하나만 읽는 소비자가 모델 수준
-  //   목록을 못 보기 때문이다.
+  // true 면 2차(고차) 솔리드 파트다(ELFORM 16·17·23~29). 2026-10-17 부터 리더가 절점 칸을 다 읽고 코너를 제자리에
+  //   놓으므로 기하 값(area_ext·volume·proj)은 **코너로 잰 값**이다 — `geometry_basis: 'corners'`(휜 모서리는 곧게 본다).
+  //   기하를 믿을 수 없는 파트(코너 차례를 모르는 ELFORM 25~28 · 칸이 모자란 카드)만 값이 **null** 이고 까닭은
+  //   `geometry_reason`. (2026-10-16 까지는 리더가 앞 8칸만 담아 2차 파트 전부가 null 이었다 — 실측 부피 -48.4%.)
+  //   플래그를 파트에도 두는 이유는, 파트 하나만 읽는 소비자가 모델 수준 목록을 못 보기 때문이다.
   second_order?: boolean
+  geometry_basis?: 'nodes' | 'corners' | null
   geometry_reason?: string | null
   area_ext: number | null
   volume: number | null
@@ -97,10 +99,10 @@ export interface ModelMeta {
   bbox_all_max?: number[]
   bbox_used_min?: number[]
   bbox_used_max?: number[]
-  // ★2차 솔리드(ELFORM 16·17·25~28)를 쓰는 파트. 그 파트의 volume·area_ext·proj·edge_len 은
-  //   코너 8개만 본 값이라 **틀려서** null 로 온다(실측 -48.4%) — 리더가 절점 칸의 앞 8개만 저장하므로
-  //   10절점 사면체의 중간절점이 코너 자리로 들어온다. 파트별로는 `ModelPart.second_order`.
-  second_order_solid_pids?: { pid: number; elform: number }[]
+  // ★2차 솔리드(ELFORM 16·17·23~29)를 쓰는 파트 전부. `geometry_basis` 가 'corners' 면 기하 값을 코너로 쟀고,
+  //   null 이면 그 파트의 volume·area_ext·proj·edge_len 이 null 이다(코너 차례를 모르는 ELFORM 25~28 · 칸이 모자란 카드).
+  //   파트별로는 `ModelPart.second_order`·`geometry_basis`.
+  second_order_solid_pids?: { pid: number; elform: number; geometry_basis?: 'corners' | null }[]
   detect?: boolean
   error?: string
 }
