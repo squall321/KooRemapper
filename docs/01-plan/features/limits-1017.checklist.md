@@ -13,8 +13,8 @@
 
 ## 문서
 - [x] 카탈로그 · ops_help(→ HelpCatalogData.inc) · SKILL.md · 매뉴얼 · 보고서 `limits-1017.report.md` · 장부 5차 · pyKooCAE `15e5e8f` · StepForge 답신 `44f16c9`
-- [ ] 메모리
+- [x] 메모리 — green-gates(백엔드 관문 바이너리) · absence(사례 × 쪼갬 탐침) · flip-premise(막음을 풀 때) · stepforge-boundary · pykoocae(REMAP 인클루드) · 색인
 
 ## 배포
 - [x] compat 빌드 `cd07c327` · 관문 전부(회귀 99 · 단위 112 · 도움말 · 패리티 · backend 564 · 덱 바이트) · cli.sif `d8213999` · Drive `dist-20261017-082514Z` · API/MCP · 스모크 셋 · 설명 14/14 · 플랫폼 경유 3/3 · 스테이징
-- [ ] SIF · /opt/apptainers · 네 자리 sha
+- [x] SIF(bake rc 0 · tar v119 · 메일) · /opt/apptainers · 세 사본 `eddd5783` · 네 자리 sha `cd07c327` · SIF 안 실행 · REMAP 배선 5/5

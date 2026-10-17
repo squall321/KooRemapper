@@ -1230,5 +1230,9 @@ plan2 는 이 항목의 전제를 P1-4(대역표)로 잡았다. 그런데 대역
 - [x] 스테이징 `1164d8ed → cd07c327`(백업 `KooRemapper.bak-1164d8ed-20261017083104`) · `cli.sif` → `d8213999`.
 - [x] pyKooCAE 매뉴얼 `15e5e8f` — 2차 솔리드 · 재결속 · flatten_includes(REMAP 체인은 미리 펼친 한 파일로) · ale · cleanup-nodes · hfdamp.
 - [x] StepForge 답신 §0-1(`44f16c9`) — geometry_basis · second_order 의 뜻 · 사면체 edge_len · 재결속 선택 넷.
-- [ ] SmartTwinPreprocessor.sif 굽기 → `/opt/apptainers` → 세 사본 sha · SIF 안 실행(아래에 채운다).
+- [x] SmartTwinPreprocessor.sif 굽기 — `bake rc=0`(분류기에 막히지 않았다) · 구워진 sha = 스테이징 sha `cd07c327` · 계산노드 복사 ·
+      tar `SmartTwinPreprocessor_20261017_v119.tar.gz` · Drive 업로드 둘 · 메일 「sent OK」 → `/opt/apptainers` 손 복사 → **세 사본 바이트 동일**
+      (`eddd5783`). 그 SIF 안에서 — `help` 63 op · TET10 `info` 「코너로 그린다」 · 야코비안 1 · 고아 줄 없음 · 쪼갠 덱 ale 옵션 없음 rc 1(안내) /
+      `flatten_includes` rc 0(산출 `*INCLUDE` 없음 · AMMG · 임시 파일 없음) · **REMAP 배선 다섯(applyfold · stackwrap · cnrb2spring · 삽입 ·
+      cleanup-nodes) 체인 통과** · `rclone.conf` 그대로. → **네 자리(게시본 · API · 스테이징 · SIF)가 `cd07c327` 로 같다.**
 

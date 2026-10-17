@@ -4,7 +4,7 @@
 > 상시 지시 「업데이트 되었으면 당연히 빌드도 다 해야한다」
 >
 > 작성일: 2026-10-17
-> 상태: 완료 — 여섯 모두 지어 5차로 배포했다. 남은 것은 셸 층 묶기의 솔버 시험(4차 · 사용자 몫)과 바깥 대기 항목이다.
+> 상태: 완료 — 여섯 모두 지어 5차로 배포했다(네 자리 `cd07c327` · SIF 세 사본 동일). 남은 것은 셸 층 묶기의 솔버 시험(4차 · 사용자 몫)과 바깥 대기 항목이다.
 >
 > ⚠ 수치는 이 라운드에서 직접 잰 값이다(커밋 메시지와 장부에 같은 값을 적었다).
 
@@ -87,7 +87,9 @@
   API · MCP 재기동(health `cd07c327` · `revision_matches_binary: true`) → smoke(op 63 · 도구 72) · 그림 20/20 · 덱 op 21/21 · 설명 14/14 ·
   플랫폼 경유 — TET10 업로드 meta `geometry_basis: corners` · 고아 0 / 쪼갠 덱 ale 옵션 없음 failed · `flatten_includes` succeeded(산출에 `*INCLUDE` 없음) /
   재결속 `tolerance` 가 구조화 검증을 지난다.
-- 스테이징 `1164d8ed → cd07c327` · `cli.sif` → SmartTwinPreprocessor.sif 재bake → `/opt/apptainers` — 결과는 장부 5차 칸.
+- 스테이징 `1164d8ed → cd07c327` · `cli.sif` → SmartTwinPreprocessor.sif 재bake(`bake rc=0` · tar v119 · Drive 업로드 둘 · 메일) →
+  `/opt/apptainers` → **세 사본 바이트 동일**(`eddd5783`) · 안의 바이너리 `cd07c327` — **네 자리(게시본 · API · 스테이징 · SIF)가 같다.**
+  그 SIF 안에서 TET10 코너 · 쪼갠 덱 ale(옵션 없음 rc 1 · 있으면 rc 0) · REMAP 배선 5/5.
 
 ## 한계 (정직한 명시)
 - ELFORM 25·26·27·28 의 코너 차례는 매뉴얼 **본문**에 없다(그림뿐) — 그 파트는 계속 거절·null 이다. 그림의 차례를 확인할 길(LS-PrePost · 실물 덱)이 생기면 푼다.
