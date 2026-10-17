@@ -142,8 +142,41 @@ def test_second_order_signal_reaches_the_platform():
         # 파트 하나만 읽는 소비자도 알 수 있어야 한다
         parts = mm.get("parts") or []
         assert parts and parts[0].get("second_order") is True, parts[:1]
-        # 왜 쓰면 안 되는지 규약에 적혀 있다
-        assert "쓰지 말라" in (mm.get("conventions") or {}).get("second_order", "")
+        # ★이 덱은 옛 한 줄 꼴(EID PID N1..N8)에 ELFORM 16 이다 — 칸이 모자란 2차 카드라 값을 믿을 수 없다(2026-10-17).
+        #   그 파트만 geometry_basis 가 null 이고 값도 null 이다(코너를 아는 2차 솔리드는 "corners" 로 숫자를 낸다 — 아래 시험).
+        assert bad[0].get("geometry_basis", "없음") is None, bad
+        assert parts[0].get("geometry_basis", "없음") is None and parts[0].get("volume", "없음") is None, parts[:1]
+        # 규약 — 코너로 잰 값이고 null 이 되는 자리를 적는다(2026-10-16 까지는 「쓰지 말라」 였다)
+        conv = (mm.get("conventions") or {}).get("second_order", "")
+        assert "코너로 잰 값" in conv and "모자란" in conv, conv
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+@pytest.mark.skipif(not _BIN.exists(), reason="KooRemapper 바이너리 없음")
+def test_corner_basis_reaches_the_platform():
+    """표준 꼴 TET10(Card 1 = EID PID · Card 2 = N1..N10)은 코너로 잰 값이 플랫폼까지 온다(2026-10-17).
+
+    리더가 절점 칸을 다 읽고 코너를 제자리에 놓으므로 값이 숫자이고 `geometry_basis` 가 "corners" 다. 래퍼가 그 칸을
+    버리면 프런트는 그 값이 코너로 잰 것인지 말할 수 없다.
+    """
+    d = Path(tempfile.mkdtemp())
+    try:
+        corners = [(0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1)]
+        pts = list(corners) + [tuple((corners[a][k] + corners[b][k]) / 2 for k in range(3))
+                               for a, b in ((0, 1), (1, 2), (2, 0), (0, 3), (1, 3), (2, 3))]
+        L = ["*KEYWORD", "*NODE"] + ["%8d%16.9f%16.9f%16.9f" % (i, *q) for i, q in enumerate(pts, 1)]
+        L += ["*ELEMENT_SOLID", "%8d%8d" % (1, 1), "".join("%8d" % n for n in range(1, 11)),
+              "*PART", "tet10", "%10d%10d%10d" % (1, 1, 1), "*SECTION_SOLID", "%10d%10d" % (1, 16),
+              "*MAT_ELASTIC", "%10d%10.4g%10.6g%10.4g" % (1, 7.85e-9, 210000, 0.3), "*END"]
+        p = d / "t10.k"
+        p.write_text("\n".join(L) + "\n", newline="\n")
+        mm = (ki.inspect_kfile(p).get("modelmeta") or {})
+        so = mm.get("second_order_solid_pids")
+        assert so == [{"pid": 1, "elform": 16, "geometry_basis": "corners"}], so
+        part = (mm.get("parts") or [{}])[0]
+        assert part.get("geometry_basis") == "corners" and abs((part.get("volume") or 0) - 1 / 6) < 1e-6, part
+        assert mm.get("orphan_nodes") == 0, mm.get("orphan_nodes")      # 중간절점까지 센다
     finally:
         shutil.rmtree(d, ignore_errors=True)
 
