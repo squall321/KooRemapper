@@ -96,7 +96,7 @@ shopt -u nullglob
 
 if [ "$DO_RESTART" = "0" ]; then
   echo "✓ 아티팩트 반입 완료. 다음: bash platform/infra/scripts/start.sh"
-  echo "  ⚠ 그런데 그것만으로는 **새 코드가 안 올라간다** — `start.sh` 의 `start_instance` 는 이미"
+  echo "  ⚠ 그런데 그것만으로는 **새 코드가 안 올라간다** — 'start.sh' 의 'start_instance' 는 이미"
   echo "    떠 있으면 건너뛴다. 한 줄로 끝내려면: bash platform/infra/scripts/dist-from-drive.sh --restart"
   exit 0
 fi
