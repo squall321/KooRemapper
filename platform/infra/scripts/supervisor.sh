@@ -87,6 +87,13 @@ gone_for_sure() {
 # 겹친 뒤 postgres 없는 셸이 목록에 남아 감독자가 18시간 동안 매분 ✓ 를 찍었고 :5436 은 비어 있었다(사람별 로그인 500 31건 — HWAX
 # 포털 수정 제안서 K1). 인스턴스 안의 pg_isready 로 유닉스소켓을 본다(그 소켓은 우리 데이터 폴더라 남의 postmaster 가 아니다 — start.sh
 # 의 pg_id 와 같은 근거).  0 받는다 · 1 기동·종료 중(이번 회차는 기다린다) · 2 응답 없음 · 3 판정 불가(목록 실패처럼 '모름' — 손대지 않는다).
+KOORM_MCP_RECHECK_S="${KOORM_MCP_RECHECK_S:-5}"   # MCP 무응답을 한 번 더 볼 때까지(초)
+# MCP 가 연결을 받는가 — HTTP 코드가 오면(406 · 405 · 200 …) 산 것이고, 연결이 안 되면 000 이다. 띄울 때 쓴 MCP_HOST 그대로 본다.
+mcp_code() {
+  local host="${MCP_HOST:-127.0.0.1}"
+  [ "$host" = "0.0.0.0" ] && host=127.0.0.1
+  curl -s -o /dev/null -w '%{http_code}' -m3 "http://${host}:${KOORM_MCP_PORT}/mcp" 2>/dev/null || true
+}
 KOORM_PG_RECHECK_S="${KOORM_PG_RECHECK_S:-5}"   # 응답 없음을 한 번 더 볼 때까지(초) — 한 번의 깜박임으로 내리지 않는다
 pg_state() {
   local rc=0
@@ -201,6 +208,18 @@ check_once() {
       rc=$?
       echo "[$(date '+%F %T')] api restart 실패(rc=$rc) — /tmp/koorm-restart-api.log"
       tail -5 /tmp/koorm-restart-api.log | sed 's/^/    /'
+    fi
+  fi
+  # mcp: 인스턴스는 **확실히 있는데** 포트가 연결조차 안 받으면 인스턴스를 내린다 — 바로 아래 '없으면 띄운다' 가 같은 회차에 다시 띄운다.
+  # 10-18 07:11 UTC earlyoom 이 인스턴스 안의 서버만 죽여(SIGTERM) 인스턴스는 남았고, 이 감시는 '있다' 만 보고 14시간 매분 ✓ 를
+  # 찍었다(HWAXPortal docs/followups-1017 FU-D22). 000(연결 안 됨)만, 두 번 보고 판정한다. 목록 조회가 실패한 '모름'(2)은 손대지 않는다.
+  instance_running "$INST_MCP"; _mcp_rc=$?
+  if [ "$_mcp_rc" -eq 0 ] && [ "$(mcp_code)" = "000" ]; then
+    sleep "$KOORM_MCP_RECHECK_S"
+    if [ "$(mcp_code)" = "000" ]; then
+      echo "[$(date '+%F %T')] mcp 무응답(인스턴스는 있다 — :${KOORM_MCP_PORT} 연결 안 됨, 두 번) → 인스턴스를 내리고 다시 띄운다"
+      "$APPTAINER" instance stop "$INST_MCP" >/tmp/koorm-stop-mcp.log 2>&1 \
+        || { rc=$?; echo "[$(date '+%F %T')] mcp instance stop 실패(rc=$rc) — /tmp/koorm-stop-mcp.log"; }
     fi
   fi
   # mcp: restart instance if gone
