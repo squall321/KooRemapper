@@ -4,11 +4,26 @@
 #include <tuple>
 #include <set>
 #include <cmath>
+#include <unordered_map>
 
 // Knowledge graph (lat.md):
 //   @lat: [[modules/grid]]
 
 namespace KooRemapper {
+
+namespace {
+
+// Hash for (i,j,k) grid index keys
+struct GridIndexHash {
+    size_t operator()(const std::tuple<int, int, int>& t) const {
+        size_t h = static_cast<unsigned>(std::get<0>(t));
+        h = h * 0x9E3779B97F4A7C15ULL ^ static_cast<unsigned>(std::get<1>(t));
+        h = h * 0x9E3779B97F4A7C15ULL ^ static_cast<unsigned>(std::get<2>(t));
+        return h;
+    }
+};
+
+}  // namespace
 
 StructuredGridIndexer::StructuredGridIndexer()
     : dimI_(0), dimJ_(0), dimK_(0), mesh_(nullptr)
@@ -448,20 +463,35 @@ bool StructuredGridIndexer::propagateIndicesGeometry(Mesh& mesh, int startElem,
     // We'll use the axisDirections_ computed in determineInitialDirectionsGeometry
     // as the reference directions for the first neighbors
 
+    // Element and centroid per element ID, computed once. The walk below only
+    // writes i/j/k, so these are the values calculateElementCentroid would
+    // return at any point (it used to be called for every visit of an element).
+    struct ElemInfo { Element* elem; Vector3D centroid; };
+    std::unordered_map<int, ElemInfo> elemInfo;
+    elemInfo.reserve(mesh.elements.size());
+    for (auto& [id, elem] : mesh.elements) {
+        elemInfo.emplace(id, ElemInfo{&elem, calculateElementCentroid(mesh, id)});
+    }
+    auto findInfo = [&elemInfo](int id) -> const ElemInfo* {
+        auto it = elemInfo.find(id);
+        return (it != elemInfo.end()) ? &it->second : nullptr;
+    };
+
     int processedCount = 0;
 
     while (!queue.empty()) {
         int elemId = queue.front();
         queue.pop();
 
-        Element* currentElem = mesh.getElement(elemId);
-        if (!currentElem) continue;
+        const ElemInfo* current = findInfo(elemId);
+        if (!current) continue;
+        Element* currentElem = current->elem;
 
         int i = currentElem->i;
         int j = currentElem->j;
         int k = currentElem->k;
 
-        Vector3D currentCentroid = calculateElementCentroid(mesh, elemId);
+        Vector3D currentCentroid = current->centroid;
         auto neighbors = connectivity.getNeighbors(elemId);
 
         // Build local axes from ALREADY INDEXED neighbors
@@ -470,11 +500,12 @@ bool StructuredGridIndexer::propagateIndicesGeometry(Mesh& mesh, int startElem,
         std::array<bool, 3> axisFound = {false, false, false};
 
         for (const auto& neighbor : neighbors) {
-            Element* neighborElem = mesh.getElement(neighbor.neighborElementId);
-            if (!neighborElem || !neighborElem->indexAssigned) continue;
+            const ElemInfo* info = findInfo(neighbor.neighborElementId);
+            if (!info || !info->elem->indexAssigned) continue;
+            Element* neighborElem = info->elem;
 
             // Calculate direction to this neighbor
-            Vector3D neighborCentroid = calculateElementCentroid(mesh, neighbor.neighborElementId);
+            Vector3D neighborCentroid = info->centroid;
             Vector3D direction = neighborCentroid - currentCentroid;
             direction = direction.normalized();
 
@@ -526,13 +557,14 @@ bool StructuredGridIndexer::propagateIndicesGeometry(Mesh& mesh, int startElem,
 
         // Now process unindexed neighbors
         for (const auto& neighbor : neighbors) {
-            Element* neighborElem = mesh.getElement(neighbor.neighborElementId);
-            if (!neighborElem || neighborElem->indexAssigned) {
+            const ElemInfo* info = findInfo(neighbor.neighborElementId);
+            if (!info || info->elem->indexAssigned) {
                 continue;
             }
+            Element* neighborElem = info->elem;
 
             // Calculate direction from current element to neighbor
-            Vector3D neighborCentroid = calculateElementCentroid(mesh, neighbor.neighborElementId);
+            Vector3D neighborCentroid = info->centroid;
             Vector3D direction = neighborCentroid - currentCentroid;
             direction = direction.normalized();
 
@@ -617,12 +649,21 @@ void StructuredGridIndexer::reorderElementNodes(Mesh& mesh) {
     //   Bottom (k-): n0 at (i-,j-), n1 at (i+,j-), n2 at (i+,j+), n3 at (i-,j+)
     //   Top (k+):    n4 at (i-,j-), n5 at (i+,j-), n6 at (i+,j+), n7 at (i-,j+)
 
-    // Build element lookup by (i,j,k) for neighbor queries
-    std::map<std::tuple<int,int,int>, const Element*> elemLookup;
+    // Build element lookup by (i,j,k) for neighbor queries. Each cell also
+    // caches its element's centroid: computed once here, and again right after
+    // that element's nodes are reordered below. A lookup therefore returns what
+    // calculateElementCentroid gives at that moment -- the sum runs in node
+    // order, so the reorder can change its last bits.
+    struct Cell { const Element* elem; Vector3D centroid; };
+    std::unordered_map<std::tuple<int,int,int>, Cell, GridIndexHash> elemLookup;
+    elemLookup.reserve(mesh.elements.size());
     for (const auto& [id, elem] : mesh.elements) {
         if (elem.indexAssigned) {
-            elemLookup[{elem.i, elem.j, elem.k}] = &elem;
+            elemLookup[{elem.i, elem.j, elem.k}].elem = &elem;
         }
+    }
+    for (auto& [ijk, cell] : elemLookup) {
+        cell.centroid = calculateElementCentroid(mesh, cell.elem->id);
     }
 
     for (auto& [id, elem] : mesh.elements) {
@@ -659,10 +700,10 @@ void StructuredGridIndexer::reorderElementNodes(Mesh& mesh) {
         auto iPlus = elemLookup.find({elem.i + 1, elem.j, elem.k});
         auto iMinus = elemLookup.find({elem.i - 1, elem.j, elem.k});
         if (iPlus != elemLookup.end()) {
-            iAxis += calculateElementCentroid(mesh, iPlus->second->id) - centroid;
+            iAxis += iPlus->second.centroid - centroid;
         }
         if (iMinus != elemLookup.end()) {
-            iAxis += centroid - calculateElementCentroid(mesh, iMinus->second->id);
+            iAxis += centroid - iMinus->second.centroid;
         }
         if (iAxis.magnitude() > 1e-10) {
             iAxis = iAxis.normalized();
@@ -674,10 +715,10 @@ void StructuredGridIndexer::reorderElementNodes(Mesh& mesh) {
         auto jPlus = elemLookup.find({elem.i, elem.j + 1, elem.k});
         auto jMinus = elemLookup.find({elem.i, elem.j - 1, elem.k});
         if (jPlus != elemLookup.end()) {
-            jAxis += calculateElementCentroid(mesh, jPlus->second->id) - centroid;
+            jAxis += jPlus->second.centroid - centroid;
         }
         if (jMinus != elemLookup.end()) {
-            jAxis += centroid - calculateElementCentroid(mesh, jMinus->second->id);
+            jAxis += centroid - jMinus->second.centroid;
         }
         if (jAxis.magnitude() > 1e-10) {
             jAxis = jAxis.normalized();
@@ -689,10 +730,10 @@ void StructuredGridIndexer::reorderElementNodes(Mesh& mesh) {
         auto kPlus = elemLookup.find({elem.i, elem.j, elem.k + 1});
         auto kMinus = elemLookup.find({elem.i, elem.j, elem.k - 1});
         if (kPlus != elemLookup.end()) {
-            kAxis += calculateElementCentroid(mesh, kPlus->second->id) - centroid;
+            kAxis += kPlus->second.centroid - centroid;
         }
         if (kMinus != elemLookup.end()) {
-            kAxis += centroid - calculateElementCentroid(mesh, kMinus->second->id);
+            kAxis += centroid - kMinus->second.centroid;
         }
         if (kAxis.magnitude() > 1e-10) {
             kAxis = kAxis.normalized();
@@ -737,6 +778,7 @@ void StructuredGridIndexer::reorderElementNodes(Mesh& mesh) {
 
         // Build new node order: for each LS-DYNA position, find the node at that corner
         std::array<int, 8> newNodeIds;
+        std::array<int, 8> newLocal;  // local index (into nodeIds/nodePos) of newNodeIds[lsPos]
         std::array<bool, 8> nodeUsed;
         nodeUsed.fill(false);
 
@@ -782,15 +824,30 @@ void StructuredGridIndexer::reorderElementNodes(Mesh& mesh) {
 
             if (bestNode >= 0) {
                 newNodeIds[lsPos] = nodeIds[bestNode];
+                newLocal[lsPos] = bestNode;
                 nodeUsed[bestNode] = true;
             } else {
                 // Fallback - should not happen
                 newNodeIds[lsPos] = nodeIds[lsPos];
+                newLocal[lsPos] = lsPos;
             }
         }
 
         // Update element with reordered nodes
         elem.nodeIds = newNodeIds;
+
+        // Refresh the cached centroid for the elements still to come (unless
+        // another element with the same index holds the cell): the sum that
+        // calculateElementCentroid now makes over the new order of 8 nodes.
+        Cell& self = elemLookup[{elem.i, elem.j, elem.k}];
+        if (self.elem == &elem) {
+            Vector3D reordered(0, 0, 0);
+            for (int n = 0; n < 8; ++n) {
+                reordered += nodePos[newLocal[n]];
+            }
+            reordered /= 8.0;
+            self.centroid = reordered;
+        }
     }
 }
 
