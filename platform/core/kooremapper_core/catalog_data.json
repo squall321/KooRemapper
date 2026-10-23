@@ -7604,14 +7604,14 @@
           "path": "depth",
           "type": "integer",
           "required": false,
-          "desc": "Per-contact DEPTH (Card A) — contact search depth (element layers). Default 2. Higher detects contact through thicker parts. Lv6 sets 3, Lv8+ sets 5. Cost increases with depth",
+          "desc": "Per-contact DEPTH (Card A). With SOFT 0/1: the number of closest segments checked for nodal penetration (default 2; 3 for AUTOMATIC_GENERAL). With SOFT = 2: a coded option — 3 = also check penetration at edges, 5 = also edge-to-edge (13/15/23/25/35/45 are variants). Lv6 sets 3 (with SOFT 1), Lv8+ sets 5 (with SOFT 2).",
           "default": null
         },
         {
           "path": "maxpar",
           "type": "number",
           "required": false,
-          "desc": "Per-contact MAXPAR (Card A) — penetration multiple for pinball (SOFT=2). Default 1.025. Nodes penetrating > segment_size × maxpar excluded. Large deformation → 1.15–1.25 needed (Lv8+ defaults to 1.15)",
+          "desc": "Per-contact MAXPAR (Card A): maximum parametric coordinate in the segment search (1.025-1.20 recommended; 0 = 1.025). SMP only, and only for non-automatic contacts and AUTOMATIC_GENERAL; not used with SOFT = 2 or Mortar. Lv8+ writes 1.15 together with SOFT = 2, where LS-DYNA ignores it.",
           "default": null
         },
         {
@@ -11099,7 +11099,7 @@
       "name": "contact",
       "category": "bc",
       "summary": "Analyze, create, modify, convert, remove, or auto-detect contact definitions (*CONTACT_*, *SET_SEGMENT, *SET_PART, *SET_NODE keywords)",
-      "description": "LS-DYNA contact management operation supporting: analyze (read-only report), create (new contacts from parts/segments), convert (SSTYP transformation), modify (friction/optional cards), remove (delete), and detect (auto-find contact pairs via spatial hashing). All actions specified as YAML list under contacts[] key. Each action processes optional Cards A-G (SOFT, SOFSCL, LCIDAB, MAXPAR, SBOPT, DEPTH, BSORT, FRCFRQ, PENMAX, THKOPT, SHLTHK, SNLOG, ISYM, I2D3D, SLDTHK, SLDSTF, IGAP, IGNORE, DPRFAC, DTSTIF, EDGEK, FLANGL, CID_RCF, Q2TRI, DTPCHK, SFNBR, FNLSCL, DNLSCL, TCSO, TIEDID, SHLEDG, SHAREC, CPARM8, IPBACK, SRNDE, FRICSF, ICOR, FTORQ, REGION, PSTIFF, IGNROFF, FSTOL, D2BINR/2DBINR, SSFTYP, SWTPR, TETFAC, SHLOFF). create also supports thermal (K/FRAD/H0/CHLM…) and tiebreak (OPTION/NFLS/SFLS/CT2CN…) special cards via type tied_thermal / tiebreak.",
+      "description": "LS-DYNA contact management operation supporting: analyze (read-only report), create (new contacts from parts/segments), convert (SSTYP transformation), modify (friction/optional cards), remove (delete), and detect (auto-find contact pairs via spatial hashing). All actions specified as YAML list under contacts[] key. Each action processes optional Cards A-G (SOFT, SOFSCL, LCIDAB, MAXPAR, SBOPT, DEPTH, BSORT, FRCFRQ, PENMAX, THKOPT, SHLTHK, SNLOG, ISYM, I2D3D, SLDTHK, SLDSTF, IGAP, IGNORE, DPRFAC, DTSTIF, EDGEK, FLANGL, CID_RCF, Q2TRI, DTPCHK, SFNBR, FNLSCL, DNLSCL, TCSO, TIEDID, SHLEDG, SHAREC, CPARM8, IPBACK, SRNDE, FRICSF, ICOR, FTORQ, REGION, PSTIFF, IGNROFF, FSTOL, D2BINR/2DBINR, SSFTYP, SWTPR, TETFAC, SHLOFF). create also supports thermal (K/FRAD/H0/LMIN/LMAX/FTOSA — key chlm…) and tiebreak (OPTION/NFLS/SFLS/CT2CN…) special cards via type tied_thermal / tiebreak.",
       "invocation": "yaml",
       "config_style": "freeform",
       "takes_kfile": true,
@@ -11188,7 +11188,7 @@
           "path": "contacts[].type",
           "type": "string",
           "required": false,
-          "desc": "Contact type for action: create. Short names (standalone `contact`): auto/automatic -> AUTOMATIC_SURFACE_TO_SURFACE, tied -> TIED_SURFACE_TO_SURFACE, tied_thermal/thermal -> TIED_SURFACE_TO_SURFACE_THERMAL, tiebreak -> AUTOMATIC_SURFACE_TO_SURFACE_TIEBREAK, mortar -> AUTOMATIC_SURFACE_TO_SURFACE_MORTAR, tied_mortar -> TIED_SURFACE_TO_SURFACE_MORTAR, single -> AUTOMATIC_SINGLE_SURFACE, eroding -> ERODING_SURFACE_TO_SURFACE, forming -> FORMING_SURFACE_TO_SURFACE. Omitting the key gives AUTOMATIC_SURFACE_TO_SURFACE (it no longer writes a nameless *CONTACT_). Any other value is uppercased and written as *CONTACT_<VALUE> as-is, so full LS-DYNA keywords work: automatic_nodes_to_surface, automatic_general, forming_one_way_surface_to_surface, tied_shell_edge_to_surface, ... . If the value is not in KooRemapper's known-keyword list the run still succeeds (rc=0) but prints \"[contact] create: type '<value>' is not a known contact keyword — writing *CONTACT_<VALUE> as-is\". The card body is always Cards 1-2 plus the optional THERMAL/TIEBREAK card, so a keyword needing a different card layout will be rejected by LS-DYNA, not by KooRemapper."
+          "desc": "Contact type for action: create. Short names (standalone `contact`): auto/automatic -> AUTOMATIC_SURFACE_TO_SURFACE, tied -> TIED_SURFACE_TO_SURFACE, tied_thermal/thermal -> TIED_SURFACE_TO_SURFACE_THERMAL, tiebreak -> AUTOMATIC_SURFACE_TO_SURFACE_TIEBREAK, mortar -> AUTOMATIC_SURFACE_TO_SURFACE_MORTAR, tied_mortar -> TIED_SURFACE_TO_SURFACE_MORTAR, single -> AUTOMATIC_SINGLE_SURFACE, eroding -> ERODING_SURFACE_TO_SURFACE, forming -> FORMING_SURFACE_TO_SURFACE. Omitting the key gives AUTOMATIC_SURFACE_TO_SURFACE (it no longer writes a nameless *CONTACT_). Any other value is uppercased and written as *CONTACT_<VALUE> as-is, so full LS-DYNA keywords work: automatic_nodes_to_surface, automatic_general, forming_one_way_surface_to_surface, tied_shell_edge_to_surface, ... . If the value is not in KooRemapper's known-keyword list the run still succeeds (rc=0) but prints \"[contact] create: type '<value>' is not a known contact keyword — writing *CONTACT_<VALUE> as-is\". The card body is Cards 1-3, then Optional Cards A-G when any of their keys is set, then the THERMAL/TIEBREAK card for *_THERMAL/*_TIEBREAK types. Known issues: LS-DYNA requires the TIEBREAK Card 4 and the THERMAL card before the optional cards, so combining them with Card A-G keys gives a misordered deck; no other type-specific Card 4 is written (ERODING_*, *_TIEBREAK_USER, ...), so those keywords come out incomplete; tied_mortar writes TIED_SURFACE_TO_SURFACE_MORTAR, which is not an LS-DYNA keyword (the manual has AUTOMATIC_SURFACE_TO_SURFACE_MORTAR_TIED)."
         },
         {
           "path": "contacts[].title",
@@ -11327,7 +11327,7 @@
           "type": "number",
           "required": false,
           "default": null,
-          "desc": "Viscous decay coefficient (Card 2, VDC field). Optional. Internally uses -1 sentinel (not set)."
+          "desc": "Viscous contact damping in percent of critical, 0-100 (Card 2, VDC field); with ICOR set on Card E it is the coefficient of restitution in percent. Optional. Internally uses -1 sentinel (not set)."
         },
         {
           "path": "contacts[].penchk",
@@ -11341,63 +11341,63 @@
           "type": "number",
           "required": false,
           "default": null,
-          "desc": "Bias tangential friction (Card 2, BT field). Optional. Internally uses -1 sentinel (not set)."
+          "desc": "Birth time: the contact becomes active at this time (Card 2, BT field); 0 = active from the start. Negative values (birth time followed during dynamic relaxation) cannot be written. Optional. Internally uses -1 sentinel (not set)."
         },
         {
           "path": "contacts[].dt",
           "type": "number",
           "required": false,
           "default": null,
-          "desc": "Dynamic increase (Card 2, DT field). Optional; stored/printed as scientific notation. Internally uses -1 sentinel (not set)."
+          "desc": "Death time: the contact is deactivated at this time (Card 2, DT field); 0 means 1.0E+20. Negative values (inactive during dynamic relaxation; -9999 = BT is a birth/death curve) cannot be written. Optional; stored/printed as scientific notation. Internally uses -1 sentinel (not set)."
         },
         {
           "path": "contacts[].sfsa",
           "type": "number",
           "required": false,
           "default": null,
-          "desc": "Slave friction scale A (Card 3, SFSA field). Optional. Internally uses -1 sentinel (not set)."
+          "desc": "Scale factor on the default SURFA (slave) penalty stiffness when SOFT = 0 or 2 (Card 3, SFSA field); default 1.0 (0 also means 1.0). Not a friction factor. Optional. Internally uses -1 sentinel (not set)."
         },
         {
           "path": "contacts[].sfsb",
           "type": "number",
           "required": false,
           "default": null,
-          "desc": "Slave friction scale B (Card 3, SFSB field). Optional. Internally uses -1 sentinel (not set)."
+          "desc": "Scale factor on the default SURFB (master) penalty stiffness when SOFT = 0 or 2 (Card 3, SFSB field); default 1.0 (0 also means 1.0). Not a friction factor. Optional. Internally uses -1 sentinel (not set)."
         },
         {
           "path": "contacts[].sast",
           "type": "number",
           "required": false,
           "default": null,
-          "desc": "Slave area scale (Card 3, SAST field). Optional. Internally uses -1 sentinel (not set)."
+          "desc": "Contact thickness for the SURFA (slave) side, shells and beams (Card 3, SAST field); overrides the default (element thickness, also used when 0) and only moves the contact surface. Optional. Internally uses -1 sentinel (not set)."
         },
         {
           "path": "contacts[].sbst",
           "type": "number",
           "required": false,
           "default": null,
-          "desc": "Slave bias stiffness (Card 3, SBST field). Optional. Internally uses -1 sentinel (not set)."
+          "desc": "Contact thickness for the SURFB (master) side, shells only (Card 3, SBST field); overrides the default (element thickness, also used when 0) and only moves the contact surface. Optional. Internally uses -1 sentinel (not set)."
         },
         {
           "path": "contacts[].sfsat",
           "type": "number",
           "required": false,
           "default": null,
-          "desc": "Slave friction scale A thermal (Card 3, SFSAT field). Optional. Internally uses -1 sentinel (not set)."
+          "desc": "Scale factor on the SURFA (slave) contact thickness, shells and beams (Card 3, SFSAT field); default 1.0; ignored when SAST is nonzero (except Mortar). Optional. Internally uses -1 sentinel (not set)."
         },
         {
           "path": "contacts[].sfsbt",
           "type": "number",
           "required": false,
           "default": null,
-          "desc": "Slave friction scale B thermal (Card 3, SFSBT field). Optional. Internally uses -1 sentinel (not set)."
+          "desc": "Scale factor on the SURFB (master) contact thickness, shells only (Card 3, SFSBT field); default 1.0; ignored when SBST is nonzero (except Mortar). Optional. Internally uses -1 sentinel (not set)."
         },
         {
           "path": "contacts[].fsf",
           "type": "number",
           "required": false,
           "default": null,
-          "desc": "Failure slide (Card 3, FSF field). Optional. Internally uses -1 sentinel (not set)."
+          "desc": "Coulomb friction scale factor (Card 3, FSF field): the Card 2 friction coefficient is multiplied by FSF; default 1.0. Optional. Internally uses -1 sentinel (not set)."
         },
         {
           "path": "contacts[].vsf",
@@ -11411,7 +11411,7 @@
           "type": "integer",
           "required": false,
           "default": null,
-          "desc": "Contact constraint type (Card A, SOFT field). Values: 0=penalty, 1=constraint, 2=soft. Internally uses -1 sentinel (not set). Triggers Card A output when set."
+          "desc": "Contact formulation (Card A, SOFT field): 0 = standard penalty, 1 = soft-constraint penalty, 2 = segment-to-segment penalty, 4 = constraint (one-way FORMING only), 6 = FORMING_NODES_TO_SURFACE gage-pin special. Internally uses -1 sentinel (not set). Triggers Card A output when set; Card A then also carries MAXPAR 1.025 and DEPTH 2 unless they are given, which overrides type-specific defaults (e.g. DEPTH 3 for AUTOMATIC_GENERAL)."
         },
         {
           "path": "contacts[].sofscl",
@@ -11425,7 +11425,7 @@
           "type": "integer",
           "required": false,
           "default": null,
-          "desc": "Load curve ID for contact angle (Card A, LCIDAB field). Optional. Internally uses -1 sentinel (not set)."
+          "desc": "Load curve ID giving airbag thickness vs. time, used only by *CONTACT_AIRBAG_SINGLE_SURFACE (Card A, LCIDAB field). Optional. Internally uses -1 sentinel (not set)."
         },
         {
           "path": "contacts[].maxpar",
@@ -11446,21 +11446,21 @@
           "type": "integer",
           "required": false,
           "default": null,
-          "desc": "Search depth (Card A, DEPTH field). Range 0-45; controls spatial search volume for contact candidate detection. Internally uses -1 sentinel (not set)."
+          "desc": "Search depth (Card A, DEPTH field): with SOFT = 0/1 the number of closest segments checked for nodal penetration (default 2; 3 for AUTOMATIC_GENERAL); with SOFT = 2 a coded option instead (3 = also check at edges, 5 = also edge-to-edge; 13, 15, 23, 25, 35, 45 are variants). Negative (load-curve) values cannot be written. Internally uses -1 sentinel (not set)."
         },
         {
           "path": "contacts[].bsort",
           "type": "integer",
           "required": false,
           "default": null,
-          "desc": "Box sort option (Card A, BSORT field). Optional. Internally uses -1 sentinel (not set)."
+          "desc": "Number of cycles between bucket sorts (Card A, BSORT field); 0 = LS-DYNA chooses; SMP only except for SOFT = 2 and Mortar. Negative (load-curve) values cannot be written. Optional. Internally uses -1 sentinel (not set)."
         },
         {
           "path": "contacts[].frcfrq",
           "type": "integer",
           "required": false,
           "default": null,
-          "desc": "Friction frequency (Card A, FRCFRQ field). Optional. Internally uses -1 sentinel (not set)."
+          "desc": "Number of cycles between contact-force updates for penalty contact (Card A, FRCFRQ field); 0 or 1 = every cycle (strongly recommended); values above 3-4 are dangerous. Not a friction setting. Optional. Internally uses -1 sentinel (not set)."
         },
         {
           "path": "contacts[].penmax",
@@ -11481,14 +11481,14 @@
           "type": "integer",
           "required": false,
           "default": null,
-          "desc": "Shell thickness (Card B, SHLTHK field). Values 0/1; if 1, accounts for shell thickness in contact. Internally uses -1 sentinel (not set)."
+          "desc": "Shell-thickness option for non-automatic surface-to-surface and node-to-surface contacts, read only when THKOPT = 1 (Card B, SHLTHK field): 0 = ignore, 1 = include (rigid bodies excluded), 2 = include rigid bodies. Automatic, single-surface and constraint contacts always include the offsets. Internally uses -1 sentinel (not set)."
         },
         {
           "path": "contacts[].snlog",
           "type": "integer",
           "required": false,
           "default": null,
-          "desc": "Slave node log (Card B, SNLOG field). Optional. Internally uses -1 sentinel (not set)."
+          "desc": "Shooting-node logic (Card B, SNLOG field): with SOFT = 0/1, 0 = enabled (default), 1 = skipped; with SOFT = 2 it controls the thick-segment check (0/1 = check without report, 2 = check and report to d3hsp, 3 = no check). Optional. Internally uses -1 sentinel (not set)."
         },
         {
           "path": "contacts[].isym",
@@ -11502,7 +11502,7 @@
           "type": "integer",
           "required": false,
           "default": null,
-          "desc": "2D/3D option (Card B, I2D3D field). Optional. Internally uses -1 sentinel (not set)."
+          "desc": "Segment search order (Card B, I2D3D field): 0 = shells before solids/thick shells, 1 = solids/thick shells first. Optional. Internally uses -1 sentinel (not set)."
         },
         {
           "path": "contacts[].sldthk",
@@ -11523,7 +11523,7 @@
           "type": "integer",
           "required": false,
           "default": null,
-          "desc": "Initial gap (Card C, IGAP field). Optional. Internally uses -1 sentinel (not set)."
+          "desc": "Implicit convergence aid (Card C, IGAP field): 1 = apply (default; may add some sticking and under-report contact force), 2 = off, >2 = apply for the first IGAP-2 converged states. Mortar: progressive stiffness for large penetrations. Not a gap distance. Negative values cannot be written. Optional. Internally uses -1 sentinel (not set)."
         },
         {
           "path": "contacts[].ignore",
@@ -11537,35 +11537,35 @@
           "type": "number",
           "required": false,
           "default": null,
-          "desc": "Damping ratio factor (Card C, DPRFAC field). Optional. Internally uses -1 sentinel (not set)."
+          "desc": "Penetration-depth reduction factor for SOFT = 2 (Card C, DPRFAC field): 0 = initial penetrations always ignored, between 0 and 1 = penalized over time, >= 1 = set ID limiting its scope. Mortar: MPAR1. Negative (curve) values cannot be written. Optional. Internally uses -1 sentinel (not set)."
         },
         {
           "path": "contacts[].dtstif",
           "type": "number",
           "required": false,
           "default": null,
-          "desc": "Damping time stiffness (Card C, DTSTIF field). Optional. Internally uses -1 sentinel (not set)."
+          "desc": "Time step used in the contact-stiffness calculation for SOFT = 1 and 2 (Card C, DTSTIF field); 0 = the initial time-integration step. Mortar: MPAR2. Negative values (moving average, curve) cannot be written. Optional. Internally uses -1 sentinel (not set)."
         },
         {
           "path": "contacts[].edgek",
           "type": "number",
           "required": false,
           "default": null,
-          "desc": "Edge stiffness (Card C, EDGEK field). Optional. Internally uses -1 sentinel (not set)."
+          "desc": "Scale factor on edge-to-edge penalty stiffness when SOFT = 2 and DEPTH = 5, 15, 25 or 35 (Card C, EDGEK field); 0 = default stiffness. A multiplier, not a stiffness. Optional. Internally uses -1 sentinel (not set)."
         },
         {
           "path": "contacts[].flangl",
           "type": "number",
           "required": false,
           "default": null,
-          "desc": "Flange angle (Card C, FLANGL field). Optional. Internally uses -1 sentinel (not set)."
+          "desc": "Feature-line angle tolerance in radians for SMOOTH contact (Card C, FLANGL field); 0 = no feature lines. Known issue: KooRemapper writes this value in column 6, which LS-DYNA leaves blank (FLANGL is column 7), so it is lost and CID_RCF lands where FLANGL belongs; a modify round-trip of a correct deck also moves them. Do not rely on it until fixed. Optional. Internally uses -1 sentinel (not set)."
         },
         {
           "path": "contacts[].cid_rcf",
           "type": "integer",
           "required": false,
           "default": null,
-          "desc": "Curve ID for radial correction (Card C, CID_RCF field). Optional. Internally uses -1 sentinel (not set)."
+          "desc": "Coordinate system ID for writing rcforc/ncforc results in a local system (Card C, CID_RCF field). Known issue: KooRemapper writes it in column 7, which LS-DYNA reads as FLANGL (CID_RCF is column 8). Do not rely on it until fixed. Optional. Internally uses -1 sentinel (not set)."
         },
         {
           "path": "contacts[].q2tri",
@@ -11579,42 +11579,42 @@
           "type": "number",
           "required": false,
           "default": null,
-          "desc": "Timestep penalty check (Card D, DTPCHK field). Optional. Internally uses -1 sentinel (not set)."
+          "desc": "Time interval between shell-penetration reports, SOFT = 2 only (Card D, DTPCHK field); 0 = off. Negative values cannot be written. Optional. Internally uses -1 sentinel (not set)."
         },
         {
           "path": "contacts[].sfnbr",
           "type": "number",
           "required": false,
           "default": null,
-          "desc": "Slave face neighbor (Card D, SFNBR field). Optional. Internally uses -1 sentinel (not set)."
+          "desc": "Scale factor for neighbor-segment contact checking, SOFT = 2 only (Card D, SFNBR field); 0 = off. Negative values cannot be written. Optional. Internally uses -1 sentinel (not set)."
         },
         {
           "path": "contacts[].fnlscl",
           "type": "number",
           "required": false,
           "default": null,
-          "desc": "Face normal scale (Card D, FNLSCL field). Optional. Internally uses -1 sentinel (not set)."
+          "desc": "Scale factor f for nonlinear contact-force scaling, SOFT = 2 only (Card D, FNLSCL field); used with DNLSCL. Optional. Internally uses -1 sentinel (not set)."
         },
         {
           "path": "contacts[].dnlscl",
           "type": "number",
           "required": false,
           "default": null,
-          "desc": "Deformed normal scale (Card D, DNLSCL field). Optional. Internally uses -1 sentinel (not set)."
+          "desc": "Penetration distance d for nonlinear contact-force scaling, SOFT = 2 only (Card D, DNLSCL field); used with FNLSCL. Optional. Internally uses -1 sentinel (not set)."
         },
         {
           "path": "contacts[].tcso",
           "type": "integer",
           "required": false,
           "default": null,
-          "desc": "Tied contact option (Card D, TCSO field). Optional. Internally uses -1 sentinel (not set)."
+          "desc": "Contact-thickness flag (Card D, TCSO field): 1 = compute a node's or segment's contact thickness only from segments in this contact (SURFACE_TO_SURFACE, shells), 0 = off. Optional. Internally uses -1 sentinel (not set)."
         },
         {
           "path": "contacts[].tiedid",
           "type": "integer",
           "required": false,
           "default": null,
-          "desc": "Tied contact ID (Card D, TIEDID field). Optional. Internally uses -1 sentinel (not set)."
+          "desc": "Incremental displacement update for tied contacts (Card D, TIEDID field): 0 = off (default), 1 = on. A flag, not an ID. Optional. Internally uses -1 sentinel (not set)."
         },
         {
           "path": "contacts[].shledg",
@@ -11628,7 +11628,7 @@
           "type": "integer",
           "required": false,
           "default": null,
-          "desc": "Shared edge (Card E, SHAREC field). Optional; triggers Card E output. Internally uses -1 sentinel (not set)."
+          "desc": "Shared-constraint flag, SOFT = 2 only (Card E, SHAREC field): 0 = segments that share a constraint are not checked against each other, 1 = they are checked. Optional; triggers Card E output. Internally uses -1 sentinel (not set)."
         },
         {
           "path": "contacts[].cparm8",
@@ -11642,7 +11642,7 @@
           "type": "integer",
           "required": false,
           "default": null,
-          "desc": "Initial penetration back (Card E, IPBACK field). Optional. Internally uses -1 sentinel (not set)."
+          "desc": "Backup penalty contact (Card E, IPBACK field): nonzero = also create a backup penalty tied contact for this interface. Constrained tied contacts only. Optional. Internally uses -1 sentinel (not set)."
         },
         {
           "path": "contacts[].srnde",
@@ -11656,7 +11656,7 @@
           "type": "number",
           "required": false,
           "default": null,
-          "desc": "Friction scale factor (Card E, FRICSF field). Optional. Internally uses -1 sentinel (not set)."
+          "desc": "Scale factor on frictional stiffness, SOFT = 2 only (Card E, FRICSF field); default 1.0. Does not scale the friction coefficient (use fsf for that). Optional. Internally uses -1 sentinel (not set)."
         },
         {
           "path": "contacts[].icor",
@@ -11684,7 +11684,7 @@
           "type": "integer",
           "required": false,
           "default": null,
-          "desc": "Penalty stiffness (Card F, PSTIFF field). Optional; triggers Card F output. Internally uses -1 sentinel (not set)."
+          "desc": "Penalty-stiffness method flag, SOFT = 2 only (Card F, PSTIFF field): 0 = per *CONTROL_CONTACT, 1 = nodal masses or density and segment size (the larger), 2 = density and segment size. Not a stiffness value. Optional; triggers Card F output. Internally uses -1 sentinel (not set)."
         },
         {
           "path": "contacts[].ignroff",
@@ -11698,28 +11698,28 @@
           "type": "number",
           "required": false,
           "default": null,
-          "desc": "Friction tolerance (Card F, FSTOL field). Optional. Internally uses -1 sentinel (not set)."
+          "desc": "Flat-segment angle tolerance in degrees for the SMOOTH option (Card F, FSTOL field); roughly half the angle between adjacent segments. Optional. Internally uses -1 sentinel (not set)."
         },
         {
           "path": "contacts[].d2binr",
           "type": "integer",
           "required": false,
           "default": null,
-          "desc": "2D bin resolution (Card F, 2DBINR field). Aliases: d2binr or 2dbinr. Optional. Internally uses -1 sentinel (not set)."
+          "desc": "Flag that 2D seatbelts start inside retractors, SOFT = 2 SURFACE_TO_SURFACE only (Card F, 2DBINR field): 0 = no, 1 = yes. Aliases: d2binr or 2dbinr. Optional. Internally uses -1 sentinel (not set)."
         },
         {
           "path": "contacts[].ssftyp",
           "type": "integer",
           "required": false,
           "default": null,
-          "desc": "Surface friction type (Card F, SSFTYP field). Optional. Internally uses -1 sentinel (not set)."
+          "desc": "Which *PART_CONTACT SSF penalty scale factor applies with SOFT = 2 (Card F, SSFTYP field): 0 = the tracked segment's, 1 = the larger, 2 = the smaller. Optional. Internally uses -1 sentinel (not set)."
         },
         {
           "path": "contacts[].swtpr",
           "type": "integer",
           "required": false,
           "default": null,
-          "desc": "Surface wrap type (Card F, SWTPR field). Optional. Internally uses -1 sentinel (not set)."
+          "desc": "Tapered shell contact segments next to segments thinned by SPOTHIN, SOFT = 2 only (Card F, SWTPR field): 0 = full-thickness segments, 1 = tapered. Optional. Internally uses -1 sentinel (not set)."
         },
         {
           "path": "contacts[].tetfac",
@@ -11733,35 +11733,35 @@
           "type": "number",
           "required": false,
           "default": null,
-          "desc": "Shell offset (Card G, SHLOFF field). Optional; triggers Card G output (and all prior cards A-F). Internally uses -1 sentinel (not set)."
+          "desc": "Contact reference-plane flag for offset shells (Card G, SHLOFF field): 0 = CNTCO on *CONTROL_SHELL decides, 1 = the contact plane is the shell reference surface. A 0/1 flag, not a distance. Optional; triggers Card G output (and all prior cards A-F). Internally uses -1 sentinel (not set)."
         },
         {
           "path": "contacts[].sboxid",
           "type": "integer",
           "required": false,
           "default": "-1",
-          "desc": "Slave box ID (Card 1 extended, SBOXID field). Optional; only modified in create/modify/detect actions if >= 0."
+          "desc": "SURFA (slave) box ID (Card 1, SBOXID field; R16 name SABOXID): only SURFA nodes/segments inside this *DEFINE_BOX are included; needs SSTYP 2/3/5/6 (part or part set), not available for ERODING. A negative value (contact volume) cannot be written. Optional; written by create/detect only if >= 0 — modify ignores it."
         },
         {
           "path": "contacts[].mboxid",
           "type": "integer",
           "required": false,
           "default": "-1",
-          "desc": "Master box ID (Card 1 extended, MBOXID field). Optional; only modified in create/modify/detect actions if >= 0."
+          "desc": "SURFB (master) box ID (Card 1, MBOXID field; R16 name SBBOXID): only SURFB segments inside this *DEFINE_BOX are included; needs MSTYP 2/3/5/6 (part or part set), not available for ERODING. A negative value (contact volume) cannot be written. Optional; written by create/detect only if >= 0 — modify ignores it."
         },
         {
           "path": "contacts[].spr",
           "type": "integer",
           "required": false,
           "default": "-1",
-          "desc": "Slave property (Card 1 extended, SPR field). Optional; only modified in create/modify/detect actions if >= 0."
+          "desc": "SURFA (slave) interface-force output flag (Card 1, SPR field; R16 name SAPR): 1 = include the SURFA side in *DATABASE_NCFORC and *DATABASE_BINARY_INTFOR, 2 = also allow wear output to dynain, 0 = off. Optional; written by create/detect only if >= 0 — modify ignores it."
         },
         {
           "path": "contacts[].mpr",
           "type": "integer",
           "required": false,
           "default": "-1",
-          "desc": "Master property (Card 1 extended, MPR field). Optional; only modified in create/modify/detect actions if >= 0."
+          "desc": "SURFB (master) interface-force output flag (Card 1, MPR field; R16 name SBPR): 1 = include the SURFB side in *DATABASE_NCFORC and *DATABASE_BINARY_INTFOR, 2 = also allow wear output to dynain, 0 = off. Optional; written by create/detect only if >= 0 — modify ignores it."
         },
         {
           "path": "contacts[].scope",
@@ -11789,7 +11789,7 @@
           "type": "number",
           "required": false,
           "default": "0.1",
-          "desc": "Gap tolerance for detect action (distance units). Controls spatial hash grid size and narrowphase distance threshold. Lower = stricter but slower."
+          "desc": "Gap tolerance (model length units) for detect and for the create/convert facing filter: the narrow-phase gap threshold; the hash cell is max(mean face size, 2 x tolerance). Lower = stricter, not slower."
         },
         {
           "path": "contacts[].normal_angle",
@@ -11810,14 +11810,14 @@
           "type": "string",
           "required": false,
           "default": "\"Auto\"",
-          "desc": "For detect action only. Prefix for auto-generated contact titles. Title format: {title_prefix}_{PartName_A}_{PartName_B}. Empty string disables prefix."
+          "desc": "For detect only. Prefix for generated SET_SEGMENT and contact titles: {prefix}_{PartA}_{PartB} (scope/include mode) or {prefix}_PID<a>_PID<b> (explicit PID mode). Default 'Auto'; an empty string also gives 'Auto'."
         },
         {
           "path": "contacts[].contact_type",
           "type": "string",
           "required": false,
           "default": "\"auto\"",
-          "desc": "For action: detect only (used when auto_create=true). Default 'auto'. Unlike contacts[].type this is a CLOSED whitelist: only the short names auto, automatic, tied, tied_thermal, thermal, tiebreak, mortar, tied_mortar, single, eroding, forming are accepted (case-insensitive; an empty value is allowed too). A full LS-DYNA keyword that contacts[].type would happily write — automatic_surface_to_surface, automatic_nodes_to_surface, ... — is REJECTED here with rc=1: \"[ERROR] [contact] unsupported contact_type '<value>' (allowed: auto, tied, tied_thermal, tiebreak, mortar, tied_mortar, single, eroding, forming)\". Note the printed 'allowed' list omits automatic and thermal, which are in fact accepted. So detect does NOT share type's value space — use a short name here, and spell full keywords out only in create's type.",
+          "desc": "For action: detect only (used when auto_create=true). Default 'auto'. Unlike contacts[].type this is a CLOSED whitelist: only the short names auto, automatic, tied, tied_thermal, thermal, tiebreak, mortar, tied_mortar, single, eroding, forming are accepted (case-insensitive; an empty value is allowed too). A full LS-DYNA keyword that contacts[].type would happily write — automatic_surface_to_surface, automatic_nodes_to_surface, ... — is REJECTED here with rc=1: \"[ERROR] [contact] unsupported contact_type '<value>' (allowed: auto, tied, tied_thermal, tiebreak, mortar, tied_mortar, single, eroding, forming)\". Note the printed 'allowed' list omits automatic and thermal, which are in fact accepted. So detect does NOT share type's value space — use a short name here, and spell full keywords out only in create's type. Known issue: detect never writes the THERMAL or TIEBREAK card, so tied_thermal/thermal/tiebreak here produce a keyword missing its mandatory card and the thermal/tiebreak keys are ignored — use action: create for those. tied_mortar has the keyword problem described under contacts[].type.",
           "values": [
             "auto",
             "automatic",
@@ -11840,14 +11840,14 @@
             "tied",
             "all"
           ],
-          "desc": "For detect action only. Skip (don't create) contact pair if existing contact already covers it. Mode: tied=only skip if TIED contact exists; all=skip if any contact exists. Empty (default)=create all."
+          "desc": "For detect action only. Skip (don't create) contact pair if existing contact already covers it. Mode: tied=only skip if TIED contact exists; all=skip if any contact exists. Empty (default)=create all. Only existing contacts whose sides are a part ID or SET_PART are recognised; SET_SEGMENT contacts (everything detect creates) never match, so re-running detect duplicates them. scope/include mode only."
         },
         {
           "path": "contacts[].subtract_existing",
           "type": "boolean",
           "required": false,
           "default": "false",
-          "desc": "For detect action only. If true, remove segments from detected faces that are already in existing TIED contacts for same PID pair. Creates contact from remaining (non-tied) segments. Ignored if no existing tied contact found."
+          "desc": "For detect action only. If true, remove segments from detected faces that are already in existing TIED contacts for same PID pair. Creates contact from remaining (non-tied) segments. Ignored if no existing tied contact found. Only TIED contacts defined by part ID or SET_PART are found; TIED contacts on SET_SEGMENTs are ignored. scope/include mode only."
         },
         {
           "path": "contacts[].k",
@@ -11883,7 +11883,7 @@
           "path": "contacts[].chlm",
           "type": "number",
           "required": false,
-          "desc": "THERMAL card CHLM (characteristic length multiplier, default 1.0)."
+          "desc": "THERMAL card field 6, which LS-DYNA reads as FTOSA in 3D contacts: the fraction of sliding-friction heat given to the SURFA side (0 = 0.5). CHLM (a search-length multiplier) exists only in *CONTACT_2D; the key name is historical. Known issue: when omitted KooRemapper writes 1.0 (all friction heat to SURFA) instead of 0."
         },
         {
           "path": "contacts[].bc_flag",
@@ -11901,13 +11901,13 @@
           "path": "contacts[].option",
           "type": "integer",
           "required": false,
-          "desc": "TIEBREAK card OPTION (tiebreak model, e.g. 1=quadratic NFLS/SFLS). create with tiebreak type."
+          "desc": "TIEBREAK card OPTION: 1 = nodes in contact stick permanently, no failure (written when omitted); 2 and above are failure models — e.g. 2 = stick until failure for nodes initially in contact, 4 = the same with frictional sliding, 5 = glue with a damage curve, 9/11 = cohesive mixed-mode (see *CONTACT Card 4). create with tiebreak type."
         },
         {
           "path": "contacts[].nfls",
           "type": "number",
           "required": false,
-          "desc": "TIEBREAK card NFLS (normal failure stress). Bond releases above this."
+          "desc": "TIEBREAK card NFLS (normal failure stress). Used by OPTION 2, 3, 4, 6, 7, 8, ±9, 10, ±11 (plastic yield stress for OPTION 5); no effect with OPTION 1, the default."
         },
         {
           "path": "contacts[].sfls",
@@ -11919,7 +11919,7 @@
           "path": "contacts[].param",
           "type": "number",
           "required": false,
-          "desc": "TIEBREAK card PARAM (option-dependent parameter, e.g. crit. distance/energy)."
+          "desc": "TIEBREAK card PARAM (OPTION-dependent: 2 = 1.0 ignores shell thickness offsets, 4 = 1.0 makes SFLS a frictional stress limit, 6/8 = critical distance CCRIT, 7/10 = friction angle in degrees, 9/11 = damage-model exponent, 13/14 = tiebreak layer thickness). Energies go in ERATEN/ERATES."
         },
         {
           "path": "contacts[].eraten",
@@ -11937,7 +11937,7 @@
           "path": "contacts[].ct2cn",
           "type": "number",
           "required": false,
-          "desc": "TIEBREAK card CT2CN (tensile-to-normal stiffness ratio, default 1.0)."
+          "desc": "TIEBREAK card CT2CN (tangential-to-normal stiffness ratio for OPTION 9, 11, 13 and 14; default 1.0)."
         }
       ],
       "presets": [
@@ -14521,7 +14521,7 @@
           "role": "value",
           "required": false,
           "group": "자원",
-          "description": "케이스당 코어 수."
+          "description": "케이스(각도)당 코어 수. 비우면 받는 쪽 기본 2(최대 64)."
         },
         {
           "name": "memory",
@@ -14529,7 +14529,7 @@
           "role": "value",
           "required": false,
           "group": "자원",
-          "description": "LS-DYNA 메모리(예: 2000m). 도구 인자로 간다."
+          "description": "케이스 하나의 Slurm 메모리(예: 4G · 512M — 숫자 뒤 대문자 G 나 M 만 받는다). 비우면 받는 쪽 기본 4G. 도구 인자로 간다."
         },
         {
           "name": "time_limit",
@@ -14537,7 +14537,7 @@
           "role": "value",
           "required": false,
           "group": "자원",
-          "description": "Slurm 시간 상한(예: 24:00:00). 도구 인자로 간다."
+          "description": "Slurm 시간 상한(HH:MM:SS, 예: 24:00:00). 비우면 받는 쪽 기본 12:00:00. 도구 인자로 간다."
         },
         {
           "name": "postprocess_enabled",
