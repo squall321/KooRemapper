@@ -69,6 +69,8 @@ def _env_snapshot() -> dict:
     `launcher` 는 실행기 명령 줄 그대로다(없으면 None). `host.nodename` 은 **API 노드**다 — 실행기를 쓰면
     job 이 실제로 돈 노드는 실행기가 `.job_<id>.node` 에 남기고, 잡이 끝난 뒤 `host.job_node` 로 옮긴다
     (`_job_node` — HWAX 답신 ③ 안 A, 10-23).
+    `omp_num_threads` 는 바이너리가 받은 OpenMP 스레드 수다 — 실행기가 없으면 `_omp_threads` 가 정하고
+    (운영자가 API 환경에 준 값이 있으면 그 값), 실행기가 있으면 실행기 몫이라 None 이다.
     """
     b = build_info(settings.kooremapper_bin)
     g = gmsh_probe(settings.kooremapper_bin)
@@ -86,7 +88,25 @@ def _env_snapshot() -> dict:
         "platform": {"app_env": settings.app_env},
         "host": {"nodename": os.uname().nodename},
         "launcher": settings.job_launcher or None,
+        "omp_num_threads": (None if settings.job_launcher
+                            else os.environ.get("OMP_NUM_THREADS") or _omp_threads()),
     }
+
+
+def _omp_threads() -> int | None:
+    """실행기가 없을 때 잡 하나가 쓸 OpenMP 스레드 수 — 코어 ÷ 동시 슬롯(10-23 결정 4B).
+
+    OpenMP 를 쓰는 op(map · prestress 등)은 스레드 수를 주지 않으면 libgomp 가 코어를 **다** 쓴다. 슬롯이
+    넷이면 그런 잡 넷이 32코어에 128스레드를 올려 서로 다툰다. 운영자가 API 환경에 `OMP_NUM_THREADS` 를
+    줬으면 그 값을 존중한다(None — 환경을 건드리지 않는다). 코어는 이 프로세스가 쓸 수 있는 CPU 다(affinity).
+    """
+    if "OMP_NUM_THREADS" in os.environ:
+        return None
+    try:
+        cores = len(os.sched_getaffinity(0))
+    except (AttributeError, OSError):
+        cores = os.cpu_count() or 1
+    return max(1, cores // max(1, settings.worker_concurrency))
 
 
 # 실행기가 남기는 노드 이름 한 줄(계약 — 노드 이름만, 영숫자 · `.` · `-` · `_`). 꼴이 아니면 적지 않는다.
@@ -210,6 +230,11 @@ def _run_blocking(job_id: str, argv: list[str], cwd: Path, out_path: Path, err_p
         # cwd · 로그 파일 · 프로세스 그룹은 그대로 준다 — 실행기가 그룹 리더가 된다.
         cmd = [*shlex.split(launcher), "--job-id", job_id, "--kind", argv[0], "--", *cmd]
         extra["env"] = _launcher_env()
+    else:
+        threads = _omp_threads()
+        if threads is not None:
+            # 나머지 환경은 그대로 물려준다 — 더하는 것은 이 한 이름뿐이다(`_omp_threads`).
+            extra["env"] = {**os.environ, "OMP_NUM_THREADS": str(threads)}
     with out_path.open("w") as out, err_path.open("w") as err:
         # start_new_session=True → the binary leads its own process group, so a
         # timeout/cancel can kill the whole group (incl. gmsh grandchildren).

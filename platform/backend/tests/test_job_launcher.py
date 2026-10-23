@@ -6,6 +6,8 @@ HWAX Portal 운영이 prod 의 job 자식을 다른 노드에서 돌리려 한�
 (`KOORM_JOB_LAUNCHER`)뿐이다. 여기서 못 박는 것은 요청서 5장의 V1–V10 과 K3 · K4 · K6 · K7 이다.
 
   · **설정이 비면 지금과 똑같다(V1).** argv · 환경 · 시간 초과의 바로 SIGKILL · 종료 때의 SIGKILL.
+    ⚠ 환경에는 예외가 하나 생겼다(10-23 결정 4B) — API 환경에 `OMP_NUM_THREADS` 가 **없으면** 그 한 이름을
+    「코어 ÷ 동시 슬롯」 으로 더한다. 운영자가 값을 줬으면 그때는 정말 그대로다(V1 시험이 그 꼴을 고정한다).
   · 실제 노드 기록(답신 ③ 안 A) · `.nfs*` 를 출력에서 뺀다(답신 ② 덧붙임) — 10-23 결정.
   · 실행기를 거쳐도 연산 꼴마다 결과가 같다(V2 그 자리 exec · V3 다른 그룹의 자식).
   · 실행기는 **TERM 먼저**다(V7 · K3). 바로 죽이면 원격이 아직 쓰는 파일을 출력으로 등록한다.
@@ -185,6 +187,8 @@ class _FakeProc:
 
 def test_v1_empty_setting_runs_the_binary_exactly_as_before(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "job_launcher", "")
+    # 운영자가 스레드 수를 준 꼴 — 그때는 환경을 정말 건드리지 않는다(값이 없을 때는 4B 시험이 본다).
+    monkeypatch.setenv("OMP_NUM_THREADS", "3")
     seen = {}
 
     def fake_popen(cmd, **kw):
@@ -261,6 +265,68 @@ def test_k6_the_snapshot_says_which_launcher_ran_the_job(monkeypatch):
     snap = rl._env_snapshot()
     assert snap["launcher"] == "/opt/hw/forge-launch --app kooremapper"
     assert snap["host"]["nodename"] == os.uname().nodename, "nodename 은 그대로 API 노드다"
+
+
+# ── 4B · 실행기가 없을 때 OpenMP 스레드 수 (10-23 결정) ───────────────────────────
+# 측정(10-23, 20만 HEX8) — map 은 1~32 스레드가 같은 시간(직렬 전처리가 대부분) · prestress 0.97 → 0.74 초.
+# 그래서 「코어 ÷ 슬롯」 은 지연 손해 없이 슬롯 넷이 128 스레드를 32코어에 올리는 것을 막는다.
+def _capture_popen(monkeypatch) -> dict:
+    seen: dict = {}
+    monkeypatch.setattr(rl.subprocess, "Popen",
+                        lambda cmd, **kw: (seen.update(cmd=cmd, kw=kw), _FakeProc([0]))[1])
+    return seen
+
+
+def test_4b_without_a_launcher_the_job_gets_cores_over_slots(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "job_launcher", "")
+    monkeypatch.setattr(settings, "worker_concurrency", 4)
+    monkeypatch.delenv("OMP_NUM_THREADS", raising=False)
+    monkeypatch.setattr(os, "sched_getaffinity", lambda pid: set(range(32)))
+    seen = _capture_popen(monkeypatch)
+    rl._run_blocking("J4", ["map", "b.k", "f.k", "o.k"], tmp_path, tmp_path / "o", tmp_path / "e")
+    env = seen["kw"]["env"]
+    assert env["OMP_NUM_THREADS"] == "8", env.get("OMP_NUM_THREADS")
+    assert {k: v for k, v in env.items() if k != "OMP_NUM_THREADS"} == dict(os.environ), \
+        "더하는 것은 이 한 이름뿐이다 — 나머지는 API 환경을 그대로 물려준다"
+    assert rl._env_snapshot()["omp_num_threads"] == 8, "잡 진단에 실제로 준 값이 남는다"
+
+
+def test_4b_few_cores_still_get_one_thread(monkeypatch):
+    monkeypatch.delenv("OMP_NUM_THREADS", raising=False)
+    monkeypatch.setattr(settings, "worker_concurrency", 4)
+    monkeypatch.setattr(os, "sched_getaffinity", lambda pid: {0, 1})
+    assert rl._omp_threads() == 1
+
+
+def test_4b_an_operator_value_is_left_alone(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "job_launcher", "")
+    monkeypatch.setenv("OMP_NUM_THREADS", "3")
+    seen = _capture_popen(monkeypatch)
+    rl._run_blocking("J5", ["map", "b.k", "f.k", "o.k"], tmp_path, tmp_path / "o", tmp_path / "e")
+    assert "env" not in seen["kw"], "운영자가 준 값이 있으면 환경을 건드리지 않는다"
+    assert rl._env_snapshot()["omp_num_threads"] == "3"
+
+
+def test_4b_with_a_launcher_the_launcher_decides(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "job_launcher", "/opt/hw/forge-launch")
+    monkeypatch.delenv("OMP_NUM_THREADS", raising=False)
+    seen = _capture_popen(monkeypatch)
+    rl._run_blocking("J6", ["map", "b.k", "f.k", "o.k"], tmp_path, tmp_path / "o", tmp_path / "e")
+    assert "OMP_NUM_THREADS" not in seen["kw"]["env"], "실행기 길에는 값을 지어 넣지 않는다(실행기 몫)"
+    assert rl._env_snapshot()["omp_num_threads"] is None
+
+
+def test_4b_the_real_child_process_receives_it(tmp_path, monkeypatch):
+    """가짜 Popen 이 아니라 **실제 자식**이 받은 값을 본다."""
+    probe = tmp_path / "probe.sh"
+    probe.write_text('#!/bin/sh\nprintf "%s" "$OMP_NUM_THREADS" > omp.txt\n')
+    probe.chmod(0o755)
+    monkeypatch.setattr(settings, "kooremapper_bin", probe)
+    monkeypatch.setattr(settings, "job_launcher", "")
+    monkeypatch.setattr(settings, "worker_concurrency", 4)
+    monkeypatch.delenv("OMP_NUM_THREADS", raising=False)
+    assert rl._run_blocking("J8", ["info"], tmp_path, tmp_path / "o", tmp_path / "e") == 0
+    assert (tmp_path / "omp.txt").read_text() == str(rl._omp_threads())
 
 
 # ── 답신 ③ 안 A · 실제 노드 기록 / ② 덧붙임 · `.nfs*` (10-23 결정) ────────────────
