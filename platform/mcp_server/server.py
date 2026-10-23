@@ -896,20 +896,43 @@ async def report_block(
 @mcp.tool()
 async def report_hotspots(
     report_id: str, ctx: Context, criterion: str = "", part_id: int | None = None,
-    top: int = 20, order: str = "stress_max",
+    top: int = 20, order: str = "stress_max", case_key: str = "",
 ) -> dict:
-    """★핫스팟 군집(deep) — **어디가 뜨거운가**. 중심좌표·둘러싼 반경·요소수·부피·
-    피크 요소 ID·피크 시각까지 온다.
+    """★핫스팟 군집(deep · sphere) — **어디가 뜨거운가**. 중심좌표·둘러싼 반경·요소수·피크 시각이 온다
+    (deep 은 부피·피크 요소 ID 까지).
 
+    sphere(전각도 낙하)는 각도 런마다 실린 군집을 **각도와 함께** 내고, `envelope` 에 파트 × 기준마다 **전 각도에서
+    가장 센** 군집(그 각도 · |응력| · 군집이 난 각도 수)을 붙인다 — 「어느 각도에서 어느 파트가 뜨거운가」 는 이것부터.
+    `case_key`(각도 런 폴더)를 주면 그 각도만 본다. 생성기 상한에 걸렸으면 `cap_note` 가 말한다.
     `criterion` ∈ {von_mises, max_principal, min_principal, …} (비우면 전부).
-    주의 둘 — `stress_*` 정렬은 **절대값**이다(`min_principal` 값은 음수다).
-    `uniform=true` 레코드의 군집은 '가장 뜨거운 곳' 이 **아니다**(값이 고르다는 뜻이다)."""
+    주의 — `stress_*` 정렬은 **절대값**이다(`min_principal` 값은 음수다). `uniform=true` 레코드의 군집은
+    '가장 뜨거운 곳' 이 **아니다**(deep). sphere 압축본에는 uniform 표시·부피·평균응력이 없다(`compact_note`)."""
     q = {"top": top, "order": order}
     if criterion:
         q["criterion"] = criterion
     if part_id is not None:
         q["part_id"] = part_id
+    if case_key:
+        q["case_key"] = case_key
     return await _get(ctx, f"/reports/{report_id}/hotspots", q)
+
+
+@mcp.tool()
+async def report_contact_profile(
+    report_id: str, ctx: Context, metric: str = "pf", top: int = 10, case_key: str = "",
+    axis_top: int = 10,
+) -> dict:
+    """★파트쌍 접촉 프로파일(sphere · impact) — **어느 파트가 어느 파트를 어느 각도(위치)에서 세게 미는가**.
+
+    `metric` ∈ pf(peak_force) · ti(total_impulse) · tw(total_work). `pairs` 는 쌍마다 최대 |값| 과 그 각도(위치),
+    `axis_summary` 는 가장 센 접촉이 큰 각도(위치) 상위 `axis_top` 개다. `case_key` 를 주면 그 각도의 파트쌍 엣지
+    전부(`at.edges` — 세 지표)가 온다 — 그 각도의 접촉 그래프다. **전 각도**가 실린다(`report_energy_flow` 의 시계열
+    상세는 상위 각도에만 있다). None 은 '그 각도에 그 접촉이 없다' 이다(0 이 아니다) · resolved=false 는 파트로
+    분해되지 않은 접촉 · `trust` 는 전 각도 Newton-3 접촉력 신뢰 요약이다."""
+    q = {"metric": metric, "top": top, "axis_top": axis_top}
+    if case_key:
+        q["case_key"] = case_key
+    return await _get(ctx, f"/reports/{report_id}/contact_profile", q)
 
 
 @mcp.tool()
@@ -1294,8 +1317,11 @@ async def report_angle_stats(
 @mcp.tool()
 async def report_energy_flow(report_id: str, ctx: Context, case_key: str | None = None) -> dict:
     """에너지/접촉 상세(원본 재파싱). deep=에너지 밸런스(hourglass/energy_ratio)·접촉력(rcforc)·
-    Newton-3 신뢰도, sphere/impact=하중경로 그래프(impactor→parts 전파, 접촉 엣지 work).
-    deep 은 case_key 불필요, sphere/impact 는 case_key 로 특정 방향/위치 지정."""
+    Newton-3 신뢰도, sphere/impact=하중경로 그래프(impactor→parts 전파 · 엣지마다 peak_force·total_work·
+    total_impulse). deep 은 case_key 불필요, sphere/impact 는 case_key 로 특정 방향/위치 지정.
+    ★상세는 생성기가 **상위 각도(위치)에만** 싣는다 — 없는 케이스를 물으면 다른 각도로 떨어지지 않고 null + 까닭
+    (`detail_note`)이다. 실제로 쓴 케이스는 `flow_case_key`. 전 각도의 파트쌍 접촉력은 `report_contact_profile`.
+    HTML 압축본이면 원해상도 피크 등 빠진 칸을 `energy_flow.form_note` 가 말한다."""
     params = {"case_key": case_key} if case_key else None
     return await _get(ctx, f"/reports/{report_id}/energy", params=params)
 

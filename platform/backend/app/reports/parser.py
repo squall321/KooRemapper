@@ -299,6 +299,13 @@ def _sphere_part_metrics(p: dict) -> dict:
         for ek in ("peak_ie", "peak_ke", "final_ie", "final_ke", "peak_ie_time", "peak_ke_time"):
             if ek in e:
                 m[ek] = _num(e.get(ek))
+    # 펄스 형상(10-17~) — 생성기가 **다운샘플 전** 값으로 따로 싣는다(「줄인 배열로 다시 적분하면 충격량이
+    # 20% 넘게 빗나간다」). dict 라 위 통과에서 빠졌다 — 평탄화해 방향별 분석 대상이 되게 한다. 못 쟀으면 키가 없다.
+    pu = p.get("pulse")
+    if isinstance(pu, dict):
+        for pk, pv in pu.items():
+            if isinstance(pv, (int, float)) and not isinstance(pv, bool):
+                m[pk if pk.startswith("pulse_") else "pulse_" + pk] = _num(pv)
     if "peak_plastic_strain" not in m and m.get("peak_strain") is not None:
         m["peak_plastic_strain"] = m["peak_strain"]
     return m
@@ -370,7 +377,8 @@ def normalize_sphere(data: dict) -> dict:
             "youngs_modulus": _num(sim_params_in.get("youngs_modulus")),
             "poisson_ratio": _num(sim_params_in.get("poisson_ratio")),
             "yield_stress": _num(data.get("yield_stress")),
-            "unit_system": None,
+            # 생성기가 검출한 단위계(10-17~). `detected=false` 면 기본값이다 — 그 구분은 summary.unit_system 에 남긴다.
+            "unit_system": (data.get("unit_system") or {}).get("id") if isinstance(data.get("unit_system"), dict) else None,
         },
         "parts": parts,
         "findings": _norm_findings(data.get("findings")),
@@ -400,6 +408,10 @@ def _sphere_summary(data: dict, cases: list, parts_in: dict) -> dict:
         "worst_stress": worst_stress,
         "worst_g": worst_g,
         "n_findings": len(data.get("findings") or []),
+        # 단위계 — peak-G 가 어느 환산으로 나왔나. `detected=false` 면 기본 환산이고 `note` 가 사유다(생성기 값 그대로).
+        "unit_system": data.get("unit_system") if isinstance(data.get("unit_system"), dict) else None,
+        # 각도 런을 분석한 unified_analyzer 빌드 {커밋: 런 수} — 여럿이면 캠페인이 **섞인 판**으로 분석됐다.
+        "analyzer_builds": data.get("tool_builds") if isinstance(data.get("tool_builds"), dict) else None,
     }
 
 
@@ -616,32 +628,124 @@ def case_energy(data: dict, kind: str, case_key: str | None = None) -> dict:
         }
     # sphere/impact — 각 케이스별 에너지 플로우 그래프.
     flows = data.get("energy_flows") or {}
-    flow = flows.get(case_key) if case_key else None
-    if flow is None and flows:
-        flow = next(iter(flows.values()))
-    if not isinstance(flow, dict):
-        return {"kind": kind, "case_key": case_key, "energy_flow": None,
-                "note": "이 리포트/케이스엔 에너지 플로우 데이터가 없습니다."}
-    return {
-        "kind": kind, "case_key": case_key,
-        "energy_flow": {
-            "impactor_ke_initial": _num(flow.get("impactor_ke_initial")),
-            "impactor_ke_final": _num(flow.get("impactor_ke_final")),
-            "energy_dissipated": _num(flow.get("energy_dissipated")),
-            "propagation_order": flow.get("propagation_order"),
-            "nodes": [
-                {"node_id": n.get("node_id"), "is_impactor": n.get("is_impactor"),
-                 "peak_ie": _num(n.get("peak_ie")), "peak_ke": _num(n.get("peak_ke"))}
-                for n in (flow.get("nodes") or [])
-            ],
-            "edges": [
-                {"src": e.get("src"), "dst": e.get("dst"), "name": e.get("name"),
-                 "peak_force": _num(e.get("peak_force")), "total_work": _num(e.get("total_work")),
-                 "confidence": _num(e.get("confidence"))}
-                for e in (flow.get("edges") or [])
-            ],
-        },
+    detail_note = data.get("energy_flows_note") or None
+    base = {"kind": kind, "case_key": case_key, **({"detail_note": detail_note} if detail_note else {})}
+    if not isinstance(flows, dict) or not flows:
+        return {**base, "energy_flow": None, "flow_case_key": None, "n_flows": 0,
+                "note": "이 리포트엔 에너지 플로우 데이터가 없습니다."}
+    if case_key:
+        flow = flows.get(case_key)
+        if not isinstance(flow, dict):
+            # ★다른 케이스로 떨어지지 않는다 — 예전엔 첫 흐름을 **이 케이스 이름으로** 돌려줬다(조용히 틀린 값).
+            #   생성기는 상세(시계열)를 접촉력이 큰 상위 케이스에만 싣는다(`energy_flows_note`).
+            return {**base, "energy_flow": None, "flow_case_key": None, "n_flows": len(flows),
+                    "available_case_keys": sorted(flows)[:200],
+                    "note": "이 케이스엔 하중경로 상세가 없습니다 — "
+                            + (detail_note or "상세는 일부 케이스에만 실린다")
+                            + " 전 케이스의 파트쌍 접촉력은 contact_profile 에 있다."}
+        used = case_key
+    else:
+        # 케이스를 안 주면 대표 하나 — **어느 케이스인지 반드시 적는다**(flow_case_key).
+        used = next(iter(flows))
+        flow = flows[used]
+        if not isinstance(flow, dict):
+            return {**base, "energy_flow": None, "flow_case_key": None, "n_flows": len(flows),
+                    "note": "하중경로 꼴을 읽지 못했습니다."}
+    return {**base, "flow_case_key": used, "n_flows": len(flows), "energy_flow": normalize_flow(flow)}
+
+
+# ── 하중경로(energy_flows) 두 꼴 ─────────────────────────────────────────────
+#
+# 생성기의 **중립** 꼴(`koo_deep_report/core/energy_flow_builder.build_flow_graph` — JSON 사이드카)과 HTML 에
+# 싣는 **압축** 꼴(`_compact_energy_flows` — sphere·impact 생성기 둘 다)은 키 이름이 다르다.
+#   중립       : impactor_ke_initial · nodes[node_id, peak_ke, peak_ie, final_*] · edges[peak_force, total_work,
+#                total_impulse, confidence, first_engage_t, contact_id] · propagation_order
+#   sphere 압축: ke_init · ke_final · dissipated · t · nodes[id, name, ke[], ie[]] · edges[pf, tw, ti, cid, f[], fei]
+#   impact 압축: (위와 같은 흐름 키 + propagation_order · depth_map · contact_*) · edges[peak_f, total_w, total_imp,
+#                conf, cid, f[], w[], imp[], t[]] — **엣지 이름이 sphere 와 또 다르다**(실측)
+# ⚠ 예전엔 중립 이름만 읽어 HTML 로 들어온 리포트의 접촉력·일·운동에너지가 **전부 null** 이었다(2026-10-23 실측 —
+#   sphere·impact 둘 다 HTML 은 압축 꼴이다).
+# ★압축본의 `ke`/`ie` 는 **솎은** 시계열이다. 생성기 규칙 — 「시계열 요약은 항상 원해상도 선계산」 — 이라 그 위의
+#   max 는 참피크를 놓친다. 피크를 다시 재지 않고 null 로 두고 까닭을 적는다.
+
+def _first(d: dict, *keys):
+    for k in keys:
+        if d.get(k) is not None:
+            return d[k]
+    return None
+
+
+def _flow_form(flow: dict) -> str:
+    if any(k in flow for k in ("ke_init", "ke_final", "dissipated")):
+        return "html_compact"
+    e0 = next((e for e in flow.get("edges") or [] if isinstance(e, dict)), None)
+    if e0 is not None and ("pf" in e0 or "peak_f" in e0) and "peak_force" not in e0:
+        return "html_compact"
+    n0 = next((n for n in flow.get("nodes") or [] if isinstance(n, dict)), None)
+    if n0 is not None and "id" in n0 and "node_id" not in n0:
+        return "html_compact"
+    return "neutral"
+
+
+def normalize_flow(flow: dict) -> dict:
+    """하중경로 하나를 한 꼴로 — 중립·압축 어느 쪽이 와도 같은 이름으로 낸다(없는 값은 null + 까닭)."""
+    form = _flow_form(flow)
+    nodes = []
+    for n in flow.get("nodes") or []:
+        if not isinstance(n, dict):
+            continue
+        nodes.append({
+            "node_id": _first(n, "node_id", "id"),
+            "name": n.get("name"),
+            "is_impactor": bool(n.get("is_impactor")),
+            "peak_ke": _num(n.get("peak_ke")), "peak_ie": _num(n.get("peak_ie")),
+            "final_ke": _num(n.get("final_ke")), "final_ie": _num(n.get("final_ie")),
+        })
+    edges = []
+    for e in flow.get("edges") or []:
+        if not isinstance(e, dict):
+            continue
+        edges.append({
+            "src": e.get("src"), "dst": e.get("dst"), "name": e.get("name"),
+            "contact_id": _first(e, "contact_id", "cid"),
+            "peak_force": _num(_first(e, "peak_force", "pf", "peak_f")),
+            "total_work": _num(_first(e, "total_work", "tw", "total_w")),
+            "total_impulse": _num(_first(e, "total_impulse", "ti", "total_imp")),
+            "confidence": _num(_first(e, "confidence", "conf")),
+            "first_engage_idx": _first(e, "first_engage_idx", "fei"),
+            "first_engage_t": _num(e.get("first_engage_t")),
+        })
+    out = {
+        "form": form,
+        "impactor_ke_initial": _num(_first(flow, "impactor_ke_initial", "ke_init")),
+        "impactor_ke_final": _num(_first(flow, "impactor_ke_final", "ke_final")),
+        "energy_dissipated": _num(_first(flow, "energy_dissipated", "dissipated")),
+        "propagation_order": flow.get("propagation_order"),
+        "nodes": nodes,
+        "edges": edges,
     }
+    if form == "html_compact":
+        # 실제로 빠진 칸만 적는다 — 생성기마다 압축 꼴이 다르다(impact 는 confidence·전파 순서를 싣는다).
+        missing = []
+        if all(n["peak_ke"] is None and n["peak_ie"] is None for n in nodes):
+            missing.append("노드의 원해상도 피크(peak_ke·peak_ie·final_*)")
+        if edges and all(e["confidence"] is None for e in edges):
+            missing.append("엣지 confidence")
+        if edges and all(e["first_engage_t"] is None for e in edges):
+            missing.append("first_engage_t")
+        if flow.get("propagation_order") is None:
+            missing.append("전파 순서")
+        out["form_note"] = ("HTML 압축본이다" + (" — " + " · ".join(missing) + " 가 실려 있지 않아 null 이다"
+                                                  "(솎은 시계열로 다시 재지 않는다)" if missing else "")
+                            + (". first_engage_idx 는 솎은 시간축의 인덱스다." if any(
+                                e["first_engage_idx"] is not None for e in edges) else "."))
+    # impact 압축본이 함께 싣는 접촉 계측 요약(contact_available·contact_checks…) — 버리지 않는다.
+    contact = {k[len("contact_"):]: flow[k] for k in flow if k.startswith("contact_")}
+    if contact:
+        out["contact"] = contact
+    if isinstance(flow.get("depth_map"), dict):
+        out["depth_map"] = flow["depth_map"]
+    return out
 
 
 def extract_geometry(data: dict, kind: str) -> dict:
@@ -987,9 +1091,18 @@ _HOTSPOT_ORDERS = ("stress_max", "stress_mean", "volume", "element_count",
 
 def hotspot_clusters(data: dict, *, criterion: str | None = None,
                      part_id: int | None = None, top: int = 20,
-                     order: str = "stress_max") -> dict:
-    """deep 리포트의 핫스팟 군집 — 평탄화해서 정렬·상한을 둔 목록으로 낸다."""
+                     order: str = "stress_max", case_key: str | None = None) -> dict:
+    """핫스팟 군집 — 평탄화해서 정렬·상한을 둔 목록으로 낸다.
+
+    deep 은 최상위 `hotspot`(파트 × 판정기준 레코드), sphere 는 각도 런마다 `results[i].hotspot`(압축 꼴)이다
+    — 꼴을 보고 가른다. sphere 는 `case_key`(각도 런 폴더)로 한 각도만 볼 수 있고, 파트 × 기준마다 가장 센 각도를
+    뽑은 `envelope` 를 함께 낸다.
+    """
     recs = data.get("hotspot")
+    if not (isinstance(recs, list) and recs) and any(
+            isinstance(r, dict) and r.get("hotspot") for r in data.get("results") or []):
+        return _sphere_hotspots(data, criterion=criterion, part_id=part_id, top=top, order=order,
+                                case_key=case_key)
     if not isinstance(recs, list) or not recs:
         return {"available": False, "n_records": 0, "clusters": [],
                 "note": "이 리포트에는 핫스팟 군집이 없다 — 생성기를 "
@@ -1077,6 +1190,279 @@ def hotspot_clusters(data: dict, *, criterion: str | None = None,
     return out
 
 
+# ── 핫스팟 군집 (sphere — 각도 런마다) ────────────────────────────────────────
+#
+# 생성기(`koo_sphere_report`, 10-17~)는 각도 런마다 `results[i].hotspot` 에 (파트 × 판정기준) 항목을 **압축해** 싣는다.
+#   항목  : p(part_id) · cr(criterion) · et(element_type, 있을 때) · cl[군집]
+#   군집  : c(center) · r(radius_enclosing) · k(rank) · n(element_count) · s(stress_max) — 있을 때만 e(strain_max) ·
+#           w(energy_total) · wd(energy_max) · t(peak_time). **없는 값은 키가 없다**(0 으로 채우지 않는다).
+# 원형에 있던 volume · stress_mean · peak_element_id · radius_rms 와 레코드 스칼라(uniform · top_percent · threshold …)는
+# 압축본에 없다 — **지어내지 않는다.** 군집이 2만 개를 넘으면 생성기가 순위 라운드로빈으로 고르고 `hotspot_cap_note`
+# 를 남긴다(전수는 생성기 report.json 의 hotspot_clusters).
+
+_SPHERE_CLUSTER_KEYS = (("c", "center"), ("r", "radius_enclosing"), ("k", "rank"), ("n", "element_count"),
+                        ("s", "stress_max"), ("e", "strain_max"), ("w", "energy_total"),
+                        ("wd", "energy_max"), ("t", "peak_time"))
+_SPHERE_HOTSPOT_ORDERS = ("stress_max", "element_count", "radius_enclosing", "rank",
+                          "strain_max", "energy_total", "energy_max")
+
+
+def _hotspot_sort_key(order: str):
+    def key(x):
+        v = x.get(order)
+        if v is None:
+            return (1, 0.0)
+        if order == "rank":
+            return (0, v)
+        return (0, -abs(v)) if order.startswith("stress") else (0, -v)
+    return key
+
+
+def _sphere_hotspots(data: dict, *, criterion: str | None, part_id: int | None, top: int,
+                     order: str, case_key: str | None) -> dict:
+    results = [r for r in data.get("results") or [] if isinstance(r, dict)]
+    runs = [r for r in results if r.get("hotspot")]
+    names = {str(k): (v.get("name") if isinstance(v, dict) else None)
+             for k, v in (data.get("parts") or {}).items()} if isinstance(data.get("parts"), dict) else {}
+    common = {
+        "kind": "sphere",
+        "n_angles_total": len(results),
+        "n_angles_with_clusters": len(runs),
+        "hotspot_parts": data.get("hotspot_parts"),
+        "mesh_available": isinstance(data.get("hotspot_mesh"), (dict, list)),
+        **({"mesh_note": data["hotspot_mesh_note"]} if data.get("hotspot_mesh_note") else {}),
+        # 생성기 상한 — 조용히 자른 것처럼 보이지 않게 그대로 올린다
+        **({"cap_note": data["hotspot_cap_note"]} if data.get("hotspot_cap_note") else {}),
+        "compact_note": ("HTML 압축본이다 — 군집의 volume·stress_mean·peak_element_id 와 레코드의 uniform·top_percent·"
+                         "threshold 는 실려 있지 않다. 값이 고른(uniform) 파트의 군집도 섞여 있을 수 있다 — "
+                         "원형은 생성기 report.json 의 hotspot_clusters 에 있다."),
+    }
+    if order not in _SPHERE_HOTSPOT_ORDERS:
+        order = "stress_max"
+    criteria, parts, flat = set(), set(), []
+    n_records = n_all = 0
+    env: dict = {}
+    for r in runs:
+        ck = r.get("folder") or (r.get("angle") or {}).get("name")
+        a = r.get("angle") or {}
+        angle = {"name": a.get("name"), "roll": _num(a.get("roll")), "pitch": _num(a.get("pitch")),
+                 "yaw": _num(a.get("yaw")), "category": a.get("category")}
+        for it in r.get("hotspot") or []:
+            if not isinstance(it, dict):
+                continue
+            n_records += 1
+            crit = it.get("cr")
+            pid = _to_int(it.get("p"))
+            criteria.add(crit)
+            parts.add(pid)
+            for c in it.get("cl") or []:
+                if not isinstance(c, dict):
+                    continue
+                n_all += 1
+                row = {"case_key": ck, "angle": angle, "part_id": pid, "part_name": names.get(str(pid)),
+                       "criterion": crit, "element_type": it.get("et")}
+                for short, full in _SPHERE_CLUSTER_KEYS:
+                    v = c.get(short)
+                    row[full] = None if v is None else (v if short in ("c", "k", "n") else _num(v))
+                if criterion and crit != criterion:
+                    continue
+                if part_id is not None and pid != part_id:
+                    continue
+                # 포락 — 각도 필터와 무관하게 전 각도에서 (파트, 기준)마다 가장 센 군집
+                e = env.setdefault((pid, crit), {"angles": set(), "worst": None})
+                e["angles"].add(ck)
+                sv = row["stress_max"]
+                if sv is not None and (e["worst"] is None or abs(sv) > abs(e["worst"]["stress_max"])):
+                    e["worst"] = row
+                if case_key and ck != case_key:
+                    continue
+                flat.append(row)
+
+    if not runs:
+        return {"available": False, "n_records": 0, "clusters": [], **common,
+                "note": "이 리포트에는 핫스팟 군집이 없다 — 각도 런의 분석 YAML 에서 `hotspot_clusters` 를 켜야"
+                        "(`unified_analyzer --hotspot-clusters`) 실린다"}
+    flat.sort(key=_hotspot_sort_key(order))
+    total = len(flat)
+    shown = flat[: max(0, top)] if top else flat
+    envelope = []
+    for (pid, crit), e in env.items():
+        w = e["worst"]
+        envelope.append({
+            "part_id": pid, "part_name": names.get(str(pid)), "criterion": crit,
+            "n_angles": len(e["angles"]),
+            "worst_case_key": w["case_key"] if w else None,
+            "worst_angle": w["angle"] if w else None,
+            "stress_max": w["stress_max"] if w else None,
+            "element_count": w["element_count"] if w else None,
+            "radius_enclosing": w["radius_enclosing"] if w else None,
+            "center": w["center"] if w else None,
+            "peak_time": w["peak_time"] if w else None,
+        })
+    envelope.sort(key=lambda x: (x["stress_max"] is None, -abs(x["stress_max"] or 0.0)))
+    out = {
+        "available": True, **common,
+        "n_records": n_records,
+        "n_clusters": total,
+        "n_clusters_all": n_all,
+        "criteria": sorted(c for c in criteria if c),
+        "parts": sorted(p for p in parts if p is not None),
+        "order": order,
+        "order_note": "stress_* 는 **절대값** 기준이다 — direction=min 기준의 값은 음수다",
+        "filter": {"criterion": criterion, "part_id": part_id, "case_key": case_key},
+        "envelope": envelope[: max(0, top)] if top else envelope,
+        "envelope_note": "파트 × 기준마다 **전 각도에서** 가장 센(|응력| 최대) 군집 하나 — n_angles 는 그 파트·기준에"
+                         " 군집이 난 각도 수다",
+        "clusters": shown,
+    }
+    if top and len(envelope) > top:
+        out["envelope_truncated"] = {"returned": top, "total": len(envelope)}
+    if total > len(shown):
+        out["truncated"] = {"returned": len(shown), "total": total}
+    return out
+
+
+# ── 파트쌍 × 각도(위치) 접촉 프로파일 (sphere · impact) ───────────────────────
+#
+# 생성기 계약 — sphere `_contact_profile` 과 impact `build_contact_profile` 이 **같은 꼴**이다(생성기 주석: 「렌더러를
+# 공유한다」). pairs[{key, src, dst, cid, name, resolved}] + pf/ti/tw(pairs × 축 행렬). 축은 sphere=`results`(각도) ·
+# impact=`positions`(위치) 와 1:1 이다. 그 축에 그 접촉이 없으면 None — **0 이 아니다**('접촉 안 함' ≠ '힘 0').
+# resolved=false 는 접촉 정의가 파트로 분해되지 않은 것(single-surface 등)이다 — 파트쌍인 척하지 않는다.
+# 스칼라만 담으므로 **전 각도**가 실린다 — 시계열 상세(energy_flows)가 상위 각도만 실리는 것과 다르다.
+
+CONTACT_PROFILE_METRICS = {"pf": "peak_force", "ti": "total_impulse", "tw": "total_work"}
+
+
+def _profile_axis(data: dict, kind: str) -> list:
+    out = []
+    if kind == "impact":
+        for p in data.get("positions") or []:
+            if not isinstance(p, dict):
+                continue
+            pid = p.get("pos_id")
+            out.append({"case_key": None if pid is None else str(pid), "label": None if pid is None else str(pid),
+                        "x": _num(p.get("x")), "y": _num(p.get("y")), "face": p.get("face")})
+        return out
+    for r in data.get("results") or []:
+        if not isinstance(r, dict):
+            continue
+        a = r.get("angle") or {}
+        out.append({"case_key": r.get("folder") or a.get("name"), "label": a.get("name"),
+                    "roll": _num(a.get("roll")), "pitch": _num(a.get("pitch")), "yaw": _num(a.get("yaw")),
+                    "category": a.get("category")})
+    return out
+
+
+def _part_names(data: dict) -> dict:
+    parts = data.get("parts")
+    if isinstance(parts, dict):
+        return {str(k): (v.get("name") if isinstance(v, dict) else None) for k, v in parts.items()}
+    if isinstance(parts, list):
+        return {str(p.get("id")): p.get("name") for p in parts if isinstance(p, dict) and p.get("id") is not None}
+    return {}
+
+
+def _cell(mat: list, i: int, j: int):
+    row = mat[i] if i < len(mat) and isinstance(mat[i], list) else []
+    v = row[j] if j < len(row) else None
+    return None if v is None else _num(v)
+
+
+def contact_profile(data: dict, kind: str, *, metric: str = "pf", top: int = 30,
+                    case_key: str | None = None, matrix: bool = False,
+                    axis_top: int | None = None, max_cells: int = 120_000) -> dict:
+    """파트쌍 × 각도(위치) 접촉 스칼라 — 쌍마다 최대(그 각도) · 축마다 가장 센 쌍 · 한 각도의 엣지 · (선택) 행렬.
+
+    `metric` ∈ pf(peak_force) · ti(total_impulse) · tw(total_work). 크기 비교는 **|값|** 이다(tw 는 음수가 있다).
+    """
+    cp = data.get("contact_profile")
+    trust = data.get("contact_trust") if isinstance(data.get("contact_trust"), dict) else None
+    base = {"kind": kind, "metric": metric, "metric_name": CONTACT_PROFILE_METRICS.get(metric),
+            **({"trust": trust} if trust else {})}
+    if metric not in CONTACT_PROFILE_METRICS:
+        return {**base, "available": False, "error": "metric 은 pf · ti · tw 중 하나다"}
+    if not isinstance(cp, dict) or not cp.get("pairs"):
+        return {**base, "available": False,
+                "note": "이 리포트에는 파트쌍 접촉 프로파일이 없다 — 생성기가 하중경로(binout 의 matsum·rcforc)를 "
+                        "만들지 못하면 비어 있다"}
+    axis = _profile_axis(data, kind)
+    names = _part_names(data)
+    raw_pairs = [pr for pr in cp["pairs"] if isinstance(pr, dict)]
+    mats = {m: (cp.get(m) or []) for m in CONTACT_PROFILE_METRICS}
+    mat = mats[metric]
+    n_axis = len(axis)
+
+    def pair_row(i: int, pr: dict) -> dict:
+        src, dst = str(pr.get("src")), str(pr.get("dst"))
+        vals = [(j, _cell(mat, i, j)) for j in range(n_axis)]
+        vals = [(j, v) for j, v in vals if v is not None]
+        pj, pv = max(vals, key=lambda t: abs(t[1])) if vals else (None, None)
+        return {"key": pr.get("key"), "src": src, "dst": dst,
+                "src_name": names.get(src), "dst_name": names.get(dst),
+                "contact_id": pr.get("cid"), "name": pr.get("name"), "resolved": bool(pr.get("resolved")),
+                "n_engaged": len(vals), "peak": pv,
+                "peak_case_key": axis[pj]["case_key"] if pj is not None else None,
+                "peak_label": axis[pj]["label"] if pj is not None else None}
+
+    rows = [pair_row(i, pr) for i, pr in enumerate(raw_pairs)]
+    order = sorted(range(len(rows)),
+                   key=lambda i: (not rows[i]["resolved"], rows[i]["peak"] is None, -abs(rows[i]["peak"] or 0.0)))
+    axis_summary = []
+    for j, ax in enumerate(axis):
+        best, n_eng = None, 0
+        for i in range(len(raw_pairs)):
+            v = _cell(mat, i, j)
+            if v is None:
+                continue
+            n_eng += 1
+            if best is None or abs(v) > abs(best[1]):
+                best = (i, v)
+        axis_summary.append({**ax, "n_engaged": n_eng,
+                             "top_pair": rows[best[0]]["key"] if best else None,
+                             "top_value": best[1] if best else None})
+    out = {**base, "available": True,
+           "axis_kind": "position" if kind == "impact" else "angle",
+           "n_pairs": len(rows), "n_resolved": sum(1 for r in rows if r["resolved"]), "n_axis": n_axis,
+           "pairs": [rows[i] for i in order][: max(0, top)] if top else [rows[i] for i in order],
+           "note": "None = 그 %s 에 그 접촉이 없다(0 이 아니다) · resolved=false 는 파트로 분해되지 않은 접촉 · "
+                   "크기 비교는 |값|" % ("위치" if kind == "impact" else "각도")}
+    if top and len(rows) > top:
+        out["pairs_truncated"] = {"returned": top, "total": len(rows)}
+    if axis_top:
+        ranked = sorted(axis_summary, key=lambda a: (a["top_value"] is None, -abs(a["top_value"] or 0.0)))
+        out["axis_summary"] = ranked[:axis_top]
+        out["axis_summary_note"] = "가장 센 접촉이 큰 %s 상위 %d/%d" % (
+            "위치" if kind == "impact" else "각도", min(axis_top, n_axis), n_axis)
+    else:
+        out["axis_summary"] = axis_summary
+    if case_key:
+        j = next((k for k, ax in enumerate(axis) if ax["case_key"] == case_key), None)
+        if j is None:
+            out["at"] = {"case_key": case_key, "found": False, "note": "그 케이스가 축에 없다"}
+        else:
+            edges = []
+            for i, pr in enumerate(raw_pairs):
+                vals = {m: _cell(mats[m], i, j) for m in CONTACT_PROFILE_METRICS}
+                if all(v is None for v in vals.values()):
+                    continue
+                r = rows[i]
+                edges.append({"key": r["key"], "src": r["src"], "dst": r["dst"], "src_name": r["src_name"],
+                              "dst_name": r["dst_name"], "name": r["name"], "resolved": r["resolved"],
+                              **{CONTACT_PROFILE_METRICS[m]: v for m, v in vals.items()}})
+            edges.sort(key=lambda e: (e["peak_force"] is None, -abs(e["peak_force"] or 0.0)))
+            out["at"] = {"case_key": case_key, "found": True, **axis[j], "edges": edges}
+    if matrix:
+        cells = len(rows) * n_axis
+        if cells > max_cells:
+            out["matrix"] = None
+            out["matrix_note"] = "행렬이 %d 칸이라 상한 %d 을 넘는다 — metric 을 하나로 · axis 를 줄여 다시 청하라" % (
+                cells, max_cells)
+        else:
+            out["matrix"] = {"pairs": [rows[i]["key"] for i in order],
+                             "values": [[_cell(mat, i, j) for j in range(n_axis)] for i in order]}
+    return out
+
+
 # ── 거동 군집 (impact) ───────────────────────────────────────────────────────
 
 def behavior_clusters(data: dict) -> dict:
@@ -1157,6 +1543,14 @@ PARSER_READS = frozenset({
     "max_principal_strain", "min_principal_strain",
     # impact
     "kpi", "unit_labels", "generated_by", "device_bbox", "device_outline", "energy_flows",
+    # sphere 새 판(10-17~) — 정규화 요약(unit_system · tool_builds) · 하중경로 응답(energy_flows_note) ·
+    # 핫스팟 응답(hotspot_parts · hotspot_mesh · hotspot_mesh_note · hotspot_cap_note) · 전용 함수(contact_profile ·
+    # contact_trust — impact 도 같은 꼴). 남기는 것(device_mesh 등)은 회귀의 EXPECTED_UNREAD 가 까닭과 함께 고정한다.
+    "unit_system", "tool_builds", "energy_flows_note",
+    "hotspot_parts", "hotspot_mesh", "hotspot_mesh_note", "hotspot_cap_note",
+    "contact_profile", "contact_trust",
+    # impact `positions` — contact_profile 의 축(위치)으로 읽는다.
+    "positions",
 })
 
 

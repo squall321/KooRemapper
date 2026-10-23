@@ -31,6 +31,10 @@ from app.reports import parser as P  # noqa: E402
 
 _DEEP = Path("/data/koopark/Test_hs_shell_e2e/report.html")
 _SPHERE = Path("/data/SmartTwinPostprocessor/lib/koo_sphere_report/examples/Test_001_report.html")
+# ★새 판 sphere(10-17~ 생성기 — 각도별 hotspot · energy_flows · contact_profile …). 옛 예제는 최상위 12키라 생성기가
+#   키를 늘린 것을 이 시험이 **보지 못했다**(2026-10-23 — 「버려지는 키 0」 이 초록인 채 9키가 버려지고 있었다).
+#   운영 이미지로 실제 런을 돌려 만들었다 — 출처는 같은 폴더 README.txt.
+_SPHERE_NEW = Path("/data/koopark/report_fixtures/sphere_hotspot_v1018/report.html")
 _IMPACT = Path("/data/koopark/Test_Impact_A/impact_report.html")
 
 # ★지금 정규화가 해석하지 않는 블록 — **이름으로 고정한다.**
@@ -39,10 +43,14 @@ _IMPACT = Path("/data/koopark/Test_Impact_A/impact_report.html")
 EXPECTED_UNREAD = {
     "deep": {"element_quality", "hotspot", "label", "peak_element_tensors", "renders"},
     "sphere": set(),
+    # 새 판 sphere — 남기는 둘: `device_mesh`(화면 자세 미리보기용 **근사** 외곽 메시 — 질의 대상이 아니다, `/blocks`
+    # 로 꺼낸다) · `set_report`(세트 후처리 산출 목록 — analytics_summary 가 다룬다, impact 와 같다).
+    "sphere_new": {"device_mesh", "set_report"},
+    # impact 의 contact_profile · positions 는 10-23 부터 `contact_profile()` 이 읽는다(positions 는 그 축이다).
     "impact": {
-        "clusters", "contact_profile", "deep_analytics", "device_geometry", "doe_analysis",
+        "clusters", "deep_analytics", "device_geometry", "doe_analysis",
         "energy_conservation_tolerance", "energy_flow_max_ie", "energy_flow_thresholds",
-        "faces", "impactor_mesh", "insights", "part_motion", "physics", "positions",
+        "faces", "impactor_mesh", "insights", "part_motion", "physics",
         "risk_score", "set_report", "solver_quality", "trajectories",
     },
 }
@@ -51,7 +59,7 @@ EXPECTED_UNREAD = {
 FIRST_CLASS = {"hotspot": "hotspot_clusters()", "clusters": "behavior_clusters()",
                "doe_analysis": "analytics_summary()", "deep_analytics": "analytics_summary()",
                "insights": "analytics_summary()", "physics": "analytics_summary()",
-               "solver_quality": "analytics_summary()", "contact_profile": "analytics_summary()",
+               "solver_quality": "analytics_summary()", "contact_profile": "contact_profile()",
                "set_report": "analytics_summary()"}
 
 
@@ -59,7 +67,7 @@ def _raw(path: Path):
     return P.extract_embedded_data(path.read_text(encoding="utf-8", errors="replace"))
 
 
-CASES = [("deep", _DEEP), ("sphere", _SPHERE), ("impact", _IMPACT)]
+CASES = [("deep", _DEEP), ("sphere", _SPHERE), ("sphere_new", _SPHERE_NEW), ("impact", _IMPACT)]
 
 
 @pytest.mark.parametrize("kind,path", CASES)

@@ -186,7 +186,12 @@ impact 전위치 부분충격)을 인제스트해 구조화 분석한다.
    - `report_angle_stats(report_id, metric?, part_id?, category?/angle_name?/near_lon+near_lat+tol_deg?, top_parts?)` :
      특정 각도군(범주·기준방향 퍼터베이션·임의 콘·전체) 표준 통계(분포 n/mean/std/CoV/백분위/IQR/최악 +
      부품별 위험·민감도). metric 은 리포트에 실재하는 것만(응답 available_metrics).
-   - `report_energy_flow(report_id, case_key?)` : deep 에너지밸런스·접촉, sphere/impact 하중경로.
+   - `report_energy_flow(report_id, case_key?)` : deep 에너지밸런스·접촉, sphere/impact 하중경로(엣지마다
+     peak_force·total_work·total_impulse). ⚠ 상세는 생성기가 **상위 각도(위치)에만** 싣는다 — 없는 케이스는 null +
+     까닭(`detail_note`)이고 다른 각도로 떨어지지 않는다. 실제 케이스는 `flow_case_key`.
+   - `report_contact_profile(report_id, metric?, case_key?)` : **파트쌍 × 각도(위치)** 접촉력·충격량·일(sphere · impact).
+     「어느 파트가 어느 파트를 어느 각도에서 세게 미는가」 를 **전 각도**로 답한다. `case_key` 를 주면 그 각도의
+     파트쌍 엣지(접촉 그래프). None 은 '접촉 없음' 이다(0 이 아니다).
    - `report_part_energy(report_id, part_id?)` : 파트별 에너지(내부 IE·운동 KE) 시계열(deep matsum, 있을 때).
    - `report_part_series(report_id, case_key, part_id)` : 케이스·파트 시계열(응력/변형률/G/변위).
    - `report_geometry(report_id)` : impact 디바이스 외곽선+파트 footprint(XY)+z범위 — "부품이 어디 있나" 시각화.
@@ -212,9 +217,11 @@ impact 전위치 부분충격)을 인제스트해 구조화 분석한다.
 
 ### 핫스팟·군집·블록
 
-- `report_hotspots` — deep 리포트의 **공간 핫스팟 군집**(어디가 뜨거운가). 중심·반경·요소수·
-  피크요소까지. ⚠ `stress_*` 정렬은 **절대값**이고(min 기준은 음수), `uniform=true` 의 군집은
-  '가장 뜨거운 곳' 이 아니다.
+- `report_hotspots` — deep · sphere 리포트의 **공간 핫스팟 군집**(어디가 뜨거운가). 중심·반경·요소수
+  (deep 은 피크요소·부피까지). sphere(전각도 낙하)는 각도마다 실리고 `envelope` 가 파트 × 기준마다 **전 각도에서
+  가장 센** 군집과 그 각도를 준다 — 먼저 `envelope` 를 보고 `case_key` 로 그 각도만 좁힌다. ⚠ `stress_*` 정렬은
+  **절대값**이고(min 기준은 음수), `uniform=true` 의 군집은 '가장 뜨거운 곳' 이 아니다 — sphere 압축본에는 그 표시가
+  없다(`compact_note`). 군집은 각도 런의 분석에서 `hotspot_clusters` 를 켰을 때만 실린다.
 - `report_behavior_clusters` — impact 의 거동 아키타입. ⚠ `degenerate=true` 면 선언한 군집
   수와 **실제로 쓰인** 수가 다르다("N 가지 거동" 으로 읽으면 안 된다). `is_mock=true` 면 합성이다.
 - `report_analytics` / `report_blocks` / `report_block` — 리포트에 들어 있는 **모든** 분석 블록.

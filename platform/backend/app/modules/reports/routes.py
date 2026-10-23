@@ -637,17 +637,44 @@ async def report_hotspots(
     part_id: int | None = Query(default=None),
     top: int = Query(default=20, ge=1, le=500),
     order: str = Query(default="stress_max"),
+    case_key: str | None = Query(default=None, description="sphere — 한 각도 런(폴더)만"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """핫스팟 군집(deep) — 어디가 뜨거운가. 중심·반경·요소수·부피·피크요소·피크시각.
+    """핫스팟 군집(deep · sphere) — 어디가 뜨거운가. 중심·반경·요소수·피크시각(deep 은 부피·피크요소까지).
 
+    sphere 는 각도 런마다 실린 군집을 각도와 함께 내고, 파트 × 기준마다 전 각도에서 가장 센 군집(`envelope`)을 붙인다.
     ★`stress_*` 정렬은 **절대값**이다(`min_principal` 기준의 값은 음수다).
-    ★`uniform=true` 레코드의 군집은 '가장 뜨거운 곳' 이 아니다(값이 고르다는 뜻) — 그렇게 적는다.
+    ★`uniform=true` 레코드의 군집은 '가장 뜨거운 곳' 이 아니다(값이 고르다는 뜻) — 그렇게 적는다. sphere 압축본에는
+      그 표시가 없다(`compact_note`).
     """
     r = await _require_report(db, user, report_id, request)
     return ok(await svc.hotspots(db, r, criterion=criterion, part_id=part_id,
-                                 top=top, order=order))
+                                 top=top, order=order, case_key=case_key))
+
+
+@router.get("/reports/{report_id}/contact_profile")
+async def report_contact_profile(
+    request: Request,
+    report_id: str,
+    metric: str = Query(default="pf", pattern="^(pf|ti|tw)$",
+                        description="pf=peak_force · ti=total_impulse · tw=total_work"),
+    top: int = Query(default=30, ge=1, le=1000),
+    case_key: str | None = Query(default=None, description="이 각도(위치)의 파트쌍 엣지를 함께"),
+    matrix: bool = Query(default=False, description="히트맵용 pairs × 축 행렬(상한 있음)"),
+    axis_top: int | None = Query(default=None, ge=1, le=5000,
+                                 description="축 요약을 가장 센 각도(위치) 상위 N 개로"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """파트쌍 × 각도(위치) 접촉 스칼라(sphere · impact) — 어느 파트가 어느 파트를 언제 세게 미는가.
+
+    ★None 은 '그 각도에 그 접촉이 없다' 이다(0 이 아니다). resolved=false 는 파트로 분해되지 않은 접촉이다.
+    ★전 각도가 실린다 — 시계열 상세(`/energy`)가 상위 각도에만 있는 것과 다르다.
+    """
+    r = await _require_report(db, user, report_id, request)
+    return ok(await svc.contact_profile(db, r, metric=metric, top=top, case_key=case_key,
+                                        matrix=matrix, axis_top=axis_top))
 
 
 @router.get("/reports/{report_id}/clusters")
@@ -715,7 +742,11 @@ async def report_energy(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """에너지/접촉 상세(원본 재파싱). deep=에너지밸런스·접촉력, sphere/impact=하중경로 그래프."""
+    """에너지/접촉 상세(원본 재파싱). deep=에너지밸런스·접촉력, sphere/impact=하중경로 그래프.
+
+    sphere/impact 는 HTML 압축본·중립 꼴을 둘 다 읽는다(`energy_flow.form`). `case_key` 에 상세가 없으면 **다른 각도로
+    떨어지지 않고** null + 까닭이다 — 상세는 생성기가 상위 각도에만 싣는다(`detail_note`). 실제로 쓴 케이스는 `flow_case_key`.
+    """
     r = await _require_report(db, user, report_id, request)
     try:
         return ok(await svc.case_energy(db, r, case_key))

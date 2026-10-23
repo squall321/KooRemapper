@@ -69,7 +69,8 @@ SmartTwin 파이프라인이 만든 deep(단건 심층)·sphere(전각도 낙하
 | `report_query` | report_id, part_id?·category?·angle_name?·near_roll/pitch+angle_tol_deg?(yaw 무시)·metric?·min/max_value?·sort·limit | GET /reports/{id}/query | 리포트 내부 fact 드릴다운(부품×각도×물리량×값, 서버 필터) |
 | `report_blocks` | report_id | GET /reports/{id}/blocks | 임베드 블록 **전수** 목록 — 이름·형태·크기·`read_by_parser`(정규화가 아직 해석 안 하는 것도 다 보인다) |
 | `report_block` | report_id, name, path?·limit?·max_bytes? | GET /reports/{id}/blocks/{name} | 블록 하나(또는 `a.b.0.c` 하위) — 무엇이든 끝까지 되짚는다. 크면 잘라서 **잘랐다고 말한다** |
-| `report_hotspots` | report_id, criterion?·part_id?·top·order | GET /reports/{id}/hotspots | ★핫스팟 군집(deep) — **어디가 뜨거운가**. 중심·반경·요소수·부피·피크요소·피크시각. 정렬은 **절대값** |
+| `report_hotspots` | report_id, criterion?·part_id?·top·order·case_key? | GET /reports/{id}/hotspots | ★핫스팟 군집(deep · sphere) — **어디가 뜨거운가**. 중심·반경·요소수·피크시각(deep 은 부피·피크요소까지). sphere 는 각도마다 + `envelope`(파트 × 기준마다 전 각도 최강) · `case_key` 로 한 각도. 정렬은 **절대값** |
+| `report_contact_profile` | report_id, metric?(pf·ti·tw)·top·case_key?·axis_top | GET /reports/{id}/contact_profile | ★파트쌍 × 각도(위치) 접촉 스칼라(sphere · impact) — 쌍마다 최대와 그 각도 · 가장 센 각도 상위 · `case_key` 면 그 각도의 엣지(접촉 그래프). **전 각도**가 실린다. None = 접촉 없음(0 이 아니다) |
 | `report_behavior_clusters` | report_id | GET /reports/{id}/clusters | 거동 아키타입 군집(impact). `degenerate`(선언≠사용)·`is_mock` 를 숨기지 않는다 |
 | `report_analytics` | report_id, block? | GET /reports/{id}/analytics | 큰 분석 블록 요약(doe_analysis·deep_analytics·insights·physics…). 생성기 `summary` **그대로** |
 | `report_media` | report_id, case_key?·kind?·role?·images_only? | GET /reports/{id}/media | 결과 이미지·영상 **목록**. `can_llm_view` 가 모델이 볼 수 있는지를 가른다(mp4 는 못 본다) |
@@ -84,7 +85,7 @@ SmartTwin 파이프라인이 만든 deep(단건 심층)·sphere(전각도 낙하
 | `report_case` | report_id, case_key | GET /reports/{id}/cases/{key} | 한 케이스 상세(파트별 메트릭) |
 | `report_directional` | report_id, part_id? | GET /reports/{id}/directional | 방향 범주(sphere 면/엣지/코너, impact F1~F6)별 최악 응력·G |
 | `report_scatter` | report_id, metric?, part_id? | GET /reports/{id}/scatter | 방향 섭동 산포(sphere) — 26방향별 mean/std/CoV/최악 + 민감도 |
-| `report_energy_flow` | report_id, case_key? | GET /reports/{id}/energy | deep=에너지밸런스·접촉력·Newton-3, sphere/impact=하중경로 그래프 |
+| `report_energy_flow` | report_id, case_key? | GET /reports/{id}/energy | deep=에너지밸런스·접촉력·Newton-3, sphere/impact=하중경로 그래프(엣지 peak_force·total_work·total_impulse). 상세는 **상위 각도에만** — 없는 케이스는 null + 까닭(다른 각도로 안 떨어진다) · `flow_case_key` |
 | `report_part_energy` | report_id, part_id? | GET /reports/{id}/part-energy | 파트별 에너지(내부 IE·운동 KE) 시계열(deep matsum, 있을 때) |
 | `report_part_series` | report_id, case_key, part_id | GET /reports/{id}/cases/{key}/series | 케이스·파트 시계열(응력/변형률/G/변위, 다운샘플) |
 | `report_geometry` | report_id | GET /reports/{id}/geometry | impact 디바이스 외곽선+파트 footprint(XY)+z범위 — 부품 위치 시각화 |

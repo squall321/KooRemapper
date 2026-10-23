@@ -1015,12 +1015,22 @@ async def block(db: AsyncSession, report: ImpactReport, name: str, *,
 
 async def hotspots(db: AsyncSession, report: ImpactReport, *, criterion: str | None = None,
                    part_id: int | None = None, top: int = 20,
-                   order: str = "stress_max") -> dict:
-    """핫스팟 군집(deep) — 파트·판정기준별 공간 군집."""
+                   order: str = "stress_max", case_key: str | None = None) -> dict:
+    """핫스팟 군집(deep · sphere) — 파트·판정기준별 공간 군집. sphere 는 각도 런마다 · 포락(envelope) 포함."""
     data, _kind = await _load_html_data(db, report)
     return await asyncio.to_thread(
         parser.hotspot_clusters, data, criterion=criterion, part_id=part_id,
-        top=top, order=order)
+        top=top, order=order, case_key=case_key)
+
+
+async def contact_profile(db: AsyncSession, report: ImpactReport, *, metric: str = "pf", top: int = 30,
+                          case_key: str | None = None, matrix: bool = False,
+                          axis_top: int | None = None) -> dict:
+    """파트쌍 × 각도(위치) 접촉 스칼라(sphere · impact) — 원본 재파싱."""
+    data, kind = await _load_html_data(db, report)
+    return await asyncio.to_thread(
+        parser.contact_profile, data, kind, metric=metric, top=top, case_key=case_key,
+        matrix=matrix, axis_top=axis_top)
 
 
 async def behavior_clusters(db: AsyncSession, report: ImpactReport) -> dict:
