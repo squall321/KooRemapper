@@ -315,6 +315,8 @@ async def delete_file(db: AsyncSession, f: SessionFile) -> None:
 # 쓸 틈까지 든다.
 _STOP_WAIT_SEC = 8.0
 _STOP_POLL_SEC = 0.25
+# 지운 뒤에도 폴더가 남았을 때 한 번 더 지우기까지 두는 초(NFS `.nfs*` — `delete_session` 주석).
+_RMTREE_RETRY_SEC = 1.0
 _LIVE_STATUSES = ("queued", "running")
 
 
@@ -384,5 +386,20 @@ async def delete_session(db: AsyncSession, session: Session) -> None:
     d = storage.session_abs_dir(session.user_id, session.id)
     if d.exists():
         shutil.rmtree(d, ignore_errors=True)
+        if d.exists():
+            # NFS 에서는 다른 노드가 아직 쥔 파일이 `.nfs*` 로 남아 폴더가 지워지지 않는다(실행기로 원격에서 도는
+            # 잡이 끝나는 중일 때). 잠깐 두고 한 번 더 지우고, 그래도 남으면 말한다 — 조용히 남기지 않는다.
+            await asyncio.sleep(_RMTREE_RETRY_SEC)
+            shutil.rmtree(d, ignore_errors=True)
+            if d.exists():
+                try:
+                    left = list(d.rglob("*"))
+                except OSError:
+                    left = []
+                logger.warning(
+                    "session %s 삭제: 폴더가 남았다(항목 %d개, 그중 .nfs* %d개) — 다른 노드가 아직 파일을 "
+                    "쥐고 있을 수 있다",
+                    session.id, len(left), sum(x.name.startswith(".nfs") for x in left),
+                )
     await db.delete(session)
     await db.commit()

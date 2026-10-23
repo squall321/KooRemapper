@@ -5,6 +5,7 @@ Concurrency is bounded by settings.worker_concurrency. Each job:
   1. atomic-claim (status queued→running)
   2. argbuild → argv + any written config.yaml
   3. snapshot session dir, run binary (cwd=session dir), capture stdout/stderr to files
+     (through the KOORM_JOB_LAUNCHER command when set — it may run the binary on another node)
   4. register NEW files as session_files(kind=output, origin_job_id)
   5. status → succeeded|failed|canceled, exit_code, output_file_ids, error_summary
 """
@@ -13,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import shlex
 import signal
 import subprocess
 import threading
@@ -62,6 +64,9 @@ def _env_snapshot() -> dict:
     값은 이미 잡 stdout 에 찍힌다(`meshfix.cpp` 가 `Gmsh: <경로> (v…)` 를 낸다). 없는 정보를
     만드는 칸이 아니라, **바이너리 리비전**을 남기는 칸이다 — 배너는 상수 `Version 1.8.0` 이어서
     로그만으로는 어느 빌드였는지 알 수 없었다.
+
+    `launcher` 는 실행기 명령 줄 그대로다(없으면 None). `host.nodename` 은 **API 노드**다 — 실행기를 쓰면
+    job 이 실제로 돈 노드는 실행기가 자기 기록(`.job_<id>.node` 등)에 남긴다.
     """
     b = build_info(settings.kooremapper_bin)
     g = gmsh_probe(settings.kooremapper_bin)
@@ -78,6 +83,7 @@ def _env_snapshot() -> dict:
         "gmsh": {"available": g.get("available"), "version": g.get("version")},
         "platform": {"app_env": settings.app_env},
         "host": {"nodename": os.uname().nodename},
+        "launcher": settings.job_launcher or None,
     }
 
 
@@ -163,21 +169,55 @@ def _kill_proc_group(proc: subprocess.Popen, sig: int) -> None:
             pass
 
 
+# 실행기에 넘기는 환경의 허용 목록. 바이너리가 읽는 이름은 `KOOREMAPPER_GMSH`·`PATH`(meshfix)와 `KOO_*_DEBUG`
+# 뿐이고 `OMP_*` 는 OpenMP 런타임이 읽는다. API 환경에는 DB 주소 · JWT 비밀 · 게이트웨이 토큰이 있다 — 다른
+# 노드로 가지 않게 한다. 실행기도 거르므로(계약 L2) 겹 방어다. 실행기가 없으면 쓰지 않는다(지금처럼 물려준다).
+_LAUNCH_ENV_NAMES = frozenset({"PATH", "LANG", "HOME", "TMPDIR", "KOOREMAPPER_GMSH"})
+_LAUNCH_ENV_PREFIXES = ("LC_", "OMP_")
+
+
+def _launcher_env() -> dict[str, str]:
+    return {
+        k: v for k, v in os.environ.items()
+        if k in _LAUNCH_ENV_NAMES or k.startswith(_LAUNCH_ENV_PREFIXES)
+        or (k.startswith("KOO_") and k.endswith("_DEBUG"))
+    }
+
+
 def _run_blocking(job_id: str, argv: list[str], cwd: Path, out_path: Path, err_path: Path) -> int:
     """Run the binary synchronously (called via asyncio.to_thread)."""
     cmd = [str(settings.kooremapper_bin), *argv]
+    launcher = settings.job_launcher
+    extra: dict = {}
+    if launcher:
+        # 실행기가 노드를 골라 같은 이미지 · 같은 cwd 로 원래 명령을 띄운다. 앱은 노드를 모른다.
+        # cwd · 로그 파일 · 프로세스 그룹은 그대로 준다 — 실행기가 그룹 리더가 된다.
+        cmd = [*shlex.split(launcher), "--job-id", job_id, "--kind", argv[0], "--", *cmd]
+        extra["env"] = _launcher_env()
     with out_path.open("w") as out, err_path.open("w") as err:
         # start_new_session=True → the binary leads its own process group, so a
         # timeout/cancel can kill the whole group (incl. gmsh grandchildren).
         proc = subprocess.Popen(
-            cmd, cwd=str(cwd), stdout=out, stderr=err, text=True, start_new_session=True
+            cmd, cwd=str(cwd), stdout=out, stderr=err, text=True, start_new_session=True, **extra
         )
         _running[job_id] = proc
         try:
             return proc.wait(timeout=settings.job_timeout_sec)
         except subprocess.TimeoutExpired:
-            _kill_proc_group(proc, signal.SIGKILL)
-            proc.wait()
+            if launcher:
+                # ⚠ 실행기는 **TERM 먼저**다. 로컬에서는 바이너리가 그룹 리더라 wait() 가 돌아오면 바이너리도
+                # 죽어 있지만, 실행기를 바로 죽이면 원격 job 은 실행기 쪽 임대가 끊을 때까지 계속 돈다. 그 사이
+                # `_execute` 가 아직 쓰이는 파일을 출력으로 등록하고, 같은 세션의 다음 job 이 같은 폴더에서 먼저
+                # 시작될 수 있다. TERM 을 받은 실행기는 원격이 끝난 것을 보고 나온다(계약 L6).
+                _kill_proc_group(proc, signal.SIGTERM)
+                try:
+                    proc.wait(timeout=settings.job_term_grace_sec)
+                except subprocess.TimeoutExpired:
+                    _kill_proc_group(proc, signal.SIGKILL)
+                    proc.wait()
+            else:
+                _kill_proc_group(proc, signal.SIGKILL)
+                proc.wait()
             err.write("\n[timeout exceeded]\n")
             return 124
         finally:
@@ -699,14 +739,45 @@ def request_cancel(job_id: str) -> bool:
     return False  # queued (not yet running) — worker will see _CANCELED
 
 
+# 실행기 정리 하위 명령(`--reap <id>`) 하나를 기다리는 상한. 계약은 10초 안에 끝나는 것이다(L10).
+_REAP_TIMEOUT_SEC = 15
+
+
+def _reap(job_id: str) -> None:
+    """실행기에게 이 잡의 원격 프로세스를 끝내게 한다. 실패해도 회수는 진행한다 — 까닭만 로그에 남긴다."""
+    cmd = [*shlex.split(settings.job_launcher), "--reap", job_id]
+    try:
+        r = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                           timeout=_REAP_TIMEOUT_SEC, env=_launcher_env())
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("job %s: 실행기 --reap 실패(%s) — 그대로 회수한다",
+                       job_id, type(exc).__name__)
+        return
+    if r.returncode != 0:
+        logger.warning("job %s: 실행기 --reap rc=%s — 그대로 회수한다 | %s",
+                       job_id, r.returncode, (r.stderr or "").strip()[-300:])
+
+
 async def reconcile_orphans() -> None:
     """On startup, fail any job left 'running' by a previous (crashed/restarted)
     worker — its subprocess is gone, so it can never complete.
+
+    실행기를 쓰면 **행을 닫기 전에** 잡마다 `<실행기> --reap <id>` 를 부른다. 원격 job 은 API 와 함께 죽지
+    않는다 — 행부터 닫으면 같은 세션의 다음 잡이 아직 끝나는 중인 원격 job 과 같은 폴더에서 겹친다.
+    (로컬 바이너리도 새 세션이라 API 가 갑자기 죽으면 남는다 — 같은 틈이지만 이번 범위 밖이다.)
 
     ⚠ 외부 잡(`external_kind IS NOT NULL`)은 **제외한다.** 그것은 이 워커의 자식이
     아니라 다른 클러스터에서 도는 것이라, 워커가 죽었다는 사실과 잡의 생사가 무관하다.
     빼지 않으면 API 재기동 한 번에 4시간짜리 stcx 잡이 화면에서 failed 로 사라지고,
     정작 클러스터에서는 멀쩡히 계속 돈다 — 가장 나쁜 종류의 거짓말이다."""
+    if settings.job_launcher:
+        async with SessionLocal() as db:
+            ids = list((await db.execute(text(
+                "SELECT id FROM jobs WHERE status='running' AND external_kind IS NULL"
+            ))).scalars())
+        if ids:
+            # 한꺼번에 부른다 — 하나씩이면 고아 8개에 최대 80초 동안 큐가 선다.
+            await asyncio.gather(*(asyncio.to_thread(_reap, jid) for jid in ids))
     async with SessionLocal() as db:
         result = await db.execute(
             text(
@@ -820,8 +891,21 @@ def start_worker() -> None:
     _worker_task = asyncio.create_task(_loop())
 
 
+# 종료 때 실행기에 SIGTERM 을 보내고 SIGKILL 까지 기다리는 초. lifespan 이 stop_worker 를 3.5초(main.py),
+# uvicorn 이 5초(api.def)에 끊으므로 그 안에 든다.
+_STOP_TERM_GRACE_SEC = 2.0
+
+
 async def stop_worker() -> None:
     _stop.set()
+    if settings.job_launcher:
+        # 시간 초과와 같은 까닭으로 TERM 먼저다 — 종료 때도 `_execute` 가 이어서 출력 목록을 뜬다.
+        for proc in list(_running.values()):
+            _kill_proc_group(proc, signal.SIGTERM)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + _STOP_TERM_GRACE_SEC
+        while _running and loop.time() < deadline:
+            await asyncio.sleep(0.05)
     # Kill any in-flight subprocess groups so a shutdown/restart doesn't leave
     # orphaned binaries running (and mutating session dirs).
     for proc in list(_running.values()):

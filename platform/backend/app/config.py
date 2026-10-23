@@ -76,6 +76,14 @@ class Settings(BaseSettings):
     job_timeout_sec: int = 1800
     # Concurrent runner workers.
     worker_concurrency: int = 4
+    # job 자식 앞에 붙이는 실행기(launcher) 명령 한 줄. `shlex.split` 으로 나눈다. 비우면 지금처럼 바이너리를
+    # 이 프로세스의 자식으로 바로 띄운다. 값이 있으면 `<실행기…> --job-id <id> --kind <연산> -- <바이너리> <argv…>`
+    # 로 띄우고, 노드 선택 · 원격 실행 · 남은 프로세스 정리는 실행기가 한다(KOORM_JOB_LAUNCHER).
+    # ⚠ 이 값은 잡마다 env_snapshot 에 그대로 남는다 — 실행기의 비밀은 인자가 아니라 파일로 준다.
+    job_launcher: str = ""
+    # 실행기를 쓸 때, 시간 초과에 SIGTERM 을 보낸 뒤 SIGKILL 까지 기다리는 초. 실행기가 원격 job 을 끝내고
+    # 나올 틈이다 — 바로 죽이면 원격이 아직 쓰는 파일을 출력으로 등록한다(KOORM_JOB_TERM_GRACE_SEC).
+    job_term_grace_sec: int = 5
     # Max single-file upload size (MB) — 전송(멀티파트) 상한. .gz 는 이 압축 크기에 걸린다.
     max_upload_mb: int = 512
     # 리포트 HTML 압축 해제 후 상한 (MB) — .gz 를 서버가 풀 때의 크기 가드(zip-bomb·메모리 보호).
