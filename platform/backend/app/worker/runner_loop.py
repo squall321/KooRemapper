@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import shlex
 import signal
 import subprocess
@@ -66,7 +67,8 @@ def _env_snapshot() -> dict:
     로그만으로는 어느 빌드였는지 알 수 없었다.
 
     `launcher` 는 실행기 명령 줄 그대로다(없으면 None). `host.nodename` 은 **API 노드**다 — 실행기를 쓰면
-    job 이 실제로 돈 노드는 실행기가 자기 기록(`.job_<id>.node` 등)에 남긴다.
+    job 이 실제로 돈 노드는 실행기가 `.job_<id>.node` 에 남기고, 잡이 끝난 뒤 `host.job_node` 로 옮긴다
+    (`_job_node` — HWAX 답신 ③ 안 A, 10-23).
     """
     b = build_info(settings.kooremapper_bin)
     g = gmsh_probe(settings.kooremapper_bin)
@@ -85,6 +87,20 @@ def _env_snapshot() -> dict:
         "host": {"nodename": os.uname().nodename},
         "launcher": settings.job_launcher or None,
     }
+
+
+# 실행기가 남기는 노드 이름 한 줄(계약 — 노드 이름만, 영숫자 · `.` · `-` · `_`). 꼴이 아니면 적지 않는다.
+_JOB_NODE_RE = re.compile(r"[A-Za-z0-9._-]{1,64}")
+
+
+def _job_node(work_dir: Path, job_id: str) -> str | None:
+    """실행기가 cwd 에 남긴 `.job_<id>.node` 의 첫 줄 — job 이 **실제로 돈** 노드. 없거나 꼴이 아니면 None."""
+    try:
+        with (work_dir / f".job_{job_id}.node").open("r", encoding="utf-8", errors="replace") as f:
+            line = f.readline(256).strip()
+    except OSError:
+        return None
+    return line if _JOB_NODE_RE.fullmatch(line) else None
 
 
 def _note_crash(job_id: str, exc: BaseException) -> bool:
@@ -657,6 +673,12 @@ async def _execute(job_id: str) -> None:
         canceled = job_id in _CANCELED
         _CANCELED.discard(job_id)
 
+        # job 이 실제로 돈 노드(실행기가 남긴 한 줄). `nodename`(API 노드)은 그대로 둔다 — 같은 칸이 잡마다
+        # 다른 뜻이 되지 않게 칸을 더한다(HWAX 답신 ③ 안 A). JSONB 는 새 dict 로 바꿔 넣어야 저장된다.
+        snap = dict(job.env_snapshot or {})
+        snap["host"] = {**(snap.get("host") or {}), "job_node": _job_node(work_dir, job_id)}
+        job.env_snapshot = snap
+
         # register outputs: files that are new OR whose mtime advanced (overwritten
         # by this run). For an overwritten file, update the existing row instead of
         # inserting a duplicate.
@@ -669,6 +691,10 @@ async def _execute(job_id: str) -> None:
         for name in changed:
             base = name.rsplit("/", 1)[-1]
             if base.startswith(".job_"):  # our log files
+                continue
+            # NFS 는 열린 채로 지운 파일을 `.nfs<16진수>` 로 남겼다가 닫힐 때 지운다 — 곧 사라질 그 파일을
+            # 산출로 올리지 않는다(HWAX 답신 ② 덧붙임, 10-23 결정).
+            if base.startswith(".nfs"):
                 continue
             fid = await _register_file(
                 db, session, name, work_dir / name, kind="output", job_id=job_id

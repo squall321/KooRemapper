@@ -34,6 +34,6 @@
 - [x] 커밋 · 푸시 · API 재기동 · 헬스 · 스모크 — `a3e9636` · 재기동 전 queued/running 0 · MCP 경유 database · meshfix succeeded · `env_snapshot.launcher` null
 
 ## 남은 것(사용자 결정)
-- [ ] Q3 실제 노드 기록 — 권장 A(`host.job_node` ← `.job_<id>.node`) 확정 뒤 넣는다
-- [ ] `.nfs*` 를 출력 등록에서 뺄지(한 줄) — 요청 밖 · 제안만 했다
+- [x] Q3 실제 노드 기록 — 안 A(`host.job_node` ← `.job_<id>.node`)를 넣었다(10-23 저녁 · 사용자 「권장대로」 · 답신 6장)
+- [x] `.nfs*` 를 출력 등록에서 뺐다(10-23 저녁 · 답신 6장)
 - [ ] Q2 NFS 판정 — HWAXProd 측정(H5) 대기

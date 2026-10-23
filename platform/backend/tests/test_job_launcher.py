@@ -6,6 +6,7 @@ HWAX Portal 운영이 prod 의 job 자식을 다른 노드에서 돌리려 한�
 (`KOORM_JOB_LAUNCHER`)뿐이다. 여기서 못 박는 것은 요청서 5장의 V1–V10 과 K3 · K4 · K6 · K7 이다.
 
   · **설정이 비면 지금과 똑같다(V1).** argv · 환경 · 시간 초과의 바로 SIGKILL · 종료 때의 SIGKILL.
+  · 실제 노드 기록(답신 ③ 안 A) · `.nfs*` 를 출력에서 뺀다(답신 ② 덧붙임) — 10-23 결정.
   · 실행기를 거쳐도 연산 꼴마다 결과가 같다(V2 그 자리 exec · V3 다른 그룹의 자식).
   · 실행기는 **TERM 먼저**다(V7 · K3). 바로 죽이면 원격이 아직 쓰는 파일을 출력으로 등록한다.
   · 재기동은 행을 닫기 **전에** `--reap` 한다(V8).
@@ -260,6 +261,56 @@ def test_k6_the_snapshot_says_which_launcher_ran_the_job(monkeypatch):
     snap = rl._env_snapshot()
     assert snap["launcher"] == "/opt/hw/forge-launch --app kooremapper"
     assert snap["host"]["nodename"] == os.uname().nodename, "nodename 은 그대로 API 노드다"
+
+
+# ── 답신 ③ 안 A · 실제 노드 기록 / ② 덧붙임 · `.nfs*` (10-23 결정) ────────────────
+def test_3a_job_node_reads_one_clean_line(tmp_path):
+    f = tmp_path / ".job_J9.node"
+    assert rl._job_node(tmp_path, "J9") is None, "파일이 없으면 null"
+    for text, want in (("h02\n", "h02"), ("  node-3.cluster_a  \n두번째 줄\n", "node-3.cluster_a"),
+                       ("h02; rm -rf /\n", None), ("x" * 65 + "\n", None), ("", None), ("\n", None)):
+        f.write_text(text, encoding="utf-8")
+        assert rl._job_node(tmp_path, "J9") == want, (text, want)
+
+
+@_needs_bin
+@_aio
+async def test_3a_the_job_records_where_it_actually_ran(db, sess, monkeypatch):
+    u, s = sess
+    (storage.session_abs_dir(u.id, s.id) / "model.k").write_text(_DECK, encoding="latin-1")
+    monkeypatch.setattr(settings, "job_launcher", f"{LAUNCH / 'nodewrite.sh'} h03")
+    job = await _run_job(db, u, s, "database", _DB_ARGS)
+    assert job.status == "succeeded", job.error_summary
+    host = job.env_snapshot["host"]
+    assert host["job_node"] == "h03", host
+    assert host["nodename"] == os.uname().nodename, "nodename 은 그대로 API 노드다(같은 칸이 잡마다 다른 뜻이 되지 않는다)"
+    assert not [n for n in await _outputs(db, job) if n.startswith(".job_")], "노드 기록 파일은 산출이 아니다"
+
+
+@_needs_bin
+@_aio
+async def test_3a_without_a_launcher_job_node_is_null(db, sess, monkeypatch):
+    u, s = sess
+    (storage.session_abs_dir(u.id, s.id) / "model.k").write_text(_DECK, encoding="latin-1")
+    monkeypatch.setattr(settings, "job_launcher", "")
+    job = await _run_job(db, u, s, "database", _DB_ARGS)
+    assert job.status == "succeeded", job.error_summary
+    assert job.env_snapshot["host"]["job_node"] is None
+
+
+@_needs_bin
+@_aio
+async def test_nfs_leftovers_are_not_registered_as_outputs(db, sess, monkeypatch):
+    u, s = sess
+    d = storage.session_abs_dir(u.id, s.id)
+    (d / "model.k").write_text(_DECK, encoding="latin-1")
+    monkeypatch.setattr(settings, "job_launcher", str(LAUNCH / "nfsjunk.sh"))
+    job = await _run_job(db, u, s, "database", _DB_ARGS)
+    assert job.status == "succeeded", job.error_summary
+    outs = await _outputs(db, job)
+    assert "model_db.k" in outs, outs
+    assert not [n for n in outs if n.rsplit("/", 1)[-1].startswith(".nfs")], outs
+    assert (d / ".nfs000000000badc0de00000001").exists(), "판정 때 그 파일이 있었다(시험이 헛돌지 않았다)"
 
 
 # ── V2 · V3 · 연산 꼴마다 같은 결과 ────────────────────────────────────────────
