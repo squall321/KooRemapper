@@ -129,6 +129,32 @@ sub/other.k
             break
     check("예제 덱 %d개에서 단정 보고 0건" % min(checked, 40), bad == 0, "%d건" % bad)
 
+    # `_MPP` 는 Card 1 앞에 MPP 1(첫 칸이 `&` 면 MPP 2 도)을 둔다(Vol_I 카드 순서). 예전 검사는 `_TITLE` · `_ID` 만 세어
+    # MPP 1(IGNORE BCKT LCBCKT NS2TRK …)을 Card 1 로 읽었다(10-23 재현) — IGNORE 2 · LCBCKT 0 을 「세그먼트 세트 2 가 없다」로
+    # 단정하고(`--strict` 면 rc 1), 진짜 Card 1 의 없는 세트는 못 봤고, MPP 2 까지 있으면 Card 1 을 Card 3 자리로 보아
+    # 「Card A 가 밀려 올라왔다」고 의심했다. 이제 카드 자리는 정본(`ct_parseContacts`)이 센다.
+    print("[E `_MPP` — MPP 1 · MPP 2 는 Card 1 이 아니다]")
+    C3 = "       0.2       0.2\n       1.0       1.0\n"
+    p = deck(d, "mpp_fp.k", "*CONTACT_AUTOMATIC_SINGLE_SURFACE_MPP\n         2       200         0         3\n"
+                            "         0         0         5         0\n" + C3)
+    rc, out = info(binary, p)
+    check("MPP 1 의 IGNORE 2 를 세트로 읽지 않는다", "세트 2 이" not in out and "정의되지 않았습니다" not in out, out[-300:])
+    p = deck(d, "mpp_fn.k", "*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_MPP\n         0       200\n"
+                            "      8888      7777         2         2\n" + C3)
+    rc, out = info(binary, p)
+    check("`_MPP` 접촉의 진짜 Card 1 이 가리키는 없는 세트를 잡는다", "8888" in out and "7777" in out, out[-300:])
+    p = deck(d, "mpp2.k", "*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_ID_MPP\n        10contact ten\n"
+                          "         2       200         0         3\n&        0\n      8888      7777         2         2\n" + C3)
+    rc, out = info(binary, p)
+    check("`_ID_MPP` + `&` MPP 2 — Card 1 의 8888 · 7777 을 잡는다", "8888" in out and "7777" in out, out[-300:])
+    check("`_ID_MPP` + `&` MPP 2 — MPP 1 의 IGNORE 2 를 세트로 읽지 않는다", "세트 2 이" not in out, out[-300:])
+    check("`_ID_MPP` + `&` MPP 2 — Card 1 을 Card 3 자리로 보지 않는다(거짓 손상 의심 없음)",
+          "밀려 올라온" not in out, out[-400:])
+    p = deck(d, "mpp_blank.k", "*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_MPP\n\n      8888      7777         2         2\n" + C3)
+    rc, out = info(binary, p)
+    check("빈 줄로 둔 MPP 1(전부 기본값)도 카드로 센다 — Card 1 의 8888 · 7777", "8888" in out and "7777" in out,
+          out[-300:])
+
     print("")
     if FAILS:
         print("FAIL %d" % len(FAILS))

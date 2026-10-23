@@ -205,6 +205,38 @@ def blank_field_contact(binary):
     check("콤마 자유 형식의 빈 칸도 같게 읽는다", "master part" in out2, out2[-600:])
 
 
+def mpp_contact(binary):
+    print("[B2 `_MPP` 접촉 — MPP 1 · `&` MPP 2 는 Card 1 이 아니다]")
+    # 매뉴얼 카드 순서는 ID → MPP 1(·2) → Card 1. 예전 스캐너는 끝의 `_TITLE` · `_ID` 만 세어(10-23 재현)
+    #   · `_MPP` · `_ID_MPP` 접촉의 Card 1 이 가리키는 죽은 PID 를 못 보고 rc 0 — 빈 파트에 걸린 접촉이 남았다
+    #   · MPP 1 의 BCKT 가 죽은 PID 와 같은 수면 MPP 1 줄을 Card 1 로 알고 고쳐 썼다(NS2TRK 3→2)
+    C1 = "         2         1         0         3\n       0.2       0.2\n       1.0       1.0\n"
+    MPP1 = "         0       200"
+    cases = (("mpp", "*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_MPP\n" + MPP1 + "\n" + C1, 1),
+             ("idmpp", "*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_ID_MPP\n        10contact ten\n" + MPP1 + "\n" + C1, 2))
+    for tag, cards, card1_at in cases:
+        d = box_dir(binary, tag)
+        with_cards(d, "c.k", cards)
+        open(os.path.join(d, "rs.yaml"), "w").write(RESTACK_YAML.format(model="c.k", out="c_out.k"))
+        rc, out = run(binary, d, "restack", "rs.yaml")
+        check("%s: 죽은 PID 1 을 master part 로 찾는다" % tag, "master part 1" in out, out[-500:])
+        lines = read(os.path.join(d, "c_out.k")).splitlines() if os.path.exists(os.path.join(d, "c_out.k")) else []
+        at = next((i for i, l in enumerate(lines) if l.startswith("*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_")), None)
+        body = lines[at + 1:at + 4] if at is not None else []
+        check("%s: MPP 1 줄은 그대로" % tag, len(body) > card1_at - 1 and body[card1_at - 1] == MPP1, str(body))
+        card1 = body[card1_at] if len(body) > card1_at else ""
+        check("%s: Card 1 의 MSTYP 가 3→2(층 PID 세트)로 바뀌었다" % tag, card1[30:40].strip() == "2", repr(card1))
+    d = box_dir(binary, "mppbait")
+    bait = "         0         1         0         3"   # MPP 1 — IGNORE 0 · BCKT 1 · LCBCKT 0 · NS2TRK 3
+    with_cards(d, "c.k", "*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_MPP\n" + bait + "\n"
+                         "         2       500         0         3\n       0.2       0.2\n       1.0       1.0\n")
+    open(os.path.join(d, "rs.yaml"), "w").write(RESTACK_YAML.format(model="c.k", out="c_out.k"))
+    rc, out = run(binary, d, "restack", "rs.yaml")
+    txt = read(os.path.join(d, "c_out.k")) if os.path.exists(os.path.join(d, "c_out.k")) else ""
+    check("MPP 1 의 BCKT 가 죽은 PID 와 같은 수여도 MPP 1 줄을 고치지 않는다", bait in txt and "(moved)" not in out,
+          out[-400:])
+
+
 def title_set_id(binary):
     print("[C *SET_..._TITLE 제목 줄과 maxSetId_]")
     # 제목 줄을 못 넘기면 SID 500 을 못 봐 새로 만드는 *SET_SEGMENT 가 1 번부터 난다.
@@ -458,6 +490,7 @@ def main():
         return 2
     three_axes(binary)
     blank_field_contact(binary)
+    mpp_contact(binary)
     title_set_id(binary)
     clean_deck(binary)
     fold_top20(binary)

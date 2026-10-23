@@ -7,6 +7,7 @@
 #include "cli/ConsoleOutput.h"
 #include "util/YamlComment.h"
 #include "assembly/ModelAssembler.h"  // 죽은 PID 참조 처리를 restack/merge 와 같은 코드로 한다
+#include "commands/contact_helpers.h"  // 접촉 Card 1 자리(ct_parseContacts)
 
 #include <algorithm>
 #include <cmath>
@@ -469,6 +470,11 @@ static void cg_scanDeadSids(const std::vector<std::string>& lines,
                             const std::set<int>& deadSids,
                             std::vector<CgSidFinding>& out) {
     if (deadSids.empty()) return;
+    // 접촉의 Card 1 줄 — 정본(`ct_parseContacts`)이 센다. ⚠ 예전엔 「키워드 뒤 첫 데이터 줄」 로 보아 `_MPP` 의 MPP 1 을
+    //   Card 1 로 알았다 — 지운 노드 세트를 가리키는 `_MPP` 접촉(STYP 4)이 [maybe] 로 낮아져 rc 0 으로 덱을 썼다(10-23 재현).
+    std::set<size_t> contactCard1;
+    for (const auto& c : ct_parseContacts(lines))
+        if (c.cardLine[0] >= 0) contactCard1.insert(static_cast<size_t>(c.cardLine[0]));
     std::string kw;
     bool firstData = true;
     for (size_t i = 0; i < lines.size(); ++i) {
@@ -503,7 +509,7 @@ static void cg_scanDeadSids(const std::vector<std::string>& lines,
             if (!isFirst) { for (int c = 0; c < 8; ++c) if (hit(c)) { add("manual"); break; } }
             continue;
         } else if (kw.rfind("*CONTACT", 0) == 0) {
-            if (isFirst) {
+            if (contactCard1.count(i)) {
                 int sstyp = cg_toInt(cg_field10(lines[i], 2));
                 int mstyp = cg_toInt(cg_field10(lines[i], 3));
                 if ((sstyp == 4 && hit(0)) || (mstyp == 4 && hit(1))) { add("manual"); continue; }

@@ -2262,6 +2262,9 @@ FORMING_NODES_TO_SURFACE
 
 > **필수 카드와 카드 순서(2026-10-23)**: 매뉴얼은 카드를 「정확히 이 순서」로 읽습니다 — ID → MPP 1(→ `&` 로 시작하는 MPP 2)
 > → Card 1·2·3 → 형이 요구하는 Card 4 → THRM 1 → ORFR → 선택 카드 A~G. KooRemapper 는 이 순서로 쓰고 읽습니다.
+> 같은 카드 자리를 `info` 의 참조 검사 · restack/merge 의 죽은 참조 스캐너 · cnrb2spring 의 지운 세트 검사 · modelmeta 도 씁니다
+> (예전엔 넷 다 `_MPP` 의 MPP 1 을 Card 1 로 읽었습니다 — `info` 는 「없는 세트」 거짓 오류, restack/merge 는 죽은 PID 를 가리키는
+> `_MPP` 접촉을 놓치거나 MPP 1 줄을 고쳐 썼고, cnrb2spring 은 막아야 할 덱을 rc 0 으로 썼고, modelmeta 는 그 접촉을 「SET_SEGMENT 200 이 덱에 없다」(MPP 1 의 BCKT)로 풀지 못했습니다).
 >
 > - **AUTOMATIC_…_TIEBREAK** — Card 4(OPTION NFLS SFLS PARAM ERATEN ERATES CT2CN)를 Card 3 바로 뒤에 씁니다. 매뉴얼이 OPTION ·
 >   NFLS · SFLS 를 required 로 두므로 `option` 이 없으면 rc=1 이고, 1(영구 고착 · 파손 없음)이 아닌 OPTION 은 `nfls` · `sfls` 도

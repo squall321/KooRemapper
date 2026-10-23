@@ -1461,6 +1461,18 @@ size_t rsFirstCard(const std::string& kw) {
     return (rsEnds(kw, "_TITLE") || rsEnds(kw, "_ID")) ? 1u : 0u;
 }
 
+// 접촉의 Card 1 줄 — 키워드 줄 번호 → Card 1 줄 번호. 카드 자리는 contact 정본(`ct_parseContacts`)이 센다: ID 카드(`_ID` —
+// 끝에도, 가운데 `_ID_MPP` 에도) · MPP 1 · `&` MPP 2(`_MPP`) · 빈 줄.
+// ⚠ 예전엔 `rsFirstCard`(끝의 `_TITLE` · `_ID` 만)로 세어 `_MPP` 의 MPP 1 을 Card 1 로 읽었다(10-23 재현) — restack 이 `_MPP`
+//   접촉의 죽은 PID 를 못 보고 rc 0 으로 빈 파트에 걸린 접촉을 남겼고, MPP 1 의 BCKT 가 죽은 PID 와 같은 수면 MPP 1 줄을
+//   Card 1 로 알고 고쳐 썼다(NS2TRK 3→2).
+std::map<size_t, size_t> rsContactCard1(const std::vector<std::string>& rawLines) {
+    std::map<size_t, size_t> out;
+    for (const auto& c : ct_parseContacts(rawLines))
+        if (c.cardLine[0] >= 0) out[static_cast<size_t>(c.startLine)] = static_cast<size_t>(c.cardLine[0]);
+    return out;
+}
+
 // 이 접촉을 tied(운동학적으로 묶는 것)로 볼 것인가.
 // 이름에 TIED 가 없어도 묶는 계열이 있다 — *CONTACT_CONSTRAINT_* 는 슬레이브 노드를
 // 상대 표면에 구속한다. 그런 카드를 전 층으로 펴면 내부 계면까지 묶여 층간 상대 전단이
@@ -2045,16 +2057,18 @@ void ModelAssembler::migrateDeadReferences(const std::set<int>& deadPids,
         int styp[2] = {0, 0};
     };
     std::vector<MContact> contacts;
+    const auto contactCard1 = rsContactCard1(rawLines_);
     for (const auto& b : blocks) {
         if (!rsStarts(b.kw, "*CONTACT")) continue;
-        size_t k = rsFirstCard(b.kw);
-        if (k >= b.data.size()) continue;
-        auto f = rsCardFields(rawLines_[b.data[k]]);
+        const auto at = contactCard1.find(b.kwLine);
+        if (at == contactCard1.end()) continue;
+        const size_t li = at->second;
+        auto f = rsCardFields(rawLines_[li]);
         MContact c;
-        c.cardLine = b.data[k];
+        c.cardLine = li;
         c.kw = b.kw;
         c.tied = rsContactIsTied(b.kw);
-        c.comma = rawLines_[b.data[k]].find(',') != std::string::npos;
+        c.comma = rawLines_[li].find(',') != std::string::npos;
         c.id[0] = rsIntField(f, 0);
         c.id[1] = rsIntField(f, 1);
         c.styp[0] = rsIntField(f, 2);
@@ -3145,14 +3159,16 @@ void ModelAssembler::scanDeadReferences(const std::string& opName,
         }
     }
 
-    // 2. *CONTACT_* 카드 1 — SSID/MSID (STYP=3 직접, STYP=2 파트 집합)
+    // 2. *CONTACT_* 카드 1 — SSID/MSID (STYP=3 직접, STYP=2 파트 집합). Card 1 자리는 contact 정본이 센다(`rsContactCard1`).
+    const auto contactCard1 = rsContactCard1(rawLines_);
     for (size_t bi = 0; bi < blocks.size(); ++bi) {
         const auto& b = blocks[bi];
         if (!rsStarts(b.kw, "*CONTACT")) continue;
         handled[bi] = true;
-        size_t k = rsFirstCard(b.kw);
-        if (k >= b.data.size()) continue;
-        auto f = rsCardFields(rawLines_[b.data[k]]);
+        const auto at = contactCard1.find(b.kwLine);
+        if (at == contactCard1.end()) continue;
+        const size_t li = at->second;
+        auto f = rsCardFields(rawLines_[li]);
         int ssid = rsIntField(f, 0), msid = rsIntField(f, 1);
         int sstyp = rsIntField(f, 2), mstyp = rsIntField(f, 3);
         bool tied = rsContactIsTied(b.kw);
@@ -3164,7 +3180,7 @@ void ModelAssembler::scanDeadReferences(const std::string& opName,
         else if (mstyp == 2 && msid > 0 && deadPartSets.count(msid))
             how = "master part set " + std::to_string(msid);
         if (how.empty()) continue;
-        add("PID", b.kw, b.data[k], "auto",
+        add("PID", b.kw, li, "auto",
             how + " — " + (tied
                 ? std::string("tied 계열입니다. 상대측 기하를 적층 축에 투영해 층이 유일할 때만 그 층으로 옮깁니다")
                 : std::string("모든 층이 solid 면 전 층으로 폅니다")));

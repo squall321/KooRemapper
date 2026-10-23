@@ -3,6 +3,8 @@
 
 #include "parser/CardFields.h"
 
+#include "commands/contact_helpers.h"
+
 #include "parser/IncludeScan.h"
 
 #include <algorithm>
@@ -27,8 +29,7 @@ namespace {
 // ②는 **표면 대 표면 서명이 확인될 때만** 센다. `*CONTACT_INTERIOR`·`*CONTACT_1D` 처럼
 // 카드 구성이 다른 변종을 3장으로 단정하면 오탐이 나고, 오탐이 나면 이 보고를 아무도 안 믿는다.
 void contactDamage(const std::vector<std::string>& lines, size_t i, const std::string& kw,
-                   ReferenceReport& rep) {
-    const bool hasId = (kw.size() >= 3 && kw.compare(kw.size() - 3, 3, "_ID") == 0) || has(kw, "_ID_");
+                   const ContactDef* c, ReferenceReport& rep) {
     // ⚠ **`*CONTACT_*` 에는 `_TITLE` 옵션이 없다.** 제목을 붙이는 옵션은 `_ID` 뿐이고, 그 카드는
     // CID 1~10칸 + HEADING 11~80칸이다. `_TITLE` 로 적힌 접촉은 LS-DYNA 가 제목줄을 **데이터
     // 카드로 읽고** 키워드 단계에서 멈춘다 — 실측(2026-10-02, R16.1.1 MPP):
@@ -39,18 +40,17 @@ void contactDamage(const std::vector<std::string>& lines, size_t i, const std::s
     if (has(kw, "_TITLE"))
         rep.damaged.push_back({(int)i + 1, kw,
             "`*CONTACT_*` 에는 _TITLE 옵션이 없습니다 — _ID 로 쓰고 CID(1~10칸)+제목(11~80칸) 카드를 두세요"});
-    int skip = (has(kw, "_TITLE") ? 1 : 0) + (hasId ? 1 : 0);
     // ⚠ **빈 줄도 카드다.** Card 2·3 은 필수지만 칸을 전부 기본값으로 두는 접촉이 있어
     // (`*CONTACT_FORCE_TRANSDUCER_PENALTY`) 빈 줄로 적힌다. 건너뛰면 그 덱이 "필수 카드가
     // 1장뿐" 으로 뜬다. 리포의 카드 색인도 같은 규율이다("빈 줄도 카드다").
+    // Card 1-3 자리는 정본(`ct_parseContacts`)이 센다 — ID 카드(`_ID`) · MPP 1 · `&` MPP 2(`_MPP`) · 빈 줄.
+    // ⚠ 예전엔 여기서 `_TITLE` · `_ID` 만 세어 `_MPP` 의 MPP 1 을 Card 1 로 읽었다(10-23 재현) — MPP 1 의 IGNORE 2 를
+    //   「세트 2 가 없다」로 보고하고(`--strict` 면 rc 1), 진짜 Card 1 의 없는 세트는 못 봤고, MPP 2 까지 있으면 Card 1 을
+    //   Card 3 자리로 보아 「Card A 가 밀려 올라왔다」고 의심했다.
     std::vector<size_t> data;
-    for (size_t j = i + 1; j < lines.size(); ++j) {
-        const std::string d = trim(lines[j]);
-        if (isComment(d)) continue;
-        if (isKeyword(d)) break;
-        if (skip > 0) { --skip; continue; }
-        data.push_back(j);
-    }
+    if (c)
+        for (int k = 0; k < 3; ++k)
+            if (c->cardLine[k] >= 0) data.push_back(static_cast<size_t>(c->cardLine[k]));
     if (data.empty()) { ++rep.notChecked; return; }
     if (hasParameterRef(lines[data[0]])) { ++rep.notChecked; return; }   // &name — 값이 기호다
 
@@ -216,6 +216,10 @@ ReferenceReport checkSetReferences(const std::vector<std::string>& lines) {
     }
 
     // ── 2단계: 세트를 가리키는 참조를 본다 ──────────────────────────────────
+    // 접촉의 카드 자리 — 키워드 줄 → 정본이 읽은 접촉
+    const std::vector<ContactDef> contacts = ct_parseContacts(lines);
+    std::map<size_t, const ContactDef*> contactAt;
+    for (const auto& c : contacts) contactAt[static_cast<size_t>(c.startLine)] = &c;
     auto note = [&](size_t li, const std::string& kw, int id) {
         if (id <= 0) return;                       // 0 은 "없음/전체" 의 관례다
         if (definedSets.count(id)) return;
@@ -237,7 +241,28 @@ ReferenceReport checkSetReferences(const std::vector<std::string>& lines) {
 
         if (!(histSet || spcSet || dampSet || loadSet || cnrb || contact)) continue;
 
-        if (contact) contactDamage(lines, i, kw, rep);
+        if (contact) {
+            const auto it = contactAt.find(i);
+            const ContactDef* c = it == contactAt.end() ? nullptr : it->second;
+            contactDamage(lines, i, kw, c, rep);
+            // Card 1 — SSID MSID SSTYP MSTYP … — **타입 칸이 세트라고 말할 때만** 본다.
+            // ⚠ 타입이 비어 있으면 기본값이 카드마다 달라 단정할 수 없다 — 그때는 검사하지 않는다.
+            //    (2=파트세트, 4=노드세트, 0=세그먼트세트가 세트를 가리킨다. 3=파트 ID 는 세트가 아니다)
+            const int card1 = c ? c->cardLine[0] : -1;
+            if (card1 < 0) continue;
+            const size_t j = static_cast<size_t>(card1);
+            if (hasParameterRef(lines[j])) { ++rep.notChecked; continue; }   // &name — 기호다
+            auto f = fields10(lines[j]);
+            int ssid = 0, msid = 0, sstyp = -1, mstyp = -1;
+            bool okS = f.size() >= 1 && toInt(f[0], ssid);
+            bool okM = f.size() >= 2 && toInt(f[1], msid);
+            bool okST = f.size() >= 3 && toInt(f[2], sstyp);
+            bool okMT = f.size() >= 4 && toInt(f[3], mstyp);
+            auto typeIsSet = [](int ty) { return ty == 0 || ty == 2 || ty == 4; };
+            if (okS && okST && typeIsSet(sstyp)) note(j, kw, ssid); else ++rep.notChecked;
+            if (okM && okMT && typeIsSet(mstyp)) note(j, kw, msid); else ++rep.notChecked;
+            continue;
+        }
 
         // 제목줄 건너뛰기. `_TITLE` 은 1줄, `_ID` 도 cid+제목 줄이 1줄 더 있다.
         int skip = (has(kw, "_TITLE") ? 1 : 0) + ((kw.size() >= 3 && kw.compare(kw.size() - 3, 3, "_ID") == 0) ||
@@ -257,18 +282,6 @@ ReferenceReport checkSetReferences(const std::vector<std::string>& lines) {
             } else if (cnrb) {
                 // PID CID NSID PNODE … — NSID 는 3번째 칸이다
                 if (f.size() >= 3 && toInt(f[2], v)) note(j, kw, v); else ++rep.notChecked;
-            } else if (contact) {
-                // SSID MSID SSTYP MSTYP … — **타입 칸이 세트라고 말할 때만** 본다.
-                // ⚠ 타입이 비어 있으면 기본값이 카드마다 달라 단정할 수 없다 — 그때는 검사하지 않는다.
-                //    (2=파트세트, 4=노드세트, 0=세그먼트세트가 세트를 가리킨다. 3=파트 ID 는 세트가 아니다)
-                int ssid = 0, msid = 0, sstyp = -1, mstyp = -1;
-                bool okS = f.size() >= 1 && toInt(f[0], ssid);
-                bool okM = f.size() >= 2 && toInt(f[1], msid);
-                bool okST = f.size() >= 3 && toInt(f[2], sstyp);
-                bool okMT = f.size() >= 4 && toInt(f[3], mstyp);
-                auto typeIsSet = [](int ty) { return ty == 0 || ty == 2 || ty == 4; };
-                if (okS && okST && typeIsSet(sstyp)) note(j, kw, ssid); else ++rep.notChecked;
-                if (okM && okMT && typeIsSet(mstyp)) note(j, kw, msid); else ++rep.notChecked;
             }
             break;                                  // 첫 데이터 카드만 본다
         }

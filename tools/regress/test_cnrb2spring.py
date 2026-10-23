@@ -465,6 +465,17 @@ def body2(binary, d):
           "$ KOOREMAPPER-PIDREF" in rfw and "$ KOOREMAPPER-SETREF" in rfw, rfw[:600])
     check("공용 스캐너 문구가 restack/merge 라는 사실을 $ 한 줄로 알린다",
           "$ cnrb2spring: 아래 KOOREMAPPER-PIDREF 보고는" in rfw, rfw[:600])
+    # `_MPP` 접촉은 Card 1 앞에 MPP 1 이 있다 — 예전엔 그 줄을 Card 1 로 보아 지운 노드 세트(STYP 4)를 가리키는 접촉이
+    # [maybe] 로 낮아지고 rc 0 으로 덱을 썼다(10-23 재현). Card 1 자리는 정본(`ct_parseContacts`)이 센다.
+    for name, card in (("plain", "*CONTACT_AUTOMATIC_NODES_TO_SURFACE\n"),
+                       ("mpp", "*CONTACT_AUTOMATIC_NODES_TO_SURFACE_MPP\n         0       200\n")):
+        ct = card + "      9001       700         4         3\n       0.2       0.2\n       1.0       1.0"
+        w(os.path.join(d, f"ctn_{name}.k"), shell_deck(extra_cards=ct))
+        w(os.path.join(d, f"ctn_{name}.yaml"), f"model: ctn_{name}.k\noutput: ctn_{name}_out.k\naxis: z\n")
+        rc, out = run(binary, d, "cnrb2spring", f"ctn_{name}.yaml")
+        check(f"지운 노드 세트를 가리키는 접촉 Card 1(STYP 4)은 [manual] · rc=1 ({name})",
+              rc == 1 and "지운 *SET_NODE_LIST 를 가리키는 자리 [manual]" in out and "*CONTACT_AUTOMATIC_NODES_TO_SURFACE" in out,
+              f"rc={rc} {out[-300:]}")
     return d
 
 
