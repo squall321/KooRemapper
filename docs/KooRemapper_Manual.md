@@ -2902,7 +2902,9 @@ $$\sigma_{xy} = (\sigma_{\theta\theta} - \sigma_{rr})\sin\theta\cos\theta$$
 > (예전에는 `*SET_PART_ADD` 로 정의한 접촉이 말없이 빠졌습니다).
 >
 > **`*CONTACT_…_ID` 접촉(2026-10-23 수정)**: 예전에는 (CID + 제목) 줄을 카드로 세지 않아 Card 3 을 Card A 로 알고
-> `SOFT=0` 을 **SFSA 칸**(슬레이브 강성 배율)에 썼습니다 — 접촉 강성이 0 이 되는데 보고는 「SOFT=1->0」 이었습니다.
+> `SOFT=0` 을 **SFSA 칸**에, `SBOPT=2` 를 **SFSAT 칸**(SURFA 접촉 두께 배율)에 썼습니다. SFSA 0 은 LS-DYNA 일반 규칙상 기본 1.0
+> 이라 준 배율이 지워지고, SFSAT 2 는 셸 접촉 두께를 두 배로 합니다. 고치려던 Card A 는 그대로인데 보고는 「SOFT=1->0 ·
+> SBOPT=1->2」 였습니다.
 > 이제 `_TITLE` 과 같이 그 줄을 건너뛰고 Card A 를 고칩니다(`tools/regress/test_set_add_resolution.py` E 항).
 
 ### 사용법

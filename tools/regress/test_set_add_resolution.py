@@ -229,7 +229,8 @@ def main():
           "세트를 풀지 못해 대상 파트가 드는지 모른다" in out, out[-500:])
 
     print("[E optimize — `_ID` 접촉의 카드 세기]")
-    # ★`_ID` 의 (CID+제목) 줄을 세지 않으면 Card 3 을 Card A 로 알고 SOFT 를 SFSA 칸(슬레이브 강성 배율)에 쓴다.
+    # ★`_ID` 의 (CID+제목) 줄을 세지 않으면 Card 3 을 Card A 로 알고 SOFT 를 SFSA 칸에, SBOPT 를 SFSAT 칸(접촉 두께
+    #   배율)에 쓴다. 옛 바이너리(cd07c327)는 Card 3 을 `0 … 2` 로 바꾸고 Card A 는 그대로 둔 채 「SOFT=1->0」 이라 보고했다.
     write("e0.k", contact("Id_side", 1, 3, 3, 3, card_a=True, cid=7))
     open(os.path.join(d, "e0.yaml"), "w").write(
         "model: e0.k\noutput: e0_out.k\noptimize: rubber\npids: [1]\nanalysis_type: explicit\n")
@@ -244,9 +245,10 @@ def main():
         if on and ln.strip() and not ln.startswith("$"):
             blk.append(ln)
     card3, card_a = (blk[3] if len(blk) > 3 else ""), (blk[4] if len(blk) > 4 else "")
-    check("E-1 Card 3 은 그대로(SFSA 1.0 — 0 이 들어가면 슬레이브 강성이 0 이다)",
-          card3[:10].strip() == "1.0", repr(card3))
+    check("E-1 Card 3 은 한 글자도 안 바뀐다(옛 바이너리는 SFSA 0 · SFSAT 2)",
+          card3 == "       1.0       1.0       0.0       0.0       1.0       1.0       1.0       1.0", repr(card3))
     check("E-2 SOFT 는 Card A 첫 칸에 0 으로", card_a[:10].strip() == "0", repr(card_a))
+    check("E-3 SBOPT 는 Card A 다섯째 칸에 2 로", card_a[40:50].strip() == "2", repr(card_a))
 
     shutil.rmtree(d, ignore_errors=True)
     print()

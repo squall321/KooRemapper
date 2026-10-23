@@ -80,7 +80,7 @@ ADD 세트 덱의 미해석 목록.
 
 | # | 무엇 | 어떻게 나왔나 | 커밋 |
 |---|---|---|---|
-| 1 | ★optimize 가 `*CONTACT_…_ID` 접촉의 **Card 3 SFSA 칸(슬레이브 강성 배율)에 SOFT=0** 을 썼다 — 보고는 「SOFT=1->0」 | 시험 덱을 `_TITLE`(접촉에는 없다 — `info --strict` 가 잡았다)에서 `_ID` 로 바꾸다 | `fe82dd3` |
+| 1 | ★optimize 가 `*CONTACT_…_ID` 접촉의 **Card 3 에 SOFT · SBOPT 를** 썼다 — SFSA 칸 0(Vol_I 일반 규칙상 기본 1.0 이라 준 배율이 지워진다) · SFSAT 칸 2(셸 접촉 두께 두 배) · 고치려던 Card A 는 그대로인데 보고는 「SOFT=1->0 · SBOPT=1->2」. ⚠ 처음엔 「접촉 강성 0」 이라 적었다(`fe82dd3` 메시지) — 틀렸다 | 시험 덱을 `_TITLE`(접촉에는 없다 — `info --strict` 가 잡았다)에서 `_ID` 로 바꾸다 | `fe82dd3` |
 | 2 | modelmeta 연결도 제목에 CID(1–10열)가 붙었다 | 같은 때 | `fe82dd3` |
 | 3 | impact 압축본의 엣지 이름이 sphere 와 또 다르다 — sphere 꼴만 맞췄다면 impact 하중경로는 여전히 null | impact 실리포트로 돌려서 | `f1520ba` |
 | 4 | MCP 문서의 도구 수가 72 로 낡았다 | 카탈로그 대조 관문 | `d70ccc7` |

@@ -26,7 +26,8 @@
 - [x] 프런트 빌드 · Playwright 로 네 화면(새 판 sphere · impact · 61파트 덱 · ADD 세트 덱)
 
 ## 하다 나온 것(같은 접촉 경로)
-- [x] optimize — `_ID` 접촉의 Card 3 SFSA 칸에 SOFT=0 을 쓰던 것(접촉 강성 0) · modelmeta `_ID` 제목/cid → `fe82dd3`
+- [x] optimize — `_ID` 접촉의 Card 3 에 SOFT · SBOPT 를 쓰던 것(SFSA 0 = 기본 1.0 · SFSAT 2 = 셸 접촉 두께 두 배 · Card A 는 그대로) · modelmeta `_ID` 제목/cid → `fe82dd3`
+- [x] 위 결함을 「접촉 강성 0」 으로 잘못 적었던 것을 바로잡았다(Vol_I 일반 규칙 · 옛 바이너리로 다시 돌려 봄) — 주석 · 회귀 E-1~3 · 매뉴얼 · 보고서
 - [x] MCP 문서의 도구 수 72 → 73(카탈로그 대조 관문이 잡았다) → `d70ccc7`
 - [x] `reports_smoke` 가 새 도구를 한 번도 안 불렀다(24/24 초록) — 값으로 재는 11항을 더했다(35/35) → `ab19ef9`
 

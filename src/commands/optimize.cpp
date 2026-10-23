@@ -241,8 +241,9 @@ std::vector<std::string> opt_applyRubber(std::vector<std::string>& lines,
             }
 
             // ⚠ `_ID` 도 카드 앞에 (CID + 제목) 한 줄을 둔다 — contact 쪽(`ct_modify*`)과 같은 규칙이다. 예전엔 `_TITLE`
-            //   만 봐서 `_ID` 접촉의 Card 3 을 Card A 로 알고 SOFT=0 을 **SFSA 칸**에 썼다(슬레이브 강성 배율 0 —
-            //   재현 2026-10-23). 보고는 「SOFT=1->0」 이라 거짓이 화면에 그대로 나갔다.
+            //   만 봐서 `_ID` 접촉의 Card 3 을 Card A 로 알고 SOFT=0 을 **SFSA 칸**에, SBOPT=2 를 **SFSAT 칸**(SURFA 접촉
+            //   두께 배율)에 썼다(재현 2026-10-23). SFSA 0 은 Vol_I 일반 규칙상 기본 1.0 이라 준 배율이 지워지고, SFSAT 2 는
+            //   셸 접촉 두께를 두 배로 한다. 고치려던 Card A 는 그대로인데 보고는 「SOFT=1->0 · SBOPT=1->2」 였다.
             bool titleSkipped = !(ct.hasTitle || ct.hasId);
             int cardNum = 0;
             for (int i = ct.startLine + 1; i < ct.endLine; ++i) {
