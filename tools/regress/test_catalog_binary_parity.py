@@ -553,11 +553,14 @@ def main():
              "thermal": "TIED_SURFACE_TO_SURFACE_THERMAL",
              "tiebreak": "AUTOMATIC_SURFACE_TO_SURFACE_TIEBREAK",
              "mortar": "AUTOMATIC_SURFACE_TO_SURFACE_MORTAR",
-             "tied_mortar": "TIED_SURFACE_TO_SURFACE_MORTAR",
+             # 예전 기대값 `TIED_SURFACE_TO_SURFACE_MORTAR` 는 매뉴얼에 없는 키워드였다(10-23 고침)
+             "tied_mortar": "AUTOMATIC_SURFACE_TO_SURFACE_MORTAR_TIED",
              "single": "AUTOMATIC_SINGLE_SURFACE", "eroding": "ERODING_SURFACE_TO_SURFACE",
              "forming": "FORMING_SURFACE_TO_SURFACE"}
+    # tiebreak 은 매뉴얼 Card 4 의 OPTION · NFLS · SFLS(required)를 받아야 만든다(10-23 — 예전엔 몰래 OPTION 1).
+    TB = "    option: 2\n    nfls: 10\n    sfls: 20\n"
     for short, full in SHORT.items():
-        rc, out, kw = ct_run("ct_" + short, f"    type: {short}\n")
+        rc, out, kw = ct_run("ct_" + short, f"    type: {short}\n" + (TB if short == "tiebreak" else ""))
         check(f"contact type: {short} → *CONTACT_{full}",
               rc == 0 and kw == f"*CONTACT_{full}_ID", f"rc={rc} kw={kw}")
     rc, out, kw = ct_run("ct_omit", "")
@@ -588,7 +591,8 @@ def main():
     def dt_run(name, ctype):
         open(os.path.join(ct, name + ".yaml"), "w").write(
             "model: model.k\noutput: %s.k\ncontacts:\n  - action: detect\n    scope: all\n"
-            "    tolerance: 0.5\n    auto_create: true\n    contact_type: %s\n" % (name, ctype))
+            "    tolerance: 0.5\n    auto_create: true\n    contact_type: %s\n" % (name, ctype) +
+            (TB if ctype == "tiebreak" else ""))
         return run(binary, ct, "contact", name + ".yaml")
     dtv = cat_key(ops, "contact", "contacts[].contact_type")
     for short in ["auto", "automatic", "tied", "tied_thermal", "thermal", "tiebreak",

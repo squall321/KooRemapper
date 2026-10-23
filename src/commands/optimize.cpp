@@ -240,42 +240,40 @@ std::vector<std::string> opt_applyRubber(std::vector<std::string>& lines,
                 continue;
             }
 
-            // ⚠ `_ID` 도 카드 앞에 (CID + 제목) 한 줄을 둔다 — contact 쪽(`ct_modify*`)과 같은 규칙이다. 예전엔 `_TITLE`
-            //   만 봐서 `_ID` 접촉의 Card 3 을 Card A 로 알고 SOFT=0 을 **SFSA 칸**에, SBOPT=2 를 **SFSAT 칸**(SURFA 접촉
-            //   두께 배율)에 썼다(재현 2026-10-23). SFSA 0 은 Vol_I 일반 규칙상 기본 1.0 이라 준 배율이 지워지고, SFSAT 2 는
-            //   셸 접촉 두께를 두 배로 한다. 고치려던 Card A 는 그대로인데 보고는 「SOFT=1->0 · SBOPT=1->2」 였다.
-            bool titleSkipped = !(ct.hasTitle || ct.hasId);
-            int cardNum = 0;
-            for (int i = ct.startLine + 1; i < ct.endLine; ++i) {
-                std::string dtr = kw_trim(lines[i]);
-                if (dtr.empty() || dtr[0] == '$') continue;
-                if (!titleSkipped) { titleSkipped = true; continue; }
-                if (cardNum == 3) {
-                    bool modified = false;
-                    char buf[16];
+            // Card A 는 **파서가 찾은 자리**로 고친다 — 직접 세지 않는다(`ContactDef::optLines`).
+            // ⚠ 예전엔 여기서 줄을 셌다. `_TITLE` 만 보다가 `_ID` 접촉의 Card 3 을 Card A 로 알고 SOFT=0 을 SFSA 칸에,
+            //   SBOPT=2 를 SFSAT 칸에 썼고(10-23 `fe82dd3`), 그 뒤에도 `_MPP` 의 MPP 1 · TIEBREAK Card 4 · THRM 1 · 빈 줄을
+            //   몰라 다른 카드를 Card A 로 고칠 수 있었다. 보고는 늘 「SOFT=1->0 · SBOPT=1->2」 였다.
+            if (!ct.layoutKnown) {
+                msgs.push_back("[optimize] *CONTACT[" + std::to_string(ct.index) + "]: 선택 카드 자리를 확정할 수 없다(" +
+                               ct.layoutWhy + ") — 건드리지 않았다");
+                continue;
+            }
+            // Card A 가 없으면 SOFT 0 · SBOPT 2(기본)라 바꿀 것이 없다.
+            if (ct.hasCardA && !ct.optLines.empty()) {
+                const int i = ct.optLines[0];
+                bool modified = false;
+                char buf[16];
 
-                    auto softToks = kw_tok10(lines[i]);
-                    int curSoft = 0;
-                    if (!softToks.empty()) try { curSoft = std::stoi(softToks[0]); } catch(...) {}
-                    if (curSoft != 0) {
-                        lines[i] = kw_setField(lines[i], 0, 10, "0");
-                        modified = true;
-                        snprintf(buf, sizeof(buf), "SOFT=%d->0", curSoft);
-                        msgs.push_back("[optimize] CONTACT #" + std::to_string(ct.index) + ": " + buf);
-                    }
-
-                    int curSbopt = 2;
-                    if (softToks.size() >= 5) try { curSbopt = std::stoi(softToks[4]); } catch(...) {}
-                    if (curSbopt == 1) {
-                        lines[i] = kw_setField(lines[i], 40, 10, "2");
-                        modified = true;
-                        msgs.push_back("[optimize] CONTACT #" + std::to_string(ct.index) + ": SBOPT=1->2");
-                    }
-
-                    if (modified) modCount++;
-                    break;
+                auto softToks = kw_tok10(lines[i]);
+                int curSoft = 0;
+                if (!softToks.empty()) try { curSoft = std::stoi(softToks[0]); } catch(...) {}
+                if (curSoft != 0) {
+                    lines[i] = kw_setField(lines[i], 0, 10, "0");
+                    modified = true;
+                    snprintf(buf, sizeof(buf), "SOFT=%d->0", curSoft);
+                    msgs.push_back("[optimize] CONTACT #" + std::to_string(ct.index) + ": " + buf);
                 }
-                cardNum++;
+
+                int curSbopt = 2;
+                if (softToks.size() >= 5) try { curSbopt = std::stoi(softToks[4]); } catch(...) {}
+                if (curSbopt == 1) {
+                    lines[i] = kw_setField(lines[i], 40, 10, "2");
+                    modified = true;
+                    msgs.push_back("[optimize] CONTACT #" + std::to_string(ct.index) + ": SBOPT=1->2");
+                }
+
+                if (modified) modCount++;
             }
 
             if (!ct.hasCardA && ct.soft != 0) {

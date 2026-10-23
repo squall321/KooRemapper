@@ -11,6 +11,9 @@
 #include <cctype>
 #include <sstream>
 #include <cstdio>
+#include <cmath>
+#include <cstdlib>
+#include <cstring>
 
 // Knowledge graph (lat.md):
 //   @lat: [[modules/commands]]
@@ -34,21 +37,84 @@ inline std::string kw_upper(const std::string& s) {
 }
 
 // Split a line into 10-character fixed-width tokens (trimmed)
+// ⚠ LS-DYNA 규칙 — 줄에 쉼표가 있으면 **자유 형식**이다(칸 폭이 아니라 쉼표로 가른다). 예전엔 10칸으로만 잘라
+//   접촉 Card 1 `1,3,3,3`(PID 1 대 PID 3)을 「SET_SEGMENT 1 · SSTYP 0」 으로, Card 2 `0.3,0.2` 의 FD 를 0 으로 읽었다(10-23 실측).
 inline std::vector<std::string> kw_tok10(const std::string& s) {
     std::vector<std::string> toks;
+    if (s.find(',') != std::string::npos) {
+        std::string cur;
+        for (char c : s) {
+            if (c == ',') { toks.push_back(kw_trim(cur)); cur.clear(); }
+            else cur += c;
+        }
+        toks.push_back(kw_trim(cur));
+        return toks;
+    }
     for (int i = 0; i < (int)s.size(); i += 10)
         toks.push_back(kw_trim(s.substr(i, std::min(10, (int)s.size()-i))));
     return toks;
 }
 
 // ---------------------------------------------------------------------------
+// Real-number fields — 값을 바꾸지 않는 표기
+// ---------------------------------------------------------------------------
+
+// w 칸에 들어가는 실수 표기. 값을 그대로 돌려주는 가장 짧은 표기를 먼저 고르고, 그것이 칸을 넘으면 칸 안에서 가장
+// 정밀한 것을 고른다(오른쪽 맞춤). 예전 카드 쓰기는 `%10.2f` · `%10.3g` 라 마찰 0.125 → 0.13 · 시각 0.0005 → 0.00 ·
+// 파손 응력 123.456 → 123 으로 **조용히 바꿨다**.
+inline std::string kw_real(double v, int w = 10) {
+    char buf[64];
+    if (!std::isfinite(v)) { snprintf(buf, sizeof(buf), "%*g", w, v); return buf; }
+    std::string s;
+    for (int p = 1; p <= 17; ++p) {
+        snprintf(buf, sizeof(buf), "%.*g", p, v);
+        if (std::strtod(buf, nullptr) == v) { s = buf; break; }
+    }
+    if ((int)s.size() > w) {
+        for (int p = 16; p >= 1; --p) {
+            snprintf(buf, sizeof(buf), "%.*g", p, v);
+            if ((int)std::strlen(buf) <= w) { s = buf; break; }
+        }
+    }
+    // 실수 칸이라는 표시 — 점이나 지수가 없으면 점을 붙인다("1" → "1.").
+    if (s.find_first_of(".eE") == std::string::npos && (int)s.size() < w) s += ".";
+    return std::string(w - std::min<int>(w, (int)s.size()), ' ') + s;
+}
+
+// 예전 형식으로 쓴 글자를 다시 읽어 **같은 값이면 그 글자**를 쓴다 — 0.2 · 1.0 같은 흔한 값은 바이트가 그대로다(골든).
+// 값이 바뀌는 경우에만 `kw_real`.
+inline std::string kw_realKeep(double v, const char* legacyFmt, int w = 10) {
+    char buf[64];
+    snprintf(buf, sizeof(buf), legacyFmt, v);
+    if ((int)std::strlen(buf) == w && std::strtod(buf, nullptr) == v) return buf;
+    return kw_real(v, w);
+}
+
+// ---------------------------------------------------------------------------
 // Fixed-width field manipulation
 // ---------------------------------------------------------------------------
 
+// 자유 형식(쉼표) 줄을 10칸 고정폭 줄로 바꾼다 — 칸을 고치기 전에. 10칸을 넘는 수는 값을 지키는 가장 정밀한 표기로.
+inline std::string kw_fixedFromFree(const std::string& line, int width = 10) {
+    std::string out;
+    for (const std::string& t : kw_tok10(line)) {
+        std::string v = t;
+        if ((int)v.size() > width) {
+            char* end = nullptr;
+            const double d = std::strtod(v.c_str(), &end);
+            if (end && *end == '\0') v = kw_trim(kw_real(d, width));
+        }
+        if ((int)v.size() > width) v = v.substr(0, width);
+        out += std::string(width - (int)v.size(), ' ') + v;
+    }
+    return out;
+}
+
 // Set a fixed-width field at [pos, pos+width) in a line (right-aligned)
+// ⚠ 자유 형식(쉼표) 줄이면 먼저 고정폭으로 바꾼다 — 칸 위치에 그대로 쓰면 쉼표 줄이 깨진다.
 inline std::string kw_setField(const std::string& line, int pos, int width,
                                 const std::string& val) {
-    std::string r = line;
+    std::string r = line.find(',') != std::string::npos ? kw_fixedFromFree(line, width) : line;
     while ((int)r.size() < pos + width) r += ' ';
     std::string v = val;
     if ((int)v.size() > width) v = v.substr(v.size() - width);

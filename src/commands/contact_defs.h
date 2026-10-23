@@ -25,6 +25,27 @@ struct ContactDef {
     // 제목에 붙었다(`1ADD_to_3`). `_ID` 가 아니면 idCid=0 · idTitle 은 비어 있다.
     int idCid = 0;
     std::string idTitle;
+    // `_MPP`(OPTION5) — MPP 1 카드(와 첫 칸이 `&` 인 MPP 2)가 Card 1 **앞에** 온다. 예전엔 몰라서 MPP 1 을 Card 1 로 읽었다.
+    bool hasMpp = false;
+
+    // ── 카드 자리(파서가 채운다 · 덱 줄 번호, 없으면 -1) ─────────────────────────────
+    // 매뉴얼 Vol_I *CONTACT 「Cards must appear in the exact order listed below」:
+    //   ID → MPP 1 → (MPP 2) → Card 1 · 2 · 3 → Card 4(형마다) → THRM → ORFR → 선택 카드 A, B, …
+    // **빈 줄도 카드다**(「Optional Cards A … may be blank lines」). 편집하는 쪽(modify · optimize · stabilize)은
+    // 줄을 **직접 세지 않고** 이 자리를 쓴다 — 저마다 세던 시절에 Card 4 를 Card A 로 덮어쓰고, 빈 Card B 뒤의
+    // Card C 를 Card B 로 다시 썼다.
+    int idLine = -1;
+    std::vector<int> mppLines;
+    int cardLine[3] = {-1, -1, -1};       // Card 1 · 2 · 3
+    std::vector<int> card4Lines;           // Card 4 (+ 4.1a · 4.1b · 4.2b …)
+    std::vector<int> thrmLines;            // THRM 1 …
+    std::vector<int> orfrLines;            // ORFR 1-4
+    std::vector<int> optLines;             // 선택 카드 A, B, … 차례대로
+    // 선택 카드가 어디서 시작하는지 **확정했는가**. Card 4 · THRM 수를 모르는 형(TIEBREAK_USER · THERMAL_FRICTION …)이면
+    // false 이고 까닭이 `layoutWhy` 에 있다 — 그때 선택 카드를 고치면 필수 카드를 덮어쓰므로 편집은 거절한다.
+    bool layoutKnown = true;
+    std::string layoutWhy;
+
     // Card 1
     int ssid=0, msid=0, sstyp=0, mstyp=0, sboxid=0, mboxid=0, spr=0, mpr=0;
     // Card 2
@@ -32,9 +53,11 @@ struct ContactDef {
     // Card 3
     double sfsa=1, sfsb=1, sast=0, sbst=0, sfsat=1, sfsbt=1, fsf=1, vsf=1;
     // Optional Card A
+    // ⚠ 안 준 칸은 **0**(= LS-DYNA 가 형마다 정하는 기본)이다. 예전엔 MAXPAR 1.025 · DEPTH 2 · SBOPT 2 · FRCFRQ 1 ·
+    //   SOFSCL 0.1 을 늘 적어 형마다 다른 기본(예 AUTOMATIC_GENERAL 의 DEPTH 3)을 덮었다. 0 은 매뉴얼 일반 규칙상 기본이다.
     bool hasCardA=false;
-    int soft=0; double sofscl=0.1; int lcidab=0; double maxpar=1.025;
-    int sbopt=2; int depth=2; int bsort=0; int frcfrq=1;
+    int soft=0; double sofscl=0; int lcidab=0; double maxpar=0;
+    int sbopt=0; int depth=0; int bsort=0; int frcfrq=0;
     // Optional Card B
     bool hasCardB=false;
     double penmax=0; int thkopt=0; int shlthk=0; int snlog=0;
@@ -58,15 +81,21 @@ struct ContactDef {
     // Optional Card G
     bool hasCardG=false;
     double shloff=0;
-    // THERMAL 카드 (*CONTACT_..._THERMAL): K FRAD H0 LMIN LMAX CHLM BC_FLAG ALGO
+    // THRM 1 (*CONTACT_..._THERMAL): K FRAD H0 LMIN LMAX FTOSA BC_FLG ALGO
+    // ⚠ 6번째 칸은 3D 접촉에서 **FTOSA**(마찰열을 SURFA 쪽에 나누는 비율, 0 = 0.5)다 — CHLM 은 `*CONTACT_2D` 에만 있다.
+    //   예전엔 CHLM 으로 알고 1.0 을 넣어 마찰열을 전부 SURFA 쪽으로 보냈다. 기본은 0.
     bool hasThermal=false;
-    double thK=0, thFrad=0, thH0=0, thLmin=0, thLmax=0, thChlm=1.0;
+    double thK=0, thFrad=0, thH0=0, thLmin=0, thLmax=0, thFtosa=0;
     int thBcflag=0, thAlgo=0;
-    // TIEBREAK 카드 (*CONTACT_..._TIEBREAK): OPTION NFLS SFLS PARAM ERATEN ERATES CT2CN
+    // Card 4 (*CONTACT_AUTOMATIC_..._TIEBREAK): OPTION NFLS SFLS PARAM ERATEN ERATES CT2CN
+    // ⚠ 매뉴얼은 OPTION · NFLS · SFLS 를 **required** 로 둔다(기본값 없음). 예전엔 생략하면 1(영구 고착 · 파손 없음)을 몰래 넣었다.
+    //   만드는 쪽은 option 을 받아야만 이 카드를 쓴다(contact.cpp).
     bool hasTiebreak=false;
-    int tbOption=1;
+    int tbOption=0;
     double tbNfls=0, tbSfls=0, tbParam=0, tbEraten=0, tbErates=0, tbCt2cn=1.0;
-    // Raw optional cards (backward compat)
+    // Card 4 (*CONTACT_ERODING_*): ISYM EROSOP IADJ — 매뉴얼 기본 0 · 1 · 0(SMP). 예전엔 이 필수 카드를 아예 안 썼다.
+    bool hasEroding=false;
+    // Raw optional cards (backward compat) — 선택 카드(A…)의 원문만 든다(Card 4 · THRM · ORFR 는 들지 않는다).
     std::vector<std::string> optionalCards;
     int startLine=0, endLine=0;  // [start, end) in rawLines
 };

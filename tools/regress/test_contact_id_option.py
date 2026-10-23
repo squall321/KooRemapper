@@ -38,8 +38,12 @@ VARIANTS = [
 
 CARD = ("*CONTACT_{kw}\n"
         "      1000contact one\n"
+        "{mpp}"
         "         1         2         3         3\n"
         "       0.2       0.2\n")
+# ⚠ `_MPP` 이면 MPP 1 카드가 Card 1 **앞에** 와야 한다(Vol_I 카드 순서). 예전 덱은 그 줄 없이 만들어 LS-DYNA 라면 Card 1 을
+#   MPP 1 로 읽을 덱이었고, 파서가 `_MPP` 를 몰라서 통과했다(10-23 고침). MPP 1: IGNORE BCKT LCBCKT NS2TRK …
+MPP1 = "         0       200\n"
 
 
 def check(name, cond, detail=""):
@@ -57,7 +61,8 @@ def build_deck(d, kw):
     src = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                         "..", "..", "examples", "indent", "small", "block.k"))
     txt = open(src, encoding="utf-8", errors="replace").read()
-    open(os.path.join(d, "m.k"), "w").write(txt.replace("*END", CARD.format(kw=kw) + "*END", 1))
+    mpp = MPP1 if "_MPP" in kw else ""
+    open(os.path.join(d, "m.k"), "w").write(txt.replace("*END", CARD.format(kw=kw, mpp=mpp) + "*END", 1))
 
 
 def cards_after(path, kw):
@@ -66,7 +71,11 @@ def cards_after(path, kw):
     key = "*CONTACT_" + kw
     for i, ln in enumerate(lines):
         if ln.strip().upper() == key:
-            body = [s for s in lines[i + 1:i + 6] if s and s[0] not in "$*"]
+            body = [s for s in lines[i + 1:i + 7] if s and s[0] not in "$*"]
+            if "_MPP" in kw and len(body) >= 2:
+                # ID 줄 다음의 MPP 1 은 그대로여야 한다 — 빼고 (ID줄, Card1, Card2) 를 돌려준다
+                check("%s: MPP 1 줄 보존" % kw, body[1] == MPP1.rstrip("\n"), repr(body[1]))
+                body = [body[0]] + body[2:]
             return body[:3]
     return []
 

@@ -9,7 +9,7 @@ contacts:
     title: Adhesive bond
     slave: {pids: [1]}
     master: {pids: [2]}
-    option: 1                   # 1 = quadratic NFLS/SFLS 파손식
+    option: 2                   # 2 = 처음 닿아 있던 절점이 (|σn|/NFLS)² + (|σs|/SFLS)² ≥ 1 이면 떨어진다(매뉴얼 Remark 3a). 1 은 영구 고착(파손 없음)
     nfls: 10.0                  # 법선 파단 응력 (MPa)
     sfls: 50.0                  # 전단 파단 응력 (MPa)
     ct2cn: 1.0

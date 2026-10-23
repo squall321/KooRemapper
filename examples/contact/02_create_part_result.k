@@ -74,5 +74,5 @@ $#      fs        fd        dc        vc       vdc    penchk        bt        dt
 $#    sfsa      sfsb      sast      sbst     sfsat     sfsbt       fsf       vsf
       1.00      1.00      0.00      0.00      1.00      1.00      1.00      1.00
 $#    soft    sofscl    lcidab    maxpar     sbopt     depth     bsort    frcfrq
-         2      0.10         0    1.0250         2         2         0         1
+         2      0.00         0    0.0000         0         0         0         0
 *END

@@ -16,6 +16,11 @@
 #include <map>
 #include <set>
 #include <algorithm>
+#include <cerrno>
+#include <climits>
+#include <cmath>
+#include <cstdlib>
+#include <optional>
 
 // Knowledge graph (lat.md):
 //   @lat: [[modules/commands]]
@@ -47,8 +52,13 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
 
     std::string modelFile, outputFile;
 
+    // 카드 칸 값은 **있으면** 쓴다(std::optional). ⚠ 예전엔 -1 을 「안 줌」 으로 써서(`>= 0` 문) 매뉴얼이 뜻을 둔 음수 —
+    //   FS −1/−2 · BT/DT 음수(동적 이완) · DT −9999 · SFSA<0(Mortar 곡선) · SAST/SBST<0(TIED) · 상자 음수(접촉 부피) ·
+    //   DEPTH/BSORT 곡선 · IGAP<0 · DPRFAC/DTSTIF 곡선 · NFLS<0(곡선) … — 을 조용히 버렸다.
+    using OD = std::optional<double>;
+    using OI = std::optional<int>;
     struct ContactAction {
-        std::string action;  // analyze/create/convert/modify/remove
+        std::string action;  // analyze/create/convert/modify/remove/detect
         // create fields
         std::string type;
         struct Side {
@@ -58,43 +68,36 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
             bool facing = false;   // filter segments to only those facing the other side
         };
         Side slave, master;
-        double friction = -1.0;  // -1 = not set (sentinel)
+        OD friction;
         std::string title;
         // convert/modify/remove fields
         int contactIndex = -1;
         std::string slaveTo, masterTo;  // "segment"
         bool convertFacing = false;     // facing filter for convert action
         // Card 1 extended
-        int sboxid = -1, mboxid = -1, spr = -1, mpr = -1;
-        // Card 2 extended (-1 = not set sentinel for doubles, -1 for ints)
-        double fd = -1, dc = -1, vc = -1, vdc = -1; int penchk = -1; double bt = -1, dt = -1;
+        OI sboxid, mboxid, spr, mpr;
+        // Card 2
+        OD fd, dc, vc, vdc; OI penchk; OD bt, dt;
         // Card 3
-        double sfsa=-1, sfsb=-1, sast=-1, sbst=-1, sfsat=-1, sfsbt=-1, fsf=-1, vsf=-1;
+        OD sfsa, sfsb, sast, sbst, sfsat, sfsbt, fsf, vsf;
         // Card A
-        int soft = -1; double sofscl = -1; int lcidab = -1; double maxpar = -1;
-        int sbopt = -1, depth = -1, bsort = -1, frcfrq = -1;
+        OI soft; OD sofscl; OI lcidab; OD maxpar; OI sbopt, depth, bsort, frcfrq;
         // Card B
-        double penmax = -1; int thkopt = -1, shlthk = -1, snlog = -1;
-        int isym = -1, i2d3d = -1; double sldthk = -1, sldstf = -1;
+        OD penmax; OI thkopt, shlthk, snlog, isym, i2d3d; OD sldthk, sldstf;
         // Card C
-        int igap = -1, ignore_ = -1; double dprfac = -1, dtstif = -1;
-        double edgek = -1, flangl = -1; int cid_rcf = -1;
+        OI igap, ignore_; OD dprfac, dtstif, edgek, flangl; OI cid_rcf;
         // Card D
-        int q2tri = -1; double dtpchk = -1, sfnbr = -1, fnlscl = -1, dnlscl = -1;
-        int tcso = -1, tiedid = -1, shledg = -1;
+        OI q2tri; OD dtpchk, sfnbr, fnlscl, dnlscl; OI tcso, tiedid, shledg;
         // Card E
-        int sharec = -1, cparm8 = -1, ipback = -1, srnde = -1;
-        double fricsf = -1; int icor = -1, ftorq = -1, region = -1;
+        OI sharec, cparm8, ipback, srnde; OD fricsf; OI icor, ftorq, region;
         // Card F
-        int pstiff = -1, ignroff = -1; double fstol = -1;
-        int d2binr = -1, ssftyp = -1, swtpr = -1; double tetfac = -1;
+        OI pstiff, ignroff; OD fstol; OI d2binr, ssftyp, swtpr; OD tetfac;
         // Card G
-        double shloff = -1;
-        // THERMAL 카드 (create; -1=미설정 sentinel)
-        double th_k=-1, th_frad=-1, th_h0=-1, th_lmin=-1, th_lmax=-1, th_chlm=-1;
-        int th_bcflag=-1, th_algo=-1;
-        // TIEBREAK 카드 (create)
-        int tb_option=-1; double tb_nfls=-1, tb_sfls=-1, tb_param=-1, tb_eraten=-1, tb_erates=-1, tb_ct2cn=-1;
+        OD shloff;
+        // THRM 1 (_THERMAL): K FRAD H0 LMIN LMAX FTOSA BC_FLG ALGO — 키 `ftosa`(옛 이름 `chlm` 도 받는다)
+        OD th_k, th_frad, th_h0, th_lmin, th_lmax, th_ftosa; OI th_bcflag, th_algo;
+        // Card 4 (AUTOMATIC_…_TIEBREAK): OPTION NFLS SFLS PARAM ERATEN ERATES CT2CN
+        OI tb_option; OD tb_nfls, tb_sfls, tb_param, tb_eraten, tb_erates, tb_ct2cn;
         // detect fields
         std::string scope;                        // "all" or empty
         std::vector<std::string> includeKeys;     // part name include keywords
@@ -138,6 +141,88 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
             if (s.size() >= 2 && ((s.front()=='"' && s.back()=='"') || (s.front()=='\'' && s.back()=='\'')))
                 return s.substr(1, s.size()-2);
             return s;
+        };
+
+        // 숫자 칸 — 글자 전체가 수여야 한다. ⚠ 예전엔 `catch(...){}` 로 못 읽은 값을 조용히 버렸다
+        //   (`friction: 0,3` · `soft: two` 가 rc 0 으로 「안 준 것」 이 됐다).
+        auto parseNum = [](const std::string& v, double& out) -> bool {
+            if (v.empty()) return false;
+            char* end = nullptr;
+            out = std::strtod(v.c_str(), &end);
+            return end && *end == '\0' && std::isfinite(out);
+        };
+        auto parseInt = [](const std::string& v, int& out) -> bool {
+            if (v.empty()) return false;
+            char* end = nullptr;
+            errno = 0;
+            const long l = std::strtol(v.c_str(), &end, 10);
+            if (!end || *end != '\0' || errno == ERANGE || l < INT_MIN || l > INT_MAX) return false;
+            out = (int)l;
+            return true;
+        };
+        auto badNumber = [&](const std::string& k, const std::string& v, bool integer) {
+            console.error("[contact] '" + k + ": " + v + "' — " + (integer ? "정수" : "수") + "로 읽을 수 없다");
+        };
+        // 카드 칸 키 → 자리. 실수(d) 또는 정수(i) 하나.
+        struct NumKey { const char* key; OD ContactAction::* d; OI ContactAction::* i; };
+        static const NumKey kNumKeys[] = {
+            {"friction", &ContactAction::friction, nullptr},
+            // Card 1
+            {"sboxid", nullptr, &ContactAction::sboxid}, {"mboxid", nullptr, &ContactAction::mboxid},
+            {"spr", nullptr, &ContactAction::spr},       {"mpr", nullptr, &ContactAction::mpr},
+            // Card 2
+            {"fd", &ContactAction::fd, nullptr}, {"dc", &ContactAction::dc, nullptr}, {"vc", &ContactAction::vc, nullptr},
+            {"vdc", &ContactAction::vdc, nullptr}, {"penchk", nullptr, &ContactAction::penchk},
+            {"bt", &ContactAction::bt, nullptr}, {"dt", &ContactAction::dt, nullptr},
+            // Card 3
+            {"sfsa", &ContactAction::sfsa, nullptr}, {"sfsb", &ContactAction::sfsb, nullptr},
+            {"sast", &ContactAction::sast, nullptr}, {"sbst", &ContactAction::sbst, nullptr},
+            {"sfsat", &ContactAction::sfsat, nullptr}, {"sfsbt", &ContactAction::sfsbt, nullptr},
+            {"fsf", &ContactAction::fsf, nullptr}, {"vsf", &ContactAction::vsf, nullptr},
+            // Card A
+            {"soft", nullptr, &ContactAction::soft}, {"sofscl", &ContactAction::sofscl, nullptr},
+            {"lcidab", nullptr, &ContactAction::lcidab}, {"maxpar", &ContactAction::maxpar, nullptr},
+            {"sbopt", nullptr, &ContactAction::sbopt}, {"depth", nullptr, &ContactAction::depth},
+            {"bsort", nullptr, &ContactAction::bsort}, {"frcfrq", nullptr, &ContactAction::frcfrq},
+            // Card B
+            {"penmax", &ContactAction::penmax, nullptr}, {"thkopt", nullptr, &ContactAction::thkopt},
+            {"shlthk", nullptr, &ContactAction::shlthk}, {"snlog", nullptr, &ContactAction::snlog},
+            {"isym", nullptr, &ContactAction::isym}, {"i2d3d", nullptr, &ContactAction::i2d3d},
+            {"sldthk", &ContactAction::sldthk, nullptr}, {"sldstf", &ContactAction::sldstf, nullptr},
+            // Card C
+            {"igap", nullptr, &ContactAction::igap}, {"ignore", nullptr, &ContactAction::ignore_},
+            {"dprfac", &ContactAction::dprfac, nullptr}, {"dtstif", &ContactAction::dtstif, nullptr},
+            {"edgek", &ContactAction::edgek, nullptr}, {"flangl", &ContactAction::flangl, nullptr},
+            {"cid_rcf", nullptr, &ContactAction::cid_rcf},
+            // Card D
+            {"q2tri", nullptr, &ContactAction::q2tri}, {"dtpchk", &ContactAction::dtpchk, nullptr},
+            {"sfnbr", &ContactAction::sfnbr, nullptr}, {"fnlscl", &ContactAction::fnlscl, nullptr},
+            {"dnlscl", &ContactAction::dnlscl, nullptr}, {"tcso", nullptr, &ContactAction::tcso},
+            {"tiedid", nullptr, &ContactAction::tiedid}, {"shledg", nullptr, &ContactAction::shledg},
+            // Card E
+            {"sharec", nullptr, &ContactAction::sharec}, {"cparm8", nullptr, &ContactAction::cparm8},
+            {"ipback", nullptr, &ContactAction::ipback}, {"srnde", nullptr, &ContactAction::srnde},
+            {"fricsf", &ContactAction::fricsf, nullptr}, {"icor", nullptr, &ContactAction::icor},
+            {"ftorq", nullptr, &ContactAction::ftorq}, {"region", nullptr, &ContactAction::region},
+            // Card F
+            {"pstiff", nullptr, &ContactAction::pstiff}, {"ignroff", nullptr, &ContactAction::ignroff},
+            {"fstol", &ContactAction::fstol, nullptr}, {"d2binr", nullptr, &ContactAction::d2binr},
+            {"2dbinr", nullptr, &ContactAction::d2binr}, {"ssftyp", nullptr, &ContactAction::ssftyp},
+            {"swtpr", nullptr, &ContactAction::swtpr}, {"tetfac", &ContactAction::tetfac, nullptr},
+            // Card G
+            {"shloff", &ContactAction::shloff, nullptr},
+            // THRM 1
+            {"k", &ContactAction::th_k, nullptr}, {"frad", &ContactAction::th_frad, nullptr},
+            {"h0", &ContactAction::th_h0, nullptr}, {"lmin", &ContactAction::th_lmin, nullptr},
+            {"lmax", &ContactAction::th_lmax, nullptr}, {"ftosa", &ContactAction::th_ftosa, nullptr},
+            {"chlm", &ContactAction::th_ftosa, nullptr},   // 옛 이름 — 3D 접촉에서 이 칸은 FTOSA 다
+            {"bc_flag", nullptr, &ContactAction::th_bcflag}, {"bc_flg", nullptr, &ContactAction::th_bcflag},
+            {"algo", nullptr, &ContactAction::th_algo},
+            // Card 4 (TIEBREAK)
+            {"option", nullptr, &ContactAction::tb_option}, {"nfls", &ContactAction::tb_nfls, nullptr},
+            {"sfls", &ContactAction::tb_sfls, nullptr}, {"param", &ContactAction::tb_param, nullptr},
+            {"eraten", &ContactAction::tb_eraten, nullptr}, {"erates", &ContactAction::tb_erates, nullptr},
+            {"ct2cn", &ContactAction::tb_ct2cn, nullptr},
         };
 
         auto parsePidList = [](const std::string& s) -> std::vector<int> {
@@ -219,106 +304,32 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
             // Sub-keys of current action
             if (key == "type") { curAction.type = val; continue; }
             if (key == "title") { curAction.title = val; continue; }
-            if (key == "contact_index") { try { curAction.contactIndex = std::stoi(val); } catch(...){} continue; }
+            if (key == "contact_index") {
+                if (!parseInt(val, curAction.contactIndex)) { badNumber(key, val, true); return 1; }
+                continue;
+            }
             if (key == "slave_to") { curAction.slaveTo = val; continue; }
             if (key == "master_to") { curAction.masterTo = val; continue; }
             if (key == "facing" && curAction.action == "convert") {
                 curAction.convertFacing = (val=="true"||val=="yes"||val=="1"); continue;
             }
-            // Card 1
-            if (key == "friction") { try { curAction.friction = std::stod(val); } catch(...){} continue; }
-            if (key == "sboxid")  { try { curAction.sboxid = std::stoi(val); } catch(...){} continue; }
-            if (key == "mboxid")  { try { curAction.mboxid = std::stoi(val); } catch(...){} continue; }
-            if (key == "spr")     { try { curAction.spr = std::stoi(val); } catch(...){} continue; }
-            if (key == "mpr")     { try { curAction.mpr = std::stoi(val); } catch(...){} continue; }
-            // Card 2
-            if (key == "fd")      { try { curAction.fd = std::stod(val); } catch(...){} continue; }
-            if (key == "dc")      { try { curAction.dc = std::stod(val); } catch(...){} continue; }
-            if (key == "vc")      { try { curAction.vc = std::stod(val); } catch(...){} continue; }
-            if (key == "vdc")     { try { curAction.vdc = std::stod(val); } catch(...){} continue; }
-            if (key == "penchk")  { try { curAction.penchk = std::stoi(val); } catch(...){} continue; }
-            if (key == "bt")      { try { curAction.bt = std::stod(val); } catch(...){} continue; }
-            if (key == "dt")      { try { curAction.dt = std::stod(val); } catch(...){} continue; }
-            // Card 3
-            if (key == "sfsa")    { try { curAction.sfsa = std::stod(val); } catch(...){} continue; }
-            if (key == "sfsb")    { try { curAction.sfsb = std::stod(val); } catch(...){} continue; }
-            if (key == "sast")    { try { curAction.sast = std::stod(val); } catch(...){} continue; }
-            if (key == "sbst")    { try { curAction.sbst = std::stod(val); } catch(...){} continue; }
-            if (key == "sfsat")   { try { curAction.sfsat = std::stod(val); } catch(...){} continue; }
-            if (key == "sfsbt")   { try { curAction.sfsbt = std::stod(val); } catch(...){} continue; }
-            if (key == "fsf")     { try { curAction.fsf = std::stod(val); } catch(...){} continue; }
-            if (key == "vsf")     { try { curAction.vsf = std::stod(val); } catch(...){} continue; }
-            // Card A
-            if (key == "soft")    { try { curAction.soft = std::stoi(val); } catch(...){} continue; }
-            if (key == "sofscl")  { try { curAction.sofscl = std::stod(val); } catch(...){} continue; }
-            if (key == "lcidab")  { try { curAction.lcidab = std::stoi(val); } catch(...){} continue; }
-            if (key == "maxpar")  { try { curAction.maxpar = std::stod(val); } catch(...){} continue; }
-            if (key == "sbopt")   { try { curAction.sbopt = std::stoi(val); } catch(...){} continue; }
-            if (key == "depth")   { try { curAction.depth = std::stoi(val); } catch(...){} continue; }
-            if (key == "bsort")   { try { curAction.bsort = std::stoi(val); } catch(...){} continue; }
-            if (key == "frcfrq")  { try { curAction.frcfrq = std::stoi(val); } catch(...){} continue; }
-            // Card B
-            if (key == "penmax")  { try { curAction.penmax = std::stod(val); } catch(...){} continue; }
-            if (key == "thkopt")  { try { curAction.thkopt = std::stoi(val); } catch(...){} continue; }
-            if (key == "shlthk")  { try { curAction.shlthk = std::stoi(val); } catch(...){} continue; }
-            if (key == "snlog")   { try { curAction.snlog = std::stoi(val); } catch(...){} continue; }
-            if (key == "isym")    { try { curAction.isym = std::stoi(val); } catch(...){} continue; }
-            if (key == "i2d3d")   { try { curAction.i2d3d = std::stoi(val); } catch(...){} continue; }
-            if (key == "sldthk")  { try { curAction.sldthk = std::stod(val); } catch(...){} continue; }
-            if (key == "sldstf")  { try { curAction.sldstf = std::stod(val); } catch(...){} continue; }
-            // Card C
-            if (key == "igap")    { try { curAction.igap = std::stoi(val); } catch(...){} continue; }
-            if (key == "ignore")  { try { curAction.ignore_ = std::stoi(val); } catch(...){} continue; }
-            if (key == "dprfac")  { try { curAction.dprfac = std::stod(val); } catch(...){} continue; }
-            if (key == "dtstif")  { try { curAction.dtstif = std::stod(val); } catch(...){} continue; }
-            if (key == "edgek")   { try { curAction.edgek = std::stod(val); } catch(...){} continue; }
-            if (key == "flangl")  { try { curAction.flangl = std::stod(val); } catch(...){} continue; }
-            if (key == "cid_rcf") { try { curAction.cid_rcf = std::stoi(val); } catch(...){} continue; }
-            // Card D
-            if (key == "q2tri")   { try { curAction.q2tri = std::stoi(val); } catch(...){} continue; }
-            if (key == "dtpchk")  { try { curAction.dtpchk = std::stod(val); } catch(...){} continue; }
-            if (key == "sfnbr")   { try { curAction.sfnbr = std::stod(val); } catch(...){} continue; }
-            if (key == "fnlscl")  { try { curAction.fnlscl = std::stod(val); } catch(...){} continue; }
-            if (key == "dnlscl")  { try { curAction.dnlscl = std::stod(val); } catch(...){} continue; }
-            if (key == "tcso")    { try { curAction.tcso = std::stoi(val); } catch(...){} continue; }
-            if (key == "tiedid")  { try { curAction.tiedid = std::stoi(val); } catch(...){} continue; }
-            if (key == "shledg")  { try { curAction.shledg = std::stoi(val); } catch(...){} continue; }
-            // Card E
-            if (key == "sharec")  { try { curAction.sharec = std::stoi(val); } catch(...){} continue; }
-            if (key == "cparm8")  { try { curAction.cparm8 = std::stoi(val); } catch(...){} continue; }
-            if (key == "ipback")  { try { curAction.ipback = std::stoi(val); } catch(...){} continue; }
-            if (key == "srnde")   { try { curAction.srnde = std::stoi(val); } catch(...){} continue; }
-            if (key == "fricsf")  { try { curAction.fricsf = std::stod(val); } catch(...){} continue; }
-            if (key == "icor")    { try { curAction.icor = std::stoi(val); } catch(...){} continue; }
-            if (key == "ftorq")   { try { curAction.ftorq = std::stoi(val); } catch(...){} continue; }
-            if (key == "region")  { try { curAction.region = std::stoi(val); } catch(...){} continue; }
-            // Card F
-            if (key == "pstiff")  { try { curAction.pstiff = std::stoi(val); } catch(...){} continue; }
-            if (key == "ignroff") { try { curAction.ignroff = std::stoi(val); } catch(...){} continue; }
-            if (key == "fstol")   { try { curAction.fstol = std::stod(val); } catch(...){} continue; }
-            if (key == "d2binr" || key == "2dbinr") { try { curAction.d2binr = std::stoi(val); } catch(...){} continue; }
-            if (key == "ssftyp")  { try { curAction.ssftyp = std::stoi(val); } catch(...){} continue; }
-            if (key == "swtpr")   { try { curAction.swtpr = std::stoi(val); } catch(...){} continue; }
-            if (key == "tetfac")  { try { curAction.tetfac = std::stod(val); } catch(...){} continue; }
-            // Card G
-            if (key == "shloff")  { try { curAction.shloff = std::stod(val); } catch(...){} continue; }
-            // THERMAL 카드 필드 (create, type: tied_thermal)
-            if (key == "k")       { try { curAction.th_k = std::stod(val); } catch(...){} continue; }
-            if (key == "frad")    { try { curAction.th_frad = std::stod(val); } catch(...){} continue; }
-            if (key == "h0")      { try { curAction.th_h0 = std::stod(val); } catch(...){} continue; }
-            if (key == "lmin")    { try { curAction.th_lmin = std::stod(val); } catch(...){} continue; }
-            if (key == "lmax")    { try { curAction.th_lmax = std::stod(val); } catch(...){} continue; }
-            if (key == "chlm")    { try { curAction.th_chlm = std::stod(val); } catch(...){} continue; }
-            if (key == "bc_flag") { try { curAction.th_bcflag = std::stoi(val); } catch(...){} continue; }
-            if (key == "algo")    { try { curAction.th_algo = std::stoi(val); } catch(...){} continue; }
-            // TIEBREAK 카드 필드 (create, type: tiebreak)
-            if (key == "option")  { try { curAction.tb_option = std::stoi(val); } catch(...){} continue; }
-            if (key == "nfls")    { try { curAction.tb_nfls = std::stod(val); } catch(...){} continue; }
-            if (key == "sfls")    { try { curAction.tb_sfls = std::stod(val); } catch(...){} continue; }
-            if (key == "param")   { try { curAction.tb_param = std::stod(val); } catch(...){} continue; }
-            if (key == "eraten")  { try { curAction.tb_eraten = std::stod(val); } catch(...){} continue; }
-            if (key == "erates")  { try { curAction.tb_erates = std::stod(val); } catch(...){} continue; }
-            if (key == "ct2cn")   { try { curAction.tb_ct2cn = std::stod(val); } catch(...){} continue; }
+            // 카드 칸 숫자 — 표(`kNumKeys`)로 한 번에. 못 읽으면 rc 1(조용히 버리지 않는다).
+            {
+                const NumKey* nk = nullptr;
+                for (const auto& k : kNumKeys) if (key == k.key) { nk = &k; break; }
+                if (nk) {
+                    if (nk->d) {
+                        double v = 0;
+                        if (!parseNum(val, v)) { badNumber(key, val, false); return 1; }
+                        curAction.*(nk->d) = v;
+                    } else {
+                        int v = 0;
+                        if (!parseInt(val, v)) { badNumber(key, val, true); return 1; }
+                        curAction.*(nk->i) = v;
+                    }
+                    continue;
+                }
+            }
 
             // detect fields
             if (key == "scope") { curAction.scope = val; continue; }
@@ -342,8 +353,14 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
                 curAction.contactType = val;
                 continue;
             }
-            if (key == "tolerance") { try { curAction.detectTolerance = std::stod(val); } catch(...){} continue; }
-            if (key == "normal_angle") { try { curAction.detectNormalAngle = std::stod(val); } catch(...){} continue; }
+            if (key == "tolerance") {
+                if (!parseNum(val, curAction.detectTolerance)) { badNumber(key, val, false); return 1; }
+                continue;
+            }
+            if (key == "normal_angle") {
+                if (!parseNum(val, curAction.detectNormalAngle)) { badNumber(key, val, false); return 1; }
+                continue;
+            }
             if (key == "auto_create") { curAction.detectAutoCreate = (val=="true"||val=="yes"||val=="1"); continue; }
             if (key == "title_prefix") { curAction.titlePrefix = val; continue; }
             if (key == "skip_existing") { curAction.skipExisting = val; continue; }
@@ -398,7 +415,7 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
                         if (c2 == std::string::npos) continue;
                         std::string k2 = kw_trim(pr.substr(0, c2));
                         std::string v2 = kw_trim(pr.substr(c2+1));
-                        if (k2 == "pid") { try { side.pid = std::stoi(v2); } catch(...){} }
+                        if (k2 == "pid") { if (!parseInt(v2, side.pid)) { badNumber(k2, v2, true); return 1; } }
                         else if (k2 == "pids") { side.pids = parsePidList(v2); }
                         else if (k2 == "as_segment") { side.asSegment = (v2=="true"||v2=="yes"||v2=="1"); }
                         else if (k2 == "facing") { side.facing = (v2=="true"||v2=="yes"||v2=="1"); }
@@ -411,7 +428,7 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
             // Multiline slave/master sub-keys
             if (!currentSide.empty()) {
                 ContactAction::Side& side = (currentSide == "slave") ? curAction.slave : curAction.master;
-                if (key == "pid") { try { side.pid = std::stoi(val); } catch(...){} continue; }
+                if (key == "pid") { if (!parseInt(val, side.pid)) { badNumber(key, val, true); return 1; } continue; }
                 if (key == "pids") {
                     // 값이 비면 다음 '- 1' 줄들이 목록이다 — 예전엔 빈 목록으로 두고 그 줄들을 버렸다
                     if (val.empty()) { side.pids.clear(); pendingPidList = &side.pids; }
@@ -507,9 +524,126 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
     console.println("[contact] Found " + std::to_string(contacts.size()) + " contacts, " +
                     std::to_string(sets.size()) + " sets");
 
+    // ── 카드 조립 — create · detect · modify 가 **같은 규칙**을 쓴다 ─────────────────────────────────
+    // ⚠ 예전엔 create · detect(두 갈래)가 같은 칸 옮기기를 세 벌 베껴 두었고, detect 사본에는 THRM · Card 4 가 빠져
+    //   tied_thermal · tiebreak 를 골라도 필수 카드 없는 키워드를 냈다(D12).
+    auto applyCard123 = [](const ContactAction& a, ContactDef& d) {
+        if (a.sboxid) d.sboxid = *a.sboxid;
+        if (a.mboxid) d.mboxid = *a.mboxid;
+        if (a.spr) d.spr = *a.spr;
+        if (a.mpr) d.mpr = *a.mpr;
+        d.fs = a.friction.value_or(d.fs);
+        if (a.fd) d.fd = *a.fd;
+        if (a.dc) d.dc = *a.dc;
+        if (a.vc) d.vc = *a.vc;
+        if (a.vdc) d.vdc = *a.vdc;
+        if (a.penchk) d.penchk = *a.penchk;
+        if (a.bt) d.bt = *a.bt;
+        if (a.dt) d.dt = *a.dt;
+        if (a.sfsa) d.sfsa = *a.sfsa;
+        if (a.sfsb) d.sfsb = *a.sfsb;
+        if (a.sast) d.sast = *a.sast;
+        if (a.sbst) d.sbst = *a.sbst;
+        if (a.sfsat) d.sfsat = *a.sfsat;
+        if (a.sfsbt) d.sfsbt = *a.sfsbt;
+        if (a.fsf) d.fsf = *a.fsf;
+        if (a.vsf) d.vsf = *a.vsf;
+    };
+    // 선택 카드 A~G — 칸을 하나라도 주면 그 카드(와 앞 카드 전부 — LS-DYNA 는 차례대로 읽는다)를 쓴다.
+    auto anyOptional = [](const ContactAction& a) -> bool {
+        return a.soft||a.sofscl||a.lcidab||a.maxpar||a.sbopt||a.depth||a.bsort||a.frcfrq||
+               a.penmax||a.thkopt||a.shlthk||a.snlog||a.isym||a.i2d3d||a.sldthk||a.sldstf||
+               a.igap||a.ignore_||a.dprfac||a.dtstif||a.edgek||a.flangl||a.cid_rcf||
+               a.q2tri||a.dtpchk||a.sfnbr||a.fnlscl||a.dnlscl||a.tcso||a.tiedid||a.shledg||
+               a.sharec||a.cparm8||a.ipback||a.srnde||a.fricsf||a.icor||a.ftorq||a.region||
+               a.pstiff||a.ignroff||a.fstol||a.d2binr||a.ssftyp||a.swtpr||a.tetfac||a.shloff;
+    };
+    auto applyOptional = [](const ContactAction& a, ContactDef& d) {
+        int top = 0;   // 1=A … 7=G
+        auto set = [&](auto& dst, const auto& src, int card) { if (src) { dst = *src; top = std::max(top, card); } };
+        set(d.soft, a.soft, 1);   set(d.sofscl, a.sofscl, 1); set(d.lcidab, a.lcidab, 1); set(d.maxpar, a.maxpar, 1);
+        set(d.sbopt, a.sbopt, 1); set(d.depth, a.depth, 1);   set(d.bsort, a.bsort, 1);   set(d.frcfrq, a.frcfrq, 1);
+        set(d.penmax, a.penmax, 2); set(d.thkopt, a.thkopt, 2); set(d.shlthk, a.shlthk, 2); set(d.snlog, a.snlog, 2);
+        set(d.isym, a.isym, 2);     set(d.i2d3d, a.i2d3d, 2);   set(d.sldthk, a.sldthk, 2); set(d.sldstf, a.sldstf, 2);
+        set(d.igap, a.igap, 3);     set(d.ignore_, a.ignore_, 3); set(d.dprfac, a.dprfac, 3); set(d.dtstif, a.dtstif, 3);
+        set(d.edgek, a.edgek, 3);   set(d.flangl, a.flangl, 3); set(d.cid_rcf, a.cid_rcf, 3);
+        set(d.q2tri, a.q2tri, 4);   set(d.dtpchk, a.dtpchk, 4); set(d.sfnbr, a.sfnbr, 4);   set(d.fnlscl, a.fnlscl, 4);
+        set(d.dnlscl, a.dnlscl, 4); set(d.tcso, a.tcso, 4);     set(d.tiedid, a.tiedid, 4); set(d.shledg, a.shledg, 4);
+        set(d.sharec, a.sharec, 5); set(d.cparm8, a.cparm8, 5); set(d.ipback, a.ipback, 5); set(d.srnde, a.srnde, 5);
+        set(d.fricsf, a.fricsf, 5); set(d.icor, a.icor, 5);     set(d.ftorq, a.ftorq, 5);   set(d.region, a.region, 5);
+        set(d.pstiff, a.pstiff, 6); set(d.ignroff, a.ignroff, 6); set(d.fstol, a.fstol, 6); set(d.d2binr, a.d2binr, 6);
+        set(d.ssftyp, a.ssftyp, 6); set(d.swtpr, a.swtpr, 6);   set(d.tetfac, a.tetfac, 6);
+        set(d.shloff, a.shloff, 7);
+        if (top >= 1) d.hasCardA = true;
+        if (top >= 2) d.hasCardB = true;
+        if (top >= 3) d.hasCardC = true;
+        if (top >= 4) d.hasCardD = true;
+        if (top >= 5) d.hasCardE = true;
+        if (top >= 6) d.hasCardF = true;
+        if (top >= 7) d.hasCardG = true;
+    };
+    // 형이 요구하는 필수 카드(Card 4 · THRM). 우리가 꼴을 아는 것만 쓰고, 모르는 것은 **거절**한다 — 예전엔 대문자로 그대로
+    // 써서 경고만 하고 rc 0 으로 불완전한 키워드를 냈다(ERODING 의 Card 4 · TIEBREAK_USER · THERMAL_FRICTION …).
+    auto applyMandatory = [](const ContactAction& a, const std::string& keyword, ContactDef& d, std::string& err) -> bool {
+        const ct_CardSpec sp = ct_cardSpec(keyword);
+        const std::string kw = "*CONTACT_" + kw_upper(keyword);
+        if (!sp.known) { err = kw + " — " + sp.why + ". 이 키워드의 필수 카드를 KooRemapper 는 쓰지 못한다"; return false; }
+        if (sp.orfr > 0) { err = kw + " — ORFR 1-4(직교 마찰) 카드를 KooRemapper 는 쓰지 못한다"; return false; }
+        if (sp.tiebreakAuto) {
+            // 매뉴얼 Card 4 의 OPTION · NFLS · SFLS 는 required(기본값 없음, V68117-68150).
+            if (!a.tb_option) {
+                err = kw + " — option 을 주어야 한다(매뉴얼 Card 4 의 OPTION · NFLS · SFLS 는 required). "
+                      "1 = 닿은 절점이 영구히 붙는다(파손 없음) · 2 = 처음 닿은 절점이 파손 때까지 붙는다 · "
+                      "4 = 같고 마찰 미끄럼 허용 · 9/11 = 응집 혼합 모드 …";
+                return false;
+            }
+            const int opt = *a.tb_option;
+            if (opt == 13 || opt == 14) { err = kw + " — OPTION 13/14 는 Card 4.1b · 4.2b 가 더 필요하다(지원하지 않는다)"; return false; }
+            // 매뉴얼 Remark 2 — SOFT=2 는 tiebreak 에 구현돼 있지 않고, SINGLE_SURFACE · GENERAL TIEBREAK 는 OPTION 1~5 만.
+            if (a.soft && *a.soft == 2) { err = kw + " — SOFT=2(세그먼트 대 세그먼트)는 tiebreak 에 구현돼 있지 않다(매뉴얼 Remark 2)"; return false; }
+            {
+                const std::string ku = kw_upper(keyword);
+                const bool singleOrGeneral = ku.find("SINGLE_SURFACE_TIEBREAK") != std::string::npos ||
+                                             ku.find("GENERAL_TIEBREAK") != std::string::npos;
+                if (singleOrGeneral && (opt < 1 || opt > 5)) {
+                    err = kw + " — SINGLE_SURFACE · GENERAL TIEBREAK 은 OPTION 1~5 만 지원된다(매뉴얼 Remark 2)"; return false;
+                }
+            }
+            if (sp.damping && (opt == 9 || opt == -9 || opt == 11 || opt == -11)) {
+                err = kw + " — DAMPING 과 OPTION ±9/±11 은 Card 4.1a 가 더 필요하다(지원하지 않는다)"; return false;
+            }
+            // 파손 OPTION 에 응력을 안 주면 0 이라 곧바로 떨어진다 — 받아야 쓴다.
+            if (opt != 1 && (!a.tb_nfls || !a.tb_sfls)) {
+                err = kw + " — OPTION " + std::to_string(opt) + " 은 파손 응력을 쓴다: nfls · sfls 를 주어야 한다(안 주면 0 이라 곧바로 떨어진다)";
+                return false;
+            }
+            d.hasTiebreak = true;
+            d.tbOption = opt;
+            if (a.tb_nfls) d.tbNfls = *a.tb_nfls;
+            if (a.tb_sfls) d.tbSfls = *a.tb_sfls;
+            if (a.tb_param) d.tbParam = *a.tb_param;
+            if (a.tb_eraten) d.tbEraten = *a.tb_eraten;
+            if (a.tb_erates) d.tbErates = *a.tb_erates;
+            if (a.tb_ct2cn) d.tbCt2cn = *a.tb_ct2cn;
+        }
+        if (sp.eroding) d.hasEroding = true;
+        if (sp.thrm > 0) {
+            d.hasThermal = true;
+            if (a.th_k) d.thK = *a.th_k;
+            if (a.th_frad) d.thFrad = *a.th_frad;
+            if (a.th_h0) d.thH0 = *a.th_h0;
+            if (a.th_lmin) d.thLmin = *a.th_lmin;
+            if (a.th_lmax) d.thLmax = *a.th_lmax;
+            if (a.th_ftosa) d.thFtosa = *a.th_ftosa;
+            if (a.th_bcflag) d.thBcflag = *a.th_bcflag;
+            if (a.th_algo) d.thAlgo = *a.th_algo;
+        }
+        return true;
+    };
+
     // 5. Process actions
     std::vector<std::string> insertBlocks;   // blocks to insert before *END
-    std::vector<std::pair<int,int>> removeRanges;  // (start,end) to remove (sorted descending later)
+    std::vector<int> removeIdx;   // 지울 접촉 번호(맨 끝에 다시 읽어 그 범위를 지운다)
     bool modified = false;
     bool analyzeOnly = true;
 
@@ -662,137 +796,11 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
             newDef.title = act.title.empty() ? ("Contact_" + std::to_string(ai)) : act.title;
             // 제목이 있으면 `_ID` 카드로 나가므로 CID 가 필요하다(`ct_generateContact` 참조).
             newDef.cid = ids.issue(KooRemapper::ids::Ns::Contact);
-            // Card 1 optional
-            if (act.sboxid >= 0) newDef.sboxid = act.sboxid;
-            if (act.mboxid >= 0) newDef.mboxid = act.mboxid;
-            if (act.spr >= 0) newDef.spr = act.spr;
-            if (act.mpr >= 0) newDef.mpr = act.mpr;
-            // Card 2
-            newDef.fs = (act.friction >= 0) ? act.friction : 0.0;
-            if (act.fd >= 0) newDef.fd = act.fd;
-            if (act.dc >= 0) newDef.dc = act.dc;
-            if (act.vc >= 0) newDef.vc = act.vc;
-            if (act.vdc >= 0) newDef.vdc = act.vdc;
-            if (act.penchk >= 0) newDef.penchk = act.penchk;
-            if (act.bt >= 0) newDef.bt = act.bt;
-            if (act.dt >= 0) newDef.dt = act.dt;
-            // Card 3
-            if (act.sfsa >= 0) newDef.sfsa = act.sfsa;
-            if (act.sfsb >= 0) newDef.sfsb = act.sfsb;
-            if (act.sast >= 0) newDef.sast = act.sast;
-            if (act.sbst >= 0) newDef.sbst = act.sbst;
-            if (act.sfsat >= 0) newDef.sfsat = act.sfsat;
-            if (act.sfsbt >= 0) newDef.sfsbt = act.sfsbt;
-            if (act.fsf >= 0) newDef.fsf = act.fsf;
-            if (act.vsf >= 0) newDef.vsf = act.vsf;
-            // Card A — any field set → hasCardA
-            if (act.soft>=0||act.sofscl>=0||act.lcidab>=0||act.maxpar>=0||
-                act.sbopt>=0||act.depth>=0||act.bsort>=0||act.frcfrq>=0) {
-                newDef.hasCardA = true;
-                if (act.soft >= 0) newDef.soft = act.soft;
-                if (act.sofscl >= 0) newDef.sofscl = act.sofscl;
-                if (act.lcidab >= 0) newDef.lcidab = act.lcidab;
-                if (act.maxpar >= 0) newDef.maxpar = act.maxpar;
-                if (act.sbopt >= 0) newDef.sbopt = act.sbopt;
-                if (act.depth >= 0) newDef.depth = act.depth;
-                if (act.bsort >= 0) newDef.bsort = act.bsort;
-                if (act.frcfrq >= 0) newDef.frcfrq = act.frcfrq;
-            }
-            // Card B
-            if (act.penmax>=0||act.thkopt>=0||act.shlthk>=0||act.snlog>=0||
-                act.isym>=0||act.i2d3d>=0||act.sldthk>=0||act.sldstf>=0) {
-                newDef.hasCardB = true; newDef.hasCardA = true;
-                if (act.penmax >= 0) newDef.penmax = act.penmax;
-                if (act.thkopt >= 0) newDef.thkopt = act.thkopt;
-                if (act.shlthk >= 0) newDef.shlthk = act.shlthk;
-                if (act.snlog >= 0) newDef.snlog = act.snlog;
-                if (act.isym >= 0) newDef.isym = act.isym;
-                if (act.i2d3d >= 0) newDef.i2d3d = act.i2d3d;
-                if (act.sldthk >= 0) newDef.sldthk = act.sldthk;
-                if (act.sldstf >= 0) newDef.sldstf = act.sldstf;
-            }
-            // Card C
-            if (act.igap>=0||act.ignore_>=0||act.dprfac>=0||act.dtstif>=0||
-                act.edgek>=0||act.flangl>=0||act.cid_rcf>=0) {
-                newDef.hasCardC = true; newDef.hasCardB = true; newDef.hasCardA = true;
-                if (act.igap >= 0) newDef.igap = act.igap;
-                if (act.ignore_ >= 0) newDef.ignore_ = act.ignore_;
-                if (act.dprfac >= 0) newDef.dprfac = act.dprfac;
-                if (act.dtstif >= 0) newDef.dtstif = act.dtstif;
-                if (act.edgek >= 0) newDef.edgek = act.edgek;
-                if (act.flangl >= 0) newDef.flangl = act.flangl;
-                if (act.cid_rcf >= 0) newDef.cid_rcf = act.cid_rcf;
-            }
-            // Card D
-            if (act.q2tri>=0||act.dtpchk>=0||act.sfnbr>=0||act.fnlscl>=0||
-                act.dnlscl>=0||act.tcso>=0||act.tiedid>=0||act.shledg>=0) {
-                newDef.hasCardD = true; newDef.hasCardC = true;
-                newDef.hasCardB = true; newDef.hasCardA = true;
-                if (act.q2tri >= 0) newDef.q2tri = act.q2tri;
-                if (act.dtpchk >= 0) newDef.dtpchk = act.dtpchk;
-                if (act.sfnbr >= 0) newDef.sfnbr = act.sfnbr;
-                if (act.fnlscl >= 0) newDef.fnlscl = act.fnlscl;
-                if (act.dnlscl >= 0) newDef.dnlscl = act.dnlscl;
-                if (act.tcso >= 0) newDef.tcso = act.tcso;
-                if (act.tiedid >= 0) newDef.tiedid = act.tiedid;
-                if (act.shledg >= 0) newDef.shledg = act.shledg;
-            }
-            // Card E
-            if (act.sharec>=0||act.cparm8>=0||act.ipback>=0||act.srnde>=0||
-                act.fricsf>=0||act.icor>=0||act.ftorq>=0||act.region>=0) {
-                newDef.hasCardE = true; newDef.hasCardD = true;
-                newDef.hasCardC = true; newDef.hasCardB = true; newDef.hasCardA = true;
-                if (act.sharec >= 0) newDef.sharec = act.sharec;
-                if (act.cparm8 >= 0) newDef.cparm8 = act.cparm8;
-                if (act.ipback >= 0) newDef.ipback = act.ipback;
-                if (act.srnde >= 0) newDef.srnde = act.srnde;
-                if (act.fricsf >= 0) newDef.fricsf = act.fricsf;
-                if (act.icor >= 0) newDef.icor = act.icor;
-                if (act.ftorq >= 0) newDef.ftorq = act.ftorq;
-                if (act.region >= 0) newDef.region = act.region;
-            }
-            // Card F
-            if (act.pstiff>=0||act.ignroff>=0||act.fstol>=0||
-                act.d2binr>=0||act.ssftyp>=0||act.swtpr>=0||act.tetfac>=0) {
-                newDef.hasCardF = true; newDef.hasCardE = true; newDef.hasCardD = true;
-                newDef.hasCardC = true; newDef.hasCardB = true; newDef.hasCardA = true;
-                if (act.pstiff >= 0) newDef.pstiff = act.pstiff;
-                if (act.ignroff >= 0) newDef.ignroff = act.ignroff;
-                if (act.fstol >= 0) newDef.fstol = act.fstol;
-                if (act.d2binr >= 0) newDef.d2binr = act.d2binr;
-                if (act.ssftyp >= 0) newDef.ssftyp = act.ssftyp;
-                if (act.swtpr >= 0) newDef.swtpr = act.swtpr;
-                if (act.tetfac >= 0) newDef.tetfac = act.tetfac;
-            }
-            // Card G
-            if (act.shloff >= 0) {
-                newDef.hasCardG = true; newDef.hasCardF = true; newDef.hasCardE = true;
-                newDef.hasCardD = true; newDef.hasCardC = true;
-                newDef.hasCardB = true; newDef.hasCardA = true;
-                newDef.shloff = act.shloff;
-            }
-            // THERMAL 카드 (_THERMAL 계열) — 필드는 미설정 시 기본값(chlm=1) 유지.
-            if (ctype.find("THERMAL") != std::string::npos) {
-                newDef.hasThermal = true;
-                if (act.th_k >= 0)      newDef.thK = act.th_k;
-                if (act.th_frad >= 0)   newDef.thFrad = act.th_frad;
-                if (act.th_h0 >= 0)     newDef.thH0 = act.th_h0;
-                if (act.th_lmin >= 0)   newDef.thLmin = act.th_lmin;
-                if (act.th_lmax >= 0)   newDef.thLmax = act.th_lmax;
-                if (act.th_chlm >= 0)   newDef.thChlm = act.th_chlm;
-                if (act.th_bcflag >= 0) newDef.thBcflag = act.th_bcflag;
-                if (act.th_algo >= 0)   newDef.thAlgo = act.th_algo;
-            }
-            // TIEBREAK 카드 (_TIEBREAK 계열) — OPTION 기본 1(quadratic NFLS/SFLS).
-            if (ctype.find("TIEBREAK") != std::string::npos) {
-                newDef.hasTiebreak = true;
-                if (act.tb_option >= 0) newDef.tbOption = act.tb_option;
-                if (act.tb_nfls >= 0)   newDef.tbNfls = act.tb_nfls;
-                if (act.tb_sfls >= 0)   newDef.tbSfls = act.tb_sfls;
-                if (act.tb_param >= 0)  newDef.tbParam = act.tb_param;
-                if (act.tb_eraten >= 0) newDef.tbEraten = act.tb_eraten;
-                if (act.tb_erates >= 0) newDef.tbErates = act.tb_erates;
-                if (act.tb_ct2cn >= 0)  newDef.tbCt2cn = act.tb_ct2cn;
+            applyCard123(act, newDef);
+            applyOptional(act, newDef);
+            {
+                std::string err;
+                if (!applyMandatory(act, ctype, newDef, err)) { console.error("[contact] create: " + err); return 1; }
             }
 
             insertBlocks.push_back(ct_generateContact(newDef));
@@ -982,199 +990,95 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
                 return 1;
             }
             auto& ct = contacts[act.contactIndex];
+            const std::string where = "[contact] [" + std::to_string(act.contactIndex) + "] ";
             std::string modFields;
 
-            // Card 1 modifications
-            if (act.sboxid >= 0 || act.mboxid >= 0 || act.spr >= 0 || act.mpr >= 0) {
-                // Full Card 1 rewrite via ct_modifyContactCard1 doesn't cover these,
-                // so use impl_setField for extended fields
-                // For now, reuse ct_modifyContactCard1 for ssid/msid/sstyp/mstyp: skip (no change)
+            // 카드 1 · 2 · 3 칸 — 파서가 찾은 줄에 그 자리 그대로(직접 세지 않는다 · 빈 줄 · MPP 카드를 안다).
+            // ⚠ 예전엔 Card 1 확장 칸(sboxid · mboxid · spr · mpr)을 받아 놓고 아무것도 안 하면서 「Modified:」 를 찍었고,
+            //   Card 2 · 3 은 `%10.2f` 로 반올림해 썼다(마찰 0.125 → 0.13).
+            auto setCard = [&](int card, int field, const std::string& text, const char* name) -> bool {
+                if (ct_setCardField(lines, ct, card, field, text)) return true;
+                console.error(where + "Card " + std::to_string(card + 1) + " 이 덱에 없어 " + name + " 를 고칠 수 없다");
+                return false;
+            };
+            struct RealField { const OD* v; int card; int field; const char* fmt; const char* name; };
+            struct IntField { const OI* v; int card; int field; const char* name; };
+            const RealField reals[] = {
+                {&act.friction, 1, 0, "%10.2f", "FS"}, {&act.fd, 1, 1, "%10.2f", "FD"}, {&act.dc, 1, 2, "%10.2f", "DC"},
+                {&act.vc, 1, 3, "%10.2f", "VC"}, {&act.vdc, 1, 4, "%10.2f", "VDC"}, {&act.bt, 1, 6, "%10.2f", "BT"},
+                {&act.dt, 1, 7, "%10.3E", "DT"},
+                {&act.sfsa, 2, 0, "%10.2f", "SFSA"}, {&act.sfsb, 2, 1, "%10.2f", "SFSB"}, {&act.sast, 2, 2, "%10.2f", "SAST"},
+                {&act.sbst, 2, 3, "%10.2f", "SBST"}, {&act.sfsat, 2, 4, "%10.2f", "SFSAT"}, {&act.sfsbt, 2, 5, "%10.2f", "SFSBT"},
+                {&act.fsf, 2, 6, "%10.2f", "FSF"}, {&act.vsf, 2, 7, "%10.2f", "VSF"},
+            };
+            const IntField ints[] = {
+                {&act.sboxid, 0, 4, "SBOXID"}, {&act.mboxid, 0, 5, "MBOXID"}, {&act.spr, 0, 6, "SPR"}, {&act.mpr, 0, 7, "MPR"},
+                {&act.penchk, 1, 5, "PENCHK"},
+            };
+            for (const auto& f : ints) {
+                if (!*f.v) continue;
+                if (!setCard(f.card, f.field, std::to_string(**f.v), f.name)) return 1;
+                modFields += std::string(" ") + f.name + "=" + std::to_string(**f.v);
+            }
+            for (const auto& f : reals) {
+                if (!*f.v) continue;
+                const std::string txt = ct_real(**f.v, f.fmt);
+                if (!setCard(f.card, f.field, txt, f.name)) return 1;
+                modFields += std::string(" ") + f.name + "=" + kw_trim(txt);
             }
 
-            // Card 2 modifications (FS + extended)
-            if (act.friction >= 0) { ct_modifyContactFs(lines, ct, act.friction); ct.fs = act.friction; }
-            // For other Card 2 fields, we need to modify in-place too
+            // 필수 카드(THRM 1 · TIEBREAK Card 4)의 칸 — 그 카드가 있는 접촉에서만. ⚠ 예전엔 이 키들을 modify 에서
+            // 받고 조용히 무시했다.
             {
-                bool card2Modified = false;
-                bool titleSkipped2 = !(ct.hasTitle || ct.hasId);
-                int cn2 = 0;
-                for (int i = ct.startLine + 1; i < ct.endLine; ++i) {
-                    std::string dtr = kw_trim(lines[i]);
-                    if (dtr.empty() || dtr[0] == '$') continue;
-                    if (!titleSkipped2) { titleSkipped2 = true; continue; }
-                    if (cn2 == 1) {
-                        // Card 2 line
-                        char buf[20];
-                        if (act.fd >= 0)     { snprintf(buf,sizeof(buf),"%10.2f",act.fd);     lines[i]=kw_setField(lines[i],10,10,buf); ct.fd=act.fd; card2Modified=true; }
-                        if (act.dc >= 0)     { snprintf(buf,sizeof(buf),"%10.2f",act.dc);     lines[i]=kw_setField(lines[i],20,10,buf); ct.dc=act.dc; card2Modified=true; }
-                        if (act.vc >= 0)     { snprintf(buf,sizeof(buf),"%10.2f",act.vc);     lines[i]=kw_setField(lines[i],30,10,buf); ct.vc=act.vc; card2Modified=true; }
-                        if (act.vdc >= 0)    { snprintf(buf,sizeof(buf),"%10.2f",act.vdc);    lines[i]=kw_setField(lines[i],40,10,buf); ct.vdc=act.vdc; card2Modified=true; }
-                        if (act.penchk >= 0) { lines[i]=kw_setField(lines[i],50,10,std::to_string(act.penchk)); ct.penchk=act.penchk; card2Modified=true; }
-                        if (act.bt >= 0)     { snprintf(buf,sizeof(buf),"%10.2f",act.bt);     lines[i]=kw_setField(lines[i],60,10,buf); ct.bt=act.bt; card2Modified=true; }
-                        if (act.dt >= 0)     { snprintf(buf,sizeof(buf),"%10.3E",act.dt);     lines[i]=kw_setField(lines[i],70,10,buf); ct.dt=act.dt; card2Modified=true; }
-                        break;
-                    }
-                    cn2++;
+                const bool thermalKeys = act.th_k || act.th_frad || act.th_h0 || act.th_lmin || act.th_lmax ||
+                                         act.th_ftosa || act.th_bcflag || act.th_algo;
+                const bool tiebreakKeys = act.tb_option || act.tb_nfls || act.tb_sfls || act.tb_param ||
+                                          act.tb_eraten || act.tb_erates || act.tb_ct2cn;
+                auto editLine = [&](int ln, int field, const std::string& text) { lines[ln] = kw_setField(lines[ln], field * 10, 10, text); };
+                if (thermalKeys) {
+                    if (ct.thrmLines.empty()) { console.error(where + "THRM 1 카드가 없는 접촉이다 — 열 칸(k · frad · …)을 고칠 수 없다"); return 1; }
+                    const int ln = ct.thrmLines[0];
+                    const std::pair<const OD*, int> rf[] = {{&act.th_k, 0}, {&act.th_frad, 1}, {&act.th_h0, 2}, {&act.th_lmin, 3},
+                                                            {&act.th_lmax, 4}, {&act.th_ftosa, 5}};
+                    for (const auto& [v, fld] : rf) if (*v) editLine(ln, fld, ct_real(**v, "%10.3g"));
+                    if (act.th_bcflag) editLine(ln, 6, std::to_string(*act.th_bcflag));
+                    if (act.th_algo) editLine(ln, 7, std::to_string(*act.th_algo));
+                    modFields += " THRM1";
                 }
-                if (card2Modified) {
-                    modFields += " Card2";
-                } else {
-                    bool card2Requested = (act.fd>=0||act.dc>=0||act.vc>=0||act.vdc>=0||
-                                           act.penchk>=0||act.bt>=0||act.dt>=0);
-                    if (card2Requested)
-                        console.warning("[contact] [" + std::to_string(act.contactIndex) +
-                            "] Card2 not found in file — add it explicitly or the contact has only Card1");
+                if (tiebreakKeys) {
+                    if (!ct.hasTiebreak || ct.card4Lines.empty()) {
+                        console.error(where + "AUTOMATIC_…_TIEBREAK Card 4 가 없는 접촉이다 — option · nfls · … 를 고칠 수 없다"); return 1;
+                    }
+                    const int ln = ct.card4Lines[0];
+                    if (act.tb_option) editLine(ln, 0, std::to_string(*act.tb_option));
+                    const std::pair<const OD*, int> rf[] = {{&act.tb_nfls, 1}, {&act.tb_sfls, 2}, {&act.tb_param, 3},
+                                                            {&act.tb_eraten, 4}, {&act.tb_erates, 5}, {&act.tb_ct2cn, 6}};
+                    for (const auto& [v, fld] : rf) if (*v) editLine(ln, fld, ct_real(**v, "%10.3g"));
+                    modFields += " Card4";
                 }
             }
 
-            // Card 3 modifications
-            {
-                bool card3Modified = false;
-                bool titleSkipped3 = !(ct.hasTitle || ct.hasId);
-                int cn3 = 0;
-                for (int i = ct.startLine + 1; i < ct.endLine; ++i) {
-                    std::string dtr = kw_trim(lines[i]);
-                    if (dtr.empty() || dtr[0] == '$') continue;
-                    if (!titleSkipped3) { titleSkipped3 = true; continue; }
-                    if (cn3 == 2) {
-                        // Card 3 line
-                        char buf[20];
-                        if (act.sfsa >= 0)  { snprintf(buf,sizeof(buf),"%10.2f",act.sfsa);  lines[i]=kw_setField(lines[i],0,10,buf); ct.sfsa=act.sfsa; card3Modified=true; }
-                        if (act.sfsb >= 0)  { snprintf(buf,sizeof(buf),"%10.2f",act.sfsb);  lines[i]=kw_setField(lines[i],10,10,buf); ct.sfsb=act.sfsb; card3Modified=true; }
-                        if (act.sast >= 0)  { snprintf(buf,sizeof(buf),"%10.2f",act.sast);  lines[i]=kw_setField(lines[i],20,10,buf); ct.sast=act.sast; card3Modified=true; }
-                        if (act.sbst >= 0)  { snprintf(buf,sizeof(buf),"%10.2f",act.sbst);  lines[i]=kw_setField(lines[i],30,10,buf); ct.sbst=act.sbst; card3Modified=true; }
-                        if (act.sfsat >= 0) { snprintf(buf,sizeof(buf),"%10.2f",act.sfsat); lines[i]=kw_setField(lines[i],40,10,buf); ct.sfsat=act.sfsat; card3Modified=true; }
-                        if (act.sfsbt >= 0) { snprintf(buf,sizeof(buf),"%10.2f",act.sfsbt); lines[i]=kw_setField(lines[i],50,10,buf); ct.sfsbt=act.sfsbt; card3Modified=true; }
-                        if (act.fsf >= 0)   { snprintf(buf,sizeof(buf),"%10.2f",act.fsf);   lines[i]=kw_setField(lines[i],60,10,buf); ct.fsf=act.fsf; card3Modified=true; }
-                        if (act.vsf >= 0)   { snprintf(buf,sizeof(buf),"%10.2f",act.vsf);   lines[i]=kw_setField(lines[i],70,10,buf); ct.vsf=act.vsf; card3Modified=true; }
-                        break;
-                    }
-                    cn3++;
-                }
-                if (card3Modified) {
-                    modFields += " Card3";
-                } else {
-                    bool card3Requested = (act.sfsa>=0||act.sfsb>=0||act.sast>=0||act.sbst>=0||
-                                           act.sfsat>=0||act.sfsbt>=0||act.fsf>=0||act.vsf>=0);
-                    if (card3Requested)
-                        console.warning("[contact] [" + std::to_string(act.contactIndex) +
-                            "] Card3 not found in file — contact may only have Card1/Card2");
-                }
-            }
-
-            // Optional Cards A~G: merge YAML values into existing ContactDef, then replace
-            bool anyOptional = (act.soft>=0||act.sofscl>=0||act.lcidab>=0||act.maxpar>=0||
-                act.sbopt>=0||act.depth>=0||act.bsort>=0||act.frcfrq>=0||
-                act.penmax>=0||act.thkopt>=0||act.shlthk>=0||act.snlog>=0||
-                act.isym>=0||act.i2d3d>=0||act.sldthk>=0||act.sldstf>=0||
-                act.igap>=0||act.ignore_>=0||act.dprfac>=0||act.dtstif>=0||
-                act.edgek>=0||act.flangl>=0||act.cid_rcf>=0||
-                act.q2tri>=0||act.dtpchk>=0||act.sfnbr>=0||act.fnlscl>=0||
-                act.dnlscl>=0||act.tcso>=0||act.tiedid>=0||act.shledg>=0||
-                act.sharec>=0||act.cparm8>=0||act.ipback>=0||act.srnde>=0||
-                act.fricsf>=0||act.icor>=0||act.ftorq>=0||act.region>=0||
-                act.pstiff>=0||act.ignroff>=0||act.fstol>=0||
-                act.d2binr>=0||act.ssftyp>=0||act.swtpr>=0||act.tetfac>=0||
-                act.shloff>=0);
-
-            if (anyOptional) {
-                // Start from existing parsed values
+            // 선택 카드 A~G — 읽은 값에 YAML 값을 얹어 선택 카드 줄만 다시 쓴다(Card 4 · THRM · ORFR 는 그대로).
+            if (anyOptional(act)) {
                 ContactDef merged = ct;
-                // Card A
-                if (act.soft>=0||act.sofscl>=0||act.lcidab>=0||act.maxpar>=0||
-                    act.sbopt>=0||act.depth>=0||act.bsort>=0||act.frcfrq>=0) {
-                    merged.hasCardA = true;
-                    if (act.soft >= 0) merged.soft = act.soft;
-                    if (act.sofscl >= 0) merged.sofscl = act.sofscl;
-                    if (act.lcidab >= 0) merged.lcidab = act.lcidab;
-                    if (act.maxpar >= 0) merged.maxpar = act.maxpar;
-                    if (act.sbopt >= 0) merged.sbopt = act.sbopt;
-                    if (act.depth >= 0) merged.depth = act.depth;
-                    if (act.bsort >= 0) merged.bsort = act.bsort;
-                    if (act.frcfrq >= 0) merged.frcfrq = act.frcfrq;
+                applyOptional(act, merged);
+                std::string why;
+                if (!ct_modifyOptionalCards(lines, ct, merged, &why)) {
+                    console.error(where + "선택 카드를 고치지 않았다 — " + why);
+                    return 1;
                 }
-                // Card B
-                if (act.penmax>=0||act.thkopt>=0||act.shlthk>=0||act.snlog>=0||
-                    act.isym>=0||act.i2d3d>=0||act.sldthk>=0||act.sldstf>=0) {
-                    merged.hasCardB = true; merged.hasCardA = true;
-                    if (act.penmax >= 0) merged.penmax = act.penmax;
-                    if (act.thkopt >= 0) merged.thkopt = act.thkopt;
-                    if (act.shlthk >= 0) merged.shlthk = act.shlthk;
-                    if (act.snlog >= 0) merged.snlog = act.snlog;
-                    if (act.isym >= 0) merged.isym = act.isym;
-                    if (act.i2d3d >= 0) merged.i2d3d = act.i2d3d;
-                    if (act.sldthk >= 0) merged.sldthk = act.sldthk;
-                    if (act.sldstf >= 0) merged.sldstf = act.sldstf;
-                }
-                // Card C
-                if (act.igap>=0||act.ignore_>=0||act.dprfac>=0||act.dtstif>=0||
-                    act.edgek>=0||act.flangl>=0||act.cid_rcf>=0) {
-                    merged.hasCardC = true; merged.hasCardB = true; merged.hasCardA = true;
-                    if (act.igap >= 0) merged.igap = act.igap;
-                    if (act.ignore_ >= 0) merged.ignore_ = act.ignore_;
-                    if (act.dprfac >= 0) merged.dprfac = act.dprfac;
-                    if (act.dtstif >= 0) merged.dtstif = act.dtstif;
-                    if (act.edgek >= 0) merged.edgek = act.edgek;
-                    if (act.flangl >= 0) merged.flangl = act.flangl;
-                    if (act.cid_rcf >= 0) merged.cid_rcf = act.cid_rcf;
-                }
-                // Card D~G: same pattern
-                if (act.q2tri>=0||act.shledg>=0||act.tcso>=0||act.tiedid>=0||
-                    act.dtpchk>=0||act.sfnbr>=0||act.fnlscl>=0||act.dnlscl>=0) {
-                    merged.hasCardD = true; merged.hasCardC = true;
-                    merged.hasCardB = true; merged.hasCardA = true;
-                    if (act.q2tri >= 0) merged.q2tri = act.q2tri;
-                    if (act.dtpchk >= 0) merged.dtpchk = act.dtpchk;
-                    if (act.sfnbr >= 0) merged.sfnbr = act.sfnbr;
-                    if (act.fnlscl >= 0) merged.fnlscl = act.fnlscl;
-                    if (act.dnlscl >= 0) merged.dnlscl = act.dnlscl;
-                    if (act.tcso >= 0) merged.tcso = act.tcso;
-                    if (act.tiedid >= 0) merged.tiedid = act.tiedid;
-                    if (act.shledg >= 0) merged.shledg = act.shledg;
-                }
-                if (act.sharec>=0||act.cparm8>=0||act.ipback>=0||act.srnde>=0||
-                    act.fricsf>=0||act.icor>=0||act.ftorq>=0||act.region>=0) {
-                    merged.hasCardE = true; merged.hasCardD = true;
-                    merged.hasCardC = true; merged.hasCardB = true; merged.hasCardA = true;
-                    if (act.sharec >= 0) merged.sharec = act.sharec;
-                    if (act.cparm8 >= 0) merged.cparm8 = act.cparm8;
-                    if (act.ipback >= 0) merged.ipback = act.ipback;
-                    if (act.srnde >= 0) merged.srnde = act.srnde;
-                    if (act.fricsf >= 0) merged.fricsf = act.fricsf;
-                    if (act.icor >= 0) merged.icor = act.icor;
-                    if (act.ftorq >= 0) merged.ftorq = act.ftorq;
-                    if (act.region >= 0) merged.region = act.region;
-                }
-                if (act.pstiff>=0||act.ignroff>=0||act.fstol>=0||
-                    act.d2binr>=0||act.ssftyp>=0||act.swtpr>=0||act.tetfac>=0) {
-                    merged.hasCardF = true; merged.hasCardE = true; merged.hasCardD = true;
-                    merged.hasCardC = true; merged.hasCardB = true; merged.hasCardA = true;
-                    if (act.pstiff >= 0) merged.pstiff = act.pstiff;
-                    if (act.ignroff >= 0) merged.ignroff = act.ignroff;
-                    if (act.fstol >= 0) merged.fstol = act.fstol;
-                    if (act.d2binr >= 0) merged.d2binr = act.d2binr;
-                    if (act.ssftyp >= 0) merged.ssftyp = act.ssftyp;
-                    if (act.swtpr >= 0) merged.swtpr = act.swtpr;
-                    if (act.tetfac >= 0) merged.tetfac = act.tetfac;
-                }
-                if (act.shloff >= 0) {
-                    merged.hasCardG = true; merged.hasCardF = true; merged.hasCardE = true;
-                    merged.hasCardD = true; merged.hasCardC = true;
-                    merged.hasCardB = true; merged.hasCardA = true;
-                    merged.shloff = act.shloff;
-                }
-
-                ct_modifyOptionalCards(lines, ct, merged);
                 modFields += " OptCards";
-                // Re-parse since line numbers shifted
-                contacts = ct_parseContacts(lines);
-                sets = ct_parseSets(lines);
-                ct_resolveSetRanges(sets, mesh);
             }
 
-            if (act.friction >= 0) modFields += " FS=" + std::to_string(act.friction);
-            console.println("[contact] [" + std::to_string(act.contactIndex) +
-                          "] Modified:" + modFields);
+            if (modFields.empty()) {
+                console.warning(where + "modify 에 고칠 칸이 없다 — 아무것도 바꾸지 않았다");
+                continue;
+            }
+            // 줄이 바뀌었다 — 뒤 액션이 낡은 자리 · 값을 보지 않게 다시 읽는다
+            contacts = ct_parseContacts(lines);
+            sets = ct_parseSets(lines);
+            ct_resolveSetRanges(sets, mesh);
+            console.println(where + "Modified:" + modFields);
             modified = true;
             continue;
         }
@@ -1188,7 +1092,11 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
             auto& ct = contacts[act.contactIndex];
             console.println("[contact] Removing [" + std::to_string(act.contactIndex) +
                           "] " + ct.fullKeyword);
-            removeRanges.push_back({ct.startLine, ct.endLine});
+            // ⚠ 줄 범위가 아니라 **접촉 번호**를 기억한다 — 뒤의 modify 가 선택 카드를 넣어 줄이 밀리면 예전엔 적어 둔 범위가
+            //   낡아 **다른 줄을 지웠다**(D21). 지우기는 맨 끝에 다시 읽어 그 번호의 범위로 한다(번호는 그동안 안 바뀐다 —
+            //   새 접촉은 맨 끝 `*END` 앞에 붙는다).
+            if (std::find(removeIdx.begin(), removeIdx.end(), act.contactIndex) == removeIdx.end())
+                removeIdx.push_back(act.contactIndex);
             modified = true;
             continue;
         }
@@ -1200,6 +1108,12 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
             double nAngle = act.detectNormalAngle;
             auto preset = ct_getPreset(act.contactType);
             std::string prefix = act.titlePrefix.empty() ? "Auto" : act.titlePrefix;
+            // 접촉을 만들 거면 필수 카드(THRM · Card 4)를 쓸 수 있는지 먼저 본다 — 쓸 수 없으면 세트도 만들지 않고 멈춘다.
+            if (act.detectAutoCreate) {
+                ContactDef probe;
+                std::string err;
+                if (!applyMandatory(act, preset.keyword, probe, err)) { console.error("[contact] detect: " + err); return 1; }
+            }
 
             bool autoMode = (act.scope == "all" || !act.includeKeys.empty());
 
@@ -1226,6 +1140,8 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
 
                 int totalFaces = 0;
                 for (const auto& [pid, f] : surfMap) totalFaces += (int)f.size();
+                // 세그먼트 → 그 면을 가진 파트 — SET_SEGMENT 로 정의된 기존 접촉(detect 가 만든 것 전부)을 파트 쌍으로 비교한다(D13).
+                const ct_SegOwners segOwners = ct_segmentOwners(surfMap);
                 console.println("[contact] Extracted surfaces: " +
                     std::to_string(totalFaces) + " total faces");
 
@@ -1256,7 +1172,7 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
 
                     // skip_existing: skip this pair if existing contact covers it
                     if (!act.skipExisting.empty()) {
-                        if (ct_pairHasExisting(pr.pidA, pr.pidB, contacts, sets, act.skipExisting)) {
+                        if (ct_pairHasExisting(pr.pidA, pr.pidB, contacts, sets, act.skipExisting, &segOwners)) {
                             console.println("  PID " + std::to_string(pr.pidA) +
                                 " (" + nameA + ") <-> PID " + std::to_string(pr.pidB) +
                                 " (" + nameB + "): skipped (existing " + act.skipExisting + ")");
@@ -1272,7 +1188,7 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
                     // subtract_existing: remove tied segments from detected faces
                     if (act.subtractExisting) {
                         auto [tiedA, tiedB] = ct_getExistingTiedSegments(
-                            pr.pidA, pr.pidB, contacts, sets, mesh, tol, nAngle);
+                            pr.pidA, pr.pidB, contacts, sets, mesh, tol, nAngle, &segOwners);
                         if (!tiedA.empty() || !tiedB.empty()) {
                             auto newA = ct_subtractFaces(facesA, tiedA);
                             auto newB = ct_subtractFaces(facesB, tiedB);
@@ -1326,114 +1242,11 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
                         def.msid = preset.needMasterSide ? masterSid : 0;
                         def.sstyp = 0; // SET_SEGMENT
                         def.mstyp = preset.needMasterSide ? 0 : 0;
-                        // Card 1 optional
-                        if (act.sboxid >= 0) def.sboxid = act.sboxid;
-                        if (act.mboxid >= 0) def.mboxid = act.mboxid;
-                        if (act.spr >= 0) def.spr = act.spr;
-                        if (act.mpr >= 0) def.mpr = act.mpr;
-                        // Card 2
-                        def.fs = (act.friction >= 0) ? act.friction : 0.0;
-                        if (act.fd >= 0) def.fd = act.fd;
-                        if (act.dc >= 0) def.dc = act.dc;
-                        if (act.vc >= 0) def.vc = act.vc;
-                        if (act.vdc >= 0) def.vdc = act.vdc;
-                        if (act.penchk >= 0) def.penchk = act.penchk;
-                        if (act.bt >= 0) def.bt = act.bt;
-                        if (act.dt >= 0) def.dt = act.dt;
-                        // Card 3
-                        if (act.sfsa >= 0) def.sfsa = act.sfsa;
-                        if (act.sfsb >= 0) def.sfsb = act.sfsb;
-                        if (act.sast >= 0) def.sast = act.sast;
-                        if (act.sbst >= 0) def.sbst = act.sbst;
-                        if (act.sfsat >= 0) def.sfsat = act.sfsat;
-                        if (act.sfsbt >= 0) def.sfsbt = act.sfsbt;
-                        if (act.fsf >= 0) def.fsf = act.fsf;
-                        if (act.vsf >= 0) def.vsf = act.vsf;
-                        // Card A
-                        if (act.soft>=0||act.sofscl>=0||act.lcidab>=0||act.maxpar>=0||
-                            act.sbopt>=0||act.depth>=0||act.bsort>=0||act.frcfrq>=0) {
-                            def.hasCardA = true;
-                            if (act.soft >= 0) def.soft = act.soft;
-                            if (act.sofscl >= 0) def.sofscl = act.sofscl;
-                            if (act.lcidab >= 0) def.lcidab = act.lcidab;
-                            if (act.maxpar >= 0) def.maxpar = act.maxpar;
-                            if (act.sbopt >= 0) def.sbopt = act.sbopt;
-                            if (act.depth >= 0) def.depth = act.depth;
-                            if (act.bsort >= 0) def.bsort = act.bsort;
-                            if (act.frcfrq >= 0) def.frcfrq = act.frcfrq;
-                        }
-                        // Card B
-                        if (act.penmax>=0||act.thkopt>=0||act.shlthk>=0||act.snlog>=0||
-                            act.isym>=0||act.i2d3d>=0||act.sldthk>=0||act.sldstf>=0) {
-                            def.hasCardB = true; def.hasCardA = true;
-                            if (act.penmax >= 0) def.penmax = act.penmax;
-                            if (act.thkopt >= 0) def.thkopt = act.thkopt;
-                            if (act.shlthk >= 0) def.shlthk = act.shlthk;
-                            if (act.snlog >= 0) def.snlog = act.snlog;
-                            if (act.isym >= 0) def.isym = act.isym;
-                            if (act.i2d3d >= 0) def.i2d3d = act.i2d3d;
-                            if (act.sldthk >= 0) def.sldthk = act.sldthk;
-                            if (act.sldstf >= 0) def.sldstf = act.sldstf;
-                        }
-                        // Card C
-                        if (act.igap>=0||act.ignore_>=0||act.dprfac>=0||act.dtstif>=0||
-                            act.edgek>=0||act.flangl>=0||act.cid_rcf>=0) {
-                            def.hasCardC = true; def.hasCardB = true; def.hasCardA = true;
-                            if (act.igap >= 0) def.igap = act.igap;
-                            if (act.ignore_ >= 0) def.ignore_ = act.ignore_;
-                            if (act.dprfac >= 0) def.dprfac = act.dprfac;
-                            if (act.dtstif >= 0) def.dtstif = act.dtstif;
-                            if (act.edgek >= 0) def.edgek = act.edgek;
-                            if (act.flangl >= 0) def.flangl = act.flangl;
-                            if (act.cid_rcf >= 0) def.cid_rcf = act.cid_rcf;
-                        }
-                        // Card D
-                        if (act.q2tri>=0||act.dtpchk>=0||act.sfnbr>=0||act.fnlscl>=0||
-                            act.dnlscl>=0||act.tcso>=0||act.tiedid>=0||act.shledg>=0) {
-                            def.hasCardD = true; def.hasCardC = true;
-                            def.hasCardB = true; def.hasCardA = true;
-                            if (act.q2tri >= 0) def.q2tri = act.q2tri;
-                            if (act.dtpchk >= 0) def.dtpchk = act.dtpchk;
-                            if (act.sfnbr >= 0) def.sfnbr = act.sfnbr;
-                            if (act.fnlscl >= 0) def.fnlscl = act.fnlscl;
-                            if (act.dnlscl >= 0) def.dnlscl = act.dnlscl;
-                            if (act.tcso >= 0) def.tcso = act.tcso;
-                            if (act.tiedid >= 0) def.tiedid = act.tiedid;
-                            if (act.shledg >= 0) def.shledg = act.shledg;
-                        }
-                        // Card E
-                        if (act.sharec>=0||act.cparm8>=0||act.ipback>=0||act.srnde>=0||
-                            act.fricsf>=0||act.icor>=0||act.ftorq>=0||act.region>=0) {
-                            def.hasCardE = true; def.hasCardD = true;
-                            def.hasCardC = true; def.hasCardB = true; def.hasCardA = true;
-                            if (act.sharec >= 0) def.sharec = act.sharec;
-                            if (act.cparm8 >= 0) def.cparm8 = act.cparm8;
-                            if (act.ipback >= 0) def.ipback = act.ipback;
-                            if (act.srnde >= 0) def.srnde = act.srnde;
-                            if (act.fricsf >= 0) def.fricsf = act.fricsf;
-                            if (act.icor >= 0) def.icor = act.icor;
-                            if (act.ftorq >= 0) def.ftorq = act.ftorq;
-                            if (act.region >= 0) def.region = act.region;
-                        }
-                        // Card F
-                        if (act.pstiff>=0||act.ignroff>=0||act.fstol>=0||
-                            act.d2binr>=0||act.ssftyp>=0||act.swtpr>=0||act.tetfac>=0) {
-                            def.hasCardF = true; def.hasCardE = true; def.hasCardD = true;
-                            def.hasCardC = true; def.hasCardB = true; def.hasCardA = true;
-                            if (act.pstiff >= 0) def.pstiff = act.pstiff;
-                            if (act.ignroff >= 0) def.ignroff = act.ignroff;
-                            if (act.fstol >= 0) def.fstol = act.fstol;
-                            if (act.d2binr >= 0) def.d2binr = act.d2binr;
-                            if (act.ssftyp >= 0) def.ssftyp = act.ssftyp;
-                            if (act.swtpr >= 0) def.swtpr = act.swtpr;
-                            if (act.tetfac >= 0) def.tetfac = act.tetfac;
-                        }
-                        // Card G
-                        if (act.shloff >= 0) {
-                            def.hasCardG = true; def.hasCardF = true; def.hasCardE = true;
-                            def.hasCardD = true; def.hasCardC = true;
-                            def.hasCardB = true; def.hasCardA = true;
-                            def.shloff = act.shloff;
+                        applyCard123(act, def);
+                        applyOptional(act, def);
+                        {
+                            std::string err;
+                            if (!applyMandatory(act, preset.keyword, def, err)) { console.error("[contact] detect: " + err); return 1; }
                         }
                         insertBlocks.push_back(ct_generateContact(def));
                         createdContacts++;
@@ -1535,114 +1348,11 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
                     def.ssid = slaveSid;
                     def.msid = masterSid;
                     def.sstyp = 0; def.mstyp = 0;
-                    // Card 1 optional
-                    if (act.sboxid >= 0) def.sboxid = act.sboxid;
-                    if (act.mboxid >= 0) def.mboxid = act.mboxid;
-                    if (act.spr >= 0) def.spr = act.spr;
-                    if (act.mpr >= 0) def.mpr = act.mpr;
-                    // Card 2
-                    def.fs = (act.friction >= 0) ? act.friction : 0.0;
-                    if (act.fd >= 0) def.fd = act.fd;
-                    if (act.dc >= 0) def.dc = act.dc;
-                    if (act.vc >= 0) def.vc = act.vc;
-                    if (act.vdc >= 0) def.vdc = act.vdc;
-                    if (act.penchk >= 0) def.penchk = act.penchk;
-                    if (act.bt >= 0) def.bt = act.bt;
-                    if (act.dt >= 0) def.dt = act.dt;
-                    // Card 3
-                    if (act.sfsa >= 0) def.sfsa = act.sfsa;
-                    if (act.sfsb >= 0) def.sfsb = act.sfsb;
-                    if (act.sast >= 0) def.sast = act.sast;
-                    if (act.sbst >= 0) def.sbst = act.sbst;
-                    if (act.sfsat >= 0) def.sfsat = act.sfsat;
-                    if (act.sfsbt >= 0) def.sfsbt = act.sfsbt;
-                    if (act.fsf >= 0) def.fsf = act.fsf;
-                    if (act.vsf >= 0) def.vsf = act.vsf;
-                    // Card A
-                    if (act.soft>=0||act.sofscl>=0||act.lcidab>=0||act.maxpar>=0||
-                        act.sbopt>=0||act.depth>=0||act.bsort>=0||act.frcfrq>=0) {
-                        def.hasCardA = true;
-                        if (act.soft >= 0) def.soft = act.soft;
-                        if (act.sofscl >= 0) def.sofscl = act.sofscl;
-                        if (act.lcidab >= 0) def.lcidab = act.lcidab;
-                        if (act.maxpar >= 0) def.maxpar = act.maxpar;
-                        if (act.sbopt >= 0) def.sbopt = act.sbopt;
-                        if (act.depth >= 0) def.depth = act.depth;
-                        if (act.bsort >= 0) def.bsort = act.bsort;
-                        if (act.frcfrq >= 0) def.frcfrq = act.frcfrq;
-                    }
-                    // Card B
-                    if (act.penmax>=0||act.thkopt>=0||act.shlthk>=0||act.snlog>=0||
-                        act.isym>=0||act.i2d3d>=0||act.sldthk>=0||act.sldstf>=0) {
-                        def.hasCardB = true; def.hasCardA = true;
-                        if (act.penmax >= 0) def.penmax = act.penmax;
-                        if (act.thkopt >= 0) def.thkopt = act.thkopt;
-                        if (act.shlthk >= 0) def.shlthk = act.shlthk;
-                        if (act.snlog >= 0) def.snlog = act.snlog;
-                        if (act.isym >= 0) def.isym = act.isym;
-                        if (act.i2d3d >= 0) def.i2d3d = act.i2d3d;
-                        if (act.sldthk >= 0) def.sldthk = act.sldthk;
-                        if (act.sldstf >= 0) def.sldstf = act.sldstf;
-                    }
-                    // Card C
-                    if (act.igap>=0||act.ignore_>=0||act.dprfac>=0||act.dtstif>=0||
-                        act.edgek>=0||act.flangl>=0||act.cid_rcf>=0) {
-                        def.hasCardC = true; def.hasCardB = true; def.hasCardA = true;
-                        if (act.igap >= 0) def.igap = act.igap;
-                        if (act.ignore_ >= 0) def.ignore_ = act.ignore_;
-                        if (act.dprfac >= 0) def.dprfac = act.dprfac;
-                        if (act.dtstif >= 0) def.dtstif = act.dtstif;
-                        if (act.edgek >= 0) def.edgek = act.edgek;
-                        if (act.flangl >= 0) def.flangl = act.flangl;
-                        if (act.cid_rcf >= 0) def.cid_rcf = act.cid_rcf;
-                    }
-                    // Card D
-                    if (act.q2tri>=0||act.dtpchk>=0||act.sfnbr>=0||act.fnlscl>=0||
-                        act.dnlscl>=0||act.tcso>=0||act.tiedid>=0||act.shledg>=0) {
-                        def.hasCardD = true; def.hasCardC = true;
-                        def.hasCardB = true; def.hasCardA = true;
-                        if (act.q2tri >= 0) def.q2tri = act.q2tri;
-                        if (act.dtpchk >= 0) def.dtpchk = act.dtpchk;
-                        if (act.sfnbr >= 0) def.sfnbr = act.sfnbr;
-                        if (act.fnlscl >= 0) def.fnlscl = act.fnlscl;
-                        if (act.dnlscl >= 0) def.dnlscl = act.dnlscl;
-                        if (act.tcso >= 0) def.tcso = act.tcso;
-                        if (act.tiedid >= 0) def.tiedid = act.tiedid;
-                        if (act.shledg >= 0) def.shledg = act.shledg;
-                    }
-                    // Card E
-                    if (act.sharec>=0||act.cparm8>=0||act.ipback>=0||act.srnde>=0||
-                        act.fricsf>=0||act.icor>=0||act.ftorq>=0||act.region>=0) {
-                        def.hasCardE = true; def.hasCardD = true;
-                        def.hasCardC = true; def.hasCardB = true; def.hasCardA = true;
-                        if (act.sharec >= 0) def.sharec = act.sharec;
-                        if (act.cparm8 >= 0) def.cparm8 = act.cparm8;
-                        if (act.ipback >= 0) def.ipback = act.ipback;
-                        if (act.srnde >= 0) def.srnde = act.srnde;
-                        if (act.fricsf >= 0) def.fricsf = act.fricsf;
-                        if (act.icor >= 0) def.icor = act.icor;
-                        if (act.ftorq >= 0) def.ftorq = act.ftorq;
-                        if (act.region >= 0) def.region = act.region;
-                    }
-                    // Card F
-                    if (act.pstiff>=0||act.ignroff>=0||act.fstol>=0||
-                        act.d2binr>=0||act.ssftyp>=0||act.swtpr>=0||act.tetfac>=0) {
-                        def.hasCardF = true; def.hasCardE = true; def.hasCardD = true;
-                        def.hasCardC = true; def.hasCardB = true; def.hasCardA = true;
-                        if (act.pstiff >= 0) def.pstiff = act.pstiff;
-                        if (act.ignroff >= 0) def.ignroff = act.ignroff;
-                        if (act.fstol >= 0) def.fstol = act.fstol;
-                        if (act.d2binr >= 0) def.d2binr = act.d2binr;
-                        if (act.ssftyp >= 0) def.ssftyp = act.ssftyp;
-                        if (act.swtpr >= 0) def.swtpr = act.swtpr;
-                        if (act.tetfac >= 0) def.tetfac = act.tetfac;
-                    }
-                    // Card G
-                    if (act.shloff >= 0) {
-                        def.hasCardG = true; def.hasCardF = true; def.hasCardE = true;
-                        def.hasCardD = true; def.hasCardC = true;
-                        def.hasCardB = true; def.hasCardA = true;
-                        def.shloff = act.shloff;
+                    applyCard123(act, def);
+                    applyOptional(act, def);
+                    {
+                        std::string err;
+                        if (!applyMandatory(act, preset.keyword, def, err)) { console.error("[contact] detect: " + err); return 1; }
                     }
                     insertBlocks.push_back(ct_generateContact(def));
                     console.println("[contact] Created *CONTACT_" + preset.keyword);
@@ -1654,13 +1364,14 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
         console.warning("[contact] Unknown action: " + act.action);
     }
 
-    // 6. Apply removals (descending order to preserve indices)
-    if (!removeRanges.empty()) {
-        std::sort(removeRanges.begin(), removeRanges.end(),
-                  [](const auto& a, const auto& b){ return a.first > b.first; });
-        for (const auto& [start, end] : removeRanges) {
-            ct_removeBlock(lines, start, end);
-        }
+    // 6. Apply removals — 지금 줄로 다시 읽어 번호의 범위를 구하고 뒤에서부터 지운다
+    if (!removeIdx.empty()) {
+        const auto now = ct_parseContacts(lines);
+        std::vector<std::pair<int,int>> ranges;
+        for (int ix : removeIdx)
+            if (ix >= 0 && ix < (int)now.size()) ranges.push_back({now[ix].startLine, now[ix].endLine});
+        std::sort(ranges.begin(), ranges.end(), [](const auto& a, const auto& b){ return a.first > b.first; });
+        for (const auto& [start, end] : ranges) ct_removeBlock(lines, start, end);
     }
 
     // 7. Insert new blocks before *END

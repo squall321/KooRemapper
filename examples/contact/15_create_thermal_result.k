@@ -73,6 +73,6 @@ $#      fs        fd        dc        vc       vdc    penchk        bt        dt
       0.00      0.00      0.00      0.00      0.00         0      0.00 1.000E+20
 $#    sfsa      sfsb      sast      sbst     sfsat     sfsbt       fsf       vsf
       1.00      1.00      0.00      0.00      1.00      1.00      1.00      1.00
-$#       k      frad        h0      lmin      lmax      chlm   bc_flag      algo
+$#       k      frad        h0      lmin      lmax     ftosa    bc_flg      algo
        100         0         0         0         0       0.5         0         0
 *END

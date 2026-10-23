@@ -86,5 +86,5 @@ $#      fs        fd        dc        vc       vdc    penchk        bt        dt
 $#    sfsa      sfsb      sast      sbst     sfsat     sfsbt       fsf       vsf
       1.00      1.00      0.00      0.00      1.00      1.00      1.00      1.00
 $#  option      nfls      sfls     param    eraten    erates     ct2cn
-         1        10        50         0         0         0         1
+         2        10        50         0         0         0         1
 *END

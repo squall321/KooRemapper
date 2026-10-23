@@ -2216,7 +2216,7 @@ contacts:
 | `tied_thermal` / `thermal` | `*CONTACT_TIED_SURFACE_TO_SURFACE_THERMAL` |
 | `tiebreak` | `*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_TIEBREAK` |
 | `mortar` | `*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_MORTAR` |
-| `tied_mortar` | `*CONTACT_TIED_SURFACE_TO_SURFACE_MORTAR` |
+| `tied_mortar` | `*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_MORTAR_TIED` |
 | `single` | `*CONTACT_AUTOMATIC_SINGLE_SURFACE` |
 | `eroding` | `*CONTACT_ERODING_SURFACE_TO_SURFACE` |
 | `forming` | `*CONTACT_FORMING_SURFACE_TO_SURFACE` |
@@ -2243,7 +2243,7 @@ AUTOMATIC_SURFACE_TO_SURFACE_TIEBREAK   AUTOMATIC_ONE_WAY_SURFACE_TO_SURFACE
 AUTOMATIC_SINGLE_SURFACE                AUTOMATIC_SINGLE_SURFACE_MORTAR
 AUTOMATIC_NODES_TO_SURFACE              AUTOMATIC_GENERAL
 TIED_SURFACE_TO_SURFACE                 TIED_SURFACE_TO_SURFACE_OFFSET
-TIED_SURFACE_TO_SURFACE_FAILURE         TIED_SURFACE_TO_SURFACE_MORTAR
+TIED_SURFACE_TO_SURFACE_FAILURE         AUTOMATIC_SURFACE_TO_SURFACE_MORTAR_TIED
 TIED_SURFACE_TO_SURFACE_THERMAL         TIED_NODES_TO_SURFACE
 TIED_NODES_TO_SURFACE_OFFSET            TIED_SHELL_EDGE_TO_SURFACE
 TIED_SHELL_EDGE_TO_SURFACE_OFFSET       ERODING_SURFACE_TO_SURFACE
@@ -2260,11 +2260,32 @@ FORMING_NODES_TO_SURFACE
        tied_thermal, thermal, tiebreak, mortar, tied_mortar, single, eroding, forming
 ```
 
+> **필수 카드와 카드 순서(2026-10-23)**: 매뉴얼은 카드를 「정확히 이 순서」로 읽습니다 — ID → MPP 1(→ `&` 로 시작하는 MPP 2)
+> → Card 1·2·3 → 형이 요구하는 Card 4 → THRM 1 → ORFR → 선택 카드 A~G. KooRemapper 는 이 순서로 쓰고 읽습니다.
+>
+> - **AUTOMATIC_…_TIEBREAK** — Card 4(OPTION NFLS SFLS PARAM ERATEN ERATES CT2CN)를 Card 3 바로 뒤에 씁니다. 매뉴얼이 OPTION ·
+>   NFLS · SFLS 를 required 로 두므로 `option` 이 없으면 rc=1 이고, 1(영구 고착 · 파손 없음)이 아닌 OPTION 은 `nfls` · `sfls` 도
+>   받아야 합니다. 추가 카드가 필요한 OPTION 13/14 · DAMPING ±9/±11 과 `soft: 2`(tiebreak 에 미구현)는 거절합니다.
+> - **ERODING_*** — Card 4 를 매뉴얼 기본(ISYM 0 · EROSOP 1 · IADJ 0)으로 씁니다.
+> - **_THERMAL** — THRM 1(K FRAD H0 LMIN LMAX **FTOSA** BC_FLG ALGO)을 Card 4 자리 뒤 · 선택 카드 앞에 씁니다. 6번째 칸은 3D 접촉에서
+>   FTOSA(마찰열 중 SURFA 쪽 몫, 0 = 0.5)이고 키는 `ftosa`(예전 이름 `chlm` 도 받습니다). 생략하면 0 입니다(예전엔 1.0).
+> - 필수 카드를 KooRemapper 가 못 쓰는 형 — `…_TIEBREAK_USER` · `TIEBREAK_NODES/SURFACE_…` · `…_THERMAL_FRICTION` ·
+>   `…_ORTHO_FRICTION` · `DRAWBEAD` · `CONSTRAINT_…` · `RIGID_…` · `…_INTERFERENCE` · `COMPOSITE/LUBRICATION` · `…_TIED_WELD` ·
+>   `AUTOMATIC_SINGLE_SURFACE_TIED` · `…_CONTRACTION_JOINT` — 은 위 경고와 달리 **rc=1** 로 거절합니다(불완전한 키워드를 내지 않습니다).
+>   덱에서 읽을 때 이런 형은 선택 카드 자리를 확정할 수 없어 선택 카드를 읽지도 고치지도 않습니다.
+>
+> 그 밖의 규칙 — 빈 줄도 카드입니다(빈 선택 카드 = 기본값) · 쉼표가 있는 줄은 자유 형식으로 읽습니다 · 카드 칸 키는 준 것만 쓰고
+> 음수도 그대로 씁니다(매뉴얼이 곡선 · 동적 이완 · 접촉 부피 등의 뜻을 둔 값) · 값을 반올림하지 않습니다(예전 `%10.2f` 는 0.125 를
+> 0.13 으로 썼습니다) · 숫자로 못 읽는 값은 rc=1 · Card A 의 안 준 칸은 0(= 형의 기본)으로 씁니다 · Card C 의 FLANGL 은 7열 ·
+> CID_RCF 는 8열입니다(6열 공란).
+
 `assemble` 도 같은 문구를 찍습니다(그 파일 관례대로 접두어는 `[WARNING] `). 즉 **오타는 LS-DYNA 가 잡습니다.**
 
-> **`assemble` 쪽 약칭 비대칭**: `assemble` 의 약칭 표에는 `tied_thermal`/`thermal`/`tiebreak` 항목이 없어,
-> `assemble` 안에서 `type: thermal` 은 `*CONTACT_THERMAL` 을 내며 위 경고를 받습니다.
-> `assemble` 에서는 **전체 키워드(`tied_surface_to_surface_thermal`)를 적으세요.**
+> **`assemble` 의 contact 는 Card 1-3 만 씁니다**: 약칭 표는 단독 `contact` 와 같습니다(2026-09-18 — 예전엔 `assemble` 에만
+> `tied_thermal`/`thermal`/`tiebreak` 가 없어 `*CONTACT_THERMAL` 이 나갔습니다). 하지만 Card 3 뒤에 필수 카드가 있는 형 —
+> `tied_thermal`/`thermal`(THRM 1) · `tiebreak`/`eroding`(Card 4) — 은 `assemble` 에서 `[ERROR] [contact] … 필수 카드(…)` 로
+> **rc=1** 입니다(2026-10-23 — 예전엔 Card 1-3 만 써서 LS-DYNA 가 다음 줄을 그 카드로 읽는 덱을 냈습니다).
+> 이런 접촉은 **단독 `contact` 의 create** 로 만드세요.
 
 #### `slave` / `master` 의 `pids` 표기
 

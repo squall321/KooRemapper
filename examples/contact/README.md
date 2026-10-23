@@ -292,7 +292,7 @@ contacts:
     slave: {pid: 1}
     master: {pid: 2}
     k: 100.0                     # gap 열전도도 (W/mm·K)
-    chlm: 0.5                    # 특성길이 배수
+    ftosa: 0.5                   # 마찰열 중 SURFA(슬레이브) 쪽 몫 — 0 이면 0.5(매뉴얼 THRM 1 의 6번째 칸; 예전 키 chlm 도 받는다)
 ```
 
 접촉면 열전달 카드를 생성한다. `frad`/`h0`/`lmin`/`lmax`/`bc_flag`/`algo` 도 지정 가능.
@@ -308,7 +308,7 @@ contacts:
     title: Adhesive bond
     slave: {pids: [1]}
     master: {pids: [2]}
-    option: 1                   # 1 = quadratic NFLS/SFLS 파손식
+    option: 2                   # 2 = 처음 닿아 있던 절점이 (|σn|/NFLS)² + (|σs|/SFLS)² ≥ 1 이면 떨어진다(매뉴얼 Remark 3a). 1 은 영구 고착(파손 없음)
     nfls: 10.0                  # 법선 파단 응력 (MPa)
     sfls: 50.0                  # 전단 파단 응력 (MPa)
     ct2cn: 1.0
@@ -340,7 +340,7 @@ model.k: 3 HEX8 parts (1×1×1 cubes), 공유 노드 접촉면
 | `auto` | `AUTOMATIC_SURFACE_TO_SURFACE` |
 | `tied` | `TIED_SURFACE_TO_SURFACE` |
 | `mortar` | `AUTOMATIC_SURFACE_TO_SURFACE_MORTAR` |
-| `tied_mortar` | `TIED_SURFACE_TO_SURFACE_MORTAR` |
+| `tied_mortar` | `AUTOMATIC_SURFACE_TO_SURFACE_MORTAR_TIED` |
 | `tied_thermal` | `TIED_SURFACE_TO_SURFACE_THERMAL` |
 | `tiebreak` | `AUTOMATIC_SURFACE_TO_SURFACE_TIEBREAK` |
 | `single` | `AUTOMATIC_SINGLE_SURFACE` |

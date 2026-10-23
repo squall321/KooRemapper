@@ -49,7 +49,7 @@ $#      fs        fd        dc        vc       vdc    penchk        bt        dt
 $#    sfsa      sfsb      sast      sbst     sfsat    sfsbt       fsf       vsf
        1.0       1.0       0.0       0.0       1.0       1.0       1.0       1.0
 $#    soft    sofscl    lcidab    maxpar     sbopt     depth     bsort    frcfrq
-         2      0.10         0    1.0250         2        35         0         1
+         2      0.00         0    0.0000         0        35         0         0
 $#  penmax    thkopt    shlthk     snlog      isym     i2d3d    sldthk    sldstf
     0.0000         0         1         0         0         0    0.0000    0.0000
 *CONTACT_TIED_SURFACE_TO_SURFACE_ID

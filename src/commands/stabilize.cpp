@@ -152,7 +152,9 @@ static void stab_resolveLevel(StabilizeConfig& cfg) {
         if (cfg.nsbcs  < 0) cfg.nsbcs  = 5;
         if (cfg.enmass < 0) cfg.enmass = 1;
         if (cfg.ignore_ < 0) cfg.ignore_ = 1;
-        if (cfg.maxpar  < 0) cfg.maxpar  = 1.15;
+        // ⚠ 예전엔 여기서 MAXPAR 1.15 도 썼다 — 매뉴얼은 MAXPAR 를 SOFT=2 · Mortar 에 쓰지 않는다(V71468-71478 ·
+        //   V71751 「MAXPAR on optional Card A is not supported」). SOFT=2 와 함께 쓰면 LS-DYNA 가 버리는 칸이다.
+        //   사용자가 maxpar 를 직접 주면 그대로 쓴다.
     }
     if (lv >= 9) {
         cfg.ihq = 6;
@@ -559,12 +561,19 @@ void stab_applyPerContact(std::vector<std::string>& lines,
     auto tag = [](const std::string& s) { return "[stabilize] " + s; };
     auto contacts = ct_parseContacts(lines);
     int modCount = 0;
-    for (auto& ct : contacts) {
+    // ⚠ 번호로 돈다 — 예전엔 range-for 로 돌면서 그 목록을 다시 파싱해 덮어써 반복자가 무효가 됐다(미정의 동작).
+    //   다시 파싱해도 접촉 수 · 차례는 그대로다(선택 카드 줄만 바뀐다).
+    for (size_t k = 0; k < contacts.size(); ++k) {
+        auto& ct = contacts[k];
         ContactDef merged = ct;
         bool changed = false;
         if (cfg.soft >= 0 || cfg.sbopt >= 0 || cfg.depth >= 0 || cfg.maxpar >= 0) {
             merged.hasCardA = true;
-            if (cfg.soft   >= 0) { merged.soft   = cfg.soft;   changed = true; }
+            // 매뉴얼 Remark 2 — SOFT=2 는 tiebreak 에 구현돼 있지 않다. 그 접촉에는 SOFT 를 2 로 바꾸지 않는다.
+            if (cfg.soft >= 0 && !(cfg.soft == 2 && ct.hasTiebreak)) { merged.soft = cfg.soft; changed = true; }
+            else if (cfg.soft == 2 && ct.hasTiebreak)
+                msgs.push_back(tag("*CONTACT[" + std::to_string(ct.index) + "] (TIEBREAK): SOFT=2 는 tiebreak 에 구현돼 있지 않아 "
+                                   "SOFT 는 그대로 둔다(매뉴얼 Remark 2)"));
             if (cfg.sbopt  >= 0) { merged.sbopt  = cfg.sbopt;  changed = true; }
             if (cfg.depth  >= 0) { merged.depth  = cfg.depth;  changed = true; }
             if (cfg.maxpar >= 0) { merged.maxpar = cfg.maxpar; changed = true; }
@@ -575,7 +584,12 @@ void stab_applyPerContact(std::vector<std::string>& lines,
             changed = true;
         }
         if (changed) {
-            ct_modifyOptionalCards(lines, ct, merged);
+            // 선택 카드 줄만 바꾼다(Card 4 · THRM 은 그대로). 자리를 확정할 수 없는 접촉은 건드리지 않고 말한다.
+            std::string why;
+            if (!ct_modifyOptionalCards(lines, ct, merged, &why)) {
+                msgs.push_back(tag("*CONTACT[" + std::to_string(ct.index) + "]: 건드리지 않았다 — " + why));
+                continue;
+            }
             contacts = ct_parseContacts(lines);
             modCount++;
         }

@@ -347,12 +347,14 @@ def body(binary, tmp):
           not [k for k in (asm_kw + std_kw) if k.endswith("_TITLE")],
           f"asm={asm_kw} std={std_kw}")
 
+    # tiebreak 은 Card 4 의 OPTION · NFLS · SFLS(required)를 받아야 만든다(10-23 — 예전엔 몰래 OPTION 1).
+    TB = "    option: 2\n    nfls: 10\n    sfls: 20\n"
     for alias, kw in (("tied_thermal", "TIED_SURFACE_TO_SURFACE_THERMAL"),
                       ("thermal", "TIED_SURFACE_TO_SURFACE_THERMAL"),
                       ("tiebreak", "AUTOMATIC_SURFACE_TO_SURFACE_TIEBREAK")):
         write(os.path.join(data, f"ct_{alias}.yaml"),
               f"model: box.k\noutput: ct_{alias}.k\ncontacts:\n  - action: create\n    type: {alias}\n"
-              "    slave: { pid: 1 }\n    master: { pid: 1 }\n")
+              "    slave: { pid: 1 }\n    master: { pid: 1 }\n" + (TB if alias == "tiebreak" else ""))
         rc, out = run(binary, data, "contact", f"ct_{alias}.yaml")
         check(f"contact: 별칭 '{alias}' 는 그대로 통과해 *CONTACT_{kw} 를 만든다",
               rc == 0 and ("Created *CONTACT_" + kw) in out, f"rc={rc} {out[-250:]}")

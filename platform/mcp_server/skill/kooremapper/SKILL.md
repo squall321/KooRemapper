@@ -61,6 +61,12 @@ LS-DYNA `.k` 파일을 다루는 KooRemapper 플랫폼을 Claude에서 사용하
   모르는 값은 rc=0 이지만 대문자로 그대로 나가 LS-DYNA 가 거절하므로, job 로그의
   `not a known contact keyword` 경고를 확인하라. **`assemble` 안에서도 같은 11종 약칭을 쓴다**(2026-09-18 확인) —
   예전에는 `assemble` 에만 `tied_thermal`·`thermal`·`tiebreak` 가 없어 LS-DYNA 에 없는 `*CONTACT_TIED_THERMAL` 이 나갔다.
+  **단, Card 3 뒤에 필수 카드가 있는 형은 `assemble` 이 못 만든다**(2026-10-23) — `tied_thermal`·`thermal`(THRM 1)과
+  `tiebreak`·`eroding`(Card 4). `assemble` 의 contact 는 Card 1-3 만 써서 LS-DYNA 가 다음 줄을 그 카드로 읽는 덱을 냈다.
+  이제 `[ERROR] [contact] … 필수 카드(…)` 로 rc=1 이니 단독 `contact` 의 create 로 만든다.
+  `tiebreak` 은 `option` 을 줘야 하고(매뉴얼 Card 4 의 OPTION · NFLS · SFLS 는 required), option 이 1 이 아니면
+  `nfls`·`sfls` 도 줘야 한다(안 주면 0 이라 곧바로 떨어진다). 빠지면 rc=1 이다.
+  `tied_mortar` 는 `*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_MORTAR_TIED` 다(예전 `TIED_SURFACE_TO_SURFACE_MORTAR` 는 없는 키워드였다).
 - 단독 op(`wrap`·`update`·`restack`·`bend`·`indent`·`formstrain`·`convert`·`refine`·`elform`·`disconnect`·`iga`·`warpage`·`offset`)는
   `output` 이 비면 rc=1 이다.
 - 결과 덱에 `nan`/`inf` 가 있으면 파일을 쓰지 않고 rc=1 이다. 같은 이름의 지난 결과는 지워지지 않고 남으므로,

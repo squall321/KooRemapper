@@ -5,7 +5,7 @@
 
 namespace KooRemapper {
 
-// KooRemapper 가 내는 카드 구성(카드 1·2·3 + 선택 THERMAL/TIEBREAK)과 맞는 *CONTACT 키워드.
+// KooRemapper 가 내는 카드 구성(카드 1·2·3 + 필수 Card 4/THRM 중 우리가 꼴을 아는 것)과 맞는 *CONTACT 키워드.
 // LS-DYNA 의 접촉 키워드는 이보다 훨씬 많고 판마다 늘어나므로 이 목록은 '허용값 검증' 이 아니라
 // '오타 경고' 의 기준이다 — 목록에 없는 값도 대문자로 그대로 내보낸다. examples/contact/README.md 이
 // 약속한 통과 규칙이고, KooRemapper 자신이 cclip 에서 쓰는 AUTOMATIC_NODES_TO_SURFACE 처럼
@@ -27,7 +27,8 @@ inline bool ctKnownContactKeyword(const std::string& kw) {
         "TIED_SURFACE_TO_SURFACE",
         "TIED_SURFACE_TO_SURFACE_OFFSET",
         "TIED_SURFACE_TO_SURFACE_FAILURE",
-        "TIED_SURFACE_TO_SURFACE_MORTAR",
+        // 예전 목록의 `TIED_SURFACE_TO_SURFACE_MORTAR` 는 매뉴얼에 없는 키워드였다 — Mortar 묶음은 아래 철자다(V67003).
+        "AUTOMATIC_SURFACE_TO_SURFACE_MORTAR_TIED",
         "TIED_SURFACE_TO_SURFACE_THERMAL",
         "TIED_NODES_TO_SURFACE",
         "TIED_NODES_TO_SURFACE_OFFSET",

@@ -20,6 +20,43 @@
 
 using namespace KooRemapper;
 
+static bool ct_has(const std::string& s, const char* sub) { return s.find(sub) != std::string::npos; }
+static bool ct_starts(const std::string& s, const char* pre) { return s.rfind(pre, 0) == 0; }
+
+// 형마다 Card 3 뒤에 오는 **필수 카드** — 매뉴얼 Vol_I *CONTACT 「Cards must appear in the exact order listed below」:
+//   ID → MPP 1 → (MPP 2) → Card 1 · 2 · 3 → Card 4(형마다) → THRM 1(·2…) → ORFR 1-4 → 선택 카드 A, B, …
+// Card 4 가 필요한 형(V66620-66640): AUTOMATIC_…_TIEBREAK · …_TIEBREAK_USER · …_COMPOSITE/LUBRICATION ·
+// AUTOMATIC_SINGLE_SURFACE_TIED · …_TIED_WELD · CONSTRAINT_ · DRAWBEAD · ERODING_ · _INTERFERENCE · RIGID_ ·
+// TIEBREAK_NODES_ · TIEBREAK_SURFACE_ · …_CONTRACTION_JOINT. 우리가 수를 확정할 수 있는 것은 AUTOMATIC_…_TIEBREAK
+// (OPTION 에 따라 4.1a · 4.1b · 4.2b 가 붙는다)와 ERODING(1장)뿐이다 — 나머지는 known=false.
+ct_CardSpec ct_cardSpec(const std::string& typeIn) {
+    ct_CardSpec sp;
+    const std::string t = kw_upper(typeIn);
+    const bool tiebreak = ct_has(t, "TIEBREAK");
+    if (tiebreak && ct_has(t, "TIEBREAK_USER")) {
+        sp.known = false; sp.why = "TIEBREAK_USER 의 Card 4.x 수는 사용자 인자 수에 달려 있다";
+    } else if (tiebreak && ct_starts(t, "AUTOMATIC_")) {
+        sp.card4 = 1; sp.tiebreakAuto = true; sp.damping = ct_has(t, "_DAMPING");
+    } else if (tiebreak) {   // TIEBREAK_NODES_… · TIEBREAK_SURFACE_… — AUTOMATIC 과 Card 4 꼴이 다르다
+        sp.known = false; sp.why = "TIEBREAK_NODES/SURFACE 의 Card 4 는 AUTOMATIC_…_TIEBREAK 와 꼴이 다르다";
+    } else if (ct_starts(t, "ERODING_")) {
+        sp.card4 = 1; sp.eroding = true;
+    } else if (ct_has(t, "COMPOSITE") || ct_has(t, "LUBRICATION") || ct_has(t, "TIED_WELD") ||
+               ct_starts(t, "AUTOMATIC_SINGLE_SURFACE_TIED") || ct_starts(t, "CONSTRAINT_") ||
+               ct_has(t, "DRAWBEAD") || ct_has(t, "INTERFERENCE") || ct_starts(t, "RIGID_") ||
+               ct_has(t, "CONTRACTION_JOINT")) {
+        sp.known = false; sp.why = "이 형의 Card 4 꼴을 KooRemapper 가 모른다";
+    }
+    if (ct_has(t, "THERMAL_FRICTION")) {
+        sp.known = false;
+        sp.why = (sp.why.empty() ? "" : sp.why + " · ") + std::string("THERMAL_FRICTION 의 THRM 2.1 은 THRM 2 입력에 달려 있다");
+    } else if (ct_has(t, "THERMAL")) {
+        sp.thrm = 1;
+    }
+    if (ct_has(t, "ORTHO_FRICTION")) sp.orfr = 4;
+    return sp;
+}
+
 std::vector<ContactDef> ct_parseContacts(const std::vector<std::string>& lines) {
     std::vector<ContactDef> result;
     int idx = 0;
@@ -47,6 +84,17 @@ std::vector<ContactDef> ct_parseContacts(const std::vector<std::string>& lines) 
                 typeStr = typeStr.substr(0, pos);
             }
         }
+        // `_MPP`(OPTION5) — `_ID` 처럼 끝에도, 가운데(`_MPP_ORTHO_FRICTION`)에도 온다.
+        {
+            size_t pos = typeStr.rfind("_MPP");
+            if (pos != std::string::npos && pos == typeStr.size() - 4) {
+                c.hasMpp = true;
+                typeStr = typeStr.substr(0, pos);
+            } else if ((pos = typeStr.find("_MPP_")) != std::string::npos) {
+                c.hasMpp = true;
+                typeStr = typeStr.substr(0, pos) + typeStr.substr(pos + 4);
+            }
+        }
         // `_ID` 옵션. ⚠ 끝에만 오는 것이 아니다 — 매뉴얼 정규 철자에 `_ID_OFFSET`·`_ID_MPP`
         // 처럼 뒤에 다른 옵션이 더 붙는 형태가 있다. 끝만 보면 그 덱에서 ID 줄을 Card 1 로 읽어
         // 슬레이브/마스터와 마찰계수가 통째로 한 카드씩 밀린다.
@@ -68,32 +116,35 @@ std::vector<ContactDef> ct_parseContacts(const std::vector<std::string>& lines) 
 
         // Collect data lines until next keyword
         int j = i + 1;
-        std::vector<std::string> dataLines;
         while (j < (int)lines.size()) {
             std::string jt = kw_trim(lines[j]);
             if (!jt.empty() && jt[0] == '*' && jt[0] != '$') {
                 // Check it's really a keyword, not $*comment
                 if (jt.size() >= 2 && jt[1] != '$') break;
             }
-            dataLines.push_back(lines[j]);
             ++j;
         }
         c.endLine = j;
 
-        // Parse data lines (skip comments/empty)
-        int cardNum = 0;
-        // If _TITLE or _ID: first non-comment is title/CID line
-        bool needTitle = c.hasTitle || hasId;
+        // 카드인 줄 — 주석(`$`)만 건너뛰고 **빈 줄은 카드로 센다**(매뉴얼: 「Optional Cards A … may be blank lines」).
+        // ⚠ 예전엔 빈 줄도 건너뛰어 빈 Card B 뒤의 Card C 가 Card B 로 읽히고 그렇게 다시 쓰였다.
+        std::vector<int> cardIdx;
+        for (int k = i + 1; k < j; ++k) {
+            const std::string kt = kw_trim(lines[k]);
+            if (!kt.empty() && kt[0] == '$') continue;
+            cardIdx.push_back(k);
+        }
+        size_t q = 0;
+        auto next = [&]() -> int { return q < cardIdx.size() ? cardIdx[q++] : -1; };
 
-        for (const auto& dl : dataLines) {
-            std::string dtr = kw_trim(dl);
-            if (dtr.empty() || dtr[0] == '$') continue;
-
-            if (needTitle) {
+        // ID 카드(`_ID`) · 제목 줄(`_TITLE` — 접촉에는 없는 옵션이지만 덱에서 만나면 한 줄로 읽는다)
+        if (hasId || c.hasTitle) {
+            c.idLine = next();
+            if (c.idLine >= 0) {
+                const std::string& dl = lines[c.idLine];
+                const std::string dtr = kw_trim(dl);
+                c.title = dtr;   // 되쓰기용 — 줄 전체(CID+제목)
                 if (hasId) {
-                    // CID + title on same line
-                    auto toks = kw_tok10(dl);
-                    if (!toks.empty()) c.title = dtr;  // store full line as title
                     // 보고용으로 칸을 가른다 — CID 1~10칸 · 제목 11~80칸. 쉼표가 앞에 있으면 자유 형식이다.
                     const size_t comma = dl.find(',');
                     const bool freeForm = comma != std::string::npos && comma < 10;
@@ -101,126 +152,131 @@ std::vector<ContactDef> ct_parseContacts(const std::vector<std::string>& lines) 
                     const std::string ttlPart = freeForm ? dl.substr(comma + 1) : (dl.size() > 10 ? dl.substr(10) : std::string());
                     try { c.idCid = std::stoi(kw_trim(cidPart)); } catch (...) { c.idCid = 0; }
                     c.idTitle = kw_trim(ttlPart);
-                } else {
-                    c.title = dtr;
                 }
-                needTitle = false;
-                continue;
             }
+        }
+        // MPP 1 · MPP 2 — MPP 2 는 첫 칸이 `&` 일 때만이다(V67202 「Otherwise, it is interpreted as Card 1」).
+        if (c.hasMpp) {
+            const int m1 = next();
+            if (m1 >= 0) c.mppLines.push_back(m1);
+            if (q < cardIdx.size()) {
+                const std::string& l = lines[cardIdx[q]];
+                if (!l.empty() && l[0] == '&') c.mppLines.push_back(next());
+            }
+        }
+        for (int k = 0; k < 3; ++k) c.cardLine[k] = next();
 
-            auto toks = kw_tok10(dl);
-            if (cardNum == 0) {
-                // Card 1: SSID MSID SSTYP MSTYP SBOXID MBOXID SPR MPR
-                if (toks.size() >= 1) try { c.ssid   = std::stoi(toks[0]); } catch(...){}
-                if (toks.size() >= 2) try { c.msid   = std::stoi(toks[1]); } catch(...){}
-                if (toks.size() >= 3) try { c.sstyp  = std::stoi(toks[2]); } catch(...){}
-                if (toks.size() >= 4) try { c.mstyp  = std::stoi(toks[3]); } catch(...){}
-                if (toks.size() >= 5) try { c.sboxid = std::stoi(toks[4]); } catch(...){}
-                if (toks.size() >= 6) try { c.mboxid = std::stoi(toks[5]); } catch(...){}
-                if (toks.size() >= 7) try { c.spr    = std::stoi(toks[6]); } catch(...){}
-                if (toks.size() >= 8) try { c.mpr    = std::stoi(toks[7]); } catch(...){}
-            } else if (cardNum == 1) {
-                // Card 2: FS FD DC VC VDC PENCHK BT DT
-                if (toks.size() >= 1) try { c.fs     = std::stod(toks[0]); } catch(...){}
-                if (toks.size() >= 2) try { c.fd     = std::stod(toks[1]); } catch(...){}
-                if (toks.size() >= 3) try { c.dc     = std::stod(toks[2]); } catch(...){}
-                if (toks.size() >= 4) try { c.vc     = std::stod(toks[3]); } catch(...){}
-                if (toks.size() >= 5) try { c.vdc    = std::stod(toks[4]); } catch(...){}
-                if (toks.size() >= 6) try { c.penchk = std::stoi(toks[5]); } catch(...){}
-                if (toks.size() >= 7) try { c.bt     = std::stod(toks[6]); } catch(...){}
-                if (toks.size() >= 8) try { c.dt     = std::stod(toks[7]); } catch(...){}
-            } else if (cardNum == 2) {
-                // Card 3: SFSA SFSB SAST SBST SFSAT SFSBT FSF VSF
-                if (toks.size() >= 1) try { c.sfsa   = std::stod(toks[0]); } catch(...){}
-                if (toks.size() >= 2) try { c.sfsb   = std::stod(toks[1]); } catch(...){}
-                if (toks.size() >= 3) try { c.sast   = std::stod(toks[2]); } catch(...){}
-                if (toks.size() >= 4) try { c.sbst   = std::stod(toks[3]); } catch(...){}
-                if (toks.size() >= 5) try { c.sfsat  = std::stod(toks[4]); } catch(...){}
-                if (toks.size() >= 6) try { c.sfsbt  = std::stod(toks[5]); } catch(...){}
-                if (toks.size() >= 7) try { c.fsf    = std::stod(toks[6]); } catch(...){}
-                if (toks.size() >= 8) try { c.vsf    = std::stod(toks[7]); } catch(...){}
-            } else if (cardNum == 3) {
-                // Card A: SOFT SOFSCL LCIDAB MAXPAR SBOPT DEPTH BSORT FRCFRQ
-                c.hasCardA = true;
-                if (toks.size() >= 1) try { c.soft    = std::stoi(toks[0]); } catch(...){}
-                if (toks.size() >= 2) try { c.sofscl  = std::stod(toks[1]); } catch(...){}
-                if (toks.size() >= 3) try { c.lcidab  = std::stoi(toks[2]); } catch(...){}
-                if (toks.size() >= 4) try { c.maxpar  = std::stod(toks[3]); } catch(...){}
-                if (toks.size() >= 5) try { c.sbopt   = std::stoi(toks[4]); } catch(...){}
-                if (toks.size() >= 6) try { c.depth   = std::stoi(toks[5]); } catch(...){}
-                if (toks.size() >= 7) try { c.bsort   = std::stoi(toks[6]); } catch(...){}
-                if (toks.size() >= 8) try { c.frcfrq  = std::stoi(toks[7]); } catch(...){}
-                c.optionalCards.push_back(dl);
-            } else if (cardNum == 4) {
-                // Card B: PENMAX THKOPT SHLTHK SNLOG ISYM I2D3D SLDTHK SLDSTF
-                c.hasCardB = true;
-                if (toks.size() >= 1) try { c.penmax  = std::stod(toks[0]); } catch(...){}
-                if (toks.size() >= 2) try { c.thkopt  = std::stoi(toks[1]); } catch(...){}
-                if (toks.size() >= 3) try { c.shlthk  = std::stoi(toks[2]); } catch(...){}
-                if (toks.size() >= 4) try { c.snlog   = std::stoi(toks[3]); } catch(...){}
-                if (toks.size() >= 5) try { c.isym    = std::stoi(toks[4]); } catch(...){}
-                if (toks.size() >= 6) try { c.i2d3d   = std::stoi(toks[5]); } catch(...){}
-                if (toks.size() >= 7) try { c.sldthk  = std::stod(toks[6]); } catch(...){}
-                if (toks.size() >= 8) try { c.sldstf  = std::stod(toks[7]); } catch(...){}
-                c.optionalCards.push_back(dl);
-            } else if (cardNum == 5) {
-                // Card C: IGAP IGNORE DPRFAC DTSTIF EDGEK FLANGL CID_RCF
-                c.hasCardC = true;
-                if (toks.size() >= 1) try { c.igap    = std::stoi(toks[0]); } catch(...){}
-                if (toks.size() >= 2) try { c.ignore_ = std::stoi(toks[1]); } catch(...){}
-                if (toks.size() >= 3) try { c.dprfac  = std::stod(toks[2]); } catch(...){}
-                if (toks.size() >= 4) try { c.dtstif  = std::stod(toks[3]); } catch(...){}
-                if (toks.size() >= 5) try { c.edgek   = std::stod(toks[4]); } catch(...){}
-                if (toks.size() >= 6) try { c.flangl  = std::stod(toks[5]); } catch(...){}
-                if (toks.size() >= 7) try { c.cid_rcf = std::stoi(toks[6]); } catch(...){}
-                c.optionalCards.push_back(dl);
-            } else if (cardNum == 6) {
-                // Card D: Q2TRI DTPCHK SFNBR FNLSCL DNLSCL TCSO TIEDID SHLEDG
-                c.hasCardD = true;
-                if (toks.size() >= 1) try { c.q2tri   = std::stoi(toks[0]); } catch(...){}
-                if (toks.size() >= 2) try { c.dtpchk  = std::stod(toks[1]); } catch(...){}
-                if (toks.size() >= 3) try { c.sfnbr   = std::stod(toks[2]); } catch(...){}
-                if (toks.size() >= 4) try { c.fnlscl  = std::stod(toks[3]); } catch(...){}
-                if (toks.size() >= 5) try { c.dnlscl  = std::stod(toks[4]); } catch(...){}
-                if (toks.size() >= 6) try { c.tcso    = std::stoi(toks[5]); } catch(...){}
-                if (toks.size() >= 7) try { c.tiedid  = std::stoi(toks[6]); } catch(...){}
-                if (toks.size() >= 8) try { c.shledg  = std::stoi(toks[7]); } catch(...){}
-                c.optionalCards.push_back(dl);
-            } else if (cardNum == 7) {
-                // Card E: SHAREC CPARM8 IPBACK SRNDE FRICSF ICOR FTORQ REGION
-                c.hasCardE = true;
-                if (toks.size() >= 1) try { c.sharec  = std::stoi(toks[0]); } catch(...){}
-                if (toks.size() >= 2) try { c.cparm8  = std::stoi(toks[1]); } catch(...){}
-                if (toks.size() >= 3) try { c.ipback  = std::stoi(toks[2]); } catch(...){}
-                if (toks.size() >= 4) try { c.srnde   = std::stoi(toks[3]); } catch(...){}
-                if (toks.size() >= 5) try { c.fricsf  = std::stod(toks[4]); } catch(...){}
-                if (toks.size() >= 6) try { c.icor    = std::stoi(toks[5]); } catch(...){}
-                if (toks.size() >= 7) try { c.ftorq   = std::stoi(toks[6]); } catch(...){}
-                if (toks.size() >= 8) try { c.region  = std::stoi(toks[7]); } catch(...){}
-                c.optionalCards.push_back(dl);
-            } else if (cardNum == 8) {
-                // Card F: PSTIFF IGNROFF (blank) FSTOL 2DBINR SSFTYP SWTPR TETFAC
-                c.hasCardF = true;
-                if (toks.size() >= 1) try { c.pstiff  = std::stoi(toks[0]); } catch(...){}
-                if (toks.size() >= 2) try { c.ignroff = std::stoi(toks[1]); } catch(...){}
-                // field 3 is blank
-                if (toks.size() >= 4) try { c.fstol   = std::stod(toks[3]); } catch(...){}
-                if (toks.size() >= 5) try { c.d2binr  = std::stoi(toks[4]); } catch(...){}
-                if (toks.size() >= 6) try { c.ssftyp  = std::stoi(toks[5]); } catch(...){}
-                if (toks.size() >= 7) try { c.swtpr   = std::stoi(toks[6]); } catch(...){}
-                if (toks.size() >= 8) try { c.tetfac  = std::stod(toks[7]); } catch(...){}
-                c.optionalCards.push_back(dl);
-            } else if (cardNum == 9) {
-                // Card G: (blank) SHLOFF (rest blank)
-                c.hasCardG = true;
-                // field 1 is blank
-                if (toks.size() >= 2) try { c.shloff  = std::stod(toks[1]); } catch(...){}
-                c.optionalCards.push_back(dl);
-            } else {
-                // Beyond Card G — store raw
-                c.optionalCards.push_back(dl);
+        auto num = [](const std::vector<std::string>& toks, size_t k, double& dst) {
+            if (k < toks.size()) try { dst = std::stod(toks[k]); } catch (...) {}
+        };
+        auto inum = [](const std::vector<std::string>& toks, size_t k, int& dst) {
+            if (k < toks.size()) try { dst = std::stoi(toks[k]); } catch (...) {}
+        };
+        if (c.cardLine[0] >= 0) {
+            // Card 1: SSID MSID SSTYP MSTYP SBOXID MBOXID SPR MPR
+            const auto toks = kw_tok10(lines[c.cardLine[0]]);
+            inum(toks, 0, c.ssid);   inum(toks, 1, c.msid);   inum(toks, 2, c.sstyp);  inum(toks, 3, c.mstyp);
+            inum(toks, 4, c.sboxid); inum(toks, 5, c.mboxid); inum(toks, 6, c.spr);    inum(toks, 7, c.mpr);
+        }
+        if (c.cardLine[1] >= 0) {
+            // Card 2: FS FD DC VC VDC PENCHK BT DT
+            const auto toks = kw_tok10(lines[c.cardLine[1]]);
+            num(toks, 0, c.fs);  num(toks, 1, c.fd);  num(toks, 2, c.dc);  num(toks, 3, c.vc);
+            num(toks, 4, c.vdc); inum(toks, 5, c.penchk); num(toks, 6, c.bt); num(toks, 7, c.dt);
+        }
+        if (c.cardLine[2] >= 0) {
+            // Card 3: SFSA SFSB SAST SBST SFSAT SFSBT FSF VSF
+            const auto toks = kw_tok10(lines[c.cardLine[2]]);
+            num(toks, 0, c.sfsa);  num(toks, 1, c.sfsb);  num(toks, 2, c.sast); num(toks, 3, c.sbst);
+            num(toks, 4, c.sfsat); num(toks, 5, c.sfsbt); num(toks, 6, c.fsf);  num(toks, 7, c.vsf);
+        }
+
+        // Card 4 · THRM · ORFR — 형이 요구하는 필수 카드(선택 카드보다 **앞**). 수를 모르면 선택 카드 자리도 모른다.
+        const ct_CardSpec spec = ct_cardSpec(c.type);
+        c.layoutKnown = spec.known;
+        c.layoutWhy = spec.why;
+        int nCard4 = spec.card4;
+        if (spec.tiebreakAuto && q < cardIdx.size()) {
+            // OPTION 에 따라 카드가 붙는다 — DAMPING 이면서 ±9 · ±11 이면 4.1a, 13 · 14 면 4.1b · 4.2b(V68155-68230)
+            const auto toks = kw_tok10(lines[cardIdx[q]]);
+            int opt = 0;
+            inum(toks, 0, opt);
+            if (spec.damping && (opt == 9 || opt == -9 || opt == 11 || opt == -11)) nCard4 += 1;
+            if (opt == 13 || opt == 14) nCard4 += 2;
+        }
+        for (int k = 0; k < nCard4; ++k) { const int ln = next(); if (ln < 0) break; c.card4Lines.push_back(ln); }
+        if (!c.card4Lines.empty()) {
+            const auto toks = kw_tok10(lines[c.card4Lines[0]]);
+            if (spec.tiebreakAuto) {
+                // Card 4: OPTION NFLS SFLS PARAM ERATEN ERATES CT2CN CN
+                c.hasTiebreak = true;
+                inum(toks, 0, c.tbOption); num(toks, 1, c.tbNfls); num(toks, 2, c.tbSfls); num(toks, 3, c.tbParam);
+                num(toks, 4, c.tbEraten);  num(toks, 5, c.tbErates); num(toks, 6, c.tbCt2cn);
+            } else if (spec.eroding) {
+                c.hasEroding = true;
             }
-            cardNum++;
+        }
+        for (int k = 0; k < spec.thrm; ++k) { const int ln = next(); if (ln < 0) break; c.thrmLines.push_back(ln); }
+        if (!c.thrmLines.empty()) {
+            // THRM 1: K FRAD H0 LMIN LMAX FTOSA BC_FLG ALGO
+            const auto toks = kw_tok10(lines[c.thrmLines[0]]);
+            c.hasThermal = true;
+            num(toks, 0, c.thK);    num(toks, 1, c.thFrad);  num(toks, 2, c.thH0); num(toks, 3, c.thLmin);
+            num(toks, 4, c.thLmax); num(toks, 5, c.thFtosa); inum(toks, 6, c.thBcflag); inum(toks, 7, c.thAlgo);
+        }
+        for (int k = 0; k < spec.orfr; ++k) { const int ln = next(); if (ln < 0) break; c.orfrLines.push_back(ln); }
+
+        // 선택 카드 A, B, … — 자리를 모르면(필수 카드 수 미확정) 읽지 않는다(Card 4 를 Card A 로 읽으면 안 된다).
+        if (c.layoutKnown) {
+            int cardNum = 0;
+            while (q < cardIdx.size()) {
+                const int ln = next();
+                c.optLines.push_back(ln);
+                const std::string& dl = lines[ln];
+                const auto toks = kw_tok10(dl);
+                c.optionalCards.push_back(dl);
+                switch (cardNum) {
+                case 0:   // Card A: SOFT SOFSCL LCIDAB MAXPAR SBOPT DEPTH BSORT FRCFRQ
+                    c.hasCardA = true;
+                    inum(toks, 0, c.soft);  num(toks, 1, c.sofscl); inum(toks, 2, c.lcidab); num(toks, 3, c.maxpar);
+                    inum(toks, 4, c.sbopt); inum(toks, 5, c.depth); inum(toks, 6, c.bsort);  inum(toks, 7, c.frcfrq);
+                    break;
+                case 1:   // Card B: PENMAX THKOPT SHLTHK SNLOG ISYM I2D3D SLDTHK SLDSTF
+                    c.hasCardB = true;
+                    num(toks, 0, c.penmax); inum(toks, 1, c.thkopt); inum(toks, 2, c.shlthk); inum(toks, 3, c.snlog);
+                    inum(toks, 4, c.isym);  inum(toks, 5, c.i2d3d);  num(toks, 6, c.sldthk);  num(toks, 7, c.sldstf);
+                    break;
+                case 2:   // Card C: IGAP IGNORE DPRFAC DTSTIF EDGEK (공란) FLANGL CID_RCF
+                    // ⚠ 6열은 공란이고 FLANGL 이 7열 · CID_RCF 가 8열이다(PDF 1210쪽 표). 예전엔 6 · 7열로 읽고 써서
+                    //   FLANGL 을 잃고 그 값을 CID_RCF 로 읽었다.
+                    c.hasCardC = true;
+                    inum(toks, 0, c.igap);  inum(toks, 1, c.ignore_); num(toks, 2, c.dprfac); num(toks, 3, c.dtstif);
+                    num(toks, 4, c.edgek);  num(toks, 6, c.flangl);   inum(toks, 7, c.cid_rcf);
+                    break;
+                case 3:   // Card D: Q2TRI DTPCHK SFNBR FNLSCL DNLSCL TCSO TIEDID SHLEDG
+                    c.hasCardD = true;
+                    inum(toks, 0, c.q2tri); num(toks, 1, c.dtpchk); num(toks, 2, c.sfnbr);  num(toks, 3, c.fnlscl);
+                    num(toks, 4, c.dnlscl); inum(toks, 5, c.tcso);  inum(toks, 6, c.tiedid); inum(toks, 7, c.shledg);
+                    break;
+                case 4:   // Card E: SHAREC CPARM8 IPBACK SRNDE FRICSF ICOR FTORQ REGION
+                    c.hasCardE = true;
+                    inum(toks, 0, c.sharec); inum(toks, 1, c.cparm8); inum(toks, 2, c.ipback); inum(toks, 3, c.srnde);
+                    num(toks, 4, c.fricsf);  inum(toks, 5, c.icor);   inum(toks, 6, c.ftorq);  inum(toks, 7, c.region);
+                    break;
+                case 5:   // Card F: PSTIFF IGNROFF (공란) FSTOL 2DBINR SSFTYP SWTPR TETFAC
+                    c.hasCardF = true;
+                    inum(toks, 0, c.pstiff); inum(toks, 1, c.ignroff); num(toks, 3, c.fstol); inum(toks, 4, c.d2binr);
+                    inum(toks, 5, c.ssftyp); inum(toks, 6, c.swtpr);   num(toks, 7, c.tetfac);
+                    break;
+                case 6:   // Card G: (공란) SHLOFF
+                    c.hasCardG = true;
+                    num(toks, 1, c.shloff);
+                    break;
+                default:  // Card G 너머 — 원문만 든다
+                    break;
+                }
+                cardNum++;
+            }
         }
         result.push_back(c);
         i = j - 1;  // advance outer loop
@@ -988,8 +1044,10 @@ ct_ContactPreset ct_getPreset(const std::string& contactType) {
         return {"AUTOMATIC_SURFACE_TO_SURFACE_TIEBREAK", true};
     if (t == "mortar")
         return {"AUTOMATIC_SURFACE_TO_SURFACE_MORTAR", true};
+    // ⚠ 예전엔 `TIED_SURFACE_TO_SURFACE_MORTAR` 를 냈다 — 매뉴얼에 없는 키워드다(Vol_I 0회). Mortar 묶음 접촉은
+    //   `AUTOMATIC_SURFACE_TO_SURFACE_MORTAR_TIED`(V67003)다.
     if (t == "tied_mortar")
-        return {"TIED_SURFACE_TO_SURFACE_MORTAR", true};
+        return {"AUTOMATIC_SURFACE_TO_SURFACE_MORTAR_TIED", true};
     if (t == "single")
         return {"AUTOMATIC_SINGLE_SURFACE", false};
     if (t == "eroding")
@@ -1006,93 +1064,94 @@ ct_ContactPreset ct_getPreset(const std::string& contactType) {
 
 // ---- Skip/Subtract helpers ----
 
+static std::array<int,4> ct_segKey(std::array<int,4> f) { std::sort(f.begin(), f.end()); return f; }
+
+ct_SegOwners ct_segmentOwners(const std::map<int, std::vector<std::array<int,4>>>& surfacesByPid) {
+    ct_SegOwners owners;
+    for (const auto& [pid, faces] : surfacesByPid)
+        for (const auto& f : faces) {
+            auto& v = owners[ct_segKey(f)];
+            if (std::find(v.begin(), v.end(), pid) == v.end()) v.push_back(pid);
+        }
+    return owners;
+}
+
+// 접촉 한쪽(SID · SSTYP)이 덮는 파트들 — 세트는 정본 해석기로(`_ADD`·`_COLLECT` 를 따라간다). 못 풀면 빈 목록 —
+// 「이미 묶였다」 를 짐작으로 단정하지 않는다. SET_SEGMENT(SSTYP 0)는 세그먼트를 가진 파트로 푼다(`owners` 가 있을 때).
+static std::set<int> ct_sidePids(int sid, int styp, const std::vector<SetDef>& sets, const ct_SegOwners* owners) {
+    std::set<int> out;
+    if (styp == 3) { out.insert(sid); return out; }
+    if (styp == 2) {
+        const auto m = ct_setMembers(sets, sid, "PART");
+        if (m.resolved) out.insert(m.ids.begin(), m.ids.end());
+        return out;
+    }
+    if (styp == 0 && owners) {
+        const auto m = ct_setMembers(sets, sid, "SEGMENT");
+        if (!m.resolved) return out;
+        for (const auto& g : m.segments) {
+            auto it = owners->find(ct_segKey(g));
+            if (it != owners->end()) out.insert(it->second.begin(), it->second.end());
+        }
+    }
+    return out;
+}
+
 // Check if a PID pair has an existing contact
 // mode: "tied" → only TIED contacts, "all" → any contact
 bool ct_pairHasExisting(int pidA, int pidB,
         const std::vector<ContactDef>& contacts,
         const std::vector<SetDef>& sets,
-        const std::string& mode) {
+        const std::string& mode,
+        const ct_SegOwners* owners) {
     for (const auto& ct : contacts) {
-        // Check if contact type matches mode
         bool typeMatch = false;
         if (mode == "all") {
             typeMatch = true;
         } else if (mode == "tied") {
-            std::string up = ct.type;
-            std::transform(up.begin(), up.end(), up.begin(),
-                [](unsigned char c) { return (char)std::toupper(c); });
-            typeMatch = (up.find("TIED") != std::string::npos);
+            typeMatch = (kw_upper(ct.type).find("TIED") != std::string::npos);
         } else {
             continue;
         }
         if (!typeMatch) continue;
-
-        // Resolve PIDs from contact sides — 세트는 정본 해석기로(`_ADD`·`_COLLECT` 를 따라간다).
-        // 못 풀면 빈 목록 — 「이미 묶였다」 를 짐작으로 단정하지 않는다.
-        auto resolvePids = [&](int sid, int styp) -> std::vector<int> {
-            if (styp == 3) return {sid};
-            if (styp == 2) {
-                auto m = ct_setMembers(sets, sid, "PART");
-                if (m.resolved) return m.ids;
-            }
-            // SSTYP=0 (segment): can't directly resolve to PID — skip
-            return {};
-        };
-
-        auto sPids = resolvePids(ct.ssid, ct.sstyp);
-        auto mPids = resolvePids(ct.msid, ct.mstyp);
-        std::set<int> sSet(sPids.begin(), sPids.end());
-        std::set<int> mSet(mPids.begin(), mPids.end());
-
+        const auto sSet = ct_sidePids(ct.ssid, ct.sstyp, sets, owners);
+        const auto mSet = ct_sidePids(ct.msid, ct.mstyp, sets, owners);
         // Check both orderings: (A in slave, B in master) or (A in master, B in slave)
-        if ((sSet.count(pidA) && mSet.count(pidB)) ||
-            (sSet.count(pidB) && mSet.count(pidA))) {
+        if ((sSet.count(pidA) && mSet.count(pidB)) || (sSet.count(pidB) && mSet.count(pidA)))
             return true;
-        }
     }
     return false;
 }
 
 // Get existing tied segments for a PID pair from existing contacts
-// Returns {slaveFaces, masterFaces} — empty if not found or not segment-based
+// Returns {faces of pidA's side, faces of pidB's side} — empty if not found
 std::pair<std::vector<std::array<int,4>>, std::vector<std::array<int,4>>>
 ct_getExistingTiedSegments(int pidA, int pidB,
         const std::vector<ContactDef>& contacts,
         const std::vector<SetDef>& sets,
-        const Mesh& mesh, double tol, double nAngle) {
+        const Mesh& mesh, double tol, double nAngle,
+        const ct_SegOwners* owners) {
     std::pair<std::vector<std::array<int,4>>, std::vector<std::array<int,4>>> result;
 
     for (const auto& ct : contacts) {
         // Only TIED contacts
-        std::string up = ct.type;
-        std::transform(up.begin(), up.end(), up.begin(),
-            [](unsigned char c) { return (char)std::toupper(c); });
-        if (up.find("TIED") == std::string::npos) continue;
+        if (kw_upper(ct.type).find("TIED") == std::string::npos) continue;
 
-        // Resolve PIDs — 정본 해석기로(위 판정과 같은 규칙)
-        auto resolvePids = [&](int sid, int styp) -> std::vector<int> {
-            if (styp == 3) return {sid};
-            if (styp == 2) {
-                auto m = ct_setMembers(sets, sid, "PART");
-                if (m.resolved) return m.ids;
-            }
-            return {};
-        };
-
-        auto sPids = resolvePids(ct.ssid, ct.sstyp);
-        auto mPids = resolvePids(ct.msid, ct.mstyp);
-        std::set<int> sSet(sPids.begin(), sPids.end());
-        std::set<int> mSet(mPids.begin(), mPids.end());
-
+        const auto sSet = ct_sidePids(ct.ssid, ct.sstyp, sets, owners);
+        const auto mSet = ct_sidePids(ct.msid, ct.mstyp, sets, owners);
         bool matchForward = (sSet.count(pidA) && mSet.count(pidB));
         bool matchReverse = (sSet.count(pidB) && mSet.count(pidA));
         if (!matchForward && !matchReverse) continue;
 
         // Found matching tied contact. Get segments.
         if (ct.sstyp == 0 && ct.mstyp == 0) {
-            // Already segment-based: 정본 해석기로(`*SET_SEGMENT_ADD` 도 펼친다)
-            result.first = ct_setMembers(sets, ct.ssid, "SEGMENT").segments;
-            result.second = ct_setMembers(sets, ct.msid, "SEGMENT").segments;
+            // Already segment-based: 정본 해석기로(`*SET_SEGMENT_ADD` 도 펼친다).
+            // ⚠ 슬레이브가 pidB 쪽이면(거꾸로 맞음) 두 쪽을 바꿔 돌려준다 — 예전엔 늘 슬레이브를 pidA 쪽으로 넣었다.
+            auto sl = ct_setMembers(sets, ct.ssid, "SEGMENT").segments;
+            auto ms = ct_setMembers(sets, ct.msid, "SEGMENT").segments;
+            if (!matchForward) std::swap(sl, ms);
+            result.first.insert(result.first.end(), sl.begin(), sl.end());
+            result.second.insert(result.second.end(), ms.begin(), ms.end());
         } else {
             // Part-based: use detect to find tied segments
             auto facesA = ct_extractSurface(mesh, pidA);
@@ -1105,8 +1164,6 @@ ct_getExistingTiedSegments(int pidA, int pidB,
                 for (int i : bIdx) result.second.push_back(facesB[i]);
             }
         }
-        if (matchReverse) std::swap(result.first, result.second);
-        break;
     }
     return result;
 }
@@ -1196,48 +1253,47 @@ std::string ct_generateSetNode(int setId,
     return ss.str();
 }
 
+// 실수 칸 하나 — 예전 형식으로 쓴 글자가 같은 값을 돌려주면 그 글자(골든 바이트 그대로), 아니면 값을 지키는 표기.
+// ⚠ 예전엔 형식 그대로 써서 마찰 0.125 → 0.13 · 출생 시각 0.0005 → 0.00 · 파손 응력 123.456 → 123 으로 조용히 바꿨다.
+std::string ct_real(double v, const char* legacyFmt) { return kw_realKeep(v, legacyFmt, 10); }
+
+static std::string ct_int(int v) { char b[32]; snprintf(b, sizeof(b), "%10d", v); return b; }
+
 // Format helpers for Optional Cards A~G
 static std::string ct_formatCardA(const ContactDef& d) {
-    char buf[90];
-    snprintf(buf, sizeof(buf), "%10d%10.2f%10d%10.4f%10d%10d%10d%10d",
-             d.soft, d.sofscl, d.lcidab, d.maxpar, d.sbopt, d.depth, d.bsort, d.frcfrq);
-    return "$#    soft    sofscl    lcidab    maxpar     sbopt     depth     bsort    frcfrq\n" + std::string(buf);
+    return "$#    soft    sofscl    lcidab    maxpar     sbopt     depth     bsort    frcfrq\n" +
+           ct_int(d.soft) + ct_real(d.sofscl, "%10.2f") + ct_int(d.lcidab) + ct_real(d.maxpar, "%10.4f") +
+           ct_int(d.sbopt) + ct_int(d.depth) + ct_int(d.bsort) + ct_int(d.frcfrq);
 }
 static std::string ct_formatCardB(const ContactDef& d) {
-    char buf[90];
-    snprintf(buf, sizeof(buf), "%10.4f%10d%10d%10d%10d%10d%10.4f%10.4f",
-             d.penmax, d.thkopt, d.shlthk, d.snlog, d.isym, d.i2d3d, d.sldthk, d.sldstf);
-    return "$#  penmax    thkopt    shlthk     snlog      isym     i2d3d    sldthk    sldstf\n" + std::string(buf);
+    return "$#  penmax    thkopt    shlthk     snlog      isym     i2d3d    sldthk    sldstf\n" +
+           ct_real(d.penmax, "%10.4f") + ct_int(d.thkopt) + ct_int(d.shlthk) + ct_int(d.snlog) +
+           ct_int(d.isym) + ct_int(d.i2d3d) + ct_real(d.sldthk, "%10.4f") + ct_real(d.sldstf, "%10.4f");
 }
 static std::string ct_formatCardC(const ContactDef& d) {
-    char buf[90];
-    snprintf(buf, sizeof(buf), "%10d%10d%10.4f%10.4f%10.4f%10.4f%10d%10s",
-             d.igap, d.ignore_, d.dprfac, d.dtstif, d.edgek, d.flangl, d.cid_rcf, "");
-    return "$#    igap    ignore    dprfac    dtstif     edgek    flangl   cid_rcf\n" + std::string(buf);
+    // ⚠ 6열은 공란 · FLANGL 7열 · CID_RCF 8열(PDF 1210쪽). 예전엔 6 · 7열에 써서 LS-DYNA 가 FLANGL 을 버리고
+    //   CID_RCF 를 FLANGL 로 읽었다.
+    return "$#    igap    ignore    dprfac    dtstif     edgek              flangl   cid_rcf\n" +
+           ct_int(d.igap) + ct_int(d.ignore_) + ct_real(d.dprfac, "%10.4f") + ct_real(d.dtstif, "%10.4f") +
+           ct_real(d.edgek, "%10.4f") + std::string(10, ' ') + ct_real(d.flangl, "%10.4f") + ct_int(d.cid_rcf);
 }
 static std::string ct_formatCardD(const ContactDef& d) {
-    char buf[90];
-    snprintf(buf, sizeof(buf), "%10d%10.4f%10.4f%10.4f%10.4f%10d%10d%10d",
-             d.q2tri, d.dtpchk, d.sfnbr, d.fnlscl, d.dnlscl, d.tcso, d.tiedid, d.shledg);
-    return "$#   q2tri    dtpchk     sfnbr    fnlscl    dnlscl      tcso    tiedid    shledg\n" + std::string(buf);
+    return "$#   q2tri    dtpchk     sfnbr    fnlscl    dnlscl      tcso    tiedid    shledg\n" +
+           ct_int(d.q2tri) + ct_real(d.dtpchk, "%10.4f") + ct_real(d.sfnbr, "%10.4f") + ct_real(d.fnlscl, "%10.4f") +
+           ct_real(d.dnlscl, "%10.4f") + ct_int(d.tcso) + ct_int(d.tiedid) + ct_int(d.shledg);
 }
 static std::string ct_formatCardE(const ContactDef& d) {
-    char buf[90];
-    snprintf(buf, sizeof(buf), "%10d%10d%10d%10d%10.4f%10d%10d%10d",
-             d.sharec, d.cparm8, d.ipback, d.srnde, d.fricsf, d.icor, d.ftorq, d.region);
-    return "$#  sharec    cparm8    ipback     srnde    fricsf      icor     ftorq    region\n" + std::string(buf);
+    return "$#  sharec    cparm8    ipback     srnde    fricsf      icor     ftorq    region\n" +
+           ct_int(d.sharec) + ct_int(d.cparm8) + ct_int(d.ipback) + ct_int(d.srnde) +
+           ct_real(d.fricsf, "%10.4f") + ct_int(d.icor) + ct_int(d.ftorq) + ct_int(d.region);
 }
 static std::string ct_formatCardF(const ContactDef& d) {
-    char buf[90];
-    snprintf(buf, sizeof(buf), "%10d%10d%10s%10.4f%10d%10d%10d%10.4f",
-             d.pstiff, d.ignroff, "", d.fstol, d.d2binr, d.ssftyp, d.swtpr, d.tetfac);
-    return "$#  pstiff   ignroff              fstol    2dbinr    ssftyp     swtpr    tetfac\n" + std::string(buf);
+    return "$#  pstiff   ignroff              fstol    2dbinr    ssftyp     swtpr    tetfac\n" +
+           ct_int(d.pstiff) + ct_int(d.ignroff) + std::string(10, ' ') + ct_real(d.fstol, "%10.4f") +
+           ct_int(d.d2binr) + ct_int(d.ssftyp) + ct_int(d.swtpr) + ct_real(d.tetfac, "%10.4f");
 }
 static std::string ct_formatCardG(const ContactDef& d) {
-    char buf[90];
-    snprintf(buf, sizeof(buf), "%10s%10.4f%10s%10s%10s%10s%10s%10s",
-             "", d.shloff, "", "", "", "", "", "");
-    return "$#            shloff\n" + std::string(buf);
+    return "$#            shloff\n" + std::string(10, ' ') + ct_real(d.shloff, "%10.4f") + std::string(60, ' ');
 }
 
 // Append optional cards A~G to stream (ensures card ordering: A before B, etc.)
@@ -1284,150 +1340,108 @@ std::string ct_generateContact(const ContactDef& d) {
         ss << kw << "\n";
     }
 
-    char buf[90];
     // Card 1: SSID MSID SSTYP MSTYP SBOXID MBOXID SPR MPR
-    snprintf(buf, sizeof(buf), "%10d%10d%10d%10d%10d%10d%10d%10d",
-             d.ssid, d.msid, d.sstyp, d.mstyp, d.sboxid, d.mboxid, d.spr, d.mpr);
     ss << "$#    ssid      msid     sstyp     mstyp    sboxid    mboxid       spr       mpr\n";
-    ss << buf << "\n";
+    ss << ct_int(d.ssid) << ct_int(d.msid) << ct_int(d.sstyp) << ct_int(d.mstyp)
+       << ct_int(d.sboxid) << ct_int(d.mboxid) << ct_int(d.spr) << ct_int(d.mpr) << "\n";
 
     // Card 2: FS FD DC VC VDC PENCHK BT DT
-    snprintf(buf, sizeof(buf), "%10.2f%10.2f%10.2f%10.2f%10.2f%10d%10.2f%10.3E",
-             d.fs, d.fd, d.dc, d.vc, d.vdc, d.penchk, d.bt, d.dt);
     ss << "$#      fs        fd        dc        vc       vdc    penchk        bt        dt\n";
-    ss << buf << "\n";
+    ss << ct_real(d.fs, "%10.2f") << ct_real(d.fd, "%10.2f") << ct_real(d.dc, "%10.2f") << ct_real(d.vc, "%10.2f")
+       << ct_real(d.vdc, "%10.2f") << ct_int(d.penchk) << ct_real(d.bt, "%10.2f") << ct_real(d.dt, "%10.3E") << "\n";
 
     // Card 3: SFSA SFSB SAST SBST SFSAT SFSBT FSF VSF
-    snprintf(buf, sizeof(buf), "%10.2f%10.2f%10.2f%10.2f%10.2f%10.2f%10.2f%10.2f",
-             d.sfsa, d.sfsb, d.sast, d.sbst, d.sfsat, d.sfsbt, d.fsf, d.vsf);
     ss << "$#    sfsa      sfsb      sast      sbst     sfsat     sfsbt       fsf       vsf\n";
-    ss << buf << "\n";
+    ss << ct_real(d.sfsa, "%10.2f") << ct_real(d.sfsb, "%10.2f") << ct_real(d.sast, "%10.2f") << ct_real(d.sbst, "%10.2f")
+       << ct_real(d.sfsat, "%10.2f") << ct_real(d.sfsbt, "%10.2f") << ct_real(d.fsf, "%10.2f") << ct_real(d.vsf, "%10.2f") << "\n";
+
+    // Card 4 — 형이 요구하는 필수 카드. ⚠ 선택 카드보다 **앞**이다(매뉴얼 카드 순서). 예전엔 THRM · TIEBREAK 카드를
+    // 선택 카드 뒤에 써서, 선택 카드가 있으면 LS-DYNA 가 Card A 를 Card 4 로 읽었다.
+    if (d.hasTiebreak) {
+        // AUTOMATIC_…_TIEBREAK: OPTION NFLS SFLS PARAM ERATEN ERATES CT2CN
+        ss << "$#  option      nfls      sfls     param    eraten    erates     ct2cn\n";
+        ss << ct_int(d.tbOption) << ct_real(d.tbNfls, "%10.3g") << ct_real(d.tbSfls, "%10.3g")
+           << ct_real(d.tbParam, "%10.3g") << ct_real(d.tbEraten, "%10.3g") << ct_real(d.tbErates, "%10.3g")
+           << ct_real(d.tbCt2cn, "%10.3g") << "\n";
+    }
+    if (d.hasEroding) {
+        // ERODING_*: ISYM EROSOP IADJ — 매뉴얼 기본(0 · 1 · 0)
+        ss << "$#    isym    erosop      iadj\n";
+        ss << ct_int(0) << ct_int(1) << ct_int(0) << "\n";
+    }
+    // THRM 1 (_THERMAL): K FRAD H0 LMIN LMAX FTOSA BC_FLG ALGO — Card 4 뒤 · 선택 카드 앞
+    if (d.hasThermal) {
+        ss << "$#       k      frad        h0      lmin      lmax     ftosa    bc_flg      algo\n";
+        ss << ct_real(d.thK, "%10.3g") << ct_real(d.thFrad, "%10.3g") << ct_real(d.thH0, "%10.3g")
+           << ct_real(d.thLmin, "%10.3g") << ct_real(d.thLmax, "%10.3g") << ct_real(d.thFtosa, "%10.3g")
+           << ct_int(d.thBcflag) << ct_int(d.thAlgo) << "\n";
+    }
 
     // Optional Cards A~G
     ct_appendOptionalCards(ss, d);
 
-    // THERMAL 카드 (_THERMAL 계열) — 옵션 카드 뒤. K FRAD H0 LMIN LMAX CHLM BC_FLAG ALGO
-    if (d.hasThermal) {
-        snprintf(buf, sizeof(buf), "%10.3g%10.3g%10.3g%10.3g%10.3g%10.3g%10d%10d",
-                 d.thK, d.thFrad, d.thH0, d.thLmin, d.thLmax, d.thChlm, d.thBcflag, d.thAlgo);
-        ss << "$#       k      frad        h0      lmin      lmax      chlm   bc_flag      algo\n";
-        ss << buf << "\n";
-    }
-    // TIEBREAK 카드 (_TIEBREAK 계열) — 옵션 카드 뒤. OPTION NFLS SFLS PARAM ERATEN ERATES CT2CN
-    if (d.hasTiebreak) {
-        snprintf(buf, sizeof(buf), "%10d%10.3g%10.3g%10.3g%10.3g%10.3g%10.3g",
-                 d.tbOption, d.tbNfls, d.tbSfls, d.tbParam, d.tbEraten, d.tbErates, d.tbCt2cn);
-        ss << "$#  option      nfls      sfls     param    eraten    erates     ct2cn\n";
-        ss << buf << "\n";
-    }
-
     return ss.str();
 }
 
+// 카드 k(0=Card 1 · 1=Card 2 · 2=Card 3)의 칸 하나를 그 자리에서 고친다 — 줄은 파서가 찾은 자리다(직접 세지 않는다).
+bool ct_setCardField(std::vector<std::string>& lines, const ContactDef& c, int card, int field,
+        const std::string& text) {
+    if (card < 0 || card > 2) return false;
+    const int ln = c.cardLine[card];
+    if (ln < 0 || ln >= (int)lines.size()) return false;
+    lines[ln] = kw_setField(lines[ln], field * 10, 10, text);
+    return true;
+}
+
 // Modify an existing contact's Card 1 fields in-place
-void ct_modifyContactCard1(std::vector<std::string>& lines,
+bool ct_modifyContactCard1(std::vector<std::string>& lines,
         const ContactDef& c,
         int newSsid, int newMsid, int newSstyp, int newMstyp) {
-    // Find Card 1 data line in [startLine, endLine)
-    bool titleSkipped = !(c.hasTitle || c.hasId);
-    int cardNum = 0;
-    for (int i = c.startLine + 1; i < c.endLine; ++i) {
-        std::string dtr = kw_trim(lines[i]);
-        if (dtr.empty() || dtr[0] == '$') continue;
-        if (!titleSkipped) { titleSkipped = true; continue; }
-        if (cardNum == 0) {
-            // This is Card 1 — modify in place
-            std::string line = lines[i];
-            if (newSsid  >= 0) line = kw_setField(line, 0, 10, std::to_string(newSsid));
-            if (newMsid  >= 0) line = kw_setField(line, 10, 10, std::to_string(newMsid));
-            if (newSstyp >= 0) line = kw_setField(line, 20, 10, std::to_string(newSstyp));
-            if (newMstyp >= 0) line = kw_setField(line, 30, 10, std::to_string(newMstyp));
-            lines[i] = line;
-            return;
-        }
-        cardNum++;
-    }
+    if (c.cardLine[0] < 0) return false;
+    if (newSsid  >= 0) ct_setCardField(lines, c, 0, 0, std::to_string(newSsid));
+    if (newMsid  >= 0) ct_setCardField(lines, c, 0, 1, std::to_string(newMsid));
+    if (newSstyp >= 0) ct_setCardField(lines, c, 0, 2, std::to_string(newSstyp));
+    if (newMstyp >= 0) ct_setCardField(lines, c, 0, 3, std::to_string(newMstyp));
+    return true;
 }
 
 // Modify Card 2 FS field
 void ct_modifyContactFs(std::vector<std::string>& lines,
         const ContactDef& c, double newFs) {
-    bool titleSkipped = !(c.hasTitle || c.hasId);
-    int cardNum = 0;
-    for (int i = c.startLine + 1; i < c.endLine; ++i) {
-        std::string dtr = kw_trim(lines[i]);
-        if (dtr.empty() || dtr[0] == '$') continue;
-        if (!titleSkipped) { titleSkipped = true; continue; }
-        if (cardNum == 1) {
-            // Card 2 — modify FS at [0, 10)
-            char buf[20]; snprintf(buf, sizeof(buf), "%10.2f", newFs);
-            lines[i] = kw_setField(lines[i], 0, 10, std::string(buf));
-            return;
-        }
-        cardNum++;
-    }
+    ct_setCardField(lines, c, 1, 0, ct_real(newFs, "%10.2f"));
 }
 
-// Replace all optional cards (Card A~G) in existing contact
-// Finds Card 3 position, removes everything after it until endLine, inserts new cards
-void ct_modifyOptionalCards(std::vector<std::string>& lines,
-        ContactDef& ct, const ContactDef& newVals) {
-    // Find position after Card 3
-    bool titleSkipped = !(ct.hasTitle || ct.hasId);
-    int cardNum = 0;
-    int card3Line = -1;
-    for (int i = ct.startLine + 1; i < ct.endLine; ++i) {
-        std::string dtr = kw_trim(lines[i]);
-        if (dtr.empty() || dtr[0] == '$') continue;
-        if (!titleSkipped) { titleSkipped = true; continue; }
-        if (cardNum == 2) { card3Line = i; break; }
-        cardNum++;
+// 선택 카드(A…)만 바꾼다 — 마지막 필수 카드(Card 3 · Card 4 · THRM · ORFR) **뒤**부터 블록 끝까지를 새 선택 카드로.
+// ⚠ 예전엔 「Card 3 뒤 전부」 를 지워 TIEBREAK Card 4 · THRM 1 이 사라지고 그 자리에 Card A 가 들어갔다.
+bool ct_modifyOptionalCards(std::vector<std::string>& lines,
+        ContactDef& ct, const ContactDef& newVals, std::string* why) {
+    if (!ct.layoutKnown) {
+        if (why) *why = "선택 카드 자리를 확정할 수 없다 — " + ct.layoutWhy;
+        return false;
     }
-    if (card3Line < 0) return;
-
-    // Find range of optional cards: from card3Line+1 to endLine
-    // Skip any comment lines that follow Card 3 data line
-    int optStart = card3Line + 1;
-    int optEnd = ct.endLine;
-
-    // Remove old optional card lines (including their comment lines)
-    if (optEnd > optStart) {
-        lines.erase(lines.begin() + optStart, lines.begin() + optEnd);
+    if (ct.cardLine[2] < 0) {
+        if (why) *why = "Card 3 이 없다 — 선택 카드는 Card 3(과 필수 카드) 뒤에 온다";
+        return false;
     }
+    int lastMand = ct.cardLine[2];
+    for (const auto* v : {&ct.card4Lines, &ct.thrmLines, &ct.orfrLines})
+        if (!v->empty()) lastMand = std::max(lastMand, v->back());
 
-    // Generate new optional cards
+    const int optStart = lastMand + 1;
+    const int optEnd = ct.endLine;
+    if (optEnd > optStart) lines.erase(lines.begin() + optStart, lines.begin() + optEnd);
+
     std::ostringstream ss;
     ct_appendOptionalCards(ss, newVals);
-    std::string newCards = ss.str();
-
-    // Insert new lines
     std::vector<std::string> newLines;
-    if (!newCards.empty()) {
-        std::istringstream is(newCards);
+    {
+        std::istringstream is(ss.str());
         std::string ln;
         while (std::getline(is, ln)) newLines.push_back(ln);
     }
-
-    if (!newLines.empty()) {
-        lines.insert(lines.begin() + optStart, newLines.begin(), newLines.end());
-    }
-
-    // Update endLine
-    int delta = (int)newLines.size() - (optEnd - optStart);
-    ct.endLine += delta;
-
-    // Update parsed fields
-    ct.hasCardA = newVals.hasCardA; ct.soft = newVals.soft; ct.sofscl = newVals.sofscl;
-    ct.lcidab = newVals.lcidab; ct.maxpar = newVals.maxpar; ct.sbopt = newVals.sbopt;
-    ct.depth = newVals.depth; ct.bsort = newVals.bsort; ct.frcfrq = newVals.frcfrq;
-    ct.hasCardB = newVals.hasCardB; ct.penmax = newVals.penmax; ct.thkopt = newVals.thkopt;
-    ct.shlthk = newVals.shlthk; ct.snlog = newVals.snlog; ct.isym = newVals.isym;
-    ct.i2d3d = newVals.i2d3d; ct.sldthk = newVals.sldthk; ct.sldstf = newVals.sldstf;
-    ct.hasCardC = newVals.hasCardC; ct.igap = newVals.igap; ct.ignore_ = newVals.ignore_;
-    ct.dprfac = newVals.dprfac; ct.dtstif = newVals.dtstif; ct.edgek = newVals.edgek;
-    ct.flangl = newVals.flangl; ct.cid_rcf = newVals.cid_rcf;
-    ct.hasCardD = newVals.hasCardD; ct.hasCardE = newVals.hasCardE;
-    ct.hasCardF = newVals.hasCardF; ct.hasCardG = newVals.hasCardG;
+    if (!newLines.empty()) lines.insert(lines.begin() + optStart, newLines.begin(), newLines.end());
+    ct.endLine += (int)newLines.size() - (optEnd - optStart);
+    return true;
 }
 
 // Remove a block [startLine, endLine) from lines
@@ -1519,23 +1533,38 @@ void ct_analyze(const std::vector<ContactDef>& contacts,
 
         // Friction & Card 2 options
         char fbuf[120];
-        snprintf(fbuf, sizeof(fbuf), "      FS=%.2f  FD=%.2f", c.fs, c.fd);
+        // ⚠ 보고도 값을 반올림하지 않는다(예전 `%.2f` 는 마찰 0.125 를 0.13 으로 보였다).
+        snprintf(fbuf, sizeof(fbuf), "      FS=%.6g  FD=%.6g", c.fs, c.fd);
         std::string optLine(fbuf);
-        if (c.dc != 0) { snprintf(fbuf, sizeof(fbuf), "  DC=%.2f", c.dc); optLine += fbuf; }
-        if (c.vc != 0) { snprintf(fbuf, sizeof(fbuf), "  VC=%.2f", c.vc); optLine += fbuf; }
+        if (c.dc != 0) { snprintf(fbuf, sizeof(fbuf), "  DC=%.6g", c.dc); optLine += fbuf; }
+        if (c.vc != 0) { snprintf(fbuf, sizeof(fbuf), "  VC=%.6g", c.vc); optLine += fbuf; }
         if (c.penchk != 0) optLine += "  PENCHK=" + std::to_string(c.penchk);
         console.println(optLine);
 
-        // Card A
+        // 필수 카드(Card 4 · THRM) — 선택 카드보다 앞이다
+        if (c.hasTiebreak) {
+            snprintf(fbuf, sizeof(fbuf), "      Card 4 (TIEBREAK): OPTION=%d  NFLS=%.6g  SFLS=%.6g", c.tbOption, c.tbNfls, c.tbSfls);
+            console.println(fbuf);
+        }
+        if (c.hasEroding) console.println("      Card 4 (ERODING) 있음");
+        if (c.hasThermal) {
+            snprintf(fbuf, sizeof(fbuf), "      THRM 1: K=%.6g  FRAD=%.6g  H0=%.6g  FTOSA=%.6g", c.thK, c.thFrad, c.thH0, c.thFtosa);
+            console.println(fbuf);
+        }
+        if (c.hasMpp) console.println("      MPP 카드 " + std::to_string(c.mppLines.size()) + "장(Card 1 앞)");
+        if (!c.layoutKnown)
+            console.println("      ⚠ 선택 카드 자리를 확정하지 못했다 — " + c.layoutWhy + " (선택 카드는 읽지도 고치지도 않는다)");
+
+        // Card A — 0 은 「형의 기본」 이라 0 이 아닌 칸만 적는다
         if (c.hasCardA) {
             std::string ca = "      Card A: SOFT=" + std::to_string(c.soft);
-            if (c.sofscl != 0.1) { snprintf(fbuf, sizeof(fbuf), "  SOFSCL=%.2f", c.sofscl); ca += fbuf; }
-            if (c.depth != 2) ca += "  DEPTH=" + std::to_string(c.depth);
-            if (c.sbopt != 2) ca += "  SBOPT=" + std::to_string(c.sbopt);
+            if (c.sofscl != 0) { snprintf(fbuf, sizeof(fbuf), "  SOFSCL=%.6g", c.sofscl); ca += fbuf; }
+            if (c.depth != 0) ca += "  DEPTH=" + std::to_string(c.depth);
+            if (c.sbopt != 0) ca += "  SBOPT=" + std::to_string(c.sbopt);
             if (c.bsort != 0) ca += "  BSORT=" + std::to_string(c.bsort);
-            if (c.frcfrq != 1) ca += "  FRCFRQ=" + std::to_string(c.frcfrq);
+            if (c.frcfrq != 0) ca += "  FRCFRQ=" + std::to_string(c.frcfrq);
             if (c.lcidab != 0) ca += "  LCIDAB=" + std::to_string(c.lcidab);
-            if (c.maxpar != 1.025) { snprintf(fbuf, sizeof(fbuf), "  MAXPAR=%.4f", c.maxpar); ca += fbuf; }
+            if (c.maxpar != 0) { snprintf(fbuf, sizeof(fbuf), "  MAXPAR=%.6g", c.maxpar); ca += fbuf; }
             console.println(ca);
         }
         // Card B

@@ -14434,6 +14434,17 @@ static std::string ca_getContactKeyword(const std::string& type) {
     return keyword;
 }
 
+// 형이 요구하는 필수 카드(Card 4 · THRM · ORFR)가 있으면 assemble 은 그 형을 쓰지 않는다 — Card 1-3 만 쓰기 때문이다.
+// ⚠ 예전엔 tied_thermal · tiebreak · eroding 을 골라도 Card 1-3 만 써서 필수 카드 없는 키워드를 냈다(rc 0).
+static bool ca_cardsSupported(const std::string& keyword) {
+    const ct_CardSpec sp = ct_cardSpec(keyword);
+    if (sp.known && sp.card4 == 0 && sp.thrm == 0 && sp.orfr == 0) return true;
+    const std::string need = !sp.known ? sp.why : (sp.thrm ? "THRM 1" : (sp.orfr ? "ORFR 1-4" : "Card 4"));
+    std::cout << "[ERROR] [contact] *CONTACT_" << keyword << " 는 Card 1-3 뒤에 필수 카드(" << need
+              << ")가 필요한데 assemble 의 contact 는 Card 1-3 만 쓴다 — 단독 `contact` 의 create 로 만든다\n";
+    return false;
+}
+
 // Generate *CONTACT card (Cards 1-3 only, no optional cards)
 static std::string ca_generateContact(const std::string& contactType,
         const std::string& title,
@@ -14462,12 +14473,12 @@ static std::string ca_generateContact(const std::string& contactType,
     snprintf(buf, sizeof(buf), "%10d%10d%10d%10d%10d%10d%10d%10d",
              ssid, msid, sstyp, mstyp, 0, 0, 0, 0);
     ss << buf << "\n";
-    // Card 2
+    // Card 2 — 마찰은 반올림하지 않는다(단독 contact 와 같은 `ct_real` — 예전 `%10.2f` 는 0.125 를 0.13 으로 썼다)
     double fs = (friction >= 0) ? friction : 0.0;
     ss << "$#      fs        fd        dc        vc       vdc    penchk        bt        dt\n";
-    snprintf(buf, sizeof(buf), "%10.2f%10.2f%10.2f%10.2f%10.2f%10d%10.2f%10.3E",
-             fs, 0.0, 0.0, 0.0, 0.0, 0, 0.0, 1.0e20);
-    ss << buf << "\n";
+    snprintf(buf, sizeof(buf), "%10.2f%10.2f%10.2f%10.2f%10d%10.2f%10.3E",
+             0.0, 0.0, 0.0, 0.0, 0, 0.0, 1.0e20);
+    ss << ct_real(fs, "%10.2f") << buf << "\n";
     // Card 3
     ss << "$#    sfsa      sfsb      sast      sbst     sfsat     sfsbt       fsf       vsf\n";
     snprintf(buf, sizeof(buf), "%10.2f%10.2f%10.2f%10.2f%10.2f%10.2f%10.2f%10.2f",
@@ -14645,6 +14656,7 @@ bool ModelAssembler::applyContact(const ContactOperation& op) {
         if (act.action == "create") {
             // --- CREATE ---
             std::string contactKw = ca_getContactKeyword(act.type);
+            if (!ca_cardsSupported(contactKw)) return false;
             int ssid = 0, msid = 0, sstyp = 0, mstyp = 0;
 
             // Resolve slave side
@@ -14769,6 +14781,7 @@ bool ModelAssembler::applyContact(const ContactOperation& op) {
                         "Detect_Master_PID" + std::to_string(act.master.pid)));
 
                     std::string contactKw = ca_getContactKeyword(act.type);
+                    if (!ca_cardsSupported(contactKw)) return false;
                     std::string title = act.titlePrefix.empty() ? "" :
                         act.titlePrefix + "_PID" + std::to_string(act.slave.pid) +
                         "_PID" + std::to_string(act.master.pid);
@@ -14838,6 +14851,7 @@ bool ModelAssembler::applyContact(const ContactOperation& op) {
                             "Detect_Master_PID" + std::to_string(pidB)));
 
                         std::string contactKw = ca_getContactKeyword(act.type);
+                        if (!ca_cardsSupported(contactKw)) return false;
                         std::string title;
                         if (!act.titlePrefix.empty())
                             title = act.titlePrefix + "_PID" + std::to_string(pidA) + "_PID" + std::to_string(pidB);

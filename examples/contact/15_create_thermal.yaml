@@ -9,5 +9,5 @@ contacts:
     slave: {pid: 1}
     master: {pid: 2}
     k: 100.0                     # gap 열전도도 (W/mm·K)
-    chlm: 0.5                    # 특성길이 배수
+    ftosa: 0.5                   # 마찰열 중 SURFA(슬레이브) 쪽 몫 — 0 이면 0.5(매뉴얼 THRM 1 의 6번째 칸; 예전 키 chlm 도 받는다)
     # frad/h0/lmin/lmax/bc_flag/algo 도 지정 가능

@@ -39,7 +39,22 @@ struct ct_ContactPreset {
     bool needMasterSide;       // false for single_surface
 };
 
+// 형마다 Card 3 뒤에 오는 필수 카드 수(매뉴얼 Vol_I *CONTACT 카드 순서). known=false 면 수를 확정할 수 없다 —
+// 파서는 선택 카드를 읽지 않고, 만드는 쪽은 그 형을 거절한다(조용히 불완전한 키워드를 내지 않는다).
+struct ct_CardSpec {
+    int card4 = 0;             // AUTOMATIC_…_TIEBREAK 은 OPTION 에 따라 더 붙는다(파서가 센다)
+    int thrm = 0;              // THRM 1 (THERMAL)
+    int orfr = 0;              // ORFR 1-4 (ORTHO_FRICTION)
+    bool tiebreakAuto = false; // AUTOMATIC_…_TIEBREAK — Card 4: OPTION NFLS SFLS PARAM ERATEN ERATES CT2CN CN
+    bool damping = false;      // …_TIEBREAK_DAMPING — OPTION ±9 · ±11 이면 Card 4.1a
+    bool eroding = false;      // ERODING_* — Card 4: ISYM EROSOP IADJ
+    bool known = true;
+    std::string why;
+};
+
 // ── Public ct_* API ────────────────────────────────────────────────────────────
+
+ct_CardSpec ct_cardSpec(const std::string& type);
 
 std::vector<ContactDef> ct_parseContacts(const std::vector<std::string>& lines);
 
@@ -91,18 +106,25 @@ std::vector<ct_PairResult> ct_detectAllPairs(
         double gapTolerance,
         double normalAngleDeg);
 
+// 세그먼트(정렬한 네 절점) → 그 면을 바깥면으로 가진 파트들. SET_SEGMENT 쪽 접촉을 파트 쌍으로 비교할 때 쓴다 —
+// detect 가 만든 접촉은 전부 SET_SEGMENT 라 예전엔 skip_existing · subtract_existing 가 그것을 못 알아봤다.
+using ct_SegOwners = std::map<std::array<int,4>, std::vector<int>>;
+ct_SegOwners ct_segmentOwners(const std::map<int, std::vector<std::array<int,4>>>& surfacesByPid);
+
 std::pair<std::vector<std::array<int,4>>, std::vector<std::array<int,4>>>
 ct_getExistingTiedSegments(int pidA, int pidB,
         const std::vector<ContactDef>& contacts,
         const std::vector<SetDef>& sets,
-        const KooRemapper::Mesh& mesh, double tol, double nAngle);
+        const KooRemapper::Mesh& mesh, double tol, double nAngle,
+        const ct_SegOwners* owners = nullptr);
 
 ct_ContactPreset ct_getPreset(const std::string& contactType);
 
 bool ct_pairHasExisting(int pidA, int pidB,
         const std::vector<ContactDef>& contacts,
         const std::vector<SetDef>& sets,
-        const std::string& mode);
+        const std::string& mode,
+        const ct_SegOwners* owners = nullptr);
 
 std::string ct_generateSetSegment(int setId,
         const std::vector<std::array<int,4>>& faces,
@@ -118,15 +140,25 @@ std::string ct_generateSetNode(int setId,
 
 std::string ct_generateContact(const ContactDef& d);
 
-void ct_modifyContactCard1(std::vector<std::string>& lines,
+// Card 1 의 SSID · MSID · SSTYP · MSTYP 를 그 자리에서 고친다(음수 인자는 그대로 둔다). Card 1 이 없으면 false.
+bool ct_modifyContactCard1(std::vector<std::string>& lines,
         const ContactDef& c,
         int newSsid, int newMsid, int newSstyp, int newMstyp);
+
+// 카드 k(0=Card 1 · 1=Card 2 · 2=Card 3)의 칸 하나(0-기준)를 그 자리에서 고친다. 그 카드가 없으면 false.
+bool ct_setCardField(std::vector<std::string>& lines, const ContactDef& c, int card, int field,
+        const std::string& text);
 
 void ct_modifyContactFs(std::vector<std::string>& lines,
         const ContactDef& c, double fs);
 
-void ct_modifyOptionalCards(std::vector<std::string>& lines,
-        ContactDef& original, const ContactDef& updated);
+// 선택 카드(A…)만 다시 쓴다 — Card 4 · THRM · ORFR 는 그대로 둔다. 선택 카드 자리를 모르는 꼴(`layoutKnown=false`)이거나
+// Card 3 이 없으면 **손대지 않고** false 와 까닭(`why`)을 돌려준다.
+bool ct_modifyOptionalCards(std::vector<std::string>& lines,
+        ContactDef& original, const ContactDef& updated, std::string* why = nullptr);
+
+// 실수 칸 하나를 쓴다 — 예전 형식(`legacyFmt`)으로 쓴 글자가 같은 값이면 그 글자, 아니면 값을 지키는 가장 정밀한 표기.
+std::string ct_real(double v, const char* legacyFmt);
 
 void ct_removeBlock(std::vector<std::string>& lines, int startLine, int endLine);
 

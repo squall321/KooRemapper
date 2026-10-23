@@ -94,11 +94,11 @@ $#      fs        fd        dc        vc       vdc    penchk        bt        dt
 $#    sfsa      sfsb      sast      sbst     sfsat     sfsbt       fsf       vsf
       1.00      1.00      0.00      0.00      1.00      1.00      1.00      1.00
 $#    soft    sofscl    lcidab    maxpar     sbopt     depth     bsort    frcfrq
-         2      0.10         0    1.0250         3        35         0         1
+         2      0.10         0    0.0000         3        35         0         0
 $#  penmax    thkopt    shlthk     snlog      isym     i2d3d    sldthk    sldstf
     0.5000         1         1         0         0         0    0.0000    0.0000
-$#    igap    ignore    dprfac    dtstif     edgek    flangl   cid_rcf
-         2         1    0.0000    0.0000    0.0000    0.0000         0          
+$#    igap    ignore    dprfac    dtstif     edgek              flangl   cid_rcf
+         2         1    0.0000    0.0000    0.0000              0.0000         0
 *SET_SEGMENT_TITLE
 Auto_S_Part_2_Center
 $#     sid       da1       da2       da3       da4
@@ -128,9 +128,9 @@ $#      fs        fd        dc        vc       vdc    penchk        bt        dt
 $#    sfsa      sfsb      sast      sbst     sfsat     sfsbt       fsf       vsf
       1.00      1.00      0.00      0.00      1.00      1.00      1.00      1.00
 $#    soft    sofscl    lcidab    maxpar     sbopt     depth     bsort    frcfrq
-         2      0.10         0    1.0250         3        35         0         1
+         2      0.10         0    0.0000         3        35         0         0
 $#  penmax    thkopt    shlthk     snlog      isym     i2d3d    sldthk    sldstf
     0.5000         1         1         0         0         0    0.0000    0.0000
-$#    igap    ignore    dprfac    dtstif     edgek    flangl   cid_rcf
-         2         1    0.0000    0.0000    0.0000    0.0000         0          
+$#    igap    ignore    dprfac    dtstif     edgek              flangl   cid_rcf
+         2         1    0.0000    0.0000    0.0000              0.0000         0
 *END

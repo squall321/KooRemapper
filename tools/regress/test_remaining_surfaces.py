@@ -34,6 +34,11 @@
   [H6] assemble 의 contact create 에 단독 contact 가 가진 별칭 tied_thermal / thermal / tiebreak 가
        없어, 같은 YAML 이 단독에선 *CONTACT_TIED_SURFACE_TO_SURFACE_THERMAL, assemble 에선
        LS-DYNA 에 없는 *CONTACT_TIED_THERMAL 을 냈다. 이제 둘 다 같은 표(ct_getPreset)를 쓴다.
+       (10-23) 표만 같다고 같은 덱은 아니었다 — THERMAL · TIEBREAK · ERODING 은 Card 3 뒤에 필수 카드
+       (THRM 1 · Card 4)가 있는데 assemble 의 contact 는 Card 1-3 만 써서, LS-DYNA 가 다음 줄을 그 카드로
+       읽는 덱을 냈다. 이제 assemble 은 그 형을 [ERROR] 로 거절하고 단독 contact 의 create 로 보낸다.
+       tied_mortar 는 매뉴얼에 없는 *CONTACT_TIED_SURFACE_TO_SURFACE_MORTAR 를 냈다 — 이제
+       *CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_MORTAR_TIED(양쪽 다).
   [H7] legacy help 의 거짓 문구 — boundary 가 '*BOUNDARY_SPC_NODE, *RIGIDWALL_PLANAR 를 넣는다' 고
        적었지만 실제 산출은 *SET_NODE_LIST + *BOUNDARY_SPC_SET 이고 *RIGIDWALL 은 소스 어디에도 없다.
        select 허용값도 'direction | all' 이라고 적었지만 실제로는 direction | all | set 이다(set 은 set_id 필수).
@@ -349,23 +354,27 @@ def body(binary, gmsh, tmp):
 
     # ── H6. contact 별칭 단독 == assemble ─────────────────────────────────────
     print("[H6] contact create 의 짧은 이름이 단독과 assemble 에서 같은 키워드를 낸다")
+    # 값 = (키워드, Card 3 뒤 필수 카드). 필수 카드가 있는 형은 assemble 이 [ERROR] 로 거절한다(10-23).
     ALIASES = {
-        "auto": "*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE",
-        "automatic": "*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE",
-        "tied": "*CONTACT_TIED_SURFACE_TO_SURFACE",
-        "tied_thermal": "*CONTACT_TIED_SURFACE_TO_SURFACE_THERMAL",
-        "thermal": "*CONTACT_TIED_SURFACE_TO_SURFACE_THERMAL",
-        "tiebreak": "*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_TIEBREAK",
-        "mortar": "*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_MORTAR",
-        "tied_mortar": "*CONTACT_TIED_SURFACE_TO_SURFACE_MORTAR",
-        "single": "*CONTACT_AUTOMATIC_SINGLE_SURFACE",
-        "eroding": "*CONTACT_ERODING_SURFACE_TO_SURFACE",
-        "forming": "*CONTACT_FORMING_SURFACE_TO_SURFACE",
+        "auto": ("*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE", None),
+        "automatic": ("*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE", None),
+        "tied": ("*CONTACT_TIED_SURFACE_TO_SURFACE", None),
+        "tied_thermal": ("*CONTACT_TIED_SURFACE_TO_SURFACE_THERMAL", "THRM 1"),
+        "thermal": ("*CONTACT_TIED_SURFACE_TO_SURFACE_THERMAL", "THRM 1"),
+        "tiebreak": ("*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_TIEBREAK", "Card 4"),
+        "mortar": ("*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_MORTAR", None),
+        "tied_mortar": ("*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_MORTAR_TIED", None),
+        "single": ("*CONTACT_AUTOMATIC_SINGLE_SURFACE", None),
+        "eroding": ("*CONTACT_ERODING_SURFACE_TO_SURFACE", "Card 4"),
+        "forming": ("*CONTACT_FORMING_SURFACE_TO_SURFACE", None),
     }
-    for alias, kw in ALIASES.items():
+    # tiebreak 은 Card 4 의 OPTION · NFLS · SFLS(required)를 받아야 만든다(10-23).
+    TB = "    option: 2\n    nfls: 10\n    sfls: 20\n"
+    for alias, (kw, need) in ALIASES.items():
         write(os.path.join(data, f"cs_{alias}.yaml"),
               f"model: box.k\noutput: cs_{alias}.k\ncontacts:\n  - action: create\n"
-              f"    type: {alias}\n    slave: {{ pid: 1 }}\n    master: {{ pid: 1 }}\n")
+              f"    type: {alias}\n    slave: {{ pid: 1 }}\n    master: {{ pid: 1 }}\n" +
+              (TB if alias == "tiebreak" else ""))
         write(os.path.join(data, f"ca_{alias}.yaml"),
               f"base_model: box.k\noutput: ca_{alias}\noperations:\n  - type: contact\n"
               f"    contacts:\n      - action: create\n        type: {alias}\n"
@@ -374,9 +383,16 @@ def body(binary, gmsh, tmp):
         ra, oa = run(binary, data, "assemble", f"ca_{alias}.yaml")
         a = first_contact_kw(os.path.join(data, f"cs_{alias}.k"))
         b = first_contact_kw(os.path.join(data, f"ca_{alias}.k"))
-        check(f"contact: '{alias}' → 단독·assemble 둘 다 {kw}",
-              rs == 0 and ra == 0 and a.startswith(kw) and a == b,
-              f"alone={a!r} asm={b!r}")
+        if need is None:
+            check(f"contact: '{alias}' → 단독·assemble 둘 다 {kw}",
+                  rs == 0 and ra == 0 and a.startswith(kw) and a == b,
+                  f"alone={a!r} asm={b!r}")
+        else:
+            check(f"contact: '{alias}' → 단독은 {kw}",
+                  rs == 0 and a.startswith(kw), f"rc={rs} alone={a!r} {os_[-200:]}")
+            check(f"contact: '{alias}' → assemble 은 {need} 를 못 쓰니 [ERROR] rc=1 (덱 없음)",
+                  ra == 1 and "[ERROR] [contact]" in oa and need in oa and not b,
+                  f"rc={ra} asm={b!r} {oa[-250:]}")
         check(f"contact: '{alias}' 는 아는 키워드라 경고가 없다 (단독·assemble 모두)",
               "not a known contact keyword" not in os_ and
               "not a known contact keyword" not in oa)

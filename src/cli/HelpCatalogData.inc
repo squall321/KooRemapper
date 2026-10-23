@@ -762,7 +762,7 @@ contacts:
 )KRH"}},
      {"KooRemapper generate box box.yaml", "KooRemapper contact contact.yaml"},
      {},
-     {"action: analyze | create | detect | convert | modify | remove", "create 의 type: 짧은 이름(auto automatic tied tied_thermal thermal tiebreak mortar tied_mortar single eroding forming) 또는 *CONTACT_ 뒤 전체 키워드. 아는 키워드 밖이면 막지 않고 경고 후 그대로 쓴다(다른 열거형 키와 달리 rc=1 이 아니다)", "전체 자동: action: detect, scope: all, tolerance: 0.1, auto_create: true", "세트를 가리키는 면(SET_PART·SET_SEGMENT)은 정본 해석기로 푼다(2026-10-23) — convert · detect 의 skip_existing ·", "  analyze 목록이 `_ADD`·`_INTERSECT`·`_COLLECT` 를 따라간다. 못 풀면(`_GENERAL` 등) 바꾸지 않고 까닭을 말한다"}},
+     {"action: analyze | create | detect | convert | modify | remove", "create 의 type: 짧은 이름(auto automatic tied tied_thermal thermal tiebreak mortar tied_mortar single eroding forming) 또는 *CONTACT_ 뒤 전체 키워드. 아는 키워드 밖이면 막지 않고 경고 후 그대로 쓴다 — 단 필수 카드(Card 4 · THRM)를 KooRemapper 가 못 쓰는 형(TIEBREAK_USER · THERMAL_FRICTION · DRAWBEAD · CONSTRAINT_ …)은 rc=1 로 거절한다", "카드 순서는 매뉴얼대로(2026-10-23) — ID → MPP → Card 1·2·3 → Card 4(TIEBREAK · ERODING) · THRM 1 → 선택 카드 A~G. 빈 줄도 카드 · 쉼표 줄은 자유 형식 · tiebreak 는 option(1 = 영구 고착, 2+ = 파손 — nfls · sfls 도) 필수", "카드 칸 값은 준 것만 쓰고(음수도 그대로) 반올림하지 않는다. 숫자로 못 읽는 값은 rc=1", "전체 자동: action: detect, scope: all, tolerance: 0.1, auto_create: true", "세트를 가리키는 면(SET_PART·SET_SEGMENT)은 정본 해석기로 푼다(2026-10-23) — convert · detect 의 skip_existing ·", "  analyze 목록이 `_ADD`·`_INTERSECT`·`_COLLECT` 를 따라간다. 못 풀면(`_GENERAL` 등) 바꾸지 않고 까닭을 말한다"}},
     {"relax", "하중·경계·접촉", "초기응력 평형용 동적 이완(DR) 설정 (5단계 프리셋)", "dr dynamic relaxation 이완", "KooRemapper relax <config.yaml>",
      {{"box.yaml", R"KRH(output: box.k
 lx: 20.0
