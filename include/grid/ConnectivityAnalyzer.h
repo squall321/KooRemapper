@@ -29,14 +29,6 @@ struct Face {
         std::sort(nodeIds.begin(), nodeIds.end());
     }
 
-    // Create unique key for face identification
-    std::string getKey() const {
-        return std::to_string(nodeIds[0]) + "_" +
-               std::to_string(nodeIds[1]) + "_" +
-               std::to_string(nodeIds[2]) + "_" +
-               std::to_string(nodeIds[3]);
-    }
-
     bool operator==(const Face& other) const {
         return nodeIds == other.nodeIds;
     }
@@ -135,8 +127,15 @@ private:
     // Element ID -> list of neighbors
     std::map<int, std::vector<ElementNeighbor>> elementNeighbors_;
 
-    // Face key -> pair of (element ID, local face index)
-    std::map<std::string, std::vector<std::pair<int, int>>> faceMap_;
+    // One entry per valid element face. buildFaceMap() fills it in element
+    // order; findNeighbors() groups entries with equal node IDs, then frees it.
+    struct FaceEntry {
+        std::array<int, 4> nodeIds;                // Sorted node IDs
+        int elementId;
+        int localFaceIndex;
+        std::vector<ElementNeighbor>* neighbors;   // elementNeighbors_[elementId]
+    };
+    std::vector<FaceEntry> faceEntries_;
 
     // Boundary faces
     std::vector<Face> boundaryFaces_;
