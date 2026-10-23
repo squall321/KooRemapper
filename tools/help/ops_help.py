@@ -638,7 +638,9 @@ contacts:
    notes=["action: analyze | create | detect | convert | modify | remove",
           "create 의 type: 짧은 이름(auto automatic tied tied_thermal thermal tiebreak mortar tied_mortar single eroding forming) "
           "또는 *CONTACT_ 뒤 전체 키워드. 아는 키워드 밖이면 막지 않고 경고 후 그대로 쓴다(다른 열거형 키와 달리 rc=1 이 아니다)",
-          "전체 자동: action: detect, scope: all, tolerance: 0.1, auto_create: true"])
+          "전체 자동: action: detect, scope: all, tolerance: 0.1, auto_create: true",
+          "세트를 가리키는 면(SET_PART·SET_SEGMENT)은 정본 해석기로 푼다(2026-10-23) — convert · detect 의 skip_existing ·",
+          "  analyze 목록이 `_ADD`·`_INTERSECT`·`_COLLECT` 를 따라간다. 못 풀면(`_GENERAL` 등) 바꾸지 않고 까닭을 말한다"])
 op("relax", "하중·경계·접촉", "초기응력 평형용 동적 이완(DR) 설정 (5단계 프리셋)", "dr dynamic relaxation 이완",
    "KooRemapper relax <config.yaml>",
    files=boxed({"relax.yaml": """model: box.k
@@ -729,7 +731,9 @@ optimize: rubber
 pids: [1]
 tssfac: 0.67
 """}),
-   cmds=[BOX_CMD, "KooRemapper optimize opt.yaml"], outputs=["box_opt.k"])
+   cmds=[BOX_CMD, "KooRemapper optimize opt.yaml"], outputs=["box_opt.k"],
+   notes=["pids 가 드는 접촉을 고를 때 세트를 가리키는 면은 `_ADD`·`_INTERSECT`·`_COLLECT` 를 따라간다(2026-10-23) —",
+          "  풀지 못하면 건드리지 않고 `세트를 풀지 못해 대상 파트가 드는지 모른다` 를 남긴다"])
 
 # ── 정보 ──
 op("info", "정보·메타", "메시 정보(절점·요소·파트 수, bbox 두 기준, 품질) 출력",
@@ -769,7 +773,11 @@ gap_tol: 0.2
           "  세어 정확하다. 코너 차례를 모르는 ELFORM 25~28 · 칸이 모자란 카드가 든 파트만 volume·area_ext·proj·",
           "  edge_len·mass 가 **null**(`geometry_basis: null`) — 까닭은 `geometry_reason`·`mass_reason`.",
           "  (예전엔 리더가 앞 8칸만 담아 2차 파트 전부가 null 이었다 — 실측 부피 −48.4%)",
-          "메시도 인클루드 닫힘까지 읽는다(2026-10-16) — 마스터 덱의 파트가 비지 않는다(재질·접촉 원문은 원래 닫힘까지 모았다)"])
+          "메시도 인클루드 닫힘까지 읽는다(2026-10-16) — 마스터 덱의 파트가 비지 않는다(재질·접촉 원문은 원래 닫힘까지 모았다)",
+          "★접촉 면이 가리키는 세트는 **정본 해석기**로 푼다(2026-10-23) — `_ADD`(PART 는 음수 = 앞 칸부터의 범위 ·",
+          "  없는 세트는 빼고 적는다)·`_INTERSECT`·`_COLLECT` 를 따라간다. 못 푸는 면(`_GENERAL`·`_ADVANCED`·순환·",
+          "  없는 세트·STYP 1/6/7)은 `unresolved_sides` 로 세고 까닭을 `unresolved_detail` 에 적는다",
+          "  (예전엔 `*SET_PART_ADD` 면이 **0쌍 · 미해석 0** 으로 사라졌고 `*SET_SEGMENT_ADD` 는 세트 ID 를 절점으로 읽었다)"])
 op("foldsurface", "변형·초기응력", "접힘 곡면(평면 elastica) 중심선 — 최소 곡률반경 고정", "접힘 fold elastica 곡률 중심선 폴더블",
    "KooRemapper foldsurface <config.yaml>",
    files={"fold.yaml": """output: fold

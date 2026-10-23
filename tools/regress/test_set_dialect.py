@@ -19,6 +19,10 @@
 뜻을 확정하지 못하는 방언은 `ids` 를 **비워 둔다**. 채워 두면 소비자가 파트 ID 로 쓴다 —
 닫히는 쪽으로 실패하는 것이 규율이다.
 
+(2026-10-23) `_ADD`·`_INTERSECT` 는 이제 **정본 해석기**(`src/commands/set_members.h`)가 푼다. 파서는 여전히
+`ids` 를 비우고 멤버 세트를 `memberSets` 에 따로 든다 — 목록은 그 해석 결과를 보인다(B-1·B-3).
+합치기 규칙 자체는 `test_set_add_resolution.py` 가 잰다.
+
 usage: test_set_dialect.py <KooRemapper 바이너리>
 """
 import json
@@ -103,17 +107,23 @@ def main():
               "type=%r 멤버=%r (기대 %r / %r)" % (t, m, want_t, want_m))
         check("   " + name.split()[0] + " rc=0", rc == 0, out[-300:])
 
-    print("[B 뜻을 확정하지 못하는 방언은 **비워 둔다**]")
+    print("[B 멤버가 개체 ID 가 아닌 방언 — 개체로 읽지 않는다]")
+    # B-1·B-3 은 10-23 에 뜻이 바뀌었다 — 예전엔 「미확정」 으로 남겼고, 이제 정본 해석기가 멤버 세트를 따라간다.
+    # 이 덱에는 멤버 세트(7·8 · SHELL 1·2)가 없다. ADD 는 없는 세트를 **빼고 적는다**(Vol_I "Ignore any nonexistant
+    # part set IDs in *SET_PART_ADD"), INTERSECT 는 멤버가 다 있어야 하므로 **못 풀었다고** 말한다.
     unknown = [
-        ("B-1 _ADD — 멤버가 세트 ID 다", "*SET_PART_ADD\n         9\n         7         8\n", 9, "PART_ADD"),
+        ("B-1 _ADD — 멤버 세트 ID 를 보이고, 없는 멤버는 빼고 적는다",
+         "*SET_PART_ADD\n         9\n         7         8\n", 9, "PART_ADD", ("[7, 8]", "덱에 없어 뺐다")),
         ("B-2 _GENERAL — 멤버가 옵션 코드다",
-         "*SET_PART_LIST_GENERAL\n        12\n       ALL\n", 12, "PART_GENERAL"),
-        ("B-3 _INTERSECT", "*SET_SHELL_INTERSECT\n        16\n         1         2\n", 16, "SHELL_INTERSECT"),
+         "*SET_PART_LIST_GENERAL\n        12\n       ALL\n", 12, "PART_GENERAL", ("미확정",)),
+        ("B-3 _INTERSECT — 멤버 세트가 없으면 못 풀었다고 말한다",
+         "*SET_SHELL_INTERSECT\n        16\n         1         2\n", 16, "SHELL_INTERSECT",
+         ("[1, 2]", "풀지 못함")),
     ]
-    for i, (name, cards, sid, want_t) in enumerate(unknown):
+    for i, (name, cards, sid, want_t, needles) in enumerate(unknown):
         rc, out = analyze(deck("b%d.k" % i, cards))
         t, m = setline(out, sid)
-        check(name, t == want_t and m is not None and "미확정" in m,
+        check(name, t == want_t and m is not None and all(n in m for n in needles),
               "type=%r 멤버=%r" % (t, m))
 
     print("[C 평범한 세트는 그대로다]")

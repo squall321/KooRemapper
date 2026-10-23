@@ -229,6 +229,7 @@ set(COMMAND_SOURCES
     src/commands/matswap.cpp
     src/commands/optimize.cpp
     src/commands/contact_helpers.cpp
+    src/commands/set_members.cpp
     src/commands/contact.cpp
     src/commands/load_boundary.cpp
     src/commands/standalone_ops.cpp
@@ -321,9 +322,10 @@ if(BUILD_TESTS)
     enable_testing()
 
     # Test executable
-    add_executable(KooRemapper_tests tests/test_main.cpp)
+    # 세트 해석 정본(`set_members.cpp`)은 의존이 없는 순수 함수라 명령 소스지만 시험에 직접 넣는다.
+    add_executable(KooRemapper_tests tests/test_main.cpp src/commands/set_members.cpp)
     target_link_libraries(KooRemapper_tests PRIVATE kooremapper_lib)
-    target_include_directories(KooRemapper_tests PRIVATE ${CMAKE_SOURCE_DIR}/tests)
+    target_include_directories(KooRemapper_tests PRIVATE ${CMAKE_SOURCE_DIR}/tests ${CMAKE_SOURCE_DIR}/src)
 
     # Define M_PI for MSVC
     if(MSVC)

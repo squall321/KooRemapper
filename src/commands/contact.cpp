@@ -812,23 +812,24 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
 
             // Helper: collect face list from a contact side.
             // Handles sstyp=3 (direct PID), sstyp=2 (SET_PART), sstyp=0 (SET_SEGMENT).
+            // 세트는 정본 해석기로 푼다(`_ADD`·`_INTERSECT`·`_COLLECT`). 못 풀면 **말하고** 빈 목록 —
+            // 예전엔 `*SET_PART_ADD` 면이 말없이 0개였고 `*SET_SEGMENT_ADD` 는 세트 ID 를 절점으로 읽었다.
             auto collectFaces = [&](int sid, int styp) -> std::vector<std::array<int,4>> {
                 if (styp == 3) return ct_extractSurface(mesh, sid);
-                if (styp == 2) {
-                    for (const auto& s : sets)
-                        if (s.type == "PART" && s.id == sid) {
-                            std::vector<std::array<int,4>> result;
-                            for (int pid : s.ids) {
-                                auto f = ct_extractSurface(mesh, pid);
-                                result.insert(result.end(), f.begin(), f.end());
-                            }
-                            return result;
-                        }
-                }
-                if (styp == 0) {
-                    for (const auto& s : sets)
-                        if (s.type == "SEGMENT" && s.id == sid)
-                            return s.segments;
+                if (styp == 2 || styp == 0) {
+                    const SetMembers m = ct_setMembers(sets, sid, styp == 2 ? "PART" : "SEGMENT");
+                    if (!m.found) return {};
+                    if (!m.resolved) {
+                        console.warning("[contact] " + m.why + " — 이 면을 모으지 않는다");
+                        return {};
+                    }
+                    if (styp == 0) return m.segments;
+                    std::vector<std::array<int,4>> result;
+                    for (int pid : m.ids) {
+                        auto f = ct_extractSurface(mesh, pid);
+                        result.insert(result.end(), f.begin(), f.end());
+                    }
+                    return result;
                 }
                 return {};
             };
@@ -899,29 +900,29 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
                     modified = true;
                 }
             } else if (act.slaveTo == "segment" && ct.sstyp == 2) {
-                // Part set → expand to segment
-                // Find the set and get PIDs
-                for (const auto& s : sets) {
-                    if (s.type == "PART" && s.id == ct.ssid) {
-                        std::vector<std::array<int,4>> allFaces;
-                        for (int pid : s.ids) {
-                            auto faces = ct_extractSurface(mesh, pid);
-                            allFaces.insert(allFaces.end(), faces.begin(), faces.end());
-                        }
-                        if (!allFaces.empty()) {
-                            int newSid = ids.issue(KooRemapper::ids::Ns::Set);
-                            insertBlocks.push_back(ct_generateSetSegment(newSid, allFaces,
-                                "Slave_expanded"));
-                            ct_modifyContactCard1(lines, ct, newSid, ct.msid, 0, ct.mstyp);
-                            console.println("[contact] [" + std::to_string(act.contactIndex) +
-                                          "] Slave SET_PART " + std::to_string(ct.ssid) +
-                                          " -> SET_SEGMENT " + std::to_string(newSid) +
-                                          " (" + std::to_string(allFaces.size()) + " faces)");
-                            ct.ssid = newSid;
-                            ct.sstyp = 0;
-                            modified = true;
-                        }
-                        break;
+                // Part set → expand to segment — 정본 해석기로 멤버를 푼다(못 풀면 바꾸지 않고 말한다)
+                const SetMembers sm = ct_setMembers(sets, ct.ssid, "PART");
+                if (sm.found && !sm.resolved)
+                    console.warning("[contact] [" + std::to_string(act.contactIndex) + "] " + sm.why +
+                                    " — 슬레이브를 세그먼트로 바꾸지 않는다");
+                if (sm.resolved) {
+                    std::vector<std::array<int,4>> allFaces;
+                    for (int pid : sm.ids) {
+                        auto faces = ct_extractSurface(mesh, pid);
+                        allFaces.insert(allFaces.end(), faces.begin(), faces.end());
+                    }
+                    if (!allFaces.empty()) {
+                        int newSid = ids.issue(KooRemapper::ids::Ns::Set);
+                        insertBlocks.push_back(ct_generateSetSegment(newSid, allFaces,
+                            "Slave_expanded"));
+                        ct_modifyContactCard1(lines, ct, newSid, ct.msid, 0, ct.mstyp);
+                        console.println("[contact] [" + std::to_string(act.contactIndex) +
+                                      "] Slave SET_PART " + std::to_string(ct.ssid) +
+                                      " -> SET_SEGMENT " + std::to_string(newSid) +
+                                      " (" + std::to_string(allFaces.size()) + " faces)");
+                        ct.ssid = newSid;
+                        ct.sstyp = 0;
+                        modified = true;
                     }
                 }
             }
@@ -945,27 +946,29 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
                     modified = true;
                 }
             } else if (act.masterTo == "segment" && ct.mstyp == 2) {
-                for (const auto& s : sets) {
-                    if (s.type == "PART" && s.id == ct.msid) {
-                        std::vector<std::array<int,4>> allFaces;
-                        for (int pid : s.ids) {
-                            auto faces = ct_extractSurface(mesh, pid);
-                            allFaces.insert(allFaces.end(), faces.begin(), faces.end());
-                        }
-                        if (!allFaces.empty()) {
-                            int newSid = ids.issue(KooRemapper::ids::Ns::Set);
-                            insertBlocks.push_back(ct_generateSetSegment(newSid, allFaces,
-                                "Master_expanded"));
-                            ct_modifyContactCard1(lines, ct, ct.ssid, newSid, ct.sstyp, 0);
-                            console.println("[contact] [" + std::to_string(act.contactIndex) +
-                                          "] Master SET_PART " + std::to_string(ct.msid) +
-                                          " -> SET_SEGMENT " + std::to_string(newSid) +
-                                          " (" + std::to_string(allFaces.size()) + " faces)");
-                            ct.msid = newSid;
-                            ct.mstyp = 0;
-                            modified = true;
-                        }
-                        break;
+                // Part set → expand to segment — 슬레이브와 같은 규칙
+                const SetMembers mm = ct_setMembers(sets, ct.msid, "PART");
+                if (mm.found && !mm.resolved)
+                    console.warning("[contact] [" + std::to_string(act.contactIndex) + "] " + mm.why +
+                                    " — 마스터를 세그먼트로 바꾸지 않는다");
+                if (mm.resolved) {
+                    std::vector<std::array<int,4>> allFaces;
+                    for (int pid : mm.ids) {
+                        auto faces = ct_extractSurface(mesh, pid);
+                        allFaces.insert(allFaces.end(), faces.begin(), faces.end());
+                    }
+                    if (!allFaces.empty()) {
+                        int newSid = ids.issue(KooRemapper::ids::Ns::Set);
+                        insertBlocks.push_back(ct_generateSetSegment(newSid, allFaces,
+                            "Master_expanded"));
+                        ct_modifyContactCard1(lines, ct, ct.ssid, newSid, ct.sstyp, 0);
+                        console.println("[contact] [" + std::to_string(act.contactIndex) +
+                                      "] Master SET_PART " + std::to_string(ct.msid) +
+                                      " -> SET_SEGMENT " + std::to_string(newSid) +
+                                      " (" + std::to_string(allFaces.size()) + " faces)");
+                        ct.msid = newSid;
+                        ct.mstyp = 0;
+                        modified = true;
                     }
                 }
             }

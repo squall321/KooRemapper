@@ -2111,6 +2111,11 @@ KooRemapper.exe contact <config.yaml>
 LS-DYNA 모델의 `*CONTACT_*`, `*SET_SEGMENT`, `*SET_PART`, `*SET_NODE` 키워드를 일괄 관리한다.
 하나의 YAML 설정으로 분석, 생성, 변환, 수정, 삭제, 자동 감지를 순차 실행할 수 있다.
 
+> **세트를 가리키는 면(2026-10-23)**: `convert`(세그먼트로 바꾸기)·`detect` 의 `skip_existing`(이미 묶인 쌍)·`analyze`
+> 목록은 세트를 정본 해석기로 풉니다 — `_ADD`·`_INTERSECT`·`_COLLECT` 를 따라갑니다(규칙은 [§43.5](#435-modelmeta--파트별-메타-json-추출)).
+> 못 풀면(`_GENERAL` 등) 바꾸지 않고 까닭을 말합니다. 예전에는 `*SET_PART_ADD` 면을 말없이 건너뛰었고, 그래서 그 세트로
+> 이미 묶인 쌍에 `detect` 가 **중복 접촉**을 만들 수 있었습니다.
+
 ### 기본 YAML 구조
 
 ```yaml
@@ -2891,6 +2896,10 @@ $$\sigma_{xy} = (\sigma_{\theta\theta} - \sigma_{rr})\sin\theta\cos\theta$$
 ## 34. optimize — 재료별 해석 최적화
 
 `optimize` 명령은 특정 재료(예: 고무)에 최적화된 LS-DYNA 컨트롤 카드를 자동으로 적용합니다.
+
+> **대상 파트가 세트 안에 있을 때(2026-10-23)**: `pids` 가 드는 접촉을 고를 때 세트를 가리키는 면은 `_ADD`·`_INTERSECT`·
+> `_COLLECT` 를 따라갑니다. 풀지 못하면 건드리지 않고 `세트를 풀지 못해 대상 파트가 드는지 모른다` 를 남깁니다
+> (예전에는 `*SET_PART_ADD` 로 정의한 접촉이 말없이 빠졌습니다).
 
 ### 사용법
 
@@ -4086,7 +4095,17 @@ KooRemapper modelmeta <config.yaml>
 > 키를 생략하면 실행 파일 옆 `materials/` → `<exe>/../materials/` → 작업 폴더 `materials/` 순으로 번들 DB 를 찾습니다
 > (`matdb` 는 작업 폴더를 **먼저** 봅니다 — 탐색 순서도 다릅니다).
 
+> **접촉 면이 세트를 가리킬 때(2026-10-23)**: SSID/MSID 가 세트면 **정본 해석기**로 파트 목록을 만듭니다.
+> `*SET_PART_ADD`·`*SET_NODE_ADD`·`*SET_SEGMENT_ADD` 는 멤버 세트를 합치고(PART 는 음수가 「앞 칸부터 그 절대값까지의
+> 범위」 — Vol_I `*SET_PART_ADD` PSID[N] LT.0 · 덱에 없는 멤버 세트는 빼고 적습니다 — "Ignore any nonexistant part set IDs"),
+> `_INTERSECT` 는 교집합, `_COLLECT` 는 같은 SID 정의를 합칩니다(하나라도 COLLECT 가 아니면 LS-DYNA 가 오류로 끝내므로 못 푼 것으로 봅니다).
+> 못 푸는 면(`_GENERAL`·`_ADVANCED`·순환·없는 세트·STYP 1/6/7)은 `connectivity.unresolved_sides` 로 세고, 면마다 까닭을
+> `connectivity.unresolved_detail`(`contact`·`side`·`sid`·`styp`·`why`)에 적습니다 — **그 면의 파트쌍은 연결도에 없습니다.**
+> 예전에는 `*SET_PART_ADD` 를 가리키는 접촉이 **0쌍 · 미해석 0** 으로 사라졌고, `*SET_SEGMENT_ADD` 는 멤버 세트 ID 를
+> 절점 번호로 읽어 엉뚱한 파트쌍을 냈습니다(재현: 정답 (1,3) 대신 (2,3)).
+
 **근거**: pyKooCAE `info_meta.md`, `examples/modelmeta/modelmeta.yaml`, 2026-09-18 실행 확인. JSON 스키마 상세 필드·기본값은 확인 필요.
+세트 해석은 `tools/regress/test_set_add_resolution.py`(2026-10-23).
 
 ---
 

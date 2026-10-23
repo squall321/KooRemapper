@@ -254,6 +254,9 @@ std::vector<SetDef> ct_parseSets(const std::vector<std::string>& lines) {
         static const char* const kDialects[] = {
             "_GENERATE_INCREMENT", "_GENERATE", "_GENERAL", "_ADD", "_INTERSECT",
             "_COLUMN", "_COLLECT",
+            // `*SET_NODE_ADD_ADVANCED` — 떼지 않으면 종류가 "NODE_ADD_ADVANCED" 로 남아 어느 소비자도
+            // 노드 세트로 알아보지 못한다. 떼어 두면 종류는 NODE · 멤버는 미확정(정본 해석기가 말한다).
+            "_ADVANCED",
         };
         for (bool peeled = true; peeled;) {
             peeled = false;
@@ -317,15 +320,30 @@ std::vector<SetDef> ct_parseSets(const std::vector<std::string>& lines) {
             }
 
             // Data lines
-            if (s.type == "SEGMENT") {
+            if (!s.membersKnown) {
+                // 뜻을 확정하지 못한 방언 — 개체 ID 칸(`ids`·`segments`)에는 넣지 않는다(채우면 소비자가
+                // 개체로 쓴다). `_ADD`·`_INTERSECT` 의 멤버는 **세트 ID** 라 `memberSets` 에 따로 들고,
+                // 푸는 일은 정본 해석기(`set_members.h`)가 한다. `_GENERAL`·`_COLUMN`·`_ADVANCED` 는 읽지 않는다.
+                // ⚠ SEGMENT 보다 **먼저** 걸러야 한다 — 예전엔 SEGMENT 분기가 앞이라 `*SET_SEGMENT_ADD` 의
+                //   세트 ID 가 세그먼트의 절점 번호로 읽혔다(재현: 접촉 파트쌍 (1,3) 이 (2,3) 으로 나왔다).
+                const std::string& dl = s.dialect;
+                if ((dl.find("ADD") != std::string::npos || dl.find("INTERSECT") != std::string::npos) &&
+                    dl.find("ADVANCED") == std::string::npos) {
+                    for (const auto& t : toks) {
+                        if (t.empty()) continue;
+                        try {
+                            int v = std::stoi(t);
+                            if (v != 0) s.memberSets.push_back(v);
+                        } catch(...){}
+                    }
+                }
+            } else if (s.type == "SEGMENT") {
                 // N1 N2 N3 N4 [A1 A2 A3 A4]
                 std::array<int,4> seg = {0,0,0,0};
                 for (int f = 0; f < 4 && f < (int)toks.size(); ++f) {
                     try { seg[f] = std::stoi(toks[f]); } catch(...){}
                 }
                 if (seg[0] != 0) s.segments.push_back(seg);
-            } else if (!s.membersKnown) {
-                // 뜻을 확정하지 못한 방언 — 읽지 않는다(채우면 소비자가 개체 ID 로 쓴다).
             } else if (s.dialect == "GENERATE") {
                 // Card 2b: B1BEG B1END B2BEG B2END … — 한 줄에 **범위쌍 4개**(Vol_I `*SET`).
                 // 펼치지 않고 범위로 들고 있는 이유는 `SetDef::ranges` 주석에 있다.
@@ -361,15 +379,6 @@ std::vector<SetDef> ct_parseSets(const std::vector<std::string>& lines) {
         i = j - 1;
     }
     return result;
-}
-
-// 그 ID 가 이 세트에 드는가 — **정의 목록이 없어도** 답할 수 있는 물음이다.
-// `optimize` 처럼 메시를 안 읽는 op 이 쓴다(그 op 은 "이 접촉이 대상 파트를 건드리나" 만 묻는다).
-bool ct_setContains(const SetDef& s, int id) {
-    for (int v : s.ids) if (v == id) return true;
-    for (const auto& r : s.ranges)
-        if (id >= r[0] && id <= r[1] && (r[2] <= 1 || (id - r[0]) % r[2] == 0)) return true;
-    return false;
 }
 
 // `_GENERATE` 범위를 **덱에 정의된 ID** 로 좁혀 `ids` 를 채운다. 파싱한 직후 한 번 부른다.
@@ -1011,12 +1020,13 @@ bool ct_pairHasExisting(int pidA, int pidB,
         }
         if (!typeMatch) continue;
 
-        // Resolve PIDs from contact sides
+        // Resolve PIDs from contact sides — 세트는 정본 해석기로(`_ADD`·`_COLLECT` 를 따라간다).
+        // 못 풀면 빈 목록 — 「이미 묶였다」 를 짐작으로 단정하지 않는다.
         auto resolvePids = [&](int sid, int styp) -> std::vector<int> {
             if (styp == 3) return {sid};
             if (styp == 2) {
-                for (const auto& s : sets)
-                    if (s.type == "PART" && s.id == sid) return s.ids;
+                auto m = ct_setMembers(sets, sid, "PART");
+                if (m.resolved) return m.ids;
             }
             // SSTYP=0 (segment): can't directly resolve to PID — skip
             return {};
@@ -1052,12 +1062,12 @@ ct_getExistingTiedSegments(int pidA, int pidB,
             [](unsigned char c) { return (char)std::toupper(c); });
         if (up.find("TIED") == std::string::npos) continue;
 
-        // Resolve PIDs
+        // Resolve PIDs — 정본 해석기로(위 판정과 같은 규칙)
         auto resolvePids = [&](int sid, int styp) -> std::vector<int> {
             if (styp == 3) return {sid};
             if (styp == 2) {
-                for (const auto& s : sets)
-                    if (s.type == "PART" && s.id == sid) return s.ids;
+                auto m = ct_setMembers(sets, sid, "PART");
+                if (m.resolved) return m.ids;
             }
             return {};
         };
@@ -1073,13 +1083,9 @@ ct_getExistingTiedSegments(int pidA, int pidB,
 
         // Found matching tied contact. Get segments.
         if (ct.sstyp == 0 && ct.mstyp == 0) {
-            // Already segment-based: read from SetDef
-            for (const auto& s : sets) {
-                if (s.type == "SEGMENT" && s.id == ct.ssid)
-                    result.first = s.segments;
-                if (s.type == "SEGMENT" && s.id == ct.msid)
-                    result.second = s.segments;
-            }
+            // Already segment-based: 정본 해석기로(`*SET_SEGMENT_ADD` 도 펼친다)
+            result.first = ct_setMembers(sets, ct.ssid, "SEGMENT").segments;
+            result.second = ct_setMembers(sets, ct.msid, "SEGMENT").segments;
         } else {
             // Part-based: use detect to find tied segments
             auto facesA = ct_extractSurface(mesh, pidA);
@@ -1439,6 +1445,27 @@ std::string ct_stypName(int styp) {
 }
 
 // Analyze and print contact report
+// 접촉 면이 가리키는 세트의 멤버를 한 줄로 — 정본 해석기로 푼다. 못 풀면 **못 풀었다고** 적는다
+// (예전엔 `_ADD` 세트에서 아무것도 안 찍어 「멤버 없음」 처럼 보였다). 세트가 덱에 없으면 비운다(예전과 같다).
+static std::string ct_memberSuffix(const std::vector<SetDef>& sets, int sid, const std::string& type) {
+    auto m = ct_setMembers(sets, sid, type);
+    if (!m.found) return "";
+    if (!m.resolved) return " -> 풀지 못함(" + m.why + ")";
+    std::string out;
+    if (type == "SEGMENT") {
+        out = " -> " + std::to_string(m.segments.size()) + " segments";
+    } else if (!m.ids.empty()) {
+        out = " -> [";
+        for (size_t k = 0; k < m.ids.size(); ++k) {
+            if (k) out += ", ";
+            out += std::to_string(m.ids[k]);
+        }
+        out += "]";
+    }
+    if (!m.note.empty()) out += " (" + m.note + ")";
+    return out;
+}
+
 void ct_analyze(const std::vector<ContactDef>& contacts,
                        const std::vector<SetDef>& sets,
                        const KooRemapper::Mesh& mesh,
@@ -1462,24 +1489,10 @@ void ct_analyze(const std::vector<ContactDef>& contacts,
         else slaveInfo += "ID=" + std::to_string(c.ssid);
         slaveInfo += " (SSTYP=" + std::to_string(c.sstyp) + ", " + ct_stypName(c.sstyp) + ")";
 
-        // Resolve set members
-        if (c.sstyp == 2 || c.sstyp == 0) {
-            for (const auto& s : sets) {
-                if (s.id == c.ssid) {
-                    if (s.type == "PART" && !s.ids.empty()) {
-                        slaveInfo += " -> [";
-                        for (size_t k = 0; k < s.ids.size(); ++k) {
-                            if (k) slaveInfo += ", ";
-                            slaveInfo += std::to_string(s.ids[k]);
-                        }
-                        slaveInfo += "]";
-                    } else if (s.type == "SEGMENT") {
-                        slaveInfo += " -> " + std::to_string(s.segments.size()) + " segments";
-                    }
-                    break;
-                }
-            }
-        }
+        // Resolve set members — 종류를 맞춰 찾는다(예전엔 ID 만 보고 첫 세트에서 멈춰, 같은 ID 의 다른 종류
+        // 세트가 앞에 있으면 아무것도 안 찍었다).
+        if (c.sstyp == 2 || c.sstyp == 0)
+            slaveInfo += ct_memberSuffix(sets, c.ssid, c.sstyp == 2 ? "PART" : "SEGMENT");
         console.println(slaveInfo);
 
         // Master info
@@ -1493,23 +1506,8 @@ void ct_analyze(const std::vector<ContactDef>& contacts,
         if (c.msid != 0 || c.mstyp != 0)
             masterInfo += " (MSTYP=" + std::to_string(c.mstyp) + ", " + ct_stypName(c.mstyp) + ")";
 
-        if (c.mstyp == 2 || c.mstyp == 0) {
-            for (const auto& s : sets) {
-                if (s.id == c.msid) {
-                    if (s.type == "PART" && !s.ids.empty()) {
-                        masterInfo += " -> [";
-                        for (size_t k = 0; k < s.ids.size(); ++k) {
-                            if (k) masterInfo += ", ";
-                            masterInfo += std::to_string(s.ids[k]);
-                        }
-                        masterInfo += "]";
-                    } else if (s.type == "SEGMENT") {
-                        masterInfo += " -> " + std::to_string(s.segments.size()) + " segments";
-                    }
-                    break;
-                }
-            }
-        }
+        if ((c.mstyp == 2 || c.mstyp == 0) && (c.msid != 0 || c.mstyp != 0))
+            masterInfo += ct_memberSuffix(sets, c.msid, c.mstyp == 2 ? "PART" : "SEGMENT");
         console.println(masterInfo);
 
         // Friction & Card 2 options
@@ -1602,7 +1600,32 @@ void ct_analyze(const std::vector<ContactDef>& contacts,
     for (const auto& s : sets) {
         std::string info = "  SET_" + s.type + (s.dialect.empty() ? "" : "_" + s.dialect) +
                            " " + std::to_string(s.id) + ": ";
-        if (!s.membersKnown) {
+        if (!s.membersKnown && !s.memberSets.empty()) {
+            // `_ADD`·`_INTERSECT` — 멤버는 **세트 ID** 다. 정본 해석기로 푼 결과를 함께 적는다.
+            info += s.dialect + " 멤버 세트 [";
+            for (size_t k = 0; k < s.memberSets.size(); ++k) {
+                if (k) info += ", ";
+                info += std::to_string(s.memberSets[k]);
+            }
+            info += "]";
+            auto m = ct_setMembers(sets, s.id, s.type);
+            if (!m.resolved) {
+                info += " -> 풀지 못함(" + m.why + ")";
+            } else if (s.type == "SEGMENT") {
+                info += " -> " + std::to_string(m.segments.size()) + " segments";
+            } else {
+                info += " -> " + std::to_string(m.ids.size()) + " entries";
+                if (!m.ids.empty() && m.ids.size() <= 10) {
+                    info += " [";
+                    for (size_t k = 0; k < m.ids.size(); ++k) {
+                        if (k) info += ", ";
+                        info += std::to_string(m.ids[k]);
+                    }
+                    info += "]";
+                }
+            }
+            if (!m.note.empty()) info += " (" + m.note + ")";
+        } else if (!s.membersKnown) {
             // 조용히 0건이라고 말하면 거짓이다 — 왜 못 읽었는지 말한다.
             info += "멤버 뜻 미확정(" + s.dialect + ")";
         } else if (!s.ranges.empty()) {
@@ -1653,13 +1676,10 @@ void ct_analyze(const std::vector<ContactDef>& contacts,
                 // Direct PID
                 pidContacts[id].push_back(role + "[" + std::to_string(c.index) + "]");
             } else if (styp == 2) {
-                // Part set — resolve
-                for (const auto& s : sets) {
-                    if (s.id == id && (s.type == "PART")) {
-                        for (int pid : s.ids) {
-                            pidContacts[pid].push_back(role + "[" + std::to_string(c.index) + "]");
-                        }
-                    }
+                // Part set — 정본 해석기로 푼다(`_ADD`·`_COLLECT` 를 따라간다 · 못 풀면 덧붙이지 않는다)
+                const SetMembers members = ct_setMembers(sets, id, "PART");
+                for (int pid : members.ids) {
+                    pidContacts[pid].push_back(role + "[" + std::to_string(c.index) + "]");
                 }
             } else if (styp == 5) {
                 // All parts

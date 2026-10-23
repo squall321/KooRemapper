@@ -17,7 +17,7 @@ bash run.sh
 | `model` | 노드/요소/파트 수, 전체 bbox |
 | `parts[]` | pid, title, elem_class(solid/shell/mixed), n_elems, bbox, **area_ext**(외부 자유표면적), **volume**, **proj.x/y/z**(정사영 면적), material |
 | `parts[].material` | mid + kfile(카드 키워드·제목·E/nu/rho/sigy) + db(번들 DB 매칭: name/category/E_GPa/rho + **match_basis**) |
-| `connectivity` | contact_edges(파트쌍 + 접촉 타입/제목/fs), single_surface(스코프), geometric_edges(detect 시), unresolved_sides |
+| `connectivity` | contact_edges(파트쌍 + 접촉 타입/제목/fs), single_surface(스코프), geometric_edges(detect 시), unresolved_sides · unresolved_detail(면마다 까닭) |
 
 ## 규약 (JSON `conventions`에도 기록)
 
@@ -32,7 +32,8 @@ bash run.sh
 - SSID/MSID의 SSTYP/MSTYP: PID(3)·SET_PART(2)·SET_NODE(4)·SET_SEGMENT(0)을
   파트 ID 목록으로 환원(노드 기반 셋은 노드→소유 파트로).
 - SINGLE_SURFACE류·master 없는 접촉은 파트쌍으로 폭발시키지 않고 스코프로 기록.
-- 미해결 사이드(누락 SET)는 `unresolved_sides`로 카운트.
+- 세트는 `_ADD`(PART 는 음수 범위)·`_INTERSECT`·`_COLLECT` 까지 풀어 파트쌍을 만든다(2026-10-23).
+- 못 푼 사이드(`_GENERAL`·`_ADVANCED`·순환·없는 세트·STYP 1/6/7)는 `unresolved_sides`로 세고, 까닭은 `unresolved_detail`.
 
 ## 재료 DB 매칭 (match_basis로 신뢰도 보고)
 

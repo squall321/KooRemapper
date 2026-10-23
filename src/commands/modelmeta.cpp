@@ -507,12 +507,16 @@ struct MmSingleSurface {
 };
 
 // SSID/MSID(+STYP)를 PID 목록으로 해석. SET_NODE/SET_SEGMENT는 노드→소유 파트로 환원.
+// 세트는 정본 해석기(`set_members.h`)로 푼다 — `_ADD`·`_INTERSECT`·`_COLLECT` 를 따라가고, 못 풀면
+// `resolved=false` 와 까닭(`why`)을 돌려준다. ⚠ 예전엔 `SetDef::ids` 를 직접 읽어 `*SET_PART_ADD` 를
+// 가리키는 접촉이 **0쌍 · 미해석 0** 으로 사라졌다(파서가 세트 ID 멤버를 일부러 비워 두기 때문이다).
 std::vector<int> mm_resolveSide(int sid, int styp,
                                 const std::vector<SetDef>& sets,
                                 const std::map<int, std::set<int>>& nodeOwners,
                                 const std::vector<int>& allPids,
-                                bool& resolved) {
+                                bool& resolved, std::string& why) {
     resolved = true;
+    why.clear();
     std::vector<int> pids;
     auto addNodePids = [&](const std::vector<int>& nids) {
         std::set<int> acc;
@@ -524,32 +528,28 @@ std::vector<int> mm_resolveSide(int sid, int styp,
     };
     if (styp == 3) { pids.push_back(sid); return pids; }
     if (styp == 5) return allPids;
+    const char* type = (styp == 2) ? "PART" : (styp == 4) ? "NODE" : (styp == 0) ? "SEGMENT" : nullptr;
+    if (!type) {
+        resolved = false;
+        why = "STYP=" + std::to_string(styp) + " 는 파트로 풀지 않는다";
+        return pids;
+    }
+    const SetMembers m = ct_setMembers(sets, sid, type);
+    if (!m.resolved) {
+        resolved = false;
+        why = m.why;
+        return pids;
+    }
     if (styp == 2) {
-        for (const auto& s : sets)
-            if (s.id == sid && s.type == "PART") { pids = s.ids; return pids; }
-        resolved = false;
-        return pids;
+        pids = m.ids;
+    } else if (styp == 4) {
+        addNodePids(m.ids);
+    } else {   // SET_SEGMENT
+        std::vector<int> nids;
+        for (const auto& seg : m.segments)
+            for (int nid : seg) if (nid > 0) nids.push_back(nid);
+        addNodePids(nids);
     }
-    if (styp == 4) {
-        for (const auto& s : sets)
-            if (s.id == sid && s.type == "NODE") { addNodePids(s.ids); return pids; }
-        resolved = false;
-        return pids;
-    }
-    if (styp == 0) {   // SET_SEGMENT
-        for (const auto& s : sets) {
-            if (s.id == sid && s.type == "SEGMENT") {
-                std::vector<int> nids;
-                for (const auto& seg : s.segments)
-                    for (int nid : seg) if (nid > 0) nids.push_back(nid);
-                addNodePids(nids);
-                return pids;
-            }
-        }
-        resolved = false;
-        return pids;
-    }
-    resolved = false;
     return pids;
 }
 
@@ -838,6 +838,9 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
     std::vector<MmEdge> edges;
     std::vector<MmSingleSurface> singles;
     int unresolvedSides = 0;
+    // 못 푼 접촉 면 — 개수만 내면 화면이 「무엇이 왜」 를 말할 수 없다. 까닭을 같이 든다.
+    struct MmUnresolved { int contact; std::string type, title, side; int sid, styp; std::string why; };
+    std::vector<MmUnresolved> unresolved;
     bool edgesTruncated = false;
 
     auto partTitle = [&](int pid) -> std::string {
@@ -847,10 +850,14 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
 
     for (const auto& c : contacts) {
         bool okS = true, okM = true;
-        auto sPids = mm_resolveSide(c.ssid, c.sstyp, sets, nodeOwners, allPids, okS);
+        std::string whyS, whyM;
+        auto sPids = mm_resolveSide(c.ssid, c.sstyp, sets, nodeOwners, allPids, okS, whyS);
         bool singleSurface = (c.msid == 0 && c.mstyp == 0) ||
                              c.type.find("SINGLE_SURFACE") != std::string::npos;
-        if (!okS) ++unresolvedSides;
+        if (!okS) {
+            ++unresolvedSides;
+            unresolved.push_back({c.index, c.type, c.title, "slave", c.ssid, c.sstyp, whyS});
+        }
 
         if (singleSurface) {
             MmSingleSurface ss;
@@ -861,8 +868,11 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
             singles.push_back(ss);
             continue;
         }
-        auto mPids = mm_resolveSide(c.msid, c.mstyp, sets, nodeOwners, allPids, okM);
-        if (!okM) ++unresolvedSides;
+        auto mPids = mm_resolveSide(c.msid, c.mstyp, sets, nodeOwners, allPids, okM, whyM);
+        if (!okM) {
+            ++unresolvedSides;
+            unresolved.push_back({c.index, c.type, c.title, "master", c.msid, c.mstyp, whyM});
+        }
 
         std::set<std::pair<int, int>> seen;
         for (int a : sPids) {
@@ -1145,8 +1155,20 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
         rf << "    ],\n";
     }
     rf << "    \"contacts_total\": " << contacts.size() << ",\n"
-       << "    \"unresolved_sides\": " << unresolvedSides << ",\n"
-       << "    \"edges_truncated\": " << (edgesTruncated ? "true" : "false") << "\n";
+       << "    \"unresolved_sides\": " << unresolvedSides << ",\n";
+    rf << "    \"unresolved_detail\": [\n";
+    for (size_t i = 0; i < unresolved.size(); ++i) {
+        const auto& u = unresolved[i];
+        rf << "      {\"contact\": " << u.contact
+           << ", \"type\": \"" << mm_jsonEsc(u.type) << "\""
+           << ", \"title\": \"" << mm_jsonEsc(u.title) << "\""
+           << ", \"side\": \"" << u.side << "\""
+           << ", \"sid\": " << u.sid << ", \"styp\": " << u.styp
+           << ", \"why\": \"" << mm_jsonEsc(u.why) << "\"}"
+           << (i + 1 < unresolved.size() ? "," : "") << "\n";
+    }
+    rf << "    ],\n";
+    rf << "    \"edges_truncated\": " << (edgesTruncated ? "true" : "false") << "\n";
     rf << "  }\n";
     rf << "}\n";
     rf.close();
@@ -1162,9 +1184,14 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
     if (!db.empty())
         console.info("[modelmeta] Material DB match: " + std::to_string(dbHit) + "/" +
                      std::to_string(parts.size()) + " parts");
-    if (unresolvedSides)
+    if (unresolvedSides) {
         console.warning("[modelmeta] " + std::to_string(unresolvedSides) +
-                        " contact side(s) unresolved (missing SET definitions)");
+                        " contact side(s) unresolved — 그 면의 파트쌍은 연결도에 없다(까닭: connectivity.unresolved_detail)");
+        for (size_t i = 0; i < unresolved.size() && i < 5; ++i)
+            console.warning("[modelmeta]   contact " + std::to_string(unresolved[i].contact) + " " +
+                            unresolved[i].side + " SID " + std::to_string(unresolved[i].sid) +
+                            " (STYP=" + std::to_string(unresolved[i].styp) + "): " + unresolved[i].why);
+    }
     console.success("[modelmeta] Report -> " + outPath);
     return 0;
 }

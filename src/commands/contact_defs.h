@@ -91,6 +91,10 @@ struct SetDef {
     double da1=0, da2=0, da3=0, da4=0;
     std::vector<std::array<int,4>> segments;  // SET_SEGMENT only
     std::vector<int> ids;                     // NODE/PART/SHELL/SOLID
+    // `_ADD`·`_INTERSECT` 의 멤버 — **세트 ID** 다(개체 ID 가 아니다). `ids` 와 섞지 않고 따로 든다.
+    // `*SET_PART_ADD` 의 음수는 「앞 칸부터 그 절대값까지의 범위」다(Vol_I `*SET_PART_ADD` PSID[N]).
+    // 펼치는 것은 정본 해석기(`set_members.h`) 하나만 한다 — 소비자가 이 칸을 직접 읽지 않는다.
+    std::vector<int> memberSets;
     int startLine=0, endLine=0;
 };
 

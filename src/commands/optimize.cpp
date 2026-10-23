@@ -22,20 +22,20 @@ using namespace KooRemapper;
 
 static bool opt_contactInvolvesPid(const ContactDef& ct,
                                     const std::set<int>& targetPids,
-                                    const std::vector<SetDef>& sets) {
+                                    const std::vector<SetDef>& sets,
+                                    bool* unknown = nullptr) {
     auto checkSide = [&](int sid, int styp) -> bool {
         if (styp == 3) {
             return targetPids.count(sid) > 0;
         } else if (styp == 2) {
-            for (const auto& s : sets) {
-                if (s.type == "PART" && s.id == sid) {
-                    // 이 op 은 메시를 안 읽으므로 `_GENERATE` 범위를 덱에 정의된 ID 로 좁힐
-                    // 수 없다. 다행히 물음은 "대상 파트가 이 세트에 드나" 뿐이라 **범위만으로
-                    // 답할 수 있다** — 그래서 `ct_setContains` 를 쓴다.
-                    for (int pid : targetPids) {
-                        if (ct_setContains(s, pid)) return true;
-                    }
-                }
+            // 이 op 은 메시를 안 읽으므로 `_GENERATE` 범위를 덱에 정의된 ID 로 좁힐 수 없다. 다행히
+            // 물음은 "대상 파트가 이 세트에 드나" 뿐이라 **범위만으로 답할 수 있다** — 그래서 포함
+            // 판정(`ct_setHas`)을 쓴다. `_ADD`·`_INTERSECT`·`_COLLECT` 도 따라간다(예전엔 `_ADD` 세트를
+            // 가리키는 접촉이 말없이 빠졌다). 답을 못 하면(-1) 건드리지 않고 그 사실을 알린다.
+            for (int pid : targetPids) {
+                const int h = ct_setHas(sets, sid, "PART", pid);
+                if (h == 1) return true;
+                if (h == -1 && unknown) *unknown = true;
             }
         }
         return false;
@@ -232,7 +232,13 @@ std::vector<std::string> opt_applyRubber(std::vector<std::string>& lines,
         int modCount = 0;
 
         for (const auto& ct : contacts) {
-            if (!opt_contactInvolvesPid(ct, targetPids, sets)) continue;
+            bool unknown = false;
+            if (!opt_contactInvolvesPid(ct, targetPids, sets, &unknown)) {
+                if (unknown)
+                    msgs.push_back("[optimize] *CONTACT[" + std::to_string(ct.index) + "]: 세트를 풀지 "
+                                   "못해 대상 파트가 드는지 모른다 — 건드리지 않았다");
+                continue;
+            }
 
             bool titleSkipped = !ct.hasTitle;
             int cardNum = 0;
