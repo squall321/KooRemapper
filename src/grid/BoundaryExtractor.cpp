@@ -2,7 +2,8 @@
 #include "core/Vector3D.h"
 #include <set>
 #include <algorithm>
-#include <map>
+#include <unordered_map>
+#include <tuple>
 #include <cmath>
 
 // Knowledge graph (lat.md):
@@ -63,32 +64,58 @@ void BoundaryExtractor::buildNodeGrid(const Mesh& mesh) {
         }
     }
 
-    // Build element lookup by (i,j,k)
-    std::map<std::tuple<int,int,int>, const Element*> elemLookup;
+    // Build element lookup by (i,j,k): a dense array over the element grid,
+    // since only indices inside it are looked up below. As in a map, a later
+    // element with the same index replaces an earlier one. Each cell also keeps
+    // its element's node IDs sorted and de-duplicated (what a std::set of them
+    // holds) for the shared-node intersection.
+    struct Cell {
+        const Element* elem = nullptr;
+        std::array<int, 8> nodes{};
+        int nodeCount = 0;
+    };
+    std::vector<Cell> cells;
+    if (dimI_ > 0 && dimJ_ > 0 && dimK_ > 0) {
+        cells.resize(static_cast<size_t>(dimI_) * dimJ_ * dimK_);
+    }
+    auto cellIndex = [this](int i, int j, int k) {
+        return (static_cast<size_t>(i) * dimJ_ + j) * dimK_ + k;
+    };
     for (const auto& [id, elem] : mesh.elements) {
-        if (elem.indexAssigned) {
-            elemLookup[{elem.i, elem.j, elem.k}] = &elem;
-        }
+        if (!elem.indexAssigned) continue;
+        if (elem.i < 0 || elem.j < 0 || elem.k < 0) continue;
+        if (elem.i >= dimI_ || elem.j >= dimJ_ || elem.k >= dimK_) continue;
+        Cell& cell = cells[cellIndex(elem.i, elem.j, elem.k)];
+        cell.elem = &elem;
+        cell.nodes = elem.nodeIds;
+        std::sort(cell.nodes.begin(), cell.nodes.end());
+        cell.nodeCount = static_cast<int>(
+            std::unique(cell.nodes.begin(), cell.nodes.end()) - cell.nodes.begin());
     }
 
-    // First pass: compute element centroids for geometry-based node selection
-    std::map<std::tuple<int,int,int>, Vector3D> elemCentroids;
-    for (const auto& [id, elem] : mesh.elements) {
-        if (elem.indexAssigned) {
+    // Element centroids for geometry-based node selection, computed when a
+    // tie-break first needs one (only grid nodes with several shared nodes do)
+    std::vector<Vector3D> centroids(cells.size());
+    std::vector<char> centroidReady(cells.size(), 0);
+    auto cellCentroid = [&](size_t c) -> const Vector3D& {
+        if (!centroidReady[c]) {
             Vector3D centroid(0, 0, 0);
             for (int n = 0; n < 8; ++n) {
-                const Node* node = mesh.getNode(elem.nodeIds[n]);
+                const Node* node = mesh.getNode(cells[c].elem->nodeIds[n]);
                 if (node) {
                     centroid += node->position;
                 }
             }
             centroid /= 8.0;
-            elemCentroids[{elem.i, elem.j, elem.k}] = centroid;
+            centroids[c] = centroid;
+            centroidReady[c] = 1;
         }
-    }
+        return centroids[c];
+    };
 
     // Build node-to-elements reverse index for O(1) lookup
-    std::map<int, std::vector<std::tuple<int,int,int>>> nodeToElems;
+    std::unordered_map<int, std::vector<std::tuple<int,int,int>>> nodeToElems;
+    nodeToElems.reserve(mesh.nodes.size());
     for (const auto& [id, elem] : mesh.elements) {
         if (elem.indexAssigned) {
             for (int n = 0; n < 8; ++n) {
@@ -98,11 +125,14 @@ void BoundaryExtractor::buildNodeGrid(const Mesh& mesh) {
     }
 
     // For each grid node position (gi,gj,gk), find the correct node ID
+    std::vector<const Element*> adjacentElems;
+    std::vector<size_t> adjacentCells;
     for (int gi = 0; gi < ni; ++gi) {
         for (int gj = 0; gj < nj; ++gj) {
             for (int gk = 0; gk < nk; ++gk) {
                 // Collect adjacent elements (elements that have this grid node as a corner)
-                std::vector<const Element*> adjacentElems;
+                adjacentElems.clear();
+                adjacentCells.clear();
 
                 for (int di = 0; di <= 1; ++di) {
                     for (int dj = 0; dj <= 1; ++dj) {
@@ -114,9 +144,10 @@ void BoundaryExtractor::buildNodeGrid(const Mesh& mesh) {
                             if (ei < 0 || ej < 0 || ek < 0) continue;
                             if (ei >= dimI_ || ej >= dimJ_ || ek >= dimK_) continue;
 
-                            auto it = elemLookup.find({ei, ej, ek});
-                            if (it != elemLookup.end()) {
-                                adjacentElems.push_back(it->second);
+                            size_t c = cellIndex(ei, ej, ek);
+                            if (cells[c].elem) {
+                                adjacentElems.push_back(cells[c].elem);
+                                adjacentCells.push_back(c);
                             }
                         }
                     }
@@ -126,25 +157,25 @@ void BoundaryExtractor::buildNodeGrid(const Mesh& mesh) {
                     continue;
                 }
 
-                // Find nodes shared by ALL adjacent elements
-                std::set<int> sharedNodes(adjacentElems[0]->nodeIds.begin(),
-                                          adjacentElems[0]->nodeIds.end());
+                // Find nodes shared by ALL adjacent elements (sorted, like a std::set)
+                std::array<int, 8> sharedNodes = cells[adjacentCells[0]].nodes;
+                int sharedCount = cells[adjacentCells[0]].nodeCount;
 
-                for (size_t e = 1; e < adjacentElems.size(); ++e) {
-                    std::set<int> elemNodes(adjacentElems[e]->nodeIds.begin(),
-                                            adjacentElems[e]->nodeIds.end());
-                    std::set<int> intersection;
-                    std::set_intersection(sharedNodes.begin(), sharedNodes.end(),
-                                          elemNodes.begin(), elemNodes.end(),
-                                          std::inserter(intersection, intersection.begin()));
+                for (size_t e = 1; e < adjacentCells.size(); ++e) {
+                    const Cell& other = cells[adjacentCells[e]];
+                    std::array<int, 8> intersection;
+                    sharedCount = static_cast<int>(
+                        std::set_intersection(sharedNodes.begin(), sharedNodes.begin() + sharedCount,
+                                              other.nodes.begin(), other.nodes.begin() + other.nodeCount,
+                                              intersection.begin()) - intersection.begin());
                     sharedNodes = intersection;
                 }
 
-                if (sharedNodes.size() == 1) {
+                if (sharedCount == 1) {
                     // Perfect - exactly one shared node
-                    nodeGrid_[gi][gj][gk] = *sharedNodes.begin();
+                    nodeGrid_[gi][gj][gk] = sharedNodes[0];
                 }
-                else if (sharedNodes.size() > 1) {
+                else if (sharedCount > 1) {
                     // Multiple shared nodes - use COMBINED connectivity + geometry approach
                     // First filter by connectivity, then use geometry as tiebreaker
 
@@ -152,11 +183,8 @@ void BoundaryExtractor::buildNodeGrid(const Mesh& mesh) {
 
                     // Compute average centroid of adjacent elements
                     Vector3D avgCentroid(0, 0, 0);
-                    for (const Element* elem : adjacentElems) {
-                        auto centIt = elemCentroids.find({elem->i, elem->j, elem->k});
-                        if (centIt != elemCentroids.end()) {
-                            avgCentroid += centIt->second;
-                        }
+                    for (size_t c : adjacentCells) {
+                        avgCentroid += cellCentroid(c);
                     }
                     avgCentroid /= static_cast<double>(adjacentElems.size());
 
@@ -183,7 +211,8 @@ void BoundaryExtractor::buildNodeGrid(const Mesh& mesh) {
                     int bestNode = -1;
                     double bestScore = -1e30;
 
-                    for (int nodeId : sharedNodes) {
+                    for (int s = 0; s < sharedCount; ++s) {
+                        int nodeId = sharedNodes[s];
                         double score = 0.0;
 
                         // Connectivity score
