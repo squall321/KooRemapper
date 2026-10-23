@@ -317,6 +317,26 @@ def sections(d):
     pa = pl[0][1][3] if pl and len(pl[0][1]) > 3 else None
     check("S-4 보통 접촉은 SOFT 2 · MAXPAR 1.15 아님", fld(pa, 0) == "2" and num(fld(pa, 3)) != 1.15, repr(pa))
 
+    # 예전 파서는 `- action` 으로 시작하는 줄만 새 항목으로 알아봤다. 플랫폼(argbuild)은 JSONB 가 키 순서를 잃어 `type` 을 먼저 쓰므로
+    # 플랫폼에서 type 을 준 create 는 늘 「YAML has no contact actions」 rc 1 이었다(10-23 살아 있는 잡으로 실측). 모르는 action 은
+    # 경고만 하고 rc 0 이었다(카탈로그는 필수 enum).
+    print("[T 목록 항목의 키 순서는 뜻이 없다 · action 은 필수 enum]")
+    deck(d)
+    rc, out, b = contact_run(d, "t0", "  - type: tiebreak\n    action: create\n    slave:\n      pids: [1]\n    master:\n      pids: [3]\n"
+                                      "    option: 2\n    nfls: 10.0\n    sfls: 50.0\n")
+    check("T-1 `- type:` 으로 시작하는 항목(argbuild 꼴)도 액션이다", rc == 0 and len(b) == 1 and "TIEBREAK" in b[0][0], out[-300:])
+    rc, out, b = contact_run(d, "t1", "- slave: { pid: 1 }\n  master: { pid: 3 }\n  action: create\n  type: auto\n")
+    check("T-2 들여쓰지 않은 목록 · action 이 맨 뒤", rc == 0 and len(b) == 1, out[-300:])
+    rc, out, b = contact_run(d, "t2", "  -\n    action: create\n    type: tied\n    slave: { pid: 1 }\n    master: { pid: 3 }\n")
+    check("T-3 `-` 만 있는 줄 — 키는 다음 줄부터", rc == 0 and len(b) == 1 and "TIED" in b[0][0], out[-300:])
+    rc, out, b = contact_run(d, "t3", "  - action: craete\n    type: auto\n    slave: { pid: 1 }\n    master: { pid: 3 }\n")
+    check("T-4 모르는 action 은 rc 1 · 덱을 쓰지 않는다", rc == 1 and "모르는 action 'craete'" in out and not b, out[-300:])
+    rc, out, b = contact_run(d, "t4", "  - type: auto\n    slave: { pid: 1 }\n    master: { pid: 3 }\n")
+    check("T-5 action 이 없는 항목은 rc 1", rc == 1 and "action 이 없다" in out, out[-300:])
+    rc, out, b = contact_run(d, "t5", "  - action: create\n    type: auto\n    slave: { pid: 1 }\n    master: { pid: 3 }\n"
+                                      "  - type: tied\n    action: create\n    slave: { pid: 2 }\n    master: { pid: 4 }\n")
+    check("T-6 키 순서가 다른 두 항목 — 둘 다 만든다", rc == 0 and len(b) == 2, out[-300:])
+
 
 if __name__ == "__main__":
     sys.exit(main())

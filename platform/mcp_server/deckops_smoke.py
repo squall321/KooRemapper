@@ -58,6 +58,14 @@ CASES = [
      [REPO / "examples" / "rebind_entities_after_remesh" / f for f in ("v1.k", "v2.k", "range_diff.json")],
      {"old_deck": "v1.k", "new_deck": "v2.k", "entities": "ours.k", "output": "ours_rebound.k",
       "range_diff": "range_diff.json"}),
+    # contact 는 자유 형식(`config`). 플랫폼(argbuild)은 JSONB 가 키 순서를 잃어 항목을 `type` 부터 쓰는데, 예전 바이너리는
+    # `- action` 으로 시작하는 항목만 알아봐 이 잡을 「YAML has no contact actions」 로 떨어뜨렸다(10-23 — 이 목록에 contact 가
+    # 없어 아무도 못 잡았다). tiebreak 은 option · nfls · sfls 를 줘야 만든다.
+    ("contact",
+     REPO / "examples" / "contact" / "model.k", [],
+     {"config": {"model": "model.k", "output": "smoke_contact.k", "contacts": [
+         {"action": "create", "type": "tiebreak", "slave": {"pids": [1]}, "master": {"pids": [2]},
+          "option": 2, "nfls": 10.0, "sfls": 50.0}]}}),
 ]
 
 OK = []
@@ -96,8 +104,9 @@ async def main():
                         S._data(await s.call_tool("upload_local_path",
                                                   {"session_id": sid, "path": str(p)}))
                     a = dict(args)
-                    # 구조화 op 은 모르는 키를 거절한다 — `rebind_entities_after_remesh` 에는 `model` 이 없다
-                    if os.path.basename(str(deck)) not in a.values():
+                    # 구조화 op 은 모르는 키를 거절한다 — `rebind_entities_after_remesh` 에는 `model` 이 없다.
+                    # 자유 형식 op(`config`)은 `model` 을 config 안에 둔다.
+                    if "config" not in a and os.path.basename(str(deck)) not in a.values():
                         a["model"] = os.path.basename(str(deck))
                     job = S._data(await s.call_tool("run_operation",
                                                     {"session_id": sid, "operation": op, "args": a}))

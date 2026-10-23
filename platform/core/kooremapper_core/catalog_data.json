@@ -11182,7 +11182,7 @@
             "remove",
             "detect"
           ],
-          "desc": "Action type. analyze: report existing contacts (no output required). create: generate new contacts. convert: transform existing contact SSTYP. modify: change friction and optional cards. remove: delete contact by index. detect: auto-find contacting surfaces."
+          "desc": "Action type. analyze: report existing contacts (no output required). create: generate new contacts. convert: transform existing contact SSTYP. modify: change friction and optional cards. remove: delete contact by index. detect: auto-find contacting surfaces. The key may appear anywhere in the list item (key order has no meaning — until 2026-10-23 an item had to start with `- action`, so an item written `- type: …` first, as the platform does, was dropped and the run failed with \"YAML has no contact actions\"). An unknown or missing action fails with rc=1 before the deck is touched (it used to be a warning and rc=0)."
         },
         {
           "path": "contacts[].type",

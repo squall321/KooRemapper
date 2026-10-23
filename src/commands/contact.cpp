@@ -269,6 +269,20 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
             }
             pendingPidList = nullptr;
 
+            // 새 목록 항목 — `contacts:` 아래 `- ` 로 시작하는 줄이면 첫 키가 무엇이든 새 액션이다(`action` 은 항목 안 어디에 와도 된다).
+            // ⚠ 예전엔 `- action` 으로 시작하는 줄만 새 항목으로 알아봤다. YAML 에서 키 순서는 뜻이 없는데 플랫폼(argbuild)은 JSONB 가
+            //   순서를 잃어 `type` 을 먼저 쓴다 — `- type: tiebreak` 다음 `action: create` 인 항목이 통째로 버려져 「YAML has no contact
+            //   actions」 rc 1 이었다(10-23 실측 — 플랫폼에서 type 을 준 create 는 늘 실패, 손으로 쓴 YAML 도 같다).
+            bool itemStart = false;
+            if (inContacts && t[0] == '-' && (t.size() == 1 || t[1] == ' ' || t[1] == '\t')) {
+                flushAction();
+                hasAction = true;
+                currentSide.clear();
+                t = kw_trim(t.substr(1));
+                if (t.empty()) continue;   // `-` 만 있는 줄 — 키는 다음 줄부터
+                itemStart = true;
+            }
+
             size_t colon = t.find(':');
             if (colon == std::string::npos) continue;
             std::string key = kw_trim(t.substr(0, colon));
@@ -276,10 +290,10 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
             std::string val = stripQuotes(kw_trim(yamlStripComment(t.substr(colon+1))));
 
             // Top-level keys
-            if (key == "model" && indent < 4) { modelFile = val; inContacts = false; continue; }
-            if (key == "output" && indent < 4) { outputFile = val; inContacts = false; continue; }
+            if (!itemStart && key == "model" && indent < 4) { modelFile = val; inContacts = false; continue; }
+            if (!itemStart && key == "output" && indent < 4) { outputFile = val; inContacts = false; continue; }
 
-            if (key == "contacts" && indent < 4) {
+            if (!itemStart && key == "contacts" && indent < 4) {
                 inContacts = true;
                 contactsIndent = indent;
                 continue;
@@ -287,21 +301,10 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
 
             if (!inContacts) continue;
 
-            // Detect new list item: "- action: ..."
-            if (t.find("- action") == 0) {
-                flushAction();
-                size_t ac = t.find(':');
-                if (ac != std::string::npos) {
-                    curAction.action = stripQuotes(kw_trim(yamlStripComment(t.substr(ac+1))));
-                }
-                hasAction = true;
-                currentSide.clear();
-                continue;
-            }
-
             if (!hasAction) continue;
 
             // Sub-keys of current action
+            if (key == "action") { curAction.action = val; continue; }
             if (key == "type") { curAction.type = val; continue; }
             if (key == "title") { curAction.title = val; continue; }
             if (key == "contact_index") {
@@ -444,6 +447,21 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
 
     if (modelFile.empty()) { console.error("YAML missing 'model' key"); return 1; }
     if (actions.empty()) { console.error("YAML has no contact actions"); return 1; }
+    // action 은 필수 enum 이다(카탈로그 `contacts[].action`). ⚠ 예전엔 모르는 값을 경고만 하고 건너뛰어 rc 0 이었다 —
+    //   `action: craete` 가 아무것도 만들지 않은 덱을 성공으로 냈다. 덱을 건드리기 전에 전부 본다.
+    {
+        static const char* const kActions[] = {"analyze", "create", "convert", "modify", "remove", "detect"};
+        for (size_t i = 0; i < actions.size(); ++i) {
+            const std::string& a = actions[i].action;
+            bool known = false;
+            for (const char* k : kActions) if (a == k) { known = true; break; }
+            if (known) continue;
+            console.error("[contact] contacts[" + std::to_string(i) + "]: " +
+                          (a.empty() ? std::string("action 이 없다") : "모르는 action '" + a + "'") +
+                          " (allowed: analyze, create, convert, modify, remove, detect)");
+            return 1;
+        }
+    }
 
     std::string modelPath = resolvePath(modelFile);
     std::string outPath;
