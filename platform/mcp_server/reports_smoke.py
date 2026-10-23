@@ -34,9 +34,12 @@ from mcp.client.streamable_http import streamablehttp_client
 ROOT = pathlib.Path("/data/koopark/Test_Impact_A")
 HTML = ROOT / "impact_report.html"
 MEDIA = ROOT / "impact_report_data"
+#: 새 판 전각도 낙하 리포트(운영 이미지로 만든 고정본 — README 에 출처). 없으면 그 항만 건너뛴다.
+SPHERE_NEW = pathlib.Path("/data/koopark/report_fixtures/sphere_hotspot_v1018/report.html")
 
 TOOLS = ("report_blocks", "report_block", "report_hotspots", "report_behavior_clusters",
-         "report_analytics", "report_media", "report_image", "report_compare")
+         "report_analytics", "report_media", "report_image", "report_compare",
+         "report_contact_profile", "report_energy_flow")
 OK = []
 
 
@@ -66,7 +69,7 @@ async def main():
         print("SKIP: API 에 닿지 않거나 토큰을 발급할 수 없다 (스택이 떠 있어야 한다)")
         return 0
     H = {"Authorization": f"Bearer {pat}"}
-    rid = sid = None
+    rid = sid = srid = ssid = None
     try:
         # 반입은 REST 다 — MCP 로 GB 를 나르지 않는다(`report_upload_instructions` 와 같은 규율).
         with httpx.Client(base_url=S.API, timeout=900.0) as c:
@@ -78,6 +81,14 @@ async def main():
         chk("번들 반입(HTML + 사이드카)", bool(rid), r.text[:300])
         if not rid:
             return 1
+        if SPHERE_NEW.exists():
+            with httpx.Client(base_url=S.API, timeout=900.0) as c:
+                r2 = c.post("/reports/intake", headers=H,
+                            files={"file": ("report.html", SPHERE_NEW.read_bytes(), "text/html")},
+                            data={"session_name": "reports smoke sphere"})
+                d2 = (r2.json().get("data") or {}) if r2.status_code < 400 else {}
+                srid, ssid = d2.get("report_id"), d2.get("session_id")
+            chk("새 판 sphere 리포트 반입", bool(srid), r2.text[:300])
         med = (d.get("media") or {})
         chk("미디어가 리포트에 붙었다 (이미지 8 · 영상 8)",
             med.get("n_images") == 8 and med.get("n_videos") == 8, med)
@@ -181,12 +192,55 @@ async def main():
                 hs = S._data(await s.call_tool("report_hotspots", {"report_id": rid}))
                 chk("핫스팟이 없는 종류에서는 **없다고 말한다**(빈 목록으로 넘기지 않는다)",
                     hs.get("available") is False and "hotspot-clusters" in (hs.get("note") or ""), hs)
+
+                # ── 파트쌍 접촉 프로파일 · 하중경로 (10-23) ────────────────────
+                # 도구 수(73)만 세면 새 도구를 한 번도 안 불러도 초록이다. 값으로 본다.
+                cp = S._data(await s.call_tool("report_contact_profile", {"report_id": rid}))
+                ax = (cp.get("axis_summary") or [{}])[0] if isinstance(cp, dict) else {}
+                chk("report_contact_profile — impact 23쌍 × 25위치",
+                    cp.get("available") is True and cp.get("axis_kind") == "position"
+                    and cp.get("n_pairs") == 23 and cp.get("n_axis") == 25, cp)
+                # ★앞 12개 위치는 접촉이 없다(전부 None) — 축 순서로 내면 「가장 센 위치」가 빈 위치가 된다.
+                chk("★축 요약이 **세기 순**이다(첫째 F5_DOE_025 · 23쌍이 닿았다)",
+                    ax.get("case_key") == "F5_DOE_025" and ax.get("n_engaged") == 23
+                    and isinstance(ax.get("top_value"), (int, float)), ax)
+                at = (S._data(await s.call_tool("report_contact_profile", {
+                    "report_id": rid, "case_key": "F5_DOE_025"})) or {}).get("at") or {}
+                chk("그 위치의 파트쌍 엣지 23 · 피크 접촉력이 다 있다",
+                    at.get("found") is True and len(at.get("edges") or []) == 23
+                    and all(e.get("peak_force") is not None for e in at.get("edges") or []), at)
+                ef = S._data(await s.call_tool("report_energy_flow", {"report_id": rid, "case_key": "F5_DOE_013"}))
+                eg = ((ef or {}).get("energy_flow") or {}).get("edges") or []
+                # ★impact 압축본은 엣지 이름이 `peak_f` 다 — 중립 이름만 읽던 때는 23개가 **전부 null** 이었다.
+                chk("★하중경로 엣지 23 · peak_force 가 null 이 아니다(압축 꼴을 읽는다)",
+                    len(eg) == 23 and all(e.get("peak_force") is not None for e in eg),
+                    [e.get("peak_force") for e in eg][:5])
+                miss = S._data(await s.call_tool("report_energy_flow", {"report_id": rid, "case_key": "NO_SUCH"}))
+                chk("★없는 케이스는 **다른 케이스로 떨어지지 않는다**(null + 고를 수 있는 키)",
+                    miss.get("energy_flow") is None and miss.get("flow_case_key") is None
+                    and len(miss.get("available_case_keys") or []) == 25, miss)
+                if srid:
+                    sh = S._data(await s.call_tool("report_hotspots", {"report_id": srid}))
+                    chk("★sphere 핫스팟 — 13항목 · 58군집 · 포락 13",
+                        sh.get("available") is True and sh.get("n_records") == 13
+                        and sh.get("n_clusters_all") == 58 and len(sh.get("envelope") or []) == 13, sh)
+                    sp = S._data(await s.call_tool("report_contact_profile", {"report_id": srid}))
+                    chk("sphere 접촉 프로파일 — 22쌍 · 각도 축 · 신뢰 요약",
+                        sp.get("n_pairs") == 22 and sp.get("axis_kind") == "angle"
+                        and isinstance(sp.get("trust"), dict), sp)
+                    se = S._data(await s.call_tool("report_energy_flow", {"report_id": srid}))
+                    sg = ((se or {}).get("energy_flow") or {}).get("edges") or []
+                    chk("sphere 하중경로 — 엣지 22 · 피크 값 · 쓴 케이스를 적는다",
+                        len(sg) == 22 and all(e.get("peak_force") is not None for e in sg)
+                        and bool(se.get("flow_case_key")), se.get("flow_case_key"))
     finally:
         with httpx.Client(base_url=S.API, timeout=120.0) as c:
-            if rid:
-                c.delete(f"/reports/{rid}", headers=H)
-            if sid:
-                c.delete(f"/sessions/{sid}", headers=H)
+            for r_id in (rid, srid):
+                if r_id:
+                    c.delete(f"/reports/{r_id}", headers=H)
+            for s_id in (sid, ssid):
+                if s_id:
+                    c.delete(f"/sessions/{s_id}", headers=H)
         if tid:
             S._revoke_token(tid)
     bad = OK.count(False)
