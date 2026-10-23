@@ -7,19 +7,20 @@
 // 색은 전부 테마 토큰(currentColor/text-*)으로 잡아 라이트·다크가 자동으로 따라온다.
 import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Activity, AlertTriangle, Compass, Flame, Image as ImageIcon, Layers, LineChart, Network, Sigma, Table2, Zap } from 'lucide-react'
+import { Activity, AlertTriangle, Compass, Flame, Image as ImageIcon, Layers, LineChart, Network, Share2, Sigma, Table2, Zap } from 'lucide-react'
 import {
   mediaBlobUrl, reportAnalytics, reportAngleStats, reportBehaviorClusters, reportBlocks,
-  reportDirectional,
+  reportContactProfile, reportDirectional,
   reportEnergy, reportHotspots, reportMedia, reportPartEnergy, reportPartRisk,
   reportPartSeries, reportScatter,
 } from '@/shared/api/endpoints'
 import type {
-  AngleGroupStats, PartEnergySeries, Report, ReportAnalytics, ReportBehaviorClusters, ReportCase,
-  ReportDirectional, ReportEnergy, ReportHotspots, ReportMedia, ReportMediaItem, ReportPartRisk,
-  ReportPartSeries, ReportScatter, ScatterMetric,
+  AngleGroupStats, ContactMetric, EnergyFlow, PartEnergySeries, Report, ReportAnalytics, ReportBehaviorClusters,
+  ReportCase, ReportContactProfile, ReportDirectional, ReportEnergy, ReportHotspots, ReportMedia, ReportMediaItem,
+  ReportPartRisk, ReportPartSeries, ReportScatter, ScatterMetric,
 } from '@/shared/api/types'
 import { Badge, EmptyState, Spinner } from '@/shared/ui/ui'
+import { ContactHeatmap, LoadPathGraph } from './ContactGraphs'
 
 // ── 표시 유틸 ────────────────────────────────────────────────────────────────
 function fmt(n: number | null | undefined, d = 1): string {
@@ -147,7 +148,7 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: 'ok
 
 // ── 탭 ───────────────────────────────────────────────────────────────────────
 type TabKey = 'parts' | 'directional' | 'scatter' | 'anglestats' | 'energy' | 'partenergy'
-  | 'series' | 'hotspots' | 'clusters' | 'analytics' | 'media'
+  | 'series' | 'hotspots' | 'clusters' | 'contacts' | 'analytics' | 'media'
 const TABS: Array<{ key: TabKey; label: string; icon: typeof Layers; kinds?: string[] }> = [
   { key: 'parts', label: '파트 위험도', icon: Layers },
   { key: 'directional', label: '방향 취약도', icon: Compass },
@@ -158,7 +159,8 @@ const TABS: Array<{ key: TabKey; label: string; icon: typeof Layers; kinds?: str
   { key: 'series', label: '파트 시계열', icon: LineChart },
   // ★아래 넷은 리포트에 **있었는데 플랫폼이 버리고 있던** 것들이다(실측: deep 21키 중 11,
   //   impact 27키 중 18). 그중에 핫스팟 군집 102레코드와 거동 군집이 있었다.
-  { key: 'hotspots', label: '핫스팟 군집', icon: Flame, kinds: ['deep'] },
+  { key: 'hotspots', label: '핫스팟 군집', icon: Flame, kinds: ['deep', 'sphere'] },
+  { key: 'contacts', label: '접촉 전개', icon: Share2, kinds: ['sphere', 'impact'] },
   { key: 'clusters', label: '거동 군집', icon: Network, kinds: ['impact'] },
   { key: 'media', label: '결과 이미지', icon: ImageIcon },
   { key: 'analytics', label: '분석 블록', icon: Table2 },
@@ -197,6 +199,7 @@ export function ReportAnalysis({ report, cases }: { report: Report; cases: Repor
         {tab === 'partenergy' && <PartEnergyView reportId={report.id} />}
         {tab === 'series' && <SeriesView report={report} cases={cases} />}
         {tab === 'hotspots' && <HotspotsView reportId={report.id} />}
+        {tab === 'contacts' && <ContactProfileView reportId={report.id} />}
         {tab === 'clusters' && <ClustersView reportId={report.id} />}
         {tab === 'media' && <MediaView report={report} />}
         {tab === 'analytics' && <AnalyticsView reportId={report.id} />}
@@ -343,6 +346,8 @@ function EnergyView({ reportId, cases }: { reportId: string; cases: ReportCase[]
   const series = raw && raw.t && activeKey
     ? { t: raw.t as number[], v: raw[activeKey] as number[] }
     : null
+  const flow = q.data?.energy_flow ?? null
+  const flowKind = q.data?.kind === 'sphere' || q.data?.kind === 'impact'
   return (
     <div className="space-y-3 text-[11px]">
       {cases.length > 0 && (
@@ -395,9 +400,199 @@ function EnergyView({ reportId, cases }: { reportId: string; cases: ReportCase[]
           ))}
         </div>
       )}
-      {!eb && !contacts.length && !series && (
+      {flow && <FlowPanel flow={flow} caseKey={q.data?.flow_case_key ?? null} detailNote={q.data?.detail_note} />}
+      {flowKind && !flow && (q.data?.available_case_keys ?? []).length > 0 && (
+        <div className="space-y-1">
+          {/* ★다른 각도로 떨어지지 않는다 — 상세가 있는 케이스를 보여 주고 고르게 한다 */}
+          <div className="text-muted">{q.data?.note}</div>
+          <div className="flex flex-wrap gap-1 items-center">
+            <span className="text-muted">상세가 있는 케이스</span>
+            {(q.data?.available_case_keys ?? []).slice(0, 60).map((k) => (
+              <button key={k} onClick={() => setCaseKey(k)}
+                      className="px-1.5 py-0.5 rounded border border-border text-[10px] text-muted hover:text-fg">{k}</button>
+            ))}
+          </div>
+        </div>
+      )}
+      {!eb && !contacts.length && !series && !flow && !(flowKind && (q.data?.available_case_keys ?? []).length > 0) && (
         <EmptyState title="표시할 에너지 정보 없음" hint={q.data?.note ?? '원본 리포트에 해당 항목이 없습니다.'} />
       )}
+    </div>
+  )
+}
+
+// 하중경로(sphere · impact) — 한 케이스의 충격체 → 파트 전파. 굵기는 최대 접촉력, 표는 상위 엣지.
+function FlowPanel({ flow, caseKey, detailNote }: { flow: EnergyFlow; caseKey: string | null; detailNote?: string }) {
+  const nodes = flow.nodes
+    .filter((n) => n.node_id != null)
+    .map((n) => ({ id: String(n.node_id), name: n.name, is_impactor: n.is_impactor }))
+  const names = new Map(nodes.map((n) => [n.id, n.name || n.id]))
+  const edges = flow.edges.map((e, i) => ({
+    key: `${e.src}>${e.dst}#${i}`, src: String(e.src), dst: String(e.dst), name: e.name,
+    value: e.peak_force, work: e.total_work, impulse: e.total_impulse,
+  }))
+  const top = [...flow.edges].sort((a, b) => Math.abs(b.peak_force ?? 0) - Math.abs(a.peak_force ?? 0)).slice(0, 12)
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap gap-2">
+        <Stat label="하중경로 케이스" value={caseKey ?? '—'} />
+        <Stat label="충격체 KE 처음" value={smart(flow.impactor_ke_initial)} />
+        <Stat label="충격체 KE 끝" value={smart(flow.impactor_ke_final)} />
+        <Stat label="소산 에너지" value={smart(flow.energy_dissipated)} />
+      </div>
+      <LoadPathGraph nodes={nodes} edges={edges} />
+      {flow.form_note && <div className="text-[10px] text-muted">{flow.form_note}</div>}
+      {detailNote && <div className="text-[10px] text-muted">{detailNote}</div>}
+      <div className="overflow-x-auto">
+        <table className="w-full text-[11px]">
+          <thead className="text-muted">
+            <tr className="text-left">
+              <th className="py-1 pr-2">접촉</th>
+              <th className="pr-2">경로</th>
+              <th className="pr-2 text-right">최대 접촉력</th>
+              <th className="pr-2 text-right">일</th>
+              <th className="pr-2 text-right">충격량</th>
+              <th className="pr-2 text-right">신뢰도</th>
+            </tr>
+          </thead>
+          <tbody>
+            {top.map((e, i) => (
+              <tr key={i} className="border-t border-border/60">
+                <td className="py-1 pr-2 truncate max-w-[160px]" title={e.name ?? ''}>{e.name ?? '—'}</td>
+                <td className="pr-2 truncate max-w-[260px]">
+                  {names.get(String(e.src)) ?? e.src} → {names.get(String(e.dst)) ?? e.dst}
+                </td>
+                <td className="pr-2 text-right mono">{smart(e.peak_force)}</td>
+                <td className="pr-2 text-right mono">{smart(e.total_work)}</td>
+                <td className="pr-2 text-right mono">{smart(e.total_impulse)}</td>
+                <td className="pr-2 text-right mono">{e.confidence == null ? '—' : fmt(e.confidence, 2)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+// ── 접촉 전개 (sphere · impact) — 파트쌍 × 각도(위치) 히트맵 · 칸을 누르면 그 각도의 접촉 그래프 ─────────────
+const CONTACT_METRIC_LABEL: Record<ContactMetric, string> = { pf: '최대 접촉력', ti: '충격량', tw: '일' }
+
+function ContactProfileView({ reportId }: { reportId: string }) {
+  const [metric, setMetric] = useState<ContactMetric>('pf')
+  const [pick, setPick] = useState<string | null>(null)
+  const q = useQuery<ReportContactProfile>({
+    queryKey: ['report-contact-profile', reportId, metric],
+    queryFn: () => reportContactProfile(reportId, { metric, matrix: true, top: 1000 }),
+  })
+  const at = useQuery<ReportContactProfile>({
+    queryKey: ['report-contact-at', reportId, pick],
+    queryFn: () => reportContactProfile(reportId, { case_key: pick ?? undefined, top: 1, axis_top: 1 }),
+    enabled: !!pick,
+  })
+  if (q.isLoading) return <Spinner />
+  const d = q.data
+  if (!d?.available) {
+    return <EmptyState title="파트쌍 접촉 프로파일 없음" hint={d?.note ?? d?.error ?? '이 리포트에는 접촉 프로파일이 없습니다.'} />
+  }
+  const pairs = d.pairs ?? []
+  const byKey = new Map(pairs.map((p) => [p.key, p]))
+  const pairLabel = (k: string) => {
+    const p = byKey.get(k)
+    if (!p) return k
+    const a = p.src_name ?? (p.src || '?'), b = p.dst_name ?? (p.dst || '?')
+    // 파트로 안 풀린 접촉(single-surface 등)은 한쪽이 세트·인터페이스다 — 접촉 이름을 붙여 무엇인지 보인다
+    return p.resolved ? `${a} ↔ ${b}` : `${a} ↔ ${b}${p.name ? ` · ${p.name}` : ''}`
+  }
+  const rows = (d.matrix?.pairs ?? []).map((k) => ({ key: k, label: pairLabel(k), resolved: byKey.get(k)?.resolved ?? false }))
+  const cols = (d.axis_summary ?? []).map((a) => ({ case_key: a.case_key, label: a.label }))
+  const word = d.axis_kind === 'position' ? '위치' : '각도'
+  const worstAxis = [...(d.axis_summary ?? [])]
+    .filter((a) => a.top_value != null)
+    .sort((a, b) => Math.abs(b.top_value ?? 0) - Math.abs(a.top_value ?? 0))
+    .slice(0, 8)
+  const atEdges = (at.data?.at?.edges ?? []).filter((e) => e.resolved)
+  const atNodes = Array.from(new Map(atEdges.flatMap((e) => [
+    [e.src, { id: e.src, name: e.src_name ?? e.src }], [e.dst, { id: e.dst, name: e.dst_name ?? e.dst }],
+  ])).values())
+  return (
+    <div className="space-y-3 text-[11px]">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-muted">
+          파트쌍 {d.n_pairs}(파트로 풀린 것 {d.n_resolved}) · {word} {d.n_axis}
+        </span>
+        {(['pf', 'ti', 'tw'] as ContactMetric[]).map((m) => (
+          <button key={m} onClick={() => setMetric(m)}
+                  className={`px-1.5 py-0.5 rounded text-[10px] ${metric === m ? 'bg-primary text-primary-fg' : 'text-muted hover:text-fg'}`}>
+            {CONTACT_METRIC_LABEL[m]}
+          </button>
+        ))}
+        {d.trust && (
+          <span className="text-muted">
+            접촉력 신뢰 — Newton-3 최악 상대오차 {smart(d.trust.newton3_worst_rel ?? null)} · 한쪽만 잰 접촉 {d.trust.n_one_sided ?? 0}
+          </span>
+        )}
+      </div>
+      {d.matrix
+        ? <ContactHeatmap rows={rows} cols={cols} values={d.matrix.values} selected={pick} onPick={setPick}
+                          valueLabel={CONTACT_METRIC_LABEL[metric]} />
+        : <div className="text-muted">{d.matrix_note}</div>}
+      <div className="text-[10px] text-muted">
+        빈 칸 = 그 {word}에 그 접촉이 없다(0 이 아니다) · 회색 글자 = 파트로 풀리지 않은 접촉(single-surface 등) ·
+        칸을 누르면 그 {word}의 접촉 그래프
+      </div>
+      {pick && (
+        at.isLoading ? <Spinner /> : at.data?.at?.found ? (
+          <div className="space-y-1">
+            <div className="text-muted">{word} {at.data.at.label ?? pick} — 파트쌍 엣지 {atEdges.length}
+              {(at.data.at.edges?.length ?? 0) > atEdges.length && ` (파트로 안 풀린 접촉 ${(at.data.at.edges?.length ?? 0) - atEdges.length} 제외)`}
+            </div>
+            <LoadPathGraph nodes={atNodes} edges={atEdges.map((e) => ({
+              key: e.key, src: e.src, dst: e.dst, name: e.name, value: e.peak_force, work: e.total_work, impulse: e.total_impulse,
+            }))} />
+          </div>
+        ) : <div className="text-muted">{at.data?.at?.note ?? '그 케이스를 찾지 못했다.'}</div>
+      )}
+      <div className="grid md:grid-cols-2 gap-3">
+        <div className="overflow-x-auto">
+          <div className="text-muted mb-1">세게 미는 파트쌍 — |{CONTACT_METRIC_LABEL[metric]}| 최대와 그 {word}</div>
+          <table className="w-full text-[11px]">
+            <tbody>
+              {pairs.slice(0, 15).map((p) => (
+                <tr key={p.key} className="border-t border-border/60">
+                  <td className={`py-1 pr-2 truncate max-w-[220px] ${p.resolved ? '' : 'text-muted'}`} title={p.name ?? ''}>
+                    {pairLabel(p.key)}
+                  </td>
+                  <td className="pr-2 text-right mono">{smart(p.peak)}</td>
+                  <td className="pr-2">
+                    {p.peak_case_key
+                      ? <button className="underline decoration-dotted" onClick={() => setPick(p.peak_case_key)}>{p.peak_label ?? p.peak_case_key}</button>
+                      : '—'}
+                  </td>
+                  <td className="pr-2 text-right text-muted">{p.n_engaged}{word}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="overflow-x-auto">
+          <div className="text-muted mb-1">가장 센 접촉이 큰 {word}</div>
+          <table className="w-full text-[11px]">
+            <tbody>
+              {worstAxis.map((a) => (
+                <tr key={a.case_key ?? ''} className="border-t border-border/60">
+                  <td className="py-1 pr-2">
+                    <button className="underline decoration-dotted" onClick={() => setPick(a.case_key)}>{a.label ?? a.case_key}</button>
+                  </td>
+                  <td className="pr-2 truncate max-w-[200px]">{a.top_pair ? pairLabel(a.top_pair) : '—'}</td>
+                  <td className="pr-2 text-right mono">{smart(a.top_value)}</td>
+                  <td className="pr-2 text-right text-muted">{a.n_engaged}쌍</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   )
 }
@@ -556,9 +751,10 @@ function PartEnergyView({ reportId }: { reportId: string }) {
 // 플랫폼이 읽지 않아 어디에도 도달하지 않았다(실측 102 레코드 · 105 군집 · 34파트 × 3기준).
 function HotspotsView({ reportId }: { reportId: string }) {
   const [criterion, setCriterion] = useState<string>('')
+  const [caseKey, setCaseKey] = useState<string>('')
   const q = useQuery<ReportHotspots>({
-    queryKey: ['report-hotspots', reportId, criterion],
-    queryFn: () => reportHotspots(reportId, { criterion: criterion || undefined, top: 50 }),
+    queryKey: ['report-hotspots', reportId, criterion, caseKey],
+    queryFn: () => reportHotspots(reportId, { criterion: criterion || undefined, top: 50, case_key: caseKey || undefined }),
   })
   if (q.isLoading) return <Spinner />
   const d = q.data
@@ -571,11 +767,17 @@ function HotspotsView({ reportId }: { reportId: string }) {
     )
   }
   const rows = d.clusters ?? []
+  // sphere 는 각도 런마다 실린다 — 포락(전 각도 최강)부터 보고 행을 눌러 그 각도로 좁힌다.
+  const sphere = d.kind === 'sphere'
+  const angleText = (a?: { name?: string | null; roll?: number | null; pitch?: number | null; yaw?: number | null } | null) =>
+    a ? `${a.name ?? '—'} (${fmt(a.roll ?? null, 0)}, ${fmt(a.pitch ?? null, 0)}, ${fmt(a.yaw ?? null, 0)})` : '—'
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2 text-[11px]">
         <span className="text-muted">
-          레코드 {d.n_records} · 군집 {d.n_clusters} · 파트 {d.parts?.length ?? 0}개
+          {sphere
+            ? `각도 ${d.n_angles_with_clusters ?? 0}/${d.n_angles_total ?? 0} · 레코드 ${d.n_records} · 군집 ${d.n_clusters_all ?? d.n_clusters}`
+            : `레코드 ${d.n_records} · 군집 ${d.n_clusters} · 파트 ${d.parts?.length ?? 0}개`}
         </span>
         <select
           value={criterion}
@@ -585,6 +787,12 @@ function HotspotsView({ reportId }: { reportId: string }) {
           <option value="">판정기준 전체</option>
           {(d.criteria ?? []).map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
+        {sphere && caseKey && (
+          <button onClick={() => setCaseKey('')}
+                  className="px-1.5 py-0.5 rounded border border-border text-[10px] text-muted hover:text-fg">
+            각도 {caseKey} — 전체로
+          </button>
+        )}
       </div>
       {/* ★크기 비교는 절대값이다 — min 기준의 값은 음수다. 그 사실을 화면에도 적는다. */}
       {d.order_note && <div className="text-[10px] text-muted">{d.order_note}</div>}
@@ -592,16 +800,57 @@ function HotspotsView({ reportId }: { reportId: string }) {
       {d.uniform_note && (
         <div className="text-[11px]" style={{ color: '#a33' }}>⚠ {d.uniform_note}</div>
       )}
+      {/* ★생성기가 상한으로 골라 실었다 — 조용히 자른 것처럼 보이지 않게 */}
+      {d.cap_note && <div className="text-[11px]" style={{ color: '#a33' }}>⚠ {d.cap_note}</div>}
+      {d.compact_note && <div className="text-[10px] text-muted">{d.compact_note}</div>}
+      {sphere && (d.envelope?.length ?? 0) > 0 && (
+        <div className="overflow-x-auto">
+          <div className="text-[11px] text-muted mb-1">
+            전 각도 포락 — 파트 × 기준마다 가장 센 군집 · 행을 누르면 그 각도의 군집만 본다
+          </div>
+          <table className="w-full text-[11px]">
+            <thead className="text-muted">
+              <tr className="text-left">
+                <th className="py-1 pr-2">파트</th>
+                <th className="pr-2">기준</th>
+                <th className="pr-2">가장 센 각도 (roll, pitch, yaw)</th>
+                <th className="pr-2 text-right">|응력| 최대</th>
+                <th className="pr-2 text-right">요소</th>
+                <th className="pr-2 text-right">반경</th>
+                <th className="pr-2 text-right">군집 난 각도</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(d.envelope ?? []).map((e, i) => (
+                <tr key={i} className={`border-t border-border/60 cursor-pointer hover:bg-surface ${caseKey && caseKey === e.worst_case_key ? 'bg-surface' : ''}`}
+                    onClick={() => e.worst_case_key && setCaseKey(e.worst_case_key)}>
+                  <td className="py-1 pr-2 truncate max-w-[180px]" title={e.part_name ?? ''}>
+                    {e.part_id}{e.part_name ? ` ${e.part_name}` : ''}
+                  </td>
+                  <td className="pr-2 mono">{e.criterion}</td>
+                  <td className="pr-2 mono">{angleText(e.worst_angle)}</td>
+                  <td className="pr-2 text-right mono">{smart(e.stress_max == null ? null : Math.abs(e.stress_max))}</td>
+                  <td className="pr-2 text-right">{e.element_count ?? '—'}</td>
+                  <td className="pr-2 text-right mono">{fmt(e.radius_enclosing ?? null, 2)}</td>
+                  <td className="pr-2 text-right">{e.n_angles}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {d.envelope_note && <div className="text-[10px] text-muted">{d.envelope_note}</div>}
+        </div>
+      )}
       <div className="overflow-x-auto">
         <table className="w-full text-[11px]">
           <thead className="text-muted">
             <tr className="text-left">
+              {sphere && <th className="py-1 pr-2">각도</th>}
               <th className="py-1 pr-2">파트</th>
               <th className="pr-2">기준</th>
               <th className="pr-2">순위</th>
               <th className="pr-2 text-right">|응력| 최대</th>
               <th className="pr-2 text-right">요소</th>
-              <th className="pr-2 text-right">부피</th>
+              {!sphere && <th className="pr-2 text-right">부피</th>}
               <th className="pr-2 text-right">반경</th>
               <th className="pr-2">중심 (x, y, z)</th>
               <th className="pr-2 text-right">피크 시각</th>
@@ -610,6 +859,7 @@ function HotspotsView({ reportId }: { reportId: string }) {
           <tbody>
             {rows.map((c, i) => (
               <tr key={i} className="border-t border-border/60">
+                {sphere && <td className="py-1 pr-2 mono">{c.angle?.name ?? c.case_key ?? '—'}</td>}
                 <td className="py-1 pr-2">
                   {c.part_id}
                   {c.uniform && <span style={{ color: '#a33' }} title="값이 고르다 — 핫스팟이 아니다"> ⚠</span>}
@@ -618,7 +868,7 @@ function HotspotsView({ reportId }: { reportId: string }) {
                 <td className="pr-2">{c.rank ?? '—'}</td>
                 <td className="pr-2 text-right mono">{smart(c.stress_max == null ? null : Math.abs(c.stress_max))}</td>
                 <td className="pr-2 text-right">{c.element_count ?? '—'}</td>
-                <td className="pr-2 text-right mono">{smart(c.volume)}</td>
+                {!sphere && <td className="pr-2 text-right mono">{smart(c.volume)}</td>}
                 <td className="pr-2 text-right mono">{fmt(c.radius_enclosing, 2)}</td>
                 <td className="pr-2 mono">
                   {c.center ? c.center.map((v) => fmt(v, 1)).join(', ') : '—'}
@@ -634,6 +884,7 @@ function HotspotsView({ reportId }: { reportId: string }) {
           전체 {d.truncated.total} 중 {d.truncated.returned} 만 표시했습니다.
         </div>
       )}
+      {d.mesh_note && <div className="text-[10px] text-muted">{d.mesh_note}</div>}
     </div>
   )
 }

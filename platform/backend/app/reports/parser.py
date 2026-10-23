@@ -1311,7 +1311,7 @@ def _sphere_hotspots(data: dict, *, criterion: str | None, part_id: int | None, 
         "order_note": "stress_* 는 **절대값** 기준이다 — direction=min 기준의 값은 음수다",
         "filter": {"criterion": criterion, "part_id": part_id, "case_key": case_key},
         "envelope": envelope[: max(0, top)] if top else envelope,
-        "envelope_note": "파트 × 기준마다 **전 각도에서** 가장 센(|응력| 최대) 군집 하나 — n_angles 는 그 파트·기준에"
+        "envelope_note": "파트 × 기준마다 전 각도에서 가장 센(|응력| 최대) 군집 하나 — n_angles 는 그 파트·기준에"
                          " 군집이 난 각도 수다",
         "clusters": shown,
     }

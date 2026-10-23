@@ -5,7 +5,7 @@ import type {
   ReportCase, ReportDirectional, ReportEnergy, ReportFactQuery, ReportGeometry, ReportListItem,
   ReportKind, ReportPartRisk, ReportPartSeries, ReportScatter, ScatterMetric, SessionDetail,
   SessionFile, SessionSummary, TokenCreated, TokenInfo, User,
-  ReportAnalytics, ReportBehaviorClusters, ReportBlocks, ReportHotspots, ReportMedia,
+  ContactMetric, ReportAnalytics, ReportBehaviorClusters, ReportBlocks, ReportContactProfile, ReportHotspots, ReportMedia,
 } from './types'
 
 // auth
@@ -431,10 +431,18 @@ export async function reportBlocks(reportId: string): Promise<ReportBlocks> {
 }
 /** 핫스팟 군집(deep) — 어디가 뜨거운가. */
 export async function reportHotspots(
-  reportId: string, opts: { criterion?: string; part_id?: number; top?: number; order?: string } = {},
+  reportId: string, opts: { criterion?: string; part_id?: number; top?: number; order?: string; case_key?: string } = {},
 ): Promise<ReportHotspots> {
   const { data } = await api.get(`/reports/${reportId}/hotspots`, { params: opts })
   return unwrap<ReportHotspots>(data)
+}
+/** 파트쌍 × 각도(위치) 접촉 스칼라(sphere · impact) — 히트맵은 matrix, 한 각도의 엣지는 case_key. */
+export async function reportContactProfile(
+  reportId: string,
+  opts: { metric?: ContactMetric; top?: number; case_key?: string; matrix?: boolean; axis_top?: number } = {},
+): Promise<ReportContactProfile> {
+  const { data } = await api.get(`/reports/${reportId}/contact_profile`, { params: opts })
+  return unwrap<ReportContactProfile>(data)
 }
 /** 거동 아키타입 군집(impact). */
 export async function reportBehaviorClusters(reportId: string): Promise<ReportBehaviorClusters> {

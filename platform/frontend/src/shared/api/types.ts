@@ -70,6 +70,9 @@ export interface ModelEdge {
   b: number
   a_title: string
   b_title: string
+  /** `*CONTACT_…_ID` 의 CID(없으면 null) — 결과 쪽 접촉 id 와 잇는 열쇠. */
+  cid?: number | null
+  title?: string
   type?: string
   fs?: number
   gap_min?: number
@@ -81,6 +84,8 @@ export interface ModelConnectivity {
   geometric_edges?: ModelEdge[]
   contacts_total: number
   unresolved_sides: number
+  /** 못 푼 접촉 면마다 까닭(`_GENERAL`·`_ADVANCED`·순환·없는 세트…) — 그 면의 파트쌍은 연결도에 없다. */
+  unresolved_detail?: { contact: number; cid?: number | null; type: string; title: string; side: string; sid: number; styp: number; why: string }[]
 }
 
 export interface ModelMeta {
@@ -320,6 +325,39 @@ export interface ReportScatter {
     worst_case_key: string | null
   }>
 }
+/** 하중경로 노드(파트·충격체). 압축본에는 원해상도 피크가 없어 null 이다(`form_note`). */
+export interface EnergyFlowNode {
+  node_id: string | null
+  name?: string | null
+  is_impactor: boolean
+  peak_ke: number | null
+  peak_ie: number | null
+  final_ke: number | null
+  final_ie: number | null
+}
+export interface EnergyFlowEdge {
+  src: string
+  dst: string
+  name?: string | null
+  contact_id?: number | null
+  peak_force: number | null
+  total_work: number | null
+  total_impulse: number | null
+  confidence: number | null
+  first_engage_idx?: number | null
+  first_engage_t?: number | null
+}
+export interface EnergyFlow {
+  form: 'neutral' | 'html_compact'
+  form_note?: string
+  impactor_ke_initial: number | null
+  impactor_ke_final: number | null
+  energy_dissipated: number | null
+  propagation_order?: string[] | null
+  nodes: EnergyFlowNode[]
+  edges: EnergyFlowEdge[]
+  contact?: Record<string, unknown>
+}
 export interface ReportEnergy {
   kind: ReportKind
   note?: string
@@ -331,7 +369,13 @@ export interface ReportEnergy {
   }
   /** deep: {t:[], <계열명>:[]}. sphere/impact 는 energy_flow 쪽에 담긴다. */
   energy_series?: Record<string, number[]> | null
-  energy_flow?: Record<string, unknown> | null
+  energy_flow?: EnergyFlow | null
+  /** 실제로 쓴 케이스 — case_key 를 안 주면 대표 하나, 주었는데 상세가 없으면 null(다른 각도로 떨어지지 않는다). */
+  flow_case_key?: string | null
+  n_flows?: number
+  /** 상세(시계열)는 생성기가 상위 각도에만 싣는다 — 그 사유. */
+  detail_note?: string
+  available_case_keys?: string[]
   contacts?: Array<{ id: number | null; name: string | null; side: number | string | null; peak_fmag: number | null }>
   contact_metrics?: Record<string, unknown> | null
   has_matsum?: boolean
@@ -479,11 +523,42 @@ export interface HotspotCluster {
   strain_max?: number | null
   peak_element_id?: number | null
   peak_time?: number | null
+  /** sphere — 그 군집이 난 각도 런. */
+  case_key?: string | null
+  angle?: { name?: string | null; roll?: number | null; pitch?: number | null; yaw?: number | null; category?: string | null } | null
+  energy_total?: number | null
+  energy_max?: number | null
+}
+/** sphere — 파트 × 기준마다 **전 각도에서** 가장 센 군집 하나. */
+export interface HotspotEnvelope {
+  part_id: number | null
+  part_name?: string | null
+  criterion?: string | null
+  n_angles: number
+  worst_case_key: string | null
+  worst_angle?: HotspotCluster['angle']
+  stress_max: number | null
+  element_count?: number | null
+  radius_enclosing?: number | null
+  center?: number[] | null
+  peak_time?: number | null
 }
 export interface ReportHotspots {
   available: boolean
+  kind?: ReportKind
   n_records?: number
   n_clusters?: number
+  n_clusters_all?: number
+  n_angles_total?: number
+  n_angles_with_clusters?: number
+  envelope?: HotspotEnvelope[]
+  envelope_note?: string
+  /** 생성기 상한(군집 2만)에 걸려 일부만 실렸다는 말 — 조용히 자른 것이 아니다. */
+  cap_note?: string
+  /** HTML 압축본에 없는 값(uniform·부피·평균응력) — 지어내지 않는다. */
+  compact_note?: string
+  mesh_note?: string
+  hotspot_parts?: number[] | null
   criteria?: string[]
   parts?: number[]
   order?: string
@@ -566,4 +641,67 @@ export interface ReportMedia {
   cases_with_media: string[]
   media: ReportMediaItem[]
   note?: string
+}
+
+// ── 파트쌍 × 각도(위치) 접촉 프로파일 (sphere · impact) ──────────────────────
+export interface ContactProfilePair {
+  key: string
+  src: string
+  dst: string
+  src_name?: string | null
+  dst_name?: string | null
+  contact_id?: number | null
+  name?: string | null
+  /** false 면 접촉 정의가 파트로 분해되지 않았다(single-surface 등) — 파트쌍이 아니다. */
+  resolved: boolean
+  n_engaged: number
+  peak: number | null
+  peak_case_key: string | null
+  peak_label: string | null
+}
+export interface ContactProfileAxis {
+  case_key: string | null
+  label: string | null
+  roll?: number | null
+  pitch?: number | null
+  yaw?: number | null
+  category?: string | null
+  x?: number | null
+  y?: number | null
+  face?: string | null
+  n_engaged: number
+  top_pair: string | null
+  top_value: number | null
+}
+export interface ContactProfileEdge {
+  key: string
+  src: string
+  dst: string
+  src_name?: string | null
+  dst_name?: string | null
+  name?: string | null
+  resolved: boolean
+  peak_force: number | null
+  total_impulse: number | null
+  total_work: number | null
+}
+export type ContactMetric = 'pf' | 'ti' | 'tw'
+export interface ReportContactProfile {
+  available: boolean
+  kind: ReportKind
+  metric: ContactMetric
+  metric_name?: string
+  note?: string
+  error?: string
+  trust?: { n_runs?: number; n_available?: number; n_interfaces?: number; newton3_worst_rel?: number | null; n_one_sided?: number }
+  axis_kind?: 'angle' | 'position'
+  n_pairs?: number
+  n_resolved?: number
+  n_axis?: number
+  pairs?: ContactProfilePair[]
+  axis_summary?: ContactProfileAxis[]
+  at?: { case_key: string; found: boolean; label?: string | null; edges?: ContactProfileEdge[]; note?: string }
+  /** 히트맵용 — None 칸은 '그 각도에 그 접촉이 없다'(0 이 아니다). 크면 null + matrix_note. */
+  matrix?: { pairs: string[]; values: (number | null)[][] } | null
+  matrix_note?: string
 }
