@@ -40,8 +40,9 @@ bool MeshRemapper::analyzeBentOnly() {
         errorMessage_ = "Bent mesh not set";
         return false;
     }
-    if (!step1_AnalyzeBentMesh()) return false;
-    if (!step2_BuildParametricSpace()) return false;
+    Mesh indexedBent;  // indexed copy of the bent mesh, shared by step1 and step2
+    if (!step1_AnalyzeBentMesh(indexedBent)) return false;
+    if (!step2_BuildParametricSpace(indexedBent)) return false;
     return true;
 }
 
@@ -65,17 +66,23 @@ bool MeshRemapper::performMapping(bool useParallel) {
 
     reportProgress(0);
 
-    // Step 1: Analyze bent mesh structure
-    if (!step1_AnalyzeBentMesh()) {
-        return false;
-    }
-    reportProgress(15);
+    {
+        // Indexed copy of the bent mesh: step1 builds it, step2 reads it.
+        // Released here, before the flat mesh is processed.
+        Mesh indexedBent;
 
-    // Step 2: Build parametric space
-    if (!step2_BuildParametricSpace()) {
-        return false;
+        // Step 1: Analyze bent mesh structure
+        if (!step1_AnalyzeBentMesh(indexedBent)) {
+            return false;
+        }
+        reportProgress(15);
+
+        // Step 2: Build parametric space
+        if (!step2_BuildParametricSpace(indexedBent)) {
+            return false;
+        }
+        reportProgress(30);
     }
-    reportProgress(30);
 
     // Step 3: Analyze flat mesh
     if (!step3_AnalyzeFlatMesh()) {
@@ -158,9 +165,9 @@ bool MeshRemapper::performMapping(bool useParallel) {
     return true;
 }
 
-bool MeshRemapper::step1_AnalyzeBentMesh() {
+bool MeshRemapper::step1_AnalyzeBentMesh(Mesh& tempMesh) {
     // Need non-const copy for modification during indexing
-    Mesh tempMesh = *bentMesh_;
+    tempMesh = *bentMesh_;
 
     // Build connectivity
     connectivity_.buildConnectivity(tempMesh);
@@ -203,23 +210,12 @@ bool MeshRemapper::step1_AnalyzeBentMesh() {
     return true;
 }
 
-bool MeshRemapper::step2_BuildParametricSpace() {
-    // Need non-const copy for modification during indexing
-    Mesh tempMesh = *bentMesh_;
-
-    // Re-run indexing for this mesh
-    connectivity_.buildConnectivity(tempMesh);
-
-    if (!indexer_.assignIndices(tempMesh, connectivity_)) {
-        errorMessage_ = "Failed to build parametric mapper: indexing failed - " +
-                       indexer_.getErrorMessage();
-        return false;
-    }
-
-    // Reorder element nodes based on geometry for consistent LS-DYNA ordering
-    indexer_.reorderElementNodes(tempMesh);
-
-    boundary_.extract(tempMesh);
+bool MeshRemapper::step2_BuildParametricSpace(const Mesh& tempMesh) {
+    // tempMesh is step1's copy, already indexed and node-reordered, and
+    // connectivity_/indexer_/boundary_ hold step1's results for it. This step
+    // used to copy the bent mesh again and re-run connectivity, indexing,
+    // node reordering and boundary extraction on it: the same deterministic
+    // computation on the same input, so the same result at twice the cost.
 
     // Check if grid dimensions are set
     if (!tempMesh.gridDimensionsSet) {

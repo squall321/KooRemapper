@@ -204,8 +204,9 @@ private:
     ProgressCallback progressCallback_;
 
     // Processing steps
-    bool step1_AnalyzeBentMesh();
-    bool step2_BuildParametricSpace();
+    // step1 fills tempMesh with the indexed bent mesh; step2 builds on it.
+    bool step1_AnalyzeBentMesh(Mesh& tempMesh);
+    bool step2_BuildParametricSpace(const Mesh& tempMesh);
     bool step3_AnalyzeFlatMesh();
     bool step4_MapNodes();
     bool step4_MapNodesParallel();  // Parallel version of step4
