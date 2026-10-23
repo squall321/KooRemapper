@@ -733,7 +733,9 @@ tssfac: 0.67
 """}),
    cmds=[BOX_CMD, "KooRemapper optimize opt.yaml"], outputs=["box_opt.k"],
    notes=["pids 가 드는 접촉을 고를 때 세트를 가리키는 면은 `_ADD`·`_INTERSECT`·`_COLLECT` 를 따라간다(2026-10-23) —",
-          "  풀지 못하면 건드리지 않고 `세트를 풀지 못해 대상 파트가 드는지 모른다` 를 남긴다"])
+          "  풀지 못하면 건드리지 않고 `세트를 풀지 못해 대상 파트가 드는지 모른다` 를 남긴다",
+          "★`*CONTACT_…_ID` 접촉도 Card A 를 제자리에서 고친다(2026-10-23) — 예전엔 (CID+제목) 줄을 세지 않아 Card 3 을",
+          "  Card A 로 알고 SOFT=0 을 SFSA 칸(슬레이브 강성 배율)에 썼다. 보고는 「SOFT=1->0」 이라 거짓이었다"])
 
 # ── 정보 ──
 op("info", "정보·메타", "메시 정보(절점·요소·파트 수, bbox 두 기준, 품질) 출력",
@@ -777,7 +779,9 @@ gap_tol: 0.2
           "★접촉 면이 가리키는 세트는 **정본 해석기**로 푼다(2026-10-23) — `_ADD`(PART 는 음수 = 앞 칸부터의 범위 ·",
           "  없는 세트는 빼고 적는다)·`_INTERSECT`·`_COLLECT` 를 따라간다. 못 푸는 면(`_GENERAL`·`_ADVANCED`·순환·",
           "  없는 세트·STYP 1/6/7)은 `unresolved_sides` 로 세고 까닭을 `unresolved_detail` 에 적는다",
-          "  (예전엔 `*SET_PART_ADD` 면이 **0쌍 · 미해석 0** 으로 사라졌고 `*SET_SEGMENT_ADD` 는 세트 ID 를 절점으로 읽었다)"])
+          "  (예전엔 `*SET_PART_ADD` 면이 **0쌍 · 미해석 0** 으로 사라졌고 `*SET_SEGMENT_ADD` 는 세트 ID 를 절점으로 읽었다)",
+          "`*CONTACT_…_ID` 의 제목은 CID(1~10칸)와 갈라 낸다 · 엣지·자기접촉·미해석 면에 `cid`(없으면 null) — 결과 쪽",
+          "  rcforc·contact_profile 의 접촉 id 와 잇는 열쇠다(예전엔 제목이 `1ADD_to_3` 처럼 CID 와 붙어 나왔다 · 2026-10-23)"])
 op("foldsurface", "변형·초기응력", "접힘 곡면(평면 elastica) 중심선 — 최소 곡률반경 고정", "접힘 fold elastica 곡률 중심선 폴더블",
    "KooRemapper foldsurface <config.yaml>",
    files={"fold.yaml": """output: fold

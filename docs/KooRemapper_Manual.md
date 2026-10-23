@@ -2900,6 +2900,10 @@ $$\sigma_{xy} = (\sigma_{\theta\theta} - \sigma_{rr})\sin\theta\cos\theta$$
 > **대상 파트가 세트 안에 있을 때(2026-10-23)**: `pids` 가 드는 접촉을 고를 때 세트를 가리키는 면은 `_ADD`·`_INTERSECT`·
 > `_COLLECT` 를 따라갑니다. 풀지 못하면 건드리지 않고 `세트를 풀지 못해 대상 파트가 드는지 모른다` 를 남깁니다
 > (예전에는 `*SET_PART_ADD` 로 정의한 접촉이 말없이 빠졌습니다).
+>
+> **`*CONTACT_…_ID` 접촉(2026-10-23 수정)**: 예전에는 (CID + 제목) 줄을 카드로 세지 않아 Card 3 을 Card A 로 알고
+> `SOFT=0` 을 **SFSA 칸**(슬레이브 강성 배율)에 썼습니다 — 접촉 강성이 0 이 되는데 보고는 「SOFT=1->0」 이었습니다.
+> 이제 `_TITLE` 과 같이 그 줄을 건너뛰고 Card A 를 고칩니다(`tools/regress/test_set_add_resolution.py` E 항).
 
 ### 사용법
 
@@ -4103,6 +4107,8 @@ KooRemapper modelmeta <config.yaml>
 > `connectivity.unresolved_detail`(`contact`·`side`·`sid`·`styp`·`why`)에 적습니다 — **그 면의 파트쌍은 연결도에 없습니다.**
 > 예전에는 `*SET_PART_ADD` 를 가리키는 접촉이 **0쌍 · 미해석 0** 으로 사라졌고, `*SET_SEGMENT_ADD` 는 멤버 세트 ID 를
 > 절점 번호로 읽어 엉뚱한 파트쌍을 냈습니다(재현: 정답 (1,3) 대신 (2,3)).
+> `*CONTACT_…_ID` 의 제목은 CID(1~10칸)와 갈라 내고, 엣지·자기접촉·미해석 면마다 `cid`(ID 를 안 준 접촉은 null —
+> LS-DYNA 가 매기는 번호를 짐작하지 않습니다)를 싣습니다. 결과 쪽(rcforc · 리포트의 contact_profile)의 접촉 id 와 잇는 열쇠입니다.
 
 **근거**: pyKooCAE `info_meta.md`, `examples/modelmeta/modelmeta.yaml`, 2026-09-18 실행 확인. JSON 스키마 상세 필드·기본값은 확인 필요.
 세트 해석은 `tools/regress/test_set_add_resolution.py`(2026-10-23).

@@ -493,18 +493,27 @@ std::string mm_defaultDbPath() {
 
 // ── connectivity ─────────────────────────────────────────────────────────────
 
+// cid — `*CONTACT_…_ID` 카드의 접촉 ID(없으면 0 → JSON null). 결과 쪽(rcforc·contact_profile)의 접촉 id 와
+// 잇는 열쇠다. ID 를 안 준 접촉의 번호는 LS-DYNA 가 매기므로 짐작해 채우지 않는다.
 struct MmEdge {
     int a = 0, b = 0;
     int contactIndex = 0;
+    int cid = 0;
     std::string type, title;
     double fs = 0;
 };
 
 struct MmSingleSurface {
     int contactIndex = 0;
+    int cid = 0;
     std::string type, title;
     std::vector<int> pids;   // 적용 범위 (빈 목록 = 전 파트)
 };
+
+// 보고용 접촉 제목 — `_ID` 카드는 CID 와 제목을 칸대로 가른 것(예전엔 `1ADD_to_3` 처럼 붙어 나왔다).
+const std::string& mm_contactTitle(const ContactDef& c) {
+    return c.hasId ? c.idTitle : c.title;
+}
 
 // SSID/MSID(+STYP)를 PID 목록으로 해석. SET_NODE/SET_SEGMENT는 노드→소유 파트로 환원.
 // 세트는 정본 해석기(`set_members.h`)로 푼다 — `_ADD`·`_INTERSECT`·`_COLLECT` 를 따라가고, 못 풀면
@@ -839,7 +848,7 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
     std::vector<MmSingleSurface> singles;
     int unresolvedSides = 0;
     // 못 푼 접촉 면 — 개수만 내면 화면이 「무엇이 왜」 를 말할 수 없다. 까닭을 같이 든다.
-    struct MmUnresolved { int contact; std::string type, title, side; int sid, styp; std::string why; };
+    struct MmUnresolved { int contact, cid; std::string type, title, side; int sid, styp; std::string why; };
     std::vector<MmUnresolved> unresolved;
     bool edgesTruncated = false;
 
@@ -856,14 +865,15 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
                              c.type.find("SINGLE_SURFACE") != std::string::npos;
         if (!okS) {
             ++unresolvedSides;
-            unresolved.push_back({c.index, c.type, c.title, "slave", c.ssid, c.sstyp, whyS});
+            unresolved.push_back({c.index, c.idCid, c.type, mm_contactTitle(c), "slave", c.ssid, c.sstyp, whyS});
         }
 
         if (singleSurface) {
             MmSingleSurface ss;
             ss.contactIndex = c.index;
             ss.type = c.type;
-            ss.title = c.title;
+            ss.title = mm_contactTitle(c);
+            ss.cid = c.idCid;
             if (c.sstyp != 5) ss.pids = sPids;
             singles.push_back(ss);
             continue;
@@ -871,7 +881,7 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
         auto mPids = mm_resolveSide(c.msid, c.mstyp, sets, nodeOwners, allPids, okM, whyM);
         if (!okM) {
             ++unresolvedSides;
-            unresolved.push_back({c.index, c.type, c.title, "master", c.msid, c.mstyp, whyM});
+            unresolved.push_back({c.index, c.idCid, c.type, mm_contactTitle(c), "master", c.msid, c.mstyp, whyM});
         }
 
         std::set<std::pair<int, int>> seen;
@@ -884,7 +894,7 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
                 MmEdge e;
                 e.a = key.first; e.b = key.second;
                 e.contactIndex = c.index;
-                e.type = c.type; e.title = c.title; e.fs = c.fs;
+                e.type = c.type; e.title = mm_contactTitle(c); e.fs = c.fs; e.cid = c.idCid;
                 edges.push_back(e);
             }
             if (edgesTruncated) break;
@@ -1122,6 +1132,7 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
            << ", \"a_title\": \"" << mm_jsonEsc(partTitle(e.a)) << "\""
            << ", \"b_title\": \"" << mm_jsonEsc(partTitle(e.b)) << "\""
            << ", \"contact\": " << e.contactIndex
+           << ", \"cid\": " << (e.cid ? std::to_string(e.cid) : std::string("null"))
            << ", \"type\": \"" << mm_jsonEsc(e.type) << "\""
            << ", \"title\": \"" << mm_jsonEsc(e.title) << "\""
            << ", \"fs\": " << num(e.fs) << "}"
@@ -1132,6 +1143,7 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
     for (size_t i = 0; i < singles.size(); ++i) {
         const auto& s = singles[i];
         rf << "      {\"contact\": " << s.contactIndex
+           << ", \"cid\": " << (s.cid ? std::to_string(s.cid) : std::string("null"))
            << ", \"type\": \"" << mm_jsonEsc(s.type) << "\""
            << ", \"title\": \"" << mm_jsonEsc(s.title) << "\""
            << ", \"pids\": [";
@@ -1160,6 +1172,7 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
     for (size_t i = 0; i < unresolved.size(); ++i) {
         const auto& u = unresolved[i];
         rf << "      {\"contact\": " << u.contact
+           << ", \"cid\": " << (u.cid ? std::to_string(u.cid) : std::string("null"))
            << ", \"type\": \"" << mm_jsonEsc(u.type) << "\""
            << ", \"title\": \"" << mm_jsonEsc(u.title) << "\""
            << ", \"side\": \"" << u.side << "\""

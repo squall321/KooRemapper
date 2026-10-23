@@ -94,6 +94,13 @@ std::vector<ContactDef> ct_parseContacts(const std::vector<std::string>& lines) 
                     // CID + title on same line
                     auto toks = kw_tok10(dl);
                     if (!toks.empty()) c.title = dtr;  // store full line as title
+                    // 보고용으로 칸을 가른다 — CID 1~10칸 · 제목 11~80칸. 쉼표가 앞에 있으면 자유 형식이다.
+                    const size_t comma = dl.find(',');
+                    const bool freeForm = comma != std::string::npos && comma < 10;
+                    const std::string cidPart = freeForm ? dl.substr(0, comma) : dl.substr(0, std::min<size_t>(10, dl.size()));
+                    const std::string ttlPart = freeForm ? dl.substr(comma + 1) : (dl.size() > 10 ? dl.substr(10) : std::string());
+                    try { c.idCid = std::stoi(kw_trim(cidPart)); } catch (...) { c.idCid = 0; }
+                    c.idTitle = kw_trim(ttlPart);
                 } else {
                     c.title = dtr;
                 }

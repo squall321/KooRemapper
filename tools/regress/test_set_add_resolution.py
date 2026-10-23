@@ -51,12 +51,14 @@ def base_deck():
     return "\n".join(lines) + "\n"
 
 
-def contact(title, ssid, msid, sstyp, mstyp, card_a=False, tied=False):
-    kw = "*CONTACT_TIED_SURFACE_TO_SURFACE_TITLE" if tied else "*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_TITLE"
-    out = ("%s\n%s\n%10d%10d%10d%10d         0         0         0         0\n"
+def contact(title, ssid, msid, sstyp, mstyp, card_a=False, tied=False, cid=1):
+    # ★`_ID` 꼴이다 — LS-DYNA `*CONTACT_*` 에는 `_TITLE` 옵션이 없다(info --strict 가 「망가진 카드」 로 잡는다).
+    #   ID 카드는 CID(1~10칸) + 제목(11~80칸).
+    kw = "*CONTACT_TIED_SURFACE_TO_SURFACE_ID" if tied else "*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_ID"
+    out = ("%s\n%10d%s\n%10d%10d%10d%10d         0         0         0         0\n"
            "       0.2       0.1       0.0       0.0       0.0         0       0.0  1.00E+20\n"
            "       1.0       1.0       0.0       0.0       1.0       1.0       1.0       1.0\n"
-           % (kw, title, ssid, msid, sstyp, mstyp))
+           % (kw, cid, title, ssid, msid, sstyp, mstyp))
     if card_a:
         out += "         1       0.1         0      1.03       1.0         2        10         1\n"
     return out
@@ -88,8 +90,10 @@ def main():
             return None, r.stdout + r.stderr
         return json.load(open(jp))["connectivity"], r.stdout + r.stderr
 
-    def pairs(conn, title):
-        return sorted((e["a"], e["b"]) for e in conn["contact_edges"] if e.get("title") == title)
+    def pairs(conn, _title=None):
+        # 쌍은 접촉 순번(0 — 덱마다 접촉이 하나다)으로 고른다. 제목으로 고르면 세트 해석 시험이 `_ID` 제목 파싱에
+        # 묶인다 — 그것은 A-1 의 제목 항목이 따로 잰다.
+        return sorted((e["a"], e["b"]) for e in conn["contact_edges"] if e.get("contact") == 0)
 
     print("[A modelmeta — 세트를 가리키는 접촉의 파트쌍]")
     cases = [
@@ -134,6 +138,10 @@ def main():
             continue
         got = pairs(conn, "T")
         check(name, got == want, "쌍=%r 기대 %r" % (got, want))
+        if i == 0:
+            # `_ID` 카드는 칸대로 가른다 — 예전엔 제목이 `1T` 처럼 CID 와 붙어 나왔다
+            e0 = conn["contact_edges"][0] if conn["contact_edges"] else {}
+            check("   A-1 _ID 카드의 제목은 CID 와 갈라 나온다 · cid 1", e0.get("title") == "T" and e0.get("cid") == 1, e0)
         check("   " + name.split()[0] + " 미해석 0", conn["unresolved_sides"] == 0,
               conn.get("unresolved_detail"))
 
@@ -219,6 +227,26 @@ def main():
     out = r.stdout + r.stderr
     check("D-2 풀지 못하는 세트는 건드리지 않고 그 사실을 말한다",
           "세트를 풀지 못해 대상 파트가 드는지 모른다" in out, out[-500:])
+
+    print("[E optimize — `_ID` 접촉의 카드 세기]")
+    # ★`_ID` 의 (CID+제목) 줄을 세지 않으면 Card 3 을 Card A 로 알고 SOFT 를 SFSA 칸(슬레이브 강성 배율)에 쓴다.
+    write("e0.k", contact("Id_side", 1, 3, 3, 3, card_a=True, cid=7))
+    open(os.path.join(d, "e0.yaml"), "w").write(
+        "model: e0.k\noutput: e0_out.k\noptimize: rubber\npids: [1]\nanalysis_type: explicit\n")
+    r = subprocess.run([binary, "optimize", "e0.yaml"], cwd=d, capture_output=True, text=True, timeout=300)
+    blk, on = [], False
+    for ln in open(os.path.join(d, "e0_out.k"), errors="replace").read().splitlines():
+        if ln.startswith("*CONTACT"):
+            on = True
+            continue
+        if on and ln.startswith("*"):
+            break
+        if on and ln.strip() and not ln.startswith("$"):
+            blk.append(ln)
+    card3, card_a = (blk[3] if len(blk) > 3 else ""), (blk[4] if len(blk) > 4 else "")
+    check("E-1 Card 3 은 그대로(SFSA 1.0 — 0 이 들어가면 슬레이브 강성이 0 이다)",
+          card3[:10].strip() == "1.0", repr(card3))
+    check("E-2 SOFT 는 Card A 첫 칸에 0 으로", card_a[:10].strip() == "0", repr(card_a))
 
     shutil.rmtree(d, ignore_errors=True)
     print()

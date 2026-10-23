@@ -20,6 +20,11 @@ struct ContactDef {
     // 전체(CID+제목)가 들어 있고 그쪽은 바이트를 보존해 되쓴다.
     int cid = 0;
     std::string title;
+    // 덱에서 읽은 `_ID` 카드를 **칸대로** 가른 값 — 보고·그림용이다(되쓰기는 위 `title` 의 줄 전체를 쓴다).
+    // CID 는 1~10칸, 제목은 11~80칸(Vol_II `*CONTACT` ID 카드). 예전엔 보고가 `title` 을 그대로 써서 CID 숫자가
+    // 제목에 붙었다(`1ADD_to_3`). `_ID` 가 아니면 idCid=0 · idTitle 은 비어 있다.
+    int idCid = 0;
+    std::string idTitle;
     // Card 1
     int ssid=0, msid=0, sstyp=0, mstyp=0, sboxid=0, mboxid=0, spr=0, mpr=0;
     // Card 2

@@ -17,7 +17,7 @@ bash run.sh
 | `model` | 노드/요소/파트 수, 전체 bbox |
 | `parts[]` | pid, title, elem_class(solid/shell/mixed), n_elems, bbox, **area_ext**(외부 자유표면적), **volume**, **proj.x/y/z**(정사영 면적), material |
 | `parts[].material` | mid + kfile(카드 키워드·제목·E/nu/rho/sigy) + db(번들 DB 매칭: name/category/E_GPa/rho + **match_basis**) |
-| `connectivity` | contact_edges(파트쌍 + 접촉 타입/제목/fs), single_surface(스코프), geometric_edges(detect 시), unresolved_sides · unresolved_detail(면마다 까닭) |
+| `connectivity` | contact_edges(파트쌍 + 접촉 타입/제목/fs/cid), single_surface(스코프), geometric_edges(detect 시), unresolved_sides · unresolved_detail(면마다 까닭) |
 
 ## 규약 (JSON `conventions`에도 기록)
 
