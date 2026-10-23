@@ -277,6 +277,11 @@ bool MeshRemapper::step3_AnalyzeFlatMesh() {
     // Analyze the flat mesh to determine its bounding box
     flatAnalyzer_.analyze(*flatMesh_);
 
+    // Element-referenced bounding box for the axis mapping, the orientation
+    // sample and step4. Each of them used to compute it again from the same,
+    // unchanged flat mesh (it builds a set of every referenced node ID).
+    flatMesh_->calculateBoundingBox(flatMin_, flatMax_);
+
     return true;
 }
 
@@ -286,8 +291,8 @@ bool MeshRemapper::step4_MapNodes() {
     resultMesh_.setName(flatMesh_->getName() + "_mapped");
 
     // Get bounding box of flat mesh
-    Vector3D minBound, maxBound;
-    flatMesh_->calculateBoundingBox(minBound, maxBound);
+    const Vector3D& minBound = flatMin_;
+    const Vector3D& maxBound = flatMax_;
 
     // Use flat mesh dimensions for parametric mapping
     double flatSizeI = maxBound.x - minBound.x;
@@ -400,8 +405,8 @@ bool MeshRemapper::step4_MapNodesParallel() {
     resultMesh_.setName(flatMesh_->getName() + "_mapped");
 
     // Get bounding box of flat mesh
-    Vector3D minBound, maxBound;
-    flatMesh_->calculateBoundingBox(minBound, maxBound);
+    const Vector3D& minBound = flatMin_;
+    const Vector3D& maxBound = flatMax_;
 
     // Use flat mesh dimensions for parametric mapping
     double flatSizeI = maxBound.x - minBound.x;
@@ -874,8 +879,8 @@ void MeshRemapper::computeAxisMapping() {
         edgeCalc_.getNeutralLengthK()
     };
 
-    Vector3D bMin, bMax;
-    flatMesh_->calculateBoundingBox(bMin, bMax);
+    const Vector3D& bMin = flatMin_;
+    const Vector3D& bMax = flatMax_;
     double detailSizes[3] = {
         bMax.x - bMin.x,
         bMax.y - bMin.y,
@@ -927,8 +932,8 @@ void MeshRemapper::correctOrientationBySample() {
         return dxdu.dot(dxdv.cross(dxdw));
     };
 
-    Vector3D minBound, maxBound;
-    flatMesh_->calculateBoundingBox(minBound, maxBound);
+    const Vector3D& minBound = flatMin_;
+    const Vector3D& maxBound = flatMax_;
     double xyzMin[3] = {minBound.x, minBound.y, minBound.z};
     double xyzSize[3] = {maxBound.x - minBound.x,
                          maxBound.y - minBound.y,

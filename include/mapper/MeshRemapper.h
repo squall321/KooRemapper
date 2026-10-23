@@ -197,6 +197,7 @@ private:
     EdgeCalculator edgeCalc_;
     ParametricMapper paramMapper_;
     UnstructuredMeshAnalyzer flatAnalyzer_;
+    Vector3D flatMin_, flatMax_;  // flatMesh_->calculateBoundingBox(), set in step3
 
     MappingStats stats_;
     std::string errorMessage_;
