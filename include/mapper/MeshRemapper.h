@@ -221,13 +221,14 @@ private:
             const int i = indexOf(id);
             return i < 0 ? nullptr : nodes_[static_cast<size_t>(i)];
         }
+        const std::vector<const Node*>& inOrder() const { return nodes_; }   // 맵 순서
     private:
         std::vector<const Node*> nodes_;   // 맵 순서
         std::vector<int> slot_;            // 촘촘할 때 — (키 - base_) → 순번, 없으면 -1
         std::vector<int> keys_;            // 성길 때 — 키 오름차순
         long long base_ = 0;
     };
-    NodeIdIndex flatIndex_;   // step3 이 평판으로 만들고 performMapping 끝에서 비운다
+    NodeIdIndex flatIndex_;   // step3 이 평판으로 만들고 reorientMappedElements 뒤에 비운다
 
     MappingStats stats_;
     std::string errorMessage_;

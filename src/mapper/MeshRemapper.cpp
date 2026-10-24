@@ -318,7 +318,8 @@ bool MeshRemapper::step3_AnalyzeFlatMesh() {
     flatMesh_->calculateBoundingBox(flatMin_, flatMax_);
 
     // 평판 절점 색인 — analyzeSourceMesh · reorientMappedElements 가 요소마다 절점 8개를
-    // `flatMesh_->getNode()`(맵 찾기)로 찾던 것을 대신한다. 평판은 performMapping 동안 바뀌지 않는다.
+    // `flatMesh_->getNode()`(맵 찾기)로 찾던 것을 대신하고, step4 가 절점 순서 · 참조 표시에 쓴다.
+    // 평판은 performMapping 동안 바뀌지 않는다.
     flatIndex_.build(flatMesh_->nodes);
 
     return true;
@@ -452,9 +453,8 @@ bool MeshRemapper::step4_MapNodesParallel() {
     double flatSizeJ = maxBound.y - minBound.y;
     double flatSizeK = maxBound.z - minBound.z;
 
-    // Convert map to vector for parallel processing
-    const auto& nodesMap = flatMesh_->getNodes();
-    std::vector<std::pair<int, Node>> nodesList(nodesMap.begin(), nodesMap.end());
+    // 평판 절점을 맵 순서로 — step3 의 색인이 든 포인터를 쓴다(예전엔 맵 전체를 (ID, Node) 벡터로 복사했다).
+    const std::vector<const Node*>& nodesList = flatIndex_.inOrder();
     int nodeCount = static_cast<int>(nodesList.size());
 
     // Pre-allocate result vector
@@ -465,26 +465,26 @@ bool MeshRemapper::step4_MapNodesParallel() {
     int axisMapLocal[3] = {axisMap_[0], axisMap_[1], axisMap_[2]};
     bool flipILocal = flipI_, flipJLocal = flipJ_, flipKLocal = flipK_;
 
-    // Build element-referenced node set, filtered by targetPids_ if set
+    // Element-referenced nodes, filtered by targetPids_ if set
     // — orphans and non-target-PID nodes pass through unchanged
     // (see sequential step4_MapNodes for rationale).
-    std::set<int> referencedNodes;
+    // 예전엔 참조 ID 를 전부 std::set 에 넣고 절점마다 키로 count 했다. 같은 질문(이 절점의 키를
+    // 요소가 쓰나)을 색인 순번에 바로 표시해 답한다 — 맵에 없는 참조는 어느 절점과도 같지 않아 빠져도 같다.
+    std::vector<char> isReferenced(nodeCount, 0);
     for (const auto& [eid, elem] : flatMesh_->elements) {
         if (!targetPids_.empty() && targetPids_.count(elem.partId) == 0) continue;
         for (int i = 0; i < Element::NUM_NODES; ++i) {
             int nid = elem.nodeIds[i];
-            if (nid > 0) referencedNodes.insert(nid);
+            if (nid <= 0) continue;
+            const int idx = flatIndex_.indexOf(nid);
+            if (idx >= 0) isReferenced[idx] = 1;
         }
-    }
-    std::vector<char> isReferenced(nodeCount, 0);
-    for (int i = 0; i < nodeCount; ++i) {
-        isReferenced[i] = referencedNodes.count(nodesList[i].first) ? 1 : 0;
     }
 
     // Parallel node mapping
     #pragma omp parallel for schedule(dynamic, 100)
     for (int i = 0; i < nodeCount; ++i) {
-        const Node& flatNode = nodesList[i].second;
+        const Node& flatNode = *nodesList[i];
 
         if (!isReferenced[i]) {
             // Orphan — pass through.
