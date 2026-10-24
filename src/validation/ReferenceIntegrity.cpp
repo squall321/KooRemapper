@@ -103,6 +103,19 @@ void contactDamage(const std::vector<std::string>& lines, size_t i, const std::s
                 "Card 3 자리(SFS SFM SST MST …, 전부 실수 칸)에 정수만 있습니다 — 선택 카드 Card A(SOFT SOFSCL "
                 "LCIDAB …)가 밀려 올라온 손상일 수 있습니다. 일부러 그렇게 썼다면 무시하세요"});
     }
+
+    // ★옛 optimize 의 흔적(결정 9B, 10-24) — 10-23(fe82dd3) 전의 optimize 는 카드를 직접 세며 `_ID` 의 ID 카드를 못 건너뛰어
+    //   Card 3 을 Card A 로 알고 SOFT=0 을 SFSA 칸(1)에, SBOPT=2 를 SFSAT 칸(5)에 썼다 — SFSA 0 은 기본 1.0 이라 준 배율이
+    //   지워지고, SFSAT 2 는 SURFA 셸 접촉 두께를 두 배로 한다. 실수 칸에 정수 표기 `0` 과 `2` 가 함께 있는 꼴만 본다(사람이 그렇게
+    //   쓸 수도 있어 단정하지 않는다 — `suspect`). `_MPP` 덱은 그 판이 MPP 1 을 Card 1 로 읽어 파트를 못 맞췄으므로 그 접촉을
+    //   건드리지 않았다(옛 배포본으로 재현). 위 「Card A 가 밀려 올라옴」 신호는 0 과 다섯째 칸을 보지 않아 이 꼴을 못 잡는다.
+    if (data.size() >= 3 && !hasParameterRef(lines[data[2]])) {
+        const auto f = fields10(lines[data[2]]);
+        if (f.size() >= 5 && trim(f[0]) == "0" && trim(f[4]) == "2")
+            rep.suspect.push_back({(int)data[2] + 1, kw,
+                "Card 3 의 SFSA 칸이 정수 0 · SFSAT 칸이 정수 2 — 10-23 전 optimize 가 `_ID` 접촉의 Card 3 에 SOFT · SBOPT 를 쓴 "
+                "흔적일 수 있습니다(SFSA 0 = 기본 1.0 · SFSAT 2 = SURFA 셸 접촉 두께 두 배). 일부러 그렇게 썼다면 무시하세요"});
+    }
 }
 
 }  // namespace

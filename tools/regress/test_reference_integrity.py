@@ -155,6 +155,23 @@ sub/other.k
     check("빈 줄로 둔 MPP 1(전부 기본값)도 카드로 센다 — Card 1 의 8888 · 7777", "8888" in out and "7777" in out,
           out[-300:])
 
+    # 10-23(fe82dd3) 전의 optimize 는 `_ID` 의 ID 카드를 못 건너뛰어 Card 3 을 Card A 로 알고 SOFT=0 을 SFSA 칸에, SBOPT=2 를
+    # SFSAT 칸에 썼다(그 판 코드 — kw_setField(…, 0, 10, "0") · kw_setField(…, 40, 10, "2")). 그 꼴을 의심으로 짚는다(결정 9B).
+    print("[F 옛 optimize 의 흔적 — Card 3 의 SFSA 정수 0 · SFSAT 정수 2]")
+    dmg = ("*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_ID\n        11rubber\n         1         2         3         3\n       0.2       0.1\n"
+           "         0       1.0       0.0       0.0         2       1.0\n")
+    p = deck(d, "optdmg.k", dmg)
+    rc, out = info(binary, p)
+    check("옛 optimize 가 쓴 Card 3(SFSA 0 · SFSAT 2)을 의심으로 짚는다", "10-23 전 optimize" in out, out[-400:])
+    rc2 = subprocess.run([binary, "info", "--strict", p], capture_output=True, text=True, timeout=300).returncode
+    check("의심이라 단정하지 않는다 — rc 0 · --strict 도 0", "의심" in out and rc == 0 and rc2 == 0,
+          "rc=%d strict=%d" % (rc, rc2))
+    clean = ("*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_ID\n        12clean\n         1         2         3         3\n       0.2       0.1\n"
+             "       1.0       1.0       0.0       0.0       1.0       1.0\n")
+    p = deck(d, "optclean.k", clean)
+    rc, out = info(binary, p)
+    check("멀쩡한 Card 3 은 짚지 않는다", "10-23 전 optimize" not in out, out[-300:])
+
     print("")
     if FAILS:
         print("FAIL %d" % len(FAILS))
