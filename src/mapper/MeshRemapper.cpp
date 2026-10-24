@@ -34,6 +34,40 @@ void MeshRemapper::setFlatMesh(const Mesh* mesh) {
     flatMesh_ = mesh;
 }
 
+void MeshRemapper::NodeIdIndex::build(const std::map<int, Node>& nodes) {
+    clear();
+    if (nodes.empty()) return;
+    base_ = nodes.begin()->first;
+    const long long span = static_cast<long long>(nodes.rbegin()->first) - base_ + 1;
+    const bool dense = span <= 4LL * static_cast<long long>(nodes.size());
+    if (dense) slot_.assign(static_cast<size_t>(span), -1);
+    else       keys_.reserve(nodes.size());
+    nodes_.reserve(nodes.size());
+    for (const auto& [id, node] : nodes) {
+        if (dense) slot_[static_cast<size_t>(id - base_)] = static_cast<int>(nodes_.size());
+        else       keys_.push_back(id);
+        nodes_.push_back(&node);
+    }
+}
+
+void MeshRemapper::NodeIdIndex::clear() {
+    std::vector<const Node*>().swap(nodes_);
+    std::vector<int>().swap(slot_);
+    std::vector<int>().swap(keys_);
+    base_ = 0;
+}
+
+int MeshRemapper::NodeIdIndex::indexOf(int id) const {
+    if (!slot_.empty()) {
+        const long long off = id - base_;
+        if (off < 0 || off >= static_cast<long long>(slot_.size())) return -1;
+        return slot_[static_cast<size_t>(off)];
+    }
+    auto it = std::lower_bound(keys_.begin(), keys_.end(), id);
+    if (it == keys_.end() || *it != id) return -1;
+    return static_cast<int>(it - keys_.begin());
+}
+
 bool MeshRemapper::analyzeBentOnly() {
     errorMessage_.clear();
     if (!bentMesh_) {
@@ -130,6 +164,7 @@ bool MeshRemapper::performMapping(bool useParallel) {
     // by checking every element individually and swapping connectivity where
     // the mapping inverted the sign.
     reorientMappedElements();
+    flatIndex_.clear();   // 평판 색인의 마지막 사용처 — 평판 절점 포인터를 더 들고 있지 않는다
 
     // Step 5.7: Optional global mirror (--flip-x/y/z). Negates node coords
     // and swaps HEX8 connectivity if axis flip count is odd, so the result
@@ -281,6 +316,10 @@ bool MeshRemapper::step3_AnalyzeFlatMesh() {
     // sample and step4. Each of them used to compute it again from the same,
     // unchanged flat mesh (it builds a set of every referenced node ID).
     flatMesh_->calculateBoundingBox(flatMin_, flatMax_);
+
+    // 평판 절점 색인 — analyzeSourceMesh · reorientMappedElements 가 요소마다 절점 8개를
+    // `flatMesh_->getNode()`(맵 찾기)로 찾던 것을 대신한다. 평판은 performMapping 동안 바뀌지 않는다.
+    flatIndex_.build(flatMesh_->nodes);
 
     return true;
 }
@@ -1176,7 +1215,7 @@ void MeshRemapper::analyzeSourceMesh() {
         std::array<Vector3D, 8> c;
         bool ok = true;
         for (int i = 0; i < 8; ++i) {
-            const Node* n = flatMesh_->getNode(elem.nodeIds[i]);
+            const Node* n = flatIndex_.find(elem.nodeIds[i]);   // = flatMesh_->getNode()
             if (!n) { ok = false; break; }
             c[i] = n->position;
         }
@@ -1245,19 +1284,26 @@ void MeshRemapper::reorientMappedElements() {
     auto& resultElems = resultMesh_.elements;
     int reoriented = 0;
 
+    // 요소 하나에 맵 찾기가 17번이었다(평판 요소 1 · 평판 절점 8 · 결과 절점 8 — HEX8 160만에서 ~2.1 s).
+    // 절점은 색인으로(평판은 step3 의 것, 결과는 여기서 만든다 — 이 루프는 결과 절점을 바꾸지 않는다),
+    // 평판 요소는 앞으로만 가는 반복자로 찾는다 — 결과 요소를 ID 오름차순으로 돌므로 `find` 와 같은 답이다.
+    NodeIdIndex resultIndex;
+    resultIndex.build(resultMesh_.nodes);
+    auto fIt = flatElems.begin();
+
     for (auto& pair : resultElems) {
         Element& mapped = pair.second;
         if (mapped.type != ElementType::HEX8) continue;
 
-        auto fIt = flatElems.find(pair.first);
-        if (fIt == flatElems.end()) continue;
+        while (fIt != flatElems.end() && fIt->first < pair.first) ++fIt;
+        if (fIt == flatElems.end() || fIt->first != pair.first) continue;
         const Element& flat = fIt->second;
 
         // jacFlat from source corner positions
         std::array<Vector3D, 8> fc;
         bool ok = true;
         for (int i = 0; i < 8; ++i) {
-            const Node* n = flatMesh_->getNode(flat.nodeIds[i]);
+            const Node* n = flatIndex_.find(flat.nodeIds[i]);   // = flatMesh_->getNode()
             if (!n) { ok = false; break; }
             fc[i] = n->position;
         }
@@ -1268,7 +1314,7 @@ void MeshRemapper::reorientMappedElements() {
         // jacBent from mapped corner positions (after step4)
         std::array<Vector3D, 8> bc;
         for (int i = 0; i < 8; ++i) {
-            const Node* n = resultMesh_.getNode(mapped.nodeIds[i]);
+            const Node* n = resultIndex.find(mapped.nodeIds[i]);   // = resultMesh_.getNode()
             if (!n) { ok = false; break; }
             bc[i] = n->getEffectivePosition();
         }

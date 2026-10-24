@@ -8,8 +8,10 @@
 #include "mapper/ParametricMapper.h"
 #include "mapper/UnstructuredMeshAnalyzer.h"
 #include <functional>
+#include <map>
 #include <set>
 #include <string>
+#include <vector>
 
 // Knowledge graph (lat.md):
 //   @lat: [[modules/mapper]]
@@ -206,6 +208,26 @@ private:
     ParametricMapper paramMapper_;
     UnstructuredMeshAnalyzer flatAnalyzer_;
     Vector3D flatMin_, flatMax_;  // flatMesh_->calculateBoundingBox(), set in step3
+
+    // 절점 ID → 절점. `std::map<int, Node>::find` 와 같은 답을 낸다 — 키 구간이 촘촘하면
+    // (구간 ≤ 절점 수 × 4) 조밀 배열에서 O(1), 아니면 정렬된 키에서 이분 탐색.
+    // 요소마다 절점 8개를 맵에서 찾던 자리가 쓴다. 맵의 절점 포인터를 들므로 맵이 바뀌면 다시 만든다.
+    class NodeIdIndex {
+    public:
+        void build(const std::map<int, Node>& nodes);
+        void clear();
+        int indexOf(int id) const;   // 맵 순번(키 오름차순), 없으면 -1
+        const Node* find(int id) const {
+            const int i = indexOf(id);
+            return i < 0 ? nullptr : nodes_[static_cast<size_t>(i)];
+        }
+    private:
+        std::vector<const Node*> nodes_;   // 맵 순서
+        std::vector<int> slot_;            // 촘촘할 때 — (키 - base_) → 순번, 없으면 -1
+        std::vector<int> keys_;            // 성길 때 — 키 오름차순
+        long long base_ = 0;
+    };
+    NodeIdIndex flatIndex_;   // step3 이 평판으로 만들고 performMapping 끝에서 비운다
 
     MappingStats stats_;
     std::string errorMessage_;
