@@ -87,8 +87,13 @@ def build_record(
     unit: str,
     title: str | None,
     html_name: str,
+    hotspots: dict | None = None,
 ) -> dict:
-    """리포트 → 범용 sim_report DataHub 레코드(dict). 첨부 경로는 {sim_id}/... 규약."""
+    """리포트 → 범용 sim_report DataHub 레코드(dict). 첨부 경로는 {sim_id}/... 규약.
+
+    ``hotspots`` — 핫스팟 요약(결정 7A, 10-24). 주면 ``content.outputs.hotspots`` 에 싣는다(없으면 키를 두지 않는다).
+    검색 칸이 아니라 저장만 된다 — 색인은 AIDH 쪽 일이다.
+    """
     dev_rev = parse_stage(stage)
     eng_meta: dict = {"project": project, "dev_revision": dev_rev}
     if variation:
@@ -179,6 +184,7 @@ def build_record(
                 "findings": report.findings,
                 "worst_cases": worst_cases,
                 "n_cases": report.n_cases,
+                **({"hotspots": hotspots} if hotspots else {}),
             },
             "eng_meta": eng_meta,
             "components": components,
@@ -200,6 +206,7 @@ async def publish(
     doe: str | None = None,
     unit: str = "mm-t-s",
     title: str | None = None,
+    hotspots: dict | None = None,
 ) -> dict:
     """레코드+첨부를 ZIP 번들로 묶어 AI Data Hub 에 POST. 등재된 레코드 요약 반환."""
     if not hub_url:
@@ -207,7 +214,7 @@ async def publish(
     sim_id = await _next_sim_id(hub_url)
     record = build_record(
         report, cases, sim_id=sim_id, project=project, stage=stage,
-        variation=variation, doe=doe, unit=unit, title=title, html_name=html_name,
+        variation=variation, doe=doe, unit=unit, title=title, html_name=html_name, hotspots=hotspots,
     )
 
     buf = io.BytesIO()

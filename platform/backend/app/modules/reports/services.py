@@ -638,7 +638,36 @@ async def publish_to_datahub(
     return await datahub.publish(
         report, cases, hub_url=hub_url, html_bytes=html_bytes, html_name=html_name,
         project=project, stage=stage, variation=variation, doe=doe, unit=unit, title=title,
+        hotspots=await _datahub_hotspot_summary(db, report),
     )
+
+
+# DataHub 에 싣는 핫스팟 요약의 항목 수 — sphere 는 포락(파트 × 기준마다 가장 센 각도), deep 은 군집 순위
+_DATAHUB_HOTSPOT_TOP = 10
+
+
+async def _datahub_hotspot_summary(db: AsyncSession, report: ImpactReport) -> dict | None:
+    """등재 레코드의 핫스팟 요약(결정 7A, 10-24) — `/hotspots` 와 같은 계산(parser.hotspot_clusters)을 그대로 쓴다.
+
+    sphere 는 포락 상위 N(가장 센 각도 · 그 값 · 군집이 난 각도 수), deep 은 군집 상위 N. 핫스팟이 없는 리포트 · 다른 종류는 None
+    (레코드에 키를 두지 않는다 — 없는 것을 빈 목록으로 지어내지 않는다).
+    """
+    if report.kind not in ("deep", "sphere"):
+        return None
+    hs = await hotspots(db, report, top=_DATAHUB_HOTSPOT_TOP)
+    if not hs.get("available"):
+        return None
+    out = {k: hs.get(k) for k in ("n_clusters", "criteria", "parts", "order", "order_note")}
+    if "envelope" in hs:
+        out["envelope"] = hs["envelope"]
+        out["envelope_note"] = hs.get("envelope_note")
+        if hs.get("envelope_truncated"):
+            out["envelope_truncated"] = hs["envelope_truncated"]
+    else:
+        out["clusters"] = hs.get("clusters")
+        if hs.get("truncated"):
+            out["truncated"] = hs["truncated"]
+    return out
 
 
 # fact 질의에 허용되는 물리량(parts_metrics 키) + 그 값이 나온 시각 키.

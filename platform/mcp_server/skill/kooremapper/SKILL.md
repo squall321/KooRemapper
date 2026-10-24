@@ -208,6 +208,7 @@ impact 전위치 부분충격)을 인제스트해 구조화 분석한다.
 7. **리비전 비교** — `compare_reports([id1, id2, ...])` 로 조건/리비전 간 파트별 최악값을 나란히 본다.
 8. **DataHub 등재** — `publish_report_to_datahub(report_id, project, stage)` 로 구조화 요약을
    AI Data Hub 데이터 자산(sim_report)으로 올린다(과제/개발단계/BOM 연계, 검색·리비전 비교용).
+   deep·sphere 는 핫스팟 요약(포락 · 군집 상위 10 — `report_hotspots` 와 같은 계산)도 `content.outputs.hotspots` 에 실린다.
 
 ### 결과 이미지로 비교하기 (`report_image` · `report_compare`)
 

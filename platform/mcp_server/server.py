@@ -1399,7 +1399,9 @@ async def publish_report_to_datahub(
 
     project=과제코드, stage=개발단계(pre|dv1..dvr|pv1..pvr|pra|mp), variation=설계안,
     doe=DOE 참조(study[:case]). 리포트 요약·소견·최악케이스·파트를 content 로 싣고 원본
-    HTML 을 첨부한다. 도메인 무관 스키마라 검색·리비전 비교에 그대로 얹힌다."""
+    HTML 을 첨부한다. 도메인 무관 스키마라 검색·리비전 비교에 그대로 얹힌다.
+    deep·sphere 리포트에 핫스팟이 있으면 그 요약(sphere=포락 상위 10 · deep=군집 상위 10 — report_hotspots 와
+    같은 계산)도 content.outputs.hotspots 에 싣는다(저장만 — 검색 칸은 아니다)."""
     body = {"project": project, "stage": stage, "unit": unit}
     if variation:
         body["variation"] = variation

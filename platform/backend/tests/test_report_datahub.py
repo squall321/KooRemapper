@@ -95,3 +95,48 @@ def test_build_record_attaches_a_registered_hub_expert():
     )
     assert rec["agents"] == ["sim-drop-impact"]
     assert datahub.HUB_AGENT == "sim-drop-impact"
+
+
+def test_build_record_carries_hotspot_summary_only_when_given():
+    # 결정 7A(10-24) — 핫스팟 요약은 content.outputs.hotspots 에. 안 주면 키를 두지 않는다(빈 목록을 지어내지 않는다).
+    r, cases = _report()
+    kw = dict(sim_id="SIM-MX-CAE-2026-0000000002", project="S26-DROP", stage="dv1", variation=None,
+              doe=None, unit="mm-t-s", title=None, html_name="report.html")
+    hs = {"n_clusters": 3, "criteria": ["max_shear"], "parts": [1],
+          "envelope": [{"part_id": 1, "criterion": "max_shear", "worst_angle": "E01", "stress_max": 812.0, "n_angles": 2}]}
+    rec = datahub.build_record(r, cases, hotspots=hs, **kw)
+    assert rec["content"]["outputs"]["hotspots"] == hs
+    rec2 = datahub.build_record(r, cases, **kw)
+    assert "hotspots" not in rec2["content"]["outputs"]
+
+
+@pytest.mark.parametrize("kind,canned,expect", [
+    ("sphere", {"available": True, "n_clusters": 5, "criteria": ["max_shear"], "parts": [1, 2], "order": "stress_max",
+                "order_note": "n", "envelope": [{"part_id": 1}], "envelope_note": "e", "clusters": [{"x": 1}]},
+     {"envelope": [{"part_id": 1}], "envelope_note": "e"}),
+    ("deep", {"available": True, "n_clusters": 2, "criteria": ["x_tension"], "parts": [3], "order": "stress_max",
+              "order_note": "n", "clusters": [{"part_id": 3}], "truncated": {"returned": 1, "total": 2}},
+     {"clusters": [{"part_id": 3}], "truncated": {"returned": 1, "total": 2}}),
+    ("deep", {"available": False, "n_records": 0, "clusters": []}, None),
+    ("impact", {"available": True, "clusters": [{"part_id": 9}]}, None),
+])
+async def test_datahub_hotspot_summary_follows_the_hotspots_route(monkeypatch, kind, canned, expect):
+    # 등재 요약은 `/hotspots` 와 같은 계산을 쓴다(베끼지 않는다) — sphere 는 포락, deep 은 군집, 없으면 None.
+    from app.modules.reports import services
+    calls = []
+
+    async def fake_hotspots(db, report, **kw):
+        calls.append(kw)
+        return canned
+    monkeypatch.setattr(services, "hotspots", fake_hotspots)
+    r, _ = _report()
+    r.kind = kind
+    got = await services._datahub_hotspot_summary(None, r)
+    if expect is None:
+        assert got is None
+    else:
+        for k, v in expect.items():
+            assert got[k] == v
+        assert got["n_clusters"] == canned["n_clusters"] and got["criteria"] == canned["criteria"]
+        assert ("envelope" in got) == (kind == "sphere") and ("clusters" in got) == (kind == "deep")
+        assert calls == [{"top": services._DATAHUB_HOTSPOT_TOP}]
