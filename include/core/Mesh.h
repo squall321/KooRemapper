@@ -3,6 +3,7 @@
 #include "core/Node.h"
 #include "core/Element.h"
 #include "core/Vector3D.h"
+#include <cstdint>
 #include <map>
 #include <set>
 #include <unordered_map>
@@ -346,19 +347,38 @@ public:
             return;
         }
 
-        // Build the set of node IDs referenced by any element.
-        std::set<int> refNodes;
+        // 요소가 참조하는 절점 ID 를 표시한다. 예전엔 참조 ID 를 전부 `std::set` 에 넣었다 —
+        // 절점 169만 개 평판에서 한 번 ~0.7 s(요소마다 8번 넣기 · 절점마다 count).
+        // 절점 키 구간 [lo, hi] 가 촘촘하면(구간 ≤ 절점 수 × 64 — 비트 배열이 절점당 8바이트 이하)
+        // 그 구간 위의 비트 배열에 표시하고, 아니면 예전 `std::set` 그대로 쓴다. 같은 집합이다 —
+        // 구간 밖의 참조는 어느 절점 키와도 같지 않으므로 '참조가 하나라도 있는가'(useRefOnly)에만 든다.
+        const long long lo = nodes.begin()->first;
+        const long long span = static_cast<long long>(nodes.rbegin()->first) - lo + 1;
+        const bool dense = span <= 64LL * static_cast<long long>(nodes.size());
+        std::vector<uint64_t> refBits;   // dense — (키 - lo) 번째 비트
+        std::set<int> refNodes;          // !dense — 예전 그대로
+        if (dense) refBits.assign(static_cast<size_t>((span + 63) / 64), 0);
+        bool useRefOnly = false;
         for (const auto& [eid, elem] : elements) {
             for (int i = 0; i < Element::NUM_NODES; ++i) {
                 int nid = elem.nodeIds[i];
-                if (nid > 0) refNodes.insert(nid);
+                if (nid <= 0) continue;
+                useRefOnly = true;
+                if (!dense) { refNodes.insert(nid); continue; }
+                const long long off = nid - lo;
+                if (off >= 0 && off < span)
+                    refBits[static_cast<size_t>(off >> 6)] |= uint64_t(1) << (off & 63);
             }
         }
-        bool useRefOnly = !refNodes.empty();
+        auto isRef = [&](int id) {   // id 는 `nodes` 의 키 — 늘 구간 안이다
+            if (!dense) return refNodes.count(id) != 0;
+            const long long off = id - lo;
+            return ((refBits[static_cast<size_t>(off >> 6)] >> (off & 63)) & 1) != 0;
+        };
 
         bool first = true;
         for (const auto& [id, node] : nodes) {
-            if (useRefOnly && refNodes.count(id) == 0) continue;
+            if (useRefOnly && !isRef(id)) continue;
             if (first) {
                 minPoint = node.position;
                 maxPoint = node.position;
