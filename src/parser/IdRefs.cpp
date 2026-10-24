@@ -4,8 +4,10 @@
 #include "parser/CardCut.h"
 #include "parser/CardFields.h"
 #include "parser/DeckScan.h"
+#include "commands/contact_helpers.h"   // 접촉 Card 1 자리 — 카드 자리 정본(ct_parseContacts)
 
 #include <algorithm>
+#include <map>
 
 namespace KooRemapper {
 namespace idrefs {
@@ -76,6 +78,10 @@ int ceilDiv(int a, int b) { return a <= 0 ? 0 : (a + b - 1) / b; }
 Scan find(const std::vector<std::string>& L, int deckFw, const std::function<bool(Axis, int)>& keep) {
     Scan s;
     Walker w{L, keep, s};
+    // 접촉 Card 1 줄 — 키워드 줄 → Card 1 줄. 정본이 ID 카드 · MPP 1 · `&` MPP 2 · 빈 줄을 센다(사본을 두지 않는다 — 10-24).
+    std::map<size_t, size_t> contactCard1;
+    for (const auto& c : ct_parseContacts(L))
+        if (c.cardLine[0] >= 0) contactCard1[static_cast<size_t>(c.startLine)] = static_cast<size_t>(c.cardLine[0]);
     for (const auto& b : cardcut::blocks(L)) {
         const std::string& kw = b.kw;
         const int ifw = keywordFieldWidth(L[b.kwLine], deckFw);
@@ -100,23 +106,13 @@ Scan find(const std::vector<std::string>& L, int deckFw, const std::function<boo
         if (done) continue;
 
         // ── 접촉 Card 1 — SSID MSID SSTYP MSTYP(STYP = 3 이면 그 ID 칸이 PID 다) ─────────────────
-        //   앞에 오는 카드 — 제목(_TITLE 은 접촉에 없지만 덱이 쓰면 한 줄) · ID 카드(_ID) · MPP 카드(_MPP —
-        //   첫 줄이 `&` 로 시작하면 한 장 더). 서명(STYP 두 칸이 0..6 정수)이 안 맞으면 단정하지 않는다.
+        //   앞에 오는 카드(제목 줄 · ID 카드 · MPP 1 · `&` MPP 2)는 정본이 센다(위 `contactCard1`).
+        //   서명(STYP 두 칸이 0..6 정수)이 안 맞으면 단정하지 않는다.
         if (starts(kw, "*CONTACT_")) {
-            size_t k = (has(kw, "_TITLE") ? 1u : 0u) +
-                       ((kw.size() >= 3 && kw.compare(kw.size() - 3, 3, "_ID") == 0) || has(kw, "_ID_") ? 1u : 0u);
-            if (has(kw, "_MPP")) {
-                if (k < b.data.size()) {
-                    ++k;
-                    if (k < b.data.size()) {
-                        const std::string& nx = L[b.data[k]];
-                        const size_t g = nx.find_first_not_of(" \t");
-                        if (g != std::string::npos && nx[g] == '&') ++k;
-                    }
-                }
-            }
-            if (k >= b.data.size()) { w.skipped(kw); continue; }
-            const auto c = cardcut::cut(L[b.data[k]], w10);
+            const auto at = contactCard1.find(b.kwLine);
+            if (at == contactCard1.end()) { w.skipped(kw); continue; }
+            const size_t li = at->second;
+            const auto c = cardcut::cut(L[li], w10);
             int sstyp = -1, mstyp = -1;
             const bool sig = c.f.size() >= 4 && toInt(c.f[2], sstyp) && toInt(c.f[3], mstyp) &&
                              sstyp >= 0 && sstyp <= 6 && mstyp >= 0 && mstyp <= 6;
@@ -124,7 +120,7 @@ Scan find(const std::vector<std::string>& L, int deckFw, const std::function<boo
             std::vector<int> idx;
             if (sstyp == 3) idx.push_back(0);
             if (mstyp == 3) idx.push_back(1);
-            if (!idx.empty()) w.take(b.data[k], kw, Axis::Part, idx, w10);
+            if (!idx.empty()) w.take(li, kw, Axis::Part, idx, w10);
             continue;
         }
         // ── `*CONSTRAINED_RIGID_BODIES` — 줄마다 PIDL PIDC ──────────────────────────────────

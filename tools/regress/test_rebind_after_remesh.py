@@ -285,6 +285,23 @@ def main():
         write(os.path.join(d, "c.yaml"), "old_deck: v1.k\nnew_deck: v2.k\nentities: c.k\noutput: c.k\n")
         rc, out = run(binary, d, OP, "c.yaml")
         check("C-9 output 이 entities 와 같으면 거절(원본을 덮어쓰지 않는다)", rc == 1 and "덮어쓰지" in out, out[-200:])
+        print("[C2 접촉 머리 카드 — ID · MPP 1 · `&` MPP 2 · 빈 MPP 1 뒤의 Card 1 을 읽는다(10-24 정본으로 모음)]")
+        # IdRefs 는 접촉 Card 1 자리를 따로 셌다(맞게 셌다). 10-24 부터 contact 정본(ct_parseContacts)이 센다 — 이 절은 그 자리를 지킨다.
+        C23 = "%s\n%s\n" % (card("0.2", "0.2"), card("1.0", "1.0"))
+        want = {999: card(1, 999, 3, 3), 998: card(2, 998, 3, 3), 997: card(997, 1, 3, 3), 996: card(996, 2, 3, 3)}
+        body = ("*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_ID\n%s\n%s\n" % (card(11) + "idc", want[999]) + C23 +
+                "*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_MPP\n%s\n%s\n" % (card(0, 200), want[998]) + C23 +
+                "*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_ID_MPP\n%s\n%s\n&        0\n%s\n" % (card(12) + "both", card(2, 200, 0, 3), want[997]) + C23 +
+                "*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_MPP\n\n%s\n" % want[996] + C23)
+        write(os.path.join(d, "dct.k"), "*KEYWORD\n*SET_NODE_LIST\n%s\n%s\n%s*END\n" % (card(50), card(a_ids[0]), body))
+        write(os.path.join(d, "dct.yaml"), "old_deck: v1.k\nnew_deck: v2.k\nentities: dct.k\noutput: dct_out.k\n")
+        rc, out = run(binary, d, OP, "dct.yaml")
+        dl = open(os.path.join(d, "dct.k")).read().splitlines()
+        for pid, c1 in want.items():
+            ln = dl.index(c1) + 1
+            check("C2-%d Card 1(line %d)이 가리키는 없는 파트 %d 을 짚는다" % (pid, ln, pid),
+                  ("line %d *CONTACT" % ln) in out and ("파트 %d" % pid) in out, out[-500:])
+        check("C2-5 rc 1 · 산출 없음", rc == 1 and not os.path.exists(os.path.join(d, "dct_out.k")), out[-200:])
         print("[E 공차 — 줄 때만(2026-10-17) · 정확 일치가 기본]")
         # 새 덱의 A 를 x 로 2e-4 밀었다(재메시가 남긴 미세한 어긋남) — 정확 일치로는 못 푼다
         A_sh = ([(n, x + 2e-4, y, z) for n, x, y, z in A_new[0]], A_new[1])
