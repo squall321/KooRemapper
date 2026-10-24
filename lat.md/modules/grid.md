@@ -4,7 +4,7 @@ Extract structured-grid topology from an unstructured input mesh.
 
 | File | Role |
 |------|------|
-| [BoundaryExtractor.cpp](../../src/grid/BoundaryExtractor.cpp) | identifies free faces / boundary loops |
+| [BoundaryExtractor.cpp](../../src/grid/BoundaryExtractor.cpp) | (i,j,k) node grid, 8 corner and 12 edge node lists of the indexed mesh — values only, no pointers into it (boundary-face lists removed 2026-10-24) |
 | [ConnectivityAnalyzer.cpp](../../src/grid/ConnectivityAnalyzer.cpp) | adjacency, node→element maps |
 | [EdgeCalculator.cpp](../../src/grid/EdgeCalculator.cpp) | edge enumeration, lengths |
 | [NeutralGridGenerator.cpp](../../src/grid/NeutralGridGenerator.cpp) | "neutral" intermediate grid for mapping |
