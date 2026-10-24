@@ -26,6 +26,9 @@
 ⚠ **날짜를 가린다.** 산출 덱 머리에 `$ Date: YYYY-MM-DD HH:MM:SS` 가 초 단위로 박히므로 가리지
 않으면 42 op 전부가 "바뀌었다" 로 나온다(`test_roundtrip_bytes.py` 의 `_DATE` 를 그대로 쓴다).
 
+⚠ **스테이징 폴더 경로도 가린다**(10-24). 보고 JSON 이 입력 · 출력의 절대 경로를 적어, 가리지 않으면 같은 바이너리로도
+cleanup-nodes · extract-parts 가 늘 "달라졌다" 로 나와 진짜 차이를 가렸다.
+
 ⚠ **모든 파일을 본다.** 처음 판은 '새로 생긴 파일' 만 봤는데, `map`·`shellmap`·`unfold` 처럼
 출력이 스테이징된 이름을 덮어쓰는 op 이 "산출물 0개" 로 빠졌다 — 정작 검증하려던 경로가 대조
 밖이었다. 그래서 스테이징 뒤 폴더의 **전체 파일**을 지문에 넣는다.
@@ -66,7 +69,13 @@ def _mask(raw):
 
 
 def digest(path):
-    return hashlib.sha256(_mask(open(path, "rb").read())).hexdigest()
+    raw = _mask(open(path, "rb").read())
+    # 스테이징 폴더의 절대 경로를 가린다 — cleanup-nodes · extract-parts 의 보고 JSON 이 입력 · 출력 경로를 그대로 적어
+    # **같은 바이너리로도** 지문이 매번 달랐다(10-24 — 두 번 떠서 비교해 보니 다른 것은 그 두 칸뿐이었다).
+    d = os.path.dirname(os.path.abspath(path))
+    for p in sorted({d, os.path.realpath(d)}, key=len, reverse=True):
+        raw = raw.replace(p.encode(), b"<STAGE>")
+    return hashlib.sha256(raw).hexdigest()
 
 
 def emit(binary, only=None):
