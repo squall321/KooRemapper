@@ -315,7 +315,8 @@ bool MeshRemapper::step3_AnalyzeFlatMesh() {
 
     // Element-referenced bounding box for the axis mapping, the orientation
     // sample and step4. Each of them used to compute it again from the same,
-    // unchanged flat mesh (it builds a set of every referenced node ID).
+    // unchanged flat mesh (it walks every element's node IDs); runMapping's
+    // axis report reads it back through getFlatBounds().
     flatMesh_->calculateBoundingBox(flatMin_, flatMax_);
 
     // 평판 절점 색인 — analyzeSourceMesh · reorientMappedElements 가 요소마다 절점 8개를
