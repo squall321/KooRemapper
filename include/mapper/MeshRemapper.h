@@ -127,6 +127,14 @@ public:
     bool isGridLookupActive() const { return paramMapper_.isGridLookupActive(); }
 
     /**
+     * step3 이 잰 평판 bbox(`flatMesh_->calculateBoundingBox()`, 요소가 쓰는 절점만).
+     * performMapping() 이 성공한 뒤에 유효하다 — 매핑은 평판을 바꾸지 않으므로 다시 재도 같은 값이다.
+     */
+    void getFlatBounds(Vector3D& minPoint, Vector3D& maxPoint) const {
+        minPoint = flatMin_; maxPoint = flatMax_;
+    }
+
+    /**
      * Get auto-detected axis mapping: detail XYZ -> bent ijk
      * Returns array of 3 ints; values 0=i, 1=j, 2=k
      */

@@ -494,8 +494,9 @@ int runMapping(const std::string& bentFile, const std::string& flatFile,
     double bentI = remapper.getNeutralSizeI();
     double bentJ = remapper.getNeutralSizeJ();
     double bentK = remapper.getNeutralSizeK();
+    // 평판 bbox 는 step3 이 잰 값을 받는다 — 매핑 뒤 같은 평판으로 다시 재던 것.
     Vector3D fMin, fMax;
-    flatMesh.calculateBoundingBox(fMin, fMax);
+    remapper.getFlatBounds(fMin, fMax);
     double dX = fMax.x - fMin.x, dY = fMax.y - fMin.y, dZ = fMax.z - fMin.z;
 
     auto fmt3 = [](double a, double b, double c) {
