@@ -92,10 +92,9 @@ private:
     // axisDirections_[0] = i-axis direction, etc.
     std::array<Vector3D, 3> axisDirections_;
 
-    // Mesh pointer for geometry queries during indexing
-    const Mesh* mesh_;
-
-    // Index lookup map
+    // Index lookup map — buildIndexLookup 이 넘긴 메시의 요소를 가리킨다(그 메시보다 오래 쓰면 안 된다).
+    // 예전의 `const Mesh* mesh_` 는 지웠다 — 쓰기만 하고 읽는 곳이 없었는데, assignIndices 의 이른 반환
+    // (색인이 이미 있음 · 시작 코너 실패 등)에서는 지우지 않아 넘긴 메시가 죽은 뒤에도 남았다.
     std::map<std::tuple<int, int, int>, const Element*> indexedElements_;
 
     /**

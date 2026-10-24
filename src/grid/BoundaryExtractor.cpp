@@ -1,6 +1,5 @@
 #include "grid/BoundaryExtractor.h"
 #include "core/Vector3D.h"
-#include <set>
 #include <algorithm>
 #include <unordered_map>
 #include <tuple>
@@ -18,11 +17,6 @@ BoundaryExtractor::BoundaryExtractor()
 }
 
 void BoundaryExtractor::extract(const Mesh& mesh) {
-    // Clear previous data
-    faceI0_.clear(); faceIM_.clear();
-    faceJ0_.clear(); faceJN_.clear();
-    faceK0_.clear(); faceKP_.clear();
-
     if (!mesh.gridDimensionsSet) {
         return;
     }
@@ -30,18 +24,6 @@ void BoundaryExtractor::extract(const Mesh& mesh) {
     dimI_ = mesh.dimI;
     dimJ_ = mesh.dimJ;
     dimK_ = mesh.dimK;
-
-    // Categorize elements by their boundary position
-    for (const auto& [id, elem] : mesh.elements) {
-        if (!elem.indexAssigned) continue;
-
-        if (elem.i == 0) faceI0_.push_back(&elem);
-        if (elem.i == dimI_ - 1) faceIM_.push_back(&elem);
-        if (elem.j == 0) faceJ0_.push_back(&elem);
-        if (elem.j == dimJ_ - 1) faceJN_.push_back(&elem);
-        if (elem.k == 0) faceK0_.push_back(&elem);
-        if (elem.k == dimK_ - 1) faceKP_.push_back(&elem);
-    }
 
     // Build node grid and extract corner/edge nodes
     buildNodeGrid(mesh);
@@ -391,78 +373,6 @@ void BoundaryExtractor::extractEdgeNodes() {
     for (int k = 0; k <= nk; ++k) {
         edgeNodes_[11].nodeIds.push_back(nodeGrid_[ni][nj][k]);
     }
-}
-
-std::vector<int> BoundaryExtractor::getNodesOnFaceI0() const {
-    std::set<int> nodes;
-    for (const auto* elem : faceI0_) {
-        // Face i=0 uses local nodes 0,3,7,4
-        nodes.insert(elem->nodeIds[0]);
-        nodes.insert(elem->nodeIds[3]);
-        nodes.insert(elem->nodeIds[7]);
-        nodes.insert(elem->nodeIds[4]);
-    }
-    return std::vector<int>(nodes.begin(), nodes.end());
-}
-
-std::vector<int> BoundaryExtractor::getNodesOnFaceIM() const {
-    std::set<int> nodes;
-    for (const auto* elem : faceIM_) {
-        // Face i=max uses local nodes 1,2,6,5
-        nodes.insert(elem->nodeIds[1]);
-        nodes.insert(elem->nodeIds[2]);
-        nodes.insert(elem->nodeIds[6]);
-        nodes.insert(elem->nodeIds[5]);
-    }
-    return std::vector<int>(nodes.begin(), nodes.end());
-}
-
-std::vector<int> BoundaryExtractor::getNodesOnFaceJ0() const {
-    std::set<int> nodes;
-    for (const auto* elem : faceJ0_) {
-        // Face j=0 uses local nodes 0,1,5,4
-        nodes.insert(elem->nodeIds[0]);
-        nodes.insert(elem->nodeIds[1]);
-        nodes.insert(elem->nodeIds[5]);
-        nodes.insert(elem->nodeIds[4]);
-    }
-    return std::vector<int>(nodes.begin(), nodes.end());
-}
-
-std::vector<int> BoundaryExtractor::getNodesOnFaceJN() const {
-    std::set<int> nodes;
-    for (const auto* elem : faceJN_) {
-        // Face j=max uses local nodes 3,2,6,7
-        nodes.insert(elem->nodeIds[3]);
-        nodes.insert(elem->nodeIds[2]);
-        nodes.insert(elem->nodeIds[6]);
-        nodes.insert(elem->nodeIds[7]);
-    }
-    return std::vector<int>(nodes.begin(), nodes.end());
-}
-
-std::vector<int> BoundaryExtractor::getNodesOnFaceK0() const {
-    std::set<int> nodes;
-    for (const auto* elem : faceK0_) {
-        // Face k=0 uses local nodes 0,1,2,3
-        nodes.insert(elem->nodeIds[0]);
-        nodes.insert(elem->nodeIds[1]);
-        nodes.insert(elem->nodeIds[2]);
-        nodes.insert(elem->nodeIds[3]);
-    }
-    return std::vector<int>(nodes.begin(), nodes.end());
-}
-
-std::vector<int> BoundaryExtractor::getNodesOnFaceKP() const {
-    std::set<int> nodes;
-    for (const auto* elem : faceKP_) {
-        // Face k=max uses local nodes 4,5,6,7
-        nodes.insert(elem->nodeIds[4]);
-        nodes.insert(elem->nodeIds[5]);
-        nodes.insert(elem->nodeIds[6]);
-        nodes.insert(elem->nodeIds[7]);
-    }
-    return std::vector<int>(nodes.begin(), nodes.end());
 }
 
 } // namespace KooRemapper

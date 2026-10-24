@@ -10,7 +10,7 @@
 namespace KooRemapper {
 
 /**
- * Extracts boundary elements and nodes from a structured grid
+ * Extracts the node grid and boundary (corner / edge) nodes from a structured grid
  */
 class BoundaryExtractor {
 public:
@@ -22,21 +22,9 @@ public:
      */
     void extract(const Mesh& mesh);
 
-    // Get elements on each boundary face
-    std::vector<const Element*> getFaceI0() const { return faceI0_; }   // i=0
-    std::vector<const Element*> getFaceIM() const { return faceIM_; }   // i=max
-    std::vector<const Element*> getFaceJ0() const { return faceJ0_; }   // j=0
-    std::vector<const Element*> getFaceJN() const { return faceJN_; }   // j=max
-    std::vector<const Element*> getFaceK0() const { return faceK0_; }   // k=0
-    std::vector<const Element*> getFaceKP() const { return faceKP_; }   // k=max
-
-    // Get nodes on each boundary face
-    std::vector<int> getNodesOnFaceI0() const;
-    std::vector<int> getNodesOnFaceIM() const;
-    std::vector<int> getNodesOnFaceJ0() const;
-    std::vector<int> getNodesOnFaceJN() const;
-    std::vector<int> getNodesOnFaceK0() const;
-    std::vector<int> getNodesOnFaceKP() const;
+    // ★ 결과는 전부 **값**(절점 ID · 격자 치수)이다 — 넘긴 메시를 가리키는 것을 들지 않는다.
+    // 예전엔 경계면마다 요소 포인터 목록(getFaceI0..KP)과 그 절점 목록(getNodesOnFace*)도 냈는데,
+    // 읽는 곳이 없었고 map 은 extract 에 넘긴 색인 사본을 step2 뒤에 풀어 그 포인터가 매달렸다.
 
     // Get 8 corner nodes
     std::array<int, 8> getCornerNodes() const { return cornerNodes_; }
@@ -73,10 +61,6 @@ public:
     }
 
 private:
-    std::vector<const Element*> faceI0_, faceIM_;
-    std::vector<const Element*> faceJ0_, faceJN_;
-    std::vector<const Element*> faceK0_, faceKP_;
-
     std::array<int, 8> cornerNodes_;
     std::array<EdgeNodes, 12> edgeNodes_;
 

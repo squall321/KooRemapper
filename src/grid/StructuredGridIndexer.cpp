@@ -26,7 +26,7 @@ struct GridIndexHash {
 }  // namespace
 
 StructuredGridIndexer::StructuredGridIndexer()
-    : dimI_(0), dimJ_(0), dimK_(0), mesh_(nullptr)
+    : dimI_(0), dimJ_(0), dimK_(0)
 {
     // Default axis-to-face mapping:
     // Face 0,1 -> i-axis (i-, i+)
@@ -46,7 +46,6 @@ bool StructuredGridIndexer::assignIndices(Mesh& mesh,
                                           const ConnectivityAnalyzer& connectivity) {
     errorMessage_.clear();
     dimI_ = dimJ_ = dimK_ = 0;
-    mesh_ = &mesh;  // Store mesh pointer for geometry queries
 
     if (mesh.elements.empty()) {
         errorMessage_ = "Mesh has no elements";
@@ -110,7 +109,6 @@ bool StructuredGridIndexer::assignIndices(Mesh& mesh,
                 "(dims=" + std::to_string(dimI_) + "x" +
                 std::to_string(dimJ_) + "x" + std::to_string(dimK_) + ", " +
                 "actual=" + std::to_string(actual) + " elements)";
-            mesh_ = nullptr;
             return false;
         }
     }
@@ -123,7 +121,6 @@ bool StructuredGridIndexer::assignIndices(Mesh& mesh,
     // Update mesh dimensions
     mesh.setGridDimensions(dimI_, dimJ_, dimK_);
 
-    mesh_ = nullptr;
     return true;
 }
 

@@ -233,8 +233,9 @@ bool MeshRemapper::step1_AnalyzeBentMesh(Mesh& tempMesh) {
     // Reorder element nodes based on geometry for consistent LS-DYNA ordering
     indexer_.reorderElementNodes(tempMesh);
 
-    // Build index lookup
-    indexer_.buildIndexLookup(tempMesh);
+    // 색인 조회표(`indexer_.buildIndexLookup`)는 만들지 않는다 — MeshRemapper 에서는 아무도
+    // `getElementAt` 을 부르지 않고, 그 표는 이 사본(tempMesh)의 요소를 가리킨 채 사본이 죽은 뒤에도
+    // 남았다(performMapping 은 step2 뒤에 사본을 푼다). unfold 는 제 사본을 들고 그 표를 쓴다.
 
     // Extract boundary information
     boundary_.extract(tempMesh);
