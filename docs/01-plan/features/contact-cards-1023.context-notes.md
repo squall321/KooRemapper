@@ -23,3 +23,10 @@
   진짜 Card 1 의 없는 세트는 못 봄 · restack 은 `_MPP` 접촉의 죽은 PID 를 못 보고 rc 0, MPP 1 의 BCKT 가 죽은 PID 와 같으면
   MPP 1 줄(NS2TRK 3→2)을 고쳐 씀 · cnrb2spring 은 [manual] 이 [maybe] 로 낮아져 rc 0. 셋 다 `ct_parseContacts` 의 카드 자리를 쓴다
   (세 번째 소비자 — 사본을 늘리지 않는다). IdRefs 는 이미 `_MPP` · `&` 를 바르게 세고 있어 그대로 둔다.
+- **(10-24) D23 은 재기동 뒤 살아 있는 잡으로 찾았다 — 관문은 전부 초록이었다.** option 2 를 준 tiebreak 잡이 「YAML has no contact actions」
+  로 떨어졌다. 같은 YAML 을 옛 배포본(252bd444)에 줘도 같다 — 이번 고침 전부터다. argbuild 는 JSONB 가 키 순서를 잃어 `type` · `action`
+  을 앞에 쓰되 `type` 을 먼저 쓰고(indent 가 그것을 요구한다), contact 파서는 `- action` 으로 시작하는 줄만 새 항목으로 봤다. 고칠 자리를
+  바이너리로 정했다 — YAML 에서 키 순서는 뜻이 없고 손으로 쓴 YAML 도 같은 꼴로 깨지며, 다른 op 의 목록 파서는 이미 `- ` 만 본다.
+  덱 지문(deck_manifest)에서 그 효과가 보였다 — 카탈로그 예제를 플랫폼 꼴로 돌리면 옛 판은 create 항목을 앞 analyze 에 섞어 **조용히 버리고
+  rc 0**(접촉 4개), 새 판은 만든다(5개). deckops_smoke 에 contact 가 없어서 플랫폼 경로를 아무도 안 쟀다 — 한 줄 더했다.
+- **(10-24) 모르는 action 은 rc 1 로 했다(D24).** 카탈로그가 필수 enum 으로 적고, assemble 은 이미 ERROR 로 막는다. 덱을 건드리기 전에 본다.

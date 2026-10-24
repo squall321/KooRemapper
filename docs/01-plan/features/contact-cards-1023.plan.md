@@ -33,6 +33,8 @@ contact op 과 그 카드를 읽고 고치는 op(optimize · stabilize · modelm
 | D20 | stabilize 가 range-for 로 접촉을 돌면서 그 목록을 다시 파싱해 덮어쓴다(반복자 무효 — 미정의 동작) · TIEBREAK 에 SOFT 2 를 쓴다(Remark 2 — 구현 안 됨) | 번호로 돈다 · TIEBREAK 는 SOFT 를 그대로 두고 알린다 |
 | D21 | remove 뒤의 액션이 줄을 밀면 다른 접촉을 지운다 | 지울 번호를 모았다가 맨 끝에 다시 읽은 자리로 지운다 |
 | D22 | info 참조 검사 · restack/merge 죽은 참조 스캐너 · cnrb2spring 이 `_MPP` 의 MPP 1 을 Card 1 로 읽는다 | 셋 다 `ct_parseContacts` 의 카드 자리 |
+| D23 | contact YAML 항목을 `- action` 으로 시작할 때만 알아본다 — 플랫폼(argbuild)은 `type` 부터 써서 type 을 준 create 가 늘 실패, 카탈로그 예제는 create 를 조용히 버리고 rc 0 | `- ` 면 첫 키가 무엇이든 새 항목 · `action` 은 어디에 와도 된다 |
+| D24 | 모르는 · 빠진 action 을 경고만 하고 rc 0(카탈로그는 필수 enum) | 덱을 건드리기 전에 rc 1 |
 
 ## 범위 — C++ 성능
 map 의 직렬 전처리(연결성 · 격자 색인 · 경계 추출 — 1·2단계에서 두 번). **산출이 바이트까지 같아야** 한다(20만 HEX8 sha `39a6a2af` · 회귀).
