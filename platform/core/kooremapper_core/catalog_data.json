@@ -13797,10 +13797,11 @@
       ],
       "example": {
         "args": {
-          "mesh_file": "stack.k"
+          "mesh_file": "flat_stack.k"
         },
-        "note": "Reads stack.k and prints the per-layer table plus the EI-weighted neutral axis; add axis=x for a stack built along x"
+        "note": "Reads the stackwrap example's flat_stack.k and prints the per-layer table plus the EI-weighted neutral axis; add axis=x for a stack built along x (until 2026-10-24 this example named a stack.k that is not in the repository)"
       },
+      "example_folder": "examples/stackwrap",
       "notes": "shellmap treats axis=0 of the flat deck as the neutral plane and uses that coordinate as the normal offset. This op measures that assumption: it prints the offset of the neutral axis from axis=0 and warns when axis=0 falls outside the stack, or lies more than half the total thickness away from the neutral axis. *MAT_VISCOELASTIC field 2 is BULK, not E — the reader converts (E = 9KG/(3K+G)) but registers nothing when GI = 0, in which case that part is listed as excluded rather than counted as zero stiffness."
     },
     {
