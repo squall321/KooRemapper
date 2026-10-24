@@ -37,5 +37,6 @@
 - [x] Drive `dist-20261023-115800Z` · health `revision_matches_binary=True`(소스 `9e8999f`)
 - [x] 스모크 — smoke(op 63 · 도구 73) · reports 35/35 · figures 20/20 · deckops 21/21
 - [x] 화면 확인용 임시 사용자 · 세션 · 리포트 둘 · 파일 넷 · 저장 폴더 지움(남은 것 0)
-- [ ] SmartTwinPreprocessor.sif 굽기 — 자동 모드 분류기가 「Production Deploy」로 막았다 → 사용자 실행 대기
-- [ ] 그 뒤 `/opt/apptainers` 사본 · 계산노드(`deploy_apptainers.sh --image`) · 노드에서 sha · SmartTwinMCP 에 알림
+- [x] SmartTwinPreprocessor.sif 굽기 — 10-23 저녁 v121(`252bd444`) · 10-24 v122(`0e7db58c` · 소스 `2e8b9e4`)
+- [x] `/opt/apptainers` 사본(v122 · 빌드본과 같은 바이트)
+- [ ] 계산노드(`deploy_apptainers.sh --image`) · 노드에서 sha · SmartTwinMCP 에 알림 — node001 · node002 VM 이 꺼져 있다(켜는 것은 사용자 결정)

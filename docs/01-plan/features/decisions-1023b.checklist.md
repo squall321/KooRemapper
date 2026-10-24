@@ -30,4 +30,4 @@
 - [x] API · MCP 재기동(살아 있는 잡 0 을 본 **결과에** 걸었다) · health ok 252bd444 일치
 - [x] SIF 굽기(rc 0 · 스테이징 cd07c327 → 252bd444 · 구운 sha 검증 · 메일 sent OK) · `/opt/apptainers`(임시 이름 복사 뒤 mv · 빌드본과 같음) ·
   헤드 사본 셋 모두 252bd444 · BUILD_INFO 소스 `74aa501`(카탈로그 고침 포함) — 노드 둘은 꺼져 있어 못 깔았다
-- [ ] 커밋 · 푸시 · 메모리 · 보고
+- [x] 커밋 · 푸시 · 메모리 · 보고 → `docs/04-report/contact-cards-1023.report.md` §1(10-24)
