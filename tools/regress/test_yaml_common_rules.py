@@ -325,7 +325,8 @@ def body(binary, tmp):
     # 단독 contact 와 assemble 이 같은 type 에 같은 키워드를 쓴다
     write(os.path.join(data, "ct_asm.yaml"),
           "base_model: box.k\noutput: ct_asm\noperations:\n  - type: contact\n    contacts:\n"
-          "      - action: create\n        type: auto\n        slave:\n          pid: 1\n")
+          "      - action: create\n        type: auto\n        slave:\n          pid: 1\n        master:\n          pid: 1\n")
+    # ⚠ master 를 준다 — 단일면이 아닌 형에 master 가 없으면 10-24 부터 rc=1 이다(예전엔 MSID 0 인 접촉을 썼다).
     rc, out = run(binary, data, "assemble", "ct_asm.yaml")
     asm_kw = [l for l in open(os.path.join(data, "ct_asm.k")).read().splitlines()
               if l.startswith("*CONTACT_")] if os.path.exists(os.path.join(data, "ct_asm.k")) else []

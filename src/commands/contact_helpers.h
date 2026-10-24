@@ -140,6 +140,14 @@ std::string ct_generateSetNode(int setId,
 
 std::string ct_generateContact(const ContactDef& d);
 
+// 형이 요구하는 필수 카드(TIEBREAK Card 4 · ERODING Card 4 · THRM 1)만 쓴다 — Card 3 바로 뒤 · 선택 카드 앞(매뉴얼 카드 순서).
+// `ct_generateContact` 가 이것을 쓰고, assemble 의 contact 는 자기 Card 1-3 뒤에 이것을 붙인다.
+std::string ct_writeMandatoryCards(const ContactDef& d);
+
+// 필수 카드 규칙 — 형을 쓸 수 있는지 보고(못 쓰는 형 · ORFR · tiebreak OPTION 요구 · 13/14 · DAMPING ±9/±11 · SOFT 2 ·
+// SINGLE/GENERAL 의 OPTION 6+ · 파손 OPTION 의 NFLS · SFLS), 되면 `d` 의 필수 카드 칸을 채운다. 안 되면 false 와 까닭(`err`).
+bool ct_applyMandatory(const ct_MandatoryKeys& m, const std::string& keyword, ContactDef& d, std::string& err);
+
 // Card 1 의 SSID · MSID · SSTYP · MSTYP 를 그 자리에서 고친다(음수 인자는 그대로 둔다). Card 1 이 없으면 false.
 bool ct_modifyContactCard1(std::vector<std::string>& lines,
         const ContactDef& c,

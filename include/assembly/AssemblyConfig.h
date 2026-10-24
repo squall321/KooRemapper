@@ -3,6 +3,8 @@
 #include <vector>
 #include <string>
 
+#include "commands/contact_defs.h"   // ct_MandatoryKeys — 필수 카드 키(단독 contact 와 같은 꼴)
+
 // Knowledge graph (lat.md):
 //   @lat: [[modules/assembly]]
 
@@ -385,6 +387,8 @@ struct ContactAction {
     ContactSide master;
     double friction = -1.0;               // -1 = not set
     std::string title;
+    // 형이 요구하는 필수 카드(TIEBREAK Card 4 · THRM 1)의 키 — 단독 contact 와 같은 규칙(ct_applyMandatory, 10-24)
+    ct_MandatoryKeys card;
 
     // detect options
     std::string scope;                    // "all" or empty

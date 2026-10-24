@@ -602,61 +602,14 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
     };
     // 형이 요구하는 필수 카드(Card 4 · THRM). 우리가 꼴을 아는 것만 쓰고, 모르는 것은 **거절**한다 — 예전엔 대문자로 그대로
     // 써서 경고만 하고 rc 0 으로 불완전한 키워드를 냈다(ERODING 의 Card 4 · TIEBREAK_USER · THERMAL_FRICTION …).
+    // 필수 카드 규칙은 정본(`ct_applyMandatory`) — assemble 의 contact 도 같은 것을 쓴다(10-24).
     auto applyMandatory = [](const ContactAction& a, const std::string& keyword, ContactDef& d, std::string& err) -> bool {
-        const ct_CardSpec sp = ct_cardSpec(keyword);
-        const std::string kw = "*CONTACT_" + kw_upper(keyword);
-        if (!sp.known) { err = kw + " — " + sp.why + ". 이 키워드의 필수 카드를 KooRemapper 는 쓰지 못한다"; return false; }
-        if (sp.orfr > 0) { err = kw + " — ORFR 1-4(직교 마찰) 카드를 KooRemapper 는 쓰지 못한다"; return false; }
-        if (sp.tiebreakAuto) {
-            // 매뉴얼 Card 4 의 OPTION · NFLS · SFLS 는 required(기본값 없음, V68117-68150).
-            if (!a.tb_option) {
-                err = kw + " — option 을 주어야 한다(매뉴얼 Card 4 의 OPTION · NFLS · SFLS 는 required). "
-                      "1 = 닿은 절점이 영구히 붙는다(파손 없음) · 2 = 처음 닿은 절점이 파손 때까지 붙는다 · "
-                      "4 = 같고 마찰 미끄럼 허용 · 9/11 = 응집 혼합 모드 …";
-                return false;
-            }
-            const int opt = *a.tb_option;
-            if (opt == 13 || opt == 14) { err = kw + " — OPTION 13/14 는 Card 4.1b · 4.2b 가 더 필요하다(지원하지 않는다)"; return false; }
-            // 매뉴얼 Remark 2 — SOFT=2 는 tiebreak 에 구현돼 있지 않고, SINGLE_SURFACE · GENERAL TIEBREAK 는 OPTION 1~5 만.
-            if (a.soft && *a.soft == 2) { err = kw + " — SOFT=2(세그먼트 대 세그먼트)는 tiebreak 에 구현돼 있지 않다(매뉴얼 Remark 2)"; return false; }
-            {
-                const std::string ku = kw_upper(keyword);
-                const bool singleOrGeneral = ku.find("SINGLE_SURFACE_TIEBREAK") != std::string::npos ||
-                                             ku.find("GENERAL_TIEBREAK") != std::string::npos;
-                if (singleOrGeneral && (opt < 1 || opt > 5)) {
-                    err = kw + " — SINGLE_SURFACE · GENERAL TIEBREAK 은 OPTION 1~5 만 지원된다(매뉴얼 Remark 2)"; return false;
-                }
-            }
-            if (sp.damping && (opt == 9 || opt == -9 || opt == 11 || opt == -11)) {
-                err = kw + " — DAMPING 과 OPTION ±9/±11 은 Card 4.1a 가 더 필요하다(지원하지 않는다)"; return false;
-            }
-            // 파손 OPTION 에 응력을 안 주면 0 이라 곧바로 떨어진다 — 받아야 쓴다.
-            if (opt != 1 && (!a.tb_nfls || !a.tb_sfls)) {
-                err = kw + " — OPTION " + std::to_string(opt) + " 은 파손 응력을 쓴다: nfls · sfls 를 주어야 한다(안 주면 0 이라 곧바로 떨어진다)";
-                return false;
-            }
-            d.hasTiebreak = true;
-            d.tbOption = opt;
-            if (a.tb_nfls) d.tbNfls = *a.tb_nfls;
-            if (a.tb_sfls) d.tbSfls = *a.tb_sfls;
-            if (a.tb_param) d.tbParam = *a.tb_param;
-            if (a.tb_eraten) d.tbEraten = *a.tb_eraten;
-            if (a.tb_erates) d.tbErates = *a.tb_erates;
-            if (a.tb_ct2cn) d.tbCt2cn = *a.tb_ct2cn;
-        }
-        if (sp.eroding) d.hasEroding = true;
-        if (sp.thrm > 0) {
-            d.hasThermal = true;
-            if (a.th_k) d.thK = *a.th_k;
-            if (a.th_frad) d.thFrad = *a.th_frad;
-            if (a.th_h0) d.thH0 = *a.th_h0;
-            if (a.th_lmin) d.thLmin = *a.th_lmin;
-            if (a.th_lmax) d.thLmax = *a.th_lmax;
-            if (a.th_ftosa) d.thFtosa = *a.th_ftosa;
-            if (a.th_bcflag) d.thBcflag = *a.th_bcflag;
-            if (a.th_algo) d.thAlgo = *a.th_algo;
-        }
-        return true;
+        ct_MandatoryKeys m;
+        m.option = a.tb_option; m.nfls = a.tb_nfls; m.sfls = a.tb_sfls; m.param = a.tb_param;
+        m.eraten = a.tb_eraten; m.erates = a.tb_erates; m.ct2cn = a.tb_ct2cn;
+        m.k = a.th_k; m.frad = a.th_frad; m.h0 = a.th_h0; m.lmin = a.th_lmin; m.lmax = a.th_lmax; m.ftosa = a.th_ftosa;
+        m.bcflag = a.th_bcflag; m.algo = a.th_algo; m.soft = a.soft;
+        return ct_applyMandatory(m, keyword, d, err);
     };
 
     // 5. Process actions
@@ -796,6 +749,23 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
 
             // For single surface types, master is unused
             bool isSingle = (ctype.find("SINGLE_SURFACE") != std::string::npos);
+            // slave · master 가 없으면 — 단일면 형은 SURFA 0 = 모든 파트 · SURFB 를 안 쓴다(Vol_I *CONTACT Card 1). 그 밖의 형에서
+            // SSID · MSID 0 은 없는 세그먼트 세트다. ⚠ 예전엔 그대로 써서 LS-DYNA 가 받지 못할 접촉이 rc 0 으로 나갔다(10-24).
+            //   안 줬으면 rc 1 · 줬는데 면을 못 찾았으면(위 경고) assemble 처럼 이 접촉만 만들지 않는다.
+            if (!isSingle) {
+                const bool sGiven = act.slave.pid > 0 || !act.slave.pids.empty();
+                const bool mGiven = act.master.pid > 0 || !act.master.pids.empty();
+                if (!sGiven || !mGiven) {
+                    console.error("[contact] create: *CONTACT_" + ctype + " 에 " + (!sGiven ? "slave" : "master") +
+                                  "(pid · pids)가 없다 — 단일면 형이 아니면 둘 다 주어야 한다");
+                    return 1;
+                }
+                if (ssid == 0 || msid == 0) {
+                    console.warning("[contact] create: *CONTACT_" + ctype + " 를 만들지 않았다 — " +
+                                    (ssid == 0 ? "slave" : "master") + " 면을 찾지 못했다(위 경고)");
+                    continue;
+                }
+            }
             if (isSingle) {
                 // Slave only — if pids given, use SET_PART
                 if (!act.slave.pids.empty() && sstyp != 2) {

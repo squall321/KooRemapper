@@ -61,9 +61,11 @@ LS-DYNA `.k` 파일을 다루는 KooRemapper 플랫폼을 Claude에서 사용하
   모르는 값은 rc=0 이지만 대문자로 그대로 나가 LS-DYNA 가 거절하므로, job 로그의
   `not a known contact keyword` 경고를 확인하라. **`assemble` 안에서도 같은 11종 약칭을 쓴다**(2026-09-18 확인) —
   예전에는 `assemble` 에만 `tied_thermal`·`thermal`·`tiebreak` 가 없어 LS-DYNA 에 없는 `*CONTACT_TIED_THERMAL` 이 나갔다.
-  **단, Card 3 뒤에 필수 카드가 있는 형은 `assemble` 이 못 만든다**(2026-10-23) — `tied_thermal`·`thermal`(THRM 1)과
-  `tiebreak`·`eroding`(Card 4). `assemble` 의 contact 는 Card 1-3 만 써서 LS-DYNA 가 다음 줄을 그 카드로 읽는 덱을 냈다.
-  이제 `[ERROR] [contact] … 필수 카드(…)` 로 rc=1 이니 단독 `contact` 의 create 로 만든다.
+  Card 3 뒤에 필수 카드가 있는 형 — `tied_thermal`·`thermal`(THRM 1)과 `tiebreak`·`eroding`(Card 4) — 은 `assemble` 도
+  단독 `contact` 와 같은 키(`option`·`nfls`·`sfls`·…·`k`·`ftosa`·…)로 같은 필수 카드를 쓴다(2026-10-24 — 10-23 엔 rc=1 로 거절했고,
+  그 전엔 Card 1-3 만 써서 LS-DYNA 가 다음 줄을 그 카드로 읽는 덱을 냈다). `assemble` 의 contact 항목은 키 순서 · 인라인
+  `slave: { pid: 1 }` · 블록 `pids:` 목록과 상관없이 같게 읽고, 못 읽는 숫자 · 빠진 slave/master 는 rc=1 이다(단일면 형은
+  slave 가 없으면 SURFA 0 = 모든 파트). 예전엔 인라인 · 블록 목록 · 첫 키가 다른 항목을 버려 **접촉이 안 생겼는데 rc=0** 이었다.
   `tiebreak` 은 `option` 을 줘야 하고(매뉴얼 Card 4 의 OPTION · NFLS · SFLS 는 required), option 이 1 이 아니면
   `nfls`·`sfls` 도 줘야 한다(안 주면 0 이라 곧바로 떨어진다). 빠지면 rc=1 이다.
   `tied_mortar` 는 `*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_MORTAR_TIED` 다(예전 `TIED_SURFACE_TO_SURFACE_MORTAR` 는 없는 키워드였다).

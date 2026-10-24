@@ -5,7 +5,11 @@
 #include <sstream>
 #include <stdexcept>
 #include <algorithm>
+#include <cerrno>
+#include <climits>
 #include <cmath>
+#include <cstdlib>
+#include <optional>
 #include <set>
 #include <iostream>
 
@@ -37,6 +41,23 @@ static std::string stripQuotes(const std::string& s) {
     if (s.size() >= 2 && ((s.front()=='"' && s.back()=='"') || (s.front()=='\'' && s.back()=='\'')))
         return s.substr(1, s.size()-2);
     return s;
+}
+
+// 숫자 하나를 끝까지 읽는다 — 못 읽으면 false(조용히 버리지 않는다 · 단독 contact 의 규칙과 같다)
+static bool caParseNum(const std::string& v, double& out) {
+    if (v.empty()) return false;
+    char* end = nullptr;
+    out = std::strtod(v.c_str(), &end);
+    return end && *end == '\0' && std::isfinite(out);
+}
+static bool caParseInt(const std::string& v, int& out) {
+    if (v.empty()) return false;
+    char* end = nullptr;
+    errno = 0;
+    const long l = std::strtol(v.c_str(), &end, 10);
+    if (!end || *end != '\0' || errno == ERANGE || l < INT_MIN || l > INT_MAX) return false;
+    out = static_cast<int>(l);
+    return true;
 }
 
 // PID 목록: "[1, 2, 3]" 또는 "1 2 3" / "1,2,3"
@@ -117,6 +138,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
     bool inLoadCurveList = false;
     int loadCurveKeyIndent = 0;
     bool inContactActionsList = false;
+    std::vector<int>* contactPidList = nullptr;   // slave/master 밑 `pids:` 블록 목록이 열려 있으면 그 자리
     bool inContactActionItem = false;
     int contactActionsKeyIndent = 0;
     bool inContactSlave = false;
@@ -592,25 +614,28 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                 inLoadCurveList = false;
             }
 
-            // --- Contact actions list items: "      - action: create" ---
-            if (inContactActionsList && indent > contactActionsKeyIndent && trimmed[0] == '-' && trimmed.size() >= 2 && trimmed[1] == ' ') {
-                std::string afterDash = trim(trimmed.substr(2));
-                size_t colonPos = afterDash.find(':');
-                if (colonPos != std::string::npos &&
-                    !config.operations.empty() &&
-                    config.operations.back().type == AssemblyOperation::CONTACT) {
-                    std::string key = trim(afterDash.substr(0, colonPos));
-                    // contact·load·boundary·rbe 목록 값은 예전엔 주석을 떼지 않아 '- action: create   # 주석' 을 모르는 action 으로 봤다
-                    std::string val = stripQuotes(trim(stripComment(afterDash.substr(colonPos + 1))));
-                    ContactAction cact;
-                    if (key == "action") cact.action = val;
-                    else if (key == "type") cact.type = val;
-                    config.operations.back().contact.actions.push_back(cact);
-                    inContactActionItem = true;
-                    inContactSlave = false;
-                    inContactMaster = false;
+            // --- Contact actions list items — `- ` 로 시작하는 줄이면 첫 키가 무엇이든 새 항목이다(10-24) ---
+            //   ⚠ 예전엔 첫 키가 action · type 일 때만 읽고 나머지(`- slave: { pid: 1 }` 처럼 첫 키가 다른 항목)는 버렸고, 인라인
+            //   `slave: { pid: 1 }` 을 `stoi` 로 읽다 실패하면 버렸고, `pids:` 밑 블록 목록의 `- 3` 줄을 새 항목 줄로 오인해 버렸다 —
+            //   그 접촉은 slave 가 비어 **아무 말 없이 만들어지지 않았다**(rc 0). 못 읽는 숫자도 조용히 버렸다(`catch(...){}`).
+            if (inContactActionsList && indent > contactActionsKeyIndent && trimmed[0] == '-' &&
+                (trimmed.size() == 1 || trimmed[1] == ' ') &&
+                !config.operations.empty() && config.operations.back().type == AssemblyOperation::CONTACT) {
+                const std::string afterDash = stripQuotes(trim(stripComment(trimmed.substr(1))));
+                if (contactPidList && !afterDash.empty() && afterDash.find(':') == std::string::npos) {
+                    int v = 0;   // `pids:` 밑 블록 목록의 한 항목
+                    if (!caParseInt(afterDash, v))
+                        throw std::runtime_error("[contact] pids 의 항목 '" + afterDash + "' 을 정수로 읽지 못했다");
+                    contactPidList->push_back(v);
+                    continue;
                 }
-                continue;
+                contactPidList = nullptr;
+                config.operations.back().contact.actions.push_back(ContactAction{});
+                inContactActionItem = true;
+                inContactSlave = false;
+                inContactMaster = false;
+                if (afterDash.empty()) continue;   // `-` 만 있는 줄 — 키는 다음 줄부터
+                trimmed = trim(trimmed.substr(1));  // 같은 줄의 첫 키를 아래 하위 키 처리로 넘긴다
             }
 
             // --- Contact action item sub-keys ---
@@ -620,52 +645,90 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                     !config.operations.empty() &&
                     config.operations.back().type == AssemblyOperation::CONTACT &&
                     !config.operations.back().contact.actions.empty()) {
+                    contactPidList = nullptr;
                     std::string key = trim(trimmed.substr(0, colonPos));
+                    // contact·load·boundary·rbe 목록 값은 예전엔 주석을 떼지 않아 '- action: create   # 주석' 을 모르는 action 으로 봤다
                     std::string val = stripQuotes(trim(stripComment(trimmed.substr(colonPos + 1))));
                     auto& cact = config.operations.back().contact.actions.back();
+                    auto bad = [&](bool integer) {
+                        return std::runtime_error("[contact] '" + key + ": " + val + "' — " + (integer ? "정수" : "수") +
+                                                  "로 읽을 수 없다");
+                    };
+                    auto num = [&](double& dst) { if (!caParseNum(val, dst)) throw bad(false); };
+                    auto inum = [&](int& dst) { if (!caParseInt(val, dst)) throw bad(true); };
+                    auto onum = [&](std::optional<double>& dst) { double v = 0; num(v); dst = v; };
+                    auto oint = [&](std::optional<int>& dst) { int v = 0; inum(v); dst = v; };
+                    auto truthy = [](const std::string& v) { return v == "true" || v == "yes" || v == "1"; };
+                    // slave/master 쪽 키 하나 — 블록 꼴(`pid: 3`)과 인라인 꼴(`{ pid: 3, as_segment: true }`)이 같은 규칙
+                    auto sideKey = [&](ContactSide& side, const std::string& k, const std::string& v) {
+                        if (k == "pid") {
+                            if (!caParseInt(v, side.pid))
+                                throw std::runtime_error("[contact] '" + k + ": " + v + "' — 정수로 읽을 수 없다");
+                        } else if (k == "pids") {
+                            if (v.empty()) { side.pids.clear(); contactPidList = &side.pids; return; }   // 블록 목록이 따라온다
+                            side.pids.clear();
+                            std::string t = v;
+                            for (auto& ch : t) if (ch == '[' || ch == ']' || ch == ',') ch = ' ';
+                            std::istringstream iss(t);
+                            std::string tok;
+                            while (iss >> tok) {
+                                int x = 0;
+                                if (!caParseInt(tok, x))
+                                    throw std::runtime_error("[contact] pids 의 항목 '" + tok + "' 을 정수로 읽지 못했다");
+                                side.pids.push_back(x);
+                            }
+                        } else if (k == "as_segment") {
+                            side.asSegment = truthy(v);
+                        } else if (k == "facing") {
+                            side.facing = truthy(v);
+                        }
+                    };
 
                     // Slave/master sub-sections
-                    if (key == "slave") {
-                        inContactSlave = true; inContactMaster = false;
-                        // inline: slave: {pid: 3}  or slave with pid on same line
-                        if (!val.empty()) {
-                            try { cact.slave.pid = std::stoi(val); } catch(...) {}
+                    if (key == "slave" || key == "master") {
+                        inContactSlave = (key == "slave");
+                        inContactMaster = !inContactSlave;
+                        ContactSide& side = inContactSlave ? cact.slave : cact.master;
+                        if (!val.empty() && val.front() == '{') {
+                            // 인라인 꼴 — 괄호 안을 대괄호 밖의 쉼표로 가른다
+                            std::string inner = val.substr(1);
+                            const size_t close = inner.rfind('}');
+                            if (close == std::string::npos)
+                                throw std::runtime_error("[contact] '" + key + ": " + val + "' — 닫는 } 가 없다");
+                            inner = inner.substr(0, close);
+                            std::vector<std::string> pairs;
+                            std::string cur;
+                            int depth = 0;
+                            for (char ch : inner) {
+                                if (ch == '[') ++depth;
+                                if (ch == ']') --depth;
+                                if (ch == ',' && depth == 0) { pairs.push_back(cur); cur.clear(); }
+                                else cur += ch;
+                            }
+                            if (!trim(cur).empty()) pairs.push_back(cur);
+                            for (const auto& pr : pairs) {
+                                const size_t c2 = pr.find(':');
+                                if (c2 == std::string::npos) continue;
+                                sideKey(side, trim(pr.substr(0, c2)), stripQuotes(trim(pr.substr(c2 + 1))));
+                            }
+                            inContactSlave = inContactMaster = false;
+                        } else if (!val.empty()) {
+                            sideKey(side, "pid", val);   // `slave: 3`
                         }
-                    } else if (key == "master") {
-                        inContactMaster = true; inContactSlave = false;
-                        if (!val.empty()) {
-                            try { cact.master.pid = std::stoi(val); } catch(...) {}
-                        }
-                    } else if (key == "pid") {
-                        if (inContactSlave) { try { cact.slave.pid = std::stoi(val); } catch(...) {} }
-                        else if (inContactMaster) { try { cact.master.pid = std::stoi(val); } catch(...) {} }
-                    } else if (key == "as_segment") {
-                        bool bval = (val == "true" || val == "yes" || val == "1");
-                        if (inContactSlave) cact.slave.asSegment = bval;
-                        else if (inContactMaster) cact.master.asSegment = bval;
-                    } else if (key == "facing") {
-                        bool bval = (val == "true" || val == "yes" || val == "1");
-                        if (inContactSlave) cact.slave.facing = bval;
-                        else if (inContactMaster) cact.master.facing = bval;
-                    } else if (key == "pids" && !val.empty() && val.front() == '[' && val.back() == ']') {
-                        std::string inner = val.substr(1, val.size()-2);
-                        std::istringstream iss(inner);
-                        std::string tok;
-                        std::vector<int>& target = inContactSlave ? cact.slave.pids : cact.master.pids;
-                        while (std::getline(iss, tok, ',')) {
-                            try { target.push_back(std::stoi(trim(tok))); } catch(...) {}
-                        }
+                    } else if (key == "pid" || key == "pids" || key == "as_segment" || key == "facing") {
+                        if (inContactSlave) sideKey(cact.slave, key, val);
+                        else if (inContactMaster) sideKey(cact.master, key, val);
                     } else if (key == "action") cact.action = val;
                     else if (key == "type" || key == "contact_type") cact.type = val;
-                    else if (key == "friction") { try { cact.friction = std::stod(val); } catch(...) {} }
+                    else if (key == "friction") num(cact.friction);
                     else if (key == "title") cact.title = val;
                     else if (key == "title_prefix") cact.titlePrefix = val;
                     else if (key == "scope") cact.scope = val;
-                    else if (key == "tolerance") { try { cact.tolerance = std::stod(val); } catch(...) {} }
-                    else if (key == "normal_angle") { try { cact.normalAngle = std::stod(val); } catch(...) {} }
-                    else if (key == "auto_create") cact.autoCreate = (val == "true" || val == "yes" || val == "1");
+                    else if (key == "tolerance") num(cact.tolerance);
+                    else if (key == "normal_angle") num(cact.normalAngle);
+                    else if (key == "auto_create") cact.autoCreate = truthy(val);
                     else if (key == "skip_existing") cact.skipExisting = val;
-                    else if (key == "subtract_existing") cact.subtractExisting = (val == "true" || val == "yes" || val == "1");
+                    else if (key == "subtract_existing") cact.subtractExisting = truthy(val);
                     else if (key == "include" && !val.empty() && val.front() == '[' && val.back() == ']') {
                         std::string inner = val.substr(1, val.size()-2);
                         std::istringstream iss(inner);
@@ -677,6 +740,22 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                         std::string tok;
                         while (std::getline(iss, tok, ',')) cact.excludeKeys.push_back(trim(tok));
                     }
+                    // 필수 카드(TIEBREAK Card 4 · THRM 1) — 단독 contact 와 같은 키 · 같은 규칙(ct_applyMandatory, 10-24)
+                    else if (key == "option") oint(cact.card.option);
+                    else if (key == "nfls") onum(cact.card.nfls);
+                    else if (key == "sfls") onum(cact.card.sfls);
+                    else if (key == "param") onum(cact.card.param);
+                    else if (key == "eraten") onum(cact.card.eraten);
+                    else if (key == "erates") onum(cact.card.erates);
+                    else if (key == "ct2cn") onum(cact.card.ct2cn);
+                    else if (key == "k") onum(cact.card.k);
+                    else if (key == "frad") onum(cact.card.frad);
+                    else if (key == "h0") onum(cact.card.h0);
+                    else if (key == "lmin") onum(cact.card.lmin);
+                    else if (key == "lmax") onum(cact.card.lmax);
+                    else if (key == "ftosa" || key == "chlm") onum(cact.card.ftosa);   // chlm — 옛 이름(3D 접촉에서 이 칸은 FTOSA)
+                    else if (key == "bc_flag" || key == "bc_flg") oint(cact.card.bcflag);
+                    else if (key == "algo") oint(cact.card.algo);
                     continue;
                 }
             }

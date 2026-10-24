@@ -1318,6 +1318,89 @@ static void ct_appendOptionalCards(std::ostringstream& ss, const ContactDef& d) 
     if (maxCard >= 7) ss << ct_formatCardG(d) << "\n";
 }
 
+std::string ct_writeMandatoryCards(const ContactDef& d) {
+    std::ostringstream ss;
+    // Card 4 — 형이 요구하는 필수 카드. ⚠ 선택 카드보다 **앞**이다(매뉴얼 카드 순서). 예전엔 THRM · TIEBREAK 카드를
+    // 선택 카드 뒤에 써서, 선택 카드가 있으면 LS-DYNA 가 Card A 를 Card 4 로 읽었다.
+    if (d.hasTiebreak) {
+        // AUTOMATIC_…_TIEBREAK: OPTION NFLS SFLS PARAM ERATEN ERATES CT2CN
+        ss << "$#  option      nfls      sfls     param    eraten    erates     ct2cn\n";
+        ss << ct_int(d.tbOption) << ct_real(d.tbNfls, "%10.3g") << ct_real(d.tbSfls, "%10.3g")
+           << ct_real(d.tbParam, "%10.3g") << ct_real(d.tbEraten, "%10.3g") << ct_real(d.tbErates, "%10.3g")
+           << ct_real(d.tbCt2cn, "%10.3g") << "\n";
+    }
+    if (d.hasEroding) {
+        // ERODING_*: ISYM EROSOP IADJ — 매뉴얼 기본(0 · 1 · 0)
+        ss << "$#    isym    erosop      iadj\n";
+        ss << ct_int(0) << ct_int(1) << ct_int(0) << "\n";
+    }
+    // THRM 1 (_THERMAL): K FRAD H0 LMIN LMAX FTOSA BC_FLG ALGO — Card 4 뒤 · 선택 카드 앞
+    if (d.hasThermal) {
+        ss << "$#       k      frad        h0      lmin      lmax     ftosa    bc_flg      algo\n";
+        ss << ct_real(d.thK, "%10.3g") << ct_real(d.thFrad, "%10.3g") << ct_real(d.thH0, "%10.3g")
+           << ct_real(d.thLmin, "%10.3g") << ct_real(d.thLmax, "%10.3g") << ct_real(d.thFtosa, "%10.3g")
+           << ct_int(d.thBcflag) << ct_int(d.thAlgo) << "\n";
+    }
+    return ss.str();
+}
+
+bool ct_applyMandatory(const ct_MandatoryKeys& m, const std::string& keyword, ContactDef& d, std::string& err) {
+    const ct_CardSpec sp = ct_cardSpec(keyword);
+    const std::string kw = "*CONTACT_" + kw_upper(keyword);
+    if (!sp.known) { err = kw + " — " + sp.why + ". 이 키워드의 필수 카드를 KooRemapper 는 쓰지 못한다"; return false; }
+    if (sp.orfr > 0) { err = kw + " — ORFR 1-4(직교 마찰) 카드를 KooRemapper 는 쓰지 못한다"; return false; }
+    if (sp.tiebreakAuto) {
+        // 매뉴얼 Card 4 의 OPTION · NFLS · SFLS 는 required(기본값 없음, V68117-68150).
+        if (!m.option) {
+            err = kw + " — option 을 주어야 한다(매뉴얼 Card 4 의 OPTION · NFLS · SFLS 는 required). "
+                  "1 = 닿은 절점이 영구히 붙는다(파손 없음) · 2 = 처음 닿은 절점이 파손 때까지 붙는다 · "
+                  "4 = 같고 마찰 미끄럼 허용 · 9/11 = 응집 혼합 모드 …";
+            return false;
+        }
+        const int opt = *m.option;
+        if (opt == 13 || opt == 14) { err = kw + " — OPTION 13/14 는 Card 4.1b · 4.2b 가 더 필요하다(지원하지 않는다)"; return false; }
+        // 매뉴얼 Remark 2 — SOFT=2 는 tiebreak 에 구현돼 있지 않고, SINGLE_SURFACE · GENERAL TIEBREAK 는 OPTION 1~5 만.
+        if (m.soft && *m.soft == 2) { err = kw + " — SOFT=2(세그먼트 대 세그먼트)는 tiebreak 에 구현돼 있지 않다(매뉴얼 Remark 2)"; return false; }
+        {
+            const std::string ku = kw_upper(keyword);
+            const bool singleOrGeneral = ku.find("SINGLE_SURFACE_TIEBREAK") != std::string::npos ||
+                                         ku.find("GENERAL_TIEBREAK") != std::string::npos;
+            if (singleOrGeneral && (opt < 1 || opt > 5)) {
+                err = kw + " — SINGLE_SURFACE · GENERAL TIEBREAK 은 OPTION 1~5 만 지원된다(매뉴얼 Remark 2)"; return false;
+            }
+        }
+        if (sp.damping && (opt == 9 || opt == -9 || opt == 11 || opt == -11)) {
+            err = kw + " — DAMPING 과 OPTION ±9/±11 은 Card 4.1a 가 더 필요하다(지원하지 않는다)"; return false;
+        }
+        // 파손 OPTION 에 응력을 안 주면 0 이라 곧바로 떨어진다 — 받아야 쓴다.
+        if (opt != 1 && (!m.nfls || !m.sfls)) {
+            err = kw + " — OPTION " + std::to_string(opt) + " 은 파손 응력을 쓴다: nfls · sfls 를 주어야 한다(안 주면 0 이라 곧바로 떨어진다)";
+            return false;
+        }
+        d.hasTiebreak = true;
+        d.tbOption = opt;
+        if (m.nfls) d.tbNfls = *m.nfls;
+        if (m.sfls) d.tbSfls = *m.sfls;
+        if (m.param) d.tbParam = *m.param;
+        if (m.eraten) d.tbEraten = *m.eraten;
+        if (m.erates) d.tbErates = *m.erates;
+        if (m.ct2cn) d.tbCt2cn = *m.ct2cn;
+    }
+    if (sp.eroding) d.hasEroding = true;
+    if (sp.thrm > 0) {
+        d.hasThermal = true;
+        if (m.k) d.thK = *m.k;
+        if (m.frad) d.thFrad = *m.frad;
+        if (m.h0) d.thH0 = *m.h0;
+        if (m.lmin) d.thLmin = *m.lmin;
+        if (m.lmax) d.thLmax = *m.lmax;
+        if (m.ftosa) d.thFtosa = *m.ftosa;
+        if (m.bcflag) d.thBcflag = *m.bcflag;
+        if (m.algo) d.thAlgo = *m.algo;
+    }
+    return true;
+}
+
 std::string ct_generateContact(const ContactDef& d) {
     std::ostringstream ss;
     // ⚠ **`*CONTACT_*` 에는 `_TITLE` 옵션이 없다.** 제목을 붙이는 옵션은 `_ID` 이고, 그 카드는
@@ -1355,27 +1438,8 @@ std::string ct_generateContact(const ContactDef& d) {
     ss << ct_real(d.sfsa, "%10.2f") << ct_real(d.sfsb, "%10.2f") << ct_real(d.sast, "%10.2f") << ct_real(d.sbst, "%10.2f")
        << ct_real(d.sfsat, "%10.2f") << ct_real(d.sfsbt, "%10.2f") << ct_real(d.fsf, "%10.2f") << ct_real(d.vsf, "%10.2f") << "\n";
 
-    // Card 4 — 형이 요구하는 필수 카드. ⚠ 선택 카드보다 **앞**이다(매뉴얼 카드 순서). 예전엔 THRM · TIEBREAK 카드를
-    // 선택 카드 뒤에 써서, 선택 카드가 있으면 LS-DYNA 가 Card A 를 Card 4 로 읽었다.
-    if (d.hasTiebreak) {
-        // AUTOMATIC_…_TIEBREAK: OPTION NFLS SFLS PARAM ERATEN ERATES CT2CN
-        ss << "$#  option      nfls      sfls     param    eraten    erates     ct2cn\n";
-        ss << ct_int(d.tbOption) << ct_real(d.tbNfls, "%10.3g") << ct_real(d.tbSfls, "%10.3g")
-           << ct_real(d.tbParam, "%10.3g") << ct_real(d.tbEraten, "%10.3g") << ct_real(d.tbErates, "%10.3g")
-           << ct_real(d.tbCt2cn, "%10.3g") << "\n";
-    }
-    if (d.hasEroding) {
-        // ERODING_*: ISYM EROSOP IADJ — 매뉴얼 기본(0 · 1 · 0)
-        ss << "$#    isym    erosop      iadj\n";
-        ss << ct_int(0) << ct_int(1) << ct_int(0) << "\n";
-    }
-    // THRM 1 (_THERMAL): K FRAD H0 LMIN LMAX FTOSA BC_FLG ALGO — Card 4 뒤 · 선택 카드 앞
-    if (d.hasThermal) {
-        ss << "$#       k      frad        h0      lmin      lmax     ftosa    bc_flg      algo\n";
-        ss << ct_real(d.thK, "%10.3g") << ct_real(d.thFrad, "%10.3g") << ct_real(d.thH0, "%10.3g")
-           << ct_real(d.thLmin, "%10.3g") << ct_real(d.thLmax, "%10.3g") << ct_real(d.thFtosa, "%10.3g")
-           << ct_int(d.thBcflag) << ct_int(d.thAlgo) << "\n";
-    }
+    // Card 4 · THRM 1 — 형이 요구하는 필수 카드(선택 카드보다 앞)
+    ss << ct_writeMandatoryCards(d);
 
     // Optional Cards A~G
     ct_appendOptionalCards(ss, d);

@@ -2291,11 +2291,16 @@ FORMING_NODES_TO_SURFACE
 
 `assemble` 도 같은 문구를 찍습니다(그 파일 관례대로 접두어는 `[WARNING] `). 즉 **오타는 LS-DYNA 가 잡습니다.**
 
-> **`assemble` 의 contact 는 Card 1-3 만 씁니다**: 약칭 표는 단독 `contact` 와 같습니다(2026-09-18 — 예전엔 `assemble` 에만
-> `tied_thermal`/`thermal`/`tiebreak` 가 없어 `*CONTACT_THERMAL` 이 나갔습니다). 하지만 Card 3 뒤에 필수 카드가 있는 형 —
-> `tied_thermal`/`thermal`(THRM 1) · `tiebreak`/`eroding`(Card 4) — 은 `assemble` 에서 `[ERROR] [contact] … 필수 카드(…)` 로
-> **rc=1** 입니다(2026-10-23 — 예전엔 Card 1-3 만 써서 LS-DYNA 가 다음 줄을 그 카드로 읽는 덱을 냈습니다).
-> 이런 접촉은 **단독 `contact` 의 create** 로 만드세요.
+> **`assemble` 의 contact 도 단독 `contact` 와 같은 카드를 씁니다**: 약칭 표가 같고(2026-09-18 — 예전엔 `assemble` 에만
+> `tied_thermal`/`thermal`/`tiebreak` 가 없어 `*CONTACT_THERMAL` 이 나갔습니다), Card 3 뒤에 필수 카드가 있는 형 —
+> `tied_thermal`/`thermal`(THRM 1) · `tiebreak`/`eroding`(Card 4) — 도 같은 키(`option` · `nfls` · `sfls` · … · `k` · `ftosa` · …)로
+> 같은 필수 카드를 같은 규칙으로 씁니다(2026-10-24 — 10-23 엔 rc=1 로 거절했고, 그 전엔 Card 1-3 만 써서 LS-DYNA 가 다음 줄을
+> 그 카드로 읽는 덱을 냈습니다). 선택 카드(Card A–G)는 `assemble` 에서 쓰지 않습니다 — 그런 칸은 단독 `contact` 로 주세요.
+>
+> `assemble` 의 contact 항목은 키 순서 · 인라인 `slave: { pid: 1 }` · 블록 `pids:` 목록과 상관없이 같게 읽고, 못 읽는 숫자 ·
+> 빠진 slave/master 는 **rc=1** 입니다(단일면 형은 slave 가 없으면 SURFA 0 = 모든 파트 — Vol_I). 2026-10-24 전에는 인라인 꼴 ·
+> 블록 목록 · 첫 키가 action/type 이 아닌 항목을 버려 **접촉이 만들어지지 않았는데 rc 0** 이었습니다. 단독 `contact` 도 단일면이
+> 아닌 형에 slave · master 가 없으면 rc=1 입니다(예전엔 SSID · MSID 0 인 접촉을 썼습니다).
 
 #### `slave` / `master` 의 `pids` 표기
 

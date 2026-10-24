@@ -14450,18 +14450,22 @@ static std::string ca_getContactKeyword(const std::string& type) {
     return keyword;
 }
 
-// 형이 요구하는 필수 카드(Card 4 · THRM · ORFR)가 있으면 assemble 은 그 형을 쓰지 않는다 — Card 1-3 만 쓰기 때문이다.
-// ⚠ 예전엔 tied_thermal · tiebreak · eroding 을 골라도 Card 1-3 만 써서 필수 카드 없는 키워드를 냈다(rc 0).
-static bool ca_cardsSupported(const std::string& keyword) {
-    const ct_CardSpec sp = ct_cardSpec(keyword);
-    if (sp.known && sp.card4 == 0 && sp.thrm == 0 && sp.orfr == 0) return true;
-    const std::string need = !sp.known ? sp.why : (sp.thrm ? "THRM 1" : (sp.orfr ? "ORFR 1-4" : "Card 4"));
-    std::cout << "[ERROR] [contact] *CONTACT_" << keyword << " 는 Card 1-3 뒤에 필수 카드(" << need
-              << ")가 필요한데 assemble 의 contact 는 Card 1-3 만 쓴다 — 단독 `contact` 의 create 로 만든다\n";
-    return false;
+// 형이 요구하는 필수 카드(TIEBREAK Card 4 · ERODING Card 4 · THRM 1) — 단독 contact 와 같은 규칙 · 같은 글자
+// (`ct_applyMandatory` · `ct_writeMandatoryCards`, 10-24). Card 1-3(`ca_generateContact`) 바로 뒤에 붙인다.
+// 쓸 수 없는 형(필수 카드 꼴을 모르는 형 · ORFR · tiebreak 의 OPTION 이 없거나 13/14 …)이면 까닭을 찍고 false.
+// ⚠ 10-23 엔 필수 카드가 있는 형을 모두 거절했고, 그 전엔 Card 1-3 만 써서 필수 카드 없는 키워드를 냈다(rc 0).
+static bool ca_mandatoryCards(const ContactAction& act, const std::string& keyword, std::string& cards) {
+    ContactDef d;
+    std::string err;
+    if (!ct_applyMandatory(act.card, keyword, d, err)) {
+        std::cout << "[ERROR] [contact] " << err << "\n";
+        return false;
+    }
+    cards = ct_writeMandatoryCards(d);
+    return true;
 }
 
-// Generate *CONTACT card (Cards 1-3 only, no optional cards)
+// Generate *CONTACT card (Cards 1-3 only, no optional cards) — 필수 카드(Card 4 · THRM 1)는 부르는 쪽이 `ca_mandatoryCards` 로 붙인다
 static std::string ca_generateContact(const std::string& contactType,
         const std::string& title,
         int ssid, int msid, int sstyp, int mstyp,
@@ -14672,7 +14676,8 @@ bool ModelAssembler::applyContact(const ContactOperation& op) {
         if (act.action == "create") {
             // --- CREATE ---
             std::string contactKw = ca_getContactKeyword(act.type);
-            if (!ca_cardsSupported(contactKw)) return false;
+            std::string mandCards;   // 필수 카드(없는 형이면 빈 글자)
+            if (!ca_mandatoryCards(act, contactKw, mandCards)) return false;
             int ssid = 0, msid = 0, sstyp = 0, mstyp = 0;
 
             // Resolve slave side
@@ -14684,6 +14689,16 @@ bool ModelAssembler::applyContact(const ContactOperation& op) {
             std::vector<int> masterPids;
             if (act.master.pid > 0) masterPids.push_back(act.master.pid);
             if (!act.master.pids.empty()) masterPids = act.master.pids;
+
+            // slave 가 없으면 — 단일면 형은 SURFA 0 = 모든 파트(Vol_I *CONTACT Card 1 「EQ.0: Includes all parts in the case of
+            // single surface contact types」), 그 밖의 형은 만들 수 없다. ⚠ 예전엔 둘 다 **아무 말 없이 만들지 않았다**(rc 0) —
+            // 인라인 `slave: { pid: 1 }` 을 못 읽던 때 그 접촉이 그렇게 사라졌다(10-24 실측).
+            const bool isSingle = contactKw.find("SINGLE_SURFACE") != std::string::npos;
+            if (!isSingle && (slavePids.empty() || masterPids.empty())) {
+                std::cout << "[ERROR] [contact] create: *CONTACT_" << contactKw << " 에 " << (slavePids.empty() ? "slave" : "master")
+                          << "(pid · pids)가 없다 — 단일면 형이 아니면 둘 다 주어야 한다\n";
+                return false;
+            }
 
             bool useFacing = (act.slave.facing && act.master.facing &&
                               slavePids.size() == 1 && masterPids.size() == 1);
@@ -14752,13 +14767,13 @@ bool ModelAssembler::applyContact(const ContactOperation& op) {
                 if (!masterPids.empty()) { msid = masterPids[0]; mstyp = 3; }
             }
 
-            if (ssid > 0) {
+            if (ssid > 0 || (isSingle && slavePids.empty())) {   // 단일면 · slave 없음 = SURFA 0(모든 파트)
                 std::string title = act.title;
                 if (title.empty() && !slavePids.empty() && !masterPids.empty()) {
                     title = "PID" + std::to_string(slavePids[0]) + "_to_PID" + std::to_string(masterPids[0]);
                 }
                 insertBlocks.push_back(ca_generateContact(contactKw, title,
-                    ssid, msid, sstyp, mstyp, act.friction, nextContactId++));
+                    ssid, msid, sstyp, mstyp, act.friction, nextContactId++) + mandCards);
                 contactCount++;
                 std::cout << "[contact] Created " << contactKw
                           << " (slave=" << ssid << " master=" << msid << ")\n";
@@ -14797,12 +14812,13 @@ bool ModelAssembler::applyContact(const ContactOperation& op) {
                         "Detect_Master_PID" + std::to_string(act.master.pid)));
 
                     std::string contactKw = ca_getContactKeyword(act.type);
-                    if (!ca_cardsSupported(contactKw)) return false;
+                    std::string mandCards;   // 필수 카드(없는 형이면 빈 글자)
+                    if (!ca_mandatoryCards(act, contactKw, mandCards)) return false;
                     std::string title = act.titlePrefix.empty() ? "" :
                         act.titlePrefix + "_PID" + std::to_string(act.slave.pid) +
                         "_PID" + std::to_string(act.master.pid);
                     insertBlocks.push_back(ca_generateContact(contactKw, title,
-                        sid1, sid2, 0, 0, act.friction, nextContactId++));
+                        sid1, sid2, 0, 0, act.friction, nextContactId++) + mandCards);
                     contactCount++;
                 }
                 continue;
@@ -14867,12 +14883,13 @@ bool ModelAssembler::applyContact(const ContactOperation& op) {
                             "Detect_Master_PID" + std::to_string(pidB)));
 
                         std::string contactKw = ca_getContactKeyword(act.type);
-                        if (!ca_cardsSupported(contactKw)) return false;
+                        std::string mandCards;   // 필수 카드(없는 형이면 빈 글자)
+                        if (!ca_mandatoryCards(act, contactKw, mandCards)) return false;
                         std::string title;
                         if (!act.titlePrefix.empty())
                             title = act.titlePrefix + "_PID" + std::to_string(pidA) + "_PID" + std::to_string(pidB);
                         insertBlocks.push_back(ca_generateContact(contactKw, title,
-                            sid1, sid2, 0, 0, act.friction, nextContactId++));
+                            sid1, sid2, 0, 0, act.friction, nextContactId++) + mandCards);
                         contactCount++;
                     }
                 }

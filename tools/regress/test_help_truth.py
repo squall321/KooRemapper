@@ -373,7 +373,8 @@ def main():
           "경고" in ctc and "type" in ctc, [l for l in ctc.splitlines() if "type" in l])
     open(os.path.join(tmp, "ct_odd.yaml"), "w").write(
         "model: box.k\noutput: ct_odd.k\ncontacts:\n  - action: create\n"
-        "    type: automatic_nodes_to_surface_bogus\n    slave: { pid: 1 }\n")
+        "    type: automatic_nodes_to_surface_bogus\n    slave: { pid: 1 }\n    master: { pid: 1 }\n")
+    # ⚠ master 를 준다 — 단일면이 아닌 형에 master 가 없으면 10-24 부터 rc=1 이다(예전엔 MSID 0 인 접촉을 썼다).
     rc, out = run(binary, tmp, "contact", "ct_odd.yaml")
     check("contact: 모르는 create type 은 rc=0 + 경고 + 그대로 기록",
           rc == 0 and os.path.exists(os.path.join(tmp, "ct_odd.k")) and

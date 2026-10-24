@@ -39,6 +39,9 @@
        읽는 덱을 냈다. 이제 assemble 은 그 형을 [ERROR] 로 거절하고 단독 contact 의 create 로 보낸다.
        tied_mortar 는 매뉴얼에 없는 *CONTACT_TIED_SURFACE_TO_SURFACE_MORTAR 를 냈다 — 이제
        *CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_MORTAR_TIED(양쪽 다).
+       (10-24) assemble 도 그 필수 카드를 단독과 같은 정본(ct_applyMandatory · ct_writeMandatoryCards)으로 쓴다 — 같은 키워드에
+       같은 필수 카드 줄이 나와야 한다. assemble 의 contact 항목 읽기도 고쳤다(H6b) — 인라인 `slave: { pid: 1 }` · 블록 `pids:`
+       목록 · 첫 키가 action/type 이 아닌 항목을 조용히 버려 접촉이 **만들어지지 않고** rc 0 이었고, 못 읽는 숫자도 버렸다.
   [H7] legacy help 의 거짓 문구 — boundary 가 '*BOUNDARY_SPC_NODE, *RIGIDWALL_PLANAR 를 넣는다' 고
        적었지만 실제 산출은 *SET_NODE_LIST + *BOUNDARY_SPC_SET 이고 *RIGIDWALL 은 소스 어디에도 없다.
        select 허용값도 'direction | all' 이라고 적었지만 실제로는 direction | all | set 이다(set 은 set_id 필수).
@@ -89,6 +92,24 @@ def find_gmsh(argv):
         return os.path.abspath(env)
     cand = os.path.join(REPO, "dist", "gmsh", "gmsh")
     return cand if os.path.isfile(cand) else ""
+
+
+def mandatory_card(path, nth=3):
+    """첫 *CONTACT 블록의 카드 줄 하나 — ID 카드(`_ID`) 뒤에서 nth 번째(0 = Card 1 · 3 = Card 3 뒤 첫 카드). 없으면 None."""
+    if not os.path.exists(path):
+        return None
+    lines = open(path, encoding="utf-8", errors="replace").read().splitlines()
+    for i, l in enumerate(lines):
+        if l.startswith("*CONTACT"):
+            cards = []
+            for m in lines[i + 1:]:
+                if m.startswith("*"):
+                    break
+                if not m.startswith("$"):
+                    cards.append(m)
+            k = (1 if l.strip().upper().endswith("_ID") else 0) + nth
+            return cards[k] if k < len(cards) else None
+    return None
 
 
 def first_contact_kw(path):
@@ -353,8 +374,8 @@ def body(binary, gmsh, tmp):
           rc == 1 and "unsupported mode 'bogus'" in out, f"rc={rc} {out[-250:]}")
 
     # ── H6. contact 별칭 단독 == assemble ─────────────────────────────────────
-    print("[H6] contact create 의 짧은 이름이 단독과 assemble 에서 같은 키워드를 낸다")
-    # 값 = (키워드, Card 3 뒤 필수 카드). 필수 카드가 있는 형은 assemble 이 [ERROR] 로 거절한다(10-23).
+    print("[H6] contact create 의 짧은 이름이 단독과 assemble 에서 같은 키워드 · 같은 필수 카드를 낸다")
+    # 값 = (키워드, Card 3 뒤 필수 카드). 필수 카드가 있는 형은 assemble 도 단독과 같은 줄을 쓴다(10-24 — 10-23 엔 거절했다).
     ALIASES = {
         "auto": ("*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE", None),
         "automatic": ("*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE", None),
@@ -368,34 +389,72 @@ def body(binary, gmsh, tmp):
         "eroding": ("*CONTACT_ERODING_SURFACE_TO_SURFACE", "Card 4"),
         "forming": ("*CONTACT_FORMING_SURFACE_TO_SURFACE", None),
     }
-    # tiebreak 은 Card 4 의 OPTION · NFLS · SFLS(required)를 받아야 만든다(10-23).
-    TB = "    option: 2\n    nfls: 10\n    sfls: 20\n"
+    # tiebreak 은 Card 4 의 OPTION · NFLS · SFLS(required)를 받아야 만든다(10-23). 열 접촉엔 THRM 1 칸 몇 개를 준다.
+    EXTRA = {"tiebreak": ["option: 2", "nfls: 10", "sfls: 20"], "tied_thermal": ["k: 0.5", "ftosa: 0.25"],
+             "thermal": ["k: 0.5"]}
     for alias, (kw, need) in ALIASES.items():
+        ex = EXTRA.get(alias, [])
         write(os.path.join(data, f"cs_{alias}.yaml"),
               f"model: box.k\noutput: cs_{alias}.k\ncontacts:\n  - action: create\n"
-              f"    type: {alias}\n    slave: {{ pid: 1 }}\n    master: {{ pid: 1 }}\n" +
-              (TB if alias == "tiebreak" else ""))
+              f"    type: {alias}\n    slave: {{ pid: 1 }}\n    master: {{ pid: 1 }}\n" + "".join("    %s\n" % e for e in ex))
         write(os.path.join(data, f"ca_{alias}.yaml"),
               f"base_model: box.k\noutput: ca_{alias}\noperations:\n  - type: contact\n"
               f"    contacts:\n      - action: create\n        type: {alias}\n"
-              "        slave:\n          pid: 1\n        master:\n          pid: 1\n")
+              "        slave:\n          pid: 1\n        master:\n          pid: 1\n" + "".join("        %s\n" % e for e in ex))
         rs, os_ = run(binary, data, "contact", f"cs_{alias}.yaml")
         ra, oa = run(binary, data, "assemble", f"ca_{alias}.yaml")
         a = first_contact_kw(os.path.join(data, f"cs_{alias}.k"))
         b = first_contact_kw(os.path.join(data, f"ca_{alias}.k"))
-        if need is None:
-            check(f"contact: '{alias}' → 단독·assemble 둘 다 {kw}",
-                  rs == 0 and ra == 0 and a.startswith(kw) and a == b,
-                  f"alone={a!r} asm={b!r}")
-        else:
-            check(f"contact: '{alias}' → 단독은 {kw}",
-                  rs == 0 and a.startswith(kw), f"rc={rs} alone={a!r} {os_[-200:]}")
-            check(f"contact: '{alias}' → assemble 은 {need} 를 못 쓰니 [ERROR] rc=1 (덱 없음)",
-                  ra == 1 and "[ERROR] [contact]" in oa and need in oa and not b,
-                  f"rc={ra} asm={b!r} {oa[-250:]}")
+        check(f"contact: '{alias}' → 단독·assemble 둘 다 {kw}",
+              rs == 0 and ra == 0 and a.startswith(kw) and a == b,
+              f"rc={rs}/{ra} alone={a!r} asm={b!r} {oa[-200:]}")
+        if need is not None:
+            ma = mandatory_card(os.path.join(data, f"cs_{alias}.k"))
+            mb = mandatory_card(os.path.join(data, f"ca_{alias}.k"))
+            check(f"contact: '{alias}' → {need} 줄이 단독과 assemble 에서 같다",
+                  ma is not None and ma == mb, f"alone={ma!r} asm={mb!r}")
         check(f"contact: '{alias}' 는 아는 키워드라 경고가 없다 (단독·assemble 모두)",
               "not a known contact keyword" not in os_ and
               "not a known contact keyword" not in oa)
+    write(os.path.join(data, "ca_tb_noopt.yaml"),
+          "base_model: box.k\noutput: ca_tb_noopt\noperations:\n  - type: contact\n    contacts:\n"
+          "      - action: create\n        type: tiebreak\n        slave:\n          pid: 1\n        master:\n          pid: 1\n")
+    ra, oa = run(binary, data, "assemble", "ca_tb_noopt.yaml")
+    check("contact: assemble 의 tiebreak 도 option 이 없으면 단독과 같은 까닭으로 rc=1",
+          ra == 1 and "option 을 주어야 한다" in oa, f"rc={ra} {oa[-250:]}")
+
+    print("[H6b] assemble 의 contact 항목 읽기 — 꼴과 상관없이 같은 접촉 · 못 읽는 것은 rc=1")
+    def asm(name, items):
+        write(os.path.join(data, name + ".yaml"),
+              "base_model: box.k\noutput: %s\noperations:\n  - type: contact\n    contacts:\n%s" % (name, items))
+        r, o = run(binary, data, "assemble", name + ".yaml")
+        k = os.path.join(data, name + ".k")
+        n = sum(1 for l in open(k, encoding="utf-8", errors="replace") if l.startswith("*CONTACT")) if os.path.exists(k) else -1
+        return r, o, n
+    base_n = sum(1 for l in open(os.path.join(data, "box.k"), encoding="utf-8", errors="replace") if l.startswith("*CONTACT"))
+    r, o, n = asm("cb_inline", "      - action: create\n        type: tied\n        slave: { pid: 1 }\n        master: { pid: 1 }\n")
+    check("H6b-1 인라인 `slave: { pid: 1 }` 로도 접촉을 만든다(예전엔 rc 0 인데 안 만들었다)", r == 0 and n == base_n + 1, (r, n, o[-200:]))
+    r, o, n = asm("cb_first", "      - slave: { pid: 1 }\n        master: { pid: 1 }\n        action: create\n        type: tied\n")
+    check("H6b-2 첫 키가 action · type 이 아닌 항목도 읽는다", r == 0 and n == base_n + 1, (r, n, o[-200:]))
+    r, o, n = asm("cb_block", "      - action: create\n        type: tied\n        slave:\n          pids:\n            - 1\n"
+                              "        master:\n          pid: 1\n")
+    check("H6b-3 블록 꼴 `pids:` 목록(`- 1`)을 읽는다", r == 0 and n == base_n + 1, (r, n, o[-200:]))
+    r, o, n = asm("cb_badnum", "      - action: create\n        type: tied\n        slave:\n          pid: 1\n"
+                               "        master:\n          pid: 1\n        friction: 0.3x\n")
+    check("H6b-4 못 읽는 숫자(friction: 0.3x)는 rc=1 과 그 키", r == 1 and "friction: 0.3x" in o, (r, o[-200:]))
+    r, o, n = asm("cb_nomaster", "      - action: create\n        type: tied\n        slave:\n          pid: 1\n")
+    check("H6b-5 단일면이 아닌 형에 master 가 없으면 rc=1(예전엔 MSID 0 인 접촉)", r == 1 and "master(pid · pids)가 없다" in o,
+          (r, o[-200:]))
+    r, o, n = asm("cb_single_all", "      - action: create\n        type: single\n")
+    k = os.path.join(data, "cb_single_all.k")
+    single_card1 = mandatory_card(k, nth=0)
+    check("H6b-6 단일면 형은 slave 가 없으면 SURFA 0 = 모든 파트(Vol_I)로 만든다(예전엔 안 만들었다)",
+          r == 0 and n == base_n + 1 and single_card1 is not None and single_card1[:10].strip() == "0", (r, n, single_card1))
+    write(os.path.join(data, "cs_nomaster.yaml"),
+          "model: box.k\noutput: cs_nomaster.k\ncontacts:\n  - action: create\n    type: tied\n    slave: { pid: 1 }\n")
+    r, o = run(binary, data, "contact", "cs_nomaster.yaml")
+    check("H6b-7 단독 contact 도 master 가 없으면 rc=1(예전엔 MSID 0 인 접촉)", r == 1 and "master(pid · pids)가 없다" in o,
+          (r, o[-200:]))
     # 대시는 밑줄과 같게 푼다 (단독이 쓰던 규칙)
     write(os.path.join(data, "cs_dash.yaml"),
           "model: box.k\noutput: cs_dash.k\ncontacts:\n  - action: create\n"

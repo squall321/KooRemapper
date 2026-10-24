@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 #include <array>
+#include <optional>
 
 // Knowledge graph (lat.md):
 //   @lat: [[modules/commands]]
@@ -132,3 +133,12 @@ struct SetDef {
     int startLine=0, endLine=0;
 };
 
+// 형이 요구하는 필수 카드(TIEBREAK Card 4 · THRM 1)의 YAML 키 — 준 것만 든다(std::optional).
+// 단독 `contact` 와 assemble 의 contact 가 같은 규칙(`ct_applyMandatory`)으로 쓴다(10-24 — 예전엔 assemble 이 그 형을 거절했다).
+struct ct_MandatoryKeys {
+    std::optional<int> option;                                  // Card 4 OPTION — tiebreak 에 필수
+    std::optional<double> nfls, sfls, param, eraten, erates, ct2cn;
+    std::optional<double> k, frad, h0, lmin, lmax, ftosa;       // THRM 1(ftosa — 옛 이름 chlm)
+    std::optional<int> bcflag, algo;
+    std::optional<int> soft;                                    // SOFT=2 는 tiebreak 에 구현돼 있지 않다(Remark 2)
+};
