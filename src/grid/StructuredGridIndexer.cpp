@@ -142,7 +142,7 @@ bool StructuredGridIndexer::determineInitialDirections(const Mesh& mesh, int sta
     // For a corner element, exactly 3 faces have neighbors
     // These 3 faces define the positive directions for i, j, k
 
-    auto neighbors = connectivity.getNeighbors(startElem);
+    const auto& neighbors = connectivity.getNeighbors(startElem);
     if (neighbors.size() != 3) {
         errorMessage_ = "Start element is not a corner (has " +
                        std::to_string(neighbors.size()) + " neighbors instead of 3)";
@@ -203,7 +203,7 @@ bool StructuredGridIndexer::propagateIndices(Mesh& mesh, int startElem,
         auto [elemId, i, j, k] = queue.front();
         queue.pop();
 
-        auto neighbors = connectivity.getNeighbors(elemId);
+        const auto& neighbors = connectivity.getNeighbors(elemId);
 
         for (const auto& neighbor : neighbors) {
             Element* neighborElem = mesh.getElement(neighbor.neighborElementId);
@@ -346,7 +346,7 @@ bool StructuredGridIndexer::determineInitialDirectionsGeometry(const Mesh& mesh,
     // For a corner element, exactly 3 faces have neighbors
     // Use geometry (element centroids) to determine axis directions
 
-    auto neighbors = connectivity.getNeighbors(startElem);
+    const auto& neighbors = connectivity.getNeighbors(startElem);
     if (neighbors.size() != 3) {
         errorMessage_ = "Start element is not a corner (has " +
                        std::to_string(neighbors.size()) + " neighbors instead of 3)";
@@ -489,7 +489,7 @@ bool StructuredGridIndexer::propagateIndicesGeometry(Mesh& mesh, int startElem,
         int k = currentElem->k;
 
         Vector3D currentCentroid = current->centroid;
-        auto neighbors = connectivity.getNeighbors(elemId);
+        const auto& neighbors = connectivity.getNeighbors(elemId);
 
         // Build local axes from ALREADY INDEXED neighbors
         // For each indexed neighbor, we know what index change it represents

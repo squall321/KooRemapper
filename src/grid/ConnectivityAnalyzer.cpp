@@ -174,12 +174,13 @@ void ConnectivityAnalyzer::validateStructuredGrid(const Mesh& mesh) {
     }
 }
 
-std::vector<ElementNeighbor> ConnectivityAnalyzer::getNeighbors(int elementId) const {
+const std::vector<ElementNeighbor>& ConnectivityAnalyzer::getNeighbors(int elementId) const {
+    static const std::vector<ElementNeighbor> kNone;
     auto it = elementNeighbors_.find(elementId);
     if (it != elementNeighbors_.end()) {
         return it->second;
     }
-    return {};
+    return kNone;
 }
 
 int ConnectivityAnalyzer::getNeighborCount(int elementId) const {

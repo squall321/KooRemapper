@@ -61,8 +61,11 @@ public:
      * Get neighbors of an element
      * @param elementId Element ID
      * @return Vector of neighbor information
+     *
+     * 참조를 준다(예전엔 부를 때마다 벡터를 복사했다 — 색인 BFS 가 요소마다 부른다). 이 객체가 살아 있고
+     * buildConnectivity 를 다시 부르기 전까지 유효하다. 없는 요소면 빈 벡터의 참조다.
      */
-    std::vector<ElementNeighbor> getNeighbors(int elementId) const;
+    const std::vector<ElementNeighbor>& getNeighbors(int elementId) const;
 
     /**
      * Get number of neighbors for an element
