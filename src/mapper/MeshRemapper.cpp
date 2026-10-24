@@ -528,9 +528,13 @@ bool MeshRemapper::step4_MapNodesParallel() {
     }
 
     // Add all nodes to result mesh (sequential, but fast)
+    // 끝을 힌트로 넣는다 — 평판 맵 순서(키 오름차순)로 오므로 삽입마다 하던 트리 탐색이 빠진다.
+    // `addNode`(`nodes[id] = node`)와 같은 결과다 — insert_or_assign 도 있으면 대입, 없으면 삽입이다.
     int orphanCount = 0;
+    auto& resultNodes = resultMesh_.nodes;
     for (int i = 0; i < nodeCount; ++i) {
-        resultMesh_.addNode(mappedNodes[i]);
+        const int id = mappedNodes[i].id;
+        resultNodes.insert_or_assign(resultNodes.end(), id, std::move(mappedNodes[i]));
         if (!isReferenced[i]) ++orphanCount;
     }
 
@@ -577,14 +581,14 @@ bool MeshRemapper::step5_CopyElements() {
     const auto& elements = flatMesh_->getElements();
     stats_.elementsProcessed = 0;
 
+    auto& resultElems = resultMesh_.elements;
     for (const auto& pair : elements) {
         const Element& flatElem = pair.second;
 
-        // Create element with same connectivity
-        Element mappedElem = flatElem;
-
-        // Add to result mesh
-        resultMesh_.addElement(mappedElem);
+        // Add an element with the same connectivity to the result mesh.
+        // 끝을 힌트로 넣는다 — `addElement`(`elements[id] = elem`)와 같은 결과이고(insert_or_assign),
+        // 평판 맵 순서로 오므로 삽입마다 하던 트리 탐색이 빠진다.
+        resultElems.insert_or_assign(resultElems.end(), flatElem.id, flatElem);
 
         stats_.elementsProcessed++;
     }
