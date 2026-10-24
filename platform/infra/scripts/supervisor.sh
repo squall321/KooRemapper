@@ -213,7 +213,9 @@ check_once() {
   # mcp: 인스턴스는 **확실히 있는데** 포트가 연결조차 안 받으면 인스턴스를 내린다 — 바로 아래 '없으면 띄운다' 가 같은 회차에 다시 띄운다.
   # 10-18 07:11 UTC earlyoom 이 인스턴스 안의 서버만 죽여(SIGTERM) 인스턴스는 남았고, 이 감시는 '있다' 만 보고 14시간 매분 ✓ 를
   # 찍었다(HWAXPortal docs/followups-1017 FU-D22). 000(연결 안 됨)만, 두 번 보고 판정한다. 목록 조회가 실패한 '모름'(2)은 손대지 않는다.
-  instance_running "$INST_MCP"; _mcp_rc=$?
+  # ⚠ `f; rc=$?` 꼴로 받지 않는다 — set -e(_common.sh) 아래서 f 가 1(없음)·2(모름)면 거기서 스크립트가 끝나 아래 '없으면 띄운다' 에 닿지
+  #   못했다(559f582 ~ 10-25, 위 118행 pg_state 와 같은 함정 — HWAXPortal 10-25 cae00 점검).
+  _mcp_rc=0; instance_running "$INST_MCP" || _mcp_rc=$?
   if [ "$_mcp_rc" -eq 0 ] && [ "$(mcp_code)" = "000" ]; then
     sleep "$KOORM_MCP_RECHECK_S"
     if [ "$(mcp_code)" = "000" ]; then

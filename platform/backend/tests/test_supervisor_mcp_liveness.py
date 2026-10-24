@@ -97,3 +97,17 @@ def test_목록_조회가_실패하면_MCP_는_손대지_않는다(stack):
     (tmp / "list_fail").write_text("")
     r, calls = run("000")
     assert "koorm_mcp" not in calls, (calls, r.stdout)
+    # 손대지 않되 회차는 끝까지 간다 — 종전엔 `instance_running …; _mcp_rc=$?` 가 set -e(_common.sh) 아래서 rc 2 로 스크립트를 끝내
+    # 이 시험은 '죽어서' 지나갔다(nginx 확인 · 심장박동 줄이 없었다).
+    assert r.returncode == 0 and "✓ supervise check done" in r.stdout, (r.returncode, r.stdout, r.stderr)
+
+
+def test_MCP_인스턴스가_없으면_같은_회차에_띄우고_끝까지_간다(stack):
+    """인스턴스가 통째로 사라진 경우 — 559f582 부터 `instance_running …; _mcp_rc=$?` 가 set -e 아래서 rc 1 로 스크립트를 끝내 아래 '없으면
+    띄운다' 에 닿지 못했다. MCP 가 다시 뜨지 않아 게이트웨이의 DynaForge 도구가 빠진 채 남는다(HWAXPortal 10-25 cae00 점검)."""
+    run, tmp = stack
+    (tmp / "mcp_gone").write_text("")
+    r, calls = run("000")
+    assert calls == ["start", "koorm_mcp"], (calls, r.stdout, r.stderr)
+    assert "mcp down → start" in r.stdout and "mcp restart 성공" in r.stdout, r.stdout
+    assert r.returncode == 0 and "✓ supervise check done" in r.stdout, (r.returncode, r.stdout, r.stderr)
