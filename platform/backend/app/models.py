@@ -429,3 +429,101 @@ class OntoAlias(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     note: Mapped[str] = mapped_column(Text, default="", nullable=False)
+
+
+# ── 레시피 — 빌드 없이 쌓이는 분석 함수(docs/01-plan/features/recipes-1026.plan.md) ──────
+# 레시피는 이름 · 소유만 들고, 코드 · 메타는 **판**에 있다. 판은 바뀌지 않는다 — 고치면 새 판이다.
+# 실행 기록은 근거다. 세션 · 잡 · 산출 파일이 지워져도 기록은 남아야 하므로 그 칸들은 SET NULL 이다.
+
+RECIPE_VERSION_STATUSES = ("draft", "candidate", "registered", "superseded")
+
+
+class Recipe(Base):
+    __tablename__ = "recipes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    domain: Mapped[str] = mapped_column(String(20), default="report", nullable=False)
+    # 처음 올린 사람. git 에서 읽어 들인 레시피는 비어 있다(사용자 id 는 박스마다 다르다).
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    origin: Mapped[str] = mapped_column(String(10), default="platform", nullable=False)  # platform | git
+    # 지금 등록된 판 — 다른 사용자가 검색 · 실행하는 판이다. 없으면 아직 등록 전이다.
+    current_version: Mapped[int | None] = mapped_column(Integer)
+    # 사람이 내린 것 — 검색 · 남의 실행에서 빠진다. 판의 상태는 그대로 둔다(기록이다).
+    deprecated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deprecated_reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    versions: Mapped[list["RecipeVersion"]] = relationship(
+        back_populates="recipe", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+
+class RecipeVersion(Base):
+    __tablename__ = "recipe_versions"
+    __table_args__ = (UniqueConstraint("recipe_id", "version", name="uq_recipe_versions_version"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    recipe_id: Mapped[int] = mapped_column(
+        ForeignKey("recipes.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    code: Mapped[str] = mapped_column(Text, nullable=False)
+    code_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    # {title, question, when_to_use, kinds, needs, inputs:{min_reports,max_reports}, params, tags}
+    meta: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    status: Mapped[str] = mapped_column(String(12), default="draft", index=True, nullable=False)
+    # 정적 검사 · 자기 시험 · 앞 판 시험의 결과 — 왜 draft 인지 여기서 읽는다.
+    checks: Mapped[dict | None] = mapped_column(JSONB)
+    # 등록 관문을 지날 때의 판정(근거 실행 · 평가) — 등록 전에는 비어 있다.
+    gate: Mapped[dict | None] = mapped_column(JSONB)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    registered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    recipe: Mapped[Recipe] = relationship(back_populates="versions")
+
+
+class RecipeRun(Base):
+    __tablename__ = "recipe_runs"
+
+    id: Mapped[str] = mapped_column(String(26), primary_key=True)  # ULID
+    recipe_id: Mapped[int] = mapped_column(
+        ForeignKey("recipes.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    version_id: Mapped[int] = mapped_column(
+        ForeignKey("recipe_versions.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    job_id: Mapped[str | None] = mapped_column(ForeignKey("jobs.id", ondelete="SET NULL"), index=True)
+    session_id: Mapped[str | None] = mapped_column(ForeignKey("sessions.id", ondelete="SET NULL"))
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    report_ids: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    report_kinds: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    params: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    status: Mapped[str] = mapped_column(String(12), default="queued", nullable=False)
+    # 결과 — 상한(설정)을 넘으면 앞부분만 두고 `result_truncated` 를 켠다. 전체는 산출 파일에 있다.
+    result: Mapped[dict | None] = mapped_column(JSONB)
+    result_truncated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    output_file_id: Mapped[int | None] = mapped_column(
+        ForeignKey("session_files.id", ondelete="SET NULL")
+    )
+    error: Mapped[str | None] = mapped_column(Text)
+    stdout_tail: Mapped[str | None] = mapped_column(Text)
+    elapsed_ms: Mapped[int | None] = mapped_column(Integer)
+    # 어느 격리 층이 켜졌나 — {landlock, seccomp, audit, limits}. 커널 층이 없는 박스가 있다.
+    sandbox: Mapped[dict | None] = mapped_column(JSONB)
+    # 평가 — 돌린 사람이 붙인다. useful 과 글(무엇을 보였나)이 등록 관문의 근거다.
+    useful: Mapped[bool | None] = mapped_column(Boolean)
+    note: Mapped[str | None] = mapped_column(Text)
+    evaluated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True, nullable=False
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
