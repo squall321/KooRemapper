@@ -1,0 +1,43 @@
+{
+  "name": "angles_over_threshold",
+  "version": 1,
+  "code_sha256": "d77d8827f7d167b06646a616c2240fbfca63d168efe62b76855787a33f33df61",
+  "meta": {
+    "tags": [
+      "angles",
+      "threshold",
+      "screen"
+    ],
+    "kinds": [
+      "impact",
+      "sphere"
+    ],
+    "needs": [],
+    "title": "문턱을 넘는 각도(케이스) 추리기",
+    "inputs": {
+      "max_reports": 4,
+      "min_reports": 1
+    },
+    "params": {},
+    "question": "어느 낙하 각도(위치)가 문턱을 넘는가",
+    "when_to_use": "전각도 낙하에서 위험한 방향만 좁힐 때"
+  },
+  "gate": {
+    "registered_by": 14952,
+    "evidence_runs": [
+      "01M5YCMZ87H7JHDE9F5YNWT493"
+    ],
+    "evidence_evals": [
+      {
+        "run_id": "01M5YCMZ87H7JHDE9F5YNWT493",
+        "note": "전각도에서 문턱을 넘는 케이스만 추려 위험한 낙하 방향을 바로 좁혔다"
+      }
+    ],
+    "superseded": null,
+    "checks": {
+      "selftest_ok": true,
+      "compat_ok": null,
+      "compat_base": null
+    }
+  }
+}

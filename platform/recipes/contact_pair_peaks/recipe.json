@@ -1,0 +1,44 @@
+{
+  "name": "contact_pair_peaks",
+  "version": 1,
+  "code_sha256": "86aeba62bd7b8a1a2dbb447318d555acd2907b083deec9cd00c9e961e2707161",
+  "meta": {
+    "tags": [
+      "contact",
+      "load-path"
+    ],
+    "kinds": [
+      "impact",
+      "sphere"
+    ],
+    "needs": [
+      "data"
+    ],
+    "title": "접촉 파트쌍 피크 순위",
+    "inputs": {
+      "max_reports": 4,
+      "min_reports": 1
+    },
+    "params": {},
+    "question": "어느 파트쌍이 어느 각도(위치)에서 가장 세게 미는가",
+    "when_to_use": "sphere·impact 에서 하중 경로(접촉)를 볼 때"
+  },
+  "gate": {
+    "registered_by": 14952,
+    "evidence_runs": [
+      "01M5YCMZEFKNHFNF9RAQ3GWMKK"
+    ],
+    "evidence_evals": [
+      {
+        "run_id": "01M5YCMZEFKNHFNF9RAQ3GWMKK",
+        "note": "파트쌍 접촉 피크를 순위로 내 하중 경로의 큰 길목을 식별했다"
+      }
+    ],
+    "superseded": null,
+    "checks": {
+      "selftest_ok": true,
+      "compat_ok": null,
+      "compat_base": null
+    }
+  }
+}

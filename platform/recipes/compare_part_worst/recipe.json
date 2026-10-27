@@ -1,0 +1,44 @@
+{
+  "name": "compare_part_worst",
+  "version": 1,
+  "code_sha256": "ebd509b23f2526eb7c3ef90bbc27554209ae5cc1c6dce168065114be54dd3cc9",
+  "meta": {
+    "tags": [
+      "compare",
+      "parts",
+      "stress"
+    ],
+    "kinds": [
+      "deep",
+      "impact",
+      "sphere"
+    ],
+    "needs": [],
+    "title": "리포트 간 파트별 최악값 비교",
+    "inputs": {
+      "max_reports": 8,
+      "min_reports": 1
+    },
+    "params": {},
+    "question": "같은 파트가 리포트(판/조건)마다 얼마나 다른가",
+    "when_to_use": "두 개 이상의 리포트를 파트 단위로 견줄 때"
+  },
+  "gate": {
+    "registered_by": 14952,
+    "evidence_runs": [
+      "01M5YCMZ5ETKX76CN1V9YETS4G"
+    ],
+    "evidence_evals": [
+      {
+        "run_id": "01M5YCMZ5ETKX76CN1V9YETS4G",
+        "note": "sphere 리포트에서 파트별 최악 응력을 한 표로 모아 비교 기준을 만들었다(수동 집계 대체)"
+      }
+    ],
+    "superseded": null,
+    "checks": {
+      "selftest_ok": true,
+      "compat_ok": null,
+      "compat_base": null
+    }
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "name": "hotspot_envelope",
+  "version": 1,
+  "code_sha256": "88177ab2e47379b73ee6796c0f324c565c5d45644dd0de68d393509f1f63dfcb",
+  "meta": {
+    "tags": [
+      "hotspot",
+      "envelope"
+    ],
+    "kinds": [
+      "deep",
+      "sphere"
+    ],
+    "needs": [
+      "data"
+    ],
+    "title": "핫스팟 포락(전 각도 최악 군집)",
+    "inputs": {
+      "max_reports": 4,
+      "min_reports": 1
+    },
+    "params": {},
+    "question": "파트·기준마다 전 각도에서 가장 센 핫스팟은 어디인가",
+    "when_to_use": "sphere·deep 에서 공간 핫스팟을 한눈에 볼 때"
+  },
+  "gate": {
+    "registered_by": 14952,
+    "evidence_runs": [
+      "01M5YCMZABB2XQX0MPSD4FXT88"
+    ],
+    "evidence_evals": [
+      {
+        "run_id": "01M5YCMZABB2XQX0MPSD4FXT88",
+        "note": "파트·기준마다 전 각도에서 가장 센 핫스팟 군집을 한 번에 뽑아 어디가 뜨거운지 짚었다"
+      }
+    ],
+    "superseded": null,
+    "checks": {
+      "selftest_ok": true,
+      "compat_ok": null,
+      "compat_base": null
+    }
+  }
+}
