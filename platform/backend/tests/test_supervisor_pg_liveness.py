@@ -127,14 +127,20 @@ def test_start_sh_가_rc_0_이어도_postgres_가_안_받으면_복구_실패다
 
 
 # ── 배포 경합 — 배포 중이면 손대지 않는다(KR-04, 2026-10-27) ───────────────
+# ★ pid 파일은 포털이 "pid epoch deploy-all" 꼴로 쓴다(deploy-all-from-drive.sh:476) — 맨 PID 만
+#   쓰면 tr -dc 버그를 못 잡는다(kooremapper-fd). 실제 모양으로 쓴다.
+def _deploy_pid_line(pid):
+    import time
+    return f"{pid} {int(time.time())} deploy-all\n"
+
+
 def test_배포_중이면_아무것도_하지_않는다(stack):
-    """포털 deploy-all 이 만든 표지(deploy.lock.d/pid, 산 PID)가 있으면 check_once 는
-    pg 판정도 가기 전에 통째로 건너뛴다 — stop/start 사이 경합을 막는다."""
+    """포털 표지(deploy.lock.d/pid, 산 PID)가 있으면 check_once 는 pg 판정도 가기 전에 통째로 건너뛴다."""
     import os
     run, tmp = stack
     lock = tmp / "repo" / "platform" / "infra" / "data" / "deploy.lock.d"
     lock.mkdir(parents=True, exist_ok=True)
-    (lock / "pid").write_text(str(os.getpid()) + "\n")   # 살아 있는 PID(이 테스트 프로세스)
+    (lock / "pid").write_text(_deploy_pid_line(os.getpid()))   # 포털 꼴 + 살아 있는 PID
     r, calls = run("2 2 0")   # 평소라면 stop → start.sh 할 상황
     assert calls == [], (calls, r.stdout)
     assert "배포 중 — 건너뜀" in r.stdout, r.stdout
@@ -145,7 +151,52 @@ def test_죽은_배포_표지는_무시한다(stack):
     run, tmp = stack
     lock = tmp / "repo" / "platform" / "infra" / "data" / "deploy.lock.d"
     lock.mkdir(parents=True, exist_ok=True)
-    (lock / "pid").write_text("2147480000\n")   # pid_max(4194304) 를 넘는, 확실히 죽은 PID
+    (lock / "pid").write_text(_deploy_pid_line(2147480000))   # pid_max(4194304) 넘는, 확실히 죽은 PID
     r, calls = run("0")
     assert "배포 중 — 건너뜀" not in r.stdout, r.stdout
     assert "✓ supervise check done" in r.stdout
+
+
+def test_update_all_락이_잡혀_있으면_건너뛴다(stack):
+    """두 번째 표지 — /tmp/hwax-update-all.*.lock 이 flock 으로 잡혀 있으면 건너뛴다.
+    엿보기는 잠금을 **잡지 않는다**(/proc/locks 읽기) — flock -n 으로 잡으면 때마침 뜨는
+    update-all 을 오작동시킨다(kooremapper-fd)."""
+    import os
+    import subprocess
+    import time
+    run, _ = stack
+    lockf = f"/tmp/hwax-update-all.pytest{os.getpid()}.lock"
+    open(lockf, "w").close()
+    holder = subprocess.Popen(["flock", lockf, "-c", "sleep 8"])
+    try:
+        for _ in range(50):      # 홀더가 잠금을 쥘 때까지 잠깐 기다린다
+            if _flock_held(lockf):
+                break
+            time.sleep(0.05)
+        assert _flock_held(lockf), "홀더가 잠금을 못 쥐었다(환경 문제)"
+        r, calls = run("2 2 0")
+        assert calls == [], (calls, r.stdout)
+        assert "배포 중 — 건너뜀" in r.stdout, r.stdout
+    finally:
+        holder.terminate()
+        holder.wait(timeout=5)
+        try:
+            os.unlink(lockf)
+        except OSError:
+            pass
+
+
+def _flock_held(path):
+    import os
+    try:
+        ino = os.stat(path).st_ino
+    except OSError:
+        return False
+    try:
+        for line in open("/proc/locks"):
+            parts = line.split()
+            if len(parts) >= 6 and parts[1] == "FLOCK" and parts[5].endswith(":" + str(ino)):
+                return True
+    except OSError:
+        return False
+    return False

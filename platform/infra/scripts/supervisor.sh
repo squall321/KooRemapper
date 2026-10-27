@@ -140,14 +140,25 @@ pg_start() {   # $1: 까닭 — start.sh 로 띄우고 postgres 가 받는지까
 #   ② /tmp/hwax-update-all.*.lock 을 **누가 잡고** 있다(flock -n 로 못 잡으면 잡혀 있는 것)
 # 둘 중 하나라도 참이면 배포 중이다. 표지가 아직 없으면(포털 HP-01 전) 늘 거짓이라 예전과 똑같이 동작한다.
 _deploy_in_progress() {
-  local dpid f
-  dpid="$(head -n1 "$DATA_DIR/deploy.lock.d/pid" 2>/dev/null | tr -dc '0-9' || true)"
+  local dpid="" f ino
+  # ① 포털은 pid 파일에 "pid epoch deploy-all" 꼴로 쓴다(deploy-all-from-drive.sh:476). **첫 칸만** 읽는다 —
+  #    `tr -dc '0-9'` 로 통째로 긁으면 pid 와 epoch 가 한 숫자로 붙어 kill -0 이 늘 실패한다(kooremapper-fd 실측).
+  if [ -f "$DATA_DIR/deploy.lock.d/pid" ]; then
+    read -r dpid _ < "$DATA_DIR/deploy.lock.d/pid" 2>/dev/null || true
+    dpid="${dpid//[!0-9]/}"
+  fi
   if [ -n "$dpid" ] && kill -0 "$dpid" 2>/dev/null; then
     return 0
   fi
+  # ② /tmp/hwax-update-all.*.lock 이 flock 으로 잡혀 있나 — **잡지 않고** 엿본다. `flock -n` 으로 엿보면
+  #    그 순간 우리가 잠금을 쥐어, 마침 뜨는 update-all 이 보유자 탐지에서 우리 flock 을 진짜 보유자로
+  #    오인해 exit 3 할 수 있다(update-all.sh 보유자 탐지, kooremapper-fd). 그래서 /proc/locks 에서
+  #    그 파일 inode 의 FLOCK 유무만 읽는다(장치번호는 안 봐서 다른 FS 의 같은 inode 와 겹치면 한 회차를
+  #    괜히 건너뛸 수 있다 — 해는 없다).
   for f in /tmp/hwax-update-all.*.lock; do
     [ -e "$f" ] || continue
-    if ! flock -n "$f" -c true 2>/dev/null; then
+    ino="$(stat -c %i "$f" 2>/dev/null)" || continue
+    if awk -v i="$ino" '$2=="FLOCK" && $6 ~ (":" i "$") {found=1} END{exit !found}' /proc/locks 2>/dev/null; then
       return 0
     fi
   done
