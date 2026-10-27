@@ -1198,7 +1198,7 @@ async def find_reports(
     sort: str = "created_at",
     order: str = "desc",
     limit: int = 100,
-) -> list:
+) -> dict:
     """조건으로 리포트 검색(전 세션, 결과 폭증 대비 다축 서버 필터) — 소유분 + 같은 소속 공유분(관리자는 전사).
 
     같은 전각도라도 방향 컨셉·초점·조건·높이별로 각기 골라낸다. 필터는 서버(SQL)가 처리해
@@ -1207,7 +1207,9 @@ async def find_reports(
     - focus(초점 예 camera-detail), doe_strategy(cuboid_26·fibonacci_162 등), scenario_type
     - drop_height(특정 높이), severity(이 심각도 이상 소견 보유), min_worst_stress/min_worst_g
     - has_part(그 부품명 포함), q(라벨/과제 텍스트), since/until(ISO), session_id, kfile_id
-    - sort(created_at|worst_stress|worst_g|drop_height)·order. 먼저 report_facets 로 값을 훑어라."""
+    - sort(created_at|worst_stress|worst_g|drop_height)·order. 먼저 report_facets 로 값을 훑어라.
+    ★0 건이어도 **빈 봉투**를 준다(KR-08) — `{items:[], total:0, reason:'리포트 없음'}`. 빈 출력이 아니라
+    「이 조건에 맞는 리포트가 없다」 는 뜻이다(도구 실패와 구분된다). `total==limit` 이면 더 있을 수 있다(truncated)."""
     params: dict = {"sort": sort, "order": order, "limit": limit}
     for k, v in {
         "kind": kind, "project": project, "dev_rev": dev_rev, "variation": variation, "doe": doe,
@@ -1219,7 +1221,11 @@ async def find_reports(
     }.items():
         if v is not None:
             params[k] = v
-    return await _get(ctx, "/reports", params=params)
+    items = await _get(ctx, "/reports", params=params)
+    items = items if isinstance(items, list) else []
+    return {"items": items, "total": len(items),
+            "reason": None if items else "리포트 없음 — 이 조건에 맞는 리포트가 없다(도구 실패가 아니다)",
+            "truncated": len(items) >= limit}
 
 
 @mcp.tool()
