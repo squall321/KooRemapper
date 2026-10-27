@@ -1531,6 +1531,101 @@ async def remove_task_alias(alias: str, ctx: Context) -> dict:
     return await _delete(ctx, "/ontology/aliases", {"alias": alias})
 
 
+# ── 레시피 — 빌드 없이 쌓이는 분석 함수(docs/01-plan/features/recipes-1026) ────────────
+# ★ 규칙 둘(SKILL.md 와 같다):
+#   1) 새 비교·분석 코드를 쓰기 전에 `recipe_search` 로 이미 있는지 먼저 보라.
+#   2) 즉석으로 짠 분석이 효과를 봤으면 `recipe_propose` 로 올려라 — 다음부터 남도 쓴다.
+@mcp.tool()
+async def recipe_search(ctx: Context, q: str = "", kind: str = "", tag: str = "",
+                        limit: int = 50) -> list:
+    """★분석·비교 코드를 쓰기 전에 **먼저** 여기를 보라 — 이미 쌓인 레시피가 있는지 찾는다.
+
+    등록된 레시피(와 내 초안·후보)를 검색어·종류(sphere/impact/deep)·태그로 좁혀 돌려준다.
+    '쓸모 있었다' 평가가 많은 것부터 나온다(경험이 쌓이는 순). 쓸 만한 게 있으면 `recipe_run`,
+    없으면 직접 분석하고 효과를 보면 `recipe_propose`."""
+    params = {"q": q, "kind": kind, "tag": tag, "limit": limit}
+    return await _get(ctx, "/recipes", params={k: v for k, v in params.items() if v != ""})
+
+
+@mcp.tool()
+async def recipe_get(name: str, ctx: Context) -> dict:
+    """레시피 하나의 상세 — 판 목록·상태·메타·관문 결과·코드. 돌리기 전에 무엇을 하는지 본다."""
+    return await _get(ctx, f"/recipes/{name}")
+
+
+@mcp.tool()
+async def recipe_run(name: str, session_id: str, report_ids: list, ctx: Context,
+                     params: dict | None = None, version: int | None = None,
+                     wait_sec: int = 200) -> dict:
+    """레시피를 실데이터 리포트로 돌리고 **결과까지** 기다려 돌려준다(격리 샌드박스 · 플랫폼 잡).
+
+    report_ids 는 이 세션에서 읽을 수 있는 리포트들이다. 결과가 쓸모 있었으면 `recipe_evaluate`
+    로 평가를 남겨라 — 그래야 그 판이 등록 관문에 걸린다. 큰 결과는 산출 파일로 가고 여기엔
+    요약만 온다(run 의 output_file_id). 돌려주는 것: {run_id, job_id, status, result, error}."""
+    import asyncio
+    body = {"session_id": session_id, "report_ids": report_ids, "params": params or {}}
+    if version is not None:
+        body["version"] = version
+    sub = await _post(ctx, f"/recipes/{name}/run", body)
+    run_id, job_id = sub.get("run_id"), sub.get("job_id")
+    last = sub
+    for _ in range(max(1, wait_sec)):
+        last = await _get(ctx, f"/recipes/runs/{run_id}")
+        if last.get("status") in ("succeeded", "failed", "canceled"):
+            break
+        await asyncio.sleep(1)
+    return {
+        "run_id": run_id, "job_id": job_id, "status": last.get("status"),
+        "result": last.get("result"), "result_truncated": last.get("result_truncated"),
+        "output_file_id": last.get("output_file_id"), "error": last.get("error"),
+        "sandbox": last.get("sandbox"), "elapsed_ms": last.get("elapsed_ms"),
+        "hint": "쓸모 있었으면 recipe_evaluate(run_id, useful=true, note=...) 로 근거를 남겨라",
+    }
+
+
+@mcp.tool()
+async def recipe_propose(name: str, code: str, ctx: Context, meta: dict | None = None) -> dict:
+    """즉석 분석이 효과를 봤을 때 레시피로 올린다 — 정적 검사 → 자기 시험 → 후보.
+
+    code 는 `run(reports, params)` 와 하나 이상의 `test_*()` 를 정의해야 한다. 리포트는
+    `recipe_kit.Report`(meta·parts·cases·part_worst()·hotspots()·contact_profile()·case_energy()
+    …)로 받고, 시험은 `recipe_kit.make_report(...)` 로 작은 리포트를 만든다. 허용 import 는
+    stdlib 일부 · numpy · scipy · recipe_kit 뿐이고, 파일 열기·os·던더 속성은 막힌다.
+    meta: {title, question, when_to_use, kinds:[sphere|impact|deep], needs:[\"data\"]?,
+    inputs:{min_reports,max_reports}, tags:[...]}. 후보가 되면 recipe_run → recipe_evaluate →
+    recipe_register 로 등록까지 간다."""
+    return await _post(ctx, "/recipes/propose",
+                       {"name": name, "code": code, "meta": meta or {}})
+
+
+@mcp.tool()
+async def recipe_evaluate(run_id: str, useful: bool, note: str, ctx: Context) -> dict:
+    """실행이 쓸모 있었는지·왜 그런지 남긴다 — useful=true + 글(20자↑)이 등록 관문의 근거다.
+
+    무엇을 보여 줬는지 구체적으로 적어라(예: '전 각도에서 파트 7 이 항복을 넘는 방향을 한 번에 집어냈다')."""
+    return await _post(ctx, f"/recipes/runs/{run_id}/evaluate",
+                       {"useful": useful, "note": note})
+
+
+@mcp.tool()
+async def recipe_register(name: str, ctx: Context, version: int | None = None) -> dict:
+    """후보를 **등록**한다 — 자동 관문(자기 시험 + 성공 실행 ≥1 + 쓸모 평가 ≥1)을 통과하면 누구나 쓰게 된다.
+
+    통과하면 platform/recipes/<이름>/ 로 파일까지 내보낸다(git 반영은 사람이 tools/recipes_publish.sh 로).
+    관문을 못 넘으면 무엇이 빠졌는지 알려 준다 — 보통 실행이나 평가가 아직 없는 것이다."""
+    body = {"version": version} if version is not None else {}
+    return await _post(ctx, f"/recipes/{name}/register", body)
+
+
+@mcp.tool()
+async def recipe_deprecate(name: str, reason: str, ctx: Context) -> dict:
+    """레시피를 **내린다**(올린 사람·관리자) — 검색과 남의 실행에서 빠진다. 판 기록은 남는다.
+
+    왜 내리는지 reason 에 남겨라(틀린 결과·더 나은 레시피로 대체 등)."""
+    return await _post(ctx, f"/recipes/{name}/deprecate", {"reason": reason})
+
+
+
 if __name__ == "__main__":
     host = os.environ.get("MCP_HOST", "127.0.0.1")
     mcp.settings.host = host

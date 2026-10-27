@@ -236,3 +236,20 @@ impact 전위치 부분충격)을 인제스트해 구조화 분석한다.
 - `report_analytics` / `report_blocks` / `report_block` — 리포트에 들어 있는 **모든** 분석 블록.
   요약으로 보고, 원본은 `report_block(name, path=…)` 으로 끝까지 되짚는다.
 
+
+## 레시피 — 분석을 빌드 없이 쌓는다
+
+비교·분석을 C++·백엔드에 박아 **빌드·배포**하지 말고, 함수 하나를 격리 샌드박스에서 돌리고
+효과가 있으면 등록해 쌓는다. 규칙 둘만 지키면 된다.
+
+1. **새 분석·비교 코드를 쓰기 전에 `recipe_search` 부터.** 이미 쌓인 레시피가 있으면
+   `recipe_run` 으로 돌린다("파트별 최악 응력 비교", "각도별 문턱 넘는 파트" 같은 것).
+2. **즉석으로 짠 분석이 효과를 봤으면 `recipe_propose` 로 올린다.** 다음 세션·다른 사람도 쓴다.
+
+흐름은 `recipe_propose`(정적 검사 → 자기 시험 → 후보) → `recipe_run`(실데이터) →
+`recipe_evaluate`(쓸모 있었나·왜 — 등록 근거) → `recipe_register`(자동 관문 통과 시 등록).
+레시피 코드는 `run(reports, params)` 와 `test_*()` 를 정의하고, 리포트는 `recipe_kit.Report`
+(`meta`·`parts`·`cases`·`part_worst()`·`cases_sorted()`·`hotspots()`·`contact_profile()`·
+`case_energy()` …)로 받는다. 큰 임베드 데이터를 쓰려면 메타에 `needs:["data"]` 를 선언하고
+`report.data` 로 받는다. 허용 import 는 stdlib 일부·numpy·scipy·recipe_kit 뿐이고, 파일
+열기·os·네트워크·던더 속성은 막힌다 — 쓰면 정적 검사나 샌드박스가 거절한다.

@@ -113,6 +113,22 @@ SmartTwin 파이프라인이 만든 deep(단건 심층)·sphere(전각도 낙하
 | `plan_task_links` | limit? | GET /ontology/task-links | 과거 붙이기 **계획**(관리자) — 아무것도 쓰지 않는다. 붙는 것·후보·못 붙인 것을 가른다 |
 | `ontology_sync_state` | — | GET /ontology/sync | 허브 수신 상태(관리자). `stopped` 는 **공개 안 된 타입**이라 멈춘 것이다 |
 
+## 레시피 — 빌드 없이 쌓이는 분석 함수
+
+C++·백엔드에 박아 **빌드·배포**하는 대신, 분석 함수 하나를 격리 샌드박스에서 돌리고 효과가
+있으면 등록해 쌓는다. ★규칙 둘 — 새 분석 코드를 쓰기 전에 `recipe_search` 로 먼저 보고,
+즉석 분석이 효과를 봤으면 `recipe_propose` 로 올린다.
+
+| 도구 | 인자 | REST | 메모 |
+| --- | --- | --- | --- |
+| `recipe_search` | q?·kind?·tag?·limit? | GET /recipes | ★**먼저** 여기. 등록된(내 초안·후보 포함) 레시피를 '쓸모' 순으로 |
+| `recipe_get` | name | GET /recipes/{name} | 판 목록·상태·메타·관문·코드 |
+| `recipe_run` | name, session_id, report_ids, params?·version?·wait_sec? | POST /recipes/{name}/run | 실데이터로 돌려 **결과까지** 기다린다(샌드박스·플랫폼 잡). 큰 결과는 산출 파일로 |
+| `recipe_propose` | name, code, meta? | POST /recipes/propose | `run(reports,params)`+`test_*`. 정적 검사→자기 시험→후보. 허용 import 는 stdlib 일부·numpy·scipy·recipe_kit 뿐 |
+| `recipe_evaluate` | run_id, useful, note | POST /recipes/runs/{id}/evaluate | useful=true+글(20자↑)이 등록 근거 |
+| `recipe_register` | name, version? | POST /recipes/{name}/register | 자동 관문 통과 시 등록+파일 내보내기(커밋·푸시는 사람이) |
+| `recipe_deprecate` | name, reason | POST /recipes/{name}/deprecate | 내린다(올린 사람·관리자). 판 기록은 남는다 |
+
 ## 시스템 / 신원
 | 도구 | 인자 | REST | 설명 |
 |---|---|---|---|
