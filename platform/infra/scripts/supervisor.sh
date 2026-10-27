@@ -135,7 +135,32 @@ pg_start() {   # $1: 까닭 — start.sh 로 띄우고 postgres 가 받는지까
   fi
 }
 
+# 배포가 도는 중인가 — 표지 둘을 본다(KR-04, 2026-10-27).
+#   ① $DATA_DIR/deploy.lock.d/pid 에 **산** PID (포털 deploy-all 이 stop 전에 만들고 start 뒤 trap 으로 지운다 — HP-01)
+#   ② /tmp/hwax-update-all.*.lock 을 **누가 잡고** 있다(flock -n 로 못 잡으면 잡혀 있는 것)
+# 둘 중 하나라도 참이면 배포 중이다. 표지가 아직 없으면(포털 HP-01 전) 늘 거짓이라 예전과 똑같이 동작한다.
+_deploy_in_progress() {
+  local dpid f
+  dpid="$(head -n1 "$DATA_DIR/deploy.lock.d/pid" 2>/dev/null | tr -dc '0-9' || true)"
+  if [ -n "$dpid" ] && kill -0 "$dpid" 2>/dev/null; then
+    return 0
+  fi
+  for f in /tmp/hwax-update-all.*.lock; do
+    [ -e "$f" ] || continue
+    if ! flock -n "$f" -c true 2>/dev/null; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 check_once() {
+  # 배포 중이면 **아무것도 하지 않는다** — stop 과 start 사이에 끼면 start 가 겹쳐 띄워져
+  # `instance … already exists` 가 난다(KR-04 · 10-09·10-17 사고). 재기동은 배포 쪽이 끝내고 한다.
+  if _deploy_in_progress; then
+    echo "[$(date '+%F %T')] 배포 중 — 건너뜀"
+    return
+  fi
   # postgres — 같은 이름의 셸이 겹쳤으면 알리고 손대지 않는다(K1 ④). 무엇을 내리든 다른 셸이 남아 다음 회차가 또 겹쳐 띄운다.
   local _shells _pg
   _shells="$(pg_shells)"

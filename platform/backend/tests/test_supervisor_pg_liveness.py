@@ -124,3 +124,28 @@ def test_start_sh_가_rc_0_이어도_postgres_가_안_받으면_복구_실패다
     r, calls = run("2 2 2 2 2 2 2")
     assert calls == ["start.sh"], calls
     assert "start.sh 는 rc 0 인데 postgres 가 접속을 받지 않는다" in r.stdout and "복구 성공" not in r.stdout
+
+
+# ── 배포 경합 — 배포 중이면 손대지 않는다(KR-04, 2026-10-27) ───────────────
+def test_배포_중이면_아무것도_하지_않는다(stack):
+    """포털 deploy-all 이 만든 표지(deploy.lock.d/pid, 산 PID)가 있으면 check_once 는
+    pg 판정도 가기 전에 통째로 건너뛴다 — stop/start 사이 경합을 막는다."""
+    import os
+    run, tmp = stack
+    lock = tmp / "repo" / "platform" / "infra" / "data" / "deploy.lock.d"
+    lock.mkdir(parents=True, exist_ok=True)
+    (lock / "pid").write_text(str(os.getpid()) + "\n")   # 살아 있는 PID(이 테스트 프로세스)
+    r, calls = run("2 2 0")   # 평소라면 stop → start.sh 할 상황
+    assert calls == [], (calls, r.stdout)
+    assert "배포 중 — 건너뜀" in r.stdout, r.stdout
+
+
+def test_죽은_배포_표지는_무시한다(stack):
+    """표지에 적힌 PID 가 죽어 있으면 배포 중이 아니다 — 예전대로 동작한다."""
+    run, tmp = stack
+    lock = tmp / "repo" / "platform" / "infra" / "data" / "deploy.lock.d"
+    lock.mkdir(parents=True, exist_ok=True)
+    (lock / "pid").write_text("2147480000\n")   # pid_max(4194304) 를 넘는, 확실히 죽은 PID
+    r, calls = run("0")
+    assert "배포 중 — 건너뜀" not in r.stdout, r.stdout
+    assert "✓ supervise check done" in r.stdout

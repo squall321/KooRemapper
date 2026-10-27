@@ -25,7 +25,21 @@ BMARK="# koorm-backup"
 BLOG="$DATA_DIR/backup.log"
 BLINE="10 4 * * * cd $REPO_ROOT && bash $SCRIPT_DIR/backup-db.sh >> $BLOG 2>&1  $BMARK"
 
-current="$(crontab -l 2>/dev/null || true)"
+# ⚠ `crontab -l` 는 셋을 다 rc≠0 으로 낸다 — ① 크론 있음(rc 0) ② 「no crontab for <user>」(rc 1) ③
+#   일시 실패(cron 데몬·권한). 옛 `|| true` 는 셋을 다 **빈 목록**으로 읽어, ③ 에서 백업·감시·터널 줄을
+#   통째로 날릴 수 있었다(KR-09, 2026-10-27). ② 만 빈 목록으로 보고, 그 밖의 실패엔 덮어쓰지 않고 멈춘다.
+_cron_err="$(mktemp)"
+if current="$(crontab -l 2>"$_cron_err")"; then
+  :
+elif grep -qi "no crontab for" "$_cron_err"; then
+  current=""
+else
+  echo "✗ crontab -l 이 실패했다(「크론 없음」이 아니다) — 덮어쓰지 않고 멈춘다:" >&2
+  sed 's/^/    /' "$_cron_err" >&2
+  rm -f "$_cron_err"
+  exit 1
+fi
+rm -f "$_cron_err"
 
 if [ "${1:-}" = "--remove" ]; then
   echo "$current" | grep -v "$MARK" | grep -v "$BMARK" | crontab - 2>/dev/null || true

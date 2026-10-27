@@ -8,6 +8,18 @@ set -euo pipefail
 export NO_PROXY="127.0.0.1,localhost,::1${NO_PROXY:+,$NO_PROXY}"
 export no_proxy="$NO_PROXY"
 
+# 크론처럼 **세션 버스가 없는** 환경에서도 `apptainer exec instance://` 가 되게 — 두 변수를 스스로
+# 채운다(sudo 불필요, AIDataHub deploy/apptainer/_common.sh 와 같은 꼴). 매일 04:10 자체 DB 백업이
+# 10-02 부터 `DBUS_SESSION_BUS_ADDRESS is not set` 으로 실패한 것이 이것이었다(KR-05, 2026-10-27).
+# 이미 값이 있으면 건드리지 않는다(사람이 쉘에서 돌릴 때의 값을 존중).
+_koorm_uid="$(id -u)"
+if [ -z "${XDG_RUNTIME_DIR:-}" ] && [ -d "/run/user/$_koorm_uid" ]; then
+  export XDG_RUNTIME_DIR="/run/user/$_koorm_uid"
+fi
+if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ] && [ -S "/run/user/$_koorm_uid/bus" ]; then
+  export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$_koorm_uid/bus"
+fi
+
 # Absolute dir of the scripts (stable regardless of CWD or how $0 was invoked).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # platform/infra/scripts -> repo root (KooRemapper/)
