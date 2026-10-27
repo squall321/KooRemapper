@@ -28,7 +28,7 @@
 
 ## 5. numpy · scipy
 - [x] `api-constraints.txt`(현재 48판 고정) · `api.def` 에 numpy · scipy + %files
-- [ ] 굽기 → 새 이미지 백엔드 시험 → 바꿔 끼우기 **(미뤘다 — 사용자 결정 · 메모리)**. 돌고 있는 api.sif 엔 아직 없다(stdlib 레시피·씨앗은 영향 0)
+- [x] 굽기(taskset, 피크 ~1 GB) → numpy 레시피 다섯 층 검증 → api.sif 바꿔 끼움(옛 것 백업) → koorm_api 재기동 · numpy 2.4.5/scipy 1.17.1 라이브
 
 ## 6. 씨앗
 - [x] 파트 최악값 비교 · 각도 문턱 · 핫스팟 포락 · 접촉 피크 — 제안 → 실행 → 평가 → 등록 → 내보내기(platform/recipes/)
@@ -36,5 +36,5 @@
 ## 7. 배포 · 마무리
 - [x] 백엔드 전체(651 통과) · 도구 수(parity) · 스모크 다섯 + 레시피(80 · 35 · 25 · 20 · 62 · 19)
 - [x] 커밋 · 푸시(의미 단위 7) · API/MCP 재기동(살아 있는 잡 0)
-- [ ] Drive 게시 — **SIF 를 다시 구울 때만**(코드는 바인드라 이미 라이브). 지금은 미룸
+- [ ] Drive 게시 — SIF 가 바뀌었으니 **prod 반영 때 필요**(아티팩트 + prod alembic + 재기동, 사용자 타이밍)
 - [x] 매뉴얼/플랫폼 문서(SKILL · TOOLS · README · CLAUDE_DESKTOP) · 메모리 · 완료 보고서

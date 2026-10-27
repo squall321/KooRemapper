@@ -19,6 +19,7 @@
 정적 검사(import 허용목록·금지 이름·던더 속성) → 제한 builtins+import 관문 → 감사 훅 → **Landlock**(읽기 뿌리만) →
 **seccomp**(소켓·kill·ptrace…) → rlimit(AS·CPU·FSIZE·NPROC=0). api.sif·호스트 커널 5.15 에서 **다섯 층 다 켜짐**.
 막힌 것: 번들 밖 읽기 · 쓰기 · fork · 스레드 · 소켓 · kill · 메모리 폭탄(MemoryError) · 무한 루프(SIGXCPU). 비밀 없는 최소 환경.
+감사 훅의 `__getattr__` 민감 속성 차단은 scipy 내부를 깨서 뺐다(AST+getattr 제거가 소스를 막고, 실제 피해는 커널 층이 막는다). `operator` 는 attrgetter 우회 때문에 허용 목록에서 뺐다.
 
 ## 등록 관문(자동)
 정적·자기 시험·(있으면)앞 판 호환 통과 **+ 성공 실데이터 실행 ≥1 + '쓸모 있었다' 평가(글 20자↑) ≥1**.
@@ -29,12 +30,12 @@
 - 백엔드 전체 **651 통과**(샌드박스 15 · DB 통합 2 포함).
 - 살아 있는 플랫폼(dev API/MCP 재기동, 잡 0 확인) 스모크 — 기본 **80 도구** · reports 35 · deckops 25 · figures 20 · allops 62 ·
   **레시피 19/19**(씨앗을 실데이터로 돌려 hotspot 포락 ≥1 · contact 쌍 ≥1 · 샌드박스 상한 켜짐 · 금지 import 거절을 **값으로**).
-- 커밋 7(6c4b014 샌드박스 · 4c96bbe 서비스 · ecc71c9 MCP · 598d117 씨앗 · 8c2700b 스모크 · 1ffceba numpy 준비 · 그 밖 문서). 모두 origin/main.
+- 커밋 7(6c4b014 샌드박스 · 4c96bbe 서비스 · ecc71c9 MCP · 598d117 씨앗 · 8c2700b 스모크 · 1ffceba numpy 준비 · 16082bb numpy 샌드박스 수정 · 그 밖 문서). 모두 origin/main. **10-27 numpy·scipy api.sif 구워 dev 배포.**
 
 ## 아직 안 한 것
-- **numpy·scipy 이미지 굽기.** `api.def` + `api-constraints.txt`(현재 48판 고정) 는 커밋했지만 **다시 굽지 않았다** —
-  돌고 있는 api.sif 엔 numpy 가 없다(stdlib 레시피·씨앗은 영향 0). 수치 레시피를 쓰려면 굽기(taskset·cgroup·가용 감시) +
-  바꿔 끼우기 + Drive 게시가 남았다. 메모리 때문에 사용자 결정으로 미룸(earlyoom).
+- **prod Drive 게시** — numpy·scipy 를 넣어 **api.sif 를 다시 구워**(taskset, 피크 ~1 GB, 89초) dev 에 바꿔 끼웠고(옛 것 백업
+  `api.sif.bak-20261027-131425`), koorm_api 에 numpy 2.4.5·scipy 1.17.1 라이브다. SIF 가 바뀌었으니 prod 는 Drive 게시 +
+  `alembic upgrade head`(0014) + 재기동이 남았다(사용자 타이밍).
 - **prod 반영** — 코드는 origin/main 에 있다. prod 는 `alembic upgrade head`(0014) + 재기동이 필요하다(노드/배포는 사용자).
 - `tools/recipes_publish.sh`(등록 레시피를 git 에 커밋·푸시하는 사람 트리거) 는 아직 안 지었다 — 지금은 손으로 `git add platform/recipes/`.
 
