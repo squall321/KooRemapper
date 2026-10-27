@@ -20,9 +20,11 @@ import ast
 ALLOWED_IMPORTS = frozenset({
     "math", "cmath", "statistics", "json", "collections", "itertools", "functools",
     "re", "bisect", "heapq", "random", "datetime", "typing", "dataclasses", "enum",
-    "numbers", "fractions", "decimal", "string", "operator", "copy",
+    "numbers", "fractions", "decimal", "string", "copy",
     "numpy", "scipy", "recipe_kit",
 })
+# ⚠ `operator` 는 일부러 뺐다 — `operator.attrgetter("__globals__")` 가 AST 던더 검사를 **우회**해
+# 임의 속성을 이름으로 집는다(getattr 제거와 같은 구멍). 분석 레시피는 numpy 로 충분하다.
 
 # 이 이름들은 호출·참조 자체를 막는다 — 동적 실행·내성(introspection)·파일·환경 통로다.
 FORBIDDEN_NAMES = frozenset({

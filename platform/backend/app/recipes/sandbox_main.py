@@ -167,14 +167,12 @@ _AUDIT_DENY_PREFIX = (
     "shutil.", "glob.glob", "pickle.find_class", "marshal.load", "webbrowser.",
     "urllib.request", "http.client", "ftplib.", "pty.spawn", "winreg.",
 )
-_SENSITIVE_ATTR = frozenset({
-    "__globals__", "__code__", "__closure__", "__builtins__", "__subclasses__",
-    "__bases__", "__mro__", "__class__", "__dict__", "__self__", "__func__",
-    "gi_frame", "cr_frame", "f_back", "f_globals", "f_locals", "tb_frame",
-})
-
-
 def _install_audit():
+    # ⚠ `object.__getattr__`(민감 속성) 은 **일부러 보지 않는다.** numpy·scipy 가 내부에서 `__code__`·
+    #   `__class__` 를 정상적으로 집어 과잉 차단이 라이브러리를 깬다(실측 — scipy.stats). 레시피 소스의
+    #   던더 접근은 AST 정적 검사가, getattr·operator.attrgetter 는 허용 목록·builtins 가 이미 막는다.
+    #   설령 str.format 류로 던더에 닿아 os 를 얻어도 **실제 피해는 커널 층이 막는다**(seccomp=소켓·fork·exec,
+    #   Landlock=번들 밖 쓰기·읽기, NPROC=0=fork/스레드, 최소 환경=비밀 없음). 그래서 여기선 **부수효과 이벤트**만 막는다.
     def hook(event, args):
         for p in _AUDIT_DENY_PREFIX:
             if event.startswith(p):
@@ -183,8 +181,6 @@ def _install_audit():
             mode = args[1] or ""
             if any(c in str(mode) for c in ("w", "a", "x", "+")):
                 raise PermissionError("샌드박스: 파일 쓰기 금지")
-        if event == "object.__getattr__" and len(args) >= 2 and args[1] in _SENSITIVE_ATTR:
-            raise PermissionError(f"샌드박스: 민감 속성 접근 금지 .{args[1]}")
     sys.addaudithook(hook)
     _layers["audit"] = True
 

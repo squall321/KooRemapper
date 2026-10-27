@@ -36,6 +36,8 @@ def test_check_good_passes():
 
 @pytest.mark.parametrize("code, needle", [
     ("import os\ndef run(r,p):\n return 1\ndef test_x():\n assert run([],{})", "import"),
+    # operator 는 attrgetter 로 던더를 이름으로 집을 수 있어 허용 목록에서 뺐다(회귀 가드)
+    ("import operator\ndef run(r,p):\n return 1\ndef test_x():\n assert run([],{})", "operator"),
     ("def run(r,p):\n return open('/x').read()\ndef test_x():\n assert run([],{})", "open"),
     ("def run(r,p):\n return [].__class__\ndef test_x():\n assert run([],{})", "속성"),
     ("def run(r,p):\n return getattr(r,'x')\ndef test_x():\n assert run([],{})", "getattr"),
