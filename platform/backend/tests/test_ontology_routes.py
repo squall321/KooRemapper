@@ -44,8 +44,8 @@ def _dep_names(route) -> set:
 
 @pytest.mark.parametrize("method,path", [
     ("GET", f"{P}/ontology/tasks"),
-    ("GET", f"{P}/ontology/tasks/{{task_key}}/revisions"),
-    ("GET", f"{P}/ontology/tasks/{{task_key}}/compare"),
+    ("GET", f"{P}/ontology/tasks/{{task_key:path}}/revisions"),
+    ("GET", f"{P}/ontology/tasks/{{task_key:path}}/compare"),
     ("GET", f"{P}/reports/{{report_id}}/revision"),
     ("PUT", f"{P}/reports/{{report_id}}/revision"),
     ("DELETE", f"{P}/reports/{{report_id}}/revision"),
@@ -68,7 +68,6 @@ def test_the_route_exists(method, path):
     ("POST", f"{P}/ontology/task-links/apply"),
     ("GET", f"{P}/ontology/aliases"),
     ("POST", f"{P}/ontology/aliases"),
-    ("GET", f"{P}/ontology/sync"),
     ("POST", f"{P}/ontology/sync"),
 ])
 def test_the_whole_fleet_paths_need_a_system_admin(method, path):
@@ -80,7 +79,8 @@ def test_the_whole_fleet_paths_need_a_system_admin(method, path):
 
 @pytest.mark.parametrize("method,path", [
     ("GET", f"{P}/ontology/tasks"),
-    ("GET", f"{P}/ontology/tasks/{{task_key}}/revisions"),
+    ("GET", f"{P}/ontology/tasks/{{task_key:path}}/revisions"),
+    ("GET", f"{P}/ontology/sync"),                         # KR-17 — 읽기는 로그인한 사용자 누구나
     ("GET", f"{P}/reports/{{report_id}}/revision"),
     ("PUT", f"{P}/reports/{{report_id}}/revision"),
 ])
@@ -118,6 +118,9 @@ def test_the_gate_check_actually_discriminates():
     `_dep_names` 가 전부 참을 돌려줘도 위 시험들이 초록이다."""
     read = _dep_names(_routes()[("GET", f"{P}/ontology/tasks")])
     assert require_system_admin.__name__ not in read, sorted(read)
-    admin = _dep_names(_routes()[("GET", f"{P}/ontology/sync")])
+    admin = _dep_names(_routes()[("POST", f"{P}/ontology/sync")])   # GET 은 KR-17 로 열렸다 — 쓰기(POST)로 본다
     assert require_system_admin.__name__ in admin
     assert read != admin, "두 길의 의존이 같다 — 관문을 못 가리고 있다"
+    # KR-17 — GET sync 읽기 길에는 관리자 관문이 없어야 한다
+    sync_read = _dep_names(_routes()[("GET", f"{P}/ontology/sync")])
+    assert require_system_admin.__name__ not in sync_read, sorted(sync_read)

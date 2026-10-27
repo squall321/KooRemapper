@@ -56,14 +56,32 @@ async def list_tasks(
         stmt = stmt.where(OntoObject.deleted.is_(False))
     if q:
         like = f"%{q}%"
-        stmt = stmt.where(OntoObject.key.ilike(like) | OntoObject.label.ilike(like))
+        # key 는 **과제명**, 과제코드는 properties.task_code 에 있다 — 둘 다 본다(KR-01).
+        stmt = stmt.where(OntoObject.key.ilike(like) | OntoObject.label.ilike(like)
+                          | OntoObject.properties["task_code"].astext.ilike(like))
     rows = (await db.execute(stmt.order_by(OntoObject.key).limit(limit))).scalars().all()
     state = (await db.execute(select(OntoSyncState).where(
         OntoSyncState.type_slug == svc.TYPE_TASK))).scalar_one_or_none()
     from app.worker import plm_sync
+
+    def _matched_by(r) -> str | None:
+        # 무엇으로 걸렸나 — key(과제명)·task_code(과제코드)·label 중(KR-01).
+        if not q:
+            return None
+        ql = q.lower()
+        code = str((r.properties or {}).get("task_code") or "")
+        if ql in (r.key or "").lower():
+            return "task_name"
+        if code and ql in code.lower():
+            return "task_code"
+        if ql in (r.label or "").lower():
+            return "label"
+        return None
+
     return ok({
         "items": [{"key": r.key, "label": r.label, "status": r.status,
                    "deleted": r.deleted, "properties": r.properties or {},
+                   "matched_by": _matched_by(r),
                    "updated_at": r.updated_at} for r in rows],
         "sync_enabled": plm_sync.enabled(),
         "last_status": state.last_status if state else None,
@@ -75,7 +93,7 @@ async def list_tasks(
     })
 
 
-@router.get("/ontology/tasks/{task_key}/compare")
+@router.get("/ontology/tasks/{task_key:path}/compare")
 async def compare_revisions(
     task_key: str,
     _user: User = Depends(get_current_user),
@@ -89,7 +107,7 @@ async def compare_revisions(
     return ok(await svc.compare(db, task_key))
 
 
-@router.get("/ontology/tasks/{task_key}/revisions")
+@router.get("/ontology/tasks/{task_key:path}/revisions")
 async def task_revisions(
     task_key: str,
     _user: User = Depends(get_current_user),
@@ -259,8 +277,13 @@ async def drop_alias(
     return ok(got, message="별칭을 뗐습니다.")
 
 
-@admin.get("/ontology/sync")
-async def sync_state(db: AsyncSession = Depends(get_db)):
+@router.get("/ontology/sync")
+async def sync_state(
+    _user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    # 읽기는 로그인한 일반 사용자에게 연다(KR-17, 2026-10-27) — 챗이 '받기가 됐나' 에 답할 수 있게.
+    # 수신 자체(받기·과거 붙이기·별칭)는 여전히 관리자만이다(admin 라우터).
     from app.worker import plm_sync
     rows = (await db.execute(select(OntoSyncState)
                              .order_by(OntoSyncState.type_slug))).scalars().all()

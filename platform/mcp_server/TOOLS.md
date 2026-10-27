@@ -102,7 +102,7 @@ SmartTwin 파이프라인이 만든 deep(단건 심층)·sphere(전각도 낙하
 
 | 도구 | 인자 | REST | 메모 |
 | --- | --- | --- | --- |
-| `list_tasks` | q?·limit? | GET /ontology/tasks | 허브에서 받은 과제 목록. ★목록이 비면 `reason` 을 본다 — 「수신이 꺼졌다」와 「받았지만 없다」는 다르다 |
+| `list_tasks` | q?·limit? | GET /ontology/tasks | 허브 과제 목록. `q` 는 key(과제명)·task_code(과제코드)·label 을 본다 · 항목마다 `matched_by`. ★비면 `reason`(「꺼졌다」≠「없다」) |
 | `task_revisions` | task_key | GET /ontology/tasks/{k}/revisions | 개정 줄 — `rev_seq` 순, 각 판의 리포트와 앞 판 |
 | `compare_task_revisions` | task_key | GET /ontology/tasks/{k}/compare | ★판끼리 **견준다** — 최악응력·최악G·심각도·케이스와 **앞 판 대비 변화**. 안 잰 것은 `null` 이고 0 이 아니다 |
 | `report_revision` | report_id, task_key? | GET /reports/{id}/revision | 이어진 개정 + **어긋남** + 후보와 근거. `mismatch` 가 있으면 수동 메타와 다르다는 뜻이다 |
@@ -111,7 +111,7 @@ SmartTwin 파이프라인이 만든 deep(단건 심층)·sphere(전각도 낙하
 | `confirm_task_alias` | alias, task_key, note? | POST /ontology/aliases | 자유 문자열을 정본 과제에 붙인다(관리자). 한 문자열은 **한 과제만** 가리킨다 |
 | `remove_task_alias` | alias | DELETE /ontology/aliases | 별칭을 뗀다(관리자). **이미 이어 둔 개정은 안 건드린다** |
 | `plan_task_links` | limit? | GET /ontology/task-links | 과거 붙이기 **계획**(관리자) — 아무것도 쓰지 않는다. 붙는 것·후보·못 붙인 것을 가른다 |
-| `ontology_sync_state` | — | GET /ontology/sync | 허브 수신 상태(관리자). `stopped` 는 **공개 안 된 타입**이라 멈춘 것이다 |
+| `ontology_sync_state` | — | GET /ontology/sync | 허브 수신 상태(읽기는 로그인한 사용자 누구나 — KR-17). `stopped` 는 **공개 안 된 타입**이라 멈춘 것 |
 
 ## 레시피 — 빌드 없이 쌓이는 분석 함수
 

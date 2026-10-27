@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import base64
 import os
+from urllib.parse import quote
 
 import httpx
 from mcp.server.fastmcp import Context, FastMCP, Image
@@ -1423,9 +1424,10 @@ async def delete_report(report_id: str, ctx: Context) -> dict:
 # 덮어쓰고 그 사실이 고친 사람에게 안 보인다). 쓰는 것은 **우리 것**(개정)뿐이다.
 @mcp.tool()
 async def list_tasks(ctx: Context, q: str = "", limit: int = 100) -> dict:
-    """허브에서 받은 **과제 목록**(과제코드·과제명). `q` 로 코드·이름 일부 검색.
+    """허브에서 받은 **과제 목록**. `q` 로 검색한다 — key(**과제명**) · `properties.task_code`(**과제코드**) ·
+    이름 모두 본다. 항목마다 `matched_by`(task_name · task_code · label)로 무엇으로 걸렸는지 온다.
     ★목록이 비면 `reason` 을 본다 — 「수신이 꺼져 있다」 와 「받았지만 없다」 는 다르다.
-    / Mirrored PLM tasks. An empty list carries a `reason`."""
+    / Mirrored PLM tasks. `q` matches key(name) · task_code · label; each item carries `matched_by`."""
     params: dict = {"limit": limit}
     if q:
         params["q"] = q      # ★빈 값을 None 으로 실으면 httpx 가 `q=` 를 보낸다 — 키를 뺀다
@@ -1437,7 +1439,7 @@ async def task_revisions(task_key: str, ctx: Context) -> dict:
     """한 과제의 **개발 개정 줄** — rev_seq 순, 각 판에 달린 리포트와 앞 판(supersedes).
     같은 과제의 판끼리 결과를 견주려면 여기서 리포트 id 를 얻어 report_compare 로 넘긴다.
     / The revision chain of one task, with the reports on each."""
-    return await _get(ctx, f"/ontology/tasks/{task_key}/revisions")
+    return await _get(ctx, f"/ontology/tasks/{quote(task_key, safe='')}/revisions")
 
 
 @mcp.tool()
@@ -1460,7 +1462,7 @@ async def set_report_revision(report_id: str, task_key: str, code: str, ctx: Con
     """리포트를 과제의 한 개정에 **확정한다**(사람의 판정으로 기록된다).
 
     `code` 는 `pre|dv1..dvr|pv1..pvr|pra|mp` — dv/pv 는 차수 필수, pre/pra/mp 는 차수 금지.
-    `supersedes` 는 앞 판의 개정 키(`<과제코드>@<code>`)다 — 순환은 거절된다.
+    `supersedes` 는 앞 판의 개정 키(`<과제 key(과제명)>@<code>`)다 — 순환은 거절된다.
     ★이 확정은 **재인제스트에 지워지지 않는다.** 그래서 짐작으로 부르지 마라 —
     `report_revision` 의 후보와 근거를 사람에게 보여 주고 고른 값을 넣어라.
     / Confirm the revision of a report. Survives re-ingest; do not guess."""
@@ -1471,9 +1473,9 @@ async def set_report_revision(report_id: str, task_key: str, code: str, ctx: Con
 
 @mcp.tool()
 async def ontology_sync_state(ctx: Context) -> dict:
-    """허브 수신 상태 — 타입별 시계·마지막 결과·받은 객체 수(시스템 관리자).
-    `last_status` 가 `stopped` 면 그 타입이 **공개 안 된 것**이라 수신을 멈춘 것이다
-    (고칠 곳은 허브 관리자다). / Hub sync state. `stopped` means the hub does not publish it."""
+    """허브 수신 상태 — 타입별 시계·마지막 결과·받은 객체 수(읽기는 로그인한 사용자 누구나).
+    '받기가 됐나' 는 여기서 본다. `last_status` 가 `stopped` 면 그 타입이 **공개 안 된 것**이라
+    수신을 멈춘 것이다(고칠 곳은 허브 관리자다). / Hub sync state. `stopped` means the hub does not publish it."""
     return await _get(ctx, "/ontology/sync")
 
 
@@ -1498,7 +1500,7 @@ async def compare_task_revisions(task_key: str, ctx: Context) -> dict:
     ★`measured_from` 은 그 판의 **몇 건에서** 최악값을 모았는지다. 한 건과 열 건의 최악값은
     같은 뜻이 아니다. 그림까지 견주려면 `reports` 의 id 를 `report_compare` 로 넘긴다.
     / Revisions of one task side by side, with the delta against the previous one."""
-    return await _get(ctx, f"/ontology/tasks/{task_key}/compare")
+    return await _get(ctx, f"/ontology/tasks/{quote(task_key, safe='')}/compare")
 
 
 @mcp.tool()

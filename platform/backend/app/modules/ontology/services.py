@@ -329,11 +329,14 @@ def normalize(text: str) -> str:
 
 
 async def resolve_task(db, free: str) -> tuple[str, str]:
-    """자유 문자열 → (과제코드, 어떻게). 못 풀면 `("", "")`.
+    """자유 문자열 → (과제 key, 어떻게). 못 풀면 `("", "")`.
 
-    **짐작이 없는 두 길만** 여기서 푼다 —
-      `exact` 과제코드와 글자 그대로 같다
-      `alias` 사람이 이미 붙인 기록이 있다
+    **짐작이 없는 세 길만** 여기서 푼다 —
+      `exact`     과제명(plm_task.key)과 글자 그대로 같다
+      `task_code` 과제코드(`properties.task_code`)와 글자 그대로 같다
+      `alias`     사람이 이미 붙인 기록이 있다
+    ⚠ key 는 **과제명**이다(rootdesign plm_task.key). 과제코드는 `properties.task_code` 에 있다 —
+      보고서에는 과제코드가 적혀 오므로 그 경로가 없으면 과제코드로는 영영 안 풀린다(KR-01, 2026-10-27).
     정규화해서 같아 보이는 것은 **여기서 풀지 않는다**(후보일 뿐이다 — `task_candidates`).
     """
     free = (free or "").strip()
@@ -345,6 +348,12 @@ async def resolve_task(db, free: str) -> tuple[str, str]:
                                  OntoObject.deleted.is_(False)))).scalar_one_or_none()
     if hit is not None:
         return hit.key, "exact"
+    code_hit = (await db.execute(
+        select(OntoObject).where(OntoObject.type_slug == TYPE_TASK,
+                                 OntoObject.properties["task_code"].astext == free,
+                                 OntoObject.deleted.is_(False)))).scalars().first()
+    if code_hit is not None:
+        return code_hit.key, "task_code"
     al = (await db.execute(
         select(OntoAlias).where(OntoAlias.type_slug == TYPE_TASK,
                                 OntoAlias.alias == free))).scalar_one_or_none()
@@ -368,18 +377,23 @@ async def task_candidates(db, free: str, *, limit: int = 5) -> list[dict]:
                                  OntoObject.deleted.is_(False)))).scalars().all()
     out: list[dict] = []
     for t in rows:
-        if normalize(t.key) == norm:
-            out.append({"key": t.key, "label": t.label, "why": "과제코드가 구분기호만 다르다",
-                        "rank": 0})
-        elif normalize(t.label) == norm:
+        # key 는 **과제명**, 과제코드는 properties.task_code 에 있다(KR-01). 둘 다 본다.
+        code = normalize(str((t.properties or {}).get("task_code") or ""))
+        if code and code == norm:
+            out.append({"key": t.key, "label": t.label, "task_code": (t.properties or {}).get("task_code"),
+                        "why": "과제코드가 구분기호만 다르다", "rank": 0})
+        elif normalize(t.key) == norm:
             out.append({"key": t.key, "label": t.label, "why": "과제명이 구분기호만 다르다",
                         "rank": 1})
-        elif norm and norm in normalize(t.label):
-            out.append({"key": t.key, "label": t.label, "why": "과제명이 이 말을 품고 있다",
+        elif normalize(t.label) == norm:
+            out.append({"key": t.key, "label": t.label, "why": "이름(label)이 구분기호만 다르다",
                         "rank": 2})
-        elif norm and normalize(t.key) and normalize(t.key) in norm:
-            out.append({"key": t.key, "label": t.label, "why": "이 말이 과제코드를 품고 있다",
+        elif norm and norm in normalize(t.label):
+            out.append({"key": t.key, "label": t.label, "why": "이름(label)이 이 말을 품고 있다",
                         "rank": 3})
+        elif norm and code and norm in code:
+            out.append({"key": t.key, "label": t.label, "task_code": (t.properties or {}).get("task_code"),
+                        "why": "과제코드가 이 말을 품고 있다", "rank": 4})
     out.sort(key=lambda c: (c["rank"], c["key"]))
     return out[:limit]
 
