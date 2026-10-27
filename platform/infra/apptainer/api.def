@@ -5,6 +5,10 @@ From: python:3.12-slim
     Component  koorm-api
     Version    0.1.0
 
+%files
+    # 재빌드가 기존 패키지 판을 올리지 않도록 현재 이미지 판을 고정한다(recipes-1026 §2).
+    api-constraints.txt /api-constraints.txt
+
 %post
     set -eux
     apt-get update
@@ -16,12 +20,15 @@ From: python:3.12-slim
     rm -rf /var/lib/apt/lists/*
     pip install --upgrade pip
     # Baseline tooling baked in; app source comes from the bind-mounted /workspace.
-    pip install --no-cache-dir \
+    # numpy·scipy 는 레시피 샌드박스가 쓰는 수치 라이브러리다. -c 로 나머지 판을 고정해,
+    # 이것을 더하려고 다시 구울 때 fastapi·pydantic 같은 것이 조용히 올라가지 않게 한다.
+    pip install --no-cache-dir -c /api-constraints.txt \
         "fastapi>=0.115" "uvicorn[standard]>=0.32" \
         "sqlalchemy[asyncio]>=2.0.36" "alembic>=1.14" "asyncpg>=0.30" \
         "pydantic>=2.9" "email-validator>=2.2" "pydantic-settings>=2.6" \
         "python-jose[cryptography]>=3.3" "argon2-cffi>=23.1" "python-multipart>=0.0.18" \
-        "ulid-py>=1.1" "PyYAML>=6.0" "jsonschema>=4.23" "httpx>=0.28"
+        "ulid-py>=1.1" "PyYAML>=6.0" "jsonschema>=4.23" "httpx>=0.28" \
+        "numpy" "scipy"
 
 %environment
     export PYTHONDONTWRITEBYTECODE=1
