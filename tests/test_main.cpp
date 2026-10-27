@@ -14,6 +14,8 @@
 // 세트 멤버 해석 정본 — 2026-10-23(`_ADD`·`_INTERSECT`·`_COLLECT`)
 #include "test_SetMembers.cpp"
 #include "test_ContactCards.cpp"
+// 주응력 퇴행 고유값 회귀 — 2026-10-27(KR-03)
+#include "test_StressTensor.cpp"
 
 int main(int argc, char* argv[]) {
     (void)argc;
