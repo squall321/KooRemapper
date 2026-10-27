@@ -15,6 +15,7 @@ def register_routers(app: FastAPI) -> None:
     from app.modules.ontology.routes import admin as ontology_admin_router
     from app.modules.ontology.routes import router as ontology_router
     from app.modules.operations.routes import router as operations_router
+    from app.modules.recipes.routes import router as recipes_router
     from app.modules.reports.routes import router as reports_router
     from app.modules.sessions.routes import router as sessions_router
     from app.modules.system.routes import router as system_router
@@ -24,6 +25,7 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(users_router, prefix=API_PREFIX)
     app.include_router(sessions_router, prefix=API_PREFIX)
     app.include_router(reports_router, prefix=API_PREFIX)
+    app.include_router(recipes_router, prefix=API_PREFIX)
     app.include_router(analysis_router, prefix=API_PREFIX)
     app.include_router(operations_router, prefix=API_PREFIX)
     app.include_router(jobs_router, prefix=API_PREFIX)

@@ -627,6 +627,13 @@ async def _execute(job_id: str) -> None:
             await _submit_external(db, job, work_dir)
             return
 
+        # 레시피 실행도 바이너리가 아니다 — 격리 샌드박스에서 파이썬 함수를 돌린다.
+        # execute_run 이 RecipeRun 과 Job 상태를 모두 적는다(여기선 바로 반환).
+        if job.operation == "recipe":
+            from app.modules.recipes import services as recipe_svc
+            await recipe_svc.execute_run(db, job)
+            return
+
         built = build_command(job.operation, job.args or {}, work_dir)
         if built.error:
             job.status = "failed"
