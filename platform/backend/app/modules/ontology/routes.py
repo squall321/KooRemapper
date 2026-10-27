@@ -43,40 +43,66 @@ router = APIRouter(tags=["ontology"], dependencies=[Depends(require_ontology)])
 
 @router.get("/ontology/tasks")
 async def list_tasks(
-    q: str | None = Query(default=None, description="과제코드·과제명 일부"),
+    q: str | None = Query(default=None, description="과제코드(properties.task_code)·과제명(key)·이름 일부"),
+    project: str | None = Query(default=None, description="이 프로젝트의 과제만(properties.project) — KR-16"),
     include_deleted: bool = Query(default=False, description="허브에서 사라진 것도"),
     limit: int = Query(default=100, ge=1, le=1000),
     _user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """허브에서 받은 과제 목록. **비어 있는 것과 수신이 꺼진 것을 갈라 말한다** —
-    빈 목록만 주면 「과제가 없다」 로 읽히는데, 실제로는 물어보지도 못한 것이다."""
+    빈 목록만 주면 「과제가 없다」 로 읽히는데, 실제로는 물어보지도 못한 것이다.
+
+    검색은 key(과제명)·properties.task_code(과제코드)·label 을 본다. 결과는 **앞부분·낱말경계
+    일치를 위로** 올리고(KR-16 — 짧은 꼴이 다른 프로젝트 과제를 섞던 것), 항목마다 `matched_by` 를 단다.
+    `project` 로 그 프로젝트의 과제만 좁힐 수 있다(properties.project — 허브 필드명 기준)."""
     stmt = select(OntoObject).where(OntoObject.type_slug == svc.TYPE_TASK)
     if not include_deleted:
         stmt = stmt.where(OntoObject.deleted.is_(False))
+    if project:
+        stmt = stmt.where(OntoObject.properties["project"].astext == project)
     if q:
         like = f"%{q}%"
-        # key 는 **과제명**, 과제코드는 properties.task_code 에 있다 — 둘 다 본다(KR-01).
         stmt = stmt.where(OntoObject.key.ilike(like) | OntoObject.label.ilike(like)
                           | OntoObject.properties["task_code"].astext.ilike(like))
-    rows = (await db.execute(stmt.order_by(OntoObject.key).limit(limit))).scalars().all()
+    # q 가 있으면 순위를 매겨야 하므로 limit 전에 넉넉히 받아(상한 있음) Python 에서 정렬·절단한다.
+    fetch = min(1000, max(limit, limit * 5)) if q else limit
+    rows = (await db.execute(stmt.order_by(OntoObject.key).limit(fetch))).scalars().all()
     state = (await db.execute(select(OntoSyncState).where(
         OntoSyncState.type_slug == svc.TYPE_TASK))).scalar_one_or_none()
     from app.worker import plm_sync
 
+    def _fields(r):
+        return (r.key or "", str((r.properties or {}).get("task_code") or ""), r.label or "")
+
     def _matched_by(r) -> str | None:
-        # 무엇으로 걸렸나 — key(과제명)·task_code(과제코드)·label 중(KR-01).
         if not q:
             return None
         ql = q.lower()
-        code = str((r.properties or {}).get("task_code") or "")
-        if ql in (r.key or "").lower():
+        name, code, label = (s.lower() for s in _fields(r))
+        if ql in name:
             return "task_name"
-        if code and ql in code.lower():
+        if code and ql in code:
             return "task_code"
-        if ql in (r.label or "").lower():
+        if ql in label:
             return "label"
         return None
+
+    def _rank(r) -> int:
+        # 0 앞부분 일치(key·task_code) · 1 낱말 경계 · 2 그 밖(부분 문자열). 짧은 꼴의 섞임을 눌러 준다(KR-16).
+        if not q:
+            return 0
+        ql = q.lower()
+        name, code, label = (s.lower() for s in _fields(r))
+        if name.startswith(ql) or (code and code.startswith(ql)):
+            return 0
+        import re as _re
+        if any(_re.search(r"(^|[\s\-_./])" + _re.escape(ql), s) for s in (name, code, label) if s):
+            return 1
+        return 2
+
+    if q:
+        rows = sorted(rows, key=lambda r: (_rank(r), r.key or ""))[:limit]
 
     return ok({
         "items": [{"key": r.key, "label": r.label, "status": r.status,
@@ -113,8 +139,14 @@ async def task_revisions(
     _user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """한 과제의 개정 줄 — `rev_seq` 순, 각 판에 달린 리포트와 앞 판."""
-    return ok({"task": task_key, "revisions": await svc.history(db, task_key)})
+    """한 과제의 개정 줄 — `rev_seq` 순, 각 판에 달린 리포트와 앞 판.
+
+    ★모르는 과제와 '개정 없음' 을 가른다(KR-07) — `task_found:false` · reason `unknown_task` 면
+    정본에 그 과제가 없다는 뜻이다(개정이 0 인 것과 다르다)."""
+    if not await svc.task_exists(db, task_key):
+        return ok({"task": task_key, "task_found": False, "reason": "unknown_task", "revisions": [],
+                   "hint": "list_tasks 로 정본 과제명을 먼저 찾으라 — 과제코드로도 검색된다(matched_by)"})
+    return ok({"task": task_key, "task_found": True, "revisions": await svc.history(db, task_key)})
 
 
 # ── 리포트의 개정 ──────────────────────────────────────────────────────────

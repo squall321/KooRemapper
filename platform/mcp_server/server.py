@@ -1423,14 +1423,17 @@ async def delete_report(report_id: str, ctx: Context) -> dict:
 # 과제의 정본은 **허브**다 — 여기에 과제를 만들거나 고치는 도구는 **없다**(있으면 다음 받기가
 # 덮어쓰고 그 사실이 고친 사람에게 안 보인다). 쓰는 것은 **우리 것**(개정)뿐이다.
 @mcp.tool()
-async def list_tasks(ctx: Context, q: str = "", limit: int = 100) -> dict:
+async def list_tasks(ctx: Context, q: str = "", limit: int = 100, project: str = "") -> dict:
     """허브에서 받은 **과제 목록**. `q` 로 검색한다 — key(**과제명**) · `properties.task_code`(**과제코드**) ·
     이름 모두 본다. 항목마다 `matched_by`(task_name · task_code · label)로 무엇으로 걸렸는지 온다.
+    앞부분·낱말경계 일치가 위로 온다(짧은 꼴이 다른 프로젝트 과제를 섞던 것을 눌렀다). `project` 로 좁힐 수 있다.
     ★목록이 비면 `reason` 을 본다 — 「수신이 꺼져 있다」 와 「받았지만 없다」 는 다르다.
     / Mirrored PLM tasks. `q` matches key(name) · task_code · label; each item carries `matched_by`."""
     params: dict = {"limit": limit}
     if q:
         params["q"] = q      # ★빈 값을 None 으로 실으면 httpx 가 `q=` 를 보낸다 — 키를 뺀다
+    if project:
+        params["project"] = project
     return await _get(ctx, "/ontology/tasks", params)
 
 
@@ -1438,7 +1441,9 @@ async def list_tasks(ctx: Context, q: str = "", limit: int = 100) -> dict:
 async def task_revisions(task_key: str, ctx: Context) -> dict:
     """한 과제의 **개발 개정 줄** — rev_seq 순, 각 판에 달린 리포트와 앞 판(supersedes).
     같은 과제의 판끼리 결과를 견주려면 여기서 리포트 id 를 얻어 report_compare 로 넘긴다.
-    / The revision chain of one task, with the reports on each."""
+    ★`task_found:false`(reason `unknown_task`)면 **정본에 그 과제가 없다**는 뜻이다 — 개정이 0 인 것과 다르다.
+    그때는 list_tasks 로 정본 과제명을 먼저 찾아라(과제코드로도 검색된다).
+    / Revision chain; task_found:false means the task is unknown (not just empty)."""
     return await _get(ctx, f"/ontology/tasks/{quote(task_key, safe='')}/revisions")
 
 

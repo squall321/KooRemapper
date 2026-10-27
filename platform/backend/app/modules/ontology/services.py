@@ -573,9 +573,15 @@ async def compare(db, task_key: str) -> dict:
     골랐는지가 안 보이면 비교가 거짓이 된다. 최악값은 **그 판의 리포트 전부에서** 모으고,
     몇 건에서 모았는지를 함께 낸다.
     """
+    # ★모르는 과제와 '개정 없음' 을 가른다(KR-07) — 챗이 「그런 과제 없음」과 「개정 없음」을
+    #   구분 못 하면 사용자를 엉뚱한 데로 보낸다. 받은 거울에 key 가 없으면 unknown_task 다.
+    if not await task_exists(db, task_key):
+        return {"task": task_key, "task_found": False, "reason": "unknown_task", "revisions": [],
+                "hint": "list_tasks 로 정본 과제명을 먼저 찾으라 — 과제코드로도 검색되고 matched_by 로 무엇으로 걸렸는지 온다"}
     line = await history(db, task_key)
     if not line:
-        return {"task": task_key, "revisions": [], "note": "이 과제에 이어진 개정이 없다"}
+        return {"task": task_key, "task_found": True, "revisions": [],
+                "note": "이 과제는 있으나 이어진 개정이 없다"}
 
     ids = sorted({rid for r in line for rid in r["reports"]})
     rows = {}
@@ -611,4 +617,13 @@ async def compare(db, task_key: str) -> dict:
             cur["d_worst_stress"] = round(cur["worst_stress"] - prev["worst_stress"], 3)
         else:
             cur["d_worst_stress"] = None
-    return {"task": task_key, "revisions": out}
+    return {"task": task_key, "task_found": True, "revisions": out}
+
+
+async def task_exists(db, key: str) -> bool:
+    """받은 거울에 이 과제명(plm_task.key)이 있나 — '모르는 과제'와 '개정 없음'을 가르는 데 쓴다(KR-07)."""
+    row = (await db.execute(
+        select(OntoObject.id).where(OntoObject.type_slug == TYPE_TASK,
+                                    OntoObject.key == key,
+                                    OntoObject.deleted.is_(False)))).first()
+    return row is not None

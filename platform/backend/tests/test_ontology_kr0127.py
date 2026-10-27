@@ -128,3 +128,50 @@ async def test_list_tasks_matched_by_and_sync_read_open(db):
             assert "enabled" in rs.json()["data"]
     finally:
         await _cleanup(db, [key], u)
+
+
+# ── KR-07 — 모르는 과제와 '개정 없음' 을 가른다 ───────────────────────
+async def test_unknown_task_vs_no_revisions(db):
+    import httpx
+    known = f"과제 {ulid.new().str[:6]}"
+    u = await _user(db)
+    try:
+        await _mk_task(db, key=known, task_code=f"KR-{ulid.new().str[:6]}")
+        app, transport = await _client()
+        app.dependency_overrides[get_current_user] = lambda: u
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+            # 없는 과제 → task_found:false · unknown_task
+            r1 = await c.get(f"{P}/ontology/tasks/{'없는과제ZZZ'}/revisions")
+            assert r1.status_code == 200
+            d1 = r1.json()["data"]
+            assert d1["task_found"] is False and d1["reason"] == "unknown_task", d1
+            # 있는 과제(개정 0) → task_found:true
+            from urllib.parse import quote
+            r2 = await c.get(f"{P}/ontology/tasks/{quote(known, safe='')}/revisions")
+            d2 = r2.json()["data"]
+            assert d2["task_found"] is True and d2["revisions"] == [], d2
+            # compare 도 같은 규칙
+            r3 = await c.get(f"{P}/ontology/tasks/{'없는과제ZZZ'}/compare")
+            assert r3.json()["data"]["task_found"] is False
+    finally:
+        await _cleanup(db, [known], u)
+
+
+# ── KR-16 — 앞부분 일치가 위로 · project 거르개 ───────────────────────
+async def test_list_tasks_prefix_ranked_first(db):
+    import httpx
+    tagn = ulid.new().str[:6]
+    pre = f"S26-{tagn}"                 # q 가 앞부분
+    mid = f"zz-S26-{tagn}-mid"          # q 가 가운데(부분 문자열)
+    u = await _user(db)
+    try:
+        await _mk_task(db, key=pre, task_code=f"C{tagn}A")
+        await _mk_task(db, key=mid, task_code=f"C{tagn}B")
+        app, transport = await _client()
+        app.dependency_overrides[get_current_user] = lambda: u
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+            r = await c.get(f"{P}/ontology/tasks", params={"q": f"S26-{tagn}"})
+            items = [it["key"] for it in r.json()["data"]["items"] if it["key"] in (pre, mid)]
+            assert items and items[0] == pre, items    # 앞부분 일치가 먼저
+    finally:
+        await _cleanup(db, [pre, mid], u)
