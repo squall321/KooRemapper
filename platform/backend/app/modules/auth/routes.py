@@ -3,7 +3,7 @@ from __future__ import annotations
 import hmac
 import secrets
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sqlalchemy import select
@@ -39,6 +39,7 @@ _SSO_CLIENT_NAMES = {
     "web": _SSO_PAT_NAME,                       # 브라우저 SPA(기본, 종전과 동일한 이름)
     "deliberation": "HWAX Deliberation SSO",    # 심의가 사용자 시야로 조회할 때
     "agent": "HWAX Agent SSO",                  # 에이전트 서버 일반 도구 호출
+    "gateway": "HWAX Gateway SSO",              # 게이트웨이 표준 위임(KR-18)
 }
 
 
@@ -59,6 +60,21 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
 async def auth_config():
     """Public: lets the login screen know whether signup is enabled."""
     return ok({"allow_signup": settings.allow_signup})
+
+
+@router.post("/auth/sso/verify")
+async def sso_verify(request: Request):
+    """포털 표준 위임 점검(`sso-set-app.sh`)이 쓰는 자리 — 게이트웨이 공유 시크릿만 대조한다(KR-18).
+
+    설정이 없으면 404, 비밀이 맞으면 204, 틀리면 401. **사용자·토큰은 건드리지 않는다**(발급이 아니다).
+    이 길이 없어서 게이트웨이 설정에 위임 항목을 손으로 넣어 왔다(요청 K8)."""
+    secret = settings.heax_gateway_secret
+    if not secret:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "SSO가 구성되어 있지 않습니다.")
+    provided = request.headers.get("x-heax-gateway-secret", "")
+    if not hmac.compare_digest(provided, secret):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "게이트웨이 검증 실패.")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/auth/sso", dependencies=[Depends(rate_limit("sso", settings.ratelimit_login_per_min))])
