@@ -400,8 +400,10 @@ async def sync_all(db, client: SpCoreClient, *, types: list[str] | None = None,
                    full: bool = False) -> dict:
     """카탈로그를 읽고 공개된 타입을 받는다.
 
-    **달라고 한 타입이 공개 목록에 없으면 거절한다** — 조용히 건너뛰면 "받았는데 비어 있다"
-    가 되고, 그것은 「데이터가 없다」 로 읽힌다(규칙 11 과 같은 성질).
+    고른 타입 중 공개 목록에 없는 것은 **거절하지 않고 건너뛰며 알린다**(응답 `skipped`, KR-06).
+    조용히 빠뜨리지 않는 것이 요점이다 — `skipped` 로 무엇을 못 받았는지 보여 준다(규칙 11 의
+    '조용한 빈 결과 금지' 는 그대로 지킨다). 예전엔 하나라도 미공개면 통째 거절했는데, 그러면
+    쓰는 타입 셋을 받으려다 공개 안 된 하나 때문에 나머지가 영영 안 들어왔다.
     """
     cat = await client.catalog()
     if not cat["ok"]:
@@ -411,14 +413,12 @@ async def sync_all(db, client: SpCoreClient, *, types: list[str] | None = None,
     revision = str(body.get("revision") or "")
     has_rel = {str(t.get("slug")): bool(t.get("relations")) for t in (body.get("types") or [])}
 
-    wanted = list(types or opened)
-    unknown = [t for t in wanted if t not in opened]
-    if unknown:
-        return {"ok": False, "error": "not_published", "detail": f"공개된 타입이 아니다: {unknown}",
-                "opened": opened}
+    requested = list(types or opened)
+    skipped = [t for t in requested if t not in opened]
+    wanted = [t for t in requested if t in opened]
 
     out: dict[str, Any] = {"ok": True, "system": body.get("system"), "revision": revision,
-                           "opened": opened, "types": {}}
+                           "opened": opened, "skipped": skipped, "types": {}}
     for slug in wanted:
         got = await sync_type(db, client, slug, full=full,
                               with_relations=has_rel.get(slug, False))

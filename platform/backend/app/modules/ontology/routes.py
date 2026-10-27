@@ -334,10 +334,16 @@ async def sync_state(
 
 @admin.post("/ontology/sync")
 async def run_sync(full: bool = Query(default=False, description="처음부터 다시 받는다")):
-    """지금 한 번 받는다. 꺼져 있으면 **조용히 성공하지 않고** 꺼졌다고 말한다."""
+    """지금 한 번 받는다. 꺼져 있으면 **조용히 성공하지 않고** 꺼졌다고 말한다.
+
+    ★한 타입이 실패해도 **성공한 타입은 이미 커밋됐다**(전부-아니면-무가 아니다). 그때는 409 로
+    통째 실패라 말하지 않고, 타입별 결과(`types`)와 함께 성공 상태로 돌려준다(KR-13). 아예 못 돈
+    것(꺼짐·예외·카탈로그 불가 — `types` 가 없다)만 409 다."""
     from app.worker import plm_sync
     got = await plm_sync.sync_once(full=full)
-    if not got.get("ok"):
-        raise HTTPException(status.HTTP_409_CONFLICT,
-                            f"{got.get('error')}: {got.get('detail') or ''}")
-    return ok(got, message="받았습니다.")
+    if got.get("ok"):
+        return ok(got, message="받았습니다.")
+    if "types" in got:
+        return ok(got, message="일부 타입이 실패했습니다 — 성공한 타입은 반영됐습니다(types 를 보세요).")
+    raise HTTPException(status.HTTP_409_CONFLICT,
+                        f"{got.get('error')}: {got.get('detail') or ''}")

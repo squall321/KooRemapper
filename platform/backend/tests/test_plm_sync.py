@@ -31,6 +31,9 @@ def on(monkeypatch):
     monkeypatch.setattr(settings, "sp_core_url", "http://hub.test/api")
     monkeypatch.setattr(settings, "sp_core_token", "tok")
     monkeypatch.setattr(settings, "sp_core_sync_sec", 600)
+    # 이 픽스처의 시험들은 가짜 허브가 공개한 **그 타입**을 받기를 기대한다(커스텀 slug).
+    # KR-06 기본(셋)으로 좁히면 그 slug 가 빠지므로, 여기서는 전부(None)로 둔다.
+    monkeypatch.setattr(settings, "sp_core_types", "")
     return settings
 
 
@@ -65,9 +68,16 @@ async def test_being_off_is_an_explicit_failure_not_a_quiet_success():
     assert got["ok"] is False and got["error"] == "disabled"
 
 
-async def test_the_type_list_is_not_hardcoded():
-    """목록을 박으면 허브에 타입이 늘어도 우리를 고쳐야 한다 — 공개된 것 전부를 받는다."""
-    assert plm_sync.wanted_types() is None
+async def test_the_type_list_comes_from_settings():
+    """공개 35종을 다 받지 않는다 — 기본은 쓰는 것 셋, 설정으로 고친다(KR-06). 비우면 전부(None)."""
+    from app.config import settings
+    assert plm_sync.wanted_types() == ["plm_project", "plm_task", "plm_model"]
+    old = settings.sp_core_types
+    settings.sp_core_types = ""
+    try:
+        assert plm_sync.wanted_types() is None
+    finally:
+        settings.sp_core_types = old
 
 
 async def test_sync_once_writes_and_commits(db, on):

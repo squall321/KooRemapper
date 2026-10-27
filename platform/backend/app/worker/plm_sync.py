@@ -27,12 +27,14 @@ def enabled() -> bool:
 
 
 def wanted_types() -> list[str] | None:
-    """받을 타입. `None` 이면 **허브가 공개한 것 전부**다.
+    """받을 타입. 설정 `KOORM_SP_CORE_TYPES`(쉼표)로 고른다 — 기본은 **쓰는 것 셋**이다(KR-06).
 
-    목록을 코드에 박지 않는 것이 요점이다 — 허브에 타입이 늘어도 우리를 고치지 않는다
-    (수신 규칙 5 와 같은 자세). 공개 안 된 것을 달라고 하면 `sync_all` 이 거절한다.
+    공개 35종을 다 받으면 약 1만 9천 건 + 관계 13종이 들어온다. 쓰는 것은 셋뿐이라 기본을 좁혔다.
+    설정이 비면 `None` — 공개된 것 전부. 고른 타입 중 공개 안 된 것이 있어도 `sync_all` 이
+    **거절하지 않고 건너뛰며 알린다**(응답 `skipped`).
     """
-    return None
+    raw = [t.strip() for t in (settings.sp_core_types or "").split(",") if t.strip()]
+    return raw or None
 
 
 async def sync_once(*, full: bool = False, client: SpCoreClient | None = None) -> dict:

@@ -127,6 +127,9 @@ class Settings(BaseSettings):
     # 주소가 비면 수신은 **꺼진 것**이고, 조용히 성공하지 않고 명시적으로 실패한다.
     sp_core_url: str = ""          # 예 `https://<허브>/api` — 끝의 `/` 는 있어도 없어도 된다
     sp_core_token: str = ""        # `core:read` 범위 PAT. `.env` 에 둔다(§7 ④)
+    # 받을 타입(쉼표). 기본은 **쓰는 것 셋**이다 — 공개 35종을 다 받지 않는다(KR-06). 공개 안 된
+    # 타입이 끼어도 **거절하지 않고 건너뛰며 알린다**(응답 `skipped`). 비우면 공개된 것 전부.
+    sp_core_types: str = "plm_project,plm_task,plm_model"
     # 한 쪽에 몇 건을 받나. 허브가 더 작게 줄 수 있다 — 그때는 허브가 준 `next` 를 따른다.
     sp_core_page_size: int = 500
     # 주기 수신 간격(초). **0 이면 주기 수신만 끈다**(기능 자체는 `ontology` 가 정한다).

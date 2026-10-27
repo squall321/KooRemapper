@@ -403,11 +403,14 @@ async def test_without_a_token_nothing_is_called(db, slug):
         await _cleanup(db, slug)
 
 
-async def test_asking_for_a_type_the_hub_does_not_publish_is_refused(db, slug):
-    """조용히 건너뛰면 "받았는데 비어 있다" 가 되고, 그것은 「데이터가 없다」 로 읽힌다."""
+async def test_asking_for_a_type_the_hub_does_not_publish_is_skipped_with_notice(db, slug):
+    """공개 안 된 타입은 **거절하지 않고 건너뛰며 알린다**(KR-06, 2026-10-27) — `skipped` 로 보여 준다.
+    통째 거절하면 쓰는 타입 셋을 받으려다 공개 안 된 하나 때문에 나머지가 안 들어온다."""
     hub = _Hub()        # 카탈로그는 plm_task 만 공개한다
-    got = await sync_all(db, _client(hub), types=["없는타입"])
-    assert got["ok"] is False and got["error"] == "not_published"
+    got = await sync_all(db, _client(hub), types=["plm_task", "없는타입"])
+    await db.commit()
+    assert got["ok"] is True, got
+    assert "없는타입" in got["skipped"] and "plm_task" in got["types"], got
     assert "plm_task" in got["opened"]
 
 

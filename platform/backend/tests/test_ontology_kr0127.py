@@ -175,3 +175,30 @@ async def test_list_tasks_prefix_ranked_first(db):
             assert items and items[0] == pre, items    # 앞부분 일치가 먼저
     finally:
         await _cleanup(db, [pre, mid], u)
+
+
+# ── KR-13 — 부분 수신은 409 가 아니라 성공 상태 + per-type ────────────
+async def test_manual_sync_partial_is_success_with_types(db):
+    import httpx
+    from unittest.mock import AsyncMock, patch
+    u = await _user(db, admin=True)   # POST /ontology/sync 는 관리자
+    try:
+        app, transport = await _client()
+        app.dependency_overrides[get_current_user] = lambda: u
+        partial = {"ok": False, "revision": "r1",
+                   "types": {"plm_task": {"ok": True, "rows": 3},
+                             "plm_model": {"ok": False, "error": "http_500"}},
+                   "skipped": []}
+        with patch("app.worker.plm_sync.sync_once", AsyncMock(return_value=partial)):
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+                r = await c.post(f"{P}/ontology/sync")
+        assert r.status_code == 200, (r.status_code, r.text[:200])   # 409 아님
+        assert r.json()["data"]["types"]["plm_task"]["rows"] == 3
+        # 아예 못 돈 것(types 없음)은 여전히 409
+        hard = {"ok": False, "error": "disabled", "detail": "off"}
+        with patch("app.worker.plm_sync.sync_once", AsyncMock(return_value=hard)):
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+                r2 = await c.post(f"{P}/ontology/sync")
+        assert r2.status_code == 409, r2.status_code
+    finally:
+        await _cleanup(db, [], u)
