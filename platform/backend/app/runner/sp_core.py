@@ -79,7 +79,10 @@ class SpCoreClient:
 
     def _http(self) -> httpx.AsyncClient:
         if self._client is None:
-            self._client = httpx.AsyncClient(timeout=self._timeout)
+            # ★trust_env=False — 프록시 환경변수(HTTP(S)_PROXY)를 따르지 않는다(KR-14). 따르면
+            #   NO_PROXY 에 허브가 빠졌을 때 `core:read` 토큰이 사내 프록시를 평문으로 지난다.
+            #   허브는 알려진 base_url 로 직접 부른다 — 프록시를 탈 이유가 없다.
+            self._client = httpx.AsyncClient(timeout=self._timeout, trust_env=False)
         return self._client
 
     async def get(self, path: str, params: Mapping[str, Any] | None = None) -> dict:

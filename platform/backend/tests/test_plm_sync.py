@@ -164,3 +164,14 @@ async def test_a_relation_to_a_system_type_never_creates_an_object_row(db, on):
         await db.execute(delete(OntoObject).where(OntoObject.type_slug == slug))
         await db.execute(delete(OntoSyncState).where(OntoSyncState.type_slug == slug))
         await db.commit()
+
+
+async def test_sp_core_client_does_not_trust_proxy_env():
+    """★core:read 토큰이 사내 프록시를 타지 않게 trust_env=False 다(KR-14)."""
+    from app.runner.sp_core import SpCoreClient
+    c = SpCoreClient("http://hub.test/api", "tok")
+    h = c._http()
+    try:
+        assert getattr(h, "_trust_env", True) is False
+    finally:
+        await h.aclose()

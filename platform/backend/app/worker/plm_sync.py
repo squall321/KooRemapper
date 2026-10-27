@@ -6,8 +6,10 @@
 그래서 외부 잡 스캔(`runner_loop._poll_external_once`)과 **같은 자리·같은 모양**으로 둔다 —
 시간 기준이고, 실패가 워커를 멈추지 않는다.
 
-**기본은 꺼짐이다**(`sp_core_sync_sec=0`). 허브가 아직 없으므로 주기적으로 두드리면 로그가
-실패로 가득 차고 **진짜 실패가 그 속에 묻힌다.**
+**켜짐은 주소·토큰이 정한다**(`enabled()` = `sp_core_url` · `sp_core_token` · `sp_core_sync_sec>0`).
+주기 기본은 `sp_core_sync_sec=3600`(1시간)이고, 주소·토큰이 비어 있으면 어차피 안 돈다 —
+그래서 주소·토큰만 넣으면 켜진다(간격까지 또 설정하지 않아도 된다). 받을 타입은
+`KOORM_SP_CORE_TYPES`(기본 plm_project,plm_task,plm_model)로 고른다(KR-06).
 """
 from __future__ import annotations
 
