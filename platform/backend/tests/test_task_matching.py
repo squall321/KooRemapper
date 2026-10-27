@@ -59,9 +59,10 @@ async def _report(db, s, *, project="", code="", embed=""):
     return r
 
 
-async def _task(db, key, label=""):
+async def _task(db, key, label="", task_code=""):
+    # key 는 **과제명**(rootdesign plm_task.key), 과제코드는 properties.task_code 다(KR-01).
     t = OntoObject(type_slug="plm_task", key=key, label=label or key,
-                   source=SOURCE_HUB, properties={})
+                   source=SOURCE_HUB, properties=({"task_code": task_code} if task_code else {}))
     db.add(t)
     await db.flush()
     return t
@@ -180,14 +181,17 @@ async def test_confirming_the_same_binding_again_is_fine(db, tag):
 # ── 후보는 근거와 함께 ────────────────────────────────────────────────────
 
 async def test_candidates_come_with_a_reason(db, tag):
-    """근거 없는 후보 목록은 사람이 검증할 수 없고, 검증할 수 없으면 결국 맨 위를 누른다."""
-    key = f"PRJ-{tag}"
+    """근거 없는 후보 목록은 사람이 검증할 수 없고, 검증할 수 없으면 결국 맨 위를 누른다.
+
+    KR-01 — key 는 **과제명**, 과제코드는 properties.task_code 다. 둘 다 근거로 뜬다."""
+    key = f"갤럭시 {tag} 낙하 과제"       # 과제명(= plm_task.key)
+    code = f"PRJ-{tag}"                   # 과제코드(= properties.task_code)
     try:
-        await _task(db, key, label=f"갤럭시 {tag} 낙하 과제")
+        await _task(db, key, label=key, task_code=code)
         await db.commit()
-        for free, says in ((f"prj {tag}", "과제코드"),
-                           (f"갤럭시{tag}낙하과제", "과제명"),
-                           (tag, "품고")):
+        for free, says in ((f"prj {tag}", "과제코드"),        # 과제코드 변형 → task_code 근거
+                           (f"갤럭시{tag}낙하과제", "과제명"),  # 과제명 변형 → key 근거
+                           (tag, "품고")):                     # 부분 일치
             cands = await onto.task_candidates(db, free)
             assert cands, free
             assert any(says in c["why"] for c in cands), (free, cands)
