@@ -32,7 +32,10 @@
 
 ## 남은 것 — prod(사용자 타이밍)
 - 코드(KR-01·02·04·05·09·17) — origin/main. prod 는 update-all 이 가져간다.
-- KR-03 바이너리 — **Drive 게시**(dist-to-drive)가 필요(prod = origin/main + Drive 아티팩트). prestress 가 플랫폼 op 이라 플랫폼 바이너리면 충분(REMAP 체인 경유까지면 cli.sif 도).
+- KR-03 바이너리 — **Drive 게시 완료**(dist-20261027-220420Z). cli.sif 도 새 바이너리로 다시 구워 올렸다(배치/HPC·REMAP 체인까지 KR-03). api.sif(numpy — 레시피)·나머지 SIF 도 같은 세트로 올라갔다. prod 반영은 `dist-from-drive.sh`(ops/update-all).
+
+## 배포 완료(10-27)
+dev 전부 라이브 · Drive 게시(dist-20261027-220420Z)까지. prod 는 ops 가 dist-from-drive + update-all 로 가져간다(노드·타이밍은 사용자/ops).
 
 ## 범위 밖
 KR-06~08·10·12~16·18·19 · stcx 전부(첫 제출·저쪽 대기) · 6절 저쪽 몫. KR-11 은 불변 조건으로 지켰다.

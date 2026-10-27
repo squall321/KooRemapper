@@ -30,4 +30,4 @@
 ## 마무리
 - [x] 백엔드 662 · C++ 145 · 스크립트/ASGI 시험
 - [x] 커밋 7(b8eb309·ca47363·c2a124b·f1ab307 등) 푸시
-- [x] compat 빌드(GLIBC_2.35) · dev 재기동·스모크(80·62/62) · 피어 회신 · [ ] prod Drive 게시(사용자 타이밍)
+- [x] compat 빌드(GLIBC_2.35) · dev 재기동·스모크(80·62/62) · 피어 회신 · [x] prod Drive 게시 완료(dist-20261027-220420Z) — prod 는 dist-from-drive(ops)
