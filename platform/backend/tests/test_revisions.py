@@ -564,5 +564,6 @@ async def test_compare_never_turns_a_missing_number_into_zero(db, task):
 
 
 async def test_compare_on_an_unknown_task_says_so(db, task):
+    # KR-07 — 거울에도 없고 개정도 없는 과제는 unknown_task 로 말한다('개정 없음'과 다르다).
     got = await onto.compare(db, task)
-    assert got["revisions"] == [] and "없다" in got["note"]
+    assert got["revisions"] == [] and got["task_found"] is False and got["reason"] == "unknown_task"

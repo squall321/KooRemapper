@@ -142,11 +142,15 @@ async def task_revisions(
     """한 과제의 개정 줄 — `rev_seq` 순, 각 판에 달린 리포트와 앞 판.
 
     ★모르는 과제와 '개정 없음' 을 가른다(KR-07) — `task_found:false` · reason `unknown_task` 면
-    정본에 그 과제가 없다는 뜻이다(개정이 0 인 것과 다르다)."""
-    if not await svc.task_exists(db, task_key):
-        return ok({"task": task_key, "task_found": False, "reason": "unknown_task", "revisions": [],
-                   "hint": "list_tasks 로 정본 과제명을 먼저 찾으라 — 과제코드로도 검색된다(matched_by)"})
-    return ok({"task": task_key, "task_found": True, "revisions": await svc.history(db, task_key)})
+    정본에 그 과제가 없다는 뜻이다(개정이 0 인 것과 다르다). 단 개정이 있으면 그 자체로 '아는' 과제다
+    (개정은 거울에 없는 자유 문자열 key 에도 붙는다)."""
+    revs = await svc.history(db, task_key)
+    if revs:
+        return ok({"task": task_key, "task_found": True, "revisions": revs})
+    if await svc.task_exists(db, task_key):
+        return ok({"task": task_key, "task_found": True, "revisions": []})
+    return ok({"task": task_key, "task_found": False, "reason": "unknown_task", "revisions": [],
+               "hint": "list_tasks 로 정본 과제명을 먼저 찾으라 — 과제코드로도 검색된다(matched_by)"})
 
 
 # ── 리포트의 개정 ──────────────────────────────────────────────────────────

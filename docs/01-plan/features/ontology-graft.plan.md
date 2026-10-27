@@ -57,10 +57,16 @@ yearly\|derived, 필터가 `year=Y`). **개정 축은 우리가 만드는 것이
 | 타입 | key | 비고 |
 |---|---|---|
 | `plm_project` 프로젝트 | 필수 | |
-| `plm_task` **과제** | **과제코드** (label = 과제명) | `project`(→`plm_project`, 필수) · `task_status` · `sra_on` · `sra_kind` · `test_site` · `test_kind` · `test_plan_status` |
-| `plm_model` 개발모델 | 모델명 원문 | `task`(→`plm_task`, 필수) · 모델명 해석(`base_code`·`series`·`region`·**`model_revision`**·`model_revision_kind`·`carrier`) |
-| `plm_test_site` 시험 주체 | 필수 | (StepForge 표에 없던 다섯째 — 실측으로 확인) |
+| `plm_task` **과제** | **과제명**(= plm_task.key) · 과제코드는 `properties.task_code` | `project`(→`plm_project`, 필수) · `task_status` · `sra_on` · `sra_kind` · `test_site` · `test_kind` · `test_plan_status` |
+| `plm_model` 개발모델 | 모델명 원문 | `task`(→`plm_task`, 필수) · 모델명 해석(`region`·**`model_revision`**·`carrier` …) |
+| `plm_test_site` 시험 주체 | 필수 | |
 | 관계 `plm_derived_from` | 파생 모델 → 원 모델 | many_to_one · 순환 금지 |
+
+> ⚠ **cae00 10-27 실측 — 위 표의 일부는 허브 공개 목록에 없다(KR-12).** key 는 **과제명**이고
+> 과제코드는 `properties.task_code` 다(KR-01 — 예전 표의 「key=과제코드」는 틀렸다). 그리고 허브에는
+> `plm_test_site` · `model_revision_kind` · `base_code` · `series` · `plm_derived_from` 이 **없었다**.
+> `model_revision_kind` 대신 쓸 칸(예 `model_kind`·`rc_marker`)과 `plm_test_site` 취급(목록에서 빼기 vs
+> '허브에 없음' 표시)은 **허브 공개 필드 확인 뒤 정한다** — 짐작으로 코드에 박지 않는다(미결, 요청서 §3 K-4).
 
 담당 부서·담당자·참여는 칸이 아니라 **관계**다(`work-core.json` 의 `dept_in_charge`·
 `responsible`·`participates`).
