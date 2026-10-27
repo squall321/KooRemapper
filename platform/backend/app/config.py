@@ -90,6 +90,19 @@ class Settings(BaseSettings):
     # 대용량(GB) 리포트는 .gz 로 올리면 전송은 작고 여기서만 크기를 본다. 필요 시 KOORM_MAX_REPORT_MB.
     max_report_mb: int = 2048
 
+    # --- 레시피 샌드박스(docs/01-plan/features/recipes-1026.plan.md) ---
+    # LLM 이 올린 분석 함수를 격리해서 돌릴 때의 상한. 이 박스는 earlyoom 이 가용 6% 아래면 남의
+    # 프로세스를 죽이므로(box-earlyoom-collateral) 메모리 상한은 선택이 아니다.
+    recipe_sandbox_mem_mb: int = 2048          # RLIMIT_AS — 가상 메모리 상한
+    recipe_sandbox_fsize_mb: int = 32          # RLIMIT_FSIZE — 결과·로그 파일 하나당 상한
+    recipe_selftest_timeout_sec: int = 60      # 제안 때 자기 시험(API 안에서 바로)
+    recipe_run_timeout_sec: int = 180          # 실데이터 실행(플랫폼 잡)
+    recipe_selftest_concurrency: int = 2       # API 안에서 동시에 도는 자기 시험 수
+    recipe_result_cap_kb: int = 256            # DB 에 담는 결과 상한(넘으면 앞부분 + 산출 파일)
+    recipe_stdout_cap_kb: int = 32             # 실행 기록에 담는 stdout 꼬리 상한
+    # 등록된 레시피를 파일로 내보내는 자리(기동 때 여기서 읽어 들인다). 상대값이면 platform/ 기준.
+    recipe_export_dir: str = "recipes"
+
     # --- stcx(356대 클러스터) 전각도 낙하 — 게이트웨이 MCP 경유 ---
     # **파일을 나른다.** cae00 `/data` 와 stcx `/data` 는 다른 저장소다 — 같은 경로를 보지
     # 않으므로 제출 전에 stcx 대시보드(:5010)의 청크 업로드로 덱을 올려야 한다.
@@ -160,6 +173,12 @@ class Settings(BaseSettings):
         if p is None or str(p) in ("", "."):
             return None
         return p
+
+    @property
+    def recipe_export_path(self) -> Path:
+        """등록된 레시피를 파일로 내보내는 절대 경로. 상대값이면 platform/ 기준으로 푼다."""
+        p = Path(self.recipe_export_dir)
+        return p if p.is_absolute() else (_PLATFORM_ROOT / p)
 
     def model_post_init(self, _ctx) -> None:
         # In production, refuse to run with the dev placeholder secrets.
