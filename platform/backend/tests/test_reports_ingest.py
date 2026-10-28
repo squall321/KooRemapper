@@ -118,3 +118,39 @@ async def test_ingest_impact(db):
         assert top and re.fullmatch(r"F\d+", str(top[0].identity.get("face")))
     finally:
         await _cleanup(db, u, s)
+
+
+@pytest.mark.skipif(not _SPHERE.exists(), reason="sphere 샘플 없음")
+async def test_sphere_ingest_writes_blocks_and_detail_reads_them(db):
+    # 반입이 곁파일을 쓰고, 상세 질의가 그것으로 원본과 같은 답을 내고, 없어지면 다시 만들고, 지우면 같이 지운다.
+    from app.reports import blockstore, parser
+    u, s = await _mk_user_session(db)
+    try:
+        raw = _SPHERE.read_bytes()
+        rep = await svc.ingest_report(db, s, filename="Test_001_report.html", raw=raw)
+        f = await db.get(SessionFile, rep.source_file_id)
+        html = storage.abs_path(f.rel_path)
+        meta = blockstore.read_meta(html)
+        assert blockstore.is_fresh(meta, f.sha256)
+
+        full = parser.extract_embedded_data(raw.decode("utf-8", "replace"))
+        r = full["results"][5]
+        key = r.get("folder") or r["angle"]["name"]
+        pid = int(next(iter(r["parts"])))
+        got = await svc.part_series(db, rep, key, pid)
+        assert got["stress_ts"] is not None
+        assert got == parser.part_series(full, "sphere", key, pid)
+        assert (await svc.blocks(db, rep)) == meta["blocks"]
+
+        blockstore.remove(html)  # 곁파일이 없어져도 첫 상세 질의가 다시 만든다
+        await svc.hotspots(db, rep)
+        assert blockstore.is_fresh(blockstore.read_meta(html), f.sha256)
+
+        # results 아래 각도 경로는 그 각도를 합쳐 읽는다 — 시계열이 빠지지 않는다
+        one = await svc.block(db, rep, "results", path="5.parts", max_bytes=10**9)
+        assert one["value"] == r["parts"]
+
+        await svc.delete_report(db, rep)
+        assert not blockstore.sidecar_dir(html).exists()
+    finally:
+        await _cleanup(db, u, s)

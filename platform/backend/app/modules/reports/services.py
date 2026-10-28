@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import json
 
 from app.models import ImpactCase, ImpactReport, Session, SessionFile
-from app.reports import analyze, parser
+from app.reports import analyze, blockstore, parser
 from app.reports.scenario import ScenarioParseError, summarize_scenario
 from app.modules.sessions import services as sess_svc
 from app.shared import storage
@@ -36,6 +36,9 @@ _SORT_COLS = {
 
 
 logger = logging.getLogger("koorm.reports")
+
+# 곁파일(blockstore)을 새로 만드는 일은 한 번에 하나 — 1,000각도 리포트는 만드는 동안 전체를 메모리에 올린다(약 3 GB).
+_BLOCK_BUILD_LOCK = asyncio.Lock()
 
 async def _store_report_html(session: Session, filename: str, raw: bytes) -> SessionFile:
     """리포트 HTML 을 세션 디렉토리에 저장하고 SessionFile(kind=report) 로 기록.
@@ -224,7 +227,10 @@ async def ingest_report(
     """
     text = raw.decode("utf-8", errors="replace")
     # 파싱을 스레드로 오프로드(대형 HTML JSON 로드가 이벤트 루프를 막지 않게).
-    study = await asyncio.to_thread(parser.parse_html, text, kind_hint=kind_hint)
+    # 임베드 데이터는 한 번만 푼다 — sphere 면 같은 데이터로 곁파일(blockstore)을 쓴다.
+    data = await asyncio.to_thread(parser.extract_embedded_data, text)
+    del text
+    study = await asyncio.to_thread(parser.parse_data, data, kind_hint=kind_hint)
     cases = study.get("cases") or []
     if not cases:
         raise ValueError(
@@ -319,6 +325,13 @@ async def ingest_report(
     await _link_revision(db, report)
     await db.commit()
     await db.refresh(report)
+    if report.kind == "sphere":
+        # 곁파일은 상세 질의의 빠른 길일 뿐이다 — 못 써도 반입은 성공이고, 첫 상세 질의가 다시 만든다.
+        try:
+            async with _BLOCK_BUILD_LOCK:
+                await asyncio.to_thread(blockstore.write, storage.abs_path(file_row.rel_path), data, file_row.sha256)
+        except Exception as e:  # noqa: BLE001 — 어떤 실패든 반입을 되돌리지 않는다
+            logger.warning("report %s: 곁파일을 못 썼다(%s) — 상세 질의는 원본을 읽는다", report.id, e)
     return report
 
 
@@ -995,8 +1008,7 @@ async def angle_group_stats(
     return {"report_id": report.id, **res}
 
 
-async def _load_html_data(db: AsyncSession, report: ImpactReport) -> tuple[dict, str]:
-    """원본 HTML 을 다시 파싱해 임베드 데이터(dict)와 kind 를 돌려준다."""
+async def _report_source(db: AsyncSession, report: ImpactReport) -> tuple[Path, SessionFile]:
     if report.source_file_id is None:
         raise ValueError("원본 리포트 HTML 이 없어 상세를 복원할 수 없습니다.")
     f = await db.get(SessionFile, report.source_file_id)
@@ -1005,20 +1017,65 @@ async def _load_html_data(db: AsyncSession, report: ImpactReport) -> tuple[dict,
     p = storage.abs_path(f.rel_path)
     if not p.exists():
         raise ValueError("원본 리포트 HTML 실물이 없습니다.")
+    return p, f
+
+
+async def _load_html_data(db: AsyncSession, report: ImpactReport) -> tuple[dict, str]:
+    """원본 HTML 을 다시 파싱해 임베드 데이터(dict)와 kind 를 돌려준다."""
+    p, _f = await _report_source(db, report)
     text = await asyncio.to_thread(p.read_text, encoding="utf-8", errors="replace")
     data = await asyncio.to_thread(parser.extract_embedded_data, text)
     return data, report.kind
 
 
+async def _load_detail_data(db: AsyncSession, report: ImpactReport, *,
+                            case_key: str | None = None,
+                            case_index: int | None = None) -> tuple[dict, str]:
+    """상세 질의용 데이터. sphere 는 곁파일의 가벼운 본(+ 고른 각도의 시계열), 나머지는 원본.
+
+    가벼운 본에는 `results[i].parts[pid].*_ts` 가 없다 — 시계열이 필요한 자리는 그 각도를 고르거나
+    (case_key · case_index) 원본(`_load_html_data`)을 쓴다. 곁파일이 없거나 원본 sha 와 다르면 한 번
+    만들고, 만드는 동안 이미 쥔 전체 데이터를 그대로 돌려준다.
+    """
+    if report.kind != "sphere":
+        return await _load_html_data(db, report)
+    p, f = await _report_source(db, report)
+    meta = await asyncio.to_thread(blockstore.read_meta, p)
+    if not blockstore.is_fresh(meta, f.sha256):
+        async with _BLOCK_BUILD_LOCK:
+            meta = await asyncio.to_thread(blockstore.read_meta, p)
+            if not blockstore.is_fresh(meta, f.sha256):
+                data, kind = await _load_html_data(db, report)
+                try:
+                    await asyncio.to_thread(blockstore.write, p, data, f.sha256)
+                except OSError as e:
+                    logger.warning("report %s: 곁파일을 못 썼다(%s) — 원본으로 답한다", report.id, e)
+                return data, kind
+    try:
+        slim = await asyncio.to_thread(blockstore.load_slim, p)
+        n = int(meta.get("n_cases") or 0)
+        idx = (meta.get("case_index") or {}).get(case_key) if case_key is not None else case_index
+        if idx is not None and -n <= idx < n:
+            idx %= n
+            heavy = await asyncio.to_thread(blockstore.load_case, p, idx)
+            blockstore.merge_case(slim, idx, heavy)
+    except (OSError, ValueError, KeyError, IndexError) as e:
+        # 곁파일이 깨졌다 — 지우고 원본으로 답한다(다음 질의가 다시 만든다).
+        logger.warning("report %s: 곁파일을 못 읽었다(%s) — 지우고 원본으로 답한다", report.id, e)
+        await asyncio.to_thread(blockstore.remove, p)
+        return await _load_html_data(db, report)
+    return slim, report.kind
+
+
 async def case_energy(db: AsyncSession, report: ImpactReport, case_key: str | None) -> dict:
-    """케이스 에너지/접촉 상세(원본 재파싱). deep=에너지밸런스·접촉, sphere/impact=하중경로."""
-    data, kind = await _load_html_data(db, report)
+    """케이스 에너지/접촉 상세. deep=에너지밸런스·접촉, sphere/impact=하중경로(최상위 energy_flows)."""
+    data, kind = await _load_detail_data(db, report)
     return await asyncio.to_thread(parser.case_energy, data, kind, case_key)
 
 
 async def part_series(db: AsyncSession, report: ImpactReport, case_key: str, part_id: int) -> dict:
-    """케이스·파트 시계열(원본 재파싱, 다운샘플)."""
-    data, kind = await _load_html_data(db, report)
+    """케이스·파트 시계열(다운샘플). sphere 는 곁파일에서 그 각도만 합쳐 읽는다."""
+    data, kind = await _load_detail_data(db, report, case_key=case_key)
     return await asyncio.to_thread(parser.part_series, data, kind, case_key, part_id)
 
 
@@ -1029,16 +1086,35 @@ async def part_energy_series(db: AsyncSession, report: ImpactReport, part_id: in
 
 
 async def blocks(db: AsyncSession, report: ImpactReport) -> dict:
-    """임베드 블록 전수 목록(원본 재파싱) — `read_by_parser` 로 해석 여부를 숨기지 않는다."""
-    data, _kind = await _load_html_data(db, report)
+    """임베드 블록 전수 목록 — `read_by_parser` 로 해석 여부를 숨기지 않는다.
+
+    sphere 는 곁파일을 만들 때 **전체 기준**으로 센 목록을 쓴다(가벼운 본으로 세면 results 가 작게 보인다).
+    """
+    data, _kind = await _load_detail_data(db, report)
+    if report.kind == "sphere":
+        p, f = await _report_source(db, report)
+        meta = await asyncio.to_thread(blockstore.read_meta, p)
+        if blockstore.is_fresh(meta, f.sha256):
+            return meta["blocks"]
     return await asyncio.to_thread(parser.list_blocks, data)
 
 
 async def block(db: AsyncSession, report: ImpactReport, name: str, *,
                 path: str | None = None, limit: int | None = None,
                 max_bytes: int = 200_000) -> dict:
-    """블록 하나(또는 하위 경로)를 꺼낸다 — 무엇이든 끝까지 되짚을 수 있게."""
-    data, _kind = await _load_html_data(db, report)
+    """블록 하나(또는 하위 경로)를 꺼낸다 — 무엇이든 끝까지 되짚을 수 있게.
+
+    sphere 의 `results` 는 가벼운 본에 시계열이 없다. `results.<순번>…` 이면 그 각도를 합쳐 읽고,
+    `results` 통째면 원본을 읽는다 — 시계열이 조용히 빠진 값을 내지 않는다.
+    """
+    first = (path or "").split(".")[0]
+    if report.kind == "sphere" and name == "results":
+        if first.lstrip("-").isdigit():
+            data, _kind = await _load_detail_data(db, report, case_index=int(first))
+        else:
+            data, _kind = await _load_html_data(db, report)
+    else:
+        data, _kind = await _load_detail_data(db, report)
     return await asyncio.to_thread(parser.get_block, data, name, path, max_bytes, limit)
 
 
@@ -1046,7 +1122,7 @@ async def hotspots(db: AsyncSession, report: ImpactReport, *, criterion: str | N
                    part_id: int | None = None, top: int = 20,
                    order: str = "stress_max", case_key: str | None = None) -> dict:
     """핫스팟 군집(deep · sphere) — 파트·판정기준별 공간 군집. sphere 는 각도 런마다 · 포락(envelope) 포함."""
-    data, _kind = await _load_html_data(db, report)
+    data, _kind = await _load_detail_data(db, report)
     return await asyncio.to_thread(
         parser.hotspot_clusters, data, criterion=criterion, part_id=part_id,
         top=top, order=order, case_key=case_key)
@@ -1055,8 +1131,8 @@ async def hotspots(db: AsyncSession, report: ImpactReport, *, criterion: str | N
 async def contact_profile(db: AsyncSession, report: ImpactReport, *, metric: str = "pf", top: int = 30,
                           case_key: str | None = None, matrix: bool = False,
                           axis_top: int | None = None) -> dict:
-    """파트쌍 × 각도(위치) 접촉 스칼라(sphere · impact) — 원본 재파싱."""
-    data, kind = await _load_html_data(db, report)
+    """파트쌍 × 각도(위치) 접촉 스칼라(sphere · impact)."""
+    data, kind = await _load_detail_data(db, report)
     return await asyncio.to_thread(
         parser.contact_profile, data, kind, metric=metric, top=top, case_key=case_key,
         matrix=matrix, axis_top=axis_top)
@@ -1070,7 +1146,7 @@ async def behavior_clusters(db: AsyncSession, report: ImpactReport) -> dict:
 
 async def analytics(db: AsyncSession, report: ImpactReport, block_name: str | None = None) -> dict:
     """큰 분석 블록 요약 — 생성기 `summary` 를 그대로 올린다(다시 계산하지 않는다)."""
-    data, _kind = await _load_html_data(db, report)
+    data, _kind = await _load_detail_data(db, report)
     return await asyncio.to_thread(parser.analytics_summary, data, block_name)
 
 
@@ -1112,15 +1188,15 @@ def media_list(report: ImpactReport, *, case_key: str | None = None,
 
 
 async def geometry(db: AsyncSession, report: ImpactReport) -> dict:
-    """공간 컨텍스트(부품 위치 시각화용, 원본 재파싱). impact=디바이스 외곽선+파트 footprint."""
-    data, kind = await _load_html_data(db, report)
+    """공간 컨텍스트(부품 위치 시각화용). impact=디바이스 외곽선+파트 footprint."""
+    data, kind = await _load_detail_data(db, report)
     return await asyncio.to_thread(parser.extract_geometry, data, kind)
 
 
 async def scatter(db: AsyncSession, report: ImpactReport, *, metric: str = "peak_stress",
                   part_id: int | None = None) -> dict:
-    """방향 섭동 산포 분석(sphere) — 원본 재파싱(swap 포함 authoritative angle 필요)."""
-    data, kind = await _load_html_data(db, report)
+    """방향 섭동 산포 분석(sphere) — 각도(swap 포함)와 스칼라만 쓴다."""
+    data, kind = await _load_detail_data(db, report)
     return await asyncio.to_thread(parser.scatter_analysis, data, kind, metric=metric, part_id=part_id)
 
 
@@ -1133,6 +1209,7 @@ async def delete_report(db: AsyncSession, report: ImpactReport) -> None:
         f = await db.get(SessionFile, fid)
         if f is not None:
             try:
+                blockstore.remove(storage.abs_path(f.rel_path))  # 곁파일(sphere 상세 질의용)도 같이
                 storage.abs_path(f.rel_path).unlink(missing_ok=True)
             except OSError:
                 pass
