@@ -117,7 +117,8 @@
 **결함 둘 — 운영 영상과 분석이 오류 없이 틀린다.**
 1. LS-PrePost 배치가 영상 24개 중 7개에서 어느 프레임부터 응력을 0 으로 그렸다. 같은 cfile 을 다시 돌리면 정상이다. 마지막 프레임의 「max = 0, at node# 0」 과 작은 파일 크기로 찾을 수 있다 — 10-28 직접 확인했다(같은 시각 정상 영상은 max 131.1, 결함 영상은 색 막대까지 전부 0). LS-PrePost VmPeak 는 4.6–5.2 GiB 라 상한 탓이 아니다. 시작 시점이 MemFree 약 1 GB 와 겹친 일이 셋 있었으나 반례도 있어 원인은 모른다.
 2. `koo_deep_report` 를 12 GiB 상한 아래 돌리면 분석 단계에서 죽는다 — 가족 파일마다 스레드 하나(249개)를 만들다 `std::system_error: Resource temporarily unavailable`(rc −6). software 백엔드는 상태 4,952 중 1,546 만 읽고 rc 0 으로 끝난다 — `StateDataParser::parse_all` 이 예외를 잡으면 그 파일 읽기를 멈춘다.
-- 둘 다 KooD3plotReader(운영 이미지의 koo_deep_report · unified_analyzer) 몫이다. 결함 보고는 사용자 확인 뒤 보낸다.
+- 둘 다 KooD3plotReader(운영 이미지의 koo_deep_report · unified_analyzer) 몫이다. 결함 보고는 10-28 저녁 보냈다.
+- **KooD3plotReader 회신(10-28 밤)** — K-1 원인 확정: LS-PrePost 4.12 는 상태별 메모리 합이 내부 예산(max_memory)을 넘으면 뒤 상태에 메모리를 안 주고 0 으로 그린다. 예산 기본값 0.8 × wxGetFreeMemory() 를 정적 링크 wx 3.0 이 /proc/meminfo 옛 형식으로 읽어 시작 시점 여유 메모리에 묶인다 → 비결정(우리가 본 「MemFree 약 1 GB 와 겹침」 과 맞다). 처방 — 작업자 HOME 의 lsppconf 예산을 크게, LS-PrePost 종료 코드 전달, ffprobe 산출물 검사. K-2 · K-3 은 예외 전파 · 가족 파일 결함은 실패 · 작업자 풀, K-4 는 렌더 실패 rc 3, P-1(개관 중복) 반영. 커밋 66c9f7b · 6a0d0d1 · c65bf31 · 441cfbd · efd6c6c(로컬 main, 배포 전 — VERSION 을 알려 주기로 함). P-2~P-4 는 그쪽 사용자 판단 뒤. 이 덱을 12 GiB 아래 분석하면 이제 rc 1 「메모리 부족」 으로 멈춘다(상태를 다 올리면 약 33 GB).
 
 **한계.** GPU · iso_clip 영상 · 차가운 캐시의 한 세션 · 「나머지 8.7 ms」 의 세부는 재지 않았다. HDD 값은 다른 측정과 디스크를 함께 써서 대부분 한 번씩만 쟀다. `movie mt 1` 은 579 초 동안 아무것도 내지 않아 멈췄다.
 

@@ -21,6 +21,8 @@
 - [ ] (P1 앞) 실제 HDF5Writer 꼴 · 상태 솎기 · 파트별 스케일 · 값 단위 예외 · libver latest · 두 번 읽기 스트리밍으로 다시 재기
 - [x] 단면 영상 시간 쪼개기(이 박스 · CPU 경로) — 4,952 상태 덱은 영상 하나 NVMe 약 100초 · HDD 157–312초(34초는 재현 안 됨) · 프레임당 20 ms 중 래스터 절반 · 한 세션 여러 단면은 7–10% · 운영 기본은 각도마다 세션 144개
 - [x] 결함 보고(KooD3plotReader) 보냄(10-28 저녁) — `docs/requests/kood3plotreader-section-video-defects-2026-10-28.md`(K-1~K-4 · P-1~P-4)
+- [x] KooD3plotReader 회신(10-28 밤) — K-1 원인 확정(LS-PrePost 메모리 예산) · K-1~K-4 · P-1 고침(로컬 커밋, 배포 대기)
+- [ ] 고친 운영 이미지가 배포되면(VERSION 통지) 단면 영상을 그 이미지로 다시 재 0 프레임이 사라졌는지 확인
 - [ ] (stcx viz 노드) GPU GL 로 movie 단계만 다시 재기 — 고쳐질 몫은 프레임당 약 10 ms(최대 2배)
 ### StepForge (요청)
 - [x] 낙하 모델 하나로 대응표(C-5) 범위 · 가중치(C-6) 품질 — 20/22(PID 20 · 21 누운 쐐기) · 거리 최대 5.5e-6 mm(패싯) · 곡면 짝 0.19 mm(StepForge P0, 10-28)
@@ -35,7 +37,7 @@
 
 ## P1 공통 바탕
 ### DynaForge
-- [ ] 후처리 연산 이관 — `operation="postprocess"` + `args_schema`(09-16 요청서 ①)
+- [ ] 후처리 연산 이관 — `operation="postprocess"` + `args_schema`(09-16 요청서 ①) · unified_analyzer 의 rc 3(분석 성공 · 렌더 실패)은 실패가 아니라 경고로 다룬다(10-28 KooD3plotReader K-4)
 - [ ] S1 추출 단계 — 후처리 잡에 KooD3plotReader 표면 HDF5 + 시간 창 + 기준 단면 조각(D-8)
 - [ ] manifest 표 — run_id · 방향 · θ/φ · 높이 · 첫 접촉 시각 · 원본 경로 · 변환기 판 · 크기 · 검증 · 보존 상태 · sha256
 - [ ] 검증 게이트 — 최대 요소가 표면일 때만 일치 요구 · 내부면 「표면 ≤ 정본」
