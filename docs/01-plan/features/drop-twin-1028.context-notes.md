@@ -33,7 +33,7 @@
 ## 7. 브라우저 뷰어는 DynaForge 화면에 (D-5 권장)
 S2 맵이 DynaForge 에 있으니 각도를 누르면 바로 열리는 자리가 자연스럽다. 입력은 StepForge glb(C-7) · 가중치(C-6) · S1(C-3) 이고, 계약이 같아서 StepForge 뷰어로 옮겨도 된다.
 
-## 8. S1 은 HDF5 를 기본으로 (D-2 권장)
+## 8. S1 은 HDF5 를 기본으로 (D-2 권장) — ★10-28 조사: Kit-CAE 3.0 은 HDF5 를 못 읽는다 (§17)
 KooD3plotReader 에 이미 있고, 제안서 기준 Kit-CAE 가 HDF5 를 기본으로 받는다(Zarr 는 어댑터가 필요하다고 제안서가 적었다). 다만 Kit-CAE 가 기대하는 HDF5 레이아웃은 P0 에 확인한다.
 
 ## 9. 1,000각도 리포트는 약 1 GB 다 — ★10-28 실측으로 고침: 484 MB (§11)
@@ -65,3 +65,9 @@ StepForge 요청을 보내는 도중 안전 분류기가 응답을 끊었다. �
 
 ## 16. SceneForge 리포는 아직 안 만들었다
 계획대로 리포 생성은 P1(이름 확정 뒤)이다. 이름은 사용자가 맡겼지만 리포 · HEAX 등록은 되돌리기 비싸고 GitHub 생성은 밖으로 나가는 일이라, 지금 만들지 사용자에게 물었다. [[feedback-confirm-naming]]
+
+## 17. Kit-CAE 는 HDF5 를 못 읽는다 — D-2 의 근거 하나가 틀렸다 (10-28 조사)
+§8 의 「제안서 기준 Kit-CAE 가 HDF5 를 기본으로 받는다」 는 틀렸다. Kit-CAE 3.0 의 가져오기 목록은 CGNS · EnSight Gold · VTK · NumPy 등이고 HDF5 · Zarr · d3plot 은 없다(원문 재확인). 공식 충돌 예제도 결과를 EnSight Gold 로 바꿔 쓴다.
+D-2(S1 = HDF5)의 권장은 그대로다 — 정본 추출본은 DynaForge 의 것이고 KooD3plotReader 가 이미 쓴다. 바뀐 것은 SceneForge 의 길이다. C-6 로 CAD 정점에 옮긴 변형을 USD 시간 샘플로 **직접** 쓰고(장면 계획의 변형층이 원래 그 꼴이다), Kit-CAE 는 FE 메시 위 필드를 볼 때만 EnSight Gold · VTK 로 바꿔 쓴다.
+같이 나온 것 — Omniverse 는 2026-05 부터 개발 · 운영 · 재배포가 무료다(FAQ 원문 확인). 지원만 NVAIE 유료다. 약관 본문과 NGC 다운로드 페이지는 아직 유료로 적어 NVIDIA 서면 확인이 남았다. RTX PRO 6000 은 `+gfx` MIG 프로파일이 있으나 Kit RTX 실동 기록은 없어 노드 시험이 남았다.
+「Kit-CAE 가 HDF5 를 받는다」 를 말하던 자리(총괄 D-2, SceneForge 계획 세 곳)와 라이선스 · MIG 리스크 넷을 같은 커밋에서 고쳤다. 전문 `docs/04-report/sceneforge-p0-research-1028.report.md`. [[feedback-flip-premise-sweep]]

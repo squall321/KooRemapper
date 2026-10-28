@@ -21,7 +21,9 @@
 ### StepForge (요청)
 - [x] 낙하 모델 하나로 대응표(C-5) 범위 · 가중치(C-6) 품질 — 20/22(PID 20 · 21 누운 쐐기) · 거리 최대 5.5e-6 mm(패싯) · 곡면 짝 0.19 mm(StepForge P0, 10-28)
 ### SceneForge (담당 미정)
-- [ ] Omniverse 라이선스 본문 · MIG 그래픽 · Kit-CAE 데이터 꼴 · viz 노드 헤드리스 · 노드 자원 · 렌더 한 개 시간 — 공개 문서 조사 진행 중 · 노드 확인은 viz 노드 접근 뒤
+- [x] 공개 문서 조사 — 라이선스(2026-05 무료 · 서면 확인 남음) · MIG(`+gfx` 있음) · Kit-CAE(HDF5 못 읽음) · 헤드리스 · NVENC — `docs/04-report/sceneforge-p0-research-1028.report.md`
+- [ ] viz 노드 확인 — `+gfx` MIG 위 Kit RTX · 헤드리스 mp4 · Apptainer Vulkan/NVENC · 노드 자원 · 렌더 한 개 시간(노드 접근 뒤)
+- [ ] NVIDIA 라이선스 서면 확인 — 누가 할지 미정
 - [ ] 렌더용 삼각화(파트 대각선 비율 편차) — StepForge 가 물음 · SceneForge 담당이 정한다
 ### 포털 (요청)
 - [ ] viz 노드 GPU 분배(C-13) 가능성 · viz 노드 ↔ 클러스터 저장소 경로(⑥) — 요청서 전달 대기

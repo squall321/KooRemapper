@@ -9,7 +9,7 @@
 | 3. 대응표(C-5) · 가중치(C-6) 가능성 | StepForge | 끝(StepForge 가 재서 보냄) |
 | 4. 대표 10각도 S1 압축률 · 게이트 | DynaForge | 진행 중 |
 | 5. 단면 영상 34초 쪼개기 | DynaForge | 진행 중 |
-| 6. Omniverse 라이선스 · MIG · Kit-CAE · 헤드리스 | SceneForge(담당 미정) | 공개 문서 조사 중 |
+| 6. Omniverse 라이선스 · MIG · Kit-CAE · 헤드리스 | SceneForge(담당 미정) | 공개 문서 조사 끝 · 노드 확인 남음 |
 | 7. viz 노드 GPU 분배 · 저장소 경로 | 포털 | 요청서 전달 대기 |
 
 ## 1. 1,000각도 리포트 반입 · 상세 질의
@@ -53,5 +53,10 @@ KooD3plotReader 에는 메시만 쓰는 HDF5 예제(`01_basic_hdf5_export`)가 �
 ## 5. 단면 영상 34초 쪼개기 — 진행 중
 운영 이미지의 `koo_deep_report --section-view`(LS-PrePost 4.12 · Xvfb · ffmpeg)를 같은 캠페인의 다른 각도로 돌려 열기 · 그리기 · 인코딩으로 나눠 잰다. 상한 12 GiB. GPU GL 비교는 viz 노드에서 한다.
 
-## 6. SceneForge 공개 문서 조사 — 진행 중
-Omniverse 라이선스 본문 · RTX PRO 6000 Blackwell 의 MIG 그래픽 · Kit-CAE 데이터 꼴 · 헤드리스 배치 렌더. MIG · 헤드리스는 결국 viz 노드에서 직접 확인해야 한다.
+## 6. SceneForge 공개 문서 조사 — 끝(노드 확인은 남음)
+전문은 `docs/04-report/sceneforge-p0-research-1028.report.md` 이다. 계획을 바꾸는 둘은 원문을 다시 열어 확인했다.
+- **라이선스** — 2026-05 부터 개발 · 운영 · 재배포 무료(FAQ). 지원은 NVAIE 유료($4,500/GPU/년). 약관 본문 · NGC 다운로드 페이지가 아직 유료로 적어 NVIDIA 서면 확인이 남았다.
+- **Kit-CAE** — 3.0 은 HDF5 · Zarr · d3plot 을 못 읽는다(CGNS · EnSight Gold · VTK · NumPy 등). D-2 의 근거 하나가 틀렸다 — SceneForge 는 USD 시간 샘플을 직접 쓴다.
+- **MIG** — RTX PRO 6000 3 에디션 모두 `+gfx` 프로파일이 있다. Kit RTX 가 그 위에서 돈다는 공개 기록은 없다.
+- **헤드리스 · 인코딩** — `--no-window` + 캡처 · Replicator, GPU 마다 NVENC 4기. 시간 샘플 USD → mp4 배치의 공식 예제는 없다. Apptainer 는 graphics · video capability 를 켜야 한다.
+- 노드에서만 판정되는 열 항목은 조사 보고서 끝에 있다.
