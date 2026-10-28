@@ -4,9 +4,10 @@
 The generated HTML files are self-contained: the entire dataset is embedded as a
 strict-JSON JavaScript object literal (deep → ``const DATA = {…}``, sphere →
 ``const REPORT_DATA = {…}``, impact → see ``normalize_impact``). We locate that
-assignment, balance-match its braces (string-aware, so braces inside part names
-or finding text don't fool us), ``json.loads`` it, detect the report ``kind``,
-and normalize to the common study schema documented in docs/impact-ingest/plan.md.
+assignment, decode the object in place with ``json.JSONDecoder.raw_decode`` (it
+reads strings properly, so braces inside part names or finding text don't fool
+it), detect the report ``kind``, and normalize to the common study schema
+documented in docs/impact-ingest/plan.md.
 
 Pure functions, no I/O — callers pass HTML text (or an already-parsed sidecar
 JSON dict). Never trusts field presence: part-id keys are strings and
@@ -24,40 +25,11 @@ import statistics
 # 모든 `const IDENT = {…}` 를 훑어 kind 시그니처가 잡히는 가장 큰 객체를 고른다.
 _ASSIGN_RE = re.compile(r"(?:const|let|var)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\{")
 _PREFERRED_IDENTS = ("DATA", "REPORT_DATA", "REPORT")
+_JSON_DECODER = json.JSONDecoder()
 
 
 class ReportParseError(ValueError):
     """HTML에서 임베드 데이터를 못 찾았거나 kind 를 판별하지 못함."""
-
-
-def _balanced_json(text: str, open_brace_idx: int) -> str:
-    """``text[open_brace_idx]`` 의 '{' 부터 짝이 맞는 '}' 까지의 JSON 문자열을 돌려준다.
-
-    문자열 리터럴 안의 중괄호/이스케이프를 인식해 건너뛴다(파트 이름의 백슬래시,
-    findings 본문의 중괄호 등에 속지 않도록).
-    """
-    depth = 0
-    in_str = False
-    esc = False
-    for k in range(open_brace_idx, len(text)):
-        c = text[k]
-        if in_str:
-            if esc:
-                esc = False
-            elif c == "\\":
-                esc = True
-            elif c == '"':
-                in_str = False
-        else:
-            if c == '"':
-                in_str = True
-            elif c == "{":
-                depth += 1
-            elif c == "}":
-                depth -= 1
-                if depth == 0:
-                    return text[open_brace_idx : k + 1]
-    raise ReportParseError("임베드 데이터의 중괄호 짝을 찾지 못했습니다.")
 
 
 def extract_embedded_data(html: str) -> dict:
@@ -85,9 +57,11 @@ def extract_embedded_data(html: str) -> dict:
             return (len(_PREFERRED_IDENTS), item[1])
 
     for ident, brace in sorted(candidates, key=_priority):
+        # 제자리 디코드 — 예전엔 파이썬으로 한 글자씩 괄호 짝을 맞춘 뒤 json.loads 했다.
+        # 1,000각도 sphere 리포트(484 MB)에서 그 괄호 맞추기만 17초였다(10-28 실측, raw_decode 는 4.5초).
         try:
-            obj = json.loads(_balanced_json(html, brace))
-        except (ReportParseError, json.JSONDecodeError):
+            obj, _end = _JSON_DECODER.raw_decode(html, brace)
+        except json.JSONDecodeError:
             continue
         if not isinstance(obj, dict):
             continue

@@ -441,3 +441,26 @@ def test_deferred_koo_data_script():
     )
     data = parser.extract_embedded_data(html)
     assert parser.detect_kind(data) == "impact"
+
+
+def test_extract_braces_in_strings_and_non_json_candidates():
+    # raw_decode 로 바꾼 뒤의 계약(10-28) — 문자열 안의 중괄호·이스케이프 따옴표에 속지 않고,
+    # 앞뒤의 비-JSON 대입식(JS 객체 리터럴)은 건너뛴다.
+    data = {
+        "project_name": "p",
+        "results": [],
+        "parts": {"1": {"name": 'Front\\Metal {x} "q"'}},
+        "findings": [{"text": "} { 닫는 괄호가 먼저 온다"}],
+    }
+    html = (
+        "<script>const cfg = {mode: 'x'};\n"
+        f"const REPORT_DATA = {json.dumps(data, ensure_ascii=False)};\n"
+        "const after = {b: 2};</script>"
+    )
+    assert parser.extract_embedded_data(html) == data
+
+
+def test_extract_truncated_json_raises():
+    # 잘린 임베드 데이터는 조용히 부분 객체가 되지 않고 ReportParseError 다.
+    with pytest.raises(parser.ReportParseError):
+        parser.extract_embedded_data('<script>const REPORT_DATA = {"a": [1, 2,</script>')

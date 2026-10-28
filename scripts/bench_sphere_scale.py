@@ -14,15 +14,14 @@ from app.reports import parser
 def _locate(text):
     m = re.search(r"REPORT_DATA\s*=\s*\{", text)
     brace = text.index("{", m.start())
-    js = parser._balanced_json(text, brace)
-    return brace, brace + len(js), js
+    obj, end = json.JSONDecoder().raw_decode(text, brace)
+    return brace, end, obj
 
 
 def build(fixture, n, out):
     t = open(fixture, encoding="utf-8", errors="replace").read()
-    brace, end, js = _locate(t)
-    d = json.loads(js)
-    ensure_ascii = all(ord(c) < 128 for c in js)
+    brace, end, d = _locate(t)
+    ensure_ascii = all(ord(c) < 128 for c in t[brace:end])
     r0 = d["results"][0]
     ga = math.pi * (3 - math.sqrt(5))
     res = []
@@ -62,18 +61,15 @@ def measure(path, mode):
     if mode == "ingest":  # 반입 — parse_html 한 번(그 뒤 DB 쓰기는 재지 않는다)
         study = parser.parse_html(text)
         out.update(parse_s=round(time.perf_counter() - t1, 3), cases=len(study["cases"]))
-    else:  # 상세 질의 — 매번 원본을 다시 읽고 임베드 JSON 을 다시 푼다(_load_html_data)
-        brace, end, js = _locate(text)
-        t2 = time.perf_counter()
-        data = json.loads(js)
+    else:  # 상세 질의 — 매번 원본을 다시 읽고 임베드 JSON 을 다시 푼다(_load_html_data 와 같은 길)
+        data = parser.extract_embedded_data(text)
         t3 = time.perf_counter()
-        del js
         ck = data["results"][-1]["folder"]
         parser.part_series(data, "sphere", ck, 3)
         t4 = time.perf_counter()
         parser.hotspot_clusters(data, case_key=ck)
         t5 = time.perf_counter()
-        out.update(balance_scan_s=round(t2 - t1, 3), json_loads_s=round(t3 - t2, 3),
+        out.update(extract_s=round(t3 - t1, 3),
                    part_series_s=round(t4 - t3, 4), hotspot_clusters_s=round(t5 - t4, 4),
                    detail_total_s=round(t5 - t0, 3))
     out["maxrss_mb"] = round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, 1)
