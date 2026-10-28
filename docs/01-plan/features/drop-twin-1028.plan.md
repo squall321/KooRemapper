@@ -44,7 +44,7 @@
 |---|---|---|---|---|---|
 | **C-1** | stcx 실행 기록 | 포털·stcx → DynaForge | JSON(`Job.external_ref`) — `registry_id` · `slurm_job_ids` · `work_dir` · `output_dir` + **(신규) 각도별 run 폴더·d3plot 경로** | job_id | 잡마다 |
 | **C-2** | 리포트 | stcx 후처리 → DynaForge | `sphere_report.html`(각도당 약 0.49 MB — 1,000각도면 484 MB, 10-28 합성 실측) | report_id(반입 때) | 반입마다 |
-| **C-3** | S1 경량 추출본 | 클러스터 후처리 잡(KooD3plotReader) → manifest 는 DynaForge, 파일은 SceneForge·브라우저 뷰어 | 각도마다 HDF5 — 공통 메시 1회(`/mesh`) · 타임스텝마다(`/states/timestep_N`) 표면 변위·응력·요소 삭제 · **기준 단면 조각** | run_id = report_id + case_key | 변환기 판 · 설정(시간 창·정밀도·파트) · sha256 |
+| **C-3** | S1 경량 추출본 | 클러스터 후처리 잡(KooD3plotReader) → manifest 는 DynaForge, 파일은 SceneForge·브라우저 뷰어 | 각도마다 HDF5 — 공통 메시 1회(`/mesh`) · 타임스텝마다(`/states/timestep_N`) 표면 변위·응력·요소 삭제 · **기준 단면 조각** | run_id = report_id + case_key | 변환기 판 · 설정(시간 창·정밀도·파트) · sha256 · 표면 규칙(10-28 StepForge 와 맞춤 — 겹친 절점 지운 육면체 면 · 사면체는 세 점 조합 넷). 10-28 원형(전 상태)은 각도당 204–670 MB(d3plot 의 1.1–3.7%) |
 | **C-4** | 덱 | DynaForge → StepForge | `.k` 파일 | 덱 sha256 | 덱 판 |
 | **C-5** | 파트 대응표 | StepForge → DynaForge·SceneForge | JSON — 머리(deck_sha256 · STEP 판) · pairs[pid · 파트 키(인스턴스 경로) · 정의 key · 근거 · 신뢰도] · unmatched[pid · 까닭] (10-28 StepForge 와 맞춘 초안) | (STEP 판, 덱 sha) | 대응 판 |
 | **C-6** | 매핑 가중치 | StepForge → SceneForge·브라우저 뷰어 | JSON 머리 + 리틀엔디언 바이너리 — 파트(인스턴스)마다 row_ptr uint32 · col uint32(FE 절점 id) · w float32 · dist float32(mm). 행 = glb 정점(mesh·primitive·정점 수를 머리에 적는다), 값 = 무게중심 좌표 3개, 템플릿 덱 기준(각도별 자세는 받는 쪽이 건다), 배열 오프셋은 8의 배수 (10-28 맞춘 초안) | 파트 키 | (STEP 내용 지문, 덱 sha256, 삼각화 설정, 빌드) |
@@ -97,7 +97,7 @@
 | 1,000각도 리포트 484 MB — 상세 질의 1회 22초 · 4 GB(10-28 실측) | 상세 질의가 막히고 API 메모리가 튄다 | 반입 때 블록 분리 저장(P1). 그 전에 raw_decode 로 약 5초 · 3.1 GB |
 | 덱 리더가 못 읽는 요소 꼴(누운 쐐기 — 10-28 PID 20 · 21) | 그 파트가 대응표에서 빠진다 | StepForge P1 보강. 그때까지 unmatched 와 까닭으로 남긴다 |
 | SceneForge 담당 미정(D-6) | P1 골격이 늦는다 | 계약 꼴만 맞춘 가짜 입력으로 골격을 먼저 세운다 |
-| 표면만 저장해 내부 최대가 빠진다 | 판정 오류 | 정본은 리포트 · 게이트는 최대 요소가 표면일 때만 일치 요구 |
+| 표면만 저장해 내부 최대가 빠진다(10-28 — 사면체 파트 1 이 11각도 중 2각도에서 내부 최대, 겉면이 0.65% · 4.84% 낮음) | 판정 오류 | 정본은 리포트 · 게이트는 최대 요소가 표면일 때만 일치 요구 |
 | 단면 내부 응력 | 단면 영상 불가 | S1 기준 단면 조각(D-8) |
 | 파손(요소 삭제) | CAD 표면에 안 보인다 | S1 삭제 플래그 · CAD 위에 얹는 방법(P4) |
 | Omniverse 라이선스·지원 | 비용·막힘 | 2026-05 부터 개발·운영·재배포 무료(NVIDIA FAQ, 10-28 확인). 약관 본문 · NGC 다운로드 페이지와 충돌해 NVIDIA 서면 확인. 지원은 NVAIE 유료($4,500/GPU/년) |
