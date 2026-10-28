@@ -8,7 +8,7 @@
 | 2. 각도별 덱 절점 · 요소 번호 | DynaForge | 끝 |
 | 3. 대응표(C-5) · 가중치(C-6) 가능성 | StepForge | 끝(StepForge 가 재서 보냄) |
 | 4. 대표 11각도 S1 압축률 · 게이트 | DynaForge | 끝(원형) |
-| 5. 단면 영상 34초 쪼개기 | DynaForge | 진행 중 |
+| 5. 단면 영상 시간 쪼개기 | DynaForge | 끝(이 박스 · CPU 경로) — 결함 둘 |
 | 6. Omniverse 라이선스 · MIG · Kit-CAE · 헤드리스 | SceneForge(담당 미정) | 공개 문서 조사 끝 · 노드 확인 남음 |
 | 7. viz 노드 GPU 분배 · 저장소 경로 | 포털 | 요청서 전달 대기 |
 
@@ -89,8 +89,37 @@
 - lasso 2.0.3 함정 — `state_filter={0}` 만 주면 버퍼 읽기가 꺼져 18 GB 를 한 번에 잡는다(`buffered_reading=True` 필수). NEIPH=6 을 두 번 세어 history 차원이 음수가 된다(`state_array_filter` 필수).
 - 운영 이미지 안 python 을 `-I` 없이 돌리면 호스트 `~/.local` 패키지(numpy 2.2.6 · h5py 3.15.1)가 섞인다.
 
-## 5. 단면 영상 34초 쪼개기 — 진행 중
-운영 이미지의 `koo_deep_report --section-view`(LS-PrePost 4.12 · Xvfb · ffmpeg)를 같은 캠페인의 다른 각도로 돌려 열기 · 그리기 · 인코딩으로 나눠 잰다. 상한 12 GiB. GPU GL 비교는 viz 노드에서 한다.
+## 5. 단면 영상 시간 쪼개기 — 끝(이 박스 · CPU 경로)
+**방법.** 운영 이미지의 `koo_deep_report --section-view` 와 그 렌더 경로(`unified_analyzer --render-only` — 도구가 만든 YAML · cfile 그대로)를 `Run_20260602_093237_801e2b`(4,952 상태)로 돌렸다. LS-PrePost 4.12(`lspp412_mesa`, Mesa 8.0.5 swrast) · Xvfb · 1280×720. `/data` HDD 원본과 NVMe 사본 둘에서, `prlimit --as` 12 GiB · 2코어 · nice 10. 기록 · 스크립트 · 운영 cfile · 비교 프레임은 `/data/koopark/drop_twin_p0/sv_proto/` 에 있다.
+
+**34초는 이 덱에서 재현되지 않는다.** 영상 하나(4,952 프레임 — 24 fps 로 206 초짜리)가 NVMe 에서 약 100 초(97–105), HDD 에서 157–312 초다. 시간이 상태(= 프레임) 수에 비례하므로(프레임당 약 20 ms) 34초 기록은 약 1,600 상태 덱이었을 것이다(추정).
+
+| 단계(NVMe) | 1회 | 2회 |
+|---|---|---|
+| Xvfb 기동 대기 | 0.5 s | 0.5 s |
+| LS-PrePost 기동 · 종료 | 1.3–1.6 s | — |
+| 열기(상태 헤더 훑기) | 0.8 s | 0.2 s |
+| 설정(fringe · view · drawcut) | 0.3–0.5 s | — |
+| movie 1280×720 — 프레임당 | 20.9 ms | 19.8 ms |
+| └ 인코딩 | 1.9 ms | 1.1 ms |
+| └ 해상도에 비례(래스터) | 10.5 ms | 9.8 ms |
+| └ 나머지(상태 4.4 MB 읽기 · 프린지 · 절단) | 8.5 ms | 8.9 ms |
+| movie 전체(4,952 프레임) | 102.0 s | 96.7 s |
+| 파트별 영상 ffmpeg 재인코딩 | 17.6 s | 17.4 s |
+| 도구 앞뒤(glstat · binout 파싱 / HTML) | 8.1–8.7 s / 2.2 s | — |
+
+- HDD 에서는 열기가 50–146 초다(초당 약 235번 무작위 읽기 — 상태 수에 비례). LS-PrePost 는 세션마다 d3plot 묶음 18.17 GB 를 다 읽고 RSS 는 4.3–4.5 GB 다.
+- **한 세션 여러 단면** — x · y · z 를 한 세션에 그리면 231–240 초, 세션 셋이면 257 초(NVMe)다. 7–10% 빠를 뿐이다(프레임 그리기가 남는다). HDD 에서는 358 → 225 초였으나 캐시가 달라 그대로 견줄 수 없다.
+- **운영 기본값은 각도마다 LS-PrePost 세션 144개다**(코드로 셈) — 개관 3, render_only 에서 개관 3 을 또(`_build_yaml`), 23파트 × 3축 × (단면 + iso_clip) 138. 세션마다 18 GB 를 읽는다. 144 × 약 90 초 ≈ 각도당 3.6 시간이다(추정).
+- **GPU 로 고쳐지는 것** — 해상도에 비례하는 프레임당 약 10 ms(movie 의 약 절반)뿐이다. 래스터가 0 이 돼도 movie 는 최대 2배 빨라진다. HDD 열기 · 세션마다 18 GB 읽기 · 프레임당 8.7 ms · 인코딩 · 144배의 세션 수는 GPU 와 무관하다.
+- **software 백엔드** — 같은 500 상태에서 LS-PrePost 보다 2.7배 느리다(프레임 49.6 ms 대 16.4 ms). 색 범위가 전 상태 공통이고 시간 · min/max 글자가 없다. 상태를 double 로 전부 올려 이 덱이면 약 36 GB 가 필요하다(계산).
+
+**결함 둘 — 운영 영상과 분석이 오류 없이 틀린다.**
+1. LS-PrePost 배치가 영상 24개 중 7개에서 어느 프레임부터 응력을 0 으로 그렸다. 같은 cfile 을 다시 돌리면 정상이다. 마지막 프레임의 「max = 0, at node# 0」 과 작은 파일 크기로 찾을 수 있다 — 10-28 직접 확인했다(같은 시각 정상 영상은 max 131.1, 결함 영상은 색 막대까지 전부 0). LS-PrePost VmPeak 는 4.6–5.2 GiB 라 상한 탓이 아니다. 시작 시점이 MemFree 약 1 GB 와 겹친 일이 셋 있었으나 반례도 있어 원인은 모른다.
+2. `koo_deep_report` 를 12 GiB 상한 아래 돌리면 분석 단계에서 죽는다 — 가족 파일마다 스레드 하나(249개)를 만들다 `std::system_error: Resource temporarily unavailable`(rc −6). software 백엔드는 상태 4,952 중 1,546 만 읽고 rc 0 으로 끝난다 — `StateDataParser::parse_all` 이 예외를 잡으면 그 파일 읽기를 멈춘다.
+- 둘 다 KooD3plotReader(운영 이미지의 koo_deep_report · unified_analyzer) 몫이다. 결함 보고는 사용자 확인 뒤 보낸다.
+
+**한계.** GPU · iso_clip 영상 · 차가운 캐시의 한 세션 · 「나머지 8.7 ms」 의 세부는 재지 않았다. HDD 값은 다른 측정과 디스크를 함께 써서 대부분 한 번씩만 쟀다. `movie mt 1` 은 579 초 동안 아무것도 내지 않아 멈췄다.
 
 ## 6. SceneForge 공개 문서 조사 — 끝(노드 확인은 남음)
 전문은 `docs/04-report/sceneforge-p0-research-1028.report.md` 이다. 계획을 바꾸는 둘은 원문을 다시 열어 확인했다.
