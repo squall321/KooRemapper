@@ -12,6 +12,8 @@
 - StepForge 요청 `docs/requests/stepforge-drop-twin-request-2026-10-28.md`
 - 포털 요청 `docs/requests/hwax-portal-drop-twin-request-2026-10-28.md`
 - 체크리스트 `drop-twin-1028.checklist.md` · 결정 노트 `drop-twin-1028.context-notes.md`
+- P0 실측 `docs/04-report/drop-twin-p0-1028.report.md`
+- 공유본 — Claude Docs 「낙하 트윈 계획」 https://claude.ai/artifact/HPP4zThLAtG2TwJu36L32E (원문은 이 파일이다. 바뀌면 이 파일을 먼저 고치고 옮긴다)
 
 ## 1. 원칙 다섯
 1. **포지마다 정본 하나.** 덱 바이트는 DynaForge, STEP 형상은 StepForge, 합성 장면은 SceneForge 가 갖는다. 같은 사실을 두 곳에서 갖지 않는다.
@@ -20,7 +22,7 @@
 4. **정본을 다시 계산하지 않는다.** 파트별 최대 응력의 정본은 DynaForge 가 반입한 리포트(원본 기준)다. 경량 추출본·장면·영상은 보기와 학습 전용이다.
 5. **기존 잡 무변경.** 지금 후처리 산출(리포트 HTML)과 판정은 그대로 두고 뒤에 붙인다. 붙인 단계가 실패해도 기존 결과는 영향이 없다.
 
-## 2. 새 포지 이름 — SceneForge (확정 전)
+## 2. 새 포지 이름 — SceneForge (권장안으로 착수 · 확정 전)
 - 이 포지가 갖는 정본은 **장면**이다. StepForge 형상과 DynaForge 결과에 자기 외관·카메라·조명·템플릿을 얹은 USD 장면(stage)이다.
 - 렌더러(Omniverse)는 그 장면을 그리는 도구일 뿐이라, 이름을 렌더러가 아니라 장면에 붙였다. 나중에 렌더러를 바꿔도 이름이 맞는다.
 - 기존 포지(DynaForge · StepForge · SignalForge · DocForge)와 같은 꼴이고, 포털 문서와 HEAXHub integrations 에서 충돌이 없다(10-28 확인).
@@ -41,13 +43,13 @@
 | # | 무엇 | 만드는 쪽 → 받는 쪽 | 꼴 | 신원 | 판(버전) |
 |---|---|---|---|---|---|
 | **C-1** | stcx 실행 기록 | 포털·stcx → DynaForge | JSON(`Job.external_ref`) — `registry_id` · `slurm_job_ids` · `work_dir` · `output_dir` + **(신규) 각도별 run 폴더·d3plot 경로** | job_id | 잡마다 |
-| **C-2** | 리포트 | stcx 후처리 → DynaForge | `sphere_report.html`(새 판 각도당 약 1 MB — 1,000각도면 약 1 GB) | report_id(반입 때) | 반입마다 |
+| **C-2** | 리포트 | stcx 후처리 → DynaForge | `sphere_report.html`(각도당 약 0.49 MB — 1,000각도면 484 MB, 10-28 합성 실측) | report_id(반입 때) | 반입마다 |
 | **C-3** | S1 경량 추출본 | 클러스터 후처리 잡(KooD3plotReader) → manifest 는 DynaForge, 파일은 SceneForge·브라우저 뷰어 | 각도마다 HDF5 — 공통 메시 1회(`/mesh`) · 타임스텝마다(`/states/timestep_N`) 표면 변위·응력·요소 삭제 · **기준 단면 조각** | run_id = report_id + case_key | 변환기 판 · 설정(시간 창·정밀도·파트) · sha256 |
 | **C-4** | 덱 | DynaForge → StepForge | `.k` 파일 | 덱 sha256 | 덱 판 |
-| **C-5** | 파트 대응표 | StepForge → DynaForge·SceneForge | JSON — 덱 PID ↔ StepForge 파트 키 · 근거(이름·형상 지문·부울 확인) · 확신도 | (STEP 판, 덱 sha) | 대응 판 |
-| **C-6** | 매핑 가중치 | StepForge → SceneForge·브라우저 뷰어 | 파트마다 희소행렬(CSR) — FE 표면 절점 → CAD 정점 | 파트 키 | (STEP 판, 덱 sha, 테셀레이션 설정) |
-| **C-7** | CAD 장면 | StepForge → SceneForge·브라우저 뷰어 | glb(이미 있음 — 정점 `_PARTID`) · **USD(신규)** | 파트 키 | STEP 판 |
-| **C-8** | 재질 이름·밀도 | StepForge → SceneForge | C-7 안에 파트마다 싣는다(StepForge 가 STEP 에서 직접 읽는다) | 파트 키 | STEP 판 |
+| **C-5** | 파트 대응표 | StepForge → DynaForge·SceneForge | JSON — 머리(deck_sha256 · STEP 판) · pairs[pid · 파트 키(인스턴스 경로) · 정의 key · 근거 · 신뢰도] · unmatched[pid · 까닭] (10-28 StepForge 와 맞춘 초안) | (STEP 판, 덱 sha) | 대응 판 |
+| **C-6** | 매핑 가중치 | StepForge → SceneForge·브라우저 뷰어 | JSON 머리 + 리틀엔디언 바이너리 — 파트(인스턴스)마다 row_ptr uint32 · col uint32(FE 절점 id) · w float32 · dist float32(mm). 행 = glb 정점(mesh·primitive·정점 수를 머리에 적는다), 값 = 무게중심 좌표 3개, 템플릿 덱 기준(각도별 자세는 받는 쪽이 건다), 배열 오프셋은 8의 배수 (10-28 맞춘 초안) | 파트 키 | (STEP 내용 지문, 덱 sha256, 삼각화 설정, 빌드) |
+| **C-7** | CAD 장면 | StepForge → SceneForge·브라우저 뷰어 | glb(이미 있음 — 정점 `_PARTID`, 단위 m) · USD(누가 만들지는 D-9) | 파트 키 | STEP 판 |
+| **C-8** | 재질 이름·밀도 | StepForge → SceneForge | 파트 표(C-5 · C-6 · glb extras)에 이름 · 밀도 · 값의 출처를 싣는다(StepForge 가 STEP 에서 직접 읽는다) | 파트 키 | STEP 판 |
 | **C-9** | 외관 라이브러리 | SceneForge 소유 | 재질 이름 → 외관(MDL·PBR · 색 · 마감) | 재질 이름 | 라이브러리 판 |
 | **C-10** | 렌더 요청 | 포털 절차(또는 DynaForge 화면) → SceneForge | JSON — `{report_id, case_key, mode: report|test_repro, scale: 1|N, template, camera: template|calibration_id, outputs}` | request_id | 요청마다 |
 | **C-11** | 렌더 결과 | SceneForge → DynaForge | mp4·정지 화면 + 메타(배율·템플릿·판·원 run_id) | render_id | 렌더마다 |
@@ -58,7 +60,7 @@
 | 단계 | DynaForge | StepForge | SceneForge | 포털 |
 |---|---|---|---|---|
 | **P0 확인·실측** | 1,000각도 리포트 반입·질의 실측 · 대표 10각도 S1 압축률·게이트 오차(클러스터) · 단면 영상 34초를 열기·그리기·인코딩으로 쪼개 재기(viz 노드) | 낙하 모델 하나로 대응표·가중치 가능성 | Omniverse 라이선스 본문 · MIG 그래픽 · Kit-CAE 의 HDF5 꼴 · viz 노드 헤드리스 렌더 | viz 노드 GPU 분배 가능성 · cae00↔stcx 저장소 경로 |
-| **P1 공통 바탕** | `postprocess` 연산 이관 · S1 추출 단계 · manifest · 검증 게이트 · 반입 블록 분리(1 GB 대비) | C-5 대응표 · C-6 가중치 · C-7 USD | 리포 세우기(이름 확정 뒤) · 제어면 골격 | C-1 · C-13 · 절차 사슬에 S1 |
+| **P1 공통 바탕** | `postprocess` 연산 이관 · S1 추출 단계 · manifest · 검증 게이트 · 반입 블록 분리(1,000각도 484 MB — 상세 질의 1회 22초 · 4 GB 실측) | C-5 대응표 · C-6 가중치 · 덱 리더 축퇴 꼴 보강 · C-7 USD(D-9) | 리포 세우기(이름 확정 뒤) · 제어면 골격 | C-1 · C-13 · 절차 사슬에 S1 |
 | **P2 브라우저 뷰어 + S2** | 구면 위험도 맵 보강(3D·보간·허용비·임계·상위 N) · 브라우저 변형 뷰어 | (C-6·C-7 을 그대로 씀) | — | — |
 | **P3 보고 mp4** | 렌더 결과 반입(C-11 → 리포트 미디어) | — | USD 장면 합성 · 외관 라이브러리 · 템플릿 · 위험 상위 N mp4 | SceneForge 등록·SSO·배포 · 절차에 렌더 |
 | **P4 시험 재현** | — | — | 카메라 교정 · ×1 · 시간 동기 · 시험-해석 나란히 · 파손 표현 | C-12 시험 자료 길 |
@@ -77,6 +79,9 @@
 | D-6 | SceneForge 담당 | 새 스택이라 전담이 필요 |
 | D-7 | 외관 데이터 출처 | CAD 색 정보 · 디자인팀 자산 · 직접 만드는 라이브러리 중에서 |
 | D-8 | 단면 영상 유지 | 유지하면 S1 에 기준 단면 조각을 담는다(표면만으로는 자른 면을 못 그린다) |
+| D-9 | USD 를 누가 만드나(10-28 StepForge P0 에서 생김) | **SceneForge 가 glb + 파트 표에서** — 장면 정본이 SceneForge 이고, StepForge 에 pxr 의존을 넣지 않는다. StepForge 도 이 결정을 기다린다 |
+
+10-28 지금 — D-1 · D-2 · D-3 · D-5 · D-8 은 권장안으로 착수했다(확정 아님). D-4 · D-6 · D-7 · D-9 는 미정이다.
 
 ## 7. 검증 기준
 - **P0** — 실측표가 나온다(압축률 · 게이트 오차 · 1,000각도 질의 시간 · 렌더 단계별 시간 · 라이선스·MIG 답).
@@ -89,7 +94,9 @@
 | 리스크 | 영향 | 대응 |
 |---|---|---|
 | viz 노드가 클러스터 저장소를 못 읽는다 | S3·S4 데이터 길 | 각도 단위 복사(S3) · 일괄 이동은 S4 때 결정(D-3) |
-| 1,000각도 리포트가 약 1 GB | 상세 질의마다 원본 재파싱 · API 메모리 | 반입 때 블록 분리 저장(P1) |
+| 1,000각도 리포트 484 MB — 상세 질의 1회 22초 · 4 GB(10-28 실측) | 상세 질의가 막히고 API 메모리가 튄다 | 반입 때 블록 분리 저장(P1). 그 전에 raw_decode 로 약 5초 · 3.1 GB |
+| 덱 리더가 못 읽는 요소 꼴(누운 쐐기 — 10-28 PID 20 · 21) | 그 파트가 대응표에서 빠진다 | StepForge P1 보강. 그때까지 unmatched 와 까닭으로 남긴다 |
+| SceneForge 담당 미정(D-6) | P1 골격이 늦는다 | 계약 꼴만 맞춘 가짜 입력으로 골격을 먼저 세운다 |
 | 표면만 저장해 내부 최대가 빠진다 | 판정 오류 | 정본은 리포트 · 게이트는 최대 요소가 표면일 때만 일치 요구 |
 | 단면 내부 응력 | 단면 영상 불가 | S1 기준 단면 조각(D-8) |
 | 파손(요소 삭제) | CAD 표면에 안 보인다 | S1 삭제 플래그 · CAD 위에 얹는 방법(P4) |

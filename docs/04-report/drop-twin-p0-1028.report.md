@@ -1,0 +1,57 @@
+# 낙하 트윈 P0 실측 (2026-10-28)
+
+계획 `docs/01-plan/features/drop-twin-1028.plan.md` · 체크리스트 `drop-twin-1028.checklist.md` · 결정 노트 `drop-twin-1028.context-notes.md`
+
+| 항목 | 담당 | 상태 |
+|---|---|---|
+| 1. 1,000각도 리포트 반입 · 상세 질의 | DynaForge | 끝 |
+| 2. 각도별 덱 절점 · 요소 번호 | DynaForge | 끝 |
+| 3. 대응표(C-5) · 가중치(C-6) 가능성 | StepForge | 끝(StepForge 가 재서 보냄) |
+| 4. 대표 10각도 S1 압축률 · 게이트 | DynaForge | 진행 중 |
+| 5. 단면 영상 34초 쪼개기 | DynaForge | 진행 중 |
+| 6. Omniverse 라이선스 · MIG · Kit-CAE · 헤드리스 | SceneForge(담당 미정) | 공개 문서 조사 중 |
+| 7. viz 노드 GPU 분배 · 저장소 경로 | 포털 | 요청서 전달 대기 |
+
+## 1. 1,000각도 리포트 반입 · 상세 질의
+**방법.** 1각도 새 판 고정본(`/data/koopark/report_fixtures/sphere_hotspot_v1018/report.html`, 1.08 MB)의 `results[0]` 을 N 번 복제해 N각도 합성 리포트를 만들었다. 각도(피보나치 격자) · 폴더 이름 · contact_profile 의 각도 축은 N 으로 늘리고, energy_flows 는 생성기처럼 상위 60 각도에만 둔다. 스크립트는 `scripts/bench_sphere_scale.py` 다.
+- 반입 = `parser.parse_html` 한 번이다. 그 뒤 DB 쓰기는 재지 않았다.
+- 상세 질의 = `_load_html_data` 와 같은 길이다 — 원본 읽기 → 임베드 JSON 찾기(`_balanced_json`) → `json.loads` → `part_series` · `hotspot_clusters`.
+- 경로마다 새 프로세스로 돌려 최대 RSS 를 따로 쟀다. `prlimit --as` 8 GiB · `taskset -c 2,3` · 시작 전 MemAvailable ≥ 25~30 GB 확인.
+
+| 각도 | 파일 | 반입 | 반입 최대 RSS | 상세 질의 1회 | 괄호 맞추기 | json.loads | 질의 자체 | 상세 최대 RSS |
+|---|---|---|---|---|---|---|---|---|
+| 10 | 6.0 MB | 0.25 s | 58 MB | 0.26 s | 0.21 s | 0.035 s | 0.002 s | 58 MB |
+| 50 | 28 MB | 1.2 s | 239 MB | 1.17 s | 0.96 s | 0.16 s | 0.007 s | 239 MB |
+| 100 | 53 MB | 2.3 s | 443 MB | 2.28 s | 1.84 s | 0.34 s | 0.013 s | 442 MB |
+| 200 | 101 MB | 4.5 s | 838 MB | 4.37 s | 3.52 s | 0.66 s | 0.025 s | 838 MB |
+| 1,000 | 484 MB | 23.5 s (+읽기 0.8 s) | 4.0 GB | 22.4 s | 17.1 s | 4.3 s | 0.13 s | 4.0 GB |
+
+- 선형이다. 각도당 약 0.49 MB · 반입 약 23 ms · 메모리 약 4 MB 다.
+- 상세 질의 22초 중 질의 자체는 0.13초다. 나머지는 원본을 다시 읽고 푸는 비용이다.
+- 괄호 맞추기를 `json.JSONDecoder().raw_decode(text, brace)` 로 바꾸면 1,000각도에서 4.5초 · 3.1 GB 다(같은 조건 한 번 측정).
+- 계획서의 「1,000각도 ≈ 1 GB」 는 1각도 파일 크기(고정 템플릿 약 0.35 MB 포함)를 그대로 곱한 값이었다. 고쳤다.
+
+**한계.** 합성이라 각도마다 같은 데이터를 복제했다(파싱 비용은 같다). 핫스팟 · 하중경로 크기가 각도마다 다른 실물 1,000각도 새 판 리포트는 이 박스에 없다. 반입 뒤 DB 쓰기는 재지 않았다. API 는 같은 일을 `asyncio.to_thread` 로 하므로, 상세 질의 하나마다 API 프로세스가 약 4 GB 를 더 쓴다.
+
+## 2. 각도별 덱 절점 · 요소 번호
+- 대상 — `/data/koopark/Test_005_Fibonacci_100` 의 100각도 `output/Run_*/DropSet.k` 와 템플릿 `MinimumModel.k`(sha256 `74612159ec729936e262d90fe50813a6de8397d3c6631488e09b70e5c29d0319`, 22파트, 원 STEP 없음).
+- 요소 — 100각도 전부, 템플릿 요소 43,657개의 번호 · PID · 연결이 같다(전수 대조, 어긋남 0).
+- 절점 — 템플릿 28,293개 번호가 모두 있고 좌표는 강체 회전만 있다(4각도 × 절점 200개 표본, 쌍 거리 차 최대 9e-8 mm).
+- 각도마다 낙하판 PID 23 이 절점 2,883 · 요소 1,800 으로 더해진다.
+- 템플릿은 `*ELEMENT_SOLID` 2줄 꼴, 각도 덱은 1줄 꼴이다. 처음에 2줄 꼴을 못 읽는 파서로 재서 「연결 0개 일치」 가 나왔고, 고쳐 다시 쟀다.
+- 결론 — C-6 가중치는 템플릿에서 한 번 셈해 100각도에 다 쓴다. 무게중심 좌표는 강체 회전에 변하지 않으므로 각도별 자세는 받는 쪽이 장면에 건다.
+
+## 3. StepForge P0 (StepForge 가 재서 보냄)
+- 기준 — StepForge f1daaa4 의 실제 잡 함수다. 원형 스크립트와 보고서는 StepForge 쪽 `var/work/a61/p0/REPORT.md` 에 있다.
+- A(우리 덱) — 덱 → 패싯 STEP → glb 5.5초. C-5 덮음 20/22(근거 deck_pid, 신뢰도 1.0). PID 20 `Bond\Bond` · 21 `Display\Display` 는 「누운 쐐기」(8슬롯에 서로 다른 절점 6개, n5=n6 · n7=n8)를 덱 리더가 못 읽어 빠졌다(P1 보강). C-6 — CAD 정점 1,112개, FE 겉면까지 거리 최대 5.5e-6 mm(패싯이라 사실상 항등), 0.65초, nnz 3,336(약 49 KB).
+- B(StepForge 쪽 실물 곡면 CAD + 그 CAD 로 지은 덱 18파트) — C-6 18/18, 정점 5,376개, nnz 16,128(약 237 KB), 0.74초. 곡면 파트의 거리 최대 0.17~0.19 mm(파트 대각선의 0.09~0.44%)는 FE 겉면의 현 오차다.
+- 맞춘 C-5 · C-6 꼴은 계획서 §4 의 C-5 · C-6 행에 적었다.
+
+## 4. 대표 10각도 S1 압축률 · 게이트 — 진행 중
+KooD3plotReader 에는 메시만 쓰는 HDF5 예제(`01_basic_hdf5_export`)가 있고, 표면 · 시간 창 · 상태를 함께 내는 S1 도구는 아직 없다. 그래서 운영 이미지(SmartTwinPostprocessor.sif — lasso · h5py 3.15.1 · numpy 2.2.6) 안에서 원형으로 잰다. 상한 8 GiB.
+
+## 5. 단면 영상 34초 쪼개기 — 진행 중
+운영 이미지의 `koo_deep_report --section-view`(LS-PrePost 4.12 · Xvfb · ffmpeg)를 같은 캠페인의 다른 각도로 돌려 열기 · 그리기 · 인코딩으로 나눠 잰다. 상한 12 GiB. GPU GL 비교는 viz 노드에서 한다.
+
+## 6. SceneForge 공개 문서 조사 — 진행 중
+Omniverse 라이선스 본문 · RTX PRO 6000 Blackwell 의 MIG 그래픽 · Kit-CAE 데이터 꼴 · 헤드리스 배치 렌더. MIG · 헤드리스는 결국 viz 노드에서 직접 확인해야 한다.
