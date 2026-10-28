@@ -10,7 +10,7 @@
 | 4. 대표 11각도 S1 압축률 · 게이트 | DynaForge | 끝(원형) |
 | 5. 단면 영상 시간 쪼개기 | DynaForge | 끝(이 박스 · CPU 경로) — 결함 둘 |
 | 6. Omniverse 라이선스 · MIG · Kit-CAE · 헤드리스 | SceneForge(담당 미정) | 공개 문서 조사 끝 · 노드 확인 남음 |
-| 7. viz 노드 GPU 분배 · 저장소 경로 | 포털 | 요청서 전달 대기 |
+| 7. viz 노드 GPU 분배 · 저장소 경로 · tbot 접근 | 포털 | 요청 보냄(10-28 저녁) — 답 대기 |
 
 ## 1. 1,000각도 리포트 반입 · 상세 질의
 **방법.** 1각도 새 판 고정본(`/data/koopark/report_fixtures/sphere_hotspot_v1018/report.html`, 1.08 MB)의 `results[0]` 을 N 번 복제해 N각도 합성 리포트를 만들었다. 각도(피보나치 격자) · 폴더 이름 · contact_profile 의 각도 축은 N 으로 늘리고, energy_flows 는 생성기처럼 상위 60 각도에만 둔다. 스크립트는 `scripts/bench_sphere_scale.py` 다.
@@ -122,7 +122,7 @@
 **한계.** GPU · iso_clip 영상 · 차가운 캐시의 한 세션 · 「나머지 8.7 ms」 의 세부는 재지 않았다. HDD 값은 다른 측정과 디스크를 함께 써서 대부분 한 번씩만 쟀다. `movie mt 1` 은 579 초 동안 아무것도 내지 않아 멈췄다.
 
 ## 6. SceneForge 공개 문서 조사 — 끝(노드 확인은 남음)
-전문은 `docs/04-report/sceneforge-p0-research-1028.report.md` 이다. 계획을 바꾸는 둘은 원문을 다시 열어 확인했다.
+전문은 SceneForge 리포 `/home/koopark/claude/SceneForge/docs/research/p0-omniverse-2026-10-28.md` 이다(10-28 옮김). 계획을 바꾸는 둘은 원문을 다시 열어 확인했다.
 - **라이선스** — 2026-05 부터 개발 · 운영 · 재배포 무료(FAQ). 지원은 NVAIE 유료($4,500/GPU/년). 약관 본문 · NGC 다운로드 페이지가 아직 유료로 적어 NVIDIA 서면 확인이 남았다.
 - **Kit-CAE** — 3.0 은 HDF5 · Zarr · d3plot 을 못 읽는다(CGNS · EnSight Gold · VTK · NumPy 등). D-2 의 근거 하나가 틀렸다 — SceneForge 는 USD 시간 샘플을 직접 쓴다.
 - **MIG** — RTX PRO 6000 3 에디션 모두 `+gfx` 프로파일이 있다. Kit RTX 가 그 위에서 돈다는 공개 기록은 없다.
