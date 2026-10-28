@@ -38,6 +38,7 @@
 ## P1 공통 바탕
 ### DynaForge
 - [ ] 후처리 연산 이관 — `operation="postprocess"` + `args_schema`(09-16 요청서 ①) · unified_analyzer 의 rc 3(분석 성공 · 렌더 실패)은 실패가 아니라 경고로 다룬다(10-28 KooD3plotReader K-4)
+  - ★KooSlurm 회신(10-28 밤) — A(f8552d8c 잡 REST 8개 jwt + 소유 검사) · B·D(0a8c9cca `output/return_manifest.json` v1, 리포트 없으면 FAILED 3) · C(2e257262 `POST /api/jobs/<id>/postprocess`) · 계약 `docs/REQUEST-result-return.md` §6(4dc924f3). 로컬 커밋 — 푸시 · 운영 반영은 사용자 결정 대기, 실제 Slurm 잡 검증 전. 신원은 「예약한 사용자 본인의 kst_ PAT」 — DynaForge 가 그것을 어떻게 얻을지 사용자 결정 필요
   - 막힌 자리(10-28 밤 확인) — `platform/docs/REQUEST-postprocess-operation.md` §7-1 은 클러스터 선행이 서야 착수: KooSlurm `docs/REQUEST-result-return.md` A(파일 REST 인증 — `/files/download` 가 아직 `@optional_jwt`) · B(귀환 매니페스트 — 코드에 없음) · C · D, pyKooCAE `docs/REQUEST-drop-impact-result-return.md` A(부분충격 리포트) · C — ★B(초속 이중 합산)는 9-17 `5baae8d` 에서 이미 고쳐져 SIF v97+ 에 있다(나는 커밋 메시지 키워드로만 찾아 놓쳤다 — pyKooCAE 회신으로 바로잡음). 두 세션에 진행 요청함(사용자 지시) — pyKooCAE 는 A + E(output_dir) → C → E(deep 건너뛰기) → D 순으로 착수
 - [ ] S1 manifest · 검증 게이트 — KooD3plotReader S1 추출기 꼴(요청 §6-1)이 정해진 뒤
 - [ ] S1 추출 단계 — 후처리 잡에 KooD3plotReader 표면 HDF5 + 시간 창 + 기준 단면 조각(D-8)
