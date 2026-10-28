@@ -8,7 +8,8 @@
 - [x] SceneForge 창립 계획
 - [x] StepForge 요청서 · 포털 요청서 작성
 - [x] StepForge 요청 발송(10-28) — 받아서 P0 까지 해 왔다
-- [x] 포털 요청 발송(10-28 저녁 — 사용자 확인 뒤) · §7 P0 덧붙임 · ⑦ viz 노드 tbot 접근
+- [x] 포털 요청 발송(10-28 저녁 — 사용자 확인 뒤) · §7 P0 덧붙임 · ⑦ viz 노드 tbot 접근 → 포털 답(10-28 밤)으로 viz 노드는 stcx 노드(사용자 확인), ⑦ 은 필요 없다
+- [x] SmartTwinMCP 에 C-1(각도별 run 폴더 · d3plot 경로) 요청 보냄(10-28 밤 — 포털이 SmartTwinMCP 몫이라 함, 사용자 승인)
 - [x] 공유 문서 — Claude Docs 「낙하 트윈 계획」(총괄 · SceneForge 두 탭) https://claude.ai/artifact/HPP4zThLAtG2TwJu36L32E
 - [x] 사용자 확인(10-28 저녁) — D-1 SceneForge · D-4 사용자 본인 · D-6 전용 Claude 세션 + 검토 · D-7 CAD 색 + 라이브러리 · D-9 SceneForge 가 USD (D-2 · 3 · 5 · 8 은 권장안으로 착수, 확정 아님)
 
@@ -20,16 +21,17 @@
 - [ ] (P1 앞) 실제 HDF5Writer 꼴 · 상태 솎기 · 파트별 스케일 · 값 단위 예외 · libver latest · 두 번 읽기 스트리밍으로 다시 재기
 - [x] 단면 영상 시간 쪼개기(이 박스 · CPU 경로) — 4,952 상태 덱은 영상 하나 NVMe 약 100초 · HDD 157–312초(34초는 재현 안 됨) · 프레임당 20 ms 중 래스터 절반 · 한 세션 여러 단면은 7–10% · 운영 기본은 각도마다 세션 144개
 - [x] 결함 보고(KooD3plotReader) 보냄(10-28 저녁) — `docs/requests/kood3plotreader-section-video-defects-2026-10-28.md`(K-1~K-4 · P-1~P-4)
-- [ ] (viz 노드) GPU GL 로 movie 단계만 다시 재기 — 고쳐질 몫은 프레임당 약 10 ms(최대 2배)
+- [ ] (stcx viz 노드) GPU GL 로 movie 단계만 다시 재기 — 고쳐질 몫은 프레임당 약 10 ms(최대 2배)
 ### StepForge (요청)
 - [x] 낙하 모델 하나로 대응표(C-5) 범위 · 가중치(C-6) 품질 — 20/22(PID 20 · 21 누운 쐐기) · 거리 최대 5.5e-6 mm(패싯) · 곡면 짝 0.19 mm(StepForge P0, 10-28)
 ### SceneForge (담당 미정)
 - [x] 공개 문서 조사 — 라이선스(2026-05 무료 · 서면 확인 남음) · MIG(`+gfx` 있음) · Kit-CAE(HDF5 못 읽음) · 헤드리스 · NVENC — `docs/04-report/sceneforge-p0-research-1028.report.md`
-- [ ] viz 노드 확인 — `+gfx` MIG 위 Kit RTX · 헤드리스 mp4 · Apptainer Vulkan/NVENC · 노드 자원 · 렌더 한 개 시간. 접근은 STE 와 같은 tbot(사용자 결정) — 봇 역할은 포털 ⑦ 답 대기
+- [ ] viz 노드 확인 — `+gfx` MIG 위 Kit RTX · 헤드리스 mp4 · Apptainer Vulkan/NVENC · 노드 자원 · 렌더 한 개 시간. 접근은 `ssh stcx` + `srun`(viz 노드 = stcx 노드, 10-28 사용자 확인). GPU 는 챗 LLM 과 공유 — 읽기만 먼저, MIG · 렌더 시험은 시간을 잡고
 - [ ] NVIDIA 라이선스 서면 확인 — SceneForge 몫(사용자 결정 10-28)
 - [ ] 렌더용 삼각화(파트 대각선 비율 편차) — StepForge 가 물음 · SceneForge 담당이 정한다
 ### 포털 (요청)
-- [ ] viz 노드 GPU 분배(C-13) 가능성 · viz 노드 ↔ 클러스터 저장소 경로(⑥) · tbot 봇 역할(⑦) — 요청 보냄(10-28 저녁), 답 대기
+- [x] 포털 답(10-28 밤) — viz 노드는 stcx 노드 · C-13 은 실행기 칸이 아니라 stcx Slurm 제출 · ⑥ 은 같은 클러스터 마운트일 가능성 · ⑦ 불필요 · ① 은 SmartTwinMCP 몫 · ③ 등록 순서는 P3 · ④ 절차 YAML 은 P1 · ⑤ 시험 자료는 P4(사용자)
+- [ ] ⑥ 마운트 확인 — cae00 에서 사람이 `ssh stcx srun -p <viz 파티션> -w <viz 노드> ls <output_dir>`(읽기만)
 
 ## P1 공통 바탕
 ### DynaForge

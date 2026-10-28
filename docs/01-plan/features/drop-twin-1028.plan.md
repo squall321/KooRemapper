@@ -35,14 +35,14 @@
 | **DynaForge 후처리 모듈** | 반입 리포트와 각도별 파트 최대(정본) · S1 추출본 manifest · 검증 게이트 결과 | 후처리 연산 이관(`postprocess`) · S1 추출 단계 · 검증 게이트 · S2 구면 위험도 맵 · 브라우저 변형 뷰어 · 렌더 결과를 리포트 미디어로 묶기 | StepForge 대응표·가중치·CAD 장면 · SceneForge 렌더 결과 · stcx 실행 기록 |
 | **StepForge** | STEP 형상 · 재질 이름 · 파트 신원 · FE↔CAD 대응표 · 매핑 가중치 · CAD 장면(glb + 파트 표) | 덱→STEP · 파트 대응 · 가중치 계산(USD 는 SceneForge — D-9) | DynaForge 덱(파일) · S1 표면 메시(파일) |
 | **SceneForge (신규)** | USD 장면 합성 · 외관 라이브러리 · 렌더 템플릿 · 시험 카메라 교정 · 렌더 결과물 · GPU 작업 순서 | 보고용 mp4 · 시험 재현 렌더 · (선택) 스트리밍 | StepForge 장면·가중치 · DynaForge S1 추출본·manifest · 시험 영상 |
-| **포털(HWAXPortal)** | 절차(사슬) · stcx 연결 · 실행기(노드 분배) · 앱 등록·SSO·배포 | 사슬 잇기 · stcx 실행 기록 넘기기 · viz 노드 GPU 분배 · SceneForge 등록 | 각 포지 도구 |
+| **포털(HWAXPortal)** | 절차(사슬) · stcx 연결 · 실행기(노드 분배) · 앱 등록·SSO·배포 | 사슬 잇기 · SceneForge 등록 · stcx 도구 중계(실행 기록은 SmartTwinMCP 가 낸다) | 각 포지 도구 |
 
 ## 4. 교환 계약
 모든 교환은 **파일 + id + 해시**다. 받는 쪽은 해시가 맞을 때만 쓴다.
 
 | # | 무엇 | 만드는 쪽 → 받는 쪽 | 꼴 | 신원 | 판(버전) |
 |---|---|---|---|---|---|
-| **C-1** | stcx 실행 기록 | 포털·stcx → DynaForge | JSON(`Job.external_ref`) — `registry_id` · `slurm_job_ids` · `work_dir` · `output_dir` + **(신규) 각도별 run 폴더·d3plot 경로** | job_id | 잡마다 |
+| **C-1** | stcx 실행 기록 | SmartTwinMCP(stcx) → DynaForge(포털은 중계) | JSON(`Job.external_ref`) — `registry_id` · `slurm_job_ids` · `work_dir` · `output_dir` + **(신규) 각도별 run 폴더·d3plot 경로** | job_id | 잡마다 |
 | **C-2** | 리포트 | stcx 후처리 → DynaForge | `sphere_report.html`(각도당 약 0.49 MB — 1,000각도면 484 MB, 10-28 합성 실측) | report_id(반입 때) | 반입마다 |
 | **C-3** | S1 경량 추출본 | 클러스터 후처리 잡(KooD3plotReader) → manifest 는 DynaForge, 파일은 SceneForge·브라우저 뷰어 | 각도마다 HDF5 — 공통 메시 1회(`/mesh`) · 타임스텝마다(`/states/timestep_N`) 표면 변위·응력·요소 삭제 · **기준 단면 조각** | run_id = report_id + case_key | 변환기 판 · 설정(시간 창·정밀도·파트) · sha256 · 표면 규칙(10-28 StepForge 와 맞춤 — 겹친 절점 지운 육면체 면 · 사면체는 세 점 조합 넷). 10-28 원형(전 상태)은 각도당 204–670 MB(d3plot 의 1.1–3.7%) |
 | **C-4** | 덱 | DynaForge → StepForge | `.k` 파일 | 덱 sha256 | 덱 판 |
@@ -54,7 +54,7 @@
 | **C-10** | 렌더 요청 | 포털 절차(또는 DynaForge 화면) → SceneForge | JSON — `{report_id, case_key, mode: report|test_repro, scale: 1|N, template, camera: template|calibration_id, outputs}` | request_id | 요청마다 |
 | **C-11** | 렌더 결과 | SceneForge → DynaForge | mp4·정지 화면 + 메타(배율·템플릿·판·원 run_id) | render_id | 렌더마다 |
 | **C-12** | 시험 영상·카메라 교정 | 시험실(포털 경유) → SceneForge | 영상 + 교정(내부·외부 매개변수 · fps · 충돌 시각 t0) | test_id ↔ (report_id, case_key) | 교정 판 |
-| **C-13** | viz 노드 분배 | 포털 실행기 → SceneForge 작업자 | 실행기 계약 확장 — 노드 종류(gpu/viz) 지정 | job_id | 실행기 판 |
+| **C-13** | 렌더 잡 제출 | SceneForge → stcx Slurm(viz 노드 GPU 파티션) | `ssh stcx` 로 sbatch(SmartTwinMCP · 챗 LLM 과 같은 길) · GPU 파티션 · gres. 노드는 Slurm 이 고른다 — 10-28 viz 노드가 stcx 노드로 확인됐다 | Slurm job id | 작업자 SIF 판 |
 
 ## 5. 단계
 | 단계 | DynaForge | StepForge | SceneForge | 포털 |
@@ -73,7 +73,7 @@
 |---|---|---|
 | D-1 | 새 포지 이름 | **SceneForge** |
 | D-2 | S1 꼴 | **HDF5** — KooD3plotReader 에 이미 있다. ⚠ Kit-CAE 3.0 은 HDF5 를 못 읽는다(10-28 조사 — CGNS · EnSight Gold · VTK · NumPy 등만). SceneForge 는 C-6 로 CAD 정점에 옮긴 변형을 USD 시간 샘플로 직접 쓰고, Kit-CAE 가 필요할 때만 EnSight Gold · VTK 로 바꾼다. Zarr 는 PhysicsNeMo 학습에 맞추려면 그때 변환 |
-| D-3 | S1 추출본 자리 | 클러스터 저장소(원본 옆)에 두고 **요청한 각도만 cae00 로 복사**(S3). 일괄 이동은 S4 때 정한다 |
+| D-3 | S1 추출본 자리 | 클러스터 저장소(원본 옆)에 둔다. 렌더는 같은 stcx 의 viz 노드에서 제자리로 읽고(10-28 — 마운트 확인 남음), 브라우저 뷰어용으로만 **요청한 각도를 cae00 로 복사**한다(S3). 일괄 이동은 S4 때 정한다 |
 | D-4 | 원본 d3plot 정리 승인자 | 사람 승인 필수 — 누구인지 정해 주십시오 |
 | D-5 | 브라우저 뷰어 자리 | **DynaForge 화면** — S2 맵을 누르면 바로 그 각도가 열린다. 데이터 계약(C-3·C-6·C-7)은 같으므로 StepForge 뷰어로 옮겨도 된다 |
 | D-6 | SceneForge 담당 | 새 스택이라 전담이 필요 |
@@ -93,11 +93,12 @@
 ## 8. 리스크
 | 리스크 | 영향 | 대응 |
 |---|---|---|
-| viz 노드가 클러스터 저장소를 못 읽는다 | S3·S4 데이터 길 | 각도 단위 복사(S3) · 일괄 이동은 S4 때 결정(D-3) |
+| viz 노드(stcx)가 S1 저장소를 못 읽는다 — 같은 클러스터라 마운트일 가능성이 크다 | S3·S4 데이터 길 | cae00 에서 `ssh stcx srun … ls` 로 확인. 못 읽으면 각도 단위 복사 · 일괄 이동은 S4 때(D-3) |
+| viz 노드 GPU 를 챗 LLM 과 나눠 쓴다(노드마다 한 벌 · cgroup 격리 없음 — 10-28 포털) | 렌더가 LLM 을 죽이거나 LLM 이 렌더를 막는다 · MIG 전환은 LLM 을 끊는다 | 읽기 확인만 먼저 · MIG · 렌더 시험은 노드 관리자와 챗 LLM 운영(포털)과 시간을 잡는다 |
 | 1,000각도 리포트 484 MB — 상세 질의 1회 22초 · 4 GB(10-28 실측) | 상세 질의가 막히고 API 메모리가 튄다 | 반입 때 블록 분리 저장(P1). 그 전에 raw_decode 로 약 5초 · 3.1 GB |
 | 덱 리더가 못 읽는 요소 꼴(누운 쐐기 — 10-28 PID 20 · 21) | 그 파트가 대응표에서 빠진다 | StepForge P1 보강. 그때까지 unmatched 와 까닭으로 남긴다 |
 | SceneForge 는 새 전용 세션이 맡는다(D-6) — 렌더 스택 경험이 쌓이기 전 | P1 골격이 늦는다 | 계약 꼴만 맞춘 가짜 입력으로 골격을 먼저 세운다 |
-| 운영 단면 영상이 어느 프레임부터 응력 0 으로 그려진다(10-28 — 24개 중 7개, 다시 돌리면 정상) | 리포트 영상이 오류 없이 틀린다 | KooD3plotReader 결함 보고(사용자 확인 뒤) · 영상마다 마지막 프레임 max = 0 검사 |
+| 운영 단면 영상이 어느 프레임부터 응력 0 으로 그려진다(10-28 — 24개 중 7개, 다시 돌리면 정상) | 리포트 영상이 오류 없이 틀린다 | KooD3plotReader 에 결함 보고함(10-28) · 영상마다 마지막 프레임 max = 0 검사 |
 | koo_deep_report 가 상태 일부만 읽고 rc 0 으로 끝난다(software 백엔드 4,952 중 1,546) · 가족 파일마다 스레드라 상한 아래 죽는다 | 분석 · 영상이 조용히 잘린다 | 같은 결함 보고 · 읽은 상태 수 검사 |
 | 표면만 저장해 내부 최대가 빠진다(10-28 — 사면체 파트 1 이 11각도 중 2각도에서 내부 최대, 겉면이 0.65% · 4.84% 낮음) | 판정 오류 | 정본은 리포트 · 게이트는 최대 요소가 표면일 때만 일치 요구 |
 | 단면 내부 응력 | 단면 영상 불가 | S1 기준 단면 조각(D-8) |

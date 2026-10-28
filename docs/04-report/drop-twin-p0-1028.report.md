@@ -10,7 +10,7 @@
 | 4. 대표 11각도 S1 압축률 · 게이트 | DynaForge | 끝(원형) |
 | 5. 단면 영상 시간 쪼개기 | DynaForge | 끝(이 박스 · CPU 경로) — 결함 둘 |
 | 6. Omniverse 라이선스 · MIG · Kit-CAE · 헤드리스 | SceneForge(담당 미정) | 공개 문서 조사 끝 · 노드 확인 남음 |
-| 7. viz 노드 GPU 분배 · 저장소 경로 · tbot 접근 | 포털 | 요청 보냄(10-28 저녁) — 답 대기 |
+| 7. viz 노드 길 · 저장소 경로 | 포털 | 답 받음(10-28 밤) — viz 노드는 stcx 노드(사용자 확인) · 마운트 확인 남음 |
 
 ## 1. 1,000각도 리포트 반입 · 상세 질의
 **방법.** 1각도 새 판 고정본(`/data/koopark/report_fixtures/sphere_hotspot_v1018/report.html`, 1.08 MB)의 `results[0]` 을 N 번 복제해 N각도 합성 리포트를 만들었다. 각도(피보나치 격자) · 폴더 이름 · contact_profile 의 각도 축은 N 으로 늘리고, energy_flows 는 생성기처럼 상위 60 각도에만 둔다. 스크립트는 `scripts/bench_sphere_scale.py` 다.

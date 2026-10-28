@@ -79,3 +79,11 @@
 - **S1** — 상태 4,952개 전부를 담은 원형이 각도당 204–670 MB(d3plot 18.2 GB 의 1.1–3.7%), 2–4분 · 2.6 GB 입니다. 정식 꼴(상태 솎기 · 파트별 스케일)로 줄일 여지가 큽니다.
 - **1,000각도 리포트** — 약 484 MB 입니다(앞서 적은 1 GB 는 틀렸습니다). DynaForge 상세 질의는 22초 → 6.7초로 고쳤고(`288afb7`), 블록 분리는 P1 입니다.
 - **R2 리포트의 단면 영상** — 운영 기본값이면 각도마다 LS-PrePost 세션이 144개 뜨고(세션마다 d3plot 18 GB 를 다 읽습니다), 영상 24개 중 7개가 어느 프레임부터 응력 0 으로 그려졌습니다(오류 없이). KooD3plotReader 에 결함 보고를 보냈습니다(`docs/requests/kood3plotreader-section-video-defects-2026-10-28.md`). R2 에서 나간 영상을 판독에 쓸 때 참고해 주십시오.
+
+## 8. 답을 받고 (10-28 밤)
+포털 답 — viz 노드 10대는 cae00 이 아니라 **stcx 노드**로 보인다(챗 LLM 가이드의 「stcx viz 노드 10대」, 노드 이름 꼴 icn401-0401-h06). **사용자가 stcx 노드라고 확인했다.** 이 요청서 §2 · ⑥ 의 「cae00 의 viz 노드」 는 틀렸다.
+- ② C-13 — 「실행기 칸」 이 아니다. 실행기(K1~K7)는 HWAXProd forge-launch 이고 GPU 가 없다. 렌더는 stcx Slurm(GPU 파티션 · gres)에 `ssh stcx` 로 sbatch 한다.
+- ⑥ — 같은 클러스터라 viz 노드가 S1 저장소를 마운트로 읽을 가능성이 크다. 확인은 cae00 에서 사람이 `ssh stcx srun -p <viz 파티션> -w <viz 노드> ls <output_dir>`(읽기만).
+- ⑦ — 필요 없다. tbot 은 cae00 → ste 헤드 길이다. viz 노드 읽기 확인은 `ssh stcx` 뒤 `srun … nvidia-smi -q` 다. 그 GPU 에는 챗 LLM 이 노드마다 한 벌 돌고 cgroup 격리가 없어, MIG 전환 · 렌더 시험은 노드 관리자와 챗 LLM 운영 둘 다와 시간을 잡는다.
+- ① — 포털은 stcx 도구를 중계만 한다. 각도별 run 폴더 · d3plot 경로는 SmartTwinMCP 에 따로 청했다(`docs/requests/smarttwinmcp-c1-run-paths-2026-10-28.md`).
+- ③ 등록 순서(HEAXHub 두 엔트리 → 권한표 · 타일 → 게이트웨이 위임 → PORT-MAP → 배포 줄)는 P3, 포트 8710 · 8711 · 5437 그대로 좋다. ④ 는 도구가 게이트웨이에 뜬 뒤(P1) R2a · R2b 에 단계 YAML 만 더한다. ⑤ 시험 자료는 P4 에 정한다(사용자).

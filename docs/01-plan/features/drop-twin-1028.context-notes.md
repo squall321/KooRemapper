@@ -92,3 +92,12 @@ D-2(S1 = HDF5)의 권장은 그대로다 — 정본 추출본은 DynaForge 의 �
 - 포털 요청은 보내기 전에 P0 결과로 고쳤다 — S1 크기 추정(약 200 MB)을 원형 실측 204–670 MB 로, 이름 확정, §7 덧붙임.
 - SceneForge 리포 `/home/koopark/claude/SceneForge` 를 세우고 계획 · P0 조사의 정본을 옮겼다(여기는 표지). GitHub 비공개 저장소는 이 박스의 gh 가 snap 이라 서비스 cgroup 에서 뜨지 않아 아직이다 — 저장된 자격 증명을 꺼내 우회하지 않았다.
 - StepForge 는 D-9 를 받아 USD 를 내지 않고, STEP 의 정의 색(#RRGGBB, 없으면 null)을 파트 표에 싣는다.
+
+## 21. viz 노드는 stcx 노드다 — 「cae00 의 viz 노드」 는 틀렸다 (10-28 밤)
+포털이 챗 LLM 가이드(「stcx viz 노드 10대」, icn401-0401-h06 꼴)를 근거로 짚었고 사용자가 확인했다. 바뀐 것 넷이다.
+- **접근** — tbot(cae00 → ste 헤드)이 아니라 `ssh stcx` + Slurm 이다. 사용자가 앞서 정한 「tbot 으로」 는 viz 노드가 ste 쪽이라고 본 결정이었고, 이 확인으로 대신한다.
+- **C-13** — 실행기(HWAXProd forge-launch, GPU 없음) 칸이 아니라 stcx Slurm 제출이다. 노드는 Slurm 이 고르므로 「앱이 노드를 고르지 않는다」 는 규율은 그대로다.
+- **S1** — 같은 클러스터라 viz 노드가 제자리로 읽을 가능성이 크다. 렌더 결과만 cae00 으로 온다(W-93 과 맞다). 마운트 확인은 사람이 cae00 에서 `srun … ls` 한 줄.
+- **GPU 를 챗 LLM 과 나눠 쓴다** — 노드마다 한 벌, cgroup 격리가 없다. MIG 전환은 LLM 을 끊으므로 노드 관리자와 챗 LLM 운영(포털) 둘 다와 시간을 잡는다.
+C-1(각도별 경로)은 포털이 아니라 SmartTwinMCP 몫이라 따로 요청했다(사용자 승인). ⑤ 시험 자료는 P4 에 정한다(사용자).
+「cae00 의 viz 노드」 · 「tbot 으로 viz 노드」 를 말하던 자리를 같은 커밋에서 고쳤다(총괄 C-13 · D-3 · 리스크, 체크리스트, P0 보고서, 포털 요청 §8, SceneForge 리포). [[feedback-flip-premise-sweep]]
