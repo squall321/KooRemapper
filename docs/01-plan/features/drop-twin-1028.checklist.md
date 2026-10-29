@@ -45,7 +45,7 @@
   - 막힌 자리(10-28 밤 확인) — `platform/docs/REQUEST-postprocess-operation.md` §7-1 은 클러스터 선행이 서야 착수: KooSlurm `docs/REQUEST-result-return.md` A(파일 REST 인증 — `/files/download` 가 아직 `@optional_jwt`) · B(귀환 매니페스트 — 코드에 없음) · C · D, pyKooCAE `docs/REQUEST-drop-impact-result-return.md` A(부분충격 리포트) · C — ★B(초속 이중 합산)는 9-17 `5baae8d` 에서 이미 고쳐져 SIF v97+ 에 있다(나는 커밋 메시지 키워드로만 찾아 놓쳤다 — pyKooCAE 회신으로 바로잡음). 두 세션에 진행 요청함(사용자 지시) — pyKooCAE 는 A + E(output_dir) → C → E(deep 건너뛰기) → D 순으로 착수
 - [ ] S1 manifest · 검증 게이트 — KooD3plotReader S1 추출기 꼴(요청 §6-1)이 정해진 뒤
 - [ ] S1 추출 단계 — 후처리 잡에 KooD3plotReader 표면 HDF5 + 시간 창 + 기준 단면 조각(D-8)
-- [ ] manifest 표 — run_id · 방향 · θ/φ · 높이 · 첫 접촉 시각 · 원본 경로 · 변환기 판 · 크기 · 검증 · 보존 상태 · sha256
+- [ ] manifest 표 — run_id · 방향 · θ/φ · 높이 · 첫 접촉 시각 · 원본 경로 · 변환기 판 · 크기 · 검증 · 보존 상태 · sha256 · **낙하 방향(`*INITIAL_VELOCITY` 그대로) · 바닥 평면(PID 23 기기 쪽 면의 점 · 법선)**(SceneForge 요청 10-29 — 덱이 기기를 안 돌리고 바닥 · 속도로 자세를 건다). 셈은 SIF 로 구운 후처리 단계에서(로컬 스크립트 아님)
 - [ ] 검증 게이트 — 최대 요소가 표면일 때만 일치 요구 · 내부면 「표면 ≤ 정본」
 - [x] 반입 블록 분리 — sphere 곁파일(slim + 각도별 시계열). 1,000각도 상세 질의 1회 0.34초 · 174 MB(처음 22.4초 · 4.0 GB). 계획 · 결과 `report-block-split-1028.plan.md`
 - [x] (빠른 길) 임베드 JSON 을 raw_decode 로 — 상세 1회 22.4초 → 6.7초 · 4.0 → 3.1 GB(`288afb7`, dev 반영 · 리포트 스모크 35/35 · 백엔드 672 통과)

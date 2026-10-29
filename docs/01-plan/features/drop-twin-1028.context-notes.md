@@ -119,3 +119,10 @@ LS-PrePost 4.12 는 상태별 메모리 합이 내부 예산을 넘으면 그 �
 - **운영 대시보드는 SSO 가 꺼져 있다** — `jwt_required` 가 모든 요청을 FULL_ACCESS_USER 로 넣는다(`jwt_middleware.py:118`). 토큰 없이 누구나 남의 잡 파일을 열 수 있고, A 는 운영에서 효과가 없다. 켜면 DynaForge 덱 업로드(`StcxUploader` — 업로드 라우트가 jwt + 'dashboard' 권한)가 401 이 된다. **사용자 결정 — 켜기 전에 영향부터 조사.** KooSlurm 호출자 목록이 왔다(`docs/sso_enable_20261029/callers.md`). 켜는 순간 신원이 admin → 실제 사용자로 바뀌므로 켜기 전 예약은 403 이 될 수 있다.
 - **7-1 지음**(`4ff9a79`) — 계획 · 결정 `postprocess-reservation-1028.plan.md` 「결정 기록」. 주소는 덱 업로드와 같은 `stcx_backend_url`(같은 backend_5010). 404 는 없는 잡도 같아서 `/info` 를 따로 본다(KooSlurm 제안). dev 는 `KOORM_GATEWAY_PAT` · `KOORM_STCX_BACKEND_URL` 이 비어 있어 stcx 제출과 후처리 예약이 둘 다 꺼짐이다(설정 값 존재만 확인, 값은 보지 않았다). 그래서 dev 스모크의 postprocess 는 「구성 안 됨」 이고, 실제 HTTP 길은 시험(MockTransport)만 쟀다.
 - **StepForge P1 운영 반영**(`009082d`) — 운영 산출 경로 · 열쇠는 체크리스트 P1 StepForge. 받은 파일 sha 여섯 일치.
+
+## 25. 각도별 자세는 기기가 아니라 바닥 · 초기 속도로 건다 — P0 「강체 회전」 정정 (10-29)
+
+- SceneForge(sceneforge-49) 지적 — S1 과 StepForge 가중치로 옮긴 CAD 정점이 두 각도 모두 강체 정합 R = I 였다. 덱 두 개를 직접 비교했다(api.sif 안 python) — fd1418 · c2559d `DropSet.k` 는 크기가 같고, 다른 줄은 **PID 23 절점 2,883줄 + `*INITIAL_VELOCITY` 한 줄뿐**이다. 기기(PID 1–22) 절점은 바이트까지 같다.
+- 그래서 P0 보고서의 「좌표는 강체 회전만 있다」 는 틀린 말이었다. 쌍 거리 차(9e-8 mm)로 재서 **항등과 회전을 가리지 못했다**. C-6 가중치는 그대로 맞는다. 다만 「각도별 자세는 받는 쪽이 건다」 의 재료가 S1 에 없으므로, C-3 manifest 가 각도마다 싣는다 — 초기 속도 벡터(덱 그대로, 유효숫자 4자리)와 바닥 평면(PID 23 기기 쪽 면 — 3층 × 961 절점 중 기기 쪽 층의 한 점과 법선, 덱 좌표 9자리로 셈). 실측 — 면 잔차 ≤ 6e-7 mm, 법선 ↔ −v̂ 0.007°, 틈 0.05 mm(두 각도).
+- StepForge 10-28 회신의 「템플릿을 낙하 자세로 돌리고」 도 기기 절점에는 맞지 않는다 — 그쪽에 알렸다.
+- 이 확인을 처음엔 로컬 python 으로 돌렸다가(numpy 없음 → 순수 파이썬) **사용자가 「왜 로컬로 하나, SIF 로 구워서 하고 있지 않나」** 고 짚었다. 같은 셈을 api.sif(numpy 구움)에서 다시 돌려 같은 값을 얻었다. manifest 값의 실제 셈은 SIF 로 구운 후처리 단계에 둔다.
