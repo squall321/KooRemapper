@@ -19,9 +19,13 @@
     mcp_server/venv/bin/python mcp_server/reports_smoke.py
 """
 import asyncio
+import hashlib
 import io
+import json
 import pathlib
+import shutil
 import sys
+import uuid
 import zipfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
@@ -36,6 +40,28 @@ HTML = ROOT / "impact_report.html"
 MEDIA = ROOT / "impact_report_data"
 #: 새 판 전각도 낙하 리포트(운영 이미지로 만든 고정본 — README 에 출처). 없으면 그 항만 건너뛴다.
 SPHERE_NEW = pathlib.Path("/data/koopark/report_fixtures/sphere_hotspot_v1018/report.html")
+# 렌더 결과(C-11) 폴더 — MCP 가 읽을 수 있는 자리여야 한다(allops_smoke 의 STAGE_ROOT 와 같은 규칙)
+RENDER_ROOT = pathlib.Path(__file__).resolve().parents[2] / "build" / "scratch" / "render_smoke"
+
+
+def _render_dir(report_id: str, case_key: str, *, broken: bool = False) -> pathlib.Path:
+    """SceneForge 렌더 결과 폴더 하나(render_result.json + mp4 · png). broken 이면 mp4 sha 를 틀리게 적는다."""
+    d = RENDER_ROOT / uuid.uuid4().hex
+    d.mkdir(parents=True)
+    mp4, png = b"\x00\x00\x00\x18ftypmp42" + b"x" * 64, b"\x89PNG\r\n\x1a\n" + b"y" * 32
+    (d / "render.mp4").write_bytes(mp4)
+    (d / "still_0.500ms.png").write_bytes(png)
+    out = lambda k, n, b: {"kind": k, "file": n, "bytes": len(b), "sha256": hashlib.sha256(b).hexdigest()}
+    outs = [out("mp4", "render.mp4", mp4), out("still", "still_0.500ms.png", png)]
+    if broken:
+        outs[0]["sha256"] = "0" * 64
+    (d / "render_result.json").write_text(json.dumps({
+        "format": "sceneforge.render_result", "version": 1, "render_id": "smoke-r1", "request_id": "smoke-q1",
+        "ok": True, "reason": None, "warnings": [],
+        "run": {"report_id": report_id, "case_key": case_key, "run_id": f"{report_id}:{case_key}"},
+        "outputs": outs,
+        "meta": {"mode": "report", "deform_scale": 10, "deform_label": "변형 ×10", "notice": "보기 전용"}}))
+    return d
 
 TOOLS = ("report_blocks", "report_block", "report_hotspots", "report_behavior_clusters",
          "report_analytics", "report_media", "report_image", "report_compare",
@@ -134,6 +160,19 @@ async def main():
                     txt[:160])
 
                 # 블록·군집·요약
+                # ── 렌더 결과(C-11) — 새 MCP 도구를 플랫폼으로 부른다(세는 관문은 안 부른 도구도 초록이다) ──
+                rd1 = _render_dir(rid, "F5_DOE_001")
+                ar = S._data(await s.call_tool("attach_render", {"report_id": rid, "path": str(rd1)})) or {}
+                chk("렌더 결과를 붙였다 (mp4 · png 둘)", ar.get("ok") is True and ar.get("stored") == 2, ar)
+                rm = S._data(await s.call_tool("report_media", {"report_id": rid, "role": "render"})) or {}
+                chk("렌더 그림은 더해졌고 번들 그림 16장은 그대로", rm.get("n_returned") == 2 and rm.get("n_total") == 18,
+                    {k: rm.get(k) for k in ("n_total", "n_returned")})
+                ar2 = S._data(await s.call_tool("attach_render", {"report_id": rid, "path": str(rd1)})) or {}
+                chk("같은 렌더를 다시 붙이면 바꾸는 것이 없다 (멱등)", ar2.get("already") is True, ar2)
+                bad = await s.call_tool("attach_render", {"report_id": rid, "path": str(_render_dir(rid, "F5_DOE_001", broken=True))})
+                chk("sha256 이 틀린 렌더는 통째로 거절한다", bad.isError and "sha256" in bad.content[0].text,
+                    bad.content[0].text[:200] if bad.content else bad)
+
                 bl = S._data(await s.call_tool("report_blocks", {"report_id": rid}))
                 chk("report_blocks — 블록 27 · 미해석 수를 숨기지 않는다",
                     bl.get("n_blocks") == 27 and bl.get("n_unread", 0) > 0, bl.get("n_blocks"))
@@ -234,6 +273,7 @@ async def main():
                         len(sg) == 22 and all(e.get("peak_force") is not None for e in sg)
                         and bool(se.get("flow_case_key")), se.get("flow_case_key"))
     finally:
+        shutil.rmtree(RENDER_ROOT, ignore_errors=True)
         with httpx.Client(base_url=S.API, timeout=120.0) as c:
             for r_id in (rid, srid):
                 if r_id:
