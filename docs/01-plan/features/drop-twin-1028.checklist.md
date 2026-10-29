@@ -65,7 +65,9 @@
 
 ## P3 보고 mp4
 - [ ] SceneForge — USD 장면 · 외관 라이브러리 초판 · 템플릿 2~3 · 상위 N mp4
-- [ ] DynaForge — 렌더 결과 반입(C-11 → 리포트 미디어)
+- [ ] DynaForge — 렌더 결과 반입(C-11 → 리포트 미디어). SceneForge 초안 `SceneForge/docs/contracts/c10-c11-render-request-result-draft-2026-10-29.md`(10-29) · 반입 쪽 의견 보냄 —
+  지금 `attach_media` 는 번들 반입 때 `report.media` 를 통째로 바꾼다 → 렌더는 **더하는 길**(render_id 멱등) · `run.case_key` 로 케이스에 붙임(리포트에 없는 키면 거절) · outputs 마다 sha256 · bytes 전부 맞아야(부분 반입 없음, 폴더 없는 이름만) · `ok: false` 는 렌더 기록으로만 · manifest sha 가 다르면 경고 · 전달은 zip 하나(가칭 `POST /reports/{id}/renders` + MCP)
+  - [ ] 명의 — 리포트 수정은 소유자만이라 붙이기도 소유자 명의만 된다. (a) 붙이기는 포털이 소유자 명의로(제안) (b) 같은 소속에 렌더 미디어 더하기 권한 — **사용자 결정**(포털 P3 때)
 - [ ] 포털 — SceneForge 등록·SSO·배포 · 절차에 렌더
 
 ## P4 시험 재현
