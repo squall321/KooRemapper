@@ -13,12 +13,12 @@
 SSO 켜기는 **이번에 하지 않는다**(§7 — 조건이 안 섰다).
 
 ## 1. cae00 — DynaForge 받기(update-all 뒤)
-이번 판에 든 것 — 반입 속도(raw_decode `288afb7` · sphere 블록 분리 `c7970dc`) · 후처리 예약 `postprocess`(`4ff9a79` → 위임 창구 `e62f601` · rc 3 경고) · 구면 위험도 맵(3D · 허용비 · 상위 N, `f366816`) · 렌더 결과 반입 C-11(`85ba2f0`) · postprocess 의 비운 선택 칸 null 을 없는 칸으로(`07679d7` — 파이썬만, git 으로 온다). **마이그레이션 둘**(0015 · 0016 — null 허용 칸 · 유일 제약, 옛 코드에 영향 없음). 바이너리는 그대로(`8c7c4f87`).
+이번 판에 든 것 — 반입 속도(raw_decode `288afb7` · sphere 블록 분리 `c7970dc`) · 후처리 예약 `postprocess`(`4ff9a79` → 위임 창구 `e62f601` · rc 3 경고) · 구면 위험도 맵(3D · 허용비 · 상위 N, `f366816`) · 렌더 결과 반입 C-11(`85ba2f0`) · postprocess 의 비운 선택 칸 null 을 없는 칸으로(`07679d7`) · `dev_rev` 를 예약 때 반입 규칙으로(`3574342`) — 둘 다 파이썬만, git 으로 온다. **마이그레이션 둘**(0015 · 0016 — null 허용 칸 · 유일 제약, 옛 코드에 영향 없음). 바이너리는 그대로(`8c7c4f87`).
 
 | 확인 | 명령 | 기대값 |
 |---|---|---|
 | 판 | `curl -s http://127.0.0.1:8700/api/health` | `"status":"ok"` · `revision` 이 이번 게시 BUILD_INFO 의 커밋(`c9bc426`) |
-| 소스 | KooRemapper 리포 루트에서 `git log -1 --oneline` | `07679d7` 이거나 그 뒤 — 위 `revision` 은 Drive 판의 커밋이라 파이썬만 바뀐 커밋은 여기서만 보인다. 앞이면 R2a 의 비운 과제 메타(null)가 422 로 막힌다 |
+| 소스 | KooRemapper 리포 루트에서 `git log -1 --oneline` | `3574342` 이거나 그 뒤 — 위 `revision` 은 Drive 판의 커밋이라 파이썬만 바뀐 커밋은 여기서만 보인다. 앞이면 null 을 보내는 손님(MCP 직접 호출 — Claude 등)이 비운 선택 칸에서 422 를 받고(포털 R2a 는 칸째 빼고 보내 영향 없음), 틀린 `dev_rev` 가 예약은 되고 잡이 끝난 뒤 반입에서야 실패한다 |
 | 마이그레이션 | KooRemapper 리포 루트에서 `bash platform/infra/scripts/migrate.sh` | 「Running upgrade」 줄 없이 「✓ migrations applied」 = 이미 0016 까지 올라 있다(빠졌으면 이 명령이 그 자리에서 올린다 — 0015 · 0016) |
 | MCP 도구 | 게이트웨이 tools/list 에서 kooremapper 도구 수, 또는 `platform/mcp_server/venv/bin/python platform/mcp_server/smoke.py` | 81개(`attach_render` 가 새로 있다) · `MCP SMOKE: PASS` |
 | 화면 | 세션 → 전각도 리포트 펼치기 → 「부품 위치·방향 시각화」 → 보기 「구(3D)」 | 3D 구가 뜬다(three.js 는 묶음 안에 있다 — 망 밖에 안 나간다) · 허용값을 넣으면 「초과 · 경고」 수가 보인다 |
