@@ -30,7 +30,7 @@
 - [x] 3D — `SphereGlobe3D.tsx`(지연 적재) · 점은 InstancedMesh · 고르기(인스턴스 번호) · 카메라 맞추기 · PNG(제목 · 범례 포함)
 - [x] typecheck · build · 셈 시험 · dev 반영(도는 잡 0 확인 · API 재기동) · Playwright 화면 확인 — 26각도 리포트: 2D 채움 · 허용값 700 → 초과 1 · 경고 8 · 3D · 표 행 → 구가 그 각도로 돈다 · 3D PNG 내려받음 · 허용값이 브라우저에 남아 다시 채워짐 · 기능 쪽 콘솔 오류 0(로그인 전 401 하나뿐). 백엔드는 바꾸지 않았다
 - [x] 총괄 체크리스트 · 기억 · 커밋
-- [ ] 운영 반영 — 콘솔 묶음은 Drive 게시(`dist-to-drive.sh`)로 간다. 운영에 나가는 일이라 사용자 확인 뒤
+- [x] 운영 반영 — Drive 게시 `dist-20261029-221150Z`(커밋 `c9bc426`, 사용자 「업로드까지도 다」 10-29). cae00 은 `update-all` 로 받는다 — 점검은 `docs/requests/hwax-portal-cae00-checks-2026-10-30.md`
 
 ## 결정 기록
 - (10-29) 허용값 출처 — 화면 입력(사용자). 리포트에 부품별 허용값 · 안전율이 없다(sphere 는 연구 전체 `yield_stress` 하나, deep 만 파트별 `safety_factor`).
