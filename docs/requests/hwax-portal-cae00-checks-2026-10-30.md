@@ -53,13 +53,16 @@ KooSlurm `docs/sso_enable_20261029/icn401_apply_check.md` 그대로. 요점 —
 3. 실패면 잡의 `error_summary` 가 매니페스트 까닭을 그대로 싣는다 — 그 문구를 DynaForge 에 넘긴다.
 
 ## 5. stcx viz 노드 — 읽기만(SceneForge · S1)
-GPU 는 노드마다 챗 LLM 과 함께 쓴다 — **읽기만**. MIG · 렌더 시험은 챗 LLM 운영과 시간을 잡고 나서.
+GPU 는 노드마다 챗 LLM 과 함께 쓴다 — **읽기만**(MIG 전환 · GPU 재설정 · 설치 · 렌더 없음). 명령의 정본은 SceneForge `scripts/stcx_viz_readcheck.sh`(f46e835) — 결과를 텍스트 파일 하나로 모은다. 그 파일을 SceneForge 세션에 넘긴다.
 ```
-ssh stcx sinfo -s
-ssh stcx scontrol show node <viz 노드>                # gres · 메모리 · 상태
-ssh stcx srun -p <viz 파티션> -w <viz 노드> ls <운영 전각도 잡의 output_dir>   # S1 이 그 자리에서 읽히나(⑥)
+bash stcx_viz_readcheck.sh                                    # 1단계 — 로그인 노드만, 노드에 잡을 걸지 않는다
+bash stcx_viz_readcheck.sh <viz 파티션> <노드> <S1 결과 폴더>    # 2단계 — 고른 노드에 CPU 1 · 512M · 5분 · GPU 요청 없는 잡 하나
 ```
-결과는 SceneForge 세션에 넘긴다(그쪽이 렌더 잡 규율 — gres 로 GPU · `--mem` 필수 · 노드 하나씩).
+- 2단계 앞뒤로 cae00 에서 `~/stcx-llm/llmctl.sh status`(챗 LLM 이 그대로인지).
+- **<S1 결과 폴더>** — S1 은 아직 나오지 않았다(KooD3plotReader 추출기 계약 대기). 둘 자리는 후처리 잡의 결과 옆 `<RESULT_DIR>/output/s1/` 로 잡고 있다(잠정). 그러니 지금은 운영 전각도 잡 하나의 `<RESULT_DIR>/output`(sphere_report.html 이 있는 곳 — 귀환 매니페스트의 `job.result_dir`)로 마운트를 본다.
+- 스크립트를 못 옮기면 한 줄씩 — SceneForge `docs/requests/dynaforge-sceneforge-tasks-reply-2026-10-29.md` 「cae00 명령」 절(sinfo · squeue · 챗 LLM sbatch gres · scontrol config · `nvidia-smi` · `ldconfig -p` 로 GL/EGL/NVENC/Vulkan 라이브러리 · `apptainer --version` · `ls -la <폴더>`).
+- 제어면 준비로 둘 더 — SceneForge 를 돌릴 cae00 계정에서 `ssh -o BatchMode=yes stcx true && echo ok`(sbatch 낼 길이 비밀번호 없이 열리나, C-13) · `ssh stcx df -h /data2`(렌더 작업자 SIF · 결과 자리 여유 — 자리는 노드 관리자와 정한다).
+- GPU 를 쓰는 시험(T1 · T2)은 SceneForge `docs/research/stcx-gpu-test-plan-2026-10-29.md` — 읽기 점검 결과가 나온 뒤 챗 LLM 운영과 시간을 잡고.
 
 ## 6. 게이트웨이 — 게이트웨이를 거친 stcx 제출이 지금 되는가(선택)
 ```
@@ -70,8 +73,8 @@ tail -3000 ~/Projects/HWAXMcpGateway/audit.jsonl | grep -a '"backend": "smart-tw
 ## 7. SSO 켜기 — 이번엔 하지 않는다(조건)
 KooSlurm `docs/sso_enable_20261029/sso_enable_procedure.md`. 켜기 전에 설 것 —
 - **IdP 주소** — 저장소의 운영 YAML 사본은 `sso.saml.idp.sso_url` 이 비었다. 비었으면 켜는 순간 아무도 로그인 못 한다(icn401 실제 YAML 확인).
-- **SSO 꺼진 동안 발급한 kst_ 는 전부 admin 으로 저장됐다** — 켠 뒤 그대로 두면 관리자 토큰이다. 절차서 §2 대로 지우고 다시 발급(`~/.claude.json` 의 smarttwin kst_ 포함).
-- **DynaForge 덱 업로드의 신원** — 업로드 PAT = 제출 PAT 여야 smarttwin_mcp 가 받는다. 제출은 지금 게이트웨이 단일 신원(「나로」)이라, 업로드만 잡 소유자로 바꾸면 켜는 순간 제출이 거절된다. 켤 때 신원 방식(사람별 위임 · 단일)과 함께 정한다.
+- **SSO 꺼진 동안 발급한 kst_ 는 전부 admin 으로 저장됐다** — 켠 뒤 그대로 두면 관리자 토큰이다. 절차서 §2 대로 지우고 다시 발급(`~/.claude.json` 의 smarttwin kst_ 포함). **smarttwin-mcp 유닛 env 의 `STMC_CLUSTER_TOKEN` 도** — 그대로 두면 게이트웨이 경유 제출이 전부 관리자 권한으로 간다. 다시 발급한 토큰의 주인이 그 뒤 제출 · 업로드의 명의가 된다(KooSlurm `a4734e7a`).
+- **DynaForge 덱 업로드의 신원 = 제출 신원**(절차서 §0 조건 5) — 게이트웨이 경유 단일 신원이면 업로드도 그 토큰(`STMC_CLUSTER_TOKEN`), 사람별 위임이면 업로드도 위임 창구 토큰. 어긋나면 켜는 순간 거절된다. 어느 쪽인지는 켤 때 사용자 결정이고, DynaForge 업로더는 그 결정에 맞춰 짓는다(지금은 보류).
 - 걸린 예약이 없을 때 켠다 — 켜는 순간 신원이 admin → 실제 사용자로 바뀌어 켜기 전 예약은 403 으로 닫힌다.
 
 ## 8. 되돌리기
