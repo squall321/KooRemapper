@@ -111,3 +111,11 @@ LS-PrePost 4.12 는 상태별 메모리 합이 내부 예산을 넘으면 그 �
 - 원본이 정본이다 — 곁파일은 원본 sha256(SessionFile) 이 맞을 때만 쓰고, 없거나 깨지면 원본으로 답하고 다시 만든다. 만들기는 한 번에 하나(전역 잠금 — 만드는 동안 3 GB 를 쥔다).
 - 시계열이 조용히 빠지지 않게 — 범용 `get_block` 의 `results` 통째 조회는 원본을 읽고, `results.<순번>…` 은 그 각도를 합친다. 블록 목록은 만들 때 전체 기준으로 센 것을 쓴다.
 - 값 — 디스크(원본의 30%)와 반입 시간(+10.6초)을 냈다. deep · impact 는 작아서 그대로 뒀다.
+
+## 24. 10-29 — 헤드 SIF · KooSlurm 운영 반영 · SSO · 7-1
+
+- **헤드 SIF 가 결정보다 먼저 v127 이 됐다.** 이 박스 `/opt/apptainers` 의 Preprocessor v127(`4d31651f`) · Postprocessor v41(`6176ff66`), 둘 다 10-28 23:06. pyKooCAE 가 node001 에 깔 때 `deploy_apptainers.sh` 가 `--nodes-file` 을 줘도 controller 에 먼저 복사했다. 바로 앞 판의 백업은 없다. Postprocessor 는 배포 전에도 같은 v41 이었다(크기 · 시각 · 기록으로 판단, sha 는 안 쟀다). **사용자 결정 — 그대로 둔다**(원래 계획의 끝 상태와 같고, 노드 검증도 이 판으로 통과).
+- **KooSlurm 실 Slurm 검증 통과**(dev node001, 결과 폴더 사본 둘) — C 의 성공(1245 COMPLETED · 13.2 MB · sha 일치)과 실패(1246 · 1247 FAILED 3 · ok:false · 까닭)가 둘 다 맞았다. REST 는 본인 200 · 남 403 · 토큰 없음 401. log_tail 에 지난 실행 파일이 섞이던 결함은 `5eb8567e` 에서 고쳤다. 못 잰 것은 B(드라이버가 실제 전각도 잡 끝에 매니페스트를 쓰는 것) — dev 에 LS-DYNA 라이선스가 없다. **사용자 결정 — 지금 반영.** KooSlurm 은 origin 까지 올렸고(`7c280000`), 운영 적용(icn401 `git pull && sudo ./dashboard/start_production.sh`)은 사용자 몫이다.
+- **운영 대시보드는 SSO 가 꺼져 있다** — `jwt_required` 가 모든 요청을 FULL_ACCESS_USER 로 넣는다(`jwt_middleware.py:118`). 토큰 없이 누구나 남의 잡 파일을 열 수 있고, A 는 운영에서 효과가 없다. 켜면 DynaForge 덱 업로드(`StcxUploader` — 업로드 라우트가 jwt + 'dashboard' 권한)가 401 이 된다. **사용자 결정 — 켜기 전에 영향부터 조사.** KooSlurm 호출자 목록이 왔다(`docs/sso_enable_20261029/callers.md`). 켜는 순간 신원이 admin → 실제 사용자로 바뀌므로 켜기 전 예약은 403 이 될 수 있다.
+- **7-1 지음**(`4ff9a79`) — 계획 · 결정 `postprocess-reservation-1028.plan.md` 「결정 기록」. 주소는 덱 업로드와 같은 `stcx_backend_url`(같은 backend_5010). 404 는 없는 잡도 같아서 `/info` 를 따로 본다(KooSlurm 제안). dev 는 `KOORM_GATEWAY_PAT` · `KOORM_STCX_BACKEND_URL` 이 비어 있어 stcx 제출과 후처리 예약이 둘 다 꺼짐이다(설정 값 존재만 확인, 값은 보지 않았다). 그래서 dev 스모크의 postprocess 는 「구성 안 됨」 이고, 실제 HTTP 길은 시험(MockTransport)만 쟀다.
+- **StepForge P1 운영 반영**(`009082d`) — 운영 산출 경로 · 열쇠는 체크리스트 P1 StepForge. 받은 파일 sha 여섯 일치.

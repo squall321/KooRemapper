@@ -38,6 +38,9 @@
 ## P1 공통 바탕
 ### DynaForge
 - [ ] 후처리 연산 이관 — `operation="postprocess"` + `args_schema`(09-16 요청서 ①) · unified_analyzer 의 rc 3(분석 성공 · 렌더 실패)은 실패가 아니라 경고로 다룬다(10-28 KooD3plotReader K-4)
+  - [x] ★7-1 후처리 예약 연산 지음(10-29 `4ff9a79`, dev 반영 · allops 64/64 · reports 35/35) — 예약자 kst_ PAT 를 암호문으로만 맡고 끝나면 지운다 · 매니페스트 판정 · `/info` 로 영영 안 올 잡 닫기 · 7-2 `external_job_key` 유일 · 7-5 `reservation.conditions`. 포털 회신 `platform/docs/REQUEST-postprocess-operation.md` §10. 계획 · 결정 `postprocess-reservation-1028.plan.md`
+  - [ ] 운영에서 첫 실제 잡으로 끝까지 — KooSlurm 운영 적용(origin `7c280000` 까지 올라감, icn401 `git pull && sudo ./dashboard/start_production.sh` 는 사용자 몫) · 예약자 PAT 를 넘기는 길(포털 답 대기) · 첫 전각도 잡에서 B 매니페스트 확인
+  - [ ] 운영 KooSlurm SSO 는 꺼져 있다(모든 요청 admin — A 가 운영에서 효과 없음). 사용자 결정(10-29) 「켜기 전에 영향부터 조사」 — KooSlurm 호출자 목록 `docs/sso_enable_20261029/callers.md`: 켜면 DynaForge `StcxUploader`(인증 없음)가 401 → 예약자 본인 kst_ PAT 를 업로드 · 삭제 넷에 싣자는 제안
   - ★KooSlurm 회신(10-28 밤) — A(f8552d8c 잡 REST 8개 jwt + 소유 검사) · B·D(0a8c9cca `output/return_manifest.json` v1, 리포트 없으면 FAILED 3) · C(2e257262 `POST /api/jobs/<id>/postprocess`) · 계약 `docs/REQUEST-result-return.md` §6(4dc924f3). 로컬 커밋 — 푸시 · 운영 반영은 사용자 결정 대기, 실제 Slurm 잡 검증 전. 신원은 「예약한 사용자 본인의 kst_ PAT」 — DynaForge 가 그것을 어떻게 얻을지 사용자 결정 필요
   - 막힌 자리(10-28 밤 확인) — `platform/docs/REQUEST-postprocess-operation.md` §7-1 은 클러스터 선행이 서야 착수: KooSlurm `docs/REQUEST-result-return.md` A(파일 REST 인증 — `/files/download` 가 아직 `@optional_jwt`) · B(귀환 매니페스트 — 코드에 없음) · C · D, pyKooCAE `docs/REQUEST-drop-impact-result-return.md` A(부분충격 리포트) · C — ★B(초속 이중 합산)는 9-17 `5baae8d` 에서 이미 고쳐져 SIF v97+ 에 있다(나는 커밋 메시지 키워드로만 찾아 놓쳤다 — pyKooCAE 회신으로 바로잡음). 두 세션에 진행 요청함(사용자 지시) — pyKooCAE 는 A + E(output_dir) → C → E(deep 건너뛰기) → D 순으로 착수
 - [ ] S1 manifest · 검증 게이트 — KooD3plotReader S1 추출기 꼴(요청 §6-1)이 정해진 뒤
@@ -49,6 +52,7 @@
 ### StepForge
 - [ ] C-5 대응표 내보내기 · C-6 가중치 잡(꼴은 10-28 초안) · 덱 리더 축퇴 꼴 보강 · 파트 표에 재질 · 밀도 · 색(C-8) — USD 는 SceneForge(D-9)
   - [x] 첫 산출(10-28 밤, 개발판) `/data/koopark/drop_twin_p1/stepforge_fe_cad_a32a9a574143/` — 대응 22/22 · 가중치 22파트(행 1,232 · nnz 3,696) · 겉면 22/22 S1 과 같음. 받는 쪽 검사 통과(sha · 오프셋 8 배수 · Σw=1 · col ⊂ S1 node_ids). 운영 반영 뒤 경로 · 열쇠가 바뀐다
+  - [x] ★운영 반영(10-29, StepForge `009082d` · 잡 `fe_cad`) — `/data/appdata/step_forge/projects/001a184fed0639fc4477054/export/fe_cad/a77cb1d20adc/`(HEAXHub `var/app_data` 가 가리킴) · 판 열쇠 `a77cb1d2…` · manifest `fc6c52e4…`. 받은 파일 여섯 sha256 대조 일치 · weights.bin 은 개발판과 바이트 동일. **P2 뷰어는 이 manifest 를 기준으로**
 ### SceneForge
 - [x] 리포 — `/home/koopark/claude/SceneForge`(10-28, 로컬 첫 커밋 ebbf77f). GitHub 비공개 저장소는 이 박스의 gh(snap)가 서비스 cgroup 에서 안 떠 대기
 - [ ] 제어면 골격 · glb → USD · 빈 장면 렌더 1장
