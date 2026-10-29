@@ -546,7 +546,8 @@ async def test_a_token_argument_is_refused_without_echoing_it(db, owner, api):
 
 @_aio
 async def test_a_null_optional_field_is_taken_as_absent(db, owner, api):
-    """포탈 절차 엔진은 비운 선택 변수를 null 로 넘긴다(10-29 문의) — 없는 칸과 같게 받고, 잡 인자에 남기지 않는다."""
+    """비운 선택 칸을 null 로 보내는 손님(MCP 를 바로 부르는 Claude 등) — 없는 칸과 같게 받고, 잡 인자에 남기지 않는다.
+    포털 절차 엔진은 칸째 뺀다(W-102)."""
     u, s = owner
     await _hold_session(db, u, s)
     h = await _login(api, u)
@@ -567,6 +568,31 @@ async def test_a_null_required_field_is_still_refused(db, owner, api):
     r = await api.post(f"/api/v1/sessions/{s.id}/jobs", headers=h,
                        json={"operation": "postprocess", "args": _args(job_key=None)})
     assert r.status_code == 422 and "job_key" in r.text, r.text
+
+
+@_aio
+@pytest.mark.parametrize("dev_rev", ["pv", "DV1", "dv1 ", "dv1\n", "dv4", "pre1"])
+async def test_a_dev_rev_the_ingest_would_refuse_is_refused_at_reservation(db, owner, api, dev_rev):
+    """반입(build_eng_meta → parse_stage)이 거절할 값을 예약이 받으면 클러스터 잡이 끝난 며칠 뒤에야 「stage 형식 오류」로
+    실패한다(포탈 반대 검토 10-29). 예약 때 같은 규칙으로 막는다."""
+    u, s = owner
+    await _hold_session(db, u, s)   # 막는 자리가 사라져 받아 버려도 떠 있는 워커가 집지 않게
+    h = await _login(api, u)
+    r = await api.post(f"/api/v1/sessions/{s.id}/jobs", headers=h,
+                       json={"operation": "postprocess", "args": _args(dev_rev=dev_rev)})
+    assert r.status_code == 422 and "stage 형식 오류" in r.text, r.text
+
+
+@_aio
+@pytest.mark.parametrize("dev_rev", ["pvr", "pre", ""])
+async def test_a_dev_rev_the_ingest_takes_is_taken(db, owner, api, dev_rev):
+    """빈 값은 반입처럼 없는 칸으로 지나간다."""
+    u, s = owner
+    await _hold_session(db, u, s)
+    h = await _login(api, u)
+    r = await api.post(f"/api/v1/sessions/{s.id}/jobs", headers=h,
+                       json={"operation": "postprocess", "args": _args(job_key="stcx:0", dev_rev=dev_rev)})
+    assert r.status_code == 201, r.text
 
 
 @_aio

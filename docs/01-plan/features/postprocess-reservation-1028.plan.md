@@ -11,7 +11,7 @@
 - ~~`kst_token` — 예약한 사용자 본인의 KooSlurm PAT(필수, **쓰기 전용**). 잡을 만들 때 인자에서 떼어 암호화해 `external_ref` 에만 두고, 잡 인자 · 응답 · 로그 · 진단 번들 어디에도 평문으로 남기지 않는다. 끝나면(성공 · 실패 · 취소 · 기한) 지운다.~~ → 10-29 아래 「전환」 으로 뺐다. 인자로 주면 422.
 - `sim_type` — `fullangle_drop | partial_impact`(필수). 기대하는 리포트 종류(sphere · impact)를 정한다.
 - 선택 — `job_name` · `label` · 과제 메타(`project` · `dev_rev` · `variation` · `doe`) · 해석 조건(`height` · `floor` · `preset` · `position_doe`).
-  null 은 없는 칸과 같다 — 라우트가 검증 전에 떼어 잡 인자에 남지 않는다(10-29 포털 문의 — 절차 엔진이 비운 선택 변수를 null 로 넘긴다). 필수 칸이 null 이면 빠진 것으로 422.
+  null 은 없는 칸과 같다 — 라우트가 검증 전에 떼어 잡 인자에 남지 않는다(MCP 를 바로 부르는 손님용 — 포털 절차 엔진은 비운 변수를 칸째 뺀다, 10-29 포털 정정). 필수 칸이 null 이면 빠진 것으로 422. `dev_rev` 는 예약 때 반입과 같은 함수(`build_eng_meta` → `parse_stage`)로 본다 — 틀리면 422.
 
 ## 흐름
 1. 잡 생성(라우트 · MCP 공통) — 인자 검증 → `kst_token` 을 떼어 암호화 → `external_ref.token_enc`. 소속도 이때 검증해 얼린다(반입 때는 요청이 없다).
@@ -70,7 +70,7 @@
 - [ ] 운영 — KooSlurm `33bd0da1` 푸시 · 운영 반영(사용자 확인) · 허용 이름에 `gateway-smart-twin-mcp` · `gateway-smart-twin-cluster`(포털이 가른 이름) · 공유 비밀 셋(KooSlurm `HEAX_GATEWAY_SECRET` = DynaForge `KOORM_KOOSLURM_SSO_SECRET` = 게이트웨이 `KST_*_SSO_SECRET`) · uid = 이메일 @ 앞부분 가정 확인(운영 사용자 한 명) · icn401 `start_production.sh`
 
 ## 포털 문의 — 비운 선택 칸 null (10-29)
-포털(hwaxportal-a5) — R2a 제출 씨앗에 과제 메타 선택 변수 넷(`project` · `dev_rev` · `variation` · `doe`)을 더하려 한다. 비워 두면 절차 엔진이 그 칸을 null 로 넘긴다 — null 을 없는 칸으로 보는지 물었다.
+포털(hwaxportal-a5) — R2a 제출 씨앗에 과제 메타 선택 변수 넷(`project` · `dev_rev` · `variation` · `doe`)을 더하려 한다. 비워 두면 절차 엔진이 그 칸을 null 로 넘긴다 — null 을 없는 칸으로 보는지 물었다. **같은 날 포털 정정** — 소스를 보니 엔진은 null 을 넘기지 않았고 그 변수를 쓰는 단계가 「변수 없음」 으로 멈췄다(R2a 면 제출은 나가고 예약만 실패). 포털이 엔진을 고쳐(W-102) 칸 하나가 통째로 `{{var}}` 인데 비었으면 **칸째 뺀다**. 아래 null 떼기는 해롭지 않고 MCP 를 바로 부르는 손님(Claude 등)에게 쓸모가 있어 그대로 둔다.
 - [x] 실측 — 그때는 422(`project: None is not of type 'string'` · `height` 는 `number`). 키를 빼거나 빈 문자열이면 통과했다. MCP `run_operation` 은 인자를 그대로 넘기므로 끝까지 422 였다
 - [x] 라우트 — **postprocess 만** 검증 전에 null 칸을 뗀다. 다른 op 은 그대로 422 다(모든 op 에 같은 규칙을 둘지는 열어 둔다 — 문의는 이 연산 하나였다). 워커는 원래 `.get()` 으로 읽고 조건 칸은 null · 빈 값을 버린다
 - [x] 시험 2 — 선택 넷 + `height` 가 null → 201 · 잡 인자에 없음 / `job_key` 가 null → 422(고치기 전 앞의 것이 422 로 실패하는 것을 봤다). 백엔드 724
@@ -78,3 +78,11 @@
 - [x] dev 반영(`07679d7`, 도는 잡 0 확인 · API 재기동) · MCP `run_operation` 으로 null 예약 한 번 — 잡이 생기고 저장 인자에 null 칸이 없다(dev 는 설정이 없어 「구성 안 됨」 으로 끝 — 예상대로) · `job_key` null 은 「required property」 로 거절
 - [x] 점검 문서 §1(이번 판 목록 · **소스** 줄 — health `revision` 은 Drive 판 커밋이라 파이썬만 바뀐 커밋이 안 보인다) · §4-2(과제 메타는 채웠을 때만)
 - [x] 포털 회신(hwaxportal-a5) — 씨앗에 선택 변수 넷을 더해도 된다 · cae00 소스가 07679d7 이후여야 한다 · 점검 문서 바뀐 곳 셋
+
+## 포털 반대 검토 — dev_rev 가 반입에서야 거절된다 (10-29)
+포털이 재현했다 — 카탈로그 `dev_rev` 설명의 예시 `pv` 는 반입(`build_eng_meta` → `parse_stage`)이 거절하는 꼴이다(dv · pv 는 차수 필수). `DV1` · `dv1 ` 도 같다. 예약(`validate_args`)은 통과하고, 클러스터 잡이 끝난 뒤 반입에서 「리포트 반입 실패: stage 형식 오류」 로 끝났다. 포털 씨앗은 고르기로 바꿔 실행을 만들 때 막았다.
+- [x] 라우트 — postprocess 는 검증 뒤 `build_eng_meta`(반입이 부르는 그 함수)를 돌려 틀리면 422. 포털은 카탈로그 `pattern`(`^(pre|pra|mp|dv[123r]|pv[123r])$`)을 권했는데 그 길로 가지 않았다 — 같은 규칙의 사본이 하나 더 생기고, 빈 문자열이 새로 막히며(반입은 빈 값을 없는 칸으로 넘긴다), jsonschema `pattern` 은 `re.search` 라 `$` 가 끝 줄바꿈 앞에서도 맞아 `dv1\n` 이 빠져나간다(돌려 봤다). 콘솔 폼은 `pattern` 을 쓰지 않는다
+- [x] 카탈로그 설명에 받는 값 열한 개를 적었다(예시 `pv` 를 뺌) — MCP 로 부르는 쪽은 설명을 읽는다
+- [x] 시험 9 — `pv` · `DV1` · `dv1 ` · `dv1\n` · `dv4` · `pre1` → 422(「stage 형식 오류」 — 고치기 전에 먼저 돌려 다섯이 201 로 실패하는 것을 봤다) / `pvr` · `pre` · 빈 값 → 201
+- [ ] 백엔드 전체 · dev 반영 · 점검 문서 · 포털 회신
+

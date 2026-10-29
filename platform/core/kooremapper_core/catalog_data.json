@@ -14751,7 +14751,7 @@
           "role": "value",
           "required": false,
           "group": "과제 메타",
-          "description": "개발 차수(dv1 · pv 같은 꼴)."
+          "description": "개발 차수 — pre · dv1 · dv2 · dv3 · dvr · pv1 · pv2 · pv3 · pvr · pra · mp 가운데 하나(소문자 그대로, dv · pv 는 차수까지). 예약 때 반입과 같은 규칙으로 보고 틀리면 422 다."
         },
         {
           "name": "variation",

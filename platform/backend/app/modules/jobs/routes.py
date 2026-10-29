@@ -51,12 +51,21 @@ async def create_job(
     if entry is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"알 수 없는 오퍼레이션: {body.operation}")
     if body.operation == postprocess_return.OPERATION:
-        # 포탈 절차 엔진은 비운 선택 변수를 null 로 넘긴다 — 없는 칸과 같게 받는다(포탈 문의 10-29).
-        # 필수 칸(job_key · sim_type)이 null 이면 아래 검증이 「빠졌다」 로 거절한다.
+        # 비운 선택 칸을 null 로 보내는 손님(MCP 를 바로 부르는 Claude 등)이 있다 — 없는 칸과 같게 받는다. 포털 절차 엔진은
+        # 칸째 뺀다(W-102). 필수 칸(job_key · sim_type)이 null 이면 아래 검증이 「빠졌다」 로 거절한다.
         body.args = {k: v for k, v in body.args.items() if v is not None}
     errs = catalog.validate_args(body.operation, body.args)
     if errs:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "인자 검증 실패: " + "; ".join(errs))
+    if body.operation == postprocess_return.OPERATION:
+        # 과제 메타는 반입이 쓰는 검사(build_eng_meta — dev_rev 는 parse_stage)를 지금 그대로 돌린다. 안 그러면 예약은 받고,
+        # 클러스터 잡이 끝난 며칠 뒤 반입에서 「stage 형식 오류」로 실패한다(포털 반대 검토 10-29 — `pv` · `DV1` · `dv1 `).
+        from app.modules.reports.services import build_eng_meta
+
+        try:
+            build_eng_meta(*(body.args.get(k) for k in ("project", "dev_rev", "variation", "doe")))
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"인자 검증 실패: 과제 메타 — {exc}")
 
     # gmsh 가 필요한 op 은 **큐에 넣기 전에** 확인한다(P1-9). 예전에는 그냥 넣었고, 잡이 한참
     # 돌다 `Gmsh failed (exit 32512)` 로 죽었다 — 사람은 자기 덱이 잘못된 줄 안다.
