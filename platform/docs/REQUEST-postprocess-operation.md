@@ -348,6 +348,7 @@ run_operation(session_id, "postprocess", {
 - **곧바로 잡 id 가 옵니다.** 진행은 `get_job(job_id)` 로 봅니다. `running` 은 매니페스트를 기다리는 중이고, 끝나면 `succeeded` 나 `failed` 입니다.
 - **성공하면 `resolved_cmd.report_ids[0]` 이 리포트 id 입니다.** `output_file_ids` 에는 저장한 HTML 의 파일 id 가 들어갑니다. 실패하면 `error_summary` 에 매니페스트의 `reason` 과 `log_tail` 이 그대로 실립니다.
 - **세션은 그 사용자 것이면 아무것이나 됩니다.** 이 연산은 세션의 덱을 읽지도 고치지도 않습니다. 그래서 인클루드 검사도 건너뜁니다.
+- **비운 선택 칸은 null 로 줘도 됩니다**(10-29 포털 문의). 없는 칸과 같게 받고 잡 인자에 남기지 않습니다. 필수 칸(`job_key` · `sim_type`)이 null 이면 빠진 것으로 보고 422 입니다.
 
 ### 명의 · 토큰 · 소속
 

@@ -8,9 +8,10 @@
 
 ## 인자 (catalog `postprocess`, invocation external)
 - `job_key` — `stcx:<slurm_job_id>`(필수). 잡 하나에 리포트 하나 — 같은 키가 이미 반입됐으면 새로 받지 않고 그 리포트를 알린다.
-- `kst_token` — 예약한 사용자 본인의 KooSlurm PAT(필수, **쓰기 전용**). 잡을 만들 때 인자에서 떼어 암호화해 `external_ref` 에만 두고, 잡 인자 · 응답 · 로그 · 진단 번들 어디에도 평문으로 남기지 않는다. 끝나면(성공 · 실패 · 취소 · 기한) 지운다.
+- ~~`kst_token` — 예약한 사용자 본인의 KooSlurm PAT(필수, **쓰기 전용**). 잡을 만들 때 인자에서 떼어 암호화해 `external_ref` 에만 두고, 잡 인자 · 응답 · 로그 · 진단 번들 어디에도 평문으로 남기지 않는다. 끝나면(성공 · 실패 · 취소 · 기한) 지운다.~~ → 10-29 아래 「전환」 으로 뺐다. 인자로 주면 422.
 - `sim_type` — `fullangle_drop | partial_impact`(필수). 기대하는 리포트 종류(sphere · impact)를 정한다.
 - 선택 — `job_name` · `label` · 과제 메타(`project` · `dev_rev` · `variation` · `doe`) · 해석 조건(`height` · `floor` · `preset` · `position_doe`).
+  null 은 없는 칸과 같다 — 라우트가 검증 전에 떼어 잡 인자에 남지 않는다(10-29 포털 문의 — 절차 엔진이 비운 선택 변수를 null 로 넘긴다). 필수 칸이 null 이면 빠진 것으로 422.
 
 ## 흐름
 1. 잡 생성(라우트 · MCP 공통) — 인자 검증 → `kst_token` 을 떼어 암호화 → `external_ref.token_enc`. 소속도 이때 검증해 얼린다(반입 때는 요청이 없다).
@@ -67,3 +68,11 @@
 - [x] 시험 29 — 위임 요청 헤더 · 캐시 재사용 · 401 다시 받기 · 창구 거절(되풀이된 kst_ 가림) · 창구 5xx 재시도 · `kst_token` 을 주면 422(값은 안 되풀이). 재사용 · 다시 받기는 일부러 깨 시험이 잡는 것까지
 - [x] 백엔드 706 · 줄바꿈 회귀 64 · 카탈로그 일치 · dev 반영(`e62f601`, 도는 잡 0 확인 · 콘솔 다시 빌드) · allops 63/63 · reports 35/35 · §10 정정 · 기억
 - [ ] 운영 — KooSlurm `33bd0da1` 푸시 · 운영 반영(사용자 확인) · 허용 이름에 `gateway-smart-twin-mcp` · `gateway-smart-twin-cluster`(포털이 가른 이름) · 공유 비밀 셋(KooSlurm `HEAX_GATEWAY_SECRET` = DynaForge `KOORM_KOOSLURM_SSO_SECRET` = 게이트웨이 `KST_*_SSO_SECRET`) · uid = 이메일 @ 앞부분 가정 확인(운영 사용자 한 명) · icn401 `start_production.sh`
+
+## 포털 문의 — 비운 선택 칸 null (10-29)
+포털(hwaxportal-a5) — R2a 제출 씨앗에 과제 메타 선택 변수 넷(`project` · `dev_rev` · `variation` · `doe`)을 더하려 한다. 비워 두면 절차 엔진이 그 칸을 null 로 넘긴다 — null 을 없는 칸으로 보는지 물었다.
+- [x] 실측 — 그때는 422(`project: None is not of type 'string'` · `height` 는 `number`). 키를 빼거나 빈 문자열이면 통과했다. MCP `run_operation` 은 인자를 그대로 넘기므로 끝까지 422 였다
+- [x] 라우트 — **postprocess 만** 검증 전에 null 칸을 뗀다. 다른 op 은 그대로 422 다(모든 op 에 같은 규칙을 둘지는 열어 둔다 — 문의는 이 연산 하나였다). 워커는 원래 `.get()` 으로 읽고 조건 칸은 null · 빈 값을 버린다
+- [x] 시험 2 — 선택 넷 + `height` 가 null → 201 · 잡 인자에 없음 / `job_key` 가 null → 422(고치기 전 앞의 것이 422 로 실패하는 것을 봤다). 백엔드 724
+- [x] 카탈로그 노트 · REQUEST §10 · 이 문서 「인자」(전환 때 못 쓴 `kst_token` 줄도 바로잡음)
+- [ ] dev 반영 · 플랫폼으로 null 예약 한 번 · 점검 문서 §1 · §4-2 · 포털 회신

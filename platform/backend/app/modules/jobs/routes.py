@@ -50,6 +50,10 @@ async def create_job(
     entry = catalog.get_operation(body.operation)
     if entry is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"알 수 없는 오퍼레이션: {body.operation}")
+    if body.operation == postprocess_return.OPERATION:
+        # 포탈 절차 엔진은 비운 선택 변수를 null 로 넘긴다 — 없는 칸과 같게 받는다(포탈 문의 10-29).
+        # 필수 칸(job_key · sim_type)이 null 이면 아래 검증이 「빠졌다」 로 거절한다.
+        body.args = {k: v for k, v in body.args.items() if v is not None}
     errs = catalog.validate_args(body.operation, body.args)
     if errs:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "인자 검증 실패: " + "; ".join(errs))

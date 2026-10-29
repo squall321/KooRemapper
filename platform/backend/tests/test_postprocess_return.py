@@ -545,6 +545,31 @@ async def test_a_token_argument_is_refused_without_echoing_it(db, owner, api):
 
 
 @_aio
+async def test_a_null_optional_field_is_taken_as_absent(db, owner, api):
+    """포탈 절차 엔진은 비운 선택 변수를 null 로 넘긴다(10-29 문의) — 없는 칸과 같게 받고, 잡 인자에 남기지 않는다."""
+    u, s = owner
+    await _hold_session(db, u, s)
+    h = await _login(api, u)
+    nulls = {"project": None, "dev_rev": None, "variation": None, "doe": None, "height": None}
+    r = await api.post(f"/api/v1/sessions/{s.id}/jobs", headers=h,
+                       json={"operation": "postprocess", "args": _args(job_key="stcx:0", **nulls)})
+    assert r.status_code == 201, r.text
+    job = await db.get(Job, r.json()["data"]["id"])
+    await db.refresh(job)
+    assert not set(nulls) & set(job.args), job.args
+    assert job.args["job_key"] == "stcx:0" and job.args["floor"] == "concrete"
+
+
+@_aio
+async def test_a_null_required_field_is_still_refused(db, owner, api):
+    u, s = owner
+    h = await _login(api, u)
+    r = await api.post(f"/api/v1/sessions/{s.id}/jobs", headers=h,
+                       json={"operation": "postprocess", "args": _args(job_key=None)})
+    assert r.status_code == 422 and "job_key" in r.text, r.text
+
+
+@_aio
 async def test_a_reservation_can_be_canceled_and_drops_its_token(db, owner, api, slurm):
     u, s = owner
     job = await _reserved(db, u, s)
