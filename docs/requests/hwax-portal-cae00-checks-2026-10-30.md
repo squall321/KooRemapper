@@ -13,11 +13,12 @@
 SSO 켜기는 **이번에 하지 않는다**(§7 — 조건이 안 섰다).
 
 ## 1. cae00 — DynaForge 받기(update-all 뒤)
-이번 판에 든 것 — 반입 속도(raw_decode `288afb7` · sphere 블록 분리 `c7970dc`) · 후처리 예약 `postprocess`(`4ff9a79` → 위임 창구 `e62f601` · rc 3 경고) · 구면 위험도 맵(3D · 허용비 · 상위 N, `f366816`) · 렌더 결과 반입 C-11(`85ba2f0`). **마이그레이션 둘**(0015 · 0016 — null 허용 칸 · 유일 제약, 옛 코드에 영향 없음). 바이너리는 그대로(`8c7c4f87`).
+이번 판에 든 것 — 반입 속도(raw_decode `288afb7` · sphere 블록 분리 `c7970dc`) · 후처리 예약 `postprocess`(`4ff9a79` → 위임 창구 `e62f601` · rc 3 경고) · 구면 위험도 맵(3D · 허용비 · 상위 N, `f366816`) · 렌더 결과 반입 C-11(`85ba2f0`) · postprocess 의 비운 선택 칸 null 을 없는 칸으로(`07679d7` — 파이썬만, git 으로 온다). **마이그레이션 둘**(0015 · 0016 — null 허용 칸 · 유일 제약, 옛 코드에 영향 없음). 바이너리는 그대로(`8c7c4f87`).
 
 | 확인 | 명령 | 기대값 |
 |---|---|---|
 | 판 | `curl -s http://127.0.0.1:8700/api/health` | `"status":"ok"` · `revision` 이 이번 게시 BUILD_INFO 의 커밋(`c9bc426`) |
+| 소스 | KooRemapper 리포 루트에서 `git log -1 --oneline` | `07679d7` 이거나 그 뒤 — 위 `revision` 은 Drive 판의 커밋이라 파이썬만 바뀐 커밋은 여기서만 보인다. 앞이면 R2a 의 비운 과제 메타(null)가 422 로 막힌다 |
 | 마이그레이션 | KooRemapper 리포 루트에서 `bash platform/infra/scripts/migrate.sh` | 「Running upgrade」 줄 없이 「✓ migrations applied」 = 이미 0016 까지 올라 있다(빠졌으면 이 명령이 그 자리에서 올린다 — 0015 · 0016) |
 | MCP 도구 | 게이트웨이 tools/list 에서 kooremapper 도구 수, 또는 `platform/mcp_server/venv/bin/python platform/mcp_server/smoke.py` | 81개(`attach_render` 가 새로 있다) · `MCP SMOKE: PASS` |
 | 화면 | 세션 → 전각도 리포트 펼치기 → 「부품 위치·방향 시각화」 → 보기 「구(3D)」 | 3D 구가 뜬다(three.js 는 묶음 안에 있다 — 망 밖에 안 나간다) · 허용값을 넣으면 「초과 · 경고」 수가 보인다 |
@@ -49,7 +50,7 @@ KooSlurm `docs/sso_enable_20261029/icn401_apply_check.md` 그대로. 요점 —
 
 ## 4. 운영 첫 실제 전각도 잡 뒤 — 끝까지 한 번
 1. **B(드라이버 매니페스트)** — KooSlurm 문서 §4: `sacct` · 드라이버 로그 끝 「=== 귀환 매니페스트 ===」 · `<RESULT_DIR>/output/return_manifest.json`. 정상이면 `COMPLETED 0:0` · `ok: true` · 리포트 sha256 이 파일과 같다. 없으면 `FAILED 3:0` · `reason` · `log_tail` — 그 줄을 KooSlurm 에 넘긴다(없으면 C 로 다시 거는 curl 이 문서에 있다).
-2. **DynaForge 예약** — 그 잡을 제출한 절차(포털 R2a, `9ce09b6`)가 걸어 둔 `postprocess` 잡이 `succeeded` 가 되고 `resolved_cmd.report_ids` 에 리포트 id 가 생긴다. 리포트가 예약자 명의 · 과제 메타로 들어왔는지, 리포트 상세의 `external_job_key` = `stcx:<잡 id>` 인지 본다.
+2. **DynaForge 예약** — 그 잡을 제출한 절차(포털 R2a, `9ce09b6`)가 걸어 둔 `postprocess` 잡이 `succeeded` 가 되고 `resolved_cmd.report_ids` 에 리포트 id 가 생긴다. 리포트가 예약자 명의로 들어왔는지(제출 때 과제 메타 — `project` · `dev_rev` · `variation` · `doe` — 를 채웠으면 그 값도), 리포트 상세의 `external_job_key` = `stcx:<잡 id>` 인지 본다.
 3. 실패면 잡의 `error_summary` 가 매니페스트 까닭을 그대로 싣는다 — 그 문구를 DynaForge 에 넘긴다.
 
 ## 5. stcx viz 노드 — 읽기만(SceneForge · S1)
