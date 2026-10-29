@@ -1,10 +1,12 @@
 // 부품 리스크의 공간 컨텍스트 시각화 — 낙하 방향(구면)·충격 위치(디바이스)에 값 마커.
-import { useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Download } from 'lucide-react'
 import { reportGeometry, reportQuery } from '@/shared/api/endpoints'
 import type { Report, ReportFact, ReportGeometry } from '@/shared/api/types'
-import { Button, Select, Spinner } from '@/shared/ui/ui'
+import { Button, Input, Select, Spinner } from '@/shared/ui/ui'
+import type { GlobePoint } from './SphereGlobe3D'
+import { levelOf, lonLatGrid, makeField, ratioOf, topN, type Field, type Level, type Sample } from './sphereRisk'
 
 // 값이 없는 지표는 조회 시 빈 결과로 안내되므로, 리포트에 있으면 자동으로 채워진다.
 const METRICS = [
@@ -60,48 +62,73 @@ function legendGroup(vmin: number, vmax: number, unit: string, x: number, y: num
   )
 }
 
-/** 전각도 낙하 — 등장방형(경도×위도)에 각 방향을 값으로 색칠, 최악 별표.
- *  좌표는 백엔드가 swap 규약을 반영해 저장한 lon/lat 을 그대로 쓴다(구버전은 클램프 폴백). */
-function spherePlot(facts: ReportFact[], norm: (v: number) => number, worst: ReportFact | null,
-                    unit: string, fmt: (v: number) => string): Plot {
-  const W = 320, H = 170, pad = 18
+/** 구면 표본의 경도 · 위도(도). 좌표는 백엔드가 swap 규약을 반영해 저장한 lon/lat 을 그대로 쓴다(구버전은 클램프 폴백). */
+function sphereLonLat(f: ReportFact): { lon: number; lat: number } {
   const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
   const wrapLon = (v: number) => (((v + 180) % 360) + 360) % 360 - 180
-  const lonlat = (f: ReportFact) => {
-    const a = (f.identity as { angle?: { lon?: number; lat?: number; roll?: number; pitch?: number; swap?: boolean } })?.angle ?? {}
-    if (typeof a.lon === 'number' && typeof a.lat === 'number') return { lon: wrapLon(a.lon), lat: clamp(a.lat, -90, 90) }
-    // 폴백(구버전 리포트, lon/lat 미저장): swap 규약 반영 + 경도 래핑(클램프 아님).
-    const roll = a.roll ?? 0, pitch = a.pitch ?? 0
-    return { lon: wrapLon(a.swap ? roll : pitch), lat: clamp(a.swap ? pitch : roll, -90, 90) }
-  }
+  const a = (f.identity as { angle?: { lon?: number; lat?: number; roll?: number; pitch?: number; swap?: boolean } })?.angle ?? {}
+  if (typeof a.lon === 'number' && typeof a.lat === 'number') return { lon: wrapLon(a.lon), lat: clamp(a.lat, -90, 90) }
+  // 폴백(구버전 리포트, lon/lat 미저장): swap 규약 반영 + 경도 래핑(클램프 아님).
+  const roll = a.roll ?? 0, pitch = a.pitch ?? 0
+  return { lon: wrapLon(a.swap ? roll : pitch), lat: clamp(a.swap ? pitch : roll, -90, 90) }
+}
+
+const angName = (f: ReportFact) => (f.identity as { angle?: { name?: string } })?.angle?.name ?? f.case_key
+
+interface SphereExtras {
+  fill: string | null                        // 보간 격자 그림(data URL) — null 이면 채우지 않는다
+  levelOf: (f: ReportFact) => Level | null   // 허용값이 없으면 늘 null
+  selectedKey: string | null
+  onSelect: (key: string) => void
+}
+
+/** 전각도 낙하 — 등장방형(경도×위도)에 각 방향을 값으로 색칠, 최악 고리 · 임계 모양 · 고른 각도.
+ *  채움(보간)은 표본 사이 추정이라 판정 · 최악은 표본 값으로만 한다. */
+function spherePlot(facts: ReportFact[], colorOf: (f: ReportFact) => string, worst: ReportFact | null,
+                    unit: string, fmt: (v: number) => string, ex: SphereExtras): Plot {
+  const W = 320, H = 170, pad = 18
+  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
   const sx = (lon: number) => pad + ((lon + 180) / 360) * (W - 2 * pad)
   const sy = (lat: number) => pad + ((90 - lat) / 180) * (H - 2 * pad)
-  const angName = (f: ReportFact) => (f.identity as { angle?: { name?: string } })?.angle?.name ?? f.case_key
+  const sel = ex.selectedKey ? facts.find((f) => f.case_key === ex.selectedKey) : undefined
   const inner = (
     <g>
-      {[-90, 0, 90].map((lat) => <line key={`la${lat}`} x1={pad} x2={W - pad} y1={sy(lat)} y2={sy(lat)} stroke="#eee" />)}
-      {[-180, -90, 0, 90, 180].map((lon) => <line key={`lo${lon}`} y1={pad} y2={H - pad} x1={sx(lon)} x2={sx(lon)} stroke="#eee" />)}
+      {ex.fill && <image href={ex.fill} x={pad} y={pad} width={W - 2 * pad} height={H - 2 * pad} preserveAspectRatio="none" />}
+      {[-90, 0, 90].map((lat) => <line key={`la${lat}`} x1={pad} x2={W - pad} y1={sy(lat)} y2={sy(lat)} stroke={ex.fill ? '#fff' : '#eee'} strokeOpacity={ex.fill ? 0.6 : 1} />)}
+      {[-180, -90, 0, 90, 180].map((lon) => <line key={`lo${lon}`} y1={pad} y2={H - pad} x1={sx(lon)} x2={sx(lon)} stroke={ex.fill ? '#fff' : '#eee'} strokeOpacity={ex.fill ? 0.6 : 1} />)}
       {[-90, 0, 90].map((lat) => <text key={`lat${lat}`} x={pad - 2} y={sy(lat) + 3} textAnchor="end" fontSize="6" fill="#bbb">{lat}°</text>)}
       {[-180, 0, 180].map((lon) => <text key={`lon${lon}`} x={sx(lon)} y={pad - 3} textAnchor="middle" fontSize="6" fill="#bbb">{lon}°</text>)}
       <text x={W / 2} y={H - 4} textAnchor="middle" fontSize="8" fill="#999">경도(방위) →</text>
       <text x={7} y={H / 2} fontSize="8" fill="#999" transform={`rotate(-90 7 ${H / 2})`}>위도(고각) →</text>
       {facts.map((f, i) => {
-        const { lon, lat } = lonlat(f)
+        const { lon, lat } = sphereLonLat(f)
+        const lv = ex.levelOf(f)
+        // 임계는 색만이 아니라 모양으로도 — 초과 굵은 테두리, 경고 점선 테두리(색각 안전 램프 위라)
+        const stroke = lv === 'exceed' ? '#111' : lv === 'warn' ? '#333' : '#fff'
         return (
-          <circle key={i} cx={sx(lon)} cy={sy(lat)} r={3.2} fill={heat(norm(f.value))} opacity={0.9}>
+          <circle key={i} cx={sx(lon)} cy={sy(lat)} r={lv === 'exceed' ? 3.8 : 3.2} fill={colorOf(f)}
+                  stroke={stroke} strokeWidth={lv === 'exceed' ? 1.6 : lv === 'warn' ? 1.1 : 0.5}
+                  strokeDasharray={lv === 'warn' ? '1.6 1' : undefined}
+                  style={{ cursor: 'pointer' }} onClick={() => ex.onSelect(f.case_key)}>
             <title>{`${angName(f)} · ${fmt(f.value)} ${unit}`}</title>
           </circle>
         )
       })}
-      {worst && (() => { const { lon, lat } = lonlat(worst); return (
+      {worst && (() => { const { lon, lat } = sphereLonLat(worst); return (
         <g>
           <circle cx={sx(lon)} cy={sy(lat)} r={6} fill="none" stroke="#111" strokeWidth={1.5} />
           <text x={clamp(sx(lon) + 8, 0, W - 40)} y={clamp(sy(lat) - 6, 10, H)} fontSize="8" fill="#111">{fmt(worst.value)} {unit}</text>
         </g>
       )})()}
+      {sel && (() => { const { lon, lat } = sphereLonLat(sel); return (
+        <g>
+          <circle cx={sx(lon)} cy={sy(lat)} r={8} fill="none" stroke="#e11d48" strokeWidth={1.6} />
+          <text x={clamp(sx(lon) + 9, 0, W - 60)} y={clamp(sy(lat) + 12, 10, H - 2)} fontSize="7" fill="#e11d48">{angName(sel)}</text>
+        </g>
+      )})()}
     </g>
   )
-  return { w: W, h: H, inner }
+  return { w: W, h: H, inner, note: ex.fill ? '채움은 표본 사이 보간(추정)이다 — 판정 · 순위 · 최악은 표본 값으로 한다.' : undefined }
 }
 
 /** 전위치 부분충격 — 디바이스 외곽선 + 선택 부품 footprint + 충격 위치 값 마커.
@@ -232,6 +259,43 @@ function MarkerFigure({ plot, caption, vmin, vmax, unit, fileBase }: {
   )
 }
 
+// 3D 구는 three.js 라 처음 열 때만 받는다 — 첫 화면 묶음을 키우지 않는다.
+const SphereGlobe3D = lazy(() => import('./SphereGlobe3D'))
+const LEGEND_STOPS = Array.from({ length: 12 }, (_, i) => heat(i / 11))
+
+/** 허용값 칸 — 이 브라우저에만 둔다(리포트 · 부품 · 물리량별). 넣은 적이 없으면 기본값(있으면)을 쓴다.
+ *  돌려주는 셋째 값은 「기본값을 쓰는 중」 이다(화면에 그렇다고 적는다). */
+function useAllowable(key: string, fallback: string): [string, (v: string) => void, boolean] {
+  const read = useCallback(() => {
+    try { return window.localStorage.getItem(key) } catch { return null }
+  }, [key])
+  const [stored, setStored] = useState<string | null>(read)
+  useEffect(() => { setStored(read()) }, [read])
+  const set = (v: string) => {
+    setStored(v)
+    try { window.localStorage.setItem(key, v) } catch { /* 저장 못 해도 이 화면에는 쓴다 */ }
+  }
+  return [stored ?? fallback, set, stored == null && fallback !== '']
+}
+
+/** 보간 격자 → 그림(data URL) — 경도 -180→180 · 위도 90→-90. 표본이 많으면 칸을 키운다(셈 시간). */
+function gridImage(field: Field, nSamples: number, color: (v: number) => string): string {
+  const g = lonLatGrid(field, nSamples > 1000 ? 3 : 2)
+  const c = document.createElement('canvas')
+  c.width = g.w
+  c.height = g.h
+  const ctx = c.getContext('2d')!
+  for (let r = 0; r < g.h; r++) {
+    for (let k = 0; k < g.w; k++) {
+      ctx.fillStyle = color(g.values[r * g.w + k])
+      ctx.fillRect(k, r, 1, 1)
+    }
+  }
+  return c.toDataURL('image/png')
+}
+
+const LEVEL_LABEL: Record<Level, string> = { exceed: '초과', warn: '경고', ok: '정상' }
+
 export function ReportVisuals({ report }: { report: Report }) {
   const partList = report.parts ?? []
   // 기본 파트를 parts[0](흔히 강체/바닥 파트1, 값이 비거나 0)이 아니라 최악응력 파트로 —
@@ -240,6 +304,19 @@ export function ReportVisuals({ report }: { report: Report }) {
   const [partId, setPartId] = useState<number | ''>(
     (typeof worstPart === 'number' ? worstPart : partList[0]?.part_id) ?? '')
   const [metric, setMetric] = useState('peak_stress')
+  const isSphere = report.kind === 'sphere'
+  const [view, setView] = useState<'2d' | '3d'>('2d')
+  const [fillOn, setFillOn] = useState(true)
+  const [warnRatio, setWarnRatio] = useState(0.8)
+  const [nTop, setNTop] = useState(10)
+  const [selected, setSelected] = useState<string | null>(null)
+  // 응력의 기본 허용값 — 리포트에 연구 전체 항복응력이 있을 때만(부품별 값은 리포트에 없다)
+  const yieldStress = Number((report.sim_params as { yield_stress?: unknown } | null)?.yield_stress)
+  const stressDefault = metric === 'peak_stress' && Number.isFinite(yieldStress) && yieldStress > 0 ? String(yieldStress) : ''
+  const [allowText, setAllowText, allowIsDefault] = useAllowable(`koorm:allow:${report.id}:${partId}:${metric}`, stressDefault)
+  const allowNum = Number(allowText)
+  const allowable = isSphere && allowText.trim() !== '' && Number.isFinite(allowNum) && allowNum > 0 ? allowNum : null
+  const ratioMode = allowable != null
 
   const facts = useQuery({
     queryKey: ['report-facts', report.id, partId, metric],
@@ -252,50 +329,170 @@ export function ReportVisuals({ report }: { report: Report }) {
     enabled: report.kind === 'impact',
   })
 
+  const fs = useMemo(() => facts.data?.facts ?? [], [facts.data])
+  const samples = useMemo<Sample[]>(
+    () => (isSphere ? fs.map((f) => ({ key: f.case_key, name: angName(f), ...sphereLonLat(f), value: f.value })) : []),
+    [fs, isSphere])
+  // 색은 「보이는 값」 으로 — 허용값이 있으면 허용비(0 부터, 1 이 보이게), 없으면 값의 범위
+  const shownOf = useCallback((v: number) => (allowable != null ? v / allowable : v), [allowable])
+  const shown = fs.map((f) => shownOf(f.value))
+  const lo = ratioMode ? 0 : (shown.length ? Math.min(...shown) : 0)
+  const hiRaw = shown.length ? Math.max(...shown) : 1
+  const hi = ratioMode ? Math.max(1, hiRaw) : hiRaw
+  const colorOfShown = useCallback((v: number) => heat(hi > lo ? (v - lo) / (hi - lo) : 0.5), [lo, hi])
+  const levelOfFact = useCallback((f: ReportFact) => levelOf(ratioOf(f.value, allowable), warnRatio), [allowable, warnRatio])
+  const field = useMemo(() => (isSphere && fillOn && samples.length >= 3 ? makeField(samples) : null),
+                        [isSphere, fillOn, samples])
+  const fillHref = useMemo(() => (field && view === '2d'
+    ? gridImage(field, samples.length, (v) => colorOfShown(shownOf(v))) : null),
+    [field, view, samples.length, colorOfShown, shownOf])
+  const top = useMemo(() => topN(samples, nTop), [samples, nTop])
+  const globePoints = useMemo<GlobePoint[]>(() => samples.map((s) => {
+    const r = ratioOf(s.value, allowable)
+    return { key: s.key, name: s.name, lon: s.lon, lat: s.lat, shown: r ?? s.value,
+             level: levelOf(r, warnRatio), label: `${s.name} · ${fmtVal(s.value)}` }
+  }), [samples, allowable, warnRatio])
+
   if (report.kind === 'deep') {
     return <div className="text-muted text-[11px]">단건 심층 리포트는 방향/위치 마커가 없습니다 — 원본 리포트 렌더를 보세요.</div>
   }
 
-  const fs = facts.data?.facts ?? []
-  const vals = fs.map((f) => f.value)
-  const vmin = vals.length ? Math.min(...vals) : 0
-  const vmax = vals.length ? Math.max(...vals) : 1
-  const norm = (v: number) => (vmax > vmin ? (v - vmin) / (vmax - vmin) : 0.5)
+  const norm = (v: number) => (hi > lo ? (v - lo) / (hi - lo) : 0.5)
   const worst = fs.reduce<ReportFact | null>((a, f) => (!a || f.value > a.value ? f : a), null)
   const unit = METRICS.find((m) => m.v === metric)?.label ?? metric
   const partName = partList.find((p) => p.part_id === Number(partId))?.name ?? `Part ${partId}`
-  const caption = `${partName} · ${unit}`
+  const legendUnit = ratioMode ? '허용비(1 = 허용값)' : unit
+  const caption = `${partName} · ${ratioMode ? `허용비(허용값 ${fmtVal(allowable as number)})` : unit}`
+    + (field ? ' · 보간 채움(추정)' : '')
   const fileBase = `${report.kind}_${partName}_${metric}`.replace(/[^\w.-]+/g, '_')
+  const levels = ratioMode ? samples.map((s) => levelOf(ratioOf(s.value, allowable), warnRatio)) : []
+  const nExceed = levels.filter((l) => l === 'exceed').length
+  const nWarn = levels.filter((l) => l === 'warn').length
 
   const plot: Plot | null = !fs.length ? null
-    : report.kind === 'sphere' ? spherePlot(fs, norm, worst, unit, fmtVal)
+    : isSphere ? spherePlot(fs, (f) => colorOfShown(shownOf(f.value)), worst, unit, fmtVal,
+                            { fill: fillHref, levelOf: levelOfFact, selectedKey: selected, onSelect: setSelected })
     : devicePlot(fs, norm, worst, unit, fmtVal, geom.data, Number(partId))
 
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2 flex-wrap text-[11px]">
         <span className="text-muted">부품 위치·방향 시각화</span>
-        <Select value={String(partId)} onChange={(e) => setPartId(e.target.value === '' ? '' : Number(e.target.value))}
-                className="h-7 text-xs w-40">
-          {partList.map((p) => <option key={p.part_id} value={p.part_id}>{p.name ?? `Part ${p.part_id}`}</option>)}
-        </Select>
-        <Select value={metric} onChange={(e) => setMetric(e.target.value)} className="h-7 text-xs w-28">
-          {METRICS.map((m) => <option key={m.v} value={m.v}>{m.label}</option>)}
-        </Select>
+        {/* 공용 Select 는 w-full 이고 cn 이 clsx 라 넘긴 폭이 밀린다 — 폭은 감싼 상자로 준다 */}
+        <div className="w-40 shrink-0">
+          <Select value={String(partId)} onChange={(e) => setPartId(e.target.value === '' ? '' : Number(e.target.value))}
+                  className="h-7 text-xs">
+            {partList.map((p) => <option key={p.part_id} value={p.part_id}>{p.name ?? `Part ${p.part_id}`}</option>)}
+          </Select>
+        </div>
+        <div className="w-28 shrink-0">
+          <Select value={metric} onChange={(e) => setMetric(e.target.value)} className="h-7 text-xs">
+            {METRICS.map((m) => <option key={m.v} value={m.v}>{m.label}</option>)}
+          </Select>
+        </div>
         {worst && <span className="text-fg">최악 <b>{fmtVal(worst.value)}</b> @ {factLabel(worst)}</span>}
       </div>
+
+      {isSphere && (
+        <div className="flex items-center gap-2 flex-wrap text-[11px]">
+          <div className="w-24 shrink-0">
+            <Select value={view} onChange={(e) => setView(e.target.value as '2d' | '3d')} className="h-7 text-xs">
+              <option value="2d">평면(2D)</option>
+              <option value="3d">구(3D)</option>
+            </Select>
+          </div>
+          <label className="flex items-center gap-1">
+            <input type="checkbox" checked={fillOn} onChange={(e) => setFillOn(e.target.checked)} /> 보간 채움
+          </label>
+          <span className="text-muted">허용값</span>
+          <div className="w-24 shrink-0">
+            <Input type="number" value={allowText} placeholder="없음" onChange={(e) => setAllowText(e.target.value)}
+                   className="h-7 text-xs" />
+          </div>
+          <span className="text-muted">{unit}</span>
+          <span className="text-muted">경고 ≥</span>
+          <div className="w-16 shrink-0">
+            <Input type="number" step="0.05" min="0.1" max="0.99" value={warnRatio}
+                   onChange={(e) => { const v = Number(e.target.value); if (v > 0 && v < 1) setWarnRatio(v) }}
+                   className="h-7 text-xs" />
+          </div>
+          <span className="text-muted">상위</span>
+          <div className="w-16 shrink-0">
+            <Select value={String(nTop)} onChange={(e) => setNTop(Number(e.target.value))} className="h-7 text-xs">
+              {[5, 10, 20, 50].map((n) => <option key={n} value={n}>{n}</option>)}
+            </Select>
+          </div>
+        </div>
+      )}
+      {isSphere && allowIsDefault && (
+        <div className="text-[10px] text-amber-600">
+          허용값은 리포트 기본값이다 — 연구 전체 항복응력 하나라 부품별 값이 아니다. 부품에 맞는 값을 넣어 바꿀 수 있다(이 브라우저에만 남는다).
+        </div>
+      )}
+      {isSphere && fs.length > 0 && (ratioMode ? (
+        <div className="text-[11px]">
+          초과 <b>{nExceed}</b> · 경고 <b>{nWarn}</b> / 표본 {samples.length} — 판정은 표본 값 ÷ 허용값(경고 ≥ {warnRatio})
+        </div>
+      ) : (
+        <div className="text-[10px] text-muted">허용값을 넣으면 허용비 · 임계(초과 · 경고)가 보인다.</div>
+      ))}
 
       {facts.isLoading || (report.kind === 'impact' && geom.isLoading) ? <Spinner /> : !plot ? (
         <div className="text-muted text-[11px]">이 부품·물리량의 값이 없습니다.</div>
       ) : (
         <div className="space-y-1">
-          <MarkerFigure plot={plot} caption={caption} vmin={vmin} vmax={vmax} unit={unit} fileBase={fileBase} />
+          {isSphere && view === '3d' ? (
+            <Suspense fallback={<Spinner />}>
+              <SphereGlobe3D points={globePoints} field={field} fieldToShown={shownOf} colorOf={colorOfShown}
+                             selectedKey={selected} onSelect={setSelected} caption={caption}
+                             legend={{ lo: fmtVal(lo), hi: fmtVal(hi), unit: legendUnit, colors: LEGEND_STOPS }}
+                             fileBase={fileBase} />
+            </Suspense>
+          ) : (
+            <MarkerFigure plot={plot} caption={caption} vmin={lo} vmax={hi} unit={legendUnit} fileBase={fileBase} />
+          )}
           {facts.data?.truncated && (
             <div className="text-[10px] text-amber-600">
               값이 많아 {fs.length}건만 표시(색 스케일이 일부 편향될 수 있음). 부품/물리량으로 좁혀 보세요.
             </div>
           )}
+          {isSphere && view === '3d' && field && (
+            <div className="text-[10px] text-amber-600">면 색은 표본 사이 보간(추정)이다 — 판정 · 순위 · 최악은 표본 값으로 한다.</div>
+          )}
         </div>
+      )}
+
+      {isSphere && top.length > 0 && (
+        <table className="w-full text-[11px] border-collapse">
+          <thead>
+            <tr className="text-muted text-left">
+              <th className="font-normal pr-2">#</th>
+              <th className="font-normal pr-2">각도</th>
+              <th className="font-normal pr-2 text-right">{unit}</th>
+              {ratioMode && <th className="font-normal pr-2 text-right">허용비</th>}
+              {ratioMode && <th className="font-normal pr-2">판정</th>}
+              <th className="font-normal">경도 / 위도</th>
+            </tr>
+          </thead>
+          <tbody>
+            {top.map((s, i) => {
+              const r = ratioOf(s.value, allowable)
+              const lv = levelOf(r, warnRatio)
+              return (
+                <tr key={s.key} onClick={() => setSelected(s.key)} className="cursor-pointer border-t border-border"
+                    style={selected === s.key ? { background: '#fff1f2' } : undefined}>
+                  <td className="pr-2">{i + 1}</td>
+                  <td className="pr-2">{s.name}</td>
+                  <td className="pr-2 text-right">{fmtVal(s.value)}</td>
+                  {/* 셋째 자리까지 — 둘째 자리 반올림은 0.7986 을 「0.80 · 정상」 처럼 경계와 같아 보이게 한다 */}
+                  {ratioMode && <td className="pr-2 text-right">{r != null ? r.toFixed(3) : '–'}</td>}
+                  {ratioMode && <td className="pr-2">{lv ? LEVEL_LABEL[lv] : '–'}</td>}
+                  <td className="text-muted">{s.lon.toFixed(0)}° / {s.lat.toFixed(0)}°</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
       )}
     </div>
   )
