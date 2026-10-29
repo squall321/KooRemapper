@@ -53,6 +53,7 @@
 - [ ] C-5 대응표 내보내기 · C-6 가중치 잡(꼴은 10-28 초안) · 덱 리더 축퇴 꼴 보강 · 파트 표에 재질 · 밀도 · 색(C-8) — USD 는 SceneForge(D-9)
   - [x] 첫 산출(10-28 밤, 개발판) `/data/koopark/drop_twin_p1/stepforge_fe_cad_a32a9a574143/` — 대응 22/22 · 가중치 22파트(행 1,232 · nnz 3,696) · 겉면 22/22 S1 과 같음. 받는 쪽 검사 통과(sha · 오프셋 8 배수 · Σw=1 · col ⊂ S1 node_ids). 운영 반영 뒤 경로 · 열쇠가 바뀐다
   - [x] ★운영 반영(10-29, StepForge `009082d` · 잡 `fe_cad`) — `/data/appdata/step_forge/projects/001a184fed0639fc4477054/export/fe_cad/a77cb1d20adc/`(HEAXHub `var/app_data` 가 가리킴) · 판 열쇠 `a77cb1d2…` · manifest `fc6c52e4…`. 받은 파일 여섯 sha256 대조 일치 · weights.bin 은 개발판과 바이트 동일. **P2 뷰어는 이 manifest 를 기준으로**
+  - 산출 꼴 변화(10-29 StepForge `2f54f5b` · D-645) — weights.json 에서 `seconds` 를 뺐다(같은 판 열쇠 = 같은 바이트) · manifest 에 늘 `variants`(`view` = glb · weights · 보기 판 열쇠, `render=true` 면 `render` = scene_render.glb · weights_render.json/.bin — SceneForge 렌더용, 그 묶음에만 `bundle_key`) · 새 길 `deck_from=mesh`(매끈한 CAD 과제의 메시 잡 덱, 기본은 `deck_step`). a77cb1d20adc 묶음은 그대로 남는다. DynaForge 에는 아직 fe_cad 리더가 없다 — P2 뷰어는 `variants.view` 를 읽는다
 ### SceneForge
 - [x] 리포 — `/home/koopark/claude/SceneForge`(10-28, 로컬 첫 커밋 ebbf77f). GitHub 비공개 저장소는 이 박스의 gh(snap)가 서비스 cgroup 에서 안 떠 대기
 - [ ] 제어면 골격 · glb → USD · 빈 장면 렌더 1장
