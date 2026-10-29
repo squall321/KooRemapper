@@ -65,4 +65,5 @@
 - [x] 클라이언트 — 위임 발급(`mint_user_token`) · 캐시(만료 2분 전까지, 기본 10분) · REST 401 이면 캐시를 버리고 다음 확인에 새로(새로 받은 토큰도 401 이면 실패) · 응답의 `username` 을 원장 `cluster_user` 로(403 까닭에 싣는다)
 - [x] 걷어 낼 것 — 카탈로그 `kst_token` · 라우트 토큰 떼기(소속 얼리기는 남긴다) · `tokenbox` · 카탈로그 `secret` 지원과 검증 문구 가리기 · 콘솔 가린 칸(다시 빌드) · 번들 `token_enc` 빼기(번들의 `kst_` 가리기는 남긴다 — 흔한 안전망). 카탈로그 노트의 옛 설정 이름(`KOORM_KOOSLURM_URL`)도 바로잡았다 — 첫 커밋에서 못 쓸었다
 - [x] 시험 29 — 위임 요청 헤더 · 캐시 재사용 · 401 다시 받기 · 창구 거절(되풀이된 kst_ 가림) · 창구 5xx 재시도 · `kst_token` 을 주면 422(값은 안 되풀이). 재사용 · 다시 받기는 일부러 깨 시험이 잡는 것까지
-- [ ] 백엔드 전체 · 회귀 · dev 반영 · 스모크 · §10 고쳐 쓰기 · 기억
+- [x] 백엔드 706 · 줄바꿈 회귀 64 · 카탈로그 일치 · dev 반영(`e62f601`, 도는 잡 0 확인 · 콘솔 다시 빌드) · allops 63/63 · reports 35/35 · §10 정정 · 기억
+- [ ] 운영 — KooSlurm `33bd0da1` 푸시 · 운영 반영(사용자 확인) · 허용 이름에 `gateway-smart-twin-mcp` · `gateway-smart-twin-cluster`(포털이 가른 이름) · 공유 비밀 셋(KooSlurm `HEAX_GATEWAY_SECRET` = DynaForge `KOORM_KOOSLURM_SSO_SECRET` = 게이트웨이 `KST_*_SSO_SECRET`) · uid = 이메일 @ 앞부분 가정 확인(운영 사용자 한 명) · icn401 `start_production.sh`
