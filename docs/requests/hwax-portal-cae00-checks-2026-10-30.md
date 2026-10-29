@@ -10,6 +10,7 @@
 4. **cae00** — `KOORM_STCX_BACKEND_URL` 확인 → DynaForge 재기동 → §2 확인.
 5. 운영의 **첫 실제 전각도 잡** 뒤 → §4.
 6. (사람 · 읽기만) stcx viz 노드 · 게이트웨이 감사 → §5 · §6.
+7. (운영 측) stcx 후처리 이미지 **Post v42** 설치 — 단면 영상 응력 0 프레임 고침 → §5-1.
 SSO 켜기는 **이번에 하지 않는다**(§7 — 조건이 안 섰다).
 
 ## 1. cae00 — DynaForge 받기(update-all 뒤)
@@ -60,10 +61,15 @@ bash stcx_viz_readcheck.sh                                    # 1단계 — 로�
 bash stcx_viz_readcheck.sh <viz 파티션> <노드> <S1 결과 폴더>    # 2단계 — 고른 노드에 CPU 1 · 512M · 5분 · GPU 요청 없는 잡 하나
 ```
 - 2단계 앞뒤로 cae00 에서 `~/stcx-llm/llmctl.sh status`(챗 LLM 이 그대로인지).
-- **<S1 결과 폴더>** — S1 은 아직 나오지 않았다(KooD3plotReader 추출기 계약 대기). 둘 자리는 후처리 잡의 결과 옆 `<RESULT_DIR>/output/s1/` 로 잡고 있다(잠정). 그러니 지금은 운영 전각도 잡 하나의 `<RESULT_DIR>/output`(sphere_report.html 이 있는 곳 — 귀환 매니페스트의 `job.result_dir`)로 마운트를 본다.
+- **<S1 결과 폴더>** — S1 은 아직 나오지 않았다(KooD3plotReader 추출기 계약 대기). 둘 자리는 추출기 쪽(KooD3plotReader)이 정한다 — 후보는 각도 run 폴더 안 `Output/s1.h5` 와 결과 옆 `<RESULT_DIR>/output/s1/` 둘이고, 둘 다 `<RESULT_DIR>/output` 아래다. 그러니 지금은 운영 전각도 잡 하나의 `<RESULT_DIR>/output`(sphere_report.html 이 있는 곳 — 귀환 매니페스트의 `job.result_dir`)로 마운트를 본다.
 - 스크립트를 못 옮기면 한 줄씩 — SceneForge `docs/requests/dynaforge-sceneforge-tasks-reply-2026-10-29.md` 「cae00 명령」 절(sinfo · squeue · 챗 LLM sbatch gres · scontrol config · `nvidia-smi` · `ldconfig -p` 로 GL/EGL/NVENC/Vulkan 라이브러리 · `apptainer --version` · `ls -la <폴더>`).
 - 제어면 준비로 둘 더 — SceneForge 를 돌릴 cae00 계정에서 `ssh -o BatchMode=yes stcx true && echo ok`(sbatch 낼 길이 비밀번호 없이 열리나, C-13) · `ssh stcx df -h /data2`(렌더 작업자 SIF · 결과 자리 여유 — 자리는 노드 관리자와 정한다).
 - GPU 를 쓰는 시험(T1 · T2)은 SceneForge `docs/research/stcx-gpu-test-plan-2026-10-29.md` — 읽기 점검 결과가 나온 뒤 챗 LLM 운영과 시간을 잡고.
+
+## 5-1. stcx — 후처리 이미지 Post v42(운영 측 설치)
+단면 영상 **응력 0 프레임**(K-1 — 운영 영상 24개 중 7개가 오류 없이 응력 0) 고침이 든 판이다(KooD3plotReader `5abbc76`). pyKooCAE 가 Drive `ApptainerImages:SmartTwinPreprocessor/` 에 올렸다 — `SmartTwinPostprocessor_20261029_v42.tar.gz`, sha256 헤드리스 `1a6e0933…` · GUI `4536ea72…`. 이 박스에서 stcx 로 밀어 넣는 절차는 없고 **설치는 운영 측 몫**이다.
+- 설치 뒤 — `apptainer exec <설치한 SmartTwinPostprocessor.sif> head -3 /opt/kood3plot/VERSION` → `Version: 5abbc76`.
+- 고침 자체는 dev 헤드에서 확인했다 — 결함을 매번 일으키는 설정(LS-PrePost 예산 20M)을 심어도 정상이고, 옛 판(Post v41 `282630b`)은 같은 설정에서 0 을 내며 rc 0 으로 끝났다(KooRemapper `7818cbc`). 운영에서는 설치 뒤 전각도 잡 하나의 단면 영상 마지막 프레임 범례가 `max = 0, at node# 0` 이 아닌지만 본다.
 
 ## 6. 게이트웨이 — 게이트웨이를 거친 stcx 제출이 지금 되는가(선택)
 ```
