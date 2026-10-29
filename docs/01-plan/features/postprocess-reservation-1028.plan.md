@@ -43,7 +43,7 @@
 - [x] 시험 26(가짜 KooSlurm) · 백엔드 전체 703 · 줄바꿈 회귀 64 · 카탈로그 일치 — 라우트 토큰 떼기 · 번들 암호문 빼기는 일부러 깨 시험이 잡는 것까지 확인
 - [x] dev 반영(10-29, 도는 잡 0 확인 뒤 API 재기동 · 콘솔 다시 빌드) · allops_smoke 64/64(postprocess 는 「구성 안 됨」 — dev 는 `KOORM_STCX_BACKEND_URL` 이 비어 있다) · reports_smoke 35/35
 - [x] 요청서 §10 회신(`platform/docs/REQUEST-postprocess-operation.md`) · 총괄 체크리스트
-- [ ] 포털에 호출 꼴 알림 · 기억
+- [x] 포털에 호출 꼴 알림(hwaxportal-a5, 10-29 — PAT 를 넘길 길 · 로그 가리기 · 운영 게이트웨이 설정을 물음) · 기억
 - [ ] 운영에서 첫 실제 잡으로 끝까지 재기 — KooSlurm 운영 적용(icn401, 사용자) · 운영 DynaForge 의 `KOORM_STCX_BACKEND_URL` · 예약자 PAT 를 넘기는 길(포털)이 서야 한다
 
 ## 결정 기록 (10-29)
