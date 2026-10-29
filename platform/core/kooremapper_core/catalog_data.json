@@ -14693,7 +14693,7 @@
       "name": "postprocess",
       "category": "analysis",
       "summary": "stcx 해석이 끝나면 귀환 매니페스트를 보고 리포트를 예약한 사람 명의로 반입",
-      "description": "stcx 에 제출한 해석 잡의 결과 리포트(sphere · impact HTML)를 **예약해 두었다가** 끝나면 반입한다. 포털 절차가 제출 직후 부르는 자리다.\n\n이 작업은 **이 서버에서 계산하지 않는다.** KooSlurm 대시보드의 귀환 매니페스트(`output/return_manifest.json`)를 기다리다가, 매니페스트가 리포트가 있다고 말하면 그 파일을 내려받아 크기 · sha256 을 맞추고 **예약한 사람 명의**로 반입한다. 잡이 끝날 때까지 몇 시간이 걸릴 수 있다 — 즉시 job_id 를 돌려주고, 상태는 잡 조회로 본다.\n\n**잡 하나에 리포트 하나.** 같은 `job_key` 가 이미 반입됐으면 새로 받지 않고 그 리포트를 알린다.\n\n**지어내지 않는다.** 매니페스트가 리포트가 없다고 하거나(`ok=false` · `present=false`) 드라이버가 일찍 죽었으면(`stage=early_exit`) 실패로 끝내고 매니페스트의 까닭 · 로그 끝을 그대로 옮긴다.\n\n`kst_token` 은 **쓰기 전용**이다 — 잡 인자에서 떼어 암호화해 두고, 끝나면(성공 · 실패 · 취소 · 기한) 지운다.",
+      "description": "stcx 에 제출한 해석 잡의 결과 리포트(sphere · impact HTML)를 **예약해 두었다가** 끝나면 반입한다. 포털 절차가 제출 직후 부르는 자리다.\n\n이 작업은 **이 서버에서 계산하지 않는다.** KooSlurm 대시보드의 귀환 매니페스트(`output/return_manifest.json`)를 기다리다가, 매니페스트가 리포트가 있다고 말하면 그 파일을 내려받아 크기 · sha256 을 맞추고 **예약한 사람 명의**로 반입한다. 잡이 끝날 때까지 몇 시간이 걸릴 수 있다 — 즉시 job_id 를 돌려주고, 상태는 잡 조회로 본다. 반입한 리포트 id 는 잡의 `resolved_cmd.report_ids` 에 있다.\n\n**잡 하나에 리포트 하나.** 같은 `job_key` 가 이미 반입됐으면 새로 받지 않고 그 리포트를 알린다.\n\n**지어내지 않는다.** 매니페스트가 리포트가 없다고 하거나(`present=false`) 드라이버가 일찍 죽었으면(`stage=early_exit`) 실패로 끝내고 매니페스트의 까닭 · 로그 끝을 그대로 옮긴다.\n\n**토큰을 받지 않는다.** 잡 소유자(위임 호출한 사람)의 kst_ 는 KooSlurm 위임 창구에서 그때그때 받는다 — 도구 인자로 나르면 포털 절차 원장 · 챗 문맥에 남는다.",
       "invocation": "external",
       "config_style": null,
       "takes_kfile": false,
@@ -14708,15 +14708,6 @@
           "group": "잡",
           "pattern": "^stcx:[0-9]+$",
           "description": "제출한 잡의 키 — `stcx:<slurm_job_id>`(KooSlurm 대시보드의 잡 id). 잡 하나에 리포트 하나 — 이미 반입된 키면 그 리포트를 알린다."
-        },
-        {
-          "name": "kst_token",
-          "type": "string",
-          "role": "value",
-          "required": true,
-          "group": "잡",
-          "secret": true,
-          "description": "예약한 사람 본인의 KooSlurm PAT(kst_…). 쓰기 전용 — 잡 인자에서 떼어 암호화해 두고 끝나면 지운다. 응답 · 로그 · 진단 번들에 평문으로 남지 않는다."
         },
         {
           "name": "sim_type",
@@ -14814,7 +14805,6 @@
       "example": {
         "args": {
           "job_key": "stcx:123456",
-          "kst_token": "kst_EXAMPLE_TOKEN_DO_NOT_USE",
           "sim_type": "fullangle_drop",
           "job_name": "phone_fib162",
           "project": "DEMO",
@@ -14824,9 +14814,10 @@
         "note": "stcx 잡 123456 의 sphere 리포트를 예약한다. 매니페스트가 리포트가 있다고 하면 예약한 사람 명의로 반입된다."
       },
       "notes": [
-        "설정 KOORM_KOOSLURM_URL(KooSlurm 대시보드 REST 기준 주소)이 비면 잡이 「구성 안 됨」 으로 명시적으로 실패한다.",
-        "토큰은 KooSlurm 이 정한 계약대로 예약한 사람 본인의 kst_ PAT 다 — 서비스 계정 · admin PAT 를 쓰지 않는다.",
-        "매니페스트를 기다리는 기한은 KOORM_POSTPROCESS_WAIT_DAYS(기본 7일)다. 넘으면 실패로 끝내고 토큰을 지운다.",
+        "설정 KOORM_STCX_BACKEND_URL(KooSlurm 대시보드 — 덱 업로드 · 위임 창구 `/api/auth/sso` 가 같은 주소) · KOORM_KOOSLURM_SSO_SECRET(위임 창구의 공유 비밀 — KooSlurm `HEAX_GATEWAY_SECRET` 과 같은 값) 가운데 하나라도 비면 잡이 「구성 안 됨」 으로 명시적으로 실패한다.",
+        "신원은 KooSlurm 계약대로 잡 소유자 본인의 kst_ 다 — 위임 창구(게이트웨이 per_user_sso 와 같은 규격, 클라이언트 이름 dynaforge)에서 받는다. 서비스 계정 · admin PAT 를 쓰지 않는다.",
+        "매니페스트를 기다리는 기한은 KOORM_POSTPROCESS_WAIT_DAYS(기본 7일)다. 넘으면 실패로 끝낸다.",
+        "클러스터 잡이 끝났는데 매니페스트가 없으면(드라이버가 쓰기 전에 죽음) 2분 뒤 실패로 끝내고, KooSlurm 후처리 잡(C)으로 다시 걸 수 있다고 알린다.",
         "이 작업은 클러스터에 손대지 않으므로 취소할 수 있다 — 기다림만 멈춘다."
       ]
     }

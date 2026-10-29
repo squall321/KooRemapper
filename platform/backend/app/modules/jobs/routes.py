@@ -142,19 +142,17 @@ async def create_job(
             dangling_warnings.append(msg)
         else:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, msg)
-    args = dict(body.args)
     external_ref = None
     if body.operation == postprocess_return.OPERATION:
-        # ★예약자의 kst_ PAT 는 잡 인자에 남기지 않는다 — 떼어 암호문으로만 원장에 둔다(사용자 결정 10-28).
-        #   소속도 지금 검증해 얼린다 — 반입 때는 요청(헤더)이 없다.
-        external_ref = postprocess_return.reservation_ref(
-            args, affiliation=verified_affiliation(request.headers, user.email, settings.heax_gateway_secret))
+        # 후처리 예약은 소속을 지금 검증해 얼린다 — 반입 때는 요청(헤더)이 없다. 신원(kst_)은 인자로 받지 않고
+        # 워커가 KooSlurm 위임 창구에서 잡 소유자의 것을 받는다(사용자 결정 10-29).
+        external_ref = {"affiliation": verified_affiliation(request.headers, user.email, settings.heax_gateway_secret)}
     job = Job(
         id=ulid.new().str,
         session_id=session_id,
         user_id=user.id,
         operation=body.operation,
-        args=args,
+        args=body.args,
         status="queued",
         warnings=dangling_warnings or None,
         external_ref=external_ref,
@@ -365,7 +363,7 @@ async def cancel_job(
     job = await _require_job(db, user, job_id)
     if job.status not in ("queued", "running"):
         raise HTTPException(status.HTTP_409_CONFLICT, f"취소할 수 없는 상태입니다: {job.status}")
-    # 후처리 예약은 클러스터에 손대지 않는 기다림이다 — 여기서 끝내고 맡은 토큰도 지운다.
+    # 후처리 예약은 클러스터에 손대지 않는 기다림이다 — 여기서 끝낼 수 있다.
     if job.operation == postprocess_return.OPERATION:
         postprocess_return.cancel(job)
         await db.commit()

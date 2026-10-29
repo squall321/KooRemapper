@@ -1,15 +1,15 @@
 # 후처리 예약(7-1) — KooSlurm 귀환 매니페스트를 기다려 리포트를 예약자 명의로 반입하는 외부 잡
 """흐름 (계획 docs/01-plan/features/postprocess-reservation-1028.plan.md)
 
-1. 잡 생성(`app.modules.jobs.routes.create_job`) — `reservation_ref` 가 `kst_token` 을 인자에서 떼어
-   암호문(`token_enc`)으로만 `external_ref` 에 둔다. 소속도 그때 검증해 얼린다 — 반입 때는 요청이 없다.
-2. 시작(`start`, 워커가 잡을 집은 직후) — 주소가 없으면 「구성 안 됨」. 같은 잡 키의 리포트가 이미 있으면
+1. 잡 생성(`app.modules.jobs.routes.create_job`) — 소속을 검증해 `external_ref.affiliation` 에 얼린다(반입 때는
+   요청이 없다). **토큰은 받지 않는다** — 도구 인자로 나르면 포털 절차 원장 · 챗 문맥에 평문으로 남는다(포털 확인,
+   사용자 결정 10-29). 확인할 때마다 KooSlurm 위임 창구에서 잡 소유자의 kst_ 를 받는다(`_owner_token`).
+2. 시작(`start`, 워커가 잡을 집은 직후) — 주소 · 위임 창구가 없으면 「구성 안 됨」. 같은 잡 키의 리포트가 이미 있으면
    그것으로 끝낸다(7-2). 아니면 외부 잡으로 걸어 두고 다음 스캔(≤15초)에 첫 확인을 한다.
 3. 확인(`poll_due`) — 매니페스트 404 는 아직이다. 200 이면 판정(`judge`) → 받기 → 반입.
    404 가 이어지는데 클러스터 잡이 끝나 있으면 매니페스트가 영영 안 올 수 있다 — 드라이버가 EXIT trap
    전에 죽었거나(SIGKILL · 시간 초과), 매니페스트를 쓰기 전 판의 드라이버다(KooSlurm 10-28). 처음 보고 2분이
    지나도 그대로면 닫는다(NFS 지연). C(후처리 잡)가 도는 중이면(.prev 가 있다) 기다린다.
-4. 끝나는 모든 길(성공 · 실패 · 취소 · 기한)에서 토큰 암호문을 지운다(`_close`).
 
 지키는 것 — **지어내지 않는다.** 성공 · 실패는 매니페스트가 말하는 대로이고, 까닭은 원문 그대로 옮긴다.
 """
@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import PurePosixPath
 
@@ -26,11 +27,10 @@ from sqlalchemy.exc import IntegrityError
 
 from app.config import settings
 from app.database import SessionLocal
-from app.models import ImpactReport, Job, Session
+from app.models import ImpactReport, Job, Session, User
 from app.modules.reports import services as report_svc
-from app.runner.kooslurm_client import MANIFEST_PATH, KooSlurmClient
+from app.runner.kooslurm_client import MANIFEST_PATH, SSO_PATH, KooSlurmClient, mint_user_token
 from app.runner.stcx_client import STATES_BAD, STATES_OK
-from app.shared import tokenbox
 from app.worker.runner_loop import _POLL_BATCH, _next_poll_delay
 
 logger = logging.getLogger("koorm.worker")
@@ -50,23 +50,40 @@ _ENDED_GRACE = timedelta(minutes=2)
 # 클러스터가 잡을 모른다(`/info` 404)를 몇 번 연달아 보면 닫나. 대시보드는 sacct 가 5초 상한에 걸려도 404 다.
 _UNKNOWN_LIMIT = 3
 _TERMINAL = STATES_OK | STATES_BAD
+# 위임 창구에서 받은 토큰을 사람별로 잠깐 들고 있는다. 발급은 같은 사람 · 같은 이름의 직전 토큰을 회수하므로 확인마다
+# 받으면 KooSlurm 에 회수된 토큰이 쌓인다. **프로세스 안에만** 있다(DB · 로그 · 번들에 없다) — 게이트웨이와 같은 까닭 ·
+# 같은 꼴이다(만료 2분 전까지, 만료를 안 주면 10분).
+_TOKEN_TTL_S = 600
+_TOKENS: dict[str, tuple[str, float, str | None]] = {}
 
 
-def reservation_ref(args: dict, *, affiliation: str) -> dict:
-    """잡 생성 때 — `args` 에서 `kst_token` 을 **떼어 내고**(그 자리에서 고친다) 잡에 둘 원장을 돌려준다.
+def _missing_config() -> list[str]:
+    return [name for name, value in (
+        ("KOORM_STCX_BACKEND_URL", settings.stcx_backend_url),
+        ("KOORM_KOOSLURM_SSO_SECRET", settings.kooslurm_sso_secret),
+    ) if not str(value or "").strip()]
 
-    평문 토큰은 이 함수 밖으로 나가지 않는다 — 잡 인자 · 응답 · 로그 어디에도 남지 않는다.
-    """
-    token = str(args.pop("kst_token", "") or "")
-    return {"token_enc": tokenbox.seal(token), "affiliation": affiliation or ""}
+
+async def _owner_token(email: str) -> dict:
+    """잡 소유자의 kst_ — 들고 있는 것이 살아 있으면 그것(`fresh: False`), 아니면 위임 창구에서 새로(`fresh: True`)."""
+    hit = _TOKENS.get(email)
+    if hit and hit[1] > time.monotonic():
+        return {"ok": True, "token": hit[0], "fresh": False, "username": hit[2]}
+    got = await mint_user_token(str(settings.stcx_backend_url).rstrip("/") + SSO_PATH,
+                                settings.kooslurm_sso_secret, email, timeout=settings.kooslurm_timeout_sec)
+    if not got.get("ok"):
+        return got
+    ttl = _TOKEN_TTL_S
+    if got.get("expires_in"):
+        ttl = max(0, min(ttl, int(got["expires_in"]) - 120))
+    _TOKENS[email] = (got["token"], time.monotonic() + ttl, got.get("username"))
+    return {"ok": True, "token": got["token"], "fresh": True, "username": got.get("username")}
 
 
 def _close(job: Job, *, status: str, now: datetime, why: str | None = None, **extra) -> None:
-    """잡을 끝낸다 — 어떤 끝이든 토큰 암호문을 지운다."""
-    ref = dict(job.external_ref or {})
-    ref.pop("token_enc", None)
-    ref.update(extra)
-    job.external_ref = ref
+    """잡을 끝낸다."""
+    if extra:
+        job.external_ref = {**(job.external_ref or {}), **extra}
     job.status = status
     job.finished_at = now
     job.external_poll_at = None
@@ -167,15 +184,11 @@ async def start(db, job: Job, now: datetime | None = None) -> None:
         return
     args = dict(job.args or {})
     ref = dict(job.external_ref or {})
-    if not str(settings.stcx_backend_url or "").strip():
+    missing = _missing_config()
+    if missing:
         _close(job, status="failed", now=now,
-               why="구성 안 됨 — KOORM_STCX_BACKEND_URL(KooSlurm 대시보드 주소)이 비었다. "
-                   "후처리 예약은 이 주소로 귀환 매니페스트를 본다(값을 지어내지 않는다)")
-        await db.commit()
-        return
-    if not ref.get("token_enc"):
-        _close(job, status="failed", now=now,
-               why="예약자 토큰이 없다 — 잡 생성 요청의 kst_token 이 원장에 실리지 않았다")
+               why="구성 안 됨 — " + " · ".join(missing) + " 이(가) 비었다. 후처리 예약은 KooSlurm 대시보드 주소와 "
+                   "위임 창구가 있어야 귀환 매니페스트를 본다(값을 지어내지 않는다)")
         await db.commit()
         return
     key = str(args.get("job_key") or "")
@@ -233,14 +246,26 @@ async def poll_one(db, job: Job, now: datetime) -> None:
     if existing is not None:          # 같은 키를 다른 예약이 먼저 반입했다(7-2)
         _succeed(job, existing, now, already=True)
         return
-    token = tokenbox.unseal(ref.get("token_enc") or "")
-    if not token:
-        _close(job, status="failed", now=now,
-               why="맡아 둔 토큰을 풀 수 없다(KOORM_TOKEN_KEY · jwt_secret 이 바뀌었을 수 있다) — 다시 예약하라")
+    owner = await db.get(User, job.user_id)
+    if owner is None or not owner.email:
+        _close(job, status="failed", now=now, why="잡 소유자를 찾을 수 없다")
         return
-    client = KooSlurmClient(settings.stcx_backend_url, token, timeout=settings.kooslurm_timeout_sec)
+    tok = await _owner_token(owner.email)
+    if not tok.get("ok"):
+        err = str(tok.get("error") or "")
+        if err.startswith("sso_") and not err.startswith("sso_5"):
+            # 4xx · 토큰 없는 응답 — 비밀 · 허용 클라이언트 · 사용자 매핑 문제다. 기다려도 안 바뀐다.
+            _close(job, status="failed", now=now,
+                   why=f"KooSlurm 위임 창구가 잡 소유자의 토큰을 내주지 않았다({err}): {tok.get('detail') or ''}"
+                       .rstrip(": "))
+            return
+        ref["last_error"] = f"sso {err}: {tok.get('detail') or ''}"[:500]
+        _wait(job, ref, now)
+        return
+    ref["cluster_user"] = tok.get("username")     # KooSlurm 이 이메일에서 푼 이름 — 403 이면 이 사람의 잡이 아니다
+    client = KooSlurmClient(settings.stcx_backend_url, tok["token"], timeout=settings.kooslurm_timeout_sec)
     try:
-        await _step(db, job, ref, client, now)
+        await _step(db, job, ref, client, now, fresh=tok["fresh"], email=owner.email)
     finally:
         await client.close()
 
@@ -260,17 +285,25 @@ def _wait(job: Job, ref: dict, now: datetime) -> None:
     job.external_poll_at = now + timedelta(seconds=delay)
 
 
-async def _step(db, job: Job, ref: dict, client: KooSlurmClient, now: datetime) -> None:
+async def _step(db, job: Job, ref: dict, client: KooSlurmClient, now: datetime, *,
+                fresh: bool, email: str) -> None:
     sid = str(ref["slurm_job_id"])
     ref["polls"] = int(ref.get("polls") or 0) + 1
     ref["last_poll_at"] = now.isoformat()
     got = await client.manifest(sid)
     if not got.get("ok"):
         err = got.get("error")
+        if err == "http_401" and not fresh:
+            # 들고 있던 토큰이 회수됐을 수 있다(같은 이름으로 다시 받은 곳이 있다) — 버리고 다음 확인에 새로 받는다.
+            _TOKENS.pop(email, None)
+            ref["last_error"] = "http_401: 들고 있던 위임 토큰이 거절됐다 — 다음 확인에 새로 받는다"
+            _wait(job, ref, now)
+            return
         if err in ("http_401", "http_403"):
-            why = ("KooSlurm 이 예약자 토큰을 거절했다(401) — PAT 가 틀렸거나 만료됐다"
+            why = ("KooSlurm 이 위임받은 잡 소유자의 토큰을 거절했다(401)"
                    if err == "http_401" else
-                   f"이 잡은 예약자의 잡이 아니다(403 — KooSlurm 소유 검사, {ref['job_key']})")
+                   f"이 잡은 잡 소유자의 것이 아니다(403 — KooSlurm 소유 검사, {ref['job_key']}, "
+                   f"KooSlurm 사용자 {ref.get('cluster_user') or '?'})")
             job.external_ref = ref
             _close(job, status="failed", now=now, why=f"{why}: {got.get('detail') or ''}".rstrip(": "))
             return

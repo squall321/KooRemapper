@@ -38,7 +38,7 @@ MAX_LINE_GROUPS = 20
 MAX_DECK_LINES = 200
 
 _EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
-# 이 플랫폼의 API 토큰은 `kr_` 로 시작한다. KooSlurm PAT 는 `kst_` 다(후처리 예약이 잡 동안 맡는다).
+# 이 플랫폼의 API 토큰은 `kr_` 로 시작한다. KooSlurm PAT 는 `kst_` 다(후처리 예약이 위임 창구에서 받아 쓴다).
 _KRTOKEN = re.compile(r"\bkr_[A-Za-z0-9_-]{8,}")
 _KSTTOKEN = re.compile(r"\bkst_[A-Za-z0-9_-]{8,}")
 _BEARER = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._\-]+")
@@ -254,8 +254,7 @@ def build(job, *, inputs: list[tuple[str, str]], outputs: list[str], deck_lines:
             "resolved_cmd": _redact_deep(job.resolved_cmd or {}),
             "env_snapshot": _redact_deep(env),
             "external_kind": job.external_kind,
-            # 맡은 토큰의 암호문은 번들에 싣지 않는다 — 풀 수 없어도 남의 신원을 밖으로 내보내는 것이다.
-            "external_ref": _redact_deep({k: v for k, v in (job.external_ref or {}).items() if k != "token_enc"}),
+            "external_ref": _redact_deep(job.external_ref or {}),
         },
         "files": {"inputs": [n for n, _ in inputs], "outputs": outputs,
                   "inputs_basis": inputs_basis},

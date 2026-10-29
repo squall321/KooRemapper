@@ -124,9 +124,11 @@ class Settings(BaseSettings):
     # --- 후처리 예약(7-1) — KooSlurm 귀환 매니페스트를 기다려 리포트를 예약자 명의로 반입 ---
     # 주소는 위 `stcx_backend_url` 을 **같이 쓴다.** 덱 업로드(`/api/v2/files/upload/*`)와 잡 REST
     # (`/api/jobs/<id>/files/download`)는 같은 대시보드(backend_5010)에 있다 — 둘로 두면 어긋난다.
-    # 예약자의 kst_ PAT 를 잡 동안 맡아 두는 암호화 키. 비면 jwt_secret 에서 끌어낸다(tokenbox).
-    token_key: str = ""
-    # 매니페스트를 기다리는 기한(일). 지나면 잡을 실패로 닫고 맡은 토큰을 지운다.
+    # 신원 — 잡 소유자의 kst_ 를 KooSlurm **위임 창구**(`<stcx_backend_url>/api/auth/sso`, 같은 대시보드)에서 그때그때
+    # 받는다(사용자 결정 10-29 — 토큰을 도구 인자로 나르면 포털 절차 원장 · 챗 문맥에 남는다). 게이트웨이 per_user_sso 와
+    # 같은 규격이고, 값은 KooSlurm 쪽 `HEAX_GATEWAY_SECRET` 과 같아야 한다. 비면 후처리 예약은 「구성 안 됨」 으로 실패한다.
+    kooslurm_sso_secret: str = ""
+    # 매니페스트를 기다리는 기한(일). 지나면 잡을 실패로 닫는다.
     postprocess_wait_days: int = 7
     # KooSlurm 호출 한 번의 상한(초). 리포트 내려받기에는 읽기 사이 간격으로 걸린다.
     kooslurm_timeout_sec: float = 30

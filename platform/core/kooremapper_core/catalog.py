@@ -21,8 +21,7 @@ Entry contract (see catalog_data.json):
       flag         (flag role: e.g. "--thickness"/"--single"),
       yaml_path    (yaml_field role: dotted path),
       enum, default,
-      pattern      (string: 값이 맞아야 할 정규식),
-      secret       (true: 쓰기 전용 비밀 — 잡 인자 · 응답에 남기지 않는다)
+      pattern      (string: 값이 맞아야 할 정규식)
   example        : {args:{...}, note}
   example_folder, notes
 """
@@ -130,10 +129,6 @@ def args_json_schema(name: str) -> dict | None:
             schema["x-kind"] = "session_file"  # hint: pick from session files
         if p.get("pattern"):
             schema["pattern"] = p["pattern"]
-        if p.get("secret"):
-            # 쓰기 전용 비밀(예: 다른 서비스 PAT). 받는 쪽은 잡 인자에 남기지 않는다 — 화면은 가린 칸으로 그린다.
-            schema["writeOnly"] = True
-            schema["format"] = "password"
         if p.get("group"):
             # 화면이 칸을 묶을 수 있게 넘긴다. 작업 하나가 수십 칸이 되면 한 줄로 늘어놓은
             # 폼은 아무도 못 쓴다 — 그렇다고 옵션을 빼면 있는 것을 못 쓰게 된다.
@@ -156,12 +151,7 @@ def validate_args(name: str, args: dict) -> list[str]:
     if schema is None:
         return [f"unknown operation: {name}"]
     validator = jsonschema.Draft202012Validator(schema)
-    props = schema.get("properties") or {}
-    out = []
-    for e in validator.iter_errors(args):
-        head = e.path[0] if e.path else None
-        # 비밀 칸(writeOnly)의 오류 문구는 값을 그대로 싣는다(`… is not of type …`) — 값은 빼고 알린다.
-        secret = head in props and props[head].get("writeOnly")
-        msg = "값의 꼴이 맞지 않다(비밀 칸이라 값은 옮기지 않는다)" if secret else e.message
-        out.append(f"{'.'.join(str(p) for p in e.path) or '(root)'}: {msg}")
-    return out
+    return [
+        f"{'.'.join(str(p) for p in e.path) or '(root)'}: {e.message}"
+        for e in validator.iter_errors(args)
+    ]

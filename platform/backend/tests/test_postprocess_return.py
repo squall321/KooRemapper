@@ -3,7 +3,8 @@
 
 이 경로의 위험은 둘이다.
   ① **안 된 것이 됐다고 남는다** — 매니페스트가 말하지 않은 성공, 까닭 없는 실패, 끝없이 기다리는 잡.
-  ② **남의 신원이 샌다** — 예약자의 kst_ PAT 가 잡 인자 · 응답 · 진단 번들 · DB 평문에 남는다.
+  ② **신원이 엇갈리거나 샌다** — 잡 소유자가 아닌 사람의 kst_ 로 부르거나, 토큰이 인자 · 오류문 · 번들에 남는다.
+     토큰은 인자로 받지 않고 KooSlurm 위임 창구에서 그때그때 받는다(사용자 결정 10-29).
 
 ⚠ 시험 DB 는 **떠 있는 dev 워커의 DB** 다. 그래서
   · 워커용 시험은 잡을 `running` 으로 넣고, 만든 시각 · 확인 시각을 **먼 미래(2100년)** 로 둔다 — 떠 있는 워커가
@@ -29,7 +30,7 @@ from sqlalchemy import delete
 
 from app.models import ImpactReport, Job, Session, SessionFile, User
 from app.runner.kooslurm_client import KooSlurmClient
-from app.shared import diagnostics, security, storage, tokenbox
+from app.shared import diagnostics, security, storage
 from app.worker import postprocess_return as pr
 
 _aio = pytest.mark.asyncio(loop_scope="session")
@@ -37,7 +38,8 @@ _aio = pytest.mark.asyncio(loop_scope="session")
 _SPHERE = Path("/data/SmartTwinPostprocessor/lib/koo_sphere_report/examples/Test_001_report.html")
 needs_sphere = pytest.mark.skipif(not _SPHERE.exists(), reason="sphere 샘플 없음")
 
-TOKEN = "kst_test_" + "Q" * 28
+SSO_URL = "http://kooslurm.test/api/auth/sso"
+SECRET = "sso-shared-secret"
 KEY = "stcx:4242"
 SID = "4242"
 REPORT = "output/sphere_report.html"
@@ -60,22 +62,51 @@ def _manifest(raw: bytes, **over) -> dict:
 
 
 class FakeSlurm:
-    """KooSlurm 대시보드 대역 — 받은 요청(경로 · path · Authorization)을 들고 있다."""
+    """KooSlurm 대역 — 위임 창구(`/auth/sso`)와 대시보드 REST. 받은 요청을 들고 있다.
+
+    위임 창구는 게이트웨이 규격대로 같은 사람의 직전 토큰을 회수하고 새 토큰을 낸다 — REST 는 살아 있는 토큰만 받는다.
+    """
 
     def __init__(self):
         self.manifest = None          # dict 면 200, None 이면 404
         self.prev = False
         self.info = {"state": "RUNNING", "exitCode": "0:0"}   # None 이면 404
         self.files: dict[str, bytes] = {}
-        self.fail_with = None         # 401 · 403 · 500 이면 모든 요청에 그 상태
+        self.fail_with = None         # 401 · 403 · 500 이면 REST 모든 요청에 그 상태
+        self.sso_status = 200
+        self.sso_body = None          # 200 이 아닐 때 돌려줄 본문
+        self.minted: list[dict] = []  # 위임 요청 헤더
+        self.live: dict[str, str] = {}   # email → 살아 있는 토큰
         self.calls: list[tuple] = []
         self.clients: list[httpx.AsyncClient] = []
 
+    def revoke(self, email):
+        self.live.pop(email, None)
+
+    def _sso(self, request: httpx.Request) -> httpx.Response:
+        h = request.headers
+        self.minted.append({k: h.get(k) for k in ("x-heax-gateway-secret", "x-heax-user-email",
+                                                  "x-hwax-delegate-email", "x-heax-client")})
+        if self.sso_status != 200:
+            return httpx.Response(self.sso_status, json=self.sso_body or {"success": False, "error": "nope"})
+        assert h.get("x-heax-gateway-secret") == SECRET
+        tok = f"kst_minted_{len(self.minted):04d}_" + "z" * 12
+        email = h.get("x-hwax-delegate-email")
+        self.live[email] = tok
+        # KooSlurm 33bd0da1 의 응답 꼴 — 봉투 없이 맨 위에 토큰 · 수명 · 푼 사용자 이름
+        return httpx.Response(200, json={"access_token": tok, "token_type": "bearer", "expires_in": 3600,
+                                         "username": email.split("@")[0], "client": h.get("x-heax-client")})
+
     def handler(self, request: httpx.Request) -> httpx.Response:
+        if str(request.url) == SSO_URL:
+            return self._sso(request)
         path = request.url.params.get("path")
-        self.calls.append((request.url.path, path, request.headers.get("authorization")))
+        auth = request.headers.get("authorization")
+        self.calls.append((request.url.path, path, auth))
         if self.fail_with:
             return httpx.Response(self.fail_with, json={"success": False, "error": f"nope {self.fail_with}"})
+        if auth not in {f"Bearer {t}" for t in self.live.values()}:
+            return httpx.Response(401, json={"success": False, "error": "Invalid token"})
         m = re.fullmatch(r"/api/jobs/(\d+)/(info|files/download)", request.url.path)
         assert m and m.group(1) == SID, request.url.path
         if m.group(2) == "info":
@@ -97,16 +128,27 @@ class FakeSlurm:
 @pytest.fixture()
 async def slurm(monkeypatch):
     from app.config import settings
+    from app.runner import kooslurm_client
     fake = FakeSlurm()
-    monkeypatch.setattr(settings, "stcx_backend_url", "http://kooslurm.test")
+    monkeypatch.setattr(settings, "stcx_backend_url", "http://kooslurm.test/")
+    monkeypatch.setattr(settings, "kooslurm_sso_secret", SECRET)
 
-    def factory(base, token, *, timeout=30.0):
+    def _client():
         c = httpx.AsyncClient(transport=httpx.MockTransport(fake.handler))
         fake.clients.append(c)
-        return KooSlurmClient(base, token, client=c)
+        return c
+
+    def factory(base, token, *, timeout=30.0):
+        return KooSlurmClient(base, token, client=_client())
+
+    async def mint(url, secret, email, *, timeout=30.0):
+        return await kooslurm_client.mint_user_token(url, secret, email, client=_client())
 
     monkeypatch.setattr(pr, "KooSlurmClient", factory)
+    monkeypatch.setattr(pr, "mint_user_token", mint)
+    pr._TOKENS.clear()
     yield fake
+    pr._TOKENS.clear()
     for c in fake.clients:
         await c.aclose()
 
@@ -135,18 +177,16 @@ async def owner(db):
 
 
 def _args(**over):
-    a = {"job_key": KEY, "kst_token": TOKEN, "sim_type": "fullangle_drop", "job_name": "phone_fib162",
+    a = {"job_key": KEY, "sim_type": "fullangle_drop", "job_name": "phone_fib162",
          "project": "DEMO", "dev_rev": "dv1", "height": 2000, "floor": "concrete"}
     a.update(over)
     return a
 
 
 async def _reserved(db, u, s, **over) -> Job:
-    """라우트가 하는 일(토큰 떼기)을 거친 running 잡 + `start` — 먼 미래 시각으로."""
-    args = _args(**over)
-    ref = pr.reservation_ref(args, affiliation="team-a")
-    job = Job(id=ulid.new().str, session_id=s.id, user_id=u.id, operation="postprocess", args=args,
-              status="running", external_ref=ref, created_at=FAR)
+    """라우트가 하는 일(소속 얼리기)을 거친 running 잡 + `start` — 먼 미래 시각으로."""
+    job = Job(id=ulid.new().str, session_id=s.id, user_id=u.id, operation="postprocess", args=_args(**over),
+              status="running", external_ref={"affiliation": "team-a"}, created_at=FAR)
     db.add(job)
     await db.commit()
     await pr.start(db, job, now=FAR)
@@ -160,10 +200,10 @@ async def _poll(db, job, minutes=1):
     return job
 
 
-def _plain_anywhere(job: Job) -> bool:
+def _kst_anywhere(job: Job) -> bool:
     blob = json.dumps([job.args, job.external_ref, job.resolved_cmd, job.error_summary, job.warnings],
                       default=str, ensure_ascii=False)
-    return TOKEN in blob
+    return "kst_" in blob
 
 
 # ── 판정(순수) ───────────────────────────────────────────────────────────────
@@ -202,23 +242,16 @@ def test_judge_takes_the_present_report_and_names_the_missing_one():
     assert v["warnings"] and "impact" in v["warnings"][0] and "FAILED" in v["warnings"][0]
 
 
-def test_tokenbox_round_trip_and_a_changed_key(monkeypatch):
-    from app.config import settings
-    sealed = tokenbox.seal(TOKEN)
-    assert TOKEN not in sealed and tokenbox.unseal(sealed) == TOKEN
-    monkeypatch.setattr(settings, "token_key", "다른 키")
-    assert tokenbox.unseal(sealed) is None, "키가 바뀌면 풀리지 않아야 한다(다른 신원으로 가지 않는다)"
-
-
 # ── 시작 ────────────────────────────────────────────────────────────────────
 @_aio
-async def test_without_the_dashboard_address_it_fails_plainly(db, owner, monkeypatch):
+async def test_without_the_dashboard_or_the_delegation_it_fails_plainly(db, owner, slurm, monkeypatch):
     from app.config import settings
-    monkeypatch.setattr(settings, "stcx_backend_url", "")
+    monkeypatch.setattr(settings, "kooslurm_sso_secret", "")
     u, s = owner
     job = await _reserved(db, u, s)
     assert job.status == "failed" and "구성 안 됨" in job.error_summary
-    assert "token_enc" not in job.external_ref, "끝났는데 토큰이 남았다"
+    assert "KOORM_KOOSLURM_SSO_SECRET" in job.error_summary and SECRET not in job.error_summary
+    assert slurm.minted == [] and slurm.calls == []
 
 
 @_aio
@@ -227,20 +260,65 @@ async def test_start_parks_the_job_without_the_token_in_its_args(db, owner, slur
     job = await _reserved(db, u, s)
     assert job.status == "running" and job.external_kind == pr.KIND
     assert job.external_ref["slurm_job_id"] == SID and job.resolved_cmd["job_key"] == KEY
-    assert "kst_token" not in job.args and not _plain_anywhere(job)
-    assert tokenbox.unseal(job.external_ref["token_enc"]) == TOKEN
-    assert slurm.calls == [], "시작은 걸어 두기만 한다 — 첫 확인은 다음 스캔"
+    assert slurm.minted == [] and slurm.calls == [], "시작은 걸어 두기만 한다 — 첫 확인은 다음 스캔"
 
 
 # ── 확인 · 반입 ─────────────────────────────────────────────────────────────
 @_aio
-async def test_404_keeps_waiting_and_carries_the_reservers_token(db, owner, slurm):
+async def test_404_keeps_waiting_with_the_owners_delegated_token(db, owner, slurm):
     u, s = owner
     job = await _reserved(db, u, s)
     await _poll(db, job)
     assert job.status == "running" and job.external_ref["cluster_state"] == "RUNNING"
     assert job.external_poll_at > FAR
-    assert {a for _, _, a in slurm.calls} == {f"Bearer {TOKEN}"}, "예약자 본인의 PAT 로 불러야 한다"
+    assert slurm.minted == [{"x-heax-gateway-secret": SECRET, "x-heax-user-email": u.email,
+                             "x-hwax-delegate-email": u.email, "x-heax-client": "dynaforge"}], "게이트웨이와 같은 위임 규격"
+    assert {a for _, _, a in slurm.calls} == {f"Bearer {slurm.live[u.email]}"}, "잡 소유자 본인의 kst_ 로 불러야 한다"
+    assert not _kst_anywhere(job), "받은 토큰이 잡 행에 남았다"
+
+
+@_aio
+async def test_the_delegated_token_is_reused_across_polls(db, owner, slurm):
+    """발급은 같은 이름의 직전 토큰을 회수한다 — 확인마다 받으면 KooSlurm 에 회수된 토큰이 쌓인다."""
+    u, s = owner
+    job = await _reserved(db, u, s)
+    for m in (1, 2, 4):
+        await _poll(db, job, minutes=m)
+    assert job.status == "running" and len(slurm.minted) == 1
+
+
+@_aio
+async def test_a_revoked_token_is_minted_again_instead_of_failing(db, owner, slurm):
+    """들고 있던 토큰이 다른 곳의 발급으로 회수되면 401 이다 — 한 번은 버리고 새로 받는다."""
+    u, s = owner
+    job = await _reserved(db, u, s)
+    await _poll(db, job, minutes=1)
+    slurm.revoke(u.email)
+    await _poll(db, job, minutes=2)
+    assert job.status == "running" and "다음 확인에 새로 받는다" in job.external_ref["last_error"]
+    await _poll(db, job, minutes=4)
+    assert job.status == "running" and len(slurm.minted) == 2
+    assert slurm.calls[-1][2] == f"Bearer {slurm.live[u.email]}"
+
+
+@_aio
+async def test_a_refused_delegation_fails_and_hides_any_token_it_echoes(db, owner, slurm):
+    u, s = owner
+    slurm.sso_status, slurm.sso_body = 403, {"success": False, "error": "client dynaforge 는 허용되지 않음 kst_leak_ABCDEFGH1234"}
+    job = await _reserved(db, u, s)
+    await _poll(db, job)
+    assert job.status == "failed" and "내주지 않았다(sso_403)" in job.error_summary
+    assert "허용되지 않음" in job.error_summary and "kst_leak" not in job.error_summary
+    assert slurm.calls == [], "위임이 안 되면 대시보드를 부르지 않는다"
+
+
+@_aio
+async def test_a_delegation_server_error_is_retried(db, owner, slurm):
+    u, s = owner
+    slurm.sso_status = 502
+    job = await _reserved(db, u, s)
+    await _poll(db, job)
+    assert job.status == "running" and job.external_ref["last_error"].startswith("sso sso_502")
 
 
 @needs_sphere
@@ -263,7 +341,7 @@ async def test_a_ready_manifest_is_ingested_under_the_reserver(db, owner, slurm)
     assert rep.reservation["manifest"]["sha256"] == hashlib.sha256(raw).hexdigest()
     assert rep.drop_height == 1500.0, "리포트 자신의 높이를 예약 값으로 덮지 않는다"
     assert job.output_file_ids == [rep.source_file_id]
-    assert "token_enc" not in job.external_ref and not _plain_anywhere(job)
+    assert not _kst_anywhere(job)
     from app.config import settings
     assert not (settings.storage_dir / ".incoming" / f"{job.id}.part").exists(), "임시 파일이 남았다"
 
@@ -293,7 +371,6 @@ async def test_the_same_job_key_is_not_ingested_twice(db, owner, slurm):
     assert second.status == "succeeded" and second.external_ref["already_ingested"] is True
     assert second.external_ref["report_ids"] == first.external_ref["report_ids"]
     assert len(slurm.calls) == calls, "이미 있는 키는 다시 받지 않는다"
-    assert "token_enc" not in second.external_ref
 
 
 @_aio
@@ -308,7 +385,6 @@ async def test_a_missing_report_fails_with_the_manifests_own_words(db, owner, sl
     await _poll(db, job)
     assert job.status == "failed"
     assert "FAILED(1:0) 로 끝남" in job.error_summary and "MemoryError" in job.error_summary
-    assert "token_enc" not in job.external_ref
 
 
 @_aio
@@ -323,14 +399,14 @@ async def test_an_early_exit_fails(db, owner, slurm):
 
 
 @_aio
-@pytest.mark.parametrize("code,word", [(401, "거절"), (403, "예약자의 잡이 아니다")])
-async def test_a_refused_token_or_owner_fails_at_once(db, owner, slurm, code, word):
+@pytest.mark.parametrize("code,word", [(401, "거절"), (403, "잡 소유자의 것이 아니다")])
+async def test_a_refused_fresh_token_or_another_owner_fails_at_once(db, owner, slurm, code, word):
     u, s = owner
     slurm.fail_with = code
     job = await _reserved(db, u, s)
     await _poll(db, job)
-    assert job.status == "failed" and word in job.error_summary
-    assert "token_enc" not in job.external_ref and TOKEN not in job.error_summary
+    assert job.status == "failed" and word in job.error_summary and not _kst_anywhere(job)
+    assert job.external_ref["cluster_user"] == u.email.split("@")[0], "누구 명의로 불렀는지 남긴다"
 
 
 @_aio
@@ -360,7 +436,6 @@ async def test_past_the_deadline_it_fails(db, owner, slurm):
     job = await _reserved(db, u, s)
     await _poll(db, job, minutes=60 * 24 * 8)
     assert job.status == "failed" and "기한(7일)" in job.error_summary
-    assert "token_enc" not in job.external_ref
 
 
 @_aio
@@ -401,14 +476,13 @@ async def test_a_job_the_cluster_does_not_know_fails_after_three_looks(db, owner
 
 
 @_aio
-async def test_the_diagnostics_bundle_carries_neither_the_token_nor_its_seal(db, owner, slurm):
+async def test_the_diagnostics_bundle_hides_a_kst_token(db, owner, slurm):
     u, s = owner
     job = await _reserved(db, u, s)
-    job.error_summary = f"누군가 붙여 넣은 {TOKEN}"
+    job.error_summary = "누군가 붙여 넣은 kst_pasted_ABCDEFGH12345678"
     await db.commit()
     blob = json.dumps(diagnostics.build(job, inputs=[], outputs=[], deck_lines=False), ensure_ascii=False)
-    assert TOKEN not in blob and "token_enc" not in blob
-    assert job.external_ref["token_enc"] not in blob
+    assert "kst_pasted" not in blob
 
 
 # ── 라우트 ──────────────────────────────────────────────────────────────────
@@ -437,28 +511,27 @@ async def _hold_session(db, u, s) -> None:
 
 
 @_aio
-async def test_the_route_strips_the_token_before_it_is_stored(db, owner, api):
+async def test_the_route_freezes_the_affiliation_and_takes_no_token(db, owner, api):
     u, s = owner
     await _hold_session(db, u, s)
     h = await _login(api, u)
     r = await api.post(f"/api/v1/sessions/{s.id}/jobs", headers=h,
                        json={"operation": "postprocess", "args": _args(job_key="stcx:0")})
     assert r.status_code == 201, r.text
-    assert TOKEN not in r.text, "응답에 토큰이 실렸다"
     job = await db.get(Job, r.json()["data"]["id"])
     await db.refresh(job)
-    assert "kst_token" not in job.args and not _plain_anywhere(job)
-    assert tokenbox.unseal(job.external_ref["token_enc"]) == TOKEN
+    assert job.external_ref == {"affiliation": ""}, "게이트웨이 증명이 없으면 소속은 빈 값(소유자만 읽는다)"
 
 
 @_aio
-async def test_a_malformed_token_is_refused_without_echoing_it(db, owner, api):
+async def test_a_token_argument_is_refused_without_echoing_it(db, owner, api):
+    """토큰을 인자로 나르면 포털 절차 원장 · 챗 문맥에 남는다 — 받지 않는다. 거절 문구도 값을 되풀이하지 않는다."""
     u, s = owner
     h = await _login(api, u)
     r = await api.post(f"/api/v1/sessions/{s.id}/jobs", headers=h,
-                       json={"operation": "postprocess", "args": _args(kst_token=987654321987)})
+                       json={"operation": "postprocess", "args": _args(kst_token="kst_should_not_be_echoed_1234")})
     assert r.status_code == 422 and "kst_token" in r.text
-    assert "987654321987" not in r.text, "비밀 칸의 값이 오류 문구로 돌아왔다"
+    assert "kst_should_not_be_echoed" not in r.text, "거절 문구가 토큰을 되풀이했다"
 
 
 @_aio
@@ -469,4 +542,4 @@ async def test_a_reservation_can_be_canceled_and_drops_its_token(db, owner, api,
     r = await api.post(f"/api/v1/jobs/{job.id}/cancel", headers=h)
     assert r.status_code == 200, r.text
     await db.refresh(job)
-    assert job.status == "canceled" and "token_enc" not in job.external_ref
+    assert job.status == "canceled"
