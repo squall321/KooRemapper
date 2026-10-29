@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import ulid
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import PlainTextResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,9 +13,12 @@ from app.models import Job, SessionFile, User
 from app.modules.jobs.schemas import JobCreate, JobRead
 from app.modules.sessions.services import get_owned_session
 from app.runner import catalog
+from app.config import settings
 from app.shared import diagnostics, storage
+from app.shared.affiliation import verified_affiliation
 from app.shared.auth import get_current_user
 from app.shared.responses import ok
+from app.worker import postprocess_return
 from app.worker.runner_loop import request_cancel
 
 router = APIRouter(tags=["jobs"])
@@ -37,6 +40,7 @@ async def _require_job(db, user, job_id) -> Job:
 
 @router.post("/sessions/{session_id}/jobs")
 async def create_job(
+    request: Request,
     session_id: str,
     body: JobCreate,
     user: User = Depends(get_current_user),
@@ -89,7 +93,9 @@ async def create_job(
     # 덱을 고쳐 쓰는 op 은 주 덱만 고치므로(분석 op 은 2026-10-16 부터 함께 읽는다) 그대로 성공하고, 산출물에는 그 `*INCLUDE` 줄이
     # 보존된다(실측). 깨진 덱은 LS-DYNA 에 넣고 나서야 드러나고, 그때는 해석 시간을 이미 썼다.
     # 다만 인클루드를 클러스터에 따로 두는 운용도 있으므로 `allow_missing_includes` 로 넘어갈 수 있다.
-    if not body.allow_missing_includes:
+    # 후처리 예약은 세션의 덱을 읽지도 고치지도 않는다 — 파일 인자가 없어 아래 `or inc` 가 세션의 **모든** 덱을
+    # 보게 되는데, 그러면 상관없는 덱 하나 때문에 예약이 막힌다(MCP 에는 넘기는 길도 없다).
+    if not body.allow_missing_includes and body.operation != postprocess_return.OPERATION:
         from app.modules.sessions.services import include_status
 
         inc = await include_status(db, session_id)
@@ -136,14 +142,22 @@ async def create_job(
             dangling_warnings.append(msg)
         else:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, msg)
+    args = dict(body.args)
+    external_ref = None
+    if body.operation == postprocess_return.OPERATION:
+        # ★예약자의 kst_ PAT 는 잡 인자에 남기지 않는다 — 떼어 암호문으로만 원장에 둔다(사용자 결정 10-28).
+        #   소속도 지금 검증해 얼린다 — 반입 때는 요청(헤더)이 없다.
+        external_ref = postprocess_return.reservation_ref(
+            args, affiliation=verified_affiliation(request.headers, user.email, settings.heax_gateway_secret))
     job = Job(
         id=ulid.new().str,
         session_id=session_id,
         user_id=user.id,
         operation=body.operation,
-        args=body.args,
+        args=args,
         status="queued",
         warnings=dangling_warnings or None,
+        external_ref=external_ref,
     )
     db.add(job)
     await db.commit()
@@ -351,6 +365,11 @@ async def cancel_job(
     job = await _require_job(db, user, job_id)
     if job.status not in ("queued", "running"):
         raise HTTPException(status.HTTP_409_CONFLICT, f"취소할 수 없는 상태입니다: {job.status}")
+    # 후처리 예약은 클러스터에 손대지 않는 기다림이다 — 여기서 끝내고 맡은 토큰도 지운다.
+    if job.operation == postprocess_return.OPERATION:
+        postprocess_return.cancel(job)
+        await db.commit()
+        return ok(message="취소됨 — 기다림만 멈췄다(클러스터 잡은 그대로다)")
     # ⚠ 외부 잡은 **여기서 취소할 수 없다.** request_cancel 은 이 프로세스의 자식을
     #    죽이는 것인데, 그 잡은 다른 클러스터에서 돈다. 그대로 두면 "취소됨" 이라고
     #    답해 놓고 잡은 계속 도는 — 성공처럼 생긴 실패가 된다. 명시적으로 거절한다.

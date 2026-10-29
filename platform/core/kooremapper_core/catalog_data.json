@@ -14688,6 +14688,147 @@
         "덱은 제출 전에 stcx 로 올라간다(청크 업로드, 상한 50GB). *INCLUDE 가 있는 덱은 아직 못 보낸다 — extract-parts 로 펼쳐서 올려라.",
         "각도 프리셋·육면체·스윕·각도 파일·공차·DR·접촉·연속 낙하는 다음 판이다. GET /api/v1/stcx/options 는 빈 목록과 사유를 돌려준다."
       ]
+    },
+    {
+      "name": "postprocess",
+      "category": "analysis",
+      "summary": "stcx 해석이 끝나면 귀환 매니페스트를 보고 리포트를 예약한 사람 명의로 반입",
+      "description": "stcx 에 제출한 해석 잡의 결과 리포트(sphere · impact HTML)를 **예약해 두었다가** 끝나면 반입한다. 포털 절차가 제출 직후 부르는 자리다.\n\n이 작업은 **이 서버에서 계산하지 않는다.** KooSlurm 대시보드의 귀환 매니페스트(`output/return_manifest.json`)를 기다리다가, 매니페스트가 리포트가 있다고 말하면 그 파일을 내려받아 크기 · sha256 을 맞추고 **예약한 사람 명의**로 반입한다. 잡이 끝날 때까지 몇 시간이 걸릴 수 있다 — 즉시 job_id 를 돌려주고, 상태는 잡 조회로 본다.\n\n**잡 하나에 리포트 하나.** 같은 `job_key` 가 이미 반입됐으면 새로 받지 않고 그 리포트를 알린다.\n\n**지어내지 않는다.** 매니페스트가 리포트가 없다고 하거나(`ok=false` · `present=false`) 드라이버가 일찍 죽었으면(`stage=early_exit`) 실패로 끝내고 매니페스트의 까닭 · 로그 끝을 그대로 옮긴다.\n\n`kst_token` 은 **쓰기 전용**이다 — 잡 인자에서 떼어 암호화해 두고, 끝나면(성공 · 실패 · 취소 · 기한) 지운다.",
+      "invocation": "external",
+      "config_style": null,
+      "takes_kfile": false,
+      "requires_gmsh": false,
+      "requires_tetgen": false,
+      "params": [
+        {
+          "name": "job_key",
+          "type": "string",
+          "role": "value",
+          "required": true,
+          "group": "잡",
+          "pattern": "^stcx:[0-9]+$",
+          "description": "제출한 잡의 키 — `stcx:<slurm_job_id>`(KooSlurm 대시보드의 잡 id). 잡 하나에 리포트 하나 — 이미 반입된 키면 그 리포트를 알린다."
+        },
+        {
+          "name": "kst_token",
+          "type": "string",
+          "role": "value",
+          "required": true,
+          "group": "잡",
+          "secret": true,
+          "description": "예약한 사람 본인의 KooSlurm PAT(kst_…). 쓰기 전용 — 잡 인자에서 떼어 암호화해 두고 끝나면 지운다. 응답 · 로그 · 진단 번들에 평문으로 남지 않는다."
+        },
+        {
+          "name": "sim_type",
+          "type": "enum",
+          "role": "value",
+          "required": true,
+          "group": "잡",
+          "enum": [
+            "fullangle_drop",
+            "partial_impact"
+          ],
+          "description": "해석 종류 — 기대하는 리포트를 정한다(fullangle_drop → sphere, partial_impact → impact)."
+        },
+        {
+          "name": "job_name",
+          "type": "string",
+          "role": "value",
+          "required": false,
+          "group": "잡",
+          "description": "사람이 알아볼 잡 이름(기록용)."
+        },
+        {
+          "name": "label",
+          "type": "string",
+          "role": "value",
+          "required": false,
+          "group": "잡",
+          "description": "반입한 리포트의 이름. 비우면 리포트의 과제 이름."
+        },
+        {
+          "name": "project",
+          "type": "string",
+          "role": "value",
+          "required": false,
+          "group": "과제 메타",
+          "description": "과제(AI DataHub 과제명 또는 과제코드). 비교 화면 · 검색이 이 값으로 묶는다."
+        },
+        {
+          "name": "dev_rev",
+          "type": "string",
+          "role": "value",
+          "required": false,
+          "group": "과제 메타",
+          "description": "개발 차수(dv1 · pv 같은 꼴)."
+        },
+        {
+          "name": "variation",
+          "type": "string",
+          "role": "value",
+          "required": false,
+          "group": "과제 메타",
+          "description": "설계 변형 이름."
+        },
+        {
+          "name": "doe",
+          "type": "string",
+          "role": "value",
+          "required": false,
+          "group": "과제 메타",
+          "description": "DOE 이름."
+        },
+        {
+          "name": "height",
+          "type": "number",
+          "role": "value",
+          "required": false,
+          "group": "해석 조건",
+          "description": "낙하 높이(모델 단위). 리포트에 높이가 없을 때 검색 축(drop_height)을 채운다."
+        },
+        {
+          "name": "floor",
+          "type": "string",
+          "role": "value",
+          "required": false,
+          "group": "해석 조건",
+          "description": "바닥 종류(기록용)."
+        },
+        {
+          "name": "preset",
+          "type": "string",
+          "role": "value",
+          "required": false,
+          "group": "해석 조건",
+          "description": "각도 프리셋 이름(기록용)."
+        },
+        {
+          "name": "position_doe",
+          "type": "string",
+          "role": "value",
+          "required": false,
+          "group": "해석 조건",
+          "description": "부분충격 위치 DOE 이름(기록용)."
+        }
+      ],
+      "example": {
+        "args": {
+          "job_key": "stcx:123456",
+          "kst_token": "kst_EXAMPLE_TOKEN_DO_NOT_USE",
+          "sim_type": "fullangle_drop",
+          "job_name": "phone_fib162",
+          "project": "DEMO",
+          "dev_rev": "dv1",
+          "height": 1500
+        },
+        "note": "stcx 잡 123456 의 sphere 리포트를 예약한다. 매니페스트가 리포트가 있다고 하면 예약한 사람 명의로 반입된다."
+      },
+      "notes": [
+        "설정 KOORM_KOOSLURM_URL(KooSlurm 대시보드 REST 기준 주소)이 비면 잡이 「구성 안 됨」 으로 명시적으로 실패한다.",
+        "토큰은 KooSlurm 이 정한 계약대로 예약한 사람 본인의 kst_ PAT 다 — 서비스 계정 · admin PAT 를 쓰지 않는다.",
+        "매니페스트를 기다리는 기한은 KOORM_POSTPROCESS_WAIT_DAYS(기본 7일)다. 넘으면 실패로 끝내고 토큰을 지운다.",
+        "이 작업은 클러스터에 손대지 않으므로 취소할 수 있다 — 기다림만 멈춘다."
+      ]
     }
   ]
 }

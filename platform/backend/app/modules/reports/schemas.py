@@ -18,6 +18,8 @@ class ReportRead(BaseModel):
     scenario: dict | None = None         # 시뮬 조건 요약
     scenario_type: str | None = None     # 방향 조건 종류(cuboid_geometry 등)
     eng_meta: dict | None = None         # 과제/rev 수동 메타
+    external_job_key: str | None = None  # 후처리 예약이 반입한 리포트의 잡 키(stcx:<slurm id>)
+    reservation: dict | None = None      # 예약 원장 — 잡 이름 · sim_type · 해석 조건(7-5)
     doe_strategy: str | None = None      # 방향 컨셉(cuboid_26 등)
     drop_height: float | None = None
     worst_stress: float | None = None

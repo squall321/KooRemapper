@@ -167,6 +167,12 @@ class ImpactReport(Base):
     # 리포트 초점/변형 라벨(수동) — 같은 전각도라도 "카메라 디테일"·"코너 정밀" 등 초점이
     # 다른 리포트를 구분·검색하기 위한 자유 태그. doe_strategy(방향 컨셉)와 직교한다.
     focus: Mapped[str | None] = mapped_column(String(64), index=True)
+    # 외부 잡 키(`stcx:<slurm id>`) — 후처리 예약(7-1)이 반입한 리포트에만 있다. **잡 하나에 리포트 하나**(7-2):
+    # 같은 키를 다시 반입하려 하면 새로 만들지 않고 이 행을 알린다. 손으로 올린 리포트는 비어 있다.
+    external_job_key: Mapped[str | None] = mapped_column(String(64), unique=True)
+    # 예약 원장 — 예약 때 받은 잡 이름 · sim_type · 해석 조건(높이 · 바닥 · 프리셋 · 위치 DOE) · 예약 잡 id.
+    # 리포트 자신이 가진 값(sim_params 등)을 덮지 않으려고 따로 둔다(7-5 — 같은 조건끼리 묶는 근거).
+    reservation: Mapped[dict | None] = mapped_column(JSONB)
     # 검색·정렬용 승격 컬럼(JSONB 대신 컬럼으로 빠른 필터). 인제스트 시 채운다.
     worst_stress: Mapped[float | None] = mapped_column(Float, index=True)
     worst_g: Mapped[float | None] = mapped_column(Float)

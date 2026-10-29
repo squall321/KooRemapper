@@ -509,7 +509,7 @@ async def _poll_external_once() -> int:
     async with SessionLocal() as db:
         due = (await db.execute(
             select(Job).where(Job.status == "running",
-                              Job.external_kind.is_not(None),
+                              Job.external_kind == EXTERNAL_KIND,
                               Job.external_poll_at.is_not(None),
                               Job.external_poll_at <= now)
             .order_by(Job.external_poll_at).limit(_POLL_BATCH)
@@ -621,6 +621,13 @@ async def _execute(job_id: str) -> None:
             return
 
         work_dir = storage.ensure_session_dir(session.user_id, session.id)
+
+        # 후처리 예약도 외부 잡이지만 stcx 제출이 아니다 — 귀환 매니페스트를 기다릴 뿐이다.
+        # (그쪽 모듈이 이 모듈을 가져다 쓰므로 순환을 피해 여기서 들인다.)
+        if job.operation == "postprocess":
+            from app.worker import postprocess_return
+            await postprocess_return.start(db, job)
+            return
 
         # 외부 작업은 여기서 갈라 나간다 — 로컬 바이너리를 부르지 않는다.
         if _is_external(job.operation):
@@ -869,6 +876,12 @@ async def _loop() -> None:
                 await _poll_external_once()
             except Exception:       # 폴링 실패가 워커를 멈추면 로컬 잡까지 선다
                 logger.exception("external job poll failed")
+            # 후처리 예약은 따로 본다 — 한쪽이 깨져도 다른 쪽은 돈다(실패 영역을 가른다).
+            try:
+                from app.worker import postprocess_return
+                await postprocess_return.poll_due()
+            except Exception:
+                logger.exception("postprocess reservation poll failed")
 
         if plm_sync.enabled() and loop_now >= next_plm:
             next_plm = loop_now + max(60, settings.sp_core_sync_sec)

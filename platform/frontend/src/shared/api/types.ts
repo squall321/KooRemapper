@@ -196,6 +196,8 @@ export interface PropDef {
   default?: unknown
   'x-kind'?: string
   'x-group'?: string
+  // 쓰기 전용 비밀(카탈로그 `secret` — 예: 후처리 예약의 kst_ PAT). 가린 칸으로 그린다.
+  writeOnly?: boolean
 }
 
 export interface JsonSchema {

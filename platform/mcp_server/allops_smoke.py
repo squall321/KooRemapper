@@ -13,6 +13,8 @@
   회귀가 본다. 통과하려면 바이너리 · 카탈로그 · API · MCP 프로세스가 모두 최신이어야 한다.
 
   빼는 것 — `stcx_fullangle_drop`(외부 클러스터에 진짜 잡을 낸다). 콘솔만 쓰는 op(info · neutralaxis)은 산출물을 보지 않는다.
+  `postprocess`(후처리 예약)는 성공이 아니라 **까닭이 분명한 실패**를 값으로 본다 — 클러스터에 없는 잡(`stcx:0`)과 가짜 토큰으로
+  부르므로 「구성 안 됨」·「이 잡을 모른다」·「토큰을 거절했다」 가운데 하나여야 하고, 잡 인자에 토큰이 남으면 안 된다.
 
   `smoke.py` 와 같은 전제(api+mcp+postgres 가 떠 있어야 한다)이고, 닿지 않으면 **건너뛴다**(rc=0).
 
@@ -38,6 +40,10 @@ import test_newline_matrix as nlm  # noqa: E402  — 스테이징 규칙을 베�
 
 SKIP = {"stcx_fullangle_drop": "외부 클러스터에 진짜 잡을 낸다"}
 CONSOLE_ONLY = {"info", "neutralaxis"}           # 산출 파일이 없는 op — succeeded 만 본다
+# 성공이 아니라 까닭이 분명한 실패를 보는 op. 인자를 덮는 까닭 — 예제 번호(123456)는 운영에 실제로 있을 수 있고, 대시보드가
+# SSO 꺼짐이면 남의 잡도 열린다(KooSlurm 10-28). Slurm 잡 번호는 1 부터라 0 은 없다.
+EXPECT_FAIL = {"postprocess": re.compile(r"구성 안 됨|이 잡을 모른다|토큰을 거절했다")}
+ARG_OVERRIDE = {"postprocess": {"job_key": "stcx:0"}}
 BINARY = REPO / "platform" / "backend" / "bin" / "KooRemapper"   # 사전 단계(PREP)는 플랫폼과 같은 바이너리로
 STAGE_ROOT = REPO / "build" / "scratch" / "allops"               # MCP 가 읽을 수 있는 자리(upload_local_path)
 
@@ -191,7 +197,8 @@ async def main():
                                 chk(f"{name}: 사슬 앞 op({pre['name']})이 succeeded", False, pl)
                                 continue
                         job = S._data(await s.call_tool("run_operation", {
-                            "session_id": sid, "operation": name, "args": op["example"]["args"]}))
+                            "session_id": sid, "operation": name,
+                            "args": {**op["example"]["args"], **ARG_OVERRIDE.get(name, {})}}))
                         jid = job.get("id") if isinstance(job, dict) else None
                         if not jid:
                             chk(f"{name}: 잡이 생겼다", False, job)
@@ -204,7 +211,12 @@ async def main():
                                 break
                             await asyncio.sleep(1)
                         err = (last or {}).get("error_summary") if isinstance(last, dict) else None
-                        if name in CONSOLE_ONLY:
+                        if name in EXPECT_FAIL:
+                            chk(f"{name}: 까닭이 분명한 실패({st})",
+                                st == "failed" and bool(EXPECT_FAIL[name].search(err or "")), err or last)
+                            chk(f"{name}: 잡 인자에 토큰이 없다",
+                                isinstance(last, dict) and "kst_token" not in (last.get("args") or {}), last)
+                        elif name in CONSOLE_ONLY:
                             chk(f"{name}: {st}", st == "succeeded", err or last)
                         else:
                             outs = await s.call_tool("get_job_outputs", {"job_id": jid})

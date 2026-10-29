@@ -219,11 +219,16 @@ async def ingest_report(
     doe: str | None = None,
     focus: str | None = None,
     shared_affiliation: str = "",
+    reservation: dict | None = None,
 ) -> ImpactReport:
     """리포트 HTML 을 파싱·정규화해 ImpactReport + ImpactCase 로 저장한다.
 
     파싱 실패/케이스 없음(예: chunked 로 데이터가 분할돼 단일 HTML만으론 불완전)이면
     ValueError 를 던져 상위(라우트)에서 400 으로 변환한다.
+
+    `reservation` — 후처리 예약(7-1)이 반입할 때의 예약 원장(`job_key` · `conditions` …). `job_key` 가
+    유일 키(`external_job_key`)가 되고, 리포트에 낙하 높이가 없으면 예약 조건의 `height` 로 채운다
+    (리포트 자신의 값은 덮지 않는다). 같은 키가 이미 있으면 커밋에서 IntegrityError — 부르는 쪽이 다룬다.
     """
     text = raw.decode("utf-8", errors="replace")
     # 파싱을 스레드로 오프로드(대형 HTML JSON 로드가 이벤트 루프를 막지 않게).
@@ -276,6 +281,8 @@ async def ingest_report(
         kind=study["kind"],
         label=label or proj.get("name") or study["kind"],
         focus=focus or None,
+        external_job_key=(reservation or {}).get("job_key") or None,
+        reservation=reservation,
         # 반입 시점에 검증한 소속을 얼려 적는다 — 소유자가 나중에 소속을 옮겨도 이 리포트의
         # 읽기 공유 범위는 움직이지 않는다(요청서 §8). 빈 값이면 소유자만 읽는다.
         shared_affiliation=shared_affiliation or None,
@@ -287,7 +294,8 @@ async def ingest_report(
         worst_stress=axes["worst_stress"],
         worst_g=axes["worst_g"],
         max_severity=axes["max_severity"],
-        drop_height=axes["drop_height"],
+        drop_height=(axes["drop_height"] if axes["drop_height"] is not None
+                     else ((reservation or {}).get("conditions") or {}).get("height")),
         scenario_type=axes["scenario_type"],
         generator=src.get("generator"),
         generator_version=src.get("generator_version"),

@@ -97,7 +97,8 @@ export function SchemaForm({
               </Select>
             ) : (
               <Input
-                type={def.type === 'number' || def.type === 'integer' ? 'number' : 'text'}
+                type={def.type === 'number' || def.type === 'integer' ? 'number' : def.writeOnly ? 'password' : 'text'}
+                autoComplete={def.writeOnly ? 'new-password' : undefined}
                 value={(value[name] as string | number) ?? ''}
                 placeholder={def.default !== undefined ? `기본값: ${String(def.default)}` : ''}
                 onChange={(e) => {
