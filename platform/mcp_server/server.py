@@ -843,6 +843,36 @@ async def update_report_meta(
 
 
 @mcp.tool()
+async def attach_render(report_id: str, path: str, ctx: Context) -> dict:
+    """SceneForge 렌더 결과(C-11)를 리포트에 붙인다 — 결과 폴더(`render_result.json` + mp4 · 정지 화면 PNG) 또는
+    그 폴더를 묶은 zip 의 경로. MCP 서버가 그 경로를 읽을 수 있는 같은 머신에서만 된다(`upload_local_path` 와 같다).
+
+    기존 리포트 미디어를 지우지 않고 **더한다**. 같은 render_id 를 다시 붙이면 바꾸는 것이 없다(멱등).
+    파일마다 sha256 · 크기가 결과의 적힌 값과 맞아야 하고, 하나라도 다르거나 적히지 않은 파일이 끼면 통째로
+    거절한다(전부 아니면 전무). 실패한 렌더(`ok: false`)는 그림 없이 기록만 남는다. 리포트 소유자만 붙일 수 있다.
+    Attach a SceneForge render result (folder or zip) to a report — appended, idempotent per render_id."""
+    import io as _io
+    import os as _os
+    import zipfile as _zf
+    if _os.path.isdir(path):
+        buf = _io.BytesIO()
+        with _zf.ZipFile(buf, "w", _zf.ZIP_STORED) as z:
+            for name in sorted(_os.listdir(path)):
+                full = _os.path.join(path, name)
+                if _os.path.isfile(full):            # 결과 폴더는 평평하다 — 하위 폴더는 싣지 않는다
+                    z.write(full, arcname=name)
+        raw = buf.getvalue()
+    elif _os.path.isfile(path):
+        with open(path, "rb") as fh:
+            raw = fh.read()
+    else:
+        raise RuntimeError(f"path not found on the MCP host: {path}")
+    files = {"file": ("render_result.zip", raw, "application/zip")}
+    async with httpx.AsyncClient(base_url=API, timeout=300) as c:
+        return _unwrap(await c.post(f"/reports/{report_id}/renders", files=files, headers=_forward_headers(ctx)))
+
+
+@mcp.tool()
 async def attach_report_scenario(report_id: str, scenario_content: str, ctx: Context) -> dict:
     """이미 인제스트된 리포트에 시뮬 조건(scenario.json 텍스트)을 첨부한다.
 

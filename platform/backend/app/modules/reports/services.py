@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import json
 
 from app.models import ImpactCase, ImpactReport, Session, SessionFile
-from app.reports import analyze, blockstore, parser
+from app.reports import analyze, blockstore, parser, render_result
 from app.reports.scenario import ScenarioParseError, summarize_scenario
 from app.modules.sessions import services as sess_svc
 from app.shared import storage
@@ -1255,3 +1255,98 @@ async def _link_revision(db, report) -> None:
         return
     if not got.get("ok") and got.get("error") != "nothing_to_link":
         logger.warning("개정 잇기 거절 — report %s: %s", report.id, got.get("detail"))
+
+
+# ── 렌더 결과(C-11) — SceneForge 가 그린 mp4 · 정지 화면을 리포트에 더한다 ─────────────────────────
+def _render_media_entry(f: SessionFile, o: dict, checked: dict, meta: dict, prefix: str, rid: str) -> dict:
+    """렌더 출력 하나 → 리포트 미디어 항목(번들 미디어와 같은 칸 + render_id · render)."""
+    return {
+        "path": prefix + o["file"], "stored_as": f.filename, "file_id": f.id, "bytes": len(o["data"]),
+        "sha256": o["sha256"].lower(),
+        "kind": "video" if o["kind"] == "mp4" else "image",
+        "can_llm_view": o["kind"] == "still",          # 모델은 영상을 못 본다
+        "case_key": checked["case_key"],
+        "set_name": (meta.get("template") or {}).get("id") if isinstance(meta.get("template"), dict) else None,
+        "set_title": meta.get("deform_label"),
+        "role": "render", "face": None, "declared": False, "render_id": rid,
+        # 화면이 영상 옆에 글로 보일 것 — 글씨는 영상에도 새겨져 있다(SceneForge)
+        "render": {**{k: o.get(k) for k in ("width", "height", "fps", "frames", "time_window_ms", "slowmo", "time_ms")},
+                   "mode": meta.get("mode"), "deform_scale": meta.get("deform_scale"),
+                   "notice": meta.get("notice"), "frame": meta.get("frame")},
+    }
+
+
+async def attach_render(db: AsyncSession, report: ImpactReport, raw: bytes) -> dict:
+    """SceneForge 렌더 결과 zip(`render_result.json` + 출력)을 리포트에 **더한다**.
+
+    번들 반입의 `attach_media` 와 달리 기존 미디어를 지우지 않는다(반입 규칙 10-29 합의).
+    - 검사(`render_result.check`)에 걸리면 RenderResultError — 아무것도 저장하지 않는다(전부 아니면 전무).
+    - 같은 render_id · 같은 출력(sha)이면 그대로 둔다(멱등). 출력이 다르면 그 렌더의 옛 파일 · 항목만 바꾼다.
+    - 같은 render_id 가 성공 · 실패를 바꿔 오면 거절한다(한 렌더는 한 결과다).
+    - `ok: false` 는 그림 없이 렌더 기록(`report.renders`)에만 남긴다.
+    """
+    from datetime import datetime, timezone
+
+    result, files = render_result.unzip(raw)
+    case_keys = set((await db.execute(
+        select(ImpactCase.case_key).where(ImpactCase.report_id == report.id))).scalars())
+    checked = render_result.check(result, files, report_id=report.id, case_keys=case_keys)
+    rid = checked["render_id"]
+    meta = result.get("meta") if isinstance(result.get("meta"), dict) else {}
+    prior = next((r for r in (report.renders or []) if r.get("render_id") == rid), None)
+    if prior is not None and bool(prior.get("ok")) != checked["ok"]:
+        raise render_result.RenderResultError(
+            f"같은 render_id({rid})가 다른 결과로 왔다(전 {'성공' if prior.get('ok') else '실패'}) — 한 렌더는 한 결과다")
+    prefix = f"renders/{rid}/"
+    new_sig = sorted((prefix + o["file"], o["sha256"].lower()) for o in checked["outputs"])
+    old_media = [m for m in (report.media or []) if m.get("render_id") == rid]
+    if prior is not None and sorted((m.get("path"), m.get("sha256")) for m in old_media) == new_sig:
+        return {"render_id": rid, "ok": checked["ok"], "already": True, "stored": 0,
+                "media_total": len(report.media or []), "warnings": prior.get("warnings") or []}
+
+    session = await db.get(Session, report.session_id)
+    if session is None:
+        raise render_result.RenderResultError("리포트의 세션을 찾지 못했다")
+    # 그 렌더의 옛 파일을 걷어 낸다 — 남겨 두면 저장 함수가 이름을 `_1` 로 피해 가며 쌓인다
+    for f in (await db.execute(select(SessionFile).where(
+            SessionFile.session_id == session.id, SessionFile.filename.like(prefix + "%")))).scalars().all():
+        await sess_svc.delete_file(db, f)
+
+    added: list[dict] = []
+    stored: list[SessionFile] = []
+    try:
+        for o in checked["outputs"]:
+            f = await sess_svc.add_uploaded_file(db, session, filename=prefix + o["file"], raw=o["data"], kind="media")
+            stored.append(f)
+            added.append(_render_media_entry(f, o, checked, meta, prefix, rid))
+        if checked["ok"]:
+            # 출처 — 받은 render_result.json 도 그 렌더 자리에 둔다
+            stored.append(await sess_svc.add_uploaded_file(
+                db, session, filename=prefix + render_result.RESULT_NAME,
+                raw=json.dumps(result, ensure_ascii=False, indent=2).encode("utf-8"), kind="generated"))
+    except Exception:
+        # 저장 도중 깨지면(디스크 등) 이번에 넣은 파일을 걷어 낸다 — 반쯤 붙은 렌더를 남기지 않는다
+        for f in stored:
+            await sess_svc.delete_file(db, f)
+        raise
+
+    warnings = [str(w) for w in (result.get("warnings") or [])]
+    inputs = meta.get("inputs") if isinstance(meta.get("inputs"), dict) else {}
+    if inputs.get("c3_manifest_sha256"):
+        # 지어내지 않는다 — DynaForge 가 C-3 manifest 를 아직 내지 않아 맞춰 볼 정본이 없다
+        warnings.append("C-3 manifest 를 DynaForge 가 아직 내지 않아 그 sha256 을 대조하지 못했다")
+    entry = {
+        "render_id": rid, "request_id": result.get("request_id"), "ok": checked["ok"],
+        "reason": result.get("reason"), "warnings": warnings, "case_key": checked["case_key"],
+        "created_at": meta.get("created_at"), "received_at": datetime.now(timezone.utc).isoformat(),
+        "mode": meta.get("mode"), "deform_scale": meta.get("deform_scale"),
+        "outputs": [{"file": o["file"], "kind": o["kind"], "bytes": len(o["data"]), "sha256": o["sha256"].lower()}
+                    for o in checked["outputs"]],
+        "renderer": meta.get("renderer"), "inputs": inputs or None,
+    }
+    report.media = [m for m in (report.media or []) if m.get("render_id") != rid] + added
+    report.renders = [r for r in (report.renders or []) if r.get("render_id") != rid] + [entry]
+    await db.commit()
+    return {"render_id": rid, "ok": checked["ok"], "already": False, "stored": len(added),
+            "media_total": len(report.media), "warnings": warnings}
+

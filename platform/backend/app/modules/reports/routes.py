@@ -20,6 +20,7 @@ from app.shared.auth import get_current_user
 from app.shared.affiliation import verified_affiliation
 from app.shared.ratelimit import rate_limit
 from app.reports import bundle as bundle_mod
+from app.reports.render_result import RenderResultError
 from app.shared.responses import ok
 
 router = APIRouter(tags=["reports"])
@@ -795,6 +796,32 @@ class PublishDataHubBody(BaseModel):
     doe: str | None = None                                     # DOE 참조 study[:case]
     unit: str = "mm-t-s"
     title: str | None = None
+
+
+@router.post(
+    "/reports/{report_id}/renders",
+    dependencies=[Depends(rate_limit("upload", settings.ratelimit_upload_per_min))],
+)
+async def attach_render(
+    report_id: str,
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """SceneForge 렌더 결과(C-11 — `render_result.json` + mp4 · 정지 화면을 담은 zip)를 리포트에 더한다.
+
+    소유자만(리포트 수정은 소유자 — 요청서 §7). 기존 미디어를 지우지 않고 더하며, 같은 render_id 는 멱등이다.
+    계약에 안 맞으면 422 — 아무것도 저장하지 않는다(전부 아니면 전무). 실패한 렌더(`ok: false`)는 기록만 남긴다.
+    """
+    r = await _require_owned_report(db, user, report_id)
+    raw, _ = await _read_upload(file, what="렌더 결과 묶음")
+    try:
+        summary = await svc.attach_render(db, r, raw)
+    except RenderResultError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"렌더 결과를 받지 않았다: {exc}")
+    msg = ("이미 받은 렌더다 — 바꾼 것이 없다" if summary["already"]
+           else "렌더 결과를 붙였다" if summary["ok"] else "실패한 렌더를 기록했다(붙인 그림 없음)")
+    return ok(summary, message=msg)
 
 
 @router.post("/reports/{report_id}/publish-datahub")

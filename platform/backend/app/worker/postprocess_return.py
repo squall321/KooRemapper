@@ -162,6 +162,16 @@ def judge(manifest: dict, *, sim_type: str) -> dict:
         return no("매니페스트의 리포트 항목에 크기 · sha256 이 없다")
     warnings = [f"{r.get('kind')} 리포트는 없다 — {r.get('reason') or '까닭 없음'}"
                 for r in entries if r is not entry and not r.get("present")]
+    # 리포트는 있는데 후처리가 0 이 아니게 끝났다 — unified_analyzer 의 rc 3 은 「분석 성공 · 렌더 실패」 다
+    # (KooD3plotReader K-4). 실패로 접지 않고 반입하되, 그림이 빠졌을 수 있다고 남긴다.
+    pp = manifest.get("postprocess") if isinstance(manifest.get("postprocess"), dict) else {}
+    if pp.get("rc") not in (None, 0):
+        warnings.append(f"후처리가 rc={pp['rc']} 로 끝났지만 {kind} 리포트는 있다 — 그림(렌더)만 빠졌을 수 있다"
+                        "(rc 3 = 분석 성공 · 렌더 실패)")
+    rj = pp.get("report_job") if isinstance(pp.get("report_job"), dict) else {}
+    if rj.get("state") and not str(rj["state"]).startswith("COMPLETED"):
+        warnings.append(f"리포트 잡 {rj.get('id')} 가 {rj['state']}({rj.get('exit_code')}) 로 끝났지만 {kind} 리포트는 있다"
+                        " — 그림(렌더)만 빠졌을 수 있다")
     return {"ok": True, "entry": entry, "kind": kind, "warnings": warnings}
 
 

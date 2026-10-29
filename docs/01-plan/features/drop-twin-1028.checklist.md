@@ -38,6 +38,7 @@
 ## P1 공통 바탕
 ### DynaForge
 - [ ] 후처리 연산 이관 — `operation="postprocess"` + `args_schema`(09-16 요청서 ①) · unified_analyzer 의 rc 3(분석 성공 · 렌더 실패)은 실패가 아니라 경고로 다룬다(10-28 KooD3plotReader K-4)
+  - [x] rc 3(분석 성공 · 렌더 실패) · 리포트 잡 실패라도 리포트가 있으면 반입하고 경고로 남긴다(10-29, 판정 `judge`)
   - [x] ★7-1 후처리 예약 연산 지음(10-29 `4ff9a79` → **`e62f601` 위임 창구로 전환**, dev 반영 · allops 63/63 · reports 35/35) — 토큰을 인자로 받지 않고 KooSlurm 위임 창구(`/api/auth/sso`, `33bd0da1`)에서 잡 소유자의 kst_ 를 받는다(포털 확인 — 인자는 절차 원장 · 챗 문맥에 남는다, 사용자 결정) · 매니페스트 판정 · `/info` 로 영영 안 올 잡 닫기 · 7-2 `external_job_key` 유일 · 7-5 `reservation.conditions`. 포털 회신 `platform/docs/REQUEST-postprocess-operation.md` §10. 계획 · 결정 `postprocess-reservation-1028.plan.md`
   - [ ] 운영에서 첫 실제 잡으로 끝까지 — KooSlurm 운영 적용(origin `7c280000` 까지 올라감, icn401 `git pull && sudo ./dashboard/start_production.sh` 는 사용자 몫) · 위임 창구 `33bd0da1` 푸시 · 운영 반영(사용자 확인) · 게이트웨이 per_user_sso(포털 — 이름 `gateway-smart-twin-mcp` · `-cluster`) · 공유 비밀 · uid = 이메일 앞부분 확인 · 첫 전각도 잡에서 B 매니페스트 확인
   - [ ] 운영 KooSlurm SSO 는 꺼져 있다(모든 요청 admin — A 가 운영에서 효과 없음). 사용자 결정(10-29) 「켜기 전에 영향부터 조사」 — KooSlurm 호출자 목록 `docs/sso_enable_20261029/callers.md`: 켜면 DynaForge `StcxUploader`(인증 없음)가 401 → 예약자 본인 kst_ PAT 를 업로드 · 삭제 넷에 싣자는 제안
@@ -67,9 +68,9 @@
 
 ## P3 보고 mp4
 - [ ] SceneForge — USD 장면 · 외관 라이브러리 초판 · 템플릿 2~3 · 상위 N mp4
-- [ ] DynaForge — 렌더 결과 반입(C-11 → 리포트 미디어). SceneForge 초안 `SceneForge/docs/contracts/c10-c11-render-request-result-draft-2026-10-29.md`(10-29) · 반입 쪽 의견 보냄 —
+- [x] DynaForge — 렌더 결과 반입(C-11 → 리포트 미디어) **지음(10-29, dev 반영)** — REST `POST /reports/{id}/renders`(zip) · MCP `attach_render(report_id, path)`(폴더 · zip) · `impact_reports.renders` 렌더 기록(마이그레이션 0016) · 시험 15. SceneForge 초안 `SceneForge/docs/contracts/c10-c11-render-request-result-draft-2026-10-29.md`(10-29) · 반입 쪽 의견 보냄 —
   지금 `attach_media` 는 번들 반입 때 `report.media` 를 통째로 바꾼다 → 렌더는 **더하는 길**(render_id 멱등) · `run.case_key` 로 케이스에 붙임(리포트에 없는 키면 거절) · outputs 마다 sha256 · bytes 전부 맞아야(부분 반입 없음, 폴더 없는 이름만) · `ok: false` 는 렌더 기록으로만 · manifest sha 가 다르면 경고 · 전달은 zip 하나(가칭 `POST /reports/{id}/renders` + MCP) — **SceneForge 가 다섯 가지 모두 받아 초안에 옮김**(10-29 `71d449b`): 결과 폴더엔 render_result.json 과 outputs 에 적은 파일만 · 폴더 없는 이름 · 폴더 하나 512 MB 이하 · 시간 칸은 덱 시각(ms) · 같은 request_id 는 같은 render_id(양쪽 멱등). 포털 P3 때 SceneForge 가 초안 + 이 의견을 hwaxportal 에 보낸다
-  - [ ] 명의 — 리포트 수정은 소유자만이라 붙이기도 소유자 명의만 된다. (a) 붙이기는 포털이 소유자 명의로(제안) (b) 같은 소속에 렌더 미디어 더하기 권한 — **사용자 결정**(포털 P3 때)
+  - [ ] 명의 — 지금은 (a) 소유자만 붙인다(REST 가 소유자 검사). 리포트 수정은 소유자만이라 붙이기도 소유자 명의만 된다. (a) 붙이기는 포털이 소유자 명의로(제안) (b) 같은 소속에 렌더 미디어 더하기 권한 — **사용자 결정**(포털 P3 때)
 - [ ] 포털 — SceneForge 등록·SSO·배포 · 절차에 렌더
 
 ## P4 시험 재현

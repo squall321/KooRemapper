@@ -79,6 +79,7 @@ SmartTwin 파이프라인이 만든 deep(단건 심층)·sphere(전각도 낙하
 | `report_angle_stats` | report_id, metric?·part_id?·category?/angle_name?/near_lon+near_lat+tol_deg?·top_parts? | GET /reports/{id}/angle-stats | 특정 각도군 표준 통계(분포 n/mean/std/CoV/백분위/IQR/최악 + 부품별 위험·민감도). available_metrics 자동 감지 |
 | `update_report_meta` | report_id, label?·project?·dev_rev?·variation?·doe?·focus?·kfile_id? | PATCH /reports/{id} | 과제명·rev·초점·K파일 링크 수동 설정(""=삭제) |
 | `attach_report_scenario` | report_id, scenario_content | POST /reports/{id}/scenario | 시뮬 조건 scenario.json 첨부 — 요약 캐시 + K파일 자동매칭 |
+| `attach_render` | report_id, path(결과 폴더 또는 zip) | POST /reports/{id}/renders | SceneForge 렌더 결과(C-11)를 리포트 미디어에 **더한다** — render_id 멱등 · sha256 · 크기 전부 맞아야(전부 아니면 전무) · 실패한 렌더는 기록만 · 소유자만 |
 | `report_summary` | report_id | GET /reports/{id} | kind·과제메타·scenario·sim_params·parts·findings·전역 최악·검색축 |
 | `report_worst_cases` | report_id, metric?, top_n? | GET /reports/{id}/cases | 최악 케이스 랭킹(sphere=방향, impact=위치, deep=단건) |
 | `report_part_risk` | report_id, part_id? | GET /reports/{id}/parts | 파트별 최악값·발생 케이스·최소 안전율 |

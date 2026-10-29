@@ -161,6 +161,9 @@ class ImpactReport(Base):
     # 모델은 영상을 못 본다. 매핑 정본은 리포트 자신(`set_report.media`)이고, 선언이 없는 종류
     # (deep)는 케이스에 묶지 않고 목록으로만 둔다 — 파일명으로 추측한 매핑은 틀려도 그럴듯하다.
     media: Mapped[list | None] = mapped_column(JSONB)
+    # 렌더 기록 — SceneForge 렌더 결과(C-11)마다 한 줄(render_id · ok · 까닭 · 경고 · 받은 시각 · 출력 sha).
+    # 성공한 렌더의 그림은 위 `media` 에 **더하고**(role render · render_id), 실패는 여기에만 남긴다.
+    renders: Mapped[list | None] = mapped_column(JSONB)
     # 과제/개발단계 수동 메타 — {project, dev_revision:{phase,round?}, design_variation?, doe?}.
     # DataHub 등재 폼의 기본값으로도 쓰인다.
     eng_meta: Mapped[dict | None] = mapped_column(JSONB)

@@ -242,6 +242,16 @@ def test_judge_takes_the_present_report_and_names_the_missing_one():
     assert v["warnings"] and "impact" in v["warnings"][0] and "FAILED" in v["warnings"][0]
 
 
+def test_judge_ingests_a_present_report_but_warns_about_a_failed_render():
+    """unified_analyzer 의 rc 3 은 「분석 성공 · 렌더 실패」 다(KooD3plotReader K-4) — 실패로 접지 않는다."""
+    m = _manifest(b"x", postprocess={"by": "report_job", "rc": 3,
+                                     "report_job": {"id": "4243", "state": "FAILED", "exit_code": "3:0"},
+                                     "postprocess_job_id": None})
+    v = pr.judge(m, sim_type="fullangle_drop")
+    assert v["ok"], v
+    assert any("rc=3" in w for w in v["warnings"]) and any("FAILED(3:0)" in w for w in v["warnings"])
+
+
 # ── 시작 ────────────────────────────────────────────────────────────────────
 @_aio
 async def test_without_the_dashboard_or_the_delegation_it_fails_plainly(db, owner, slurm, monkeypatch):
