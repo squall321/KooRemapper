@@ -45,7 +45,7 @@
   - 막힌 자리(10-28 밤 확인) — `platform/docs/REQUEST-postprocess-operation.md` §7-1 은 클러스터 선행이 서야 착수: KooSlurm `docs/REQUEST-result-return.md` A(파일 REST 인증 — `/files/download` 가 아직 `@optional_jwt`) · B(귀환 매니페스트 — 코드에 없음) · C · D, pyKooCAE `docs/REQUEST-drop-impact-result-return.md` A(부분충격 리포트) · C — ★B(초속 이중 합산)는 9-17 `5baae8d` 에서 이미 고쳐져 SIF v97+ 에 있다(나는 커밋 메시지 키워드로만 찾아 놓쳤다 — pyKooCAE 회신으로 바로잡음). 두 세션에 진행 요청함(사용자 지시) — pyKooCAE 는 A + E(output_dir) → C → E(deep 건너뛰기) → D 순으로 착수
 - [ ] S1 manifest · 검증 게이트 — KooD3plotReader S1 추출기 꼴(요청 §6-1)이 정해진 뒤
 - [ ] S1 추출 단계 — 후처리 잡에 KooD3plotReader 표면 HDF5 + 시간 창 + 기준 단면 조각(D-8)
-- [ ] manifest 표 — run_id · 방향 · θ/φ · 높이 · 첫 접촉 시각 · 원본 경로 · 변환기 판 · 크기 · 검증 · 보존 상태 · sha256 · **낙하 방향(`*INITIAL_VELOCITY` 그대로) · 바닥 평면(PID 23 기기 쪽 면의 점 · 법선)**(SceneForge 요청 10-29 — 덱이 기기를 안 돌리고 바닥 · 속도로 자세를 건다). 셈은 SIF 로 구운 후처리 단계에서(로컬 스크립트 아님)
+- [ ] manifest 표 — run_id · 방향 · θ/φ · 높이 · 첫 접촉 시각 · 원본 경로 · 변환기 판 · 크기 · 검증 · 보존 상태 · sha256 · **낙하 방향(`*INITIAL_VELOCITY` 그대로) · 바닥 평면(PID 23 기기 쪽 면의 점 · 법선 · 평평함 · 틈)**(SceneForge 요청 10-29 — 덱이 기기를 안 돌리고 바닥 · 속도로 자세를 건다) · **`first_contact_s` 와 그 정의**(SceneForge 2차 — 보고 영상 시간 창의 기준) — 제안 `gap_mm ÷ |v|`(틈이 닫히는 시각, `first_contact_basis: gap_over_speed`, Test_005 는 9.2 µs). 선택 `contact_force_onset_s`(koo_impact_report `_compute_contact_mask` 와 같은 rcforc 규칙 — binout 을 읽어야 해 SIF 후처리 단계에서) — SceneForge 답 대기. 셈은 SIF 로 구운 후처리 단계에서(로컬 스크립트 아님). 받는 쪽 거절 기준(SceneForge) — 속도 방향 ↔ −법선 0.1° 초과 · S1 처음 움직임 ↔ −법선 1° 초과면 거절, 처음 움직임 1e-6 mm 미만이면 경고만
 - [ ] 검증 게이트 — 최대 요소가 표면일 때만 일치 요구 · 내부면 「표면 ≤ 정본」
 - [x] 반입 블록 분리 — sphere 곁파일(slim + 각도별 시계열). 1,000각도 상세 질의 1회 0.34초 · 174 MB(처음 22.4초 · 4.0 GB). 계획 · 결과 `report-block-split-1028.plan.md`
 - [x] (빠른 길) 임베드 JSON 을 raw_decode 로 — 상세 1회 22.4초 → 6.7초 · 4.0 → 3.1 GB(`288afb7`, dev 반영 · 리포트 스모크 35/35 · 백엔드 672 통과)
@@ -61,7 +61,7 @@
 
 ## P2 브라우저 뷰어 + S2 (DynaForge)
 - [ ] 구면 위험도 맵 보강 — 3D 구 · 보간 채움 · 허용비 · 임계 강조 · 상위 N
-- [ ] 브라우저 변형 뷰어 — StepForge glb(C-7) + 가중치(C-6) + S1 프레임(C-3) · 맵 클릭으로 열기 · 응력 색 · 배율 표기
+- [ ] 브라우저 변형 뷰어 — StepForge glb(C-7) + 가중치(C-6) + S1 프레임(C-3) · 맵 클릭으로 열기 · 응력 색 · 배율 표기 — ⚠ 배율은 **강체 운동을 뺀 변형에만** 건다(SceneForge 4c09b3a 가 찾음 — 변위 전체를 ×10 하면 튕김까지 10배라 기기가 날아간다. 상태마다 겉면 절점에 맞춘 강체 운동은 ×1, 벗어난 몫만 ×N)
 
 ## P3 보고 mp4
 - [ ] SceneForge — USD 장면 · 외관 라이브러리 초판 · 템플릿 2~3 · 상위 N mp4
