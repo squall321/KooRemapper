@@ -77,4 +77,4 @@
 - [x] 카탈로그 노트 · REQUEST §10 · 이 문서 「인자」(전환 때 못 쓴 `kst_token` 줄도 바로잡음)
 - [x] dev 반영(`07679d7`, 도는 잡 0 확인 · API 재기동) · MCP `run_operation` 으로 null 예약 한 번 — 잡이 생기고 저장 인자에 null 칸이 없다(dev 는 설정이 없어 「구성 안 됨」 으로 끝 — 예상대로) · `job_key` null 은 「required property」 로 거절
 - [x] 점검 문서 §1(이번 판 목록 · **소스** 줄 — health `revision` 은 Drive 판 커밋이라 파이썬만 바뀐 커밋이 안 보인다) · §4-2(과제 메타는 채웠을 때만)
-- [ ] 포털 회신
+- [x] 포털 회신(hwaxportal-a5) — 씨앗에 선택 변수 넷을 더해도 된다 · cae00 소스가 07679d7 이후여야 한다 · 점검 문서 바뀐 곳 셋
