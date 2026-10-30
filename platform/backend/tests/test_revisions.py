@@ -99,6 +99,21 @@ async def test_set_revision_makes_the_object_and_three_edges(db, task):
         await _clean(db, task)
 
 
+async def test_reconfirming_moves_the_report_instead_of_adding_a_second_link(db, task):
+    """리포트 하나에 개정 하나(앞 계획 §7 ③). 다시 확정하면 옛 판에서 **빠진다** — 안 빠지면 같은 리포트가 두 판의
+    최악값에 다 들어가 판끼리 견준 숫자가 틀어진다(10-30 실측으로 잡혔다). 옛 개정 객체는 남는다(unlink 와 같다)."""
+    rep = _report(project=task, code="dv1")
+    try:
+        await onto.set_revision(db, rep, task_key=task, code="dv1", source="manual")
+        await onto.set_revision(db, rep, task_key=task, code="pv1", source="manual")
+        linked = await _edges(db, onto.REL_MEASURED, src_key=rep.id)
+        assert [e.dst_key for e in linked] == [f"{task}@pv1"], [e.dst_key for e in linked]
+        line = {x["code"]: x["reports"] for x in await onto.history(db, task)}
+        assert line == {"dv1": [], "pv1": [rep.id]}, line
+    finally:
+        await _clean(db, task)
+
+
 async def test_a_bad_code_is_refused(db, task):
     rep = _report()
     for bad in ("dv", "pv", "mp2", "zz", ""):

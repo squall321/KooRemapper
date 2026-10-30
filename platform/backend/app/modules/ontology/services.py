@@ -220,6 +220,12 @@ async def set_revision(db, report: ImpactReport, *, task_key: str, code: str,
     await _edge(db, REL_OF, TYPE_REVISION, key, TYPE_TASK, task_key)
     if supersedes:
         await _edge(db, REL_SUPERSEDES, TYPE_REVISION, key, TYPE_REVISION, supersedes)
+    # ★리포트 하나에 개정 하나(앞 계획 §7 ③) — 다른 판으로 다시 확정하면 옛 선을 뗀다. 안 떼면 같은 리포트가 두 판에
+    #   다 잡혀 판끼리 견준 숫자가 틀어진다(10-30 실측: dv1 → pv1 다시 확정 뒤 선 둘). 떼는 꼴은 `unlink_revision` 과 같다.
+    for old in (await db.execute(select(OntoRelation).where(
+            OntoRelation.relation == REL_MEASURED, OntoRelation.src_type == TYPE_REPORT,
+            OntoRelation.src_key == str(report.id), OntoRelation.dst_key != key))).scalars().all():
+        await db.delete(old)
     # 리포트는 우리 1급 표다 — 행을 만들지 않고 **선의 끝점**으로만 쓴다.
     await _edge(db, REL_MEASURED, TYPE_REPORT, str(report.id), TYPE_REVISION, key)
 
