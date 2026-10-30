@@ -14,9 +14,13 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import func, select, text
 
 from app.config import settings
 from app.database import SessionLocal
+from app.models import OntoSyncRun
 from app.runner.sp_core import SpCoreClient, sync_all
 
 logger = logging.getLogger("koorm.worker")
@@ -39,33 +43,108 @@ def wanted_types() -> list[str] | None:
     return raw or None
 
 
-async def sync_once(*, full: bool = False, client: SpCoreClient | None = None) -> dict:
-    """한 번 받는다. 실패를 예외로 올리지 않는다 — 워커가 이것 때문에 멈추면 안 된다.
+# 규칙 14 — 두 실행이 겹치지 않게(워커 주기와 관리자 버튼은 다른 프로세스다). 트랜잭션 advisory 잠금이라 커밋 ·
+# 실패 때 저절로 풀린다 — 세션 잠금은 풀에서 연결이 바뀌면 다른 연결로 풀려 남는다.
+LOCK_NAME = "dynaforge.sp_core_sync"
 
-    `client` 는 시험이 넣는다(MockTransport 를 실은 것) — 이 리포가 `StcxClient`·
-    `McpHttpClient` 에서 쓰는 것과 같은 구멍이다. 망 없이 계약을 고정하려면 필요하다.
+
+async def try_lock(db) -> bool:
+    """이 트랜잭션에 받기 잠금을 건다(못 걸면 `False` — 누가 받는 중이다). 층 2 를 손으로 고치는 길(합친 과제 옮기기)도 건다."""
+    return bool((await db.execute(text("SELECT pg_try_advisory_xact_lock(hashtext(:k))"), {"k": LOCK_NAME})).scalar())
+
+
+async def _open_run(*, mode: str, allow_shrink: bool, trigger: str, requested_by: str) -> int:
+    """실행 기록을 **따로** 연다 — 본 트랜잭션이 깨져도 기록은 남는다."""
+    async with SessionLocal() as db:
+        run = OntoSyncRun(mode=mode, allow_shrink=allow_shrink, trigger=trigger, requested_by=requested_by)
+        db.add(run)
+        await db.commit()
+        return run.id
+
+
+async def _close_run(run_id: int, got: dict) -> None:
+    async with SessionLocal() as db:
+        run = await db.get(OntoSyncRun, run_id)
+        if run is None:
+            return
+        run.finished_at = datetime.now(timezone.utc)
+        run.result = str(got.get("result") or "failed")
+        run.revision = got.get("revision")
+        run.counts = {"types": got.get("types") or {}, "relations": got.get("relations") or {},
+                      "skipped": got.get("skipped") or [], "reflected": got.get("reflected")}
+        run.problems = list(got.get("problems") or [])
+        run.notes = list(got.get("notes") or [])
+        run.error = got.get("error")
+        await db.commit()
+
+
+async def full_due(now: datetime | None = None) -> bool:
+    """주 1회 처음부터 받을 때가 됐나 — 마지막으로 **끝까지 돈** 처음부터 받기(정상 · 확인 필요)에서 따진다."""
+    days = int(settings.sp_core_full_every_days or 0)
+    if days <= 0:
+        return False
+    async with SessionLocal() as db:
+        last = (await db.execute(select(func.max(OntoSyncRun.finished_at)).where(
+            OntoSyncRun.mode == "full", OntoSyncRun.result.in_(["ok", "needs_check"])))).scalar_one()
+    return last is None or (now or datetime.now(timezone.utc)) - last >= timedelta(days=days)
+
+
+async def sync_once(*, full: bool = False, allow_shrink: bool = False, client: SpCoreClient | None = None,
+                    trigger: str = "worker", requested_by: str = "") -> dict:
+    """한 번 받는다(층 1 → 층 2 반영 → 커밋). 실패를 예외로 올리지 않는다 — 워커가 이것 때문에 멈추면 안 된다.
+
+    결과는 셋이다(규칙 16) — ok · needs_check · failed. 이미 받는 중이면 시작하지 않고 `busy` 를 돌려준다(규칙 14).
+    `client` 는 시험이 넣는다(MockTransport 를 실은 것) — 망 없이 계약을 고정하려면 필요하다.
     """
     if not enabled():
-        return {"ok": False, "error": "disabled",
+        return {"ok": False, "result": "failed", "error": "disabled",
                 "detail": "KOORM_SP_CORE_URL/TOKEN/SYNC_SEC 중 비어 있는 것이 있다"}
     owns = client is None
     client = client or SpCoreClient(settings.sp_core_url, settings.sp_core_token,
                                     page_size=settings.sp_core_page_size)
+    mode = "full" if full else "normal"
     try:
         async with SessionLocal() as db:
-            got = await sync_all(db, client, types=wanted_types(), full=full)
-            # 받은 것은 **커밋한다** — 중간에 실패한 타입이 있어도 성공한 타입은 남는다.
-            # 전부-아니면-무로 묶으면 타입 하나가 막힐 때 나머지가 영영 안 들어온다.
-            await db.commit()
-    except Exception as exc:                       # noqa: BLE001
-        logger.exception("plm sync failed")
-        return {"ok": False, "error": "exception", "detail": f"{type(exc).__name__}: {exc}"}
+            if not await try_lock(db):
+                await db.rollback()
+                return {"ok": False, "result": "busy", "error": "busy",
+                        "detail": "이미 받는 중이다 — 끝난 뒤 다시 한다"}
+            run_id = await _open_run(mode=mode, allow_shrink=allow_shrink, trigger=trigger,
+                                     requested_by=requested_by)
+            try:
+                got = await sync_all(db, client, types=wanted_types(), full=full, allow_shrink=allow_shrink)
+                # 층 2 — 사본 표만 읽어 이 플랫폼에 반영한다(식별자 바뀜 → 우리 개정 · 별칭). 멈춘 실행도 끝까지
+                # 받은 흐름은 이미 사본에 있으므로 반영한다. ★저장점 안에서 — 반영이 깨져도 받은 것(층 1)은 남기고
+                # 「확인 필요」 로 알린다(반영 결함 하나가 받기를 영영 막으면 안 된다).
+                from app.modules.ontology import services as onto
+                try:
+                    async with db.begin_nested():
+                        got["reflected"] = await onto.reflect_after_sync(db)
+                except Exception as exc:               # noqa: BLE001
+                    logger.exception("plm reflect failed")
+                    got["reflected"] = {"error": f"{type(exc).__name__}: {exc}"}
+                    got["problems"] = [*(got.get("problems") or []),
+                                       f"층 2 반영 실패 — {type(exc).__name__}: {exc}"]
+                    if got.get("result") == "ok":
+                        got["result"] = "needs_check"      # ok 는 그대로 — 받기는 끝까지 돌았다(sync_all 과 같은 뜻)
+                # 받은 것은 **커밋한다** — 멈춘 실행도 끝까지 받은 흐름의 기준 시각은 옮겨 둔다(다음 실행이 거기서 잇는다).
+                await db.commit()
+            except Exception as exc:                   # noqa: BLE001
+                await db.rollback()
+                logger.exception("plm sync failed")
+                got = {"ok": False, "result": "failed", "error": "exception",
+                       "detail": f"{type(exc).__name__}: {exc}"}
+            await _close_run(run_id, got)
+            got["run_id"] = run_id
+    except Exception as exc:                           # noqa: BLE001 — 잠금 · 기록을 못 열었다
+        logger.exception("plm sync could not start")
+        return {"ok": False, "result": "failed", "error": "exception", "detail": f"{type(exc).__name__}: {exc}"}
     finally:
         if owns:
             await client.close()
-    if got.get("ok"):
+    if got.get("result") == "ok":
         counts = {k: v.get("rows", 0) for k, v in (got.get("types") or {}).items()}
         logger.info("plm sync ok — 판 %s · %s", got.get("revision"), counts)
     else:
-        logger.warning("plm sync 일부 실패 — %s", got.get("error") or got.get("types"))
+        logger.warning("plm sync %s — %s", got.get("result"), got.get("error") or got.get("problems"))
     return got

@@ -386,6 +386,10 @@ class OntoRelation(Base):
     dst_type: Mapped[str] = mapped_column(String(80), nullable=False)
     dst_key: Mapped[str] = mapped_column(String(300), nullable=False)
     properties: Mapped[dict | None] = mapped_column(JSONB)
+    # 허브 선의 근거 메모와 허브가 준 갱신 시각(ISO 문자열 그대로) — SP 사본 표 꼴(키트 10-21 §4)
+    evidence_note: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[str | None] = mapped_column(String(40))
+    # 끊은 선은 지우지 않고 표시만 한다(이 표의 규약 — sp-receive-1030 결정)
     deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
     source: Mapped[str] = mapped_column(String(20), default=SOURCE_SELF, nullable=False)
     synced_at: Mapped[datetime] = mapped_column(
@@ -408,8 +412,8 @@ class OntoSyncState(Base):
     relations_as_of: Mapped[str | None] = mapped_column(String(40))
     catalog_revision: Mapped[str | None] = mapped_column(String(120))
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    # ok | reset | stopped | error — `stopped` 는 규칙 11 의 `APP-CORE-0001`(공개 안 된 타입)
-    # 이다. 그때는 **그 타입 수신을 멈추고 알린다** — 계속 두드리지 않는다.
+    # ok | skipped | error — `skipped` 는 규칙 11 의 `-CORE-0001`(공개 안 된 타입)이다. 그 타입만 건너뛰고
+    # 실행 결과를 「확인 필요」 로 알린다(키트 10-21 — 나머지 타입은 계속 받는다).
     last_status: Mapped[str | None] = mapped_column(String(20))
     last_error: Mapped[str | None] = mapped_column(Text)
 
@@ -440,6 +444,64 @@ class OntoAlias(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     note: Mapped[str] = mapped_column(Text, default="", nullable=False)
+
+
+class OntoPreviousKey(Base):
+    """허브가 바꾼 식별자 — (타입, 옛 key) → 지금 key(SP 키트 10-21 규칙 5).
+
+    가진 행 · 선은 받을 때 새 key 로 옮긴다. 이 표는 **다른 곳에 남은 옛 값**(우리 개정 · 별칭 ·
+    다른 행의 참조 칸)을 푸는 데 쓴다. A→B→C 면 A · B 둘 다 C 를 가리킨다.
+    """
+
+    __tablename__ = "onto_previous_keys"
+
+    type_slug: Mapped[str] = mapped_column(String(80), primary_key=True)
+    old_key: Mapped[str] = mapped_column(String(300), primary_key=True)
+    key: Mapped[str] = mapped_column(String(300), nullable=False, index=True)
+    seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class OntoCatalog(Base):
+    """받은 카탈로그(`GET /api/core`) — **정의 판이 바뀔 때만** 한 줄을 더한다(규칙 12).
+
+    직전 것과 견줘 무엇이 달라졌는지(타입 · 칸 · 관계)를 실행 기록에 남긴다.
+    """
+
+    __tablename__ = "onto_catalogs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    revision: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    body: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class OntoSyncRun(Base):
+    """받기 한 번의 기록 — 결과는 셋이다(규칙 16): ok(정상) · needs_check(확인 필요) · failed(실패).
+
+    본 트랜잭션이 깨져도 남도록 따로 쓴다. `problems` 가 「확인 필요」 사유, `notes` 가 알림(정의 판 바뀜 등).
+    """
+
+    __tablename__ = "onto_sync_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    mode: Mapped[str] = mapped_column(String(20), default="normal", nullable=False)   # normal | full
+    allow_shrink: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    trigger: Mapped[str] = mapped_column(String(20), default="worker", nullable=False)  # worker | admin
+    requested_by: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    result: Mapped[str] = mapped_column(String(20), default="running", nullable=False)  # running | ok | needs_check | failed
+    revision: Mapped[str | None] = mapped_column(String(120))
+    counts: Mapped[dict | None] = mapped_column(JSONB)
+    problems: Mapped[list | None] = mapped_column(JSONB)
+    notes: Mapped[list | None] = mapped_column(JSONB)
+    error: Mapped[str | None] = mapped_column(Text)
 
 
 # ── 레시피 — 빌드 없이 쌓이는 분석 함수(docs/01-plan/features/recipes-1026.plan.md) ──────

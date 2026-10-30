@@ -886,7 +886,8 @@ async def _loop() -> None:
         if plm_sync.enabled() and loop_now >= next_plm:
             next_plm = loop_now + max(60, settings.sp_core_sync_sec)
             try:
-                await plm_sync.sync_once()
+                # 시간마다 증분 + 주 1회 처음부터(사용자 결정 10-30 — 지시서 기본안)
+                await plm_sync.sync_once(full=await plm_sync.full_due())
             except Exception:       # 수신 실패가 워커를 멈추면 로컬 잡까지 선다
                 logger.exception("plm sync poll failed")
 

@@ -14,13 +14,14 @@
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select, update
 
 from app.models import (SOURCE_HUB, SOURCE_SELF, ImpactReport, OntoAlias,
-                        OntoObject, OntoRelation)
+                        OntoObject, OntoPreviousKey, OntoRelation)
 from app.reports.datahub import DataHubError, parse_stage
 
 TYPE_REVISION = "dev_revision"
@@ -239,6 +240,8 @@ async def link_from_eng_meta(db, report: ImpactReport) -> dict:
     if not task or not code:
         return {"ok": False, "error": "nothing_to_link",
                 "detail": "eng_meta 에 과제와 dev_revision.code 가 둘 다 있어야 한다"}
+    # 허브가 바꾼 옛 과제명이면 지금 것으로 — 안 풀면 옛 key 로 개정이 새로 생겨 같은 판이 둘이 된다(층 2)
+    task = await current_key(db, TYPE_TASK, task)
     return await set_revision(db, report, task_key=task, code=code, source="eng_meta")
 
 
@@ -267,8 +270,34 @@ async def mismatch(db, report: ImpactReport) -> dict | None:
     expected = revision_key(task, code)
     if expected == linked:
         return None
+    # ★수동 메타는 고치지 않는다(DataHub 칸이 거기 물려 있다). 허브가 과제명을 바꿨거나 합쳤고 이어진 개정이
+    #   그리로 옮겨졌으면 「다르다」 가 아니라 그 사실을 말한다 — 둘 다 잘못이 아니고, 수동 메타가 옛 이름일 뿐이다.
+    now = await current_key(db, TYPE_TASK, task)
+    if now != task and revision_key(now, code) == linked:
+        return {"kind": "renamed", "linked": linked, "eng_meta": expected,
+                "said": f"수동 메타의 과제 {task!r} 는 허브에서 {now!r} 로 바뀌었다 — 이어진 개정은 옮겼다(수동 메타는 그대로 둔다)"}
+    st = await task_state(db, task)
+    if st["state"] == "merged" and revision_key(st["into"], code) == linked:
+        return {"kind": "merged", "linked": linked, "eng_meta": expected,
+                "said": f"수동 메타의 과제 {task!r} 는 허브에서 {st['into']!r} 로 합쳐졌다 — 이어진 개정은 옮겼다(수동 메타는 그대로 둔다)"}
     return {"kind": "differs", "linked": linked, "eng_meta": expected,
             "said": "수동 메타와 이어진 개정이 다르다 — 관계가 정본이다"}
+
+
+async def linked_revision(db, report: ImpactReport) -> dict | None:
+    """이 리포트에 이어진 개정(없으면 `None`) — 그 개정이 가리키는 과제와 함께."""
+    edge = (await db.execute(
+        select(OntoRelation).where(OntoRelation.relation == REL_MEASURED,
+                                   OntoRelation.src_type == TYPE_REPORT,
+                                   OntoRelation.src_key == str(report.id),
+                                   OntoRelation.deleted.is_(False)))).scalars().first()
+    if edge is None:
+        return None
+    rev = (await db.execute(select(OntoObject).where(
+        OntoObject.type_slug == TYPE_REVISION, OntoObject.key == edge.dst_key))).scalar_one_or_none()
+    props = (rev.properties or {}) if rev is not None else {}
+    return {"key": edge.dst_key, "task": str(props.get("task") or edge.dst_key.rsplit("@", 1)[0]),
+            "code": props.get("code") or edge.dst_key.rsplit("@", 1)[-1]}
 
 
 # ── 개정 줄 ────────────────────────────────────────────────────────────────
@@ -331,12 +360,15 @@ def normalize(text: str) -> str:
 async def resolve_task(db, free: str) -> tuple[str, str]:
     """자유 문자열 → (과제 key, 어떻게). 못 풀면 `("", "")`.
 
-    **짐작이 없는 세 길만** 여기서 푼다 —
-      `exact`     과제명(plm_task.key)과 글자 그대로 같다
-      `task_code` 과제코드(`properties.task_code`)와 글자 그대로 같다
-      `alias`     사람이 이미 붙인 기록이 있다
+    **짐작이 없는 길만** 여기서 푼다 —
+      `exact`        과제명(plm_task.key)과 글자 그대로 같다
+      `task_code`    과제코드(`properties.task_code`)와 글자 그대로 같다
+      `previous_key` 허브가 바꾼 옛 과제명이다(`onto_previous_keys` — 같은 과제다)
+      `alias`        사람이 이 플랫폼에서 이미 붙인 기록이 있다
+      `hub_alias`    허브 행의 별칭(`properties.aliases`)과 글자 그대로 같고 그런 과제가 **하나뿐**이다(KR-01 다시, 10-30)
     ⚠ key 는 **과제명**이다(rootdesign plm_task.key). 과제코드는 `properties.task_code` 에 있다 —
       보고서에는 과제코드가 적혀 오므로 그 경로가 없으면 과제코드로는 영영 안 풀린다(KR-01, 2026-10-27).
+    ★우리 별칭이 허브 별칭보다 먼저다 — 허브가 나중에 같은 별칭을 다른 과제에 달아도 사람이 정한 것을 조용히 바꾸지 않는다.
     정규화해서 같아 보이는 것은 **여기서 풀지 않는다**(후보일 뿐이다 — `task_candidates`).
     """
     free = (free or "").strip()
@@ -354,12 +386,28 @@ async def resolve_task(db, free: str) -> tuple[str, str]:
                                  OntoObject.deleted.is_(False)))).scalars().first()
     if code_hit is not None:
         return code_hit.key, "task_code"
+    now = await current_key(db, TYPE_TASK, free)
+    if now != free and await task_exists(db, now):
+        return now, "previous_key"
     al = (await db.execute(
         select(OntoAlias).where(OntoAlias.type_slug == TYPE_TASK,
                                 OntoAlias.alias == free))).scalar_one_or_none()
     if al is not None:
         return al.key, "alias"
+    named = [t.key for t in (await db.execute(
+        select(OntoObject).where(OntoObject.type_slug == TYPE_TASK,
+                                 OntoObject.properties["aliases"].contains([free]),
+                                 OntoObject.deleted.is_(False)))).scalars().all()
+             if free in hub_aliases(t)]
+    if len(named) == 1:
+        return named[0], "hub_alias"
     return "", ""
+
+
+def hub_aliases(obj: OntoObject) -> list[str]:
+    """허브 행의 별칭 — SP 는 있으면 `properties.aliases` 에 배열로 준다(키트 10-21 §5.2). 모양이 어긋나면 없는 것으로 본다."""
+    raw = (obj.properties or {}).get("aliases")
+    return [str(a) for a in raw if str(a or "").strip()] if isinstance(raw, list) else []
 
 
 async def task_candidates(db, free: str, *, limit: int = 5) -> list[dict]:
@@ -377,6 +425,8 @@ async def task_candidates(db, free: str, *, limit: int = 5) -> list[dict]:
                                  OntoObject.deleted.is_(False)))).scalars().all()
     out: list[dict] = []
     for t in rows:
+        if t.status == "deprecated":
+            continue        # 그만 씀 — 새로 고르는 목록에서만 숨긴다(사용자 결정 10-30). 이미 이은 것 · 검색에는 그대로 보인다
         # key 는 **과제명**, 과제코드는 properties.task_code 에 있다(KR-01). 둘 다 본다.
         code = normalize(str((t.properties or {}).get("task_code") or ""))
         if code and code == norm:
@@ -388,6 +438,9 @@ async def task_candidates(db, free: str, *, limit: int = 5) -> list[dict]:
         elif normalize(t.label) == norm:
             out.append({"key": t.key, "label": t.label, "why": "이름(label)이 구분기호만 다르다",
                         "rank": 2})
+        elif norm and any(normalize(a) == norm for a in hub_aliases(t)):
+            out.append({"key": t.key, "label": t.label, "why": "허브 별칭이 구분기호만 다르다",
+                        "rank": 2})
         elif norm and norm in normalize(t.label):
             out.append({"key": t.key, "label": t.label, "why": "이름(label)이 이 말을 품고 있다",
                         "rank": 3})
@@ -396,6 +449,79 @@ async def task_candidates(db, free: str, *, limit: int = 5) -> list[dict]:
                         "why": "과제코드가 이 말을 품고 있다", "rank": 4})
     out.sort(key=lambda c: (c["rank"], c["key"]))
     return out[:limit]
+
+
+_BOUNDARY = r"(^|[\s\-_./()\[\]])"
+_KIND_RANK = {"prefix": 0, "word": 1, "substring": 2}
+_FIELD_RANK = {"task_name": 0, "task_code": 1, "alias": 2, "label": 3}
+
+
+def match_kind(q: str, text: str) -> str | None:
+    """`q` 가 `text` 에 어떻게 걸렸나 — `prefix`(앞부분) · `word`(낱말 경계) · `substring`(부분) · 안 걸리면 `None`."""
+    ql, t = (q or "").lower(), (text or "").lower()
+    if not ql or ql not in t:
+        return None
+    if t.startswith(ql):
+        return "prefix"
+    if re.search(_BOUNDARY + re.escape(ql), t):
+        return "word"
+    return "substring"
+
+
+async def search_tasks(db, q: str = "", *, project: str = "", include_deleted: bool = False,
+                       limit: int = 100) -> dict:
+    """과제 검색 — 과제명(key) · 과제코드 · 별칭(허브 `properties.aliases` 와 우리 별칭 표) · 이름을 본다.
+
+    ★**순위를 매긴 뒤 자른다**(KR-16 다시, 10-30) — key 순으로 먼저 자른 창 안에서만 순위를 매기면 짧은 질의의 앞부분
+    일치가 창 밖으로 밀린다. 걸린 것을 전부 받아(과제는 수천 건 이하) 앞부분 · 낱말 경계 · 부분 순, 같은 꼴이면 과제명 ·
+    과제코드 · 별칭 · 이름 순으로 놓는다. 행마다 `matched_by`(어느 칸) · `match_kind`(어떻게)를 단다. 별칭으로 걸렸으면
+    `matched_alias` 에 그 별칭이 온다(KR-01 다시).
+    """
+    q = (q or "").strip()
+    stmt = select(OntoObject).where(OntoObject.type_slug == TYPE_TASK)
+    if not include_deleted:
+        stmt = stmt.where(OntoObject.deleted.is_(False))
+    if project:
+        stmt = stmt.where(OntoObject.properties["project"].astext == project)
+    if not q:
+        rows = (await db.execute(stmt.order_by(OntoObject.key).limit(limit + 1))).scalars().all()
+        return {"items": [_task_item(r) for r in rows[:limit]], "truncated": len(rows) > limit}
+    like = f"%{q}%"
+    ours: dict[str, list[str]] = {}
+    for alias, key in (await db.execute(select(OntoAlias.alias, OntoAlias.key).where(
+            OntoAlias.type_slug == TYPE_TASK, OntoAlias.alias.ilike(like)))).all():
+        ours.setdefault(key, []).append(alias)
+    # 허브 별칭은 배열의 글자(`->>`)로 먼저 거르고(넉넉한 거르개) 아래에서 원소마다 정확히 본다
+    cond = (OntoObject.key.ilike(like) | OntoObject.label.ilike(like)
+            | OntoObject.properties["task_code"].astext.ilike(like)
+            | OntoObject.properties["aliases"].astext.ilike(like))
+    if ours:
+        cond = cond | OntoObject.key.in_(sorted(ours))
+    hits = []
+    for r in (await db.execute(stmt.where(cond))).scalars().all():
+        fields = [("task_name", r.key or "", None), ("task_code", str((r.properties or {}).get("task_code") or ""), None),
+                  *[("alias", a, "hub") for a in hub_aliases(r)], *[("alias", a, "dynaforge") for a in ours.get(r.key, [])],
+                  ("label", r.label or "", None)]
+        best = None
+        for field, text, origin in fields:
+            kind = match_kind(q, text)
+            if kind and (best is None or (_KIND_RANK[kind], _FIELD_RANK[field]) < best[0]):
+                best = ((_KIND_RANK[kind], _FIELD_RANK[field]), field, kind, text, origin)
+        if best is not None:
+            hits.append((best, r))
+    hits.sort(key=lambda h: (h[0][0], h[1].key or ""))
+    items = []
+    for (_, field, kind, text, origin), r in hits[:limit]:
+        item = {**_task_item(r), "matched_by": field, "match_kind": kind}
+        if field == "alias":
+            item.update(matched_alias=text, alias_source=origin)
+        items.append(item)
+    return {"items": items, "total": len(hits), "truncated": len(hits) > limit}
+
+
+def _task_item(r: OntoObject) -> dict:
+    return {"key": r.key, "label": r.label, "status": r.status, "deleted": r.deleted,
+            "properties": r.properties or {}, "matched_by": None, "updated_at": r.updated_at}
 
 
 def report_free_task(report: ImpactReport) -> str:
@@ -628,3 +754,267 @@ async def task_exists(db, key: str) -> bool:
                                     OntoObject.key == key,
                                     OntoObject.deleted.is_(False)))).first()
     return row is not None
+
+
+# ── 허브 식별자 바뀜 · 합침 — 층 2(SP 키트 10-21 §6) ────────────────────────
+# 층 1(`app/runner/sp_core.py`)은 사본(허브 거울 행 · 허브 선)만 맞춘다. 우리 것 — 개정(`<과제>@<코드>` 열쇠 · 우리 선) ·
+# 별칭 표 · 개정의 모델 칸 — 은 여기서 **사본 표만 읽고** 맞춘다. SP API 를 부르지 않는다.
+#   식별자 바뀜 — 같은 것이다. 저절로 옮긴다(키트 §6: 같은 레코드의 key 만 바꾼다. 새 레코드를 만들지 않는다).
+#   합침(`merged_into`) — 저절로 옮기지 않는다. 알리고 관리자가 누른다(사용자 결정 10-30 「알리고 사람이 옮긴다」).
+
+MOVE_RENAME = "hub_rename"
+MOVE_MERGE = "hub_merge"
+_HOPS = 10      # 합침 · 바뀜이 줄줄이 이어질 때 따라가는 한도 — 데이터가 돌아도 멈춘다
+
+
+async def renamed_keys(db, type_slug: str) -> dict[str, str]:
+    """(옛 key → 지금 key). 그 옛 key 로 허브 행이 다시 있으면 뺀다 — 다시 쓰인 식별자다(지금 key 로 살아 있다)."""
+    pairs = [(o, k) for o, k in (await db.execute(select(OntoPreviousKey.old_key, OntoPreviousKey.key).where(
+        OntoPreviousKey.type_slug == type_slug))).all() if o and k and o != k]
+    if not pairs:
+        return {}
+    live = set((await db.execute(select(OntoObject.key).where(
+        OntoObject.type_slug == type_slug, OntoObject.source == SOURCE_HUB,
+        OntoObject.key.in_([o for o, _ in pairs])))).scalars())
+    return {o: k for o, k in pairs if o not in live}
+
+
+async def current_key(db, type_slug: str, key: str) -> str:
+    """옛 식별자면 지금 것으로, 아니면 그대로(키트 §6 — 못 찾으면 옛 → 새 로 풀어 다시 찾는다)."""
+    key = (key or "").strip()
+    if not key:
+        return key
+    if (await db.execute(select(OntoObject.id).where(
+            OntoObject.type_slug == type_slug, OntoObject.key == key,
+            OntoObject.source == SOURCE_HUB))).first() is not None:
+        return key
+    now = (await db.execute(select(OntoPreviousKey.key).where(
+        OntoPreviousKey.type_slug == type_slug, OntoPreviousKey.old_key == key))).scalar_one_or_none()
+    return now or key
+
+
+async def _hub_task(db, key: str) -> OntoObject | None:
+    return (await db.execute(select(OntoObject).where(
+        OntoObject.type_slug == TYPE_TASK, OntoObject.key == key,
+        OntoObject.source == SOURCE_HUB))).scalar_one_or_none()
+
+
+async def _merge_end(db, key: str) -> tuple[str, OntoObject | None]:
+    """합쳐진 곳을 끝까지 — A→B 로 합쳤는데 B 도 C 로 합쳐졌거나 이름이 바뀌었으면 C."""
+    cur, row, seen = key, None, set()
+    for _ in range(_HOPS):
+        cur = await current_key(db, TYPE_TASK, cur)
+        if cur in seen:
+            break
+        seen.add(cur)
+        row = await _hub_task(db, cur)
+        if row is None or not row.deleted or not row.merged_into:
+            break
+        cur = row.merged_into
+    return cur, row
+
+
+async def task_state(db, key: str) -> dict:
+    """과제 하나의 지금 처지 — 화면이 띄울 알림 재료.
+
+    state — `active` · `deprecated`(그만 씀 — 새로 고르는 목록에서만 숨긴다) · `merged`(합쳐짐 — 관리자가 옮긴다) ·
+    `gone`(허브에서 사라짐 — 「사용 안 함」) · `hidden`(이 자격으로 안 보임) · `renamed`(옛 식별자 — 다음 반영이 옮긴다) ·
+    `unknown`(허브에 없는 자유 문자열). 사용자 결정 10-30(지시서 기본안).
+    """
+    key = (key or "").strip()
+    row = await _hub_task(db, key) if key else None
+    if row is None:
+        now = await current_key(db, TYPE_TASK, key) if key else key
+        if now != key:
+            return {"key": key, "state": "renamed", "now": now}
+        return {"key": key, "state": "unknown"}
+    base = {"key": key, "label": row.label}
+    if row.deleted and row.hidden:
+        return {**base, "state": "hidden"}
+    if row.deleted and row.merged_into:
+        into, end = await _merge_end(db, row.merged_into)
+        return {**base, "state": "merged", "merged_into": row.merged_into, "into": into,
+                "into_label": end.label if end is not None else None,
+                "into_active": bool(end is not None and not end.deleted)}
+    if row.deleted:
+        return {**base, "state": "gone"}
+    if row.status == "deprecated":
+        return {**base, "state": "deprecated"}
+    return {**base, "state": "active"}
+
+
+async def _same_edge(db, r: OntoRelation, src: str, dst: str) -> OntoRelation | None:
+    return (await db.execute(select(OntoRelation).where(
+        OntoRelation.relation == r.relation, OntoRelation.src_type == r.src_type, OntoRelation.src_key == src,
+        OntoRelation.dst_type == r.dst_type, OntoRelation.dst_key == dst,
+        OntoRelation.id != r.id))).scalar_one_or_none()
+
+
+async def _repoint(db, old: str, new: str, *, incoming_only: bool) -> dict:
+    """우리 선에서 개정 끝 `old` 를 `new` 로. 같은 선이 이미 있으면 옛 줄을 지운다(살아 있는 쪽을 남긴다).
+
+    `supersedes` 가 제 자신을 가리키거나 줄이 돌게 되면 옮기지 않고 끊는다(`deleted`) — 개정 줄을 따라가는 질의가
+    돈다(`set_revision` 의 순환 거절과 같은 까닭). 끊은 것은 돌려줘서 실행 기록에 남긴다.
+    """
+    done = {"reports": 0, "edges": 0, "dropped": []}
+    ends = [and_(OntoRelation.dst_type == TYPE_REVISION, OntoRelation.dst_key == old)]
+    if not incoming_only:
+        ends.append(and_(OntoRelation.src_type == TYPE_REVISION, OntoRelation.src_key == old))
+    rows = (await db.execute(select(OntoRelation).where(
+        OntoRelation.source == SOURCE_SELF, OntoRelation.deleted.is_(False), or_(*ends)))).scalars().all()
+    for r in rows:
+        src = new if (not incoming_only and r.src_type == TYPE_REVISION and r.src_key == old) else r.src_key
+        dst = new if (r.dst_type == TYPE_REVISION and r.dst_key == old) else r.dst_key
+        if r.relation == REL_SUPERSEDES and (src == dst or src in await _chain_keys(db, dst)):
+            r.deleted = True
+            done["dropped"].append(f"{r.src_key} → {r.dst_key}")
+            await db.flush()
+            continue
+        clash = await _same_edge(db, r, src, dst)
+        if clash is not None:
+            clash.deleted = False
+            await db.delete(r)
+        else:
+            r.src_key, r.dst_key = src, dst
+        await db.flush()
+        done["reports" if r.relation == REL_MEASURED else "edges"] += 1
+    return done
+
+
+async def move_task_revisions(db, from_key: str, to_key: str, *, by: str = "", reason: str = "") -> dict:
+    """과제 A 에 매달린 **우리 것**(개정 · 별칭)을 과제 B 로 옮긴다 — 식별자 바뀜(저절로)과 합침(관리자)이 함께 쓴다.
+
+    개정 key 는 `<과제>@<코드>` 라 과제가 바뀌면 key 도 바뀐다 — 같은 개정 행의 key 만 바꾸고 선의 끝을 따라 옮긴다.
+    ★B 에 같은 코드 개정이 이미 있으면 A 쪽 리포트 선(`measured_at`)과 A 쪽을 앞 판으로 둔 선만 B 개정으로 옮기고,
+    A 쪽 개정은 지우지 않고 비활성(`merged_into`)으로 둔다 — 지우면 되돌릴 수 없다. 옮긴 사람 · 까닭은 개정 칸에 남긴다.
+    """
+    from_key, to_key = (from_key or "").strip(), (to_key or "").strip()
+    done: dict[str, Any] = {"from": from_key, "to": to_key, "revisions": 0, "collapsed": 0,
+                            "reports": 0, "edges": 0, "aliases": 0, "dropped": []}
+    if not from_key or not to_key or from_key == to_key:
+        return done
+    revs = [r for r in (await db.execute(select(OntoObject).where(
+        OntoObject.type_slug == TYPE_REVISION, OntoObject.source == SOURCE_SELF,
+        OntoObject.deleted.is_(False)))).scalars().all()
+        if str((r.properties or {}).get("task") or "") == from_key]
+    for rev in revs:
+        props = dict(rev.properties or {})
+        code = str(props.get("code") or rev.key.rsplit("@", 1)[-1])
+        old, new = rev.key, revision_key(to_key, code)
+        note = {"from": old, "to": new, "why": reason, "by": by, "at": _now()}
+        props["moves"] = [*(props.get("moves") or []), note]
+        there = (await db.execute(select(OntoObject).where(
+            OntoObject.type_slug == TYPE_REVISION, OntoObject.key == new))).scalar_one_or_none()
+        if there is None:
+            # 같은 개정이다 — key 만 바꾼다
+            for e in (await db.execute(select(OntoRelation).where(
+                    OntoRelation.relation == REL_OF, OntoRelation.source == SOURCE_SELF,
+                    OntoRelation.src_type == TYPE_REVISION, OntoRelation.src_key == old))).scalars().all():
+                await db.delete(e)
+            rev.key = new
+            rev.label = f"{to_key} {code}"
+            rev.properties = {**props, "task": to_key}
+            rev.previous_keys = list(dict.fromkeys([*(rev.previous_keys or []), old]))
+            await db.flush()
+            await _edge(db, REL_OF, TYPE_REVISION, new, TYPE_TASK, to_key)
+            moved = await _repoint(db, old, new, incoming_only=False)
+            done["revisions"] += 1
+        else:
+            # B 에 같은 판이 있다 — 리포트와 「이것을 앞 판으로 둔 선」 만 그리로. A 쪽 개정은 비활성.
+            if there.deleted:
+                there.deleted, there.merged_into = False, None
+            moved = await _repoint(db, old, new, incoming_only=True)
+            rev.properties = props
+            rev.deleted, rev.merged_into = True, new
+            await db.flush()
+            done["collapsed"] += 1
+        done["reports"] += moved["reports"]
+        done["edges"] += moved["edges"]
+        done["dropped"] += moved["dropped"]
+    res = await db.execute(update(OntoAlias).where(
+        OntoAlias.type_slug == TYPE_TASK, OntoAlias.key == from_key).values(key=to_key))
+    done["aliases"] = int(res.rowcount or 0)
+    await db.flush()
+    return done
+
+
+async def merged_tasks(db) -> list[dict]:
+    """허브에서 합쳐졌는데(`merged_into`) 우리 것(개정 · 별칭)이 아직 진 쪽에 매달린 과제 — 관리자가 옮길 목록."""
+    gone = (await db.execute(select(OntoObject).where(
+        OntoObject.type_slug == TYPE_TASK, OntoObject.source == SOURCE_HUB, OntoObject.deleted.is_(True),
+        OntoObject.hidden.is_(False), OntoObject.merged_into.isnot(None)))).scalars().all()
+    if not gone:
+        return []
+    keys = {g.key for g in gone}
+    revs: dict[str, list[str]] = {}
+    for r in (await db.execute(select(OntoObject).where(
+            OntoObject.type_slug == TYPE_REVISION, OntoObject.source == SOURCE_SELF,
+            OntoObject.deleted.is_(False)))).scalars().all():
+        task = str((r.properties or {}).get("task") or "")
+        if task in keys:
+            revs.setdefault(task, []).append(r.key)
+    aliases: dict[str, int] = {}
+    for a in (await db.execute(select(OntoAlias.key).where(
+            OntoAlias.type_slug == TYPE_TASK, OntoAlias.key.in_(sorted(keys))))).scalars():
+        aliases[a] = aliases.get(a, 0) + 1
+    out = []
+    for g in sorted(gone, key=lambda x: x.key):
+        mine = sorted(revs.get(g.key, []))
+        if not mine and not aliases.get(g.key):
+            continue
+        reports = 0
+        if mine:
+            reports = len((await db.execute(select(OntoRelation.id).where(
+                OntoRelation.relation == REL_MEASURED, OntoRelation.dst_type == TYPE_REVISION,
+                OntoRelation.dst_key.in_(mine), OntoRelation.deleted.is_(False)))).all())
+        into, end = await _merge_end(db, g.merged_into)
+        out.append({"key": g.key, "label": g.label, "merged_into": g.merged_into, "into": into,
+                    "into_label": end.label if end is not None else None,
+                    "into_active": bool(end is not None and not end.deleted),
+                    "revisions": mine, "reports": reports, "aliases": aliases.get(g.key, 0)})
+    return out
+
+
+async def move_merged_task(db, key: str, *, by: str = "", note: str = "") -> dict:
+    """관리자가 누른 「B 로 옮기기」 — 허브가 합친 과제(A)의 우리 것을 합쳐진 곳(끝까지 따라간 B)으로.
+
+    받는 곳은 허브가 정한 것뿐이다 — 고를 칸을 두지 않는다(사람이 고르는 것은 「옮길까」 이지 「어디로」 가 아니다).
+    """
+    row = await _hub_task(db, (key or "").strip())
+    if row is None or not row.deleted or not row.merged_into or row.hidden:
+        return {"ok": False, "error": "not_merged", "detail": f"{key!r} 는 허브에서 합쳐진 과제가 아니다"}
+    into, end = await _merge_end(db, row.merged_into)
+    if end is None or end.deleted:
+        return {"ok": False, "error": "target_gone", "into": into,
+                "detail": f"합쳐진 곳 {into!r} 도 허브에 살아 있지 않다 — 옮길 곳이 없다"}
+    got = await move_task_revisions(db, row.key, into, by=by, reason=MOVE_MERGE + (f" — {note}" if note else ""))
+    return {"ok": True, **got}
+
+
+async def reflect_after_sync(db) -> dict:
+    """층 2 — 받은 사본만 읽고 이 플랫폼의 것에 반영한다(받기 한 번마다 `plm_sync.sync_once` 가 부른다).
+
+    ① 과제 식별자 바뀜 — 우리 개정 · 별칭을 새 key 로 저절로 옮긴다. ② 모델 식별자 바뀜 — 개정의 `model` 칸.
+    ③ 합쳐진 과제 — **옮기지 않고 센다**(실행 기록 · 관리 화면이 띄운다). 매번 전체 대조다(키트 §6 — 수만 건 이하면
+    그것이 가장 단순하고 틀릴 일이 적다). 옮길 것이 없으면 아무것도 쓰지 않는다.
+    """
+    out: dict[str, Any] = {"renamed": 0, "revisions": 0, "collapsed": 0, "reports": 0, "aliases": 0,
+                           "models": 0, "dropped": [], "merged_waiting": 0}
+    for old, new in sorted((await renamed_keys(db, TYPE_TASK)).items()):
+        got = await move_task_revisions(db, old, new, reason=MOVE_RENAME)
+        if got["revisions"] or got["collapsed"] or got["aliases"]:
+            out["renamed"] += 1
+        for k in ("revisions", "collapsed", "reports", "aliases"):
+            out[k] += got[k]
+        out["dropped"] += got["dropped"]
+    models = await renamed_keys(db, TYPE_MODEL)
+    if models:
+        for r in (await db.execute(select(OntoObject).where(
+                OntoObject.type_slug == TYPE_REVISION, OntoObject.source == SOURCE_SELF))).scalars().all():
+            was = str((r.properties or {}).get("model") or "")
+            if was in models:
+                r.properties = {**(r.properties or {}), "model": models[was]}
+                out["models"] += 1
+        await db.flush()
+    out["merged_waiting"] = len(await merged_tasks(db))
+    return out

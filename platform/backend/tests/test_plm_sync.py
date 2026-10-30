@@ -5,6 +5,7 @@
 묻힌다** — 그 상태가 가장 비싸다.
 """
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.dont_write_bytecode = True
@@ -13,9 +14,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import httpx
 import pytest
 import ulid
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 
-from app.models import OntoObject, OntoRelation, OntoSyncState
+from app.models import OntoCatalog, OntoObject, OntoRelation, OntoSyncRun, OntoSyncState, OntoType
 from app.runner.sp_core import SpCoreClient
 from app.worker import plm_sync
 
@@ -35,6 +36,40 @@ def on(monkeypatch):
     # KR-06 기본(셋)으로 좁히면 그 slug 가 빠지므로, 여기서는 전부(None)로 둔다.
     monkeypatch.setattr(settings, "sp_core_types", "")
     return settings
+
+
+async def _cat_mark(db) -> int:
+    return int((await db.execute(select(func.coalesce(func.max(OntoCatalog.id), 0)))).scalar_one())
+
+
+async def _forget(db, slug: str, got: dict | None, mark: int) -> None:
+    """★`sync_once` 는 정말 커밋한다 — 실행 기록 · 카탈로그 줄 · 허브 타입 정의까지 치운다. 안 치우면 다음 실제 받기가
+    시험 카탈로그(`r1`)와 견줘 「정의 판이 바뀌었다」 로 전부 처음부터 받고, 관리 화면의 최근 실행에 시험이 섞인다.
+    (시험 카탈로그에 없는 허브 정의는 받을 때 지워진다 — 다음 실제 받기가 카탈로그로 다시 채운다.)"""
+    if got and got.get("run_id"):
+        await db.execute(delete(OntoSyncRun).where(OntoSyncRun.id == got["run_id"]))
+    await db.execute(delete(OntoCatalog).where(OntoCatalog.id > mark, OntoCatalog.revision == "r1"))
+    await db.execute(delete(OntoType).where(OntoType.slug == slug, OntoType.source == "hub"))
+    await db.execute(delete(OntoRelation).where(OntoRelation.src_type == slug))
+    await db.execute(delete(OntoObject).where(OntoObject.type_slug == slug))
+    await db.execute(delete(OntoSyncState).where(OntoSyncState.type_slug == slug))
+    await db.commit()
+
+
+def _one_task_hub(slug: str):
+    cat = {"system": "허브", "revision": "r1", "as_of": "T0",
+           "types": [{"slug": slug, "label": "과제", "count": 1, "properties": [],
+                      "endpoint": f"/core/{slug}", "relations": []}]}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/core"):
+            return httpx.Response(200, json=cat)
+        return httpx.Response(200, json={"items": [
+            {"key": "PRJ-1", "label": "과제 하나", "status": "active",
+             "updated_at": "T1", "deleted": False}], "as_of": "T1", "next": None})
+
+    return SpCoreClient("http://hub.test/api", "tok",
+                        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
 
 
 async def test_it_is_off_by_default():
@@ -83,29 +118,84 @@ async def test_the_type_list_comes_from_settings():
 async def test_sync_once_writes_and_commits(db, on):
     """받은 것은 **커밋한다** — 성공한 타입은 남아야 한다."""
     slug = f"t_{ulid.new().str[:12].lower()}"
-    cat = {"system": "허브", "revision": "r1", "as_of": "T0",
-           "types": [{"slug": slug, "label": "과제", "count": 1, "properties": [],
-                      "endpoint": f"/core/{slug}", "relations": []}]}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path.endswith("/core"):
-            return httpx.Response(200, json=cat)
-        return httpx.Response(200, json={"items": [
-            {"key": "PRJ-1", "label": "과제 하나", "status": "active",
-             "updated_at": "T1", "deleted": False}], "as_of": "T1", "next": None})
-
-    client = SpCoreClient("http://hub.test/api", "tok",
-                          client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    mark, got = await _cat_mark(db), None
     try:
-        got = await plm_sync.sync_once(client=client)
-        assert got["ok"], got
+        got = await plm_sync.sync_once(client=_one_task_hub(slug))
+        assert got["ok"] and got["result"] == "ok", got
         # **다른 세션**에서 보인다 = 정말 커밋됐다
         rows = (await db.execute(select(OntoObject).where(
             OntoObject.type_slug == slug))).scalars().all()
         assert [r.key for r in rows] == ["PRJ-1"]
     finally:
-        await db.execute(delete(OntoObject).where(OntoObject.type_slug == slug))
-        await db.execute(delete(OntoSyncState).where(OntoSyncState.type_slug == slug))
+        await _forget(db, slug, got, mark)
+
+
+async def test_every_run_leaves_a_record_with_one_of_three_results(db, on):
+    """규칙 16 — 결과는 셋(정상 · 확인 필요 · 실패)이고 실행마다 기록이 남는다(관리 화면의 「최근 실행」)."""
+    slug = f"t_{ulid.new().str[:12].lower()}"
+    mark, got = await _cat_mark(db), None
+    try:
+        got = await plm_sync.sync_once(client=_one_task_hub(slug), trigger="admin", requested_by="a@x")
+        run = (await db.execute(select(OntoSyncRun).where(OntoSyncRun.id == got["run_id"])
+                                .execution_options(populate_existing=True))).scalar_one()
+        assert (run.result, run.trigger, run.requested_by, run.mode) == ("ok", "admin", "a@x", "normal")
+        assert run.finished_at is not None and run.revision == "r1"
+        assert run.counts["types"][slug]["rows"] == 1, run.counts
+        assert "reflected" in run.counts, "층 2 반영 결과도 기록에 남는다"
+    finally:
+        await _forget(db, slug, got, mark)
+
+
+async def test_a_run_does_not_start_while_another_holds_the_lock(db, on):
+    """규칙 14 — 워커 주기와 관리자 버튼은 다른 프로세스다. 겹치면 기준 시각이 엇갈린다 — 시작하지 않고 「받는 중」."""
+    slug = f"t_{ulid.new().str[:12].lower()}"
+    from app.database import SessionLocal
+    async with SessionLocal() as holder:
+        assert await plm_sync.try_lock(holder)
+        got = await plm_sync.sync_once(client=_one_task_hub(slug))
+        await holder.rollback()          # 트랜잭션 잠금 — 끝나면 저절로 풀린다
+    assert got["result"] == "busy" and "run_id" not in got, got
+    rows = (await db.execute(select(OntoObject).where(OntoObject.type_slug == slug))).scalars().all()
+    assert rows == [], "잠겨 있는데 받았다"
+
+
+async def test_a_broken_reflect_keeps_what_was_received_and_says_so(db, on, monkeypatch):
+    """층 2 결함 하나가 받기(층 1)를 영영 막으면 안 된다 — 받은 것은 남기고 「확인 필요」 로 알린다."""
+    from app.modules.ontology import services as onto
+
+    async def boom(_db):
+        raise RuntimeError("반영 결함")
+
+    monkeypatch.setattr(onto, "reflect_after_sync", boom)
+    slug = f"t_{ulid.new().str[:12].lower()}"
+    mark, got = await _cat_mark(db), None
+    try:
+        got = await plm_sync.sync_once(client=_one_task_hub(slug))
+        assert got["result"] == "needs_check", got
+        assert any("층 2 반영 실패" in p for p in got["problems"]), got["problems"]
+        rows = (await db.execute(select(OntoObject).where(OntoObject.type_slug == slug))).scalars().all()
+        assert [r.key for r in rows] == ["PRJ-1"], "반영이 깨졌다고 받은 것까지 되돌렸다"
+    finally:
+        await _forget(db, slug, got, mark)
+
+
+async def test_the_weekly_full_comes_due(db, monkeypatch):
+    """주 1회 처음부터(10-30 사용자 「권장」) — 마지막으로 **끝까지 돈** 처음부터 받기에서 따진다. 0 이면 끈다.
+
+    살아 있는 dev DB 를 쓰므로 기록을 **미래**에 하나 두고 그 뒤로 시계를 돌린다 — 다른 기록이 있어도 최댓값은 그것이다."""
+    from app.config import settings
+    monkeypatch.setattr(settings, "sp_core_full_every_days", 7)
+    at = datetime.now(timezone.utc) + timedelta(days=1)
+    run = OntoSyncRun(mode="full", trigger="test", result="needs_check", started_at=at, finished_at=at)
+    db.add(run)
+    await db.commit()
+    try:
+        assert await plm_sync.full_due(at + timedelta(days=6)) is False
+        assert await plm_sync.full_due(at + timedelta(days=7, minutes=1)) is True
+        monkeypatch.setattr(settings, "sp_core_full_every_days", 0)
+        assert await plm_sync.full_due(at + timedelta(days=30)) is False, "0 이면 끈다"
+    finally:
+        await db.execute(delete(OntoSyncRun).where(OntoSyncRun.id == run.id))
         await db.commit()
 
 
@@ -115,7 +205,7 @@ async def test_the_worker_still_calls_it():
     """한 줄짜리 배선이라 조용히 사라질 수 있다 — 사라지면 수신이 **영원히 안 돈다.**"""
     text = _RUNNER.read_text(encoding="utf-8")
     assert "plm_sync.enabled()" in text, "게이트가 없다"
-    assert "plm_sync.sync_once()" in text, "호출이 없다"
+    assert "plm_sync.sync_once(full=await plm_sync.full_due())" in text, "호출이 없다(주 1회 처음부터 포함)"
     assert "max(60, settings.sp_core_sync_sec)" in text, "간격 하한이 없다 — 1초로 두드릴 수 있다"
 
 
@@ -148,6 +238,7 @@ async def test_a_relation_to_a_system_type_never_creates_an_object_row(db, on):
 
     client = SpCoreClient("http://hub.test/api", "tok",
                           client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    mark, got = await _cat_mark(db), None
     try:
         got = await plm_sync.sync_once(client=client)
         assert got["ok"], got
@@ -160,10 +251,7 @@ async def test_a_relation_to_a_system_type_never_creates_an_object_row(db, on):
             OntoObject.type_slug == "workspace"))).scalars().all()
         assert made == [], f"부서를 행으로 복제했다: {[m.key for m in made]}"
     finally:
-        await db.execute(delete(OntoRelation).where(OntoRelation.src_type == slug))
-        await db.execute(delete(OntoObject).where(OntoObject.type_slug == slug))
-        await db.execute(delete(OntoSyncState).where(OntoSyncState.type_slug == slug))
-        await db.commit()
+        await _forget(db, slug, got, mark)
 
 
 async def test_sp_core_client_does_not_trust_proxy_env():

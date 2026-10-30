@@ -56,6 +56,13 @@ def _dep_names(route) -> set:
     ("DELETE", f"{P}/ontology/aliases"),
     ("GET", f"{P}/ontology/sync"),
     ("POST", f"{P}/ontology/sync"),
+    # SP 받는 쪽 전부(sp-receive-1030) — 실행 기록 · 합친 과제 옮기기 · 보기
+    ("GET", f"{P}/ontology/sync/runs"),
+    ("GET", f"{P}/ontology/merged-tasks"),
+    ("POST", f"{P}/ontology/merged-tasks/{{task_key:path}}/move"),
+    ("GET", f"{P}/ontology/types"),
+    ("GET", f"{P}/ontology/objects"),
+    ("GET", f"{P}/ontology/objects/{{type_slug}}/{{key:path}}"),
 ])
 def test_the_route_exists(method, path):
     assert (method, path) in _routes(), sorted(k[1] for k in _routes())
@@ -69,6 +76,9 @@ def test_the_route_exists(method, path):
     ("GET", f"{P}/ontology/aliases"),
     ("POST", f"{P}/ontology/aliases"),
     ("POST", f"{P}/ontology/sync"),
+    ("GET", f"{P}/ontology/sync/runs"),                    # 누른 사람이 실린다
+    ("GET", f"{P}/ontology/merged-tasks"),
+    ("POST", f"{P}/ontology/merged-tasks/{{task_key:path}}/move"),   # 남의 리포트에 달린 개정까지 옮긴다
 ])
 def test_the_whole_fleet_paths_need_a_system_admin(method, path):
     """★전사 데이터를 움직이는 길이다 — 로그인만으로 열리면 결함이고, 그 결함은
@@ -83,6 +93,9 @@ def test_the_whole_fleet_paths_need_a_system_admin(method, path):
     ("GET", f"{P}/ontology/sync"),                         # KR-17 — 읽기는 로그인한 사용자 누구나
     ("GET", f"{P}/reports/{{report_id}}/revision"),
     ("PUT", f"{P}/reports/{{report_id}}/revision"),
+    ("GET", f"{P}/ontology/types"),                        # 보기는 읽기 전용 — 로그인한 누구나
+    ("GET", f"{P}/ontology/objects"),
+    ("GET", f"{P}/ontology/objects/{{type_slug}}/{{key:path}}"),
 ])
 def test_the_rest_still_needs_a_login(method, path):
     names = _dep_names(_routes()[(method, path)])
@@ -106,10 +119,12 @@ def test_the_write_paths_are_only_our_own_things():
     # ★2026-10-14 에 **되돌리는 길 둘**이 늘었다(개정 해제 · 별칭 떼기). 확정하는 기능에
     #   되돌릴 길이 없으면 반쪽이고, `confirm_alias` 는 이미 "먼저 떼야 한다" 고 말하고
     #   있었다. 이 집합은 그대로 **과제를 쓰는 길이 안 생겼음**을 지킨다.
+    #   10-30 합친 과제 옮기기가 늘었다 — 고치는 것은 **우리 개정 · 별칭**이지 허브 과제가 아니다(사용자 결정 「알리고 사람이 옮긴다」).
     allowed = {f"{P}/reports/{{report_id}}/revision",      # PUT 확정 · DELETE 해제
                f"{P}/ontology/task-links/apply",
                f"{P}/ontology/aliases",                    # POST 붙이기 · DELETE 떼기
-               f"{P}/ontology/sync"}
+               f"{P}/ontology/sync",
+               f"{P}/ontology/merged-tasks/{{task_key:path}}/move"}
     assert set(writes) == allowed, writes
 
 
