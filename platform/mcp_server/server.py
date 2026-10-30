@@ -1493,10 +1493,14 @@ async def delete_report(report_id: str, ctx: Context) -> dict:
 @mcp.tool()
 async def list_tasks(ctx: Context, q: str = "", limit: int = 100, project: str = "") -> dict:
     """허브에서 받은 **과제 목록**. `q` 로 검색한다 — key(**과제명**) · `properties.task_code`(**과제코드**) ·
-    이름 모두 본다. 항목마다 `matched_by`(task_name · task_code · label)로 무엇으로 걸렸는지 온다.
-    앞부분·낱말경계 일치가 위로 온다(짧은 꼴이 다른 프로젝트 과제를 섞던 것을 눌렀다). `project` 로 좁힐 수 있다.
+    **별칭**(허브 `properties.aliases` · 이 플랫폼에서 붙인 별칭) · 이름 모두 본다. 항목마다 `matched_by`
+    (task_name · task_code · alias · label)와 `match_kind`(prefix 앞부분 · word 낱말 경계 · substring 부분)가 온다 —
+    별칭으로 걸렸으면 `matched_alias` · `alias_source`(hub · dynaforge)도. **순위를 매긴 뒤 자른다** — 앞부분 · 낱말 경계
+    일치가 위로 오고, 더 있으면 `truncated:true` · `total`. `project` 로 좁힐 수 있다.
+    ★`status:"deprecated"` 는 허브가 **그만 쓰라고 한** 과제다 — 새로 붙일 때는 고르지 마라(이미 이은 것은 그대로다).
     ★목록이 비면 `reason` 을 본다 — 「수신이 꺼져 있다」 와 「받았지만 없다」 는 다르다.
-    / Mirrored PLM tasks. `q` matches key(name) · task_code · label; each item carries `matched_by`."""
+    / Mirrored PLM tasks. `q` matches name · task_code · aliases · label, ranked before truncation;
+    each item carries `matched_by` and `match_kind`."""
     params: dict = {"limit": limit}
     if q:
         params["q"] = q      # ★빈 값을 None 으로 실으면 httpx 가 `q=` 를 보낸다 — 키를 뺀다
@@ -1517,13 +1521,16 @@ async def task_revisions(task_key: str, ctx: Context) -> dict:
 
 @mcp.tool()
 async def report_revision(report_id: str, ctx: Context, task_key: str = "") -> dict:
-    """이 리포트가 어느 과제·개정인가 + **어긋남** + **후보와 근거**.
+    """이 리포트가 어느 과제·개정인가(`linked`) + **어긋남** + **후보와 근거** + 그 과제의 허브 처지(`task_state`).
 
     ★`mismatch` 가 비어 있지 않으면 수동 메타(eng_meta)와 이어진 개정이 다르다는 뜻이다 —
-    **관계가 정본**이지만 서버는 조용히 맞추지 않는다. 사람에게 보여 주고 고르게 하라.
+    **관계가 정본**이지만 서버는 조용히 맞추지 않는다. 사람에게 보여 주고 고르게 하라. `kind` 가
+    `renamed` · `merged` 면 잘못이 아니다 — 허브가 과제명을 바꿨거나 합쳤고 개정이 그리로 옮겨졌다(수동 메타는 옛 이름).
+    ★`task_state.state` — `merged` 면 「A 는 B(`into`)로 합쳐짐」 을 알려라. 옮기는 것은 **시스템 관리자**가 화면에서
+    누른다(저절로 옮기지 않는다 — 사용자 결정). `gone` 은 허브에서 사라짐(사용 안 함), `deprecated` 는 그만 씀.
     `candidates` 는 고르지 않은 후보다(근거 포함). `valid: false` 인 것은 형식이 아니지만
     **버리지 않고** 보여 주는 것이다.
-    / The linked revision, any mismatch, and unchosen candidates with evidence."""
+    / The linked revision, any mismatch, unchosen candidates, and the hub state of its task (merged → admin moves it)."""
     return await _get(ctx, f"/reports/{report_id}/revision",
                       {"task_key": task_key} if task_key else None)
 
@@ -1546,10 +1553,42 @@ async def set_report_revision(report_id: str, task_key: str, code: str, ctx: Con
 
 @mcp.tool()
 async def ontology_sync_state(ctx: Context) -> dict:
-    """허브 수신 상태 — 타입별 시계·마지막 결과·받은 객체 수(읽기는 로그인한 사용자 누구나).
-    '받기가 됐나' 는 여기서 본다. `last_status` 가 `stopped` 면 그 타입이 **공개 안 된 것**이라
-    수신을 멈춘 것이다(고칠 곳은 허브 관리자다). / Hub sync state. `stopped` means the hub does not publish it."""
+    """허브 수신 상태 — 타입별 시계 · 마지막 실행 · 정의 판 · 타입별 건수(읽기는 로그인한 사용자 누구나).
+    '받기가 됐나' 는 여기서 본다. `last_run.result` 는 셋이다 — `ok` 정상 · `needs_check` 확인 필요(사유는
+    `last_run.problems` — 공개 안 된 타입 · 「절반 넘게 안 와서 정리를 멈춤」 등) · `failed` 실패(`error`).
+    타입의 `last_status` 가 `skipped` 면 허브가 그 타입을 **공개하지 않은 것**이다(고칠 곳은 허브 관리자다).
+    `object_states` 는 타입별 활성 · 그만 씀 · 사용 안 함 건수, `merged_waiting` 은 관리자가 옮길 합쳐진 과제 수다.
+    받기 실행 · 처음부터 · 강제 정리는 **관리자 화면에만** 있다(도구 없음). / Hub sync state; result is ok · needs_check · failed."""
     return await _get(ctx, "/ontology/sync")
+
+
+@mcp.tool()
+async def ontology_types(ctx: Context) -> dict:
+    """허브에서 받은 **타입 정의**(칸 · 관계)와 타입별 건수 — 활성 · 그만 씀(deprecated) · 사용 안 함(사라짐 · 합쳐짐) ·
+    그중 안 보이게 됨(hidden). 우리 것(`dev_revision`)도 같은 표에 있어 `source`(hub · dynaforge)로 가른다.
+    ★읽기 전용이다 — 정본은 허브다(고치는 도구는 없다). / Received types with fields, relations and per-state counts."""
+    return await _get(ctx, "/ontology/types")
+
+
+@mcp.tool()
+async def ontology_find(type_slug: str, ctx: Context, q: str = "", state: str = "all",
+                        limit: int = 100, offset: int = 0) -> dict:
+    """받은 한 타입의 객체를 찾는다 — `q` 는 key · 이름 일부, `state` 는 all · active · deprecated(그만 씀) · inactive(사용 안 함).
+    ★사라진 것도 지우지 않았다 — `active:false` 로 함께 온다(합쳐졌으면 `merged_into`). `total` 이 전체 건수다.
+    과제는 `list_tasks` 가 낫다(과제코드 · 별칭 · 순위). / Find objects of one received type; gone ones stay as active:false."""
+    params: dict = {"type": type_slug, "state": state, "limit": limit, "offset": offset}
+    if q:
+        params["q"] = q      # 빈 값을 실으면 `q=` 가 간다 — 키를 뺀다
+    return await _get(ctx, "/ontology/objects", params)
+
+
+@mcp.tool()
+async def ontology_object(type_slug: str, key: str, ctx: Context) -> dict:
+    """객체 하나 — 칸 · 상태 · 합쳐진 곳(`merged_into_now` — 바뀜 · 합침을 끝까지 푼 것) · 옛 식별자(`previous`) ·
+    나가는/들어오는 선(`out` · `in` — 지금 이어진 것, 근거 메모 포함).
+    ★허브가 바꾼 **옛 식별자로** 물으면 `object:null` 과 `renamed_to`(지금 key)가 온다 — 「없다」 가 아니다.
+    / One received object with fields, state, old keys and live edges; an old key answers with renamed_to."""
+    return await _get(ctx, f"/ontology/objects/{quote(type_slug, safe='')}/{quote(key, safe='')}")
 
 
 @mcp.tool()

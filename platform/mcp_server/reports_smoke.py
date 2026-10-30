@@ -217,6 +217,12 @@ async def main():
                     off = await s.call_tool("list_tasks", {})
                     chk("기능이 꺼져 있으면 **꺼졌다고 사유와 함께 거절한다**(조용히 빈 답 금지)",
                         bool(off.isError) and "꺼져" in str(off.content), str(off.content)[:200])
+                    # 받은 것 보기 도구 셋(10-30)도 같은 관문을 지난다 — 세기만 하면 안 불러도 초록이다
+                    for name, args in (("ontology_types", {}), ("ontology_find", {"type_slug": "plm_task"}),
+                                       ("ontology_object", {"type_slug": "plm_task", "key": "SMOKE-NOPE"})):
+                        off2 = await s.call_tool(name, args)
+                        chk(f"{name} — 꺼져 있으면 꺼졌다고 거절한다",
+                            bool(off2.isError) and "꺼져" in str(off2.content), str(off2.content)[:200])
                     print("  (과제·개정 기능이 꺼져 있다 — 켜진 뒤의 항은 건너뛴다)")
                 if onto_on:
                   tk = S._data(await s.call_tool("list_tasks", {}))
@@ -224,7 +230,8 @@ async def main():
                       isinstance(tk, dict) and "sync_enabled" in tk
                       and bool(tk.get("items") or tk.get("reason") is not None), tk)
                   rv = S._data(await s.call_tool("report_revision", {"report_id": rid}))
-                  shaped = isinstance(rv, dict) and {"mismatch", "candidates", "free_task"} <= set(rv)
+                  shaped = isinstance(rv, dict) and {"mismatch", "candidates", "free_task",
+                                                     "linked", "task_state"} <= set(rv)
                   chk("개정 조회가 **어긋남·후보를 함께** 준다", shaped, rv)
                   # 기능이 없는 스택에서는 위가 FAIL 이고, 그러면 아래는 **묻지 않는다** —
                   # 없는 것에 `.get` 을 걸면 관문이 역추적으로 죽어 다른 항까지 못 본다.
@@ -236,6 +243,33 @@ async def main():
                                           {"report_id": rid, "task_key": "SMOKE-NOPE", "code": "dv"})
                   chk("형식이 아닌 개정 코드는 **거절된다**(dv/pv 는 차수 필수)",
                       bool(bad.isError), str(bad.content)[:200])
+                  # ── 받은 것 보기(10-30 — SP 받는 쪽 전부) ──────────────────
+                  ot = S._data(await s.call_tool("ontology_types", {}))
+                  chk("ontology_types — 타입마다 정의와 상태별 건수",
+                      isinstance(ot, dict) and isinstance(ot.get("types"), list)
+                      and isinstance(ot.get("relation_types"), list)
+                      and all(isinstance(t.get("counts"), dict) for t in ot["types"]), ot)
+                  pick = next((t["slug"] for t in (ot.get("types") or []) if (t.get("counts") or {}).get("total")),
+                              "plm_task") if isinstance(ot, dict) else "plm_task"
+                  of = S._data(await s.call_tool("ontology_find", {"type_slug": pick, "limit": 3}))
+                  chk(f"ontology_find — {pick} 의 객체와 전체 건수(사라진 것도 active 로 가른다)",
+                      isinstance(of, dict) and isinstance(of.get("total"), int)
+                      and all("active" in i for i in of.get("items") or []), of)
+                  if isinstance(of, dict) and of.get("items"):
+                      first = of["items"][0]
+                      oo = S._data(await s.call_tool("ontology_object", {"type_slug": pick, "key": first["key"]}))
+                      chk("ontology_object — 한 객체의 칸 · 옛 식별자 · 선",
+                          isinstance(oo, dict) and (oo.get("object") or {}).get("key") == first["key"]
+                          and {"out", "in", "previous"} <= set(oo), oo)
+                  bad_state = await s.call_tool("ontology_find", {"type_slug": pick, "state": "smoke-nope"})
+                  chk("ontology_find — 모르는 거르개는 **거절한다**(조용히 전부 주지 않는다)",
+                      bool(bad_state.isError), str(bad_state.content)[:200])
+                  nope = await s.call_tool("ontology_object", {"type_slug": "plm_task", "key": "SMOKE-NOPE-KEY"})
+                  chk("ontology_object — 받은 적 없는 것은 **없다고 말한다**(404)",
+                      bool(nope.isError) and "받은 적이 없" in str(nope.content), str(nope.content)[:200])
+                  st = S._data(await s.call_tool("ontology_sync_state", {}))
+                  chk("ontology_sync_state — 마지막 실행 · 정의 판 · 상태별 건수 · 옮길 합침 수를 함께 준다",
+                      isinstance(st, dict) and {"last_run", "catalog", "object_states", "merged_waiting"} <= set(st), st)
                   pl = S._data(await s.call_tool("plan_task_links", {}))
                   chk("과거 붙이기 계획이 **붙는 것·후보·못 붙인 것**을 갈라 준다",
                       isinstance(pl, dict) and isinstance(pl.get("counts"), dict)
