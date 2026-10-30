@@ -184,13 +184,17 @@ def test_a_bundle_of_another_device_is_refused_and_a_partial_one_warns():
     assert out["pids_bundle_only"] == [99] and "리포트에 없다" in out["warnings"][0]
 
 
-_REAL = Path("/data/appdata/step_forge/projects/001a184fed0639fc4477054/export/fe_cad/2b8061b6990f")
+_REAL_ROOT = Path("/data/appdata/step_forge/projects/001a184fed0639fc4477054/export/fe_cad")
 
 
-@pytest.mark.skipif(not (_REAL / "manifest.json").exists(), reason="StepForge 실제 묶음 없음(이 박스 전용)")
-def test_the_real_stepforge_bundle_passes():
-    """합성 묶음만으로는 StepForge 산출 꼴이 바뀐 것을 못 본다 — P2 기준 묶음(10-29)을 그대로 검사한다."""
-    files = {f.name: f.read_bytes() for f in _REAL.iterdir() if f.is_file()}
+@pytest.mark.parametrize("key", ["2b8061b6990f", "7c48a68ee6c4"])
+def test_the_real_stepforge_bundle_passes(key):
+    """합성 묶음만으로는 StepForge 산출 꼴이 바뀐 것을 못 본다 — P2 기준 묶음(10-29)과 D-648 판(10-30 — 판 열쇠
+    재료에 표 지문 `key_parts.tables` 를 넣어 머리 꼴이 바뀌었다)을 그대로 검사한다."""
+    real = _REAL_ROOT / key
+    if not (real / "manifest.json").exists():
+        pytest.skip("StepForge 실제 묶음 없음(이 박스 전용)")
+    files = {f.name: f.read_bytes() for f in real.iterdir() if f.is_file()}
     out = cb.check(json.loads(files[cb.MANIFEST_NAME]), files, report_part_ids=set(range(1, 24)))
     assert out["n_parts"] == 22 and out["rows"] == 1232 and out["nnz"] == 3696 and out["pids_matched"] == 22
     assert out["warnings"] == [] and out["units"]["glb"] == "m"
