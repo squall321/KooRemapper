@@ -114,6 +114,45 @@ async def test_reconfirming_moves_the_report_instead_of_adding_a_second_link(db,
         await _clean(db, task)
 
 
+async def _owned_report(db, task: str, code: str):
+    """DB 에 실제로 있는 리포트(사용자 · 세션 포함) — 트리거는 실제 행이 지워질 때만 돈다. 한 트랜잭션 안이라 끝에 되돌린다."""
+    from app.models import Session, User
+    from app.shared import security
+    u = User(email=f"rev_{ulid.new().str}@kooremapper.test", password_hash=security.hash_password("x"), is_active=True)
+    db.add(u)
+    await db.flush()
+    s = Session(id=ulid.new().str, user_id=u.id, name="rev-trigger", storage_path="x")
+    db.add(s)
+    await db.flush()
+    rep = ImpactReport(id=ulid.new().str, session_id=s.id, user_id=u.id, kind="sphere",
+                       eng_meta={"project": task, "dev_revision": {"code": code}}, n_cases=0)
+    db.add(rep)
+    await db.flush()
+    await onto.set_revision(db, rep, task_key=task, code=code, source="manual")
+    return u, s, rep
+
+
+async def test_deleting_a_report_takes_its_revision_link_with_it(db, task):
+    """사용자 결정 10-30 — 리포트를 지우면 그 개정 선도 지운다. 선의 끝점은 key 라 FK 가 없어 DB 트리거(0019)가 맡는다.
+    남으면 개정 비교의 리포트 수에 없는 리포트가 들어간다(dev 에 411개가 그렇게 남아 있었다)."""
+    from sqlalchemy import delete as sql_delete
+
+    from app.models import Session
+    try:
+        _, _, gone = await _owned_report(db, task, "dv1")
+        _, s2, kept = await _owned_report(db, task, "dv1")
+        assert len(await _edges(db, onto.REL_MEASURED, dst_key=f"{task}@dv1")) == 2
+        await db.delete(gone)                       # API 의 delete_report 와 같은 꼴
+        await db.flush()
+        assert [e.src_key for e in await _edges(db, onto.REL_MEASURED, dst_key=f"{task}@dv1")] == [kept.id], \
+            "지운 리포트의 선이 남았거나 남의 선까지 지웠다"
+        await db.execute(sql_delete(Session).where(Session.id == s2.id))   # 세션 삭제 — 리포트는 FK 연쇄로 지워진다
+        assert await _edges(db, onto.REL_MEASURED, dst_key=f"{task}@dv1") == [], "연쇄로 지워진 리포트의 선이 남았다"
+        assert (await onto.history(db, task))[0]["reports"] == []
+    finally:
+        await db.rollback()
+
+
 async def test_a_bad_code_is_refused(db, task):
     rep = _report()
     for bad in ("dv", "pv", "mp2", "zz", ""):

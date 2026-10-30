@@ -371,7 +371,11 @@ class OntoObject(Base):
 
 
 class OntoRelation(Base):
-    """선 — **끝점은 `key` 로** 잇는다(`CoreRelationOut` 이 그렇게 생겼다)."""
+    """선 — **끝점은 `key` 로** 잇는다(`CoreRelationOut` 이 그렇게 생겼다).
+
+    끝점 타입이 여럿이라 FK 가 없다. 리포트를 끝으로 하는 우리 선은 리포트가 지워질 때 **DB 트리거**가 함께 지운다
+    (`trg_impact_reports_drop_links` — 마이그레이션 0019, FK 연쇄 삭제와 같은 몫).
+    """
 
     __tablename__ = "onto_relations"
     __table_args__ = (
