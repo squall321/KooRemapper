@@ -146,6 +146,23 @@ async def test_a_render_is_added_and_existing_media_is_kept(db, api, owned):
 
 
 @_aio
+async def test_a_render_drawn_from_s1_directly_is_attached_with_a_warning(db, api, owned):
+    """SceneForge 10-30 — 렌더러 Blender Cycles · C-3 manifest 꼴이 정해지기 전에는 임시 `inputs.s1` 로 그린다
+    (`c3_manifest_sha256` 은 null). 렌더러 칸은 이름으로 가르지 않고 그대로 싣고, manifest 로 대조 못 한 것은 계약 6항대로 말한다."""
+    o = owned
+    res = _result(o["rid"], o["key"], [_out("mp4", "render.mp4", MP4)], rid="r-s1")
+    res["meta"]["inputs"] = {"c3_manifest_sha256": None, "s1_sha256": "713584", "stepforge_key": "7c48", "variant": "view"}
+    res["meta"]["renderer"] = {"name": "blender-cycles", "version": "4.5.15 LTS", "device": "OPTIX",
+                               "gpus": ["GPU"], "samples": 64, "denoise": True, "worker_image_sha256": None}
+    r = await _post(api, o, _zip(res, {"render.mp4": MP4}))
+    assert r.status_code == 200, r.text
+    log = [x for x in (await _fresh(db, o["rid"])).renders if x["render_id"] == "r-s1"][0]
+    assert log["renderer"] == res["meta"]["renderer"], "렌더러 칸을 고치거나 버렸다"
+    assert log["inputs"]["s1_sha256"] == "713584"
+    assert any("임시 inputs.s1" in w for w in log["warnings"]), log["warnings"]
+
+
+@_aio
 async def test_the_same_render_twice_changes_nothing(db, api, owned):
     o = owned
     res = _result(o["rid"], o["key"], [_out("mp4", "render.mp4", MP4)])

@@ -1335,6 +1335,10 @@ async def attach_render(db: AsyncSession, report: ImpactReport, raw: bytes) -> d
     if inputs.get("c3_manifest_sha256"):
         # 지어내지 않는다 — DynaForge 가 C-3 manifest 를 아직 내지 않아 맞춰 볼 정본이 없다
         warnings.append("C-3 manifest 를 DynaForge 가 아직 내지 않아 그 sha256 을 대조하지 못했다")
+    elif inputs.get("s1_sha256"):
+        # 임시 `inputs.s1`(SceneForge 10-30 — manifest 꼴이 정해지기 전)로 S1 을 바로 읽어 그렸다. 대조할 manifest 가 없다는
+        # 것은 같으니 같은 규칙(계약 6항)으로 말한다 — 어느 S1 인지는 `inputs.s1_sha256` 에 남는다
+        warnings.append("C-3 manifest 없이 S1 을 바로 읽어 그렸다(임시 inputs.s1) — manifest 로 대조하지 못했다")
     entry = {
         "render_id": rid, "request_id": result.get("request_id"), "ok": checked["ok"],
         "reason": result.get("reason"), "warnings": warnings, "case_key": checked["case_key"],
