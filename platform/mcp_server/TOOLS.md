@@ -128,7 +128,7 @@ C++·백엔드에 박아 **빌드·배포**하는 대신, 분석 함수 하나�
 | `recipe_run` | name, session_id, report_ids, params?·version?·wait_sec? | POST /recipes/{name}/run | 실데이터로 돌려 **결과까지** 기다린다(샌드박스·플랫폼 잡). 큰 결과는 산출 파일로 |
 | `recipe_propose` | name, code, meta? | POST /recipes/propose | `run(reports,params)`+`test_*`. 정적 검사→자기 시험→후보. 허용 import 는 stdlib 일부·numpy·scipy·recipe_kit 뿐 |
 | `recipe_evaluate` | run_id, useful, note | POST /recipes/runs/{id}/evaluate | useful=true+글(20자↑)이 등록 근거 |
-| `recipe_register` | name, version? | POST /recipes/{name}/register | 자동 관문 통과 시 등록+파일 내보내기(커밋·푸시는 사람이) |
+| `recipe_register` | name, version? | POST /recipes/{name}/register | **사람 승인 없이** 자동 관문(정적 검사 · 자기 시험 · 호환 시험 + 실데이터 성공 ≥1 + 쓸모 평가 ≥1)만 넘으면 모두에게 열린다(사용자 결정 10-26) · 파일 내보내기(커밋·푸시는 사람이) · 잘못 올라간 것은 `recipe_deprecate` |
 | `recipe_deprecate` | name, reason | POST /recipes/{name}/deprecate | 내린다(올린 사람·관리자). 판 기록은 남는다 |
 
 ## 시스템 / 신원

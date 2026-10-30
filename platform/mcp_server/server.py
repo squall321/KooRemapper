@@ -1684,8 +1684,12 @@ async def recipe_evaluate(run_id: str, useful: bool, note: str, ctx: Context) ->
 
 @mcp.tool()
 async def recipe_register(name: str, ctx: Context, version: int | None = None) -> dict:
-    """후보를 **등록**한다 — 자동 관문(자기 시험 + 성공 실행 ≥1 + 쓸모 평가 ≥1)을 통과하면 누구나 쓰게 된다.
+    """후보를 **등록**한다 — **사람 승인 없이** 자동 관문만 넘으면 바로 모두가 검색 · 실행하게 된다
+    (사용자 결정 10-26 「LLM 자동 + 자동 관문」).
 
+    관문: 정적 검사 · 자기 시험 · (있으면)앞 판 호환 시험 통과 + 이 판으로 실데이터 실행 성공 ≥1 +
+    「쓸모 있었다」 평가(글 20자 이상) ≥1. 코드는 격리 샌드박스에서만 돈다(허용 import 만 — recipe_propose).
+    잘못 올라간 것은 사람이 recipe_deprecate 로 내린다(올린 사람 · 관리자, 판 기록은 남는다).
     통과하면 platform/recipes/<이름>/ 로 파일까지 내보낸다(git 반영은 사람이 tools/recipes_publish.sh 로).
     관문을 못 넘으면 무엇이 빠졌는지 알려 준다 — 보통 실행이나 평가가 아직 없는 것이다."""
     body = {"version": version} if version is not None else {}

@@ -251,7 +251,8 @@ impact 전위치 부분충격)을 인제스트해 구조화 분석한다.
 2. **즉석으로 짠 분석이 효과를 봤으면 `recipe_propose` 로 올린다.** 다음 세션·다른 사람도 쓴다.
 
 흐름은 `recipe_propose`(정적 검사 → 자기 시험 → 후보) → `recipe_run`(실데이터) →
-`recipe_evaluate`(쓸모 있었나·왜 — 등록 근거) → `recipe_register`(자동 관문 통과 시 등록).
+`recipe_evaluate`(쓸모 있었나·왜 — 등록 근거) → `recipe_register`(자동 관문 통과 시 등록 — **사람 승인 없이** 바로
+모두에게 열린다, 사용자 결정 10-26. 잘못 올라간 것은 `recipe_deprecate` 로 내린다).
 레시피 코드는 `run(reports, params)` 와 `test_*()` 를 정의하고, 리포트는 `recipe_kit.Report`
 (`meta`·`parts`·`cases`·`part_worst()`·`cases_sorted()`·`hotspots()`·`contact_profile()`·
 `case_energy()` …)로 받는다. 큰 임베드 데이터를 쓰려면 메타에 `needs:["data"]` 를 선언하고
