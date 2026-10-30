@@ -96,7 +96,9 @@ def test_submodule_is_pinned_and_declared() -> None:
     assert "path = external/StandardPlatform" in text
     assert "url = https://github.com/4leaf321-nox321/StandardPlatform.git" in text
     assert "branch" not in text   # 브랜치 추적이면 `submodule update --remote` 한 번에 판이 바뀐다
-    # ★StepForge 와 **같은 커밋**에 고정돼 있어야 한다 — 같은 참고본을 봐야 결이 맞는다
+    # ★StepForge 와 **같은 커밋**에 고정돼 있어야 한다 — 같은 참고본을 봐야 결이 맞는다.
+    #   10-30 f7485c0(v0.4.52) → 778db2f(v0.4.67) — 받는 쪽 키트 2026-10-21 판(규칙 16 · 시험장)을 받으려고.
+    #   StepForge 동의(stepforge-d4 10-30 — 그쪽은 진행 중인 묶음 둘을 끝낸 뒤 같은 커밋으로 올린다).
     status = subprocess.run(["git", "-C", str(ROOT), "submodule", "status"],
                             capture_output=True, text=True, check=True).stdout
-    assert "f7485c0e6e73f74304521c3fc705968eaea8a809" in status, status
+    assert "778db2f0bf7b932917268e2e635f9e45b28a25ab" in status, status
