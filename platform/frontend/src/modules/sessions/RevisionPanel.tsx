@@ -1,14 +1,15 @@
 // 리포트가 어느 과제의 어느 **개발 개정**인가 — 어긋남을 보여 주고 사람이 확정한다
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Check, GitBranch, Unlink } from 'lucide-react'
+import { AlertTriangle, Check, GitBranch, GitMerge, Info, Unlink } from 'lucide-react'
 
 import {
-  compareTaskRevisions, ontologyState, reportRevision, setReportRevision,
-  unlinkReportRevision, type RevisionCandidate,
+  compareTaskRevisions, moveMergedTask, ontologyState, reportRevision, setReportRevision,
+  unlinkReportRevision, type RevisionCandidate, type TaskState,
 } from '@/shared/api/endpoints'
 import { Badge, Button, Input, Spinner } from '@/shared/ui/ui'
 import { errorMessage } from '@/shared/api/client'
+import { useAuth } from '@/shared/auth/AuthContext'
 
 /** 개정 패널.
  *
@@ -74,7 +75,7 @@ export function RevisionPanel({ reportId }: { reportId: string }) {
 
   const start = (c?: RevisionCandidate) => {
     setTask(d.resolved_task ?? d.free_task ?? '')
-    setCode(c?.code ?? d.mismatch?.linked?.split('@')[1] ?? '')
+    setCode(c?.code ?? d.linked?.code ?? '')
     setErr(null)
     setOpen(true)
   }
@@ -84,8 +85,8 @@ export function RevisionPanel({ reportId }: { reportId: string }) {
       <div className="flex items-center gap-2 flex-wrap">
         <GitBranch size={13} className="text-muted" />
         <span className="text-muted">개정</span>
-        {d.mismatch ? (
-          <b className="text-fg">{d.mismatch.linked}</b>
+        {d.linked ? (
+          <b className="text-fg">{d.linked.key}</b>
         ) : d.resolved_task ? (
           <span className="text-muted">
             과제 <b className="text-fg">{d.resolved_task}</b>
@@ -99,20 +100,30 @@ export function RevisionPanel({ reportId }: { reportId: string }) {
         )}
         {!open && (
           <Button size="sm" variant="ghost" onClick={() => start()}>
-            {d.mismatch ? '다시 확정' : '확정'}
+            {d.linked ? '다시 확정' : '확정'}
           </Button>
         )}
         {/* ★확정하는 기능에 되돌리는 길이 없으면 반쪽이다. 개정 **객체는 남는다** —
             그 판에 다른 리포트가 달려 있을 수 있다. */}
-        {!open && d.mismatch && (
+        {!open && d.linked && (
           <Button size="sm" variant="ghost" onClick={() => drop.mutate()} disabled={drop.isPending}>
             {drop.isPending ? <Spinner /> : <><Unlink size={13} /> 연결 끊기</>}
           </Button>
         )}
       </div>
 
-      {/* ★어긋남 — 서버가 조용히 맞추지 않은 것을 사람이 보는 자리 */}
-      {d.mismatch && (
+      {/* 과제의 허브 처지 — 합쳐짐은 알리고 관리자가 옮긴다(저절로 옮기지 않는다 — 사용자 결정 10-30) */}
+      {d.task_state && <TaskStateNotice st={d.task_state} reportId={reportId} />}
+
+      {/* ★어긋남 — 서버가 조용히 맞추지 않은 것을 사람이 보는 자리. 허브가 과제명을 바꿨거나 합쳐서 개정을 옮긴 것은
+          잘못이 아니다(수동 메타가 옛 이름일 뿐) — 붉게 그리지 않는다 */}
+      {d.mismatch && (d.mismatch.kind === 'renamed' || d.mismatch.kind === 'merged') && (
+        <div className="flex items-start gap-2 rounded border border-border bg-bg px-2 py-1.5 text-muted">
+          <Info size={13} className="mt-0.5 shrink-0" />
+          <span>{d.mismatch.said}</span>
+        </div>
+      )}
+      {d.mismatch && d.mismatch.kind !== 'renamed' && d.mismatch.kind !== 'merged' && (
         <div className="flex items-start gap-2 rounded border border-danger/50 bg-danger/5 px-2 py-1.5">
           <AlertTriangle size={13} className="mt-0.5 shrink-0 text-danger" />
           <div className="space-y-0.5">
@@ -173,7 +184,68 @@ export function RevisionPanel({ reportId }: { reportId: string }) {
         </div>
       )}
 
-      {d.resolved_task && <Chain taskKey={d.resolved_task} here={reportId} />}
+      {/* 이어진 개정의 과제가 먼저다 — 수동 메타가 합쳐지기 전 과제를 말해도 줄은 옮겨진 곳에 있다 */}
+      {(d.linked?.task ?? d.resolved_task) && <Chain taskKey={(d.linked?.task ?? d.resolved_task)!} here={reportId} />}
+    </div>
+  )
+}
+
+/** 과제의 허브 처지 알림. ★합쳐진 과제는 **관리자가 누를 때만** 옮긴다 — 그 과제에 달린 남의 리포트 개정까지 함께 옮기는 일이다. */
+function TaskStateNotice({ st, reportId }: { st: TaskState; reportId: string }) {
+  const qc = useQueryClient()
+  const { user } = useAuth()
+  const [err, setErr] = useState<string | null>(null)
+  const move = useMutation({
+    mutationFn: () => moveMergedTask(st.key),
+    onSuccess: () => {
+      setErr(null)
+      qc.invalidateQueries({ queryKey: ['report-revision', reportId] })
+      qc.invalidateQueries({ queryKey: ['task-revisions'] })
+      qc.invalidateQueries({ queryKey: ['ontology-merged'] })
+    },
+    onError: (e) => setErr(errorMessage(e)),
+  })
+  const box = 'flex items-start gap-2 rounded border px-2 py-1.5'
+  if (st.state === 'merged') {
+    return (
+      <div className={`${box} border-warning/50 bg-warning/5`}>
+        <GitMerge size={13} className="mt-0.5 shrink-0 text-warning" />
+        <div className="space-y-1">
+          <div className="text-warning">
+            과제 <b>{st.key}</b> 는 허브에서 <b>{st.into}</b>{st.into_label ? ` (${st.into_label})` : ''} 로 합쳐졌다
+          </div>
+          {!st.into_active ? (
+            <div className="text-muted">합쳐진 곳도 허브에 살아 있지 않다 — 옮길 곳이 없다</div>
+          ) : user?.is_system_admin ? (
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button size="sm" variant="outline" disabled={move.isPending}
+                      onClick={() => {
+                        if (window.confirm(`${st.key} 에 이어 둔 개정 · 별칭을 모두 ${st.into} 로 옮깁니다. 다른 사람의 리포트도 함께 옮겨집니다.`)) move.mutate()
+                      }}>
+                {move.isPending ? <Spinner /> : <>{st.into} 로 옮기기</>}
+              </Button>
+              <span className="text-muted">이 과제의 개정 전부가 옮겨진다</span>
+              {err && <span className="text-danger">{err}</span>}
+            </div>
+          ) : (
+            <div className="text-muted">옮기는 것은 시스템 관리자가 한다(시스템 상태 → 허브 받기)</div>
+          )}
+        </div>
+      </div>
+    )
+  }
+  const said: Partial<Record<TaskState['state'], string>> = {
+    gone: `과제 ${st.key} 는 허브에서 사라졌다 — 「사용 안 함」. 이어 둔 개정 · 리포트는 그대로다`,
+    hidden: `과제 ${st.key} 는 이 자격으로 더 이상 안 보인다(소유 부서가 옮겨 갔을 수 있다) — 이어 둔 것은 그대로다`,
+    deprecated: `과제 ${st.key} 는 허브가 그만 쓰라고 한 과제다 — 새 리포트에는 고르지 않는다`,
+    renamed: `과제 ${st.key} 는 허브에서 ${st.now ?? ''} 로 바뀌었다 — 다음 받기가 개정을 옮긴다`,
+  }
+  const text = said[st.state]
+  if (!text) return null
+  return (
+    <div className={`${box} border-border bg-bg text-muted`}>
+      <Info size={13} className="mt-0.5 shrink-0" />
+      <span>{text}</span>
     </div>
   )
 }

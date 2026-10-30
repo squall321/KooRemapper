@@ -10,6 +10,7 @@ import { OperationsPage } from '@/modules/operations/OperationsPage'
 import { TokensPage } from '@/modules/tokens/TokensPage'
 import { AccountPage } from '@/modules/account/AccountPage'
 import { SystemPage } from '@/modules/system/SystemPage'
+import { OntologyPage } from '@/modules/ontology/OntologyPage'
 import { UsersPage } from '@/modules/admin/UsersPage'
 
 export function App() {
@@ -42,6 +43,7 @@ export function App() {
         <Route path="/operations" element={<OperationsPage />} />
         <Route path="/tokens" element={<TokensPage />} />
         <Route path="/system" element={<SystemPage />} />
+        <Route path="/ontology" element={<OntologyPage />} />
         <Route path="/account" element={<AccountPage />} />
         {user.is_system_admin && <Route path="/admin/users" element={<UsersPage />} />}
         <Route path="*" element={<Navigate to="/" replace />} />

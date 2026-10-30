@@ -8,6 +8,8 @@ import { api, unwrap, errorMessage } from '@/shared/api/client'
 import { Badge, Card, CardBody, CardHeader, Spinner } from '@/shared/ui/ui'
 import { PageHeader } from '@/shared/components/PageHeader'
 import { cn } from '@/shared/lib/cn'
+import { useAuth } from '@/shared/auth/AuthContext'
+import { OntologySyncCard } from './OntologySyncCard'
 
 // ---- API response shapes (from /system/status & /system/capabilities) ----
 type SystemStatus = {
@@ -111,6 +113,7 @@ export function SystemPage() {
 
   const s = status.data
   const c = caps.data
+  const { user } = useAuth()
 
   return (
     <div>
@@ -229,6 +232,9 @@ export function SystemPage() {
           </CardBody>
         </Card>
       )}
+
+      {/* 허브 받기 관리 — 기능이 켜졌고 관리자일 때만(받기 실행은 전사 데이터를 움직인다) */}
+      {c?.ontology?.enabled && user?.is_system_admin && <OntologySyncCard />}
 
       {/* ---------- Parity matrix ---------- */}
       <Card className="mb-6">

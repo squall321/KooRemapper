@@ -191,15 +191,30 @@ export interface RevisionCandidate {
   why?: string; phase?: string; round?: string | null; rev_seq?: number
 }
 export interface TaskCandidate { key: string; label: string; why: string }
+/** 과제 하나의 허브 처지 — 합쳐짐(관리자가 옮긴다) · 사라짐(사용 안 함) · 그만 씀 · 안 보이게 됨 · 옛 식별자. */
+export interface TaskState {
+  key: string
+  label?: string
+  state: 'active' | 'deprecated' | 'merged' | 'gone' | 'hidden' | 'renamed' | 'unknown'
+  merged_into?: string
+  /** 합쳐진 곳을 끝까지 따라간 것(B 가 다시 바뀌었거나 합쳐졌으면 그 끝) */
+  into?: string
+  into_label?: string | null
+  into_active?: boolean
+  now?: string
+}
 export interface ReportRevisionOut {
   report_id: string
   eng_meta: Record<string, unknown>
   free_task: string
   resolved_task: string | null
   resolved_how: string | null
+  /** 이어진 개정(없으면 null) — 그 개정이 가리키는 과제와 함께 */
+  linked: { key: string; task: string; code: string } | null
+  task_state: TaskState | null
   /** 비어 있지 않으면 수동 메타와 이어진 개정이 **다르다**. 서버는 조용히 맞추지 않는다 —
-   *  화면이 보여 주고 사람이 고른다. */
-  mismatch: { kind: string; linked: string; eng_meta?: string; said: string } | null
+   *  화면이 보여 주고 사람이 고른다. `renamed` · `merged` 는 잘못이 아니다(수동 메타가 옛 이름). */
+  mismatch: { kind: 'differs' | 'eng_meta_missing' | 'renamed' | 'merged'; linked: string; eng_meta?: string; said: string } | null
   candidates: RevisionCandidate[]
   task_candidates: TaskCandidate[]
 }
@@ -227,6 +242,99 @@ export async function compareTaskRevisions(taskKey: string): Promise<{ task: str
 export async function unlinkReportRevision(reportId: string): Promise<{ was: string[]; detail: string }> {
   const { data } = await api.delete(`/reports/${reportId}/revision`)
   return unwrap<{ was: string[]; detail: string }>(data)
+}
+
+// 허브 받기 · 받은 것 보기(SP 받는 쪽 — 키트 2026-10-21). **고치는 길은 없다**(정본은 허브) — 쓰는 것은 받기 실행과
+// 합친 과제 옮기기(우리 개정 · 별칭)뿐이고 둘 다 관리자다.
+export interface ObjectCounts { total: number; active: number; deprecated: number; inactive: number; hidden: number }
+export interface SyncRun {
+  id: number
+  started_at: string
+  finished_at: string | null
+  mode: 'normal' | 'full'
+  allow_shrink: boolean
+  trigger: string
+  /** 결과는 셋(키트 규칙 16) — running 은 아직 안 끝난 것 */
+  result: 'running' | 'ok' | 'needs_check' | 'failed'
+  revision: string | null
+  counts: { types?: Record<string, Record<string, number>>; relations?: Record<string, Record<string, number>>; skipped?: string[] }
+  problems: string[]
+  notes: string[]
+  error: string | null
+  requested_by?: string
+}
+export interface OntologySyncOut {
+  /** 허브 주소 · 토큰 · 간격이 다 있나(받기 자체가 켜졌나) */
+  enabled: boolean
+  types: { type_slug: string; objects_as_of: string | null; relations_as_of: string | null; last_run_at: string | null
+           last_status: string | null; last_error: string | null; objects: number }[]
+  object_states: Record<string, ObjectCounts>
+  last_run: SyncRun | null
+  catalog: { revision: string; received_at: string; system: string | null; types: number } | null
+  full_every_days: number
+  merged_waiting: number
+}
+export async function ontologySync(): Promise<OntologySyncOut> {
+  return unwrap<OntologySyncOut>((await api.get('/ontology/sync')).data)
+}
+export async function ontologySyncRuns(limit = 10): Promise<SyncRun[]> {
+  return unwrap<SyncRun[]>((await api.get('/ontology/sync/runs', { params: { limit } })).data)
+}
+export async function runOntologySync(opts: { full?: boolean; allowShrink?: boolean } = {}): Promise<
+  { result: string; problems?: string[]; notes?: string[]; error?: string | null; detail?: string }> {
+  const { data } = await api.post('/ontology/sync', null, {
+    params: { full: opts.full || undefined, allow_shrink: opts.allowShrink || undefined } })
+  return unwrap(data)
+}
+export interface MergedTask {
+  key: string; label: string; merged_into: string; into: string; into_label: string | null; into_active: boolean
+  revisions: string[]; reports: number; aliases: number
+}
+export async function mergedTasks(): Promise<MergedTask[]> {
+  return unwrap<MergedTask[]>((await api.get('/ontology/merged-tasks')).data)
+}
+export async function moveMergedTask(key: string, note = ''): Promise<{
+  from: string; to: string; revisions: number; collapsed: number; reports: number; aliases: number; dropped: string[] }> {
+  const { data } = await api.post(`/ontology/merged-tasks/${encodeURIComponent(key)}/move`, { note })
+  return unwrap(data)
+}
+export interface OntoTypeOut {
+  slug: string; label: string; description: string
+  /** hub(허브 카탈로그) · dynaforge(우리 것) · null(정의 없이 행만 있다) */
+  source: string | null
+  catalog_revision: string | null
+  properties: { key: string; label?: string; data_type?: string; unit?: string; ref_type_slug?: string }[]
+  relations: string[]
+  counts: Partial<ObjectCounts>
+}
+export interface OntoRelationTypeOut { slug: string; label: string; inverse_label: string; src: string[]; dst: string[]; source: string }
+export async function ontologyTypes(): Promise<{ types: OntoTypeOut[]; relation_types: OntoRelationTypeOut[] }> {
+  return unwrap((await api.get('/ontology/types')).data)
+}
+export type OntoState = 'all' | 'active' | 'deprecated' | 'inactive'
+export interface OntoObjectRow {
+  type: string; key: string; label: string; status: string; active: boolean; hidden: boolean
+  merged_into: string | null; source: string; updated_at: string | null; synced_at: string
+}
+export async function ontologyObjects(p: { type: string; q?: string; state?: OntoState; limit?: number; offset?: number }):
+  Promise<{ type: string; total: number; offset: number; items: OntoObjectRow[] }> {
+  return unwrap((await api.get('/ontology/objects', { params: { ...p, q: p.q || undefined } })).data)
+}
+export interface OntoEdge {
+  relation: string; type: string; key: string; label: string | null; source: string
+  evidence_note: string | null; updated_at: string | null
+}
+export interface OntoObjectOut {
+  object: (OntoObjectRow & { properties: Record<string, unknown>; previous_keys: string[] }) | null
+  /** 옛 식별자로 물었을 때 — 지금 key */
+  renamed_to?: string
+  merged_into_now?: string | null
+  out: OntoEdge[]
+  in: OntoEdge[]
+  previous: string[]
+}
+export async function ontologyObject(type: string, key: string): Promise<OntoObjectOut> {
+  return unwrap((await api.get(`/ontology/objects/${encodeURIComponent(type)}/${encodeURIComponent(key)}`)).data)
 }
 
 export async function setReportRevision(reportId: string, body: {

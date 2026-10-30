@@ -1,5 +1,7 @@
 import { NavLink, Outlet } from 'react-router-dom'
-import { Boxes, FolderOpen, LayoutDashboard, KeyRound, BookOpen, Moon, Sun, LogOut, Activity, UserCog, Users } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
+import { Boxes, FolderOpen, LayoutDashboard, KeyRound, BookOpen, Moon, Sun, LogOut, Activity, UserCog, Users, Network } from 'lucide-react'
+import { ontologyState } from '@/shared/api/endpoints'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { useTheme } from '@/shared/theme/ThemeContext'
 import { cn } from '@/shared/lib/cn'
@@ -16,9 +18,14 @@ const nav = [
 export function AppShell() {
   const { user, logout } = useAuth()
   const { theme, toggle } = useTheme()
-  const items = user?.is_system_admin
-    ? [...nav, { to: '/admin/users', label: '사용자 관리', icon: Users }]
+  // 과제·개정 기능이 꺼져 있으면 메뉴도 **없어진다**(개정 패널과 같은 규율 — 포탈 옵션이 정한다)
+  const onto = useQuery({ queryKey: ['ontology-state'], queryFn: ontologyState, staleTime: 60_000, enabled: !!user })
+  const base = onto.data?.enabled
+    ? [...nav.slice(0, 3), { to: '/ontology', label: '온톨로지', icon: Network }, ...nav.slice(3)]
     : nav
+  const items = user?.is_system_admin
+    ? [...base, { to: '/admin/users', label: '사용자 관리', icon: Users }]
+    : base
   return (
     <div className="flex h-full">
       <aside className="w-56 shrink-0 border-r border-border bg-surface flex flex-col">

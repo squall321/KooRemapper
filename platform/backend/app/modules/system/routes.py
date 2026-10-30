@@ -90,6 +90,10 @@ _PARITY = [
      "note": "웹은 업로드·원샷 반입·분석 7탭(ReportsPanel/ReportAnalysis)"},
     {"feature": "내 정보(whoami)", "web": True, "mcp": True},
     {"feature": "시스템 상태", "web": True, "mcp": True},
+    {"feature": "허브 기준정보 보기(온톨로지)", "web": True, "mcp": True,
+     "note": "읽기 전용 — 정본은 SP 허브(ontology_types · ontology_find · ontology_object)"},
+    {"feature": "허브 받기 관리(admin)", "web": True, "mcp": False,
+     "note": "지금 받기 · 처음부터 · 강제 정리 · 합친 과제 옮기기 — 전사 데이터를 움직이므로 관리자 화면 전용"},
     {"feature": "MCP 토큰 발급", "web": True, "mcp": False, "note": "보안상 웹 전용"},
     {"feature": "사용자 관리(admin)", "web": True, "mcp": False},
 ]

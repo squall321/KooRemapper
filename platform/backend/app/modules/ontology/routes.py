@@ -369,7 +369,7 @@ async def run_sync(
     if got.get("types"):
         return ok(got, message="멈췄습니다 — 끝까지 받은 타입은 반영됐습니다(types · error 를 보세요).")
     raise HTTPException(status.HTTP_409_CONFLICT,
-                        f"{got.get('error')}: {got.get('detail') or ''}")
+                        str(got.get("error")) + (f": {got['detail']}" if got.get("detail") else ""))
 
 
 @admin.get("/ontology/merged-tasks")
