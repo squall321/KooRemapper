@@ -261,6 +261,8 @@ function MarkerFigure({ plot, caption, vmin, vmax, unit, fileBase }: {
 
 // 3D 구는 three.js 라 처음 열 때만 받는다 — 첫 화면 묶음을 키우지 않는다.
 const SphereGlobe3D = lazy(() => import('./SphereGlobe3D'))
+// 형상 뷰어도 three.js(+ glb 읽기)라 「형상 보기」 를 누를 때만 받는다.
+const CadViewer3D = lazy(() => import('./CadViewer3D'))
 const LEGEND_STOPS = Array.from({ length: 12 }, (_, i) => heat(i / 11))
 
 /** 허용값 칸 — 이 브라우저에만 둔다(리포트 · 부품 · 물리량별). 넣은 적이 없으면 기본값(있으면)을 쓴다.
@@ -310,6 +312,7 @@ export function ReportVisuals({ report }: { report: Report }) {
   const [warnRatio, setWarnRatio] = useState(0.8)
   const [nTop, setNTop] = useState(10)
   const [selected, setSelected] = useState<string | null>(null)
+  const [cadOpen, setCadOpen] = useState(false)
   // 응력의 기본 허용값 — 리포트에 연구 전체 항복응력이 있을 때만(부품별 값은 리포트에 없다)
   const yieldStress = Number((report.sim_params as { yield_stress?: unknown } | null)?.yield_stress)
   const stressDefault = metric === 'peak_stress' && Number.isFinite(yieldStress) && yieldStress > 0 ? String(yieldStress) : ''
@@ -460,6 +463,28 @@ export function ReportVisuals({ report }: { report: Report }) {
             <div className="text-[10px] text-amber-600">면 색은 표본 사이 보간(추정)이다 — 판정 · 순위 · 최악은 표본 값으로 한다.</div>
           )}
         </div>
+      )}
+
+      {isSphere && selected && (
+        <div className="flex items-center gap-2 flex-wrap text-[11px]">
+          <span>고른 각도 <b>{samples.find((s) => s.key === selected)?.name ?? selected}</b></span>
+          {report.cad ? (
+            <Button size="sm" onClick={() => setCadOpen((v) => !v)}>{cadOpen ? '형상 닫기' : '형상 보기'}</Button>
+          ) : (
+            <span className="text-muted">
+              형상 묶음이 없다 — StepForge fe_cad 묶음을 MCP <code>attach_cad(report_id, 묶음 폴더)</code> 나
+              REST <code>POST /reports/{'{id}'}/cad</code>(zip)로 붙이면 여기서 연다.
+            </span>
+          )}
+        </div>
+      )}
+      {isSphere && selected && cadOpen && report.cad && (
+        <Suspense fallback={<Spinner />}>
+          <CadViewer3D reportId={report.id} sessionId={report.session_id} cad={report.cad} caseKey={selected}
+                       caseName={samples.find((s) => s.key === selected)?.name ?? selected}
+                       metric={metric} metricLabel={unit} highlightPid={partId === '' ? null : Number(partId)}
+                       colorOf={heat} fmt={fmtVal} legendColors={LEGEND_STOPS} onClose={() => setCadOpen(false)} />
+        </Suspense>
       )}
 
       {isSphere && top.length > 0 && (

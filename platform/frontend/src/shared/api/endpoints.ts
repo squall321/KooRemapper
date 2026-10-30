@@ -317,6 +317,15 @@ export async function getReport(reportId: string): Promise<Report> {
   const { data } = await api.get(`/reports/${reportId}`)
   return unwrap<Report>(data)
 }
+export async function getReportCase(reportId: string, caseKey: string): Promise<ReportCase> {
+  const { data } = await api.get(`/reports/${reportId}/cases/${encodeURIComponent(caseKey)}`)
+  return unwrap<ReportCase>(data)
+}
+/** 세션 파일을 바이트로 — glb 처럼 화면이 직접 읽는 파일(인증 헤더가 필요해 직접 받는다). */
+export async function sessionFileBytes(sessionId: string, fileId: number): Promise<ArrayBuffer> {
+  const res = await api.get(`/sessions/${sessionId}/files/${fileId}/download`, { responseType: 'arraybuffer' })
+  return res.data as ArrayBuffer
+}
 export async function listReportCases(
   reportId: string, sort = 'max_stress', order = 'desc', limit = 20,
 ): Promise<ReportCase[]> {

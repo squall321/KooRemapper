@@ -268,6 +268,41 @@ export interface Report extends ReportListItem {
   parts: Array<{ part_id: number; name: string; group: string }> | null
   findings: ReportFinding[] | null
   summary: Record<string, unknown> | null
+  cad?: ReportCad | null             // 붙인 CAD 형상 묶음(StepForge fe_cad) — 변형 뷰어가 연다
+}
+/** 붙인 CAD 묶음의 파트 한 줄 — glb 노드를 FE 파트(pid)에 잇는다(받는 쪽 검사를 통과한 요약). */
+export interface ReportCadPart {
+  pid: number
+  part_key: string | null
+  name: string | null
+  color: unknown
+  material: string | null
+  glb: { file: string; node: number; mesh: number }
+  rows: number
+  nnz: number
+  dist_mm_max: number | null
+}
+/** 리포트에 붙인 StepForge fe_cad 묶음(C-6 가중치 · C-7 glb) — `POST /reports/{id}/cad` 가 채운다. */
+export interface ReportCad {
+  key: string
+  attached_at: string
+  deck: { file?: string; sha256?: string } | null
+  cad_project: { id?: string; name?: string; facet_body?: boolean } | null
+  step_revision: Array<{ file?: string; sha256?: string }> | null
+  units: Record<string, string> | null
+  render_variant: boolean
+  view: {
+    glb: Array<{ file: string; file_id: number }>
+    weights: { file: string; file_id: number }
+    bin: { file: string; file_id: number }
+  }
+  parts: ReportCadPart[]
+  n_parts: number
+  rows: number
+  nnz: number
+  pids_matched: number
+  pids_bundle_only: number[]
+  warnings: string[]
 }
 /** 최악값 + 그 값이 나온 케이스 — 분석 응답이 공통으로 쓰는 모양. */
 export interface WorstRef {

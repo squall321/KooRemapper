@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { dirOf, interpolate, type Field, type Level } from './sphereRisk'
+import { release } from './threeUtil'
 
 export interface GlobePoint {
   key: string
@@ -54,17 +55,6 @@ function textSprite(text: string, color = '#555', height = 0.1, boxed = false): 
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false }))
   sp.scale.set((height * w) / h, height, 1)
   return sp
-}
-
-/** 물체 하나의 GPU 자원을 놓는다 — 글자 스프라이트의 텍스처까지(재질만 놓으면 텍스처가 남는다). */
-function release(o: THREE.Object3D): void {
-  const m = o as THREE.Mesh
-  m.geometry?.dispose?.()
-  const mats = ([] as (THREE.Material | undefined)[]).concat(m.material as THREE.Material | THREE.Material[] | undefined)
-  for (const mat of mats) {
-    ;(mat as THREE.SpriteMaterial | undefined)?.map?.dispose()
-    mat?.dispose()
-  }
 }
 
 /** 점 v 에서 구에 닿는 평면 위의 원(고리). */
