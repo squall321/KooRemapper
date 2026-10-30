@@ -35,7 +35,7 @@
 - [x] MCP `attach_cad` · TOOLS.md · SKILL · README · CLAUDE_DESKTOP 도구 수(81 → 82) · 리포트 스모크에 붙이기 · 멱등 · 거절 셋
 - [x] 화면 — 「형상 보기」 · `CadViewer3D`(GLTFLoader · m → mm · 파트 칠 · 범례 · 고르기 · 묶음 정보 · **속 보기**) · 묶음 없을 때 안내. 순수 셈 `cadView.ts` + 확인 11 · `release` 를 3D 구와 함께 쓰게 `threeUtil.ts` 로(두 번째 소비자)
 - [x] 백엔드 750 · 리포트 스모크 42/42(MCP 로 실제 묶음 붙이기 · 멱등 · sha 틀림) · 화면 확인(Playwright — 새 판 sphere 리포트에 실제 묶음, 22/22 칠 · Display 208 MPa 카키 · PCB 75 MPa 파랑 · 속 보기에서 PCB 고르기 · 콘솔 오류 0)
-- [ ] dev 반영 · 커밋 · Drive 게시 · cae00 점검 문서(§1 이번 판 · 마이그레이션 0017) · 포털 · StepForge 알림
+- [x] dev 반영(마이그레이션 0017 · API · MCP 재기동, 도는 잡 0 확인) · 커밋 · Drive 게시 `dist-20261030-032145Z`(`d37fcbb`, latest 확인) · cae00 점검 문서(`352a8fd` — §1 이번 판 · 0017 · MCP 82 · 형상 보기 줄 · §9 붙일 주체) · 포털 · StepForge 알림
 
 ## 결정 기록
 - (10-30) 위 사용자 결정 둘.
