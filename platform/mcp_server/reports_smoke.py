@@ -42,6 +42,16 @@ MEDIA = ROOT / "impact_report_data"
 SPHERE_NEW = pathlib.Path("/data/koopark/report_fixtures/sphere_hotspot_v1018/report.html")
 # 렌더 결과(C-11) 폴더 — MCP 가 읽을 수 있는 자리여야 한다(allops_smoke 의 STAGE_ROOT 와 같은 규칙)
 RENDER_ROOT = pathlib.Path(__file__).resolve().parents[2] / "build" / "scratch" / "render_smoke"
+#: StepForge fe_cad 묶음(P2 뷰어 기준, 10-29) — 이 박스에만 있다. 없으면 그 항만 건너뛴다.
+CAD_REAL = pathlib.Path("/data/appdata/step_forge/projects/001a184fed0639fc4477054/export/fe_cad/2b8061b6990f")
+
+
+def _cad_broken() -> pathlib.Path:
+    """실제 묶음을 베껴 parts.json 한 바이트를 바꾼다 — manifest sha 와 어긋난다."""
+    d = RENDER_ROOT / uuid.uuid4().hex
+    shutil.copytree(CAD_REAL, d)
+    (d / "parts.json").write_bytes((d / "parts.json").read_bytes() + b" ")
+    return d
 
 
 def _render_dir(report_id: str, case_key: str, *, broken: bool = False) -> pathlib.Path:
@@ -272,6 +282,15 @@ async def main():
                     chk("sphere 하중경로 — 엣지 22 · 피크 값 · 쓴 케이스를 적는다",
                         len(sg) == 22 and all(e.get("peak_force") is not None for e in sg)
                         and bool(se.get("flow_case_key")), se.get("flow_case_key"))
+                    if CAD_REAL.exists():
+                        # ── CAD 형상 묶음(뷰어 1단계) — 새 MCP 도구를 플랫폼으로 부른다(세는 관문은 안 부른 도구도 초록이다) ──
+                        ac = S._data(await s.call_tool("attach_cad", {"report_id": srid, "path": str(CAD_REAL)})) or {}
+                        chk("CAD 묶음을 붙였다 (22파트 · 파일 7)", ac.get("stored") == 7 and ac.get("n_parts") == 22, ac)
+                        ac2 = S._data(await s.call_tool("attach_cad", {"report_id": srid, "path": str(CAD_REAL)})) or {}
+                        chk("같은 묶음을 다시 붙이면 바꾸는 것이 없다 (멱등)", ac2.get("already") is True, ac2)
+                        badc = await s.call_tool("attach_cad", {"report_id": srid, "path": str(_cad_broken())})
+                        chk("파일 하나가 바뀐 묶음은 통째로 거절한다", badc.isError and "sha256" in badc.content[0].text,
+                            badc.content[0].text[:200] if badc.content else badc)
     finally:
         shutil.rmtree(RENDER_ROOT, ignore_errors=True)
         with httpx.Client(base_url=S.API, timeout=120.0) as c:

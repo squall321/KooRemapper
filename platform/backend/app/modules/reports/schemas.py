@@ -21,6 +21,7 @@ class ReportRead(BaseModel):
     external_job_key: str | None = None  # 후처리 예약이 반입한 리포트의 잡 키(stcx:<slurm id>)
     reservation: dict | None = None      # 예약 원장 — 잡 이름 · sim_type · 해석 조건(7-5)
     renders: list | None = None          # 렌더 기록(C-11) — 성공 · 실패 모두, 그림은 media 에
+    cad: dict | None = None              # 붙인 CAD 형상 묶음(StepForge fe_cad) — 열쇠 · 덱 · 파트 · 파일 id
     doe_strategy: str | None = None      # 방향 컨셉(cuboid_26 등)
     drop_height: float | None = None
     worst_stress: float | None = None

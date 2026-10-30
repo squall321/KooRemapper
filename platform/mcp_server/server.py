@@ -873,6 +873,38 @@ async def attach_render(report_id: str, path: str, ctx: Context) -> dict:
 
 
 @mcp.tool()
+async def attach_cad(report_id: str, path: str, ctx: Context) -> dict:
+    """StepForge fe_cad 묶음(C-6 가중치 · C-7 glb)을 리포트의 형상으로 붙인다 — 묶음 폴더(`manifest.json` · glb ·
+    weights.json · weights.bin · parts.json · pairs.json) 또는 그 폴더를 묶은 zip 의 경로. MCP 서버가 그 경로를 읽을 수
+    있는 같은 머신에서만 된다(`upload_local_path` 와 같다).
+
+    리포트 하나에 묶음 하나다. 같은 묶음을 다시 붙이면 바꾸는 것이 없고(멱등), 다른 열쇠의 묶음이면 갈아 끼운다.
+    받는 쪽 검사(파일마다 sha256 · 크기, 열쇠, 가중치 배열, glb 정점 수, 묶음 파트가 리포트 파트와 겹치는가)에 하나라도
+    걸리면 통째로 거절한다(전부 아니면 전무). 리포트 소유자만 붙일 수 있다. 붙이면 리포트 화면의 구면 위험도 맵에서
+    각도를 골라 「형상 보기」 로 그 기기를 연다.
+    Attach a StepForge fe_cad bundle (folder or zip) to a report as its device shape — one per report, idempotent."""
+    import io as _io
+    import os as _os
+    import zipfile as _zf
+    if _os.path.isdir(path):
+        buf = _io.BytesIO()
+        with _zf.ZipFile(buf, "w", _zf.ZIP_STORED) as z:
+            for name in sorted(_os.listdir(path)):
+                full = _os.path.join(path, name)
+                if _os.path.isfile(full):            # 묶음 폴더는 평평하다 — 하위 폴더는 싣지 않는다
+                    z.write(full, arcname=name)
+        raw = buf.getvalue()
+    elif _os.path.isfile(path):
+        with open(path, "rb") as fh:
+            raw = fh.read()
+    else:
+        raise RuntimeError(f"path not found on the MCP host: {path}")
+    files = {"file": ("fe_cad.zip", raw, "application/zip")}
+    async with httpx.AsyncClient(base_url=API, timeout=300) as c:
+        return _unwrap(await c.post(f"/reports/{report_id}/cad", files=files, headers=_forward_headers(ctx)))
+
+
+@mcp.tool()
 async def attach_report_scenario(report_id: str, scenario_content: str, ctx: Context) -> dict:
     """이미 인제스트된 리포트에 시뮬 조건(scenario.json 텍스트)을 첨부한다.
 

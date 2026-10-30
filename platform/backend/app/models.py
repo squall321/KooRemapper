@@ -164,6 +164,8 @@ class ImpactReport(Base):
     # 렌더 기록 — SceneForge 렌더 결과(C-11)마다 한 줄(render_id · ok · 까닭 · 경고 · 받은 시각 · 출력 sha).
     # 성공한 렌더의 그림은 위 `media` 에 **더하고**(role render · render_id), 실패는 여기에만 남긴다.
     renders: Mapped[list | None] = mapped_column(JSONB)
+    # 붙인 CAD 형상 묶음(StepForge fe_cad — C-6 · C-7) — 받는 쪽 검사를 통과한 요약과 저장한 파일 id. 리포트 하나에 하나.
+    cad: Mapped[dict | None] = mapped_column(JSONB)
     # 과제/개발단계 수동 메타 — {project, dev_revision:{phase,round?}, design_variation?, doe?}.
     # DataHub 등재 폼의 기본값으로도 쓰인다.
     eng_meta: Mapped[dict | None] = mapped_column(JSONB)

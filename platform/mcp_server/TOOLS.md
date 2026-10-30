@@ -80,6 +80,7 @@ SmartTwin 파이프라인이 만든 deep(단건 심층)·sphere(전각도 낙하
 | `update_report_meta` | report_id, label?·project?·dev_rev?·variation?·doe?·focus?·kfile_id? | PATCH /reports/{id} | 과제명·rev·초점·K파일 링크 수동 설정(""=삭제) |
 | `attach_report_scenario` | report_id, scenario_content | POST /reports/{id}/scenario | 시뮬 조건 scenario.json 첨부 — 요약 캐시 + K파일 자동매칭 |
 | `attach_render` | report_id, path(결과 폴더 또는 zip) | POST /reports/{id}/renders | SceneForge 렌더 결과(C-11)를 리포트 미디어에 **더한다** — render_id 멱등 · sha256 · 크기 전부 맞아야(전부 아니면 전무) · 실패한 렌더는 기록만 · 소유자만 |
+| `attach_cad` | report_id, path(fe_cad 묶음 폴더 또는 zip) | POST /reports/{id}/cad | StepForge fe_cad 묶음(C-6 가중치 · C-7 glb)을 리포트의 형상으로 붙인다 — 리포트 하나에 하나 · 같은 묶음 멱등 · 다른 열쇠면 갈아 끼움 · sha256 · 크기 · 열쇠 · 가중치 배열 · glb 정점 · 파트 겹침 전부 맞아야(전부 아니면 전무) · 소유자만. 붙이면 맵에서 「형상 보기」 |
 | `report_summary` | report_id | GET /reports/{id} | kind·과제메타·scenario·sim_params·parts·findings·전역 최악·검색축 |
 | `report_worst_cases` | report_id, metric?, top_n? | GET /reports/{id}/cases | 최악 케이스 랭킹(sphere=방향, impact=위치, deep=단건) |
 | `report_part_risk` | report_id, part_id? | GET /reports/{id}/parts | 파트별 최악값·발생 케이스·최소 안전율 |

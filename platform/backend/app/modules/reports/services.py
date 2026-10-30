@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import json
 
 from app.models import ImpactCase, ImpactReport, Session, SessionFile
-from app.reports import analyze, blockstore, parser, render_result
+from app.reports import analyze, blockstore, cad_bundle, parser, render_result
 from app.reports.scenario import ScenarioParseError, summarize_scenario
 from app.modules.sessions import services as sess_svc
 from app.shared import storage
@@ -1349,4 +1349,71 @@ async def attach_render(db: AsyncSession, report: ImpactReport, raw: bytes) -> d
     await db.commit()
     return {"render_id": rid, "ok": checked["ok"], "already": False, "stored": len(added),
             "media_total": len(report.media), "warnings": warnings}
+
+
+# ── CAD 형상 묶음(C-6 · C-7) — StepForge fe_cad 를 리포트의 형상으로 붙인다(뷰어 1단계, 사용자 결정 10-30) ─────────
+async def attach_cad(db: AsyncSession, report: ImpactReport, raw: bytes) -> dict:
+    """StepForge fe_cad 묶음 zip(manifest.json + 적힌 파일)을 리포트의 형상으로 붙인다.
+
+    - 검사(`cad_bundle.check`)에 걸리면 CadBundleError — 아무것도 저장하지 않는다(전부 아니면 전무).
+    - 리포트 하나에 묶음 하나. 같은 열쇠 · 같은 파일(sha)이면 그대로 둔다(멱등), 다른 열쇠면 갈아 끼운다.
+      같은 열쇠에 다른 파일은 거절한다(StepForge 는 같은 열쇠면 같은 바이트다).
+    - 새 파일을 먼저 저장하고 리포트 칸을 바꾼 뒤 옛 파일을 지운다 — 저장이 깨지면 이번 파일만 걷어 내 옛 묶음이 남는다.
+    """
+    from datetime import datetime, timezone
+
+    manifest, files = cad_bundle.unzip(raw)
+    part_ids = {int(p["part_id"]) for p in (report.parts or []) if isinstance(p, dict) and _isint(p.get("part_id"))}
+    checked = cad_bundle.check(manifest, files, report_part_ids=part_ids)
+    key = checked["key"]
+    prior = report.cad if isinstance(report.cad, dict) else None
+    sig = sorted((m["file"], m["sha256"]) for m in checked["files"])
+    if prior and prior.get("key") == key and \
+            sorted((m.get("file"), m.get("sha256")) for m in prior.get("files") or []) == sig:
+        return {"key": key, "already": True, "stored": 0, "n_parts": prior.get("n_parts"),
+                "warnings": prior.get("warnings") or []}
+
+    session = await db.get(Session, report.session_id)
+    if session is None:
+        raise cad_bundle.CadBundleError("리포트의 세션을 찾지 못했다")
+    base = f"cad/{report.id}/"
+    old = (await db.execute(select(SessionFile).where(
+        SessionFile.session_id == session.id, SessionFile.filename.like(base + "%")))).scalars().all()
+    if prior and prior.get("key") == key:
+        # StepForge 는 같은 판 열쇠면 같은 바이트다(D-645) — 다르면 위쪽이 어긋난 것이라 갈아 끼우지 않고 알린다
+        raise cad_bundle.CadBundleError(f"같은 열쇠({key[:12]})인데 파일이 이미 붙은 묶음과 다르다 — StepForge 는 같은 "
+                                        "열쇠면 같은 바이트다. 그쪽 산출을 확인해 달라")
+    prefix = f"{base}{key[:12]}/"
+    stored: list[SessionFile] = []
+    ids: dict[str, int] = {}
+    try:
+        for name, data in files.items():
+            f = await sess_svc.add_uploaded_file(db, session, filename=prefix + name, raw=data, kind="generated")
+            stored.append(f)
+            ids[name] = f.id
+        view = checked["view"]
+        report.cad = {
+            "key": key, "attached_at": datetime.now(timezone.utc).isoformat(),
+            "deck": checked["deck"], "cad_project": checked["cad_project"], "step_revision": checked["step_revision"],
+            "units": checked["units"], "render_variant": checked["render"],
+            "view": {"glb": [{"file": n, "file_id": ids[n]} for n in view["glb"]],
+                     "weights": {"file": view["weights"], "file_id": ids[view["weights"]]},
+                     "bin": {"file": view["bin"], "file_id": ids[view["bin"]]}},
+            "manifest_file_id": ids[cad_bundle.MANIFEST_NAME],
+            "parts_file_id": ids[cad_bundle.PARTS_NAME], "pairs_file_id": ids[cad_bundle.PAIRS_NAME],
+            "parts": checked["parts"], "n_parts": checked["n_parts"], "rows": checked["rows"], "nnz": checked["nnz"],
+            "pids_matched": checked["pids_matched"], "pids_bundle_only": checked["pids_bundle_only"],
+            "files": checked["files"], "warnings": checked["warnings"],
+        }
+        await db.commit()
+    except Exception:
+        # 저장 도중 깨지면(디스크 등) 이번에 넣은 파일을 걷어 낸다 — 반쯤 붙은 묶음을 남기지 않는다
+        await db.rollback()
+        for f in stored:
+            await sess_svc.delete_file(db, f)
+        raise
+    for f in old:
+        await sess_svc.delete_file(db, f)
+    return {"key": key, "already": False, "stored": len(stored), "n_parts": checked["n_parts"],
+            "replaced": prior.get("key") if prior else None, "warnings": checked["warnings"]}
 

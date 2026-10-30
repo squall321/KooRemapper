@@ -20,6 +20,7 @@ from app.shared.auth import get_current_user
 from app.shared.affiliation import verified_affiliation
 from app.shared.ratelimit import rate_limit
 from app.reports import bundle as bundle_mod
+from app.reports.cad_bundle import CadBundleError
 from app.reports.render_result import RenderResultError
 from app.shared.responses import ok
 
@@ -821,6 +822,32 @@ async def attach_render(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"렌더 결과를 받지 않았다: {exc}")
     msg = ("이미 받은 렌더다 — 바꾼 것이 없다" if summary["already"]
            else "렌더 결과를 붙였다" if summary["ok"] else "실패한 렌더를 기록했다(붙인 그림 없음)")
+    return ok(summary, message=msg)
+
+
+@router.post(
+    "/reports/{report_id}/cad",
+    dependencies=[Depends(rate_limit("upload", settings.ratelimit_upload_per_min))],
+)
+async def attach_cad(
+    report_id: str,
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """StepForge fe_cad 묶음(C-6 가중치 · C-7 glb — manifest.json + 적힌 파일을 담은 zip)을 리포트의 형상으로 붙인다.
+
+    소유자만(리포트 수정은 소유자). 리포트 하나에 묶음 하나 — 같은 묶음은 멱등, 다른 열쇠면 갈아 끼운다.
+    받는 쪽 검사(파일 sha · 열쇠 · 가중치 배열 · glb 정점 수 · 이 리포트의 파트인가)에 안 맞으면 422 — 아무것도 저장하지 않는다.
+    """
+    r = await _require_owned_report(db, user, report_id)
+    raw, _ = await _read_upload(file, what="CAD 묶음")
+    try:
+        summary = await svc.attach_cad(db, r, raw)
+    except CadBundleError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"CAD 묶음을 받지 않았다: {exc}")
+    msg = ("이미 붙은 묶음이다 — 바꾼 것이 없다" if summary["already"]
+           else "CAD 묶음을 갈아 끼웠다" if summary.get("replaced") else "CAD 묶음을 붙였다")
     return ok(summary, message=msg)
 
 

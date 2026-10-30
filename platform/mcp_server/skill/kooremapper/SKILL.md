@@ -184,6 +184,8 @@ impact 전위치 부분충격)을 인제스트해 구조화 분석한다.
    (`POST /reports/intake`: file·kfile·scenario·project… multipart, .gz 가능 → 세션 생성/K링크까지).
    SceneForge 가 그린 렌더 결과(mp4 · 정지 화면, C-11)는 `attach_render(report_id, path)` 로 **더한다** —
    결과 폴더나 zip 경로. 기존 그림을 지우지 않고, 같은 render_id 는 멱등, sha256 이 하나라도 다르면 통째로 거절.
+   StepForge fe_cad 묶음(glb · 가중치)은 `attach_cad(report_id, path)` 로 리포트의 **형상**으로 붙인다 — 리포트 하나에
+   하나, 같은 묶음 멱등 · 다른 열쇠면 갈아 끼움, 검사에 하나라도 걸리면 통째로 거절. 붙이면 화면 맵에서 「형상 보기」.
 2. **개요 파악** — `report_summary(report_id)` 로 kind·프로젝트·전역 최악값·findings 를 본다.
 3. **최악 케이스** — `report_worst_cases(report_id, metric)` (sphere=최악 방향, impact=최악 위치).
    metric ∈ max_stress/max_g/max_disp/min_safety_factor.
