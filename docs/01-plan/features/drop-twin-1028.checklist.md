@@ -28,8 +28,11 @@
 - [x] 낙하 모델 하나로 대응표(C-5) 범위 · 가중치(C-6) 품질 — 20/22(PID 20 · 21 누운 쐐기) · 거리 최대 5.5e-6 mm(패싯) · 곡면 짝 0.19 mm(StepForge P0, 10-28)
 ### SceneForge (담당 미정)
 - [x] 공개 문서 조사 — 라이선스(2026-05 무료 · 서면 확인 남음) · MIG(`+gfx` 있음) · Kit-CAE(HDF5 못 읽음) · 헤드리스 · NVENC — `docs/04-report/sceneforge-p0-research-1028.report.md`
-- [ ] viz 노드 확인 — `+gfx` MIG 위 Kit RTX · 헤드리스 mp4 · Apptainer Vulkan/NVENC · 노드 자원 · 렌더 한 개 시간. 접근은 `ssh stcx` + `srun`(viz 노드 = stcx 노드, 10-28 사용자 확인). GPU 는 챗 LLM 과 공유 — 읽기만 먼저, MIG · 렌더 시험은 시간을 잡고
-- [ ] NVIDIA 라이선스 서면 확인 — SceneForge 몫(사용자 결정 10-28)
+- [x] 렌더러 결정 **D-10 Blender Cycles**(10-30 사용자 결정 — SceneForge 결정 노트 §28 · Kit 보류). 제어면 착수(그쪽 §29 — 잡 하나가 stcx 에서 요청 확인 ·
+      장면 · 렌더 · 인코딩 · C-11 결과 폴더까지, REST 8710 · MCP 8711)
+- [ ] viz 노드 확인 — 노드 자원 · CUDA/OptiX 잡 하나 · 렌더 한 개 시간(헤드리스 mp4 는 ffmpeg libx264). ★D-10 뒤로 `+gfx` MIG · Kit RTX · Vulkan/NVENC 는 Kit 를 다시 쓸 때만.
+      접근은 `ssh stcx` + `srun`(viz 노드 = stcx 노드, 10-28 사용자 확인). GPU 는 챗 LLM 과 공유 — 읽기만 먼저, 렌더 시험은 시간을 잡고
+- [-] NVIDIA 라이선스 서면 확인 — D-10 뒤로는 Kit 를 다시 쓸 때만(보낼지는 사용자)
 - [ ] 렌더용 삼각화(파트 대각선 비율 편차) — StepForge 가 물음 · SceneForge 담당이 정한다
 ### 포털 (요청)
 - [x] 포털 답(10-28 밤) — viz 노드는 stcx 노드 · C-13 은 실행기 칸이 아니라 stcx Slurm 제출 · ⑥ 은 같은 클러스터 마운트일 가능성 · ⑦ 불필요 · ① 은 SmartTwinMCP 몫 · ③ 등록 순서는 P3 · ④ 절차 YAML 은 P1 · ⑤ 시험 자료는 P4(사용자)

@@ -7,6 +7,10 @@
 - DynaForge 와 StepForge 는 각자 강화하고, Omniverse 는 **새 포지**로 지금 세운다. 이름은 이 계획이 정한다(§2).
 - 셋은 따로 개발하고 필요한 정보만 주고받는다. 포털은 stcx 정보 때문에 같이 맞물린다.
 
+**10-30 사용자 결정(SceneForge 세션 · 결정 노트 §28 → 이 계획 D-10)** — 렌더러는 Omniverse Kit 대신 **Blender Cycles** 다(Kit 보류). 이 문서의
+「Omniverse 로 그린다」 는 「SceneForge 가 USD 장면을 Cycles 로 그린다」 로 읽는다 — 보고 mp4 도 시험 재현(P4)도 같다(시험 영상과의 실제 견줌은 P4 에서
+잰다). 아래의 Kit · Kit-CAE · NVIDIA 라이선스 · MIG `+gfx` 서술은 Kit 를 다시 쓸 때를 위한 기록이다. 장면 정본(USD, D-9)과 계약(C-10 · C-11)은 그대로다.
+
 받는 쪽 문서 —
 - 새 포지 창립 계획 — SceneForge 리포 `/home/koopark/claude/SceneForge/docs/PLAN.md`(10-28 옮김)
 - StepForge 요청 `docs/requests/stepforge-drop-twin-request-2026-10-28.md`
@@ -80,8 +84,10 @@
 | D-7 | 외관 데이터 출처 | CAD 색 정보 · 디자인팀 자산 · 직접 만드는 라이브러리 중에서 |
 | D-8 | 단면 영상 유지 | 유지하면 S1 에 기준 단면 조각을 담는다(표면만으로는 자른 면을 못 그린다) |
 | D-9 | USD 를 누가 만드나(10-28 StepForge P0 에서 생김) | **SceneForge 가 glb + 파트 표에서** — 장면 정본이 SceneForge 이고, StepForge 에 pxr 의존을 넣지 않는다. StepForge 도 이 결정을 기다린다 |
+| D-10 | 렌더러(10-30 SceneForge 에서 생김) | **Blender Cycles**(Kit 보류) — NVIDIA 약관 충돌(PST A.5)이 렌더 길을 막지 않고, Cycles 는 CUDA · OptiX 연산만 써 그래픽 라이브러리 · NVENC · MIG `+gfx` 가 필요 없다(CPU 로도 돈다). 잃는 것은 Kit RTX 실시간 · MDL · Omniverse 생태계(P5 스트리밍 · Kit-CAE). C-11 `meta.renderer` 는 `blender-cycles` |
 
 10-28 저녁 사용자 확정 — **D-1 SceneForge · D-4 사용자 본인 · D-6 전용 Claude 세션 + 사용자 검토 · D-7 CAD 색 + 라이브러리 · D-9 SceneForge 가 USD.** D-2 · D-3 · D-5 · D-8 은 권장안으로 착수했다(확정 아님). NVIDIA 라이선스 서면 확인은 SceneForge 몫이다.
+10-30 사용자 확정(SceneForge 세션 — 그쪽 결정 노트 §28 「권장안대로」) — **D-10 Blender Cycles.** NVIDIA 서면 확인은 Kit 를 다시 쓸 때만 필요하다(보낼지는 사용자).
 
 ## 7. 검증 기준
 - **P0** — 실측표가 나온다(압축률 · 게이트 오차 · 1,000각도 질의 시간 · 렌더 단계별 시간 · 라이선스·MIG 답).
@@ -103,7 +109,7 @@
 | 표면만 저장해 내부 최대가 빠진다(10-28 — 사면체 파트 1 이 11각도 중 2각도에서 내부 최대, 겉면이 0.65% · 4.84% 낮음) | 판정 오류 | 정본은 리포트 · 게이트는 최대 요소가 표면일 때만 일치 요구 |
 | 단면 내부 응력 | 단면 영상 불가 | S1 기준 단면 조각(D-8) |
 | 파손(요소 삭제) | CAD 표면에 안 보인다 | S1 삭제 플래그 · CAD 위에 얹는 방법(P4) |
-| Omniverse 라이선스·지원 | 비용·막힘 | 2026-05 부터 개발·운영·재배포 무료(NVIDIA FAQ, 10-28 확인). 약관 본문 · NGC 다운로드 페이지와 충돌해 NVIDIA 서면 확인. 지원은 NVAIE 유료($4,500/GPU/년) |
-| MIG 에서 Kit RTX 가 안 될 수 있다(`+gfx` 프로파일은 있다 — 실동 기록 없음) | 동시 사용자 수 | 노드 시험. 기본은 GPU 하나에 Kit 하나 |
+| Omniverse 라이선스·지원 | 비용·막힘 | 2026-05 부터 개발·운영·재배포 무료(NVIDIA FAQ, 10-28 확인). 약관 본문 · NGC 다운로드 페이지와 충돌해 NVIDIA 서면 확인. 지원은 NVAIE 유료($4,500/GPU/년) — ★D-10(Cycles) 뒤로는 Kit 를 다시 쓸 때만 |
+| MIG 에서 Kit RTX 가 안 될 수 있다(`+gfx` 프로파일은 있다 — 실동 기록 없음) | 동시 사용자 수 | 노드 시험. 기본은 GPU 하나에 Kit 하나 — ★D-10 뒤로는 Kit 를 다시 쓸 때만(Cycles 는 CUDA · OptiX 만, CPU 로도 돈다) |
 | 진짜처럼 보여 생기는 오해 | 잘못된 판단 | 배율 표기 의무 · 시험 재현은 ×1 고정 |
 | 세 팀 일정이 엇갈린다 | 서로 막힘 | 계약(§4)을 먼저 맞추고, 파일로 주고받아 앞 단계가 늦어도 뒤가 시제품으로 진행 |

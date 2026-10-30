@@ -144,3 +144,15 @@ LS-PrePost 4.12 는 상태별 메모리 합이 내부 예산을 넘으면 그 �
 - 게이트 「같음」 은 정의가 같아야 성립한다 — S1 은 적분점 0층이다. 리포트 파트 최대와 같은 정의인지 물었다(P0 원형은 deep report 와 44/44).
 - 표본을 Post v42 SIF 의 h5py 로 직접 읽어 계약과 맞춰 봤다(api.sif 에는 h5py 가 없다) — `/posture` 스칼라 넷이 속성이라 계약 표와 달랐다. 저쪽 말과 표본을 대조하는 데 몇 분이면 된다.
 
+## 28. 렌더러는 Blender Cycles — D-10 (10-30, SceneForge 에서 사용자 결정)
+- SceneForge 결정 노트 §28 에 「10-30 사용자가 「권장안대로」 를 골랐다」 로 적힌 것을 원문으로 확인하고 결정 표에 D-10 으로 올렸다(그쪽 알림
+  `docs/requests/dynaforge-renderer-control-plane-notice-2026-10-30.md` · be62451). 장면 정본(USD, D-9)과 C-10 · C-11 계약은 그대로다.
+- **DynaForge 쪽에 닿는 것을 실물로 쟀다.** ① 반입은 `meta.renderer` 를 이름으로 가르지 않고 그대로 싣는다(코드 · 시험으로 확인). ② 그쪽 실물
+  (`/data/koopark/drop_twin_p1/sceneforge_c11_example/r-a5acb189218577dc`, v14 S1 × 7c48 · 1080p 300장)을 우리 검사기(`render_result.check`)로 돌리니
+  시험용 run 값(`dev-v14` · `dev`)으로는 전부 통과, 우리 리포트로는 run.report_id 가 달라서만 거절 — 그쪽 말 그대로다. ③ 임시 `inputs.s1` 로 그리면
+  `c3_manifest_sha256` 이 null 이라 예전 코드는 아무 말도 안 했다 → 계약 6항(manifest 로 대조 못 하면 경고)대로 「임시 inputs.s1 — manifest 로
+  대조하지 못했다」 경고를 단다.
+- **끝까지 붙이는 시험용 dev 리포트** — 관리자 명의 세션 「SceneForge C-11 반입 시험(10-30)」 `01M67CQM5MP8MH74RCXT2K0TTX` 의 전각도 표본 리포트
+  `01M67CQMAH83FYAYT59S90TCQ5`(각도 26 — 각도 열쇠는 `Run_…` 폴더 이름). 내용이 v14 와 같은 해석은 아니다 — 길(계약 · 전달 · 붙이기 · 화면)을 재는 것이다.
+  MCP 컨테이너는 `/data/koopark` 을 못 읽으므로 붙이기는 REST(`POST /reports/{id}/renders` zip)로 한다.
+
