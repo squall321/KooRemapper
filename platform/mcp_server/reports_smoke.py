@@ -46,11 +46,15 @@ RENDER_ROOT = pathlib.Path(__file__).resolve().parents[2] / "build" / "scratch" 
 CAD_REAL = pathlib.Path("/data/appdata/step_forge/projects/001a184fed0639fc4477054/export/fe_cad/2b8061b6990f")
 
 
-def _cad_broken() -> pathlib.Path:
-    """실제 묶음을 베껴 parts.json 한 바이트를 바꾼다 — manifest sha 와 어긋난다."""
+def _cad_copy(*, broken: bool = False) -> pathlib.Path:
+    """실제 묶음을 MCP 가 읽을 수 있는 자리로 베낀다(MCP 컨테이너에는 /data/appdata 가 안 보인다 — 10-30 실측).
+    broken 이면 parts.json 의 한 바이트를 크기는 그대로 둔 채 바꿔 manifest sha256 과만 어긋나게 한다."""
     d = RENDER_ROOT / uuid.uuid4().hex
     shutil.copytree(CAD_REAL, d)
-    (d / "parts.json").write_bytes((d / "parts.json").read_bytes() + b" ")
+    if broken:
+        b = bytearray((d / "parts.json").read_bytes())
+        b[100] = ord("X") if b[100] != ord("X") else ord("Y")
+        (d / "parts.json").write_bytes(bytes(b))
     return d
 
 
@@ -284,11 +288,14 @@ async def main():
                         and bool(se.get("flow_case_key")), se.get("flow_case_key"))
                     if CAD_REAL.exists():
                         # ── CAD 형상 묶음(뷰어 1단계) — 새 MCP 도구를 플랫폼으로 부른다(세는 관문은 안 부른 도구도 초록이다) ──
-                        ac = S._data(await s.call_tool("attach_cad", {"report_id": srid, "path": str(CAD_REAL)})) or {}
-                        chk("CAD 묶음을 붙였다 (22파트 · 파일 7)", ac.get("stored") == 7 and ac.get("n_parts") == 22, ac)
-                        ac2 = S._data(await s.call_tool("attach_cad", {"report_id": srid, "path": str(CAD_REAL)})) or {}
+                        good = str(_cad_copy())
+                        ac = S._data(await s.call_tool("attach_cad", {"report_id": srid, "path": good}))
+                        ac = ac if isinstance(ac, dict) else {"text": ac}
+                        chk("CAD 묶음을 붙였다 (22파트 · 파일 6 — manifest 포함)", ac.get("stored") == 6 and ac.get("n_parts") == 22, ac)
+                        ac2 = S._data(await s.call_tool("attach_cad", {"report_id": srid, "path": good}))
+                        ac2 = ac2 if isinstance(ac2, dict) else {"text": ac2}
                         chk("같은 묶음을 다시 붙이면 바꾸는 것이 없다 (멱등)", ac2.get("already") is True, ac2)
-                        badc = await s.call_tool("attach_cad", {"report_id": srid, "path": str(_cad_broken())})
+                        badc = await s.call_tool("attach_cad", {"report_id": srid, "path": str(_cad_copy(broken=True))})
                         chk("파일 하나가 바뀐 묶음은 통째로 거절한다", badc.isError and "sha256" in badc.content[0].text,
                             badc.content[0].text[:200] if badc.content else badc)
     finally:

@@ -25,6 +25,7 @@
 - 변형 프레임 · 응력 색의 절점 단위 표시 — C-3 S1(2단계).
 - 낙하 방향 화살표 · 바닥 — 정확한 값은 S1 `/posture`(초기 속도 · 바닥 평면)가 준다. 리포트 각도(lat · lon)를 방향으로 바꾸는 규칙을 하나 더 두면 사본이 된다.
 - 붙이는 주체(포털 절차의 한 단계 · 사용자 MCP) — 길만 만들고, 누가 붙일지는 포털과 정한다.
+  ⚠ MCP `attach_cad` 는 **MCP 컨테이너가 읽는 경로만** 된다 — StepForge 산출 자리(`/data/appdata/step_forge/…`)는 dev MCP 컨테이너에서 안 보였다(10-30 실측 「path not found on the MCP host」 — `upload_local_path` · `attach_render` 와 같은 규칙). 운영도 같을 것이다. 붙일 주체가 정해지면 길은 둘 — REST(multipart, 어디서든) · MCP 가 보는 자리로 옮겨 놓기(또는 그 자리를 읽기 전용으로 묶기 — 운영 설정).
 
 ## 체크리스트
 - [x] `app/reports/cad_bundle.py` — unzip · check(위 검사 전부) + 시험(좋은 묶음 · sha 틀림 · 빠진 파일 · 덤 파일 · 열쇠 어긋남 · 오프셋 · Σw · 정점 수 · pid 안 겹침/일부 · 한글 glb 이름 · **이 박스의 실제 StepForge 묶음** 22파트 · 행 1,232)
