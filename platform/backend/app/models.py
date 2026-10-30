@@ -354,8 +354,9 @@ class OntoObject(Base):
     label: Mapped[str] = mapped_column(String(500), default="", nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="active", nullable=False)
     properties: Mapped[dict | None] = mapped_column(JSONB)
-    # ★`renamed_from` 이 올 때 옮긴 옛 식별자들. **키트에는 이 처리가 없다**(ENVELOPE 에도
-    #   없다) — 규칙 4 가 요구하므로 우리가 채웠다. 없으면 개명 뒤 같은 것이 둘이 된다.
+    # ★허브가 식별자를 바꿀 때(`renamed_from` · `previous_keys`) 이 행이 지나온 옛 key 들 — 키트 10-21 규칙 5.
+    #   옛 → 새 짝은 `onto_previous_keys` 에도 남긴다(층 2 가 우리 개정 · 별칭의 옛 값을 거기서 푼다).
+    #   우리 개정(dev_revision)은 과제가 바뀌거나 합쳐져 옮겨질 때 옛 `<과제>@<코드>` 를 여기 남긴다.
     previous_keys: Mapped[list | None] = mapped_column(JSONB)
     deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
     # 지운 것이 아니라 **이 자격으로 더 이상 안 보이는 것**(소유 부서가 옮겨 갔다). 이름·칸이
