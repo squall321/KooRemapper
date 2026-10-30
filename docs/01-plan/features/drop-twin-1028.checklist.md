@@ -77,6 +77,10 @@
 - [ ] SceneForge — USD 장면 · 외관 라이브러리 초판 · 템플릿 2~3 · 상위 N mp4
 - [x] DynaForge — 렌더 결과 반입(C-11 → 리포트 미디어) **지음(10-29, dev 반영)** — REST `POST /reports/{id}/renders`(zip) · MCP `attach_render(report_id, path)`(폴더 · zip) · `impact_reports.renders` 렌더 기록(마이그레이션 0016) · 시험 15. SceneForge 초안 `SceneForge/docs/contracts/c10-c11-render-request-result-draft-2026-10-29.md`(10-29) · 반입 쪽 의견 보냄 —
   지금 `attach_media` 는 번들 반입 때 `report.media` 를 통째로 바꾼다 → 렌더는 **더하는 길**(render_id 멱등) · `run.case_key` 로 케이스에 붙임(리포트에 없는 키면 거절) · outputs 마다 sha256 · bytes 전부 맞아야(부분 반입 없음, 폴더 없는 이름만) · `ok: false` 는 렌더 기록으로만 · manifest sha 가 다르면 경고 · 전달은 zip 하나(가칭 `POST /reports/{id}/renders` + MCP) — **SceneForge 가 다섯 가지 모두 받아 초안에 옮김**(10-29 `71d449b`): 결과 폴더엔 render_result.json 과 outputs 에 적은 파일만 · 폴더 없는 이름 · 폴더 하나 512 MB 이하 · 시간 칸은 덱 시각(ms) · 같은 request_id 는 같은 render_id(양쪽 멱등). 포털 P3 때 SceneForge 가 초안 + 이 의견을 hwaxportal 에 보낸다
+  - [x] **끝까지 붙이기 — 실제 Cycles 렌더로 통과(10-30 밤)** — SceneForge 가 우리 시험 리포트 `01M67CQMAH83FYAYT59S90TCQ5` · 각도
+        `Run_20260207_211809_06e06e` 로 다시 낸 `r-8a235c54058fc5fb`(v14 S1 × 7c48 · 1080p)를 REST zip 으로 붙였다 — 미디어 4(영상 1 · 정지 3) ·
+        내려받은 넷 sha256 · bytes 일치 · 정지 셋만 모델이 봄 · 경고 둘(22파트 회색 · 임시 inputs.s1) · 다시 올리면 already · 렌더 기록에
+        blender-cycles · s1 해시. ★MCP `attach_render(path)` 는 MCP 컨테이너가 `/data/koopark` 을 못 읽어 이 자리에선 안 된다(REST 는 어디서든)
   - [ ] 명의 — 지금은 (a) 소유자만 붙인다(REST 가 소유자 검사). 리포트 수정은 소유자만이라 붙이기도 소유자 명의만 된다. (a) 붙이기는 포털이 소유자 명의로(제안) (b) 같은 소속에 렌더 미디어 더하기 권한 — **사용자 결정**(포털 P3 때)
 - [ ] 포털 — SceneForge 등록·SSO·배포 · 절차에 렌더
 
