@@ -1,6 +1,6 @@
 {
   "_note": "DynaForge 해석 결과 어휘(그룹 cae) — SP import 꼴. 전각도 낙하·전위치 부분충격·단일 런 후처리 결과를 온톨로지 인스턴스로 싣기 위한 타입·관계(구조·충격해석 개념을 DynaForge 전용 slug cae_ 로 묶었다). 정본은 DynaForge platform/core/ontology/dynaforge-cae.json 이다. 만드는 쪽(KooD3plotReader python/koo_deep_report/koo_deep_report/ontology/dynaforge-cae.json)은 이 파일의 바이트 사본을 싣고 꾸러미 머리 vocabulary.sha256 으로 맞춰 본다 — 고칠 때는 정본을 고치고 `_version` 을 올린 뒤 사본을 바이트 그대로 옮긴다.",
-  "_version": "0.3",
+  "_version": "0.4",
   "groups": [
     {
       "slug": "cae",
@@ -309,6 +309,12 @@
           "label": "S1 파일 해시",
           "data_type": "text",
           "help": "같은 런 S1 경량 추출본(s1.h5)의 sha256 — s1.json 에서 온다."
+        },
+        {
+          "key": "flow_scalars_only",
+          "label": "하중 전달 축약",
+          "data_type": "bool",
+          "help": "참이면 이 런의 하중 전달은 스칼라(최대 접촉력·충격량·전달 일)만 실렸다 — 첫 맞닿음 시각·전파 깊이·파트 매핑 신뢰도는 메모리를 줄이려고 뺐다(잰 것을 뺀 것이지 안 잰 것이 아니다). 전각도 리포트는 접촉력 상위 60개 런만 시계열을 되읽는다. 비어 있으면 축약되지 않았거나 표식이 없는 옛 산출물이다."
         }
       ]
     },

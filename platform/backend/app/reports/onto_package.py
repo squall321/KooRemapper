@@ -20,8 +20,11 @@ FORMAT = "dynaforge.onto_package"
 FORMAT_VERSION = 1
 VOCAB_DIR = Path(__file__).resolve().parents[3] / "core" / "ontology"
 CANONICAL = "dynaforge-cae.json"
-# 받아들인 판 — 어휘 바이트의 sha256 → 그 바이트가 든 파일(VOCAB_DIR 기준).
-ACCEPTED = {"72ff9b49edd5a38bc1112268df85de5b61eb36cba09bf3e2bc4c07a08d4c4d64": CANONICAL}
+# 받아들인 판 — 어휘 바이트의 sha256 → 그 바이트가 든 파일(VOCAB_DIR 기준). 정본을 올리면 옛 바이트는 history/ 로 옮겨 여기 남긴다.
+ACCEPTED = {
+    "59b4e70b3d308b46574a28dc4b5745a909e4923a5a062fe5ddbdaf17522124fa": CANONICAL,                         # 0.4 — cae_run.flow_scalars_only(10-31)
+    "72ff9b49edd5a38bc1112268df85de5b61eb36cba09bf3e2bc4c07a08d4c4d64": "history/dynaforge-cae-0.3.json",  # 0.3 — 생산 쪽 첫 배포판
+}
 LOADED_TYPES = ("cae_campaign", "cae_part", "cae_contact", "cae_load_path", "cae_finding", "cae_hotspot")
 SCENARIO_OF = {"sphere": "drop_all_angle", "impact": "impact_all_position", "deep": "single_run"}
 REPORT_TYPE = "impact_report"

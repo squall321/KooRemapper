@@ -22,6 +22,7 @@ from app.runner import ontology_def
 FIX = Path(__file__).with_name("fixtures") / "cae_package_v14_min.json"
 REAL = Path("/home/koopark/claude/KooD3plotReader/KooD3plotReader/.work/ontology")
 RID = "01TESTREPORT0000000000000A"
+SHA03 = "72ff9b49edd5a38bc1112268df85de5b61eb36cba09bf3e2bc4c07a08d4c4d64"   # 생산 쪽 첫 배포판(0.3)의 어휘 바이트
 
 
 def _pkg() -> dict:
@@ -41,10 +42,24 @@ def _check(pkg: dict, **kw):
 
 # ── 정본 ────────────────────────────────────────────────────────────────────
 
-def test_the_canonical_vocabulary_is_the_deployed_producers_bytes():
+def test_the_deployed_producers_bytes_stay_accepted():
+    """생산 쪽 배포판은 0.3 바이트를 싣는다 — 정본을 올려도 그 판의 꾸러미가 통해야 한다(history 에 남긴다)."""
+    raw = (op.VOCAB_DIR / op.ACCEPTED[SHA03]).read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == SHA03 and json.loads(raw)["_version"] == "0.3"
+
+
+def test_the_canonical_is_0_3_plus_flow_scalars_only_in_the_producers_format():
+    """0.4 = 0.3 에 cae_run.flow_scalars_only(bool) 하나(KooD3plotReader 10-31 정의). 생산 쪽이 바이트 그대로 옮기므로 꼴이 정해져 있다."""
     raw = (op.VOCAB_DIR / op.CANONICAL).read_bytes()
-    assert hashlib.sha256(raw).hexdigest() == "72ff9b49edd5a38bc1112268df85de5b61eb36cba09bf3e2bc4c07a08d4c4d64"
-    assert json.loads(raw)["_version"] == "0.3"
+    doc = json.loads(raw)
+    assert doc["_version"] == "0.4" and hashlib.sha256(raw).hexdigest() in op.ACCEPTED
+    assert raw == (json.dumps(doc, ensure_ascii=False, indent=2) + "\n").encode(), "정본 꼴(indent 2 · 한글 그대로 · 끝 줄바꿈)"
+    run = next(t for t in doc["types"] if t["slug"] == "cae_run")
+    added = run["properties"].pop()
+    assert (added["key"], added["data_type"]) == ("flow_scalars_only", "bool")
+    old = json.loads((op.VOCAB_DIR / op.ACCEPTED[SHA03]).read_bytes())
+    doc["_version"] = old["_version"]
+    assert doc == old, "0.3 에서 칸 하나 말고 바뀐 것이 있다"
 
 
 def test_every_accepted_version_is_on_disk_with_its_fingerprint():
@@ -86,7 +101,7 @@ def test_a_matching_package_becomes_campaign_level_rows_and_edges():
     assert rel == {"contact_side": 51, "path_between": 42, "finding_about": 21, "campaign_report": 1}
     assert next(e for e in got["edges"] if e["relation"] == "campaign_report")["dst_key"] == RID
     assert any((e["properties"] or {}).get("role") for e in got["edges"] if e["relation"] == "contact_side")
-    assert got["vocabulary"] == {"version": "0.3", "sha256": next(iter(op.ACCEPTED))}
+    assert got["vocabulary"] == {"version": "0.3", "sha256": SHA03}
     assert got["runs"] == {"package": 2, "matched": 2, "missing": []}
 
 
@@ -95,6 +110,17 @@ def test_some_runs_missing_from_the_report_is_a_warning_not_a_refusal():
     one = sorted(_cases(pkg))[:1]
     got = _check(pkg, case_keys=set(one))
     assert got["runs"]["matched"] == 1 and any("이 리포트에 없다" in w for w in got["warnings"])
+
+
+def test_each_package_is_checked_with_its_own_version():
+    """0.4 꾸러미는 flow_scalars_only 를 실을 수 있고, 0.3 꾸러미가 그 칸을 실으면 거절한다 — 판마다 그 판의 어휘로."""
+    sha04 = next(s for s, n in op.ACCEPTED.items() if n == op.CANONICAL)
+    pkg = _pkg()
+    pkg["vocabulary"].update(version="0.4", sha256=sha04)
+    _obj(pkg, "cae_run")["properties"]["flow_scalars_only"] = True
+    got = _check(pkg)
+    assert got["vocabulary"] == {"version": "0.4", "sha256": sha04} and got["rows"]
+    _bad(lambda p: _obj(p, "cae_run")["properties"].update(flow_scalars_only=True), word="어휘에 없는 칸")
 
 
 # ── 거절 — 아무것도 싣지 않는다 ─────────────────────────────────────────────
