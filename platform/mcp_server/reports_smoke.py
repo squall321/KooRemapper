@@ -42,6 +42,8 @@ MEDIA = ROOT / "impact_report_data"
 SPHERE_NEW = pathlib.Path("/data/koopark/report_fixtures/sphere_hotspot_v1018/report.html")
 # 렌더 결과(C-11) 폴더 — MCP 가 읽을 수 있는 자리여야 한다(allops_smoke 의 STAGE_ROOT 와 같은 규칙)
 RENDER_ROOT = pathlib.Path(__file__).resolve().parents[2] / "build" / "scratch" / "render_smoke"
+#: 해석 온톨로지 꾸러미(KooD3plotReader impA — 위 HTML 과 같은 때 나온 진짜 짝, 어휘 0.3). 없으면 그 항만 건너뛴다.
+CAE_REAL = pathlib.Path("/home/koopark/claude/KooD3plotReader/KooD3plotReader/.work/ontology/impA/impact_report.ontology.json")
 #: StepForge fe_cad 묶음(P2 뷰어 기준, 10-29) — 이 박스에만 있다. 없으면 그 항만 건너뛴다.
 CAD_REAL = pathlib.Path("/data/appdata/step_forge/projects/001a184fed0639fc4477054/export/fe_cad/2b8061b6990f")
 
@@ -275,6 +277,45 @@ async def main():
                       isinstance(pl, dict) and isinstance(pl.get("counts"), dict)
                       and {"links", "proposal", "unmatched", "reports_without_a_name"}
                       <= set(pl["counts"]), pl)
+
+                # ── 해석 온톨로지(cae, 10-31) — 세기만 하면 안 부른 새 도구도 초록이다. 값으로 본다 ─────────
+                #   이 리포트는 꾸러미 없이 올렸으니 「안 실었다」 와 붙이는 길을 말해야 한다(빈 답이 아니라).
+                cae = S._data(await s.call_tool("report_cae", {"report_id": rid}))
+                chk("report_cae — 꾸러미를 안 실은 리포트는 loaded:false 와 붙이는 길을 말한다",
+                    isinstance(cae, dict) and cae.get("loaded") is False and "attach_cae_package" in (cae.get("why") or ""), cae)
+                cp_ = S._data(await s.call_tool("find_cae_parts", {"min_severity": "WARNING", "limit": 5}))
+                chk("find_cae_parts — 항목 목록 · 건수 · 잘림 칸을 준다(읽을 수 있는 리포트만)",
+                    isinstance(cp_, dict) and isinstance(cp_.get("items"), list) and "truncated" in cp_
+                    and all(i.get("severity") in ("CRITICAL", "WARNING") for i in cp_["items"]), cp_)
+                lp_ = S._data(await s.call_tool("find_cae_load_paths", {"sort": "engage_ratio", "limit": 5}))
+                chk("find_cae_load_paths — 정렬 기준 큰 것부터의 목록",
+                    isinstance(lp_, dict) and isinstance(lp_.get("items"), list), lp_)
+                miss = await s.call_tool("attach_cae_package", {"report_id": rid, "path": "/nonexistent/x.ontology.json"})
+                chk("attach_cae_package — 없는 경로는 **거절한다**(조용히 성공하지 않는다)",
+                    bool(miss.isError) and "not found" in str(miss.content), str(miss.content)[:200])
+                bad_sort = await s.call_tool("find_cae_load_paths", {"sort": "smoke-nope"})
+                chk("find_cae_load_paths — 모르는 정렬은 거절한다", bool(bad_sort.isError), str(bad_sort.content)[:200])
+                if CAE_REAL.exists():
+                    # 진짜 짝을 MCP → REST → DB 로 끝까지 싣는다(짝 HTML 지문 · pos_id 런 키가 맞아야 실린다)
+                    cd = RENDER_ROOT / uuid.uuid4().hex
+                    cd.mkdir(parents=True)
+                    shutil.copy(CAE_REAL, cd / CAE_REAL.name)
+                    got = S._data(await s.call_tool("attach_cae_package", {"report_id": rid, "path": str(cd / CAE_REAL.name)}))
+                    got = got if isinstance(got, dict) else {"text": got}
+                    loaded = (got.get("counts") or {}).get("loaded") or {}
+                    chk("attach_cae_package — 진짜 짝(impA 꾸러미)을 싣는다: 캠페인 하나 · 파트 판정 · 하중 경로 행",
+                        got.get("already") is False and loaded.get("cae_campaign") == 1 and loaded.get("cae_part", 0) > 0
+                        and loaded.get("cae_load_path", 0) > 0 and (got.get("runs") or {}).get("missing") == [], got)
+                    cae2 = S._data(await s.call_tool("report_cae", {"report_id": rid})) or {}
+                    chk("report_cae — 실은 뒤 파트 판정(위험한 것부터) · 하중 경로가 온다",
+                        cae2.get("loaded") is True and cae2.get("parts") and cae2.get("load_paths"), str(cae2)[:300])
+                    again = S._data(await s.call_tool("attach_cae_package", {"report_id": rid, "path": str(cd / CAE_REAL.name)}))
+                    chk("같은 꾸러미를 다시 실으면 바꾸는 것이 없다 (멱등)", isinstance(again, dict) and again.get("already") is True, again)
+                    mine = S._data(await s.call_tool("find_cae_load_paths", {"kind": "impact", "limit": 500})) or {}
+                    chk("find_cae_load_paths — 이 리포트의 하중 경로가 리포트를 건너 질의에 나온다",
+                        any(i.get("report_id") == rid for i in mine.get("items") or []), str(mine)[:300])
+                else:
+                    print("  (KooD3plotReader impA 꾸러미가 없다 — 실제로 싣는 항은 건너뛴다)")
 
                 hs = S._data(await s.call_tool("report_hotspots", {"report_id": rid}))
                 chk("핫스팟이 없는 종류에서는 **없다고 말한다**(빈 목록으로 넘기지 않는다)",

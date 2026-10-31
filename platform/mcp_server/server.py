@@ -985,6 +985,87 @@ async def attach_render(report_id: str, path: str, ctx: Context) -> dict:
         return _unwrap(await c.post(f"/reports/{report_id}/renders", files=files, headers=_forward_headers(ctx)))
 
 
+# ── 해석 온톨로지(cae_*) — 후처리 꾸러미를 리포트에 싣고 묻는다(사용자 결정 10-31 (가), 계획 cae-ontology-1031) ─────────────
+# 허용값은 백엔드 GET /cae/parts · /cae/load-paths 의 Query 패턴과 같아야 한다(test_mcp_tools_contract 가 대조한다).
+CAE_SEVERITIES = ("CRITICAL", "WARNING", "UNKNOWN", "OK")         # 높은 것부터
+CAE_PATH_SORTS = ("impulse_max", "engage_ratio", "peak_force_max", "work_max")
+CAE_LIMIT_MAX = 500
+
+
+@mcp.tool()
+async def attach_cae_package(
+    report_id: Annotated[str, Field(description=_A_REPORT_ID)],
+    path: Annotated[str, Field(description="꾸러미 파일 경로(<리포트 이름>.ontology.json — 후처리가 리포트 HTML 옆에 낸다). "
+                                           "MCP 서버가 읽을 수 있는 같은 머신 경로.")],
+    ctx: Context,
+) -> dict:
+    """후처리 해석 온톨로지 꾸러미(`dynaforge.onto_package`)를 리포트에 싣는다 — **캠페인 수준만 행으로**(캠페인 · 파트 판정 · 접촉 ·
+    하중 경로 · 소견 · 응력 집중). 런 · 파트 응답은 리포트의 케이스(impact_cases)가 정본이라 행으로 싣지 않는다. 소유자만.
+
+    받아들인 어휘 판 · 짝 HTML 지문(꾸러미의 source.html 이 이 리포트 원본 HTML 과 같아야 한다) · 종류 · 런 키가 맞아야 한다 —
+    하나라도 어긋나면 아무것도 바뀌지 않는다. 같은 꾸러미는 멱등, 다른 꾸러미면 그 리포트의 행을 통째로 바꾼다. 리포트를 번들(.zip)로
+    올리면 같은 폴더 · 같은 이름 줄기의 꾸러미는 저절로 실린다.
+    Load a postprocess ontology package into a report (campaign-level rows only); all-or-nothing, idempotent."""
+    import os as _os
+    if not _os.path.isfile(path):
+        raise RuntimeError(f"path not found on the MCP host: {path}")
+    with open(path, "rb") as fh:
+        raw = fh.read()
+    files = {"file": (_os.path.basename(path), raw, "application/json")}
+    async with _client() as c:
+        return _unwrap(await c.post(f"/reports/{report_id}/cae", files=files, headers=_forward_headers(ctx)))
+
+
+@mcp.tool()
+async def report_cae(report_id: Annotated[str, Field(description=_A_REPORT_ID)], ctx: Context) -> dict:
+    """리포트 하나의 해석 온톨로지 — 캠페인(단위계 · 낙하 높이 · 충돌 속도 …) · **파트 판정 위험한 것부터**(최소 안전율 · 최악 응력과
+    그 런의 각도 · 위치 identity) · **하중 경로 충격량 큰 것부터**(파트 쌍 · 맞닿은 비율) · 접촉(양쪽 파트) · 소견 · 응력 집중.
+    실은 적이 없으면 `loaded:false` 와 붙이는 길을 준다. 런마다의 값은 report_case · report_part_series 가 준다.
+    One report's analysis ontology — part judgments (worst first), load paths (largest impulse first), contacts, findings."""
+    return await _get(ctx, f"/reports/{report_id}/cae")
+
+
+@mcp.tool()
+async def find_cae_parts(
+    ctx: Context,
+    min_severity: Annotated[str | None, Field(description=f"판정 하한 — {_one_of(CAE_SEVERITIES)} 중 하나. 이 판정 **이상**"
+                                                          "(CRITICAL 이면 CRITICAL 만, WARNING 이면 CRITICAL 도).")] = None,
+    max_safety_factor: Annotated[float | None, Field(description="최소 안전율 상한(무차원) — 이 값 이하인 파트. 1 미만이면 항복이다.")] = None,
+    project: Annotated[str | None, Field(description="과제 — 수동 메타의 과제 또는 리포트에 박힌 project_name 과 같은 것.")] = None,
+    kind: Annotated[str | None, Field(description=f"리포트 종류 — {_one_of(REPORT_KINDS)} 중 하나. 비우면 모두.")] = None,
+    limit: Annotated[int, Field(description=f"최대 건수(1~{CAE_LIMIT_MAX}). 위험한 순으로 매긴 뒤 자른다.")] = 100,
+) -> dict:
+    """리포트를 건너 **파트 판정**을 찾는다 — 판정 · 최소 안전율 · 최악 응력 순으로 위험한 것부터. 읽을 수 있는 리포트(소유 · 같은 소속,
+    관리자는 전사)의 것만. 항목마다 리포트 id · 라벨 · 과제와 파트 칸(재질 · 최악 런 case_key)이 온다.
+    Find part judgments across readable reports, most dangerous first."""
+    params: dict = {"limit": limit}
+    for k, v in {"min_severity": min_severity, "max_safety_factor": max_safety_factor,
+                 "project": project, "kind": kind}.items():
+        if v is not None:
+            params[k] = v
+    return await _get(ctx, "/cae/parts", params)
+
+
+@mcp.tool()
+async def find_cae_load_paths(
+    ctx: Context,
+    sort: Annotated[str, Field(description=f"정렬 기준(큰 것부터) — {_one_of(CAE_PATH_SORTS)} 중 하나"
+                                           "(충격량 N·s · 맞닿은 비율 · 최대 힘 N · 일 mJ).")] = "impulse_max",
+    min_engage_ratio: Annotated[float | None, Field(description="맞닿은 런의 비율 하한(0~1) — 이 쌍이 맞닿은 런 수 ÷ 런 수.")] = None,
+    project: Annotated[str | None, Field(description="과제 — 수동 메타의 과제 또는 리포트에 박힌 project_name 과 같은 것.")] = None,
+    kind: Annotated[str | None, Field(description=f"리포트 종류 — {_one_of(REPORT_KINDS)} 중 하나. 비우면 모두.")] = None,
+    limit: Annotated[int, Field(description=f"최대 건수(1~{CAE_LIMIT_MAX}). 정렬 기준으로 매긴 뒤 자른다.")] = 100,
+) -> dict:
+    """리포트를 건너 **하중 경로**(하중을 주고받은 파트 쌍)를 찾는다 — sort 가 큰 것부터. 읽을 수 있는 리포트의 것만.
+    「충격이 어디로 흘렀나」 를 캠페인끼리 견줄 때 쓴다. 런마다의 하중 전달은 리포트의 report_contact_profile 이 준다.
+    Find load paths (part pairs) across readable reports, ranked by the chosen measure."""
+    params: dict = {"sort": sort, "limit": limit}
+    for k, v in {"min_engage_ratio": min_engage_ratio, "project": project, "kind": kind}.items():
+        if v is not None:
+            params[k] = v
+    return await _get(ctx, "/cae/load-paths", params)
+
+
 @mcp.tool()
 async def attach_cad(report_id: str, path: str, ctx: Context) -> dict:
     """StepForge fe_cad 묶음(C-6 가중치 · C-7 glb)을 리포트의 형상으로 붙인다 — 묶음 폴더(`manifest.json` · glb ·

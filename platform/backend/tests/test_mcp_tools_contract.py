@@ -155,3 +155,30 @@ def test_slow_backends_end_inside_one_call_deadline_with_the_knob_named():
         r = got[case]
         assert not r["ok"] and knob in (r["error"] or "") and r["elapsed"] < 1.8, (case, r)
     assert "job_id=j1" in got["figure_never"]["error"], "그림 잡은 계속 돈다 — 무엇을 지켜볼지 말해야 한다"
+
+
+# ── 해석 온톨로지 도구(cae — 사용자 결정 10-31 (가)) ─────────────────────────
+
+CAE_TOOLS = ("attach_cae_package", "report_cae", "find_cae_parts", "find_cae_load_paths")
+
+
+@needs_mcp
+def test_the_cae_tools_describe_every_argument():
+    got = _probe("schemas", *CAE_TOOLS)["tools"]
+    assert set(got) == set(CAE_TOOLS), sorted(got)
+    missing = [f"{t}.{a}" for t in CAE_TOOLS for a, spec in (got[t].get("properties") or {}).items()
+               if not str(spec.get("description") or "").strip()]
+    assert not missing, missing
+
+
+def test_the_cae_allowed_values_are_the_backend_constraints():
+    c = _server_constants()
+    assert c["CAE_SEVERITIES"] == _pattern_values(_query("/api/v1/cae/parts", "min_severity"))
+    assert c["CAE_PATH_SORTS"] == _pattern_values(_query("/api/v1/cae/load-paths", "sort"))
+    for path in ("/api/v1/cae/parts", "/api/v1/cae/load-paths"):
+        assert c["CAE_LIMIT_MAX"] == next(m.le for m in _query(path, "limit").metadata if hasattr(m, "le"))
+        assert c["REPORT_KINDS"] == _pattern_values(_query(path, "kind"))
+    from app.modules.reports.services import CAE_PATH_SORTS, CAE_SEVERITY_RANK
+    assert c["CAE_PATH_SORTS"] == CAE_PATH_SORTS
+    ranked = tuple(k for k in sorted(CAE_SEVERITY_RANK, key=CAE_SEVERITY_RANK.get, reverse=True) if k != "INFO")
+    assert c["CAE_SEVERITIES"] == ranked, "판정은 높은 것부터 — 소견만 쓰는 INFO 는 파트 판정에 없다"
