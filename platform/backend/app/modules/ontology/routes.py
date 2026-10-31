@@ -286,8 +286,10 @@ def _run_out(r: OntoSyncRun, *, who: bool) -> dict:
 
 async def _object_states(db) -> dict[str, dict[str, int]]:
     """타입별 건수 — 활성 · 그만 씀 · 사용 안 함(사라짐 · 합쳐짐) · 그중 안 보이게 됨."""
+    # 리포트에서 나온 행(cae_* — report_id)은 리포트 가시성을 따른다 — 전사 공개인 이 창들에는 세지도 내지도 않는다
     rows = (await db.execute(select(OntoObject.type_slug, OntoObject.deleted, OntoObject.hidden,
                                     OntoObject.status, func.count())
+                             .where(OntoObject.report_id.is_(None))
                              .group_by(OntoObject.type_slug, OntoObject.deleted, OntoObject.hidden,
                                        OntoObject.status))).all()
     out: dict[str, dict[str, int]] = {}
@@ -436,7 +438,7 @@ async def ontology_objects(
     """한 타입의 객체 — 사라진 것도 지우지 않았으므로 「사용 안 함」 으로 함께 보인다(거르개 `state`)."""
     if state not in _STATES:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"state 는 {_STATES} 중 하나")
-    stmt = select(OntoObject).where(OntoObject.type_slug == type)
+    stmt = select(OntoObject).where(OntoObject.type_slug == type, OntoObject.report_id.is_(None))
     if state == "active":
         stmt = stmt.where(OntoObject.deleted.is_(False), OntoObject.status != "deprecated")
     elif state == "deprecated":
@@ -467,7 +469,8 @@ async def ontology_object(type_slug: str, key: str,
                           db: AsyncSession = Depends(get_db)):
     """객체 하나 — 칸 · 상태 · 합쳐진 곳 · 옛 식별자 · 나가는/들어오는 선(지금 이어진 것)."""
     obj = (await db.execute(select(OntoObject).where(
-        OntoObject.type_slug == type_slug, OntoObject.key == key))).scalar_one_or_none()
+        OntoObject.type_slug == type_slug, OntoObject.key == key,
+        OntoObject.report_id.is_(None)))).scalar_one_or_none()
     if obj is None:
         now = await svc.current_key(db, type_slug, key)
         if now != key:
@@ -475,10 +478,10 @@ async def ontology_object(type_slug: str, key: str,
             return ok({"object": None, "renamed_to": now, "out": [], "in": [], "previous": []})
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"{type_slug} {key!r} 는 받은 적이 없습니다.")
     out_rows = (await db.execute(select(OntoRelation).where(
-        OntoRelation.src_type == type_slug, OntoRelation.src_key == key,
+        OntoRelation.src_type == type_slug, OntoRelation.src_key == key, OntoRelation.report_id.is_(None),
         OntoRelation.deleted.is_(False)).order_by(OntoRelation.relation, OntoRelation.dst_key))).scalars().all()
     in_rows = (await db.execute(select(OntoRelation).where(
-        OntoRelation.dst_type.in_([type_slug, ""]), OntoRelation.dst_key == key,
+        OntoRelation.dst_type.in_([type_slug, ""]), OntoRelation.dst_key == key, OntoRelation.report_id.is_(None),
         OntoRelation.deleted.is_(False)).order_by(OntoRelation.relation, OntoRelation.src_key))).scalars().all()
     labels = await _labels(db, [(r.dst_type, r.dst_key) for r in out_rows] + [(r.src_type, r.src_key) for r in in_rows])
     previous = (await db.execute(select(OntoPreviousKey.old_key).where(
@@ -504,5 +507,5 @@ async def _labels(db, ends: list[tuple[str, str]]) -> dict[tuple[str, str], str]
     if not keys:
         return {}
     rows = (await db.execute(select(OntoObject.type_slug, OntoObject.key, OntoObject.label).where(
-        OntoObject.key.in_(keys)))).all()
+        OntoObject.key.in_(keys), OntoObject.report_id.is_(None)))).all()
     return {(t, k): lab for t, k, lab in rows}

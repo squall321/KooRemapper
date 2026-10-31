@@ -14,13 +14,13 @@ from pathlib import Path
 from typing import Optional
 
 import ulid
-from sqlalchemy import asc, desc, func, select
+from sqlalchemy import asc, delete, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import json
 
-from app.models import ImpactCase, ImpactReport, Session, SessionFile
-from app.reports import analyze, blockstore, cad_bundle, parser, render_result
+from app.models import SOURCE_SELF, ImpactCase, ImpactReport, OntoObject, OntoRelation, Session, SessionFile
+from app.reports import analyze, blockstore, cad_bundle, onto_package, parser, render_result
 from app.reports.scenario import ScenarioParseError, summarize_scenario
 from app.modules.sessions import services as sess_svc
 from app.shared import storage
@@ -1353,6 +1353,199 @@ async def attach_render(db: AsyncSession, report: ImpactReport, raw: bytes) -> d
     await db.commit()
     return {"render_id": rid, "ok": checked["ok"], "already": False, "stored": len(added),
             "media_total": len(report.media), "warnings": warnings}
+
+
+# ── 해석 온톨로지(cae_*) — 후처리 꾸러미를 캠페인 수준 행으로 싣는다(사용자 결정 10-31 (가), 계획 cae-ontology-1031) ──────
+async def attach_ontology(db: AsyncSession, report: ImpactReport, raw: bytes, *, filename: str = "") -> dict:
+    """후처리 온톨로지 꾸러미(`dynaforge.onto_package`)를 리포트에 싣는다. 검사(`onto_package.check`)에 걸리면 OntoPackageError —
+    아무것도 바꾸지 않는다(전부 아니면 전무).
+
+    - 짝 — 꾸러미가 적은 HTML 지문이 리포트 원본 HTML 과 같아야 하고, 종류가 같아야 하고, 런 키가 리포트 각도와 맞아야 한다.
+    - 캠페인 수준만 행으로(campaign · part · contact · load_path · finding · hotspot). 런 · 파트 응답의 정본은 impact_cases 다.
+    - 다시 실으면 그 리포트의 행 · 선을 통째로 바꾼다(정본은 리포트, 꾸러미는 거기서 다시 만든다). 같은 바이트면 그대로 둔다(멱등).
+    - 꾸러미 파일은 리포트 세션에 둔다 — 하중 전달(런 × 접촉)은 거기에만 있다. 지문별 자리라 저장이 깨지면 이번 파일만 걷어 내고
+      옛 행 · 옛 파일이 남는다. 옛 파일은 새 행이 커밋된 뒤에 지운다.
+    """
+    import hashlib
+    from datetime import datetime, timezone
+
+    try:
+        pkg = json.loads(raw)
+    except ValueError as exc:
+        raise onto_package.OntoPackageError(f"꾸러미를 JSON 으로 읽지 못했다: {exc}")
+    sha = hashlib.sha256(raw).hexdigest()
+    prior = report.ontology if isinstance(report.ontology, dict) else None
+    if prior and prior.get("sha256") == sha:
+        return {**prior, "already": True}
+    src = await db.get(SessionFile, report.source_file_id) if report.source_file_id is not None else None
+    case_keys = set((await db.execute(
+        select(ImpactCase.case_key).where(ImpactCase.report_id == report.id))).scalars())
+    checked = onto_package.check(pkg, report_id=report.id, report_kind=report.kind,
+                                 html_sha256=src.sha256 if src is not None else None, case_keys=case_keys)
+    session = await db.get(Session, report.session_id)
+    if session is None:
+        raise onto_package.OntoPackageError("리포트의 세션을 찾지 못했다")
+    base = f"ontology/{report.id}/"
+    old_files = list((await db.execute(select(SessionFile).where(
+        SessionFile.session_id == session.id, SessionFile.filename.like(base + "%")))).scalars().all())
+    stored = await sess_svc.add_uploaded_file(
+        db, session, filename=f"{base}{sha[:12]}/{Path(filename).name or 'report.ontology.json'}", raw=raw, kind="generated")
+    try:
+        await db.execute(delete(OntoRelation).where(OntoRelation.report_id == report.id))
+        await db.execute(delete(OntoObject).where(OntoObject.report_id == report.id))
+        db.add_all([OntoObject(type_slug=r["type_slug"], key=r["key"], label=r["label"], status="active",
+                               properties=r["properties"], source=SOURCE_SELF, report_id=report.id)
+                    for r in checked["rows"]])
+        db.add_all([OntoRelation(relation=e["relation"], src_type=e["src_type"], src_key=e["src_key"],
+                                 dst_type=e["dst_type"], dst_key=e["dst_key"], properties=e["properties"],
+                                 source=SOURCE_SELF, deleted=False, report_id=report.id) for e in checked["edges"]])
+        html = (pkg.get("source") or {}).get("html") if isinstance(pkg.get("source"), dict) else None
+        report.ontology = {
+            "vocabulary": checked["vocabulary"], "sha256": sha, "file_id": stored.id, "file": stored.filename,
+            "producer": pkg.get("producer") if isinstance(pkg.get("producer"), dict) else None,
+            "source_html": html, "units": (pkg.get("units") or {}).get("system") if isinstance(pkg.get("units"), dict) else None,
+            "counts": checked["counts"], "runs": checked["runs"], "warnings": checked["warnings"],
+            "loaded_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await db.commit()
+    except Exception:
+        stored_id = stored.id
+        await db.rollback()                          # 깨진 트랜잭션을 걷은 뒤 이번 파일만 다시 읽어 지운다
+        again = await db.get(SessionFile, stored_id)
+        if again is not None:
+            await sess_svc.delete_file(db, again)
+        raise
+    summary = dict(report.ontology)
+    for f in old_files:
+        await sess_svc.delete_file(db, f)
+    return {**summary, "already": False}
+
+
+# 판정 순위 — 높을수록 위험. 파트 판정(cae_part.severity)과 소견(CRITICAL · WARNING · INFO)을 한 줄로 세운다.
+CAE_SEVERITY_RANK = {"CRITICAL": 4, "WARNING": 3, "UNKNOWN": 2, "INFO": 1, "OK": 0}
+CAE_PATH_SORTS = ("impulse_max", "engage_ratio", "peak_force_max", "work_max")
+
+
+def _rel(report_id: str, value):
+    """`<리포트 id>/part/3` → `part/3` — 화면 · MCP 에는 꾸러미의 상대 키로 낸다."""
+    pre = f"{report_id}/"
+    return value[len(pre):] if isinstance(value, str) and value.startswith(pre) else value
+
+
+def _case_of(report_id: str, value) -> str | None:
+    """런 참조(`<리포트 id>/run/<case_key>`) → case_key. 런은 행이 아니라 impact_cases 다(결정 (가))."""
+    k = _rel(report_id, value)
+    return k[len("run/"):] if isinstance(k, str) and k.startswith("run/") else None
+
+
+def _cae_props(report_id: str, props: dict | None) -> dict:
+    out = {}
+    for name, value in (props or {}).items():
+        if name == "report":
+            continue
+        out[name] = _rel(report_id, value)
+        case = _case_of(report_id, value)
+        if case is not None:
+            out[f"{name}_case"] = case
+    return out
+
+
+def _num(v):
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+async def ontology_view(db: AsyncSession, report: ImpactReport) -> dict:
+    """리포트 하나의 해석 온톨로지 — 캠페인 · 파트 판정(위험한 것부터) · 하중 경로(충격량 큰 것부터) · 접촉 · 소견 · 응력 집중.
+    실은 적이 없으면 `loaded: false` 와 까닭(꾸러미를 붙이는 길)을 준다."""
+    rid = report.id
+    if not isinstance(report.ontology, dict):
+        return {"report_id": rid, "loaded": False,
+                "why": "이 리포트에 실은 해석 온톨로지가 없다 — 후처리 꾸러미(<리포트 이름>.ontology.json)를 번들에 함께 넣거나 "
+                       "POST /reports/{id}/cae · MCP attach_cae_package 로 붙인다"}
+    rows = (await db.execute(select(OntoObject).where(OntoObject.report_id == rid))).scalars().all()
+    edges = (await db.execute(select(OntoRelation).where(OntoRelation.report_id == rid))).scalars().all()
+    by: dict[str, list[OntoObject]] = {}
+    for o in rows:
+        by.setdefault(o.type_slug, []).append(o)
+    name_of = {o.key: o.label for o in by.get("cae_part", [])}
+    idents = {c.case_key: c.identity for c in (await db.execute(
+        select(ImpactCase).where(ImpactCase.report_id == rid))).scalars().all()}
+
+    def item(o: OntoObject) -> dict:
+        return {"key": _rel(rid, o.key), "label": o.label, **_cae_props(rid, o.properties)}
+
+    parts = [item(o) for o in by.get("cae_part", [])]
+    for p in parts:
+        for k in ("worst_von_mises_run_case", "worst_g_run_case"):
+            if p.get(k) in idents:
+                p[k.replace("_case", "_identity")] = idents[p[k]]
+    parts.sort(key=lambda p: (-CAE_SEVERITY_RANK.get(str(p.get("severity")), 2),
+                              _num(p.get("min_safety_factor")) if _num(p.get("min_safety_factor")) is not None else 1e18,
+                              -(_num(p.get("worst_von_mises")) or 0)))
+    paths = [item(o) for o in by.get("cae_load_path", [])]
+    for p in paths:
+        for side in ("part_a", "part_b"):
+            p[f"{side}_name"] = name_of.get(f"{rid}/{p.get(side)}")
+    paths.sort(key=lambda p: -(_num(p.get("impulse_max")) or -1))
+    sides: dict[str, list] = {}
+    about: dict[str, list] = {}
+    for e in edges:
+        if e.relation == "contact_side":
+            sides.setdefault(e.src_key, []).append({"part": _rel(rid, e.dst_key), "name": name_of.get(e.dst_key),
+                                                   **(e.properties or {})})
+        elif e.relation == "finding_about":
+            about.setdefault(e.src_key, []).append(_rel(rid, e.dst_key))
+    contacts = [{**item(o), "sides": sides.get(o.key, [])} for o in by.get("cae_contact", [])]
+    findings = [{**item(o), "about": about.get(o.key, [])} for o in by.get("cae_finding", [])]
+    findings.sort(key=lambda f: -CAE_SEVERITY_RANK.get(str(f.get("severity")), 1))
+    camp = by.get("cae_campaign", [])
+    return {"report_id": rid, "loaded": True, "summary": report.ontology,
+            "campaign": item(camp[0]) if camp else None,
+            "parts": parts, "load_paths": paths, "contacts": contacts, "findings": findings,
+            "hotspots": [item(o) for o in by.get("cae_hotspot", [])]}
+
+
+async def find_cae_rows(db: AsyncSession, user_id: int, *, type_slug: str, is_admin: bool = False,
+                        affiliation: str = "", project: str | None = None, kind: str | None = None,
+                        min_severity: str | None = None, max_safety_factor: float | None = None,
+                        min_engage_ratio: float | None = None, sort: str | None = None,
+                        limit: int = 100) -> list[dict]:
+    """리포트를 건너는 해석 온톨로지 질의 — **읽을 수 있는 리포트의 행만**(소유 · 같은 소속, 관리자는 전사 — 리포트 검색과 같은 술어).
+
+    `cae_part` — 판정이 min_severity 이상이거나 최소 안전율이 max_safety_factor 이하인 파트, 위험한 것부터.
+    `cae_load_path` — 맞닿은 비율이 min_engage_ratio 이상인 경로, sort(impulse_max · engage_ratio · …) 큰 것부터.
+    """
+    from sqlalchemy import Float, case, or_
+
+    stmt = (select(OntoObject, ImpactReport).join(ImpactReport, ImpactReport.id == OntoObject.report_id)
+            .where(OntoObject.type_slug == type_slug))
+    if not is_admin:
+        stmt = stmt.where(_readable_scope(user_id, affiliation))
+    if kind:
+        stmt = stmt.where(ImpactReport.kind == kind)
+    if project:
+        stmt = stmt.where(or_(ImpactReport.eng_meta["project"].astext == project, ImpactReport.project_name == project))
+    if min_severity:
+        floor = CAE_SEVERITY_RANK.get(min_severity, 0)
+        stmt = stmt.where(OntoObject.properties["severity"].astext.in_(
+            [k for k, v in CAE_SEVERITY_RANK.items() if v >= floor]))
+    if max_safety_factor is not None:
+        stmt = stmt.where(OntoObject.properties["min_safety_factor"].astext.cast(Float) <= max_safety_factor)
+    if min_engage_ratio is not None:
+        stmt = stmt.where(OntoObject.properties["engage_ratio"].astext.cast(Float) >= min_engage_ratio)
+    num = lambda name: OntoObject.properties[name].astext.cast(Float)          # noqa: E731 — 칸 하나를 수로
+    # ★순위를 SQL 에서 매긴 **뒤** 자른다(KR-16 의 교훈 — 창을 먼저 자르면 위험한 것이 창 밖으로 밀린다).
+    if type_slug == "cae_load_path":
+        key = sort if sort in CAE_PATH_SORTS else "impulse_max"
+        stmt = stmt.order_by(num(key).desc().nulls_last(), OntoObject.id)
+    else:
+        rank = case(CAE_SEVERITY_RANK, value=OntoObject.properties["severity"].astext, else_=2)
+        stmt = stmt.order_by(rank.desc(), num("min_safety_factor").asc().nulls_last(),
+                             num("worst_von_mises").desc().nulls_last(), OntoObject.id)
+    rows = (await db.execute(stmt.limit(max(limit, 1)))).all()
+    return [{"report_id": r.id, "report_label": r.label, "kind": r.kind,
+             "project": (r.eng_meta or {}).get("project") or r.project_name,
+             "key": _rel(r.id, o.key), "label": o.label, **_cae_props(r.id, o.properties)} for o, r in rows]
 
 
 # ── CAD 형상 묶음(C-6 · C-7) — StepForge fe_cad 를 리포트의 형상으로 붙인다(뷰어 1단계, 사용자 결정 10-30) ─────────

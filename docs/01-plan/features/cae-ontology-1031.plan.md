@@ -23,12 +23,12 @@
   다시 실으면 그 리포트의 행을 통째로 바꾼다(정본은 리포트이고 꾸러미는 거기서 다시 만든다).
 - 짝 — 머리 `source.html.sha256` 이 리포트 원본 HTML 의 지문과 같아야 한다. 종류(sphere · impact · deep)가 맞아야 한다. 꾸러미의 런 키가 리포트의
   `case_key` 와 맞는지 본다(하나도 안 맞으면 거절, 일부면 경고).
-- 들어오는 길 — REST `POST /reports/{id}/ontology`(꾸러미 JSON) · MCP `attach_ontology(report_id, path)` · 번들 반입이 같은 이름 줄기의 꾸러미를 저절로.
+- 들어오는 길 — REST `POST /reports/{id}/cae`(꾸러미 JSON) · MCP `attach_cae_package(report_id, path)` · 번들 반입이 같은 이름 줄기의 꾸러미를 저절로.
   후처리 예약(7-1) 길은 KooSlurm 귀환 매니페스트에 꾸러미 항목이 생긴 뒤(요청).
 ### 질의
-- 리포트 하나 — `GET /reports/{id}/ontology`(캠페인 · 파트 판정 · 하중 경로 · 소견 · 경고). 리포트 가시성 그대로.
+- 리포트 하나 — `GET /reports/{id}/cae`(캠페인 · 파트 판정 · 하중 경로 · 소견 · 경고). 리포트 가시성 그대로.
 - 리포트를 건너 — `GET /cae/parts`(판정 · 안전율로) · `GET /cae/load-paths`(충격량 · 맞닿은 비율 순). **읽을 수 있는 리포트의 것만**(`_readable_scope`, 관리자는 전사).
-- MCP — `attach_ontology` · `report_ontology` · `find_cae_parts` · `find_load_paths`.
+- MCP — `attach_cae_package` · `report_cae` · `find_cae_parts` · `find_cae_load_paths`.
 - ★리포트에서 나온 행은 리포트 가시성을 따른다 — 전사 공개인 일반 보기(`/ontology/types` · `/ontology/objects`)에는 `cae_*` 를 내지 않는다.
 - 화면 — 리포트 상세에 「해석 온톨로지」(파트 판정 · 하중 경로 상위 · 경고).
 
@@ -48,4 +48,5 @@
 - (10-31) 받아들인 판 목록을 둔다 — 정본 하나와만 견주면 정본을 올리는 순간 옛 판을 싣는 배포판의 꾸러미가 모두 막힌다(그쪽 권고). 판마다 그 판 어휘로 검증.
 - (10-31) 리포트 행은 `report_id` FK CASCADE 로 묶는다 — 키 접두 LIKE 로 지우면 색인을 못 타고, 가시성도 리포트와 이어야 한다.
 - (10-31) 다시 실으면 그 리포트 행을 통째로 바꾼다 — 그쪽 계약 초안은 「삭제 표시」 를 권했지만 행의 정본이 리포트라 남길 것이 없다.
+- (10-31) 리포트 쪽 길 이름은 `/reports/{id}/cae` — `/ontology` 가 든 길은 과제 · 개정 스위치(허브 설정)에 묶이는데 해석 어휘는 허브와 무관하게 돈다.
 - (10-31) 일반 보기에서 `cae_*` 를 뺀다 — 일반 보기는 로그인한 누구나 읽는데 리포트는 소유 · 소속으로 갈린다(리포트 수치가 새어 나간다).

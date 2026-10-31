@@ -21,6 +21,7 @@ from app.shared.affiliation import verified_affiliation
 from app.shared.ratelimit import rate_limit
 from app.reports import bundle as bundle_mod
 from app.reports.cad_bundle import CadBundleError
+from app.reports.onto_package import OntoPackageError
 from app.reports.render_result import RenderResultError
 from app.shared.responses import ok
 
@@ -203,6 +204,7 @@ async def report_intake(
     #   임베드되지 않으므로(옆에 딸린 파일이다), HTML 하나만 올리면 그림이 애초에 들어오지
     #   않는다 — LLM 도 화면도 결과를 볼 수 없다. 가드는 전부 `app/reports/bundle.py` 에 있다.
     bundle_media: list[dict] = []
+    bundle_onto: dict | None = None
     bundle_info: dict | None = None
     if bundle_mod.looks_like_bundle(up_name, raw):
         try:
@@ -211,6 +213,7 @@ async def report_intake(
             raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
         raw, up_name = b["html"], b["html_name"]
         bundle_media = b["media"]
+        bundle_onto = b.get("ontology")
         bundle_info = {"html_name": b["html_name"], "n_html": b["n_html"],
                        "n_media": len(b["media"]), "skipped": b["skipped"]}
         if b.get("note"):
@@ -251,6 +254,14 @@ async def report_intake(
             # 매핑 정본은 리포트 자신(`set_report.media`)이다 — 서비스가 읽는다.
             media_summary = await svc.attach_media(
                 db, s, report, media=bundle_media, html=raw)
+        onto_summary: dict | None = None
+        if bundle_onto:
+            # 후처리 꾸러미(같은 이름 줄기) — 실패해도 리포트 반입은 막지 않고 까닭을 돌려준다(사용자 결정 10-31 (가))
+            try:
+                got = await svc.attach_ontology(db, report, bundle_onto["data"], filename=bundle_onto["name"])
+                onto_summary = {"ok": True, "loaded": got["counts"]["loaded"], "warnings": got["warnings"]}
+            except OntoPackageError as exc:
+                onto_summary = {"ok": False, "why": str(exc)}
     except ValueError as exc:
         if created_here:
             await sess_svc.delete_session(db, s)          # 신규 세션+K 통째로 정리(cascade+rmtree)
@@ -264,6 +275,8 @@ async def report_intake(
         payload["bundle"] = bundle_info
     if media_summary:
         payload["media"] = media_summary
+    if onto_summary:
+        payload["ontology"] = onto_summary
     return ok(
         payload,
         message=f"{report.kind} 리포트 반입 완료 ({report.n_cases} 케이스"
@@ -849,6 +862,84 @@ async def attach_cad(
     msg = ("이미 붙은 묶음이다 — 바꾼 것이 없다" if summary["already"]
            else "CAD 묶음을 갈아 끼웠다" if summary.get("replaced") else "CAD 묶음을 붙였다")
     return ok(summary, message=msg)
+
+
+@router.post(
+    "/reports/{report_id}/cae",
+    dependencies=[Depends(rate_limit("upload", settings.ratelimit_upload_per_min))],
+)
+async def attach_ontology(
+    report_id: str,
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """후처리 온톨로지 꾸러미(`<리포트 이름>.ontology.json`, `dynaforge.onto_package`)를 리포트에 싣는다 — 캠페인 수준만 행으로
+    (사용자 결정 10-31 (가)). 소유자만. 받아들인 어휘 판 · 짝 HTML 지문 · 종류 · 런 키에 안 맞으면 422 — 아무것도 바꾸지 않는다.
+    같은 바이트는 멱등, 다른 꾸러미면 그 리포트의 행을 통째로 바꾼다."""
+    r = await _require_owned_report(db, user, report_id)
+    raw, name = await _read_upload(file, what="온톨로지 꾸러미")
+    try:
+        summary = await svc.attach_ontology(db, r, raw, filename=name or "")
+    except OntoPackageError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"온톨로지 꾸러미를 받지 않았다: {exc}")
+    loaded = summary["counts"]["loaded"]
+    msg = ("이미 실은 꾸러미다 — 바꾼 것이 없다" if summary["already"]
+           else "해석 온톨로지를 실었다 — " + " · ".join(f"{t.removeprefix('cae_')} {n}" for t, n in loaded.items() if n))
+    return ok(summary, message=msg)
+
+
+@router.get("/reports/{report_id}/cae")
+async def report_ontology(
+    request: Request,
+    report_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """리포트 하나의 해석 온톨로지(cae — 과제 · 개정 스위치와 무관하게 돈다) — 캠페인 · 파트 판정(위험한 것부터, 최악 런의 각도 · 위치) · 하중 경로(충격량 큰 것부터) ·
+    접촉(양쪽 파트) · 소견 · 응력 집중. 리포트를 읽을 수 있는 사람만(소유 · 같은 소속). 안 실었으면 `loaded: false` 와 까닭."""
+    r = await _require_report(db, user, report_id, request)
+    return ok(await svc.ontology_view(db, r))
+
+
+@router.get("/cae/parts")
+async def find_cae_parts(
+    request: Request,
+    min_severity: str | None = Query(default=None, pattern="^(CRITICAL|WARNING|UNKNOWN|OK)$",
+                                     description="이 판정 이상(CRITICAL > WARNING > UNKNOWN > OK)"),
+    max_safety_factor: float | None = Query(default=None, ge=0, description="최소 안전율이 이 값 이하"),
+    project: str | None = Query(default=None, description="과제(수동 메타 또는 리포트에 박힌 이름)"),
+    kind: str | None = Query(default=None, pattern="^(deep|sphere|impact)$"),
+    limit: int = Query(default=100, ge=1, le=500),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """리포트를 건너 파트 판정을 찾는다 — 위험한 것부터(판정 · 안전율 · 최악 응력 순으로 매긴 뒤 자른다). **읽을 수 있는 리포트의 것만**
+    (소유 · 같은 소속, 관리자는 전사 — 리포트 검색과 같은 술어)."""
+    rows = await svc.find_cae_rows(
+        db, user.id, type_slug="cae_part", is_admin=user.is_system_admin,
+        affiliation=verified_affiliation(request.headers, user.email, settings.heax_gateway_secret),
+        project=project, kind=kind, min_severity=min_severity, max_safety_factor=max_safety_factor, limit=limit)
+    return ok({"items": rows, "total": len(rows), "truncated": len(rows) >= limit})
+
+
+@router.get("/cae/load-paths")
+async def find_cae_load_paths(
+    request: Request,
+    sort: str = Query(default="impulse_max", pattern="^(impulse_max|engage_ratio|peak_force_max|work_max)$"),
+    min_engage_ratio: float | None = Query(default=None, ge=0, le=1, description="맞닿은 런의 비율 하한(0~1)"),
+    project: str | None = Query(default=None, description="과제(수동 메타 또는 리포트에 박힌 이름)"),
+    kind: str | None = Query(default=None, pattern="^(deep|sphere|impact)$"),
+    limit: int = Query(default=100, ge=1, le=500),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """리포트를 건너 하중 경로(파트 쌍)를 찾는다 — sort 가 큰 것부터. 읽을 수 있는 리포트의 것만."""
+    rows = await svc.find_cae_rows(
+        db, user.id, type_slug="cae_load_path", is_admin=user.is_system_admin,
+        affiliation=verified_affiliation(request.headers, user.email, settings.heax_gateway_secret),
+        project=project, kind=kind, min_engage_ratio=min_engage_ratio, sort=sort, limit=limit)
+    return ok({"items": rows, "total": len(rows), "truncated": len(rows) >= limit})
 
 
 @router.post("/reports/{report_id}/publish-datahub")

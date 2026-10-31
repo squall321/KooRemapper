@@ -166,6 +166,8 @@ class ImpactReport(Base):
     renders: Mapped[list | None] = mapped_column(JSONB)
     # 붙인 CAD 형상 묶음(StepForge fe_cad — C-6 · C-7) — 받는 쪽 검사를 통과한 요약과 저장한 파일 id. 리포트 하나에 하나.
     cad: Mapped[dict | None] = mapped_column(JSONB)
+    # 해석 온톨로지 적재 요약(0020) — 어휘 판 · 꾸러미 파일 · 실은 건수 · 경고. 행은 onto_objects(report_id 로 묶임).
+    ontology: Mapped[dict | None] = mapped_column(JSONB)
     # 과제/개발단계 수동 메타 — {project, dev_revision:{phase,round?}, design_variation?, doe?}.
     # DataHub 등재 폼의 기본값으로도 쓰인다.
     eng_meta: Mapped[dict | None] = mapped_column(JSONB)
@@ -365,6 +367,10 @@ class OntoObject(Base):
     merged_into: Mapped[str | None] = mapped_column(String(300))
     source: Mapped[str] = mapped_column(String(20), default=SOURCE_SELF, nullable=False)
     updated_at: Mapped[str | None] = mapped_column(String(40))   # 허브가 준 ISO 문자열 그대로
+    # 리포트에서 나온 행(해석 어휘 cae_* — 0020)이면 그 리포트. 리포트를 지우면 함께 사라지고, 읽기는 리포트 가시성을 따른다.
+    # 허브 거울 · 우리 개정은 비어 있다 — 전사 공개 보기(`/ontology/objects`)는 비어 있는 행만 낸다.
+    report_id: Mapped[str | None] = mapped_column(
+        ForeignKey("impact_reports.id", ondelete="CASCADE"), index=True, nullable=True)
     synced_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -397,6 +403,8 @@ class OntoRelation(Base):
     # 끊은 선은 지우지 않고 표시만 한다(이 표의 규약 — sp-receive-1030 결정)
     deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
     source: Mapped[str] = mapped_column(String(20), default=SOURCE_SELF, nullable=False)
+    report_id: Mapped[str | None] = mapped_column(          # 리포트에서 나온 선(0020) — OntoObject.report_id 와 같은 뜻
+        ForeignKey("impact_reports.id", ondelete="CASCADE"), index=True, nullable=True)
     synced_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

@@ -59,7 +59,12 @@ def _unsafe_name(name: str) -> bool:
     return any(part in ("..",) for part in n.split("/"))
 
 
+ONTOLOGY_SUFFIX = ".ontology.json"     # 후처리 온톨로지 꾸러미 — 짝 HTML 과 같은 폴더 · 같은 이름 줄기(KooD3plotReader 계약 초안 2)
+
+
 def _classify(name: str) -> str:
+    if name.lower().endswith(ONTOLOGY_SUFFIX):
+        return "ontology"
     ext = posixpath.splitext(name.lower())[1]
     if ext in (".html", ".htm"):
         return "html"
@@ -163,10 +168,14 @@ def extract(raw: bytes, filename: str | None = None) -> dict:
         media.append({"path": n, "bytes": len(d), "data": d, "ext": ext,
                       "kind": "image" if ext in IMAGE_EXT else "video",
                       "can_llm_view": ext in IMAGE_EXT})
+    # 고른 HTML 과 같은 폴더 · 같은 이름 줄기의 꾸러미 하나만 짝으로 본다(report_<그룹>.html ↔ report_<그룹>.ontology.json)
+    pair = posixpath.splitext(html_name)[0] + ONTOLOGY_SUFFIX
+    onto = next(({"name": posixpath.basename(n), "data": d} for n, d in members if n == pair), None)
     out = {
         "html_name": html_name,
         "html": html,
         "media": media,
+        "ontology": onto,
         "n_html": len(htmls),
         "skipped": {k: v for k, v in skipped.items() if v},
         "total_bytes": total,
