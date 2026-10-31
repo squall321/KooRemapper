@@ -52,9 +52,10 @@ SP 키트 2026-10-21 판(규칙 16 · 시험장 8단계 자동 시험) 받기 ·
 | 해석 온톨로지 — 붙이기 | 후처리 산출 폴더의 `<리포트 이름>.ontology.json`(리포트 HTML 과 같은 줄기)을 「꾸러미 붙이기」 로 | 파트 판정(위험한 것부터) · 하중 경로(충격량 큰 것부터) 표. 남의 리포트 꾸러미면 「이 리포트의 꾸러미가 아니다」 로 거절되고 아무것도 안 바뀐다 |
 | MCP | `report_cae(report_id)` · `find_cae_parts(min_severity="CRITICAL")` | 붙인 리포트면 `loaded: true` 와 파트 목록, 아니면 `loaded: false` 와 붙이는 길. 찾기는 읽을 수 있는 리포트(소유 · 같은 소속)의 것만 |
 
-운영에서 꾸러미가 생기는 것은 `koo_ontology` 가 든 후처리 이미지가 깔린 뒤다(KooD3plotReader `post_analyze` 마지막 단계) — 그전에는 「없음」 이
-정상이다. 후처리 예약(7-1) 길은 아직 꾸러미를 저절로 받지 않는다 — 그 길에서는 꾸러미가 생기지 않고(생산 쪽에 물음) 귀환 매니페스트에도 칸이
-없다(KooSlurm 에 청함 — `kooslurm-ontology-manifest-request-2026-10-31.md`).
+운영에서 꾸러미가 생기는 것은 꾸러미를 내는 후처리 이미지가 stcx 에 깔린 뒤다 — 그전에는 「없음」 이 정상이다. 후처리 예약(7-1) 반입은
+귀환 매니페스트의 꾸러미(`reports[].ontology`)를 저절로 싣는다. 세 자리가 다 서야 실제로 실린다 — KooSlurm 작성기(`b6a3d75c`, icn401 반영 뒤
+제출한 잡부터) · 리포트 도구가 `-o` HTML 곁에 꾸러미를 쓰는 후처리 이미지(KooD3plotReader (A), 판 이름 대기) · 이 판의 DynaForge. 하나라도 없으면
+리포트만 반입되고 잡 `external_ref.ontology.state` 가 `no_field`(옛 작성기) · `absent`(꾸러미 없음)다 — 둘 다 정상이고 경고가 아니다.
 
 ## 2. cae00 — 후처리 예약(7-1) 설정
 `platform/.env`(KooRemapper)에 둘. **값은 화면 · 로그 · 채팅에 붙이지 않는다.**

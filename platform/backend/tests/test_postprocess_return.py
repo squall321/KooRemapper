@@ -26,9 +26,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import httpx
 import pytest
 import ulid
-from sqlalchemy import delete
+from sqlalchemy import delete, func, select
 
-from app.models import ImpactReport, Job, Session, SessionFile, User
+from app.models import ImpactReport, Job, OntoObject, Session, SessionFile, User
 from app.runner.kooslurm_client import KooSlurmClient
 from app.shared import diagnostics, security, storage
 from app.worker import postprocess_return as pr
@@ -438,6 +438,95 @@ async def test_a_download_that_does_not_match_the_manifest_fails(db, owner, slur
     await _poll(db, job)
     assert job.status == "failed" and "매니페스트와 다르다" in job.error_summary
     assert (await db.get(Job, job.id)).external_ref.get("report_ids") is None
+
+
+# ── 리포트 곁의 해석 온톨로지 꾸러미(매니페스트 reports[].ontology — KooSlurm b6a3d75c, 사용자 결정 10-31 (가)) ──────
+ONTO = "output/sphere_report.ontology.json"
+_CAE_FIX = Path(__file__).with_name("fixtures") / "cae_package_v14_min.json"
+
+
+def _package_for(raw_html: bytes, *, html_sha: str | None = None) -> bytes:
+    """픽스처 꾸러미(v14 런 둘)를 이 리포트 HTML 의 짝으로 — 머리 지문을 이 HTML 로, 런 키를 이 리포트의 각도로 바꾼다."""
+    from app.reports import parser
+    keys = [c["case_key"] for c in parser.parse_html(raw_html.decode("utf-8", "replace"), kind_hint="sphere")["cases"]]
+    pkg = json.loads(_CAE_FIX.read_text(encoding="utf-8"))
+    pkg["source"]["html"] = {"file": "sphere_report.html", "sha256": html_sha or hashlib.sha256(raw_html).hexdigest()}
+    runs = iter(keys)
+    for o in pkg["objects"]:
+        if o["type"] == "cae_run":
+            o["properties"]["case_key"] = next(runs)
+    return json.dumps(pkg).encode()
+
+
+def _onto_field(pkg: bytes, **over) -> dict:
+    return {"path": ONTO, "present": True, "size": len(pkg), "sha256": hashlib.sha256(pkg).hexdigest(), **over}
+
+
+@needs_sphere
+@_aio
+async def test_a_package_beside_the_report_is_loaded_onto_it(db, owner, slurm):
+    u, s = owner
+    raw = _SPHERE.read_bytes()
+    pkg = _package_for(raw)
+    m = _manifest(raw)
+    m["reports"][0]["ontology"] = _onto_field(pkg)
+    slurm.manifest, slurm.files[REPORT], slurm.files[ONTO] = m, raw, pkg
+    job = await _reserved(db, u, s)
+    await _poll(db, job)
+    assert job.status == "succeeded", job.error_summary
+    onto = job.external_ref["ontology"]
+    assert onto["state"] == "loaded" and onto["rows"]["cae_part"] == 23, onto
+    assert not [w for w in job.warnings or [] if "온톨로지" in w]
+    rep = await db.get(ImpactReport, job.external_ref["report_ids"][0])
+    assert rep.ontology["sha256"] == hashlib.sha256(pkg).hexdigest()
+    n = (await db.execute(select(func.count()).select_from(OntoObject).where(OntoObject.report_id == rep.id))).scalar_one()
+    assert n == 94, "캠페인 수준 행"
+    assert not _kst_anywhere(job)
+    from app.config import settings
+    assert not (settings.storage_dir / ".incoming" / f"{rep.id}.ontology.part").exists(), "임시 파일이 남았다"
+
+
+@needs_sphere
+@_aio
+@pytest.mark.parametrize("field,state", [(None, "no_field"),
+                                         ({"path": ONTO, "present": False, "size": None, "sha256": None}, "absent")])
+async def test_no_package_is_recorded_without_a_warning(db, owner, slurm, field, state):
+    """칸이 없는 옛 작성기 · 이번 잡에 꾸러미가 없음 — 둘 다 정상이다(꾸러미는 덧붙이는 산출물). 원장에만 갈라 적는다."""
+    u, s = owner
+    raw = _SPHERE.read_bytes()
+    m = _manifest(raw)
+    if field is not None:
+        m["reports"][0]["ontology"] = field
+    slurm.manifest, slurm.files[REPORT] = m, raw
+    job = await _reserved(db, u, s)
+    await _poll(db, job)
+    assert job.status == "succeeded" and job.external_ref["ontology"] == {"state": state}
+    assert not [w for w in job.warnings or [] if "온톨로지" in w]
+    assert not [c for c in slurm.calls if c[1] == ONTO], "없는 꾸러미를 받으러 갔다"
+
+
+@needs_sphere
+@_aio
+@pytest.mark.parametrize("case,word", [("download", "매니페스트와 다르다"), ("pairing", "이 리포트의 꾸러미가 아니다"),
+                                       ("outside", "결과 폴더 밖")])
+async def test_a_package_that_does_not_load_warns_and_keeps_the_report(db, owner, slurm, case, word):
+    """꾸러미가 깨져도 리포트 반입 · 잡 성공은 그대로다 — 경고로만 남긴다."""
+    u, s = owner
+    raw = _SPHERE.read_bytes()
+    pkg = _package_for(raw, html_sha="f" * 64 if case == "pairing" else None)
+    m = _manifest(raw)
+    m["reports"][0]["ontology"] = _onto_field(pkg, **({"path": "/data/x.ontology.json"} if case == "outside" else {}))
+    slurm.manifest, slurm.files[REPORT], slurm.files[ONTO] = m, raw, pkg[:-5] if case == "download" else pkg
+    job = await _reserved(db, u, s)
+    await _poll(db, job)
+    assert job.status == "succeeded", job.error_summary
+    onto = job.external_ref["ontology"]
+    assert onto["state"] == "failed" and word in onto["why"], onto
+    assert any("해석 온톨로지 꾸러미를 싣지 못했다" in w and word in w for w in job.warnings)
+    rep = await db.get(ImpactReport, job.external_ref["report_ids"][0])
+    assert rep is not None and rep.ontology is None, "리포트는 남고 꾸러미만 빠진다"
+    n = (await db.execute(select(func.count()).select_from(OntoObject).where(OntoObject.report_id == rep.id))).scalar_one()
+    assert n == 0
 
 
 @_aio

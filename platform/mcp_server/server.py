@@ -1004,7 +1004,8 @@ async def attach_cae_package(
 
     받아들인 어휘 판 · 짝 HTML 지문(꾸러미의 source.html 이 이 리포트 원본 HTML 과 같아야 한다) · 종류 · 런 키가 맞아야 한다 —
     하나라도 어긋나면 아무것도 바뀌지 않는다. 같은 꾸러미는 멱등, 다른 꾸러미면 그 리포트의 행을 통째로 바꾼다. 리포트를 번들(.zip)로
-    올리면 같은 폴더 · 같은 이름 줄기의 꾸러미는 저절로 실린다.
+    올리면 같은 폴더 · 같은 이름 줄기의 꾸러미는 저절로 실린다. 후처리 예약(postprocess) 반입도 귀환 매니페스트에 꾸러미가 있으면
+    저절로 싣는다(잡의 external_ref.ontology.state).
     Load a postprocess ontology package into a report (campaign-level rows only); all-or-nothing, idempotent."""
     import os as _os
     if not _os.path.isfile(path):

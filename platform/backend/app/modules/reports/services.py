@@ -1461,7 +1461,8 @@ async def ontology_view(db: AsyncSession, report: ImpactReport) -> dict:
     if not isinstance(report.ontology, dict):
         return {"report_id": rid, "loaded": False,
                 "why": "이 리포트에 실은 해석 온톨로지가 없다 — 후처리 꾸러미(<리포트 이름>.ontology.json)를 번들에 함께 넣거나 "
-                       "POST /reports/{id}/cae · MCP attach_cae_package 로 붙인다"}
+                       "POST /reports/{id}/cae · MCP attach_cae_package 로 붙인다(후처리 예약 반입은 귀환 매니페스트에 "
+                       "꾸러미가 있으면 저절로 싣는다)"}
     rows = (await db.execute(select(OntoObject).where(OntoObject.report_id == rid))).scalars().all()
     edges = (await db.execute(select(OntoRelation).where(OntoRelation.report_id == rid))).scalars().all()
     by: dict[str, list[OntoObject]] = {}

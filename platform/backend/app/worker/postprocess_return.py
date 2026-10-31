@@ -29,6 +29,7 @@ from app.config import settings
 from app.database import SessionLocal
 from app.models import ImpactReport, Job, Session, User
 from app.modules.reports import services as report_svc
+from app.reports.onto_package import OntoPackageError
 from app.runner.kooslurm_client import MANIFEST_PATH, SSO_PATH, KooSlurmClient, mint_user_token
 from app.runner.stcx_client import STATES_BAD, STATES_OK
 from app.worker.runner_loop import _POLL_BATCH, _next_poll_delay
@@ -461,3 +462,61 @@ async def _fetch_and_ingest(db, job: Job, ref: dict, client: KooSlurmClient, ver
     if verdict["warnings"]:
         job.warnings = [*(job.warnings or []), *verdict["warnings"]]
     logger.info("postprocess job %s ingested %s → report %s", job.id, ref["job_key"], report.id)
+
+    # 리포트 곁의 해석 온톨로지 꾸러미 — 반입 · 잡 성공을 **먼저 굳힌 뒤** 싣는다. 싣기가 깨지면 attach_ontology 가 세션을
+    # 되감는데, 그때 굳히지 않은 반입까지 함께 되감기면 안 된다(리포트가 정본이고 꾸러미는 덧붙이는 산출물이다).
+    jid, rid = job.id, report.id
+    await db.commit()
+    onto = await _attach_package(db, client, str(ref["slurm_job_id"]), rid, entry, cap)
+    j = await db.get(Job, jid)
+    j.external_ref = {**(j.external_ref or {}), "ontology": onto}
+    if onto["state"] == "failed":
+        j.warnings = [*(j.warnings or []), f"해석 온톨로지 꾸러미를 싣지 못했다 — {onto['why']} (리포트는 반입됐다)"]
+
+
+async def _attach_package(db, client: KooSlurmClient, sid: str, rid: str, entry: dict, cap: int) -> dict:
+    """매니페스트 리포트 항목의 `ontology`(KooSlurm `b6a3d75c` — 짝 HTML 곁 `<kind>_report.ontology.json` 의 경로 · 크기 · sha256)를
+    받아 그 리포트에 싣는다(`attach_ontology` — 어휘 판 · 짝 HTML 지문 · 종류 · 런 키를 검사한다).
+
+    → 원장(`external_ref.ontology`)에 남길 `{"state": …}` — `loaded` · `absent`(이번 잡에 꾸러미가 없다) · `no_field`(칸을 모르는 옛
+    작성기) · `failed`(+ `why`). **무엇이 깨져도 잡을 실패로 만들지 않는다** — 부르는 쪽이 `failed` 만 경고로 올린다.
+    """
+    pkg = entry.get("ontology")
+    if not isinstance(pkg, dict):
+        return {"state": "no_field"}
+    if not pkg.get("present"):
+        return {"state": "absent"}
+    path = str(pkg.get("path") or "")
+    if not path or path.startswith("/") or ".." in PurePosixPath(path).parts:
+        return {"state": "failed", "why": f"꾸러미가 결과 폴더 밖에 있다(path={path!r}) — 파일 REST 로 받을 수 없다"}
+    size, sha = pkg.get("size"), str(pkg.get("sha256") or "")
+    if not isinstance(size, int) or not sha:
+        return {"state": "failed", "why": "매니페스트의 꾸러미 칸에 크기 · sha256 이 없다"}
+    if size > cap:
+        return {"state": "failed", "why": f"꾸러미가 반입 상한({settings.max_upload_mb} MB)보다 크다({size} 바이트)"}
+    incoming = settings.storage_dir / ".incoming"
+    incoming.mkdir(parents=True, exist_ok=True)
+    part = incoming / f"{rid}.ontology.part"
+    try:
+        got = await client.download(sid, path, part, max_bytes=cap)
+        if not got.get("ok"):
+            return {"state": "failed", "why": f"꾸러미를 받지 못했다 — {got.get('error')}: {got.get('detail') or ''}".rstrip(": ")}
+        if got["bytes"] != size or got["sha256"] != sha:
+            return {"state": "failed", "why": f"내려받은 꾸러미가 매니페스트와 다르다(크기 {got['bytes']}/{size} · sha256 "
+                                              f"{got['sha256'][:12]}/{sha[:12]})"}
+        raw = await asyncio.to_thread(part.read_bytes)
+    finally:
+        part.unlink(missing_ok=True)
+    report = await db.get(ImpactReport, rid)
+    if report is None:
+        return {"state": "failed", "why": "반입한 리포트를 찾지 못했다"}
+    try:
+        summary = await report_svc.attach_ontology(db, report, raw, filename=PurePosixPath(path).name)
+    except OntoPackageError as exc:
+        return {"state": "failed", "why": f"꾸러미를 받지 않았다 — {exc}"}
+    except Exception as exc:  # noqa: BLE001 — 꾸러미 하나가 반입한 리포트 · 잡 성공을 무르게 하면 안 된다
+        logger.exception("postprocess report %s: ontology package attach crashed", rid)
+        await db.rollback()
+        return {"state": "failed", "why": f"꾸러미를 싣다 깨졌다 — {type(exc).__name__}: {exc}"}
+    return {"state": "loaded", "sha256": summary["sha256"], "rows": summary["counts"]["loaded"],
+            "warnings": summary.get("warnings") or []}

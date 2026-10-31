@@ -372,6 +372,7 @@ run_operation(session_id, "postprocess", {
 | 위임 창구 4xx | 비밀 · 허용 클라이언트 · 이메일 형식 문제입니다. 바로 실패로 닫습니다(5xx 와 연결 오류는 다시 봅니다) |
 | 시간 초과 · 5xx | 다시 봅니다(기한이 상한) |
 | 매니페스트 200, 리포트 있음 | 크기와 sha256 을 맞춘 뒤 반입하고 성공으로 닫습니다 |
+| (10-31) 리포트 항목에 꾸러미(`reports[].ontology`, KooSlurm `b6a3d75c`) | 반입을 굳힌 뒤 크기 · sha256 을 맞춰 그 리포트에 해석 온톨로지로 싣습니다. 꾸러미가 없거나 깨져도 잡은 성공이고, 깨진 것만 `warnings` 에 남깁니다. 결과는 `external_ref.ontology.state`(`loaded` · `absent` · `no_field`(칸을 모르는 옛 작성기) · `failed`) |
 | 매니페스트 200, 리포트 없음 · early_exit · 다른 sim_type | 매니페스트의 까닭을 그대로 실어 실패로 닫습니다 |
 | 404 인데 클러스터 잡이 이미 끝남 | 2분을 더 기다린 뒤 닫습니다(NFS 지연). 까닭에는 「C(`POST /api/jobs/<id>/postprocess`)로 다시 걸 수 있다」를 적습니다. 단, C 가 도는 중이면(`.prev.json` 있음) 계속 기다립니다 |
 | 클러스터가 잡을 모름(`/info` 404 세 번 연달아) | job_key 를 확인하라는 까닭으로 닫습니다 |

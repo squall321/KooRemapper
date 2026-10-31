@@ -24,7 +24,7 @@
 - 짝 — 머리 `source.html.sha256` 이 리포트 원본 HTML 의 지문과 같아야 한다. 종류(sphere · impact · deep)가 맞아야 한다. 꾸러미의 런 키가 리포트의
   `case_key` 와 맞는지 본다(하나도 안 맞으면 거절, 일부면 경고).
 - 들어오는 길 — REST `POST /reports/{id}/cae`(꾸러미 JSON) · MCP `attach_cae_package(report_id, path)` · 번들 반입이 같은 이름 줄기의 꾸러미를 저절로.
-  후처리 예약(7-1) 길은 KooSlurm 귀환 매니페스트에 꾸러미 항목이 생긴 뒤(요청).
+  후처리 예약(7-1) 반입은 귀환 매니페스트의 `reports[].ontology`(KooSlurm `b6a3d75c`)를 받아 저절로 싣는다 — 실패는 경고, 잡은 성공.
 ### 질의
 - 리포트 하나 — `GET /reports/{id}/cae`(캠페인 · 파트 판정 · 하중 경로 · 소견 · 경고). 리포트 가시성 그대로.
 - 리포트를 건너 — `GET /cae/parts`(판정 · 안전율로) · `GET /cae/load-paths`(충격량 · 맞닿은 비율 순). **읽을 수 있는 리포트의 것만**(`_readable_scope`, 관리자는 전사).
@@ -42,7 +42,7 @@
 - [x] 질의 REST · MCP 넷 · 일반 보기에서 `cae_*` 빼기 + 시험 · 문서 쓸기(TOOLS · 개수 · 패리티) (`220df28` · `4ada7ba`)
 - [x] 화면 — 리포트 상세 「해석 온톨로지」 — 실물 v14 를 화면에서 붙여 확인(없음 · 남의 꾸러미 거절 · 실림 23/21 · 멱등 · 종류 다름 거절 뒤 그대로)
 - [x] 백엔드 전체(813) · 스모크(MCP 89 · 리포트 54/54) · 화면 확인 · dev 반영 · 커밋 · Drive 게시(`dist-20261031-214338Z`) · KooSlurm 매니페스트 요청 · KooD3plotReader 알림 (`eea5098` · `4646a82`)
-- [ ] 7-1 길 받는 쪽(`postprocess_return` — 반입 뒤 꾸러미 받아 싣기, 실패는 경고) — KooSlurm 칸 모양 · 생산 쪽 (A)/(B) 답이 온 뒤
+- [x] 7-1 길 받는 쪽(`postprocess_return` — 반입을 굳힌 뒤 꾸러미 받아 싣기, 실패는 경고 · 원장 `external_ref.ontology.state`) + 시험 여섯
 
 ## 결정 기록
 - (10-31) 위 사용자 결정.
@@ -55,3 +55,7 @@
   생산 쪽 꾸러미 단계는 `post_analyze.sh` 의 Step O(`<TEST_DIR>/report*.json` · `impact_report.json`)뿐이다. 그래서 KooSlurm 매니페스트 칸만으로는
   모자라다 — KooSlurm 에 칸(`kooslurm-ontology-manifest-request-2026-10-31.md`), KooD3plotReader 에 (A) 도구가 스스로 / (B) 셸이 부른다
   (`kood3plotreader-ontology-adopted-2026-10-31.md`, 우리 의견 (A))를 물었다. 받는 쪽(`postprocess_return`)은 모양이 정해진 뒤 짓는다.
+- (10-31) 답 둘 — KooSlurm 이 제안 모양 그대로 넣었다(`b6a3d75c` — 리포트 항목 안 `ontology`, ok · version 그대로, 소스로 확인).
+  KooD3plotReader 는 (A) — 리포트 도구가 JSON · HTML 뒤에 공용 함수로 `-o` HTML 곁에 꾸러미를 쓴다(실패해도 예외 없음). pyKooCAE 는 손댈 것이 없다.
+  그래서 받는 쪽을 지었다 — 반입 · 잡 성공을 **먼저 커밋한 뒤** 싣는다(`attach_ontology` 는 실패하면 세션을 되감는다). 칸 없음(`no_field`) ·
+  꾸러미 없음(`absent`)은 정상이라 경고하지 않고 원장에만 갈라 적는다 — 생산 쪽 이미지가 깔리기 전에는 모든 잡이 그렇다.

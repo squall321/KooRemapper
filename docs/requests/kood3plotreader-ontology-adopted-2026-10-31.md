@@ -39,3 +39,9 @@
 ## 3. 묻는 것
 1. (A) · (B) 어느 쪽으로 하실지 — (B) 면 알려 주십시오, pyKooCAE 에 청하겠습니다.
 2. `koo_ontology` 가 든 후처리 이미지의 판 이름(stcx 설치 요청에 함께 적겠습니다).
+
+## 4. 답 (10-31)
+- **(A)** — 리포트 도구가 JSON · HTML 을 다 쓴 뒤 공용 함수(`koo_deep_report.ontology.emit.beside`)로 `-o` HTML 곁에 `<줄기>.ontology.json` 을 쓴다.
+  실패해도 예외를 올리지 않는다. pyKooCAE 는 손댈 것이 없다. post_analyze Step O 는 S1 다음에 같은 파일을 S1 정보까지 실어 다시 쓴다.
+- 판 이름은 아직 — (A) 까지 담은 최종 커밋으로 빌드한다(어휘 0.3 그대로).
+- 0.4 칸 정의를 받았다 — `cae_run.properties` 맨 끝(`s1_sha256` 다음)에 `flow_scalars_only`(bool). 생산 쪽은 우리 0.4 커밋을 받은 다음 판에서 올린다.

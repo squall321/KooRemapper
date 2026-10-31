@@ -125,7 +125,7 @@ SmartTwin 파이프라인이 만든 deep(단건 심층)·sphere(전각도 낙하
 
 | 도구 | 인자 | REST | 메모 |
 | --- | --- | --- | --- |
-| `attach_cae_package` | report_id, path | POST /reports/{id}/cae | 꾸러미를 싣는다(소유자). 어휘 판 · 짝 HTML 지문 · 종류 · 런 키가 맞아야 — 아니면 아무것도 안 바뀐다. 번들 반입은 같은 이름 줄기를 저절로 |
+| `attach_cae_package` | report_id, path | POST /reports/{id}/cae | 꾸러미를 싣는다(소유자). 어휘 판 · 짝 HTML 지문 · 종류 · 런 키가 맞아야 — 아니면 아무것도 안 바뀐다. 번들 반입은 같은 이름 줄기를, 후처리 예약(postprocess) 반입은 귀환 매니페스트의 꾸러미를 저절로 |
 | `report_cae` | report_id | GET /reports/{id}/cae | 리포트 하나 — 파트 판정(위험한 것부터 · 최악 런 각도) · 하중 경로(충격량 큰 것부터) · 접촉 · 소견 · 응력 집중. 안 실었으면 `loaded:false` |
 | `find_cae_parts` | min_severity?·max_safety_factor?·project?·kind?·limit? | GET /cae/parts | 리포트를 건너 파트 판정 — 위험한 순으로 매긴 뒤 자른다. 읽을 수 있는 리포트의 것만 |
 | `find_cae_load_paths` | sort?·min_engage_ratio?·project?·kind?·limit? | GET /cae/load-paths | 리포트를 건너 하중 경로(파트 쌍) — 충격량 · 맞닿은 비율 … 큰 것부터 |
