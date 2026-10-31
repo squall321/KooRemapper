@@ -429,6 +429,40 @@ export async function getReportCase(reportId: string, caseKey: string): Promise<
   const { data } = await api.get(`/reports/${reportId}/cases/${encodeURIComponent(caseKey)}`)
   return unwrap<ReportCase>(data)
 }
+
+/** 리포트에 실은 해석 온톨로지(후처리 꾸러미를 캠페인 수준으로 — 사용자 결정 10-31 (가)). 칸 이름은 어휘 dynaforge-cae 그대로다. */
+export interface CaePart {
+  key: string; label: string; part_id?: number; severity?: string
+  min_safety_factor?: number; safety_factor_complete?: boolean; worst_von_mises?: number; worst_g?: number
+  worst_von_mises_run_case?: string; worst_von_mises_run_identity?: Record<string, unknown>
+}
+export interface CaeLoadPath {
+  key: string; label: string; part_a_name?: string | null; part_b_name?: string | null
+  n_runs_engaged?: number; engage_ratio?: number; impulse_max?: number; peak_force_max?: number
+}
+export interface CaeSummary {
+  vocabulary?: { version?: string; sha256?: string }; file?: string; units?: string | null
+  producer?: { tool?: string; adapter?: string; version?: string } | null
+  runs?: { package: number; matched: number; missing: string[] }; warnings?: string[]; loaded_at?: string
+}
+export type CaeView =
+  | { report_id: string; loaded: false; why: string }
+  | {
+      report_id: string; loaded: true; summary: CaeSummary
+      campaign: { label: string; values_normalized?: boolean; unit_system?: string; unit_note?: string } | null
+      parts: CaePart[]; load_paths: CaeLoadPath[]; contacts: unknown[]; findings: unknown[]; hotspots: unknown[]
+    }
+export async function reportCae(reportId: string): Promise<CaeView> {
+  const { data } = await api.get(`/reports/${reportId}/cae`)
+  return unwrap<CaeView>(data)
+}
+/** 꾸러미(<리포트 이름>.ontology.json)를 싣는다 — 소유자만. 짝이 안 맞으면 422(아무것도 안 바뀐다). */
+export async function attachCae(reportId: string, file: File): Promise<CaeSummary & { already: boolean }> {
+  const fd = new FormData()
+  fd.append('file', file)
+  const { data } = await api.post(`/reports/${reportId}/cae`, fd)
+  return unwrap<CaeSummary & { already: boolean }>(data)
+}
 /** 세션 파일을 바이트로 — glb 처럼 화면이 직접 읽는 파일(인증 헤더가 필요해 직접 받는다). */
 export async function sessionFileBytes(sessionId: string, fileId: number): Promise<ArrayBuffer> {
   const res = await api.get(`/sessions/${sessionId}/files/${fileId}/download`, { responseType: 'arraybuffer' })

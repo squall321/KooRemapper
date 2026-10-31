@@ -11,8 +11,10 @@ import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Input, Spinner }
 import { errorMessage } from '@/shared/api/client'
 import { ConfirmDialog } from '@/shared/components/ConfirmDialog'
 import { ReportAnalysis } from './ReportAnalysis'
+import { CaePanel } from './CaePanel'
 import { RevisionPanel } from './RevisionPanel'
 import { ReportVisuals } from './ReportVisuals'
+import { identityLabel } from './caseIdentity'
 
 const KIND_LABEL: Record<string, string> = {
   deep: '단건 심층', sphere: '전각도 낙하', impact: '전위치 부분충격',
@@ -217,6 +219,8 @@ function ReportDetail({ sessionId, reportId, files }: { sessionId: string; repor
           화면이 받아 보여 주는 자리다(안 보여 주면 "말했다" 는 사실에 의미가 없다). */}
       <RevisionPanel reportId={reportId} />
 
+      <CaePanel reportId={reportId} />
+
       <div className="flex items-center gap-2 flex-wrap">
         {r.source_file_id != null && (
           <Button size="sm" variant="ghost" onClick={async () => setHtmlUrl(await reportHtmlBlobUrl(sessionId, r.source_file_id!))}>
@@ -272,13 +276,7 @@ function Findings({ items }: { items: ReportFinding[] }) {
 }
 
 function caseLabel(c: ReportCase): string {
-  const id = c.identity ?? {}
-  const angle = (id as { angle?: { name?: string } }).angle
-  if (angle?.name) return angle.name
-  const face = (id as { face?: string; pos_id?: string }).face
-  const pos = (id as { pos_id?: string }).pos_id
-  if (face || pos) return pos ?? face ?? c.case_key
-  return c.case_key
+  return identityLabel(c.identity, c.case_key)
 }
 
 /** 메타 상태 키 — 이 값이 바뀌면 편집기/등재폼을 리마운트해 낡은 state 를 버린다. */

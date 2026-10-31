@@ -36,11 +36,11 @@
 - 런 단위 행(사용자 결정 (가)) · `cae_*` 를 허브로 내보내기 · 어휘 0.4(`flow_scalars_only`)는 생산 쪽 표식이 배포될 때 함께(그쪽 제안 — 넣는 것은 동의).
 
 ## 체크리스트
-- [ ] 정본 어휘 0.3 바이트 그대로 · 받아들인 판 목록 · 꾸러미 검사(순수 함수) + 시험
-- [ ] 마이그레이션 0020 — `onto_objects.report_id` · `onto_relations.report_id`(FK CASCADE · 색인) · `impact_reports.ontology`
-- [ ] 적재 서비스 · REST 붙이기 · 번들 반입 연결 + 시험(실물 표본 v14 · impA · deep)
-- [ ] 질의 REST · MCP 넷 · 일반 보기에서 `cae_*` 빼기 + 시험 · 문서 쓸기(TOOLS · 개수 · 패리티)
-- [ ] 화면 — 리포트 상세 「해석 온톨로지」
+- [x] 정본 어휘 0.3 바이트 그대로 · 받아들인 판 목록 · 꾸러미 검사(순수 함수) + 시험 (`0e9c9da`)
+- [x] 마이그레이션 0020 — `onto_objects.report_id` · `onto_relations.report_id`(FK CASCADE · 색인) · `impact_reports.ontology` (`220df28`)
+- [x] 적재 서비스 · REST 붙이기 · 번들 반입 연결 + 시험(실물 표본 v14 · impA · deep) (`220df28`)
+- [x] 질의 REST · MCP 넷 · 일반 보기에서 `cae_*` 빼기 + 시험 · 문서 쓸기(TOOLS · 개수 · 패리티) (`220df28` · `4ada7ba`)
+- [x] 화면 — 리포트 상세 「해석 온톨로지」 — 실물 v14 를 화면에서 붙여 확인(없음 · 남의 꾸러미 거절 · 실림 23/21 · 멱등 · 종류 다름 거절 뒤 그대로)
 - [ ] 백엔드 전체 · 스모크 · 화면 확인 · dev 반영 · 커밋 · Drive 게시 · KooSlurm 매니페스트 요청 · KooD3plotReader 알림
 
 ## 결정 기록
