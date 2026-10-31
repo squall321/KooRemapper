@@ -1,0 +1,1176 @@
+{
+  "_note": "DynaForge 해석 결과 어휘(그룹 cae) — SP import 꼴. 전각도 낙하·전위치 부분충격·단일 런 후처리 결과를 온톨로지 인스턴스로 싣기 위한 타입·관계(구조·충격해석 개념을 DynaForge 전용 slug cae_ 로 묶었다). 정본은 DynaForge platform/core/ontology/dynaforge-cae.json 이다. 만드는 쪽(KooD3plotReader python/koo_deep_report/koo_deep_report/ontology/dynaforge-cae.json)은 이 파일의 바이트 사본을 싣고 꾸러미 머리 vocabulary.sha256 으로 맞춰 본다 — 고칠 때는 정본을 고치고 `_version` 을 올린 뒤 사본을 바이트 그대로 옮긴다.",
+  "_version": "0.3",
+  "groups": [
+    {
+      "slug": "cae",
+      "label": "해석 결과",
+      "sort_order": 20
+    }
+  ],
+  "types": [
+    {
+      "slug": "cae_campaign",
+      "label": "해석 캠페인",
+      "nav_group_slug": "cae",
+      "icon": "Layers",
+      "key_policy": "required",
+      "description": "후처리 한 번이 다룬 해석 묶음 — 전각도 낙하(구면 DOE), 전위치 부분충격 DOE, 또는 런 하나(deep). 리포트(`impact_report`) 하나에 캠페인 하나. 키는 적재 때 DynaForge 가 `<리포트 키>/campaign` 으로 붙인다. 값은 이 어휘의 단위(MPa·mm·s·mJ·N·N·s·mm/s·G)로 싣는다. 캠페인의 `values_normalized` 가 거짓이면 덱 단위 원값이니 캠페인끼리 견주지 말 것.",
+      "properties": [
+        {
+          "key": "report",
+          "label": "리포트",
+          "data_type": "object_ref",
+          "ref_type_slug": "impact_report",
+          "inverse_label": "해석 캠페인",
+          "help": "이 캠페인을 낸 리포트. 적재할 때 DynaForge 가 채운다 — 만드는 쪽(후처리)은 리포트 키를 모른다.",
+          "required": true
+        },
+        {
+          "key": "scenario_kind",
+          "label": "해석 종류",
+          "data_type": "enum",
+          "enum_options": [
+            "drop_all_angle",
+            "impact_all_position",
+            "single_run"
+          ],
+          "help": "drop_all_angle = 전각도 낙하(koo_sphere_report), impact_all_position = 전위치 부분충격(koo_impact_report), single_run = 런 하나(koo_deep_report).",
+          "required": true
+        },
+        {
+          "key": "test_dir",
+          "label": "캠페인 폴더",
+          "data_type": "text",
+          "help": "후처리가 읽은 캠페인 폴더 이름(경로가 아니라 이름)."
+        },
+        {
+          "key": "n_runs",
+          "label": "런 수",
+          "data_type": "number"
+        },
+        {
+          "key": "n_runs_ok",
+          "label": "성공 런 수",
+          "data_type": "number"
+        },
+        {
+          "key": "n_runs_failed",
+          "label": "실패 런 수",
+          "data_type": "number"
+        },
+        {
+          "key": "doe_strategy",
+          "label": "실험계획",
+          "data_type": "text",
+          "help": "runner_config 의 DOE 전략 이름(예 fibonacci, face_edge_corner)."
+        },
+        {
+          "key": "angular_spacing_deg",
+          "label": "각도 간격",
+          "data_type": "number",
+          "unit": "deg",
+          "help": "전각도 낙하에서 이웃 낙하 방향 사이 평균 각도."
+        },
+        {
+          "key": "sphere_coverage",
+          "label": "구면 덮임",
+          "data_type": "number",
+          "help": "낙하 방향이 구면을 덮은 비율(0–1)."
+        },
+        {
+          "key": "unit_system",
+          "label": "단위계",
+          "data_type": "enum",
+          "enum_options": [
+            "si",
+            "ton_mm_s",
+            "ton_mm_ms",
+            "g_mm_ms",
+            "unknown"
+          ],
+          "help": "덱 *MAT 밀도로 감지한 단위계(부분충격은 --units 로 줄 수도 있다). 감지 못 하면 unknown.",
+          "required": true
+        },
+        {
+          "key": "values_normalized",
+          "label": "단위 정규화",
+          "data_type": "bool",
+          "help": "참이면 모든 수치를 이 어휘의 단위로 바꿔 실었다. 거짓이면 덱 단위 원값이다(단위계를 감지 못 했을 때)."
+        },
+        {
+          "key": "unit_note",
+          "label": "단위 판정 단서",
+          "data_type": "text_long",
+          "help": "단위계를 못 정한 사유, 또는 정했지만 붙은 단서. 비어 있으면 깨끗이 판정했다."
+        },
+        {
+          "key": "g_factor",
+          "label": "1 G 환산값",
+          "data_type": "number",
+          "help": "1 G 를 덱 가속도 단위로 나타낸 값(ton-mm-s 이면 9806.65). G 값은 이것으로 나눈 결과다."
+        },
+        {
+          "key": "impactor_part_id",
+          "label": "충격체 파트",
+          "data_type": "number",
+          "help": "부분충격 DOE 의 충격체 PID. 낙하에는 없다."
+        },
+        {
+          "key": "impact_speed",
+          "label": "충격 속도",
+          "data_type": "number",
+          "unit": "mm/s",
+          "help": "충격 직전 속력. 낙하·단일 런은 덱 *INITIAL_VELOCITY 의 크기(없으면 S1 /posture 초기 속도), 부분충격은 충격체 초기 속도 크기."
+        },
+        {
+          "key": "drop_height",
+          "label": "낙하 높이",
+          "data_type": "number",
+          "unit": "mm",
+          "help": "DropSet.json initial_conditions.drop_height. 충격 속도와 √(2gh) 가 3% 안에서 맞을 때만 싣는다(높이의 단위를 그것으로 확인한다)."
+        },
+        {
+          "key": "yield_source",
+          "label": "항복값 출처",
+          "data_type": "enum",
+          "enum_options": [
+            "dropset_part_yield",
+            "yield_map",
+            "cli_yield_stress",
+            "mat_card",
+            "none"
+          ],
+          "help": "안전율에 쓴 항복 한계의 출처. none 이면 안전율을 셈하지 않았다."
+        },
+        {
+          "key": "producer",
+          "label": "만든 도구",
+          "data_type": "text"
+        },
+        {
+          "key": "producer_version",
+          "label": "만든 도구 판",
+          "data_type": "text"
+        },
+        {
+          "key": "produced_at",
+          "label": "만든 시각",
+          "data_type": "datetime"
+        }
+      ]
+    },
+    {
+      "slug": "cae_run",
+      "label": "해석 런",
+      "nav_group_slug": "cae",
+      "icon": "PlayCircle",
+      "key_policy": "required",
+      "description": "LS-DYNA 해석 한 번 — 전각도 낙하의 한 방향, 부분충격의 한 위치. 키 `<캠페인>/run/<런 폴더>`.",
+      "properties": [
+        {
+          "key": "campaign",
+          "label": "캠페인",
+          "data_type": "object_ref",
+          "ref_type_slug": "cae_campaign",
+          "inverse_label": "런",
+          "required": true
+        },
+        {
+          "key": "case_key",
+          "label": "런 키",
+          "data_type": "text",
+          "help": "리포트가 런을 부르는 이름 — DynaForge impact_cases.case_key 와 같다. 전각도 낙하는 런 폴더(Run_…, 없으면 방향 이름, 그것도 없으면 run_<순번>), 부분충격은 위치 이름(pos_id), 단일 런(deep)은 single.",
+          "required": true
+        },
+        {
+          "key": "angle_name",
+          "label": "방향 이름",
+          "data_type": "text",
+          "help": "DOE 표의 이름(F_TOP, E_…, C_…, P0123 등). 못 맞추면 R{roll}_P{pitch}_Y{yaw}."
+        },
+        {
+          "key": "roll_deg",
+          "label": "롤",
+          "data_type": "number",
+          "unit": "deg"
+        },
+        {
+          "key": "pitch_deg",
+          "label": "피치",
+          "data_type": "number",
+          "unit": "deg"
+        },
+        {
+          "key": "yaw_deg",
+          "label": "요",
+          "data_type": "number",
+          "unit": "deg",
+          "help": "DropSet initial_conditions.orientation_euler_deg. 모델은 그대로 두고 속도 벡터를 돌려 자세를 건다."
+        },
+        {
+          "key": "angle_category",
+          "label": "방향 분류",
+          "data_type": "enum",
+          "enum_options": [
+            "face",
+            "edge",
+            "corner",
+            "fibonacci",
+            "unknown"
+          ],
+          "help": "방향 이름의 접두로만 가른 분류(F/E/C/P) — 물리적으로 판정한 면·모서리·꼭짓점이 아니다."
+        },
+        {
+          "key": "impact_dir_x",
+          "label": "충격 방향 x",
+          "data_type": "number"
+        },
+        {
+          "key": "impact_dir_y",
+          "label": "충격 방향 y",
+          "data_type": "number"
+        },
+        {
+          "key": "impact_dir_z",
+          "label": "충격 방향 z",
+          "data_type": "number",
+          "help": "기기 좌표계에서 본 낙하 방향 단위벡터 d = Rᵀ(0,0,−1), R = Rx(roll)·Ry(pitch)·Rz(yaw) (리포트 지도와 같은 식)."
+        },
+        {
+          "key": "run_folder",
+          "label": "런 폴더",
+          "data_type": "text",
+          "help": "해석 산출물 폴더 이름(Run_…). case_key 가 폴더가 아닐 때(부분충격·단일 런)도 여기 있다."
+        },
+        {
+          "key": "impact_face",
+          "label": "충격 면",
+          "data_type": "text",
+          "help": "부분충격 DOE 의 면 코드(F1…F6)."
+        },
+        {
+          "key": "impact_x",
+          "label": "충격 위치 x",
+          "data_type": "number",
+          "unit": "mm",
+          "help": "면 좌표계의 충격 위치(step_config LocationX)."
+        },
+        {
+          "key": "impact_y",
+          "label": "충격 위치 y",
+          "data_type": "number",
+          "unit": "mm"
+        },
+        {
+          "key": "solver_quality",
+          "label": "해석 품질",
+          "data_type": "enum",
+          "enum_options": [
+            "PASS",
+            "WARN",
+            "FAIL",
+            "UNKNOWN"
+          ],
+          "help": "glstat 에너지 수지 게이트(총에너지 표류·hourglass·sliding) 판정. 부분충격 리포트가 낸다."
+        },
+        {
+          "key": "num_states",
+          "label": "상태 수",
+          "data_type": "number"
+        },
+        {
+          "key": "end_time",
+          "label": "끝 시각",
+          "data_type": "number",
+          "unit": "s"
+        },
+        {
+          "key": "success",
+          "label": "해석 성공",
+          "data_type": "bool",
+          "help": "분석 결과를 읽었으면 참. 거짓이면 이 런의 응답 객체가 없다."
+        },
+        {
+          "key": "analyzer_commit",
+          "label": "분석기 판",
+          "data_type": "text",
+          "help": "이 런을 분석한 unified_analyzer 의 커밋."
+        },
+        {
+          "key": "first_contact_time",
+          "label": "첫 접촉 시각",
+          "data_type": "number",
+          "unit": "s",
+          "help": "S1 /posture 의 first_contact_s(틈 ÷ 초기 속도). S1 이 없으면 비운다."
+        },
+        {
+          "key": "s1_sha256",
+          "label": "S1 파일 해시",
+          "data_type": "text",
+          "help": "같은 런 S1 경량 추출본(s1.h5)의 sha256 — s1.json 에서 온다."
+        }
+      ]
+    },
+    {
+      "slug": "cae_part",
+      "label": "해석 파트",
+      "nav_group_slug": "cae",
+      "icon": "Box",
+      "key_policy": "required",
+      "description": "해석 모델의 파트(PID) — 캠페인 안에서 하나. 런마다의 값은 `cae_part_response`, 여기에는 **전 런을 걸친 최악값(포락)**과 안전율·판정을 둔다. 키 `<캠페인>/part/<PID>`. 값은 이 어휘의 단위(MPa·mm·s·mJ·N·N·s·mm/s·G)로 싣는다. 캠페인의 `values_normalized` 가 거짓이면 덱 단위 원값이니 캠페인끼리 견주지 말 것.",
+      "properties": [
+        {
+          "key": "campaign",
+          "label": "캠페인",
+          "data_type": "object_ref",
+          "ref_type_slug": "cae_campaign",
+          "inverse_label": "파트",
+          "required": true
+        },
+        {
+          "key": "part_id",
+          "label": "파트 번호",
+          "data_type": "number",
+          "help": "LS-DYNA PID.",
+          "required": true
+        },
+        {
+          "key": "name",
+          "label": "파트 이름",
+          "data_type": "text",
+          "help": "덱 *PART 제목."
+        },
+        {
+          "key": "part_group",
+          "label": "파트 묶음",
+          "data_type": "text",
+          "help": "이름에서 `\\` 또는 `/` 앞부분. 없으면 Other."
+        },
+        {
+          "key": "material_id",
+          "label": "재질 번호",
+          "data_type": "number",
+          "help": "덱 *PART 의 MID."
+        },
+        {
+          "key": "material_type",
+          "label": "재질 모델",
+          "data_type": "text",
+          "help": "*MAT 카드 종류(ELASTIC, PIECEWISE_LINEAR_PLASTICITY 등)."
+        },
+        {
+          "key": "material_name",
+          "label": "재질 이름",
+          "data_type": "text",
+          "help": "*MAT_…_TITLE 의 제목. 제목 없는 카드면 비운다."
+        },
+        {
+          "key": "yield_limit",
+          "label": "항복 한계",
+          "data_type": "number",
+          "unit": "MPa",
+          "help": "최소 안전율을 정한 한계(binding)."
+        },
+        {
+          "key": "yield_criterion",
+          "label": "항복 기준",
+          "data_type": "text",
+          "help": "그 한계가 무엇에 대한 것인가(von_mises, max_principal)."
+        },
+        {
+          "key": "worst_von_mises",
+          "label": "최대 등가응력(전 방향)",
+          "data_type": "number",
+          "unit": "MPa",
+          "help": "모든 런의 파트 최대 von Mises 응력 σvm = √(½Σ(σi−σj)² + 3Στ²) 중 최댓값. 삭제된 요소는 뺀 리포트 정본 값."
+        },
+        {
+          "key": "worst_von_mises_run",
+          "label": "최대 등가응력 런",
+          "data_type": "object_ref",
+          "ref_type_slug": "cae_run",
+          "inverse_label": "등가응력 최악 파트"
+        },
+        {
+          "key": "worst_max_principal",
+          "label": "최대 주응력(전 방향)",
+          "data_type": "number",
+          "unit": "MPa",
+          "help": "σ1 의 전 런 최댓값 — 인장 파괴 판단."
+        },
+        {
+          "key": "worst_min_principal",
+          "label": "최소 주응력(전 방향)",
+          "data_type": "number",
+          "unit": "MPa",
+          "help": "σ3 의 전 런 최솟값(가장 큰 압축)."
+        },
+        {
+          "key": "worst_plastic_strain",
+          "label": "최대 유효소성변형률(전 방향)",
+          "data_type": "number",
+          "help": "εp 의 전 런 최댓값. 탄성분을 뺀 영구변형."
+        },
+        {
+          "key": "worst_g",
+          "label": "최대 가속도(전 방향)",
+          "data_type": "number",
+          "unit": "G",
+          "help": "파트 평균 가속도 크기의 최대를 1 G 로 나눈 값의 전 런 최댓값."
+        },
+        {
+          "key": "worst_g_run",
+          "label": "최대 가속도 런",
+          "data_type": "object_ref",
+          "ref_type_slug": "cae_run",
+          "inverse_label": "가속도 최악 파트"
+        },
+        {
+          "key": "min_safety_factor",
+          "label": "최소 안전율",
+          "data_type": "number",
+          "help": "min(항복 한계 ÷ 최대 응력) — 한계 기준별로 맞는 응력을 쓴다. 한계가 없으면 비운다."
+        },
+        {
+          "key": "safety_factor_complete",
+          "label": "안전율 완전",
+          "data_type": "bool",
+          "help": "거짓이면 한계 일부의 응력을 재지 못해 안전율이 실제보다 클 수 있다(리포트는 이때 critical 로 단정하지 않는다)."
+        },
+        {
+          "key": "severity",
+          "label": "판정",
+          "data_type": "enum",
+          "enum_options": [
+            "OK",
+            "WARNING",
+            "CRITICAL",
+            "UNKNOWN"
+          ],
+          "help": "어휘 공통: 안전율 < 1 CRITICAL, < 1.5 WARNING(불완전하면 WARNING). 전각도 낙하만 가속도 > 200,000 G CRITICAL, > 50,000 G WARNING 을 더한다(그 리포트의 규칙 — 부분충격 리포트는 가속도 절대 기준을 두지 않는다). 응력 한계가 없고 가속도도 안 걸리면 UNKNOWN. 철자는 DynaForge 소견 심각도와 같다."
+        },
+        {
+          "key": "von_mises_cov",
+          "label": "방향 의존도",
+          "data_type": "number",
+          "help": "런별 최대 등가응력의 변동계수(표준편차 ÷ 평균, 모집단). 0.5 이상이면 방향에 강하게 의존."
+        },
+        {
+          "key": "n_runs_measured",
+          "label": "잰 런 수",
+          "data_type": "number",
+          "help": "이 파트의 등가응력이 있는 런 수(포락·변동계수의 분모)."
+        }
+      ]
+    },
+    {
+      "slug": "cae_part_response",
+      "label": "파트 응답",
+      "nav_group_slug": "cae",
+      "icon": "Activity",
+      "key_policy": "required",
+      "description": "한 런에서 한 파트가 보인 최대 응답. 시계열은 담지 않는다(리포트·S1 에 있다). 키 `<캠페인>/resp/<런 키>/<PID>`. 값은 이 어휘의 단위(MPa·mm·s·mJ·N·N·s·mm/s·G)로 싣는다. 캠페인의 `values_normalized` 가 거짓이면 덱 단위 원값이니 캠페인끼리 견주지 말 것.",
+      "properties": [
+        {
+          "key": "run",
+          "label": "런",
+          "data_type": "object_ref",
+          "ref_type_slug": "cae_run",
+          "inverse_label": "파트 응답",
+          "required": true
+        },
+        {
+          "key": "part",
+          "label": "파트",
+          "data_type": "object_ref",
+          "ref_type_slug": "cae_part",
+          "inverse_label": "런별 응답",
+          "required": true
+        },
+        {
+          "key": "peak_von_mises",
+          "label": "최대 등가응력",
+          "data_type": "number",
+          "unit": "MPa",
+          "help": "von Mises 등가응력 σvm 의 시간·요소 최대(삭제 요소 제외)."
+        },
+        {
+          "key": "peak_von_mises_time",
+          "label": "최대 등가응력 시각",
+          "data_type": "number",
+          "unit": "s"
+        },
+        {
+          "key": "peak_max_principal",
+          "label": "최대 주응력",
+          "data_type": "number",
+          "unit": "MPa",
+          "help": "최대 주응력 σ1(인장)의 최대."
+        },
+        {
+          "key": "peak_max_principal_time",
+          "label": "최대 주응력 시각",
+          "data_type": "number",
+          "unit": "s"
+        },
+        {
+          "key": "min_principal",
+          "label": "최소 주응력",
+          "data_type": "number",
+          "unit": "MPa",
+          "help": "최소 주응력 σ3(압축)의 최소."
+        },
+        {
+          "key": "peak_plastic_strain",
+          "label": "최대 유효소성변형률",
+          "data_type": "number",
+          "help": "유효소성변형률 εp 의 최대. 덱이 소성을 내지 않으면 없다."
+        },
+        {
+          "key": "peak_vm_strain",
+          "label": "최대 등가변형률",
+          "data_type": "number",
+          "help": "von Mises 등가변형률 — 탄성분 포함. εp 와 다른 양이다."
+        },
+        {
+          "key": "peak_max_principal_strain",
+          "label": "최대 주변형률",
+          "data_type": "number"
+        },
+        {
+          "key": "min_principal_strain",
+          "label": "최소 주변형률",
+          "data_type": "number"
+        },
+        {
+          "key": "peak_g",
+          "label": "최대 가속도",
+          "data_type": "number",
+          "unit": "G",
+          "help": "파트 평균 가속도 크기의 최대 ÷ 1 G."
+        },
+        {
+          "key": "peak_g_time",
+          "label": "최대 가속도 시각",
+          "data_type": "number",
+          "unit": "s"
+        },
+        {
+          "key": "peak_displacement",
+          "label": "최대 변위",
+          "data_type": "number",
+          "unit": "mm",
+          "help": "파트 안 절점 변위 크기의 최대(평균 변위가 아니다)."
+        },
+        {
+          "key": "peak_internal_energy",
+          "label": "최대 내부에너지",
+          "data_type": "number",
+          "unit": "mJ",
+          "help": "matsum 파트 내부(변형)에너지의 최대."
+        },
+        {
+          "key": "peak_internal_energy_time",
+          "label": "최대 내부에너지 시각",
+          "data_type": "number",
+          "unit": "s"
+        },
+        {
+          "key": "peak_kinetic_energy",
+          "label": "최대 운동에너지",
+          "data_type": "number",
+          "unit": "mJ"
+        },
+        {
+          "key": "peak_kinetic_energy_time",
+          "label": "최대 운동에너지 시각",
+          "data_type": "number",
+          "unit": "s"
+        },
+        {
+          "key": "final_internal_energy",
+          "label": "끝 내부에너지",
+          "data_type": "number",
+          "unit": "mJ",
+          "help": "해석 끝 시각의 내부에너지 — 남은 변형에너지."
+        },
+        {
+          "key": "final_kinetic_energy",
+          "label": "끝 운동에너지",
+          "data_type": "number",
+          "unit": "mJ"
+        },
+        {
+          "key": "safety_factor",
+          "label": "안전율(이 런)",
+          "data_type": "number",
+          "help": "항복 한계 ÷ 이 런의 최대 응력(기준별, 작은 쪽)."
+        }
+      ]
+    },
+    {
+      "slug": "cae_contact",
+      "label": "접촉 정의",
+      "nav_group_slug": "cae",
+      "icon": "Link2",
+      "key_policy": "required",
+      "description": "덱의 `*CONTACT` 카드 하나(rcforc 인터페이스) — 어느 파트와 어느 파트가 닿을 수 있게 정의했나. 키 `<캠페인>/contact/<CID>`.",
+      "properties": [
+        {
+          "key": "campaign",
+          "label": "캠페인",
+          "data_type": "object_ref",
+          "ref_type_slug": "cae_campaign",
+          "inverse_label": "접촉 정의",
+          "required": true
+        },
+        {
+          "key": "contact_id",
+          "label": "접촉 번호",
+          "data_type": "number",
+          "help": "rcforc 인터페이스 번호(_ID 카드면 CID).",
+          "required": true
+        },
+        {
+          "key": "name",
+          "label": "접촉 이름",
+          "data_type": "text"
+        },
+        {
+          "key": "contact_card",
+          "label": "접촉 카드",
+          "data_type": "text",
+          "help": "키워드 이름(예 *CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_ID, *CONTACT_TIED_…). 묶임(TIED)과 맞닿음을 가른다."
+        },
+        {
+          "key": "resolution_confidence",
+          "label": "파트 매핑 신뢰도",
+          "data_type": "number",
+          "help": "양쪽을 파트로 푼 신뢰도(1.0 = PID 직독, 세그먼트 집합은 다수결 비율, 0 = 못 풂)."
+        }
+      ]
+    },
+    {
+      "slug": "cae_load_transfer",
+      "label": "하중 전달",
+      "nav_group_slug": "cae",
+      "icon": "ArrowRightLeft",
+      "key_policy": "required",
+      "description": "한 런에서 접촉 인터페이스 하나를 건너간 힘·충격량·일 — 파트 사이 에너지 흐름 네트워크의 엣지. 방향은 충격이 퍼진 순서(먼저 닿은 쪽 → 나중 쪽). 키 `<캠페인>/xfer/<런 키>/<CID>`. 값은 이 어휘의 단위(MPa·mm·s·mJ·N·N·s·mm/s·G)로 싣는다. 캠페인의 `values_normalized` 가 거짓이면 덱 단위 원값이니 캠페인끼리 견주지 말 것.",
+      "properties": [
+        {
+          "key": "run",
+          "label": "런",
+          "data_type": "object_ref",
+          "ref_type_slug": "cae_run",
+          "inverse_label": "하중 전달",
+          "required": true
+        },
+        {
+          "key": "contact",
+          "label": "접촉",
+          "data_type": "object_ref",
+          "ref_type_slug": "cae_contact",
+          "inverse_label": "런별 하중 전달"
+        },
+        {
+          "key": "from_part",
+          "label": "보내는 파트",
+          "data_type": "object_ref",
+          "ref_type_slug": "cae_part",
+          "inverse_label": "내보낸 하중 전달"
+        },
+        {
+          "key": "to_part",
+          "label": "받는 파트",
+          "data_type": "object_ref",
+          "ref_type_slug": "cae_part",
+          "inverse_label": "받은 하중 전달"
+        },
+        {
+          "key": "peak_force",
+          "label": "최대 접촉력",
+          "data_type": "number",
+          "unit": "N",
+          "help": "rcforc 접촉력 크기의 최대."
+        },
+        {
+          "key": "total_impulse",
+          "label": "충격량",
+          "data_type": "number",
+          "unit": "N·s",
+          "help": "∫|F|dt — 접촉으로 건너간 운동량의 크기."
+        },
+        {
+          "key": "total_work",
+          "label": "전달 일",
+          "data_type": "number",
+          "unit": "mJ",
+          "help": "∫F·(v_보내는−v_받는)dt — 두 파트의 **평균 강체속도 차**로 셈한 대리값(접촉면 국부 미끄럼 일이 아니다). 양 끝이 실제 파트일 때만."
+        },
+        {
+          "key": "first_engage_time",
+          "label": "첫 맞닿음 시각",
+          "data_type": "number",
+          "unit": "s",
+          "help": "접촉력이 최대의 1% 를 처음 넘은 시각."
+        },
+        {
+          "key": "propagation_depth",
+          "label": "전파 깊이",
+          "data_type": "number",
+          "help": "첫 충격 파트에서 받는 파트까지 접촉을 몇 번 건넜나(BFS)."
+        },
+        {
+          "key": "confidence",
+          "label": "파트 매핑 신뢰도",
+          "data_type": "number"
+        },
+        {
+          "key": "unresolved_side",
+          "label": "파트로 못 푼 쪽",
+          "data_type": "text",
+          "help": "한쪽이 파트가 아니면(집합·전 모델·이름 없는 인터페이스) 그 그래프 노드 이름. 그쪽 파트 참조는 비운다."
+        }
+      ]
+    },
+    {
+      "slug": "cae_load_path",
+      "label": "하중 경로",
+      "nav_group_slug": "cae",
+      "icon": "Route",
+      "key_policy": "required",
+      "description": "두 파트 사이 하중 전달을 **모든 런에 걸쳐** 모은 것 — 어느 방향에서 이 경로로 힘이 얼마나 자주·크게 건너갔나. 파트 쌍은 순서 없음(작은 PID 가 a). 키 `<캠페인>/path/<PID a>-<PID b>`. 값은 이 어휘의 단위(MPa·mm·s·mJ·N·N·s·mm/s·G)로 싣는다. 캠페인의 `values_normalized` 가 거짓이면 덱 단위 원값이니 캠페인끼리 견주지 말 것.",
+      "properties": [
+        {
+          "key": "campaign",
+          "label": "캠페인",
+          "data_type": "object_ref",
+          "ref_type_slug": "cae_campaign",
+          "inverse_label": "하중 경로",
+          "required": true
+        },
+        {
+          "key": "part_a",
+          "label": "파트 a",
+          "data_type": "object_ref",
+          "ref_type_slug": "cae_part",
+          "inverse_label": "하중 경로",
+          "required": true
+        },
+        {
+          "key": "part_b",
+          "label": "파트 b",
+          "data_type": "object_ref",
+          "ref_type_slug": "cae_part",
+          "inverse_label": "하중 경로",
+          "required": true
+        },
+        {
+          "key": "n_runs_engaged",
+          "label": "맞닿은 런 수",
+          "data_type": "number"
+        },
+        {
+          "key": "engage_ratio",
+          "label": "맞닿은 비율",
+          "data_type": "number",
+          "help": "맞닿은 런 수 ÷ 에너지 흐름을 잰 런 수."
+        },
+        {
+          "key": "n_runs_a_to_b",
+          "label": "a→b 런 수",
+          "data_type": "number"
+        },
+        {
+          "key": "n_runs_b_to_a",
+          "label": "b→a 런 수",
+          "data_type": "number"
+        },
+        {
+          "key": "impulse_max",
+          "label": "최대 충격량",
+          "data_type": "number",
+          "unit": "N·s"
+        },
+        {
+          "key": "impulse_max_run",
+          "label": "최대 충격량 런",
+          "data_type": "object_ref",
+          "ref_type_slug": "cae_run",
+          "inverse_label": "충격량 최대 경로"
+        },
+        {
+          "key": "impulse_median",
+          "label": "충격량 중앙값",
+          "data_type": "number",
+          "unit": "N·s",
+          "help": "맞닿은 런들의 중앙값."
+        },
+        {
+          "key": "impulse_p90",
+          "label": "충격량 90%",
+          "data_type": "number",
+          "unit": "N·s",
+          "help": "맞닿은 런들의 90 백분위(선형 보간)."
+        },
+        {
+          "key": "peak_force_max",
+          "label": "최대 접촉력",
+          "data_type": "number",
+          "unit": "N"
+        },
+        {
+          "key": "work_max",
+          "label": "최대 전달 일",
+          "data_type": "number",
+          "unit": "mJ"
+        }
+      ]
+    },
+    {
+      "slug": "cae_hotspot",
+      "label": "응력 집중 군집",
+      "nav_group_slug": "cae",
+      "icon": "Flame",
+      "key_policy": "required",
+      "description": "한 런·한 파트에서 기준량 상위 요소가 모인 덩어리(핫스팟). 키 `<캠페인>/hs/<런 키>/<PID>/<기준>/<요소 종류>/<순위>`. 값은 이 어휘의 단위(MPa·mm·s·mJ·N·N·s·mm/s·G)로 싣는다. 캠페인의 `values_normalized` 가 거짓이면 덱 단위 원값이니 캠페인끼리 견주지 말 것.",
+      "properties": [
+        {
+          "key": "response",
+          "label": "파트 응답",
+          "data_type": "object_ref",
+          "ref_type_slug": "cae_part_response",
+          "inverse_label": "응력 집중 군집",
+          "required": true
+        },
+        {
+          "key": "criterion",
+          "label": "기준량",
+          "data_type": "enum",
+          "enum_options": [
+            "von_mises",
+            "max_principal",
+            "min_principal",
+            "max_shear",
+            "x_tension",
+            "y_tension",
+            "z_tension"
+          ]
+        },
+        {
+          "key": "element_type",
+          "label": "요소 종류",
+          "data_type": "enum",
+          "enum_options": [
+            "solid",
+            "thick_shell",
+            "shell"
+          ]
+        },
+        {
+          "key": "rank",
+          "label": "순위",
+          "data_type": "number"
+        },
+        {
+          "key": "element_count",
+          "label": "요소 수",
+          "data_type": "number"
+        },
+        {
+          "key": "center_x",
+          "label": "중심 x",
+          "data_type": "number",
+          "unit": "mm"
+        },
+        {
+          "key": "center_y",
+          "label": "중심 y",
+          "data_type": "number",
+          "unit": "mm"
+        },
+        {
+          "key": "center_z",
+          "label": "중심 z",
+          "data_type": "number",
+          "unit": "mm",
+          "help": "초기 형상(d3plot 좌표) 기준."
+        },
+        {
+          "key": "radius_enclosing",
+          "label": "감싸는 반경",
+          "data_type": "number",
+          "unit": "mm"
+        },
+        {
+          "key": "stress_mean",
+          "label": "평균 응력",
+          "data_type": "number",
+          "unit": "MPa"
+        },
+        {
+          "key": "stress_max",
+          "label": "최대 응력",
+          "data_type": "number",
+          "unit": "MPa"
+        },
+        {
+          "key": "peak_element_id",
+          "label": "최대 요소 번호",
+          "data_type": "number"
+        },
+        {
+          "key": "peak_time",
+          "label": "최대 시각",
+          "data_type": "number",
+          "unit": "s"
+        }
+      ]
+    },
+    {
+      "slug": "cae_finding",
+      "label": "판정 소견",
+      "nav_group_slug": "cae",
+      "icon": "AlertTriangle",
+      "key_policy": "required",
+      "description": "후처리가 낸 판정 문장(항복 초과, 과대 가속도, 단위 불일치 등). 키 `<캠페인>/finding/<순번>`.",
+      "properties": [
+        {
+          "key": "campaign",
+          "label": "캠페인",
+          "data_type": "object_ref",
+          "ref_type_slug": "cae_campaign",
+          "inverse_label": "판정 소견",
+          "required": true
+        },
+        {
+          "key": "severity",
+          "label": "심각도",
+          "data_type": "enum",
+          "enum_options": [
+            "CRITICAL",
+            "WARNING",
+            "INFO"
+          ],
+          "help": "리포트 소견 철자 그대로 — DynaForge 의 소견 심각도와 같다.",
+          "required": true
+        },
+        {
+          "key": "title",
+          "label": "제목",
+          "data_type": "text",
+          "required": true
+        },
+        {
+          "key": "detail",
+          "label": "내용",
+          "data_type": "text_long"
+        },
+        {
+          "key": "recommendation",
+          "label": "권고",
+          "data_type": "text_long"
+        }
+      ]
+    }
+  ],
+  "relation_types": [
+    {
+      "slug": "run_of",
+      "label": "캠페인",
+      "inverse_label": "런",
+      "description": "런이 어느 캠페인에 드나.",
+      "cardinality": "many_to_one",
+      "transitive": false,
+      "acyclic": false,
+      "src_type_slugs": [
+        "cae_run"
+      ],
+      "dst_type_slugs": [
+        "cae_campaign"
+      ]
+    },
+    {
+      "slug": "part_in_campaign",
+      "label": "캠페인",
+      "inverse_label": "파트",
+      "description": "파트가 어느 캠페인 모델의 것인가.",
+      "cardinality": "many_to_one",
+      "transitive": false,
+      "acyclic": false,
+      "src_type_slugs": [
+        "cae_part"
+      ],
+      "dst_type_slugs": [
+        "cae_campaign"
+      ]
+    },
+    {
+      "slug": "campaign_report",
+      "label": "리포트",
+      "inverse_label": "해석 캠페인",
+      "description": "캠페인을 낸 리포트(1급 표 — 선의 한쪽 끝이 바깥이다). 적재 때 DynaForge 가 긋는다.",
+      "cardinality": "one_to_one",
+      "transitive": false,
+      "acyclic": false,
+      "src_type_slugs": [
+        "cae_campaign"
+      ],
+      "dst_type_slugs": [
+        "impact_report"
+      ]
+    },
+    {
+      "slug": "response_in",
+      "label": "런",
+      "inverse_label": "파트 응답",
+      "description": "응답이 어느 런의 것인가.",
+      "cardinality": "many_to_one",
+      "transitive": false,
+      "acyclic": false,
+      "src_type_slugs": [
+        "cae_part_response"
+      ],
+      "dst_type_slugs": [
+        "cae_run"
+      ]
+    },
+    {
+      "slug": "response_of",
+      "label": "파트",
+      "inverse_label": "런별 응답",
+      "description": "응답이 어느 파트의 것인가.",
+      "cardinality": "many_to_one",
+      "transitive": false,
+      "acyclic": false,
+      "src_type_slugs": [
+        "cae_part_response"
+      ],
+      "dst_type_slugs": [
+        "cae_part"
+      ]
+    },
+    {
+      "slug": "contact_side",
+      "label": "맞닿는 파트",
+      "inverse_label": "접촉 정의",
+      "description": "접촉 정의의 한쪽 면이 어느 파트인가. 줄의 properties.role 이 slave/master.",
+      "cardinality": "many_to_many",
+      "transitive": false,
+      "acyclic": false,
+      "src_type_slugs": [
+        "cae_contact"
+      ],
+      "dst_type_slugs": [
+        "cae_part"
+      ]
+    },
+    {
+      "slug": "transfer_in",
+      "label": "런",
+      "inverse_label": "하중 전달",
+      "description": "하중 전달이 어느 런의 것인가.",
+      "cardinality": "many_to_one",
+      "transitive": false,
+      "acyclic": false,
+      "src_type_slugs": [
+        "cae_load_transfer"
+      ],
+      "dst_type_slugs": [
+        "cae_run"
+      ]
+    },
+    {
+      "slug": "transfer_via",
+      "label": "접촉",
+      "inverse_label": "하중 전달",
+      "description": "어느 접촉 정의를 건넜나.",
+      "cardinality": "many_to_one",
+      "transitive": false,
+      "acyclic": false,
+      "src_type_slugs": [
+        "cae_load_transfer"
+      ],
+      "dst_type_slugs": [
+        "cae_contact"
+      ]
+    },
+    {
+      "slug": "transfer_from",
+      "label": "보내는 파트",
+      "inverse_label": "내보낸 하중",
+      "description": "충격이 먼저 닿은 쪽.",
+      "cardinality": "many_to_one",
+      "transitive": false,
+      "acyclic": false,
+      "src_type_slugs": [
+        "cae_load_transfer"
+      ],
+      "dst_type_slugs": [
+        "cae_part"
+      ]
+    },
+    {
+      "slug": "transfer_to",
+      "label": "받는 파트",
+      "inverse_label": "받은 하중",
+      "description": "충격이 나중에 닿은 쪽.",
+      "cardinality": "many_to_one",
+      "transitive": false,
+      "acyclic": false,
+      "src_type_slugs": [
+        "cae_load_transfer"
+      ],
+      "dst_type_slugs": [
+        "cae_part"
+      ]
+    },
+    {
+      "slug": "path_between",
+      "label": "파트",
+      "inverse_label": "하중 경로",
+      "description": "하중 경로의 두 끝(줄 둘).",
+      "cardinality": "many_to_many",
+      "transitive": false,
+      "acyclic": false,
+      "src_type_slugs": [
+        "cae_load_path"
+      ],
+      "dst_type_slugs": [
+        "cae_part"
+      ]
+    },
+    {
+      "slug": "hotspot_of",
+      "label": "파트 응답",
+      "inverse_label": "응력 집중 군집",
+      "description": "군집이 어느 런·파트의 응답에서 나왔나.",
+      "cardinality": "many_to_one",
+      "transitive": false,
+      "acyclic": false,
+      "src_type_slugs": [
+        "cae_hotspot"
+      ],
+      "dst_type_slugs": [
+        "cae_part_response"
+      ]
+    },
+    {
+      "slug": "finding_about",
+      "label": "대상 파트",
+      "inverse_label": "판정 소견",
+      "description": "소견이 가리키는 파트(없을 수 있다).",
+      "cardinality": "many_to_many",
+      "transitive": false,
+      "acyclic": false,
+      "src_type_slugs": [
+        "cae_finding"
+      ],
+      "dst_type_slugs": [
+        "cae_part"
+      ]
+    }
+  ]
+}
