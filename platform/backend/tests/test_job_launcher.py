@@ -563,6 +563,8 @@ async def test_v7_outputs_are_registered_only_after_the_remote_child_ended(db, s
         _kill_all(tag)
     assert job.exit_code == 124 and job.status == "failed", (job.status, job.exit_code)
     assert "[timeout exceeded]" in job.error_summary
+    # 포털 time-limits 1-2 — 요약이 값과 손잡이 이름을 말한다(무엇을 늘리면 되는지 사람이 안다)
+    assert "2초 벽시계" in job.error_summary and "KOORM_JOB_TIMEOUT_SEC" in job.error_summary, job.error_summary
     registered = await _outputs(db, job)
     disk = hashlib.sha256(
         (storage.session_abs_dir(u.id, s.id) / "slow_out.k").read_bytes()).hexdigest()

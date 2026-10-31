@@ -1,0 +1,459 @@
+{
+ "_note": "MCP 도구 인자 계약 — 설명을 달기 전(2026-10-31, origin/main d3d777c 뒤 판)에 FastMCP 목록에서 뜬 형 · 기본값 · 필수 · 순서. 설명(description)과 pydantic 이 이름으로 만드는 title 은 뺐다. 포털 요청 arg-descriptions §2-3 · §5(형 · 기본값 · 필수 · 순서는 그대로).",
+ "tools": {
+  "create_session": {
+   "args": [
+    {
+     "name": "name",
+     "schema": {
+      "type": "string"
+     }
+    },
+    {
+     "name": "description",
+     "schema": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     }
+    }
+   ],
+   "required": [
+    "name"
+   ]
+  },
+  "find_reports": {
+   "args": [
+    {
+     "name": "kind",
+     "schema": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     }
+    },
+    {
+     "name": "project",
+     "schema": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     }
+    },
+    {
+     "name": "dev_rev",
+     "schema": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     }
+    },
+    {
+     "name": "variation",
+     "schema": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     }
+    },
+    {
+     "name": "doe",
+     "schema": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     }
+    },
+    {
+     "name": "focus",
+     "schema": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     }
+    },
+    {
+     "name": "doe_strategy",
+     "schema": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     }
+    },
+    {
+     "name": "scenario_type",
+     "schema": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     }
+    },
+    {
+     "name": "drop_height",
+     "schema": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     }
+    },
+    {
+     "name": "severity",
+     "schema": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     }
+    },
+    {
+     "name": "min_worst_stress",
+     "schema": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     }
+    },
+    {
+     "name": "min_worst_g",
+     "schema": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     }
+    },
+    {
+     "name": "has_part",
+     "schema": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     }
+    },
+    {
+     "name": "q",
+     "schema": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     }
+    },
+    {
+     "name": "since",
+     "schema": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     }
+    },
+    {
+     "name": "until",
+     "schema": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     }
+    },
+    {
+     "name": "session_id",
+     "schema": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     }
+    },
+    {
+     "name": "kfile_id",
+     "schema": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     }
+    },
+    {
+     "name": "sort",
+     "schema": {
+      "default": "created_at",
+      "type": "string"
+     }
+    },
+    {
+     "name": "order",
+     "schema": {
+      "default": "desc",
+      "type": "string"
+     }
+    },
+    {
+     "name": "limit",
+     "schema": {
+      "default": 100,
+      "type": "integer"
+     }
+    }
+   ],
+   "required": []
+  },
+  "report_directional": {
+   "args": [
+    {
+     "name": "report_id",
+     "schema": {
+      "type": "string"
+     }
+    },
+    {
+     "name": "part_id",
+     "schema": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     }
+    }
+   ],
+   "required": [
+    "report_id"
+   ]
+  },
+  "report_findings": {
+   "args": [
+    {
+     "name": "report_id",
+     "schema": {
+      "type": "string"
+     }
+    },
+    {
+     "name": "severity",
+     "schema": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     }
+    }
+   ],
+   "required": [
+    "report_id"
+   ]
+  },
+  "report_part_risk": {
+   "args": [
+    {
+     "name": "report_id",
+     "schema": {
+      "type": "string"
+     }
+    },
+    {
+     "name": "part_id",
+     "schema": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     }
+    }
+   ],
+   "required": [
+    "report_id"
+   ]
+  },
+  "report_part_series": {
+   "args": [
+    {
+     "name": "report_id",
+     "schema": {
+      "type": "string"
+     }
+    },
+    {
+     "name": "case_key",
+     "schema": {
+      "type": "string"
+     }
+    },
+    {
+     "name": "part_id",
+     "schema": {
+      "type": "integer"
+     }
+    }
+   ],
+   "required": [
+    "report_id",
+    "case_key",
+    "part_id"
+   ]
+  },
+  "report_summary": {
+   "args": [
+    {
+     "name": "report_id",
+     "schema": {
+      "type": "string"
+     }
+    }
+   ],
+   "required": [
+    "report_id"
+   ]
+  },
+  "run_operation": {
+   "args": [
+    {
+     "name": "session_id",
+     "schema": {
+      "type": "string"
+     }
+    },
+    {
+     "name": "operation",
+     "schema": {
+      "type": "string"
+     }
+    },
+    {
+     "name": "args",
+     "schema": {
+      "additionalProperties": true,
+      "type": "object"
+     }
+    }
+   ],
+   "required": [
+    "session_id",
+    "operation",
+    "args"
+   ]
+  }
+ }
+}

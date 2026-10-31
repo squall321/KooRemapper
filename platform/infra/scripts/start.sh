@@ -222,7 +222,8 @@ start_instance "$INST_MCP" "$MCP_SIF" \
   --env "KOOREMAPPER_API_BASE=http://127.0.0.1:${KOORM_API_PORT}" \
   --env "KOORM_MCP_PORT=${KOORM_MCP_PORT}" \
   --env "MCP_HOST=${MCP_HOST:-127.0.0.1}" \
-  --env "MCP_ALLOWED_HOSTS=${MCP_ALLOWED_HOSTS:-}"
+  --env "MCP_ALLOWED_HOSTS=${MCP_ALLOWED_HOSTS:-}" \
+  --env "KOORM_MCP_API_TIMEOUT_S=${KOORM_MCP_API_TIMEOUT_S:-}"
 
 # ── nginx (optional TLS reverse proxy) ──────────────────────────────
 if [ "${KOORM_ENABLE_NGINX:-0}" = "1" ]; then

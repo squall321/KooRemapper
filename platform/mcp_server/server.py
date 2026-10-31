@@ -16,11 +16,17 @@ Claude Code 등록(개인 토큰):
 from __future__ import annotations
 
 import base64
+import contextvars
+import functools
 import os
+import sys
+import time
+from typing import Annotated
 from urllib.parse import quote
 
 import httpx
 from mcp.server.fastmcp import Context, FastMCP, Image
+from pydantic import Field
 
 API_BASE = os.environ.get("KOOREMAPPER_API_BASE", "http://127.0.0.1:8700").rstrip("/")
 API = f"{API_BASE}/api/v1"
@@ -28,6 +34,94 @@ API = f"{API_BASE}/api/v1"
 # MCP serverInfo.name — 포탈/HEAX 카탈로그와 통일한 브랜드 표시명.
 # (라우트 슬러그·URL 은 여전히 kooremapper 로 유지된다.)
 mcp = FastMCP("DynaForge")
+
+# ── 시간 한도 — 손잡이 하나 · 도구 호출 하나에 벽시계 기한 하나(포털 time-limits 1-1, 사용자 결정 10-31) ──────────────────
+# ★바깥 층(게이트웨이가 도구 호출을 기다리는 600초 — 그쪽 `GATEWAY_CALL_TIMEOUT`)보다 안쪽이어야 이 층이 먼저 걸려 값과 손잡이
+#   이름이 든 문구가 나온다. 바깥이 먼저 끊으면 「답하지 않았다」 만 남고 백엔드 일은 계속 돈다(포털 D-17 층 규칙). 업로드 ·
+#   내려받기 · 반입도 이 값이다(예전엔 60 · 120 · 180 · 300 이 열여덟 곳에 글자로 박혀 있었다). 더 긴 일은 잡(제출 + 상태 조회)으로 간다.
+GATEWAY_CALL_TIMEOUT_S = 600
+API_TIMEOUT_KNOB = "KOORM_MCP_API_TIMEOUT_S"
+API_TIMEOUT_S = float(os.environ.get(API_TIMEOUT_KNOB) or 540)
+if not 0 < API_TIMEOUT_S < GATEWAY_CALL_TIMEOUT_S:
+    print(f"⚠ {API_TIMEOUT_KNOB}={API_TIMEOUT_S:g} 는 0 과 게이트웨이 한도 {GATEWAY_CALL_TIMEOUT_S}초 사이가 아니다 — 540 으로 둔다",
+          file=sys.stderr)
+    API_TIMEOUT_S = 540.0
+_DEADLINE: contextvars.ContextVar[float | None] = contextvars.ContextVar("koorm_mcp_deadline", default=None)
+
+
+class _Late(RuntimeError):
+    """이 도구 호출의 기한이 다 됐다 — 문구에 값과 손잡이 이름이 있다. 그림 기다림은 이것을 잡아 job_id 를 함께 말한다."""
+
+
+def _late() -> _Late:
+    return _Late(f"DynaForge 백엔드가 이 도구 호출의 기한 {API_TIMEOUT_S:g}초 안에 답하지 않았다({API_TIMEOUT_KNOB}) — "
+                 "오래 걸리는 일은 잡(run_operation → get_job)으로 하라")
+
+
+def _left() -> float:
+    """이 도구 호출에 남은 초. 다 됐으면 다음 요청을 내지 않고 손잡이 이름이 든 문구로 멈춘다."""
+    deadline = _DEADLINE.get()
+    left = API_TIMEOUT_S if deadline is None else deadline - time.monotonic()
+    if left <= 0:
+        raise _late()
+    return left
+
+
+def _client() -> httpx.AsyncClient:
+    """백엔드 REST 클라이언트 — 기다림은 이 도구 호출에 남은 시간만큼이다(요청마다 새로 재지 않는다)."""
+    return httpx.AsyncClient(base_url=API, timeout=_left())
+
+
+_register = mcp.tool
+
+
+def _bounded_tool(*args, **kwargs):
+    """`mcp.tool()` 과 같되 도구 호출 하나에 벽시계 기한 하나를 건다 — REST 를 여러 번 부르는 도구(compare_reports · 그림 잡
+    기다림)도 합쳐서 그 안이다. httpx 시간 초과는 값과 손잡이 이름이 든 문구로 바꾼다. 끊긴 요청은 다시 보내지 않는다(쓰기가 두 번
+    나갈 수 있다). 인자 꼴은 그대로다(FastMCP 는 `__wrapped__` 의 서명으로 스키마를 만든다). 도구가 다른 도구를 부르면 바깥 기한을 쓴다."""
+    register = _register(*args, **kwargs)
+
+    def deco(fn):
+        @functools.wraps(fn)
+        async def bounded(*a, **kw):
+            mine = time.monotonic() + API_TIMEOUT_S
+            outer = _DEADLINE.get()
+            token = _DEADLINE.set(min(outer, mine) if outer is not None else mine)
+            try:
+                return await fn(*a, **kw)
+            except httpx.TimeoutException:
+                raise _late() from None
+            finally:
+                _DEADLINE.reset(token)
+        return register(bounded)
+    return deco
+
+
+mcp.tool = _bounded_tool
+
+# ── 인자 설명(포털 arg-descriptions §2-3, 사용자 결정 10-31) — 게이트웨이가 세는 것은 inputSchema 맨 위 인자의 description 이다 ─────
+# 허용값 · 상한 · 단위는 손으로 옮겨 적지 않는다 — 아래 상수에서 만든다. 이 값이 백엔드의 실제 제약(GET /reports 의 Query 패턴 ·
+# 상한 · 높이 허용차, 세션 이름 길이, 심각도 순위, 단위 관례)과 같은지는 백엔드 시험 `tests/test_mcp_tools_contract.py` 가 대조한다
+# (MCP 는 백엔드를 import 하지 않는다). ★같은 이름의 인자라도 도구마다 뜻이 다르면 문구를 따로 쓴다 — find_reports 의 severity 는
+# 「이 심각도 이상」, report_findings 의 severity 는 「같은 것만」 이다.
+REPORT_KINDS = ("deep", "sphere", "impact")
+SEVERITIES = ("CRITICAL", "WARNING", "INFO")            # 높은 것부터
+FIND_SORTS = ("created_at", "worst_stress", "worst_g", "drop_height")
+SORT_ORDERS = ("asc", "desc")
+FIND_LIMIT_MAX = 500
+HEIGHT_TOL_MM = 1.0
+SESSION_NAME_MAX = 255
+UNIT_STRESS, UNIT_ACCEL, UNIT_LENGTH = "MPa", "G", "mm"   # SmartTwin ton-mm-s 관례
+
+
+def _one_of(values) -> str:
+    return " · ".join(values)
+
+
+_A_SESSION_ID = "세션 id — create_session 응답의 id · list_sessions 의 id."
+_A_REPORT_ID = "리포트 id — find_reports 의 items[].id · ingest_report 응답의 id."
+_A_PART_ID_OPT = "파트 번호(LS-DYNA PID) — report_summary 의 parts[].part_id. 비우면 모든 파트."
+_A_FACET = "report_facets 가 주는 값 그대로(같은 것만 걸린다)."
 
 
 def _forward_headers(ctx: Context) -> dict:
@@ -67,24 +161,24 @@ def _unwrap(r: httpx.Response):
 
 
 async def _get(ctx, path, params=None):
-    async with httpx.AsyncClient(base_url=API, timeout=60) as c:
+    async with _client() as c:
         return _unwrap(await c.get(path, params=params, headers=_forward_headers(ctx)))
 
 
 async def _post(ctx, path, json_body=None):
-    async with httpx.AsyncClient(base_url=API, timeout=120) as c:
+    async with _client() as c:
         return _unwrap(await c.post(path, json=json_body, headers=_forward_headers(ctx)))
 
 
 async def _put(ctx, path, json_body=None):
-    async with httpx.AsyncClient(base_url=API, timeout=120) as c:
+    async with _client() as c:
         return _unwrap(await c.put(path, json=json_body, headers=_forward_headers(ctx)))
 
 
 async def _delete(ctx, path, params=None):
     # ⚠쿼리를 **문자열로 이어 붙이지 않는다** — 값에 공백·`&`·`=` 가 들어오면 조용히
     #   다른 요청이 된다(별칭은 사람이 쓰는 자유 문자열이라 그런 글자가 들어온다).
-    async with httpx.AsyncClient(base_url=API, timeout=60) as c:
+    async with _client() as c:
         return _unwrap(await c.delete(path, params=params, headers=_forward_headers(ctx)))
 
 
@@ -124,7 +218,11 @@ async def list_sessions(ctx: Context) -> list:
 
 
 @mcp.tool()
-async def create_session(name: str, ctx: Context, description: str | None = None) -> dict:
+async def create_session(
+    name: Annotated[str, Field(description=f"세션 이름(1~{SESSION_NAME_MAX}자) — 사람이 알아보는 이름.")],
+    ctx: Context,
+    description: Annotated[str | None, Field(description="세션 설명(선택) — 무엇을 하는 세션인지 한 줄.")] = None,
+) -> dict:
     """새 세션(작업 공간)을 만든다 — K파일 업로드·오퍼레이션 실행의 컨테이너라 모든 작업의
     첫 도구다. 기존 작업을 이어가려면 list_sessions 로 먼저 찾는다."""
     return await _post(ctx, "/sessions", {"name": name, "description": description})
@@ -154,7 +252,7 @@ async def upload_kfile(
     올린 뒤 `session_includes` 로 빠진 게 없는지 확인하라(`..`·절대경로는 서버가 제거한다)."""
     raw = base64.b64decode(content) if base64_encoded else content.encode("utf-8")
     files = {"files": (filename, raw, "application/octet-stream")}
-    async with httpx.AsyncClient(base_url=API, timeout=120) as c:
+    async with _client() as c:
         return _unwrap(
             await c.post(
                 f"/sessions/{session_id}/files", files=files, headers=_forward_headers(ctx)
@@ -176,7 +274,7 @@ async def upload_local_path(session_id: str, path: str, ctx: Context, filename: 
     with open(path, "rb") as fh:
         raw = fh.read()
     files = {"files": (name, raw, "application/octet-stream")}
-    async with httpx.AsyncClient(base_url=API, timeout=300) as c:
+    async with _client() as c:
         return _unwrap(
             await c.post(
                 f"/sessions/{session_id}/files", files=files, headers=_forward_headers(ctx)
@@ -190,7 +288,7 @@ async def save_result_to_path(session_id: str, file_id: int, dest_path: str, ctx
     MCP 서버가 dest_path 에 쓸 수 있는 같은 머신에서 돌 때만 동작.
     Save a session file to a local disk path (best for large outputs; same-machine only)."""
     import os as _os
-    async with httpx.AsyncClient(base_url=API, timeout=300) as c:
+    async with _client() as c:
         r = await c.get(
             f"/sessions/{session_id}/files/{file_id}/download", headers=_forward_headers(ctx)
         )
@@ -234,7 +332,13 @@ async def inspect_file(session_id: str, file_id: int, ctx: Context) -> dict:
 
 # ── 실행 / 결과 ──────────────────────────────────────────────────────
 @mcp.tool()
-async def run_operation(session_id: str, operation: str, args: dict, ctx: Context) -> dict:
+async def run_operation(
+    session_id: Annotated[str, Field(description=_A_SESSION_ID)],
+    operation: Annotated[str, Field(description="오퍼레이션 이름 — list_operations 의 name(예 info · map · contact).")],
+    args: Annotated[dict, Field(description="오퍼레이션 인자 — describe_operation(operation) 의 args_schema 를 따르는 객체. "
+                                            "파일 인자는 이 세션의 파일 이름(get_session 의 files[].filename).")],
+    ctx: Context,
+) -> dict:
     """세션 파일에 오퍼레이션을 적용(비동기 Job 생성) → job_id 반환. args 는
     describe_operation 의 args_schema 를 따른다(파일 인자는 세션 내 파일명). 진행상황은
     get_job 으로 폴링하고, 끝나면 download_result 로 산출물을 가져온다."""
@@ -250,7 +354,7 @@ async def get_job(job_id: str, ctx: Context, include_logs: bool = False) -> dict
     (막지 않고 남긴다 · LS-DYNA 는 키워드 단계에서 멈춘다)."""
     job = await _get(ctx, f"/jobs/{job_id}")
     if include_logs and isinstance(job, dict):
-        async with httpx.AsyncClient(base_url=API, timeout=60) as c:
+        async with _client() as c:
             r = await c.get(f"/jobs/{job_id}/logs", headers=_forward_headers(ctx))
             job = {**job, "logs": r.text[-4000:] if r.status_code < 400 else f"(logs unavailable: HTTP {r.status_code})"}
     return job
@@ -270,7 +374,7 @@ async def update_session(
     """세션 이름·설명을 수정한다 — 작업이 진화해 이름이 안 맞을 때 정리용.
     / Rename or re-describe a session."""
     body = {k: v for k, v in {"name": name, "description": description}.items() if v is not None}
-    async with httpx.AsyncClient(base_url=API, timeout=60) as c:
+    async with _client() as c:
         return _unwrap(await c.patch(f"/sessions/{session_id}", json=body, headers=_forward_headers(ctx)))
 
 
@@ -300,7 +404,7 @@ async def download_result(
 ) -> dict:
     """세션 파일 내용을 가져온다(오퍼레이션 산출물 회수). 기본은 텍스트로 반환하고,
     바이너리거나 큰 파일이면 as_base64=true 로 base64 반환."""
-    async with httpx.AsyncClient(base_url=API, timeout=120) as c:
+    async with _client() as c:
         r = await c.get(
             f"/sessions/{session_id}/files/{file_id}/download",
             headers=_forward_headers(ctx),
@@ -351,16 +455,25 @@ async def _run_figure_job(ctx: Context, session_id: str, operation: str,
     if not job_id:
         raise RuntimeError(f"잡을 만들지 못했습니다: {job}")
 
-    waited = 0.0
+    # 기다림은 벽시계로 잰다 — 잠만 세면 상태 조회에 든 시간이 빠진다. 그리고 이 도구 호출의 기한 안으로 죈다(끝난 뒤 산출 목록을
+    # 받을 틈을 남긴다). 기한까지 안 끝나면 잡은 그대로 두고 job_id 와 손잡이를 말한다 — 잡을 끄지 않는다.
+    left = _left()
+    end = time.monotonic() + min(float(timeout_s), left - min(5.0, left / 10))
     last = job
-    while waited < timeout_s:
-        await asyncio.sleep(1.0)
-        waited += 1.0
-        last = await _get(ctx, f"/jobs/{job_id}")
-        # 백엔드는 `canceled`(l 하나)로 쓴다 — `cancelled` 만 보면 취소된 잡을 끝난 것으로
-        # 알아보지 못해 `timeout_s`(최대 300초)를 꽉 채운 뒤에야 에러가 된다. 둘 다 본다.
-        if last.get("status") in ("succeeded", "failed", "canceled", "cancelled"):
-            break
+    try:
+        while time.monotonic() < end:
+            await asyncio.sleep(max(0.0, min(1.0, end - time.monotonic())))
+            last = await _get(ctx, f"/jobs/{job_id}")
+            # 백엔드는 `canceled`(l 하나)로 쓴다 — `cancelled` 만 보면 취소된 잡을 끝난 것으로
+            # 알아보지 못해 `timeout_s`(최대 300초)를 꽉 채운 뒤에야 에러가 된다. 둘 다 본다.
+            if last.get("status") in ("succeeded", "failed", "canceled", "cancelled"):
+                break
+    except (_Late, httpx.TimeoutException):
+        pass        # 상태 조회가 기한에 걸렸다 — 잡은 그대로 둔다(아래에서 마지막으로 본 상태 · job_id 와 함께 말한다)
+    if last.get("status") in ("queued", "running"):
+        raise RuntimeError(
+            f"{operation} 잡이 기다린 시간 안에 끝나지 않았다(timeout_s={timeout_s} · 이 도구 호출의 기한 {API_TIMEOUT_S:g}초 "
+            f"{API_TIMEOUT_KNOB}) — 잡은 계속 돈다: job_id={job_id}. get_job 으로 지켜보고 끝나면 download_result 로 받는다")
     if last.get("status") != "succeeded":
         raise RuntimeError(
             "%s 잡이 끝나지 않았거나 실패했습니다: status=%s exit_code=%s job_id=%s\n--- 로그 ---\n%s"
@@ -374,7 +487,7 @@ async def _job_log_tail(ctx: Context, job_id: str, limit: int = 2500) -> str:
     콘솔에만** 있으므로(자유면 비율·등진 삼각형 수·ink_ratio·바닥 처리한 층 수·겹침 쌍 수)
     이것이 그 둘의 매니페스트 노릇을 한다."""
     try:
-        async with httpx.AsyncClient(base_url=API, timeout=60) as c:
+        async with _client() as c:
             r = await c.get(f"/jobs/{job_id}/logs", headers=_forward_headers(ctx))
         return r.text[-limit:] if r.status_code < 400 else f"(로그를 읽지 못했습니다: HTTP {r.status_code})"
     except Exception as e:  # 로그를 못 읽는 것이 그림을 못 쓴 것은 아니다
@@ -497,7 +610,7 @@ async def mesh_section_figure(
     if json_id is None:
         raise RuntimeError(f"단면 매니페스트(JSON)가 산출물에 없습니다: {[f.get('filename') for f in outs]}")
 
-    async with httpx.AsyncClient(base_url=API, timeout=120) as c:
+    async with _client() as c:
         r = await c.get(f"/sessions/{session_id}/files/{json_id}/download",
                         headers=_forward_headers(ctx))
     if r.status_code >= 400:
@@ -811,7 +924,7 @@ async def ingest_report(
     files = {"file": (filename, raw, "text/html")}
     if scenario_content:
         files["scenario"] = ("scenario.json", scenario_content.encode("utf-8"), "application/json")
-    async with httpx.AsyncClient(base_url=API, timeout=180) as c:
+    async with _client() as c:
         return _unwrap(await c.post(
             f"/sessions/{session_id}/reports",
             files=files, data=data, headers=_forward_headers(ctx),
@@ -837,7 +950,7 @@ async def update_report_meta(
         "label": label, "project": project, "dev_rev": dev_rev,
         "variation": variation, "doe": doe, "kfile_id": kfile_id, "focus": focus,
     }.items() if v is not None}
-    async with httpx.AsyncClient(base_url=API, timeout=60) as c:
+    async with _client() as c:
         return _unwrap(await c.patch(
             f"/reports/{report_id}", json=body, headers=_forward_headers(ctx)))
 
@@ -868,7 +981,7 @@ async def attach_render(report_id: str, path: str, ctx: Context) -> dict:
     else:
         raise RuntimeError(f"path not found on the MCP host: {path}")
     files = {"file": ("render_result.zip", raw, "application/zip")}
-    async with httpx.AsyncClient(base_url=API, timeout=300) as c:
+    async with _client() as c:
         return _unwrap(await c.post(f"/reports/{report_id}/renders", files=files, headers=_forward_headers(ctx)))
 
 
@@ -900,7 +1013,7 @@ async def attach_cad(report_id: str, path: str, ctx: Context) -> dict:
     else:
         raise RuntimeError(f"path not found on the MCP host: {path}")
     files = {"file": ("fe_cad.zip", raw, "application/zip")}
-    async with httpx.AsyncClient(base_url=API, timeout=300) as c:
+    async with _client() as c:
         return _unwrap(await c.post(f"/reports/{report_id}/cad", files=files, headers=_forward_headers(ctx)))
 
 
@@ -911,7 +1024,7 @@ async def attach_report_scenario(report_id: str, scenario_content: str, ctx: Con
     조건 요약(angle_source·tolerance·예상 run 수)이 리포트에 캐시되고, template(.k
     파일명)로 세션 내 원본 K파일이 자동 매칭된다(미연결일 때)."""
     files = {"file": ("scenario.json", scenario_content.encode("utf-8"), "application/json")}
-    async with httpx.AsyncClient(base_url=API, timeout=60) as c:
+    async with _client() as c:
         return _unwrap(await c.post(
             f"/reports/{report_id}/scenario", files=files, headers=_forward_headers(ctx)))
 
@@ -1067,7 +1180,7 @@ async def _fetch_media(ctx: Context, report_id: str, *, case_key: str = "",
 
 
 async def _download_bytes(ctx: Context, session_id: str, file_id: int) -> bytes:
-    async with httpx.AsyncClient(base_url=API, timeout=120) as c:
+    async with _client() as c:
         r = await c.get(f"/sessions/{session_id}/files/{file_id}/download",
                         headers=_forward_headers(ctx))
     if r.status_code >= 400:
@@ -1182,7 +1295,7 @@ async def report_compare(
 
 
 @mcp.tool()
-async def report_summary(report_id: str, ctx: Context) -> dict:
+async def report_summary(report_id: Annotated[str, Field(description=_A_REPORT_ID)], ctx: Context) -> dict:
     """리포트 요약 — kind, 프로젝트/DOE, sim_params, parts, findings, 전역 최악 롤업.
     무엇을 분석할 수 있는지 먼저 여기서 파악하라."""
     return await _get(ctx, f"/reports/{report_id}")
@@ -1206,7 +1319,8 @@ async def report_worst_cases(
 
 
 @mcp.tool()
-async def report_part_risk(report_id: str, ctx: Context, part_id: int | None = None) -> dict:
+async def report_part_risk(report_id: Annotated[str, Field(description=_A_REPORT_ID)], ctx: Context,
+                           part_id: Annotated[int | None, Field(description=_A_PART_ID_OPT)] = None) -> dict:
     """파트별 최악값과 그게 발생한 케이스(각도/위치) + 최소 안전율. part_id 를 주면 그 파트만.
     "어느 파트가 어느 방향/위치에서 가장 위험한가" 를 답한다."""
     params = {"part_id": part_id} if part_id is not None else None
@@ -1221,7 +1335,8 @@ async def report_case(report_id: str, case_key: str, ctx: Context) -> dict:
 
 
 @mcp.tool()
-async def report_directional(report_id: str, ctx: Context, part_id: int | None = None) -> dict:
+async def report_directional(report_id: Annotated[str, Field(description=_A_REPORT_ID)], ctx: Context,
+                             part_id: Annotated[int | None, Field(description=_A_PART_ID_OPT)] = None) -> dict:
     """방향 취약도 — 방향 범주(sphere: 면/엣지/코너, impact: F1~F6)별 최악 응력·G.
     part_id 를 주면 그 파트의 범주별 취약도. "어느 방향이 가장 위험한가"."""
     params = {"part_id": part_id} if part_id is not None else None
@@ -1239,27 +1354,37 @@ async def report_facets(ctx: Context) -> dict:
 @mcp.tool()
 async def find_reports(
     ctx: Context,
-    kind: str | None = None,
-    project: str | None = None,
-    dev_rev: str | None = None,
-    variation: str | None = None,
-    doe: str | None = None,
-    focus: str | None = None,
-    doe_strategy: str | None = None,
-    scenario_type: str | None = None,
-    drop_height: float | None = None,
-    severity: str | None = None,
-    min_worst_stress: float | None = None,
-    min_worst_g: float | None = None,
-    has_part: str | None = None,
-    q: str | None = None,
-    since: str | None = None,
-    until: str | None = None,
-    session_id: str | None = None,
-    kfile_id: int | None = None,
-    sort: str = "created_at",
-    order: str = "desc",
-    limit: int = 100,
+    kind: Annotated[str | None, Field(description=f"리포트 종류 — {_one_of(REPORT_KINDS)} 중 하나"
+                                                  "(sphere 전각도 낙하 · impact 부분 충격 · deep 단건). 비우면 모두.")] = None,
+    project: Annotated[str | None, Field(description="과제 — 수동 메타의 과제(eng_meta.project) 또는 리포트에 박힌 "
+                                                     "project_name 과 같은 것. " + _A_FACET)] = None,
+    dev_rev: Annotated[str | None, Field(description="개발 단계 코드(예 dv1 · pv2 · mp) — " + _A_FACET)] = None,
+    variation: Annotated[str | None, Field(description="설계안 — " + _A_FACET)] = None,
+    doe: Annotated[str | None, Field(description="DOE 캠페인(study) — " + _A_FACET)] = None,
+    focus: Annotated[str | None, Field(description="초점 라벨(예 camera-detail) — " + _A_FACET)] = None,
+    doe_strategy: Annotated[str | None, Field(description="방향 컨셉(예 cuboid_26 · fibonacci_162) — " + _A_FACET)] = None,
+    scenario_type: Annotated[str | None, Field(description="조건 종류(scenario source_type) — " + _A_FACET)] = None,
+    drop_height: Annotated[float | None, Field(description=f"낙하 높이({UNIT_LENGTH}) — 이 높이 ±{HEIGHT_TOL_MM:g} "
+                                                           f"{UNIT_LENGTH} 의 리포트.")] = None,
+    severity: Annotated[str | None, Field(description=f"심각도 — {_one_of(SEVERITIES)} 중 하나. 이 심각도 **이상**의 소견이 "
+                                                      "있는 리포트(WARNING 이면 CRITICAL 도 걸린다).")] = None,
+    min_worst_stress: Annotated[float | None, Field(description=f"최악 응력 하한({UNIT_STRESS}) — 리포트의 전역 최악 "
+                                                                "응력이 이 값 이상.")] = None,
+    min_worst_g: Annotated[float | None, Field(description=f"최악 가속 하한({UNIT_ACCEL}) — 리포트의 전역 최악 가속이 "
+                                                           "이 값 이상.")] = None,
+    has_part: Annotated[str | None, Field(description="파트 이름 — 이 이름(정확히 같은 것)의 파트를 가진 리포트"
+                                                      "(report_summary 의 parts[].name).")] = None,
+    q: Annotated[str | None, Field(description="글자 검색 — 라벨 · 과제에 이 글자가 든 리포트(대소문자 무시).")] = None,
+    since: Annotated[str | None, Field(description="만든 때 하한 — ISO 8601(예 2026-10-01 또는 "
+                                                   "2026-10-01T09:00:00+09:00). 이 시각 이후.")] = None,
+    until: Annotated[str | None, Field(description="만든 때 상한 — ISO 8601(since 와 같은 꼴). 이 시각 이전.")] = None,
+    session_id: Annotated[str | None, Field(description="세션 id — 이 세션의 리포트만(list_sessions 의 id).")] = None,
+    kfile_id: Annotated[int | None, Field(description="K파일 id — 이 K파일(세션 파일)에서 나온 리포트만"
+                                                      "(get_session 의 files[].id).")] = None,
+    sort: Annotated[str, Field(description=f"정렬 기준 — {_one_of(FIND_SORTS)} 중 하나.")] = "created_at",
+    order: Annotated[str, Field(description=f"정렬 방향 — {_one_of(SORT_ORDERS)}.")] = "desc",
+    limit: Annotated[int, Field(description=f"최대 건수(1~{FIND_LIMIT_MAX}). 결과가 이만큼이면 truncated:true — "
+                                            "더 있을 수 있다.")] = 100,
 ) -> dict:
     """조건으로 리포트 검색(전 세션, 결과 폭증 대비 다축 서버 필터) — 소유분 + 같은 소속 공유분(관리자는 전사).
 
@@ -1410,13 +1535,24 @@ async def report_geometry(report_id: str, ctx: Context) -> dict:
 
 
 @mcp.tool()
-async def report_part_series(report_id: str, case_key: str, part_id: int, ctx: Context) -> dict:
+async def report_part_series(
+    report_id: Annotated[str, Field(description=_A_REPORT_ID)],
+    case_key: Annotated[str, Field(description="케이스 열쇠 — report_worst_cases 의 case_key"
+                                               "(sphere 는 각도 폴더 · impact 는 위치 id).")],
+    part_id: Annotated[int, Field(description="파트 번호(LS-DYNA PID) — report_summary 의 parts[].part_id.")],
+    ctx: Context,
+) -> dict:
     """한 케이스·파트의 시계열(원본 재파싱, 다운샘플) — 응력/변형률/G/변위 시간이력."""
     return await _get(ctx, f"/reports/{report_id}/cases/{case_key}/series", params={"part_id": part_id})
 
 
 @mcp.tool()
-async def report_findings(report_id: str, ctx: Context, severity: str | None = None) -> list:
+async def report_findings(
+    report_id: Annotated[str, Field(description=_A_REPORT_ID)],
+    ctx: Context,
+    severity: Annotated[str | None, Field(description=f"심각도 — {_one_of(SEVERITIES)} 중 하나. 그 심각도와 **같은** "
+                                                      "소견만(대소문자 무시). 비우면 모두.")] = None,
+) -> list:
     """리포트의 위험 소견(CRITICAL/WARNING/INFO). severity 로 필터 가능.
     항복 초과·과도 G 등 자동 판정된 항목을 준다(sphere/impact)."""
     params = {"severity": severity} if severity else None

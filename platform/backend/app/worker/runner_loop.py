@@ -259,7 +259,9 @@ def _run_blocking(job_id: str, argv: list[str], cwd: Path, out_path: Path, err_p
             else:
                 _kill_proc_group(proc, signal.SIGKILL)
                 proc.wait()
-            err.write("\n[timeout exceeded]\n")
+            # 값과 손잡이 이름을 표지 **앞** 줄에 — 잡 요약(stderr 꼬리)에 실린다(포털 time-limits 1-2). 마지막 줄 `[timeout exceeded]`
+            # 는 HWAX 실행기 계약(K2 · V7)이 약속한 그대로 둔다.
+            err.write(f"\n전처리 잡이 {settings.job_timeout_sec}초 벽시계에 걸렸다(KOORM_JOB_TIMEOUT_SEC)\n[timeout exceeded]\n")
             return 124
         finally:
             _running.pop(job_id, None)

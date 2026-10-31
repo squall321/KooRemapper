@@ -22,7 +22,7 @@
 | `KOORM_PAT_DEFAULT_EXPIRES_DAYS` | `90` | PAT 기본 만료(일) |
 | `KOORM_STORAGE_DIR` | `platform/storage` | 세션 파일 실물 경로 |
 | `KOORM_KOOREMAPPER_BIN` | `platform/backend/bin/KooRemapper` | runner가 실행할 바이너리 |
-| `KOORM_JOB_TIMEOUT_SEC` | `1800` | Job 1건 최대 실행시간 |
+| `KOORM_JOB_TIMEOUT_SEC` | `1800` | Job 1건 최대 실행시간(벽시계). 걸리면 잡 요약에 값과 이 이름이 실린다 |
 | `KOORM_WORKER_CONCURRENCY` | `4` | 동시 워커 수. 실행기가 없고 API 환경에 `OMP_NUM_THREADS` 가 없으면 잡마다 `OMP_NUM_THREADS = 코어(affinity) ÷ 이 값`(최소 1)을 준다 — API 환경에 값을 주면 그 값을 그대로 쓴다. 실제 값은 잡의 `env_snapshot.omp_num_threads` 에 남는다(10-23) |
 | `KOORM_JOB_LAUNCHER` | (빈 값) | job 자식 앞에 붙이는 실행기 명령 한 줄(`shlex.split`). 비우면 지금처럼 API 의 자식으로 바로 띄운다. 값이 있으면 `<실행기…> --job-id <id> --kind <연산> -- <바이너리> <argv…>` 로 띄우고, 자식 환경을 허용 목록(`PATH LANG LC_* HOME TMPDIR OMP_* KOOREMAPPER_GMSH KOO_*_DEBUG`)으로 줄이며, 재기동 때 `<실행기> --reap <id>` 를 부른다. 잡마다 `env_snapshot.launcher` 에 남는다 — 비밀은 인자가 아니라 파일로 줄 것. 실행기가 cwd 에 남긴 `.job_<id>.node` 첫 줄(노드 이름)은 `env_snapshot.host.job_node` 로 옮긴다(`host.nodename` 은 API 노드 그대로). 출력 등록은 `.job_*` · `.nfs*` 를 뺀다. 계약은 `docs/requests/hwax-job-launcher-request-2026-10-23.md` |
 | `KOORM_JOB_TERM_GRACE_SEC` | `5` | 실행기를 쓸 때 시간 초과에 SIGTERM 을 보낸 뒤 SIGKILL 까지 기다리는 초(종료 때는 2초 고정) |
@@ -45,6 +45,7 @@
 | `KOOREMAPPER_API_BASE` | `http://127.0.0.1:8700` | MCP가 호출할 REST 베이스 |
 | `MCP_HOST` | `127.0.0.1` | MCP 바인드 호스트 |
 | `MCP_ALLOWED_HOSTS` | (빈값) | 비-localhost 바인드 시 허용 Host(쉼표). 빈값이면 DNS-rebind 보호가 외부 Host를 거부 |
+| `KOORM_MCP_API_TIMEOUT_S` | `540` | MCP → REST 한도(초) = 도구 호출 하나의 벽시계 기한(REST 를 여러 번 부르는 도구도 합쳐서). 게이트웨이 도구 호출 600초보다 작아야 한다(아니면 540). 걸리면 문구에 값과 이 이름이 실린다 |
 | `KOORM_MCP_MAX_DOWNLOAD_BYTES` | `5242880` | download_result가 인라인 반환할 최대 바이트 |
 
 ## Apptainer / 운영
