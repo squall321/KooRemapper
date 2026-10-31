@@ -50,3 +50,7 @@
 - (10-31) 다시 실으면 그 리포트 행을 통째로 바꾼다 — 그쪽 계약 초안은 「삭제 표시」 를 권했지만 행의 정본이 리포트라 남길 것이 없다.
 - (10-31) 리포트 쪽 길 이름은 `/reports/{id}/cae` — `/ontology` 가 든 길은 과제 · 개정 스위치(허브 설정)에 묶이는데 해석 어휘는 허브와 무관하게 돈다.
 - (10-31) 일반 보기에서 `cae_*` 를 뺀다 — 일반 보기는 로그인한 누구나 읽는데 리포트는 소유 · 소속으로 갈린다(리포트 수치가 새어 나간다).
+- (10-31) **7-1 길에서는 꾸러미가 생기지 않는다**(소스로 봄) — pyKooCAE 셸이 `koo_sphere_report -o <출력>/sphere_report.html` 을 바로 부르고,
+  생산 쪽 꾸러미 단계는 `post_analyze.sh` 의 Step O(`<TEST_DIR>/report*.json` · `impact_report.json`)뿐이다. 그래서 KooSlurm 매니페스트 칸만으로는
+  모자라다 — KooSlurm 에 칸(`kooslurm-ontology-manifest-request-2026-10-31.md`), KooD3plotReader 에 (A) 도구가 스스로 / (B) 셸이 부른다
+  (`kood3plotreader-ontology-adopted-2026-10-31.md`, 우리 의견 (A))를 물었다. 받는 쪽(`postprocess_return`)은 모양이 정해진 뒤 짓는다.
