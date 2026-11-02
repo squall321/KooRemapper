@@ -157,6 +157,13 @@ async def main():
                 if img:
                     chk("★mimeType 이 image/png (모델이 볼 수 있는 형식)",
                         img[0].mimeType == "image/png", img[0].mimeType)
+                    # 출처 한 줄(2026-11-02, 포털) — 게이트웨이가 그림을 리포트로 옮겨도 어디서 왔는지 남게
+                    import base64, hashlib
+                    prov = " ".join(getattr(c, "text", "") for c in res.content)
+                    sha = hashlib.sha256(base64.b64decode(img[0].data)).hexdigest()
+                    chk("★report_image 앞에 출처 한 줄 — report·case·file_id·sha256 이 그 바이트와 맞는다",
+                        f"report={rid}" in prov and "case=F5_DOE_001" in prov and "file_id=" in prov
+                        and f"sha256={sha}" in prov, prov[:200])
 
                 # ★핵심 ② 영상은 **거절하고 대안을 말한다**(모델이 못 보므로)
                 mv = S._data(await s.call_tool("report_media", {"report_id": rid, "kind": "video"}))
@@ -172,6 +179,11 @@ async def main():
                 nimg = k3.count("ImageContent")
                 txt = next((c.text for c in res3.content if hasattr(c, "text")), "")
                 chk("★report_compare 가 이미지 3장을 함께 돌려준다", nimg == 3, k3)
+                provs = [c.text for c in res3.content if hasattr(c, "text") and "출처 — " in c.text]
+                chk("★report_compare 이미지마다 출처 한 줄(케이스별)",
+                    len(provs) == 3 and all(f"case={ck}" in t for ck, t in
+                                            zip(["F5_DOE_001", "F5_DOE_002", "F5_DOE_003"], provs)),
+                    [t[:80] for t in provs])
                 chk("★그 앞에 지표 표가 온다", txt.lstrip().startswith("# 비교") and "| case |" in txt,
                     txt[:160])
 
