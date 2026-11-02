@@ -23,6 +23,8 @@
 
 ## 배포
 - [x] dev `mcp.sif` 교체(옛 것 `mcp.sif.bak-20261102-212508`) · MCP 재기동
-- [ ] 게이트웨이로 그림 한 번 — 이미지 블록 + `fig_…` 줄 · `figure_to_report` → RA — **포털에 부탁**(이 박스 `.env` 에 게이트웨이 PAT 가 없다 · 게이트웨이 `/health` 에서 `reportarchive: false`)
+- [ ] 게이트웨이로 그림 한 번 — 이미지 블록 + `fig_…` 줄 · `figure_to_report` → RA — **cae00 에서 사람이 하는 확인 단계로 옮겼다**(포털 결정 11-02, HWAXPortal `docs/request-1030/server-setup.md` §0)
+      - 까닭: 게이트웨이는 사람마다 위임하므로 메시가 든 DynaForge 세션을 가진 실제 사용자 신원이 필요하다. 포털 스모크 신원에는 세션이 없고, 실제 사용자 행세는 하지 않는다. dev RA 도 내려가 있다
+      - 게이트웨이 그림 저장은 백엔드와 무관하다 — 포털이 StepForge `render_3d` 로 dev 에서 확인했다(줄 붙음 · 서명 내려받기 200 · 변조 티켓 404)
 - [x] 포털에 SHA(`a7904f7` · `4be66a5` · `84715c6`) — dist 번호는 승인 뒤
 - [ ] 운영 Drive 게시 — **사용자 승인**
