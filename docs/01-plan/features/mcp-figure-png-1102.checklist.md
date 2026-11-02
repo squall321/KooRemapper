@@ -10,19 +10,19 @@
 - [x] 시험 SIF(rsvg+나눔+pillow) 30초 빌드 · 크기·시간 실측(결정 노트)
 
 ## 구현
-- [ ] `platform/mcp_server/figure_png.py` — SVG → (bytes, fmt, w, h), 실패는 짧은 까닭
-- [ ] 메시 그림 도구 셋 — `[dict, Image]` + `figure_png` / `figure_png_error`, 낡은 "PNG 경로 없음" 문구 고치기
-- [ ] `report_image` · `report_compare` — 이미지마다 출처 한 줄
-- [ ] `mcp.def` — librsvg2-bin · fonts-nanum · pillow, `requirements.txt` 에 pillow
-- [ ] TOOLS.md · SKILL.md 의 "픽셀은 없다" 문구
+- [x] `platform/mcp_server/figure_png.py` — SVG → (bytes, fmt, w, h), 실패는 짧은 까닭
+- [x] 메시 그림 도구 셋 — `[dict, Image]` + `figure_png` / `figure_png_error`, 낡은 "PNG 경로 없음" 문구 고치기
+- [x] `report_image` · `report_compare` — 이미지마다 출처 한 줄
+- [x] `mcp.def` — librsvg2-bin · fonts-nanum · pillow, `requirements.txt` 에 pillow · **패키지 고정**(`mcp.constraints.txt`)
+- [x] TOOLS.md · SKILL.md 의 "픽셀은 없다" 문구
 
 ## 시험
-- [ ] 단위 — 렌더러 없음 · 시간 초과 · 크기 줄이기 순서(호스트)
-- [ ] SIF 안 실렌더 — 한글 글꼴 있음, 큰 그림이 256KB 안으로
-- [ ] backend 전체 · figures_smoke(이미지 블록 확인)
+- [x] 단위 — 렌더러 없음 · 시간 초과 · 실패 rc · 빈 SVG · 작은 PNG 통과(호스트 5)
+- [x] SIF 안 실렌더 — 한글 글꼴 있음, 큰 그림이 256KB 안으로(3)
+- [x] backend 전체 829 · figures_smoke 26/26 · reports_smoke 56/56(출처 줄) · smoke · deckops_smoke 25/25
 
 ## 배포
-- [ ] dev `mcp.sif` 교체(옛 것 백업) · MCP 재기동
-- [ ] 게이트웨이로 그림 한 번 — 이미지 블록 + `fig_…` 줄 · `figure_to_report` → RA
-- [ ] 포털에 SHA · (승인 뒤) dist 번호
+- [x] dev `mcp.sif` 교체(옛 것 `mcp.sif.bak-20261102-212508`) · MCP 재기동
+- [ ] 게이트웨이로 그림 한 번 — 이미지 블록 + `fig_…` 줄 · `figure_to_report` → RA — **포털에 부탁**(이 박스 `.env` 에 게이트웨이 PAT 가 없다 · 게이트웨이 `/health` 에서 `reportarchive: false`)
+- [x] 포털에 SHA(`a7904f7` · `4be66a5` · `84715c6`) — dist 번호는 승인 뒤
 - [ ] 운영 Drive 게시 — **사용자 승인**

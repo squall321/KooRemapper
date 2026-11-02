@@ -29,3 +29,18 @@ C++ 에 넣는 것보다 SIF 에 rsvg-convert 와 나눔 글꼴을 넣는 편이
 ### SIF 크기
 
 시험 SIF 101MB(지금 60MB). 나눔 글꼴과 librsvg 의존(cairo·pango)이 대부분이다.
+
+### 패키지를 고정했다 — 고정 없이 다시 구우면 mcp 2.3.0 이 들어왔다
+
+`mcp.def` 는 `mcp>=1.2` 만 적고 있었다. 다시 구우니 **mcp 2.3.0**·anyio 4.16·starlette 1.10 이 들어왔다(지금
+SIF 는 1.28.0·4.14·1.3.1). 주 판이 바뀌면 서버가 통째로 깨질 수 있어, 지금 SIF 의 `pip freeze` 를
+`mcp.constraints.txt` 로 박고 `-c` 로 묶었다. 새 SIF 는 옛 SIF 와 패키지가 같고 pillow 하나만 늘었다(freeze diff).
+
+### dev 의 MCP 는 SIF 의 mcp 가 아니라 호스트 `~/.local` 의 mcp 를 쓴다 (고치지 않았다)
+
+인스턴스가 `python server.py`(사용자 사이트 켜짐)로 뜨고 홈이 붙어서, `~/.local/lib/python3.12` 의
+**mcp 1.27.1**·typing_extensions 가 SIF 의 것을 가린다(실측 `mcp.__file__`). 운영(cae00)은 `~/.local` 이
+없으니 SIF 의 1.28.0 을 쓴다 — dev 와 운영의 mcp 판이 다르다. 고정하지 않은 새 SIF(anyio 4.16)는 이
+`~/.local` typing_extensions 와 부딪쳐 `cannot import name 'sentinel'` 로 **dev 서버가 못 떴을 것**이다.
+`[dict, Image]` 직렬화는 1.27.1·1.28.0 둘 다에서 텍스트 바이트 동일을 확인했다.
+고치려면 `mcp.def` 의 `%environment` 에 `PYTHONNOUSERSITE=1` — dev 의 mcp 판이 바뀌는 일이라 이번에는 하지 않았다.
