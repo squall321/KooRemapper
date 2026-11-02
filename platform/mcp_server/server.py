@@ -18,6 +18,7 @@ from __future__ import annotations
 import base64
 import contextvars
 import functools
+import hashlib
 import os
 import sys
 import time
@@ -27,6 +28,8 @@ from urllib.parse import quote
 import httpx
 from mcp.server.fastmcp import Context, FastMCP, Image
 from pydantic import Field
+
+from figure_png import FigurePngError, rasterize
 
 API_BASE = os.environ.get("KOOREMAPPER_API_BASE", "http://127.0.0.1:8700").rstrip("/")
 API = f"{API_BASE}/api/v1"
@@ -542,6 +545,29 @@ def _pick_svg(outs: list) -> tuple:
     raise RuntimeError("그림(SVG)이 산출물에 없습니다: %s" % [f.get("filename") for f in outs])
 
 
+async def _with_png(ctx: Context, session_id: str, svg_id: int | None, res: dict) -> list:
+    """`res` 뒤에 그림의 **이미지 블록**을 붙여 `[res, Image]` 로 돌려준다(2026-11-02, 포털 요청).
+
+    게이트웨이는 이미지 블록을 저장해 `figure_to_report` 로 리포트에 넣는다 — SVG 는 거기 못 간다.
+    `res` 의 텍스트 블록은 그대로 나가고(FastMCP 가 dict 를 같은 꼴로 직렬화한다) 키 하나만 는다 —
+    `figure_png`(꼴·크기) 또는 못 만든 까닭 `figure_png_error`. 못 만들면 `[res]` 만 간다.
+    """
+    if svg_id is None:
+        res["figure_png_error"] = "render_failed: 산출물에 SVG 가 없다"
+        return [res]
+    try:
+        svg = await _download_bytes(ctx, session_id, svg_id)
+        data, fmt, w, h = await rasterize(svg)
+    except FigurePngError as e:
+        res["figure_png_error"] = str(e)
+        return [res]
+    except RuntimeError as e:
+        res["figure_png_error"] = f"download_failed: {e}"[:200]
+        return [res]
+    res["figure_png"] = {"format": fmt, "width": w, "height": h, "bytes": len(data)}
+    return [res, Image(data=data, format=fmt)]
+
+
 @mcp.tool()
 async def mesh_section_figure(
     session_id: str,
@@ -555,14 +581,16 @@ async def mesh_section_figure(
     width: int = 1200,
     height: int = 900,
     timeout_s: int = 180,
-) -> dict:
+) -> list:
     """격자(메시)를 평면으로 잘라 **단면 그림(SVG)** 과 그 매니페스트를 한 번에 돌려준다.
     적층 덱의 층 경계·두께·재질을 눈으로 보려면 이것을 쓴다.
 
-    ⚠ **이 응답에 그림의 픽셀은 없다.** 챗·LLM 은 이미지 픽셀을 못 보므로, 그림의 요지가 되는
-    숫자를 **텍스트로** 함께 돌려준다 — 자른 축과 **왜 그 축인지**, 맞은 파트 수/전체, 평면이
-    절점층에 걸려 ε 비켰는지, 확대 축과 배율, 최소 피처와 그 픽셀값, 파트별 제목·두께·두께의
-    출처·E. 그림 자체는 `svg_file_id` 를 `download_result` 로 받으면 텍스트(SVG)로 온다.
+    그림은 **이미지 블록**(PNG, 크면 JPEG — 폭 1500px 안팎·256KB 이하 목표)으로 함께 온다 —
+    게이트웨이가 그것을 저장해 `figure_to_report` 로 리포트에 넣는다. 꼴·크기는 `figure_png`,
+    못 만들었으면 까닭이 `figure_png_error` 에 있다. 그래도 그림의 요지가 되는 숫자를 **텍스트로**
+    함께 돌려준다 — 자른 축과 **왜 그 축인지**, 맞은 파트 수/전체, 평면이 절점층에 걸려 ε
+    비켰는지, 확대 축과 배율, 최소 피처와 그 픽셀값, 파트별 제목·두께·두께의 출처·E. 벡터 원본은
+    `svg_file_id` 를 `download_result` 로 받으면 텍스트(SVG)로 온다.
 
     축: `axis="auto"` 는 ① 단면이 선에 가까운 축을 빼고 ② 파트를 가장 많이 만나는 축 ③ 동점이면
     단면 넓이가 큰 축을 고른다. **"적층 방향에 수직" 이 규칙이 아니다** — 실측으로 61파트 배터리
@@ -654,9 +682,9 @@ async def mesh_section_figure(
     # ★확대 배율·최소피처 px 는 매니페스트에 없다(SVG 배치 때 정해진다) — 로그에서 뽑아 싣는다.
     res["figure_numbers"] = await _figure_numbers(ctx, job_id)
     res["how_to_see_the_figure"] = (
-        "SVG 는 `download_result(session_id, svg_file_id)` 로 텍스트로 받을 수 있습니다. "
-        "Claude 의 시야에 그림을 넣는 PNG 경로는 아직 없습니다 — 지금은 사람이 브라우저에서 "
-        "보거나 SVG 를 저장해 엽니다(`save_result_to_path`)."
+        "그림은 이 응답의 이미지 블록으로 옵니다(꼴·크기 `figure_png`, 없으면 까닭 "
+        "`figure_png_error`). 벡터 원본 SVG 는 `download_result(session_id, svg_file_id)` 로 "
+        "텍스트로 받거나 `save_result_to_path` 로 저장해 엽니다."
     )
     res["read_this_first"] = (
         "그림이 거짓말하지 않게 하는 숫자들입니다. `axis_chosen_because` 로 축이 맞는지, "
@@ -666,7 +694,7 @@ async def mesh_section_figure(
         "정해지므로 매니페스트에는 없습니다. "
         "단위는 없습니다(LS-DYNA 덱)."
     )
-    return res
+    return await _with_png(ctx, session_id, svg_id, res)
 
 
 @mcp.tool()
@@ -680,12 +708,13 @@ async def mesh_surface_figure(
     width: int = 1200,
     height: int = 900,
     timeout_s: int = 300,
-) -> dict:
+) -> list:
     """격자의 **자유면만** 뽑아 직교투영·깊이정렬로 그린 **3D 겉모습 그림(SVG)** 을 돌려준다.
     "이 덱이 대체 어떻게 생겼나" 를 볼 때 쓴다. 층 두께는 `mesh_section_figure` 가 답한다.
 
-    ⚠ **이 응답에 그림의 픽셀은 없다.** `mesh_section_figure` 와 달리 이 op 은 JSON 매니페스트를
-    내지 않으므로, 그림의 요지 숫자는 **`report` 에 콘솔 텍스트로** 온다 — 자유면 수/전체 면 수,
+    그림은 **이미지 블록**(PNG, 크면 JPEG)으로 함께 온다 — 꼴·크기는 `figure_png`, 못 만들었으면
+    까닭이 `figure_png_error`. `mesh_section_figure` 와 달리 이 op 은 JSON 매니페스트를 내지
+    않으므로, 그림의 요지 숫자는 **`report` 에 콘솔 텍스트로** 온다 — 자유면 수/전체 면 수,
     등진 삼각형 수, ink_ratio, SVG 크기.
 
     자유면만 그리는 것이 성능 꾀가 아니라 **그림의 요지**다. 실측 286k 요소 덱에서 전체 면
@@ -698,7 +727,7 @@ async def mesh_surface_figure(
     ⚠ **큰 덱에서는 SVG 가 download_result 로 안 나온다** — 삼각형을 솎지 않기 때문이다(솎으면
     구멍이 뚫려 그림이 거짓이 된다). 실측 286k 요소 덱이 12.2MB 이고 다운로드 상한은 5MB 다.
     응답의 `svg_bytes` 와 `download_warning` 을 보고, 크면 `save_result_to_path` 로 디스크에
-    저장하거나 `wire=true` 로 좁힌다.
+    저장하거나 `wire=true` 로 좁힌다. 이미지 블록은 이 상한과 무관하게 온다(서버가 그려 줄인다).
     """
     files = await _get(ctx, f"/sessions/{session_id}/files")
     byid = {int(f["id"]): f for f in files}
@@ -726,7 +755,7 @@ async def mesh_surface_figure(
         "깊이정렬은 삼각형 무게중심 기준이므로 서로 관통하는 삼각형은 순서가 틀릴 수 있습니다. "
         "단위는 없습니다(LS-DYNA 덱)."
     )
-    return res
+    return await _with_png(ctx, session_id, svg_id, res)
 
 
 @mcp.tool()
@@ -739,7 +768,7 @@ async def mesh_stack_diagram(
     width: int = 900,
     height: int = 700,
     timeout_s: int = 180,
-) -> dict:
+) -> list:
     """적층을 **층 모식도(SVG)** 로 그리고 **중립축·기하 중심면·굽힘강성을 같은 그림에** 긋는다.
     "층이 몇 개이고 중립축이 어디냐" 를 한 그림으로 볼 때 쓴다.
 
@@ -756,8 +785,9 @@ async def mesh_stack_diagram(
     `*MAT` 을 못 읽어도(실제 덱은 `*INCLUDE` 안에 있다) 층은 그리고 **중립축만** 생략한다.
     중립축·굽힘강성은 `neutralaxis` op 과 **같은 계산**이다 — 숫자가 다르면 결함이다.
 
-    ⚠ **이 응답에 그림의 픽셀은 없다.** JSON 매니페스트도 없으므로 요지 숫자는 **`report` 에
-    콘솔 텍스트로** 온다 — 층 수(E 읽음/두께만), 감싸는 파트, 겹침 쌍 수, 바닥 처리한 층 수,
+    그림은 **이미지 블록**(PNG, 크면 JPEG)으로 함께 온다 — 꼴·크기는 `figure_png`, 못 만들었으면
+    까닭이 `figure_png_error`. JSON 매니페스트는 없으므로 요지 숫자는 **`report` 에 콘솔
+    텍스트로** 온다 — 층 수(E 읽음/두께만), 감싸는 파트, 겹침 쌍 수, 바닥 처리한 층 수,
     중립축·기하 중심면·굽힘강성.
     """
     if axis not in ("x", "y", "z"):
@@ -773,7 +803,7 @@ async def mesh_stack_diagram(
     job_id, outs = await _run_figure_job(ctx, session_id, "stackdiagram", args, timeout_s)
     svg_id, svg_bytes = _pick_svg(outs)
 
-    return {
+    res = {
         "job_id": job_id, "svg_file_id": svg_id, "svg_bytes": svg_bytes,
         "report": await _job_log_tail(ctx, job_id),
         "read_this_first": (
@@ -785,6 +815,7 @@ async def mesh_stack_diagram(
             "단위는 없습니다(LS-DYNA 덱)."
         ),
     }
+    return await _with_png(ctx, session_id, svg_id, res)
 
 
 @mcp.tool()
@@ -1270,6 +1301,13 @@ async def _download_bytes(ctx: Context, session_id: str, file_id: int) -> bytes:
     return r.content
 
 
+def _provenance(report_id: str, case_key: str | None, row: dict, data: bytes) -> str:
+    """이미지 한 장의 출처 한 줄 — 게이트웨이가 그림을 리포트로 옮겨도 어디서 왔는지 남게(2026-11-02, 포털 요청)."""
+    return "출처 — report=%s case=%s file_id=%s sha256=%s path=%s" % (
+        report_id, case_key or "-", row.get("file_id"), hashlib.sha256(data).hexdigest(),
+        row.get("path") or "-")
+
+
 @mcp.tool()
 async def report_image(
     report_id: str, ctx: Context, case_key: str = "", path: str = "", role: str = "peak",
@@ -1280,7 +1318,8 @@ async def report_image(
     (경로는 `report_media` 가 알려 준다). `role` 은 보통 `peak`(피크 상태 렌더)다.
 
     ★mp4 는 **모델이 못 본다** — 그것을 고르면 거절하고 대신 쓸 png 를 알려 준다.
-    ★여러 케이스를 **한 번에 비교**하려면 `report_compare` 를 써라(지표 표까지 같이 온다)."""
+    ★여러 케이스를 **한 번에 비교**하려면 `report_compare` 를 써라(지표 표까지 같이 온다).
+    그림 앞에 **출처 한 줄**(report·case·file_id·sha256·path)이 온다."""
     # ⚠ `path` 로 한 장을 지정했으면 `role` 로 **걸러서는 안 된다** — 예컨대 mp4(role=view)를
     #   지정했는데 기본 `role=peak` 가 먼저 걸러 버리면 "그림이 없다" 라는 **엉뚱한 까닭**을
     #   대고, 정작 "영상은 못 본다" 를 말하지 못한다(실측으로 그랬다).
@@ -1307,7 +1346,8 @@ async def report_image(
         raise RuntimeError("리포트의 세션을 알 수 없다")
     data = await _download_bytes(ctx, session_id, pick["file_id"])
     ext = "." + (pick.get("path") or "").rsplit(".", 1)[-1].lower()
-    return Image(data=data, format=_IMAGE_MIME.get(ext, "png"))
+    return [_provenance(report_id, pick.get("case_key") or case_key, pick, data),
+            Image(data=data, format=_IMAGE_MIME.get(ext, "png"))]
 
 
 @mcp.tool()
@@ -1317,7 +1357,8 @@ async def report_compare(
 ) -> list:
     """★케이스 여러 개를 **그림 + 지표**로 한 번에 비교한다 — 리포트를 쓸 때 쓰라.
 
-    돌려주는 것: ① 케이스별 지표 표(텍스트) ② 각 케이스의 피크 렌더 **이미지**.
+    돌려주는 것: ① 케이스별 지표 표(텍스트) ② 각 케이스의 피크 렌더 **이미지**(앞에 출처 한 줄 —
+    report·case·file_id·sha256·path).
     그래서 그림을 **보면서** "어느 방향이 왜 더 나쁜가" 를 쓸 수 있다.
 
     `metrics` 를 비우면 기본(peak_stress·peak_g·peak_disp)을 쓴다.
@@ -1371,7 +1412,8 @@ async def report_compare(
         except RuntimeError:
             continue
         ext = "." + (row.get("path") or "").rsplit(".", 1)[-1].lower()
-        out.append("## %s — %s" % (ck, row.get("path", "").rsplit("/", 1)[-1]))
+        out.append("## %s — %s\n%s" % (ck, row.get("path", "").rsplit("/", 1)[-1],
+                                         _provenance(report_id, ck, row, data)))
         out.append(Image(data=data, format=_IMAGE_MIME.get(ext, "png")))
     return out
 

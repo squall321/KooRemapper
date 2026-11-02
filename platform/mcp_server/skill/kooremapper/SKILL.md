@@ -150,10 +150,11 @@ job 은 `failed` 로 보이지만 산출 덱은 있다 — `get_job(job_id, incl
 | `mesh_surface_figure` | **자유면**만 직교투영(겉모습) | "이 덱이 어떻게 생겼나" |
 | `mesh_stack_diagram` | 층 **모식도** + 중립축·기하 중심면 | 층 수와 중립축을 한 그림에. 평면을 고를 필요가 없다 |
 
-⚠ **응답에 그림의 픽셀은 없다.** 챗·LLM 은 이미지를 못 보므로 그림의 요지를 **숫자로** 함께
-준다 — 단면은 매니페스트 + `figure_numbers`(확대 배율·최소피처 px), 나머지 둘은 `report`
-(콘솔 숫자). **그 숫자를 먼저 읽어라.** 그림 자체는 `download_result(session_id, svg_file_id)`
-로 받는다(사람이 브라우저로 본다).
+그림은 **이미지 블록**(PNG, 크면 JPEG)으로 함께 온다 — 게이트웨이가 그것을 저장해 리포트로
+옮긴다(`figure_to_report`). 꼴·크기는 `figure_png`, 못 만들었으면 까닭이 `figure_png_error` 다.
+그래도 그림의 요지를 **숫자로** 함께 준다 — 단면은 매니페스트 + `figure_numbers`(확대 배율·최소피처
+px), 나머지 둘은 `report`(콘솔 숫자). **그 숫자를 먼저 읽어라** — 비등방 확대 그림은 눈으로만 보면
+두께를 오해한다. 벡터 원본은 `download_result(session_id, svg_file_id)` 로 받는다.
 
 거절하는 자리가 있고, 거절이 기능이다.
 - `mesh_stack_diagram` 은 **감긴/접힌 적층을 거절한다** — 파트 축 범위가 포개지면 층 순서가

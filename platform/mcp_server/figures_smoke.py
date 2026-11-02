@@ -31,6 +31,18 @@ REPO = Path(__file__).resolve().parents[2]
 DECK = str(REPO / "examples" / "stackwrap" / "flat_stack.k")
 OK = []
 
+def chk_png(tag, res, d):
+    """그림 도구는 SVG 옆에 **이미지 블록**을 함께 낸다(2026-11-02) — 게이트웨이가 그것을 리포트로 옮긴다."""
+    imgs = [c for c in res.content if getattr(c, "type", None) == "image"]
+    meta = d.get("figure_png") if isinstance(d, dict) else None
+    chk("%s★이미지 블록이 한 장 온다 (png/jpeg)" % tag,
+        len(imgs) == 1 and imgs[0].mimeType in ("image/png", "image/jpeg"),
+        [getattr(c, "mimeType", c.type) for c in res.content] if not meta else d.get("figure_png_error"))
+    chk("%s★figure_png 가 블록과 맞고 256KB 이하다" % tag,
+        bool(meta) and bool(imgs) and meta["bytes"] <= 256 * 1024
+        and imgs[0].mimeType == "image/" + meta["format"], meta or (d.get("figure_png_error") if isinstance(d, dict) else d))
+
+
 def chk(name, cond, detail=""):
     print("  %-56s %s" % (name, "OK" if cond else "FAIL"))
     OK.append(bool(cond))
@@ -78,6 +90,7 @@ async def main():
                         "parts_hit" in sec and "min_feature" in sec, list(sec)[:12])
                     chk("① 다각형은 오지 않는다 (응답을 불리지 않는다)", "polys" not in sec)
                     print("      요지: %s" % (d.get("figure_numbers") or "").replace("\n", " | ")[:220])
+                chk_png("①", res, d)
 
                 # ② 자유면
                 res = await s.call_tool("mesh_surface_figure", {"session_id": sid, "file_id": fid})
@@ -88,6 +101,7 @@ async def main():
                         d.get("svg_file_id") and d.get("svg_bytes", 0) > 0, {k: d.get(k) for k in ("svg_file_id","svg_bytes")})
                     chk("②★report 에 자유면 비율이 들어 있다",
                         "Free face share" in (d.get("report") or ""), (d.get("report") or "")[:200])
+                chk_png("②", res, d)
 
                 # ③ 층 모식도
                 res = await s.call_tool("mesh_stack_diagram",
@@ -100,6 +114,7 @@ async def main():
                     chk("③★report 에 중립축이 들어 있다", "Neutral axis" in rep, rep[:250])
                     chk("③★report 의 층 집계 합이 맞는다",
                         "E 읽음 3 · 두께만 0" in rep, [l for l in rep.splitlines() if "Layers" in l])
+                chk_png("③", res, d)
 
                 # ④ 그림을 실제로 내려받을 수 있나
                 svg = S._data(await s.call_tool("download_result",

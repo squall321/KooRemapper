@@ -5,12 +5,21 @@ From: python:3.12-slim
     Component  koorm-mcp
     Version    0.1.0
 
+%files
+    mcp.constraints.txt /opt/mcp.constraints.txt
+
 %post
     set -eux
     pip install --upgrade pip
     # Separate image from the API: the mcp SDK and FastAPI/starlette pins can
     # conflict, so the MCP server runs as its own process/deps (REST-only link).
-    pip install --no-cache-dir "mcp>=1.2" "httpx>=0.28"
+    # Pinned: an unpinned rebuild on 2026-11-02 pulled mcp 2.3.0 (was 1.28.0).
+    pip install --no-cache-dir -c /opt/mcp.constraints.txt mcp httpx pillow
+    # Mesh figure tools return a raster image block next to the SVG (figure_png.py).
+    # The SVGs carry Korean text, so the renderer needs a real font: rsvg-convert + Nanum.
+    apt-get update
+    apt-get install -y --no-install-recommends librsvg2-bin fonts-nanum
+    rm -rf /var/lib/apt/lists/*
 
 %environment
     export PYTHONDONTWRITEBYTECODE=1

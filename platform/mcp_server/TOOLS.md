@@ -42,9 +42,9 @@ MCP 서버는 streamable-http로 뜨고, 들어온 `Authorization: Bearer kr_...
 | `list_session_jobs` | session_id | GET /sessions/{id}/jobs | 세션의 Job 이력 |
 | `cancel_job` | job_id | POST /jobs/{id}/cancel | 대기/실행 중 Job 취소 |
 | `get_job_outputs` | job_id | GET /jobs/{id}/outputs | Job이 만든 산출 파일 목록 |
-| `mesh_section_figure` | session_id, file_id, axis?, at?, compare_file_id?, mode?, isotropic?, width?, height? | POST /sessions/{id}/jobs (section) + 폴링 + 매니페스트 | 격자를 평면으로 잘라 **단면 SVG** 와 그 매니페스트를 한 번에. ⚠ 응답에 픽셀은 없다 — 그림의 요지를 **숫자로** 함께 준다(축과 고른 까닭·맞은 파트 수·ε 비킴·확대 배율·최소피처와 px·파트별 두께와 출처). 다각형은 **돌려주지 않는다**(286k 요소 덱의 단면 JSON 이 455KB 다) |
-| `mesh_surface_figure` | session_id, file_id, azimuth?, elevation?, wire?, width?, height? | POST /sessions/{id}/jobs (surfview) + 폴링 + 로그 | 자유면만 뽑아 직교투영·깊이정렬로 그린 **겉모습 SVG**. 매니페스트가 없으므로 요지 숫자는 `report`(콘솔)로 온다 — 자유면 비율·**등진 삼각형 수**·ink_ratio. ⚠ **등축**이다(3D 를 늘이면 모양이 거짓이다) — 층 두께는 `mesh_section_figure`. ⚠ 큰 덱은 SVG 가 5MB 상한을 넘어 `download_result` 가 거절한다(실측 12.2MB) → `svg_bytes`·`download_warning` 을 보고 `save_result_to_path` |
-| `mesh_stack_diagram` | session_id, file_id, axis?, force?, width?, height? | POST /sessions/{id}/jobs (stackdiagram) + 폴링 + 로그 | 적층을 **층 모식도 SVG** 로 그리고 **중립축·기하 중심면·굽힘강성을 같은 그림에** 긋는다. 평면을 고를 필요가 없다. ⚠ **감긴 적층은 거절한다** — 솔리드 축 범위가 포개지면 층 순서가 없고, 포갠 것을 층처럼 쌓은 그림은 완전히 그럴듯해 보인다(그때는 `mesh_section_figure`). `*MAT` 이 없으면 층은 그리고 중립축만 생략한다 |
+| `mesh_section_figure` | session_id, file_id, axis?, at?, compare_file_id?, mode?, isotropic?, width?, height? | POST /sessions/{id}/jobs (section) + 폴링 + 매니페스트 | 격자를 평면으로 잘라 **단면 SVG** 와 그 매니페스트를 한 번에. 그림은 **이미지 블록**(PNG, 크면 JPEG — 폭 1500px 안팎·256KB 이하 목표)으로도 온다(`figure_png`, 못 만들면 `figure_png_error`). 그림의 요지는 **숫자로** 함께 준다(축과 고른 까닭·맞은 파트 수·ε 비킴·확대 배율·최소피처와 px·파트별 두께와 출처). 다각형은 **돌려주지 않는다**(286k 요소 덱의 단면 JSON 이 455KB 다) |
+| `mesh_surface_figure` | session_id, file_id, azimuth?, elevation?, wire?, width?, height? | POST /sessions/{id}/jobs (surfview) + 폴링 + 로그 | 자유면만 뽑아 직교투영·깊이정렬로 그린 **겉모습 SVG**(+ 이미지 블록 · `figure_png`). 매니페스트가 없으므로 요지 숫자는 `report`(콘솔)로 온다 — 자유면 비율·**등진 삼각형 수**·ink_ratio. ⚠ **등축**이다(3D 를 늘이면 모양이 거짓이다) — 층 두께는 `mesh_section_figure`. ⚠ 큰 덱은 SVG 가 5MB 상한을 넘어 `download_result` 가 거절한다(실측 12.2MB) → `svg_bytes`·`download_warning` 을 보고 `save_result_to_path` |
+| `mesh_stack_diagram` | session_id, file_id, axis?, force?, width?, height? | POST /sessions/{id}/jobs (stackdiagram) + 폴링 + 로그 | 적층을 **층 모식도 SVG**(+ 이미지 블록 · `figure_png`) 로 그리고 **중립축·기하 중심면·굽힘강성을 같은 그림에** 긋는다. 평면을 고를 필요가 없다. ⚠ **감긴 적층은 거절한다** — 솔리드 축 범위가 포개지면 층 순서가 없고, 포갠 것을 층처럼 쌓은 그림은 완전히 그럴듯해 보인다(그때는 `mesh_section_figure`). `*MAT` 이 없으면 층은 그리고 중립축만 생략한다 |
 
 ## 전사 코퍼스 (조직 전체 통계)
 개별 모델이 아니라 조직이 쌓아온 K파일·잡·리포트 전체를 집계한다(개인 식별 없음).
@@ -74,8 +74,8 @@ SmartTwin 파이프라인이 만든 deep(단건 심층)·sphere(전각도 낙하
 | `report_behavior_clusters` | report_id | GET /reports/{id}/clusters | 거동 아키타입 군집(impact). `degenerate`(선언≠사용)·`is_mock` 를 숨기지 않는다 |
 | `report_analytics` | report_id, block? | GET /reports/{id}/analytics | 큰 분석 블록 요약(doe_analysis·deep_analytics·insights·physics…). 생성기 `summary` **그대로** |
 | `report_media` | report_id, case_key?·kind?·role?·images_only? | GET /reports/{id}/media | 결과 이미지·영상 **목록**. `can_llm_view` 가 모델이 볼 수 있는지를 가른다(mp4 는 못 본다) |
-| `report_image` | report_id, case_key?·path?·role | (media + 파일 다운로드) | ★결과 이미지를 **그림으로** 돌려준다 — 모델이 실제로 보고 판단한다 |
-| `report_compare` | report_id, case_keys[], metrics?·max_images? | (cases + media) | ★케이스 여러 개를 **지표 표 + 이미지**로 한 번에 비교 — 리포트 쓸 때 쓴다. 장수 상한, 넘으면 **뺀 수를 말한다** |
+| `report_image` | report_id, case_key?·path?·role | (media + 파일 다운로드) | ★결과 이미지를 **그림으로** 돌려준다 — 모델이 실제로 보고 판단한다. 그림 앞에 출처 한 줄(report·case·file_id·sha256·path) |
+| `report_compare` | report_id, case_keys[], metrics?·max_images? | (cases + media) | ★케이스 여러 개를 **지표 표 + 이미지**로 한 번에 비교 — 리포트 쓸 때 쓴다. 장수 상한, 넘으면 **뺀 수를 말한다**. 이미지마다 출처 한 줄(report·case·file_id·sha256·path) |
 | `report_angle_stats` | report_id, metric?·part_id?·category?/angle_name?/near_lon+near_lat+tol_deg?·top_parts? | GET /reports/{id}/angle-stats | 특정 각도군 표준 통계(분포 n/mean/std/CoV/백분위/IQR/최악 + 부품별 위험·민감도). available_metrics 자동 감지 |
 | `update_report_meta` | report_id, label?·project?·dev_rev?·variation?·doe?·focus?·kfile_id? | PATCH /reports/{id} | 과제명·rev·초점·K파일 링크 수동 설정(""=삭제) |
 | `attach_report_scenario` | report_id, scenario_content | POST /reports/{id}/scenario | 시뮬 조건 scenario.json 첨부 — 요약 캐시 + K파일 자동매칭 |
