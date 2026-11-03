@@ -75,5 +75,5 @@ $#  nrcyck    drtol   drfctr   drterm   tssfdr   irelal    edttl    idrflg
        250 0.001000       0.0       0.0       0.0         0       0.0         0
 *CONTROL_TERMINATION
 $#  endtim    endcyc     dtmin    endeng    endmas     nosol
-       0.0         0       0.0       0.0       0.01e+20         0
+       0.0         0       0.0       0.0   1.0E+20         0
 *END

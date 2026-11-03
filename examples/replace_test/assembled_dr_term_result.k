@@ -26,7 +26,7 @@ $#     mid        ro         e        pr
          1  7.85E-09  2.10E+05       0.3
 *CONTROL_TERMINATION
 $#  endtim    endcyc     dtmin    endeng    endmas     nosol
-       0.0         0       0.0       0.0       0.01e+20         0
+       0.0         0       0.0       0.0   1.0E+20         0
 *INCLUDE
 assembled_dr_term_result.dynain
 *CONTROL_DYNAMIC_RELAXATION

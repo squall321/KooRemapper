@@ -3867,7 +3867,7 @@ $#      n1        n2        n3        n4
 $#     ssid      msid     sstyp     mstyp    sboxid    mboxid       spr       mpr
          1         2         0         0         0         0         1         1
 $#       fs        fd        dc        vc       vdc    penchk        bt        dt
-       0.0       0.0       0.0       0.0       0.0         0       0.0  1.0000E+20
+       0.0       0.0       0.0       0.0       0.0         0       0.0   1.0E+20
 $#     sfsa      sfsb      sast      sbst     sfsat     sfsbt       fsf       vsf
        1.0       1.0       0.0       0.0       1.0       1.0       1.0       1.0
 *PART
