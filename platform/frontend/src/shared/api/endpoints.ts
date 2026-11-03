@@ -244,7 +244,7 @@ export async function unlinkReportRevision(reportId: string): Promise<{ was: str
   return unwrap<{ was: string[]; detail: string }>(data)
 }
 
-// 허브 받기 · 받은 것 보기(SP 받는 쪽 — 키트 2026-10-21). **고치는 길은 없다**(정본은 허브) — 쓰는 것은 받기 실행과
+// 허브 받기 · 받은 것 보기(SP 받는 쪽 — 키트 2026-11-03). **고치는 길은 없다**(정본은 허브) — 쓰는 것은 받기 실행과
 // 합친 과제 옮기기(우리 개정 · 별칭)뿐이고 둘 다 관리자다.
 export interface ObjectCounts { total: number; active: number; deprecated: number; inactive: number; hidden: number }
 export interface SyncRun {

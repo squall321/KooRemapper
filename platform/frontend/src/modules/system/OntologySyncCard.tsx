@@ -25,7 +25,7 @@ function heldBack(run: SyncRun | null): boolean {
   return all.some((c) => (c?.held_back ?? 0) > 0)
 }
 
-/** SP 키트 2026-10-21 §7 의 관리 화면. 받기 실행은 MCP 에 없다 — 전사 데이터를 움직이는 길은 시스템 관리자다. */
+/** SP 키트 2026-11-03 §7 의 관리 화면. 받기 실행은 MCP 에 없다 — 전사 데이터를 움직이는 길은 시스템 관리자다. */
 export function OntologySyncCard() {
   const qc = useQueryClient()
   const [err, setErr] = useState<string | null>(null)
