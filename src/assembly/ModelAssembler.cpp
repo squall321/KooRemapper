@@ -4456,9 +4456,9 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
         if (useCzm) {
             ct << std::setw(10) << fs << std::setw(10) << fd
                << "       0.0" << std::setw(10) << vc
-               << "       0.0         0       0.0  1.0000E+20\n";
+               << "       0.0         0       0.0   1.0E+20\n";   // DT 는 10칸 — 80열 밖은 버려진다(R16)
         } else {
-            ct << "       0.0       0.0       0.0       0.0       0.0         0       0.0  1.0000E+20\n";
+            ct << "       0.0       0.0       0.0       0.0       0.0         0       0.0   1.0E+20\n";
         }
         ct << "$#     sfsa      sfsb      sast      sbst     sfsat     sfsbt       fsf       vsf\n";
         ct << "       1.0       1.0       0.0       0.0       1.0       1.0       1.0       1.0\n";
@@ -5258,7 +5258,7 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                 // Replace with DR-compatible termination (endtim=0 for DR-only)
                 output << "*CONTROL_TERMINATION\n";
                 output << "$#  endtim    endcyc     dtmin    endeng    endmas     nosol\n";
-                output << "       0.0         0       0.0       0.0       0.01e+20         0\n";
+                output << "       0.0         0       0.0       0.0   1.0E+20         0\n";
                 skippingReplacedSection = true;
                 currentSection = Section::NONE;
                 continue;
@@ -5474,7 +5474,7 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                     if (!hasTermination) {
                         output << "*CONTROL_TERMINATION\n";
                         output << "$#  endtim    endcyc     dtmin    endeng    endmas     nosol\n";
-                        output << "       0.0         0       0.0       0.0       0.01e+20         0\n";
+                        output << "       0.0         0       0.0       0.0   1.0E+20         0\n";
                     }
                 }
 
@@ -9857,7 +9857,7 @@ bool ModelAssembler::applyOffset(const OffsetOperation& op, double E, double nu)
             ct << std::setw(10) << ssid << std::setw(10) << msid
                << "         0         0         0         0         1         1\n";
             ct << "$#       fs        fd        dc        vc       vdc    penchk        bt        dt\n";
-            ct << "       0.0       0.0       0.0       0.0       0.0         0       0.0  1.0000E+20\n";
+            ct << "       0.0       0.0       0.0       0.0       0.0         0       0.0   1.0E+20\n";
             ct << "$#     sfsa      sfsb      sast      sbst     sfsat     sfsbt       fsf       vsf\n";
             ct << "       1.0       1.0       0.0       0.0       1.0       1.0       1.0       1.0\n";
             addedKeywordBlocks_.push_back(ct.str());

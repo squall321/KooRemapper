@@ -260,6 +260,13 @@ def check_lines(lines, width, label, skip=frozenset()):
             continue                          # 자유형식은 폭과 무관하다
         if l.rstrip() in skip:
             continue
+        # 80열 — R16 「characters beyond column 80 of each line are ignored」(2026-11-03, pykoocae-53 지적:
+        # TIED 접촉 카드 2 의 DT 를 12칸으로 써 줄이 82자였다 — 81~82열이 버려져 DT 가 `1.0000E+` 로 읽힌다).
+        # I10 이 넓히는 카드(*NODE·*ELEMENT_*)와 long 덱은 이 규칙 밖이다.
+        widened = w == 20 or (w == 10 and (base_kw == "*NODE" or base_kw in INT_KW))
+        if not widened and len(l.rstrip()) > 80:
+            bad.append((i, "%s 80열 넘음(%d자)" % (kw, len(l.rstrip())), l.rstrip()[:90]))
+            continue
         if base_kw in ("*NODE",):
             n += 1
             if not _node_ok(l, w):
