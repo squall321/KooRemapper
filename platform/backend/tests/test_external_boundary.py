@@ -100,7 +100,9 @@ def test_submodule_is_pinned_and_declared() -> None:
     #   10-30 f7485c0(v0.4.52) → 778db2f(v0.4.67) — 받는 쪽 키트 2026-10-21 판(규칙 16 · 시험장)을 받으려고.
     #   11-03 778db2f → ab41cff(v0.4.72) — 키트 2026-11-03 판(선 반영 · 관계의 뜻, 사용자 지시 「SP 와 이어진 플랫폼은 모두 최신으로」).
     #   StepForge 도 11-03 같은 커밋으로 올렸다(그쪽 b9db3d0 · origin/main ec721ef — 서브모듈 가리킴을 확인함).
+    #   11-04 ab41cff → d3b5aa1 — SP main 의 다음 커밋(자주검증 입력 svinput · ADR 0051). 코어 창구 · 키트는 그대로(diff 0).
+    #   StepForge 가 먼저 올렸다(그쪽 064ec41 · origin/main d0126cd — 서브모듈 가리킴을 확인함).
     #   StepForge 도 10-31 같은 커밋으로 올렸다(그쪽 525be5c — 확인함). 올릴 때마다 서로 알린다(리포 CLAUDE.md).
     status = subprocess.run(["git", "-C", str(ROOT), "submodule", "status"],
                             capture_output=True, text=True, check=True).stdout
-    assert "ab41cff85ecb9115d17a6daacf95edfbc7127f38" in status, status
+    assert "d3b5aa1670075115cc88ebcb1d4a400c062bc605" in status, status
