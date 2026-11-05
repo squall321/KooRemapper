@@ -102,7 +102,9 @@ def test_submodule_is_pinned_and_declared() -> None:
     #   StepForge 도 11-03 같은 커밋으로 올렸다(그쪽 b9db3d0 · origin/main ec721ef — 서브모듈 가리킴을 확인함).
     #   11-04 ab41cff → d3b5aa1 — SP main 의 다음 커밋(자주검증 입력 svinput · ADR 0051). 코어 창구 · 키트는 그대로(diff 0).
     #   StepForge 가 먼저 올렸다(그쪽 064ec41 · origin/main d0126cd — 서브모듈 가리킴을 확인함).
+    #   11-05 d3b5aa1 → ab41cff 로 되돌림 — SP main 이 강제로 ab41cff 로 돌아갔다(d3b5aa1 은 확장 갈래 ext/jvhub 로 — ls-remote 확인).
+    #   main 을 따른다. StepForge 도 되돌렸다(그쪽 562e8de · origin/main 8e711c4 — 서브모듈 가리킴을 확인함).
     #   StepForge 도 10-31 같은 커밋으로 올렸다(그쪽 525be5c — 확인함). 올릴 때마다 서로 알린다(리포 CLAUDE.md).
     status = subprocess.run(["git", "-C", str(ROOT), "submodule", "status"],
                             capture_output=True, text=True, check=True).stdout
-    assert "d3b5aa1670075115cc88ebcb1d4a400c062bc605" in status, status
+    assert "ab41cff85ecb9115d17a6daacf95edfbc7127f38" in status, status
