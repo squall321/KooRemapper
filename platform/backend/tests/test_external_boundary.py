@@ -104,7 +104,9 @@ def test_submodule_is_pinned_and_declared() -> None:
     #   StepForge 가 먼저 올렸다(그쪽 064ec41 · origin/main d0126cd — 서브모듈 가리킴을 확인함).
     #   11-05 d3b5aa1 → ab41cff 로 되돌림 — SP main 이 강제로 ab41cff 로 돌아갔다(d3b5aa1 은 확장 갈래 ext/jvhub 로 — ls-remote 확인).
     #   main 을 따른다. StepForge 도 되돌렸다(그쪽 562e8de · origin/main 8e711c4 — 서브모듈 가리킴을 확인함).
+    #   11-06 ab41cff → 1705f2c(v0.4.74) — 키트 판 그대로(2026-11-03). coreapi 는 내보내지 않는 칸 종류에 「문서」 를 더한 것뿐
+    #   (DETACHED_KINDS = file · document) — 받는 쪽에는 새 칸이 오지 않을 뿐이다. StepForge origin/main 도 1705f2c(가리킴 확인).
     #   StepForge 도 10-31 같은 커밋으로 올렸다(그쪽 525be5c — 확인함). 올릴 때마다 서로 알린다(리포 CLAUDE.md).
     status = subprocess.run(["git", "-C", str(ROOT), "submodule", "status"],
                             capture_output=True, text=True, check=True).stdout
-    assert "ab41cff85ecb9115d17a6daacf95edfbc7127f38" in status, status
+    assert "1705f2c243f0930e62102f86543f10667281afe7" in status, status
