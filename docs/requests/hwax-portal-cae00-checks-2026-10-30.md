@@ -10,7 +10,8 @@
 4. **cae00** — `KOORM_STCX_BACKEND_URL` 확인 → DynaForge 재기동 → §2 확인.
 5. 운영의 **첫 실제 전각도 잡** 뒤 → §4.
 6. (사람 · 읽기만) stcx viz 노드 · 게이트웨이 감사 → §5 · §6.
-7. (운영 측) stcx 후처리 이미지 **Post v42** 설치 — 단면 영상 응력 0 프레임 고침 → §5-1.
+7. (운영 측) stcx 후처리 이미지 **Post v43**(`eccde7f`) 설치 — 단면 영상 응력 0 프레임 고침(v42 와 같음) · S1 추출 · 해석 온톨로지 꾸러미 → §5-1.
+   꾸러미가 어휘 0.4 라 cae00 의 1번(update-all)을 먼저 하거나 같은 때에 한다.
 SSO 켜기는 **이번에 하지 않는다**(§7 — 조건이 안 섰다).
 
 ## 1. cae00 — DynaForge 받기(update-all 뒤)
@@ -54,7 +55,7 @@ SP 키트 2026-10-21 판(규칙 16 · 시험장 8단계 자동 시험) 받기 ·
 
 운영에서 꾸러미가 생기는 것은 꾸러미를 내는 후처리 이미지가 stcx 에 깔린 뒤다 — 그전에는 「없음」 이 정상이다. 후처리 예약(7-1) 반입은
 귀환 매니페스트의 꾸러미(`reports[].ontology`)를 저절로 싣는다. 세 자리가 다 서야 실제로 실린다 — KooSlurm 작성기(`b6a3d75c`, icn401 반영 뒤
-제출한 잡부터) · 리포트 도구가 `-o` HTML 곁에 꾸러미를 쓰는 후처리 이미지(KooD3plotReader (A), 판 이름 대기) · 이 판의 DynaForge. 하나라도 없으면
+제출한 잡부터) · 리포트 도구가 `-o` HTML 곁에 꾸러미를 쓰는 후처리 이미지(KooD3plotReader (A) — **Post v43** `eccde7f`, §5-1) · 이 판의 DynaForge. 하나라도 없으면
 리포트만 반입되고 잡 `external_ref.ontology.state` 가 `no_field`(옛 작성기) · `absent`(꾸러미 없음)다 — 둘 다 정상이고 경고가 아니다.
 이 싣기(`77c10a0`)와 어휘 0.4 판(0.3 꾸러미도 그대로 받는다)은 **파이썬 · 데이터만 바뀐 커밋**이라 Drive 판은 그대로다 —
 `update-all` 의 git 갱신으로 들어간다(§1 「소스」 줄의 `git log -1` 로 본다).
@@ -99,10 +100,25 @@ bash stcx_viz_readcheck.sh <viz 파티션> <노드> <S1 결과 폴더>    # 2단
 - 제어면 준비로 둘 더 — SceneForge 를 돌릴 cae00 계정에서 `ssh -o BatchMode=yes stcx true && echo ok`(sbatch 낼 길이 비밀번호 없이 열리나, C-13) · `ssh stcx df -h /data2`(렌더 작업자 SIF · 결과 자리 여유 — 자리는 노드 관리자와 정한다).
 - GPU 를 쓰는 시험(T1 · T2)은 SceneForge `docs/research/stcx-gpu-test-plan-2026-10-29.md` — 읽기 점검 결과가 나온 뒤 챗 LLM 운영과 시간을 잡고.
 
-## 5-1. stcx — 후처리 이미지 Post v42(운영 측 설치)
-단면 영상 **응력 0 프레임**(K-1 — 운영 영상 24개 중 7개가 오류 없이 응력 0) 고침이 든 판이다(KooD3plotReader `5abbc76`). pyKooCAE 가 Drive `ApptainerImages:SmartTwinPreprocessor/` 에 올렸다 — `SmartTwinPostprocessor_20261029_v42.tar.gz`, sha256 헤드리스 `1a6e0933…` · GUI `4536ea72…`. 이 박스에서 stcx 로 밀어 넣는 절차는 없고 **설치는 운영 측 몫**이다.
-- 설치 뒤 — `apptainer exec <설치한 SmartTwinPostprocessor.sif> head -3 /opt/kood3plot/VERSION` → `Version: 5abbc76`.
-- 고침 자체는 dev 헤드에서 확인했다 — 결함을 매번 일으키는 설정(LS-PrePost 예산 20M)을 심어도 정상이고, 옛 판(Post v41 `282630b`)은 같은 설정에서 0 을 내며 rc 0 으로 끝났다(KooRemapper `7818cbc`). 운영에서는 설치 뒤 전각도 잡 하나의 단면 영상 마지막 프레임 범례가 `max = 0, at node# 0` 이 아닌지만 본다.
+## 5-1. stcx — 후처리 이미지 Post v43(운영 측 설치)
+v42 를 건너뛰고 **v43**(KooD3plotReader `eccde7f`, 11-04)을 깐다 — v42 의 고침이 다 들어 있다(`5abbc76` 이 `eccde7f` 의 조상 — 확인).
+- 든 것 — 단면 영상 **응력 0 프레임** 고침(K-1 — 운영 영상 24개 중 7개가 오류 없이 응력 0, v42 와 같음) · S1 경량 추출(계약 초안 4) ·
+  리포트 곁의 **해석 온톨로지 꾸러미**(`<출력>/<kind>_report.ontology.json`, 어휘 0.4 — 리포트 도구가 스스로 쓴다) · 전각도 흐름 병렬(`--parallel-runs`).
+- 파일 — Drive `ApptainerImages:SmartTwinPreprocessor/SmartTwinPostprocessor_20261104_v43.tar.gz`(551,323,350 바이트), sha256 헤드리스
+  `94b98c4625302372fcfa50ed6561a618ae2a0c0c255347007a9733943e591a7c` · GUI `a6b95a76…`. dev 헤드 `/opt/apptainers` · `/data/SmartTwinPostprocessor` 가
+  이 판이다(지문 확인). 이 박스에서 stcx 로 밀어 넣는 절차는 없고 **설치는 운영 측 몫**이다. 리포트 잡이 도는 노드 쪽 사본까지 같은 판으로 둔다
+  (헤드와 노드의 판이 다르면 리포트 셸이 경고한다).
+- 설치 뒤 — `apptainer exec <설치한 SmartTwinPostprocessor.sif> head -3 /opt/kood3plot/VERSION` → `Version: eccde7f`.
+- 순서 — 이 판의 꾸러미는 어휘 0.4 다. cae00 DynaForge 가 `bd03428` 이상이어야 받는다(§0 의 1번 update-all 을 먼저 하거나 같은 때에).
+  늦으면 그 사이 반입된 리포트는 꾸러미 없이 들어온다(리포트는 정상 — 꾸러미는 나중에 리포트 화면 「꾸러미 붙이기」로 붙인다).
+- 운영에서 볼 것 — 전각도 잡 하나 뒤 (1) 단면 영상 마지막 프레임 범례가 `max = 0, at node# 0` 이 아니다 (2) 결과 폴더에
+  `<출력>/sphere_report.ontology.json` 이 있다 (3) icn401 반영 뒤 제출한 잡이면 귀환 매니페스트의 `reports[].ontology.present` 가 true 이고,
+  그 잡을 받은 DynaForge 후처리 예약의 `external_ref.ontology.state` 가 `loaded`.
+- 확인한 것 — 배포된 SIF 안에서(`python3 -s`, 캠페인 폴더 읽기 전용으로 묶음) v14 리포트로 꾸러미를 만들어 DynaForge 검사에 넣었다 — 어휘 0.4 ·
+  producer `eccde7f` · 행 94 · 선 115 · 런 20/20 · 경고 0(KooD3plotReader 의 부분충격 확인 — 행 88 · 선 95 · 런 25/25). 캠페인 폴더를 못 읽으면
+  접촉 양쪽 선이 빠진 꾸러미(행 89 · 선 64)가 **경고 없이** 나온다 — 7-1 의 리포트 셸은 `/data` 와 캠페인 폴더를 묶으므로 그 길은 해당하지 않는다.
+- v42 의 고침 확인 기록(dev 헤드, KooRemapper `7818cbc`)은 그대로다 — 결함을 매번 일으키는 설정(LS-PrePost 예산 20M)을 심어도 정상이고,
+  옛 판(Post v41 `282630b`)은 같은 설정에서 0 을 내며 rc 0 으로 끝났다.
 
 ## 6. 게이트웨이 — 게이트웨이를 거친 stcx 제출이 지금 되는가(선택)
 ```
