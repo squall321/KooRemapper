@@ -118,6 +118,10 @@ sub/other.k
         for fn in files:
             if not fn.endswith(".k"):
                 continue
+            # StepForge 이월 조각(apply_carryover_plan 의 입력)은 덱이 아니다 — 받는 덱의 SECID · MID 를 가리키는 꼴이
+            # 계약이라 혼자 읽으면 「정의되지 않았다」 가 맞다. 오탐 훑기에서 뺀다(11-07).
+            if os.path.basename(root) == "apply_carryover_plan" and fn.startswith("fragment_"):
+                continue
             checked += 1
             if checked > 40:
                 break

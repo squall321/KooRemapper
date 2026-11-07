@@ -61,6 +61,11 @@ QUIET = [
 #   양방향으로 본다. 여기 있는데 조용해지면 **검출이 멎은 것**이고, 여기 없는데 보고되면
 #   **새 결함 덱이 들어온 것**이다(둘 다 사람이 봐야 한다 — 목록을 고치든 덱을 고치든).
 DEFECT_DECKS = [
+    # StepForge 이월 조각(apply_carryover_plan 의 입력) — 받는 덱의 SECID · MID 를 가리키는 꼴이 계약이다(조각 안에 섹션 ·
+    # 물성 카드가 없다). 혼자서는 「참조가 없다」 로 보이는 것이 맞다 — 덱이 아니라 받는 덱에 넣을 조각이다(11-07).
+    "examples/apply_carryover_plan/fragment_4.k",
+    "examples/apply_carryover_plan/fragment_5.k",
+    "examples/apply_carryover_plan/fragment_6.k",
     "examples/extract-parts/part2_include.k",
     "examples/offset/01_basic_result.k",
     "examples/offset/02_multi_layer_result.k",
@@ -102,6 +107,11 @@ DEFECT_DECKS = [
     "tests/offset_shell_result.k",
     "tests/offset_test_result.k",
     "tests/offset_tshell_result.k",
+    "tools/regress/data/apply_carryover_plan/mesh12/fragment_1.k",     # 이월 조각 — 위와 같은 까닭
+    "tools/regress/data/apply_carryover_plan/mesh12/fragment_11.k",
+    "tools/regress/data/apply_carryover_plan/mesh12/fragment_13.k",
+    "tools/regress/data/apply_carryover_plan/mesh12/fragment_14.k",
+    "tools/regress/data/apply_carryover_plan/mesh12/fragment_4.k",
 ]
 
 # 진짜 결함이 있는 리포 덱 — 계속 보고해야 한다(여기는 **메시지**까지 본다)
