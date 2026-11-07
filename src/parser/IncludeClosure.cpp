@@ -130,6 +130,9 @@ struct Walker {
             std::string l;
             while (std::getline(in, l)) {
                 if (!l.empty() && l.back() == '\r') l.pop_back();
+                // 파일 맨 앞 UTF-8 BOM 은 뗀다 — 흘려 읽기(`walkStream`) · 주 덱 리더 · StepForge(utf-8-sig)와 같다. 안 떼면 첫 키워드가
+                // 데이터 줄로 보여 그 블록(세트 · 접촉 …)을 닫힘 검사가 통째로 못 보았다(2026-11-07 적대적 검토 #2)
+                if (f.lines.empty() && l.size() >= 3 && l.compare(0, 3, "\xEF\xBB\xBF") == 0) l.erase(0, 3);
                 if (!deckscan::isDataLine(l) && deckscan::keywordToken(l) == "*END") break;
                 f.lines.push_back(std::move(l));
             }

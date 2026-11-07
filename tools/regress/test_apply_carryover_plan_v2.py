@@ -381,6 +381,7 @@ def main():
         part_f(binary)
         part_g(binary)
         part_r1(binary)
+        part_r2(binary)
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
     print()
@@ -745,6 +746,19 @@ def part_r1(binary):
     rc, out, rep = apply_case(binary, d)
     refused("R-1c 판 1 — BATTERY 조각의 새 섹션 9 가 쌓인 카드의 9 와 겹친다 → fragment(PID 6)", rc, out, rep, d, "fragment", 6)
     check("R-1d 그 까닭(쌓인 카드)을 말한다", "쌓인 카드" in details(rep, "fragment", 6), details(rep, "fragment")[:300])
+
+
+
+def part_r2(binary):
+    print("[R-2 인클루드 파일 맨 앞 UTF-8 BOM — 첫 키워드가 데이터 줄로 보여 그 세트를 닫힘 검사가 못 보았다(검토 B2)]")
+    d = stage("r2")
+    n4 = min(pid_nodes(read_deck(os.path.join(d, "deck.k"))[1])[4])
+    split_include(d, "inc/s.k", 12345)
+    open(os.path.join(d, "inc", "s.k"), "wb").write(b"\xef\xbb\xbf" + ("*SET_NODE_LIST\n        77\n%10d\n*END\n" % n4).encode())
+    to_v2(d, include_files=["inc/s.k"])
+    rc, out, rep = apply_case(binary, d)
+    refused("R-2 BOM 으로 시작하는 inc/s.k 의 *SET_NODE_LIST 가 바꿔 넣는 PID 4 의 절점 → node_ref(PID 4)", rc, out, rep, d, "node_ref", 4)
+    check("R-2b 그 파일 · 줄(inc/s.k 줄 1)을 말한다", "inc/s.k 줄 1" in details(rep, "node_ref", 4), details(rep, "node_ref")[:200])
 
 
 if __name__ == "__main__":

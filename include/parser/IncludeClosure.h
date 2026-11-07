@@ -31,6 +31,7 @@ namespace include_closure {
 //     디렉터리. `_RELATIVE` 는 입력 파일 위치 기준                                     181591-181600
 //   로컬 디렉터리 = **주 덱의 폴더**로 본다(LS-DYNA 는 덱 폴더에서 돈다). 중첩 인클루드도 하위
 //   파일의 폴더가 아니라 거기서 찾는다 — 더 넓게 찾으면 LS-DYNA 가 못 찾을 덱을 괜찮다고 한다.
+//   인클루드 파일 맨 앞의 UTF-8 BOM 은 뗀다(`read` · `readPaths` 둘 다 — 2026-11-07).
 //
 // 따라가지 않는 것 — **말한다**. 맨 `*INCLUDE` 가 아닌 인클루드 카드(`_TRANSFORM` 의 ID 오프셋
 // IDNOFF·IDEOFF·IDPOFF·IDMOFF·IDSOFF…, `_BINARY`·`_NASTRAN`·`_AUTO_OFFSET`·`_STAMPED_*`…)는

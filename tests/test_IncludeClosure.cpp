@@ -333,6 +333,19 @@ TEST(IncludeClosure_inlined_는_줄마다_온_파일과_줄을_낸다) {
     }
 }
 
+// 인클루드 파일 맨 앞 UTF-8 BOM(2026-11-07 적대적 검토 #2) — 떼지 않으면 첫 줄의 키워드가 데이터 줄로 보였다. BOM 뒤 첫 키워드가 `*INCLUDE` 면
+// 그 중첩 인클루드를 따라가지 못했고(닫힘에서 빠진다), 세트 · 접촉이면 그 블록을 훑는 검사가 통째로 못 보았다
+TEST(IncludeClosure_인클루드_파일_맨_앞_BOM_은_뗀다) {
+    Scratch s("bom");
+    s.put("a.k", "\xEF\xBB\xBF*INCLUDE\nb.k\n*SET_NODE_LIST\n        77\n         5\n");
+    s.put("b.k", "*NODE\n       5\n");
+    const auto c = readMain(s, "main.k", "*KEYWORD\n*INCLUDE\na.k\n*END\n");
+    ASSERT_TRUE(c.complete());
+    ASSERT_EQ(c.files.size(), static_cast<size_t>(2));   // a 와 a 가 끌어온 b — BOM 뒤 *INCLUDE 를 따라갔다
+    ASSERT_EQ(baseOf(c.files[1].path), std::string("b.k"));
+    ASSERT_EQ(c.files[0].lines[0], std::string("*INCLUDE"));   // 줄에 BOM 이 남지 않는다
+}
+
 TEST(IncludeClosure_inlined_는_펼칠_수_없으면_까닭을_댄다) {
     Scratch s("inlbad");
     s.put("w.k", "*KEYWORD I10=Y\n*NODE\n1\n");
