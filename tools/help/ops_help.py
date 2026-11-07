@@ -1088,6 +1088,8 @@ output: deck_applied.k
           "  참조는 바꿔 넣기에서 살고 지우기는 막는다) · 정본(NodeRefs · IdRefs)이 칸 뜻을 단정하지 못한 카드 · 정본이 보지도 세지도 않고",
           "  참조 없는 키워드 표(제어 · 출력 · 곡선 · 섹션 · 재질 …)에도 없는 키워드 · 풀 수 없는 방언 세트(_GENERAL …)",
           "  · `*PART_INERTIA` 같은 `*PART` 변형 · 판 1 의 셸 두께가 바뀐 모프(field.thickness) · morph 줄의 instead · 못 지은 조각(까닭은 보고에)",
+          "  · 요소 `_TITLE` 블록(`*ELEMENT_SOLID_TITLE` · `_SHELL_TITLE` · `_TSHELL_TITLE`)에 요소가 있을 수 있는 PID 를 고치는 줄",
+          "  (opaque_elements — TITLE 은 설명서 옵션이 아니라 제목 카드를 읽는지 근거가 없다 · keep 은 둔다 · StepForge 권고 D-681)",
           "★덱을 고치는 줄은 하나도 적용하지 않는다 — 절점 칸을 다 읽지 못하는 요소 블록(리더가 담지 않는 `*ELEMENT_SOLID_ORTHO` · `_H20` ·",
           "  `_TET4TOTET10` · `*ELEMENT_TSHELL_BETA` · 보 `_WARPAGE` · `_ELBOW` · 칸 자리를 모르는 블록)이나 요소 블록 사이 EID 겹침이 있을 때.",
           "  조각을 넣으려면 덱이 *END 로 끝나야 한다 — 넣는 카드(조각 · 새 셸 섹션)는 주 덱의 **첫** *END 앞에 한 벌만 둔다",

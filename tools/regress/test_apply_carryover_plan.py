@@ -23,6 +23,7 @@
   I 계획의 실제 꼴(리뷰 11-07) — 돌린 강체의 반올림 · 셸 회전 · 셸 새 섹션 T1 · 못 지은 조각 · check 없는 transform · 이름 주입
   J 산출 자리(리뷰 11-07) — 확장자가 아닌 몫으로 가른 동반 파일 · 거절해도 앞 산출은 그대로다(11-07 밤)
   K 출력 규칙(사용자 결정 11-07 밤) — 임시 파일 + 바꿔 넣기 · 거절 · 실패면 앞 파일 그대로 · 설정 YAML · 폴더는 쓰지도 지우지도 않는다
+  L StepForge 권고 넷(그쪽 591d5b5 · D-681 — 사용자 결정 11-07 밤) — 요소 _TITLE 블록 · 정수 칸의 실수 꼴 · 열 재질 MID · 두 번 정의된 SECID · MID
 
 usage: test_apply_carryover_plan.py <KooRemapper 바이너리>
 """
@@ -209,6 +210,7 @@ def main():
         part_i(binary)
         part_j(binary)
         part_k(binary)
+        part_l(binary)
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
     print()
@@ -949,6 +951,36 @@ def part_k(binary):
     check("K-5 성공 → 바꿔 넣었다(sha256_out = 산출 바이트) · output_written true · 임시 파일 없음",
           rc == 0 and rep.get("output_written") is True and rep.get("deck", {}).get("sha256_out") == sha(os.path.join(d, "deck_applied.k")) and
           not tmp_left(d), (rc, rep.get("output_written"), tmp_left(d)))
+
+
+def titled_block(d, pid, title, kw="*ELEMENT_SOLID_TITLE"):
+    """PID 의 솔리드 요소 줄을 *ELEMENT_SOLID 에서 빼 `kw` 블록(제목 줄 하나)으로 옮기고 계획의 덱 지문을 맞춘다."""
+    lines = open(os.path.join(d, "deck.k"), encoding="utf-8").read().split("\n")
+    s0 = lines.index("*ELEMENT_SOLID")
+    e0 = next(i for i in range(s0 + 1, len(lines)) if lines[i].startswith("*"))
+    moved, kept = [], []
+    for l in lines[s0 + 1:e0]:
+        (moved if (l.strip() and not l.startswith("$") and int(l[8:16]) == pid) else kept).append(l)
+    assert moved
+    write(os.path.join(d, "deck.k"), "\n".join(lines[:s0 + 1] + kept + [kw, title] + moved + lines[e0:]))
+    reseal(d)
+    return len(moved)
+
+
+def part_l(binary):
+    print("[L StepForge 권고 넷(D-681) — LS-DYNA 가 덱을 읽는 꼴로 가른다]")
+    # L-1 요소 `_TITLE` 블록 — TITLE 은 설명서 옵션이 아니어서 첫 줄이 제목 카드인지 근거가 없다(우리 리더는 숫자꼴 제목을 요소로 읽는다)
+    d = stage(EX, "l1")
+    n = titled_block(d, 3, "bracket solids")
+    rc, out, rep = apply_case(binary, d)
+    refused("L-1 고치는 PID 3(transform)의 요소 %d 개가 *ELEMENT_SOLID_TITLE 블록에 → opaque_elements(PID 3)" % n, rc, out, rep, d,
+            "opaque_elements", 3)
+    d = stage(EX, "l1b")
+    titled_block(d, 1, "housing solids")
+    rc, out, rep = apply_case(binary, d)
+    pr = {r["pid"]: r for r in rep.get("parts", [])}
+    check("L-1b keep PID 1 의 요소가 _TITLE 블록에 → 받는다(rc 0 · PID 1 은 손대지 않는다 · 다른 줄은 적용)",
+          rc == 0 and pr.get(1, {}).get("result") == "skipped" and pr.get(3, {}).get("result") == "applied", (rc, sorted(kinds(rep)), out[-300:]))
 
 
 if __name__ == "__main__":

@@ -201,6 +201,21 @@ std::string elementBlockGap(const std::string& line) {
     return std::string();
 }
 
+// ★리더가 메시에 담는 격자 블록 가운데 TITLE 옵션이 붙은 것(`*ELEMENT_SOLID_TITLE` · `*ELEMENT_SHELL_TITLE`(셸 변형 포함) ·
+// `*ELEMENT_TSHELL_TITLE`) — StepForge 권고(그쪽 591d5b5 · D-681, 사용자 결정 11-07 밤). TITLE 은 이 키워드들의 설명서 옵션이 아니어서
+// 블록 첫 줄이 제목 카드인지 LS-DYNA 가 어떻게 읽는지 근거가 없다. 우리 리더도 짐작한다(11-07 밤 실측) — 솔리드 · 티쉘은 제목 카드가
+// 없다고 읽어 글자 제목은 칸이 안 읽혀 버려질 뿐이고 숫자꼴 제목(「10 20」)은 두 줄 카드 머리가 되어 다음 요소 카드를 절점 줄로 삼킨다
+// (EID 10 · PID 20 이 생기고 요소 1 이 사라졌다). 셸은 첫 줄의 첫 토큰이 정수가 아닐 때만 제목으로 버려 숫자꼴 제목이 요소 하나가 된다.
+bool gridTitleBlock(const std::string& line) {
+    if (!gridReaderReadsKeyword(line)) return false;
+    const ElementKeywordInfo info = parseElementKeyword(line);
+    if (info.family == ElemFamily::NONE || info.keyword.size() <= 9) return false;
+    std::istringstream rest(info.keyword.substr(9));   // `*ELEMENT_` 뒤의 토큰
+    for (std::string t; std::getline(rest, t, '_');)
+        if (t == "TITLE") return true;
+    return false;
+}
+
 // 리더가 담는 격자 요소 카드를 카드마다 한 번 — Card 1 줄과 그 칸. 카드 경계는 정본(`elementCardSpan`)이 정하고, 2차 솔리드의 절점
 // 수는 리더가 담은 PID → ELFORM(`Mesh::partSolidElform`)에서 온다. 주석은 건너뛰고 빈 줄은 카드 안에서만 카드다.
 struct GridCard {
@@ -760,6 +775,29 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, const std::
         Gap& g = elemGaps[kw];
         if (g.blocks++ == 0) { g.first = i; g.why = std::move(why); }
     }
+    // 요소 `_TITLE` 블록(`gridTitleBlock`)은 다 읽은 블록이 아니다 — 그 블록에 요소가 있을 수 있는 PID 를 고치면 거절하고 keep · review 는
+    // 둔다(StepForge 권고 D-681). PID 는 데이터 줄마다 둘째 칸의 정수 — 첫 줄이 제목이든 아니든 두 읽기를 다 덮게 넉넉히 센다(두 줄 카드의
+    // 절점 줄 · 제목 줄의 정수도 들어 거짓 거절이 날 수 있다 — 안전한 쪽). 키워드 줄은 `forEachGridCard` 와 같은 규칙(첫 글자 `*`)
+    std::map<long long, size_t> titleBlockOf;   // PID → 그 PID 가 있을 수 있는 첫 블록의 키워드 줄
+    {
+        const int deckFw = deckFieldWidth(S);
+        bool in = false;
+        int fw = deckFw;
+        size_t kwl = 0;
+        for (size_t i = 0; i < S.size(); ++i) {
+            const std::string& l = S[i];
+            const size_t g = l.find_first_not_of(" \t");
+            if (g != std::string::npos && l[g] == '*') {
+                in = gridTitleBlock(l);
+                fw = keywordFieldWidth(l, deckFw);
+                kwl = i;
+                continue;
+            }
+            if (!in || !deckscan::isDataLine(l)) continue;
+            const int v = deckscan::fieldInt(deckscan::cardFields(l, fw), 1);
+            if (v > 0) titleBlockOf.emplace(v, kwl);
+        }
+    }
     const auto midside = shellMidsideNodes(S, M);
     {
         std::vector<long long> unplanned;
@@ -969,6 +1007,12 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, const std::
         if (parts.duplicate.count(pid) || variant) {
             problem(pid, "part_duplicate", std::string("PID 의 *PART 카드가 둘 이상이다") +
                                                (variant ? "(맨 *PART 와 " + variants.at(static_cast<int>(pid)) + ")" : std::string()));
+            continue;
+        }
+        if (auto t = titleBlockOf.find(pid); t != titleBlockOf.end()) {
+            problem(pid, "opaque_elements", "PID 의 요소가 " + deckscan::kwBare(deckscan::keywordToken(S[t->second])) + " 블록(" + at(t->second) +
+                                                ")에 있을 수 있다 — 요소 키워드의 TITLE 은 설명서 옵션이 아니어서 첫 줄이 제목 카드인지 근거가 없고 "
+                                                "우리 리더는 숫자꼴 제목을 요소로 읽는다 · 그 PID 는 고치지 않는다(StepForge 권고 D-681)");
             continue;
         }
         // 판 2 · 인클루드 덱 — 고칠 자리(그 PID 의 `*PART` · 요소 · 그 요소의 절점)가 전부 주 덱에 있어야 한다(사용자 결정 11-07 「주 덱만

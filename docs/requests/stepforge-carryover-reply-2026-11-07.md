@@ -100,6 +100,7 @@
 - **적대적 검토 뒤 고친 것(11-07)** — 짓는 쪽 시험이 다 초록이었는데도 조용히 틀린 덱을 내는 길이 있어 막았다. 보고의 새 종류:
   - `opaque_elements` — 리더가 메시에 담지 않는 요소 블록(`*ELEMENT_SOLID_ORTHO` · `_DOF` · `_H20` 류 · `_H8TOH20` · `_TET4TOTET10` ·
     `*ELEMENT_TSHELL_BETA`, 보의 `_ELBOW` · `_WARPAGE` 옵션 카드 등)이 있으면 모든 형상 줄(옮기기 · 모프 · 바꿔 넣기 · 지우기 · 새 파트)을 거절.
+    (11-07 밤 · 그쪽 권고 D-681) 요소 `_TITLE` 블록에 요소가 있을 수 있는 PID 를 고치는 줄도 같은 갈래로 거절한다(PID 마다 — keep 은 둔다).
   - `ref_unscanned` — 바꿔 넣기 · 지우기 줄이 있는데, 덱에 우리가 참조를 읽지 못하는 키워드(참조 없음이 확실한 키워드 목록 밖 —
     예 `*LOAD_SEGMENT` · `*CONSTRAINED_SHELL_TO_SOLID` · `*INITIAL_VELOCITY_RIGID_BODY`)가 있으면 거절. 옮기기 · 모프만인 계획은 해당 없다.
   - `set_unresolved` — 풀 수 없는 `_GENERAL` 세트. `eid_collision` — 요소 종류 사이 EID 겹침(우리 리더 · 쓰기가 EID 하나로 요소를 가린다).
