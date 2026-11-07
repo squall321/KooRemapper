@@ -121,6 +121,14 @@ bool parseYaml(const std::string& path, Config& c, ConsoleOutput& console) {
 int runStackDiagram(const std::string& yamlFile, ConsoleOutput& console) {
     Config c;
     if (!parseYaml(yamlFile, c, console)) return 1;
+    // ★YAML 안의 상대 경로 = 그 YAML 파일이 있는 폴더 기준(매뉴얼 §3.1(a) — 2026-11-07 전엔 이 op 만 작업 폴더 기준이라
+    //   `stackdiagram cfg/x.yaml` 이 cfg/ 옆의 파일을 못 찾고 작업 폴더에 썼다). 절대 경로는 그대로
+    {
+        const size_t cut = yamlFile.find_last_of("/\\");
+        const std::string dir = (cut == std::string::npos) ? std::string() : yamlFile.substr(0, cut);
+        c.model = KooRemapper::yamlResolvePath(dir, c.model);
+        c.output = KooRemapper::yamlResolvePath(dir, c.output);
+    }
     if (c.model.empty())  { console.error("model: 이 필요하다"); return 1; }
     if (c.output.empty()) { console.error("output: 이 필요하다"); return 1; }
     if (c.width < 430 || c.height < 240) {

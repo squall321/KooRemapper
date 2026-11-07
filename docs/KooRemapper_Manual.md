@@ -301,6 +301,9 @@ Commands:
 > 이 규칙은 예전에 op 마다 달랐습니다. `load`·`boundary`·`rbe`·`contact`·`relax`·`explicit`·`implicit`·`modal`·`ale`·`database`·`cclip`·`matdb`·`generate box` 는
 > "폴더 없는 이름(`box.k`)만 YAML 폴더 기준, 폴더가 붙은 상대 경로(`../data/box.k`)는 작업 폴더 기준" 이었고,
 > `battery`·`tetremesh`·`meshfix` 는 통째로 작업 폴더 기준이었으나 이제 위 한 가지 규칙으로 통일됐습니다.
+> 2026-11-07 까지는 `foldsurface`·`refshell`·`stackwrap`·`linkage-fit`·`applyfold`·`section`·`surfview`·`stackdiagram` 도 YAML 값을
+> 그대로 열어 **통째로 작업 폴더 기준**이었습니다(이 절이 「남은 예외는 map 하나」라고 적은 것과 달랐다) — 이제 같은 규칙입니다.
+> 플랫폼은 설정을 세션 폴더(= 작업 폴더)에 두므로 바뀌는 것이 없습니다.
 > 예전 동작에 기대어 `../` 경로를 적어 둔 기존 YAML 은 경로를 다시 확인해야 합니다.
 > `extract-surface` 는 YAML 설정이 없는 위치인자 op 이라 애초에 이 규칙의 대상이 아닙니다([§43.7](#437-extract-surface--표면-셸-추출)).
 
