@@ -152,6 +152,25 @@ def map_bbox_source(binary, root):
     check("C-4 ★flip_input 고리가 map 뒤에 멈춰도 c4.k.__preproc_flat.k 를 남기지 않는다",
           rc == 1 and not exists(d, "c4.k.__preproc_flat.k"), (rc, sorted(os.listdir(d)), out[-300:]))
 
+    print("[M] 고리의 재료 없음 CSV 가 map 산출을 덮는 것은 map 이 쓰기 전에 막는다")
+    scaled_flat_with_material(os.path.join(d, "demo_flat_fine.k"), os.path.join(d, "flat_m.k"), 1.0)
+    chain = "bent: demo_bent.k\nflat: %s\noutput: %s\nprestress:\n  enabled: true\n  output: %s\n%s"
+    with open(os.path.join(d, "n1.yaml"), "w") as f:
+        f.write(chain % ("demo_flat_fine.k", "n1.k", "n1.k", ""))
+    rc, out = run(binary, d, "map", "n1.yaml")
+    check("M-1 ★재료가 없으면 CSV 가 prestress.output(= output n1.k)에 간다 → map 이 쓰기 전에 rc 1 · n1.k 없음",
+          rc == 1 and "같은 파일" in out and not exists(d, "n1.k"), (rc, sorted(os.listdir(d)), out[-300:]))
+    with open(os.path.join(d, "n2.yaml"), "w") as f:
+        f.write(chain % ("flat_m.k", "n2.k", "n2.k", ""))
+    rc, out = run(binary, d, "map", "n2.yaml")
+    check("M-2 대조 — 평판에 K-파일 재료가 있으면 같은 이름이어도 된다(메시 사본이 map 산출 자리 · n2.dynain)",
+          rc == 0 and exists(d, "n2.dynain") and exists(d, "n2.k"), (rc, out[-300:]))
+    with open(os.path.join(d, "n3.yaml"), "w") as f:
+        f.write(chain % ("demo_flat_fine.k", "n3.k", "n3.k", "  E: 210000.0\n  nu: 0.3\n"))
+    rc, out = run(binary, d, "map", "n3.yaml")
+    check("M-3 대조 — E · nu 를 주면 재료가 있다(n3.dynain · 사본이 map 산출 자리)",
+          rc == 0 and exists(d, "n3.dynain"), (rc, out[-300:]))
+
 
 def main():
     if len(sys.argv) < 2:

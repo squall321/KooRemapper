@@ -1903,15 +1903,48 @@ static int runMain(int argc, char* argv[]) {
             const bool chain = yamlMode && pre_enabled && !pre_output.empty();
             if (chain) {
                 if (flipX || flipY || flipZ) writes.push_back(outputPath + ".__flipped_ref.k");
-                // 재료가 있을 때의 이름(보통) — 메시 사본이 map 산출 그 자리인 것은 문서의 쓰임이다(foo.k + foo.dynain).
-                // 재료가 없을 때 CSV 가 쓸 prestress.output 은 읽는 파일과만 견주고, 정확한 판정은 runPrestress 가 다시 한다
-                const PrestressOutputs po = prestressOutputs(pre_output, true);
-                writes.push_back(po.dynain);
-                if (!KooRemapper::include_closure::sameFile(po.mesh, outputPath)) writes.push_back(po.mesh);
-                if (pre_csv) writes.push_back(po.csv);
+                // ★고리 prestress 가 쓸 이름은 재료가 있는지에 달렸다 — runPrestress 와 같은 판정을 map 이 쓰기 **전에** 한다(2026-11-07).
+                //   예전엔 재료가 없을 때 CSV(prestress.output 그 자리)가 map 산출을 덮는 것을 map 이 산출을 쓴 뒤에야 보았다.
+                //   재료가 있으면 메시 사본이 map 산출 그 자리인 것은 문서의 쓰임이다(foo.k + foo.dynain)
+                auto chainWrites = [&](bool hasMaterial) {
+                    const PrestressOutputs po = prestressOutputs(pre_output, hasMaterial);
+                    std::vector<std::string> w;
+                    if (hasMaterial) {
+                        w.push_back(po.dynain);
+                        if (!KooRemapper::include_closure::sameFile(po.mesh, outputPath)) w.push_back(po.mesh);
+                    }
+                    if (pre_csv || !hasMaterial) w.push_back(po.csv);
+                    return w;
+                };
+                auto withChain = [&](bool hasMaterial) {
+                    auto w = writes;
+                    const auto c = chainWrites(hasMaterial);
+                    w.insert(w.end(), c.begin(), c.end());
+                    return w;
+                };
+                // 재료 — E · nu 를 주면 있다. 기준이 뒤집기를 지났으면(메시만 쓴 임시 기준) K-파일 재료가 없다. 그 밖이면 평판의
+                // K-파일 재료다 — 두 경우의 판정이 갈릴 때만 평판을 읽어 정한다(큰 평판을 한 번 더 읽지 않게)
+                bool hasMaterial = true;
+                if (!(pre_E > 0 && pre_nu > 0 && pre_nu < 0.5)) {
+                    if (flipInX || flipInY || flipInZ || flipX || flipY || flipZ) {
+                        hasMaterial = false;
+                    } else {
+                        std::string why;
+                        const bool clashWith = KooRemapper::output_guard::findClash(withChain(true), mapReads, why);
+                        const bool clashWithout = KooRemapper::output_guard::findClash(withChain(false), mapReads, why);
+                        if (clashWith != clashWithout) {
+                            try {
+                                KFileReader probe;
+                                hasMaterial = probe.readFile(flatPath).getMaterialCount() > 0;
+                            } catch (...) {
+                                // 못 읽으면 runMapping 이 같은 평판을 읽다가 아무것도 쓰기 전에 멈춘다
+                            }
+                        }
+                    }
+                }
+                writes = withChain(hasMaterial);
             }
             if (KooRemapper::output_guard::refuse("map", writes, mapReads, console)) return 1;
-            if (chain && KooRemapper::output_guard::refuse("map", {pre_output}, mapReads, console)) return 1;
         }
 
         printBanner(console);

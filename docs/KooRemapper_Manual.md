@@ -411,7 +411,7 @@ BOM 을 붙인 설정으로 둘 다 **종료 코드 0** 으로 정상 산출물�
   단독 op 은 `output == model` 도 거절합니다 — 고친 덱을 다른 이름으로 받으세요.
 - **`map` 의 prestress 고리** — 메시 사본이 map 산출 그 자리인 것(`output: foo.k` + `prestress.output: foo.dynain`)은
   [§6](#6-prestress--초기-응력변형률-계산)의 쓰임이라 막지 않습니다. dynain · CSV 가 map 산출을 덮는 것과 사본이 `bent` ·
-  `flat` 을 덮는 것은 막습니다.
+  `flat` 을 덮는 것은 막습니다 — 재료가 없어 CSV 가 `prestress.output` 자리에 갈 때도 map 이 쓰기 전에 봅니다.
 - **거절하지 않는 것** — 다른 폴더의 같은 이름, 입력과 상관없는 기존 파일(예전처럼 덮어씁니다), 이름이 고유한 임시 파일
   (`flatten_includes` 의 `.<이름>.kr_flat_….k` 등).
 - 설정 파일은 명령줄의 `.yaml`·`.yml` 과 op 이 읽는 설정 경로입니다. 산출을 명령줄의 `.yaml` 로 받는 op 은 없습니다.
@@ -483,7 +483,10 @@ $$N_i = \frac{1}{8}(1 + \xi_i\xi)(1 + \eta_i\eta)(1 + \zeta_i\zeta)$$
 - 상세 메시 노드가 참조 요소 외부에 있으면 경고 출력
 - `info` 명령으로 Jacobian 통계 확인 가능
 - `output` 과 YAML 의 `prestress.output` 이 낼 파일(dynain · 메시 사본 · CSV)이 `bent` · `flat`(그 인클루드까지) · 설정과 같은
-  파일이면 아무것도 쓰지 않고 **종료 코드 1** 입니다([§3.1(j)](#31-yaml-공통-규칙-모든-op)). 예전에는 `prestress.output` 이
+  파일이거나 서로 겹치면 아무것도 쓰지 않고 **종료 코드 1** 입니다([§3.1(j)](#31-yaml-공통-규칙-모든-op)). 고리가 무엇을 쓸지는
+  재료에 달렸다 — `prestress.E`·`nu` 가 있거나 기준(뒤집지 않은 평판)에 K-파일 재료가 있으면 dynain · 메시 사본, 없으면
+  `prestress.output` 자리에 CSV 만 — 이 판정을 map 이 **쓰기 전에** 한다(2026-11-07 전엔 재료가 없을 때 CSV 가 map 산출을 덮는
+  것을 map 이 산출을 쓴 뒤에야 보았다). 예전에는 `prestress.output` 이
   flat 이면 메시 사본이 기준 메시를 덮었고, `output` 이 flat 이면 고리가 덮인 flat 을 기준으로 **0 응력**을 종료 코드 0 으로 냈습니다.
 - 이 실행이 만든 임시 파일 — 앞처리 평판(`<output>.__preproc_flat.k` · `flip_input_*` 나 `bbox_align: source` 가 평판을 바꿀 때)과
   뒤집은 기준(`<output>.__flipped_ref.k` · prestress 고리의 `flip_x/y/z`) — 은 성공이든 실패든 끝에 지웁니다(2026-11-07 전에는 앞처리
