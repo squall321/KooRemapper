@@ -368,6 +368,29 @@ bool putField(std::string& line, size_t idx, int w, long long v) {
     return true;
 }
 
+// ★새 SECID 가 겹치는지 볼 때의 「덱이 정의한 SECID」 — `*SECTION_*` 블록의 **모든** 데이터 줄의 첫 칸 정수(리뷰 11-07 #1).
+// 번호 커서(`cur_scanSectionIds`)는 키워드마다 첫 카드만 읽는다 — 한 키워드 아래 쌓인 둘째 카드의 SECID 가 보이지 않아 새 섹션이
+// 그 번호를 다시 냈다(rc 0 · 같은 SECID 둘). 쌓인 카드의 줄 수는 섹션 종류 · 옵션 카드마다 달라 정확히 가르지 않고 넉넉히 센다 —
+// 두께 · 제목 줄의 정수도 든다(겹친다고 잘못 보면 거절 — 안전한 쪽). 칸 폭은 블록 키워드의 폭(long `+` 이면 20)
+std::set<long long> sectionIdsAnyCard(const std::vector<std::string>& L) {
+    std::set<long long> out;
+    const int deckFw = deckFieldWidth(L);
+    bool in = false;
+    int w = 10;
+    for (const auto& l : L) {
+        if (cardcut::isKeywordLine(l)) {
+            in = deckscan::kwBare(deckscan::keywordToken(l)).rfind("*SECTION_", 0) == 0;
+            w = keywordFieldWidth(l, deckFw) == 20 ? 20 : 10;
+            continue;
+        }
+        if (!in || !deckscan::isDataLine(l)) continue;
+        const auto f = deckscan::cardFields(l, w);
+        int v = 0;
+        if (!f.empty() && cards::toInt(f[0], v) && v > 0) out.insert(v);
+    }
+    return out;
+}
+
 // 키워드 줄 kw 부터 다음 키워드 줄 앞까지(주석 · 빈 줄 포함) — StepForge `section_card` 가 옮기는 「옛 카드 원문」 의 자리
 std::vector<std::string> blockAt(const std::vector<std::string>& L, size_t kw) {
     size_t j = kw + 1;
@@ -689,6 +712,9 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, const std::
     const PartIndex& parts = closureActive ? partsAll : partsMain;
     const auto variants = definedPartVariantIds(S);
     const auto sections = definedSectionIds(S);
+    // 새 SECID 의 겹침 · 차례는 쌓인 카드까지 넉넉히 센 집합으로 본다(위 `sections` 는 키워드마다 첫 카드 — 있나 · 종류를 가리는 데만 쓴다)
+    const auto secidsAll = sectionIdsAnyCard(S);
+    const long long secidTop = secidsAll.empty() ? 0 : *secidsAll.rbegin();
     const auto mids = definedMaterialIds(S);
     for (size_t kwl : parts.oddBlocks)
         problem(0, "deck_part_block", at(kwl) + " 의 *PART 블록 — 데이터 줄이 제목 · 카드 짝으로 떨어지지 않는다");
@@ -1353,11 +1379,14 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, const std::
         if (h.newSection.present) {
             const int ns = static_cast<int>(h.newSection.secid);
             if (sections.count(ns)) fp.push_back("new_section.secid " + std::to_string(ns) + " 가 덱에 이미 있다(" + sections.at(ns) + ")");
+            else if (secidsAll.count(ns))
+                fp.push_back("new_section.secid " + std::to_string(ns) + " 가 덱에 이미 있다(*SECTION_* 블록 안의 쌓인 카드 — 데이터 줄 첫 칸)");
             if (!newSecids.insert(ns).second) fp.push_back("new_section.secid " + std::to_string(ns) + " 를 다른 조각도 쓴다");
-            // 판 2 — 새 SECID 는 덱(닫힘 전체)의 가장 큰 SECID 위로 매긴다(§10.3 ③)
-            if (v2 && ns <= plan.maxSecid)
+            // 판 2 — 새 SECID 는 덱(닫힘 전체 · 쌓인 카드까지)의 가장 큰 SECID 위로 매긴다(§10.3 ③)
+            if (v2 && (ns <= plan.maxSecid || ns <= secidTop))
                 problem(j.pid, "secid_order", h.file + " — new_section.secid " + std::to_string(ns) + " 가 deck.max.secid " +
-                                                  std::to_string(plan.maxSecid) + " 위가 아니다(§10.3 ③)");
+                                                  std::to_string(plan.maxSecid) + " · 이 덱(닫힘 · 쌓인 카드까지)의 가장 큰 SECID " +
+                                                  std::to_string(secidTop) + " 위가 아니다(§10.3 ③)");
         } else if (!j.scan.elems.empty()) {
             auto it = sections.find(static_cast<int>(h.secid));
             if (it == sections.end()) fp.push_back("SECID " + std::to_string(h.secid) + " 가 덱에 없다");
@@ -1409,10 +1438,13 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, const std::
             }
             if (auto it = sections.find(static_cast<int>(ns.secid)); it != sections.end())
                 problem(pid, "secid_collision", "new_section.secid " + sid + " 가 덱(닫힘)에 이미 있다(" + it->second + ")");
+            else if (secidsAll.count(ns.secid))
+                problem(pid, "secid_collision", "new_section.secid " + sid + " 가 덱(닫힘)에 이미 있다(*SECTION_* 블록 안의 쌓인 카드 — 데이터 줄 첫 칸)");
             if (newSecids.count(ns.secid)) problem(pid, "secid_collision", "new_section.secid " + sid + " 가 조각의 새 섹션과 겹친다");
             if (!morphSecids.insert(ns.secid).second) problem(pid, "secid_collision", "new_section.secid " + sid + " 를 다른 모프 줄도 쓴다");
-            if (ns.secid <= plan.maxSecid)
-                problem(pid, "secid_order", "new_section.secid " + sid + " 가 deck.max.secid " + std::to_string(plan.maxSecid) + " 위가 아니다(§10.3 ③)");
+            if (ns.secid <= plan.maxSecid || ns.secid <= secidTop)
+                problem(pid, "secid_order", "new_section.secid " + sid + " 가 deck.max.secid " + std::to_string(plan.maxSecid) +
+                                                " · 이 덱(닫힘 · 쌓인 카드까지)의 가장 큰 SECID " + std::to_string(secidTop) + " 위가 아니다(§10.3 ③)");
             if (ns.secid <= fragMax)
                 problem(pid, "secid_order", "new_section.secid " + sid + " — 조각의 새 섹션(가장 큰 SECID " + std::to_string(fragMax) +
                                                 ")을 먼저 매기고 모프 줄은 그 뒤에 잇는다(§10.3 ③)");

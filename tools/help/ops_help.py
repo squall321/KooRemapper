@@ -1053,6 +1053,8 @@ output: deck_applied.k
           "★판 2 셸 두께가 바뀐 모프 — field.new_section 이 지은 카드(section_<PID>.k: *KEYWORD · 셸 섹션 카드 하나 · *END)는 덱의 옛 카드(그 PID",
           "  *PART 의 SECID — 주 덱)를 **그대로 옮겨** SECID(Card 1 앞 10칸) · T1~T4(Card 2 앞 40칸)만 바꾼 것이어야 한다(줄마다 견준다 · 다르면",
           "  new_section). SECID 는 계획 값 · 닫힘에 없음 · deck.max.secid 위 · 조각의 새 섹션 뒤 줄 차례(secid_collision · secid_order).",
+          "  「닫힘에 없음」 은 한 키워드 아래 쌓인 둘째 카드까지 본다 — `*SECTION_*` 데이터 줄 첫 칸의 정수를 모두 SECID 로 넉넉히 센다(조각의",
+          "  새 섹션도 같다 · 판 1 · 2 — 두께 · 제목의 정수도 들어 거짓 거절이 날 수 있다)",
           "  넣고 그 PID *PART 의 SECID 만 잇는다(같은 섹션을 쓰는 다른 파트는 그대로). new_section null 이면 섹션 그대로(두께 칸이 있어도) ·",
           "  못 지었으면(secid null · instead) 거절 · 요소마다 두께(*ELEMENT_SHELL_THICKNESS 류 THIC)를 싣는 PID 는 거절(element_thickness)",
           "★판 2 — 강체가 아닌 옮김은 계획이 review 로 돌린다(refused_transform — 옮기지 않고 보고에 그대로 되돌려 준다) · deck_from(raw · mesh)은",

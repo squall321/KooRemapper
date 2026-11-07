@@ -380,6 +380,7 @@ def main():
         part_e(binary)
         part_f(binary)
         part_g(binary)
+        part_r1(binary)
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
     print()
@@ -707,6 +708,43 @@ def part_g(binary):
           rc == 0 and same and pr.get(3, {}).get("result") == "skipped" and
           pr.get(3, {}).get("refused_transform", {}).get("transform", [0])[0] == 1.01 and p["summary"]["actions"].get("review") == 1,
           (rc, pr.get(3), out[-300:]))
+
+
+# ── 적대적 검토 11-07 고침(R) — 검토가 rc 0 으로 내보낸 덱 · 입력을 덮은 길 ─────────────────────────────────────────────
+
+HOUSING_SEC = "*SECTION_SOLID_TITLE\nHOUSING#1_sec\n$#   secid    elform\n         1         1\n"
+
+
+def stacked_secid(d, hidden):
+    """HOUSING 섹션을 한 키워드 아래 두 카드로 — 둘째 카드(SECID hidden)는 아무 *PART 도 안 쓴다(그쪽 리더는 「쌓인 카드 — 안 읽는다」 고 경고만)."""
+    body = read(os.path.join(d, "deck.k"))
+    assert HOUSING_SEC in body
+    write(os.path.join(d, "deck.k"), body.replace(HOUSING_SEC, "*SECTION_SOLID\n$#   secid    elform\n         1         1\n%10d         1\n" % hidden))
+
+
+def part_r1(binary):
+    print("[R-1 쌓인 둘째 카드의 SECID — 번호 커서가 첫 카드만 읽어 새 섹션이 같은 SECID 를 다시 냈다(검토 S5)]")
+    d = stage("r1")
+    stacked_secid(d, 10)
+    p = to_v2(d)
+    write(os.path.join(d, "section_4.k"), SECTION_4)
+    can_morph(d, p, {"secid": 10, "thickness": 0.6, "file": "section_4.k", "why": "0.4 → 0.6"})
+    put_file(d, p, "section_4.k")
+    resummarize(p)
+    plan_save(d, p)
+    rc, out, rep = apply_case(binary, d)
+    refused("R-1 모프의 새 셸 섹션 10 이 *SECTION_SOLID 둘째 카드의 10 과 겹친다 → secid_collision(PID 4)", rc, out, rep, d,
+            "secid_collision", 4)
+    check("R-1b 쌓인 카드라고 말하고 차례(덱의 가장 큰 SECID 10)도 본다", "쌓인 카드" in details(rep, "secid_collision", 4) and
+          "secid_order" in kinds(rep, 4), (details(rep, "secid_collision")[:200], sorted(kinds(rep))))
+    d = stage("r1c")
+    stacked_secid(d, 9)
+    p = plan_load(d)                       # 판 1 계획 그대로 — 조각의 새 섹션(BATTERY SECID 9)도 같은 틈이 있었다
+    p["deck"]["sha256"] = sha(os.path.join(d, "deck.k"))
+    plan_save(d, p)
+    rc, out, rep = apply_case(binary, d)
+    refused("R-1c 판 1 — BATTERY 조각의 새 섹션 9 가 쌓인 카드의 9 와 겹친다 → fragment(PID 6)", rc, out, rep, d, "fragment", 6)
+    check("R-1d 그 까닭(쌓인 카드)을 말한다", "쌓인 카드" in details(rep, "fragment", 6), details(rep, "fragment")[:300])
 
 
 if __name__ == "__main__":

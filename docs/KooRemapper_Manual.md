@@ -5744,6 +5744,9 @@ null). 칸 하나라도 다르면 손대는 줄은 `deck_range`(칸 · 계획 �
   바꾼 것이어야 한다 — 키워드 줄 · 제목 · 주석 · 그 밖의 칸 · 딸린 카드를 줄마다 견준다(다르면 `new_section` 에 그 줄).
 - SECID 는 `new_section.secid` 와 같고 · 닫힘에 없고(`secid_collision`) · `deck.max.secid` 위이며 · 조각의 새 섹션을 먼저 매긴 뒤 모프 줄
   차례로 잇는다(`secid_order`). T1~T4 는 넷 다 `thickness` 다.
+- 「닫힘에 없다」 · 「가장 큰 SECID 위」 는 한 키워드 아래 **쌓인 둘째 카드**까지 본다 — `*SECTION_*` 블록의 데이터 줄마다 첫 칸의 정수를
+  SECID 로 넉넉히 센다(번호 커서는 첫 카드만 읽어, 쌓인 카드의 SECID 를 새 섹션이 다시 낸 적이 있다 — 적대적 검토 11-07). 두께 · 제목 줄의
+  정수도 들어 거짓 거절이 날 수 있다(안전한 쪽). 조각의 새 섹션(판 1 · 2)도 같은 집합으로 겹침을 본다.
 - 넣으면 그 카드를 주 덱 `*END` 앞에 두고 그 PID `*PART` 의 SECID 칸**만** 덱 폭(표준 · i10 10칸 · long 20칸)으로 고친다 — 같은 섹션을 쓰는
   다른 파트는 옛 섹션 그대로다. 보고의 그 줄에 `new_section {secid, thickness}`.
 - 거절 — 못 지은 꼴(`secid` · `file` 이 null — 그 줄은 조각 `instead` 로 물러섰다 · 우리는 변위장만 쓴다 — `new_section` · `morph_instead`) ·
