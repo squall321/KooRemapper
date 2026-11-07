@@ -383,6 +383,7 @@ def main():
         part_r1(binary)
         part_r2(binary)
         part_r3(binary)
+        part_r4(binary)
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
     print()
@@ -803,6 +804,45 @@ def part_r3(binary):
     rc, out, rep = apply_case(binary, d, output="deck.k", report="deck_carryover.json")
     check("R-3d output 이 model → 덱 그대로 · 거절 까닭을 보고에 쓴다(output_clobber)",
           rc == 1 and sha(os.path.join(d, "deck.k")) == before and "output_clobber" in kinds(rep), (rc, sorted(kinds(rep)), out[-200:]))
+
+
+
+def report_utf8(path):
+    """보고를 엄격한 UTF-8 로 읽는다 — (보고, 바른 UTF-8 인가)."""
+    if not os.path.exists(path):
+        return {}, False
+    try:
+        return json.loads(open(path, "rb").read().decode("utf-8")), True
+    except (UnicodeDecodeError, ValueError):
+        return {}, False
+
+
+def part_r4(binary):
+    print("[R-4 보고의 글자는 바른 UTF-8 — 60 바이트 자르기가 한글을 반쪽 냈고(검토 S4) · 계획의 깨진 바이트를 그대로 실었다]")
+    d = stage("r4")
+    deck = os.path.join(d, "deck.k")
+    write(deck, read(deck).replace("CAN#4_sec\n", "X" + "가" * 30 + "\n", 1))
+    p = to_v2(d)
+    write(os.path.join(d, "section_4.k"), SECTION_4.replace("CAN#4_sec", "Y" + "가" * 30))
+    can_morph(d, p, {"secid": 10, "thickness": 0.6, "file": "section_4.k", "why": "0.4 → 0.6"})
+    put_file(d, p, "section_4.k")
+    resummarize(p)
+    plan_save(d, p)
+    write(os.path.join(d, "a.yaml"), "model: deck.k\nplan: plan.json\noutput: deck_applied.k\n")
+    rc, out = run(binary, d, OP, "a.yaml")
+    rep, ok = report_utf8(os.path.join(d, "deck_applied_carryover.json"))
+    check("R-4 옛 카드와 다른 한글 제목(60 바이트 넘게) → new_section 거절 · 보고가 바른 UTF-8(글자 경계에서 자른다)",
+          rc == 1 and ok and "new_section" in kinds(rep, 4) and "X가가" in details(rep, "new_section", 4), (rc, ok, out[-300:]))
+    d = stage("r4b")
+    p = to_v2(d)
+    raw = json.dumps(p, ensure_ascii=False, indent=1).encode("utf-8")
+    assert raw.count('"name": "BOSS_NEW"'.encode("utf-8")) == 1
+    open(os.path.join(d, "plan.json"), "wb").write(raw.replace('"name": "BOSS_NEW"'.encode("utf-8"), b'"name": "BOSS_\xff\xfeNEW"'))
+    write(os.path.join(d, "a.yaml"), "model: deck.k\nplan: plan.json\noutput: deck_applied.k\n")
+    rc, out = run(binary, d, OP, "a.yaml")
+    rep, ok = report_utf8(os.path.join(d, "deck_applied_carryover.json"))
+    check("R-4b 계획 글자의 깨진 바이트(새 파트 이름) → 보고는 바른 UTF-8 이고 그 자리를 U+FFFD 로 싣는다",
+          rc == 0 and ok and "\ufffd" in ((rep.get("added") or [{}])[0].get("name") or ""), (rc, ok, out[-300:]))
 
 
 if __name__ == "__main__":

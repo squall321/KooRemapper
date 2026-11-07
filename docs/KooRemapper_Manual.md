@@ -5758,7 +5758,8 @@ null). 칸 하나라도 다르면 손대는 줄은 `deck_range`(칸 · 계획 �
 `ok` · `plan{sha256 · version · report_key · deck_from}` · `deck{sha256_in · sha256_out · includes}` · `problems[{pid · kind · detail}]` ·
 `warnings` · `shift` · `parts[처리마다 result · 옮긴 수 · 최대 변위 · 지운 수 · 넣은 구간 · 새 섹션(바꿔 넣기 {secid · elform} · 모프
 {secid · thickness}) · 뒤집힘 앞뒤 · refused_transform]` · `added` · `touches_changed`. 거절해도 · 내부 오류에도 쓰고, 거절하면 출력 자리의
-옛 덱을 지운다(`stale_output_removed`).
+옛 덱을 지운다(`stale_output_removed`). 보고의 글자는 늘 바른 UTF-8 이다 — 계획(JSON 리더는 글자를 검사하지 않는다) · 덱 줄 · 경로에서 온
+깨진 바이트는 U+FFFD 로 바꿔 싣고, 줄을 보일 때는 글자 경계에서 자른다(계획 글자를 이유로 거절하지 않는다 — 실을 때 고친다).
 
 output · report 는 이 op 이 **읽는 파일**(주 덱 · 계획 · 인클루드 닫힘 · 계획의 동반 파일 — `files` 와 줄이 가리킨 변위장 · 조각 ·
 `section_<PID>.k`) 어느 것과도 같으면 안 된다. output 만 겹치면 보고에 `output_clobber` 로 적고 아무것도 덮지 않으며, report 가 겹치면 보고

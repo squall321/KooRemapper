@@ -674,7 +674,42 @@ std::string padInt(long long v, int w) {
     return buf;
 }
 
-std::string q(const std::string& s) { return json::quote(s); }
+// 보고에 싣는 글자는 늘 바른 UTF-8 이다 — 깨진 바이트(넘친 꼴 · 서로게이트 · U+10FFFF 위 · 잘린 꼴)는 U+FFFD 로 바꾼다(RFC 3629).
+// 계획(StrictJson 은 글자를 검사하지 않는다) · 덱 줄 · 경로 어디서 온 글자든 보고가 엄격한 리더에서 깨지지 않게(2026-11-07 적대적 검토 #4)
+std::string validUtf8(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    size_t i = 0;
+    while (i < s.size()) {
+        const unsigned char c = static_cast<unsigned char>(s[i]);
+        if (c < 0x80) { out += static_cast<char>(c); ++i; continue; }
+        size_t n = 0;
+        uint32_t cp = 0;
+        if ((c & 0xE0) == 0xC0) { n = 1; cp = c & 0x1Fu; }
+        else if ((c & 0xF0) == 0xE0) { n = 2; cp = c & 0x0Fu; }
+        else if ((c & 0xF8) == 0xF0) { n = 3; cp = c & 0x07u; }
+        bool ok = n > 0;
+        for (size_t k = 1; ok && k <= n; ++k) {
+            if (i + k >= s.size() || (static_cast<unsigned char>(s[i + k]) & 0xC0) != 0x80) ok = false;
+            else cp = (cp << 6) | (static_cast<unsigned char>(s[i + k]) & 0x3Fu);
+        }
+        if (ok && ((n == 1 && cp < 0x80) || (n == 2 && cp < 0x800) || (n == 3 && cp < 0x10000) || (cp >= 0xD800 && cp <= 0xDFFF) || cp > 0x10FFFF))
+            ok = false;
+        if (ok) { out.append(s, i, n + 1); i += n + 1; }
+        else { out += "\xEF\xBF\xBD"; ++i; }
+    }
+    return out;
+}
+
+std::string q(const std::string& s) { return json::quote(validUtf8(s)); }
+
+// 글자 경계에서 자른다 — 바이트 n 에서 자르면 한글(3 바이트)이 반쪽으로 남아 보고가 깨진 UTF-8 이 되었다(검토 #4)
+std::string clipUtf8(const std::string& l, size_t n) {
+    if (l.size() <= n) return l;
+    size_t cut = n;
+    while (cut > 0 && (static_cast<unsigned char>(l[cut]) & 0xC0) == 0x80) --cut;
+    return l.substr(0, cut) + "…";
+}
 
 std::string num(double v) {
     if (!std::isfinite(v)) return "null";
@@ -1307,7 +1342,7 @@ bool scanSectionFile(const std::vector<std::string>& in, SectionFileScan& s, std
 
 void compareSectionCards(const std::vector<std::string>& deck, const SectionFileScan& s, std::vector<std::string>& problems) {
     auto tail = [](const std::string& l, size_t n) { return l.size() > n ? l.substr(n) : std::string(); };
-    auto clip = [](const std::string& l) { return "'" + (l.size() > 60 ? l.substr(0, 60) + "…" : l) + "'"; };
+    auto clip = [](const std::string& l) { return "'" + clipUtf8(l, 60) + "'"; };
     if (deck.size() != s.block.size()) {
         problems.push_back("줄 수 " + std::to_string(s.block.size()) + " 가 덱의 옛 카드(" + std::to_string(deck.size()) +
                            " 줄 — 키워드 줄부터 다음 키워드 앞까지)와 다르다 — 옛 카드를 그대로 옮긴 카드가 아니다");

@@ -627,6 +627,44 @@ TEST(Carryover_v2_새_셸_섹션_파일_엄격_읽기와_옛_카드_대조) {
     ASSERT_TRUE(carryover::scanSectionFile(coLines(comp), s, pr));
 }
 
+// 보고는 늘 바른 UTF-8(2026-11-07 적대적 검토 #4) — 계획 · 덱에서 온 깨진 바이트는 U+FFFD 로, 줄을 보일 때는 글자 경계에서 자른다
+TEST(Carryover_보고의_글자는_바른_UTF8) {
+    auto valid = [](const std::string& t) {
+        for (size_t i = 0; i < t.size();) {
+            const unsigned char c = static_cast<unsigned char>(t[i]);
+            const size_t n = c < 0x80 ? 0 : (c & 0xE0) == 0xC0 ? 1 : (c & 0xF0) == 0xE0 ? 2 : (c & 0xF8) == 0xF0 ? 3 : 9;
+            if (n == 9 || i + n >= t.size()) return false;
+            for (size_t k = 1; k <= n; ++k)
+                if ((static_cast<unsigned char>(t[i + k]) & 0xC0) != 0x80) return false;
+            i += n + 1;
+        }
+        return true;
+    };
+    carryover::Report r;
+    r.planRead = r.planParsed = true;
+    r.planSha256 = kCoSha;
+    r.reportKey = std::string("k\xff\xfe") + "\xED\xA0\x80" + "\xC0\xAF" + "끝";   // 깨진 바이트 · 서로게이트 · 넘친 꼴
+    r.problems.push_back({0, "plan_schema", std::string("이름 '\xE7\x95' 잘린 꼴")});
+    const std::string j = carryover::toJson(r);
+    ASSERT_TRUE(valid(j));
+    ASSERT_TRUE(j.find("\xEF\xBF\xBD") != std::string::npos);
+    ASSERT_TRUE(j.find("끝") != std::string::npos);
+    json::Value v;
+    std::string err;
+    ASSERT_TRUE(json::parse(j, v, err));
+    // 줄을 보이는 자르기 — 60 바이트 자리가 한글 한가운데여도 반쪽을 남기지 않는다
+    carryover::SectionFileScan s;
+    std::vector<std::string> pr;
+    std::string longTitle = "X";
+    for (int k = 0; k < 30; ++k) longTitle += "가";
+    std::string other = "Y";
+    for (int k = 0; k < 30; ++k) other += "가";
+    ASSERT_TRUE(carryover::scanSectionFile(coLines(coReplace(kCoSection, "CAN#4_sec", other)), s, pr));
+    carryover::compareSectionCards(coLines(coReplace(kCoDeckSection, "CAN#4_sec", longTitle)), s, pr);
+    ASSERT_EQ(pr.size(), static_cast<size_t>(1));
+    ASSERT_TRUE(valid(pr[0]));
+}
+
 TEST(Carryover_v2_보고에_deck_from_인클루드_refused_transform) {
     carryover::Report r;
     r.planRead = r.planParsed = true;
