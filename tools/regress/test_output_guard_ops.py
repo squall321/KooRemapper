@@ -350,8 +350,8 @@ def special_yaml(st, binary):
         write(os.path.join(d, cfg_name), cfg)
         before = snapshot(d)
         rc, text = run(binary, d, [op, cfg_name])
-        check("★%s output 을 빼면 → rc 1 · 모델을 덮지 않는다(예전엔 model 자리에 rc 0)" % op,
-              rc == 1 and "output" in text and not diff(before, snapshot(d)), (rc, text[-300:]))
+        check("★%s output 을 빼면 → rc 1 「output 이 비어 있습니다」 · 모델을 덮지 않는다(예전엔 model 자리에 rc 0)" % op,
+              rc == 1 and "output 이 비어" in text and not diff(before, snapshot(d)), (rc, text[-300:]))
     # rebind — 예전엔 문자열 비교라 `./` 철자를 못 봤다
     d, argv = st.case("rebind_entities_after_remesh", "dot")
     cfg = read(os.path.join(d, argv[1]))

@@ -688,7 +688,7 @@ boundaries:
 )KRH"}},
      {"KooRemapper generate box box.yaml", "KooRemapper boundary bc.yaml"},
      {},
-     {"dof: x y z xy xyz all ...", "select: direction(법선과 direction 사이 angle 이내 면) | all(파트 노출면 전체) | set(기존 *SET_NODE, set_id 필요) — load 의 select(direction|set|tied)와 값이 다르다"}},
+     {"dof: x y z xy xyz all ...", "select: direction(법선과 direction 사이 angle 이내 면) | all(파트 노출면 전체) | set(기존 *SET_NODE, set_id 필요) — load 의 select(direction|set|tied)와 값이 다르다", "output 은 필수 — 빼면 예전엔 model 자리에 그대로 덮어썼다(rc 0). 2026-11-07 부터 rc 1"}},
     {"rbe", "하중·경계·접촉", "파트 면에 RBE2(CNRB)/RBE3(INTERPOLATION) 강체 요소", "rbe2 rbe3 spider 강체요소", "KooRemapper rbe <config.yaml>",
      {{"box.yaml", R"KRH(output: box.k
 lx: 20.0
@@ -716,7 +716,7 @@ rbe:
 )KRH"}},
      {"KooRemapper generate box box.yaml", "KooRemapper rbe rbe.yaml"},
      {},
-     {"mode: spider(면 전체 중심 1개) | face(면마다)", "select: direction | all(파트 노출면 전체) — boundary 와 달리 set 은 없다"}},
+     {"mode: spider(면 전체 중심 1개) | face(면마다)", "select: direction | all(파트 노출면 전체) — boundary 와 달리 set 은 없다", "output 은 필수 — 빼면 예전엔 model 자리에 그대로 덮어썼다(rc 0). 2026-11-07 부터 rc 1"}},
     {"cnrb2spring", "하중·경계·접촉", "CNRB 체결점을 두 강체 + 유격 discrete beam 조인트로 분할", "볼트 유격 gap clearance 나사 체결 스프링 discrete beam 측면낙하", "KooRemapper cnrb2spring <config.yaml>",
      {{"spring.yaml", R"KRH(model: examples/cnrb2spring/two_plate_bolt.k
 output: two_plate_bolt_spring.k
