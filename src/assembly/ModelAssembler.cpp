@@ -5225,6 +5225,7 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
     bool elementTwoLineFormat = false;     // 지금 섹션의 카드가 두 줄 이상인가(새 층을 어디에 쓸지 정한다)
     bool dropCurrentCard = false;          // 지금 카드의 나머지 줄을 버려야 하나
     bool tshellElementsInserted = false;   // 새 tshell 층을 이미 썼나(솔리드와 따로 센다)
+    bool endInsertsDone = false;           // *END 앞 덧붙임(셸 · 키워드 블록 · dynain · IGA · DR)을 이미 썼나 — 첫 *END 앞에만
 
     const ElemCardIndex eidx = ecBuildIndex(rawLines_);
 
@@ -5368,6 +5369,13 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                 shellElementsHandled = true;
             } else if (upper.substr(0, 4) == "*END") {
                 currentSection = Section::NONE;
+                // ★덧붙일 것은 주 덱의 **첫** *END 앞에만 넣는다 — LS-DYNA 는 첫 *END 에서 읽기를 멈춘다. *END 가 둘 이상인 덱에서 *END 마다
+                //   다시 넣어 같은 카드(셸 요소 · 섹션 · 조각 …)가 두 벌 생겼다(2026-11-07 적대적 검토 #6 — apply_carryover_plan 의 새 셸 섹션)
+                if (endInsertsDone) {
+                    output << line << "\n";
+                    continue;
+                }
+                endInsertsDone = true;
 
                 // Insert remaining additions if not yet done
                 if (!nodesInserted) {

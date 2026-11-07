@@ -114,6 +114,14 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
   경계에서. 계획 글자를 `plan_json` 으로 거절하는 쪽은 덱 · 경로에서 온 깨진 바이트를 못 막고, 한 글자 때문에 계획 전체의 문제 목록을 잃는다.
 - **링크 덱의 폴더(#5)** — 산출 폴더 규칙은 「준 경로 그대로의 폴더」 를(폴더만 정규화) 쓴다 — 닫힘(`dirOf(model)`) · 되읽기(`dirOf(output)`)와
   같은 자리. 파일 경로를 정규화하면 덱 링크를 따라가 다른 폴더가 나왔다.
+- **`*END` 둘(#6)** — 쓰기(`ModelAssembler::writeOutput`)의 `*END` 갈래에 깃발 하나(`endInsertsDone`) — 덧붙임은 주 덱의 **첫** `*END` 앞에만,
+  둘째부터는 줄만 옮긴다. 그 갈래가 내는 것 전부(더한 절점 · 솔리드 · 티쉘 · 셸 요소 · 키워드 블록 · dynain · IGA `*INCLUDE` · DR 카드)가 같이
+  고쳐진다. `addedKeywordBlocks_` 를 채우는 op — applyCarryoverPlan(조각 · 새 셸 섹션) · applyCadSolidMerge · applyRestack · applyOffset ·
+  applyDisconnect · applyConnectionCZM · applyConnectionContact · createCzmElementsForDualOffset · addContactHint · migrateDeadReferences ·
+  processDeadReferences · insertMaterialCard · createPartKeyword · createSectionSolid · createSectionShell · createSectionTShell · applyLoad ·
+  applyControl · applyDatabase · applyMerge — 모두 「덱 끝(*END 앞)에 한 벌」 을 뜻했다(첫 *END 뒤 벌은 해석에 안 들어가고 같은 번호 카드만
+  늘렸다). 쓰기 밖에서 rawLines_ 를 고쳐 넣는 갈래는 손대지 않았다 — applyMatswap · applyMatdb · applyLoad 의 끼움은 첫 *END 만(`inserted`),
+  applyContact · applyBoundary · applyRbe 는 *END 마다(같은 틈) · applyBattery 의 `*INCLUDE` 는 마지막 *END 앞(첫 *END 뒤라 안 읽힌다) — 알렸다.
 
 ## 리뷰 11-07 고침 — 정한 것
 리뷰(11-07) 결함 11 + 그럴듯한 둘을 고쳤다. 공용 코드(i10 조각의 쓰기 관문 왕복 · 솔리드 · 티쉘 변형의 바닥 · `*ELEMENT_MASS` PID 칸)는 다른 갈래 몫.

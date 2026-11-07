@@ -385,6 +385,7 @@ def main():
         part_r3(binary)
         part_r4(binary)
         part_r5(binary)
+        part_r6(binary)
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
     print()
@@ -863,6 +864,37 @@ def part_r5(binary):
     rc, out, rep = apply_case(binary, d, output="out/deck_applied.k", report="out/deck_applied_carryover.json")
     refused("R-5b 산출은 여전히 덱(링크) 폴더여야 한다 — 다른 폴더면 include_output", rc, out, rep, d, "include_output",
             out_name="out/deck_applied.k")
+
+
+
+def part_r6(binary):
+    print("[R-6 *END 가 둘인 덱 — 쓰기가 *END 마다 덧붙임을 넣어 새 셸 섹션 · 조각이 두 벌 나갔다(검토 END3)]")
+    def two_ends(d):
+        deck = os.path.join(d, "deck.k")
+        body = read(deck)
+        assert body.endswith("*END\n")
+        write(deck, body + "$ notes after end\n*END\n")
+    d = stage("r6")
+    two_ends(d)
+    p = to_v2(d)
+    write(os.path.join(d, "section_4.k"), SECTION_4)
+    can_morph(d, p, {"secid": 10, "thickness": 0.6, "file": "section_4.k", "why": "0.4 → 0.6"})
+    put_file(d, p, "section_4.k")
+    resummarize(p)
+    plan_save(d, p)
+    rc, out, rep = apply_case(binary, d)
+    body = read(os.path.join(d, "deck_applied.k")) if rc == 0 else ""
+    first_end = body.find("\n*END\n")
+    check("R-6 모프 새 셸 섹션 — SECID 10 카드가 한 벌 · 첫 *END 앞에",
+          rc == 0 and body.count("        10         2         1         2\n") == 1 and
+          0 <= body.find("        10         2         1         2\n") < first_end, (rc, body.count("        10         2"), out[-300:]))
+    d = stage("r6b")
+    two_ends(d)
+    to_v2(d)
+    rc, out, rep = apply_case(binary, d)
+    body = read(os.path.join(d, "deck_applied.k")) if rc == 0 else ""
+    check("R-6b 바꿔 넣기 조각 셋 — 넣은 블록 머리가 셋(*END 마다 두 벌이 아니다)",
+          rc == 0 and body.count("$ === apply_carryover_plan") == 3, (rc, body.count("$ === apply_carryover_plan"), out[-300:]))
 
 
 if __name__ == "__main__":
