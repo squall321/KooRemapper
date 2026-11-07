@@ -382,6 +382,7 @@ def main():
         part_g(binary)
         part_r1(binary)
         part_r2(binary)
+        part_r3(binary)
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
     print()
@@ -759,6 +760,49 @@ def part_r2(binary):
     rc, out, rep = apply_case(binary, d)
     refused("R-2 BOM 으로 시작하는 inc/s.k 의 *SET_NODE_LIST 가 바꿔 넣는 PID 4 의 절점 → node_ref(PID 4)", rc, out, rep, d, "node_ref", 4)
     check("R-2b 그 파일 · 줄(inc/s.k 줄 1)을 말한다", "inc/s.k 줄 1" in details(rep, "node_ref", 4), details(rep, "node_ref")[:200])
+
+
+
+def part_r3(binary):
+    print("[R-3 산출 · 보고가 계획의 동반 파일 이름 — 덮거나 거절하며 「옛 산출」로 지웠다(검토 K1-K4)]")
+    def k_case(name):
+        d = stage(name)
+        p = to_v2(d)
+        write(os.path.join(d, "section_4.k"), SECTION_4)
+        can_morph(d, p, {"secid": 10, "thickness": 0.6, "file": "section_4.k", "why": "0.4 → 0.6"})
+        put_file(d, p, "section_4.k")
+        resummarize(p)
+        plan_save(d, p)
+        return d
+    d = k_case("r3a")
+    sec = os.path.join(d, "section_4.k")
+    before = sha(sec)
+    rc, out, rep = apply_case(binary, d, output="section_4.k", report="section_4_carryover.json")
+    check("R-3 output 이 새 셸 섹션 파일(section_4.k) → 거절(output_clobber) · 그 파일 그대로 · 보고는 쓴다(ok false)",
+          rc == 1 and sha(sec) == before and rep.get("ok") is False and "output_clobber" in kinds(rep), (rc, sorted(kinds(rep)), out[-300:]))
+    d = stage("r3b")
+    p = to_v2(d)
+    p["summary"]["failed"] = 9              # 어차피 거절되는 계획
+    plan_save(d, p)
+    frag = os.path.join(d, "fragment_6.k")
+    before = sha(frag)
+    rc, out, rep = apply_case(binary, d, output="fragment_6.k", report="fragment_6_carryover.json")
+    check("R-3b 거절되는 계획 · output 이 조각(fragment_6.k) → 그 조각을 지우지 않는다(stale_output_removed 없음)",
+          rc == 1 and os.path.exists(frag) and sha(frag) == before and rep.get("ok") is False and
+          "stale_output_removed" not in {w["kind"] for w in rep.get("warnings", [])}, (rc, rep.get("warnings"), out[-300:]))
+    d = k_case("r3c")
+    sec = os.path.join(d, "section_4.k")
+    before = sha(sec)
+    write(os.path.join(d, "a.yaml"), "model: deck.k\nplan: plan.json\noutput: deck_applied.k\nreport: section_4.k\n")
+    rc, out = run(binary, d, OP, "a.yaml")
+    check("R-3c report 가 동반 파일(section_4.k) → rc 1 · 그 파일 그대로 · 산출 없음(보고 자리가 없어 콘솔로만)",
+          rc == 1 and sha(sec) == before and not os.path.exists(os.path.join(d, "deck_applied.k")), (rc, out[-300:]))
+    d = stage("r3d")
+    to_v2(d)
+    before = sha(os.path.join(d, "deck.k"))
+    rc, out, rep = apply_case(binary, d, output="deck.k", report="deck_carryover.json")
+    check("R-3d output 이 model → 덱 그대로 · 거절 까닭을 보고에 쓴다(output_clobber)",
+          rc == 1 and sha(os.path.join(d, "deck.k")) == before and "output_clobber" in kinds(rep), (rc, sorted(kinds(rep)), out[-200:]))
 
 
 if __name__ == "__main__":

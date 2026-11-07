@@ -14572,7 +14572,7 @@
           "role": "yaml_field",
           "yaml_path": "output",
           "required": true,
-          "description": "Output deck. Must differ from model and from every file the deck includes; for a deck with *INCLUDE it must be in the model's folder (the *INCLUDE lines are kept). Not written (or deleted, together with a deck an earlier run left at this path) when any check fails."
+          "description": "Output deck. Must differ from every file the op reads — model, plan, every file the deck includes and every plan companion (field_<PID>.bin, fragment_<PID>.k, section_<PID>.k); if it does not, nothing is written and the report says output_clobber. For a deck with *INCLUDE it must be in the model's folder (the *INCLUDE lines are kept). Not written (or deleted, together with a deck an earlier run left at this path — never an input file) when any check fails."
         },
         {
           "name": "report",
@@ -14580,7 +14580,7 @@
           "role": "yaml_field",
           "yaml_path": "report",
           "required": false,
-          "description": "Report JSON (format dynaforge-carryover-apply): ok, plan (with deck_from) and deck hashes, the verified include list, every problem and warning, shift, per-row results. Default <output stem>_carryover.json. Written on success and on refusal."
+          "description": "Report JSON (format dynaforge-carryover-apply): ok, plan (with deck_from) and deck hashes, the verified include list, every problem and warning, shift, per-row results. Default <output stem>_carryover.json. Written on success and on refusal; it must differ from output and from every file the op reads (then the refusal is console only)."
         }
       ],
       "example": {

@@ -1754,6 +1754,44 @@ int runCadSolidMerge(const std::string& yamlFile, ConsoleOutput& console) {
     return 0;
 }
 
+// 계획이 가리키는 동반 파일 이름 — `files` 의 키와 줄이 가리킨 이름(field.file · field.new_section.file · fragment.file · instead.file).
+// 계획 폴더 바로 아래의 맨 이름만(경로 · `..` 은 적용 쪽이 거절한다). 읽지 못하는 계획이면 빈 목록 — 그 계획은 어차피 거절된다.
+static std::vector<std::string> carryoverCompanionNames(const std::string& planPath) {
+    std::vector<std::string> out;
+    std::ifstream f(planPath, std::ios::binary);
+    if (!f.is_open()) return out;
+    std::ostringstream ss;
+    ss << f.rdbuf();
+    KooRemapper::json::Value v;
+    std::string err;
+    if (!KooRemapper::json::parse(ss.str(), v, err) || v.type != KooRemapper::json::Value::Type::Object) return out;
+    using VT = KooRemapper::json::Value::Type;
+    auto add = [&](const KooRemapper::json::Value* s) {
+        if (!s || s->type != VT::String || s->s.empty() || s->s == "." || s->s == "..") return;
+        if (s->s.find_first_of("/\\:") != std::string::npos || s->s.find('\0') != std::string::npos) return;
+        out.push_back(s->s);
+    };
+    if (const auto* fs = v.get("files"); fs && fs->type == VT::Object)
+        for (const auto& kv : fs->obj) {
+            KooRemapper::json::Value name;
+            name.type = VT::String;
+            name.s = kv.first;
+            add(&name);
+        }
+    for (const char* list : {"parts", "added"})
+        if (const auto* a = v.get(list); a && a->type == VT::Array)
+            for (const auto& row : a->arr) {
+                if (row.type != VT::Object) continue;
+                for (const char* k : {"fragment", "instead"})
+                    if (const auto* x = row.get(k); x && x->type == VT::Object) add(x->get("file"));
+                if (const auto* fld = row.get("field"); fld && fld->type == VT::Object) {
+                    add(fld->get("file"));
+                    if (const auto* ns = fld->get("new_section"); ns && ns->type == VT::Object) add(ns->get("file"));
+                }
+            }
+    return out;
+}
+
 // ── Standalone apply_carryover_plan ─────────────────────────────────────────
 // StepForge 이월 계획(plan.json · field_<PID>.bin · fragment_<PID>.k)을 덱에 적용한다 — 규칙과 검사는
 // `ModelAssembler::applyCarryoverPlan` · 쓴 덱 대조와 품질 관문은 `verifyCarryoverOutput`.
@@ -1807,31 +1845,29 @@ int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
     const std::string outputPrefix = y.getOutputPrefix();
     const std::string outPath = outputPrefix + ".k";
     const std::string reportPath = reportFile.empty() ? outputPrefix + "_carryover.json" : y.resolvePath(reportFile);
-    auto canon = [](const std::string& p) {
-        std::error_code ec;
-        const auto c = std::filesystem::weakly_canonical(p, ec);
-        return ec ? p : c.string();
+    // ★이 op 이 읽는 파일 — 주 덱 · 계획 · 인클루드 닫힘 · 계획의 동반 파일(files 와 줄이 가리킨 이름 — 변위장 · 조각 · 새 셸 섹션).
+    //   산출 · 보고는 그 어느 것과도 같으면 안 된다 — 판 2 는 인클루드를 읽기만 하고(사용자 결정 11-07), 동반 파일을 덮거나 거절하며
+    //   「옛 산출」로 지우면 계획을 다시 받아야 한다(2026-11-07 적대적 검토 #3 — section_4 · fragment_6 을 덮고 지웠다)
+    std::vector<std::string> reads{modelPath, planPath};
+    for (const auto& f : KooRemapper::include_closure::readPaths(modelPath).files) reads.push_back(f.path);
+    for (const auto& n : carryoverCompanionNames(planPath)) reads.push_back((std::filesystem::path(planPath).parent_path() / n).string());   // 적용 쪽과 같은 자리
+    auto isInput = [&](const std::string& p) {
+        return std::any_of(reads.begin(), reads.end(), [&](const std::string& r) { return KooRemapper::include_closure::sameFile(p, r); });
     };
-    if (canon(outPath) == canon(modelPath)) {
-        console.error(std::string("[") + tag + "] output 이 model 과 같다 — 계획이 지문(deck.sha256)으로 고정한 입력 덱을 덮어쓰지 않는다");
+    std::string clobW, clobR;
+    // 보고가 입력(또는 산출)이면 보고조차 쓸 자리가 없다 — 콘솔로만 거절한다
+    if (KooRemapper::include_closure::sameFile(reportPath, outPath) ||
+        KooRemapper::include_closure::clobberPair({reportPath}, reads, clobW, clobR)) {
+        console.error(std::string("[") + tag + "] report 「" + reportPath + "」 가 " +
+                      (clobR.empty() ? std::string("output") : "읽는 파일 「" + clobR + "」") + " 과 같다 — 입력(주 덱 · 계획 · 인클루드 · "
+                      "계획의 동반 파일)에 쓰지 않는다. report 를 다른 이름으로 주라");
         return 1;
     }
-    if (canon(reportPath) == canon(modelPath) || canon(reportPath) == canon(planPath) || canon(reportPath) == canon(outPath)) {
-        console.error(std::string("[") + tag + "] report 가 model · plan · output 중 하나와 같다 — 다른 이름을 주세요");
-        return 1;
-    }
-    // ★산출 · 보고가 덱의 인클루드 파일과 같으면 거절한다 — 판 2 는 인클루드 닫힘을 읽기만 하고 그 파일은 쓰지 않는다(사용자 결정 11-07).
-    //   보고는 거절해도 쓰므로 그 전에 묻는다(보고가 인클루드를 덮으면 입력이 사라진다 — 2026-11-07 검토 #6 의 규칙)
-    {
-        std::vector<std::string> reads{modelPath, planPath};
-        for (const auto& f : KooRemapper::include_closure::readPaths(modelPath).files) reads.push_back(f.path);
-        std::string w, r;
-        if (KooRemapper::include_closure::clobberPair({outPath, reportPath}, reads, w, r)) {
-            console.error(std::string("[") + tag + "] 「" + w + "」 이 읽는 파일 「" + r + "」 과 같다 — 입력(주 덱 · 계획 · 인클루드)에 쓰지 않는다. "
-                          "output · report 를 다른 이름으로 주라");
-            return 1;
-        }
-    }
+    // 산출이 입력이면 보고(안전한 자리)에 적고 거절한다 — 아무것도 덮거나 지우지 않는다(아래 dropOutput 도 입력은 건너뛴다)
+    std::string outClobber;
+    if (KooRemapper::include_closure::clobberPair({outPath}, reads, clobW, clobR))
+        outClobber = "output 「" + clobW + "」 이 읽는 파일 「" + clobR + "」 과 같다 — 입력(주 덱 · 계획 · 인클루드 · 계획의 동반 파일)은 덮어쓰지 "
+                     "않는다(계획이 지문으로 고정한 파일이다) · output 을 다른 이름으로 주라";
     console.println(std::string("[") + tag + "] Model : " + modelPath);
     console.println(std::string("[") + tag + "] Plan  : " + planPath);
 
@@ -1850,12 +1886,13 @@ int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
             else console.warning(line);
         }
     };
-    // 거절하면 출력 자리에 덱을 남기지 않는다 — 앞선 실행이 남긴 덱이 ok false 보고 옆에 앉아 있으면 그것을 이번 산출로 읽는다(리뷰 11-07)
+    // 거절하면 출력 자리에 덱을 남기지 않는다 — 앞선 실행이 남긴 덱이 ok false 보고 옆에 앉아 있으면 그것을 이번 산출로 읽는다(리뷰 11-07).
+    // 단 **입력 파일은 절대 지우지 않는다**(검토 #3 — 산출 이름이 동반 파일이면 그 조각을 「옛 산출」로 지웠다)
     std::error_code staleEc;
     const bool staleAtStart = std::filesystem::exists(outPath, staleEc);
     auto dropOutput = [&]() {
         std::error_code ec;
-        if (!std::filesystem::exists(outPath, ec)) return;
+        if (!std::filesystem::exists(outPath, ec) || isInput(outPath)) return;
         if (!std::filesystem::remove(outPath, ec)) {
             console.warning(std::string("[") + tag + "] 출력 자리의 덱을 지우지 못했다: " + outPath);
             return;
@@ -1878,6 +1915,11 @@ int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
         for (auto& pr : rep.parts) if (pr.result == "applied") pr.result = "skipped";
         for (auto& ar : rep.added) if (ar.result == "applied") ar.result = "skipped";
     };
+
+    if (!outClobber.empty()) {
+        rep.problems.push_back({0, "output_clobber", outClobber});
+        return refuse("output 이 읽는 파일과 같다 — 아무것도 쓰지 않았다(보고만 남긴다)");
+    }
 
     // 이 op 안의 어떤 예외도 보고를 남기고 덱을 남기지 않는다(리뷰 11-07 — map::at 이 보고 없이 rc 1 로 끝났다)
     bool wrote = false;   // 이번 실행이 덱을 썼다(예외가 나면 지운다)
