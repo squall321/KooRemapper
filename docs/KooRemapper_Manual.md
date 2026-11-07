@@ -5260,10 +5260,13 @@ LS-DYNA 에서 쓰지 않는 재질은 무해하고, 쪼개려면 재질 종류�
 |---|---|
 | `*SET_NODE` · `_LIST` | 남은 절점 |
 | `*SET_NODE_COLUMN` | 남은 절점(줄 단위) |
-| `*SET_PART` · `_LIST` | 고른 PID |
-| `*SET_SOLID` · `*SET_SHELL` · `*SET_TSHELL` | 남은 그 종류 EID |
+| `*SET_PART` · `_LIST` · `_COLUMN` | 고른 PID(열 꼴은 줄 단위) |
+| `*SET_SOLID` · `*SET_SHELL` · `*SET_TSHELL`(`_COLUMN` 도) | 남은 그 종류 EID |
 | `*SET_SEGMENT` | **네 절점이 다 남은** 면만 |
 | `_GENERATE` · `_GENERAL` · `_ADD` · `_INTERSECT` | **버리고 SID 를 적는다** |
+
+★열 꼴(`_COLUMN` — 줄마다 멤버 하나와 속성 A1-A4)은 세트 대상대로 거르고 번호를 다시 매기면 그 대상의 번호로 바꾼다(파트는 그대로).
+2026-11-07 전엔 늘 절점 번호로 걸러 `*SET_PART_COLUMN` · `*SET_SHELL_COLUMN` 을 비우거나 절점 번호로 바꿨다(회귀 Q 절).
 
 ★`*SET_SEGMENT` 에서 일부만 남은 면을 싣지 않는 이유 — 세 절점만 남은 면은 면이 아니고,
 `*SET_SEGMENT` 의 감김은 **접촉 방향과 압력 부호**를 정한다(§46 과 같은 자리다).
@@ -5420,8 +5423,8 @@ PID 로 짐작하지 않는다(예전엔 그 조각이 고른 PID 와 우연히 
 
 ★`*ELEMENT_MASS_PART` 는 파트에 질량을 얹는 카드다 — ID(I8) ADDMASS(F16) FINMASS(F16) LCID MWD, **칸 0 이 PID** 이고 요소 번호 ·
 절점 칸이 없다(Vol_I 160135-160207). 예전엔 질량 카드의 칸 3 을 PID 로 읽어 `extract-parts` 가 고른 파트의 추가 질량을 조용히
-버렸다 — 이제 고른 PID 면 싣는다. `_SET` 은 칸 0 이 **파트 세트 ID** 다 — 목록 꼴 `*SET_PART` 를 풀어 세트가 다 고른 파트면 싣고
-(세트도 실린다), 하나도 아니면 버리고, 일부만 고르거나 세트를 풀 수 없으면(`_ADD` · `_GENERAL` · `_COLUMN` … · 덱에서 못 찾음)
+버렸다 — 이제 고른 PID 면 싣는다. `_SET` 은 칸 0 이 **파트 세트 ID** 다 — 목록 · 열 꼴 `*SET_PART` 를 풀어 세트가 다 고른 파트면 싣고
+(세트도 실린다), 하나도 아니면 버리고, 일부만 고르거나 세트를 풀 수 없으면(`_ADD` · `_GENERAL` · `_GENERATE` … · 덱에서 못 찾음)
 줄을 대고 **거절**한다(질량은 세트 전체에 나눠 얹힌다 — 일부만 실으면 남은 파트에 얹히는 질량이 바뀐다). 번호 바닥 · 이월 적용의
 걸음은 이 카드를 요소로 세지 않고(EID 가 없다), `cleanup-nodes` 는 그 줄의 정수(LCID …)를 절점으로 세지 않는다.
 

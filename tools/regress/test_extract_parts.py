@@ -20,6 +20,8 @@
       이제 줄을 대고 거절하며(산출 없음) 되읽기도 칸이 깨진 콤마 줄을 센다(O 절 · 2026-11-07 검토 #7).
     · 실패해도 남는 파일 — 못 여는 인클루드 · 되읽기 실패 뒤에 산출이 남았고, 거절한 실행 옆에 지난 실행의 산출 · 번호 지도 ·
       보고가 그대로 있었다. rc≠0 이면 그것들을 지운다(되읽기 실패의 보고만 이번 결과로 남긴다 — P 절 · 검토 #8).
+    · 열 꼴 세트(`*SET_*_COLUMN`) — 쓰기가 늘 절점 번호로 걸러 파트 · 셸 COLUMN 세트를 비우거나 절점 번호로 바꿨다.
+      세트 대상(절점 · 파트 · 셸 …)으로 거르고 그 대상으로 번호를 바꾼다(Q 절 · 재검토 N1).
 
 usage: test_extract_parts.py <KooRemapper 바이너리>
 """
@@ -582,6 +584,39 @@ def main():
         rc, out = run(binary, d, "extract-parts", "P3a.yaml")
         check("P-5 renumber 성공은 산출 · 번호 지도 · 보고를 다 남긴다",
               rc == 0 and len(exists("P3_out.k", "P3_out_renumber_map.json", "P3.json")) == 3, (rc, out[-300:]))
+
+        # ── Q: ★열 꼴 세트(*SET_*_COLUMN)는 세트 대상으로 거르고 그 대상으로 번호를 바꾼다 ──
+        QL = ["*KEYWORD", "*NODE"] + [nl(n, float(n), 0.0, 0.0) for n in range(101, 109)]
+        QL += ["*ELEMENT_SHELL", e8(70, 7, 101, 102, 103, 104), e8(80, 8, 105, 106, 107, 108)]
+        QL += ["*PART", "p7", s10(7, 9, 9), "*PART", "p8", s10(8, 9, 9), "*SECTION_SHELL", s10(9, 2), "       1.0",
+               "*MAT_ELASTIC", "         9  7.85E-9  210000     0.3"]
+        QL += ["*SET_PART_COLUMN", s10(901), "%10d%10s" % (7, "1.0"), "%10d%10s" % (8, "2.0"),
+               "*SET_SHELL_COLUMN", s10(902), "%10d%10s" % (70, "1.0"), "%10d%10s" % (80, "2.0"),
+               "*SET_NODE_COLUMN", s10(903), "%10d%10s" % (101, "1.0"), "%10d%10s" % (105, "2.0"), "*END"]
+        write(os.path.join(d, "Q.k"), "\n".join(QL) + "\n")
+        def qsets(path):
+            out, kw = {}, ""
+            for ln in open(path).read().split("\n"):
+                if ln.startswith("*"):
+                    kw = ln.strip()
+                elif kw.startswith("*SET_") and ln.strip() and not ln.startswith("$"):
+                    out.setdefault(kw, []).append(ln)
+            return {k: v[1:] for k, v in out.items()}      # 첫 줄은 SID 카드
+        cfg(d, "Q1.yaml", "model: Q.k\noutput: Q1_out.k\nparts: [7]\n")
+        rc, out = run(binary, d, "extract-parts", "Q1.yaml")
+        qs = qsets(os.path.join(d, "Q1_out.k")) if rc == 0 else {}
+        check("Q-1 ★*SET_PART_COLUMN — 고른 PID 7 의 줄만 남긴다(예전엔 절점 번호로 걸러 비웠다)",
+              rc == 0 and qs.get("*SET_PART_COLUMN") == ["%10d%10s" % (7, "1.0")], (rc, qs, out[-300:]))
+        check("Q-2 ★*SET_SHELL_COLUMN — 고른 파트의 셸 70 만 남긴다",
+              rc == 0 and qs.get("*SET_SHELL_COLUMN") == ["%10d%10s" % (70, "1.0")], qs)
+        check("Q-3 *SET_NODE_COLUMN — 실은 절점 101 만 남긴다", rc == 0 and qs.get("*SET_NODE_COLUMN") == ["%10d%10s" % (101, "1.0")], qs)
+        cfg(d, "Q2.yaml", "model: Q.k\noutput: Q2_out.k\nparts: [7]\nrenumber: true\n")
+        rc, out = run(binary, d, "extract-parts", "Q2.yaml")
+        qs = qsets(os.path.join(d, "Q2_out.k")) if rc == 0 else {}
+        check("Q-4 ★renumber — 셸 COLUMN 은 요소 번호(70→1) · 절점 COLUMN 은 절점 번호(101→1) · 파트 COLUMN 은 그대로(7)",
+              rc == 0 and qs.get("*SET_SHELL_COLUMN") == ["%10d%10s" % (1, "1.0")] and
+              qs.get("*SET_NODE_COLUMN") == ["%10d%10s" % (1, "1.0")] and qs.get("*SET_PART_COLUMN") == ["%10d%10s" % (7, "1.0")],
+              (rc, qs, out[-300:]))
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

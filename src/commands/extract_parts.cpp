@@ -94,9 +94,9 @@ struct DeckIndex {
     std::map<int, int> secElform;              // SECID → ELFORM
     std::vector<std::string> partVariants;     // `*PART_INERTIA` 등
     int fieldWidth = 8;
-    // `*SET_PART`(목록 꼴)의 SID → PID — `*ELEMENT_MASS_PART_SET` 의 세트를 풀 때만 쓴다(2026-11-07 검토 #5)
+    // `*SET_PART`(목록 · 열 꼴)의 SID → PID — `*ELEMENT_MASS_PART_SET` 의 세트를 풀 때만 쓴다(2026-11-07 검토 #5)
     std::map<int, std::vector<int>> partSets;
-    std::set<int> partSetsOpaque;              // 멤버를 목록으로 못 읽는 꼴(`_ADD` · `_GENERAL` · `_GENERATE` · `_COLUMN` …) · 두 번 정의된 SID
+    std::set<int> partSetsOpaque;              // 멤버를 ID 로 못 읽는 꼴(`_ADD` · `_GENERAL` · `_GENERATE` …) · 두 번 정의된 SID
 };
 
 // `*PART` 블록은 '제목 줄 + 카드 2' 가 **쌍으로 반복**된다(제목은 비워 둘 수 있으나 생략 못 한다).
@@ -143,8 +143,10 @@ void indexDeck(const std::string& path, DeckIndex& idx, std::set<std::string>& v
                 ++di;
             }
         } else if (starts(kw, "*SET_PART")) {
-            // 목록 꼴만 멤버를 읽는다(`_COLUMN` 은 쓰기가 세트 줄을 절점으로 거르니 풀 수 없는 것으로 둔다)
-            const bool list = KooRemapper::deckscan::classifySetNode(kw) == KooRemapper::deckscan::SetKind::LIST;
+            // 목록 꼴 · 열 꼴만 멤버를 읽는다(열 꼴은 줄마다 칸 0 이 PID — 속성 A1-A4 는 멤버가 아니다)
+            const auto kind = KooRemapper::deckscan::classifySetNode(kw);
+            const bool list = kind != KooRemapper::deckscan::SetKind::OPAQUE;
+            const bool column = kind == KooRemapper::deckscan::SetKind::COLUMN;
             const int tn = titleLines(kw);
             int di = 0, sid = 0;
             std::vector<int> mem;
@@ -153,7 +155,7 @@ void indexDeck(const std::string& path, DeckIndex& idx, std::set<std::string>& v
                 if (di < tn) { ++di; continue; }
                 const auto f = cardFields(l, setW);
                 if (di++ == tn) { sid = fieldInt(f, 0); continue; }
-                for (size_t q = 0; q < f.size(); ++q) {
+                for (size_t q = 0; q < (column ? std::min<size_t>(1, f.size()) : f.size()); ++q) {
                     const int v = fieldInt(f, q);
                     if (v > 0) mem.push_back(v);
                 }
@@ -294,7 +296,7 @@ std::vector<int> auxPidCandidates(const KooRemapper::AuxElementCard& a, const Ko
 int massSetVerdict(int sid, const DeckIndex& idx, const std::vector<int>& sel, std::string& why) {
     const auto it = idx.partSets.find(sid);
     if (sid <= 0 || it == idx.partSets.end() || idx.partSetsOpaque.count(sid)) {
-        why = "파트 세트 " + std::to_string(sid) + " 을 풀 수 없다(목록 꼴 *SET_PART 가 아니거나 덱 · 맨 *INCLUDE 에서 못 찾았다)";
+        why = "파트 세트 " + std::to_string(sid) + " 을 풀 수 없다(목록 · 열 꼴 *SET_PART 가 아니거나 덱 · 맨 *INCLUDE 에서 못 찾았다)";
         return -1;
     }
     std::string all, mine;
@@ -1041,12 +1043,17 @@ struct Writer {
                     *out << o2 << "\n";
                     break;
                 }
-                if (stream) {                    // `_COLUMN` — 한 줄에 하나
-                    int v = fieldInt(f, 0);
-                    if (v <= 0 || !inSorted(pk.nodes, v)) break;
+                if (stream) {                    // `_COLUMN` — 한 줄에 멤버 하나(+ 속성 A1-A4)
+                    // ★세트가 무엇의 집합인가로 거르고 그 대상으로 번호를 바꾼다 — 절점 · 파트(번호를 바꾸지 않는다) · 셸 · 솔리드 · 티쉘.
+                    //   예전엔 늘 절점 번호로 걸러 `*SET_PART_COLUMN` · `*SET_SHELL_COLUMN` 을 비우거나 절점 번호로 바꿨다(재검토 N1)
+                    const std::vector<int>* keep = subjectList(subj);
+                    const int v = fieldInt(f, 0);
+                    if (v <= 0 || !keep || !inSorted(*keep, v)) break;
                     std::string o2 = line;
-                    if (commaRefuse(line)) break;
-                    if (rm.on) putField(o2, sfw, 0, rm.node(v));
+                    if (rm.on && subj != SetOf::PART) {
+                        if (commaRefuse(line)) break;
+                        putField(o2, sfw, 0, remapSubject(subj, v));
+                    }
                     *out << o2 << "\n";
                     break;
                 }
