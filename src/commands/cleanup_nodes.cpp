@@ -103,6 +103,9 @@ const char* kDefaultKeep[] = {
 struct Scan {
     std::vector<int> definedMain;      // **주 덱**이 정의한 절점(지울 수 있는 것은 이것뿐)
     std::vector<int> definedAll;       // 인클루드까지 합친 정의
+    // 스칼라 절점(`*NODE_SCALAR` · `_VALUE` — 보 `_WARPAGE` 의 SN1 · SN2 가 가리킨다). `*NODE` 줄이 아니라 지울 후보가 아니고, 되읽기의
+    // 「정의된 절점」 에 든다(번호는 `*NODE` 와 겹치지 않는다 — Vol_I 214757)
+    std::vector<int> definedScalar;
     std::vector<int> byElement;        // 요소가 쓰는 절점(보 족은 하나로 읽은 칸 — `auxPrimaryFields`)
     // 보 족 줄을 **다른 읽기**로만 읽을 때 나오는 절점(넓은 칸 뒤 — 설명서 칸 · 정수 폭 · 토큰이 갈린다, 2026-11-07 사용자 결정
     // 「둘 다 남긴다」). 지우지 않는다. 되읽기는 입력에 있던 것만 본다(다른 읽기가 지어낸 번호는 원래 없던 절점일 수 있다)
@@ -206,7 +209,7 @@ bool matchesKeepList(const std::string& kw, const std::vector<std::string>& keep
 // 파일 하나만 훑는다 — 인클루드는 따라가지 않는다(정본 닫힘의 파일마다 호출자가 부른다).
 void scanRefsStream(std::istream& in, bool isMain, const Opts& o,
                     const std::map<int, int>& pidNodes, Scan& sc, long long& paramRefLines) {
-    enum class Mode { OTHER, NODE, ELEM, SETNODE, KEEP, TEXT };
+    enum class Mode { OTHER, NODE, SCALAR, ELEM, SETNODE, KEEP, TEXT };
     (void)o.model;
     Mode mode = Mode::OTHER;
     std::string kw;
@@ -242,6 +245,7 @@ void scanRefsStream(std::istream& in, bool isMain, const Opts& o,
                 continue;
             }
             if (kw == "*NODE") { mode = Mode::NODE; continue; }
+            if (KooRemapper::isScalarNodeKeyword(kw)) { mode = Mode::SCALAR; continue; }
             // `*INCLUDE` 계열 — 이름·경로·변환값이라 정수로 읽지 않는다. 따라가기(이름 · 찾는 차례 · 변종 · 깊이)는 정본 닫힘이
             // 맡는다. ⚠ `*INCLUDE_PATH` 는 **탐색 경로**라 「못 읽은 변종」이 아니다 — 정본도 그렇게 본다(예전에 변종으로 세어
             // `safe` 가 멀쩡한 덱을 거절했다).
@@ -295,9 +299,11 @@ void scanRefsStream(std::istream& in, bool isMain, const Opts& o,
                     const auto& prim = KooRemapper::auxPrimaryFields(rd);
                     for (int v : KooRemapper::auxNodesOf(aux, prim)) sc.byElement.push_back(v);
                     for (int v : KooRemapper::auxNodesAlt(aux, rd, prim)) sc.byElementAlt.push_back(v);
-                } else if (auxLineIdx == aux.optNodeLine) {
-                    // 옵션 카드의 절점 — 보 `_ELBOW` 의 가운데 절점 MN(예전엔 Card 1 만 읽어 safe 가 MN 을 지웠다 · 재검토 D2)
-                    for (int v : KooRemapper::auxOptNodesOf(aux, line, fw)) sc.byElement.push_back(v);
+                } else {
+                    // 옵션 카드의 절점 — 보 `_WARPAGE` 의 SN1 · SN2 · `_ELBOW` 의 가운데 절점 MN(예전엔 Card 1 만 읽어 safe 가 MN 을
+                    // 지웠다 · 재검토 D2 · SN 은 아무도 안 읽었다 — 셋째 묶음). SN 이 `*NODE` 번호면 그 절점을 지키고, 스칼라 절점이면
+                    // 되읽기가 `*NODE_SCALAR` 에서 찾는다
+                    for (int v : KooRemapper::auxOptNodesOf(aux, auxLineIdx, line, fw)) sc.byElement.push_back(v);
                 }
                 ++auxLineIdx;
                 if (--auxRemaining <= 0) auxRemaining = 0;
@@ -353,6 +359,12 @@ void scanRefsStream(std::istream& in, bool isMain, const Opts& o,
                 if (xyz[k] < sc.bmin[k]) sc.bmin[k] = xyz[k];
                 if (xyz[k] > sc.bmax[k]) sc.bmax[k] = xyz[k];
             }
+            continue;
+        }
+
+        if (mode == Mode::SCALAR) {
+            const int nid = fieldInt(cardFields(line, fw), 0);
+            if (nid > 0) sc.definedScalar.push_back(nid);
             continue;
         }
 
@@ -711,22 +723,25 @@ VerifyResult verifyDeck(const std::string& path, const Opts& o, const std::vecto
     probe.model = path;
     long long paramRefs = 0;
     scanRefsClosure(files, probe, pidNodes, sc, paramRefs);
-    sortUnique(sc.definedAll);
+    // 정의된 절점 — `*NODE` 와 스칼라 절점(`*NODE_SCALAR` — 보 `_WARPAGE` 의 SN 이 가리킨다. 예전엔 SN 을 읽지 않아 몰랐다)
+    std::vector<int> defined = sc.definedAll;
+    defined.insert(defined.end(), sc.definedScalar.begin(), sc.definedScalar.end());
+    sortUnique(defined);
     sortUnique(sc.byElement);
     sortUnique(sc.byElementAlt);
     for (int v : sc.byElement)
-        if (!inSorted(sc.definedAll, v)) {
+        if (!inSorted(defined, v)) {
             ++vr.undefByElement;
             if (!vr.firstUndefined) vr.firstUndefined = v;
         }
     for (int v : sc.byElementAlt)
-        if (!inSorted(sc.definedAll, v) && inSorted(inputDefined, v) && !inSorted(sc.byElement, v)) {
+        if (!inSorted(defined, v) && inSorted(inputDefined, v) && !inSorted(sc.byElement, v)) {
             ++vr.undefByElement;
             if (!vr.firstUndefined) vr.firstUndefined = v;
         }
     for (const auto& kv : sc.setMembers)
         for (int v : kv.second)
-            if (!inSorted(sc.definedAll, v)) {
+            if (!inSorted(defined, v)) {
                 ++vr.undefSetMembers;
                 if (!vr.firstUndefined) vr.firstUndefined = v;
             }

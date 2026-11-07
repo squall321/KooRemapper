@@ -17,6 +17,7 @@
     담지 않아 예전 바닥은 솔리드 · 셸 최대 위였다(11-07 답신이 StepForge 에 「빔 · 이산 · 질량까지 센다」고 했다)
   · 리더가 안 읽는 솔리드 · 티쉘 변형(`_ORTHO` · `_H8TOH20` · `_DOF` · `_H20` · `*ELEMENT_TSHELL_BETA`)의 EID 도 —
     키워드 접미사 `%` 의 폭 · 인클루드 닫힘까지 · 삽입이 같은 바닥으로 옮긴다(F · 2026-11-07)
+  · 절점 바닥은 스칼라 절점(`*NODE_SCALAR` · `_VALUE` — 보 `_WARPAGE` 의 SN)까지 — 그 번호는 `*NODE` 와 겹치면 안 된다(G · 셋째 묶음)
 
 usage: test_id_floor.py <KooRemapper 바이너리>
 """
@@ -215,6 +216,22 @@ def main():
         mf = json.load(open(os.path.join(d, "merged_f1_fragment_map.json"), encoding="utf-8")) if rc == 0 else {}
         check("F-8 cad_solid_merge_to_deck 이 ORTHO 덱에서 요소를 바닥 99000 위(99001~)로 옮긴다", rc == 0 and
               (mf.get("ranges") or {}).get("elem", [0])[0] == 99001, (rc, mf.get("ranges"), out[-300:]))
+
+        print("[G 스칼라 절점(*NODE_SCALAR — 보 _WARPAGE 의 SN)도 절점 번호다 — 바닥이 그 위]")
+        # 스칼라 절점 번호는 `*NODE` 번호와 겹치면 안 된다(Vol_I 214757). 리더는 `*NODE` 만 담아 예전 바닥은 그 번호를 몰랐다(셋째 묶음)
+        write(os.path.join(d, "deck_G1.k"), base.replace("*END", "*NODE_SCALAR\n%8d%8d\n*END" % (900, 1)))
+        write(os.path.join(d, "g1.yaml"), "model: deck_G1.k\noutput: floor_g1.json\n")
+        rc, out = run(binary, d, "id_floor", "g1.yaml")
+        ff = json.load(open(os.path.join(d, "floor_g1.json"), encoding="utf-8")) if rc == 0 else {}
+        check("G-1 ★`*NODE_SCALAR` NID 900 → node_start 901(예전엔 `*NODE` 위 13)", rc == 0 and ff.get("node_start") == 901,
+              (rc, ff, out[-200:]))
+        write(os.path.join(d, "scal.k"), "*KEYWORD\n*NODE_SCALAR_VALUE\n%8d%16s%16s%16s%8d\n*END\n" % (950, "0.0", "0.0", "0.0", 1))
+        write(os.path.join(d, "deck_G2.k"), base.replace("*END", "*INCLUDE\nscal.k\n*END"))
+        write(os.path.join(d, "g2.yaml"), "model: deck_G2.k\noutput: floor_g2.json\n")
+        rc, out = run(binary, d, "id_floor", "g2.yaml")
+        ff = json.load(open(os.path.join(d, "floor_g2.json"), encoding="utf-8")) if rc == 0 else {}
+        check("G-2 ★인클루드 안의 `*NODE_SCALAR_VALUE` NID 950 → node_start 951", rc == 0 and ff.get("node_start") == 951,
+              (rc, ff, out[-200:]))
 
         print("[D 잘못된 YAML]")
         write(os.path.join(d, "x.yaml"), "model: deck.k\noutput: x.json\nfragment: stepforge_fragment.k\n")

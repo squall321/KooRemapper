@@ -17,6 +17,9 @@
   C 질량 얹기 — `*ELEMENT_MASS_PART` 는 칸 0 이 PID 다(ID ADDMASS(F16) FINMASS(F16) LCID MWD). 예전엔 질량 카드의 칸 3 을 읽어 고른 파트의
     추가 질량을 버렸다. `_SET` 은 파트 세트를 풀어 다 고른 파트면 싣고 · 하나도 아니면 버리고 · 일부거나 못 풀면 거절한다.
     cleanup-nodes 는 그 줄의 정수(LCID)를 절점으로 세지 않는다.
+  E 보 `_WARPAGE` 의 스칼라 절점 SN1 · SN2(Card 9 · 8칸 표) — 아무 걸음도 읽지 않았다: cleanup-nodes safe 가 SN 이 `*NODE` 번호면
+    지웠고, extract-parts 는 `*NODE_SCALAR` 를 통째로 버려 뽑은 보가 없는 스칼라 절점을 가리켰다(rc 0 · 되읽기 0). 이제 다 읽고 스칼라
+    절점 줄을 싣고 번호도 바꾼다(셋째 묶음)
   D 보 `_ELBOW` 의 가운데 절점 MN(Card 10 · 8칸 표) — 예전엔 Card 1 만 읽어 cleanup-nodes safe 가 MN 을 지우고(rc 0 · 되읽기 0)
     extract-parts 가 싣지 않았다. 이제 다 읽고 renumber 도 그 칸(1-10열)에 새 번호를 쓴다 · 콤마 ELBOW 줄 · MN 칸 안에서 시작하는
     `$` 주석은 renumber 를 거절한다(새 번호가 `$` 를 덮어 주석 글자가 칸 2 의 값이 됐다 — D4)
@@ -239,6 +242,44 @@ def main():
         new = {old: nid for nid, old in ids.items()}
         check("D5 MN 칸 뒤의 주석은 그대로 두고 MN 을 바꾼다",
               rc == 0 and len(rows) == 2 and rows[1] == "%10d $ mid node" % new.get(104, -1), (rc, rows, out[-300:]))
+
+        print("[E 보 _WARPAGE 의 스칼라 절점 SN1 · SN2(Card 9) — cleanup-nodes · extract-parts(싣기 · 번호 다시 매기기 · 되읽기)]")
+        warp = ["*ELEMENT_BEAM_WARPAGE", "%8d%8d%8d%8d%8d" % (21, 9, 101, 102, 103), "%10d%10d" % (201, 202)]
+        scal = ["*NODE_SCALAR", "%8d%8d" % (201, 1), "%8d%8d" % (202, 1), "%8d%8d" % (203, 1)]   # 203 은 아무도 안 쓴다
+        # SN 이 `*NODE` 번호인 덱 — 그 절점을 지킨다(예전엔 SN 을 읽지 않아 safe 가 201 · 202 를 지웠다)
+        write(os.path.join(d, "E1.k"), beam_deck(warp, nodes=(101, 102, 103, 201, 202, 105)))
+        write(os.path.join(d, "E1c.yaml"), "model: E1.k\noutput: E1c_out.k\nmode: safe\nreport: E1c.json\n")
+        rc, out = run(binary, d, "cleanup-nodes", "E1c.yaml")
+        kept = sorted(node_ids(os.path.join(d, "E1c_out.k")).values()) if rc == 0 else []
+        check("E-1 ★cleanup-nodes safe — SN(201 · 202)이 `*NODE` 번호면 지키고 105 만 지운다",
+              rc == 0 and kept == [101, 102, 103, 201, 202], (rc, kept, out[-300:]))
+        # SN 이 스칼라 절점(`*NODE_SCALAR`) — 되읽기가 거기서 찾는다(미정의로 세지 않는다) · 스칼라 줄은 그대로
+        write(os.path.join(d, "E2.k"), beam_deck(scal + warp))
+        write(os.path.join(d, "E2c.yaml"), "model: E2.k\noutput: E2c_out.k\nmode: safe\nreport: E2c.json\n")
+        rc, out = run(binary, d, "cleanup-nodes", "E2c.yaml")
+        r2 = json.load(open(os.path.join(d, "E2c.json"), encoding="utf-8")) if os.path.exists(os.path.join(d, "E2c.json")) else {}
+        rows = section_lines(os.path.join(d, "E2c_out.k"), "*NODE_SCALAR") if rc == 0 else []
+        check("E-2 cleanup-nodes safe — 스칼라 절점 SN 을 미정의로 세지 않는다(rc 0 · 되읽기 0) · `*NODE_SCALAR` 세 줄 그대로",
+              rc == 0 and (r2.get("verify") or {}).get("undefined_by_elements") == 0 and rows == scal[1:], (rc, r2.get("verify"), rows, out[-300:]))
+        rc, out, rep, outp = extract(binary, d, "E3", beam_deck(scal + warp), (9,))
+        rows = section_lines(outp, "*NODE_SCALAR") if rc == 0 else []
+        check("E-3 ★extract-parts — 보가 쓰는 스칼라 절점 201 · 202 줄만 싣는다(203 은 안 싣는다) · 되읽기 0",
+              rc == 0 and rows == scal[1:3] and (rep.get("verify") or {}).get("undefined_nodes") == 0, (rc, rows, rep.get("verify"), out[-300:]))
+        write(os.path.join(d, "E4.k"), beam_deck(scal + warp))
+        write(os.path.join(d, "E4r.yaml"), "model: E4.k\noutput: E4r_out.k\nparts: [9]\nrenumber: true\nreport: E4r.json\n")
+        rc, out = run(binary, d, "extract-parts", "E4r.yaml")
+        mp = os.path.join(d, "E4r_out_renumber_map.json")
+        old2new = dict(json.load(open(mp, encoding="utf-8"))["nodes"]) if rc == 0 and os.path.exists(mp) else {}
+        rows = section_lines(os.path.join(d, "E4r_out.k"), "*ELEMENT_BEAM_WARPAGE") if rc == 0 else []
+        srows = section_lines(os.path.join(d, "E4r_out.k"), "*NODE_SCALAR") if rc == 0 else []
+        want_sn = "%10d%10d" % (old2new.get(201, -1), old2new.get(202, -2))
+        check("E-4 ★renumber — SN 칸(1-20열)과 `*NODE_SCALAR` 의 NID 를 같은 새 번호로 바꾼다 · 되읽기 0",
+              rc == 0 and len(rows) == 2 and rows[1] == want_sn and 201 not in old2new.values() and
+              srows == ["%8d%8d" % (old2new.get(201, -1), 1), "%8d%8d" % (old2new.get(202, -2), 1)],
+              (rc, rows, srows, out[-300:]))
+        rc, out, rep, outp = extract(binary, d, "E5", beam_deck(warp), (9,))
+        check("E-5 ★extract-parts — SN 이 덱 어디에도 없으면(스칼라 절점 정의 없음) 되읽기가 잡는다 → rc 1",
+              rc == 1 and "미정의 절점 2" in out, (rc, out[-300:]))
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

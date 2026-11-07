@@ -331,10 +331,13 @@ AuxElementCard auxElementCard(const std::string& keywordLine) {
                 else
                     unsupported("*ELEMENT_BEAM 의 옵션 '" + o + "' 은 카드 줄 수를 확정할 수 없습니다");
             }
-            // `_ELBOW` 의 Card 10 = MN(가운데 절점) — 옵션 카드는 설명서 차례(2 … 10)로 오니 ELBOW 카드는 늘 마지막 줄이다
-            if (a.supported && a.hasPart && std::find(opts.begin(), opts.end(), "ELBOW") != opts.end()) {
-                a.optNodeLine = a.lines - 1;
-                a.optNodeFields = {0};
+            // 옵션 카드는 설명서 차례(Card 2 … 10)로 온다 — `_ELBOW` 의 Card 10(MN · 가운데 절점)은 늘 마지막 줄, `_WARPAGE` 의
+            // Card 9(SN1 · SN2 — 스칼라 절점)는 그 앞(ELBOW 가 없으면 마지막) 줄이다
+            if (a.supported && a.hasPart) {
+                const bool elbow = std::find(opts.begin(), opts.end(), "ELBOW") != opts.end();
+                const bool warp = std::find(opts.begin(), opts.end(), "WARPAGE") != opts.end();
+                if (warp) a.optNodes.push_back({a.lines - 1 - (elbow ? 1 : 0), {0, 1}});
+                if (elbow) a.optNodes.push_back({a.lines - 1, {0}});
             }
             break;
         case AuxFamily::DISCRETE:
@@ -589,14 +592,23 @@ bool auxManualNodesPlaceable(const AuxElementCard& a, const AuxCardReadings& r) 
 
 int auxOptTableWidth(int fw) { return fw >= 20 ? 20 : 10; }
 
-bool auxOptNodesPlaceable(const AuxElementCard& a, const std::string& line, int fw) {
+const std::vector<int>* auxOptNodeFields(const AuxElementCard& a, int cardLine) {
+    if (cardLine <= 0) return nullptr;
+    for (const auto& o : a.optNodes)
+        if (o.line == cardLine) return &o.fields;
+    return nullptr;
+}
+
+bool auxOptNodesPlaceable(const AuxElementCard& a, int cardLine, const std::string& line, int fw) {
+    const std::vector<int>* fields = auxOptNodeFields(a, cardLine);
+    if (!fields) return true;
     std::string body = line;
     while (!body.empty() && (body.back() == '\r' || body.back() == '\n')) body.pop_back();
     const size_t cmt = body.find('$');
     if (cmt != std::string::npos) body.erase(cmt);
     if (body.find(',') != std::string::npos) return false;   // 콤마 자유형식 — 칸 자리가 없다
     const size_t w = static_cast<size_t>(auxOptTableWidth(fw));
-    for (int q : a.optNodeFields) {
+    for (int q : *fields) {
         const size_t c0 = static_cast<size_t>(q) * w;
         std::string t = c0 < body.size() ? body.substr(c0, w) : std::string();
         const size_t b0 = t.find_first_not_of(" \t");
@@ -610,13 +622,15 @@ bool auxOptNodesPlaceable(const AuxElementCard& a, const std::string& line, int 
     return true;
 }
 
-std::vector<int> auxOptNodesOf(const AuxElementCard& a, const std::string& line, int fw) {
+std::vector<int> auxOptNodesOf(const AuxElementCard& a, int cardLine, const std::string& line, int fw) {
     std::vector<int> out;
+    const std::vector<int>* fields = auxOptNodeFields(a, cardLine);
+    if (!fields) return out;
     std::string body = line;
     const size_t cmt = body.find('$');
     if (cmt != std::string::npos) body.erase(cmt);
     const auto f = deckscan::cardFields(body, auxOptTableWidth(fw));
-    for (int q : a.optNodeFields) {
+    for (int q : *fields) {
         const int v = deckscan::fieldInt(f, static_cast<size_t>(q));
         if (v > 0) out.push_back(v);
     }
@@ -726,8 +740,8 @@ void forEachNonGridElementCard(const std::vector<std::string>& lines,
         c.line = i;
         if (aux.supported) {
             if (!aux.hasEid) continue;   // 요소가 아니다(`*ELEMENT_MASS_PART(_SET)` — EID · 절점 칸이 없다 · PID 는 IdRefs 가 본다)
-            if (remaining > 0 && pending && lineIdx == aux.optNodeLine) {   // 옵션 카드의 절점(보 `_ELBOW` 의 MN)
-                for (int v : auxOptNodesOf(aux, l, fw)) pend.nodes.push_back(v);
+            if (remaining > 0 && pending && auxOptNodeFields(aux, lineIdx)) {   // 옵션 카드의 절점(보 `_WARPAGE` 의 SN · `_ELBOW` 의 MN)
+                for (int v : auxOptNodesOf(aux, lineIdx, l, fw)) pend.nodes.push_back(v);
                 std::sort(pend.nodes.begin(), pend.nodes.end());
                 pend.nodes.erase(std::unique(pend.nodes.begin(), pend.nodes.end()), pend.nodes.end());
             }
@@ -742,7 +756,7 @@ void forEachNonGridElementCard(const std::vector<std::string>& lines,
                 c.pid = (aux.hasPart && aux.partField >= 0) ? deckscan::fieldInt(fs, static_cast<size_t>(aux.partField)) : 0;
                 c.pids = auxPidsOf(aux, rd);
                 c.nodes = auxNodesUnion(aux, rd);
-                if (aux.optNodeLine > 0) { pend = c; pending = true; }   // 옵션 카드의 절점까지 읽고 넘긴다
+                if (!aux.optNodes.empty()) { pend = c; pending = true; }   // 옵션 카드의 절점까지 읽고 넘긴다
                 else f(c);
             }
             ++lineIdx;
@@ -759,6 +773,29 @@ void forEachNonGridElementCard(const std::vector<std::string>& lines,
 int nonGridElementMaxId(const std::vector<std::string>& lines) {
     int m = 0;
     forEachNonGridElementCard(lines, [&](const NonGridElementCard& c) { m = std::max(m, c.eid); });
+    return m;
+}
+
+bool isScalarNodeKeyword(const std::string& kw) { return kw == "*NODE_SCALAR" || kw == "*NODE_SCALAR_VALUE"; }
+
+int scalarNodeMaxId(const std::vector<std::string>& lines) {
+    const int deckFw = deckFieldWidth(lines);
+    int fw = deckFw, m = 0;
+    bool in = false;
+    for (const auto& l : lines) {
+        const size_t g = l.find_first_not_of(" \t");
+        if (g == std::string::npos) continue;
+        if (l[g] == '*') {
+            in = isScalarNodeKeyword(deckscan::kwBare(deckscan::keywordToken(l)));
+            fw = keywordFieldWidth(l, deckFw);
+            continue;
+        }
+        if (!in || l[g] == '$') continue;
+        std::string body = l;
+        const size_t cmt = body.find('$');
+        if (cmt != std::string::npos) body.erase(cmt);
+        m = std::max(m, deckscan::fieldInt(deckscan::cardFields(body, fw), 0));
+    }
     return m;
 }
 

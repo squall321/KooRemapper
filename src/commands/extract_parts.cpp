@@ -460,11 +460,12 @@ void scanElements(const std::string& path, const std::vector<int>& sel, const De
                     const bool placeable = KooRemapper::auxManualNodesPlaceable(aux, rd);
                     if (!placeable || !altM.empty()) pk.renumberRisk.push_back({where, altM, placeable});
                 }
-            } else if (auxPicked && auxLineIdx == aux.optNodeLine) {
-                // 옵션 카드의 절점 — 보 `_ELBOW` 의 가운데 절점 MN(8칸 표). 콤마 줄 · 칸 안에 빈칸 · MN 칸 안에서 시작하는 `$` 주석이면
-                // 번호를 제자리에 못 바꾼다(재검토 D2 — 주석이 겹친 MN 에 새 번호를 쓰면 `$` 를 덮어 주석 글자가 칸 2 의 값이 됐다)
-                for (int v : KooRemapper::auxOptNodesOf(aux, line, fw)) pk.nodes.push_back(v);
-                if (!KooRemapper::auxOptNodesPlaceable(aux, line, fw))
+            } else if (auxPicked && KooRemapper::auxOptNodeFields(aux, auxLineIdx)) {
+                // 옵션 카드의 절점 — 보 `_WARPAGE` 의 SN1 · SN2(스칼라 절점 — `*NODE_SCALAR` 줄을 싣는다) · `_ELBOW` 의 가운데 절점
+                // MN(8칸 표). 콤마 줄 · 칸 안에 빈칸 · 번호 칸 안에서 시작하는 `$` 주석이면 번호를 제자리에 못 바꾼다(재검토 D2 — 주석이
+                // 겹친 MN 에 새 번호를 쓰면 `$` 를 덮어 주석 글자가 칸 2 의 값이 됐다). 예전엔 SN 을 아무도 안 읽었다(셋째 묶음)
+                for (int v : KooRemapper::auxOptNodesOf(aux, auxLineIdx, line, fw)) pk.nodes.push_back(v);
+                if (!KooRemapper::auxOptNodesPlaceable(aux, auxLineIdx, line, fw))
                     pk.renumberRisk.push_back({path + ":" + std::to_string(lineNo) + " " + kw, {}, false});
             }
             ++auxLineIdx;
@@ -613,7 +614,7 @@ struct WriteStats {
     long long auxCards = 0;                         // 보·질량·이산 족에서 실은 카드
 };
 
-enum class Act { VERBATIM, NODE, ELEM, ELEM_AUX, PART, PART_VARIANT, IDBLOCK, SETS, DROP };
+enum class Act { VERBATIM, NODE, SCALAR_NODE, ELEM, ELEM_AUX, PART, PART_VARIANT, IDBLOCK, SETS, DROP };
 
 // 버리면 **조용하면 치명적인** 키워드 — 초기상태·이력. 자르려면 카드 수를 알아야 하고
 // `*INITIAL_STRESS_SOLID` 는 그것이 **데이터로** 정해진다(Vol_I 190149-: NINT·NHISV·LARGE·
@@ -632,6 +633,9 @@ Act classify(const std::string& kw, const Opts& o, bool elemSupported, bool auxS
     // 가리킨다. 그 밖의 `*DATABASE_` 는 순수 설정이라 그대로 싣는다.
     if (starts(kw, "*DATABASE")) return has(kw, "_HISTORY") ? Act::DROP : Act::VERBATIM;
     if (kw == "*NODE") return o.incNodes ? Act::NODE : Act::DROP;
+    // 스칼라 절점 — 보 `_WARPAGE` 의 SN1 · SN2 가 가리킨다. 고른 요소가 쓰는 줄만 싣는다(예전엔 통째로 버려 뽑은 보가 없는 스칼라
+    // 절점을 가리켰다 — 셋째 묶음)
+    if (KooRemapper::isScalarNodeKeyword(kw)) return o.incNodes ? Act::SCALAR_NODE : Act::DROP;
     if (starts(kw, "*ELEMENT"))
         return elemSupported ? Act::ELEM : (auxSupported ? Act::ELEM_AUX : Act::DROP);
     if (kw == "*PART" || kw == "*PART_TITLE") return Act::PART;
@@ -855,7 +859,7 @@ struct Writer {
             return;
         }
         if (act == Act::VERBATIM) *out << line << "\n";
-        else if (act == Act::NODE || act == Act::ELEM || act == Act::ELEM_AUX)
+        else if (act == Act::NODE || act == Act::SCALAR_NODE || act == Act::ELEM || act == Act::ELEM_AUX)
             pendingKw = line;                                 // 첫 줄이 실릴 때 낸다
         else if (act == Act::DROP) {
             st.dropped[kw] += 1;
@@ -891,6 +895,23 @@ struct Writer {
                 if (rm.on && !putField(o2, fw, 0, rm.node(nid))) {
                     console.error("renumber: 새 절점 번호가 칸 폭 " + std::to_string(fw) +
                                   " 를 넘는다 (NID " + std::to_string(nid) + ")");
+                    failed = true;
+                    break;
+                }
+                emitLine(o2);
+                ++st.nodeLines;
+                break;
+            }
+            case Act::SCALAR_NODE: {
+                // 스칼라 절점(`*NODE_SCALAR` · `_VALUE` — 칸 0 이 NID) — 고른 요소가 쓰는 줄만 · 번호를 매기면 NID 를 바꾼다
+                if (!isDataLine(line)) break;
+                const int nid = fieldInt(cardFields(line, fw), 0);
+                if (nid <= 0 || !inSorted(pk.nodes, nid)) break;
+                std::string o2 = line;
+                if (commaRefuse(line)) break;
+                if (rm.on && !putField(o2, fw, 0, rm.node(nid))) {
+                    console.error("renumber: 새 절점 번호가 칸 폭 " + std::to_string(fw) + " 를 넘는다 (스칼라 NID " +
+                                  std::to_string(nid) + ")");
                     failed = true;
                     break;
                 }
@@ -1002,17 +1023,19 @@ struct Writer {
                         put(aux.nodeSkip, aux.nodeCount);
                         put(aux.nodeSkip2, aux.nodeCount2);
                     }
-                    if (rm.on && lineIdx > 0 && lineIdx == aux.optNodeLine) {
-                        // 옵션 카드의 절점(보 `_ELBOW` 의 MN — 8칸 표 칸 폭 10 · long 20). 콤마 줄은 패스 1 이 이미 거절했다
+                    const std::vector<int>* optF = KooRemapper::auxOptNodeFields(aux, lineIdx);
+                    if (rm.on && optF) {
+                        // 옵션 카드의 절점(보 `_WARPAGE` 의 SN1 · SN2 · `_ELBOW` 의 MN — 8칸 표 칸 폭 10 · long 20). 제자리에 못 쓰는
+                        // 줄(콤마 · 칸 안 빈칸 · 번호 칸의 주석)은 패스 1 이 이미 거절했다
                         const int w = KooRemapper::auxOptTableWidth(fw);
                         std::string body = line;
                         const size_t cmt = body.find('$');
                         if (cmt != std::string::npos) body.erase(cmt);
                         const auto f = cardFields(body, w);
-                        for (int q : aux.optNodeFields) {
+                        for (int q : *optF) {
                             const int v = fieldInt(f, (size_t)q);
                             if (v > 0 && !putField(o2, w, (size_t)q, rm.node(v))) {
-                                console.error("renumber: " + kw + " 줄 「" + line + "」 의 가운데 절점 번호를 제자리에 못 바꾼다");
+                                console.error("renumber: " + kw + " 줄 「" + line + "」 의 옵션 카드 절점 번호를 제자리에 못 바꾼다");
                                 failed = true;
                             }
                         }
@@ -1236,8 +1259,8 @@ Verify verifyOutput(const std::string& path, const std::vector<int>& altExisting
                 for (int x : KooRemapper::auxNodesOf(vaux, f)) elemNodes.push_back(x);
                 for (int x : KooRemapper::auxNodesAlt(vaux, rd, f))
                     if (inSorted(altExisting, x)) elemNodes.push_back(x);
-            } else if (vAuxLineIdx == vaux.optNodeLine) {
-                for (int x : KooRemapper::auxOptNodesOf(vaux, line, fw)) elemNodes.push_back(x);   // 보 `_ELBOW` 의 MN
+            } else {
+                for (int x : KooRemapper::auxOptNodesOf(vaux, vAuxLineIdx, line, fw)) elemNodes.push_back(x);   // 보 `_WARPAGE` 의 SN · `_ELBOW` 의 MN
             }
             ++vAuxLineIdx;
             if (--vAuxRemaining <= 0) vAuxRemaining = 0;
@@ -1277,6 +1300,10 @@ Verify verifyOutput(const std::string& path, const std::vector<int>& altExisting
             int nid = 0;
             double xyz[3];
             if (readNodeLine(line, fw, nid, xyz)) nodes.push_back(nid);
+        } else if (KooRemapper::isScalarNodeKeyword(kw)) {   // 스칼라 절점 — 보 `_WARPAGE` 의 SN 이 가리킨다
+            malformed(line);
+            const int nid = fieldInt(cardFields(line, fw), 0);
+            if (nid > 0) nodes.push_back(nid);
         } else if (starts(kw, "*SECTION")) {
             int id = fieldInt(cardFields(line, 10), 0);
             if (id > 0) secIds.push_back(id);

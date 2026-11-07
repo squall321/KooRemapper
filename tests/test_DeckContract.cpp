@@ -660,20 +660,23 @@ TEST(auxElementCard_보_ELBOW_의_가운데_절점은_마지막_옵션_카드) {
     auto a = auxElementCard("*ELEMENT_BEAM_ELBOW");
     ASSERT_TRUE(a.supported);
     ASSERT_EQ(a.lines, 2);
-    ASSERT_EQ(a.optNodeLine, 1);
-    ASSERT_TRUE(auxOptNodesOf(a, "       104", 8) == std::vector<int>({104}));
-    ASSERT_TRUE(auxOptNodesOf(a, "104,0", 8) == std::vector<int>({104}));
+    ASSERT_EQ(a.optNodes.size(), (size_t)1);
+    ASSERT_TRUE(auxOptNodeFields(a, 1) && *auxOptNodeFields(a, 1) == std::vector<int>({0}));
+    ASSERT_TRUE(auxOptNodeFields(a, 0) == nullptr);   // Card 1 은 옵션 카드가 아니다
+    ASSERT_TRUE(auxOptNodesOf(a, 1, "       104", 8) == std::vector<int>({104}));
+    ASSERT_TRUE(auxOptNodesOf(a, 1, "104,0", 8) == std::vector<int>({104}));
+    ASSERT_TRUE(auxOptNodesOf(a, 0, "       104", 8).empty());
     // 번호를 제자리에 바꿔 쓸 수 있나 — MN 칸(1-10열) 안에서 시작하는 `$` 주석 · 콤마 · 칸 안 빈칸이면 못 쓴다(새 번호가 `$` 를 덮었다)
-    ASSERT_TRUE(auxOptNodesPlaceable(a, "       104", 8));
-    ASSERT_TRUE(auxOptNodesPlaceable(a, "       104 $ mid node", 8));   // 칸 뒤 주석
-    ASSERT_FALSE(auxOptNodesPlaceable(a, "     104 $m", 8));             // 주석이 10열에서 시작 — 칸 안
-    ASSERT_FALSE(auxOptNodesPlaceable(a, "104,0", 8));
-    ASSERT_FALSE(auxOptNodesPlaceable(a, "  10 4", 8));
-    ASSERT_TRUE(auxOptNodesPlaceable(a, "0 $ none", 8));                 // 0 은 번호가 아니다 — 바꿔 쓰지 않는다
+    ASSERT_TRUE(auxOptNodesPlaceable(a, 1, "       104", 8));
+    ASSERT_TRUE(auxOptNodesPlaceable(a, 1, "       104 $ mid node", 8));   // 칸 뒤 주석
+    ASSERT_FALSE(auxOptNodesPlaceable(a, 1, "     104 $m", 8));             // 주석이 10열에서 시작 — 칸 안
+    ASSERT_FALSE(auxOptNodesPlaceable(a, 1, "104,0", 8));
+    ASSERT_FALSE(auxOptNodesPlaceable(a, 1, "  10 4", 8));
+    ASSERT_TRUE(auxOptNodesPlaceable(a, 1, "0 $ none", 8));                 // 0 은 번호가 아니다 — 바꿔 쓰지 않는다
     a = auxElementCard("*ELEMENT_BEAM_ORIENTATION_ELBOW");
     ASSERT_EQ(a.lines, 3);
-    ASSERT_EQ(a.optNodeLine, 2);
-    ASSERT_EQ(auxElementCard("*ELEMENT_BEAM_ORIENTATION").optNodeLine, -1);
+    ASSERT_TRUE(auxOptNodeFields(a, 2) != nullptr && auxOptNodeFields(a, 1) == nullptr);
+    ASSERT_TRUE(auxElementCard("*ELEMENT_BEAM_ORIENTATION").optNodes.empty());
     // 걸음은 MN 까지 읽고 카드를 넘긴다(이월 적용의 나눠 쓴 절점 · 바닥)
     const std::vector<std::string> L = {"*KEYWORD", "*ELEMENT_BEAM_ELBOW", "      21       8     101     102     103", "       104",
                                         "      22       8     105     106     107", "       108", "*END"};
@@ -683,6 +686,39 @@ TEST(auxElementCard_보_ELBOW_의_가운데_절점은_마지막_옵션_카드) {
     ASSERT_EQ(cs[0].eid, 21);
     ASSERT_TRUE(cs[0].nodes == std::vector<int>({101, 102, 103, 104}));
     ASSERT_TRUE(cs[1].nodes == std::vector<int>({105, 106, 107, 108}));
+}
+
+TEST(auxElementCard_보_WARPAGE_의_스칼라_절점은_Card_9) {
+    // `*ELEMENT_BEAM_WARPAGE` Card 9 = SN1 SN2(스칼라 절점 · 8칸 표 I10 — Vol_I 155889 · 156529-156548). 옵션 카드는 설명서 차례
+    // (2 … 10)로 오니 WARPAGE 카드는 ELBOW(Card 10) 앞, ELBOW 가 없으면 마지막이다. 예전엔 아무 걸음도 SN 을 읽지 않았다(셋째 묶음)
+    auto a = auxElementCard("*ELEMENT_BEAM_WARPAGE");
+    ASSERT_TRUE(a.supported);
+    ASSERT_EQ(a.lines, 2);
+    ASSERT_TRUE(auxOptNodeFields(a, 1) && *auxOptNodeFields(a, 1) == std::vector<int>({0, 1}));
+    ASSERT_TRUE(auxOptNodesOf(a, 1, "       201       202", 8) == std::vector<int>({201, 202}));
+    ASSERT_TRUE(auxOptNodesOf(a, 1, "                 201                 202", 20) == std::vector<int>({201, 202}));   // long 은 칸 폭 20
+    ASSERT_FALSE(auxOptNodesPlaceable(a, 1, "     201 $       202", 8));        // 주석이 SN1 칸 안에서 시작한다
+    // 옵션 셋 — ORIENTATION(Card 8 · 줄 1) · WARPAGE(Card 9 · 줄 2) · ELBOW(Card 10 · 줄 3)
+    a = auxElementCard("*ELEMENT_BEAM_WARPAGE_ELBOW_ORIENTATION");
+    ASSERT_TRUE(a.supported);
+    ASSERT_EQ(a.lines, 4);
+    ASSERT_TRUE(auxOptNodeFields(a, 1) == nullptr);
+    ASSERT_TRUE(auxOptNodeFields(a, 2) && *auxOptNodeFields(a, 2) == std::vector<int>({0, 1}));
+    ASSERT_TRUE(auxOptNodeFields(a, 3) && *auxOptNodeFields(a, 3) == std::vector<int>({0}));
+    // 걸음은 SN 까지 읽고 카드를 넘긴다
+    const std::vector<std::string> L = {"*KEYWORD", "*ELEMENT_BEAM_WARPAGE", "      21       8     101     102     103", "       201       202",
+                                        "      22       8     105     106     107", "       203       204", "*END"};
+    std::vector<NonGridElementCard> cs;
+    forEachNonGridElementCard(L, [&](const NonGridElementCard& x) { cs.push_back(x); });
+    ASSERT_EQ(cs.size(), (size_t)2);
+    ASSERT_TRUE(cs[0].nodes == std::vector<int>({101, 102, 103, 201, 202}));
+    ASSERT_TRUE(cs[1].nodes == std::vector<int>({105, 106, 107, 203, 204}));
+    // 스칼라 절점 번호는 `*NODE` 번호와 겹치지 않는다 — 새 절점 번호의 바닥이 그 위다
+    const std::vector<std::string> S = {"*KEYWORD", "*NODE", "       1             0.0             0.0             0.0",
+                                        "*NODE_SCALAR", "     201       1", "*NODE_SCALAR_VALUE",
+                                        "     907             0.0             0.0             0.0       1", "*END"};
+    ASSERT_EQ(scalarNodeMaxId(S), 907);
+    ASSERT_TRUE(isScalarNodeKeyword("*NODE_SCALAR") && isScalarNodeKeyword("*NODE_SCALAR_VALUE") && !isScalarNodeKeyword("*NODE"));
 }
 
 TEST(auxElementCard_질량_얹기는_칸_0_이_PID) {

@@ -5125,6 +5125,9 @@ KooRemapper cleanup-nodes <config.yaml>
 하나라도 0 이 아니면 **rc≠0** 이다. `prune_sets: false` 로 일부러 깨면 그 자리에서 잡힌다 —
 회귀 B-11·B-12 가 그것을 못 박는다(검증이 늘 0 을 내는 장식이 아니라는 증거다).
 
+보 `_WARPAGE` 의 SN1 · SN2(스칼라 절점 — §48.7)는 `*NODE` 번호면 그 절점을 지키고, `*NODE_SCALAR` 에 정의되었으면 되읽기가
+그 정의를 본다(미정의로 세지 않는다 — 스칼라 절점 줄은 지울 후보가 아니다).
+
 보 족 줄이 두 가지로 읽혀 갈리면(§48.7 — 안전띠 SLEN 을 8칸에 쓴 줄) 다른 읽기만 말하는 절점도 지우지 않는다 —
 리포트 `nodes.used_only_by_other_reading` 이 그 수다(`used_by_elements` 는 하나로 읽은 칸의 수). 되읽기는 그 절점 가운데
 **입력에 있던 것**만 본다(다른 읽기가 지어낸 번호는 원래 없던 절점일 수 있다).
@@ -5271,6 +5274,7 @@ wrote」 는 바꿔 넣은 뒤에만 찍는다).
 | `*DATABASE_` (단, `_HISTORY` 제외) | 그대로 |
 | `*DATABASE_HISTORY_*` | **버린다** — 절점·요소 ID 를 담는다 |
 | `*NODE` | 고른 파트의 요소가 쓰는 줄만 |
+| `*NODE_SCALAR` · `_VALUE` | 고른 요소가 쓰는 스칼라 절점 줄만(보 `_WARPAGE` 의 SN — §48.7) · 번호를 매기면 NID 도 같은 새 번호로 |
 | `*ELEMENT_{SOLID,SHELL,TSHELL}` | 고른 PID 의 카드만(카드 전체 줄) |
 | `*ELEMENT_{BEAM,DISCRETE,MASS,SEATBELT}` | 고른 PID 의 카드만 — **PID 칸이 족마다 다르다**(§48.7) |
 | `*ELEMENT_PLOTEL` | PID 가 없다 — **두 절점이 다 남았을 때만** 싣는다 |
@@ -5402,7 +5406,7 @@ several (even tens of) cards per set" 이라고 적는다. 그 규칙을 틀리�
 
 | 족 | Card 1 변수 | 절점 칸 | PID 칸 | 넓은 칸(E16) | 추가 카드 |
 |---|---|---|---|---|---|
-| `BEAM` | `EID PID N1 N2 N3 RT1 RR1 RT2 RR2 LOCAL` | 2·3·4 · `_ELBOW` 면 마지막 옵션 카드(Card 10 · 8칸 표)의 MN | 1 | 없음 | 옵션마다 1장 |
+| `BEAM` | `EID PID N1 N2 N3 RT1 RR1 RT2 RR2 LOCAL` | 2·3·4 · `_WARPAGE` 면 Card 9(8칸 표)의 SN1 · SN2 · `_ELBOW` 면 마지막 옵션 카드(Card 10 · 8칸 표)의 MN | 1 | 없음 | 옵션마다 1장 |
 | `DISCRETE` | `EID PID N1 N2 VID S PF OFFSET` | 2·3 | 1 | `S` · `OFFSET`(절점 · PID 뒤라 판정기가 읽지 않는다) | `_LCO` 면 1장 |
 | `MASS` | `EID ID MASS PID` | **1** | **3** (33-40열) | `MASS` 17-32열 | 없음 |
 | `SEATBELT` | `EID PID N1 N2 SBRID SLEN N3 N4` | 2·3 **와** 6·7 (N3 57-64 · N4 65-72열) | 1 | `SLEN` 41-56열 | 없음 |
@@ -5461,6 +5465,15 @@ long 20 · Vol_I 156596-156638)에 있다. 2026-11-07 전엔 Card 1 만 읽어 `
 `extract-parts` 가 싣지 않았다 — 이제 걸음 · cleanup-nodes · extract-parts(싣기 · 번호 다시 매기기 · 되읽기)가 다 읽는다(콤마 ELBOW
 줄 · MN 칸 안에 빈칸 · MN 칸(1-10열) 안에서 시작하는 `$` 주석은 renumber 가 거절한다 — 새 번호가 `$` 를 덮어 주석 글자가 칸 2 의 값이
 됐다). 이월 적용은 ELBOW 블록을 그대로 거절한다.
+
+★보 `_WARPAGE` 의 SN1 · SN2 는 Card 9(ELBOW 가 있으면 그 앞 · 없으면 마지막 옵션 카드 · 8칸 표 칸 0 · 1 — Vol_I 155889 · 156529-156548)의
+**스칼라 절점**(`*NODE_SCALAR` · `_VALUE` — 번호는 `*NODE` 와 겹치지 않는다, Vol_I 214757)이다. 2026-11-07 전엔 아무 걸음도 SN 을
+읽지 않았다 — `cleanup-nodes` safe 는 SN 이 `*NODE` 번호면 지웠고, `extract-parts` 는 `*NODE_SCALAR` 를 통째로 버려 뽑은 보가 없는
+스칼라 절점을 가리켰다(rc 0 · 되읽기 0). 이제 같은 걸음이 SN 을 읽어 — cleanup-nodes 는 지키고 · 되읽기는 스칼라 절점 정의를 보고,
+extract-parts 는 그 스칼라 절점 줄을 싣고 번호를 다시 매길 때 SN 칸과 NID 를 같은 새 번호로 바꾸며 되읽기도 SN 을 잰다(덱에 없으면
+rc 1). restack 의 지운 절점 보고는 WARPAGE · ELBOW 블록의 정수를 다 보지 않고 절점 칸(Card 1 · SN · MN)만 본다(EID 가 지운 절점
+번호와 같아 거짓으로 적던 것). 새 절점 번호의 바닥(assemble · `id_floor`)도 스칼라 절점 번호 위다(회귀 `test_aux_card_walkers.py` E 절 ·
+`test_dead_node_list_cards.py` C 절 · `test_id_floor.py` G 절). 이월 적용은 WARPAGE 블록을 그대로 거절한다.
 
 ★절점 칸 **개수**까지 적는 이유 — '칸 2부터 끝까지' 로 뭉개면 보의 `RT1`·`RR1`·`LOCAL` 과
 안전벨트의 `SBRID`·`SLEN` 이 절점이 된다. 세기만 하면 과포함(안전한 방향)이지만, **번호를
@@ -5699,7 +5712,8 @@ fragment_map: fragment_abc.json       # (선택) 받은 조각의 대응표 — 
 ```
 
 - 네 번호의 이름은 StepForge `export_part_fragment` 의 인자 **그대로**다 — 그대로 넘기면 된다.
-- 바닥은 assemble 과 **같은 커서**다(인클루드 닫힘까지 센 절점·요소·파트·섹션·재질·세트의 최대값 + 1).
+- 바닥은 assemble 과 **같은 커서**다(인클루드 닫힘까지 센 절점·요소·파트·섹션·재질·세트의 최대값 + 1). 절점은 스칼라 절점
+  (`*NODE_SCALAR` · `_VALUE` — 보 `_WARPAGE` 의 SN)까지 센다 — 그 번호는 `*NODE` 와 겹치면 안 된다(2026-11-07 전엔 몰랐다).
   `pid_start` 는 PID·SECID·MID 셋의 최대값 위다 — 조각은 셋을 같은 번호로 쓴다.
 - 그 번호로 쓴 조각은 `cad_solid_merge_to_deck`(§49)가 **옮기지 않고** 넣는다 — 두 op 이 같은 바닥을 본다.
 - `fragment_map` 을 주면 쓴 범위마다 아래끝이 바닥 이상이면 `above`, 아니면 `below` 이고 하나라도 `below` 면 rc 1 이다

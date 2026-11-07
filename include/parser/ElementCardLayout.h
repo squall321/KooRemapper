@@ -89,6 +89,9 @@ int realFieldWidth(int intFw);
 //   *ELEMENT_BEAM     : `*ELEMENT_BEAM_{OPTION}_{OPTION}`, 옵션마다 카드 **한 장**씩
 //                       (THICKNESS/SCALAR/SCALR/SECTION/PID/OFFSET/ORIENTATION/WARPAGE/ELBOW).
 //                       Card 1 = EID PID N1 N2 N3 RT1 RR1 RT2 RR2 LOCAL → 절점은 칸 2·3·4 **셋만**.
+//                       옵션 카드는 설명서 차례(Card 2 THICKNESS · 3 SECTION · 4 SCALAR · 5 SCALR · 6 PID · 7 OFFSET ·
+//                       8 ORIENTATION · 9 WARPAGE · 10 ELBOW)로 온다 — 옵션 카드의 절점은 Card 9 의 SN1 · SN2(스칼라 절점 —
+//                       `*NODE_SCALAR` · 8칸 표 칸 0 · 1)와 Card 10 의 MN(가운데 절점 · 칸 0)이다(Vol_I 155889 · 156529-156548).
 //   *ELEMENT_DISCRETE : Card 1 = EID PID N1 N2 VID S PF OFFSET → 절점은 칸 2·3.
 //                       `_LCO` 는 "a second card is read" → +1 장.
 //   *ELEMENT_MASS     : Card 1 = EID(I8) ID(I8) MASS(E16) PID(I8) → 절점은 칸 **1** 하나 (159866-159930).
@@ -130,10 +133,14 @@ struct AuxElementCard {
     bool partIsSet = false;        // `partField` 가 PID 가 아니라 **파트 세트 ID** 다(`*ELEMENT_MASS_PART_SET`) — PID 로 견주지 말 것
     std::vector<int> elemRefFields;   // 보 요소 번호를 담는 칸(차례 — 8칸 표, 칸 폭 10 · long 20): `*ELEMENT_BEAM_PULLEY` BID1 · BID2 ·
                                       // `*ELEMENT_BEAM_SOURCE` BSEID. 0 이면 LS-DYNA 가 이웃 보를 스스로 찾는다(PULLEY)
-    // 옵션 카드의 절점 — 보 `_ELBOW` 의 가운데 절점 MN(Card 10 · 옵션 카드 가운데 늘 마지막 · 8칸 표 I10, long 20 — Vol_I
-    // 156596-156638). 예전엔 Card 1 만 읽어 cleanup-nodes safe 가 MN 을 지우고 extract-parts 가 싣지 않았다(재검토 D2)
-    int  optNodeLine = -1;            // 카드 안 몇째 줄(0 = Card 1) — 없으면 -1
-    std::vector<int> optNodeFields;   // 그 줄의 절점 칸(차례 — 8칸 표)
+    // 옵션 카드의 절점 — 보 `_WARPAGE` 의 SN1 · SN2(Card 9 · 스칼라 절점) · `_ELBOW` 의 가운데 절점 MN(Card 10 — 옵션 카드 가운데
+    // 늘 마지막)이다. 8칸 표(I10, long 20 — Vol_I 156529-156548 · 156596-156638). 예전엔 Card 1 만 읽어 cleanup-nodes safe 가 MN 을
+    // 지우고 extract-parts 가 싣지 않았고(재검토 D2), WARPAGE 의 SN 은 아무 걸음도 읽지 않았다(셋째 묶음)
+    struct OptNodes {
+        int line = -1;                // 카드 안 몇째 줄(0 = Card 1)
+        std::vector<int> fields;      // 그 줄의 절점 칸(차례 — 8칸 표)
+    };
+    std::vector<OptNodes> optNodes;
     bool supported = false;    // false 면 이 변형을 추측하지 않는다
     std::string reason;        // supported=false 일 때 댈 이유
 };
@@ -195,12 +202,15 @@ std::vector<int> auxNodesDisputed(const AuxElementCard& a, const AuxCardReadings
 // manual 에 번호를 제자리에 쓸 수 있는가 — 콤마 줄이 아니고 manual 의 칸이 다 깨끗하며 절점 칸이 비었거나 정수이고, 번호를 쓸
 // (양수인) 절점 칸이 `$` 주석과 겹치지 않는다(줄 가운데 주석은 설명서 문법이 아니다 — 겹친 칸에 쓰면 주석을 덮는다 · 0 은 쓰지 않는다)
 bool auxManualNodesPlaceable(const AuxElementCard& a, const AuxCardReadings& r);
-// 옵션 카드 줄(`optNodeLine`)의 절점 — 8칸 표(칸 폭 10 · long 20)로 자른 `optNodeFields` 칸의 양수(콤마 줄은 콤마 차례)
+// 카드 안 `cardLine` 째 줄(0 = Card 1)이 옵션 카드의 절점 줄이면 그 절점 칸(차례 — 8칸 표), 아니면 nullptr
+const std::vector<int>* auxOptNodeFields(const AuxElementCard& a, int cardLine);
+// 옵션 카드 줄의 절점 — 8칸 표(칸 폭 10 · long 20)로 자른 그 줄의 절점 칸의 양수(콤마 줄은 콤마 차례). 절점 줄이 아니면 비었다
 int auxOptTableWidth(int fw);
-std::vector<int> auxOptNodesOf(const AuxElementCard& a, const std::string& line, int fw);
-// 옵션 카드 줄의 절점(보 `_ELBOW` 의 MN)을 제자리에 바꿔 쓸 수 있나 — 콤마 줄이 아니고, 번호가 있는 칸마다 칸 글자가 정수 하나이며,
-// `$` 주석이 그 칸 안에서 시작하지 않는다(칸에 새 번호를 쓰면 주석 머리 `$` 를 덮어 뒤 글자가 다음 칸의 값이 된다)
-bool auxOptNodesPlaceable(const AuxElementCard& a, const std::string& line, int fw);
+std::vector<int> auxOptNodesOf(const AuxElementCard& a, int cardLine, const std::string& line, int fw);
+// 옵션 카드 줄의 절점(보 `_WARPAGE` 의 SN · `_ELBOW` 의 MN)을 제자리에 바꿔 쓸 수 있나 — 콤마 줄이 아니고, 번호가 있는 칸마다 칸
+// 글자가 정수 하나이며, `$` 주석이 그 칸 안에서 시작하지 않는다(칸에 새 번호를 쓰면 주석 머리 `$` 를 덮어 뒤 글자가 다음 칸의 값이
+// 된다). 절점 줄이 아니면 true
+bool auxOptNodesPlaceable(const AuxElementCard& a, int cardLine, const std::string& line, int fw);
 // PID 후보 — primary 읽기의 PID 먼저(언제나), 든 다른 읽기가 다른 PID 를 말하면 그것도(양수만 · 유일).
 // PID 칸이 없는 족은 비었다
 std::vector<int> auxPidsOf(const AuxElementCard& a, const AuxCardReadings& r);
@@ -245,6 +255,11 @@ void forEachNonGridElementCard(const std::vector<std::string>& lines,
                                const std::function<void(const NonGridElementCard&)>& f);
 // 그 줄들의 격자 밖 요소 EID 최대값(없으면 0) — `ModelAssembler::idMaxima` 의 바닥
 int nonGridElementMaxId(const std::vector<std::string>& lines);
+// 스칼라 절점(`*NODE_SCALAR` · `_VALUE` — 보 `_WARPAGE` 의 SN 이 가리킨다)의 NID 최대값(없으면 0). 스칼라 절점 번호는 `*NODE` 의
+// 번호와 겹치면 안 된다(Vol_I 214757 「unique relative to other nodes」) — 새 절점 번호의 바닥이 그 위여야 한다(리더는 `*NODE` 만 담는다)
+int scalarNodeMaxId(const std::vector<std::string>& lines);
+// 스칼라 절점 키워드인가(키워드 토큰 — 대문자 · 접미사 뗌) — `*NODE_SCALAR` · `*NODE_SCALAR_VALUE`. 데이터 줄의 칸 0 이 NID 다
+bool isScalarNodeKeyword(const std::string& kw);
 
 // *SECTION_SOLID 의 ELFORM → 절점 수. 고차 정식이 아니면 0.
 // Vol_I 228671-228677: 23=20절점, 24=27, 25=21, 26=15, 27=20(cubic tet), 28=40, 29=64.
