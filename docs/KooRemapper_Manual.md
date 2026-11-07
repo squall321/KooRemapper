@@ -4058,6 +4058,12 @@ KooRemapper battery <config.yaml>
 > **그 YAML 파일이 있는 폴더** 기준입니다 — `KooRemapper battery cfg/b.yaml` 의 `output: bat_out` 은
 > `cfg/bat_out_tier0_phase1.k` 로 나갑니다(예전에는 작업 폴더에 떨어졌습니다). `output` 이 가리키는 폴더는 미리 있어야 합니다.
 >
+> **배치의 같은 이름(2026-11-07)**: 덱 이름은 `<output><tier>_phase{1|2}.k` 입니다 — 모델 종류는 이름에 없고, tier 는 다섯 칸
+> (`_tier-1` · `_tier0` · `_tier0_5` · `_tier1` · `_tier2`)으로 묶이고, phase 2 가 아니면 모두 `_phase1` 입니다. 그래서 `batch:` 의
+> 두 조합이 같은 이름에 쓰게 되면(`model_types: [stacked, wound]` · `tiers: [0, 0.2]` · `phases: [1, 3]`) **아무 덱도 쓰지 않고 종료
+> 코드 1** 이고 겹친 이름과 조합을 다 적습니다. 예전에는 뒤 조합이 앞 덱을 조용히 덮고 종료 코드 0 이었습니다. 모델 종류마다
+> 돌리려면 `output` 을 달리 해 따로 돌리세요.
+>
 > **`dynain_file` 만은 경로로 풀지 않습니다.** `*INCLUDE_DYNAIN` 다음 줄에 **적힌 문자열 그대로** 찍히고
 > KooRemapper 는 그 파일을 열지 않습니다(솔버가 산출 덱 기준으로 읽습니다).
 > `use_dynain: true` + `dynain_file: ../state/my.dynain` 을 주면 덱에도 `../state/my.dynain` 이 그대로 들어갑니다.

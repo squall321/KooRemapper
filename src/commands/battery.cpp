@@ -11,6 +11,7 @@
 #include "cli/ConsoleOutput.h"
 #include "util/YamlComment.h"
 
+#include <map>
 #include <string>
 #include <vector>
 #include <fstream>
@@ -538,8 +539,11 @@ std::string generateBatteryKFile(const BatteryConfig& cfg,
 // ─────────────────────────────────────────────────────────────
 // Batch generation
 // ─────────────────────────────────────────────────────────────
-static void generateBatch(const BatteryConfig& baseCfg,
-                           ConsoleOutput& console) {
+// ★두 조합이 같은 파일 이름이면 쓰기 전에 거절한다(2026-11-07) — 이름(`<output><tier>_phase{1|2}.k`)에 모델 종류가 없고 tier 는
+//   다섯 칸으로 묶이고 phase 2 가 아니면 모두 _phase1 이라, 예전엔 [stacked, wound] · tiers [0, 0.2] · phases [1, 3] 이 앞 조합의
+//   덱을 조용히 덮고 rc 0 이었다. 이름 규칙(문서에 적힌 것)은 바꾸지 않는다.
+static int generateBatch(const BatteryConfig& baseCfg,
+                         ConsoleOutput& console) {
     const auto& batch = baseCfg.batch;
 
     std::vector<double> tiers    = batch.tiers.empty()
@@ -558,6 +562,7 @@ static void generateBatch(const BatteryConfig& baseCfg,
                      && (std::find(phases.begin(), phases.end(), 1) != phases.end())
                      && (std::find(phases.begin(), phases.end(), 2) != phases.end());
 
+    std::vector<BatteryConfig> combos;
     for (const auto& mt : mts) {
         for (double tier : tiers) {
             for (size_t pi = 0; pi < phases.size(); ++pi) {
@@ -584,10 +589,34 @@ static void generateBatch(const BatteryConfig& baseCfg,
                                    + ".dynain";
                 }
 
-                generateBatteryKFile(cur, console);
+                combos.push_back(cur);
             }
         }
     }
+
+    std::map<std::string, std::vector<std::string>> byName;   // 파일 이름 → 그 이름을 쓸 조합
+    for (const auto& c : combos) {
+        char tierBuf[32];
+        snprintf(tierBuf, sizeof(tierBuf), "%g", c.tier);
+        byName[batteryKFilePath(c)].push_back("model_type " + c.modelType + " · tier " + tierBuf + " · phase " +
+                                               std::to_string(c.phase));
+    }
+    bool clash = false;
+    for (const auto& [name, who] : byName) {
+        if (who.size() < 2) continue;
+        if (!clash) console.error("[battery] batch 의 두 조합이 같은 파일 이름에 쓴다 — 하나가 다른 하나를 덮는다(아무 파일도 쓰지 않았다)");
+        clash = true;
+        std::string list;
+        for (const auto& w : who) list += (list.empty() ? "" : " / ") + w;
+        console.error("[battery]   " + name + " ← " + list);
+    }
+    if (clash) {
+        console.info("[battery] 이름은 <output><tier>_phase{1|2}.k 다(모델 종류는 이름에 없다 · tier 는 _tier-1 · _tier0 · _tier0_5 · "
+                     "_tier1 · _tier2 · phase 2 가 아니면 _phase1) — 겹치는 조합은 output 을 달리 해 따로 돌려라");
+        return 1;
+    }
+    for (const auto& c : combos) generateBatteryKFile(c, console);
+    return 0;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -628,7 +657,7 @@ int runBattery(const std::string& yamlFile, ConsoleOutput& console) {
                    !cfg.batch.modelTypes.empty();
 
     if (isBatch) {
-        generateBatch(cfg, console);
+        if (generateBatch(cfg, console) != 0) return 1;
     } else {
         std::string out = generateBatteryKFile(cfg, console);
         if (out.empty()) return 1;

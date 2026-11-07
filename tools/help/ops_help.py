@@ -120,7 +120,9 @@ op("battery", "메시 생성", "배터리 셀(적층·권취) 모델 + 스웰링
    outputs=["examples/battery/swell/stacked/battery_stacked_swell_tier0_phase1.k"],
    notes=["설정 키가 많아 저장소 예제(examples/battery/swell/stacked|wound/*.yaml)를 복사해 고쳐 쓰는 편이 안전하다.",
           "output 경로의 폴더가 있어야 한다.",
-          "dynain_file 은 경로가 아니라 *INCLUDE_DYNAIN 에 그대로 찍히는 문자열이다 — 산출 덱 옆에서 솔버가 찾을 이름으로 적을 것"])
+          "dynain_file 은 경로가 아니라 *INCLUDE_DYNAIN 에 그대로 찍히는 문자열이다 — 산출 덱 옆에서 솔버가 찾을 이름으로 적을 것",
+          "덱 이름은 <output><tier>_phase{1|2}.k — 모델 종류는 이름에 없다. batch 의 두 조합이 같은 이름이면(model_types: [stacked,",
+          "  wound] · tiers: [0, 0.2] · phases: [1, 3]) 아무 덱도 쓰지 않고 rc 1 로 겹친 조합을 짚는다(2026-11-07 전엔 뒤 조합이 덮고 rc 0)"])
 op("cclip", "메시 생성", "육면체 파트를 힘-변위로 보정한 C형 스프링 클립(눌린 상태 초기응력)으로 치환", "클립 spring 스프링 접점",
    "KooRemapper cclip <config.yaml>",
    files={"board.yaml": """output: clip_board.k
