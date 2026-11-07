@@ -1,6 +1,7 @@
 #include "database.h"
 #include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 #include "parser/DeckWriter.h"
+#include "parser/DeckScan.h"      // firstEndLine — 덧붙이는 자리는 첫 *END
 #include "util/YamlComment.h"
 #include "cli/ConsoleOutput.h"
 
@@ -408,17 +409,13 @@ int runDatabase(const std::string& yamlFile, ConsoleOutput& console) {
     if (!out_w.ok()) { console.error("Cannot write: " + outputPath); return 1; }
     std::ostream& out = out_w.stream();
 
-    bool endFound = false;
-    for (const auto& ln : rawLines) {
-        std::string up = ln;
-        for (auto& c : up) c = (char)toupper((unsigned char)c);
-        size_t s2 = up.find_first_not_of(" \t");
-        if (s2 != std::string::npos) up = up.substr(s2);
-        if (up.find("*END") == 0 && (up.size() == 4 || !std::isalpha(up[4]))) {
-            out << insertBlock;
-            endFound = true;
-        }
-        out << ln << "\n";
+    // ★블록은 주 덱의 **첫** *END 앞에 한 번 — LS-DYNA 는 첫 *END 에서 멈춘다. 예전엔 *END 마다 넣어 *END 가 둘인 덱에 같은
+    //   *DATABASE_* 카드가 두 벌 나갔다(셋째 묶음)
+    const size_t endAt = KooRemapper::deckscan::firstEndLine(rawLines);
+    const bool endFound = endAt < rawLines.size();
+    for (size_t i = 0; i < rawLines.size(); ++i) {
+        if (i == endAt) out << insertBlock;
+        out << rawLines[i] << "\n";
     }
 
     if (!endFound) {

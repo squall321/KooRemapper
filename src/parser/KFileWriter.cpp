@@ -191,7 +191,12 @@ bool KFileWriter::writeFileWithSource(const std::string& filename, const Mesh& m
             elemEmitted = true;
         };
 
+        // ★원본의 **첫** `*END` 에서 끝낸다 — 못 쓴 블록을 그 앞에 쓰고 `*END` 를 쓴 뒤, 남은 원본 줄은 그대로 베낀다(LS-DYNA 는 첫
+        //   `*END` 에서 멈추고 리더도 거기서 멈춘다). 예전엔 원본의 `*END` 를 모두 지우고 맨 끝에 하나만 써, 첫 `*END` 뒤에 있던 카드
+        //   (읽히지 않던 것)가 산출에서 **살아났다** — map 이 덱 끝의 죽은 `*PART` 를 첫 `*END` 앞으로 옮겼다(셋째 묶음)
+        bool afterEnd = false;
         for (const std::string& line : srcLines) {
+            if (afterEnd) { out << line << "\n"; continue; }
             // Detect start of a new keyword block (any line beginning with '*'
             // after optional whitespace).
             size_t firstNonWs = 0;
@@ -222,7 +227,11 @@ bool KFileWriter::writeFileWithSource(const std::string& filename, const Mesh& m
                     continue;
                 }
                 if (startsWithKeyword(line, "*END")) {
+                    emitOurNodes();
+                    emitOurElems();
+                    writeEnd(out);
                     endSuppressed = true;
+                    afterEnd = true;
                     continue;
                 }
                 // Other keyword — fall through to verbatim emit
@@ -234,10 +243,12 @@ bool KFileWriter::writeFileWithSource(const std::string& filename, const Mesh& m
 
         // If the source somehow lacked the keyword we were planning to
         // substitute, emit it now so the output is still well-formed.
-        if (!nodeEmitted) writeNodeSection(out, mesh, useMappedPositions);
-        if (!elemEmitted) writeElementSection(out, mesh, &verbatimElemIds);
+        if (!afterEnd) {   // 원본에 *END 가 없었다 — 끝에 쓴다
+            if (!nodeEmitted) writeNodeSection(out, mesh, useMappedPositions);
+            if (!elemEmitted) writeElementSection(out, mesh, &verbatimElemIds);
+            writeEnd(out);
+        }
         (void)endSuppressed;
-        writeEnd(out);
 
         writer.close();
         return true;

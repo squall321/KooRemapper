@@ -2,6 +2,7 @@
 #include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 #include "parser/IdAllocator.h"   // 인클루드 닫힘까지 센 최대값 · 못 본 자리 경고
 #include "parser/DeckWriter.h"
+#include "parser/DeckScan.h"      // firstEndLine — 덧붙이는 자리는 첫 *END
 #include "cli/ConsoleOutput.h"
 #include "util/YamlComment.h"
 
@@ -518,12 +519,9 @@ int hfdamp_apply(std::vector<std::string>& lines,
              cfg.cdamp, fLow, fHigh, psid, "", 0, 0, 0);
     insert.push_back(std::string(buf));
 
-    // Find *END and insert before it
-    int endIdx = -1;
-    for (int i = (int)lines.size()-1; i >= 0; --i) {
-        std::string kw = hf_upper(hf_trim(lines[i]));
-        if (kw == "*END") { endIdx = i; break; }
-    }
+    // 주 덱의 **첫** *END 앞에 — 예전엔 마지막 *END 앞이라 *END 가 둘인 덱에서 LS-DYNA 가 이 감쇠 카드를 읽지 않았다(셋째 묶음)
+    const size_t endAt = KooRemapper::deckscan::firstEndLine(lines);
+    const int endIdx = endAt < lines.size() ? static_cast<int>(endAt) : -1;
 
     if (endIdx < 0) {
         // No *END found: append at end

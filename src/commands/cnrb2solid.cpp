@@ -1,4 +1,5 @@
 #include "parser/DeckWriter.h"
+#include "parser/DeckScan.h"      // insertBeforeFirstEnd — 덧붙이는 자리는 첫 *END
 #include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 #include <cctype>
 #include "parser/IncludeClosure.h"   // FlatDeck — flatten_includes(2026-10-17)
@@ -943,17 +944,14 @@ int cnrb2solid_convert(std::vector<std::string>& lines,
         }
     }
 
-    // Build new line buffer
+    // Build new line buffer — 지운 줄을 빼고, 새 카드는 주 덱의 **첫** *END 앞에 한 번(없으면 끝에). 예전엔 *END 마다 넣어 *END 가
+    // 둘인 덱에 새 솔리드 · 절점 · 접촉이 두 벌 나갔고, *END 가 없는 덱에는 넣지 않아 CNRB 만 지워진 덱이 나갔다(셋째 묶음)
     std::vector<std::string> newLines;
     newLines.reserve(lines.size() + insertLines.size());
-    for (size_t i = 0; i < lines.size(); ++i) {
-        if (rm[i]) continue;
-        std::string tr = cs_trim(lines[i]);
-        if (cs_upper(tr) == "*END") {
-            for (auto& l : insertLines) newLines.push_back(l);
-        }
-        newLines.push_back(lines[i]);
-    }
+    for (size_t i = 0; i < lines.size(); ++i)
+        if (!rm[i]) newLines.push_back(lines[i]);
+    newLines.insert(newLines.begin() + static_cast<std::ptrdiff_t>(KooRemapper::deckscan::firstEndLine(newLines)),
+                    insertLines.begin(), insertLines.end());
     lines = std::move(newLines);
     return converted;
 }

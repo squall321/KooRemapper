@@ -14809,30 +14809,6 @@ static std::vector<std::array<int,4>> ca_subtractFaces(
 // ============================================================================
 // applyContact
 // ============================================================================
-// 주 덱의 **첫** `*END` 줄(없으면 줄 수) — LS-DYNA 는 첫 *END 에서 읽기를 멈춘다(그 뒤 줄은 해석에 들지 않는다)
-static size_t firstEndLine(const std::vector<std::string>& lines) {
-    for (size_t i = 0; i < lines.size(); ++i) {
-        const std::string& l = lines[i];
-        if (l.size() >= 4 && l[0] == '*' && std::toupper(static_cast<unsigned char>(l[1])) == 'E' &&
-            std::toupper(static_cast<unsigned char>(l[2])) == 'N' && std::toupper(static_cast<unsigned char>(l[3])) == 'D')
-            return i;
-    }
-    return lines.size();
-}
-
-// 덧붙일 블록(여러 줄 글자)을 주 덱의 첫 `*END` 앞에 **한 번** 넣는다 — `*END` 가 없으면 끝에 붙인다. 쓰기의 덧붙임(`writeOutput` 의
-// `endInsertsDone` · 1dfa555)과 같은 규칙이다. 예전 applyContact · applyBoundary · applyRbe 는 `*END` 마다 넣어 *END 가 둘인 덱에 같은
-// 접촉 · SPC · 구속이 두 벌 나갔고(둘째 벌은 해석에 들지 않는다), `*END` 가 없는 덱에는 넣을 자리가 없어 카드가 조용히 빠졌다(셋째 묶음)
-static void insertBeforeFirstEnd(std::vector<std::string>& lines, const std::vector<std::string>& blocks) {
-    std::vector<std::string> add;
-    for (const auto& block : blocks) {
-        std::istringstream bs(block);
-        std::string bl;
-        while (std::getline(bs, bl)) add.push_back(bl);
-    }
-    lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(firstEndLine(lines)), add.begin(), add.end());
-}
-
 bool ModelAssembler::applyContact(const ContactOperation& op) {
     if (op.actions.empty()) {
         std::cout << "[contact] No contact actions specified\n";
@@ -15081,7 +15057,7 @@ bool ModelAssembler::applyContact(const ContactOperation& op) {
     }
 
     // 주 덱의 첫 *END 앞에 한 번(없으면 끝에)
-    if (!insertBlocks.empty()) insertBeforeFirstEnd(rawLines_, insertBlocks);
+    if (!insertBlocks.empty()) deckscan::insertBeforeFirstEnd(rawLines_, insertBlocks);
 
     infoMessages.push_back("[contact] Applied " + std::to_string(contactCount) + " contact(s)");
     return true;
@@ -15297,7 +15273,7 @@ bool ModelAssembler::applyBoundary(const BoundaryOperation& op) {
     }
 
     // 주 덱의 첫 *END 앞에 한 번(없으면 끝에)
-    if (!insertBlocks.empty()) insertBeforeFirstEnd(rawLines_, insertBlocks);
+    if (!insertBlocks.empty()) deckscan::insertBeforeFirstEnd(rawLines_, insertBlocks);
 
     infoMessages.push_back("[boundary] Applied " + std::to_string(bcCount) + " boundary condition(s)");
     return true;
@@ -15585,7 +15561,7 @@ bool ModelAssembler::applyRbe(const RbeOperation& op) {
     }
 
     // 주 덱의 첫 *END 앞에 한 번(없으면 끝에)
-    if (!insertBlocks.empty()) insertBeforeFirstEnd(rawLines_, insertBlocks);
+    if (!insertBlocks.empty()) deckscan::insertBeforeFirstEnd(rawLines_, insertBlocks);
 
     infoMessages.push_back("[rbe] Created " + std::to_string(rbeCount)
         + " constraint(s), " + std::to_string(nodesCreated) + " centroid node(s)");
@@ -17762,7 +17738,7 @@ bool ModelAssembler::applyBattery(const BatteryOperation& op, const std::string&
 
     // *INCLUDE 는 주 덱의 **첫** *END 앞에(없으면 끝에) — 예전엔 마지막 *END 앞이라 *END 가 둘인 덱에서 LS-DYNA 가 그 인클루드를
     // 읽지 않았다(첫 *END 에서 멈춘다 · 셋째 묶음)
-    insertBeforeFirstEnd(rawLines_, {"*INCLUDE\n" + kPath});
+    deckscan::insertBeforeFirstEnd(rawLines_, {"*INCLUDE\n" + kPath});
 
     char buf[256];
     snprintf(buf, sizeof(buf), "[battery] Included: %s", kPath.c_str());

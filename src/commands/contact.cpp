@@ -1,4 +1,5 @@
 #include "parser/DeckWriter.h"
+#include "parser/DeckScan.h"      // firstEndLine — 덧붙이는 자리는 첫 *END
 #include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 #include "parser/IdAllocator.h"
 #include "parser/IncludeClosure.h"
@@ -1367,13 +1368,8 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
 
     // 7. Insert new blocks before *END
     if (!insertBlocks.empty()) {
-        int endPos = -1;
-        for (int i = (int)lines.size()-1; i >= 0; --i) {
-            std::string up = kw_trim(lines[i]);
-            for (auto& c : up) c = static_cast<char>(toupper(static_cast<unsigned char>(c)));
-            if (up == "*END") { endPos = i; break; }
-        }
-        if (endPos < 0) endPos = (int)lines.size();
+        // 주 덱의 **첫** *END 앞에(없으면 끝에) — 예전엔 마지막 *END 앞이라 *END 가 둘인 덱에서 새 접촉이 읽히지 않았다(셋째 묶음)
+        const int endPos = static_cast<int>(KooRemapper::deckscan::firstEndLine(lines));
 
         std::vector<std::string> combined;
         for (const auto& blk : insertBlocks) {

@@ -55,6 +55,32 @@ inline bool isDataLine(const std::string& l) {
     return l[g] != '$' && l[g] != '*';
 }
 
+// ── 덧붙이는 자리 — 주 덱의 첫 `*END` ──────────────────────────────────────────
+// LS-DYNA 는 첫 `*END` 에서 읽기를 멈춘다(그 뒤 줄은 해석에 들지 않는다). 덱을 고쳐 쓰는 op 이 덧붙이는 카드는 **첫** `*END` 앞에
+// **한 번** 넣는다 — `*END` 마다 넣으면 `*END` 가 둘인 덱에 같은 카드가 두 벌 나가고(둘째 벌은 읽히지 않는다), 마지막 `*END` 앞에
+// 넣으면 읽히지 않으며, `*END` 가 없는데 넣지 않으면 카드가 조용히 빠진다(셋째 묶음 — contact · boundary · rbe · battery · database ·
+// cnrb2solid · hfdamp). 쓰기(`ModelAssembler::writeOutput` 의 `endInsertsDone`)와 같은 규칙이다.
+
+// 첫 `*END` 줄의 차례(키워드 줄이고 토큰이 `*END` — 대소문자 · 칸폭 접미사 무관) · 없으면 줄 수
+inline size_t firstEndLine(const std::vector<std::string>& lines) {
+    for (size_t i = 0; i < lines.size(); ++i) {
+        const size_t g = lines[i].find_first_not_of(" \t");
+        if (g != std::string::npos && lines[i][g] == '*' && kwBare(keywordToken(lines[i])) == "*END") return i;
+    }
+    return lines.size();
+}
+
+// 블록(여러 줄 글자)을 첫 `*END` 앞에 한 번 넣는다 — `*END` 가 없으면 끝에 붙인다
+inline void insertBeforeFirstEnd(std::vector<std::string>& lines, const std::vector<std::string>& blocks) {
+    std::vector<std::string> add;
+    for (const auto& block : blocks) {
+        std::istringstream bs(block);
+        std::string bl;
+        while (std::getline(bs, bl)) add.push_back(bl);
+    }
+    lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(firstEndLine(lines)), add.begin(), add.end());
+}
+
 // ── 카드 칸 ──────────────────────────────────────────────────────────────────
 
 // 카드 줄을 칸으로 나눈다 — 콤마가 있으면 자유형식, 아니면 **고정폭**.

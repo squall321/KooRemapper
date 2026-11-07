@@ -9,7 +9,11 @@
     · applyContact · applyBoundary · applyRbe — `*END` 를 만날 때마다 넣어 `*END` 가 둘인 덱에 같은 접촉 · SPC · 구속이 **두 벌**
       나갔고(둘째 벌은 해석에 안 든다), `*END` 가 없는 덱에서는 아무 데도 넣지 않아 카드가 **조용히 빠졌다**.
     · applyBattery — `*INCLUDE` 를 **마지막** `*END` 앞에 넣어 `*END` 가 둘인 덱에서는 LS-DYNA 가 그 인클루드를 읽지 않았다.
-  이제 넷 다 주 덱의 첫 `*END` 앞에(없으면 끝에) 한 번 넣는다.
+  이제 넷 다 주 덱의 첫 `*END` 앞에(없으면 끝에) 한 번 넣는다. 같은 꼴을 단독 op 에서도 찾아 고쳤다(공용 `deckscan::insertBeforeFirstEnd`).
+    · 단독 database · cnrb2solid(assemble 도 같은 함수) — `*END` 마다 넣었다(cnrb2solid 는 `*END` 가 없으면 넣지 않아 CNRB 만 지워졌다).
+    · hfdamp(assemble 도 같은 함수) · 단독 contact — **마지막** `*END` 앞에 넣었다.
+    · map · shellmap · squeeze 의 메시 쓰기(KFileWriter) — 원본의 `*END` 를 모두 지우고 끝에 하나만 써 첫 `*END` 뒤의(읽히지 않던) 카드가
+      산출에서 살아났다. 이제 첫 `*END` 에서 끝내고 남은 원본 줄은 그 뒤에 그대로 둔다.
 
 무엇을 보나.
   `*END` 가 둘인 덱 — 넣은 카드 수가 `*END` 하나인 덱과 같고, 넣은 카드가 다 첫 `*END` 앞에 있다(contact · boundary · rbe) ·
@@ -118,6 +122,55 @@ def main():
             else:
                 check("battery-2 ★*END 가 둘인 덱 — 배터리 *INCLUDE 가 첫 *END 앞이다(예전엔 마지막 *END 앞이라 읽히지 않았다)",
                       ok, (rc, inc, first_end(L), text[-300:]))
+
+        # 단독 op — 같은 규칙(첫 *END 앞에 한 번 · 없으면 끝에)
+        cnrb_src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "examples", "cnrb2solid", "bolt_simple.k")
+        bolt = open(cnrb_src, encoding="utf-8").read()
+        write(os.path.join(d, "bolt_one.k"), bolt)
+        write(os.path.join(d, "bolt_two.k"), bolt.rstrip("\n") + "\n" + TAIL)
+        write(os.path.join(d, "bolt_none.k"), "\n".join(l for l in bolt.splitlines() if l.strip().upper() != "*END") + "\n")
+        solo = (
+            ("database", "*DATABASE_BINARY_D3PLOT", "%s.k", lambda m, o: ("database", "model: %s\noutput: %s\npreset: drop\ndt: 0.0001\n"
+                                                                         "dt_plot: 0.005\n" % (m, o))),
+            ("hfdamp", "*DAMPING_FREQUENCY_RANGE", "%s.k", lambda m, o: ("hfdamp", "model: %s\noutput: %s\ndt_target: 3.0e-7\ncdamp: 0.99\n"
+                                                                         "fhigh_ratio: 100.0\nmode: global\n" % (m, o))),
+            ("contact-solo", "*CONTACT", "%s.k", lambda m, o: ("contact", "model: %s\noutput: %s\ncontacts:\n  - action: create\n"
+                                                              "    type: automatic_single_surface\n    slave: { pid: 1 }\n" % (m, o))),
+            ("cnrb2solid", "*CONTACT_TIED", "bolt_%s.k", lambda m, o: ("cnrb2solid", "model: %s\noutput: %s\nE: 200000.0\nPR: 0.3\n"
+                                                                       "RHO: 7.85e-9\nradius_scale: 0.999\nnum_circum_nodes: 8\n"
+                                                                       "inner_radius_ratio: 0.3\naxis_direction: auto\nz_tolerance: 0.1\n"
+                                                                       "r_tolerance: 0.5\n" % (m, o))),
+        )
+        for name, prefix, model, mk in solo:
+            print("[%s]" % name)
+            counts = {}
+            for deck in ("one", "two", "none"):
+                out = "%s_%s_out.k" % (name, deck)
+                op, body = mk(model % deck, out)
+                write(os.path.join(d, "%s_%s.yaml" % (name, deck)), body)
+                rc, text = run(binary, d, op, "%s_%s.yaml" % (name, deck))
+                L = lines_of(os.path.join(d, out))
+                counts[deck] = (rc, len(kw_rows(L, prefix)), all(i < first_end(L) for i in kw_rows(L, prefix)), text)
+            rc1, n1, _, t1 = counts["one"]
+            rc2, n2, before2, t2 = counts["two"]
+            rc0, n0, _, t0 = counts["none"]
+            check("%s-1 기준 — *END 하나인 덱에 %s 카드가 들어간다" % (name, prefix), rc1 == 0 and n1 > 0, (rc1, n1, t1[-300:]))
+            check("%s-2 ★*END 가 둘인 덱 — %s 카드가 한 벌(%d)이고 다 첫 *END 앞이다" % (name, prefix, n1),
+                  rc2 == 0 and n2 == n1 and before2, (rc2, n2, before2, t2[-300:]))
+            check("%s-3 *END 가 없는 덱에도 %s 카드가 들어간다" % (name, prefix), rc0 == 0 and n0 == n1, (rc0, n0, t0[-300:]))
+
+        # map(KFileWriter) — 첫 *END 뒤의 카드는 산출에서도 첫 *END 뒤에 남는다(읽히지 않던 것을 살리지 않는다)
+        print("[map — 메시 쓰기(KFileWriter)]")
+        run(binary, d, "generate", "arc", "--dim-i", "6", "--dim-j", "3", "--dim-k", "2", "g")
+        flat = open(os.path.join(d, "g_flat.k"), encoding="utf-8").read()
+        dead = "*COMMENT\n첫 *END 뒤 — 읽히지 않는다\n*PART\ndead part\n%10d%10d%10d\n*END\n" % (99, 1, 1)
+        write(os.path.join(d, "flat_dead.k"), flat + dead)
+        rc, text = run(binary, d, "map", "g_bent.k", "flat_dead.k", "map_out.k")
+        L = lines_of(os.path.join(d, "map_out.k"))
+        ends = [i for i, l in enumerate(L) if l.upper().startswith("*END")]
+        dp = [i for i, l in enumerate(L) if l == "dead part"]
+        check("map ★원본의 첫 *END 뒤 카드(죽은 *PART 99)가 산출에서도 첫 *END 뒤다 · *END 둘이 그대로",
+              rc == 0 and len(ends) == 2 and len(dp) == 1 and dp[0] > ends[0], (rc, ends, dp, text[-300:]))
     finally:
         shutil.rmtree(d, ignore_errors=True)
 
