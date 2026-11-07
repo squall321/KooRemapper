@@ -18,6 +18,7 @@
 #include <map>
 #include <array>
 #include <functional>
+#include <memory>
 #include <string>
 
 // Knowledge graph (lat.md):
@@ -61,13 +62,14 @@ public:
     IdMaxima idMaxima() const {
         return {maxNodeId_, std::max(maxElementId_, maxAuxElementId_), maxPartId_, maxSectionId_, maxMaterialId_, maxSetId_};
     }
-    // ★StepForge 이월 계획(plan.json · 변위장 · 조각)을 이 덱에 적용한다(2026-11-07 · `apply_carryover_plan`).
+    // ★StepForge 이월 계획(plan.json · 변위장 · 조각 · 새 셸 섹션)을 이 덱에 적용한다(2026-11-07 · `apply_carryover_plan`).
     //   사전 검사는 **전부 아니면 전무**다 — 걸린 것을 `rep.problems` 에 모두 담고 false(편집 상태를 건드리지 않는다).
     //   통과하면 처리마다 편집 상태(옮긴 절점 · 지운 요소 · 넣을 블록 · `*PART` 고침)를 꾸민다 — 쓰기는 부르는 쪽(`writeOutput`).
-    //   `loadBaseModel` 뒤에 부른다(덱 지문은 그 파일의 바이트로 잰다).
-    bool applyCarryoverPlan(const std::string& planPath, carryover::Report& rep);
-    // 쓴 덱을 다시 읽어 기대(옮긴 자리 · 지운 번호 · 넣은 번호와 좌표 · 파트별 요소 수 · 섹션)와 대조하고 품질 관문
-    // (새로 뒤집힌 솔리드 · 법선이 뒤집힌 셸)을 건다. false 면 `rep.problems` 에 까닭 — 부르는 쪽이 그 산출을 지운다.
+    //   `loadBaseModel` 뒤에 부른다(덱 지문은 그 파일의 바이트로 잰다). 판 2 · 인클루드가 있는 덱은 닫힘 전체를 읽기만 하고
+    //   주 덱만 고친다 — `outputPath` 는 그 산출이 덱과 같은 폴더인지 본다(산출의 `*INCLUDE` 이름이 같은 파일을 가리켜야 한다).
+    bool applyCarryoverPlan(const std::string& planPath, const std::string& outputPath, carryover::Report& rep);
+    // 쓴 덱을 다시 읽어(인클루드가 있으면 닫힘째) 기대(옮긴 자리 · 지운 번호 · 넣은 번호와 좌표 · 파트별 요소 수 · 섹션)와
+    // 대조하고 품질 관문(새로 뒤집힌 솔리드 · 법선이 뒤집힌 셸)을 건다. false 면 `rep.problems` 에 까닭 — 부르는 쪽이 그 산출을 지운다.
     bool verifyCarryoverOutput(const std::string& deckPath, carryover::Report& rep) const;
     bool loadRawOnly(const std::string& filename);
     bool applyReplace(const ReplaceOperation& op, double E, double nu,
@@ -234,12 +236,18 @@ private:
     int maxAuxElementId_ = 0;
 
     // ── 이월 계획 적용(CarryoverApply.cpp) ─────────────────────────────────────
-    // 이 덱(주 덱)이 정의하는 MID · SECID(→ 그 키워드) · `*PART` 변형 PID(→ 그 키워드) — 번호 커서와 같은 훑기를 쓴다
-    std::set<int> definedMaterialIds() const;
-    std::map<int, std::string> definedSectionIds() const;
-    std::map<int, std::string> definedPartVariantIds() const;
+    // 그 줄들(주 덱이거나 펼친 닫힘)이 정의하는 MID · SECID(→ 그 키워드) · `*PART` 변형 PID(→ 그 키워드) — 번호 커서와 같은 훑기를 쓴다
+    static std::set<int> definedMaterialIds(const std::vector<std::string>& lines);
+    static std::map<int, std::string> definedSectionIds(const std::vector<std::string>& lines);
+    static std::map<int, std::string> definedPartVariantIds(const std::vector<std::string>& lines);
     // applyCarryoverPlan 이 남기는 기대 — verifyCarryoverOutput 이 쓴 덱과 대조한다
     struct CarryExpect {
+        // 대조의 「앞」 메시 — 인클루드가 있는 덱(판 2)은 닫힘째 읽은 메시(`closure`), 아니면 baseMesh_
+        const Mesh* base = nullptr;
+        std::shared_ptr<const Mesh> closure;
+        bool includes = false;                                  // 산출도 닫힘째 다시 읽는다(주 덱 옆에 썼다)
+        std::vector<carryover::IncludeEntry> includeList;       // 대조한 닫힘 — 산출의 닫힘도 같아야 한다
+        std::map<long long, double> newShellT;                  // 모프가 넣은 새 셸 섹션 SECID → 두께(판 2)
         std::map<int, Vector3D> moved;                          // 옮긴 절점 → 새 자리
         std::map<int, long long> movedPid;                      // 옮긴 절점 → 그 PID(보고용)
         std::set<int> removedNodes, removedElems;

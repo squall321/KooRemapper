@@ -103,7 +103,10 @@ const char* kDefaultKeep[] = {
 struct Scan {
     std::vector<int> definedMain;      // **주 덱**이 정의한 절점(지울 수 있는 것은 이것뿐)
     std::vector<int> definedAll;       // 인클루드까지 합친 정의
-    std::vector<int> byElement;        // 요소가 쓰는 절점
+    std::vector<int> byElement;        // 요소가 쓰는 절점(보 족은 하나로 읽은 칸 — `auxPrimaryFields`)
+    // 보 족 줄을 **다른 읽기**로만 읽을 때 나오는 절점(넓은 칸 뒤 — 설명서 칸 · 정수 폭 · 토큰이 갈린다, 2026-11-07 사용자 결정
+    // 「둘 다 남긴다」). 지우지 않는다. 되읽기는 입력에 있던 것만 본다(다른 읽기가 지어낸 번호는 원래 없던 절점일 수 있다)
+    std::vector<int> byElementAlt;
     std::map<std::string, std::vector<int>> keepInts;      // keep 키워드 → 그 블록의 정수
     std::map<std::string, std::vector<int>> unknownInts;   // 그 밖 키워드 → 정수
     std::map<int, std::vector<int>> setMembers;            // SID → 멤버(LIST·COLUMN 만)
@@ -274,7 +277,10 @@ void scanRefsStream(std::istream& in, bool isMain, const Opts& o,
             //   건너뛰면 다음 요소의 Card 1 을 이 카드의 연결 줄로 삼켜 절점이 통째로 사라진다.
             const bool comment = (g != std::string::npos && line[g] == '$');
             if (comment) continue;
-            if (g == std::string::npos && cardRemaining == 0) continue;   // 카드 밖의 빈 줄
+            // 카드 밖의 빈 줄만 건너뛴다 — 보 족 카드(auxRemaining)도 셈에 든다. 보의 옵션 카드(`_ORIENTATION` 의 VX VY VZ …)를
+            // 비워 두면 그 빈 줄이 그 카드다(LS-PrePost 도 그렇게 읽는다). 예전엔 격자 셈만 보아 다음 요소의 Card 1 을 그 카드로
+            // 삼켰다 — 그 요소의 절점을 아무도 안 쓴다고 보고 지웠다(rc 0 · 2026-11-07 검토).
+            if (g == std::string::npos && cardRemaining == 0 && auxRemaining == 0) continue;
             if (elemOpaque && aux.supported) {
                 // ★보·질량·이산 족은 **칸 자리를 안다** — 추측하지 않는다.
                 //   그래서 `*ELEMENT_BEAM` 의 RT1·RR1·LOCAL 이나 `*ELEMENT_SEATBELT` 의
@@ -282,16 +288,16 @@ void scanRefsStream(std::istream& in, bool isMain, const Opts& o,
                 //   번호 절점이 영구히 남는다).
                 if (auxRemaining == 0) { auxLineIdx = 0; auxRemaining = aux.lines; }
                 if (auxLineIdx == 0) {
-                    auto f = cardFields(line, fw);
-                    auto take = [&](int from, int cnt) {
-                        if (from < 0) return;
-                        for (int q = 0; q < cnt; ++q) {
-                            int v = fieldInt(f, (size_t)(from + q));
-                            if (v > 0) sc.byElement.push_back(v);
-                        }
-                    };
-                    take(aux.nodeSkip, aux.nodeCount);
-                    take(aux.nodeSkip2, aux.nodeCount2);
+                    // 칸은 공용 판정기가 자른다 — 안전띠 SLEN 은 E16 이라 N3 · N4 가 57-72열이다(정수 폭으로 자르면 N4 를 놓쳐
+                    // safe 가 쓰는 절점을 지웠다 · 2026-11-07). 줄이 두 가지로 읽혀 갈리면(정수 폭으로 쓴 안전띠 줄) **둘 다** 남긴다 —
+                    // 하나로 읽은 칸은 byElement, 다른 읽기만 말하는 절점은 byElementAlt. 되읽기 검증(verifyDeck)도 이 걸음을 쓴다.
+                    const auto rd = KooRemapper::auxCardReadings(aux, line, fw);
+                    const auto& prim = KooRemapper::auxPrimaryFields(rd);
+                    for (int v : KooRemapper::auxNodesOf(aux, prim)) sc.byElement.push_back(v);
+                    for (int v : KooRemapper::auxNodesAlt(aux, rd, prim)) sc.byElementAlt.push_back(v);
+                } else if (auxLineIdx == aux.optNodeLine) {
+                    // 옵션 카드의 절점 — 보 `_ELBOW` 의 가운데 절점 MN(예전엔 Card 1 만 읽어 safe 가 MN 을 지웠다 · 재검토 D2)
+                    for (int v : KooRemapper::auxOptNodesOf(aux, line, fw)) sc.byElement.push_back(v);
                 }
                 ++auxLineIdx;
                 if (--auxRemaining <= 0) auxRemaining = 0;
@@ -453,12 +459,16 @@ Resolution resolve(const Opts& o, Scan& sc) {
     sortUnique(sc.definedMain);
     sortUnique(sc.definedAll);
     sortUnique(sc.byElement);
+    sortUnique(sc.byElementAlt);
     sortUnique(sc.opaqueSetInts);
 
-    // 후보 = 주 덱이 정의했고 어떤 요소도 쓰지 않는 절점
+    // 후보 = 주 덱이 정의했고 어떤 요소도 쓰지 않는 절점 — 보 족 줄의 다른 읽기가 말하는 절점도 쓰는 것으로 친다
+    std::vector<int> used;
+    std::set_union(sc.byElement.begin(), sc.byElement.end(), sc.byElementAlt.begin(), sc.byElementAlt.end(),
+                   std::back_inserter(used));
     r.candidates.reserve(sc.definedMain.size());
     std::set_difference(sc.definedMain.begin(), sc.definedMain.end(),
-                        sc.byElement.begin(), sc.byElement.end(),
+                        used.begin(), used.end(),
                         std::back_inserter(r.candidates));
 
     std::vector<char> mark(r.candidates.size(), 0);
@@ -687,7 +697,9 @@ struct VerifyResult {
     int firstUndefined = 0;
 };
 
-VerifyResult verifyDeck(const std::string& path, const Opts& o) {
+// `inputDefined` — 입력 덱(닫힘)이 정의한 절점(정렬). 보 족 줄의 **다른 읽기**만 말하는 절점은 입력에 있던 것만 본다 —
+// 그것이 산출에 없으면 이 op 이 지운 것이다. 입력에도 없던 번호는 다른 읽기가 지어낸 것일 수 있어 세지 않는다.
+VerifyResult verifyDeck(const std::string& path, const Opts& o, const std::vector<int>& inputDefined) {
     VerifyResult vr;
     // 산출 덱의 닫힘 — 쓴 덱이 가리키는 인클루드를 같은 정본으로 다시 찾는다(주 덱 폴더가 다를 수 있다)
     const std::vector<std::string> files = deckFiles(path, KooRemapper::include_closure::readPaths(path));
@@ -701,8 +713,14 @@ VerifyResult verifyDeck(const std::string& path, const Opts& o) {
     scanRefsClosure(files, probe, pidNodes, sc, paramRefs);
     sortUnique(sc.definedAll);
     sortUnique(sc.byElement);
+    sortUnique(sc.byElementAlt);
     for (int v : sc.byElement)
         if (!inSorted(sc.definedAll, v)) {
+            ++vr.undefByElement;
+            if (!vr.firstUndefined) vr.firstUndefined = v;
+        }
+    for (int v : sc.byElementAlt)
+        if (!inSorted(sc.definedAll, v) && inSorted(inputDefined, v) && !inSorted(sc.byElement, v)) {
             ++vr.undefByElement;
             if (!vr.firstUndefined) vr.firstUndefined = v;
         }
@@ -844,6 +862,29 @@ int runCleanupNodes(const std::string& yamlFile, ConsoleOutput& console) {
     //    예전 자기 재귀(8단)는 9단째 인클루드를 「읽었다」고 세면서 훑지 않아 거기 요소가 쓰는 절점을 **지웠다**(rc 0 실측).
     const auto clo = KooRemapper::include_closure::readPaths(o.model);
     const std::vector<std::string> files = deckFiles(o.model, clo);
+    // ★쓸 파일(산출 · 보고)이 읽는 덱(주 덱 · 인클루드)과 같으면 거절한다 — 고쳐 쓰기는 산출을 열어(잘라 비워) 놓고 주 덱을 다시 흘려
+    //   읽는다. 같은 파일이면 입력이 0 바이트가 되고 되읽기도 빈 덱을 보아 rc 0 이었다. 인클루드 · 보고는 다 읽은 뒤에 그 입력을
+    //   덮는다(2026-11-07 검토 #6). 설정 YAML · 이름이 가리킨 경로(깊이 상한을 넘은 것) · 따라가지 않는 변형 인클루드의 파일도 덮지
+    //   않는다 — 산출 덱이 그 변형 카드를 그대로 실으니 덮으면 산출이 가리키는 파일이 사라진다(재검토 R3 과 같은 규칙). 산출을 쓰지
+    //   않는 report 모드는 보고만 본다
+    {
+        const std::vector<std::string> writes{o.mode == "report" ? std::string() : o.output, o.reportPath};
+        std::vector<std::string> reads = files;
+        reads.push_back(yamlFile);
+        for (const auto& ref : clo.refs)
+            if (!ref.path.empty()) reads.push_back(ref.path);
+        for (const auto& n : clo.notFollowed)
+            if (!n.path.empty()) reads.push_back(n.path);
+        std::string w, r;
+        if (KooRemapper::include_closure::clobberPair(writes, reads, w, r)) {
+            const bool both = std::find(reads.begin(), reads.end(), r) == reads.end();
+            console.error(both ? "쓸 파일 「" + w + "」 과 「" + r + "」 이 같은 파일이다 — 하나가 다른 하나를 덮는다"
+                               : "쓸 파일 「" + w + "」 이 읽는 파일 「" + r + "」 과 같은 파일이다 — 입력(설정 · 주 덱 · 인클루드)에 쓰지 "
+                                 "않는다(고쳐 쓰기가 입력을 비우고 다시 읽는다)");
+            console.info("output · report 를 입력과 다른 이름으로 주라");
+            return 1;
+        }
+    }
 
     // ── 패스 0·1 ─────────────────────────────────────────────────────────────
     SectionMap sm;
@@ -895,6 +936,14 @@ int runCleanupNodes(const std::string& yamlFile, ConsoleOutput& console) {
         console.info("  nodes defined (incl. *INCLUDE): " + std::to_string(sc.definedAll.size()) +
                      "  — 인클루드 정의는 지우지 않는다");
     console.info("  used by elements:          " + std::to_string(sc.byElement.size()));
+    {
+        std::vector<int> altOnly;
+        std::set_difference(sc.byElementAlt.begin(), sc.byElementAlt.end(), sc.byElement.begin(), sc.byElement.end(),
+                            std::back_inserter(altOnly));
+        if (!altOnly.empty())
+            console.info("  kept only by another reading of a beam-family line: " + std::to_string(altOnly.size()) +
+                         " — 넓은 칸 뒤 칸이 설명서 칸 · 정수 폭으로 갈리는 줄(둘 다 남긴다)");
+    }
     console.info("  unreferenced candidates:   " + std::to_string(res.candidates.size()));
     for (const auto& r : res.keptByKeyword)
         console.info("    kept by " + r.keyword + ": " + std::to_string(r.nodes));
@@ -955,7 +1004,7 @@ int runCleanupNodes(const std::string& yamlFile, ConsoleOutput& console) {
             console.warning("정리 후 멤버가 0 이 된 *SET_NODE 가 " + std::to_string(setsEmptied) +
                             " 개다 — 그 세트를 가리키는 카드가 있으면 LS-DYNA 가 거기서 죽는다");
         if (o.verify) {
-            vr = verifyDeck(o.output, o);
+            vr = verifyDeck(o.output, o, sc.definedAll);
             if (vr.undefByElement == 0 && vr.undefSetMembers == 0)
                 console.success("verify: 산출 덱에 '참조하는데 없는 절점' 0 (요소·세트 멤버 전수)");
             else
@@ -987,6 +1036,12 @@ int runCleanupNodes(const std::string& yamlFile, ConsoleOutput& console) {
         jf << "    \"defined_main\": " << sc.definedMain.size() << ",\n";
         jf << "    \"defined_all\": " << sc.definedAll.size() << ",\n";
         jf << "    \"used_by_elements\": " << sc.byElement.size() << ",\n";
+        {
+            std::vector<int> altOnly;
+            std::set_difference(sc.byElementAlt.begin(), sc.byElementAlt.end(), sc.byElement.begin(), sc.byElement.end(),
+                                std::back_inserter(altOnly));
+            jf << "    \"used_only_by_other_reading\": " << altOnly.size() << ",\n";
+        }
         jf << "    \"unreferenced_candidates\": " << res.candidates.size() << ",\n";
         jf << "    \"deletable\": " << res.deletable.size() << ",\n";
         jf << "    \"deleted\": " << deletedNodeLines << "\n";

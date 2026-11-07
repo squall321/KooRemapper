@@ -75,24 +75,46 @@ struct Walker {
             return;
         }
         if (kw != "*INCLUDE") {
-            out.notFollowed.push_back({file, base + at + 1, kw, names.empty() ? "" : names[0].name});
+            const std::string nm = names.empty() ? "" : names[0].name;
+            out.notFollowed.push_back({file, base + at + 1, kw, nm, nm.empty() ? "" : resolvePath(nm, mainDir, searchDirs)});
             return;
         }
         for (const auto& n : names) {
             ++out.cards;
+            NameRef ref;
+            ref.file = file;
+            ref.firstLine = base + n.line + 1;
+            ref.lastLine = base + n.last + 1;
+            ref.name = n.name;
             const std::string p = resolvePath(n.name, mainDir, searchDirs);
             if (p.empty()) {
                 out.unresolved.push_back({file, base + n.line + 1, n.name, "없다"});
+                ref.what = NameRef::What::Unresolved;
+                out.refs.push_back(std::move(ref));
                 continue;
             }
-            if (depth + 1 > maxDepth) { out.depthCut = true; continue; }
+            ref.path = p;
+            if (depth + 1 > maxDepth) {
+                out.depthCut = true;
+                ref.what = NameRef::What::DepthCut;
+                out.refs.push_back(std::move(ref));
+                continue;
+            }
             const std::string k = keyOf(p);
-            if (visited.count(k)) { out.cycles.push_back(p); continue; }
+            if (visited.count(k)) {
+                out.cycles.push_back(p);
+                ref.what = NameRef::What::Cycle;
+                out.refs.push_back(std::move(ref));
+                continue;
+            }
             std::ifstream in(p);
             if (!in.is_open()) {
                 out.unresolved.push_back({file, base + n.line + 1, n.name, "열 수 없다"});
+                ref.what = NameRef::What::Unresolved;
+                out.refs.push_back(std::move(ref));
                 continue;
             }
+            out.refs.push_back(ref);
             visited.insert(k);
             File f;
             f.path = p;
@@ -108,6 +130,9 @@ struct Walker {
             std::string l;
             while (std::getline(in, l)) {
                 if (!l.empty() && l.back() == '\r') l.pop_back();
+                // 파일 맨 앞 UTF-8 BOM 은 뗀다 — 흘려 읽기(`walkStream`) · 주 덱 리더 · StepForge(utf-8-sig)와 같다. 안 떼면 첫 키워드가
+                // 데이터 줄로 보여 그 블록(세트 · 접촉 …)을 닫힘 검사가 통째로 못 보았다(2026-11-07 적대적 검토 #2)
+                if (f.lines.empty() && l.size() >= 3 && l.compare(0, 3, "\xEF\xBB\xBF") == 0) l.erase(0, 3);
                 if (!deckscan::isDataLine(l) && deckscan::keywordToken(l) == "*END") break;
                 f.lines.push_back(std::move(l));
             }
@@ -260,8 +285,9 @@ std::vector<std::string> flatten(const std::vector<std::string>& mainLines, cons
 namespace {
 
 // 이 파일의 줄을 펼쳐 담는다 — 맨 `*INCLUDE` 카드는 지우고 그 자리에 끌어온 파일들을(이 카드에서 끌어온 차례로) 넣는다.
+// `origin` 이 있으면 담은 줄마다 그 자리(이 파일의 색인 `fileIdx` · 줄)를 함께 담는다.
 void inlineInto(std::vector<std::string>& out, const std::vector<std::string>& lines, const std::string& path,
-                const Closure& c, size_t depth, bool isMain) {
+                const Closure& c, size_t depth, bool isMain, size_t fileIdx, std::vector<LineOrigin>* origin) {
     std::vector<const File*> kids;
     for (const auto& f : c.files)
         if (f.depth == depth + 1 && f.from == path) kids.push_back(&f);
@@ -278,12 +304,14 @@ void inlineInto(std::vector<std::string>& out, const std::vector<std::string>& l
                 ++j;
             }
             for (const File* f : kids)
-                if (f->fromLine == card) inlineInto(out, f->lines, f->path, c, depth + 1, false);
+                if (f->fromLine == card)
+                    inlineInto(out, f->lines, f->path, c, depth + 1, false, static_cast<size_t>(f - c.files.data()), origin);
             i = j;
             continue;
         }
         if (!isMain && !kw.empty() && kw.rfind("*KEYWORD", 0) == 0) { ++i; continue; }   // 폭은 주 덱이 정한다
         out.push_back(l);
+        if (origin) origin->push_back({fileIdx, i});
         ++i;
     }
 }
@@ -291,8 +319,9 @@ void inlineInto(std::vector<std::string>& out, const std::vector<std::string>& l
 }  // namespace
 
 bool inlined(const std::vector<std::string>& mainLines, const std::string& mainPath, const Closure& c,
-             std::vector<std::string>& out, std::string& why) {
+             std::vector<std::string>& out, std::string& why, std::vector<LineOrigin>* origin) {
     out.clear();
+    if (origin) origin->clear();
     if (!c.complete()) {
         if (!c.unresolved.empty())
             why = "*INCLUDE 를 찾지 못했다 — " + c.unresolved[0].file + ":" + std::to_string(c.unresolved[0].line) + " '" +
@@ -327,8 +356,28 @@ bool inlined(const std::vector<std::string>& mainLines, const std::string& mainP
         }
     }
     out.reserve(mainLines.size());
-    inlineInto(out, mainLines, mainPath, c, 0, true);
+    if (origin) origin->reserve(mainLines.size());
+    inlineInto(out, mainLines, mainPath, c, 0, true, LineOrigin::kMain, origin);
     return true;
+}
+
+bool sameFile(const std::string& a, const std::string& b) {
+    if (a.empty() || b.empty()) return false;
+    std::error_code ec;
+    if (fs::exists(a, ec) && fs::exists(b, ec) && fs::equivalent(a, b, ec) && !ec) return true;
+    return keyOf(a) == keyOf(b);
+}
+
+bool clobberPair(const std::vector<std::string>& writes, const std::vector<std::string>& reads,
+                 std::string& write, std::string& read) {
+    for (size_t i = 0; i < writes.size(); ++i) {
+        if (writes[i].empty()) continue;
+        for (const auto& r : reads)
+            if (sameFile(writes[i], r)) { write = writes[i]; read = r; return true; }
+        for (size_t j = i + 1; j < writes.size(); ++j)
+            if (sameFile(writes[i], writes[j])) { write = writes[i]; read = writes[j]; return true; }
+    }
+    return false;
 }
 
 std::string partFile(const Closure& c, int pid) {

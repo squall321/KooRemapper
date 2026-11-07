@@ -26,15 +26,19 @@
 #include "parser/DeckScan.h"
 #include "parser/DeckWriter.h"
 #include "parser/ElementCardLayout.h"
+#include "parser/IncludeClosure.h"   // 쓸 파일이 입력 덱을 덮는지(sameFile · clobberPair)
 #include "util/YamlComment.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <map>
 #include <set>
 #include <sstream>
 #include <string>
+#include <system_error>
 #include <vector>
 
 using KooRemapper::ConsoleOutput;
@@ -93,6 +97,37 @@ struct DeckIndex {
     std::map<int, int> secElform;              // SECID → ELFORM
     std::vector<std::string> partVariants;     // `*PART_INERTIA` 등
     int fieldWidth = 8;
+    // `*SET_PART`(목록 · 열 꼴)의 SID → PID — `*ELEMENT_MASS_PART_SET` 의 세트를 풀 때만 쓴다(2026-11-07 검토 #5)
+    std::map<int, std::vector<int>> partSets;
+    std::set<int> partSetsOpaque;              // 멤버를 ID 로 못 읽는 꼴(`_ADD` · `_GENERAL` · `_GENERATE` …) · 두 번 정의된 SID
+};
+
+// ── 인클루드 — 정본 닫힘(include_closure::readPaths)을 따른다 ──────────────────────────────────
+// 주 덱 폴더 먼저 · 그다음 `*INCLUDE_PATH` 폴더(Vol_I 181591) · `␣+` 이음 · 인클루드 안 `*END` 는 그 파일만 끝낸다 · 깊이 16 · 같은 파일은
+// 한 번. 예전엔 패스마다 포함하는 파일의 폴더로 풀고 `*INCLUDE_PATH` 를 몰랐으며 깊이 8 에서 말없이 멈췄다 — 9단째 인클루드의 고른 파트
+// 셸이 rc 0 · 되읽기 0 으로 빠졌다(재검토 N3 · D1). 패스는 `*INCLUDE` 블록의 이름 줄(그 이름의 마지막 줄)에서 이 표를 묻는다.
+class IncludeMap {
+public:
+    explicit IncludeMap(const std::string& model) : clo_(KooRemapper::include_closure::readPaths(model)) {
+        for (const auto& r : clo_.refs) byLast_[{r.file, r.lastLine}] = &r;
+    }
+    IncludeMap(const IncludeMap&) = delete;
+    IncludeMap& operator=(const IncludeMap&) = delete;
+    const KooRemapper::include_closure::Closure& closure() const { return clo_; }
+    // 그 파일 그 줄에서 끝나는 이름 — 없으면 nullptr(이름의 앞줄 · 주석 · 닫힘이 보지 않은 줄)
+    const KooRemapper::include_closure::NameRef* at(const std::string& file, size_t line) const {
+        const auto it = byLast_.find({file, line});
+        return it == byLast_.end() ? nullptr : it->second;
+    }
+    // 따라갈 경로(Followed 일 때만) — 아니면 빈 글자
+    std::string follow(const std::string& file, size_t line) const {
+        const auto* r = at(file, line);
+        return r && r->what == KooRemapper::include_closure::NameRef::What::Followed ? r->path : std::string();
+    }
+
+private:
+    KooRemapper::include_closure::Closure clo_;
+    std::map<std::pair<std::string, size_t>, const KooRemapper::include_closure::NameRef*> byLast_;
 };
 
 // `*PART` 블록은 '제목 줄 + 카드 2' 가 **쌍으로 반복**된다(제목은 비워 둘 수 있으나 생략 못 한다).
@@ -100,16 +135,17 @@ struct DeckIndex {
 // 통째로 어긋난다. 주석(`$`)만 뺀다.
 //
 // ⚠ 덱 전문을 메모리에 들지 않는다(2.32GB 전제) — **블록 하나만** 버퍼한다.
-void indexDeck(const std::string& path, DeckIndex& idx, std::set<std::string>& visited,
-               int depth = 0) {
-    if (depth > 8 || visited.count(path)) return;
+// `im` — 인클루드를 따라갈 표(되읽기는 홀로 선 산출을 보니 nullptr)
+void indexDeck(const std::string& path, DeckIndex& idx, std::set<std::string>& visited, const IncludeMap* im) {
+    if (visited.count(path)) return;
     visited.insert(path);
     std::ifstream in(path);
     if (!in.is_open()) return;
-    const std::string baseDir = dirOf(path);
+    size_t lineNo = 0;
     const int sfw = 10;                        // `*PART` 카드 2 와 `*SECTION_*` 은 8I10 이다
     std::string line, kw;
     std::vector<std::string> buf;              // 지금 블록의 카드 줄
+    int setW = 10;                             // `*SET_PART` 카드 폭(8I10 · long 이면 20)
 
     auto flush = [&]() {
         if (kw == "*PART" || kw == "*PART_TITLE") {
@@ -137,20 +173,49 @@ void indexDeck(const std::string& path, DeckIndex& idx, std::set<std::string>& v
                 }
                 ++di;
             }
+        } else if (starts(kw, "*SET_PART")) {
+            // 목록 꼴 · 열 꼴만 멤버를 읽는다(열 꼴은 줄마다 칸 0 이 PID — 속성 A1-A4 는 멤버가 아니다)
+            const auto kind = KooRemapper::deckscan::classifySetNode(kw);
+            const bool list = kind != KooRemapper::deckscan::SetKind::OPAQUE;
+            const bool column = kind == KooRemapper::deckscan::SetKind::COLUMN;
+            const int tn = titleLines(kw);
+            int di = 0, sid = 0;
+            std::vector<int> mem;
+            for (const auto& l : buf) {
+                if (!isDataLine(l)) continue;
+                if (di < tn) { ++di; continue; }
+                const auto f = cardFields(l, setW);
+                if (di++ == tn) { sid = fieldInt(f, 0); continue; }
+                for (size_t q = 0; q < (column ? std::min<size_t>(1, f.size()) : f.size()); ++q) {
+                    const int v = fieldInt(f, q);
+                    if (v > 0) mem.push_back(v);
+                }
+            }
+            if (sid > 0) {
+                if (!list || idx.partSets.count(sid) || idx.partSetsOpaque.count(sid)) {
+                    idx.partSets.erase(sid);
+                    idx.partSetsOpaque.insert(sid);
+                } else {
+                    idx.partSets[sid] = mem;
+                }
+            }
         }
         buf.clear();
     };
 
     while (std::getline(in, line)) {
         while (!line.empty() && line.back() == '\r') line.pop_back();
+        ++lineNo;
         size_t g = line.find_first_not_of(" \t");
         if (g != std::string::npos && line[g] == '*') {
             flush();
             kw = kwBare(keywordToken(line));
+            if (kw == "*END") break;                       // 그 파일은 여기서 끝난다(Vol_I 179654 — 닫힘과 같다)
             if (kw == "*KEYWORD") {
                 int w = KooRemapper::keywordCardDeckWidth(line);
                 if (w > 0) idx.fieldWidth = w;
             }
+            setW = KooRemapper::keywordFieldWidth(line, idx.fieldWidth) >= 20 ? 20 : 10;
             if (starts(kw, "*PART") && kw != "*PART" && kw != "*PART_TITLE" &&
                 std::find(idx.partVariants.begin(), idx.partVariants.end(), kw) ==
                     idx.partVariants.end())
@@ -158,11 +223,13 @@ void indexDeck(const std::string& path, DeckIndex& idx, std::set<std::string>& v
             continue;
         }
         if (kw == "*INCLUDE") {
-            std::string rel = trim(line);
-            if (!rel.empty()) indexDeck(joinPath(baseDir, rel), idx, visited, depth + 1);
+            if (im) {
+                const std::string next = im->follow(path, lineNo);
+                if (!next.empty()) indexDeck(next, idx, visited, im);
+            }
             continue;
         }
-        if (kw != "*PART" && kw != "*PART_TITLE" && !starts(kw, "*SECTION_SOLID")) continue;
+        if (kw != "*PART" && kw != "*PART_TITLE" && !starts(kw, "*SECTION_SOLID") && !starts(kw, "*SET_PART")) continue;
         if (g != std::string::npos && line[g] == '$') continue;
         buf.push_back(line);
     }
@@ -194,16 +261,99 @@ struct Picked {
     std::vector<std::string> auxKws;                      // 그 중 **칸 자리를 아는** 키워드
     std::map<std::string, long long> opaqueElemTouched;   // 못 읽는 변형이 고른 파트를 담았다
     std::map<std::string, long long> opaqueElemOther;     // 담지 않았다(그냥 버린다)
+    long long seatbeltCards = 0;                          // 고른 파트의 `*ELEMENT_SEATBELT` 카드
+    std::vector<std::string> seatbeltDevices;             // 덱의 안전띠 장치 키워드 블록 — 「파일:줄 키워드」
+    // ── 보 장치 · 질량 얹기(2026-11-07 검토 #5) ──
+    std::vector<int> beamEids;                            // 고른 파트의 보(`*ELEMENT_BEAM*`) 요소 번호
+    struct BeamDevice { std::string where; std::vector<int> refs; };
+    std::vector<BeamDevice> beamDevices;                  // `*ELEMENT_BEAM_PULLEY` · `_SOURCE` 줄 — 가리키는 보 요소 번호
+    long long massPartCards = 0;                          // 고른 파트(세트)의 `*ELEMENT_MASS_PART(_SET)` 줄(요소가 아니다 — auxCards 와 따로)
+    long long massSetCards = 0;                           // 그 가운데 `_SET`(세트가 실려야 한다)
+    std::vector<std::string> massSetRefused;              // 세트를 일부만 고르거나 풀 수 없는 `*ELEMENT_MASS_PART_SET` 줄
+    // ── 보 족 줄이 두 가지로 읽힐 때(넓은 칸 뒤 칸 — 2026-11-07 사용자 결정 「둘 다 남기고 번호 매기기는 거절」) ──
+    std::vector<int> altNodes;                            // 고른 줄을 다른 읽기로만 읽을 때 나오는 절점 — 덱에 있으면 싣는다
+    struct AuxLine { std::string where; std::vector<int> altVsManual; bool placeable = true; };
+    std::vector<AuxLine> renumberRisk;                    // 고른 보 족 줄 가운데 번호를 제자리에 못 바꿔 쓸 수 있는 것
+    std::vector<std::string> ambiguousPid;                // 읽기마다 PID 가 갈리고 그 하나가 고른 PID 인 줄
 };
 
-void scanElements(const std::string& path, const std::vector<int>& sel, const DeckIndex& idx,
-                  const std::map<int, int>& pidNodes, Picked& pk,
-                  std::set<std::string>& visited, int depth = 0, bool top = true) {
-    if (depth > 8 || visited.count(path)) return;
+// 그 번호들(정렬) 가운데 덱(닫힘)의 `*NODE` 가 정의한 것을 `found` 에 — 보 족 줄의 다른 읽기가 말하는 절점이 덱에 있나를 잴 때만
+// 부른다(드물다 · 덱 전체의 절점 표를 들지 않는다). 인클루드는 scanElements 와 같이 맨 `*INCLUDE` 를 따라간다.
+void definedNodesAmong(const std::string& path, const DeckIndex& idx, const std::vector<int>& want,
+                       std::vector<int>& found, std::set<std::string>& visited, const IncludeMap& im) {
+    if (visited.count(path)) return;
     visited.insert(path);
     std::ifstream in(path);
     if (!in.is_open()) return;
-    const std::string baseDir = dirOf(path);
+    std::string line, kw;
+    int fw = idx.fieldWidth;
+    size_t lineNo = 0;
+    while (std::getline(in, line)) {
+        while (!line.empty() && line.back() == '\r') line.pop_back();
+        ++lineNo;
+        const size_t g = line.find_first_not_of(" \t");
+        if (g != std::string::npos && line[g] == '*') {
+            kw = kwBare(keywordToken(line));
+            if (kw == "*END") break;
+            fw = KooRemapper::keywordFieldWidth(line, idx.fieldWidth);
+            continue;
+        }
+        if (!isDataLine(line)) continue;
+        if (kw == "*INCLUDE") {
+            const std::string next = im.follow(path, lineNo);
+            if (!next.empty()) definedNodesAmong(next, idx, want, found, visited, im);
+            continue;
+        }
+        if (kw != "*NODE") continue;
+        int nid = 0;
+        double xyz[3];
+        if (readNodeLine(line, fw, nid, xyz) && inSorted(want, nid)) found.push_back(nid);
+    }
+}
+
+// 보 족 Card 1 의 PID 후보 — 하나로 읽은 PID(`auxPrimaryFields` · 0 이면 PID 없음)가 먼저, 다른 읽기(설명서 칸 · 정수 폭 · 토큰)가
+// 다른 PID 를 말하면 그것이 덱의 파트(`*PART` 표)일 때만 더한다 — 정수꼴 질량값(「1000」)이나 빈 칸을 PID 로 세어 멀쩡한 줄을
+// 모호하다 하지 않는다. 후보가 둘 이상이고 그 하나라도 고른 PID 면 실을지 버릴지 정할 수 없다(2026-11-07 「둘 다 남기고 …」 — 질량 PID).
+// 패스 1(scanElements)과 패스 2(Writer)가 같이 쓴다 — 고르는 판정이 갈리면 싣는 줄과 센 절점이 어긋난다.
+std::vector<int> auxPidCandidates(const KooRemapper::AuxElementCard& a, const KooRemapper::AuxCardReadings& rd,
+                                  const DeckIndex& idx) {
+    std::vector<int> out;
+    if (!a.hasPart || a.partField < 0) return out;
+    const int prim = fieldInt(KooRemapper::auxPrimaryFields(rd), (size_t)a.partField);
+    out.push_back(prim);
+    for (int p : KooRemapper::auxPidsOf(a, rd))
+        if (p != prim && idx.parts.count(p)) out.push_back(p);
+    return out;
+}
+
+// `*ELEMENT_MASS_PART_SET` 의 파트 세트를 고른 파트와 견준다 — 0 = 세트에 고른 파트가 없다(버린다) · 1 = 세트가 다 고른 파트다
+// (싣는다) · -1 = 실을지 버릴지 정할 수 없다(`why`). 질량은 세트 전체에 나눠 얹히니 일부만 실으면 남은 파트에 얹히는 질량이 바뀐다.
+// 세트를 못 풀면(목록 꼴이 아니다 · 덱에서 못 찾았다) 고른 파트에 닿는지 모른다 — 정할 수 없다로 친다.
+int massSetVerdict(int sid, const DeckIndex& idx, const std::vector<int>& sel, std::string& why) {
+    const auto it = idx.partSets.find(sid);
+    if (sid <= 0 || it == idx.partSets.end() || idx.partSetsOpaque.count(sid)) {
+        why = "파트 세트 " + std::to_string(sid) + " 을 풀 수 없다(목록 · 열 꼴 *SET_PART 가 아니거나 덱 · 맨 *INCLUDE 에서 못 찾았다)";
+        return -1;
+    }
+    std::string all, mine;
+    size_t in = 0;
+    for (int p : it->second) {
+        all += (all.empty() ? "" : ", ") + std::to_string(p);
+        if (inSorted(sel, p)) { ++in; mine += (mine.empty() ? "" : ", ") + std::to_string(p); }
+    }
+    if (in == 0) return 0;
+    if (in == it->second.size()) return 1;
+    why = "파트 세트 " + std::to_string(sid) + "(" + all + ") 가운데 " + mine + " 만 고른다 — 나눠 얹는 질량이 남은 파트에 다르게 간다";
+    return -1;
+}
+
+void scanElements(const std::string& path, const std::vector<int>& sel, const DeckIndex& idx,
+                  const std::map<int, int>& pidNodes, Picked& pk,
+                  std::set<std::string>& visited, const IncludeMap& im, bool top = true) {
+    if (visited.count(path)) return;
+    visited.insert(path);
+    std::ifstream in(path);
+    if (!in.is_open()) return;
     std::string line, kw;
     int fw = idx.fieldWidth;
     KooRemapper::ElementKeywordInfo info;
@@ -211,18 +361,23 @@ void scanElements(const std::string& path, const std::vector<int>& sel, const De
     int remaining = 0, lineIdx = 0;
     std::vector<std::string> card1;
     bool inElem = false, opaque = false, picked = false, inInclude = false;
+    std::string deviceAt;   // 데이터 줄을 기다리는 안전띠 장치 블록 「파일:줄 키워드」 — 첫 데이터 줄에서 센다(빈 블록은 장치가 없다)
     // 보·질량·이산 족 — 공용 판정기의 별도 축이 칸 자리를 안다(ElementCardLayout.h 의 인용).
     KooRemapper::AuxElementCard aux;
     int auxRemaining = 0, auxLineIdx = 0;
     bool auxPicked = false;
     std::vector<std::string> auxCard1;
+    size_t lineNo = 0;
 
     while (std::getline(in, line)) {
+        ++lineNo;
         size_t g = line.find_first_not_of(" \t\r\n");
         if (g != std::string::npos && line[g] == '*') {
             remaining = 0;
             kw = kwBare(keywordToken(line));
+            if (kw == "*END") break;                       // 그 파일은 여기서 끝난다(닫힘과 같다)
             fw = KooRemapper::keywordFieldWidth(line, idx.fieldWidth);
+            deviceAt.clear();
             if (kw == "*INCLUDE") { inElem = false; inInclude = true; continue; }
             inInclude = false;
             inElem = starts(kw, "*ELEMENT");
@@ -234,44 +389,83 @@ void scanElements(const std::string& path, const std::vector<int>& sel, const De
                 if (aux.supported &&
                     std::find(pk.auxKws.begin(), pk.auxKws.end(), kw) == pk.auxKws.end())
                     pk.auxKws.push_back(kw);
+                // 안전띠 **장치** 키워드(`_PRETENSIONER` · `_RETRACTOR` · `_SENSOR` · `_SLIPRING` · 모르는 `_*`)는 PID 칸이 없다 —
+                // 어느 띠에 붙었는지 증명할 수 없어 자리를 적어 둔다(아래 runExtractParts 의 거절). 데이터 줄이 있어야 장치다 —
+                // 키워드 줄만 있는 블록은 세지 않는다. `_ACCELEROMETER` 는 띠가 아니라 절점의 가속도를 재는 장치라(Vol_I) 띠와
+                // 무관할 수 있다 — 거절하지 않고 다른 모르는 카드처럼 버려 `dropped_keywords` 에 센다(사용자 결정 2026-11-07)
+                if (aux.family == KooRemapper::AuxFamily::SEATBELT && !aux.supported &&
+                    kw.rfind("*ELEMENT_SEATBELT_ACCELEROMETER", 0) != 0)
+                    deviceAt = path + ":" + std::to_string(lineNo) + " " + kw;
             }
             continue;
         }
         if (inInclude) {
             if (!isDataLine(line)) continue;
-            std::string rel = trim(line);
-            if (!rel.empty())
-                scanElements(joinPath(baseDir, rel), sel, idx, pidNodes, pk, visited,
-                             depth + 1, false);
+            const std::string next = im.follow(path, lineNo);
+            if (!next.empty()) scanElements(next, sel, idx, pidNodes, pk, visited, im, false);
             continue;
         }
         if (!inElem) continue;
         if (g != std::string::npos && line[g] == '$') continue;
-        if (g == std::string::npos && remaining == 0) continue;     // 카드 밖의 빈 줄
+        // 카드 밖의 빈 줄만 건너뛴다 — 보 족 카드(auxRemaining)도 셈에 든다. 비워 둔 옵션 카드도 카드다(LS-PrePost 도 그렇게
+        // 읽는다). 예전엔 격자 셈만 보아 다음 요소의 Card 1 을 그 카드로 삼켜 절점을 놓쳤다(되읽기 실패 · 2026-11-07 검토).
+        if (g == std::string::npos && remaining == 0 && auxRemaining == 0) continue;
 
         if (opaque && aux.supported) {
             // ★칸 자리를 **안다** — PID 칸도 족마다 다르다(`*ELEMENT_MASS` 는 칸 차례 3 = 33-40열 —
-            //   MASS 가 E16 이라 칸은 공용 판정기 `auxCardFields` 가 자른다).
+            //   MASS 가 E16 이라 칸은 공용 판정기 `auxCardReadings` 가 자른다).
             //   `*ELEMENT_PLOTEL` 은 PID 가 없어 여기서 고르지 않고, 쓰기 쪽이 '두 절점이 다
             //   남았나' 로 판정한다(그 줄은 표시용이고 파트에 속하지 않는다).
             if (auxRemaining == 0) {
-                auxCard1 = KooRemapper::auxCardFields(aux, line, fw);
+                const auto rd = KooRemapper::auxCardReadings(aux, line, fw);
+                auxCard1 = KooRemapper::auxPrimaryFields(rd);
                 auxLineIdx = 0;
                 auxRemaining = aux.lines;
-                const int pid = (aux.partField >= 0) ? fieldInt(auxCard1, (size_t)aux.partField) : 0;
-                auxPicked = aux.hasPart && pid > 0 && inSorted(sel, pid);
-                if (auxPicked) ++pk.auxCards;
-            }
-            if (auxLineIdx == 0 && auxPicked) {
-                auto take = [&](int from, int cnt) {
-                    if (from < 0) return;
-                    for (int q = 0; q < cnt; ++q) {
-                        int v = fieldInt(auxCard1, (size_t)(from + q));
-                        if (v > 0) pk.nodes.push_back(v);
-                    }
-                };
-                take(aux.nodeSkip, aux.nodeCount);
-                take(aux.nodeSkip2, aux.nodeCount2);
+                // PID 는 후보 전부를 본다 — 넓은 칸 뒤 PID(질량)는 설명서 칸 · 정수 폭으로 갈릴 수 있다. 갈리는데 그 하나가 고른 PID 면
+                // 실을지 버릴지 정할 수 없다 — 줄을 적어 두고 runExtractParts 가 거절한다(조용히 싣거나 버리지 않는다)
+                const std::string where = path + ":" + std::to_string(lineNo) + " " + kw;
+                std::vector<int> pids;
+                bool hit = false;
+                if (aux.partIsSet) {
+                    // `*ELEMENT_MASS_PART_SET` — 칸 0 이 파트 세트 ID 다. 세트를 풀어 견준다(일부만 · 못 풀면 거절할 줄로 적는다)
+                    std::string why;
+                    const int v = massSetVerdict(fieldInt(auxCard1, 0), idx, sel, why);
+                    if (v < 0) pk.massSetRefused.push_back(where + " — " + why);
+                    hit = v == 1;
+                } else {
+                    pids = auxPidCandidates(aux, rd, idx);
+                    for (int p : pids) hit = hit || inSorted(sel, p);
+                }
+                auxPicked = aux.hasPart && hit;
+                if (auxPicked && pids.size() > 1) {
+                    std::string ps;
+                    for (int p : pids) ps += (ps.empty() ? "" : " / ") + (p > 0 ? std::to_string(p) : std::string("0(없음)"));
+                    pk.ambiguousPid.push_back(where + " — PID " + ps);
+                }
+                if (auxPicked && !aux.hasEid) {
+                    // 질량 얹기(`*ELEMENT_MASS_PART(_SET)`)는 요소가 아니다 — 요소 수에 넣지 않는다(EID · 절점 칸이 없다)
+                    ++pk.massPartCards;
+                    if (aux.partIsSet) ++pk.massSetCards;
+                } else if (auxPicked) {
+                    ++pk.auxCards;
+                    if (aux.family == KooRemapper::AuxFamily::SEATBELT) ++pk.seatbeltCards;
+                    if (aux.family == KooRemapper::AuxFamily::BEAM) pk.beamEids.push_back(fieldInt(auxCard1, 0));
+                    // 절점 — 하나로 읽은 칸은 싣고, 다른 읽기만 말하는 절점은 덱에 있으면 싣는다(둘 다 남긴다)
+                    for (int v : KooRemapper::auxNodesOf(aux, auxCard1)) pk.nodes.push_back(v);
+                    for (int v : KooRemapper::auxNodesAlt(aux, rd, auxCard1)) pk.altNodes.push_back(v);
+                    // 번호 매기기는 설명서 칸(LS-DYNA 가 읽는 칸)에 쓴다. 제자리에 못 쓰거나(콤마 · 절점 칸에 공백) 그 줄을 그렇게
+                    // 썼을 수 있는 다른 읽기가 설명서 칸에 없는 절점을 말하면 적어 둔다 — 그 절점이 덱에 있으면 모호하다(runExtractParts 가
+                    // 덱에서 잰다). 설명서 꼴 줄(N4 가 65-72열에 있다)은 정수 폭 읽기가 갈림을 말하지 않는다(`auxNodesDisputed`)
+                    const auto altM = KooRemapper::auxNodesDisputed(aux, rd);
+                    const bool placeable = KooRemapper::auxManualNodesPlaceable(aux, rd);
+                    if (!placeable || !altM.empty()) pk.renumberRisk.push_back({where, altM, placeable});
+                }
+            } else if (auxPicked && auxLineIdx == aux.optNodeLine) {
+                // 옵션 카드의 절점 — 보 `_ELBOW` 의 가운데 절점 MN(8칸 표). 콤마 줄 · 칸 안에 빈칸 · MN 칸 안에서 시작하는 `$` 주석이면
+                // 번호를 제자리에 못 바꾼다(재검토 D2 — 주석이 겹친 MN 에 새 번호를 쓰면 `$` 를 덮어 주석 글자가 칸 2 의 값이 됐다)
+                for (int v : KooRemapper::auxOptNodesOf(aux, line, fw)) pk.nodes.push_back(v);
+                if (!KooRemapper::auxOptNodesPlaceable(aux, line, fw))
+                    pk.renumberRisk.push_back({path + ":" + std::to_string(lineNo) + " " + kw, {}, false});
             }
             ++auxLineIdx;
             if (--auxRemaining <= 0) auxRemaining = 0;
@@ -284,12 +478,33 @@ void scanElements(const std::string& path, const std::vector<int>& sel, const De
             // ⚠ PID 칸을 1 로 **가정하면 안 된다.** 족은 알고 줄 수만 모르는 경우가 있고
             //   (`*ELEMENT_MASS_NODE_SET` 은 PID 가 칸 차례 **3** — 33-40열이다), 1 로 가정하면 그 카드가
             //   '안 고른 파트' 로 분류돼 **조용히 버려진다**(실측으로 회귀 L-14 가 잡았다).
-            auto f = KooRemapper::auxCardFields(aux, line, fw);
-            const int pf = (aux.family != KooRemapper::AuxFamily::NONE && aux.partField >= 0)
-                               ? aux.partField : 1;
-            int pid = fieldInt(f, (size_t)pf);
-            if (pid > 0 && inSorted(sel, pid)) ++pk.opaqueElemTouched[kw];
-            else                               ++pk.opaqueElemOther[kw];
+            //   족은 아는데 **PID 칸이 없다**고 표가 말하면(`*ELEMENT_SEATBELT_ACCELEROMETER` 같은 별개 키워드 · 플롯 요소)
+            //   PID 를 짐작하지 않는다 — 예전엔 칸 1(가속도계의 절점 · 리트랙터의 절점)을 PID 로 읽어, 그 번호가 고른 PID 와
+            //   우연히 같으면 「고른 파트를 담았다」 고 거절했다. 여기서는 싣지 않는 카드로 센다 — 안전띠 장치(가속도계 · 데이터 줄
+            //   없는 블록은 빼고)는 고른 파트에 안전띠 요소가 있으면 runExtractParts 가 통째로 거절한다(띠에 붙었는지 증명할 수 없다).
+            if (aux.family != KooRemapper::AuxFamily::NONE && !aux.hasPart) {
+                if (!deviceAt.empty()) { pk.seatbeltDevices.push_back(deviceAt); deviceAt.clear(); }
+                // 보 장치(`*ELEMENT_BEAM_PULLEY` · `_SOURCE` — 8칸 표)는 가리키는 보 요소 번호를 적어 둔다(runExtractParts 가 고른 보와 견준다)
+                if (!aux.elemRefFields.empty()) {
+                    const auto f = cardFields(line, fw >= 20 ? 20 : 10);
+                    Picked::BeamDevice bd{path + ":" + std::to_string(lineNo) + " " + kw, {}};
+                    for (int q : aux.elemRefFields) bd.refs.push_back(fieldInt(f, (size_t)q));
+                    pk.beamDevices.push_back(std::move(bd));
+                }
+                ++pk.opaqueElemOther[kw];
+                continue;
+            }
+            // 족을 알면 그 PID 칸의 후보 전부(넓은 칸 뒤 PID 는 읽기마다 갈린다 — `auxPidCandidates`), 모르면 칸 1
+            const auto rd = KooRemapper::auxCardReadings(aux, line, fw);
+            bool touched = false;
+            if (aux.family != KooRemapper::AuxFamily::NONE && aux.partField >= 0) {
+                for (int p : auxPidCandidates(aux, rd, idx)) touched = touched || inSorted(sel, p);
+            } else {
+                const int pid = fieldInt(KooRemapper::auxPrimaryFields(rd), 1);
+                touched = pid > 0 && inSorted(sel, pid);
+            }
+            if (touched) ++pk.opaqueElemTouched[kw];
+            else         ++pk.opaqueElemOther[kw];
             continue;
         }
         if (remaining == 0) {
@@ -362,15 +577,19 @@ struct Remap {
 // 고정폭 칸 하나를 **제자리에서** 갈아 끼운다. 다른 칸의 글자는 손대지 않는다 —
 // 그래서 좌표 실수를 다시 포맷하지 않고(왕복 오차 0) 주석·꼬리 공백도 그대로 간다.
 // 새 값이 칸보다 길면 false 를 돌려준다(번호를 1부터 다시 매기면 일어날 수 없다).
-bool putField(std::string& line, int fw, size_t idx, int value) {
-    const size_t off = idx * (size_t)fw;
-    if (fw <= 0) return false;
+bool putAt(std::string& line, size_t col, size_t width, int value) {
+    if (width == 0 || width > 30) return false;
     char buf[32];
-    int n = std::snprintf(buf, sizeof(buf), "%*d", fw, value);
-    if (n != fw) return false;
-    if (line.size() < off + (size_t)fw) line.resize(off + (size_t)fw, ' ');
-    line.replace(off, (size_t)fw, buf, (size_t)fw);
+    int n = std::snprintf(buf, sizeof(buf), "%*d", (int)width, value);
+    if (n != (int)width) return false;
+    if (line.size() < col + width) line.resize(col + width, ' ');
+    line.replace(col, width, buf, width);
     return true;
+}
+
+bool putField(std::string& line, int fw, size_t idx, int value) {
+    if (fw <= 0) return false;
+    return putAt(line, idx * (size_t)fw, (size_t)fw, value);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -448,6 +667,7 @@ SetOf setSubject(const std::string& kw) {
 // 못 읽는 인클루드가 하나라도 있으면 **거절한다**(rc=1) — 파트가 조용히 빠지는 쪽이 더 나쁘다.
 struct Writer {
     const Opts& o;
+    const IncludeMap& im;
     const DeckIndex& idx;
     const std::vector<int>& sel;
     const std::map<int, int>& pidNodes;
@@ -460,6 +680,19 @@ struct Writer {
     std::set<std::string> visited;
     std::vector<std::string> missingIncludes;
     bool failed = false;
+    // 번호를 다시 매길 줄이 콤마 자유형식이면 제자리에 쓸 열이 없다 — 「파일:줄 키워드」 를 적고 쓰지 않는다(패스 2 뒤 거절 · 산출을
+    // 지운다). 예전엔 칸 차례 × 폭 자리에 덮어써 「       1102,103,       1 …」 같은 깨진 줄을 냈고 되읽기도 통과했다(2026-11-07 검토 #7)
+    std::vector<std::string> commaLines;
+    long long commaCount = 0;
+    const std::string* curPath = nullptr;
+    size_t curLine = 0;
+
+    bool commaRefuse(const std::string& line) {
+        if (!rm.on || line.find(',') == std::string::npos) return false;
+        if (commaLines.size() < 50) commaLines.push_back((curPath ? *curPath : std::string()) + ":" + std::to_string(curLine) + " " + kw);
+        ++commaCount;
+        return true;
+    }
 
     // 현재 블록 상태
     std::string kw, kwLine;
@@ -471,6 +704,7 @@ struct Writer {
     int remaining = 0, lineIdx = 0;
     bool picked = false;
     std::vector<std::string> card1;
+    KooRemapper::AuxCardReadings auxRd;   // 보 족 Card 1 의 읽기들(설명서 칸의 열 자리에 번호를 쓴다)
     std::vector<std::string> auxBuf;      // 보 족 카드 한 장(줄 수가 2 이상일 수 있다)
     std::vector<std::string> buf;
     std::vector<size_t> cardIdx;
@@ -629,15 +863,17 @@ struct Writer {
         }
     }
 
-    void onData(const std::string& line, size_t g, const std::string& baseDir, int depth) {
+    void onData(const std::string& line, size_t g, int depth) {
         switch (act) {
             case Act::VERBATIM: *out << line << "\n"; break;
             case Act::DROP: {
                 // `*INCLUDE` 는 버리지 않고 **펼친다** — 그 안에 고른 파트의 요소가 있다.
                 if (kw == "*INCLUDE" && isDataLine(line)) {
-                    std::string rel = trim(line);
-                    if (rel.empty()) break;
-                    processFile(joinPath(baseDir, rel), depth + 1);
+                    // 정본 닫힘이 정한 대로 — 따라가거나(Followed) · 이미 실었거나(Cycle) · 못 찾았거나 깊이를 넘었다(미리 거절했다)
+                    const auto* r = im.at(curPath ? *curPath : std::string(), curLine);
+                    using W = KooRemapper::include_closure::NameRef::What;
+                    if (r && r->what == W::Followed) processFile(r->path, depth + 1);
+                    else if (r && (r->what == W::Unresolved || r->what == W::DepthCut)) missingIncludes.push_back(r->name);
                     break;
                 }
                 st.dropped[kw] += 1;
@@ -651,6 +887,7 @@ struct Writer {
                 if (!readNodeLine(line, fw, nid, xyz)) break;
                 if (!inSorted(pk.nodes, nid)) break;
                 std::string o2 = line;
+                if (commaRefuse(line)) break;
                 if (rm.on && !putField(o2, fw, 0, rm.node(nid))) {
                     console.error("renumber: 새 절점 번호가 칸 폭 " + std::to_string(fw) +
                                   " 를 넘는다 (NID " + std::to_string(nid) + ")");
@@ -678,7 +915,10 @@ struct Writer {
                 }
                 if (picked) {
                     std::string o2 = line;
-                    if (rm.on) {
+                    const bool renumLine = lineIdx == 0 || (lineIdx >= span.nodeFirst && lineIdx < span.nodeFirst + span.nodeLines);
+                    if (renumLine && commaRefuse(line)) {
+                        // 적었다 — 번호를 바꾸지 않고 둔다(패스 2 뒤 거절 · 산출을 지운다)
+                    } else if (rm.on) {
                         if (lineIdx == 0) {
                             int eid = fieldInt(card1, 0);
                             if (eid > 0 && !putField(o2, fw, 0, rm.elem(eid))) {
@@ -712,13 +952,19 @@ struct Writer {
                 if (g != std::string::npos && line[g] == '$') break;
                 if (g == std::string::npos && remaining == 0) break;
                 if (remaining == 0) {
-                    card1 = KooRemapper::auxCardFields(aux, line, fw);
+                    auxRd = KooRemapper::auxCardReadings(aux, line, fw);
+                    card1 = KooRemapper::auxPrimaryFields(auxRd);
                     lineIdx = 0;
                     remaining = aux.lines;
-                    if (aux.hasPart) {
-                        const int pid = (aux.partField >= 0)
-                                            ? fieldInt(card1, (size_t)aux.partField) : 0;
-                        picked = (pid > 0 && inSorted(sel, pid));
+                    if (aux.hasPart && aux.partIsSet) {
+                        // 패스 1 과 같은 판정 — 세트가 다 고른 파트일 때만 싣는다(일부 · 못 푼 세트는 이미 거절했다)
+                        std::string why;
+                        picked = massSetVerdict(fieldInt(card1, 0), idx, sel, why) == 1;
+                    } else if (aux.hasPart) {
+                        // 패스 1 과 같은 판정 — PID 후보 가운데 고른 것이 있으면 싣는다(갈리는 줄은 이미 거절했다)
+                        bool hit = false;
+                        for (int p : auxPidCandidates(aux, auxRd, idx)) hit = hit || inSorted(sel, p);
+                        picked = hit;
                     } else {
                         // PID 칸이 없다(`*ELEMENT_PLOTEL`) — 표시용이고 파트에 속하지 않는다.
                         // **두 절점이 다 남았을 때만** 싣는다(한쪽만 남은 선은 선이 아니다).
@@ -728,23 +974,48 @@ struct Writer {
                             if (v <= 0 || !inSorted(pk.nodes, v)) { picked = false; break; }
                         }
                     }
-                    if (picked) ++st.auxCards;
+                    if (picked && aux.hasEid) ++st.auxCards;
                 }
                 if (picked) {
                     std::string o2 = line;
                     // ⚠ 번호를 다시 매길 때 **절점 칸만** 고친다. 보의 RT1·RR1·LOCAL 이나
                     //   안전벨트의 SBRID·SLEN 을 같이 고치면 카드가 깨진다. 요소 ID 는
                     //   건드리지 않는다 — 번호 표는 격자 요소만 담는다(족별로 번호가 따로다).
+                    // ★설명서 칸(LS-DYNA 가 읽는 칸 — `auxCardReadings` 의 manual)의 열 자리에 쓴다. 칸 차례 × 폭으로 잡으면 안전띠
+                    //   N3 · N4(SLEN 이 E16 이라 57-72열)를 SLEN 위에 썼다(2026-11-07). 제자리에 못 쓰는 줄 · 두 가지로 읽혀 갈리는 줄은
+                    //   패스 1 뒤에 줄마다 적고 이미 거절했다 — 여기 걸리면 이 op 의 결함이다(줄마다 한 번 말한다).
                     if (rm.on && lineIdx == 0) {
+                        bool told = false;
                         auto put = [&](int from, int cnt) {
-                            if (from < 0) return;
-                            for (int q = 0; q < cnt; ++q) {
-                                const int v = fieldInt(card1, (size_t)(from + q));
-                                if (v > 0) putField(o2, fw, (size_t)(from + q), rm.node(v));
+                            for (int q = 0; from >= 0 && q < cnt; ++q) {
+                                const size_t k = (size_t)(from + q);
+                                const int v = fieldInt(auxRd.manual.f, k);
+                                if (v <= 0) continue;
+                                if (k < auxRd.manual.col.size() && !auxRd.comma &&
+                                    putAt(o2, auxRd.manual.col[k], auxRd.manual.width[k], rm.node(v)))
+                                    continue;
+                                if (!told) console.error("renumber: " + kw + " 줄 「" + line + "」 의 절점 번호를 제자리에 못 바꾼다");
+                                told = true;
+                                failed = true;
                             }
                         };
                         put(aux.nodeSkip, aux.nodeCount);
                         put(aux.nodeSkip2, aux.nodeCount2);
+                    }
+                    if (rm.on && lineIdx > 0 && lineIdx == aux.optNodeLine) {
+                        // 옵션 카드의 절점(보 `_ELBOW` 의 MN — 8칸 표 칸 폭 10 · long 20). 콤마 줄은 패스 1 이 이미 거절했다
+                        const int w = KooRemapper::auxOptTableWidth(fw);
+                        std::string body = line;
+                        const size_t cmt = body.find('$');
+                        if (cmt != std::string::npos) body.erase(cmt);
+                        const auto f = cardFields(body, w);
+                        for (int q : aux.optNodeFields) {
+                            const int v = fieldInt(f, (size_t)q);
+                            if (v > 0 && !putField(o2, w, (size_t)q, rm.node(v))) {
+                                console.error("renumber: " + kw + " 줄 「" + line + "」 의 가운데 절점 번호를 제자리에 못 바꾼다");
+                                failed = true;
+                            }
+                        }
                     }
                     emitLine(o2);
                 }
@@ -797,6 +1068,7 @@ struct Writer {
                     }
                     if (!all) break;
                     std::string o2 = line;
+                    if (commaRefuse(line)) break;
                     if (rm.on)
                         for (size_t q = 0; q < 4; ++q) {
                             int v = fieldInt(f, q);
@@ -805,11 +1077,17 @@ struct Writer {
                     *out << o2 << "\n";
                     break;
                 }
-                if (stream) {                    // `_COLUMN` — 한 줄에 하나
-                    int v = fieldInt(f, 0);
-                    if (v <= 0 || !inSorted(pk.nodes, v)) break;
+                if (stream) {                    // `_COLUMN` — 한 줄에 멤버 하나(+ 속성 A1-A4)
+                    // ★세트가 무엇의 집합인가로 거르고 그 대상으로 번호를 바꾼다 — 절점 · 파트(번호를 바꾸지 않는다) · 셸 · 솔리드 · 티쉘.
+                    //   예전엔 늘 절점 번호로 걸러 `*SET_PART_COLUMN` · `*SET_SHELL_COLUMN` 을 비우거나 절점 번호로 바꿨다(재검토 N1)
+                    const std::vector<int>* keep = subjectList(subj);
+                    const int v = fieldInt(f, 0);
+                    if (v <= 0 || !keep || !inSorted(*keep, v)) break;
                     std::string o2 = line;
-                    if (rm.on) putField(o2, sfw, 0, rm.node(v));
+                    if (rm.on && subj != SetOf::PART) {
+                        if (commaRefuse(line)) break;
+                        putField(o2, sfw, 0, remapSubject(subj, v));
+                    }
                     *out << o2 << "\n";
                     break;
                 }
@@ -825,13 +1103,12 @@ struct Writer {
     }
 
     void processFile(const std::string& path, int depth) {
-        if (failed || depth > 8) return;
+        if (failed) return;
         if (visited.count(path)) return;
         visited.insert(path);
         std::ifstream in(path);
         if (!in.is_open()) { missingIncludes.push_back(path); return; }
         if (depth > 0) ++st.includesInlined;
-        const std::string baseDir = dirOf(path);
         // 블록 상태는 파일 경계에서 닫는다 — 인클루드 안의 키워드가 바깥 블록을 잇지 않는다.
         const std::string savedKw = kw, savedKwLine = kwLine;
         const Act savedAct = act;
@@ -839,8 +1116,11 @@ struct Writer {
         act = Act::VERBATIM;
         kw.clear();
         std::string line;
+        size_t ln = 0;
         while (std::getline(in, line)) {
             while (!line.empty() && line.back() == '\r') line.pop_back();
+            curPath = &path;       // 인클루드를 펼치고 돌아오면 다음 줄에서 다시 맞춘다
+            curLine = ++ln;
             size_t g = line.find_first_not_of(" \t");
             if (g != std::string::npos && line[g] == '*') {
                 // 인클루드 안의 `*KEYWORD`·`*END` 는 펼친 덱에 두 번 나오면 안 된다.
@@ -849,12 +1129,14 @@ struct Writer {
                     flushBlock();
                     act = Act::DROP;
                     kw = k2;
+                    if (k2 == "*END") break;               // 그 파일은 여기서 끝난다(닫힘과 같다)
                     continue;
                 }
                 onKeyword(line);
+                if (k2 == "*END") break;                   // 주 덱의 `*END` 는 싣고 멈춘다
                 continue;
             }
-            onData(line, g, baseDir, depth);
+            onData(line, g, depth);
             if (failed) return;
         }
         flushBlock();
@@ -875,15 +1157,31 @@ struct Writer {
 // 정수로 보이면 ID 로 섞인다. 과포함은 '없다고 거짓 경보' 를 줄이는 쪽이고, ID 블록을 통째로
 // 싣는 이 op 에서는 정말 빠진 ID 가 숨지 않는다(그 블록 자체가 안 실린다).
 
+// 칸이 깨진 콤마 줄 — 콤마로 가른 칸 안에 공백이 낀다(번호를 콤마 줄의 칸 차례 × 폭 자리에 덮어쓴 꼴 「       1102,103,       1 …」).
+// 되읽기가 절점 · 요소 · 세트 멤버로 읽는 줄만 본다(제목 · 곡선 줄은 보지 않는다)
+bool malformedCommaLine(const std::string& line) {
+    if (line.find(',') == std::string::npos) return false;
+    std::string tok;
+    auto bad = [](const std::string& t) { return trim(t).find_first_of(" \t") != std::string::npos; };
+    for (char c : line) {
+        if (c == ',') { if (bad(tok)) return true; tok.clear(); }
+        else tok += c;
+    }
+    return bad(tok);
+}
+
 struct Verify {
     long long undefNodes = 0, undefParts = 0, undefSections = 0, undefMaterials = 0;
     int firstBadNode = 0, firstBadPart = 0;
+    long long malformed = 0;          // 칸이 깨진 콤마 줄(`malformedCommaLine`)
+    std::string firstMalformed;       // 그 첫 줄 「줄 번호: 내용」
 };
 
-Verify verifyOutput(const std::string& path) {
+// `altExisting` — 보 족 줄의 다른 읽기만 말하는 절점 가운데 입력 덱에 있던 것(정렬). 그것은 산출에도 있어야 한다(둘 다 남겼다).
+Verify verifyOutput(const std::string& path, const std::vector<int>& altExisting) {
     Verify v;
     DeckIndex idx;
-    { std::set<std::string> vis; indexDeck(path, idx, vis); }
+    { std::set<std::string> vis; indexDeck(path, idx, vis, nullptr); }
     const std::map<int, int> pidN = pidNodeCounts(idx);
 
     std::vector<int> nodes, secIds, matIds, elemPids, elemNodes, setMembers;
@@ -900,8 +1198,14 @@ Verify verifyOutput(const std::string& path) {
     //   "되읽어 증명한다" 가 거짓이 된다.
     KooRemapper::AuxElementCard vaux;
     int vAuxRemaining = 0, vAuxLineIdx = 0;
+    size_t vln = 0;
+    auto malformed = [&](const std::string& l) {
+        if (!malformedCommaLine(l)) return;
+        if (v.malformed++ == 0) v.firstMalformed = std::to_string(vln) + ": " + l;
+    };
     while (std::getline(in, line)) {
         while (!line.empty() && line.back() == '\r') line.pop_back();
+        ++vln;
         size_t g = line.find_first_not_of(" \t");
         if (g != std::string::npos && line[g] == '*') {
             kw = kwBare(keywordToken(line));
@@ -922,20 +1226,18 @@ Verify verifyOutput(const std::string& path) {
             if (g == std::string::npos && vAuxRemaining == 0) continue;
             if (vAuxRemaining == 0) { vAuxLineIdx = 0; vAuxRemaining = vaux.lines; }
             if (vAuxLineIdx == 0) {
-                auto f = KooRemapper::auxCardFields(vaux, line, fw);
-                if (vaux.partField >= 0) {
+                malformed(line);
+                const auto rd = KooRemapper::auxCardReadings(vaux, line, fw);
+                const auto& f = KooRemapper::auxPrimaryFields(rd);
+                if (vaux.partField >= 0 && !vaux.partIsSet) {   // `_MASS_PART_SET` 의 칸 0 은 파트 세트 ID 다
                     const int pid = fieldInt(f, (size_t)vaux.partField);
                     if (pid > 0) elemPids.push_back(pid);
                 }
-                auto take = [&](int from, int cnt) {
-                    if (from < 0) return;
-                    for (int q = 0; q < cnt; ++q) {
-                        const int v = fieldInt(f, (size_t)(from + q));
-                        if (v > 0) elemNodes.push_back(v);
-                    }
-                };
-                take(vaux.nodeSkip, vaux.nodeCount);
-                take(vaux.nodeSkip2, vaux.nodeCount2);
+                for (int x : KooRemapper::auxNodesOf(vaux, f)) elemNodes.push_back(x);
+                for (int x : KooRemapper::auxNodesAlt(vaux, rd, f))
+                    if (inSorted(altExisting, x)) elemNodes.push_back(x);
+            } else if (vAuxLineIdx == vaux.optNodeLine) {
+                for (int x : KooRemapper::auxOptNodesOf(vaux, line, fw)) elemNodes.push_back(x);   // 보 `_ELBOW` 의 MN
             }
             ++vAuxLineIdx;
             if (--vAuxRemaining <= 0) vAuxRemaining = 0;
@@ -956,6 +1258,7 @@ Verify verifyOutput(const std::string& path) {
                 lineIdx = 0;
                 remaining = span.lines;
             }
+            if (lineIdx == 0 || (lineIdx >= span.nodeFirst && lineIdx < span.nodeFirst + span.nodeLines)) malformed(line);
             if (lineIdx >= span.nodeFirst && lineIdx < span.nodeFirst + span.nodeLines) {
                 const std::vector<std::string> f = (lineIdx == 0) ? card1 : cardFields(line, fw);
                 size_t from = (lineIdx == span.nodeFirst) ? (size_t)span.nodeFieldSkip : 0u;
@@ -970,6 +1273,7 @@ Verify verifyOutput(const std::string& path) {
         }
         if (!isDataLine(line)) continue;
         if (kw == "*NODE") {
+            malformed(line);
             int nid = 0;
             double xyz[3];
             if (readNodeLine(line, fw, nid, xyz)) nodes.push_back(nid);
@@ -983,6 +1287,7 @@ Verify verifyOutput(const std::string& path) {
             const int sfw = (fw >= 20) ? 20 : 10;
             const int tn = titleLines(kw);
             if (dataIdx > tn) {
+                malformed(line);
                 auto f = cardFields(line, sfw);
                 size_t lim = (KooRemapper::deckscan::classifySetNode(kw) ==
                               KooRemapper::deckscan::SetKind::COLUMN) ? 1u : f.size();
@@ -997,6 +1302,7 @@ Verify verifyOutput(const std::string& path) {
             const int sfw = (fw >= 20) ? 20 : 10;
             const int tn = titleLines(kw);
             if (dataIdx > tn) {
+                malformed(line);
                 auto f = cardFields(line, sfw);
                 for (size_t q = 0; q < 4 && q < f.size(); ++q) {
                     int x = fieldInt(f, q);
@@ -1035,6 +1341,12 @@ std::string jsonStr(const std::string& s) {
         if (c == '"' || c == '\\') { o += '\\'; o += c; }
         else if (c == '\n') o += "\\n";
         else if (c == '\t') o += "\\t";
+        else if (c == '\r') o += "\\r";
+        else if ((unsigned char)c < 0x20) {
+            char b[8];
+            std::snprintf(b, sizeof b, "\\u%04x", (unsigned)(unsigned char)c);
+            o += b;
+        }
         else o += c;
     }
     return o + "\"";
@@ -1061,11 +1373,113 @@ std::string kwMap(const std::map<std::string, long long>& m) {
     return os.str();
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 쓸 파일 — 같은 폴더의 임시 파일에 쓰고 성공하면 제 이름으로 바꿔 넣는다(재검토 R3 · R5)
+// ─────────────────────────────────────────────────────────────────────────────
+// 실패하면 이번 실행이 만든 임시 파일만 지운다 — 앞 실행이 같은 이름으로 남긴 파일 · 남의 파일 · 폴더는 건드리지 않는다
+// (예전엔 rc≠0 이면 산출 · 번호 지도 · 보고 이름을 지워 설정 YAML · 따라가지 않는 인클루드 · 빈 폴더 · 앞 잡의 산출까지 지웠다).
+
+bool isDirectory(const std::string& p) {
+    std::error_code ec;
+    return !p.empty() && std::filesystem::is_directory(p, ec);
+}
+
+bool fileExists(const std::string& p) {
+    std::error_code ec;
+    return !p.empty() && std::filesystem::exists(p, ec);
+}
+
+// 이 op 이 쓴 번호 지도인가 — 첫 키로 알아본다(`kind`, 2026-11-07 전 판은 `note` 다음 `nodes`). 아니면 지우지도 덮지도 않는다
+bool isRenumberMap(const std::string& p) {
+    std::ifstream in(p, std::ios::binary);
+    if (!in.is_open()) return false;
+    std::string head(512, '\0');
+    in.read(&head[0], (std::streamsize)head.size());
+    head.resize((size_t)in.gcount());
+    head.erase(std::remove(head.begin(), head.end(), '\r'), head.end());
+    static const std::string kNow = "{\n  \"kind\": \"extract-parts renumber map\",";
+    static const std::string kOld = "{\n  \"note\": \"old -> new. 이것이 없으면 되돌릴 수 없다\",\n  \"nodes\": [";
+    return head.rfind(kNow, 0) == 0 || head.rfind(kOld, 0) == 0;
+}
+
+// 글자 수 상한(바이트) — UTF-8 글자 가운데서 자르지 않는다
+std::string utf8Cut(const std::string& s, size_t cap) {
+    if (s.size() <= cap) return s;
+    size_t n = cap;
+    while (n > 0 && ((unsigned char)s[n] & 0xC0) == 0x80) --n;
+    return s.substr(0, n) + "…";
+}
+
+class StagedFiles {
+public:
+    StagedFiles() = default;
+    StagedFiles(const StagedFiles&) = delete;
+    StagedFiles& operator=(const StagedFiles&) = delete;
+    ~StagedFiles() { discardAll(); }
+
+    // `dst` 의 임시 경로 — 같은 폴더(바꿔 넣기가 한 파일 시스템 안의 이름 바꾸기다) · 점으로 시작하는 이름
+    bool reserve(const std::string& dst, std::string& tmp) {
+        static unsigned serial = 0;
+        const size_t sep = dst.find_last_of("/\\");
+        const std::string dir = sep == std::string::npos ? std::string() : dst.substr(0, sep + 1);
+        const std::string base = sep == std::string::npos ? dst : dst.substr(sep + 1);
+        const std::string stamp = std::to_string((long long)std::chrono::steady_clock::now().time_since_epoch().count());
+        for (int k = 0; k < 100; ++k) {
+            const std::string t = dir + "." + base + ".kr_tmp_" + stamp + "_" + std::to_string(++serial);
+            if (fileExists(t)) continue;
+            tmp = t;
+            items_.push_back({dst, tmp});
+            return true;
+        }
+        return false;
+    }
+    // 글을 임시 파일에 쓴다(바이너리 — 개행을 그대로 · 덱이 아니다)
+    bool writeText(const std::string& dst, const std::string& text, std::string& tmp) {
+        if (!reserve(dst, tmp)) return false;
+        std::ofstream f(tmp, std::ios::binary);
+        if (!f.is_open()) return false;
+        f << text;
+        f.close();
+        return !f.fail();
+    }
+    // 임시 파일을 `dst` 로 바꿔 넣는다
+    bool commit(const std::string& dst) {
+        for (size_t i = 0; i < items_.size(); ++i) {
+            if (items_[i].first != dst) continue;
+            std::error_code ec;
+            std::filesystem::rename(items_[i].second, dst, ec);
+            if (ec) return false;
+            items_.erase(items_.begin() + (std::ptrdiff_t)i);
+            return true;
+        }
+        return false;
+    }
+    // 바꿔 넣지 않은 임시 파일을 지운다 — 이번 실행이 만든 것뿐이다
+    void discardAll() {
+        for (const auto& it : items_) {
+            std::error_code ec;
+            std::filesystem::remove(it.second, ec);
+        }
+        items_.clear();
+    }
+
+private:
+    std::vector<std::pair<std::string, std::string>> items_;   // 바꿔 넣을 경로 · 임시 경로
+};
+
 }  // namespace
 
 // ─────────────────────────────────────────────────────────────────────────────
 // runExtractParts
 // ─────────────────────────────────────────────────────────────────────────────
+
+// 번호 지도 경로 — `out.k` → `out_renumber_map.json`(확장자 앞에 붙인다)
+std::string renumberMapPath(const std::string& output) {
+    const size_t dot = output.rfind('.');
+    const size_t sep = output.find_last_of("/\\");
+    if (dot != std::string::npos && (sep == std::string::npos || dot > sep)) return output.substr(0, dot) + "_renumber_map.json";
+    return output + "_renumber_map.json";
+}
 
 int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
     {   // 탭 들여쓰기는 블록을 통째로 무너뜨려 조용히 아무 일도 안 한다 — 파싱 전에 거른다
@@ -1144,34 +1558,197 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
     o.model = rp(o.model);
     o.output = rp(o.output);
     o.reportPath = rp(o.reportPath);
-
-    if (o.model.empty()) { console.error("'model' is required in YAML config"); return 1; }
-    { std::ifstream probe(o.model);
-      if (!probe.is_open()) { console.error("Cannot open model: " + o.model); return 1; } }
-    if (o.parts.empty() && o.partTitles.empty()) {
-        console.error("'parts' (PID list) 또는 'part_titles' (와일드카드) 가 하나는 필요하다 — "
-                      "무엇을 뽑을지 고르지 않으면 할 일이 없다");
-        return 1;
-    }
-    if (o.output.empty()) {
+    if (o.output.empty() && !o.model.empty()) {
         size_t dot = o.model.rfind('.');
         o.output = (dot == std::string::npos) ? o.model + "_extracted"
                    : o.model.substr(0, dot) + "_extracted" + o.model.substr(dot);
+    }
+    const std::string mapPathOf = o.output.empty() ? std::string() : renumberMapPath(o.output);
+    const std::string mapWrite = o.renumber ? mapPathOf : std::string();   // 번호를 매길 때만 번호 지도를 쓴다
+
+    // ── 실행의 결과 — 보고는 성공 · 실패 모두 쓴다(재검토 R3 · R4 · R5 뒤 사용자 결정 2026-11-07) ─────────────────────
+    // ★이번 실행이 만들지 않은 파일은 지우지 않고 폴더는 지우지 않는다. 산출 · 번호 지도 · 보고는 같은 폴더의 임시 파일에 쓰고 다 되면
+    //   바꿔 넣는다 — 실패하면 앞 실행의 파일이 그대로다. 보고에는 ok · output_written · 거절 목록 전부(`refusals`)를 적고 쓰지 않은
+    //   파일은 대지 않는다. 거절 목록은 [ERROR] 요약 줄로도 낸다 — 플랫폼 잡 요약(error_summary)이 [ERROR] 줄만 모은다
+    DeckIndex idx;
+    std::vector<int> sel;
+    Picked pk;
+    Needed nd;
+    Remap rm;
+    WriteStats st;
+    Verify vf;
+    bool verified = false;
+    struct Refusal { std::string kind, message; std::vector<std::string> lines; };
+    std::vector<Refusal> refusals;
+    // 덮으면 안 되는 파일 — 설정 YAML · 주 덱 · 닫힘의 인클루드(주 덱 폴더 · *INCLUDE_PATH 로 찾은 것) · 따라가지 않는 변형 인클루드의 파일
+    std::vector<std::string> reads{yamlFile};
+    if (!o.model.empty()) reads.push_back(o.model);
+    StagedFiles staged;
+    auto reportWritable = [&]() {
+        if (o.reportPath.empty() || isDirectory(o.reportPath)) return false;
+        for (const auto& r : reads)
+            if (KooRemapper::include_closure::sameFile(o.reportPath, r)) return false;
+        return !KooRemapper::include_closure::sameFile(o.reportPath, o.output) &&
+               !KooRemapper::include_closure::sameFile(o.reportPath, mapWrite);
+    };
+    auto reportJson = [&](bool written) {
+        std::ostringstream jf;
+        jf << "{\n  \"op\": \"extract-parts\",\n";
+        jf << "  \"model\": " << jsonStr(o.model) << ",\n";
+        jf << "  \"output\": " << (written ? jsonStr(o.output) : std::string("null")) << ",\n";   // 쓰지 않은 파일은 대지 않는다
+        jf << "  \"ok\": " << (written ? "true" : "false") << ",\n";
+        jf << "  \"output_written\": " << (written ? "true" : "false") << ",\n";
+        jf << "  \"refusals\": [";
+        for (size_t i = 0; i < refusals.size(); ++i) {
+            jf << (i ? "," : "") << "\n    {\"kind\": " << jsonStr(refusals[i].kind)
+               << ", \"message\": " << jsonStr(refusals[i].message) << ", \"lines\": [";
+            for (size_t k = 0; k < refusals[i].lines.size(); ++k) jf << (k ? ", " : "") << jsonStr(refusals[i].lines[k]);
+            jf << "]}";
+        }
+        jf << (refusals.empty() ? "" : "\n  ") << "],\n";
+        jf << "  \"deck\": {\"field_width\": " << idx.fieldWidth
+           << ", \"includes_inlined\": " << st.includesInlined
+           << ", \"parts_in_deck\": " << idx.parts.size() << "},\n";
+        jf << "  \"parts_selected\": " << intList(sel) << ",\n";
+        jf << "  \"include\": {\"nodes\": " << (o.incNodes ? "true" : "false")
+           << ", \"sets\": " << (o.incSets ? "\"referenced\"" : "\"none\"")
+           << ", \"materials\": " << (o.incMaterials ? "true" : "false")
+           << ", \"sections\": " << (o.incSections ? "true" : "false") << "},\n";
+        jf << "  \"picked\": {\"element_cards\": " << pk.cards
+           << ", \"aux_element_cards\": " << st.auxCards
+           << ", \"nodes\": " << pk.nodes.size()
+           << ", \"node_lines_written\": " << st.nodeLines
+           << ", \"parts_emitted\": " << st.partsEmitted << "},\n";
+        jf << "  \"needed\": {\"sections\": " << intList(nd.secids)
+           << ", \"materials\": " << intList(nd.mids)
+           << ", \"eos\": " << intList(nd.eosids)
+           << ", \"hourglass\": " << intList(nd.hgids) << "},\n";
+        jf << "  \"sets_trimmed\": " << kwMap(st.setsTrimmed) << ",\n";
+        jf << "  \"sets_dropped_sids\": " << intList(st.setsDropped) << ",\n";
+        jf << "  \"aux_keywords_read\": [";
+        for (size_t i = 0; i < pk.auxKws.size(); ++i)
+            jf << (i ? ", " : "") << jsonStr(pk.auxKws[i]);
+        jf << "],\n";
+        jf << "  \"carried_whole\": " << kwMap(st.carriedWhole) << ",\n";
+        jf << "  \"part_variant_blocks_carried_whole\": " << st.partVariantBlocks << ",\n";
+        jf << "  \"dropped_keywords\": " << kwMap(st.dropped) << ",\n";
+        jf << "  \"dropped_initial_state\": " << kwMap(st.droppedState) << ",\n";
+        if (!st.droppedState.empty())
+            jf << "  \"dropped_initial_state_note\": "
+               << jsonStr("뽑은 덱에는 초기응력·이력이 없다. 카드 수가 데이터로 정해지는 꼴이라"
+                          "(NINT·NHISV·LARGE) 자르면 응력이 요소끼리 섞일 수 있어 자르지 않았다. "
+                          "전체 모델의 dynain 을 update/prestress 로 다시 적용하라 — "
+                          "ID 가 보존되므로 ID 로 맞는다")
+               << ",\n";
+        jf << "  \"renumber\": {\"on\": " << (rm.on ? "true" : "false") << ", \"map\": "
+           << (written && rm.on ? jsonStr(mapWrite) : std::string("null")) << "},\n";
+        jf << "  \"verify\": "
+           << (verified ? "{\"undefined_nodes\": " + std::to_string(vf.undefNodes) +
+                          ", \"undefined_parts\": " + std::to_string(vf.undefParts) +
+                          ", \"undefined_sections\": " + std::to_string(vf.undefSections) +
+                          ", \"undefined_materials\": " + std::to_string(vf.undefMaterials) +
+                          ", \"malformed_comma_lines\": " + std::to_string(vf.malformed) + "}"
+                        : "null")
+           << "\n}\n";
+        return jf.str();
+    };
+    // 거절 — [ERROR] 머리 줄 · 목록(줄마다) · 목록을 담은 [ERROR] 요약 줄 하나 · 힌트. 그리고 실패 보고(쓸 수 있을 때 — 임시 파일로)
+    auto fail = [&](const std::string& kind, const std::string& message, const std::vector<std::string>& lines = {},
+                    const std::string& hint = std::string()) {
+        console.error(message);
+        const size_t cap = 50;
+        for (size_t i = 0; i < lines.size() && i < cap; ++i) console.println("  " + lines[i]);
+        if (lines.size() > cap) console.println("  … 외 " + std::to_string(lines.size() - cap) + " 줄(보고의 refusals 에 전부)");
+        if (!lines.empty()) {
+            std::string first;
+            for (size_t i = 0; i < lines.size() && i < 3; ++i) first += (i ? " · " : "") + lines[i];
+            console.error("  거절 목록 " + std::to_string(lines.size()) + " 줄 — " + utf8Cut(first, 600));
+        }
+        if (!hint.empty()) console.info(hint);
+        refusals.push_back({kind, message, lines});
+        staged.discardAll();
+        if (reportWritable()) {
+            std::string tmp;
+            if (staged.writeText(o.reportPath, reportJson(false), tmp) && staged.commit(o.reportPath))
+                console.info("report: " + o.reportPath);
+            else
+                console.error("Cannot write report: " + o.reportPath);
+            staged.discardAll();
+        }
+        return 1;
+    };
+
+    if (o.model.empty()) return fail("config", "'model' is required in YAML config");
+    { std::ifstream probe(o.model);
+      if (!probe.is_open()) return fail("config", "Cannot open model: " + o.model); }
+
+    // 인클루드 닫힘 — 정본 규칙(주 덱 폴더 · *INCLUDE_PATH · 깊이 16). 읽는 파일을 다 알아야 보고 · 산출을 그 위에 쓰지 않는다
+    const IncludeMap im(o.model);
+    for (const auto& f : im.closure().files) reads.push_back(f.path);
+    for (const auto& r : im.closure().refs)
+        if (!r.path.empty()) reads.push_back(r.path);
+    for (const auto& n : im.closure().notFollowed)
+        if (!n.path.empty()) reads.push_back(n.path);
+
+    if (o.parts.empty() && o.partTitles.empty())
+        return fail("config", "'parts' (PID list) 또는 'part_titles' (와일드카드) 가 하나는 필요하다 — "
+                              "무엇을 뽑을지 고르지 않으면 할 일이 없다");
+
+    // ★쓸 파일이 읽는 파일과 같으면 거절한다 — 바꿔 넣는 순간 입력(설정 · 주 덱 · 인클루드 · 변형 인클루드의 파일)이 사라진다. 쓸 자리가
+    //   폴더면 거절한다(지우지 않는다). 번호를 매길 때 번호 지도 자리에 이 op 의 번호 지도가 아닌 파일이 있으면 덮지 않는다
+    {
+        const std::vector<std::string> writes{o.output, o.reportPath, mapWrite};
+        std::string w, r;
+        if (KooRemapper::include_closure::clobberPair(writes, reads, w, r)) {
+            const bool both = std::find(writes.begin(), writes.end(), r) != writes.end() &&
+                              std::find(reads.begin(), reads.end(), r) == reads.end();
+            return fail("clobber", both ? "쓸 파일 「" + w + "」 과 「" + r + "」 이 같은 파일이다 — 하나가 다른 하나를 덮는다"
+                                        : "쓸 파일 「" + w + "」 이 읽는 파일 「" + r + "」 과 같은 파일이다 — 입력(설정 · 주 덱 · 인클루드)에 "
+                                          "쓰지 않는다",
+                        {}, "output · report 를 입력과 다른 이름으로 주라");
+        }
+        for (const auto& p : writes)
+            if (isDirectory(p))
+                return fail("clobber", "쓸 자리 「" + p + "」 가 폴더다 — 폴더에 쓰지 않고 지우지도 않는다", {},
+                            "output · report 에 파일 이름을 주라");
+        if (!mapWrite.empty() && fileExists(mapWrite) && !isRenumberMap(mapWrite))
+            return fail("clobber", "번호 지도 자리 「" + mapWrite + "」 에 이 op 의 번호 지도가 아닌 파일이 있다 — 덮지 않는다", {},
+                        "그 파일을 옮기거나 output 이름을 바꿔라");
     }
 
     console.info("extract-parts: " + o.model);
 
     // ── 패스 0 — `*PART` 표 ──────────────────────────────────────────────────
-    DeckIndex idx;
-    { std::set<std::string> vis; indexDeck(o.model, idx, vis); }
-    if (idx.parts.empty()) {
-        console.error("No *PART definitions found (or only *PART_* variants we cannot chunk)");
-        return 1;
+    std::set<std::string> inputs;   // 이 op 이 연 파일(주 덱 · 따라간 맨 *INCLUDE) — 닫힘의 파일과 같다
+    indexDeck(o.model, idx, inputs, &im);
+    // ★인클루드 닫힘을 다 못 읽으면 미리 거절한다 — 그 안의 고른 파트 요소 · 안전띠 장치를 못 본다(재검토 D1 · N2 · N3)
+    //   · 못 찾았거나 열 수 없는 맨 *INCLUDE(주 덱 폴더 · *INCLUDE_PATH 폴더에서 찾는다)
+    //   · 깊이 16 을 넘은 인클루드(예전엔 8 에서 말없이 멈춰 9단째의 고른 파트가 rc 0 으로 빠졌다)
+    //   · 따라가지 않는 파일 인클루드(*INCLUDE_TRANSFORM · _AUTO_OFFSET · _BINARY · _NASTRAN · _STAMPED_* …) — 안을 모르니 고른 파트가
+    //     거기 있는지 증명할 수 없다(예전엔 안전띠를 골랐을 때만 거절했다). *INCLUDE_PATH · _PATH_RELATIVE 는 탐색 경로라 세지 않는다
+    {
+        const auto& clo = im.closure();
+        std::vector<std::string> bad;
+        for (const auto& u : clo.unresolved)
+            bad.push_back(u.file + ":" + std::to_string(u.line) + " *INCLUDE 「" + u.name + "」 — " + u.why);
+        using W = KooRemapper::include_closure::NameRef::What;
+        for (const auto& r : clo.refs)
+            if (r.what == W::DepthCut)
+                bad.push_back(r.file + ":" + std::to_string(r.firstLine) + " *INCLUDE 「" + r.name + "」 — 인클루드 깊이 상한(16)을 넘었다");
+        for (const auto& n : clo.notFollowed)
+            bad.push_back(n.file + ":" + std::to_string(n.line) + " " + n.keyword + (n.name.empty() ? "" : " 「" + n.name + "」") +
+                          " — 이 op 이 따라가지 않는 파일 인클루드다(안을 모른다)");
+        if (!bad.empty())
+            return fail("include", "인클루드 닫힘을 다 읽지 못했다 — " + std::to_string(bad.size()) + " 곳. 그 안의 고른 파트 요소 · 장치가 "
+                                   "조용히 빠질 수 있어 거절한다", bad,
+                        "따라가는 것은 맨 *INCLUDE 다(주 덱 폴더 먼저 · 그다음 *INCLUDE_PATH 폴더 · 깊이 16) — 변형 인클루드는 펼친 덱으로 돌려라");
     }
+    if (idx.parts.empty()) return fail("parts", "No *PART definitions found (or only *PART_* variants we cannot chunk)");
     const std::map<int, int> pidNodes = pidNodeCounts(idx);
 
     // 고를 PID 를 확정한다 — 제목 와일드카드는 여기서 PID 로 바뀐다.
-    std::vector<int> sel = o.parts, missing;
+    std::vector<int> missing;
+    sel = o.parts;
     std::vector<std::string> titleHits;
     for (const auto& pat : o.partTitles) {
         bool any = false;
@@ -1189,46 +1766,108 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
         std::string s;
         for (size_t i = 0; i < missing.size() && i < 20; ++i)
             s += (i ? ", " : "") + std::to_string(missing[i]);
-        console.error("덱에 없는 PID: " + s + " — 오타면 조용히 빈 덱이 나온다");
-        return 1;
+        return fail("parts", "덱에 없는 PID: " + s + " — 오타면 조용히 빈 덱이 나온다");
     }
     std::vector<int> selDefined;
     for (int p : sel) if (idx.parts.count(p)) selDefined.push_back(p);
     sel = selDefined;
-    if (sel.empty()) { console.error("고를 파트가 없다"); return 1; }
+    if (sel.empty()) return fail("parts", "고를 파트가 없다");
     console.info("  parts: " + std::to_string(sel.size()) + " / " +
                  std::to_string(idx.parts.size()) + " (덱 전체)");
     for (const auto& h : titleHits) console.info("    title match: " + h);
 
     // ── 패스 1 — 요소·절점 ──────────────────────────────────────────────────
-    Picked pk;
-    { std::set<std::string> vis; scanElements(o.model, sel, idx, pidNodes, pk, vis); }
+    { std::set<std::string> vis; scanElements(o.model, sel, idx, pidNodes, pk, vis, im); }
     if (idx.fieldWidth != 8)
         console.info("  deck field width: " + std::to_string(idx.fieldWidth));
     // ⚠ 보·질량·이산 족도 센다. 격자 카드만 세면 **보만으로 된 파트**(볼트·용접점 묶음)가
     //   "요소가 없다" 로 거절된다 — 회귀 L-0 이 그 자리를 지킨다.
-    if (pk.cards == 0 && pk.auxCards == 0) {
-        console.error("고른 파트에 요소가 없다 — PID 는 맞는데 그 파트의 요소를 못 읽었다는 뜻이다");
-        return 1;
-    }
+    if (pk.cards == 0 && pk.auxCards == 0)
+        return fail("parts", "고른 파트에 요소가 없다 — PID 는 맞는데 그 파트의 요소를 못 읽었다는 뜻이다");
     // ★모르는 `*ELEMENT_*` 변형이 고른 파트의 요소를 담고 있으면 **거절한다.**
     //   조용히 빠뜨린 덱은 그럴듯하게 돌면서 틀린다.
     if (!pk.opaqueElemTouched.empty()) {
+        std::vector<std::string> lines;
         for (const auto& kv : pk.opaqueElemTouched)
-            console.error(kv.first + " 가 고른 파트의 요소 " + std::to_string(kv.second) +
-                          " 줄을 담고 있는데 이 op 은 그 카드의 줄 수를 모른다 — "
-                          "조용히 빠뜨리지 않기 위해 거절한다");
-        console.info("읽을 수 있는 것은 격자 3족(*ELEMENT_SOLID·SHELL·TSHELL)과 "
-                     "보 족 5종(*ELEMENT_BEAM·DISCRETE·MASS·SEATBELT·PLOTEL)이다");
-        return 1;
+            lines.push_back(kv.first + " — 고른 파트의 요소 " + std::to_string(kv.second) + " 줄");
+        return fail("opaque_elements", "이 op 이 카드의 줄 수를 모르는 *ELEMENT_* 변형이 고른 파트의 요소를 담고 있다 — 조용히 빠뜨리지 "
+                                       "않기 위해 거절한다", lines,
+                    "읽을 수 있는 것은 격자 3족(*ELEMENT_SOLID·SHELL·TSHELL)과 보 족 5종(*ELEMENT_BEAM·DISCRETE·MASS·SEATBELT·PLOTEL)이다");
+    }
+    // ★안전띠 장치 키워드는 PID 칸이 없어 고른 띠에 붙었는지 **증명할 수 없다** — 위 규칙(「모르는 변형이 고른 파트를 담으면
+    //   거절」)을 보수적으로 댄다: 고른 파트에 `*ELEMENT_SEATBELT` 가 있으면 거절하고, 없으면 다른 모르는 카드처럼 버리고
+    //   `dropped_keywords` 에 센다(2026-11-07). 장치를 빼고 띠만 실은 덱은 그럴듯하게 돌면서 리트랙터 · 프리텐셔너가 없다.
+    //   가속도계(`_ACCELEROMETER`)와 데이터 줄 없는 장치 블록은 세지 않는다(scanElements — 사용자 결정 2026-11-07).
+    if (pk.seatbeltCards > 0 && !pk.seatbeltDevices.empty())
+        return fail("seatbelt_device", "고른 파트에 *ELEMENT_SEATBELT 카드 " + std::to_string(pk.seatbeltCards) + " 장이 있는데 덱에 안전띠 "
+                                       "장치 키워드가 " + std::to_string(pk.seatbeltDevices.size()) + " 블록 있다 — 장치는 PID 칸이 없어 고른 "
+                                       "띠에 붙었는지 증명할 수 없으므로 거절한다(빼면 띠가 그럴듯하게 돌면서 장치가 없다)",
+                    pk.seatbeltDevices, "안전띠를 고르지 않으면 장치는 싣지 않고 dropped_keywords 에 센다");
+    // ★보 장치(`*ELEMENT_BEAM_PULLEY` · `_SOURCE`)는 PID 칸이 없다 — 고른 보 요소(BID1 · BID2 · BSEID)를 가리키면 장치를 빼고 보만 실을
+    //   수 없다 → 거절. 번호가 0 이면(PULLEY — LS-DYNA 가 이웃 보를 스스로 찾는다) 고른 파트에 보가 있을 때 거절. 그 밖은 버리고
+    //   dropped_keywords 에 센다(2026-11-07 검토 #5 — 예전엔 보의 옵션으로 읽어 칸 1(BID1 · BSNID)을 PID 로 셌다)
+    {
+        sortUnique(pk.beamEids);
+        std::vector<std::string> bad;
+        for (const auto& bd : pk.beamDevices) {
+            std::string hit;
+            bool zero = true;
+            for (int r : bd.refs) {
+                if (r > 0) zero = false;
+                if (r > 0 && inSorted(pk.beamEids, r)) hit += (hit.empty() ? "" : ", ") + std::to_string(r);
+            }
+            if (!hit.empty()) bad.push_back(bd.where + " — 고른 보 요소 " + hit + " 를 가리킨다");
+            else if (zero && !pk.beamEids.empty()) bad.push_back(bd.where + " — 보 요소 번호가 0(이웃 보를 스스로 찾는다)이고 고른 파트에 보가 있다");
+        }
+        if (!bad.empty())
+            return fail("beam_device", "보 장치(*ELEMENT_BEAM_PULLEY · _SOURCE) " + std::to_string(bad.size()) + " 줄이 고른 보에 붙었을 수 "
+                                       "있다 — 장치는 PID 칸이 없어 따로 싣지 못하고, 빼면 보가 그럴듯하게 돌면서 도르래 · 공급원이 없다. "
+                                       "거절한다", bad);
+    }
+    // ★질량 얹기 세트(`*ELEMENT_MASS_PART_SET`) — 세트를 일부만 고르거나 풀 수 없으면 실을지 버릴지 정할 수 없다. 세트를 싣지 않으면
+    //   (`include.sets: none`) 실은 줄이 없는 세트를 가리킨다(2026-11-07 검토 #5)
+    if (!pk.massSetRefused.empty() || (pk.massSetCards > 0 && !o.incSets)) {
+        std::vector<std::string> lines = pk.massSetRefused;
+        if (pk.massSetCards > 0 && !o.incSets)
+            lines.push_back("include.sets: none — 실을 질량 얹기 " + std::to_string(pk.massSetCards) + " 줄이 가리키는 *SET_PART 를 싣지 않는다");
+        return fail("mass_part_set", "*ELEMENT_MASS_PART_SET " + std::to_string(pk.massSetRefused.size() + (o.incSets ? 0 : pk.massSetCards)) +
+                                     " 줄 — 파트 세트에 나눠 얹는 질량을 고른 파트에 맞게 실을 수 없어 거절한다", lines);
+    }
+    // ★넓은 칸 뒤 PID 가 읽기마다 갈리는데 그 하나를 골랐다 — 실을지 버릴지 정할 수 없다(질량의 MASS 를 정수 폭으로 쓴 줄 · 2026-11-07)
+    if (!pk.ambiguousPid.empty())
+        return fail("ambiguous_pid", "보 족 줄 " + std::to_string(pk.ambiguousPid.size()) + " 장이 설명서 칸과 정수 폭으로 읽혀 PID 가 갈리고 "
+                                     "그 하나가 고른 파트다 — 실을지 버릴지 정할 수 없어 거절한다", pk.ambiguousPid,
+                    "그 줄을 설명서 칸(정수 8 · 실수 16 — i10 은 정수 10, long 은 모두 20)으로 고쳐 쓰라");
+    // 다른 읽기만 말하는 절점 — 덱(닫힘)에 정의된 것만 남긴다(둘 다 남긴다 · 지어낸 번호는 싣지 않는다). 드물게만 덱을 한 번 더 훑는다
+    std::vector<int> altExisting;
+    {
+        std::vector<int> want = pk.altNodes;
+        for (const auto& r : pk.renumberRisk) want.insert(want.end(), r.altVsManual.begin(), r.altVsManual.end());
+        sortUnique(want);
+        if (!want.empty()) {
+            std::set<std::string> vis;
+            definedNodesAmong(o.model, idx, want, altExisting, vis, im);
+            sortUnique(altExisting);
+        }
+        sortUnique(pk.altNodes);
+        std::vector<int> carry;
+        std::set_intersection(pk.altNodes.begin(), pk.altNodes.end(), altExisting.begin(), altExisting.end(),
+                              std::back_inserter(carry));
+        if (!carry.empty()) {
+            pk.nodes.insert(pk.nodes.end(), carry.begin(), carry.end());
+            sortUnique(pk.nodes);
+            console.info("  보 족 줄의 다른 읽기만 말하는 절점 " + std::to_string(carry.size()) +
+                         " 개도 싣는다 — 넓은 칸 뒤 칸이 설명서 칸 · 정수 폭으로 갈린다(둘 다 남긴다)");
+        }
     }
     console.info("  element cards: " + std::to_string(pk.cards) +
                  (pk.auxCards > 0 ? " (+보·질량·이산 " + std::to_string(pk.auxCards) + ")" : "") +
                  "  nodes: " + std::to_string(pk.nodes.size()));
     for (const auto& k : pk.auxKws)
         console.info("    " + k + " — 칸 자리를 알고 읽었다(추측이 아니다)");
+    if (pk.massPartCards > 0)
+        console.info("  *ELEMENT_MASS_PART(_SET) " + std::to_string(pk.massPartCards) + " 줄 — 고른 파트(세트)에 얹는 질량을 싣는다");
 
-    Needed nd;
     for (int p : sel) {
         const PartDef& d = idx.parts.at(p);
         if (d.secid > 0) nd.secids.push_back(d.secid);
@@ -1241,13 +1880,31 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
     sortUnique(nd.hgids);  sortUnique(nd.tmids);
 
     // ── 번호 다시 매기기 판정 ────────────────────────────────────────────────
-    Remap rm;
     if (o.renumber) {
-        if (pk.elemIdCollision) {
-            console.error("renumber: 종류가 다른 요소가 같은 EID 를 쓴다 — 전역으로 1부터 다시 "
-                          "매기면 어느 쪽인지 알 수 없게 된다. renumber: false 로 돌려라");
-            return 1;
+        if (pk.elemIdCollision)
+            return fail("renumber", "renumber: 종류가 다른 요소가 같은 EID 를 쓴다 — 전역으로 1부터 다시 매기면 어느 쪽인지 알 수 없게 "
+                                    "된다. renumber: false 로 돌려라");
+        // ★번호를 제자리에 바꿔 쓸 수 없는 보 족 줄 — 줄마다 한 번 적고 쓰기 전에 거절한다(2026-11-07 「번호 매기기는 거절」)
+        //   · 칸 자리가 없다 — 콤마 자유형식 · 설명서 칸 안에 빈칸이 낀 줄(정수 폭으로 쓴 줄 — LS-DYNA 가 읽는 칸이 쓴 꼴과 다르다) ·
+        //     번호를 쓸 칸에 겹친 `$` 주석
+        //   · 모호하다 — 그 줄을 그렇게 썼을 수 있는 다른 읽기(규칙 (a)-(d)를 지킨 정수 폭 읽기)가 설명서 칸에 없는 절점을 말하고 그
+        //     절점이 덱에 있다. 설명서대로 쓴 줄(빈 SLEN · 빈 SBRID · 소수점 · 지수 표기 · 왼쪽 맞춤 · 꼬리 주석 · 정수꼴 SLEN)은 다른
+        //     읽기가 없다
+        std::vector<std::string> bad;
+        for (const auto& r : pk.renumberRisk) {
+            if (!r.placeable) {
+                bad.push_back(r.where + " — 칸 자리가 없다(콤마 자유형식 · 설명서 칸 안에 빈칸 · 번호 칸에 겹친 $ 주석)");
+                continue;
+            }
+            std::string hit;
+            for (int v : r.altVsManual)
+                if (inSorted(altExisting, v)) hit += (hit.empty() ? "" : ", ") + std::to_string(v);
+            if (!hit.empty())
+                bad.push_back(r.where + " — 설명서 칸과 정수 폭으로 읽혀 갈린다(다른 읽기의 절점 " + hit + " 이 덱에 있다)");
         }
+        if (!bad.empty())
+            return fail("renumber", "renumber: 보 족 줄 " + std::to_string(bad.size()) + " 장은 절점 번호를 제자리에 바꿔 쓸 수 없다 — "
+                                    "거절한다", bad, "renumber: false 면 그 줄은 그대로 싣고 두 읽기의 절점을 다 싣는다");
         rm.on = true;
         rm.nodes = &pk.nodes;
         rm.elems = &pk.allElems;
@@ -1255,26 +1912,29 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
                      " · 요소 1.." + std::to_string(pk.allElems.size()));
     }
 
-    // ── 패스 2 — 쓰기 ───────────────────────────────────────────────────────
-    WriteStats st;
+    // ── 패스 2 — 쓰기(임시 파일 — 다 되기 전엔 산출 자리를 건드리지 않는다) ─────────────────────────────
+    std::string tmpOut;
+    if (!staged.reserve(o.output, tmpOut)) return fail("write", "Cannot open output: " + o.output);
     {
-        KooRemapper::DeckWriter w(o.output, KooRemapper::deck_newline::detect(o.model));
-        if (!w.ok()) { console.error("Cannot open output: " + o.output); return 1; }
-        Writer wr{o, idx, sel, pidNodes, pk, nd, rm, console, st};
+        KooRemapper::DeckWriter w(tmpOut, KooRemapper::deck_newline::detect(o.model));
+        if (!w.ok()) return fail("write", "Cannot open output: " + o.output);
+        Writer wr{o, im, idx, sel, pidNodes, pk, nd, rm, console, st};
         wr.out = &w.stream();
         wr.processFile(o.model, 0);
         w.close();
-        if (wr.failed) return 1;
-        if (!wr.missingIncludes.empty()) {
-            for (const auto& m : wr.missingIncludes)
-                console.error("*INCLUDE 를 열 수 없다: " + m);
-            console.error("인클루드를 못 읽으면 그 안의 파트가 조용히 빠진다 — 거절한다");
-            return 1;
+        if (!wr.commaLines.empty()) {
+            std::vector<std::string> lines = wr.commaLines;
+            if (wr.commaCount > (long long)wr.commaLines.size())
+                lines.push_back("… 외 " + std::to_string(wr.commaCount - (long long)wr.commaLines.size()) + " 장");
+            return fail("renumber", "renumber: 콤마 자유형식 줄 " + std::to_string(wr.commaCount) + " 장은 칸 자리가 없어 번호를 제자리에 "
+                                    "바꿔 쓸 수 없다 — 거절한다", lines,
+                        "renumber: false 면 그 줄을 그대로 싣는다 · 고정폭으로 고쳐 쓰면 번호를 매길 수 있다");
         }
+        // 쓰다 멈춘 덱(번호를 다 못 바꾼 줄이 남는다)은 바꿔 넣지 않는다 — 그럴듯하게 읽히는 틀린 덱이다
+        if (wr.failed) return fail("write", "쓰기가 멈췄다(위 [ERROR]) — 산출을 쓰지 않았다");
+        if (!wr.missingIncludes.empty())
+            return fail("include", "*INCLUDE 를 열 수 없다 — 인클루드를 못 읽으면 그 안의 파트가 조용히 빠진다. 거절한다", wr.missingIncludes);
     }
-    console.success("wrote: " + o.output + "  (*NODE " + std::to_string(st.nodeLines) +
-                    " · 요소 카드 " + std::to_string(st.elemCards) +
-                    " · *PART " + std::to_string(st.partsEmitted) + ")");
     if (st.includesInlined > 0)
         console.info("  *INCLUDE " + std::to_string(st.includesInlined) +
                      " 개를 펼쳐 넣었다 — 산출 덱은 홀로 선다");
@@ -1314,106 +1974,78 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
                      std::to_string(total) + " 줄 (리포트의 dropped_keywords 에 전부 적는다)");
     }
 
-    // ── 번호 표 ─────────────────────────────────────────────────────────────
-    std::string mapPath;
+    // ── 번호 표(임시 파일) ──────────────────────────────────────────────────
     if (rm.on) {
-        {   // `out.k` → `out_renumber_map.json` (확장자 앞에 붙인다)
-            size_t dot = o.output.rfind('.');
-            size_t sep = o.output.find_last_of("/\\");
-            if (dot != std::string::npos && (sep == std::string::npos || dot > sep))
-                mapPath = o.output.substr(0, dot) + "_renumber_map.json";
-            else
-                mapPath = o.output + "_renumber_map.json";
-        }
-        std::ofstream mf(mapPath);
-        if (!mf.is_open()) { console.error("Cannot write renumber map: " + mapPath); return 1; }
-        mf << "{\n  \"note\": \"old -> new. 이것이 없으면 되돌릴 수 없다\",\n  \"nodes\": [";
+        std::ostringstream mf;
+        mf << "{\n  \"kind\": \"extract-parts renumber map\",\n  \"note\": \"old -> new. 이것이 없으면 되돌릴 수 없다\",\n  \"nodes\": [";
         for (size_t i = 0; i < pk.nodes.size(); ++i)
             mf << (i ? "," : "") << "[" << pk.nodes[i] << "," << (i + 1) << "]";
         mf << "],\n  \"elements\": [";
         for (size_t i = 0; i < pk.allElems.size(); ++i)
             mf << (i ? "," : "") << "[" << pk.allElems[i] << "," << (i + 1) << "]";
         mf << "]\n}\n";
-        mf.close();
-        console.info("  renumber map: " + mapPath);
+        std::string tmpMap;
+        if (!staged.writeText(mapWrite, mf.str(), tmpMap)) return fail("write", "Cannot write renumber map: " + mapWrite);
         if (pk.nodes.size() > 1000000)
             console.warning("번호 표가 " + std::to_string(pk.nodes.size()) +
                             " 항이다 — 파일이 크다. 되돌리려면 필요하므로 지우지 말라");
     }
 
-    // ── 패스 3 — 되읽기 검증 ────────────────────────────────────────────────
-    Verify vf;
+    // ── 패스 3 — 되읽기 검증(임시 산출을 읽는다) ─────────────────────────────
     if (o.verify) {
-        vf = verifyOutput(o.output);
-        const bool ok = (vf.undefNodes == 0 && vf.undefParts == 0 &&
-                         vf.undefSections == 0 && vf.undefMaterials == 0);
-        if (ok)
+        // 번호를 다시 매겼으면 산출의 번호는 새 번호다 — 다른 읽기만 말하는 절점(옛 번호)은 대지 않는다(갈림이 덱에 있는 줄은 이미
+        // 거절했고, 남은 것은 설명서 꼴 줄을 정수 폭으로 읽은 넘친 몫이다)
+        vf = verifyOutput(tmpOut, rm.on ? std::vector<int>() : altExisting);
+        verified = true;
+        if (vf.undefNodes == 0 && vf.undefParts == 0 && vf.undefSections == 0 && vf.undefMaterials == 0 && vf.malformed == 0) {
             console.success("verify: 산출 덱의 미정의 참조 0 (절점·파트·섹션·재질 전수)");
-        else {
-            console.error("verify: 미정의 절점 " + std::to_string(vf.undefNodes) +
-                          " · 파트 " + std::to_string(vf.undefParts) +
-                          " · 섹션 " + std::to_string(vf.undefSections) +
-                          " · 재질 " + std::to_string(vf.undefMaterials));
-            if (vf.firstBadNode) console.error("  첫 미정의 절점 NID " + std::to_string(vf.firstBadNode));
-            if (vf.firstBadPart) console.error("  첫 미정의 파트 PID " + std::to_string(vf.firstBadPart));
+        } else {
+            std::vector<std::string> lines;
+            if (vf.firstBadNode) lines.push_back("첫 미정의 절점 NID " + std::to_string(vf.firstBadNode));
+            if (vf.firstBadPart) lines.push_back("첫 미정의 파트 PID " + std::to_string(vf.firstBadPart));
+            if (vf.malformed) lines.push_back("첫 깨진 콤마 줄 — " + vf.firstMalformed);
+            return fail("verify", "verify: 미정의 절점 " + std::to_string(vf.undefNodes) +
+                                  " · 파트 " + std::to_string(vf.undefParts) +
+                                  " · 섹션 " + std::to_string(vf.undefSections) +
+                                  " · 재질 " + std::to_string(vf.undefMaterials) +
+                                  (vf.malformed ? " · 칸이 깨진 콤마 줄 " + std::to_string(vf.malformed) : std::string()) +
+                                  " — 산출 · 번호 지도를 쓰지 않았다(이번 실행의 임시 파일만 지웠다 · 같은 이름의 앞 파일은 그대로다)",
+                        lines, "산출을 보려면 verify: false 로 다시 돌려라(되읽지 않고 쓴다)");
         }
     }
 
-    // ── 리포트 ──────────────────────────────────────────────────────────────
-    if (!o.reportPath.empty()) {
-        std::ofstream jf(o.reportPath);
-        if (!jf.is_open()) { console.error("Cannot write report: " + o.reportPath); return 1; }
-        jf << "{\n  \"op\": \"extract-parts\",\n";
-        jf << "  \"model\": " << jsonStr(o.model) << ",\n";
-        jf << "  \"output\": " << jsonStr(o.output) << ",\n";
-        jf << "  \"deck\": {\"field_width\": " << idx.fieldWidth
-           << ", \"includes_inlined\": " << st.includesInlined
-           << ", \"parts_in_deck\": " << idx.parts.size() << "},\n";
-        jf << "  \"parts_selected\": " << intList(sel) << ",\n";
-        jf << "  \"include\": {\"nodes\": " << (o.incNodes ? "true" : "false")
-           << ", \"sets\": " << (o.incSets ? "\"referenced\"" : "\"none\"")
-           << ", \"materials\": " << (o.incMaterials ? "true" : "false")
-           << ", \"sections\": " << (o.incSections ? "true" : "false") << "},\n";
-        jf << "  \"picked\": {\"element_cards\": " << pk.cards
-           << ", \"aux_element_cards\": " << st.auxCards
-           << ", \"nodes\": " << pk.nodes.size()
-           << ", \"node_lines_written\": " << st.nodeLines
-           << ", \"parts_emitted\": " << st.partsEmitted << "},\n";
-        jf << "  \"needed\": {\"sections\": " << intList(nd.secids)
-           << ", \"materials\": " << intList(nd.mids)
-           << ", \"eos\": " << intList(nd.eosids)
-           << ", \"hourglass\": " << intList(nd.hgids) << "},\n";
-        jf << "  \"sets_trimmed\": " << kwMap(st.setsTrimmed) << ",\n";
-        jf << "  \"sets_dropped_sids\": " << intList(st.setsDropped) << ",\n";
-        jf << "  \"aux_keywords_read\": [";
-        for (size_t i = 0; i < pk.auxKws.size(); ++i)
-            jf << (i ? ", " : "") << jsonStr(pk.auxKws[i]);
-        jf << "],\n";
-        jf << "  \"carried_whole\": " << kwMap(st.carriedWhole) << ",\n";
-        jf << "  \"part_variant_blocks_carried_whole\": " << st.partVariantBlocks << ",\n";
-        jf << "  \"dropped_keywords\": " << kwMap(st.dropped) << ",\n";
-        jf << "  \"dropped_initial_state\": " << kwMap(st.droppedState) << ",\n";
-        if (!st.droppedState.empty())
-            jf << "  \"dropped_initial_state_note\": "
-               << jsonStr("뽑은 덱에는 초기응력·이력이 없다. 카드 수가 데이터로 정해지는 꼴이라"
-                          "(NINT·NHISV·LARGE) 자르면 응력이 요소끼리 섞일 수 있어 자르지 않았다. "
-                          "전체 모델의 dynain 을 update/prestress 로 다시 적용하라 — "
-                          "ID 가 보존되므로 ID 로 맞는다")
-               << ",\n";
-        jf << "  \"renumber\": {\"on\": " << (rm.on ? "true" : "false") << ", \"map\": "
-           << (mapPath.empty() ? std::string("null") : jsonStr(mapPath)) << "},\n";
-        jf << "  \"verify\": "
-           << (o.verify ? "{\"undefined_nodes\": " + std::to_string(vf.undefNodes) +
-                          ", \"undefined_parts\": " + std::to_string(vf.undefParts) +
-                          ", \"undefined_sections\": " + std::to_string(vf.undefSections) +
-                          ", \"undefined_materials\": " + std::to_string(vf.undefMaterials) + "}"
-                        : "null")
-           << "\n}\n";
-        jf.close();
+    // ── 바꿔 넣기 — 보고를 임시로 먼저 쓰고(못 쓰면 아무것도 바꾸지 않는다) 산출 · 번호 지도 · 보고 차례로 ─────────
+    const bool writeReport = reportWritable();
+    if (writeReport) {
+        std::string tmpRep;
+        if (!staged.writeText(o.reportPath, reportJson(true), tmpRep)) return fail("write", "Cannot write report: " + o.reportPath);
+    }
+    if (!staged.commit(o.output)) return fail("write", "산출을 제 이름으로 바꿔 넣지 못했다: " + o.output);
+    console.success("wrote: " + o.output + "  (*NODE " + std::to_string(st.nodeLines) +
+                    " · 요소 카드 " + std::to_string(st.elemCards) +
+                    " · *PART " + std::to_string(st.partsEmitted) + ")");
+    if (rm.on) {
+        if (!staged.commit(mapWrite)) {
+            console.error("번호 지도를 제 이름으로 바꿔 넣지 못했다: " + mapWrite + " — 산출은 썼는데 되돌릴 표가 없다");
+            return 1;
+        }
+        console.info("  renumber map: " + mapWrite);
+    } else if (fileExists(mapPathOf) && !KooRemapper::include_closure::sameFile(mapPathOf, o.reportPath)) {
+        // 지난 실행이 남긴 번호 지도는 번호를 매기지 않은 이 산출과 짝이 아니다 — 이 op 의 번호 지도로 알아볼 때만 지운다
+        if (isRenumberMap(mapPathOf)) {
+            std::error_code ec;
+            std::filesystem::remove(mapPathOf, ec);
+            console.info("  지난 실행의 번호 지도를 지웠다(번호를 매기지 않은 이 산출과 짝이 아니다): " + mapPathOf);
+        } else {
+            console.warning("번호 지도 자리 「" + mapPathOf + "」 에 이 op 의 번호 지도가 아닌 파일이 있다 — 그대로 둔다");
+        }
+    }
+    if (writeReport) {
+        if (!staged.commit(o.reportPath)) {
+            console.error("Cannot write report: " + o.reportPath + " — 산출은 썼다");
+            return 1;
+        }
         console.info("report: " + o.reportPath);
     }
-
-    if (o.verify && (vf.undefNodes || vf.undefParts || vf.undefSections || vf.undefMaterials))
-        return 1;
     return 0;
 }

@@ -1,0 +1,481 @@
+{
+ "format": "stepforge-carryover-plan",
+ "version": 2,
+ "unit": "mm-t-s",
+ "frame": "world",
+ "deck": {
+  "project_id": "001a1b610a5402c1c48b151",
+  "relpath": "export/assembled.k",
+  "deck_from": "mesh",
+  "sha256": "32d0af772a35ba8d439ab11dee5b6ad62a551ffdc166b20d328f89c2869127aa",
+  "includes": [],
+  "max": {
+   "node": 3903,
+   "elem": 2236,
+   "pid": 12,
+   "secid": 12,
+   "mid": 12
+  },
+  "unread_cards": []
+ },
+ "report_key": "f8ff42845904c7a92133857eb3edbee4d351807d9e946110d09abc71b38f4130",
+ "cad": {
+  "old": {
+   "project_id": "001a1b610a5402c1c48b151",
+   "name": "live-a89-src-1794055906",
+   "shape_key": "757e4cd9a90d7164"
+  },
+  "new": {
+   "project_id": "001a1b6113f94bb9024420a",
+   "name": "live-a89-var-1794055906",
+   "shape_key": "3ed283e621802461"
+  }
+ },
+ "floor_mm": 0.000364005,
+ "summary": {
+  "actions": {
+   "remesh": 1,
+   "morph": 1,
+   "keep": 10
+  },
+  "added": 0,
+  "fields": 1,
+  "fragments": 1,
+  "sections": 0,
+  "failed": 0
+ },
+ "parts": [
+  {
+   "pid": 1,
+   "name": "HOUSING#1",
+   "action": "remesh",
+   "why": "변위가 요소 크기보다 크다",
+   "mapping": "one_to_one",
+   "members": [
+    "/live-a89-src-1794055906/live_a89_v1_1794055906.step/V1/HOUSING"
+   ],
+   "deck": {
+    "node": [
+     1,
+     2577
+    ],
+    "node_count": 2577,
+    "elem": [
+     1,
+     1546
+    ],
+    "elem_count": 1546,
+    "contiguous": true,
+    "secid": 1,
+    "mid": 1
+   },
+   "fragment": {
+    "ok": true,
+    "file": "fragment_1.k",
+    "pid": 1,
+    "secid": 1,
+    "mid": 1,
+    "new_section": null,
+    "ranges": {
+     "node": [
+      3904,
+      6687
+     ],
+     "elem": [
+      2237,
+      3914
+     ]
+    },
+    "nodes": 2784,
+    "elements": 1678,
+    "bytes": 295514,
+    "mesh": {
+     "kind": "hex",
+     "size": 0.950063327,
+     "strategy": "압출",
+     "families": {
+      "hex": 1678
+     }
+    },
+    "target": {
+     "members": [
+      "/live-a89-var-1794055906/live_a89_v1_1794055906.step/V1/HOUSING"
+     ],
+     "defeatured": [],
+     "skipped": []
+    },
+    "check": {
+     "ok": true,
+     "cover": 1.0,
+     "claim": 1.0,
+     "band": {
+      "p50": 0.0,
+      "p95": 3e-09,
+      "max": 0.037875141
+     },
+     "problems": []
+    }
+   }
+  },
+  {
+   "pid": 2,
+   "name": "RIB#2",
+   "action": "morph",
+   "why": "면 구성이 같고 변위가 요소 크기 안",
+   "mapping": "one_to_one",
+   "members": [
+    "/live-a89-src-1794055906/live_a89_v1_1794055906.step/V1/RIB"
+   ],
+   "deck": {
+    "node": [
+     2578,
+     2755
+    ],
+    "node_count": 178,
+    "elem": [
+     1547,
+     1614
+    ],
+    "elem_count": 68,
+    "contiguous": true,
+    "secid": 2,
+    "mid": 2
+   },
+   "field": {
+    "file": "field_2.bin",
+    "nodes": 178,
+    "bytes": 5162,
+    "layout": [
+     {
+      "name": "node",
+      "dtype": "<u4",
+      "offset": 0,
+      "count": 178
+     },
+     {
+      "name": "disp",
+      "dtype": "<f8",
+      "offset": 712,
+      "shape": [
+       178,
+       3
+      ],
+      "unit": "mm"
+     },
+     {
+      "name": "kind",
+      "dtype": "<u1",
+      "offset": 4984,
+      "count": 178,
+      "codes": {
+       "0": "interior",
+       "1": "face",
+       "2": "edge",
+       "3": "corner",
+       "4": "unlabeled"
+      },
+      "shared_bit": 8
+     }
+    ],
+    "surface_nodes": 178,
+    "kinds": {
+     "interior": 0,
+     "face": 98,
+     "edge": 72,
+     "corner": 8,
+     "unlabeled": 0
+    },
+    "max_disp": 0.2,
+    "faces": 6,
+    "face_pairs": {
+     "0": 0,
+     "1": 2,
+     "2": 1,
+     "3": 3,
+     "4": 4,
+     "5": 5
+    },
+    "dropped_directions": 0,
+    "projection_fallbacks": 0,
+    "solver": {
+     "iterations": 0,
+     "residual": 0.0,
+     "converged": true,
+     "unknowns": 268
+    },
+    "check": {
+     "on_new_surface_max_error": 0.0,
+     "on_new_surface_over": 0,
+     "elements": 68,
+     "inverted": 0,
+     "unchecked": 0,
+     "min_ratio": 1.4,
+     "ok": true
+    },
+    "new_section": null
+   }
+  },
+  {
+   "pid": 3,
+   "name": "BRACKET#3",
+   "action": "keep",
+   "why": "그대로",
+   "mapping": "one_to_one",
+   "members": [
+    "/live-a89-src-1794055906/live_a89_v1_1794055906.step/V1/BRACKET"
+   ],
+   "deck": {
+    "node": [
+     2756,
+     2959
+    ],
+    "node_count": 204,
+    "elem": [
+     1615,
+     1714
+    ],
+    "elem_count": 100,
+    "contiguous": true,
+    "secid": 3,
+    "mid": 3
+   }
+  },
+  {
+   "pid": 4,
+   "name": "CAN#4",
+   "action": "keep",
+   "why": "그대로",
+   "mapping": "one_to_one",
+   "members": [
+    "/live-a89-src-1794055906/live_a89_v1_1794055906.step/V1/CAN"
+   ],
+   "deck": {
+    "node": [
+     2960,
+     3191
+    ],
+    "node_count": 232,
+    "elem": [
+     1715,
+     1929
+    ],
+    "elem_count": 215,
+    "contiguous": true,
+    "secid": 4,
+    "mid": 4
+   }
+  },
+  {
+   "pid": 5,
+   "name": "SCREW_1#5",
+   "action": "keep",
+   "why": "그대로",
+   "mapping": "one_to_one",
+   "members": [
+    "/live-a89-src-1794055906/live_a89_v1_1794055906.step/V1/SCREW_1"
+   ],
+   "deck": {
+    "node": [
+     3192,
+     3233
+    ],
+    "node_count": 42,
+    "elem": [
+     1930,
+     1943
+    ],
+    "elem_count": 14,
+    "contiguous": true,
+    "secid": 5,
+    "mid": 5
+   }
+  },
+  {
+   "pid": 6,
+   "name": "SCREW_2#6",
+   "action": "keep",
+   "why": "그대로",
+   "mapping": "one_to_one",
+   "members": [
+    "/live-a89-src-1794055906/live_a89_v1_1794055906.step/V1/SCREW_2"
+   ],
+   "deck": {
+    "node": [
+     3234,
+     3275
+    ],
+    "node_count": 42,
+    "elem": [
+     1944,
+     1957
+    ],
+    "elem_count": 14,
+    "contiguous": true,
+    "secid": 6,
+    "mid": 6
+   }
+  },
+  {
+   "pid": 7,
+   "name": "SCREW_3#7",
+   "action": "keep",
+   "why": "그대로",
+   "mapping": "one_to_one",
+   "members": [
+    "/live-a89-src-1794055906/live_a89_v1_1794055906.step/V1/SCREW_3"
+   ],
+   "deck": {
+    "node": [
+     3276,
+     3317
+    ],
+    "node_count": 42,
+    "elem": [
+     1958,
+     1971
+    ],
+    "elem_count": 14,
+    "contiguous": true,
+    "secid": 7,
+    "mid": 7
+   }
+  },
+  {
+   "pid": 8,
+   "name": "SCREW_4#8",
+   "action": "keep",
+   "why": "그대로",
+   "mapping": "one_to_one",
+   "members": [
+    "/live-a89-src-1794055906/live_a89_v1_1794055906.step/V1/SCREW_4"
+   ],
+   "deck": {
+    "node": [
+     3318,
+     3359
+    ],
+    "node_count": 42,
+    "elem": [
+     1972,
+     1985
+    ],
+    "elem_count": 14,
+    "contiguous": true,
+    "secid": 8,
+    "mid": 8
+   }
+  },
+  {
+   "pid": 9,
+   "name": "PCB#9",
+   "action": "keep",
+   "why": "그대로",
+   "mapping": "one_to_one",
+   "members": [
+    "/live-a89-src-1794055906/live_a89_v1_1794055906.step/V1/PCB"
+   ],
+   "deck": {
+    "node": [
+     3360,
+     3567
+    ],
+    "node_count": 208,
+    "elem": [
+     1986,
+     2070
+    ],
+    "elem_count": 85,
+    "contiguous": true,
+    "secid": 9,
+    "mid": 9
+   }
+  },
+  {
+   "pid": 10,
+   "name": "COMP#10",
+   "action": "keep",
+   "why": "그대로",
+   "mapping": "one_to_one",
+   "members": [
+    "/live-a89-src-1794055906/live_a89_v1_1794055906.step/V1/COMP"
+   ],
+   "deck": {
+    "node": [
+     3568,
+     3623
+    ],
+    "node_count": 56,
+    "elem": [
+     2071,
+     2089
+    ],
+    "elem_count": 19,
+    "contiguous": true,
+    "secid": 10,
+    "mid": 10
+   }
+  },
+  {
+   "pid": 11,
+   "name": "BATTERY#11",
+   "action": "keep",
+   "why": "그대로",
+   "mapping": "one_to_one",
+   "members": [
+    "/live-a89-src-1794055906/live_a89_v1_1794055906.step/V1/BATTERY"
+   ],
+   "deck": {
+    "node": [
+     3624,
+     3843
+    ],
+    "node_count": 220,
+    "elem": [
+     2090,
+     2215
+    ],
+    "elem_count": 126,
+    "contiguous": true,
+    "secid": 11,
+    "mid": 11
+   }
+  },
+  {
+   "pid": 12,
+   "name": "SPACER_OLD#12",
+   "action": "keep",
+   "why": "그대로",
+   "mapping": "one_to_one",
+   "members": [
+    "/live-a89-src-1794055906/live_a89_v1_1794055906.step/V1/SPACER_OLD"
+   ],
+   "deck": {
+    "node": [
+     3844,
+     3903
+    ],
+    "node_count": 60,
+    "elem": [
+     2216,
+     2236
+    ],
+    "elem_count": 21,
+    "contiguous": true,
+    "secid": 12,
+    "mid": 12
+   }
+  }
+ ],
+ "added": [],
+ "files": {
+  "fragment_1.k": {
+   "sha256": "d19e117d3a27cd199630d099ba0b6676bca4cc7433959cc7aab0dfd2d48b8f7f",
+   "bytes": 295514
+  },
+  "field_2.bin": {
+   "sha256": "3e95ce6caa04a1c5fb43f87f069d4ba11ac044026dab8477705431aca42df539",
+   "bytes": 5162
+  }
+ },
+ "code_build": "4295f7dbf71c"
+}

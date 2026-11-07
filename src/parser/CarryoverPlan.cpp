@@ -1,6 +1,7 @@
-// StepForge 이월 계획 · 변위장 · 조각의 엄격한 읽기와 적용 보고 JSON — 칸 표 하나(kKeys)가 v1 계약이다
+// StepForge 이월 계획 · 변위장 · 조각 · 새 셸 섹션의 엄격한 읽기와 적용 보고 JSON — 칸 표 하나(kKeys)가 판 1 · 2 계약이다
 #include "parser/CarryoverPlan.h"
 
+#include "parser/CardCut.h"
 #include "parser/DeckScan.h"
 #include "parser/ElementCardLayout.h"
 #include "util/StrictJson.h"
@@ -8,10 +9,12 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <map>
 #include <set>
 #include <sstream>
+#include <string_view>
 
 namespace KooRemapper {
 namespace carryover {
@@ -20,21 +23,28 @@ namespace {
 using json::Value;
 using VT = Value::Type;
 
-// ★계획 v1 의 칸 — **이 표 하나**가 정본이다(사용자 결정 11-07 — v2 칸은 여기 더한다).
-//   required 가 없으면 거절 · optional 은 있어도 된다 · 그 밖의 칸은 모르는 칸이라 거절한다.
+// ★계획의 칸 — **이 표 하나**가 정본이다(사용자 결정 11-07). 줄마다 판 1 의 칸과 판 2 가 더한 칸을 함께 적는다 —
+//   판 1 은 앞 두 칸(required · optional)만, 판 2 는 넷 다(그쪽 요청서 §10.2 — 「판 2 는 판 1 의 칸을 뜻 그대로 두고 칸을 더했다」).
+//   뒤 두 칸만 있는 묶음은 판 2 에만 있다(판 1 계획에서는 묻지 않는다 — 그 칸을 품은 위 묶음이 판 1 에서 모르는 칸으로 거절한다).
+//   required 가 없으면 거절 · optional 은 있어도 된다 · 그 밖의 칸은 그 판에서 모르는 칸이라 거절한다.
 enum class K {
     Top, Deck, DeckMax, Keep, Transform, Morph, Remesh, Delete, Review, Shared, Field, FieldFailed,
-    LayoutCount, LayoutShape, Fragment, FragmentFailed, Ranges, NewSection, Added, FileEntry
+    LayoutCount, LayoutShape, Fragment, FragmentFailed, Ranges, NewSection, Added, FileEntry,
+    PartDeck, Include, MorphSection, ElementThickness, RefusedTransform, Summary
 };
 struct KeySet {
     std::vector<const char*> required, optional;
 };
-const std::map<K, KeySet>& kKeys() {
+struct KeyRow {
+    std::vector<const char*> required, optional;     // 판 1(과 판 2)
+    std::vector<const char*> required2, optional2;   // 판 2 가 더한 칸
+};
+const std::map<K, KeyRow>& kKeys() {
     static const std::vector<const char*> kRow = {"pid", "name", "action", "why", "mapping", "members"};
-    auto row = [](std::vector<const char*> extra, std::vector<const char*> opt) {
+    auto row = [](std::vector<const char*> extra, std::vector<const char*> opt, std::vector<const char*> opt2 = {}) {
         std::vector<const char*> req = kRow;
         req.insert(req.end(), extra.begin(), extra.end());
-        return KeySet{req, opt};
+        return KeyRow{req, opt, {"deck"}, opt2};   // 판 2 — 처리가 무엇이든 줄마다 그 PID 의 덱 자리(§10.2)
     };
     static const std::vector<const char*> kFieldKeys = {
         "file", "nodes", "bytes", "layout", "surface_nodes", "kinds", "max_disp", "faces", "face_pairs",
@@ -45,34 +55,56 @@ const std::map<K, KeySet>& kKeys() {
         a.insert(a.end(), b.begin(), b.end());
         return a;
     };
-    static const std::map<K, KeySet> t = {
+    auto only2 = [](std::vector<const char*> req) { return KeyRow{{}, {}, req, {}}; };
+    static const std::map<K, KeyRow> t = {
         {K::Top, {{"format", "version", "unit", "frame", "deck", "report_key", "cad", "floor_mm", "summary", "parts", "added",
                    "files"},
-                  {"code_build"}}},
-        {K::Deck, {{"project_id", "relpath", "sha256", "max", "unread_cards"}, {}}},
-        {K::DeckMax, {{"node", "elem", "pid", "secid", "mid"}, {}}},
+                  {"code_build"}, {}, {}}},
+        // 판 2 — 덱의 자리(raw · mesh)와 `*INCLUDE` 닫힘(늘 있다 · 없으면 빈 목록)
+        {K::Deck, {{"project_id", "relpath", "sha256", "max", "unread_cards"}, {}, {"deck_from", "includes"}, {}}},
+        // max 의 다섯 칸은 판 1 부터 있다 — 판 2 는 뜻만 넓혔다(닫힘 전체에서 센다 · §10.2)
+        {K::DeckMax, {{"node", "elem", "pid", "secid", "mid"}, {}, {}, {}}},
         {K::Keep, row({}, {"absorbed", "touches_changed"})},
         // check 는 선택 — StepForge 는 덱 겉면이나 새 CAD 짝이 없으면 그 칸을 쓰지 않는다(`carryover_build.py` build — 리뷰 11-07)
         {K::Transform, row({"transform", "translation", "rotation_deg"}, {"check", "shared_nodes"})},
         {K::Morph, row({"field"}, {"instead", "shared_nodes"})},
         {K::Remesh, row({"fragment"}, {"shared_nodes"})},
         {K::Delete, row({}, {"shared_nodes"})},
-        {K::Review, row({}, {})},
-        {K::Shared, {{"nodes", "with"}, {}}},
-        {K::Field, {kFieldKeys, {"thickness"}}},
-        {K::FieldFailed, {{"file", "why"}, plus(kFieldKeys, {"thickness"})}},
-        {K::LayoutCount, {{"name", "dtype", "offset", "count"}, {"unit", "codes", "shared_bit"}}},
-        {K::LayoutShape, {{"name", "dtype", "offset", "shape"}, {"unit", "codes", "shared_bit"}}},
-        {K::Fragment, {kFragmentKeys, {}}},
+        // 판 2 — 강체가 아닌 옮김은 review 로 오고 그 4×4 를 싣는다(transform · translation · rotation_deg · check · shared_nodes 는 없다)
+        {K::Review, row({}, {}, {"refused_transform"})},
+        {K::Shared, {{"nodes", "with"}, {}, {}, {}}},
+        // 판 2 — new_section 은 늘 있다(null 일 수 있다 · 못 지은 변위장에도) · element_thickness 는 있을 때만
+        {K::Field, {kFieldKeys, {"thickness"}, {"new_section"}, {"element_thickness"}}},
+        {K::FieldFailed, {{"file", "why"}, plus(kFieldKeys, {"thickness"}), {"new_section"}, {"element_thickness"}}},
+        {K::LayoutCount, {{"name", "dtype", "offset", "count"}, {"unit", "codes", "shared_bit"}, {}, {}}},
+        {K::LayoutShape, {{"name", "dtype", "offset", "shape"}, {"unit", "codes", "shared_bit"}, {}, {}}},
+        {K::Fragment, {kFragmentKeys, {}, {}, {}}},
         // 못 지은 조각 — StepForge 의 실제 꼴은 셋이다(`carryover_build.py` fragment): {ok, why} · {ok, why(null 일 수 있다), notes} ·
         // 지었으나 확인을 못 지난 조각 {ok, 조각 칸 전부, check{why · problems}} — why 가 없을 수 있다(리뷰 11-07)
-        {K::FragmentFailed, {{"ok"}, plus(kFragmentKeys, {"why", "notes"})}},
-        {K::Ranges, {{"node", "elem"}, {}}},
-        {K::NewSection, {{"secid", "elform", "why"}, {"nip", "t"}}},
-        {K::Added, {{"path", "name", "action", "suggestion", "fragment", "why"}, {"pid"}}},
-        {K::FileEntry, {{"sha256", "bytes"}, {}}},
+        {K::FragmentFailed, {{"ok"}, plus(kFragmentKeys, {"why", "notes"}), {}, {}}},
+        {K::Ranges, {{"node", "elem"}, {}, {}, {}}},
+        {K::NewSection, {{"secid", "elform", "why"}, {"nip", "t"}, {}, {}}},
+        {K::Added, {{"path", "name", "action", "suggestion", "fragment", "why"}, {"pid"}, {}, {}}},
+        {K::FileEntry, {{"sha256", "bytes"}, {}, {}, {}}},
+        // ── 판 2 에만 있는 묶음(요청서 §10.2) ──
+        {K::PartDeck, only2({"node", "node_count", "elem", "elem_count", "contiguous", "secid", "mid"})},
+        {K::Include, only2({"relpath", "sha256"})},
+        {K::MorphSection, only2({"secid", "thickness", "file", "why"})},
+        {K::ElementThickness, only2({"elements", "why"})},
+        {K::RefusedTransform, only2({"transform", "det", "scale", "orthogonality_error"})},
+        {K::Summary, only2({"actions", "added", "fields", "fragments", "sections", "failed"})},
     };
     return t;
+}
+
+// 그 판의 칸 — 판 1 이면 앞 두 칸, 아니면 넷 다(모르는 판은 가장 새 판의 표로 본다 — 판 거절은 따로 말한다)
+KeySet keySetOf(K k, int version) {
+    const KeyRow& r = kKeys().at(k);
+    if (version == 1) return KeySet{r.required, r.optional};
+    KeySet s{r.required, r.optional};
+    s.required.insert(s.required.end(), r.required2.begin(), r.required2.end());
+    s.optional.insert(s.optional.end(), r.optional2.begin(), r.optional2.end());
+    return s;
 }
 
 bool isHex64(const std::string& s) {
@@ -82,25 +114,37 @@ bool isHex64(const std::string& s) {
     return true;
 }
 
+// 계획이 적은 동반 파일 이름 — 계획 폴더 바로 아래의 맨 이름만 받는다(`../` · 하위 폴더 · 절대 경로 거절)
+bool plainName(const std::string& n) {
+    if (n.empty() || n == "." || n == "..") return false;
+    for (char c : n)
+        if (c == '/' || c == '\\' || c == '\0' || c == ':') return false;
+    return true;
+}
+
 // 걸린 것을 모으며 읽는다 — 틀린 칸 하나가 나머지 칸을 가리지 않게 각 읽기는 false 를 돌려줄 뿐 멈추지 않는다.
 class Reader {
 public:
     explicit Reader(std::vector<Problem>& out) : out_(out) {}
     size_t count() const { return out_.size(); }
+    // 칸 표를 고를 판 — 계획의 version 이 1 이면 1, 아니면 2(모르는 판의 거절은 따로 말한다)
+    void setVersion(int v) { version_ = v == 1 ? 1 : 2; }
+    int version() const { return version_; }
     void bad(long long pid, const std::string& where, const std::string& what, const char* kind = "plan_schema") {
         out_.push_back({pid, kind, where + " — " + what});
     }
-    // 객체인가 · 칸이 표대로인가(모르는 칸 · 빠진 칸을 이름으로 말한다). 객체가 아니면 false.
+    // 객체인가 · 칸이 그 판의 표대로인가(모르는 칸 · 빠진 칸을 이름으로 말한다). 객체가 아니면 false.
     bool keys(const Value& v, K k, const std::string& where, long long pid) {
         if (v.type != VT::Object) { bad(pid, where, "객체가 아니다"); return false; }
-        const KeySet& ks = kKeys().at(k);
+        const KeySet ks = keySetOf(k, version_);
         auto known = [&](const std::string& name) {
             for (const char* r : ks.required) if (name == r) return true;
             for (const char* o : ks.optional) if (name == o) return true;
             return false;
         };
         for (const auto& kv : v.obj)
-            if (!known(kv.first)) bad(pid, where, "모르는 칸 '" + kv.first + "' — 계획 v1 에 없는 칸은 받지 않는다");
+            if (!known(kv.first))
+                bad(pid, where, "모르는 칸 '" + kv.first + "' — 계획 판 " + std::to_string(version_) + " 에 없는 칸은 받지 않는다");
         for (const char* r : ks.required)
             if (!v.get(r)) bad(pid, where, "칸 '" + std::string(r) + "' 가 없다");
         return true;
@@ -176,6 +220,7 @@ public:
 
 private:
     std::vector<Problem>& out_;
+    int version_ = 1;
 };
 
 // `field.layout` — 이름 셋(node · disp · kind)이 한 번씩, 꼴은 그쪽 머리(§4) 그대로.
@@ -249,6 +294,44 @@ void readLayout(Reader& r, const Value& L, const std::string& where, long long p
                               ")와 다르다", "field_layout");
 }
 
+// 판 2 — 모프 줄 field 의 새 셸 섹션(`new_section` — 늘 있다)과 요소마다 두께(`element_thickness` — 있을 때만). 꼴은 요청서 §10.2 —
+// null · {secid: 정수, thickness, file: 글, why}(지었다) · {secid: null, thickness, file: null, why}(두께가 바뀌었는데 못 지었다).
+void readMorphV2(Reader& r, const Value& f, const std::string& where, long long pid, FieldHead& h) {
+    if (const Value* ns = f.get("new_section"); ns && !ns->isNull()) {
+        const std::string w = where + ".new_section";
+        if (r.keys(*ns, K::MorphSection, w, pid)) {
+            MorphSection& m = h.newSection;
+            m.present = true;
+            const Value* sec = ns->get("secid");
+            const Value* file = ns->get("file");
+            const bool secNull = sec && sec->isNull(), fileNull = file && file->isNull();
+            bool okSec = secNull, okFile = fileNull;
+            if (sec && !secNull) okSec = r.integer(sec, w + ".secid", pid, 1, m.secid);
+            if (file && !fileNull) {
+                okFile = r.str(file, w + ".file", pid, m.file);
+                if (okFile && !plainName(m.file)) {
+                    r.bad(pid, w + ".file", "'" + m.file + "' — 계획 폴더 바로 아래의 맨 이름이 아니다", "file_name");
+                    okFile = false;
+                }
+            }
+            if (sec && file && secNull != fileNull) r.bad(pid, w, "secid 와 file 은 함께 있거나 함께 null 이다");
+            m.built = sec && file && !secNull && !fileNull && okSec && okFile;
+            if (r.number(ns->get("thickness"), w + ".thickness", pid, m.thickness) && !(m.thickness > 0))
+                r.bad(pid, w + ".thickness", "0 보다 커야 한다");
+            r.str(ns->get("why"), w + ".why", pid, m.why);
+        }
+    }
+    if (const Value* et = f.get("element_thickness")) {
+        const std::string w = where + ".element_thickness";
+        if (r.keys(*et, K::ElementThickness, w, pid)) {
+            h.hasElementThickness = true;
+            r.integer(et->get("elements"), w + ".elements", pid, 1, h.elementThicknessCount);
+            std::string why;
+            r.str(et->get("why"), w + ".why", pid, why);
+        }
+    }
+}
+
 void readField(Reader& r, const Value& f, const std::string& where, long long pid, FieldHead& h) {
     h.present = true;
     if (f.type != VT::Object) { r.bad(pid, where, "객체가 아니다"); return; }
@@ -257,9 +340,11 @@ void readField(Reader& r, const Value& f, const std::string& where, long long pi
         r.keys(f, K::FieldFailed, where, pid);
         h.built = false;
         r.str(f.get("why"), where + ".why", pid, h.why);
+        if (r.version() >= 2) readMorphV2(r, f, where, pid, h);
         return;
     }
     r.keys(f, K::Field, where, pid);
+    if (r.version() >= 2) readMorphV2(r, f, where, pid, h);
     h.built = r.str(file, where + ".file", pid, h.file);
     r.integer(f.get("nodes"), where + ".nodes", pid, 0, h.nodes);
     r.integer(f.get("bytes"), where + ".bytes", pid, 0, h.bytes);
@@ -367,6 +452,34 @@ bool actionOf(const std::string& s, Action& a) {
     return false;
 }
 
+// 판 2 — 줄의 덱 자리(요청서 §10.2 `parts[].deck`). 범위는 [min, max] 이거나 null, contiguous 는 참 · 거짓 · null, SECID · MID 는
+// 정수이거나 null(`*PART` 가 없다). 값은 덱과 견준다(적용 쪽) — 여기서는 꼴만 본다.
+void readPartDeck(Reader& r, const Value& d, const std::string& where, long long pid, PartDeck& out) {
+    if (!r.keys(d, K::PartDeck, where, pid)) return;
+    out.present = true;
+    auto range = [&](const char* key, bool& has, long long& lo, long long& hi) {
+        const Value* v = d.get(key);
+        if (!v || v->isNull()) return;
+        has = true;
+        readRange(r, v, where + "." + key, pid, lo, hi);
+    };
+    auto maybeInt = [&](const char* key, bool& has, long long& v) {
+        const Value* x = d.get(key);
+        if (!x || x->isNull()) return;
+        has = r.integer(x, where + "." + key, pid, 0, v);
+    };
+    range("node", out.hasNode, out.nodeLo, out.nodeHi);
+    r.integer(d.get("node_count"), where + ".node_count", pid, 0, out.nodeCount);
+    range("elem", out.hasElem, out.elemLo, out.elemHi);
+    r.integer(d.get("elem_count"), where + ".elem_count", pid, 0, out.elemCount);
+    if (const Value* c = d.get("contiguous"); c && !c->isNull()) {
+        bool b = false;
+        if (r.boolean(c, where + ".contiguous", pid, b)) out.contiguous = b ? 1 : 0;
+    }
+    maybeInt("secid", out.hasSecid, out.secid);
+    maybeInt("mid", out.hasMid, out.mid);
+}
+
 void readPart(Reader& r, const Value& p, size_t k, PartRow& row) {
     std::string where = "parts[" + std::to_string(k) + "]";
     if (p.type != VT::Object) { r.bad(0, where, "객체가 아니다"); return; }
@@ -413,8 +526,18 @@ void readPart(Reader& r, const Value& p, size_t k, PartRow& row) {
         case Action::Remesh:
             readFragment(r, p.get("fragment"), where + ".fragment", pid, false, row.fragment);
             break;
-        case Action::Delete:
         case Action::Review:
+            // 판 2 — 강체가 아닌 옮김(요청서 §10.2 · §10.3 ④). 옮기지 않는다 — 보고에 그대로 되돌려 준다
+            if (const Value* rt = p.get("refused_transform"); rt && r.keys(*rt, K::RefusedTransform, where + ".refused_transform", pid)) {
+                const std::string w = where + ".refused_transform";
+                bool ok = r.numArray(rt->get("transform"), w + ".transform", pid, 16, row.refusedM.data());
+                ok = r.number(rt->get("det"), w + ".det", pid, row.refusedDet) && ok;
+                ok = r.number(rt->get("scale"), w + ".scale", pid, row.refusedScale) && ok;
+                ok = r.number(rt->get("orthogonality_error"), w + ".orthogonality_error", pid, row.refusedOrth) && ok;
+                row.hasRefusedTransform = ok;
+            }
+            break;
+        case Action::Delete:
             break;
     }
     if (const Value* s = p.get("shared_nodes")) {
@@ -424,6 +547,8 @@ void readPart(Reader& r, const Value& p, size_t k, PartRow& row) {
             r.intArray(s->get("with"), where + ".shared_nodes.with", pid, 1, row.shared.with);
         }
     }
+    if (r.version() >= 2)
+        if (const Value* d = p.get("deck")) readPartDeck(r, *d, where + ".deck", pid, row.deck);
     row.valid = (r.count() == before);
 }
 
@@ -446,12 +571,80 @@ void readAdded(Reader& r, const Value& a, size_t k, AddedRow& row) {
     row.valid = (r.count() == before);
 }
 
-// 계획이 적은 동반 파일 이름 — 계획 폴더 바로 아래의 맨 이름만 받는다(`../` · 하위 폴더 · 절대 경로 거절)
-bool plainName(const std::string& n) {
-    if (n.empty() || n == "." || n == "..") return false;
-    for (char c : n)
-        if (c == '/' || c == '\\' || c == '\0' || c == ':') return false;
-    return true;
+// 판 2 의 summary(요청서 §10.2 · 그쪽 `carryover_build.build`) — {actions: {처리: 수}, added, fields, fragments, sections, failed}
+struct Summary {
+    bool read = false;
+    std::map<std::string, long long> actions;
+    long long added = 0, fields = 0, fragments = 0, sections = 0, failed = 0;
+};
+const char* const kActionNames[] = {"keep", "transform", "morph", "remesh", "delete", "review"};
+
+void readSummary(Reader& r, const Value& s, Summary& sum) {
+    if (!r.keys(s, K::Summary, "summary", 0)) return;
+    bool ok = true;
+    if (const Value* a = s.get("actions")) {
+        if (a->type != VT::Object) { r.bad(0, "summary.actions", "객체가 아니다"); ok = false; }
+        else
+            for (const auto& [name, n] : a->obj) {
+                const bool known = std::any_of(std::begin(kActionNames), std::end(kActionNames), [&](const char* x) { return name == x; });
+                long long c = 0;
+                if (!known) { r.bad(0, "summary.actions", "'" + name + "' — 처리 이름이 아니다"); ok = false; }
+                else if (r.integer(&n, "summary.actions." + name, 0, 0, c)) sum.actions[name] = c;
+                else ok = false;
+            }
+    }
+    ok = r.integer(s.get("added"), "summary.added", 0, 0, sum.added) && ok;
+    ok = r.integer(s.get("fields"), "summary.fields", 0, 0, sum.fields) && ok;
+    ok = r.integer(s.get("fragments"), "summary.fragments", 0, 0, sum.fragments) && ok;
+    ok = r.integer(s.get("sections"), "summary.sections", 0, 0, sum.sections) && ok;
+    ok = r.integer(s.get("failed"), "summary.failed", 0, 0, sum.failed) && ok;
+    sum.read = ok;
+}
+
+// 그 줄에서 못 지었거나 확인을 못 지난 재료의 수 — 그쪽 `carryover_build._failed` 와 같은 셈(조각 · 대신 지은 조각의 ok false ·
+// 파일이 없거나 check.ok 가 참이 아닌 변위장 · 파일이 없는 새 셸 섹션)
+long long failedOf(const Value& row) {
+    auto isStr = [](const Value* x) { return x && x->type == VT::String && !x->s.empty(); };
+    long long n = 0;
+    for (const char* k : {"fragment", "instead"})
+        if (const Value* x = row.get(k); x && x->type == VT::Object)
+            if (const Value* ok = x->get("ok"); ok && ok->type == VT::Bool && !ok->b) ++n;
+    if (const Value* f = row.get("field"); f && f->type == VT::Object) {
+        const Value* chk = f->get("check");
+        const Value* ok = chk && chk->type == VT::Object ? chk->get("ok") : nullptr;
+        if (!isStr(f->get("file")) || !(ok && ok->type == VT::Bool && ok->b)) ++n;
+        if (const Value* ns = f->get("new_section"); ns && ns->type == VT::Object && !isStr(ns->get("file"))) ++n;
+    }
+    return n;
+}
+
+// 판 2 — summary 의 actions · sections · failed 가 계획 줄과 같은가(같은 계획 안의 두 주장 — 다르면 plan_inconsistent).
+// actions 는 줄의 처리를 센다(강체가 아닌 옮김은 review — §10.2 「바뀐 뜻」 ②). 나머지 칸(added · fields · fragments)은 판 1 과 뜻이
+// 같아 대조하지 않는다.
+void crossCheckSummary(Reader& r, const Value& root, const Plan& plan, const Summary& sum) {
+    std::map<std::string, long long> rows;
+    for (const auto& p : plan.parts)
+        if (!p.actionText.empty()) ++rows[p.actionText];
+    for (const char* name : kActionNames) {
+        const long long a = sum.actions.count(name) ? sum.actions.at(name) : 0, b = rows.count(name) ? rows.at(name) : 0;
+        if (a != b)
+            r.bad(0, std::string("summary.actions.") + name, std::to_string(a) + " 이 계획 줄의 " + name + " 수 " + std::to_string(b) +
+                                                                 " 와 다르다", "plan_inconsistent");
+    }
+    long long sections = 0;
+    for (const auto& p : plan.parts)
+        if (p.action == Action::Morph && p.field.newSection.built) ++sections;
+    if (sum.sections != sections)
+        r.bad(0, "summary.sections", std::to_string(sum.sections) + " 이 새 셸 섹션 파일을 실은 모프 줄 수 " + std::to_string(sections) +
+                                         " 와 다르다", "plan_inconsistent");
+    long long failed = 0;
+    for (const char* list : {"parts", "added"})
+        if (const Value* a = root.get(list); a && a->type == VT::Array)
+            for (const auto& row : a->arr)
+                if (row.type == VT::Object) failed += failedOf(row);
+    if (sum.failed != failed)
+        r.bad(0, "summary.failed", std::to_string(sum.failed) + " 이 계획 줄에서 센 못 지은 재료 수 " + std::to_string(failed) +
+                                       "(조각 · 대신 지은 조각 · 변위장 · 새 셸 섹션) 와 다르다", "plan_inconsistent");
 }
 
 bool parseLL(const std::string& s, long long& v) {
@@ -483,12 +676,52 @@ std::string padInt(long long v, int w) {
     return buf;
 }
 
-std::string q(const std::string& s) { return json::quote(s); }
+// 보고에 싣는 글자는 늘 바른 UTF-8 이다 — 깨진 바이트(넘친 꼴 · 서로게이트 · U+10FFFF 위 · 잘린 꼴)는 U+FFFD 로 바꾼다(RFC 3629).
+// 계획(StrictJson 은 글자를 검사하지 않는다) · 덱 줄 · 경로 어디서 온 글자든 보고가 엄격한 리더에서 깨지지 않게(2026-11-07 적대적 검토 #4)
+std::string validUtf8(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    size_t i = 0;
+    while (i < s.size()) {
+        const unsigned char c = static_cast<unsigned char>(s[i]);
+        if (c < 0x80) { out += static_cast<char>(c); ++i; continue; }
+        size_t n = 0;
+        uint32_t cp = 0;
+        if ((c & 0xE0) == 0xC0) { n = 1; cp = c & 0x1Fu; }
+        else if ((c & 0xF0) == 0xE0) { n = 2; cp = c & 0x0Fu; }
+        else if ((c & 0xF8) == 0xF0) { n = 3; cp = c & 0x07u; }
+        bool ok = n > 0;
+        for (size_t k = 1; ok && k <= n; ++k) {
+            if (i + k >= s.size() || (static_cast<unsigned char>(s[i + k]) & 0xC0) != 0x80) ok = false;
+            else cp = (cp << 6) | (static_cast<unsigned char>(s[i + k]) & 0x3Fu);
+        }
+        if (ok && ((n == 1 && cp < 0x80) || (n == 2 && cp < 0x800) || (n == 3 && cp < 0x10000) || (cp >= 0xD800 && cp <= 0xDFFF) || cp > 0x10FFFF))
+            ok = false;
+        if (ok) { out.append(s, i, n + 1); i += n + 1; }
+        else { out += "\xEF\xBF\xBD"; ++i; }
+    }
+    return out;
+}
 
+std::string q(const std::string& s) { return json::quote(validUtf8(s)); }
+
+// 글자 경계에서 자른다 — 바이트 n 에서 자르면 한글(3 바이트)이 반쪽으로 남아 보고가 깨진 UTF-8 이 되었다(검토 #4)
+std::string clipUtf8(const std::string& l, size_t n) {
+    if (l.size() <= n) return l;
+    size_t cut = n;
+    while (cut > 0 && (static_cast<unsigned char>(l[cut]) & 0xC0) == 0x80) --cut;
+    return l.substr(0, cut) + "…";
+}
+
+// 다시 읽으면 같은 double 이 되는 가장 짧은 꼴(15 → 16 → 17 자리) — %.15g 는 계획의 refused_transform 을 되돌려 줄 때 끝자리를
+// 잃었다(1.0000000000000002 → 1 · 적대적 검토 11-07 #7). 짧게 맞는 값(0.6 · 1.01)은 예전과 같은 글자다.
 std::string num(double v) {
     if (!std::isfinite(v)) return "null";
     char buf[64];
-    std::snprintf(buf, sizeof(buf), "%.15g", v);
+    for (int prec = 15; prec <= 17; ++prec) {
+        std::snprintf(buf, sizeof(buf), "%.*g", prec, v);
+        if (std::strtod(buf, nullptr) == v) break;
+    }
     return buf;
 }
 
@@ -528,12 +761,17 @@ bool parsePlan(const std::string& text, Plan& out, std::vector<Problem>& problem
     }
     Reader r(problems);
     const size_t before = r.count();
-    if (!r.keys(v, K::Top, "계획", 0)) return false;
+    if (v.type != VT::Object) { r.bad(0, "계획", "객체가 아니다"); return false; }
+    // 판을 먼저 본다 — 칸 표가 판마다 다르다(판 1 · 2 만 받는다 · 모르는 판은 가장 새 판의 표로 나머지를 본다)
+    const Value* ver = v.get("version");
+    r.setVersion(ver && ver->type == VT::Int && ver->i == 1 ? 1 : 2);
+    r.keys(v, K::Top, "계획", 0);
 
     if (r.str(v.get("format"), "format", 0, out.format) && out.format != "stepforge-carryover-plan")
         r.bad(0, "format", "'" + out.format + "' — stepforge-carryover-plan 만 받는다", "plan_format");
-    if (r.integer(v.get("version"), "version", 0, 0, out.version) && out.version != 1)
-        r.bad(0, "version", std::to_string(out.version) + " — 판 1 만 받는다(칸의 뜻이 바뀐 판은 그 꼴을 받기로 한 뒤에)", "plan_format");
+    if (r.integer(v.get("version"), "version", 0, 0, out.version) && out.version != 1 && out.version != 2)
+        r.bad(0, "version", std::to_string(out.version) + " — 판 1 · 2 만 받는다(칸의 뜻이 바뀐 판은 그 꼴을 받기로 한 뒤에)", "plan_format");
+    const bool v2 = r.version() >= 2;
     if (r.str(v.get("unit"), "unit", 0, out.unit) && out.unit != "mm-t-s")
         r.bad(0, "unit", "'" + out.unit + "' — mm-t-s 만 받는다(환산하지 않는다)", "plan_format");
     if (r.str(v.get("frame"), "frame", 0, out.frame) && out.frame != "world")
@@ -552,12 +790,36 @@ bool parsePlan(const std::string& text, Plan& out, std::vector<Problem>& problem
             r.integer(m->get("mid"), "deck.max.mid", 0, 0, out.maxMid);
         }
         r.strArray(d->get("unread_cards"), "deck.unread_cards", 0, out.unreadCards);
+        if (v2) {
+            // 덱의 자리 — 덱을 relpath 로 찾지 않는다(부르는 쪽이 준 model 이 그 덱이고 sha256 이 지킨다) · 보고에 되돌려 줄 뿐이다
+            if (r.str(d->get("deck_from"), "deck.deck_from", 0, out.deckFrom) && out.deckFrom != "raw" && out.deckFrom != "mesh")
+                r.bad(0, "deck.deck_from", "'" + out.deckFrom + "' — raw · mesh 만 있다");
+            if (const Value* inc = d->get("includes")) {
+                if (inc->type != VT::Array) r.bad(0, "deck.includes", "배열이 아니다");
+                else {
+                    out.hasIncludes = true;
+                    for (size_t k = 0; k < inc->arr.size(); ++k) {
+                        const std::string w = "deck.includes[" + std::to_string(k) + "]";
+                        IncludeEntry e;
+                        if (!r.keys(inc->arr[k], K::Include, w, 0)) continue;
+                        if (r.str(inc->arr[k].get("relpath"), w + ".relpath", 0, e.relpath) && e.relpath.empty())
+                            r.bad(0, w + ".relpath", "비었다");
+                        if (r.str(inc->arr[k].get("sha256"), w + ".sha256", 0, e.sha256) && !isHex64(e.sha256))
+                            r.bad(0, w + ".sha256", "소문자 16진 64자가 아니다");
+                        out.includes.push_back(e);
+                    }
+                }
+            }
+        }
     }
     r.str(v.get("report_key"), "report_key", 0, out.reportKey);
     r.object(v.get("cad"), "cad", 0);
     double floorMm = 0;
     if (r.number(v.get("floor_mm"), "floor_mm", 0, floorMm) && floorMm < 0) r.bad(0, "floor_mm", "음수다");
-    r.object(v.get("summary"), "summary", 0);
+    // 판 1 의 summary 는 꼴만 본다. 판 2 는 칸을 보고(그쪽 요청서 §10.2) actions · sections · failed 를 계획 줄과 대조한다(아래)
+    Summary sum;
+    if (!v2) r.object(v.get("summary"), "summary", 0);
+    else if (const Value* s = v.get("summary")) readSummary(r, *s, sum);
     if (const Value* cb = v.get("code_build")) r.str(cb, "code_build", 0, out.codeBuild);
 
     if (const Value* ps = v.get("parts")) {
@@ -600,6 +862,7 @@ bool parsePlan(const std::string& text, Plan& out, std::vector<Problem>& problem
                 out.files.push_back(fe);
             }
     }
+    if (v2 && sum.read) crossCheckSummary(r, v, out, sum);
     return r.count() == before;
 }
 
@@ -987,14 +1250,166 @@ std::string renderFragment(const std::vector<std::string>& lines, const Fragment
     return o.str();
 }
 
+bool shellSectionRows(const std::vector<std::string>& block, size_t& row1, size_t& row2, std::string& why) {
+    const auto bl = cardcut::blocks(block);
+    if (bl.size() != 1 || bl[0].kwLine != 0) { why = "블록이 섹션 키워드 하나로 시작하는 한 묶음이 아니다"; return false; }
+    const std::string& kw = bl[0].kw;
+    if (kw != "*SECTION_SHELL" && kw != "*SECTION_SHELL_TITLE") { why = kw + " — *SECTION_SHELL · *SECTION_SHELL_TITLE 이 아니다"; return false; }
+    const auto& data = bl[0].data;   // 주석 밖의 줄 — 빈 줄도 카드다(끝의 빈 줄은 여백)
+    const size_t title = kw == "*SECTION_SHELL_TITLE" ? 1 : 0;
+    if (data.size() < title + 2) { why = "Card 1 · Card 2 가 없다(데이터 줄 " + std::to_string(data.size()) + ")"; return false; }
+    row1 = data[title];
+    row2 = data[title + 1];
+    for (size_t r : {row1, row2})
+        if (block[r].find(',') != std::string::npos || block[r].find('\t') != std::string::npos) {
+            why = std::to_string(r + 1) + "째 줄 — 자유 형식(콤마 · 탭)이다(고정폭 10칸만 받는다)";
+            return false;
+        }
+    const auto f = cardcut::cut(block[row1], 10).f;
+    long long elform = 0, nip = 0, icomp = 0;
+    if (f.size() > 1 && !deckscan::trim(f[1]).empty() && !parseLL(f[1], elform)) { why = "Card 1 의 ELFORM 이 정수가 아니다"; return false; }
+    if (f.size() > 3 && !parseLL(f[3], nip)) { why = "Card 1 의 NIP 가 정수가 아니다"; return false; }
+    if (f.size() > 6 && !parseLL(f[6], icomp)) { why = "Card 1 의 ICOMP 가 정수가 아니다"; return false; }
+    // 딸린 카드(Vol_I *SECTION_SHELL) — ICOMP 1 이면 각도 카드 ceil(NIP/8)(NIP 0 = 2 점) · ELFORM 101~105 는 사용자 정의 셸의
+    // 카드 묶음(NIPP · 적분점 · 성질 카드)이 따라온다 — 그 줄 수는 그 카드의 값이 정해 여기서는 받지 않는다
+    if (elform >= 101 && elform <= 105) { why = "사용자 정의 셸(ELFORM " + std::to_string(elform) + ")의 딸린 카드는 계약 밖이다"; return false; }
+    if (icomp != 0 && icomp != 1) { why = "Card 1 의 ICOMP " + std::to_string(icomp) + " — 0 · 1 만 있다"; return false; }
+    const long long nipEff = nip > 0 ? nip : 2;
+    const size_t angles = icomp == 1 ? static_cast<size_t>((nipEff + 7) / 8) : 0;
+    const size_t want = title + 2 + angles;
+    if (data.size() != want) {
+        why = "카드 하나가 아니다 — 데이터 줄 " + std::to_string(data.size()) + "(제목 " + std::to_string(title) + " · Card 1 · Card 2" +
+              (angles ? " · 각도 카드 " + std::to_string(angles) : std::string()) + " = " + std::to_string(want) +
+              ") — 한 키워드 아래 쌓인 둘째 카드일 수 있다";
+        return false;
+    }
+    return true;
+}
+
+bool scanSectionFile(const std::vector<std::string>& in, SectionFileScan& s, std::vector<std::string>& problems) {
+    s = SectionFileScan{};
+    const size_t before = problems.size();
+    auto bad = [&](size_t i, const std::string& what) { problems.push_back("새 섹션 " + std::to_string(i + 1) + "째 줄 — " + what); };
+    // 제어 문자(탭 밖) — 주석 · 제목 줄은 글자 그대로 덱에 들어간다(조각과 같은 규칙 · 리뷰 11-07)
+    for (size_t i = 0; i < in.size(); ++i)
+        if (std::any_of(in[i].begin(), in[i].end(), [](char c) {
+                const unsigned char u = static_cast<unsigned char>(c);
+                return (u < 0x20 && u != '\t') || u == 0x7F;
+            }))
+            bad(i, "제어 문자가 든 줄 — 인쇄할 수 있는 글자(와 탭)만 싣는다");
+    // 키워드 줄 셋 — *KEYWORD · 셸 섹션 · *END(그 차례 · 그 밖의 키워드 없음)
+    std::vector<size_t> kws;
+    for (size_t i = 0; i < in.size(); ++i)
+        if (cardcut::isKeywordLine(in[i])) kws.push_back(i);
+    auto tok = [&](size_t i) { return deckscan::keywordToken(in[i]); };
+    for (size_t i = 0; i < (kws.empty() ? in.size() : kws.front()); ++i)
+        if (deckscan::isDataLine(in[i])) bad(i, "*KEYWORD 앞의 데이터 줄");
+    if (kws.empty() || deckscan::kwBare(tok(kws[0])) != "*KEYWORD") {
+        problems.push_back("새 섹션 — 첫 키워드가 *KEYWORD 가 아니다");
+        return false;
+    }
+    if (const int w = keywordCardDeckWidth(in[kws[0]]); w != 0 && w != 8) bad(kws[0], "*KEYWORD 의 폭이 표준(8)이 아니다");
+    if (kws.size() < 2) { problems.push_back("새 섹션 — 셸 섹션 카드가 없다"); return false; }
+    const size_t sk = kws[1];
+    const std::string skw = tok(sk);
+    if (skw != "*SECTION_SHELL" && skw != "*SECTION_SHELL_TITLE") {
+        bad(sk, "키워드 " + skw + " — *SECTION_SHELL · *SECTION_SHELL_TITLE 카드 하나만 싣는다(칸 폭 접미사 없이)");
+        return false;
+    }
+    for (size_t i = kws[0] + 1; i < sk; ++i) {
+        if (deckscan::isDataLine(in[i])) bad(i, "*KEYWORD 와 섹션 카드 사이의 데이터 줄");
+        else if (cardcut::isCommentLine(in[i])) s.head.push_back(in[i]);
+    }
+    if (kws.size() < 3) { problems.push_back("새 섹션 — *END 가 없다(잘린 파일일 수 있다)"); return false; }
+    const size_t ek = kws[2];
+    if (deckscan::kwBare(tok(ek)) != "*END") {
+        bad(ek, "섹션 카드 뒤의 키워드 " + tok(ek) + " — 셸 섹션 카드 하나와 *END 만 싣는다");
+        return false;
+    }
+    for (size_t k = 3; k < kws.size(); ++k) bad(kws[k], "*END 뒤의 키워드 " + tok(kws[k]));
+    for (size_t i = ek + 1; i < in.size(); ++i)
+        if (deckscan::isDataLine(in[i])) bad(i, "*END 뒤의 데이터 줄");
+    s.block.assign(in.begin() + static_cast<long>(sk), in.begin() + static_cast<long>(ek));
+    std::string why;
+    if (!shellSectionRows(s.block, s.row1, s.row2, why)) {
+        problems.push_back("새 섹션 — " + why);
+        return false;
+    }
+    const auto c1 = cardcut::cut(s.block[s.row1], 10).f;
+    if (c1.empty() || !parseLL(c1[0], s.secid) || s.secid <= 0) bad(sk + s.row1, "Card 1 의 SECID 를 읽지 못했다");
+    if (c1.size() > 1) parseLL(c1[1], s.elform);
+    const auto c2 = cardcut::cut(s.block[s.row2], 10).f;
+    for (size_t k = 0; k < 4; ++k)
+        if (k >= c2.size() || !parseReal(c2[k], s.t[k])) {
+            bad(sk + s.row2, "Card 2 의 T" + std::to_string(k + 1) + " 을 읽지 못했다(넷 다 적혀 있어야 한다)");
+            break;
+        }
+    return problems.size() == before;
+}
+
+void compareSectionCards(const std::vector<std::string>& deck, const SectionFileScan& s, std::vector<std::string>& problems) {
+    auto tail = [](const std::string& l, size_t n) { return l.size() > n ? l.substr(n) : std::string(); };
+    auto clip = [](const std::string& l) { return "'" + clipUtf8(l, 60) + "'"; };
+    if (deck.size() != s.block.size()) {
+        problems.push_back("줄 수 " + std::to_string(s.block.size()) + " 가 덱의 옛 카드(" + std::to_string(deck.size()) +
+                           " 줄 — 키워드 줄부터 다음 키워드 앞까지)와 다르다 — 옛 카드를 그대로 옮긴 카드가 아니다");
+        return;
+    }
+    size_t shown = 0;
+    for (size_t k = 0; k < deck.size() && shown < 3; ++k) {
+        const std::string& a = deck[k];
+        const std::string& b = s.block[k];
+        std::string what;
+        if (k == s.row1) {
+            if (tail(a, 10) != tail(b, 10)) what = "(Card 1)의 SECID 밖 칸(ELFORM · SHRF · NIP · PROPT · QR/IRID · ICOMP · SETYP)이";
+        } else if (k == s.row2) {
+            if (tail(a, 40) != tail(b, 40)) what = "(Card 2)의 T1~T4 밖 칸(NLOC · MAREA · IDOF · EDGSET)이";
+        } else if (a != b) {
+            what = k == 0 ? "(키워드)이" : "이";
+        }
+        if (what.empty()) continue;
+        ++shown;
+        problems.push_back("블록 " + std::to_string(k + 1) + "째 줄" + what + " 덱의 옛 카드와 다르다 — 덱 " + clip(a) + " · 새 " + clip(b) +
+                           " (SECID 와 T1~T4 만 바꿀 수 있다)");
+    }
+}
+
+bool bytesGiveLines(const std::string& bytes, const std::vector<std::string>& lines, bool include) {
+    size_t k = 0;
+    for (size_t p = 0; p < bytes.size();) {
+        size_t e = bytes.find('\n', p);
+        if (e == std::string::npos) e = bytes.size();
+        std::string_view l(bytes.data() + p, e - p);
+        p = e + 1;
+        if (!l.empty() && l.back() == '\r') l.remove_suffix(1);
+        if (include) {
+            if (k == 0 && l.size() >= 3 && l.substr(0, 3) == "\xEF\xBB\xBF") l.remove_prefix(3);
+            const std::string t(l);
+            if (!deckscan::isDataLine(t) && deckscan::keywordToken(t) == "*END") break;   // 그 파일은 여기서 끝난다 — 뒤는 담지 않았다
+        }
+        if (k >= lines.size() || l != std::string_view(lines[k])) return false;
+        ++k;
+    }
+    return k == lines.size();
+}
+
 std::string toJson(const Report& r) {
     std::ostringstream o;
     o << "{\n  \"format\": \"dynaforge-carryover-apply\",\n  \"version\": 1,\n  \"ok\": " << (r.ok ? "true" : "false") << ",\n";
     o << "  \"plan\": {\"sha256\": " << (r.planRead ? q(r.planSha256) : "null")
       << ", \"version\": " << (r.planParsed ? std::to_string(r.planVersion) : "null")
-      << ", \"report_key\": " << (r.planParsed ? q(r.reportKey) : "null") << "},\n";
+      << ", \"report_key\": " << (r.planParsed ? q(r.reportKey) : "null")
+      << ", \"deck_from\": " << (r.deckFrom.empty() ? "null" : q(r.deckFrom)) << "},\n";
     o << "  \"deck\": {\"sha256_in\": " << (r.deckShaIn.empty() ? "null" : q(r.deckShaIn))
-      << ", \"sha256_out\": " << (r.deckShaOut.empty() ? "null" : q(r.deckShaOut)) << "},\n";
+      << ", \"sha256_out\": " << (r.deckShaOut.empty() ? "null" : q(r.deckShaOut)) << ", \"includes\": ";
+    if (!r.includesChecked) o << "null";
+    else {
+        o << "[";
+        for (size_t k = 0; k < r.includes.size(); ++k)
+            o << (k ? ", " : "") << "{\"relpath\": " << q(r.includes[k].relpath) << ", \"sha256\": " << q(r.includes[k].sha256) << "}";
+        o << "]";
+    }
+    o << "},\n";
     auto list = [&](const char* key, const std::vector<Problem>& v) {
         o << "  \"" << key << "\": [";
         for (size_t k = 0; k < v.size(); ++k) o << (k ? ",\n    " : "\n    ") << problemJson(v[k]);
@@ -1013,7 +1428,16 @@ std::string toJson(const Report& r) {
         if (p.hasInserted)
             o << ", \"inserted\": {\"node\": [" << p.insNodeLo << ", " << p.insNodeHi << "], \"elem\": [" << p.insElemLo << ", "
               << p.insElemHi << "]}";
-        if (p.hasNewSection) o << ", \"new_section\": {\"secid\": " << p.newSecid << ", \"elform\": " << p.newElform << "}";
+        if (p.hasNewSection && p.newSectionShell)
+            o << ", \"new_section\": {\"secid\": " << p.newSecid << ", \"thickness\": " << num(p.newThickness) << "}";
+        else if (p.hasNewSection)
+            o << ", \"new_section\": {\"secid\": " << p.newSecid << ", \"elform\": " << p.newElform << "}";
+        if (p.hasRefusedTransform) {
+            o << ", \"refused_transform\": {\"transform\": [";
+            for (size_t m = 0; m < 16; ++m) o << (m ? ", " : "") << num(p.refusedM[m]);
+            o << "], \"det\": " << num(p.refusedDet) << ", \"scale\": " << num(p.refusedScale)
+              << ", \"orthogonality_error\": " << num(p.refusedOrth) << "}";
+        }
         if (p.hasInverted) o << ", \"inverted_before\": " << p.invertedBefore << ", \"inverted_after\": " << p.invertedAfter;
         if (p.hasFlipped) o << ", \"flipped\": " << p.flipped;
         if (!p.absorbed.empty()) {

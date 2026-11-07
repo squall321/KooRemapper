@@ -307,6 +307,45 @@ TEST(IncludeClosure_inlined_는_카드를_지우고_본문을_차례대로_넣�
     for (size_t i = 0; i < want.size(); ++i) ASSERT_EQ(out[i], want[i]);
 }
 
+// 펼친 줄마다의 자리(2026-11-07 · `apply_carryover_plan` 판 2) — 닫힘을 훑는 읽기 전용 검사가 「그 인클루드 파일 몇째 줄」을 말한다
+TEST(IncludeClosure_inlined_는_줄마다_온_파일과_줄을_낸다) {
+    Scratch s("inlorg");
+    s.put("a.k", "*KEYWORD\n*NODE\n1\n*INCLUDE\nb.k\n*END\n*NODE\n99\n");
+    s.put("b.k", "*KEYWORD\n*NODE\n2\n*END\n");
+    s.put("c.k", "*NODE\n3\n");
+    const std::string body = "*KEYWORD\n*TITLE\nt\n*INCLUDE\na.k\n$ 주석\nc.k\n*PART\np\n*END\n";
+    const std::string mp = s.put("main.k", body);
+    const auto L = splitLines(body);
+    const auto c = include_closure::read(mp, L);
+    std::vector<std::string> out;
+    std::vector<include_closure::LineOrigin> org;
+    std::string why;
+    ASSERT_TRUE(include_closure::inlined(L, mp, c, out, why, &org));
+    ASSERT_EQ(org.size(), out.size());
+    ASSERT_EQ(c.files.size(), static_cast<size_t>(3));   // a · b(a 가 끌어온) · c — 깊이 우선
+    const size_t M = include_closure::LineOrigin::kMain;
+    const std::vector<std::pair<size_t, size_t>> want = {{M, 0}, {M, 1}, {M, 2}, {0, 1}, {0, 2}, {1, 1}, {1, 2}, {2, 0}, {2, 1},
+                                                         {M, 7}, {M, 8}, {M, 9}};
+    ASSERT_EQ(org.size(), want.size());
+    for (size_t i = 0; i < want.size(); ++i) {
+        ASSERT_EQ(org[i].file, want[i].first);
+        ASSERT_EQ(org[i].line, want[i].second);
+    }
+}
+
+// 인클루드 파일 맨 앞 UTF-8 BOM(2026-11-07 적대적 검토 #2) — 떼지 않으면 첫 줄의 키워드가 데이터 줄로 보였다. BOM 뒤 첫 키워드가 `*INCLUDE` 면
+// 그 중첩 인클루드를 따라가지 못했고(닫힘에서 빠진다), 세트 · 접촉이면 그 블록을 훑는 검사가 통째로 못 보았다
+TEST(IncludeClosure_인클루드_파일_맨_앞_BOM_은_뗀다) {
+    Scratch s("bom");
+    s.put("a.k", "\xEF\xBB\xBF*INCLUDE\nb.k\n*SET_NODE_LIST\n        77\n         5\n");
+    s.put("b.k", "*NODE\n       5\n");
+    const auto c = readMain(s, "main.k", "*KEYWORD\n*INCLUDE\na.k\n*END\n");
+    ASSERT_TRUE(c.complete());
+    ASSERT_EQ(c.files.size(), static_cast<size_t>(2));   // a 와 a 가 끌어온 b — BOM 뒤 *INCLUDE 를 따라갔다
+    ASSERT_EQ(baseOf(c.files[1].path), std::string("b.k"));
+    ASSERT_EQ(c.files[0].lines[0], std::string("*INCLUDE"));   // 줄에 BOM 이 남지 않는다
+}
+
 TEST(IncludeClosure_inlined_는_펼칠_수_없으면_까닭을_댄다) {
     Scratch s("inlbad");
     s.put("w.k", "*KEYWORD I10=Y\n*NODE\n1\n");
@@ -359,4 +398,59 @@ TEST(IncludeClosure_FlatDeck_는_인클루드가_없으면_쓰지_않고_있으�
         ASSERT_EQ(fs::path(tmp).parent_path(), fs::path(mp).parent_path());   // 주 덱 옆 — 상대 경로 기준이 같다
     }
     ASSERT_FALSE(fs::exists(tmp));                                            // 소멸자가 지웠다
+}
+
+TEST(IncludeClosure_sameFile_은_철자_절대경로_하드링크를_같다고_본다) {
+    // 쓸 파일이 입력 덱을 덮는지(2026-11-07 검토 #6 — extract-parts 의 output == model 이 입력을 비웠다). 아직 없는 산출은 정규 경로로 견준다
+    Scratch s("same");
+    const std::string m = s.put("d/m.k", "*KEYWORD\n*END\n");
+    const std::string inc = s.put("d/inc.k", "*NODE\n");
+    ASSERT_TRUE(include_closure::sameFile(m, m));
+    ASSERT_TRUE(include_closure::sameFile(m, (s.root / "d" / "." / "m.k").string()));
+    ASSERT_TRUE(include_closure::sameFile(m, (s.root / "d" / ".." / "d" / "m.k").string()));
+    const std::string hard = (s.root / "d" / "hard.k").string();
+    fs::create_hard_link(m, hard);
+    ASSERT_TRUE(include_closure::sameFile(hard, m));
+    ASSERT_FALSE(include_closure::sameFile(m, inc));
+    ASSERT_FALSE(include_closure::sameFile((s.root / "d" / "out.k").string(), m));   // 없는 파일
+    ASSERT_FALSE(include_closure::sameFile("", m));
+    std::string w, r;
+    ASSERT_TRUE(include_closure::clobberPair({(s.root / "d" / "out.k").string(), inc}, {m, inc}, w, r));
+    ASSERT_EQ(w, inc);
+    ASSERT_EQ(r, inc);
+    ASSERT_TRUE(include_closure::clobberPair({(s.root / "d" / "o.k").string(), (s.root / "d" / "." / "o.k").string()}, {m}, w, r));
+    ASSERT_FALSE(include_closure::clobberPair({(s.root / "d" / "out.k").string(), std::string()}, {m, inc}, w, r));
+}
+
+TEST(IncludeClosure_refs_는_이름마다_어떻게_됐는지_적는다) {
+    // 흘려 읽는 소비자(extract-parts)가 자기 걸음의 이름 줄에서 이것을 물어 같은 규칙으로 따라간다(2026-11-07 재검토 N3 · D1)
+    Scratch s("refs");
+    s.put("a.k", "*KEYWORD\n*INCLUDE\nb.k\n*END\n");
+    s.put("b.k", "*KEYWORD\n*NODE\n1\n*END\n");
+    s.put("lib/t.k", "*NODE\n2\n");
+    const std::string body = "*KEYWORD\n*INCLUDE\na.k\nnope.k\nb.k\n*INCLUDE_PATH\nlib\n*INCLUDE_TRANSFORM\nt.k\n*END\n";
+    const std::string mp = s.put("m.k", body);
+    const auto c = include_closure::readPaths(mp);
+    using W = include_closure::NameRef::What;
+    ASSERT_EQ(c.refs.size(), (size_t)4);                       // a.k · b.k(a 안) · nope.k · b.k(두 번째 — 순환/이미 읽음)
+    ASSERT_TRUE(c.refs[0].what == W::Followed);
+    ASSERT_EQ(c.refs[0].file, mp);
+    ASSERT_EQ(c.refs[0].lastLine, (size_t)3);
+    ASSERT_EQ(baseOf(c.refs[0].path), std::string("a.k"));
+    ASSERT_TRUE(c.refs[1].what == W::Followed);                // a.k 안의 b.k
+    ASSERT_EQ(c.refs[1].lastLine, (size_t)3);
+    ASSERT_TRUE(c.refs[2].what == W::Unresolved);
+    ASSERT_EQ(c.refs[2].name, std::string("nope.k"));
+    ASSERT_TRUE(c.refs[3].what == W::Cycle);                   // 이미 읽은 b.k
+    ASSERT_EQ(c.notFollowed.size(), (size_t)1);
+    ASSERT_EQ(baseOf(c.notFollowed[0].path), std::string("t.k"));   // *INCLUDE_PATH 폴더에서 찾았다 — 읽지는 않는다
+    // 깊이 상한 — 사슬이 상한을 넘으면 그 이름이 DepthCut 이다
+    Scratch d("refs_depth");
+    for (int k = 1; k <= 3; ++k)
+        d.put("c" + std::to_string(k) + ".k", k < 3 ? "*INCLUDE\nc" + std::to_string(k + 1) + ".k\n" : "*NODE\n1\n");
+    const std::string m2 = d.put("m.k", "*KEYWORD\n*INCLUDE\nc1.k\n*END\n");
+    const auto c2 = include_closure::readPaths(m2, 2);
+    ASSERT_TRUE(c2.depthCut);
+    ASSERT_TRUE(c2.refs.back().what == W::DepthCut);
+    ASSERT_EQ(baseOf(c2.refs.back().name), std::string("c3.k"));
 }

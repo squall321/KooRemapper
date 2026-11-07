@@ -158,6 +158,18 @@ int runStrip(const std::string& yamlFile, ConsoleOutput& console)
         console.error("'keywords' list is required (nothing to strip)");
         return 1;
     }
+    // ★산출이 읽는 덱(주 덱 · 인클루드)과 같으면 거절한다 — 거르기는 산출을 열어(잘라 비워) 놓고 주 덱을 흘려 읽는다. 같은 파일이면
+    //   입력이 0 바이트가 되고 rc 0(「Total lines: 0」)이었다. 인클루드를 덮으면 그 입력이 사라진다(2026-11-07 검토 #6)
+    {
+        std::vector<std::string> reads{modelPath};
+        for (const auto& f : KooRemapper::include_closure::readPaths(modelPath).files) reads.push_back(f.path);
+        std::string w, r;
+        if (KooRemapper::include_closure::clobberPair({outputPath}, reads, w, r)) {
+            console.error("output 「" + w + "」 이 읽는 덱 「" + r + "」 과 같은 파일이다 — 입력 덱(주 덱 · 인클루드)에 쓰지 않는다(거르기가 "
+                          "입력을 비우고 다시 읽는다). output 을 다른 이름으로 주라");
+            return 1;
+        }
+    }
 
     // Build uppercase match set for keywords
     // Each entry is matched as a PREFIX of the line's keyword.

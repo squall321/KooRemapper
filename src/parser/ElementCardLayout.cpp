@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <sstream>
 #include <vector>
 
 namespace KooRemapper {
@@ -313,12 +314,27 @@ AuxElementCard auxElementCard(const std::string& keywordLine) {
             a.nodeSkip = 2; a.nodeCount = 3;
             for (const auto& o : opts) {
                 if (o == "TITLE") continue;
+                if (o == "PULLEY" || o == "SOURCE") {
+                    // 보 요소가 아니라 **다른 키워드**다 — 8칸 표(I10)이고 PID 칸이 없다(156795 PUID BID1 BID2 PNID FD FS LMIN DC ·
+                    // 156905 BSID BSNID BSEID NELE …). 칸 1(BID1 · BSNID)을 PID 로 읽지 않는다 — 보 요소 번호 칸만 적는다
+                    a.hasPart = false;
+                    a.partField = -1;
+                    a.nodeCount = 0;
+                    a.elemRefFields = (o == "PULLEY") ? std::vector<int>{1, 2} : std::vector<int>{2};
+                    unsupported("*ELEMENT_BEAM_" + o + " 은 별개 키워드이고 PID 칸이 없습니다");
+                    break;
+                }
                 if (o == "THICKNESS" || o == "SCALAR" || o == "SCALR" || o == "SECTION" ||
                     o == "PID" || o == "OFFSET" || o == "ORIENTATION" || o == "WARPAGE" ||
                     o == "ELBOW")
                     a.lines += 1;                   // 옵션마다 카드 한 장
                 else
                     unsupported("*ELEMENT_BEAM 의 옵션 '" + o + "' 은 카드 줄 수를 확정할 수 없습니다");
+            }
+            // `_ELBOW` 의 Card 10 = MN(가운데 절점) — 옵션 카드는 설명서 차례(2 … 10)로 오니 ELBOW 카드는 늘 마지막 줄이다
+            if (a.supported && a.hasPart && std::find(opts.begin(), opts.end(), "ELBOW") != opts.end()) {
+                a.optNodeLine = a.lines - 1;
+                a.optNodeFields = {0};
             }
             break;
         case AuxFamily::DISCRETE:
@@ -330,14 +346,27 @@ AuxElementCard auxElementCard(const std::string& keywordLine) {
                 else unsupported("*ELEMENT_DISCRETE 의 옵션 '" + o + "' 은 카드 줄 수를 확정할 수 없습니다");
             }
             break;
-        case AuxFamily::MASS:
+        case AuxFamily::MASS: {
             // Card 1 = EID(I8) ID(I8) MASS(E16) PID(I8) (159866-159930). ⚠ PID 는 칸 차례 **3** 이다(칸 1 이 아니다) —
-            // MASS 가 넓은 칸이라 8칸으로 자르면 33-40열(칸 4)이다. 그 차례는 `auxCardFields` 가 자른다.
+            // MASS 가 넓은 칸이라 8칸으로 자르면 33-40열(칸 4)이다. 그 차례는 `auxCardReadings` 가 자른다.
             a.nodeSkip = 1; a.nodeCount = 1;
             a.partField = 3;
             a.wideFields = {2};
+            a.card1Fields = 4;
+            const bool part = std::find(opts.begin(), opts.end(), "PART") != opts.end();
+            if (part) {
+                // `_PART(_SET)` — 파트(세트)에 질량을 얹는 카드다. Card 1 = ID(I8) ADDMASS(F16) FINMASS(F16) LCID(I8) MWD(I8)
+                // (160135-160207) — 칸 0 이 PID(`_SET` 이면 파트 세트 ID)이고 요소 번호 · 절점 칸이 없다
+                a.nodeSkip = -1; a.nodeCount = 0;
+                a.partField = 0;
+                a.wideFields = {1, 2};
+                a.card1Fields = 5;
+                a.hasEid = false;
+            }
             for (const auto& o : opts) {
                 if (o == "TITLE") continue;
+                if (part && o == "PART") continue;
+                if (part && o == "SET") { a.partIsSet = true; continue; }
                 // `_NODE_SET` 은 칸 1 이 **절점 세트 ID** 다 — 절점으로 읽으면 엉뚱한 절점을
                 // 지키고 세트 멤버는 놓친다. 추측하지 않는다.
                 if (o == "NODE" || o == "SET")
@@ -346,14 +375,23 @@ AuxElementCard auxElementCard(const std::string& keywordLine) {
                     unsupported("*ELEMENT_MASS 의 옵션 '" + o + "' 은 칸 뜻을 확정할 수 없습니다");
             }
             break;
+        }
         case AuxFamily::SEATBELT:
-            // Card 1 = EID PID N1 N2 SBRID SLEN N3 N4 — 절점이 **두 구간**이다.
+            // Card 1 = EID PID N1 N2 SBRID(I8 다섯) SLEN(F16) N3 N4(I8) (160311-160353) — 절점이 **두 구간**이다(칸 차례 2·3 · 6·7).
+            // SLEN 이 넓은 칸이라 N3 · N4 는 57-64 · 65-72열이다(8칸으로 자르면 칸 7·8). 그 차례는 `auxCardReadings` 가 자른다.
             a.nodeSkip = 2; a.nodeCount = 2;
             a.nodeSkip2 = 6; a.nodeCount2 = 2;
+            a.wideFields = {5};
+            a.card1Fields = 8;
             for (const auto& o : opts) {
                 if (o == "TITLE") continue;
-                // `_ACCELEROMETER`·`_PRETENSIONER`·`_RETRACTOR`·`_SENSOR`·`_SLIPRING` 은
-                // 변형이 아니라 **다른 키워드**다 — 칸 배치가 통째로 다르다.
+                // `_ACCELEROMETER`·`_PRETENSIONER`·`_RETRACTOR`·`_SENSOR`·`_SLIPRING` 은 변형이 아니라 **다른 키워드**다 —
+                // 10칸 폭 표이고 PID 칸이 없다(160482 · 160602 · 160931 · 161342 · 161725). 칸 자리를 짐작하지 않는다.
+                a.hasPart = false;
+                a.partField = -1;
+                a.nodeCount = 0; a.nodeSkip2 = -1; a.nodeCount2 = 0;
+                a.wideFields.clear();
+                a.card1Fields = 0;
                 unsupported("*ELEMENT_SEATBELT_" + o + " 은 별개 키워드이고 칸 배치가 다릅니다");
             }
             break;
@@ -373,23 +411,227 @@ AuxElementCard auxElementCard(const std::string& keywordLine) {
     return a;
 }
 
-std::vector<std::string> auxCardFields(const AuxElementCard& a, const std::string& line, int fw) {
-    if (a.wideFields.empty()) return deckscan::cardFields(line, fw);
+namespace {
+
+// 정수 칸 글자 — 부호와 숫자뿐(자리 수는 보지 않는다 · i10 의 열 자리 번호도 꼴로는 정수다)
+bool isIntText(const std::string& s) {
+    size_t i = (!s.empty() && (s[0] == '+' || s[0] == '-')) ? 1 : 0;
+    if (i >= s.size()) return false;
+    for (; i < s.size(); ++i)
+        if (!std::isdigit(static_cast<unsigned char>(s[i]))) return false;
+    return true;
+}
+
+// 실수 칸 글자 — 부호 · 소수점 · 지수(E · D · 글자 없이 부호 — 「1.0-3」). 정수도 실수다
+bool isRealText(const std::string& s) {
+    size_t i = 0;
+    const size_t n = s.size();
+    if (i < n && (s[i] == '+' || s[i] == '-')) ++i;
+    bool digits = false, dot = false;
+    for (; i < n; ++i) {
+        const char c = s[i];
+        if (std::isdigit(static_cast<unsigned char>(c))) { digits = true; continue; }
+        if (c == '.' && !dot) { dot = true; continue; }
+        break;
+    }
+    if (!digits) return false;
+    if (i == n) return true;
+    const char c = s[i];
+    if (c == 'E' || c == 'e' || c == 'D' || c == 'd') ++i;
+    else if (c != '+' && c != '-') return false;
+    if (i < n && (s[i] == '+' || s[i] == '-')) ++i;
+    const size_t d0 = i;
+    while (i < n && std::isdigit(static_cast<unsigned char>(s[i]))) ++i;
+    return i == n && i > d0;
+}
+
+// 다른 읽기 `f` 가 「그 줄을 그렇게 썼을 수 있는」 읽기인가 — 헤더의 규칙 (a)-(d)
+bool altReadingValid(const AuxElementCard& a, const std::vector<std::string>& f, size_t contentLen, int fw) {
+    if (a.card1Fields <= 0 || fw <= 0) return false;
+    const size_t n = static_cast<size_t>(a.card1Fields);
+    if (contentLen > n * static_cast<size_t>(fw)) return false;                         // (b)
+    for (size_t k = n; k < f.size(); ++k)
+        if (!f[k].empty()) return false;                                                // 카드 칸 밖에 글자
+    for (size_t k = 0; k < n && k < f.size(); ++k) {                                    // (a)
+        const std::string& t = f[k];
+        if (t.empty()) continue;
+        if (t.find_first_of(" \t") != std::string::npos) return false;
+        const bool real = std::find(a.wideFields.begin(), a.wideFields.end(), static_cast<int>(k)) != a.wideFields.end();
+        if (real ? !isRealText(t) : !isIntText(t)) return false;
+    }
+    if (a.family == AuxFamily::SEATBELT && a.nodeSkip2 >= 0 && a.nodeCount2 == 2) {     // (c)
+        const int n3 = deckscan::fieldInt(f, static_cast<size_t>(a.nodeSkip2));
+        const int n4 = deckscan::fieldInt(f, static_cast<size_t>(a.nodeSkip2 + 1));
+        if ((n3 > 0) != (n4 > 0)) return false;
+    }
+    if (a.family == AuxFamily::MASS && a.hasEid && (f.size() <= 2 || f[2].empty())) return false;   // (d)
+    return true;
+}
+
+// primary 와 든 다른 읽기 — 차례대로(primary 먼저)
+std::vector<const std::vector<std::string>*> usedReadings(const AuxCardReadings& r) {
+    std::vector<const std::vector<std::string>*> out{&auxPrimaryFields(r)};
+    if (r.plainAlt) out.push_back(&r.plain.f);
+    return out;
+}
+
+}  // namespace
+
+AuxCardReadings auxCardReadings(const AuxElementCard& a, const std::string& line, int fw) {
+    AuxCardReadings r;
     std::string body = line;
     while (!body.empty() && (body.back() == '\r' || body.back() == '\n')) body.pop_back();
-    if (body.find(',') != std::string::npos) return deckscan::cardFields(body, fw);   // 자유형식 — 토큰 차례
-    const size_t rw = static_cast<size_t>(realFieldWidth(fw));
-    std::vector<std::string> out;
-    bool misaligned = false;
-    for (size_t pos = 0, q = 0; pos < body.size(); ++q) {
-        const bool wide = std::find(a.wideFields.begin(), a.wideFields.end(), static_cast<int>(q)) != a.wideFields.end();
-        const size_t w = wide ? rw : static_cast<size_t>(fw);
-        out.push_back(deckscan::trim(body.substr(pos, w)));
-        if (out.back().find_first_of(" \t") != std::string::npos) misaligned = true;
-        pos += w;
+    // 줄의 끝 — 꼬리 `$…` 주석과 꼬리 공백을 뺀다(주석이 칸을 더럽히거나 줄을 카드 폭 밖으로 늘리지 않게 · 재검토 결정 (b))
+    const size_t cmt = body.find('$');
+    r.commentAt = cmt;
+    if (cmt != std::string::npos) body.erase(cmt);
+    while (!body.empty() && (body.back() == ' ' || body.back() == '\t')) body.pop_back();
+    r.contentLen = body.size();
+    auto inner = [](const std::string& s) { return s.find_first_of(" \t") != std::string::npos; };
+    if (body.find(',') != std::string::npos) {               // 자유형식 — 콤마 토큰이 곧 칸 차례 · 열 자리 없음
+        r.comma = true;
+        r.manual.f = deckscan::cardFields(body, fw);
+        r.manualClean = std::none_of(r.manual.f.begin(), r.manual.f.end(), inner);
+        r.plain = r.manual;
+        r.plainClean = r.manualClean;
+        return r;
     }
-    // 칸이 어긋난 줄 — `deckscan::cardFields` 와 같이 여기서만 공백 토큰으로 읽는다(토큰 차례 = 칸 차례)
-    return misaligned ? deckscan::cardFields(body, fw) : out;
+    // 고정폭 — 열로 자른다. 칸 안에 공백이 끼어도 자르기는 그대로 두고 깨끗하지 않다고만 적는다
+    const size_t rw = static_cast<size_t>(realFieldWidth(fw));
+    auto cut = [&](bool wideAware, AuxCardCut& t) {
+        bool clean = true;
+        for (size_t pos = 0, q = 0; pos < body.size(); ++q) {
+            const bool wide = wideAware &&
+                              std::find(a.wideFields.begin(), a.wideFields.end(), static_cast<int>(q)) != a.wideFields.end();
+            const size_t w = wide ? rw : static_cast<size_t>(fw);
+            std::string f = deckscan::trim(body.substr(pos, w));
+            if (inner(f)) clean = false;
+            t.f.push_back(std::move(f));
+            t.col.push_back(pos);
+            t.width.push_back(w);
+            pos += w;
+        }
+        return clean;
+    };
+    r.manualClean = cut(true, r.manual);
+    if (a.wideFields.empty()) {
+        r.plain = r.manual;
+        r.plainClean = r.manualClean;
+    } else {
+        r.plainClean = cut(false, r.plain);
+    }
+    if (!r.manualClean || !r.plainClean) {                   // 칸이 어긋난 줄 — 공백 토큰도 한 읽기다
+        std::istringstream iss(body);
+        for (std::string t; iss >> t;) r.tokens.push_back(t);
+    }
+    // 다른 읽기 — primary 가 아닌 plain 이 규칙 (a)-(d)를 지킬 때만 든다. 넓은 칸이 없는 족은 plain 이 manual 이라 다른 읽기가 없다.
+    // 공백 토큰은 다른 읽기로 세지 않는다(헤더 — 붙은 숫자를 엉뚱한 칸으로 읽는다)
+    if (!a.wideFields.empty()) r.plainAlt = &auxPrimaryFields(r) != &r.plain.f && altReadingValid(a, r.plain.f, r.contentLen, fw);
+    return r;
+}
+
+const std::vector<std::string>& auxPrimaryFields(const AuxCardReadings& r) {
+    if (r.comma || r.manualClean) return r.manual.f;
+    if (r.plainClean) return r.plain.f;
+    return r.tokens;
+}
+
+std::vector<int> auxNodesOf(const AuxElementCard& a, const std::vector<std::string>& f) {
+    std::vector<int> out;
+    auto take = [&](int from, int cnt) {
+        for (int q = 0; from >= 0 && q < cnt; ++q) {
+            const int v = deckscan::fieldInt(f, static_cast<size_t>(from + q));
+            if (v > 0) out.push_back(v);
+        }
+    };
+    take(a.nodeSkip, a.nodeCount);
+    take(a.nodeSkip2, a.nodeCount2);
+    return out;
+}
+
+std::vector<int> auxNodesUnion(const AuxElementCard& a, const AuxCardReadings& r) {
+    std::vector<int> out;
+    for (const auto* f : usedReadings(r))
+        for (int v : auxNodesOf(a, *f)) out.push_back(v);
+    std::sort(out.begin(), out.end());
+    out.erase(std::unique(out.begin(), out.end()), out.end());
+    return out;
+}
+
+std::vector<int> auxNodesAlt(const AuxElementCard& a, const AuxCardReadings& r, const std::vector<std::string>& base) {
+    std::vector<int> b = auxNodesOf(a, base);
+    std::sort(b.begin(), b.end());
+    std::vector<int> out;
+    for (int v : auxNodesUnion(a, r))
+        if (!std::binary_search(b.begin(), b.end(), v)) out.push_back(v);
+    return out;
+}
+
+std::vector<int> auxNodesDisputed(const AuxElementCard& a, const AuxCardReadings& r) {
+    return auxNodesAlt(a, r, r.manual.f);
+}
+
+bool auxManualNodesPlaceable(const AuxElementCard& a, const AuxCardReadings& r) {
+    if (r.comma || !r.manualClean) return false;   // manual 이 깨끗하지 않으면 LS-DYNA 가 읽는 칸 자체가 쓴 꼴과 다르다
+    auto ok = [&](int from, int cnt) {
+        for (int q = 0; from >= 0 && q < cnt; ++q) {
+            const size_t k = static_cast<size_t>(from + q);
+            if (k >= r.manual.f.size() || r.manual.f[k].empty()) continue;
+            int v = 0;
+            if (!cards::toInt(r.manual.f[k], v)) return false;
+            if (v <= 0) continue;   // 번호가 아니다(0) — 바꿔 쓰지 않으니 주석과 겹쳐도 된다
+            if (r.commentAt != std::string::npos && r.manual.col[k] + r.manual.width[k] > r.commentAt) return false;   // 주석과 겹친다
+        }
+        return true;
+    };
+    return ok(a.nodeSkip, a.nodeCount) && ok(a.nodeSkip2, a.nodeCount2);
+}
+
+int auxOptTableWidth(int fw) { return fw >= 20 ? 20 : 10; }
+
+bool auxOptNodesPlaceable(const AuxElementCard& a, const std::string& line, int fw) {
+    std::string body = line;
+    while (!body.empty() && (body.back() == '\r' || body.back() == '\n')) body.pop_back();
+    const size_t cmt = body.find('$');
+    if (cmt != std::string::npos) body.erase(cmt);
+    if (body.find(',') != std::string::npos) return false;   // 콤마 자유형식 — 칸 자리가 없다
+    const size_t w = static_cast<size_t>(auxOptTableWidth(fw));
+    for (int q : a.optNodeFields) {
+        const size_t c0 = static_cast<size_t>(q) * w;
+        std::string t = c0 < body.size() ? body.substr(c0, w) : std::string();
+        const size_t b0 = t.find_first_not_of(" \t");
+        if (b0 == std::string::npos) continue;
+        t = t.substr(b0, t.find_last_not_of(" \t") - b0 + 1);
+        int v = 0;
+        if (t.find_first_of(" \t") != std::string::npos || !cards::toInt(t, v)) return false;   // 칸 안에 빈칸 · 정수가 아니다
+        if (v <= 0) continue;
+        if (cmt != std::string::npos && c0 + w > cmt) return false;   // `$` 주석이 그 칸 안에서 시작한다 — 새 번호가 주석 머리를 덮는다
+    }
+    return true;
+}
+
+std::vector<int> auxOptNodesOf(const AuxElementCard& a, const std::string& line, int fw) {
+    std::vector<int> out;
+    std::string body = line;
+    const size_t cmt = body.find('$');
+    if (cmt != std::string::npos) body.erase(cmt);
+    const auto f = deckscan::cardFields(body, auxOptTableWidth(fw));
+    for (int q : a.optNodeFields) {
+        const int v = deckscan::fieldInt(f, static_cast<size_t>(q));
+        if (v > 0) out.push_back(v);
+    }
+    return out;
+}
+
+std::vector<int> auxPidsOf(const AuxElementCard& a, const AuxCardReadings& r) {
+    std::vector<int> out;
+    if (!a.hasPart || a.partField < 0) return out;
+    const size_t pf = static_cast<size_t>(a.partField);
+    for (const auto* f : usedReadings(r)) {   // primary 먼저 — 언제나 든다(예전엔 primary 가 plain 이면 건너뛰었다)
+        const int v = deckscan::fieldInt(*f, pf);
+        if (v > 0 && std::find(out.begin(), out.end(), v) == out.end()) out.push_back(v);
+    }
+    return out;
 }
 
 bool gridReaderReadsKeyword(const std::string& keywordLine) {
@@ -465,6 +707,7 @@ void forEachNonGridElementCard(const std::vector<std::string>& lines,
                 pend.known = true;
                 pend.eid = deckscan::fieldInt(fs, 0);
                 pend.pid = deckscan::fieldInt(fs, 1);
+                if (pend.pid > 0) pend.pids = {pend.pid};
                 pending = true;
             }
             if (lineIdx >= span.nodeFirst && lineIdx < span.nodeFirst + span.nodeLines) {
@@ -482,24 +725,28 @@ void forEachNonGridElementCard(const std::vector<std::string>& lines,
         c.keyword = kw;
         c.line = i;
         if (aux.supported) {
+            if (!aux.hasEid) continue;   // 요소가 아니다(`*ELEMENT_MASS_PART(_SET)` — EID · 절점 칸이 없다 · PID 는 IdRefs 가 본다)
+            if (remaining > 0 && pending && lineIdx == aux.optNodeLine) {   // 옵션 카드의 절점(보 `_ELBOW` 의 MN)
+                for (int v : auxOptNodesOf(aux, l, fw)) pend.nodes.push_back(v);
+                std::sort(pend.nodes.begin(), pend.nodes.end());
+                pend.nodes.erase(std::unique(pend.nodes.begin(), pend.nodes.end()), pend.nodes.end());
+            }
             if (remaining == 0) {
                 remaining = aux.lines;
-                const auto fs = auxCardFields(aux, l, fw);
+                lineIdx = 0;
+                // 절점은 읽기 전부의 합집합 · PID 는 후보 전부(헤더 「읽기들」 — 이월 적용의 나눠 쓴 절점 · aux_in_part 가 본다)
+                const AuxCardReadings rd = auxCardReadings(aux, l, fw);
+                const auto& fs = auxPrimaryFields(rd);
                 c.known = true;
                 c.eid = deckscan::fieldInt(fs, 0);
                 c.pid = (aux.hasPart && aux.partField >= 0) ? deckscan::fieldInt(fs, static_cast<size_t>(aux.partField)) : 0;
-                auto take = [&](int from, int cnt) {
-                    if (from < 0) return;
-                    for (int q = 0; q < cnt; ++q) {
-                        const int v = deckscan::fieldInt(fs, static_cast<size_t>(from + q));
-                        if (v > 0) c.nodes.push_back(v);
-                    }
-                };
-                take(aux.nodeSkip, aux.nodeCount);
-                take(aux.nodeSkip2, aux.nodeCount2);
-                f(c);
+                c.pids = auxPidsOf(aux, rd);
+                c.nodes = auxNodesUnion(aux, rd);
+                if (aux.optNodeLine > 0) { pend = c; pending = true; }   // 옵션 카드의 절점까지 읽고 넘긴다
+                else f(c);
             }
-            --remaining;
+            ++lineIdx;
+            if (--remaining == 0) flush();
             continue;
         }
         if (g == std::string::npos) continue;

@@ -31,6 +31,7 @@ namespace include_closure {
 //     디렉터리. `_RELATIVE` 는 입력 파일 위치 기준                                     181591-181600
 //   로컬 디렉터리 = **주 덱의 폴더**로 본다(LS-DYNA 는 덱 폴더에서 돈다). 중첩 인클루드도 하위
 //   파일의 폴더가 아니라 거기서 찾는다 — 더 넓게 찾으면 LS-DYNA 가 못 찾을 덱을 괜찮다고 한다.
+//   인클루드 파일 맨 앞의 UTF-8 BOM 은 뗀다(`read` · `readPaths` 둘 다 — 2026-11-07).
 //
 // 따라가지 않는 것 — **말한다**. 맨 `*INCLUDE` 가 아닌 인클루드 카드(`_TRANSFORM` 의 ID 오프셋
 // IDNOFF·IDEOFF·IDPOFF·IDMOFF·IDSOFF…, `_BINARY`·`_NASTRAN`·`_AUTO_OFFSET`·`_STAMPED_*`…)는
@@ -43,6 +44,19 @@ struct NotFollowed {
     size_t line = 0;       // 1-기반
     std::string keyword;   // 예: *INCLUDE_TRANSFORM
     std::string name;      // 카드가 가리킨 첫 이름(있으면)
+    std::string path;      // 그 이름을 맨 `*INCLUDE` 처럼 찾은 경로(못 찾으면 빈 글자) — 읽지는 않는다. 쓰는 op 이 덮지 않게 견준다
+};
+
+// 맨 `*INCLUDE` 의 이름 하나가 어떻게 됐나 — 줄을 흘려 읽는 소비자(extract-parts — 2.32GB 덱 전제)가 자기 걸음에서 그 이름 줄을 만나면
+// 이것을 물어 같은 규칙(주 덱 폴더 먼저 · `*INCLUDE_PATH` · `␣+` 이음 · 깊이 · 순환)으로 따라간다(2026-11-07 재검토 N3 · D1).
+struct NameRef {
+    enum class What { Followed, Unresolved, Cycle, DepthCut };
+    std::string file;      // 그 이름이 적힌 파일(주 덱은 `read` · `readPaths` 에 준 경로 그대로)
+    size_t firstLine = 0;  // 1-기반 — `␣+` 이음이면 lastLine > firstLine
+    size_t lastLine = 0;
+    std::string name;
+    std::string path;      // 찾은 경로(Followed · Cycle · DepthCut · 열 수 없는 Unresolved) — Cycle 은 이미 읽은 파일이다
+    What what = What::Followed;
 };
 
 // 찾지 못했거나 열지 못한 이름.
@@ -71,6 +85,7 @@ struct Closure {
     std::vector<std::string> cycles;        // 다시 들어오려 한 경로 — 한 번만 읽는다
     bool depthCut = false;                  // 깊이 상한에 걸려 더 따라가지 않았다
     size_t cards = 0;                       // 따라간 맨 `*INCLUDE` 의 이름 수(주 덱 포함 전부)
+    std::vector<NameRef> refs;              // 맨 `*INCLUDE` 이름마다 — 읽은 차례
 
     // 닫힘을 **다** 읽었나. 하나라도 못 봤으면 소비자는 「단정 불가」로 다뤄야 한다.
     bool complete() const { return unresolved.empty() && notFollowed.empty() && !depthCut; }
@@ -110,8 +125,26 @@ std::vector<std::string> flatten(const std::vector<std::string>& mainLines, cons
 // 규칙). 인클루드 파일 안의 `*END` 뒤는 이미 닫힘이 담지 않았다. 주 덱의 `*INCLUDE_PATH` 는 남긴다(가리킬 파일이 없어 무해).
 // 펼칠 수 없으면 false 와 까닭 — 닫힘이 불완전하다(없는 파일 · `_TRANSFORM` 등 · 깊이) · 순환이 있다 · `*INCLUDE +`·`-`
 // (그 파일의 폭을 바꾼다) · 인클루드 파일 `*KEYWORD` 의 폭이 주 덱과 다르다. 짐작해 펼치지 않는다.
+// `origin` 을 주면 펼친 줄마다 어디서 왔나(파일 · 그 파일의 줄)를 같은 차례로 담는다 — 펼친 덱을 훑는 읽기 전용 검사가
+// 「인클루드 파일 몇째 줄」을 말하려고 쓴다(2026-11-07 · `apply_carryover_plan` 판 2).
+struct LineOrigin {
+    static constexpr size_t kMain = static_cast<size_t>(-1);
+    size_t file = kMain;    // `Closure::files` 의 색인 — 주 덱이면 kMain
+    size_t line = 0;        // 그 파일의 줄(0-기반)
+};
 bool inlined(const std::vector<std::string>& mainLines, const std::string& mainPath, const Closure& c,
-             std::vector<std::string>& out, std::string& why);
+             std::vector<std::string>& out, std::string& why, std::vector<LineOrigin>* origin = nullptr);
+
+// 같은 파일인가 — 정규 경로(`weakly_canonical` — `./a.k` · 절대 경로 · 심볼릭 링크)가 같거나, 둘 다 있으면 같은 파일(하드 링크 —
+// `equivalent`)이다. 빈 경로는 아무것과도 같지 않다.
+bool sameFile(const std::string& a, const std::string& b);
+
+// ★쓸 파일(`writes` — 산출 · 보고 · 번호 지도 …)이 읽는 파일(`reads` — 주 덱 · 인클루드)이나 다른 쓸 파일과 같은 첫 짝을 찾는다
+// (빈 경로는 건너뛴다). 있으면 true 와 그 둘 — `read` 가 쓸 파일이면 쓸 파일끼리 겹친 것이다. 흘려 읽는 op 은 산출을 열면(잘라
+// 비우면) 아직 읽지 않은 입력이 0 바이트가 되고, 다 읽은 뒤 쓰는 보고도 입력을 덮는다(2026-11-07 검토 #6 — extract-parts 의
+// `output == model` 이 입력을 비우고 rc 1). 부르는 쪽은 산출을 열기 **전에** 묻고 거절한다.
+bool clobberPair(const std::vector<std::string>& writes, const std::vector<std::string>& reads,
+                 std::string& write, std::string& read);
 
 // 닫힘의 인클루드 파일 가운데 그 PID 의 `*PART` 카드를 가진 첫 파일(없으면 빈 문자열) — 줄을 읽는 op 이 「대상이 인클루드
 // 안에 있다 — `flatten_includes: true`」를 말하려고 쓴다(2026-10-17). `*PART` 계열 블록에서 PID·SECID 가 둘 다 양수인 줄을
