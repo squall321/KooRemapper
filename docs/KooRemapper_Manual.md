@@ -5332,8 +5332,10 @@ several (even tens of) cards per set" 이라고 적는다. 그 규칙을 틀리�
 다시 매길 때는 그 칸을 덮어써 카드가 깨진다.** 회귀 L-3·L-4·L-12 가 그 셋을 각각 지킨다.
 
 ★`*ELEMENT_SEATBELT_*`(ACCELEROMETER·PRETENSIONER·RETRACTOR·SENSOR·SLIPRING)는 옵션이 아니라
-**다른 키워드**다 — 10칸 폭 표이고 PID 칸이 없다. 추측하지 않고 미지원 · **PID 없음**으로 둔다(`extract-parts` 는 그 카드를
-싣지 않고 `dropped_keywords` 에 센다 — 예전엔 칸 1 을 PID 로 짐작해 「고른 파트를 담았다」 고 거절할 수 있었다).
+**다른 키워드**다 — 10칸 폭 표이고 PID 칸이 없다. 추측하지 않고 미지원 · **PID 없음**으로 둔다. 그래서 `extract-parts` 는
+그 장치가 고른 띠에 붙었는지 **증명할 수 없다** — 고른 파트에 `*ELEMENT_SEATBELT` 가 있고 덱에 장치 키워드가 있으면 **거절**하고
+(rc 1 · 산출 없음 · 장치 키워드와 「파일:줄」 을 댄다), 안전띠를 고르지 않았으면 싣지 않고 `dropped_keywords` 에 센다. 칸 1 을
+PID 로 짐작하지 않는다(예전엔 그 조각이 고른 PID 와 우연히 같으면 띠와 상관없이 거절했다).
 `*ELEMENT_MASS_NODE_SET` 도 미지원이다: 칸 1 이 절점이 아니라 **절점 세트 ID** 라서, 절점으로
 읽으면 엉뚱한 절점을 지키고 세트 멤버는 놓친다.
 

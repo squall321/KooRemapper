@@ -19,8 +19,9 @@
     콤마 줄은 그대로 실어 나르되 renumber 는 rc 1 · 산출 없음
   C apply_carryover_plan — 다시 짓는(remesh) PID 의 절점을 N4 로만 쓰는 안전띠 → shared_nodes 로 거절
   D restack — 지운 절점을 N4 로 무는 안전띠 줄은 manual · SBRID 만 같은 번호인 줄은 아니다
-  E extract-parts — 안전띠 **장치** 키워드(`*ELEMENT_SEATBELT_RETRACTOR` …)는 PID 칸이 없다 — 칸 1 을 PID 로 짐작해
-    「고른 파트를 담았다」 고 거절하지 않는다(싣지 않고 dropped_keywords 에 센다)
+  E extract-parts — 안전띠 **장치** 키워드(`*ELEMENT_SEATBELT_RETRACTOR` …)는 PID 칸이 없어 고른 띠에 붙었는지 증명할 수 없다.
+    고른 파트에 `*ELEMENT_SEATBELT` 가 있으면 **거절**한다(rc 1 · 산출 없음 · 장치 키워드와 줄을 댄다). 안전띠를 고르지 않았으면
+    싣지 않고 dropped_keywords 에 센다 — 칸 1 을 PID 로 짐작하지 않는다(그 조각이 고른 PID 와 같아도 거절하지 않는다)
 
 usage: test_seatbelt_card_layout.py <KooRemapper 바이너리>
 """
@@ -226,20 +227,32 @@ def main():
         check("D-2 ★SBRID 만 지운 절점과 같은 번호(500007)인 줄(%d)은 올리지 않는다 — 절점 칸이 아니다" % l9102,
               not any("line %d " % l9102 in l for l in found), found)
 
-        print("[E extract-parts — 안전띠 장치 키워드는 PID 칸이 없다 · 칸 1 을 PID 로 짐작해 거절하지 않는다]")
-        # *ELEMENT_SEATBELT_RETRACTOR Card 1 = SBRID SBRNID SBID SID1-4 DSID (I10 · Vol_I 160931). SBRID 10009 를 8칸으로 자르면
-        # 칸 1 이 「09」 — 예전엔 그것을 PID 9 로 읽어 PID 9 를 뽑으면 「고른 파트를 담았다」 고 거절했다.
-        retr = ("*ELEMENT_SEATBELT_RETRACTOR\n" + "%10d%10d%10d" % (10009, 101, 13) + "\n" +
+        print("[E extract-parts — 안전띠 장치 키워드: 띠를 고르면 거절 · 안 고르면 dropped_keywords · 칸 1 을 PID 로 짐작하지 않는다]")
+        # *ELEMENT_SEATBELT_RETRACTOR Card 1 = SBRID SBRNID SBID SID1-4 DSID (I10 · Vol_I 160931). SBRID 10008 을 8칸으로 자르면
+        # 칸 1 이 「08」 — 예전엔 그것을 PID 8 로 읽어, 보 파트 8 을 뽑으면 「고른 파트를 담았다」 고 거절했다(띠와 상관없이).
+        retr = ("*ELEMENT_SEATBELT_RETRACTOR\n" + "%10d%10d%10d" % (10008, 101, 13) + "\n" +
                 "%10s%10s%10d%10d%10s" % ("0.0", "0.0", 0, 0, "0.0") + "\n")
-        write(os.path.join(d, "E.k"), belt_deck(8, belt(8, 13, 9, 101, 102, 10009, "0.0", 103, 104), tail=retr))
-        write(os.path.join(d, "e.yaml"), "model: E.k\noutput: e_out.k\nparts: [9]\nreport: e.json\n")
-        rc, out = run(binary, d, "extract-parts", "e.yaml")
-        rep = json.load(open(os.path.join(d, "e.json"), encoding="utf-8")) if rc == 0 else {}
-        check("E-1 ★rc 0 — 장치 키워드를 「PID 9 를 담았다」 고 거절하지 않는다",
+        beam = ("*ELEMENT_BEAM\n" + "%8d%8d%8d%8d" % (20, 8, 101, 102) + "\n*PART\nbeam\n" + "%10d%10d%10d" % (8, 8, 8) +
+                "\n*SECTION_BEAM\n" + "%10d%10d" % (8, 1) + "\n*MAT_ELASTIC\n" + "%10d%10s%10s%10s" % (8, "7.85E-9", "210000.", "0.3") + "\n")
+        edeck = belt_deck(8, belt(8, 13, 9, 101, 102, 10008, "0.0", 103, 104), tail=beam + retr)
+        write(os.path.join(d, "E.k"), edeck)
+        rline = edeck.split("\n").index("*ELEMENT_SEATBELT_RETRACTOR") + 1
+        # (1) 안전띠(PID 9)를 고른다 — 장치가 그 띠에 붙었는지 증명할 수 없다 → 거절
+        write(os.path.join(d, "e1.yaml"), "model: E.k\noutput: e1_out.k\nparts: [9]\nreport: e1.json\n")
+        rc, out = run(binary, d, "extract-parts", "e1.yaml")
+        check("E-1 ★띠를 고르면 거절 — rc 1 · 산출 없음 · 장치 키워드와 그 줄(%d)을 댄다" % rline,
+              rc == 1 and not os.path.exists(os.path.join(d, "e1_out.k")) and
+              re.search(r"E\.k:%d \*ELEMENT_SEATBELT_RETRACTOR" % rline, out) is not None, (rc, out[-500:]))
+        # (2) 보 파트 8 만 고른다 — 띠가 없으니 장치는 싣지 않고 센다 · 칸 1 의 「08」 을 PID 8 로 짐작하지 않는다
+        write(os.path.join(d, "e2.yaml"), "model: E.k\noutput: e2_out.k\nparts: [8]\nreport: e2.json\n")
+        rc, out = run(binary, d, "extract-parts", "e2.yaml")
+        rep = json.load(open(os.path.join(d, "e2.json"), encoding="utf-8")) if rc == 0 else {}
+        body = open(os.path.join(d, "e2_out.k"), encoding="utf-8").read() if rc == 0 else ""
+        check("E-2 ★띠를 안 고르면 rc 0 — 장치는 dropped_keywords 에 센다(칸 1 을 PID 8 로 짐작해 거절하지 않는다)",
               rc == 0 and "*ELEMENT_SEATBELT_RETRACTOR" in (rep.get("dropped_keywords") or {}), (rc, rep.get("dropped_keywords"), out[-400:]))
-        check("E-2 안전띠 요소(PID 9)는 실었다 — 장치 키워드는 싣지 않는다(칸 자리를 모른다)",
-              rc == 0 and len(section_lines(os.path.join(d, "e_out.k"), "*ELEMENT_SEATBELT")) == 1 and
-              "*ELEMENT_SEATBELT_RETRACTOR" not in open(os.path.join(d, "e_out.k"), encoding="utf-8").read(), out[-300:])
+        check("E-3 보(PID 8)는 실었고 안전띠 요소 · 장치는 싣지 않았다",
+              rc == 0 and len(section_lines(os.path.join(d, "e2_out.k"), "*ELEMENT_BEAM")) == 1 and "*ELEMENT_SEATBELT" not in body,
+              body[-400:])
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

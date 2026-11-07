@@ -194,6 +194,8 @@ struct Picked {
     std::vector<std::string> auxKws;                      // 그 중 **칸 자리를 아는** 키워드
     std::map<std::string, long long> opaqueElemTouched;   // 못 읽는 변형이 고른 파트를 담았다
     std::map<std::string, long long> opaqueElemOther;     // 담지 않았다(그냥 버린다)
+    long long seatbeltCards = 0;                          // 고른 파트의 `*ELEMENT_SEATBELT` 카드
+    std::vector<std::string> seatbeltDevices;             // 덱의 안전띠 장치 키워드 블록 — 「파일:줄 키워드」
 };
 
 void scanElements(const std::string& path, const std::vector<int>& sel, const DeckIndex& idx,
@@ -216,8 +218,10 @@ void scanElements(const std::string& path, const std::vector<int>& sel, const De
     int auxRemaining = 0, auxLineIdx = 0;
     bool auxPicked = false;
     std::vector<std::string> auxCard1;
+    size_t lineNo = 0;
 
     while (std::getline(in, line)) {
+        ++lineNo;
         size_t g = line.find_first_not_of(" \t\r\n");
         if (g != std::string::npos && line[g] == '*') {
             remaining = 0;
@@ -234,6 +238,10 @@ void scanElements(const std::string& path, const std::vector<int>& sel, const De
                 if (aux.supported &&
                     std::find(pk.auxKws.begin(), pk.auxKws.end(), kw) == pk.auxKws.end())
                     pk.auxKws.push_back(kw);
+                // 안전띠 **장치** 키워드(`_ACCELEROMETER` · `_PRETENSIONER` · `_RETRACTOR` · `_SENSOR` · `_SLIPRING`)는
+                // PID 칸이 없다 — 어느 띠에 붙었는지 증명할 수 없어 자리를 적어 둔다(아래 runExtractParts 의 거절)
+                if (aux.family == KooRemapper::AuxFamily::SEATBELT && !aux.supported)
+                    pk.seatbeltDevices.push_back(path + ":" + std::to_string(lineNo) + " " + kw);
             }
             continue;
         }
@@ -261,6 +269,7 @@ void scanElements(const std::string& path, const std::vector<int>& sel, const De
                 const int pid = (aux.partField >= 0) ? fieldInt(auxCard1, (size_t)aux.partField) : 0;
                 auxPicked = aux.hasPart && pid > 0 && inSorted(sel, pid);
                 if (auxPicked) ++pk.auxCards;
+                if (auxPicked && aux.family == KooRemapper::AuxFamily::SEATBELT) ++pk.seatbeltCards;
             }
             if (auxLineIdx == 0 && auxPicked) {
                 auto take = [&](int from, int cnt) {
@@ -286,7 +295,8 @@ void scanElements(const std::string& path, const std::vector<int>& sel, const De
             //   '안 고른 파트' 로 분류돼 **조용히 버려진다**(실측으로 회귀 L-14 가 잡았다).
             //   족은 아는데 **PID 칸이 없다**고 표가 말하면(`*ELEMENT_SEATBELT_ACCELEROMETER` 같은 별개 키워드 · 플롯 요소)
             //   PID 를 짐작하지 않는다 — 예전엔 칸 1(가속도계의 절점 · 리트랙터의 절점)을 PID 로 읽어, 그 번호가 고른 PID 와
-            //   우연히 같으면 「고른 파트를 담았다」 고 거절했다. 그 카드는 다른 모르는 카드처럼 싣지 않고 `dropped` 에 센다.
+            //   우연히 같으면 「고른 파트를 담았다」 고 거절했다. 여기서는 싣지 않는 카드로 센다 — 안전띠 장치는 고른 파트에
+            //   안전띠 요소가 있으면 runExtractParts 가 통째로 거절한다(띠에 붙었는지 증명할 수 없다).
             if (aux.family != KooRemapper::AuxFamily::NONE && !aux.hasPart) { ++pk.opaqueElemOther[kw]; continue; }
             auto f = KooRemapper::auxCardFields(aux, line, fw);
             const int pf = (aux.family != KooRemapper::AuxFamily::NONE && aux.partField >= 0)
@@ -1243,6 +1253,17 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
                           "조용히 빠뜨리지 않기 위해 거절한다");
         console.info("읽을 수 있는 것은 격자 3족(*ELEMENT_SOLID·SHELL·TSHELL)과 "
                      "보 족 5종(*ELEMENT_BEAM·DISCRETE·MASS·SEATBELT·PLOTEL)이다");
+        return 1;
+    }
+    // ★안전띠 장치 키워드는 PID 칸이 없어 고른 띠에 붙었는지 **증명할 수 없다** — 위 규칙(「모르는 변형이 고른 파트를 담으면
+    //   거절」)을 보수적으로 댄다: 고른 파트에 `*ELEMENT_SEATBELT` 가 있으면 거절하고, 없으면 다른 모르는 카드처럼 버리고
+    //   `dropped_keywords` 에 센다(2026-11-07). 장치를 빼고 띠만 실은 덱은 그럴듯하게 돌면서 리트랙터 · 프리텐셔너가 없다.
+    if (pk.seatbeltCards > 0 && !pk.seatbeltDevices.empty()) {
+        console.error("고른 파트에 *ELEMENT_SEATBELT 카드 " + std::to_string(pk.seatbeltCards) + " 장이 있는데 덱에 안전띠 장치 키워드가 " +
+                      std::to_string(pk.seatbeltDevices.size()) + " 블록 있다 — 장치는 PID 칸이 없어 고른 띠에 붙었는지 증명할 수 "
+                      "없으므로 거절한다(빼면 띠가 그럴듯하게 돌면서 장치가 없다)");
+        for (const auto& d : pk.seatbeltDevices) console.println("  " + d);
+        console.info("안전띠를 고르지 않으면 장치는 싣지 않고 dropped_keywords 에 센다");
         return 1;
     }
     console.info("  element cards: " + std::to_string(pk.cards) +
