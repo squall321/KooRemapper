@@ -5470,7 +5470,8 @@ several (even tens of) cards per set" 이라고 적는다. 그 규칙을 틀리�
 long 20 · Vol_I 156596-156638)에 있다. 2026-11-07 전엔 Card 1 만 읽어 `cleanup-nodes` safe 가 MN 을 지우고(rc 0 · 되읽기 0)
 `extract-parts` 가 싣지 않았다 — 이제 걸음 · cleanup-nodes · extract-parts(싣기 · 번호 다시 매기기 · 되읽기)가 다 읽는다(콤마 ELBOW
 줄 · MN 칸 안에 빈칸 · MN 칸(1-10열) 안에서 시작하는 `$` 주석은 renumber 가 거절한다 — 새 번호가 `$` 를 덮어 주석 글자가 칸 2 의 값이
-됐다). 이월 적용은 ELBOW 블록을 그대로 거절한다.
+됐다). 이월 적용(§52)도 같은 걸음이 MN 을 읽어 ELBOW 블록을 다른 보처럼 다룬다(나눠 쓴 절점에 MN 까지 · 11-07 밤 — 그 전엔 그 블록이
+있으면 덱을 고치는 줄을 다 거절했다).
 
 ★보 `_WARPAGE` 의 SN1 · SN2 는 Card 9(ELBOW 가 있으면 그 앞 · 없으면 마지막 옵션 카드 · 8칸 표 칸 0 · 1 — Vol_I 155889 · 156529-156548)의
 **스칼라 절점**(`*NODE_SCALAR` · `_VALUE` — 번호는 `*NODE` 와 겹치지 않는다, Vol_I 214757)이다. 2026-11-07 전엔 아무 걸음도 SN 을
@@ -5479,7 +5480,8 @@ long 20 · Vol_I 156596-156638)에 있다. 2026-11-07 전엔 Card 1 만 읽어 `
 extract-parts 는 그 스칼라 절점 줄을 싣고 번호를 다시 매길 때 SN 칸과 NID 를 같은 새 번호로 바꾸며 되읽기도 SN 을 잰다(덱에 없으면
 rc 1). restack 의 지운 절점 보고는 WARPAGE · ELBOW 블록의 정수를 다 보지 않고 절점 칸(Card 1 · SN · MN)만 본다(EID 가 지운 절점
 번호와 같아 거짓으로 적던 것). 새 절점 번호의 바닥(assemble · `id_floor`)도 스칼라 절점 번호 위다(회귀 `test_aux_card_walkers.py` E 절 ·
-`test_dead_node_list_cards.py` C 절 · `test_id_floor.py` G 절). 이월 적용은 WARPAGE 블록을 그대로 거절한다.
+`test_dead_node_list_cards.py` C 절 · `test_id_floor.py` G 절). 이월 적용(§52)도 같은 걸음이 SN 을 읽어 WARPAGE 블록을 다른 보처럼
+다룬다(나눠 쓴 절점에 SN 까지 · 조각의 절점 바닥은 스칼라 절점 번호 위 · 11-07 밤).
 
 ★절점 칸 **개수**까지 적는 이유 — '칸 2부터 끝까지' 로 뭉개면 보의 `RT1`·`RR1`·`LOCAL` 과
 안전벨트의 `SBRID`·`SLEN` 이 절점이 된다. 세기만 하면 과포함(안전한 방향)이지만, **번호를
@@ -5884,8 +5886,8 @@ output 이면 설정을, 빈 폴더면 폴더를 지웠다 · 11-07 밤 실측).
 
 ### 52.9 시험 · 아직 하지 않는 것
 
-- 회귀 `tools/regress/test_apply_carryover_plan.py`(판 1 · 88항 — K 출력 규칙) · `tools/regress/test_apply_carryover_plan_v2.py`(판 2 · 86항 — 실물 둘 ·
-  진리값 판을 판 2 로 · 칸 표 · 덱 자리 · §10.5 새 셸 섹션 · 인클루드 · refused_transform · 적대적 검토 고침 R-1~R-8 — R-8 은 gdb 로
+- 회귀 `tools/regress/test_apply_carryover_plan.py`(판 1 · 101항 — K 출력 규칙 · L StepForge 권고 · 보 ELBOW · WARPAGE) · `tools/regress/test_apply_carryover_plan_v2.py`(판 2 · 88항 — 실물 둘 ·
+  진리값 판을 판 2 로 · 칸 표 · 덱 자리 · §10.5 새 셸 섹션 · 인클루드 · refused_transform · 적대적 검토 고침 R-1~R-8 · S StepForge 권고 — R-8 은 gdb 로
   적용 직전에 멈춰 파일을 바꾼다 · gdb 로 멈추지 못하면 SKIP) · 단위 `tests/test_CarryoverPlan.cpp`.
 - 인클루드 파일 안의 고칠 자리는 고치지 않는다(거절 — 사용자 결정 11-07). 그 파트를 고치려면 닫힘을 펼친 한 덱으로 계획을 다시 받아야 한다.
 - 절점 두께 카드로 두께를 옮기는 일 · 요소마다 두께를 싣는 PID 의 새 섹션은 받지 않는다(그쪽도 조각으로 물러선다 · §10.7).

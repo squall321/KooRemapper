@@ -45,7 +45,7 @@
 //     바꿔 넣기에서 살고 지우기는 막는다). 정본(`NodeRefs` · `IdRefs`)이 칸 뜻을 단정하지 못한 자리, 정본이 보지도 세지도 않고
 //     참조 없는 키워드 표(`refCover`)에도 없는 키워드, 풀 수 없는 방언 세트가 덱에 있으면 그것도 거절한다 — 그 PID 를 가리키지
 //     않는다고 증명할 수 없다(리뷰 11-07)
-//   · 절점 칸을 다 읽지 못하는 요소 블록(리더가 담지 않는 솔리드 · 티쉘 변형 · 보 `_WARPAGE` · `_ELBOW` …)이나 EID 가 겹친 덱은
+//   · 절점 칸을 다 읽지 못하는 요소 블록(리더가 담지 않는 솔리드 · 티쉘 변형 · 셸 `_DOF` · 칸 자리를 모르는 변형 …)이나 EID 가 겹친 덱은
 //     덱을 고치는 줄을 하나도 적용하지 않는다(리뷰 11-07)
 //   · 조각 번호는 덱 바닥(`idMaxima` — 보 · 이산 · 질량 요소까지) 위여야 한다. 아래에 걸치면 조각 전부를 **한 이동량**으로 옮긴다
 //   · 쓴 뒤 **다시 읽어** 대조하고 품질 관문(새로 뒤집힌 솔리드 · 모프가 법선을 뒤집은 셸)을 건다 — 걸리면 부르는 쪽이 산출을 지운다
@@ -181,8 +181,9 @@ bool hasOption(const std::string& kw, const std::string& base, const char* opt) 
 // ★이 `*ELEMENT_*` 블록의 절점 칸을 이월 적용이 **전부** 읽는가(리뷰 11-07 — 리더가 담지 않는 솔리드 변형을 아무도 보지 않아
 // 지운 절점을 가리키는 카드 · 겹친 EID 가 rc 0 으로 나갔다). 읽으면 빈 글자, 아니면 까닭. 읽는 것은 둘뿐이다 —
 //   · 리더가 메시에 그대로 담는 격자 블록(셸 `_DOF` 는 빼고 — Card 5 의 NS1-NS4 스칼라 절점은 아무도 읽지 않는다, Vol_I 162243-162261)
-//   · 칸 자리를 아는 격자 밖 블록(`auxElementCard`) 가운데 옵션 카드에 절점이 없는 것 — 보의 `_WARPAGE`(SN1 · SN2) ·
-//     `_ELBOW`(MN)는 그 카드를 읽지 않는다(Vol_I 156529-156610). Card 1 의 N3(방향 절점)은 읽는다
+//   · 칸 자리를 아는 격자 밖 블록(`auxElementCard`) — 보의 옵션 카드 절점(`_WARPAGE` Card 9 의 SN1 · SN2 · `_ELBOW` Card 10 의 MN)도
+//     공용 걸음(`forEachNonGridElementCard`)이 읽어 카드의 절점에 싣는다(92f50fe · 6341aac — 11-07 밤에 그 두 거절을 뺐다 · Vol_I
+//     156529-156638). Card 1 의 N3(방향 절점)은 읽는다
 std::string elementBlockGap(const std::string& line) {
     const ElementKeywordInfo info = parseElementKeyword(line);
     if (info.family != ElemFamily::NONE) {
@@ -196,8 +197,6 @@ std::string elementBlockGap(const std::string& line) {
     const AuxElementCard a = auxElementCard(line);
     if (a.family == AuxFamily::NONE) return "칸 자리를 모르는 요소 키워드";
     if (!a.supported) return "칸 자리를 확정할 수 없는 변형";
-    if (a.family == AuxFamily::BEAM && hasOption(a.keyword, "*ELEMENT_BEAM", "WARPAGE")) return "WARPAGE 카드의 절점(SN1 · SN2)을 읽지 않는다";
-    if (a.family == AuxFamily::BEAM && hasOption(a.keyword, "*ELEMENT_BEAM", "ELBOW")) return "ELBOW 카드의 가운데 절점(MN)을 읽지 않는다";
     return std::string();
 }
 

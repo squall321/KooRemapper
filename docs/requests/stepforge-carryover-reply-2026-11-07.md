@@ -99,7 +99,8 @@
 - **경고만 하는 것** — 계획에 줄이 없는 덱 PID · `unread_cards` · 새 파트의 물성 확인 · 바이트가 다른 `.k` 조각(값 대조는 통과).
 - **적대적 검토 뒤 고친 것(11-07)** — 짓는 쪽 시험이 다 초록이었는데도 조용히 틀린 덱을 내는 길이 있어 막았다. 보고의 새 종류:
   - `opaque_elements` — 리더가 메시에 담지 않는 요소 블록(`*ELEMENT_SOLID_ORTHO` · `_DOF` · `_H20` 류 · `_H8TOH20` · `_TET4TOTET10` ·
-    `*ELEMENT_TSHELL_BETA`, 보의 `_ELBOW` · `_WARPAGE` 옵션 카드 등)이 있으면 모든 형상 줄(옮기기 · 모프 · 바꿔 넣기 · 지우기 · 새 파트)을 거절.
+    `*ELEMENT_TSHELL_BETA` 등)이 있으면 모든 형상 줄(옮기기 · 모프 · 바꿔 넣기 · 지우기 · 새 파트)을 거절. (11-07 밤) 보의 `_ELBOW`(MN) ·
+    `_WARPAGE`(SN1 · SN2) 옵션 카드는 이제 우리 걸음이 읽어 거절하지 않는다 — 그 절점은 나눠 쓴 절점 검사에 든다.
     (11-07 밤 · 그쪽 권고 D-681) 요소 `_TITLE` 블록에 요소가 있을 수 있는 PID 를 고치는 줄도 같은 갈래로 거절한다(PID 마다 — keep 은 둔다).
   - `ref_unscanned` — 바꿔 넣기 · 지우기 줄이 있는데, 덱에 우리가 참조를 읽지 못하는 키워드(참조 없음이 확실한 키워드 목록 밖 —
     예 `*LOAD_SEGMENT` · `*CONSTRAINED_SHELL_TO_SOLID` · `*INITIAL_VELOCITY_RIGID_BODY`)가 있으면 거절. 옮기기 · 모프만인 계획은 해당 없다.

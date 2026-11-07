@@ -176,6 +176,11 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
   옛 셈과 다를 때 적는 탐침 바이너리로 회귀 전체(111)를 돌렸다: 갈린 곳은 셋 — ① `examples/wrap/cylinder_2layer.k`(진짜 쌓인 카드 —
   `*SECTION_SOLID` 밑 SECID 1 · 2 · 1 → 2)를 쓰는 wrap 실행 스물여덟(wrap 은 절점만 옮기고 SECID 를 내지 않는다 — 산출 그대로) ② 이월 적용 R-1
   의 쌓인 카드 덱(8 → 9 · 10 — 거절 시험이라 산출 없음) ③ 새 회귀 `test_section_cursor_stacked.py`. 그러니 기존 회귀 산출은 바뀌지 않는다.
+- **보 `_ELBOW` · `_WARPAGE`(셋째 묶음 4 — 다른 보처럼)** — 공용 걸음(`forEachNonGridElementCard`)이 MN(Card 10 · 92f50fe) · SN1 · SN2(Card 9 ·
+  6341aac — 이 갈래에 그 커밋만 합쳤다)를 카드의 절점에 싣는다. 이월 적용이 그 절점을 쓰는 곳은 나눠 쓴 절점 하나(고치는 PID 의 절점과
+  겹치면 `shared_nodes`)라 `elementBlockGap` 의 두 거절을 뺐다. SN 은 스칼라 절점 번호(`*NODE_SCALAR` — `*NODE` 와 겹치면 안 된다)라
+  고치는 PID 의 절점과 겹치는 덱은 설명서 밖이다 — 겹치면 나눠 쓴 절점으로 거절된다(안전한 쪽). 조각의 절점 바닥은 6341aac 의
+  `scalarNodeMaxId` 로 스칼라 절점 번호 위다.
 
 ## 리뷰 11-07 고침 — 정한 것
 리뷰(11-07) 결함 11 + 그럴듯한 둘을 고쳤다. 공용 코드(i10 조각의 쓰기 관문 왕복 · 솔리드 · 티쉘 변형의 바닥 · `*ELEMENT_MASS` PID 칸)는 다른 갈래 몫.
@@ -184,6 +189,7 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
   ① 리더가 메시에 그대로 담는 격자 블록(`KFileReader::parseFile` 의 갈래를 옮긴 `readerReadsGrid`: `*ELEMENT_SOLID` · `_SOLID_TITLE` · `*ELEMENT_TSHELL` ·
   `_TSHELL_TITLE` 은 이름이 같을 때만, `*ELEMENT_SHELL` 은 `parseElementKeyword` 가 받는 변형 — 단 `_DOF` 는 Card 5 의 NS1-NS4 를 아무도 읽지 않아 뺀다)
   ② 칸 자리를 아는 격자 밖 블록(`auxElementCard`) — 보는 옵션 카드에 절점이 있는 `_WARPAGE`(SN1 · SN2) · `_ELBOW`(MN)를 뺀다. Card 1 의 N3(방향 절점)은 읽는다.
+  → 11-07 밤 공용 걸음이 MN(92f50fe) · SN(6341aac)을 읽게 되어 그 둘을 뺀 것을 거두었다(아래 「11-07 밤 결정 고침」).
   ⚠ `readerReadsGrid` 는 리더 갈래의 사본이다 — 공용 갈래가 「리더가 담는 키워드」 판정을 정본에 두면 그것으로 바꾼다.
 - **참조 덮음 표(결함 2)** — 바꿔 넣기 · 지우기 줄이 있으면 덱의 키워드마다 `refCover`(CarryoverApply.cpp)로 가른다. 정본(NodeRefs · IdRefs · 접촉 면)이 읽거나 세는
   갈래 · 참조 없는 키워드 표 · 파트 칸만 아무도 안 읽는 갈래(지우기만 막는다) 밖은 **거절**(`ref_unscanned` — 키워드마다 한 번 · 첫 줄). 모르면 Free 가 아니다.

@@ -24,6 +24,7 @@
   J 산출 자리(리뷰 11-07) — 확장자가 아닌 몫으로 가른 동반 파일 · 거절해도 앞 산출은 그대로다(11-07 밤)
   K 출력 규칙(사용자 결정 11-07 밤) — 임시 파일 + 바꿔 넣기 · 거절 · 실패면 앞 파일 그대로 · 설정 YAML · 폴더는 쓰지도 지우지도 않는다
   L StepForge 권고 넷(그쪽 591d5b5 · D-681 — 사용자 결정 11-07 밤) — 요소 _TITLE 블록 · 정수 칸의 실수 꼴 · 열 재질 MID · 두 번 정의된 SECID · MID
+    · L-5 보 _ELBOW · _WARPAGE 를 다른 보처럼(공용 걸음이 MN · SN1 · SN2 를 읽는다)
 
 usage: test_apply_carryover_plan.py <KooRemapper 바이너리>
 """
@@ -655,9 +656,9 @@ def part_h(binary):
     rc, out, rep = apply_case(binary, d)
     det = details(rep, "opaque_elements")
     refused("H-2 옮기기 하나만 있어도 거절 → opaque_elements", rc, out, rep, d, "opaque_elements")
-    check("H-2b 키워드 넷(ORTHO · TSHELL_BETA · H8TOH20 · BEAM_WARPAGE)을 모두 말한다",
-          all(k + "(줄 " in det for k in ("*ELEMENT_SOLID_ORTHO", "*ELEMENT_TSHELL_BETA", "*ELEMENT_SOLID_H8TOH20",
-                                           "*ELEMENT_BEAM_WARPAGE")), det[:500])
+    check("H-2b 키워드 셋(ORTHO · TSHELL_BETA · H8TOH20)을 모두 말하고 BEAM_WARPAGE 는 말하지 않는다(SN 까지 읽는다 · 11-07 밤)",
+          all(k + "(줄 " in det for k in ("*ELEMENT_SOLID_ORTHO", "*ELEMENT_TSHELL_BETA", "*ELEMENT_SOLID_H8TOH20")) and
+          "*ELEMENT_BEAM_WARPAGE" not in det, det[:500])
     d = stage(EX, "h2c")
     add_before_end(d, "*ELEMENT_MASS_PART\n%8d%16.6e%16.6e\n" % (7, 0.001, 0.0))   # 절점 칸이 없다(ID ADDMASS FINMASS …)
     rc, out, rep = apply_case(binary, d)
@@ -1024,6 +1025,31 @@ def part_l(binary):
     rc, out, rep = apply_case(binary, d)
     check("L-4c keep PID 1 의 SECID 1 이 두 번이면 그 줄은 손대지 않으니 거절하지 않는다(rc 0)", rc == 0 and "part_duplicate" not in kinds(rep),
           (rc, sorted(kinds(rep)), out[-300:]))
+
+    # L-5 보 _ELBOW(MN · Card 10) · _WARPAGE(SN1 · SN2 · Card 9) — 공용 걸음이 그 절점을 읽어 다른 보처럼 다룬다(92f50fe · 6341aac).
+    #     예전엔 그 블록이 있으면 덱을 고치는 줄을 다 거절했다(opaque_elements)
+    _n, e0, _p, _s, _m = read_deck(os.path.join(EX, "deck.k"))
+    pn = pid_nodes(e0)
+    only1 = sorted(pn[1] - set().union(*(v for k, v in pn.items() if k != 1)))
+    n3 = sorted(pn[3])
+    elbow = "*ELEMENT_BEAM_ELBOW\n%8d%8d%8d%8d%8d\n%10d\n"
+    warp = "*NODE_SCALAR\n%8d%8d\n%8d%8d\n*ELEMENT_BEAM_WARPAGE\n%8d%8d%8d%8d%8d\n%10d%10d\n"
+    for tag, block, shared in (
+            ("l5", elbow % (9101, 1, only1[0], only1[1], 0, only1[2]), False),
+            ("l5b", elbow % (9101, 1, only1[0], only1[1], 0, n3[0]), True),
+            ("l5c", warp % (900001, 1, 900002, 1, 9102, 1, only1[0], only1[1], 0, 900001, 900002), False),
+            ("l5d", warp % (900001, 1, 900002, 1, 9102, 1, only1[0], only1[1], 0, n3[0], 900002), True)):
+        d = stage(EX, tag)
+        add_before_end(d, block)
+        keep_only(d, but=(3,))
+        rc, out, rep = apply_case(binary, d)
+        what = "ELBOW 의 MN" if "ELBOW" in block else "WARPAGE 의 SN1"
+        if shared:
+            refused("%s %s 이 옮기는 PID 3 의 절점 → shared_nodes(PID 3 · 옵션 카드 절점까지 읽는다)" % (("L-" + tag[1:]), what),
+                    rc, out, rep, d, "shared_nodes", 3)
+        else:
+            check("%s %s 이 손대지 않는 절점 → 받는다(그 블록은 다 읽은 블록이다)" % (("L-" + tag[1:]), what),
+                  rc == 0 and "opaque_elements" not in kinds(rep), (rc, sorted(kinds(rep)), details(rep, "opaque_elements")[:200]))
 
 
 if __name__ == "__main__":
