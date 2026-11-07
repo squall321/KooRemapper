@@ -93,6 +93,9 @@ struct DeckIndex {
     std::map<int, int> secElform;              // SECID → ELFORM
     std::vector<std::string> partVariants;     // `*PART_INERTIA` 등
     int fieldWidth = 8;
+    // `*SET_PART`(목록 꼴)의 SID → PID — `*ELEMENT_MASS_PART_SET` 의 세트를 풀 때만 쓴다(2026-11-07 검토 #5)
+    std::map<int, std::vector<int>> partSets;
+    std::set<int> partSetsOpaque;              // 멤버를 목록으로 못 읽는 꼴(`_ADD` · `_GENERAL` · `_GENERATE` · `_COLUMN` …) · 두 번 정의된 SID
 };
 
 // `*PART` 블록은 '제목 줄 + 카드 2' 가 **쌍으로 반복**된다(제목은 비워 둘 수 있으나 생략 못 한다).
@@ -110,6 +113,7 @@ void indexDeck(const std::string& path, DeckIndex& idx, std::set<std::string>& v
     const int sfw = 10;                        // `*PART` 카드 2 와 `*SECTION_*` 은 8I10 이다
     std::string line, kw;
     std::vector<std::string> buf;              // 지금 블록의 카드 줄
+    int setW = 10;                             // `*SET_PART` 카드 폭(8I10 · long 이면 20)
 
     auto flush = [&]() {
         if (kw == "*PART" || kw == "*PART_TITLE") {
@@ -137,6 +141,30 @@ void indexDeck(const std::string& path, DeckIndex& idx, std::set<std::string>& v
                 }
                 ++di;
             }
+        } else if (starts(kw, "*SET_PART")) {
+            // 목록 꼴만 멤버를 읽는다(`_COLUMN` 은 쓰기가 세트 줄을 절점으로 거르니 풀 수 없는 것으로 둔다)
+            const bool list = KooRemapper::deckscan::classifySetNode(kw) == KooRemapper::deckscan::SetKind::LIST;
+            const int tn = titleLines(kw);
+            int di = 0, sid = 0;
+            std::vector<int> mem;
+            for (const auto& l : buf) {
+                if (!isDataLine(l)) continue;
+                if (di < tn) { ++di; continue; }
+                const auto f = cardFields(l, setW);
+                if (di++ == tn) { sid = fieldInt(f, 0); continue; }
+                for (size_t q = 0; q < f.size(); ++q) {
+                    const int v = fieldInt(f, q);
+                    if (v > 0) mem.push_back(v);
+                }
+            }
+            if (sid > 0) {
+                if (!list || idx.partSets.count(sid) || idx.partSetsOpaque.count(sid)) {
+                    idx.partSets.erase(sid);
+                    idx.partSetsOpaque.insert(sid);
+                } else {
+                    idx.partSets[sid] = mem;
+                }
+            }
         }
         buf.clear();
     };
@@ -151,6 +179,7 @@ void indexDeck(const std::string& path, DeckIndex& idx, std::set<std::string>& v
                 int w = KooRemapper::keywordCardDeckWidth(line);
                 if (w > 0) idx.fieldWidth = w;
             }
+            setW = KooRemapper::keywordFieldWidth(line, idx.fieldWidth) >= 20 ? 20 : 10;
             if (starts(kw, "*PART") && kw != "*PART" && kw != "*PART_TITLE" &&
                 std::find(idx.partVariants.begin(), idx.partVariants.end(), kw) ==
                     idx.partVariants.end())
@@ -162,7 +191,7 @@ void indexDeck(const std::string& path, DeckIndex& idx, std::set<std::string>& v
             if (!rel.empty()) indexDeck(joinPath(baseDir, rel), idx, visited, depth + 1);
             continue;
         }
-        if (kw != "*PART" && kw != "*PART_TITLE" && !starts(kw, "*SECTION_SOLID")) continue;
+        if (kw != "*PART" && kw != "*PART_TITLE" && !starts(kw, "*SECTION_SOLID") && !starts(kw, "*SET_PART")) continue;
         if (g != std::string::npos && line[g] == '$') continue;
         buf.push_back(line);
     }
@@ -197,6 +226,13 @@ struct Picked {
     long long seatbeltCards = 0;                          // 고른 파트의 `*ELEMENT_SEATBELT` 카드
     std::vector<std::string> seatbeltDevices;             // 덱의 안전띠 장치 키워드 블록 — 「파일:줄 키워드」
     std::vector<std::string> unfollowedIncludes;          // 따라가지 않는 파일 인클루드(`*INCLUDE_TRANSFORM` …) — 「파일:줄 키워드」
+    // ── 보 장치 · 질량 얹기(2026-11-07 검토 #5) ──
+    std::vector<int> beamEids;                            // 고른 파트의 보(`*ELEMENT_BEAM*`) 요소 번호
+    struct BeamDevice { std::string where; std::vector<int> refs; };
+    std::vector<BeamDevice> beamDevices;                  // `*ELEMENT_BEAM_PULLEY` · `_SOURCE` 줄 — 가리키는 보 요소 번호
+    long long massPartCards = 0;                          // 고른 파트(세트)의 `*ELEMENT_MASS_PART(_SET)` 줄(요소가 아니다 — auxCards 와 따로)
+    long long massSetCards = 0;                           // 그 가운데 `_SET`(세트가 실려야 한다)
+    std::vector<std::string> massSetRefused;              // 세트를 일부만 고르거나 풀 수 없는 `*ELEMENT_MASS_PART_SET` 줄
     // ── 보 족 줄이 두 가지로 읽힐 때(넓은 칸 뒤 칸 — 2026-11-07 사용자 결정 「둘 다 남기고 번호 매기기는 거절」) ──
     std::vector<int> altNodes;                            // 고른 줄을 다른 읽기로만 읽을 때 나오는 절점 — 덱에 있으면 싣는다
     struct AuxLine { std::string where; std::vector<int> altVsManual; bool placeable = true; };
@@ -249,6 +285,27 @@ std::vector<int> auxPidCandidates(const KooRemapper::AuxElementCard& a, const Ko
     for (int p : KooRemapper::auxPidsOf(a, rd))
         if (p != prim && idx.parts.count(p)) out.push_back(p);
     return out;
+}
+
+// `*ELEMENT_MASS_PART_SET` 의 파트 세트를 고른 파트와 견준다 — 0 = 세트에 고른 파트가 없다(버린다) · 1 = 세트가 다 고른 파트다
+// (싣는다) · -1 = 실을지 버릴지 정할 수 없다(`why`). 질량은 세트 전체에 나눠 얹히니 일부만 실으면 남은 파트에 얹히는 질량이 바뀐다.
+// 세트를 못 풀면(목록 꼴이 아니다 · 덱에서 못 찾았다) 고른 파트에 닿는지 모른다 — 정할 수 없다로 친다.
+int massSetVerdict(int sid, const DeckIndex& idx, const std::vector<int>& sel, std::string& why) {
+    const auto it = idx.partSets.find(sid);
+    if (sid <= 0 || it == idx.partSets.end() || idx.partSetsOpaque.count(sid)) {
+        why = "파트 세트 " + std::to_string(sid) + " 을 풀 수 없다(목록 꼴 *SET_PART 가 아니거나 덱 · 맨 *INCLUDE 에서 못 찾았다)";
+        return -1;
+    }
+    std::string all, mine;
+    size_t in = 0;
+    for (int p : it->second) {
+        all += (all.empty() ? "" : ", ") + std::to_string(p);
+        if (inSorted(sel, p)) { ++in; mine += (mine.empty() ? "" : ", ") + std::to_string(p); }
+    }
+    if (in == 0) return 0;
+    if (in == it->second.size()) return 1;
+    why = "파트 세트 " + std::to_string(sid) + "(" + all + ") 가운데 " + mine + " 만 고른다 — 나눠 얹는 질량이 남은 파트에 다르게 간다";
+    return -1;
 }
 
 void scanElements(const std::string& path, const std::vector<int>& sel, const DeckIndex& idx,
@@ -333,19 +390,33 @@ void scanElements(const std::string& path, const std::vector<int>& sel, const De
                 auxRemaining = aux.lines;
                 // PID 는 후보 전부를 본다 — 넓은 칸 뒤 PID(질량)는 설명서 칸 · 정수 폭으로 갈릴 수 있다. 갈리는데 그 하나가 고른 PID 면
                 // 실을지 버릴지 정할 수 없다 — 줄을 적어 두고 runExtractParts 가 거절한다(조용히 싣거나 버리지 않는다)
-                const auto pids = auxPidCandidates(aux, rd, idx);
-                bool hit = false;
-                for (int p : pids) hit = hit || inSorted(sel, p);
-                auxPicked = aux.hasPart && hit;
                 const std::string where = path + ":" + std::to_string(lineNo) + " " + kw;
+                std::vector<int> pids;
+                bool hit = false;
+                if (aux.partIsSet) {
+                    // `*ELEMENT_MASS_PART_SET` — 칸 0 이 파트 세트 ID 다. 세트를 풀어 견준다(일부만 · 못 풀면 거절할 줄로 적는다)
+                    std::string why;
+                    const int v = massSetVerdict(fieldInt(auxCard1, 0), idx, sel, why);
+                    if (v < 0) pk.massSetRefused.push_back(where + " — " + why);
+                    hit = v == 1;
+                } else {
+                    pids = auxPidCandidates(aux, rd, idx);
+                    for (int p : pids) hit = hit || inSorted(sel, p);
+                }
+                auxPicked = aux.hasPart && hit;
                 if (auxPicked && pids.size() > 1) {
                     std::string ps;
                     for (int p : pids) ps += (ps.empty() ? "" : " / ") + (p > 0 ? std::to_string(p) : std::string("0(없음)"));
                     pk.ambiguousPid.push_back(where + " — PID " + ps);
                 }
-                if (auxPicked) {
+                if (auxPicked && !aux.hasEid) {
+                    // 질량 얹기(`*ELEMENT_MASS_PART(_SET)`)는 요소가 아니다 — 요소 수에 넣지 않는다(EID · 절점 칸이 없다)
+                    ++pk.massPartCards;
+                    if (aux.partIsSet) ++pk.massSetCards;
+                } else if (auxPicked) {
                     ++pk.auxCards;
                     if (aux.family == KooRemapper::AuxFamily::SEATBELT) ++pk.seatbeltCards;
+                    if (aux.family == KooRemapper::AuxFamily::BEAM) pk.beamEids.push_back(fieldInt(auxCard1, 0));
                     // 절점 — 하나로 읽은 칸은 싣고, 다른 읽기만 말하는 절점은 덱에 있으면 싣는다(둘 다 남긴다)
                     for (int v : KooRemapper::auxNodesOf(aux, auxCard1)) pk.nodes.push_back(v);
                     for (int v : KooRemapper::auxNodesAlt(aux, rd, auxCard1)) pk.altNodes.push_back(v);
@@ -374,6 +445,13 @@ void scanElements(const std::string& path, const std::vector<int>& sel, const De
             //   없는 블록은 빼고)는 고른 파트에 안전띠 요소가 있으면 runExtractParts 가 통째로 거절한다(띠에 붙었는지 증명할 수 없다).
             if (aux.family != KooRemapper::AuxFamily::NONE && !aux.hasPart) {
                 if (!deviceAt.empty()) { pk.seatbeltDevices.push_back(deviceAt); deviceAt.clear(); }
+                // 보 장치(`*ELEMENT_BEAM_PULLEY` · `_SOURCE` — 8칸 표)는 가리키는 보 요소 번호를 적어 둔다(runExtractParts 가 고른 보와 견준다)
+                if (!aux.elemRefFields.empty()) {
+                    const auto f = cardFields(line, fw >= 20 ? 20 : 10);
+                    Picked::BeamDevice bd{path + ":" + std::to_string(lineNo) + " " + kw, {}};
+                    for (int q : aux.elemRefFields) bd.refs.push_back(fieldInt(f, (size_t)q));
+                    pk.beamDevices.push_back(std::move(bd));
+                }
                 ++pk.opaqueElemOther[kw];
                 continue;
             }
@@ -819,7 +897,11 @@ struct Writer {
                     card1 = KooRemapper::auxPrimaryFields(auxRd);
                     lineIdx = 0;
                     remaining = aux.lines;
-                    if (aux.hasPart) {
+                    if (aux.hasPart && aux.partIsSet) {
+                        // 패스 1 과 같은 판정 — 세트가 다 고른 파트일 때만 싣는다(일부 · 못 푼 세트는 이미 거절했다)
+                        std::string why;
+                        picked = massSetVerdict(fieldInt(card1, 0), idx, sel, why) == 1;
+                    } else if (aux.hasPart) {
                         // 패스 1 과 같은 판정 — PID 후보 가운데 고른 것이 있으면 싣는다(갈리는 줄은 이미 거절했다)
                         bool hit = false;
                         for (int p : auxPidCandidates(aux, auxRd, idx)) hit = hit || inSorted(sel, p);
@@ -833,7 +915,7 @@ struct Writer {
                             if (v <= 0 || !inSorted(pk.nodes, v)) { picked = false; break; }
                         }
                     }
-                    if (picked) ++st.auxCards;
+                    if (picked && aux.hasEid) ++st.auxCards;
                 }
                 if (picked) {
                     std::string o2 = line;
@@ -1040,7 +1122,7 @@ Verify verifyOutput(const std::string& path, const std::vector<int>& altExisting
             if (vAuxLineIdx == 0) {
                 const auto rd = KooRemapper::auxCardReadings(vaux, line, fw);
                 const auto& f = KooRemapper::auxPrimaryFields(rd);
-                if (vaux.partField >= 0) {
+                if (vaux.partField >= 0 && !vaux.partIsSet) {   // `_MASS_PART_SET` 의 칸 0 은 파트 세트 ID 다
                     const int pid = fieldInt(f, (size_t)vaux.partField);
                     if (pid > 0) elemPids.push_back(pid);
                 }
@@ -1355,6 +1437,39 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
         console.info("따라가는 것은 맨 *INCLUDE 뿐이다(*INCLUDE_PATH · _PATH_RELATIVE 는 탐색 경로라 세지 않는다)");
         return 1;
     }
+    // ★보 장치(`*ELEMENT_BEAM_PULLEY` · `_SOURCE`)는 PID 칸이 없다 — 고른 보 요소(BID1 · BID2 · BSEID)를 가리키면 장치를 빼고 보만 실을
+    //   수 없다 → 거절. 번호가 0 이면(PULLEY — LS-DYNA 가 이웃 보를 스스로 찾는다) 고른 파트에 보가 있을 때 거절. 그 밖은 버리고
+    //   dropped_keywords 에 센다(2026-11-07 검토 #5 — 예전엔 보의 옵션으로 읽어 칸 1(BID1 · BSNID)을 PID 로 셌다)
+    {
+        sortUnique(pk.beamEids);
+        std::vector<std::string> bad;
+        for (const auto& bd : pk.beamDevices) {
+            std::string hit;
+            bool zero = true;
+            for (int r : bd.refs) {
+                if (r > 0) zero = false;
+                if (r > 0 && inSorted(pk.beamEids, r)) hit += (hit.empty() ? "" : ", ") + std::to_string(r);
+            }
+            if (!hit.empty()) bad.push_back(bd.where + " — 고른 보 요소 " + hit + " 를 가리킨다");
+            else if (zero && !pk.beamEids.empty()) bad.push_back(bd.where + " — 보 요소 번호가 0(이웃 보를 스스로 찾는다)이고 고른 파트에 보가 있다");
+        }
+        if (!bad.empty()) {
+            console.error("보 장치(*ELEMENT_BEAM_PULLEY · _SOURCE) " + std::to_string(bad.size()) + " 줄이 고른 보에 붙었을 수 있다 — 장치는 "
+                          "PID 칸이 없어 따로 싣지 못하고, 빼면 보가 그럴듯하게 돌면서 도르래 · 공급원이 없다. 거절한다");
+            for (const auto& b : bad) console.println("  " + b);
+            return 1;
+        }
+    }
+    // ★질량 얹기 세트(`*ELEMENT_MASS_PART_SET`) — 세트를 일부만 고르거나 풀 수 없으면 실을지 버릴지 정할 수 없다. 세트를 싣지 않으면
+    //   (`include.sets: none`) 실은 줄이 없는 세트를 가리킨다(2026-11-07 검토 #5)
+    if (!pk.massSetRefused.empty() || (pk.massSetCards > 0 && !o.incSets)) {
+        console.error("*ELEMENT_MASS_PART_SET " + std::to_string(pk.massSetRefused.size() + (o.incSets ? 0 : pk.massSetCards)) +
+                      " 줄 — 파트 세트에 나눠 얹는 질량을 고른 파트에 맞게 실을 수 없어 거절한다");
+        for (const auto& l : pk.massSetRefused) console.println("  " + l);
+        if (pk.massSetCards > 0 && !o.incSets)
+            console.println("  include.sets: none — 실을 질량 얹기 " + std::to_string(pk.massSetCards) + " 줄이 가리키는 *SET_PART 를 싣지 않는다");
+        return 1;
+    }
     // ★넓은 칸 뒤 PID 가 읽기마다 갈리는데 그 하나를 골랐다 — 실을지 버릴지 정할 수 없다(질량의 MASS 를 정수 폭으로 쓴 줄 · 2026-11-07)
     if (!pk.ambiguousPid.empty()) {
         console.error("보 족 줄 " + std::to_string(pk.ambiguousPid.size()) + " 장이 설명서 칸과 정수 폭으로 읽혀 PID 가 갈리고 그 하나가 "
@@ -1390,6 +1505,8 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
                  "  nodes: " + std::to_string(pk.nodes.size()));
     for (const auto& k : pk.auxKws)
         console.info("    " + k + " — 칸 자리를 알고 읽었다(추측이 아니다)");
+    if (pk.massPartCards > 0)
+        console.info("  *ELEMENT_MASS_PART(_SET) " + std::to_string(pk.massPartCards) + " 줄 — 고른 파트(세트)에 얹는 질량을 싣는다");
 
     Needed nd;
     for (int p : sel) {

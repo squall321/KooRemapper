@@ -843,7 +843,8 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
                 const size_t g = l.find_first_not_of(" \t");
                 if (g != std::string::npos && l[g] == '*') {
                     const AuxElementCard a = auxElementCard(l);
-                    inAux = a.family != AuxFamily::NONE && a.supported;
+                    // 질량 얹기(`*ELEMENT_MASS_PART(_SET)` — 요소가 아니다 · 걸음이 넘긴다)는 ⑥이 세지 않으니 빼지 않는다(그 PID 는 아래 표가 본다)
+                    inAux = a.family != AuxFamily::NONE && a.supported && a.hasEid;
                 }
                 if (inAux) auxOnly.push_back(l);
             }

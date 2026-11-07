@@ -314,6 +314,16 @@ AuxElementCard auxElementCard(const std::string& keywordLine) {
             a.nodeSkip = 2; a.nodeCount = 3;
             for (const auto& o : opts) {
                 if (o == "TITLE") continue;
+                if (o == "PULLEY" || o == "SOURCE") {
+                    // 보 요소가 아니라 **다른 키워드**다 — 8칸 표(I10)이고 PID 칸이 없다(156795 PUID BID1 BID2 PNID FD FS LMIN DC ·
+                    // 156905 BSID BSNID BSEID NELE …). 칸 1(BID1 · BSNID)을 PID 로 읽지 않는다 — 보 요소 번호 칸만 적는다
+                    a.hasPart = false;
+                    a.partField = -1;
+                    a.nodeCount = 0;
+                    a.elemRefFields = (o == "PULLEY") ? std::vector<int>{1, 2} : std::vector<int>{2};
+                    unsupported("*ELEMENT_BEAM_" + o + " 은 별개 키워드이고 PID 칸이 없습니다");
+                    break;
+                }
                 if (o == "THICKNESS" || o == "SCALAR" || o == "SCALR" || o == "SECTION" ||
                     o == "PID" || o == "OFFSET" || o == "ORIENTATION" || o == "WARPAGE" ||
                     o == "ELBOW")
@@ -331,15 +341,27 @@ AuxElementCard auxElementCard(const std::string& keywordLine) {
                 else unsupported("*ELEMENT_DISCRETE 의 옵션 '" + o + "' 은 카드 줄 수를 확정할 수 없습니다");
             }
             break;
-        case AuxFamily::MASS:
+        case AuxFamily::MASS: {
             // Card 1 = EID(I8) ID(I8) MASS(E16) PID(I8) (159866-159930). ⚠ PID 는 칸 차례 **3** 이다(칸 1 이 아니다) —
             // MASS 가 넓은 칸이라 8칸으로 자르면 33-40열(칸 4)이다. 그 차례는 `auxCardReadings` 가 자른다.
             a.nodeSkip = 1; a.nodeCount = 1;
             a.partField = 3;
             a.wideFields = {2};
             a.card1Fields = 4;
+            const bool part = std::find(opts.begin(), opts.end(), "PART") != opts.end();
+            if (part) {
+                // `_PART(_SET)` — 파트(세트)에 질량을 얹는 카드다. Card 1 = ID(I8) ADDMASS(F16) FINMASS(F16) LCID(I8) MWD(I8)
+                // (160135-160207) — 칸 0 이 PID(`_SET` 이면 파트 세트 ID)이고 요소 번호 · 절점 칸이 없다
+                a.nodeSkip = -1; a.nodeCount = 0;
+                a.partField = 0;
+                a.wideFields = {1, 2};
+                a.card1Fields = 5;
+                a.hasEid = false;
+            }
             for (const auto& o : opts) {
                 if (o == "TITLE") continue;
+                if (part && o == "PART") continue;
+                if (part && o == "SET") { a.partIsSet = true; continue; }
                 // `_NODE_SET` 은 칸 1 이 **절점 세트 ID** 다 — 절점으로 읽으면 엉뚱한 절점을
                 // 지키고 세트 멤버는 놓친다. 추측하지 않는다.
                 if (o == "NODE" || o == "SET")
@@ -348,6 +370,7 @@ AuxElementCard auxElementCard(const std::string& keywordLine) {
                     unsupported("*ELEMENT_MASS 의 옵션 '" + o + "' 은 칸 뜻을 확정할 수 없습니다");
             }
             break;
+        }
         case AuxFamily::SEATBELT:
             // Card 1 = EID PID N1 N2 SBRID(I8 다섯) SLEN(F16) N3 N4(I8) (160311-160353) — 절점이 **두 구간**이다(칸 차례 2·3 · 6·7).
             // SLEN 이 넓은 칸이라 N3 · N4 는 57-64 · 65-72열이다(8칸으로 자르면 칸 7·8). 그 차례는 `auxCardReadings` 가 자른다.
@@ -599,6 +622,7 @@ void forEachNonGridElementCard(const std::vector<std::string>& lines,
         c.keyword = kw;
         c.line = i;
         if (aux.supported) {
+            if (!aux.hasEid) continue;   // 요소가 아니다(`*ELEMENT_MASS_PART(_SET)` — EID · 절점 칸이 없다 · PID 는 IdRefs 가 본다)
             if (remaining == 0) {
                 remaining = aux.lines;
                 // 절점은 읽기 전부의 합집합 · PID 는 후보 전부(헤더 「읽기들」 — 이월 적용의 나눠 쓴 절점 · aux_in_part 가 본다)

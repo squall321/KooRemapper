@@ -97,6 +97,12 @@ int realFieldWidth(int intFw);
 //                         그 차례로 자르는 것은 `auxCardReadings` 뿐이다(2026-11-07 — 정수 폭으로 잘라 PID 를 MASS 에서 읽었다).
 //                       ⚠ `_NODE_SET` 변형은 그 칸이 **절점 세트 ID** 다 — 절점으로 읽으면
 //                         엉뚱한 절점을 지키고 세트 멤버는 놓친다. 그래서 **미지원**으로 둔다.
+//   *ELEMENT_MASS_PART: Card 1 = ID(I8) ADDMASS(F16) FINMASS(F16) LCID(I8) MWD(I8) (160135-160207) — 파트에 질량을 얹는 카드다.
+//                       칸 0 이 PID(`_SET` 이면 **파트 세트 ID**)이고 요소 번호 · 절점 칸이 없다(`hasEid=false`). 예전엔 질량
+//                       카드의 칸 3 을 PID 로 읽어 extract-parts 가 고른 파트의 추가 질량을 조용히 버렸다(2026-11-07 검토 #5).
+//   *ELEMENT_BEAM_PULLEY · *ELEMENT_BEAM_SOURCE : 보 요소가 아니라 **별개 키워드**다 — 8칸 표(I10)이고 PID 칸이 없다
+//                       (156795 PUID BID1 BID2 PNID … · 156905 BSID BSNID BSEID …). 예전엔 보의 옵션으로 읽어 칸 1(BID1 · BSNID)을
+//                       PID 로 셌다. 보 요소 번호 칸만 적는다(`elemRefFields` — BID1 · BID2 · BSEID).
 //   *ELEMENT_SEATBELT : Card 1 = EID(I8) PID(I8) N1(I8) N2(I8) SBRID(I8) SLEN(F16) N3(I8) N4(I8) → 절점이 **두 구간**이다
 //                       (칸 차례 2·3 과 6·7 — 160311-160353, 10칸 표에 아홉 자리라 SLEN 이 두 칸 41-56열이다).
 //                       ⚠ N3 · N4 는 57-64 · 65-72열이다(8칸으로 자르면 칸 7·8). 예전엔 8칸 칸 6·7(49-64열 — SLEN 의 뒤
@@ -120,6 +126,10 @@ struct AuxElementCard {
     int  partField = 1;        // PID 가 든 칸 — **칸 차례**(`auxCardReadings` 가 나눈 차례). ⚠ `*ELEMENT_MASS` 는 3(EID ID MASS PID)
     std::vector<int> wideFields;   // Card 1 에서 정수 칸보다 넓은 실수 칸의 차례(`*ELEMENT_MASS` 의 MASS = 2 · 안전띠 SLEN = 5)
     int  card1Fields = 0;          // 넓은 칸이 있는 족의 Card 1 칸 수(질량 4 · 안전띠 8) — 정수 폭 읽기가 줄을 다 담는가를 잰다
+    bool hasEid = true;            // false = 칸 0 이 요소 번호가 아니다 · 절점 칸도 없다(`*ELEMENT_MASS_PART(_SET)` — 요소가 아니다)
+    bool partIsSet = false;        // `partField` 가 PID 가 아니라 **파트 세트 ID** 다(`*ELEMENT_MASS_PART_SET`) — PID 로 견주지 말 것
+    std::vector<int> elemRefFields;   // 보 요소 번호를 담는 칸(차례 — 8칸 표, 칸 폭 10 · long 20): `*ELEMENT_BEAM_PULLEY` BID1 · BID2 ·
+                                      // `*ELEMENT_BEAM_SOURCE` BSEID. 0 이면 LS-DYNA 가 이웃 보를 스스로 찾는다(PULLEY)
     bool supported = false;    // false 면 이 변형을 추측하지 않는다
     std::string reason;        // supported=false 일 때 댈 이유
 };
@@ -198,6 +208,7 @@ bool gridReaderReadsKeyword(const std::string& keywordLine);
 //            · 격자 밖 족 — `auxElementCard` 가 안다(절점은 읽기 전부의 합집합 · PID 는 후보 전부 — 위 「읽기들」)
 //            · 리더가 안 읽는 격자 변형 — 줄 수가 PID 에 달리지 않을 때만(절점 수 옵션 `_H20` 등 · 티쉘 `_BETA`) ·
 //              `elementCardSpan` 의 절점 줄 전부
+//   요소가 아닌 카드(`hasEid=false` — `*ELEMENT_MASS_PART(_SET)`)는 넘기지 않는다(EID · 절점 칸이 없다 — PID 는 IdRefs 가 본다)
 //   !known — 칸 자리나 카드 줄 수를 모른다. **데이터 줄마다** 한 번 · 그 줄의 첫 칸을 EID 로 넘치게 센다(바닥은 높아질
 //            뿐 낮아지지 않는다). 절점 수 옵션이 없는 솔리드 변형(`_ORTHO` · `_DOF` · `_H8TOH20` · `_TET4TOTET10` …)은
 //            카드 줄 수가 그 PID 의 ELFORM(다른 파일의 `*SECTION_SOLID` 일 수 있다)과 구 포맷 여부에 달려 여기 든다

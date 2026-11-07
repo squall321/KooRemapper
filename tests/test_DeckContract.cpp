@@ -586,6 +586,52 @@ TEST(auxPidsOf_질량_PID_후보는_읽기마다) {
     ASSERT_TRUE(auxPidsOf(pl, auxCardReadings(pl, "       1     101     102", 8)).empty());
 }
 
+TEST(auxElementCard_보_장치는_PID_칸이_없다) {
+    // `*ELEMENT_BEAM_PULLEY`(PUID BID1 BID2 PNID …) · `*ELEMENT_BEAM_SOURCE`(BSID BSNID BSEID …)는 보 요소가 아니라 별개 키워드다
+    // (Vol_I 156795 · 156905) — 칸 1 을 PID 로 읽지 않는다(예전엔 BID1 · BSNID 를 PID 로 셌다). 보 요소 번호 칸만 적는다
+    auto a = auxElementCard("*ELEMENT_BEAM_PULLEY");
+    ASSERT_TRUE(a.family == AuxFamily::BEAM);
+    ASSERT_FALSE(a.supported);
+    ASSERT_FALSE(a.hasPart);
+    ASSERT_EQ(a.partField, -1);
+    ASSERT_TRUE(a.elemRefFields == std::vector<int>({1, 2}));
+    a = auxElementCard("*ELEMENT_BEAM_SOURCE");
+    ASSERT_FALSE(a.hasPart);
+    ASSERT_TRUE(a.elemRefFields == std::vector<int>({2}));
+    a = auxElementCard("*ELEMENT_BEAM_ORIENTATION");   // 보의 옵션은 그대로다
+    ASSERT_TRUE(a.supported);
+    ASSERT_TRUE(a.hasPart);
+    ASSERT_TRUE(a.elemRefFields.empty());
+}
+
+TEST(auxElementCard_질량_얹기는_칸_0_이_PID) {
+    // `*ELEMENT_MASS_PART` = ID(I8) ADDMASS(F16) FINMASS(F16) LCID(I8) MWD(I8) (Vol_I 160135-160207) — 칸 0 이 PID(`_SET` 이면
+    // 파트 세트 ID)이고 요소 번호 · 절점 칸이 없다. 예전엔 질량 카드의 칸 3 을 PID 로 읽어 고른 파트의 추가 질량을 버렸다
+    auto a = auxElementCard("*ELEMENT_MASS_PART");
+    ASSERT_TRUE(a.supported);
+    ASSERT_TRUE(a.hasPart);
+    ASSERT_FALSE(a.hasEid);
+    ASSERT_FALSE(a.partIsSet);
+    ASSERT_EQ(a.partField, 0);
+    ASSERT_EQ(a.nodeCount, 0);
+    char b[128];
+    std::snprintf(b, sizeof b, "%8d%16s%16s%8d%8d", 9, "0.25", "0.0", 105, 0);
+    const auto r = auxCardReadings(a, b, 8);
+    ASSERT_TRUE(auxPidsOf(a, r) == std::vector<int>({9}));
+    ASSERT_TRUE(auxNodesUnion(a, r).empty());                 // LCID(105)는 절점이 아니다
+    a = auxElementCard("*ELEMENT_MASS_PART_SET");
+    ASSERT_TRUE(a.supported);
+    ASSERT_TRUE(a.partIsSet);
+    ASSERT_FALSE(a.hasEid);
+    // 걸음은 질량 얹기를 넘긴다(요소가 아니다 — 번호 바닥이 그 PID 를 EID 로 세지 않는다)
+    const std::vector<std::string> L = {"*KEYWORD", "*ELEMENT_MASS_PART", b, "*ELEMENT_MASS_PART_SET", b, "*END"};
+    size_t n = 0;
+    forEachNonGridElementCard(L, [&](const NonGridElementCard&) { ++n; });
+    ASSERT_EQ(n, (size_t)0);
+    ASSERT_FALSE(auxElementCard("*ELEMENT_MASS_NODE_SET").supported);   // 그 밖 질량 변형은 그대로다
+    ASSERT_FALSE(auxElementCard("*ELEMENT_MASS_MATRIX").supported);
+}
+
 TEST(auxElementCard_안전띠_장치_키워드는_PID_칸이_없다) {
     // `_ACCELEROMETER`·`_PRETENSIONER`·`_RETRACTOR`·`_SENSOR`·`_SLIPRING` 은 별개 키워드다 — 10칸 폭 표이고 PID 칸이 없다
     // (Vol_I 160482 · 160602 · 160931 · 161342 · 161725). 칸 자리를 짐작하지 않는다(extract-parts 가 칸 1 을 PID 로 읽었다).
