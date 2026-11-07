@@ -529,7 +529,8 @@ int run(const Input& in, ConsoleOutput& console) {
     }
 
     // ── 4b. 파트·요소 참조(v2) — 파트는 `*PART` 제목, 요소는 (파트 제목, 요소 절점들의 좌표 집합) 정확 일치 ─────
-    const auto ir = idrefs::find(E, fw);
+    // 질량 줄을 다른 읽기로 읽은 PID 는 옛 덱의 파트일 때만 「단정하지 못한 자리」로 센다(넓은 칸 뒤 — 2026-11-07)
+    const auto ir = idrefs::find(E, fw, nullptr, [&](int p) { return oldD.pids.count(p) != 0; });
     if (ir.notChecked > 0) {
         std::string ks;
         for (const auto& k : ir.notCheckedKeywords) ks += (ks.empty() ? "" : ", ") + k;

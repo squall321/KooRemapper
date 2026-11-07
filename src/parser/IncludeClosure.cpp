@@ -331,6 +331,25 @@ bool inlined(const std::vector<std::string>& mainLines, const std::string& mainP
     return true;
 }
 
+bool sameFile(const std::string& a, const std::string& b) {
+    if (a.empty() || b.empty()) return false;
+    std::error_code ec;
+    if (fs::exists(a, ec) && fs::exists(b, ec) && fs::equivalent(a, b, ec) && !ec) return true;
+    return keyOf(a) == keyOf(b);
+}
+
+bool clobberPair(const std::vector<std::string>& writes, const std::vector<std::string>& reads,
+                 std::string& write, std::string& read) {
+    for (size_t i = 0; i < writes.size(); ++i) {
+        if (writes[i].empty()) continue;
+        for (const auto& r : reads)
+            if (sameFile(writes[i], r)) { write = writes[i]; read = r; return true; }
+        for (size_t j = i + 1; j < writes.size(); ++j)
+            if (sameFile(writes[i], writes[j])) { write = writes[i]; read = writes[j]; return true; }
+    }
+    return false;
+}
+
 std::string partFile(const Closure& c, int pid) {
     for (const auto& f : c.files) {
         bool inPart = false;

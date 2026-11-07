@@ -113,6 +113,17 @@ std::vector<std::string> flatten(const std::vector<std::string>& mainLines, cons
 bool inlined(const std::vector<std::string>& mainLines, const std::string& mainPath, const Closure& c,
              std::vector<std::string>& out, std::string& why);
 
+// 같은 파일인가 — 정규 경로(`weakly_canonical` — `./a.k` · 절대 경로 · 심볼릭 링크)가 같거나, 둘 다 있으면 같은 파일(하드 링크 —
+// `equivalent`)이다. 빈 경로는 아무것과도 같지 않다.
+bool sameFile(const std::string& a, const std::string& b);
+
+// ★쓸 파일(`writes` — 산출 · 보고 · 번호 지도 …)이 읽는 파일(`reads` — 주 덱 · 인클루드)이나 다른 쓸 파일과 같은 첫 짝을 찾는다
+// (빈 경로는 건너뛴다). 있으면 true 와 그 둘 — `read` 가 쓸 파일이면 쓸 파일끼리 겹친 것이다. 흘려 읽는 op 은 산출을 열면(잘라
+// 비우면) 아직 읽지 않은 입력이 0 바이트가 되고, 다 읽은 뒤 쓰는 보고도 입력을 덮는다(2026-11-07 검토 #6 — extract-parts 의
+// `output == model` 이 입력을 비우고 rc 1). 부르는 쪽은 산출을 열기 **전에** 묻고 거절한다.
+bool clobberPair(const std::vector<std::string>& writes, const std::vector<std::string>& reads,
+                 std::string& write, std::string& read);
+
 // 닫힘의 인클루드 파일 가운데 그 PID 의 `*PART` 카드를 가진 첫 파일(없으면 빈 문자열) — 줄을 읽는 op 이 「대상이 인클루드
 // 안에 있다 — `flatten_includes: true`」를 말하려고 쓴다(2026-10-17). `*PART` 계열 블록에서 PID·SECID 가 둘 다 양수인 줄을
 // 카드 2 로 본다(리더의 `prescanPartSections` 와 같은 규칙). `read` 가 담은 줄을 본다(`readPaths` 판은 줄이 없다).
