@@ -1,0 +1,417 @@
+{
+ "format": "stepforge-carryover-plan",
+ "version": 1,
+ "unit": "mm-t-s",
+ "frame": "world",
+ "deck": {
+  "project_id": "001a1b41fb76a0201972bc2",
+  "relpath": "live_a88_deck.k",
+  "sha256": "0713a659789236408247e4a1e1f27a87a60e9e9fd8dbb135f3226cca563f1f03",
+  "max": {
+   "node": 3420,
+   "elem": 2578,
+   "pid": 8,
+   "secid": 8,
+   "mid": 8
+  },
+  "unread_cards": []
+ },
+ "report_key": "78357f36d68983e77012e01262b732d691530f544e5616d1aeb72ed7845ca979",
+ "cad": {
+  "old": {
+   "project_id": "001a1b41fb76a0201972bc2",
+   "name": "live-a88-carry-old-1794023339",
+   "shape_key": "757e4cd9a90d7164"
+  },
+  "new": {
+   "project_id": "001a1b41fb98a771916aaf4",
+   "name": "live-a88-carry-new-1794023339",
+   "shape_key": "1278bce116dc8ed8"
+  }
+ },
+ "floor_mm": 0.000364005,
+ "summary": {
+  "actions": {
+   "keep": 2,
+   "morph": 1,
+   "transform": 1,
+   "remesh": 3,
+   "delete": 1
+  },
+  "added": 1,
+  "fields": 1,
+  "fragments": 3,
+  "failed": 0
+ },
+ "parts": [
+  {
+   "pid": 1,
+   "name": "HOUSING#1",
+   "action": "keep",
+   "why": "바뀐 자리가 간소화가 지운 피처 안이다",
+   "mapping": "one_to_one",
+   "members": [
+    "/live-a88-carry-old-1794023339/live_a88_v1.step/V1/HOUSING"
+   ],
+   "absorbed": [
+    "/live-a88-carry-old-1794023339/live_a88_v1.step/V1/HOUSING"
+   ]
+  },
+  {
+   "pid": 2,
+   "name": "RIB#2",
+   "action": "morph",
+   "why": "면 구성이 같고 변위가 요소 크기 안",
+   "mapping": "one_to_one",
+   "members": [
+    "/live-a88-carry-old-1794023339/live_a88_v1.step/V1/RIB"
+   ],
+   "field": {
+    "file": "field_2.bin",
+    "nodes": 178,
+    "bytes": 5162,
+    "layout": [
+     {
+      "name": "node",
+      "dtype": "<u4",
+      "offset": 0,
+      "count": 178
+     },
+     {
+      "name": "disp",
+      "dtype": "<f8",
+      "offset": 712,
+      "shape": [
+       178,
+       3
+      ],
+      "unit": "mm"
+     },
+     {
+      "name": "kind",
+      "dtype": "<u1",
+      "offset": 4984,
+      "count": 178,
+      "codes": {
+       "0": "interior",
+       "1": "face",
+       "2": "edge",
+       "3": "corner",
+       "4": "unlabeled"
+      },
+      "shared_bit": 8
+     }
+    ],
+    "surface_nodes": 178,
+    "kinds": {
+     "interior": 0,
+     "face": 98,
+     "edge": 72,
+     "corner": 8,
+     "unlabeled": 0
+    },
+    "max_disp": 0.2,
+    "faces": 6,
+    "face_pairs": {
+     "0": 0,
+     "1": 1,
+     "2": 2,
+     "3": 3,
+     "4": 4,
+     "5": 5
+    },
+    "dropped_directions": 0,
+    "projection_fallbacks": 0,
+    "solver": {
+     "iterations": 0,
+     "residual": 0.0,
+     "converged": true,
+     "unknowns": 268
+    },
+    "check": {
+     "on_new_surface_max_error": 0.0,
+     "on_new_surface_over": 0,
+     "elements": 68,
+     "inverted": 0,
+     "unchecked": 0,
+     "min_ratio": 1.4,
+     "ok": true
+    }
+   }
+  },
+  {
+   "pid": 3,
+   "name": "BRACKET#3",
+   "action": "transform",
+   "why": "자리만 옮겼다",
+   "mapping": "one_to_one",
+   "members": [
+    "/live-a88-carry-old-1794023339/live_a88_v1.step/V1/BRACKET"
+   ],
+   "transform": [
+    1.0,
+    0.0,
+    0.0,
+    2.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "translation": [
+    2.0,
+    0.0,
+    0.0
+   ],
+   "rotation_deg": 0.0,
+   "check": {
+    "claim_after": 1.0,
+    "claim_before": 1.0
+   }
+  },
+  {
+   "pid": 4,
+   "name": "CAN#4",
+   "action": "remesh",
+   "why": "면 구성이 바뀌었다",
+   "mapping": "one_to_one",
+   "members": [
+    "/live-a88-carry-old-1794023339/live_a88_v1.step/V1/CAN"
+   ],
+   "fragment": {
+    "ok": true,
+    "file": "fragment_4.k",
+    "pid": 4,
+    "secid": 4,
+    "mid": 4,
+    "new_section": null,
+    "ranges": {
+     "node": [
+      3421,
+      3712
+     ],
+     "elem": [
+      2579,
+      2846
+     ]
+    },
+    "nodes": 292,
+    "elements": 268,
+    "bytes": 30641,
+    "mesh": {
+     "kind": "shell",
+     "size": 0.825488743,
+     "thickness_from": "새 CAD 잰 두께",
+     "thickness": 0.4,
+     "families": {
+      "quad": 264,
+      "tri": 4
+     }
+    },
+    "target": {
+     "members": [
+      "/live-a88-carry-new-1794023339/live_a88_v2.step/V2/CAN"
+     ],
+     "defeatured": [],
+     "skipped": []
+    },
+    "check": {
+     "ok": true,
+     "cover": 1.0,
+     "claim": 1.0,
+     "band": {
+      "p50": 0.199999994,
+      "p95": 0.20137932,
+      "max": 0.204119428
+     },
+     "problems": []
+    }
+   }
+  },
+  {
+   "pid": 5,
+   "name": "PCB_ASM#5",
+   "action": "remesh",
+   "why": "합친 파트의 일부만 바뀌었다(자리 · 형상 · 없어짐이 섞였다)",
+   "mapping": "merged",
+   "members": [
+    "/live-a88-carry-old-1794023339/live_a88_v1.step/V1/COMP",
+    "/live-a88-carry-old-1794023339/live_a88_v1.step/V1/PCB"
+   ],
+   "fragment": {
+    "ok": true,
+    "file": "fragment_5.k",
+    "pid": 5,
+    "secid": 5,
+    "mid": 5,
+    "new_section": null,
+    "ranges": {
+     "node": [
+      3713,
+      3977
+     ],
+     "elem": [
+      2847,
+      3553
+     ]
+    },
+    "nodes": 265,
+    "elements": 707,
+    "bytes": 73277,
+    "mesh": {
+     "kind": "tet",
+     "size": 1.0,
+     "strategy": "tet",
+     "families": {
+      "tet": 707
+     }
+    },
+    "target": {
+     "members": [
+      "/live-a88-carry-new-1794023339/live_a88_v2.step/V2/COMP",
+      "/live-a88-carry-new-1794023339/live_a88_v2.step/V2/PCB"
+     ],
+     "defeatured": [],
+     "skipped": [],
+     "fused": 2
+    },
+    "check": {
+     "ok": true,
+     "cover": 1.0,
+     "claim": 1.0,
+     "band": {
+      "p50": 0.0,
+      "p95": 0.0,
+      "max": 0.0
+     },
+     "problems": []
+    }
+   }
+  },
+  {
+   "pid": 6,
+   "name": "BATTERY#6",
+   "action": "remesh",
+   "why": "면 구성이 바뀌었다",
+   "mapping": "one_to_one",
+   "members": [
+    "/live-a88-carry-old-1794023339/live_a88_v1.step/V1/BATTERY"
+   ],
+   "fragment": {
+    "ok": true,
+    "file": "fragment_6.k",
+    "pid": 6,
+    "secid": 9,
+    "mid": 6,
+    "new_section": {
+     "secid": 9,
+     "elform": 10,
+     "why": "옛 섹션 ELFORM 1 는 사면체 1차 꼴이 아니다 — 사면체로 지은 조각은 ELFORM 10"
+    },
+    "ranges": {
+     "node": [
+      3978,
+      4281
+     ],
+     "elem": [
+      3554,
+      4451
+     ]
+    },
+    "nodes": 304,
+    "elements": 898,
+    "bytes": 91048,
+    "mesh": {
+     "kind": "hex",
+     "size": 0.968387299,
+     "strategy": "tet",
+     "families": {
+      "tet": 898
+     }
+    },
+    "target": {
+     "members": [
+      "/live-a88-carry-new-1794023339/live_a88_v2.step/V2/BATTERY"
+     ],
+     "defeatured": [],
+     "skipped": []
+    },
+    "check": {
+     "ok": true,
+     "cover": 1.0,
+     "claim": 1.0,
+     "band": {
+      "p50": 0.0,
+      "p95": 0.0,
+      "max": 0.013431178
+     },
+     "problems": []
+    }
+   }
+  },
+  {
+   "pid": 7,
+   "name": "SPACER_OLD#7",
+   "action": "delete",
+   "why": "새 CAD 에서 없어졌다",
+   "mapping": "one_to_one",
+   "members": [
+    "/live-a88-carry-old-1794023339/live_a88_v1.step/V1/SPACER_OLD"
+   ]
+  },
+  {
+   "pid": 8,
+   "name": "MASS_LUMP#8",
+   "action": "keep",
+   "why": "덱에만 있는 파트(CAD 원천 없음) — 닿은 덱 파트가 바뀐다(BRACKET#3 transform) · 함께 옮길지 · 다시 이을지는 사람이 정한다",
+   "mapping": "deck_only",
+   "members": [],
+   "touches_changed": [
+    3
+   ]
+  }
+ ],
+ "added": [
+  {
+   "path": "/live-a88-carry-new-1794023339/live_a88_v2.step/V2/BOSS_NEW",
+   "name": "BOSS_NEW",
+   "action": "add",
+   "suggestion": {
+    "like": "/live-a88-carry-old-1794023339/live_a88_v1.step/V1/SCREW_1",
+    "distance": 1.185661,
+    "deck_pid": null,
+    "removed_in_deck": true,
+    "basis": "꼴(정렬한 상자 변의 비)과 크기(대각선 비의 로그)가 가장 가까운 옛 파트 — 후보다(판정 아님)"
+   },
+   "fragment": null,
+   "why": "닮은 옛 파트(/live-a88-carry-old-1794023339/live_a88_v1.step/V1/SCREW_1)가 덱에서 지워졌다 — 같은 간소화면 넣지 않는다(사람이 정한다)"
+  }
+ ],
+ "files": {
+  "field_2.bin": {
+   "sha256": "5050a9badfb81a16343be6b278748915c167882451194c97e735375c3d615ae2",
+   "bytes": 5162
+  },
+  "fragment_4.k": {
+   "sha256": "7fe188260ef6df26fef6e28b91fbde41363ec4e01cafbb2db68f9227b412e385",
+   "bytes": 30641
+  },
+  "fragment_5.k": {
+   "sha256": "1e76fa47363fe685365d39ba6917fca193133dec4a68d2a5c674a4fbfe2a417c",
+   "bytes": 73277
+  },
+  "fragment_6.k": {
+   "sha256": "6e249de762d1e91296b5208dddc1da4d8ad3e9f853637715e72b00dd853cb6f7",
+   "bytes": 91048
+  }
+ },
+ "code_build": "f309e72b30e3"
+}

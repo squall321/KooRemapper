@@ -1,0 +1,517 @@
+{
+ "format": "stepforge-carryover-plan",
+ "version": 1,
+ "unit": "mm-t-s",
+ "frame": "world",
+ "deck": {
+  "project_id": "001a1b39d4863d03e13adca",
+  "relpath": "deck_mesh.k",
+  "sha256": "acd42dbc74135a834a4703f3b034b6c3f1501a6c1a44ca36a49c599908a455b2",
+  "max": {
+   "node": 3903,
+   "elem": 2236,
+   "pid": 12,
+   "secid": 12,
+   "mid": 12
+  },
+  "unread_cards": []
+ },
+ "report_key": "a3812a7a20690f4cb0a834bdd58323cbe4a613495eae3cbe6a0f181eecd96d6a",
+ "cad": {
+  "old": {
+   "project_id": "001a1b39d4863d03e13adca",
+   "name": "S-v1",
+   "shape_key": "757e4cd9a90d7164"
+  },
+  "new": {
+   "project_id": "001a1b39d615aae8717ed49",
+   "name": "W-v2",
+   "shape_key": "1278bce116dc8ed8"
+  }
+ },
+ "floor_mm": 0.000364005,
+ "summary": {
+  "actions": {
+   "remesh": 3,
+   "delete": 3,
+   "transform": 2,
+   "keep": 4
+  },
+  "added": 2,
+  "fields": 0,
+  "fragments": 5,
+  "failed": 0
+ },
+ "parts": [
+  {
+   "pid": 1,
+   "name": "HOUSING#1",
+   "action": "remesh",
+   "why": "변위가 요소 크기보다 크다",
+   "mapping": "one_to_one",
+   "members": [
+    "/S-v1/v1.step/V1/HOUSING"
+   ],
+   "fragment": {
+    "ok": true,
+    "file": "fragment_1.k",
+    "pid": 1,
+    "secid": 1,
+    "mid": 1,
+    "new_section": null,
+    "ranges": {
+     "node": [
+      3904,
+      6687
+     ],
+     "elem": [
+      2237,
+      3914
+     ]
+    },
+    "nodes": 2784,
+    "elements": 1678,
+    "bytes": 295507,
+    "mesh": {
+     "kind": "hex",
+     "size": 0.950063327,
+     "strategy": "압출",
+     "families": {
+      "hex": 1678
+     }
+    },
+    "target": {
+     "members": [
+      "/W-v2/v1.step/V2/HOUSING"
+     ],
+     "defeatured": [],
+     "skipped": []
+    },
+    "check": {
+     "ok": true,
+     "cover": 1.0,
+     "claim": 1.0,
+     "band": {
+      "p50": 0.0,
+      "p95": 3e-09,
+      "max": 0.037875141
+     },
+     "problems": []
+    }
+   }
+  },
+  {
+   "pid": 2,
+   "name": "리브#2",
+   "action": "delete",
+   "why": "새 CAD 에서 없어졌다",
+   "mapping": "one_to_one",
+   "members": [
+    "/S-v1/v1.step/V1/RIB"
+   ]
+  },
+  {
+   "pid": 3,
+   "name": "BRACKET#3",
+   "action": "transform",
+   "why": "자리만 옮겼다",
+   "mapping": "one_to_one",
+   "members": [
+    "/S-v1/v1.step/V1/BRACKET"
+   ],
+   "transform": [
+    1.0,
+    0.0,
+    0.0,
+    2.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "translation": [
+    2.0,
+    0.0,
+    0.0
+   ],
+   "rotation_deg": 0.0,
+   "check": {
+    "claim_after": 1.0,
+    "claim_before": 1.0
+   }
+  },
+  {
+   "pid": 4,
+   "name": "CAN#4",
+   "action": "remesh",
+   "why": "면 구성이 바뀌었다",
+   "mapping": "one_to_one",
+   "members": [
+    "/S-v1/v1.step/V1/CAN"
+   ],
+   "fragment": {
+    "ok": true,
+    "file": "fragment_4.k",
+    "pid": 4,
+    "secid": 4,
+    "mid": 4,
+    "new_section": null,
+    "ranges": {
+     "node": [
+      6688,
+      6979
+     ],
+     "elem": [
+      3915,
+      4182
+     ]
+    },
+    "nodes": 292,
+    "elements": 268,
+    "bytes": 30637,
+    "mesh": {
+     "kind": "shell",
+     "size": 0.825488743,
+     "thickness_from": "새 CAD 잰 두께",
+     "thickness": 0.4,
+     "families": {
+      "quad": 264,
+      "tri": 4
+     }
+    },
+    "target": {
+     "members": [
+      "/W-v2/v1.step/V2/CAN"
+     ],
+     "defeatured": [],
+     "skipped": []
+    },
+    "check": {
+     "ok": true,
+     "cover": 1.0,
+     "claim": 1.0,
+     "band": {
+      "p50": 0.199999994,
+      "p95": 0.20137932,
+      "max": 0.204119428
+     },
+     "problems": []
+    }
+   }
+  },
+  {
+   "pid": 5,
+   "name": "SCREW_1#5",
+   "action": "keep",
+   "why": "그대로",
+   "mapping": "one_to_one",
+   "members": [
+    "/S-v1/v1.step/V1/SCREW_1"
+   ]
+  },
+  {
+   "pid": 6,
+   "name": "SCREW_2#6",
+   "action": "keep",
+   "why": "그대로",
+   "mapping": "one_to_one",
+   "members": [
+    "/S-v1/v1.step/V1/SCREW_2"
+   ]
+  },
+  {
+   "pid": 7,
+   "name": "SCREW_3#7",
+   "action": "keep",
+   "why": "그대로",
+   "mapping": "one_to_one",
+   "members": [
+    "/S-v1/v1.step/V1/SCREW_3"
+   ]
+  },
+  {
+   "pid": 8,
+   "name": "SCREW_4#8",
+   "action": "delete",
+   "why": "새 CAD 에서 없어졌다",
+   "mapping": "one_to_one",
+   "members": [
+    "/S-v1/v1.step/V1/SCREW_4"
+   ]
+  },
+  {
+   "pid": 9,
+   "name": "PCB#9",
+   "action": "keep",
+   "why": "그대로",
+   "mapping": "one_to_one",
+   "members": [
+    "/S-v1/v1.step/V1/PCB"
+   ]
+  },
+  {
+   "pid": 10,
+   "name": "COMP#10",
+   "action": "transform",
+   "why": "자리만 옮겼다",
+   "mapping": "one_to_one",
+   "members": [
+    "/S-v1/v1.step/V1/COMP"
+   ],
+   "transform": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "translation": [
+    0.0,
+    1.0,
+    0.0
+   ],
+   "rotation_deg": 0.0,
+   "check": {
+    "claim_after": 1.0,
+    "claim_before": 1.0
+   }
+  },
+  {
+   "pid": 11,
+   "name": "BATTERY#11",
+   "action": "remesh",
+   "why": "면 구성이 바뀌었다",
+   "mapping": "one_to_one",
+   "members": [
+    "/S-v1/v1.step/V1/BATTERY"
+   ],
+   "fragment": {
+    "ok": true,
+    "file": "fragment_11.k",
+    "pid": 11,
+    "secid": 13,
+    "mid": 11,
+    "new_section": {
+     "secid": 13,
+     "elform": 10,
+     "why": "옛 섹션 ELFORM 1 는 사면체 1차 꼴이 아니다 — 사면체로 지은 조각은 ELFORM 10"
+    },
+    "ranges": {
+     "node": [
+      6980,
+      7283
+     ],
+     "elem": [
+      4183,
+      5080
+     ]
+    },
+    "nodes": 304,
+    "elements": 898,
+    "bytes": 91048,
+    "mesh": {
+     "kind": "hex",
+     "size": 0.968387299,
+     "strategy": "tet",
+     "families": {
+      "tet": 898
+     }
+    },
+    "target": {
+     "members": [
+      "/W-v2/v1.step/V2/BATTERY"
+     ],
+     "defeatured": [],
+     "skipped": []
+    },
+    "check": {
+     "ok": true,
+     "cover": 1.0,
+     "claim": 1.0,
+     "band": {
+      "p50": 0.0,
+      "p95": 0.0,
+      "max": 0.013431178
+     },
+     "problems": []
+    }
+   }
+  },
+  {
+   "pid": 12,
+   "name": "SPACER_OLD#12",
+   "action": "delete",
+   "why": "새 CAD 에서 없어졌다",
+   "mapping": "one_to_one",
+   "members": [
+    "/S-v1/v1.step/V1/SPACER_OLD"
+   ]
+  }
+ ],
+ "added": [
+  {
+   "path": "/W-v2/v1.step/V2/RIB",
+   "name": "RIB",
+   "action": "add",
+   "suggestion": {
+    "like": "/S-v1/v1.step/V1/RIB",
+    "distance": 0.026801,
+    "deck_pid": 2,
+    "removed_in_deck": false,
+    "basis": "꼴(정렬한 상자 변의 비)과 크기(대각선 비의 로그)가 가장 가까운 옛 파트 — 후보다(판정 아님)"
+   },
+   "pid": 13,
+   "fragment": {
+    "ok": true,
+    "file": "fragment_13.k",
+    "pid": 13,
+    "secid": 2,
+    "mid": 2,
+    "new_section": null,
+    "ranges": {
+     "node": [
+      7284,
+      7461
+     ],
+     "elem": [
+      5081,
+      5148
+     ]
+    },
+    "nodes": 178,
+    "elements": 68,
+    "bytes": 16544,
+    "mesh": {
+     "kind": "hex",
+     "size": 1.0,
+     "strategy": "압출",
+     "families": {
+      "hex": 68
+     }
+    },
+    "target": {
+     "members": [
+      "/W-v2/v1.step/V2/RIB"
+     ],
+     "defeatured": [],
+     "skipped": []
+    },
+    "check": {
+     "ok": true,
+     "cover": 1.0,
+     "claim": 1.0,
+     "band": {
+      "p50": 0.0,
+      "p95": 0.0,
+      "max": 0.0
+     },
+     "problems": []
+    }
+   },
+   "why": "닮은 옛 파트 /S-v1/v1.step/V1/RIB(덱 PID 2)의 간소화 · 메시 칸 · 섹션 · 물성을 따랐다 — 후보다(사람이 확인)"
+  },
+  {
+   "path": "/W-v2/v1.step/V2/BOSS_NEW",
+   "name": "BOSS_NEW",
+   "action": "add",
+   "suggestion": {
+    "like": "/S-v1/v1.step/V1/SCREW_2",
+    "distance": 1.184446,
+    "deck_pid": 6,
+    "removed_in_deck": false,
+    "basis": "꼴(정렬한 상자 변의 비)과 크기(대각선 비의 로그)가 가장 가까운 옛 파트 — 후보다(판정 아님)"
+   },
+   "pid": 14,
+   "fragment": {
+    "ok": true,
+    "file": "fragment_14.k",
+    "pid": 14,
+    "secid": 6,
+    "mid": 6,
+    "new_section": null,
+    "ranges": {
+     "node": [
+      7462,
+      7689
+     ],
+     "elem": [
+      5149,
+      5293
+     ]
+    },
+    "nodes": 228,
+    "elements": 145,
+    "bytes": 25641,
+    "mesh": {
+     "kind": "hex",
+     "size": 0.400849416,
+     "strategy": "압출",
+     "families": {
+      "hex": 145
+     }
+    },
+    "target": {
+     "members": [
+      "/W-v2/v1.step/V2/BOSS_NEW"
+     ],
+     "defeatured": [],
+     "skipped": []
+    },
+    "check": {
+     "ok": true,
+     "cover": 0.992359,
+     "claim": 1.0,
+     "band": {
+      "p50": 0.008280138,
+      "p95": 0.019100659,
+      "max": 0.019210157
+     },
+     "problems": []
+    }
+   },
+   "why": "닮은 옛 파트 /S-v1/v1.step/V1/SCREW_2(덱 PID 6)의 간소화 · 메시 칸 · 섹션 · 물성을 따랐다 — 후보다(사람이 확인)"
+  }
+ ],
+ "files": {
+  "fragment_1.k": {
+   "sha256": "d58897523cccc1cfda87297b6da7d0820369683b86688c607cdf3d92cfda4327",
+   "bytes": 295507
+  },
+  "fragment_4.k": {
+   "sha256": "74fb59dec3e44d5f5c89d534267b0725ca2d1ea6551bcb8c14991b1c6724c3c0",
+   "bytes": 30637
+  },
+  "fragment_11.k": {
+   "sha256": "c263b48d2eef2600a13b8ef98d8ba6b9c5ee0fb3e39b68f6853d7fb9c24426cf",
+   "bytes": 91048
+  },
+  "fragment_13.k": {
+   "sha256": "20a88fff4e0db646c0369b7720b3a6c272fafe7de706eebbd3bb7eabf9185a99",
+   "bytes": 16544
+  },
+  "fragment_14.k": {
+   "sha256": "019efd737aa0fb5aa3ba481cfe445af969d41f3da5a4e059caa09e92b710415b",
+   "bytes": 25641
+  }
+ },
+ "code_build": "f251d5e9ba0c"
+}
