@@ -91,7 +91,10 @@ int realFieldWidth(int intFw);
 //                       Card 1 = EID PID N1 N2 N3 RT1 RR1 RT2 RR2 LOCAL → 절점은 칸 2·3·4 **셋만**.
 //   *ELEMENT_DISCRETE : Card 1 = EID PID N1 N2 VID S PF OFFSET → 절점은 칸 2·3.
 //                       `_LCO` 는 "a second card is read" → +1 장.
-//   *ELEMENT_MASS     : Card 1 = EID ID MASS PID → 절점은 칸 **1** 하나.
+//   *ELEMENT_MASS     : Card 1 = EID(I8) ID(I8) MASS(E16) PID(I8) → 절점은 칸 **1** 하나 (159866-159930).
+//                       ⚠ MASS 는 10칸 표에서 **두 칸**(17-32열)이다 — PID 는 33-40열(8칸으로 자르면 칸 4)이고
+//                         8칸 칸 3(25-32열)은 MASS 의 뒤 절반이다. 칸 차례(EID ID MASS PID)로 PID 는 3 이지만
+//                         그 차례로 자르는 것은 `auxCardFields` 뿐이다(2026-11-07 — 정수 폭으로 잘라 PID 를 MASS 에서 읽었다).
 //                       ⚠ `_NODE_SET` 변형은 그 칸이 **절점 세트 ID** 다 — 절점으로 읽으면
 //                         엉뚱한 절점을 지키고 세트 멤버는 놓친다. 그래서 **미지원**으로 둔다.
 //   *ELEMENT_SEATBELT : Card 1 = EID PID N1 N2 SBRID SLEN N3 N4 → 절점이 **두 구간**이다
@@ -110,7 +113,8 @@ struct AuxElementCard {
     int  nodeSkip2 = -1;       // 둘째 절점 구간(없으면 -1) — `*ELEMENT_SEATBELT`
     int  nodeCount2 = 0;
     bool hasPart = true;       // false = PID 칸이 없다(`*ELEMENT_PLOTEL`)
-    int  partField = 1;        // PID 가 든 칸. ⚠ `*ELEMENT_MASS` 는 **3** 이다(EID ID MASS PID)
+    int  partField = 1;        // PID 가 든 칸 — **칸 차례**(`auxCardFields` 가 나눈 차례). ⚠ `*ELEMENT_MASS` 는 3(EID ID MASS PID)
+    std::vector<int> wideFields;   // Card 1 에서 정수 칸보다 넓은 실수 칸의 차례(`*ELEMENT_MASS` 의 MASS = 2)
     bool supported = false;    // false 면 이 변형을 추측하지 않는다
     std::string reason;        // supported=false 일 때 댈 이유
 };
@@ -118,6 +122,13 @@ struct AuxElementCard {
 // 키워드 줄을 푼다. 격자 족(`parseElementKeyword` 가 아는 것)이면 family=NONE 을 돌려준다 —
 // 두 판정기는 **배타적**이다. 모르는 `*ELEMENT_*` 변형도 family=NONE 이다.
 AuxElementCard auxElementCard(const std::string& keywordLine);
+
+// 그 족 Card 1 한 줄을 **칸 차례대로** 나눈다 — `partField`·`nodeSkip` 은 이 차례를 가리킨다.
+// 고정폭이면 `wideFields` 의 칸은 실수 폭(`realFieldWidth` — 표준·i10 16 · long 20), 나머지는 정수 폭 `fw` 다
+// (Vol_I 19315-19316 long 은 20 이하를 20 으로 · 19353-19354 i10 은 8칸짜리만 10칸으로). 콤마 자유형식과 칸이 어긋난 줄(고정 칸 안에 공백)은
+// `deckscan::cardFields` 와 같이 토큰 차례가 곧 칸 차례다. `wideFields` 가 비면 `deckscan::cardFields(line, fw)` 그대로다.
+// ⚠ 절점 칸은 넓은 칸 **앞**에 있다(질량의 ID 는 칸 1) — 칸 차례 × 폭으로 자리를 잡아 쓰는 쪽(extract-parts 의 번호 다시 매기기)이 맞다.
+std::vector<std::string> auxCardFields(const AuxElementCard& a, const std::string& line, int fw);
 
 // `KFileReader` 가 메시에 담는 요소 키워드인가 — 그 리더의 키워드 분기(`KFileReader::parseFile`)와 **같은 판정**이다
 // (키워드 토큰도 그 리더처럼 `*` 뒤 영숫자 · `_` · `-` 를 대문자로 모은다).
@@ -138,7 +149,7 @@ bool gridReaderReadsKeyword(const std::string& keywordLine);
 // 몰랐고(11-07 답신은 「바닥은 빔 · 이산 · 질량까지 센다」고 했다), 이월 적용은 그 요소가 쓰는 절점을 몰랐다.
 // 두 소비자(바닥 `nonGridElementMaxId` · 이월 적용의 나눠 쓴 절점)가 이 **한 걸음**을 쓴다.
 //   known  — 칸 자리와 카드 줄 수를 안다. 카드마다 한 번(Card 1 줄) · EID · PID(없으면 0) · 절점 칸
-//            · 격자 밖 족 — `auxElementCard` 가 안다
+//            · 격자 밖 족 — `auxElementCard` 가 안다(칸은 `auxCardFields` 차례)
 //            · 리더가 안 읽는 격자 변형 — 줄 수가 PID 에 달리지 않을 때만(절점 수 옵션 `_H20` 등 · 티쉘 `_BETA`) ·
 //              `elementCardSpan` 의 절점 줄 전부
 //   !known — 칸 자리나 카드 줄 수를 모른다. **데이터 줄마다** 한 번 · 그 줄의 첫 칸을 EID 로 넘치게 센다(바닥은 높아질

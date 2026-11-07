@@ -128,12 +128,32 @@ Scan find(const std::vector<std::string>& L, int deckFw, const std::function<boo
             for (size_t m = 0; m < b.data.size(); ++m) w.take(b.data[m], kw, Axis::Part, {0, 1}, w10);
             continue;
         }
-        // ── `*ELEMENT_MASS` 의 PID(칸 4 · 8칸 표) — 0 이 아니면 단정하지 않는다 ─────────────────
+        // ── `*ELEMENT_MASS`(·`_NODE_SET`)의 PID — 0 이 아니면 단정하지 않는다 ─────────────────────────────
+        //   Card 1 = EID(I8) ID(I8) MASS(E16) PID(I8) (Vol_I 159866-159930) — PID 는 33-40열이다. 칸은 공용 판정기가
+        //   자른다(`auxCardFields` · 칸 차례 3). 예전엔 8칸 칸 3(25-32열 — MASS 의 뒤 절반)을 읽어 PID 를 놓치고
+        //   질량값 숫자를 PID 로 셌다(2026-11-07). `_PART` 는 칸 1 이 PID(`_SET` 이면 파트 세트) · `_MATRIX` 는 PID 칸이
+        //   없다 — 칸 꼴이 달라 그 자리를 읽지 않는다. 그 밖 꼬리는 단정하지 않는다.
         if (starts(kw, "*ELEMENT_MASS")) {
-            for (size_t m = 0; m < b.data.size(); ++m) {
-                const auto c = cardcut::cut(L[b.data[m]], ifw);
-                int pid = 0;
-                if (c.f.size() > 3 && toInt(c.f[3], pid) && pid > 0) w.skipped(kw);
+            if (kw == "*ELEMENT_MASS" || kw == "*ELEMENT_MASS_NODE_SET") {
+                const AuxElementCard a = auxElementCard(L[b.kwLine]);
+                for (size_t m = 0; m < b.data.size(); ++m) {
+                    std::string body = L[b.data[m]];
+                    const size_t cm = body.find('$');
+                    if (cm != std::string::npos) body = body.substr(0, cm);
+                    int pid = 0;
+                    const auto f = auxCardFields(a, body, ifw);
+                    if (a.partField >= 0 && static_cast<size_t>(a.partField) < f.size() &&
+                        toInt(f[static_cast<size_t>(a.partField)], pid) && pid > 0)
+                        w.skipped(kw);
+                }
+            } else if (kw == "*ELEMENT_MASS_PART") {
+                for (size_t m = 0; m < b.data.size(); ++m) {
+                    const auto c = cardcut::cut(L[b.data[m]], ifw);
+                    int pid = 0;
+                    if (!c.f.empty() && toInt(c.f[0], pid) && pid > 0) w.skipped(kw);
+                }
+            } else if (kw != "*ELEMENT_MASS_PART_SET" && !starts(kw, "*ELEMENT_MASS_MATRIX")) {
+                w.skipped(kw);
             }
             continue;
         }

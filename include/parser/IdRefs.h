@@ -36,7 +36,8 @@ struct Scan {
 //          `*INITIAL_STRESS_SOLID`·`*INITIAL_STRESS_SHELL`(카드 세트마다 Card 1 칸 1 — 세트 길이는 NINT·NHISV·LARGE…가
 //          정한다 · 블록과 맞지 않으면 단정하지 않는다 · 2026-10-17). 위 넷의 `_SET` 은 세트 번호라 옮기지 않는다
 //   세어만 둔다 — `_GENERATE`·`_GENERAL` 세트 · 이력 `_ID`·`_LOCAL` · 초기변형률 · 강체 강제운동 ·
-//          `*ELEMENT_MASS` 의 0 아닌 PID · 서명이 안 맞는 접촉
+//          `*ELEMENT_MASS`(·`_NODE_SET`)의 0 아닌 PID(33-40열 — MASS 가 E16 이다) · `*ELEMENT_MASS_PART` 의 PID ·
+//          모르는 `*ELEMENT_MASS_*` 꼬리 · 서명이 안 맞는 접촉
 Scan find(const std::vector<std::string>& lines, int deckFw,
           const std::function<bool(Axis, int)>& keep = nullptr);
 

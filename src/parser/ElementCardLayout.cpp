@@ -331,9 +331,11 @@ AuxElementCard auxElementCard(const std::string& keywordLine) {
             }
             break;
         case AuxFamily::MASS:
-            // Card 1 = EID ID MASS PID. ⚠ PID 는 칸 **3** 이다(칸 1 이 아니다).
+            // Card 1 = EID(I8) ID(I8) MASS(E16) PID(I8) (159866-159930). ⚠ PID 는 칸 차례 **3** 이다(칸 1 이 아니다) —
+            // MASS 가 넓은 칸이라 8칸으로 자르면 33-40열(칸 4)이다. 그 차례는 `auxCardFields` 가 자른다.
             a.nodeSkip = 1; a.nodeCount = 1;
             a.partField = 3;
+            a.wideFields = {2};
             for (const auto& o : opts) {
                 if (o == "TITLE") continue;
                 // `_NODE_SET` 은 칸 1 이 **절점 세트 ID** 다 — 절점으로 읽으면 엉뚱한 절점을
@@ -369,6 +371,25 @@ AuxElementCard auxElementCard(const std::string& keywordLine) {
             break;
     }
     return a;
+}
+
+std::vector<std::string> auxCardFields(const AuxElementCard& a, const std::string& line, int fw) {
+    if (a.wideFields.empty()) return deckscan::cardFields(line, fw);
+    std::string body = line;
+    while (!body.empty() && (body.back() == '\r' || body.back() == '\n')) body.pop_back();
+    if (body.find(',') != std::string::npos) return deckscan::cardFields(body, fw);   // 자유형식 — 토큰 차례
+    const size_t rw = static_cast<size_t>(realFieldWidth(fw));
+    std::vector<std::string> out;
+    bool misaligned = false;
+    for (size_t pos = 0, q = 0; pos < body.size(); ++q) {
+        const bool wide = std::find(a.wideFields.begin(), a.wideFields.end(), static_cast<int>(q)) != a.wideFields.end();
+        const size_t w = wide ? rw : static_cast<size_t>(fw);
+        out.push_back(deckscan::trim(body.substr(pos, w)));
+        if (out.back().find_first_of(" \t") != std::string::npos) misaligned = true;
+        pos += w;
+    }
+    // 칸이 어긋난 줄 — `deckscan::cardFields` 와 같이 여기서만 공백 토큰으로 읽는다(토큰 차례 = 칸 차례)
+    return misaligned ? deckscan::cardFields(body, fw) : out;
 }
 
 bool gridReaderReadsKeyword(const std::string& keywordLine) {
@@ -461,7 +482,7 @@ void forEachNonGridElementCard(const std::vector<std::string>& lines,
         if (aux.supported) {
             if (remaining == 0) {
                 remaining = aux.lines;
-                const auto fs = deckscan::cardFields(l, fw);
+                const auto fs = auxCardFields(aux, l, fw);
                 c.known = true;
                 c.eid = deckscan::fieldInt(fs, 0);
                 c.pid = (aux.hasPart && aux.partField >= 0) ? deckscan::fieldInt(fs, static_cast<size_t>(aux.partField)) : 0;

@@ -141,6 +141,8 @@ def main():
                 "*NODE", "%8d%16.6f%16.6f%16.6f" % (9001, -1.0, 0.0, 0.0),
                 "*ELEMENT_MASS", "%8d%8d%16.6e%8d" % (9001, 9001, 0.5, 0) + "",
                 "*ELEMENT_MASS", "%8d%8d%16.6e%8d" % (9002, a_ids[2], 0.25, 0),
+                # 질량값 1000 이 25-32열에 온다 · PID 0(33-40열) — 예전 정본은 8칸 칸 3 을 PID 로 읽어 이 블록을 거절했다(2026-11-07)
+                "*ELEMENT_MASS", "%8d%8d%16s%8d" % (9003, a_ids[3], "1000", 0),
                 "*DEFINE_CURVE", card(31), "%20.6f%20.6f" % (0.0, 0.0), "%20.6f%20.6f" % (1.0, 1.0),
                 "*BOUNDARY_SPC_SET", card(50, 0, 1, 1, 1),
                 # v2 — 파트·요소 참조
@@ -259,6 +261,9 @@ def main():
             ("C-5 강제운동 Card 3(|DOF|=9) — 칸을 단정 못 한다", "*BOUNDARY_PRESCRIBED_MOTION_NODE\n%s\n%s\n" % (
                 card(a_ids[0], 9, 0, 0, "1.0"), card("0.0", "0.0", 0, a_ids[1], 0)), "단정하지 못한"),
             ("C-6 자유형식 줄은 제자리에 못 바꾼다", "*BOUNDARY_SPC_NODE\n%d,0,1,1,1\n" % a_ids[0], "자유형식"),
+            # ★PID 는 33-40열(MASS 가 E16) — 예전 정본은 25-32열을 읽어 이 PID 를 못 보고 옛 번호 그대로 썼다(2026-11-07)
+            ("C-10 집중질량의 PID(33-40열)는 옮기지 못한다 — 단정 못 한다",
+             "*ELEMENT_MASS\n%8d%8d%16s%8d\n" % (9003, a_ids[0], "0.5", 1), "단정하지 못한"),
         ]
         for name, body, needle in cases:
             if os.path.exists(os.path.join(d, "c_out.k")):

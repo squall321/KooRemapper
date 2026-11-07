@@ -20,12 +20,14 @@
 #include "parser/DeckNewline.h"
 #include "parser/DeckWriter.h"
 #include "parser/ElementCardLayout.h"
+#include "parser/IdRefs.h"
 #include "parser/KFileReader.h"
 #include "parser/NodeRefs.h"
 #include "parser/KFileWriter.h"
 #include "core/Mesh.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 
@@ -216,9 +218,80 @@ TEST(auxElementCard_BEAM_의_절점과_PID) {
 
 TEST(auxElementCard_MASS_의_PID_는_세번째_칸) {
     // ★`EID ID MASS PID` 다. 1 로 가정하면 **질량값을 파트 번호로** 읽는다.
+    //   칸 3 은 **칸 차례**다 — MASS 가 E16(넓은 칸 2)이라 8칸으로 자르면 PID 는 칸 4(33-40열)다(2026-11-07).
     const auto a = auxElementCard("*ELEMENT_MASS");
     ASSERT_TRUE(a.supported);
     ASSERT_EQ(a.partField, 3);
+    ASSERT_EQ(a.wideFields.size(), (size_t)1);
+    ASSERT_EQ(a.wideFields[0], 2);
+}
+
+TEST(auxCardFields_질량_PID_는_33_40열이다) {
+    // Vol_I 159866-159930 — EID(I8) ID(I8) MASS(E16) PID(I8). 예전 판정은 8칸 칸 3(25-32열 — MASS 의 뒤 절반)을
+    // PID 로 읽어 33-40열의 PID 를 놓치고, 질량값 숫자를 PID 로 셌다(이월 적용 · extract-parts · 재결속이 같이 틀렸다).
+    const auto a = auxElementCard("*ELEMENT_MASS");
+    const size_t pf = static_cast<size_t>(a.partField);
+    const std::string std8 = "   95001       1             1.0       7";
+    ASSERT_EQ(std8.substr(32, 8), std::string("       7"));
+    ASSERT_EQ(deckscan::fieldInt(auxCardFields(a, std8, 8), pf), 7);
+    ASSERT_EQ(deckscan::fieldInt(auxCardFields(a, std8, 8), (size_t)a.nodeSkip), 1);
+    ASSERT_EQ(deckscan::fieldInt(deckscan::cardFields(std8, 8), 3), 0);        // 정수 폭 칸 3 = "     1.0"
+    const std::string big = "   95001       1            1000       0";   // 질량 1000 · PID 0
+    ASSERT_EQ(deckscan::fieldInt(deckscan::cardFields(big, 8), 3), 1000);     // 예전 판정이 PID 로 읽은 값
+    ASSERT_EQ(deckscan::fieldInt(auxCardFields(a, big, 8), pf), 0);
+    // i10 — 정수 칸만 10칸(10·10·16·10) · long — 넷 다 20칸 · 콤마 자유형식 — 토큰 차례(Vol_I 19315 · 19353)
+    char b[128];
+    std::snprintf(b, sizeof b, "%10d%10d%16s%10d", 95001, 1, "1.0", 1234567);
+    ASSERT_EQ(deckscan::fieldInt(auxCardFields(a, b, 10), pf), 1234567);
+    std::snprintf(b, sizeof b, "%10d%10d%16s%10d", 95001, 1, "1.0000000000E-03", 7);
+    ASSERT_EQ(deckscan::fieldInt(auxCardFields(a, b, 10), pf), 7);
+    std::snprintf(b, sizeof b, "%20d%20d%20s%20d", 95001, 1, "1.0", 7);
+    ASSERT_EQ(deckscan::fieldInt(auxCardFields(a, b, 20), pf), 7);
+    ASSERT_EQ(deckscan::fieldInt(auxCardFields(a, "95001,1,1.0,7", 8), pf), 7);
+    // 칸이 어긋난 줄(MASS 를 8칸에 쓴 줄) — 토큰 차례로 읽는다(`deckscan::cardFields` 와 같은 되돌림)
+    ASSERT_EQ(deckscan::fieldInt(auxCardFields(a, "      12     105     0.5       9", 8), pf), 9);
+    // 넓은 칸이 없는 족은 정수 폭 그대로다
+    const auto beam = auxElementCard("*ELEMENT_BEAM");
+    ASSERT_TRUE(auxCardFields(beam, std8, 8) == deckscan::cardFields(std8, 8));
+}
+
+TEST(forEachNonGridElementCard_질량_PID_를_33_40열에서_읽는다) {
+    const std::vector<std::string> L = {"*KEYWORD", "*ELEMENT_MASS", "$#   eid      id            mass     pid",
+                                        "   95001       1             1.0       7",
+                                        "   95002       2            1000       0", "*END"};
+    std::vector<NonGridElementCard> cs;
+    forEachNonGridElementCard(L, [&](const NonGridElementCard& c) { cs.push_back(c); });
+    ASSERT_EQ(cs.size(), (size_t)2);
+    ASSERT_TRUE(cs[0].known && cs[1].known);
+    ASSERT_EQ(cs[0].pid, 7);
+    ASSERT_EQ(cs[1].pid, 0);
+    ASSERT_EQ(cs[0].nodes.size(), (size_t)1);
+    ASSERT_EQ(cs[0].nodes[0], 1);
+    ASSERT_EQ(cs[1].nodes[0], 2);
+}
+
+TEST(idrefs_질량_PID_는_33_40열에서만_센다) {
+    // `*ELEMENT_MASS` 의 0 아닌 PID 는 정본이 「단정하지 못한 자리」로 센다 — 재결속은 그 블록을 거절한다.
+    // 33-40열의 PID 7 은 센다 · 25-32열에 걸친 질량값 1000(PID 0)은 세지 않는다(예전엔 거꾸로였다).
+    // (한 덱에 두 줄을 같이 두면 예전 판정도 「1」 이 나온다 — 틀린 줄을 센 1 이다. 줄마다 따로 잰다.)
+    const std::vector<std::string> L7 = {"*KEYWORD", "*ELEMENT_MASS", "   95001       1             1.0       7", "*END"};
+    const std::vector<std::string> L0 = {"*KEYWORD", "*ELEMENT_MASS", "   95002       2            1000       0", "*END"};
+    ASSERT_EQ(idrefs::find(L7, 8).notChecked, 1);
+    ASSERT_EQ(idrefs::find(L0, 8).notChecked, 0);
+    char b[128];
+    std::snprintf(b, sizeof b, "%10d%10d%16s%10d", 95001, 1, "1.0", 7);
+    const std::vector<std::string> L10 = {"*KEYWORD I10=Y", "*ELEMENT_MASS", b, "*END"};
+    ASSERT_EQ(idrefs::find(L10, 10).notChecked, 1);
+    // `_PART` 는 칸 1 이 PID(센다) · `_PART_SET` 은 파트 세트 · `_MATRIX` 는 PID 칸이 없다(세지 않는다) — 칸 꼴이 달라
+    // 질량 카드의 자리를 거기 대지 않는다
+    const std::vector<std::string> P = {
+        "*KEYWORD", "*ELEMENT_MASS_PART", "       7             1.0             0.0",
+        "*ELEMENT_MASS_PART_SET", "       3             1.0             0.0",
+        "*ELEMENT_MASS_MATRIX", "      9001         1         0",
+        "       1.0       0.0       1.0       0.0       0.0       1.0       0.0",
+        "       0.0       0.0       0.0       0.0       0.0       0.0       0.0",
+        "       0.0       0.0       0.0       0.0       0.0       0.0       0.0", "*END"};
+    ASSERT_EQ(idrefs::find(P, 8).notChecked, 1);
 }
 
 // ── 격자 리더가 담지 않는 솔리드 · 티쉘 변형 — 번호 바닥이 그 EID 를 몰랐다(2026-11-07) ─────────────

@@ -316,7 +316,8 @@ def main():
         # 남고, 번호를 다시 매길 때는 그 칸을 **덮어써 카드가 깨진다**.
         #   BEAM     EID PID N1 N2 N3 RT1 RR1 RT2 RR2 LOCAL   → 절점은 칸 2·3·4
         #   DISCRETE EID PID N1 N2 VID S PF OFFSET            → 절점은 칸 2·3
-        #   MASS     EID ID  MASS PID                         → 절점은 칸 1, **PID 는 칸 3**
+        #   MASS     EID ID  MASS(E16) PID                    → 절점은 칸 1, **PID 는 칸 차례 3 = 33-40열**
+        #            (MASS 가 16칸이라 8칸으로 자르면 칸 4 다 — 칸 3(25-32열)은 MASS 의 뒤 절반, 2026-11-07)
         #   SEATBELT EID PID N1 N2 SBRID SLEN N3 N4           → 절점이 **두 구간**(2·3, 6·7)
         #   PLOTEL   EID N1 N2                                → **PID 칸이 없다**
         L = ["*KEYWORD", "*NODE"]
@@ -334,8 +335,9 @@ def main():
         L += ["*ELEMENT_BEAM", e8(10, 9, 101, 102, 0, 7, 7, 7, 7, 777)]
         #                          EID PID  N1   N2  VID
         L += ["*ELEMENT_DISCRETE", e8(11, 9, 103, 104, 0)]
-        #                      EID  ID  MASS(실수) PID    ← PID 가 칸 3 이다
-        L += ["*ELEMENT_MASS", "%8d%8d%8s%8d" % (12, 105, "0.5", 9)]
+        #                      EID  ID  MASS(E16)  PID    ← PID 는 33-40열(매뉴얼 꼴 — Vol_I 159866-159930)
+        # ★덫: EID 16 은 PID 0 인데 질량값 9 가 25-32열에 온다 — 8칸 칸 3 을 PID 로 읽으면 PID 9 로 실리고 절점 106 이 딸려 온다
+        L += ["*ELEMENT_MASS", "%8d%8d%16s%8d" % (12, 105, "0.5", 9), "%8d%8d%16s%8d" % (16, 106, "9", 0)]
         #                          EID PID  N1   N2 SBRID SLEN  N3  N4
         L += ["*ELEMENT_SEATBELT", e8(13, 9, 101, 102, 888, 0, 103, 104)]
         #                        EID  N1   N2     ← PID 가 없다
@@ -360,8 +362,10 @@ def main():
               "\n     777 " not in lk, "777 이 실렸다 — LOCAL 을 절점으로 읽었다")
         check("L-4 ★SEATBELT 의 SBRID 칸(888)을 절점으로 세지 않는다",
               "\n     888 " not in lk, "888 이 실렸다 — SBRID 를 절점으로 읽었다")
-        check("L-5 ★MASS 의 PID 는 칸 3 이다 (칸 1 을 PID 로 읽으면 이 카드가 안 실린다)",
+        check("L-5 ★MASS 의 PID 는 33-40열이다 (칸 1 을 PID 로 읽으면 이 카드가 안 실린다)",
               "*ELEMENT_MASS" in lk and "\n     105 " in lk, "105 또는 MASS 카드가 없다")
+        check("L-5b ★질량값(25-32열의 9)을 PID 로 읽지 않는다 — PID 0 카드(EID 16)와 그 절점 106 은 안 실린다",
+              "\n      16     106" not in lk and "\n     106 " not in lk, [x for x in lk.split("\n") if "106" in x][:3])
         check("L-6 ★SEATBELT 의 둘째 절점 구간(N3·N4 = 103·104)도 읽는다",
               "\n     103 " in lk and "\n     104 " in lk, "")
         check("L-7 BEAM·DISCRETE 의 절점이 실렸다", "\n     101 " in lk and "\n     102 " in lk, "")
@@ -388,7 +392,7 @@ def main():
         # `*ELEMENT_MASS_NODE_SET` — 칸 1 이 절점이 아니라 **세트** 라 추측하지 않는다
         L2 = list(L)
         L2.insert(len(L2) - 1, "*ELEMENT_MASS_NODE_SET")
-        L2.insert(len(L2) - 1, "%8d%8d%8s%8d" % (15, 500, "0.5", 9))
+        L2.insert(len(L2) - 1, "%8d%8d%16s%8d" % (15, 500, "0.5", 9))   # PID 9 는 33-40열
         write(os.path.join(d, "auxset.k"), "\n".join(L2) + "\n")
         cfg(d, "l2.yaml", "model: auxset.k\noutput: l2.k\nparts: [9]\n")
         rc, out = run(binary, d, "extract-parts", "l2.yaml")

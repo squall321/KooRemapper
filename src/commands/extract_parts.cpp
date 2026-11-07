@@ -250,11 +250,12 @@ void scanElements(const std::string& path, const std::vector<int>& sel, const De
         if (g == std::string::npos && remaining == 0) continue;     // 카드 밖의 빈 줄
 
         if (opaque && aux.supported) {
-            // ★칸 자리를 **안다** — PID 칸도 족마다 다르다(`*ELEMENT_MASS` 는 칸 3).
+            // ★칸 자리를 **안다** — PID 칸도 족마다 다르다(`*ELEMENT_MASS` 는 칸 차례 3 = 33-40열 —
+            //   MASS 가 E16 이라 칸은 공용 판정기 `auxCardFields` 가 자른다).
             //   `*ELEMENT_PLOTEL` 은 PID 가 없어 여기서 고르지 않고, 쓰기 쪽이 '두 절점이 다
             //   남았나' 로 판정한다(그 줄은 표시용이고 파트에 속하지 않는다).
             if (auxRemaining == 0) {
-                auxCard1 = cardFields(line, fw);
+                auxCard1 = KooRemapper::auxCardFields(aux, line, fw);
                 auxLineIdx = 0;
                 auxRemaining = aux.lines;
                 const int pid = (aux.partField >= 0) ? fieldInt(auxCard1, (size_t)aux.partField) : 0;
@@ -281,9 +282,9 @@ void scanElements(const std::string& path, const std::vector<int>& sel, const De
             // 거절해야 한다(조용히 빠뜨린 덱이 더 나쁘다).
             //
             // ⚠ PID 칸을 1 로 **가정하면 안 된다.** 족은 알고 줄 수만 모르는 경우가 있고
-            //   (`*ELEMENT_MASS_NODE_SET` 은 PID 가 칸 **3** 이다), 1 로 가정하면 그 카드가
+            //   (`*ELEMENT_MASS_NODE_SET` 은 PID 가 칸 차례 **3** — 33-40열이다), 1 로 가정하면 그 카드가
             //   '안 고른 파트' 로 분류돼 **조용히 버려진다**(실측으로 회귀 L-14 가 잡았다).
-            auto f = cardFields(line, fw);
+            auto f = KooRemapper::auxCardFields(aux, line, fw);
             const int pf = (aux.family != KooRemapper::AuxFamily::NONE && aux.partField >= 0)
                                ? aux.partField : 1;
             int pid = fieldInt(f, (size_t)pf);
@@ -711,7 +712,7 @@ struct Writer {
                 if (g != std::string::npos && line[g] == '$') break;
                 if (g == std::string::npos && remaining == 0) break;
                 if (remaining == 0) {
-                    card1 = cardFields(line, fw);
+                    card1 = KooRemapper::auxCardFields(aux, line, fw);
                     lineIdx = 0;
                     remaining = aux.lines;
                     if (aux.hasPart) {
@@ -921,7 +922,7 @@ Verify verifyOutput(const std::string& path) {
             if (g == std::string::npos && vAuxRemaining == 0) continue;
             if (vAuxRemaining == 0) { vAuxLineIdx = 0; vAuxRemaining = vaux.lines; }
             if (vAuxLineIdx == 0) {
-                auto f = cardFields(line, fw);
+                auto f = KooRemapper::auxCardFields(vaux, line, fw);
                 if (vaux.partField >= 0) {
                     const int pid = fieldInt(f, (size_t)vaux.partField);
                     if (pid > 0) elemPids.push_back(pid);
