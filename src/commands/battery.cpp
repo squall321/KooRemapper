@@ -601,13 +601,13 @@ static int generateBatch(const BatteryConfig& baseCfg,
         }
     }
 
-    std::map<std::string, std::vector<std::string>> byName;   // 파일 이름 → 그 이름을 쓸 조합
-    for (const auto& c : combos) {
+    auto label = [](const BatteryConfig& c) {
         char tierBuf[32];
         snprintf(tierBuf, sizeof(tierBuf), "%g", c.tier);
-        byName[batteryKFilePath(c)].push_back("model_type " + c.modelType + " · tier " + tierBuf + " · phase " +
-                                               std::to_string(c.phase));
-    }
+        return "model_type " + c.modelType + " · tier " + tierBuf + " · phase " + std::to_string(c.phase);
+    };
+    std::map<std::string, std::vector<std::string>> byName;   // 파일 이름 → 그 이름을 쓸 조합
+    for (const auto& c : combos) byName[batteryKFilePath(c)].push_back(label(c));
     bool clash = false;
     for (const auto& [name, who] : byName) {
         if (who.size() < 2) continue;
@@ -623,7 +623,17 @@ static int generateBatch(const BatteryConfig& baseCfg,
                      "따로 돌려라");
         return 1;
     }
-    for (const auto& c : combos) generateBatteryKFile(c, console);
+    // ★조합 하나라도 못 만들면 rc 1 과 못 만든 조합의 요약(2026-11-07) — 예전엔 실패를 버리고 rc 0 이었다(자동화는 rc 만 본다).
+    //   나머지 조합은 끝까지 만든다
+    std::vector<std::string> failed;
+    for (const auto& c : combos)
+        if (generateBatteryKFile(c, console).empty()) failed.push_back(label(c) + " → " + batteryKFilePath(c));
+    if (!failed.empty()) {
+        console.error("[battery] batch 의 조합 " + std::to_string(combos.size()) + "개 가운데 " + std::to_string(failed.size()) +
+                      "개를 만들지 못했다(까닭은 위 [ERROR] 다)");
+        for (const auto& f : failed) console.error("[battery]   " + f);
+        return 1;
+    }
     return 0;
 }
 

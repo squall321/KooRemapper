@@ -4074,6 +4074,10 @@ KooRemapper battery <config.yaml>
 > 적습니다. 예전에는 종류도 이름에 없어 뒤 조합이 앞 덱을 조용히 덮고 종료 코드 0 이었습니다(사용자 결정 「종류가 둘 이상이면
 > 이름에 넣는다」).
 >
+> **배치의 종료 코드(2026-11-07)**: 조합 하나라도 덱을 만들지 못하면(쓸 수 없는 경로 · 모르는 `model_type`) 나머지 조합은 끝까지
+> 만들고 **종료 코드 1** 이며, 끝에 못 만든 조합과 그 덱 이름(`model_type stacked · tier 1 · phase 1 → bt_tier1_phase1.k`)을 모아
+> 적습니다. 예전에는 실패한 조합을 버리고 종료 코드 0 이었습니다.
+>
 > **`dynain_file` 만은 경로로 풀지 않습니다.** `*INCLUDE_DYNAIN` 다음 줄에 **적힌 문자열 그대로** 찍히고
 > KooRemapper 는 그 파일을 열지 않습니다(솔버가 산출 덱 기준으로 읽습니다).
 > `use_dynain: true` + `dynain_file: ../state/my.dynain` 을 주면 덱에도 `../state/my.dynain` 이 그대로 들어갑니다.

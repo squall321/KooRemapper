@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# battery 배치의 덱 이름(모델 종류가 둘 이상이면 종류를 넣는다)과, 그래도 겹치는 조합을 쓰기 전에 짚어 거절하는지 보는 회귀 시험
+# battery 배치의 덱 이름(모델 종류가 둘 이상이면 종류를 넣는다) · 겹치는 조합의 거절 · 실패한 조합의 rc 를 보는 회귀 시험
 """battery 배치의 덱 이름 (2026-11-07 셋째 묶음 · 사용자 결정).
 
 왜 이 시험이 있나.
@@ -15,6 +15,7 @@
       *INCLUDE_DYNAIN 이 같은 종류의 phase 1 이름(bt_<종류>_tier0_phase1.dynain)을 가리킨다
   B-2 · B-3 겹치는 tier · phase → rc 1 · 덱 없음 · 겹친 이름을 말한다   B-5 종류가 둘이어도 tier 가 겹치면 거절
   B-4 대조 — 종류 하나 · tiers [0, 1] 은 예전 이름 그대로(bt_tier0_phase1.k · bt_tier1_phase1.k)
+  B-6 조합 하나를 못 쓰면(그 이름에 폴더가 있다) rc 1 · 못 만든 조합의 요약 · 나머지 조합은 쓴다 — 예전엔 rc 0 이었다
 
 usage: test_battery_batch_names.py <KooRemapper 바이너리>
 """
@@ -60,14 +61,16 @@ def main():
                encoding="utf-8").read()
     root = tempfile.mkdtemp(prefix="batb_")
     try:
-        def case(k, batch, extra=""):
+        def case(k, batch, extra="", block=()):
             d = os.path.join(root, "c%d" % k)
             os.makedirs(d)
+            for b in block:   # 그 이름에 폴더를 두면 덱을 열지 못한다
+                os.makedirs(os.path.join(d, b))
             cfg = src.replace("output: battery_stacked_swell", "output: bt") + extra + "\nbatch:\n" + batch
             with open(os.path.join(d, "b.yaml"), "w", encoding="utf-8") as f:
                 f.write(cfg)
             rc, out = run(binary, d, "battery", "b.yaml")
-            return d, rc, out, sorted(f for f in os.listdir(d) if f.endswith(".k"))
+            return d, rc, out, sorted(f for f in os.listdir(d) if f.endswith(".k") and os.path.isfile(os.path.join(d, f)))
 
         d, rc, out, made = case(1, "  model_types: [stacked, wound]\n  phases: [1, 2]\n", "\nuse_dynain: true\n")
         want = ["bt_stacked_tier0_phase1.k", "bt_stacked_tier0_phase2.k", "bt_wound_tier0_phase1.k", "bt_wound_tier0_phase2.k"]
@@ -90,6 +93,10 @@ def main():
         d, rc, out, made = case(9, "  tiers: [0, 1]\n")
         check("B-4 대조 — 종류 하나 · tiers [0, 1] 은 예전 이름 그대로",
               rc == 0 and made == ["bt_tier0_phase1.k", "bt_tier1_phase1.k"], (rc, made, out[-300:]))
+        d, rc, out, made = case(6, "  tiers: [0, 1]\n", block=("bt_tier1_phase1.k",))
+        check("B-6 ★조합 하나를 못 쓰면 rc 1 · 못 만든 조합(tier 1 → bt_tier1_phase1.k)을 요약한다(예전엔 rc 0)",
+              rc == 1 and "1개를 만들지 못했다" in out and "tier 1 · phase 1 → bt_tier1_phase1.k" in out, (rc, out[-400:]))
+        check("B-6   └ 나머지 조합(tier 0)은 끝까지 쓴다", made == ["bt_tier0_phase1.k"], made)
     finally:
         shutil.rmtree(root, ignore_errors=True)
     print()
