@@ -715,6 +715,25 @@ TEST(Carryover_보고의_수는_다시_읽으면_같은_값) {
     ASSERT_TRUE(j.find("1.0000000000000002") != std::string::npos);
 }
 
+
+TEST(Carryover_셸_섹션의_정수_칸_실수_꼴은_그_정수) {
+    // StepForge 권고 D-681 — LS-DYNA 실행 기록이 NIP `3.000E+00` 을 3 으로 받는다 · 정수가 아닌 값은 그대로 거절
+    auto rows = [](const std::string& card1, const std::vector<std::string>& more, std::string& why) {
+        std::vector<std::string> b{"*SECTION_SHELL", card1, "       0.6       0.6       0.6       0.6"};
+        b.insert(b.end(), more.begin(), more.end());
+        size_t r1 = 0, r2 = 0;
+        return carryover::shellSectionRows(b, r1, r2, why);
+    };
+    std::string why;
+    ASSERT_TRUE(rows("        10         2         1 5.000e+00", {}, why));
+    ASSERT_TRUE(rows("        10 1.600e+01         1         5", {}, why));                       // ELFORM 16
+    ASSERT_TRUE(rows("        10         2         1 3.000E+00         0         0 1.000e+00", {"       0.0"}, why));   // ICOMP 1 · 각도 카드 하나
+    ASSERT_FALSE(rows("        10         2         1 2.500e+00", {}, why));
+    ASSERT_TRUE(why.find("NIP") != std::string::npos);
+    ASSERT_FALSE(rows("        10         2         1         2         0         0       1.5", {}, why));
+    ASSERT_TRUE(why.find("ICOMP") != std::string::npos);
+}
+
 TEST(Carryover_v2_보고에_deck_from_인클루드_refused_transform) {
     carryover::Report r;
     r.planRead = r.planParsed = true;
