@@ -331,6 +331,11 @@ AuxElementCard auxElementCard(const std::string& keywordLine) {
                 else
                     unsupported("*ELEMENT_BEAM 의 옵션 '" + o + "' 은 카드 줄 수를 확정할 수 없습니다");
             }
+            // `_ELBOW` 의 Card 10 = MN(가운데 절점) — 옵션 카드는 설명서 차례(2 … 10)로 오니 ELBOW 카드는 늘 마지막 줄이다
+            if (a.supported && a.hasPart && std::find(opts.begin(), opts.end(), "ELBOW") != opts.end()) {
+                a.optNodeLine = a.lines - 1;
+                a.optNodeFields = {0};
+            }
             break;
         case AuxFamily::DISCRETE:
             // Card 1 = EID PID N1 N2 VID S PF OFFSET
@@ -581,6 +586,21 @@ bool auxManualNodesPlaceable(const AuxElementCard& a, const AuxCardReadings& r) 
     return ok(a.nodeSkip, a.nodeCount) && ok(a.nodeSkip2, a.nodeCount2);
 }
 
+int auxOptTableWidth(int fw) { return fw >= 20 ? 20 : 10; }
+
+std::vector<int> auxOptNodesOf(const AuxElementCard& a, const std::string& line, int fw) {
+    std::vector<int> out;
+    std::string body = line;
+    const size_t cmt = body.find('$');
+    if (cmt != std::string::npos) body.erase(cmt);
+    const auto f = deckscan::cardFields(body, auxOptTableWidth(fw));
+    for (int q : a.optNodeFields) {
+        const int v = deckscan::fieldInt(f, static_cast<size_t>(q));
+        if (v > 0) out.push_back(v);
+    }
+    return out;
+}
+
 std::vector<int> auxPidsOf(const AuxElementCard& a, const AuxCardReadings& r) {
     std::vector<int> out;
     if (!a.hasPart || a.partField < 0) return out;
@@ -684,8 +704,14 @@ void forEachNonGridElementCard(const std::vector<std::string>& lines,
         c.line = i;
         if (aux.supported) {
             if (!aux.hasEid) continue;   // 요소가 아니다(`*ELEMENT_MASS_PART(_SET)` — EID · 절점 칸이 없다 · PID 는 IdRefs 가 본다)
+            if (remaining > 0 && pending && lineIdx == aux.optNodeLine) {   // 옵션 카드의 절점(보 `_ELBOW` 의 MN)
+                for (int v : auxOptNodesOf(aux, l, fw)) pend.nodes.push_back(v);
+                std::sort(pend.nodes.begin(), pend.nodes.end());
+                pend.nodes.erase(std::unique(pend.nodes.begin(), pend.nodes.end()), pend.nodes.end());
+            }
             if (remaining == 0) {
                 remaining = aux.lines;
+                lineIdx = 0;
                 // 절점은 읽기 전부의 합집합 · PID 는 후보 전부(헤더 「읽기들」 — 이월 적용의 나눠 쓴 절점 · aux_in_part 가 본다)
                 const AuxCardReadings rd = auxCardReadings(aux, l, fw);
                 const auto& fs = auxPrimaryFields(rd);
@@ -694,9 +720,11 @@ void forEachNonGridElementCard(const std::vector<std::string>& lines,
                 c.pid = (aux.hasPart && aux.partField >= 0) ? deckscan::fieldInt(fs, static_cast<size_t>(aux.partField)) : 0;
                 c.pids = auxPidsOf(aux, rd);
                 c.nodes = auxNodesUnion(aux, rd);
-                f(c);
+                if (aux.optNodeLine > 0) { pend = c; pending = true; }   // 옵션 카드의 절점까지 읽고 넘긴다
+                else f(c);
             }
-            --remaining;
+            ++lineIdx;
+            if (--remaining == 0) flush();
             continue;
         }
         if (g == std::string::npos) continue;

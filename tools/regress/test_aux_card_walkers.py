@@ -17,6 +17,8 @@
   C 질량 얹기 — `*ELEMENT_MASS_PART` 는 칸 0 이 PID 다(ID ADDMASS(F16) FINMASS(F16) LCID MWD). 예전엔 질량 카드의 칸 3 을 읽어 고른 파트의
     추가 질량을 버렸다. `_SET` 은 파트 세트를 풀어 다 고른 파트면 싣고 · 하나도 아니면 버리고 · 일부거나 못 풀면 거절한다.
     cleanup-nodes 는 그 줄의 정수(LCID)를 절점으로 세지 않는다.
+  D 보 `_ELBOW` 의 가운데 절점 MN(Card 10 · 8칸 표) — 예전엔 Card 1 만 읽어 cleanup-nodes safe 가 MN 을 지우고(rc 0 · 되읽기 0)
+    extract-parts 가 싣지 않았다. 이제 다 읽고 renumber 도 그 칸(1-10열)에 새 번호를 쓴다 · 콤마 ELBOW 줄은 renumber 를 거절한다
 
 usage: test_aux_card_walkers.py <KooRemapper 바이너리>
 """
@@ -187,6 +189,36 @@ def main():
         kept = sorted(node_ids(os.path.join(d, "c7_out.k")).values()) if rc == 0 else []
         check("C-7 cleanup-nodes — 질량 얹기의 LCID(105)를 절점으로 세지 않는다 → 고아 104 · 105 를 지운다",
               rc == 0 and kept == [101, 102, 103], (rc, kept, out[-300:]))
+
+        print("[D 보 _ELBOW 의 가운데 절점 MN(Card 10) — cleanup-nodes · extract-parts · renumber]")
+        for tag, kwname, cards in (("D1", "*ELEMENT_BEAM_ELBOW", ["%8d%8d%8d%8d%8d" % (21, 9, 101, 102, 103), "%10d" % 104]),
+                                   ("D2", "*ELEMENT_BEAM_ORIENTATION_ELBOW",
+                                    ["%8d%8d%8d%8d%8d" % (21, 9, 101, 102, 103), "%16s%16s%16s" % ("0.0", "1.0", "0.0"), "%10d" % 104])):
+            write(os.path.join(d, tag + ".k"), beam_deck([kwname] + cards))
+            write(os.path.join(d, tag + "c.yaml"), "model: %s.k\noutput: %sc_out.k\nmode: safe\nreport: %sc.json\n" % (tag, tag, tag))
+            rc, out = run(binary, d, "cleanup-nodes", tag + "c.yaml")
+            kept = sorted(node_ids(os.path.join(d, tag + "c_out.k")).values()) if rc == 0 else []
+            check("%s-1 ★cleanup-nodes safe — %s 의 MN(104)을 남기고 105 만 지운다" % (tag, kwname),
+                  rc == 0 and kept == [101, 102, 103, 104], (rc, kept, out[-300:]))
+            rc, out, rep, outp = extract(binary, d, tag + "x", beam_deck([kwname] + cards), (9,))
+            carried = sorted(node_ids(outp).values()) if rc == 0 else []
+            check("%s-2 ★extract-parts — MN(104)까지 싣는다 · 되읽기 0" % tag,
+                  rc == 0 and carried == [101, 102, 103, 104] and (rep.get("verify") or {}).get("undefined_nodes") == 0,
+                  (rc, carried, rep.get("verify"), out[-300:]))
+            write(os.path.join(d, tag + "r.k"), beam_deck([kwname] + cards))
+            write(os.path.join(d, tag + "r.yaml"), "model: %sr.k\noutput: %sr_out.k\nparts: [9]\nrenumber: true\nreport: %sr.json\n" % (tag, tag, tag))
+            rc, out = run(binary, d, "extract-parts", tag + "r.yaml")
+            ids = node_ids(os.path.join(d, tag + "r_out.k")) if rc == 0 else {}
+            new = {old: nid for nid, old in ids.items()}
+            rows = section_lines(os.path.join(d, tag + "r_out.k"), kwname) if rc == 0 else []
+            check("%s-3 ★renumber — MN 칸(1-10열)에 새 번호(%s)를 쓴다 · 되읽기 0" % (tag, new.get(104)),
+                  rc == 0 and len(rows) == len(cards) and rows[-1] == "%10d" % new.get(104, -1) and new.get(104) != 104,
+                  (rc, rows, out[-300:]))
+        write(os.path.join(d, "D3.k"), beam_deck(["*ELEMENT_BEAM_ELBOW", "%8d%8d%8d%8d%8d" % (21, 9, 101, 102, 103), "104,0"]))
+        write(os.path.join(d, "D3r.yaml"), "model: D3.k\noutput: D3r_out.k\nparts: [9]\nrenumber: true\n")
+        rc, out = run(binary, d, "extract-parts", "D3r.yaml")
+        check("D3 콤마 ELBOW 줄 — renumber 는 제자리가 없어 거절한다 · 산출 없음",
+              rc == 1 and "제자리에 바꿔 쓸 수 없다" in out and not os.path.exists(os.path.join(d, "D3r_out.k")), (rc, out[-300:]))
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

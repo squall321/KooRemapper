@@ -635,6 +635,30 @@ TEST(auxElementCard_보_장치는_PID_칸이_없다) {
     ASSERT_TRUE(a.elemRefFields.empty());
 }
 
+TEST(auxElementCard_보_ELBOW_의_가운데_절점은_마지막_옵션_카드) {
+    // `*ELEMENT_BEAM_ELBOW` Card 10 = MN(가운데 절점 · 8칸 표 I10 — Vol_I 156596-156638). 옵션 카드는 설명서 차례(2 … 10)로 오니
+    // ELBOW 카드는 늘 마지막 줄이다. 예전엔 Card 1 만 읽어 cleanup-nodes safe 가 MN 을 지웠다(재검토 D2)
+    auto a = auxElementCard("*ELEMENT_BEAM_ELBOW");
+    ASSERT_TRUE(a.supported);
+    ASSERT_EQ(a.lines, 2);
+    ASSERT_EQ(a.optNodeLine, 1);
+    ASSERT_TRUE(auxOptNodesOf(a, "       104", 8) == std::vector<int>({104}));
+    ASSERT_TRUE(auxOptNodesOf(a, "104,0", 8) == std::vector<int>({104}));
+    a = auxElementCard("*ELEMENT_BEAM_ORIENTATION_ELBOW");
+    ASSERT_EQ(a.lines, 3);
+    ASSERT_EQ(a.optNodeLine, 2);
+    ASSERT_EQ(auxElementCard("*ELEMENT_BEAM_ORIENTATION").optNodeLine, -1);
+    // 걸음은 MN 까지 읽고 카드를 넘긴다(이월 적용의 나눠 쓴 절점 · 바닥)
+    const std::vector<std::string> L = {"*KEYWORD", "*ELEMENT_BEAM_ELBOW", "      21       8     101     102     103", "       104",
+                                        "      22       8     105     106     107", "       108", "*END"};
+    std::vector<NonGridElementCard> cs;
+    forEachNonGridElementCard(L, [&](const NonGridElementCard& x) { cs.push_back(x); });
+    ASSERT_EQ(cs.size(), (size_t)2);
+    ASSERT_EQ(cs[0].eid, 21);
+    ASSERT_TRUE(cs[0].nodes == std::vector<int>({101, 102, 103, 104}));
+    ASSERT_TRUE(cs[1].nodes == std::vector<int>({105, 106, 107, 108}));
+}
+
 TEST(auxElementCard_질량_얹기는_칸_0_이_PID) {
     // `*ELEMENT_MASS_PART` = ID(I8) ADDMASS(F16) FINMASS(F16) LCID(I8) MWD(I8) (Vol_I 160135-160207) — 칸 0 이 PID(`_SET` 이면
     // 파트 세트 ID)이고 요소 번호 · 절점 칸이 없다. 예전엔 질량 카드의 칸 3 을 PID 로 읽어 고른 파트의 추가 질량을 버렸다

@@ -428,6 +428,11 @@ void scanElements(const std::string& path, const std::vector<int>& sel, const De
                     const bool placeable = KooRemapper::auxManualNodesPlaceable(aux, rd);
                     if (!placeable || !altM.empty()) pk.renumberRisk.push_back({where, altM, placeable});
                 }
+            } else if (auxPicked && auxLineIdx == aux.optNodeLine) {
+                // 옵션 카드의 절점 — 보 `_ELBOW` 의 가운데 절점 MN(8칸 표). 콤마 줄이면 번호를 제자리에 못 바꾼다(재검토 D2)
+                for (int v : KooRemapper::auxOptNodesOf(aux, line, fw)) pk.nodes.push_back(v);
+                if (line.find(',') != std::string::npos)
+                    pk.renumberRisk.push_back({path + ":" + std::to_string(lineNo) + " " + kw, {}, false});
             }
             ++auxLineIdx;
             if (--auxRemaining <= 0) auxRemaining = 0;
@@ -961,6 +966,21 @@ struct Writer {
                         put(aux.nodeSkip, aux.nodeCount);
                         put(aux.nodeSkip2, aux.nodeCount2);
                     }
+                    if (rm.on && lineIdx > 0 && lineIdx == aux.optNodeLine) {
+                        // 옵션 카드의 절점(보 `_ELBOW` 의 MN — 8칸 표 칸 폭 10 · long 20). 콤마 줄은 패스 1 이 이미 거절했다
+                        const int w = KooRemapper::auxOptTableWidth(fw);
+                        std::string body = line;
+                        const size_t cmt = body.find('$');
+                        if (cmt != std::string::npos) body.erase(cmt);
+                        const auto f = cardFields(body, w);
+                        for (int q : aux.optNodeFields) {
+                            const int v = fieldInt(f, (size_t)q);
+                            if (v > 0 && !putField(o2, w, (size_t)q, rm.node(v))) {
+                                console.error("renumber: " + kw + " 줄 「" + line + "」 의 가운데 절점 번호를 제자리에 못 바꾼다");
+                                failed = true;
+                            }
+                        }
+                    }
                     emitLine(o2);
                 }
                 ++lineIdx;
@@ -1174,6 +1194,8 @@ Verify verifyOutput(const std::string& path, const std::vector<int>& altExisting
                 for (int x : KooRemapper::auxNodesOf(vaux, f)) elemNodes.push_back(x);
                 for (int x : KooRemapper::auxNodesAlt(vaux, rd, f))
                     if (inSorted(altExisting, x)) elemNodes.push_back(x);
+            } else if (vAuxLineIdx == vaux.optNodeLine) {
+                for (int x : KooRemapper::auxOptNodesOf(vaux, line, fw)) elemNodes.push_back(x);   // 보 `_ELBOW` 의 MN
             }
             ++vAuxLineIdx;
             if (--vAuxRemaining <= 0) vAuxRemaining = 0;

@@ -130,6 +130,10 @@ struct AuxElementCard {
     bool partIsSet = false;        // `partField` 가 PID 가 아니라 **파트 세트 ID** 다(`*ELEMENT_MASS_PART_SET`) — PID 로 견주지 말 것
     std::vector<int> elemRefFields;   // 보 요소 번호를 담는 칸(차례 — 8칸 표, 칸 폭 10 · long 20): `*ELEMENT_BEAM_PULLEY` BID1 · BID2 ·
                                       // `*ELEMENT_BEAM_SOURCE` BSEID. 0 이면 LS-DYNA 가 이웃 보를 스스로 찾는다(PULLEY)
+    // 옵션 카드의 절점 — 보 `_ELBOW` 의 가운데 절점 MN(Card 10 · 옵션 카드 가운데 늘 마지막 · 8칸 표 I10, long 20 — Vol_I
+    // 156596-156638). 예전엔 Card 1 만 읽어 cleanup-nodes safe 가 MN 을 지우고 extract-parts 가 싣지 않았다(재검토 D2)
+    int  optNodeLine = -1;            // 카드 안 몇째 줄(0 = Card 1) — 없으면 -1
+    std::vector<int> optNodeFields;   // 그 줄의 절점 칸(차례 — 8칸 표)
     bool supported = false;    // false 면 이 변형을 추측하지 않는다
     std::string reason;        // supported=false 일 때 댈 이유
 };
@@ -191,6 +195,9 @@ std::vector<int> auxNodesDisputed(const AuxElementCard& a, const AuxCardReadings
 // manual 에 번호를 제자리에 쓸 수 있는가 — 콤마 줄이 아니고 manual 의 칸이 다 깨끗하며 절점 칸이 비었거나 정수이고, 번호를 쓸
 // 절점 칸이 `$` 주석과 겹치지 않는다(줄 가운데 주석은 설명서 문법이 아니다 — 겹친 칸에 쓰면 주석을 덮는다)
 bool auxManualNodesPlaceable(const AuxElementCard& a, const AuxCardReadings& r);
+// 옵션 카드 줄(`optNodeLine`)의 절점 — 8칸 표(칸 폭 10 · long 20)로 자른 `optNodeFields` 칸의 양수(콤마 줄은 콤마 차례)
+int auxOptTableWidth(int fw);
+std::vector<int> auxOptNodesOf(const AuxElementCard& a, const std::string& line, int fw);
 // PID 후보 — primary 읽기의 PID 먼저(언제나), 든 다른 읽기가 다른 PID 를 말하면 그것도(양수만 · 유일).
 // PID 칸이 없는 족은 비었다
 std::vector<int> auxPidsOf(const AuxElementCard& a, const AuxCardReadings& r);
@@ -213,7 +220,7 @@ bool gridReaderReadsKeyword(const std::string& keywordLine);
 // 티쉘 옵션 변형(`_ORTHO` · `_DOF` · `_H20` … · `*ELEMENT_TSHELL_BETA`)은 메시에 없다 — 그래서 번호 바닥이 그 EID 를
 // 몰랐고(11-07 답신은 「바닥은 빔 · 이산 · 질량까지 센다」고 했다), 이월 적용은 그 요소가 쓰는 절점을 몰랐다.
 // 두 소비자(바닥 `nonGridElementMaxId` · 이월 적용의 나눠 쓴 절점)가 이 **한 걸음**을 쓴다.
-//   known  — 칸 자리와 카드 줄 수를 안다. 카드마다 한 번(Card 1 줄) · EID · PID(없으면 0) · 절점 칸
+//   known  — 칸 자리와 카드 줄 수를 안다. 카드마다 한 번(Card 1 줄 — 옵션 카드에 절점이 있으면 카드 끝에서) · EID · PID(없으면 0) · 절점 칸
 //            · 격자 밖 족 — `auxElementCard` 가 안다(절점은 읽기 전부의 합집합 · PID 는 후보 전부 — 위 「읽기들」)
 //            · 리더가 안 읽는 격자 변형 — 줄 수가 PID 에 달리지 않을 때만(절점 수 옵션 `_H20` 등 · 티쉘 `_BETA`) ·
 //              `elementCardSpan` 의 절점 줄 전부

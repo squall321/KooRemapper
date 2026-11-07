@@ -5336,7 +5336,7 @@ several (even tens of) cards per set" 이라고 적는다. 그 규칙을 틀리�
 
 | 족 | Card 1 변수 | 절점 칸 | PID 칸 | 넓은 칸(E16) | 추가 카드 |
 |---|---|---|---|---|---|
-| `BEAM` | `EID PID N1 N2 N3 RT1 RR1 RT2 RR2 LOCAL` | 2·3·4 | 1 | 없음 | 옵션마다 1장 |
+| `BEAM` | `EID PID N1 N2 N3 RT1 RR1 RT2 RR2 LOCAL` | 2·3·4 · `_ELBOW` 면 마지막 옵션 카드(Card 10 · 8칸 표)의 MN | 1 | 없음 | 옵션마다 1장 |
 | `DISCRETE` | `EID PID N1 N2 VID S PF OFFSET` | 2·3 | 1 | `S` · `OFFSET`(절점 · PID 뒤라 판정기가 읽지 않는다) | `_LCO` 면 1장 |
 | `MASS` | `EID ID MASS PID` | **1** | **3** (33-40열) | `MASS` 17-32열 | 없음 |
 | `SEATBELT` | `EID PID N1 N2 SBRID SLEN N3 N4` | 2·3 **와** 6·7 (N3 57-64 · N4 65-72열) | 1 | `SLEN` 41-56열 | 없음 |
@@ -5389,6 +5389,11 @@ several (even tens of) cards per set" 이라고 적는다. 그 규칙을 틀리�
   붙은 8자리 PID) 다른 읽기의 PID 는 덱의 파트일 때만 후보로 친다. 후보가 둘 이상이고 그 하나라도 고른 PID 면 `extract-parts` 는
   줄을 대고 **거절**한다. PID 없는 정수꼴 질량 「1000」 은 정수 폭 읽기의 MASS 가 비어(규칙 (d)) 갈리지 않는다.
   이월 적용의 `aux_in_part` 는 후보 전부를 보고, 재결속은 다른 읽기의 PID 가 옛 덱의 파트면 「단정하지 못한 자리」로 센다.
+
+★보 `_ELBOW` 의 가운데 절점 MN 은 Card 1 이 아니라 마지막 옵션 카드(Card 10 — 옵션 카드는 설명서 차례 2 … 10 으로 온다 · 8칸 표 I10,
+long 20 · Vol_I 156596-156638)에 있다. 2026-11-07 전엔 Card 1 만 읽어 `cleanup-nodes` safe 가 MN 을 지우고(rc 0 · 되읽기 0)
+`extract-parts` 가 싣지 않았다 — 이제 걸음 · cleanup-nodes · extract-parts(싣기 · 번호 다시 매기기 · 되읽기)가 다 읽는다(콤마 ELBOW
+줄은 renumber 가 거절한다). 이월 적용은 ELBOW 블록을 그대로 거절한다.
 
 ★절점 칸 **개수**까지 적는 이유 — '칸 2부터 끝까지' 로 뭉개면 보의 `RT1`·`RR1`·`LOCAL` 과
 안전벨트의 `SBRID`·`SLEN` 이 절점이 된다. 세기만 하면 과포함(안전한 방향)이지만, **번호를
