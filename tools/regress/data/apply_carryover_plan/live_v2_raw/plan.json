@@ -1,0 +1,331 @@
+{
+ "format": "stepforge-carryover-plan",
+ "version": 2,
+ "unit": "mm-t-s",
+ "frame": "world",
+ "deck": {
+  "project_id": "001a1b610a5402c1c48b151",
+  "relpath": "live_a89_deck_1794055906.k",
+  "deck_from": "raw",
+  "sha256": "0713a659789236408247e4a1e1f27a87a60e9e9fd8dbb135f3226cca563f1f03",
+  "includes": [],
+  "max": {
+   "node": 3420,
+   "elem": 2578,
+   "pid": 8,
+   "secid": 8,
+   "mid": 8
+  },
+  "unread_cards": []
+ },
+ "report_key": "fc160119a36e54769558c743e85616b052287cc1a8421343089cb986a26931a5",
+ "cad": {
+  "old": {
+   "project_id": "001a1b610a5402c1c48b151",
+   "name": "live-a89-src-1794055906",
+   "shape_key": "757e4cd9a90d7164"
+  },
+  "new": {
+   "project_id": "001a1b6113f94bb9024420a",
+   "name": "live-a89-var-1794055906",
+   "shape_key": "3ed283e621802461"
+  }
+ },
+ "floor_mm": 0.000364005,
+ "summary": {
+  "actions": {
+   "keep": 7,
+   "morph": 1
+  },
+  "added": 0,
+  "fields": 1,
+  "fragments": 0,
+  "sections": 0,
+  "failed": 0
+ },
+ "parts": [
+  {
+   "pid": 1,
+   "name": "HOUSING#1",
+   "action": "keep",
+   "why": "바뀐 자리가 간소화가 지운 피처 안이다",
+   "mapping": "one_to_one",
+   "members": [
+    "/live-a89-src-1794055906/live_a89_v1_1794055906.step/V1/HOUSING"
+   ],
+   "deck": {
+    "node": [
+     1,
+     2238
+    ],
+    "node_count": 2238,
+    "elem": [
+     1,
+     1376
+    ],
+    "elem_count": 1376,
+    "contiguous": true,
+    "secid": 1,
+    "mid": 1
+   },
+   "absorbed": [
+    "/live-a89-src-1794055906/live_a89_v1_1794055906.step/V1/HOUSING"
+   ]
+  },
+  {
+   "pid": 2,
+   "name": "RIB#2",
+   "action": "morph",
+   "why": "면 구성이 같고 변위가 요소 크기 안",
+   "mapping": "one_to_one",
+   "members": [
+    "/live-a89-src-1794055906/live_a89_v1_1794055906.step/V1/RIB"
+   ],
+   "deck": {
+    "node": [
+     2239,
+     2416
+    ],
+    "node_count": 178,
+    "elem": [
+     1377,
+     1444
+    ],
+    "elem_count": 68,
+    "contiguous": true,
+    "secid": 2,
+    "mid": 2
+   },
+   "field": {
+    "file": "field_2.bin",
+    "nodes": 178,
+    "bytes": 5162,
+    "layout": [
+     {
+      "name": "node",
+      "dtype": "<u4",
+      "offset": 0,
+      "count": 178
+     },
+     {
+      "name": "disp",
+      "dtype": "<f8",
+      "offset": 712,
+      "shape": [
+       178,
+       3
+      ],
+      "unit": "mm"
+     },
+     {
+      "name": "kind",
+      "dtype": "<u1",
+      "offset": 4984,
+      "count": 178,
+      "codes": {
+       "0": "interior",
+       "1": "face",
+       "2": "edge",
+       "3": "corner",
+       "4": "unlabeled"
+      },
+      "shared_bit": 8
+     }
+    ],
+    "surface_nodes": 178,
+    "kinds": {
+     "interior": 0,
+     "face": 98,
+     "edge": 72,
+     "corner": 8,
+     "unlabeled": 0
+    },
+    "max_disp": 0.2,
+    "faces": 6,
+    "face_pairs": {
+     "0": 0,
+     "1": 2,
+     "2": 1,
+     "3": 3,
+     "4": 4,
+     "5": 5
+    },
+    "dropped_directions": 0,
+    "projection_fallbacks": 0,
+    "solver": {
+     "iterations": 0,
+     "residual": 0.0,
+     "converged": true,
+     "unknowns": 268
+    },
+    "check": {
+     "on_new_surface_max_error": 0.0,
+     "on_new_surface_over": 0,
+     "elements": 68,
+     "inverted": 0,
+     "unchecked": 0,
+     "min_ratio": 1.4,
+     "ok": true
+    },
+    "new_section": null
+   }
+  },
+  {
+   "pid": 3,
+   "name": "BRACKET#3",
+   "action": "keep",
+   "why": "그대로",
+   "mapping": "one_to_one",
+   "members": [
+    "/live-a89-src-1794055906/live_a89_v1_1794055906.step/V1/BRACKET"
+   ],
+   "deck": {
+    "node": [
+     2417,
+     2620
+    ],
+    "node_count": 204,
+    "elem": [
+     1445,
+     1544
+    ],
+    "elem_count": 100,
+    "contiguous": true,
+    "secid": 3,
+    "mid": 3
+   }
+  },
+  {
+   "pid": 4,
+   "name": "CAN#4",
+   "action": "keep",
+   "why": "그대로",
+   "mapping": "one_to_one",
+   "members": [
+    "/live-a89-src-1794055906/live_a89_v1_1794055906.step/V1/CAN"
+   ],
+   "deck": {
+    "node": [
+     2621,
+     2852
+    ],
+    "node_count": 232,
+    "elem": [
+     1545,
+     1759
+    ],
+    "elem_count": 215,
+    "contiguous": true,
+    "secid": 4,
+    "mid": 4
+   }
+  },
+  {
+   "pid": 5,
+   "name": "PCB_ASM#5",
+   "action": "keep",
+   "why": "그대로",
+   "mapping": "merged",
+   "members": [
+    "/live-a89-src-1794055906/live_a89_v1_1794055906.step/V1/COMP",
+    "/live-a89-src-1794055906/live_a89_v1_1794055906.step/V1/PCB"
+   ],
+   "deck": {
+    "node": [
+     2853,
+     3102
+    ],
+    "node_count": 250,
+    "elem": [
+     1760,
+     2419
+    ],
+    "elem_count": 660,
+    "contiguous": true,
+    "secid": 5,
+    "mid": 5
+   }
+  },
+  {
+   "pid": 6,
+   "name": "BATTERY#6",
+   "action": "keep",
+   "why": "그대로",
+   "mapping": "one_to_one",
+   "members": [
+    "/live-a89-src-1794055906/live_a89_v1_1794055906.step/V1/BATTERY"
+   ],
+   "deck": {
+    "node": [
+     3103,
+     3322
+    ],
+    "node_count": 220,
+    "elem": [
+     2420,
+     2545
+    ],
+    "elem_count": 126,
+    "contiguous": true,
+    "secid": 6,
+    "mid": 6
+   }
+  },
+  {
+   "pid": 7,
+   "name": "SPACER_OLD#7",
+   "action": "keep",
+   "why": "그대로",
+   "mapping": "one_to_one",
+   "members": [
+    "/live-a89-src-1794055906/live_a89_v1_1794055906.step/V1/SPACER_OLD"
+   ],
+   "deck": {
+    "node": [
+     3323,
+     3382
+    ],
+    "node_count": 60,
+    "elem": [
+     2546,
+     2566
+    ],
+    "elem_count": 21,
+    "contiguous": true,
+    "secid": 7,
+    "mid": 7
+   }
+  },
+  {
+   "pid": 8,
+   "name": "MASS_LUMP#8",
+   "action": "keep",
+   "why": "덱에만 있는 파트(CAD 원천 없음)",
+   "mapping": "deck_only",
+   "members": [],
+   "deck": {
+    "node": [
+     3383,
+     3420
+    ],
+    "node_count": 38,
+    "elem": [
+     2567,
+     2578
+    ],
+    "elem_count": 12,
+    "contiguous": true,
+    "secid": 8,
+    "mid": 8
+   }
+  }
+ ],
+ "added": [],
+ "files": {
+  "field_2.bin": {
+   "sha256": "5050a9badfb81a16343be6b278748915c167882451194c97e735375c3d615ae2",
+   "bytes": 5162
+  }
+ },
+ "code_build": "4295f7dbf71c"
+}

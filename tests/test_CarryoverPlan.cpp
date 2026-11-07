@@ -9,6 +9,7 @@
 #include "parser/CarryoverPlan.h"
 #include "util/StrictJson.h"
 
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -166,13 +167,17 @@ TEST(Carryover_계획_v1_꼴을_받는다) {
 TEST(Carryover_모르는_칸_빠진_칸_판을_모두_말한다) {
     carryover::Plan plan;
     std::vector<carryover::Problem> pr;
-    // 맨 위 모르는 칸 + transform 줄의 모르는 칸 + 판 2 — 한 번에 셋 다 나와야 한다(전부 아니면 전무)
-    ASSERT_FALSE(carryover::parsePlan(coPlanJson("\"extra\": 1, ", ", \"scale\": 1.0", 2), plan, pr));
+    // 판 1 계획 — 맨 위 모르는 칸 + transform 줄의 모르는 칸 — 한 번에 둘 다 나와야 한다(전부 아니면 전무)
+    ASSERT_FALSE(carryover::parsePlan(coPlanJson("\"extra\": 1, ", ", \"scale\": 1.0", 1), plan, pr));
     ASSERT_TRUE(coAnyProblem(pr, "plan_schema", "'extra'"));
     ASSERT_TRUE(coAnyProblem(pr, "plan_schema", "'scale'"));
-    ASSERT_TRUE(coAnyProblem(pr, "plan_format", "판 1 만"));
     ASSERT_FALSE(plan.parts[1].valid);   // 칸이 틀린 줄은 덱과 대조하지 않는다
     ASSERT_TRUE(plan.parts[0].valid);    // 다른 줄은 그대로 읽는다
+    // 모르는 판(3) — 판을 말하고 칸도 그대로 본다(판 2 가 받아진 뒤로 판 1 · 2 만 받는다 · 2026-11-07)
+    pr.clear();
+    ASSERT_FALSE(carryover::parsePlan(coPlanJson("\"extra\": 1, ", "", 3), plan, pr));
+    ASSERT_TRUE(coAnyProblem(pr, "plan_format", "판 1 · 2 만"));
+    ASSERT_TRUE(coAnyProblem(pr, "plan_schema", "'extra'"));
 
     std::string missing = coPlanJson();
     missing.replace(missing.find("\"report_key\": \"k\", "), std::strlen("\"report_key\": \"k\", "), "");
@@ -411,4 +416,250 @@ TEST(Carryover_보고_JSON_은_엄격한_리더로_읽힌다) {
     ASSERT_EQ(v.get("plan")->get("report_key")->s, std::string("k\"q"));
     ASSERT_EQ(v.get("parts")->arr[0].get("inserted")->get("node")->arr[1].i, 17LL);
     ASSERT_EQ(v.get("touches_changed")->arr[0].get("with")->arr[0].i, 3LL);
+}
+
+// ── 판 2(2026-11-07 — StepForge 요청서 §10 · 그쪽 main 60f8969) ─────────────────────────────────────────────
+// 칸 표는 판마다 하나다 — 판 2 는 판 1 위에 줄마다 덱 자리 · deck.deck_from · deck.includes · field.new_section(늘 있다) ·
+// element_thickness · review 줄의 refused_transform · summary(여섯 칸)를 더했다. summary 의 actions · sections · failed 는 줄과 대조한다.
+namespace {
+
+// 판 2 계획 — keep · transform · 셸 모프(새 섹션 SECID 10) · 강체가 아닌 옮김을 돌린 review(요소 없는 PID)
+std::string coPlanV2() {
+    const std::string sha = kCoSha;
+    const std::string place = "\"deck\": {\"node\": [1, 8], \"node_count\": 8, \"elem\": [1, 1], \"elem_count\": 1, \"contiguous\": true, "
+                              "\"secid\": 1, \"mid\": 1}";
+    return std::string("{\"format\": \"stepforge-carryover-plan\", \"version\": 2, \"unit\": \"mm-t-s\", \"frame\": \"world\",") +
+           " \"deck\": {\"project_id\": \"p\", \"relpath\": \"export/assembled.k\", \"deck_from\": \"mesh\", \"sha256\": \"" + sha +
+           "\", \"includes\": [{\"relpath\": \"inc/a.k\", \"sha256\": \"" + sha + "\"}],"
+           " \"max\": {\"node\": 12, \"elem\": 3, \"pid\": 4, \"secid\": 9, \"mid\": 4}, \"unread_cards\": []},"
+           " \"report_key\": \"k\", \"cad\": {}, \"floor_mm\": 0.0003,"
+           " \"summary\": {\"actions\": {\"keep\": 1, \"transform\": 1, \"morph\": 1, \"review\": 1}, \"added\": 0, \"fields\": 1,"
+           " \"fragments\": 0, \"sections\": 1, \"failed\": 0},"
+           " \"parts\": ["
+           "{\"pid\": 1, \"name\": \"A\", \"action\": \"keep\", \"why\": \"w\", \"mapping\": \"one_to_one\", \"members\": [], " + place +
+           ", \"touches_changed\": [2]},"
+           "{\"pid\": 2, \"name\": \"B\", \"action\": \"transform\", \"why\": \"w\", \"mapping\": \"one_to_one\", \"members\": [], " + place +
+           ", \"transform\": [1,0,0,2, 0,1,0,0, 0,0,1,0, 0,0,0,1], \"translation\": [2,0,0], \"rotation_deg\": 0.0},"
+           "{\"pid\": 3, \"name\": \"C\", \"action\": \"morph\", \"why\": \"w\", \"mapping\": \"one_to_one\", \"members\": [], " + place +
+           ", \"field\": {\"file\": \"field_3.bin\", \"nodes\": 2, \"bytes\": 58, \"layout\": ["
+           "{\"name\": \"node\", \"dtype\": \"<u4\", \"offset\": 0, \"count\": 2},"
+           "{\"name\": \"disp\", \"dtype\": \"<f8\", \"offset\": 8, \"shape\": [2, 3], \"unit\": \"mm\"},"
+           "{\"name\": \"kind\", \"dtype\": \"<u1\", \"offset\": 56, \"count\": 2, \"shared_bit\": 8}],"
+           " \"surface_nodes\": 2, \"kinds\": {}, \"max_disp\": 0.1, \"faces\": 2, \"face_pairs\": {}, \"dropped_directions\": 0,"
+           " \"projection_fallbacks\": 0, \"solver\": {}, \"check\": {\"ok\": true}, \"thickness\": {\"old\": 0.4, \"new\": 0.6},"
+           " \"new_section\": {\"secid\": 10, \"thickness\": 0.6, \"file\": \"section_3.k\", \"why\": \"0.4 → 0.6\"}}},"
+           "{\"pid\": 4, \"name\": \"D\", \"action\": \"review\", \"why\": \"옮김 4×4 가 강체가 아니다\", \"mapping\": \"one_to_one\", \"members\": [],"
+           " \"deck\": {\"node\": null, \"node_count\": 0, \"elem\": null, \"elem_count\": 0, \"contiguous\": null, \"secid\": null, \"mid\": null},"
+           " \"refused_transform\": {\"transform\": [1.01,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1], \"det\": 1.01, \"scale\": 1.003322, "
+           "\"orthogonality_error\": 0.0201}}],"
+           " \"added\": [],"
+           " \"files\": {\"field_3.bin\": {\"sha256\": \"" + sha + "\", \"bytes\": 58}, \"section_3.k\": {\"sha256\": \"" + sha +
+           "\", \"bytes\": 300}}}";
+}
+
+std::string coReplace(std::string s, const std::string& from, const std::string& to) {
+    const size_t at = s.find(from);
+    if (at != std::string::npos) s.replace(at, from.size(), to);
+    return s;
+}
+
+// 요청서 §10.5 의 `section_4.k` 전문(329 바이트) — 진리값 판 CAN(SECID 4 · 0.4)을 옮겨 SECID 10 · 0.6 으로 바꾼 카드
+const char* kCoSection =
+    "*KEYWORD\n"
+    "$# StepForge — 이월 모프 PID 4 의 새 셸 섹션(옛 SECID 4) — deck.k\n"
+    "*SECTION_SHELL_TITLE\n"
+    "CAN#4_sec\n"
+    "$#   secid    elform      shrf       nip     propt   qr/irid     icomp     setyp\n"
+    "        10         2         1         2\n"
+    "$#      t1        t2        t3        t4\n"
+    "       0.6       0.6       0.6       0.6\n"
+    "*END\n";
+
+// 그 카드가 옮긴 덱의 옛 카드(키워드 줄부터 다음 키워드 앞까지)
+const char* kCoDeckSection =
+    "*SECTION_SHELL_TITLE\n"
+    "CAN#4_sec\n"
+    "$#   secid    elform      shrf       nip     propt   qr/irid     icomp     setyp\n"
+    "         4         2         1         2\n"
+    "$#      t1        t2        t3        t4\n"
+    "       0.4       0.4       0.4       0.4\n";
+
+}  // namespace
+
+TEST(Carryover_계획_v2_꼴을_받는다) {
+    carryover::Plan plan;
+    std::vector<carryover::Problem> pr;
+    const bool ok = carryover::parsePlan(coPlanV2(), plan, pr);
+    for (const auto& p : pr) std::printf("    %s — %s\n", p.kind.c_str(), p.detail.c_str());
+    ASSERT_TRUE(ok);
+    ASSERT_EQ(plan.version, 2LL);
+    ASSERT_EQ(plan.deckFrom, std::string("mesh"));
+    ASSERT_TRUE(plan.hasIncludes);
+    ASSERT_EQ(plan.includes.size(), static_cast<size_t>(1));
+    ASSERT_EQ(plan.includes[0].relpath, std::string("inc/a.k"));
+    ASSERT_EQ(plan.maxSecid, 9LL);
+    const auto& keep = plan.parts[0];
+    ASSERT_TRUE(keep.valid && keep.deck.present && keep.deck.hasNode && keep.deck.nodeHi == 8 && keep.deck.contiguous == 1);
+    ASSERT_TRUE(keep.deck.hasSecid && keep.deck.secid == 1);
+    const auto& morph = plan.parts[2];
+    ASSERT_TRUE(morph.valid && morph.field.built && morph.field.hasThickness);
+    ASSERT_TRUE(morph.field.newSection.present && morph.field.newSection.built);
+    ASSERT_EQ(morph.field.newSection.secid, 10LL);
+    ASSERT_NEAR(morph.field.newSection.thickness, 0.6, 0.0);
+    ASSERT_EQ(morph.field.newSection.file, std::string("section_3.k"));
+    const auto& review = plan.parts[3];
+    ASSERT_TRUE(review.valid && review.action == carryover::Action::Review && review.hasRefusedTransform);
+    ASSERT_NEAR(review.refusedM[0], 1.01, 0.0);
+    ASSERT_NEAR(review.refusedOrth, 0.0201, 0.0);
+    ASSERT_TRUE(review.deck.present && !review.deck.hasNode && !review.deck.hasElem && review.deck.contiguous == -1 && !review.deck.hasSecid);
+    // 못 지은 새 섹션(secid · file null) — 받아 두고(적용 쪽이 거절한다) built 가 아니다
+    std::string failed = coReplace(coPlanV2(), "\"new_section\": {\"secid\": 10, \"thickness\": 0.6, \"file\": \"section_3.k\"",
+                                   "\"element_thickness\": {\"elements\": 2, \"why\": \"요소마다 두께\"}, \"new_section\": {\"secid\": null, "
+                                   "\"thickness\": 0.6, \"file\": null");
+    failed = coReplace(failed, "\"sections\": 1, \"failed\": 0", "\"sections\": 0, \"failed\": 1");
+    pr.clear();
+    ASSERT_TRUE(carryover::parsePlan(failed, plan, pr));
+    ASSERT_TRUE(plan.parts[2].field.newSection.present && !plan.parts[2].field.newSection.built);
+    ASSERT_TRUE(plan.parts[2].field.hasElementThickness && plan.parts[2].field.elementThicknessCount == 2);
+}
+
+TEST(Carryover_칸_표는_판마다_다르다) {
+    carryover::Plan plan;
+    std::vector<carryover::Problem> pr;
+    // 판 1 계획에 판 2 칸 — 모르는 칸
+    ASSERT_FALSE(carryover::parsePlan(coReplace(coPlanJson(), "\"relpath\": \"deck.k\",", "\"relpath\": \"deck.k\", \"deck_from\": \"raw\","), plan, pr));
+    ASSERT_TRUE(coAnyProblem(pr, "plan_schema", "모르는 칸 'deck_from' — 계획 판 1"));
+    // 판 2 칸 표 — 빠진 칸(줄의 deck · deck.includes · field.new_section) · 모르는 칸(덱 자리 안 · review 줄의 transform · 새 파트 줄의 deck)
+    const std::string v2 = coPlanV2();
+    struct Case { std::string from, to, needle; };
+    const Case cases[] = {
+        {"\"members\": [], \"deck\": {\"node\": [1, 8]", "\"members\": [], \"deckx\": {\"node\": [1, 8]", "칸 'deck' 가 없다"},
+        {"\"includes\": [{\"relpath\": \"inc/a.k\", \"sha256\": \"" + std::string(kCoSha) + "\"}],", "", "칸 'includes' 가 없다"},
+        {", \"new_section\": {\"secid\": 10, \"thickness\": 0.6, \"file\": \"section_3.k\", \"why\": \"0.4 → 0.6\"}", "",
+         "칸 'new_section' 가 없다"},
+        {"\"contiguous\": true, \"secid\": 1", "\"contiguous\": true, \"gap\": 0, \"secid\": 1", "모르는 칸 'gap'"},
+        {"\"refused_transform\": {", "\"translation\": [0, 0, 0], \"refused_transform\": {", "모르는 칸 'translation'"},
+        {"\"deck_from\": \"mesh\"", "\"deck_from\": \"job\"", "raw · mesh 만"},
+        {"\"added\": []", "\"added\": [{\"path\": \"/n\", \"name\": \"N\", \"action\": \"add\", \"suggestion\": {}, \"fragment\": null, \"why\": \"x\","
+                          " \"deck\": {}}]", "모르는 칸 'deck'"},
+    };
+    for (const auto& c : cases) {
+        pr.clear();
+        const bool ok = carryover::parsePlan(coReplace(v2, c.from, c.to), plan, pr);
+        if (ok || !coAnyProblem(pr, "plan_schema", c.needle)) {
+            std::printf("    기대한 거절이 없다: %s\n", c.needle.c_str());
+            for (const auto& p : pr) std::printf("      %s — %s\n", p.kind.c_str(), p.detail.c_str());
+        }
+        ASSERT_FALSE(ok);
+        ASSERT_TRUE(coAnyProblem(pr, "plan_schema", c.needle));
+    }
+    // 판 1 의 summary 는 꼴만 본다 — 판 2 의 여섯 칸이 없어도 받는다(판 1 그대로)
+    pr.clear();
+    ASSERT_TRUE(carryover::parsePlan(coPlanJson(), plan, pr));
+}
+
+TEST(Carryover_v2_summary_를_계획_줄과_대조한다) {
+    carryover::Plan plan;
+    std::vector<carryover::Problem> pr;
+    // review 로 돌린 옮김은 review 로 센다(§10.2 「바뀐 뜻」 ②) — transform 2 로 적으면 다르다
+    ASSERT_FALSE(carryover::parsePlan(coReplace(coPlanV2(), "\"transform\": 1, \"morph\": 1, \"review\": 1", "\"transform\": 2, \"morph\": 1"),
+                                      plan, pr));
+    ASSERT_TRUE(coAnyProblem(pr, "plan_inconsistent", "summary.actions.transform"));
+    ASSERT_TRUE(coAnyProblem(pr, "plan_inconsistent", "summary.actions.review"));
+    pr.clear();
+    ASSERT_FALSE(carryover::parsePlan(coReplace(coPlanV2(), "\"sections\": 1", "\"sections\": 0"), plan, pr));
+    ASSERT_TRUE(coAnyProblem(pr, "plan_inconsistent", "summary.sections"));
+    // 못 지은 새 섹션은 failed 에 든다 — 0 이면 다르다
+    std::string failed = coReplace(coPlanV2(), "\"new_section\": {\"secid\": 10, \"thickness\": 0.6, \"file\": \"section_3.k\"",
+                                   "\"new_section\": {\"secid\": null, \"thickness\": 0.6, \"file\": null");
+    failed = coReplace(failed, "\"sections\": 1", "\"sections\": 0");
+    pr.clear();
+    ASSERT_FALSE(carryover::parsePlan(failed, plan, pr));
+    ASSERT_TRUE(coAnyProblem(pr, "plan_inconsistent", "summary.failed — 0"));
+    // secid 만 null(file 은 이름) — 함께 있거나 함께 null 이다
+    pr.clear();
+    ASSERT_FALSE(carryover::parsePlan(coReplace(coPlanV2(), "\"secid\": 10, \"thickness\": 0.6", "\"secid\": null, \"thickness\": 0.6"), plan, pr));
+    ASSERT_TRUE(coAnyProblem(pr, "plan_schema", "함께 있거나 함께 null"));
+}
+
+TEST(Carryover_v2_새_셸_섹션_파일_엄격_읽기와_옛_카드_대조) {
+    carryover::SectionFileScan s;
+    std::vector<std::string> pr;
+    ASSERT_EQ(std::strlen(kCoSection), static_cast<size_t>(329));   // 요청서 §10.5 「329 바이트」
+    ASSERT_TRUE(carryover::scanSectionFile(coLines(kCoSection), s, pr));
+    ASSERT_EQ(s.secid, 10LL);
+    ASSERT_EQ(s.elform, 2LL);
+    ASSERT_NEAR(s.t[0], 0.6, 0.0);
+    ASSERT_NEAR(s.t[3], 0.6, 0.0);
+    ASSERT_EQ(s.block.size(), static_cast<size_t>(6));
+    ASSERT_EQ(s.head.size(), static_cast<size_t>(1));
+    carryover::compareSectionCards(coLines(kCoDeckSection), s, pr);
+    ASSERT_EQ(pr.size(), static_cast<size_t>(0));
+    // 옛 카드와 다른 칸(SHRF 1 → 0.8) · 다른 주석 — SECID · T1~T4 밖은 그대로여야 한다
+    std::string other = coReplace(kCoSection, "        10         2         1         2", "        10         2       0.8         2");
+    ASSERT_TRUE(carryover::scanSectionFile(coLines(other), s, pr));
+    carryover::compareSectionCards(coLines(kCoDeckSection), s, pr);
+    ASSERT_TRUE(coAnyText(pr, "블록 4째 줄(Card 1)의 SECID 밖 칸"));
+    pr.clear();
+    std::string note = coReplace(kCoSection, "$#      t1", "$#      T1");
+    ASSERT_TRUE(carryover::scanSectionFile(coLines(note), s, pr));
+    carryover::compareSectionCards(coLines(kCoDeckSection), s, pr);
+    ASSERT_TRUE(coAnyText(pr, "블록 5째 줄이 덱의 옛 카드와 다르다"));
+    // 꼴 밖 — 쌓인 둘째 카드 · 다른 키워드 · *END 없음 · 사용자 정의 셸
+    const std::string stacked = coReplace(kCoSection, "*END", "         3         2\n       1.0       1.0       1.0       1.0\n*END");
+    pr.clear();
+    ASSERT_FALSE(carryover::scanSectionFile(coLines(stacked), s, pr));
+    ASSERT_TRUE(coAnyText(pr, "카드 하나가 아니다"));
+    pr.clear();
+    ASSERT_FALSE(carryover::scanSectionFile(coLines(coReplace(kCoSection, "*END", "*MAT_ELASTIC\n         9       1.0\n*END")), s, pr));
+    ASSERT_TRUE(coAnyText(pr, "섹션 카드 뒤의 키워드 *MAT_ELASTIC"));
+    pr.clear();
+    ASSERT_FALSE(carryover::scanSectionFile(coLines(coReplace(kCoSection, "*END\n", "")), s, pr));
+    ASSERT_TRUE(coAnyText(pr, "*END 가 없다"));
+    pr.clear();
+    ASSERT_FALSE(carryover::scanSectionFile(coLines(coReplace(kCoSection, "        10         2", "        10       101")), s, pr));
+    ASSERT_TRUE(coAnyText(pr, "사용자 정의 셸"));
+    // ICOMP 1 — 각도 카드 ceil(NIP/8) 장까지가 카드 하나다
+    const std::string comp = coReplace(coReplace(kCoSection, "        10         2         1         2",
+                                                 "        10         2         1         3         0         0         1"),
+                                       "*END", "       0.0      45.0      90.0\n*END");
+    pr.clear();
+    ASSERT_TRUE(carryover::scanSectionFile(coLines(comp), s, pr));
+}
+
+TEST(Carryover_v2_보고에_deck_from_인클루드_refused_transform) {
+    carryover::Report r;
+    r.planRead = r.planParsed = true;
+    r.planSha256 = kCoSha;
+    r.planVersion = 2;
+    r.deckFrom = "raw";
+    r.includesChecked = true;
+    r.includes.push_back({"inc/part8.k", kCoSha});
+    carryover::PartResult p;
+    p.pid = 4;
+    p.action = "review";
+    p.hasRefusedTransform = true;
+    p.refusedM[0] = 1.01;
+    p.refusedM[15] = 1.0;
+    p.refusedDet = 1.01;
+    r.parts.push_back(p);
+    carryover::PartResult m;
+    m.pid = 3;
+    m.action = "morph";
+    m.result = "applied";
+    m.hasNewSection = m.newSectionShell = true;
+    m.newSecid = 10;
+    m.newThickness = 0.6;
+    r.parts.push_back(m);
+    json::Value v;
+    std::string err;
+    ASSERT_TRUE(json::parse(carryover::toJson(r), v, err));
+    ASSERT_EQ(v.get("plan")->get("deck_from")->s, std::string("raw"));
+    ASSERT_EQ(v.get("deck")->get("includes")->arr[0].get("relpath")->s, std::string("inc/part8.k"));
+    ASSERT_NEAR(v.get("parts")->arr[0].get("refused_transform")->get("transform")->arr[0].d, 1.01, 0.0);
+    ASSERT_NEAR(v.get("parts")->arr[1].get("new_section")->get("thickness")->d, 0.6, 0.0);
+    carryover::Report v1;   // 판 1 — 대조하지 않은 닫힘은 null · deck_from 도 null
+    ASSERT_TRUE(json::parse(carryover::toJson(v1), v, err));
+    ASSERT_TRUE(v.get("deck")->get("includes")->isNull());
+    ASSERT_TRUE(v.get("plan")->get("deck_from")->isNull());
 }

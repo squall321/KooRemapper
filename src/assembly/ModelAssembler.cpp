@@ -321,10 +321,11 @@ void ModelAssembler::initMaxSetIdFromRawLines() {
     maxSetId_ = cur_scanMaxSetId(rawLines_);
 }
 
-// 이월 적용(CarryoverApply.cpp)이 번호 커서와 **같은 훑기**로 덱의 정의를 본다 — 사본을 두지 않으려고 여기서 내준다
-std::set<int> ModelAssembler::definedMaterialIds() const { return cur_scanMaterialIds(rawLines_); }
-std::map<int, std::string> ModelAssembler::definedSectionIds() const { return cur_scanSectionIds(rawLines_); }
-std::map<int, std::string> ModelAssembler::definedPartVariantIds() const { return cur_scanPartVariantIds(rawLines_); }
+// 이월 적용(CarryoverApply.cpp)이 번호 커서와 **같은 훑기**로 덱의 정의를 본다 — 사본을 두지 않으려고 여기서 내준다.
+// 줄을 받는다 — 판 2 의 인클루드 덱은 펼친 닫힘 전체를 본다(2026-11-07)
+std::set<int> ModelAssembler::definedMaterialIds(const std::vector<std::string>& lines) { return cur_scanMaterialIds(lines); }
+std::map<int, std::string> ModelAssembler::definedSectionIds(const std::vector<std::string>& lines) { return cur_scanSectionIds(lines); }
+std::map<int, std::string> ModelAssembler::definedPartVariantIds(const std::vector<std::string>& lines) { return cur_scanPartVariantIds(lines); }
 
 // ★대상이 인클루드 안에만 있는가(헤더의 주석 참조). 판정 자료는 `raiseMaxIdsOverIncludes` 가 같은 리더로 센 것이다.
 static std::string ma_flattenHint() {

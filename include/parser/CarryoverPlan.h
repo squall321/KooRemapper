@@ -1,4 +1,4 @@
-// StepForge 이월 계획(plan.json v1) · 변위장 · 조각을 엄격히 읽고 적용 보고 JSON 을 쓴다 — 모르는 칸 · 꼴 밖은 말하고 거절한다
+// StepForge 이월 계획(plan.json 판 1 · 2) · 변위장 · 조각 · 새 셸 섹션을 엄격히 읽고 적용 보고 JSON 을 쓴다 — 모르는 칸 · 꼴 밖은 말하고 거절한다
 #pragma once
 
 #include <array>
@@ -17,11 +17,12 @@ namespace carryover {
 //   그래서 덱을 모르는 순수 읽기를 여기 둔다(덱과 대조하는 일은 `ModelAssembler::applyCarryoverPlan`).
 //
 // 지키는 것.
-//   · 칸 표는 **한 곳**(CarryoverPlan.cpp 머리의 `kKeys`)이다 — v2 칸(줄마다 덱 범위 · `deck.includes` ·
-//     `field.new_section` …)은 그 표 하나에 더한다(사용자 결정 11-07)
+//   · 칸 표는 **한 곳**(CarryoverPlan.cpp 머리의 `kKeys`)이다 — 판마다 칸이 다르다(판 1 그대로 · 판 2 는 그쪽 요청서 §10.2 의
+//     칸을 더한다 — 줄마다 덱 자리 · `deck.deck_from` · `deck.includes` · `field.new_section` · `refused_transform` · `summary`).
+//     모르는 칸 · 빠진 칸은 **그 판의** 표로 거절한다(사용자 결정 11-07)
 //   · 걸린 것을 **전부** 모은다 — 한 줄이 틀려도 다음 줄을 본다(사전 검사는 전부 아니면 전무)
-//   · 꼴만 보는 칸(mesh · target · check · solver · face_pairs · kinds · cad · summary · suggestion · layout 의 codes)은
-//     객체인지만 보고 속은 읽지 않는다
+//   · 꼴만 보는 칸(mesh · target · check · solver · face_pairs · kinds · cad · suggestion · layout 의 codes · 판 1 의 summary)은
+//     객체인지만 보고 속은 읽지 않는다. 판 2 의 summary 는 칸을 보고 actions · sections · failed 를 계획 줄과 대조한다
 
 // 걸린 것 하나.
 struct Problem {
@@ -45,6 +46,17 @@ struct LayoutEntry {
     long long sharedBit = 8;    // kind 의 「다른 PID 와 나눠 쓰는 절점」 비트(그쪽 꼴 — 넷째 비트 8)
 };
 
+// morph 줄의 새 셸 섹션(판 2 `field.new_section` — 요청서 §10.2). null 이면 present=false.
+// built 면 그쪽이 카드를 지었다(secid · file) — 그 카드를 넣고 그 PID 의 `*PART` SECID 만 잇는다(답신 Q8).
+// 아니면 두께가 바뀌었는데 못 지었다(secid · file 이 null · 까닭은 why) — 그 줄은 조각으로 물러선다(instead).
+struct MorphSection {
+    bool present = false;
+    bool built = false;
+    long long secid = 0;
+    double thickness = 0;       // 카드의 T1~T4 에 쓴 값 그대로(10칸 · 유효숫자 다섯을 되읽은 수)
+    std::string file, why;
+};
+
 // morph 줄의 `field` 머리.
 struct FieldHead {
     bool present = false;
@@ -52,7 +64,20 @@ struct FieldHead {
     std::string file, why;
     long long nodes = 0, bytes = 0;
     LayoutEntry node, disp, kind;
-    bool hasThickness = false;  // 셸 두께가 바뀐 모프 — v1 은 받지 않는다(v2 의 `field.new_section` 이 필요하다)
+    bool hasThickness = false;  // 셸 두께가 바뀐 모프 — 판 1 은 받지 않는다(판 2 는 new_section 이 정한다)
+    MorphSection newSection;    // 판 2
+    bool hasElementThickness = false;   // 판 2 — 그 PID 셸 요소가 요소마다 두께를 싣는다(섹션 두께를 덮는다)
+    long long elementThicknessCount = 0;
+};
+
+// 판 2 — 줄마다 그 PID 의 덱 자리(`parts[].deck` — 그쪽 `KDeck.part_ranges()` 와 `*PART`). null 칸은 has* 가 거짓이다.
+struct PartDeck {
+    bool present = false;
+    bool hasNode = false, hasElem = false, hasSecid = false, hasMid = false;
+    long long nodeLo = 0, nodeHi = 0, nodeCount = 0;
+    long long elemLo = 0, elemHi = 0, elemCount = 0;
+    int contiguous = -1;        // -1 null · 0 거짓 · 1 참
+    long long secid = 0, mid = 0;
 };
 
 // 조각이 함께 싣는 새 섹션(`fragment.new_section`).
@@ -91,6 +116,11 @@ struct PartRow {
     bool hasInstead = false;                    // morph — 받지 않는다(우리는 변위장만 쓴다)
     FragmentHead fragment;                      // remesh
     SharedNodes shared;
+    PartDeck deck;                              // 판 2 — 모든 줄
+    // 판 2 review 줄 — 1단계가 옮김으로 냈으나 강체가 아니라 계획이 사람 확인으로 돌린 4×4(옮기지 않는다 · 보고에 그대로 싣는다)
+    bool hasRefusedTransform = false;
+    std::array<double, 16> refusedM{};
+    double refusedDet = 0, refusedScale = 0, refusedOrth = 0;
 };
 
 struct AddedRow {
@@ -106,10 +136,18 @@ struct FileEntry {
     long long bytes = 0;
 };
 
+// 판 2 `deck.includes` 한 줄 — 주 덱 폴더 기준 상대 경로(`/` · 정규화)와 그 파일 바이트 전부의 sha256(LS-DYNA 가 읽는 차례)
+struct IncludeEntry {
+    std::string relpath, sha256;
+};
+
 struct Plan {
     std::string format, unit, frame, reportKey, codeBuild;
     long long version = 0;
     std::string deckSha256, deckRelpath, deckProjectId;
+    std::string deckFrom;               // 판 2 — raw · mesh(덱을 relpath 로 찾지 않는다 — 보고에 되돌려 줄 뿐이다)
+    bool hasIncludes = false;           // 판 2 — deck.includes 칸을 읽었다(빈 목록일 수 있다)
+    std::vector<IncludeEntry> includes;
     long long maxNode = 0, maxElem = 0, maxPid = 0, maxSecid = 0, maxMid = 0;
     std::vector<std::string> unreadCards;
     std::vector<PartRow> parts;
@@ -117,8 +155,8 @@ struct Plan {
     std::vector<FileEntry> files;   // 적힌 차례
 };
 
-// 계획 JSON 을 읽는다. 걸린 것(문법 · 모르는 칸 · 빠진 칸 · 꼴 · 값)을 `problems` 에 **모두** 더하고, 하나도 없으면 true.
-// 문법이 틀리면 그 하나만 담고 멈춘다(속을 읽을 수 없다).
+// 계획 JSON 을 읽는다. 걸린 것(문법 · 모르는 칸 · 빠진 칸 · 꼴 · 값 · 판 2 의 summary 대조)을 `problems` 에 **모두** 더하고,
+// 하나도 없으면 true. 문법이 틀리면 그 하나만 담고 멈춘다(속을 읽을 수 없다).
 bool parsePlan(const std::string& text, Plan& out, std::vector<Problem>& problems);
 
 // 변위장 이진 — 머리의 차례대로 리틀엔디언으로 읽는다. 절점 오름차순(중복 없음) · 변위 유한 · 꼴 바이트(아래 세 비트 0~4,
@@ -165,6 +203,26 @@ void checkFragment(const FragmentScan& s, const FragmentHead& h, long long expec
 std::string renderFragment(const std::vector<std::string>& lines, const FragmentScan& s, long long shiftNode,
                            long long shiftElem, int fw, bool withPart);
 
+// 판 2 — 모프 줄의 새 셸 섹션 파일(`section_<PID>.k` — 요청서 §10.3 ②)을 엄격히 읽는다: `*KEYWORD` · 셸 섹션 카드
+// **하나**(`*SECTION_SHELL` · `_TITLE` — 제목 · Card 1 · Card 2 · ICOMP 1 이면 각도 카드) · `*END`. 그 밖의 키워드 · 데이터 줄 ·
+// 쌓인 둘째 카드 · 사용자 정의 셸(ELFORM 101~105)의 딸린 카드 · 자유 형식 · 제어 문자는 거절한다.
+struct SectionFileScan {
+    std::vector<std::string> head;    // `*KEYWORD` 와 섹션 키워드 사이의 주석 줄(넣을 때 함께 간다)
+    std::vector<std::string> block;   // 섹션 키워드 줄부터 `*END` 앞까지 — 덱에 넣는 줄이고 덱의 옛 카드와 줄마다 견준다
+    size_t row1 = 0, row2 = 0;        // block 안의 Card 1(SECID …) · Card 2(T1~T4 …) 자리
+    long long secid = 0, elform = 0;
+    double t[4] = {0, 0, 0, 0};
+};
+bool scanSectionFile(const std::vector<std::string>& lines, SectionFileScan& out, std::vector<std::string>& problems);
+
+// 셸 섹션 블록(키워드 줄부터 다음 키워드 앞까지 — 덱의 것이든 파일의 것이든)에서 **카드 하나**의 Card 1 · Card 2 자리를 찾는다.
+// 빈 줄은 카드다(끝의 빈 줄만 여백) — LS-DYNA 가 읽는 차례다. 카드 하나가 아니면 false 와 까닭.
+bool shellSectionRows(const std::vector<std::string>& block, size_t& row1, size_t& row2, std::string& why);
+
+// 새 카드가 덱의 옛 카드를 **그대로 옮기고** SECID(Card 1 앞 10칸)와 T1~T4(Card 2 앞 40칸)만 바꾼 것인가(요청서 §10.3 ②) —
+// 다른 줄 · 다른 칸이 하나라도 있으면 그 자리를 `problems` 에 담는다.
+void compareSectionCards(const std::vector<std::string>& deckBlock, const SectionFileScan& s, std::vector<std::string>& problems);
+
 // ── 보고(`dynaforge-carryover-apply` v1) ─────────────────────────────────────
 struct PartResult {
     long long pid = 0;
@@ -179,11 +237,16 @@ struct PartResult {
     long long insNodeLo = 0, insNodeHi = 0, insElemLo = 0, insElemHi = 0;
     bool hasNewSection = false;
     long long newSecid = 0, newElform = 0;
+    bool newSectionShell = false;           // 판 2 모프 — 셸 두께(아래)를 싣는다(바꿔 넣기는 ELFORM 을 싣는다)
+    double newThickness = 0;
     bool hasInverted = false;
     long long invertedBefore = 0, invertedAfter = 0;
     bool hasFlipped = false;
     long long flipped = 0;
     std::vector<std::string> absorbed;
+    bool hasRefusedTransform = false;       // 판 2 review 줄 — 계획이 실은 그대로 되돌려 준다
+    std::array<double, 16> refusedM{};
+    double refusedDet = 0, refusedScale = 0, refusedOrth = 0;
 };
 struct AddedResult {
     std::string name;
@@ -202,7 +265,10 @@ struct Report {
     std::string planSha256, reportKey;
     long long planVersion = 0;
     bool planParsed = false;            // version · report_key 를 읽었다
+    std::string deckFrom;               // 판 2 deck.deck_from — 비면 null
     std::string deckShaIn, deckShaOut;  // 비면 null
+    bool includesChecked = false;       // 판 2 — 덱의 인클루드 닫힘을 deck.includes 와 대조해 같았다(아니면 null)
+    std::vector<IncludeEntry> includes;
     std::vector<Problem> problems, warnings;
     bool shifted = false;
     long long shiftNode = 0, shiftElem = 0;

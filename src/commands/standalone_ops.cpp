@@ -6,6 +6,7 @@
 #include "cli/ConsoleOutput.h"
 #include "commands/rebind.h"
 #include "parser/FragmentMap.h"
+#include "parser/IncludeClosure.h"   // 이월 적용 — 산출 · 보고가 인클루드 파일을 덮지 않게(clobberPair)
 #include "util/Sha256.h"
 #include "util/StrictJson.h"
 #include <filesystem>
@@ -1819,6 +1820,18 @@ int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
         console.error(std::string("[") + tag + "] report 가 model · plan · output 중 하나와 같다 — 다른 이름을 주세요");
         return 1;
     }
+    // ★산출 · 보고가 덱의 인클루드 파일과 같으면 거절한다 — 판 2 는 인클루드 닫힘을 읽기만 하고 그 파일은 쓰지 않는다(사용자 결정 11-07).
+    //   보고는 거절해도 쓰므로 그 전에 묻는다(보고가 인클루드를 덮으면 입력이 사라진다 — 2026-11-07 검토 #6 의 규칙)
+    {
+        std::vector<std::string> reads{modelPath, planPath};
+        for (const auto& f : KooRemapper::include_closure::readPaths(modelPath).files) reads.push_back(f.path);
+        std::string w, r;
+        if (KooRemapper::include_closure::clobberPair({outPath, reportPath}, reads, w, r)) {
+            console.error(std::string("[") + tag + "] 「" + w + "」 이 읽는 파일 「" + r + "」 과 같다 — 입력(주 덱 · 계획 · 인클루드)에 쓰지 않는다. "
+                          "output · report 를 다른 이름으로 주라");
+            return 1;
+        }
+    }
     console.println(std::string("[") + tag + "] Model : " + modelPath);
     console.println(std::string("[") + tag + "] Plan  : " + planPath);
 
@@ -1875,7 +1888,7 @@ int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
             rep.problems.push_back({0, "deck_read", assembler.getErrorMessage()});
             return refuse("덱을 읽지 못했다 — 덱을 쓰지 않았다");
         }
-        if (!assembler.applyCarryoverPlan(planPath, rep))
+        if (!assembler.applyCarryoverPlan(planPath, outPath, rep))
             return refuse("사전 검사에서 " + std::to_string(rep.problems.size()) + " 건이 걸렸다 — 계획 전체를 적용하지 않았고 덱을 쓰지 않았다");
         for (const auto& msg : assembler.infoMessages) console.println(msg);
         if (!writeOutputChecked(assembler, outputPrefix, tag, console)) {

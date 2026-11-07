@@ -9,6 +9,7 @@
 #include "parser/DeckScan.h"
 #include "parser/ElementCardLayout.h"
 #include "parser/IdRefs.h"
+#include "parser/IncludeClosure.h"
 #include "parser/KFileReader.h"
 #include "parser/NodeRefs.h"
 #include "util/Sha256.h"
@@ -48,6 +49,16 @@
 //     덱을 고치는 줄을 하나도 적용하지 않는다(리뷰 11-07)
 //   · 조각 번호는 덱 바닥(`idMaxima` — 보 · 이산 · 질량 요소까지) 위여야 한다. 아래에 걸치면 조각 전부를 **한 이동량**으로 옮긴다
 //   · 쓴 뒤 **다시 읽어** 대조하고 품질 관문(새로 뒤집힌 솔리드 · 모프가 법선을 뒤집은 셸)을 건다 — 걸리면 부르는 쪽이 산출을 지운다
+//
+// 판 2(2026-11-07 — StepForge 요청서 §10 · 사용자 결정 둘).
+//   · 인클루드가 있는 덱 — `deck.includes` 가 우리 닫힘(`include_closure::read` — §10.3 ① 과 같은 규칙)과 **글자 그대로** 같아야 받는다.
+//     사전 검사는 닫힘 전체를 **읽기만** 하고(참조 · 나눠 쓴 절점 · 세트 · 접촉 · 번호 바닥 · SECID) **주 덱만 고친다** — 고칠 자리
+//     (바꿀 PID 의 요소 · 그 절점 · `*PART` · 새 섹션이 옮길 옛 섹션 카드)가 인클루드 파일에 있으면 거절하고 목록을 낸다(「주 덱만 고침 ·
+//     인클루드면 거절」). 산출은 `*INCLUDE` 줄을 그대로 두고 덱과 같은 폴더에 써야 한다 — 그래야 같은 파일을 가리킨다
+//   · 줄마다 실린 덱 자리(그쪽 `KDeck.part_ranges()` · `*PART`)를 우리 셈과 견준다 — 손대는 줄은 거절, keep · review 는 경고
+//     (「손대는 줄은 거절 · keep/review 는 경고」)
+//   · 셸 두께가 바뀐 모프의 새 섹션(`section_<PID>.k`) — 옛 카드를 그대로 옮겨 SECID · T1~T4 만 바꾼 카드인지 줄마다 견주고,
+//     넣은 뒤 그 PID 의 `*PART` SECID 만 잇는다(답신 Q8)
 
 namespace KooRemapper {
 namespace {
@@ -116,6 +127,7 @@ struct PartLoc {
     size_t pairs = 0;                       // 그 블록의 짝 수
     long long secid = 0, mid = 0;
     bool fixedCard = true;                  // 카드가 고정폭이다(SECID 칸을 제자리에서 고칠 수 있다)
+    int fieldW = 10;                        // 그 블록의 칸 폭 — 표준 · i10 은 10, long(덱 · 키워드 `+`)은 20
 };
 struct PartIndex {
     std::map<long long, PartLoc> plain;
@@ -126,14 +138,17 @@ struct PartIndex {
 PartIndex indexParts(const std::vector<std::string>& L) {
     PartIndex idx;
     const auto blocks = cardcut::blocks(L);
+    const int deckFw = deckFieldWidth(L);
     for (size_t b = 0; b < blocks.size(); ++b) {
         const auto& blk = blocks[b];
         if (blk.kw != "*PART" && blk.kw != "*PART_TITLE") continue;
         const size_t end = (b + 1 < blocks.size()) ? blocks[b + 1].kwLine : L.size();
         if (blk.data.size() % 2 != 0) idx.oddBlocks.push_back(blk.kwLine);
+        // `*PART` 칸은 표준 · i10 에서 10, long 에서 20 이다(i10 은 8칸만 넓힌다 — Vol_I 19353) — SECID 를 제자리에서 고칠 칸 폭
+        const int w = keywordFieldWidth(L[blk.kwLine], deckFw) == 20 ? 20 : 10;
         for (size_t k = 0; k + 1 < blk.data.size(); k += 2) {
             const std::string& card = L[blk.data[k + 1]];
-            const auto c = cardcut::cut(card, 10);
+            const auto c = cardcut::cut(card, w);
             int pid = 0, sec = 0, mid = 0;
             if (c.f.empty() || !cards::toInt(c.f[0], pid) || pid <= 0) continue;
             if (c.f.size() > 1) cards::toInt(c.f[1], sec);
@@ -147,6 +162,7 @@ PartIndex indexParts(const std::vector<std::string>& L) {
             loc.secid = sec;
             loc.mid = mid;
             loc.fixedCard = c.fixed && card.find(',') == std::string::npos;
+            loc.fieldW = w;
             if (!idx.plain.emplace(pid, loc).second) idx.duplicate.insert(pid);
         }
     }
@@ -192,6 +208,8 @@ struct GridCard {
     ElemFamily family = ElemFamily::NONE;
     const std::string* keyword = nullptr;
     std::vector<std::string> f;
+    int fw = 8;                     // 그 블록의 정수 칸 폭(키워드 접미사까지)
+    bool thicknessCard = false;     // 셸 THICKNESS · BETA · MCID — Card 2(중간절점이면 Card 3 도)가 두께다
 };
 void forEachGridCard(const std::vector<std::string>& L, const Mesh& m, const std::function<void(const GridCard&)>& fn) {
     const int deckFw = deckFieldWidth(L);
@@ -217,6 +235,8 @@ void forEachGridCard(const std::vector<std::string>& L, const Mesh& m, const std
             c.family = info.family;
             c.keyword = &info.keyword;
             c.f = deckscan::cardFields(l, fw);
+            c.fw = fw;
+            c.thicknessCard = info.thicknessCard;
             int pidN = 0;
             if (info.family == ElemFamily::SOLID)
                 if (auto it = m.partSolidElform.find(deckscan::fieldInt(c.f, 1)); it != m.partSolidElform.end())
@@ -338,14 +358,93 @@ Cover refCover(const std::string& kw) {
     return Cover::Unscanned;
 }
 
-// 고정폭 10칸 하나를 제자리에서 바꾼다 — 다른 칸의 글자는 그대로(`extract_parts` putField 와 같은 꼴)
-bool putField10(std::string& line, size_t idx, long long v) {
-    char buf[32];
-    if (std::snprintf(buf, sizeof(buf), "%10lld", v) != 10) return false;
-    const size_t off = idx * 10;
-    if (line.size() < off + 10) line.resize(off + 10, ' ');
-    line.replace(off, 10, buf, 10);
+// 고정폭 칸(w 칸) 하나를 제자리에서 바꾼다 — 다른 칸의 글자는 그대로(`extract_parts` putField 와 같은 꼴)
+bool putField(std::string& line, size_t idx, int w, long long v) {
+    char buf[40];
+    if (std::snprintf(buf, sizeof(buf), "%*lld", w, v) != w) return false;
+    const size_t off = idx * static_cast<size_t>(w);
+    if (line.size() < off + static_cast<size_t>(w)) line.resize(off + static_cast<size_t>(w), ' ');
+    line.replace(off, static_cast<size_t>(w), buf, static_cast<size_t>(w));
     return true;
+}
+
+// 키워드 줄 kw 부터 다음 키워드 줄 앞까지(주석 · 빈 줄 포함) — StepForge `section_card` 가 옮기는 「옛 카드 원문」 의 자리
+std::vector<std::string> blockAt(const std::vector<std::string>& L, size_t kw) {
+    size_t j = kw + 1;
+    while (j < L.size() && !cardcut::isKeywordLine(L[j])) ++j;
+    return std::vector<std::string>(L.begin() + static_cast<long>(kw), L.begin() + static_cast<long>(j));
+}
+
+// 첫 카드의 SECID 가 secid 인 셸 섹션 블록(`*SECTION_SHELL` · `_TITLE`)의 키워드 줄들 — 첫 데이터 줄(제목 다음)의 앞 10칸으로 가린다
+// (StepForge `section_card` 와 같은 읽기). 한 키워드 아래 쌓인 둘째 카드는 보지 않는다(그 블록은 카드 하나가 아니라 거절된다).
+std::vector<size_t> shellSectionBlocks(const std::vector<std::string>& L, long long secid) {
+    std::vector<size_t> out;
+    for (size_t i = 0; i < L.size(); ++i) {
+        if (!cardcut::isKeywordLine(L[i])) continue;
+        const std::string kw = deckscan::kwBare(deckscan::keywordToken(L[i]));
+        if (kw != "*SECTION_SHELL" && kw != "*SECTION_SHELL_TITLE") continue;
+        size_t skip = kw == "*SECTION_SHELL_TITLE" ? 1 : 0;
+        for (size_t j = i + 1; j < L.size() && !cardcut::isKeywordLine(L[j]); ++j) {
+            if (cardcut::isCommentLine(L[j])) continue;
+            if (skip) { --skip; continue; }
+            int v = 0;
+            const auto f = cardcut::cut(L[j], 10).f;
+            if (!f.empty() && cards::toInt(f[0], v) && v == secid) out.push_back(i);
+            break;
+        }
+    }
+    return out;
+}
+
+// 그 PID 의 셸 요소 가운데 요소마다 두께(`*ELEMENT_SHELL_THICKNESS` · `_BETA` · `_MCID` 의 THIC1-4 · 중간절점이면 THIC5-8)에 0 이 아닌 값을
+// 적은 수 — 그 값은 섹션 두께를 덮는다(Vol_I *ELEMENT_SHELL 주석 6) · 새 섹션 두께가 그 요소에 먹지 않는다(답신 Q8 — 거절)
+long long perElementThickness(const std::vector<std::string>& L, const Mesh& m, long long pid) {
+    long long n = 0;
+    forEachGridCard(L, m, [&](const GridCard& c) {
+        if (c.family != ElemFamily::SHELL || !c.thicknessCard || deckscan::fieldInt(c.f, 1) != pid) return;
+        const int rw = realFieldWidth(c.fw);
+        bool mid = false;
+        for (size_t q = 6; q < 10; ++q) mid = mid || deckscan::fieldInt(c.f, q) > 0;
+        bool thick = false;
+        size_t j = c.line;
+        for (int card = 0; card < (mid ? 2 : 1); ++card) {
+            ++j;
+            while (j < L.size() && cardcut::isCommentLine(L[j])) ++j;
+            if (j >= L.size() || cardcut::isKeywordLine(L[j])) break;
+            const auto f = cards::fieldsFixed(L[j], rw);
+            for (size_t q = 0; q < 4 && q < f.size(); ++q) {
+                char* end = nullptr;
+                const double t = f[q].empty() ? 0.0 : std::strtod(f[q].c_str(), &end);
+                if (!f[q].empty() && (end != f[q].c_str() + f[q].size() || t != 0.0)) thick = true;   // 못 읽는 칸도 0 이라 단정하지 않는다
+            }
+        }
+        n += thick ? 1 : 0;
+    });
+    return n;
+}
+
+// 주 덱 폴더 기준 상대 경로 — `/` · `.` · `..` 를 정규화한다(StepForge `os.path.relpath(p, main_dir)` 와 같은 꼴 · 링크는 풀지 않는다)
+std::string relpathOf(const std::string& path, const std::string& mainDir) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path a = fs::absolute(path, ec).lexically_normal();
+    const fs::path b = fs::absolute(mainDir.empty() ? std::string(".") : mainDir, ec).lexically_normal();
+    const fs::path r = a.lexically_relative(b);
+    return r.empty() ? a.generic_string() : r.generic_string();
+}
+
+// 덱의 인클루드 닫힘 — LS-DYNA 가 읽는 차례로 파일마다 {주 덱 폴더 기준 상대 경로, 바이트 전부의 sha256}(판 2 `deck.includes` 와 같은 꼴)
+std::vector<carryover::IncludeEntry> closureEntries(const include_closure::Closure& c, const std::string& mainPath) {
+    std::vector<carryover::IncludeEntry> out;
+    const std::string dir = deckscan::dirOf(mainPath);
+    for (const auto& f : c.files) {
+        carryover::IncludeEntry e;
+        e.relpath = relpathOf(f.path, dir);
+        std::string bytes;
+        e.sha256 = readBytes(f.path, bytes) ? util::sha256Hex(bytes) : std::string("(읽지 못했다)");
+        out.push_back(e);
+    }
+    return out;
 }
 
 // 솔리드가 뒤집혔나(야코비안 ≤ 0) — 사면체는 6V(`Validator`), 육면체 · 쐐기는 2×2×2 가우스점의 최소(`ElementQualityChecker`)
@@ -374,15 +473,16 @@ bool shellNormal(const Mesh& m, const Element& e, Vector3D& n) {
 
 }  // namespace
 
-bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::Report& rep) {
+bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, const std::string& outputPath, carryover::Report& rep) {
     namespace fs = std::filesystem;
     carry_ = CarryExpect{};
+    carry_.base = &baseMesh_;
     std::vector<Problem>& P = rep.problems;
     auto problem = [&](long long pid, const char* kind, const std::string& detail) { P.push_back({pid, kind, detail}); };
     auto warn = [&](long long pid, const char* kind, const std::string& detail) { rep.warnings.push_back({pid, kind, detail}); };
     const std::string tag = "[apply_carryover_plan] ";
 
-    // ── ① 덱 — 지문 · 폭 · 인클루드 ────────────────────────────────────────────
+    // ── ① 덱 — 지문 · 폭 ────────────────────────────────────────────────────
     {
         std::string bytes;
         if (!readBytes(baseModelPath_, bytes)) { problem(0, "deck_read", "덱을 다시 열지 못했다: " + baseModelPath_); return false; }
@@ -391,18 +491,8 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
     const int fw = deckFieldWidth(rawLines_);
     if (fw == 20)
         problem(0, "deck_width", "long 폭 덱(*KEYWORD long=y)은 받지 않는다 — 조각의 좌표 글자를 그대로 둘 수 없고 쓰기 길이 20칸 꼴을 확정하지 않았다");
-    {
-        size_t first = 0, n = 0;
-        for (size_t i = 0; i < rawLines_.size(); ++i) {
-            if (deckscan::isDataLine(rawLines_[i])) continue;
-            if (deckscan::kwBare(deckscan::keywordToken(rawLines_[i])).rfind("*INCLUDE", 0) == 0 && n++ == 0) first = i;
-        }
-        if (n)
-            problem(0, "deck_include", "덱에 *INCLUDE 카드가 " + std::to_string(n) + " 장 있다(첫 줄 " + std::to_string(first + 1) +
-                                           ") — 계획 v1 에는 deck.includes 가 없어 인클루드 닫힘을 지문으로 지킬 수 없다(답신 Q3)");
-    }
 
-    // ── ② 계획 — 엄격히 읽는다(칸 표 하나 · 걸린 것 전부) ────────────────────────
+    // ── ② 계획 — 엄격히 읽는다(칸 표 하나 · 판마다 · 걸린 것 전부) ─────────────────
     std::string planText;
     if (!readBytes(planPath, planText)) { problem(0, "plan_read", "계획을 열지 못했다: " + planPath); return false; }
     rep.planRead = true;
@@ -413,6 +503,8 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
     rep.planParsed = true;
     rep.planVersion = plan.version;
     rep.reportKey = plan.reportKey;
+    const bool v2 = plan.version == 2;
+    if (v2) rep.deckFrom = plan.deckFrom;   // 덱을 relpath 로 찾지 않는다 — 부르는 쪽이 준 model 이 그 덱이다(sha256 이 지킨다)
     if (!plan.deckSha256.empty() && plan.deckSha256 != rep.deckShaIn)
         problem(0, "deck_sha", "이 덱의 sha256 " + rep.deckShaIn + " 이 계획의 deck.sha256 " + plan.deckSha256 + " 와 다르다 — 계획은 다른 덱(" +
                                    plan.deckRelpath + ")을 전제했다");
@@ -426,10 +518,109 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
         pr.pid = row.pid;
         pr.action = row.actionText;
         if (row.valid && row.action == Action::Keep) pr.absorbed = row.absorbed;
+        if (row.valid && row.hasRefusedTransform) {   // 판 2 — 계획이 사람 확인으로 돌린 옮김(그대로 되돌려 준다)
+            pr.hasRefusedTransform = true;
+            pr.refusedM = row.refusedM;
+            pr.refusedDet = row.refusedDet;
+            pr.refusedScale = row.refusedScale;
+            pr.refusedOrth = row.refusedOrth;
+        }
         rep.parts.push_back(pr);
         if (row.pid > 0) planPids.insert(row.pid);
         if (row.valid && row.action == Action::Keep && !row.touchesChanged.empty()) rep.touches.push_back({row.pid, row.touchesChanged});
     }
+
+    // ── ②b 인클루드 닫힘 — 판 1 은 거절 · 판 2 는 deck.includes 와 글자 그대로 대조(사용자 결정 11-07 「주 덱만 고침」) ──────────
+    // 판 2 에서 닫힘을 다 읽었으면 아래 검사는 **펼친 닫힘 전체**(S · M)를 읽기만 한다. 고치는 것은 주 덱(rawLines_)뿐이다.
+    std::vector<std::string> closureLines;
+    std::vector<include_closure::LineOrigin> origins;
+    std::vector<carryover::IncludeEntry> entries;
+    bool closureActive = false;
+    {
+        size_t first = 0, n = 0;
+        for (size_t i = 0; i < rawLines_.size(); ++i) {
+            if (deckscan::isDataLine(rawLines_[i])) continue;
+            if (deckscan::kwBare(deckscan::keywordToken(rawLines_[i])).rfind("*INCLUDE", 0) == 0 && n++ == 0) first = i;
+        }
+        if (!v2) {
+            if (n)
+                problem(0, "deck_include", "덱에 *INCLUDE 카드가 " + std::to_string(n) + " 장 있다(첫 줄 " + std::to_string(first + 1) +
+                                               ") — 계획 v1 에는 deck.includes 가 없어 인클루드 닫힘을 지문으로 지킬 수 없다(답신 Q3)");
+        } else {
+            // 닫힘을 다 못 읽으면(없는 · 못 연 이름 · 맨 *INCLUDE 가 아닌 카드 · 깊이 · 순환 · 폭을 바꾸는 카드 · 폭이 다른 인클루드) 거절 —
+            // 그쪽도 그런 덱의 계획은 내지 않는다(§10.3 ①)
+            std::string why;
+            const bool readable = n == 0 || include_closure::inlined(rawLines_, baseModelPath_, incl_, closureLines, why, &origins);
+            if (!readable) {
+                problem(0, "include_closure", "덱의 *INCLUDE 닫힘을 다 읽지 못했다 — " + why + " · 닫힘 전체를 읽어야 고치는 PID 를 가리키는 카드가 없다고 "
+                                                  "단정할 수 있다");
+                closureLines.clear();
+                origins.clear();
+            } else {
+                entries = closureEntries(incl_, baseModelPath_);
+                bool same = entries.size() == plan.includes.size();
+                for (size_t k = 0; same && k < entries.size(); ++k)
+                    same = entries[k].relpath == plan.includes[k].relpath && entries[k].sha256 == plan.includes[k].sha256;
+                if (!same) {
+                    auto show = [](const std::vector<carryover::IncludeEntry>& v) {
+                        std::string s;
+                        for (const auto& e : v) s += (s.empty() ? "" : ", ") + e.relpath + "(" + e.sha256.substr(0, 12) + "…)";
+                        return "[" + s + "]";
+                    };
+                    problem(0, "include_mismatch", "deck.includes " + show(plan.includes) + " 가 이 덱의 *INCLUDE 닫힘 " + show(entries) +
+                                                       "(주 덱 폴더 기준 상대 경로 · 파일 바이트의 sha256 · LS-DYNA 가 읽는 차례 · 파일마다 한 번)과 다르다");
+                } else {
+                    rep.includesChecked = true;
+                    rep.includes = entries;
+                }
+                closureActive = !incl_.files.empty();
+            }
+            if (closureActive) {
+                // 산출은 `*INCLUDE` 줄을 그대로 둔다 — LS-DYNA 와 우리 리더는 그 이름을 **산출 덱의 폴더**에서 찾는다(Vol_I 181591).
+                // 다른 폴더에 쓰면 그 산출이 다른 파일(또는 없는 파일)을 끌어온다 — 덱과 같은 폴더에만 쓴다
+                std::error_code ec;
+                const fs::path od = fs::weakly_canonical(fs::absolute(outputPath, ec), ec).parent_path();
+                const fs::path md = fs::weakly_canonical(fs::absolute(baseModelPath_, ec), ec).parent_path();
+                if (outputPath.empty() || od != md)
+                    problem(0, "include_output", "인클루드가 있는 덱의 산출(" + outputPath + ")은 덱과 같은 폴더(" + md.string() + ")에 써야 한다 — 산출은 "
+                                                     "*INCLUDE 줄을 그대로 두고 그 이름은 산출 덱의 폴더에서 찾는다(다른 폴더면 다른 파일을 끌어온다)");
+                // 닫힘째 읽은 메시 — 나눠 쓴 절점 · 덱 자리 · 품질 · 되읽기 대조의 「앞」(인클루드 안의 요소 · 절점까지)
+                std::string note;
+                bool complete = true;
+                try {
+                    KFileReader reader;
+                    carry_.closure = std::make_shared<const Mesh>(reader.readFileWithIncludes(baseModelPath_, &note, &complete));
+                } catch (const std::exception& e) {
+                    complete = false;
+                    note = e.what();
+                }
+                if (!complete || !carry_.closure) {
+                    problem(0, "include_closure", "인클루드 닫힘을 메시로 다 읽지 못했다 — " + note);
+                    closureActive = false;
+                    carry_.closure.reset();
+                } else {
+                    carry_.base = carry_.closure.get();
+                    carry_.includes = true;
+                    carry_.includeList = entries;
+                }
+            }
+            if (!closureActive) {   // 끌어온 파일이 없다(`*INCLUDE_PATH` 뿐) · 못 읽었다 — 펼친 사본을 들고 있지 않는다
+                closureLines.clear();
+                origins.clear();
+            }
+        }
+    }
+    // 읽기 전용으로 훑을 줄과 메시 — 인클루드가 있는 판 2 덱은 펼친 닫힘, 아니면 주 덱 그대로(사본을 짓지 않는다)
+    const std::vector<std::string>& S = closureActive ? closureLines : rawLines_;
+    const Mesh& M = *carry_.base;
+    // 훑은 줄의 자리 — 주 덱이면 「줄 N」, 인클루드면 「<상대 경로> 줄 N」(인클루드가 없으면 예전 문구 그대로)
+    auto at = [&](size_t i) -> std::string {
+        if (!closureActive || i >= origins.size()) return "줄 " + std::to_string(i + 1);
+        const auto& o = origins[i];
+        if (o.file == include_closure::LineOrigin::kMain || o.file >= entries.size()) return "줄 " + std::to_string(o.line + 1);
+        return entries[o.file].relpath + " 줄 " + std::to_string(o.line + 1);
+    };
+    auto relOfPath = [&](const std::string& path) { return relpathOf(path, deckscan::dirOf(baseModelPath_)); };
     for (const auto& a : plan.added) {
         carryover::AddedResult ar;
         ar.name = a.name;
@@ -439,12 +630,13 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
     }
 
     // ── ③ 동반 파일 — 계획 폴더 바로 아래 · 지문 ───────────────────────────────
-    // 파일의 몫은 **줄이 정한다**(morph 의 field.file · remesh · 새 파트의 fragment.file) — 확장자로 가르면 `.k` 로 이름 지은 변위장이
-    // 조각으로 읽혀 아무 문제도 남기지 않고 적용 단계에서 터졌다(리뷰 11-07). 변위장은 지문이 다르면 거절, 조각은 값으로 대조(⑧),
-    // 어느 줄도 안 쓰는 파일은 경고만 한다(덱에 닿지 않는다).
-    std::set<std::string> fieldFiles, fragmentFiles;
+    // 파일의 몫은 **줄이 정한다**(morph 의 field.file · 판 2 field.new_section.file · remesh · 새 파트의 fragment.file) — 확장자로 가르면
+    // `.k` 로 이름 지은 변위장이 조각으로 읽혀 아무 문제도 남기지 않고 적용 단계에서 터졌다(리뷰 11-07). 변위장 · 새 셸 섹션은 지문이
+    // 다르면 거절(바이트가 곧 값이다), 조각은 값으로 대조(⑧), 어느 줄도 안 쓰는 파일은 경고만 한다(덱에 닿지 않는다).
+    std::set<std::string> fieldFiles, fragmentFiles, sectionFiles;
     for (const auto& row : plan.parts) {
         if (row.action == Action::Morph && row.field.built && !row.field.file.empty()) fieldFiles.insert(row.field.file);
+        if (v2 && row.action == Action::Morph && row.field.newSection.built) sectionFiles.insert(row.field.newSection.file);
         if (row.action == Action::Remesh && row.fragment.present && row.fragment.ok && !row.fragment.file.empty())
             fragmentFiles.insert(row.fragment.file);
     }
@@ -452,6 +644,9 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
         if (a.fragment.present && a.fragment.ok && !a.fragment.file.empty()) fragmentFiles.insert(a.fragment.file);
     for (const auto& n : fieldFiles)
         if (fragmentFiles.count(n)) problem(0, "plan_inconsistent", n + " 을 변위장과 조각이 함께 가리킨다 — 한 파일의 몫은 하나다");
+    for (const auto& n : sectionFiles)
+        if (fieldFiles.count(n) || fragmentFiles.count(n))
+            problem(0, "plan_inconsistent", n + " 을 새 셸 섹션과 " + (fieldFiles.count(n) ? "변위장" : "조각") + "이 함께 가리킨다 — 한 파일의 몫은 하나다");
     const fs::path planDir = fs::path(planPath).parent_path();
     struct Companion { bool exists = false, exact = false; std::string text, mismatch; long long claimBytes = 0; };
     std::map<std::string, Companion> comp;
@@ -470,10 +665,10 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
         if (c.exact) continue;
         const std::string detail = fe.name + " — 실물 sha256 " + sha.substr(0, 16) + "… · " + std::to_string(c.text.size()) +
                                    " 바이트가 계획의 " + fe.sha256.substr(0, 16) + "… · " + std::to_string(fe.bytes) + " 바이트와 다르다";
-        if (fieldFiles.count(fe.name)) problem(0, "file_mismatch", detail);   // 변위장 — 바이트가 곧 값이다
+        if (fieldFiles.count(fe.name) || sectionFiles.count(fe.name)) problem(0, "file_mismatch", detail);   // 변위장 · 새 섹션 — 바이트가 곧 값이다
         else c.mismatch = detail;   // 조각은 값으로 대조한다(⑧) · 안 쓰는 파일은 경고(⑧ 끝)
     }
-    // 줄이 가리키는 파일 — files 에 있어야 하고 머리의 bytes 가 files 의 bytes 와 같아야 한다(계획 안의 두 주장)
+    // 줄이 가리키는 파일 — files 에 있어야 하고 머리의 bytes 가 files 의 bytes 와 같아야 한다(계획 안의 두 주장 · 새 섹션 머리는 bytes 가 없다 — -1)
     std::set<std::string> usedFiles;   // 줄이 가리킨 동반 파일 — 바이트가 달랐는데 아무 줄도 안 쓴 조각은 값으로 못 대조했다고 말한다
     auto companion = [&](long long pid, const std::string& name, long long bytes, const char* what) -> const Companion* {
         usedFiles.insert(name);
@@ -482,38 +677,41 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
             problem(pid, "file_unlisted", std::string(what) + " " + name + " 이 계획의 files 에 없다 — 지문으로 대조할 수 없다");
             return nullptr;
         }
-        if (it->second.claimBytes != bytes)
+        if (bytes >= 0 && it->second.claimBytes != bytes)
             problem(pid, "plan_inconsistent", std::string(what) + " " + name + " 의 bytes " + std::to_string(bytes) + " 가 files 의 " +
                                                   std::to_string(it->second.claimBytes) + " 와 다르다");
         return it->second.exists ? &it->second : nullptr;
     };
 
-    // ── ④ 덱 표 — *PART · 섹션 · 재질 · 격자 밖 요소 · 셸 중간절점 ─────────────────
-    const PartIndex parts = indexParts(rawLines_);
-    const auto variants = definedPartVariantIds();
-    const auto sections = definedSectionIds();
-    const auto mids = definedMaterialIds();
+    // ── ④ 덱 표 — *PART · 섹션 · 재질 · 격자 밖 요소 · 셸 중간절점(닫힘 전체 — 고칠 자리는 주 덱의 표 `partsMain`) ─────────
+    const PartIndex partsMain = indexParts(rawLines_);
+    const PartIndex partsAll = closureActive ? indexParts(S) : PartIndex{};
+    const PartIndex& parts = closureActive ? partsAll : partsMain;
+    const auto variants = definedPartVariantIds(S);
+    const auto sections = definedSectionIds(S);
+    const auto mids = definedMaterialIds(S);
     for (size_t kwl : parts.oddBlocks)
-        problem(0, "deck_part_block", "줄 " + std::to_string(kwl + 1) + " 의 *PART 블록 — 데이터 줄이 제목 · 카드 짝으로 떨어지지 않는다");
+        problem(0, "deck_part_block", at(kwl) + " 의 *PART 블록 — 데이터 줄이 제목 · 카드 짝으로 떨어지지 않는다");
     std::vector<NonGridElementCard> auxCards;   // 칸 자리를 아는 격자 밖 요소(보 · 이산 · 질량 · 안전띠 · 플롯) — 나눠 쓴 절점 · EID 겹침이 본다
-    forEachNonGridElementCard(rawLines_, [&](const NonGridElementCard& c) {
+    forEachNonGridElementCard(S, [&](const NonGridElementCard& c) {
         if (c.known) auxCards.push_back(c);
     });
     // 절점 칸을 다 읽지 못하는 요소 블록 — 키워드마다 첫 줄 · 블록 수 · 까닭(`elementBlockGap`)
     struct Gap { size_t first = 0, blocks = 0; std::string why; };
     std::map<std::string, Gap> elemGaps;
-    bool hasEnd = false;   // 넣을 블록은 쓰기가 *END 자리에 낸다(writeOutput — 대문자 머리 「*END」)
-    for (size_t i = 0; i < rawLines_.size(); ++i) {
-        if (!cardcut::isKeywordLine(rawLines_[i])) continue;
-        const std::string kw = deckscan::kwBare(deckscan::keywordToken(rawLines_[i]));
-        hasEnd = hasEnd || kw.rfind("*END", 0) == 0;
+    bool hasEnd = false;   // 넣을 블록은 쓰기가 주 덱의 *END 자리에 낸다(writeOutput — 대문자 머리 「*END」)
+    for (size_t i = 0; i < rawLines_.size(); ++i)
+        if (cardcut::isKeywordLine(rawLines_[i]) && deckscan::kwBare(deckscan::keywordToken(rawLines_[i])).rfind("*END", 0) == 0) hasEnd = true;
+    for (size_t i = 0; i < S.size(); ++i) {
+        if (!cardcut::isKeywordLine(S[i])) continue;
+        const std::string kw = deckscan::kwBare(deckscan::keywordToken(S[i]));
         if (kw.rfind("*ELEMENT_", 0) != 0) continue;
-        std::string why = elementBlockGap(rawLines_[i]);
+        std::string why = elementBlockGap(S[i]);
         if (why.empty()) continue;
         Gap& g = elemGaps[kw];
         if (g.blocks++ == 0) { g.first = i; g.why = std::move(why); }
     }
-    const auto midside = shellMidsideNodes(rawLines_, baseMesh_);
+    const auto midside = shellMidsideNodes(S, M);
     {
         std::vector<long long> unplanned;
         for (const auto& [pid, loc] : parts.plain) {
@@ -532,7 +730,7 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
             anyRefRows = anyRefRows || row.action == Action::Remesh || row.action == Action::Delete;
         }
     auto elementNodes = [&](const Element& e, const std::function<void(int)>& f) {
-        baseMesh_.forEachElementNode(e, f);
+        M.forEachElementNode(e, f);
         if (e.type != ElementType::QUAD4) return;
         auto it = midside.find(e.id);
         if (it != midside.end()) for (int n : it->second) f(n);
@@ -540,7 +738,7 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
     std::map<long long, std::vector<int>> elemsOf, nodesOf;
     {
         std::map<long long, std::set<int>> ns;
-        for (const auto& [eid, e] : baseMesh_.elements) {
+        for (const auto& [eid, e] : M.elements) {
             if (!geometryPids.count(e.partId)) continue;
             elemsOf[e.partId].push_back(eid);
             auto& s = ns[e.partId];
@@ -555,7 +753,7 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
     if (anyGeometry && !elemGaps.empty()) {
         std::string list;
         for (const auto& [kw, g] : elemGaps)
-            list += (list.empty() ? "" : ", ") + kw + "(줄 " + std::to_string(g.first + 1) + " · 블록 " + std::to_string(g.blocks) + " · " + g.why + ")";
+            list += (list.empty() ? "" : ", ") + kw + "(" + at(g.first) + " · 블록 " + std::to_string(g.blocks) + " · " + g.why + ")";
         problem(0, "opaque_elements", "덱에 절점 칸을 다 읽지 못하는 요소 블록이 있다 — " + list +
                                           " · 그 요소가 고치는 PID 의 절점 · 요소를 쓰는지 단정할 수 없고 번호 바닥도 그 EID 를 모른다");
     }
@@ -566,11 +764,11 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
     bool eidSuspect = false;
     if (anyGeometry) {
         size_t gridCards = 0;
-        forEachGridCard(rawLines_, baseMesh_, [&](const GridCard& c) { gridCards += deckscan::fieldInt(c.f, 0) > 0 ? 1 : 0; });
-        eidSuspect = gridCards != baseMesh_.elements.size();
+        forEachGridCard(S, M, [&](const GridCard& c) { gridCards += deckscan::fieldInt(c.f, 0) > 0 ? 1 : 0; });
+        eidSuspect = gridCards != M.elements.size();
         std::unordered_set<int> auxSeen;
         for (const auto& c : auxCards)
-            if (c.eid > 0 && (baseMesh_.elements.count(c.eid) || !auxSeen.insert(c.eid).second)) eidSuspect = true;
+            if (c.eid > 0 && (M.elements.count(c.eid) || !auxSeen.insert(c.eid).second)) eidSuspect = true;
     }
     if (eidSuspect) {
         std::vector<std::string> kwNames;
@@ -581,14 +779,14 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
             if (eid <= 0) return;
             auto ki = kwIndex.emplace(kw, static_cast<uint32_t>(kwNames.size()));
             if (ki.second) kwNames.push_back(kw);
-            const auto at = std::make_pair(ki.first->second, line);
-            auto f = first.emplace(eid, at);
+            const auto here = std::make_pair(ki.first->second, line);
+            auto f = first.emplace(eid, here);
             if (f.second) return;
             auto& d = dup[eid];
             if (d.empty()) d.push_back(f.first->second);
-            d.push_back(at);
+            d.push_back(here);
         };
-        forEachGridCard(rawLines_, baseMesh_, [&](const GridCard& c) { note(deckscan::fieldInt(c.f, 0), *c.keyword, c.line); });
+        forEachGridCard(S, M, [&](const GridCard& c) { note(deckscan::fieldInt(c.f, 0), *c.keyword, c.line); });
         for (const auto& c : auxCards) note(c.eid, c.keyword, c.line);
         if (!dup.empty()) {
             std::string list;
@@ -599,7 +797,7 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
                 if (k++ == 10) list += " …";
                 if (k > 10) continue;
                 std::string where;
-                for (const auto& o : occ) where += (where.empty() ? "" : " · ") + kwNames[o.first] + " 줄 " + std::to_string(o.second + 1);
+                for (const auto& o : occ) where += (where.empty() ? "" : " · ") + kwNames[o.first] + " " + at(o.second);
                 list += (list.empty() ? "" : ", ") + ("EID " + std::to_string(eid) + "(" + where + ")");
             }
             problem(0, "eid_collision", "요소 번호가 겹친다 " + std::to_string(dup.size()) + " 개 — " + list + " · 키워드 " + join(kws) +
@@ -607,15 +805,112 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
         }
     }
 
-    // ── ⑤ 줄마다 — 덱에 있나 · 처리별 검사 ────────────────────────────────────
+    // ── ④b 판 2 — 줄마다의 덱 자리(그쪽 `KDeck.part_ranges()` 와 같은 셈) · 인클루드 파일이 정의한 고칠 절점 ─────────────
+    // 덱 자리: 그 PID 의 솔리드 · 셸 · 두꺼운 셸 요소(닫힘 전체 · 리더가 담은 격자 요소)가 가리킨 서로 다른 절점(2차 중간절점 · 8절점 셸의
+    // N5-N8 포함 · 0 제외)의 최소 · 최대 · 수, 요소 번호의 최소 · 최대 · 수, 둘 다 빈 데가 없나(contiguous — 요소가 없으면 null),
+    // `*PART` 의 SECID · MID(없으면 null). 번호 목록(지우기 · 바꿔 넣기)은 늘 그 PID 의 요소에서 다시 구한다 — 범위로 고르지 않는다(§10.3 ⑤)
+    struct Place {
+        bool hasNode = false, hasElem = false, hasSecid = false, hasMid = false;
+        long long nodeLo = 0, nodeHi = 0, nodeCount = 0, elemLo = 0, elemHi = 0, elemCount = 0, secid = 0, mid = 0;
+        int contiguous = -1;
+    };
+    std::map<long long, Place> places;
+    if (v2) {
+        std::map<long long, std::vector<const Element*>> byPid;   // 계획에 줄이 있는 PID 만(EID 오름차순 — 메시가 그 차례다)
+        for (const auto& [eid, e] : M.elements) {
+            (void)eid;
+            if (planPids.count(e.partId)) byPid[e.partId].push_back(&e);
+        }
+        std::vector<int> buf;
+        for (const auto& [pid, es] : byPid) {
+            Place pl;
+            pl.hasElem = true;
+            pl.elemLo = es.front()->id;
+            pl.elemHi = es.back()->id;
+            pl.elemCount = static_cast<long long>(es.size());
+            buf.clear();
+            for (const Element* e : es) elementNodes(*e, [&](int n) { if (n > 0) buf.push_back(n); });
+            std::sort(buf.begin(), buf.end());
+            buf.erase(std::unique(buf.begin(), buf.end()), buf.end());
+            pl.nodeCount = static_cast<long long>(buf.size());
+            if (!buf.empty()) { pl.hasNode = true; pl.nodeLo = buf.front(); pl.nodeHi = buf.back(); }
+            pl.contiguous = pl.hasNode && pl.nodeHi - pl.nodeLo + 1 == pl.nodeCount && pl.elemHi - pl.elemLo + 1 == pl.elemCount ? 1 : 0;
+            places[pid] = pl;
+        }
+        for (long long pid : planPids) {
+            Place& pl = places[pid];
+            if (auto it = parts.plain.find(pid); it != parts.plain.end()) {
+                pl.hasSecid = pl.hasMid = true;
+                pl.secid = it->second.secid;
+                pl.mid = it->second.mid;
+            }
+        }
+    }
+    // 그 줄의 덱 자리를 우리 셈과 견준 차이(칸마다 「계획 · 우리」) — 비면 같다
+    auto placeDiff = [&](const carryover::PartDeck& d, const Place& o) {
+        auto rng = [](bool has, long long lo, long long hi) { return has ? "[" + std::to_string(lo) + ", " + std::to_string(hi) + "]" : std::string("null"); };
+        auto opt = [](bool has, long long v) { return has ? std::to_string(v) : std::string("null"); };
+        auto tri = [](int c) { return c < 0 ? std::string("null") : (c ? std::string("true") : std::string("false")); };
+        std::vector<std::string> out;
+        auto cmp = [&](const char* name, const std::string& a, const std::string& b) {
+            if (a != b) out.push_back(std::string(name) + " 계획 " + a + " · 우리 " + b);
+        };
+        cmp("node", rng(d.hasNode, d.nodeLo, d.nodeHi), rng(o.hasNode, o.nodeLo, o.nodeHi));
+        cmp("node_count", std::to_string(d.nodeCount), std::to_string(o.nodeCount));
+        cmp("elem", rng(d.hasElem, d.elemLo, d.elemHi), rng(o.hasElem, o.elemLo, o.elemHi));
+        cmp("elem_count", std::to_string(d.elemCount), std::to_string(o.elemCount));
+        cmp("contiguous", tri(d.contiguous), tri(o.contiguous));
+        cmp("secid", opt(d.hasSecid, d.secid), opt(o.hasSecid, o.secid));
+        cmp("mid", opt(d.hasMid, d.mid), opt(o.hasMid, o.mid));
+        std::string s;
+        for (const auto& x : out) s += (s.empty() ? "" : " · ") + x;
+        return s;
+    };
+    // 인클루드 파일의 `*NODE` 가 정의한 고칠 절점 → 그 파일(닫힘 색인) — 주 덱만 고치므로 그런 절점은 옮기지도 지우지도 못한다
+    std::unordered_map<int, size_t> includeNodeFile;
+    if (closureActive) {
+        std::unordered_set<int> U;
+        for (const auto& [pid, ns] : nodesOf) {
+            (void)pid;
+            U.insert(ns.begin(), ns.end());
+        }
+        for (size_t fi = 0; fi < incl_.files.size() && !U.empty(); ++fi) {
+            const auto& L = incl_.files[fi].lines;
+            bool inNode = false;
+            int nfw = fw;
+            for (const auto& l : L) {
+                if (cardcut::isKeywordLine(l)) {
+                    inNode = deckscan::kwBare(deckscan::keywordToken(l)) == "*NODE";
+                    nfw = keywordFieldWidth(l, fw);
+                    continue;
+                }
+                if (!inNode || !deckscan::isDataLine(l)) continue;
+                int nid = 0;
+                double xyz[3];
+                if (deckscan::readNodeLine(l, nfw, nid, xyz) && U.count(nid)) includeNodeFile.emplace(nid, fi);
+            }
+        }
+    }
+
+    // ── ⑤ 줄마다 — 덱에 있나 · 덱 자리 · 고칠 자리가 주 덱인가 · 처리별 검사 ─────────────────────────
     std::map<long long, carryover::Field> fields;
-    std::set<long long> ready;   // 덱에서 찾았고 요소가 있는 고칠 PID
+    std::set<long long> ready;   // 덱에서 찾았고 요소가 있는 고칠 PID(고칠 자리가 전부 주 덱에 있다)
     for (const auto& row : plan.parts) {
         if (!row.valid) continue;
         const long long pid = row.pid;
         const bool plain = parts.plain.count(pid) != 0;
         const bool variant = variants.count(static_cast<int>(pid)) != 0;
         if (!plain && !variant) { problem(pid, "part_missing", "PID " + std::to_string(pid) + " 가 덱의 *PART 에 없다"); continue; }
+        // 판 2 — 줄의 덱 자리가 우리 셈과 다르면 손대는 줄은 거절, keep · review 는 경고(사용자 결정 11-07)
+        if (v2 && row.deck.present) {
+            const std::string diff = placeDiff(row.deck, places[pid]);
+            if (!diff.empty()) {
+                if (geometryAction(row.action))
+                    problem(pid, "deck_range", "PID 의 덱 자리가 계획과 다르다 — " + diff + " · 계획이 본 덱과 다른 PID 를 고치지 않는다");
+                else
+                    warn(pid, "deck_range", "PID 의 덱 자리가 계획과 다르다 — " + diff + " · " + row.actionText + " 줄이라 손대지 않는다");
+            }
+        }
         if (!geometryAction(row.action)) continue;
         if (!plain) {
             problem(pid, "part_variant", "PID 가 맨 *PART 가 아니라 " + variants.at(static_cast<int>(pid)) +
@@ -627,6 +922,41 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
                                                (variant ? "(맨 *PART 와 " + variants.at(static_cast<int>(pid)) + ")" : std::string()));
             continue;
         }
+        // 판 2 · 인클루드 덱 — 고칠 자리(그 PID 의 `*PART` · 요소 · 그 요소의 절점)가 전부 주 덱에 있어야 한다(사용자 결정 11-07 「주 덱만
+        // 고침 · 인클루드면 거절」 — 인클루드 파일은 쓰지 않는다). 새 섹션이 옮길 옛 섹션 카드는 아래 ⑧b 가 본다
+        if (closureActive) {
+            std::map<std::string, std::vector<std::string>> where;   // 파일 → 무엇
+            if (!partsMain.plain.count(pid)) {
+                const std::string f = include_closure::partFile(incl_, static_cast<int>(pid));
+                where[f.empty() ? std::string("(인클루드)") : relOfPath(f)].push_back("*PART 카드");
+            }
+            long long inInclude = 0;
+            for (int eid : elemsOf[pid]) {
+                auto it = baseMesh_.elements.find(eid);
+                if (it == baseMesh_.elements.end() || it->second.partId != pid) ++inInclude;
+            }
+            if (inInclude) {
+                auto f = includeElemPidFile_.find(static_cast<int>(pid));
+                where[f == includeElemPidFile_.end() ? std::string("(인클루드)") : relOfPath(f->second)].push_back(
+                    "요소 " + std::to_string(inInclude) + " 개");
+            }
+            std::map<size_t, std::vector<int>> nodeFiles;
+            for (int n : nodesOf[pid])
+                if (auto it = includeNodeFile.find(n); it != includeNodeFile.end()) nodeFiles[it->second].push_back(n);
+            for (const auto& [fi, ns] : nodeFiles)
+                where[entries[fi].relpath].push_back("절점 " + std::to_string(ns.size()) + " 개(" + idList(ns, 8) + ")");
+            if (!where.empty()) {
+                std::string list;
+                for (const auto& [f, what] : where) {
+                    std::string w;
+                    for (const auto& x : what) w += (w.empty() ? "" : " · ") + x;
+                    list += (list.empty() ? "" : " / ") + f + ": " + w;
+                }
+                problem(pid, "include_edit", "PID " + std::to_string(pid) + "(" + row.actionText + ")를 고칠 자리가 인클루드 파일에 있다 — " + list +
+                                                 " · 주 덱만 고친다(인클루드 파일은 쓰지 않는다 — 사용자 결정 11-07)");
+                continue;
+            }
+        }
         if (elemsOf[pid].empty()) {
             problem(pid, "part_empty", "PID 의 요소가 메시에 없다 — 리더가 읽지 못한 블록에 있을 수 있다");
             continue;
@@ -634,7 +964,7 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
         {
             std::vector<int> undefinedNodes;
             for (int n : nodesOf[pid])
-                if (!baseMesh_.getNode(n)) undefinedNodes.push_back(n);
+                if (!M.getNode(n)) undefinedNodes.push_back(n);
             if (!undefinedNodes.empty()) {
                 problem(pid, "node_undefined", "PID 의 요소가 정의되지 않은 절점을 가리킨다 — " + idList(undefinedNodes));
                 continue;
@@ -689,7 +1019,9 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
                 if (row.hasInstead)
                     problem(pid, "morph_instead", "morph 줄에 instead(조각)가 있다 — 우리는 변위장만 쓴다(답신 Q1). 그 줄은 적용하지 않는다");
                 if (!row.field.built) { problem(pid, "field_missing", "변위장을 못 지었다 — " + row.field.why); break; }
-                if (row.field.hasThickness)
+                // 판 1 은 셸 두께가 바뀐 모프를 받지 않는다. 판 2 는 new_section 이 정한다 — null 이면 섹션을 그대로 두고(§10.2) 지은 카드면
+                // ⑧b 가 넣는다
+                if (!v2 && row.field.hasThickness)
                     problem(pid, "field_thickness", "셸 두께가 바뀐 모프 — v1 에는 field.new_section 이 없어 섹션을 잇지 못한다(답신 Q8 · v2)");
                 const Companion* c = companion(pid, row.field.file, row.field.bytes, "변위장");
                 if (!c || !c->exact) break;   // 없거나 지문이 다르면 읽지 않는다(이미 말했다)
@@ -753,7 +1085,7 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
         std::unordered_map<int, std::set<long long>> gridUsers;
         std::unordered_map<int, std::set<std::string>> auxUsers;
         if (!U.empty()) {
-            for (const auto& [eid, e] : baseMesh_.elements) {
+            for (const auto& [eid, e] : M.elements) {
                 (void)eid;
                 elementNodes(e, [&](int n) {
                     if (U.count(n)) gridUsers[n].insert(e.partId);
@@ -807,31 +1139,31 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
         // 블록마다 한 문장으로 모은다 — 절점 세트 한 블록이 수천 줄이다
         struct Hit { long long count = 0; size_t firstLine = 0; std::set<int> values; std::string kw; };
         std::map<std::pair<long long, size_t>, Hit> nodeHits;
-        const auto nr = noderefs::find(rawLines_, fw, [&](int v) { return nodeOwner.count(v) != 0; });
+        const auto nr = noderefs::find(S, fw, [&](int v) { return nodeOwner.count(v) != 0; });
         for (const auto& r : nr.refs) {
             auto& h = nodeHits[{nodeOwner.at(r.value), r.kwLine}];
-            if (h.count++ == 0) { h.firstLine = r.line; h.kw = noderefs::keywordOf(rawLines_, r); }
+            if (h.count++ == 0) { h.firstLine = r.line; h.kw = noderefs::keywordOf(S, r); }
             if (h.values.size() < 12) h.values.insert(r.value);
         }
         for (const auto& [key, h] : nodeHits)
-            problem(key.first, "node_ref", h.kw + "(줄 " + std::to_string(key.second + 1) + ")이 이 PID 의 절점을 " + std::to_string(h.count) +
-                                               " 곳 가리킨다(첫 줄 " + std::to_string(h.firstLine + 1) + " · 절점 " + idList(h.values, 10) +
+            problem(key.first, "node_ref", h.kw + "(" + at(key.second) + ")이 이 PID 의 절점을 " + std::to_string(h.count) +
+                                               " 곳 가리킨다(첫 " + at(h.firstLine) + " · 절점 " + idList(h.values, 10) +
                                                ") — 바꿔 넣거나 지우면 그 참조를 옮길 수 없다");
         std::map<std::tuple<long long, size_t, int>, Hit> idHits;
-        const auto ir = idrefs::find(rawLines_, fw, [&](idrefs::Axis ax, int v) {
+        const auto ir = idrefs::find(S, fw, [&](idrefs::Axis ax, int v) {
             return ax == idrefs::Axis::Elem ? elemOwner.count(v) != 0 : deletePids.count(v) != 0;
         });
         for (const auto& r : ir.refs) {
             const long long owner = r.axis == idrefs::Axis::Elem ? elemOwner.at(r.value) : r.value;
             auto& h = idHits[{owner, r.kwLine, r.axis == idrefs::Axis::Elem ? 0 : 1}];
-            if (h.count++ == 0) { h.firstLine = r.line; h.kw = idrefs::keywordOf(rawLines_, r); }
+            if (h.count++ == 0) { h.firstLine = r.line; h.kw = idrefs::keywordOf(S, r); }
             if (h.values.size() < 12) h.values.insert(r.value);
         }
         for (const auto& [key, h] : idHits) {
             const bool elem = std::get<2>(key) == 0;
             problem(std::get<0>(key), elem ? "elem_ref" : "part_ref",
-                    h.kw + "(줄 " + std::to_string(std::get<1>(key) + 1) + ")이 이 PID 의 " + (elem ? "요소" : "PID") + "를 " +
-                        std::to_string(h.count) + " 곳 가리킨다(첫 줄 " + std::to_string(h.firstLine + 1) +
+                    h.kw + "(" + at(std::get<1>(key)) + ")이 이 PID 의 " + (elem ? "요소" : "PID") + "를 " +
+                        std::to_string(h.count) + " 곳 가리킨다(첫 " + at(h.firstLine) +
                         (elem ? " · 요소 " + idList(h.values, 10) : std::string()) + ") — " +
                         (elem ? "바꿔 넣거나 지우면 그 참조를 옮길 수 없다" : "지우면 그 참조가 매달린다(PID 로 건 참조는 지우기를 막는다)"));
         }
@@ -839,7 +1171,7 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
         {
             std::vector<std::string> auxOnly;
             bool inAux = false;
-            for (const auto& l : rawLines_) {
+            for (const auto& l : S) {
                 const size_t g = l.find_first_not_of(" \t");
                 if (g != std::string::npos && l[g] == '*') {
                     const AuxElementCard a = auxElementCard(l);
@@ -867,9 +1199,9 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
             struct Uncov { size_t first = 0, blocks = 0; bool partOnly = false; };
             std::map<std::string, Uncov> unscanned;
             const bool deleting = !deletePids.empty();
-            for (size_t i = 0; i < rawLines_.size(); ++i) {   // 키워드 줄만 본다(큰 *NODE 블록의 줄 표를 짓지 않는다)
-                if (!cardcut::isKeywordLine(rawLines_[i])) continue;
-                const std::string kw = deckscan::kwBare(deckscan::keywordToken(rawLines_[i]));
+            for (size_t i = 0; i < S.size(); ++i) {   // 키워드 줄만 본다(큰 *NODE 블록의 줄 표를 짓지 않는다)
+                if (!cardcut::isKeywordLine(S[i])) continue;
+                const std::string kw = deckscan::kwBare(deckscan::keywordToken(S[i]));
                 if (kw.rfind("*SET_", 0) == 0 || kw.rfind("*INCLUDE", 0) == 0) continue;   // 세트 표(아래) · 인클루드(①)가 본다
                 Cover cv;
                 if (kw.rfind("*ELEMENT_", 0) == 0) {
@@ -882,9 +1214,9 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
                     cv = refCover(kw);
                     // *LOAD_NODE_POINT 의 M1-M3(칸 6-8)는 따름 힘의 절점이다(Vol_I *LOAD_NODE — DOF 4 · 8). 정본은 칸 1 만 읽는다
                     if (cv == Cover::Scanned && kw.rfind("*LOAD_NODE_POINT", 0) == 0)
-                        for (size_t d = i + 1; d < rawLines_.size() && !cardcut::isKeywordLine(rawLines_[d]); ++d) {
-                            if (cardcut::isCommentLine(rawLines_[d])) continue;
-                            const auto c = cardcut::cut(rawLines_[d], fw >= 20 ? 20 : 10);
+                        for (size_t d = i + 1; d < S.size() && !cardcut::isKeywordLine(S[d]); ++d) {
+                            if (cardcut::isCommentLine(S[d])) continue;
+                            const auto c = cardcut::cut(S[d], fw >= 20 ? 20 : 10);
                             for (size_t q = 5; q < 8 && q < c.f.size(); ++q) {
                                 int v = 0;
                                 if (!deckscan::trim(c.f[q]).empty() && (!cards::toInt(c.f[q], v) || v != 0)) cv = Cover::Unscanned;
@@ -896,17 +1228,17 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
                 if (u.blocks++ == 0) { u.first = i; u.partOnly = cv == Cover::PartOnly; }
             }
             for (const auto& [kw, u] : unscanned)
-                problem(0, "ref_unscanned", kw + "(줄 " + std::to_string(u.first + 1) + " · 블록 " + std::to_string(u.blocks) + ") — " +
+                problem(0, "ref_unscanned", kw + "(" + at(u.first) + " · 블록 " + std::to_string(u.blocks) + ") — " +
                                                 (u.partOnly ? std::string("파트 ID 칸을 정본이 읽지 않는다 · 지우는 PID 를 가리키지 않는다고 증명할 수 없다")
                                                             : std::string("절점 · 요소 · 파트 칸을 정본(NodeRefs · IdRefs)이 읽지 않고 참조 없는 키워드 표에도 없다 · "
                                                                           "바꿔 넣거나 지우는 PID 를 가리키지 않는다고 증명할 수 없다")));
         }
         // 접촉 면 — 세트로 건 면은 정본(`ct_setMembers`)으로 풀어 본다(방언 `_ADD` · `_GENERATE` … 까지)
-        auto sets = ct_parseSets(rawLines_);
-        ct_resolveSetRanges(sets, baseMesh_);
-        for (const auto& c : ct_parseContacts(rawLines_)) {
+        auto sets = ct_parseSets(S);
+        ct_resolveSetRanges(sets, M);
+        for (const auto& c : ct_parseContacts(S)) {
             if (c.cardLine[0] < 0) continue;   // Card 1 이 없으면 정본이 단정하지 않았다고 이미 셌다
-            const std::string where = c.fullKeyword + "(줄 " + std::to_string(c.startLine + 1) + ")";
+            const std::string where = c.fullKeyword + "(" + at(static_cast<size_t>(c.startLine)) + ")";
             const std::pair<const char*, std::pair<int, int>> sides[] = {{"SURFA", {c.ssid, c.sstyp}}, {"SURFB", {c.msid, c.mstyp}}};
             for (const auto& [side, s] : sides) {
                 const int id = s.first, st = s.second;
@@ -946,8 +1278,8 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
             const bool elemSet = type == "SHELL" || type == "SOLID" || type == "TSHELL" || type == "BEAM";
             const bool nodeSet = type == "NODE" || type == "SEGMENT";
             const bool partSet = type == "PART";
-            const std::string where = deckscan::kwBare(deckscan::keywordToken(rawLines_[static_cast<size_t>(s.startLine)])) + " " +
-                                      std::to_string(s.id) + "(줄 " + std::to_string(s.startLine + 1) + ")";
+            const std::string where = deckscan::kwBare(deckscan::keywordToken(S[static_cast<size_t>(s.startLine)])) + " " +
+                                      std::to_string(s.id) + "(" + at(static_cast<size_t>(s.startLine)) + ")";
             if (!elemSet && !nodeSet && !partSet) {
                 problem(0, "ref_unscanned", where + " — 세트 종류 " + s.type +
                                                 " 의 멤버를 정본도 세트 해석기도 읽지 않는다 · 바꿔 넣거나 지우는 PID 를 담지 않는다고 증명할 수 없다");
@@ -1009,7 +1341,7 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
         const bool shellPart = !j.scan.elems.empty() && shells == j.scan.elems.size();
         if (!mids.count(static_cast<int>(h.mid))) fp.push_back("MID " + std::to_string(h.mid) + " 이 덱에 없다");
         if (!j.added) {
-            const PartLoc& loc = parts.plain.at(j.pid);
+            const PartLoc& loc = partsMain.plain.at(j.pid);   // 바꿔 넣는 PID 의 `*PART` 는 주 덱에 있다(⑤ — 아니면 ready 가 아니다)
             if (h.mid != loc.mid)
                 fp.push_back("fragment.mid " + std::to_string(h.mid) + " 가 덱 *PART 의 MID " + std::to_string(loc.mid) + " 와 다르다 — 바꿔 넣기는 덱의 MID 를 그대로 쓴다");
             if (!h.newSection.present && h.secid != loc.secid)
@@ -1022,6 +1354,10 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
             const int ns = static_cast<int>(h.newSection.secid);
             if (sections.count(ns)) fp.push_back("new_section.secid " + std::to_string(ns) + " 가 덱에 이미 있다(" + sections.at(ns) + ")");
             if (!newSecids.insert(ns).second) fp.push_back("new_section.secid " + std::to_string(ns) + " 를 다른 조각도 쓴다");
+            // 판 2 — 새 SECID 는 덱(닫힘 전체)의 가장 큰 SECID 위로 매긴다(§10.3 ③)
+            if (v2 && ns <= plan.maxSecid)
+                problem(j.pid, "secid_order", h.file + " — new_section.secid " + std::to_string(ns) + " 가 deck.max.secid " +
+                                                  std::to_string(plan.maxSecid) + " 위가 아니다(§10.3 ③)");
         } else if (!j.scan.elems.empty()) {
             auto it = sections.find(static_cast<int>(h.secid));
             if (it == sections.end()) fp.push_back("SECID " + std::to_string(h.secid) + " 가 덱에 없다");
@@ -1035,6 +1371,109 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
             else
                 problem(j.pid, "file_mismatch", c->mismatch);
         }
+    }
+
+    // ── ⑧b 판 2 — 셸 두께가 바뀐 모프의 새 섹션(요청서 §10.2 · §10.3 ② ③ · 답신 Q8) ─────────────────────────
+    // 카드는 덱의 옛 카드(그 PID `*PART` 의 SECID — 주 덱)를 그대로 옮겨 SECID(Card 1 앞 10칸) · T1~T4(Card 2 앞 40칸)만 바꾼 것이어야
+    // 한다. SECID 는 계획과 같고 · 닫힘에 없고 · deck.max.secid 위이며 · 조각의 새 섹션 뒤에 모프 줄 차례로 잇는다. 요소마다 두께를
+    // 싣는 PID 면 새 섹션 두께가 먹지 않아 거절한다. 못 지은 꼴(secid · file null)은 그 줄이 조각으로 물러섰다는 뜻이다 — 우리는 변위장만
+    // 쓴다(답신 Q1 · instead 는 morph_instead 가 따로 말한다).
+    struct SecJob {
+        long long pid = 0, secid = 0;
+        double thickness = 0;
+        std::string file;
+        carryover::SectionFileScan scan;
+    };
+    std::map<size_t, SecJob> secJobs;   // 계획 줄 → 넣을 새 섹션
+    if (v2) {
+        long long fragMax = 0;   // 조각의 새 섹션(줄 차례로 먼저 매긴다 — §10.3 ③)
+        for (const auto& row : plan.parts)
+            if (row.valid && row.action == Action::Remesh && row.fragment.ok && row.fragment.newSection.present)
+                fragMax = std::max(fragMax, row.fragment.newSection.secid);
+        for (const auto& a : plan.added)
+            if (a.valid && a.fragment.present && a.fragment.ok && a.fragment.newSection.present)
+                fragMax = std::max(fragMax, a.fragment.newSection.secid);
+        std::set<long long> morphSecids;
+        long long prev = 0;
+        for (size_t k = 0; k < plan.parts.size(); ++k) {
+            const auto& row = plan.parts[k];
+            if (!row.valid || row.action != Action::Morph || !row.field.newSection.present) continue;   // null — 섹션은 그대로(§10.2)
+            const long long pid = row.pid;
+            const auto& ns = row.field.newSection;
+            const std::string sid = std::to_string(ns.secid);
+            if (!ns.built) {
+                problem(pid, "new_section", "셸 두께가 바뀌었는데 StepForge 가 새 섹션을 못 지었다 — " +
+                                                (ns.why.empty() ? std::string("까닭을 적지 않았다") : ns.why) +
+                                                " · 그 줄은 조각(instead)으로 물러섰다 — 우리는 변위장만 쓴다(답신 Q1)");
+                continue;
+            }
+            if (auto it = sections.find(static_cast<int>(ns.secid)); it != sections.end())
+                problem(pid, "secid_collision", "new_section.secid " + sid + " 가 덱(닫힘)에 이미 있다(" + it->second + ")");
+            if (newSecids.count(ns.secid)) problem(pid, "secid_collision", "new_section.secid " + sid + " 가 조각의 새 섹션과 겹친다");
+            if (!morphSecids.insert(ns.secid).second) problem(pid, "secid_collision", "new_section.secid " + sid + " 를 다른 모프 줄도 쓴다");
+            if (ns.secid <= plan.maxSecid)
+                problem(pid, "secid_order", "new_section.secid " + sid + " 가 deck.max.secid " + std::to_string(plan.maxSecid) + " 위가 아니다(§10.3 ③)");
+            if (ns.secid <= fragMax)
+                problem(pid, "secid_order", "new_section.secid " + sid + " — 조각의 새 섹션(가장 큰 SECID " + std::to_string(fragMax) +
+                                                ")을 먼저 매기고 모프 줄은 그 뒤에 잇는다(§10.3 ③)");
+            if (ns.secid <= prev)
+                problem(pid, "secid_order", "new_section.secid " + sid + " — 모프 줄의 새 섹션은 줄 차례로 잇는다(앞 줄 " + std::to_string(prev) + ")");
+            prev = std::max(prev, ns.secid);
+            if (row.field.hasElementThickness)
+                problem(pid, "element_thickness", "계획이 이 PID 의 셸 요소 " + std::to_string(row.field.elementThicknessCount) +
+                                                      " 개가 요소마다 두께를 싣는다고 했다(field.element_thickness) — 그 두께가 섹션 두께를 덮어 새 섹션이 먹지 않는다(답신 Q8 — 거절)");
+            SecJob sj;
+            sj.pid = pid;
+            sj.secid = ns.secid;
+            sj.thickness = ns.thickness;
+            sj.file = ns.file;
+            std::vector<std::string> fp;
+            bool scanned = false;
+            const Companion* c = companion(pid, ns.file, -1, "새 셸 섹션");
+            if (c && c->exact) {   // 없거나 지문이 다르면 읽지 않는다(이미 말했다)
+                scanned = carryover::scanSectionFile(splitLines(c->text), sj.scan, fp);
+                if (scanned && sj.scan.secid != ns.secid)
+                    fp.push_back("카드의 SECID " + std::to_string(sj.scan.secid) + " 가 new_section.secid " + sid + " 와 다르다");
+                if (scanned)
+                    for (int t = 0; t < 4; ++t)
+                        if (!(std::fabs(sj.scan.t[t] - ns.thickness) <= 1e-9 * std::max(1.0, std::fabs(ns.thickness)))) {
+                            fp.push_back("카드의 T" + std::to_string(t + 1) + " " + num(sj.scan.t[t]) + " 가 new_section.thickness " + num(ns.thickness) +
+                                         " 와 다르다(T1~T4 넷 다 그 값이어야 한다)");
+                            break;
+                        }
+            }
+            // 덱의 옛 카드 — 그 PID `*PART`(주 덱 — ⑤ 를 지났으면 ready)의 SECID 로 찾는다. 주 덱에 하나뿐이어야 하고 인클루드에 있으면 거절
+            if (ready.count(pid)) {
+                const PartLoc& loc = partsMain.plain.at(pid);
+                if (!loc.fixedCard)
+                    fp.push_back("덱 *PART 카드(줄 " + std::to_string(loc.cardLine + 1) + ")가 고정폭이 아니다 — SECID 칸을 제자리에서 고칠 수 없다");
+                std::vector<std::string> incFiles;
+                if (closureActive)
+                    for (size_t fi = 0; fi < incl_.files.size(); ++fi)
+                        if (definedSectionIds(incl_.files[fi].lines).count(static_cast<int>(loc.secid))) incFiles.push_back(entries[fi].relpath);
+                const auto blocks = shellSectionBlocks(rawLines_, loc.secid);
+                if (!incFiles.empty()) {
+                    std::set<std::string> u(incFiles.begin(), incFiles.end());
+                    problem(pid, "include_edit", "PID " + std::to_string(pid) + "(morph)의 옛 섹션 SECID " + std::to_string(loc.secid) + " 카드가 인클루드 파일에 있다 — " +
+                                                     join(u) + " · 새 섹션은 그 카드를 옮긴다 — 주 덱만 고친다(사용자 결정 11-07)");
+                } else if (blocks.size() != 1) {
+                    fp.push_back(blocks.empty() ? "덱 *PART 의 옛 SECID " + std::to_string(loc.secid) +
+                                                      " 이 주 덱의 *SECTION_SHELL(_TITLE) 블록 첫 카드가 아니다(다른 섹션 꼴 · 쌓인 둘째 카드) — 옮긴 카드를 견줄 수 없다"
+                                                : "옛 SECID " + std::to_string(loc.secid) + " 의 셸 섹션 블록이 둘 이상이다(줄 " + std::to_string(blocks[0] + 1) +
+                                                      " · " + std::to_string(blocks[1] + 1) + ")");
+                } else {
+                    if (keywordFieldWidth(rawLines_[blocks[0]], fw) == 20) fp.push_back("옛 셸 섹션 카드(줄 " + std::to_string(blocks[0] + 1) + ")가 long 폭이다");
+                    if (scanned) carryover::compareSectionCards(blockAt(rawLines_, blocks[0]), sj.scan, fp);
+                }
+                if (const long long et = perElementThickness(S, M, pid); et > 0)
+                    problem(pid, "element_thickness", "PID 셸 요소 " + std::to_string(et) + " 개가 요소마다 두께(*ELEMENT_SHELL_THICKNESS · _BETA · _MCID 의 "
+                                                          "THIC)를 싣는다 — 그 두께가 섹션 두께를 덮어 새 섹션이 먹지 않는다(답신 Q8 — 거절)");
+            }
+            for (const auto& s : fp) problem(pid, "new_section", ns.file + " — " + s);
+            if (fp.empty() && scanned) secJobs.emplace(k, std::move(sj));
+        }
+        if (!secJobs.empty() && jobs.empty() && !hasEnd)   // 새 섹션 카드도 쓰기가 주 덱의 *END 자리에 낸다(조각과 같은 까닭)
+            problem(0, "deck_no_end", "덱에 *END 가 없다 — 새 셸 섹션 카드는 *END 앞에 넣는다 · 잘린 덱일 수 있다");
     }
 
     for (const auto& [name, c] : comp)
@@ -1142,7 +1581,7 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
                 double maxd = 0;
                 long long moved = 0;
                 auto put = [&](int n, const Vector3D& y) {
-                    const Vector3D x = baseMesh_.getNode(n)->position;
+                    const Vector3D x = M.getNode(n)->position;
                     modifiedNodePositions_[n] = y;
                     carry_.moved[n] = y;
                     carry_.movedPid[n] = pid;
@@ -1152,7 +1591,7 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
                 if (row.action == Action::Transform) {
                     const auto& m = row.m;
                     for (int n : nodesOf[pid]) {
-                        const Vector3D x = baseMesh_.getNode(n)->position;
+                        const Vector3D x = M.getNode(n)->position;
                         put(n, Vector3D(m[0] * x.x + m[1] * x.y + m[2] * x.z + m[3], m[4] * x.x + m[5] * x.y + m[6] * x.z + m[7],
                                         m[8] * x.x + m[9] * x.y + m[10] * x.z + m[11]));
                     }
@@ -1160,7 +1599,7 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
                     const auto& f = fields.at(pid);
                     for (size_t i = 0; i < f.node.size(); ++i) {
                         const int n = static_cast<int>(f.node[i]);
-                        const Vector3D x = baseMesh_.getNode(n)->position;
+                        const Vector3D x = M.getNode(n)->position;
                         put(n, Vector3D(x.x + f.disp[3 * i], x.y + f.disp[3 * i + 1], x.z + f.disp[3 * i + 2]));
                     }
                 }
@@ -1169,8 +1608,29 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
                 pr.maxDisp = maxd;
                 pr.result = "applied";
                 carry_.gates.push_back({pid, row.action, false, k});
+                std::string secNote;
+                if (auto sj = secJobs.find(k); sj != secJobs.end()) {
+                    // 판 2 새 셸 섹션 — 그쪽 카드(옛 카드를 옮긴 것)를 *END 앞에 넣고 이 PID `*PART` 의 SECID 만 잇는다(답신 Q8 —
+                    // 같은 섹션을 쓰는 다른 파트는 옛 섹션 그대로). 계획이 준 파일 이름은 한 줄로(주석 줄을 끊지 못하게)
+                    const SecJob& j = sj->second;
+                    const PartLoc& loc = partsMain.plain.at(pid);
+                    std::ostringstream blk;
+                    blk << "$\n$ === apply_carryover_plan — PID " << pid << " morph 새 셸 섹션 SECID " << j.secid << "(옛 SECID " << loc.secid
+                        << ") · StepForge " << oneLine(j.file) << " ===\n";
+                    for (const auto& l : j.scan.head) blk << l << "\n";
+                    for (const auto& l : j.scan.block) blk << l << "\n";
+                    addedKeywordBlocks_.push_back(blk.str());
+                    putField(rawLines_[loc.cardLine], 1, loc.fieldW, j.secid);
+                    carry_.newSecid[pid] = j.secid;
+                    carry_.newShellT[j.secid] = j.thickness;
+                    maxSectionId_ = std::max<long long>(maxSectionId_, j.secid);
+                    pr.hasNewSection = pr.newSectionShell = true;
+                    pr.newSecid = j.secid;
+                    pr.newThickness = j.thickness;
+                    secNote = " · 새 셸 섹션 SECID " + std::to_string(j.secid) + "(두께 " + num(j.thickness) + " · 옛 SECID " + std::to_string(loc.secid) + ")";
+                }
                 infoMessages.push_back(tag + "PID " + std::to_string(pid) + " " + row.actionText + " — 절점 " + std::to_string(moved) +
-                                       " 개 · 최대 변위 " + num(maxd));
+                                       " 개 · 최대 변위 " + num(maxd) + secNote);
                 break;
             }
             case Action::Remesh: {
@@ -1184,8 +1644,8 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
                 pr.insElemLo = h.elemLo + shiftElem;
                 pr.insElemHi = h.elemHi + shiftElem;
                 if (h.newSection.present) {
-                    const PartLoc& loc = parts.plain.at(pid);
-                    putField10(rawLines_[loc.cardLine], 1, h.newSection.secid);   // *PART 의 SECID 만 잇는다(같은 섹션을 쓰는 다른 파트는 그대로)
+                    const PartLoc& loc = partsMain.plain.at(pid);
+                    putField(rawLines_[loc.cardLine], 1, loc.fieldW, h.newSection.secid);   // *PART 의 SECID 만 잇는다(같은 섹션을 쓰는 다른 파트는 그대로)
                     carry_.newSecid[pid] = h.newSection.secid;
                     maxSectionId_ = std::max<long long>(maxSectionId_, h.newSection.secid);
                     pr.hasNewSection = true;
@@ -1203,7 +1663,7 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
             }
             case Action::Delete: {
                 removePart(pid, pr);
-                const PartLoc& loc = parts.plain.at(pid);
+                const PartLoc& loc = partsMain.plain.at(pid);
                 ++deletedPairs[loc.kwLine];
                 carry_.deletedPids.insert(pid);
                 pr.result = "applied";
@@ -1220,7 +1680,7 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
     // *PART 짝 지우기 — 블록의 짝을 다 지우면 블록째(키워드 · 주석까지), 아니면 그 짝(제목 · 사이 주석 · 카드)만
     for (const auto& row : plan.parts) {
         if (row.action != Action::Delete) continue;
-        const PartLoc& loc = parts.plain.at(row.pid);
+        const PartLoc& loc = partsMain.plain.at(row.pid);
         const bool whole = deletedPairs[loc.kwLine] == loc.pairs;
         const size_t from = whole ? loc.kwLine : loc.titleLine, to = whole ? loc.blockEnd : loc.cardLine + 1;
         for (size_t i = from; i < to; ++i) dropLines.insert(i);
@@ -1272,16 +1732,46 @@ bool ModelAssembler::verifyCarryoverOutput(const std::string& deckPath, carryove
         }
         return false;
     };
+    const Mesh& base = carry_.base ? *carry_.base : baseMesh_;   // 대조의 「앞」 — 인클루드 덱은 닫힘째 읽은 메시
     Mesh out;
     try {
         KFileReader reader;
-        out = reader.readFile(deckPath);
+        if (!carry_.includes) {
+            out = reader.readFile(deckPath);
+        } else {
+            // 판 2 인클루드 덱 — 산출은 주 덱 옆에 있고 `*INCLUDE` 줄을 그대로 두었다. 산출의 닫힘이 대조한 닫힘(파일 · 바이트)과 같아야 하고
+            // 그 닫힘째 다시 읽는다(LS-DYNA 가 그 산출을 읽는 꼴)
+            std::vector<std::string> outLines;
+            {
+                std::ifstream f(deckPath, std::ios::binary);
+                for (std::string l; std::getline(f, l);) {
+                    if (!l.empty() && l.back() == '\r') l.pop_back();
+                    outLines.push_back(std::move(l));
+                }
+            }
+            const auto oc = include_closure::read(deckPath, outLines);
+            const auto got = closureEntries(oc, deckPath);
+            bool same = oc.complete() && oc.cycles.empty() && got.size() == carry_.includeList.size();
+            for (size_t k = 0; same && k < got.size(); ++k)
+                same = got[k].relpath == carry_.includeList[k].relpath && got[k].sha256 == carry_.includeList[k].sha256;
+            if (!same) {
+                problem(0, "verify", "쓴 덱의 *INCLUDE 닫힘이 입력 덱의 닫힘(deck.includes 와 대조한 것)과 다르다 — 산출이 다른 파일을 끌어온다");
+                return finish();
+            }
+            std::string note;
+            bool complete = true;
+            out = reader.readFileWithIncludes(deckPath, &note, &complete);
+            if (!complete) {
+                problem(0, "verify", "쓴 덱을 인클루드 닫힘째 다시 읽지 못했다 — " + note);
+                return finish();
+            }
+        }
     } catch (const std::exception& e) {
         problem(0, "verify", std::string("쓴 덱을 다시 읽지 못했다: ") + e.what());
         return finish();
     }
     Vector3D bmin, bmax;
-    baseMesh_.calculateBoundingBox(bmin, bmax);
+    base.calculateBoundingBox(bmin, bmax);
     const double tol = 1e-6 * std::max(1.0, (bmax - bmin).magnitude());
 
     // ① 옮긴 절점 — 기대 자리(대각선의 1e-6 안)
@@ -1325,7 +1815,7 @@ bool ModelAssembler::verifyCarryoverOutput(const std::string& deckPath, carryove
     {
         long long changed = 0;
         int first = 0;
-        for (const auto& [id, nd] : baseMesh_.nodes) {
+        for (const auto& [id, nd] : base.nodes) {
             if (carry_.moved.count(id) || carry_.removedNodes.count(id)) continue;
             const Node* o = out.getNode(id);
             if (o && o->position.x == nd.position.x && o->position.y == nd.position.y && o->position.z == nd.position.z) continue;
@@ -1336,7 +1826,7 @@ bool ModelAssembler::verifyCarryoverOutput(const std::string& deckPath, carryove
     // ⑤ 파트별 요소 수 — 입력 − 지움 + 넣음
     {
         std::map<long long, long long> expect, got;
-        for (const auto& [eid, e] : baseMesh_.elements)
+        for (const auto& [eid, e] : base.elements)
             if (!carry_.removedElems.count(eid)) ++expect[e.partId];
         for (const auto& [eid, ins] : carry_.insertedElems) {
             (void)eid;
@@ -1362,6 +1852,12 @@ bool ModelAssembler::verifyCarryoverOutput(const std::string& deckPath, carryove
         if (it == out.parts.end() || it->second.sectionId != sec)
             problem(pid, "verify", "쓴 덱의 *PART 가 새 SECID " + std::to_string(sec) + " 를 가리키지 않는다");
     }
+    // 판 2 — 모프가 넣은 새 셸 섹션이 쓴 덱에 그 두께로 있다(리더가 읽은 T1)
+    for (const auto& [sec, t] : carry_.newShellT) {
+        auto it = out.shellSections.find(static_cast<int>(sec));
+        if (it == out.shellSections.end() || std::fabs(it->second.thickness - t) > 1e-9 * std::max(1.0, std::fabs(t)))
+            problem(0, "verify", "쓴 덱에 새 셸 섹션 SECID " + std::to_string(sec) + "(두께 " + num(t) + ")이 없다");
+    }
     for (const auto& [pid, ap] : carry_.addedParts) {
         auto it = out.parts.find(static_cast<int>(pid));
         if (it == out.parts.end() || it->second.sectionId != ap.secid || it->second.materialId != ap.mid)
@@ -1374,7 +1870,7 @@ bool ModelAssembler::verifyCarryoverOutput(const std::string& deckPath, carryove
     {
         std::set<long long> gp;
         for (const auto& g : carry_.gates) gp.insert(g.pid);
-        for (const auto& [eid, e] : baseMesh_.elements) {
+        for (const auto& [eid, e] : base.elements) {
             (void)eid;
             if (gp.count(e.partId)) inBefore[e.partId].push_back(&e);
         }
@@ -1398,12 +1894,12 @@ bool ModelAssembler::verifyCarryoverOutput(const std::string& deckPath, carryove
                     if (g.action != Action::Morph) continue;
                     ++shells;
                     Vector3D nb, na;
-                    const bool okB = shellNormal(baseMesh_, eb, nb), okA = shellNormal(out, *ea, na);
+                    const bool okB = shellNormal(base, eb, nb), okA = shellNormal(out, *ea, na);
                     if (okB && (!okA || nb.dot(na) < 0)) ++flipped;
                     continue;
                 }
                 ++solids;
-                const bool b = solidInverted(baseMesh_, eb), a = solidInverted(out, *ea);
+                const bool b = solidInverted(base, eb), a = solidInverted(out, *ea);
                 ib += b ? 1 : 0;
                 ia += a ? 1 : 0;
                 fresh += (a && !b) ? 1 : 0;
@@ -1412,7 +1908,7 @@ bool ModelAssembler::verifyCarryoverOutput(const std::string& deckPath, carryove
             // 바꿔 넣기 · 새 파트 — 새 요소는 전부 새것이다(옛 요소의 뒤집힘은 앞 값으로만 적는다)
             if (!g.added)
                 for (const Element* pb : olds)
-                    if (pb->type != ElementType::QUAD4 && solidInverted(baseMesh_, *pb)) ++ib;
+                    if (pb->type != ElementType::QUAD4 && solidInverted(base, *pb)) ++ib;
             for (const Element* pa : news) {
                 if (pa->type == ElementType::QUAD4) continue;
                 ++solids;

@@ -5623,3 +5623,121 @@ fragment_map: fragment_abc.json       # (선택) 받은 조각의 대응표 — 
 - `fragment_map` 을 주면 쓴 범위마다 아래끝이 바닥 이상이면 `above`, 아니면 `below` 이고 하나라도 `below` 면 rc 1 이다
   (그 조각은 넣을 때 옮겨진다). 회귀 `tools/regress/test_id_floor.py` 10항.
 
+## 52. `apply_carryover_plan` — StepForge 이월 계획을 덱에 적용하기(판 1 · 2)
+
+```
+KooRemapper apply_carryover_plan <config.yaml>
+```
+
+```yaml
+model: deck.k                # 계획이 지문(deck.sha256)으로 고정한 덱 — 받은 바이트 그대로
+plan: plan.json              # StepForge 이월 계획 — 동반 파일(field_<PID>.bin · fragment_<PID>.k · section_<PID>.k)은 같은 폴더
+output: deck_applied.k       # 고친 덱 — 걸린 것이 하나라도 있으면 쓰지 않는다(rc 1)
+# report: my_report.json     # (선택) 보고 JSON — 기본 <output 줄기>_carryover.json · 거절해도 쓴다
+```
+
+예제는 `examples/apply_carryover_plan/` 에 있다(StepForge 진리값 판 — 판 1 · keep 2 · morph 1 · transform 1 · remesh 3 · delete 1 · 새 파트 1).
+판 2 실물 둘(바깥 덱 `fc160119a36e` · 메시 덱 `f8ff42845904`)은 회귀 자료 `tools/regress/data/apply_carryover_plan/live_v2_*` 에 있다.
+
+### 52.1 왜 우리 op 인가
+
+CAD 개정이 오면 StepForge 가 덱 PID 마다 처리(그대로 · 강체 옮김 · 모프 · 같은 간소화로 다시 짓기 · 지움 · 사람 확인 · 새 파트)를 정하고
+재료(계획 · 변위장 · 조각 · 새 셸 섹션)를 낸다(그쪽 `docs/REQUEST-2026-11-06-carryover.md` — 판 2 는 §10). 이미 있는 덱의 바이트를 고치는
+일은 경계 합의(§1)로 우리 몫이다. 처리 꼴은 우리 답신 `docs/requests/stepforge-carryover-reply-2026-11-07.md`(Q1~Q8)와 사용자 결정(11-07)이 정했다.
+
+### 52.2 계획 읽기 — 판마다 칸 표 하나
+
+- 칸 표는 `src/parser/CarryoverPlan.cpp` 머리의 `kKeys` **한 곳**이다. 줄마다 판 1 의 칸과 판 2 가 더한 칸을 함께 적고, 모르는 칸 ·
+  빠진 칸은 **그 판의** 표로 거절한다(`plan_schema`). `format` · `version`(1 · 2) · `unit`(mm-t-s) · `frame`(world)이 다르면 `plan_format`.
+- 판 2 가 더한 칸 — `deck.deck_from`(raw · mesh — 보고에 되돌려 줄 뿐 덱을 relpath 로 찾지 않는다) · `deck.includes`(늘 있다) · 줄마다
+  `deck`(덱 자리 — 새 파트 줄에는 없다) · 모프 줄 `field.new_section`(늘 있다 · null 일 수 있다) · `field.element_thickness`(있을 때만) ·
+  review 줄 `refused_transform` · `summary` 여섯 칸(`actions` · `added` · `fields` · `fragments` · `sections` · `failed`). `deck.max` 의
+  다섯 칸은 판 1 부터 있다(판 2 는 닫힘 전체에서 센다는 뜻을 넓혔다).
+- 판 2 의 summary 는 줄과 대조한다 — `actions` 는 줄의 처리 수(강체가 아닌 옮김은 review 로 센다), `sections` 는 새 셸 섹션 파일을 실은
+  모프 줄 수, `failed` 는 그쪽 `_failed` 와 같은 셈(못 지은 조각 · 대신 지은 조각 · 변위장 · 새 섹션). 다르면 `plan_inconsistent`.
+- 계획은 **그 덱의 것**이어야 한다 — `deck.sha256` 이 model 파일 바이트의 sha256 과 다르면 `deck_sha`. 동반 파일은 `files` 의
+  sha256 · 바이트로 대조한다(변위장 · 새 섹션은 바이트가 곧 값이라 다르면 거절, 조각은 값 대조가 지나면 받고 경고).
+
+### 52.3 처리
+
+| 처리 | 하는 일 |
+|---|---|
+| keep · review | 손대지 않는다(`touches_changed` · `absorbed` · 판 2 `refused_transform` 은 보고에) |
+| transform | 강체 4×4(RᵀR = I · det 1 을 1e-6 안 · 마지막 행 0 0 0 1)를 그 PID 요소의 절점 **전부**(2차 중간절점 · 셸 N5-N8)에 — 돌리면 재질 축 · 좌표계는 그대로라 경고 |
+| morph | 변위장을 더한다(절점 = 그 PID 요소의 절점 전부). 판 2 `new_section` 이 지은 카드면 그 카드를 넣고 `*PART` SECID 만 잇는다(§52.7) |
+| remesh | 그 PID 의 요소 · 절점을 걷고 조각을 같은 PID 로 넣는다(조각의 `new_section` 이면 카드를 넣고 SECID 를 잇는다) |
+| delete | 요소 · 절점 · `*PART` 를 지운다(`*SECTION` · `*MAT` 은 남긴다) |
+| 새 파트 | 조각을 넣는다(물성은 사람이 맞춘다 — 경고) |
+
+지우기 · 바꿔 넣기의 번호 목록은 늘 **그 PID 의 요소**에서 구한다 — 계획의 범위로 고르지 않는다(손으로 매긴 덱은 범위 안에 다른 PID 의
+번호가 끼어 있다 · §10.3 ⑤). 쓴 덱은 다시 읽어(인클루드가 있으면 닫힘째) 옮긴 자리 · 지운 번호 · 넣은 번호와 좌표 · 손대지 않은 절점 ·
+파트별 요소 수 · `*PART` · 새 셸 섹션을 대조하고, **새로** 뒤집힌 솔리드나 모프가 뒤집은 셸 법선이 있으면 산출을 지운다.
+
+### 52.4 사전 검사 — 전부 아니면 전무
+
+한 줄이라도 걸리면 계획 전체를 적용하지 않고 걸린 것을 **모두** 보고에 담는다(덱이 반쯤 고쳐진 채 남지 않게). 판 2 가 더한 갈래 —
+
+| 갈래(kind) | 언제 |
+|---|---|
+| `include_closure` | 판 2 · 덱의 `*INCLUDE` 닫힘을 다 못 읽었다(없는 · 못 연 이름 · 맨 `*INCLUDE` 가 아닌 카드 · 깊이 · 순환 · `*INCLUDE ±` · 폭이 다른 인클루드) |
+| `include_mismatch` | `deck.includes` 가 우리 닫힘(주 덱 폴더 기준 상대 경로 · 바이트 sha256 · 읽는 차례 · 파일마다 한 번)과 다르다 |
+| `include_edit` | 고칠 자리가 인클루드 파일에 있다 — (파일 · PID · 무엇) 목록 |
+| `include_output` | 인클루드 덱의 산출을 덱과 다른 폴더에 쓰려 한다 |
+| `deck_range` | 손대는 줄의 덱 자리가 우리 셈과 다르다(keep · review 는 같은 갈래의 **경고**) |
+| `new_section` · `secid_collision` · `secid_order` · `element_thickness` | 모프의 새 셸 섹션(§52.7) |
+| `plan_inconsistent` | summary 가 줄과 다르다 · 한 파일을 두 몫이 가리킨다 |
+
+판 1 부터 있던 갈래(나눠 쓰는 절점 · 절점/세그먼트/요소 참조 · 정본 밖 키워드 · 풀 수 없는 세트 · 읽지 못하는 요소 블록 · EID 겹침 ·
+번호 바닥 · 못 지은 조각 …)는 그대로다 — 판 2 의 인클루드 덱에서는 그 검사가 **닫힘 전체**를 본다(인클루드 파일의 세트가 바꿔 넣는
+PID 의 절점을 가리키면 주 덱에서와 똑같이 `node_ref` 로 거절하고 「`inc/sets.k` 줄 N」 처럼 그 파일 · 줄을 댄다). 판 1 계획은 `*INCLUDE` 가
+있으면 `deck_include` 로 거절하고, 셸 두께가 바뀐 모프(`field.thickness`)를 `field_thickness` 로 거절한다.
+
+### 52.5 판 2 — 인클루드가 있는 덱(「주 덱만 고침 · 인클루드면 거절」 · 사용자 결정 11-07)
+
+- `deck.includes` 를 우리 닫힘(`include_closure::read` — 그쪽 §10.3 ① 과 같은 규칙)과 **글자 그대로** 견준다. 같아야 받는다.
+- 사전 검사는 닫힘 전체를 **읽기만** 한다 — 펼친 줄(`include_closure::inlined` — 줄마다 온 파일 · 줄을 함께 낸다)과 닫힘째 읽은 메시로
+  참조 · 나눠 쓴 절점 · 세트 · 접촉 · 정본 밖 키워드 · SECID · MID · 번호 바닥 · 덱 자리를 본다.
+- **주 덱만 고친다.** 고칠 자리 — 바꿀 PID(옮기기 · 모프 · 바꿔 넣기 · 지우기)의 요소 · 그 요소의 절점 · `*PART` · 새 섹션이 옮길 옛 섹션
+  카드 — 가 하나라도 인클루드 파일에 있으면 거절하고 `include_edit` 에 (파일 · PID · 무엇)을 적는다. 넣는 카드는 늘 주 덱의 `*END` 앞이다.
+  인클루드 파일은 쓰지 않는다 — output · report 가 닫힘의 파일과 같으면 아무것도 쓰기 전에 거절한다.
+- 산출은 `*INCLUDE` 줄을 **그대로** 둔다. LS-DYNA 와 우리 리더는 그 이름을 산출 덱의 폴더에서 찾으므로 산출은 덱과 **같은 폴더**에만
+  쓴다(`include_output`). 쓴 뒤 산출의 닫힘이 대조한 닫힘(파일 · 바이트)과 같은지 보고 그 닫힘째 다시 읽어 대조한다.
+- 보고의 `deck.includes` 가 대조한 닫힘을 되돌려 준다(판 1 · 대조하지 못했으면 null).
+
+### 52.6 판 2 — 줄마다 덱 자리(「손대는 줄은 거절 · keep/review 는 경고」 · 사용자 결정 11-07)
+
+줄의 `deck`(`node` [최소, 최대] · `node_count` · `elem` [최소, 최대] · `elem_count` · `contiguous` · `secid` · `mid`)를 닫힘째 다시 센다 —
+그쪽 `KDeck.part_ranges()` 와 같은 셈(그 PID 의 솔리드 · 셸 · 두꺼운 셸 요소가 가리킨 **서로 다른** 절점 — 2차 중간절점 · 8절점 셸 N5-N8
+포함 · 0 제외 · `contiguous` 는 절점 · 요소 둘 다 빈 데가 없나 · 요소가 없으면 범위 · `contiguous` 가 null · `*PART` 가 없으면 SECID · MID 가
+null). 칸 하나라도 다르면 손대는 줄은 `deck_range`(칸 · 계획 값 · 우리 값)로 거절, keep · review 줄은 같은 갈래로 경고만 한다.
+
+### 52.7 판 2 — 셸 두께가 바뀐 모프의 새 섹션(답신 Q8 · 그쪽 §10.3 ② ③)
+
+- `field.new_section` 이 null 이면 섹션을 그대로 둔다(두께 칸 `field.thickness` 가 있어도 — 사람이 정한 두께 · §10.2).
+- 지은 카드(`{secid, thickness, file: "section_<PID>.k", why}`) — 파일은 `files` 의 지문과 같아야 하고, 엄격히 읽어 `*KEYWORD` · 셸 섹션
+  카드 **하나**(`*SECTION_SHELL` · `_TITLE` — 제목 · Card 1 · Card 2 · ICOMP 1 이면 각도 카드 · 그 밖의 줄 · 쌓인 둘째 카드 · 사용자 정의 셸
+  ELFORM 101~105 는 거절) · `*END` 여야 한다.
+- 카드는 덱의 옛 카드(그 PID 주 덱 `*PART` 의 SECID — 주 덱에 하나뿐)를 **그대로 옮겨** SECID(Card 1 앞 10칸)와 T1~T4(Card 2 앞 40칸)만
+  바꾼 것이어야 한다 — 키워드 줄 · 제목 · 주석 · 그 밖의 칸 · 딸린 카드를 줄마다 견준다(다르면 `new_section` 에 그 줄).
+- SECID 는 `new_section.secid` 와 같고 · 닫힘에 없고(`secid_collision`) · `deck.max.secid` 위이며 · 조각의 새 섹션을 먼저 매긴 뒤 모프 줄
+  차례로 잇는다(`secid_order`). T1~T4 는 넷 다 `thickness` 다.
+- 넣으면 그 카드를 주 덱 `*END` 앞에 두고 그 PID `*PART` 의 SECID 칸**만** 덱 폭(표준 · i10 10칸 · long 20칸)으로 고친다 — 같은 섹션을 쓰는
+  다른 파트는 옛 섹션 그대로다. 보고의 그 줄에 `new_section {secid, thickness}`.
+- 거절 — 못 지은 꼴(`secid` · `file` 이 null — 그 줄은 조각 `instead` 로 물러섰다 · 우리는 변위장만 쓴다 — `new_section` · `morph_instead`) ·
+  요소마다 두께를 싣는 PID(`field.element_thickness` 이거나 덱의 `*ELEMENT_SHELL_THICKNESS` · `_BETA` · `_MCID` 에 0 이 아닌 THIC — 그 두께가
+  섹션 두께를 덮는다 · `element_thickness`).
+
+### 52.8 보고 JSON(`dynaforge-carryover-apply`)
+
+`ok` · `plan{sha256 · version · report_key · deck_from}` · `deck{sha256_in · sha256_out · includes}` · `problems[{pid · kind · detail}]` ·
+`warnings` · `shift` · `parts[처리마다 result · 옮긴 수 · 최대 변위 · 지운 수 · 넣은 구간 · 새 섹션(바꿔 넣기 {secid · elform} · 모프
+{secid · thickness}) · 뒤집힘 앞뒤 · refused_transform]` · `added` · `touches_changed`. 거절해도 · 내부 오류에도 쓰고, 거절하면 출력 자리의
+옛 덱을 지운다(`stale_output_removed`).
+
+### 52.9 시험 · 아직 하지 않는 것
+
+- 회귀 `tools/regress/test_apply_carryover_plan.py`(판 1 · 83항) · `tools/regress/test_apply_carryover_plan_v2.py`(판 2 · 67항 — 실물 둘 ·
+  진리값 판을 판 2 로 · 칸 표 · 덱 자리 · §10.5 새 셸 섹션 · 인클루드 · refused_transform) · 단위 `tests/test_CarryoverPlan.cpp`.
+- 인클루드 파일 안의 고칠 자리는 고치지 않는다(거절 — 사용자 결정 11-07). 그 파트를 고치려면 닫힘을 펼친 한 덱으로 계획을 다시 받아야 한다.
+- 절점 두께 카드로 두께를 옮기는 일 · 요소마다 두께를 싣는 PID 의 새 섹션은 받지 않는다(그쪽도 조각으로 물러선다 · §10.7).
+
