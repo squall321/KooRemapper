@@ -18,10 +18,17 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
   `contiguous` · SECID · MID · `snapshot.basis`/`project_id` · `deck.includes`(늘 있음, 없으면 빈 목록) · `field.new_section` + `section_<PID>.k` ·
   transform 은 그쪽이 강체를 확인하고 아니면 review · 요소마다 셸 두께가 있으면 줄에 표시 · `version` 2). 그 목록으로 짓고 v2 실물이 오면 대조한다.
 - **이름 `apply_carryover_plan`** — 사용자 확인(11-07).
+- **판 2 받기(11-07 저녁 — StepForge `60f8969` · 코드 `4295f7d` · 라이브 9525)** — 정본은 그쪽 요청서 §10. 사용자 결정 둘 —
+  ① 인클루드가 있는 덱은 `deck.includes` 를 대조해 받되 **주 덱만 고친다** — 고칠 자리(바꿀 PID 의 요소 · 절점 · `*PART` · 섹션)가 인클루드 파일에 있으면
+  거절하고 목록(인클루드 파일은 쓰지 않는다). ② 줄마다 실린 덱 자리(절점 · 요소 범위와 수 · 이어짐 · SECID · MID)가 우리 셈과 다르면 **손대는 줄은 거절**,
+  keep · review 줄은 경고. 실물 둘(바깥 덱 `fc160119a36e` · 메시 덱 `f8ff42845904`)은 받은 바이트 지문이 계획과 같고, 지금 배포 판(`752fa2b`)은 둘 다
+  `version 2` · 모르는 칸으로 거절한다(엄격 읽기가 설계대로).
 
 ## 체크리스트
 - [x] 새 연산 이름 사용자 확인 — `apply_carryover_plan`
-- [ ] v2 실물 받기 · 대조(그쪽이 커밋을 알려 준다) — 칸은 `src/parser/CarryoverPlan.cpp` 머리의 `kKeys` **한 표**에 더한다
+- [x] v2 실물 받기(11-07 — 실물 둘 · 지문 대조 · 지금 판은 거절함을 확인)
+- [ ] v2 짓기 — 칸은 `src/parser/CarryoverPlan.cpp` 머리의 `kKeys` **한 표**에 · 인클루드 대조(주 덱만 고침) · 줄마다 덱 자리 대조 · 새 섹션 · refused_transform
+- [ ] v2 실물 둘 · 인클루드 꼴 · 셸 두께 모프 꼴로 시험 · 적대적 검토 · 배포 · StepForge 에 알림
 - [x] 읽기 — 계획(엄격) · 변위장(이진) · 조각(덱 SECID · MID 참조 꼴) — `include/parser/CarryoverPlan.h`
 - [x] 사전 검사 — 꼴 · 덱 지문 · 파일 지문 · 변위장 덮음 · 조각 범위 대 바닥 · 참조 · 나눈 절점(전부 아니면 전무) — v1 이라 includes 는 거절
 - [x] 처리 — transform(강체 확인) · morph · remesh(같은 PID 로 바꿔 넣기 · new_section) · delete · add · keep/review(`touches_changed` 보고) —
