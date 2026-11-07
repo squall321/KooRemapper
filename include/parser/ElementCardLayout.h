@@ -119,14 +119,31 @@ struct AuxElementCard {
 // 두 판정기는 **배타적**이다. 모르는 `*ELEMENT_*` 변형도 family=NONE 이다.
 AuxElementCard auxElementCard(const std::string& keywordLine);
 
+// `KFileReader` 가 메시에 담는 요소 키워드인가 — 그 리더의 키워드 분기(`KFileReader::parseFile`)와 **같은 판정**이다
+// (키워드 토큰도 그 리더처럼 `*` 뒤 영숫자 · `_` · `-` 를 대문자로 모은다).
+//   담는다 — `*ELEMENT_SOLID`·`_SOLID_TITLE`·`*ELEMENT_TSHELL`·`_TSHELL_TITLE`(맨 이름 그대로) · `*ELEMENT_SHELL` 로
+//            시작하고 `parseElementKeyword` 가 줄 수를 확정하는 셸 변형
+//   안 담는다 — 솔리드 · 티쉘의 옵션 변형(`_ORTHO` · `_DOF` · `_H20`·`_T15`·`_P21`·`_H27`·`_P40`·`_H64` · `_H8TOH20` ·
+//            `_TET4TOTET10` · `*ELEMENT_TSHELL_BETA` …). `parseElementKeyword` 가 줄 수를 알아도(supported) 메시에 **없다**.
+// 왜 있나 (2026-11-07). 격자 밖 걸음이 「parseElementKeyword 가 supported 면 리더가 담는다」고 보아 그 변형을 아무도 세지
+// 않았다 — 번호 바닥(`id_floor` · 조각 삽입 · 이월 적용)이 그 EID 를 몰랐다. 리더 분기가 바뀌면 이것도 바꾼다
+// (`tests/test_DeckContract.cpp` 가 키워드마다 리더로 읽어 대조한다).
+bool gridReaderReadsKeyword(const std::string& keywordLine);
+
 // ── 격자 리더가 메시에 담지 않는 `*ELEMENT_*` 카드 ──────────────────────────
 //
-// 왜 있나 (2026-11-07). `KFileReader` 는 격자 족(솔리드 · 셸 · 티쉘)의 지원 변형만 메시에 담는다. 보 · 이산 · 질량 ·
-// 안전띠 · 플롯 요소와 줄 수를 모르는 변형(COMPOSITE · `*ELEMENT_INERTIA` …)은 메시에 없다 — 그래서 번호 바닥이
-// 그 EID 를 몰랐고(11-07 답신은 「바닥은 빔 · 이산 · 질량까지 센다」고 했다), 이월 적용은 그 요소가 쓰는 절점을 몰랐다.
+// 왜 있나 (2026-11-07). `KFileReader` 는 격자 족(솔리드 · 셸 · 티쉘)의 몇 키워드만 메시에 담는다(`gridReaderReadsKeyword`).
+// 보 · 이산 · 질량 · 안전띠 · 플롯 요소, 줄 수를 모르는 변형(COMPOSITE · `*ELEMENT_INERTIA` …), 리더가 읽지 않는 솔리드 ·
+// 티쉘 옵션 변형(`_ORTHO` · `_DOF` · `_H20` … · `*ELEMENT_TSHELL_BETA`)은 메시에 없다 — 그래서 번호 바닥이 그 EID 를
+// 몰랐고(11-07 답신은 「바닥은 빔 · 이산 · 질량까지 센다」고 했다), 이월 적용은 그 요소가 쓰는 절점을 몰랐다.
 // 두 소비자(바닥 `nonGridElementMaxId` · 이월 적용의 나눠 쓴 절점)가 이 **한 걸음**을 쓴다.
-//   known  — `auxElementCard` 가 칸 자리를 안다. 카드마다 한 번(Card 1 줄) · EID · PID(없으면 0) · 절점 칸
-//   !known — 칸 자리를 모른다. **데이터 줄마다** 한 번 · 그 줄의 첫 칸을 EID 로 넘치게 센다(바닥은 높아질 뿐 낮아지지 않는다)
+//   known  — 칸 자리와 카드 줄 수를 안다. 카드마다 한 번(Card 1 줄) · EID · PID(없으면 0) · 절점 칸
+//            · 격자 밖 족 — `auxElementCard` 가 안다
+//            · 리더가 안 읽는 격자 변형 — 줄 수가 PID 에 달리지 않을 때만(절점 수 옵션 `_H20` 등 · 티쉘 `_BETA`) ·
+//              `elementCardSpan` 의 절점 줄 전부
+//   !known — 칸 자리나 카드 줄 수를 모른다. **데이터 줄마다** 한 번 · 그 줄의 첫 칸을 EID 로 넘치게 센다(바닥은 높아질
+//            뿐 낮아지지 않는다). 절점 수 옵션이 없는 솔리드 변형(`_ORTHO` · `_DOF` · `_H8TOH20` · `_TET4TOTET10` …)은
+//            카드 줄 수가 그 PID 의 ELFORM(다른 파일의 `*SECTION_SOLID` 일 수 있다)과 구 포맷 여부에 달려 여기 든다
 // 빈 줄은 카드 안에서만 카드다(격자 카드와 같은 규칙) · 주석은 건너뛴다.
 struct NonGridElementCard {
     std::string keyword;        // 대문자 · 접미사 뗌

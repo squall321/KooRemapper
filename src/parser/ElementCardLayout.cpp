@@ -371,25 +371,57 @@ AuxElementCard auxElementCard(const std::string& keywordLine) {
     return a;
 }
 
+bool gridReaderReadsKeyword(const std::string& keywordLine) {
+    // `KFileReader::extractKeyword` 와 같은 토큰 — `*` 뒤 영숫자 · `_` · `-` 를 대문자로(접미사 `%`·`+` 와 공백에서 멈춘다)
+    const size_t s = keywordLine.find_first_not_of(" \t");
+    if (s == std::string::npos || keywordLine[s] != '*') return false;
+    std::string k;
+    for (size_t i = s + 1; i < keywordLine.size(); ++i) {
+        const unsigned char ch = static_cast<unsigned char>(keywordLine[i]);
+        if (!std::isalnum(ch) && ch != '_' && ch != '-') break;
+        k += static_cast<char>(std::toupper(ch));
+    }
+    if (k == "ELEMENT_SOLID" || k == "ELEMENT_SOLID_TITLE" || k == "ELEMENT_TSHELL" || k == "ELEMENT_TSHELL_TITLE")
+        return true;
+    // 셸 분기는 줄 수를 확정하지 못하는 변형(COMPOSITE 계열)을 통째로 건너뛴다(`parseElementShellSection`)
+    if (k.rfind("ELEMENT_SHELL", 0) == 0) return parseElementKeyword(keywordLine).supported;
+    return false;
+}
+
 void forEachNonGridElementCard(const std::vector<std::string>& lines,
                                const std::function<void(const NonGridElementCard&)>& f) {
     const int deckFw = deckFieldWidth(lines);
     bool in = false;            // 격자 리더가 담지 않는 *ELEMENT_ 블록 안
-    AuxElementCard aux;
+    AuxElementCard aux;         // 격자 밖 족(보 · 질량 …) — 격자 변형이면 기본값(supported=false)
+    ElementKeywordInfo grid;    // 리더가 안 읽는 격자 변형
+    bool gridKnown = false;     // 그 변형의 카드 줄 수가 PID 에 달리지 않는다(헤더 참조)
     std::string kw;
     int fw = deckFw;
     int remaining = 0;          // 칸 자리를 아는 카드의 남은 줄
+    // 격자 변형 카드는 절점이 여러 줄에 있어 카드가 끝날 때 넘긴다(카드가 모자라게 끝나도 넘긴다 — EID 를 잃지 않는다)
+    NonGridElementCard pend;
+    bool pending = false;
+    ElementCardSpan span;
+    int lineIdx = 0;
+    auto flush = [&]() {
+        if (pending) f(pend);
+        pending = false;
+    };
     for (size_t i = 0; i < lines.size(); ++i) {
         const std::string& l = lines[i];
         const size_t g = l.find_first_not_of(" \t");
         if (g != std::string::npos && l[g] == '*') {
+            flush();
             in = false;
             remaining = 0;
             const ElementKeywordInfo info = parseElementKeyword(l);
             if (info.keyword.rfind("*ELEMENT_", 0) != 0) continue;
-            if (info.family != ElemFamily::NONE && info.supported) continue;   // 리더가 메시에 담는다
+            if (info.family != ElemFamily::NONE && gridReaderReadsKeyword(l)) continue;   // 리더가 메시에 담는다
             in = true;
-            aux = auxElementCard(l);
+            grid = info;
+            aux = info.family == ElemFamily::NONE ? auxElementCard(l) : AuxElementCard();
+            gridKnown = info.family != ElemFamily::NONE && info.supported &&
+                        (info.family != ElemFamily::SOLID || info.optionNodes > 0);
             kw = info.keyword;
             fw = keywordFieldWidth(l, deckFw);
             continue;
@@ -397,6 +429,32 @@ void forEachNonGridElementCard(const std::vector<std::string>& lines,
         if (!in) continue;
         if (g != std::string::npos && l[g] == '$') continue;
         if (g == std::string::npos && remaining == 0) continue;   // 카드 밖의 빈 줄
+        if (gridKnown) {
+            const auto fs = deckscan::cardFields(l, fw);
+            if (remaining == 0) {
+                flush();
+                span = elementCardSpan(grid, fs, 0);   // 줄 수가 PID 에 달리지 않는 변형만 여기 온다
+                remaining = span.lines;
+                lineIdx = 0;
+                pend = NonGridElementCard();
+                pend.keyword = kw;
+                pend.line = i;
+                pend.known = true;
+                pend.eid = deckscan::fieldInt(fs, 0);
+                pend.pid = deckscan::fieldInt(fs, 1);
+                pending = true;
+            }
+            if (lineIdx >= span.nodeFirst && lineIdx < span.nodeFirst + span.nodeLines) {
+                const size_t from = lineIdx == span.nodeFirst ? static_cast<size_t>(span.nodeFieldSkip) : 0u;
+                for (size_t q = from; q < fs.size(); ++q) {
+                    const int v = deckscan::fieldInt(fs, q);
+                    if (v > 0) pend.nodes.push_back(v);
+                }
+            }
+            ++lineIdx;
+            if (--remaining == 0) flush();
+            continue;
+        }
         NonGridElementCard c;
         c.keyword = kw;
         c.line = i;
@@ -425,6 +483,7 @@ void forEachNonGridElementCard(const std::vector<std::string>& lines,
         c.eid = deckscan::fieldInt(deckscan::cardFields(l, fw), 0);   // 넘치게 센다 — 바닥은 높아질 뿐이다
         f(c);
     }
+    flush();
 }
 
 int nonGridElementMaxId(const std::vector<std::string>& lines) {

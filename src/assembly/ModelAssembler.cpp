@@ -265,7 +265,8 @@ bool ModelAssembler::loadBaseModel(const std::string& filename) {
     // 3. Track max IDs
     maxNodeId_ = baseMesh_.getMaxNodeId();
     maxElementId_ = baseMesh_.getMaxElementId();
-    // 바닥(`idMaxima`)은 리더가 담지 않는 요소 족까지 센다 — 보 · 이산 · 질량 · 안전띠 · 플롯 · 줄 수를 모르는 변형(2026-11-07)
+    // 바닥(`idMaxima`)은 리더가 담지 않는 요소 족까지 센다 — 보 · 이산 · 질량 · 안전띠 · 플롯 · 줄 수를 모르는 변형(2026-11-07) ·
+    // 리더가 안 읽는 솔리드 · 티쉘 옵션 변형(`_ORTHO` · `_H20` … · `*ELEMENT_TSHELL_BETA` — `gridReaderReadsKeyword`)
     maxAuxElementId_ = nonGridElementMaxId(rawLines_);
 
     maxPartId_ = 0;

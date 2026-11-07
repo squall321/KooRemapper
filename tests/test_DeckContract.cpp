@@ -20,10 +20,12 @@
 #include "parser/DeckNewline.h"
 #include "parser/DeckWriter.h"
 #include "parser/ElementCardLayout.h"
+#include "parser/KFileReader.h"
 #include "parser/NodeRefs.h"
 #include "parser/KFileWriter.h"
 #include "core/Mesh.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 
@@ -217,6 +219,97 @@ TEST(auxElementCard_MASS_의_PID_는_세번째_칸) {
     const auto a = auxElementCard("*ELEMENT_MASS");
     ASSERT_TRUE(a.supported);
     ASSERT_EQ(a.partField, 3);
+}
+
+// ── 격자 리더가 담지 않는 솔리드 · 티쉘 변형 — 번호 바닥이 그 EID 를 몰랐다(2026-11-07) ─────────────
+// 리더는 `*ELEMENT_SOLID`·`*ELEMENT_TSHELL` 맨 이름만 메시에 담는다. 격자 밖 걸음은 「parseElementKeyword 가 supported 면
+// 리더가 담는다」고 보아 `_ORTHO` · `_H20` · `*ELEMENT_TSHELL_BETA` … 를 아무도 세지 않았다(id_floor · 조각 삽입 · 이월 적용).
+
+TEST(gridReaderReadsKeyword_는_KFileReader_분기와_같다) {
+    // 키워드마다 작은 덱을 써서 **리더로 읽어 본다** — 판정이 리더 분기와 갈리면 여기서 빨개진다.
+    namespace fs = std::filesystem;
+    const std::string solid8 = "       1       1\n       1       2       3       4       5       6       7       8\n";
+    const std::string tshell8 = "       1       1       1       2       3       4       5       6       7       8\n";
+    const std::string shell8 = "       1       1       1       2       3       4\n";
+    struct Case { const char* kw; std::string data; bool reads; };
+    const std::vector<Case> cases = {
+        {"*ELEMENT_SOLID", solid8, true},
+        {"*ELEMENT_SOLID %", "         1         1\n         1         2         3         4         5         6         7         8\n", true},
+        {"*ELEMENT_SOLID_ORTHO", solid8 + "             1.0             0.0             0.0\n"
+                                          "             0.0             1.0             0.0\n", false},
+        {"*ELEMENT_SOLID_DOF", solid8 + "       1       2       3       4       5       6       7       8\n", false},
+        {"*ELEMENT_SOLID_H20", solid8 + "       1       2       3       4       5       6       7       8       1       2\n", false},
+        {"*ELEMENT_SOLID_H8TOH20", solid8, false},
+        {"*ELEMENT_SOLID_TET4TOTET10", solid8, false},
+        {"*ELEMENT_TSHELL", tshell8, true},
+        {"*ELEMENT_TSHELL_BETA", tshell8 + "            30.0\n", false},
+        {"*ELEMENT_SHELL", shell8, true},
+        {"*ELEMENT_SHELL_THICKNESS", shell8 + "             1.0             1.0             1.0             1.0\n", true},
+        {"*ELEMENT_SHELL_COMPOSITE", shell8 + "       1     1.0     0.0\n", false},
+    };
+    const fs::path tmp = fs::temp_directory_path() / "koorm_grid_reader_reads.k";
+    for (const auto& c : cases) {
+        ASSERT_EQ(gridReaderReadsKeyword(c.kw), c.reads);
+        {
+            std::ofstream o(tmp);
+            o << "*KEYWORD\n*NODE\n";
+            for (int n = 1; n <= 8; ++n) o << std::string(7, ' ') << n << "             0.0             0.0             0.0\n";
+            o << c.kw << "\n" << c.data << "*END\n";
+        }
+        KFileReader r;
+        const Mesh m = r.readFile(tmp.string());
+        if ((m.getElementCount() > 0) != c.reads) {
+            KooRemapper::Test::TestFramework::instance().fail(std::string("리더와 판정이 갈린다: ") + c.kw);
+            std::error_code ec;
+            fs::remove(tmp, ec);
+            return;
+        }
+    }
+    std::error_code ec;
+    fs::remove(tmp, ec);
+}
+
+TEST(forEachNonGridElementCard_리더가_안_읽는_격자_변형을_센다) {
+    const std::string hex = "       1       2       3       4       5       6       7       8";
+    const std::vector<std::string> L = {
+        "*KEYWORD",
+        "*ELEMENT_SOLID", "       1       1", hex,                       // 리더가 담는다 — 걸음은 건너뛴다
+        // 절점 수 옵션이 없는 솔리드 변형 — 줄 수가 그 PID 의 ELFORM 에 달려 **데이터 줄마다** 첫 칸을 센다
+        "*ELEMENT_SOLID_ORTHO", "   98000       1", hex, "             1.0             0.0             0.0",
+        "             0.0             1.0             0.0", "   99000       1", hex,
+        "             1.0             0.0             0.0", "             0.0             1.0             0.0",
+        // 줄 수가 PID 에 달리지 않는다 — 카드마다 한 번(Card 1 · 절점 줄 전부)
+        "*ELEMENT_TSHELL_BETA", "   97000       2       1       2       3       4       5       6       7       8",
+        "            30.0",
+        "*ELEMENT_SOLID_H20", "   96000       3", "       1       2       3       4       5       6       7       8       9      10",
+        "      11      12      13      14      15      16      17      18      19      20",
+        "*END"};
+    std::vector<NonGridElementCard> cs;
+    forEachNonGridElementCard(L, [&](const NonGridElementCard& c) { cs.push_back(c); });
+    std::vector<int> ortho;
+    const NonGridElementCard* tsh = nullptr;
+    const NonGridElementCard* h20 = nullptr;
+    for (const auto& c : cs) {
+        ASSERT_NE(c.keyword, std::string("*ELEMENT_SOLID"));
+        if (c.keyword == "*ELEMENT_SOLID_ORTHO") {
+            ASSERT_FALSE(c.known);
+            ortho.push_back(c.eid);
+        }
+        if (c.keyword == "*ELEMENT_TSHELL_BETA") { ASSERT_TRUE(tsh == nullptr); tsh = &c; }
+        if (c.keyword == "*ELEMENT_SOLID_H20") { ASSERT_TRUE(h20 == nullptr); h20 = &c; }
+    }
+    ASSERT_TRUE(std::find(ortho.begin(), ortho.end(), 98000) != ortho.end());
+    ASSERT_TRUE(std::find(ortho.begin(), ortho.end(), 99000) != ortho.end());
+    ASSERT_TRUE(tsh != nullptr && tsh->known);
+    ASSERT_EQ(tsh->eid, 97000);
+    ASSERT_EQ(tsh->pid, 2);
+    ASSERT_EQ(tsh->nodes.size(), (size_t)8);
+    ASSERT_TRUE(h20 != nullptr && h20->known);
+    ASSERT_EQ(h20->eid, 96000);
+    ASSERT_EQ(h20->pid, 3);
+    ASSERT_EQ(h20->nodes.size(), (size_t)20);
+    ASSERT_EQ(h20->nodes.back(), 20);
+    ASSERT_EQ(nonGridElementMaxId(L), 99000);
 }
 
 TEST(auxElementCard_PLOTEL_은_PID_가_없다) {

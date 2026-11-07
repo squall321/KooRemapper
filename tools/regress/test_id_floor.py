@@ -15,6 +15,8 @@
   · `id_floor` 가 above 라고 한 조각을 넣으면 옮기지 않는다(같은 바닥을 두 op 이 같이 본다)
   · 요소 바닥은 **모든 족**이다 — 보 · 질량 · 이산 요소의 EID 까지(2026-11-07). 리더(`KFileReader`)는 그 셋을 메시에
     담지 않아 예전 바닥은 솔리드 · 셸 최대 위였다(11-07 답신이 StepForge 에 「빔 · 이산 · 질량까지 센다」고 했다)
+  · 리더가 안 읽는 솔리드 · 티쉘 변형(`_ORTHO` · `_H8TOH20` · `_DOF` · `_H20` · `*ELEMENT_TSHELL_BETA`)의 EID 도 —
+    키워드 접미사 `%` 의 폭 · 인클루드 닫힘까지 · 삽입이 같은 바닥으로 옮긴다(F · 2026-11-07)
 
 usage: test_id_floor.py <KooRemapper 바이너리>
 """
@@ -159,6 +161,60 @@ def main():
         mm = json.load(open(os.path.join(d, "merged_aux_fragment_map.json"), encoding="utf-8")) if rc == 0 else {}
         check("E-2 cad_solid_merge_to_deck 이 요소를 바닥 888 위(889~)로 옮긴다", rc == 0 and
               (mm.get("ranges") or {}).get("elem", [0])[0] == 889, (rc, mm.get("ranges"), out[-300:]))
+
+        print("[F 리더가 안 읽는 솔리드 · 티쉘 변형의 EID 도 센다 — _ORTHO · _H8TOH20 · _DOF · _H20 · *ELEMENT_TSHELL_BETA(2026-11-07)]")
+        # 리더(KFileReader)는 *ELEMENT_SOLID · *ELEMENT_TSHELL 맨 이름만 메시에 담는다. 격자 밖 걸음은 「줄 수를 알면 리더가
+        # 담는다」고 보아 이 변형들을 아무도 세지 않았다 — 바닥이 덱의 솔리드 최대 2 위(elem_start 3)로 나왔다.
+        # 가장 큰 EID 를 **마지막** 요소에 둔다 — 카드 줄 수를 잘못 세어 둘째 Card 1 을 삼키면 그 번호를 놓친다.
+        hexn = "%8d" * 8 % (1, 2, 3, 4, 5, 6, 7, 8)
+        avec = "%16s%16s%16s" % ("1.0", "0.0", "0.0")
+        dvec = "%16s%16s%16s" % ("0.0", "1.0", "0.0")
+        n10 = "%8d" * 10 % (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+        n20 = "%8d" * 10 % (11, 12, 1, 2, 3, 4, 5, 6, 7, 8)
+
+        def card1(eid, pid=1):
+            return "%8d%8d" % (eid, pid)
+
+        variants = [
+            ("F-1", "*ELEMENT_SOLID_ORTHO", [card1(98000), hexn, avec, dvec, card1(99000), hexn, avec, dvec]),
+            ("F-2", "*ELEMENT_SOLID_H8TOH20", [card1(98000), hexn, card1(99000), hexn]),
+            ("F-3", "*ELEMENT_TSHELL_BETA", [card1(98000) + hexn, "%16s" % "30.0", card1(99000) + hexn, "%16s" % "30.0"]),
+            ("F-4", "*ELEMENT_SOLID_DOF", [card1(98000), hexn, hexn, card1(99000), hexn, hexn]),
+            ("F-5", "*ELEMENT_SOLID_H20", [card1(98000), n10, n20, card1(99000), n10, n20]),
+        ]
+        base = open(os.path.join(d, "deck.k"), encoding="utf-8").read()
+        for label, kw, rows in variants:
+            name = "deck_%s.k" % label.replace("-", "")
+            write(os.path.join(d, name), base.replace("*END", kw + "\n" + "\n".join(rows) + "\n*END"))
+            write(os.path.join(d, "f.yaml"), "model: %s\noutput: floor_f.json\n" % name)
+            rc, out = run(binary, d, "id_floor", "f.yaml")
+            ff = json.load(open(os.path.join(d, "floor_f.json"), encoding="utf-8")) if rc == 0 else {}
+            check("%s %s 의 EID 99000 → elem_start 99001 · 절점 바닥 13 그대로" % (label, kw),
+                  rc == 0 and ff.get("elem_start") == 99001 and ff.get("node_start") == 13, (rc, ff, out[-200:]))
+        # 키워드 접미사 `%` 는 그 블록만 10칸이다 — 8칸으로 자르면 9900000 을 99000 으로 읽는다
+        write(os.path.join(d, "deck_F6.k"), base.replace("*END", "*ELEMENT_SOLID_ORTHO %\n" + "\n".join(
+            ["%10d%10d" % (9900000, 1), "%10d" * 8 % (1, 2, 3, 4, 5, 6, 7, 8), avec, dvec]) + "\n*END"))
+        write(os.path.join(d, "f6.yaml"), "model: deck_F6.k\noutput: floor_f6.json\n")
+        rc, out = run(binary, d, "id_floor", "f6.yaml")
+        ff = json.load(open(os.path.join(d, "floor_f6.json"), encoding="utf-8")) if rc == 0 else {}
+        check("F-6 `*ELEMENT_SOLID_ORTHO %`(10칸)의 EID 9900000 → elem_start 9900001", rc == 0 and
+              ff.get("elem_start") == 9900001, (rc, ff, out[-200:]))
+        # 인클루드 닫힘까지 — 기존 바닥 훑기와 같은 길(파일마다 같은 걸음)
+        write(os.path.join(d, "orth.k"), "*KEYWORD\n*ELEMENT_SOLID_ORTHO\n" + "\n".join(
+            [card1(99500), hexn, avec, dvec]) + "\n*END\n")
+        write(os.path.join(d, "deck_F7.k"), base.replace("*END", "*INCLUDE\n" + "orth.k" + "\n*END"))
+        write(os.path.join(d, "f7.yaml"), "model: deck_F7.k\noutput: floor_f7.json\n")
+        rc, out = run(binary, d, "id_floor", "f7.yaml")
+        ff = json.load(open(os.path.join(d, "floor_f7.json"), encoding="utf-8")) if rc == 0 else {}
+        check("F-7 인클루드 안의 *ELEMENT_SOLID_ORTHO EID 99500 → elem_start 99501", rc == 0 and
+              ff.get("elem_start") == 99501, (rc, ff, out[-200:]))
+        # 삽입도 같은 바닥으로 옮긴다 — 요소 3… 으로 쓴 조각(E-2 의 것)을 ORTHO 덱(F-1)에 넣으면 99001~ 로
+        write(os.path.join(d, "fm.yaml"), "model: deck_F1.k\noutput: merged_f1\nfragment: lowe_frag.k\n"
+              "fragment_map: lowe.json\n")
+        rc, out = run(binary, d, "cad_solid_merge_to_deck", "fm.yaml")
+        mf = json.load(open(os.path.join(d, "merged_f1_fragment_map.json"), encoding="utf-8")) if rc == 0 else {}
+        check("F-8 cad_solid_merge_to_deck 이 ORTHO 덱에서 요소를 바닥 99000 위(99001~)로 옮긴다", rc == 0 and
+              (mf.get("ranges") or {}).get("elem", [0])[0] == 99001, (rc, mf.get("ranges"), out[-300:]))
 
         print("[D 잘못된 YAML]")
         write(os.path.join(d, "x.yaml"), "model: deck.k\noutput: x.json\nfragment: stepforge_fragment.k\n")
