@@ -8309,7 +8309,7 @@
           "type": "config",
           "role": "config",
           "required": true,
-          "description": "YAML configuration object containing model path, output path (optional, defaults to model path), and boundaries array"
+          "description": "YAML configuration object containing model path, output path (required — an omitted output, or one that is the model, an include of it or the config, is refused with rc 1), and boundaries array"
         }
       ],
       "example": {
@@ -8343,7 +8343,7 @@
             ]
           }
         },
-        "note": "Example: KooRemapper boundary boundary_partial.yaml. Input and output paths are relative to the YAML file directory. Output field is optional and defaults to input filename if omitted."
+        "note": "Example: KooRemapper boundary boundary_partial.yaml. Input and output paths are relative to the YAML file directory. Output field is required — omitting it is refused with rc 1 (until 2026-11-07 an omitted output overwrote the model in place)."
       },
       "example_folder": "examples/boundary",
       "notes": "DOF presets: 'all' fixes all 6 degrees of freedom (3 translations + 3 rotations). 'xyz' fixes only translations (rotations free). Single letters (x/y/z) fix that axis translation only. 'rx'/'ry'/'rz' fix rotations. 'custom' requires explicit dofx/dofy/dofz/dofrx/dofry/dofrz values. Direction mode (select='direction') extracts surface faces from the part, filters them by face normal alignment within angle tolerance, collects unique nodes, auto-generates a *SET_NODE block. Set mode (select='set') requires a pre-existing *SET_NODE with set_id and applies SPC directly to that set. If output path omitted, uses model filename as output. Paths without directory separators are resolved relative to the YAML config directory. Supported DOF string values are case-insensitive. Individual DOF fields (dofx, etc.) are 0-based (0=free, 1=fixed), matching LS-DYNA SPC card format.\n\nYAML INPUT — COMMON RULES:\n---\n- A leading UTF-8 BOM is ignored, so a config saved by a Windows editor (Notepad) works as-is.\n- A TAB used for INDENTATION anywhere in the file is rejected with rc=1 — `[ERROR] [<op>] YAML 들여쓰기에 탭을 쓸 수 없습니다 (공백을 쓰세요): <n>번째 줄: <line>`. The whole file is scanned, so a tab under a key this op never reads fails too; configs that used to run with rc=0 can now fail. Tabs inside a quoted value are kept, but a tab that starts a line inside a `|`/`>` literal block (material_card, czm_material_card, material_cards) is rejected, because the parser would otherwise drop that card line silently.\n- The tab scan is skipped when the config arrives on a stream that cannot be rewound (pipe, process substitution, /dev/stdin); such input reaches the parser unchecked.\n- RELATIVE PATHS: a path given on the COMMAND LINE is relative to the current working directory. A relative path INSIDE the YAML — with or without a folder part (`box.k` and `../data/box.k` alike) — is relative to the folder that holds that YAML file, and never falls back to the working directory. Absolute paths (leading `/` or `\\`, or an `X:` drive letter) are used as-is.\n\nINCLUDE CLOSURE (since 2026-10-17): this op edits only the main deck. If its targets live only inside an *INCLUDE it stops with exit code 1 and names flatten_includes; with flatten_includes: true it reads the closure flattened into one standalone deck and writes one file without *INCLUDE (measured: the same output as the unsplit deck). For an all-parts run on a master deck whose own parts are in the main file, the parts inside includes are left alone and a warning says so.\n\nOUTPUT GUARD (since 2026-11-07): before opening any file the op compares every file it will write (the deck <output>.k and, when written, <output>.dynain and the IGA include files) with every file it reads (the config YAML, the model and its *INCLUDE closure) by resolved path, symlink and hard link (./a.k, an absolute path and ../dir/a.k are the same file). A match exits 1 with an [ERROR] that names both paths; nothing is written and the inputs are untouched. A file of the same name in another folder, or an existing file the op does not read, is overwritten as before. Unlike assemble, output equal to the model is refused too — write the edited deck under another name. output is required: omitting it used to overwrite the model in place (exit code 0) and is refused with exit code 1 since 2026-11-07.",
@@ -8357,9 +8357,8 @@
         {
           "path": "output",
           "type": "string",
-          "required": false,
-          "default": "(same as model)",
-          "desc": "Output .k file path; omitted .k extension auto-appended; defaults to model filename if not specified"
+          "required": true,
+          "desc": "Output .k file path; omitted .k extension auto-appended. Required — omitted, or the same file as the model, one of its includes or the config, is refused with rc 1 (until 2026-11-07 an omitted output overwrote the model)"
         },
         {
           "path": "boundaries",
@@ -8530,8 +8529,8 @@
         {
           "path": "output",
           "type": "file",
-          "required": false,
-          "desc": "Output K-file path (or stem without .k); defaults to input model if omitted. Relative to YAML directory."
+          "required": true,
+          "desc": "Output K-file path (or stem without .k). Relative to YAML directory. Required — omitted, or the same file as the model, one of its includes or the config, is refused with rc 1 (until 2026-11-07 an omitted output overwrote the model)."
         },
         {
           "path": "rbe",
