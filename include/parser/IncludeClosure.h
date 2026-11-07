@@ -43,6 +43,19 @@ struct NotFollowed {
     size_t line = 0;       // 1-기반
     std::string keyword;   // 예: *INCLUDE_TRANSFORM
     std::string name;      // 카드가 가리킨 첫 이름(있으면)
+    std::string path;      // 그 이름을 맨 `*INCLUDE` 처럼 찾은 경로(못 찾으면 빈 글자) — 읽지는 않는다. 쓰는 op 이 덮지 않게 견준다
+};
+
+// 맨 `*INCLUDE` 의 이름 하나가 어떻게 됐나 — 줄을 흘려 읽는 소비자(extract-parts — 2.32GB 덱 전제)가 자기 걸음에서 그 이름 줄을 만나면
+// 이것을 물어 같은 규칙(주 덱 폴더 먼저 · `*INCLUDE_PATH` · `␣+` 이음 · 깊이 · 순환)으로 따라간다(2026-11-07 재검토 N3 · D1).
+struct NameRef {
+    enum class What { Followed, Unresolved, Cycle, DepthCut };
+    std::string file;      // 그 이름이 적힌 파일(주 덱은 `read` · `readPaths` 에 준 경로 그대로)
+    size_t firstLine = 0;  // 1-기반 — `␣+` 이음이면 lastLine > firstLine
+    size_t lastLine = 0;
+    std::string name;
+    std::string path;      // 연 경로(Followed · Cycle) — Cycle 은 이미 읽은 파일이다
+    What what = What::Followed;
 };
 
 // 찾지 못했거나 열지 못한 이름.
@@ -71,6 +84,7 @@ struct Closure {
     std::vector<std::string> cycles;        // 다시 들어오려 한 경로 — 한 번만 읽는다
     bool depthCut = false;                  // 깊이 상한에 걸려 더 따라가지 않았다
     size_t cards = 0;                       // 따라간 맨 `*INCLUDE` 의 이름 수(주 덱 포함 전부)
+    std::vector<NameRef> refs;              // 맨 `*INCLUDE` 이름마다 — 읽은 차례
 
     // 닫힘을 **다** 읽었나. 하나라도 못 봤으면 소비자는 「단정 불가」로 다뤄야 한다.
     bool complete() const { return unresolved.empty() && notFollowed.empty() && !depthCut; }

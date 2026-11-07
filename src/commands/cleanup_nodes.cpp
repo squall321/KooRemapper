@@ -295,6 +295,9 @@ void scanRefsStream(std::istream& in, bool isMain, const Opts& o,
                     const auto& prim = KooRemapper::auxPrimaryFields(rd);
                     for (int v : KooRemapper::auxNodesOf(aux, prim)) sc.byElement.push_back(v);
                     for (int v : KooRemapper::auxNodesAlt(aux, rd, prim)) sc.byElementAlt.push_back(v);
+                } else if (auxLineIdx == aux.optNodeLine) {
+                    // 옵션 카드의 절점 — 보 `_ELBOW` 의 가운데 절점 MN(예전엔 Card 1 만 읽어 safe 가 MN 을 지웠다 · 재검토 D2)
+                    for (int v : KooRemapper::auxOptNodesOf(aux, line, fw)) sc.byElement.push_back(v);
                 }
                 ++auxLineIdx;
                 if (--auxRemaining <= 0) auxRemaining = 0;
