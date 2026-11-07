@@ -53,6 +53,12 @@ CASES = [
      REPO / "examples" / "cad_solid_merge_to_deck" / "deck.k",
      [REPO / "examples" / "cad_solid_merge_to_deck" / f for f in ("stepforge_fragment.k", "stepforge_fragment.json")],
      {"output": "merged.k", "fragment": "stepforge_fragment.k", "fragment_map": "stepforge_fragment.json"}),
+    # 이월 계획 적용 — StepForge 진리값 판(계획 · 변위장 하나 · 조각 셋, 계획이 덱의 바이트 지문을 고정한다)
+    ("apply_carryover_plan",
+     REPO / "examples" / "apply_carryover_plan" / "deck.k",
+     [REPO / "examples" / "apply_carryover_plan" / f
+      for f in ("plan.json", "field_2.bin", "fragment_4.k", "fragment_5.k", "fragment_6.k")],
+     {"plan": "plan.json", "output": "deck_applied.k", "report": "deck_applied_carryover.json"}),
     ("rebind_entities_after_remesh",
      REPO / "examples" / "rebind_entities_after_remesh" / "ours.k",
      [REPO / "examples" / "rebind_entities_after_remesh" / f for f in ("v1.k", "v2.k", "range_diff.json")],

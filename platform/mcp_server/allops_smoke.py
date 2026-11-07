@@ -131,6 +131,17 @@ def needed_files(args, d):
                     want.add(b)
                     todo.append(b)
                 break
+    # 이월 계획(`apply_carryover_plan` 의 plan.json)은 동반 파일(변위장 · 조각)을 **이름으로** 가리킨다 — 인자에는 계획 하나만
+    # 나오므로 위 걸음으로는 안 올라가고, 그러면 잡이 「파일이 없다」 로 거절된다. 계획의 `files` 에 적힌 것을 함께 올린다.
+    for f in sorted(want):
+        if not f.lower().endswith(".json"):
+            continue
+        try:
+            obj = json.loads((d / f).read_text(encoding="utf-8"))
+        except ValueError:
+            continue
+        if isinstance(obj, dict) and obj.get("format") == "stepforge-carryover-plan":
+            want.update(n for n in (obj.get("files") or {}) if n in names)
     return sorted(want)
 
 
