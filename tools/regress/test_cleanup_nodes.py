@@ -26,6 +26,7 @@
   · E 절 — 고차 솔리드의 절점 카드가 **두 줄**이다(한 줄만 읽으면 12개가 고아로 보인다)
   · F 절 — `*INCLUDE` 를 읽지 않으면 그 안이 쓰는 절점을 고아로 본다(닫힘은 정본 — 깊이 · `␣+` 이음 · 인클루드 안 `*END`)
   · H 절 — `_TITLE` 제목줄이 SID 줄을 한 줄 밀어낸다
+  · M 절 — output · report 가 설정 YAML · 따라가지 않는 변형 인클루드의 파일이면 거절한다(그 위에 썼다 — 재검토 R3 과 같은 규칙)
 
 usage: test_cleanup_nodes.py <KooRemapper 바이너리>
 """
@@ -507,6 +508,28 @@ def main():
         check("L-6 보 족이 쓰는 절점은 남았다", "\n     101 " in ac and "\n     102 " in ac, "")
         check("L-7 LOCAL·SBRID 와 번호가 같던 고아는 지워졌다",
               "\n     777 " not in ac and "\n     888 " not in ac, "")
+
+        # ── M: ★설정 YAML · 따라가지 않는 변형 인클루드의 파일에도 쓰지 않는다(재검토 R3 과 같은 규칙) ─────────────
+        #   읽는 덱(주 덱 · 인클루드)만 견주어 output · report 가 설정 YAML 이나 *INCLUDE_TRANSFORM 의 파일이면 그 위에 썼다 —
+        #   산출 덱은 그 변형 카드를 그대로 실으니 산출이 가리키는 파일이 사라졌다
+        md = os.path.join(d, "M")
+        os.makedirs(md)
+        tr = "*INCLUDE_TRANSFORM\ntr.k\n0,0,0,0,0,0,0\n0,0,0,0,0,0,0\n1.0,1.0,1.0,1.0\n0\n"
+        L = ["*KEYWORD", "*NODE"] + [nodeline(i, x, y, z) for i, (x, y, z) in enumerate(CUBE, start=1)]
+        L += ["*ELEMENT_SOLID", "%8d%8d" % (1, 1), "".join("%8d" % n for n in range(1, 9)),
+              "*PART", "p", "%10d%10d%10d" % (1, 1, 1), "*SECTION_SOLID", "%10d%10d" % (1, 1)]
+        write(os.path.join(md, "m.k"), "\n".join(L) + "\n" + tr + "*END\n")
+        write(os.path.join(md, "tr.k"), "*KEYWORD\n*NODE\n" + nodeline(201, 0, 0, 0) + "\n*END\n")
+        for tag, what, kv, keep in (("M-1", "output 이 설정 YAML", dict(model="m.k", output="mc.yaml", mode="force"), "mc.yaml"),
+                                    ("M-2", "output 이 *INCLUDE_TRANSFORM 의 파일(force)", dict(model="m.k", output="tr.k", mode="force"), "tr.k"),
+                                    ("M-3", "report 가 *INCLUDE_TRANSFORM 의 파일(report 모드)", dict(model="m.k", report="tr.k"), "tr.k")):
+            y = tag.replace("-", "") + ".yaml" if tag != "M-1" else "mc.yaml"
+            cfg(md, y, **kv)
+            before = open(os.path.join(md, keep), "rb").read()
+            rc, out = run(binary, md, "cleanup-nodes", y)
+            after = open(os.path.join(md, keep), "rb").read() if os.path.exists(os.path.join(md, keep)) else None
+            check("%s ★%s → rc 1 · 그 파일 바이트 그대로" % (tag, what), rc == 1 and after == before and "같은 파일" in out,
+                  (rc, after == before, out[-300:]))
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

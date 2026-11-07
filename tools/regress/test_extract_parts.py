@@ -18,8 +18,10 @@
       한다. 빠뜨린 덱은 그럴듯하게 돌면서 틀린다(J 절).
     · 콤마 자유형식 줄의 번호 다시 매기기 — 칸 차례 × 폭 자리에 덮어써 깨진 줄을 냈고 되읽기도 통과했다.
       이제 줄을 대고 거절하며(산출 없음) 되읽기도 칸이 깨진 콤마 줄을 센다(O 절 · 2026-11-07 검토 #7).
-    · 실패해도 남는 파일 — 못 여는 인클루드 · 되읽기 실패 뒤에 산출이 남았고, 거절한 실행 옆에 지난 실행의 산출 · 번호 지도 ·
-      보고가 그대로 있었다. rc≠0 이면 그것들을 지운다(되읽기 실패의 보고만 이번 결과로 남긴다 — P 절 · 검토 #8).
+    · 실패한 실행의 파일 — 산출 · 번호 지도 · 보고를 같은 폴더의 임시 파일에 쓰고 다 되면 바꿔 넣는다. 실패하면 이번 실행이 만들지
+      않은 파일은 하나도 지우지 않고(앞 실행의 산출 · 설정 YAML · 남의 번호 지도 자리 파일 · 폴더 · 변형 인클루드의 파일) 보고는 늘
+      쓴다(ok · output_written · 거절 목록 전부). 거절 목록은 [ERROR] 요약 줄로도 나온다(P 절 · 재검토 R3 · R4 · R5 — 검토 #8 의
+      「지운다」 를 뒤집었다).
     · 열 꼴 세트(`*SET_*_COLUMN`) — 쓰기가 늘 절점 번호로 걸러 파트 · 셸 COLUMN 세트를 비우거나 절점 번호로 바꿨다.
       세트 대상(절점 · 파트 · 셸 …)으로 거르고 그 대상으로 번호를 바꾼다(Q 절 · 재검토 N1).
     · 인클루드 찾기 — 패스마다 포함하는 파일의 폴더로 풀고 *INCLUDE_PATH 를 몰랐으며 깊이 8 에서 말없이 멈췄다. 정본 닫힘대로 따라가고
@@ -217,7 +219,7 @@ def main():
               "*SET_NODE_LIST" in rn and rd["verify"]["undefined_nodes"] == 0)
 
         # ── E: include.sets / materials 끄기 ─────────────────────────────────
-        # 되읽기를 끄고 산출을 본다 — 되읽기가 실패하면 산출을 지운다(P 절 · 2026-11-07 검토 #8)
+        # 되읽기를 끄고 산출을 본다 — 되읽기가 실패하면 산출을 쓰지 않는다(P 절)
         cfg(d, "e0.yaml", "model: main.k\noutput: e.k\nparts: [1, 2]\nverify: false\ninclude:\n"
                           "  sets: none\n  materials: false\n")
         rc0, out0 = run(binary, d, "extract-parts", "e0.yaml")
@@ -228,9 +230,9 @@ def main():
                          "  sets: none\n  materials: false\nreport: repe.json\n")
         rc, out = run(binary, d, "extract-parts", "e.yaml")
         re_ = rep(d, "repe.json")
-        check("E-3 ★그러면 검증이 재질 미정의를 잡는다 (조용히 통과하지 않는다) · 산출은 지운다",
-              re_["verify"]["undefined_materials"] > 0 and rc != 0 and not os.path.exists(os.path.join(d, "e.k")),
-              (re_["verify"], rc))
+        check("E-3 ★그러면 검증이 재질 미정의를 잡는다 (조용히 통과하지 않는다) · 산출을 쓰지 않는다(앞 실행의 e.k 는 그대로)",
+              re_["verify"]["undefined_materials"] > 0 and rc != 0 and re_.get("output_written") is False and
+              os.path.exists(os.path.join(d, "e.k")) and open(os.path.join(d, "e.k")).read() == e, (re_["verify"], rc))
 
         # ── F: 세트 자르기 ───────────────────────────────────────────────────
         check("F-1 *SET_NODE_LIST 를 남은 절점으로 자른다",
@@ -535,7 +537,8 @@ def main():
         cfg(d, "O6.yaml", "model: O6.k\noutput: O6_out.k\nparts: [1]\nrenumber: true\n")
         rc, out = run(binary, d, "extract-parts", "O6.yaml")
         check("O-6 ★renumber — 솔리드 콤마 카드(Card 1 · 절점 줄) → rc 1 · 두 줄을 댄다",
-              rc == 1 and out.count("O6.k:") == 2 and not os.path.exists(os.path.join(d, "O6_out.k")), (rc, out[-400:]))
+              rc == 1 and sum(1 for l in out.splitlines() if l.startswith("  ") and "O6.k:" in l) == 2 and
+              not os.path.exists(os.path.join(d, "O6_out.k")), (rc, out[-400:]))
         # renumber 없이는 콤마 줄을 그대로 싣는다
         cfg(d, "O7.yaml", "model: O-2.k\noutput: O7_out.k\nparts: [9]\nreport: O7.json\n")
         rc, out = run(binary, d, "extract-parts", "O7.yaml")
@@ -551,41 +554,133 @@ def main():
         check("O-8 ★되읽기가 칸이 깨진 콤마 줄(「8,9,1 2,3,4」)을 센다 → rc 1",
               rc == 1 and (r8.get("verify") or {}).get("malformed_comma_lines") == 1 and "깨진 콤마" in out, (rc, r8.get("verify"), out[-300:]))
 
-        # ── P: ★rc≠0 이면 산출 · 번호 지도가 남지 않는다 · 지난 실행의 곁 파일도 이번 결과로 남지 않는다 ──
+        # ── P: ★실패한 실행은 이번에 만들지 않은 파일을 지우지 않는다 · 보고는 늘 쓴다 · 거절 목록은 [ERROR] 요약으로도 ──
+        #   (재검토 R3 · R4 · R5 — 예전엔 rc≠0 이면 산출 · 번호 지도 · 보고 이름을 지워 설정 YAML · 남의 파일 · 빈 폴더 · 앞 잡의 산출 ·
+        #   *INCLUDE_PATH 로 찾는 인클루드 · *INCLUDE_TRANSFORM 의 파일까지 지웠고, 되읽기 실패 전에 「[OK] wrote」 를 찍었다)
         def exists(*names):
             return [n for n in names if os.path.exists(os.path.join(d, n))]
+
+        def body(path):       # 없으면 None
+            if not os.path.isfile(os.path.join(d, path)):
+                return None
+            with open(os.path.join(d, path), "rb") as f:
+                return f.read()
+
+        def summary(out):     # 플랫폼 잡 요약 흉내(runner_loop — stderr 가 비면 마지막 [ERROR] 다섯 줄 · 800 자)
+            errs = [ln for ln in out.splitlines() if "[ERROR]" in ln]
+            return "\n".join(errs[-5:])[-800:]
+
+        def first_refusal(r):
+            return (r.get("refusals") or [{}])[0]
+
         write(os.path.join(d, "P1.k"), base_deck(include_name="nope.k"))
         cfg(d, "P1.yaml", "model: P1.k\noutput: P1_out.k\nparts: [1]\nreport: P1.json\n")
         rc, out = run(binary, d, "extract-parts", "P1.yaml")
-        check("P-1 ★못 여는 *INCLUDE → rc 1 · 부분 산출이 남지 않는다", rc == 1 and not exists("P1_out.k", "P1.json"),
-              (rc, exists("P1_out.k", "P1.json"), out[-300:]))
+        r1 = rep(d, "P1.json") if exists("P1.json") else {}
+        f1 = first_refusal(r1)
+        check("P-1 ★못 여는 *INCLUDE → rc 1 · 산출 없음 · 보고는 쓴다(ok · output_written false · output null · 거절 목록에 그 줄)",
+              rc == 1 and not exists("P1_out.k") and r1.get("ok") is False and r1.get("output_written") is False and
+              r1.get("output") is None and f1.get("kind") == "include" and any("nope.k" in x for x in f1.get("lines", [])),
+              (rc, exists("P1_out.k"), r1.get("refusals"), out[-300:]))
         write(os.path.join(d, "P2.k"), base_deck().replace(e8(30, 3, 17, 18, 19, 20), e8(30, 3, 17, 18, 19, 21)))
         cfg(d, "P2.yaml", "model: P2.k\noutput: P2_out.k\nparts: [3]\nrenumber: true\nreport: P2.json\n")
         rc, out = run(binary, d, "extract-parts", "P2.yaml")
-        r2 = rep(d, "P2.json") if os.path.exists(os.path.join(d, "P2.json")) else {}
-        check("P-2 ★되읽기 실패(없는 절점 21) → rc 1 · 산출 · 번호 지도는 지우고 보고는 남긴다(output_written false)",
+        r2 = rep(d, "P2.json") if exists("P2.json") else {}
+        check("P-2 ★되읽기 실패(없는 절점 21) → rc 1 · 산출 · 번호 지도를 쓰지 않는다 · 보고는 번호 지도를 대지 않는다 · "
+              "「[OK] wrote」 · 「renumber map:」 을 찍지 않는다 · verify: false 를 알린다",
               rc == 1 and not exists("P2_out.k", "P2_out_renumber_map.json") and r2.get("output_written") is False and
-              (r2.get("verify") or {}).get("undefined_nodes") == 1, (rc, exists("P2_out.k", "P2_out_renumber_map.json"), r2.get("verify")))
-        # 지난 실행(renumber 성공)이 남긴 산출 · 번호 지도 · 보고 — 같은 이름으로 거절되는 실행 뒤에 남으면 이번 결과로 읽힌다
+              (r2.get("renumber") or {}).get("map", "x") is None and (r2.get("verify") or {}).get("undefined_nodes") == 1 and
+              "[OK] wrote" not in out and "renumber map:" not in out and "verify: false" in out,
+              (rc, exists("P2_out.k", "P2_out_renumber_map.json"), r2.get("renumber"), r2.get("verify"), out[-400:]))
+        # 지난 실행(renumber 성공)이 남긴 산출 · 번호 지도 — 같은 이름으로 거절되는 실행이 건드리지 않는다
         cfg(d, "P3a.yaml", "model: main.k\noutput: P3_out.k\nparts: [1]\nrenumber: true\nreport: P3.json\n")
         rc0, _ = run(binary, d, "extract-parts", "P3a.yaml")
-        before = exists("P3_out.k", "P3_out_renumber_map.json", "P3.json")
+        before = {n: body(n) for n in exists("P3_out.k", "P3_out_renumber_map.json")}
         cfg(d, "P3b.yaml", "model: O-1.k\noutput: P3_out.k\nparts: [9]\nrenumber: true\nreport: P3.json\n")
         rc, out = run(binary, d, "extract-parts", "P3b.yaml")
-        check("P-3 ★거절한 실행(콤마 줄 renumber) 뒤에 지난 실행의 산출 · 번호 지도 · 보고가 남지 않는다",
-              rc0 == 0 and len(before) == 3 and rc == 1 and not exists("P3_out.k", "P3_out_renumber_map.json", "P3.json"),
-              (rc0, before, rc, exists("P3_out.k", "P3_out_renumber_map.json", "P3.json"), out[-300:]))
+        r3 = rep(d, "P3.json") if exists("P3.json") else {}
+        check("P-3 ★거절한 실행(콤마 줄 renumber)은 앞 실행의 산출 · 번호 지도를 건드리지 않는다(바이트 그대로) · 보고는 이번 거절이다",
+              rc0 == 0 and len(before) == 2 and rc == 1 and all(body(n) == v for n, v in before.items()) and
+              r3.get("ok") is False and first_refusal(r3).get("kind") == "renumber",
+              (rc0, sorted(before), rc, r3.get("refusals"), out[-300:]))
         rc0, _ = run(binary, d, "extract-parts", "P3a.yaml")
         cfg(d, "P4.yaml", "model: main.k\noutput: P3_out.k\nparts: [1]\nreport: P3.json\n")
         rc, out = run(binary, d, "extract-parts", "P4.yaml")
-        r4 = rep(d, "P3.json") if os.path.exists(os.path.join(d, "P3.json")) else {}
-        check("P-4 ★번호를 안 매긴 실행은 지난 실행의 번호 지도를 지운다(이 산출과 짝이 아니다) · rc 0",
+        r4 = rep(d, "P3.json") if exists("P3.json") else {}
+        check("P-4 ★번호를 안 매긴 실행은 지난 실행이 남긴 이 op 의 번호 지도를 지운다(이 산출과 짝이 아니다) · rc 0",
               rc0 == 0 and rc == 0 and exists("P3_out.k", "P3.json") == ["P3_out.k", "P3.json"] and
               not exists("P3_out_renumber_map.json") and (r4.get("renumber") or {}).get("on") is False and
-              r4.get("output_written") is True, (rc0, rc, exists("P3_out.k", "P3_out_renumber_map.json", "P3.json")))
+              r4.get("ok") is True and r4.get("output_written") is True, (rc0, rc, exists("P3_out.k", "P3_out_renumber_map.json", "P3.json")))
+        write(os.path.join(d, "P3_out_renumber_map.json"),
+              '{\n  "note": "old -> new. 이것이 없으면 되돌릴 수 없다",\n  "nodes": [[1,1]],\n  "elements": [[1,1]]\n}\n')
+        rc, out = run(binary, d, "extract-parts", "P4.yaml")
+        check("P-4b 앞 판(kind 없이 note · nodes 로 시작)의 번호 지도도 이 op 의 것으로 알아보고 지운다",
+              rc == 0 and not exists("P3_out_renumber_map.json"), (rc, out[-300:]))
         rc, out = run(binary, d, "extract-parts", "P3a.yaml")
-        check("P-5 renumber 성공은 산출 · 번호 지도 · 보고를 다 남긴다",
-              rc == 0 and len(exists("P3_out.k", "P3_out_renumber_map.json", "P3.json")) == 3, (rc, out[-300:]))
+        r5 = rep(d, "P3.json") if rc == 0 else {}
+        m5 = json.loads(body("P3_out_renumber_map.json")) if exists("P3_out_renumber_map.json") else {}
+        check("P-5 renumber 성공은 산출 · 번호 지도(kind 표지) · 보고를 다 남긴다 · 보고가 그 지도를 댄다 · 거절 없음",
+              rc == 0 and len(exists("P3_out.k", "P3_out_renumber_map.json", "P3.json")) == 3 and
+              m5.get("kind") == "extract-parts renumber map" and
+              str((r5.get("renumber") or {}).get("map")).endswith("P3_out_renumber_map.json") and r5.get("refusals") == [],
+              (rc, r5.get("renumber"), out[-300:]))
+
+        # 검토 재현(재검토 R3) — 실패 · 성공 실행이 이번에 만들지 않은 파일 · 폴더를 지우거나 덮지 않는다
+        inc_path_deck = base_deck(include_name="parts.k", extra=["*INCLUDE_PATH", "incdir"])
+        tr_deck = base_deck(extra=["*INCLUDE_TRANSFORM", "tr.k", "0,0,0,0,0,0,0", "0,0,0,0,0,0,0", "1.0,1.0,1.0,1.0", "0"])
+        p6 = (("P-6a", "report 가 설정 YAML(오타 PID)", "model: in.k\noutput: out.k\nparts: [99]\nreport: e.yaml\n", {}, None, 1),
+              ("P-6b", "output 이 설정 YAML", "model: in.k\noutput: e.yaml\nparts: [1]\n", {}, None, 1),
+              ("P-6c", "번호 지도 자리의 남의 파일 · 번호 안 매김 → rc 0 · 그대로 두고 알린다",
+               "model: in.k\noutput: out.k\nparts: [1]\n", {"out_renumber_map.json": '{"mine": 1}\n'}, None, 0),
+              ("P-6d", "번호 지도 자리의 남의 파일 · renumber → 덮지 않고 거절",
+               "model: in.k\noutput: out.k\nparts: [1]\nrenumber: true\n", {"out_renumber_map.json": '{"mine": 1}\n'}, None, 1),
+              ("P-6e", "앞 산출 · 오타 PID → 앞 산출 그대로",
+               "model: in.k\noutput: out.k\nparts: [99]\nreport: r.json\n", {"out.k": "PREVIOUS GOOD OUTPUT\n"}, None, 1),
+              ("P-6f", "output 이 빈 폴더", "model: in.k\noutput: outdir\nparts: [1]\n", {"outdir": None}, None, 1),
+              ("P-6g", "report 가 빈 폴더(오타 PID)", "model: in.k\noutput: out.k\nparts: [99]\nreport: repdir\n", {"repdir": None}, None, 1),
+              ("P-6h", "확장자 없는 output 의 번호 지도 자리에 남의 파일 → rc 0 · 그대로",
+               "model: in.k\noutput: notes\nparts: [1]\n", {"notes_renumber_map.json": "user notes\n"}, None, 0),
+              ("P-6i", "output 이 *INCLUDE_PATH 로 찾는 인클루드(오타 PID)",
+               "model: in.k\noutput: incdir/parts.k\nparts: [99]\n", {"incdir/parts.k": INC}, inc_path_deck, 1),
+              ("P-6j", "output 이 *INCLUDE_TRANSFORM 의 파일(오타 PID)",
+               "model: in.k\noutput: tr.k\nparts: [99]\n", {"tr.k": INC}, tr_deck, 1))
+        for tag, what, yml, pre, deck, want_rc in p6:
+            dd = os.path.join(d, tag)
+            os.makedirs(os.path.join(dd, "incdir"))
+            write(os.path.join(dd, "in.k"), deck or base_deck())
+            write(os.path.join(dd, "inc_part2.k"), INC)
+            for fn, t in pre.items():
+                if t is None:
+                    os.makedirs(os.path.join(dd, fn))
+                else:
+                    write(os.path.join(dd, fn), t)
+            write(os.path.join(dd, "e.yaml"), yml)
+            keep = list(pre) + ["e.yaml", "in.k", "inc_part2.k"]
+            snap = {fn: (open(os.path.join(dd, fn), "rb").read() if os.path.isfile(os.path.join(dd, fn)) else None) for fn in keep}
+            rc, out = run(binary, dd, "extract-parts", "e.yaml")
+            same = [fn for fn, v in snap.items()
+                    if (v is None and os.path.isdir(os.path.join(dd, fn))) or
+                    (v is not None and os.path.isfile(os.path.join(dd, fn)) and open(os.path.join(dd, fn), "rb").read() == v)]
+            extra_ok = True
+            if tag == "P-6c":
+                extra_ok = "그대로 둔다" in out
+            if tag == "P-6e":
+                re6 = json.load(open(os.path.join(dd, "r.json"))) if os.path.exists(os.path.join(dd, "r.json")) else {}
+                extra_ok = re6.get("ok") is False and first_refusal(re6).get("kind") == "parts"
+            check("%s ★%s — rc %d · 손대지 않았다(%s)" % (tag, what, want_rc, " · ".join(keep)),
+                  rc == want_rc and len(same) == len(keep) and extra_ok, (rc, sorted(set(keep) - set(same)), out[-400:]))
+
+        # 거절 목록이 [ERROR] 요약에 실린다 — 플랫폼 잡 요약은 [ERROR] 줄만 모은다(예전엔 목록이 꼬리표 없는 줄이라 원시 로그에만 남았다)
+        write(os.path.join(d, "P7.k"), base_deck(include_name="nope1.k", extra=["*INCLUDE"] + ["nope%d.k" % k for k in range(2, 9)]))
+        cfg(d, "P7.yaml", "model: P7.k\noutput: P7_out.k\nparts: [1]\nreport: P7.json\n")
+        rc, out = run(binary, d, "extract-parts", "P7.yaml")
+        r7 = rep(d, "P7.json") if exists("P7.json") else {}
+        sm = summary(out)
+        check("P-7 ★잡 요약(마지막 [ERROR] 다섯 줄)에 거절 머리 · 목록 수 · 첫 줄이 실린다 · 보고엔 목록 여덟 줄 전부",
+              rc == 1 and "인클루드 닫힘을 다 읽지 못했다" in sm and "거절 목록 8 줄" in sm and "nope2.k" in sm and
+              len(first_refusal(r7).get("lines", [])) == 8, (rc, sm, r7.get("refusals")))
+        left = [os.path.join(w, n) for w, _, ns in os.walk(d) for n in ns if ".kr_tmp_" in n]
+        check("P-8 임시 파일이 하나도 남지 않는다(성공 · 거절 · 되읽기 실패 모두)", not left, left[:5])
 
         # ── Q: ★열 꼴 세트(*SET_*_COLUMN)는 세트 대상으로 거르고 그 대상으로 번호를 바꾼다 ──
         QL = ["*KEYWORD", "*NODE"] + [nl(n, float(n), 0.0, 0.0) for n in range(101, 109)]

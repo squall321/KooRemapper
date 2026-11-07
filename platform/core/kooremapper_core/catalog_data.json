@@ -14231,7 +14231,7 @@
       "name": "extract-parts",
       "category": "mesh",
       "summary": "Write a deck holding only the chosen parts, keeping every ID, the deck's field width and its newlines, then read it back and report any missing reference.",
-      "description": "Pulls selected parts out of a large deck into a smaller one that still runs. Parts are chosen by PID or by title wildcard, which matters on a 61-part deck where nobody remembers the numbers. The hard part is not the pulling — it is whether what is left is intact, because a deck that references a node, part, section or material it no longer contains dies somewhere else entirely and the cause is not obvious. So the op reads its own output back and reports undefined nodes, parts, sections and materials, exiting non-zero if any are found. *INCLUDE files are inlined rather than skipped: decks of this size are almost always split, and not reading them produces a deck with no elements at all for a part that lives in an include. The output is therefore one self-contained file, and an include that cannot be opened is refused rather than silently dropping the parts inside it. Beam, discrete, mass, seatbelt and plotel elements are read too, from manual-derived field positions; the variants still not understood are refused when they hold elements of a chosen part, because a deck that quietly lost structure runs and looks plausible, and dropped with a count when they only hold other parts. Everything dropped is listed by keyword in the report, so there is no invisible loss. IDs are preserved by default; renumber: true renumbers nodes and elements from 1 and writes the old-to-new map beside the deck, without which the extraction cannot be undone.",
+      "description": "Pulls selected parts out of a large deck into a smaller one that still runs. Parts are chosen by PID or by title wildcard, which matters on a 61-part deck where nobody remembers the numbers. The hard part is not the pulling — it is whether what is left is intact, because a deck that references a node, part, section or material it no longer contains dies somewhere else entirely and the cause is not obvious. So the op reads its own output back and reports undefined nodes, parts, sections and materials, exiting non-zero if any are found. *INCLUDE files are inlined rather than skipped: decks of this size are almost always split, and not reading them produces a deck with no elements at all for a part that lives in an include. The output is therefore one self-contained file, and an include that cannot be opened is refused rather than silently dropping the parts inside it. Beam, discrete, mass, seatbelt and plotel elements are read too, from manual-derived field positions; the variants still not understood are refused when they hold elements of a chosen part, because a deck that quietly lost structure runs and looks plausible, and dropped with a count when they only hold other parts. Everything dropped is listed by keyword in the report, so there is no invisible loss. IDs are preserved by default; renumber: true renumbers nodes and elements from 1 and writes the old-to-new map beside the deck, without which the extraction cannot be undone. The output, the renumber map and the report are written to temporary files in the same folder and renamed into place only when everything, the read-back included, succeeded: a failed run writes no output or map and deletes nothing it did not create — an earlier run's files, the YAML, someone else's files and folders stay as they were. The report is written on success and on failure, with ok, output_written and every refusal with its full list of lines.",
       "invocation": "yaml",
       "config_style": "structured",
       "takes_kfile": true,
@@ -14244,7 +14244,7 @@
           "role": "yaml_field",
           "yaml_path": "model",
           "required": true,
-          "description": "Input LS-DYNA K-file (or 'input'). *INCLUDE files are followed and inlined into the output."
+          "description": "Input LS-DYNA K-file (or 'input'). Plain *INCLUDE files are followed with the shared include rules (main-deck folder first, then the *INCLUDE_PATH folders, nesting up to 16) and inlined into the output. An include that cannot be found or opened, nesting deeper than 16, or any file-include variant the op does not follow (*INCLUDE_TRANSFORM, _AUTO_OFFSET, _BINARY, _NASTRAN, _STAMPED_* …) is refused with file:line, because the chosen parts could be inside it."
         },
         {
           "name": "output",
@@ -14253,7 +14253,7 @@
           "yaml_path": "output",
           "required": false,
           "default": null,
-          "description": "Output K-file. Defaults to the input name with an '_extracted' suffix."
+          "description": "Output K-file. Defaults to the input name with an '_extracted' suffix. Refused when it is the YAML, the model, a file of the include closure, a file an unfollowed include variant names, or a folder."
         },
         {
           "name": "parts",
@@ -14278,7 +14278,7 @@
           "yaml_path": "renumber",
           "required": false,
           "default": false,
-          "description": "Renumber nodes and elements from 1 and write <output>_renumber_map.json with the old-to-new pairs. Only field 0 of each line is rewritten in place, so coordinate text is preserved byte for byte. Refused when two element families share an element ID."
+          "description": "Renumber nodes and elements from 1 and write <output>_renumber_map.json with the old-to-new pairs. Numbers are replaced field by field in place (node and element IDs, element node fields, set members), so coordinate text is preserved byte for byte. Refused when two element families share an element ID. Lines whose numbers cannot be rewritten in place are refused with file:line before anything is written: comma free-format lines (*NODE, solid/shell/thick-shell cards, *SET_SEGMENT, *SET_*_COLUMN, beam-family cards), beam-family lines with a blank inside a manual field or a $ comment over a node field, and beam-family lines whose integer-width reading names a different node that exists in the deck. The map starts with \"kind\": \"extract-parts renumber map\"; an existing file at the map path that is not such a map is never overwritten (refused). Without renumber, a stale map from an earlier run is removed only when it is recognisably this op's map; anything else is left in place with a warning."
         },
         {
           "name": "verify",
@@ -14287,7 +14287,7 @@
           "yaml_path": "verify",
           "required": false,
           "default": true,
-          "description": "Read the written deck back and report undefined nodes, parts, sections and materials. Non-zero exit if any."
+          "description": "Read the written deck back (before it is renamed into place) and report undefined nodes, parts, sections and materials and comma lines whose fields broke. Non-zero exit if any, and then no output or map is written; run with verify: false to inspect the deck anyway."
         },
         {
           "name": "include.nodes",
@@ -14309,7 +14309,7 @@
             "referenced",
             "none"
           ],
-          "description": "referenced trims *SET_NODE / *SET_PART / *SET_SOLID / *SET_SHELL / *SET_TSHELL to what the output contains and keeps *SET_SEGMENT faces whose four nodes all survive. Variants whose members cannot be read as IDs (_GENERATE, _GENERAL, _ADD, _INTERSECT) are dropped and their SIDs listed."
+          "description": "referenced trims *SET_NODE / *SET_PART / *SET_SOLID / *SET_SHELL / *SET_TSHELL to what the output contains and keeps *SET_SEGMENT faces whose four nodes all survive. Variants whose members cannot be read as IDs (_GENERATE, _GENERAL, _ADD, _INTERSECT) are dropped and their SIDs listed. Column sets (*SET_*_COLUMN) are filtered and renumbered by their own subject (nodes, parts, shells …), not as nodes."
         },
         {
           "name": "include.materials",
@@ -14336,7 +14336,7 @@
           "yaml_path": "report",
           "required": false,
           "default": null,
-          "description": "Write the result as JSON: selected parts, picked counts, needed section/material IDs, sets trimmed and dropped, dropped keywords, renumber map path and the read-back verification."
+          "description": "Write the result as JSON, on success and on failure: ok, output_written, refusals (kind, message and the full list of file:line entries), selected parts, picked counts, needed section/material IDs, sets trimmed and dropped, dropped keywords, the renumber map path (null when none was written) and the read-back verification. Never written over the YAML, an input file or a folder."
         }
       ],
       "example": {
@@ -14352,7 +14352,7 @@
         "note": "실행 검증된 예제 (입력: assembly.k — 파트 2 는 *INCLUDE 안에 있어서 펼쳐 넣는다)"
       },
       "example_folder": "examples/extract-parts",
-      "notes": "Unknown YAML keys are reported as a warning and ignored (the run continues with the defaults).\n\nWhat is carried: *KEYWORD, *TITLE, *PARAMETER*, *CONTROL_*, *DATABASE_ other than *DATABASE_HISTORY_*, the chosen parts' *PART pairs, their *SECTION_*/*MAT_*/*EOS_*/*HOURGLASS blocks, *DEFINE_CURVE/TABLE, the *NODE lines their elements use, their *ELEMENT_{SOLID,SHELL,TSHELL} cards and the trimmed sets. *DATABASE_HISTORY_* is dropped because it holds node and element IDs that may not survive. Everything else is dropped and counted by keyword in the report. A *PART_* variant the op cannot chunk (*PART_INERTIA and friends) is carried whole when one of its first-field PIDs was chosen, which may bring unselected parts along; LS-DYNA warns about a part with no elements, and that is far better than losing a rigid body silently. Card line counts come from the one shared judge, ElementCardLayout::elementCardSpan, so a higher-order solid's second node card is carried too. Field widths follow the deck: *NODE and *ELEMENT_* at the width *KEYWORD declares (8, i10=y 10, long=y 20) or the keyword suffix, *SET_* and *PART* at I10 (I20 under long). Lines are copied, not re-rendered, so fixed-width exponents are never truncated and original newlines survive; renumbering replaces single fields in place for the same reason. Relative paths resolve against the YAML file's directory."
+      "notes": "Unknown YAML keys are reported as a warning and ignored (the run continues with the defaults).\n\nWhat is carried: *KEYWORD, *TITLE, *PARAMETER*, *CONTROL_*, *DATABASE_ other than *DATABASE_HISTORY_*, the chosen parts' *PART pairs, their *SECTION_*/*MAT_*/*EOS_*/*HOURGLASS blocks, *DEFINE_CURVE/TABLE, the *NODE lines their elements use, their element cards (solid, shell, thick shell and the beam family — beam, discrete, mass, seatbelt, plotel) and the trimmed sets. *DATABASE_HISTORY_* is dropped because it holds node and element IDs that may not survive. Everything else is dropped and counted by keyword in the report. A *PART_* variant the op cannot chunk (*PART_INERTIA and friends) is carried whole when one of its first-field PIDs was chosen, which may bring unselected parts along; LS-DYNA warns about a part with no elements, and that is far better than losing a rigid body silently. Card line counts come from the one shared judge, ElementCardLayout::elementCardSpan, so a higher-order solid's second node card is carried too. Field widths follow the deck: *NODE and *ELEMENT_* at the width *KEYWORD declares (8, i10=y 10, long=y 20) or the keyword suffix, *SET_* and *PART* at I10 (I20 under long). Lines are copied, not re-rendered, so fixed-width exponents are never truncated and original newlines survive; renumbering replaces single fields in place for the same reason. Relative paths resolve against the YAML file's directory.\n\nRefusals (exit 1, nothing written; the report carries every line and an [ERROR] summary line the count and the first lines): a *ELEMENT_* variant whose card length the op does not know holding a chosen part's elements; seatbelt device keywords (*ELEMENT_SEATBELT_RETRACTOR, _PRETENSIONER, _SENSOR, _SLIPRING, unknown _*) when a chosen part has *ELEMENT_SEATBELT cards — devices carry no PID, so they cannot be shown to belong to another belt (_ACCELEROMETER and device blocks without data lines are dropped and counted instead); *ELEMENT_BEAM_PULLEY / _SOURCE pointing at a chosen beam (or at 0 while a chosen part has beams); *ELEMENT_MASS_PART_SET whose set is only partly chosen or cannot be resolved, or any of them under include.sets: none; a beam-family line whose PID differs between the manual reading and the integer-width reading when one of them is chosen. A beam-family line written at integer width (SLEN or MASS in an 8-column field) is read both ways only when the integer-width reading could have been written that way — every field it uses is clean and of the right kind, the line ends within the integer-width card, a seatbelt has N3 and N4 both or neither, a mass has its MASS — and then the nodes of both readings that exist in the deck are carried. The middle node MN of *ELEMENT_BEAM_ELBOW (its last option card) is carried and renumbered."
     },
     {
       "name": "id_floor",

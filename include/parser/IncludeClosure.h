@@ -55,7 +55,7 @@ struct NameRef {
     size_t firstLine = 0;  // 1-기반 — `␣+` 이음이면 lastLine > firstLine
     size_t lastLine = 0;
     std::string name;
-    std::string path;      // 연 경로(Followed · Cycle) — Cycle 은 이미 읽은 파일이다
+    std::string path;      // 찾은 경로(Followed · Cycle · DepthCut · 열 수 없는 Unresolved) — Cycle 은 이미 읽은 파일이다
     What what = What::Followed;
 };
 

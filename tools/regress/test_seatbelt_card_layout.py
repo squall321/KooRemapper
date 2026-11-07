@@ -519,6 +519,15 @@ def main():
         check("G-8 ★번호 칸에 겹친 $ 주석 — renumber 거절(주석을 덮지 않는다) · 싣기는 절점 넷을 다 싣는다",
               rc == 1 and "겹친 $ 주석" in out and not os.path.exists(os.path.join(d, "G8r_out.k")) and rcx == 0 and
               carried == [101, 118, 128, 147], (rc, out[-300:], rcx, carried))
+        # 주석이 겹친 칸이 0(N3 · N4 = 0 인 1D 띠)이면 바꿔 쓸 번호가 없다 — renumber 는 되고 주석이 그대로다(검토자 퍼즈의 거짓 거절)
+        gz = ("%-8d%-8d%-8d%-8d%-8d%-16s%-8d%-8d" % (13, 9, 128, 147, 0, "0.0", 0, 0)).rstrip() + "  $ belt"
+        write(os.path.join(d, "G8z.k"), belt_deck(8, gz, nodes=(128, 147)))
+        write(os.path.join(d, "G8z.yaml"), "model: G8z.k\noutput: G8z_out.k\nparts: [9]\nrenumber: true\n")
+        rc, out = run(binary, d, "extract-parts", "G8z.yaml")
+        rows = section_lines(os.path.join(d, "G8z_out.k"), "*ELEMENT_SEATBELT") if rc == 0 else []
+        check("G-8z ★주석이 겹친 칸이 0 이면 renumber 를 거절하지 않는다 · N1 · N2 만 바꾸고 주석은 그대로",
+              rc == 0 and len(rows) == 1 and rows[0].endswith("0  $ belt") and rows[0][16:32] == "%8d%8d" % (1, 2),
+              (rc, rows, out[-300:]))
         # 재결속 — 엔티티의 질량 줄 「    9003       1               1」(PID 없음 · 정수꼴 MASS)은 정수 폭 읽기의 MASS 가 비어 다른 읽기가
         # 아니다 → 옛 덱의 PID 1 이 있어도 「단정하지 못한 자리」가 아니다(재검토 R6 — 예전엔 rc 1)
         rb = os.path.join(d, "rebind")
