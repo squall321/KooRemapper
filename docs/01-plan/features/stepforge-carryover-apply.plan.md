@@ -28,14 +28,16 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
       morph 의 new_section(두께)은 v2(지금은 `field.thickness` 가 있으면 거절)
 - [x] 되읽어 대조 · 품질 관문(새로 뒤집힌 솔리드 · 뒤집힌 셸 법선이면 산출을 지운다) · 보고(PID 마다 · 적용 덱 sha256) — `src/assembly/CarryoverApply.cpp`
 - [x] 시험 — 진리값 판(`examples/apply_carryover_plan`) · 12 파트 덱(`tools/regress/data/apply_carryover_plan/mesh12`) ·
-      거절 16 · CRLF · 바닥 · 품질(`tools/regress/test_apply_carryover_plan.py` 45 항) · 리더 단위 시험(`tests/test_CarryoverPlan.cpp` 7)
+      거절 16 · CRLF · 바닥 · 품질 · 리뷰 11-07 고침(H · I · J)(`tools/regress/test_apply_carryover_plan.py` 80 항) · 리더 단위 시험(`tests/test_CarryoverPlan.cpp` 10)
+- [x] 리뷰 11-07 고침 — 아래 「리뷰 11-07 고침 — 정한 것」
 - [x] 바닥 — `idMaxima()` 의 요소가 보 · 이산 · 질량 · 안전띠 · 플롯 요소까지(`id_floor` · `cad_solid_merge_to_deck` 같이, `test_id_floor` E)
 - [x] help · 카탈로그 · 개행 행렬 제외 · ofstream 선언
 
 ## 지으며 정한 것 (11-07 — 다음 세션이 다시 따지지 않게)
 - **보고는 거절해도 쓴다** — 저쪽이 걸린 것 전부를 읽고 계획을 고친다. YAML 이 틀려 보고 자리를 모를 때(모르는 키 · output 없음)만 콘솔뿐.
 - **조각 바이트가 다를 때의 값 대조** = 조각 엄격 읽기 + 머리 대조(번호 구간 · 수 · PID · SECID · MID · 요소 꼴 · 새 섹션 카드 · 요소가 쓰는 절점이
-  다 있고 안 쓰는 절점 없음). 좌표는 대조하지 않는다 — 그래서 받되 **경고**(`fragment_bytes`)다. `.bin` 은 지문이 다르면 거절.
+  다 있고 안 쓰는 절점 없음). 좌표는 대조하지 않는다 — 그래서 받되 **경고**(`fragment_bytes`)다. 변위장은 지문이 다르면 거절
+  (파일의 몫은 확장자가 아니라 줄이 정한다 — 리뷰 11-07).
 - **remesh 조각의 SECID · MID** — new_section 이 없으면 덱 `*PART` 의 SECID 와 같아야 하고, MID 는 늘 덱 `*PART` 의 MID 와 같아야 한다
   (다르면 거절 — 섹션을 바꾸는 꼴은 new_section 뿐). 섹션 종류(셸 · 솔리드)가 조각 요소 꼴과 맞아야 한다.
 - **`*PART` 변형**(`_INERTIA` 등)은 remesh · delete 만이 아니라 transform · morph 도 거절 — 무게중심 · 관성 칸을 함께 옮길 규칙이 없다.
@@ -47,8 +49,51 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
   담으면 거절(`set_member`). 접촉 면(STYP 0 · 1 · 4, 지우기는 2 · 6 도)은 풀 수 없으면 거절(`contact_side`).
 - **셸 중간절점(N5-N8)** — 리더가 담지 않아 이월 적용이 직접 읽어 PID 절점에 넣는다(옮기기 · 지우기 · 나눠 쓴 절점).
 - **품질 잣대** — 사면체 6V(`Validator`) · 육면체 · 쐐기 2×2×2 가우스점 최소 야코비안(`ElementQualityChecker`) ≤ 0 = 뒤집힘. 셸은 두 대각선 외적이
-  앞뒤로 반대(또는 0)면 뒤집힘(옮기기 · 모프만 — 새 셸은 앞이 없다). 바꿔 넣기 · 새 파트는 새 요소가 하나라도 뒤집히면 거절.
+  앞뒤로 반대(또는 0)면 뒤집힘(모프만 — 옮기기는 det +1 강체라 뒤집을 수 없고 새 셸은 앞이 없다 · 리뷰 11-07). 바꿔 넣기 · 새 파트는
+  새 요소가 하나라도 뒤집히면 거절.
 - **바닥** — 새 counter `maxAuxElementId_` 를 `idMaxima()` 에만 넣었다. 다른 op 의 새 요소 번호(`maxElementId_`)는 그대로다(LS-DYNA 번호는 요소
   종류마다 따로다 — 바꾸면 30곳 op 의 번호가 움직인다).
 - **남은 것** — `auxElementCard` 의 `*ELEMENT_MASS` PID 칸이 3(8칸 자르기)인데 매뉴얼 꼴은 EID I8 · NID I8 · MASS E16 · PID I8 이라 8칸으로는 칸 4 다
-  (`IdRefs` 도 같은 자리). 이월 적용은 그 PID 를 「PID 에 질량 요소가 있다」 판정에만 쓴다 — 정본을 고치는 일은 따로.
+  (`IdRefs` 도 같은 자리). 이월 적용은 그 PID 를 「PID 에 질량 요소가 있다」(aux_in_part) 판정에만 쓴다 — 정본을 고치는 일은 따로(리뷰 11-07 —
+  공용 코드 갈래가 고친다. 그 전까지는 지우는 PID 를 가리키는 질량 요소를 이 op 이 못 잡는다 — 재현 `MASS1_pid_deleted`).
+
+## 리뷰 11-07 고침 — 정한 것
+리뷰(11-07) 결함 11 + 그럴듯한 둘을 고쳤다. 공용 코드(i10 조각의 쓰기 관문 왕복 · 솔리드 · 티쉘 변형의 바닥 · `*ELEMENT_MASS` PID 칸)는 다른 갈래 몫.
+- **요소 블록 판정(결함 1)** — 덱을 고치는 줄(옮기기 · 모프 · 바꿔 넣기 · 지우기 · 조각 있는 새 파트)이 하나라도 있으면, 절점 칸을 다 읽지 못하는
+  `*ELEMENT_*` 블록이 있을 때 **전부** 거절(`opaque_elements` — 키워드마다 첫 줄 · 블록 수 · 까닭). 다 읽는 것은 둘뿐 —
+  ① 리더가 메시에 그대로 담는 격자 블록(`KFileReader::parseFile` 의 갈래를 옮긴 `readerReadsGrid`: `*ELEMENT_SOLID` · `_SOLID_TITLE` · `*ELEMENT_TSHELL` ·
+  `_TSHELL_TITLE` 은 이름이 같을 때만, `*ELEMENT_SHELL` 은 `parseElementKeyword` 가 받는 변형 — 단 `_DOF` 는 Card 5 의 NS1-NS4 를 아무도 읽지 않아 뺀다)
+  ② 칸 자리를 아는 격자 밖 블록(`auxElementCard`) — 보는 옵션 카드에 절점이 있는 `_WARPAGE`(SN1 · SN2) · `_ELBOW`(MN)를 뺀다. Card 1 의 N3(방향 절점)은 읽는다.
+  ⚠ `readerReadsGrid` 는 리더 갈래의 사본이다 — 공용 갈래가 「리더가 담는 키워드」 판정을 정본에 두면 그것으로 바꾼다.
+- **참조 덮음 표(결함 2)** — 바꿔 넣기 · 지우기 줄이 있으면 덱의 키워드마다 `refCover`(CarryoverApply.cpp)로 가른다. 정본(NodeRefs · IdRefs · 접촉 면)이 읽거나 세는
+  갈래 · 참조 없는 키워드 표 · 파트 칸만 아무도 안 읽는 갈래(지우기만 막는다) 밖은 **거절**(`ref_unscanned` — 키워드마다 한 번 · 첫 줄). 모르면 Free 가 아니다.
+  - 참조 없는 표(매뉴얼 칸을 본 것만) — `*KEYWORD` · `*TITLE` · `*END` · `*COMMENT` · `*NODE` · `*PART`(+`_CONTACT`) · `*SECTION_SOLID/SHELL/TSHELL/BEAM/DISCRETE/SEATBELT` ·
+    `*MAT_*`(빼는 것: `_ADD_*` · `_NONLOCAL` · 6DOF 스프링 093/095 — 파트 칸, `_WINFRITH_CONCRETE_REINFORCEMENT` — 요소 칸) · `*EOS_*` · `*HOURGLASS` · `*DAMPING_GLOBAL` ·
+    `*DEFINE_CURVE` · `_CURVE_SMOOTH` · `_TABLE`(2D · 3D) · `_BOX` · `_VECTOR` · `_COORDINATE_SYSTEM`(`_CURVE_FUNCTION`(DX(n)) · `_CURVE_FEEDBACK`(PID) ·
+    `_CURVE_TRIM`(NSEED) · `_COORDINATE_VECTOR`(NID) · `_VECTOR_NODES` 는 아니다) · `*PARAMETER*` · `*CONTROL_*`(빼는 것: `_FORMING_*` · `_IMPLICIT_SOLUTION`(ARCCTL 절점) ·
+    `_COARSEN` · `_2D_REMESHING_REGION` · `_SPOTWELD_BEAM` · `_STAGED_CONSTRUCTION` · `_SEGMENTS_IN_ALE_COUPLING`, 파트 칸만: `_REFINE_*` · `_ADAPTIVE_CURVE` ·
+    `_SUBCYCLE*` · `_MPP_DECOMPOSITION_*PART*`) · `*DATABASE_BINARY_*` · `_EXTENT_*` · `_FORMAT` · `_NODAL_FORCE_GROUP` · `_HISTORY_*_SET` · ASCII 출력(GLSTAT · MATSUM ·
+    NODOUT · RCFORC …, `_RCFORC_MOMENT` 는 절점 칸이라 아니다) · `*BOUNDARY_SPC_SET*` · `*INITIAL_VELOCITY` · `*LOAD_BODY_X/Y/Z/RX/RY/RZ/VECTOR/PARTS` ·
+    `*LOAD_SEGMENT_SET` · `*LOAD_SHELL_SET` · `*RIGIDWALL_PLANAR`(`_ID` · `_FINITE` · `_MOVING` 만 — `_ORTHO` · `_FORCES` 는 절점 칸). 세트 ID 만 가리키는 칸은 된다
+    (세트 멤버는 정본 · 해석기가 본다).
+  - 파트 칸만(지우기만 막는다) — `*INITIAL_VELOCITY_RIGID_BODY` · `*CONSTRAINED_RIGID_BODY_STOPPERS` · `*CONSTRAINED_EXTRA_NODES_NODE`(절점은 정본) · `_SET` ·
+    `*DAMPING_RELATIVE` · `*DEFINE_FRICTION` · 위 `*MAT_*` · `*CONTROL_*` 파트 칸 · 보 `_PID` 옵션(PID1 · PID2).
+  - 정본이 읽지만 덜 읽는 것 — `*LOAD_NODE_POINT` 의 M1-M3(DOF 4 · 8 의 따름 힘 절점)가 0 이 아니면 거절. 정본 접촉이라도 카드 1 꼴이 다른
+    `*CONTACT_ENTITY` · `_GEBOD` · `_1D` · `_2D` · `_RIGID_SURFACE` · `_AUTO_MOVE` · `_COUPLING` · `_ADD_WEAR` · `_EXCLUDE_INTERACTION` · `_INTERIOR` · `_SPG` ·
+    `_GUIDED_CABLE` 은 거절. CNRB · `*DEFINE_COORDINATE_NODES` 의 변형은 정본이 첫 정의만 읽어 거절.
+  - 세트 — 종류를 모르는 세트(`*SET_DISCRETE` · `*SET_NODE_INTERVAL` …)는 `ref_unscanned`, 풀 수 없는 방언(`_GENERAL` · `_ADVANCED` · 없는 멤버 · 순환)은
+    `set_unresolved`(파트 세트는 지우기 줄이 있을 때만). `_COLUMN` · 평범한 목록은 정본이 읽는다.
+  - 표의 근거는 `docs/LSDyna/Vol_I.txt` · `Vol_II.txt` 칸 설명(「Node ID」 · 「Part ID」 · 「Element ID」 · 절점 칸 이름)이다. 흔한 낙하 덱 꼴(제어 · 출력 · 곡선 ·
+    세트 구속 · 초기 속도 · PID 접촉)을 받는지 회귀 H-8 이 본다.
+- **EID 겹침(결함 3)** — LS-DYNA 는 요소 종류마다 번호가 따로라 겹쳐도 된다. 그러나 리더는 요소를 번호 하나로 들고 쓰기는 지울 번호를 모든 요소 블록에서
+  지운다 — 덱을 고치는 줄이 있으면 거절(`eid_collision` — EID · 키워드 · 줄). 큰 덱에서 EID 표를 짓지 않게 격자 카드 수 = 메시 EID 수 · 격자 밖 EID 가 안 겹치면 건너뛴다.
+- **강체 허용(결함 4)** — max|RᵀR − I| · |det − 1| ≤ 1e-6(StepForge 의 round(x, 9) 가 RᵀR 에 ~2e-9 를 쌓는다), 보고는 `%.12g`.
+- **셸 법선(결함 5)** — 모프만 견준다. **T1(결함 6)** — 상대 1e-4(StepForge `%10.5g`).
+- **주입(결함 8)** — 덱에 쓰는 계획 글자(이름 · 파일 이름)의 제어 문자를 빈칸으로. 조각 줄의 제어 문자(탭 밖)는 거절 — 주석 · 제목 줄은 글자 그대로 들어간다.
+- **동반 파일의 몫 · 예외(결함 9)** — 몫은 줄이 정한다(morph 의 field.file · remesh · 새 파트의 fragment.file). 어느 줄도 안 쓰는 파일은 확장자와 무관하게 경고만
+  (`file_mismatch_unused` — 전에는 `.bin` 이면 거절). 이 op 안의 예외는 보고(`internal_error`)를 쓰고 덱을 남기지 않는다.
+- **`*END` 없음(결함 10)** — 조각을 넣을 때만 `deck_no_end`(쓰기가 블록을 *END 자리에 낸다). 옮기기 · 모프만이면 받는다.
+- **StepForge 실제 꼴(결함 11)** — 못 지은 조각은 `{ok, why}` · `{ok, why(null), notes}` · `{ok, 조각 칸, check{why · problems}}` — 까닭은 why → notes.why →
+  check.why → check.problems 차례로 `fragment_failed` 에 싣는다. transform 의 `check` 는 선택이다.
+- **그럴듯한 둘** — 돌리면(R ≠ I) `orientation_not_rotated` 경고(재질 축 · 좌표계 · MCID · 초기 응력은 돌리지 않는다). 거절하면 출력 자리의 옛 덱을 지우고
+  `stale_output_removed` 로 적는다.
