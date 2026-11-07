@@ -94,12 +94,22 @@ int realFieldWidth(int intFw);
 //   *ELEMENT_MASS     : Card 1 = EID(I8) ID(I8) MASS(E16) PID(I8) → 절점은 칸 **1** 하나 (159866-159930).
 //                       ⚠ MASS 는 10칸 표에서 **두 칸**(17-32열)이다 — PID 는 33-40열(8칸으로 자르면 칸 4)이고
 //                         8칸 칸 3(25-32열)은 MASS 의 뒤 절반이다. 칸 차례(EID ID MASS PID)로 PID 는 3 이지만
-//                         그 차례로 자르는 것은 `auxCardFields` 뿐이다(2026-11-07 — 정수 폭으로 잘라 PID 를 MASS 에서 읽었다).
+//                         그 차례로 자르는 것은 `auxCardReadings` 뿐이다(2026-11-07 — 정수 폭으로 잘라 PID 를 MASS 에서 읽었다).
 //                       ⚠ `_NODE_SET` 변형은 그 칸이 **절점 세트 ID** 다 — 절점으로 읽으면
 //                         엉뚱한 절점을 지키고 세트 멤버는 놓친다. 그래서 **미지원**으로 둔다.
-//   *ELEMENT_SEATBELT : Card 1 = EID PID N1 N2 SBRID SLEN N3 N4 → 절점이 **두 구간**이다
-//                       (칸 2·3 과 칸 6·7). 사이의 SBRID·SLEN 을 절점으로 읽으면 번호를 다시
-//                       매길 때 그 칸을 **덮어써 카드가 깨진다**.
+//   *ELEMENT_MASS_PART: Card 1 = ID(I8) ADDMASS(F16) FINMASS(F16) LCID(I8) MWD(I8) (160135-160207) — 파트에 질량을 얹는 카드다.
+//                       칸 0 이 PID(`_SET` 이면 **파트 세트 ID**)이고 요소 번호 · 절점 칸이 없다(`hasEid=false`). 예전엔 질량
+//                       카드의 칸 3 을 PID 로 읽어 extract-parts 가 고른 파트의 추가 질량을 조용히 버렸다(2026-11-07 검토 #5).
+//   *ELEMENT_BEAM_PULLEY · *ELEMENT_BEAM_SOURCE : 보 요소가 아니라 **별개 키워드**다 — 8칸 표(I10)이고 PID 칸이 없다
+//                       (156795 PUID BID1 BID2 PNID … · 156905 BSID BSNID BSEID …). 예전엔 보의 옵션으로 읽어 칸 1(BID1 · BSNID)을
+//                       PID 로 셌다. 보 요소 번호 칸만 적는다(`elemRefFields` — BID1 · BID2 · BSEID).
+//   *ELEMENT_SEATBELT : Card 1 = EID(I8) PID(I8) N1(I8) N2(I8) SBRID(I8) SLEN(F16) N3(I8) N4(I8) → 절점이 **두 구간**이다
+//                       (칸 차례 2·3 과 6·7 — 160311-160353, 10칸 표에 아홉 자리라 SLEN 이 두 칸 41-56열이다).
+//                       ⚠ N3 · N4 는 57-64 · 65-72열이다(8칸으로 자르면 칸 7·8). 예전엔 8칸 칸 6·7(49-64열 — SLEN 의 뒤
+//                         절반과 N3)을 읽어 N4 를 놓쳤다 — cleanup-nodes 가 쓰는 N4 를 지우고 extract-parts 가 빠뜨렸다(2026-11-07).
+//                       사이의 SBRID·SLEN 을 절점으로 읽으면 번호를 다시 매길 때 그 칸을 **덮어써 카드가 깨진다**.
+//                       `_ACCELEROMETER`·`_PRETENSIONER`·`_RETRACTOR`·`_SENSOR`·`_SLIPRING` 은 **별개 키워드**다 — 10칸 폭 표이고
+//                       PID 칸이 없다(160482 · 160602 · 160931 · 161342 · 161725). 미지원 · PID 없음으로 둔다(짐작하지 않는다).
 //   *ELEMENT_PLOTEL   : Card 1 = EID N1 N2 → **PID 칸이 없다**. 'PID 는 칸 1' 로 뭉개면
 //                       N1 을 파트로 읽는다.
 enum class AuxFamily { NONE, BEAM, DISCRETE, MASS, SEATBELT, PLOTEL };
@@ -113,8 +123,13 @@ struct AuxElementCard {
     int  nodeSkip2 = -1;       // 둘째 절점 구간(없으면 -1) — `*ELEMENT_SEATBELT`
     int  nodeCount2 = 0;
     bool hasPart = true;       // false = PID 칸이 없다(`*ELEMENT_PLOTEL`)
-    int  partField = 1;        // PID 가 든 칸 — **칸 차례**(`auxCardFields` 가 나눈 차례). ⚠ `*ELEMENT_MASS` 는 3(EID ID MASS PID)
-    std::vector<int> wideFields;   // Card 1 에서 정수 칸보다 넓은 실수 칸의 차례(`*ELEMENT_MASS` 의 MASS = 2)
+    int  partField = 1;        // PID 가 든 칸 — **칸 차례**(`auxCardReadings` 가 나눈 차례). ⚠ `*ELEMENT_MASS` 는 3(EID ID MASS PID)
+    std::vector<int> wideFields;   // Card 1 에서 정수 칸보다 넓은 실수 칸의 차례(`*ELEMENT_MASS` 의 MASS = 2 · 안전띠 SLEN = 5)
+    int  card1Fields = 0;          // 넓은 칸이 있는 족의 Card 1 칸 수(질량 4 · 안전띠 8) — 정수 폭 읽기가 줄을 다 담는가를 잰다
+    bool hasEid = true;            // false = 칸 0 이 요소 번호가 아니다 · 절점 칸도 없다(`*ELEMENT_MASS_PART(_SET)` — 요소가 아니다)
+    bool partIsSet = false;        // `partField` 가 PID 가 아니라 **파트 세트 ID** 다(`*ELEMENT_MASS_PART_SET`) — PID 로 견주지 말 것
+    std::vector<int> elemRefFields;   // 보 요소 번호를 담는 칸(차례 — 8칸 표, 칸 폭 10 · long 20): `*ELEMENT_BEAM_PULLEY` BID1 · BID2 ·
+                                      // `*ELEMENT_BEAM_SOURCE` BSEID. 0 이면 LS-DYNA 가 이웃 보를 스스로 찾는다(PULLEY)
     bool supported = false;    // false 면 이 변형을 추측하지 않는다
     std::string reason;        // supported=false 일 때 댈 이유
 };
@@ -123,12 +138,53 @@ struct AuxElementCard {
 // 두 판정기는 **배타적**이다. 모르는 `*ELEMENT_*` 변형도 family=NONE 이다.
 AuxElementCard auxElementCard(const std::string& keywordLine);
 
-// 그 족 Card 1 한 줄을 **칸 차례대로** 나눈다 — `partField`·`nodeSkip` 은 이 차례를 가리킨다.
-// 고정폭이면 `wideFields` 의 칸은 실수 폭(`realFieldWidth` — 표준·i10 16 · long 20), 나머지는 정수 폭 `fw` 다
-// (Vol_I 19315-19316 long 은 20 이하를 20 으로 · 19353-19354 i10 은 8칸짜리만 10칸으로). 콤마 자유형식과 칸이 어긋난 줄(고정 칸 안에 공백)은
-// `deckscan::cardFields` 와 같이 토큰 차례가 곧 칸 차례다. `wideFields` 가 비면 `deckscan::cardFields(line, fw)` 그대로다.
-// ⚠ 절점 칸은 넓은 칸 **앞**에 있다(질량의 ID 는 칸 1) — 칸 차례 × 폭으로 자리를 잡아 쓰는 쪽(extract-parts 의 번호 다시 매기기)이 맞다.
-std::vector<std::string> auxCardFields(const AuxElementCard& a, const std::string& line, int fw);
+// ── 보 족 Card 1 한 줄의 **읽기들** (2026-11-07 · 사용자 결정 「둘 다 남기고 번호 매기기는 거절」) ────────────────────────
+// 칸 번호(`partField`·`nodeSkip`)는 **칸 차례**다. 넓은 칸(`wideFields`)이 있는 족(안전띠 SLEN · 질량 MASS)의 줄은 두 가지로
+// 읽힐 수 있고, 갈리면 넓은 칸 **뒤** 칸(안전띠 N3 · N4 · 질량 PID)이 다르다.
+//   manual — 설명서 칸(넓은 칸은 실수 폭 `realFieldWidth` — 표준·i10 16 · long 20, 나머지는 정수 폭 `fw`. Vol_I 19315-19316 ·
+//            19353-19354). 고정폭 줄은 **늘 열로** 자른다 — 칸 안에 공백이 끼어도(정수 폭으로 쓴 줄의 SLEN 자리). LS-DYNA 가 읽는 칸이다
+//   plain  — 모든 칸을 정수 폭으로(설명서와 다르게 쓴 줄 — 이 리포의 옛 픽스처 · 손으로 쓴 덱). 넓은 칸이 없는 족은 manual 과 같다
+//   tokens — 공백 토큰. 고정폭 두 읽기 가운데 칸 안에 공백이 낀 것이 있을 때만(칸이 어긋난 줄 — `deckscan::cardFields` 의 되돌림)
+// 콤마 자유형식은 콤마 토큰 하나가 읽기다(manual = plain = 토큰, 열 자리 없음).
+// 쓰는 법 — 지키는 쪽(절점을 남기거나 싣는 쪽 · 지운 절점 보고 · 이월 적용의 나눠 쓴 절점)은 읽기 전부의 **합집합**,
+// 하나로 읽어야 하는 쪽은 `auxPrimaryFields`(manual 이 깨끗하면 그것 · 아니면 plain · 아니면 토큰 — 전부터의 꼴),
+// 번호를 제자리에 바꿔 쓰는 쪽은 manual 의 열 자리에 쓰되 줄이 **모호하면 거절**한다(`auxNodesDisputed` 가 덱에 있는 절점을 말할 때).
+// ★갈림(모호함 · PID 후보)은 그 줄을 정말 그렇게 썼을 수 있는 읽기만 말한다 — 정수 폭으로 쓴 줄은 칸 수 × fw(질량 32열 · 안전띠
+//   64열, i10 40 · 80열) 안에서 끝난다. 그 뒤에 글자가 있으면(질량의 33-40열 PID · 안전띠의 65-72열 N4) 그 줄은 설명서 칸으로 쓴
+//   것이라 정수 폭 읽기는 갈림을 말하지 않는다(`plainFits` — 정수꼴 질량값 「9」 뒤에 PID 0 을 쓴 줄을 PID 9 와 갈린다 하지 않는다).
+//   지키는 쪽의 합집합에는 그래도 든다(넘치게 남길 뿐이다).
+struct AuxCardCut {
+    std::vector<std::string> f;     // 칸 차례대로
+    std::vector<size_t> col;        // 칸마다 시작 열(0-기반) — 비었으면 열 자리가 없는 줄(콤마 자유형식)
+    std::vector<size_t> width;      // 칸마다 폭
+};
+struct AuxCardReadings {
+    bool comma = false;               // 콤마 자유형식 — manual · plain 은 콤마 토큰(열 자리 없음)
+    AuxCardCut manual;                // 설명서 칸
+    bool manualClean = false;         // manual 칸마다 안 공백이 없다
+    AuxCardCut plain;                 // 정수 폭 칸
+    bool plainClean = false;
+    bool plainFits = true;            // 줄이 정수 폭 칸 수(card1Fields × fw) 안에서 끝난다 — 거짓이면 plain 은 갈림을 말하지 않는다
+    std::vector<std::string> tokens;  // 공백 토큰 — 고정폭 읽기 가운데 깨끗하지 않은 것이 있을 때만
+};
+AuxCardReadings auxCardReadings(const AuxElementCard& a, const std::string& line, int fw);
+
+// 하나로 읽는다면 — manual 이 깨끗하면 manual · 아니면 plain · 아니면 토큰(콤마 줄은 콤마 토큰)
+const std::vector<std::string>& auxPrimaryFields(const AuxCardReadings& r);
+// 칸 차례로 나눈 줄 하나가 말하는 절점(`nodeSkip` · `nodeSkip2` 구간의 양수, 칸 차례대로)
+std::vector<int> auxNodesOf(const AuxElementCard& a, const std::vector<std::string>& f);
+// 지키는 쪽 — 읽기 전부의 절점 합집합(정렬 · 유일)
+std::vector<int> auxNodesUnion(const AuxElementCard& a, const AuxCardReadings& r);
+// 합집합에서 `base` 읽기(manual 이나 primary)의 절점을 뺀 것(정렬 · 유일) — 다른 읽기만 말하는 절점
+std::vector<int> auxNodesAlt(const AuxElementCard& a, const AuxCardReadings& r, const std::vector<std::string>& base);
+// 갈림 — 그 줄을 그렇게 썼을 수 있는 다른 읽기(plain 은 `plainFits` 일 때만 · 토큰)가 말하는데 manual 에 없는 절점(정렬 · 유일).
+// 번호를 manual 의 열 자리에 바꿔 쓰는 쪽이 본다 — 그 절점이 덱에 있으면 줄이 모호하다
+std::vector<int> auxNodesDisputed(const AuxElementCard& a, const AuxCardReadings& r);
+// manual 의 절점 칸이 전부 비었거나 깨끗한 정수인가 — 아니면 그 칸에 번호를 제자리에 쓸 수 없다(콤마 줄은 늘 거짓)
+bool auxManualNodesPlaceable(const AuxElementCard& a, const AuxCardReadings& r);
+// PID 후보 — primary 읽기의 PID 먼저, 다른 읽기(plain 은 `plainFits` 일 때만)가 다른 PID 를 말하면 그것도(양수만 · 유일).
+// PID 칸이 없는 족은 비었다
+std::vector<int> auxPidsOf(const AuxElementCard& a, const AuxCardReadings& r);
 
 // `KFileReader` 가 메시에 담는 요소 키워드인가 — 그 리더의 키워드 분기(`KFileReader::parseFile`)와 **같은 판정**이다
 // (키워드 토큰도 그 리더처럼 `*` 뒤 영숫자 · `_` · `-` 를 대문자로 모은다).
@@ -149,9 +205,10 @@ bool gridReaderReadsKeyword(const std::string& keywordLine);
 // 몰랐고(11-07 답신은 「바닥은 빔 · 이산 · 질량까지 센다」고 했다), 이월 적용은 그 요소가 쓰는 절점을 몰랐다.
 // 두 소비자(바닥 `nonGridElementMaxId` · 이월 적용의 나눠 쓴 절점)가 이 **한 걸음**을 쓴다.
 //   known  — 칸 자리와 카드 줄 수를 안다. 카드마다 한 번(Card 1 줄) · EID · PID(없으면 0) · 절점 칸
-//            · 격자 밖 족 — `auxElementCard` 가 안다(칸은 `auxCardFields` 차례)
+//            · 격자 밖 족 — `auxElementCard` 가 안다(절점은 읽기 전부의 합집합 · PID 는 후보 전부 — 위 「읽기들」)
 //            · 리더가 안 읽는 격자 변형 — 줄 수가 PID 에 달리지 않을 때만(절점 수 옵션 `_H20` 등 · 티쉘 `_BETA`) ·
 //              `elementCardSpan` 의 절점 줄 전부
+//   요소가 아닌 카드(`hasEid=false` — `*ELEMENT_MASS_PART(_SET)`)는 넘기지 않는다(EID · 절점 칸이 없다 — PID 는 IdRefs 가 본다)
 //   !known — 칸 자리나 카드 줄 수를 모른다. **데이터 줄마다** 한 번 · 그 줄의 첫 칸을 EID 로 넘치게 센다(바닥은 높아질
 //            뿐 낮아지지 않는다). 절점 수 옵션이 없는 솔리드 변형(`_ORTHO` · `_DOF` · `_H8TOH20` · `_TET4TOTET10` …)은
 //            카드 줄 수가 그 PID 의 ELFORM(다른 파일의 `*SECTION_SOLID` 일 수 있다)과 구 포맷 여부에 달려 여기 든다
@@ -161,8 +218,9 @@ struct NonGridElementCard {
     size_t line = 0;            // 그 카드(또는 줄)의 0-기반 줄
     bool known = false;
     int eid = 0;
-    int pid = 0;                // known 이고 PID 칸이 있을 때만
-    std::vector<int> nodes;     // known 일 때만 — 양수인 절점 칸
+    int pid = 0;                // known 이고 PID 칸이 있을 때만 — 하나로 읽은 PID(`auxPrimaryFields`)
+    std::vector<int> pids;      // known 일 때 PID 후보 전부 — 넓은 칸 뒤 PID(질량)는 읽기마다 다를 수 있다(`auxPidsOf` · 격자 변형은 pid 하나)
+    std::vector<int> nodes;     // known 일 때만 — 양수인 절점 칸. 격자 밖 족은 읽기 전부의 합집합(`auxNodesUnion`)
 };
 void forEachNonGridElementCard(const std::vector<std::string>& lines,
                                const std::function<void(const NonGridElementCard&)>& f);

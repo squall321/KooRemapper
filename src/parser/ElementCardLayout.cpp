@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <sstream>
 #include <vector>
 
 namespace KooRemapper {
@@ -313,6 +314,16 @@ AuxElementCard auxElementCard(const std::string& keywordLine) {
             a.nodeSkip = 2; a.nodeCount = 3;
             for (const auto& o : opts) {
                 if (o == "TITLE") continue;
+                if (o == "PULLEY" || o == "SOURCE") {
+                    // 보 요소가 아니라 **다른 키워드**다 — 8칸 표(I10)이고 PID 칸이 없다(156795 PUID BID1 BID2 PNID FD FS LMIN DC ·
+                    // 156905 BSID BSNID BSEID NELE …). 칸 1(BID1 · BSNID)을 PID 로 읽지 않는다 — 보 요소 번호 칸만 적는다
+                    a.hasPart = false;
+                    a.partField = -1;
+                    a.nodeCount = 0;
+                    a.elemRefFields = (o == "PULLEY") ? std::vector<int>{1, 2} : std::vector<int>{2};
+                    unsupported("*ELEMENT_BEAM_" + o + " 은 별개 키워드이고 PID 칸이 없습니다");
+                    break;
+                }
                 if (o == "THICKNESS" || o == "SCALAR" || o == "SCALR" || o == "SECTION" ||
                     o == "PID" || o == "OFFSET" || o == "ORIENTATION" || o == "WARPAGE" ||
                     o == "ELBOW")
@@ -330,14 +341,27 @@ AuxElementCard auxElementCard(const std::string& keywordLine) {
                 else unsupported("*ELEMENT_DISCRETE 의 옵션 '" + o + "' 은 카드 줄 수를 확정할 수 없습니다");
             }
             break;
-        case AuxFamily::MASS:
+        case AuxFamily::MASS: {
             // Card 1 = EID(I8) ID(I8) MASS(E16) PID(I8) (159866-159930). ⚠ PID 는 칸 차례 **3** 이다(칸 1 이 아니다) —
-            // MASS 가 넓은 칸이라 8칸으로 자르면 33-40열(칸 4)이다. 그 차례는 `auxCardFields` 가 자른다.
+            // MASS 가 넓은 칸이라 8칸으로 자르면 33-40열(칸 4)이다. 그 차례는 `auxCardReadings` 가 자른다.
             a.nodeSkip = 1; a.nodeCount = 1;
             a.partField = 3;
             a.wideFields = {2};
+            a.card1Fields = 4;
+            const bool part = std::find(opts.begin(), opts.end(), "PART") != opts.end();
+            if (part) {
+                // `_PART(_SET)` — 파트(세트)에 질량을 얹는 카드다. Card 1 = ID(I8) ADDMASS(F16) FINMASS(F16) LCID(I8) MWD(I8)
+                // (160135-160207) — 칸 0 이 PID(`_SET` 이면 파트 세트 ID)이고 요소 번호 · 절점 칸이 없다
+                a.nodeSkip = -1; a.nodeCount = 0;
+                a.partField = 0;
+                a.wideFields = {1, 2};
+                a.card1Fields = 5;
+                a.hasEid = false;
+            }
             for (const auto& o : opts) {
                 if (o == "TITLE") continue;
+                if (part && o == "PART") continue;
+                if (part && o == "SET") { a.partIsSet = true; continue; }
                 // `_NODE_SET` 은 칸 1 이 **절점 세트 ID** 다 — 절점으로 읽으면 엉뚱한 절점을
                 // 지키고 세트 멤버는 놓친다. 추측하지 않는다.
                 if (o == "NODE" || o == "SET")
@@ -346,14 +370,23 @@ AuxElementCard auxElementCard(const std::string& keywordLine) {
                     unsupported("*ELEMENT_MASS 의 옵션 '" + o + "' 은 칸 뜻을 확정할 수 없습니다");
             }
             break;
+        }
         case AuxFamily::SEATBELT:
-            // Card 1 = EID PID N1 N2 SBRID SLEN N3 N4 — 절점이 **두 구간**이다.
+            // Card 1 = EID PID N1 N2 SBRID(I8 다섯) SLEN(F16) N3 N4(I8) (160311-160353) — 절점이 **두 구간**이다(칸 차례 2·3 · 6·7).
+            // SLEN 이 넓은 칸이라 N3 · N4 는 57-64 · 65-72열이다(8칸으로 자르면 칸 7·8). 그 차례는 `auxCardReadings` 가 자른다.
             a.nodeSkip = 2; a.nodeCount = 2;
             a.nodeSkip2 = 6; a.nodeCount2 = 2;
+            a.wideFields = {5};
+            a.card1Fields = 8;
             for (const auto& o : opts) {
                 if (o == "TITLE") continue;
-                // `_ACCELEROMETER`·`_PRETENSIONER`·`_RETRACTOR`·`_SENSOR`·`_SLIPRING` 은
-                // 변형이 아니라 **다른 키워드**다 — 칸 배치가 통째로 다르다.
+                // `_ACCELEROMETER`·`_PRETENSIONER`·`_RETRACTOR`·`_SENSOR`·`_SLIPRING` 은 변형이 아니라 **다른 키워드**다 —
+                // 10칸 폭 표이고 PID 칸이 없다(160482 · 160602 · 160931 · 161342 · 161725). 칸 자리를 짐작하지 않는다.
+                a.hasPart = false;
+                a.partField = -1;
+                a.nodeCount = 0; a.nodeSkip2 = -1; a.nodeCount2 = 0;
+                a.wideFields.clear();
+                a.card1Fields = 0;
                 unsupported("*ELEMENT_SEATBELT_" + o + " 은 별개 키워드이고 칸 배치가 다릅니다");
             }
             break;
@@ -373,23 +406,129 @@ AuxElementCard auxElementCard(const std::string& keywordLine) {
     return a;
 }
 
-std::vector<std::string> auxCardFields(const AuxElementCard& a, const std::string& line, int fw) {
-    if (a.wideFields.empty()) return deckscan::cardFields(line, fw);
+AuxCardReadings auxCardReadings(const AuxElementCard& a, const std::string& line, int fw) {
+    AuxCardReadings r;
     std::string body = line;
     while (!body.empty() && (body.back() == '\r' || body.back() == '\n')) body.pop_back();
-    if (body.find(',') != std::string::npos) return deckscan::cardFields(body, fw);   // 자유형식 — 토큰 차례
-    const size_t rw = static_cast<size_t>(realFieldWidth(fw));
-    std::vector<std::string> out;
-    bool misaligned = false;
-    for (size_t pos = 0, q = 0; pos < body.size(); ++q) {
-        const bool wide = std::find(a.wideFields.begin(), a.wideFields.end(), static_cast<int>(q)) != a.wideFields.end();
-        const size_t w = wide ? rw : static_cast<size_t>(fw);
-        out.push_back(deckscan::trim(body.substr(pos, w)));
-        if (out.back().find_first_of(" \t") != std::string::npos) misaligned = true;
-        pos += w;
+    auto inner = [](const std::string& s) { return s.find_first_of(" \t") != std::string::npos; };
+    if (body.find(',') != std::string::npos) {               // 자유형식 — 콤마 토큰이 곧 칸 차례 · 열 자리 없음
+        r.comma = true;
+        r.manual.f = deckscan::cardFields(body, fw);
+        r.manualClean = std::none_of(r.manual.f.begin(), r.manual.f.end(), inner);
+        r.plain = r.manual;
+        r.plainClean = r.manualClean;
+        return r;
     }
-    // 칸이 어긋난 줄 — `deckscan::cardFields` 와 같이 여기서만 공백 토큰으로 읽는다(토큰 차례 = 칸 차례)
-    return misaligned ? deckscan::cardFields(body, fw) : out;
+    // 고정폭 — 열로 자른다. 칸 안에 공백이 끼어도 자르기는 그대로 두고 깨끗하지 않다고만 적는다
+    const size_t rw = static_cast<size_t>(realFieldWidth(fw));
+    auto cut = [&](bool wideAware, AuxCardCut& t) {
+        bool clean = true;
+        for (size_t pos = 0, q = 0; pos < body.size(); ++q) {
+            const bool wide = wideAware &&
+                              std::find(a.wideFields.begin(), a.wideFields.end(), static_cast<int>(q)) != a.wideFields.end();
+            const size_t w = wide ? rw : static_cast<size_t>(fw);
+            std::string f = deckscan::trim(body.substr(pos, w));
+            if (inner(f)) clean = false;
+            t.f.push_back(std::move(f));
+            t.col.push_back(pos);
+            t.width.push_back(w);
+            pos += w;
+        }
+        return clean;
+    };
+    r.manualClean = cut(true, r.manual);
+    if (a.wideFields.empty()) {
+        r.plain = r.manual;
+        r.plainClean = r.manualClean;
+    } else {
+        r.plainClean = cut(false, r.plain);
+        // 정수 폭으로 쓴 줄은 칸 수 × fw 안에서 끝난다 — 그 뒤에 글자가 있으면 설명서 칸으로 쓴 줄이다(헤더 「갈림」)
+        r.plainFits = a.card1Fields <= 0 ||
+                      body.find_first_not_of(" \t", static_cast<size_t>(a.card1Fields) * static_cast<size_t>(fw)) == std::string::npos;
+    }
+    if (!r.manualClean || !r.plainClean) {                   // 칸이 어긋난 줄 — 공백 토큰도 한 읽기다
+        std::istringstream iss(body);
+        for (std::string t; iss >> t;) r.tokens.push_back(t);
+    }
+    return r;
+}
+
+const std::vector<std::string>& auxPrimaryFields(const AuxCardReadings& r) {
+    if (r.comma || r.manualClean) return r.manual.f;
+    if (r.plainClean) return r.plain.f;
+    return r.tokens;
+}
+
+std::vector<int> auxNodesOf(const AuxElementCard& a, const std::vector<std::string>& f) {
+    std::vector<int> out;
+    auto take = [&](int from, int cnt) {
+        for (int q = 0; from >= 0 && q < cnt; ++q) {
+            const int v = deckscan::fieldInt(f, static_cast<size_t>(from + q));
+            if (v > 0) out.push_back(v);
+        }
+    };
+    take(a.nodeSkip, a.nodeCount);
+    take(a.nodeSkip2, a.nodeCount2);
+    return out;
+}
+
+std::vector<int> auxNodesUnion(const AuxElementCard& a, const AuxCardReadings& r) {
+    std::vector<int> out = auxNodesOf(a, r.manual.f);
+    for (int v : auxNodesOf(a, r.plain.f)) out.push_back(v);
+    for (int v : auxNodesOf(a, r.tokens)) out.push_back(v);
+    std::sort(out.begin(), out.end());
+    out.erase(std::unique(out.begin(), out.end()), out.end());
+    return out;
+}
+
+std::vector<int> auxNodesAlt(const AuxElementCard& a, const AuxCardReadings& r, const std::vector<std::string>& base) {
+    std::vector<int> b = auxNodesOf(a, base);
+    std::sort(b.begin(), b.end());
+    std::vector<int> out;
+    for (int v : auxNodesUnion(a, r))
+        if (!std::binary_search(b.begin(), b.end(), v)) out.push_back(v);
+    return out;
+}
+
+std::vector<int> auxNodesDisputed(const AuxElementCard& a, const AuxCardReadings& r) {
+    std::vector<int> m = auxNodesOf(a, r.manual.f);
+    std::sort(m.begin(), m.end());
+    std::vector<int> out;
+    auto add = [&](const std::vector<std::string>& f) {
+        for (int v : auxNodesOf(a, f))
+            if (!std::binary_search(m.begin(), m.end(), v)) out.push_back(v);
+    };
+    if (r.plainFits) add(r.plain.f);
+    add(r.tokens);
+    std::sort(out.begin(), out.end());
+    out.erase(std::unique(out.begin(), out.end()), out.end());
+    return out;
+}
+
+bool auxManualNodesPlaceable(const AuxElementCard& a, const AuxCardReadings& r) {
+    if (r.comma) return false;
+    auto ok = [&](int from, int cnt) {
+        for (int q = 0; from >= 0 && q < cnt; ++q) {
+            const size_t k = static_cast<size_t>(from + q);
+            if (k >= r.manual.f.size() || r.manual.f[k].empty()) continue;
+            int v = 0;
+            if (!cards::toInt(r.manual.f[k], v)) return false;
+        }
+        return true;
+    };
+    return ok(a.nodeSkip, a.nodeCount) && ok(a.nodeSkip2, a.nodeCount2);
+}
+
+std::vector<int> auxPidsOf(const AuxElementCard& a, const AuxCardReadings& r) {
+    std::vector<int> out;
+    if (!a.hasPart || a.partField < 0) return out;
+    const size_t pf = static_cast<size_t>(a.partField);
+    for (const auto* f : {&auxPrimaryFields(r), &r.manual.f, &r.plain.f, &r.tokens}) {
+        if (f == &r.plain.f && !r.plainFits) continue;   // 설명서 칸으로 쓴 줄 — 정수 폭 읽기의 PID 는 후보가 아니다(primary 면 이미 들었다)
+        const int v = deckscan::fieldInt(*f, pf);
+        if (v > 0 && std::find(out.begin(), out.end(), v) == out.end()) out.push_back(v);
+    }
+    return out;
 }
 
 bool gridReaderReadsKeyword(const std::string& keywordLine) {
@@ -465,6 +604,7 @@ void forEachNonGridElementCard(const std::vector<std::string>& lines,
                 pend.known = true;
                 pend.eid = deckscan::fieldInt(fs, 0);
                 pend.pid = deckscan::fieldInt(fs, 1);
+                if (pend.pid > 0) pend.pids = {pend.pid};
                 pending = true;
             }
             if (lineIdx >= span.nodeFirst && lineIdx < span.nodeFirst + span.nodeLines) {
@@ -482,21 +622,17 @@ void forEachNonGridElementCard(const std::vector<std::string>& lines,
         c.keyword = kw;
         c.line = i;
         if (aux.supported) {
+            if (!aux.hasEid) continue;   // 요소가 아니다(`*ELEMENT_MASS_PART(_SET)` — EID · 절점 칸이 없다 · PID 는 IdRefs 가 본다)
             if (remaining == 0) {
                 remaining = aux.lines;
-                const auto fs = auxCardFields(aux, l, fw);
+                // 절점은 읽기 전부의 합집합 · PID 는 후보 전부(헤더 「읽기들」 — 이월 적용의 나눠 쓴 절점 · aux_in_part 가 본다)
+                const AuxCardReadings rd = auxCardReadings(aux, l, fw);
+                const auto& fs = auxPrimaryFields(rd);
                 c.known = true;
                 c.eid = deckscan::fieldInt(fs, 0);
                 c.pid = (aux.hasPart && aux.partField >= 0) ? deckscan::fieldInt(fs, static_cast<size_t>(aux.partField)) : 0;
-                auto take = [&](int from, int cnt) {
-                    if (from < 0) return;
-                    for (int q = 0; q < cnt; ++q) {
-                        const int v = deckscan::fieldInt(fs, static_cast<size_t>(from + q));
-                        if (v > 0) c.nodes.push_back(v);
-                    }
-                };
-                take(aux.nodeSkip, aux.nodeCount);
-                take(aux.nodeSkip2, aux.nodeCount2);
+                c.pids = auxPidsOf(aux, rd);
+                c.nodes = auxNodesUnion(aux, rd);
                 f(c);
             }
             --remaining;

@@ -477,8 +477,8 @@ def main():
         L += ["*ELEMENT_SOLID", e8(1, 1), e8(*range(1, 9))]
         #                      EID PID  N1   N2   N3 RT1 RR1 RT2 RR2 LOCAL
         L += ["*ELEMENT_BEAM", e8(10, 9, 101, 102, 0, 7, 7, 7, 7, 777)]
-        #                          EID PID  N1   N2 SBRID SLEN N3 N4
-        L += ["*ELEMENT_SEATBELT", e8(13, 9, 101, 102, 888, 0, 0, 0)]
+        #                          EID PID  N1   N2 SBRID SLEN(E16) N3 N4   ← 매뉴얼 꼴(Vol_I 160311-160353 · N3 · N4 는 57-72열)
+        L += ["*ELEMENT_SEATBELT", "%8d%8d%8d%8d%8d%16s%8d%8d" % (13, 9, 101, 102, 888, "0.0", 0, 0)]
         L += ["*PART", "solid", s10(1, 1, 1), "aux", s10(9, 9, 9),
               "*SECTION_SOLID", s10(1, 1), "*SECTION_BEAM", s10(9, 1),
               "*MAT_ELASTIC", "         1  7.85E-9  210000     0.3", "*END"]

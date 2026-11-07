@@ -75,7 +75,8 @@ int ceilDiv(int a, int b) { return a <= 0 ? 0 : (a + b - 1) / b; }
 
 }  // namespace
 
-Scan find(const std::vector<std::string>& L, int deckFw, const std::function<bool(Axis, int)>& keep) {
+Scan find(const std::vector<std::string>& L, int deckFw, const std::function<bool(Axis, int)>& keep,
+          const std::function<bool(int)>& pidExists) {
     Scan s;
     Walker w{L, keep, s};
     // 접촉 Card 1 줄 — 키워드 줄 → Card 1 줄. 정본이 ID 카드 · MPP 1 · `&` MPP 2 · 빈 줄을 센다(사본을 두지 않는다 — 10-24).
@@ -130,9 +131,10 @@ Scan find(const std::vector<std::string>& L, int deckFw, const std::function<boo
         }
         // ── `*ELEMENT_MASS`(·`_NODE_SET`)의 PID — 0 이 아니면 단정하지 않는다 ─────────────────────────────
         //   Card 1 = EID(I8) ID(I8) MASS(E16) PID(I8) (Vol_I 159866-159930) — PID 는 33-40열이다. 칸은 공용 판정기가
-        //   자른다(`auxCardFields` · 칸 차례 3). 예전엔 8칸 칸 3(25-32열 — MASS 의 뒤 절반)을 읽어 PID 를 놓치고
-        //   질량값 숫자를 PID 로 셌다(2026-11-07). `_PART` 는 칸 1 이 PID(`_SET` 이면 파트 세트) · `_MATRIX` 는 PID 칸이
-        //   없다 — 칸 꼴이 달라 그 자리를 읽지 않는다. 그 밖 꼬리는 단정하지 않는다.
+        //   자른다(`auxCardReadings` · 칸 차례 3). 예전엔 8칸 칸 3(25-32열 — MASS 의 뒤 절반)을 읽어 PID 를 놓치고
+        //   질량값 숫자를 PID 로 셌다(2026-11-07). 줄을 정수 폭으로 썼으면(MASS 8칸) PID 가 읽기마다 갈린다 — 다른 읽기의 PID 는
+        //   `pidExists` 가 덱의 파트라고 할 때만 센다(빈 PID · 정수꼴 질량값을 PID 로 세어 거절하지 않는다). `_PART` 는 칸 1 이
+        //   PID(`_SET` 이면 파트 세트) · `_MATRIX` 는 PID 칸이 없다 — 칸 꼴이 달라 그 자리를 읽지 않는다. 그 밖 꼬리는 단정하지 않는다.
         if (starts(kw, "*ELEMENT_MASS")) {
             if (kw == "*ELEMENT_MASS" || kw == "*ELEMENT_MASS_NODE_SET") {
                 const AuxElementCard a = auxElementCard(L[b.kwLine]);
@@ -140,11 +142,13 @@ Scan find(const std::vector<std::string>& L, int deckFw, const std::function<boo
                     std::string body = L[b.data[m]];
                     const size_t cm = body.find('$');
                     if (cm != std::string::npos) body = body.substr(0, cm);
-                    int pid = 0;
-                    const auto f = auxCardFields(a, body, ifw);
-                    if (a.partField >= 0 && static_cast<size_t>(a.partField) < f.size() &&
-                        toInt(f[static_cast<size_t>(a.partField)], pid) && pid > 0)
-                        w.skipped(kw);
+                    const auto rd = auxCardReadings(a, body, ifw);
+                    const auto pids = auxPidsOf(a, rd);
+                    const int prim = a.partField >= 0 ? deckscan::fieldInt(auxPrimaryFields(rd), static_cast<size_t>(a.partField)) : 0;
+                    bool count = prim > 0;
+                    for (int p : pids)
+                        if (p != prim && pidExists && pidExists(p)) count = true;
+                    if (count) w.skipped(kw);
                 }
             } else if (kw == "*ELEMENT_MASS_PART") {
                 for (size_t m = 0; m < b.data.size(); ++m) {

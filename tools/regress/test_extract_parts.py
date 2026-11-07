@@ -16,6 +16,10 @@
       요소가 **하나도 없는** 덱이 조용히 나온다(B 절).
     · 우리가 줄 수를 모르는 `*ELEMENT_*` 변형 — 고른 파트의 요소를 담고 있으면 **거절**해야
       한다. 빠뜨린 덱은 그럴듯하게 돌면서 틀린다(J 절).
+    · 콤마 자유형식 줄의 번호 다시 매기기 — 칸 차례 × 폭 자리에 덮어써 깨진 줄을 냈고 되읽기도 통과했다.
+      이제 줄을 대고 거절하며(산출 없음) 되읽기도 칸이 깨진 콤마 줄을 센다(O 절 · 2026-11-07 검토 #7).
+    · 실패해도 남는 파일 — 못 여는 인클루드 · 되읽기 실패 뒤에 산출이 남았고, 거절한 실행 옆에 지난 실행의 산출 · 번호 지도 ·
+      보고가 그대로 있었다. rc≠0 이면 그것들을 지운다(되읽기 실패의 보고만 이번 결과로 남긴다 — P 절 · 검토 #8).
 
 usage: test_extract_parts.py <KooRemapper 바이너리>
 """
@@ -122,7 +126,8 @@ def main():
         r = rep(d)
         check("A-1 ★되읽기 검증 — 미정의 참조 0 (절점·파트·섹션·재질 전수)",
               r["verify"] == {"undefined_nodes": 0, "undefined_parts": 0,
-                              "undefined_sections": 0, "undefined_materials": 0}, r["verify"])
+                              "undefined_sections": 0, "undefined_materials": 0,
+                              "malformed_comma_lines": 0}, r["verify"])
         check("A-2 고른 파트의 요소 카드 2개", r["picked"]["element_cards"] == 2, r["picked"])
         check("A-3 그 요소가 쓰는 절점 16개만", r["picked"]["nodes"] == 16, r["picked"])
         check("A-4 쓴 *NODE 줄도 16개 (아무도 안 쓰는 999 는 안 간다)",
@@ -208,15 +213,20 @@ def main():
               "*SET_NODE_LIST" in rn and rd["verify"]["undefined_nodes"] == 0)
 
         # ── E: include.sets / materials 끄기 ─────────────────────────────────
+        # 되읽기를 끄고 산출을 본다 — 되읽기가 실패하면 산출을 지운다(P 절 · 2026-11-07 검토 #8)
+        cfg(d, "e0.yaml", "model: main.k\noutput: e.k\nparts: [1, 2]\nverify: false\ninclude:\n"
+                          "  sets: none\n  materials: false\n")
+        rc0, out0 = run(binary, d, "extract-parts", "e0.yaml")
+        e = open(os.path.join(d, "e.k")).read() if rc0 == 0 else ""
+        check("E-1 sets: none 이면 *SET_* 이 없다", rc0 == 0 and "*SET_" not in e, out0[-300:])
+        check("E-2 materials: false 면 *MAT_* 이 없다", rc0 == 0 and "*MAT_" not in e, out0[-300:])
         cfg(d, "e.yaml", "model: main.k\noutput: e.k\nparts: [1, 2]\ninclude:\n"
                          "  sets: none\n  materials: false\nreport: repe.json\n")
         rc, out = run(binary, d, "extract-parts", "e.yaml")
-        e = open(os.path.join(d, "e.k")).read()
         re_ = rep(d, "repe.json")
-        check("E-1 sets: none 이면 *SET_* 이 없다", "*SET_" not in e)
-        check("E-2 materials: false 면 *MAT_* 이 없다", "*MAT_" not in e)
-        check("E-3 ★그러면 검증이 재질 미정의를 잡는다 (조용히 통과하지 않는다)",
-              re_["verify"]["undefined_materials"] > 0 and rc != 0, (re_["verify"], rc))
+        check("E-3 ★그러면 검증이 재질 미정의를 잡는다 (조용히 통과하지 않는다) · 산출은 지운다",
+              re_["verify"]["undefined_materials"] > 0 and rc != 0 and not os.path.exists(os.path.join(d, "e.k")),
+              (re_["verify"], rc))
 
         # ── F: 세트 자르기 ───────────────────────────────────────────────────
         check("F-1 *SET_NODE_LIST 를 남은 절점으로 자른다",
@@ -318,12 +328,13 @@ def main():
         #   DISCRETE EID PID N1 N2 VID S PF OFFSET            → 절점은 칸 2·3
         #   MASS     EID ID  MASS(E16) PID                    → 절점은 칸 1, **PID 는 칸 차례 3 = 33-40열**
         #            (MASS 가 16칸이라 8칸으로 자르면 칸 4 다 — 칸 3(25-32열)은 MASS 의 뒤 절반, 2026-11-07)
-        #   SEATBELT EID PID N1 N2 SBRID SLEN N3 N4           → 절점이 **두 구간**(2·3, 6·7)
+        #   SEATBELT EID PID N1 N2 SBRID SLEN(E16) N3 N4      → 절점이 **두 구간**(칸 차례 2·3, 6·7)
+        #            (SLEN 이 16칸이라 N3 · N4 는 57-64 · 65-72열 — 8칸으로 자르면 칸 7·8, 2026-11-07)
         #   PLOTEL   EID N1 N2                                → **PID 칸이 없다**
         L = ["*KEYWORD", "*NODE"]
         for i in range(1, 9):
             L.append(nl(i, i % 2, (i // 2) % 2, i // 4))
-        for n in (101, 102, 103, 104, 105, 106):
+        for n in (101, 102, 103, 104, 105, 106, 107, 108):   # 107 · 108 은 안전띠의 N3 · N4 만 쓴다
             L.append(nl(n, float(n), 0.0, 0.0))
         # ★덫: 절점이 아닌 칸에 **실제로 존재하는 절점 번호**를 넣는다.
         #   잘못 읽으면 이 절점들이 산출 덱에 실린다.
@@ -338,8 +349,9 @@ def main():
         #                      EID  ID  MASS(E16)  PID    ← PID 는 33-40열(매뉴얼 꼴 — Vol_I 159866-159930)
         # ★덫: EID 16 은 PID 0 인데 질량값 9 가 25-32열에 온다 — 8칸 칸 3 을 PID 로 읽으면 PID 9 로 실리고 절점 106 이 딸려 온다
         L += ["*ELEMENT_MASS", "%8d%8d%16s%8d" % (12, 105, "0.5", 9), "%8d%8d%16s%8d" % (16, 106, "9", 0)]
-        #                          EID PID  N1   N2 SBRID SLEN  N3  N4
-        L += ["*ELEMENT_SEATBELT", e8(13, 9, 101, 102, 888, 0, 103, 104)]
+        #                          EID PID  N1   N2 SBRID SLEN(E16) N3  N4    ← 매뉴얼 꼴(Vol_I 160311-160353)
+        belt_line = "%8d%8d%8d%8d%8d%16s%8d%8d" % (13, 9, 101, 102, 888, "0.0", 107, 108)
+        L += ["*ELEMENT_SEATBELT", belt_line]
         #                        EID  N1   N2     ← PID 가 없다
         L += ["*ELEMENT_PLOTEL", e8(14, 101, 102)]
         L += ["*PART", "solid part", s10(1, 1, 1), "aux part", s10(9, 9, 9)]
@@ -366,8 +378,8 @@ def main():
               "*ELEMENT_MASS" in lk and "\n     105 " in lk, "105 또는 MASS 카드가 없다")
         check("L-5b ★질량값(25-32열의 9)을 PID 로 읽지 않는다 — PID 0 카드(EID 16)와 그 절점 106 은 안 실린다",
               "\n      16     106" not in lk and "\n     106 " not in lk, [x for x in lk.split("\n") if "106" in x][:3])
-        check("L-6 ★SEATBELT 의 둘째 절점 구간(N3·N4 = 103·104)도 읽는다",
-              "\n     103 " in lk and "\n     104 " in lk, "")
+        check("L-6 ★SEATBELT 의 둘째 절점 구간(N3·N4 = 107·108 — 57-72열 · 다른 요소는 안 쓴다)도 읽는다",
+              "\n     107 " in lk and "\n     108 " in lk, "")
         check("L-7 BEAM·DISCRETE 의 절점이 실렸다", "\n     101 " in lk and "\n     102 " in lk, "")
         check("L-8 아무도 안 쓰는 999 는 안 실린다", "\n     999 " not in lk, "")
         check("L-9 ★PLOTEL 은 두 절점이 다 남아서 실렸다", "*ELEMENT_PLOTEL" in lk, "")
@@ -388,6 +400,20 @@ def main():
               beam and beam[0].endswith("     777"), beam[:1])
         check("L-13 BEAM 의 절점 칸은 새 번호다 (101·102 → 1·2 꼴)",
               beam and beam[0][16:32].strip().split() != ["101", "102"], beam[:1])
+        # ★안전띠 — 절점 넷이 **제자리**(17-32 · 57-72열)에서 새 번호다. SBRID · SLEN(33-56열)은 글자 그대로다.
+        #   예전엔 칸 차례 × 8 로 자리를 잡아 N3 을 49열(SLEN 위)에 쓰고 N4 는 옛 번호 그대로 두었다(2026-11-07).
+        newid = {}
+        sect = ""
+        for x in lr.split("\n"):
+            if x.startswith("*"):
+                sect = x.split()[0].upper()
+            elif sect == "*NODE" and x.strip() and not x.startswith("$"):
+                newid[int(round(float(x[8:24])))] = int(x[:8])      # 픽스처 절점의 x 좌표 = 옛 번호
+        belt = [x for x in lr.split("\n") if x.startswith("      13")]
+        want = (belt_line[:16] + "%8d%8d" % (newid.get(101, -1), newid.get(102, -1)) + belt_line[32:56] +
+                "%8d%8d" % (newid.get(107, -1), newid.get(108, -1)))
+        check("L-13b ★SEATBELT renumber — N1·N2·N3·N4 가 제자리에서 새 번호 · SBRID·SLEN 글자 그대로",
+              len(belt) == 1 and belt[0] == want and newid.get(108, 108) != 108, (belt[:1], want))
 
         # `*ELEMENT_MASS_NODE_SET` — 칸 1 이 절점이 아니라 **세트** 라 추측하지 않는다
         L2 = list(L)
@@ -473,6 +499,89 @@ def main():
         check("N-9 그때 리포트 칸은 비어 있다",
               rep(d, "repn2.json")["dropped_initial_state"] == {},
               rep(d, "repn2.json")["dropped_initial_state"])
+
+        # ── O: ★renumber 는 콤마 줄을 제자리에 못 바꾼다 — 줄을 대고 거절 · 되읽기도 깨진 콤마 줄을 센다 ──
+        def odeck(shell, node_extra=(), sets=()):
+            L = ["*KEYWORD", "*NODE"] + [nl(i, float(i), 0.0, 0.0) for i in (1, 2, 3, 4)] + list(node_extra)
+            L += ["*ELEMENT_SHELL"] + list(shell)
+            L += ["*PART", "sh", s10(9, 9, 9), "*SECTION_SHELL", s10(9, 2), "       1.0",
+                  "*MAT_ELASTIC", "         9  7.85E-9  210000     0.3"] + list(sets) + ["*END"]
+            return "\n".join(L) + "\n"
+        fixed = e8(1, 9, 1, 2, 3, 4)
+        ocases = (("O-1", odeck(["7,9,1,2,3,4"]), "*ELEMENT_SHELL", 1, "셸 콤마 줄"),
+                  ("O-2", odeck([fixed, "8,9,1,2,3,4"]), "*ELEMENT_SHELL", 1, "고정폭 줄 뒤의 셸 콤마 줄(검토 재현 — 되읽기도 통과했다)"),
+                  ("O-3", odeck([fixed], node_extra=["5,5.0,0.0,0.0"], sets=["*SET_NODE_LIST", s10(40), s10(5)]) .replace(
+                      e8(1, 9, 1, 2, 3, 4), e8(1, 9, 1, 2, 3, 5)), "*NODE", 1, "*NODE 콤마 줄"),
+                  ("O-4", odeck([fixed], sets=["*SET_SEGMENT", s10(800), "1,2,3,4"]), "*SET_SEGMENT", 1, "*SET_SEGMENT 콤마 줄"),
+                  ("O-5", odeck([fixed], sets=["*SET_NODE_COLUMN", s10(801), "1,0.0", "2,0.0"]), "*SET_NODE_COLUMN", 2,
+                   "*SET_NODE_COLUMN 콤마 줄 둘"))
+        for tag, deck, kwname, n, what in ocases:
+            write(os.path.join(d, tag + ".k"), deck)
+            cfg(d, tag + ".yaml", "model: %s.k\noutput: %s_out.k\nparts: [9]\nrenumber: true\n" % (tag, tag))
+            rc, out = run(binary, d, "extract-parts", tag + ".yaml")
+            lines = [i + 1 for i, l in enumerate(deck.split("\n")) if "," in l]
+            listed = [ln for ln in lines if ("%s.k:%d %s" % (tag, ln, kwname)) in out]
+            check("%s ★renumber — %s → rc 1 · 줄 %d 장을 댄다 · 산출 없음" % (tag, what, n),
+                  rc == 1 and len(listed) == n and not os.path.exists(os.path.join(d, tag + "_out.k")) and
+                  not os.path.exists(os.path.join(d, tag + "_out_renumber_map.json")), (rc, listed, out[-400:]))
+        # 솔리드 — Card 1(EID PID)과 절점 줄 둘 다 번호를 바꾼다
+        sdeck = base_deck().replace(e8(1, 1) + "\n" + e8(*range(1, 9)), "1,1\n1,2,3,4,5,6,7,8")
+        write(os.path.join(d, "O6.k"), sdeck)
+        write(os.path.join(d, "inc_part2.k"), INC)
+        cfg(d, "O6.yaml", "model: O6.k\noutput: O6_out.k\nparts: [1]\nrenumber: true\n")
+        rc, out = run(binary, d, "extract-parts", "O6.yaml")
+        check("O-6 ★renumber — 솔리드 콤마 카드(Card 1 · 절점 줄) → rc 1 · 두 줄을 댄다",
+              rc == 1 and out.count("O6.k:") == 2 and not os.path.exists(os.path.join(d, "O6_out.k")), (rc, out[-400:]))
+        # renumber 없이는 콤마 줄을 그대로 싣는다
+        cfg(d, "O7.yaml", "model: O-2.k\noutput: O7_out.k\nparts: [9]\nreport: O7.json\n")
+        rc, out = run(binary, d, "extract-parts", "O7.yaml")
+        r7 = rep(d, "O7.json") if rc == 0 else {}
+        check("O-7 renumber 없이는 콤마 줄도 그대로 싣는다 · 되읽기 0",
+              rc == 0 and "8,9,1,2,3,4" in open(os.path.join(d, "O7_out.k")).read() and
+              (r7.get("verify") or {}).get("malformed_comma_lines") == 0, (rc, out[-300:]))
+        # 되읽기 — 칸이 깨진 콤마 줄(콤마로 가른 칸 안에 공백)을 센다 · rc 1
+        write(os.path.join(d, "O8.k"), odeck([fixed, "8,9,1 2,3,4"]))
+        cfg(d, "O8.yaml", "model: O8.k\noutput: O8_out.k\nparts: [9]\nreport: O8.json\n")
+        rc, out = run(binary, d, "extract-parts", "O8.yaml")
+        r8 = rep(d, "O8.json") if os.path.exists(os.path.join(d, "O8.json")) else {}
+        check("O-8 ★되읽기가 칸이 깨진 콤마 줄(「8,9,1 2,3,4」)을 센다 → rc 1",
+              rc == 1 and (r8.get("verify") or {}).get("malformed_comma_lines") == 1 and "깨진 콤마" in out, (rc, r8.get("verify"), out[-300:]))
+
+        # ── P: ★rc≠0 이면 산출 · 번호 지도가 남지 않는다 · 지난 실행의 곁 파일도 이번 결과로 남지 않는다 ──
+        def exists(*names):
+            return [n for n in names if os.path.exists(os.path.join(d, n))]
+        write(os.path.join(d, "P1.k"), base_deck(include_name="nope.k"))
+        cfg(d, "P1.yaml", "model: P1.k\noutput: P1_out.k\nparts: [1]\nreport: P1.json\n")
+        rc, out = run(binary, d, "extract-parts", "P1.yaml")
+        check("P-1 ★못 여는 *INCLUDE → rc 1 · 부분 산출이 남지 않는다", rc == 1 and not exists("P1_out.k", "P1.json"),
+              (rc, exists("P1_out.k", "P1.json"), out[-300:]))
+        write(os.path.join(d, "P2.k"), base_deck().replace(e8(30, 3, 17, 18, 19, 20), e8(30, 3, 17, 18, 19, 21)))
+        cfg(d, "P2.yaml", "model: P2.k\noutput: P2_out.k\nparts: [3]\nrenumber: true\nreport: P2.json\n")
+        rc, out = run(binary, d, "extract-parts", "P2.yaml")
+        r2 = rep(d, "P2.json") if os.path.exists(os.path.join(d, "P2.json")) else {}
+        check("P-2 ★되읽기 실패(없는 절점 21) → rc 1 · 산출 · 번호 지도는 지우고 보고는 남긴다(output_written false)",
+              rc == 1 and not exists("P2_out.k", "P2_out_renumber_map.json") and r2.get("output_written") is False and
+              (r2.get("verify") or {}).get("undefined_nodes") == 1, (rc, exists("P2_out.k", "P2_out_renumber_map.json"), r2.get("verify")))
+        # 지난 실행(renumber 성공)이 남긴 산출 · 번호 지도 · 보고 — 같은 이름으로 거절되는 실행 뒤에 남으면 이번 결과로 읽힌다
+        cfg(d, "P3a.yaml", "model: main.k\noutput: P3_out.k\nparts: [1]\nrenumber: true\nreport: P3.json\n")
+        rc0, _ = run(binary, d, "extract-parts", "P3a.yaml")
+        before = exists("P3_out.k", "P3_out_renumber_map.json", "P3.json")
+        cfg(d, "P3b.yaml", "model: O-1.k\noutput: P3_out.k\nparts: [9]\nrenumber: true\nreport: P3.json\n")
+        rc, out = run(binary, d, "extract-parts", "P3b.yaml")
+        check("P-3 ★거절한 실행(콤마 줄 renumber) 뒤에 지난 실행의 산출 · 번호 지도 · 보고가 남지 않는다",
+              rc0 == 0 and len(before) == 3 and rc == 1 and not exists("P3_out.k", "P3_out_renumber_map.json", "P3.json"),
+              (rc0, before, rc, exists("P3_out.k", "P3_out_renumber_map.json", "P3.json"), out[-300:]))
+        rc0, _ = run(binary, d, "extract-parts", "P3a.yaml")
+        cfg(d, "P4.yaml", "model: main.k\noutput: P3_out.k\nparts: [1]\nreport: P3.json\n")
+        rc, out = run(binary, d, "extract-parts", "P4.yaml")
+        r4 = rep(d, "P3.json") if os.path.exists(os.path.join(d, "P3.json")) else {}
+        check("P-4 ★번호를 안 매긴 실행은 지난 실행의 번호 지도를 지운다(이 산출과 짝이 아니다) · rc 0",
+              rc0 == 0 and rc == 0 and exists("P3_out.k", "P3.json") == ["P3_out.k", "P3.json"] and
+              not exists("P3_out_renumber_map.json") and (r4.get("renumber") or {}).get("on") is False and
+              r4.get("output_written") is True, (rc0, rc, exists("P3_out.k", "P3_out_renumber_map.json", "P3.json")))
+        rc, out = run(binary, d, "extract-parts", "P3a.yaml")
+        check("P-5 renumber 성공은 산출 · 번호 지도 · 보고를 다 남긴다",
+              rc == 0 and len(exists("P3_out.k", "P3_out_renumber_map.json", "P3.json")) == 3, (rc, out[-300:]))
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

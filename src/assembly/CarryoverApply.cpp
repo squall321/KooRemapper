@@ -642,8 +642,9 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
         }
         {
             std::set<std::string> kinds;
+            // PID 후보 전부를 본다 — 질량 줄을 정수 폭으로 쓰면 PID 가 읽기마다 갈린다(2026-11-07 — 어느 읽기로든 이 PID 면 적는다)
             for (const auto& c : auxCards)
-                if (c.pid == pid) kinds.insert(c.keyword);
+                if (std::find(c.pids.begin(), c.pids.end(), pid) != c.pids.end()) kinds.insert(c.keyword);
             if (!kinds.empty())
                 problem(pid, "aux_in_part", "PID 에 " + join(kinds) + " 요소가 있다 — 옮기기 · 바꿔 넣기 · 지우기가 그 요소를 다루지 않는다");
         }
@@ -842,7 +843,8 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
                 const size_t g = l.find_first_not_of(" \t");
                 if (g != std::string::npos && l[g] == '*') {
                     const AuxElementCard a = auxElementCard(l);
-                    inAux = a.family != AuxFamily::NONE && a.supported;
+                    // 질량 얹기(`*ELEMENT_MASS_PART(_SET)` — 요소가 아니다 · 걸음이 넘긴다)는 ⑥이 세지 않으니 빼지 않는다(그 PID 는 아래 표가 본다)
+                    inAux = a.family != AuxFamily::NONE && a.supported && a.hasEid;
                 }
                 if (inAux) auxOnly.push_back(l);
             }
