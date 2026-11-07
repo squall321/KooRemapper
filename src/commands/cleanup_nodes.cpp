@@ -864,14 +864,22 @@ int runCleanupNodes(const std::string& yamlFile, ConsoleOutput& console) {
     const std::vector<std::string> files = deckFiles(o.model, clo);
     // ★쓸 파일(산출 · 보고)이 읽는 덱(주 덱 · 인클루드)과 같으면 거절한다 — 고쳐 쓰기는 산출을 열어(잘라 비워) 놓고 주 덱을 다시 흘려
     //   읽는다. 같은 파일이면 입력이 0 바이트가 되고 되읽기도 빈 덱을 보아 rc 0 이었다. 인클루드 · 보고는 다 읽은 뒤에 그 입력을
-    //   덮는다(2026-11-07 검토 #6). 산출을 쓰지 않는 report 모드는 보고만 본다
+    //   덮는다(2026-11-07 검토 #6). 설정 YAML · 이름이 가리킨 경로(깊이 상한을 넘은 것) · 따라가지 않는 변형 인클루드의 파일도 덮지
+    //   않는다 — 산출 덱이 그 변형 카드를 그대로 실으니 덮으면 산출이 가리키는 파일이 사라진다(재검토 R3 과 같은 규칙). 산출을 쓰지
+    //   않는 report 모드는 보고만 본다
     {
         const std::vector<std::string> writes{o.mode == "report" ? std::string() : o.output, o.reportPath};
+        std::vector<std::string> reads = files;
+        reads.push_back(yamlFile);
+        for (const auto& ref : clo.refs)
+            if (!ref.path.empty()) reads.push_back(ref.path);
+        for (const auto& n : clo.notFollowed)
+            if (!n.path.empty()) reads.push_back(n.path);
         std::string w, r;
-        if (KooRemapper::include_closure::clobberPair(writes, files, w, r)) {
-            const bool both = std::find(files.begin(), files.end(), r) == files.end();
+        if (KooRemapper::include_closure::clobberPair(writes, reads, w, r)) {
+            const bool both = std::find(reads.begin(), reads.end(), r) == reads.end();
             console.error(both ? "쓸 파일 「" + w + "」 과 「" + r + "」 이 같은 파일이다 — 하나가 다른 하나를 덮는다"
-                               : "쓸 파일 「" + w + "」 이 읽는 덱 「" + r + "」 과 같은 파일이다 — 입력 덱(주 덱 · 인클루드)에 쓰지 "
+                               : "쓸 파일 「" + w + "」 이 읽는 파일 「" + r + "」 과 같은 파일이다 — 입력(설정 · 주 덱 · 인클루드)에 쓰지 "
                                  "않는다(고쳐 쓰기가 입력을 비우고 다시 읽는다)");
             console.info("output · report 를 입력과 다른 이름으로 주라");
             return 1;
