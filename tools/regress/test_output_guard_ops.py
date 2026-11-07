@@ -402,6 +402,15 @@ def special_yaml(st, binary):
           "  - type: update\n    dynain: bx_tier0_phase1.k\n")
     expect_refused("assemble battery 덱(bx_tier0_phase1.k)이 뒤 update 의 dynain — 쓰기 전에", binary, d,
                    ["assemble", "bat_asm.yaml"])
+    # meshfix polish — 임시 파일 `<줄기>__pol<회차>_<덩어리>.*` 은 gmsh 를 돌려 봐야 정해지니 그 꼴의 입력이 있으면 gmsh 전에 막는다
+    d, argv = st.case("meshfix", "polish")
+    cfg = read(os.path.join(d, argv[1]))
+    write(os.path.join(d, argv[1]), cfg + "polish: true\n")
+    add_include(os.path.join(d, yget(cfg, "model")), "remeshed__pol0_0.stl")
+    before = snapshot(d)
+    rc, text = run(binary, d, argv)
+    check("★meshfix polish 의 임시 파일 꼴(remeshed__pol0_0.stl)인 인클루드 → gmsh 전에 rc 1 · 폴더 바이트 그대로",
+          rc == 1 and "polish 의 임시 파일" in text and not diff(before, snapshot(d)), (rc, text[-300:]))
 
 
 def main():

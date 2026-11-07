@@ -3698,6 +3698,8 @@ KooRemapper.exe meshfix <config.yaml>
 > **쓰기 관문**(2026-11-07): `output` · 임시 파일(`<줄기>__mf.stl`·`.geo`·`.msh`·`.log`)이 `model` · 그 인클루드 · 설정과 같은
 > 파일이면 gmsh 를 돌리기 전에 **종료 코드 1** 입니다([§3.1(j)](#31-yaml-공통-규칙-모든-op)). 예전에는 `output == model` 이면
 > 쓰기 뒤 재검사가 실패할 때 「산출을 지웠다」며 **모델을 지웠습니다**. `preview: true` 는 아무것도 쓰지 않아 보지 않습니다.
+> `polish: true` 면 polish 의 임시 파일(`<줄기>__pol<회차>_<덩어리>.stl`·`.geo`·`.msh`·`.log` — 회차 · 덩어리 수는 gmsh 를 돌려 봐야
+> 정해진다) 꼴의 이름을 가진 입력(모델 · 인클루드 · 설정)이 산출 폴더에 있어도 gmsh 전에 거절합니다(polish 가 그 파일을 덮고 지운다).
 
 ```yaml
 model:   input.k      # 입력 K파일

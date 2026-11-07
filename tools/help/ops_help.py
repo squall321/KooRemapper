@@ -347,7 +347,8 @@ warn_min_jac: 0.15
           "`preview: true` — gmsh 없이 그 카드를 미리 짚는다(표면 = gmsh 에 달림 · 내부 = 멈춘다). 덱을 쓰지 않는다",
           "  표면 절점이면 `boundary_nodes: fixed` 가 짝을 찾은 원래 번호를 지킨다",
           "output · 임시 파일(<줄기>__mf.stl/.geo/.msh/.log)이 model · 그 인클루드 · 설정과 같은 파일이면 gmsh 를 돌리기 전에 rc 1 —",
-          "  예전엔 output == model 이면 쓰기 뒤 재검사가 실패할 때 산출을 지우며 모델을 지웠다(2026-11-07)"])
+          "  예전엔 output == model 이면 쓰기 뒤 재검사가 실패할 때 산출을 지우며 모델을 지웠다(2026-11-07)",
+          "  polish: true 면 polish 임시 파일(<줄기>__pol<회차>_<덩어리>.stl/.geo/.msh/.log) 꼴의 입력이 산출 폴더에 있어도 rc 1"])
 op("cnrb2solid", "표면·재메시", "CNRB(절점 강체) 볼트를 HEX8 솔리드 원통 + tied 접촉으로 변환", "볼트 bolt cnrb 원통",
    "KooRemapper cnrb2solid <config.yaml>",
    needs=["examples/cnrb2solid/bolt_simple.k"],

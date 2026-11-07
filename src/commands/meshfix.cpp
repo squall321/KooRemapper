@@ -13,6 +13,7 @@
 
 #include "parser/DeckWriter.h"
 #include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
+#include "parser/IncludeClosure.h"   // sameFile — polish 임시 파일의 폴더가 산출 폴더인지(2026-11-07)
 #include "parser/DeckScan.h"          // keywordToken·kwBare — 흘려 읽으며 블록을 고른다
 #include "parser/ElementCardLayout.h"   // deckFieldWidth — 덱이 선언한 칸 폭을 따른다
 #include "parser/IncludeScan.h"   // scanFile — 흘려 읽어 인클루드가 있나만 본다
@@ -2303,6 +2304,30 @@ int runMeshFix(const char* configPath, ConsoleOutput& console) {
         KooRemapper::output_guard::refuse("meshfix", {cfg.output, stlPath, geoPath, mshPath, logPath},
                                           KooRemapper::output_guard::configAndModel(configPath, cfg.model), console))
         return 1;
+    // ★polish 의 임시 파일 `<줄기>__pol<회차>_<덩어리>.{stl,geo,msh,log}`(Windows 는 `.log.bat` 도 — 쓴 뒤 지운다)은 회차 · 덩어리 수가
+    //   gmsh 를 돌려 봐야 정해진다 — 그 꼴의 이름을 가진 입력(모델 · 인클루드 · 설정)이 산출 폴더에 있으면 쓰기 전에 거절한다(2026-11-07)
+    if (!cfg.preview && cfg.polish) {
+        auto polishTemp = [&](const std::string& name) {
+            const std::string head = stem + "__pol";
+            if (name.compare(0, head.size(), head) != 0) return false;
+            size_t i = head.size();
+            auto digits = [&]() { const size_t a = i; while (i < name.size() && std::isdigit((unsigned char)name[i])) ++i; return i > a; };
+            if (!digits() || i >= name.size() || name[i++] != '_' || !digits()) return false;
+            const std::string ext = name.substr(i);
+            for (const char* e : {".stl", ".geo", ".msh", ".log", ".log.bat"})
+                if (ext == e) return true;
+            return false;
+        };
+        for (const auto& in : KooRemapper::output_guard::configAndModel(configPath, cfg.model)) {
+            const fs::path ip(in.path);
+            const std::string dir = ip.parent_path().empty() ? std::string(".") : ip.parent_path().string();
+            if (!polishTemp(ip.filename().string()) || !KooRemapper::include_closure::sameFile(dir, outDir.string())) continue;
+            console.error("[meshfix] polish 의 임시 파일 이름(" + stem + "__pol<회차>_<덩어리>.stl · .geo · .msh · .log)이 읽는 파일 「" +
+                          in.path + "」(" + in.role + ") 과 같은 꼴이다 — polish 가 그 파일을 덮고 지운다(아무 파일도 쓰지 않았다)");
+            console.info("[meshfix] output 이름(줄기)을 바꾸거나 그 입력의 이름을 바꿔라");
+            return 1;
+        }
+    }
 
     // 2. Gmsh — `preview` 는 gmsh 를 돌리지 않으므로 찾지도 않는다
     std::string gmshVer;
