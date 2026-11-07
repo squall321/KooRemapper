@@ -981,6 +981,33 @@ def part_l(binary):
     pr = {r["pid"]: r for r in rep.get("parts", [])}
     check("L-1b keep PID 1 의 요소가 _TITLE 블록에 → 받는다(rc 0 · PID 1 은 손대지 않는다 · 다른 줄은 적용)",
           rc == 0 and pr.get(1, {}).get("result") == "skipped" and pr.get(3, {}).get("result") == "applied", (rc, sorted(kinds(rep)), out[-300:]))
+    # L-3 열 재질의 번호 이름 *MAT_T01~T18 — TMID 는 MID 와 독립된 번호다(Vol II 2-9 · 3-1) · 공용 MID 훑기가 뺀다
+    t01 = ("*MAT_T01\n$#    tmid       tro     tgrlc    tgmult      tlat      hlat\n        50       0.0       0.0       0.0\n"
+           "$#      hc        tc\n       1.0       1.0\n")
+    d = stage(EX, "l3")
+    add_before_end(d, t01)
+    write(os.path.join(d, "fl.yaml"), "model: deck.k\noutput: floor.json\n")
+    rc2, o2 = run(binary, d, "id_floor", "fl.yaml")
+    fl = json.load(open(os.path.join(d, "floor.json"), encoding="utf-8")) if rc2 == 0 else {}
+    check("L-3 id_floor — *MAT_T01 의 TMID 50 은 PID · SECID · MID 바닥을 올리지 않는다(pid_start 9 · 예전 51)",
+          fl.get("pid_start") == 9, (rc2, fl, o2[-300:]))
+    # L-3c 경계 — *MAT_T18_TITLE(제목 줄 뒤 TMID 90 — 예전엔 바닥 91)도 빼고, *MAT_T 로 시작하는 구조 재질(*MAT_TABULATED_JOHNSON_COOK 70)은 센다
+    d = stage(EX, "l3c")
+    add_before_end(d, "*MAT_T18_TITLE\nispg heat\n        90       0.0\n*MAT_TABULATED_JOHNSON_COOK\n        70       1.0     1.0e5       0.3\n")
+    write(os.path.join(d, "fl.yaml"), "model: deck.k\noutput: floor.json\n")
+    rc2, o2 = run(binary, d, "id_floor", "fl.yaml")
+    fl = json.load(open(os.path.join(d, "floor.json"), encoding="utf-8")) if rc2 == 0 else {}
+    check("L-3c *MAT_T18_TITLE 은 빼고 *MAT_TABULATED_JOHNSON_COOK 70 은 센다(pid_start 71)", fl.get("pid_start") == 71, (rc2, fl, o2[-300:]))
+    # L-3b 이월 적용 — 바꿔 넣는 BATTERY(PID 6)의 MID 6 이 열 재질로만 있다(*MAT_T01 TMID 6) → 조각의 MID 가 덱에 없다
+    d = stage(EX, "l3b")
+    deck = os.path.join(d, "deck.k")
+    body = open(deck, encoding="utf-8").read()
+    old6 = "*MAT_ELASTIC_TITLE\nBATTERY#6_PLACEHOLDER\n$#     mid        ro         e        pr\n         6         1         1       0.3\n"
+    assert body.count(old6) == 1
+    write(deck, body.replace(old6, t01.replace("        50", "         6")))
+    reseal(d)
+    rc, out, rep = apply_case(binary, d)
+    refused("L-3b 조각(PID 6)의 MID 6 이 *MAT_T01 의 TMID 로만 있다 → fragment(MID 가 덱에 없다)", rc, out, rep, d, "fragment", 6)
 
 
 if __name__ == "__main__":

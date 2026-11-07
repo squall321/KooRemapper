@@ -5700,7 +5700,8 @@ fragment_map: fragment_abc.json       # (선택) 받은 조각의 대응표 — 
 
 - 네 번호의 이름은 StepForge `export_part_fragment` 의 인자 **그대로**다 — 그대로 넘기면 된다.
 - 바닥은 assemble 과 **같은 커서**다(인클루드 닫힘까지 센 절점·요소·파트·섹션·재질·세트의 최대값 + 1).
-  `pid_start` 는 PID·SECID·MID 셋의 최대값 위다 — 조각은 셋을 같은 번호로 쓴다.
+  `pid_start` 는 PID·SECID·MID 셋의 최대값 위다 — 조각은 셋을 같은 번호로 쓴다. 열 재질(`*MAT_THERMAL_*` 과 그 번호 이름
+  `*MAT_T01`~`*MAT_T18`)의 TMID 는 MID 와 독립된 번호라(Vol II 3-1 — 같은 수가 있어도 된다) MID 로 세지 않는다(번호 이름은 11-07 밤에 더했다).
 - 그 번호로 쓴 조각은 `cad_solid_merge_to_deck`(§49)가 **옮기지 않고** 넣는다 — 두 op 이 같은 바닥을 본다.
 - `fragment_map` 을 주면 쓴 범위마다 아래끝이 바닥 이상이면 `above`, 아니면 `below` 이고 하나라도 `below` 면 rc 1 이다
   (그 조각은 넣을 때 옮겨진다). 회귀 `tools/regress/test_id_floor.py` 10항.
@@ -5792,6 +5793,9 @@ StepForge 권고 넷도 받는다(그쪽 `591d5b5` · D-681 · 사용자 결정 
 - **정수 칸의 실수 꼴** — NIP `5.000e+00` 처럼 실수 꼴로 쓴 정수 값은 그 정수로 읽는다(LS-DYNA 실행 기록이 NIP `3.000E+00` 을 3 으로
   받는다 · 그쪽 말뭉치 52 덱). 새 셸 섹션 카드의 줄 셈(Card 1 의 ELFORM · NIP · ICOMP — §52.7)이 받는다. 정수가 아닌 값(`2.5`)은
   그대로 거절한다. ID 칸(SECID)은 정수 글자만 받는다.
+- **열 재질의 번호 이름**(`*MAT_T01`~`*MAT_T18`)은 MID 를 정의하지 않는다 — TMID 는 MID 와 독립된 번호다(Vol II 2-9 · 3-1).
+  `*MAT_THERMAL_*` 과 `*MAT_ADD_*` 처럼 공용 MID 훑기에서 뺀다 — 조각의 MID 가 열 재질의 TMID 로만 있으면 「덱에 없다」(`fragment`)이고,
+  새 MID · 번호 바닥(`id_floor` 의 `pid_start` 등)이 TMID 위로 올라가지 않는다.
 
 ### 52.5 판 2 — 인클루드가 있는 덱(「주 덱만 고침 · 인클루드면 거절」 · 사용자 결정 11-07)
 

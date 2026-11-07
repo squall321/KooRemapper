@@ -93,19 +93,28 @@ int cur_scanMaxSectionId(const std::vector<std::string>& lines) {
 // 줄들에서 `*MAT_*` 의 MID 최대값. 리더(`KFileReader`)는 재질 **다섯 종류**만 읽어 `baseMesh_.materials` 에
 // 담는다 — 그 밖의 재질(`*MAT_PLASTIC_KINEMATIC` 등)도 번호는 차지한다. 그것을 못 세어 새 재질이 그 MID 를
 // **다시** 냈다(재현: `*MAT_PLASTIC_KINEMATIC 2` 가 있는 덱에 czm 이 `*MAT_COHESIVE_MIXED_MODE 2` 를 냈다, rc 0).
-// 빼는 것 — `*MAT_THERMAL_*`(TMID 는 MID 와 **독립된** 번호다, Vol II 159546-159548)와 `*MAT_ADD_*`(새 MID 를
+// 빼는 것 — `*MAT_THERMAL_*` 와 그 번호 이름 `*MAT_T01`~`*MAT_T18`(TMID 는 MID 와 **독립된** 번호다, Vol II 159546-159548 ·
+// 2-9 의 번호 표 — 번호 이름은 StepForge 권고 591d5b5 · D-681 · 사용자 결정 11-07 밤에 더했다)와 `*MAT_ADD_*`(새 MID 를
 // 정의하지 않고 있는 재질에 덧붙인다 — 몇몇은 첫 칸이 PID 다).
 // MID 칸은 표준·I10 에서 10칸, long 에서 20칸이다(I10 은 8칸만 넓힌다 — Vol_I 19353). 공백 토큰이 아니라
 // 칸으로 읽는다 — `         17.8500E-09` 처럼 붙은 칸을 17 로 읽지 않게.
-// 줄들에서 `*MAT_*` 가 **정의하는** MID 들 — `_THERMAL_`·`_ADD_` 는 정의가 아니다. 최대값(`cur_scanMaxMaterialId`)과
+// 줄들에서 `*MAT_*` 가 **정의하는** MID 들 — 열 재질 · `_ADD_` 는 정의가 아니다. 최대값(`cur_scanMaxMaterialId`)과
 // 「그 재질이 인클루드에만 있나」(`materialsReachable` · 2026-10-17)가 같은 규칙을 본다.
+bool cur_isThermalMaterial(const std::string& kw) {
+    if (kw.rfind("*MAT_THERMAL_", 0) == 0) return true;
+    if (kw.size() < 8 || kw.compare(0, 6, "*MAT_T") != 0 || !std::isdigit(static_cast<unsigned char>(kw[6])) ||
+        !std::isdigit(static_cast<unsigned char>(kw[7])))
+        return false;
+    const int n = (kw[6] - '0') * 10 + (kw[7] - '0');
+    return n >= 1 && n <= 18 && (kw.size() == 8 || kw[8] == '_');
+}
 std::set<int> cur_scanMaterialIds(const std::vector<std::string>& lines) {
     std::set<int> ids;
     const int deckFw = deckFieldWidth(lines);
     for (size_t i = 0; i < lines.size(); ++i) {
         if (deckscan::isDataLine(lines[i])) continue;
         const std::string kw = deckscan::kwBare(deckscan::keywordToken(lines[i]));
-        if (kw.rfind("*MAT_", 0) != 0 || kw.rfind("*MAT_THERMAL_", 0) == 0 || kw.rfind("*MAT_ADD_", 0) == 0)
+        if (kw.rfind("*MAT_", 0) != 0 || cur_isThermalMaterial(kw) || kw.rfind("*MAT_ADD_", 0) == 0)
             continue;
         const int fw = keywordFieldWidth(lines[i], deckFw) == 20 ? 20 : 10;
         bool needTitle = kw.find("_TITLE") != std::string::npos;

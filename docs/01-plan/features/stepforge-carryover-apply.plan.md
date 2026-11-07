@@ -154,6 +154,14 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
 - **정수 칸의 실수 꼴(권고 ②)** — `parseIntegral`(정수 글자 또는 실수 꼴의 정수 값 · |v| ≤ 2^53)을 `shellSectionRows` 의 ELFORM · NIP · ICOMP 와
   `scanSectionFile` 의 ELFORM 에. SECID(ID 칸)는 정수 글자만 — 실수 꼴 SECID 를 받으면 그 카드를 덱에 넣은 뒤 우리 번호 훑기(`iss >> int`)가
   `1.000e+01` 을 1 로 읽어 되읽기 대조가 갈린다. 다른 이월 칸 읽기(*PART · 요소)는 그대로다.
+- **열 재질 번호 이름(권고 ③ · 공용 훑기)** — `cur_scanMaterialIds` 가 `*MAT_T01`~`*MAT_T18`(뒤가 끝 · `_`)도 뺀다(`cur_isThermalMaterial` —
+  `*MAT_TABULATED_*` 같은 구조 재질은 센다). 부르는 곳 — ① `cur_scanMaxMaterialId` → `maxMaterialId_`(loadBaseModel · 인클루드 위로) →
+  새 MID 를 내는 op: restack · disconnect(CZM) · IGA · offset · connection CZM · 다재료 offset · dual offset(prestress · CZM) · cnrb2solid ·
+  merge, 그리고 `idMaxima().material` → `id_floor` 의 `pid_start` · `cad_solid_merge_to_deck` 의 PID·SECID·MID 바닥 · 이월 적용의 조각
+  이동량 바닥 ② `definedMaterialIds` → 이월 적용의 「조각 MID 가 덱에 있나」 ③ `materialsReachable` → matswap · matdb 의 「MID 가
+  인클루드에만 있나」. **번호가 바뀌는 덱** — `*MAT_T01`~`T18` 의 TMID 가 구조 MID(바닥이면 PID · SECID 도)의 최대값보다 큰 덱뿐이다 —
+  그 op 들의 새 MID(· 바닥)가 TMID 위가 아니라 구조 번호 위로 내려온다(같은 수의 TMID 와 MID 는 Vol II 가 허락한다). 리포의 픽스처 ·
+  회귀 덱에는 `*MAT_T01`~`T18` 이 없다(전수 grep) — 기존 회귀 산출은 그대로다.
 
 ## 리뷰 11-07 고침 — 정한 것
 리뷰(11-07) 결함 11 + 그럴듯한 둘을 고쳤다. 공용 코드(i10 조각의 쓰기 관문 왕복 · 솔리드 · 티쉘 변형의 바닥 · `*ELEMENT_MASS` PID 칸)는 다른 갈래 몫.
