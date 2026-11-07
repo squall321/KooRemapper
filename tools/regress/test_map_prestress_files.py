@@ -128,6 +128,30 @@ def map_bbox_source(binary, root):
           rc == 1 and "같은 파일" in out and open(os.path.join(d, "o.k.__preproc_flat.k"), "rb").read() == before
           and not exists(d, "o.k"), (rc, out[-300:]))
 
+    print("[C] 실패해도 이 실행의 임시 파일을 남기지 않는다")
+    os.makedirs(os.path.join(d, "outdir"))
+    rc, out = run(binary, d, "map", "--bbox-align", "source", "--bbox-align-max-drift", "50",
+                  "demo_bent.k", "flat_s.k", "outdir")
+    check("C-1 ★앞처리 평판을 쓴 뒤 산출 쓰기가 실패해도(output 이 폴더) outdir.__preproc_flat.k 를 남기지 않는다",
+          rc == 1 and "Applied scale to detail flat" in out and not exists(d, "outdir.__preproc_flat.k"),
+          (rc, sorted(os.listdir(d)), out[-300:]))
+    with open(os.path.join(d, "c2.yaml"), "w") as f:
+        f.write((base % ("c2", src, "c2", en)).replace("  enabled: true\n", "  enabled: true\n  strain_type: bogus\n"))
+    rc, out = run(binary, d, "map", "c2.yaml")
+    check("C-2 ★고리가 map 뒤에 멈춰도(strain_type 오타) c2.k.__preproc_flat.k 를 남기지 않는다",
+          rc == 1 and "strain_type" in out and not exists(d, "c2.k.__preproc_flat.k"), (rc, sorted(os.listdir(d)), out[-300:]))
+    # flip_input 도 같은 임시 파일을 쓴다(고치기 전에도 썼다 — 고치기 전 바이너리로도 남는 것이 보인다)
+    os.makedirs(os.path.join(d, "outdir2"))
+    rc, out = run(binary, d, "map", "--flip-input-z", "demo_bent.k", "flat_s.k", "outdir2")
+    check("C-3 ★flip_input 의 앞처리 평판도 산출 쓰기가 실패하면 지운다(outdir2.__preproc_flat.k)",
+          rc == 1 and not exists(d, "outdir2.__preproc_flat.k"), (rc, sorted(os.listdir(d)), out[-300:]))
+    with open(os.path.join(d, "c4.yaml"), "w") as f:
+        f.write((base % ("c4", "flip_input_z: true\n", "c4", en)).replace("  enabled: true\n",
+                                                                         "  enabled: true\n  strain_type: bogus\n"))
+    rc, out = run(binary, d, "map", "c4.yaml")
+    check("C-4 ★flip_input 고리가 map 뒤에 멈춰도 c4.k.__preproc_flat.k 를 남기지 않는다",
+          rc == 1 and not exists(d, "c4.k.__preproc_flat.k"), (rc, sorted(os.listdir(d)), out[-300:]))
+
 
 def main():
     if len(sys.argv) < 2:

@@ -1915,11 +1915,19 @@ static int runMain(int argc, char* argv[]) {
         }
 
         printBanner(console);
+        // ★이 실행이 만든 임시 파일(앞처리 평판 · 뒤집은 기준)은 성공이든 실패든 이 블록을 나갈 때 지운다(2026-11-07) — 예전엔
+        //   runMapping 이 앞처리 평판을 쓴 뒤 실패하거나 고리가 앞에서 멈추면(strain_type · 뒤집기 실패) 남았다. 이 실행이 쓴 것만 —
+        //   쓰기 관문이 이 이름들을 입력과 견줬으니 입력은 아니다
+        struct RunTemps {
+            std::vector<std::string> paths;
+            ~RunTemps() { for (const auto& p : paths) std::remove(p.c_str()); }
+        } runTemps;
         std::string scaledFlatPath;  // populated by runMapping when flat is preprocessed
         int mapRc = runMapping(bentPath, flatPath, outputPath,
                                console, useParallel, forcePositive, flipX, flipY, flipZ,
                                bboxAlignMode, bboxAlignMaxDrift, &scaledFlatPath,
                                flipInX, flipInY, flipInZ, targetPids);
+        if (!scaledFlatPath.empty()) runTemps.paths.push_back(scaledFlatPath);
         if (mapRc != 0) return mapRc;
 
         // Optional prestress chaining: configured only via YAML (CLI form
@@ -1957,8 +1965,7 @@ static int runMain(int argc, char* argv[]) {
             //   3. Otherwise: use the original flat as-is.
             std::string refFileForPrestress = flatPath;
             std::string tempRefPath;
-            bool ownsScaledFlat = !scaledFlatPath.empty();   // we own its lifetime
-            if (ownsScaledFlat) {
+            if (!scaledFlatPath.empty()) {
                 refFileForPrestress = scaledFlatPath;
             }
             bool needFlipRef = (flipX || flipY || flipZ);
@@ -1967,8 +1974,11 @@ static int runMain(int argc, char* argv[]) {
                 std::cout << "\n";
                 console.info("Generating flip-aligned reference for prestress: "
                              + tempRefPath);
+                std::error_code tec;
+                const bool tempExisted = std::filesystem::exists(tempRefPath, tec);
                 int frc = applyMeshFlipFile(refFileForPrestress, tempRefPath,
                                              flipX, flipY, flipZ, console);
+                if (frc == 0 || !tempExisted) runTemps.paths.push_back(tempRefPath);   // 썼거나 쓰다 만 이번 실행의 것
                 if (frc != 0) return frc;
                 refFileForPrestress = tempRefPath;
             }
@@ -1980,15 +1990,9 @@ static int runMain(int argc, char* argv[]) {
             console.info("Output: " + pre_output);
             int prc = runPrestress(refFileForPrestress, outputPath, pre_output,
                                     pre_E, pre_nu, strainType, pre_csv, console, &mapReads);
-
-            // Clean up temp ref(s) regardless of prestress success.
-            if (!tempRefPath.empty()) std::remove(tempRefPath.c_str());
-            if (ownsScaledFlat)      std::remove(scaledFlatPath.c_str());
-            return prc;
+            return prc;   // 임시 파일은 runTemps 가 지운다(성공 · 실패 모두)
         }
-        // No prestress chain — scaled flat tmp (if any) is no longer needed.
-        if (!scaledFlatPath.empty()) std::remove(scaledFlatPath.c_str());
-        return 0;
+        return 0;   // 고리가 없으면 앞처리 평판은 더 쓸 데가 없다 — runTemps 가 지운다
     }
 
     // Shell-based mapping command

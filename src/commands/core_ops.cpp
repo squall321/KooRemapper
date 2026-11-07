@@ -33,6 +33,7 @@
 #include "util/Timer.h"
 #include "util/Validator.h"
 #include <iostream>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -429,12 +430,15 @@ int runMapping(const std::string& bentFile, const std::string& flatFile,
         // 크기만 맞춘 기준은 평판의 카드(*PART · *SECTION · *MAT …)를 그대로 옮긴다 — 예전에 고리가 읽던 원래 평판과 같은 K-파일 재료를
         // 보게 한다(재료를 어디서 찾는지는 바꾸지 않는다). flip_input 이 낀 기준은 예전처럼 메시만 쓴다(재료 카드 없음)
         const bool flipped = flipInputX || flipInputY || flipInputZ;
+        std::error_code tec;
+        const bool tempExisted = std::filesystem::exists(scaledFlatTmpPath, tec);
         const bool wrote = flipped ? w.writeFile(scaledFlatTmpPath, flatMesh, false)
                                    : w.writeFileWithSource(scaledFlatTmpPath, flatMesh, flatFile, false);
         if (!wrote) {
             console.warning("Failed to write pre-processed flat temp: "
                             + w.getErrorMessage()
                             + " (chain prestress may report residual strain)");
+            if (!tempExisted) std::remove(scaledFlatTmpPath.c_str());   // 이번에 쓰다 만 것만 지운다(2026-11-07)
             scaledFlatTmpPath.clear();
         } else if (outScaledFlatPath) {
             *outScaledFlatPath = scaledFlatTmpPath;

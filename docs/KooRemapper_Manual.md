@@ -485,6 +485,9 @@ $$N_i = \frac{1}{8}(1 + \xi_i\xi)(1 + \eta_i\eta)(1 + \zeta_i\zeta)$$
 - `output` 과 YAML 의 `prestress.output` 이 낼 파일(dynain · 메시 사본 · CSV)이 `bent` · `flat`(그 인클루드까지) · 설정과 같은
   파일이면 아무것도 쓰지 않고 **종료 코드 1** 입니다([§3.1(j)](#31-yaml-공통-규칙-모든-op)). 예전에는 `prestress.output` 이
   flat 이면 메시 사본이 기준 메시를 덮었고, `output` 이 flat 이면 고리가 덮인 flat 을 기준으로 **0 응력**을 종료 코드 0 으로 냈습니다.
+- 이 실행이 만든 임시 파일 — 앞처리 평판(`<output>.__preproc_flat.k` · `flip_input_*` 나 `bbox_align: source` 가 평판을 바꿀 때)과
+  뒤집은 기준(`<output>.__flipped_ref.k` · prestress 고리의 `flip_x/y/z`) — 은 성공이든 실패든 끝에 지웁니다(2026-11-07 전에는 앞처리
+  평판을 쓴 뒤 산출 쓰기가 실패하거나 고리가 map 뒤에 멈추면 남았습니다).
 
 ---
 
