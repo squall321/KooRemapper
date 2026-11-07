@@ -12,6 +12,7 @@
 #include "util/YamlComment.h"
 
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 #include <fstream>
@@ -342,7 +343,8 @@ BatteryConfig parseBatteryConfig(const std::string& yamlFile) {
 // 덱 이름 규칙 하나 — 쓰기 관문(assemble 의 battery 처리)이 쓰기 전에 같은 이름으로 견준다(2026-11-07)
 std::string batteryKFilePath(const BatteryConfig& cfg) {
     const std::string phaseSuffix = (cfg.phase == 2) ? "_phase2" : "_phase1";
-    return cfg.output + batteryTierSuffix(cfg.tier) + phaseSuffix + ".k";
+    const std::string typePart = cfg.nameWithModelType ? "_" + cfg.modelType : std::string();
+    return cfg.output + typePart + batteryTierSuffix(cfg.tier) + phaseSuffix + ".k";
 }
 
 std::string generateBatteryKFile(const BatteryConfig& cfg,
@@ -561,6 +563,9 @@ static int generateBatch(const BatteryConfig& baseCfg,
     bool autoChain = baseCfg.useDynain
                      && (std::find(phases.begin(), phases.end(), 1) != phases.end())
                      && (std::find(phases.begin(), phases.end(), 2) != phases.end());
+    // ★모델 종류가 둘 이상이면 종류를 이름에 넣는다(2026-11-07 · 사용자 결정) — 예전엔 이름에 종류가 없어 [stacked, wound] 가
+    //   같은 덱에 차례로 썼다(앞 커밋부터는 거절). 하나뿐이면 문서의 예전 이름 그대로
+    const bool typeInName = std::set<std::string>(mts.begin(), mts.end()).size() >= 2;
 
     std::vector<BatteryConfig> combos;
     for (const auto& mt : mts) {
@@ -571,6 +576,7 @@ static int generateBatch(const BatteryConfig& baseCfg,
                 cur.modelType = mt;
                 cur.tier      = tier;
                 cur.phase     = ph;
+                cur.nameWithModelType = typeInName;
 
                 // Per-phase mode override (phase_modes: [swell, dent])
                 if (pi < batch.phaseModes.size()) {
@@ -584,6 +590,7 @@ static int generateBatch(const BatteryConfig& baseCfg,
                 if (autoChain && pi > 0 && cur.dynainFile.empty()) {
                     int prevPhase = phases[pi - 1];
                     cur.dynainFile = cur.output
+                                   + (typeInName ? "_" + mt : std::string())   // 앞 phase 덱 이름과 같은 규칙
                                    + batteryTierSuffix(tier)
                                    + "_phase" + std::to_string(prevPhase)
                                    + ".dynain";
@@ -611,8 +618,9 @@ static int generateBatch(const BatteryConfig& baseCfg,
         console.error("[battery]   " + name + " ← " + list);
     }
     if (clash) {
-        console.info("[battery] 이름은 <output><tier>_phase{1|2}.k 다(모델 종류는 이름에 없다 · tier 는 _tier-1 · _tier0 · _tier0_5 · "
-                     "_tier1 · _tier2 · phase 2 가 아니면 _phase1) — 겹치는 조합은 output 을 달리 해 따로 돌려라");
+        console.info("[battery] 이름은 <output><tier>_phase{1|2}.k 다(모델 종류가 둘 이상이면 <output>_<model_type><tier>_phase{1|2}.k · "
+                     "tier 는 _tier-1 · _tier0 · _tier0_5 · _tier1 · _tier2 · phase 2 가 아니면 _phase1) — 겹치는 조합은 output 을 달리 해 "
+                     "따로 돌려라");
         return 1;
     }
     for (const auto& c : combos) generateBatteryKFile(c, console);
