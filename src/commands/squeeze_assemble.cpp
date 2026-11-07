@@ -570,6 +570,12 @@ int runAssemble(const std::string& configFile, const ConsoleOutput& console) {
                        std::to_string(assembler.getPartCount()) + " parts");
     }
 
+    // ★루프 안에서 덱보다 먼저 쓰는 곁 파일(warpage 진단 · battery 덱)을 무엇이든 쓰기 전에 이 실행의 모든 입력과 견준다(2026-11-07)
+    if (!assembler.planRunWrites(config.operations, configDir, outputPrefix)) {
+        console.error(assembler.getErrorMessage());
+        return 1;
+    }
+
     // Determine material
     double matE = config.E;
     double matNu = config.nu;

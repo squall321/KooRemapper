@@ -3316,6 +3316,10 @@ operations:
 - **in-place 는 `assemble` 만(2026-11-07)**: 덱 산출만 `base_model` 그 자리에 씁니다. 인클루드 · 설정 · 처리의 입력
   (`detail_flat` · `dat_file` · `bundle` · `dynain` · `database` …) · `.dynain`/IGA 곁 파일이 읽는 파일과 같으면 아무것도 쓰지 않고
   종료 코드 1 입니다. 단독 명령은 `output == model` 도 거절합니다([§3.1(j)](#31-yaml-공통-규칙-모든-op)).
+- **루프 안 쓰기(2026-11-07)**: 처리 루프가 덱보다 먼저 쓰는 곁 파일 — warpage 의 `debug: true` 진단 셋(`<debug_prefix>_raw.dat` ·
+  `_curvature.dat` · `_warpage.vtk`)과 battery 덱(`<output><tier>_phase{1|2}.k`) — 은 처리를 **하나도 하기 전에** 이 실행의 모든
+  입력(뒤 처리의 입력까지)과 견줍니다. 예전에는 쓰는 자리에서 그때까지 읽은 입력과만 견줘, 앞 처리의 진단 파일이 뒤 update 의
+  `dynain` 을 덮거나 battery 덱이 뒤 처리의 입력을 덮고 종료 코드 0 이었습니다.
 
 > **참고**: 아래 각 오퍼레이션은 동일 이름의 독립 명령어(12~22장)와 동일한 알고리즘을 사용합니다.
 > assemble 내에서는 `- type: <이름>` 으로 지정하며, 여러 오퍼레이션을 순차 결합할 수 있습니다.

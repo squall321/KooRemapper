@@ -553,7 +553,9 @@ material:
    notes=["operations[].type 는 각 op 이름(replace squeeze restack offset disconnect update generate ...)",
           "restack·merge 항목은 operations[] 안에 pid_refs: strict(기본) | warn 을 받는다 — 비운 PID 를 가리키던 자리를 못 옮기면 strict 는 rc=1(덱은 쓴다), warn 은 같은 보고에 rc=0. 자세한 것은 help restack·help merge",
           "output == base_model(in-place)은 assemble 만 받는다 — 다 읽은 뒤 덱만 그 자리에 쓴다. 인클루드 · 설정 · 처리의 입력",
-          "  (detail_flat · dat_file · bundle · dynain …) · .dynain/IGA 곁 파일이 읽는 파일과 같으면 아무것도 쓰지 않고 rc 1(2026-11-07)"])
+          "  (detail_flat · dat_file · bundle · dynain …) · .dynain/IGA 곁 파일이 읽는 파일과 같으면 아무것도 쓰지 않고 rc 1(2026-11-07)",
+          "루프 안에서 덱보다 먼저 쓰는 곁 파일(warpage debug 진단 · battery 덱)은 처리 전에 **모든** 처리의 입력과 견준다 —",
+          "  예전엔 그때까지 읽은 입력과만 견줘 뒤 처리의 입력(update 의 dynain 등)을 덮을 수 있었다"])
 
 # ── 하중·경계·접촉 ──
 op("load", "하중·경계·접촉", "파트 면(방향/tied/세그먼트셋 선택)에 압력·힘 하중 + 곡선", "하중 pressure 압력 force",

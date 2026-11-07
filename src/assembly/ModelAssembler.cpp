@@ -408,6 +408,76 @@ void ModelAssembler::planWrite(const std::string& path) {
     if (!path.empty()) plannedWrites_.push_back(path);
 }
 
+bool ModelAssembler::planRunWrites(const std::vector<AssemblyOperation>& ops, const std::string& configDir,
+                                   const std::string& outputPrefix) {
+    auto cfgPath = [&](const std::string& p) { return KooRemapper::yamlResolvePath(configDir, p); };
+    std::vector<std::string> midRun;   // 루프 안에서 덱보다 먼저 쓰는 파일
+    for (const auto& op : ops) {
+        switch (op.type) {
+        case AssemblyOperation::REPLACE:
+            noteInput(cfgPath(op.replace.detailFlat), "detail_flat");
+            noteInput(cfgPath(op.replace.shellBent), "shell_bent");
+            noteInput(cfgPath(op.replace.simpleBent), "simple_bent");
+            break;
+        case AssemblyOperation::BEND:
+            if (op.bend.source == "dat") noteInput(cfgPath(op.bend.datFile), "dat_file");
+            if (op.bend.source == "dat_pair") {
+                noteInput(cfgPath(op.bend.datTop), "dat_top");
+                noteInput(cfgPath(op.bend.datBottom), "dat_bottom");
+            }
+            break;
+        case AssemblyOperation::WARPAGE: {
+            // applyWarpage 의 규칙 그대로 — `/` · `X:` 만 절대 경로로 본다
+            std::string dat = op.warpage.datFile;
+            if (!configDir.empty() && !dat.empty() && dat[0] != '/' && !(dat.size() > 1 && dat[1] == ':'))
+                dat = configDir + "/" + dat;
+            noteInput(dat, "dat_file");
+            if (op.warpage.debug)
+                for (const char* sfx : {"_raw.dat", "_curvature.dat", "_warpage.vtk"})
+                    midRun.push_back(op.warpage.debugPrefix + sfx);
+            break;
+        }
+        case AssemblyOperation::MATSWAP:
+            noteInput(cfgPath(op.matswap.bundleFile), "재질 번들");
+            break;
+        case AssemblyOperation::MATDB:
+            if (!op.matdb.databasePath.empty()) noteInput(cfgPath(op.matdb.databasePath), "재질 DB");
+            break;
+        case AssemblyOperation::UPDATE:
+            noteInput(cfgPath(op.update.dynainFile), "dynain");
+            break;
+        case AssemblyOperation::BATTERY: {
+            if (op.battery.configFile.empty()) break;
+            const std::string bc = cfgPath(op.battery.configFile);
+            noteInput(bc, "battery config");
+            try {
+                BatteryConfig cfg = parseBatteryConfig(bc);
+                if (!op.battery.output.empty()) cfg.output = op.battery.output;
+                midRun.push_back(batteryKFilePath(cfg));
+            } catch (const std::exception&) {
+                // 못 읽으면 applyBattery 가 아무것도 쓰기 전에 같은 까닭으로 멈춘다
+            }
+            break;
+        }
+        default:
+            break;
+        }
+    }
+    if (midRun.empty()) return true;
+    std::string why;
+    if (output_guard::findClash(midRun, guardInputs_, why)) {
+        errorMessage_ = "assemble: " + why + " — 처리 루프가 덱보다 먼저 쓰는 파일이다. 출력 파일을 쓰지 않았습니다";
+        return false;
+    }
+    std::vector<std::string> withDeck{outputPrefix + ".k", outputPrefix + ".dynain"};
+    withDeck.insert(withDeck.end(), midRun.begin(), midRun.end());
+    if (output_guard::findClash(withDeck, {}, why)) {
+        errorMessage_ = "assemble: " + why + " — 출력 파일을 쓰지 않았습니다";
+        return false;
+    }
+    return true;
+}
+
 // 주 덱의 인클루드 닫힘을 읽는다 — 정본(`include_closure`)으로, 주 덱 폴더 기준.
 // 못 본 자리(찾지 못한 이름 · 따라가지 않은 `*INCLUDE_*` · 깊이 상한)는 **여기서 한 번** 말한다.
 // 발급은 op 마다 일어나지만 경고를 거기 두면 한 실행에 여러 번 찍힌다(사람이 센다).
