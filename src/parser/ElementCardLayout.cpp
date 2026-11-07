@@ -393,11 +393,13 @@ std::vector<std::string> auxCardFields(const AuxElementCard& a, const std::strin
 }
 
 bool gridReaderReadsKeyword(const std::string& keywordLine) {
-    // `KFileReader::extractKeyword` 와 같은 토큰 — `*` 뒤 영숫자 · `_` · `-` 를 대문자로(접미사 `%`·`+` 와 공백에서 멈춘다)
-    const size_t s = keywordLine.find_first_not_of(" \t");
-    if (s == std::string::npos || keywordLine[s] != '*') return false;
+    // 리더의 키워드 줄 규칙 그대로 — 0열이 `*` 이고 그다음이 글자인 줄만(`KFileReader::isKeywordLine`). 들여쓴 `*` 줄은 리더에게
+    // 키워드가 아니라 앞 블록의 데이터다 — 여기서 너그러우면 그 블록을 「리더가 담았다」 고 보고 아무도 안 본다(11-07).
+    // 이름은 `KFileReader::extractKeyword` 와 같은 토큰 — `*` 뒤 영숫자 · `_` · `-` 를 대문자로(접미사 `%`·`+` 와 공백에서 멈춘다)
+    if (keywordLine.size() < 2 || keywordLine[0] != '*' ||
+        !std::isalpha(static_cast<unsigned char>(keywordLine[1]))) return false;
     std::string k;
-    for (size_t i = s + 1; i < keywordLine.size(); ++i) {
+    for (size_t i = 1; i < keywordLine.size(); ++i) {
         const unsigned char ch = static_cast<unsigned char>(keywordLine[i]);
         if (!std::isalnum(ch) && ch != '_' && ch != '-') break;
         k += static_cast<char>(std::toupper(ch));

@@ -153,28 +153,6 @@ PartIndex indexParts(const std::vector<std::string>& L) {
     return idx;
 }
 
-// 리더(`KFileReader::parseFile`)가 보는 키워드 이름 — 0열 '*' 다음이 글자인 줄만 키워드 줄이고(isKeywordLine), 이름은 그 뒤
-// 영숫자 · '_' · '-' 를 대문자로 모은 것이다(extractKeyword). 키워드 줄이 아니면 빈 글자.
-std::string readerKeyword(const std::string& line) {
-    if (line.size() < 2 || line[0] != '*' || !std::isalpha(static_cast<unsigned char>(line[1]))) return std::string();
-    std::string kw;
-    for (size_t i = 1; i < line.size(); ++i) {
-        const unsigned char c = static_cast<unsigned char>(line[i]);
-        if (!(std::isalnum(c) || c == '_' || c == '-')) break;
-        kw += static_cast<char>(std::toupper(c));
-    }
-    return kw;
-}
-
-// 리더가 이 블록의 요소를 메시에 **그대로** 담는가 — 그 리더의 갈래를 옮긴다(KFileReader.cpp parseFile): ELEMENT_SOLID · _SOLID_TITLE ·
-// ELEMENT_TSHELL · _TSHELL_TITLE 은 이름이 똑같을 때만, ELEMENT_SHELL 은 머리가 같고 `parseElementKeyword` 가 받는 변형일 때.
-// 그 밖(`*ELEMENT_SOLID_ORTHO` · `_H20` · `_TET4TOTET10` · `*ELEMENT_TSHELL_BETA` …)은 리더가 통째로 건너뛴다 — 메시에 없다.
-bool readerReadsGrid(const std::string& line) {
-    const std::string kw = readerKeyword(line);
-    if (kw == "ELEMENT_SOLID" || kw == "ELEMENT_SOLID_TITLE" || kw == "ELEMENT_TSHELL" || kw == "ELEMENT_TSHELL_TITLE") return true;
-    return kw.rfind("ELEMENT_SHELL", 0) == 0 && parseElementKeyword(line).supported;
-}
-
 // 정규화한 키워드(`*ELEMENT_BEAM_WARPAGE_TITLE`)의 옵션 토큰에 `opt` 가 있나
 bool hasOption(const std::string& kw, const std::string& base, const char* opt) {
     if (kw.rfind(base, 0) != 0) return false;
@@ -192,7 +170,7 @@ bool hasOption(const std::string& kw, const std::string& base, const char* opt) 
 std::string elementBlockGap(const std::string& line) {
     const ElementKeywordInfo info = parseElementKeyword(line);
     if (info.family != ElemFamily::NONE) {
-        if (!readerReadsGrid(line)) return info.supported ? "리더가 메시에 담지 않는 변형" : "카드 줄 수를 확정할 수 없는 변형";
+        if (!gridReaderReadsKeyword(line)) return info.supported ? "리더가 메시에 담지 않는 변형" : "카드 줄 수를 확정할 수 없는 변형";
         if (info.family == ElemFamily::SHELL && hasOption(info.keyword, "*ELEMENT_SHELL", "DOF"))
             return "DOF 카드의 스칼라 절점(NS1-NS4)을 읽지 않는다";
         return std::string();
@@ -225,7 +203,7 @@ void forEachGridCard(const std::vector<std::string>& L, const Mesh& m, const std
         const std::string& l = L[i];
         const size_t g = l.find_first_not_of(" \t");
         if (g != std::string::npos && l[g] == '*') {
-            in = readerReadsGrid(l);
+            in = gridReaderReadsKeyword(l);
             if (in) info = parseElementKeyword(l);
             fw = keywordFieldWidth(l, deckFw);
             remaining = 0;
