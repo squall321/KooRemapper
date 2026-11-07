@@ -1396,6 +1396,7 @@ bool bytesGiveLines(const std::string& bytes, const std::vector<std::string>& li
 std::string toJson(const Report& r) {
     std::ostringstream o;
     o << "{\n  \"format\": \"dynaforge-carryover-apply\",\n  \"version\": 1,\n  \"ok\": " << (r.ok ? "true" : "false") << ",\n";
+    o << "  \"output_written\": " << (r.outputWritten ? "true" : "false") << ",\n";
     o << "  \"plan\": {\"sha256\": " << (r.planRead ? q(r.planSha256) : "null")
       << ", \"version\": " << (r.planParsed ? std::to_string(r.planVersion) : "null")
       << ", \"report_key\": " << (r.planParsed ? q(r.reportKey) : "null")

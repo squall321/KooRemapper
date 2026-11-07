@@ -5714,7 +5714,7 @@ KooRemapper apply_carryover_plan <config.yaml>
 ```yaml
 model: deck.k                # 계획이 지문(deck.sha256)으로 고정한 덱 — 받은 바이트 그대로
 plan: plan.json              # StepForge 이월 계획 — 동반 파일(field_<PID>.bin · fragment_<PID>.k · section_<PID>.k)은 같은 폴더
-output: deck_applied.k       # 고친 덱 — 걸린 것이 하나라도 있으면 쓰지 않는다(rc 1)
+output: deck_applied.k       # 고친 덱 — 걸린 것이 하나라도 있으면 바꿔 넣지 않는다(rc 1 · 그 자리의 앞 파일은 그대로)
 # report: my_report.json     # (선택) 보고 JSON — 기본 <output 줄기>_carryover.json · 거절해도 쓴다
 ```
 
@@ -5756,7 +5756,8 @@ CAD 개정이 오면 StepForge 가 덱 PID 마다 처리(그대로 · 강체 옮
 
 지우기 · 바꿔 넣기의 번호 목록은 늘 **그 PID 의 요소**에서 구한다 — 계획의 범위로 고르지 않는다(손으로 매긴 덱은 범위 안에 다른 PID 의
 번호가 끼어 있다 · §10.3 ⑤). 쓴 덱은 다시 읽어(인클루드가 있으면 닫힘째) 옮긴 자리 · 지운 번호 · 넣은 번호와 좌표 · 손대지 않은 절점 ·
-파트별 요소 수 · `*PART` · 새 셸 섹션을 대조하고, **새로** 뒤집힌 솔리드나 모프가 뒤집은 셸 법선이 있으면 산출을 지운다.
+파트별 요소 수 · `*PART` · 새 셸 섹션을 대조하고, **새로** 뒤집힌 솔리드나 모프가 뒤집은 셸 법선이 있으면 바꿔 넣지 않는다(쓴 임시 파일만
+지운다 — §52.8).
 
 넣는 카드(조각 · 새 셸 섹션)는 주 덱의 **첫** `*END` 앞에 한 벌만 둔다 — LS-DYNA 는 첫 `*END` 에서 읽기를 멈춘다. 쓰기가 `*END` 마다
 덧붙임을 다시 넣어, `*END` 가 둘 이상인 덱이면 같은 카드가 두 벌 나갔다(쓰기의 같은 자리를 쓰는 다른 op 도 같이 고쳤다 · 적대적 검토 11-07).
@@ -5824,20 +5825,25 @@ null). 칸 하나라도 다르면 손대는 줄은 `deck_range`(칸 · 계획 �
 
 `ok` · `plan{sha256 · version · report_key · deck_from}` · `deck{sha256_in · sha256_out · includes}` · `problems[{pid · kind · detail}]` ·
 `warnings` · `shift` · `parts[처리마다 result · 옮긴 수 · 최대 변위 · 지운 수 · 넣은 구간 · 새 섹션(바꿔 넣기 {secid · elform} · 모프
-{secid · thickness}) · 뒤집힘 앞뒤 · refused_transform]` · `added` · `touches_changed`. 거절해도 · 내부 오류에도 쓰고, 거절하면 출력 자리의
-옛 덱을 지운다(`stale_output_removed`). 보고의 글자는 늘 바른 UTF-8 이다 — 계획(JSON 리더는 글자를 검사하지 않는다) · 덱 줄 · 경로에서 온
+{secid · thickness}) · 뒤집힘 앞뒤 · refused_transform]` · `added` · `touches_changed`. 거절해도 · 내부 오류에도 쓴다 — `ok` · `output_written`(이번
+실행이 output 자리에 덱을 바꿔 넣었나) · 걸린 것 전부. 보고의 글자는 늘 바른 UTF-8 이다 — 계획(JSON 리더는 글자를 검사하지 않는다) · 덱 줄 · 경로에서 온
 깨진 바이트는 U+FFFD 로 바꿔 싣고, 줄을 보일 때는 글자 경계에서 자른다(계획 글자를 이유로 거절하지 않는다 — 실을 때 고친다).
 수는 다시 읽으면 같은 double 이 되는 가장 짧은 꼴(15 → 16 → 17 자리)로 쓴다 — `refused_transform` 은 계획 값과 비트까지 같다(예전 `%.15g` 는
 `1.0000000000000002` 를 `1` 로 냈다 · 적대적 검토 11-07).
 
-output · report 는 이 op 이 **읽는 파일**(주 덱 · 계획 · 인클루드 닫힘 · 계획의 동반 파일 — `files` 와 줄이 가리킨 변위장 · 조각 ·
-`section_<PID>.k`) 어느 것과도 같으면 안 된다. output 만 겹치면 보고에 `output_clobber` 로 적고 아무것도 덮지 않으며, report 가 겹치면 보고
-자리가 없어 콘솔로만 거절한다. 거절할 때 지우는 옛 산출도 입력 파일이면 지우지 않는다(적대적 검토 11-07 — 산출 이름이 `fragment_6` 이면
-그 조각을 「옛 산출」로 지웠다).
+output · report 는 이 op 이 **읽는 파일**(설정 YAML · 주 덱 · 계획 · 인클루드 닫힘 · 계획의 동반 파일 — `files` 와 줄이 가리킨 변위장 ·
+조각 · `section_<PID>.k`) 어느 것과도 같으면 안 되고 폴더여도 안 된다(공용 관문 `output_guard`). output 이 걸리면 보고에 `output_clobber` 로
+적고 아무것도 쓰지 않으며, report 가 걸리면 보고 자리가 없어 콘솔로만 거절한다.
+
+쓰기는 **임시 파일 + 바꿔 넣기**다(사용자 결정 11-07 밤 — extract-parts 와 같은 규칙). 덱과 보고를 같은 폴더의 임시 파일
+(`.<이름>.kr_tmp_…`)에 쓰고, 되읽기 대조 · 품질 관문까지 지나면 덱 · 보고 차례로 바꿔 넣는다. 거절 · 실패면 이번 실행의 임시 파일만
+지운다 — output 자리의 앞 파일 · 폴더 · 남의 파일은 그대로다(보고의 `output_written` false 가 그것이 이번 산출이 아니라고 말한다).
+예전엔 거절하면 앞 실행의 덱을 「옛 산출」로 지웠다(`stale_output_removed` — 플랫폼에서 앞 잡의 출력이 사라졌고, 설정 YAML 과 같은
+output 이면 설정을, 빈 폴더면 폴더를 지웠다 · 11-07 밤 실측).
 
 ### 52.9 시험 · 아직 하지 않는 것
 
-- 회귀 `tools/regress/test_apply_carryover_plan.py`(판 1 · 83항) · `tools/regress/test_apply_carryover_plan_v2.py`(판 2 · 86항 — 실물 둘 ·
+- 회귀 `tools/regress/test_apply_carryover_plan.py`(판 1 · 88항 — K 출력 규칙) · `tools/regress/test_apply_carryover_plan_v2.py`(판 2 · 86항 — 실물 둘 ·
   진리값 판을 판 2 로 · 칸 표 · 덱 자리 · §10.5 새 셸 섹션 · 인클루드 · refused_transform · 적대적 검토 고침 R-1~R-8 — R-8 은 gdb 로
   적용 직전에 멈춰 파일을 바꾼다 · gdb 로 멈추지 못하면 SKIP) · 단위 `tests/test_CarryoverPlan.cpp`.
 - 인클루드 파일 안의 고칠 자리는 고치지 않는다(거절 — 사용자 결정 11-07). 그 파트를 고치려면 닫힘을 펼친 한 덱으로 계획을 다시 받아야 한다.

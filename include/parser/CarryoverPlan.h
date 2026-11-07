@@ -267,6 +267,7 @@ struct Touch {
 };
 struct Report {
     bool ok = false;
+    bool outputWritten = false;         // 이번 실행이 output 자리에 덱을 바꿔 넣었다(거절 · 실패면 false — 앞 파일은 그대로다)
     bool planRead = false;              // 계획 바이트를 읽었다(sha256 이 있다)
     std::string planSha256, reportKey;
     long long planVersion = 0;

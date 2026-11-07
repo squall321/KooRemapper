@@ -413,6 +413,8 @@ TEST(Carryover_보고_JSON_은_엄격한_리더로_읽힌다) {
     ASSERT_TRUE(json::parse(carryover::toJson(r), v, err));
     ASSERT_EQ(v.get("format")->s, std::string("dynaforge-carryover-apply"));
     ASSERT_TRUE(v.get("ok")->type == json::Value::Type::Bool && !v.get("ok")->b);
+    // 산출을 바꿔 넣었나 — 거절 · 실패면 false(output 자리의 앞 파일은 이번 산출이 아니다 · 11-07 밤)
+    ASSERT_TRUE(v.get("output_written") && v.get("output_written")->type == json::Value::Type::Bool && !v.get("output_written")->b);
     ASSERT_TRUE(v.get("deck")->get("sha256_out")->isNull());
     ASSERT_TRUE(v.get("shift")->isNull());
     ASSERT_EQ(v.get("problems")->arr.size(), static_cast<size_t>(2));

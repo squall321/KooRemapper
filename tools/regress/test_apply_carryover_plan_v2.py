@@ -122,9 +122,14 @@ def warn_kinds(rep):
     return {(w.get("pid"), w["kind"]) for w in rep.get("warnings", [])}
 
 
+def tmp_left(d):
+    """이번 실행이 남긴 임시 파일(`.<이름>.kr_tmp_…`) — 거절 · 성공 어느 쪽이든 남으면 안 된다."""
+    return sorted(n for n in os.listdir(d) if n.startswith(".") and ".kr_tmp_" in n)
+
+
 def refused(name, rc, out, rep, d, kind, pid=None, out_name="deck_applied.k"):
-    ok = (rc == 1 and rep.get("ok") is False and kind in kinds(rep, pid) and
-          not os.path.exists(os.path.join(d, out_name)) and rep.get("deck", {}).get("sha256_out") is None)
+    ok = (rc == 1 and rep.get("ok") is False and rep.get("output_written") is False and kind in kinds(rep, pid) and
+          not os.path.exists(os.path.join(d, out_name)) and rep.get("deck", {}).get("sha256_out") is None and not tmp_left(d))
     return check(name, ok, (rc, sorted(kinds(rep)), out[-500:]))
 
 

@@ -13,14 +13,16 @@
   · transform — BRACKET 은 x + 2 · 손대지 않은 파트의 절점 줄은 좌표 글자가 그대로다
   · remesh — 조각의 절점 · 요소가 그 번호 · 그 좌표 글자로 들어가고 옛 요소는 없다 · 새 섹션(SECID 9 · ELFORM 10)을 *PART 가 가리킨다
   · delete — 요소 · *PART 가 없고 *SECTION · *MAT 은 남는다(mesh12 의 새 파트가 지운 PID 의 SECID · MID 를 가리킨다)
-  · 거절 — rc 1 · 보고 ok false · 그 갈래(kind)가 있다 · 산출 덱이 없다 · 다른 줄도 적용하지 않았다
+  · 거절 — rc 1 · 보고 ok false · output_written false · 그 갈래(kind)가 있다 · 산출 덱이 없다 · 임시 파일이 남지 않는다 ·
+    다른 줄도 적용하지 않았다
   · 개행 — CRLF 덱은 CRLF 로 나간다 · CRLF 로 바뀐 조각은 값 대조로 받고 경고한다
 
 무엇을 보나.
   A 진리값 판(examples/apply_carryover_plan) · B 12 파트 덱(mesh12) · C 거절 · D 개행 · E YAML · F 바닥(보 요소) · G 품질 관문
   H 덱이 숨긴 것(리뷰 11-07) — 리더가 담지 않는 요소 블록 · 정본 밖 참조 · 풀 수 없는 세트 · EID 겹침 · *END 없음
   I 계획의 실제 꼴(리뷰 11-07) — 돌린 강체의 반올림 · 셸 회전 · 셸 새 섹션 T1 · 못 지은 조각 · check 없는 transform · 이름 주입
-  J 산출 자리(리뷰 11-07) — 확장자가 아닌 몫으로 가른 동반 파일 · 거절하면 옛 산출을 지운다
+  J 산출 자리(리뷰 11-07) — 확장자가 아닌 몫으로 가른 동반 파일 · 거절해도 앞 산출은 그대로다(11-07 밤)
+  K 출력 규칙(사용자 결정 11-07 밤) — 임시 파일 + 바꿔 넣기 · 거절 · 실패면 앞 파일 그대로 · 설정 YAML · 폴더는 쓰지도 지우지도 않는다
 
 usage: test_apply_carryover_plan.py <KooRemapper 바이너리>
 """
@@ -160,9 +162,14 @@ def kinds(rep, pid=None):
     return {p["kind"] for p in rep.get("problems", []) if pid is None or p.get("pid") == pid}
 
 
+def tmp_left(d):
+    """이번 실행이 남긴 임시 파일(`.<이름>.kr_tmp_…`) — 거절 · 성공 어느 쪽이든 남으면 안 된다."""
+    return sorted(n for n in os.listdir(d) if n.startswith(".") and ".kr_tmp_" in n)
+
+
 def refused(name, rc, out, rep, d, kind, pid=None, out_name="deck_applied.k"):
-    ok = (rc == 1 and rep.get("ok") is False and kind in kinds(rep, pid) and
-          not os.path.exists(os.path.join(d, out_name)) and rep.get("deck", {}).get("sha256_out") is None)
+    ok = (rc == 1 and rep.get("ok") is False and rep.get("output_written") is False and kind in kinds(rep, pid) and
+          not os.path.exists(os.path.join(d, out_name)) and rep.get("deck", {}).get("sha256_out") is None and not tmp_left(d))
     return check(name, ok, (rc, sorted(kinds(rep)), out[-400:]))
 
 
@@ -201,6 +208,7 @@ def main():
         part_h(binary)
         part_i(binary)
         part_j(binary)
+        part_k(binary)
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
     print()
@@ -876,14 +884,71 @@ def part_j(binary):
           rc == 0 and "file_mismatch_unused" in {x["kind"] for x in rep.get("warnings", [])}, (rc, sorted(kinds(rep))))
 
     d = stage(EX, "j3")
-    write(os.path.join(d, "deck_applied.k"), "*KEYWORD\n$ 앞선 실행이 남긴 덱\n*END\n")
+    old = "*KEYWORD\n$ 앞선 실행이 남긴 덱\n*END\n"
+    write(os.path.join(d, "deck_applied.k"), old)
     p = plan_load(d)
     p["deck"]["sha256"] = "0" * 64
     plan_save(d, p)
     rc, out, rep = apply_case(binary, d)
-    refused("J-3 거절하면 출력 자리의 옛 덱을 지운다(ok false 보고 옆에 남지 않게)", rc, out, rep, d, "deck_sha")
-    check("J-3b 보고가 그것을 말한다(stale_output_removed)", "stale_output_removed" in {x["kind"] for x in rep.get("warnings", [])},
+    check("J-3 거절해도 출력 자리의 앞 파일은 그대로다(사용자 결정 11-07 밤 — extract-parts 와 같은 규칙) · ok false · output_written false",
+          rc == 1 and rep.get("ok") is False and rep.get("output_written") is False and "deck_sha" in kinds(rep) and
+          open(os.path.join(d, "deck_applied.k"), encoding="utf-8").read() == old and not tmp_left(d), (rc, sorted(kinds(rep)), tmp_left(d)))
+    check("J-3b 지우지 않았으니 stale_output_removed 경고도 없다", "stale_output_removed" not in {x["kind"] for x in rep.get("warnings", [])},
           rep.get("warnings"))
+
+
+def part_k(binary):
+    print("[K 출력 규칙 — 임시 파일에 쓰고 끝까지 지나면 바꿔 넣는다 · 거절 · 실패면 앞 파일 그대로(사용자 결정 11-07 밤)]")
+    base = "model: deck.k\nplan: plan.json\n"
+    old = "*KEYWORD\n$ 앞선 실행이 남긴 덱\n*END\n"
+    # K-1 report 가 설정 YAML — 보고 자리가 없다 · 콘솔로만 거절하고 아무것도 쓰지 않는다(예전엔 설정을 보고로 덮고 rc 0)
+    d = stage(EX, "k1")
+    yaml = base + "output: out.k\nreport: a.yaml\n"
+    rc, out, _rep = apply_case(binary, d, yaml=yaml, report="no_report.json")
+    check("K-1 report 가 설정 YAML → rc 1 · 설정 그대로 · 덱 · 보고 둘 다 쓰지 않는다",
+          rc == 1 and open(os.path.join(d, "a.yaml"), encoding="utf-8").read() == yaml and not os.path.exists(os.path.join(d, "out.k")) and
+          not tmp_left(d), (rc, out[-300:]))
+    # K-2 output 이 설정 파일(이름이 c.k) — 보고에 output_clobber · 설정 그대로(예전엔 쓰기 관문에 걸린 뒤 「옛 산출」로 지웠다)
+    d = stage(EX, "k2")
+    yaml = base + "output: c.k\n"
+    write(os.path.join(d, "c.k"), yaml)
+    rc, out = run(binary, d, OP, "c.k")
+    rp = os.path.join(d, "c_carryover.json")
+    rep = json.load(open(rp, encoding="utf-8")) if os.path.exists(rp) else {}
+    check("K-2 output 이 설정 파일 → rc 1 · output_clobber · 설정이 그대로 있다 · output_written false",
+          rc == 1 and "output_clobber" in kinds(rep) and rep.get("output_written") is False and os.path.exists(os.path.join(d, "c.k")) and
+          open(os.path.join(d, "c.k"), encoding="utf-8").read() == yaml and not tmp_left(d), (rc, sorted(kinds(rep)), out[-300:]))
+    # K-3 output 자리가 빈 폴더 — 폴더는 쓰지도 지우지도 않는다(예전엔 「옛 산출」로 rmdir 했다)
+    d = stage(EX, "k3")
+    os.makedirs(os.path.join(d, "deck_applied.k"))
+    rc, out, rep = apply_case(binary, d)
+    check("K-3 output 자리가 폴더 → rc 1 · output_clobber · 폴더가 그대로 있다",
+          rc == 1 and "output_clobber" in kinds(rep) and os.path.isdir(os.path.join(d, "deck_applied.k")) and not tmp_left(d),
+          (rc, sorted(kinds(rep)), out[-300:]))
+    # K-4 쓴 뒤 품질 관문에서 걸린다(G-1 의 뒤집는 모프) — 앞 파일 그대로 · 임시 파일 없음(예전엔 덮어쓴 뒤 지웠다)
+    d = stage(EX, "k4")
+    write(os.path.join(d, "deck_applied.k"), old)
+    p = plan_load(d)
+    head = next(r for r in p["parts"] if r["pid"] == 2)["field"]
+    lay = {e["name"]: e for e in head["layout"]}
+    fp = os.path.join(d, head["file"])
+    b = bytearray(open(fp, "rb").read())
+    ids, disp = read_field(d, head)
+    i = next(k for k in range(len(ids)) if disp[3 * k + 1] > 0)
+    struct.pack_into("<d", b, lay["disp"]["offset"] + 8 * (3 * i + 1), -50.0)
+    open(fp, "wb").write(bytes(b))
+    reseal(d, files=[head["file"]])
+    rc, out, rep = apply_case(binary, d)
+    check("K-4 쓴 뒤 품질 관문에서 걸렸다 → rc 1 · quality_inverted · 앞 파일 그대로 · output_written false · 임시 파일 없음",
+          rc == 1 and "quality_inverted" in kinds(rep) and rep.get("output_written") is False and
+          open(os.path.join(d, "deck_applied.k"), encoding="utf-8").read() == old and not tmp_left(d), (rc, sorted(kinds(rep)), tmp_left(d)))
+    # K-5 성공 — 앞 파일을 바꿔 넣는다 · 보고의 sha256_out 이 그 자리의 바이트 · output_written true · 임시 파일 없음
+    d = stage(EX, "k5")
+    write(os.path.join(d, "deck_applied.k"), old)
+    rc, out, rep = apply_case(binary, d)
+    check("K-5 성공 → 바꿔 넣었다(sha256_out = 산출 바이트) · output_written true · 임시 파일 없음",
+          rc == 0 and rep.get("output_written") is True and rep.get("deck", {}).get("sha256_out") == sha(os.path.join(d, "deck_applied.k")) and
+          not tmp_left(d), (rc, rep.get("output_written"), tmp_left(d)))
 
 
 if __name__ == "__main__":

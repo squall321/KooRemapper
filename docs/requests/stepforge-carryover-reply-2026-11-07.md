@@ -105,7 +105,8 @@
   - `set_unresolved` — 풀 수 없는 `_GENERAL` 세트. `eid_collision` — 요소 종류 사이 EID 겹침(우리 리더 · 쓰기가 EID 하나로 요소를 가린다).
   - `deck_no_end` — `*END` 없는 덱에 바꿔 넣기 · 새 파트. `internal_error` — 예기치 않은 오류에도 보고는 남고 덱은 안 쓴다.
   - 경고 `orientation_not_rotated` — 회전(R ≠ I)이 있으면 재료 축(AOPT) · 좌표계 · MCID · 초기응력은 돌리지 않는다고 알린다.
-    `stale_output_removed` — 거절할 때 같은 자리의 옛 산출 덱을 지웠다.
+    (11-07 밤 바뀜) 거절 · 실패하면 output 자리의 앞 파일은 **그대로 둔다** — 쓰기는 임시 파일 + 바꿔 넣기이고, 보고의 `output_written` 이
+    이번 실행이 덱을 바꿔 넣었는지 말한다(옛 경고 `stale_output_removed` 는 없앴다).
   - 너그러워진 것 — 강체 허용을 1e-6 으로(그쪽 `round(x, 9)` 행렬이 1e-9 판정에 걸렸다), 옮기기 줄은 셸 법선 검사를 안 한다(회전으로 법선이
     도는 것은 뒤집힘이 아니다), 셸 새 섹션의 T1 은 상대 1e-4(그쪽 `%10.5g`), 못 지은 조각의 `notes` · 빈 `why` · `check` 없는 옮기기 줄을 받는다.
 - **공용 고침(같은 날)** — i10 덱에 조각을 넣으면 쓰기 관문이 블록을 8칸으로 읽어 늘 멈췄다(`cad_solid_merge_to_deck` 도) → 덱 폭으로.

@@ -115,6 +115,7 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
   report 가 겹치면 콘솔로만 거절(보고 자리가 없다), output 만 겹치면 보고에 `output_clobber`(예전 output == model 은 콘솔로만이었다 — 같은
   길로 모았다). 거절의 옛 산출 지우기(J-3 · 리뷰 11-07 결정)는 그대로 두되 입력이면 건너뛴다. extract-parts 갈래의 「임시 파일 + 성공 때
   이름 바꾸기 · 실패하면 옛 파일 그대로」 로는 옮기지 않았다 — 그러면 J-3(거절하면 옛 덱을 지운다)이 뒤집힌다(그 결정은 사람이 정할 일).
+  → 11-07 밤 사용자가 정했다 — extract-parts 와 같게(아래 「11-07 밤 결정 고침」).
 - **보고 UTF-8(#4)** — 둘 중 「실을 때 고친다」 를 골랐다 — 보고의 모든 글자(`q()`)를 바른 UTF-8 로(깨진 바이트 → U+FFFD), 줄 자르기는 글자
   경계에서. 계획 글자를 `plan_json` 으로 거절하는 쪽은 덱 · 경로에서 온 깨진 바이트를 못 막고, 한 글자 때문에 계획 전체의 문제 목록을 잃는다.
 - **링크 덱의 폴더(#5)** — 산출 폴더 규칙은 「준 경로 그대로의 폴더」 를(폴더만 정규화) 쓴다 — 닫힘(`dirOf(model)`) · 되읽기(`dirOf(output)`)와
@@ -136,6 +137,15 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
   줄보다 먼저(몇 ms), 닫힘 메시는 지문 뒤에 읽는다 — 인클루드는 쓴 뒤 닫힘 대조가 다시 재고, 주 덱은 되읽기 대조가 거의 잡는다.
   회귀 R-8 은 gdb 로 `applyCarryoverPlan` 에서 멈춰 파일을 바꾼다(검은 상자로는 한 프로세스 안의 두 읽기 사이를 못 끼운다 · 단위 시험은
   ModelAssembler 를 링크하지 못한다 — 명령 갈래 심볼). gdb 로 멈추지 못하면 SKIP.
+
+## 11-07 밤 결정 고침 — 정한 것
+- **출력 규칙(사용자 결정 ①)** — extract-parts(`a33af2f`)와 같은 꼴: 덱 · 보고를 output 폴더의 임시 파일(`.<이름>.kr_tmp_…`)에 쓰고 되읽기 대조 ·
+  품질 관문까지 지나면 덱 · 보고 차례로 바꿔 넣는다(`CarryStagedFiles` — extract-parts `StagedFiles` 의 사본 · 셋째 소비자가 오면 공용으로).
+  거절 · 실패면 이번 실행의 임시 파일만 지운다 — 앞 파일 · 폴더 · 남의 파일은 안 건드린다. 보고에 `output_written` 을 더했다(파일 목록은 원래
+  싣지 않는다 — 덱 지문 `sha256_out` 은 바꿔 넣은 때만). `stale_output_removed` 는 없앴다. 읽는 파일 대조를 공용 관문 `output_guard::findClash`
+  로 옮기며 **설정 YAML** 이 들었다 — 통합 판(`a62d7d2`)에서 실측: `report: a.yaml` 이 설정을 보고로 덮었고(rc 0) · 설정(c.k)과 같은 output 은
+  쓰기 관문에 걸린 뒤 「옛 산출」로 지워졌고 · 빈 폴더 output 은 rmdir 됐다. 폴더 자리는 output 이면 `output_clobber`, report 면 콘솔 거절.
+  쓰기 관문(`writeOutput` 의 `output_guard`)은 임시 이름을 보므로 output 자리의 겹침은 그 전에 runner 가 묻는다(아무것도 쓰기 전).
 
 ## 리뷰 11-07 고침 — 정한 것
 리뷰(11-07) 결함 11 + 그럴듯한 둘을 고쳤다. 공용 코드(i10 조각의 쓰기 관문 왕복 · 솔리드 · 티쉘 변형의 바닥 · `*ELEMENT_MASS` PID 칸)는 다른 갈래 몫.
@@ -176,4 +186,4 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
 - **StepForge 실제 꼴(결함 11)** — 못 지은 조각은 `{ok, why}` · `{ok, why(null), notes}` · `{ok, 조각 칸, check{why · problems}}` — 까닭은 why → notes.why →
   check.why → check.problems 차례로 `fragment_failed` 에 싣는다. transform 의 `check` 는 선택이다.
 - **그럴듯한 둘** — 돌리면(R ≠ I) `orientation_not_rotated` 경고(재질 축 · 좌표계 · MCID · 초기 응력은 돌리지 않는다). 거절하면 출력 자리의 옛 덱을 지우고
-  `stale_output_removed` 로 적는다.
+  `stale_output_removed` 로 적는다. → 11-07 밤 사용자 결정으로 없앴다(앞 파일은 그대로 · 아래).
