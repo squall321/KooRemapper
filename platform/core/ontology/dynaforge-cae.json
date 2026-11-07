@@ -1,6 +1,6 @@
 {
   "_note": "DynaForge 해석 결과 어휘(그룹 cae) — SP import 꼴. 전각도 낙하·전위치 부분충격·단일 런 후처리 결과를 온톨로지 인스턴스로 싣기 위한 타입·관계(구조·충격해석 개념을 DynaForge 전용 slug cae_ 로 묶었다). 정본은 DynaForge platform/core/ontology/dynaforge-cae.json 이다. 만드는 쪽(KooD3plotReader python/koo_deep_report/koo_deep_report/ontology/dynaforge-cae.json)은 이 파일의 바이트 사본을 싣고 꾸러미 머리 vocabulary.sha256 으로 맞춰 본다 — 고칠 때는 정본을 고치고 `_version` 을 올린 뒤 사본을 바이트 그대로 옮긴다.",
-  "_version": "0.4",
+  "_version": "0.5",
   "groups": [
     {
       "slug": "cae",
@@ -841,7 +841,7 @@
       "nav_group_slug": "cae",
       "icon": "Flame",
       "key_policy": "required",
-      "description": "한 런·한 파트에서 기준량 상위 요소가 모인 덩어리(핫스팟). 키 `<캠페인>/hs/<런 키>/<PID>/<기준>/<요소 종류>/<순위>`. 값은 이 어휘의 단위(MPa·mm·s·mJ·N·N·s·mm/s·G)로 싣는다. 캠페인의 `values_normalized` 가 거짓이면 덱 단위 원값이니 캠페인끼리 견주지 말 것.",
+      "description": "한 런·한 파트에서 기준량 상위 요소가 모인 덩어리(핫스팟). 키 `<캠페인>/hs/<런 키>/<PID>/<기준>/<요소 종류>/<순위>`. 값은 이 어휘의 단위(MPa·mm·s·mJ·N·N·s·mm/s·G·mJ/mm³)로 싣는다. 응력 기준의 값은 stress_* 에, 소성 기준(plastic_strain · plastic_work)의 값은 plastic_strain_*(무차원) · plastic_work_*(mJ/mm³)에 싣는다 — 기준마다 한 쌍만 채운다. 캠페인의 `values_normalized` 가 거짓이면 덱 단위 원값이니 캠페인끼리 견주지 말 것.",
       "properties": [
         {
           "key": "response",
@@ -862,7 +862,9 @@
             "max_shear",
             "x_tension",
             "y_tension",
-            "z_tension"
+            "z_tension",
+            "plastic_strain",
+            "plastic_work"
           ]
         },
         {
@@ -914,13 +916,41 @@
           "key": "stress_mean",
           "label": "평균 응력",
           "data_type": "number",
-          "unit": "MPa"
+          "unit": "MPa",
+          "help": "응력 기준(von_mises · 주응력 · 최대 전단 · 축 인장)일 때만 채운다 — 소성 기준에서는 비운다."
         },
         {
           "key": "stress_max",
           "label": "최대 응력",
           "data_type": "number",
-          "unit": "MPa"
+          "unit": "MPa",
+          "help": "응력 기준일 때만 채운다 — 소성 기준에서는 비운다."
+        },
+        {
+          "key": "plastic_strain_mean",
+          "label": "평균 유효소성변형률",
+          "data_type": "number",
+          "help": "기준이 plastic_strain 일 때만 — 요소별 유효소성변형률 이력 최댓값의 군집 평균(무차원, 셸 계열은 층 평균)."
+        },
+        {
+          "key": "plastic_strain_max",
+          "label": "최대 유효소성변형률",
+          "data_type": "number",
+          "help": "기준이 plastic_strain 일 때만 — 군집 안 최댓값(무차원)."
+        },
+        {
+          "key": "plastic_work_mean",
+          "label": "평균 소성일 밀도",
+          "data_type": "number",
+          "unit": "mJ/mm³",
+          "help": "기준이 plastic_work 일 때만 — 누적 소성일 밀도 w_p = ∫σ_vm dε_p 의 군집 평균."
+        },
+        {
+          "key": "plastic_work_max",
+          "label": "최대 소성일 밀도",
+          "data_type": "number",
+          "unit": "mJ/mm³",
+          "help": "기준이 plastic_work 일 때만 — 군집 안 최댓값."
         },
         {
           "key": "peak_element_id",
