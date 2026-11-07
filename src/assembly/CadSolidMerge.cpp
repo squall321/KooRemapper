@@ -240,9 +240,11 @@ bool ModelAssembler::applyCadSolidMerge(const CadSolidMergeOperation& op) {
     const int fw = deckFieldWidth(rawLines_);
     if (fw == 20) { errorMessage_ = tag + "long 폭 덱은 받지 않는다 — 좌표 칸도 넓어져 조각 글자를 그대로 둘 수 없다"; return false; }
     const long long pidFloor = std::max({maxPartId_, maxSectionId_, maxMaterialId_});
+    // 요소 바닥은 `id_floor` 와 같은 값 — 보 · 이산 · 질량 요소까지 센다(2026-11-07 · `idMaxima`)
+    const long long elemFloor = idMaxima().elem;
     Shift sh;
     if (m.node.used && m.node.lo <= maxNodeId_) sh.node = (long long)maxNodeId_ + 1 - m.node.lo;
-    if (m.elem.used && m.elem.lo <= maxElementId_) sh.elem = (long long)maxElementId_ + 1 - m.elem.lo;
+    if (m.elem.used && m.elem.lo <= elemFloor) sh.elem = elemFloor + 1 - m.elem.lo;
     if (m.pid.used && m.pid.lo <= pidFloor) sh.pid = pidFloor + 1 - m.pid.lo;
     const long long idCap = fw == 8 ? 99999999LL : (long long)std::numeric_limits<int>::max();
     const long long cardCap = (long long)std::numeric_limits<int>::max();

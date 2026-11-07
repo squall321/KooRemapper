@@ -13,6 +13,8 @@
   · 바닥 = assemble 과 같은 커서(인클루드 닫힘까지)의 최대값 + 1 · pid_start 는 PID·SECID·MID 셋의 최대값 위
   · 대응표 `ranges` 의 아래끝이 바닥 이상이면 "above"(rc 0) · 아래면 "below"(rc 1) — 경계값(아래끝 = 바닥)은 above
   · `id_floor` 가 above 라고 한 조각을 넣으면 옮기지 않는다(같은 바닥을 두 op 이 같이 본다)
+  · 요소 바닥은 **모든 족**이다 — 보 · 질량 · 이산 요소의 EID 까지(2026-11-07). 리더(`KFileReader`)는 그 셋을 메시에
+    담지 않아 예전 바닥은 솔리드 · 셸 최대 위였다(11-07 답신이 StepForge 에 「빔 · 이산 · 질량까지 센다」고 했다)
 
 usage: test_id_floor.py <KooRemapper 바이너리>
 """
@@ -58,6 +60,19 @@ def shifted_map(m, dn, de, dp):
         p["node_start"] += dn
         p["elem_start"] += de
     return m
+
+
+def shift_elem_ids(text, de):
+    """조각의 요소 번호(첫 칸 · 8칸)만 de 만큼 옮긴다 — 저쪽이 다른 요소 시작 번호로 쓴 조각의 꼴."""
+    out, sect = [], ""
+    for l in text.splitlines(keepends=True):
+        s = l.strip()
+        if s.startswith("*"):
+            sect = s.upper()
+        elif sect.startswith("*ELEMENT") and s and not s.startswith("$"):
+            l = "%8d" % (int(l[:8]) + de) + l[8:]
+        out.append(l)
+    return "".join(out)
 
 
 def main():
@@ -122,6 +137,28 @@ def main():
         rc, out = run(binary, d, "cad_solid_merge_to_deck", "m.yaml")
         check("C-4 id_floor 가 above 라 한 조각은 삽입이 옮기지 않는다(같은 바닥)", rc == 0 and "옮기지 않았다" in out,
               out[-300:])
+
+        print("[E 바닥은 모든 요소 족을 센다 — 보 · 질량 · 이산 요소의 EID 까지(2026-11-07 · 11-07 답신이 약속했다)]")
+        # 덱의 솔리드 최대 EID 는 2 — 그 위에 보(777) · 질량(888) · 이산(555)을 둔다. 리더는 이 셋을 메시에 담지 않는다
+        aux = ("*ELEMENT_BEAM\n%8d%8d%8d%8d\n*ELEMENT_MASS\n%8d%8d%16s%8d\n*ELEMENT_DISCRETE\n%8d%8d%8d%8d\n*END" % (
+            777, 1, 1, 2, 888, 3, "1.0", 0, 555, 1, 3, 4))
+        write(os.path.join(d, "deck_aux.k"), open(os.path.join(d, "deck.k"), encoding="utf-8").read().replace("*END", aux))
+        write(os.path.join(d, "ea.yaml"), "model: deck_aux.k\noutput: floor_aux.json\n")
+        rc, out = run(binary, d, "id_floor", "ea.yaml")
+        fx = json.load(open(os.path.join(d, "floor_aux.json"), encoding="utf-8")) if rc == 0 else {}
+        check("E-1 elem_start 889 — 질량 888 위(솔리드 · 셸 최대 2 가 아니다) · 절점 바닥은 그대로 13",
+              rc == 0 and fx.get("elem_start") == 889 and fx.get("node_start") == 13, (rc, fx))
+        # 그 바닥 아래(요소 3…)로 쓴 대응표를 넣으면 삽입이 바닥(888) 위로 옮긴다 — id_floor 와 같은 바닥
+        de = 3 - real["ranges"]["elem"][0]
+        lowe = shifted_map(real, 0, de, 0)
+        write(os.path.join(d, "lowe.json"), json.dumps(lowe, ensure_ascii=False, indent=2))
+        write(os.path.join(d, "lowe_frag.k"),
+              shift_elem_ids(open(os.path.join(d, "stepforge_fragment.k"), encoding="utf-8").read(), de))
+        write(os.path.join(d, "em.yaml"), "model: deck_aux.k\noutput: merged_aux\nfragment: lowe_frag.k\nfragment_map: lowe.json\n")
+        rc, out = run(binary, d, "cad_solid_merge_to_deck", "em.yaml")
+        mm = json.load(open(os.path.join(d, "merged_aux_fragment_map.json"), encoding="utf-8")) if rc == 0 else {}
+        check("E-2 cad_solid_merge_to_deck 이 요소를 바닥 888 위(889~)로 옮긴다", rc == 0 and
+              (mm.get("ranges") or {}).get("elem", [0])[0] == 889, (rc, mm.get("ranges"), out[-300:]))
 
         print("[D 잘못된 YAML]")
         write(os.path.join(d, "x.yaml"), "model: deck.k\noutput: x.json\nfragment: stepforge_fragment.k\n")

@@ -52,9 +52,12 @@ public:
     bool applyCadSolidMerge(const CadSolidMergeOperation& op);
     const std::vector<fragment::Map>& mergedMaps() const { return mergedMaps_; }
     // 이 덱(인클루드 닫힘까지 센 커서)의 번호 최대값 — `id_floor` 가 StepForge 조각의 시작 번호로 낸다(요청 때 발행)
+    // ★요소는 **모든 족**을 센다(2026-11-07) — 격자(솔리드 · 셸 · 티쉘)에 더해 보 · 이산 · 질량 · 안전띠 · 플롯 요소와 줄 수를
+    //   모르는 변형까지(`maxAuxElementId_`). 11-07 답신이 StepForge 에 「바닥은 빔 · 이산 · 질량 요소까지 센다」고 했다 —
+    //   `id_floor` · `cad_solid_merge_to_deck` · `apply_carryover_plan` 이 이 값을 본다. 다른 op 의 새 요소 번호(`maxElementId_`)는 그대로다.
     struct IdMaxima { int node = 0, elem = 0, part = 0, section = 0, material = 0, set = 0; };
     IdMaxima idMaxima() const {
-        return {maxNodeId_, maxElementId_, maxPartId_, maxSectionId_, maxMaterialId_, maxSetId_};
+        return {maxNodeId_, std::max(maxElementId_, maxAuxElementId_), maxPartId_, maxSectionId_, maxMaterialId_, maxSetId_};
     }
     bool loadRawOnly(const std::string& filename);
     bool applyReplace(const ReplaceOperation& op, double E, double nu,
@@ -215,6 +218,9 @@ private:
     int maxSectionId_;
     int maxMaterialId_;
     int maxSetId_;       // max *SET_* ID across all set types (SEGMENT, NODE, PART, etc.)
+    // 격자 리더가 메시에 담지 않는 `*ELEMENT_*` 카드(보 · 이산 · 질량 · 안전띠 · 플롯 · 줄 수를 모르는 변형)의 EID 최대값 —
+    // 주 덱과 인클루드 닫힘(`nonGridElementMaxId`). `idMaxima()` 의 바닥에만 든다(새 요소 번호 커서는 `maxElementId_`).
+    int maxAuxElementId_ = 0;
 
     // Counters
     int replacedParts_;

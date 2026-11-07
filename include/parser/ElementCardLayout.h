@@ -14,6 +14,8 @@
 //
 // @lat: [[modules/parser]]
 
+#include <cstddef>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -116,6 +118,28 @@ struct AuxElementCard {
 // 키워드 줄을 푼다. 격자 족(`parseElementKeyword` 가 아는 것)이면 family=NONE 을 돌려준다 —
 // 두 판정기는 **배타적**이다. 모르는 `*ELEMENT_*` 변형도 family=NONE 이다.
 AuxElementCard auxElementCard(const std::string& keywordLine);
+
+// ── 격자 리더가 메시에 담지 않는 `*ELEMENT_*` 카드 ──────────────────────────
+//
+// 왜 있나 (2026-11-07). `KFileReader` 는 격자 족(솔리드 · 셸 · 티쉘)의 지원 변형만 메시에 담는다. 보 · 이산 · 질량 ·
+// 안전띠 · 플롯 요소와 줄 수를 모르는 변형(COMPOSITE · `*ELEMENT_INERTIA` …)은 메시에 없다 — 그래서 번호 바닥이
+// 그 EID 를 몰랐고(11-07 답신은 「바닥은 빔 · 이산 · 질량까지 센다」고 했다), 이월 적용은 그 요소가 쓰는 절점을 몰랐다.
+// 두 소비자(바닥 `nonGridElementMaxId` · 이월 적용의 나눠 쓴 절점)가 이 **한 걸음**을 쓴다.
+//   known  — `auxElementCard` 가 칸 자리를 안다. 카드마다 한 번(Card 1 줄) · EID · PID(없으면 0) · 절점 칸
+//   !known — 칸 자리를 모른다. **데이터 줄마다** 한 번 · 그 줄의 첫 칸을 EID 로 넘치게 센다(바닥은 높아질 뿐 낮아지지 않는다)
+// 빈 줄은 카드 안에서만 카드다(격자 카드와 같은 규칙) · 주석은 건너뛴다.
+struct NonGridElementCard {
+    std::string keyword;        // 대문자 · 접미사 뗌
+    size_t line = 0;            // 그 카드(또는 줄)의 0-기반 줄
+    bool known = false;
+    int eid = 0;
+    int pid = 0;                // known 이고 PID 칸이 있을 때만
+    std::vector<int> nodes;     // known 일 때만 — 양수인 절점 칸
+};
+void forEachNonGridElementCard(const std::vector<std::string>& lines,
+                               const std::function<void(const NonGridElementCard&)>& f);
+// 그 줄들의 격자 밖 요소 EID 최대값(없으면 0) — `ModelAssembler::idMaxima` 의 바닥
+int nonGridElementMaxId(const std::vector<std::string>& lines);
 
 // *SECTION_SOLID 의 ELFORM → 절점 수. 고차 정식이 아니면 0.
 // Vol_I 228671-228677: 23=20절점, 24=27, 25=21, 26=15, 27=20(cubic tet), 28=40, 29=64.

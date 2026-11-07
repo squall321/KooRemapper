@@ -1,6 +1,8 @@
 // *ELEMENT_* 키워드 옵션을 매뉴얼 표대로 카드 줄 수로 바꾸는 판정기 (헤더의 인용 참조)
 #include "parser/ElementCardLayout.h"
 
+#include "parser/DeckScan.h"   // 카드 칸 읽기(cardFields · fieldInt) — 격자 밖 요소 걸음이 쓴다
+
 #include <algorithm>
 #include <cctype>
 #include <vector>
@@ -367,6 +369,68 @@ AuxElementCard auxElementCard(const std::string& keywordLine) {
             break;
     }
     return a;
+}
+
+void forEachNonGridElementCard(const std::vector<std::string>& lines,
+                               const std::function<void(const NonGridElementCard&)>& f) {
+    const int deckFw = deckFieldWidth(lines);
+    bool in = false;            // 격자 리더가 담지 않는 *ELEMENT_ 블록 안
+    AuxElementCard aux;
+    std::string kw;
+    int fw = deckFw;
+    int remaining = 0;          // 칸 자리를 아는 카드의 남은 줄
+    for (size_t i = 0; i < lines.size(); ++i) {
+        const std::string& l = lines[i];
+        const size_t g = l.find_first_not_of(" \t");
+        if (g != std::string::npos && l[g] == '*') {
+            in = false;
+            remaining = 0;
+            const ElementKeywordInfo info = parseElementKeyword(l);
+            if (info.keyword.rfind("*ELEMENT_", 0) != 0) continue;
+            if (info.family != ElemFamily::NONE && info.supported) continue;   // 리더가 메시에 담는다
+            in = true;
+            aux = auxElementCard(l);
+            kw = info.keyword;
+            fw = keywordFieldWidth(l, deckFw);
+            continue;
+        }
+        if (!in) continue;
+        if (g != std::string::npos && l[g] == '$') continue;
+        if (g == std::string::npos && remaining == 0) continue;   // 카드 밖의 빈 줄
+        NonGridElementCard c;
+        c.keyword = kw;
+        c.line = i;
+        if (aux.supported) {
+            if (remaining == 0) {
+                remaining = aux.lines;
+                const auto fs = deckscan::cardFields(l, fw);
+                c.known = true;
+                c.eid = deckscan::fieldInt(fs, 0);
+                c.pid = (aux.hasPart && aux.partField >= 0) ? deckscan::fieldInt(fs, static_cast<size_t>(aux.partField)) : 0;
+                auto take = [&](int from, int cnt) {
+                    if (from < 0) return;
+                    for (int q = 0; q < cnt; ++q) {
+                        const int v = deckscan::fieldInt(fs, static_cast<size_t>(from + q));
+                        if (v > 0) c.nodes.push_back(v);
+                    }
+                };
+                take(aux.nodeSkip, aux.nodeCount);
+                take(aux.nodeSkip2, aux.nodeCount2);
+                f(c);
+            }
+            --remaining;
+            continue;
+        }
+        if (g == std::string::npos) continue;
+        c.eid = deckscan::fieldInt(deckscan::cardFields(l, fw), 0);   // 넘치게 센다 — 바닥은 높아질 뿐이다
+        f(c);
+    }
+}
+
+int nonGridElementMaxId(const std::vector<std::string>& lines) {
+    int m = 0;
+    forEachNonGridElementCard(lines, [&](const NonGridElementCard& c) { m = std::max(m, c.eid); });
+    return m;
 }
 
 }  // namespace KooRemapper
