@@ -641,6 +641,19 @@ struct Writer {
     std::set<std::string> visited;
     std::vector<std::string> missingIncludes;
     bool failed = false;
+    // 번호를 다시 매길 줄이 콤마 자유형식이면 제자리에 쓸 열이 없다 — 「파일:줄 키워드」 를 적고 쓰지 않는다(패스 2 뒤 거절 · 산출을
+    // 지운다). 예전엔 칸 차례 × 폭 자리에 덮어써 「       1102,103,       1 …」 같은 깨진 줄을 냈고 되읽기도 통과했다(2026-11-07 검토 #7)
+    std::vector<std::string> commaLines;
+    long long commaCount = 0;
+    const std::string* curPath = nullptr;
+    size_t curLine = 0;
+
+    bool commaRefuse(const std::string& line) {
+        if (!rm.on || line.find(',') == std::string::npos) return false;
+        if (commaLines.size() < 50) commaLines.push_back((curPath ? *curPath : std::string()) + ":" + std::to_string(curLine) + " " + kw);
+        ++commaCount;
+        return true;
+    }
 
     // 현재 블록 상태
     std::string kw, kwLine;
@@ -833,6 +846,7 @@ struct Writer {
                 if (!readNodeLine(line, fw, nid, xyz)) break;
                 if (!inSorted(pk.nodes, nid)) break;
                 std::string o2 = line;
+                if (commaRefuse(line)) break;
                 if (rm.on && !putField(o2, fw, 0, rm.node(nid))) {
                     console.error("renumber: 새 절점 번호가 칸 폭 " + std::to_string(fw) +
                                   " 를 넘는다 (NID " + std::to_string(nid) + ")");
@@ -860,7 +874,10 @@ struct Writer {
                 }
                 if (picked) {
                     std::string o2 = line;
-                    if (rm.on) {
+                    const bool renumLine = lineIdx == 0 || (lineIdx >= span.nodeFirst && lineIdx < span.nodeFirst + span.nodeLines);
+                    if (renumLine && commaRefuse(line)) {
+                        // 적었다 — 번호를 바꾸지 않고 둔다(패스 2 뒤 거절 · 산출을 지운다)
+                    } else if (rm.on) {
                         if (lineIdx == 0) {
                             int eid = fieldInt(card1, 0);
                             if (eid > 0 && !putField(o2, fw, 0, rm.elem(eid))) {
@@ -995,6 +1012,7 @@ struct Writer {
                     }
                     if (!all) break;
                     std::string o2 = line;
+                    if (commaRefuse(line)) break;
                     if (rm.on)
                         for (size_t q = 0; q < 4; ++q) {
                             int v = fieldInt(f, q);
@@ -1007,6 +1025,7 @@ struct Writer {
                     int v = fieldInt(f, 0);
                     if (v <= 0 || !inSorted(pk.nodes, v)) break;
                     std::string o2 = line;
+                    if (commaRefuse(line)) break;
                     if (rm.on) putField(o2, sfw, 0, rm.node(v));
                     *out << o2 << "\n";
                     break;
@@ -1037,8 +1056,11 @@ struct Writer {
         act = Act::VERBATIM;
         kw.clear();
         std::string line;
+        size_t ln = 0;
         while (std::getline(in, line)) {
             while (!line.empty() && line.back() == '\r') line.pop_back();
+            curPath = &path;       // 인클루드를 펼치고 돌아오면 다음 줄에서 다시 맞춘다
+            curLine = ++ln;
             size_t g = line.find_first_not_of(" \t");
             if (g != std::string::npos && line[g] == '*') {
                 // 인클루드 안의 `*KEYWORD`·`*END` 는 펼친 덱에 두 번 나오면 안 된다.
@@ -1073,9 +1095,24 @@ struct Writer {
 // 정수로 보이면 ID 로 섞인다. 과포함은 '없다고 거짓 경보' 를 줄이는 쪽이고, ID 블록을 통째로
 // 싣는 이 op 에서는 정말 빠진 ID 가 숨지 않는다(그 블록 자체가 안 실린다).
 
+// 칸이 깨진 콤마 줄 — 콤마로 가른 칸 안에 공백이 낀다(번호를 콤마 줄의 칸 차례 × 폭 자리에 덮어쓴 꼴 「       1102,103,       1 …」).
+// 되읽기가 절점 · 요소 · 세트 멤버로 읽는 줄만 본다(제목 · 곡선 줄은 보지 않는다)
+bool malformedCommaLine(const std::string& line) {
+    if (line.find(',') == std::string::npos) return false;
+    std::string tok;
+    auto bad = [](const std::string& t) { return trim(t).find_first_of(" \t") != std::string::npos; };
+    for (char c : line) {
+        if (c == ',') { if (bad(tok)) return true; tok.clear(); }
+        else tok += c;
+    }
+    return bad(tok);
+}
+
 struct Verify {
     long long undefNodes = 0, undefParts = 0, undefSections = 0, undefMaterials = 0;
     int firstBadNode = 0, firstBadPart = 0;
+    long long malformed = 0;          // 칸이 깨진 콤마 줄(`malformedCommaLine`)
+    std::string firstMalformed;       // 그 첫 줄 「줄 번호: 내용」
 };
 
 // `altExisting` — 보 족 줄의 다른 읽기만 말하는 절점 가운데 입력 덱에 있던 것(정렬). 그것은 산출에도 있어야 한다(둘 다 남겼다).
@@ -1099,8 +1136,14 @@ Verify verifyOutput(const std::string& path, const std::vector<int>& altExisting
     //   "되읽어 증명한다" 가 거짓이 된다.
     KooRemapper::AuxElementCard vaux;
     int vAuxRemaining = 0, vAuxLineIdx = 0;
+    size_t vln = 0;
+    auto malformed = [&](const std::string& l) {
+        if (!malformedCommaLine(l)) return;
+        if (v.malformed++ == 0) v.firstMalformed = std::to_string(vln) + ": " + l;
+    };
     while (std::getline(in, line)) {
         while (!line.empty() && line.back() == '\r') line.pop_back();
+        ++vln;
         size_t g = line.find_first_not_of(" \t");
         if (g != std::string::npos && line[g] == '*') {
             kw = kwBare(keywordToken(line));
@@ -1121,6 +1164,7 @@ Verify verifyOutput(const std::string& path, const std::vector<int>& altExisting
             if (g == std::string::npos && vAuxRemaining == 0) continue;
             if (vAuxRemaining == 0) { vAuxLineIdx = 0; vAuxRemaining = vaux.lines; }
             if (vAuxLineIdx == 0) {
+                malformed(line);
                 const auto rd = KooRemapper::auxCardReadings(vaux, line, fw);
                 const auto& f = KooRemapper::auxPrimaryFields(rd);
                 if (vaux.partField >= 0 && !vaux.partIsSet) {   // `_MASS_PART_SET` 의 칸 0 은 파트 세트 ID 다
@@ -1150,6 +1194,7 @@ Verify verifyOutput(const std::string& path, const std::vector<int>& altExisting
                 lineIdx = 0;
                 remaining = span.lines;
             }
+            if (lineIdx == 0 || (lineIdx >= span.nodeFirst && lineIdx < span.nodeFirst + span.nodeLines)) malformed(line);
             if (lineIdx >= span.nodeFirst && lineIdx < span.nodeFirst + span.nodeLines) {
                 const std::vector<std::string> f = (lineIdx == 0) ? card1 : cardFields(line, fw);
                 size_t from = (lineIdx == span.nodeFirst) ? (size_t)span.nodeFieldSkip : 0u;
@@ -1164,6 +1209,7 @@ Verify verifyOutput(const std::string& path, const std::vector<int>& altExisting
         }
         if (!isDataLine(line)) continue;
         if (kw == "*NODE") {
+            malformed(line);
             int nid = 0;
             double xyz[3];
             if (readNodeLine(line, fw, nid, xyz)) nodes.push_back(nid);
@@ -1177,6 +1223,7 @@ Verify verifyOutput(const std::string& path, const std::vector<int>& altExisting
             const int sfw = (fw >= 20) ? 20 : 10;
             const int tn = titleLines(kw);
             if (dataIdx > tn) {
+                malformed(line);
                 auto f = cardFields(line, sfw);
                 size_t lim = (KooRemapper::deckscan::classifySetNode(kw) ==
                               KooRemapper::deckscan::SetKind::COLUMN) ? 1u : f.size();
@@ -1191,6 +1238,7 @@ Verify verifyOutput(const std::string& path, const std::vector<int>& altExisting
             const int sfw = (fw >= 20) ? 20 : 10;
             const int tn = titleLines(kw);
             if (dataIdx > tn) {
+                malformed(line);
                 auto f = cardFields(line, sfw);
                 for (size_t q = 0; q < 4 && q < f.size(); ++q) {
                     int x = fieldInt(f, q);
@@ -1592,6 +1640,16 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
         wr.out = &w.stream();
         wr.processFile(o.model, 0);
         w.close();
+        if (!wr.commaLines.empty()) {
+            std::remove(o.output.c_str());
+            console.error("renumber: 콤마 자유형식 줄 " + std::to_string(wr.commaCount) + " 장은 칸 자리가 없어 번호를 제자리에 바꿔 쓸 수 "
+                          "없다 — 거절한다");
+            for (const auto& l : wr.commaLines) console.println("  " + l);
+            if (wr.commaCount > (long long)wr.commaLines.size())
+                console.println("  … 외 " + std::to_string(wr.commaCount - (long long)wr.commaLines.size()) + " 장");
+            console.info("renumber: false 면 그 줄을 그대로 싣는다 · 고정폭으로 고쳐 쓰면 번호를 매길 수 있다");
+            return 1;
+        }
         // 쓰다 멈춘 덱(번호를 다 못 바꾼 줄이 남는다)을 디스크에 남기지 않는다 — 그럴듯하게 읽히는 틀린 덱이다
         if (wr.failed) { std::remove(o.output.c_str()); return 1; }
         if (!wr.missingIncludes.empty()) {
@@ -1670,16 +1728,18 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
         // 거절했고, 남은 것은 설명서 꼴 줄을 정수 폭으로 읽은 넘친 몫이다)
         vf = verifyOutput(o.output, rm.on ? std::vector<int>() : altExisting);
         const bool ok = (vf.undefNodes == 0 && vf.undefParts == 0 &&
-                         vf.undefSections == 0 && vf.undefMaterials == 0);
+                         vf.undefSections == 0 && vf.undefMaterials == 0 && vf.malformed == 0);
         if (ok)
             console.success("verify: 산출 덱의 미정의 참조 0 (절점·파트·섹션·재질 전수)");
         else {
             console.error("verify: 미정의 절점 " + std::to_string(vf.undefNodes) +
                           " · 파트 " + std::to_string(vf.undefParts) +
                           " · 섹션 " + std::to_string(vf.undefSections) +
-                          " · 재질 " + std::to_string(vf.undefMaterials));
+                          " · 재질 " + std::to_string(vf.undefMaterials) +
+                          (vf.malformed ? " · 칸이 깨진 콤마 줄 " + std::to_string(vf.malformed) : std::string()));
             if (vf.firstBadNode) console.error("  첫 미정의 절점 NID " + std::to_string(vf.firstBadNode));
             if (vf.firstBadPart) console.error("  첫 미정의 파트 PID " + std::to_string(vf.firstBadPart));
+            if (vf.malformed) console.error("  첫 깨진 콤마 줄 — " + vf.firstMalformed);
         }
     }
 
@@ -1730,14 +1790,15 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
            << (o.verify ? "{\"undefined_nodes\": " + std::to_string(vf.undefNodes) +
                           ", \"undefined_parts\": " + std::to_string(vf.undefParts) +
                           ", \"undefined_sections\": " + std::to_string(vf.undefSections) +
-                          ", \"undefined_materials\": " + std::to_string(vf.undefMaterials) + "}"
+                          ", \"undefined_materials\": " + std::to_string(vf.undefMaterials) +
+                          ", \"malformed_comma_lines\": " + std::to_string(vf.malformed) + "}"
                         : "null")
            << "\n}\n";
         jf.close();
         console.info("report: " + o.reportPath);
     }
 
-    if (o.verify && (vf.undefNodes || vf.undefParts || vf.undefSections || vf.undefMaterials))
+    if (o.verify && (vf.undefNodes || vf.undefParts || vf.undefSections || vf.undefMaterials || vf.malformed))
         return 1;
     return 0;
 }

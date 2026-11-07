@@ -16,6 +16,8 @@
       요소가 **하나도 없는** 덱이 조용히 나온다(B 절).
     · 우리가 줄 수를 모르는 `*ELEMENT_*` 변형 — 고른 파트의 요소를 담고 있으면 **거절**해야
       한다. 빠뜨린 덱은 그럴듯하게 돌면서 틀린다(J 절).
+    · 콤마 자유형식 줄의 번호 다시 매기기 — 칸 차례 × 폭 자리에 덮어써 깨진 줄을 냈고 되읽기도 통과했다.
+      이제 줄을 대고 거절하며(산출 없음) 되읽기도 칸이 깨진 콤마 줄을 센다(O 절 · 2026-11-07 검토 #7).
 
 usage: test_extract_parts.py <KooRemapper 바이너리>
 """
@@ -122,7 +124,8 @@ def main():
         r = rep(d)
         check("A-1 ★되읽기 검증 — 미정의 참조 0 (절점·파트·섹션·재질 전수)",
               r["verify"] == {"undefined_nodes": 0, "undefined_parts": 0,
-                              "undefined_sections": 0, "undefined_materials": 0}, r["verify"])
+                              "undefined_sections": 0, "undefined_materials": 0,
+                              "malformed_comma_lines": 0}, r["verify"])
         check("A-2 고른 파트의 요소 카드 2개", r["picked"]["element_cards"] == 2, r["picked"])
         check("A-3 그 요소가 쓰는 절점 16개만", r["picked"]["nodes"] == 16, r["picked"])
         check("A-4 쓴 *NODE 줄도 16개 (아무도 안 쓰는 999 는 안 간다)",
@@ -489,6 +492,53 @@ def main():
         check("N-9 그때 리포트 칸은 비어 있다",
               rep(d, "repn2.json")["dropped_initial_state"] == {},
               rep(d, "repn2.json")["dropped_initial_state"])
+
+        # ── O: ★renumber 는 콤마 줄을 제자리에 못 바꾼다 — 줄을 대고 거절 · 되읽기도 깨진 콤마 줄을 센다 ──
+        def odeck(shell, node_extra=(), sets=()):
+            L = ["*KEYWORD", "*NODE"] + [nl(i, float(i), 0.0, 0.0) for i in (1, 2, 3, 4)] + list(node_extra)
+            L += ["*ELEMENT_SHELL"] + list(shell)
+            L += ["*PART", "sh", s10(9, 9, 9), "*SECTION_SHELL", s10(9, 2), "       1.0",
+                  "*MAT_ELASTIC", "         9  7.85E-9  210000     0.3"] + list(sets) + ["*END"]
+            return "\n".join(L) + "\n"
+        fixed = e8(1, 9, 1, 2, 3, 4)
+        ocases = (("O-1", odeck(["7,9,1,2,3,4"]), "*ELEMENT_SHELL", 1, "셸 콤마 줄"),
+                  ("O-2", odeck([fixed, "8,9,1,2,3,4"]), "*ELEMENT_SHELL", 1, "고정폭 줄 뒤의 셸 콤마 줄(검토 재현 — 되읽기도 통과했다)"),
+                  ("O-3", odeck([fixed], node_extra=["5,5.0,0.0,0.0"], sets=["*SET_NODE_LIST", s10(40), s10(5)]) .replace(
+                      e8(1, 9, 1, 2, 3, 4), e8(1, 9, 1, 2, 3, 5)), "*NODE", 1, "*NODE 콤마 줄"),
+                  ("O-4", odeck([fixed], sets=["*SET_SEGMENT", s10(800), "1,2,3,4"]), "*SET_SEGMENT", 1, "*SET_SEGMENT 콤마 줄"),
+                  ("O-5", odeck([fixed], sets=["*SET_NODE_COLUMN", s10(801), "1,0.0", "2,0.0"]), "*SET_NODE_COLUMN", 2,
+                   "*SET_NODE_COLUMN 콤마 줄 둘"))
+        for tag, deck, kwname, n, what in ocases:
+            write(os.path.join(d, tag + ".k"), deck)
+            cfg(d, tag + ".yaml", "model: %s.k\noutput: %s_out.k\nparts: [9]\nrenumber: true\n" % (tag, tag))
+            rc, out = run(binary, d, "extract-parts", tag + ".yaml")
+            lines = [i + 1 for i, l in enumerate(deck.split("\n")) if "," in l]
+            listed = [ln for ln in lines if ("%s.k:%d %s" % (tag, ln, kwname)) in out]
+            check("%s ★renumber — %s → rc 1 · 줄 %d 장을 댄다 · 산출 없음" % (tag, what, n),
+                  rc == 1 and len(listed) == n and not os.path.exists(os.path.join(d, tag + "_out.k")) and
+                  not os.path.exists(os.path.join(d, tag + "_out_renumber_map.json")), (rc, listed, out[-400:]))
+        # 솔리드 — Card 1(EID PID)과 절점 줄 둘 다 번호를 바꾼다
+        sdeck = base_deck().replace(e8(1, 1) + "\n" + e8(*range(1, 9)), "1,1\n1,2,3,4,5,6,7,8")
+        write(os.path.join(d, "O6.k"), sdeck)
+        write(os.path.join(d, "inc_part2.k"), INC)
+        cfg(d, "O6.yaml", "model: O6.k\noutput: O6_out.k\nparts: [1]\nrenumber: true\n")
+        rc, out = run(binary, d, "extract-parts", "O6.yaml")
+        check("O-6 ★renumber — 솔리드 콤마 카드(Card 1 · 절점 줄) → rc 1 · 두 줄을 댄다",
+              rc == 1 and out.count("O6.k:") == 2 and not os.path.exists(os.path.join(d, "O6_out.k")), (rc, out[-400:]))
+        # renumber 없이는 콤마 줄을 그대로 싣는다
+        cfg(d, "O7.yaml", "model: O-2.k\noutput: O7_out.k\nparts: [9]\nreport: O7.json\n")
+        rc, out = run(binary, d, "extract-parts", "O7.yaml")
+        r7 = rep(d, "O7.json") if rc == 0 else {}
+        check("O-7 renumber 없이는 콤마 줄도 그대로 싣는다 · 되읽기 0",
+              rc == 0 and "8,9,1,2,3,4" in open(os.path.join(d, "O7_out.k")).read() and
+              (r7.get("verify") or {}).get("malformed_comma_lines") == 0, (rc, out[-300:]))
+        # 되읽기 — 칸이 깨진 콤마 줄(콤마로 가른 칸 안에 공백)을 센다 · rc 1
+        write(os.path.join(d, "O8.k"), odeck([fixed, "8,9,1 2,3,4"]))
+        cfg(d, "O8.yaml", "model: O8.k\noutput: O8_out.k\nparts: [9]\nreport: O8.json\n")
+        rc, out = run(binary, d, "extract-parts", "O8.yaml")
+        r8 = rep(d, "O8.json") if os.path.exists(os.path.join(d, "O8.json")) else {}
+        check("O-8 ★되읽기가 칸이 깨진 콤마 줄(「8,9,1 2,3,4」)을 센다 → rc 1",
+              rc == 1 and (r8.get("verify") or {}).get("malformed_comma_lines") == 1 and "깨진 콤마" in out, (rc, r8.get("verify"), out[-300:]))
     finally:
         shutil.rmtree(d, ignore_errors=True)
 
