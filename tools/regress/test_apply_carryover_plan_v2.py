@@ -20,7 +20,8 @@
   A 실물 둘(바깥 덱 fc160119a36e · 메시 덱 f8ff42845904) · B 진리값 판을 판 2 로 · C 칸 표(판마다) · D 덱 자리 ·
   E 새 셸 섹션(§10.5) · F 인클루드(주 덱만 고침) · G refused_transform ·
   R 적대적 검토(11-07 저녁) 고침 — R-1 쌓인 카드 SECID · R-2 인클루드 BOM · R-3 동반 파일 덮기 · R-4 보고 UTF-8 · R-5 링크 덱 폴더 ·
-  R-6 *END 둘 · R-7 수의 끝자리 · R-8 담은 뒤 바뀐 덱(gdb 로 적용 직전에 멈춰 파일을 바꾼다 — 못 멈추면 SKIP)
+  R-6 *END 둘 · R-7 수의 끝자리 · R-8 담은 뒤 바뀐 덱(gdb 로 적용 직전에 멈춰 파일을 바꾼다 — 못 멈추면 SKIP) ·
+  S StepForge 권고(그쪽 591d5b5 · D-681) — S-2 정수 칸의 실수 꼴
 
 usage: test_apply_carryover_plan_v2.py <KooRemapper 바이너리>
 """
@@ -122,9 +123,14 @@ def warn_kinds(rep):
     return {(w.get("pid"), w["kind"]) for w in rep.get("warnings", [])}
 
 
+def tmp_left(d):
+    """이번 실행이 남긴 임시 파일(`.<이름>.kr_tmp_…`) — 거절 · 성공 어느 쪽이든 남으면 안 된다."""
+    return sorted(n for n in os.listdir(d) if n.startswith(".") and ".kr_tmp_" in n)
+
+
 def refused(name, rc, out, rep, d, kind, pid=None, out_name="deck_applied.k"):
-    ok = (rc == 1 and rep.get("ok") is False and kind in kinds(rep, pid) and
-          not os.path.exists(os.path.join(d, out_name)) and rep.get("deck", {}).get("sha256_out") is None)
+    ok = (rc == 1 and rep.get("ok") is False and rep.get("output_written") is False and kind in kinds(rep, pid) and
+          not os.path.exists(os.path.join(d, out_name)) and rep.get("deck", {}).get("sha256_out") is None and not tmp_left(d))
     return check(name, ok, (rc, sorted(kinds(rep)), out[-500:]))
 
 
@@ -390,6 +396,7 @@ def main():
         part_r6(binary)
         part_r7(binary)
         part_r8(binary)
+        part_s(binary)
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
     print()
@@ -970,6 +977,33 @@ def part_r8(binary):
     check("R-8b 인클루드 파일이 담은 뒤 바뀌었다 → deck_changed(inc/part8.k) · 덱을 쓰지 않는다",
           rep.get("ok") is False and "inc/part8.k" in details(rep, "deck_changed") and
           not os.path.exists(os.path.join(d, "deck_applied.k")), (rep.get("ok"), sorted(kinds(rep)), out[-300:]))
+
+
+
+def part_s(binary):
+    print("[S StepForge 권고(D-681 · 사용자 결정 11-07 밤) — LS-DYNA 가 덱을 읽는 꼴로]")
+    # S-2 정수 칸의 실수 꼴 — NIP `5.000e+00` 은 5(LS-DYNA 실행 기록) · 새 셸 섹션 카드의 줄 셈(shellSectionRows)이 받는다
+    for tag, nip, ok in (("s2", "5.000e+00", True), ("s2b", "2.500e+00", False)):
+        d = stage(tag)
+        deck = os.path.join(d, "deck.k")
+        body = read(deck)
+        old1 = "         4         2         1         2\n"
+        assert body.count(old1) == 1
+        write(deck, body.replace(old1, "         4         2         1 %s\n" % nip))
+        p = to_v2(d)
+        write(os.path.join(d, "section_4.k"), SECTION_4.replace("        10         2         1         2\n",
+                                                                "        10         2         1 %s\n" % nip))
+        can_morph(d, p, {"secid": 10, "thickness": 0.6, "file": "section_4.k", "why": "0.4 → 0.6"})
+        put_file(d, p, "section_4.k")
+        resummarize(p)
+        plan_save(d, p)
+        rc, out, rep = apply_case(binary, d)
+        if ok:
+            body = read(os.path.join(d, "deck_applied.k")) if rc == 0 else ""
+            check("S-2 NIP 가 실수 꼴 정수(5.000e+00) → 그 정수로 읽어 받는다 · 새 카드가 글자 그대로 들어갔다",
+                  rc == 0 and "        10         2         1 5.000e+00\n" in body, (rc, sorted(kinds(rep)), out[-300:]))
+        else:
+            refused("S-2b NIP 가 정수가 아닌 실수(2.500e+00) → 그대로 거절(new_section)", rc, out, rep, d, "new_section")
 
 
 if __name__ == "__main__":

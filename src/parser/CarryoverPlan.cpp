@@ -670,6 +670,16 @@ bool parseReal(const std::string& s, double& v) {
     return end == t.c_str() + t.size() && std::isfinite(v);
 }
 
+// 정수 칸 — 정수 글자이거나, 실수 꼴로 쓴 **정수 값**(NIP `5.000e+00`)이면 그 정수다. LS-DYNA 실행 기록이 NIP `3.000E+00` 을 3 으로
+// 받는다(StepForge 권고 591d5b5 · D-681 — 그쪽 말뭉치 52 덱 · 사용자 결정 11-07 밤). 정수가 아닌 값(`2.5`)은 그대로 거절한다
+bool parseIntegral(const std::string& s, long long& v) {
+    if (parseLL(s, v)) return true;
+    double d = 0;
+    if (!parseReal(s, d) || d != std::floor(d) || std::fabs(d) > 9007199254740992.0) return false;
+    v = static_cast<long long>(d);
+    return true;
+}
+
 std::string padInt(long long v, int w) {
     char buf[32];
     std::snprintf(buf, sizeof(buf), "%*lld", w, v);
@@ -1267,9 +1277,10 @@ bool shellSectionRows(const std::vector<std::string>& block, size_t& row1, size_
         }
     const auto f = cardcut::cut(block[row1], 10).f;
     long long elform = 0, nip = 0, icomp = 0;
-    if (f.size() > 1 && !deckscan::trim(f[1]).empty() && !parseLL(f[1], elform)) { why = "Card 1 의 ELFORM 이 정수가 아니다"; return false; }
-    if (f.size() > 3 && !parseLL(f[3], nip)) { why = "Card 1 의 NIP 가 정수가 아니다"; return false; }
-    if (f.size() > 6 && !parseLL(f[6], icomp)) { why = "Card 1 의 ICOMP 가 정수가 아니다"; return false; }
+    // 정수 칸의 실수 꼴(`5.000e+00`)은 그 정수로 읽는다(`parseIntegral` — 예전엔 거절했다) · 정수가 아닌 값은 거절
+    if (f.size() > 1 && !deckscan::trim(f[1]).empty() && !parseIntegral(f[1], elform)) { why = "Card 1 의 ELFORM 이 정수가 아니다"; return false; }
+    if (f.size() > 3 && !parseIntegral(f[3], nip)) { why = "Card 1 의 NIP 가 정수가 아니다"; return false; }
+    if (f.size() > 6 && !parseIntegral(f[6], icomp)) { why = "Card 1 의 ICOMP 가 정수가 아니다"; return false; }
     // 딸린 카드(Vol_I *SECTION_SHELL) — ICOMP 1 이면 각도 카드 ceil(NIP/8)(NIP 0 = 2 점) · ELFORM 101~105 는 사용자 정의 셸의
     // 카드 묶음(NIPP · 적분점 · 성질 카드)이 따라온다 — 그 줄 수는 그 카드의 값이 정해 여기서는 받지 않는다
     if (elform >= 101 && elform <= 105) { why = "사용자 정의 셸(ELFORM " + std::to_string(elform) + ")의 딸린 카드는 계약 밖이다"; return false; }
@@ -1336,8 +1347,8 @@ bool scanSectionFile(const std::vector<std::string>& in, SectionFileScan& s, std
         return false;
     }
     const auto c1 = cardcut::cut(s.block[s.row1], 10).f;
-    if (c1.empty() || !parseLL(c1[0], s.secid) || s.secid <= 0) bad(sk + s.row1, "Card 1 의 SECID 를 읽지 못했다");
-    if (c1.size() > 1) parseLL(c1[1], s.elform);
+    if (c1.empty() || !parseLL(c1[0], s.secid) || s.secid <= 0) bad(sk + s.row1, "Card 1 의 SECID 를 읽지 못했다");   // ID 칸은 정수 글자만
+    if (c1.size() > 1) parseIntegral(c1[1], s.elform);
     const auto c2 = cardcut::cut(s.block[s.row2], 10).f;
     for (size_t k = 0; k < 4; ++k)
         if (k >= c2.size() || !parseReal(c2[k], s.t[k])) {
@@ -1396,6 +1407,7 @@ bool bytesGiveLines(const std::string& bytes, const std::vector<std::string>& li
 std::string toJson(const Report& r) {
     std::ostringstream o;
     o << "{\n  \"format\": \"dynaforge-carryover-apply\",\n  \"version\": 1,\n  \"ok\": " << (r.ok ? "true" : "false") << ",\n";
+    o << "  \"output_written\": " << (r.outputWritten ? "true" : "false") << ",\n";
     o << "  \"plan\": {\"sha256\": " << (r.planRead ? q(r.planSha256) : "null")
       << ", \"version\": " << (r.planParsed ? std::to_string(r.planVersion) : "null")
       << ", \"report_key\": " << (r.planParsed ? q(r.reportKey) : "null")

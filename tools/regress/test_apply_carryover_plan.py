@@ -13,14 +13,18 @@
   · transform — BRACKET 은 x + 2 · 손대지 않은 파트의 절점 줄은 좌표 글자가 그대로다
   · remesh — 조각의 절점 · 요소가 그 번호 · 그 좌표 글자로 들어가고 옛 요소는 없다 · 새 섹션(SECID 9 · ELFORM 10)을 *PART 가 가리킨다
   · delete — 요소 · *PART 가 없고 *SECTION · *MAT 은 남는다(mesh12 의 새 파트가 지운 PID 의 SECID · MID 를 가리킨다)
-  · 거절 — rc 1 · 보고 ok false · 그 갈래(kind)가 있다 · 산출 덱이 없다 · 다른 줄도 적용하지 않았다
+  · 거절 — rc 1 · 보고 ok false · output_written false · 그 갈래(kind)가 있다 · 산출 덱이 없다 · 임시 파일이 남지 않는다 ·
+    다른 줄도 적용하지 않았다
   · 개행 — CRLF 덱은 CRLF 로 나간다 · CRLF 로 바뀐 조각은 값 대조로 받고 경고한다
 
 무엇을 보나.
   A 진리값 판(examples/apply_carryover_plan) · B 12 파트 덱(mesh12) · C 거절 · D 개행 · E YAML · F 바닥(보 요소) · G 품질 관문
   H 덱이 숨긴 것(리뷰 11-07) — 리더가 담지 않는 요소 블록 · 정본 밖 참조 · 풀 수 없는 세트 · EID 겹침 · *END 없음
   I 계획의 실제 꼴(리뷰 11-07) — 돌린 강체의 반올림 · 셸 회전 · 셸 새 섹션 T1 · 못 지은 조각 · check 없는 transform · 이름 주입
-  J 산출 자리(리뷰 11-07) — 확장자가 아닌 몫으로 가른 동반 파일 · 거절하면 옛 산출을 지운다
+  J 산출 자리(리뷰 11-07) — 확장자가 아닌 몫으로 가른 동반 파일 · 거절해도 앞 산출은 그대로다(11-07 밤)
+  K 출력 규칙(사용자 결정 11-07 밤) — 임시 파일 + 바꿔 넣기 · 거절 · 실패면 앞 파일 그대로 · 설정 YAML · 폴더는 쓰지도 지우지도 않는다
+  L StepForge 권고 넷(그쪽 591d5b5 · D-681 — 사용자 결정 11-07 밤) — 요소 _TITLE 블록 · 정수 칸의 실수 꼴 · 열 재질 MID · 두 번 정의된 SECID · MID
+    · L-5 보 _ELBOW · _WARPAGE 를 다른 보처럼(공용 걸음이 MN · SN1 · SN2 를 읽는다)
 
 usage: test_apply_carryover_plan.py <KooRemapper 바이너리>
 """
@@ -160,9 +164,14 @@ def kinds(rep, pid=None):
     return {p["kind"] for p in rep.get("problems", []) if pid is None or p.get("pid") == pid}
 
 
+def tmp_left(d):
+    """이번 실행이 남긴 임시 파일(`.<이름>.kr_tmp_…`) — 거절 · 성공 어느 쪽이든 남으면 안 된다."""
+    return sorted(n for n in os.listdir(d) if n.startswith(".") and ".kr_tmp_" in n)
+
+
 def refused(name, rc, out, rep, d, kind, pid=None, out_name="deck_applied.k"):
-    ok = (rc == 1 and rep.get("ok") is False and kind in kinds(rep, pid) and
-          not os.path.exists(os.path.join(d, out_name)) and rep.get("deck", {}).get("sha256_out") is None)
+    ok = (rc == 1 and rep.get("ok") is False and rep.get("output_written") is False and kind in kinds(rep, pid) and
+          not os.path.exists(os.path.join(d, out_name)) and rep.get("deck", {}).get("sha256_out") is None and not tmp_left(d))
     return check(name, ok, (rc, sorted(kinds(rep)), out[-400:]))
 
 
@@ -201,6 +210,8 @@ def main():
         part_h(binary)
         part_i(binary)
         part_j(binary)
+        part_k(binary)
+        part_l(binary)
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
     print()
@@ -645,9 +656,9 @@ def part_h(binary):
     rc, out, rep = apply_case(binary, d)
     det = details(rep, "opaque_elements")
     refused("H-2 옮기기 하나만 있어도 거절 → opaque_elements", rc, out, rep, d, "opaque_elements")
-    check("H-2b 키워드 넷(ORTHO · TSHELL_BETA · H8TOH20 · BEAM_WARPAGE)을 모두 말한다",
-          all(k + "(줄 " in det for k in ("*ELEMENT_SOLID_ORTHO", "*ELEMENT_TSHELL_BETA", "*ELEMENT_SOLID_H8TOH20",
-                                           "*ELEMENT_BEAM_WARPAGE")), det[:500])
+    check("H-2b 키워드 셋(ORTHO · TSHELL_BETA · H8TOH20)을 모두 말하고 BEAM_WARPAGE 는 말하지 않는다(SN 까지 읽는다 · 11-07 밤)",
+          all(k + "(줄 " in det for k in ("*ELEMENT_SOLID_ORTHO", "*ELEMENT_TSHELL_BETA", "*ELEMENT_SOLID_H8TOH20")) and
+          "*ELEMENT_BEAM_WARPAGE" not in det, det[:500])
     d = stage(EX, "h2c")
     add_before_end(d, "*ELEMENT_MASS_PART\n%8d%16.6e%16.6e\n" % (7, 0.001, 0.0))   # 절점 칸이 없다(ID ADDMASS FINMASS …)
     rc, out, rep = apply_case(binary, d)
@@ -876,14 +887,169 @@ def part_j(binary):
           rc == 0 and "file_mismatch_unused" in {x["kind"] for x in rep.get("warnings", [])}, (rc, sorted(kinds(rep))))
 
     d = stage(EX, "j3")
-    write(os.path.join(d, "deck_applied.k"), "*KEYWORD\n$ 앞선 실행이 남긴 덱\n*END\n")
+    old = "*KEYWORD\n$ 앞선 실행이 남긴 덱\n*END\n"
+    write(os.path.join(d, "deck_applied.k"), old)
     p = plan_load(d)
     p["deck"]["sha256"] = "0" * 64
     plan_save(d, p)
     rc, out, rep = apply_case(binary, d)
-    refused("J-3 거절하면 출력 자리의 옛 덱을 지운다(ok false 보고 옆에 남지 않게)", rc, out, rep, d, "deck_sha")
-    check("J-3b 보고가 그것을 말한다(stale_output_removed)", "stale_output_removed" in {x["kind"] for x in rep.get("warnings", [])},
+    check("J-3 거절해도 출력 자리의 앞 파일은 그대로다(사용자 결정 11-07 밤 — extract-parts 와 같은 규칙) · ok false · output_written false",
+          rc == 1 and rep.get("ok") is False and rep.get("output_written") is False and "deck_sha" in kinds(rep) and
+          open(os.path.join(d, "deck_applied.k"), encoding="utf-8").read() == old and not tmp_left(d), (rc, sorted(kinds(rep)), tmp_left(d)))
+    check("J-3b 지우지 않았으니 stale_output_removed 경고도 없다", "stale_output_removed" not in {x["kind"] for x in rep.get("warnings", [])},
           rep.get("warnings"))
+
+
+def part_k(binary):
+    print("[K 출력 규칙 — 임시 파일에 쓰고 끝까지 지나면 바꿔 넣는다 · 거절 · 실패면 앞 파일 그대로(사용자 결정 11-07 밤)]")
+    base = "model: deck.k\nplan: plan.json\n"
+    old = "*KEYWORD\n$ 앞선 실행이 남긴 덱\n*END\n"
+    # K-1 report 가 설정 YAML — 보고 자리가 없다 · 콘솔로만 거절하고 아무것도 쓰지 않는다(예전엔 설정을 보고로 덮고 rc 0)
+    d = stage(EX, "k1")
+    yaml = base + "output: out.k\nreport: a.yaml\n"
+    rc, out, _rep = apply_case(binary, d, yaml=yaml, report="no_report.json")
+    check("K-1 report 가 설정 YAML → rc 1 · 설정 그대로 · 덱 · 보고 둘 다 쓰지 않는다",
+          rc == 1 and open(os.path.join(d, "a.yaml"), encoding="utf-8").read() == yaml and not os.path.exists(os.path.join(d, "out.k")) and
+          not tmp_left(d), (rc, out[-300:]))
+    # K-2 output 이 설정 파일(이름이 c.k) — 보고에 output_clobber · 설정 그대로(예전엔 쓰기 관문에 걸린 뒤 「옛 산출」로 지웠다)
+    d = stage(EX, "k2")
+    yaml = base + "output: c.k\n"
+    write(os.path.join(d, "c.k"), yaml)
+    rc, out = run(binary, d, OP, "c.k")
+    rp = os.path.join(d, "c_carryover.json")
+    rep = json.load(open(rp, encoding="utf-8")) if os.path.exists(rp) else {}
+    check("K-2 output 이 설정 파일 → rc 1 · output_clobber · 설정이 그대로 있다 · output_written false",
+          rc == 1 and "output_clobber" in kinds(rep) and rep.get("output_written") is False and os.path.exists(os.path.join(d, "c.k")) and
+          open(os.path.join(d, "c.k"), encoding="utf-8").read() == yaml and not tmp_left(d), (rc, sorted(kinds(rep)), out[-300:]))
+    # K-3 output 자리가 빈 폴더 — 폴더는 쓰지도 지우지도 않는다(예전엔 「옛 산출」로 rmdir 했다)
+    d = stage(EX, "k3")
+    os.makedirs(os.path.join(d, "deck_applied.k"))
+    rc, out, rep = apply_case(binary, d)
+    check("K-3 output 자리가 폴더 → rc 1 · output_clobber · 폴더가 그대로 있다",
+          rc == 1 and "output_clobber" in kinds(rep) and os.path.isdir(os.path.join(d, "deck_applied.k")) and not tmp_left(d),
+          (rc, sorted(kinds(rep)), out[-300:]))
+    # K-4 쓴 뒤 품질 관문에서 걸린다(G-1 의 뒤집는 모프) — 앞 파일 그대로 · 임시 파일 없음(예전엔 덮어쓴 뒤 지웠다)
+    d = stage(EX, "k4")
+    write(os.path.join(d, "deck_applied.k"), old)
+    p = plan_load(d)
+    head = next(r for r in p["parts"] if r["pid"] == 2)["field"]
+    lay = {e["name"]: e for e in head["layout"]}
+    fp = os.path.join(d, head["file"])
+    b = bytearray(open(fp, "rb").read())
+    ids, disp = read_field(d, head)
+    i = next(k for k in range(len(ids)) if disp[3 * k + 1] > 0)
+    struct.pack_into("<d", b, lay["disp"]["offset"] + 8 * (3 * i + 1), -50.0)
+    open(fp, "wb").write(bytes(b))
+    reseal(d, files=[head["file"]])
+    rc, out, rep = apply_case(binary, d)
+    check("K-4 쓴 뒤 품질 관문에서 걸렸다 → rc 1 · quality_inverted · 앞 파일 그대로 · output_written false · 임시 파일 없음",
+          rc == 1 and "quality_inverted" in kinds(rep) and rep.get("output_written") is False and
+          open(os.path.join(d, "deck_applied.k"), encoding="utf-8").read() == old and not tmp_left(d), (rc, sorted(kinds(rep)), tmp_left(d)))
+    # K-5 성공 — 앞 파일을 바꿔 넣는다 · 보고의 sha256_out 이 그 자리의 바이트 · output_written true · 임시 파일 없음
+    d = stage(EX, "k5")
+    write(os.path.join(d, "deck_applied.k"), old)
+    rc, out, rep = apply_case(binary, d)
+    check("K-5 성공 → 바꿔 넣었다(sha256_out = 산출 바이트) · output_written true · 임시 파일 없음",
+          rc == 0 and rep.get("output_written") is True and rep.get("deck", {}).get("sha256_out") == sha(os.path.join(d, "deck_applied.k")) and
+          not tmp_left(d), (rc, rep.get("output_written"), tmp_left(d)))
+
+
+def titled_block(d, pid, title, kw="*ELEMENT_SOLID_TITLE"):
+    """PID 의 솔리드 요소 줄을 *ELEMENT_SOLID 에서 빼 `kw` 블록(제목 줄 하나)으로 옮기고 계획의 덱 지문을 맞춘다."""
+    lines = open(os.path.join(d, "deck.k"), encoding="utf-8").read().split("\n")
+    s0 = lines.index("*ELEMENT_SOLID")
+    e0 = next(i for i in range(s0 + 1, len(lines)) if lines[i].startswith("*"))
+    moved, kept = [], []
+    for l in lines[s0 + 1:e0]:
+        (moved if (l.strip() and not l.startswith("$") and int(l[8:16]) == pid) else kept).append(l)
+    assert moved
+    write(os.path.join(d, "deck.k"), "\n".join(lines[:s0 + 1] + kept + [kw, title] + moved + lines[e0:]))
+    reseal(d)
+    return len(moved)
+
+
+def part_l(binary):
+    print("[L StepForge 권고 넷(D-681) — LS-DYNA 가 덱을 읽는 꼴로 가른다]")
+    # L-1 요소 `_TITLE` 블록 — TITLE 은 설명서 옵션이 아니어서 첫 줄이 제목 카드인지 근거가 없다(우리 리더는 숫자꼴 제목을 요소로 읽는다)
+    d = stage(EX, "l1")
+    n = titled_block(d, 3, "bracket solids")
+    rc, out, rep = apply_case(binary, d)
+    refused("L-1 고치는 PID 3(transform)의 요소 %d 개가 *ELEMENT_SOLID_TITLE 블록에 → opaque_elements(PID 3)" % n, rc, out, rep, d,
+            "opaque_elements", 3)
+    d = stage(EX, "l1b")
+    titled_block(d, 1, "housing solids")
+    rc, out, rep = apply_case(binary, d)
+    pr = {r["pid"]: r for r in rep.get("parts", [])}
+    check("L-1b keep PID 1 의 요소가 _TITLE 블록에 → 받는다(rc 0 · PID 1 은 손대지 않는다 · 다른 줄은 적용)",
+          rc == 0 and pr.get(1, {}).get("result") == "skipped" and pr.get(3, {}).get("result") == "applied", (rc, sorted(kinds(rep)), out[-300:]))
+    # L-3 열 재질의 번호 이름 *MAT_T01~T18 — TMID 는 MID 와 독립된 번호다(Vol II 2-9 · 3-1) · 공용 MID 훑기가 뺀다
+    t01 = ("*MAT_T01\n$#    tmid       tro     tgrlc    tgmult      tlat      hlat\n        50       0.0       0.0       0.0\n"
+           "$#      hc        tc\n       1.0       1.0\n")
+    d = stage(EX, "l3")
+    add_before_end(d, t01)
+    write(os.path.join(d, "fl.yaml"), "model: deck.k\noutput: floor.json\n")
+    rc2, o2 = run(binary, d, "id_floor", "fl.yaml")
+    fl = json.load(open(os.path.join(d, "floor.json"), encoding="utf-8")) if rc2 == 0 else {}
+    check("L-3 id_floor — *MAT_T01 의 TMID 50 은 PID · SECID · MID 바닥을 올리지 않는다(pid_start 9 · 예전 51)",
+          fl.get("pid_start") == 9, (rc2, fl, o2[-300:]))
+    # L-3c 경계 — *MAT_T18_TITLE(제목 줄 뒤 TMID 90 — 예전엔 바닥 91)도 빼고, *MAT_T 로 시작하는 구조 재질(*MAT_TABULATED_JOHNSON_COOK 70)은 센다
+    d = stage(EX, "l3c")
+    add_before_end(d, "*MAT_T18_TITLE\nispg heat\n        90       0.0\n*MAT_TABULATED_JOHNSON_COOK\n        70       1.0     1.0e5       0.3\n")
+    write(os.path.join(d, "fl.yaml"), "model: deck.k\noutput: floor.json\n")
+    rc2, o2 = run(binary, d, "id_floor", "fl.yaml")
+    fl = json.load(open(os.path.join(d, "floor.json"), encoding="utf-8")) if rc2 == 0 else {}
+    check("L-3c *MAT_T18_TITLE 은 빼고 *MAT_TABULATED_JOHNSON_COOK 70 은 센다(pid_start 71)", fl.get("pid_start") == 71, (rc2, fl, o2[-300:]))
+    # L-3b 이월 적용 — 바꿔 넣는 BATTERY(PID 6)의 MID 6 이 열 재질로만 있다(*MAT_T01 TMID 6) → 조각의 MID 가 덱에 없다
+    d = stage(EX, "l3b")
+    deck = os.path.join(d, "deck.k")
+    body = open(deck, encoding="utf-8").read()
+    old6 = "*MAT_ELASTIC_TITLE\nBATTERY#6_PLACEHOLDER\n$#     mid        ro         e        pr\n         6         1         1       0.3\n"
+    assert body.count(old6) == 1
+    write(deck, body.replace(old6, t01.replace("        50", "         6")))
+    reseal(d)
+    rc, out, rep = apply_case(binary, d)
+    refused("L-3b 조각(PID 6)의 MID 6 이 *MAT_T01 의 TMID 로만 있다 → fragment(MID 가 덱에 없다)", rc, out, rep, d, "fragment", 6)
+    # L-4 손대는 PID 의 SECID · MID 를 두 블록이 정의한다 — LS-DYNA 는 둘째 정의에서 멈춘다(StepForge 도 그 줄에서) · part_duplicate
+    d = stage(EX, "l4")
+    add_before_end(d, "*SECTION_SOLID\n         3         2\n")
+    rc, out, rep = apply_case(binary, d)
+    refused("L-4 옮기는 PID 3 의 SECID 3 이 두 번 정의됐다 → part_duplicate(PID 3)", rc, out, rep, d, "part_duplicate", 3)
+    check("L-4 보고가 두 정의의 자리를 댄다", "SECID 3 의 정의가 2 개" in details(rep, "part_duplicate"), details(rep, "part_duplicate")[:300])
+    d = stage(EX, "l4b")
+    add_before_end(d, "*MAT_RIGID\n         2   7.8e-09   2.1e+05       0.3\n")
+    rc, out, rep = apply_case(binary, d)
+    refused("L-4b 모프하는 PID 2 의 MID 2 가 두 번 정의됐다(*MAT_ELASTIC_TITLE · *MAT_RIGID) → part_duplicate(PID 2)", rc, out, rep, d,
+            "part_duplicate", 2)
+    d = stage(EX, "l4c")
+    add_before_end(d, "*SECTION_SOLID\n         1         2\n")
+    rc, out, rep = apply_case(binary, d)
+    check("L-4c keep PID 1 의 SECID 1 이 두 번이면 그 줄은 손대지 않으니 거절하지 않는다(rc 0)", rc == 0 and "part_duplicate" not in kinds(rep),
+          (rc, sorted(kinds(rep)), out[-300:]))
+
+    # L-5 보 _ELBOW(MN · Card 10) · _WARPAGE(SN1 · SN2 · Card 9) — 공용 걸음이 그 절점을 읽어 다른 보처럼 다룬다(92f50fe · 6341aac).
+    #     예전엔 그 블록이 있으면 덱을 고치는 줄을 다 거절했다(opaque_elements)
+    _n, e0, _p, _s, _m = read_deck(os.path.join(EX, "deck.k"))
+    pn = pid_nodes(e0)
+    only1 = sorted(pn[1] - set().union(*(v for k, v in pn.items() if k != 1)))
+    n3 = sorted(pn[3])
+    elbow = "*ELEMENT_BEAM_ELBOW\n%8d%8d%8d%8d%8d\n%10d\n"
+    warp = "*NODE_SCALAR\n%8d%8d\n%8d%8d\n*ELEMENT_BEAM_WARPAGE\n%8d%8d%8d%8d%8d\n%10d%10d\n"
+    for tag, block, shared in (
+            ("l5", elbow % (9101, 1, only1[0], only1[1], 0, only1[2]), False),
+            ("l5b", elbow % (9101, 1, only1[0], only1[1], 0, n3[0]), True),
+            ("l5c", warp % (900001, 1, 900002, 1, 9102, 1, only1[0], only1[1], 0, 900001, 900002), False),
+            ("l5d", warp % (900001, 1, 900002, 1, 9102, 1, only1[0], only1[1], 0, n3[0], 900002), True)):
+        d = stage(EX, tag)
+        add_before_end(d, block)
+        keep_only(d, but=(3,))
+        rc, out, rep = apply_case(binary, d)
+        what = "ELBOW 의 MN" if "ELBOW" in block else "WARPAGE 의 SN1"
+        if shared:
+            refused("%s %s 이 옮기는 PID 3 의 절점 → shared_nodes(PID 3 · 옵션 카드 절점까지 읽는다)" % (("L-" + tag[1:]), what),
+                    rc, out, rep, d, "shared_nodes", 3)
+        else:
+            check("%s %s 이 손대지 않는 절점 → 받는다(그 블록은 다 읽은 블록이다)" % (("L-" + tag[1:]), what),
+                  rc == 0 and "opaque_elements" not in kinds(rep), (rc, sorted(kinds(rep)), details(rep, "opaque_elements")[:200]))
 
 
 if __name__ == "__main__":

@@ -52,11 +52,11 @@ namespace KooRemapper {
 namespace { static int bc_findMaxSetNodeId(const std::vector<std::string>& rawLines); }
 
 namespace {
-// 줄들에서 `*SECTION_*` 첫 데이터 카드의 SECID(→ 그 키워드, 먼저 나온 것) — 파트가 참조하지 않는 섹션도 번호를 차지한다.
-// 주 덱과 인클루드 파일이 **같은 규칙**으로 센다(loadBaseModel · raiseMaxIdsOverIncludes). 이월 적용(2026-11-07)이 같은 훑기로
-// 「그 SECID 가 덱에 있나 · 셸 섹션인가」를 본다(`definedSectionIds`).
-std::map<int, std::string> cur_scanSectionIds(const std::vector<std::string>& lines) {
-    std::map<int, std::string> ids;
+// 줄들에서 `*SECTION_*` 블록마다 첫 데이터 카드의 SECID — SECID → 그 블록들(키워드 줄 · 키워드), 나온 차례. 같은 SECID 를 두 블록이
+// 정의하면 둘 다 담는다(이월 적용의 「손대는 PID 의 SECID 가 두 번 정의됐나」 — StepForge 권고 D-681 · 11-07 밤). 아래
+// `cur_scanSectionIds` 가 이것의 첫 정의다.
+std::map<int, std::vector<std::pair<size_t, std::string>>> cur_scanSectionDefs(const std::vector<std::string>& lines) {
+    std::map<int, std::vector<std::pair<size_t, std::string>>> defs;
     for (size_t i = 0; i < lines.size(); ++i) {
         const std::string& l = lines[i];
         size_t s = l.find_first_not_of(" \t");
@@ -78,34 +78,79 @@ std::map<int, std::string> cur_scanSectionIds(const std::vector<std::string>& li
             // 필요하므로 공백 토큰 하나로 충분하다(10칸 덱이든 8칸 덱이든 SECID 는 첫 칸이다).
             std::istringstream iss(d);
             int sid = 0;
-            if (iss >> sid && sid > 0) ids.emplace(sid, deckscan::kwBare(deckscan::keywordToken(l)));
+            if (iss >> sid && sid > 0) defs[sid].emplace_back(i, deckscan::kwBare(deckscan::keywordToken(l)));
             break;                      // 첫 데이터 카드만 본다
         }
     }
+    return defs;
+}
+
+// 줄들에서 `*SECTION_*` 첫 데이터 카드의 SECID(→ 그 키워드, 먼저 나온 것) — 파트가 참조하지 않는 섹션도 번호를 차지한다.
+// 주 덱과 인클루드 파일이 **같은 규칙**으로 센다(loadBaseModel · raiseMaxIdsOverIncludes). 이월 적용(2026-11-07)이 같은 훑기로
+// 「그 SECID 가 덱에 있나 · 셸 섹션인가」를 본다(`definedSectionIds`).
+std::map<int, std::string> cur_scanSectionIds(const std::vector<std::string>& lines) {
+    std::map<int, std::string> ids;
+    for (const auto& [sid, d] : cur_scanSectionDefs(lines)) ids.emplace(sid, d.front().second);
     return ids;
 }
 
+// ★번호 커서가 볼 「덱이 쓴 SECID」 — `*SECTION_*` 블록의 **모든** 데이터 줄의 첫 칸 정수(넉넉히). 위 첫 카드 표는 한 키워드 아래
+// 쌓인 둘째 카드의 SECID 를 몰라, 새 섹션을 내는 op 이 그 번호를 다시 냈다(rc 0 · 같은 SECID 둘 — 이월 적용의 11-07 적대적 검토 #1 과
+// 같은 틈 · 셋째 묶음 · 사용자 결정 「이번 판」). 쌓인 카드의 줄 수는 섹션 종류 · 옵션 카드마다 달라 정확히 가르지 않고 넉넉히 센다 —
+// 정수로 쓴 두께(`5`) · 각도 · 숫자 제목 줄도 들어 커서가 쓸데없이 오를 수 있다(겹치는 것보다 안전한 쪽). 칸 폭은 블록 키워드의 폭
+// (long `+` 이면 20). 있나 · 종류(`definedSectionIds`)는 위 첫 카드 표가 그대로 본다. 이월 적용의 새 SECID 겹침도 이 집합을 쓴다
+std::set<int> cur_scanSectionIdsAnyCard(const std::vector<std::string>& lines) {
+    std::set<int> out;
+    const int deckFw = deckFieldWidth(lines);
+    bool in = false;
+    int w = 10;
+    for (const auto& l : lines) {
+        const size_t g = l.find_first_not_of(" \t");
+        if (g != std::string::npos && l[g] == '*') {
+            in = deckscan::kwBare(deckscan::keywordToken(l)).rfind("*SECTION_", 0) == 0;
+            w = keywordFieldWidth(l, deckFw) == 20 ? 20 : 10;
+            continue;
+        }
+        if (!in || !deckscan::isDataLine(l)) continue;
+        const auto f = deckscan::cardFields(l, w);
+        int v = 0;
+        if (!f.empty() && deckscan::toInt(f[0], v) && v > 0) out.insert(v);
+    }
+    return out;
+}
+
 int cur_scanMaxSectionId(const std::vector<std::string>& lines) {
-    const auto ids = cur_scanSectionIds(lines);
-    return ids.empty() ? 0 : ids.rbegin()->first;
+    const auto ids = cur_scanSectionIdsAnyCard(lines);
+    return ids.empty() ? 0 : *ids.rbegin();
 }
 
 // 줄들에서 `*MAT_*` 의 MID 최대값. 리더(`KFileReader`)는 재질 **다섯 종류**만 읽어 `baseMesh_.materials` 에
 // 담는다 — 그 밖의 재질(`*MAT_PLASTIC_KINEMATIC` 등)도 번호는 차지한다. 그것을 못 세어 새 재질이 그 MID 를
 // **다시** 냈다(재현: `*MAT_PLASTIC_KINEMATIC 2` 가 있는 덱에 czm 이 `*MAT_COHESIVE_MIXED_MODE 2` 를 냈다, rc 0).
-// 빼는 것 — `*MAT_THERMAL_*`(TMID 는 MID 와 **독립된** 번호다, Vol II 159546-159548)와 `*MAT_ADD_*`(새 MID 를
+// 빼는 것 — `*MAT_THERMAL_*` 와 그 번호 이름 `*MAT_T01`~`*MAT_T18`(TMID 는 MID 와 **독립된** 번호다, Vol II 159546-159548 ·
+// 2-9 의 번호 표 — 번호 이름은 StepForge 권고 591d5b5 · D-681 · 사용자 결정 11-07 밤에 더했다)와 `*MAT_ADD_*`(새 MID 를
 // 정의하지 않고 있는 재질에 덧붙인다 — 몇몇은 첫 칸이 PID 다).
 // MID 칸은 표준·I10 에서 10칸, long 에서 20칸이다(I10 은 8칸만 넓힌다 — Vol_I 19353). 공백 토큰이 아니라
 // 칸으로 읽는다 — `         17.8500E-09` 처럼 붙은 칸을 17 로 읽지 않게.
-// 줄들에서 `*MAT_*` 가 **정의하는** MID 들 — `_THERMAL_`·`_ADD_` 는 정의가 아니다. 최대값(`cur_scanMaxMaterialId`)과
+// 줄들에서 `*MAT_*` 가 **정의하는** MID 들 — 열 재질 · `_ADD_` 는 정의가 아니다. 최대값(`cur_scanMaxMaterialId`)과
 // 「그 재질이 인클루드에만 있나」(`materialsReachable` · 2026-10-17)가 같은 규칙을 본다.
-std::set<int> cur_scanMaterialIds(const std::vector<std::string>& lines) {
-    std::set<int> ids;
+bool cur_isThermalMaterial(const std::string& kw) {
+    if (kw.rfind("*MAT_THERMAL_", 0) == 0) return true;
+    if (kw.size() < 8 || kw.compare(0, 6, "*MAT_T") != 0 || !std::isdigit(static_cast<unsigned char>(kw[6])) ||
+        !std::isdigit(static_cast<unsigned char>(kw[7])))
+        return false;
+    const int n = (kw[6] - '0') * 10 + (kw[7] - '0');
+    return n >= 1 && n <= 18 && (kw.size() == 8 || kw[8] == '_');
+}
+// MID → 그것을 정의한 `*MAT_*` 키워드 줄들(나온 차례 · 첫 데이터 카드의 MID) — 같은 MID 를 두 카드가 정의하면 둘 다 담는다
+// (이월 적용의 「손대는 PID 의 MID 가 두 번 정의됐나」 — StepForge 권고 D-681). 아래 `cur_scanMaterialIds` 가 이것의 번호들이다.
+std::map<int, std::vector<size_t>> cur_scanMaterialDefs(const std::vector<std::string>& lines) {
+    std::map<int, std::vector<size_t>> defs;
     const int deckFw = deckFieldWidth(lines);
     for (size_t i = 0; i < lines.size(); ++i) {
         if (deckscan::isDataLine(lines[i])) continue;
         const std::string kw = deckscan::kwBare(deckscan::keywordToken(lines[i]));
-        if (kw.rfind("*MAT_", 0) != 0 || kw.rfind("*MAT_THERMAL_", 0) == 0 || kw.rfind("*MAT_ADD_", 0) == 0)
+        if (kw.rfind("*MAT_", 0) != 0 || cur_isThermalMaterial(kw) || kw.rfind("*MAT_ADD_", 0) == 0)
             continue;
         const int fw = keywordFieldWidth(lines[i], deckFw) == 20 ? 20 : 10;
         bool needTitle = kw.find("_TITLE") != std::string::npos;
@@ -116,9 +161,17 @@ std::set<int> cur_scanMaterialIds(const std::vector<std::string>& lines) {
             if (h != std::string::npos && d[h] == '$') continue;
             if (needTitle) { needTitle = false; continue; }   // 제목 줄은 비어 있을 수 있다
             const int mid = deckscan::fieldInt(deckscan::cardFields(d, fw), 0);
-            if (mid > 0) ids.insert(mid);
+            if (mid > 0) defs[mid].push_back(i);
             break;                                             // 첫 데이터 카드만 본다
         }
+    }
+    return defs;
+}
+std::set<int> cur_scanMaterialIds(const std::vector<std::string>& lines) {
+    std::set<int> ids;
+    for (const auto& [mid, at] : cur_scanMaterialDefs(lines)) {
+        (void)at;
+        ids.insert(mid);
     }
     return ids;
 }
@@ -328,6 +381,16 @@ void ModelAssembler::initMaxSetIdFromRawLines() {
 // 줄을 받는다 — 판 2 의 인클루드 덱은 펼친 닫힘 전체를 본다(2026-11-07)
 std::set<int> ModelAssembler::definedMaterialIds(const std::vector<std::string>& lines) { return cur_scanMaterialIds(lines); }
 std::map<int, std::string> ModelAssembler::definedSectionIds(const std::vector<std::string>& lines) { return cur_scanSectionIds(lines); }
+std::set<int> ModelAssembler::sectionIdsAnyCard(const std::vector<std::string>& lines) { return cur_scanSectionIdsAnyCard(lines); }
+std::map<int, std::vector<size_t>> ModelAssembler::materialDefinitionLines(const std::vector<std::string>& lines) {
+    return cur_scanMaterialDefs(lines);
+}
+std::map<int, std::vector<size_t>> ModelAssembler::sectionDefinitionLines(const std::vector<std::string>& lines) {
+    std::map<int, std::vector<size_t>> out;
+    for (const auto& [sid, d] : cur_scanSectionDefs(lines))
+        for (const auto& kw : d) out[sid].push_back(kw.first);
+    return out;
+}
 std::map<int, std::string> ModelAssembler::definedPartVariantIds(const std::vector<std::string>& lines) { return cur_scanPartVariantIds(lines); }
 
 // ★대상이 인클루드 안에만 있는가(헤더의 주석 참조). 판정 자료는 `raiseMaxIdsOverIncludes` 가 같은 리더로 센 것이다.

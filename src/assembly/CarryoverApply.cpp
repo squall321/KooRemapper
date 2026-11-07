@@ -45,7 +45,7 @@
 //     바꿔 넣기에서 살고 지우기는 막는다). 정본(`NodeRefs` · `IdRefs`)이 칸 뜻을 단정하지 못한 자리, 정본이 보지도 세지도 않고
 //     참조 없는 키워드 표(`refCover`)에도 없는 키워드, 풀 수 없는 방언 세트가 덱에 있으면 그것도 거절한다 — 그 PID 를 가리키지
 //     않는다고 증명할 수 없다(리뷰 11-07)
-//   · 절점 칸을 다 읽지 못하는 요소 블록(리더가 담지 않는 솔리드 · 티쉘 변형 · 보 `_WARPAGE` · `_ELBOW` …)이나 EID 가 겹친 덱은
+//   · 절점 칸을 다 읽지 못하는 요소 블록(리더가 담지 않는 솔리드 · 티쉘 변형 · 셸 `_DOF` · 칸 자리를 모르는 변형 …)이나 EID 가 겹친 덱은
 //     덱을 고치는 줄을 하나도 적용하지 않는다(리뷰 11-07)
 //   · 조각 번호는 덱 바닥(`idMaxima` — 보 · 이산 · 질량 요소까지) 위여야 한다. 아래에 걸치면 조각 전부를 **한 이동량**으로 옮긴다
 //   · 쓴 뒤 **다시 읽어** 대조하고 품질 관문(새로 뒤집힌 솔리드 · 모프가 법선을 뒤집은 셸)을 건다 — 걸리면 부르는 쪽이 산출을 지운다
@@ -181,8 +181,9 @@ bool hasOption(const std::string& kw, const std::string& base, const char* opt) 
 // ★이 `*ELEMENT_*` 블록의 절점 칸을 이월 적용이 **전부** 읽는가(리뷰 11-07 — 리더가 담지 않는 솔리드 변형을 아무도 보지 않아
 // 지운 절점을 가리키는 카드 · 겹친 EID 가 rc 0 으로 나갔다). 읽으면 빈 글자, 아니면 까닭. 읽는 것은 둘뿐이다 —
 //   · 리더가 메시에 그대로 담는 격자 블록(셸 `_DOF` 는 빼고 — Card 5 의 NS1-NS4 스칼라 절점은 아무도 읽지 않는다, Vol_I 162243-162261)
-//   · 칸 자리를 아는 격자 밖 블록(`auxElementCard`) 가운데 옵션 카드에 절점이 없는 것 — 보의 `_WARPAGE`(SN1 · SN2) ·
-//     `_ELBOW`(MN)는 그 카드를 읽지 않는다(Vol_I 156529-156610). Card 1 의 N3(방향 절점)은 읽는다
+//   · 칸 자리를 아는 격자 밖 블록(`auxElementCard`) — 보의 옵션 카드 절점(`_WARPAGE` Card 9 의 SN1 · SN2 · `_ELBOW` Card 10 의 MN)도
+//     공용 걸음(`forEachNonGridElementCard`)이 읽어 카드의 절점에 싣는다(92f50fe · 6341aac — 11-07 밤에 그 두 거절을 뺐다 · Vol_I
+//     156529-156638). Card 1 의 N3(방향 절점)은 읽는다
 std::string elementBlockGap(const std::string& line) {
     const ElementKeywordInfo info = parseElementKeyword(line);
     if (info.family != ElemFamily::NONE) {
@@ -196,9 +197,22 @@ std::string elementBlockGap(const std::string& line) {
     const AuxElementCard a = auxElementCard(line);
     if (a.family == AuxFamily::NONE) return "칸 자리를 모르는 요소 키워드";
     if (!a.supported) return "칸 자리를 확정할 수 없는 변형";
-    if (a.family == AuxFamily::BEAM && hasOption(a.keyword, "*ELEMENT_BEAM", "WARPAGE")) return "WARPAGE 카드의 절점(SN1 · SN2)을 읽지 않는다";
-    if (a.family == AuxFamily::BEAM && hasOption(a.keyword, "*ELEMENT_BEAM", "ELBOW")) return "ELBOW 카드의 가운데 절점(MN)을 읽지 않는다";
     return std::string();
+}
+
+// ★리더가 메시에 담는 격자 블록 가운데 TITLE 옵션이 붙은 것(`*ELEMENT_SOLID_TITLE` · `*ELEMENT_SHELL_TITLE`(셸 변형 포함) ·
+// `*ELEMENT_TSHELL_TITLE`) — StepForge 권고(그쪽 591d5b5 · D-681, 사용자 결정 11-07 밤). TITLE 은 이 키워드들의 설명서 옵션이 아니어서
+// 블록 첫 줄이 제목 카드인지 LS-DYNA 가 어떻게 읽는지 근거가 없다. 우리 리더도 짐작한다(11-07 밤 실측) — 솔리드 · 티쉘은 제목 카드가
+// 없다고 읽어 글자 제목은 칸이 안 읽혀 버려질 뿐이고 숫자꼴 제목(「10 20」)은 두 줄 카드 머리가 되어 다음 요소 카드를 절점 줄로 삼킨다
+// (EID 10 · PID 20 이 생기고 요소 1 이 사라졌다). 셸은 첫 줄의 첫 토큰이 정수가 아닐 때만 제목으로 버려 숫자꼴 제목이 요소 하나가 된다.
+bool gridTitleBlock(const std::string& line) {
+    if (!gridReaderReadsKeyword(line)) return false;
+    const ElementKeywordInfo info = parseElementKeyword(line);
+    if (info.family == ElemFamily::NONE || info.keyword.size() <= 9) return false;
+    std::istringstream rest(info.keyword.substr(9));   // `*ELEMENT_` 뒤의 토큰
+    for (std::string t; std::getline(rest, t, '_');)
+        if (t == "TITLE") return true;
+    return false;
 }
 
 // 리더가 담는 격자 요소 카드를 카드마다 한 번 — Card 1 줄과 그 칸. 카드 경계는 정본(`elementCardSpan`)이 정하고, 2차 솔리드의 절점
@@ -366,29 +380,6 @@ bool putField(std::string& line, size_t idx, int w, long long v) {
     if (line.size() < off + static_cast<size_t>(w)) line.resize(off + static_cast<size_t>(w), ' ');
     line.replace(off, static_cast<size_t>(w), buf, static_cast<size_t>(w));
     return true;
-}
-
-// ★새 SECID 가 겹치는지 볼 때의 「덱이 정의한 SECID」 — `*SECTION_*` 블록의 **모든** 데이터 줄의 첫 칸 정수(리뷰 11-07 #1).
-// 번호 커서(`cur_scanSectionIds`)는 키워드마다 첫 카드만 읽는다 — 한 키워드 아래 쌓인 둘째 카드의 SECID 가 보이지 않아 새 섹션이
-// 그 번호를 다시 냈다(rc 0 · 같은 SECID 둘). 쌓인 카드의 줄 수는 섹션 종류 · 옵션 카드마다 달라 정확히 가르지 않고 넉넉히 센다 —
-// 두께 · 제목 줄의 정수도 든다(겹친다고 잘못 보면 거절 — 안전한 쪽). 칸 폭은 블록 키워드의 폭(long `+` 이면 20)
-std::set<long long> sectionIdsAnyCard(const std::vector<std::string>& L) {
-    std::set<long long> out;
-    const int deckFw = deckFieldWidth(L);
-    bool in = false;
-    int w = 10;
-    for (const auto& l : L) {
-        if (cardcut::isKeywordLine(l)) {
-            in = deckscan::kwBare(deckscan::keywordToken(l)).rfind("*SECTION_", 0) == 0;
-            w = keywordFieldWidth(l, deckFw) == 20 ? 20 : 10;
-            continue;
-        }
-        if (!in || !deckscan::isDataLine(l)) continue;
-        const auto f = deckscan::cardFields(l, w);
-        int v = 0;
-        if (!f.empty() && cards::toInt(f[0], v) && v > 0) out.insert(v);
-    }
-    return out;
 }
 
 // 키워드 줄 kw 부터 다음 키워드 줄 앞까지(주석 · 빈 줄 포함) — StepForge `section_card` 가 옮기는 「옛 카드 원문」 의 자리
@@ -736,9 +727,13 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, const std::
     const auto variants = definedPartVariantIds(S);
     const auto sections = definedSectionIds(S);
     // 새 SECID 의 겹침 · 차례는 쌓인 카드까지 넉넉히 센 집합으로 본다(위 `sections` 는 키워드마다 첫 카드 — 있나 · 종류를 가리는 데만 쓴다)
+    // (번호 커서와 같은 공용 훑기 `ModelAssembler::sectionIdsAnyCard` — 리뷰 11-07 #1 에 이 파일에 두었던 것을 11-07 밤 커서에도 쓰려고 옮겼다)
     const auto secidsAll = sectionIdsAnyCard(S);
     const long long secidTop = secidsAll.empty() ? 0 : *secidsAll.rbegin();
     const auto mids = definedMaterialIds(S);
+    // 번호마다 정의한 블록 — 손대는 PID 의 SECID · MID 를 두 블록이 정의하면 그 줄을 거절한다(StepForge 권고 D-681 · 아래 ⑤)
+    const auto secDefs = sectionDefinitionLines(S);
+    const auto midDefs = materialDefinitionLines(S);
     for (size_t kwl : parts.oddBlocks)
         problem(0, "deck_part_block", at(kwl) + " 의 *PART 블록 — 데이터 줄이 제목 · 카드 짝으로 떨어지지 않는다");
     std::vector<NonGridElementCard> auxCards;   // 칸 자리를 아는 격자 밖 요소(보 · 이산 · 질량 · 안전띠 · 플롯) — 나눠 쓴 절점 · EID 겹침이 본다
@@ -759,6 +754,29 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, const std::
         if (why.empty()) continue;
         Gap& g = elemGaps[kw];
         if (g.blocks++ == 0) { g.first = i; g.why = std::move(why); }
+    }
+    // 요소 `_TITLE` 블록(`gridTitleBlock`)은 다 읽은 블록이 아니다 — 그 블록에 요소가 있을 수 있는 PID 를 고치면 거절하고 keep · review 는
+    // 둔다(StepForge 권고 D-681). PID 는 데이터 줄마다 둘째 칸의 정수 — 첫 줄이 제목이든 아니든 두 읽기를 다 덮게 넉넉히 센다(두 줄 카드의
+    // 절점 줄 · 제목 줄의 정수도 들어 거짓 거절이 날 수 있다 — 안전한 쪽). 키워드 줄은 `forEachGridCard` 와 같은 규칙(첫 글자 `*`)
+    std::map<long long, size_t> titleBlockOf;   // PID → 그 PID 가 있을 수 있는 첫 블록의 키워드 줄
+    {
+        const int deckFw = deckFieldWidth(S);
+        bool in = false;
+        int fw = deckFw;
+        size_t kwl = 0;
+        for (size_t i = 0; i < S.size(); ++i) {
+            const std::string& l = S[i];
+            const size_t g = l.find_first_not_of(" \t");
+            if (g != std::string::npos && l[g] == '*') {
+                in = gridTitleBlock(l);
+                fw = keywordFieldWidth(l, deckFw);
+                kwl = i;
+                continue;
+            }
+            if (!in || !deckscan::isDataLine(l)) continue;
+            const int v = deckscan::fieldInt(deckscan::cardFields(l, fw), 1);
+            if (v > 0) titleBlockOf.emplace(v, kwl);
+        }
     }
     const auto midside = shellMidsideNodes(S, M);
     {
@@ -970,6 +988,32 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, const std::
             problem(pid, "part_duplicate", std::string("PID 의 *PART 카드가 둘 이상이다") +
                                                (variant ? "(맨 *PART 와 " + variants.at(static_cast<int>(pid)) + ")" : std::string()));
             continue;
+        }
+        if (auto t = titleBlockOf.find(pid); t != titleBlockOf.end()) {
+            problem(pid, "opaque_elements", "PID 의 요소가 " + deckscan::kwBare(deckscan::keywordToken(S[t->second])) + " 블록(" + at(t->second) +
+                                                ")에 있을 수 있다 — 요소 키워드의 TITLE 은 설명서 옵션이 아니어서 첫 줄이 제목 카드인지 근거가 없고 "
+                                                "우리 리더는 숫자꼴 제목을 요소로 읽는다 · 그 PID 는 고치지 않는다(StepForge 권고 D-681)");
+            continue;
+        }
+        // 그 PID 의 SECID · MID 를 두 블록 이상이 정의하면 LS-DYNA 는 둘째 정의에서 멈춘다 — StepForge 도 그 줄에서 멈춘다(권고 D-681 ·
+        // 사용자 결정 11-07 밤). `*PART` 가 둘인 것과 같은 갈래(part_duplicate)로 거절한다. 정의는 블록마다 첫 카드다(번호 훑기와 같다)
+        {
+            const PartLoc& loc = parts.plain.at(pid);
+            std::string dup;
+            auto twice = [&](const char* what, long long id, const std::map<int, std::vector<size_t>>& defs) {
+                auto it = id > 0 ? defs.find(static_cast<int>(id)) : defs.end();
+                if (it == defs.end() || it->second.size() < 2) return;
+                std::string where;
+                for (size_t k = 0; k < it->second.size() && k < 4; ++k) where += (k ? " · " : "") + at(it->second[k]);
+                dup += (dup.empty() ? "" : " / ") + std::string(what) + " " + std::to_string(id) + " 의 정의가 " + std::to_string(it->second.size()) +
+                       " 개(" + where + ")";
+            };
+            twice("SECID", loc.secid, secDefs);
+            twice("MID", loc.mid, midDefs);
+            if (!dup.empty()) {
+                problem(pid, "part_duplicate", "PID 의 " + dup + " — LS-DYNA 는 같은 번호의 둘째 정의에서 멈춘다(StepForge 도 그 줄에서 멈춘다 · 권고 D-681)");
+                continue;
+            }
         }
         // 판 2 · 인클루드 덱 — 고칠 자리(그 PID 의 `*PART` · 요소 · 그 요소의 절점)가 전부 주 덱에 있어야 한다(사용자 결정 11-07 「주 덱만
         // 고침 · 인클루드면 거절」 — 인클루드 파일은 쓰지 않는다). 새 섹션이 옮길 옛 섹션 카드는 아래 ⑧b 가 본다

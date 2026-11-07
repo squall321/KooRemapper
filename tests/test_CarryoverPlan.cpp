@@ -413,6 +413,8 @@ TEST(Carryover_보고_JSON_은_엄격한_리더로_읽힌다) {
     ASSERT_TRUE(json::parse(carryover::toJson(r), v, err));
     ASSERT_EQ(v.get("format")->s, std::string("dynaforge-carryover-apply"));
     ASSERT_TRUE(v.get("ok")->type == json::Value::Type::Bool && !v.get("ok")->b);
+    // 산출을 바꿔 넣었나 — 거절 · 실패면 false(output 자리의 앞 파일은 이번 산출이 아니다 · 11-07 밤)
+    ASSERT_TRUE(v.get("output_written") && v.get("output_written")->type == json::Value::Type::Bool && !v.get("output_written")->b);
     ASSERT_TRUE(v.get("deck")->get("sha256_out")->isNull());
     ASSERT_TRUE(v.get("shift")->isNull());
     ASSERT_EQ(v.get("problems")->arr.size(), static_cast<size_t>(2));
@@ -711,6 +713,25 @@ TEST(Carryover_보고의_수는_다시_읽으면_같은_값) {
     // 짧게 맞는 값은 예전 글자 그대로(0.6 이 0.59999999999999998 로 길어지지 않는다)
     ASSERT_TRUE(j.find("\"thickness\": 0.6}") != std::string::npos);
     ASSERT_TRUE(j.find("1.0000000000000002") != std::string::npos);
+}
+
+
+TEST(Carryover_셸_섹션의_정수_칸_실수_꼴은_그_정수) {
+    // StepForge 권고 D-681 — LS-DYNA 실행 기록이 NIP `3.000E+00` 을 3 으로 받는다 · 정수가 아닌 값은 그대로 거절
+    auto rows = [](const std::string& card1, const std::vector<std::string>& more, std::string& why) {
+        std::vector<std::string> b{"*SECTION_SHELL", card1, "       0.6       0.6       0.6       0.6"};
+        b.insert(b.end(), more.begin(), more.end());
+        size_t r1 = 0, r2 = 0;
+        return carryover::shellSectionRows(b, r1, r2, why);
+    };
+    std::string why;
+    ASSERT_TRUE(rows("        10         2         1 5.000e+00", {}, why));
+    ASSERT_TRUE(rows("        10 1.600e+01         1         5", {}, why));                       // ELFORM 16
+    ASSERT_TRUE(rows("        10         2         1 3.000E+00         0         0 1.000e+00", {"       0.0"}, why));   // ICOMP 1 · 각도 카드 하나
+    ASSERT_FALSE(rows("        10         2         1 2.500e+00", {}, why));
+    ASSERT_TRUE(why.find("NIP") != std::string::npos);
+    ASSERT_FALSE(rows("        10         2         1         2         0         0       1.5", {}, why));
+    ASSERT_TRUE(why.find("ICOMP") != std::string::npos);
 }
 
 TEST(Carryover_v2_보고에_deck_from_인클루드_refused_transform) {

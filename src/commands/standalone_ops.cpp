@@ -10,6 +10,7 @@
 #include "parser/OutputGuard.h"
 #include "util/Sha256.h"
 #include "util/StrictJson.h"
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -1808,11 +1809,74 @@ static std::vector<std::string> carryoverCompanionNames(const std::string& planP
     return out;
 }
 
+// 같은 폴더의 임시 파일에 쓰고 끝까지 지나면 바꿔 넣는다 — extract-parts `StagedFiles` 와 같은 꼴(이월 적용이 두 번째 소비자다 —
+// 공용 자리로 모을 때 하나로). 지우는 것은 바꿔 넣지 않은 임시 파일뿐이다(이번 실행이 만든 것) — 앞 파일 · 폴더 · 남의 파일은 안 건드린다
+namespace {
+class CarryStagedFiles {
+public:
+    CarryStagedFiles() = default;
+    CarryStagedFiles(const CarryStagedFiles&) = delete;
+    CarryStagedFiles& operator=(const CarryStagedFiles&) = delete;
+    ~CarryStagedFiles() { discardAll(); }
+
+    // `dst` 의 임시 경로 — 같은 폴더(바꿔 넣기가 한 파일 시스템 안의 이름 바꾸기다) · 점으로 시작 · 끝은 `suffix`(덱은 ".k" — 쓰기가 <접두>.k 를 쓴다)
+    bool reserve(const std::string& dst, const std::string& suffix, std::string& tmp) {
+        static unsigned serial = 0;
+        const size_t sep = dst.find_last_of("/\\");
+        const std::string dir = sep == std::string::npos ? std::string() : dst.substr(0, sep + 1);
+        const std::string base = sep == std::string::npos ? dst : dst.substr(sep + 1);
+        const std::string stamp = std::to_string((long long)std::chrono::steady_clock::now().time_since_epoch().count());
+        for (int k = 0; k < 100; ++k) {
+            const std::string t = dir + "." + base + ".kr_tmp_" + stamp + "_" + std::to_string(++serial) + suffix;
+            std::error_code ec;
+            if (std::filesystem::exists(t, ec) || ec) continue;
+            tmp = t;
+            items_.push_back({dst, tmp});
+            return true;
+        }
+        return false;
+    }
+    // 글을 임시 파일에 쓴다(바이너리 — 개행을 그대로)
+    bool writeText(const std::string& dst, const std::string& text, std::string& tmp) {
+        if (!reserve(dst, "", tmp)) return false;
+        std::ofstream f(tmp, std::ios::binary);
+        if (!f.is_open()) return false;
+        f << text;
+        f.close();
+        return !f.fail();
+    }
+    // 임시 파일을 `dst` 로 바꿔 넣는다
+    bool commit(const std::string& dst) {
+        for (size_t i = 0; i < items_.size(); ++i) {
+            if (items_[i].first != dst) continue;
+            std::error_code ec;
+            std::filesystem::rename(items_[i].second, dst, ec);
+            if (ec) return false;
+            items_.erase(items_.begin() + (std::ptrdiff_t)i);
+            return true;
+        }
+        return false;
+    }
+    // 바꿔 넣지 않은 임시 파일을 지운다 — 이번 실행이 만든 것뿐이다
+    void discardAll() {
+        for (const auto& it : items_) {
+            std::error_code ec;
+            std::filesystem::remove(it.second, ec);
+        }
+        items_.clear();
+    }
+
+private:
+    std::vector<std::pair<std::string, std::string>> items_;   // 바꿔 넣을 경로 · 임시 경로
+};
+}  // namespace
+
 // ── Standalone apply_carryover_plan ─────────────────────────────────────────
 // StepForge 이월 계획(plan.json · field_<PID>.bin · fragment_<PID>.k)을 덱에 적용한다 — 규칙과 검사는
 // `ModelAssembler::applyCarryoverPlan` · 쓴 덱 대조와 품질 관문은 `verifyCarryoverOutput`.
 // 산출 둘 — <output>.k(고친 덱) · 보고 JSON(`report`, 기본 <output 줄기>_carryover.json). 보고는 **거절해도** 쓴다
 // (걸린 것 전부 · 처리마다 결과 — 저쪽이 그것을 읽고 계획을 고친다). 거절이면 덱을 쓰지 않는다(rc 1).
+// ★쓰기는 임시 파일 + 바꿔 넣기(사용자 결정 11-07 밤 — extract-parts 와 같은 규칙) — 거절 · 실패면 output 자리의 앞 파일은 그대로다.
 int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
     const char* tag = "apply_carryover_plan";
     {
@@ -1861,37 +1925,47 @@ int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
     const std::string outputPrefix = y.getOutputPrefix();
     const std::string outPath = outputPrefix + ".k";
     const std::string reportPath = reportFile.empty() ? outputPrefix + "_carryover.json" : y.resolvePath(reportFile);
-    // ★이 op 이 읽는 파일 — 주 덱 · 계획 · 인클루드 닫힘 · 계획의 동반 파일(files 와 줄이 가리킨 이름 — 변위장 · 조각 · 새 셸 섹션).
-    //   산출 · 보고는 그 어느 것과도 같으면 안 된다 — 판 2 는 인클루드를 읽기만 하고(사용자 결정 11-07), 동반 파일을 덮거나 거절하며
-    //   「옛 산출」로 지우면 계획을 다시 받아야 한다(2026-11-07 적대적 검토 #3 — section_4 · fragment_6 을 덮고 지웠다)
-    std::vector<std::string> reads{modelPath, planPath};
-    for (const auto& f : KooRemapper::include_closure::readPaths(modelPath).files) reads.push_back(f.path);
-    for (const auto& n : carryoverCompanionNames(planPath)) reads.push_back((std::filesystem::path(planPath).parent_path() / n).string());   // 적용 쪽과 같은 자리
-    auto isInput = [&](const std::string& p) {
-        return std::any_of(reads.begin(), reads.end(), [&](const std::string& r) { return KooRemapper::include_closure::sameFile(p, r); });
+    // ★이 op 이 읽는 파일 — 주 덱 · 인클루드 닫힘 · 계획 · 계획의 동반 파일(files 와 줄이 가리킨 이름 — 변위장 · 조각 · 새 셸 섹션) ·
+    //   설정 YAML(`resolveFiles` 가 적어 두어 관문이 저절로 본다). 산출 · 보고는 그 어느 것과도 같으면 안 된다(공용 관문 `output_guard` —
+    //   정규 경로 · 심볼릭 · 하드 링크). 판 2 는 인클루드를 읽기만 하고(사용자 결정 11-07), 동반 파일을 덮으면 계획을 다시 받아야 한다
+    //   (2026-11-07 적대적 검토 #3). 설정 YAML 은 예전 대조에 빠져 `report: a.yaml` 이 설정을 보고로 덮었고(rc 0) · 설정과 같은 output 은
+    //   쓰기 관문에 걸린 뒤 「옛 산출」로 지워졌다(11-07 밤 실측)
+    std::vector<KooRemapper::output_guard::Input> reads = KooRemapper::output_guard::modelInputs(modelPath);
+    reads.push_back({planPath, "plan"});
+    for (const auto& n : carryoverCompanionNames(planPath))
+        reads.push_back({(std::filesystem::path(planPath).parent_path() / n).string(), "계획의 동반 파일"});   // 적용 쪽과 같은 자리
+    auto isDir = [](const std::string& p) {
+        std::error_code ec;
+        return std::filesystem::is_directory(p, ec);
     };
-    std::string clobW, clobR;
-    // 보고가 입력(또는 산출)이면 보고조차 쓸 자리가 없다 — 콘솔로만 거절한다
-    if (KooRemapper::include_closure::sameFile(reportPath, outPath) ||
-        KooRemapper::include_closure::clobberPair({reportPath}, reads, clobW, clobR)) {
-        console.error(std::string("[") + tag + "] report 「" + reportPath + "」 가 " +
-                      (clobR.empty() ? std::string("output") : "읽는 파일 「" + clobR + "」") + " 과 같다 — 입력(주 덱 · 계획 · 인클루드 · "
-                      "계획의 동반 파일)에 쓰지 않는다. report 를 다른 이름으로 주라");
+    std::string why;
+    // 보고 자리가 입력 · 산출 · 폴더면 보고조차 쓸 자리가 없다 — 콘솔로만 거절한다(아무것도 쓰지 않는다)
+    if (KooRemapper::output_guard::findClash({reportPath}, reads, why) || KooRemapper::include_closure::sameFile(reportPath, outPath) ||
+        isDir(reportPath)) {
+        if (why.empty()) why = isDir(reportPath) ? "report 「" + reportPath + "」 자리가 폴더다" : "report 「" + reportPath + "」 가 output 과 같다";
+        console.error(std::string("[") + tag + "] " + why + " — 보고를 쓸 자리가 없어 아무것도 쓰지 않았다. report 를 다른 이름으로 주라");
         return 1;
     }
-    // 산출이 입력이면 보고(안전한 자리)에 적고 거절한다 — 아무것도 덮거나 지우지 않는다(아래 dropOutput 도 입력은 건너뛴다)
+    // 산출 자리가 입력 · 폴더면 보고(안전한 자리)에 적고 거절한다 — 아무것도 쓰거나 지우지 않는다
     std::string outClobber;
-    if (KooRemapper::include_closure::clobberPair({outPath}, reads, clobW, clobR))
-        outClobber = "output 「" + clobW + "」 이 읽는 파일 「" + clobR + "」 과 같다 — 입력(주 덱 · 계획 · 인클루드 · 계획의 동반 파일)은 덮어쓰지 "
-                     "않는다(계획이 지문으로 고정한 파일이다) · output 을 다른 이름으로 주라";
+    if (KooRemapper::output_guard::findClash({outPath}, reads, why))
+        outClobber = "output — " + why + "(계획이 지문으로 고정한 입력 · 설정은 덮어쓰지 않는다) · output 을 다른 이름으로 주라";
+    else if (isDir(outPath))
+        outClobber = "output 「" + outPath + "」 자리가 폴더다 — 폴더는 덮거나 지우지 않는다 · output 을 다른 이름으로 주라";
     console.println(std::string("[") + tag + "] Model : " + modelPath);
     console.println(std::string("[") + tag + "] Plan  : " + planPath);
 
+    // ★쓰기는 같은 폴더의 임시 파일(`.<이름>.kr_tmp_…`)에 하고 대조 · 품질 관문까지 지나면 바꿔 넣는다(extract-parts 와 같은 규칙 —
+    //   사용자 결정 11-07 밤). 거절 · 실패면 이번 실행의 임시 파일만 지운다 — output 자리의 앞 파일 · 폴더 · 남의 파일은 건드리지 않는다
+    //   (예전엔 거절하면 앞 실행의 덱을 「옛 산출」로 지웠다 — 플랫폼에서 앞 잡의 출력이 사라졌다 · `stale_output_removed`)
+    CarryStagedFiles staged;
     KooRemapper::carryover::Report rep;
     auto writeReport = [&]() {
-        std::ofstream o(reportPath, std::ios::binary);
-        if (!o.is_open()) { console.error(std::string("[") + tag + "] 보고를 쓸 수 없다: " + reportPath); return false; }
-        o << KooRemapper::carryover::toJson(rep);
+        std::string tmp;
+        if (!staged.writeText(reportPath, KooRemapper::carryover::toJson(rep), tmp) || !staged.commit(reportPath)) {
+            console.error(std::string("[") + tag + "] 보고를 쓸 수 없다: " + reportPath);
+            return false;
+        }
         console.println(std::string("[") + tag + "] Report: " + reportPath);
         return true;
     };
@@ -1902,25 +1976,13 @@ int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
             else console.warning(line);
         }
     };
-    // 거절하면 출력 자리에 덱을 남기지 않는다 — 앞선 실행이 남긴 덱이 ok false 보고 옆에 앉아 있으면 그것을 이번 산출로 읽는다(리뷰 11-07).
-    // 단 **입력 파일은 절대 지우지 않는다**(검토 #3 — 산출 이름이 동반 파일이면 그 조각을 「옛 산출」로 지웠다)
-    std::error_code staleEc;
-    const bool staleAtStart = std::filesystem::exists(outPath, staleEc);
-    auto dropOutput = [&]() {
-        std::error_code ec;
-        if (!std::filesystem::exists(outPath, ec) || isInput(outPath)) return;
-        if (!std::filesystem::remove(outPath, ec)) {
-            console.warning(std::string("[") + tag + "] 출력 자리의 덱을 지우지 못했다: " + outPath);
-            return;
-        }
-        rep.warnings.push_back({0, "stale_output_removed", "출력 자리(" + outPath + ")에 있던 덱을 지웠다" +
-                                                              (staleAtStart ? std::string(" — 앞선 실행이 남긴 덱이다") : std::string()) +
-                                                              " · 거절한 보고 옆에 이번 산출이 아닌 덱이 남지 않게"});
-    };
+    // 거절 · 실패 — 이번 실행의 임시 파일만 지우고 보고(ok false · output_written false · 걸린 것 전부)를 쓴다. output 자리의 앞 파일은
+    // 그대로다 — 보고의 output_written 이 그것이 이번 산출이 아니라고 말한다
     auto refuse = [&](const std::string& why) {
         rep.ok = false;
+        rep.outputWritten = false;
         rep.deckShaOut.clear();
-        dropOutput();
+        staged.discardAll();
         printList(rep.problems, true);
         printList(rep.warnings, false);
         writeReport();
@@ -1934,11 +1996,10 @@ int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
 
     if (!outClobber.empty()) {
         rep.problems.push_back({0, "output_clobber", outClobber});
-        return refuse("output 이 읽는 파일과 같다 — 아무것도 쓰지 않았다(보고만 남긴다)");
+        return refuse("output 자리에 쓸 수 없다 — 아무것도 쓰지 않았다(보고만 남긴다)");
     }
 
-    // 이 op 안의 어떤 예외도 보고를 남기고 덱을 남기지 않는다(리뷰 11-07 — map::at 이 보고 없이 rc 1 로 끝났다)
-    bool wrote = false;   // 이번 실행이 덱을 썼다(예외가 나면 지운다)
+    // 이 op 안의 어떤 예외도 보고를 남기고 덱을 바꿔 넣지 않는다(리뷰 11-07 — map::at 이 보고 없이 rc 1 로 끝났다)
     std::string internal;
     try {
         ModelAssembler assembler;
@@ -1949,28 +2010,49 @@ int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
         if (!assembler.applyCarryoverPlan(planPath, outPath, rep))
             return refuse("사전 검사에서 " + std::to_string(rep.problems.size()) + " 건이 걸렸다 — 계획 전체를 적용하지 않았고 덱을 쓰지 않았다");
         for (const auto& msg : assembler.infoMessages) console.println(msg);
-        if (!writeOutputChecked(assembler, outputPrefix, tag, console)) {
-            rep.problems.push_back({0, "write", assembler.getErrorMessage().empty() ? std::string("쓰기 관문에서 멈췄다") : assembler.getErrorMessage()});
+        // 덱은 output 옆의 임시 파일에 쓴다(쓰기는 <접두>.k 를 쓴다). 쓰기 관문이 남긴 말의 임시 이름은 output 이름으로 바꿔 싣는다
+        std::string tmpDeck;
+        if (!staged.reserve(outPath, ".k", tmpDeck)) {
+            rep.problems.push_back({0, "write", "output 옆에 임시 파일 이름을 잡지 못했다: " + outPath});
             unapply();
-            return refuse("덱 쓰기가 멈췄다 — 산출이 없다");
+            return refuse("덱 쓰기가 멈췄다 — 산출이 없다(output 자리의 앞 파일은 그대로다)");
         }
-        wrote = true;
-        if (!assembler.verifyCarryoverOutput(outPath, rep)) {
-            std::remove(outPath.c_str());
-            return refuse("쓴 덱의 대조 · 품질 관문에서 걸렸다 — 산출을 지웠다: " + outPath);
+        if (!writeOutputChecked(assembler, tmpDeck.substr(0, tmpDeck.size() - 2), tag, console)) {
+            std::string msg = assembler.getErrorMessage().empty() ? std::string("쓰기 관문에서 멈췄다") : assembler.getErrorMessage();
+            for (size_t at = msg.find(tmpDeck); at != std::string::npos; at = msg.find(tmpDeck, at + outPath.size()))
+                msg.replace(at, tmpDeck.size(), outPath);
+            rep.problems.push_back({0, "write", msg});
+            unapply();
+            return refuse("덱 쓰기가 멈췄다 — 산출이 없다(output 자리의 앞 파일은 그대로다)");
         }
+        if (!assembler.verifyCarryoverOutput(tmpDeck, rep))
+            return refuse("쓴 덱의 대조 · 품질 관문에서 걸렸다 — 바꿔 넣지 않았다(output 자리의 앞 파일은 그대로다): " + outPath);
         {
-            std::ifstream o(outPath, std::ios::binary);
+            std::ifstream o(tmpDeck, std::ios::binary);
             std::ostringstream ss;
             ss << o.rdbuf();
             rep.deckShaOut = KooRemapper::util::sha256Hex(ss.str());
         }
         rep.ok = true;
+        rep.outputWritten = true;
         printList(rep.warnings, false);
-        if (!writeReport()) {
-            std::remove(outPath.c_str());   // rc 1 이면 산출이 없다 — 보고 없이 덱만 남기지 않는다
+        // 보고를 먼저 임시로 써 두고 덱 · 보고 차례로 바꿔 넣는다 — 덱을 바꿔 넣지 못하면 앞 파일 그대로 거절한다
+        std::string tmpRep;
+        if (!staged.writeText(reportPath, KooRemapper::carryover::toJson(rep), tmpRep)) {
+            rep.problems.push_back({0, "write", "보고를 임시 파일에 쓰지 못했다: " + reportPath});
+            unapply();
+            return refuse("보고를 쓸 수 없다 — 덱을 바꿔 넣지 않았다(output 자리의 앞 파일은 그대로다)");
+        }
+        if (!staged.commit(outPath)) {
+            rep.problems.push_back({0, "write", "쓴 덱을 output 자리(" + outPath + ")로 바꿔 넣지 못했다"});
+            unapply();
+            return refuse("덱을 바꿔 넣지 못했다 — output 자리의 앞 파일은 그대로다");
+        }
+        if (!staged.commit(reportPath)) {   // 덱은 이미 바꿔 넣었다 — 보고 없이 성공이라 말하지 않는다
+            console.error(std::string("[") + tag + "] 덱은 바꿔 넣었지만(" + outPath + ") 보고를 바꿔 넣지 못했다: " + reportPath);
             return 1;
         }
+        console.println(std::string("[") + tag + "] Report: " + reportPath);
         console.println(std::string("[") + tag + "] Done -> " + outPath + "  (sha256 " + rep.deckShaOut + ")");
         return 0;
     } catch (const std::exception& e) {
@@ -1978,9 +2060,8 @@ int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
     } catch (...) {
         internal = "알 수 없는 예외";
     }
-    if (wrote) std::remove(outPath.c_str());   // 이번에 쓴 덱 — 대조를 마치지 못했다
-    rep.problems.push_back({0, "internal_error", "이월 적용 안에서 예외가 났다(" + internal + ") — 덱을 쓰지 않았다" +
-                                                     (wrote ? std::string("(쓴 덱은 지웠다)") : std::string()) + " · 이 op 의 결함이다(보고와 입력을 알려 주세요)"});
+    rep.problems.push_back({0, "internal_error", "이월 적용 안에서 예외가 났다(" + internal + ") — 덱을 바꿔 넣지 않았다(output 자리의 앞 파일은 "
+                                                     "그대로다) · 이 op 의 결함이다(보고와 입력을 알려 주세요)"});
     unapply();
-    return refuse("내부 오류로 멈췄다 — 산출이 없다");
+    return refuse("내부 오류로 멈췄다 — 산출이 없다(output 자리의 앞 파일은 그대로다)");
 }

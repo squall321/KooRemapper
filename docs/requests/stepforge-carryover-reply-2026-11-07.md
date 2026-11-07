@@ -99,13 +99,16 @@
 - **경고만 하는 것** — 계획에 줄이 없는 덱 PID · `unread_cards` · 새 파트의 물성 확인 · 바이트가 다른 `.k` 조각(값 대조는 통과).
 - **적대적 검토 뒤 고친 것(11-07)** — 짓는 쪽 시험이 다 초록이었는데도 조용히 틀린 덱을 내는 길이 있어 막았다. 보고의 새 종류:
   - `opaque_elements` — 리더가 메시에 담지 않는 요소 블록(`*ELEMENT_SOLID_ORTHO` · `_DOF` · `_H20` 류 · `_H8TOH20` · `_TET4TOTET10` ·
-    `*ELEMENT_TSHELL_BETA`, 보의 `_ELBOW` · `_WARPAGE` 옵션 카드 등)이 있으면 모든 형상 줄(옮기기 · 모프 · 바꿔 넣기 · 지우기 · 새 파트)을 거절.
+    `*ELEMENT_TSHELL_BETA` 등)이 있으면 모든 형상 줄(옮기기 · 모프 · 바꿔 넣기 · 지우기 · 새 파트)을 거절. (11-07 밤) 보의 `_ELBOW`(MN) ·
+    `_WARPAGE`(SN1 · SN2) 옵션 카드는 이제 우리 걸음이 읽어 거절하지 않는다 — 그 절점은 나눠 쓴 절점 검사에 든다.
+    (11-07 밤 · 그쪽 권고 D-681) 요소 `_TITLE` 블록에 요소가 있을 수 있는 PID 를 고치는 줄도 같은 갈래로 거절한다(PID 마다 — keep 은 둔다).
   - `ref_unscanned` — 바꿔 넣기 · 지우기 줄이 있는데, 덱에 우리가 참조를 읽지 못하는 키워드(참조 없음이 확실한 키워드 목록 밖 —
     예 `*LOAD_SEGMENT` · `*CONSTRAINED_SHELL_TO_SOLID` · `*INITIAL_VELOCITY_RIGID_BODY`)가 있으면 거절. 옮기기 · 모프만인 계획은 해당 없다.
   - `set_unresolved` — 풀 수 없는 `_GENERAL` 세트. `eid_collision` — 요소 종류 사이 EID 겹침(우리 리더 · 쓰기가 EID 하나로 요소를 가린다).
   - `deck_no_end` — `*END` 없는 덱에 바꿔 넣기 · 새 파트. `internal_error` — 예기치 않은 오류에도 보고는 남고 덱은 안 쓴다.
   - 경고 `orientation_not_rotated` — 회전(R ≠ I)이 있으면 재료 축(AOPT) · 좌표계 · MCID · 초기응력은 돌리지 않는다고 알린다.
-    `stale_output_removed` — 거절할 때 같은 자리의 옛 산출 덱을 지웠다.
+    (11-07 밤 바뀜) 거절 · 실패하면 output 자리의 앞 파일은 **그대로 둔다** — 쓰기는 임시 파일 + 바꿔 넣기이고, 보고의 `output_written` 이
+    이번 실행이 덱을 바꿔 넣었는지 말한다(옛 경고 `stale_output_removed` 는 없앴다).
   - 너그러워진 것 — 강체 허용을 1e-6 으로(그쪽 `round(x, 9)` 행렬이 1e-9 판정에 걸렸다), 옮기기 줄은 셸 법선 검사를 안 한다(회전으로 법선이
     도는 것은 뒤집힘이 아니다), 셸 새 섹션의 T1 은 상대 1e-4(그쪽 `%10.5g`), 못 지은 조각의 `notes` · 빈 `why` · `check` 없는 옮기기 줄을 받는다.
 - **공용 고침(같은 날)** — i10 덱에 조각을 넣으면 쓰기 관문이 블록을 8칸으로 읽어 늘 멈췄다(`cad_solid_merge_to_deck` 도) → 덱 폭으로.

@@ -375,6 +375,12 @@ BOM 을 붙인 설정으로 둘 다 **종료 코드 0** 으로 정상 산출물�
 번호를 다시 낼 수 있었습니다(실사용 인클루드 덱 88장 중 83장에서 주 덱만 센 노드·요소 최대값이
 닫힘의 최대값보다 작았습니다).
 
+- 섹션 번호(SECID)는 `*SECTION_*` 블록의 **모든** 데이터 줄 첫 칸 정수를 넉넉히 셉니다(2026-11-07 밤) — 블록마다 첫 카드만
+  세어, 한 키워드 아래 쌓인 둘째 카드의 SECID(예: `examples/wrap/cylinder_2layer.k` 의 `*SECTION_SOLID` 밑 SECID 1 · 2)를 새 섹션이
+  다시 낼 수 있었습니다(rc 0 · 같은 SECID 둘). 정수로 쓴 두께 · 각도 · 숫자 제목 줄도 들어 새 SECID 가 쓸데없이 커질 수 있습니다
+  (겹치는 것보다 안전한 쪽). 「그 SECID 가 있나 · 어떤 섹션인가」 는 첫 카드 표 그대로입니다. 새 SECID 를 내는 op —
+  `restack` · `disconnect` · `offset`(다재료 · dual 포함) · `merge` · `cnrb2solid` · IGA — 와 바닥(`id_floor` · `cad_solid_merge_to_deck`
+  · `apply_carryover_plan`)이 이 셈을 씁니다.
 - 인클루드를 다 읽었으면 조용합니다. 못 읽은 이름이나 따라가지 않은 `*INCLUDE_*`(`_TRANSFORM` 등)가 있으면
   **한 번** 경고하고 종료 코드는 그대로 0 입니다.
   ```
@@ -5492,7 +5498,8 @@ several (even tens of) cards per set" 이라고 적는다. 그 규칙을 틀리�
 long 20 · Vol_I 156596-156638)에 있다. 2026-11-07 전엔 Card 1 만 읽어 `cleanup-nodes` safe 가 MN 을 지우고(rc 0 · 되읽기 0)
 `extract-parts` 가 싣지 않았다 — 이제 걸음 · cleanup-nodes · extract-parts(싣기 · 번호 다시 매기기 · 되읽기)가 다 읽는다(콤마 ELBOW
 줄 · MN 칸 안에 빈칸 · MN 칸(1-10열) 안에서 시작하는 `$` 주석은 renumber 가 거절한다 — 새 번호가 `$` 를 덮어 주석 글자가 칸 2 의 값이
-됐다). 이월 적용은 ELBOW 블록을 그대로 거절한다.
+됐다). 이월 적용(§52)도 같은 걸음이 MN 을 읽어 ELBOW 블록을 다른 보처럼 다룬다(나눠 쓴 절점에 MN 까지 · 11-07 밤 — 그 전엔 그 블록이
+있으면 덱을 고치는 줄을 다 거절했다).
 
 ★보 `_WARPAGE` 의 SN1 · SN2 는 Card 9(ELBOW 가 있으면 그 앞 · 없으면 마지막 옵션 카드 · 8칸 표 칸 0 · 1 — Vol_I 155889 · 156529-156548)의
 **스칼라 절점**(`*NODE_SCALAR` · `_VALUE` — 번호는 `*NODE` 와 겹치지 않는다, Vol_I 214757)이다. 2026-11-07 전엔 아무 걸음도 SN 을
@@ -5501,7 +5508,8 @@ long 20 · Vol_I 156596-156638)에 있다. 2026-11-07 전엔 Card 1 만 읽어 `
 extract-parts 는 그 스칼라 절점 줄을 싣고 번호를 다시 매길 때 SN 칸과 NID 를 같은 새 번호로 바꾸며 되읽기도 SN 을 잰다(덱에 없으면
 rc 1). restack 의 지운 절점 보고는 WARPAGE · ELBOW 블록의 정수를 다 보지 않고 절점 칸(Card 1 · SN · MN)만 본다(EID 가 지운 절점
 번호와 같아 거짓으로 적던 것). 새 절점 번호의 바닥(assemble · `id_floor`)도 스칼라 절점 번호 위다(회귀 `test_aux_card_walkers.py` E 절 ·
-`test_dead_node_list_cards.py` C 절 · `test_id_floor.py` G 절). 이월 적용은 WARPAGE 블록을 그대로 거절한다.
+`test_dead_node_list_cards.py` C 절 · `test_id_floor.py` G 절). 이월 적용(§52)도 같은 걸음이 SN 을 읽어 WARPAGE 블록을 다른 보처럼
+다룬다(나눠 쓴 절점에 SN 까지 · 조각의 절점 바닥은 스칼라 절점 번호 위 · 11-07 밤).
 
 ★절점 칸 **개수**까지 적는 이유 — '칸 2부터 끝까지' 로 뭉개면 보의 `RT1`·`RR1`·`LOCAL` 과
 안전벨트의 `SBRID`·`SLEN` 이 절점이 된다. 세기만 하면 과포함(안전한 방향)이지만, **번호를
@@ -5740,9 +5748,10 @@ fragment_map: fragment_abc.json       # (선택) 받은 조각의 대응표 — 
 ```
 
 - 네 번호의 이름은 StepForge `export_part_fragment` 의 인자 **그대로**다 — 그대로 넘기면 된다.
-- 바닥은 assemble 과 **같은 커서**다(인클루드 닫힘까지 센 절점·요소·파트·섹션·재질·세트의 최대값 + 1). 절점은 스칼라 절점
-  (`*NODE_SCALAR` · `_VALUE` — 보 `_WARPAGE` 의 SN)까지 센다 — 그 번호는 `*NODE` 와 겹치면 안 된다(2026-11-07 전엔 몰랐다).
-  `pid_start` 는 PID·SECID·MID 셋의 최대값 위다 — 조각은 셋을 같은 번호로 쓴다.
+- 바닥은 assemble 과 **같은 커서**다(인클루드 닫힘까지 센 절점·요소·파트·섹션·재질·세트의 최대값 + 1 — 섹션은 쌓인 카드까지 · §3.1(h)).
+  절점은 스칼라 절점(`*NODE_SCALAR` · `_VALUE` — 보 `_WARPAGE` 의 SN)까지 센다 — 그 번호는 `*NODE` 와 겹치면 안 된다(2026-11-07 전엔 몰랐다).
+  `pid_start` 는 PID·SECID·MID 셋의 최대값 위다 — 조각은 셋을 같은 번호로 쓴다. 열 재질(`*MAT_THERMAL_*` 과 그 번호 이름
+  `*MAT_T01`~`*MAT_T18`)의 TMID 는 MID 와 독립된 번호라(Vol II 3-1 — 같은 수가 있어도 된다) MID 로 세지 않는다(번호 이름은 11-07 밤에 더했다).
 - 그 번호로 쓴 조각은 `cad_solid_merge_to_deck`(§49)가 **옮기지 않고** 넣는다 — 두 op 이 같은 바닥을 본다.
 - `fragment_map` 을 주면 쓴 범위마다 아래끝이 바닥 이상이면 `above`, 아니면 `below` 이고 하나라도 `below` 면 rc 1 이다
   (그 조각은 넣을 때 옮겨진다). 회귀 `tools/regress/test_id_floor.py` 10항.
@@ -5756,7 +5765,7 @@ KooRemapper apply_carryover_plan <config.yaml>
 ```yaml
 model: deck.k                # 계획이 지문(deck.sha256)으로 고정한 덱 — 받은 바이트 그대로
 plan: plan.json              # StepForge 이월 계획 — 동반 파일(field_<PID>.bin · fragment_<PID>.k · section_<PID>.k)은 같은 폴더
-output: deck_applied.k       # 고친 덱 — 걸린 것이 하나라도 있으면 쓰지 않는다(rc 1)
+output: deck_applied.k       # 고친 덱 — 걸린 것이 하나라도 있으면 바꿔 넣지 않는다(rc 1 · 그 자리의 앞 파일은 그대로)
 # report: my_report.json     # (선택) 보고 JSON — 기본 <output 줄기>_carryover.json · 거절해도 쓴다
 ```
 
@@ -5798,7 +5807,8 @@ CAD 개정이 오면 StepForge 가 덱 PID 마다 처리(그대로 · 강체 옮
 
 지우기 · 바꿔 넣기의 번호 목록은 늘 **그 PID 의 요소**에서 구한다 — 계획의 범위로 고르지 않는다(손으로 매긴 덱은 범위 안에 다른 PID 의
 번호가 끼어 있다 · §10.3 ⑤). 쓴 덱은 다시 읽어(인클루드가 있으면 닫힘째) 옮긴 자리 · 지운 번호 · 넣은 번호와 좌표 · 손대지 않은 절점 ·
-파트별 요소 수 · `*PART` · 새 셸 섹션을 대조하고, **새로** 뒤집힌 솔리드나 모프가 뒤집은 셸 법선이 있으면 산출을 지운다.
+파트별 요소 수 · `*PART` · 새 셸 섹션을 대조하고, **새로** 뒤집힌 솔리드나 모프가 뒤집은 셸 법선이 있으면 바꿔 넣지 않는다(쓴 임시 파일만
+지운다 — §52.8).
 
 넣는 카드(조각 · 새 셸 섹션)는 주 덱의 **첫** `*END` 앞에 한 벌만 둔다 — LS-DYNA 는 첫 `*END` 에서 읽기를 멈춘다. 쓰기가 `*END` 마다
 덧붙임을 다시 넣어, `*END` 가 둘 이상인 덱이면 같은 카드가 두 벌 나갔다(쓰기의 같은 자리를 쓰는 다른 op 도 같이 고쳤다 · 적대적 검토 11-07).
@@ -5821,6 +5831,25 @@ CAD 개정이 오면 StepForge 가 덱 PID 마다 처리(그대로 · 강체 옮
 번호 바닥 · 못 지은 조각 …)는 그대로다 — 판 2 의 인클루드 덱에서는 그 검사가 **닫힘 전체**를 본다(인클루드 파일의 세트가 바꿔 넣는
 PID 의 절점을 가리키면 주 덱에서와 똑같이 `node_ref` 로 거절하고 「`inc/sets.k` 줄 N」 처럼 그 파일 · 줄을 댄다). 판 1 계획은 `*INCLUDE` 가
 있으면 `deck_include` 로 거절하고, 셸 두께가 바뀐 모프(`field.thickness`)를 `field_thickness` 로 거절한다.
+
+StepForge 권고 넷도 받는다(그쪽 `591d5b5` · D-681 · 사용자 결정 11-07 밤). 넷 다 LS-DYNA 가 덱을 읽는 꼴로 가른다.
+
+- **요소 `_TITLE` 블록**(`*ELEMENT_SOLID_TITLE` · `*ELEMENT_SHELL_TITLE` · `*ELEMENT_TSHELL_TITLE`)은 다 읽은 블록이 아니다 — TITLE 은
+  이 키워드들의 설명서 옵션이 아니어서 블록 첫 줄이 제목 카드인지 근거가 없다. 그 블록에 요소가 있을 수 있는 PID(데이터 줄마다 둘째
+  칸 — 두 읽기를 다 덮게 넉넉히)를 고치는 줄은 `opaque_elements`(그 PID)로 거절하고 keep · review 는 둔다. 우리 리더도 짐작으로 읽는다
+  (11-07 밤 실측) — 솔리드 · 티쉘은 제목 카드가 없다고 보아 글자 제목은 칸이 안 읽혀 버려질 뿐이고, 숫자꼴 제목(「10 20」)은 두 줄 카드
+  머리가 되어 다음 요소 카드를 절점 줄로 삼킨다(EID 10 · PID 20 이 생기고 요소 1 이 사라졌다). 셸은 첫 줄의 첫 토큰이 정수가 아닐 때만
+  제목으로 버려 숫자꼴 제목이 요소 하나가 된다.
+- **정수 칸의 실수 꼴** — NIP `5.000e+00` 처럼 실수 꼴로 쓴 정수 값은 그 정수로 읽는다(LS-DYNA 실행 기록이 NIP `3.000E+00` 을 3 으로
+  받는다 · 그쪽 말뭉치 52 덱). 새 셸 섹션 카드의 줄 셈(Card 1 의 ELFORM · NIP · ICOMP — §52.7)이 받는다. 정수가 아닌 값(`2.5`)은
+  그대로 거절한다. ID 칸(SECID)은 정수 글자만 받는다.
+- **열 재질의 번호 이름**(`*MAT_T01`~`*MAT_T18`)은 MID 를 정의하지 않는다 — TMID 는 MID 와 독립된 번호다(Vol II 2-9 · 3-1).
+  `*MAT_THERMAL_*` 과 `*MAT_ADD_*` 처럼 공용 MID 훑기에서 뺀다 — 조각의 MID 가 열 재질의 TMID 로만 있으면 「덱에 없다」(`fragment`)이고,
+  새 MID · 번호 바닥(`id_floor` 의 `pid_start` 등)이 TMID 위로 올라가지 않는다.
+- **두 번 정의된 SECID · MID** — 손대는 PID(옮기기 · 모프 · 바꿔 넣기 · 지우기)의 `*PART` 가 가리키는 SECID 나 MID 를 닫힘의 두 블록 이상이
+  정의하면 그 줄을 `part_duplicate` 로 거절한다(LS-DYNA 는 같은 번호의 둘째 정의에서 멈춘다 — StepForge 도 그 줄에서 멈춘다). 보고에 정의마다
+  자리(인클루드면 파일 · 줄)를 댄다. 정의는 블록마다 첫 카드다(번호 훑기와 같다 — 한 키워드 아래 쌓인 둘째 카드는 세지 않는다). keep ·
+  review 줄은 손대지 않으니 거절하지 않는다.
 
 ### 52.5 판 2 — 인클루드가 있는 덱(「주 덱만 고침 · 인클루드면 거절」 · 사용자 결정 11-07)
 
@@ -5848,13 +5877,14 @@ null). 칸 하나라도 다르면 손대는 줄은 `deck_range`(칸 · 계획 �
 - `field.new_section` 이 null 이면 섹션을 그대로 둔다(두께 칸 `field.thickness` 가 있어도 — 사람이 정한 두께 · §10.2).
 - 지은 카드(`{secid, thickness, file: "section_<PID>.k", why}`) — 파일은 `files` 의 지문과 같아야 하고, 엄격히 읽어 `*KEYWORD` · 셸 섹션
   카드 **하나**(`*SECTION_SHELL` · `_TITLE` — 제목 · Card 1 · Card 2 · ICOMP 1 이면 각도 카드 · 그 밖의 줄 · 쌓인 둘째 카드 · 사용자 정의 셸
-  ELFORM 101~105 는 거절) · `*END` 여야 한다.
+  ELFORM 101~105 는 거절) · `*END` 여야 한다. Card 1 의 ELFORM · NIP · ICOMP 는 실수 꼴로 쓴 정수(`5.000e+00`)도 그 정수로 읽는다
+  (§52.4 StepForge 권고 — 정수가 아닌 값은 거절).
 - 카드는 덱의 옛 카드(그 PID 주 덱 `*PART` 의 SECID — 주 덱에 하나뿐)를 **그대로 옮겨** SECID(Card 1 앞 10칸)와 T1~T4(Card 2 앞 40칸)만
   바꾼 것이어야 한다 — 키워드 줄 · 제목 · 주석 · 그 밖의 칸 · 딸린 카드를 줄마다 견준다(다르면 `new_section` 에 그 줄).
 - SECID 는 `new_section.secid` 와 같고 · 닫힘에 없고(`secid_collision`) · `deck.max.secid` 위이며 · 조각의 새 섹션을 먼저 매긴 뒤 모프 줄
   차례로 잇는다(`secid_order`). T1~T4 는 넷 다 `thickness` 다.
 - 「닫힘에 없다」 · 「가장 큰 SECID 위」 는 한 키워드 아래 **쌓인 둘째 카드**까지 본다 — `*SECTION_*` 블록의 데이터 줄마다 첫 칸의 정수를
-  SECID 로 넉넉히 센다(번호 커서는 첫 카드만 읽어, 쌓인 카드의 SECID 를 새 섹션이 다시 낸 적이 있다 — 적대적 검토 11-07). 두께 · 제목 줄의
+  SECID 로 넉넉히 센다(공용 번호 커서와 같은 셈 — 예전 커서는 첫 카드만 읽어 쌓인 카드의 SECID 를 새 섹션이 다시 냈다 · 11-07). 두께 · 제목 줄의
   정수도 들어 거짓 거절이 날 수 있다(안전한 쪽). 조각의 새 섹션(판 1 · 2)도 같은 집합으로 겹침을 본다.
 - 넣으면 그 카드를 주 덱 첫 `*END` 앞에 두고 그 PID `*PART` 의 SECID 칸**만** 덱 폭(표준 · i10 10칸 · long 20칸)으로 고친다 — 같은 섹션을 쓰는
   다른 파트는 옛 섹션 그대로다. 보고의 그 줄에 `new_section {secid, thickness}`.
@@ -5866,21 +5896,26 @@ null). 칸 하나라도 다르면 손대는 줄은 `deck_range`(칸 · 계획 �
 
 `ok` · `plan{sha256 · version · report_key · deck_from}` · `deck{sha256_in · sha256_out · includes}` · `problems[{pid · kind · detail}]` ·
 `warnings` · `shift` · `parts[처리마다 result · 옮긴 수 · 최대 변위 · 지운 수 · 넣은 구간 · 새 섹션(바꿔 넣기 {secid · elform} · 모프
-{secid · thickness}) · 뒤집힘 앞뒤 · refused_transform]` · `added` · `touches_changed`. 거절해도 · 내부 오류에도 쓰고, 거절하면 출력 자리의
-옛 덱을 지운다(`stale_output_removed`). 보고의 글자는 늘 바른 UTF-8 이다 — 계획(JSON 리더는 글자를 검사하지 않는다) · 덱 줄 · 경로에서 온
+{secid · thickness}) · 뒤집힘 앞뒤 · refused_transform]` · `added` · `touches_changed`. 거절해도 · 내부 오류에도 쓴다 — `ok` · `output_written`(이번
+실행이 output 자리에 덱을 바꿔 넣었나) · 걸린 것 전부. 보고의 글자는 늘 바른 UTF-8 이다 — 계획(JSON 리더는 글자를 검사하지 않는다) · 덱 줄 · 경로에서 온
 깨진 바이트는 U+FFFD 로 바꿔 싣고, 줄을 보일 때는 글자 경계에서 자른다(계획 글자를 이유로 거절하지 않는다 — 실을 때 고친다).
 수는 다시 읽으면 같은 double 이 되는 가장 짧은 꼴(15 → 16 → 17 자리)로 쓴다 — `refused_transform` 은 계획 값과 비트까지 같다(예전 `%.15g` 는
 `1.0000000000000002` 를 `1` 로 냈다 · 적대적 검토 11-07).
 
-output · report 는 이 op 이 **읽는 파일**(주 덱 · 계획 · 인클루드 닫힘 · 계획의 동반 파일 — `files` 와 줄이 가리킨 변위장 · 조각 ·
-`section_<PID>.k`) 어느 것과도 같으면 안 된다. output 만 겹치면 보고에 `output_clobber` 로 적고 아무것도 덮지 않으며, report 가 겹치면 보고
-자리가 없어 콘솔로만 거절한다. 거절할 때 지우는 옛 산출도 입력 파일이면 지우지 않는다(적대적 검토 11-07 — 산출 이름이 `fragment_6` 이면
-그 조각을 「옛 산출」로 지웠다).
+output · report 는 이 op 이 **읽는 파일**(설정 YAML · 주 덱 · 계획 · 인클루드 닫힘 · 계획의 동반 파일 — `files` 와 줄이 가리킨 변위장 ·
+조각 · `section_<PID>.k`) 어느 것과도 같으면 안 되고 폴더여도 안 된다(공용 관문 `output_guard`). output 이 걸리면 보고에 `output_clobber` 로
+적고 아무것도 쓰지 않으며, report 가 걸리면 보고 자리가 없어 콘솔로만 거절한다.
+
+쓰기는 **임시 파일 + 바꿔 넣기**다(사용자 결정 11-07 밤 — extract-parts 와 같은 규칙). 덱과 보고를 같은 폴더의 임시 파일
+(`.<이름>.kr_tmp_…`)에 쓰고, 되읽기 대조 · 품질 관문까지 지나면 덱 · 보고 차례로 바꿔 넣는다. 거절 · 실패면 이번 실행의 임시 파일만
+지운다 — output 자리의 앞 파일 · 폴더 · 남의 파일은 그대로다(보고의 `output_written` false 가 그것이 이번 산출이 아니라고 말한다).
+예전엔 거절하면 앞 실행의 덱을 「옛 산출」로 지웠다(`stale_output_removed` — 플랫폼에서 앞 잡의 출력이 사라졌고, 설정 YAML 과 같은
+output 이면 설정을, 빈 폴더면 폴더를 지웠다 · 11-07 밤 실측).
 
 ### 52.9 시험 · 아직 하지 않는 것
 
-- 회귀 `tools/regress/test_apply_carryover_plan.py`(판 1 · 83항) · `tools/regress/test_apply_carryover_plan_v2.py`(판 2 · 86항 — 실물 둘 ·
-  진리값 판을 판 2 로 · 칸 표 · 덱 자리 · §10.5 새 셸 섹션 · 인클루드 · refused_transform · 적대적 검토 고침 R-1~R-8 — R-8 은 gdb 로
+- 회귀 `tools/regress/test_apply_carryover_plan.py`(판 1 · 101항 — K 출력 규칙 · L StepForge 권고 · 보 ELBOW · WARPAGE) · `tools/regress/test_apply_carryover_plan_v2.py`(판 2 · 88항 — 실물 둘 ·
+  진리값 판을 판 2 로 · 칸 표 · 덱 자리 · §10.5 새 셸 섹션 · 인클루드 · refused_transform · 적대적 검토 고침 R-1~R-8 · S StepForge 권고 — R-8 은 gdb 로
   적용 직전에 멈춰 파일을 바꾼다 · gdb 로 멈추지 못하면 SKIP) · 단위 `tests/test_CarryoverPlan.cpp`.
 - 인클루드 파일 안의 고칠 자리는 고치지 않는다(거절 — 사용자 결정 11-07). 그 파트를 고치려면 닫힘을 펼친 한 덱으로 계획을 다시 받아야 한다.
 - 절점 두께 카드로 두께를 옮기는 일 · 요소마다 두께를 싣는 PID 의 새 섹션은 받지 않는다(그쪽도 조각으로 물러선다 · §10.7).
