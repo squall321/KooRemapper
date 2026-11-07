@@ -48,18 +48,43 @@ def test_the_deployed_producers_bytes_stay_accepted():
     assert hashlib.sha256(raw).hexdigest() == SHA03 and json.loads(raw)["_version"] == "0.3"
 
 
-def test_the_canonical_is_0_3_plus_flow_scalars_only_in_the_producers_format():
-    """0.4 = 0.3 에 cae_run.flow_scalars_only(bool) 하나(KooD3plotReader 10-31 정의). 생산 쪽이 바이트 그대로 옮기므로 꼴이 정해져 있다."""
-    raw = (op.VOCAB_DIR / op.CANONICAL).read_bytes()
-    doc = json.loads(raw)
-    assert doc["_version"] == "0.4" and hashlib.sha256(raw).hexdigest() in op.ACCEPTED
-    assert raw == (json.dumps(doc, ensure_ascii=False, indent=2) + "\n").encode(), "정본 꼴(indent 2 · 한글 그대로 · 끝 줄바꿈)"
+SHA04 = "59b4e70b3d308b46574a28dc4b5745a909e4923a5a062fe5ddbdaf17522124fa"   # 0.4 — 생산 쪽 eccde7f 배포판
+
+
+def _vocab(sha: str) -> dict:
+    return json.loads((op.VOCAB_DIR / op.ACCEPTED[sha]).read_bytes())
+
+
+def test_0_4_is_0_3_plus_flow_scalars_only():
+    """0.4 = 0.3 에 cae_run.flow_scalars_only(bool) 하나(KooD3plotReader 10-31 정의)."""
+    doc, old = _vocab(SHA04), _vocab(SHA03)
     run = next(t for t in doc["types"] if t["slug"] == "cae_run")
     added = run["properties"].pop()
     assert (added["key"], added["data_type"]) == ("flow_scalars_only", "bool")
-    old = json.loads((op.VOCAB_DIR / op.ACCEPTED[SHA03]).read_bytes())
     doc["_version"] = old["_version"]
     assert doc == old, "0.3 에서 칸 하나 말고 바뀐 것이 있다"
+
+
+def test_the_canonical_is_0_4_plus_plastic_hotspot_criteria_in_the_producers_format():
+    """0.5 = 0.4 에 핫스팟 소성 기준 둘(plastic_strain · plastic_work)과 기준별 값 칸 넷 — 칸마다 단위가 하나다(사용자 결정 11-07).
+    생산 쪽이 바이트 그대로 옮기므로 꼴이 정해져 있다."""
+    raw = (op.VOCAB_DIR / op.CANONICAL).read_bytes()
+    doc = json.loads(raw)
+    assert doc["_version"] == "0.5" and hashlib.sha256(raw).hexdigest() in op.ACCEPTED
+    assert raw == (json.dumps(doc, ensure_ascii=False, indent=2) + "\n").encode(), "정본 꼴(indent 2 · 한글 그대로 · 끝 줄바꿈)"
+    hs = next(t for t in doc["types"] if t["slug"] == "cae_hotspot")
+    by = {p["key"]: p for p in hs["properties"]}
+    assert by["criterion"]["enum_options"][-2:] == ["plastic_strain", "plastic_work"]
+    assert "unit" not in by["plastic_strain_mean"] and "unit" not in by["plastic_strain_max"], "유효소성변형률은 무차원"
+    assert by["plastic_work_mean"]["unit"] == by["plastic_work_max"]["unit"] == "mJ/mm³"
+    assert by["stress_mean"]["unit"] == by["stress_max"]["unit"] == "MPa"
+    # 0.4 로 되돌리면 같아야 한다 — 핫스팟 밖은 바뀐 것이 없다
+    old = _vocab(SHA04)
+    old_hs = next(t for t in old["types"] if t["slug"] == "cae_hotspot")
+    assert [p["key"] for p in hs["properties"] if not p["key"].startswith("plastic_")] == [p["key"] for p in old_hs["properties"]]
+    rest = {k: v for k, v in doc.items() if k not in ("_version", "types")}
+    assert rest == {k: v for k, v in old.items() if k not in ("_version", "types")}
+    assert [t for t in doc["types"] if t["slug"] != "cae_hotspot"] == [t for t in old["types"] if t["slug"] != "cae_hotspot"]
 
 
 def test_every_accepted_version_is_on_disk_with_its_fingerprint():
@@ -114,13 +139,33 @@ def test_some_runs_missing_from_the_report_is_a_warning_not_a_refusal():
 
 def test_each_package_is_checked_with_its_own_version():
     """0.4 꾸러미는 flow_scalars_only 를 실을 수 있고, 0.3 꾸러미가 그 칸을 실으면 거절한다 — 판마다 그 판의 어휘로."""
-    sha04 = next(s for s, n in op.ACCEPTED.items() if n == op.CANONICAL)
     pkg = _pkg()
-    pkg["vocabulary"].update(version="0.4", sha256=sha04)
+    pkg["vocabulary"].update(version="0.4", sha256=SHA04)
     _obj(pkg, "cae_run")["properties"]["flow_scalars_only"] = True
     got = _check(pkg)
-    assert got["vocabulary"] == {"version": "0.4", "sha256": sha04} and got["rows"]
+    assert got["vocabulary"] == {"version": "0.4", "sha256": SHA04} and got["rows"]
     _bad(lambda p: _obj(p, "cae_run")["properties"].update(flow_scalars_only=True), word="어휘에 없는 칸")
+
+
+def test_a_plastic_hotspot_is_taken_from_0_5_and_refused_by_0_4():
+    """핫스팟 소성 기준은 0.5 꾸러미만 실을 수 있다 — 0.4 꾸러미가 실으면 열거값 밖으로 거절한다(판마다 그 판의 어휘)."""
+    sha05 = next(s for s, n in op.ACCEPTED.items() if n == op.CANONICAL)
+    response = _obj(_pkg(), "cae_part_response")["key"]
+    hotspot = {"type": "cae_hotspot", "key": "hs/plastic/1", "label": "소성 1",
+               "properties": {"response": response, "criterion": "plastic_strain", "element_type": "solid", "rank": 1,
+                              "element_count": 3, "plastic_strain_mean": 0.012, "plastic_strain_max": 0.03}}
+    pkg = _pkg()
+    pkg["vocabulary"].update(version="0.5", sha256=sha05)
+    pkg["objects"].append(hotspot)
+    got = _check(pkg)
+    hs = [r for r in got["rows"] if r["type_slug"] == "cae_hotspot"]
+    assert hs and hs[0]["properties"]["plastic_strain_max"] == 0.03
+    pkg4 = _pkg()
+    pkg4["vocabulary"].update(version="0.4", sha256=SHA04)
+    pkg4["objects"].append(dict(hotspot, properties={**hotspot["properties"]}))
+    with pytest.raises(op.OntoPackageError) as exc:
+        _check(pkg4)
+    assert "어휘" in str(exc.value), str(exc.value)
 
 
 # ── 거절 — 아무것도 싣지 않는다 ─────────────────────────────────────────────

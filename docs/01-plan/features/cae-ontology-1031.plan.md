@@ -63,3 +63,7 @@
   `history/dynaforge-cae-0.3.json` 으로 옮겨 받아들인 판에 남겼다(생산 쪽 배포판은 0.3 을 싣는다). 0.4 sha256 `59b4e70b3d30…`.
   꼴은 생산 쪽 규칙 그대로(`json.dumps(indent=2, ensure_ascii=False)` + 줄바꿈) — 그쪽이 바이트를 옮긴다. `cae_run` 은 행으로 싣지 않으므로
   적재 · 질의는 바뀌지 않는다(검사만 판마다).
+- (11-07) **정본 0.5** — KooD3plotReader `f218f49` 요청(핫스팟 소성 기준). 사용자 결정 「기준별 값 칸을 따로 둔다」 — `cae_hotspot.criterion` 에
+  `plastic_strain` · `plastic_work`, 값 칸 `plastic_strain_mean/max`(무차원) · `plastic_work_mean/max`(mJ/mm³). `stress_*` 는 응력 기준에만.
+  0.4 바이트는 `history/dynaforge-cae-0.4.json`(생산 쪽 `eccde7f` 배포판) — 0.3 · 0.4 · 0.5 를 모두 받는다. sha256 `c42d02b3…`.
+
