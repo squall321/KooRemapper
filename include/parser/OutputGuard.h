@@ -37,7 +37,8 @@ const std::vector<std::string>& configs();
 void clearConfigs();
 
 // 모델과 그 인클루드 닫힘(`include_closure::readPaths` — 맨 `*INCLUDE` · 주 덱 폴더 기준 · `*INCLUDE_PATH`)을 읽는 파일로.
-// 덱을 흘려 읽고 줄은 담지 않는다. `role` 은 모델의 몫(인클루드는 「<role> 의 인클루드」).
+// 덱을 흘려 읽고 줄은 담지 않는다. `role` 은 모델의 몫(인클루드는 「<role> 의 인클루드」). 따라가지 않는 변형 인클루드
+// (`*INCLUDE_TRANSFORM` …)가 가리키는 파일 · 깊이 상한을 넘은 이름의 파일도 든다 — 산출 덱이 그 카드를 그대로 싣는다(셋째 묶음).
 std::vector<Input> modelInputs(const std::string& modelPath, const std::string& role = "model");
 // 설정 파일(빈 경로면 뺀다)과 모델 · 그 인클루드 닫힘 — 대부분의 op 이 읽는 것이 이것이다.
 std::vector<Input> configAndModel(const std::string& configPath, const std::string& modelPath);

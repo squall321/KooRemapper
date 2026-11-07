@@ -56,6 +56,20 @@ TEST(OutputGuard_modelInputs_는_모델과_중첩_인클루드를_몫과_함께_
     ASSERT_TRUE(output_guard::modelInputs("").empty());
 }
 
+TEST(OutputGuard_modelInputs_는_따라가지_않는_변형_인클루드의_파일도_낸다) {
+    // 산출 덱은 `*INCLUDE_TRANSFORM` 카드를 그대로 싣는다 — 그 파일을 덮으면 산출이 가리키는 파일이 사라진다(셋째 묶음 — database ·
+    // convert 가 output 을 그 파일로 주면 rc 0 으로 덮었다). 깊이 상한을 넘은 이름의 파일도 읽는 파일로 본다
+    OgScratch s("variants");
+    const std::string m = s.put("d/main.k", "*KEYWORD\n*INCLUDE_TRANSFORM\nt.k\n0,0,0,0,0,0,0\n0,0,0,0,0,0,0\n1.0,1.0,1.0,1.0\n0\n*END\n");
+    s.put("d/t.k", "*KEYWORD\n*NODE\n*END\n");
+    const auto in = output_guard::modelInputs(m);
+    ASSERT_EQ(in.size(), (size_t)2);
+    ASSERT_EQ(fs::path(in[1].path).filename().string(), std::string("t.k"));
+    ASSERT_EQ(in[1].role, std::string("model 의 *INCLUDE_TRANSFORM 파일"));
+    std::string why;
+    ASSERT_TRUE(output_guard::findClash({s.at("d/t.k")}, in, why));
+}
+
 TEST(OutputGuard_findClash_는_모델_인클루드_철자_링크를_잡고_두_경로를_적는다) {
     OgScratch s("clash");
     const std::string m = s.put("d/main.k", "*KEYWORD\n*INCLUDE\ninc.k\n*END\n");

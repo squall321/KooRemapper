@@ -1,6 +1,7 @@
 #include "strip.h"
 #include "parser/IncludeClosure.h"   // FlatDeck — flatten_includes(2026-10-17)
 #include "parser/IncludeScan.h"      // 덱이 쪼개져 있나 — 안내·거절
+#include "parser/OutputGuard.h"      // 쓸 파일이 읽는 파일을 덮나 — 공용 관문
 #include "parser/DeckWriter.h"
 #include "util/YamlComment.h"
 #include "cli/ConsoleOutput.h"
@@ -158,18 +159,14 @@ int runStrip(const std::string& yamlFile, ConsoleOutput& console)
         console.error("'keywords' list is required (nothing to strip)");
         return 1;
     }
-    // ★산출이 읽는 덱(주 덱 · 인클루드)과 같으면 거절한다 — 거르기는 산출을 열어(잘라 비워) 놓고 주 덱을 흘려 읽는다. 같은 파일이면
-    //   입력이 0 바이트가 되고 rc 0(「Total lines: 0」)이었다. 인클루드를 덮으면 그 입력이 사라진다(2026-11-07 검토 #6)
-    {
-        std::vector<std::string> reads{modelPath};
-        for (const auto& f : KooRemapper::include_closure::readPaths(modelPath).files) reads.push_back(f.path);
-        std::string w, r;
-        if (KooRemapper::include_closure::clobberPair({outputPath}, reads, w, r)) {
-            console.error("output 「" + w + "」 이 읽는 덱 「" + r + "」 과 같은 파일이다 — 입력 덱(주 덱 · 인클루드)에 쓰지 않는다(거르기가 "
-                          "입력을 비우고 다시 읽는다). output 을 다른 이름으로 주라");
-            return 1;
-        }
-    }
+    // ★산출이 읽는 파일과 같으면 거절한다 — 거르기는 산출을 열어(잘라 비워) 놓고 주 덱을 흘려 읽는다. 같은 파일이면 입력이 0 바이트가
+    //   되고 rc 0(「Total lines: 0」)이었다(2026-11-07 검토 #6). 읽는 파일은 extract-parts · cleanup-nodes 와 같다 — 설정 YAML · 주 덱 ·
+    //   인클루드 닫힘 · 이름이 가리킨 경로(깊이 상한을 넘은 것) · 따라가지 않는 변형 인클루드(`*INCLUDE_TRANSFORM` …)의 파일(산출 덱이 그
+    //   카드를 그대로 실어 덮으면 산출이 가리키는 파일이 사라진다). 예전엔 주 덱 · 인클루드만 견주어 설정 · 변형 인클루드의 파일을 덮고
+    //   rc 0 이었다(셋째 묶음). 거절은 공용 관문(`output_guard`)이 말한다
+    if (KooRemapper::output_guard::refuse("strip", {outputPath},
+                                          KooRemapper::output_guard::configAndModel(yamlFile, modelPath), console))
+        return 1;
 
     // Build uppercase match set for keywords
     // Each entry is matched as a PREFIX of the line's keyword.

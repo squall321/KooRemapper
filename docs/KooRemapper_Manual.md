@@ -393,7 +393,9 @@ BOM 을 붙인 설정으로 둘 다 **종료 코드 0** 으로 정상 산출물�
 
 덱 · 보고를 쓰는 모든 op 은 파일을 **하나라도 열기 전에** 이번 실행이 쓸 파일 전부(`output` · `report` 와 곁 파일 —
 `.dynain` · IGA 인클루드 · 대응표 · 진단 파일 · 임시 파일)를 읽는 파일과 견줍니다. 읽는 파일은 **설정 YAML** · **모델** ·
-**모델의 `*INCLUDE` 닫힘**([§3.1(h)](#31-yaml-공통-규칙-모든-op) 과 같은 규칙 — 주 덱 폴더 · `*INCLUDE_PATH`) · **다른 입력**
+**모델의 `*INCLUDE` 닫힘**([§3.1(h)](#31-yaml-공통-규칙-모든-op) 과 같은 규칙 — 주 덱 폴더 · `*INCLUDE_PATH`) · **따라가지 않는
+변형 인클루드(`*INCLUDE_TRANSFORM` · `_AUTO_OFFSET` · `_BINARY` …)가 가리키는 파일**과 깊이 상한을 넘은 이름의 파일(산출 덱이 그
+카드를 그대로 실어 덮으면 산출이 가리키는 파일이 사라진다 — 셋째 묶음 전엔 `database` · `convert` 가 rc 0 으로 덮었다) · **다른 입력**
 (`dynain` · `bundle` · `dat_file` · `detail_flat` · `database` · `entities` · `fragment` · `groups` · 기준 · 변형 메시 …)입니다.
 같은 파일이면 — 철자가 달라도(`./a.k` · 절대 경로 · `../폴더/a.k`), 심볼릭 링크 · 하드 링크여도 — **아무 파일도 쓰지 않고
 종료 코드 1** 이고 두 경로를 다 적습니다.
@@ -4436,8 +4438,11 @@ keywords:
 
 **근거**: help(`Usage:` 한 줄), pyKooCAE `surface_remesh.md`, `examples/strip/strip_test.yaml`.
 
-★`output` 이 읽는 덱(주 덱 · 인클루드)과 같은 파일이면(철자가 달라도 · 하드 링크도) **거절**한다 — 산출을 열어(잘라 비워) 놓고
-주 덱을 흘려 읽으니 같은 파일이면 입력이 0 바이트가 된다(2026-11-07 전엔 rc 0 「Total lines: 0」).
+★`output` 이 읽는 파일과 같은 파일이면(철자가 달라도 · 하드 링크도) **거절**한다 — 산출을 열어(잘라 비워) 놓고 주 덱을 흘려
+읽으니 같은 파일이면 입력이 0 바이트가 된다(2026-11-07 전엔 rc 0 「Total lines: 0」). 읽는 파일은 `extract-parts` · `cleanup-nodes` 와
+같다 — 설정 YAML · 주 덱 · 인클루드 닫힘 · 따라가지 않는 변형 인클루드의 파일(공용 관문 [§3.1(j)](#31-yaml-공통-규칙-모든-op)).
+셋째 묶음 전엔 주 덱 · 인클루드만 견주어 설정 YAML · `*INCLUDE_TRANSFORM` 의 파일을 덮고 rc 0 이었다(회귀
+`test_output_clobbers_input.py`).
 
 ---
 

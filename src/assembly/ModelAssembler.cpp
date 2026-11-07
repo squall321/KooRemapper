@@ -400,6 +400,13 @@ void ModelAssembler::noteModelInputs(const std::string& filename, bool flattened
     }
     guardInputs_.push_back({filename, "model"});
     for (const auto& f : incl_.files) guardInputs_.push_back({f.path, "model 의 인클루드"});
+    // 깊이 상한을 넘은 이름의 파일 · 따라가지 않는 변형 인클루드(`*INCLUDE_TRANSFORM` …)의 파일도 — 산출 덱이 그 카드를 그대로 싣는다
+    // (셋째 묶음 — 실측: convert 가 output 을 그 파일로 주면 rc 0 으로 덮었다 · `output_guard::modelInputs` 와 같은 목록)
+    for (const auto& r : incl_.refs)   // 따라간 이름 · 순환은 이미 `files` 에 있다
+        if (r.what != include_closure::NameRef::What::Followed && r.what != include_closure::NameRef::What::Cycle && !r.path.empty())
+            guardInputs_.push_back({r.path, "model 의 인클루드"});
+    for (const auto& n : incl_.notFollowed)
+        if (!n.path.empty()) guardInputs_.push_back({n.path, "model 의 " + n.keyword + " 파일"});
 }
 
 void ModelAssembler::noteInput(const std::string& path, const std::string& role) {

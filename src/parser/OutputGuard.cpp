@@ -30,7 +30,16 @@ std::vector<Input> modelInputs(const std::string& modelPath, const std::string& 
     std::vector<Input> out;
     if (modelPath.empty()) return out;
     out.push_back({modelPath, role});
-    for (const auto& f : include_closure::readPaths(modelPath).files) out.push_back({f.path, role + " 의 인클루드"});
+    const auto clo = include_closure::readPaths(modelPath);
+    for (const auto& f : clo.files) out.push_back({f.path, role + " 의 인클루드"});
+    // 이름이 가리킨 경로(깊이 상한을 넘은 것)와 따라가지 않는 변형 인클루드(`*INCLUDE_TRANSFORM` …)의 파일도 — 산출 덱이 그 카드를
+    // 그대로 실으니 덮으면 산출이 가리키는 파일이 사라진다(셋째 묶음 — 실측: database · convert 가 output 을 그 파일로 주면 rc 0 으로
+    // 덮었다. 흘려 읽는 셋 — extract-parts · cleanup-nodes · strip — 과 같은 목록이다)
+    for (const auto& r : clo.refs)   // 따라간 이름 · 순환은 이미 `files` 에 있다
+        if (r.what != include_closure::NameRef::What::Followed && r.what != include_closure::NameRef::What::Cycle && !r.path.empty())
+            out.push_back({r.path, role + " 의 인클루드"});
+    for (const auto& n : clo.notFollowed)
+        if (!n.path.empty()) out.push_back({n.path, role + " 의 " + n.keyword + " 파일"});
     return out;
 }
 

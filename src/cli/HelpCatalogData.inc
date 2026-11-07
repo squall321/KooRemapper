@@ -412,7 +412,7 @@ keywords:
 )KRH"}},
      {"KooRemapper generate box box.yaml", "KooRemapper strip strip.yaml"},
      {},
-     {"output 이 읽는 덱(주 덱 · 인클루드)과 같은 파일이면 **거절**한다 — 주 덱을 흘려 읽으니 입력이 비워진다"}},
+     {"output 이 읽는 파일(설정 YAML · 주 덱 · 인클루드 · 따라가지 않는 변형 인클루드의 파일)과 같은 파일이면 **거절**한다 —", "  주 덱을 흘려 읽으니 입력이 비워진다(extract-parts · cleanup-nodes 와 같은 목록 · 공용 관문)"}},
     {"strain", "변형·초기응력", "기준·변형 메시 쌍의 요소별 변형률(6성분) CSV", "변형률 strain csv", "KooRemapper strain [--type green|...] <ref_mesh> <def_mesh> <output.csv>",
      {},
      {"KooRemapper generate --dim-i 20 --dim-j 5 arc demo", "KooRemapper strain demo_flat.k demo_bent.k strain.csv"},

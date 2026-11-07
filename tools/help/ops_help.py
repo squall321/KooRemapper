@@ -388,7 +388,8 @@ keywords:
   - "*ELEMENT_SOLID"
 """}),
    cmds=[BOX_CMD, "KooRemapper strip strip.yaml"], outputs=["box_cards_only.k"],
-   notes=["output 이 읽는 덱(주 덱 · 인클루드)과 같은 파일이면 **거절**한다 — 주 덱을 흘려 읽으니 입력이 비워진다"])
+   notes=["output 이 읽는 파일(설정 YAML · 주 덱 · 인클루드 · 따라가지 않는 변형 인클루드의 파일)과 같은 파일이면 **거절**한다 —",
+          "  주 덱을 흘려 읽으니 입력이 비워진다(extract-parts · cleanup-nodes 와 같은 목록 · 공용 관문)"])
 
 # ── 변형·초기응력 ──
 op("strain", "변형·초기응력", "기준·변형 메시 쌍의 요소별 변형률(6성분) CSV", "변형률 strain csv",
