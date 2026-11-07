@@ -1681,7 +1681,7 @@ std::map<int, int> ecBuildPidNodes(const std::vector<std::string>& rawLines) {
     return out;
 }
 
-ElemCardIndex ecBuildIndex(const std::vector<std::string>& rawLines, bool strict = false) {
+ElemCardIndex ecBuildIndex(const std::vector<std::string>& rawLines, bool strict = false, int deckFw = 0) {
     ElemCardIndex idx;
     size_t n = rawLines.size();
     idx.owner.assign(n, -1);
@@ -1692,8 +1692,9 @@ ElemCardIndex ecBuildIndex(const std::vector<std::string>& rawLines, bool strict
     idx.opaque.assign(n, 0);
 
     // 칸 폭은 매뉴얼 한 곳(ElementCardLayout)에서만 정한다 — *KEYWORD 의 i10/long(19305-19360)과
-    // 키워드 줄 접미사('%','+','-')다.
-    const int fw = deckFieldWidth(rawLines);
+    // 키워드 줄 접미사('%','+','-')다. `deckFw` 를 주면 그것이 기본 폭이다 — `*KEYWORD` 줄이 없는 줄 묶음
+    // (덱 폭으로 쓴, 넣을 블록)을 그 덱의 폭으로 읽을 때다.
+    const int fw = deckFw > 0 ? deckFw : deckFieldWidth(rawLines);
 
     const std::map<int, int> pidNodes = ecBuildPidNodes(rawLines);
 
@@ -5877,6 +5878,9 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
         // op 가 통째로 끼워 넣는 키워드 블록에 요소 카드가 들어 있으면 그것도 기대에 넣고, 그 파트도 **건드린
         // 것**으로 친다. 예전에는 블록만 넣는 op(StepForge 조각 삽입 — 2026-10-16)이면 건드린 파트가 비어 이
         // 대조가 통째로 건너뛰어졌다 — 블록이 요소를 잃어도 아무도 몰랐을 것이다.
+        // ★블록은 **덱 폭**으로 썼고 `*KEYWORD` 줄이 없다 — 덱 폭(`deckFw`)으로 읽는다. 블록 줄만으로 폭을 정하면 8 이라
+        //   i10 덱에 넣은 조각을 8칸으로 잘라 PID 를 엉뚱하게 셌다(2026-11-07 — 4자리 번호면 칸이 어긋나지 않아 관대한
+        //   되돌림도 못 살렸다. i10 덱에 조각을 넣는 op(cad_solid_merge_to_deck · apply_carryover_plan)이 여기서 멈췄다).
         if (!addedKeywordBlocks_.empty()) {
             std::vector<std::string> blkLines;
             for (const auto& blk : addedKeywordBlocks_) {
@@ -5884,7 +5888,7 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                 std::string bl;
                 while (std::getline(bs, bl)) blkLines.push_back(bl);
             }
-            for (const auto& [pid, cnt] : ecBuildIndex(blkLines).countByPid) { expect[pid] += cnt; touched.insert(pid); }
+            for (const auto& [pid, cnt] : ecBuildIndex(blkLines, false, deckFw).countByPid) { expect[pid] += cnt; touched.insert(pid); }
         }
 
         if (!touched.empty()) {

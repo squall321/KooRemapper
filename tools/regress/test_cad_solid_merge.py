@@ -21,6 +21,7 @@
     대응표 = 덱 번호 · 자리표시 물성 경고 · info --strict
   B 인클루드에 조각보다 큰 번호가 있는 덱 — 그 위로 옮긴다(과도기 길)
   C i10 덱 — 넣은 절점·요소 번호 칸이 10칸이다
+  C2 i10 덱 · 4자리 번호 조각 — 쓰기 뒤 요소 수 대조가 넣은 블록을 덱 폭으로 읽어 통과한다(2026-11-07)
   D 거절 — 모르는 칸 · 빠진 칸 · 단위 불일치 · frame · 옮긴 절점(coord_sha) · sid 비-null · 계약 밖 키워드 ·
     ranges 가 실제와 다름 · long 덱
 
@@ -138,6 +139,40 @@ def base_map():
     return json.load(open(os.path.join(EX, "stepforge_fragment.json"), encoding="utf-8"))
 
 
+def to_i10(text):
+    """표준 폭 덱(`*NODE` · `*ELEMENT_SOLID` 8칸)을 `*KEYWORD I10=Y` 덱으로 — 정수 칸만 10칸(좌표 16칸은 그대로)."""
+    out, kw = [], None
+    for l in text.splitlines():
+        if l.startswith("*"):
+            kw = l.split()[0].upper()
+            out.append("*KEYWORD I10=Y" if kw == "*KEYWORD" else l)
+        elif l.startswith("$") or not l.strip():
+            out.append(l)
+        elif kw == "*NODE":
+            out.append("%10d" % int(l[:8]) + l[8:])
+        elif kw == "*ELEMENT_SOLID":
+            out.append("".join("%10d" % int(l[i:i + 8]) for i in range(0, len(l), 8)))
+        else:
+            out.append(l)
+    return "\n".join(out) + "\n"
+
+
+def renumber_fragment(text, dn, de):
+    """조각의 절점 번호(`*NODE` 첫 칸 · 요소의 절점 칸)를 dn, 요소 번호를 de 만큼 옮긴 사본 — PID 와 좌표 글자는 그대로."""
+    out, kw = [], None
+    for l in text.splitlines():
+        s = l.strip()
+        if s.startswith("*"):
+            kw = s.split()[0].upper()
+        elif s and not s.startswith("$") and kw == "*NODE":
+            l = "%8d" % (int(l[:8]) + dn) + l[8:]
+        elif s and not s.startswith("$") and kw and kw.startswith("*ELEMENT"):
+            v = [int(l[i:i + 8]) if l[i:i + 8].strip() else 0 for i in range(0, len(l), 8)]
+            l = "".join("%8d" % x for x in [v[0] + de, v[1]] + [n + dn if n else 0 for n in v[2:]])
+        out.append(l)
+    return "\n".join(out) + "\n"
+
+
 def verify_merged(label, d, deck_text, want_node_lo, want_elem_lo, want_pid_lo, want_fw):
     m = base_map()
     nodes, elems, fw, L = read_mesh(os.path.join(d, "merged.k"))
@@ -233,6 +268,41 @@ def main():
             nodes0, elems0, _fw, _L = read_mesh(os.path.join(d, "deck.k"))
             assert max(nodes0) < 500001 and max(elems0) < 600001 and max_card_ids(mesh) < 900
             verify_merged("C", d, mesh, 500001, 600001, 900, 10)   # i10 덱 — 조각이 위에 있어 그대로 · 칸은 10
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+    print("[C2 i10 덱 · 4자리 번호 조각 — 쓰기 뒤 요소 수 대조가 넣은 블록을 덱 폭(10)으로 읽는다(2026-11-07)]")
+    # 예전 대조는 넣은 블록을 **블록 줄만으로** 폭을 정해(*KEYWORD 줄이 없어 8) 10칸 줄을 8칸으로 잘랐다. C 의 6자리
+    # 번호는 8칸 조각이 어긋나(칸 안에 공백) 관대한 되돌림이 살렸지만, 4자리 번호면 칸이 맞아떨어져 PID 를 엉뚱하게 세고
+    # 왕복 검증이 rc 1 로 멈췄다(이월 적용 · 조각 삽입 모두 — i10 덱에 조각을 넣지 못했다).
+    dn, de = 1001 - base_map()["ranges"]["node"][0], 2001 - base_map()["ranges"]["elem"][0]
+    deck_i10 = to_i10(deck)
+    m4 = base_map()
+    m4["ranges"]["node"] = [x + dn for x in m4["ranges"]["node"]]
+    m4["ranges"]["elem"] = [x + de for x in m4["ranges"]["elem"]]
+    for p in m4["parts"]:
+        p["node_start"] += dn
+        p["elem_start"] += de
+    d = stage(deck_i10, renumber_fragment(open(os.path.join(EX, "stepforge_fragment.k"), encoding="utf-8").read(), dn, de), m4)
+    try:
+        rc, out = run(binary, d)
+        if check("C2 rc 0 · 왕복 검증 통과", rc == 0 and "왕복 검증: 출력 덱을 다시 읽어" in out, out[-600:]):
+            verify_merged("C2", d, deck_i10, 1001, 2001, 900, 10)   # 덱 최대 12 · 2 · 2 — 조각이 위에 있어 그대로
+            _n, _e, _fw, L = read_mesh(os.path.join(d, "merged.k"))
+            head = next(i for i, l in enumerate(L) if "cad_solid_merge_to_deck" in l)
+            kw, rows = None, []
+            for l in L[head:]:
+                if l.startswith("*"):
+                    kw = l.split()[0].upper()
+                elif kw == "*ELEMENT_SOLID" and l.strip() and not l.startswith("$"):
+                    rows.append(l)
+            # 이 사례가 그 결함을 잰다 — 넣은 10칸 줄을 8칸으로 잘라도 칸 안에 공백이 없다(관대한 되돌림이 못 살린다)
+            check("C2 넣은 요소 줄은 8칸으로 잘라도 어긋나지 않는다(예전 대조를 속이는 꼴)", rows and all(
+                len(r[i:i + 8].split()) <= 1 for r in rows for i in range(0, len(r), 8)), rows[:1])
+            p = subprocess.run([binary, "info", os.path.join(d, "merged.k"), "--strict"], capture_output=True,
+                               text=True, encoding="utf-8", errors="replace")
+            check("C2 info --strict 가 받아들인다(미정의 참조 0)", p.returncode == 0 and "참조 무결성 OK" in p.stdout,
+                  (p.stdout + p.stderr)[-300:])
     finally:
         shutil.rmtree(d, ignore_errors=True)
 
