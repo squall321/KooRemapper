@@ -16,6 +16,8 @@
   B-2 · B-3 겹치는 tier · phase → rc 1 · 덱 없음 · 겹친 이름을 말한다   B-5 종류가 둘이어도 tier 가 겹치면 거절
   B-4 대조 — 종류 하나 · tiers [0, 1] 은 예전 이름 그대로(bt_tier0_phase1.k · bt_tier1_phase1.k)
   B-6 조합 하나를 못 쓰면(그 이름에 폴더가 있다) rc 1 · 못 만든 조합의 요약 · 나머지 조합은 쓴다 — 예전엔 rc 0 이었다
+  B-7 설정이 다른 폴더(`battery cfg/b.yaml` · 절대 경로)여도 자동 dynain_file 은 덱 옆 이름(bt_tier0_phase1.dynain) — 예전엔 YAML
+      폴더가 붙어(cfg/bt_tier0_phase1.dynain · 절대 경로) 덱 폴더 기준으로 읽는 솔버가 찾지 못했다
 
 usage: test_battery_batch_names.py <KooRemapper 바이너리>
 """
@@ -97,6 +99,18 @@ def main():
         check("B-6 ★조합 하나를 못 쓰면 rc 1 · 못 만든 조합(tier 1 → bt_tier1_phase1.k)을 요약한다(예전엔 rc 0)",
               rc == 1 and "1개를 만들지 못했다" in out and "tier 1 · phase 1 → bt_tier1_phase1.k" in out, (rc, out[-400:]))
         check("B-6   └ 나머지 조합(tier 0)은 끝까지 쓴다", made == ["bt_tier0_phase1.k"], made)
+        for k, how in ((7, "cfg/b.yaml"), (8, "절대 경로")):
+            d = os.path.join(root, "c%d" % k)
+            cfg = os.path.join(d, "cfg")
+            os.makedirs(cfg)
+            with open(os.path.join(cfg, "b.yaml"), "w", encoding="utf-8") as f:
+                f.write(src.replace("output: battery_stacked_swell", "output: bt") +
+                        "\nuse_dynain: true\nbatch:\n  phases: [1, 2]\n")
+            rc, out = run(binary, d, "battery", "cfg/b.yaml" if k == 7 else os.path.join(cfg, "b.yaml"))
+            p2 = os.path.join(cfg, "bt_tier0_phase2.k")
+            got = include_dynain(p2) if os.path.exists(p2) else None
+            check("B-7 ★battery %s · phases [1, 2] → phase 2 의 *INCLUDE_DYNAIN 이 덱 옆 이름 bt_tier0_phase1.dynain" % how,
+                  rc == 0 and got == "bt_tier0_phase1.dynain", (rc, got, out[-300:]))
     finally:
         shutil.rmtree(root, ignore_errors=True)
     print()

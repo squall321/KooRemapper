@@ -589,7 +589,11 @@ static int generateBatch(const BatteryConfig& baseCfg,
                 // Auto-chain: later phases get *INCLUDE_DYNAIN from the previous phase output
                 if (autoChain && pi > 0 && cur.dynainFile.empty()) {
                     int prevPhase = phases[pi - 1];
-                    cur.dynainFile = cur.output
+                    // ★*INCLUDE_DYNAIN 은 산출 덱 옆에서 솔버가 찾을 이름이다(§43.1 · 2026-11-07) — 앞 phase 덱과 같은 폴더라 접두사의
+                    //   파일 이름 부분만 쓴다. 예전엔 YAML 폴더로 푼 접두사를 통째로 붙여 `battery cfg/b.yaml` 의 phase 2 덱이
+                    //   cfg/bt_tier0_phase1.dynain(덱 폴더 기준이면 cfg/cfg/…)을, 절대 경로 설정이면 그 절대 경로를 적었다
+                    const size_t cut = cur.output.find_last_of("/\\");
+                    cur.dynainFile = (cut == std::string::npos ? cur.output : cur.output.substr(cut + 1))
                                    + (typeInName ? "_" + mt : std::string())   // 앞 phase 덱 이름과 같은 규칙
                                    + batteryTierSuffix(tier)
                                    + "_phase" + std::to_string(prevPhase)

@@ -4089,7 +4089,10 @@ KooRemapper battery <config.yaml>
 > **`dynain_file` 만은 경로로 풀지 않습니다.** `*INCLUDE_DYNAIN` 다음 줄에 **적힌 문자열 그대로** 찍히고
 > KooRemapper 는 그 파일을 열지 않습니다(솔버가 산출 덱 기준으로 읽습니다).
 > `use_dynain: true` + `dynain_file: ../state/my.dynain` 을 주면 덱에도 `../state/my.dynain` 이 그대로 들어갑니다.
-> **산출 덱 옆에서 솔버가 찾을 이름**으로 적으세요. (배치 체이닝에서 자동 계산되는 값도 같은 규칙입니다.)
+> **산출 덱 옆에서 솔버가 찾을 이름**으로 적으세요. (배치 체이닝에서 자동 계산되는 값도 같은 규칙 — 폴더 없는 덱 옆 이름입니다.
+> 2026-11-07 까지는 YAML 이 다른 폴더에 있으면 그 폴더가 붙어 `battery cfg/b.yaml` 의 phase 2 덱에 `cfg/bt_tier0_phase1.dynain`
+> (절대 경로로 주면 그 절대 경로)이 적혀 솔버가 찾지 못했습니다.) 자동 계산은 `batch.phases` 에 1 과 2 가 다 있을 때만입니다 —
+> 홑 실행에서 `dynain_file` 을 비우면 `use_dynain: true` 여도 `*INCLUDE_DYNAIN` 을 쓰지 않습니다.
 
 **근거**: pyKooCAE `mesh_generate.md`, `examples/battery/swell/{stacked,wound}/*.yaml`, 2026-09-18 실행 확인. 미등장 필드·기본값은 확인 필요.
 
