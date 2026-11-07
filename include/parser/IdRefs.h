@@ -38,8 +38,11 @@ struct Scan {
 //   세어만 둔다 — `_GENERATE`·`_GENERAL` 세트 · 이력 `_ID`·`_LOCAL` · 초기변형률 · 강체 강제운동 ·
 //          `*ELEMENT_MASS`(·`_NODE_SET`)의 0 아닌 PID(33-40열 — MASS 가 E16 이다) · `*ELEMENT_MASS_PART` 의 PID ·
 //          모르는 `*ELEMENT_MASS_*` 꼬리 · 서명이 안 맞는 접촉
+// `pidExists` — 질량 줄을 다른 읽기로 읽은 PID(넓은 칸 뒤 — 설명서 칸 · 정수 폭이 갈린다)를 셀지 정한다. 그 PID 가 덱에 있는
+// 파트일 때만 센다(지어낸 번호로 거절하지 않는다). 주지 않으면 다른 읽기의 PID 는 세지 않는다(2026-11-07).
 Scan find(const std::vector<std::string>& lines, int deckFw,
-          const std::function<bool(Axis, int)>& keep = nullptr);
+          const std::function<bool(Axis, int)>& keep = nullptr,
+          const std::function<bool(int)>& pidExists = nullptr);
 
 // 이 키워드(대문자 · 접미사 뗌) 블록이 `find` 가 칸을 읽거나 세어 두는 갈래인가.
 bool mayReference(const std::string& kw);

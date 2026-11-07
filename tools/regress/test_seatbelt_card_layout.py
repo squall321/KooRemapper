@@ -10,8 +10,10 @@
     · extract-parts 가 N4 를 싣지 않았고, renumber 는 N3 을 49열(SLEN 위)에 썼다
     · 이월 적용의 나눠 쓴 절점 검사가 N4 를 몰랐다
     · restack 의 「지운 절점을 무는 줄」 보고는 10칸으로 잘라 SBRID 를 절점으로 셌다
-  칸 자리는 이제 `auxCardFields` · `auxCardCut`(넓은 칸 SLEN 을 따른 자르기)이 정하고 모든 소비자가 그것을 쓴다.
+  칸 자리는 이제 공용 판정기의 읽기들(`auxCardReadings` — 설명서 칸 · 정수 폭 · 토큰)이 정하고 모든 소비자가 그것을 쓴다.
   칸 자리가 없는 줄(콤마 자유형식 · 칸이 어긋난 줄)은 제자리에 번호를 못 바꾸니 renumber 가 거절한다.
+  줄을 정수 폭으로 써서 두 읽기가 갈리면(SLEN 8칸) 지키는 쪽은 **둘 다** 남기고 renumber 는 거절한다(사용자 결정 2026-11-07 —
+  3ce0c4c 는 설명서 칸 자르기에 칸 안 공백이 없으면 그것만 믿어, 빈 SLEN 을 8칸에 쓴 줄의 진짜 N3 을 지웠다).
 
 무엇을 보나.
   A cleanup-nodes safe — 8칸 · i10 덱에서 N3 · N4 를 남기고 아무도 안 쓰는 절점만 지운다 · 되읽기 미정의 0
@@ -22,6 +24,10 @@
   E extract-parts — 안전띠 **장치** 키워드(`*ELEMENT_SEATBELT_RETRACTOR` …)는 PID 칸이 없어 고른 띠에 붙었는지 증명할 수 없다.
     고른 파트에 `*ELEMENT_SEATBELT` 가 있으면 **거절**한다(rc 1 · 산출 없음 · 장치 키워드와 줄을 댄다). 안전띠를 고르지 않았으면
     싣지 않고 dropped_keywords 에 센다 — 칸 1 을 PID 로 짐작하지 않는다(그 조각이 고른 PID 와 같아도 거절하지 않는다)
+  F 두 가지로 읽히는 줄(정수 폭으로 쓴 안전띠 · 질량 줄) — cleanup-nodes · extract-parts 는 두 읽기의 절점을 다 지킨다 ·
+    renumber 는 다른 읽기의 절점이 덱에 있으면 거절(줄을 댄다 · 산출 없음) · 설명서대로 쓴 줄(빈 SLEN · 빈 SBRID · 소수점 · E/D 지수 ·
+    왼쪽 맞춤 · 꼬리 주석)은 renumber 가 그대로 된다 · restack 은 어느 읽기로든 지운 절점을 물면 올린다 · 질량 PID 가 읽기마다
+    갈리고 그 하나를 고르면 extract-parts 가 거절 · 이월 적용의 aux_in_part 도 PID 후보 전부를 본다
 
 usage: test_seatbelt_card_layout.py <KooRemapper 바이너리>
 """
@@ -68,10 +74,10 @@ def node(fw, n, x):
     return ("%" + str(fw) + "d") % n + "%16.6f%16.6f%16.6f" % (x, 0.0, 0.0)
 
 
-def belt_deck(fw, belt_line, tail=""):
+def belt_deck(fw, belt_line, tail="", nodes=(101, 102, 103, 104, 105)):
     """절점 101-105(x = 번호) · 안전띠 한 장(PID 9) · 파트 9. 절점 105 는 아무도 안 쓴다."""
     head = "*KEYWORD I10=Y" if fw == 10 else "*KEYWORD"
-    L = [head, "*NODE"] + [node(fw, n, float(n)) for n in (101, 102, 103, 104, 105)]
+    L = [head, "*NODE"] + [node(fw, n, float(n)) for n in nodes]
     L += ["*ELEMENT_SEATBELT", belt_line]
     L += ["*PART", "belt", "%10d%10d%10d" % (9, 9, 9), "*SECTION_SEATBELT", "%10d" % 9,
           "*MAT_SEATBELT", "%10d%10s" % (9, "1.0E-9")]
@@ -253,6 +259,142 @@ def main():
         check("E-3 보(PID 8)는 실었고 안전띠 요소 · 장치는 싣지 않았다",
               rc == 0 and len(section_lines(os.path.join(d, "e2_out.k"), "*ELEMENT_BEAM")) == 1 and "*ELEMENT_SEATBELT" not in body,
               body[-400:])
+
+        print("[F 두 가지로 읽히는 줄 — 지키는 쪽은 둘 다 · renumber 는 거절 · 설명서 꼴은 그대로 · 질량 PID]")
+        # SLEN 을 8칸에 쓴(빈 SLEN) 줄 — 설명서 칸(SLEN 16)으로 읽으면 SLEN = 「103」 · N3 = 104 · N4 없음, 정수 폭이면 N3 103 · N4 104
+        w8 = "%8d%8d%8d%8d%8d%8s%8d%8d" % (13, 9, 101, 102, 0, "", 103, 104)
+        write(os.path.join(d, "F1.k"), belt_deck(8, w8))
+        write(os.path.join(d, "F1.yaml"), "model: F1.k\noutput: F1_out.k\nmode: safe\nreport: F1.json\n")
+        rc, out = run(binary, d, "cleanup-nodes", "F1.yaml")
+        kept = sorted(node_ids(os.path.join(d, "F1_out.k"), 8).values()) if rc == 0 else []
+        check("F-1 ★cleanup-nodes — 빈 SLEN 을 8칸에 쓴 줄의 두 읽기 절점을 다 남긴다(103 · 104) · 105 만 지운다",
+              rc == 0 and kept == [101, 102, 103, 104], (rc, kept, out[-300:]))
+        # i10 덱에 SLEN 을 10칸(빈)으로 쓴 줄 — 설명서 칸은 N3(1000003)을 둘로 잘라 「100」 · 「0003」(= 절점 3)을 읽는다
+        g2 = "%10d%10d%10d%10d%10d%10s%10d%10d" % (13, 9, 1000001, 1000002, 0, "", 1000003, 42)
+        f2nodes = (1000001, 1000002, 1000003, 42, 3, 1000005)
+        write(os.path.join(d, "F2.k"), belt_deck(10, g2, nodes=f2nodes))
+        write(os.path.join(d, "F2.yaml"), "model: F2.k\noutput: F2_out.k\nmode: safe\nreport: F2.json\n")
+        rc, out = run(binary, d, "cleanup-nodes", "F2.yaml")
+        kept = sorted(node_ids(os.path.join(d, "F2_out.k"), 10).values()) if rc == 0 else []
+        check("F-2 ★cleanup-nodes — i10 줄의 두 읽기(3 · 1000003)를 다 남긴다 · 1000005 만 지운다",
+              rc == 0 and kept == [3, 42, 1000001, 1000002, 1000003], (rc, kept, out[-300:]))
+        # extract-parts — renumber 없이는 두 읽기의 절점을 다 싣고 줄은 그대로 · renumber 는 줄을 대고 거절(산출 없음)
+        write(os.path.join(d, "f3.yaml"), "model: F1.k\noutput: f3_out.k\nparts: [9]\nreport: f3.json\n")
+        rc, out = run(binary, d, "extract-parts", "f3.yaml")
+        rep = json.load(open(os.path.join(d, "f3.json"), encoding="utf-8")) if rc == 0 else {}
+        kept = sorted(node_ids(os.path.join(d, "f3_out.k"), 8).values()) if rc == 0 else []
+        check("F-3 ★extract-parts — 두 읽기의 절점(103 · 104)을 다 싣는다 · 줄 그대로 · 되읽기 미정의 0",
+              rc == 0 and kept == [101, 102, 103, 104] and section_lines(os.path.join(d, "f3_out.k"), "*ELEMENT_SEATBELT") == [w8] and
+              (rep.get("verify") or {}).get("undefined_nodes") == 0, (rc, kept, rep.get("verify"), out[-300:]))
+        for tag, deckname, bline in (("F-4", "F1.k", belt_deck(8, w8).split("\n").index(w8) + 1),
+                                     ("F-5", "F2.k", belt_deck(10, g2, nodes=f2nodes).split("\n").index(g2) + 1)):
+            y = tag.replace("-", "") + "r.yaml"
+            write(os.path.join(d, y), "model: %s\noutput: %s_out.k\nparts: [9]\nrenumber: true\nreport: %s.json\n" % (deckname, y, y))
+            rc, out = run(binary, d, "extract-parts", y)
+            check("%s ★renumber — %s 의 줄이 두 가지로 읽혀 갈린다 → rc 1 · 줄(%s:%d)을 댄다 · 산출 · 보고 없음" % (tag, deckname, deckname, bline),
+                  rc == 1 and "갈린다" in out and ("%s:%d *ELEMENT_SEATBELT" % (deckname, bline)) in out and
+                  not os.path.exists(os.path.join(d, y + "_out.k")), (rc, out[-500:]))
+        # 설명서대로 쓴 줄은 갈리지 않는다 — renumber 가 그대로 된다(절점 넷이 설명서 칸 17-32 · 57-72열에서 새 번호 · 나머지 글자 그대로)
+        manual = {
+            "빈 SLEN": "%8d%8d%8d%8d%8d%16s%8d%8d" % (13, 9, 101, 102, 0, "", 103, 104),
+            "빈 SBRID": "%8d%8d%8d%8d%8s%16s%8d%8d" % (13, 9, 101, 102, "", "0.0", 103, 104),
+            "빈 SBRID · SLEN": "%8d%8d%8d%8d%8s%16s%8d%8d" % (13, 9, 101, 102, "", "", 103, 104),
+            "소수점": "%8d%8d%8d%8d%8d%16s%8d%8d" % (13, 9, 101, 102, 0, "100.0", 103, 104),
+            "E 지수": "%8d%8d%8d%8d%8d%16s%8d%8d" % (13, 9, 101, 102, 0, "-1.234567890E-01", 103, 104),
+            "D 지수": "%8d%8d%8d%8d%8d%16s%8d%8d" % (13, 9, 101, 102, 0, "-5.0D+00", 103, 104),
+            "왼쪽 맞춤": "%-8d%-8d%-8d%-8d%-8d%-16s%-8d%-8d" % (13, 9, 101, 102, 0, "1.5", 103, 104),
+            "꼬리 주석": "%8d%8d%8d%8d%8s%16s%8d%8d" % (13, 9, 101, 102, "", "0.0", 103, 104) + "  $ belt A",
+        }
+        for k, (name, ml) in enumerate(manual.items()):
+            tag = "F6%d" % k
+            write(os.path.join(d, tag + ".k"), belt_deck(8, ml))
+            write(os.path.join(d, tag + ".yaml"), "model: %s.k\noutput: %s_out.k\nparts: [9]\nrenumber: true\nreport: %s.json\n" % (tag, tag, tag))
+            rc, out = run(binary, d, "extract-parts", tag + ".yaml")
+            rep = json.load(open(os.path.join(d, tag + ".json"), encoding="utf-8")) if rc == 0 else {}
+            ok = rc == 0 and (rep.get("verify") or {}).get("undefined_nodes") == 0
+            got = None
+            if ok:
+                ids = node_ids(os.path.join(d, tag + "_out.k"), 8)
+                new = {old: nid for nid, old in ids.items()}
+                rows = section_lines(os.path.join(d, tag + "_out.k"), "*ELEMENT_SEATBELT")
+                want = (ml[:16] + "%8d%8d" % (new.get(101, -1), new.get(102, -1)) + ml[32:56] +
+                        "%8d%8d" % (new.get(103, -1), new.get(104, -1)) + ml[72:])
+                got = rows
+                ok = sorted(ids.values()) == [101, 102, 103, 104] and rows == [want] and new.get(104) != 104
+            check("F-6.%d 설명서 꼴(%s) — renumber rc 0 · 절점 넷이 설명서 칸에서 새 번호 · 나머지 글자 그대로" % (k + 1, name), ok,
+                  (rc, got, out[-300:]))
+        # 정수꼴 SLEN(「10」 · 절점 10 이 덱에 있다) — 정수 폭 읽기는 SLEN 의 뒤 절반을 N3 = 10 으로 읽지만 N4 가 65-72열에 있어 설명서
+        # 꼴이다(정수 폭으로 쓴 줄은 64열에서 끝난다). 갈림이 아니다 — renumber 가 된다(10 은 지키는 쪽 합집합이라 넘치게 실린다)
+        ml = "%8d%8d%8d%8d%8d%16s%8d%8d" % (13, 9, 101, 102, 0, "10", 103, 104)
+        write(os.path.join(d, "F69.k"), belt_deck(8, ml, nodes=(10, 101, 102, 103, 104, 105)))
+        write(os.path.join(d, "F69.yaml"), "model: F69.k\noutput: F69_out.k\nparts: [9]\nrenumber: true\nreport: F69.json\n")
+        rc, out = run(binary, d, "extract-parts", "F69.yaml")
+        rep = json.load(open(os.path.join(d, "F69.json"), encoding="utf-8")) if rc == 0 else {}
+        ok, got = rc == 0 and (rep.get("verify") or {}).get("undefined_nodes") == 0, None
+        if ok:
+            ids = node_ids(os.path.join(d, "F69_out.k"), 8)
+            new = {old: nid for nid, old in ids.items()}
+            got = section_lines(os.path.join(d, "F69_out.k"), "*ELEMENT_SEATBELT")
+            want = (ml[:16] + "%8d%8d" % (new.get(101, -1), new.get(102, -1)) + ml[32:56] + "%8d%8d" % (new.get(103, -1), new.get(104, -1)))
+            ok = sorted(ids.values()) == [10, 101, 102, 103, 104] and got == [want]
+        check("F-6.9 정수꼴 SLEN(「10」 · 절점 10 이 있다) — N4 가 65-72열이라 갈림이 아니다 · renumber rc 0 · SLEN 글자 그대로", ok,
+              (rc, got, out[-400:]))
+        # restack — 정수 폭 읽기의 N3(500006)이 지운 절점이고 설명서 칸 읽기(SLEN 자리)는 그것을 못 본다 → 어느 읽기로든 물면 manual
+        fbelts = ["*ELEMENT_SEATBELT", "%8d%8d%8d%8d%8d%8s%8d%8d" % (9103, 3, 500001, 500002, 0, "", 500006, 500003)]
+        fdeck = deck.replace("\n".join(belts), "\n".join(fbelts))
+        assert fdeck != deck
+        write(os.path.join(d, "F7.k"), fdeck)
+        write(os.path.join(d, "f7.yaml"), open(os.path.join(d, "d.yaml"), encoding="utf-8").read()
+              .replace("model: D.k", "model: F7.k").replace("output: d_out.k", "output: f7_out.k"))
+        rc, out = run(binary, d, "restack", "f7.yaml")
+        l9103 = next(i for i, l in enumerate(fdeck.split("\n")) if l.startswith("    9103")) + 1
+        check("F-7 ★restack — 정수 폭 읽기만 지운 절점(500006)을 무는 줄(%d)도 manual 로 올린다" % l9103,
+              rc == 0 and re.search(r"line %d \*ELEMENT_SEATBELT \(manual\)" % l9103, out) is not None, (rc, out[-500:]))
+        # 질량 — 줄이 32열(PID 칸 앞)에서 끝나면 정수 폭으로 쓴 줄일 수 있다: 설명서 칸은 MASS 「1000」 · PID 없음, 정수 폭은 PID 1000.
+        # 8칸 MASS 에 8자리 PID 가 붙은 줄도 같다(설명서 칸 MASS 「1.00E-0310000005」 · PID 없음). 그 PID 를 고르면 실을지 버릴지
+        # 정할 수 없다 → 거절 · 줄을 댄다. PID 칸(33-40열)까지 쓴 줄은 설명서 꼴이다 — 정수꼴 질량 「1000」 이어도 갈리지 않는다
+        mbeam = ("*ELEMENT_BEAM\n" + "%8d%8d%8d%8d" % (20, 7, 101, 102) + "\n" + "%8d%8d%8d%8d" % (21, 1000, 103, 104) + "\n" +
+                 "%8d%8d%8d%8d" % (22, 10000005, 103, 104) + "\n"
+                 "*PART\nb7\n" + "%10d%10d%10d" % (7, 8, 8) + "\n*PART\nb1000\n" + "%10d%10d%10d" % (1000, 8, 8) +
+                 "\n*PART\nb10000005\n" + "%10d%10d%10d" % (10000005, 8, 8) +
+                 "\n*SECTION_BEAM\n" + "%10d%10d" % (8, 1) + "\n*MAT_ELASTIC\n" + "%10d%10s%10s%10s" % (8, "7.85E-9", "210000.", "0.3") + "\n")
+        mcases = (("F-8", "%8d%8d%16s" % (95001, 105, "1000"), (1000,), "PID 0(없음) / 1000"),
+                  ("F-9", "%8d%8d%8s%8d" % (95001, 105, "1.00E-03", 10000005), (10000005,), "PID 0(없음) / 10000005"),
+                  ("F-10", "%8d%8d%16s%8d" % (95001, 105, "1000", 7), (7,), None),
+                  ("F-10b", "%8d%8d%16s%8d" % (95001, 105, "1000", 7), (1000,), None),
+                  ("F-10c", "%8d%8d%16s%8d" % (95001, 105, "1.0", 7), (7,), None))
+        for tag, ml, picks, said in mcases:
+            mdeck = belt_deck(8, belt(8, 13, 9, 101, 102, 0, "0.0", 103, 104), tail=mbeam + "*ELEMENT_MASS\n" + ml + "\n")
+            y = tag.replace("-", "") + ".yaml"
+            write(os.path.join(d, y + ".k"), mdeck)
+            write(os.path.join(d, y), "model: %s.k\noutput: %s_out.k\nparts: [%s]\nreport: %s.json\n" % (y, y, ",".join(map(str, picks)), y))
+            rc, out = run(binary, d, "extract-parts", y)
+            mline = mdeck.split("\n").index(ml) + 1
+            if said:
+                check("%s ★질량 PID 가 읽기마다 갈린다(%s) · 그 PID 를 고르면 거절 — rc 1 · 줄(%d)을 댄다 · 산출 없음" % (tag, said, mline),
+                      rc == 1 and re.search(r"%s\.k:%d \*ELEMENT_MASS — %s" % (re.escape(y), mline, re.escape(said)), out) is not None and
+                      not os.path.exists(os.path.join(d, y + "_out.k")), (rc, out[-500:]))
+            else:
+                mine = 7 in picks
+                rows = section_lines(os.path.join(d, y + "_out.k"), "*ELEMENT_MASS") if rc == 0 else None
+                check("%s 설명서 꼴 질량(%s · PID 7) · %s 를 고른다 — rc 0 · 질량을 %s" % (tag, ml[16:32].strip(), picks[0], "싣는다" if mine else "싣지 않는다"),
+                      rc == 0 and rows == ([ml] if mine else []), (rc, rows, out[-400:]))
+        # 이월 적용 — 질량 줄의 PID 가 설명서 칸으로 비고(0) 정수 폭으로 4(다시 짓는 PID)면 aux_in_part 로 PID 4 를 거절한다
+        dm = os.path.join(d, "carry_mass")
+        shutil.copytree(CARRY, dm)
+        text = open(os.path.join(dm, "deck.k"), encoding="utf-8").read()
+        text = text.rstrip()[:-4] + "*ELEMENT_MASS\n%8d%8d%16s%8s\n*END\n" % (95601, keep[0], "4", "")
+        write(os.path.join(dm, "deck.k"), text)
+        plan = json.load(open(os.path.join(dm, "plan.json"), encoding="utf-8"))
+        plan["deck"]["sha256"] = hashlib.sha256(open(os.path.join(dm, "deck.k"), "rb").read()).hexdigest()
+        write(os.path.join(dm, "plan.json"), json.dumps(plan, ensure_ascii=False, indent=1))
+        write(os.path.join(dm, "run.yaml"), "model: deck.k\nplan: plan.json\noutput: out.k\n")
+        rc, out = run(binary, dm, "apply_carryover_plan", "run.yaml")
+        rp = os.path.join(dm, "out_carryover.json")
+        rep = json.load(open(rp, encoding="utf-8")) if os.path.exists(rp) else {}
+        hits = [p for p in (rep.get("problems") or []) if p.get("pid") == 4 and p.get("kind") == "aux_in_part"]
+        check("F-11 ★apply_carryover_plan — 정수 폭 읽기의 질량 PID(4)도 aux_in_part 로 본다 → rc 1",
+              rc == 1 and hits and "*ELEMENT_MASS" in hits[0].get("detail", ""), (rc, rep.get("problems"), out[-300:]))
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

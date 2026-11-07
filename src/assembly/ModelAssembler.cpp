@@ -2773,6 +2773,7 @@ void ModelAssembler::cleanupDeadNodeRefs(const std::set<int>& deadNodes,
         return true;
     };
 
+    const int deckFwAux = deckFieldWidth(rawLines_);   // 보 · 이산 · 안전띠 줄의 칸 폭(키워드 접미사가 덮어쓴다) — 블록마다 재지 않는다
     for (const auto& b : rsCollectBlocks(rawLines_)) {
         const std::string& kw = b.kw;
 
@@ -3062,17 +3063,18 @@ void ModelAssembler::cleanupDeadNodeRefs(const std::set<int>& deadNodes,
                 }
             }
         }
-        // 보 · 이산 · 안전띠 — 칸 자리는 공용 판정기(`auxElementCard` · `auxCardFields`)가 안다. Card 1 의 절점 칸만 본다
+        // 보 · 이산 · 안전띠 — 칸 자리는 공용 판정기(`auxElementCard` · `auxCardReadings`)가 안다. Card 1 의 절점 칸만 본다
         // (안전띠 SLEN 이 E16 이라 N3 · N4 는 57-72열이다 — 예전엔 10칸으로 잘라 칸 2-7 을 봐서, 칸이 어긋나면 공백 토큰이
-        // 우연히 맞고 맞아떨어지면 엉뚱한 칸이었으며 SBRID · 보의 릴리즈 칸을 절점으로 셌다 · 2026-11-07). 칸 자리를 모르는 것
-        // (모르는 옵션 · 보의 WARPAGE · ELBOW 카드 절점 · `_ACCELEROMETER` 같은 별개 키워드)은 줄의 정수를 **전부** 본다 —
-        // 넘치게 센다(사람이 볼 줄이 늘 뿐 지운 절점을 무는 줄을 놓치지 않는다).
+        // 우연히 맞고 맞아떨어지면 엉뚱한 칸이었으며 SBRID · 보의 릴리즈 칸을 절점으로 셌다 · 2026-11-07). 줄이 두 가지로 읽혀
+        // 갈리면(정수 폭으로 쓴 안전띠 줄) **어느 읽기로든** 지운 절점을 물면 적는다 — 이 길은 줄을 지우지 않고 사람이 볼 항목만
+        // 남긴다(사용자 결정 「둘 다 남긴다」). 칸 자리를 모르는 것(모르는 옵션 · 보의 WARPAGE · ELBOW 카드 절점 · `_ACCELEROMETER`
+        // 같은 별개 키워드)은 줄의 정수를 **전부** 본다 — 넘치게 센다(사람이 볼 줄이 늘 뿐 지운 절점을 무는 줄을 놓치지 않는다).
         if (rsStarts(kw, "*ELEMENT_BEAM") || rsStarts(kw, "*ELEMENT_DISCRETE") ||
             rsStarts(kw, "*ELEMENT_SEATBELT")) {
             const AuxElementCard a = auxElementCard(rawLines_[b.kwLine]);
             const bool exact = a.supported && a.family != AuxFamily::NONE &&
                                !(a.family == AuxFamily::BEAM && (rsHas(kw, "_WARPAGE") || rsHas(kw, "_ELBOW")));
-            const int afw = keywordFieldWidth(rawLines_[b.kwLine], deckFieldWidth(rawLines_));
+            const int afw = keywordFieldWidth(rawLines_[b.kwLine], deckFwAux);
             int cardLeft = 0;                    // 지금 카드의 남은 줄(빈 줄도 카드 안에서는 카드다)
             for (size_t li = b.kwLine + 1; li < rawLines_.size(); ++li) {
                 const std::string& ln = rawLines_[li];
@@ -3086,13 +3088,8 @@ void ModelAssembler::cleanupDeadNodeRefs(const std::set<int>& deadNodes,
                     if (card1) cardLeft = a.lines;
                     --cardLeft;
                     if (!card1 || g == std::string::npos) continue;   // 옵션 카드 · 빈 줄 — 절점 칸이 없다
-                    const auto f = auxCardFields(a, ln, afw);
-                    auto scan = [&](int from, int cnt) {
-                        for (int q = 0; from >= 0 && q < cnt; ++q)
-                            if (dead(deckscan::fieldInt(f, static_cast<size_t>(from + q)))) any = true;
-                    };
-                    scan(a.nodeSkip, a.nodeCount);
-                    scan(a.nodeSkip2, a.nodeCount2);
+                    for (int v : auxNodesUnion(a, auxCardReadings(a, ln, afw)))
+                        if (dead(v)) any = true;
                 } else {
                     if (g == std::string::npos) continue;
                     std::vector<int> v;
