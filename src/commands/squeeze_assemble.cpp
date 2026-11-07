@@ -693,7 +693,7 @@ int runAssemble(const std::string& configFile, const ConsoleOutput& console) {
         } else if (op.type == AssemblyOperation::HFDAMP) {
             ok = assembler.applyHFDamp(op.hfdamp);
         } else if (op.type == AssemblyOperation::BATTERY) {
-            ok = assembler.applyBattery(op.battery, configDir);
+            ok = assembler.applyBattery(op.battery, configDir, outputPrefix);
         } else if (op.type == AssemblyOperation::SPLIT) {
             if (!op.split.targetPids.empty()) {
                 for (int pid : op.split.targetPids) {

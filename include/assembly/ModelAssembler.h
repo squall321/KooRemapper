@@ -111,7 +111,8 @@ public:
     bool applyFillet(const FilletOperation& op);
     bool applyCnrb2Solid(const Cnrb2SolidOperation& op);
     bool applyHFDamp(const HFDampOperation& op);
-    bool applyBattery(const BatteryOperation& op, const std::string& configDir);
+    // outputPrefix — 주 덱(<prefix>.k)의 자리. battery 덱의 `*INCLUDE` 이름을 그 폴더 기준으로 적는다(2026-11-07)
+    bool applyBattery(const BatteryOperation& op, const std::string& configDir, const std::string& outputPrefix);
     bool applySplit(const SplitOperation& op);
     bool applyMerge(const MergeOperation& op);
     bool applyStrip(const StripOperation& op);

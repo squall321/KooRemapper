@@ -122,6 +122,8 @@ op("battery", "메시 생성", "배터리 셀(적층·권취) 모델 + 스웰링
    outputs=["examples/battery/swell/stacked/battery_stacked_swell_tier0_phase1.k"],
    notes=["설정 키가 많아 저장소 예제(examples/battery/swell/stacked|wound/*.yaml)를 복사해 고쳐 쓰는 편이 안전하다.",
           "output 경로의 폴더가 있어야 한다.",
+          "assemble 의 - type: battery 도 같은 규칙 — 이 설정의 output 은 이 설정 폴더, 항목에 준 output 은 assemble YAML 폴더 기준이고",
+          "  주 덱의 *INCLUDE 는 주 덱 폴더 기준 이름으로 적는다(2026-11-07 전엔 둘 다 작업 폴더 기준)",
           "dynain_file 은 경로가 아니라 *INCLUDE_DYNAIN 에 그대로 찍히는 문자열이다 — 산출 덱 옆에서 솔버가 찾을 이름으로 적을 것",
           "덱 이름은 <output><tier>_phase{1|2}.k — batch.model_types 에 종류가 둘 이상이면 <output>_<model_type><tier>_phase{1|2}.k",
           "  (자동 dynain_file 도 같은 규칙). 그래도 두 조합이 같은 이름이면(tiers: [0, 0.2] · phases: [1, 3]) 아무 덱도 쓰지 않고 rc 1 로",
@@ -469,7 +471,9 @@ operations:
    cmds=[BOX_CMD, "KooRemapper warpage warpage.yaml"], outputs=["box_warp.k"],
    notes=["dat 파일은 처짐값 행렬(행×열, 공백 구분). 파트 평면 bbox(또는 data_bbox)에 펼치며 열 0 = 평면 1축 최소, "
           "행 0 = 2축 최소 (bend 의 dat 는 행 0 = 최대). 값 단위는 unit(기본 um)",
-          "mode: prestress(기본, 초기응력만) | deform(노드 이동). outside_behavior: zero(기본) | clamp | extrapolate"])
+          "mode: prestress(기본, 초기응력만) | deform(노드 이동). outside_behavior: zero(기본) | clamp | extrapolate",
+          "debug: true 면 <debug_prefix>_raw.dat · _curvature.dat · _warpage.vtk 를 쓴다 — debug_prefix(기본 debug/warp)는 YAML 폴더",
+          "  기준이고 그 폴더는 미리 있어야 한다(2026-11-07 전엔 작업 폴더 기준)"])
 op("bend", "변형·초기응력", "처짐 함수 w(x1,x2) 로 파트를 굽히고 초기응력 계산", "굽힘 bending 곡률 formula",
    "KooRemapper bend <config.yaml>",
    files=boxed({"bend.yaml": """base_model: box.k
@@ -563,7 +567,9 @@ material:
           "output == base_model(in-place)은 assemble 만 받는다 — 다 읽은 뒤 덱만 그 자리에 쓴다. 인클루드 · 설정 · 처리의 입력",
           "  (detail_flat · dat_file · bundle · dynain …) · .dynain/IGA 곁 파일이 읽는 파일과 같으면 아무것도 쓰지 않고 rc 1(2026-11-07)",
           "루프 안에서 덱보다 먼저 쓰는 곁 파일(warpage debug 진단 · battery 덱)은 처리 전에 **모든** 처리의 입력과 견준다 —",
-          "  예전엔 그때까지 읽은 입력과만 견줘 뒤 처리의 입력(update 의 dynain 등)을 덮을 수 있었다"])
+          "  예전엔 그때까지 읽은 입력과만 견줘 뒤 처리의 입력(update 의 dynain 등)을 덮을 수 있었다",
+          "그 곁 파일의 자리도 YAML 폴더 기준이다 — warpage 의 debug_prefix 는 이 YAML 폴더, battery 덱은 battery 설정의 output(그 설정",
+          "  폴더 · 항목에 준 output 은 이 YAML 폴더). 주 덱의 *INCLUDE 는 주 덱 폴더 기준 이름(2026-11-07 전엔 작업 폴더 기준)"])
 
 # ── 하중·경계·접촉 ──
 op("load", "하중·경계·접촉", "파트 면(방향/tied/세그먼트셋 선택)에 압력·힘 하중 + 곡선", "하중 pressure 압력 force",

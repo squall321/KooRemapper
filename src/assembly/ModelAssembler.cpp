@@ -328,6 +328,31 @@ std::set<int> ModelAssembler::definedMaterialIds(const std::vector<std::string>&
 std::map<int, std::string> ModelAssembler::definedSectionIds(const std::vector<std::string>& lines) { return cur_scanSectionIds(lines); }
 std::map<int, std::string> ModelAssembler::definedPartVariantIds(const std::vector<std::string>& lines) { return cur_scanPartVariantIds(lines); }
 
+// battery 의 산출 접두사 — YAML 안의 상대 경로라 **그 값을 적은 YAML 의 폴더** 기준이다(§3.1(a) · 2026-11-07): assemble 의
+// `output` 은 assemble YAML 폴더, battery 설정의 `output` 은 그 설정 폴더(단독 battery 와 같다). 예전엔 둘 다 작업 폴더 기준이라
+// `assemble cfg/a.yaml` 이 battery 덱을 작업 폴더에 쓰고 cfg/ 의 주 덱에는 찾을 수 없는 이름을 적었다. applyBattery · planRunWrites 가 같이 쓴다
+static std::string ma_batteryOutput(const std::string& opOutput, const std::string& cfgOutput,
+                                    const std::string& configDir, const std::string& cfgPath) {
+    if (!opOutput.empty()) return yamlResolvePath(configDir, opOutput);
+    const size_t cut = cfgPath.find_last_of("/\\");
+    return yamlResolvePath(cut == std::string::npos ? std::string() : cfgPath.substr(0, cut), cfgOutput);
+}
+
+// 주 덱에 적을 `*INCLUDE` 이름 — 솔버와 include_closure 는 **주 덱 폴더** 기준으로 읽는다(Vol_I 181591). YAML 에 절대 경로로
+// 적은 값(`written`)이면 적은 그대로 둔다. 상대로 적은 값은 YAML 폴더가 절대 경로여도(플랫폼은 설정을 절대 경로로 준다) 상대 이름이다
+static std::string ma_includeName(const std::string& path, const std::string& deckDir, const std::string& written) {
+    const bool writtenAbs = !written.empty() && (written[0] == '/' || written[0] == '\\' ||
+                                                 (written.size() >= 2 && written[1] == ':'));
+    if (path.empty() || writtenAbs) return path;
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path a = fs::absolute(path, ec).lexically_normal();
+    fs::path b = fs::absolute(deckDir.empty() ? std::string(".") : deckDir, ec).lexically_normal();
+    if (!b.has_filename()) b = b.parent_path();   // `.` 이 남긴 끝 `/`
+    const fs::path r = a.lexically_relative(b);
+    return r.empty() ? path : r.generic_string();
+}
+
 // ★대상이 인클루드 안에만 있는가(헤더의 주석 참조). 판정 자료는 `raiseMaxIdsOverIncludes` 가 같은 리더로 센 것이다.
 static std::string ma_flattenHint() {
     return " — 고쳐 쓰는 op 은 주 덱만 고친다. `flatten_includes: true` 를 주면 인클루드 닫힘을 펼쳐 홀로 서는 한 덱으로 "
@@ -434,7 +459,7 @@ bool ModelAssembler::planRunWrites(const std::vector<AssemblyOperation>& ops, co
             noteInput(dat, "dat_file");
             if (op.warpage.debug)
                 for (const char* sfx : {"_raw.dat", "_curvature.dat", "_warpage.vtk"})
-                    midRun.push_back(op.warpage.debugPrefix + sfx);
+                    midRun.push_back(cfgPath(op.warpage.debugPrefix) + sfx);   // applyWarpage 와 같이 YAML 폴더 기준
             break;
         }
         case AssemblyOperation::MATSWAP:
@@ -452,7 +477,7 @@ bool ModelAssembler::planRunWrites(const std::vector<AssemblyOperation>& ops, co
             noteInput(bc, "battery config");
             try {
                 BatteryConfig cfg = parseBatteryConfig(bc);
-                if (!op.battery.output.empty()) cfg.output = op.battery.output;
+                cfg.output = ma_batteryOutput(op.battery.output, cfg.output, configDir, bc);   // applyBattery 와 같은 규칙
                 midRun.push_back(batteryKFilePath(cfg));
             } catch (const std::exception&) {
                 // 못 읽으면 applyBattery 가 아무것도 쓰기 전에 같은 까닭으로 멈춘다
@@ -9294,14 +9319,16 @@ bool ModelAssembler::applyWarpage(const WarpageOperation& op, double E, double n
 
     // 9. Debug export
     if (op.debug) {
+        // ★debug_prefix 도 YAML 안의 상대 경로라 YAML 폴더 기준이다(§3.1(a) · 2026-11-07) — 예전엔 작업 폴더 기준이었다
+        const std::string debugPrefix = yamlResolvePath(configDir, op.debugPrefix);
         // ★진단 파일도 이 실행이 쓰는 파일이다 — 덱보다 먼저 쓰므로 여기서 읽은 파일과 견준다(2026-11-07 · 쓰기 관문)
         std::string why;
-        if (output_guard::findClash({op.debugPrefix + "_raw.dat", op.debugPrefix + "_curvature.dat",
-                                     op.debugPrefix + "_warpage.vtk"}, guardInputs_, why)) {
+        if (output_guard::findClash({debugPrefix + "_raw.dat", debugPrefix + "_curvature.dat",
+                                     debugPrefix + "_warpage.vtk"}, guardInputs_, why)) {
             errorMessage_ = "warpage debug_prefix: " + why + " — 출력 파일을 쓰지 않았습니다";
             return false;
         }
-        grid.exportDebugData(op.debugPrefix);
+        grid.exportDebugData(debugPrefix);
     }
 
     // 10. Mode-specific processing
@@ -17793,7 +17820,8 @@ bool ModelAssembler::applyHFDamp(const HFDampOperation& op) {
 // ─────────────────────────────────────────────────────────────────────────────
 // applyBattery — generate battery K-file and *INCLUDE it in the assembly
 // ─────────────────────────────────────────────────────────────────────────────
-bool ModelAssembler::applyBattery(const BatteryOperation& op, const std::string& configDir) {
+bool ModelAssembler::applyBattery(const BatteryOperation& op, const std::string& configDir,
+                                  const std::string& outputPrefix) {
     if (op.configFile.empty()) {
         errorMessage_ = "[battery] config file path is required";
         return false;
@@ -17817,8 +17845,9 @@ bool ModelAssembler::applyBattery(const BatteryOperation& op, const std::string&
         return false;
     }
 
-    // Output prefix override
-    if (!op.output.empty()) cfg.output = op.output;
+    // Output prefix override — 어느 쪽이든 그 값을 적은 YAML 의 폴더 기준(ma_batteryOutput · 2026-11-07)
+    const std::string writtenOut = op.output.empty() ? cfg.output : op.output;   // YAML 에 적힌 그대로 — *INCLUDE 이름을 정할 때
+    cfg.output = ma_batteryOutput(op.output, cfg.output, configDir, cfgPath);
     noteInput(cfgPath, "battery config");   // 쓰기 관문이 산출과 견준다(2026-11-07)
     // ★배터리 덱은 루프 안에서 덱보다 먼저 쓴다 — 여기서 읽은 파일과 견준다(2026-11-07 · 쓰기 관문)
     {
@@ -17836,6 +17865,9 @@ bool ModelAssembler::applyBattery(const BatteryOperation& op, const std::string&
         errorMessage_ = "[battery] Failed to generate K-file";
         return false;
     }
+    // ★주 덱의 *INCLUDE 는 주 덱 폴더 기준 이름이다(ma_includeName · 2026-11-07) — 예전엔 작업 폴더 기준 경로를 그대로 적어
+    //   주 덱이 다른 폴더에 있으면 솔버가 찾지 못했다
+    kPath = ma_includeName(kPath, deckscan::dirOf(outputPrefix + ".k"), writtenOut);
 
     // Insert *INCLUDE before *END (or append before closing)
     bool inserted = false;
