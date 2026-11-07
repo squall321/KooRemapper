@@ -26,6 +26,7 @@
 #include "parser/DeckScan.h"
 #include "parser/DeckWriter.h"
 #include "parser/ElementCardLayout.h"
+#include "parser/IncludeClosure.h"   // 쓸 파일이 입력 덱을 덮는지(sameFile · clobberPair)
 #include "util/YamlComment.h"
 
 #include <algorithm>
@@ -1260,6 +1261,14 @@ std::string kwMap(const std::map<std::string, long long>& m) {
 // runExtractParts
 // ─────────────────────────────────────────────────────────────────────────────
 
+// 번호 지도 경로 — `out.k` → `out_renumber_map.json`(확장자 앞에 붙인다)
+std::string renumberMapPath(const std::string& output) {
+    const size_t dot = output.rfind('.');
+    const size_t sep = output.find_last_of("/\\");
+    if (dot != std::string::npos && (sep == std::string::npos || dot > sep)) return output.substr(0, dot) + "_renumber_map.json";
+    return output + "_renumber_map.json";
+}
+
 int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
     {   // 탭 들여쓰기는 블록을 통째로 무너뜨려 조용히 아무 일도 안 한다 — 파싱 전에 거른다
         std::string tabLine;
@@ -1356,7 +1365,23 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
 
     // ── 패스 0 — `*PART` 표 ──────────────────────────────────────────────────
     DeckIndex idx;
-    { std::set<std::string> vis; indexDeck(o.model, idx, vis); }
+    std::set<std::string> inputs;   // 이 op 이 읽는 파일(주 덱 · 따라가는 맨 *INCLUDE) — 쓸 파일이 덮으면 안 된다
+    indexDeck(o.model, idx, inputs);
+    // ★쓸 파일이 읽는 파일과 같으면 거절한다 — 쓰기(패스 2)는 산출을 열어(잘라 비워) 놓고 주 덱 · 인클루드를 다시 흘려 읽는다. 같은
+    //   파일이면 입력이 0 바이트가 된다(rc 1 로 끝나도 입력이 사라졌다). 보고 · 번호 지도는 다 읽은 뒤 입력을 덮는다(2026-11-07 검토 #6)
+    {
+        std::vector<std::string> writes{o.output, o.reportPath};
+        if (o.renumber) writes.push_back(renumberMapPath(o.output));
+        std::string w, r;
+        if (KooRemapper::include_closure::clobberPair(writes, std::vector<std::string>(inputs.begin(), inputs.end()), w, r)) {
+            const bool both = std::find(writes.begin(), writes.end(), r) != writes.end() && !inputs.count(r);
+            console.error(both ? "쓸 파일 「" + w + "」 과 「" + r + "」 이 같은 파일이다 — 하나가 다른 하나를 덮는다"
+                               : "쓸 파일 「" + w + "」 이 읽는 덱 「" + r + "」 과 같은 파일이다 — 쓰기가 그 입력을 비우고 다시 "
+                                 "읽는다(입력이 사라진다). 입력 덱(주 덱 · 인클루드)에 쓰지 않는다");
+            console.info("output · report 를 입력과 다른 이름으로 주라");
+            return 1;
+        }
+    }
     if (idx.parts.empty()) {
         console.error("No *PART definitions found (or only *PART_* variants we cannot chunk)");
         return 1;
@@ -1621,14 +1646,7 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
     // ── 번호 표 ─────────────────────────────────────────────────────────────
     std::string mapPath;
     if (rm.on) {
-        {   // `out.k` → `out_renumber_map.json` (확장자 앞에 붙인다)
-            size_t dot = o.output.rfind('.');
-            size_t sep = o.output.find_last_of("/\\");
-            if (dot != std::string::npos && (sep == std::string::npos || dot > sep))
-                mapPath = o.output.substr(0, dot) + "_renumber_map.json";
-            else
-                mapPath = o.output + "_renumber_map.json";
-        }
+        mapPath = renumberMapPath(o.output);
         std::ofstream mf(mapPath);
         if (!mf.is_open()) { console.error("Cannot write renumber map: " + mapPath); return 1; }
         mf << "{\n  \"note\": \"old -> new. 이것이 없으면 되돌릴 수 없다\",\n  \"nodes\": [";

@@ -360,3 +360,25 @@ TEST(IncludeClosure_FlatDeck_는_인클루드가_없으면_쓰지_않고_있으�
     }
     ASSERT_FALSE(fs::exists(tmp));                                            // 소멸자가 지웠다
 }
+
+TEST(IncludeClosure_sameFile_은_철자_절대경로_하드링크를_같다고_본다) {
+    // 쓸 파일이 입력 덱을 덮는지(2026-11-07 검토 #6 — extract-parts 의 output == model 이 입력을 비웠다). 아직 없는 산출은 정규 경로로 견준다
+    Scratch s("same");
+    const std::string m = s.put("d/m.k", "*KEYWORD\n*END\n");
+    const std::string inc = s.put("d/inc.k", "*NODE\n");
+    ASSERT_TRUE(include_closure::sameFile(m, m));
+    ASSERT_TRUE(include_closure::sameFile(m, (s.root / "d" / "." / "m.k").string()));
+    ASSERT_TRUE(include_closure::sameFile(m, (s.root / "d" / ".." / "d" / "m.k").string()));
+    const std::string hard = (s.root / "d" / "hard.k").string();
+    fs::create_hard_link(m, hard);
+    ASSERT_TRUE(include_closure::sameFile(hard, m));
+    ASSERT_FALSE(include_closure::sameFile(m, inc));
+    ASSERT_FALSE(include_closure::sameFile((s.root / "d" / "out.k").string(), m));   // 없는 파일
+    ASSERT_FALSE(include_closure::sameFile("", m));
+    std::string w, r;
+    ASSERT_TRUE(include_closure::clobberPair({(s.root / "d" / "out.k").string(), inc}, {m, inc}, w, r));
+    ASSERT_EQ(w, inc);
+    ASSERT_EQ(r, inc);
+    ASSERT_TRUE(include_closure::clobberPair({(s.root / "d" / "o.k").string(), (s.root / "d" / "." / "o.k").string()}, {m}, w, r));
+    ASSERT_FALSE(include_closure::clobberPair({(s.root / "d" / "out.k").string(), std::string()}, {m, inc}, w, r));
+}
