@@ -16,6 +16,9 @@
 
   지금은 세 장치가 정본 표(`noderefs::listCardOf`·`listCardFields`)를 쓴다.
 
+  C 절 — 보 `_WARPAGE` · `_ELBOW` 는 칸 자리를 몰라 그 블록의 정수를 다 보았다(EID 가 지운 절점 번호와 같으면 거짓으로 적었다).
+  이제 Card 1 의 절점과 옵션 카드의 절점(SN1 · SN2 · MN)만 본다(셋째 묶음).
+
 usage: test_dead_node_list_cards.py <KooRemapper 바이너리>
 """
 import os
@@ -135,6 +138,30 @@ def main():
             check("B-1 `_LIST` 는 67·68 을 같은 자리 새 절점으로 옮긴다(기준)",
                   len(s81) == 4 and s81[:2] == [81, 1] and 67 not in s81 and 68 not in s81, s81)
             check("B-2 ★맨 `*SET_NODE` 도 **같은** 새 절점으로 옮긴다(빼지 않는다)", s80[1:] == s81[1:], (s80, s81))
+
+        print("[C 보 _WARPAGE · _ELBOW — 옵션 카드의 절점(SN · MN)만 본다 — 셋으로 쌓기(67..132 를 지운다)]")
+        # 보 EID 100 은 지운 절점 번호와 같다 — 예전엔 칸 자리를 몰라 그 블록의 정수를 다 보아 「지운 노드를 뭅니다」 로 거짓으로 적었다.
+        # WARPAGE 의 SN 이 지운 절점(71)을 물면 · ELBOW 의 MN 이 지운 절점(70)이면 적는다
+        cards = ("*NODE_SCALAR\n     201       1\n     202       1\n"
+                 "*ELEMENT_BEAM_WARPAGE\n     100       9       1       2       3\n       201       202\n"
+                 "*ELEMENT_BEAM_WARPAGE\n     400       9       1       2       3\n        71       202\n"
+                 "*ELEMENT_BEAM_ELBOW\n     300       9       1       2       3\n        70\n"
+                 "*PART\nbeam\n         9         9         9\n*SECTION_BEAM\n         9         1\n"
+                 "*MAT_ELASTIC\n         9  7.85E-9  210000     0.3\n")
+        ck = base.replace("*END", cards + "*END", 1)
+        open(os.path.join(d, "c.k"), "w").write(ck)
+        open(os.path.join(d, "c.yaml"), "w").write(restack_yaml("c.k", "c_out.k", 3))
+        rc, out = run(binary, d, "restack", "c.yaml")
+        lines = ck.splitlines()
+        def reported(text):      # 그 줄(덱의 1-기반 줄 번호)을 「지운 노드를 뭅니다」 로 적었나
+            n = next(i + 1 for i, l in enumerate(lines) if l == text)
+            return re.search(r"line %d \*ELEMENT_BEAM_\w+ \(manual\): 이 요소가 지운 노드를 뭅니다" % n, out) is not None
+        check("C-0 restack 이 돈다", rc == 0 and os.path.exists(os.path.join(d, "c_out.k")), out[-300:])
+        check("C-1 ★WARPAGE 보의 EID(100)가 지운 절점 번호와 같아도 적지 않는다 — 절점 칸(N1-N3 · SN1 · SN2)만 본다",
+              not reported("     100       9       1       2       3"), [l for l in out.splitlines() if "ELEMENT_BEAM" in l])
+        check("C-2 WARPAGE 의 SN1 이 지운 절점(71)이면 그 줄을 적는다", reported("        71       202"),
+              [l for l in out.splitlines() if "ELEMENT_BEAM" in l])
+        check("C-3 ELBOW 의 MN 이 지운 절점(70)이면 그 줄을 적는다", reported("        70"), [l for l in out.splitlines() if "ELEMENT_BEAM" in l])
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

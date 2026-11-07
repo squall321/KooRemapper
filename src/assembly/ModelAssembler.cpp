@@ -321,6 +321,8 @@ bool ModelAssembler::loadBaseModel(const std::string& filename) {
     // 바닥(`idMaxima`)은 리더가 담지 않는 요소 족까지 센다 — 보 · 이산 · 질량 · 안전띠 · 플롯 · 줄 수를 모르는 변형(2026-11-07) ·
     // 리더가 안 읽는 솔리드 · 티쉘 옵션 변형(`_ORTHO` · `_H20` … · `*ELEMENT_TSHELL_BETA` — `gridReaderReadsKeyword`)
     maxAuxElementId_ = nonGridElementMaxId(rawLines_);
+    // 스칼라 절점(`*NODE_SCALAR` — 보 `_WARPAGE` 의 SN)도 절점 번호를 차지한다 — 리더는 `*NODE` 만 담는다(셋째 묶음)
+    maxNodeId_ = std::max(maxNodeId_, scalarNodeMaxId(rawLines_));
 
     maxPartId_ = 0;
     maxSectionId_ = 0;
@@ -510,6 +512,7 @@ void ModelAssembler::raiseMaxIdsOverIncludes() {
         maxMaterialId_ = std::max(maxMaterialId_, cur_scanMaxMaterialId(f.lines));
         maxSetId_ = std::max(maxSetId_, cur_scanMaxSetId(f.lines));
         maxAuxElementId_ = std::max(maxAuxElementId_, nonGridElementMaxId(f.lines));   // 바닥 — 모든 요소 족(2026-11-07)
+        maxNodeId_ = std::max(maxNodeId_, scalarNodeMaxId(f.lines));                    // 스칼라 절점도 절점 번호다(셋째 묶음)
     }
     ConsoleOutput console;
     ids::warnUnsure(console, rm.unsure);
@@ -3155,13 +3158,14 @@ void ModelAssembler::cleanupDeadNodeRefs(const std::set<int>& deadNodes,
         // (안전띠 SLEN 이 E16 이라 N3 · N4 는 57-72열이다 — 예전엔 10칸으로 잘라 칸 2-7 을 봐서, 칸이 어긋나면 공백 토큰이
         // 우연히 맞고 맞아떨어지면 엉뚱한 칸이었으며 SBRID · 보의 릴리즈 칸을 절점으로 셌다 · 2026-11-07). 줄이 두 가지로 읽혀
         // 갈리면(정수 폭으로 쓴 안전띠 줄) **어느 읽기로든** 지운 절점을 물면 적는다 — 이 길은 줄을 지우지 않고 사람이 볼 항목만
-        // 남긴다(사용자 결정 「둘 다 남긴다」). 칸 자리를 모르는 것(모르는 옵션 · 보의 WARPAGE · ELBOW 카드 절점 · `_ACCELEROMETER`
-        // 같은 별개 키워드)은 줄의 정수를 **전부** 본다 — 넘치게 센다(사람이 볼 줄이 늘 뿐 지운 절점을 무는 줄을 놓치지 않는다).
+        // 남긴다(사용자 결정 「둘 다 남긴다」). 옵션 카드의 절점(보 `_WARPAGE` 의 SN1 · SN2 · `_ELBOW` 의 MN)도 그 칸만 본다 — 예전엔
+        // 칸 자리를 몰라 그 블록의 정수를 다 보아 EID · 릴리즈 칸이 지운 절점 번호와 같으면 거짓으로 적었다(셋째 묶음). 칸 자리를
+        // 모르는 것(모르는 옵션 · `_ACCELEROMETER` 같은 별개 키워드)은 줄의 정수를 **전부** 본다 — 넘치게 센다(사람이 볼 줄이 늘 뿐
+        // 지운 절점을 무는 줄을 놓치지 않는다).
         if (rsStarts(kw, "*ELEMENT_BEAM") || rsStarts(kw, "*ELEMENT_DISCRETE") ||
             rsStarts(kw, "*ELEMENT_SEATBELT")) {
             const AuxElementCard a = auxElementCard(rawLines_[b.kwLine]);
-            const bool exact = a.supported && a.family != AuxFamily::NONE &&
-                               !(a.family == AuxFamily::BEAM && (rsHas(kw, "_WARPAGE") || rsHas(kw, "_ELBOW")));
+            const bool exact = a.supported && a.family != AuxFamily::NONE;
             const int afw = keywordFieldWidth(rawLines_[b.kwLine], deckFwAux);
             int cardLeft = 0;                    // 지금 카드의 남은 줄(빈 줄도 카드 안에서는 카드다)
             for (size_t li = b.kwLine + 1; li < rawLines_.size(); ++li) {
@@ -3174,10 +3178,16 @@ void ModelAssembler::cleanupDeadNodeRefs(const std::set<int>& deadNodes,
                 if (exact) {
                     const bool card1 = (cardLeft == 0);
                     if (card1) cardLeft = a.lines;
+                    const int cardLine = a.lines - cardLeft;   // 카드 안 몇째 줄(0 = Card 1)
                     --cardLeft;
-                    if (!card1 || g == std::string::npos) continue;   // 옵션 카드 · 빈 줄 — 절점 칸이 없다
-                    for (int v : auxNodesUnion(a, auxCardReadings(a, ln, afw)))
-                        if (dead(v)) any = true;
+                    if (g == std::string::npos) continue;      // 빈 줄 — 절점 칸이 없다
+                    if (!card1) {                              // 옵션 카드 — 절점 칸이 있는 줄만(WARPAGE 의 SN · ELBOW 의 MN)
+                        for (int v : auxOptNodesOf(a, cardLine, ln, afw))
+                            if (dead(v)) any = true;
+                    } else {
+                        for (int v : auxNodesUnion(a, auxCardReadings(a, ln, afw)))
+                            if (dead(v)) any = true;
+                    }
                 } else {
                     if (g == std::string::npos) continue;
                     std::vector<int> v;
