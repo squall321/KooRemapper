@@ -18,6 +18,8 @@
       한다. 빠뜨린 덱은 그럴듯하게 돌면서 틀린다(J 절).
     · 콤마 자유형식 줄의 번호 다시 매기기 — 칸 차례 × 폭 자리에 덮어써 깨진 줄을 냈고 되읽기도 통과했다.
       이제 줄을 대고 거절하며(산출 없음) 되읽기도 칸이 깨진 콤마 줄을 센다(O 절 · 2026-11-07 검토 #7).
+    · 실패해도 남는 파일 — 못 여는 인클루드 · 되읽기 실패 뒤에 산출이 남았고, 거절한 실행 옆에 지난 실행의 산출 · 번호 지도 ·
+      보고가 그대로 있었다. rc≠0 이면 그것들을 지운다(되읽기 실패의 보고만 이번 결과로 남긴다 — P 절 · 검토 #8).
 
 usage: test_extract_parts.py <KooRemapper 바이너리>
 """
@@ -211,15 +213,20 @@ def main():
               "*SET_NODE_LIST" in rn and rd["verify"]["undefined_nodes"] == 0)
 
         # ── E: include.sets / materials 끄기 ─────────────────────────────────
+        # 되읽기를 끄고 산출을 본다 — 되읽기가 실패하면 산출을 지운다(P 절 · 2026-11-07 검토 #8)
+        cfg(d, "e0.yaml", "model: main.k\noutput: e.k\nparts: [1, 2]\nverify: false\ninclude:\n"
+                          "  sets: none\n  materials: false\n")
+        rc0, out0 = run(binary, d, "extract-parts", "e0.yaml")
+        e = open(os.path.join(d, "e.k")).read() if rc0 == 0 else ""
+        check("E-1 sets: none 이면 *SET_* 이 없다", rc0 == 0 and "*SET_" not in e, out0[-300:])
+        check("E-2 materials: false 면 *MAT_* 이 없다", rc0 == 0 and "*MAT_" not in e, out0[-300:])
         cfg(d, "e.yaml", "model: main.k\noutput: e.k\nparts: [1, 2]\ninclude:\n"
                          "  sets: none\n  materials: false\nreport: repe.json\n")
         rc, out = run(binary, d, "extract-parts", "e.yaml")
-        e = open(os.path.join(d, "e.k")).read()
         re_ = rep(d, "repe.json")
-        check("E-1 sets: none 이면 *SET_* 이 없다", "*SET_" not in e)
-        check("E-2 materials: false 면 *MAT_* 이 없다", "*MAT_" not in e)
-        check("E-3 ★그러면 검증이 재질 미정의를 잡는다 (조용히 통과하지 않는다)",
-              re_["verify"]["undefined_materials"] > 0 and rc != 0, (re_["verify"], rc))
+        check("E-3 ★그러면 검증이 재질 미정의를 잡는다 (조용히 통과하지 않는다) · 산출은 지운다",
+              re_["verify"]["undefined_materials"] > 0 and rc != 0 and not os.path.exists(os.path.join(d, "e.k")),
+              (re_["verify"], rc))
 
         # ── F: 세트 자르기 ───────────────────────────────────────────────────
         check("F-1 *SET_NODE_LIST 를 남은 절점으로 자른다",
@@ -539,6 +546,42 @@ def main():
         r8 = rep(d, "O8.json") if os.path.exists(os.path.join(d, "O8.json")) else {}
         check("O-8 ★되읽기가 칸이 깨진 콤마 줄(「8,9,1 2,3,4」)을 센다 → rc 1",
               rc == 1 and (r8.get("verify") or {}).get("malformed_comma_lines") == 1 and "깨진 콤마" in out, (rc, r8.get("verify"), out[-300:]))
+
+        # ── P: ★rc≠0 이면 산출 · 번호 지도가 남지 않는다 · 지난 실행의 곁 파일도 이번 결과로 남지 않는다 ──
+        def exists(*names):
+            return [n for n in names if os.path.exists(os.path.join(d, n))]
+        write(os.path.join(d, "P1.k"), base_deck(include_name="nope.k"))
+        cfg(d, "P1.yaml", "model: P1.k\noutput: P1_out.k\nparts: [1]\nreport: P1.json\n")
+        rc, out = run(binary, d, "extract-parts", "P1.yaml")
+        check("P-1 ★못 여는 *INCLUDE → rc 1 · 부분 산출이 남지 않는다", rc == 1 and not exists("P1_out.k", "P1.json"),
+              (rc, exists("P1_out.k", "P1.json"), out[-300:]))
+        write(os.path.join(d, "P2.k"), base_deck().replace(e8(30, 3, 17, 18, 19, 20), e8(30, 3, 17, 18, 19, 21)))
+        cfg(d, "P2.yaml", "model: P2.k\noutput: P2_out.k\nparts: [3]\nrenumber: true\nreport: P2.json\n")
+        rc, out = run(binary, d, "extract-parts", "P2.yaml")
+        r2 = rep(d, "P2.json") if os.path.exists(os.path.join(d, "P2.json")) else {}
+        check("P-2 ★되읽기 실패(없는 절점 21) → rc 1 · 산출 · 번호 지도는 지우고 보고는 남긴다(output_written false)",
+              rc == 1 and not exists("P2_out.k", "P2_out_renumber_map.json") and r2.get("output_written") is False and
+              (r2.get("verify") or {}).get("undefined_nodes") == 1, (rc, exists("P2_out.k", "P2_out_renumber_map.json"), r2.get("verify")))
+        # 지난 실행(renumber 성공)이 남긴 산출 · 번호 지도 · 보고 — 같은 이름으로 거절되는 실행 뒤에 남으면 이번 결과로 읽힌다
+        cfg(d, "P3a.yaml", "model: main.k\noutput: P3_out.k\nparts: [1]\nrenumber: true\nreport: P3.json\n")
+        rc0, _ = run(binary, d, "extract-parts", "P3a.yaml")
+        before = exists("P3_out.k", "P3_out_renumber_map.json", "P3.json")
+        cfg(d, "P3b.yaml", "model: O-1.k\noutput: P3_out.k\nparts: [9]\nrenumber: true\nreport: P3.json\n")
+        rc, out = run(binary, d, "extract-parts", "P3b.yaml")
+        check("P-3 ★거절한 실행(콤마 줄 renumber) 뒤에 지난 실행의 산출 · 번호 지도 · 보고가 남지 않는다",
+              rc0 == 0 and len(before) == 3 and rc == 1 and not exists("P3_out.k", "P3_out_renumber_map.json", "P3.json"),
+              (rc0, before, rc, exists("P3_out.k", "P3_out_renumber_map.json", "P3.json"), out[-300:]))
+        rc0, _ = run(binary, d, "extract-parts", "P3a.yaml")
+        cfg(d, "P4.yaml", "model: main.k\noutput: P3_out.k\nparts: [1]\nreport: P3.json\n")
+        rc, out = run(binary, d, "extract-parts", "P4.yaml")
+        r4 = rep(d, "P3.json") if os.path.exists(os.path.join(d, "P3.json")) else {}
+        check("P-4 ★번호를 안 매긴 실행은 지난 실행의 번호 지도를 지운다(이 산출과 짝이 아니다) · rc 0",
+              rc0 == 0 and rc == 0 and exists("P3_out.k", "P3.json") == ["P3_out.k", "P3.json"] and
+              not exists("P3_out_renumber_map.json") and (r4.get("renumber") or {}).get("on") is False and
+              r4.get("output_written") is True, (rc0, rc, exists("P3_out.k", "P3_out_renumber_map.json", "P3.json")))
+        rc, out = run(binary, d, "extract-parts", "P3a.yaml")
+        check("P-5 renumber 성공은 산출 · 번호 지도 · 보고를 다 남긴다",
+              rc == 0 and len(exists("P3_out.k", "P3_out_renumber_map.json", "P3.json")) == 3, (rc, out[-300:]))
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

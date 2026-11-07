@@ -1418,8 +1418,8 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
     // ★쓸 파일이 읽는 파일과 같으면 거절한다 — 쓰기(패스 2)는 산출을 열어(잘라 비워) 놓고 주 덱 · 인클루드를 다시 흘려 읽는다. 같은
     //   파일이면 입력이 0 바이트가 된다(rc 1 로 끝나도 입력이 사라졌다). 보고 · 번호 지도는 다 읽은 뒤 입력을 덮는다(2026-11-07 검토 #6)
     {
-        std::vector<std::string> writes{o.output, o.reportPath};
-        if (o.renumber) writes.push_back(renumberMapPath(o.output));
+        // 번호 지도는 renumber 가 아니어도 넣는다 — 실패하거나 번호를 안 매기면 지난 실행이 남긴 지도를 지운다(아래 failRun)
+        const std::vector<std::string> writes{o.output, o.reportPath, renumberMapPath(o.output)};
         std::string w, r;
         if (KooRemapper::include_closure::clobberPair(writes, std::vector<std::string>(inputs.begin(), inputs.end()), w, r)) {
             const bool both = std::find(writes.begin(), writes.end(), r) != writes.end() && !inputs.count(r);
@@ -1430,9 +1430,20 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
             return 1;
         }
     }
+    // ★rc≠0 이면 이번 실행이 쓴 것을 남기지 않는다 — 부분 출력 · 번호 지도, 그리고 지난 실행이 같은 이름으로 남긴 산출 · 번호 지도 ·
+    //   보고도 지운다(이번 결과로 읽히지 않게 — 2026-11-07 검토 #8: 못 여는 인클루드 · 되읽기 실패 뒤에 산출이 남았고, 거절한 실행 옆에
+    //   지난 실행의 산출 · 지도 · 보고가 그대로 있었다). 위 검사가 그 셋이 입력이 아님을 보였다. 되읽기 실패만은 보고가 이번 결과(미정의
+    //   수)라 남기고 그 안에 「output_written: false」 를 적는다
+    const std::string mapPathOf = renumberMapPath(o.output);
+    auto failRun = [&](bool keepReport) {
+        std::remove(o.output.c_str());
+        std::remove(mapPathOf.c_str());
+        if (!keepReport && !o.reportPath.empty()) std::remove(o.reportPath.c_str());
+        return 1;
+    };
     if (idx.parts.empty()) {
         console.error("No *PART definitions found (or only *PART_* variants we cannot chunk)");
-        return 1;
+        return failRun(false);
     }
     const std::map<int, int> pidNodes = pidNodeCounts(idx);
 
@@ -1456,12 +1467,12 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
         for (size_t i = 0; i < missing.size() && i < 20; ++i)
             s += (i ? ", " : "") + std::to_string(missing[i]);
         console.error("덱에 없는 PID: " + s + " — 오타면 조용히 빈 덱이 나온다");
-        return 1;
+        return failRun(false);
     }
     std::vector<int> selDefined;
     for (int p : sel) if (idx.parts.count(p)) selDefined.push_back(p);
     sel = selDefined;
-    if (sel.empty()) { console.error("고를 파트가 없다"); return 1; }
+    if (sel.empty()) { console.error("고를 파트가 없다"); return failRun(false); }
     console.info("  parts: " + std::to_string(sel.size()) + " / " +
                  std::to_string(idx.parts.size()) + " (덱 전체)");
     for (const auto& h : titleHits) console.info("    title match: " + h);
@@ -1475,7 +1486,7 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
     //   "요소가 없다" 로 거절된다 — 회귀 L-0 이 그 자리를 지킨다.
     if (pk.cards == 0 && pk.auxCards == 0) {
         console.error("고른 파트에 요소가 없다 — PID 는 맞는데 그 파트의 요소를 못 읽었다는 뜻이다");
-        return 1;
+        return failRun(false);
     }
     // ★모르는 `*ELEMENT_*` 변형이 고른 파트의 요소를 담고 있으면 **거절한다.**
     //   조용히 빠뜨린 덱은 그럴듯하게 돌면서 틀린다.
@@ -1486,7 +1497,7 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
                           "조용히 빠뜨리지 않기 위해 거절한다");
         console.info("읽을 수 있는 것은 격자 3족(*ELEMENT_SOLID·SHELL·TSHELL)과 "
                      "보 족 5종(*ELEMENT_BEAM·DISCRETE·MASS·SEATBELT·PLOTEL)이다");
-        return 1;
+        return failRun(false);
     }
     // ★안전띠 장치 키워드는 PID 칸이 없어 고른 띠에 붙었는지 **증명할 수 없다** — 위 규칙(「모르는 변형이 고른 파트를 담으면
     //   거절」)을 보수적으로 댄다: 고른 파트에 `*ELEMENT_SEATBELT` 가 있으면 거절하고, 없으면 다른 모르는 카드처럼 버리고
@@ -1498,7 +1509,7 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
                       "없으므로 거절한다(빼면 띠가 그럴듯하게 돌면서 장치가 없다)");
         for (const auto& d : pk.seatbeltDevices) console.println("  " + d);
         console.info("안전띠를 고르지 않으면 장치는 싣지 않고 dropped_keywords 에 센다");
-        return 1;
+        return failRun(false);
     }
     // ★따라가지 않는 파일 인클루드의 안은 보지 않는다 — 거기 안전띠 장치가 있으면 위 거절을 못 한다. 고른 파트에 안전띠가 있으면
     //   장치가 없다고 증명할 수 없으니 거절한다(2026-11-07 검토 #3 — `*INCLUDE_TRANSFORM` 안의 리트랙터를 빼고 띠만 rc 0 으로 실었다)
@@ -1508,7 +1519,7 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
                       "붙은 장치가 없다고 증명할 수 없으므로 거절한다");
         for (const auto& l : pk.unfollowedIncludes) console.println("  " + l);
         console.info("따라가는 것은 맨 *INCLUDE 뿐이다(*INCLUDE_PATH · _PATH_RELATIVE 는 탐색 경로라 세지 않는다)");
-        return 1;
+        return failRun(false);
     }
     // ★보 장치(`*ELEMENT_BEAM_PULLEY` · `_SOURCE`)는 PID 칸이 없다 — 고른 보 요소(BID1 · BID2 · BSEID)를 가리키면 장치를 빼고 보만 실을
     //   수 없다 → 거절. 번호가 0 이면(PULLEY — LS-DYNA 가 이웃 보를 스스로 찾는다) 고른 파트에 보가 있을 때 거절. 그 밖은 버리고
@@ -1530,7 +1541,7 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
             console.error("보 장치(*ELEMENT_BEAM_PULLEY · _SOURCE) " + std::to_string(bad.size()) + " 줄이 고른 보에 붙었을 수 있다 — 장치는 "
                           "PID 칸이 없어 따로 싣지 못하고, 빼면 보가 그럴듯하게 돌면서 도르래 · 공급원이 없다. 거절한다");
             for (const auto& b : bad) console.println("  " + b);
-            return 1;
+            return failRun(false);
         }
     }
     // ★질량 얹기 세트(`*ELEMENT_MASS_PART_SET`) — 세트를 일부만 고르거나 풀 수 없으면 실을지 버릴지 정할 수 없다. 세트를 싣지 않으면
@@ -1541,7 +1552,7 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
         for (const auto& l : pk.massSetRefused) console.println("  " + l);
         if (pk.massSetCards > 0 && !o.incSets)
             console.println("  include.sets: none — 실을 질량 얹기 " + std::to_string(pk.massSetCards) + " 줄이 가리키는 *SET_PART 를 싣지 않는다");
-        return 1;
+        return failRun(false);
     }
     // ★넓은 칸 뒤 PID 가 읽기마다 갈리는데 그 하나를 골랐다 — 실을지 버릴지 정할 수 없다(질량의 MASS 를 정수 폭으로 쓴 줄 · 2026-11-07)
     if (!pk.ambiguousPid.empty()) {
@@ -1549,7 +1560,7 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
                       "고른 파트다 — 실을지 버릴지 정할 수 없어 거절한다");
         for (const auto& l : pk.ambiguousPid) console.println("  " + l);
         console.info("그 줄을 설명서 칸(정수 8 · 실수 16 — i10 은 정수 10, long 은 모두 20)으로 고쳐 쓰라");
-        return 1;
+        return failRun(false);
     }
     // 다른 읽기만 말하는 절점 — 덱(닫힘)에 정의된 것만 남긴다(둘 다 남긴다 · 지어낸 번호는 싣지 않는다). 드물게만 덱을 한 번 더 훑는다
     std::vector<int> altExisting;
@@ -1599,7 +1610,7 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
         if (pk.elemIdCollision) {
             console.error("renumber: 종류가 다른 요소가 같은 EID 를 쓴다 — 전역으로 1부터 다시 "
                           "매기면 어느 쪽인지 알 수 없게 된다. renumber: false 로 돌려라");
-            return 1;
+            return failRun(false);
         }
         // ★번호를 제자리에 바꿔 쓸 수 없는 보 족 줄 — 줄마다 한 번 적고 쓰기 전에 거절한다(2026-11-07 「번호 매기기는 거절」)
         //   · 칸 자리가 없다 — 콤마 자유형식 · 설명서 칸의 절점 칸에 공백이 낀 줄
@@ -1622,7 +1633,7 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
             console.error("renumber: 보 족 줄 " + std::to_string(bad.size()) + " 장은 절점 번호를 제자리에 바꿔 쓸 수 없다 — 거절한다");
             for (const auto& b : bad) console.println("  " + b);
             console.info("renumber: false 면 그 줄은 그대로 싣고 두 읽기의 절점을 다 싣는다");
-            return 1;
+            return failRun(false);
         }
         rm.on = true;
         rm.nodes = &pk.nodes;
@@ -1635,28 +1646,27 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
     WriteStats st;
     {
         KooRemapper::DeckWriter w(o.output, KooRemapper::deck_newline::detect(o.model));
-        if (!w.ok()) { console.error("Cannot open output: " + o.output); return 1; }
+        if (!w.ok()) { console.error("Cannot open output: " + o.output); return failRun(false); }
         Writer wr{o, idx, sel, pidNodes, pk, nd, rm, console, st};
         wr.out = &w.stream();
         wr.processFile(o.model, 0);
         w.close();
         if (!wr.commaLines.empty()) {
-            std::remove(o.output.c_str());
             console.error("renumber: 콤마 자유형식 줄 " + std::to_string(wr.commaCount) + " 장은 칸 자리가 없어 번호를 제자리에 바꿔 쓸 수 "
                           "없다 — 거절한다");
             for (const auto& l : wr.commaLines) console.println("  " + l);
             if (wr.commaCount > (long long)wr.commaLines.size())
                 console.println("  … 외 " + std::to_string(wr.commaCount - (long long)wr.commaLines.size()) + " 장");
             console.info("renumber: false 면 그 줄을 그대로 싣는다 · 고정폭으로 고쳐 쓰면 번호를 매길 수 있다");
-            return 1;
+            return failRun(false);
         }
         // 쓰다 멈춘 덱(번호를 다 못 바꾼 줄이 남는다)을 디스크에 남기지 않는다 — 그럴듯하게 읽히는 틀린 덱이다
-        if (wr.failed) { std::remove(o.output.c_str()); return 1; }
+        if (wr.failed) return failRun(false);
         if (!wr.missingIncludes.empty()) {
             for (const auto& m : wr.missingIncludes)
                 console.error("*INCLUDE 를 열 수 없다: " + m);
             console.error("인클루드를 못 읽으면 그 안의 파트가 조용히 빠진다 — 거절한다");
-            return 1;
+            return failRun(false);
         }
     }
     console.success("wrote: " + o.output + "  (*NODE " + std::to_string(st.nodeLines) +
@@ -1704,9 +1714,9 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
     // ── 번호 표 ─────────────────────────────────────────────────────────────
     std::string mapPath;
     if (rm.on) {
-        mapPath = renumberMapPath(o.output);
+        mapPath = mapPathOf;
         std::ofstream mf(mapPath);
-        if (!mf.is_open()) { console.error("Cannot write renumber map: " + mapPath); return 1; }
+        if (!mf.is_open()) { console.error("Cannot write renumber map: " + mapPath); return failRun(false); }
         mf << "{\n  \"note\": \"old -> new. 이것이 없으면 되돌릴 수 없다\",\n  \"nodes\": [";
         for (size_t i = 0; i < pk.nodes.size(); ++i)
             mf << (i ? "," : "") << "[" << pk.nodes[i] << "," << (i + 1) << "]";
@@ -1719,6 +1729,8 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
         if (pk.nodes.size() > 1000000)
             console.warning("번호 표가 " + std::to_string(pk.nodes.size()) +
                             " 항이다 — 파일이 크다. 되돌리려면 필요하므로 지우지 말라");
+    } else {
+        std::remove(mapPathOf.c_str());   // 지난 실행이 남긴 번호 지도 — 번호를 안 매긴 이 산출과 짝이 아니다
     }
 
     // ── 패스 3 — 되읽기 검증 ────────────────────────────────────────────────
@@ -1743,13 +1755,17 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
         }
     }
 
+    const bool verifyOk = !o.verify || (vf.undefNodes == 0 && vf.undefParts == 0 && vf.undefSections == 0 &&
+                                        vf.undefMaterials == 0 && vf.malformed == 0);
+
     // ── 리포트 ──────────────────────────────────────────────────────────────
     if (!o.reportPath.empty()) {
         std::ofstream jf(o.reportPath);
-        if (!jf.is_open()) { console.error("Cannot write report: " + o.reportPath); return 1; }
+        if (!jf.is_open()) { console.error("Cannot write report: " + o.reportPath); return failRun(false); }
         jf << "{\n  \"op\": \"extract-parts\",\n";
         jf << "  \"model\": " << jsonStr(o.model) << ",\n";
         jf << "  \"output\": " << jsonStr(o.output) << ",\n";
+        jf << "  \"output_written\": " << (verifyOk ? "true" : "false") << ",\n";   // 되읽기가 실패하면 산출 · 번호 지도를 지운다
         jf << "  \"deck\": {\"field_width\": " << idx.fieldWidth
            << ", \"includes_inlined\": " << st.includesInlined
            << ", \"parts_in_deck\": " << idx.parts.size() << "},\n";
@@ -1798,7 +1814,6 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
         console.info("report: " + o.reportPath);
     }
 
-    if (o.verify && (vf.undefNodes || vf.undefParts || vf.undefSections || vf.undefMaterials || vf.malformed))
-        return 1;
+    if (!verifyOk) return failRun(true);   // 보고는 이번 결과다 — 산출 · 번호 지도만 지운다
     return 0;
 }
