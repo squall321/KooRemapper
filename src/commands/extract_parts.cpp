@@ -99,18 +99,46 @@ struct DeckIndex {
     std::set<int> partSetsOpaque;              // 멤버를 ID 로 못 읽는 꼴(`_ADD` · `_GENERAL` · `_GENERATE` …) · 두 번 정의된 SID
 };
 
+// ── 인클루드 — 정본 닫힘(include_closure::readPaths)을 따른다 ──────────────────────────────────
+// 주 덱 폴더 먼저 · 그다음 `*INCLUDE_PATH` 폴더(Vol_I 181591) · `␣+` 이음 · 인클루드 안 `*END` 는 그 파일만 끝낸다 · 깊이 16 · 같은 파일은
+// 한 번. 예전엔 패스마다 포함하는 파일의 폴더로 풀고 `*INCLUDE_PATH` 를 몰랐으며 깊이 8 에서 말없이 멈췄다 — 9단째 인클루드의 고른 파트
+// 셸이 rc 0 · 되읽기 0 으로 빠졌다(재검토 N3 · D1). 패스는 `*INCLUDE` 블록의 이름 줄(그 이름의 마지막 줄)에서 이 표를 묻는다.
+class IncludeMap {
+public:
+    explicit IncludeMap(const std::string& model) : clo_(KooRemapper::include_closure::readPaths(model)) {
+        for (const auto& r : clo_.refs) byLast_[{r.file, r.lastLine}] = &r;
+    }
+    IncludeMap(const IncludeMap&) = delete;
+    IncludeMap& operator=(const IncludeMap&) = delete;
+    const KooRemapper::include_closure::Closure& closure() const { return clo_; }
+    // 그 파일 그 줄에서 끝나는 이름 — 없으면 nullptr(이름의 앞줄 · 주석 · 닫힘이 보지 않은 줄)
+    const KooRemapper::include_closure::NameRef* at(const std::string& file, size_t line) const {
+        const auto it = byLast_.find({file, line});
+        return it == byLast_.end() ? nullptr : it->second;
+    }
+    // 따라갈 경로(Followed 일 때만) — 아니면 빈 글자
+    std::string follow(const std::string& file, size_t line) const {
+        const auto* r = at(file, line);
+        return r && r->what == KooRemapper::include_closure::NameRef::What::Followed ? r->path : std::string();
+    }
+
+private:
+    KooRemapper::include_closure::Closure clo_;
+    std::map<std::pair<std::string, size_t>, const KooRemapper::include_closure::NameRef*> byLast_;
+};
+
 // `*PART` 블록은 '제목 줄 + 카드 2' 가 **쌍으로 반복**된다(제목은 비워 둘 수 있으나 생략 못 한다).
 // ⚠ 그래서 **빈 줄도 카드 줄로 센다** — 건너뛰면 다음 파트의 제목 자리가 한 칸 밀려 PID 가
 // 통째로 어긋난다. 주석(`$`)만 뺀다.
 //
 // ⚠ 덱 전문을 메모리에 들지 않는다(2.32GB 전제) — **블록 하나만** 버퍼한다.
-void indexDeck(const std::string& path, DeckIndex& idx, std::set<std::string>& visited,
-               int depth = 0) {
-    if (depth > 8 || visited.count(path)) return;
+// `im` — 인클루드를 따라갈 표(되읽기는 홀로 선 산출을 보니 nullptr)
+void indexDeck(const std::string& path, DeckIndex& idx, std::set<std::string>& visited, const IncludeMap* im) {
+    if (visited.count(path)) return;
     visited.insert(path);
     std::ifstream in(path);
     if (!in.is_open()) return;
-    const std::string baseDir = dirOf(path);
+    size_t lineNo = 0;
     const int sfw = 10;                        // `*PART` 카드 2 와 `*SECTION_*` 은 8I10 이다
     std::string line, kw;
     std::vector<std::string> buf;              // 지금 블록의 카드 줄
@@ -174,10 +202,12 @@ void indexDeck(const std::string& path, DeckIndex& idx, std::set<std::string>& v
 
     while (std::getline(in, line)) {
         while (!line.empty() && line.back() == '\r') line.pop_back();
+        ++lineNo;
         size_t g = line.find_first_not_of(" \t");
         if (g != std::string::npos && line[g] == '*') {
             flush();
             kw = kwBare(keywordToken(line));
+            if (kw == "*END") break;                       // 그 파일은 여기서 끝난다(Vol_I 179654 — 닫힘과 같다)
             if (kw == "*KEYWORD") {
                 int w = KooRemapper::keywordCardDeckWidth(line);
                 if (w > 0) idx.fieldWidth = w;
@@ -190,8 +220,10 @@ void indexDeck(const std::string& path, DeckIndex& idx, std::set<std::string>& v
             continue;
         }
         if (kw == "*INCLUDE") {
-            std::string rel = trim(line);
-            if (!rel.empty()) indexDeck(joinPath(baseDir, rel), idx, visited, depth + 1);
+            if (im) {
+                const std::string next = im->follow(path, lineNo);
+                if (!next.empty()) indexDeck(next, idx, visited, im);
+            }
             continue;
         }
         if (kw != "*PART" && kw != "*PART_TITLE" && !starts(kw, "*SECTION_SOLID") && !starts(kw, "*SET_PART")) continue;
@@ -228,7 +260,6 @@ struct Picked {
     std::map<std::string, long long> opaqueElemOther;     // 담지 않았다(그냥 버린다)
     long long seatbeltCards = 0;                          // 고른 파트의 `*ELEMENT_SEATBELT` 카드
     std::vector<std::string> seatbeltDevices;             // 덱의 안전띠 장치 키워드 블록 — 「파일:줄 키워드」
-    std::vector<std::string> unfollowedIncludes;          // 따라가지 않는 파일 인클루드(`*INCLUDE_TRANSFORM` …) — 「파일:줄 키워드」
     // ── 보 장치 · 질량 얹기(2026-11-07 검토 #5) ──
     std::vector<int> beamEids;                            // 고른 파트의 보(`*ELEMENT_BEAM*`) 요소 번호
     struct BeamDevice { std::string where; std::vector<int> refs; };
@@ -246,26 +277,28 @@ struct Picked {
 // 그 번호들(정렬) 가운데 덱(닫힘)의 `*NODE` 가 정의한 것을 `found` 에 — 보 족 줄의 다른 읽기가 말하는 절점이 덱에 있나를 잴 때만
 // 부른다(드물다 · 덱 전체의 절점 표를 들지 않는다). 인클루드는 scanElements 와 같이 맨 `*INCLUDE` 를 따라간다.
 void definedNodesAmong(const std::string& path, const DeckIndex& idx, const std::vector<int>& want,
-                       std::vector<int>& found, std::set<std::string>& visited, int depth = 0) {
-    if (depth > 8 || visited.count(path)) return;
+                       std::vector<int>& found, std::set<std::string>& visited, const IncludeMap& im) {
+    if (visited.count(path)) return;
     visited.insert(path);
     std::ifstream in(path);
     if (!in.is_open()) return;
-    const std::string baseDir = dirOf(path);
     std::string line, kw;
     int fw = idx.fieldWidth;
+    size_t lineNo = 0;
     while (std::getline(in, line)) {
         while (!line.empty() && line.back() == '\r') line.pop_back();
+        ++lineNo;
         const size_t g = line.find_first_not_of(" \t");
         if (g != std::string::npos && line[g] == '*') {
             kw = kwBare(keywordToken(line));
+            if (kw == "*END") break;
             fw = KooRemapper::keywordFieldWidth(line, idx.fieldWidth);
             continue;
         }
         if (!isDataLine(line)) continue;
         if (kw == "*INCLUDE") {
-            const std::string rel = trim(line);
-            if (!rel.empty()) definedNodesAmong(joinPath(baseDir, rel), idx, want, found, visited, depth + 1);
+            const std::string next = im.follow(path, lineNo);
+            if (!next.empty()) definedNodesAmong(next, idx, want, found, visited, im);
             continue;
         }
         if (kw != "*NODE") continue;
@@ -313,12 +346,11 @@ int massSetVerdict(int sid, const DeckIndex& idx, const std::vector<int>& sel, s
 
 void scanElements(const std::string& path, const std::vector<int>& sel, const DeckIndex& idx,
                   const std::map<int, int>& pidNodes, Picked& pk,
-                  std::set<std::string>& visited, int depth = 0, bool top = true) {
-    if (depth > 8 || visited.count(path)) return;
+                  std::set<std::string>& visited, const IncludeMap& im, bool top = true) {
+    if (visited.count(path)) return;
     visited.insert(path);
     std::ifstream in(path);
     if (!in.is_open()) return;
-    const std::string baseDir = dirOf(path);
     std::string line, kw;
     int fw = idx.fieldWidth;
     KooRemapper::ElementKeywordInfo info;
@@ -340,13 +372,10 @@ void scanElements(const std::string& path, const std::vector<int>& sel, const De
         if (g != std::string::npos && line[g] == '*') {
             remaining = 0;
             kw = kwBare(keywordToken(line));
+            if (kw == "*END") break;                       // 그 파일은 여기서 끝난다(닫힘과 같다)
             fw = KooRemapper::keywordFieldWidth(line, idx.fieldWidth);
             deviceAt.clear();
             if (kw == "*INCLUDE") { inElem = false; inInclude = true; continue; }
-            // 맨 `*INCLUDE` 가 아닌 파일 인클루드(`_TRANSFORM` · `_AUTO_OFFSET` · `_BINARY` · `_NASTRAN` · `_STAMPED_*` …)는 따라가지
-            // 않는다 — 그 안은 보지 않는다. `*INCLUDE_PATH` · `_PATH_RELATIVE` 는 탐색 경로라(파일을 끌어오지 않는다) 세지 않는다
-            if (starts(kw, "*INCLUDE") && !starts(kw, "*INCLUDE_PATH"))
-                pk.unfollowedIncludes.push_back(path + ":" + std::to_string(lineNo) + " " + kw);
             inInclude = false;
             inElem = starts(kw, "*ELEMENT");
             if (inElem) {
@@ -369,10 +398,8 @@ void scanElements(const std::string& path, const std::vector<int>& sel, const De
         }
         if (inInclude) {
             if (!isDataLine(line)) continue;
-            std::string rel = trim(line);
-            if (!rel.empty())
-                scanElements(joinPath(baseDir, rel), sel, idx, pidNodes, pk, visited,
-                             depth + 1, false);
+            const std::string next = im.follow(path, lineNo);
+            if (!next.empty()) scanElements(next, sel, idx, pidNodes, pk, visited, im, false);
             continue;
         }
         if (!inElem) continue;
@@ -636,6 +663,7 @@ SetOf setSubject(const std::string& kw) {
 // 못 읽는 인클루드가 하나라도 있으면 **거절한다**(rc=1) — 파트가 조용히 빠지는 쪽이 더 나쁘다.
 struct Writer {
     const Opts& o;
+    const IncludeMap& im;
     const DeckIndex& idx;
     const std::vector<int>& sel;
     const std::map<int, int>& pidNodes;
@@ -831,15 +859,17 @@ struct Writer {
         }
     }
 
-    void onData(const std::string& line, size_t g, const std::string& baseDir, int depth) {
+    void onData(const std::string& line, size_t g, int depth) {
         switch (act) {
             case Act::VERBATIM: *out << line << "\n"; break;
             case Act::DROP: {
                 // `*INCLUDE` 는 버리지 않고 **펼친다** — 그 안에 고른 파트의 요소가 있다.
                 if (kw == "*INCLUDE" && isDataLine(line)) {
-                    std::string rel = trim(line);
-                    if (rel.empty()) break;
-                    processFile(joinPath(baseDir, rel), depth + 1);
+                    // 정본 닫힘이 정한 대로 — 따라가거나(Followed) · 이미 실었거나(Cycle) · 못 찾았거나 깊이를 넘었다(미리 거절했다)
+                    const auto* r = im.at(curPath ? *curPath : std::string(), curLine);
+                    using W = KooRemapper::include_closure::NameRef::What;
+                    if (r && r->what == W::Followed) processFile(r->path, depth + 1);
+                    else if (r && (r->what == W::Unresolved || r->what == W::DepthCut)) missingIncludes.push_back(r->name);
                     break;
                 }
                 st.dropped[kw] += 1;
@@ -1069,13 +1099,12 @@ struct Writer {
     }
 
     void processFile(const std::string& path, int depth) {
-        if (failed || depth > 8) return;
+        if (failed) return;
         if (visited.count(path)) return;
         visited.insert(path);
         std::ifstream in(path);
         if (!in.is_open()) { missingIncludes.push_back(path); return; }
         if (depth > 0) ++st.includesInlined;
-        const std::string baseDir = dirOf(path);
         // 블록 상태는 파일 경계에서 닫는다 — 인클루드 안의 키워드가 바깥 블록을 잇지 않는다.
         const std::string savedKw = kw, savedKwLine = kwLine;
         const Act savedAct = act;
@@ -1096,12 +1125,14 @@ struct Writer {
                     flushBlock();
                     act = Act::DROP;
                     kw = k2;
+                    if (k2 == "*END") break;               // 그 파일은 여기서 끝난다(닫힘과 같다)
                     continue;
                 }
                 onKeyword(line);
+                if (k2 == "*END") break;                   // 주 덱의 `*END` 는 싣고 멈춘다
                 continue;
             }
-            onData(line, g, baseDir, depth);
+            onData(line, g, depth);
             if (failed) return;
         }
         flushBlock();
@@ -1146,7 +1177,7 @@ struct Verify {
 Verify verifyOutput(const std::string& path, const std::vector<int>& altExisting) {
     Verify v;
     DeckIndex idx;
-    { std::set<std::string> vis; indexDeck(path, idx, vis); }
+    { std::set<std::string> vis; indexDeck(path, idx, vis, nullptr); }
     const std::map<int, int> pidN = pidNodeCounts(idx);
 
     std::vector<int> nodes, secIds, matIds, elemPids, elemNodes, setMembers;
@@ -1442,8 +1473,9 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
 
     // ── 패스 0 — `*PART` 표 ──────────────────────────────────────────────────
     DeckIndex idx;
+    const IncludeMap im(o.model);   // 인클루드 닫힘 — 정본 규칙(주 덱 폴더 · *INCLUDE_PATH · 깊이 16)
     std::set<std::string> inputs;   // 이 op 이 읽는 파일(주 덱 · 따라가는 맨 *INCLUDE) — 쓸 파일이 덮으면 안 된다
-    indexDeck(o.model, idx, inputs);
+    indexDeck(o.model, idx, inputs, &im);
     // ★쓸 파일이 읽는 파일과 같으면 거절한다 — 쓰기(패스 2)는 산출을 열어(잘라 비워) 놓고 주 덱 · 인클루드를 다시 흘려 읽는다. 같은
     //   파일이면 입력이 0 바이트가 된다(rc 1 로 끝나도 입력이 사라졌다). 보고 · 번호 지도는 다 읽은 뒤 입력을 덮는다(2026-11-07 검토 #6)
     {
@@ -1470,6 +1502,31 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
         if (!keepReport && !o.reportPath.empty()) std::remove(o.reportPath.c_str());
         return 1;
     };
+    // ★인클루드 닫힘을 다 못 읽으면 미리 거절한다 — 그 안의 고른 파트 요소 · 안전띠 장치를 못 본다(재검토 D1 · N2 · N3)
+    //   · 못 찾았거나 열 수 없는 맨 *INCLUDE(주 덱 폴더 · *INCLUDE_PATH 폴더에서 찾는다)
+    //   · 깊이 16 을 넘은 인클루드(예전엔 8 에서 말없이 멈춰 9단째의 고른 파트가 rc 0 으로 빠졌다)
+    //   · 따라가지 않는 파일 인클루드(*INCLUDE_TRANSFORM · _AUTO_OFFSET · _BINARY · _NASTRAN · _STAMPED_* …) — 안을 모르니 고른 파트가
+    //     거기 있는지 증명할 수 없다(예전엔 안전띠를 골랐을 때만 거절했다). *INCLUDE_PATH · _PATH_RELATIVE 는 탐색 경로라 세지 않는다
+    {
+        const auto& clo = im.closure();
+        std::vector<std::string> bad;
+        for (const auto& u : clo.unresolved)
+            bad.push_back(u.file + ":" + std::to_string(u.line) + " *INCLUDE 「" + u.name + "」 — " + u.why);
+        using W = KooRemapper::include_closure::NameRef::What;
+        for (const auto& r : clo.refs)
+            if (r.what == W::DepthCut)
+                bad.push_back(r.file + ":" + std::to_string(r.firstLine) + " *INCLUDE 「" + r.name + "」 — 인클루드 깊이 상한(16)을 넘었다");
+        for (const auto& n : clo.notFollowed)
+            bad.push_back(n.file + ":" + std::to_string(n.line) + " " + n.keyword + (n.name.empty() ? "" : " 「" + n.name + "」") +
+                          " — 이 op 이 따라가지 않는 파일 인클루드다(안을 모른다)");
+        if (!bad.empty()) {
+            console.error("인클루드 닫힘을 다 읽지 못했다 — " + std::to_string(bad.size()) + " 곳. 그 안의 고른 파트 요소 · 장치가 조용히 "
+                          "빠질 수 있어 거절한다");
+            for (const auto& b : bad) console.println("  " + b);
+            console.info("따라가는 것은 맨 *INCLUDE 다(주 덱 폴더 먼저 · 그다음 *INCLUDE_PATH 폴더 · 깊이 16) — 변형 인클루드는 펼친 덱으로 돌려라");
+            return failRun(false);
+        }
+    }
     if (idx.parts.empty()) {
         console.error("No *PART definitions found (or only *PART_* variants we cannot chunk)");
         return failRun(false);
@@ -1508,7 +1565,7 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
 
     // ── 패스 1 — 요소·절점 ──────────────────────────────────────────────────
     Picked pk;
-    { std::set<std::string> vis; scanElements(o.model, sel, idx, pidNodes, pk, vis); }
+    { std::set<std::string> vis; scanElements(o.model, sel, idx, pidNodes, pk, vis, im); }
     if (idx.fieldWidth != 8)
         console.info("  deck field width: " + std::to_string(idx.fieldWidth));
     // ⚠ 보·질량·이산 족도 센다. 격자 카드만 세면 **보만으로 된 파트**(볼트·용접점 묶음)가
@@ -1538,16 +1595,6 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
                       "없으므로 거절한다(빼면 띠가 그럴듯하게 돌면서 장치가 없다)");
         for (const auto& d : pk.seatbeltDevices) console.println("  " + d);
         console.info("안전띠를 고르지 않으면 장치는 싣지 않고 dropped_keywords 에 센다");
-        return failRun(false);
-    }
-    // ★따라가지 않는 파일 인클루드의 안은 보지 않는다 — 거기 안전띠 장치가 있으면 위 거절을 못 한다. 고른 파트에 안전띠가 있으면
-    //   장치가 없다고 증명할 수 없으니 거절한다(2026-11-07 검토 #3 — `*INCLUDE_TRANSFORM` 안의 리트랙터를 빼고 띠만 rc 0 으로 실었다)
-    if (pk.seatbeltCards > 0 && !pk.unfollowedIncludes.empty()) {
-        console.error("고른 파트에 *ELEMENT_SEATBELT 카드 " + std::to_string(pk.seatbeltCards) + " 장이 있는데 이 op 이 따라가지 않는 파일 "
-                      "인클루드가 " + std::to_string(pk.unfollowedIncludes.size()) + " 블록 있다 — 그 안의 안전띠 장치를 볼 수 없어 고른 띠에 "
-                      "붙은 장치가 없다고 증명할 수 없으므로 거절한다");
-        for (const auto& l : pk.unfollowedIncludes) console.println("  " + l);
-        console.info("따라가는 것은 맨 *INCLUDE 뿐이다(*INCLUDE_PATH · _PATH_RELATIVE 는 탐색 경로라 세지 않는다)");
         return failRun(false);
     }
     // ★보 장치(`*ELEMENT_BEAM_PULLEY` · `_SOURCE`)는 PID 칸이 없다 — 고른 보 요소(BID1 · BID2 · BSEID)를 가리키면 장치를 빼고 보만 실을
@@ -1599,7 +1646,7 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
         sortUnique(want);
         if (!want.empty()) {
             std::set<std::string> vis;
-            definedNodesAmong(o.model, idx, want, altExisting, vis);
+            definedNodesAmong(o.model, idx, want, altExisting, vis, im);
             sortUnique(altExisting);
         }
         sortUnique(pk.altNodes);
@@ -1677,7 +1724,7 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
     {
         KooRemapper::DeckWriter w(o.output, KooRemapper::deck_newline::detect(o.model));
         if (!w.ok()) { console.error("Cannot open output: " + o.output); return failRun(false); }
-        Writer wr{o, idx, sel, pidNodes, pk, nd, rm, console, st};
+        Writer wr{o, im, idx, sel, pidNodes, pk, nd, rm, console, st};
         wr.out = &w.stream();
         wr.processFile(o.model, 0);
         w.close();

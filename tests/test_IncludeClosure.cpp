@@ -382,3 +382,36 @@ TEST(IncludeClosure_sameFile_은_철자_절대경로_하드링크를_같다고_�
     ASSERT_TRUE(include_closure::clobberPair({(s.root / "d" / "o.k").string(), (s.root / "d" / "." / "o.k").string()}, {m}, w, r));
     ASSERT_FALSE(include_closure::clobberPair({(s.root / "d" / "out.k").string(), std::string()}, {m, inc}, w, r));
 }
+
+TEST(IncludeClosure_refs_는_이름마다_어떻게_됐는지_적는다) {
+    // 흘려 읽는 소비자(extract-parts)가 자기 걸음의 이름 줄에서 이것을 물어 같은 규칙으로 따라간다(2026-11-07 재검토 N3 · D1)
+    Scratch s("refs");
+    s.put("a.k", "*KEYWORD\n*INCLUDE\nb.k\n*END\n");
+    s.put("b.k", "*KEYWORD\n*NODE\n1\n*END\n");
+    s.put("lib/t.k", "*NODE\n2\n");
+    const std::string body = "*KEYWORD\n*INCLUDE\na.k\nnope.k\nb.k\n*INCLUDE_PATH\nlib\n*INCLUDE_TRANSFORM\nt.k\n*END\n";
+    const std::string mp = s.put("m.k", body);
+    const auto c = include_closure::readPaths(mp);
+    using W = include_closure::NameRef::What;
+    ASSERT_EQ(c.refs.size(), (size_t)4);                       // a.k · b.k(a 안) · nope.k · b.k(두 번째 — 순환/이미 읽음)
+    ASSERT_TRUE(c.refs[0].what == W::Followed);
+    ASSERT_EQ(c.refs[0].file, mp);
+    ASSERT_EQ(c.refs[0].lastLine, (size_t)3);
+    ASSERT_EQ(baseOf(c.refs[0].path), std::string("a.k"));
+    ASSERT_TRUE(c.refs[1].what == W::Followed);                // a.k 안의 b.k
+    ASSERT_EQ(c.refs[1].lastLine, (size_t)3);
+    ASSERT_TRUE(c.refs[2].what == W::Unresolved);
+    ASSERT_EQ(c.refs[2].name, std::string("nope.k"));
+    ASSERT_TRUE(c.refs[3].what == W::Cycle);                   // 이미 읽은 b.k
+    ASSERT_EQ(c.notFollowed.size(), (size_t)1);
+    ASSERT_EQ(baseOf(c.notFollowed[0].path), std::string("t.k"));   // *INCLUDE_PATH 폴더에서 찾았다 — 읽지는 않는다
+    // 깊이 상한 — 사슬이 상한을 넘으면 그 이름이 DepthCut 이다
+    Scratch d("refs_depth");
+    for (int k = 1; k <= 3; ++k)
+        d.put("c" + std::to_string(k) + ".k", k < 3 ? "*INCLUDE\nc" + std::to_string(k + 1) + ".k\n" : "*NODE\n1\n");
+    const std::string m2 = d.put("m.k", "*KEYWORD\n*INCLUDE\nc1.k\n*END\n");
+    const auto c2 = include_closure::readPaths(m2, 2);
+    ASSERT_TRUE(c2.depthCut);
+    ASSERT_TRUE(c2.refs.back().what == W::DepthCut);
+    ASSERT_EQ(baseOf(c2.refs.back().name), std::string("c3.k"));
+}

@@ -75,24 +75,46 @@ struct Walker {
             return;
         }
         if (kw != "*INCLUDE") {
-            out.notFollowed.push_back({file, base + at + 1, kw, names.empty() ? "" : names[0].name});
+            const std::string nm = names.empty() ? "" : names[0].name;
+            out.notFollowed.push_back({file, base + at + 1, kw, nm, nm.empty() ? "" : resolvePath(nm, mainDir, searchDirs)});
             return;
         }
         for (const auto& n : names) {
             ++out.cards;
+            NameRef ref;
+            ref.file = file;
+            ref.firstLine = base + n.line + 1;
+            ref.lastLine = base + n.last + 1;
+            ref.name = n.name;
             const std::string p = resolvePath(n.name, mainDir, searchDirs);
             if (p.empty()) {
                 out.unresolved.push_back({file, base + n.line + 1, n.name, "없다"});
+                ref.what = NameRef::What::Unresolved;
+                out.refs.push_back(std::move(ref));
                 continue;
             }
-            if (depth + 1 > maxDepth) { out.depthCut = true; continue; }
+            ref.path = p;
+            if (depth + 1 > maxDepth) {
+                out.depthCut = true;
+                ref.what = NameRef::What::DepthCut;
+                out.refs.push_back(std::move(ref));
+                continue;
+            }
             const std::string k = keyOf(p);
-            if (visited.count(k)) { out.cycles.push_back(p); continue; }
+            if (visited.count(k)) {
+                out.cycles.push_back(p);
+                ref.what = NameRef::What::Cycle;
+                out.refs.push_back(std::move(ref));
+                continue;
+            }
             std::ifstream in(p);
             if (!in.is_open()) {
                 out.unresolved.push_back({file, base + n.line + 1, n.name, "열 수 없다"});
+                ref.what = NameRef::What::Unresolved;
+                out.refs.push_back(std::move(ref));
                 continue;
             }
+            out.refs.push_back(ref);
             visited.insert(k);
             File f;
             f.path = p;

@@ -25,7 +25,8 @@
     고른 파트에 `*ELEMENT_SEATBELT` 가 있으면 **거절**한다(rc 1 · 산출 없음 · 장치 키워드와 줄을 댄다). 안전띠를 고르지 않았으면
     싣지 않고 dropped_keywords 에 센다 — 칸 1 을 PID 로 짐작하지 않는다(그 조각이 고른 PID 와 같아도 거절하지 않는다).
     가속도계(`_ACCELEROMETER`)는 거절하지 않고 dropped_keywords 에 센다 · 데이터 줄 없는 장치 블록은 장치가 아니다(사용자 결정 11-07).
-    따라가지 않는 파일 인클루드(`*INCLUDE_TRANSFORM` …)의 안은 못 보니 띠를 고르면 거절한다(`*INCLUDE_PATH` 는 탐색 경로라 아니다)
+    따라가지 않는 파일 인클루드(`*INCLUDE_TRANSFORM` …)의 안은 못 보니 거절한다 — 띠를 고르지 않아도(재검토 N2) · `*INCLUDE_PATH` 는
+    탐색 경로라 아니다
   F 두 가지로 읽히는 줄(정수 폭으로 쓴 안전띠 · 질량 줄) — cleanup-nodes · extract-parts 는 두 읽기의 절점을 다 지킨다 ·
     renumber 는 다른 읽기의 절점이 덱에 있으면 거절(줄을 댄다 · 산출 없음) · 설명서대로 쓴 줄(빈 SLEN · 빈 SBRID · 소수점 · E/D 지수 ·
     왼쪽 맞춤 · 꼬리 주석)은 renumber 가 그대로 된다 · restack 은 어느 읽기로든 지운 절점을 물면 올린다 · 질량 PID 가 읽기마다
@@ -301,8 +302,8 @@ def main():
                    "★띠를 고르고 *INCLUDE_TRANSFORM(안에 리트랙터)이 있으면 거절 — rc 1 · 인클루드 줄을 댄다"),
                   ("E-10", belt_deck(8, belt(8, 13, 9, 101, 102, 0, "0.0", 103, 104), tail="*INCLUDE_PATH\nincdir\n"), "9", False,
                    "*INCLUDE_PATH(탐색 경로)만 있으면 띠를 골라도 rc 0"),
-                  ("E-11", edeck.replace("*END\n", tr + "*END\n"), "8", False,
-                   "띠를 안 고르면 *INCLUDE_TRANSFORM 이 있어도 rc 0(그 블록은 dropped_keywords)"))
+                  ("E-11", edeck.replace("*END\n", tr + "*END\n"), "8", True,
+                   "★띠를 안 골라도 *INCLUDE_TRANSFORM 이 있으면 거절 — 안의 고른 파트를 못 본다(재검토 N2)"))
         for tag, ideck, pick, refuse, what in icases:
             y = tag.replace("-", "") + ".yaml"
             write(os.path.join(d, y + ".k"), ideck)
