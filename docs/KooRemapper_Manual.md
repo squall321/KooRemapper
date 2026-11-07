@@ -3307,6 +3307,11 @@ operations:
 
   **같은 경로에 있던 지난 실행 결과는 지우지 않습니다** — 실패해도 그 자리에 예전 파일이 그대로 남으니,
   새 결과로 오해하지 않도록 종료 코드를 반드시 확인하세요. in-place 출력(`output` == `base_model`)에서는 입력 메시가 보존됩니다.
+- **덧붙이는 카드는 첫 `*END` 앞에 한 벌(2026-11-07)**: LS-DYNA 는 주 덱의 **첫** `*END` 에서 읽기를 멈춥니다. 오퍼레이션이
+  덧붙이는 카드(새 절점 · 요소 · 섹션 · 키워드 블록 · `contact` 의 접촉 · `boundary` 의 SPC · `rbe` 의 구속 · `battery` 의 `*INCLUDE` …)는
+  그 앞에 한 번만 넣고, `*END` 가 없으면 덱 끝에 붙입니다. 예전엔 쓰기가 `*END` 마다 다시 넣어 `*END` 가 둘인 덱에 같은 카드가 두 벌
+  나갔고(1dfa555 가 쓰기를 고쳤다), `contact` · `boundary` · `rbe` 는 `*END` 마다 · `*END` 가 없으면 아무 데도 넣지 않아 카드가
+  조용히 빠졌으며, `battery` 는 `*INCLUDE` 를 마지막 `*END` 앞에 두어 읽히지 않았습니다(셋째 묶음 · 회귀 `test_end_insert_once.py`).
 - **in-place 는 `assemble` 만(2026-11-07)**: 덱 산출만 `base_model` 그 자리에 씁니다. 인클루드 · 설정 · 처리의 입력
   (`detail_flat` · `dat_file` · `bundle` · `dynain` · `database` …) · `.dynain`/IGA 곁 파일이 읽는 파일과 같으면 아무것도 쓰지 않고
   종료 코드 1 입니다. 단독 명령은 `output == model` 도 거절합니다([§3.1(j)](#31-yaml-공통-규칙-모든-op)).
