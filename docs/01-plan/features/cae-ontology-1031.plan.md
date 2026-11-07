@@ -43,6 +43,8 @@
 - [x] 화면 — 리포트 상세 「해석 온톨로지」 — 실물 v14 를 화면에서 붙여 확인(없음 · 남의 꾸러미 거절 · 실림 23/21 · 멱등 · 종류 다름 거절 뒤 그대로)
 - [x] 백엔드 전체(813) · 스모크(MCP 89 · 리포트 54/54) · 화면 확인 · dev 반영 · 커밋 · Drive 게시(`dist-20261031-214338Z`) · KooSlurm 매니페스트 요청 · KooD3plotReader 알림 (`eea5098` · `4646a82`)
 - [x] 7-1 길 받는 쪽(`postprocess_return` — 반입을 굳힌 뒤 꾸러미 받아 싣기, 실패는 경고 · 원장 `external_ref.ontology.state`) + 시험 여섯
+- [x] Post v47(`f8f0e22`, 0.5 를 내는 배포판) 받기 확인 — 받는 쪽 무변경 · 실측 셋(아래 11-07) · cae00 점검 §5-1 (`bc3a9ab`)
+- [ ] 다음 어휘 판 — 셸 · 두꺼운 셸 응력 칸의 뜻(아래 11-07, 생산 쪽 동의)
 
 ## 결정 기록
 - (10-31) 위 사용자 결정.
@@ -66,4 +68,10 @@
 - (11-07) **정본 0.5** — KooD3plotReader `f218f49` 요청(핫스팟 소성 기준). 사용자 결정 「기준별 값 칸을 따로 둔다」 — `cae_hotspot.criterion` 에
   `plastic_strain` · `plastic_work`, 값 칸 `plastic_strain_mean/max`(무차원) · `plastic_work_mean/max`(mJ/mm³). `stress_*` 는 응력 기준에만.
   0.4 바이트는 `history/dynaforge-cae-0.4.json`(생산 쪽 `eccde7f` 배포판) — 0.3 · 0.4 · 0.5 를 모두 받는다. sha256 `c42d02b3…`.
-
+- (11-07) **Post v47 `f8f0e22`** — 0.5 를 내는 첫 배포판. 받는 쪽은 바꿀 것이 없었다(어휘가 응력 칸을 솔리드로 묶지 않는다). 실측(검사는 구운 api.sif
+  안) — v14 sphere 꾸러미 행 94 · 선 115 · 런 20/20 · 경고 0, 캠페인 폴더를 안 묶으면 행 89 · 선 64 와 머리 경고(`07d3e96`)가 검사 결과로 넘어와
+  `report.ontology.warnings` → 리포트 화면에 노란 줄(7-1 자동 반입도 같은 자리), 셸 파우치 deep 꾸러미 행 144 · 선 1 · 런 1/1 · 경고 0 · 핫스팟 79
+  (von_mises 56 · plastic_strain 23 — 소성 핫스팟은 소성 칸만).
+- (11-07) **다음 어휘 판에 넣을 것** — 셸 · 두꺼운 셸 파트의 응력 값은 적분점 층 극값이다(σvm · σ1 · εp 는 층 최대, σ3 는 층 최소). 그 뜻을
+  `cae_part_response` 의 `peak_von_mises` · `peak_max_principal` · `min_principal` · `peak_plastic_strain` 설명과 `cae_part` 의 `worst_*` 포락 설명에 넣는다.
+  설명만 바꿔도 지문이 바뀌어 판이 오르므로 따로 올리지 않고 다음 판에 같이 넣는다(생산 쪽 동의 — 그쪽 문서에도 그 판 항목으로 적힌다).
