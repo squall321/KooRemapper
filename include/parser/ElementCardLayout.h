@@ -193,11 +193,14 @@ std::vector<int> auxNodesAlt(const AuxElementCard& a, const AuxCardReadings& r, 
 // 줄이 모호하다
 std::vector<int> auxNodesDisputed(const AuxElementCard& a, const AuxCardReadings& r);
 // manual 에 번호를 제자리에 쓸 수 있는가 — 콤마 줄이 아니고 manual 의 칸이 다 깨끗하며 절점 칸이 비었거나 정수이고, 번호를 쓸
-// 절점 칸이 `$` 주석과 겹치지 않는다(줄 가운데 주석은 설명서 문법이 아니다 — 겹친 칸에 쓰면 주석을 덮는다)
+// (양수인) 절점 칸이 `$` 주석과 겹치지 않는다(줄 가운데 주석은 설명서 문법이 아니다 — 겹친 칸에 쓰면 주석을 덮는다 · 0 은 쓰지 않는다)
 bool auxManualNodesPlaceable(const AuxElementCard& a, const AuxCardReadings& r);
 // 옵션 카드 줄(`optNodeLine`)의 절점 — 8칸 표(칸 폭 10 · long 20)로 자른 `optNodeFields` 칸의 양수(콤마 줄은 콤마 차례)
 int auxOptTableWidth(int fw);
 std::vector<int> auxOptNodesOf(const AuxElementCard& a, const std::string& line, int fw);
+// 옵션 카드 줄의 절점(보 `_ELBOW` 의 MN)을 제자리에 바꿔 쓸 수 있나 — 콤마 줄이 아니고, 번호가 있는 칸마다 칸 글자가 정수 하나이며,
+// `$` 주석이 그 칸 안에서 시작하지 않는다(칸에 새 번호를 쓰면 주석 머리 `$` 를 덮어 뒤 글자가 다음 칸의 값이 된다)
+bool auxOptNodesPlaceable(const AuxElementCard& a, const std::string& line, int fw);
 // PID 후보 — primary 읽기의 PID 먼저(언제나), 든 다른 읽기가 다른 PID 를 말하면 그것도(양수만 · 유일).
 // PID 칸이 없는 족은 비었다
 std::vector<int> auxPidsOf(const AuxElementCard& a, const AuxCardReadings& r);

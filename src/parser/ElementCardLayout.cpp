@@ -579,6 +579,7 @@ bool auxManualNodesPlaceable(const AuxElementCard& a, const AuxCardReadings& r) 
             if (k >= r.manual.f.size() || r.manual.f[k].empty()) continue;
             int v = 0;
             if (!cards::toInt(r.manual.f[k], v)) return false;
+            if (v <= 0) continue;   // 번호가 아니다(0) — 바꿔 쓰지 않으니 주석과 겹쳐도 된다
             if (r.commentAt != std::string::npos && r.manual.col[k] + r.manual.width[k] > r.commentAt) return false;   // 주석과 겹친다
         }
         return true;
@@ -587,6 +588,27 @@ bool auxManualNodesPlaceable(const AuxElementCard& a, const AuxCardReadings& r) 
 }
 
 int auxOptTableWidth(int fw) { return fw >= 20 ? 20 : 10; }
+
+bool auxOptNodesPlaceable(const AuxElementCard& a, const std::string& line, int fw) {
+    std::string body = line;
+    while (!body.empty() && (body.back() == '\r' || body.back() == '\n')) body.pop_back();
+    const size_t cmt = body.find('$');
+    if (cmt != std::string::npos) body.erase(cmt);
+    if (body.find(',') != std::string::npos) return false;   // 콤마 자유형식 — 칸 자리가 없다
+    const size_t w = static_cast<size_t>(auxOptTableWidth(fw));
+    for (int q : a.optNodeFields) {
+        const size_t c0 = static_cast<size_t>(q) * w;
+        std::string t = c0 < body.size() ? body.substr(c0, w) : std::string();
+        const size_t b0 = t.find_first_not_of(" \t");
+        if (b0 == std::string::npos) continue;
+        t = t.substr(b0, t.find_last_not_of(" \t") - b0 + 1);
+        int v = 0;
+        if (t.find_first_of(" \t") != std::string::npos || !cards::toInt(t, v)) return false;   // 칸 안에 빈칸 · 정수가 아니다
+        if (v <= 0) continue;
+        if (cmt != std::string::npos && c0 + w > cmt) return false;   // `$` 주석이 그 칸 안에서 시작한다 — 새 번호가 주석 머리를 덮는다
+    }
+    return true;
+}
 
 std::vector<int> auxOptNodesOf(const AuxElementCard& a, const std::string& line, int fw) {
     std::vector<int> out;

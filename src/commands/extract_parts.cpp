@@ -461,9 +461,10 @@ void scanElements(const std::string& path, const std::vector<int>& sel, const De
                     if (!placeable || !altM.empty()) pk.renumberRisk.push_back({where, altM, placeable});
                 }
             } else if (auxPicked && auxLineIdx == aux.optNodeLine) {
-                // 옵션 카드의 절점 — 보 `_ELBOW` 의 가운데 절점 MN(8칸 표). 콤마 줄이면 번호를 제자리에 못 바꾼다(재검토 D2)
+                // 옵션 카드의 절점 — 보 `_ELBOW` 의 가운데 절점 MN(8칸 표). 콤마 줄 · 칸 안에 빈칸 · MN 칸 안에서 시작하는 `$` 주석이면
+                // 번호를 제자리에 못 바꾼다(재검토 D2 — 주석이 겹친 MN 에 새 번호를 쓰면 `$` 를 덮어 주석 글자가 칸 2 의 값이 됐다)
                 for (int v : KooRemapper::auxOptNodesOf(aux, line, fw)) pk.nodes.push_back(v);
-                if (line.find(',') != std::string::npos)
+                if (!KooRemapper::auxOptNodesPlaceable(aux, line, fw))
                     pk.renumberRisk.push_back({path + ":" + std::to_string(lineNo) + " " + kw, {}, false});
             }
             ++auxLineIdx;

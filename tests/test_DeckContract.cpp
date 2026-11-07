@@ -573,6 +573,25 @@ TEST(auxCardReadings_정수_폭으로_쓴_안전띠_줄은_두_읽기를_다_낸
     ASSERT_FALSE(auxManualNodesPlaceable(a, r));
 }
 
+TEST(auxManualNodesPlaceable_0_인_칸은_주석과_겹쳐도_된다) {
+    // 왼쪽 맞춤 1D 띠(N3 · N4 = 0) 뒤 꼬리 주석이 N4 칸(65-72열) 안에서 시작한다 — 0 은 번호가 아니라 바꿔 쓰지 않으니 거절할 까닭이
+    // 없다(검토자 퍼즈 — 예전엔 「번호 칸에 겹친 $ 주석」 으로 renumber 를 거절했다). 같은 자리의 주석이 양수 N4 와 겹치면 여전히 못 쓴다
+    const auto a = auxElementCard("*ELEMENT_SEATBELT");
+    char b[160];
+    std::snprintf(b, sizeof b, "%-8d%-8d%-8d%-8d%-8d%-16s%-8d%-8d", 13, 9, 101, 102, 0, "0.0", 0, 0);
+    std::string l = b;
+    while (!l.empty() && l.back() == ' ') l.pop_back();
+    auto r = auxCardReadings(a, l + "  $ belt", 8);
+    ASSERT_TRUE(r.manualClean);
+    ASSERT_TRUE(auxManualNodesPlaceable(a, r));
+    std::snprintf(b, sizeof b, "%-8d%-8d%-8d%-8d%-8d%-16s%-8d%-8d", 13, 9, 101, 102, 0, "0.0", 103, 104);
+    l = b;
+    while (!l.empty() && l.back() == ' ') l.pop_back();
+    r = auxCardReadings(a, l + "  $ belt", 8);
+    ASSERT_TRUE(r.manualClean);
+    ASSERT_FALSE(auxManualNodesPlaceable(a, r));
+}
+
 TEST(auxPidsOf_질량_PID_후보는_읽기마다) {
     // 질량 PID(33-40열)는 MASS(E16) 뒤에 있다 — 줄을 정수 폭으로 썼으면(MASS 8칸) 읽기마다 PID 가 갈린다
     const auto a = auxElementCard("*ELEMENT_MASS");
@@ -644,6 +663,13 @@ TEST(auxElementCard_보_ELBOW_의_가운데_절점은_마지막_옵션_카드) {
     ASSERT_EQ(a.optNodeLine, 1);
     ASSERT_TRUE(auxOptNodesOf(a, "       104", 8) == std::vector<int>({104}));
     ASSERT_TRUE(auxOptNodesOf(a, "104,0", 8) == std::vector<int>({104}));
+    // 번호를 제자리에 바꿔 쓸 수 있나 — MN 칸(1-10열) 안에서 시작하는 `$` 주석 · 콤마 · 칸 안 빈칸이면 못 쓴다(새 번호가 `$` 를 덮었다)
+    ASSERT_TRUE(auxOptNodesPlaceable(a, "       104", 8));
+    ASSERT_TRUE(auxOptNodesPlaceable(a, "       104 $ mid node", 8));   // 칸 뒤 주석
+    ASSERT_FALSE(auxOptNodesPlaceable(a, "     104 $m", 8));             // 주석이 10열에서 시작 — 칸 안
+    ASSERT_FALSE(auxOptNodesPlaceable(a, "104,0", 8));
+    ASSERT_FALSE(auxOptNodesPlaceable(a, "  10 4", 8));
+    ASSERT_TRUE(auxOptNodesPlaceable(a, "0 $ none", 8));                 // 0 은 번호가 아니다 — 바꿔 쓰지 않는다
     a = auxElementCard("*ELEMENT_BEAM_ORIENTATION_ELBOW");
     ASSERT_EQ(a.lines, 3);
     ASSERT_EQ(a.optNodeLine, 2);

@@ -18,7 +18,8 @@
     추가 질량을 버렸다. `_SET` 은 파트 세트를 풀어 다 고른 파트면 싣고 · 하나도 아니면 버리고 · 일부거나 못 풀면 거절한다.
     cleanup-nodes 는 그 줄의 정수(LCID)를 절점으로 세지 않는다.
   D 보 `_ELBOW` 의 가운데 절점 MN(Card 10 · 8칸 표) — 예전엔 Card 1 만 읽어 cleanup-nodes safe 가 MN 을 지우고(rc 0 · 되읽기 0)
-    extract-parts 가 싣지 않았다. 이제 다 읽고 renumber 도 그 칸(1-10열)에 새 번호를 쓴다 · 콤마 ELBOW 줄은 renumber 를 거절한다
+    extract-parts 가 싣지 않았다. 이제 다 읽고 renumber 도 그 칸(1-10열)에 새 번호를 쓴다 · 콤마 ELBOW 줄 · MN 칸 안에서 시작하는
+    `$` 주석은 renumber 를 거절한다(새 번호가 `$` 를 덮어 주석 글자가 칸 2 의 값이 됐다 — D4)
 
 usage: test_aux_card_walkers.py <KooRemapper 바이너리>
 """
@@ -219,6 +220,25 @@ def main():
         rc, out = run(binary, d, "extract-parts", "D3r.yaml")
         check("D3 콤마 ELBOW 줄 — renumber 는 제자리가 없어 거절한다 · 산출 없음",
               rc == 1 and "제자리에 바꿔 쓸 수 없다" in out and not os.path.exists(os.path.join(d, "D3r_out.k")), (rc, out[-300:]))
+        # MN 칸(1-10열) 안에서 시작하는 `$` 주석 — 새 번호를 칸에 쓰면 `$` 를 덮어 주석 글자가 칸 2 의 값이 됐다(「         4m」) → 거절.
+        # 칸 뒤에서 시작하는 주석은 그대로 두고 번호를 바꾼다
+        write(os.path.join(d, "D4.k"), beam_deck(["*ELEMENT_BEAM_ELBOW", "%8d%8d%8d%8d%8d" % (21, 9, 101, 102, 103), "     104 $m"]))
+        write(os.path.join(d, "D4r.yaml"), "model: D4.k\noutput: D4r_out.k\nparts: [9]\nrenumber: true\n")
+        rc, out = run(binary, d, "extract-parts", "D4r.yaml")
+        rc2, out2, rep2, outp2 = extract(binary, d, "D4x", beam_deck(["*ELEMENT_BEAM_ELBOW", "%8d%8d%8d%8d%8d" % (21, 9, 101, 102, 103),
+                                                                       "     104 $m"]), (9,))
+        carried = sorted(node_ids(outp2).values()) if rc2 == 0 else []
+        check("D4 ★MN 칸 안에서 시작하는 $ 주석 — renumber 거절(주석을 덮지 않는다) · 싣기는 MN 까지",
+              rc == 1 and "겹친 $ 주석" in out and not os.path.exists(os.path.join(d, "D4r_out.k")) and rc2 == 0 and
+              carried == [101, 102, 103, 104], (rc, out[-300:], rc2, carried))
+        write(os.path.join(d, "D5.k"), beam_deck(["*ELEMENT_BEAM_ELBOW", "%8d%8d%8d%8d%8d" % (21, 9, 101, 102, 103), "       104 $ mid node"]))
+        write(os.path.join(d, "D5r.yaml"), "model: D5.k\noutput: D5r_out.k\nparts: [9]\nrenumber: true\n")
+        rc, out = run(binary, d, "extract-parts", "D5r.yaml")
+        rows = section_lines(os.path.join(d, "D5r_out.k"), "*ELEMENT_BEAM_ELBOW") if rc == 0 else []
+        ids = node_ids(os.path.join(d, "D5r_out.k")) if rc == 0 else {}
+        new = {old: nid for nid, old in ids.items()}
+        check("D5 MN 칸 뒤의 주석은 그대로 두고 MN 을 바꾼다",
+              rc == 0 and len(rows) == 2 and rows[1] == "%10d $ mid node" % new.get(104, -1), (rc, rows, out[-300:]))
     finally:
         shutil.rmtree(d, ignore_errors=True)
 
