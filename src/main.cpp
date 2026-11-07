@@ -1708,7 +1708,7 @@ static int runMain(int argc, char* argv[]) {
             //     enabled: true             generates a dynain from the mapped
             //     output: detail_stress.dynain
             //     strain_type: green       # green | engineering
-            //     E:  210000.0             # MPa, optional (omit -> strain only)
+            //     E:  210000.0             # MPa, optional (omit -> K-file *MAT of the reference; strain only if none)
             //     nu: 0.3                  # optional
             //     csv: false               # optional, write CSV instead of dynain
             //   )
@@ -1877,7 +1877,7 @@ static int runMain(int argc, char* argv[]) {
                 console.println("    enabled: true");
                 console.println("    output: detail_stress.dynain");
                 console.println("    strain_type: green      # green | engineering");
-                console.println("    E:  210000.0            # MPa, optional (omit = strain only)");
+                console.println("    E:  210000.0            # MPa, optional (omit = K-file *MAT of the reference; strain only if none)");
                 console.println("    nu: 0.3                 # optional");
                 console.println("    csv: false              # optional");
                 console.println("Diagnostics:");
@@ -1896,7 +1896,10 @@ static int runMain(int argc, char* argv[]) {
         for (auto& r : KooRemapper::output_guard::modelInputs(flatPath, "flat")) mapReads.push_back(std::move(r));
         {
             std::vector<std::string> writes{outputPath};
-            if (flipInX || flipInY || flipInZ) writes.push_back(outputPath + ".__preproc_flat.k");
+            std::string alignLow = bboxAlignMode;
+            for (auto& c : alignLow) c = (char)std::tolower((unsigned char)c);
+            // 앞처리 평판 임시 파일 — flip_input 이나 bbox_align: source 가 평판을 바꾸면 runMapping 이 쓴다
+            if (flipInX || flipInY || flipInZ || alignLow == "source") writes.push_back(outputPath + ".__preproc_flat.k");
             const bool chain = yamlMode && pre_enabled && !pre_output.empty();
             if (chain) {
                 if (flipX || flipY || flipZ) writes.push_back(outputPath + ".__flipped_ref.k");

@@ -278,6 +278,7 @@ int runMapping(const std::string& bentFile, const std::string& flatFile,
     // bbox-align preprocessor (optional)
     // -----------------------------------------------------------------
     std::string scaledFlatTmpPath;
+    bool flatScaled = false;   // source 모드가 평판의 크기를 실제로 바꿨다 — 아래에서 임시 파일로 남긴다(고리 prestress 의 기준)
     {
         std::string mode = bboxAlignMode;
         for (auto& c : mode) c = (char)std::tolower((unsigned char)c);
@@ -334,6 +335,7 @@ int runMapping(const std::string& bentFile, const std::string& flatFile,
                 if (mode == "source") {
                     applyAffineScaleAboutCenter(flatMesh,
                                                 ba.scale[0], ba.scale[1], ba.scale[2]);
+                    flatScaled = true;
                 } else {  // target
                     applyAffineScaleAboutCenter(bentMesh,
                                                 ba.scale[0], ba.scale[1], ba.scale[2]);
@@ -415,17 +417,21 @@ int runMapping(const std::string& bentFile, const std::string& flatFile,
     // the SAME pre-processed mesh as F's reference. Otherwise F would
     // compute against the un-pre-processed flat and reintroduce the
     // injected stretch / mirror as spurious residual strain.
-    bool flatWasPreprocessed = (!scaledFlatTmpPath.empty()) ||
-                                flipInputX || flipInputY || flipInputZ;
+    // ★예전엔 이 판정이 `scaledFlatTmpPath` 가 이미 찼는지를 보았는데 위 source 갈래가 그것을 한 번도 채우지 않아, source 만 주면
+    //   임시 파일을 쓰지 않았고 고리 prestress 가 크기를 맞추기 **전** 평판을 기준으로 썼다(2026-11-07 — 카탈로그 · 코드 머리말은
+    //   「source 는 임시 파일을 쓴다」). 이제 크기를 실제로 바꿨으면 쓴다.
+    bool flatWasPreprocessed = flatScaled || flipInputX || flipInputY || flipInputZ;
     if (flatWasPreprocessed) {
-        // Use the existing path slot regardless of which preprocessor(s)
-        // ran -- bbox_align=source may have written it already, but we
-        // need to re-write to capture the additional flip_input state.
         if (scaledFlatTmpPath.empty()) {
             scaledFlatTmpPath = outputFile + ".__preproc_flat.k";
         }
         KFileWriter w;
-        if (!w.writeFile(scaledFlatTmpPath, flatMesh, false)) {
+        // 크기만 맞춘 기준은 평판의 카드(*PART · *SECTION · *MAT …)를 그대로 옮긴다 — 예전에 고리가 읽던 원래 평판과 같은 K-파일 재료를
+        // 보게 한다(재료를 어디서 찾는지는 바꾸지 않는다). flip_input 이 낀 기준은 예전처럼 메시만 쓴다(재료 카드 없음)
+        const bool flipped = flipInputX || flipInputY || flipInputZ;
+        const bool wrote = flipped ? w.writeFile(scaledFlatTmpPath, flatMesh, false)
+                                   : w.writeFileWithSource(scaledFlatTmpPath, flatMesh, flatFile, false);
+        if (!wrote) {
             console.warning("Failed to write pre-processed flat temp: "
                             + w.getErrorMessage()
                             + " (chain prestress may report residual strain)");

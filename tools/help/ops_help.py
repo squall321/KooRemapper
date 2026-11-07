@@ -53,7 +53,9 @@ op("map", "메시 매핑", "평면 상세 메시를 굽힌 구조화 HEX8 참조
    outputs=["mapped.k"],
    notes=["bent 참조는 구조화 HEX8 이어야 한다. generate 가 bent/flat/flat_fine/flat_tet 세트를 만든다.",
           "output(과 YAML 의 prestress.output 이 낼 dynain · 메시 사본 · CSV)이 bent · flat(그 인클루드까지) · 설정과 같은 파일이면",
-          "  아무것도 쓰지 않고 rc 1 — 메시 사본이 map 산출 자리인 것(output: foo.k + prestress.output: foo.dynain)만은 받는다"])
+          "  아무것도 쓰지 않고 rc 1 — 메시 사본이 map 산출 자리인 것(output: foo.k + prestress.output: foo.dynain)만은 받는다",
+          "bbox_align: source 가 평판의 크기를 바꾸면 그 평판(<output>.__preproc_flat.k · 평판의 카드를 그대로 · 끝나면 지운다)이 고리",
+          "  prestress 의 기준이다 — 2026-11-07 전엔 이 파일을 쓰지 않아 크기를 맞추기 전 평판을 기준으로 썼다"])
 op("shellmap", "메시 매핑", "굽힌 QUAD4 셸을 참조로 평면 상세 메시를 매핑", "셸매핑 shell 곡면 전개",
    "KooRemapper shellmap [--thickness <t>] <bent_shell> <flat_detail> <output>",
    cmds=["KooRemapper generate --dim-i 20 --dim-j 5 arc demo",
