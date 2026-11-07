@@ -1871,7 +1871,10 @@ int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
     }
     rep.ok = true;
     printList(rep.warnings, false);
-    if (!writeReport()) return 1;
+    if (!writeReport()) {
+        std::remove(outPath.c_str());   // rc 1 이면 산출이 없다 — 보고 없이 덱만 남기지 않는다
+        return 1;
+    }
     console.println(std::string("[") + tag + "] Done -> " + outPath + "  (sha256 " + rep.deckShaOut + ")");
     return 0;
 }

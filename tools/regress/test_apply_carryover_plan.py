@@ -474,6 +474,15 @@ def part_d(binary):
           rc == 0 and (4, "fragment_bytes") in warn and pr[4]["result"] == "applied" and
           all(n1.get(n, ("",))[0] == t for n, t in fn.items()), (rc, warn, out[-300:]))
 
+    d = stage(EX, "d3")
+    write(os.path.join(d, "spare.k"), "*KEYWORD\n*END\n")
+    p = plan_load(d)
+    p["files"]["spare.k"] = {"sha256": "0" * 64, "bytes": 15}
+    plan_save(d, p)
+    rc, out, rep = apply_case(binary, d)
+    check("D-3 어느 줄도 안 쓰는 조각 파일의 바이트가 다르다 → 적용하되 file_mismatch_unused 경고",
+          rc == 0 and "file_mismatch_unused" in {x["kind"] for x in rep.get("warnings", [])}, (rc, out[-300:]))
+
 
 def part_e(binary):
     print("[E YAML]")

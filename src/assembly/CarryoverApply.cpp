@@ -305,7 +305,9 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
         else problem(0, "file_mismatch", detail);
     }
     // 줄이 가리키는 파일 — files 에 있어야 하고 머리의 bytes 가 files 의 bytes 와 같아야 한다(계획 안의 두 주장)
+    std::set<std::string> usedFiles;   // 줄이 가리킨 동반 파일 — 바이트가 달랐는데 아무 줄도 안 쓴 조각은 값으로 못 대조했다고 말한다
     auto companion = [&](long long pid, const std::string& name, long long bytes, const char* what) -> const Companion* {
+        usedFiles.insert(name);
         auto it = comp.find(name);
         if (it == comp.end()) {
             problem(pid, "file_unlisted", std::string(what) + " " + name + " 이 계획의 files 에 없다 — 지문으로 대조할 수 없다");
@@ -728,6 +730,10 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
                 problem(j.pid, "file_mismatch", c->mismatch);
         }
     }
+
+    for (const auto& [name, c] : comp)
+        if (!c.mismatch.empty() && !usedFiles.count(name))
+            warn(0, "file_mismatch_unused", c.mismatch + " — 계획의 어느 줄도 이 파일을 쓰지 않아 값으로 대조하지 않았다");
 
     // ── ⑨ 번호 — 바닥(모든 요소 족) 위 · 조각끼리 겹치지 않음 · 칸 폭 ──────────────────
     long long shiftNode = 0, shiftElem = 0;

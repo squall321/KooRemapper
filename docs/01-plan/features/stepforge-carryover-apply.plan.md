@@ -28,7 +28,7 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
       morph 의 new_section(두께)은 v2(지금은 `field.thickness` 가 있으면 거절)
 - [x] 되읽어 대조 · 품질 관문(새로 뒤집힌 솔리드 · 뒤집힌 셸 법선이면 산출을 지운다) · 보고(PID 마다 · 적용 덱 sha256) — `src/assembly/CarryoverApply.cpp`
 - [x] 시험 — 진리값 판(`examples/apply_carryover_plan`) · 12 파트 덱(`tools/regress/data/apply_carryover_plan/mesh12`) ·
-      거절 16 · CRLF · 바닥 · 품질(`tools/regress/test_apply_carryover_plan.py` 44 항) · 리더 단위 시험(`tests/test_CarryoverPlan.cpp` 7)
+      거절 16 · CRLF · 바닥 · 품질(`tools/regress/test_apply_carryover_plan.py` 45 항) · 리더 단위 시험(`tests/test_CarryoverPlan.cpp` 7)
 - [x] 바닥 — `idMaxima()` 의 요소가 보 · 이산 · 질량 · 안전띠 · 플롯 요소까지(`id_floor` · `cad_solid_merge_to_deck` 같이, `test_id_floor` E)
 - [x] help · 카탈로그 · 개행 행렬 제외 · ofstream 선언
 
