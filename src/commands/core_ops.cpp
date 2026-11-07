@@ -1075,24 +1075,17 @@ PrestressOutputs prestressOutputs(const std::string& outputFile, bool hasMateria
     o.dynain = outputFile;
     if (o.dynain.size() >= 2 && o.dynain.substr(o.dynain.size() - 2) == ".k")
         o.dynain = o.dynain.substr(0, o.dynain.size() - 2) + ".dynain";
-    // Output filename: same as dynain but with .k extension
-    o.mesh = outputFile;
-    size_t dotPos = o.mesh.rfind('.');
-    if (dotPos != std::string::npos) {
-        o.mesh = o.mesh.substr(0, dotPos) + ".k";
-    } else {
-        o.mesh += ".k";
-    }
-    o.csv = outputFile;
-    if (hasMaterial) {
-        // Change extension to .csv
-        size_t csvDot = o.csv.rfind('.');
-        if (csvDot != std::string::npos) {
-            o.csv = o.csv.substr(0, csvDot) + ".csv";
-        } else {
-            o.csv += ".csv";
-        }
-    }
+    // ★메시 사본 · CSV 는 **파일 이름의 확장자**만 바꾼다(2026-11-07). 예전엔 경로 전체의 마지막 `.` 을 보아 `./pre` 가 `.k`,
+    //   `../pre` 가 `..k`, `a.d/pre` 가 `a.k` 를 썼다. 이름 첫 글자의 점(`.pre`)은 확장자가 아니다(std::filesystem 과 같다)
+    auto swapExt = [&](const std::string& ext) {
+        const size_t slash = outputFile.find_last_of("/\\");
+        const size_t base = (slash == std::string::npos) ? 0 : slash + 1;
+        const size_t dot = outputFile.rfind('.');
+        if (dot == std::string::npos || dot <= base) return outputFile + ext;
+        return outputFile.substr(0, dot) + ext;
+    };
+    o.mesh = swapExt(".k");
+    o.csv = hasMaterial ? swapExt(".csv") : outputFile;
     return o;
 }
 

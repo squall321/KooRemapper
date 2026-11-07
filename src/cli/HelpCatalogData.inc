@@ -422,7 +422,7 @@ keywords:
      {},
      {"KooRemapper generate --dim-i 20 --dim-j 5 arc demo", "KooRemapper prestress --E 210000 --nu 0.3 demo_flat.k demo_bent.k demo_pre"},
      {},
-     {"쓰는 파일 — <output>(dynain · `.k` 로 끝나면 <줄기>.dynain) · <줄기>.k(변형 메시 사본) · --csv 면 <줄기>.csv", "  (재료가 없으면 <output> 에 CSV 만). 이 가운데 하나가 기준 · 변형 메시(그 인클루드까지)와 같거나 서로 같으면 rc 1", "  — 예전엔 `prestress ref def.key def.key` 가 변형 메시를 다시 읽기 전에 dynain 으로 덮었다(2026-11-07)"}},
+     {"쓰는 파일 — <output>(dynain · `.k` 로 끝나면 <줄기>.dynain) · <줄기>.k(변형 메시 사본) · --csv 면 <줄기>.csv", "  <줄기> 는 output 에서 **파일 이름의 확장자**만 뗀 것이다 — ./pre → ./pre.k · a.d/pre → a.d/pre.k(예전엔 .k · a.k)", "  (재료가 없으면 <output> 에 CSV 만). 이 가운데 하나가 기준 · 변형 메시(그 인클루드까지)와 같거나 서로 같으면 rc 1", "  — 예전엔 `prestress ref def.key def.key` 가 변형 메시를 다시 읽기 전에 dynain 으로 덮었다(2026-11-07)"}},
     {"squeeze", "변형·초기응력", "파트를 지정 변형률로 압축하고 역방향 초기응력 출력 (억지 끼움)", "압축 억지끼움 interference swelling", "KooRemapper squeeze <mesh.k> <config.yaml> <output_prefix>",
      {{"box.yaml", R"KRH(output: box.k
 lx: 20.0

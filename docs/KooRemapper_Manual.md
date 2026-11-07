@@ -591,6 +591,8 @@ $$\sigma_{ij} = \lambda \varepsilon_{kk} \delta_{ij} + 2\mu \varepsilon_{ij}$$
 - `<output>`: `*INITIAL_STRESS_SOLID` 카드(dynain). `pre.k` 처럼 `.k` 로 끝나면 아래 메시 사본과 겹치지 않게 `pre.dynain` 으로 씁니다.
 - `<output 에서 확장자를 뗀 이름>.k`: 변형 메시 사본 + 위 dynain `*INCLUDE`
 - `<output 에서 확장자를 뗀 이름>.csv` (`--csv`): 요소별 변형률/응력 CSV. 재료(E·ν)를 찾지 못하면 dynain 대신 `<output>` 에 CSV 만 씁니다.
+- 확장자는 **파일 이름의 것만** 뗍니다 — `./pre` → `./pre.k`, `a.d/pre` → `a.d/pre.k`, `.pre` → `.pre.k`(이름 첫 글자의 점은 확장자가
+  아닙니다). 2026-11-07 전에는 경로 전체의 마지막 점을 잘라 `./pre` 가 `.k`, `a.d/pre` 가 `a.k` 를 썼습니다.
 
 예: `KooRemapper prestress --E 210000 --nu 0.3 flat.k bent.k pre.dynain` → `pre.dynain` + `pre.k`
 

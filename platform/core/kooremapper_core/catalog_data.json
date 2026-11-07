@@ -1268,7 +1268,7 @@
           "role": "output",
           "order": 2,
           "required": true,
-          "description": "Output file path (dynain format or CSV prefix, no extension needed)"
+          "description": "Output file path — the dynain itself (an output ending in .k writes <stem>.dynain); the mesh copy goes to <stem>.k, <stem> = output minus its file name's extension"
         },
         {
           "name": "E",
@@ -1322,7 +1322,7 @@
         "note": "Computes initial stress from deformed configuration. ref_mesh is reference state (undeformed); def_mesh is current deformed state. Both must have identical element topology and node count. Material properties (*MAT_ELASTIC) are read from ref_mesh unless overridden with --E/--nu."
       },
       "example_folder": "examples/arc30",
-      "notes": "Material priority: command-line --E/--nu (highest) completely override K-file materials; if neither provided, reads *PART→*MAT_ELASTIC mappings from ref_mesh. If no material found, stress output is zero but strain is always computed. Both meshes must have identical topology (node IDs, element IDs, connectivity); if one mesh is the result of mapping (e.g., KooRemapper map output), verify node/element IDs match ref_mesh. Output always includes a .k file (deformed mesh with *INCLUDE directive) plus .dynain; remove the extension from 'output' argument—the tool auto-appends .dynain and .k. Flip correction: if meshes have odd-parity mirror flips (e.g., HEX8 node order swapped), apply the same flip to ref_mesh before passing to prestress to ensure consistent strain computation (reflection-invariant E' = R E R^T). Green-Lagrange strain is for large deformations (bending, forming); engineering strain for small deformations.\n\nOUTPUT GUARD (since 2026-11-07): before opening any file the op compares every file it will write (<output> (dynain), <stem>.k (mesh copy) and <stem>.csv) with every file it reads (the reference and deformed meshes with their *INCLUDE closures) by resolved path, symlink and hard link (./a.k, an absolute path and ../dir/a.k are the same file). A match exits 1 with an [ERROR] that names both paths; nothing is written and the inputs are untouched. A file of the same name in another folder, or an existing file the op does not read, is overwritten as before. The three names are also checked against each other. Until 2026-11-07 `prestress ref def.key def.key` overwrote the deformed mesh with the dynain before re-reading it.",
+      "notes": "Material priority: command-line --E/--nu (highest) completely override K-file materials; if neither provided, reads *PART→*MAT_ELASTIC mappings from ref_mesh. If no material found, stress output is zero but strain is always computed. Both meshes must have identical topology (node IDs, element IDs, connectivity); if one mesh is the result of mapping (e.g., KooRemapper map output), verify node/element IDs match ref_mesh. With a material the op writes the dynain to 'output' itself (an output ending in .k writes <stem>.dynain instead, so it does not collide with the mesh copy), the deformed mesh + *INCLUDE of the dynain to <stem>.k and, with --csv, <stem>.csv; without a material it writes only a CSV, to 'output' itself. <stem> is output minus its file name's extension — a dot in a folder name or a leading dot is not an extension, so ./pre gives ./pre.k and a.d/pre gives a.d/pre.k (until 2026-11-07 the last dot of the whole path was cut: '.k' and 'a.k'). Flip correction: if meshes have odd-parity mirror flips (e.g., HEX8 node order swapped), apply the same flip to ref_mesh before passing to prestress to ensure consistent strain computation (reflection-invariant E' = R E R^T). Green-Lagrange strain is for large deformations (bending, forming); engineering strain for small deformations.\n\nOUTPUT GUARD (since 2026-11-07): before opening any file the op compares every file it will write (<output> (dynain), <stem>.k (mesh copy) and <stem>.csv) with every file it reads (the reference and deformed meshes with their *INCLUDE closures) by resolved path, symlink and hard link (./a.k, an absolute path and ../dir/a.k are the same file). A match exits 1 with an [ERROR] that names both paths; nothing is written and the inputs are untouched. A file of the same name in another folder, or an existing file the op does not read, is overwritten as before. The three names are also checked against each other. Until 2026-11-07 `prestress ref def.key def.key` overwrote the deformed mesh with the dynain before re-reading it.",
       "keys": [
         {
           "path": "ref_mesh",
@@ -1340,7 +1340,7 @@
           "path": "output",
           "type": "file",
           "required": true,
-          "desc": "Output file path (no extension required). Generates <output>.dynain (or .k if embedded) for *INITIAL_STRESS_SOLID cards; also creates <output>.k with deformed mesh + *INCLUDE directive. If --csv is used, also writes <output>.csv."
+          "desc": "Output file path. The dynain (*INITIAL_STRESS_SOLID) goes to this path as given (one ending in .k writes <stem>.dynain instead); <stem>.k gets the deformed mesh + *INCLUDE of the dynain; with --csv also <stem>.csv. <stem> = the path minus its file name's extension (a dot in a folder name is not one)."
         },
         {
           "path": "E",
@@ -1372,7 +1372,7 @@
           "type": "boolean",
           "required": false,
           "default": "false",
-          "desc": "Output CSV file with per-element strain/stress data. When set, writes <output>.csv in addition to dynain. If no material is available (no K-file materials and no --E/--nu), CSV is always written regardless of this flag."
+          "desc": "Output CSV file with per-element strain/stress data. When set, writes <stem>.csv (output minus its file name's extension) in addition to the dynain. If no material is available (no K-file materials and no --E/--nu), the CSV is always written, to output itself, regardless of this flag."
         }
       ],
       "presets": null
