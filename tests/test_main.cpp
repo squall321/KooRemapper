@@ -8,6 +8,8 @@
 // 덱 계약의 기본 조각 — 2026-10-15 에 더했다. 그 전에는 단언 52개가 전부 기하였다.
 #include "test_DeckContract.cpp"
 #include "test_IncludeClosure.cpp"
+// 쓸 파일이 읽는 파일을 덮는지 묻는 공용 관문 — 2026-11-07
+#include "test_OutputGuard.cpp"
 #include "test_IdAllocator.cpp"
 // StepForge 조각 계약 — 2026-10-16
 #include "test_FragmentMap.cpp"
