@@ -83,6 +83,8 @@ EXCLUDE = {
     "stackdiagram": "SVG 만 낸다(파트 축범위로 층 모식도를 그린다) — 덱을 쓰지 않는다",
     "modelmeta": "메타 JSON 만 낸다",
     "id_floor": "번호 바닥 JSON 만 낸다(덱을 읽고 시작 번호를 적는다) — 덱을 쓰지 않는다",
+    "apply_carryover_plan": "입력 덱의 바이트를 계획의 deck.sha256 이 고정한다 — CRLF 로 바꾼 덱은 다른 덱이라 거절이 계약이다. "
+                            "개행 · 칸 폭 보존은 test_apply_carryover_plan.py(D-1 CRLF 덱 · D-2 CRLF 조각)가 본다",
     "strain": "CSV 만 낸다(ref_mesh/def_mesh 를 읽고 변형률 표를 쓴다)",
     "foldsurface": "CSV 만 낸다 — 덱을 읽지도 쓰지도 않는 순수 수치다",
     "linkage-fit": "YAML 만 낸다(두 덱을 읽고 군별 변환을 적는다) — 덱을 쓰지 않는다",

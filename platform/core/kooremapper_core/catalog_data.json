@@ -14540,6 +14540,61 @@
       "notes": "Relative paths resolve against the YAML file's directory. Unknown YAML keys are refused (a typo such as deck_units would otherwise insert in the default unit). The insert is refused with exit code 1 and no output when the map or the fragment breaks the contract; the console lists every disagreement. After writing, the deck is read back and the element count of every part, including the inserted ones, is compared with the expected count."
     },
     {
+      "name": "apply_carryover_plan",
+      "category": "mesh",
+      "summary": "Apply a StepForge carry-over plan (plan.json v1 with its displacement fields and fragments) to the deck it was made for: per deck PID keep, rigid transform, morph, remesh or delete, and insert new parts.",
+      "description": "When a CAD revision comes in, StepForge decides per deck PID what happens to the simplified analysis deck and writes the material for it: plan.json, a displacement field field_<PID>.bin for each morph row and a deck fragment fragment_<PID>.k for each remesh row and new part. Changing the deck is ours (boundary agreement §1); the shapes follow our reply of 2026-11-07. The plan is read exactly as version 1 defines it — unknown or missing fields, or a format, version, unit (mm-t-s) or frame (world) other than expected, are refused — and it must belong to this deck: deck.sha256 must equal the SHA-256 of the model file. The companion files are looked up by name in plan.json's folder and must match their sha256 and size in the plan's files table; a fragment whose bytes differ (newlines, spaces) is still accepted with a warning when its values check out (ID ranges, counts, PID, SECID, MID, element family read from the file, new section card). Decks with *INCLUDE and long-format decks are refused in v1. Pre-checks are all or nothing: every problem is collected and listed, and no deck is written. A PID is refused when it shares nodes with another part or with beam, discrete, mass, seatbelt or plot elements (also when the plan's shared_nodes or the field's shared bit says so), when a remeshed or deleted PID is referenced by node, segment or element from sets, contacts, history and similar cards (references by PID survive a remesh and block a delete), when the canonical reference tables cannot pin down a card's fields, when an element block's card layout is unknown, when the PID is defined by a *PART variant such as *PART_INERTIA, for a shell-thickness morph (field.thickness — needs v2), for a morph row with instead, and for a fragment that was not built. Keep and review rows change nothing (touches_changed and absorbed are reported). Transform applies a rigid 4x4 (R orthonormal and det 1 within 1e-9, last row 0 0 0 1) to every node of the PID's elements, mid-side nodes included; morph adds the displacement field, whose nodes must be exactly the nodes of the PID's elements; remesh removes the PID's elements and nodes and inserts the fragment under the same PID (with new_section, the section card is added and only that *PART's SECID is repointed); delete removes the elements, the nodes and the *PART but keeps *SECTION and *MAT; new parts are inserted from their fragments. Fragment IDs must lie above the deck's floor (the id_floor value, beams, discretes and masses included); fragments reaching down to it are all moved by one common offset, reported as shift. Only ID fields are rewritten, at the deck's width; coordinates are kept byte for byte. The written deck is read back and checked (moved nodes, removed and inserted IDs with their coordinates, untouched nodes, element count per part, *PART cards), then a quality gate refuses a newly inverted solid (Jacobian <= 0) or a flipped shell normal (transform and morph) and deletes the written deck. A JSON report is always written, also on refusal.",
+      "invocation": "yaml",
+      "config_style": "structured",
+      "takes_kfile": true,
+      "requires_gmsh": false,
+      "requires_tetgen": false,
+      "params": [
+        {
+          "name": "model",
+          "type": "file",
+          "role": "yaml_field",
+          "yaml_path": "model",
+          "required": true,
+          "description": "The deck the plan was made for. Its SHA-256 must equal the plan's deck.sha256; *INCLUDE is refused in v1."
+        },
+        {
+          "name": "plan",
+          "type": "file",
+          "role": "yaml_field",
+          "yaml_path": "plan",
+          "required": true,
+          "description": "StepForge plan.json (format stepforge-carryover-plan, version 1). The field_<PID>.bin and fragment_<PID>.k files it lists must lie in the same folder."
+        },
+        {
+          "name": "output",
+          "type": "output",
+          "role": "yaml_field",
+          "yaml_path": "output",
+          "required": true,
+          "description": "Output deck. Must differ from model. Not written (or deleted) when any check fails."
+        },
+        {
+          "name": "report",
+          "type": "output",
+          "role": "yaml_field",
+          "yaml_path": "report",
+          "required": false,
+          "description": "Report JSON (format dynaforge-carryover-apply): ok, plan and deck hashes, every problem and warning, shift, per-row results. Default <output stem>_carryover.json. Written on success and on refusal."
+        }
+      ],
+      "example": {
+        "args": {
+          "model": "deck.k",
+          "plan": "plan.json",
+          "output": "deck_applied.k"
+        },
+        "note": "실행 검증된 예제 (StepForge 진리값 판 — keep 2 · morph 1 · transform 1 · remesh 3(새 섹션 하나) · delete 1 · 새 파트 1(조각 없음))"
+      },
+      "example_folder": "examples/apply_carryover_plan",
+      "notes": "Relative paths resolve against the YAML file's directory; companion files resolve against plan.json's directory. Unknown YAML keys are refused."
+    },
+    {
       "name": "stcx_fullangle_drop",
       "category": "analysis",
       "summary": "Submit a full-angle (Fibonacci) LS-DYNA drop study to the stcx cluster",
