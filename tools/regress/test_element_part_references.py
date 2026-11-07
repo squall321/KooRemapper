@@ -107,6 +107,7 @@ DEFECT_DECKS = [
     "tests/offset_shell_result.k",
     "tests/offset_test_result.k",
     "tests/offset_tshell_result.k",
+    "tools/regress/data/apply_carryover_plan/live_v2_mesh/fragment_1.k",   # 판 2 실물(메시 덱 f8ff42845904)의 이월 조각 — 위와 같은 까닭
     "tools/regress/data/apply_carryover_plan/mesh12/fragment_1.k",     # 이월 조각 — 위와 같은 까닭
     "tools/regress/data/apply_carryover_plan/mesh12/fragment_11.k",
     "tools/regress/data/apply_carryover_plan/mesh12/fragment_13.k",
