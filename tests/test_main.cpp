@@ -16,6 +16,8 @@
 #include "test_ContactCards.cpp"
 // 주응력 퇴행 고유값 회귀 — 2026-10-27(KR-03)
 #include "test_StressTensor.cpp"
+// StepForge 이월 계획 리더(계획 · 변위장 · 조각 · 보고) — 2026-11-07
+#include "test_CarryoverPlan.cpp"
 
 int main(int argc, char* argv[]) {
     (void)argc;

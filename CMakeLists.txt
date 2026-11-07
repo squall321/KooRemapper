@@ -54,6 +54,7 @@ set(CORE_SOURCES
 set(PARSER_SOURCES
     src/parser/ElementCardLayout.cpp
     src/parser/FragmentMap.cpp
+    src/parser/CarryoverPlan.cpp
     src/parser/IncludeClosure.cpp
     src/parser/NodeRefs.cpp
     src/parser/IdRefs.cpp
