@@ -972,6 +972,7 @@ fragment_map: examples/cad_solid_merge_to_deck/stepforge_fragment.json
           "  StepForge `export_part_fragment` 의 인자(`node_start`·`elem_start`·`pid_start`·`sid_start` — 이름 그대로)로 주면",
           "  조각이 그 번호로 쓰이고 `cad_solid_merge_to_deck` 가 **옮기지 않고** 넣는다(대응표 번호 = 덱 번호)",
           "바닥 = assemble 과 같은 커서(**인클루드 닫힘까지**)의 최대값 + 1. pid_start 는 PID·SECID·MID 셋의 최대값 위다",
+          "  (SECID 는 *SECTION_* 블록의 모든 데이터 줄 첫 칸 정수 — 한 키워드 아래 쌓인 둘째 카드까지 넉넉히 · 11-07 밤)",
           "  (열 재질 *MAT_THERMAL_* · *MAT_T01~T18 의 TMID 는 MID 와 독립된 번호라 세지 않는다 — Vol II 3-1)",
           "★요소 바닥은 **모든 요소 족**이다(2026-11-07) — 솔리드 · 셸 · 티쉘에 더해 보 · 이산 · 질량 · 안전띠 · 플롯 요소와",
           "  줄 수를 모르는 변형의 EID 까지 센다(리더는 그 요소를 메시에 담지 않는다). `cad_solid_merge_to_deck` 도 이 바닥으로 옮긴다",

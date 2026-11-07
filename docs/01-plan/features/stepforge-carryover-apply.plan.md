@@ -167,6 +167,15 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
   로 이월 적용에 넘긴다. 손대는 줄의 `*PART` SECID · MID 정의가 둘 이상이면 `part_duplicate`(새 갈래를 만들지 않고 detail 에 「SECID n 의
   정의가 k 개(자리 …)」). 정의는 블록마다 첫 카드 — StepForge 리더도 쌓인 카드를 읽지 않으니 「같은 줄에서 멈춘다」 가 선다. 쌓인 둘째
   카드끼리의 겹침은 세지 않는다(남는 틈 — 새 SECID 의 겹침은 따로 넉넉히 센다).
+- **공용 SECID 커서(셋째 묶음 · 사용자 「이번 판」)** — `cur_scanMaxSectionId` 가 `cur_scanSectionIdsAnyCard`(섹션 블록의 모든 데이터 줄 첫 칸
+  정수 · 블록 키워드 폭)로 센다 → `maxSectionId_`(loadBaseModel · 인클루드 위로) · `idMaxima().section`. 이월 적용의 `sectionIdsAnyCard` 를
+  옮겨 둘이 하나의 규칙을 쓴다(둘째 소비자). 있나 · 종류(`cur_scanSectionIds` · `definedSectionIds`)는 첫 카드 그대로. **새 SECID 가 바뀔 수
+  있는 op** — restack · disconnect(CZM 섹션 둘) · offset · 다재료 offset · dual offset prestress · merge · cnrb2solid(시작 번호) · IGA(커서를
+  올리기만), 바닥 — `id_floor`(pid_start) · `cad_solid_merge_to_deck` · `apply_carryover_plan`(조각 이동량 바닥). 바뀌는 덱은 섹션 블록에
+  첫 카드보다 큰 정수가 첫 칸인 줄(쌓인 카드 · 정수 두께 · 숫자 제목)이 있는 덱뿐 — 커서는 오르기만 한다. **기존 회귀 산출** — 커서가
+  옛 셈과 다를 때 적는 탐침 바이너리로 회귀 전체(111)를 돌렸다: 갈린 곳은 셋 — ① `examples/wrap/cylinder_2layer.k`(진짜 쌓인 카드 —
+  `*SECTION_SOLID` 밑 SECID 1 · 2 · 1 → 2)를 쓰는 wrap 실행 스물여덟(wrap 은 절점만 옮기고 SECID 를 내지 않는다 — 산출 그대로) ② 이월 적용 R-1
+  의 쌓인 카드 덱(8 → 9 · 10 — 거절 시험이라 산출 없음) ③ 새 회귀 `test_section_cursor_stacked.py`. 그러니 기존 회귀 산출은 바뀌지 않는다.
 
 ## 리뷰 11-07 고침 — 정한 것
 리뷰(11-07) 결함 11 + 그럴듯한 둘을 고쳤다. 공용 코드(i10 조각의 쓰기 관문 왕복 · 솔리드 · 티쉘 변형의 바닥 · `*ELEMENT_MASS` PID 칸)는 다른 갈래 몫.

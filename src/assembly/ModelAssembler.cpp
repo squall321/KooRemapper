@@ -94,9 +94,34 @@ std::map<int, std::string> cur_scanSectionIds(const std::vector<std::string>& li
     return ids;
 }
 
+// ★번호 커서가 볼 「덱이 쓴 SECID」 — `*SECTION_*` 블록의 **모든** 데이터 줄의 첫 칸 정수(넉넉히). 위 첫 카드 표는 한 키워드 아래
+// 쌓인 둘째 카드의 SECID 를 몰라, 새 섹션을 내는 op 이 그 번호를 다시 냈다(rc 0 · 같은 SECID 둘 — 이월 적용의 11-07 적대적 검토 #1 과
+// 같은 틈 · 셋째 묶음 · 사용자 결정 「이번 판」). 쌓인 카드의 줄 수는 섹션 종류 · 옵션 카드마다 달라 정확히 가르지 않고 넉넉히 센다 —
+// 정수로 쓴 두께(`5`) · 각도 · 숫자 제목 줄도 들어 커서가 쓸데없이 오를 수 있다(겹치는 것보다 안전한 쪽). 칸 폭은 블록 키워드의 폭
+// (long `+` 이면 20). 있나 · 종류(`definedSectionIds`)는 위 첫 카드 표가 그대로 본다. 이월 적용의 새 SECID 겹침도 이 집합을 쓴다
+std::set<int> cur_scanSectionIdsAnyCard(const std::vector<std::string>& lines) {
+    std::set<int> out;
+    const int deckFw = deckFieldWidth(lines);
+    bool in = false;
+    int w = 10;
+    for (const auto& l : lines) {
+        const size_t g = l.find_first_not_of(" \t");
+        if (g != std::string::npos && l[g] == '*') {
+            in = deckscan::kwBare(deckscan::keywordToken(l)).rfind("*SECTION_", 0) == 0;
+            w = keywordFieldWidth(l, deckFw) == 20 ? 20 : 10;
+            continue;
+        }
+        if (!in || !deckscan::isDataLine(l)) continue;
+        const auto f = deckscan::cardFields(l, w);
+        int v = 0;
+        if (!f.empty() && deckscan::toInt(f[0], v) && v > 0) out.insert(v);
+    }
+    return out;
+}
+
 int cur_scanMaxSectionId(const std::vector<std::string>& lines) {
-    const auto ids = cur_scanSectionIds(lines);
-    return ids.empty() ? 0 : ids.rbegin()->first;
+    const auto ids = cur_scanSectionIdsAnyCard(lines);
+    return ids.empty() ? 0 : *ids.rbegin();
 }
 
 // 줄들에서 `*MAT_*` 의 MID 최대값. 리더(`KFileReader`)는 재질 **다섯 종류**만 읽어 `baseMesh_.materials` 에
@@ -354,6 +379,7 @@ void ModelAssembler::initMaxSetIdFromRawLines() {
 // 줄을 받는다 — 판 2 의 인클루드 덱은 펼친 닫힘 전체를 본다(2026-11-07)
 std::set<int> ModelAssembler::definedMaterialIds(const std::vector<std::string>& lines) { return cur_scanMaterialIds(lines); }
 std::map<int, std::string> ModelAssembler::definedSectionIds(const std::vector<std::string>& lines) { return cur_scanSectionIds(lines); }
+std::set<int> ModelAssembler::sectionIdsAnyCard(const std::vector<std::string>& lines) { return cur_scanSectionIdsAnyCard(lines); }
 std::map<int, std::vector<size_t>> ModelAssembler::materialDefinitionLines(const std::vector<std::string>& lines) {
     return cur_scanMaterialDefs(lines);
 }

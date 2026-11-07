@@ -383,29 +383,6 @@ bool putField(std::string& line, size_t idx, int w, long long v) {
     return true;
 }
 
-// ★새 SECID 가 겹치는지 볼 때의 「덱이 정의한 SECID」 — `*SECTION_*` 블록의 **모든** 데이터 줄의 첫 칸 정수(리뷰 11-07 #1).
-// 번호 커서(`cur_scanSectionIds`)는 키워드마다 첫 카드만 읽는다 — 한 키워드 아래 쌓인 둘째 카드의 SECID 가 보이지 않아 새 섹션이
-// 그 번호를 다시 냈다(rc 0 · 같은 SECID 둘). 쌓인 카드의 줄 수는 섹션 종류 · 옵션 카드마다 달라 정확히 가르지 않고 넉넉히 센다 —
-// 두께 · 제목 줄의 정수도 든다(겹친다고 잘못 보면 거절 — 안전한 쪽). 칸 폭은 블록 키워드의 폭(long `+` 이면 20)
-std::set<long long> sectionIdsAnyCard(const std::vector<std::string>& L) {
-    std::set<long long> out;
-    const int deckFw = deckFieldWidth(L);
-    bool in = false;
-    int w = 10;
-    for (const auto& l : L) {
-        if (cardcut::isKeywordLine(l)) {
-            in = deckscan::kwBare(deckscan::keywordToken(l)).rfind("*SECTION_", 0) == 0;
-            w = keywordFieldWidth(l, deckFw) == 20 ? 20 : 10;
-            continue;
-        }
-        if (!in || !deckscan::isDataLine(l)) continue;
-        const auto f = deckscan::cardFields(l, w);
-        int v = 0;
-        if (!f.empty() && cards::toInt(f[0], v) && v > 0) out.insert(v);
-    }
-    return out;
-}
-
 // 키워드 줄 kw 부터 다음 키워드 줄 앞까지(주석 · 빈 줄 포함) — StepForge `section_card` 가 옮기는 「옛 카드 원문」 의 자리
 std::vector<std::string> blockAt(const std::vector<std::string>& L, size_t kw) {
     size_t j = kw + 1;
@@ -751,6 +728,7 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, const std::
     const auto variants = definedPartVariantIds(S);
     const auto sections = definedSectionIds(S);
     // 새 SECID 의 겹침 · 차례는 쌓인 카드까지 넉넉히 센 집합으로 본다(위 `sections` 는 키워드마다 첫 카드 — 있나 · 종류를 가리는 데만 쓴다)
+    // (번호 커서와 같은 공용 훑기 `ModelAssembler::sectionIdsAnyCard` — 리뷰 11-07 #1 에 이 파일에 두었던 것을 11-07 밤 커서에도 쓰려고 옮겼다)
     const auto secidsAll = sectionIdsAnyCard(S);
     const long long secidTop = secidsAll.empty() ? 0 : *secidsAll.rbegin();
     const auto mids = definedMaterialIds(S);
