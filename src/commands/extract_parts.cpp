@@ -1613,14 +1613,15 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
             return failRun(false);
         }
         // ★번호를 제자리에 바꿔 쓸 수 없는 보 족 줄 — 줄마다 한 번 적고 쓰기 전에 거절한다(2026-11-07 「번호 매기기는 거절」)
-        //   · 칸 자리가 없다 — 콤마 자유형식 · 설명서 칸의 절점 칸에 공백이 낀 줄
+        //   · 칸 자리가 없다 — 콤마 자유형식 · 설명서 칸 안에 빈칸이 낀 줄(정수 폭으로 쓴 줄 — LS-DYNA 가 읽는 칸이 쓴 꼴과 다르다) ·
+        //     번호를 쓸 칸에 겹친 `$` 주석
         //   · 모호하다 — 그 줄을 그렇게 썼을 수 있는 다른 읽기(정수 폭 칸 수 안에서 끝나는 줄의 정수 폭 · 토큰)가 설명서 칸에 없는
         //     절점을 말하고 그 절점이 덱에 있다. 설명서대로 쓴 줄(빈 SLEN · 빈 SBRID · 소수점 · 지수 표기 · 왼쪽 맞춤 · 꼬리 주석)은
         //     N4 가 65-72열에 있어 정수 폭 읽기가 갈림을 말하지 않거나, SLEN 의 뒤 절반이 정수가 아니거나 덱에 없는 번호라 걸리지 않는다
         std::vector<std::string> bad;
         for (const auto& r : pk.renumberRisk) {
             if (!r.placeable) {
-                bad.push_back(r.where + " — 칸 자리가 없다(콤마 자유형식 · 절점 칸에 공백)");
+                bad.push_back(r.where + " — 칸 자리가 없다(콤마 자유형식 · 설명서 칸 안에 빈칸 · 번호 칸에 겹친 $ 주석)");
                 continue;
             }
             std::string hit;
