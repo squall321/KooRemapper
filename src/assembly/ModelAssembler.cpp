@@ -52,11 +52,11 @@ namespace KooRemapper {
 namespace { static int bc_findMaxSetNodeId(const std::vector<std::string>& rawLines); }
 
 namespace {
-// 줄들에서 `*SECTION_*` 첫 데이터 카드의 SECID(→ 그 키워드, 먼저 나온 것) — 파트가 참조하지 않는 섹션도 번호를 차지한다.
-// 주 덱과 인클루드 파일이 **같은 규칙**으로 센다(loadBaseModel · raiseMaxIdsOverIncludes). 이월 적용(2026-11-07)이 같은 훑기로
-// 「그 SECID 가 덱에 있나 · 셸 섹션인가」를 본다(`definedSectionIds`).
-std::map<int, std::string> cur_scanSectionIds(const std::vector<std::string>& lines) {
-    std::map<int, std::string> ids;
+// 줄들에서 `*SECTION_*` 블록마다 첫 데이터 카드의 SECID — SECID → 그 블록들(키워드 줄 · 키워드), 나온 차례. 같은 SECID 를 두 블록이
+// 정의하면 둘 다 담는다(이월 적용의 「손대는 PID 의 SECID 가 두 번 정의됐나」 — StepForge 권고 D-681 · 11-07 밤). 아래
+// `cur_scanSectionIds` 가 이것의 첫 정의다.
+std::map<int, std::vector<std::pair<size_t, std::string>>> cur_scanSectionDefs(const std::vector<std::string>& lines) {
+    std::map<int, std::vector<std::pair<size_t, std::string>>> defs;
     for (size_t i = 0; i < lines.size(); ++i) {
         const std::string& l = lines[i];
         size_t s = l.find_first_not_of(" \t");
@@ -78,10 +78,19 @@ std::map<int, std::string> cur_scanSectionIds(const std::vector<std::string>& li
             // 필요하므로 공백 토큰 하나로 충분하다(10칸 덱이든 8칸 덱이든 SECID 는 첫 칸이다).
             std::istringstream iss(d);
             int sid = 0;
-            if (iss >> sid && sid > 0) ids.emplace(sid, deckscan::kwBare(deckscan::keywordToken(l)));
+            if (iss >> sid && sid > 0) defs[sid].emplace_back(i, deckscan::kwBare(deckscan::keywordToken(l)));
             break;                      // 첫 데이터 카드만 본다
         }
     }
+    return defs;
+}
+
+// 줄들에서 `*SECTION_*` 첫 데이터 카드의 SECID(→ 그 키워드, 먼저 나온 것) — 파트가 참조하지 않는 섹션도 번호를 차지한다.
+// 주 덱과 인클루드 파일이 **같은 규칙**으로 센다(loadBaseModel · raiseMaxIdsOverIncludes). 이월 적용(2026-11-07)이 같은 훑기로
+// 「그 SECID 가 덱에 있나 · 셸 섹션인가」를 본다(`definedSectionIds`).
+std::map<int, std::string> cur_scanSectionIds(const std::vector<std::string>& lines) {
+    std::map<int, std::string> ids;
+    for (const auto& [sid, d] : cur_scanSectionDefs(lines)) ids.emplace(sid, d.front().second);
     return ids;
 }
 
@@ -108,8 +117,10 @@ bool cur_isThermalMaterial(const std::string& kw) {
     const int n = (kw[6] - '0') * 10 + (kw[7] - '0');
     return n >= 1 && n <= 18 && (kw.size() == 8 || kw[8] == '_');
 }
-std::set<int> cur_scanMaterialIds(const std::vector<std::string>& lines) {
-    std::set<int> ids;
+// MID → 그것을 정의한 `*MAT_*` 키워드 줄들(나온 차례 · 첫 데이터 카드의 MID) — 같은 MID 를 두 카드가 정의하면 둘 다 담는다
+// (이월 적용의 「손대는 PID 의 MID 가 두 번 정의됐나」 — StepForge 권고 D-681). 아래 `cur_scanMaterialIds` 가 이것의 번호들이다.
+std::map<int, std::vector<size_t>> cur_scanMaterialDefs(const std::vector<std::string>& lines) {
+    std::map<int, std::vector<size_t>> defs;
     const int deckFw = deckFieldWidth(lines);
     for (size_t i = 0; i < lines.size(); ++i) {
         if (deckscan::isDataLine(lines[i])) continue;
@@ -125,9 +136,17 @@ std::set<int> cur_scanMaterialIds(const std::vector<std::string>& lines) {
             if (h != std::string::npos && d[h] == '$') continue;
             if (needTitle) { needTitle = false; continue; }   // 제목 줄은 비어 있을 수 있다
             const int mid = deckscan::fieldInt(deckscan::cardFields(d, fw), 0);
-            if (mid > 0) ids.insert(mid);
+            if (mid > 0) defs[mid].push_back(i);
             break;                                             // 첫 데이터 카드만 본다
         }
+    }
+    return defs;
+}
+std::set<int> cur_scanMaterialIds(const std::vector<std::string>& lines) {
+    std::set<int> ids;
+    for (const auto& [mid, at] : cur_scanMaterialDefs(lines)) {
+        (void)at;
+        ids.insert(mid);
     }
     return ids;
 }
@@ -335,6 +354,15 @@ void ModelAssembler::initMaxSetIdFromRawLines() {
 // 줄을 받는다 — 판 2 의 인클루드 덱은 펼친 닫힘 전체를 본다(2026-11-07)
 std::set<int> ModelAssembler::definedMaterialIds(const std::vector<std::string>& lines) { return cur_scanMaterialIds(lines); }
 std::map<int, std::string> ModelAssembler::definedSectionIds(const std::vector<std::string>& lines) { return cur_scanSectionIds(lines); }
+std::map<int, std::vector<size_t>> ModelAssembler::materialDefinitionLines(const std::vector<std::string>& lines) {
+    return cur_scanMaterialDefs(lines);
+}
+std::map<int, std::vector<size_t>> ModelAssembler::sectionDefinitionLines(const std::vector<std::string>& lines) {
+    std::map<int, std::vector<size_t>> out;
+    for (const auto& [sid, d] : cur_scanSectionDefs(lines))
+        for (const auto& kw : d) out[sid].push_back(kw.first);
+    return out;
+}
 std::map<int, std::string> ModelAssembler::definedPartVariantIds(const std::vector<std::string>& lines) { return cur_scanPartVariantIds(lines); }
 
 // ★대상이 인클루드 안에만 있는가(헤더의 주석 참조). 판정 자료는 `raiseMaxIdsOverIncludes` 가 같은 리더로 센 것이다.

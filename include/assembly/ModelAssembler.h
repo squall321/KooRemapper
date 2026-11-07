@@ -253,6 +253,9 @@ private:
     static std::set<int> definedMaterialIds(const std::vector<std::string>& lines);
     static std::map<int, std::string> definedSectionIds(const std::vector<std::string>& lines);
     static std::map<int, std::string> definedPartVariantIds(const std::vector<std::string>& lines);
+    // 같은 훑기로 번호마다 정의한 블록의 키워드 줄 전부(나온 차례) — 둘 이상이면 그 번호가 두 번 정의됐다(StepForge 권고 D-681)
+    static std::map<int, std::vector<size_t>> materialDefinitionLines(const std::vector<std::string>& lines);
+    static std::map<int, std::vector<size_t>> sectionDefinitionLines(const std::vector<std::string>& lines);
     // applyCarryoverPlan 이 남기는 기대 — verifyCarryoverOutput 이 쓴 덱과 대조한다
     struct CarryExpect {
         // 대조의 「앞」 메시 — 인클루드가 있는 덱(판 2)은 닫힘째 읽은 메시(`closure`), 아니면 baseMesh_

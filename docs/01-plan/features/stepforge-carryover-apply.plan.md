@@ -162,6 +162,11 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
   인클루드에만 있나」. **번호가 바뀌는 덱** — `*MAT_T01`~`T18` 의 TMID 가 구조 MID(바닥이면 PID · SECID 도)의 최대값보다 큰 덱뿐이다 —
   그 op 들의 새 MID(· 바닥)가 TMID 위가 아니라 구조 번호 위로 내려온다(같은 수의 TMID 와 MID 는 Vol II 가 허락한다). 리포의 픽스처 ·
   회귀 덱에는 `*MAT_T01`~`T18` 이 없다(전수 grep) — 기존 회귀 산출은 그대로다.
+- **두 번 정의된 SECID · MID(권고 ④)** — 공용 훑기 둘에 「번호마다 정의 전부」 꼴을 더하고(`cur_scanSectionDefs` · `cur_scanMaterialDefs` —
+  옛 `cur_scanSectionIds` · `cur_scanMaterialIds` 는 그 첫 정의 · 번호 집합으로 같은 값을 낸다) `sectionDefinitionLines` · `materialDefinitionLines`
+  로 이월 적용에 넘긴다. 손대는 줄의 `*PART` SECID · MID 정의가 둘 이상이면 `part_duplicate`(새 갈래를 만들지 않고 detail 에 「SECID n 의
+  정의가 k 개(자리 …)」). 정의는 블록마다 첫 카드 — StepForge 리더도 쌓인 카드를 읽지 않으니 「같은 줄에서 멈춘다」 가 선다. 쌓인 둘째
+  카드끼리의 겹침은 세지 않는다(남는 틈 — 새 SECID 의 겹침은 따로 넉넉히 센다).
 
 ## 리뷰 11-07 고침 — 정한 것
 리뷰(11-07) 결함 11 + 그럴듯한 둘을 고쳤다. 공용 코드(i10 조각의 쓰기 관문 왕복 · 솔리드 · 티쉘 변형의 바닥 · `*ELEMENT_MASS` PID 칸)는 다른 갈래 몫.

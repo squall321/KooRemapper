@@ -1008,6 +1008,22 @@ def part_l(binary):
     reseal(d)
     rc, out, rep = apply_case(binary, d)
     refused("L-3b 조각(PID 6)의 MID 6 이 *MAT_T01 의 TMID 로만 있다 → fragment(MID 가 덱에 없다)", rc, out, rep, d, "fragment", 6)
+    # L-4 손대는 PID 의 SECID · MID 를 두 블록이 정의한다 — LS-DYNA 는 둘째 정의에서 멈춘다(StepForge 도 그 줄에서) · part_duplicate
+    d = stage(EX, "l4")
+    add_before_end(d, "*SECTION_SOLID\n         3         2\n")
+    rc, out, rep = apply_case(binary, d)
+    refused("L-4 옮기는 PID 3 의 SECID 3 이 두 번 정의됐다 → part_duplicate(PID 3)", rc, out, rep, d, "part_duplicate", 3)
+    check("L-4 보고가 두 정의의 자리를 댄다", "SECID 3 의 정의가 2 개" in details(rep, "part_duplicate"), details(rep, "part_duplicate")[:300])
+    d = stage(EX, "l4b")
+    add_before_end(d, "*MAT_RIGID\n         2   7.8e-09   2.1e+05       0.3\n")
+    rc, out, rep = apply_case(binary, d)
+    refused("L-4b 모프하는 PID 2 의 MID 2 가 두 번 정의됐다(*MAT_ELASTIC_TITLE · *MAT_RIGID) → part_duplicate(PID 2)", rc, out, rep, d,
+            "part_duplicate", 2)
+    d = stage(EX, "l4c")
+    add_before_end(d, "*SECTION_SOLID\n         1         2\n")
+    rc, out, rep = apply_case(binary, d)
+    check("L-4c keep PID 1 의 SECID 1 이 두 번이면 그 줄은 손대지 않으니 거절하지 않는다(rc 0)", rc == 0 and "part_duplicate" not in kinds(rep),
+          (rc, sorted(kinds(rep)), out[-300:]))
 
 
 if __name__ == "__main__":

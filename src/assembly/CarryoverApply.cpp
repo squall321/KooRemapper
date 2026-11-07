@@ -754,6 +754,9 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, const std::
     const auto secidsAll = sectionIdsAnyCard(S);
     const long long secidTop = secidsAll.empty() ? 0 : *secidsAll.rbegin();
     const auto mids = definedMaterialIds(S);
+    // 번호마다 정의한 블록 — 손대는 PID 의 SECID · MID 를 두 블록이 정의하면 그 줄을 거절한다(StepForge 권고 D-681 · 아래 ⑤)
+    const auto secDefs = sectionDefinitionLines(S);
+    const auto midDefs = materialDefinitionLines(S);
     for (size_t kwl : parts.oddBlocks)
         problem(0, "deck_part_block", at(kwl) + " 의 *PART 블록 — 데이터 줄이 제목 · 카드 짝으로 떨어지지 않는다");
     std::vector<NonGridElementCard> auxCards;   // 칸 자리를 아는 격자 밖 요소(보 · 이산 · 질량 · 안전띠 · 플롯) — 나눠 쓴 절점 · EID 겹침이 본다
@@ -1014,6 +1017,26 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, const std::
                                                 ")에 있을 수 있다 — 요소 키워드의 TITLE 은 설명서 옵션이 아니어서 첫 줄이 제목 카드인지 근거가 없고 "
                                                 "우리 리더는 숫자꼴 제목을 요소로 읽는다 · 그 PID 는 고치지 않는다(StepForge 권고 D-681)");
             continue;
+        }
+        // 그 PID 의 SECID · MID 를 두 블록 이상이 정의하면 LS-DYNA 는 둘째 정의에서 멈춘다 — StepForge 도 그 줄에서 멈춘다(권고 D-681 ·
+        // 사용자 결정 11-07 밤). `*PART` 가 둘인 것과 같은 갈래(part_duplicate)로 거절한다. 정의는 블록마다 첫 카드다(번호 훑기와 같다)
+        {
+            const PartLoc& loc = parts.plain.at(pid);
+            std::string dup;
+            auto twice = [&](const char* what, long long id, const std::map<int, std::vector<size_t>>& defs) {
+                auto it = id > 0 ? defs.find(static_cast<int>(id)) : defs.end();
+                if (it == defs.end() || it->second.size() < 2) return;
+                std::string where;
+                for (size_t k = 0; k < it->second.size() && k < 4; ++k) where += (k ? " · " : "") + at(it->second[k]);
+                dup += (dup.empty() ? "" : " / ") + std::string(what) + " " + std::to_string(id) + " 의 정의가 " + std::to_string(it->second.size()) +
+                       " 개(" + where + ")";
+            };
+            twice("SECID", loc.secid, secDefs);
+            twice("MID", loc.mid, midDefs);
+            if (!dup.empty()) {
+                problem(pid, "part_duplicate", "PID 의 " + dup + " — LS-DYNA 는 같은 번호의 둘째 정의에서 멈춘다(StepForge 도 그 줄에서 멈춘다 · 권고 D-681)");
+                continue;
+            }
         }
         // 판 2 · 인클루드 덱 — 고칠 자리(그 PID 의 `*PART` · 요소 · 그 요소의 절점)가 전부 주 덱에 있어야 한다(사용자 결정 11-07 「주 덱만
         // 고침 · 인클루드면 거절」 — 인클루드 파일은 쓰지 않는다). 새 섹션이 옮길 옛 섹션 카드는 아래 ⑧b 가 본다
