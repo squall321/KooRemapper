@@ -347,13 +347,19 @@ AuxElementCard auxElementCard(const std::string& keywordLine) {
             }
             break;
         case AuxFamily::SEATBELT:
-            // Card 1 = EID PID N1 N2 SBRID SLEN N3 N4 — 절점이 **두 구간**이다.
+            // Card 1 = EID PID N1 N2 SBRID(I8 다섯) SLEN(F16) N3 N4(I8) (160311-160353) — 절점이 **두 구간**이다(칸 차례 2·3 · 6·7).
+            // SLEN 이 넓은 칸이라 N3 · N4 는 57-64 · 65-72열이다(8칸으로 자르면 칸 7·8). 그 차례는 `auxCardFields` 가 자른다.
             a.nodeSkip = 2; a.nodeCount = 2;
             a.nodeSkip2 = 6; a.nodeCount2 = 2;
+            a.wideFields = {5};
             for (const auto& o : opts) {
                 if (o == "TITLE") continue;
-                // `_ACCELEROMETER`·`_PRETENSIONER`·`_RETRACTOR`·`_SENSOR`·`_SLIPRING` 은
-                // 변형이 아니라 **다른 키워드**다 — 칸 배치가 통째로 다르다.
+                // `_ACCELEROMETER`·`_PRETENSIONER`·`_RETRACTOR`·`_SENSOR`·`_SLIPRING` 은 변형이 아니라 **다른 키워드**다 —
+                // 10칸 폭 표이고 PID 칸이 없다(160482 · 160602 · 160931 · 161342 · 161725). 칸 자리를 짐작하지 않는다.
+                a.hasPart = false;
+                a.partField = -1;
+                a.nodeCount = 0; a.nodeSkip2 = -1; a.nodeCount2 = 0;
+                a.wideFields.clear();
                 unsupported("*ELEMENT_SEATBELT_" + o + " 은 별개 키워드이고 칸 배치가 다릅니다");
             }
             break;
@@ -373,23 +379,41 @@ AuxElementCard auxElementCard(const std::string& keywordLine) {
     return a;
 }
 
-std::vector<std::string> auxCardFields(const AuxElementCard& a, const std::string& line, int fw) {
-    if (a.wideFields.empty()) return deckscan::cardFields(line, fw);
+AuxCardCut auxCardCut(const AuxElementCard& a, const std::string& line, int fw) {
+    AuxCardCut c;
     std::string body = line;
     while (!body.empty() && (body.back() == '\r' || body.back() == '\n')) body.pop_back();
-    if (body.find(',') != std::string::npos) return deckscan::cardFields(body, fw);   // 자유형식 — 토큰 차례
-    const size_t rw = static_cast<size_t>(realFieldWidth(fw));
-    std::vector<std::string> out;
-    bool misaligned = false;
-    for (size_t pos = 0, q = 0; pos < body.size(); ++q) {
-        const bool wide = std::find(a.wideFields.begin(), a.wideFields.end(), static_cast<int>(q)) != a.wideFields.end();
-        const size_t w = wide ? rw : static_cast<size_t>(fw);
-        out.push_back(deckscan::trim(body.substr(pos, w)));
-        if (out.back().find_first_of(" \t") != std::string::npos) misaligned = true;
-        pos += w;
+    if (body.find(',') != std::string::npos) {               // 자유형식 — 토큰 차례 · 제자리에 쓸 열이 없다
+        c.f = deckscan::cardFields(body, fw);
+        return c;
     }
-    // 칸이 어긋난 줄 — `deckscan::cardFields` 와 같이 여기서만 공백 토큰으로 읽는다(토큰 차례 = 칸 차례)
-    return misaligned ? deckscan::cardFields(body, fw) : out;
+    // 고정폭으로 잘라 본다 — 칸 안에 공백이 남으면 어긋난 줄이다(`deckscan::cardFields` 와 같은 규율)
+    const size_t rw = static_cast<size_t>(realFieldWidth(fw));
+    auto cut = [&](bool wideAware, AuxCardCut& t) {
+        for (size_t pos = 0, q = 0; pos < body.size(); ++q) {
+            const bool wide = wideAware &&
+                              std::find(a.wideFields.begin(), a.wideFields.end(), static_cast<int>(q)) != a.wideFields.end();
+            const size_t w = wide ? rw : static_cast<size_t>(fw);
+            std::string s = deckscan::trim(body.substr(pos, w));
+            if (s.find_first_of(" \t") != std::string::npos) return false;
+            t.f.push_back(std::move(s));
+            t.col.push_back(pos);
+            t.width.push_back(w);
+            pos += w;
+        }
+        return true;
+    };
+    // 넓은 칸을 따른 매뉴얼 꼴 → 어긋나면 정수 폭(그 줄은 정수 폭으로 쓰였다) → 그것도 어긋나면 공백 토큰(자리 없음)
+    if (!a.wideFields.empty() && cut(true, c)) return c;
+    c = AuxCardCut();
+    if (cut(false, c)) return c;
+    c = AuxCardCut();
+    c.f = deckscan::cardFields(body, fw);
+    return c;
+}
+
+std::vector<std::string> auxCardFields(const AuxElementCard& a, const std::string& line, int fw) {
+    return auxCardCut(a, line, fw).f;
 }
 
 bool gridReaderReadsKeyword(const std::string& keywordLine) {

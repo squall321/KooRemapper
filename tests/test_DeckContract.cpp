@@ -403,6 +403,72 @@ TEST(auxElementCard_SEATBELT_은_절점_구간이_둘) {
     ASSERT_TRUE(a.supported);
     ASSERT_GT(a.nodeSkip2, 0);
     ASSERT_GT(a.nodeCount2, 0);
+    // SLEN(칸 차례 5)이 E16 — 10칸 표에 아홉 자리(Vol_I 160311-160353)
+    ASSERT_EQ(a.wideFields.size(), (size_t)1);
+    ASSERT_EQ(a.wideFields[0], 5);
+}
+
+TEST(auxCardCut_안전띠_N3_N4_는_57_72열이다) {
+    // EID PID N1 N2 SBRID(I8) SLEN(F16) N3 N4(I8) — N3 57-64열 · N4 65-72열. 예전 판정은 8칸 칸 6·7(49-64열 — SLEN 의 뒤
+    // 절반과 N3)을 읽어 N4 를 놓쳤다 — cleanup-nodes 가 쓰는 N4 를 지웠고 extract-parts 가 빠뜨렸다(2026-11-07 실측).
+    const auto a = auxElementCard("*ELEMENT_SEATBELT");
+    char b[200];
+    std::snprintf(b, sizeof b, "%8d%8d%8d%8d%8d%16s%8d%8d", 13, 9, 101, 102, 888, "0.0", 103, 104);
+    const std::string std8 = b;
+    ASSERT_EQ(deckscan::fieldInt(deckscan::cardFields(std8, 8), 6), 0);      // 정수 폭 칸 6 = SLEN 의 뒤 절반
+    ASSERT_EQ(deckscan::fieldInt(deckscan::cardFields(std8, 8), 7), 103);    // 정수 폭 칸 7 = N3(N4 가 아니다)
+    auto c = auxCardCut(a, std8, 8);
+    ASSERT_EQ(deckscan::fieldInt(c.f, 6), 103);
+    ASSERT_EQ(deckscan::fieldInt(c.f, 7), 104);
+    ASSERT_EQ(deckscan::fieldInt(c.f, 4), 888);                              // SBRID 는 절점 칸이 아니다(칸 차례 4)
+    ASSERT_EQ(c.col.size(), c.f.size());
+    ASSERT_EQ(c.col[6], (size_t)56);
+    ASSERT_EQ(c.col[7], (size_t)64);
+    ASSERT_EQ(c.width[5], (size_t)16);
+    // i10 — 정수 칸만 10칸(SLEN 16 그대로) · long — 모두 20칸
+    std::snprintf(b, sizeof b, "%10d%10d%10d%10d%10d%16s%10d%10d", 13, 9, 101, 102, 888, "0.0", 1000003, 1000004);
+    c = auxCardCut(a, b, 10);
+    ASSERT_EQ(deckscan::fieldInt(c.f, 6), 1000003);
+    ASSERT_EQ(deckscan::fieldInt(c.f, 7), 1000004);
+    ASSERT_EQ(c.col[6], (size_t)66);
+    ASSERT_EQ(c.col[7], (size_t)76);
+    std::snprintf(b, sizeof b, "%20d%20d%20d%20d%20d%20s%20d%20d", 13, 9, 101, 102, 888, "0.0", 103, 104);
+    c = auxCardCut(a, b, 20);
+    ASSERT_EQ(deckscan::fieldInt(c.f, 7), 104);
+    ASSERT_EQ(c.col[7], (size_t)140);
+    // 콤마 자유형식 · 공백으로만 가른 줄 — 토큰 차례 · 제자리에 쓸 열이 없다
+    c = auxCardCut(a, "13,9,101,102,888,0.0,103,104", 8);
+    ASSERT_EQ(deckscan::fieldInt(c.f, 7), 104);
+    ASSERT_TRUE(c.col.empty());
+    c = auxCardCut(a, "13 9 101 102 888 0.0 103 104", 8);
+    ASSERT_EQ(deckscan::fieldInt(c.f, 7), 104);
+    ASSERT_TRUE(c.col.empty());
+    // SLEN 을 8칸에 쓴 줄(매뉴얼 꼴이 아니다) — 정수 폭으로 맞아떨어지면 그 줄의 자리(칸 차례 × 8)다
+    std::snprintf(b, sizeof b, "%8d%8d%8d%8d%8d%8d%8d%8d", 13, 9, 101, 102, 888, 0, 103, 104);
+    c = auxCardCut(a, b, 8);
+    ASSERT_EQ(deckscan::fieldInt(c.f, 7), 104);
+    ASSERT_EQ(c.col.size(), (size_t)8);
+    ASSERT_EQ(c.col[7], (size_t)56);
+    // 걸음(이월 적용의 나눠 쓴 절점 · 바닥)도 같은 칸을 본다
+    const std::vector<std::string> L = {"*KEYWORD", "*ELEMENT_SEATBELT", std8, "*END"};
+    std::vector<NonGridElementCard> cs;
+    forEachNonGridElementCard(L, [&](const NonGridElementCard& x) { cs.push_back(x); });
+    ASSERT_EQ(cs.size(), (size_t)1);
+    ASSERT_TRUE(cs[0].nodes == std::vector<int>({101, 102, 103, 104}));
+    ASSERT_EQ(cs[0].pid, 9);
+}
+
+TEST(auxElementCard_안전띠_장치_키워드는_PID_칸이_없다) {
+    // `_ACCELEROMETER`·`_PRETENSIONER`·`_RETRACTOR`·`_SENSOR`·`_SLIPRING` 은 별개 키워드다 — 10칸 폭 표이고 PID 칸이 없다
+    // (Vol_I 160482 · 160602 · 160931 · 161342 · 161725). 칸 자리를 짐작하지 않는다(extract-parts 가 칸 1 을 PID 로 읽었다).
+    for (const char* k : {"*ELEMENT_SEATBELT_ACCELEROMETER", "*ELEMENT_SEATBELT_PRETENSIONER", "*ELEMENT_SEATBELT_RETRACTOR",
+                          "*ELEMENT_SEATBELT_SENSOR", "*ELEMENT_SEATBELT_SLIPRING"}) {
+        const auto a = auxElementCard(k);
+        ASSERT_FALSE(a.supported);
+        ASSERT_FALSE(a.hasPart);
+        ASSERT_EQ(a.partField, -1);
+        ASSERT_TRUE(a.wideFields.empty());
+    }
 }
 
 // ── 개행 — 한 파일 안에서 갈리면 최악이다 ───────────────────────────────

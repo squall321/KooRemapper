@@ -318,12 +318,13 @@ def main():
         #   DISCRETE EID PID N1 N2 VID S PF OFFSET            → 절점은 칸 2·3
         #   MASS     EID ID  MASS(E16) PID                    → 절점은 칸 1, **PID 는 칸 차례 3 = 33-40열**
         #            (MASS 가 16칸이라 8칸으로 자르면 칸 4 다 — 칸 3(25-32열)은 MASS 의 뒤 절반, 2026-11-07)
-        #   SEATBELT EID PID N1 N2 SBRID SLEN N3 N4           → 절점이 **두 구간**(2·3, 6·7)
+        #   SEATBELT EID PID N1 N2 SBRID SLEN(E16) N3 N4      → 절점이 **두 구간**(칸 차례 2·3, 6·7)
+        #            (SLEN 이 16칸이라 N3 · N4 는 57-64 · 65-72열 — 8칸으로 자르면 칸 7·8, 2026-11-07)
         #   PLOTEL   EID N1 N2                                → **PID 칸이 없다**
         L = ["*KEYWORD", "*NODE"]
         for i in range(1, 9):
             L.append(nl(i, i % 2, (i // 2) % 2, i // 4))
-        for n in (101, 102, 103, 104, 105, 106):
+        for n in (101, 102, 103, 104, 105, 106, 107, 108):   # 107 · 108 은 안전띠의 N3 · N4 만 쓴다
             L.append(nl(n, float(n), 0.0, 0.0))
         # ★덫: 절점이 아닌 칸에 **실제로 존재하는 절점 번호**를 넣는다.
         #   잘못 읽으면 이 절점들이 산출 덱에 실린다.
@@ -338,8 +339,9 @@ def main():
         #                      EID  ID  MASS(E16)  PID    ← PID 는 33-40열(매뉴얼 꼴 — Vol_I 159866-159930)
         # ★덫: EID 16 은 PID 0 인데 질량값 9 가 25-32열에 온다 — 8칸 칸 3 을 PID 로 읽으면 PID 9 로 실리고 절점 106 이 딸려 온다
         L += ["*ELEMENT_MASS", "%8d%8d%16s%8d" % (12, 105, "0.5", 9), "%8d%8d%16s%8d" % (16, 106, "9", 0)]
-        #                          EID PID  N1   N2 SBRID SLEN  N3  N4
-        L += ["*ELEMENT_SEATBELT", e8(13, 9, 101, 102, 888, 0, 103, 104)]
+        #                          EID PID  N1   N2 SBRID SLEN(E16) N3  N4    ← 매뉴얼 꼴(Vol_I 160311-160353)
+        belt_line = "%8d%8d%8d%8d%8d%16s%8d%8d" % (13, 9, 101, 102, 888, "0.0", 107, 108)
+        L += ["*ELEMENT_SEATBELT", belt_line]
         #                        EID  N1   N2     ← PID 가 없다
         L += ["*ELEMENT_PLOTEL", e8(14, 101, 102)]
         L += ["*PART", "solid part", s10(1, 1, 1), "aux part", s10(9, 9, 9)]
@@ -366,8 +368,8 @@ def main():
               "*ELEMENT_MASS" in lk and "\n     105 " in lk, "105 또는 MASS 카드가 없다")
         check("L-5b ★질량값(25-32열의 9)을 PID 로 읽지 않는다 — PID 0 카드(EID 16)와 그 절점 106 은 안 실린다",
               "\n      16     106" not in lk and "\n     106 " not in lk, [x for x in lk.split("\n") if "106" in x][:3])
-        check("L-6 ★SEATBELT 의 둘째 절점 구간(N3·N4 = 103·104)도 읽는다",
-              "\n     103 " in lk and "\n     104 " in lk, "")
+        check("L-6 ★SEATBELT 의 둘째 절점 구간(N3·N4 = 107·108 — 57-72열 · 다른 요소는 안 쓴다)도 읽는다",
+              "\n     107 " in lk and "\n     108 " in lk, "")
         check("L-7 BEAM·DISCRETE 의 절점이 실렸다", "\n     101 " in lk and "\n     102 " in lk, "")
         check("L-8 아무도 안 쓰는 999 는 안 실린다", "\n     999 " not in lk, "")
         check("L-9 ★PLOTEL 은 두 절점이 다 남아서 실렸다", "*ELEMENT_PLOTEL" in lk, "")
@@ -388,6 +390,20 @@ def main():
               beam and beam[0].endswith("     777"), beam[:1])
         check("L-13 BEAM 의 절점 칸은 새 번호다 (101·102 → 1·2 꼴)",
               beam and beam[0][16:32].strip().split() != ["101", "102"], beam[:1])
+        # ★안전띠 — 절점 넷이 **제자리**(17-32 · 57-72열)에서 새 번호다. SBRID · SLEN(33-56열)은 글자 그대로다.
+        #   예전엔 칸 차례 × 8 로 자리를 잡아 N3 을 49열(SLEN 위)에 쓰고 N4 는 옛 번호 그대로 두었다(2026-11-07).
+        newid = {}
+        sect = ""
+        for x in lr.split("\n"):
+            if x.startswith("*"):
+                sect = x.split()[0].upper()
+            elif sect == "*NODE" and x.strip() and not x.startswith("$"):
+                newid[int(round(float(x[8:24])))] = int(x[:8])      # 픽스처 절점의 x 좌표 = 옛 번호
+        belt = [x for x in lr.split("\n") if x.startswith("      13")]
+        want = (belt_line[:16] + "%8d%8d" % (newid.get(101, -1), newid.get(102, -1)) + belt_line[32:56] +
+                "%8d%8d" % (newid.get(107, -1), newid.get(108, -1)))
+        check("L-13b ★SEATBELT renumber — N1·N2·N3·N4 가 제자리에서 새 번호 · SBRID·SLEN 글자 그대로",
+              len(belt) == 1 and belt[0] == want and newid.get(108, 108) != 108, (belt[:1], want))
 
         # `*ELEMENT_MASS_NODE_SET` — 칸 1 이 절점이 아니라 **세트** 라 추측하지 않는다
         L2 = list(L)

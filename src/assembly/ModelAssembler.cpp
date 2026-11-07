@@ -3062,14 +3062,45 @@ void ModelAssembler::cleanupDeadNodeRefs(const std::set<int>& deadNodes,
                 }
             }
         }
+        // 보 · 이산 · 안전띠 — 칸 자리는 공용 판정기(`auxElementCard` · `auxCardFields`)가 안다. Card 1 의 절점 칸만 본다
+        // (안전띠 SLEN 이 E16 이라 N3 · N4 는 57-72열이다 — 예전엔 10칸으로 잘라 칸 2-7 을 봐서, 칸이 어긋나면 공백 토큰이
+        // 우연히 맞고 맞아떨어지면 엉뚱한 칸이었으며 SBRID · 보의 릴리즈 칸을 절점으로 셌다 · 2026-11-07). 칸 자리를 모르는 것
+        // (모르는 옵션 · 보의 WARPAGE · ELBOW 카드 절점 · `_ACCELEROMETER` 같은 별개 키워드)은 줄의 정수를 **전부** 본다 —
+        // 넘치게 센다(사람이 볼 줄이 늘 뿐 지운 절점을 무는 줄을 놓치지 않는다).
         if (rsStarts(kw, "*ELEMENT_BEAM") || rsStarts(kw, "*ELEMENT_DISCRETE") ||
             rsStarts(kw, "*ELEMENT_SEATBELT")) {
-            for (size_t m = 0; m < b.data.size(); ++m) {
-                auto f = rsCardFields(rawLines_[b.data[m]]);
+            const AuxElementCard a = auxElementCard(rawLines_[b.kwLine]);
+            const bool exact = a.supported && a.family != AuxFamily::NONE &&
+                               !(a.family == AuxFamily::BEAM && (rsHas(kw, "_WARPAGE") || rsHas(kw, "_ELBOW")));
+            const int afw = keywordFieldWidth(rawLines_[b.kwLine], deckFieldWidth(rawLines_));
+            int cardLeft = 0;                    // 지금 카드의 남은 줄(빈 줄도 카드 안에서는 카드다)
+            for (size_t li = b.kwLine + 1; li < rawLines_.size(); ++li) {
+                const std::string& ln = rawLines_[li];
+                const size_t g = ln.find_first_not_of(" \t");
+                if (g != std::string::npos && ln[g] == '*') break;
+                if (g != std::string::npos && ln[g] == '$') continue;
+                if (g == std::string::npos && cardLeft == 0) continue;
                 bool any = false;
-                for (size_t q = 2; q < f.size() && q < 8; ++q) if (dead(rsIntField(f, q))) any = true;
+                if (exact) {
+                    const bool card1 = (cardLeft == 0);
+                    if (card1) cardLeft = a.lines;
+                    --cardLeft;
+                    if (!card1 || g == std::string::npos) continue;   // 옵션 카드 · 빈 줄 — 절점 칸이 없다
+                    const auto f = auxCardFields(a, ln, afw);
+                    auto scan = [&](int from, int cnt) {
+                        for (int q = 0; from >= 0 && q < cnt; ++q)
+                            if (dead(deckscan::fieldInt(f, static_cast<size_t>(from + q)))) any = true;
+                    };
+                    scan(a.nodeSkip, a.nodeCount);
+                    scan(a.nodeSkip2, a.nodeCount2);
+                } else {
+                    if (g == std::string::npos) continue;
+                    std::vector<int> v;
+                    deckscan::harvestInts(ln, v);
+                    for (int x : v) if (dead(x)) any = true;
+                }
                 if (any)
-                    record("manual", kw, b.data[m],
+                    record("manual", kw, li,
                            "이 요소가 지운 노드를 뭅니다 — 요소를 지울지 노드를 살릴지는 사람이 정해야 합니다");
             }
         }

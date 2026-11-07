@@ -97,9 +97,13 @@ int realFieldWidth(int intFw);
 //                         그 차례로 자르는 것은 `auxCardFields` 뿐이다(2026-11-07 — 정수 폭으로 잘라 PID 를 MASS 에서 읽었다).
 //                       ⚠ `_NODE_SET` 변형은 그 칸이 **절점 세트 ID** 다 — 절점으로 읽으면
 //                         엉뚱한 절점을 지키고 세트 멤버는 놓친다. 그래서 **미지원**으로 둔다.
-//   *ELEMENT_SEATBELT : Card 1 = EID PID N1 N2 SBRID SLEN N3 N4 → 절점이 **두 구간**이다
-//                       (칸 2·3 과 칸 6·7). 사이의 SBRID·SLEN 을 절점으로 읽으면 번호를 다시
-//                       매길 때 그 칸을 **덮어써 카드가 깨진다**.
+//   *ELEMENT_SEATBELT : Card 1 = EID(I8) PID(I8) N1(I8) N2(I8) SBRID(I8) SLEN(F16) N3(I8) N4(I8) → 절점이 **두 구간**이다
+//                       (칸 차례 2·3 과 6·7 — 160311-160353, 10칸 표에 아홉 자리라 SLEN 이 두 칸 41-56열이다).
+//                       ⚠ N3 · N4 는 57-64 · 65-72열이다(8칸으로 자르면 칸 7·8). 예전엔 8칸 칸 6·7(49-64열 — SLEN 의 뒤
+//                         절반과 N3)을 읽어 N4 를 놓쳤다 — cleanup-nodes 가 쓰는 N4 를 지우고 extract-parts 가 빠뜨렸다(2026-11-07).
+//                       사이의 SBRID·SLEN 을 절점으로 읽으면 번호를 다시 매길 때 그 칸을 **덮어써 카드가 깨진다**.
+//                       `_ACCELEROMETER`·`_PRETENSIONER`·`_RETRACTOR`·`_SENSOR`·`_SLIPRING` 은 **별개 키워드**다 — 10칸 폭 표이고
+//                       PID 칸이 없다(160482 · 160602 · 160931 · 161342 · 161725). 미지원 · PID 없음으로 둔다(짐작하지 않는다).
 //   *ELEMENT_PLOTEL   : Card 1 = EID N1 N2 → **PID 칸이 없다**. 'PID 는 칸 1' 로 뭉개면
 //                       N1 을 파트로 읽는다.
 enum class AuxFamily { NONE, BEAM, DISCRETE, MASS, SEATBELT, PLOTEL };
@@ -114,7 +118,7 @@ struct AuxElementCard {
     int  nodeCount2 = 0;
     bool hasPart = true;       // false = PID 칸이 없다(`*ELEMENT_PLOTEL`)
     int  partField = 1;        // PID 가 든 칸 — **칸 차례**(`auxCardFields` 가 나눈 차례). ⚠ `*ELEMENT_MASS` 는 3(EID ID MASS PID)
-    std::vector<int> wideFields;   // Card 1 에서 정수 칸보다 넓은 실수 칸의 차례(`*ELEMENT_MASS` 의 MASS = 2)
+    std::vector<int> wideFields;   // Card 1 에서 정수 칸보다 넓은 실수 칸의 차례(`*ELEMENT_MASS` 의 MASS = 2 · 안전띠 SLEN = 5)
     bool supported = false;    // false 면 이 변형을 추측하지 않는다
     std::string reason;        // supported=false 일 때 댈 이유
 };
@@ -127,8 +131,18 @@ AuxElementCard auxElementCard(const std::string& keywordLine);
 // 고정폭이면 `wideFields` 의 칸은 실수 폭(`realFieldWidth` — 표준·i10 16 · long 20), 나머지는 정수 폭 `fw` 다
 // (Vol_I 19315-19316 long 은 20 이하를 20 으로 · 19353-19354 i10 은 8칸짜리만 10칸으로). 콤마 자유형식과 칸이 어긋난 줄(고정 칸 안에 공백)은
 // `deckscan::cardFields` 와 같이 토큰 차례가 곧 칸 차례다. `wideFields` 가 비면 `deckscan::cardFields(line, fw)` 그대로다.
-// ⚠ 절점 칸은 넓은 칸 **앞**에 있다(질량의 ID 는 칸 1) — 칸 차례 × 폭으로 자리를 잡아 쓰는 쪽(extract-parts 의 번호 다시 매기기)이 맞다.
 std::vector<std::string> auxCardFields(const AuxElementCard& a, const std::string& line, int fw);
+
+// `auxCardFields` 에 더해 칸마다 **줄 안의 자리**(시작 열 · 폭)를 준다. 칸 값을 제자리에서 바꿔 쓰는 쪽(extract-parts 의
+// 번호 다시 매기기)은 이 자리에 쓴다 — 칸 차례 × 폭으로 자리를 잡으면 넓은 칸 뒤의 절점(안전띠 N3 · N4)을 SLEN 위에 쓴다.
+// 고정폭으로 잘린 줄만 자리가 있다 — 넓은 칸을 따른 자르기, 또는 그것이 어긋나고 정수 폭으로 맞아떨어진 줄(그 줄은 정수 폭으로
+// 쓰여 있다). 콤마 자유형식 · 공백 토큰으로 읽은 줄은 `col` 이 비었다 — 제자리에 쓸 열이 없다(쓰는 쪽은 거절한다).
+struct AuxCardCut {
+    std::vector<std::string> f;     // 칸 차례대로(`auxCardFields` 와 같다)
+    std::vector<size_t> col;        // 칸마다 시작 열(0-기반) — 비었으면 자리가 없는 줄
+    std::vector<size_t> width;      // 칸마다 폭
+};
+AuxCardCut auxCardCut(const AuxElementCard& a, const std::string& line, int fw);
 
 // `KFileReader` 가 메시에 담는 요소 키워드인가 — 그 리더의 키워드 분기(`KFileReader::parseFile`)와 **같은 판정**이다
 // (키워드 토큰도 그 리더처럼 `*` 뒤 영숫자 · `_` · `-` 를 대문자로 모은다).

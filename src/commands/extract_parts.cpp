@@ -284,6 +284,10 @@ void scanElements(const std::string& path, const std::vector<int>& sel, const De
             // ⚠ PID 칸을 1 로 **가정하면 안 된다.** 족은 알고 줄 수만 모르는 경우가 있고
             //   (`*ELEMENT_MASS_NODE_SET` 은 PID 가 칸 차례 **3** — 33-40열이다), 1 로 가정하면 그 카드가
             //   '안 고른 파트' 로 분류돼 **조용히 버려진다**(실측으로 회귀 L-14 가 잡았다).
+            //   족은 아는데 **PID 칸이 없다**고 표가 말하면(`*ELEMENT_SEATBELT_ACCELEROMETER` 같은 별개 키워드 · 플롯 요소)
+            //   PID 를 짐작하지 않는다 — 예전엔 칸 1(가속도계의 절점 · 리트랙터의 절점)을 PID 로 읽어, 그 번호가 고른 PID 와
+            //   우연히 같으면 「고른 파트를 담았다」 고 거절했다. 그 카드는 다른 모르는 카드처럼 싣지 않고 `dropped` 에 센다.
+            if (aux.family != KooRemapper::AuxFamily::NONE && !aux.hasPart) { ++pk.opaqueElemOther[kw]; continue; }
             auto f = KooRemapper::auxCardFields(aux, line, fw);
             const int pf = (aux.family != KooRemapper::AuxFamily::NONE && aux.partField >= 0)
                                ? aux.partField : 1;
@@ -362,15 +366,19 @@ struct Remap {
 // 고정폭 칸 하나를 **제자리에서** 갈아 끼운다. 다른 칸의 글자는 손대지 않는다 —
 // 그래서 좌표 실수를 다시 포맷하지 않고(왕복 오차 0) 주석·꼬리 공백도 그대로 간다.
 // 새 값이 칸보다 길면 false 를 돌려준다(번호를 1부터 다시 매기면 일어날 수 없다).
-bool putField(std::string& line, int fw, size_t idx, int value) {
-    const size_t off = idx * (size_t)fw;
-    if (fw <= 0) return false;
+bool putAt(std::string& line, size_t col, size_t width, int value) {
+    if (width == 0 || width > 30) return false;
     char buf[32];
-    int n = std::snprintf(buf, sizeof(buf), "%*d", fw, value);
-    if (n != fw) return false;
-    if (line.size() < off + (size_t)fw) line.resize(off + (size_t)fw, ' ');
-    line.replace(off, (size_t)fw, buf, (size_t)fw);
+    int n = std::snprintf(buf, sizeof(buf), "%*d", (int)width, value);
+    if (n != (int)width) return false;
+    if (line.size() < col + width) line.resize(col + width, ' ');
+    line.replace(col, width, buf, width);
     return true;
+}
+
+bool putField(std::string& line, int fw, size_t idx, int value) {
+    if (fw <= 0) return false;
+    return putAt(line, idx * (size_t)fw, (size_t)fw, value);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -471,6 +479,7 @@ struct Writer {
     int remaining = 0, lineIdx = 0;
     bool picked = false;
     std::vector<std::string> card1;
+    KooRemapper::AuxCardCut auxCut;       // 보 족 Card 1 의 칸 자리(넓은 칸 뒤 절점을 제자리에 쓰려고)
     std::vector<std::string> auxBuf;      // 보 족 카드 한 장(줄 수가 2 이상일 수 있다)
     std::vector<std::string> buf;
     std::vector<size_t> cardIdx;
@@ -712,7 +721,8 @@ struct Writer {
                 if (g != std::string::npos && line[g] == '$') break;
                 if (g == std::string::npos && remaining == 0) break;
                 if (remaining == 0) {
-                    card1 = KooRemapper::auxCardFields(aux, line, fw);
+                    auxCut = KooRemapper::auxCardCut(aux, line, fw);
+                    card1 = auxCut.f;
                     lineIdx = 0;
                     remaining = aux.lines;
                     if (aux.hasPart) {
@@ -735,12 +745,25 @@ struct Writer {
                     // ⚠ 번호를 다시 매길 때 **절점 칸만** 고친다. 보의 RT1·RR1·LOCAL 이나
                     //   안전벨트의 SBRID·SLEN 을 같이 고치면 카드가 깨진다. 요소 ID 는
                     //   건드리지 않는다 — 번호 표는 격자 요소만 담는다(족별로 번호가 따로다).
+                    // ★칸 자리는 자른 그대로(`auxCardCut`)다 — 칸 차례 × 폭으로 잡으면 안전띠 N3 · N4(SLEN 이 E16 이라 57-72열)를
+                    //   SLEN 위에 썼다(2026-11-07). 자리가 없는 줄(자유형식 · 칸이 어긋난 줄)은 제자리에 못 쓴다 — 거절한다.
                     if (rm.on && lineIdx == 0) {
                         auto put = [&](int from, int cnt) {
                             if (from < 0) return;
                             for (int q = 0; q < cnt; ++q) {
-                                const int v = fieldInt(card1, (size_t)(from + q));
-                                if (v > 0) putField(o2, fw, (size_t)(from + q), rm.node(v));
+                                const size_t k = (size_t)(from + q);
+                                const int v = fieldInt(card1, k);
+                                if (v <= 0) continue;
+                                if (k >= auxCut.col.size()) {
+                                    console.error("renumber: " + kw + " 줄 「" + line + "」 은 칸 자리가 없다(자유형식 · 칸이 "
+                                                  "어긋난 줄) — 절점 번호를 제자리에 못 바꾼다. renumber: false 로 돌려라");
+                                    failed = true;
+                                    continue;
+                                }
+                                if (!putAt(o2, auxCut.col[k], auxCut.width[k], rm.node(v))) {
+                                    console.error("renumber: 새 절점 번호가 칸 폭을 넘는다");
+                                    failed = true;
+                                }
                             }
                         };
                         put(aux.nodeSkip, aux.nodeCount);
@@ -1264,7 +1287,8 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
         wr.out = &w.stream();
         wr.processFile(o.model, 0);
         w.close();
-        if (wr.failed) return 1;
+        // 쓰다 멈춘 덱(번호를 다 못 바꾼 줄이 남는다)을 디스크에 남기지 않는다 — 그럴듯하게 읽히는 틀린 덱이다
+        if (wr.failed) { std::remove(o.output.c_str()); return 1; }
         if (!wr.missingIncludes.empty()) {
             for (const auto& m : wr.missingIncludes)
                 console.error("*INCLUDE 를 열 수 없다: " + m);

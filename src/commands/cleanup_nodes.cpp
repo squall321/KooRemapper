@@ -282,7 +282,9 @@ void scanRefsStream(std::istream& in, bool isMain, const Opts& o,
                 //   번호 절점이 영구히 남는다).
                 if (auxRemaining == 0) { auxLineIdx = 0; auxRemaining = aux.lines; }
                 if (auxLineIdx == 0) {
-                    auto f = cardFields(line, fw);
+                    // 칸은 공용 판정기가 자른다 — 안전띠 SLEN 은 E16 이라 N3 · N4 가 57-72열이다(정수 폭으로 자르면 N4 를 놓쳐
+                    // safe 가 쓰는 절점을 지웠다 · 2026-11-07). 되읽기 검증(verifyDeck)도 이 걸음을 쓴다.
+                    auto f = KooRemapper::auxCardFields(aux, line, fw);
                     auto take = [&](int from, int cnt) {
                         if (from < 0) return;
                         for (int q = 0; q < cnt; ++q) {

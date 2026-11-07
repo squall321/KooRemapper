@@ -5312,20 +5312,28 @@ several (even tens of) cards per set" 이라고 적는다. 그 규칙을 틀리�
 `*ELEMENT_BEAM`·`DISCRETE`·`MASS`·`SEATBELT`·`PLOTEL` 의 칸 배치를
 `include/parser/ElementCardLayout.h` 의 `auxElementCard` 에 매뉴얼 근거로 넣었다.
 
-| 족 | Card 1 변수 | 절점 칸 | PID 칸 | 추가 카드 |
-|---|---|---|---|---|
-| `BEAM` | `EID PID N1 N2 N3 RT1 RR1 RT2 RR2 LOCAL` | 2·3·4 | 1 | 옵션마다 1장 |
-| `DISCRETE` | `EID PID N1 N2 VID S PF OFFSET` | 2·3 | 1 | `_LCO` 면 1장 |
-| `MASS` | `EID ID MASS PID` | **1** | **3** | 없음 |
-| `SEATBELT` | `EID PID N1 N2 SBRID SLEN N3 N4` | 2·3 **와** 6·7 | 1 | 없음 |
-| `PLOTEL` | `EID N1 N2` | 1·2 | **없음** | 없음 |
+| 족 | Card 1 변수 | 절점 칸 | PID 칸 | 넓은 칸(E16) | 추가 카드 |
+|---|---|---|---|---|---|
+| `BEAM` | `EID PID N1 N2 N3 RT1 RR1 RT2 RR2 LOCAL` | 2·3·4 | 1 | 없음 | 옵션마다 1장 |
+| `DISCRETE` | `EID PID N1 N2 VID S PF OFFSET` | 2·3 | 1 | `S` · `OFFSET`(절점 · PID 뒤라 판정기가 읽지 않는다) | `_LCO` 면 1장 |
+| `MASS` | `EID ID MASS PID` | **1** | **3** (33-40열) | `MASS` 17-32열 | 없음 |
+| `SEATBELT` | `EID PID N1 N2 SBRID SLEN N3 N4` | 2·3 **와** 6·7 (N3 57-64 · N4 65-72열) | 1 | `SLEN` 41-56열 | 없음 |
+| `PLOTEL` | `EID N1 N2` | 1·2 | **없음** | 없음 | 없음 |
+
+★칸 번호는 **칸 차례**다 — 열 자리가 아니다(2026-11-07). `MASS` 의 MASS 와 안전띠의 `SLEN` 은 실수 칸이라
+정수 칸의 **두 배 폭**(표준 · i10 은 16, long 은 20)이다. 그래서 8칸으로 자르면 질량의 PID 는 칸 4, 안전띠의 N3 · N4 는
+칸 7·8 이다. 예전 판정은 정수 폭으로 잘라 질량의 PID 를 질량값의 뒤 절반에서 읽었고, 안전띠의 N4 를 놓쳐
+`cleanup-nodes` 가 쓰는 절점을 지웠다. 이제 칸은 `auxCardFields` · `auxCardCut`(열 자리까지)이 자르고 모든 소비자가
+그것을 쓴다 — `cleanup-nodes` · `extract-parts`(고르기 · 번호 다시 매기기 · 되읽기) · 이월 적용 · 번호 바닥 · restack 의
+지운 절점 보고. 번호를 다시 매길 때는 그 **열 자리**에 쓰고, 열 자리가 없는 줄(콤마 자유형식 · 칸이 어긋난 줄)은 거절한다.
 
 ★절점 칸 **개수**까지 적는 이유 — '칸 2부터 끝까지' 로 뭉개면 보의 `RT1`·`RR1`·`LOCAL` 과
 안전벨트의 `SBRID`·`SLEN` 이 절점이 된다. 세기만 하면 과포함(안전한 방향)이지만, **번호를
 다시 매길 때는 그 칸을 덮어써 카드가 깨진다.** 회귀 L-3·L-4·L-12 가 그 셋을 각각 지킨다.
 
 ★`*ELEMENT_SEATBELT_*`(ACCELEROMETER·PRETENSIONER·RETRACTOR·SENSOR·SLIPRING)는 옵션이 아니라
-**다른 키워드**다 — 칸 배치가 통째로 다르므로 추측하지 않고 미지원으로 둔다.
+**다른 키워드**다 — 10칸 폭 표이고 PID 칸이 없다. 추측하지 않고 미지원 · **PID 없음**으로 둔다(`extract-parts` 는 그 카드를
+싣지 않고 `dropped_keywords` 에 센다 — 예전엔 칸 1 을 PID 로 짐작해 「고른 파트를 담았다」 고 거절할 수 있었다).
 `*ELEMENT_MASS_NODE_SET` 도 미지원이다: 칸 1 이 절점이 아니라 **절점 세트 ID** 라서, 절점으로
 읽으면 엉뚱한 절점을 지키고 세트 멤버는 놓친다.
 
