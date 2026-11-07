@@ -479,6 +479,8 @@ private:
     // fw = 그 줄이 들어갈 섹션의 정수 칸 폭(8 / 10 / 20). 덱이 i10 인데 8 칸으로 쓰면
     // LS-DYNA 가 새 노드·새 요소를 통째로 다르게 읽는다(Vol_I 19342-19360).
     std::string formatNodeLine(int id, double x, double y, double z, int fw) const;
+    // 옮긴 절점을 다시 쓸 때 붙일 TC · RC 칸 — 리더가 그 줄에서 읽어 둔 값을 섹션 칸 폭으로(둘 다 0 이면 빈 문자열, 11-07).
+    std::string nodeConstraintTail(int nodeId, int fw) const;
     std::string formatElementLine(const AddedElement& elem, int fw) const;
     std::string formatShellElementLine(const AddedShellElement& elem, int fw) const;
     bool isKeywordLine(const std::string& line) const;

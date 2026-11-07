@@ -5502,9 +5502,11 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                     continue;  // Skip removed node
                 }
                 if (modifiedNodePositions_.count(nodeId) > 0) {
-                    // Write modified position
+                    // 좌표만 새로 쓰고 줄의 나머지(TC · RC 칸)는 그대로 붙인다 — 예전엔 번호와 x · y · z 만 다시 써서
+                    // 옮긴 절점의 구속 칸이 조용히 사라졌다(applyfold · update · 평행이동, 2026-11-07 발견).
                     const auto& pos = modifiedNodePositions_[nodeId];
-                    output << formatNodeLine(nodeId, pos.x, pos.y, pos.z, curSecFw) << "\n";
+                    output << formatNodeLine(nodeId, pos.x, pos.y, pos.z, curSecFw)
+                           << nodeConstraintTail(nodeId, curSecFw) << "\n";
                     continue;
                 }
             }
@@ -6245,6 +6247,16 @@ std::string ModelAssembler::formatNodeLine(int id, double x, double y, double z,
         << std::setw(rw) << std::scientific << std::setprecision(9) << x
         << std::setw(rw) << std::scientific << std::setprecision(9) << y
         << std::setw(rw) << std::scientific << std::setprecision(9) << z;
+    return oss.str();
+}
+
+std::string ModelAssembler::nodeConstraintTail(int nodeId, int fw) const {
+    // 줄을 다시 자르지 않는다 — 리더(KFileReader)가 그 줄을 「자유형식 우선 · 안 되면 섹션 칸 폭」 으로 읽어 TC · RC 를 절점에
+    // 담아 두었다. 같은 해석을 두 번 짜면 갈린다(번호를 10칸에 적은 표준 폭 덱에서 열 위치로 자르면 z 의 끝을 TC 로 읽었다).
+    const Node* n = baseMesh_.getNode(nodeId);
+    if (n == nullptr || (n->tc == 0 && n->rc == 0)) return std::string();
+    std::ostringstream oss;
+    oss << std::setw(fw) << n->tc << std::setw(fw) << n->rc;
     return oss.str();
 }
 
