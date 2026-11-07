@@ -208,6 +208,7 @@ int runLoad(const std::string& yamlFile, ConsoleOutput& console) {
     console.println("[load] Load cases: " + std::to_string(loadOp.loads.size()));
 
     ModelAssembler assembler;
+    assembler.noteInput(yamlFile, "설정 YAML");   // 쓰기 관문이 output 과 견준다(2026-11-07)
     assembler.setFlattenIncludes(flattenIncludes);
     if (!assembler.loadBaseModel(modelFile)) {
         console.error(assembler.getErrorMessage());
@@ -349,7 +350,13 @@ int runBoundary(const std::string& yamlFile, ConsoleOutput& console) {
     f.close();
 
     if (modelFile.empty()) { console.error("model not specified"); return 1; }
-    if (outputFile.empty()) outputFile = modelFile;
+    // ★output 이 비면 예전엔 model 경로를 그대로 출력 이름으로 써 입력 모델을 그 자리에서 덮어썼다(rc 0 · 문서에 없다) — 다른 단독
+    //   op(`rejectEmptyOutput`)과 같이 거절한다(2026-11-07 · 쓰기 관문)
+    if (outputFile.empty()) {
+        console.error("[boundary] output 이 비어 있습니다 — 입력 모델을 덮어쓰게 되므로 output 을 지정하세요 / "
+                      "output not specified; it would overwrite the input model.");
+        return 1;
+    }
 
     // Resolve paths — YAML 폴더 기준(절대 경로는 그대로)
     modelFile  = KooRemapper::yamlResolvePath(configDir, modelFile);
@@ -364,6 +371,7 @@ int runBoundary(const std::string& yamlFile, ConsoleOutput& console) {
     console.println("[boundary] Boundary cases: " + std::to_string(boundaryOp.boundaries.size()));
 
     ModelAssembler assembler;
+    assembler.noteInput(yamlFile, "설정 YAML");   // 쓰기 관문이 output 과 견준다(2026-11-07)
     assembler.setFlattenIncludes(flattenIncludes);
     if (!assembler.loadBaseModel(modelFile)) {
         console.error(assembler.getErrorMessage());
@@ -500,7 +508,13 @@ int runRbe(const std::string& yamlFile, ConsoleOutput& console) {
     f.close();
 
     if (modelFile.empty()) { console.error("model not specified"); return 1; }
-    if (outputFile.empty()) outputFile = modelFile;
+    // ★output 이 비면 예전엔 model 경로를 그대로 출력 이름으로 써 입력 모델을 그 자리에서 덮어썼다(rc 0 · 문서에 없다) — 다른 단독
+    //   op(`rejectEmptyOutput`)과 같이 거절한다(2026-11-07 · 쓰기 관문)
+    if (outputFile.empty()) {
+        console.error("[rbe] output 이 비어 있습니다 — 입력 모델을 덮어쓰게 되므로 output 을 지정하세요 / "
+                      "output not specified; it would overwrite the input model.");
+        return 1;
+    }
 
     // Resolve paths — YAML 폴더 기준(절대 경로는 그대로)
     modelFile  = KooRemapper::yamlResolvePath(configDir, modelFile);
@@ -515,6 +529,7 @@ int runRbe(const std::string& yamlFile, ConsoleOutput& console) {
     console.println("[rbe] Constraints: " + std::to_string(rbeOp.constraints.size()));
 
     ModelAssembler assembler;
+    assembler.noteInput(yamlFile, "설정 YAML");   // 쓰기 관문이 output 과 견준다(2026-11-07)
     assembler.setFlattenIncludes(flattenIncludes);
     if (!assembler.loadBaseModel(modelFile)) {
         console.error(assembler.getErrorMessage());

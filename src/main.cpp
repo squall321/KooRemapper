@@ -83,9 +83,11 @@
 #include "commands/stackdiagram.h"
 #include "commands/cleanup_nodes.h"
 #include "commands/extract_parts.h"
+#include "parser/OutputGuard.h"
 
 #include <iostream>
 #include <fstream>
+#include <filesystem>
 #include <cctype>
 #include <cstdio>
 #include <system_error>
@@ -1595,6 +1597,18 @@ static int runMain(int argc, char* argv[]) {
         }
     }
 
+    // ★명령줄의 설정 YAML 을 「이 실행이 읽는 파일」로 적어 둔다(2026-11-07) — 모든 op 의 쓰기 관문(`output_guard`)이 쓸 파일을
+    //   이것과도 견준다. output 이 설정 파일이면 쓰기가 설정을 지운다(다시 돌릴 수도 없다). 산출을 명령줄의 .yaml 로 받는 op 은 없다
+    for (int i = 2; i < argc; ++i) {
+        std::string a = argv[i];
+        std::string low = a;
+        for (auto& c : low) c = (char)std::tolower((unsigned char)c);
+        const bool yamlName = (low.size() > 5 && low.compare(low.size() - 5, 5, ".yaml") == 0) ||
+                              (low.size() > 4 && low.compare(low.size() - 4, 4, ".yml") == 0);
+        std::error_code ec;
+        if (yamlName && std::filesystem::is_regular_file(a, ec)) KooRemapper::output_guard::noteConfig(a);
+    }
+
     // Map command
     // @lat: [[commands/map]]
     if (command == "map") {
@@ -1875,6 +1889,28 @@ static int runMain(int argc, char* argv[]) {
             outputPath = positionalArgs[2];
         }
 
+        // ★쓰기 관문(2026-11-07 · output_guard) — 무엇이든 쓰기 전에, 이 실행이 쓸 파일 전부(산출 · 임시 평판 · 고리 prestress 의
+        //   dynain · 메시 사본 · CSV)를 읽는 파일(bent · flat 과 그 인클루드 · 설정)과 견준다. 예전엔 prestress.output 이 flat 이면
+        //   메시 사본이 기준 메시를 덮었고, output 이 flat 이면 고리가 덮인 flat 을 기준으로 0 응력을 rc 0 으로 냈다
+        std::vector<KooRemapper::output_guard::Input> mapReads = KooRemapper::output_guard::modelInputs(bentPath, "bent");
+        for (auto& r : KooRemapper::output_guard::modelInputs(flatPath, "flat")) mapReads.push_back(std::move(r));
+        {
+            std::vector<std::string> writes{outputPath};
+            if (flipInX || flipInY || flipInZ) writes.push_back(outputPath + ".__preproc_flat.k");
+            const bool chain = yamlMode && pre_enabled && !pre_output.empty();
+            if (chain) {
+                if (flipX || flipY || flipZ) writes.push_back(outputPath + ".__flipped_ref.k");
+                // 재료가 있을 때의 이름(보통) — 메시 사본이 map 산출 그 자리인 것은 문서의 쓰임이다(foo.k + foo.dynain).
+                // 재료가 없을 때 CSV 가 쓸 prestress.output 은 읽는 파일과만 견주고, 정확한 판정은 runPrestress 가 다시 한다
+                const PrestressOutputs po = prestressOutputs(pre_output, true);
+                writes.push_back(po.dynain);
+                if (!KooRemapper::include_closure::sameFile(po.mesh, outputPath)) writes.push_back(po.mesh);
+                if (pre_csv) writes.push_back(po.csv);
+            }
+            if (KooRemapper::output_guard::refuse("map", writes, mapReads, console)) return 1;
+            if (chain && KooRemapper::output_guard::refuse("map", {pre_output}, mapReads, console)) return 1;
+        }
+
         printBanner(console);
         std::string scaledFlatPath;  // populated by runMapping when flat is preprocessed
         int mapRc = runMapping(bentPath, flatPath, outputPath,
@@ -1940,7 +1976,7 @@ static int runMain(int argc, char* argv[]) {
             console.info("Deformed (mapped): " + outputPath);
             console.info("Output: " + pre_output);
             int prc = runPrestress(refFileForPrestress, outputPath, pre_output,
-                                    pre_E, pre_nu, strainType, pre_csv, console);
+                                    pre_E, pre_nu, strainType, pre_csv, console, &mapReads);
 
             // Clean up temp ref(s) regardless of prestress success.
             if (!tempRefPath.empty()) std::remove(tempRefPath.c_str());

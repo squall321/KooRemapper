@@ -190,6 +190,8 @@ bool remapFragment(const std::vector<std::string>& in, const Shift& sh, int fw, 
 
 bool ModelAssembler::applyCadSolidMerge(const CadSolidMergeOperation& op) {
     const std::string tag = "[cad_solid_merge_to_deck] ";
+    noteInput(op.fragmentMap, "fragment_map");   // 쓰기 관문이 산출과 견준다(2026-11-07)
+    noteInput(op.fragment, "fragment");
     // ① 대응표 — 칸 집합 그대로
     std::string mapText;
     {

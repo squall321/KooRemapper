@@ -1,4 +1,5 @@
 #include "database.h"
+#include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 #include "parser/DeckWriter.h"
 #include "util/YamlComment.h"
 #include "cli/ConsoleOutput.h"
@@ -265,6 +266,8 @@ int runDatabase(const std::string& yamlFile, ConsoleOutput& console) {
         console.error("model and output are required");
         return 1;
     }
+    // ★쓰기 관문(2026-11-07 · output_guard) — 쓸 파일이 설정 · 모델 · 그 인클루드와 같은 파일이면 열기 전에 거절한다
+    if (KooRemapper::output_guard::refuse("database", {outputPath}, KooRemapper::output_guard::configAndModel(yamlFile, modelPath), console)) return 1;
 
     if (!hasIndividual && !preset.empty()) {
         auto presets = db_getPresets();

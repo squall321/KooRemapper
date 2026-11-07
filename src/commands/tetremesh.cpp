@@ -1,4 +1,5 @@
 #include "parser/DeckNewline.h"
+#include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 #include "parser/IncludeScan.h"   // scanFile — 흘려 읽어 인클루드가 있나만 본다
 #include "parser/IncludeClosure.h"   // FlatDeck — flatten_includes(2026-10-17)
 #include "parser/IdAllocator.h"   // 인클루드 닫힘 · 못 본 자리 경고
@@ -236,6 +237,11 @@ int runTetRemesh(const std::string& configPath,
         cfg.model  = KooRemapper::yamlResolvePath(configDir, cfg.model);
         cfg.output = KooRemapper::yamlResolvePath(configDir, cfg.output);
     }
+    // ★쓰기 관문(2026-11-07 · output_guard) — 산출이 설정 · 모델 · 그 인클루드와 같은 파일이면 읽기 · 쓰기 전에 거절한다.
+    //   이 op 은 *NODE · *ELEMENT 만 다시 쓰므로 output == model 이면 재질 · 접촉 · *INCLUDE 가 다 사라졌다
+    if (!cfg.reportOnly &&
+        KooRemapper::output_guard::refuse("tetremesh", {cfg.output}, KooRemapper::output_guard::configAndModel(configPath, cfg.model), console))
+        return 1;
 
     Timer timer;
 

@@ -623,6 +623,12 @@ int runShellMapping(const std::string& bentShellFile, const std::string& flatFil
                     const std::string& outputFile, double thickness,
                     const ConsoleOutput& console) {
     Timer timer;
+    // ★쓰기 관문(2026-11-07 · output_guard) — 산출이 읽는 메시(그 인클루드까지)와 같은 파일이면 읽기 · 쓰기 전에 거절한다
+    {
+        auto reads = KooRemapper::output_guard::modelInputs(bentShellFile, "bent_shell");
+        for (auto& r : KooRemapper::output_guard::modelInputs(flatFile, "flat_detail")) reads.push_back(std::move(r));
+        if (KooRemapper::output_guard::refuse("shellmap", {outputFile}, reads, console)) return 1;
+    }
 
     // Load bent shell mesh
     console.info("Loading bent shell mesh: " + bentShellFile);
@@ -902,6 +908,12 @@ int runStrain(const std::string& refFile, const std::string& defFile,
               const std::string& outputFile, const std::string& strainType,
               const ConsoleOutput& console) {
     Timer timer;
+    // ★쓰기 관문(2026-11-07 · output_guard) — 산출이 읽는 메시(그 인클루드까지)와 같은 파일이면 읽기 · 쓰기 전에 거절한다
+    {
+        auto reads = KooRemapper::output_guard::modelInputs(refFile, "기준 메시");
+        for (auto& r : KooRemapper::output_guard::modelInputs(defFile, "변형 메시")) reads.push_back(std::move(r));
+        if (KooRemapper::output_guard::refuse("strain", {outputFile}, reads, console)) return 1;
+    }
 
     // Load reference mesh
     console.info("Loading reference mesh: " + refFile);
@@ -982,6 +994,8 @@ int runStrain(const std::string& refFile, const std::string& defFile,
 int runUnfold(const std::string& bentFile, const std::string& outputFile,
               const ConsoleOutput& console) {
     Timer timer;
+    // ★쓰기 관문(2026-11-07 · output_guard) — 산출이 읽는 메시(그 인클루드까지)와 같은 파일이면 읽기 · 쓰기 전에 거절한다
+    if (KooRemapper::output_guard::refuse("unfold", {outputFile}, KooRemapper::output_guard::modelInputs(bentFile, "bent"), console)) return 1;
 
     // Load bent mesh
     console.info("Loading bent mesh: " + bentFile);
@@ -1053,6 +1067,35 @@ int runUnfold(const std::string& bentFile, const std::string& outputFile,
     return 0;
 }
 
+// prestress 가 쓸 파일 이름(헤더 주석) — 쓰기 관문과 아래 쓰기가 같은 규칙을 쓰도록 한 곳에 둔다(2026-11-07)
+PrestressOutputs prestressOutputs(const std::string& outputFile, bool hasMaterial) {
+    PrestressOutputs o;
+    // output 이 .k 로 끝나면 아래 변형 메시 사본(<stem>.k)과 같은 파일이 된다 — 사본이 dynain 을 덮어쓰고
+    // 자기 자신을 *INCLUDE 했다. 이때 dynain 은 <stem>.dynain 으로 쓴다.
+    o.dynain = outputFile;
+    if (o.dynain.size() >= 2 && o.dynain.substr(o.dynain.size() - 2) == ".k")
+        o.dynain = o.dynain.substr(0, o.dynain.size() - 2) + ".dynain";
+    // Output filename: same as dynain but with .k extension
+    o.mesh = outputFile;
+    size_t dotPos = o.mesh.rfind('.');
+    if (dotPos != std::string::npos) {
+        o.mesh = o.mesh.substr(0, dotPos) + ".k";
+    } else {
+        o.mesh += ".k";
+    }
+    o.csv = outputFile;
+    if (hasMaterial) {
+        // Change extension to .csv
+        size_t csvDot = o.csv.rfind('.');
+        if (csvDot != std::string::npos) {
+            o.csv = o.csv.substr(0, csvDot) + ".csv";
+        } else {
+            o.csv += ".csv";
+        }
+    }
+    return o;
+}
+
 /**
  * Calculate prestress from deformed configuration
  */
@@ -1061,7 +1104,8 @@ int runPrestress(const std::string& refFile, const std::string& defFile,
                  double E, double nu,
                  StrainType strainType,
                  bool outputCSV,
-                 const ConsoleOutput& console) {
+                 const ConsoleOutput& console,
+                 const std::vector<KooRemapper::output_guard::Input>* chainReads) {
     Timer timer;
 
     // Load reference mesh
@@ -1173,6 +1217,26 @@ int runPrestress(const std::string& refFile, const std::string& defFile,
     bool hasCmdLineMaterial = (E > 0 && nu > 0 && nu < 0.5);
     bool hasKFileMaterial = (refMesh.getMaterialCount() > 0);
     bool hasMaterial = hasCmdLineMaterial || hasKFileMaterial;
+
+    // ★쓰기 관문(2026-11-07 · 헤더 주석) — 계산 · 쓰기 전에. dynain 은 변형 메시를 다시 읽기 **전에** 쓰므로 예전엔
+    //   `prestress ref def.key def.key` 가 변형 메시를 덮고 그것을 다시 읽었다. 쓰는 이름은 아래 쓰기와 같은 `prestressOutputs`
+    const PrestressOutputs names = prestressOutputs(outputFile, hasMaterial);
+    {
+        auto reads = KooRemapper::output_guard::modelInputs(refFile, "기준 메시");
+        if (chainReads) {
+            reads.push_back({defFile, "map 의 산출(변형 메시)"});
+            reads.insert(reads.end(), chainReads->begin(), chainReads->end());
+        } else {
+            for (auto& r : KooRemapper::output_guard::modelInputs(defFile, "변형 메시")) reads.push_back(std::move(r));
+        }
+        std::vector<std::string> writes;
+        if (hasMaterial) {
+            writes.push_back(names.dynain);
+            if (!(chainReads && KooRemapper::include_closure::sameFile(names.mesh, defFile))) writes.push_back(names.mesh);
+        }
+        if (outputCSV || !hasMaterial) writes.push_back(names.csv);
+        if (KooRemapper::output_guard::refuse("prestress", writes, reads, console)) return 1;
+    }
     
     if (hasCmdLineMaterial) {
         // Command line material overrides K-file materials completely
@@ -1243,11 +1307,8 @@ int runPrestress(const std::string& refFile, const std::string& defFile,
     writer.setLargeDeformation(strainType == StrainType::GREEN_LAGRANGE);
 
     if (hasMaterial) {
-        // output 이 .k 로 끝나면 아래 변형 메시 사본(<stem>.k)과 같은 파일이 된다 — 사본이 dynain 을 덮어쓰고
-        // 자기 자신을 *INCLUDE 했다. 이때 dynain 은 <stem>.dynain 으로 쓴다.
-        std::string dynainFile = outputFile;
-        if (dynainFile.size() >= 2 && dynainFile.substr(dynainFile.size() - 2) == ".k")
-            dynainFile = dynainFile.substr(0, dynainFile.size() - 2) + ".dynain";
+        // 이름 규칙은 `prestressOutputs` 하나다(쓰기 관문이 같은 이름으로 견줬다)
+        const std::string& dynainFile = names.dynain;
         console.info("Writing dynain file: " + dynainFile);
         if (!writer.writeFile(dynainFile, results, strainType, refFile, defFile)) {
             console.error("Failed to write dynain: " + writer.getErrorMessage());
@@ -1257,14 +1318,7 @@ int runPrestress(const std::string& refFile, const std::string& defFile,
 
         // Create a copy of deformed mesh with *INCLUDE for dynain
         // The dynain contains stress-only data, meant to be used with deformed mesh
-        // Output filename: same as dynain but with .k extension
-        std::string meshOutputFile = outputFile;
-        size_t dotPos = meshOutputFile.rfind('.');
-        if (dotPos != std::string::npos) {
-            meshOutputFile = meshOutputFile.substr(0, dotPos) + ".k";
-        } else {
-            meshOutputFile += ".k";
-        }
+        const std::string& meshOutputFile = names.mesh;
 
         // Get just the dynain filename (not full path) for *INCLUDE
         std::string dynainFilename = dynainFile;
@@ -1346,16 +1400,7 @@ int runPrestress(const std::string& refFile, const std::string& defFile,
 
     // Write CSV if requested or if no material
     if (outputCSV || !hasMaterial) {
-        std::string csvFile = outputFile;
-        if (hasMaterial) {
-            // Change extension to .csv
-            size_t dotPos = csvFile.rfind('.');
-            if (dotPos != std::string::npos) {
-                csvFile = csvFile.substr(0, dotPos) + ".csv";
-            } else {
-                csvFile += ".csv";
-            }
-        }
+        const std::string& csvFile = names.csv;
 
         console.info("Writing CSV file: " + csvFile);
         if (!writer.writeStrainCSV(csvFile, results)) {
@@ -1852,6 +1897,8 @@ int runGenerateBox(const std::string& yamlFile, ConsoleOutput& console) {
     // Ensure .k extension
     if (outputPath.size() < 2 || outputPath.substr(outputPath.size() - 2) != ".k")
         outputPath += ".k";
+    // ★쓰기 관문(2026-11-07 · output_guard) — 산출이 설정 파일이면 쓰기 전에 거절한다
+    if (KooRemapper::output_guard::refuse("generate", {outputPath}, {{yamlFile, "설정 YAML"}}, console)) return 1;
 
     int npx = nx + 1, npy = ny + 1, npz = nz + 1;
     int nodeCount = npx * npy * npz;
@@ -1958,6 +2005,13 @@ int runGenerateVar(const std::string& configFile, const std::string& outputFile,
     } catch (const std::exception& e) {
         console.error("Failed to read config: " + std::string(e.what()));
         return 1;
+    }
+    // ★쓰기 관문(2026-11-07 · output_guard) — 산출이 설정 · 기준 메시(그 인클루드까지)와 같은 파일이면 쓰기 전에 거절한다
+    {
+        std::vector<KooRemapper::output_guard::Input> reads{{configFile, "설정 YAML"}};
+        const std::string ref = !refFile.empty() ? refFile : extConfig.reference.flatMeshFile;
+        if (!noScale) for (auto& r : KooRemapper::output_guard::modelInputs(ref, "reference")) reads.push_back(std::move(r));
+        if (KooRemapper::output_guard::refuse("generate-var", {outputFile}, reads, console)) return 1;
     }
     
     // Determine reference dimensions

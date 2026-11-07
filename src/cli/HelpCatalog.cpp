@@ -111,6 +111,9 @@ void printOverview(std::ostream& os, const std::string& version) {
     os << "  - 덱을 고쳐 쓰는 op 은 주 덱만 고친다. 대상(파트·재질·CNRB·지울 카드)이 *INCLUDE 안에만 있으면 종료 코드 1 로\n";
     os << "    멈추고, `flatten_includes: true` 를 주면 닫힘을 펼쳐 *INCLUDE 없는 한 덱으로 고친다(2026-10-17 —\n";
     os << "    못 읽는 인클루드 · 순환 · 폭을 바꾸는 *INCLUDE ± 는 펼치지 않고 까닭을 말한다)\n";
+    os << "  - 쓸 파일(output · report · .dynain · IGA · 대응표 같은 곁 파일)이 읽는 파일(설정 YAML · 모델 · 그 *INCLUDE 닫힘 ·\n";
+    os << "    dynain/bundle/dat/entities 같은 다른 입력)과 같은 파일이면 — 철자(./ · ../ · 절대 경로) · 심볼릭 링크 · 하드 링크가\n";
+    os << "    달라도 — 아무것도 쓰지 않고 [ERROR] + 종료 코드 1 (2026-11-07). in-place 는 assemble 만(output == base_model)\n";
     os << "  - restack·merge 는 비운 PID 를 가리키던 자리를 옮기고, 못 옮기면 rc=1 (pid_refs: warn 으로 끌 수 있다)\n";
     os << "  - 실패하면 [ERROR] 줄을 찍고 종료 코드 1\n";
     os << "  - SIF 안 경로: /opt/kooremapper/bin/KooRemapper, 번들 재질 DB /opt/kooremapper/materials/material_db.json\n";

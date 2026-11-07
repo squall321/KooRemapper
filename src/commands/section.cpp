@@ -8,6 +8,7 @@
 //   모서리 기반은 그것을 피해 가지만, **육면체 12 모서리 표를 그대로 쓰면 안 된다** — 그 표를
 //   TET4 저장에 적용하면 모서리 `(n0,n2)` 가 빠진다(실측). 그래서 종류별 모서리 표를 둔다.
 #include "section.h"
+#include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 
 #include "cli/ConsoleOutput.h"
 #include "core/Mesh.h"
@@ -588,6 +589,15 @@ int runSection(const std::string& yamlFile, ConsoleOutput& console) {
                       "여백 70x2 + 범례 260 + 그림 자리가 들어가야 한다. "
                       "(받은 값: " + std::to_string(c.width) + "x" + std::to_string(c.height) + ")");
         return 1;
+    }
+
+    // ★쓰기 관문(2026-11-07 · output_guard) — JSON · SVG 가 설정 · 모델 · compare(그 인클루드까지)와 같은 파일이면 읽기 · 쓰기 전에 거절한다
+    {
+        auto reads = KooRemapper::output_guard::configAndModel(yamlFile, c.model);
+        if (!c.compare.empty()) for (auto& r : KooRemapper::output_guard::modelInputs(c.compare, "compare")) reads.push_back(std::move(r));
+        std::vector<std::string> writes{c.output + "_section.json"};
+        if (c.svg) writes.push_back(c.output + "_section.svg");
+        if (KooRemapper::output_guard::refuse("section", writes, reads, console)) return 1;
     }
 
     // ── 덱을 자른다. compare 를 주면 둘. overlay 는 **같은 평면**으로 자른다(그것이 겹침의 뜻이다) ──

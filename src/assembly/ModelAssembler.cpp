@@ -309,6 +309,7 @@ bool ModelAssembler::loadBaseModel(const std::string& filename) {
     // ⚠ rc 를 건드리지 않는다. 하류(플랫폼 워커·pyKooCAE REMAP 스텝)가 rc≠0 이면 체인을 멈춘다.
     readIncludeClosure();
     raiseMaxIdsOverIncludes();
+    noteModelInputs(filename, flat.active());
 
     return true;
 }
@@ -388,6 +389,25 @@ bool ModelAssembler::materialsReachable(const std::vector<int>& mids, const std:
     return true;
 }
 
+// ★쓰기 관문이 볼 읽은 파일(헤더의 `noteInput` 주석) — 모델과 그 인클루드 닫힘. 펼쳤으면 rawLines_ 에 `*INCLUDE` 가 없어
+//   incl_ 이 비므로 원본 닫힘을 다시 읽는다(펼친 산출이 인클루드 파일을 덮으면 원래 덱이 깨진다).
+void ModelAssembler::noteModelInputs(const std::string& filename, bool flattened) {
+    if (flattened) {
+        for (auto& in : output_guard::modelInputs(filename)) guardInputs_.push_back(std::move(in));
+        return;
+    }
+    guardInputs_.push_back({filename, "model"});
+    for (const auto& f : incl_.files) guardInputs_.push_back({f.path, "model 의 인클루드"});
+}
+
+void ModelAssembler::noteInput(const std::string& path, const std::string& role) {
+    if (!path.empty()) guardInputs_.push_back({path, role});
+}
+
+void ModelAssembler::planWrite(const std::string& path) {
+    if (!path.empty()) plannedWrites_.push_back(path);
+}
+
 // 주 덱의 인클루드 닫힘을 읽는다 — 정본(`include_closure`)으로, 주 덱 폴더 기준.
 // 못 본 자리(찾지 못한 이름 · 따라가지 않은 `*INCLUDE_*` · 깊이 상한)는 **여기서 한 번** 말한다.
 // 발급은 op 마다 일어나지만 경고를 거기 두면 한 실행에 여러 번 찍힌다(사람이 센다).
@@ -459,6 +479,7 @@ bool ModelAssembler::loadRawOnly(const std::string& filename) {
     }
     file.close();
     readIncludeClosure();   // 지역 커서(matdb 의 MID)가 인클루드까지 센다 — 멤버 커서는 이 길에서 안 쓴다
+    noteModelInputs(filename, flat.active());
     return true;
 }
 
@@ -477,6 +498,9 @@ bool ModelAssembler::applyReplace(const ReplaceOperation& op, double E, double n
     std::string detailFlatPath = resolvePath(op.detailFlat);
     std::string shellBentPath  = resolvePath(op.shellBent);
     std::string simpleBentPath = resolvePath(op.simpleBent);
+    noteInput(detailFlatPath, "detail_flat");   // 쓰기 관문이 산출과 견준다(2026-11-07)
+    noteInput(shellBentPath, "shell_bent");
+    noteInput(simpleBentPath, "simple_bent");
 
     // 1. Identify target part's elements and exclusive nodes
     std::set<int> partElemIds = getPartElementIds(op.targetPid);
@@ -4817,6 +4841,7 @@ bool ModelAssembler::applyBend(const BendOperation& op, double E, double nu,
 
     if (op.source == "dat") {
         std::string datPath = resolvePath(op.datFile);
+        noteInput(datPath, "dat_file");   // 쓰기 관문이 산출과 견준다(2026-11-07)
         if (!grid.loadFromFile(datPath)) {
             errorMessage_ = "Failed to load deflection grid: " + grid.getErrorMessage();
             return false;
@@ -4826,6 +4851,8 @@ bool ModelAssembler::applyBend(const BendOperation& op, double E, double nu,
     } else if (op.source == "dat_pair") {
         std::string topPath = resolvePath(op.datTop);
         std::string bottomPath = resolvePath(op.datBottom);
+        noteInput(topPath, "dat_top");   // 쓰기 관문이 산출과 견준다(2026-11-07)
+        noteInput(bottomPath, "dat_bottom");
 
         if (!gridTop.loadFromFile(topPath)) {
             errorMessage_ = "Failed to load top grid: " + gridTop.getErrorMessage();
@@ -5153,6 +5180,28 @@ static bool ma_resultsHaveNonFinite(const std::vector<ElementResult>& results) {
 bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
     std::string outputFile = outputPrefix + ".k";
     std::string dynainFile = outputPrefix + ".dynain";
+
+    // ★쓰기 관문(2026-11-07 · 헤더의 `noteInput` 주석) — 파일을 하나라도 열기 **전에** 이번에 쓸 파일 전부(덱 · dynain · IGA ·
+    //   부르는 쪽이 적은 곁 파일)를 읽은 파일(모델 · 인클루드 닫힘 · apply* 와 부르는 쪽이 적은 입력 · 명령줄 설정)과 견준다.
+    //   in-place 를 허락한 op(assemble — 매뉴얼에 적힌 쓰임)이면 **덱 산출만** 주 덱 그 자체여도 된다(다 읽은 뒤 쓴다).
+    {
+        std::vector<std::string> side;
+        if (!accumulatedResults_.empty() && !dynainEmbed_) side.push_back(dynainFile);
+        for (const auto& igaf : igaFiles_) side.push_back(igaf.fullpath);
+        side.insert(side.end(), plannedWrites_.begin(), plannedWrites_.end());
+        std::vector<output_guard::Input> deckReads;
+        for (const auto& in : guardInputs_)
+            if (!(inPlaceAllowed_ && in.role == "model" && include_closure::sameFile(in.path, baseModelPath_)))
+                deckReads.push_back(in);
+        std::vector<std::string> all{outputFile};
+        all.insert(all.end(), side.begin(), side.end());
+        std::string why;
+        if (output_guard::findClash(all, deckReads, why) || output_guard::findClash(side, guardInputs_, why)) {
+            errorMessage_ = why + " — 출력 파일을 쓰지 않았습니다: " + outputFile +
+                            " / an output is the same file as an input or another output; nothing written";
+            return false;
+        }
+    }
 
     // Get dynain basename for *INCLUDE
     std::string dynainBasename = dynainFile;
@@ -9108,6 +9157,7 @@ bool ModelAssembler::applyWarpage(const WarpageOperation& op, double E, double n
         datPath = configDir + "/" + datPath;
     }
 
+    noteInput(datPath, "dat_file");   // 쓰기 관문이 산출과 견준다(2026-11-07)
     if (!grid.loadFromFile(datPath, op.maskValue, op.noiseThreshold)) {
         errorMessage_ = "Failed to load warpage data: " + datPath;
         return false;
@@ -9174,6 +9224,13 @@ bool ModelAssembler::applyWarpage(const WarpageOperation& op, double E, double n
 
     // 9. Debug export
     if (op.debug) {
+        // ★진단 파일도 이 실행이 쓰는 파일이다 — 덱보다 먼저 쓰므로 여기서 읽은 파일과 견준다(2026-11-07 · 쓰기 관문)
+        std::string why;
+        if (output_guard::findClash({op.debugPrefix + "_raw.dat", op.debugPrefix + "_curvature.dat",
+                                     op.debugPrefix + "_warpage.vtk"}, guardInputs_, why)) {
+            errorMessage_ = "warpage debug_prefix: " + why + " — 출력 파일을 쓰지 않았습니다";
+            return false;
+        }
         grid.exportDebugData(op.debugPrefix);
     }
 
@@ -12126,6 +12183,7 @@ bool ModelAssembler::applyMatswap(const MatswapOperation& op, const std::string&
         !(bundlePath.size() >= 2 && bundlePath[1] == ':')) {
         bundlePath = configDir + "/" + bundlePath;
     }
+    noteInput(bundlePath, "재질 번들");   // 쓰기 관문이 산출과 견준다(2026-11-07)
 
     // 2. Parse bundle
     MwBundle bundle;
@@ -13133,6 +13191,8 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
         }
         dbPath = resolved;
     }
+
+    noteInput(dbPath, "재질 DB");   // 쓰기 관문이 산출과 견준다(2026-11-07)
 
     // 2. Load database
     MdMaterialDatabase db = md_loadDatabase(dbPath);
@@ -16323,6 +16383,7 @@ bool ModelAssembler::applyTranslate(double dx, double dy, double dz) {
 bool ModelAssembler::applyUpdate(const UpdateOperation& op) {
     // 대상이 인클루드 안에만 있으면 멈춘다 — 주 덱만 고쳐 아무것도 안 바뀐 덱을 내지 않는다(`targetsReachable` · 2026-10-17)
     if (!targetsReachable({}, "update")) return false;   // dynain 은 덱 전체 절점·요소를 고친다
+    noteInput(op.dynainFile, "dynain");   // 쓰기 관문이 산출과 견준다(2026-11-07)
     std::ifstream f(op.dynainFile);
     if (!f.is_open()) {
         errorMessage_ = "update: cannot open dynain file: " + op.dynainFile;
@@ -17688,6 +17749,15 @@ bool ModelAssembler::applyBattery(const BatteryOperation& op, const std::string&
 
     // Output prefix override
     if (!op.output.empty()) cfg.output = op.output;
+    noteInput(cfgPath, "battery config");   // 쓰기 관문이 산출과 견준다(2026-11-07)
+    // ★배터리 덱은 루프 안에서 덱보다 먼저 쓴다 — 여기서 읽은 파일과 견준다(2026-11-07 · 쓰기 관문)
+    {
+        std::string why;
+        if (output_guard::findClash({batteryKFilePath(cfg)}, guardInputs_, why)) {
+            errorMessage_ = "[battery] " + why + " — 출력 파일을 쓰지 않았습니다";
+            return false;
+        }
+    }
 
     // Generate the battery K-file
     ConsoleOutput console;

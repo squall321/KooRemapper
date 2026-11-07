@@ -1,4 +1,5 @@
 #include "parser/DeckWriter.h"
+#include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 #include <cctype>
 #include "parser/IncludeClosure.h"   // FlatDeck — flatten_includes(2026-10-17)
 #include "parser/ElementCardLayout.h"   // deckFieldWidth — 덱이 선언한 칸 폭을 따른다
@@ -1021,6 +1022,8 @@ int runCnrb2Solid(const std::string& yamlFile, ConsoleOutput& console) {
     std::string modelPath = resolvePath(modelFile);
     std::string outPath   = resolvePath(outputFile);
     // ★`flatten_includes`(2026-10-17) — 인클루드 닫힘을 펼친 덱(주 덱 옆 임시 파일)을 읽고 고친다 · 산출은 홀로 선다
+    // ★쓰기 관문(2026-11-07 · output_guard) — 쓸 파일이 설정 · 모델 · 그 인클루드와 같은 파일이면 열기 전에 거절한다
+    if (KooRemapper::output_guard::refuse("cnrb2solid", {outPath}, KooRemapper::output_guard::configAndModel(yamlFile, modelPath), console)) return 1;
     const std::string modelOrig = modelPath;
     KooRemapper::include_closure::FlatDeck flat;
     if (flattenIncludes) {

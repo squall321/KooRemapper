@@ -4,6 +4,7 @@
 
 #include "parser/DeckNewline.h"
 #include "parser/IncludeClosure.h"
+#include "parser/OutputGuard.h"
 #include "parser/FragmentMap.h"
 #include "parser/CarryoverPlan.h"
 #include "assembly/AssemblyConfig.h"
@@ -116,6 +117,14 @@ public:
     bool applyStrip(const StripOperation& op);
     // Returns all distinct part IDs currently in the model (base + added elements)
     std::vector<int> getAllPartIds() const;
+    // ★쓸 파일이 읽은 파일을 덮는지(2026-11-07 · `output_guard`) — `writeOutput` 이 파일을 하나라도 열기 **전에** 이번에 쓸 파일
+    //   전부(덱 · dynain · IGA · `planWrite` 로 적은 곁 파일)를 읽은 파일(`loadBaseModel` 의 모델 · 인클루드 닫힘, apply* 와 부르는
+    //   쪽이 `noteInput` 으로 적은 입력, 명령줄 설정)과 견주고 같으면 아무것도 쓰지 않고 false 다. 실측 — `update` 의 output 이
+    //   모델의 인클루드면 rc 0 으로 그 인클루드가 주 덱으로 바뀌어 자기 자신을 끌어왔다. 덱 산출이 **주 덱 그 자체**인 것(in-place —
+    //   매뉴얼 assemble 「공통 특성」 · `test_assemble_guards.py`)만은 막지 않는다 — 다 읽은 뒤 쓴다. 곁 파일은 주 덱도 막는다.
+    void noteInput(const std::string& path, const std::string& role);
+    void planWrite(const std::string& path);
+    void setInPlaceAllowed(bool on) { inPlaceAllowed_ = on; }   // assemble 만 켠다 — 단독 op 은 output == model 을 거절한다
     bool writeOutput(const std::string& outputPrefix);
 
     const std::vector<ElementResult>& getAccumulatedResults() const {
@@ -198,6 +207,10 @@ private:
     // 인클루드에 이미 있는 번호까지 세려고 든다 — 쪼개지 않은 같은 덱이면 rawLines_ 에 들어 있었을 줄이다.
     include_closure::Closure incl_;
     bool flattenIncludes_ = false;
+    std::vector<output_guard::Input> guardInputs_;   // 읽은 파일(모델 · 인클루드 · 다른 입력) — writeOutput 의 쓰기 관문이 본다
+    std::vector<std::string> plannedWrites_;         // 덱 말고 부르는 쪽이 이 실행에서 쓸 곁 파일(대응표 · 보고)
+    bool inPlaceAllowed_ = false;                    // 덱 산출이 주 덱 그 자체여도 되나(assemble)
+    void noteModelInputs(const std::string& filename, bool flattened);
     std::map<int, std::string> includeElemPidFile_;   // 인클루드 안에 요소가 있는 PID → 첫 파일(`readerMax`)
     std::vector<fragment::Map> mergedMaps_;   // applyCadSolidMerge 가 옮긴 대응표(덱 번호) — 부르는 쪽이 파일로 쓴다
     // 입력 덱의 개행. 읽을 때 기억했다가 최종 출력에서 되붙인다 — 리더가 CR 을 떼므로

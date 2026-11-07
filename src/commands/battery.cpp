@@ -338,11 +338,16 @@ BatteryConfig parseBatteryConfig(const std::string& yamlFile) {
 // Single K-file generator
 // ─────────────────────────────────────────────────────────────
 
+// 덱 이름 규칙 하나 — 쓰기 관문(assemble 의 battery 처리)이 쓰기 전에 같은 이름으로 견준다(2026-11-07)
+std::string batteryKFilePath(const BatteryConfig& cfg) {
+    const std::string phaseSuffix = (cfg.phase == 2) ? "_phase2" : "_phase1";
+    return cfg.output + batteryTierSuffix(cfg.tier) + phaseSuffix + ".k";
+}
+
 std::string generateBatteryKFile(const BatteryConfig& cfg,
                                   ConsoleOutput& console) {
     // Build output filename
-    std::string phaseSuffix = (cfg.phase == 2) ? "_phase2" : "_phase1";
-    std::string outPath = cfg.output + batteryTierSuffix(cfg.tier) + phaseSuffix + ".k";
+    std::string outPath = batteryKFilePath(cfg);
 
     console.println("[battery] Generating: " + outPath);
     console.println("[battery]   model_type : " + cfg.modelType);

@@ -1,4 +1,5 @@
 #include "parser/DeckWriter.h"
+#include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 #include "parser/IdAllocator.h"   // 인클루드 닫힘까지 센 최대값 · 못 본 자리 경고
 #include "parser/IncludeClosure.h" // FlatDeck · partFile — flatten_includes(2026-10-17)
 #include "ale.h"
@@ -564,6 +565,13 @@ int runAle(const std::string& yamlFile, ConsoleOutput& console) {
     std::string modelPath = resolvePath(modelFile);
     std::string outPath   = resolvePath(outputFile);
     const std::string modelOrig = modelPath;   // 개행은 원본을 따른다
+    // ★쓰기 관문(2026-11-07 · output_guard) — 쓸 파일이 설정 · 모델 · 그 인클루드 · 번들 재질 파일과 같은 파일이면 열기 전에 거절한다
+    {
+        auto reads = KooRemapper::output_guard::configAndModel(yamlFile, modelPath);
+        for (const auto& e : aleEntries)
+            if (!ale_isPreset(e.material)) reads.push_back({resolvePath(e.material), "재질 번들"});
+        if (KooRemapper::output_guard::refuse("ale", {outPath}, reads, console)) return 1;
+    }
 
     // ★`flatten_includes`(2026-10-17) — 인클루드 닫힘을 펼친 덱(주 덱 옆 임시 파일)을 읽고 고친다 · 산출은 홀로 선다.
     KooRemapper::include_closure::FlatDeck flat;

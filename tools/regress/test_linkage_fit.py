@@ -254,7 +254,8 @@ def main():
                 continue
             out_lines.append(ln)
         open(os.path.join(d, "short.k"), "w", newline="\n").write("\n".join(out_lines) + "\n")
-        write_cfg(os.path.join(d, "g.yaml"), reference="ref.k", folded="short.k", output="g")
+        # output 은 설정(g.yaml)과 다른 이름이어야 한다 — `output: g` 는 `g.yaml` 을 써 설정을 덮으므로 쓰기 관문이 먼저 거절한다(2026-11-07)
+        write_cfg(os.path.join(d, "g.yaml"), reference="ref.k", folded="short.k", output="g_out")
         rc, out3 = run(binary, d, "linkage-fit", "g.yaml")
         check("G-1 절점이 모자라면 rc=1", rc == 1, out3[-200:])
         check("G-2 몇 개가 없는지 말한다", "1개" in out3 or "1 개" in out3, out3[-200:])

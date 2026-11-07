@@ -1,4 +1,5 @@
 #include "hfdamp.h"
+#include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 #include "parser/IdAllocator.h"   // 인클루드 닫힘까지 센 최대값 · 못 본 자리 경고
 #include "parser/DeckWriter.h"
 #include "cli/ConsoleOutput.h"
@@ -597,6 +598,8 @@ int runHFDamp(const std::string& yamlFile, ConsoleOutput& console) {
 
     std::string modelPath = resolvePath(modelFile);
     std::string outPath   = resolvePath(outputFile);
+    // ★쓰기 관문(2026-11-07 · output_guard) — 쓸 파일이 설정 · 모델 · 그 인클루드와 같은 파일이면 열기 전에 거절한다
+    if (KooRemapper::output_guard::refuse("hfdamp", {outPath}, KooRemapper::output_guard::configAndModel(yamlFile, modelPath), console)) return 1;
 
     // Read model
     std::vector<std::string> lines;

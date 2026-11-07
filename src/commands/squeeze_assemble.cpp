@@ -1,4 +1,5 @@
 #include "squeeze_assemble.h"
+#include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 #include "parser/DeckWriter.h"
 #include "util/YamlComment.h"
 #include "relax.h"
@@ -44,6 +45,10 @@ int runSqueeze(const std::string& meshFile, const std::string& configFile,
     std::string outputPrefix = outputPrefixArg;
     if (outputPrefix.size() >= 2 && outputPrefix.substr(outputPrefix.size() - 2) == ".k")
         outputPrefix.resize(outputPrefix.size() - 2);
+    // ★쓰기 관문(2026-11-07 · output_guard) — <prefix>.k · <prefix>.dynain 이 메시(그 인클루드까지) · 설정과 같은 파일이면 거절한다
+    if (KooRemapper::output_guard::refuse("squeeze", {outputPrefix + ".k", outputPrefix + ".dynain"},
+                                        KooRemapper::output_guard::configAndModel(configFile, meshFile), console))
+        return 1;
 
     // Load mesh
     console.info("Loading mesh: " + meshFile);
@@ -545,6 +550,10 @@ int runAssemble(const std::string& configFile, const ConsoleOutput& console) {
 
     // 2. Load base model (skip if first op is 'generate')
     ModelAssembler assembler;
+    // ★쓰기 관문(2026-11-07) — in-place(output == base_model)는 매뉴얼 「공통 특성」에 적힌 쓰임이라 덱 산출만은 주 덱 그 자체여도
+    //   된다. 인클루드 · 설정 · 처리들의 입력(detail_flat · dat · bundle · dynain …)과 곁 파일(dynain · IGA)은 writeOutput 이 막는다
+    assembler.setInPlaceAllowed(true);
+    assembler.noteInput(configFile, "설정 YAML");
     assembler.setDynamicRelaxation(config.dynamicRelaxation);
     assembler.setDynainEmbed(config.dynainEmbed);
     assembler.setFlattenIncludes(config.flattenIncludes);   // 로드 전에 — base_model 의 닫힘을 펼쳐 읽는다

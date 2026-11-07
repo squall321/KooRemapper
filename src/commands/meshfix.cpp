@@ -12,6 +12,7 @@
 #endif
 
 #include "parser/DeckWriter.h"
+#include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 #include "parser/DeckScan.h"          // keywordToken·kwBare — 흘려 읽으며 블록을 고른다
 #include "parser/ElementCardLayout.h"   // deckFieldWidth — 덱이 선언한 칸 폭을 따른다
 #include "parser/IncludeScan.h"   // scanFile — 흘려 읽어 인클루드가 있나만 본다
@@ -2274,6 +2275,35 @@ int runMeshFix(const char* configPath, ConsoleOutput& console) {
         cfg.output = KooRemapper::yamlResolvePath(configDir, cfg.output);
     }
 
+    // Temp paths alongside output — use fs::path for native separator consistency
+    // gmsh 는 .geo 안 Merge/Save 의 상대 경로를 '.geo 파일이 있는 폴더' 기준으로 푸는다 —
+    // 그래서 outDir 이 상대 경로면 Save 가 'sub/sub/x.msh' 로 두 번 붙어 'Unable to open file' 로 끝났다
+    // (output 에 폴더가 붙은 설정은 전부 그랬다). 임시 파일 자리를 절대 경로로 고정한다.
+    fs::path outDir = fs::path(cfg.output).parent_path();
+    if (outDir.empty()) outDir = fs::path(".");
+    {
+        std::error_code oec;
+        fs::path abs = fs::absolute(outDir, oec);
+        if (!oec) outDir = abs.lexically_normal();
+    }
+    std::string stem = fs::path(cfg.output).stem().string();
+    // .geo 문자열에는 " 를 escape 할 방법이 없다 — 임시 파일 이름에서만 뺀다(출력 이름은 그대로)
+    for (auto& c : stem) if (c == '"') c = '_';
+    auto tempPath = [&](const std::string& ext) {
+        return (outDir / (stem + "__mf" + ext)).string();
+    };
+    std::string stlPath = tempPath(".stl");
+    std::string geoPath = tempPath(".geo");
+    std::string mshPath = tempPath(".msh");
+    std::string logPath = tempPath(".log");
+    // ★쓰기 관문(2026-11-07 · output_guard) — 산출 · 임시 파일(쓴 뒤 지운다)이 설정 · 모델 · 그 인클루드와 같은 파일이면 gmsh 를
+    //   돌리기 전에 거절한다. 예전엔 output == model 이면 쓰기 뒤 재검사가 실패할 때 「산출을 지웠다」며 **모델을 지웠다**.
+    //   `preview` 는 아무것도 쓰지 않는다
+    if (!cfg.preview &&
+        KooRemapper::output_guard::refuse("meshfix", {cfg.output, stlPath, geoPath, mshPath, logPath},
+                                          KooRemapper::output_guard::configAndModel(configPath, cfg.model), console))
+        return 1;
+
     // 2. Gmsh — `preview` 는 gmsh 를 돌리지 않으므로 찾지도 않는다
     std::string gmshVer;
     std::string gmshExe = cfg.preview ? std::string("(preview — 쓰지 않는다)") : findGmshExe(&gmshVer);
@@ -2351,27 +2381,6 @@ int runMeshFix(const char* configPath, ConsoleOutput& console) {
     if (ar.badElemCount > 0)
         console.warning("Input bad-Jac (J<0.15): " + std::to_string(ar.badElemCount));
 
-    // Temp paths alongside output — use fs::path for native separator consistency
-    // gmsh 는 .geo 안 Merge/Save 의 상대 경로를 '.geo 파일이 있는 폴더' 기준으로 푸는다 —
-    // 그래서 outDir 이 상대 경로면 Save 가 'sub/sub/x.msh' 로 두 번 붙어 'Unable to open file' 로 끝났다
-    // (output 에 폴더가 붙은 설정은 전부 그랬다). 임시 파일 자리를 절대 경로로 고정한다.
-    fs::path outDir = fs::path(cfg.output).parent_path();
-    if (outDir.empty()) outDir = fs::path(".");
-    {
-        std::error_code oec;
-        fs::path abs = fs::absolute(outDir, oec);
-        if (!oec) outDir = abs.lexically_normal();
-    }
-    std::string stem = fs::path(cfg.output).stem().string();
-    // .geo 문자열에는 " 를 escape 할 방법이 없다 — 임시 파일 이름에서만 뺀다(출력 이름은 그대로)
-    for (auto& c : stem) if (c == '"') c = '_';
-    auto tempPath = [&](const std::string& ext) {
-        return (outDir / (stem + "__mf" + ext)).string();
-    };
-    std::string stlPath = tempPath(".stl");
-    std::string geoPath = tempPath(".geo");
-    std::string mshPath = tempPath(".msh");
-    std::string logPath = tempPath(".log");
 
     // 5. STL
     console.info("Extracting boundary surface...");

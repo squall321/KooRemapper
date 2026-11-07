@@ -1,5 +1,6 @@
 // 적층을 EI 중립축 기준으로 옮긴 뒤 기준 셸에 감는 op — shellmap 의 "축=0 이 중립면" 전제를 실제로 맞춘다.
 #include "stackwrap.h"
+#include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 
 #include "assembly/ModelAssembler.h"
 #include "cli/ConsoleOutput.h"
@@ -88,6 +89,15 @@ int runStackWrap(const std::string& yamlFile, ConsoleOutput& console) {
     if (c.output.empty())    { console.error("output: 이 필요하다"); return 1; }
     // 다른 접두사 op 과 같이 끝의 `.k` 는 뗀다 — `output: x.k` 가 `x.k.k` · `x.k_neutral.k` 를 쓰지 않게
     if (c.output.size() > 2 && c.output.compare(c.output.size() - 2, 2, ".k") == 0) c.output.resize(c.output.size() - 2);
+    // ★쓰기 관문(2026-11-07 · output_guard) — <output>.k · <output>_neutral.k 가 bent_shell · flat_stack(그 인클루드까지) · 설정과
+    //   같은 파일이면 쓰기 전에 거절한다. `_neutral.k` 는 bent_shell 을 읽기 **전에** 쓴다 — 같으면 옮긴 적층을 셸로 읽었다
+    {
+        auto reads = KooRemapper::output_guard::configAndModel(yamlFile, c.flatStack);
+        for (auto& r : KooRemapper::output_guard::modelInputs(c.bentShell, "bent_shell")) reads.push_back(std::move(r));
+        std::vector<std::string> writes{c.output + ".k"};
+        if (c.shift) writes.push_back(c.output + "_neutral.k");
+        if (KooRemapper::output_guard::refuse("stackwrap", writes, reads, console)) return 1;
+    }
 
     const char* axisName = c.axis == 0 ? "x" : (c.axis == 1 ? "y" : "z");
 

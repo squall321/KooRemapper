@@ -1,5 +1,6 @@
 // 2D 곡선을 폭 방향으로 쓸어 QUAD4 기준 셸 덱을 만드는 op — shellmap 의 기준면 공급원.
 #include "refshell.h"
+#include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 
 #include "cli/ConsoleOutput.h"
 #include "parser/DeckWriter.h"
@@ -140,6 +141,8 @@ int runRefShell(const std::string& yamlFile, ConsoleOutput& console) {
     if (c.width <= 0)     { console.error("width: 가 0 보다 커야 한다"); return 1; }
     if (c.thickness <= 0) { console.error("thickness: 가 0 보다 커야 한다"); return 1; }
     if (c.divisions < 0 || c.widthDivisions < 0) { console.error("분할 수는 음수가 될 수 없다"); return 1; }
+    // ★쓰기 관문(2026-11-07 · output_guard) — 셸 덱이 설정 · 곡선 CSV 와 같은 파일이면 읽기 · 쓰기 전에 거절한다
+    if (KooRemapper::output_guard::refuse("refshell", {c.output}, {{yamlFile, "설정 YAML"}, {c.curve, "curve"}}, console)) return 1;
 
     std::vector<P2> raw;
     if (!readCurve(c.curve, raw, console)) return 1;

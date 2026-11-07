@@ -1,5 +1,6 @@
 // 접힌 덱에서 군별 강체변환(힌지 축·각·피벗)을 역산하는 op — 피벗 산포를 반드시 함께 보고한다.
 #include "linkage_fit.h"
+#include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 
 #include "cli/ConsoleOutput.h"
 #include "core/Matrix3x3.h"
@@ -159,6 +160,13 @@ int runLinkageFit(const std::string& yamlFile, ConsoleOutput& console) {
     if (c.folded.empty())    { console.error("folded: 가 필요하다"); return 1; }
     if (c.output.empty())    { console.error("output: 이 필요하다"); return 1; }
     if (c.angleTol < 0 || c.pivotTol < 0) { console.error("허용값은 음수가 될 수 없다"); return 1; }
+    // ★쓰기 관문(2026-11-07 · output_guard) — <output>.yaml 이 설정 · reference · folded(그 인클루드까지)와 같은 파일이면 읽기 · 쓰기 전에 거절한다
+    {
+        std::vector<KooRemapper::output_guard::Input> reads{{yamlFile, "설정 YAML"}};
+        for (auto& r : KooRemapper::output_guard::modelInputs(c.reference, "reference")) reads.push_back(std::move(r));
+        for (auto& r : KooRemapper::output_guard::modelInputs(c.folded, "folded")) reads.push_back(std::move(r));
+        if (KooRemapper::output_guard::refuse("linkage-fit", {c.output + ".yaml"}, reads, console)) return 1;
+    }
 
     KFileReader r1, r2;
     Mesh ref, def;
