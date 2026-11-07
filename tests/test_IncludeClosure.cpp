@@ -307,6 +307,32 @@ TEST(IncludeClosure_inlined_는_카드를_지우고_본문을_차례대로_넣�
     for (size_t i = 0; i < want.size(); ++i) ASSERT_EQ(out[i], want[i]);
 }
 
+// 펼친 줄마다의 자리(2026-11-07 · `apply_carryover_plan` 판 2) — 닫힘을 훑는 읽기 전용 검사가 「그 인클루드 파일 몇째 줄」을 말한다
+TEST(IncludeClosure_inlined_는_줄마다_온_파일과_줄을_낸다) {
+    Scratch s("inlorg");
+    s.put("a.k", "*KEYWORD\n*NODE\n1\n*INCLUDE\nb.k\n*END\n*NODE\n99\n");
+    s.put("b.k", "*KEYWORD\n*NODE\n2\n*END\n");
+    s.put("c.k", "*NODE\n3\n");
+    const std::string body = "*KEYWORD\n*TITLE\nt\n*INCLUDE\na.k\n$ 주석\nc.k\n*PART\np\n*END\n";
+    const std::string mp = s.put("main.k", body);
+    const auto L = splitLines(body);
+    const auto c = include_closure::read(mp, L);
+    std::vector<std::string> out;
+    std::vector<include_closure::LineOrigin> org;
+    std::string why;
+    ASSERT_TRUE(include_closure::inlined(L, mp, c, out, why, &org));
+    ASSERT_EQ(org.size(), out.size());
+    ASSERT_EQ(c.files.size(), static_cast<size_t>(3));   // a · b(a 가 끌어온) · c — 깊이 우선
+    const size_t M = include_closure::LineOrigin::kMain;
+    const std::vector<std::pair<size_t, size_t>> want = {{M, 0}, {M, 1}, {M, 2}, {0, 1}, {0, 2}, {1, 1}, {1, 2}, {2, 0}, {2, 1},
+                                                         {M, 7}, {M, 8}, {M, 9}};
+    ASSERT_EQ(org.size(), want.size());
+    for (size_t i = 0; i < want.size(); ++i) {
+        ASSERT_EQ(org[i].file, want[i].first);
+        ASSERT_EQ(org[i].line, want[i].second);
+    }
+}
+
 TEST(IncludeClosure_inlined_는_펼칠_수_없으면_까닭을_댄다) {
     Scratch s("inlbad");
     s.put("w.k", "*KEYWORD I10=Y\n*NODE\n1\n");

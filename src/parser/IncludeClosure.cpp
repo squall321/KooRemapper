@@ -260,8 +260,9 @@ std::vector<std::string> flatten(const std::vector<std::string>& mainLines, cons
 namespace {
 
 // 이 파일의 줄을 펼쳐 담는다 — 맨 `*INCLUDE` 카드는 지우고 그 자리에 끌어온 파일들을(이 카드에서 끌어온 차례로) 넣는다.
+// `origin` 이 있으면 담은 줄마다 그 자리(이 파일의 색인 `fileIdx` · 줄)를 함께 담는다.
 void inlineInto(std::vector<std::string>& out, const std::vector<std::string>& lines, const std::string& path,
-                const Closure& c, size_t depth, bool isMain) {
+                const Closure& c, size_t depth, bool isMain, size_t fileIdx, std::vector<LineOrigin>* origin) {
     std::vector<const File*> kids;
     for (const auto& f : c.files)
         if (f.depth == depth + 1 && f.from == path) kids.push_back(&f);
@@ -278,12 +279,14 @@ void inlineInto(std::vector<std::string>& out, const std::vector<std::string>& l
                 ++j;
             }
             for (const File* f : kids)
-                if (f->fromLine == card) inlineInto(out, f->lines, f->path, c, depth + 1, false);
+                if (f->fromLine == card)
+                    inlineInto(out, f->lines, f->path, c, depth + 1, false, static_cast<size_t>(f - c.files.data()), origin);
             i = j;
             continue;
         }
         if (!isMain && !kw.empty() && kw.rfind("*KEYWORD", 0) == 0) { ++i; continue; }   // 폭은 주 덱이 정한다
         out.push_back(l);
+        if (origin) origin->push_back({fileIdx, i});
         ++i;
     }
 }
@@ -291,8 +294,9 @@ void inlineInto(std::vector<std::string>& out, const std::vector<std::string>& l
 }  // namespace
 
 bool inlined(const std::vector<std::string>& mainLines, const std::string& mainPath, const Closure& c,
-             std::vector<std::string>& out, std::string& why) {
+             std::vector<std::string>& out, std::string& why, std::vector<LineOrigin>* origin) {
     out.clear();
+    if (origin) origin->clear();
     if (!c.complete()) {
         if (!c.unresolved.empty())
             why = "*INCLUDE 를 찾지 못했다 — " + c.unresolved[0].file + ":" + std::to_string(c.unresolved[0].line) + " '" +
@@ -327,7 +331,8 @@ bool inlined(const std::vector<std::string>& mainLines, const std::string& mainP
         }
     }
     out.reserve(mainLines.size());
-    inlineInto(out, mainLines, mainPath, c, 0, true);
+    if (origin) origin->reserve(mainLines.size());
+    inlineInto(out, mainLines, mainPath, c, 0, true, LineOrigin::kMain, origin);
     return true;
 }
 

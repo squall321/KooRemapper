@@ -110,8 +110,15 @@ std::vector<std::string> flatten(const std::vector<std::string>& mainLines, cons
 // 규칙). 인클루드 파일 안의 `*END` 뒤는 이미 닫힘이 담지 않았다. 주 덱의 `*INCLUDE_PATH` 는 남긴다(가리킬 파일이 없어 무해).
 // 펼칠 수 없으면 false 와 까닭 — 닫힘이 불완전하다(없는 파일 · `_TRANSFORM` 등 · 깊이) · 순환이 있다 · `*INCLUDE +`·`-`
 // (그 파일의 폭을 바꾼다) · 인클루드 파일 `*KEYWORD` 의 폭이 주 덱과 다르다. 짐작해 펼치지 않는다.
+// `origin` 을 주면 펼친 줄마다 어디서 왔나(파일 · 그 파일의 줄)를 같은 차례로 담는다 — 펼친 덱을 훑는 읽기 전용 검사가
+// 「인클루드 파일 몇째 줄」을 말하려고 쓴다(2026-11-07 · `apply_carryover_plan` 판 2).
+struct LineOrigin {
+    static constexpr size_t kMain = static_cast<size_t>(-1);
+    size_t file = kMain;    // `Closure::files` 의 색인 — 주 덱이면 kMain
+    size_t line = 0;        // 그 파일의 줄(0-기반)
+};
 bool inlined(const std::vector<std::string>& mainLines, const std::string& mainPath, const Closure& c,
-             std::vector<std::string>& out, std::string& why);
+             std::vector<std::string>& out, std::string& why, std::vector<LineOrigin>* origin = nullptr);
 
 // 같은 파일인가 — 정규 경로(`weakly_canonical` — `./a.k` · 절대 경로 · 심볼릭 링크)가 같거나, 둘 다 있으면 같은 파일(하드 링크 —
 // `equivalent`)이다. 빈 경로는 아무것과도 같지 않다.
