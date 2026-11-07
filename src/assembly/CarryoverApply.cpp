@@ -4,6 +4,7 @@
 #include "commands/contact_helpers.h"
 #include "core/Mesh.h"
 #include "parser/CardCut.h"
+#include "parser/CardFields.h"
 #include "parser/CarryoverPlan.h"
 #include "parser/DeckScan.h"
 #include "parser/ElementCardLayout.h"
@@ -15,10 +16,13 @@
 #include "validation/ElementQualityChecker.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <limits>
 #include <map>
 #include <set>
@@ -37,10 +41,13 @@
 //     달라도(개행 · 공백) **값 대조**가 지나면 받고 경고한다
 //   · 나눠 쓰는 절점(보 · 이산 · 질량 · 안전띠 · 플롯 요소 포함)이 있는 PID 는 옮기지도 바꾸지도 지우지도 않는다(결정)
 //   · 바꿔 넣거나 지우는 PID 를 절점 · 세그먼트 · 요소로 가리키는 세트 · 접촉이 있으면 거절한다(결정 — PID 로 건 참조는
-//     바꿔 넣기에서 살고 지우기는 막는다). 정본(`NodeRefs` · `IdRefs`)이 칸 뜻을 단정하지 못한 자리가 덱에 있으면 그것도
-//     거절한다 — 그 PID 를 가리키지 않는다고 증명할 수 없다
+//     바꿔 넣기에서 살고 지우기는 막는다). 정본(`NodeRefs` · `IdRefs`)이 칸 뜻을 단정하지 못한 자리, 정본이 보지도 세지도 않고
+//     참조 없는 키워드 표(`refCover`)에도 없는 키워드, 풀 수 없는 방언 세트가 덱에 있으면 그것도 거절한다 — 그 PID 를 가리키지
+//     않는다고 증명할 수 없다(리뷰 11-07)
+//   · 절점 칸을 다 읽지 못하는 요소 블록(리더가 담지 않는 솔리드 · 티쉘 변형 · 보 `_WARPAGE` · `_ELBOW` …)이나 EID 가 겹친 덱은
+//     덱을 고치는 줄을 하나도 적용하지 않는다(리뷰 11-07)
 //   · 조각 번호는 덱 바닥(`idMaxima` — 보 · 이산 · 질량 요소까지) 위여야 한다. 아래에 걸치면 조각 전부를 **한 이동량**으로 옮긴다
-//   · 쓴 뒤 **다시 읽어** 대조하고 품질 관문(새로 뒤집힌 솔리드 · 법선이 뒤집힌 셸)을 건다 — 걸리면 부르는 쪽이 산출을 지운다
+//   · 쓴 뒤 **다시 읽어** 대조하고 품질 관문(새로 뒤집힌 솔리드 · 모프가 법선을 뒤집은 셸)을 건다 — 걸리면 부르는 쪽이 산출을 지운다
 
 namespace KooRemapper {
 namespace {
@@ -146,19 +153,80 @@ PartIndex indexParts(const std::vector<std::string>& L) {
     return idx;
 }
 
-// 8절점 셸의 중간절점(N5-N8) — 리더(`KFileReader`)는 셸 코너 넷만 담는다. 옮기면 중간절점도 옮겨야 하고, 나눠 쓴 절점을 셀 때도
-// 세야 한다. EID → 중간절점. 카드 경계는 정본(`elementCardSpan`)이 정한다.
-std::unordered_map<int, std::vector<int>> shellMidsideNodes(const std::vector<std::string>& L) {
-    std::unordered_map<int, std::vector<int>> out;
+// 리더(`KFileReader::parseFile`)가 보는 키워드 이름 — 0열 '*' 다음이 글자인 줄만 키워드 줄이고(isKeywordLine), 이름은 그 뒤
+// 영숫자 · '_' · '-' 를 대문자로 모은 것이다(extractKeyword). 키워드 줄이 아니면 빈 글자.
+std::string readerKeyword(const std::string& line) {
+    if (line.size() < 2 || line[0] != '*' || !std::isalpha(static_cast<unsigned char>(line[1]))) return std::string();
+    std::string kw;
+    for (size_t i = 1; i < line.size(); ++i) {
+        const unsigned char c = static_cast<unsigned char>(line[i]);
+        if (!(std::isalnum(c) || c == '_' || c == '-')) break;
+        kw += static_cast<char>(std::toupper(c));
+    }
+    return kw;
+}
+
+// 리더가 이 블록의 요소를 메시에 **그대로** 담는가 — 그 리더의 갈래를 옮긴다(KFileReader.cpp parseFile): ELEMENT_SOLID · _SOLID_TITLE ·
+// ELEMENT_TSHELL · _TSHELL_TITLE 은 이름이 똑같을 때만, ELEMENT_SHELL 은 머리가 같고 `parseElementKeyword` 가 받는 변형일 때.
+// 그 밖(`*ELEMENT_SOLID_ORTHO` · `_H20` · `_TET4TOTET10` · `*ELEMENT_TSHELL_BETA` …)은 리더가 통째로 건너뛴다 — 메시에 없다.
+bool readerReadsGrid(const std::string& line) {
+    const std::string kw = readerKeyword(line);
+    if (kw == "ELEMENT_SOLID" || kw == "ELEMENT_SOLID_TITLE" || kw == "ELEMENT_TSHELL" || kw == "ELEMENT_TSHELL_TITLE") return true;
+    return kw.rfind("ELEMENT_SHELL", 0) == 0 && parseElementKeyword(line).supported;
+}
+
+// 정규화한 키워드(`*ELEMENT_BEAM_WARPAGE_TITLE`)의 옵션 토큰에 `opt` 가 있나
+bool hasOption(const std::string& kw, const std::string& base, const char* opt) {
+    if (kw.rfind(base, 0) != 0) return false;
+    std::istringstream rest(kw.substr(base.size()));
+    for (std::string t; std::getline(rest, t, '_');)
+        if (t == opt) return true;
+    return false;
+}
+
+// ★이 `*ELEMENT_*` 블록의 절점 칸을 이월 적용이 **전부** 읽는가(리뷰 11-07 — 리더가 담지 않는 솔리드 변형을 아무도 보지 않아
+// 지운 절점을 가리키는 카드 · 겹친 EID 가 rc 0 으로 나갔다). 읽으면 빈 글자, 아니면 까닭. 읽는 것은 둘뿐이다 —
+//   · 리더가 메시에 그대로 담는 격자 블록(셸 `_DOF` 는 빼고 — Card 5 의 NS1-NS4 스칼라 절점은 아무도 읽지 않는다, Vol_I 162243-162261)
+//   · 칸 자리를 아는 격자 밖 블록(`auxElementCard`) 가운데 옵션 카드에 절점이 없는 것 — 보의 `_WARPAGE`(SN1 · SN2) ·
+//     `_ELBOW`(MN)는 그 카드를 읽지 않는다(Vol_I 156529-156610). Card 1 의 N3(방향 절점)은 읽는다
+std::string elementBlockGap(const std::string& line) {
+    const ElementKeywordInfo info = parseElementKeyword(line);
+    if (info.family != ElemFamily::NONE) {
+        if (!readerReadsGrid(line)) return info.supported ? "리더가 메시에 담지 않는 변형" : "카드 줄 수를 확정할 수 없는 변형";
+        if (info.family == ElemFamily::SHELL && hasOption(info.keyword, "*ELEMENT_SHELL", "DOF"))
+            return "DOF 카드의 스칼라 절점(NS1-NS4)을 읽지 않는다";
+        return std::string();
+    }
+    // `*ELEMENT_MASS_PART(_SET)` 은 파트(세트)에 질량을 나눠 얹는 카드다 — 칸은 ID ADDMASS FINMASS LCID MWD 뿐, 절점 칸이 없다(Vol_I 160154)
+    if (hasOption(info.keyword, "*ELEMENT_MASS", "PART")) return std::string();
+    const AuxElementCard a = auxElementCard(line);
+    if (a.family == AuxFamily::NONE) return "칸 자리를 모르는 요소 키워드";
+    if (!a.supported) return "칸 자리를 확정할 수 없는 변형";
+    if (a.family == AuxFamily::BEAM && hasOption(a.keyword, "*ELEMENT_BEAM", "WARPAGE")) return "WARPAGE 카드의 절점(SN1 · SN2)을 읽지 않는다";
+    if (a.family == AuxFamily::BEAM && hasOption(a.keyword, "*ELEMENT_BEAM", "ELBOW")) return "ELBOW 카드의 가운데 절점(MN)을 읽지 않는다";
+    return std::string();
+}
+
+// 리더가 담는 격자 요소 카드를 카드마다 한 번 — Card 1 줄과 그 칸. 카드 경계는 정본(`elementCardSpan`)이 정하고, 2차 솔리드의 절점
+// 수는 리더가 담은 PID → ELFORM(`Mesh::partSolidElform`)에서 온다. 주석은 건너뛰고 빈 줄은 카드 안에서만 카드다.
+struct GridCard {
+    size_t line = 0;
+    ElemFamily family = ElemFamily::NONE;
+    const std::string* keyword = nullptr;
+    std::vector<std::string> f;
+};
+void forEachGridCard(const std::vector<std::string>& L, const Mesh& m, const std::function<void(const GridCard&)>& fn) {
     const int deckFw = deckFieldWidth(L);
     ElementKeywordInfo info;
     bool in = false;
     int fw = deckFw, remaining = 0;
-    for (const auto& l : L) {
+    GridCard c;
+    for (size_t i = 0; i < L.size(); ++i) {
+        const std::string& l = L[i];
         const size_t g = l.find_first_not_of(" \t");
         if (g != std::string::npos && l[g] == '*') {
-            info = parseElementKeyword(l);
-            in = info.family == ElemFamily::SHELL && info.supported;
+            in = readerReadsGrid(l);
+            if (in) info = parseElementKeyword(l);
             fw = keywordFieldWidth(l, deckFw);
             remaining = 0;
             continue;
@@ -167,18 +235,129 @@ std::unordered_map<int, std::vector<int>> shellMidsideNodes(const std::vector<st
         if (g != std::string::npos && l[g] == '$') continue;
         if (g == std::string::npos && remaining == 0) continue;
         if (remaining == 0) {
-            const auto f = deckscan::cardFields(l, fw);
-            remaining = elementCardSpan(info, f, 0).lines;
-            std::vector<int> mid;
-            for (size_t q = 6; q < 10; ++q) {
-                const int v = deckscan::fieldInt(f, q);
-                if (v > 0) mid.push_back(v);
-            }
-            if (!mid.empty()) out[deckscan::fieldInt(f, 0)] = mid;
+            c.line = i;
+            c.family = info.family;
+            c.keyword = &info.keyword;
+            c.f = deckscan::cardFields(l, fw);
+            int pidN = 0;
+            if (info.family == ElemFamily::SOLID)
+                if (auto it = m.partSolidElform.find(deckscan::fieldInt(c.f, 1)); it != m.partSolidElform.end())
+                    pidN = solidNodesFromElform(it->second);
+            remaining = elementCardSpan(info, c.f, pidN).lines;
+            fn(c);
         }
         --remaining;
     }
+}
+
+// 8절점 셸의 중간절점(N5-N8) — 리더(`KFileReader`)는 셸 코너 넷만 담는다. 옮기면 중간절점도 옮겨야 하고, 나눠 쓴 절점을 셀 때도
+// 세야 한다. EID → 중간절점.
+std::unordered_map<int, std::vector<int>> shellMidsideNodes(const std::vector<std::string>& L, const Mesh& m) {
+    std::unordered_map<int, std::vector<int>> out;
+    forEachGridCard(L, m, [&](const GridCard& c) {
+        if (c.family != ElemFamily::SHELL) return;
+        std::vector<int> mid;
+        for (size_t q = 6; q < 10; ++q) {
+            const int v = deckscan::fieldInt(c.f, q);
+            if (v > 0) mid.push_back(v);
+        }
+        if (!mid.empty()) out[deckscan::fieldInt(c.f, 0)] = mid;
+    });
     return out;
+}
+
+// 계획이 준 글자를 덱 줄에 넣을 때 — 줄을 끊거나 이을 수 있는 제어 문자(CR · LF · 그 밖)를 빈칸으로(리뷰 11-07 — 이름의 개행이 살아 있는
+// `*BOUNDARY_SPC_NODE` 카드를 심었다)
+std::string oneLine(const std::string& s) {
+    std::string out = s;
+    for (char& c : out) {
+        const unsigned char u = static_cast<unsigned char>(c);
+        if (u < 0x20 || u == 0x7F) c = ' ';
+    }
+    return out;
+}
+
+// ★바꿔 넣기 · 지우기의 참조 덮음 — 이 키워드(대문자 · 칸폭 접미사 뗌)가 고치는 PID 의 절점 · 요소 · 파트를 가리키지 않는다고
+// **증명할 수 있나**(리뷰 11-07 — 정본 밖 키워드 열 가지가 지운 절점 · 요소 · 파트를 가리킨 채 rc 0 으로 나갔다).
+//   Free      — 매뉴얼(Vol_I · Vol_II) 칸에 절점 · 요소 · 파트 ID 가 없다. 세트 ID 는 된다(세트 멤버는 정본 · 세트 해석기가 본다)
+//   Scanned   — 정본(NodeRefs · IdRefs · 접촉 면 풀기)이 그 칸을 읽거나, 못 읽으면 notChecked 로 센다(`not_checked` 가 거절한다)
+//   PartOnly  — 절점 · 요소 칸은 없거나 정본이 읽지만 **파트 ID 칸**을 아무도 읽지 않는다 — 지우기만 막는다(PID 참조는 바꿔 넣기에서 산다)
+//   Unscanned — 그 밖 전부. 모르면 Free 가 아니다
+// `*SET_*` 는 세트 표(`ct_parseSets`)가 · `*ELEMENT_*` 는 요소 블록 판정(`elementBlockGap`)이 · `*INCLUDE` 는 앞 검사가 다룬다.
+// 표의 근거(매뉴얼 칸)는 계획 노트 `stepforge-carryover-apply.plan.md` 「참조 덮음 표」.
+enum class Cover { Free, Scanned, PartOnly, Unscanned };
+Cover refCover(const std::string& kw) {
+    using cards::has;
+    using cards::starts;
+    const std::string base = kw.size() > 6 && kw.compare(kw.size() - 6, 6, "_TITLE") == 0 ? kw.substr(0, kw.size() - 6) : kw;
+    auto oneOf = [](const std::string& k, std::initializer_list<const char*> names) {
+        return std::any_of(names.begin(), names.end(), [&](const char* n) { return k == n; });
+    };
+    // ── 정본이 읽거나 세는 갈래 — NodeRefs(한 칸 카드 · 이력 · CNRB · 좌표계 절점 · 세는 갈래) · IdRefs(접촉 · 강체 묶음 · 감쇠 ·
+    //    초기응력 · 세는 갈래). `*LOAD_NODE_POINT` 의 M1-M3 는 부르는 쪽이 따로 본다
+    if (starts(kw, "*BOUNDARY_SPC_NODE") || starts(kw, "*INITIAL_VELOCITY_NODE") || starts(kw, "*BOUNDARY_PRESCRIBED_MOTION_NODE") ||
+        starts(kw, "*LOAD_NODE_POINT") || kw == "*CONSTRAINED_NODAL_RIGID_BODY" || kw == "*DEFINE_COORDINATE_NODES" ||
+        starts(kw, "*CONSTRAINED_JOINT_") || starts(kw, "*CONSTRAINED_SPOTWELD") || kw == "*CONSTRAINED_RIGID_BODIES" ||
+        starts(kw, "*DAMPING_PART_MASS") || starts(kw, "*DAMPING_PART_STIFFNESS") || starts(kw, "*INITIAL_STRESS_SOLID") ||
+        starts(kw, "*INITIAL_STRESS_SHELL") || starts(kw, "*PART_MOVE") || starts(kw, "*BOUNDARY_PRESCRIBED_MOTION_RIGID") ||
+        starts(kw, "*INITIAL_VELOCITY_GENERATION") || starts(kw, "*MAT_ADD_THERMAL_EXPANSION") || starts(kw, "*DEFORMABLE_TO_RIGID") ||
+        starts(kw, "*INITIAL_STRAIN_SOLID") || starts(kw, "*INITIAL_STRAIN_SHELL"))
+        return Cover::Scanned;
+    if (starts(kw, "*DATABASE_HISTORY_")) {
+        if (kw.size() > 4 && kw.compare(kw.size() - 4, 4, "_SET") == 0) return Cover::Free;   // 세트 ID 다
+        for (const char* t : {"*DATABASE_HISTORY_NODE", "*DATABASE_HISTORY_SOLID", "*DATABASE_HISTORY_SHELL", "*DATABASE_HISTORY_BEAM",
+                              "*DATABASE_HISTORY_TSHELL"})
+            if (starts(kw, t)) return Cover::Scanned;   // 맨 키워드는 읽고 `_ID` · `_LOCAL` 은 센다
+        return Cover::Unscanned;
+    }
+    if (starts(kw, "*CONTACT_")) {
+        // 카드 1 이 SURFA SURFB SURFATYP SURFBTYP 꼴이 아닌 접촉 — 정본은 같은 자리로 읽어 뜻을 틀린다(Vol_I 접촉 장의 따로 선 키워드)
+        for (const char* t : {"*CONTACT_ENTITY", "*CONTACT_GEBOD", "*CONTACT_1D", "*CONTACT_2D", "*CONTACT_RIGID_SURFACE",
+                              "*CONTACT_AUTO_MOVE", "*CONTACT_COUPLING", "*CONTACT_ADD_WEAR", "*CONTACT_EXCLUDE_INTERACTION",
+                              "*CONTACT_INTERIOR", "*CONTACT_SPG", "*CONTACT_GUIDED_CABLE"})
+            if (starts(kw, t)) return Cover::Unscanned;
+        return Cover::Scanned;
+    }
+    // ── 파트 칸만 아무도 읽지 않는 갈래(절점 · 요소 ID 칸이 없거나 그 칸은 정본이 읽는다)
+    if (starts(kw, "*CONSTRAINED_EXTRA_NODES_NODE") || starts(kw, "*CONSTRAINED_EXTRA_NODES_SET") ||
+        starts(kw, "*INITIAL_VELOCITY_RIGID_BODY") || starts(kw, "*CONSTRAINED_RIGID_BODY_STOPPERS") || starts(kw, "*DAMPING_RELATIVE") ||
+        starts(kw, "*DEFINE_FRICTION") || starts(kw, "*MAT_ADD_") || base == "*MAT_NONLOCAL" ||
+        oneOf(base, {"*MAT_ELASTIC_6DOF_SPRING_DISCRETE_BEAM", "*MAT_093", "*MAT_INELASTIC_6DOF_SPRING_DISCRETE_BEAM", "*MAT_095"}) ||
+        starts(kw, "*CONTROL_REFINE_") || starts(kw, "*CONTROL_ADAPTIVE_CURVE") || starts(kw, "*CONTROL_SUBCYCLE") ||
+        (starts(kw, "*CONTROL_MPP_DECOMPOSITION_") && has(kw, "PART")))
+        return Cover::PartOnly;
+    // ── 참조 없는 키워드(매뉴얼 칸을 본 것만 — 모르면 넣지 않는다)
+    if (oneOf(base, {"*KEYWORD", "*TITLE", "*END", "*COMMENT", "*NODE", "*PART", "*PART_CONTACT", "*HOURGLASS", "*DAMPING_GLOBAL", "*SECTION_SOLID",
+                     "*SECTION_SHELL", "*SECTION_TSHELL", "*SECTION_BEAM", "*SECTION_DISCRETE", "*SECTION_SEATBELT", "*DEFINE_CURVE",
+                     "*DEFINE_CURVE_SMOOTH", "*DEFINE_TABLE", "*DEFINE_TABLE_2D", "*DEFINE_TABLE_3D", "*DEFINE_BOX", "*DEFINE_VECTOR",
+                     "*DEFINE_COORDINATE_SYSTEM", "*INITIAL_VELOCITY", "*LOAD_BODY_X", "*LOAD_BODY_Y", "*LOAD_BODY_Z", "*LOAD_BODY_RX",
+                     "*LOAD_BODY_RY", "*LOAD_BODY_RZ", "*LOAD_BODY_VECTOR", "*LOAD_BODY_PARTS", "*LOAD_SEGMENT_SET", "*LOAD_SHELL_SET",
+                     "*DATABASE_FORMAT", "*DATABASE_NODAL_FORCE_GROUP", "*DATABASE_ABSTAT", "*DATABASE_ATDOUT", "*DATABASE_BNDOUT",
+                     "*DATABASE_CURVOUT", "*DATABASE_DCFAIL", "*DATABASE_DEFGEO", "*DATABASE_DEFORC", "*DATABASE_DISBOUT",
+                     "*DATABASE_ELOUT", "*DATABASE_GCEOUT", "*DATABASE_GLSTAT", "*DATABASE_H3OUT", "*DATABASE_JNTFORC",
+                     "*DATABASE_MATSUM", "*DATABASE_NCFORC", "*DATABASE_NODFOR", "*DATABASE_NODOUT", "*DATABASE_PLLYOUT",
+                     "*DATABASE_PRTUBE", "*DATABASE_RBDOUT", "*DATABASE_RCFORC", "*DATABASE_RWFORC", "*DATABASE_SBTOUT",
+                     "*DATABASE_SECFORC", "*DATABASE_SLEOUT", "*DATABASE_SPCFORC", "*DATABASE_SPHOUT", "*DATABASE_SSSTAT",
+                     "*DATABASE_SWFORC", "*DATABASE_TPRINT", "*DATABASE_TRHIST"}))
+        return Cover::Free;
+    if (starts(kw, "*BOUNDARY_SPC_SET") || starts(kw, "*PARAMETER") || starts(kw, "*EOS_") || starts(kw, "*DATABASE_BINARY_") ||
+        starts(kw, "*DATABASE_EXTENT_"))
+        return Cover::Free;
+    if (starts(kw, "*RIGIDWALL_PLANAR")) {   // `_ORTHO` · `_FORCES` 는 절점 칸(NODE1 …)이 있다
+        std::istringstream rest(kw.substr(std::string("*RIGIDWALL_PLANAR").size()));
+        for (std::string t; std::getline(rest, t, '_');)
+            if (!t.empty() && t != "ID" && t != "FINITE" && t != "MOVING") return Cover::Unscanned;
+        return Cover::Free;
+    }
+    if (starts(kw, "*MAT_"))   // 재질 카드 — 위 PartOnly 밖에서 요소 칸(EID1 · EID2)이 있는 것은 철근 카드 하나다(Vol_II)
+        return starts(kw, "*MAT_WINFRITH_CONCRETE_REINFORCEMENT") ? Cover::Unscanned : Cover::Free;
+    if (starts(kw, "*CONTROL_")) {   // 풀이 제어 — 절점 · 요소 칸이 있는 카드만 뺀다(Vol_I 제어 장의 칸)
+        for (const char* t : {"*CONTROL_FORMING", "*CONTROL_IMPLICIT_SOLUTION", "*CONTROL_COARSEN", "*CONTROL_2D_REMESHING_REGION",
+                              "*CONTROL_SPOTWELD_BEAM", "*CONTROL_STAGED_CONSTRUCTION", "*CONTROL_SEGMENTS_IN_ALE_COUPLING"})
+            if (starts(kw, t)) return Cover::Unscanned;
+        return Cover::Free;
+    }
+    return Cover::Unscanned;
 }
 
 // 고정폭 10칸 하나를 제자리에서 바꾼다 — 다른 칸의 글자는 그대로(`extract_parts` putField 와 같은 꼴)
@@ -282,6 +461,19 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
     }
 
     // ── ③ 동반 파일 — 계획 폴더 바로 아래 · 지문 ───────────────────────────────
+    // 파일의 몫은 **줄이 정한다**(morph 의 field.file · remesh · 새 파트의 fragment.file) — 확장자로 가르면 `.k` 로 이름 지은 변위장이
+    // 조각으로 읽혀 아무 문제도 남기지 않고 적용 단계에서 터졌다(리뷰 11-07). 변위장은 지문이 다르면 거절, 조각은 값으로 대조(⑧),
+    // 어느 줄도 안 쓰는 파일은 경고만 한다(덱에 닿지 않는다).
+    std::set<std::string> fieldFiles, fragmentFiles;
+    for (const auto& row : plan.parts) {
+        if (row.action == Action::Morph && row.field.built && !row.field.file.empty()) fieldFiles.insert(row.field.file);
+        if (row.action == Action::Remesh && row.fragment.present && row.fragment.ok && !row.fragment.file.empty())
+            fragmentFiles.insert(row.fragment.file);
+    }
+    for (const auto& a : plan.added)
+        if (a.fragment.present && a.fragment.ok && !a.fragment.file.empty()) fragmentFiles.insert(a.fragment.file);
+    for (const auto& n : fieldFiles)
+        if (fragmentFiles.count(n)) problem(0, "plan_inconsistent", n + " 을 변위장과 조각이 함께 가리킨다 — 한 파일의 몫은 하나다");
     const fs::path planDir = fs::path(planPath).parent_path();
     struct Companion { bool exists = false, exact = false; std::string text, mismatch; long long claimBytes = 0; };
     std::map<std::string, Companion> comp;
@@ -300,9 +492,8 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
         if (c.exact) continue;
         const std::string detail = fe.name + " — 실물 sha256 " + sha.substr(0, 16) + "… · " + std::to_string(c.text.size()) +
                                    " 바이트가 계획의 " + fe.sha256.substr(0, 16) + "… · " + std::to_string(fe.bytes) + " 바이트와 다르다";
-        const bool fragmentFile = fe.name.size() > 2 && fe.name.compare(fe.name.size() - 2, 2, ".k") == 0;
-        if (fragmentFile) c.mismatch = detail;   // 조각은 값으로 대조한다(⑦)
-        else problem(0, "file_mismatch", detail);
+        if (fieldFiles.count(fe.name)) problem(0, "file_mismatch", detail);   // 변위장 — 바이트가 곧 값이다
+        else c.mismatch = detail;   // 조각은 값으로 대조한다(⑧) · 안 쓰는 파일은 경고(⑧ 끝)
     }
     // 줄이 가리키는 파일 — files 에 있어야 하고 머리의 bytes 가 files 의 bytes 와 같아야 한다(계획 안의 두 주장)
     std::set<std::string> usedFiles;   // 줄이 가리킨 동반 파일 — 바이트가 달랐는데 아무 줄도 안 쓴 조각은 값으로 못 대조했다고 말한다
@@ -326,13 +517,25 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
     const auto mids = definedMaterialIds();
     for (size_t kwl : parts.oddBlocks)
         problem(0, "deck_part_block", "줄 " + std::to_string(kwl + 1) + " 의 *PART 블록 — 데이터 줄이 제목 · 카드 짝으로 떨어지지 않는다");
-    std::vector<NonGridElementCard> auxCards;
-    std::set<std::string> opaqueKws;
+    std::vector<NonGridElementCard> auxCards;   // 칸 자리를 아는 격자 밖 요소(보 · 이산 · 질량 · 안전띠 · 플롯) — 나눠 쓴 절점 · EID 겹침이 본다
     forEachNonGridElementCard(rawLines_, [&](const NonGridElementCard& c) {
         if (c.known) auxCards.push_back(c);
-        else opaqueKws.insert(c.keyword);
     });
-    const auto midside = shellMidsideNodes(rawLines_);
+    // 절점 칸을 다 읽지 못하는 요소 블록 — 키워드마다 첫 줄 · 블록 수 · 까닭(`elementBlockGap`)
+    struct Gap { size_t first = 0, blocks = 0; std::string why; };
+    std::map<std::string, Gap> elemGaps;
+    bool hasEnd = false;   // 넣을 블록은 쓰기가 *END 자리에 낸다(writeOutput — 대문자 머리 「*END」)
+    for (size_t i = 0; i < rawLines_.size(); ++i) {
+        if (!cardcut::isKeywordLine(rawLines_[i])) continue;
+        const std::string kw = deckscan::kwBare(deckscan::keywordToken(rawLines_[i]));
+        hasEnd = hasEnd || kw.rfind("*END", 0) == 0;
+        if (kw.rfind("*ELEMENT_", 0) != 0) continue;
+        std::string why = elementBlockGap(rawLines_[i]);
+        if (why.empty()) continue;
+        Gap& g = elemGaps[kw];
+        if (g.blocks++ == 0) { g.first = i; g.why = std::move(why); }
+    }
+    const auto midside = shellMidsideNodes(rawLines_, baseMesh_);
     {
         std::vector<long long> unplanned;
         for (const auto& [pid, loc] : parts.plain) {
@@ -367,9 +570,64 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
         }
         for (auto& [pid, s] : ns) nodesOf[pid].assign(s.begin(), s.end());
     }
-    if (!geometryPids.empty() && !opaqueKws.empty())
-        problem(0, "opaque_elements", "덱에 칸 자리를 모르는 요소 블록이 있다 — " + join(opaqueKws) +
-                                          " · 그 요소가 고치는 PID 의 절점 · 요소를 쓰는지 단정할 수 없다");
+    // 덱을 고치는 줄 — 옮기기 · 모프 · 바꿔 넣기 · 지우기 · 조각이 있는 새 파트
+    const bool anyGeometry = !geometryPids.empty() || std::any_of(plan.added.begin(), plan.added.end(), [](const carryover::AddedRow& a) {
+                                 return a.valid && a.fragment.present && a.fragment.ok;
+                             });
+    if (anyGeometry && !elemGaps.empty()) {
+        std::string list;
+        for (const auto& [kw, g] : elemGaps)
+            list += (list.empty() ? "" : ", ") + kw + "(줄 " + std::to_string(g.first + 1) + " · 블록 " + std::to_string(g.blocks) + " · " + g.why + ")";
+        problem(0, "opaque_elements", "덱에 절점 칸을 다 읽지 못하는 요소 블록이 있다 — " + list +
+                                          " · 그 요소가 고치는 PID 의 절점 · 요소를 쓰는지 단정할 수 없고 번호 바닥도 그 EID 를 모른다");
+    }
+    // 요소 번호 겹침 — 리더는 요소를 번호 하나로 들고(한쪽을 잃는다) 쓰기는 지울 번호를 모든 요소 블록에서 지운다(리뷰 11-07 — 셸과
+    // 솔리드가 EID 하나를 나눠 써 지우지 않을 솔리드가 사라졌다). 날 줄을 직접 훑어 격자 · 격자 밖 요소 카드를 다 센다.
+    // 먼저 싸게 본다 — 격자 카드 수가 메시의 서로 다른 EID 수와 같고 격자 밖 EID 가 메시 · 서로와 안 겹치면 겹침이 없다(큰 덱에서 EID
+    // 표를 통째로 짓지 않는다). 수가 다르면(리더가 건너뛴 카드일 수도 있다) 표를 지어 실제로 겹친 번호를 찾는다
+    bool eidSuspect = false;
+    if (anyGeometry) {
+        size_t gridCards = 0;
+        forEachGridCard(rawLines_, baseMesh_, [&](const GridCard& c) { gridCards += deckscan::fieldInt(c.f, 0) > 0 ? 1 : 0; });
+        eidSuspect = gridCards != baseMesh_.elements.size();
+        std::unordered_set<int> auxSeen;
+        for (const auto& c : auxCards)
+            if (c.eid > 0 && (baseMesh_.elements.count(c.eid) || !auxSeen.insert(c.eid).second)) eidSuspect = true;
+    }
+    if (eidSuspect) {
+        std::vector<std::string> kwNames;
+        std::map<std::string, uint32_t> kwIndex;
+        std::unordered_map<int, std::pair<uint32_t, size_t>> first;     // EID → (키워드 · 줄)
+        std::map<int, std::vector<std::pair<uint32_t, size_t>>> dup;     // 겹친 EID → 나온 자리 전부
+        auto note = [&](int eid, const std::string& kw, size_t line) {
+            if (eid <= 0) return;
+            auto ki = kwIndex.emplace(kw, static_cast<uint32_t>(kwNames.size()));
+            if (ki.second) kwNames.push_back(kw);
+            const auto at = std::make_pair(ki.first->second, line);
+            auto f = first.emplace(eid, at);
+            if (f.second) return;
+            auto& d = dup[eid];
+            if (d.empty()) d.push_back(f.first->second);
+            d.push_back(at);
+        };
+        forEachGridCard(rawLines_, baseMesh_, [&](const GridCard& c) { note(deckscan::fieldInt(c.f, 0), *c.keyword, c.line); });
+        for (const auto& c : auxCards) note(c.eid, c.keyword, c.line);
+        if (!dup.empty()) {
+            std::string list;
+            std::set<std::string> kws;
+            size_t k = 0;
+            for (const auto& [eid, occ] : dup) {
+                for (const auto& o : occ) kws.insert(kwNames[o.first]);
+                if (k++ == 10) list += " …";
+                if (k > 10) continue;
+                std::string where;
+                for (const auto& o : occ) where += (where.empty() ? "" : " · ") + kwNames[o.first] + " 줄 " + std::to_string(o.second + 1);
+                list += (list.empty() ? "" : ", ") + ("EID " + std::to_string(eid) + "(" + where + ")");
+            }
+            problem(0, "eid_collision", "요소 번호가 겹친다 " + std::to_string(dup.size()) + " 개 — " + list + " · 키워드 " + join(kws) +
+                                            " · 이 덱은 요소를 번호로 가를 수 없다(리더는 한쪽만 들고 쓰기는 지울 번호를 모든 요소 블록에서 지운다)");
+        }
+    }
 
     // ── ⑤ 줄마다 — 덱에 있나 · 처리별 검사 ────────────────────────────────────
     std::map<long long, carryover::Field> fields;
@@ -427,9 +685,19 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
                     }
                 const double det = R[0][0] * (R[1][1] * R[2][2] - R[1][2] * R[2][1]) - R[0][1] * (R[1][0] * R[2][2] - R[1][2] * R[2][0]) +
                                    R[0][2] * (R[1][0] * R[2][1] - R[1][1] * R[2][0]);
-                if (!(orth <= 1e-9) || !(std::fabs(det - 1.0) <= 1e-9))
-                    problem(pid, "transform_not_rigid", "회전부가 강체가 아니다 — max|RᵀR − I| = " + num(orth) + " · det(R) = " + num(det) +
-                                                            " (허용 1e-9 — 늘림 · 기울임 · 거울을 받지 않는다)");
+                // 허용 1e-6 — StepForge 는 4×4 칸을 round(x, 9) 로 싣는다. 칸마다 5e-10 이 RᵀR 에 ~2e-9 까지 쌓여 1e-9 로는 돌린
+                // 강체의 다섯에 하나를 거절했다(리뷰 11-07 — z 축 23° 가 1.2e-9). 늘림 · 기울임 · 거울은 그보다 몇 자리 크다
+                if (!(orth <= 1e-6) || !(std::fabs(det - 1.0) <= 1e-6)) {
+                    char buf[128];
+                    std::snprintf(buf, sizeof(buf), "max|RᵀR − I| = %.12g · det(R) = %.12g", orth, det);
+                    problem(pid, "transform_not_rigid", std::string("회전부가 강체가 아니다 — ") + buf + " (허용 1e-6 — 늘림 · 기울임 · 거울을 받지 않는다)");
+                }
+                double offIdentity = 0;
+                for (int i = 0; i < 3; ++i)
+                    for (int j = 0; j < 3; ++j) offIdentity = std::max(offIdentity, std::fabs(R[i][j] - (i == j ? 1.0 : 0.0)));
+                if (offIdentity > 1e-12)
+                    warn(pid, "orientation_not_rotated", "PID " + std::to_string(pid) + " 를 돌린다 — 절점 자리만 돌리고 재질 축(AOPT 벡터) · " +
+                                                             "좌표계(*DEFINE_COORDINATE_*) · 셸 MCID · 초기 응력 · 변형률은 돌리지 않는다(사람이 확인한다)");
                 for (int k = 0; k < 3; ++k)
                     if (std::fabs(row.translation[static_cast<size_t>(k)] - m[static_cast<size_t>(4 * k + 3)]) >
                         1e-9 * std::max(1.0, std::fabs(m[static_cast<size_t>(4 * k + 3)]))) {
@@ -472,7 +740,9 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
                 break;
             }
             case Action::Remesh:
-                if (!row.fragment.ok) problem(pid, "fragment_failed", "조각을 못 지었다 — " + row.fragment.why);
+                if (!row.fragment.ok)
+                    problem(pid, "fragment_failed", "조각을 못 지었다 — " + (row.fragment.why.empty() ? std::string("StepForge 가 까닭을 적지 않았다")
+                                                                                                     : row.fragment.why));
                 break;
             default:
                 break;
@@ -484,7 +754,8 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
         for (const auto& a : plan.added) {
             if (!a.valid || !a.fragment.present) continue;
             if (!a.fragment.ok) {
-                problem(a.pid, "fragment_failed", "새 파트 " + a.name + " 의 조각을 못 지었다 — " + a.fragment.why);
+                problem(a.pid, "fragment_failed", "새 파트 " + a.name + " 의 조각을 못 지었다 — " +
+                                                      (a.fragment.why.empty() ? std::string("StepForge 가 까닭을 적지 않았다") : a.fragment.why));
                 continue;
             }
             const long long pid = a.fragment.pid;
@@ -610,6 +881,46 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
                                               " · 바꿔 넣거나 지우는 PID 를 가리키지 않는다고 증명할 수 없다");
             }
         }
+        // ★정본이 보지도 세지도 않는 키워드 — 참조 없는 표(`refCover`)에 없으면 거절한다(리뷰 11-07 — *CONSTRAINED_SHELL_TO_SOLID ·
+        // *LOAD_SEGMENT · *DEFINE_VECTOR_NODES … 가 지운 절점을 가리킨 채 rc 0 으로 나갔다). 키워드마다 한 번 · 첫 줄과 블록 수
+        {
+            struct Uncov { size_t first = 0, blocks = 0; bool partOnly = false; };
+            std::map<std::string, Uncov> unscanned;
+            const bool deleting = !deletePids.empty();
+            for (size_t i = 0; i < rawLines_.size(); ++i) {   // 키워드 줄만 본다(큰 *NODE 블록의 줄 표를 짓지 않는다)
+                if (!cardcut::isKeywordLine(rawLines_[i])) continue;
+                const std::string kw = deckscan::kwBare(deckscan::keywordToken(rawLines_[i]));
+                if (kw.rfind("*SET_", 0) == 0 || kw.rfind("*INCLUDE", 0) == 0) continue;   // 세트 표(아래) · 인클루드(①)가 본다
+                Cover cv;
+                if (kw.rfind("*ELEMENT_", 0) == 0) {
+                    // 절점 칸은 요소 블록 판정(④)이 · 격자 밖 요소의 PID 는 aux_in_part 가 본다. 보 `_PID` 옵션 카드의 PID1 · PID2 와
+                    // `*ELEMENT_MASS_PART` 의 ID(파트)는 아무도 읽지 않는다(Vol_I 155771 · 160154) — `_SET` 은 파트 세트 ID 다
+                    const bool massPart = hasOption(kw, "*ELEMENT_MASS", "PART");
+                    cv = (hasOption(kw, "*ELEMENT_BEAM", "PID") || (massPart && !hasOption(kw, "*ELEMENT_MASS", "SET"))) ? Cover::PartOnly
+                                                                                                                            : Cover::Scanned;
+                } else {
+                    cv = refCover(kw);
+                    // *LOAD_NODE_POINT 의 M1-M3(칸 6-8)는 따름 힘의 절점이다(Vol_I *LOAD_NODE — DOF 4 · 8). 정본은 칸 1 만 읽는다
+                    if (cv == Cover::Scanned && kw.rfind("*LOAD_NODE_POINT", 0) == 0)
+                        for (size_t d = i + 1; d < rawLines_.size() && !cardcut::isKeywordLine(rawLines_[d]); ++d) {
+                            if (cardcut::isCommentLine(rawLines_[d])) continue;
+                            const auto c = cardcut::cut(rawLines_[d], fw >= 20 ? 20 : 10);
+                            for (size_t q = 5; q < 8 && q < c.f.size(); ++q) {
+                                int v = 0;
+                                if (!deckscan::trim(c.f[q]).empty() && (!cards::toInt(c.f[q], v) || v != 0)) cv = Cover::Unscanned;
+                            }
+                        }
+                }
+                if (cv == Cover::Free || cv == Cover::Scanned || (cv == Cover::PartOnly && !deleting)) continue;
+                Uncov& u = unscanned[kw];
+                if (u.blocks++ == 0) { u.first = i; u.partOnly = cv == Cover::PartOnly; }
+            }
+            for (const auto& [kw, u] : unscanned)
+                problem(0, "ref_unscanned", kw + "(줄 " + std::to_string(u.first + 1) + " · 블록 " + std::to_string(u.blocks) + ") — " +
+                                                (u.partOnly ? std::string("파트 ID 칸을 정본이 읽지 않는다 · 지우는 PID 를 가리키지 않는다고 증명할 수 없다")
+                                                            : std::string("절점 · 요소 · 파트 칸을 정본(NodeRefs · IdRefs)이 읽지 않고 참조 없는 키워드 표에도 없다 · "
+                                                                          "바꿔 넣거나 지우는 PID 를 가리키지 않는다고 증명할 수 없다")));
+        }
         // 접촉 면 — 세트로 건 면은 정본(`ct_setMembers`)으로 풀어 본다(방언 `_ADD` · `_GENERATE` … 까지)
         auto sets = ct_parseSets(rawLines_);
         ct_resolveSetRanges(sets, baseMesh_);
@@ -647,28 +958,40 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
                                                        " 곳 담는다 — 바꿔 넣거나 지우면 그 면이 조용히 비거나 깨진다");
             }
         }
-        // 방언 세트(_GENERATE · _ADD · _INTERSECT) — 정본 칸 표가 읽지 않는 꼴이라 풀어서 본다(평범한 목록은 위 정본이 봤다)
+        // 세트 — 평범한 목록 · `_COLUMN` 은 위 정본이 읽었다. 방언(_GENERATE · _ADD · _INTERSECT)은 정본 해석기로 풀어 보고, 풀 수 없으면
+        // (`_GENERAL` 의 옵션 줄 · `_ADVANCED` · 없는 멤버 세트 · 순환) 거절한다(리뷰 11-07 — `*SET_NODE_GENERAL` 의 PART 줄이 지운 PID 를
+        // 담은 채 rc 0 으로 나갔다). 종류를 모르는 세트(*SET_DISCRETE · *SET_NODE_INTERVAL …)는 정본도 해석기도 보지 않는다 — 거절한다
         for (const auto& s : sets) {
-            if (s.dialect.empty() || s.dialect == "COLLECT") continue;
-            const bool elemSet = s.type == "SHELL" || s.type == "SOLID" || s.type == "TSHELL" || s.type == "BEAM";
-            const bool nodeSet = s.type == "NODE" || s.type == "SEGMENT";
-            const bool partSet = s.type == "PART" && !deletePids.empty();
-            if (!elemSet && !nodeSet && !partSet) continue;
-            const auto m = ct_setMembers(sets, s.id, s.type);
-            if (!m.found || !m.resolved) continue;   // 풀 수 없는 방언 — 접촉 면이면 위에서 말했다
+            const std::string type = s.type == "NODE_SMOOTH" ? "NODE" : s.type;   // *SET_NODE_LIST_SMOOTH — 정본은 목록으로 읽는다
+            const bool elemSet = type == "SHELL" || type == "SOLID" || type == "TSHELL" || type == "BEAM";
+            const bool nodeSet = type == "NODE" || type == "SEGMENT";
+            const bool partSet = type == "PART";
+            const std::string where = deckscan::kwBare(deckscan::keywordToken(rawLines_[static_cast<size_t>(s.startLine)])) + " " +
+                                      std::to_string(s.id) + "(줄 " + std::to_string(s.startLine + 1) + ")";
+            if (!elemSet && !nodeSet && !partSet) {
+                problem(0, "ref_unscanned", where + " — 세트 종류 " + s.type +
+                                                " 의 멤버를 정본도 세트 해석기도 읽지 않는다 · 바꿔 넣거나 지우는 PID 를 담지 않는다고 증명할 수 없다");
+                continue;
+            }
+            if (partSet && deletePids.empty()) continue;   // 파트 세트는 바꿔 넣기에서 산다
+            if (s.dialect.empty() || s.dialect == "COLLECT" || s.dialect == "COLUMN") continue;   // 정본 칸 표가 읽었다
+            const auto m = ct_setMembers(sets, s.id, type);
+            if (!m.found || !m.resolved) {
+                problem(0, "set_unresolved", where + " — 멤버를 풀 수 없다(" + (m.found ? m.why : std::string("덱에 없다")) +
+                                                 ") · 바꿔 넣거나 지우는 PID 를 담지 않는다고 증명할 수 없다");
+                continue;
+            }
             std::map<long long, long long> hits;
             for (const auto& seg : m.segments)
                 for (int n : seg)
                     if (auto it = nodeOwner.find(n); it != nodeOwner.end()) ++hits[it->second];
             for (int v : m.ids) {
                 if (elemSet) { if (auto it = elemOwner.find(v); it != elemOwner.end()) ++hits[it->second]; }
-                else if (s.type == "NODE") { if (auto it = nodeOwner.find(v); it != nodeOwner.end()) ++hits[it->second]; }
+                else if (type == "NODE") { if (auto it = nodeOwner.find(v); it != nodeOwner.end()) ++hits[it->second]; }
                 else if (partSet && deletePids.count(v)) ++hits[v];
             }
             for (const auto& [owner, cnt] : hits)
-                problem(owner, "set_member", "*SET_" + s.type + "_" + s.dialect + " " + std::to_string(s.id) + "(줄 " +
-                                                 std::to_string(s.startLine + 1) + ")이 이 PID 를 " + std::to_string(cnt) +
-                                                 " 곳 담는다 — 바꿔 넣거나 지우면 그 세트가 조용히 바뀐다");
+                problem(owner, "set_member", where + "이 이 PID 를 " + std::to_string(cnt) + " 곳 담는다 — 바꿔 넣거나 지우면 그 세트가 조용히 바뀐다");
         }
     }
 
@@ -690,6 +1013,9 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
         const auto& a = plan.added[k];
         if (a.valid && a.fragment.present && a.fragment.ok) jobs.push_back({a.fragment.pid, true, k, &a.fragment, {}, {}});
     }
+    // 넣을 조각은 쓰기가 *END 자리에 낸다 — *END 가 없는 덱이면 블록이 조용히 빠지고 되읽기 대조가 엉뚱한 까닭으로 멈췄다(리뷰 11-07)
+    if (!jobs.empty() && !hasEnd)
+        problem(0, "deck_no_end", "덱에 *END 가 없다 — 조각(바꿔 넣기 · 새 파트)은 *END 앞에 넣는다 · 잘린 덱일 수 있다(끝에 *END 를 두고 계획을 다시 짓는다)");
     std::set<long long> newSecids;
     for (auto& j : jobs) {
         const auto& h = *j.h;
@@ -793,8 +1119,8 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, carryover::
     for (const auto& j : jobs) (j.added ? jobOfAdded : jobOfRow)[j.row] = &j;
     auto insertFragment = [&](const Job& j, const std::string& title) {
         const auto& h = *j.h;
-        std::ostringstream head;
-        head << "$\n$ === apply_carryover_plan — " << title << " · StepForge 조각 " << h.file << " ===\n"
+        std::ostringstream head;   // 계획이 준 글자(이름 · 파일 이름)는 한 줄로 — 주석 줄을 끊고 카드를 심지 못하게
+        head << "$\n$ === apply_carryover_plan — " << oneLine(title) << " · StepForge 조각 " << oneLine(h.file) << " ===\n"
              << "$ 번호 — 절점 " << h.nodeLo + shiftNode << "~" << h.nodeHi + shiftNode << " · 요소 " << h.elemLo + shiftElem << "~"
              << h.elemHi + shiftElem;
         if (shiftNode || shiftElem) head << " (조각 번호에서 절점 +" << shiftNode << " · 요소 +" << shiftElem << " 옮김)";
@@ -1063,7 +1389,7 @@ bool ModelAssembler::verifyCarryoverOutput(const std::string& deckPath, carryove
     }
     if (P.size() != before) return finish();   // 대조가 틀린 덱의 품질은 재지 않는다
 
-    // ⑦ 품질 관문 — 새로 뒤집힌 솔리드(야코비안 ≤ 0) · 법선이 뒤집힌 셸(옮기기 · 모프)
+    // ⑦ 품질 관문 — 새로 뒤집힌 솔리드(야코비안 ≤ 0) · 법선이 뒤집힌 셸(모프)
     std::map<long long, std::vector<const Element*>> inBefore, inAfter;
     {
         std::set<long long> gp;
@@ -1087,6 +1413,9 @@ bool ModelAssembler::verifyCarryoverOutput(const std::string& deckPath, carryove
                 const Element* ea = out.getElement(eb.id);
                 if (!ea) continue;   // ⑤가 이미 말했다
                 if (eb.type == ElementType::QUAD4) {
+                    // 셸 법선은 모프에서만 견준다 — 옮기기는 det +1 강체라 뒤집을 수 없고, 세계 축으로 앞뒤 법선을 견주면 크게 돌린 셸이
+                    // 「뒤집혔다」고 나왔다(리뷰 11-07 — 180° · 100° 회전)
+                    if (g.action != Action::Morph) continue;
                     ++shells;
                     Vector3D nb, na;
                     const bool okB = shellNormal(baseMesh_, eb, nb), okA = shellNormal(out, *ea, na);

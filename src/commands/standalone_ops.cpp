@@ -1837,44 +1837,79 @@ int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
             else console.warning(line);
         }
     };
+    // 거절하면 출력 자리에 덱을 남기지 않는다 — 앞선 실행이 남긴 덱이 ok false 보고 옆에 앉아 있으면 그것을 이번 산출로 읽는다(리뷰 11-07)
+    std::error_code staleEc;
+    const bool staleAtStart = std::filesystem::exists(outPath, staleEc);
+    auto dropOutput = [&]() {
+        std::error_code ec;
+        if (!std::filesystem::exists(outPath, ec)) return;
+        if (!std::filesystem::remove(outPath, ec)) {
+            console.warning(std::string("[") + tag + "] 출력 자리의 덱을 지우지 못했다: " + outPath);
+            return;
+        }
+        rep.warnings.push_back({0, "stale_output_removed", "출력 자리(" + outPath + ")에 있던 덱을 지웠다" +
+                                                              (staleAtStart ? std::string(" — 앞선 실행이 남긴 덱이다") : std::string()) +
+                                                              " · 거절한 보고 옆에 이번 산출이 아닌 덱이 남지 않게"});
+    };
     auto refuse = [&](const std::string& why) {
+        rep.ok = false;
+        rep.deckShaOut.clear();
+        dropOutput();
         printList(rep.problems, true);
         printList(rep.warnings, false);
         writeReport();
         console.error(std::string("[") + tag + "] " + why);
         return 1;
     };
-
-    ModelAssembler assembler;
-    if (!assembler.loadBaseModel(modelPath)) {
-        rep.problems.push_back({0, "deck_read", assembler.getErrorMessage()});
-        return refuse("덱을 읽지 못했다 — 덱을 쓰지 않았다");
-    }
-    if (!assembler.applyCarryoverPlan(planPath, rep))
-        return refuse("사전 검사에서 " + std::to_string(rep.problems.size()) + " 건이 걸렸다 — 계획 전체를 적용하지 않았고 덱을 쓰지 않았다");
-    for (const auto& msg : assembler.infoMessages) console.println(msg);
-    if (!writeOutputChecked(assembler, outputPrefix, tag, console)) {
-        rep.problems.push_back({0, "write", assembler.getErrorMessage().empty() ? std::string("쓰기 관문에서 멈췄다") : assembler.getErrorMessage()});
+    auto unapply = [&]() {
         for (auto& pr : rep.parts) if (pr.result == "applied") pr.result = "skipped";
         for (auto& ar : rep.added) if (ar.result == "applied") ar.result = "skipped";
-        return refuse("덱 쓰기가 멈췄다 — 산출이 없다");
+    };
+
+    // 이 op 안의 어떤 예외도 보고를 남기고 덱을 남기지 않는다(리뷰 11-07 — map::at 이 보고 없이 rc 1 로 끝났다)
+    bool wrote = false;   // 이번 실행이 덱을 썼다(예외가 나면 지운다)
+    std::string internal;
+    try {
+        ModelAssembler assembler;
+        if (!assembler.loadBaseModel(modelPath)) {
+            rep.problems.push_back({0, "deck_read", assembler.getErrorMessage()});
+            return refuse("덱을 읽지 못했다 — 덱을 쓰지 않았다");
+        }
+        if (!assembler.applyCarryoverPlan(planPath, rep))
+            return refuse("사전 검사에서 " + std::to_string(rep.problems.size()) + " 건이 걸렸다 — 계획 전체를 적용하지 않았고 덱을 쓰지 않았다");
+        for (const auto& msg : assembler.infoMessages) console.println(msg);
+        if (!writeOutputChecked(assembler, outputPrefix, tag, console)) {
+            rep.problems.push_back({0, "write", assembler.getErrorMessage().empty() ? std::string("쓰기 관문에서 멈췄다") : assembler.getErrorMessage()});
+            unapply();
+            return refuse("덱 쓰기가 멈췄다 — 산출이 없다");
+        }
+        wrote = true;
+        if (!assembler.verifyCarryoverOutput(outPath, rep)) {
+            std::remove(outPath.c_str());
+            return refuse("쓴 덱의 대조 · 품질 관문에서 걸렸다 — 산출을 지웠다: " + outPath);
+        }
+        {
+            std::ifstream o(outPath, std::ios::binary);
+            std::ostringstream ss;
+            ss << o.rdbuf();
+            rep.deckShaOut = KooRemapper::util::sha256Hex(ss.str());
+        }
+        rep.ok = true;
+        printList(rep.warnings, false);
+        if (!writeReport()) {
+            std::remove(outPath.c_str());   // rc 1 이면 산출이 없다 — 보고 없이 덱만 남기지 않는다
+            return 1;
+        }
+        console.println(std::string("[") + tag + "] Done -> " + outPath + "  (sha256 " + rep.deckShaOut + ")");
+        return 0;
+    } catch (const std::exception& e) {
+        internal = e.what();
+    } catch (...) {
+        internal = "알 수 없는 예외";
     }
-    if (!assembler.verifyCarryoverOutput(outPath, rep)) {
-        std::remove(outPath.c_str());
-        return refuse("쓴 덱의 대조 · 품질 관문에서 걸렸다 — 산출을 지웠다: " + outPath);
-    }
-    {
-        std::ifstream o(outPath, std::ios::binary);
-        std::ostringstream ss;
-        ss << o.rdbuf();
-        rep.deckShaOut = KooRemapper::util::sha256Hex(ss.str());
-    }
-    rep.ok = true;
-    printList(rep.warnings, false);
-    if (!writeReport()) {
-        std::remove(outPath.c_str());   // rc 1 이면 산출이 없다 — 보고 없이 덱만 남기지 않는다
-        return 1;
-    }
-    console.println(std::string("[") + tag + "] Done -> " + outPath + "  (sha256 " + rep.deckShaOut + ")");
-    return 0;
+    if (wrote) std::remove(outPath.c_str());   // 이번에 쓴 덱 — 대조를 마치지 못했다
+    rep.problems.push_back({0, "internal_error", "이월 적용 안에서 예외가 났다(" + internal + ") — 덱을 쓰지 않았다" +
+                                                     (wrote ? std::string("(쓴 덱은 지웠다)") : std::string()) + " · 이 op 의 결함이다(보고와 입력을 알려 주세요)"});
+    unapply();
+    return refuse("내부 오류로 멈췄다 — 산출이 없다");
 }

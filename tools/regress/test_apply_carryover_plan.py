@@ -18,6 +18,9 @@
 
 무엇을 보나.
   A 진리값 판(examples/apply_carryover_plan) · B 12 파트 덱(mesh12) · C 거절 · D 개행 · E YAML · F 바닥(보 요소) · G 품질 관문
+  H 덱이 숨긴 것(리뷰 11-07) — 리더가 담지 않는 요소 블록 · 정본 밖 참조 · 풀 수 없는 세트 · EID 겹침 · *END 없음
+  I 계획의 실제 꼴(리뷰 11-07) — 돌린 강체의 반올림 · 셸 회전 · 셸 새 섹션 T1 · 못 지은 조각 · check 없는 transform · 이름 주입
+  J 산출 자리(리뷰 11-07) — 확장자가 아닌 몫으로 가른 동반 파일 · 거절하면 옛 산출을 지운다
 
 usage: test_apply_carryover_plan.py <KooRemapper 바이너리>
 """
@@ -195,6 +198,9 @@ def main():
         part_e(binary)
         part_f(binary)
         part_g(binary)
+        part_h(binary)
+        part_i(binary)
+        part_j(binary)
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
     print()
@@ -261,6 +267,8 @@ def part_a(binary):
           rep["touches_changed"] == [{"pid": 8, "with": [3]}], json.dumps(rep["parts"], ensure_ascii=False)[:500])
     rc2, out2 = run(binary, d, "info", "--strict", "deck_applied.k")
     check("A-10 info --strict 가 산출 덱을 받는다(미정의 참조 0)", rc2 == 0 and "참조 무결성 OK" in out2, out2[-300:])
+    check("A-11 옮기기만 한 PID(회전 없음)에는 orientation_not_rotated 경고가 없다",
+          "orientation_not_rotated" not in {x["kind"] for x in rep["warnings"]}, rep["warnings"])
 
 
 def part_b(binary):
@@ -568,6 +576,314 @@ def part_g(binary):
     refused("G-2 셸 모프가 법선을 뒤집는다 → quality_flipped(PID 4) · 산출을 지웠다", rc, out, rep, d, "quality_flipped", 4)
     fl = next((r for r in rep.get("parts", []) if r["pid"] == 4), {})
     check("G-3 보고에 그 PID 의 flipped 수가 있다", fl.get("flipped", 0) >= 1 and fl.get("result") == "refused", fl)
+
+
+# ── 리뷰 11-07 — 덱이 숨긴 것 · 계획의 실제 꼴 · 산출 자리 ─────────────────────────────────────
+
+def add_before_end(d, text):
+    """덱의 *END 앞에 블록을 넣고 계획의 deck.sha256 을 다시 박는다."""
+    p = os.path.join(d, "deck.k")
+    write(p, open(p, encoding="utf-8").read().replace("*END", text + "*END"))
+    reseal(d)
+
+
+def deck_line(d, keyword):
+    """그 키워드 줄의 1-기반 줄 번호(첫 것)."""
+    for i, ln in enumerate(open(os.path.join(d, "deck.k"), encoding="utf-8").read().split("\n")):
+        if ln.strip().upper() == keyword:
+            return i + 1
+    return -1
+
+
+def details(rep, kind):
+    return " ".join(x["detail"] for x in rep.get("problems", []) if x["kind"] == kind)
+
+
+def keep_only(d, but=()):
+    """계획의 줄을 keep 으로(but 의 PID 는 그대로) · 새 파트의 조각은 null 로."""
+    p = plan_load(d)
+    for r in p["parts"]:
+        if r["pid"] in but:
+            continue
+        for k in ("transform", "translation", "rotation_deg", "check", "field", "instead", "fragment", "shared_nodes"):
+            r.pop(k, None)
+        r["action"] = "keep"
+    for a in p["added"]:
+        a["fragment"] = None
+    plan_save(d, p)
+
+
+def solid_eid_of(e0, pid):
+    return min(eid for eid, (p, ns) in e0.items() if p == pid and len(ns) == 8)
+
+
+def part_h(binary):
+    print("[H 덱이 숨긴 것 — 리더가 담지 않는 요소 블록 · 정본 밖 참조 · 풀 수 없는 세트 · EID 겹침 · *END 없음]")
+    _n, e0, _p, _s, _m = read_deck(os.path.join(EX, "deck.k"))
+    pn = pid_nodes(e0)
+    n1, n4, n7 = sorted(pn[1]), sorted(pn[4]), sorted(pn[7])
+    ortho = ("*ELEMENT_SOLID_ORTHO\n" + "%8d%8d" % (9000, 8) + "".join("%8d" % n for n in n7[:8]) + "\n" +
+             "%16.6e%16.6e%16.6e\n%16.6e%16.6e%16.6e\n" % (1.0, 0.0, 0.0, 0.0, 1.0, 0.0))
+    d = stage(EX, "h1")
+    add_before_end(d, ortho)
+    rc, out, rep = apply_case(binary, d)
+    refused("H-1 *ELEMENT_SOLID_ORTHO(리더가 담지 않는 변형)가 지우는 PID 7 의 절점을 쓴다 → opaque_elements", rc, out, rep, d,
+            "opaque_elements")
+    det = details(rep, "opaque_elements")
+    check("H-1b 그 키워드와 줄을 말한다", "*ELEMENT_SOLID_ORTHO(줄 %d" % deck_line(d, "*ELEMENT_SOLID_ORTHO") in det, det[:300])
+    keep_only(d)
+    rc, out, rep = apply_case(binary, d)
+    check("H-1c keep 뿐인 계획은 같은 덱도 받는다(덱을 고치는 줄이 없다)", rc == 0 and rep.get("ok") is True, (rc, sorted(kinds(rep))))
+
+    d = stage(EX, "h2")
+    blocks = (ortho +
+              "*ELEMENT_TSHELL_BETA\n" + "%8d%8d" % (9001, 1) + "".join("%8d" % n for n in n1[:8]) + "\n%16.6e\n" % 0.0 +
+              "*ELEMENT_SOLID_H8TOH20\n%8d%8d\n" % (9002, 1) + "".join("%8d" % n for n in n1[:8]) + "\n" +
+              "*ELEMENT_BEAM_WARPAGE\n%8d%8d%8d%8d%8d\n%8d%8d\n" % (9003, 1, n1[0], n1[1], 0, n1[2], n1[3]))
+    add_before_end(d, blocks)
+    keep_only(d, but=(3,))
+    rc, out, rep = apply_case(binary, d)
+    det = details(rep, "opaque_elements")
+    refused("H-2 옮기기 하나만 있어도 거절 → opaque_elements", rc, out, rep, d, "opaque_elements")
+    check("H-2b 키워드 넷(ORTHO · TSHELL_BETA · H8TOH20 · BEAM_WARPAGE)을 모두 말한다",
+          all(k + "(줄 " in det for k in ("*ELEMENT_SOLID_ORTHO", "*ELEMENT_TSHELL_BETA", "*ELEMENT_SOLID_H8TOH20",
+                                           "*ELEMENT_BEAM_WARPAGE")), det[:500])
+    d = stage(EX, "h2c")
+    add_before_end(d, "*ELEMENT_MASS_PART\n%8d%16.6e%16.6e\n" % (7, 0.001, 0.0))   # 절점 칸이 없다(ID ADDMASS FINMASS …)
+    rc, out, rep = apply_case(binary, d)
+    refused("H-2c *ELEMENT_MASS_PART 가 지우는 PID 7 을 가리킨다 → 거절(파트 칸)", rc, out, rep, d, "ref_unscanned")
+    check("H-2d 그것은 절점 칸이 없는 블록이다 — opaque_elements 가 아니다", "opaque_elements" not in kinds(rep), sorted(kinds(rep)))
+    keep_only(d, but=(3,))
+    rc, out, rep = apply_case(binary, d)
+    check("H-2e 같은 덱에 옮기기만 하면 받는다", rc == 0 and rep.get("ok") is True, (rc, sorted(kinds(rep))))
+
+    d = stage(EX, "h3")
+    lines = open(os.path.join(d, "deck.k"), encoding="utf-8").read().split("\n")
+    se = solid_eid_of(e0, 1)
+    kw = ""
+    for i, ln in enumerate(lines):
+        if ln.startswith("*"):
+            kw = ln.strip().upper()
+        elif kw == "*ELEMENT_SHELL" and ln.strip() and not ln.startswith("$"):
+            lines[i] = "%8d" % se + ln[8:]                 # 셸(PID 4 — remesh) 하나가 솔리드(PID 1 — keep)의 EID 를 쓴다
+            break
+    write(os.path.join(d, "deck.k"), "\n".join(lines))
+    reseal(d)
+    rc, out, rep = apply_case(binary, d)
+    det = details(rep, "eid_collision")
+    refused("H-3 셸과 솔리드가 EID 하나를 나눠 쓴다 → eid_collision", rc, out, rep, d, "eid_collision")
+    check("H-3b 겹친 EID 와 두 키워드를 말한다", ("EID %d(" % se) in det and "*ELEMENT_SOLID 줄" in det and "*ELEMENT_SHELL 줄" in det,
+          det[:300])
+    d = stage(EX, "h3c")
+    add_before_end(d, "*ELEMENT_BEAM\n%8d%8d%8d%8d\n" % (se, 1, 1, 2))
+    rc, out, rep = apply_case(binary, d)
+    refused("H-3c 보가 솔리드의 EID 를 쓴다 → eid_collision(*ELEMENT_BEAM)", rc, out, rep, d, "eid_collision")
+    check("H-3d 보고에 *ELEMENT_BEAM 이 있다", "*ELEMENT_BEAM" in details(rep, "eid_collision"), details(rep, "eid_collision")[:300])
+
+    d = stage(EX, "h4")
+    add_before_end(d, "*SET_NODE_LIST\n%10d\n%10d%10d\n*CONSTRAINED_SHELL_TO_SOLID\n%10d%10d\n" % (91, 1, 2, n7[0], 91))
+    rc, out, rep = apply_case(binary, d)
+    refused("H-4 *CONSTRAINED_SHELL_TO_SOLID 가 지우는 PID 7 의 절점을 가리킨다(정본 밖) → ref_unscanned", rc, out, rep, d,
+            "ref_unscanned")
+    det = details(rep, "ref_unscanned")
+    check("H-4b 키워드와 줄을 한 번 말한다", det.count("*CONSTRAINED_SHELL_TO_SOLID(줄 %d" % deck_line(d, "*CONSTRAINED_SHELL_TO_SOLID")) == 1,
+          det[:300])
+
+    d = stage(EX, "h5")
+    add_before_end(d, "*INITIAL_VELOCITY_RIGID_BODY\n%10d%10.1f%10.1f%10.1f\n" % (7, 1.0, 0.0, 0.0))
+    rc, out, rep = apply_case(binary, d)
+    refused("H-5 *INITIAL_VELOCITY_RIGID_BODY 가 지우는 PID 7 을 가리킨다(파트 칸) → ref_unscanned", rc, out, rep, d, "ref_unscanned")
+    p = plan_load(d)
+    for r in p["parts"]:
+        if r["pid"] == 7:
+            r["action"] = "keep"
+    plan_save(d, p)
+    rc, out, rep = apply_case(binary, d)
+    check("H-5b 지우지 않으면(바꿔 넣기 · 옮기기만) PID 로 건 참조는 산다 → rc 0", rc == 0 and rep.get("ok") is True, (rc, sorted(kinds(rep))))
+
+    d = stage(EX, "h6")
+    add_before_end(d, "*SET_NODE_GENERAL\n%10d\nPART      %10d\n" % (92, 7))
+    rc, out, rep = apply_case(binary, d)
+    refused("H-6 *SET_NODE_GENERAL(PART 7 — 풀 수 없는 방언) → set_unresolved", rc, out, rep, d, "set_unresolved")
+    d = stage(EX, "h6b")
+    add_before_end(d, "*SET_DISCRETE_LIST\n%10d\n%10d\n" % (93, 1))
+    rc, out, rep = apply_case(binary, d)
+    refused("H-6b 종류를 모르는 세트(*SET_DISCRETE_LIST) → ref_unscanned", rc, out, rep, d, "ref_unscanned")
+
+    curve = "*DEFINE_CURVE\n%10d\n%20.6e%20.6e\n%20.6e%20.6e\n" % (9, 0.0, 1.0, 1.0, 1.0)
+    d = stage(EX, "h7")
+    add_before_end(d, curve + "*LOAD_NODE_POINT\n%10d%10d%10d%10.1f%10d%10d%10d%10d\n" % (n1[0], 4, 9, 1.0, 0, n4[0], n4[1], n4[2]))
+    rc, out, rep = apply_case(binary, d)
+    refused("H-7 *LOAD_NODE_POINT 의 M1-M3(따름 힘 절점)이 바꿔 넣는 PID 4 의 절점 → ref_unscanned", rc, out, rep, d, "ref_unscanned")
+    d = stage(EX, "h7b")
+    add_before_end(d, curve + "*LOAD_NODE_POINT\n%10d%10d%10d%10.1f\n" % (n1[0], 3, 9, 1.0))
+    rc, out, rep = apply_case(binary, d)
+    check("H-7b M1-M3 가 비면 정본이 읽는다 → rc 0", rc == 0 and rep.get("ok") is True, (rc, sorted(kinds(rep))))
+
+    d = stage(EX, "h8")
+    typical = ("*CONTROL_TERMINATION\n%10.4f\n*CONTROL_TIMESTEP\n%10.1f%10.2f\n*CONTROL_ENERGY\n%10d%10d%10d%10d\n" % (0.01, 0.0, 0.9, 2, 2, 2, 2) +
+               "*DATABASE_GLSTAT\n%10.1e\n*DATABASE_MATSUM\n%10.1e\n*DATABASE_BINARY_D3PLOT\n%10.1e\n" % (1e-4, 1e-4, 1e-3) +
+               curve + "*HOURGLASS\n%10d%10d\n*DAMPING_GLOBAL\n%10d%10.3f\n" % (1, 4, 0, 0.001) +
+               "*SET_NODE_LIST\n%10d\n%10d%10d\n*BOUNDARY_SPC_SET\n%10d%10d%10d%10d%10d%10d%10d%10d\n" % (95, 1, 2, 95, 0, 1, 1, 1, 0, 0, 0) +
+               "*INITIAL_VELOCITY\n%10d\n%10.1f%10.1f%10.1f\n" % (95, 0.0, 0.0, -1000.0) +
+               "*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE\n%10d%10d%10d%10d\n\n\n" % (1, 8, 3, 3))
+    add_before_end(d, typical)
+    rc, out, rep = apply_case(binary, d)
+    check("H-8 흔한 제어 · 출력 · 곡선 · 세트 구속 · 초기 속도 · PID 접촉(지우지 않는 파트)은 받는다 → rc 0",
+          rc == 0 and rep.get("ok") is True and not kinds(rep), (rc, sorted(kinds(rep)), details(rep, "ref_unscanned")[:300]))
+
+    d = stage(EX, "h9")
+    write(os.path.join(d, "deck.k"), open(os.path.join(d, "deck.k"), encoding="utf-8").read().replace("*END\n", ""))
+    reseal(d)
+    rc, out, rep = apply_case(binary, d)
+    refused("H-9 *END 가 없는 덱에 조각을 넣는다 → deck_no_end", rc, out, rep, d, "deck_no_end")
+    keep_only(d, but=(3,))
+    rc, out, rep = apply_case(binary, d)
+    check("H-9b 조각이 없으면(옮기기만) *END 가 없어도 받는다", rc == 0 and rep.get("ok") is True, (rc, sorted(kinds(rep))))
+
+
+def part_i(binary):
+    print("[I 계획의 실제 꼴 — 돌린 강체의 반올림 · 셸 회전 · 셸 새 섹션 T1 · 못 지은 조각 · check 없는 transform · 이름 주입]")
+    c, s = 0.920504853, 0.390731128          # z 축 23° — StepForge 가 round(x, 9) 로 싣는 꼴(max|RᵀR − I| ≈ 1.2e-9)
+    m = [c, -s, 0.0, 4.70226275, s, c, 0.0, -3.112359819, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+    d = stage(EX, "i1")
+    p = plan_load(d)
+    for r in p["parts"]:
+        if r["pid"] == 3:
+            r.update({"transform": m, "translation": [m[3], m[7], m[11]], "rotation_deg": 23.0})
+            r.pop("check", None)                 # StepForge 는 확인 재료가 없으면 check 를 쓰지 않는다
+    plan_save(d, p)
+    rc, out, rep = apply_case(binary, d)
+    n0 = read_deck(os.path.join(d, "deck.k"))[0]
+    n1 = read_deck(os.path.join(d, "deck_applied.k"))[0] if rc == 0 else {}
+    pn = pid_nodes(read_deck(os.path.join(d, "deck.k"))[1])
+    worst = max((abs(n1[n][1][k] - (m[4 * k] * n0[n][1][0] + m[4 * k + 1] * n0[n][1][1] + m[4 * k + 2] * n0[n][1][2] + m[4 * k + 3]))
+                 for n in pn[3] for k in range(3)), default=9) if rc == 0 else 9
+    warn = {(x.get("pid"), x["kind"]) for x in rep.get("warnings", [])}
+    # 1e-7 — 돌린 좌표는 16 칸 글자(유효 10 자리 남짓)로 쓰여 ~5e-9 까지 반올림된다(옮기기만 한 A-4 는 글자가 정확하다)
+    check("I-1 z 축 23° 강체(칸 반올림 9 자리 · check 없음) → rc 0 · 절점 = R x + t(1e-7)", rc == 0 and worst < 1e-7, (rc, worst, out[-300:]))
+    check("I-1b 돌린 PID 에 orientation_not_rotated 경고(PID 3)", (3, "orientation_not_rotated") in warn, warn)
+
+    d = stage(EX, "i2")
+    p = plan_load(d)
+    for r in p["parts"]:
+        if r["pid"] == 3:
+            r["transform"][0] = 1.0000123456789
+    plan_save(d, p)
+    rc, out, rep = apply_case(binary, d)
+    refused("I-2 늘린 4×4(1.0000123456789 — 허용 1e-6 밖) → transform_not_rigid", rc, out, rep, d, "transform_not_rigid", 3)
+    check("I-2b det 을 유효 12 자리로 말한다", "det(R) = 1.00001234568" in details(rep, "transform_not_rigid"),
+          details(rep, "transform_not_rigid")[:300])
+
+    d = stage(EX, "i3")
+    p = plan_load(d)
+    for r in p["parts"]:
+        if r["pid"] == 4:                        # CAN(셸) — x 축 180° 강체(y=10 · z=5 둘레)
+            r.pop("fragment")
+            r.update({"action": "transform", "transform": [1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 20.0, 0.0, 0.0, -1.0, 10.0, 0.0, 0.0, 0.0, 1.0],
+                      "translation": [0.0, 20.0, 10.0], "rotation_deg": 180.0})
+    plan_save(d, p)
+    rc, out, rep = apply_case(binary, d)
+    pr = {r["pid"]: r for r in rep.get("parts", [])}
+    check("I-3 셸 PID 를 180° 돌린다 → rc 0 · quality_flipped 없음 · applied(옮기기는 법선을 뒤집지 못한다)",
+          rc == 0 and pr.get(4, {}).get("result") == "applied" and "quality_flipped" not in kinds(rep), (rc, sorted(kinds(rep))))
+
+    def shell_section(d, t_plan, t1_text):
+        fp = os.path.join(d, "fragment_4.k")
+        txt = open(fp, encoding="utf-8").read()
+        txt = txt.replace("         4         4         4\n", "         4        10         4\n*SECTION_SHELL_TITLE\nCAN#4_sec\n"
+                          "        10         2         1         2\n" + ("%10s" % t1_text) * 4 + "\n", 1)
+        write(fp, txt)
+        p = plan_load(d)
+        for r in p["parts"]:
+            if r["pid"] == 4:
+                r["fragment"].update({"secid": 10, "new_section": {"secid": 10, "elform": 2, "nip": 2, "t": t_plan, "why": "두께가 바뀌었다"},
+                                      "bytes": os.path.getsize(fp)})
+        plan_save(d, p)
+        reseal(d, files=["fragment_4.k"])
+
+    d = stage(EX, "i4")
+    shell_section(d, 0.612345678, "0.61235")     # StepForge 는 T1 을 %10.5g 로 쓴다
+    rc, out, rep = apply_case(binary, d)
+    p1, s1 = read_deck(os.path.join(d, "deck_applied.k"))[2:4] if rc == 0 else ({}, {})
+    check("I-4 셸 새 섹션 T1 0.61235(%10.5g) 대 계획 t 0.612345678 → rc 0 · *PART 4 → SECID 10",
+          rc == 0 and p1.get(4, (0,))[0] == 10 and s1.get(10, ("",))[0] == "*SECTION_SHELL_TITLE", (rc, sorted(kinds(rep)), out[-300:]))
+    d = stage(EX, "i4b")
+    shell_section(d, 0.6125, "0.61235")
+    rc, out, rep = apply_case(binary, d)
+    refused("I-4b T1 이 상대 1e-4 밖(0.61235 대 0.6125) → fragment", rc, out, rep, d, "fragment", 4)
+
+    d = stage(EX, "i5")
+    p = plan_load(d)
+    for r in p["parts"]:
+        if r["pid"] == 5:                        # StepForge `target_shape` 실패 — why 가 null 이고 notes 에 까닭
+            r["fragment"] = {"ok": False, "why": None, "notes": {"why": "새 CAD 에서 대상 형상을 못 찾았다", "defeatured": []}}
+        if r["pid"] == 6:                        # 지었으나 확인을 못 지났다 — why 없이 check.problems
+            r["fragment"]["ok"] = False
+            r["fragment"]["check"] = {"ok": False, "problems": ["요소 수 898 가 쓴 수 899 와 다르다"]}
+    plan_save(d, p)
+    rc, out, rep = apply_case(binary, d)
+    f5 = " ".join(x["detail"] for x in rep.get("problems", []) if x.get("pid") == 5 and x["kind"] == "fragment_failed")
+    f6 = " ".join(x["detail"] for x in rep.get("problems", []) if x.get("pid") == 6 and x["kind"] == "fragment_failed")
+    check("I-5 못 지은 조각의 실제 꼴(notes · why null · check.problems) → fragment_failed 에 그 까닭 · plan_schema 없음",
+          rc == 1 and "대상 형상을 못 찾았다" in f5 and "쓴 수 899" in f6 and "plan_schema" not in kinds(rep), (sorted(kinds(rep)), f5, f6))
+
+    d = stage(EX, "i6")
+    p = plan_load(d)
+    for r in p["parts"]:
+        if r["pid"] == 4:
+            r["name"] = "CAN\n*BOUNDARY_SPC_NODE\n       1       0       1       1       1       1       1       1\n$"
+    plan_save(d, p)
+    rc, out, rep = apply_case(binary, d)
+    body = open(os.path.join(d, "deck_applied.k"), encoding="utf-8").read().split("\n") if rc == 0 else []
+    live = [ln for ln in body if ln.strip().upper().startswith("*BOUNDARY_SPC_NODE")]
+    head = [ln for ln in body if ln.startswith("$ === apply_carryover_plan") and "*BOUNDARY_SPC_NODE" in ln]
+    check("I-6 이름의 개행은 주석 줄을 끊지 못한다 — 살아 있는 *BOUNDARY_SPC_NODE 가 없고 머리 주석 한 줄에 남는다",
+          rc == 0 and not live and len(head) == 1, (rc, live[:2], head[:1]))
+
+
+def part_j(binary):
+    print("[J 산출 자리 — 확장자가 아닌 몫으로 가른 동반 파일 · 거절하면 옛 산출을 지운다]")
+    def rename_field(d):
+        os.rename(os.path.join(d, "field_2.bin"), os.path.join(d, "field_2.k"))
+        p = plan_load(d)
+        p["files"]["field_2.k"] = p["files"].pop("field_2.bin")
+        for r in p["parts"]:
+            if r["pid"] == 2:
+                r["field"]["file"] = "field_2.k"
+        plan_save(d, p)
+
+    d = stage(EX, "j1")
+    rename_field(d)
+    rc, out, rep = apply_case(binary, d)
+    check("J-1 .k 로 이름 지은 변위장(바이트 그대로) → 변위장으로 읽고 rc 0", rc == 0 and rep.get("ok") is True, (rc, sorted(kinds(rep))))
+    d = stage(EX, "j1b")
+    rename_field(d)
+    fp = os.path.join(d, "field_2.k")
+    b = bytearray(open(fp, "rb").read())
+    b[800] ^= 0x01
+    open(fp, "wb").write(bytes(b))
+    rc, out, rep = apply_case(binary, d)
+    refused("J-1b .k 이름 변위장의 바이트가 다르다 → file_mismatch · 보고가 있다(예외로 끝나지 않는다)", rc, out, rep, d, "file_mismatch")
+
+    d = stage(EX, "j2")
+    write(os.path.join(d, "spare.bin"), "x")
+    p = plan_load(d)
+    p["files"]["spare.bin"] = {"sha256": "0" * 64, "bytes": 1}
+    plan_save(d, p)
+    rc, out, rep = apply_case(binary, d)
+    check("J-2 어느 줄도 안 쓰는 .bin 의 지문이 다르다 → 확장자가 아니라 몫(없음)으로 — 적용하고 file_mismatch_unused 경고",
+          rc == 0 and "file_mismatch_unused" in {x["kind"] for x in rep.get("warnings", [])}, (rc, sorted(kinds(rep))))
+
+    d = stage(EX, "j3")
+    write(os.path.join(d, "deck_applied.k"), "*KEYWORD\n$ 앞선 실행이 남긴 덱\n*END\n")
+    p = plan_load(d)
+    p["deck"]["sha256"] = "0" * 64
+    plan_save(d, p)
+    rc, out, rep = apply_case(binary, d)
+    refused("J-3 거절하면 출력 자리의 옛 덱을 지운다(ok false 보고 옆에 남지 않게)", rc, out, rep, d, "deck_sha")
+    check("J-3b 보고가 그것을 말한다(stale_output_removed)", "stale_output_removed" in {x["kind"] for x in rep.get("warnings", [])},
+          rep.get("warnings"))
 
 
 if __name__ == "__main__":
