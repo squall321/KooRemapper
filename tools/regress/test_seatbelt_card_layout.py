@@ -24,7 +24,8 @@
   E extract-parts — 안전띠 **장치** 키워드(`*ELEMENT_SEATBELT_RETRACTOR` …)는 PID 칸이 없어 고른 띠에 붙었는지 증명할 수 없다.
     고른 파트에 `*ELEMENT_SEATBELT` 가 있으면 **거절**한다(rc 1 · 산출 없음 · 장치 키워드와 줄을 댄다). 안전띠를 고르지 않았으면
     싣지 않고 dropped_keywords 에 센다 — 칸 1 을 PID 로 짐작하지 않는다(그 조각이 고른 PID 와 같아도 거절하지 않는다).
-    가속도계(`_ACCELEROMETER`)는 거절하지 않고 dropped_keywords 에 센다 · 데이터 줄 없는 장치 블록은 장치가 아니다(사용자 결정 11-07)
+    가속도계(`_ACCELEROMETER`)는 거절하지 않고 dropped_keywords 에 센다 · 데이터 줄 없는 장치 블록은 장치가 아니다(사용자 결정 11-07).
+    따라가지 않는 파일 인클루드(`*INCLUDE_TRANSFORM` …)의 안은 못 보니 띠를 고르면 거절한다(`*INCLUDE_PATH` 는 탐색 경로라 아니다)
   F 두 가지로 읽히는 줄(정수 폭으로 쓴 안전띠 · 질량 줄) — cleanup-nodes · extract-parts 는 두 읽기의 절점을 다 지킨다 ·
     renumber 는 다른 읽기의 절점이 덱에 있으면 거절(줄을 댄다 · 산출 없음) · 설명서대로 쓴 줄(빈 SLEN · 빈 SBRID · 소수점 · E/D 지수 ·
     왼쪽 맞춤 · 꼬리 주석)은 renumber 가 그대로 된다 · restack 은 어느 읽기로든 지운 절점을 물면 올린다 · 질량 PID 가 읽기마다
@@ -271,13 +272,13 @@ def main():
                   ("E-7", "*ELEMENT_SEATBELT_PRETENSIONER\n" + "%10d%10d%10d%10d" % (1, 1, 1, 0) + "\n", True, "*ELEMENT_SEATBELT_PRETENSIONER", "_PRETENSIONER 는 그대로 거절"),
                   ("E-8", "*ELEMENT_SEATBELT_WHATEVER\n" + "%10d" % 1 + "\n", True, "*ELEMENT_SEATBELT_WHATEVER", "모르는 *ELEMENT_SEATBELT_* 도 그대로 거절"))
         for tag, extra, refuse, kwname, what in ecases:
-            edeck = belt_deck(8, belt(8, 13, 9, 101, 102, 0, "0.0", 103, 104), tail=extra)
+            xdeck = belt_deck(8, belt(8, 13, 9, 101, 102, 0, "0.0", 103, 104), tail=extra)
             y = tag.replace("-", "") + ".yaml"
-            write(os.path.join(d, y + ".k"), edeck)
+            write(os.path.join(d, y + ".k"), xdeck)
             write(os.path.join(d, y), "model: %s.k\noutput: %s_out.k\nparts: [9]\nreport: %s.json\n" % (y, y, y))
             rc, out = run(binary, d, "extract-parts", y)
             if refuse:
-                kl = [i + 1 for i, l in enumerate(edeck.split("\n")) if l == kwname]
+                kl = [i + 1 for i, l in enumerate(xdeck.split("\n")) if l == kwname]
                 listed = re.findall(r"^\s+\S+\.k:(\d+) (\*ELEMENT_SEATBELT_\w+)", out, re.M)
                 ok = rc == 1 and not os.path.exists(os.path.join(d, y + "_out.k")) and listed == [(str(n), kwname) for n in kl[-1:]]
                 check("%s %s — rc 1 · 줄 %s" % (tag, what, kl[-1:]), ok, (rc, listed, out[-500:]))
@@ -286,6 +287,32 @@ def main():
                 ok = rc == 0 and len(section_lines(os.path.join(d, y + "_out.k"), "*ELEMENT_SEATBELT")) == 1 and \
                     kwname in (rep.get("dropped_keywords") or {})
                 check("%s %s" % (tag, what), ok, (rc, rep.get("dropped_keywords"), out[-400:]))
+        # 따라가지 않는 파일 인클루드 — 그 안의 장치를 못 본다. 띠를 고르면 거절(인클루드 키워드 · 줄을 댄다) · 탐색 경로(_PATH)는 세지 않는다
+        retr_file = "*KEYWORD\n*ELEMENT_SEATBELT_RETRACTOR\n" + "%10d%10d%10d" % (10008, 101, 13) + "\n" + \
+            "%10s%10s%10d%10d%10s" % ("0.0", "0.0", 0, 0, "0.0") + "\n*END\n"
+        write(os.path.join(d, "inc_dev.k"), retr_file)
+        os.makedirs(os.path.join(d, "incdir"), exist_ok=True)
+        tr = "*INCLUDE_TRANSFORM\ninc_dev.k\n0,0,0,0,0,0,0\n0,0,0,0,0,0,0\n1.0,1.0,1.0,1.0\n0\n"
+        icases = (("E-9", belt_deck(8, belt(8, 13, 9, 101, 102, 0, "0.0", 103, 104), tail=tr), "9", True,
+                   "★띠를 고르고 *INCLUDE_TRANSFORM(안에 리트랙터)이 있으면 거절 — rc 1 · 인클루드 줄을 댄다"),
+                  ("E-10", belt_deck(8, belt(8, 13, 9, 101, 102, 0, "0.0", 103, 104), tail="*INCLUDE_PATH\nincdir\n"), "9", False,
+                   "*INCLUDE_PATH(탐색 경로)만 있으면 띠를 골라도 rc 0"),
+                  ("E-11", edeck.replace("*END\n", tr + "*END\n"), "8", False,
+                   "띠를 안 고르면 *INCLUDE_TRANSFORM 이 있어도 rc 0(그 블록은 dropped_keywords)"))
+        for tag, ideck, pick, refuse, what in icases:
+            y = tag.replace("-", "") + ".yaml"
+            write(os.path.join(d, y + ".k"), ideck)
+            write(os.path.join(d, y), "model: %s.k\noutput: %s_out.k\nparts: [%s]\nreport: %s.json\n" % (y, y, pick, y))
+            rc, out = run(binary, d, "extract-parts", y)
+            if refuse:
+                il = ideck.split("\n").index("*INCLUDE_TRANSFORM") + 1
+                check("%s %s(%d)" % (tag, what, il),
+                      rc == 1 and ("%s.k:%d *INCLUDE_TRANSFORM" % (y, il)) in out and not os.path.exists(os.path.join(d, y + "_out.k")),
+                      (rc, out[-500:]))
+            else:
+                rep = json.load(open(os.path.join(d, y + ".json"), encoding="utf-8")) if rc == 0 else {}
+                check("%s %s" % (tag, what), rc == 0 and os.path.exists(os.path.join(d, y + "_out.k")),
+                      (rc, rep.get("dropped_keywords"), out[-400:]))
 
         print("[F 두 가지로 읽히는 줄 — 지키는 쪽은 둘 다 · renumber 는 거절 · 설명서 꼴은 그대로 · 질량 PID]")
         # SLEN 을 8칸에 쓴(빈 SLEN) 줄 — 설명서 칸(SLEN 16)으로 읽으면 SLEN = 「103」 · N3 = 104 · N4 없음, 정수 폭이면 N3 103 · N4 104

@@ -196,6 +196,7 @@ struct Picked {
     std::map<std::string, long long> opaqueElemOther;     // 담지 않았다(그냥 버린다)
     long long seatbeltCards = 0;                          // 고른 파트의 `*ELEMENT_SEATBELT` 카드
     std::vector<std::string> seatbeltDevices;             // 덱의 안전띠 장치 키워드 블록 — 「파일:줄 키워드」
+    std::vector<std::string> unfollowedIncludes;          // 따라가지 않는 파일 인클루드(`*INCLUDE_TRANSFORM` …) — 「파일:줄 키워드」
     // ── 보 족 줄이 두 가지로 읽힐 때(넓은 칸 뒤 칸 — 2026-11-07 사용자 결정 「둘 다 남기고 번호 매기기는 거절」) ──
     std::vector<int> altNodes;                            // 고른 줄을 다른 읽기로만 읽을 때 나오는 절점 — 덱에 있으면 싣는다
     struct AuxLine { std::string where; std::vector<int> altVsManual; bool placeable = true; };
@@ -282,6 +283,10 @@ void scanElements(const std::string& path, const std::vector<int>& sel, const De
             fw = KooRemapper::keywordFieldWidth(line, idx.fieldWidth);
             deviceAt.clear();
             if (kw == "*INCLUDE") { inElem = false; inInclude = true; continue; }
+            // 맨 `*INCLUDE` 가 아닌 파일 인클루드(`_TRANSFORM` · `_AUTO_OFFSET` · `_BINARY` · `_NASTRAN` · `_STAMPED_*` …)는 따라가지
+            // 않는다 — 그 안은 보지 않는다. `*INCLUDE_PATH` · `_PATH_RELATIVE` 는 탐색 경로라(파일을 끌어오지 않는다) 세지 않는다
+            if (starts(kw, "*INCLUDE") && !starts(kw, "*INCLUDE_PATH"))
+                pk.unfollowedIncludes.push_back(path + ":" + std::to_string(lineNo) + " " + kw);
             inInclude = false;
             inElem = starts(kw, "*ELEMENT");
             if (inElem) {
@@ -1338,6 +1343,16 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
                       "없으므로 거절한다(빼면 띠가 그럴듯하게 돌면서 장치가 없다)");
         for (const auto& d : pk.seatbeltDevices) console.println("  " + d);
         console.info("안전띠를 고르지 않으면 장치는 싣지 않고 dropped_keywords 에 센다");
+        return 1;
+    }
+    // ★따라가지 않는 파일 인클루드의 안은 보지 않는다 — 거기 안전띠 장치가 있으면 위 거절을 못 한다. 고른 파트에 안전띠가 있으면
+    //   장치가 없다고 증명할 수 없으니 거절한다(2026-11-07 검토 #3 — `*INCLUDE_TRANSFORM` 안의 리트랙터를 빼고 띠만 rc 0 으로 실었다)
+    if (pk.seatbeltCards > 0 && !pk.unfollowedIncludes.empty()) {
+        console.error("고른 파트에 *ELEMENT_SEATBELT 카드 " + std::to_string(pk.seatbeltCards) + " 장이 있는데 이 op 이 따라가지 않는 파일 "
+                      "인클루드가 " + std::to_string(pk.unfollowedIncludes.size()) + " 블록 있다 — 그 안의 안전띠 장치를 볼 수 없어 고른 띠에 "
+                      "붙은 장치가 없다고 증명할 수 없으므로 거절한다");
+        for (const auto& l : pk.unfollowedIncludes) console.println("  " + l);
+        console.info("따라가는 것은 맨 *INCLUDE 뿐이다(*INCLUDE_PATH · _PATH_RELATIVE 는 탐색 경로라 세지 않는다)");
         return 1;
     }
     // ★넓은 칸 뒤 PID 가 읽기마다 갈리는데 그 하나를 골랐다 — 실을지 버릴지 정할 수 없다(질량의 MASS 를 정수 폭으로 쓴 줄 · 2026-11-07)
