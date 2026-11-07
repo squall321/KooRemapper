@@ -279,6 +279,106 @@ TEST(Carryover_넣을_블록_번호만_옮긴다) {
     ASSERT_TRUE(a.find("*PART\n$# C\nC\n         3         9         3\n") != std::string::npos);
 }
 
+// StepForge 의 실제 꼴(리뷰 11-07 · `carryover_build.py`) — 못 지은 조각은 notes 를 싣고 why 가 null 이거나 없다 · transform 은 check 를
+// 빼기도 한다. 그 꼴을 plan_schema 로 거절하면 저쪽의 까닭이 사라진다.
+TEST(Carryover_StepForge_실제_꼴_못_지은_조각과_check_없는_transform) {
+    const std::string base = coPlanJson();
+    const std::string fragHead = "\"fragment\": {\"ok\": true";
+    const size_t f0 = base.find(fragHead);
+    const size_t f1 = base.find("\"check\": {}}", f0) + std::strlen("\"check\": {}}");
+    auto withFragment = [&](const std::string& frag) { return base.substr(0, f0) + "\"fragment\": " + frag + base.substr(f1); };
+    carryover::Plan plan;
+    std::vector<carryover::Problem> pr;
+
+    std::string noCheck = base;
+    noCheck.replace(noCheck.find("\"rotation_deg\": 0.0, \"check\": {}"), std::strlen("\"rotation_deg\": 0.0, \"check\": {}"), "\"rotation_deg\": 0.0");
+    ASSERT_TRUE(carryover::parsePlan(noCheck, plan, pr));
+    ASSERT_TRUE(plan.parts[1].valid && plan.parts[1].action == carryover::Action::Transform);
+
+    pr.clear();
+    ASSERT_TRUE(carryover::parsePlan(withFragment("{\"ok\": false, \"why\": null, \"notes\": {\"why\": \"형상을 못 찾았다\", \"defeatured\": []}}"), plan, pr));
+    ASSERT_TRUE(plan.parts[2].valid && !plan.parts[2].fragment.ok);
+    ASSERT_EQ(plan.parts[2].fragment.why, std::string("형상을 못 찾았다"));
+
+    std::string built = base.substr(f0, f1 - f0);   // 지었으나 확인을 못 지났다 — 조각 칸 전부 + check.problems, why 없음
+    built.replace(built.find("\"ok\": true"), std::strlen("\"ok\": true"), "\"ok\": false");
+    built.replace(built.rfind("\"check\": {}"), std::strlen("\"check\": {}"), "\"check\": {\"ok\": false, \"problems\": [\"요소 수 2 가 3 와 다르다\"]}");
+    pr.clear();
+    ASSERT_TRUE(carryover::parsePlan(base.substr(0, f0) + built + base.substr(f1), plan, pr));
+    ASSERT_EQ(plan.parts[2].fragment.why, std::string("요소 수 2 가 3 와 다르다"));
+
+    pr.clear();
+    ASSERT_TRUE(carryover::parsePlan(withFragment("{\"ok\": false}"), plan, pr));   // 까닭이 없다 — 부르는 쪽이 그렇게 말한다
+    ASSERT_TRUE(plan.parts[2].fragment.why.empty());
+
+    pr.clear();
+    ASSERT_FALSE(carryover::parsePlan(withFragment("{\"ok\": false, \"why\": 3}"), plan, pr));
+    ASSERT_TRUE(coAnyProblem(pr, "plan_schema", "문자열 · null 이 아니다"));
+    pr.clear();
+    ASSERT_FALSE(carryover::parsePlan(withFragment("{\"ok\": false, \"why\": \"x\", \"extra\": 1}"), plan, pr));
+    ASSERT_TRUE(coAnyProblem(pr, "plan_schema", "'extra'"));   // 모르는 칸은 그대로 거절한다
+}
+
+// 셸 새 섹션의 T1 — StepForge 는 카드에 %10.5g 로 쓰고 계획에는 round(t, 9) 를 싣는다(리뷰 11-07). 상대 1e-4 안이면 같다.
+TEST(Carryover_셸_새_섹션_T1_은_상대_만분의_일) {
+    const char* frag =
+        "*KEYWORD\n"
+        "*NODE\n"
+        "      13 0.000000000e+00 0.000000000e+00 0.000000000e+00\n"
+        "      14 1.000000000e+00 0.000000000e+00 0.000000000e+00\n"
+        "      15 1.000000000e+00 1.000000000e+00 0.000000000e+00\n"
+        "      16 0.000000000e+00 1.000000000e+00 0.000000000e+00\n"
+        "*ELEMENT_SHELL\n"
+        "       3       3      13      14      15      16\n"
+        "*PART\n"
+        "C\n"
+        "         3        10         3\n"
+        "*SECTION_SHELL_TITLE\n"
+        "C_sec\n"
+        "        10         2         1         2\n"
+        "   0.61235   0.61235   0.61235   0.61235\n"
+        "*END\n";
+    carryover::FragmentScan s;
+    std::vector<std::string> pr;
+    ASSERT_TRUE(carryover::scanFragment(coLines(frag), s, pr));
+    carryover::FragmentHead h;
+    h.present = h.ok = true;
+    h.pid = 3;
+    h.secid = 10;
+    h.mid = 3;
+    h.newSection.present = true;
+    h.newSection.secid = 10;
+    h.newSection.elform = 2;
+    h.newSection.hasNip = true;
+    h.newSection.nip = 2;
+    h.newSection.hasT = true;
+    h.newSection.t = 0.612345678;
+    h.nodeLo = 13;
+    h.nodeHi = 16;
+    h.elemLo = h.elemHi = 3;
+    h.nodes = 4;
+    h.elements = 1;
+    carryover::checkFragment(s, h, 3, pr);
+    ASSERT_EQ(pr.size(), static_cast<size_t>(0));
+    h.newSection.t = 0.6125;   // 상대 2.4e-4 — 다른 두께다
+    carryover::checkFragment(s, h, 3, pr);
+    ASSERT_TRUE(coAnyText(pr, "T1 0.61235"));
+}
+
+// 조각 줄의 제어 문자 — 주석 · 제목 줄은 글자 그대로 덱에 들어간다. 줄 가운데 CR 은 다른 리더에서 줄을 끊는다(리뷰 11-07)
+TEST(Carryover_조각_제어_문자는_거절) {
+    std::string t = kCoFragment;
+    t.replace(t.find("$# StepForge"), std::strlen("$# StepForge"), "$# Step\rForge");
+    carryover::FragmentScan s;
+    std::vector<std::string> pr;
+    ASSERT_FALSE(carryover::scanFragment(coLines(t), s, pr));
+    ASSERT_TRUE(coAnyText(pr, "제어 문자"));
+    std::string tab = kCoFragment;   // 주석의 탭은 받는다(절점 · 요소 줄의 탭은 따로 거절한다)
+    tab.replace(tab.find("$# StepForge"), std::strlen("$# StepForge"), "$#\tStepForge");
+    pr.clear();
+    ASSERT_TRUE(carryover::scanFragment(coLines(tab), s, pr));
+}
+
 TEST(Carryover_보고_JSON_은_엄격한_리더로_읽힌다) {
     carryover::Report r;
     r.ok = false;

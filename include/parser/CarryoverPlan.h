@@ -69,7 +69,7 @@ struct NewSection {
 // remesh 줄 · 새 파트 줄의 `fragment` 머리.
 struct FragmentHead {
     bool present = false;       // 객체다(added 줄의 null 은 false)
-    bool ok = false;            // 못 지었으면 false 와 why
+    bool ok = false;            // 못 지었으면 false — why 는 있는 까닭(맨 위 why · notes.why · check.why · check.problems), 없으면 빈 글자
     std::string file, why;
     long long pid = 0, secid = 0, mid = 0;
     NewSection newSection;

@@ -52,7 +52,8 @@ const std::map<K, KeySet>& kKeys() {
         {K::Deck, {{"project_id", "relpath", "sha256", "max", "unread_cards"}, {}}},
         {K::DeckMax, {{"node", "elem", "pid", "secid", "mid"}, {}}},
         {K::Keep, row({}, {"absorbed", "touches_changed"})},
-        {K::Transform, row({"transform", "translation", "rotation_deg", "check"}, {"shared_nodes"})},
+        // check 는 선택 — StepForge 는 덱 겉면이나 새 CAD 짝이 없으면 그 칸을 쓰지 않는다(`carryover_build.py` build — 리뷰 11-07)
+        {K::Transform, row({"transform", "translation", "rotation_deg"}, {"check", "shared_nodes"})},
         {K::Morph, row({"field"}, {"instead", "shared_nodes"})},
         {K::Remesh, row({"fragment"}, {"shared_nodes"})},
         {K::Delete, row({}, {"shared_nodes"})},
@@ -63,7 +64,9 @@ const std::map<K, KeySet>& kKeys() {
         {K::LayoutCount, {{"name", "dtype", "offset", "count"}, {"unit", "codes", "shared_bit"}}},
         {K::LayoutShape, {{"name", "dtype", "offset", "shape"}, {"unit", "codes", "shared_bit"}}},
         {K::Fragment, {kFragmentKeys, {}}},
-        {K::FragmentFailed, {{"ok", "why"}, kFragmentKeys}},
+        // 못 지은 조각 — StepForge 의 실제 꼴은 셋이다(`carryover_build.py` fragment): {ok, why} · {ok, why(null 일 수 있다), notes} ·
+        // 지었으나 확인을 못 지난 조각 {ok, 조각 칸 전부, check{why · problems}} — why 가 없을 수 있다(리뷰 11-07)
+        {K::FragmentFailed, {{"ok"}, plus(kFragmentKeys, {"why", "notes"})}},
         {K::Ranges, {{"node", "elem"}, {}}},
         {K::NewSection, {{"secid", "elform", "why"}, {"nip", "t"}}},
         {K::Added, {{"path", "name", "action", "suggestion", "fragment", "why"}, {"pid"}}},
@@ -283,6 +286,29 @@ void readRange(Reader& r, const Value* v, const std::string& where, long long pi
     if (a && b && lo > hi) r.bad(pid, where, "lo 가 hi 보다 크다");
 }
 
+// 못 지은 조각의 까닭 — 있는 것을 쓴다: 맨 위 why(문자열 · null) → notes.why → check.why → check.problems[]. 없으면 빈 글자
+// (부르는 쪽이 「까닭을 적지 않았다」고 말한다). 꼴만 본다 — why 는 문자열 · null, notes · check 는 객체.
+std::string failedReason(Reader& r, const Value& f, const std::string& where, long long pid) {
+    auto text = [](const Value* v) { return v && v->type == VT::String ? v->s : std::string(); };
+    const Value* why = f.get("why");
+    if (why && !why->isNull() && why->type != VT::String) r.bad(pid, where + ".why", "문자열 · null 이 아니다");
+    const Value* notes = f.get("notes");
+    if (notes) r.object(notes, where + ".notes", pid);
+    const Value* check = f.get("check");
+    if (check) r.object(check, where + ".check", pid);
+    if (!text(why).empty()) return text(why);
+    if (notes && notes->type == VT::Object && !text(notes->get("why")).empty()) return text(notes->get("why"));
+    if (check && check->type == VT::Object) {
+        if (!text(check->get("why")).empty()) return text(check->get("why"));
+        std::string all;
+        if (const Value* ps = check->get("problems"); ps && ps->type == VT::Array)
+            for (const auto& p : ps->arr)
+                if (!text(&p).empty()) all += (all.empty() ? "" : " · ") + p.s;
+        if (!all.empty()) return all;
+    }
+    return std::string();
+}
+
 // allowNull — added 줄은 조각 없이(null) 까닭만 실을 수 있다. remesh 줄은 아니다.
 void readFragment(Reader& r, const Value* f, const std::string& where, long long pid, bool allowNull, FragmentHead& h) {
     if (!f) return;
@@ -298,7 +324,7 @@ void readFragment(Reader& r, const Value* f, const std::string& where, long long
     }
     if (!h.ok) {
         r.keys(*f, K::FragmentFailed, where, pid);
-        r.str(f->get("why"), where + ".why", pid, h.why);
+        h.why = failedReason(r, *f, where, pid);
         return;
     }
     r.keys(*f, K::Fragment, where, pid);
@@ -712,6 +738,16 @@ bool scanFragment(const std::vector<std::string>& in, FragmentScan& s, std::vect
         const std::string& l = in[i];
         FragmentScan::Line& L = s.lines[i];
         L.block = block;
+        // 제어 문자(탭 밖) — 주석 · 제목 줄은 글자 그대로 덱에 들어간다. 줄 가운데의 CR 은 다른 리더에서 줄을 끊어 살아 있는 카드가
+        // 될 수 있다(리뷰 11-07 — 계획 이름의 개행이 카드를 심었다). 고치지 않고 거절한다
+        if (std::any_of(l.begin(), l.end(), [](char c) {
+                const unsigned char u = static_cast<unsigned char>(c);
+                return (u < 0x20 && u != '\t') || u == 0x7F;
+            })) {
+            bad(i, "제어 문자가 든 줄 — 조각 줄은 인쇄할 수 있는 글자(와 탭)만 싣는다");
+            L.kind = FragmentScan::LineKind::Skip;
+            continue;
+        }
         const size_t g = l.find_first_not_of(" \t");
         if (g != std::string::npos && l[g] == '*') {
             if (head.on) { bad(i, "두 줄 꼴 솔리드 카드의 절점 줄이 없다"); head.on = false; }
@@ -869,8 +905,11 @@ void checkFragment(const FragmentScan& s, const FragmentHead& h, long long expec
         if (!sec.shell && (h.newSection.hasNip || h.newSection.hasT)) bad("솔리드 섹션에 new_section 의 nip · t 가 있다");
         if (sec.shell && h.newSection.hasNip && sec.nip != h.newSection.nip)
             bad("셸 섹션의 NIP " + std::to_string(sec.nip) + " 가 new_section.nip 와 다르다");
-        if (sec.shell && h.newSection.hasT && !(sec.t1Given && std::fabs(sec.t1 - h.newSection.t) <= 1e-12 * std::max(1.0, h.newSection.t)))
-            bad("셸 섹션의 T1 이 new_section.t 와 다르다");
+        // T1 은 상대 1e-4 안 — StepForge 는 카드에 %10.5g(유효 5자리)로 쓰고 계획에는 round(t, 9) 를 싣는다(`lsdyna_k.py` · 리뷰 11-07)
+        if (sec.shell && h.newSection.hasT &&
+            !(sec.t1Given && std::fabs(sec.t1 - h.newSection.t) <= 1e-4 * std::max(std::fabs(h.newSection.t), 1e-12)))
+            bad("셸 섹션의 T1 " + (sec.t1Given ? num(sec.t1) : std::string("(빈 칸)")) + " 이 new_section.t " + num(h.newSection.t) +
+                " 와 다르다(허용 상대 1e-4)");
     }
     // 번호 — 구간 · 수 · 중복
     std::set<long long> eids, nids;
