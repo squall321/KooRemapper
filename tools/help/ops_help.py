@@ -1084,7 +1084,8 @@ output: deck_applied.k
           "  plan{sha256 · version · report_key · deck_from} · deck{sha256_in · sha256_out · includes(대조한 닫힘 · 판 1 은 null)} ·",
           "  problems[{pid · kind · detail}] · warnings · shift · parts[처리마다 result · 옮긴 수 · 최대 변위 · 지운 수 · 넣은 구간 · 새 섹션",
           "  (바꿔 넣기 {secid · elform} · 모프 {secid · thickness}) · 뒤집힘 앞뒤 · refused_transform] · added · touches_changed.",
-          "  보고의 글자는 늘 바른 UTF-8 이다 — 계획 · 덱에서 온 깨진 바이트는 U+FFFD 로 바꿔 싣고 줄을 보일 때는 글자 경계에서 자른다",
+          "  보고의 글자는 늘 바른 UTF-8 이다 — 계획 · 덱에서 온 깨진 바이트는 U+FFFD 로 바꿔 싣고 줄을 보일 때는 글자 경계에서 자른다.",
+          "  수는 다시 읽으면 같은 double 이 되는 가장 짧은 꼴(15~17 자리) — refused_transform 은 계획 값과 비트까지 같다",
           "경로는 YAML 폴더 기준 · 모르는 YAML 키는 거절 · output · report 가 읽는 파일(주 덱 · 계획 · 인클루드 · 계획의 동반 파일 — files 와 줄이",
           "  가리킨 변위장 · 조각 · section_<PID>.k)과 같으면 거절한다 — output 만 겹치면 보고에 output_clobber 로 적고(아무것도 덮지 않는다),",
           "  report 가 겹치면 보고 자리가 없어 콘솔로만. 거절할 때 지우는 옛 산출(stale_output_removed)도 입력 파일이면 지우지 않는다"])

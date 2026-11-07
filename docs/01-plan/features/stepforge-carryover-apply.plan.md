@@ -122,6 +122,8 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
   applyControl · applyDatabase · applyMerge — 모두 「덱 끝(*END 앞)에 한 벌」 을 뜻했다(첫 *END 뒤 벌은 해석에 안 들어가고 같은 번호 카드만
   늘렸다). 쓰기 밖에서 rawLines_ 를 고쳐 넣는 갈래는 손대지 않았다 — applyMatswap · applyMatdb · applyLoad 의 끼움은 첫 *END 만(`inserted`),
   applyContact · applyBoundary · applyRbe 는 *END 마다(같은 틈) · applyBattery 의 `*INCLUDE` 는 마지막 *END 앞(첫 *END 뒤라 안 읽힌다) — 알렸다.
+- **수의 끝자리(#7)** — 보고의 수(`num`)는 15 → 16 → 17 자리 중 다시 읽어 같은 double 이 되는 첫 꼴. `%.17g` 하나로 쓰면 왕복은 되지만
+  0.6 이 `0.59999999999999998` 로 길어져 사람이 읽는 보고가 흐려지고 예전 보고와 글자가 갈린다 — 짧게 맞는 값은 예전 글자 그대로다.
 
 ## 리뷰 11-07 고침 — 정한 것
 리뷰(11-07) 결함 11 + 그럴듯한 둘을 고쳤다. 공용 코드(i10 조각의 쓰기 관문 왕복 · 솔리드 · 티쉘 변형의 바닥 · `*ELEMENT_MASS` PID 칸)는 다른 갈래 몫.

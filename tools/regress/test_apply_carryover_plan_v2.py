@@ -386,6 +386,7 @@ def main():
         part_r4(binary)
         part_r5(binary)
         part_r6(binary)
+        part_r7(binary)
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
     print()
@@ -895,6 +896,25 @@ def part_r6(binary):
     body = read(os.path.join(d, "deck_applied.k")) if rc == 0 else ""
     check("R-6b 바꿔 넣기 조각 셋 — 넣은 블록 머리가 셋(*END 마다 두 벌이 아니다)",
           rc == 0 and body.count("$ === apply_carryover_plan") == 3, (rc, body.count("$ === apply_carryover_plan"), out[-300:]))
+
+
+
+def part_r7(binary):
+    print("[R-7 refused_transform 을 되돌려 줄 때 끝자리 — %.15g 가 1.0000000000000002 를 1 로 냈다(검토 #7)]")
+    d = stage("r7")
+    p = to_v2(d)
+    row = next(r for r in p["parts"] if r["pid"] == 3)
+    for k in ("transform", "translation", "rotation_deg", "check"):
+        row.pop(k, None)
+    m = [1.0000000000000002, 0, 0, 0.30000000000000004, 0, 1, 2.220446049250313e-16, 0, 0, 0, 0.9999999999999999, 0, 0, 0, 0, 1]
+    rt = {"transform": m, "det": 1.0000000000000002, "scale": 0.30000000000000004, "orthogonality_error": 2 / 3}
+    row.update({"action": "review", "why": "옮김 4×4 가 강체가 아니다 — 끝자리", "refused_transform": rt})
+    resummarize(p)
+    plan_save(d, p)
+    rc, out, rep = apply_case(binary, d)
+    got = {r["pid"]: r for r in rep.get("parts", [])}.get(3, {}).get("refused_transform")
+    check("R-7 보고의 refused_transform 이 계획 값과 비트까지 같다(transform 16 · det · scale · orthogonality_error)",
+          rc == 0 and got == rt, (rc, got, out[-300:]))
 
 
 if __name__ == "__main__":

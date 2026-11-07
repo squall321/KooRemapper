@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <map>
 #include <set>
@@ -711,10 +712,15 @@ std::string clipUtf8(const std::string& l, size_t n) {
     return l.substr(0, cut) + "…";
 }
 
+// 다시 읽으면 같은 double 이 되는 가장 짧은 꼴(15 → 16 → 17 자리) — %.15g 는 계획의 refused_transform 을 되돌려 줄 때 끝자리를
+// 잃었다(1.0000000000000002 → 1 · 적대적 검토 11-07 #7). 짧게 맞는 값(0.6 · 1.01)은 예전과 같은 글자다.
 std::string num(double v) {
     if (!std::isfinite(v)) return "null";
     char buf[64];
-    std::snprintf(buf, sizeof(buf), "%.15g", v);
+    for (int prec = 15; prec <= 17; ++prec) {
+        std::snprintf(buf, sizeof(buf), "%.*g", prec, v);
+        if (std::strtod(buf, nullptr) == v) break;
+    }
     return buf;
 }
 

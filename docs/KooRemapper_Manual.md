@@ -5765,6 +5765,8 @@ null). 칸 하나라도 다르면 손대는 줄은 `deck_range`(칸 · 계획 �
 {secid · thickness}) · 뒤집힘 앞뒤 · refused_transform]` · `added` · `touches_changed`. 거절해도 · 내부 오류에도 쓰고, 거절하면 출력 자리의
 옛 덱을 지운다(`stale_output_removed`). 보고의 글자는 늘 바른 UTF-8 이다 — 계획(JSON 리더는 글자를 검사하지 않는다) · 덱 줄 · 경로에서 온
 깨진 바이트는 U+FFFD 로 바꿔 싣고, 줄을 보일 때는 글자 경계에서 자른다(계획 글자를 이유로 거절하지 않는다 — 실을 때 고친다).
+수는 다시 읽으면 같은 double 이 되는 가장 짧은 꼴(15 → 16 → 17 자리)로 쓴다 — `refused_transform` 은 계획 값과 비트까지 같다(예전 `%.15g` 는
+`1.0000000000000002` 를 `1` 로 냈다 · 적대적 검토 11-07).
 
 output · report 는 이 op 이 **읽는 파일**(주 덱 · 계획 · 인클루드 닫힘 · 계획의 동반 파일 — `files` 와 줄이 가리킨 변위장 · 조각 ·
 `section_<PID>.k`) 어느 것과도 같으면 안 된다. output 만 겹치면 보고에 `output_clobber` 로 적고 아무것도 덮지 않으며, report 가 겹치면 보고
@@ -5773,8 +5775,8 @@ output · report 는 이 op 이 **읽는 파일**(주 덱 · 계획 · 인클루
 
 ### 52.9 시험 · 아직 하지 않는 것
 
-- 회귀 `tools/regress/test_apply_carryover_plan.py`(판 1 · 83항) · `tools/regress/test_apply_carryover_plan_v2.py`(판 2 · 67항 — 실물 둘 ·
-  진리값 판을 판 2 로 · 칸 표 · 덱 자리 · §10.5 새 셸 섹션 · 인클루드 · refused_transform) · 단위 `tests/test_CarryoverPlan.cpp`.
+- 회귀 `tools/regress/test_apply_carryover_plan.py`(판 1 · 83항) · `tools/regress/test_apply_carryover_plan_v2.py`(판 2 · 84항 — 실물 둘 ·
+  진리값 판을 판 2 로 · 칸 표 · 덱 자리 · §10.5 새 셸 섹션 · 인클루드 · refused_transform · 적대적 검토 고침 R-1~R-7) · 단위 `tests/test_CarryoverPlan.cpp`.
 - 인클루드 파일 안의 고칠 자리는 고치지 않는다(거절 — 사용자 결정 11-07). 그 파트를 고치려면 닫힘을 펼친 한 덱으로 계획을 다시 받아야 한다.
 - 절점 두께 카드로 두께를 옮기는 일 · 요소마다 두께를 싣는 PID 의 새 섹션은 받지 않는다(그쪽도 조각으로 물러선다 · §10.7).
 

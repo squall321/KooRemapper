@@ -665,6 +665,50 @@ TEST(Carryover_보고의_글자는_바른_UTF8) {
     ASSERT_TRUE(valid(pr[0]));
 }
 
+TEST(Carryover_보고의_수는_다시_읽으면_같은_값) {
+    // %.15g 는 끝자리를 잃었다 — 계획이 낸 refused_transform 을 보고가 그대로 되돌려 주지 못했다(적대적 검토 11-07 #7)
+    const double vals[] = {1.0000000000000002, 0.30000000000000004, 2.0 / 3.0, 0.1, 1e-300, 5e-324, 1.7976931348623157e308, -0.0,
+                           123456789.12345679, 1.01, 0.6, 1.0, 0.0, -2.5e-17, 9007199254740993.0, 0.9999999999999999};
+    carryover::Report r;
+    r.planRead = r.planParsed = true;
+    r.planSha256 = kCoSha;
+    carryover::PartResult p;
+    p.pid = 4;
+    p.action = "review";
+    p.hasRefusedTransform = true;
+    size_t n = 0;
+    for (double x : vals) p.refusedM[n++ % 16] = x;
+    p.refusedDet = vals[0];
+    p.refusedScale = vals[1];
+    p.refusedOrth = vals[2];
+    r.parts.push_back(p);
+    carryover::PartResult m;
+    m.pid = 3;
+    m.action = "morph";
+    m.result = "applied";
+    m.hasMove = true;
+    m.maxDisp = 0.30000000000000004;
+    m.hasNewSection = m.newSectionShell = true;
+    m.newSecid = 10;
+    m.newThickness = 0.6;
+    r.parts.push_back(m);
+    const std::string j = carryover::toJson(r);
+    json::Value v;
+    std::string err;
+    ASSERT_TRUE(json::parse(j, v, err));
+    // 소수점 · 지수가 없는 글자(1 · 0 · 9007199254740992)는 엄격한 리더가 정수로 담는다
+    auto numOf = [](const json::Value& x) { return x.type == json::Value::Type::Int ? static_cast<double>(x.i) : x.d; };
+    const auto* rt = v.get("parts")->arr[0].get("refused_transform");
+    for (size_t k = 0; k < 16; ++k) ASSERT_TRUE(numOf(rt->get("transform")->arr[k]) == p.refusedM[k]);
+    ASSERT_TRUE(numOf(*rt->get("det")) == vals[0]);
+    ASSERT_TRUE(numOf(*rt->get("scale")) == vals[1]);
+    ASSERT_TRUE(numOf(*rt->get("orthogonality_error")) == vals[2]);
+    ASSERT_TRUE(numOf(*v.get("parts")->arr[1].get("max_disp")) == 0.30000000000000004);
+    // 짧게 맞는 값은 예전 글자 그대로(0.6 이 0.59999999999999998 로 길어지지 않는다)
+    ASSERT_TRUE(j.find("\"thickness\": 0.6}") != std::string::npos);
+    ASSERT_TRUE(j.find("1.0000000000000002") != std::string::npos);
+}
+
 TEST(Carryover_v2_보고에_deck_from_인클루드_refused_transform) {
     carryover::Report r;
     r.planRead = r.planParsed = true;
