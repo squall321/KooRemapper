@@ -384,6 +384,7 @@ def main():
         part_r2(binary)
         part_r3(binary)
         part_r4(binary)
+        part_r5(binary)
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
     print()
@@ -843,6 +844,25 @@ def part_r4(binary):
     rep, ok = report_utf8(os.path.join(d, "deck_applied_carryover.json"))
     check("R-4b 계획 글자의 깨진 바이트(새 파트 이름) → 보고는 바른 UTF-8 이고 그 자리를 U+FFFD 로 싣는다",
           rc == 0 and ok and "\ufffd" in ((rep.get("added") or [{}])[0].get("name") or ""), (rc, ok, out[-300:]))
+
+
+
+def part_r5(binary):
+    print("[R-5 model 이 다른 폴더를 가리키는 심볼릭 링크 — 산출 폴더 규칙이 링크를 따라가 맞는 산출을 거절했다(검토 O1)]")
+    d = stage("r5")
+    split_include(d, "inc/part8.k", 8, move_defs=True)
+    to_v2(d, include_files=["inc/part8.k"])
+    os.makedirs(os.path.join(d, "real"))
+    shutil.move(os.path.join(d, "deck.k"), os.path.join(d, "real", "deck.k"))
+    os.symlink(os.path.join("real", "deck.k"), os.path.join(d, "deck.k"))     # 인클루드는 링크 옆 inc/ — LS-DYNA 가 찾는 자리
+    rc, out, rep = apply_case(binary, d)
+    check("R-5 링크 옆에 산출 · 인클루드도 링크 옆 → rc 0(include_output 거짓 거절이 아니다) · 닫힘째 되읽어 대조",
+          rc == 0 and rep.get("ok") is True and "include_output" not in kinds(rep) and
+          rep.get("deck", {}).get("includes", [{}])[0].get("relpath") == "inc/part8.k", (rc, sorted(kinds(rep)), out[-300:]))
+    os.makedirs(os.path.join(d, "out"))
+    rc, out, rep = apply_case(binary, d, output="out/deck_applied.k", report="out/deck_applied_carryover.json")
+    refused("R-5b 산출은 여전히 덱(링크) 폴더여야 한다 — 다른 폴더면 include_output", rc, out, rep, d, "include_output",
+            out_name="out/deck_applied.k")
 
 
 if __name__ == "__main__":

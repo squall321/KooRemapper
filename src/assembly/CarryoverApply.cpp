@@ -601,9 +601,16 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, const std::
             if (closureActive) {
                 // 산출은 `*INCLUDE` 줄을 그대로 둔다 — LS-DYNA 와 우리 리더는 그 이름을 **산출 덱의 폴더**에서 찾는다(Vol_I 181591).
                 // 다른 폴더에 쓰면 그 산출이 다른 파일(또는 없는 파일)을 끌어온다 — 덱과 같은 폴더에만 쓴다
-                std::error_code ec;
-                const fs::path od = fs::weakly_canonical(fs::absolute(outputPath, ec), ec).parent_path();
-                const fs::path md = fs::weakly_canonical(fs::absolute(baseModelPath_, ec), ec).parent_path();
+                // 견주는 폴더는 **준 경로 그대로의 폴더**다 — 덱 파일이 심볼릭 링크여도 그 링크가 놓인 자리(LS-DYNA 와 닫힘이 상대 이름을
+                // 푸는 자리). 파일 경로를 정규화하면 링크를 따라가 다른 폴더가 나와 맞는 산출을 거절했다(적대적 검토 #5). 폴더 자체의
+                // 별칭(폴더 링크)은 정규화로 풀어도 같은 파일을 찾는다
+                auto dirOfGiven = [](const std::string& p) {
+                    std::error_code e;
+                    const fs::path d = fs::absolute(fs::path(p), e).parent_path();
+                    const fs::path c = fs::weakly_canonical(d, e);
+                    return e ? d.lexically_normal() : c;
+                };
+                const fs::path od = dirOfGiven(outputPath), md = dirOfGiven(baseModelPath_);
                 if (outputPath.empty() || od != md)
                     problem(0, "include_output", "인클루드가 있는 덱의 산출(" + outputPath + ")은 덱과 같은 폴더(" + md.string() + ")에 써야 한다 — 산출은 "
                                                      "*INCLUDE 줄을 그대로 두고 그 이름은 산출 덱의 폴더에서 찾는다(다른 폴더면 다른 파일을 끌어온다)");
