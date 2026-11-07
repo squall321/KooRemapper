@@ -265,6 +265,7 @@ void scanElements(const std::string& path, const std::vector<int>& sel, const De
     int remaining = 0, lineIdx = 0;
     std::vector<std::string> card1;
     bool inElem = false, opaque = false, picked = false, inInclude = false;
+    std::string deviceAt;   // 데이터 줄을 기다리는 안전띠 장치 블록 「파일:줄 키워드」 — 첫 데이터 줄에서 센다(빈 블록은 장치가 없다)
     // 보·질량·이산 족 — 공용 판정기의 별도 축이 칸 자리를 안다(ElementCardLayout.h 의 인용).
     KooRemapper::AuxElementCard aux;
     int auxRemaining = 0, auxLineIdx = 0;
@@ -279,6 +280,7 @@ void scanElements(const std::string& path, const std::vector<int>& sel, const De
             remaining = 0;
             kw = kwBare(keywordToken(line));
             fw = KooRemapper::keywordFieldWidth(line, idx.fieldWidth);
+            deviceAt.clear();
             if (kw == "*INCLUDE") { inElem = false; inInclude = true; continue; }
             inInclude = false;
             inElem = starts(kw, "*ELEMENT");
@@ -290,10 +292,13 @@ void scanElements(const std::string& path, const std::vector<int>& sel, const De
                 if (aux.supported &&
                     std::find(pk.auxKws.begin(), pk.auxKws.end(), kw) == pk.auxKws.end())
                     pk.auxKws.push_back(kw);
-                // 안전띠 **장치** 키워드(`_ACCELEROMETER` · `_PRETENSIONER` · `_RETRACTOR` · `_SENSOR` · `_SLIPRING`)는
-                // PID 칸이 없다 — 어느 띠에 붙었는지 증명할 수 없어 자리를 적어 둔다(아래 runExtractParts 의 거절)
-                if (aux.family == KooRemapper::AuxFamily::SEATBELT && !aux.supported)
-                    pk.seatbeltDevices.push_back(path + ":" + std::to_string(lineNo) + " " + kw);
+                // 안전띠 **장치** 키워드(`_PRETENSIONER` · `_RETRACTOR` · `_SENSOR` · `_SLIPRING` · 모르는 `_*`)는 PID 칸이 없다 —
+                // 어느 띠에 붙었는지 증명할 수 없어 자리를 적어 둔다(아래 runExtractParts 의 거절). 데이터 줄이 있어야 장치다 —
+                // 키워드 줄만 있는 블록은 세지 않는다. `_ACCELEROMETER` 는 띠가 아니라 절점의 가속도를 재는 장치라(Vol_I) 띠와
+                // 무관할 수 있다 — 거절하지 않고 다른 모르는 카드처럼 버려 `dropped_keywords` 에 센다(사용자 결정 2026-11-07)
+                if (aux.family == KooRemapper::AuxFamily::SEATBELT && !aux.supported &&
+                    kw.rfind("*ELEMENT_SEATBELT_ACCELEROMETER", 0) != 0)
+                    deviceAt = path + ":" + std::to_string(lineNo) + " " + kw;
             }
             continue;
         }
@@ -360,9 +365,13 @@ void scanElements(const std::string& path, const std::vector<int>& sel, const De
             //   '안 고른 파트' 로 분류돼 **조용히 버려진다**(실측으로 회귀 L-14 가 잡았다).
             //   족은 아는데 **PID 칸이 없다**고 표가 말하면(`*ELEMENT_SEATBELT_ACCELEROMETER` 같은 별개 키워드 · 플롯 요소)
             //   PID 를 짐작하지 않는다 — 예전엔 칸 1(가속도계의 절점 · 리트랙터의 절점)을 PID 로 읽어, 그 번호가 고른 PID 와
-            //   우연히 같으면 「고른 파트를 담았다」 고 거절했다. 여기서는 싣지 않는 카드로 센다 — 안전띠 장치는 고른 파트에
-            //   안전띠 요소가 있으면 runExtractParts 가 통째로 거절한다(띠에 붙었는지 증명할 수 없다).
-            if (aux.family != KooRemapper::AuxFamily::NONE && !aux.hasPart) { ++pk.opaqueElemOther[kw]; continue; }
+            //   우연히 같으면 「고른 파트를 담았다」 고 거절했다. 여기서는 싣지 않는 카드로 센다 — 안전띠 장치(가속도계 · 데이터 줄
+            //   없는 블록은 빼고)는 고른 파트에 안전띠 요소가 있으면 runExtractParts 가 통째로 거절한다(띠에 붙었는지 증명할 수 없다).
+            if (aux.family != KooRemapper::AuxFamily::NONE && !aux.hasPart) {
+                if (!deviceAt.empty()) { pk.seatbeltDevices.push_back(deviceAt); deviceAt.clear(); }
+                ++pk.opaqueElemOther[kw];
+                continue;
+            }
             // 족을 알면 그 PID 칸의 후보 전부(넓은 칸 뒤 PID 는 읽기마다 갈린다 — `auxPidCandidates`), 모르면 칸 1
             const auto rd = KooRemapper::auxCardReadings(aux, line, fw);
             bool touched = false;
@@ -1322,6 +1331,7 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
     // ★안전띠 장치 키워드는 PID 칸이 없어 고른 띠에 붙었는지 **증명할 수 없다** — 위 규칙(「모르는 변형이 고른 파트를 담으면
     //   거절」)을 보수적으로 댄다: 고른 파트에 `*ELEMENT_SEATBELT` 가 있으면 거절하고, 없으면 다른 모르는 카드처럼 버리고
     //   `dropped_keywords` 에 센다(2026-11-07). 장치를 빼고 띠만 실은 덱은 그럴듯하게 돌면서 리트랙터 · 프리텐셔너가 없다.
+    //   가속도계(`_ACCELEROMETER`)와 데이터 줄 없는 장치 블록은 세지 않는다(scanElements — 사용자 결정 2026-11-07).
     if (pk.seatbeltCards > 0 && !pk.seatbeltDevices.empty()) {
         console.error("고른 파트에 *ELEMENT_SEATBELT 카드 " + std::to_string(pk.seatbeltCards) + " 장이 있는데 덱에 안전띠 장치 키워드가 " +
                       std::to_string(pk.seatbeltDevices.size()) + " 블록 있다 — 장치는 PID 칸이 없어 고른 띠에 붙었는지 증명할 수 "

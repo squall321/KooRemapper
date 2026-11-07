@@ -23,7 +23,8 @@
   D restack — 지운 절점을 N4 로 무는 안전띠 줄은 manual · SBRID 만 같은 번호인 줄은 아니다
   E extract-parts — 안전띠 **장치** 키워드(`*ELEMENT_SEATBELT_RETRACTOR` …)는 PID 칸이 없어 고른 띠에 붙었는지 증명할 수 없다.
     고른 파트에 `*ELEMENT_SEATBELT` 가 있으면 **거절**한다(rc 1 · 산출 없음 · 장치 키워드와 줄을 댄다). 안전띠를 고르지 않았으면
-    싣지 않고 dropped_keywords 에 센다 — 칸 1 을 PID 로 짐작하지 않는다(그 조각이 고른 PID 와 같아도 거절하지 않는다)
+    싣지 않고 dropped_keywords 에 센다 — 칸 1 을 PID 로 짐작하지 않는다(그 조각이 고른 PID 와 같아도 거절하지 않는다).
+    가속도계(`_ACCELEROMETER`)는 거절하지 않고 dropped_keywords 에 센다 · 데이터 줄 없는 장치 블록은 장치가 아니다(사용자 결정 11-07)
   F 두 가지로 읽히는 줄(정수 폭으로 쓴 안전띠 · 질량 줄) — cleanup-nodes · extract-parts 는 두 읽기의 절점을 다 지킨다 ·
     renumber 는 다른 읽기의 절점이 덱에 있으면 거절(줄을 댄다 · 산출 없음) · 설명서대로 쓴 줄(빈 SLEN · 빈 SBRID · 소수점 · E/D 지수 ·
     왼쪽 맞춤 · 꼬리 주석)은 renumber 가 그대로 된다 · restack 은 어느 읽기로든 지운 절점을 물면 올린다 · 질량 PID 가 읽기마다
@@ -259,6 +260,32 @@ def main():
         check("E-3 보(PID 8)는 실었고 안전띠 요소 · 장치는 싣지 않았다",
               rc == 0 and len(section_lines(os.path.join(d, "e2_out.k"), "*ELEMENT_BEAM")) == 1 and "*ELEMENT_SEATBELT" not in body,
               body[-400:])
+
+        # 가속도계는 띠와 무관할 수 있다 — 거절 목록에서 뺀다(버리고 dropped_keywords). 데이터 줄 없는 장치 블록은 장치가 아니다
+        acc = "*ELEMENT_SEATBELT_ACCELEROMETER\n" + "%10d%10d%10d%10d" % (1, 105, 105, 105) + "\n"
+        empty_sensor = "*ELEMENT_SEATBELT_SENSOR\n$ 아직 안 채웠다\n\n"
+        sensor = "*ELEMENT_SEATBELT_SENSOR\n" + "%10d%10d%10d%10d" % (1, 1, 13, 0) + "\n"
+        ecases = (("E-4", acc, False, "*ELEMENT_SEATBELT_ACCELEROMETER", "★가속도계만 있으면 띠를 골라도 rc 0 — 가속도계는 dropped_keywords"),
+                  ("E-5", empty_sensor, False, "*ELEMENT_SEATBELT_SENSOR", "★데이터 줄 없는 장치 블록(빈 _SENSOR)은 세지 않는다 — rc 0"),
+                  ("E-6", acc + empty_sensor + sensor, True, "*ELEMENT_SEATBELT_SENSOR", "데이터 줄 있는 _SENSOR 는 그대로 거절 — 그 블록만 댄다(가속도계 · 빈 블록은 아니다)"),
+                  ("E-7", "*ELEMENT_SEATBELT_PRETENSIONER\n" + "%10d%10d%10d%10d" % (1, 1, 1, 0) + "\n", True, "*ELEMENT_SEATBELT_PRETENSIONER", "_PRETENSIONER 는 그대로 거절"),
+                  ("E-8", "*ELEMENT_SEATBELT_WHATEVER\n" + "%10d" % 1 + "\n", True, "*ELEMENT_SEATBELT_WHATEVER", "모르는 *ELEMENT_SEATBELT_* 도 그대로 거절"))
+        for tag, extra, refuse, kwname, what in ecases:
+            edeck = belt_deck(8, belt(8, 13, 9, 101, 102, 0, "0.0", 103, 104), tail=extra)
+            y = tag.replace("-", "") + ".yaml"
+            write(os.path.join(d, y + ".k"), edeck)
+            write(os.path.join(d, y), "model: %s.k\noutput: %s_out.k\nparts: [9]\nreport: %s.json\n" % (y, y, y))
+            rc, out = run(binary, d, "extract-parts", y)
+            if refuse:
+                kl = [i + 1 for i, l in enumerate(edeck.split("\n")) if l == kwname]
+                listed = re.findall(r"^\s+\S+\.k:(\d+) (\*ELEMENT_SEATBELT_\w+)", out, re.M)
+                ok = rc == 1 and not os.path.exists(os.path.join(d, y + "_out.k")) and listed == [(str(n), kwname) for n in kl[-1:]]
+                check("%s %s — rc 1 · 줄 %s" % (tag, what, kl[-1:]), ok, (rc, listed, out[-500:]))
+            else:
+                rep = json.load(open(os.path.join(d, y + ".json"), encoding="utf-8")) if rc == 0 else {}
+                ok = rc == 0 and len(section_lines(os.path.join(d, y + "_out.k"), "*ELEMENT_SEATBELT")) == 1 and \
+                    kwname in (rep.get("dropped_keywords") or {})
+                check("%s %s" % (tag, what), ok, (rc, rep.get("dropped_keywords"), out[-400:]))
 
         print("[F 두 가지로 읽히는 줄 — 지키는 쪽은 둘 다 · renumber 는 거절 · 설명서 꼴은 그대로 · 질량 PID]")
         # SLEN 을 8칸에 쓴(빈 SLEN) 줄 — 설명서 칸(SLEN 16)으로 읽으면 SLEN = 「103」 · N3 = 104 · N4 없음, 정수 폭이면 N3 103 · N4 104
