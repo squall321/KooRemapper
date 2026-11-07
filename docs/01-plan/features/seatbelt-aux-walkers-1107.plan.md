@@ -12,6 +12,8 @@
 - 안전띠 줄이 설명서 칸과 정수 폭 두 가지로 읽혀 갈릴 때 — 「둘 다 남기고 번호 매기기는 거절」.
 - `*ELEMENT_SEATBELT_ACCELEROMETER` — 「거절 목록에서 뺀다」(빼고 `dropped_keywords` 에 적는다 · 빈 장치 블록은 안 센다).
 - 고치다 새로 찾은 기존 위험 여덟(출력이 입력을 덮는 것 다섯 · extract-parts 셋) — 「이번 판에 같이 고친다」.
+- boundary · rbe 가 output 을 빼면 model 자리에 쓰던 것(카탈로그에 적혀 있었다) — 「거절로 바꾸고 문장을 고친다」(`c4b40d6` · `001f1bc`).
+- 셋째로 새로 본 기존 결함 열하나 — 「이번 판에 같이」.
 - 검토 중 LS-PrePost 가 고쳐 쓴 `~/LSTC/LS-PrePost4.12` 설정 — 「홈 폴더로 바꾼다」(했다 — 세 줄 · 최근 목록 두 줄, 고치기 전 사본은 scratch).
 
 ## 고칠 것(검토 번호)
@@ -51,7 +53,13 @@
 - [x] 재검토 — 확인 결함 여섯(퇴행 넷: 정수꼴 SLEN 의 유령 절점 · i10 왼쪽 정렬 거짓 거절 · 실패 때 안 쓴 파일 지움 · rebind 정수 질량 거짓 거절,
       딸린 것 둘: 검증 실패 뒤 「썼다」 · 플랫폼에서 앞 잡 출력 지움 + 거절 목록이 잡 요약에 없음) · 기존 둘(인클루드 깊이 8 · ELBOW 가운데 절점)
 - [ ] 2차 고침 — 재검토 여섯 + 기존 둘 + extract-parts 새 위험 셋(COLUMN 세트 · 따라가지 않는 인클루드 안 고른 파트 · 중첩 인클루드 찾기)
-- [ ] 출력이 입력을 덮는 것 — 메모리 op 의 인클루드(실측 `update`) · meshfix · prestress · map→prestress · rebind
+- [x] 2차 고침(`668f1d5` · `92f50fe` · `5ae2792` · `8261ce7` · `a33af2f` · `e4f6992` · `7bacad9` · `284d132` — 단위 170 · 회귀 108 · 퍼지 거짓 거절 0)
+- [x] 출력이 입력을 덮는 것 — 공용 관문 `output_guard`(`03babf8` · `ea98e4a` · `c4b40d6` — 단위 170 · 회귀 110 · 새 행렬 508 항)
+- [x] 합치기 가지 `integrate-1107`(판 2 · 출력 관문 · 안전띠 — 충돌 셋) · boundary · rbe 문장(`001f1bc`)
+- [ ] 셋째 묶음 열하나 — 출력 관문 갈래: assemble 중간 쓰기 · map `bbox_align: source` 임시 · map 실패 뒤 `.__preproc_flat.k` ·
+      prestress 곁 이름(`rfind('.')`) · battery 배치 같은 이름 · YAML op 여덟의 경로 기준 / 안전띠 갈래: WARPAGE SN1 · SN2 · strip 의 덮지 않을
+      목록 · contact · boundary · rbe 의 `*END` 마다 넣기 · battery `*INCLUDE` 를 마지막 `*END` 앞에 / 판 2 갈래: 공용 SECID 커서의 쌓인 카드
+- [ ] 고친 것 전부 적대적 검토(갈래 셋) — 2차 고침 · 출력 관문은 아직 검토 전
 - [ ] 고친 것만 겨냥한 적대적 검토
 - [ ] main 에 합치기 · 단위 · 전체 회귀(gmsh 변수 둘) · push
 - [ ] compat 빌드 · 잡 확인 뒤 API 재기동 · 스모크 · CLI · Drive 게시 · appt313 스테이징 · cae00 점검 · 포털 알림

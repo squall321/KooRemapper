@@ -18,6 +18,11 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
   `contiguous` · SECID · MID · `snapshot.basis`/`project_id` · `deck.includes`(늘 있음, 없으면 빈 목록) · `field.new_section` + `section_<PID>.k` ·
   transform 은 그쪽이 강체를 확인하고 아니면 review · 요소마다 셸 두께가 있으면 줄에 표시 · `version` 2). 그 목록으로 짓고 v2 실물이 오면 대조한다.
 - **이름 `apply_carryover_plan`** — 사용자 확인(11-07).
+- **11-07 밤 사용자 결정 둘** — ① 거절 · 실패 때 출력 자리의 앞 실행 덱을 지우던 규칙(`stale_output_removed`)을 extract-parts 와 맞춘다 —
+  임시 파일에 쓰고 성공하면 바꿔 넣는다 · 거절 · 실패면 앞 파일은 그대로 · 보고는 늘 쓴다(플랫폼에서 앞 잡의 출력이 지워지지 않게).
+  ② StepForge `591d5b5` 의 권고 셋 + 하나를 받는다 — 요소 `_TITLE` 블록은 읽지 않는 블록(그 PID 를 고치면 거절) · 정수 칸의 실수 꼴
+  (`5.000e+00`)은 그 정수(LS-DYNA 실행 기록) · 열 재질 `*MAT_T01`~`T18` 은 MID 셈에서 뺀다(Vol II) · 손대는 PID 의 SECID · MID 가 두 번
+  정의돼 있으면 거절(`part_duplicate` 처럼 — 두 앱이 같은 줄에서 멈춘다).
 - **판 2 받기(11-07 저녁 — StepForge `60f8969` · 코드 `4295f7d` · 라이브 9525)** — 정본은 그쪽 요청서 §10. 사용자 결정 둘 —
   ① 인클루드가 있는 덱은 `deck.includes` 를 대조해 받되 **주 덱만 고친다** — 고칠 자리(바꿀 PID 의 요소 · 절점 · `*PART` · 섹션)가 인클루드 파일에 있으면
   거절하고 목록(인클루드 파일은 쓰지 않는다). ② 줄마다 실린 덱 자리(절점 · 요소 범위와 수 · 이어짐 · SECID · MID)가 우리 셈과 다르면 **손대는 줄은 거절**,
