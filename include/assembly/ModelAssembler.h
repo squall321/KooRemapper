@@ -5,6 +5,7 @@
 #include "parser/DeckNewline.h"
 #include "parser/IncludeClosure.h"
 #include "parser/FragmentMap.h"
+#include "parser/CarryoverPlan.h"
 #include "assembly/AssemblyConfig.h"
 #include "core/Mesh.h"
 #include "core/Vector3D.h"
@@ -59,6 +60,14 @@ public:
     IdMaxima idMaxima() const {
         return {maxNodeId_, std::max(maxElementId_, maxAuxElementId_), maxPartId_, maxSectionId_, maxMaterialId_, maxSetId_};
     }
+    // ★StepForge 이월 계획(plan.json · 변위장 · 조각)을 이 덱에 적용한다(2026-11-07 · `apply_carryover_plan`).
+    //   사전 검사는 **전부 아니면 전무**다 — 걸린 것을 `rep.problems` 에 모두 담고 false(편집 상태를 건드리지 않는다).
+    //   통과하면 처리마다 편집 상태(옮긴 절점 · 지운 요소 · 넣을 블록 · `*PART` 고침)를 꾸민다 — 쓰기는 부르는 쪽(`writeOutput`).
+    //   `loadBaseModel` 뒤에 부른다(덱 지문은 그 파일의 바이트로 잰다).
+    bool applyCarryoverPlan(const std::string& planPath, carryover::Report& rep);
+    // 쓴 덱을 다시 읽어 기대(옮긴 자리 · 지운 번호 · 넣은 번호와 좌표 · 파트별 요소 수 · 섹션)와 대조하고 품질 관문
+    // (새로 뒤집힌 솔리드 · 법선이 뒤집힌 셸)을 건다. false 면 `rep.problems` 에 까닭 — 부르는 쪽이 그 산출을 지운다.
+    bool verifyCarryoverOutput(const std::string& deckPath, carryover::Report& rep) const;
     bool loadRawOnly(const std::string& filename);
     bool applyReplace(const ReplaceOperation& op, double E, double nu,
                       const std::string& configDir);
@@ -221,6 +230,28 @@ private:
     // 격자 리더가 메시에 담지 않는 `*ELEMENT_*` 카드(보 · 이산 · 질량 · 안전띠 · 플롯 · 줄 수를 모르는 변형)의 EID 최대값 —
     // 주 덱과 인클루드 닫힘(`nonGridElementMaxId`). `idMaxima()` 의 바닥에만 든다(새 요소 번호 커서는 `maxElementId_`).
     int maxAuxElementId_ = 0;
+
+    // ── 이월 계획 적용(CarryoverApply.cpp) ─────────────────────────────────────
+    // 이 덱(주 덱)이 정의하는 MID · SECID(→ 그 키워드) · `*PART` 변형 PID(→ 그 키워드) — 번호 커서와 같은 훑기를 쓴다
+    std::set<int> definedMaterialIds() const;
+    std::map<int, std::string> definedSectionIds() const;
+    std::map<int, std::string> definedPartVariantIds() const;
+    // applyCarryoverPlan 이 남기는 기대 — verifyCarryoverOutput 이 쓴 덱과 대조한다
+    struct CarryExpect {
+        std::map<int, Vector3D> moved;                          // 옮긴 절점 → 새 자리
+        std::map<int, long long> movedPid;                      // 옮긴 절점 → 그 PID(보고용)
+        std::set<int> removedNodes, removedElems;
+        std::map<long long, std::array<double, 3>> insertedNodes;   // 넣은 절점(덱 번호) → 조각 좌표
+        struct Inserted { long long pid = 0; std::vector<long long> nodes; };
+        std::map<long long, Inserted> insertedElems;            // 넣은 요소(덱 번호) → PID · 절점(덱 번호, 정렬)
+        std::map<long long, long long> newSecid;                // 바꿔 넣은 PID → 새 SECID
+        std::set<long long> deletedPids;
+        struct AddedPart { long long secid = 0, mid = 0; };
+        std::map<long long, AddedPart> addedParts;
+        struct Gate { long long pid = 0; carryover::Action action = carryover::Action::Keep; bool added = false; size_t row = 0; };
+        std::vector<Gate> gates;                                // 품질 관문을 걸 PID(계획 줄 차례)
+    };
+    CarryExpect carry_;
 
     // Counters
     int replacedParts_;

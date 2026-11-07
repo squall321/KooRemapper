@@ -25,3 +25,5 @@ int runCadSolidMerge(const std::string& yamlFile, KooRemapper::ConsoleOutput& co
 int runIdFloor(const std::string& yamlFile, KooRemapper::ConsoleOutput& console);
 // 재메시 뒤 덧붙인 블록의 절점 번호를 (파트 이름, 좌표)로 새 덱 번호에 다시 묶는다(StepForge 경계 11행)
 int runRebindAfterRemesh(const std::string& yamlFile, KooRemapper::ConsoleOutput& console);
+// StepForge 이월 계획(plan.json · 변위장 · 조각)을 덱 PID 마다 적용한다 — 사전 검사는 전부 아니면 전무 · 보고 JSON(2026-11-07)
+int runApplyCarryoverPlan(const std::string& yamlFile, KooRemapper::ConsoleOutput& console);

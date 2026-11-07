@@ -6,7 +6,9 @@
 #include "cli/ConsoleOutput.h"
 #include "commands/rebind.h"
 #include "parser/FragmentMap.h"
+#include "util/Sha256.h"
 #include "util/StrictJson.h"
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -1748,5 +1750,128 @@ int runCadSolidMerge(const std::string& yamlFile, ConsoleOutput& console) {
         mo << KooRemapper::fragment::toJson(assembler.mergedMaps().front()) << "\n";
     }
     console.println(std::string("[") + tag + "] Done -> " + outputPrefix + ".k · " + mapOut);
+    return 0;
+}
+
+// ── Standalone apply_carryover_plan ─────────────────────────────────────────
+// StepForge 이월 계획(plan.json · field_<PID>.bin · fragment_<PID>.k)을 덱에 적용한다 — 규칙과 검사는
+// `ModelAssembler::applyCarryoverPlan` · 쓴 덱 대조와 품질 관문은 `verifyCarryoverOutput`.
+// 산출 둘 — <output>.k(고친 덱) · 보고 JSON(`report`, 기본 <output 줄기>_carryover.json). 보고는 **거절해도** 쓴다
+// (걸린 것 전부 · 처리마다 결과 — 저쪽이 그것을 읽고 계획을 고친다). 거절이면 덱을 쓰지 않는다(rc 1).
+int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
+    const char* tag = "apply_carryover_plan";
+    {
+        std::string tabLine;
+        if (KooRemapper::yamlScanTabIndent(yamlFile, tabLine)) {
+            console.error(KooRemapper::yamlTabIndentMessage(tag, tabLine));
+            return 1;
+        }
+    }
+    StandaloneYamlBase y;
+    y.resolveFiles(yamlFile);
+    if (rejectMultiOperation(yamlFile, tag, console)) return 1;
+    std::ifstream f(yamlFile);
+    if (!f.is_open()) { console.error("Cannot open: " + yamlFile); return 1; }
+    KooRemapper::yamlSkipBOM(f);
+    std::string planFile, reportFile;
+    std::vector<std::string> unknown;
+    for (std::string ln; std::getline(f, ln);) {
+        if (!ln.empty() && ln.back() == '\r') ln.pop_back();
+        std::string tr = y.trim(ln);
+        if (tr.empty() || tr[0] == '#') continue;
+        size_t cp = tr.find(':');
+        if (cp == std::string::npos) continue;
+        const std::string key = y.keyOf(tr, cp);
+        const std::string val = y.stripQuotes(y.trim(KooRemapper::yamlStripComment(tr.substr(cp + 1))));
+        if (key == "model" || key == "output") y.parseCommonKey(key, val);
+        else if (key == "plan") planFile = val;
+        else if (key == "report") reportFile = val;
+        else unknown.push_back(key);
+    }
+    f.close();
+    // 모르는 키는 거절한다 — 형제 op(cad_solid_merge_to_deck · id_floor)과 같다
+    if (!unknown.empty()) {
+        std::string ks;
+        for (const auto& k : unknown) ks += (ks.empty() ? "" : ", ") + k;
+        console.error(std::string("[") + tag + "] 모르는 키: " + ks + " — model · plan · output · report(선택)만 받는다");
+        return 1;
+    }
+    if (y.modelFile.empty() || planFile.empty()) {
+        console.error(std::string("[") + tag + "] model(고칠 덱)과 plan(StepForge plan.json)이 있어야 합니다");
+        return 1;
+    }
+    if (rejectEmptyOutput(y, tag, console)) return 1;
+    const std::string modelPath = y.resolvePath(y.modelFile);
+    const std::string planPath = y.resolvePath(planFile);
+    const std::string outputPrefix = y.getOutputPrefix();
+    const std::string outPath = outputPrefix + ".k";
+    const std::string reportPath = reportFile.empty() ? outputPrefix + "_carryover.json" : y.resolvePath(reportFile);
+    auto canon = [](const std::string& p) {
+        std::error_code ec;
+        const auto c = std::filesystem::weakly_canonical(p, ec);
+        return ec ? p : c.string();
+    };
+    if (canon(outPath) == canon(modelPath)) {
+        console.error(std::string("[") + tag + "] output 이 model 과 같다 — 계획이 지문(deck.sha256)으로 고정한 입력 덱을 덮어쓰지 않는다");
+        return 1;
+    }
+    if (canon(reportPath) == canon(modelPath) || canon(reportPath) == canon(planPath) || canon(reportPath) == canon(outPath)) {
+        console.error(std::string("[") + tag + "] report 가 model · plan · output 중 하나와 같다 — 다른 이름을 주세요");
+        return 1;
+    }
+    console.println(std::string("[") + tag + "] Model : " + modelPath);
+    console.println(std::string("[") + tag + "] Plan  : " + planPath);
+
+    KooRemapper::carryover::Report rep;
+    auto writeReport = [&]() {
+        std::ofstream o(reportPath, std::ios::binary);
+        if (!o.is_open()) { console.error(std::string("[") + tag + "] 보고를 쓸 수 없다: " + reportPath); return false; }
+        o << KooRemapper::carryover::toJson(rep);
+        console.println(std::string("[") + tag + "] Report: " + reportPath);
+        return true;
+    };
+    auto printList = [&](const std::vector<KooRemapper::carryover::Problem>& v, bool problems) {
+        for (const auto& p : v) {
+            const std::string line = (p.pid > 0 ? "[PID " + std::to_string(p.pid) + "] " : std::string()) + p.kind + " — " + p.detail;
+            if (problems) console.error(line);
+            else console.warning(line);
+        }
+    };
+    auto refuse = [&](const std::string& why) {
+        printList(rep.problems, true);
+        printList(rep.warnings, false);
+        writeReport();
+        console.error(std::string("[") + tag + "] " + why);
+        return 1;
+    };
+
+    ModelAssembler assembler;
+    if (!assembler.loadBaseModel(modelPath)) {
+        rep.problems.push_back({0, "deck_read", assembler.getErrorMessage()});
+        return refuse("덱을 읽지 못했다 — 덱을 쓰지 않았다");
+    }
+    if (!assembler.applyCarryoverPlan(planPath, rep))
+        return refuse("사전 검사에서 " + std::to_string(rep.problems.size()) + " 건이 걸렸다 — 계획 전체를 적용하지 않았고 덱을 쓰지 않았다");
+    for (const auto& msg : assembler.infoMessages) console.println(msg);
+    if (!writeOutputChecked(assembler, outputPrefix, tag, console)) {
+        rep.problems.push_back({0, "write", assembler.getErrorMessage().empty() ? std::string("쓰기 관문에서 멈췄다") : assembler.getErrorMessage()});
+        for (auto& pr : rep.parts) if (pr.result == "applied") pr.result = "skipped";
+        for (auto& ar : rep.added) if (ar.result == "applied") ar.result = "skipped";
+        return refuse("덱 쓰기가 멈췄다 — 산출이 없다");
+    }
+    if (!assembler.verifyCarryoverOutput(outPath, rep)) {
+        std::remove(outPath.c_str());
+        return refuse("쓴 덱의 대조 · 품질 관문에서 걸렸다 — 산출을 지웠다: " + outPath);
+    }
+    {
+        std::ifstream o(outPath, std::ios::binary);
+        std::ostringstream ss;
+        ss << o.rdbuf();
+        rep.deckShaOut = KooRemapper::util::sha256Hex(ss.str());
+    }
+    rep.ok = true;
+    printList(rep.warnings, false);
+    if (!writeReport()) return 1;
+    console.println(std::string("[") + tag + "] Done -> " + outPath + "  (sha256 " + rep.deckShaOut + ")");
     return 0;
 }

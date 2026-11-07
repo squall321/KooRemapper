@@ -52,10 +52,11 @@ namespace KooRemapper {
 namespace { static int bc_findMaxSetNodeId(const std::vector<std::string>& rawLines); }
 
 namespace {
-// 줄들에서 `*SECTION_*` 첫 데이터 카드의 SECID 최대값 — 파트가 참조하지 않는 섹션도 번호를 차지한다.
-// 주 덱과 인클루드 파일이 **같은 규칙**으로 센다(loadBaseModel · raiseMaxIdsOverIncludes).
-int cur_scanMaxSectionId(const std::vector<std::string>& lines) {
-    int maxId = 0;
+// 줄들에서 `*SECTION_*` 첫 데이터 카드의 SECID(→ 그 키워드, 먼저 나온 것) — 파트가 참조하지 않는 섹션도 번호를 차지한다.
+// 주 덱과 인클루드 파일이 **같은 규칙**으로 센다(loadBaseModel · raiseMaxIdsOverIncludes). 이월 적용(2026-11-07)이 같은 훑기로
+// 「그 SECID 가 덱에 있나 · 셸 섹션인가」를 본다(`definedSectionIds`).
+std::map<int, std::string> cur_scanSectionIds(const std::vector<std::string>& lines) {
+    std::map<int, std::string> ids;
     for (size_t i = 0; i < lines.size(); ++i) {
         const std::string& l = lines[i];
         size_t s = l.find_first_not_of(" \t");
@@ -77,11 +78,16 @@ int cur_scanMaxSectionId(const std::vector<std::string>& lines) {
             // 필요하므로 공백 토큰 하나로 충분하다(10칸 덱이든 8칸 덱이든 SECID 는 첫 칸이다).
             std::istringstream iss(d);
             int sid = 0;
-            if (iss >> sid && sid > maxId) maxId = sid;
+            if (iss >> sid && sid > 0) ids.emplace(sid, deckscan::kwBare(deckscan::keywordToken(l)));
             break;                      // 첫 데이터 카드만 본다
         }
     }
-    return maxId;
+    return ids;
+}
+
+int cur_scanMaxSectionId(const std::vector<std::string>& lines) {
+    const auto ids = cur_scanSectionIds(lines);
+    return ids.empty() ? 0 : ids.rbegin()->first;
 }
 
 // 줄들에서 `*MAT_*` 의 MID 최대값. 리더(`KFileReader`)는 재질 **다섯 종류**만 읽어 `baseMesh_.materials` 에
@@ -132,11 +138,12 @@ int cur_scanMaxMaterialId(const std::vector<std::string>& lines) {
 // ⚠ 옵션형 블록 하나에 파트가 여럿이면 **첫 파트만** 센다 — 옵션 카드 수가 옵션마다 다르고 INERTIA 의 Card 6 은
 //    선택이라(216041) 줄 수를 확정 못 한다. 실사용 6,053장에서 변형으로 파트를 정의한 것은 `*PART_COMPOSITE` 1건,
 //    여러 파트 블록은 0이다. `*PART_DUPLICATE` 가 오프셋으로 만드는 번호도 세지 않는다(실사용 0).
-int cur_scanMaxPartVariantId(const std::vector<std::string>& lines) {
+// 같은 훑기로 PID(→ 그 키워드, 먼저 나온 것)를 모은다 — 이월 적용(2026-11-07)이 「그 PID 는 맨 `*PART` 가 아니라 변형이다」를 말하려고 쓴다.
+std::map<int, std::string> cur_scanPartVariantIds(const std::vector<std::string>& lines) {
     static const char* const kDefOpts[] = {"INERTIA", "REPOSITION", "CONTACT", "PRINT", "ATTACHMENT", "NODES",
                                            "AVERAGED", "FIELD"};
     enum class Form { None, Opts, Composite, Stacked };
-    int maxId = 0;
+    std::map<int, std::string> ids;
     const int deckFw = deckFieldWidth(lines);
     for (size_t i = 0; i < lines.size(); ++i) {
         if (deckscan::isDataLine(lines[i])) continue;
@@ -169,11 +176,17 @@ int cur_scanMaxPartVariantId(const std::vector<std::string>& lines) {
             if (heading) { heading = false; continue; }          // Card 1 제목(비어 있을 수 있다)
             if (form == Form::Composite && first && d.rfind("OPTCARD", 0) == 0) continue;   // 선택 Card 2
             first = false;
-            maxId = std::max(maxId, deckscan::fieldInt(deckscan::cardFields(d, fw), 0));
+            const int pid = deckscan::fieldInt(deckscan::cardFields(d, fw), 0);
+            if (pid > 0) ids.emplace(pid, kw);
             if (form != Form::Stacked) break;                    // 첫 파트의 PID 만
         }
     }
-    return maxId;
+    return ids;
+}
+
+int cur_scanMaxPartVariantId(const std::vector<std::string>& lines) {
+    const auto ids = cur_scanPartVariantIds(lines);
+    return ids.empty() ? 0 : ids.rbegin()->first;
 }
 
 // 줄들에서 `*SET_*` 의 SID 최대값(모든 종류를 한 통으로).
@@ -306,6 +319,11 @@ bool ModelAssembler::loadBaseModel(const std::string& filename) {
 void ModelAssembler::initMaxSetIdFromRawLines() {
     maxSetId_ = cur_scanMaxSetId(rawLines_);
 }
+
+// 이월 적용(CarryoverApply.cpp)이 번호 커서와 **같은 훑기**로 덱의 정의를 본다 — 사본을 두지 않으려고 여기서 내준다
+std::set<int> ModelAssembler::definedMaterialIds() const { return cur_scanMaterialIds(rawLines_); }
+std::map<int, std::string> ModelAssembler::definedSectionIds() const { return cur_scanSectionIds(rawLines_); }
+std::map<int, std::string> ModelAssembler::definedPartVariantIds() const { return cur_scanPartVariantIds(rawLines_); }
 
 // ★대상이 인클루드 안에만 있는가(헤더의 주석 참조). 판정 자료는 `raiseMaxIdsOverIncludes` 가 같은 리더로 센 것이다.
 static std::string ma_flattenHint() {

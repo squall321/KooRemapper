@@ -2665,6 +2665,27 @@ static int runMain(int argc, char* argv[]) {
         printBanner(console);
         return runCadSolidMerge(argv[2], console);
     }
+    // StepForge 이월 계획을 덱에 적용한다(2026-11-07 — 계획 · 변위장 · 조각을 내는 것은 StepForge, 덱을 고치는 것은 우리)
+    if (command == "apply_carryover_plan") {
+        if (argc < 3) {
+            console.error("Usage: KooRemapper apply_carryover_plan <config.yaml>");
+            console.info("Applies a StepForge carry-over plan (plan.json v1 with field_<PID>.bin and fragment_<PID>.k next");
+            console.info("to it) to the deck it was made for: per deck PID keep / transform (rigid 4x4) / morph (add the");
+            console.info("displacement field) / remesh (replace the PID's elements and nodes with the fragment) / delete,");
+            console.info("and insert new parts. The plan is read strictly (unknown keys refused), the deck must match");
+            console.info("deck.sha256 and every companion file its sha256 and size. Pre-checks are all-or-nothing: every");
+            console.info("problem (shared nodes, node/element/segment references to a remeshed or deleted PID, ...) is");
+            console.info("listed and no deck is written. The written deck is re-read and checked, and a new inverted solid");
+            console.info("or flipped shell refuses it. A JSON report is always written.");
+            console.info("Minimal config:");
+            console.info("  model: deck.k");
+            console.info("  plan: plan.json");
+            console.info("  output: deck_applied.k");
+            return 1;
+        }
+        printBanner(console);
+        return runApplyCarryoverPlan(argv[2], console);
+    }
 
     // Disconnect command
     // @lat: [[commands/disconnect]]
