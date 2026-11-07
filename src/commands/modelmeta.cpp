@@ -12,6 +12,7 @@
 //     (닫힌 표면 왕복 상쇄). 부피 = 면-중심 피라미드 분해(와인딩 무관 |dot| 합).
 //   - 쉘 파트: 요소면 단면 기준(단측), 정사영 /2 없음, 부피 0.
 #include "parser/IncludeClosure.h"   // 인클루드 닫힘 — 정본
+#include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 #include "modelmeta.h"
 #include "contact_helpers.h"
 #include "cli/ConsoleOutput.h"
@@ -576,6 +577,12 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
     }
     MmConfig cfg;
     if (!mm_parseConfig(yamlFile, cfg, console)) return 1;
+    // ★쓰기 관문(2026-11-07 · output_guard) — 메타 JSON 이 설정 · 모델 · 그 인클루드 · 재질 DB 와 같은 파일이면 읽기 · 쓰기 전에 거절한다
+    {
+        auto reads = KooRemapper::output_guard::configAndModel(yamlFile, cfg.model);
+        reads.push_back({cfg.materialDb.empty() ? mm_defaultDbPath() : cfg.materialDb, "재질 DB"});
+        if (KooRemapper::output_guard::refuse("modelmeta", {cfg.output + "_modelmeta.json"}, reads, console)) return 1;
+    }
 
     console.info("[modelmeta] Model: " + cfg.model);
 

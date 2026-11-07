@@ -1,4 +1,5 @@
 #include "modal.h"
+#include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 #include "parser/DeckWriter.h"
 #include "kw_util.h"
 #include "cli/ConsoleOutput.h"
@@ -130,6 +131,8 @@ int runModal(const std::string& yamlFile, ConsoleOutput& console) {
     };
     std::string modelFullPath = resolvePath(modelPath);
     std::string outFullPath   = resolvePath(outPath);
+    // ★쓰기 관문(2026-11-07 · output_guard) — 쓸 파일이 설정 · 모델 · 그 인클루드와 같은 파일이면 열기 전에 거절한다
+    if (KooRemapper::output_guard::refuse("modal", {outFullPath}, KooRemapper::output_guard::configAndModel(yamlFile, modelFullPath), console)) return 1;
 
     // 2. Read model file
     std::vector<std::string> lines;

@@ -1,4 +1,5 @@
 #include "matswap.h"
+#include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 #include "parser/IdAllocator.h"   // 인클루드 닫힘까지 센 최대값 · 못 본 자리 경고
 #include "parser/DeckWriter.h"
 #include "util/YamlComment.h"
@@ -279,6 +280,12 @@ int runMatswap(const std::string& modelFile, const std::string& bundleFile,
     console.println("[matswap] Model  : " + modelFile);
     console.println("[matswap] Bundle : " + bundleFile);
     console.println("[matswap] Target PID: " + std::to_string(targetPid));
+    // ★쓰기 관문(2026-11-07 · output_guard) — 옛 위치 인자 꼴(설정 없음)의 산출이 모델 · 그 인클루드 · 번들과 같은 파일이면 열기 전에 거절한다
+    {
+        auto reads = KooRemapper::output_guard::modelInputs(modelFile);
+        reads.push_back({bundleFile, "재질 번들"});
+        if (KooRemapper::output_guard::refuse("matswap", {outputFile}, reads, console)) return 1;
+    }
 
     // 1. Read model
     std::vector<std::string> modelLines;
@@ -618,6 +625,7 @@ int runMatswapYaml(const std::string& yamlFile, ConsoleOutput& console) {
     console.println("[matswap] Swaps  : " + std::to_string(swaps.size()));
 
     ModelAssembler assembler;
+    assembler.noteInput(yamlFile, "설정 YAML");   // 쓰기 관문(writeOutput)이 output 과 견준다(2026-11-07)
     assembler.setFlattenIncludes(flattenIncludes);
     if (!assembler.loadBaseModel(modelFile)) {
         console.error(assembler.getErrorMessage()); return 1;

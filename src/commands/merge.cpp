@@ -1,4 +1,5 @@
 #include "parser/ElementCardLayout.h"   // deckFieldWidth · elementCardSpan — 칸 폭·카드 줄 수 정본
+#include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 #include "parser/IncludeClosure.h"   // FlatDeck — flatten_includes(2026-10-17)
 #include "parser/IncludeScan.h"      // 덱이 쪼개져 있나 — 안내·거절
 #include "parser/DeckScan.h"            // cardFields · fieldInt — 칸 읽기 정본
@@ -889,6 +890,8 @@ int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
         console.error("Invalid config: model and merge groups required");
         return 1;
     }
+    // ★쓰기 관문(2026-11-07 · output_guard) — 쓸 파일이 설정 · 모델 · 그 인클루드와 같은 파일이면 열기 전에 거절한다
+    if (KooRemapper::output_guard::refuse("merge", {cfg.outputPath}, KooRemapper::output_guard::configAndModel(yamlFile, cfg.modelPath), console)) return 1;
 
     const char* dirName[] = {"X", "Y", "Z"};
     const char* methName[] = {"Voigt", "Reuss", "VRH"};

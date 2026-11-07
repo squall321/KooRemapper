@@ -387,6 +387,35 @@ BOM 을 붙인 설정으로 둘 다 **종료 코드 0** 으로 정상 산출물�
 - `extract-surface` 는 원 덱에 들이지 않는 **별도 덱**(추출한 면)을 내므로 이 규칙의 대상이 아닙니다 — 노드는
   원래 번호 그대로, 셸은 1 부터입니다. 그 덱을 원 덱에 `*INCLUDE` 로 들이면 노드 정의가 겹칩니다.
 
+#### (j) 쓸 파일이 읽는 파일과 같으면 거절 (2026-11-07)
+
+덱 · 보고를 쓰는 모든 op 은 파일을 **하나라도 열기 전에** 이번 실행이 쓸 파일 전부(`output` · `report` 와 곁 파일 —
+`.dynain` · IGA 인클루드 · 대응표 · 진단 파일 · 임시 파일)를 읽는 파일과 견줍니다. 읽는 파일은 **설정 YAML** · **모델** ·
+**모델의 `*INCLUDE` 닫힘**([§3.1(h)](#31-yaml-공통-규칙-모든-op) 과 같은 규칙 — 주 덱 폴더 · `*INCLUDE_PATH`) · **다른 입력**
+(`dynain` · `bundle` · `dat_file` · `detail_flat` · `database` · `entities` · `fragment` · `groups` · 기준 · 변형 메시 …)입니다.
+같은 파일이면 — 철자가 달라도(`./a.k` · 절대 경로 · `../폴더/a.k`), 심볼릭 링크 · 하드 링크여도 — **아무 파일도 쓰지 않고
+종료 코드 1** 이고 두 경로를 다 적습니다.
+
+```
+[ERROR] [relax] 쓸 파일 「box.k」 이 읽는 파일 「box.k」(model) 과 같은 파일이다 — 입력을 덮어쓰지 않는다(아무 파일도 쓰지 않았다)
+```
+
+- **왜** — 예전에는 흘려 읽는 셋(`extract-parts` · `cleanup-nodes` · `strip`)만 견줬습니다. `update` 의 `output` 이 모델의
+  인클루드면 종료 코드 0 으로 그 인클루드가 주 덱으로 바뀌어 자기 자신을 끌어오고 `*NODE` 가 사라졌고, `meshfix` 는
+  `output == model` 이면 쓰기 뒤 재검사가 실패할 때 산출을 지우며 **모델을 지웠고**, `prestress ref def.key def.key` 는 변형
+  메시를 다시 읽기 전에 dynain 으로 덮었고, `rebind_entities_after_remesh` 는 `entities` 와 **문자열로만** 견줬습니다.
+- **in-place 는 `assemble` 만** — `output == base_model` 은 [§39 공통 특성](#39-assemble--통합-어셈블리)에 적힌 쓰임이라 덱
+  산출만은 그 자리에 씁니다(다 읽은 뒤 씁니다). 인클루드 · 설정 · 처리의 입력 · `.dynain`/IGA 곁 파일은 `assemble` 도 막습니다.
+  단독 op 은 `output == model` 도 거절합니다 — 고친 덱을 다른 이름으로 받으세요.
+- **`map` 의 prestress 고리** — 메시 사본이 map 산출 그 자리인 것(`output: foo.k` + `prestress.output: foo.dynain`)은
+  [§6](#6-prestress--초기-응력변형률-계산)의 쓰임이라 막지 않습니다. dynain · CSV 가 map 산출을 덮는 것과 사본이 `bent` ·
+  `flat` 을 덮는 것은 막습니다.
+- **거절하지 않는 것** — 다른 폴더의 같은 이름, 입력과 상관없는 기존 파일(예전처럼 덮어씁니다), 이름이 고유한 임시 파일
+  (`flatten_includes` 의 `.<이름>.kr_flat_….k` 등).
+- 설정 파일은 명령줄의 `.yaml`·`.yml` 과 op 이 읽는 설정 경로입니다. 산출을 명령줄의 `.yaml` 로 받는 op 은 없습니다.
+- 회귀 `tools/regress/test_output_guard_ops.py` — op 마다 모델 · 인클루드 · 설정 · 다른 입력 · 하드/심볼릭 링크 · `../` 철자는
+  거절, 대조 · 다른 폴더의 같은 이름 · 상관없는 기존 파일은 그대로 도는지 봅니다.
+
 ---
 
 ## 4. map — HEX8 구조화 메시 매핑
@@ -451,6 +480,9 @@ $$N_i = \frac{1}{8}(1 + \xi_i\xi)(1 + \eta_i\eta)(1 + \zeta_i\zeta)$$
 - 참조 메시는 반드시 **규칙적 HEX8 구조** 필요
 - 상세 메시 노드가 참조 요소 외부에 있으면 경고 출력
 - `info` 명령으로 Jacobian 통계 확인 가능
+- `output` 과 YAML 의 `prestress.output` 이 낼 파일(dynain · 메시 사본 · CSV)이 `bent` · `flat`(그 인클루드까지) · 설정과 같은
+  파일이면 아무것도 쓰지 않고 **종료 코드 1** 입니다([§3.1(j)](#31-yaml-공통-규칙-모든-op)). 예전에는 `prestress.output` 이
+  flat 이면 메시 사본이 기준 메시를 덮었고, `output` 이 flat 이면 고리가 덮인 flat 을 기준으로 **0 응력**을 종료 코드 0 으로 냈습니다.
 
 ---
 
@@ -559,6 +591,11 @@ $$\sigma_{ij} = \lambda \varepsilon_{kk} \delta_{ij} + 2\mu \varepsilon_{ij}$$
 - `<output 에서 확장자를 뗀 이름>.csv` (`--csv`): 요소별 변형률/응력 CSV. 재료(E·ν)를 찾지 못하면 dynain 대신 `<output>` 에 CSV 만 씁니다.
 
 예: `KooRemapper prestress --E 210000 --nu 0.3 flat.k bent.k pre.dynain` → `pre.dynain` + `pre.k`
+
+위 세 이름 가운데 하나가 기준 · 변형 메시(그 인클루드까지)와 같거나 서로 같으면 **아무것도 쓰지 않고 종료 코드 1** 입니다
+([§3.1(j)](#31-yaml-공통-규칙-모든-op)) — `prestress ref.k def.key def.key`(dynain 이 변형 메시를 다시 읽기 **전에** 덮었다) ·
+`prestress flat.k bent.k bent.dynain`(메시 사본 `bent.k` 가 변형 메시) · `--csv` 에 `x.csv`(dynain 과 CSV 가 한 파일).
+`map` 의 prestress 고리에서는 메시 사본이 map 산출 자리여도 됩니다([§4](#4-map--hex8-구조화-메시-매핑)).
 
 ### 재료 우선순위
 1. 명령행 `--E`, `--nu` 인자 (전체 오버라이드)
@@ -3266,6 +3303,9 @@ operations:
 
   **같은 경로에 있던 지난 실행 결과는 지우지 않습니다** — 실패해도 그 자리에 예전 파일이 그대로 남으니,
   새 결과로 오해하지 않도록 종료 코드를 반드시 확인하세요. in-place 출력(`output` == `base_model`)에서는 입력 메시가 보존됩니다.
+- **in-place 는 `assemble` 만(2026-11-07)**: 덱 산출만 `base_model` 그 자리에 씁니다. 인클루드 · 설정 · 처리의 입력
+  (`detail_flat` · `dat_file` · `bundle` · `dynain` · `database` …) · `.dynain`/IGA 곁 파일이 읽는 파일과 같으면 아무것도 쓰지 않고
+  종료 코드 1 입니다. 단독 명령은 `output == model` 도 거절합니다([§3.1(j)](#31-yaml-공통-규칙-모든-op)).
 
 > **참고**: 아래 각 오퍼레이션은 동일 이름의 독립 명령어(12~22장)와 동일한 알고리즘을 사용합니다.
 > assemble 내에서는 `- type: <이름>` 으로 지정하며, 여러 오퍼레이션을 순차 결합할 수 있습니다.
@@ -3637,6 +3677,10 @@ KooRemapper.exe meshfix <config.yaml>
 > **경로 규칙**(2026-09-18 실행 확인): `model`·`output` 의 상대 경로는 [§3.1(a)](#31-yaml-공통-규칙-모든-op) 대로
 > **그 YAML 파일이 있는 폴더** 기준입니다 — `KooRemapper meshfix cfg/meshfix.yaml` 은 `cfg/` 에서 읽고 `cfg/` 에 씁니다
 > (예전에는 작업 폴더 기준이었습니다). `tetremesh`([§43.8](#438-tetremesh--tet4-로컬-재메시))도 같습니다.
+
+> **쓰기 관문**(2026-11-07): `output` · 임시 파일(`<줄기>__mf.stl`·`.geo`·`.msh`·`.log`)이 `model` · 그 인클루드 · 설정과 같은
+> 파일이면 gmsh 를 돌리기 전에 **종료 코드 1** 입니다([§3.1(j)](#31-yaml-공통-규칙-모든-op)). 예전에는 `output == model` 이면
+> 쓰기 뒤 재검사가 실패할 때 「산출을 지웠다」며 **모델을 지웠습니다**. `preview: true` 는 아무것도 쓰지 않아 보지 않습니다.
 
 ```yaml
 model:   input.k      # 입력 K파일
@@ -5548,7 +5592,7 @@ tolerance: 1.0e-3             # (선택 · 2026-10-17) 좌표 공차 — 주지 
 | 자유형식(콤마) 줄 | 제자리에 같은 폭으로 바꿔 쓸 수 없다 |
 | 블록이 정의한 번호가 새 덱과 겹친다 | `*NODE` · 세트 SID · CNRB PID · `*ELEMENT_MASS` EID · LCID · CID |
 | 구간 표의 `coords.before`/`after` 가 두 덱에서 다시 잰 값과 다르다 | 이 표의 이전·이후 덱이 아니다 |
-| 덱의 `*INCLUDE` 닫힘을 다 못 읽었다(없는 파일 · `_TRANSFORM` 등 · `*INCLUDE ±`) · 두 덱의 정수 칸 폭이 다르다 · 모르는 YAML 키 · output = entities | 못 본 파일의 절점을 「없다」로 읽으면 엉뚱한 짝을 짓는다 · 원본을 덮어쓰지 않는다 |
+| 덱의 `*INCLUDE` 닫힘을 다 못 읽었다(없는 파일 · `_TRANSFORM` 등 · `*INCLUDE ±`) · 두 덱의 정수 칸 폭이 다르다 · 모르는 YAML 키 · output 이 읽는 파일(설정 · 두 덱과 그 인클루드 · entities · range_diff)과 같은 파일(철자 · 링크가 달라도 — 2026-11-07 전엔 entities 와 문자열로만 견줬다) | 못 본 파일의 절점을 「없다」로 읽으면 엉뚱한 짝을 짓는다 · 원본을 덮어쓰지 않는다 |
 | 절점 칸이 모자란 2차 솔리드(노드 8+2 쪼갬 등) | 그 요소의 절점 소속을 다 못 본다 |
 
 **v2(2026-10-16) — 파트와 요소도 옮긴다.** 파트는 `*PART` **제목**으로(저쪽은 메시 잡마다 PID 도 밀 수 있다 —

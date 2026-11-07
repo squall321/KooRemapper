@@ -153,6 +153,7 @@ int runMatdb(const std::string& yamlFile, ConsoleOutput& console) {
         console.println("[matdb] Material rules: " + std::to_string(op.rules.size()));
 
     ModelAssembler assembler;
+    assembler.noteInput(yamlFile, "설정 YAML");   // 쓰기 관문(writeOutput)이 output 과 견준다(2026-11-07)
     assembler.setFlattenIncludes(flattenIncludes);
     if (!assembler.loadRawOnly(modelFile)) {
         console.error(assembler.getErrorMessage());

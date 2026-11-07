@@ -1,5 +1,6 @@
 // linkage-fit 이 적은 군별 변환을 큰 덱에 찍는 op — 조용히 빠지는 절점이 하나도 없어야 한다.
 #include "applyfold.h"
+#include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 #include "parser/IncludeClosure.h"   // FlatDeck — flatten_includes
 #include "parser/IncludeScan.h"      // 거절 안내 — 덱이 쪼개져 있나
 
@@ -186,6 +187,12 @@ int runApplyFold(const std::string& yamlFile, ConsoleOutput& console) {
     // 다른 접두사 op(matdb · load · matswap · cclip · assemble …)과 같이 끝의 `.k` 는 뗀다 — `output: x.k` 가 `x.k.k` 를
     // 쓰지 않게(pyKooCAE REMAP 스텝은 `output: Remap_dti.k` 를 넣고 그 이름의 덱을 찾는다)
     if (output.size() > 2 && output.compare(output.size() - 2, 2, ".k") == 0) output.resize(output.size() - 2);
+    // ★쓰기 관문(2026-11-07 · output_guard) — <output>.k 가 모델(그 인클루드까지) · groups · 설정과 같은 파일이면 거절한다
+    {
+        auto reads = KooRemapper::output_guard::configAndModel(yamlFile, model);
+        reads.push_back({groupsFile, "groups"});
+        if (KooRemapper::output_guard::refuse("applyfold", {output + ".k"}, reads, console)) return 1;
+    }
 
     std::vector<Group> groups;
     if (!readGroups(groupsFile, groups, console)) return 1;

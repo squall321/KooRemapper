@@ -6,6 +6,7 @@
 #include "cli/ConsoleOutput.h"
 #include "commands/rebind.h"
 #include "parser/FragmentMap.h"
+#include "parser/OutputGuard.h"
 #include "util/Sha256.h"
 #include "util/StrictJson.h"
 #include <filesystem>
@@ -66,6 +67,8 @@ struct StandaloneYamlBase {
     bool resolveFiles(const std::string& yamlFile) {
         size_t lastSlash = yamlFile.find_last_of("/\\");
         if (lastSlash != std::string::npos) configDir = yamlFile.substr(0, lastSlash);
+        // 설정 파일도 이 실행이 읽는 파일이다 — 쓰기 관문(`output_guard`)이 output 과 견준다(이름이 .yaml 이 아니어도)
+        KooRemapper::output_guard::noteConfig(yamlFile);
         return true;
     }
 
@@ -1543,6 +1546,12 @@ int runIdFloor(const std::string& yamlFile, ConsoleOutput& console) {
     const std::string modelPath = y.resolvePath(y.modelFile);
     std::string outPath = y.resolvePath(y.outputFile);
     if (outPath.size() < 5 || outPath.substr(outPath.size() - 5) != ".json") outPath += ".json";
+    // ★쓰기 관문(2026-11-07 · output_guard) — 바닥 JSON 이 설정 · 모델 · 그 인클루드 · 대응표와 같은 파일이면 열기 전에 거절한다
+    {
+        auto reads = KooRemapper::output_guard::configAndModel(yamlFile, modelPath);
+        if (!mapPath.empty()) reads.push_back({y.resolvePath(mapPath), "fragment_map"});
+        if (KooRemapper::output_guard::refuse(tag, {outPath}, reads, console)) return 1;
+    }
 
     ModelAssembler assembler;
     assembler.setFlattenIncludes(y.flattenIncludes);   // `flatten_includes` — 로드 전에
@@ -1668,9 +1677,15 @@ int runRebindAfterRemesh(const std::string& yamlFile, ConsoleOutput& console) {
     in.entities = y.resolvePath(in.entities);
     in.output = y.resolvePath(output);
     if (!in.rangeDiff.empty()) in.rangeDiff = y.resolvePath(in.rangeDiff);
-    if (in.output == in.entities) {
-        console.error(std::string("[") + tag + "] output 이 entities 와 같다 — 원본 블록을 덮어쓰지 않는다");
-        return 1;
+    // ★쓰기 관문(2026-11-07 · output_guard) — 예전엔 output 과 entities 를 **문자열로만** 견줘 `./x` · 절대 경로 · 링크 · 두 덱과
+    //   그 인클루드 · range_diff · 설정은 보지 않았다. 같은 파일이면 열기 전에 거절한다(원본을 덮어쓰지 않는다)
+    {
+        std::vector<KooRemapper::output_guard::Input> reads{{yamlFile, "설정 YAML"}};
+        for (auto& r : KooRemapper::output_guard::modelInputs(in.oldDeck, "old_deck")) reads.push_back(std::move(r));
+        for (auto& r : KooRemapper::output_guard::modelInputs(in.newDeck, "new_deck")) reads.push_back(std::move(r));
+        reads.push_back({in.entities, "entities"});
+        if (!in.rangeDiff.empty()) reads.push_back({in.rangeDiff, "range_diff"});
+        if (KooRemapper::output_guard::refuse(tag, {in.output}, reads, console)) return 1;
     }
     console.println(std::string("[") + tag + "] old " + in.oldDeck + " → new " + in.newDeck);
     console.println(std::string("[") + tag + "] entities " + in.entities +
@@ -1735,7 +1750,9 @@ int runCadSolidMerge(const std::string& yamlFile, ConsoleOutput& console) {
 
     console.println(std::string("[") + tag + "] Model   : " + modelPath);
     console.println(std::string("[") + tag + "] Fragment: " + op.fragment + "  (map " + op.fragmentMap + ")");
+    const std::string mapOut = outputPrefix + "_fragment_map.json";
     ModelAssembler assembler;
+    assembler.planWrite(mapOut);   // 덱 뒤에 쓰는 대응표도 쓰기 관문이 덱보다 먼저 견준다(2026-11-07)
     assembler.setFlattenIncludes(y.flattenIncludes);   // `flatten_includes` — 로드 전에
     if (!y.flattenBad.empty()) console.warning("flatten_includes 값 「" + y.flattenBad + "」 을 참·거짓으로 읽지 못했다 — true 로 주라(지금은 펼치지 않는다)");
     if (!assembler.loadBaseModel(modelPath)) { console.error(assembler.getErrorMessage()); return 1; }
@@ -1743,7 +1760,6 @@ int runCadSolidMerge(const std::string& yamlFile, ConsoleOutput& console) {
     for (const auto& msg : assembler.infoMessages) console.println(msg);
     if (!writeOutputChecked(assembler, outputPrefix, tag, console)) return 1;
 
-    const std::string mapOut = outputPrefix + "_fragment_map.json";
     {
         std::ofstream mo(mapOut, std::ios::binary);
         if (!mo.is_open()) { console.error(std::string("[") + tag + "] 옮긴 대응표를 쓰지 못했다: " + mapOut); return 1; }

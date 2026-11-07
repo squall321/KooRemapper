@@ -51,7 +51,9 @@ op("map", "메시 매핑", "평면 상세 메시를 굽힌 구조화 HEX8 참조
    cmds=["KooRemapper generate --dim-i 20 --dim-j 5 arc demo",
          "KooRemapper map demo_bent.k demo_flat_fine.k mapped.k"],
    outputs=["mapped.k"],
-   notes=["bent 참조는 구조화 HEX8 이어야 한다. generate 가 bent/flat/flat_fine/flat_tet 세트를 만든다."])
+   notes=["bent 참조는 구조화 HEX8 이어야 한다. generate 가 bent/flat/flat_fine/flat_tet 세트를 만든다.",
+          "output(과 YAML 의 prestress.output 이 낼 dynain · 메시 사본 · CSV)이 bent · flat(그 인클루드까지) · 설정과 같은 파일이면",
+          "  아무것도 쓰지 않고 rc 1 — 메시 사본이 map 산출 자리인 것(output: foo.k + prestress.output: foo.dynain)만은 받는다"])
 op("shellmap", "메시 매핑", "굽힌 QUAD4 셸을 참조로 평면 상세 메시를 매핑", "셸매핑 shell 곡면 전개",
    "KooRemapper shellmap [--thickness <t>] <bent_shell> <flat_detail> <output>",
    cmds=["KooRemapper generate --dim-i 20 --dim-j 5 arc demo",
@@ -289,7 +291,9 @@ output: box_updated.k
 dynain: box_sq.k
 """}),
    cmds=[BOX_CMD, "KooRemapper squeeze box.k sq.yaml box_sq", "KooRemapper update update.yaml"],
-   outputs=["box_updated.k"])
+   outputs=["box_updated.k"],
+   notes=["output 이 model · 그 인클루드 · dynain · 설정과 같은 파일이면 쓰기 전에 rc 1 — 예전엔 output 이 모델의 인클루드면 rc 0 으로",
+          "  그 인클루드가 주 덱으로 바뀌어 자기 자신을 끌어오고 *NODE 가 사라졌다(2026-11-07). 고친 덱은 다른 이름으로 받는다"])
 op("iga", "메시 편집", "솔리드 파트를 NURBS trivariate IGA 패치로 감싸 IGA 해석용으로 변환", "nurbs isogeometric",
    "KooRemapper iga <config.yaml>",
    files=boxed({"iga.yaml": """base_model: box.k
@@ -335,7 +339,9 @@ warn_min_jac: 0.15
           "★지울 절점을 세트·SPC·이력 등이 가리키면 **같은 자리(snap_tolerance)의 새 절점으로 바꿔 쓴다**(재결속) —",
           "  못 풀면(내부 절점 · 인클루드 안 · 자유형식 줄) 덱을 쓰지 않고 rc 1 · 그 줄을 짚는다(`info --strict` 와 같은 칸 표)",
           "`preview: true` — gmsh 없이 그 카드를 미리 짚는다(표면 = gmsh 에 달림 · 내부 = 멈춘다). 덱을 쓰지 않는다",
-          "  표면 절점이면 `boundary_nodes: fixed` 가 짝을 찾은 원래 번호를 지킨다"])
+          "  표면 절점이면 `boundary_nodes: fixed` 가 짝을 찾은 원래 번호를 지킨다",
+          "output · 임시 파일(<줄기>__mf.stl/.geo/.msh/.log)이 model · 그 인클루드 · 설정과 같은 파일이면 gmsh 를 돌리기 전에 rc 1 —",
+          "  예전엔 output == model 이면 쓰기 뒤 재검사가 실패할 때 산출을 지우며 모델을 지웠다(2026-11-07)"])
 op("cnrb2solid", "표면·재메시", "CNRB(절점 강체) 볼트를 HEX8 솔리드 원통 + tied 접촉으로 변환", "볼트 bolt cnrb 원통",
    "KooRemapper cnrb2solid <config.yaml>",
    needs=["examples/cnrb2solid/bolt_simple.k"],
@@ -394,7 +400,10 @@ op("prestress", "변형·초기응력", "기준·변형 메시 쌍에서 Hooke �
    "KooRemapper prestress [--E v --nu v --strain green|...] <ref_mesh> <def_mesh> <output>",
    cmds=["KooRemapper generate --dim-i 20 --dim-j 5 arc demo",
          "KooRemapper prestress --E 210000 --nu 0.3 demo_flat.k demo_bent.k demo_pre"],
-   outputs=["demo_pre.k"])
+   outputs=["demo_pre.k"],
+   notes=["쓰는 파일 — <output>(dynain · `.k` 로 끝나면 <줄기>.dynain) · <줄기>.k(변형 메시 사본) · --csv 면 <줄기>.csv",
+          "  (재료가 없으면 <output> 에 CSV 만). 이 가운데 하나가 기준 · 변형 메시(그 인클루드까지)와 같거나 서로 같으면 rc 1",
+          "  — 예전엔 `prestress ref def.key def.key` 가 변형 메시를 다시 읽기 전에 dynain 으로 덮었다(2026-11-07)"])
 op("squeeze", "변형·초기응력", "파트를 지정 변형률로 압축하고 역방향 초기응력 출력 (억지 끼움)", "압축 억지끼움 interference swelling",
    "KooRemapper squeeze <mesh.k> <config.yaml> <output_prefix>",
    files=boxed({"sq.yaml": """parts:
@@ -537,7 +546,9 @@ material:
 """}),
    cmds=[BOX_CMD, "KooRemapper assemble asm.yaml"], outputs=["box_assembled.k"],
    notes=["operations[].type 는 각 op 이름(replace squeeze restack offset disconnect update generate ...)",
-          "restack·merge 항목은 operations[] 안에 pid_refs: strict(기본) | warn 을 받는다 — 비운 PID 를 가리키던 자리를 못 옮기면 strict 는 rc=1(덱은 쓴다), warn 은 같은 보고에 rc=0. 자세한 것은 help restack·help merge"])
+          "restack·merge 항목은 operations[] 안에 pid_refs: strict(기본) | warn 을 받는다 — 비운 PID 를 가리키던 자리를 못 옮기면 strict 는 rc=1(덱은 쓴다), warn 은 같은 보고에 rc=0. 자세한 것은 help restack·help merge",
+          "output == base_model(in-place)은 assemble 만 받는다 — 다 읽은 뒤 덱만 그 자리에 쓴다. 인클루드 · 설정 · 처리의 입력",
+          "  (detail_flat · dat_file · bundle · dynain …) · .dynain/IGA 곁 파일이 읽는 파일과 같으면 아무것도 쓰지 않고 rc 1(2026-11-07)"])
 
 # ── 하중·경계·접촉 ──
 op("load", "하중·경계·접촉", "파트 면(방향/tied/세그먼트셋 선택)에 압력·힘 하중 + 곡선", "하중 pressure 압력 force",
@@ -992,7 +1003,9 @@ range_diff: examples/rebind_entities_after_remesh/range_diff.json
           "  `info --strict` 와 같은 정본(`parser/NodeRefs`) · 2차 솔리드는 중간절점의 소속까지 본다",
           "★v2 — 파트는 `*PART` 제목으로, 요소는 (파트 제목, 요소 절점 좌표 집합)으로 옮긴다(`*SET_PART` · 접촉 SSTYP 3 ·",
           "  강체 묶음 · 요소 세트 · 요소 이력 · 파트 감쇠 `*DAMPING_PART_MASS/STIFFNESS` · 초기응력 `*INITIAL_STRESS_SOLID/SHELL`",
-          "  — 정본 `parser/IdRefs` · 초기응력은 카드 세트 길이를 NINT·NHISV·LARGE… 로 센다)"])
+          "  — 정본 `parser/IdRefs` · 초기응력은 카드 세트 길이를 NINT·NHISV·LARGE… 로 센다)",
+          "output 이 읽는 파일(설정 · old_deck · new_deck 과 그 인클루드 · entities · range_diff)과 같은 파일이면 rc 1 — 철자 · 링크가",
+          "  달라도 같다(2026-11-07 전엔 entities 와 **문자열로만** 견줘 `./ours.k` 를 놓쳤다)"])
 op("cad_solid_merge_to_deck", "메시 편집", "StepForge 조각(.k + 대응표)을 기존 덱에 **넣는다** — 계약 대조 · 번호 이동 · coord_sha 검산",
    "조각 삽입 fragment merge insert stepforge 대응표 coord_sha cad solid 넣기 경계",
    "KooRemapper cad_solid_merge_to_deck <config.yaml>",
@@ -1020,7 +1033,8 @@ fragment_map: examples/cad_solid_merge_to_deck/stepforge_fragment.json
           "unit 은 `deck_unit`(기본 mm-t-s)과 같아야 하고 frame 은 world 여야 한다 — 환산·변환은 하지 않는다",
           "계약 밖 키워드(`*SET_*`·`*MAT_ADD_*`·`*MAT_THERMAL_*` …)가 든 조각·`ranges.sid` 가 null 이 아닌 조각은 거절",
           "저쪽 자리표시 물성(RO = E = 1.0)은 그대로 넣되 MID 마다 **경고**한다 — 해석 전에 바꿀 것",
-          "산출 둘 — `<output>.k` · `<output>_fragment_map.json`(같은 칸 집합의 대응표를 **덱 번호**로 옮긴 것)"])
+          "산출 둘 — `<output>.k` · `<output>_fragment_map.json`(같은 칸 집합의 대응표를 **덱 번호**로 옮긴 것)",
+          "  둘 중 하나가 model · 그 인클루드 · fragment · fragment_map · 설정과 같은 파일이면 덱을 쓰기 전에 rc 1(2026-11-07)"])
 op("apply_carryover_plan", "메시 편집", "StepForge 이월 계획(plan.json · 변위장 · 조각)을 덱 PID 마다 **적용한다** — keep · transform · morph · remesh · delete · 새 파트",
    "이월 carryover 계획 plan CAD 개정 변위장 field morph transform remesh delete 바꿔 넣기 stepforge 적용",
    "KooRemapper apply_carryover_plan <config.yaml>",

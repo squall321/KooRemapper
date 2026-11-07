@@ -1,4 +1,5 @@
 #include "parser/DeckWriter.h"
+#include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 #include "parser/IdAllocator.h"
 #include "parser/IncludeClosure.h"
 #include "contact.h"
@@ -470,6 +471,8 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
         if (const std::string note = KooRemapper::yamlOutputExtNote(outPath); !note.empty())
             console.warning("[contact] " + note);
     }
+    // ★쓰기 관문(2026-11-07 · output_guard) — 쓸 파일이 설정 · 모델 · 그 인클루드와 같은 파일이면 열기 전에 거절한다
+    if (KooRemapper::output_guard::refuse("contact", {outPath}, KooRemapper::output_guard::configAndModel(yamlFile, modelPath), console)) return 1;
 
     // 2. Read model as rawLines
     std::vector<std::string> lines;

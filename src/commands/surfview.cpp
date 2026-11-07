@@ -11,6 +11,7 @@
 // 그 표로 자유면을 세면 TET 덱의 표면이 틀린다 — `extract-surface` 가 실제로 그렇다(TET4 하나에서
 // 자유면 5개를 내고 그중 3개가 가짜다). 그래서 여기서는 종류별 표를 쓴다.
 #include "surfview.h"
+#include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 
 #include "cli/ConsoleOutput.h"
 #include "core/Mesh.h"
@@ -107,6 +108,9 @@ int runSurfView(const std::string& yamlFile, ConsoleOutput& console) {
         return 1;
     }
     if (c.maxParts < 1) { console.error("max_parts 는 1 이상이어야 한다"); return 1; }
+    // ★쓰기 관문(2026-11-07 · output_guard) — SVG 가 설정 · 모델 · 그 인클루드와 같은 파일이면 읽기 · 쓰기 전에 거절한다
+    if (KooRemapper::output_guard::refuse("surfview", {c.output + "_surface.svg"}, KooRemapper::output_guard::configAndModel(yamlFile, c.model), console))
+        return 1;
 
     KFileReader reader;
     Mesh mesh;

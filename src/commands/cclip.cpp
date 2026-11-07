@@ -1,5 +1,6 @@
 // C-clip(스프링 접점) 생성 op 구현 — 박스 파트 치환·Castigliano 캘리브레이션·모멘트일치 눌림·INITIAL_STRESS_SHELL 출력.
 #include "cclip.h"
+#include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 #include "parser/InitialStressCard.h"   // *INITIAL_STRESS_SOLID 카드 1 정본(I10×8)
 #include "parser/IdAllocator.h"   // 못 본 자리 · 단정 못 함 경고
 #include "parser/ElementCardLayout.h"   // deckFieldWidth — 칸 폭 정본
@@ -1110,6 +1111,17 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
     }
     if (targets.empty()) { console.error("[cclip] no target parts resolved"); return 1; }
     console.info("[cclip] Targets: " + std::to_string(targets.size()) + " part(s)");
+    // ★쓰기 관문(2026-11-07 · output_guard) — 본 덱 · dynain · _free.k · 보고 · 검증용 압축 덱이 설정 · 모델 · 그 인클루드와 같은
+    //   파일이면 쓰기 전에 거절한다(예: model `X_free.k` + output `X` 면 _free.k 가 모델을 덮었다)
+    {
+        std::vector<std::string> writes{outPath};
+        if (cfg.stressOutput != "embed") writes.push_back(outPrefixPath + ".dynain");
+        if (cfg.freeOutput) writes.push_back(outPrefixPath + "_free.k");
+        if (cfg.report) writes.push_back(outPrefixPath + "_cclip_report.json");
+        if (cfg.mode == "deck")
+            for (const auto& t : targets) writes.push_back(outPrefixPath + "_cclip_deck_" + std::to_string(t.first) + ".k");
+        if (KooRemapper::output_guard::refuse("cclip", writes, KooRemapper::output_guard::configAndModel(yamlFile, modelOrig), console)) return 1;
+    }
 
     // ID bases — raw-scan over model lines PLUS the whole *INCLUDE closure,
     // covering keywords KFileReader may not track (and include-file id spaces)

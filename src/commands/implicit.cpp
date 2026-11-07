@@ -1,4 +1,5 @@
 #include "implicit.h"
+#include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 #include "parser/IncludeClosure.h"   // FlatDeck — flatten_includes(2026-10-17)
 #include <cctype>
 #include "parser/DeckWriter.h"
@@ -168,6 +169,8 @@ int runExplicit(const std::string& yamlFile, ConsoleOutput& console) {
     std::string modelPath = resolvePath(modelFile);
     std::string outPath   = resolvePath(outputFile);
     // ★`flatten_includes`(2026-10-17) — 인클루드 닫힘을 펼친 덱을 읽어 거기서 지운다 · 산출은 홀로 선다
+    // ★쓰기 관문(2026-11-07 · output_guard) — 쓸 파일이 설정 · 모델 · 그 인클루드와 같은 파일이면 열기 전에 거절한다
+    if (KooRemapper::output_guard::refuse("explicit", {outPath}, KooRemapper::output_guard::configAndModel(yamlFile, modelPath), console)) return 1;
     const std::string modelOrig = modelPath;
     KooRemapper::include_closure::FlatDeck flat;
     if (flattenIncludes) {
@@ -325,6 +328,8 @@ int runImplicit(const std::string& yamlFile, ConsoleOutput& console) {
     };
     std::string modelPath = resolvePath(modelFile);
     std::string outPath   = resolvePath(outputFile);
+    // ★쓰기 관문(2026-11-07 · output_guard) — 쓸 파일이 설정 · 모델 · 그 인클루드와 같은 파일이면 열기 전에 거절한다
+    if (KooRemapper::output_guard::refuse("implicit", {outPath}, KooRemapper::output_guard::configAndModel(yamlFile, modelPath), console)) return 1;
 
     std::vector<std::string> lines;
     {

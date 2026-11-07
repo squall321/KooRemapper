@@ -1,7 +1,9 @@
 #pragma once
 #include "analysis/StrainTensor.h"
+#include "parser/OutputGuard.h"
 #include <set>
 #include <string>
+#include <vector>
 
 // Knowledge graph (lat.md):
 //   @lat: [[modules/commands]]
@@ -57,12 +59,24 @@ int runStrain(const std::string& refFile, const std::string& defFile,
 int runUnfold(const std::string& bentFile, const std::string& outputFile,
               const KooRemapper::ConsoleOutput& console);
 
+// prestress 가 쓸 파일 이름 — 쓰기 관문과 쓰기가 **같은 규칙**을 쓴다(2026-11-07)
+//   dynain : output 그대로(`.k` 로 끝나면 `<줄기>.dynain` — 아래 메시 사본과 겹치지 않게)
+//   mesh   : output 의 마지막 `.` 앞 + `.k`(변형 메시 사본 + dynain `*INCLUDE`) — 재료가 있을 때만 쓴다
+//   csv    : 재료가 있으면 마지막 `.` 앞 + `.csv`(`--csv` 일 때만), 없으면 output 그대로(dynain 대신)
+struct PrestressOutputs { std::string dynain, mesh, csv; };
+PrestressOutputs prestressOutputs(const std::string& outputFile, bool hasMaterial);
+
+// ★쓰기 관문(2026-11-07) — dynain · 메시 사본 · CSV 가 기준 · 변형 메시(그 인클루드까지) · 설정과 같은 파일이면 쓰기 전에 거절한다.
+//   `chainReads` 가 있으면 map 의 prestress 고리다 — defFile 은 그 실행이 막 쓴 산출이라 메시 사본이 그 자리에 쓰는 것은 막지
+//   않고(`output: foo.k` + `prestress.output: foo.dynain` — 문서의 쓰임), dynain · CSV 가 그것을 덮는 것은 막는다. `chainReads` 는
+//   map 의 입력(bent · flat 과 그 인클루드)이다.
 int runPrestress(const std::string& refFile, const std::string& defFile,
                  const std::string& outputFile,
                  double E, double nu,
                  KooRemapper::StrainType strainType,
                  bool outputCSV,
-                 const KooRemapper::ConsoleOutput& console);
+                 const KooRemapper::ConsoleOutput& console,
+                 const std::vector<KooRemapper::output_guard::Input>* chainReads = nullptr);
 
 // `strict=true` 면 **LS-DYNA 가 키워드 단계에서 죽을 것**을 찾으면 rc=1 을 낸다.
 // ⚠ 기본값 false 를 바꾸면 안 된다 — `info` 의 rc=0 은 계약이다(플랫폼의 업로드 검사와

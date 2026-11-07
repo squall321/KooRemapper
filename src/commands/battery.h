@@ -31,3 +31,5 @@ BatteryConfig parseBatteryConfig(const std::string& yamlFile);
 // Returns output file path written, or "" on error
 std::string generateBatteryKFile(const BatteryConfig& cfg,
                                   KooRemapper::ConsoleOutput& console);
+// 위가 쓸 덱 경로(`<output><tier>_phase{1|2}.k`) — 쓰기 전에 견주려고 따로 낸다(2026-11-07)
+std::string batteryKFilePath(const BatteryConfig& cfg);

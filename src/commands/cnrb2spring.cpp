@@ -1,5 +1,6 @@
 // CNRB 체결점 하나를 Side A/B 두 강체로 쪼개고 그 사이를 제로길이 discrete beam(ELFORM=6) 하나로 잇는 op
 #include "parser/ElementCardLayout.h"
+#include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 #include "parser/IncludeClosure.h"   // FlatDeck — flatten_includes(2026-10-17)
 #include "parser/IdAllocator.h"   // 인클루드 닫힘 · 못 본 자리 경고
 #include "parser/DeckWriter.h"
@@ -1402,6 +1403,8 @@ int runCnrb2Spring(const std::string& yamlFile, ConsoleOutput& console) {
 
     std::string modelPath = KooRemapper::yamlResolvePath(configDir, modelFile);
     std::string outPath   = KooRemapper::yamlResolvePath(configDir, outputFile);
+    // ★쓰기 관문(2026-11-07 · output_guard) — 쓸 파일이 설정 · 모델 · 그 인클루드와 같은 파일이면 열기 전에 거절한다
+    if (KooRemapper::output_guard::refuse("cnrb2spring", {outPath}, KooRemapper::output_guard::configAndModel(yamlFile, modelPath), console)) return 1;
     // ★`flatten_includes`(2026-10-17) — 인클루드 닫힘을 펼친 덱(주 덱 옆 임시 파일)을 읽고 고친다 · 산출은 홀로 선다
     const std::string modelOrig = modelPath;
     KooRemapper::include_closure::FlatDeck flat;

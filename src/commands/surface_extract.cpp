@@ -1,4 +1,5 @@
 #include "parser/DeckWriter.h"
+#include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 #include "surface_extract.h"
 #include "parser/KFileReader.h"
 #include "core/Mesh.h"
@@ -164,6 +165,9 @@ int runExtractSurface(const std::string& solidFile,
                       const ExtractSurfaceOptions& opts,
                       KooRemapper::ConsoleOutput& console) {
     using namespace KooRemapper;
+
+    // ★쓰기 관문(2026-11-07 · output_guard) — 산출이 솔리드 메시(그 인클루드까지)와 같은 파일이면 읽기 · 쓰기 전에 거절한다
+    if (output_guard::refuse("extract-surface", {outputFile}, output_guard::modelInputs(solidFile, "solid"), console)) return 1;
 
     // ---- 1. Read input mesh -----------------------------------------------
     KFileReader reader;

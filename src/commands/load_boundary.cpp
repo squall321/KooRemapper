@@ -208,6 +208,7 @@ int runLoad(const std::string& yamlFile, ConsoleOutput& console) {
     console.println("[load] Load cases: " + std::to_string(loadOp.loads.size()));
 
     ModelAssembler assembler;
+    assembler.noteInput(yamlFile, "설정 YAML");   // 쓰기 관문이 output 과 견준다(2026-11-07)
     assembler.setFlattenIncludes(flattenIncludes);
     if (!assembler.loadBaseModel(modelFile)) {
         console.error(assembler.getErrorMessage());
@@ -364,6 +365,7 @@ int runBoundary(const std::string& yamlFile, ConsoleOutput& console) {
     console.println("[boundary] Boundary cases: " + std::to_string(boundaryOp.boundaries.size()));
 
     ModelAssembler assembler;
+    assembler.noteInput(yamlFile, "설정 YAML");   // 쓰기 관문이 output 과 견준다(2026-11-07)
     assembler.setFlattenIncludes(flattenIncludes);
     if (!assembler.loadBaseModel(modelFile)) {
         console.error(assembler.getErrorMessage());
@@ -515,6 +517,7 @@ int runRbe(const std::string& yamlFile, ConsoleOutput& console) {
     console.println("[rbe] Constraints: " + std::to_string(rbeOp.constraints.size()));
 
     ModelAssembler assembler;
+    assembler.noteInput(yamlFile, "설정 YAML");   // 쓰기 관문이 output 과 견준다(2026-11-07)
     assembler.setFlattenIncludes(flattenIncludes);
     if (!assembler.loadBaseModel(modelFile)) {
         console.error(assembler.getErrorMessage());
