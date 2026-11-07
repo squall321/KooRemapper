@@ -10,6 +10,7 @@
 #include "TestFramework.h"
 
 #include "parser/IncludeClosure.h"
+#include "parser/ElementCardLayout.h"   // scalarNodeMaxIdFile — 스칼라 절점 번호(셋째 묶음)
 
 #include <filesystem>
 #include <fstream>
@@ -453,4 +454,23 @@ TEST(IncludeClosure_refs_는_이름마다_어떻게_됐는지_적는다) {
     ASSERT_TRUE(c2.depthCut);
     ASSERT_TRUE(c2.refs.back().what == W::DepthCut);
     ASSERT_EQ(baseOf(c2.refs.back().name), std::string("c3.k"));
+}
+
+TEST(IncludeClosure_readerMax_와_흘려_읽기는_스칼라_절점_번호도_센다) {
+    // `*NODE_SCALAR` · `_VALUE` 의 NID 는 `*NODE` 와 한 공간이다(Vol_I 214757) — 리더는 `*NODE` 만 담으니 새 절점 번호의 바닥
+    // (tetremesh · meshfix · cclip)이 스칼라 절점 번호를 몰랐다(셋째 묶음)
+    Scratch s("readermax_scalar");
+    s.put("x.k", "*KEYWORD\n*NODE\n       5             0.0             0.0             0.0\n*NODE_SCALAR\n     900       1\n*END\n");
+    const std::string m = s.put("m.k", "*KEYWORD\n*INCLUDE\nx.k\n*NODE_SCALAR_VALUE\n     950             0.0             0.0             0.0       1\n*END\n");
+    std::vector<std::string> mainLines;
+    {
+        std::ifstream in(m);
+        for (std::string l; std::getline(in, l);) mainLines.push_back(l);
+    }
+    const auto c = include_closure::read(m, mainLines);
+    const auto rm = include_closure::readerMax(mainLines, m, c);
+    ASSERT_EQ(rm.node, 900);                       // 인클루드의 *NODE 5 와 *NODE_SCALAR 900 의 큰 쪽(주 덱은 부르는 쪽이 센다)
+    ASSERT_EQ(scalarNodeMaxIdFile(m), 950);        // 주 덱을 흘려 읽는 판 — 줄을 담지 않는다
+    ASSERT_EQ(scalarNodeMaxIdFile(s.put("i10.k", "*KEYWORD I10=Y\n*NODE_SCALAR\n  12345678         1\n*END\n")), 12345678);
+    ASSERT_EQ(scalarNodeMaxIdFile((s.root / "없다.k").string()), 0);
 }

@@ -3,6 +3,7 @@
 #include "parser/IncludeScan.h"   // scanFile — 흘려 읽어 인클루드가 있나만 본다
 #include "parser/IncludeClosure.h"   // FlatDeck — flatten_includes(2026-10-17)
 #include "parser/IdAllocator.h"   // 인클루드 닫힘 · 못 본 자리 경고
+#include "parser/ElementCardLayout.h"   // scalarNodeMaxIdFile — 스칼라 절점 번호 위로 낸다
 #include "commands/tetremesh.h"
 #include "core/Mesh.h"
 #include "parser/KFileReader.h"
@@ -354,7 +355,8 @@ int runTetRemesh(const std::string& configPath,
                  (fallback ? std::string("  fallback=") + fallback->name() : ""));
 
     RemeshOrchestrator orch(pc, backend, fallback);
-    orch.setIdFloor(inclMax.node, inclMax.elem);   // 인클루드에 이미 있는 번호 위로 낸다
+    // 인클루드에 이미 있는 번호 위로 낸다 · 스칼라 절점(`*NODE_SCALAR` — 리더가 담지 않는다)의 번호 위로도(셋째 묶음)
+    orch.setIdFloor(std::max(inclMax.node, KooRemapper::scalarNodeMaxIdFile(cfg.model)), inclMax.elem);
     RemeshSummary summary;
     if (cfg.reportOnly) {
         console.info("Report-only mode: scanning quality, no mesh changes will be written.");

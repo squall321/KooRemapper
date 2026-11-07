@@ -1146,7 +1146,8 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
                         "개를 열지 못했거나 따라가지 않았습니다 — 그 파일의 ID 는 충돌 검사에 안 들어갔습니다");
         console.println("  열지 못한 파일: " + names);
     }
-    int nextNid  = std::max(mesh.getMaxNodeId(), inclReaderMax.node) + 1;
+    // 스칼라 절점(`*NODE_SCALAR` — 리더가 담지 않는다)의 번호 위로도 — 번호는 `*NODE` 와 겹치면 안 된다(셋째 묶음)
+    int nextNid  = std::max({mesh.getMaxNodeId(), inclReaderMax.node, KooRemapper::scalarNodeMaxId(lines)}) + 1;
     int nextEid  = std::max(mesh.getMaxElementId(), inclReaderMax.elem) + 1;
     int nextSec  = std::max(cc_scanMaxId(scanLines, "*SECTION"), 0) + 1;
     int nextMid  = std::max(cc_scanMaxId(scanLines, "*MAT"), 0) + 1;

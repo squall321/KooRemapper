@@ -464,6 +464,8 @@ ReaderMax readerMax(const std::vector<std::string>& mainLines, const std::string
             KFileReader reader;
             const Mesh m = reader.readFile(f.path);
             r.node = std::max(r.node, m.getMaxNodeId());
+            // 스칼라 절점(`*NODE_SCALAR` · `_VALUE` — 보 `_WARPAGE` 의 SN)도 절점 번호다 — 리더는 `*NODE` 만 담는다(셋째 묶음)
+            r.node = std::max(r.node, scalarNodeMaxId(f.lines));
             r.elem = std::max(r.elem, m.getMaxElementId());
             for (const auto& [pid, part] : m.parts) {
                 r.part = std::max(r.part, pid);

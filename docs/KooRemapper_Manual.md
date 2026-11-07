@@ -386,6 +386,12 @@ BOM 을 붙인 설정으로 둘 다 **종료 코드 0** 으로 정상 산출물�
 - 자기 덱을 직접 읽는 단독 op 도 같은 규칙입니다(2026-10-16) — `hfdamp`·`cnrb2solid`·`ale`·`matswap`(위치 인자판)·
   `tetremesh`·`meshfix`·`cclip`·`contact` 는 닫힘까지 세어 그 위로 내고, `cnrb2spring`(고정 번호대 + 충돌 검사)은
   인클루드의 번호도 충돌 검사에 넣습니다. 경고 문구는 위와 같습니다.
+- **스칼라 절점**(`*NODE_SCALAR` · `_VALUE` — 보 `_WARPAGE` 의 SN 이 가리킨다)도 절점 번호를 차지합니다 — 그 번호는 `*NODE` 와
+  겹치면 안 됩니다(Vol_I 214757). 리더는 `*NODE` 만 담으므로 새 절점 번호는 주 덱과 인클루드의 스칼라 절점 번호 위로도 냅니다
+  (assemble 계열 · `id_floor` · `tetremesh` · `meshfix` · `cclip` — `cnrb2solid` 는 원래 그 위였다), `cnrb2spring` 은 스칼라 절점 번호도
+  충돌 검사에 넣습니다. 셋째 묶음 전엔 「`*NODE` 최대 + 1」 이 스칼라 절점 번호와 같을 수 있었습니다(회귀
+  `test_scalar_node_ids.py`). 정의 판정(`info --strict` 의 미정의 절점)은 `*NODE` 계열 블록의 첫 칸을 다 세어 원래 스칼라 절점을
+  압니다.
 - `extract-surface` 는 원 덱에 들이지 않는 **별도 덱**(추출한 면)을 내므로 이 규칙의 대상이 아닙니다 — 노드는
   원래 번호 그대로, 셸은 1 부터입니다. 그 덱을 원 덱에 `*INCLUDE` 로 들이면 노드 정의가 겹칩니다.
 

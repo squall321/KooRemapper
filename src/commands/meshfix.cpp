@@ -2336,6 +2336,8 @@ int runMeshFix(const char* configPath, ConsoleOutput& console) {
         cfg.idFloorNode = rm.node;
         cfg.idFloorElem = rm.elem;
     }
+    // 주 덱의 스칼라 절점(`*NODE_SCALAR` — 리더가 담지 않는다) 번호 위로도 낸다 — 번호는 `*NODE` 와 겹치면 안 된다(셋째 묶음)
+    cfg.idFloorNode = std::max(cfg.idFloorNode, KooRemapper::scalarNodeMaxIdFile(cfg.model));
     KFileReader reader;
     Mesh mesh = reader.readFile(cfg.model);
     if (mesh.getNodeCount() == 0) {

@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <fstream>
 #include <sstream>
 #include <vector>
 
@@ -777,6 +778,37 @@ int nonGridElementMaxId(const std::vector<std::string>& lines) {
 }
 
 bool isScalarNodeKeyword(const std::string& kw) { return kw == "*NODE_SCALAR" || kw == "*NODE_SCALAR_VALUE"; }
+
+int scalarNodeMaxIdFile(const std::string& path) {
+    std::ifstream in(path);
+    if (!in.is_open()) return 0;
+    // 덱 폭은 첫 `*KEYWORD` 카드가 정한다(`deckFieldWidth` 와 같다) — 흘려 읽으니 그 줄에서 정한다
+    int deckFw = 8, fw = 8, m = 0;
+    bool kwSeen = false, inScalar = false;
+    std::string l;
+    while (std::getline(in, l)) {
+        if (!l.empty() && l.back() == '\r') l.pop_back();
+        const size_t g = l.find_first_not_of(" \t");
+        if (g == std::string::npos) continue;
+        if (l[g] == '*') {
+            const std::string kw = deckscan::kwBare(deckscan::keywordToken(l));
+            if (!kwSeen && kw == "*KEYWORD") {
+                const int w = keywordCardDeckWidth(l);
+                deckFw = w > 0 ? w : 8;
+                kwSeen = true;
+            }
+            inScalar = isScalarNodeKeyword(kw);
+            fw = keywordFieldWidth(l, deckFw);
+            continue;
+        }
+        if (!inScalar || l[g] == '$') continue;
+        std::string body = l;
+        const size_t cmt = body.find('$');
+        if (cmt != std::string::npos) body.erase(cmt);
+        m = std::max(m, deckscan::fieldInt(deckscan::cardFields(body, fw), 0));
+    }
+    return m;
+}
 
 int scalarNodeMaxId(const std::vector<std::string>& lines) {
     const int deckFw = deckFieldWidth(lines);

@@ -3611,7 +3611,7 @@
           "yaml_path": "node_id_start",
           "required": false,
           "default": "90000001",
-          "description": "팬텀 노드 시작 ID (조인트당 2개, 같은 좌표). 충돌하면 rc=1"
+          "description": "팬텀 노드 시작 ID (조인트당 2개, 같은 좌표). 충돌하면 rc=1(스칼라 절점 `*NODE_SCALAR` 의 번호와 겹쳐도 — 번호는 `*NODE` 와 한 공간이다)"
         },
         {
           "name": "elem_id_start",

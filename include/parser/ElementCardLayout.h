@@ -258,6 +258,8 @@ int nonGridElementMaxId(const std::vector<std::string>& lines);
 // 스칼라 절점(`*NODE_SCALAR` · `_VALUE` — 보 `_WARPAGE` 의 SN 이 가리킨다)의 NID 최대값(없으면 0). 스칼라 절점 번호는 `*NODE` 의
 // 번호와 겹치면 안 된다(Vol_I 214757 「unique relative to other nodes」) — 새 절점 번호의 바닥이 그 위여야 한다(리더는 `*NODE` 만 담는다)
 int scalarNodeMaxId(const std::vector<std::string>& lines);
+// 같은 셈의 흘려 읽는 판 — 줄을 담지 않는다(700MB 덱을 담지 않는 tetremesh · meshfix 의 주 덱). 못 열면 0
+int scalarNodeMaxIdFile(const std::string& path);
 // 스칼라 절점 키워드인가(키워드 토큰 — 대문자 · 접미사 뗌) — `*NODE_SCALAR` · `*NODE_SCALAR_VALUE`. 데이터 줄의 칸 0 이 NID 다
 bool isScalarNodeKeyword(const std::string& kw);
 

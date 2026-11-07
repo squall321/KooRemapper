@@ -386,7 +386,8 @@ static CgUsedIds cg_scanUsedIds(const std::vector<std::string>& lines) {
             std::string up = cg_keyword(tr);
             firstDataTaken = false;
             pendingElem = 0;
-            if      (up == "*NODE")                          kind = NODE;
+            // 스칼라 절점(`*NODE_SCALAR` · `_VALUE`)도 절점 번호를 차지한다 — 고정 번호대가 그 번호와 겹치면 거절해야 한다(셋째 묶음)
+            if      (up == "*NODE" || up == "*NODE_SCALAR" || up == "*NODE_SCALAR_VALUE") kind = NODE;
             else if (up.rfind("*ELEMENT_", 0) == 0)           kind = ELEM;
             else if (up.rfind("*PART", 0) == 0)               kind = PART;
             else if (up.rfind("*SECTION_", 0) == 0)           kind = SECT;
