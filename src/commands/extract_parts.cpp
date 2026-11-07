@@ -255,7 +255,9 @@ void scanElements(const std::string& path, const std::vector<int>& sel, const De
         }
         if (!inElem) continue;
         if (g != std::string::npos && line[g] == '$') continue;
-        if (g == std::string::npos && remaining == 0) continue;     // 카드 밖의 빈 줄
+        // 카드 밖의 빈 줄만 건너뛴다 — 보 족 카드(auxRemaining)도 셈에 든다. 비워 둔 옵션 카드도 카드다(LS-PrePost 도 그렇게
+        // 읽는다). 예전엔 격자 셈만 보아 다음 요소의 Card 1 을 그 카드로 삼켜 절점을 놓쳤다(되읽기 실패 · 2026-11-07 검토).
+        if (g == std::string::npos && remaining == 0 && auxRemaining == 0) continue;
 
         if (opaque && aux.supported) {
             // ★칸 자리를 **안다** — PID 칸도 족마다 다르다(`*ELEMENT_MASS` 는 칸 차례 3 = 33-40열 —

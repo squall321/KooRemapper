@@ -274,7 +274,10 @@ void scanRefsStream(std::istream& in, bool isMain, const Opts& o,
             //   건너뛰면 다음 요소의 Card 1 을 이 카드의 연결 줄로 삼켜 절점이 통째로 사라진다.
             const bool comment = (g != std::string::npos && line[g] == '$');
             if (comment) continue;
-            if (g == std::string::npos && cardRemaining == 0) continue;   // 카드 밖의 빈 줄
+            // 카드 밖의 빈 줄만 건너뛴다 — 보 족 카드(auxRemaining)도 셈에 든다. 보의 옵션 카드(`_ORIENTATION` 의 VX VY VZ …)를
+            // 비워 두면 그 빈 줄이 그 카드다(LS-PrePost 도 그렇게 읽는다). 예전엔 격자 셈만 보아 다음 요소의 Card 1 을 그 카드로
+            // 삼켰다 — 그 요소의 절점을 아무도 안 쓴다고 보고 지웠다(rc 0 · 2026-11-07 검토).
+            if (g == std::string::npos && cardRemaining == 0 && auxRemaining == 0) continue;
             if (elemOpaque && aux.supported) {
                 // ★보·질량·이산 족은 **칸 자리를 안다** — 추측하지 않는다.
                 //   그래서 `*ELEMENT_BEAM` 의 RT1·RR1·LOCAL 이나 `*ELEMENT_SEATBELT` 의
