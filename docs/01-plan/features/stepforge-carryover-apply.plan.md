@@ -124,6 +124,13 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
   applyContact · applyBoundary · applyRbe 는 *END 마다(같은 틈) · applyBattery 의 `*INCLUDE` 는 마지막 *END 앞(첫 *END 뒤라 안 읽힌다) — 알렸다.
 - **수의 끝자리(#7)** — 보고의 수(`num`)는 15 → 16 → 17 자리 중 다시 읽어 같은 double 이 되는 첫 꼴. `%.17g` 하나로 쓰면 왕복은 되지만
   0.6 이 `0.59999999999999998` 로 길어져 사람이 읽는 보고가 흐려지고 예전 보고와 글자가 갈린다 — 짧게 맞는 값은 예전 글자 그대로다.
+- **지문은 읽은 바이트의 것(그럴듯한 하나 — gdb 로 재현해 실제 결함이었다)** — 줄은 담을 때(`loadBaseModel` · `readIncludeClosure`),
+  지문은 적용할 때(① · ②b) 읽었다. 잰 바이트를 담은 줄과 견준다(`carryover::bytesGiveLines` — 주 덱은 getline + CR 하나, 인클루드는
+  닫힘 리더 `Walker::card` 꼴의 사본 · 단위 시험이 둘을 묶는다). 다르면 `deck_changed`. 바이트를 담을 때 함께 들고 있는 쪽(닫힘 · 리더를
+  고쳐 바이트를 넘기는 것)은 공용 코드라 고르지 않았다. 남는 틈 — 메시 읽기(`readFile` · `readFileWithIncludes`)는 따로 연다: 주 덱 메시는
+  줄보다 먼저(몇 ms), 닫힘 메시는 지문 뒤에 읽는다 — 인클루드는 쓴 뒤 닫힘 대조가 다시 재고, 주 덱은 되읽기 대조가 거의 잡는다.
+  회귀 R-8 은 gdb 로 `applyCarryoverPlan` 에서 멈춰 파일을 바꾼다(검은 상자로는 한 프로세스 안의 두 읽기 사이를 못 끼운다 · 단위 시험은
+  ModelAssembler 를 링크하지 못한다 — 명령 갈래 심볼). gdb 로 멈추지 못하면 SKIP.
 
 ## 리뷰 11-07 고침 — 정한 것
 리뷰(11-07) 결함 11 + 그럴듯한 둘을 고쳤다. 공용 코드(i10 조각의 쓰기 관문 왕복 · 솔리드 · 티쉘 변형의 바닥 · `*ELEMENT_MASS` PID 칸)는 다른 갈래 몫.

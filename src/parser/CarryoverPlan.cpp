@@ -14,6 +14,7 @@
 #include <map>
 #include <set>
 #include <sstream>
+#include <string_view>
 
 namespace KooRemapper {
 namespace carryover {
@@ -1371,6 +1372,25 @@ void compareSectionCards(const std::vector<std::string>& deck, const SectionFile
         problems.push_back("블록 " + std::to_string(k + 1) + "째 줄" + what + " 덱의 옛 카드와 다르다 — 덱 " + clip(a) + " · 새 " + clip(b) +
                            " (SECID 와 T1~T4 만 바꿀 수 있다)");
     }
+}
+
+bool bytesGiveLines(const std::string& bytes, const std::vector<std::string>& lines, bool include) {
+    size_t k = 0;
+    for (size_t p = 0; p < bytes.size();) {
+        size_t e = bytes.find('\n', p);
+        if (e == std::string::npos) e = bytes.size();
+        std::string_view l(bytes.data() + p, e - p);
+        p = e + 1;
+        if (!l.empty() && l.back() == '\r') l.remove_suffix(1);
+        if (include) {
+            if (k == 0 && l.size() >= 3 && l.substr(0, 3) == "\xEF\xBB\xBF") l.remove_prefix(3);
+            const std::string t(l);
+            if (!deckscan::isDataLine(t) && deckscan::keywordToken(t) == "*END") break;   // 그 파일은 여기서 끝난다 — 뒤는 담지 않았다
+        }
+        if (k >= lines.size() || l != std::string_view(lines[k])) return false;
+        ++k;
+    }
+    return k == lines.size();
 }
 
 std::string toJson(const Report& r) {

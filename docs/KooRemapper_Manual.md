@@ -5680,6 +5680,9 @@ CAD 개정이 오면 StepForge 가 덱 PID 마다 처리(그대로 · 강체 옮
   모프 줄 수, `failed` 는 그쪽 `_failed` 와 같은 셈(못 지은 조각 · 대신 지은 조각 · 변위장 · 새 섹션). 다르면 `plan_inconsistent`.
 - 계획은 **그 덱의 것**이어야 한다 — `deck.sha256` 이 model 파일 바이트의 sha256 과 다르면 `deck_sha`. 동반 파일은 `files` 의
   sha256 · 바이트로 대조한다(변위장 · 새 섹션은 바이트가 곧 값이라 다르면 거절, 조각은 값 대조가 지나면 받고 경고).
+- 지문은 **담은 줄을 낸 바이트**의 것이다 — 줄은 덱을 담을 때 읽고 지문은 적용할 때 파일을 다시 열어 잰다. 잰 바이트가 담은 줄을 내지
+  않으면(그 사이에 주 덱 · 인클루드 파일이 바뀌었다) `deck_changed` 로 거절한다(적대적 검토 11-07 — 계획이 바뀐 뒤의 덱 것이면 지문이
+  맞아 옛 줄을 고쳐 썼다). 인클루드 파일은 닫힘이 담는 꼴(맨 앞 BOM 을 떼고 첫 `*END` 앞까지)로 견준다 — 그 뒤만 바뀐 것은 같은 줄이다.
 
 ### 52.3 처리
 
@@ -5775,8 +5778,9 @@ output · report 는 이 op 이 **읽는 파일**(주 덱 · 계획 · 인클루
 
 ### 52.9 시험 · 아직 하지 않는 것
 
-- 회귀 `tools/regress/test_apply_carryover_plan.py`(판 1 · 83항) · `tools/regress/test_apply_carryover_plan_v2.py`(판 2 · 84항 — 실물 둘 ·
-  진리값 판을 판 2 로 · 칸 표 · 덱 자리 · §10.5 새 셸 섹션 · 인클루드 · refused_transform · 적대적 검토 고침 R-1~R-7) · 단위 `tests/test_CarryoverPlan.cpp`.
+- 회귀 `tools/regress/test_apply_carryover_plan.py`(판 1 · 83항) · `tools/regress/test_apply_carryover_plan_v2.py`(판 2 · 86항 — 실물 둘 ·
+  진리값 판을 판 2 로 · 칸 표 · 덱 자리 · §10.5 새 셸 섹션 · 인클루드 · refused_transform · 적대적 검토 고침 R-1~R-8 — R-8 은 gdb 로
+  적용 직전에 멈춰 파일을 바꾼다 · gdb 로 멈추지 못하면 SKIP) · 단위 `tests/test_CarryoverPlan.cpp`.
 - 인클루드 파일 안의 고칠 자리는 고치지 않는다(거절 — 사용자 결정 11-07). 그 파트를 고치려면 닫힘을 펼친 한 덱으로 계획을 다시 받아야 한다.
 - 절점 두께 카드로 두께를 옮기는 일 · 요소마다 두께를 싣는 PID 의 새 섹션은 받지 않는다(그쪽도 조각으로 물러선다 · §10.7).
 

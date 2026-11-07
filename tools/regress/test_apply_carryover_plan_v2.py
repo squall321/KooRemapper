@@ -18,7 +18,9 @@
 
 무엇을 보나.
   A 실물 둘(바깥 덱 fc160119a36e · 메시 덱 f8ff42845904) · B 진리값 판을 판 2 로 · C 칸 표(판마다) · D 덱 자리 ·
-  E 새 셸 섹션(§10.5) · F 인클루드(주 덱만 고침) · G refused_transform
+  E 새 셸 섹션(§10.5) · F 인클루드(주 덱만 고침) · G refused_transform ·
+  R 적대적 검토(11-07 저녁) 고침 — R-1 쌓인 카드 SECID · R-2 인클루드 BOM · R-3 동반 파일 덮기 · R-4 보고 UTF-8 · R-5 링크 덱 폴더 ·
+  R-6 *END 둘 · R-7 수의 끝자리 · R-8 담은 뒤 바뀐 덱(gdb 로 적용 직전에 멈춰 파일을 바꾼다 — 못 멈추면 SKIP)
 
 usage: test_apply_carryover_plan_v2.py <KooRemapper 바이너리>
 """
@@ -387,6 +389,7 @@ def main():
         part_r5(binary)
         part_r6(binary)
         part_r7(binary)
+        part_r8(binary)
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
     print()
@@ -915,6 +918,58 @@ def part_r7(binary):
     got = {r["pid"]: r for r in rep.get("parts", [])}.get(3, {}).get("refused_transform")
     check("R-7 보고의 refused_transform 이 계획 값과 비트까지 같다(transform 16 · det · scale · orthogonality_error)",
           rc == 0 and got == rt, (rc, got, out[-300:]))
+
+
+
+def gdb_swap(binary, d, swaps):
+    """gdb 로 applyCarryoverPlan 에서 멈추고 파일을 바꾼 뒤 잇는다 — 「담은 뒤 바뀐 파일」 을 결정적으로 만든다.
+    멈추지 못하면(gdb 없음 · 심볼 없는 바이너리 · ptrace 막힘) None."""
+    gdb = shutil.which("gdb")
+    if not gdb:
+        return None
+    args = [gdb, "-batch", "-nx", "-ex", "set pagination off", "-ex", "set breakpoint pending on",
+            "-ex", "break KooRemapper::ModelAssembler::applyCarryoverPlan", "-ex", "run"]
+    for src, dst in swaps:
+        args += ["-ex", "shell cp '%s' '%s'" % (src, dst)]
+    args += ["-ex", "continue", "--args", binary, OP, "a.yaml"]
+    p = subprocess.run(args, cwd=d, capture_output=True, text=True, timeout=900, encoding="utf-8", errors="replace")
+    out = p.stdout + p.stderr
+    return out if "Breakpoint 1, " in out else None
+
+
+def part_r8(binary):
+    print("[R-8 담은 뒤 바뀐 덱 · 인클루드 — 줄은 담을 때 · 지문은 적용할 때 읽어, 계획이 지금 덱의 것이면 옛 줄을 고쳤다(검토 그럴듯한 하나)]")
+    # 담을 때는 X(주석 한 줄 더) · 적용할 때는 계획의 판 Y — gdb 로 그 사이에 파일을 바꾼다
+    d = stage("r8")
+    to_v2(d)
+    deck = os.path.join(d, "deck.k")
+    y = os.path.join(TMP, "r8_Y.k")
+    shutil.copy(deck, y)
+    write(deck, read(y).replace("*KEYWORD\n", "*KEYWORD\n$ OLD DECK X\n", 1))
+    write(os.path.join(d, "a.yaml"), "model: deck.k\nplan: plan.json\noutput: deck_applied.k\n")
+    out = gdb_swap(binary, d, [(y, deck)])
+    if out is None:
+        print("  R-8 SKIP — gdb 로 applyCarryoverPlan 에서 멈추지 못했다(gdb 없음 · 심볼 없는 바이너리 · ptrace 막힘)")
+        return
+    rp = os.path.join(d, "deck_applied_carryover.json")
+    rep = json.load(open(rp, encoding="utf-8")) if os.path.exists(rp) else {}
+    check("R-8 주 덱이 담은 뒤 바뀌었다 → deck_changed · 덱을 쓰지 않는다(옛 줄로 지은 산출이 없다)",
+          rep.get("ok") is False and "deck_changed" in kinds(rep) and not os.path.exists(os.path.join(d, "deck_applied.k")),
+          (rep.get("ok"), sorted(kinds(rep)), out[-300:]))
+    d = stage("r8b")
+    split_include(d, "inc/part8.k", 8, move_defs=True)
+    to_v2(d, include_files=["inc/part8.k"])
+    inc = os.path.join(d, "inc", "part8.k")
+    y = os.path.join(TMP, "r8b_Y.k")
+    shutil.copy(inc, y)
+    write(inc, "$ OLD INCLUDE X\n" + read(y))
+    write(os.path.join(d, "a.yaml"), "model: deck.k\nplan: plan.json\noutput: deck_applied.k\n")
+    out = gdb_swap(binary, d, [(y, inc)]) or ""
+    rp = os.path.join(d, "deck_applied_carryover.json")
+    rep = json.load(open(rp, encoding="utf-8")) if os.path.exists(rp) else {}
+    check("R-8b 인클루드 파일이 담은 뒤 바뀌었다 → deck_changed(inc/part8.k) · 덱을 쓰지 않는다",
+          rep.get("ok") is False and "inc/part8.k" in details(rep, "deck_changed") and
+          not os.path.exists(os.path.join(d, "deck_applied.k")), (rep.get("ok"), sorted(kinds(rep)), out[-300:]))
 
 
 if __name__ == "__main__":

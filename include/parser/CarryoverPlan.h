@@ -223,6 +223,12 @@ bool shellSectionRows(const std::vector<std::string>& block, size_t& row1, size_
 // 다른 줄 · 다른 칸이 하나라도 있으면 그 자리를 `problems` 에 담는다.
 void compareSectionCards(const std::vector<std::string>& deckBlock, const SectionFileScan& s, std::vector<std::string>& problems);
 
+// 이 바이트가 그 줄을 내나 — 지문(sha256)은 늘 **훑고 고친 줄을 낸 바이트**의 것이어야 한다(줄은 덱을 담을 때 읽고 지문은 적용할 때
+// 파일을 다시 열어 잰다 — 그 사이에 파일이 바뀌면 다른 바이트의 지문을 계획과 견주었다 · 적대적 검토 11-07). 줄 나누기는 읽기와 같다 —
+// `std::getline`(LF) · 줄 끝 CR 하나를 뗀다. include = 인클루드 파일 꼴(`include_closure::read` 가 담는 꼴 — 맨 앞 UTF-8 BOM 을 떼고
+// 첫 `*END` 줄 앞까지 · IncludeClosure.cpp `Walker::card` 규칙의 사본이라 단위 시험이 둘을 묶는다). 줄 사본을 짓지 않는다.
+bool bytesGiveLines(const std::string& bytes, const std::vector<std::string>& lines, bool include);
+
 // ── 보고(`dynaforge-carryover-apply` v1) ─────────────────────────────────────
 struct PartResult {
     long long pid = 0;

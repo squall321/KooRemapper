@@ -7,10 +7,14 @@
 //   `tools/regress/test_apply_carryover_plan.py` 가 실물 진리값 판으로 본다).
 #include "TestFramework.h"
 #include "parser/CarryoverPlan.h"
+#include "parser/IncludeClosure.h"
 #include "util/StrictJson.h"
 
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -744,4 +748,65 @@ TEST(Carryover_v2_보고에_deck_from_인클루드_refused_transform) {
     ASSERT_TRUE(json::parse(carryover::toJson(v1), v, err));
     ASSERT_TRUE(v.get("deck")->get("includes")->isNull());
     ASSERT_TRUE(v.get("plan")->get("deck_from")->isNull());
+}
+
+namespace {
+
+// 바이트를 그대로 쓴다(텍스트 모드 · 개행 바꿈 없이)
+void coWriteBytes(const std::filesystem::path& p, const std::string& body) {
+    std::ofstream f(p, std::ios::binary | std::ios::trunc);
+    f << body;
+}
+
+// 덱을 담는 읽기(loadBaseModel)와 같은 줄 — std::getline · 줄 끝 CR 하나
+std::vector<std::string> coGetlines(const std::string& body) {
+    std::vector<std::string> out;
+    std::istringstream in(body);
+    for (std::string l; std::getline(in, l);) {
+        if (!l.empty() && l.back() == '\r') l.pop_back();
+        out.push_back(l);
+    }
+    return out;
+}
+
+}  // namespace
+
+TEST(Carryover_바이트가_읽은_줄을_내나는_닫힘_리더와_같은_규칙) {
+    // bytesGiveLines 의 인클루드 꼴은 `include_closure::read`(Walker::card) 규칙의 사본이다 — 갈리면 여기서 빨강
+    namespace fs = std::filesystem;
+    const fs::path root = fs::temp_directory_path() / "koorm_co_bytes";
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    fs::create_directories(root);
+    const std::vector<std::string> bodies = {
+        "\xEF\xBB\xBF*NODE\r\n       1     0.0\r\n*END\r\ntail after end\r\n",   // BOM · CRLF · *END 뒤 꼬리
+        "*NODE\n$*END\n*END_X\n       2\n  *end   \nafter\n",                    // 주석 · *END_X 는 끝이 아니다 · 앞 공백 소문자 *end 는 끝
+        "*NODE\n       3",                                                     // 끝 개행 없음
+        "",                                                                     // 빈 파일
+        "*END\n",                                                               // 첫 줄이 *END
+        "\n\n*NODE\n\n",                                                        // 빈 줄
+        "\xEF\xBB\xBF",                                                         // BOM 뿐
+        "a\r\r\nb\n",                                                           // CR 둘 — 하나만 뗀다
+    };
+    std::string main = "*KEYWORD\n";
+    for (size_t k = 0; k < bodies.size(); ++k) {
+        coWriteBytes(root / ("i" + std::to_string(k) + ".k"), bodies[k]);
+        main += "*INCLUDE\ni" + std::to_string(k) + ".k\n";
+    }
+    main += "*END\n";
+    coWriteBytes(root / "main.k", main);
+    const auto c = include_closure::read((root / "main.k").string(), coGetlines(main));
+    ASSERT_EQ(c.files.size(), bodies.size());
+    for (size_t k = 0; k < bodies.size(); ++k) ASSERT_TRUE(carryover::bytesGiveLines(bodies[k], c.files[k].lines, true));
+    // *END 앞이 바뀌면 거짓 · *END 뒤만 바뀌면 참(닫힘도 LS-DYNA 도 그 뒤를 읽지 않는다 — 지문은 지금 바이트의 것이다)
+    ASSERT_FALSE(carryover::bytesGiveLines(coReplace(bodies[0], "0.0", "0.5"), c.files[0].lines, true));
+    ASSERT_TRUE(carryover::bytesGiveLines(coReplace(bodies[0], "tail", "TAIL"), c.files[0].lines, true));
+    ASSERT_FALSE(carryover::bytesGiveLines(bodies[2] + "\n       4\n", c.files[2].lines, true));
+    ASSERT_FALSE(carryover::bytesGiveLines(bodies[2].substr(0, bodies[2].size() - 1), c.files[2].lines, true));
+    ASSERT_FALSE(carryover::bytesGiveLines("x\n" + bodies[3], c.files[3].lines, true));
+    // 주 덱 꼴(include false) — 줄을 전부(BOM · *END 뒤까지) · std::getline + CR 하나
+    for (const auto& b : bodies) ASSERT_TRUE(carryover::bytesGiveLines(b, coGetlines(b), false));
+    ASSERT_FALSE(carryover::bytesGiveLines(bodies[0], c.files[0].lines, false));
+    ASSERT_FALSE(carryover::bytesGiveLines(bodies[1] + "x\n", coGetlines(bodies[1]), false));
+    fs::remove_all(root, ec);
 }

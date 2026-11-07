@@ -456,15 +456,22 @@ std::string relpathOf(const std::string& path, const std::string& mainDir) {
     return r.empty() ? a.generic_string() : r.generic_string();
 }
 
-// 덱의 인클루드 닫힘 — LS-DYNA 가 읽는 차례로 파일마다 {주 덱 폴더 기준 상대 경로, 바이트 전부의 sha256}(판 2 `deck.includes` 와 같은 꼴)
-std::vector<carryover::IncludeEntry> closureEntries(const include_closure::Closure& c, const std::string& mainPath) {
+// 덱의 인클루드 닫힘 — LS-DYNA 가 읽는 차례로 파일마다 {주 덱 폴더 기준 상대 경로, 바이트 전부의 sha256}(판 2 `deck.includes` 와 같은 꼴).
+// changed 를 주면 잰 바이트가 닫힘이 담은 줄(`files[].lines`)을 내지 않는 파일(닫힘을 읽은 뒤 바뀌었다)의 상대 경로를 담는다
+std::vector<carryover::IncludeEntry> closureEntries(const include_closure::Closure& c, const std::string& mainPath,
+                                                    std::vector<std::string>* changed = nullptr) {
     std::vector<carryover::IncludeEntry> out;
     const std::string dir = deckscan::dirOf(mainPath);
     for (const auto& f : c.files) {
         carryover::IncludeEntry e;
         e.relpath = relpathOf(f.path, dir);
         std::string bytes;
-        e.sha256 = readBytes(f.path, bytes) ? util::sha256Hex(bytes) : std::string("(읽지 못했다)");
+        if (!readBytes(f.path, bytes)) {
+            e.sha256 = "(읽지 못했다)";
+        } else {
+            e.sha256 = util::sha256Hex(bytes);
+            if (changed && !carryover::bytesGiveLines(bytes, f.lines, true)) changed->push_back(e.relpath);
+        }
         out.push_back(e);
     }
     return out;
@@ -510,6 +517,11 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, const std::
         std::string bytes;
         if (!readBytes(baseModelPath_, bytes)) { problem(0, "deck_read", "덱을 다시 열지 못했다: " + baseModelPath_); return false; }
         rep.deckShaIn = util::sha256Hex(bytes);
+        // 지문은 **고칠 줄을 낸 바이트**의 것이어야 한다 — 줄(rawLines_)은 덱을 담을 때 읽고 지문은 여기서 파일을 다시 열어 잰다. 그 사이에
+        // 파일이 바뀌면 지금 바이트의 지문을 계획과 견주고 처음 읽은 줄을 고쳐 썼다(계획이 지금 덱의 것이면 옛 덱에 적용된다 · 적대적 검토 11-07)
+        if (!carryover::bytesGiveLines(bytes, rawLines_, false))
+            problem(0, "deck_changed", "덱 파일이 읽은 뒤 바뀌었다(" + baseModelPath_ + ") — 잰 지문은 지금 바이트의 것이고 고칠 줄은 처음 읽은 "
+                                       "것이라 계획과 견줄 수 없다 · 파일을 그대로 두고 다시 돌린다");
     }
     const int fw = deckFieldWidth(rawLines_);
     if (fw == 20)
@@ -580,7 +592,11 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, const std::
                 closureLines.clear();
                 origins.clear();
             } else {
-                entries = closureEntries(incl_, baseModelPath_);
+                std::vector<std::string> changed;
+                entries = closureEntries(incl_, baseModelPath_, &changed);
+                for (const auto& r : changed)   // 지문은 훑은 줄을 낸 바이트의 것이어야 한다 — 주 덱과 같은 까닭(①)
+                    problem(0, "deck_changed", "인클루드 파일 " + r + " 이 읽은 뒤 바뀌었다 — 잰 지문은 지금 바이트의 것이고 훑은 줄은 처음 읽은 "
+                                               "것이라 deck.includes 와 견줄 수 없다 · 파일을 그대로 두고 다시 돌린다");
                 bool same = entries.size() == plan.includes.size();
                 for (size_t k = 0; same && k < entries.size(); ++k)
                     same = entries[k].relpath == plan.includes[k].relpath && entries[k].sha256 == plan.includes[k].sha256;
