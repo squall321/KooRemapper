@@ -165,8 +165,10 @@ static int applyMeshFlipFile(const std::string& inFile,
             e.nodeIds[6] = orig[2]; e.nodeIds[7] = orig[3];
         }
     }
+    // ★뒤집은 기준도 입력 덱의 카드(*PART · *SECTION · *MAT …)를 그대로 싣는다(2026-11-07 · 사용자 결정 「뒤집어도 재질을 싣는다」) —
+    //   예전엔 메시만 써서 E · nu 를 주지 않은 고리가 K-파일 재료를 잃고 변형률만 냈다. 절점 · 솔리드 요소는 뒤집은 메시에서 쓴다
     KFileWriter writer;
-    if (!writer.writeFile(outFile, mesh, /*useMappedPositions=*/false)) {
+    if (!writer.writeFileWithSource(outFile, mesh, inFile, /*useMappedPositions=*/false)) {
         console.error(std::string("flip-helper: cannot write ") + outFile +
                       ": " + writer.getErrorMessage());
         return 1;
@@ -1922,23 +1924,19 @@ static int runMain(int argc, char* argv[]) {
                     w.insert(w.end(), c.begin(), c.end());
                     return w;
                 };
-                // 재료 — E · nu 를 주면 있다. 기준이 뒤집기를 지났으면(메시만 쓴 임시 기준) K-파일 재료가 없다. 그 밖이면 평판의
-                // K-파일 재료다 — 두 경우의 판정이 갈릴 때만 평판을 읽어 정한다(큰 평판을 한 번 더 읽지 않게)
+                // 재료 — E · nu 를 주면 있다. 아니면 평판의 K-파일 재료다(앞처리 · 뒤집은 기준도 평판의 카드를 싣는다 — 2026-11-07).
+                // 두 경우의 판정이 갈릴 때만 평판을 읽어 정한다(큰 평판을 한 번 더 읽지 않게)
                 bool hasMaterial = true;
                 if (!(pre_E > 0 && pre_nu > 0 && pre_nu < 0.5)) {
-                    if (flipInX || flipInY || flipInZ || flipX || flipY || flipZ) {
-                        hasMaterial = false;
-                    } else {
-                        std::string why;
-                        const bool clashWith = KooRemapper::output_guard::findClash(withChain(true), mapReads, why);
-                        const bool clashWithout = KooRemapper::output_guard::findClash(withChain(false), mapReads, why);
-                        if (clashWith != clashWithout) {
-                            try {
-                                KFileReader probe;
-                                hasMaterial = probe.readFile(flatPath).getMaterialCount() > 0;
-                            } catch (...) {
-                                // 못 읽으면 runMapping 이 같은 평판을 읽다가 아무것도 쓰기 전에 멈춘다
-                            }
+                    std::string why;
+                    const bool clashWith = KooRemapper::output_guard::findClash(withChain(true), mapReads, why);
+                    const bool clashWithout = KooRemapper::output_guard::findClash(withChain(false), mapReads, why);
+                    if (clashWith != clashWithout) {
+                        try {
+                            KFileReader probe;
+                            hasMaterial = probe.readFile(flatPath).getMaterialCount() > 0;
+                        } catch (...) {
+                            // 못 읽으면 runMapping 이 같은 평판을 읽다가 아무것도 쓰기 전에 멈춘다
                         }
                     }
                 }

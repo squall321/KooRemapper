@@ -427,13 +427,12 @@ int runMapping(const std::string& bentFile, const std::string& flatFile,
             scaledFlatTmpPath = outputFile + ".__preproc_flat.k";
         }
         KFileWriter w;
-        // 크기만 맞춘 기준은 평판의 카드(*PART · *SECTION · *MAT …)를 그대로 옮긴다 — 예전에 고리가 읽던 원래 평판과 같은 K-파일 재료를
-        // 보게 한다(재료를 어디서 찾는지는 바꾸지 않는다). flip_input 이 낀 기준은 예전처럼 메시만 쓴다(재료 카드 없음)
-        const bool flipped = flipInputX || flipInputY || flipInputZ;
+        // 앞처리한 기준은 평판의 카드(*PART · *SECTION · *MAT …)를 그대로 옮긴다 — 고리가 원래 평판과 같은 K-파일 재료를 본다.
+        // ★뒤집어도(flip_input) 싣는다(2026-11-07 · 사용자 결정 「뒤집어도 재질을 싣는다」) — 예전엔 메시만 써서 E · nu 를 주지 않은
+        //   고리가 조용히 변형률만 냈다. 절점 · 솔리드 요소는 뒤집은 메시에서(HEX8 차례 바꿈 포함), 나머지 카드는 평판 그대로다
         std::error_code tec;
         const bool tempExisted = std::filesystem::exists(scaledFlatTmpPath, tec);
-        const bool wrote = flipped ? w.writeFile(scaledFlatTmpPath, flatMesh, false)
-                                   : w.writeFileWithSource(scaledFlatTmpPath, flatMesh, flatFile, false);
+        const bool wrote = w.writeFileWithSource(scaledFlatTmpPath, flatMesh, flatFile, false);
         if (!wrote) {
             console.warning("Failed to write pre-processed flat temp: "
                             + w.getErrorMessage()

@@ -171,6 +171,19 @@ def map_bbox_source(binary, root):
     check("M-3 대조 — E · nu 를 주면 재료가 있다(n3.dynain · 사본이 map 산출 자리)",
           rc == 0 and exists(d, "n3.dynain"), (rc, out[-300:]))
 
+    print("[F] 뒤집어도(flip_input · flip_x) 고리의 기준이 평판의 재질 카드를 싣는다 — E · nu 없이 K-파일 재료로 응력")
+    for k, (what, flip) in enumerate((("flip_input_z", "flip_input_z: true\n"), ("flip_x(산출 뒤집기)", "flip_x: true\n")), 1):
+        name = "f%d" % k
+        with open(os.path.join(d, name + ".yaml"), "w") as f:
+            f.write("bent: demo_bent.k\nflat: flat_m.k\noutput: %s.k\n%sprestress:\n  enabled: true\n  output: %s.dynain\n"
+                    % (name, flip, name))
+        rc, out = run(binary, d, "map", name + ".yaml")
+        dyn = os.path.join(d, name + ".dynain")
+        body = open(dyn, encoding="utf-8", errors="replace").read() if os.path.exists(dyn) else ""
+        check("F-%d ★%s 고리 — K-파일 재료로 응력 · dynain(*INITIAL_STRESS_SOLID)(예전엔 재료를 잃고 변형률 CSV 만)" % (k, what),
+              rc == 0 and "Using materials from K-file" in out and "*INITIAL_STRESS_SOLID" in body
+              and exists(d, name + ".k"), (rc, [l for l in out.splitlines() if "aterial" in l][:4], out[-300:]))
+
 
 def main():
     if len(sys.argv) < 2:

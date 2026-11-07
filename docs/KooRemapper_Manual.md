@@ -487,10 +487,13 @@ $$N_i = \frac{1}{8}(1 + \xi_i\xi)(1 + \eta_i\eta)(1 + \zeta_i\zeta)$$
 - `info` 명령으로 Jacobian 통계 확인 가능
 - `output` 과 YAML 의 `prestress.output` 이 낼 파일(dynain · 메시 사본 · CSV)이 `bent` · `flat`(그 인클루드까지) · 설정과 같은
   파일이거나 서로 겹치면 아무것도 쓰지 않고 **종료 코드 1** 입니다([§3.1(j)](#31-yaml-공통-규칙-모든-op)). 고리가 무엇을 쓸지는
-  재료에 달렸다 — `prestress.E`·`nu` 가 있거나 기준(뒤집지 않은 평판)에 K-파일 재료가 있으면 dynain · 메시 사본, 없으면
+  재료에 달렸다 — `prestress.E`·`nu` 가 있거나 평판에 K-파일 재료가 있으면(앞처리 · 뒤집은 기준도 평판의 카드를 싣는다) dynain · 메시 사본, 없으면
   `prestress.output` 자리에 CSV 만 — 이 판정을 map 이 **쓰기 전에** 한다(2026-11-07 전엔 재료가 없을 때 CSV 가 map 산출을 덮는
   것을 map 이 산출을 쓴 뒤에야 보았다). 예전에는 `prestress.output` 이
   flat 이면 메시 사본이 기준 메시를 덮었고, `output` 이 flat 이면 고리가 덮인 flat 을 기준으로 **0 응력**을 종료 코드 0 으로 냈습니다.
+- prestress 고리의 기준 — 앞처리한 평판(`bbox_align: source` · `flip_input_*`)과 뒤집은 기준(`flip_x/y/z`)도 평판의 `*PART` ·
+  `*SECTION` · `*MAT` 카드를 그대로 싣습니다. 그래서 `prestress.E`·`nu` 없이도 뒤집든 말든 평판의 K-파일 재료로 응력을 냅니다
+  (2026-11-07 · 사용자 결정 「뒤집어도 재질을 싣는다」 — 예전엔 뒤집은 기준이 메시만 실어 고리가 조용히 변형률만 냈습니다).
 - 이 실행이 만든 임시 파일 — 앞처리 평판(`<output>.__preproc_flat.k` · `flip_input_*` 나 `bbox_align: source` 가 평판을 바꿀 때)과
   뒤집은 기준(`<output>.__flipped_ref.k` · prestress 고리의 `flip_x/y/z`) — 은 성공이든 실패든 끝에 지웁니다(2026-11-07 전에는 앞처리
   평판을 쓴 뒤 산출 쓰기가 실패하거나 고리가 map 뒤에 멈추면 남았습니다).
