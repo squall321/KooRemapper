@@ -276,6 +276,7 @@ struct Picked {
     struct AuxLine { std::string where; std::vector<int> altVsManual; bool placeable = true; };
     std::vector<AuxLine> renumberRisk;                    // 고른 보 족 줄 가운데 번호를 제자리에 못 바꿔 쓸 수 있는 것
     std::vector<std::string> unreadableAux;               // 칸으로 읽지 못한 보 족 줄(쓰는 칸에 빈칸 — `auxLineUnreadable`) 「파일:줄」
+    std::vector<std::string> unreadablePicked;            // 그 가운데 고른 파트에 있을 수 있는 줄 「파일:줄 키워드 — 까닭」(거절한다)
     std::vector<std::string> ambiguousPid;                // 읽기마다 PID 가 갈리고 그 하나가 고른 PID 인 줄
 };
 
@@ -325,6 +326,23 @@ std::vector<int> auxPidCandidates(const KooRemapper::AuxElementCard& a, const Ko
     for (int p : KooRemapper::auxPidsOf(a, rd))
         if (p != prim && idx.parts.count(p)) out.push_back(p);
     return out;
+}
+
+// 칸으로 읽지 못한 보 족 줄(`auxLineUnreadable`)이 고른 파트에 있을 수 있나 — 있으면 까닭(비었으면 없다). 그 줄의 정수(`auxLineInts` ·
+// PID 칸의 값도) 가운데 고른 PID 가 있으면 있을 수 있다 — 넘치게 센다. PID 칸이 깨끗해도 그것만 믿지 않는다: 짧은 공백 줄은 PID 칸에
+// 다른 번호의 조각이 든다(`45 2 103 105` 의 9-16열 「105」 · 2026-11-08 여섯째 검토 S1 · 「지키는 쪽은 잃지 않는다」)
+std::string unreadablePickedWhy(const KooRemapper::AuxElementCard& a, const std::vector<std::string>& card1, const std::string& line,
+                                const std::vector<int>& sel) {
+    std::vector<int> cand = KooRemapper::auxLineInts(line);
+    const std::string pf =
+        a.partField >= 0 && static_cast<size_t>(a.partField) < card1.size() ? card1[static_cast<size_t>(a.partField)] : std::string();
+    int p = 0;
+    if (!pf.empty() && pf.find_first_of(" \t") == std::string::npos && toInt(pf, p) && p > 0) cand.push_back(p);
+    sortUnique(cand);
+    std::string hit;
+    for (int v : cand)
+        if (inSorted(sel, v)) hit += (hit.empty() ? "" : ", ") + std::to_string(v);
+    return hit.empty() ? std::string() : "그 줄의 PID 를 칸으로 단정하지 못했고(쓰는 칸에 빈칸) 그 줄의 정수 가운데 고른 PID " + hit + " 가 있다";
 }
 
 // `*ELEMENT_MASS_PART_SET` 의 파트 세트를 고른 파트와 견준다 — 0 = 세트에 고른 파트가 없다(버린다) · 1 = 세트가 다 고른 파트다
@@ -426,6 +444,12 @@ void scanElements(const std::string& path, const std::vector<int>& sel, const De
                 // 실을지 버릴지 정할 수 없다 — 줄을 적어 두고 runExtractParts 가 거절한다(조용히 싣거나 버리지 않는다)
                 const std::string where = path + ":" + std::to_string(lineNo) + " " + kw;
                 if (KooRemapper::auxLineUnreadable(rd)) pk.unreadableAux.push_back(where);   // [WARN] — runExtractParts 가 댄다
+                // ★칸으로 읽지 못한 줄이 고른 파트에 있을 수 있으면 거절한다 — 실으면 절점이, 버리면 요소가 빠진다(2026-11-08 여섯째 검토 S1 —
+                //   예전엔 조용히 버렸다 · rc 0). 질량 얹기 세트(`_PART_SET`)는 세트를 못 풀어 아래 massSetVerdict 가 따로 거절한다
+                if (KooRemapper::auxLineUnreadable(rd) && aux.hasPart && !aux.partIsSet) {
+                    const std::string why = unreadablePickedWhy(aux, auxCard1, line, sel);
+                    if (!why.empty()) pk.unreadablePicked.push_back(where + " — " + why);
+                }
                 std::vector<int> pids;
                 bool hit = false;
                 if (aux.partIsSet) {
@@ -1776,8 +1800,14 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
     // ★칸으로 읽지 못한 보 족 줄(쓰는 칸 EID · PID · 절점에 빈칸 — 공백으로 가른 줄 등) — 그 칸은 값이 없어 이 op 이 그 줄의 PID · 절점을
     //   모른다(공백 토큰은 읽기가 아니다 · 2026-11-08). 조용히 넘기지 않고 줄마다 댄다 — 고른 파트의 요소인데 빠졌을 수 있다
     for (const auto& w : pk.unreadableAux)
-        console.warning("[extract-parts] " + w + " — 보 족 줄의 쓰는 칸(EID · PID · 절점)에 빈칸이 끼어 칸으로 읽지 못했다 — 그 칸의 "
-                        "PID · 절점을 세지 않았다(고른 파트의 요소면 빠졌을 수 있다 · 번호 매기기는 그 줄을 거절한다). 고정폭 칸이나 콤마로 고쳐 써라");
+        console.warning("[extract-parts] " + w + " — 보 족 줄의 쓰는 칸(EID · PID · 절점)에 빈칸이 끼어 칸으로 읽지 못했다 — 고른 파트에 "
+                        "있을 수 있으면(PID 칸 · 그 줄의 정수로 본다) 거절하고, 아니면 싣지 않는다. 고정폭 칸이나 콤마로 고쳐 써라");
+    // ★그 줄이 고른 파트에 있을 수 있으면 거절한다 — 그 줄의 PID · 절점을 칸으로 몰라 실으면 절점이, 버리면 요소가 조용히 빠진다
+    //   (2026-11-08 여섯째 검토 S1 · 사용자 원칙 「지키는 쪽은 잃지 않는다 — 거절이 안전한 실패다」)
+    if (!pk.unreadablePicked.empty())
+        return fail("unreadable_aux", "칸으로 읽지 못한 보 족 줄 " + std::to_string(pk.unreadablePicked.size()) + " 장이 고른 파트에 있을 수 "
+                                      "있다 — 그 줄의 PID · 절점을 칸으로 몰라 싣지도 버리지도 못해 거절한다", pk.unreadablePicked,
+                    "그 줄을 고정폭 칸(정수 8 · 실수 16 — i10 은 정수 10, long 은 모두 20)이나 콤마로 고쳐 쓰라");
     // ⚠ 보·질량·이산 족도 센다. 격자 카드만 세면 **보만으로 된 파트**(볼트·용접점 묶음)가
     //   "요소가 없다" 로 거절된다 — 회귀 L-0 이 그 자리를 지킨다.
     if (pk.cards == 0 && pk.auxCards == 0)

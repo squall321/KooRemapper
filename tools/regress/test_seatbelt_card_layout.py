@@ -43,9 +43,12 @@
     정수 폭 줄(EID 왼쪽 맞춤)의 진짜 N3 을 지우지 않고 renumber 를 거절한다 · 그렇게 쓴 질량 줄을 버리지 않고 PID 갈림으로 거절한다 ·
     칸마다 맞춤이 다른 설명서 꼴 i10 줄은 넘치게 남기고 renumber 를 거절한다 · 고르게 쓴 정수 폭 줄(오른쪽 맞춤 · `%7d `)은 그대로
   J 칸으로 읽지 못한 보 족 줄(쓰는 칸에 빈칸 — 공백으로 가른 줄 · 2026-11-08 사용자 결정) — 공백 토큰은 읽기가 아니라 그 칸은 값이 없다.
-    조용히 넘기지 않는다: cleanup-nodes · extract-parts 가 줄마다 「파일:줄 키워드」 를 [WARN] 으로 대고(cleanup 은 보고 warnings 에도),
-    cleanup-nodes 는 그 줄의 정수 가운데 덱의 절점 번호를 지우지 않는다(지키기만 — kept_by 「(unreadable beam-family lines)」) ·
-    restack 은 그 줄의 정수가 지운 절점이면 사람이 볼 줄(manual)로 올린다 · 설명서대로 쓴 줄은 경고가 없다
+    조용히 넘기지 않는다 — 소비자마다 그 줄의 정수를 넘치게 센다: cleanup-nodes 는 줄마다 「파일:줄 키워드」 를 [WARN] 으로 대고(보고
+    warnings 에도) 그 줄의 정수 가운데 덱의 절점 번호를 지우지 않는다(지키기만 — kept_by 「(unreadable beam-family lines)」) · restack 은 그
+    줄의 정수가 지운 절점이면 사람이 볼 줄(manual)로 올린다 · 설명서대로 쓴 줄은 경고가 없다. 여섯째 검토 S1(그 전엔 아래가 다 rc 0 으로
+    잃었다): extract-parts 는 그 줄이 고른 파트에 있을 수 있으면(PID 칸 · 그 줄의 정수) 「파일:줄」 을 대고 거절한다(아니면 싣지 않는다) ·
+    id_floor 의 elem_start 는 그 줄의 정수 최대 위 · 이월 적용은 그 줄의 정수를 나눠 쓴 절점으로 본다 · 재결속은 그 질량 줄의 PID 를
+    「단정하지 못한 자리」 로 센다
 
 usage: test_seatbelt_card_layout.py <KooRemapper 바이너리>
 """
@@ -725,10 +728,14 @@ def main():
               rc == 0 and len(warn) == 1 and ("J.k:%d *ELEMENT_SEATBELT" % jl) in out and "[WARN" in out and
               (rep.get("kept_by") or {}).get("(unreadable beam-family lines)") == 3, (rc, rep.get("warnings"), rep.get("kept_by"), out[-400:]))
         check("J-3 설명서대로 쓴 줄(%d)은 경고가 없다" % (jl - 1), ("J.k:%d " % (jl - 1)) not in out, out[-300:])
-        write(os.path.join(d, "Jx.yaml"), "model: J.k\noutput: Jx_out.k\nparts: [9]\n")
+        write(os.path.join(d, "Jx.yaml"), "model: J.k\noutput: Jx_out.k\nparts: [9]\nreport: Jx.json\n")
         rc, out = run(binary, d, "extract-parts", "Jx.yaml")
-        check("J-4 ★extract-parts — 그 줄을 「파일:줄 키워드」 로 [WARN] 한다(PID · 절점을 세지 못했다)",
-              ("J.k:%d *ELEMENT_SEATBELT" % jl) in out and "칸으로 읽지 못했다" in out and ("J.k:%d " % (jl - 1)) not in out, (rc, out[-400:]))
+        rep = json.load(open(os.path.join(d, "Jx.json"), encoding="utf-8")) if os.path.exists(os.path.join(d, "Jx.json")) else {}
+        refs = [r for r in (rep.get("refusals") or []) if r.get("kind") == "unreadable_aux"]
+        check("J-4 ★extract-parts parts [9] — 그 줄의 정수에 고른 PID 9 가 있다 → 「파일:줄 키워드」(J.k:%d)를 대고 거절 · 산출 없음 "
+              "(예전엔 rc 0 으로 그 줄과 절점 201-204 를 버렸다)" % jl,
+              rc == 1 and len(refs) == 1 and any(("J.k:%d *ELEMENT_SEATBELT" % jl) in x for x in refs[0].get("lines", [])) and
+              ("J.k:%d " % (jl - 1)) not in out and not os.path.exists(os.path.join(d, "Jx_out.k")), (rc, rep.get("refusals"), out[-400:]))
         db = open(os.path.join(d, "D.k"), encoding="utf-8").read()
         jbad = "9104 3 500001 500002 0.0 500004 500006"             # 지운 절점 500006 을 공백 토큰으로만 문다(설명서 칸으로는 SBRID 자리)
         db = db.replace("\n*END\n", "\n" + jbad + "\n*END\n")
@@ -738,6 +745,80 @@ def main():
         l9104 = db.split("\n").index(jbad) + 1
         check("J-5 ★restack — 칸으로 읽지 못한 띠 줄(%d)의 정수가 지운 절점(500006)이면 manual 로 올린다" % l9104,
               rc == 0 and any(re.search(r"line %d \*ELEMENT_SEATBELT \(manual\)" % l9104, l) for l in out.splitlines()), (rc, out[-400:]))
+
+        # extract-parts — 고른 파트에 멀쩡한 요소가 함께 있는 덱(셸 PID 1 · 보 족 PID 2 의 멀쩡한 줄 + 칸으로 읽지 못한 줄). 예전엔 멀쩡한 줄만
+        # 싣고 그 줄과 절점을 rc 0 으로 버렸다(여섯째 검토 S1 — aux_element_cards 1)
+        def xdeck(kw, good_line, bad_line):
+            L = ["*KEYWORD", "*NODE"] + [node(8, n, float(n)) for n in (1, 2, 3, 4, 101, 102, 103, 104, 105)]
+            L += ["*ELEMENT_SHELL", "%8d%8d%8d%8d%8d%8d" % (1, 1, 1, 2, 3, 4), kw, good_line, bad_line]
+            L += ["*PART", "p1", "%10d%10d%10d" % (1, 1, 1), "*PART", "p2", "%10d%10d%10d" % (2, 2, 1),
+                  "*SECTION_SHELL", "%10d%10d" % (1, 2), "%10s" % "1.0", "*SECTION_BEAM", "%10d%10d" % (2, 1), "",
+                  "*MAT_ELASTIC", "%10d%10s%10s%10s" % (1, "7.85E-9", "210000.", "0.3"), "*END"]
+            return "\n".join(L) + "\n"
+        xcases = (("J-6a", "*ELEMENT_BEAM", "%8d%8d%8d%8d%8d" % (14, 2, 1, 2, 3), "13 2 101 102 103", "보 · 공백으로 가른 줄"),
+                  ("J-6b", "*ELEMENT_SEATBELT", "%8d%8d%8d%8d" % (14, 2, 1, 2), "13 2 101 102 0 0.5 103 104", "안전띠 · 공백으로 가른 줄"),
+                  ("J-6c", "*ELEMENT_MASS", "%8d%8d%16s%8d" % (14, 1, "1.0", 2), "13 105 0.001 2", "질량 · 공백으로 가른 줄(PID 칸 33-40열이 비었다)"),
+                  ("J-6d", "*ELEMENT_DISCRETE", "%8d%8d%8d%8d" % (14, 2, 1, 2), "13 2 101 102 0 1.0 0.0", "이산 · 공백으로 가른 줄"),
+                  ("J-6e", "*ELEMENT_BEAM", "%8d%8d%8d%8d%8d" % (14, 2, 1, 2, 3), "%8d%8d" % (13, 2) + " 101 102 103",
+                   "보 · EID · PID 는 칸 · 절점만 공백으로"),
+                  ("J-6f", "*ELEMENT_DISCRETE", "%8d%8d%8d%8d" % (14, 2, 1, 2), "45 2 103 105",
+                   "이산 · 짧은 공백 줄(PID 칸 9-16열에 「105」 — PID 칸만 믿으면 버린다)"))
+        for tag, kw, gl, bl, what in xcases:
+            text = xdeck(kw, gl, bl)
+            write(os.path.join(d, tag + ".k"), text)
+            bline = text.split("\n").index(bl) + 1
+            write(os.path.join(d, tag + "x.yaml"), "model: %s.k\noutput: %sx_out.k\nparts: [2]\nreport: %sx.json\n" % (tag, tag, tag))
+            rc, out = run(binary, d, "extract-parts", tag + "x.yaml")
+            rp = os.path.join(d, tag + "x.json")
+            rep = json.load(open(rp, encoding="utf-8")) if os.path.exists(rp) else {}
+            refs = [r for r in (rep.get("refusals") or []) if r.get("kind") == "unreadable_aux"]
+            check("%s ★extract-parts parts [2] — %s 가 고른 파트에 있을 수 있다 → 「%s.k:%d %s」 를 대고 거절 · 산출 없음" % (tag, what, tag, bline, kw),
+                  rc == 1 and len(refs) == 1 and any(("%s.k:%d %s" % (tag, bline, kw)) in x for x in refs[0].get("lines", [])) and
+                  not os.path.exists(os.path.join(d, tag + "x_out.k")), (rc, rep.get("refusals"), out[-400:]))
+            if tag in ("J-6a", "J-6e"):
+                # 고르지 않은 파트의 줄이면 거절하지 않는다 — 그 줄의 정수에 고른 PID 1 이 없다
+                write(os.path.join(d, tag + "y.yaml"), "model: %s.k\noutput: %sy_out.k\nparts: [1]\n" % (tag, tag))
+                rc, out = run(binary, d, "extract-parts", tag + "y.yaml")
+                rows = section_lines(os.path.join(d, tag + "y_out.k"), "*ELEMENT_SHELL") if rc == 0 else []
+                check("%s parts [1] — 그 줄은 고른 파트에 있을 수 없다 → 거절하지 않는다 · 셸만 싣는다 · 줄은 [WARN]" % tag,
+                      rc == 0 and len(rows) == 1 and ("%s.k:%d %s" % (tag, bline, kw)) in out and "[WARN" in out, (rc, rows, out[-400:]))
+
+        # id_floor — 칸으로 읽지 못한 보 줄의 EID 를 모른다 → 그 줄의 정수 최대(900) 위. 예전엔 elem_start 2(셸 1 위)였다 — 조각의 요소 번호가
+        # 그 보와 겹칠 수 있었다
+        text = xdeck("*ELEMENT_BEAM", "%8d%8d%8d%8d%8d" % (14, 2, 1, 2, 3), "900 2 101 102 103")
+        write(os.path.join(d, "J7.k"), text)
+        write(os.path.join(d, "J7.yaml"), "model: J7.k\noutput: J7_floor.json\n")
+        rc, out = run(binary, d, "id_floor", "J7.yaml")
+        fl = json.load(open(os.path.join(d, "J7_floor.json"), encoding="utf-8")) if os.path.exists(os.path.join(d, "J7_floor.json")) else {}
+        check("J-7 ★id_floor — 칸으로 읽지 못한 보 줄 「900 2 101 102 103」 → elem_start 901(그 줄의 정수 최대 위 · 예전엔 15)",
+              rc == 0 and fl.get("elem_start") == 901, (rc, fl, out[-300:]))
+
+        # 이월 적용 — 칸으로 읽지 못한 띠 줄이 다시 짓는 PID 4 만 쓰는 절점을 문다 → 나눠 쓴 절점(rc 1). 예전엔 rc 0 으로 그 절점을 지운 덱을 냈다
+        dj = os.path.join(d, "carry_unreadable")
+        shutil.copytree(CARRY, dj)
+        text = open(os.path.join(dj, "deck.k"), encoding="utf-8").read()
+        tl = "95501 20 %d %d 0 0.0 %d %d" % (keep[0], keep[1], keep[2], rem[0])
+        text = text.rstrip()[:-4] + "*PART\nbelt\n%10d%10d%10d\n*ELEMENT_SEATBELT\n%s\n*END\n" % (20, 1, 1, tl)
+        write(os.path.join(dj, "deck.k"), text)
+        plan = json.load(open(os.path.join(dj, "plan.json"), encoding="utf-8"))
+        plan["deck"]["sha256"] = hashlib.sha256(open(os.path.join(dj, "deck.k"), "rb").read()).hexdigest()
+        write(os.path.join(dj, "plan.json"), json.dumps(plan, ensure_ascii=False, indent=1))
+        write(os.path.join(dj, "run.yaml"), "model: deck.k\nplan: plan.json\noutput: out.k\n")
+        rc, out = run(binary, dj, "apply_carryover_plan", "run.yaml")
+        rp = os.path.join(dj, "out_carryover.json")
+        rep = json.load(open(rp, encoding="utf-8")) if os.path.exists(rp) else {}
+        hits = [p for p in (rep.get("problems") or []) if p.get("pid") == 4 and p.get("kind") == "shared_nodes"]
+        check("J-8 ★apply_carryover_plan — 칸으로 읽지 못한 띠 줄 「%s」 의 정수(%d — PID 4 만 쓰는 절점)도 나눠 쓴 절점 → rc 1" % (tl, rem[0]),
+              rc == 1 and hits and str(rem[0]) in hits[0].get("detail", "") and not os.path.exists(os.path.join(dj, "out.k")),
+              (rc, rep.get("problems"), out[-300:]))
+
+        # 재결속 — 칸으로 읽지 못한 질량 줄은 PID 를 칸으로 모른다 → 「단정하지 못한 자리」(예전엔 PID 칸이 비어 PID 없음으로 보았다 —
+        # 그 줄의 절점 1 은 원래부터 칸이 어긋난 줄이라 못 푼 참조로 거절했다)
+        write(os.path.join(rb, "ours3.k"), "*KEYWORD\n*ELEMENT_MASS\n9003 1 1.0E-03 1\n*END\n")
+        write(os.path.join(rb, "rb3.yaml"), "old_deck: v1.k\nnew_deck: v2.k\nentities: ours3.k\noutput: o3.k\n")
+        rc, out = run(binary, rb, "rebind_entities_after_remesh", "rb3.yaml")
+        check("J-9 rebind — 칸으로 읽지 못한 질량 줄 「9003 1 1.0E-03 1」 의 PID 도 「단정하지 못한 자리」 로 센다(rc 1)",
+              rc == 1 and "단정하지 못한" in out, (rc, out[-400:]))
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

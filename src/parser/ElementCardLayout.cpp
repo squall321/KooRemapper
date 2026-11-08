@@ -545,6 +545,16 @@ AuxCardReadings auxCardReadings(const AuxElementCard& a, const std::string& line
 
 const std::vector<std::string>& auxPrimaryFields(const AuxCardReadings& r) { return r.manual.f; }
 
+std::vector<int> auxLineInts(const std::string& line) {
+    std::string body = line;
+    const size_t cm = body.find('$');
+    if (cm != std::string::npos) body.erase(cm);
+    std::vector<int> out;
+    deckscan::harvestInts(body, out);
+    deckscan::sortUnique(out);
+    return out;
+}
+
 std::vector<int> auxNodesOf(const AuxElementCard& a, const std::vector<std::string>& f) {
     std::vector<int> out;
     auto take = [&](int from, int cnt) {
@@ -581,6 +591,10 @@ std::vector<int> auxNodesDisputed(const AuxElementCard& a, const AuxCardReadings
 }
 
 std::vector<int> auxNodesSure(const AuxElementCard& a, const AuxCardReadings& r) {
+    // 칸으로 읽지 못한 줄은 확실한 절점이 없다 — 열 자리의 값은 공백으로 가른 번호의 조각일 수 있다(「21634837」 의 「634837」). 다 한 읽기만
+    // 말하는 절점으로 친다(덱에 있으면 남기고 · 되읽기는 입력에 있던 것만 잰다). 예전엔 그 조각을 쓰는 절점으로 세어 되읽기가 「미정의」 로
+    // cleanup-nodes 를 rc 1 로 끝냈다(2026-11-08 여섯째 검토 퍼즈 fz_space — 표준 보 40 줄 가운데 10)
+    if (auxLineUnreadable(r)) return {};
     auto sorted = [&](const std::vector<std::string>& f) {
         std::vector<int> v = auxNodesOf(a, f);
         std::sort(v.begin(), v.end());
@@ -785,6 +799,18 @@ void forEachNonGridElementCard(const std::vector<std::string>& lines,
                 c.pid = (aux.hasPart && aux.partField >= 0) ? deckscan::fieldInt(fs, static_cast<size_t>(aux.partField)) : 0;
                 c.pids = auxPidsOf(aux, rd);
                 c.nodes = auxNodesUnion(aux, rd);
+                // 칸으로 읽지 못한 줄(쓰는 칸에 빈칸 — 공백으로 가른 줄)은 칸으로 EID · PID · 절점을 모른다 — 그 줄의 정수 전부를 절점 · PID
+                // 후보로 넘치게 센다(이월 적용의 나눠 쓴 절점 · aux_in_part) · 바닥은 그 최대까지(`nonGridElementMaxId`). 예전엔 그 칸이 비어
+                // 이월 적용이 지운 절점을 무는 띠를 rc 0 으로 냈고 바닥이 그 EID 를 몰랐다(2026-11-08 여섯째 검토 S1)
+                if (auxLineUnreadable(rd)) {
+                    c.unreadable = true;
+                    c.ints = auxLineInts(l);
+                    c.nodes.insert(c.nodes.end(), c.ints.begin(), c.ints.end());
+                    deckscan::sortUnique(c.nodes);
+                    if (aux.hasPart)   // PID 칸이 없는 족(플롯)은 PID 후보가 없다
+                        for (int v : c.ints)
+                            if (std::find(c.pids.begin(), c.pids.end(), v) == c.pids.end()) c.pids.push_back(v);
+                }
                 if (!aux.optNodes.empty()) { pend = c; pending = true; }   // 옵션 카드의 절점까지 읽고 넘긴다
                 else f(c);
             }
@@ -801,7 +827,10 @@ void forEachNonGridElementCard(const std::vector<std::string>& lines,
 
 int nonGridElementMaxId(const std::vector<std::string>& lines) {
     int m = 0;
-    forEachNonGridElementCard(lines, [&](const NonGridElementCard& c) { m = std::max(m, c.eid); });
+    forEachNonGridElementCard(lines, [&](const NonGridElementCard& c) {
+        m = std::max(m, c.eid);
+        for (int v : c.ints) m = std::max(m, v);   // 칸으로 읽지 못한 줄 — EID 를 모르니 그 줄의 정수 최대까지(바닥은 높아질 뿐이다)
+    });
     return m;
 }
 

@@ -464,15 +464,31 @@ TEST(auxCardReadings_안전띠_N3_N4_는_57_72열이다) {
     ASSERT_TRUE(r.comma);
     ASSERT_EQ(deckscan::fieldInt(auxPrimaryFields(r), 7), 104);
     ASSERT_FALSE(auxManualNodesPlaceable(a, r));
-    // 공백으로만 가른 줄 — 고정폭 줄이라 열로만 읽는다(공백 토큰은 읽기가 아니다 · 2026-11-08). EID 칸(1-8열)에 빈칸이 껴 깨끗하지
-    // 않고 제자리가 없다. 절점은 열 자리의 값뿐이다(칸 4 = 25-32열의 104)
-    r = auxCardReadings(a, "13 9 101 102 888 0.0 103 104", 8);
+    // 공백으로만 가른 줄 — 고정폭 줄이라 열로만 읽는다(공백 토큰은 읽기가 아니다 · 2026-11-08). EID 칸(1-8열)에 빈칸이 껴 칸으로 읽지
+    // 못하고 제자리가 없다. 열 자리로는 절점을 모른다(칸 4 = 25-32열의 104 뿐) — 그래서 소비자는 그 줄의 정수 전부를 넘치게 센다
+    // (`auxLineInts` · 여섯째 검토 S1 — 예전엔 걸음 · 바닥 · 뽑기가 열 자리의 104 만 보아 그 줄의 EID · PID · 절점을 잃었다)
+    const std::string sp = "13 9 101 102 888 0.0 103 104";
+    r = auxCardReadings(a, sp, 8);
     ASSERT_FALSE(r.manualClean);
+    ASSERT_TRUE(auxLineUnreadable(r));
     ASSERT_TRUE(auxPrimaryFields(r) == r.manual.f);
     ASSERT_FALSE(r.plainAlt);
-    ASSERT_TRUE(auxNodesUnion(a, r) == std::vector<int>({104}));
     ASSERT_FALSE(auxManualNodesPlaceable(a, r));
-    // 걸음(이월 적용의 나눠 쓴 절점 · 바닥)도 같은 칸을 본다
+    ASSERT_TRUE(auxLineInts(sp) == std::vector<int>({9, 13, 101, 102, 103, 104, 888}));      // 실수(0.0)는 버린다
+    ASSERT_TRUE(auxNodesSure(a, r).empty());                                                  // 열 자리의 104 는 조각일 수 있다 —
+    ASSERT_TRUE(auxNodesUnsure(a, r) == std::vector<int>({104}));                              //   한 읽기만(덱에 있을 때만 잰다)
+    ASSERT_TRUE(auxLineInts(sp + "   $ 77 belt") == auxLineInts(sp));                          // 주석 뒤 정수는 세지 않는다
+    // 정수 폭으로 쓴 i10 줄의 긴 번호가 설명서 칸 경계를 걸친다(설명서 N3 칸 「7083 56977」 에 빈칸) — 정수 폭 읽기가 들어 읽은 줄이다
+    {
+        char b2[200];
+        std::snprintf(b2, sizeof b2, "%10d%10d%10d%10d%10d%10s%10d%10d", 13, 9, 2038153015, 216154185, 0, "", 2064627083, 569778307);
+        const auto r2 = auxCardReadings(a, b2, 10);
+        ASSERT_FALSE(r2.manualClean);
+        ASSERT_TRUE(r2.plainAlt);
+        ASSERT_FALSE(auxLineUnreadable(r2));
+        ASSERT_TRUE(auxNodesSure(a, r2) == std::vector<int>({216154185, 2038153015}));
+    }
+    // 걸음(이월 적용의 나눠 쓴 절점 · aux_in_part · 바닥)도 같은 칸을 본다 — 칸으로 읽은 줄은 그 칸만
     const std::vector<std::string> L = {"*KEYWORD", "*ELEMENT_SEATBELT", std8, "*END"};
     std::vector<NonGridElementCard> cs;
     forEachNonGridElementCard(L, [&](const NonGridElementCard& x) { cs.push_back(x); });
@@ -480,6 +496,27 @@ TEST(auxCardReadings_안전띠_N3_N4_는_57_72열이다) {
     ASSERT_TRUE(cs[0].nodes == std::vector<int>({101, 102, 103, 104}));
     ASSERT_EQ(cs[0].pid, 9);
     ASSERT_TRUE(cs[0].pids == std::vector<int>({9}));
+    ASSERT_FALSE(cs[0].unreadable);
+    ASSERT_TRUE(cs[0].ints.empty());
+    ASSERT_EQ(nonGridElementMaxId(L), 13);
+    // 칸으로 읽지 못한 줄 — 그 줄의 정수 전부가 절점 · PID 후보 · 바닥은 그 최대(888 — EID 를 모른다)
+    const std::vector<std::string> Ls = {"*KEYWORD", "*ELEMENT_SEATBELT", sp, "*END"};
+    cs.clear();
+    forEachNonGridElementCard(Ls, [&](const NonGridElementCard& x) { cs.push_back(x); });
+    ASSERT_EQ(cs.size(), (size_t)1);
+    ASSERT_TRUE(cs[0].unreadable);
+    ASSERT_TRUE(cs[0].ints == std::vector<int>({9, 13, 101, 102, 103, 104, 888}));
+    ASSERT_TRUE(cs[0].nodes == cs[0].ints);
+    ASSERT_TRUE(cs[0].pids == cs[0].ints);
+    ASSERT_EQ(nonGridElementMaxId(Ls), 888);
+    ASSERT_EQ(nonGridElementMaxId({"*KEYWORD", "*ELEMENT_BEAM", "900 2 101 102 103", "*END"}), 900);
+    // PID 칸이 없는 족(플롯)은 PID 후보를 더하지 않는다 — 절점 후보만(열 자리의 조각 「2」(9열 — 102 의 끝)도 남긴다 · 넘치게 센다)
+    cs.clear();
+    forEachNonGridElementCard({"*KEYWORD", "*ELEMENT_PLOTEL", "7 101 102", "*END"}, [&](const NonGridElementCard& x) { cs.push_back(x); });
+    ASSERT_EQ(cs.size(), (size_t)1);
+    ASSERT_TRUE(cs[0].unreadable);
+    ASSERT_TRUE(cs[0].pids.empty());
+    ASSERT_TRUE(cs[0].nodes == std::vector<int>({2, 7, 101, 102}));
 }
 
 TEST(auxCardReadings_정수_폭으로_쓴_안전띠_줄은_두_읽기를_다_낸다) {

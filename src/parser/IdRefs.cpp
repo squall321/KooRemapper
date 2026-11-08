@@ -148,6 +148,9 @@ Scan find(const std::vector<std::string>& L, int deckFw, const std::function<boo
                     bool count = prim > 0;
                     for (int p : pids)
                         if (p != prim && pidExists && pidExists(p)) count = true;
+                    // 칸으로 읽지 못한 줄(쓰는 칸에 빈칸 — 공백으로 가른 줄 `9003 1 1.0E-03 1`)은 PID 를 칸으로 모른다 — 단정하지 않는다
+                    // (예전엔 PID 칸이 비어 「PID 없음」 으로 보았다 · 2026-11-08 여섯째 검토 S1)
+                    if (auxLineUnreadable(rd)) count = true;
                     if (count) w.skipped(kw);
                 }
             } else if (kw == "*ELEMENT_MASS_PART") {

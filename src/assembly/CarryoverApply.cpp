@@ -1059,8 +1059,10 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, const std::
         {
             std::set<std::string> kinds;
             // PID 후보 전부를 본다 — 질량 줄을 정수 폭으로 쓰면 PID 가 읽기마다 갈린다(2026-11-07 — 어느 읽기로든 이 PID 면 적는다)
+            // 칸으로 읽지 못한 줄(공백으로 가른 줄)은 그 줄의 정수가 다 PID 후보다 — 그 줄을 대고 「있을 수 있다」 로 적는다(여섯째 검토 S1)
             for (const auto& c : auxCards)
-                if (std::find(c.pids.begin(), c.pids.end(), pid) != c.pids.end()) kinds.insert(c.keyword);
+                if (std::find(c.pids.begin(), c.pids.end(), pid) != c.pids.end())
+                    kinds.insert(c.keyword + (c.unreadable ? "(칸으로 읽지 못한 " + at(c.line) + " — PID 를 모른다)" : std::string()));
             if (!kinds.empty())
                 problem(pid, "aux_in_part", "PID 에 " + join(kinds) + " 요소가 있다 — 옮기기 · 바꿔 넣기 · 지우기가 그 요소를 다루지 않는다");
         }
@@ -1179,7 +1181,9 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, const std::
             }
             for (const auto& c : auxCards)
                 for (int n : c.nodes)
-                    if (U.count(n)) auxUsers[n].insert(c.keyword + (c.pid > 0 ? "(PID " + std::to_string(c.pid) + ")" : ""));
+                    if (U.count(n))
+                        auxUsers[n].insert(c.keyword + (c.unreadable ? "(칸으로 읽지 못한 " + at(c.line) + " — 그 줄의 정수)"
+                                                                     : c.pid > 0 ? "(PID " + std::to_string(c.pid) + ")" : ""));
         }
         for (const auto& row : plan.parts) {
             if (!row.valid || !ready.count(row.pid)) continue;

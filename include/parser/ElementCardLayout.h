@@ -194,10 +194,16 @@ AuxCardReadings auxCardReadings(const AuxElementCard& a, const std::string& line
 
 // 하나로 읽는다면 — manual(콤마 줄은 콤마 토큰)
 const std::vector<std::string>& auxPrimaryFields(const AuxCardReadings& r);
-// 칸으로 읽지 못한 줄 — 쓰는 칸(EID · PID · 절점)에 빈칸이 낀 줄(공백으로만 가른 줄 `13 9 101 102 …` 등). 그 칸은 값이 없다(공백 토큰은
-// 읽기가 아니다). 조용히 넘기지 않는다(2026-11-08 사용자 결정) — 소비자마다 「파일:줄」 을 대고 [WARN] 하고, 지키는 쪽(cleanup-nodes)은
-// 그 줄의 정수 가운데 덱의 절점 번호를 지운다 하지 않는다(지키기만 — 번호 매기기 · PID 에는 쓰지 않는다)
-inline bool auxLineUnreadable(const AuxCardReadings& r) { return !r.manualClean; }
+// 칸으로 읽지 못한 줄 — 설명서 칸의 쓰는 칸(EID · PID · 절점)에 빈칸이 끼고 정수 폭 읽기도 들지 않는 줄(공백으로만 가른 줄
+// `13 9 101 102 …` 등). 그 칸은 값이 없다(공백 토큰은 읽기가 아니다). 정수 폭 읽기가 들면(i10 정수 폭 줄의 긴 번호가 설명서 칸 경계를
+// 걸친다) 그 읽기가 쓰는 칸을 다 읽으니 읽은 줄이다 — 두 읽기의 합집합을 쓴다(여섯째 검토 S1 — 예전 판정 `!manualClean` 은 그 줄도 넣어
+// cleanup-nodes 의 [WARN] 이 거짓이었다). 조용히 넘기지 않는다(2026-11-08 사용자 결정) — 소비자마다 그 줄의 정수(`auxLineInts`)를 넘치게 센다: cleanup-nodes 는
+// 덱의 절점 번호인 것을 지우지 않고 · restack 은 지운 절점이면 사람이 볼 줄로 올리고 · 격자 밖 걸음(이월 적용의 나눠 쓴 절점 ·
+// aux_in_part)은 절점 · PID 후보로 · 번호 바닥은 그 최대까지 · extract-parts 는 고른 파트에 있을 수 있으면 거절한다(여섯째 검토 S1 —
+// 그 전엔 걸음 · 바닥 · 뽑기가 그 줄의 EID · PID · 절점을 잃었다). 번호 매기기에는 쓰지 않는다(그 줄은 거절한다)
+inline bool auxLineUnreadable(const AuxCardReadings& r) { return !r.manualClean && !r.plainAlt; }
+// 그 줄의 정수 전부 — `$` 주석 앞 · 8칸 · 10칸 · 공백(콤마) 토큰의 합집합 · 실수 표기는 버린다 · 양수만(정렬 · 유일 — `deckscan::harvestInts`)
+std::vector<int> auxLineInts(const std::string& line);
 // 칸 차례로 나눈 줄 하나가 말하는 절점(`nodeSkip` · `nodeSkip2` 구간의 양수, 칸 차례대로)
 std::vector<int> auxNodesOf(const AuxElementCard& a, const std::vector<std::string>& f);
 // 지키는 쪽 — primary 와 든 다른 읽기의 절점 합집합(정렬 · 유일)
@@ -207,7 +213,8 @@ std::vector<int> auxNodesAlt(const AuxElementCard& a, const AuxCardReadings& r, 
 // 갈림 — 합집합 가운데 manual 에 없는 절점(정렬 · 유일). 번호를 manual 의 열 자리에 바꿔 쓰는 쪽이 본다 — 그 절점이 덱에 있으면
 // 줄이 모호하다
 std::vector<int> auxNodesDisputed(const AuxElementCard& a, const AuxCardReadings& r);
-// 확실한 절점 — 든 읽기가 **다** 말하는 절점(정렬 · 유일 — 다른 읽기가 없으면 manual 의 절점). 되읽기는 이것이 덱에 다 있어야 한다
+// 확실한 절점 — 든 읽기가 **다** 말하는 절점(정렬 · 유일 — 다른 읽기가 없으면 manual 의 절점). 되읽기는 이것이 덱에 다 있어야 한다.
+// 칸으로 읽지 못한 줄(`auxLineUnreadable`)은 없다(열 자리의 값은 공백으로 가른 번호의 조각일 수 있다 — 다 아래 「한 읽기만」 이다)
 std::vector<int> auxNodesSure(const AuxElementCard& a, const AuxCardReadings& r);
 // 한 읽기만 말하는 절점 — 합집합 − 확실(정렬 · 유일). 지키는 쪽은 덱에 있으면 남기고 싣고, 되읽기는 입력 덱에 있던 것만 잰다 — 갈리는
 // 줄의 한 읽기는 덱에 없는 번호를 말할 수 있다(정수 폭으로 쓴 i10 줄을 설명서 칸으로 자르면 N4 칸에 N4 의 끝 네 자리가 든다 · 11-08)
@@ -251,6 +258,8 @@ bool gridReaderReadsKeyword(const std::string& keywordLine);
 //            · 리더가 안 읽는 격자 변형 — 줄 수가 PID 에 달리지 않을 때만(절점 수 옵션 `_H20` 등 · 티쉘 `_BETA`) ·
 //              `elementCardSpan` 의 절점 줄 전부
 //   요소가 아닌 카드(`hasEid=false` — `*ELEMENT_MASS_PART(_SET)`)는 넘기지 않는다(EID · 절점 칸이 없다 — PID 는 IdRefs 가 본다)
+//            · 칸으로 읽지 못한 Card 1(`auxLineUnreadable` — 공백으로 가른 줄)은 그 줄의 정수 전부를 절점 · PID 후보로 넘치게 센다
+//              (`unreadable` · `ints` — 바닥은 그 최대까지 · 2026-11-08 여섯째 검토 S1)
 //   !known — 칸 자리나 카드 줄 수를 모른다. **데이터 줄마다** 한 번 · 그 줄의 첫 칸을 EID 로 넘치게 센다(바닥은 높아질
 //            뿐 낮아지지 않는다). 절점 수 옵션이 없는 솔리드 변형(`_ORTHO` · `_DOF` · `_H8TOH20` · `_TET4TOTET10` …)은
 //            카드 줄 수가 그 PID 의 ELFORM(다른 파일의 `*SECTION_SOLID` 일 수 있다)과 구 포맷 여부에 달려 여기 든다
@@ -263,10 +272,13 @@ struct NonGridElementCard {
     int pid = 0;                // known 이고 PID 칸이 있을 때만 — 하나로 읽은 PID(`auxPrimaryFields`)
     std::vector<int> pids;      // known 일 때 PID 후보 전부 — 넓은 칸 뒤 PID(질량)는 읽기마다 다를 수 있다(`auxPidsOf` · 격자 변형은 pid 하나)
     std::vector<int> nodes;     // known 일 때만 — 양수인 절점 칸. 격자 밖 족은 읽기 전부의 합집합(`auxNodesUnion`)
+    bool unreadable = false;    // 격자 밖 족의 Card 1 을 칸으로 읽지 못했다(`auxLineUnreadable`) — 아래 ints 가 nodes · pids 에도 들었다
+    std::vector<int> ints;      // unreadable 일 때 그 줄의 정수 전부(`auxLineInts`) — pids(PID 칸이 있는 족) · nodes 에 더했고 바닥은 그 최대까지
 };
 void forEachNonGridElementCard(const std::vector<std::string>& lines,
                                const std::function<void(const NonGridElementCard&)>& f);
-// 그 줄들의 격자 밖 요소 EID 최대값(없으면 0) — `ModelAssembler::idMaxima` 의 바닥
+// 그 줄들의 격자 밖 요소 EID 최대값(없으면 0) — `ModelAssembler::idMaxima` 의 바닥. 칸으로 읽지 못한 줄은 그 줄의 정수 최대까지
+// (EID 를 모른다 — 바닥은 높아질 뿐이다 · 예전엔 `900 2 101 102 103` 이 elem_start 를 901 이 아니라 2 로 냈다)
 int nonGridElementMaxId(const std::vector<std::string>& lines);
 // 스칼라 절점(`*NODE_SCALAR` · `_VALUE` — 보 `_WARPAGE` 의 SN 이 가리킨다)의 NID 최대값(없으면 0). 스칼라 절점 번호는 `*NODE` 의
 // 번호와 겹치면 안 된다(Vol_I 214757 「unique relative to other nodes」) — 새 절점 번호의 바닥이 그 위여야 한다(리더는 `*NODE` 만 담는다)

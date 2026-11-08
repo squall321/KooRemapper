@@ -306,10 +306,7 @@ void scanRefsStream(std::istream& in, const std::string& path, bool isMain, cons
                     // 칸으로 읽지 못한 줄(쓰는 칸에 빈칸) — 그 칸은 값이 없다. 그 줄이 말할 수도 있는 절점을 지우지 않게 줄의 정수를 모은다
                     // (지키기만 — 덱의 절점 번호인 것만 남는다 · 번호 매기기 · PID 에는 쓰지 않는다). 줄은 [WARN] 으로 댄다(2026-11-08)
                     if (KooRemapper::auxLineUnreadable(rd)) {
-                        std::string body = line;
-                        const size_t cm = body.find('$');
-                        if (cm != std::string::npos) body.erase(cm);
-                        harvestInts(body, sc.unreadableAuxInts);
+                        for (int v : KooRemapper::auxLineInts(line)) sc.unreadableAuxInts.push_back(v);
                         sc.unreadableAuxLines.push_back(path + ":" + std::to_string(lineNo) + " " + kw);
                     }
                 } else {
