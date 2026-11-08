@@ -124,6 +124,8 @@ op("battery", "메시 생성", "배터리 셀(적층·권취) 모델 + 스웰링
           "output 경로의 폴더가 있어야 한다.",
           "assemble 의 - type: battery 도 같은 규칙 — 이 설정의 output 은 이 설정 폴더, 항목에 준 output 은 assemble YAML 폴더 기준이고",
           "  주 덱의 *INCLUDE 는 주 덱 폴더 기준 이름으로 적는다(2026-11-07 전엔 둘 다 작업 폴더 기준)",
+          "assemble 안에서는 번호를 족마다 기존 모델의 최대값 위로 옮겨 얹는다(절점 · 요소 · 파트 · 섹션 · 재질 · 열 재질 · 모래시계 ·",
+          "  세트 · 접촉 · 곡선 — 2026-11-08 전엔 그대로 끌어와 겹쳤다). help assemble 의 node_id_offset · elem_id_offset · use_include",
           "dynain_file 은 경로가 아니라 *INCLUDE_DYNAIN 에 그대로 찍히는 문자열이다 — 산출 덱 옆에서 솔버가 찾을 이름으로 적을 것",
           "덱 이름은 <output><tier>_phase{1|2}.k — batch.model_types 에 종류가 둘 이상이면 <output>_<model_type><tier>_phase{1|2}.k",
           "  (자동 dynain_file 도 같은 규칙 — 폴더 없는 덱 옆 이름, batch.phases 에 1 · 2 가 다 있을 때만. 2026-11-07 전엔 다른 폴더의",
@@ -574,7 +576,10 @@ material:
           "루프 안에서 덱보다 먼저 쓰는 곁 파일(warpage debug 진단 · battery 덱)은 처리 전에 **모든** 처리의 입력과 견준다 —",
           "  예전엔 그때까지 읽은 입력과만 견줘 뒤 처리의 입력(update 의 dynain 등)을 덮을 수 있었다",
           "그 곁 파일의 자리도 YAML 폴더 기준이다 — warpage 의 debug_prefix 는 이 YAML 폴더, battery 덱은 battery 설정의 output(그 설정",
-          "  폴더 · 항목에 준 output 은 이 YAML 폴더). 주 덱의 *INCLUDE 는 주 덱 폴더 기준 이름(2026-11-07 전엔 작업 폴더 기준)"])
+          "  폴더 · 항목에 준 output 은 이 YAML 폴더). 주 덱의 *INCLUDE 는 주 덱 폴더 기준 이름(2026-11-07 전엔 작업 폴더 기준)",
+          "battery 항목은 덱 번호를 족마다 기존 모델의 최대값 위로 옮긴다(2026-11-08 — 예전엔 그대로 끌어와 겹쳤다). node_id_offset ·",
+          "  elem_id_offset 을 주면 그 값(최대값 아래로 걸치면 rc 1) · use_include: false 면 주 덱에 펼친다(battery 덱 파일 없음) ·",
+          "  *INCLUDE_DYNAIN 을 끌어오는 battery(phase 2 · use_dynain)는 옮길 때 거절(그 dynain 은 다른 실행의 번호)"])
 
 # ── 하중·경계·접촉 ──
 op("load", "하중·경계·접촉", "파트 면(방향/tied/세그먼트셋 선택)에 압력·힘 하중 + 곡선", "하중 pressure 압력 force",

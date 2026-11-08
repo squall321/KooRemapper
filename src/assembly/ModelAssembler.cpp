@@ -5,6 +5,7 @@
 #include "commands/cnrb2solid.h"
 #include "commands/hfdamp.h"
 #include "commands/battery.h"
+#include "battery/BatteryIdShift.h"   // battery 덱의 번호를 족마다 옮긴다(assemble battery)
 #include "assembly/DeflectionGrid.h"
 #include "assembly/FormulaEvaluator.h"
 #include "assembly/ClosedLoop.h"
@@ -413,6 +414,40 @@ static std::string ma_includeName(const std::string& path, const std::string& de
     return util::relpathOf(path, deckDir);   // 이월 적용의 인클루드 목록과 같은 셈(util/RelPath.h)
 }
 
+// 줄들이 정의하는 번호의 최대값 — battery 덱을 얹을 때 공용 바닥(`idMaxima`)에 없는 족을 센다(2026-11-08): 열 재질(TMID —
+// `cur_isThermalMaterial`) · 모래시계(HGID) · 곡선 이름공간(`*DEFINE_CURVE*` · `*DEFINE_TABLE*` · `*DEFINE_FUNCTION*` — LS-DYNA 는
+// 곡선 · 표 · 함수가 번호를 나눈다). 첫 데이터 카드(제목 다음)의 첫 칸 — `cur_scanMaterialDefs` 와 같은 칸 읽기
+static int ma_maxDefinedIn(const std::vector<std::string>& lines, int fam) {
+    int mx = 0;
+    const int deckFw = deckFieldWidth(lines);
+    for (size_t i = 0; i < lines.size(); ++i) {
+        if (deckscan::isDataLine(lines[i])) continue;
+        const std::string kw = deckscan::kwBare(deckscan::keywordToken(lines[i]));
+        bool want = false;
+        if (fam == bat::FAM_TMAT) want = kw.rfind("*MAT_", 0) == 0 && cur_isThermalMaterial(kw);
+        else if (fam == bat::FAM_HOURGLASS) want = kw == "*HOURGLASS" || kw == "*HOURGLASS_TITLE";
+        else if (fam == bat::FAM_CURVE)
+            want = kw.rfind("*DEFINE_CURVE", 0) == 0 || kw.rfind("*DEFINE_TABLE", 0) == 0 || kw.rfind("*DEFINE_FUNCTION", 0) == 0;
+        if (!want) continue;
+        const int fw = keywordFieldWidth(lines[i], deckFw) == 20 ? 20 : 10;
+        const bool titled = kw.find("_TITLE") != std::string::npos;
+        // `*HOURGLASS` 는 한 블록에 정의가 여럿이다(카드마다 · `_TITLE` 이면 제목 · 카드 짝마다) — 나머지 족은 블록마다 하나다
+        const bool every = (fam == bat::FAM_HOURGLASS);
+        size_t pos = 0;
+        for (size_t j = i + 1; j < lines.size(); ++j) {
+            const std::string& d = lines[j];
+            const size_t h = d.find_first_not_of(" \t");
+            if (h != std::string::npos && d[h] == '*') break;
+            if (h != std::string::npos && d[h] == '$') continue;
+            const size_t k = pos++;
+            if (titled && k % 2 == 0) continue;   // 제목 줄은 비어 있을 수 있다
+            mx = std::max(mx, deckscan::fieldInt(deckscan::cardFields(d, fw), 0));
+            if (!every) break;
+        }
+    }
+    return mx;
+}
+
 // ★대상이 인클루드 안에만 있는가(헤더의 주석 참조). 판정 자료는 `raiseMaxIdsOverIncludes` 가 같은 리더로 센 것이다.
 static std::string ma_flattenHint() {
     return " — 고쳐 쓰는 op 은 주 덱만 고친다. `flatten_includes: true` 를 주면 인클루드 닫힘을 펼쳐 홀로 서는 한 덱으로 "
@@ -545,7 +580,7 @@ bool ModelAssembler::planRunWrites(const std::vector<AssemblyOperation>& ops, co
             try {
                 BatteryConfig cfg = parseBatteryConfig(bc);
                 cfg.output = ma_batteryOutput(op.battery.output, cfg.output, configDir, bc);   // applyBattery 와 같은 규칙
-                midRun.push_back(batteryKFilePath(cfg));
+                if (op.battery.useInclude) midRun.push_back(batteryKFilePath(cfg));   // 펼치면(use_include: false) 쓰는 덱이 없다
             } catch (const std::exception&) {
                 // 못 읽으면 applyBattery 가 아무것도 쓰기 전에 같은 까닭으로 멈춘다
             }
@@ -584,6 +619,7 @@ void ModelAssembler::readIncludeClosure() {
 int ModelAssembler::inclMax(const std::function<int(const std::vector<std::string>&)>& scan) const {
     int m = 0;
     for (const auto& f : incl_.files) m = std::max(m, scan(f.lines));
+    for (const auto& d : addedDecks_) m = std::max(m, scan(d));   // 이 실행이 *INCLUDE 로 덧붙인 덱(assemble battery)
     return m;
 }
 
@@ -17881,32 +17917,148 @@ bool ModelAssembler::applyBattery(const BatteryOperation& op, const std::string&
     const std::string writtenOut = op.output.empty() ? cfg.output : op.output;   // YAML 에 적힌 그대로 — *INCLUDE 이름을 정할 때
     cfg.output = ma_batteryOutput(op.output, cfg.output, configDir, cfgPath);
     noteInput(cfgPath, "battery config");   // 쓰기 관문이 산출과 견준다(2026-11-07)
-    // ★배터리 덱은 루프 안에서 덱보다 먼저 쓴다 — 여기서 읽은 파일과 견준다(2026-11-07 · 쓰기 관문)
-    {
+    const std::string deckPath = batteryKFilePath(cfg);
+    if (op.nodeIdOffset < 0 || op.elemIdOffset < 0) {
+        errorMessage_ = "[battery] node_id_offset · elem_id_offset 은 0(기존 모델의 최대값 위로 저절로) 또는 양수다";
+        return false;
+    }
+    // ★펼치기(use_include: false)는 battery 카드(표준 8 · 10칸)를 주 덱에 그대로 넣는다 — 주 덱이 i10 · long 이면 다르게 읽힌다
+    if (!op.useInclude && deckFieldWidth(rawLines_) != 8) {
+        errorMessage_ = "[battery] use_include: false — 주 덱이 표준 칸 폭이 아니다(*KEYWORD 의 I10 · LONG) — battery 카드를 펼쳐 넣으면 "
+                        "칸이 다르게 읽힌다. use_include: true 로 끌어오라";
+        return false;
+    }
+    // ★배터리 덱은 루프 안에서 덱보다 먼저 쓴다 — 여기서 읽은 파일과 견준다(2026-11-07 · 쓰기 관문). 펼치면 쓰는 파일이 없다
+    if (op.useInclude) {
         std::string why;
-        if (output_guard::findClash({batteryKFilePath(cfg)}, guardInputs_, why)) {
+        if (output_guard::findClash({deckPath}, guardInputs_, why)) {
             errorMessage_ = "[battery] " + why + " — 출력 파일을 쓰지 않았습니다";
             return false;
         }
     }
 
-    // Generate the battery K-file
+    // Generate the battery K-file — 글자만 짓는다(번호를 옮긴 뒤 쓴다 · 2026-11-08)
     ConsoleOutput console;
-    std::string kPath = generateBatteryKFile(cfg, console);
-    if (kPath.empty()) {
+    std::string deckText;
+    if (!buildBatteryKFileText(cfg, console, op.useInclude ? deckPath : std::string("(주 덱에 펼친다 — use_include: false)"),
+                               deckText)) {
         errorMessage_ = "[battery] Failed to generate K-file";
         return false;
     }
-    // ★주 덱의 *INCLUDE 는 주 덱 폴더 기준 이름이다(ma_includeName · 2026-11-07) — 예전엔 작업 폴더 기준 경로를 그대로 적어
-    //   주 덱이 다른 폴더에 있으면 솔버가 찾지 못했다
-    kPath = ma_includeName(kPath, deckscan::dirOf(outputPrefix + ".k"), writtenOut);
 
-    // *INCLUDE 는 주 덱의 **첫** *END 앞에(없으면 끝에) — 예전엔 마지막 *END 앞이라 *END 가 둘인 덱에서 LS-DYNA 가 그 인클루드를
-    // 읽지 않았다(첫 *END 에서 멈춘다 · 셋째 묶음)
-    deckscan::insertBeforeFirstEnd(rawLines_, {"*INCLUDE\n" + kPath});
+    // ★번호를 기존 모델의 최대값 위로 옮긴다(2026-11-08 · 사용자 결정 「고친다」) — 예전엔 battery 덱의 번호(절점 · 요소 1 ~ ·
+    //   고정 PID · SECID · MID · 세트 · 곡선 · 접촉)를 그대로 끌어와 기존 모델과 겹쳤다(상자 198 절점이 모두 겹쳐 rc 0).
+    //   족마다 「기존 최대값」만큼 옮긴다 — 공용 바닥(`idMaxima` — 모든 요소 족 · 스칼라 절점까지)과, 거기 없는 족(열 재질 · 모래시계 ·
+    //   접촉 · 곡선)은 주 덱 · 인클루드 · 이 실행이 덧붙인 덱을 같은 규칙으로 훑는다. 기존 모델에 없는 족은 옮기지 않는다.
+    //   node_id_offset · elem_id_offset 을 주면 그 값이다 — 기존 최대값 위가 아니면(겹칠 수 있으면) 쓰기 전에 멈춘다.
+    bat::ShiftResult sr;
+    std::string err, unused;
+    if (!bat::shiftBatteryIds(deckText, bat::IdShift{}, unused, sr, err)) {
+        errorMessage_ = "[battery] " + err;
+        return false;
+    }
+    std::array<long long, bat::FAM_COUNT> baseMax{};
+    {
+        const auto mx = idMaxima();
+        baseMax[bat::FAM_NODE] = mx.node;
+        baseMax[bat::FAM_ELEM] = mx.elem;
+        baseMax[bat::FAM_PART] = mx.part;
+        baseMax[bat::FAM_SECTION] = mx.section;
+        baseMax[bat::FAM_MAT] = mx.material;
+        baseMax[bat::FAM_SET] = mx.set;
+        for (int fam : {bat::FAM_TMAT, bat::FAM_HOURGLASS, bat::FAM_CURVE}) {
+            auto scan = [fam](const std::vector<std::string>& L) { return ma_maxDefinedIn(L, fam); };
+            baseMax[static_cast<size_t>(fam)] = std::max(scan(rawLines_), inclMax(scan));
+        }
+        baseMax[bat::FAM_CONTACT] = std::max(ct_findMaxContactId(rawLines_), inclMax(ct_findMaxContactId));
+    }
+    bat::IdShift by{};
+    for (int fam = 0; fam < bat::FAM_COUNT; ++fam)
+        if (sr.defined[static_cast<size_t>(fam)].hi > 0) by[static_cast<size_t>(fam)] = baseMax[static_cast<size_t>(fam)];
+    for (const auto& [fam, given, key] : {std::make_tuple(int(bat::FAM_NODE), op.nodeIdOffset, "node_id_offset"),
+                                          std::make_tuple(int(bat::FAM_ELEM), op.elemIdOffset, "elem_id_offset")}) {
+        if (given <= 0) continue;
+        const bat::IdRange& r = sr.defined[static_cast<size_t>(fam)];
+        by[static_cast<size_t>(fam)] = given;
+        if (r.hi > 0 && r.lo + given <= baseMax[static_cast<size_t>(fam)]) {
+            errorMessage_ = std::string("[battery] ") + key + " " + std::to_string(given) + " — battery " + bat::idFamName(fam) +
+                            " " + std::to_string(r.lo) + "~" + std::to_string(r.hi) + " 이 " + std::to_string(r.lo + given) + "~" +
+                            std::to_string(r.hi + given) + " 가 되어 기존 모델의 " + bat::idFamName(fam) + " 최대값 " +
+                            std::to_string(baseMax[static_cast<size_t>(fam)]) + " 아래로 걸친다(겹칠 수 있다) — " +
+                            std::to_string(baseMax[static_cast<size_t>(fam)]) + " 이상을 주거나 0(저절로)으로 두라. 아무 파일도 쓰지 않았다";
+            return false;
+        }
+    }
+    if (sr.includesDynain && (by[bat::FAM_NODE] != 0 || by[bat::FAM_ELEM] != 0)) {
+        errorMessage_ = "[battery] battery 덱이 *INCLUDE_DYNAIN(" + cfg.dynainFile + ")을 끌어온다 — 번호를 옮기면(절점 +" +
+                        std::to_string(by[bat::FAM_NODE]) + " · 요소 +" + std::to_string(by[bat::FAM_ELEM]) +
+                        ") 다른 실행이 쓴 그 dynain 의 번호와 어긋난다. assemble 의 battery 에서는 use_dynain 을 끄라. 아무 파일도 쓰지 않았다";
+        return false;
+    }
+    std::string shifted;
+    bat::ShiftResult srAfter;
+    if (!bat::shiftBatteryIds(deckText, by, shifted, srAfter, err)) {
+        errorMessage_ = "[battery] " + err + " — 아무 파일도 쓰지 않았다";
+        return false;
+    }
+    std::vector<std::string> shiftedLines;
+    {
+        std::istringstream in(shifted);
+        std::string l;
+        while (std::getline(in, l)) shiftedLines.push_back(l);
+    }
+
+    std::string kPath;
+    if (op.useInclude) {
+        if (!writeBatteryKFileText(deckPath, shifted, console)) {
+            errorMessage_ = "[battery] Cannot write output: " + deckPath;
+            return false;
+        }
+        // ★주 덱의 *INCLUDE 는 주 덱 폴더 기준 이름이다(ma_includeName · 2026-11-07) — 예전엔 작업 폴더 기준 경로를 그대로 적어
+        //   주 덱이 다른 폴더에 있으면 솔버가 찾지 못했다
+        kPath = ma_includeName(deckPath, deckscan::dirOf(outputPrefix + ".k"), writtenOut);
+
+        // *INCLUDE 는 주 덱의 **첫** *END 앞에(없으면 끝에) — 예전엔 마지막 *END 앞이라 *END 가 둘인 덱에서 LS-DYNA 가 그 인클루드를
+        // 읽지 않았다(첫 *END 에서 멈춘다 · 셋째 묶음)
+        deckscan::insertBeforeFirstEnd(rawLines_, {"*INCLUDE\n" + kPath});
+        addedDecks_.push_back(shiftedLines);   // 뒤 op 의 번호 발급(inclMax)이 이 덱의 번호를 센다
+    } else {
+        // ★use_include: false — battery 덱의 카드를 주 덱의 첫 *END 앞에 펼친다(2026-11-08 · 카탈로그가 적은 그대로). 앞 머리
+        //   ($ 주석 · *KEYWORD)와 *END 는 뺀다 — 주 덱의 것을 쓴다. battery 덱 파일은 쓰지 않는다
+        std::string body;
+        bool inBody = false;
+        for (const auto& l : shiftedLines) {
+            const std::string kw = l.empty() || l[0] != '*' ? std::string() : deckscan::kwBare(deckscan::keywordToken(l));
+            if (kw == "*KEYWORD") { inBody = true; continue; }
+            if (kw == "*END") break;
+            if (inBody) body += l + "\n";
+        }
+        deckscan::insertBeforeFirstEnd(rawLines_, {body});
+    }
+    // 뒤 op 이 새 번호를 낼 커서 — battery 의 옮긴 최대값 위로(그러지 않으면 뒤 op 의 새 절점 · 파트 · 세트가 battery 와 겹친다)
+    {
+        auto top = [&](int fam) {
+            const bat::IdRange& r = sr.defined[static_cast<size_t>(fam)];
+            return r.hi > 0 ? static_cast<int>(r.hi + by[static_cast<size_t>(fam)]) : 0;
+        };
+        maxNodeId_ = std::max(maxNodeId_, top(bat::FAM_NODE));
+        maxElementId_ = std::max(maxElementId_, top(bat::FAM_ELEM));
+        maxPartId_ = std::max(maxPartId_, top(bat::FAM_PART));
+        maxSectionId_ = std::max(maxSectionId_, top(bat::FAM_SECTION));
+        maxMaterialId_ = std::max(maxMaterialId_, top(bat::FAM_MAT));
+        maxSetId_ = std::max(maxSetId_, top(bat::FAM_SET));
+    }
+    {
+        std::string moved;
+        for (int fam = 0; fam < bat::FAM_COUNT; ++fam)
+            if (by[static_cast<size_t>(fam)] != 0)
+                moved += std::string(moved.empty() ? "" : " · ") + bat::idFamName(fam) + " +" + std::to_string(by[static_cast<size_t>(fam)]);
+        infoMessages.push_back("[battery] 번호를 기존 모델 위로 옮겼다 — " + (moved.empty() ? std::string("옮길 것 없음(기존 모델에 그 족이 없다)") : moved));
+    }
 
     char buf[256];
-    snprintf(buf, sizeof(buf), "[battery] Included: %s", kPath.c_str());
+    if (op.useInclude) snprintf(buf, sizeof(buf), "[battery] Included: %s", kPath.c_str());
+    else snprintf(buf, sizeof(buf), "[battery] 주 덱의 첫 *END 앞에 펼쳤다(use_include: false) — battery 덱 파일은 쓰지 않았다");
     infoMessages.push_back(buf);
     // ★use_dynain: true 인데 dynain_file 이 비면 battery 덱에 *INCLUDE_DYNAIN 이 빠진다 — 알린다(2026-11-08 · 예전엔 말없이)
     const std::string dynWarn = batteryDynainSkipWarning(cfg);

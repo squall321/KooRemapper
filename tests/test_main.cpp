@@ -22,6 +22,8 @@
 #include "test_CarryoverPlan.cpp"
 // 주 덱 폴더 기준 상대 경로 공용 함수 — 2026-11-08(이월 적용 · assemble battery 가 같이 쓴다)
 #include "test_RelPath.cpp"
+// battery 덱 번호 옮기기(assemble battery) — 2026-11-08
+#include "test_BatteryIdShift.cpp"
 
 int main(int argc, char* argv[]) {
     (void)argc;

@@ -4105,6 +4105,19 @@ KooRemapper battery <config.yaml>
 > `output` 만 적은 그대로). 예전에는 둘 다 작업 폴더 기준이라 `KooRemapper assemble cfg/a.yaml` 이 battery 덱을 작업 폴더에 쓰고
 > cfg/ 의 주 덱에는 솔버가 찾지 못하는 이름을 적었습니다.
 >
+> **`assemble` 안의 battery 번호(2026-11-08)**: battery 덱의 번호를 **족마다 기존 모델의 최대값 위로** 옮겨 얹습니다 — 절점 · 요소
+> (모든 요소 족 · 스칼라 절점까지 센 공용 바닥) · 파트 · 섹션 · 재질 · 열 재질(TMID) · 모래시계(HGID) · 세트(종류를 한 통으로) ·
+> 접촉(CID) · 곡선(곡선 · 표 · 함수가 나누는 번호). 기존 모델에 없는 족은 옮기지 않습니다. 정의와 그것을 가리키는 칸(요소의 절점 ·
+> 파트, 파트의 섹션 · 재질, 세트 멤버, 접촉의 SSID · MSID, 경계 · 하중 · 에어백 · 열팽창 · 초기 응력 · 변형률, 재질의 곡선)을 같이 옮기고
+> 나머지 글자는 그대로 둡니다. `node_id_offset` · `elem_id_offset` 을 주면 그 값을 더합니다 — 기존 최대값 위가 아니면(아래로 걸치면)
+> **아무 파일도 쓰지 않고 종료 코드 1** 입니다(번호 사이 빈자리는 보지 않습니다). `use_include: false` 면 battery 덱 파일을 쓰지 않고 그
+> 카드를 주 덱의 첫 `*END` 앞에 펼칩니다(주 덱이 i10 · long 이면 칸이 다르게 읽혀 거절). battery 덱이 `*INCLUDE_DYNAIN` 을 끌어오면
+> (phase 2 · `use_dynain`) 번호를 옮길 때 거절합니다 — 그 dynain 은 다른 실행의 번호입니다. battery 쓰개가 내지 않는 카드나 뜻을 모르는
+> 0 아닌 번호 칸이 있으면 옮기지 않고 거절합니다. 뒤 처리(contact · load …)가 새로 내는 번호도 battery 덱의 번호 위로 냅니다. 예전에는
+> battery 덱을 번호 그대로 끌어와 기존 모델과 겹쳤고(상자 198 절점이 모두 겹쳐 종료 코드 0), 두 오프셋과 `use_include` 는 읽기만
+> 했습니다. battery 덱의 `*CONTROL_*` · `*DATABASE_*` · 고정구 · 경계조건은 그대로 실립니다(번호 겹침만 다룹니다). 단독 `battery` 는 한 덱이
+> 홀로 서므로 해당이 없습니다(설정 40가지로 지은 덱에 족 안에서 겹친 번호 0).
+>
 > **배치의 덱 이름(2026-11-07)**: 덱 이름은 `<output><tier>_phase{1|2}.k` 입니다 — tier 는 다섯 칸(`_tier-1` · `_tier0` ·
 > `_tier0_5` · `_tier1` · `_tier2`)으로 묶이고, phase 2 가 아니면 모두 `_phase1` 입니다. `batch.model_types` 에 종류가 **둘 이상**이면
 > 종류를 이름에 넣습니다 — `<output>_<model_type><tier>_phase{1|2}.k`(`bt_stacked_tier0_phase1.k` · `bt_wound_tier0_phase1.k`), 자동으로

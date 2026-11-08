@@ -354,12 +354,11 @@ std::string batteryDynainSkipWarning(const BatteryConfig& cfg) {
            "batch.phases 에 1 과 2 가 다 있을 때 뒤 phase 뿐이다)";
 }
 
-std::string generateBatteryKFile(const BatteryConfig& cfg,
-                                  ConsoleOutput& console) {
-    // Build output filename
-    std::string outPath = batteryKFilePath(cfg);
-
-    console.println("[battery] Generating: " + outPath);
+// 배터리 덱 글자를 메모리에 짓는다 — 파일은 쓰지 않는다(2026-11-08 · assemble 이 번호를 옮긴 뒤 쓴다). `what` 은 「Generating:」
+// 줄의 이름(쓸 경로 · 주 덱에 펼친다는 말), 「Done. …」 줄은 `done` 에 둔다(부르는 쪽이 쓴 뒤에 찍는다). 모르는 model_type 이면 false
+static bool buildBatteryDeck(const BatteryConfig& cfg, ConsoleOutput& console, const std::string& what,
+                             std::string& text, std::string& done) {
+    console.println("[battery] Generating: " + what);
     console.println("[battery]   model_type : " + cfg.modelType);
     {
         char buf[64];
@@ -431,26 +430,20 @@ std::string generateBatteryKFile(const BatteryConfig& cfg,
         }
 
         out << "*END\n";
-
-        std::ofstream f(outPath);
-        if (!f.is_open()) {
-            console.error("[battery] Cannot write output: " + outPath);
-            return "";
-        }
-        f << out.str();
+        text = out.str();
 
         char sbuf[128];
         snprintf(sbuf, sizeof(sbuf),
                  "[battery] Done. Nodes=%d Shells=%d Solids=%d",
                  stats.nNodes, stats.nShells, stats.nSolids);
-        console.println(sbuf);
-        return outPath;
+        done = sbuf;
+        return true;
     }
 
     if (cfg.modelType != "stacked") {
         console.error("[battery] Unknown model_type: " + cfg.modelType +
                       " (supported: stacked, wound)");
-        return "";
+        return false;
     }
 
     // ── Stacked model ─────────────────────────────────────────
@@ -525,24 +518,48 @@ std::string generateBatteryKFile(const BatteryConfig& cfg,
     }
 
     out << "*END\n";
-
-    // Write to file
-    std::ofstream f(outPath);
-    if (!f.is_open()) {
-        console.error("[battery] Cannot write output: " + outPath);
-        return "";
-    }
-    f << out.str();
+    text = out.str();
 
     {
         char buf[128];
         snprintf(buf, sizeof(buf),
                  "[battery] Done. Nodes=%d Shells=%d Solids=%d TotalZ=%.4fmm",
                  stats.nNodes, stats.nShells, stats.nSolids, stats.totalZ);
-        console.println(buf);
+        done = buf;
     }
+    return true;
+}
 
+bool writeBatteryKFileText(const std::string& path, const std::string& text, ConsoleOutput& console) {
+    std::ofstream f(path);
+    if (!f.is_open()) {
+        console.error("[battery] Cannot write output: " + path);
+        return false;
+    }
+    f << text;
+    f.close();
+    if (f.fail()) {
+        console.error("[battery] Cannot write output: " + path);
+        return false;
+    }
+    return true;
+}
+
+std::string generateBatteryKFile(const BatteryConfig& cfg,
+                                  ConsoleOutput& console) {
+    const std::string outPath = batteryKFilePath(cfg);
+    std::string text, done;
+    if (!buildBatteryDeck(cfg, console, outPath, text, done)) return "";
+    if (!writeBatteryKFileText(outPath, text, console)) return "";
+    console.println(done);
     return outPath;
+}
+
+bool buildBatteryKFileText(const BatteryConfig& cfg, ConsoleOutput& console, const std::string& what, std::string& text) {
+    std::string done;
+    if (!buildBatteryDeck(cfg, console, what, text, done)) return false;
+    console.println(done);
+    return true;
 }
 
 // ─────────────────────────────────────────────────────────────

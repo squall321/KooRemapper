@@ -53,7 +53,8 @@ DECLARED = {
                                     "덱 산출물은 DeckWriter 로 쓴다(2e47878)"),
     # ── 덱(신규) ────────────────────────────────────────────────────────────
     "src/commands/core_ops.cpp": (1, "덱(신규) — `generate box` 가 덱을 새로 만든다. 입력 덱이 없다"),
-    "src/commands/battery.cpp": (2, "덱(신규) — 배터리 덱을 새로 만든다. 입력 덱을 읽지 않는다"),
+    "src/commands/battery.cpp": (1, "덱(신규) — 배터리 덱을 새로 만든다(writeBatteryKFileText 하나 — 단독 battery 와 assemble 의 battery "
+                                    "가 같이 쓴다). 입력 덱을 읽지 않는다"),
     "src/parser/KFileReader.cpp": (1, "덱(임시) — 인클루드 닫힘을 펼친 **읽기용** 임시 덱(readFileWithIncludes). 같은 파서로 "
                                       "읽고 곧 지운다 — 산출 덱이 아니다"),
     "src/assembly/CadSolidMerge.cpp": (1, "덱(신규) — 넣을 조각 블록만 담은 검산용 임시 덱(다시 읽어 coord_sha 를 재고 곧 지운다). "
