@@ -5488,7 +5488,10 @@ PID 나 **제목 와일드카드**로 고른 파트만 담은 덱을 쓴다. ID�
 1.7–32 MB 의 임시 파일을 남겼고 다시 돌려도 아무도 치우지 않았다(회귀 K). 플랫폼(runner)은 `*.kr_tmp_*` 파일을 산출로 올리지 않는다 —
 예전엔 `.job_*` · `.nfs*` 말고는 새 파일을 다 `kind=output` 으로 올려 반쯤 쓴 덱이 세션 파일 목록에 떴다(`test_job_launcher.py`).
 **산출 자리 꼴** — 배포 판(752fa2b)은 산출 자리에 제자리로 썼다. 그 꼴들을 되살린다(회귀 O). 산출이 심볼릭 링크면 끝까지 따라간
-파일 옆에 쓰고 그 파일로 바꿔 넣는다(링크는 그대로 · 매달린 링크면 링크가 가리키는 자리에 만든다). 있던 파일의 권한 비트(0640 …)를
+파일 옆에 쓰고 그 파일로 바꿔 넣는다(링크는 그대로 · 매달린 링크면 링크가 가리키는 자리에 만든다 — 커널처럼 **물리로** 따라간다: 링크가
+놓인 폴더를 realpath 로 풀고 그 안에서 링크 글을 잇는다. 예전엔 `..` 를 낱말로 풀어 폴더 링크를 지난 `S/../deck.k` 가 입력 덱이 되어
+rc 0 으로 그것을 덮었다 · 여섯째 검토 S3 · 회귀 D. 쓸 파일 관문은 준 경로와 함께 그 물리 자리도 견준다 — 두 쓸 파일이 매달린 링크로
+한 파일에 닿아도 거절). 있던 파일의 권한 비트(0640 …)를
 잇는다. 하드 링크 · 소유자 · ACL 은 잇지 않는다 — 산출은 새 파일이 되고 다른 하드 링크 이름은 앞 내용을 그대로 가리킨다. 쓸 수 없는
 (읽기 전용) 산출 파일은 앞 판처럼 거절한다. 일반 파일이 아닌 자리(`/dev/null` — 보고만 보는 마른 실행 · FIFO · 문자 장치)는 임시 파일
 없이 바로 쓰고 바꿔 넣지도 지우지도 않는다 — 장치 노드 위로는 root 여도 이름을 바꿔 넣지 않는다(잡을 때 일반 파일이었어도 바꿔 넣기
@@ -6196,7 +6199,7 @@ output 이면 설정을, 빈 폴더면 폴더를 지웠다 · 11-07 밤 실측).
 - 회귀 `tools/regress/test_apply_carryover_plan.py`(판 1 · 101항 — K 출력 규칙 · L StepForge 권고 · 보 ELBOW · WARPAGE) · `tools/regress/test_apply_carryover_plan_v2.py`(판 2 · 88항 — 실물 둘 ·
   진리값 판을 판 2 로 · 칸 표 · 덱 자리 · §10.5 새 셸 섹션 · 인클루드 · refused_transform · 적대적 검토 고침 R-1~R-8 · S StepForge 권고 — R-8 은 gdb 로
   적용 직전에 멈춰 파일을 바꾼다 · gdb 로 멈추지 못하면 SKIP) · 단위 `tests/test_CarryoverPlan.cpp`.
-- 쓰기 규칙(extract-parts 와 공용 도우미 `staged_write`) — 회귀 `tools/regress/test_staged_write.py`(E 긴 이름 · K 죽은 실행 · O 산출 자리 꼴 · C 바꿔 넣기 차례 · 잠금 · M 말 · U extract-parts 보고 글자 · W 쓰기 오류) · 단위 `tests/test_StagedWrite.cpp` · `tests/test_Utf8.cpp`.
+- 쓰기 규칙(extract-parts 와 공용 도우미 `staged_write`) — 회귀 `tools/regress/test_staged_write.py`(E 긴 이름 · K 죽은 실행 · O 산출 자리 꼴 · C 바꿔 넣기 차례 · 잠금 · M 말 · U extract-parts 보고 글자 · W 쓰기 오류 · D 매달린 링크) · 단위 `tests/test_StagedWrite.cpp` · `tests/test_Utf8.cpp`.
 - 인클루드 파일 안의 고칠 자리는 고치지 않는다(거절 — 사용자 결정 11-07). 그 파트를 고치려면 닫힘을 펼친 한 덱으로 계획을 다시 받아야 한다.
 - 절점 두께 카드로 두께를 옮기는 일 · 요소마다 두께를 싣는 PID 의 새 섹션은 받지 않는다(그쪽도 조각으로 물러선다 · §10.7).
 

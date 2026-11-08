@@ -199,6 +199,27 @@ TEST(StagedWrite_링크는_따라간_파일로_바꿔_넣고_권한_비트를_�
     ASSERT_EQ(slurp(s.at("real/new.k")), std::string("made\n"));
 }
 
+TEST(StagedWrite_매달린_링크는_커널처럼_물리로_따라간다) {
+    // L → real/sub · real/sub/x.k → ../deck.k — 커널은 real/deck.k 에 쓴다. 낱말로 풀면(L/../deck.k) 맨 위 deck.k 였다(여섯째 검토 S3)
+    SwScratch s("dotdot");
+    fs::create_directories(s.root / "real" / "sub");
+    std::ofstream(s.at("deck.k")) << "INPUT\n";
+    fs::create_directory_symlink("real/sub", s.root / "L");
+    fs::create_symlink("../deck.k", s.root / "real" / "sub" / "x.k");
+    const std::string dst = s.at("L/x.k");
+    const std::string want = (fs::canonical(s.root) / "real" / "deck.k").string();
+    ASSERT_EQ(staged_write::physicalTarget(dst), want);
+    staged_write::StagedFiles st;
+    std::string why;
+    ASSERT_TRUE(st.writeText(dst, "NEW\n", why));
+    ASSERT_TRUE(st.commit(dst, why));
+    ASSERT_EQ(slurp(s.at("deck.k")), std::string("INPUT\n"));   // 입력 그대로
+    ASSERT_EQ(slurp(want), std::string("NEW\n"));
+    ASSERT_TRUE(fs::is_symlink(s.root / "real" / "sub" / "x.k"));
+    // 링크가 아닌 자리 — 폴더를 물리로 푼 절대 경로
+    ASSERT_EQ(staged_write::physicalTarget(s.at("L/plain.k")), (fs::canonical(s.root) / "real" / "sub" / "plain.k").string());
+}
+
 TEST(StagedWrite_장치는_바로_쓰고_지우지_않으며_일반_파일이_아니게_된_자리로는_바꿔_넣지_않는다) {
     SwScratch s("dev");
     staged_write::StagedFiles st;

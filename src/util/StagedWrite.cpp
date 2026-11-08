@@ -210,6 +210,23 @@ std::string dirPartOf(const std::string& p) {
     return sep == std::string::npos ? std::string() : p.substr(0, sep + 1);
 }
 
+// 폴더를 물리로 푼 절대 경로(심볼릭 링크 · `..` 를 커널처럼) — 빈 글은 현재 폴더. 못 풀면 빈 글(errno 그대로)
+std::string physicalDir(const std::string& dir) {
+#ifndef _WIN32
+    if (char* rp = ::realpath(dir.empty() ? "." : dir.c_str(), nullptr)) {
+        std::string s = rp;
+        std::free(rp);
+        if (s.size() > 1 && s.back() == '/') s.pop_back();
+        return s;
+    }
+    return std::string();
+#else
+    std::error_code ec;
+    const fs::path c = fs::canonical(dir.empty() ? fs::path(".") : fs::path(dir), ec);
+    return ec ? std::string() : c.string();
+#endif
+}
+
 // ── 대상 ─────────────────────────────────────────────────────────────────────
 // 대상 — 심볼릭 링크면 끝까지 따라간 파일(매달린 링크면 링크가 가리키는 자리 — 앞 판은 링크를 따라 썼다). 일반 파일이 아니면 special
 struct Target {
@@ -242,15 +259,29 @@ Target resolveTarget(const std::string& dst) {
     }
     const int e = errno;
     if (e != ENOENT) { t.err = errText(e); return t; }
+    // 없다 — 매달린 링크면 그 링크가 가리키는 자리에 만든다(앞 판은 링크를 따라 썼다). ★커널처럼 **물리로** 푼다 — 링크가 놓인 폴더를
+    //   realpath 로 풀고 그 안에서 링크 글을 잇는다. 예전엔 `parent_path()/글` 을 lexically_normal 로 풀어, 폴더 링크를 지난
+    //   `S/../deck.k` 가 낱말로 `deck.k`(입력 덱)가 되어 rc 0 으로 그것을 덮었다(여섯째 검토 S3 — 커널은 arch/deck.k 를 쓴다)
     std::string p = dst;
+    bool link = false;
     for (int hop = 0; hop < 40; ++hop) {
         struct stat lst;
         if (::lstat(p.c_str(), &lst) != 0 || !S_ISLNK(lst.st_mode)) break;
         std::error_code ec;
         fs::path to = fs::read_symlink(p, ec);
         if (ec) break;
-        if (to.is_relative()) to = fs::path(p).parent_path() / to;
-        p = to.lexically_normal().string();
+        link = true;
+        if (to.is_relative()) {
+            const std::string at = physicalDir(dirPartOf(p));
+            if (at.empty()) { t.err = errText(errno); return t; }
+            to = fs::path(at) / to;
+        }
+        p = to.string();
+    }
+    if (link) {   // 마지막 자리도 그 폴더를 물리로 풀어 잇는다(폴더가 없으면 커널처럼 실패)
+        const std::string at = physicalDir(dirPartOf(p));
+        if (at.empty()) { t.err = errText(errno); return t; }
+        p = at + "/" + baseOf(p);
     }
     t.path = p;
 #else
@@ -594,6 +625,16 @@ std::vector<Note> StagedFiles::takeNotes() {
     std::vector<Note> out;
     out.swap(notes_);
     return out;
+}
+
+// ── 쓰기가 닿을 자리 ──────────────────────────────────────────────────────────
+std::string physicalTarget(const std::string& dst) {
+    if (dst.empty()) return dst;
+    const Target t = resolveTarget(dst);
+    if (!t.err.empty() || t.special) return dst;
+    if (t.path != dst) return t.path;   // 링크 — 있으면 realpath, 매달렸으면 물리로 따라간 자리
+    const std::string at = physicalDir(dirPartOf(dst));
+    return at.empty() ? dst : at + "/" + baseOf(dst);
 }
 
 // ── 주인 없는 임시 파일 ───────────────────────────────────────────────────────

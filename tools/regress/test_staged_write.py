@@ -26,6 +26,9 @@
     (chmod 000) 해 그 실패를 일으키고 콘솔 · 보고 어디에도 `.kr_tmp_` 가 없고 제 이름이 있는지 본다.
   U 보고 글자 — extract-parts 보고는 덱 · 경로의 깨진 바이트(CP949 로 쓴 `*INCLUDE` 이름 · 모르는 키워드 · 모델 경로)를 그대로 실어
     엄격한 UTF-8 리더에서 읽히지 않았다(3차 검토 TJ_euckr). 이월 적용 보고(54ac559)와 같은 함수로 U+FFFD 를 싣는다.
+  D 매달린 링크 — 링크 글을 `parent_path()/글` 의 낱말 정규화로 풀어, 폴더 링크를 지난 `S/../deck.k` 가 입력 덱이 되어 rc 0 으로 그것을
+    덮었다(여섯째 검토 S3 — 모델 · 주 덱 · 보고 링크로 계획). 커널처럼 물리로 따라가고, 쓸 파일 관문이 그 물리 자리도 본다(두 쓸 파일이
+    매달린 링크로 한 파일에 닿으면 거절).
   W 쓰기 오류 — 쓰기 · 닫기 결과를 보지 않아 디스크가 차거나 파일 크기 상한(RLIMIT_FSIZE · SIGXFSZ 무시 — ENOSPC · EDQUOT 의
     대역)에 걸려 잘린 덱을 rc 0 · ok 로 바꿔 넣었다(여섯째 검토 S2 — extract-parts 는 `*NODE` 가운데서 끊긴 덱 · 이월 적용은 마지막
     새 섹션을 잃은 덱). 이제 바꿔 넣지 않고 rc 1 · 보고가 그 오류를 말한다. 바로 쓰는 op(DeckWriter · writeOutput)도 rc 1.
@@ -715,6 +718,45 @@ def sec_u(binary):
           rc == 0 and rep is not None and "�" in rep.get("model", "") and rep.get("ok") is True, (rc, (rep or {}).get("model")))
 
 
+# ── D 매달린 링크 — 물리로 ────────────────────────────────────────────────────
+def dotdot(d, link_name, target):
+    """L → real/sub · real/sub/<link_name> → <target>(물리 자리는 real/ 안 · 낱말 풀이는 d 바로 아래)."""
+    os.makedirs(os.path.join(d, "real", "sub"))
+    os.symlink("real/sub", os.path.join(d, "L"))
+    os.symlink(target, os.path.join(d, "real", "sub", link_name))
+
+
+def sec_d(binary):
+    print("[D] 매달린 링크 — 커널처럼 물리로 따라간다 · 쓸 파일 관문이 그 자리도 본다")
+    d = ep_dir("D1")
+    dotdot(d, "out.k", "../in.k")
+    before = sha(os.path.join(d, "in.k"))
+    rc, out, rep = ep(binary, d, output="L/out.k")
+    check("D-1 extract-parts 산출 L/out.k → ../in.k(물리 real/in.k) — rc 0 · 모델 in.k 그대로 · real/in.k 가 새 덱 · 링크 그대로",
+          rc == 0 and sha(os.path.join(d, "in.k")) == before and is_new_deck(os.path.join(d, "real", "in.k")) and
+          os.path.islink(os.path.join(d, "real", "sub", "out.k")), (rc, out[-300:]))
+    d = co_dir("D2")
+    dotdot(d, "x.k", "../deck.k")
+    before = sha(os.path.join(d, "deck.k"))
+    rc, out, rep = co(binary, d, output="L/x", report="rep.json")
+    check("D-2 apply_carryover_plan 산출 L/x.k → ../deck.k(물리 real/deck.k) — rc 0 · 주 덱 그대로 · real/deck.k 가 새 덱",
+          rc == 0 and sha(os.path.join(d, "deck.k")) == before and is_new_deck(os.path.join(d, "real", "deck.k")), (rc, out[-300:]))
+    d = co_dir("D3")
+    dotdot(d, "rep.json", "../plan.json")
+    before = sha(os.path.join(d, "plan.json"))
+    rc, out, rep = co(binary, d, report="L/rep.json")
+    got = load(os.path.join(d, "real", "plan.json"))
+    check("D-3 apply_carryover_plan 보고 L/rep.json → ../plan.json(물리 real/plan.json) — rc 0 · 계획 그대로 · 보고는 real/plan.json",
+          rc == 0 and sha(os.path.join(d, "plan.json")) == before and isinstance(got, dict) and got.get("ok") is True, (rc, out[-300:]))
+    # D-4 두 쓸 파일이 매달린 링크로 한 파일에 닿는다 — 보고 r.json → out.k(아직 없다) · 산출 out.k
+    d = ep_dir("D4")
+    os.symlink("out.k", os.path.join(d, "r.json"))
+    rc, out, rep = ep(binary, d)
+    check("D-4 extract-parts 보고(매달린 링크 → out.k) · 산출 out.k — rc 1 · 같은 파일이라 거절 · 아무것도 쓰지 않음",
+          rc == 1 and "같은 파일" in out and not os.path.exists(os.path.join(d, "out.k")) and os.path.islink(os.path.join(d, "r.json"))
+          and not tmp_left(d), (rc, sorted(os.listdir(d)), out[-300:]))
+
+
 # ── W 쓰기 오류 ──────────────────────────────────────────────────────────────
 def run_fsize(binary, d, args, limit):
     """파일 크기 상한(SIGXFSZ 무시 — 넘는 쓰기가 EFBIG 로 짧게 끝난다)으로 돌린다."""
@@ -805,6 +847,7 @@ def main():
         sec_m(binary)
         sec_u(binary)
         sec_w(binary)
+        sec_d(binary)
     finally:
         for w, ds, _ in os.walk(TMP):   # 읽기 전용으로 둔 폴더도 지운다
             for x in ds:

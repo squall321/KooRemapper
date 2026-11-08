@@ -1923,8 +1923,13 @@ int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
         return std::filesystem::is_directory(p, ec);
     };
     std::string why;
+    // 쓰기가 실제로 닿을 자리도 견준다 — 링크(매달린 것도)를 커널처럼 물리로 따라간 자리(여섯째 검토 S3 — 매달린 링크의 `..` 를 낱말로
+    // 풀어 계획 · 주 덱을 덮었다). 준 경로와 따로 견준다(제 물리 자리와 견주면 늘 같다)
+    const std::string reportPhys = KooRemapper::staged_write::physicalTarget(reportPath);
+    const std::string outPhys = KooRemapper::staged_write::physicalTarget(outPath);
     // 보고 자리가 입력 · 산출 · 폴더면 보고조차 쓸 자리가 없다 — 콘솔로만 거절한다(아무것도 쓰지 않는다)
-    if (KooRemapper::output_guard::findClash({reportPath}, reads, why) || KooRemapper::include_closure::sameFile(reportPath, outPath) ||
+    if (KooRemapper::output_guard::findClash({reportPath}, reads, why) || KooRemapper::output_guard::findClash({reportPhys}, reads, why) ||
+        KooRemapper::include_closure::sameFile(reportPath, outPath) || KooRemapper::include_closure::sameFile(reportPhys, outPhys) ||
         isDir(reportPath)) {
         if (why.empty()) why = isDir(reportPath) ? "report 「" + reportPath + "」 자리가 폴더다" : "report 「" + reportPath + "」 가 output 과 같다";
         console.error(std::string("[") + tag + "] " + why + " — 보고를 쓸 자리가 없어 아무것도 쓰지 않았다. report 를 다른 이름으로 주라");
@@ -1932,7 +1937,7 @@ int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
     }
     // 산출 자리가 입력 · 폴더면 보고(안전한 자리)에 적고 거절한다 — 아무것도 쓰거나 지우지 않는다
     std::string outClobber;
-    if (KooRemapper::output_guard::findClash({outPath}, reads, why))
+    if (KooRemapper::output_guard::findClash({outPath}, reads, why) || KooRemapper::output_guard::findClash({outPhys}, reads, why))
         outClobber = "output — " + why + "(계획이 지문으로 고정한 입력 · 설정은 덮어쓰지 않는다) · output 을 다른 이름으로 주라";
     else if (isDir(outPath))
         outClobber = "output 「" + outPath + "」 자리가 폴더다 — 폴더는 덮거나 지우지 않는다 · output 을 다른 이름으로 주라";

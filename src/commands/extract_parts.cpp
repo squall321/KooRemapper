@@ -1567,10 +1567,13 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
     };
     auto reportWritable = [&]() {
         if (o.reportPath.empty() || isDirectory(o.reportPath)) return false;
+        using KooRemapper::include_closure::sameFile;
+        using KooRemapper::staged_write::physicalTarget;
+        const std::string rp = physicalTarget(o.reportPath);   // 매달린 링크면 물리로 따라간 자리(여섯째 검토 S3)
         for (const auto& r : reads)
-            if (KooRemapper::include_closure::sameFile(o.reportPath, r)) return false;
-        return !KooRemapper::include_closure::sameFile(o.reportPath, o.output) &&
-               !KooRemapper::include_closure::sameFile(o.reportPath, mapWrite);
+            if (sameFile(o.reportPath, r) || sameFile(rp, r)) return false;
+        return !sameFile(o.reportPath, o.output) && !sameFile(o.reportPath, mapWrite) &&
+               !sameFile(rp, physicalTarget(o.output)) && !sameFile(rp, physicalTarget(mapWrite));
     };
     // 보고 — 실제로 바꿔 넣은 것만 댄다(산출 · 번호 지도). ok 는 셋 다 바꿔 넣었을 때만 참이다
     auto reportJson = [&](bool ok, bool written, bool mapWritten) {
@@ -1685,10 +1688,13 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
     //   폴더면 거절한다(지우지 않는다). 번호를 매길 때 번호 지도 자리에 이 op 의 번호 지도가 아닌 파일이 있으면 덮지 않는다
     {
         const std::vector<std::string> writes{o.output, o.reportPath, mapWrite};
+        // 쓰기가 실제로 닿을 자리도 견준다 — 링크(매달린 것도)를 커널처럼 물리로 따라간 자리. 준 경로의 정규화는 매달린 링크 이름에서
+        // 멈춰, 링크가 가리키는 입력 · 다른 쓸 파일과 겹치는 것을 못 봤다(여섯째 검토 S3)
+        std::vector<std::string> phys;
+        for (const auto& p : writes) phys.push_back(p.empty() ? p : KooRemapper::staged_write::physicalTarget(p));
         std::string w, r;
-        if (KooRemapper::include_closure::clobberPair(writes, reads, w, r)) {
-            const bool both = std::find(writes.begin(), writes.end(), r) != writes.end() &&
-                              std::find(reads.begin(), reads.end(), r) == reads.end();
+        if (KooRemapper::include_closure::clobberPair(writes, reads, w, r) || KooRemapper::include_closure::clobberPair(phys, reads, w, r)) {
+            const bool both = std::find(reads.begin(), reads.end(), r) == reads.end();
             return fail("clobber", both ? "쓸 파일 「" + w + "」 과 「" + r + "」 이 같은 파일이다 — 하나가 다른 하나를 덮는다"
                                         : "쓸 파일 「" + w + "」 이 읽는 파일 「" + r + "」 과 같은 파일이다 — 입력(설정 · 주 덱 · 인클루드)에 "
                                           "쓰지 않는다",
