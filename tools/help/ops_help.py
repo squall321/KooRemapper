@@ -393,7 +393,9 @@ merge:
           "*ELEMENT_MASS(_PART 포함)는 merge 에서도 옮기지 않고 manual 로 남긴다 — 변형마다 PID 칸 자리가 달라(EID·노드 ID·MASS·PID / _PART 는 PID·MASS) 잘못 짚으면 노드 ID 를 덮어쓴다. 집중질량은 직접 배분해라",
           "못 옮긴 자리가 하나라도 남으면 rc=1 이고 덱은 쓴다. 전체 목록은 덱 머리(*KEYWORD 바로 뒤)의 '$ KOOREMAPPER-PIDREF' 블록에 moved/left/manual/unknown/maybe 등급과 입력 덱 기준 줄 번호로 들어간다. maybe(화이트리스트 밖)는 rc 에 넣지 않는다",
           "pid_refs: strict(기본) | warn — warn 은 같은 보고를 하고 rc=0 으로 끝낸다. 그 밖의 값은 rc=1 + invalid pid_refs. assemble 은 operations[] 항목 안에, 단독 merge 는 YAML 에 그대로 적는다",
-          "위 사례의 three_layer.k 는 *MAT_ADD_THERMAL_EXPANSION 2 건이 죽은 PID 를 가리켜 '옮김' 으로 보고된다 — 못 옮긴 자리가 없어 rc=0 이다"])
+          "위 사례의 three_layer.k 는 *MAT_ADD_THERMAL_EXPANSION 2 건이 죽은 PID 를 가리켜 '옮김' 으로 보고된다 — 못 옮긴 자리가 없어 rc=0 이다",
+          "assemble 의 merge 는 모르는 *MAT_* 를 Card 1 = MID RO E PR 로 읽어 본다(GENERIC) — 열 재질(*MAT_THERMAL_* · *MAT_T01~T18)은 읽지 않는다",
+          "  (2026-11-08 — 예전엔 *MAT_T01 의 TMID TRO TGRLC 를 읽어 같은 번호 구조 재질의 E 를 TGRLC 로 덮었다)"])
 op("strip", "표면·재메시", "지정 키워드를 k 파일에서 제거 (메시 빼고 카드만 남기기 등)", "제거 키워드 remove",
    "KooRemapper strip <config.yaml>",
    files=boxed({"strip.yaml": """model: box.k
@@ -536,7 +538,9 @@ materials:
    notes=["사례처럼 database 를 생략하는 편이 이식성 있다 — 작업 폴더 materials/material_db.json → 실행 파일 기준 materials/·../materials/ 순으로 번들 DB 를 찾는다 (SIF 도 /opt/kooremapper/bin + /opt/kooremapper/materials 로 이 규칙에 걸린다)",
           "database 를 적으면 폴더가 붙은 값은 작업 폴더 기준, 폴더 없는 홑이름은 YAML 폴더 기준이다 — 번들 이름만 주는 형태는 없으니 절대 경로나 생략을 쓸 것",
           "match: 파트/재질 제목 부분일치, \"*\" 는 나머지 전부. mid: 로 MID 직접 지정",
-          "damping_preset: smartphone_drop | smartphone_drop_aggressive | quasi_static | off (모르는 값은 rc=1)"])
+          "damping_preset: smartphone_drop | smartphone_drop_aggressive | quasi_static | off (모르는 값은 rc=1)",
+          "덱의 열 재질(*MAT_THERMAL_* · 번호 이름 *MAT_T01~T18)은 재질 블록이 아니다(첫 칸이 TMID · 2026-11-08) — 맞춘 MID 와 같은 번호의",
+          "  열 카드는 둘 다 지운다. 예전엔 번호 이름을 그 MID 의 재질로 바꿔 써 같은 MID 가 둘이 되고 thermal: true 면 열 카드가 두 벌이었다"])
 op("matswap", "재료·어셈블리", "MAT+HOURGLASS+CURVE+SECTION 번들을 파트에 통째로 교체", "재질교체 bundle rubber",
    "KooRemapper matswap <config.yaml>\nKooRemapper matswap <model.k> <bundle.k> <pid> <output.k>",
    needs=["examples/matswap/two_cubes.k", "examples/matswap/rubber.k"],
@@ -721,7 +725,9 @@ fhigh_ratio: 100.0
 mode: global
 """}),
    cmds=[BOX_CMD, "KooRemapper hfdamp hf.yaml"], outputs=["box_hfdamp.k"],
-   notes=["mode: global | selective (dt ≤ dt_target 파트만)"])
+   notes=["mode: global | selective (dt ≤ dt_target 파트만)",
+          "selective 의 재료는 *MAT_* Card 1 의 MID RO E PR — 열 재질(*MAT_THERMAL_* · *MAT_T01~T18)은 읽지 않는다(2026-11-08 — 예전엔",
+          "  *MAT_T01 의 TRO · TGRLC 로 같은 번호 재질의 RO · E 를 덮어 dt 를 못 재고 전체 감쇠로 바꿨다)"])
 
 # ── 솔버 설정 ──
 op("implicit", "솔버 설정", "explicit 덱을 implicit(정적·동적) 설정으로 변환", "암시적 static 정적",
@@ -797,6 +803,9 @@ op("info", "정보·메타", "메시 정보(절점·요소·파트 수, bbox 두
           "  `Orphan nodes` 는 **상한**이다. (예전엔 앞 8칸만 담아 TET10 덱에서 거짓 고아 · 거짓 「음수 2」를 냈다)",
           "`--strict` 는 세트·SPC·하중·이력·CNRB PNODE 등이 가리키는 **절점**도 본다 — 없으면 미정의 참조(줄마다 한 건).",
           "  `*NODE` 가 하나도 없는 조각 덱은 단정하지 않는다. 실사용 6,053장에서 거짓 경보 0",
+          "`--strict` 의 열 재질(`*MAT_THERMAL_*` · 번호 이름 `*MAT_T01`~`T18`) 첫 칸은 **TMID** 다(2026-11-08) — 구조 MID 와 같은 수여도",
+          "  겹침이 아니고 `*PART` 의 MID 를 정의하지 않는다(Vol I *PART 비고 7). 예전엔 `*MAT_ELASTIC 2` + `*MAT_T01 2` 를 망가진 카드로,",
+          "  구조 재질 없는 `*PART` MID 2 를 열 재질(이름 꼴도) 덕에 「정의됨」으로 보았다",
           "★메시를 **인클루드 닫힘까지** 읽는다(2026-10-16) — 마스터 덱의 절점·요소·파트·bbox 가 실제 값이다(예전엔 0).",
           "  닫힘을 다 읽었으면 「없는 노드를 가리키는 요소」도 단정한다. `*INCLUDE ±` 면 펼치지 않고 주 덱만"])
 op("modelmeta", "정보·메타", "파트별 기하 메트릭·재질·연결성(접촉 탐지 포함) JSON 추출", "메타 json connectivity 연결성",
@@ -1060,7 +1069,8 @@ fragment_map: examples/cad_solid_merge_to_deck/stepforge_fragment.json
           "좌표 글자는 **바이트 그대로** 두고 번호 칸만 이 덱의 폭(8 · i10 이면 10)으로 쓴다. 넣을 블록을",
           "  **다시 읽어** coord_sha 를 한 번 더 잰다. long 덱은 받지 않는다",
           "unit 은 `deck_unit`(기본 mm-t-s)과 같아야 하고 frame 은 world 여야 한다 — 환산·변환은 하지 않는다",
-          "계약 밖 키워드(`*SET_*`·`*MAT_ADD_*`·`*MAT_THERMAL_*` …)가 든 조각·`ranges.sid` 가 null 이 아닌 조각은 거절",
+          "계약 밖 키워드(`*SET_*`·`*MAT_ADD_*`·열 재질 `*MAT_THERMAL_*` · 번호 이름 `*MAT_T01`~`T18` …)가 든 조각·`ranges.sid` 가 null 이 아닌 조각은 거절",
+          "  (번호 이름은 2026-11-08 전엔 받았다)",
           "저쪽 자리표시 물성(RO = E = 1.0)은 그대로 넣되 MID 마다 **경고**한다 — 해석 전에 바꿀 것",
           "산출 둘 — `<output>.k` · `<output>_fragment_map.json`(같은 칸 집합의 대응표를 **덱 번호**로 옮긴 것)",
           "  둘 중 하나가 model · 그 인클루드 · fragment · fragment_map · 설정과 같은 파일이면 덱을 쓰기 전에 rc 1(2026-11-07)"])

@@ -160,6 +160,20 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
   (`cur_scanSectionSets` — 이미 빈 줄을 카드로 센다)으로 옮겨 쌓인 묶음끼리의 겹침도 센다(11-07 의 남는 틈을 닫았다). MID 의 두 번 정의는
   첫 카드 그대로(MID 훑기는 빈 제목 줄을 이미 바로 읽는다).
 
+- **열 재질은 따로 센다(#3 · c50e54c 와 다른 훑기의 어긋남)** — c50e54c 가 공용 MID 커서에서 번호 이름 `*MAT_T01`~`T18` 도 뺐는데 다른 훑기는
+  `*MAT_THERMAL_` 만 뺐다 — offset(재질 카드)이 `*MAT_T01 2` 옆에 낸 `*MAT_ELASTIC 2` 를 `info --strict` 가 「망가진 카드」로 막았다. 판정을
+  `cards::isThermalMaterialKeyword`(CardFields.h — 번호 뒤는 끝 · `_` · 공백 · 폭 접미사) 하나로 모아 커서 · 겹침(ReferenceIntegrity) · `*PART`
+  참조(`checkElementPartReferences`) · matdb 의 재질 블록(`md_scanMatBlocks`)과 옛 열 카드 지우기 · assemble merge 의 GENERIC · 조각 계약
+  (CadSolidMerge) · hfdamp 가 쓴다. 참조 쪽은 `*MAT_ADD_` 만 빼서 **이름 꼴 열 재질도** `*PART` MID 를 정의한다고 보았다 — Vol I *PART 비고 7
+  (MID 는 `*MAT` 의, TMID 는 `*MAT_THERMAL` 의 번호)대로 둘 다 뺐다. 재질 카드 없는 offset 이 쓰는 빈 MID(열 재질이 없어도 35a35bb 부터
+  그렇다 — offset 몫이라 손대지 않음)를 같은 번호 TMID 가 가렸다. 회귀 `test_thermal_mat_ids.py` 9항(35a35bb 에서 9 실패).
+  남긴 훑기 — 이름 꼴 열 재질도 MID 와 한 번호 공간으로 본다(35a35bb 그대로 · 우리 몫 밖). 지우거나 베끼는 것: matswap(단독
+  `msw_removeBlock("*MAT_", mid)` · assemble `mw_removeBlock("*MAT_", mid)` — 바꾸는 MID 와 첫 칸이 같은 `*MAT_*` 블록을 다 지운다: 같은 번호
+  TMID 의 열 카드 · 같은 번호 PID 의 `*MAT_ADD_*`), cclip(`cc_removeBlockById("*MAT", mid)` — 같다), offset IGA 의 `extractMaterialBlock`(첫 칸이
+  origMid 인 첫 `*MAT` 블록을 베낀다 — 열 카드가 앞이면 그것), matdb(`thermal: false` 여도 같은 번호 열 카드를 지우고 `*PART` TMID 는 그대로
+  둔다). 번호를 세기만 하는 것(커서가 높아질 뿐 · 겹침은 넉넉한 쪽): matswap · cclip 의 최대값, ale `ale_findMaxIds`, cnrb2solid 의 번호 공간 표
+  (`Ns::Mat`), cnrb2spring 의 `MAT`. 단독 merge 는 모르는 재질을 알림에만 쓴다.
+
 ## 11-07 밤 결정 고침 — 정한 것
 - **출력 규칙(사용자 결정 ①)** — extract-parts(`a33af2f`)와 같은 꼴: 덱 · 보고를 output 폴더의 임시 파일(`.<이름>.kr_tmp_…`)에 쓰고 되읽기 대조 ·
   품질 관문까지 지나면 덱 · 보고 차례로 바꿔 넣는다(`CarryStagedFiles` — extract-parts `StagedFiles` 의 사본 · 셋째 소비자가 오면 공용으로).

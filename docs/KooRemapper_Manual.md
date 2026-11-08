@@ -991,6 +991,13 @@ KooRemapper.exe info <mesh_file.k>
 ② Card 3 의 SFSA 칸이 정수 `0` · SFSAT 칸이 정수 `2`(2026-10-24) — 10-23 전 optimize 가 `_ID` 접촉의 Card 3 을 Card A 로 알고
 SOFT · SBOPT 를 쓴 흔적이다(SFSA 0 = 기본 1.0 이라 준 배율이 지워지고, SFSAT 2 는 SURFA 셸 접촉 두께를 두 배로 한다).
 
+**열 재질의 번호는 따로 센다(2026-11-08).** `*MAT_THERMAL_*` 과 그 번호 이름 `*MAT_T01`~`*MAT_T18` 의 첫 칸은 **TMID**(열 재질
+번호)다 — 구조 재질의 MID 와 독립된 번호라(Vol II *MAT_THERMAL — 같은 수가 있어도 된다) `*MAT_ELASTIC 2` 와 `*MAT_T01 2` 가 함께
+있어도 겹침이 아니고, `*PART` 의 MID 를 정의하지도 않는다(Vol I *PART 비고 7 — MID 는 `*MAT` 의, TMID 는 `*MAT_THERMAL` 의 번호다).
+예전엔 겹침 쪽이 번호 이름을 구조 재질로 보아 그 둘을 「망가진 카드」로 막았고, 참조 쪽은 열 재질을 다(이름 꼴도) 정의로 보아 구조
+재질이 없는 `*PART` MID 2 를 `*MAT_T01 2` 덕에 지나보냈다. 같은 판정(`cards::isThermalMaterialKeyword`)을 번호 커서(§3.1(h)) ·
+matdb(§24) · merge · hfdamp(§43.4) · `cad_solid_merge_to_deck`(§49)도 쓴다. 회귀 `tools/regress/test_thermal_mat_ids.py` 9항.
+
 **세트·경계조건·이력이 가리키는 절점도 본다(2026-10-16).** 미정의 참조에 「절점」이 들어간다 —
 `line N *SET_NODE_LIST: 절점 4개 — 첫째 379 이 정의되지 않았습니다` 처럼 **줄마다 한 건**(첫 번호와 개수)으로 센다.
 예전에는 요소→절점만 봐서, meshfix 가 다시 짠 파트의 옛 절점을 세트·SPC·이력이 그대로 가리킨 덱이
@@ -2188,6 +2195,9 @@ materials:                # 개별 규칙 (선택)
 ### 열 재료 삽입 (`thermal: true`)
 - `*MAT_THERMAL_ISOTROPIC` + `*MAT_ADD_THERMAL_EXPANSION` 자동 삽입
 - TMID 링크 자동 연결
+- 덱에 이미 있는 열 재질(`*MAT_THERMAL_*` · 번호 이름 `*MAT_T01`~`*MAT_T18`)은 **재질 블록이 아니다** — 첫 칸이 TMID 다(§11 · 2026-11-08).
+  맞춘 MID 와 같은 번호의 열 카드는 이름 꼴이든 번호 이름이든 지운다. 예전엔 번호 이름을 그 MID 의 재질로 읽어 구조 재질 카드로 바꿔
+  쓰고(같은 MID 가 둘) `thermal: true` 면 열 카드를 두 벌 넣었다
 
 ---
 
@@ -4219,6 +4229,10 @@ KooRemapper hfdamp <config.yaml>
 | `mode` | global | `global`(PSID=0 전 파트) / `selective`(요소 dt ≤ dt_target 파트만, 재료 E·PR·RHO 필요) |
 | `tssfac` | 0.9 | selective 전용. 요소 dt 추정 안전계수 |
 
+selective 의 재료는 `*MAT_*` Card 1 의 MID · RO · E · PR 로 읽는다 — 열 재질(`*MAT_THERMAL_*` · 번호 이름 `*MAT_T01`~`*MAT_T18`)은
+읽지 않는다(그 Card 1 은 TMID · TRO · TGRLC … 다 · 2026-11-08). 예전엔 번호 이름의 Card 1 로 같은 번호 구조 재질의 RO · E 를 덮어 —
+`*MAT_T01 1`(TRO 0 · TGRLC 0)이 든 덱에서 dt 를 못 재고 「대상 파트가 없다」며 전체 감쇠로 바꿨다(회귀 `test_thermal_mat_ids.py` F).
+
 **선택형은 인클루드 닫힘 안의 파트를 본다(2026-10-16).** 예전에는 분석이 주 덱만 봐서, 메시를 `*INCLUDE` 한 마스터 덱에서 「dt 조건을 만족하는 파트가 없다」며 **전체 감쇠(PSID=0)로 조용히 바꿨다**(rc 0 — 독립 op 과 `assemble` 의 `type: hfdamp` 둘 다 실측). 지금은 닫힘을 펼친 줄에서 파트·요소·재질을 읽고, 감쇠 키워드와 세트는 주 덱에 넣는다. 닫힘을 다 못 읽었는데(없는 파일 · `*INCLUDE_TRANSFORM` 등) 대상 파트를 못 찾으면 **전체로 바꾸지 않고 멈춘다**(종료 코드 1 · 산출 없음 — 값 검사 거절도 1 이다. 2026-10-17 전에는 255 였다) — 찾았으면 쓰되 못 본 인클루드가 있다고 말한다. 인클루드가 없는 덱은 예전과 바이트가 같다(회귀 `test_hfdamp_include_closure.py`).
 
 **근거**: pyKooCAE `load_bc_contact.md`, `examples/hfdamp/{basic,selective,hfdamp_full}.yaml`. DEFORM 옵션은 요소 응력/힘을 감쇠하고 강체 운동은 감쇠하지 않으며 동적 강성을 약 CDAMP% 높인다. `--help` 는 인자를 config 경로로 해석해 에러를 내므로 근거는 예제·README.
@@ -4414,6 +4428,11 @@ operations:
     method: vrh
     pid_refs: warn
 ```
+
+`assemble` 의 merge 는 따로 아는 재질(ELASTIC · 024 · 076 · 006 · RIGID) 밖의 `*MAT_*` 를 Card 1 = MID · RO · E · PR 로 읽어 본다
+(GENERIC). 열 재질(`*MAT_THERMAL_*` · 번호 이름 `*MAT_T01`~`*MAT_T18`)과 `*MAT_ADD_*`(열팽창은 CTE 로 따로 읽는다)는 그렇게 읽지 않는다
+(`[merge-mat] SKIP` 줄 · 2026-11-08) — 예전엔 번호 이름의 Card 1(TMID · TRO · TGRLC)을 읽어 같은 번호 구조 재질의 E 를 TGRLC 로
+덮었다(회귀 `test_thermal_mat_ids.py` E).
 
 #### merge 도 원 파트를 비운다 — 그 참조를 다룬다 (2026-09-18)
 
@@ -5646,7 +5665,7 @@ StepForge 와의 경계 합의(저쪽 `docs/BOUNDARY-DYNAFORGE.md` §1·§3-3)�
 | 대응표의 파트와 조각의 `*PART` 가 같은 집합인가 | 거절 |
 | 파트마다 요소 수·요소 구간 · 그 요소가 쓰는 절점 = 절점 구간 · **`coord_sha`** | 거절 |
 | `ranges.sid` 가 `null` 인가(조각에 세트가 없다) | 아니면 거절 |
-| 계약 밖 키워드(`*SET_*`·`*MAT_ADD_*`·`*MAT_THERMAL_*` …)·칸 폭 접미사·자유 형식 줄 | 거절 |
+| 계약 밖 키워드(`*SET_*`·`*MAT_ADD_*`·열 재질 `*MAT_THERMAL_*` · 번호 이름 `*MAT_T01`~`*MAT_T18`(11-08 전엔 받았다) …)·칸 폭 접미사·자유 형식 줄 | 거절 |
 
 `coord_sha` 는 저쪽 `core/remesh_impact.coord_sha` 와 **같은 식**이다 — 절점마다 좌표 셋을 `%16.9e` 로 이어
 한 줄로 만들고, 줄들을 사전순으로 정렬해 `\n` 으로 이은 것의 SHA-256 앞 16자. 번호·순서와 무관하다.
@@ -5891,7 +5910,9 @@ StepForge 권고 넷도 받는다(그쪽 `591d5b5` · D-681 · 사용자 결정 
   10진이 아닌 꼴(`0x2` · `inf` — 덱 칸은 10진만 · 실수 칸 T1~T4 도 같다 · 11-08)은 거절한다. ID 칸(SECID)은 정수 글자만 받는다.
 - **열 재질의 번호 이름**(`*MAT_T01`~`*MAT_T18`)은 MID 를 정의하지 않는다 — TMID 는 MID 와 독립된 번호다(Vol II 2-9 · 3-1).
   `*MAT_THERMAL_*` 과 `*MAT_ADD_*` 처럼 공용 MID 훑기에서 뺀다 — 조각의 MID 가 열 재질의 TMID 로만 있으면 「덱에 없다」(`fragment`)이고,
-  새 MID · 번호 바닥(`id_floor` 의 `pid_start` 등)이 TMID 위로 올라가지 않는다.
+  새 MID · 번호 바닥(`id_floor` 의 `pid_start` 등)이 TMID 위로 올라가지 않는다. 11-08 부터 다른 훑기도 같은 판정
+  (`cards::isThermalMaterialKeyword`)을 쓴다 — `info --strict` 의 겹침 · 참조(§11), matdb, merge, hfdamp, `cad_solid_merge_to_deck`
+  (예전엔 번호 이름을 구조 재질로 보아 `*MAT_ELASTIC 2` + `*MAT_T01 2` 를 strict 가 「망가진 카드」로 막았다).
 - **두 번 정의된 SECID · MID** — 손대는 PID(옮기기 · 모프 · 바꿔 넣기 · 지우기)의 `*PART` 가 가리키는 SECID 나 MID 를 닫힘의 두 블록 이상이
   정의하면 그 줄을 `part_duplicate` 로 거절한다(LS-DYNA 는 같은 번호의 둘째 정의에서 멈춘다 — StepForge 도 그 줄에서 멈춘다). 보고에 정의마다
   자리(인클루드면 파일 · 줄)를 댄다. SECID 정의는 카드 묶음마다다(번호 커서와 같은 셈 — 한 키워드 아래 쌓인 묶음끼리도 센다 · `_TITLE` 의

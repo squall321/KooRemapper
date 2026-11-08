@@ -77,6 +77,21 @@ inline bool toInt(const std::string& s, int& v) {
 inline bool starts(const std::string& kw, const char* p) { return kw.rfind(p, 0) == 0; }
 inline bool has(const std::string& kw, const char* p) { return kw.find(p) != std::string::npos; }
 
+// 열 재질 키워드인가 — `*MAT_THERMAL_*` 과 그 번호 이름 `*MAT_T01`~`*MAT_T18`(번호 뒤는 끝 · `_` · 공백 · 폭 접미사). 대문자 키워드
+// (앞 `*` 포함 · 줄째 받아도 된다). 첫 칸이 **TMID** 다 — 구조 MID 와 독립된 번호이고 같은 수가 있어도 된다(Vol II *MAT_THERMAL ·
+// 2-9 의 번호 표). MID 를 세는 · 찾는 · 지우는 · 견주는 훑기는 다 이 한 판정으로 열 재질을 뺀다(2026-11-08 — 번호 이름을 빼먹은 훑기가
+// 여럿이었다: 참조 무결성 · matdb · merge · 조각 넣기 · hfdamp)
+inline bool isThermalMaterialKeyword(const std::string& kw) {
+    if (kw.rfind("*MAT_THERMAL_", 0) == 0) return true;
+    if (kw.size() < 8 || kw.compare(0, 6, "*MAT_T") != 0 || !std::isdigit(static_cast<unsigned char>(kw[6])) ||
+        !std::isdigit(static_cast<unsigned char>(kw[7])))
+        return false;
+    const int n = (kw[6] - '0') * 10 + (kw[7] - '0');
+    if (n < 1 || n > 18) return false;
+    const char next = kw.size() == 8 ? ' ' : kw[8];
+    return next == '_' || next == ' ' || next == '\t' || next == '\r' || next == '%' || next == '+' || next == '-';
+}
+
 // 카드 첫 칸의 ID. **10칸 → 자유형식** 순서로 읽는다.
 //
 // ⚠ `fields10` 만으로는 안 된다. 그 함수는 첫 칸이 **비었을 때만** 자유형식으로 되돌리므로,

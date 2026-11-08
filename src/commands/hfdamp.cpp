@@ -3,6 +3,7 @@
 #include "parser/IdAllocator.h"   // 인클루드 닫힘까지 센 최대값 · 못 본 자리 경고
 #include "parser/DeckWriter.h"
 #include "parser/DeckScan.h"      // firstEndLine — 덧붙이는 자리는 첫 *END
+#include "parser/CardFields.h"    // 열 재질 판정(isThermalMaterialKeyword — 번호 이름 *MAT_T01~T18)
 #include "cli/ConsoleOutput.h"
 #include "util/YamlComment.h"
 
@@ -210,7 +211,8 @@ static HFParseResult hf_parseKFile(const std::vector<std::string>& lines) {
                     kw.find("MAT_DAMPER") == std::string::npos &&
                     kw.find("MAT_VACUUM") == std::string::npos &&
                     kw.find("MAT_HE_BURN") == std::string::npos &&
-                    kw.find("MAT_THERMAL") == std::string::npos) {
+                    kw.find("MAT_THERMAL") == std::string::npos &&
+                    !KooRemapper::cards::isThermalMaterialKeyword(kw)) {   // 번호 이름 *MAT_T01~T18 도 열 재질(11-08 #3)
                     section = "MAT"; curMat = MatData(); matLineIdx = 0;
                 } else {
                     section = "OTHER";

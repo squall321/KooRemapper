@@ -143,7 +143,9 @@ ReferenceReport checkSetReferences(const std::vector<std::string>& lines) {
         //    `*MAT_NONLOCAL` 도 자기 ID 체계다.
         // ⚠ 한 키워드 아래 정의가 **여러 장** 오므로 첫 카드만 보면 안 된다(매뉴얼 "Card Sets").
         //    그래서 데이터 줄 전체를 훑되, **첫 칸이 정수인 줄만** 후보로 본다.
-        const bool matOtherNs = starts(kw, "*MAT_ADD_") || starts(kw, "*MAT_THERMAL_") ||
+        // 열 재질은 번호 이름(`*MAT_T01`~`T18`)도 TMID 다 — 예전엔 `*MAT_THERMAL_` 만 빼서 `*MAT_T01 2` 와 `*MAT_ELASTIC 2` 를 같은 번호의
+        // 겹침(망가진 카드)으로 보았다(Vol II 는 같은 TMID · MID 를 허락한다 · 11-08 #3)
+        const bool matOtherNs = starts(kw, "*MAT_ADD_") || isThermalMaterialKeyword(kw) ||
                                 starts(kw, "*MAT_NONLOCAL");
         if (starts(kw, "*SECTION_") || (starts(kw, "*MAT_") && !matOtherNs)) {
             const bool isSec = starts(kw, "*SECTION_");

@@ -219,14 +219,7 @@ std::set<int> cur_scanSectionIdsInUse(const std::vector<std::string>& lines) {
 // 칸으로 읽는다 — `         17.8500E-09` 처럼 붙은 칸을 17 로 읽지 않게.
 // 줄들에서 `*MAT_*` 가 **정의하는** MID 들 — 열 재질 · `_ADD_` 는 정의가 아니다. 최대값(`cur_scanMaxMaterialId`)과
 // 「그 재질이 인클루드에만 있나」(`materialsReachable` · 2026-10-17)가 같은 규칙을 본다.
-bool cur_isThermalMaterial(const std::string& kw) {
-    if (kw.rfind("*MAT_THERMAL_", 0) == 0) return true;
-    if (kw.size() < 8 || kw.compare(0, 6, "*MAT_T") != 0 || !std::isdigit(static_cast<unsigned char>(kw[6])) ||
-        !std::isdigit(static_cast<unsigned char>(kw[7])))
-        return false;
-    const int n = (kw[6] - '0') * 10 + (kw[7] - '0');
-    return n >= 1 && n <= 18 && (kw.size() == 8 || kw[8] == '_');
-}
+bool cur_isThermalMaterial(const std::string& kw) { return cards::isThermalMaterialKeyword(kw); }   // 공용 판정(CardFields.h)
 // MID → 그것을 정의한 `*MAT_*` 키워드 줄들(나온 차례 · 첫 데이터 카드의 MID) — 같은 MID 를 두 카드가 정의하면 둘 다 담는다
 // (이월 적용의 「손대는 PID 의 MID 가 두 번 정의됐나」 — StepForge 권고 D-681). 아래 `cur_scanMaterialIds` 가 이것의 번호들이다.
 std::map<int, std::vector<size_t>> cur_scanMaterialDefs(const std::vector<std::string>& lines) {
@@ -12822,8 +12815,9 @@ static std::vector<MdMatBlock> md_scanMatBlocks(const std::vector<std::string>& 
         if (t.empty() || t[0] != '*') continue;
         std::string u = mw_upper(t);
         if (u.substr(0, 5) != "*MAT_") continue;
-        // Exclude *MAT_THERMAL_*, *MAT_ADD_*
-        if (u.find("*MAT_THERMAL_") == 0 || u.find("*MAT_ADD_") == 0) continue;
+        // 열 재질(*MAT_THERMAL_* · 번호 이름 *MAT_T01~T18 — TMID 는 다른 번호 공간)과 *MAT_ADD_* 는 재질 블록이 아니다(11-08 #3 — 번호 이름은
+        // 빠져 있어 *MAT_T01 의 TMID 를 그 MID 의 재질로 바꿔 쓰고 MID 커서를 올렸다)
+        if (cards::isThermalMaterialKeyword(u) || u.find("*MAT_ADD_") == 0) continue;
 
         bool hasTitle = (u.find("_TITLE") != std::string::npos);
         MdMatBlock blk;
@@ -13754,7 +13748,7 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
         std::string t = mw_trim(rawLines_[i]);
         if (t.empty() || t[0] != '*') continue;
         std::string u = mw_upper(t);
-        bool isThermal = (u.find("*MAT_THERMAL_") == 0);
+        bool isThermal = cards::isThermalMaterialKeyword(u);   // 번호 이름 *MAT_T01~T18 도(11-08 #3 — 남아 같은 TMID 가 둘이 됐다)
         bool isExpansion = (u.find("*MAT_ADD_THERMAL_EXPANSION") == 0);
         if (!isThermal && !isExpansion) continue;
 
@@ -18371,7 +18365,7 @@ static std::map<int, mg_MatInfo> mg_parseMaterials(const std::vector<std::string
                 inMat = true; matType = "RIGID"; matCard = matMid = 0;
                 titleLine = (up.find("TITLE") != std::string::npos);
             } else if (up.find("*MAT_") == 0 && up.find("*MAT_ADD_") != 0 &&
-                       up.find("*MAT_THERMAL_") != 0) {
+                       !cards::isThermalMaterialKeyword(up)) {   // 열 재질(번호 이름 포함)의 Card 1 은 TMID TRO TGRLC … 다(11-08 #3)
                 // Generic fallback: try Card 1 = MID, RO, E, PR
                 inMat = true; matType = "GENERIC"; matCard = matMid = 0;
                 titleLine = (up.find("TITLE") != std::string::npos);
@@ -19143,6 +19137,9 @@ ReferenceReport checkElementPartReferences(const std::vector<std::string>& lines
             // `*MAT_ADD_*` 계열은 **재질을 새로 만들지 않는다** — 기존 MID 를 꾸민다(첫 칸도 PID 다).
             // 정의 집합에 넣으면 없는 재질을 있다고 말하게 된다.
             if (rsStarts(b.kw, "*MAT_ADD_")) { ++rep.notChecked; continue; }
+            // 열 재질(`*MAT_THERMAL_*` · `*MAT_T01`~`T18`)의 첫 칸은 TMID 다 — 구조 MID 가 아니다(Vol II · 11-08 #3). 넣으면 `*MAT_T01 2` 가
+            // 구조 재질이 없는 `*PART` MID 2 를 「정의됨」으로 지나보냈다
+            if (cards::isThermalMaterialKeyword(b.kw)) continue;
             collectFirstFields(b, matIds);
             continue;
         }
