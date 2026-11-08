@@ -1221,6 +1221,8 @@ report: extract_report.json
           "  질량이면 MASS 가 있고 · 칸마다 같은 꼴(같은 왼쪽 · 오른쪽 여백)로 썼을 때만 다른 읽기다 — 설명서 꼴 줄(정수꼴 SLEN ·",
           "  i10 왼쪽 맞춤 · 칸마다 맞춤이 다른 줄)에 유령 절점이 없다.",
           "  질량 PID 가 읽기마다 갈리고 그 하나를 고르면 **거절**한다(파일:줄을 댄다)",
+          "  쓰는 칸(EID · PID · 절점)에 빈칸이 낀 보 족 줄(공백으로 가른 줄)은 칸으로 읽지 못한다 — 줄마다 「파일:줄」 을 [WARN] 으로 댄다",
+          "  (그 줄의 PID · 절점을 세지 못했다 — 고른 파트의 요소면 빠졌을 수 있다 · 번호 매기기는 그 줄을 거절한다)",
           "★그래도 모르는 변형(`*ELEMENT_MASS_NODE_SET`·`*ELEMENT_INERTIA` 등)이 **고른 파트의**",
           "  요소를 담고 있으면 **거절한다**. 조용히 빠뜨린 덱은 그럴듯하게 돌면서 틀린다.",
           "  안 고른 파트의 것이면 버리고 **수로 적는다**",
@@ -1290,7 +1292,9 @@ report: cleanup_report.json
           "보 족 카드(보 · 이산 · 질량 · 안전벨트 · 플롯)는 칸 자리를 안다(보 `_ELBOW` 의 가운데 절점 MN · `_WARPAGE` 의 SN1 · SN2 도 —"
           " SN 이 스칼라 절점이면 되읽기가 `*NODE_SCALAR` 를 본다) — 고정폭 줄은 늘 설명서 칸으로 읽고(카드 폭 뒤 꼬리 글 ·",
           "  SLEN · MASS 칸 안 빈칸에도) 안전벨트 SLEN 을 8칸에 써 줄이 두 가지로 읽히면 두 읽기의 절점을 **다** 남긴다",
-          "  (한 읽기만 말하는 절점 수 `nodes.used_only_by_other_reading` — 덱에 없는 번호는 되읽기가 미정의로 세지 않는다)"])
+          "  (한 읽기만 말하는 절점 수 `nodes.used_only_by_other_reading` — 덱에 없는 번호는 되읽기가 미정의로 세지 않는다)",
+          "쓰는 칸(EID · PID · 절점)에 빈칸이 낀 보 족 줄(공백으로 가른 줄)은 칸으로 읽지 못한다 — 줄마다 「파일:줄 키워드」 를 [WARN] 으로",
+          "  대고(리포트 warnings) 그 줄의 정수 가운데 덱의 절점 번호는 지우지 않는다(kept_by `(unreadable beam-family lines)` · 지키기만)"])
 op("neutralaxis", "정보·메타", "적층의 EI 가중 중립축·굽힘강성 계산", "중립축 적층 EI 굽힘강성 stack 중립면",
    "KooRemapper neutralaxis <mesh_file> [--axis x|y|z]",
    files={"box.yaml": BOX}, cmds=[BOX_CMD, "KooRemapper neutralaxis box.k"], outputs=[],

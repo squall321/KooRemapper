@@ -275,6 +275,7 @@ struct Picked {
     std::vector<int> altNodes;                            // 고른 줄을 다른 읽기로만 읽을 때 나오는 절점 — 덱에 있으면 싣는다
     struct AuxLine { std::string where; std::vector<int> altVsManual; bool placeable = true; };
     std::vector<AuxLine> renumberRisk;                    // 고른 보 족 줄 가운데 번호를 제자리에 못 바꿔 쓸 수 있는 것
+    std::vector<std::string> unreadableAux;               // 칸으로 읽지 못한 보 족 줄(쓰는 칸에 빈칸 — `auxLineUnreadable`) 「파일:줄」
     std::vector<std::string> ambiguousPid;                // 읽기마다 PID 가 갈리고 그 하나가 고른 PID 인 줄
 };
 
@@ -424,6 +425,7 @@ void scanElements(const std::string& path, const std::vector<int>& sel, const De
                 // PID 는 후보 전부를 본다 — 넓은 칸 뒤 PID(질량)는 설명서 칸 · 정수 폭으로 갈릴 수 있다. 갈리는데 그 하나가 고른 PID 면
                 // 실을지 버릴지 정할 수 없다 — 줄을 적어 두고 runExtractParts 가 거절한다(조용히 싣거나 버리지 않는다)
                 const std::string where = path + ":" + std::to_string(lineNo) + " " + kw;
+                if (KooRemapper::auxLineUnreadable(rd)) pk.unreadableAux.push_back(where);   // [WARN] — runExtractParts 가 댄다
                 std::vector<int> pids;
                 bool hit = false;
                 if (aux.partIsSet) {
@@ -1771,6 +1773,11 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
     { std::set<std::string> vis; scanElements(o.model, sel, idx, pidNodes, pk, vis, im); }
     if (idx.fieldWidth != 8)
         console.info("  deck field width: " + std::to_string(idx.fieldWidth));
+    // ★칸으로 읽지 못한 보 족 줄(쓰는 칸 EID · PID · 절점에 빈칸 — 공백으로 가른 줄 등) — 그 칸은 값이 없어 이 op 이 그 줄의 PID · 절점을
+    //   모른다(공백 토큰은 읽기가 아니다 · 2026-11-08). 조용히 넘기지 않고 줄마다 댄다 — 고른 파트의 요소인데 빠졌을 수 있다
+    for (const auto& w : pk.unreadableAux)
+        console.warning("[extract-parts] " + w + " — 보 족 줄의 쓰는 칸(EID · PID · 절점)에 빈칸이 끼어 칸으로 읽지 못했다 — 그 칸의 "
+                        "PID · 절점을 세지 않았다(고른 파트의 요소면 빠졌을 수 있다 · 번호 매기기는 그 줄을 거절한다). 고정폭 칸이나 콤마로 고쳐 써라");
     // ⚠ 보·질량·이산 족도 센다. 격자 카드만 세면 **보만으로 된 파트**(볼트·용접점 묶음)가
     //   "요소가 없다" 로 거절된다 — 회귀 L-0 이 그 자리를 지킨다.
     if (pk.cards == 0 && pk.auxCards == 0)

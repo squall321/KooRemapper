@@ -41,6 +41,10 @@
     말하는 번호가 덱에 없으면(정수 폭 i10 줄의 설명서 칸 조각) 되읽기가 미정의로 세지 않는다
   I 규칙 (e)(2026-11-08 재검토) — 칸마다 맞춤이 다른 설명서 꼴 i10 줄은 정수 폭 읽기가 다른 읽기가 아니다(고아 10 을 지우고 renumber 가
     된다) · 정수 폭으로 고르게 쓴 줄(오른쪽 맞춤 · `%7d `)은 그대로 두 읽기를 다 지키고 renumber 를 거절한다
+  J 칸으로 읽지 못한 보 족 줄(쓰는 칸에 빈칸 — 공백으로 가른 줄 · 2026-11-08 사용자 결정) — 공백 토큰은 읽기가 아니라 그 칸은 값이 없다.
+    조용히 넘기지 않는다: cleanup-nodes · extract-parts 가 줄마다 「파일:줄 키워드」 를 [WARN] 으로 대고(cleanup 은 보고 warnings 에도),
+    cleanup-nodes 는 그 줄의 정수 가운데 덱의 절점 번호를 지우지 않는다(지키기만 — kept_by 「(unreadable beam-family lines)」) ·
+    restack 은 그 줄의 정수가 지운 절점이면 사람이 볼 줄(manual)로 올린다 · 설명서대로 쓴 줄은 경고가 없다
 
 usage: test_seatbelt_card_layout.py <KooRemapper 바이너리>
 """
@@ -693,6 +697,37 @@ def main():
               "정수 폭 오른쪽 맞춤 i10(N3 123456789 · N4 1234)", renum=False)
         tl = ("%7d %7d %7d %7d %7s %7s %7d %7d " % (13, 9, 101, 102, "", "0.5", 1031, 1041)).rstrip()
         three("I-3", 8, tl, (101, 102, 1031, 1041, 105), [101, 102, 1031, 1041], "정수 폭 `%7d ` 줄", renum=False)
+
+        print("[J 칸으로 읽지 못한 보 족 줄 — [WARN] 파일:줄 · cleanup-nodes 가 그 줄의 정수를 지킨다 · restack 보고]")
+        good = belt(8, 14, 9, 101, 102, 0, "0.0", 103, 104)
+        bad = "13 9 201 202 888 0.0 203 204"                     # 공백으로만 가른 줄 — 설명서 칸으로 읽으면 EID 칸이 「13 9 201」 · N2 = 204
+        jdeck = belt_deck(8, good + "\n" + bad, nodes=(101, 102, 103, 104, 105, 201, 202, 203, 204))
+        write(os.path.join(d, "J.k"), jdeck)
+        jl = jdeck.split("\n").index(bad) + 1
+        write(os.path.join(d, "Jc.yaml"), "model: J.k\noutput: Jc_out.k\nmode: safe\nreport: Jc.json\n")
+        rc, out = run(binary, d, "cleanup-nodes", "Jc.yaml")
+        kept = sorted(node_ids(os.path.join(d, "Jc_out.k"), 8).values()) if rc == 0 else None
+        rep = json.load(open(os.path.join(d, "Jc.json"), encoding="utf-8")) if rc == 0 else {}
+        warn = [w for w in (rep.get("warnings") or []) if "J.k:%d *ELEMENT_SEATBELT" % jl in w and "칸으로 읽지 못했다" in w]
+        check("J-1 ★cleanup-nodes safe — 공백으로 가른 띠 줄의 정수(201 · 202 · 203)를 지우지 않는다 · 고아 105 만 지운다",
+              rc == 0 and kept == [101, 102, 103, 104, 201, 202, 203, 204], (rc, kept, out[-300:]))
+        check("J-2 ★[WARN] 그 줄의 「파일:줄 키워드」(J.k:%d *ELEMENT_SEATBELT) — 콘솔 · 보고 warnings · kept_by 에 센다" % jl,
+              rc == 0 and len(warn) == 1 and ("J.k:%d *ELEMENT_SEATBELT" % jl) in out and "[WARN" in out and
+              (rep.get("kept_by") or {}).get("(unreadable beam-family lines)") == 3, (rc, rep.get("warnings"), rep.get("kept_by"), out[-400:]))
+        check("J-3 설명서대로 쓴 줄(%d)은 경고가 없다" % (jl - 1), ("J.k:%d " % (jl - 1)) not in out, out[-300:])
+        write(os.path.join(d, "Jx.yaml"), "model: J.k\noutput: Jx_out.k\nparts: [9]\n")
+        rc, out = run(binary, d, "extract-parts", "Jx.yaml")
+        check("J-4 ★extract-parts — 그 줄을 「파일:줄 키워드」 로 [WARN] 한다(PID · 절점을 세지 못했다)",
+              ("J.k:%d *ELEMENT_SEATBELT" % jl) in out and "칸으로 읽지 못했다" in out and ("J.k:%d " % (jl - 1)) not in out, (rc, out[-400:]))
+        db = open(os.path.join(d, "D.k"), encoding="utf-8").read()
+        jbad = "9104 3 500001 500002 0.0 500004 500006"             # 지운 절점 500006 을 공백 토큰으로만 문다(설명서 칸으로는 SBRID 자리)
+        db = db.replace("\n*END\n", "\n" + jbad + "\n*END\n")
+        write(os.path.join(d, "J5.k"), db)
+        write(os.path.join(d, "j5.yaml"), open(os.path.join(d, "d.yaml"), encoding="utf-8").read().replace("model: D.k", "model: J5.k").replace("d_out.k", "j5_out.k"))
+        rc, out = run(binary, d, "restack", "j5.yaml")
+        l9104 = db.split("\n").index(jbad) + 1
+        check("J-5 ★restack — 칸으로 읽지 못한 띠 줄(%d)의 정수가 지운 절점(500006)이면 manual 로 올린다" % l9104,
+              rc == 0 and any(re.search(r"line %d \*ELEMENT_SEATBELT \(manual\)" % l9104, l) for l in out.splitlines()), (rc, out[-400:]))
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

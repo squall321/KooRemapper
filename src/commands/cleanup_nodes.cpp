@@ -116,6 +116,9 @@ struct Scan {
     std::vector<int> opaqueSetInts;                        // 못 읽는 세트 변종이 이름하는 절점
     std::vector<std::string> opaqueSetKws;
     std::vector<std::string> elemOpaqueKws;                // 줄 수를 모르는 `*ELEMENT_*` 변종
+    // 칸으로 읽지 못한 보 족 줄(쓰는 칸에 빈칸 — `auxLineUnreadable`) — 그 줄의 정수(지키기만) · 「파일:줄 키워드」(2026-11-08)
+    std::vector<int> unreadableAuxInts;
+    std::vector<std::string> unreadableAuxLines;
     // bbox(전)
     double bmin[3] = {1e300, 1e300, 1e300};
     double bmax[3] = {-1e300, -1e300, -1e300};
@@ -205,8 +208,8 @@ bool matchesKeepList(const std::string& kw, const std::vector<std::string>& keep
     return false;
 }
 
-// 파일 하나만 훑는다 — 인클루드는 따라가지 않는다(정본 닫힘의 파일마다 호출자가 부른다).
-void scanRefsStream(std::istream& in, bool isMain, const Opts& o,
+// 파일 하나만 훑는다 — 인클루드는 따라가지 않는다(정본 닫힘의 파일마다 호출자가 부른다). `path` 는 「파일:줄」 을 댈 때만 쓴다
+void scanRefsStream(std::istream& in, const std::string& path, bool isMain, const Opts& o,
                     const std::map<int, int>& pidNodes, Scan& sc, long long& paramRefLines) {
     enum class Mode { OTHER, NODE, SCALAR, ELEM, SETNODE, KEEP, TEXT };
     (void)o.model;
@@ -227,8 +230,10 @@ void scanRefsStream(std::istream& in, bool isMain, const Opts& o,
     std::string line;
 
     auto endElementCard = [&]() { cardRemaining = 0; cardLineIdx = 0; };
+    size_t lineNo = 0;
 
     while (std::getline(in, line)) {
+        ++lineNo;
         size_t g = line.find_first_not_of(" \t\r\n");
         const bool isKw = isKeywordLine(line);   // 1열 규칙(리더와 같다) — `*COMMENT` 글 속의 「  *END」 가 덱을 끝내지 않는다
 
@@ -298,6 +303,15 @@ void scanRefsStream(std::istream& in, bool isMain, const Opts& o,
                     const auto rd = KooRemapper::auxCardReadings(aux, line, fw);
                     for (int v : KooRemapper::auxNodesSure(aux, rd)) sc.byElement.push_back(v);
                     for (int v : KooRemapper::auxNodesUnsure(aux, rd)) sc.byElementAlt.push_back(v);
+                    // 칸으로 읽지 못한 줄(쓰는 칸에 빈칸) — 그 칸은 값이 없다. 그 줄이 말할 수도 있는 절점을 지우지 않게 줄의 정수를 모은다
+                    // (지키기만 — 덱의 절점 번호인 것만 남는다 · 번호 매기기 · PID 에는 쓰지 않는다). 줄은 [WARN] 으로 댄다(2026-11-08)
+                    if (KooRemapper::auxLineUnreadable(rd)) {
+                        std::string body = line;
+                        const size_t cm = body.find('$');
+                        if (cm != std::string::npos) body.erase(cm);
+                        harvestInts(body, sc.unreadableAuxInts);
+                        sc.unreadableAuxLines.push_back(path + ":" + std::to_string(lineNo) + " " + kw);
+                    }
                 } else {
                     // 옵션 카드의 절점 — 보 `_WARPAGE` 의 SN1 · SN2 · `_ELBOW` 의 가운데 절점 MN(예전엔 Card 1 만 읽어 safe 가 MN 을
                     // 지웠다 · 재검토 D2 · SN 은 아무도 안 읽었다 — 셋째 묶음). SN 이 `*NODE` 번호면 그 절점을 지키고, 스칼라 절점이면
@@ -413,7 +427,7 @@ void scanRefs(const std::string& path, bool isMain, const Opts& o,
               const std::map<int, int>& pidNodes, Scan& sc, long long& paramRefLines) {
     std::ifstream in(path);
     if (!in.is_open()) return;
-    scanRefsStream(in, isMain, o, pidNodes, sc, paramRefLines);
+    scanRefsStream(in, path, isMain, o, pidNodes, sc, paramRefLines);
 }
 
 // 닫힘 전체를 훑는다 — 주 덱(지울 수 있는 정의) 다음 인클루드 파일마다. 인클루드가 선언한 칸 폭이 다음 파일로 새지 않게
@@ -441,6 +455,7 @@ struct Resolution {
     std::vector<int> deletable;
     std::vector<KeptRow> keptByKeyword;         // keep 목록이 살린 것
     std::vector<KeptRow> keptByUnknown;         // 모르는 키워드가 살린 것
+    long long keptByUnreadableAux = 0;          // 칸으로 읽지 못한 보 족 줄의 정수가 살린 것
     long long keptByOpaqueSets = 0;
     long long forceDeletedDespiteUnknown = 0;
 };
@@ -492,6 +507,9 @@ Resolution resolve(const Opts& o, Scan& sc) {
     }
     // 2) 멤버를 못 읽는 세트 변종
     r.keptByOpaqueSets = markKept(sc.opaqueSetInts, r.candidates, sc.setMembers, mark);
+    // 2b) 칸으로 읽지 못한 보 족 줄의 정수 — 그 줄이 말할 수도 있는 절점은 지우지 않는다(모드와 상관없이 · 세트 변종과 같다 · 2026-11-08)
+    sortUnique(sc.unreadableAuxInts);
+    r.keptByUnreadableAux = markKept(sc.unreadableAuxInts, r.candidates, sc.setMembers, mark);
     // 3) 모르는 키워드 — `force` 는 이것을 **존중하지 않는다**
     for (auto& kv : sc.unknownInts) {
         sortUnique(kv.second);
@@ -937,6 +955,9 @@ int runCleanupNodes(const std::string& yamlFile, ConsoleOutput& console) {
     if (paramRefLines > 0)
         warnings.push_back("*PARAMETER 참조(&)가 있는 줄 " + std::to_string(paramRefLines) +
                            " — 기호로 적힌 절점 ID 는 읽을 수 없다");
+    for (const auto& w : sc.unreadableAuxLines)
+        warnings.push_back(w + " — 보 족 줄의 쓰는 칸(EID · PID · 절점)에 빈칸이 끼어 칸으로 읽지 못했다(공백으로 가른 줄?) — 그 칸의 "
+                           "절점은 세지 않았다. 그 줄의 정수 가운데 덱의 절점 번호는 지우지 않는다(지키기만 — 고정폭 칸이나 콤마로 고쳐 써라)");
 
     // ── bbox(후) ─────────────────────────────────────────────────────────────
     Box after;
@@ -962,6 +983,9 @@ int runCleanupNodes(const std::string& yamlFile, ConsoleOutput& console) {
     if (res.keptByOpaqueSets > 0)
         console.info("    kept by unreadable *SET_NODE_* variants: " +
                      std::to_string(res.keptByOpaqueSets));
+    if (res.keptByUnreadableAux > 0)
+        console.info("    kept by unreadable beam-family lines: " + std::to_string(res.keptByUnreadableAux) +
+                     " — 쓰는 칸에 빈칸이 낀 줄의 정수(아래 경고의 줄)");
     for (const auto& r : res.keptByUnknown)
         console.info("    " + std::string(o.mode == "force" ? "FORCE-DELETED despite " : "kept by ") +
                      r.keyword + ": " + std::to_string(r.nodes));
@@ -1065,9 +1089,13 @@ int runCleanupNodes(const std::string& yamlFile, ConsoleOutput& console) {
                 jf << (first ? "" : ", ") << jsonStr(r.keyword) << ": " << r.nodes;
                 first = false;
             }
-            if (res.keptByOpaqueSets > 0)
+            if (res.keptByOpaqueSets > 0) {
                 jf << (first ? "" : ", ") << "\"(unreadable *SET_NODE_* variants)\": "
                    << res.keptByOpaqueSets;
+                first = false;
+            }
+            if (res.keptByUnreadableAux > 0)
+                jf << (first ? "" : ", ") << "\"(unreadable beam-family lines)\": " << res.keptByUnreadableAux;
         }
         jf << "},\n";
         jf << "  \"unknown_keyword_kept\": [";

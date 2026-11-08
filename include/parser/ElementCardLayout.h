@@ -194,6 +194,10 @@ AuxCardReadings auxCardReadings(const AuxElementCard& a, const std::string& line
 
 // 하나로 읽는다면 — manual(콤마 줄은 콤마 토큰)
 const std::vector<std::string>& auxPrimaryFields(const AuxCardReadings& r);
+// 칸으로 읽지 못한 줄 — 쓰는 칸(EID · PID · 절점)에 빈칸이 낀 줄(공백으로만 가른 줄 `13 9 101 102 …` 등). 그 칸은 값이 없다(공백 토큰은
+// 읽기가 아니다). 조용히 넘기지 않는다(2026-11-08 사용자 결정) — 소비자마다 「파일:줄」 을 대고 [WARN] 하고, 지키는 쪽(cleanup-nodes)은
+// 그 줄의 정수 가운데 덱의 절점 번호를 지운다 하지 않는다(지키기만 — 번호 매기기 · PID 에는 쓰지 않는다)
+inline bool auxLineUnreadable(const AuxCardReadings& r) { return !r.manualClean; }
 // 칸 차례로 나눈 줄 하나가 말하는 절점(`nodeSkip` · `nodeSkip2` 구간의 양수, 칸 차례대로)
 std::vector<int> auxNodesOf(const AuxElementCard& a, const std::vector<std::string>& f);
 // 지키는 쪽 — primary 와 든 다른 읽기의 절점 합집합(정렬 · 유일)
