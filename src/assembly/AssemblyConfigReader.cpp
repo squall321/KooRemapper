@@ -1686,7 +1686,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                             else if (key == "output")         op.battery.output        = val;
                             else if (key == "node_id_offset") op.battery.nodeIdOffset  = std::stoi(val);
                             else if (key == "elem_id_offset") op.battery.elemIdOffset  = std::stoi(val);
-                            else if (key == "use_include")    op.battery.useInclude    = (val == "true" || val == "1");
+                            else if (key == "use_include")    op.battery.useInclude    = (val == "true" || val == "yes" || val == "1");
                         }
                     } catch (...) {}
                 }

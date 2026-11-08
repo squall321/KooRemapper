@@ -1935,7 +1935,7 @@ operations:
 | `finite_strain` | von Kármán 대변형(true) / Kirchhoff 소변형(false) | `true` |
 | `outside_behavior` | 격자 범위 밖 노드 처리 (zero/clamp/extrapolate) | `zero` |
 | `data_bbox` | 격자가 덮는 평면 범위 (`x_min`·`x_max`·`y_min`·`y_max`) | 파트 bbox |
-| `debug` / `debug_prefix` | 격자·곡률 VTK 등 디버그 출력 — `<debug_prefix>_raw.dat` · `_curvature.dat` · `_warpage.vtk`. 접두사는 YAML 폴더 기준(2026-11-07 전엔 작업 폴더)이고 그 폴더는 미리 있어야 합니다 | `false` / `debug/warp` |
+| `debug` / `debug_prefix` | 격자·곡률 VTK 등 디버그 출력 — `<debug_prefix>_raw.dat` · `_curvature.dat` · `_warpage.vtk`. 접두사는 YAML 폴더 기준(2026-11-07 전엔 작업 폴더)이고 **그 폴더가 없으면 만듭니다**. 폴더를 못 만들거나 파일 하나라도 못 쓰면 덱을 쓰기 전에 종료 코드 1 입니다(2026-11-08 전엔 없는 폴더면 아무것도 쓰지 않고 「Exported」 를 찍었습니다) | `false` / `debug/warp` |
 
 ### dat 파일 형식
 
@@ -4107,6 +4107,7 @@ KooRemapper battery <config.yaml>
 | `wound.flat` / `.flat_ratio` / `.n_winds` | (wound) 편평·비율·권취 수 |
 | `swelling.soc` / `.nmc_cte` / `.graphite_cte` | SOC·양극/음극 팽창률 |
 | `dr_endtim` / `dr_tolerance` / `dr_factor` / `dr_nrcyck` | DR 파라미터 |
+| `tabs.width` / `.height` / `.pos_x_center` / `.neg_x_center` | 탭 폭 · 높이 · X 중심 [mm] — 기본 중심 17.5 · 52.5 는 폭 70 셀 기준. (stacked) 탭이 셀(0~`cell_width`)과 겹치지 않으면 종료 코드 1(`no_pcm` 이면 탭을 짓지 않는다 · 2026-11-08 전엔 덱에 없는 절점을 가리키고 종료 코드 0) |
 
 > **경로 규칙**(2026-09-18 실행 확인): `output` 의 상대 경로는 [§3.1(a)](#31-yaml-공통-규칙-모든-op) 대로
 > **그 YAML 파일이 있는 폴더** 기준입니다 — `KooRemapper battery cfg/b.yaml` 의 `output: bat_out` 은
@@ -4117,6 +4118,19 @@ KooRemapper battery <config.yaml>
 > (`config: sub/bat.yaml` → `sub/bt_tier0_phase1.k`, `output: out/model` 이면 `../bt_tier0_phase1.k` — 절대 경로로 적은 battery
 > `output` 만 적은 그대로). 예전에는 둘 다 작업 폴더 기준이라 `KooRemapper assemble cfg/a.yaml` 이 battery 덱을 작업 폴더에 쓰고
 > cfg/ 의 주 덱에는 솔버가 찾지 못하는 이름을 적었습니다.
+>
+> **`assemble` 안의 battery 번호(2026-11-08)**: battery 덱의 번호를 **족마다 기존 모델의 최대값 위로** 옮겨 얹습니다 — 절점 · 요소
+> (모든 요소 족 · 스칼라 절점까지 센 공용 바닥) · 파트 · 섹션 · 재질 · 열 재질(TMID) · 모래시계(HGID) · 세트(종류를 한 통으로) ·
+> 접촉(CID) · 곡선(곡선 · 표 · 함수가 나누는 번호). 기존 모델에 없는 족은 옮기지 않습니다. 정의와 그것을 가리키는 칸(요소의 절점 ·
+> 파트, 파트의 섹션 · 재질, 세트 멤버, 접촉의 SSID · MSID, 경계 · 하중 · 에어백 · 열팽창 · 초기 응력 · 변형률, 재질의 곡선)을 같이 옮기고
+> 나머지 글자는 그대로 둡니다. `node_id_offset` · `elem_id_offset` 을 주면 그 값을 더합니다 — 기존 최대값 위가 아니면(아래로 걸치면)
+> **아무 파일도 쓰지 않고 종료 코드 1** 입니다(번호 사이 빈자리는 보지 않습니다). `use_include: false` 면 battery 덱 파일을 쓰지 않고 그
+> 카드를 주 덱의 첫 `*END` 앞에 펼칩니다(주 덱이 i10 · long 이면 칸이 다르게 읽혀 거절). battery 덱이 `*INCLUDE_DYNAIN` 을 끌어오면
+> (phase 2 · `use_dynain`) 번호를 옮길 때 거절합니다 — 그 dynain 은 다른 실행의 번호입니다. battery 쓰개가 내지 않는 카드나 뜻을 모르는
+> 0 아닌 번호 칸이 있으면 옮기지 않고 거절합니다. 뒤 처리(contact · load …)가 새로 내는 번호도 battery 덱의 번호 위로 냅니다. 예전에는
+> battery 덱을 번호 그대로 끌어와 기존 모델과 겹쳤고(상자 198 절점이 모두 겹쳐 종료 코드 0), 두 오프셋과 `use_include` 는 읽기만
+> 했습니다. battery 덱의 `*CONTROL_*` · `*DATABASE_*` · 고정구 · 경계조건은 그대로 실립니다(번호 겹침만 다룹니다). 단독 `battery` 는 한 덱이
+> 홀로 서므로 해당이 없습니다(설정 40가지로 지은 덱에 족 안에서 겹친 번호 0).
 >
 > **배치의 덱 이름(2026-11-07)**: 덱 이름은 `<output><tier>_phase{1|2}.k` 입니다 — tier 는 다섯 칸(`_tier-1` · `_tier0` ·
 > `_tier0_5` · `_tier1` · `_tier2`)으로 묶이고, phase 2 가 아니면 모두 `_phase1` 입니다. `batch.model_types` 에 종류가 **둘 이상**이면
@@ -4136,7 +4150,8 @@ KooRemapper battery <config.yaml>
 > **산출 덱 옆에서 솔버가 찾을 이름**으로 적으세요. (배치 체이닝에서 자동 계산되는 값도 같은 규칙 — 폴더 없는 덱 옆 이름입니다.
 > 2026-11-07 까지는 YAML 이 다른 폴더에 있으면 그 폴더가 붙어 `battery cfg/b.yaml` 의 phase 2 덱에 `cfg/bt_tier0_phase1.dynain`
 > (절대 경로로 주면 그 절대 경로)이 적혀 솔버가 찾지 못했습니다.) 자동 계산은 `batch.phases` 에 1 과 2 가 다 있을 때만입니다 —
-> 홑 실행에서 `dynain_file` 을 비우면 `use_dynain: true` 여도 `*INCLUDE_DYNAIN` 을 쓰지 않습니다.
+> 홑 실행에서 `dynain_file` 을 비우면 `use_dynain: true` 여도 `*INCLUDE_DYNAIN` 을 쓰지 않고, 그 덱 이름을 적은 **[WARN]** 으로
+> 알립니다(assemble 의 battery · 자동 이름이 없는 batch 조합도 같다 — 2026-11-08 전엔 말이 없었습니다). 이름을 지어내지는 않습니다.
 
 **근거**: pyKooCAE `mesh_generate.md`, `examples/battery/swell/{stacked,wound}/*.yaml`, 2026-09-18 실행 확인. 미등장 필드·기본값은 확인 필요.
 

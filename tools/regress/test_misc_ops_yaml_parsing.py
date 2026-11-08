@@ -179,7 +179,10 @@ def main():
           rc == 0 and os.path.exists(os.path.join(d, "h_meta_modelmeta.json")), f"rc={rc} {out[-200:]}")
 
     print("[battery: 탭 앞 주석·따옴표 값]")
-    BAT = "tier: -1\nphase: 1\ngeometry:\n  cell_width: 30\n  cell_height: 30\n  n_unit_cells: 1\n"
+    # 탭은 셀(폭 30) 안에 둔다 — 기본 탭 중심(17.5 · 52.5)은 폭 70 셀 기준이라 음극 탭이 셀 밖이고, 2026-11-08 부터 적층 battery 는
+    # 그런 설정을 rc 1 로 거절한다(예전엔 탭 줄이 격자 밖을 읽어 덱에 없는 절점을 가리켰다 — 이 시험이 보는 YAML 값 읽기와 무관)
+    BAT = ("tier: -1\nphase: 1\ngeometry:\n  cell_width: 30\n  cell_height: 30\n  n_unit_cells: 1\n"
+           "tabs:\n  pos_x_center: 7.5\n  neg_x_center: 22.5\n")
     write(d, "bat_tab.yaml", "output: bat_tab\nmodel_type: stacked\t# 적층\n" + BAT)
     rc, out = run(binary, d, "battery", "bat_tab.yaml")
     check("battery: 탭 앞 인라인 주석도 값에서 떨어짐 (rc=0)",

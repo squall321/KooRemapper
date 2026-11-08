@@ -15,6 +15,7 @@
 #include <set>
 #include <string>
 #include <vector>
+#include <tuple>
 #include <fstream>
 #include <sstream>
 #include <cstdio>
@@ -347,12 +348,18 @@ std::string batteryKFilePath(const BatteryConfig& cfg) {
     return cfg.output + typePart + batteryTierSuffix(cfg.tier) + phaseSuffix + ".k";
 }
 
-std::string generateBatteryKFile(const BatteryConfig& cfg,
-                                  ConsoleOutput& console) {
-    // Build output filename
-    std::string outPath = batteryKFilePath(cfg);
+std::string batteryDynainSkipWarning(const BatteryConfig& cfg) {
+    if (!cfg.useDynain || !cfg.dynainFile.empty()) return "";
+    return "[battery] use_dynain: true 인데 dynain_file 이 비어 「" + batteryKFilePath(cfg) +
+           "」 에 *INCLUDE_DYNAIN 을 쓰지 않았다 — 앞 단계 실행의 dynain 이름을 dynain_file 에 적어라(이름을 스스로 짓는 것은 "
+           "batch.phases 에 1 과 2 가 다 있을 때 뒤 phase 뿐이다)";
+}
 
-    console.println("[battery] Generating: " + outPath);
+// 배터리 덱 글자를 메모리에 짓는다 — 파일은 쓰지 않는다(2026-11-08 · assemble 이 번호를 옮긴 뒤 쓴다). `what` 은 「Generating:」
+// 줄의 이름(쓸 경로 · 주 덱에 펼친다는 말), 「Done. …」 줄은 `done` 에 둔다(부르는 쪽이 쓴 뒤에 찍는다). 모르는 model_type 이면 false
+static bool buildBatteryDeck(const BatteryConfig& cfg, ConsoleOutput& console, const std::string& what,
+                             std::string& text, std::string& done) {
+    console.println("[battery] Generating: " + what);
     console.println("[battery]   model_type : " + cfg.modelType);
     {
         char buf[64];
@@ -424,26 +431,38 @@ std::string generateBatteryKFile(const BatteryConfig& cfg,
         }
 
         out << "*END\n";
-
-        std::ofstream f(outPath);
-        if (!f.is_open()) {
-            console.error("[battery] Cannot write output: " + outPath);
-            return "";
-        }
-        f << out.str();
+        text = out.str();
 
         char sbuf[128];
         snprintf(sbuf, sizeof(sbuf),
                  "[battery] Done. Nodes=%d Shells=%d Solids=%d",
                  stats.nNodes, stats.nShells, stats.nSolids);
-        console.println(sbuf);
-        return outPath;
+        done = sbuf;
+        return true;
     }
 
     if (cfg.modelType != "stacked") {
         console.error("[battery] Unknown model_type: " + cfg.modelType +
                       " (supported: stacked, wound)");
-        return "";
+        return false;
+    }
+
+    // ★탭이 셀과 겹쳐야 한다(2026-11-08) — 탭 줄은 셀 위 가장자리(+Y) 격자 열에서 뻗는다. 셀 밖 탭(기본 중심 17.5 · 52.5 는 폭 70
+    //   셀 기준)은 격자 밖 절점 번호를 읽어 덱에 없는 절점을 가리켰다(rc 0)
+    if (!cfg.noPcm) {
+        const auto& tb = cfg.tabs;
+        for (const auto& [name, key, c] : {std::make_tuple("양극", "pos_x_center", tb.posXCenter),
+                                           std::make_tuple("음극", "neg_x_center", tb.negXCenter)}) {
+            const double lo = c - tb.width / 2.0, hi = c + tb.width / 2.0;
+            if (hi > 0.0 && lo < cfg.geo.cellWidth) continue;
+            char buf[320];
+            snprintf(buf, sizeof(buf),
+                     "[battery] %s 탭(tabs.%s %g · width %g → x %g~%g)이 셀(cell_width %g) 밖이다 — 탭 줄을 지을 격자 열이 없다. "
+                     "tabs.pos_x_center · neg_x_center 를 셀 안으로 주라(기본 17.5 · 52.5 는 폭 70 셀 기준) — 아무 파일도 쓰지 않았다",
+                     name, key, c, tb.width, lo, hi, cfg.geo.cellWidth);
+            console.error(buf);
+            return false;
+        }
     }
 
     // ── Stacked model ─────────────────────────────────────────
@@ -518,24 +537,48 @@ std::string generateBatteryKFile(const BatteryConfig& cfg,
     }
 
     out << "*END\n";
-
-    // Write to file
-    std::ofstream f(outPath);
-    if (!f.is_open()) {
-        console.error("[battery] Cannot write output: " + outPath);
-        return "";
-    }
-    f << out.str();
+    text = out.str();
 
     {
         char buf[128];
         snprintf(buf, sizeof(buf),
                  "[battery] Done. Nodes=%d Shells=%d Solids=%d TotalZ=%.4fmm",
                  stats.nNodes, stats.nShells, stats.nSolids, stats.totalZ);
-        console.println(buf);
+        done = buf;
     }
+    return true;
+}
 
+bool writeBatteryKFileText(const std::string& path, const std::string& text, ConsoleOutput& console) {
+    std::ofstream f(path);
+    if (!f.is_open()) {
+        console.error("[battery] Cannot write output: " + path);
+        return false;
+    }
+    f << text;
+    f.close();
+    if (f.fail()) {
+        console.error("[battery] Cannot write output: " + path);
+        return false;
+    }
+    return true;
+}
+
+std::string generateBatteryKFile(const BatteryConfig& cfg,
+                                  ConsoleOutput& console) {
+    const std::string outPath = batteryKFilePath(cfg);
+    std::string text, done;
+    if (!buildBatteryDeck(cfg, console, outPath, text, done)) return "";
+    if (!writeBatteryKFileText(outPath, text, console)) return "";
+    console.println(done);
     return outPath;
+}
+
+bool buildBatteryKFileText(const BatteryConfig& cfg, ConsoleOutput& console, const std::string& what, std::string& text) {
+    std::string done;
+    if (!buildBatteryDeck(cfg, console, what, text, done)) return false;
+    console.println(done);
+    return true;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -568,6 +611,7 @@ static int generateBatch(const BatteryConfig& baseCfg,
     const bool typeInName = std::set<std::string>(mts.begin(), mts.end()).size() >= 2;
 
     std::vector<BatteryConfig> combos;
+    std::vector<bool> chainHead;   // 자동 사슬의 첫 phase — dynain 을 받지 않는 것이 맞다(경고하지 않는다)
     for (const auto& mt : mts) {
         for (double tier : tiers) {
             for (size_t pi = 0; pi < phases.size(); ++pi) {
@@ -601,6 +645,7 @@ static int generateBatch(const BatteryConfig& baseCfg,
                 }
 
                 combos.push_back(cur);
+                chainHead.push_back(autoChain && pi == 0);
             }
         }
     }
@@ -630,8 +675,16 @@ static int generateBatch(const BatteryConfig& baseCfg,
     // ★조합 하나라도 못 만들면 rc 1 과 못 만든 조합의 요약(2026-11-07) — 예전엔 실패를 버리고 rc 0 이었다(자동화는 rc 만 본다).
     //   나머지 조합은 끝까지 만든다
     std::vector<std::string> failed;
-    for (const auto& c : combos)
-        if (generateBatteryKFile(c, console).empty()) failed.push_back(label(c) + " → " + batteryKFilePath(c));
+    for (size_t ci = 0; ci < combos.size(); ++ci) {
+        const auto& c = combos[ci];
+        if (generateBatteryKFile(c, console).empty()) {
+            failed.push_back(label(c) + " → " + batteryKFilePath(c));
+            continue;
+        }
+        // ★dynain 을 바란 조합이 그것을 받지 못하면 알린다(2026-11-08) — 예전엔 말없이 *INCLUDE_DYNAIN 이 빠졌다
+        const std::string warn = chainHead[ci] ? std::string() : batteryDynainSkipWarning(c);
+        if (!warn.empty()) console.warning(warn);
+    }
     if (!failed.empty()) {
         console.error("[battery] batch 의 조합 " + std::to_string(combos.size()) + "개 가운데 " + std::to_string(failed.size()) +
                       "개를 만들지 못했다(까닭은 위 [ERROR] 다)");
@@ -683,6 +736,9 @@ int runBattery(const std::string& yamlFile, ConsoleOutput& console) {
     } else {
         std::string out = generateBatteryKFile(cfg, console);
         if (out.empty()) return 1;
+        // ★use_dynain: true 인데 dynain_file 이 비면 *INCLUDE_DYNAIN 이 빠진다 — 알린다(2026-11-08 · 예전엔 말없이)
+        const std::string warn = batteryDynainSkipWarning(cfg);
+        if (!warn.empty()) console.warning(warn);
     }
 
     return 0;

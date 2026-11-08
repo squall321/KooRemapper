@@ -214,6 +214,9 @@ private:
     // 주 덱의 인클루드 닫힘(파일마다 경로·줄, LS-DYNA 가 읽는 차례). 번호 커서가 주 덱과 **같은 스캐너**로
     // 인클루드에 이미 있는 번호까지 세려고 든다 — 쪼개지 않은 같은 덱이면 rawLines_ 에 들어 있었을 줄이다.
     include_closure::Closure incl_;
+    // 이 실행이 `*INCLUDE` 로 덧붙인 덱의 줄(assemble 의 battery — 2026-11-08). 로드 뒤에 생겨 incl_ 에 없다 — 뒤 op 의 번호
+    // 발급(`inclMax`)이 인클루드처럼 센다(battery 의 곡선 · 접촉 · 세트 번호를 다시 내지 않게)
+    std::vector<std::vector<std::string>> addedDecks_;
     bool flattenIncludes_ = false;
     std::vector<output_guard::Input> guardInputs_;   // 읽은 파일(모델 · 인클루드 · 다른 입력) — writeOutput 의 쓰기 관문이 본다
     std::vector<std::string> plannedWrites_;         // 덱 말고 부르는 쪽이 이 실행에서 쓸 곁 파일(대응표 · 보고)
@@ -404,6 +407,7 @@ private:
     // 멤버 커서(NODE·ELEM·PART·SECTION·MAT·SET)를 인클루드 파일마다 주 덱과 같은 규칙으로 센 값 위로 올린다.
     void raiseMaxIdsOverIncludes();
     // 같은 스캐너를 인클루드 파일마다 돌린 최대값(인클루드가 없으면 0) — op 안에서 따로 세는 지역 커서용.
+    // 이 실행이 덧붙인 덱(`addedDecks_`)도 센다(2026-11-08).
     int inclMax(const std::function<int(const std::vector<std::string>&)>& scan) const;
     // 덱 머리에 넣을 $ KOOREMAPPER-PIDREF 블록(발견이 없으면 빈 문자열)
     std::string buildPidRefHeaderBlock() const;

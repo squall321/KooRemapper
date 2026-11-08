@@ -1,4 +1,5 @@
 #include "assembly/WarpageGrid.h"
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <iostream>
@@ -456,7 +457,30 @@ double WarpageGrid::getAverageCurvature() const {
     return count > 0 ? sum / count : 0.0;
 }
 
-void WarpageGrid::exportDebugData(const std::string& prefix) const {
+bool WarpageGrid::exportDebugData(const std::string& prefix, std::string& err) const {
+    // ★없는 폴더를 만든다(2026-11-08) — 기본 접두사 debug/warp 의 debug/ 는 프로그램이 정한 자리다. 예전엔 없는 폴더에 쓰지 못하고도
+    //   스트림 실패를 보지 않아 rc 0 에 「Exported」 를 찍었다
+    {
+        const std::filesystem::path dir = std::filesystem::path(prefix).parent_path();
+        std::error_code ec;
+        if (!dir.empty() && !std::filesystem::is_directory(dir, ec)) {
+            std::filesystem::create_directories(dir, ec);
+            if (ec || !std::filesystem::is_directory(dir)) {
+                err = "진단 폴더 「" + dir.string() + "」 을 만들지 못했다" + (ec ? " (" + ec.message() + ")" : std::string());
+                return false;
+            }
+        }
+    }
+    // 파일 하나를 다 썼는지 — 열지 못했거나 쓰다 실패했으면 그 파일을 적는다
+    auto closed = [&](auto& f, const std::string& path) {   // f — 아래 진단 스트림 셋(덱 아님)
+        f.close();
+        if (f.fail()) {
+            err = "진단 파일 「" + path + "」 을 쓰지 못했다";
+            return false;
+        }
+        return true;
+    };
+
     // 1. 원본 데이터
     std::ofstream rawFile(prefix + "_raw.dat");
     for (int i = 0; i < nRows_; ++i) {
@@ -466,6 +490,7 @@ void WarpageGrid::exportDebugData(const std::string& prefix) const {
         }
         rawFile << "\n";
     }
+    if (!closed(rawFile, prefix + "_raw.dat")) return false;
 
     // 2. 곡률
     std::ofstream kappaFile(prefix + "_curvature.dat");
@@ -478,6 +503,7 @@ void WarpageGrid::exportDebugData(const std::string& prefix) const {
         }
         kappaFile << "\n";
     }
+    if (!closed(kappaFile, prefix + "_curvature.dat")) return false;
 
     // 3. VTK
     std::ofstream vtkFile(prefix + "_warpage.vtk");
@@ -507,8 +533,10 @@ void WarpageGrid::exportDebugData(const std::string& prefix) const {
             vtkFile << kappa << "\n";
         }
     }
+    if (!closed(vtkFile, prefix + "_warpage.vtk")) return false;
 
     std::cout << "[DEBUG] Exported: " << prefix << "_{raw,curvature,warpage.vtk}\n";
+    return true;
 }
 
 } // namespace KooRemapper

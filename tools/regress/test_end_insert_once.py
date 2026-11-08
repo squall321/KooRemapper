@@ -33,8 +33,10 @@ FAILS, OKS = [], []
 BOX = ("output: box.k\nlx: 20.0\nly: 10.0\nlz: 2.0\nnx: 4\nny: 2\nnz: 1\nrho: 7.85e-9\nE: 210000.0\nnu: 0.3\nmid: 1\n"
        "secid: 1\npid: 1\npart_title: PLATE\n")
 TAIL = "*COMMENT\nLS-DYNA 는 첫 *END 에서 멈춘다 — 아래는 읽지 않는다\n*END\n"
+# 탭은 셀(폭 30) 안에 둔다 — 기본 탭 중심(17.5 · 52.5)은 폭 70 셀 기준이라 음극 탭이 셀 밖이고, 그러면 탭 줄이 격자 밖 절점 번호를
+# 읽어 덱에 없는 절점을 가리켰다(2026-11-08 — assemble 의 battery 가 번호를 옮기며 그런 덱을 거절한다)
 BAT = ("output: bat\nmodel_type: stacked\ntier: -1\nphase: 1\ngeometry:\n  cell_width: 30\n  cell_height: 30\n"
-       "  n_unit_cells: 1\n")
+       "  n_unit_cells: 1\ntabs:\n  pos_x_center: 7.5\n  neg_x_center: 22.5\n")
 
 
 def check(name, cond, detail=""):
