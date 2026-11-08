@@ -1287,6 +1287,17 @@ int runWarpage(const std::string& yamlFile, ConsoleOutput& console) {
     assembler.setFlattenIncludes(y.flattenIncludes);   // `flatten_includes` — 로드 전에
     if (!y.flattenBad.empty()) console.warning("flatten_includes 값 「" + y.flattenBad + "」 을 참·거짓으로 읽지 못했다 — true 로 주라(지금은 펼치지 않는다)");
     if (!assembler.loadBaseModel(modelPath)) { console.error(assembler.getErrorMessage()); return 1; }
+    // ★진단 셋(debug: true)은 덱보다 먼저 쓴다 — 무엇이든 쓰기 전에 덱 산출 · 진단 셋을 입력과 견준다(2026-11-08 · 6차 검토 G4).
+    //   예전엔 진단 셋(과 없던 그 폴더)을 써 두고 덱 쓰기에서야 「output == model」 로 멈췄다. assemble 의 관문을 그 한 처리로 부른다
+    {
+        AssemblyOperation one;
+        one.type = AssemblyOperation::WARPAGE;
+        one.warpage = op;
+        if (!assembler.planRunWrites({one}, y.configDir, outputPrefix, "warpage")) {
+            console.error(assembler.getErrorMessage());
+            return 1;
+        }
+    }
     if (!assembler.applyWarpage(op, y.matE, y.matNu, y.configDir)) { console.error(assembler.getErrorMessage()); return 1; }
     for (const auto& msg : assembler.infoMessages) console.println(msg);
     if (!writeOutputChecked(assembler, outputPrefix, "warpage", console)) return 1;

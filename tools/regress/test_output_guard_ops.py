@@ -81,6 +81,11 @@ def snapshot(d):
     return out
 
 
+def dirs_of(d):
+    """폴더 안 모든 하위 폴더(빈 폴더까지 — `snapshot` 은 파일만 본다)."""
+    return sorted(os.path.relpath(p, d) for p, _dirs, _files in os.walk(d))
+
+
 def diff(a, b):
     keys = sorted(set(a) | set(b))
     return [k for k in keys if a.get(k) != b.get(k)]
@@ -403,6 +408,25 @@ def special_yaml(st, binary):
     made = all(os.path.isfile(os.path.join(d, "debug", "warp" + s)) for s in ("_raw.dat", "_curvature.dat", "_warpage.vtk"))
     check("★assemble warpage 둘 · debug · 같은 기본 접두사 → rc 0 · 진단 셋 한 벌 · 덱(예전엔 「같은 파일」 rc 1)",
           rc == 0 and made and os.path.isfile(os.path.join(d, "w2.k")) and "같은 파일" not in text, (rc, made, text[-300:]))
+    # 덱 산출이 입력이면 루프 안 쓰기(battery 덱 · 진단 셋 · 그 폴더)보다 먼저 멈춘다 — 2026-11-08 전엔 덱 쓰기에서야 보아 그것들을
+    # 써 둔 채 「출력 파일을 쓰지 않았습니다」 였다(6차 검토 G4 · 재현 late · late2)
+    dbg = "    debug: true\n    debug_prefix: dbg/wp\n"
+    d, argv = st.case("warpage", "asm_late")
+    add_include(os.path.join(d, "box.k"), "inc.k")
+    write(os.path.join(d, "bat.yaml"), "output: bt\nmodel_type: stacked\ntier: -1\nphase: 1\nmode: dent\n")
+    write(os.path.join(d, "late.yaml"),
+          "base_model: box.k\noutput: inc\nmaterial:\n  E: 210000\n  nu: 0.3\noperations:\n"
+          "  - type: battery\n    config: bat.yaml\n" + wp + dbg)
+    before = dirs_of(d)
+    expect_refused("assemble output == 모델의 인클루드 + battery + warpage 진단 → battery 덱 · 진단 셋보다 먼저", binary, d,
+                   ["assemble", "late.yaml"])
+    check("  └ 진단 셋의 폴더(dbg/)도 만들지 않는다", dirs_of(d) == before, sorted(set(dirs_of(d)) - set(before)))
+    d, argv = st.case("warpage", "late2")
+    cfg = read(os.path.join(d, argv[1]))
+    write(os.path.join(d, argv[1]), yset(cfg, "output", "box").replace("    mode: deform\n", "    mode: deform\n" + dbg))
+    before = dirs_of(d)
+    expect_refused("단독 warpage debug · output == model → 진단 셋보다 먼저", binary, d, argv)
+    check("  └ 진단 셋의 폴더(dbg/)도 만들지 않는다", dirs_of(d) == before, sorted(set(dirs_of(d)) - set(before)))
     d, argv = st.case("assemble", "asm_battery")
     bat = os.path.join(REPO, "examples", "battery", "swell", "stacked", "stacked_swell.yaml")
     shutil.copyfile(bat, os.path.join(d, "bat.yaml"))   # tier 0 · phase 1 → <output>_tier0_phase1.k

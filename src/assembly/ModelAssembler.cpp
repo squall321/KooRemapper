@@ -608,7 +608,7 @@ void ModelAssembler::planWrite(const std::string& path) {
 }
 
 bool ModelAssembler::planRunWrites(const std::vector<AssemblyOperation>& ops, const std::string& configDir,
-                                   const std::string& outputPrefix) {
+                                   const std::string& outputPrefix, const std::string& who) {
     auto cfgPath = [&](const std::string& p) { return KooRemapper::yamlResolvePath(configDir, p); };
     // 루프 안에서 덱보다 먼저 쓰는 파일 — battery 덱은 주 덱이 `*INCLUDE` 로 가리키는 산출이고, warpage 진단 셋은 덮여도 되는
     // 곁 파일이다(op 하나에 target_pids 둘도 같은 셋을 차례로 덮는다)
@@ -675,13 +675,27 @@ bool ModelAssembler::planRunWrites(const std::vector<AssemblyOperation>& ops, co
     }
     std::string why;
     if (output_guard::findClash(midRun, guardInputs_, why)) {
-        errorMessage_ = "assemble: " + why + " — 처리 루프가 덱보다 먼저 쓰는 파일이다. 출력 파일을 쓰지 않았습니다";
+        errorMessage_ = who + ": " + why + " — 처리 루프가 덱보다 먼저 쓰는 파일이다. 출력 파일을 쓰지 않았습니다";
         return false;
     }
-    std::vector<std::string> withDeck{outputPrefix + ".k", outputPrefix + ".dynain"};
+    // ★덱 산출도 루프 **전에** 입력과 견준다(2026-11-08 · 6차 검토 G4) — 예전엔 덱 쓰기(writeOutput)에서야 보아, 걸려도 그 앞에
+    //   battery 덱 · 진단 셋을 이미 써 두고 「출력 파일을 쓰지 않았습니다」 였다. 규칙은 writeOutput 의 관문과 같다(in-place 를
+    //   허락한 실행이면 덱만 주 덱 그 자체여도 된다). `.dynain` 은 쓸지 아직 모르니(처리가 응력을 내야 쓴다) 쓴다고 보고 견준다 —
+    //   dynain_embed 면 따로 쓰지 않는다
+    const std::string deckOut = outputPrefix + ".k", dynOut = outputPrefix + ".dynain";
+    std::vector<output_guard::Input> deckReads;
+    for (const auto& in : guardInputs_)
+        if (!(inPlaceAllowed_ && in.role == "model" && include_closure::sameFile(in.path, baseModelPath_))) deckReads.push_back(in);
+    if (output_guard::findClash({deckOut}, deckReads, why) || (!dynainEmbed_ && output_guard::findClash({dynOut}, guardInputs_, why))) {
+        errorMessage_ = why + " — 출력 파일을 쓰지 않았습니다: " + deckOut +
+                        " / an output is the same file as an input or another output; nothing written";
+        return false;
+    }
+    std::vector<std::string> withDeck{deckOut};
+    if (!dynainEmbed_) withDeck.push_back(dynOut);
     withDeck.insert(withDeck.end(), midRun.begin(), midRun.end());
     if (output_guard::findClash(withDeck, {}, why)) {
-        errorMessage_ = "assemble: " + why + " — 출력 파일을 쓰지 않았습니다";
+        errorMessage_ = who + ": " + why + " — 출력 파일을 쓰지 않았습니다";
         return false;
     }
     return true;

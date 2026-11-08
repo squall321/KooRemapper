@@ -498,7 +498,8 @@ operations:
           "mode: prestress(기본, 초기응력만) | deform(노드 이동). outside_behavior: zero(기본) | clamp | extrapolate",
           "debug: true 면 <debug_prefix>_raw.dat · _curvature.dat · _warpage.vtk 를 쓴다 — debug_prefix(기본 debug/warp)는 YAML 폴더",
           "  기준(2026-11-07 전엔 작업 폴더)이고 그 폴더가 없으면 만든다. 폴더를 못 만들거나 하나라도 못 쓰면 덱을 쓰기 전에 rc 1",
-          "  (2026-11-08 전엔 없는 폴더면 아무것도 쓰지 않고 「Exported」 를 찍었다)"])
+          "  (2026-11-08 전엔 없는 폴더면 아무것도 쓰지 않고 「Exported」 를 찍었다). 진단 셋을 쓰기 전에 덱 산출도 입력과 견준다",
+          "  (2026-11-08 전엔 output == model 이면 진단 셋 · 그 폴더를 써 둔 뒤 멈췄다)"])
 op("bend", "변형·초기응력", "처짐 함수 w(x1,x2) 로 파트를 굽히고 초기응력 계산", "굽힘 bending 곡률 formula",
    "KooRemapper bend <config.yaml>",
    files=boxed({"bend.yaml": """base_model: box.k
@@ -603,6 +604,8 @@ material:
           "루프 안에서 덱보다 먼저 쓰는 곁 파일(warpage debug 진단 · battery 덱)은 처리 전에 **모든** 처리의 입력과 견준다 —",
           "  예전엔 그때까지 읽은 입력과만 견줘 뒤 처리의 입력(update 의 dynain 등)을 덮을 수 있었다. 진단 셋끼리는 같아도 된다 —",
           "  같은 debug_prefix 의 warpage 둘은 뒤가 앞을 덮는다(2026-11-08 전엔 「같은 파일」 rc 1)",
+          "  루프 안 쓰기가 있으면 덱 산출(<output>.k · .dynain)도 그 자리에서 입력과 견준다 — 2026-11-08 전엔 덱 쓰기에서야 보아",
+          "  battery 덱 · 진단 셋을 써 둔 뒤 멈췄다(.dynain 은 쓸지 아직 모르니 쓴다고 보고 견준다 · dynain_embed 면 뺀다)",
           "그 곁 파일의 자리도 YAML 폴더 기준이다 — warpage 의 debug_prefix 는 이 YAML 폴더, battery 덱은 battery 설정의 output(그 설정",
           "  폴더 · 항목에 준 output 은 이 YAML 폴더). 주 덱의 *INCLUDE 는 주 덱 폴더 기준 이름(2026-11-07 전엔 작업 폴더 기준)",
           "battery 항목은 덱 번호를 족마다 기존 모델의 최대값 위로 옮긴다(2026-11-08 — 예전엔 그대로 끌어와 겹쳤다). node_id_offset ·",
