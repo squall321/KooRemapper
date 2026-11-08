@@ -726,10 +726,11 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, const std::
     const PartIndex& parts = closureActive ? partsAll : partsMain;
     const auto variants = definedPartVariantIds(S);
     const auto sections = definedSectionIds(S);
-    // 새 SECID 의 겹침 · 차례는 쌓인 카드까지 넉넉히 센 집합으로 본다(위 `sections` 는 키워드마다 첫 카드 — 있나 · 종류를 가리는 데만 쓴다)
-    // (번호 커서와 같은 공용 훑기 `ModelAssembler::sectionIdsAnyCard` — 리뷰 11-07 #1 에 이 파일에 두었던 것을 11-07 밤 커서에도 쓰려고 옮겼다)
-    const auto secidsAll = sectionIdsAnyCard(S);
-    const long long secidTop = secidsAll.empty() ? 0 : *secidsAll.rbegin();
+    // 새 SECID 의 겹침 · 차례는 번호 커서와 같은 공용 훑기로 본다 — SOLID · SHELL · TSHELL 은 쌓인 카드 묶음까지 정확히, 행 수를 모르는 꼴은
+    // 행마다 첫 칸 숫자를 넉넉히(StepForge 591d5b5 와 같은 규칙 · 위 `sections` 는 키워드마다 첫 카드 — 있나 · 종류를 가리는 데만 쓴다).
+    // 예전엔 모든 행을 넉넉히 세어 제목 · 두께 · 각도의 숫자가 「가장 큰 SECID」 가 되어 정상 계획을 secid_order 로 거절했다(적대적 검토 11-08 #2)
+    const auto secidsAll = sectionIdsInUse(S);
+    const long long secidTop = sectionIdTop(S);
     const auto mids = definedMaterialIds(S);
     // 번호마다 정의한 블록 — 손대는 PID 의 SECID · MID 를 두 블록이 정의하면 그 줄을 거절한다(StepForge 권고 D-681 · 아래 ⑤)
     const auto secDefs = sectionDefinitionLines(S);
@@ -1447,7 +1448,7 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, const std::
             const int ns = static_cast<int>(h.newSection.secid);
             if (sections.count(ns)) fp.push_back("new_section.secid " + std::to_string(ns) + " 가 덱에 이미 있다(" + sections.at(ns) + ")");
             else if (secidsAll.count(ns))
-                fp.push_back("new_section.secid " + std::to_string(ns) + " 가 덱에 이미 있다(*SECTION_* 블록 안의 쌓인 카드 — 데이터 줄 첫 칸)");
+                fp.push_back("new_section.secid " + std::to_string(ns) + " 가 덱에 이미 있다(*SECTION_* 블록의 쌓인 카드 묶음 · 행 수를 모르는 꼴의 행 첫 칸)");
             if (!newSecids.insert(ns).second) fp.push_back("new_section.secid " + std::to_string(ns) + " 를 다른 조각도 쓴다");
             // 판 2 — 새 SECID 는 덱(닫힘 전체 · 쌓인 카드까지)의 가장 큰 SECID 위로 매긴다(§10.3 ③)
             if (v2 && (ns <= plan.maxSecid || ns <= secidTop))
@@ -1506,7 +1507,7 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, const std::
             if (auto it = sections.find(static_cast<int>(ns.secid)); it != sections.end())
                 problem(pid, "secid_collision", "new_section.secid " + sid + " 가 덱(닫힘)에 이미 있다(" + it->second + ")");
             else if (secidsAll.count(ns.secid))
-                problem(pid, "secid_collision", "new_section.secid " + sid + " 가 덱(닫힘)에 이미 있다(*SECTION_* 블록 안의 쌓인 카드 — 데이터 줄 첫 칸)");
+                problem(pid, "secid_collision", "new_section.secid " + sid + " 가 덱(닫힘)에 이미 있다(*SECTION_* 블록의 쌓인 카드 묶음 · 행 수를 모르는 꼴의 행 첫 칸)");
             if (newSecids.count(ns.secid)) problem(pid, "secid_collision", "new_section.secid " + sid + " 가 조각의 새 섹션과 겹친다");
             if (!morphSecids.insert(ns.secid).second) problem(pid, "secid_collision", "new_section.secid " + sid + " 를 다른 모프 줄도 쓴다");
             if (ns.secid <= plan.maxSecid || ns.secid <= secidTop)

@@ -380,10 +380,13 @@ BOM 을 붙인 설정으로 둘 다 **종료 코드 0** 으로 정상 산출물�
 번호를 다시 낼 수 있었습니다(실사용 인클루드 덱 88장 중 83장에서 주 덱만 센 노드·요소 최대값이
 닫힘의 최대값보다 작았습니다).
 
-- 섹션 번호(SECID)는 `*SECTION_*` 블록의 **모든** 데이터 줄 첫 칸 정수를 넉넉히 셉니다(2026-11-07 밤) — 블록마다 첫 카드만
-  세어, 한 키워드 아래 쌓인 둘째 카드의 SECID(예: `examples/wrap/cylinder_2layer.k` 의 `*SECTION_SOLID` 밑 SECID 1 · 2)를 새 섹션이
-  다시 낼 수 있었습니다(rc 0 · 같은 SECID 둘). 정수로 쓴 두께 · 각도 · 숫자 제목 줄도 들어 새 SECID 가 쓸데없이 커질 수 있습니다
-  (겹치는 것보다 안전한 쪽). 「그 SECID 가 있나 · 어떤 섹션인가」 는 첫 카드 표 그대로입니다. 새 SECID 를 내는 op —
+- 섹션 번호(SECID)는 `*SECTION_*` 블록을 **카드 묶음**으로 갈라 셉니다(2026-11-08 · StepForge 리더 591d5b5 와 같은 규칙) —
+  `*SECTION_SOLID` · `_SHELL` · `_TSHELL` 은 묶음 한 벌의 줄 수를 Card 1 이 정하므로(제목 줄 · SHELL 의 Card 2 · ICOMP 1 의 각도 카드)
+  한 키워드 아래 쌓인 묶음의 SECID 까지 정확히 읽고(예: `examples/wrap/cylinder_2layer.k` 의 `*SECTION_SOLID` 밑 SECID 1 · 2 — 예전엔
+  첫 카드만 세어 새 섹션이 2 를 다시 낼 수 있었다), 줄 수를 모르는 꼴(보 · 이산 · SPH · EFG · SPG · PERI · IGA …)과 못 가른 자리부터는
+  행마다 첫 칸 숫자를 넉넉히 셉니다. 제목(`2024` · `12 mm plate`) · 정수로 쓴 두께(`12`) · 각도(`90`)는 SECID 가 아닙니다(11-07 밤 판은
+  모든 행을 세어 그 숫자가 새 SECID 를 부풀렸습니다). 옛 첫 카드 셈(`2.0` 으로 쓴 SECID 를 2 로 읽는다)보다 내려가지 않습니다.
+  「그 SECID 가 있나 · 어떤 섹션인가」 는 첫 카드 표 그대로입니다. 새 SECID 를 내는 op —
   `restack` · `disconnect` · `offset`(다재료 · dual 포함) · `merge` · `cnrb2solid` · IGA — 와 바닥(`id_floor` · `cad_solid_merge_to_deck`
   · `apply_carryover_plan`)이 이 셈을 씁니다.
 - 인클루드를 다 읽었으면 조용합니다. 못 읽은 이름이나 따라가지 않은 `*INCLUDE_*`(`_TRANSFORM` 등)가 있으면
@@ -5926,9 +5929,10 @@ null). 칸 하나라도 다르면 손대는 줄은 `deck_range`(칸 · 계획 �
   바꾼 것이어야 한다 — 키워드 줄 · 제목 · 주석 · 그 밖의 칸 · 딸린 카드를 줄마다 견준다(다르면 `new_section` 에 그 줄).
 - SECID 는 `new_section.secid` 와 같고 · 닫힘에 없고(`secid_collision`) · `deck.max.secid` 위이며 · 조각의 새 섹션을 먼저 매긴 뒤 모프 줄
   차례로 잇는다(`secid_order`). T1~T4 는 넷 다 `thickness` 다.
-- 「닫힘에 없다」 · 「가장 큰 SECID 위」 는 한 키워드 아래 **쌓인 둘째 카드**까지 본다 — `*SECTION_*` 블록의 데이터 줄마다 첫 칸의 정수를
-  SECID 로 넉넉히 센다(공용 번호 커서와 같은 셈 — 예전 커서는 첫 카드만 읽어 쌓인 카드의 SECID 를 새 섹션이 다시 냈다 · 11-07). 두께 · 제목 줄의
-  정수도 들어 거짓 거절이 날 수 있다(안전한 쪽). 조각의 새 섹션(판 1 · 2)도 같은 집합으로 겹침을 본다.
+- 「닫힘에 없다」 · 「가장 큰 SECID 위」 는 공용 번호 커서와 **같은 셈**이다(§3.1(h) — 카드 묶음): SOLID · SHELL · TSHELL 은 쌓인 묶음의
+  SECID 까지 정확히, 줄 수를 모르는 꼴은 행마다 첫 칸 숫자를 넉넉히. 제목 · 두께 · 각도의 숫자는 SECID 가 아니다 — 11-07 판은 모든 행을
+  세어 정상 계획의 새 섹션을 `secid_order` 로 거절했다(StepForge 는 받는 덱 · 적대적 검토 11-08). 조각의 새 섹션(판 1 · 2)도 같은 셈으로
+  겹침을 본다.
 - 넣으면 그 카드를 주 덱 첫 `*END` 앞에 두고 그 PID `*PART` 의 SECID 칸**만** 덱 폭(표준 · i10 10칸 · long 20칸)으로 고친다 — 같은 섹션을 쓰는
   다른 파트는 옛 섹션 그대로다. 보고의 그 줄에 `new_section {secid, thickness}`.
 - 거절 — 못 지은 꼴(`secid` · `file` 이 null — 그 줄은 조각 `instead` 로 물러섰다 · 우리는 변위장만 쓴다 — `new_section` · `morph_instead`) ·

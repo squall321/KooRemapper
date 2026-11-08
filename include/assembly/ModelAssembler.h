@@ -264,8 +264,11 @@ private:
     // 같은 훑기로 번호마다 정의한 블록의 키워드 줄 전부(나온 차례) — 둘 이상이면 그 번호가 두 번 정의됐다(StepForge 권고 D-681)
     static std::map<int, std::vector<size_t>> materialDefinitionLines(const std::vector<std::string>& lines);
     static std::map<int, std::vector<size_t>> sectionDefinitionLines(const std::vector<std::string>& lines);
-    // 번호 커서(`maxSectionId_` · `idMaxima().section`)가 보는 SECID — `*SECTION_*` 블록의 모든 데이터 줄 첫 칸 정수(쌓인 카드까지 넉넉히)
-    static std::set<int> sectionIdsAnyCard(const std::vector<std::string>& lines);
+    // 덱이 쓰는 SECID — 섹션 블록의 카드 묶음(SOLID · SHELL · TSHELL 은 쌓인 묶음까지 정확히) · 행 수를 모르는 꼴은 행마다 첫 칸 숫자 ·
+    // 옛 첫 카드 셈의 합(이월 적용의 새 SECID 겹침), 그리고 그 가장 큰 값(= 번호 커서 `maxSectionId_` · `idMaxima().section` 이 보는 값 ·
+    // 이월 적용의 새 SECID 차례) — StepForge 리더(591d5b5)와 같은 규칙
+    static std::set<int> sectionIdsInUse(const std::vector<std::string>& lines);
+    static int sectionIdTop(const std::vector<std::string>& lines);
     // applyCarryoverPlan 이 남기는 기대 — verifyCarryoverOutput 이 쓴 덱과 대조한다
     struct CarryExpect {
         // 대조의 「앞」 메시 — 인클루드가 있는 덱(판 2)은 닫힘째 읽은 메시(`closure`), 아니면 baseMesh_

@@ -144,6 +144,16 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
   `int()` · `float()` 가 받는 10진 꼴과 같다(파이썬 `float` 도 16진을 안 받는다). 공용 SECID 훑기의 줄 셈이 쓰는 `carryover::integralField`
   가 이 규칙의 바깥 문이다.
 
+- **SECID 는 카드 묶음으로(#2 · 8f6761a · 9298665 의 퇴행)** — 11-07 판의 「섹션 블록의 모든 행 첫 칸」 셈은 제목(`2024` · `12 mm plate`) ·
+  정수 두께(`12`) · 정수 각도(`90`)를 SECID 로 세어 정상 판 2 계획의 새 섹션(조각 9 · 모프 10 — StepForge 591d5b5 가 deck.max.secid 8 을
+  내는 덱)을 `secid_order` 로 거절했고 커서를 부풀렸다(2535716 은 받았다). `cur_scanSectionSets` 가 StepForge `card_sets` 와 같은 규칙으로
+  가른다 — SOLID 1 · SHELL 2 + ICOMP 1 각도 ceil(NIP/8) · TSHELL 1 + 각도(ELFORM 101~105 · ICOMP 0 · 1 밖 · 못 읽은 칸이면 모름) · `_TITLE` 은
+  묶음마다 제목 줄 · 빈 줄도 카드(끝의 빈 줄은 여백) · 묶음의 SECID 칸은 숫자만. 모르는 꼴과 못 가른 자리부터는 행마다 첫 칸 숫자(`loose` —
+  StepForge `secid_bound`). 커서 · 이월 적용의 차례(`sectionIdTop`) · 겹침(`sectionIdsInUse`)이 이 셈 하나를 쓴다. 겹침도 넉넉한 셈을 거두었다 —
+  ICOMP 1 덱에서 StepForge 가 새 SECID 를 각도 숫자(90)와 같게 매길 수 있어 그것을 겹침으로 거절하면 같은 거짓 거절이다(모르는 꼴만
+  넉넉히). 커서가 옛 첫 카드 셈(공백 토큰 — `2.0` → 2) 밑으로 내려가지 않게 둘의 큰 쪽을 쓴다. 검토자의 21 회귀 산출 모으기(752fa2b 와
+  견줌)를 다시 돌렸다 — 아래 결과.
+
 ## 11-07 밤 결정 고침 — 정한 것
 - **출력 규칙(사용자 결정 ①)** — extract-parts(`a33af2f`)와 같은 꼴: 덱 · 보고를 output 폴더의 임시 파일(`.<이름>.kr_tmp_…`)에 쓰고 되읽기 대조 ·
   품질 관문까지 지나면 덱 · 보고 차례로 바꿔 넣는다(`CarryStagedFiles` — extract-parts `StagedFiles` 의 사본 · 셋째 소비자가 오면 공용으로).
@@ -182,6 +192,7 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
   옛 셈과 다를 때 적는 탐침 바이너리로 회귀 전체(111)를 돌렸다: 갈린 곳은 셋 — ① `examples/wrap/cylinder_2layer.k`(진짜 쌓인 카드 —
   `*SECTION_SOLID` 밑 SECID 1 · 2 · 1 → 2)를 쓰는 wrap 실행 스물여덟(wrap 은 절점만 옮기고 SECID 를 내지 않는다 — 산출 그대로) ② 이월 적용 R-1
   의 쌓인 카드 덱(8 → 9 · 10 — 거절 시험이라 산출 없음) ③ 새 회귀 `test_section_cursor_stacked.py`. 그러니 기존 회귀 산출은 바뀌지 않는다.
+  → 11-08 적대적 검토가 이 「모든 행」 셈의 퇴행을 찾아 카드 묶음 셈으로 바꿨다(위 「11-08」 #2).
 - **보 `_ELBOW` · `_WARPAGE`(셋째 묶음 4 — 다른 보처럼)** — 공용 걸음(`forEachNonGridElementCard`)이 MN(Card 10 · 92f50fe) · SN1 · SN2(Card 9 ·
   6341aac — 이 갈래에 그 커밋만 합쳤다)를 카드의 절점에 싣는다. 이월 적용이 그 절점을 쓰는 곳은 나눠 쓴 절점 하나(고치는 PID 의 절점과
   겹치면 `shared_nodes`)라 `elementBlockGap` 의 두 거절을 뺐다. SN 은 스칼라 절점 번호(`*NODE_SCALAR` — `*NODE` 와 겹치면 안 된다)라

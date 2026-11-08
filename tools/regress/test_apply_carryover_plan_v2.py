@@ -21,7 +21,7 @@
   E 새 셸 섹션(§10.5) · F 인클루드(주 덱만 고침) · G refused_transform ·
   R 적대적 검토(11-07 저녁) 고침 — R-1 쌓인 카드 SECID · R-2 인클루드 BOM · R-3 동반 파일 덮기 · R-4 보고 UTF-8 · R-5 링크 덱 폴더 ·
   R-6 *END 둘 · R-7 수의 끝자리 · R-8 담은 뒤 바뀐 덱(gdb 로 적용 직전에 멈춰 파일을 바꾼다 — 못 멈추면 SKIP) ·
-  S StepForge 권고(그쪽 591d5b5 · D-681) — S-2 정수 칸의 실수 꼴
+  S StepForge 권고(그쪽 591d5b5 · D-681) — S-2 정수 칸의 실수 꼴 · S-3 새 SECID 차례(카드 묶음으로 센다 · 11-08)
 
 usage: test_apply_carryover_plan_v2.py <KooRemapper 바이너리>
 """
@@ -1007,6 +1007,36 @@ def part_s(binary):
                     rc, out, rep, d, "new_section")
             check("S-2%s 까닭은 NIP 칸이다(다른 칸이 어긋나 걸린 것이 아니다)" % tag[-1], "NIP" in details(rep, "new_section"),
                   details(rep, "new_section")[:300])
+
+    # S-3 새 SECID 의 차례 — 셸 · 솔리드 · 티쉘 섹션은 카드 묶음으로 정확히 센다(StepForge 591d5b5 와 같은 규칙). 제목 · 두께 · 각도의 숫자는
+    #     SECID 가 아니다 — 예전엔 섹션 블록의 모든 행을 넉넉히 세어 정상 계획의 새 섹션(조각 9 · 모프 10)을 secid_order 로 거절했다(11-08 #2)
+    mass8 = "*SECTION_SOLID_TITLE\nMASS_LUMP#8_sec\n$#   secid    elform\n         8         1\n"
+    shell8 = ("*SECTION_SHELL_TITLE\nMASS_LUMP#8_sec\n$#   secid    elform      shrf       nip     propt   qr/irid     icomp\n"
+              "         8         2         1         %d         0         0         %d\n$#      t1        t2        t3        t4\n%s\n")
+    for tag, old, new, what, ok in (
+            ("s3", "BRACKET#3_sec\n", "2024\n", "섹션 제목이 숫자(2024)", True),
+            ("s3b", "BRACKET#3_sec\n", "12 mm plate\n", "섹션 제목이 숫자로 시작(12 mm plate)", True),
+            ("s3c", mass8, shell8 % (2, 0, "        12        12        12        12"), "정수로 쓴 셸 두께 12", True),
+            ("s3d", mass8, shell8 % (4, 1, "       1.0       1.0       1.0       1.0\n$#      b1        b2        b3        b4\n"
+                                        "        90         0         0        90"), "ICOMP 1 의 정수 각도 90", True),
+            ("s3e", mass8, mass8 + "stacked\n        12         1\n", "진짜 쌓인 카드 묶음(SECID 12 — 지킴이)", False)):
+        d = stage(tag)
+        deck = os.path.join(d, "deck.k")
+        body = read(deck)
+        assert body.count(old) == 1, old
+        write(deck, body.replace(old, new))
+        p = to_v2(d)
+        write(os.path.join(d, "section_4.k"), SECTION_4)
+        can_morph(d, p, {"secid": 10, "thickness": 0.6, "file": "section_4.k", "why": "0.4 → 0.6"})
+        put_file(d, p, "section_4.k")
+        resummarize(p)
+        plan_save(d, p)
+        rc, out, rep = apply_case(binary, d)
+        if ok:
+            check("S-%s %s → 새 섹션(9 · 10)을 받는다(그 숫자는 SECID 가 아니다)" % (tag[1:], what),
+                  rc == 0 and "secid_order" not in kinds(rep), (rc, sorted(kinds(rep)), details(rep, "secid_order")[:200]))
+        else:
+            refused("S-%s %s → 새 섹션 10 이 그 아래다 · secid_order" % (tag[1:], what), rc, out, rep, d, "secid_order")
 
 
 if __name__ == "__main__":
