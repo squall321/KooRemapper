@@ -595,4 +595,24 @@ private:
 // 애매하면 `notChecked` 로 세고, ID 0 은 dangling 이 아니며, `*INCLUDE` 가 있으면 단정하지 않는다.
 ReferenceReport checkElementPartReferences(const std::vector<std::string>& lines);
 
+// ★절점 · 요소 번호를 두 번 정의했나(2026-11-08 · 사용자 결정) — 부르는 쪽이 합친 줄(주 덱 + 인클루드 닫힘)을 **같은 종류끼리** 본다.
+//   리더(`KFileReader` → `Mesh::addNode` · `addElement` 의 `map[id] =`)는 같은 번호를 뒤 정의로 덮어 앞 정의를 **말없이** 잃는다 —
+//   실측: 상자(절점 1~198 · 솔리드 1~100) 위에 battery 덱(절점 1~ · 셸 1~)을 끌어온 덱을 `info` 가 「Nodes 27558」로 세고 SECID · MID
+//   겹침만 짚었다. 같은 종류의 번호가 둘이면 LS-DYNA 는 키워드 단계에서 멈춘다.
+//   종류 — 절점(`*NODE` · 스칼라 절점 — Vol_I 214757 「unique relative to other nodes」) · 솔리드 · 셸 · 티쉘(카드 경계는 `ecBuildIndex`) ·
+//   보 족(`*ELEMENT_BEAM` · `_DISCRETE` · `_SEATBELT` · `_PLOTEL` — null beam 때문에 서로 달라야 한다 · Vol_I 155977 · 157732 · 160300).
+//   질량 · 관성처럼 「권장」인 족과 줄 수를 모르는 카드는 보지 않는다(오탐을 내지 않는다).
+//   `damaged` — 같은 종류 안의 겹침. 겹친 블록과 처음 정의한 블록의 짝마다 한 건(개수 · 첫 번호 · 번호 범위) — 절점 수만큼 건수가 불지
+//   않게. `crossFamily` — 족을 건너 같은 요소 번호(셸 1 · 솔리드 1): LS-DYNA 는 족마다 번호를 따로 두어 받지만 이 도구의 리더는 한 표로
+//   합쳐 뒤 정의만 남긴다(단정하지 않는 알림 — rc · `--strict` 와 무관). 줄은 `lines` 안의 1-기반 번호다.
+struct IdDuplicateReport {
+    std::vector<DamagedCard> damaged;
+    std::vector<DamagedCard> crossFamily;
+    // 리더가 덮어 잃는 정의 수 — 절점(정의 수 − 서로 다른 번호 수) · 격자 요소(솔리드 · 셸 · 티쉘을 한 표로 — 리더가 그렇게 담는다)
+    size_t nodeMerged = 0, elemMerged = 0;
+    // 칸이 어긋나 두 읽기(고정폭 · 토큰)가 다른 번호를 낸 절점 줄 — 겹침을 단정하지 않고 센다
+    int notChecked = 0;
+};
+IdDuplicateReport checkNodeElementDuplicates(const std::vector<std::string>& lines);
+
 } // namespace KooRemapper

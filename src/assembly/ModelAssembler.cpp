@@ -15,6 +15,7 @@
 #include "parser/KFileReader.h"
 #include "parser/IdAllocator.h"   // 번호를 한 길로 — 인클루드 닫힘까지 본 최대값 위로
 #include "parser/DeckScan.h"      // keywordToken — `*INCLUDE ±` 를 알아보려고
+#include "parser/CardCut.h"       // isKeywordLine · isCommentLine — 절점 · 요소 번호 겹침 판정(info)
 #include "parser/ElementCardLayout.h"   // 요소 카드 줄 수 판정 — 리더와 쓰기가 같은 표를 쓴다
 #include "parser/ShellReader.h"
 #include "parser/DynainWriter.h"
@@ -43,6 +44,9 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <set>
+#include <cstdint>
+#include <cstring>
+#include <tuple>
 
 // Knowledge graph (lat.md):
 //   @lat: [[modules/assembly]]
@@ -19386,6 +19390,170 @@ ReferenceReport checkElementPartReferences(const std::vector<std::string>& lines
         }
     }
 
+    return rep;
+}
+
+IdDuplicateReport checkNodeElementDuplicates(const std::vector<std::string>& lines) {
+    IdDuplicateReport rep;
+    enum : uint8_t { NS_NODE, NS_SOLID, NS_SHELL, NS_TSHELL, NS_BEAM, NS_COUNT };
+    static const char* const kNsName[NS_COUNT] = {"절점", "솔리드 요소", "셸 요소", "티쉘 요소", "보 족 요소"};
+    struct Def { int id; uint32_t line; uint8_t ns; };
+    std::vector<Def> defs;
+    // 정의가 든 블록(키워드 줄) — 키워드 줄 차례를 모아 두고 이분 탐색한다(줄마다 표를 두지 않는다)
+    std::vector<uint32_t> kwLines;
+    for (size_t i = 0; i < lines.size(); ++i)
+        if (cardcut::isKeywordLine(lines[i])) kwLines.push_back(static_cast<uint32_t>(i));
+    auto blockOf = [&kwLines](uint32_t line) -> uint32_t {
+        auto it = std::upper_bound(kwLines.begin(), kwLines.end(), line);
+        return it == kwLines.begin() ? 0u : *(it - 1);
+    };
+    const int deckFw = deckFieldWidth(lines);
+
+    // 절점 — 맨 `*NODE`(칸 폭 표대로) · 스칼라 절점(칸 0)
+    for (size_t k = 0; k < kwLines.size(); ++k) {
+        const std::string& kl = lines[kwLines[k]];
+        const std::string kw = deckscan::kwBare(deckscan::keywordToken(kl));
+        const bool plain = (kw == "*NODE");
+        if (!plain && !isScalarNodeKeyword(kw)) continue;
+        const int fw = keywordFieldWidth(kl, deckFw);
+        const size_t end = k + 1 < kwLines.size() ? kwLines[k + 1] : lines.size();
+        for (size_t j = kwLines[k] + 1; j < end; ++j) {
+            const std::string& ln = lines[j];
+            if (cardcut::isCommentLine(ln) || cardcut::isBlank(ln) || ln.find('&') != std::string::npos) continue;
+            int v = 0;
+            if (plain) {
+                // 두 읽기가 같은 번호를 낼 때만 센다 — 칸 폭대로(`readNodeLine` · LS-DYNA 의 고정폭) · 토큰 먼저(`KFileReader` — 좌표가
+                // 붙은 줄이면 고정폭). 둘이 다르면 그 줄은 칸이 어긋나 번호를 단정할 수 없다(8칸 덱에 10칸 번호를 쓴 예제 덱 넷 —
+                // `       100` 을 고정폭은 1 로 읽는다). 겹침이라고 말하지 않고 세어 둔다
+                double xyz[3];
+                if (!deckscan::readNodeLine(ln, fw, v, xyz)) v = 0;
+                std::vector<std::string> tok;
+                {
+                    std::string cur;
+                    for (char c : ln) {
+                        if (c == ',' || c == ' ' || c == '\t' || c == '\r') { if (!cur.empty()) { tok.push_back(cur); cur.clear(); } }
+                        else cur += c;
+                    }
+                    if (!cur.empty()) tok.push_back(cur);
+                }
+                bool glued = false;
+                for (size_t q = 1; q < 4 && q < tok.size() && !glued; ++q)
+                    for (size_t c = 1; c < tok[q].size(); ++c)
+                        if ((tok[q][c] == '+' || tok[q][c] == '-') && !std::strchr("eEdD", tok[q][c - 1])) { glued = true; break; }
+                int reader = v;   // 붙은 줄 · 토큰이 모자란 줄은 리더도 고정폭으로 읽는다
+                if (tok.size() >= 4 && !glued && !deckscan::toInt(tok[0], reader)) reader = 0;
+                if (v <= 0 || reader != v) { ++rep.notChecked; continue; }
+            } else {
+                std::string body = ln;
+                const size_t cm = body.find('$');
+                if (cm != std::string::npos) body.erase(cm);
+                v = deckscan::fieldInt(deckscan::cardFields(body, fw), 0);
+            }
+            if (v > 0) defs.push_back({v, static_cast<uint32_t>(j), NS_NODE});
+        }
+    }
+    // 격자 요소 — 카드 경계는 정본(`ecBuildIndex`)이 정한다(줄 수를 못 정한 블록은 EID 를 내지 않는다)
+    {
+        const ElemCardIndex idx = ecBuildIndex(lines);
+        for (size_t i = 0; i < lines.size(); ++i) {
+            if (idx.span[i] <= 0 || idx.eidOf[i] <= 0) continue;
+            const uint8_t ns = idx.famOf[i] == 'S' ? NS_SOLID : idx.famOf[i] == 'H' ? NS_SHELL : NS_TSHELL;
+            defs.push_back({idx.eidOf[i], static_cast<uint32_t>(i), ns});
+        }
+    }
+    // 보 족 — 칸 자리와 줄 수를 아는 카드만(`known`). 격자 변형은 위 색인이 이미 셌다
+    forEachNonGridElementCard(lines, [&](const NonGridElementCard& c) {
+        if (!c.known || c.eid <= 0) return;
+        const std::string& k = c.keyword;
+        if (k.rfind("*ELEMENT_BEAM", 0) == 0 || k.rfind("*ELEMENT_DISCRETE", 0) == 0 ||
+            k.rfind("*ELEMENT_SEATBELT", 0) == 0 || k.rfind("*ELEMENT_PLOTEL", 0) == 0)
+            defs.push_back({c.eid, static_cast<uint32_t>(c.line), NS_BEAM});
+    });
+
+    std::sort(defs.begin(), defs.end(), [](const Def& a, const Def& b) {
+        return std::tie(a.ns, a.id, a.line) < std::tie(b.ns, b.id, b.line);
+    });
+    // 같은 종류 안 — (종류, 겹친 블록, 처음 정의한 블록)마다 한 건
+    struct Grp { uint8_t ns = 0; uint32_t dupLine = 0, firstLine = 0; int firstId = 0, lo = 0, hi = 0; size_t count = 0; };
+    std::map<std::tuple<uint8_t, uint32_t, uint32_t>, Grp> groups;
+    for (size_t a = 0; a < defs.size();) {
+        size_t b = a + 1;
+        while (b < defs.size() && defs[b].ns == defs[a].ns && defs[b].id == defs[a].id) ++b;
+        for (size_t d = a + 1; d < b; ++d) {
+            Grp& g = groups[std::make_tuple(defs[d].ns, blockOf(defs[d].line), blockOf(defs[a].line))];
+            if (g.count == 0 || defs[d].line < g.dupLine) {
+                g.dupLine = defs[d].line;
+                g.firstLine = defs[a].line;
+                g.firstId = defs[d].id;
+            }
+            g.lo = g.count == 0 ? defs[d].id : std::min(g.lo, defs[d].id);
+            g.hi = g.count == 0 ? defs[d].id : std::max(g.hi, defs[d].id);
+            g.ns = defs[d].ns;
+            ++g.count;
+        }
+        a = b;
+    }
+    // 리더가 덮어 잃는 수 — 절점은 절점끼리, 격자 요소는 족을 건너 한 표(`Mesh::elements`)로 센다
+    {
+        std::vector<int> nodeIds, gridIds;
+        for (const auto& d : defs) {
+            if (d.ns == NS_NODE) nodeIds.push_back(d.id);
+            else if (d.ns != NS_BEAM) gridIds.push_back(d.id);
+        }
+        const size_t nn = nodeIds.size(), ng = gridIds.size();
+        deckscan::sortUnique(nodeIds);
+        deckscan::sortUnique(gridIds);
+        rep.nodeMerged = nn - nodeIds.size();
+        rep.elemMerged = ng - gridIds.size();
+    }
+    std::vector<Grp> gs;
+    for (const auto& [key, g] : groups) { (void)key; gs.push_back(g); }
+    std::sort(gs.begin(), gs.end(), [](const Grp& x, const Grp& y) { return x.dupLine < y.dupLine; });
+    for (const auto& g : gs) {
+        const std::string kw = deckscan::kwBare(deckscan::keywordToken(lines[blockOf(g.dupLine)]));
+        std::string what = std::string(kNsName[g.ns]) + " ID " + std::to_string(g.firstId) + " 가 line " +
+                           std::to_string(g.firstLine + 1) + " 과 겹칩니다";
+        if (g.count > 1)
+            what += " — 이 블록에서 겹친 " + std::string(kNsName[g.ns]) + " " + std::to_string(g.count) + "개(" +
+                    std::to_string(g.lo) + "~" + std::to_string(g.hi) + ")";
+        what += " — 같은 종류의 ID 는 유일해야 합니다";
+        rep.damaged.push_back({static_cast<int>(g.dupLine) + 1, kw, what});
+    }
+
+    // 족을 건너 같은 요소 번호 — 리더가 한 표(`Mesh::elements`)로 담는 격자 족(솔리드 · 셸 · 티쉘)끼리만(보 족은 리더가 담지 않아
+    // 합치지 않는다). (뒤 족, 앞 족)의 짝마다 한 건 · 번호마다 한 번 센다. 줄은 뒤 족의 첫 정의
+    {
+        std::vector<Def> el;
+        for (const auto& d : defs)
+            if (d.ns != NS_NODE && d.ns != NS_BEAM) el.push_back(d);
+        std::sort(el.begin(), el.end(), [](const Def& a, const Def& b) { return std::tie(a.id, a.line) < std::tie(b.id, b.line); });
+        struct XGrp { uint32_t line = 0; int firstId = 0, lo = 0, hi = 0; size_t count = 0; uint8_t nsA = 0, nsB = 0; };
+        std::map<std::pair<uint8_t, uint8_t>, XGrp> xs;
+        for (size_t a = 0; a < el.size();) {
+            size_t b = a + 1;
+            while (b < el.size() && el[b].id == el[a].id) ++b;
+            for (size_t d = a + 1; d < b; ++d) {
+                if (el[d].ns == el[a].ns) continue;
+                XGrp& g = xs[std::make_pair(el[d].ns, el[a].ns)];
+                if (g.count > 0 && g.hi == el[d].id) continue;   // 같은 번호를 한 짝에서 두 번 세지 않는다(번호 차례로 온다)
+                if (g.count == 0 || el[d].line < g.line) { g.line = el[d].line; g.firstId = el[d].id; }
+                g.lo = g.count == 0 ? el[d].id : std::min(g.lo, el[d].id);
+                g.hi = g.count == 0 ? el[d].id : std::max(g.hi, el[d].id);
+                g.nsA = el[d].ns;
+                g.nsB = el[a].ns;
+                ++g.count;
+            }
+            a = b;
+        }
+        for (const auto& [key, g] : xs) {
+            (void)key;
+            const std::string kw = deckscan::kwBare(deckscan::keywordToken(lines[blockOf(g.line)]));
+            rep.crossFamily.push_back({static_cast<int>(g.line) + 1, kw,
+                std::string(kNsName[g.nsA]) + " ID " + std::to_string(g.firstId) + " 이 " + kNsName[g.nsB] + "에도 있습니다 — 족을 건너 "
+                "겹친 번호 " + std::to_string(g.count) + "개(" + std::to_string(g.lo) + "~" + std::to_string(g.hi) + "). LS-DYNA 는 족마다 "
+                "번호를 따로 두지만 이 도구의 리더는 한 표로 합쳐 뒤 정의만 남깁니다"});
+        }
+    }
     return rep;
 }
 
