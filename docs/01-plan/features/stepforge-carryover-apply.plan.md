@@ -187,7 +187,24 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
 - **조각 바닥은 절점 · 요소만(#6 · 문서)** — 이 문서(아래 「11-07 밤」 의 권고 ③ · 셋째 묶음 커서)와 그 커밋 글이 이월 적용의 조각 이동량
   바닥을 SECID · MID 커서의 소비자로 적었는데, 그 바닥(CarryoverApply ⑨)은 `idMaxima()` 의 절점 · 요소 최대값만 본다 — 줄을 고쳤다(커밋 글은
   그대로 남는다). 이월 적용이 SECID 셈을 쓰는 곳은 새 섹션의 차례 · 겹침, MID 셈은 「조각 MID 가 덱에 있나」 다. 도움말 · 카탈로그의 「조각
-  번호는 덱 바닥 위」 도 절점 · 요소 번호라고 적었다(PID · SECID · MID 는 옮기지 않는다).
+  번호는 덱 바닥 위」 도 절점 · 요소 번호라고 적었다(PID · SECID · MID 는 옮기지 않는다). 설명서 §3.1(h) 의 같은 말도 11-08 둘째에 고쳤다.
+
+## 11-08 둘째 — 재질 번호(MID) 가족 고침(사용자 결정 「이번 판에 다 고친다」) — 정한 것
+- **공용 재질 번호 훑기 하나(`parser/MaterialIds.h` · `matids`)** — 세기 · 있나 · 두 번 정의 · 정의 지우기 · 베끼기 · 고정 번호대 겹침이 같은
+  셈을 쓴다(둘째 소비자 규칙 — op 마다 일곱 벌의 사본이 따로 셌다). 구조 재질 = `*MAT_*` 가운데 열 재질(`cards::isThermalMaterialKeyword` —
+  TMID)과 `*MAT_ADD_*` 를 뺀 것. 섹션 카드 묶음 셈과 같은 꼴 — 빈 줄도 카드 · 끝의 빈 줄은 여백 · `$` 는 건너뜀 · 쉼표 줄은 모르는 꼴.
+- **쌓인 재질 묶음((g))** — 묶음 한 벌의 줄 수를 Vol II R16 카드 요약이 정하는 꼴만 다 읽는다: `*MAT_ELASTIC`(001) 1 + Card 1.1(E < 0 ·
+  StepForge 591d5b5 `card_set_rows` 와 같다) + Card 2(`_FLUID`) · `*MAT_PLASTIC_KINEMATIC`(003) 2 · `*MAT_VISCOELASTIC`(006) 1 · `*MAT_NULL`(009) 1
+  · `*MAT_RIGID`(020) 3 · `*MAT_PIECEWISE_LINEAR_PLASTICITY`(024 · 옵션 없는 꼴) 4. 저장소 덱의 구조 재질 꼴 가운데 이 여섯이 대부분이다(ELASTIC
+  531 · 024 283 · 006 215 · 003 205). E 칸이 수가 아니면(`&E`) 모름 — 지어내지 않는다. 그 밖의 꼴과 못 가른 자리부터는 행마다 첫 칸 숫자
+  (`deckscan::digitsField` — 섹션과 공용)를 넉넉히 센다(커서 · 겹침만 — 「있나」 는 묶음의 Card 1). 커서(`cur_scanMaxMaterialId`)가 그
+  최대 · 있나(`definedMaterialIds` · `materialsReachable`)가 정의 · 두 번 정의(`materialDefinitionLines` — 이월 적용 part_duplicate)가 묶음마다
+  Card 1 줄을 쓴다(쌓인 묶음끼리도 센다 — StepForge `dup_mats` 와 같은 쪽). StepForge 는 `*MAT_ELASTIC` 만 쌓인 묶음을 읽고 다른 재질은 새
+  번호를 매기지 않아 MID 위끝을 세지 않는다 — 우리 커서가 넉넉한 쪽이라 겹침은 없다.
+- **MID 를 내는 op 마다 같은 셈((d))** — matswap(단독 · assemble) · cclip · ale · cnrb2solid · cnrb2spring · matdb match_part 가 각자 센
+  `*MAT_` 첫 카드(또는 모든 행) 셈을 `matids` 로 바꿨다. assemble 의 matswap · matdb 는 공용 커서(`maxMaterialId_` · matswap 은
+  `maxSectionId_` 도)와 견주고 낸 번호를 올린다 — 같은 실행의 앞 op(offset)이 덧붙인 재질 · 섹션은 아직 rawLines_ 에 없어 예전 훑기가
+  못 보고 MID 2 · SECID 2 를 또 냈다(--strict 망가진 카드 2건 · 실측). 회귀 `test_material_id_family.py` G · D 17항(4dfe039 에서 17 실패).
 
 ## 11-07 밤 결정 고침 — 정한 것
 - **출력 규칙(사용자 결정 ①)** — extract-parts(`a33af2f`)와 같은 꼴: 덱 · 보고를 output 폴더의 임시 파일(`.<이름>.kr_tmp_…`)에 쓰고 되읽기 대조 ·

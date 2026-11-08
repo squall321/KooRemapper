@@ -560,6 +560,7 @@ swaps:
 """},
    cmds=["KooRemapper matswap swap.yaml"], outputs=["two_cubes_rubber.k"],
    notes=["번들은 *PARAMETER 로 &PID1 &MID1 &SECID1 &HGID1 &LCID1 자리표시를 쓰는 k 파일 (examples/matswap/rubber.k 형식). ID 는 충돌 없게 자동 부여",
+          "  새 MID 는 공용 재질 훑기 위로(2026-11-08) — 열 재질 TMID · *MAT_ADD_* 는 세지 않고 쌓인 재질 묶음은 센다. assemble 안이면 앞 op 이 낸 MID · SECID 도 피한다",
           "pids: [..] / swap_all: true 도 가능. PART 카드가 PID SECID MID 3필드뿐인 모델(generate box 출력 등)도 된다"])
 op("assemble", "재료·어셈블리", "replace·squeeze·restack·update 등 여러 파트 연산을 순차 적용하고 초기응력 누적", "조립 복합 pipeline",
    "KooRemapper assemble <config.yaml>",
@@ -673,6 +674,7 @@ pid_refs: strict
           "k_rot 은 회전 3자유도 강성이다(기본 1.0e7 N*mm/rad). 0 으로 두면 회전을 풀지만 원 CNRB 와 달라진다.",
           "gap·k_engage·k_axial·k_rot 는 실측이 아닌 가정값이다 — 기본값을 쓰면 콘솔에 그 사실을 알린다.",
           "새 ID 는 고정 번호대(노드 9000만·요소 990만·카드 99만)다. 원본과 겹치면 조용히 밀지 않고 rc=1 이다.",
+          "  재질 번호대는 공용 재질 훑기로 견준다(2026-11-08) — 열 재질의 TMID 는 MID 가 아니고(예전 거짓 겹침) 쌓인 재질 묶음의 MID 는 센다",
           "CNRB 가 잇는 두 파트는 요소 연결성으로 판정한다. 세트 안의 '*NODE 에 없는 ID' 는 제외하고 몇 개인지 알린다."])
 op("contact", "하중·경계·접촉", "접촉 정의 분석·생성·자동감지·변환·수정·삭제를 한 YAML 로 순차 실행", "접촉 contact tied detect",
    "KooRemapper contact <config.yaml>",
@@ -1017,7 +1019,8 @@ fragment_map: examples/cad_solid_merge_to_deck/stepforge_fragment.json
           "바닥 = assemble 과 같은 커서(**인클루드 닫힘까지**)의 최대값 + 1. pid_start 는 PID·SECID·MID 셋의 최대값 위다",
           "  (SECID 는 *SECTION_* 블록을 카드 묶음으로 갈라 센다 — SOLID · SHELL · TSHELL 은 쌓인 묶음까지 정확히, 줄 수를 모르는 꼴은",
           "  행마다 첫 칸 숫자를 넉넉히 · 제목 · 두께 · 각도의 숫자는 SECID 가 아니다 · StepForge 591d5b5 와 같은 규칙 · 11-08)",
-          "  (열 재질 *MAT_THERMAL_* · *MAT_T01~T18 의 TMID 는 MID 와 독립된 번호라 세지 않는다 — Vol II 3-1)",
+          "  (열 재질 *MAT_THERMAL_* · *MAT_T01~T18 의 TMID 는 MID 와 독립된 번호라 세지 않는다 — Vol II 3-1 · 한 키워드 아래 쌓인 재질",
+          "  묶음은 센다 — 줄 수를 아는 꼴은 묶음마다, 모르는 꼴은 행마다 첫 칸 숫자 · 2026-11-08)",
           "★요소 바닥은 **모든 요소 족**이다(2026-11-07) — 솔리드 · 셸 · 티쉘에 더해 보 · 이산 · 질량 · 안전띠 · 플롯 요소와",
           "  줄 수를 모르는 변형의 EID 까지 센다(리더는 그 요소를 메시에 담지 않는다). `cad_solid_merge_to_deck` 도 이 바닥으로 옮긴다",
           "  (조각은 셋을 같은 번호로 쓴다 — 삽입도 한 이동량으로 옮긴다)",

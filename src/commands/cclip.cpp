@@ -3,6 +3,7 @@
 #include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 #include "parser/InitialStressCard.h"   // *INITIAL_STRESS_SOLID 카드 1 정본(I10×8)
 #include "parser/IdAllocator.h"   // 못 본 자리 · 단정 못 함 경고
+#include "parser/MaterialIds.h"   // 재질 번호 공용 훑기(열 재질 · 덧붙임 카드 · 쌓인 묶음 — 2026-11-08)
 #include "parser/ElementCardLayout.h"   // deckFieldWidth — 칸 폭 정본
 #include "parser/IncludeClosure.h"   // 충돌 코퍼스 — 인클루드 닫힘(정본)
 #include "parser/DeckWriter.h"
@@ -1150,7 +1151,8 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
     int nextNid  = std::max({mesh.getMaxNodeId(), inclReaderMax.node, KooRemapper::scalarNodeMaxId(lines)}) + 1;
     int nextEid  = std::max(mesh.getMaxElementId(), inclReaderMax.elem) + 1;
     int nextSec  = std::max(cc_scanMaxId(scanLines, "*SECTION"), 0) + 1;
-    int nextMid  = std::max(cc_scanMaxId(scanLines, "*MAT"), 0) + 1;
+    // MID 는 공용 재질 훑기로 센다(열 재질 TMID · `*MAT_ADD_*` 는 빼고 · 쌓인 재질 묶음은 센다 — 11-08 (d))
+    int nextMid  = KooRemapper::matids::maxId(scanLines) + 1;
     int nextSet  = std::max(cc_scanMaxId(scanLines, "*SET"), 0) + 1;
     // extra part-like ids (CNRB shares the part id space with *PART variants)
     int nextPidX = std::max(cc_scanMaxPartId(scanLines),

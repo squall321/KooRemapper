@@ -28,6 +28,8 @@
 #include "test_StagedWrite.cpp"
 // 보고 글자를 바른 UTF-8 로(공용 util::validUtf8) — 2026-11-08
 #include "test_Utf8.cpp"
+// 재질 번호 공용 훑기(쌓인 재질 묶음 · 열 재질 · 덧붙임 카드) — 2026-11-08
+#include "test_MaterialIds.cpp"
 
 int main(int argc, char* argv[]) {
     (void)argc;

@@ -3,6 +3,7 @@
 #include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 #include "parser/IncludeClosure.h"   // FlatDeck — flatten_includes(2026-10-17)
 #include "parser/IdAllocator.h"   // 인클루드 닫힘 · 못 본 자리 경고
+#include "parser/MaterialIds.h"   // 재질 번호 공용 훑기(열 재질 · 덧붙임 카드 · 쌓인 묶음 — 2026-11-08)
 #include "parser/DeckWriter.h"
 #include "cnrb2spring.h"
 #include "cli/ConsoleOutput.h"
@@ -372,7 +373,7 @@ struct CgUsedIds {
 
 static CgUsedIds cg_scanUsedIds(const std::vector<std::string>& lines) {
     CgUsedIds u;
-    enum Kind { NONE, NODE, ELEM, PART, SECT, MAT, CURVE, COORD };
+    enum Kind { NONE, NODE, ELEM, PART, SECT, CURVE, COORD };   // MID 는 공용 재질 훑기(아래 `matids::inUse`)
     Kind kind = NONE;
     bool firstDataTaken = false;
     bool titlePending = false;   // '_TITLE' 카드의 제목 줄 한 줄
@@ -391,7 +392,6 @@ static CgUsedIds cg_scanUsedIds(const std::vector<std::string>& lines) {
             else if (up.rfind("*ELEMENT_", 0) == 0)           kind = ELEM;
             else if (up.rfind("*PART", 0) == 0)               kind = PART;
             else if (up.rfind("*SECTION_", 0) == 0)           kind = SECT;
-            else if (up.rfind("*MAT_", 0) == 0)               kind = MAT;
             else if (up.rfind("*DEFINE_CURVE", 0) == 0)       kind = CURVE;
             else if (up.rfind("*DEFINE_COORDINATE", 0) == 0)  kind = COORD;
             else                                              kind = NONE;
@@ -422,7 +422,7 @@ static CgUsedIds cg_scanUsedIds(const std::vector<std::string>& lines) {
             if (pid > 0) u.part.insert(pid);
             continue;
         }
-        // SECTION·MAT·DEFINE_CURVE·DEFINE_COORDINATE — 제목 줄은 '_TITLE 이면 한 줄' 로만 건넌다(cg_parseNodeSets 와 같은 판정).
+        // SECTION·DEFINE_CURVE·DEFINE_COORDINATE — 제목 줄은 '_TITLE 이면 한 줄' 로만 건넌다(cg_parseNodeSets 와 같은 판정).
         // 여기서 cg_looksLikeDataLine 으로 거르면 칸이 하나뿐인 헤더 줄(예: *DEFINE_CURVE_TITLE 의 LCID)이
         // 통째로 걸러지고 다음 데이터 줄이 ID 로 등록돼 충돌 검사가 죽는다.
         if (titlePending) {
@@ -448,11 +448,13 @@ static CgUsedIds cg_scanUsedIds(const std::vector<std::string>& lines) {
         firstDataTaken = true;
         switch (kind) {
             case SECT:  u.sect.insert(id);  break;
-            case MAT:   u.mat.insert(id);   break;
             case CURVE: u.curve.insert(id); break;
             default: break;
         }
     }
+    // MID 는 공용 재질 훑기로 센다 — 열 재질의 TMID · `*MAT_ADD_*` 의 첫 칸은 MID 가 아니고, 한 키워드 아래 쌓인 재질 묶음은 센다
+    // (행 수를 모르는 꼴은 행마다 첫 칸 숫자 — 11-08 (d) · 예전엔 블록마다 첫 데이터 줄을 세어 TMID 로 거짓 겹침을, 쌓인 둘째 MID 는 놓쳤다)
+    u.mat = KooRemapper::matids::inUse(lines);
     return u;
 }
 

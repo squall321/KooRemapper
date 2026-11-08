@@ -387,8 +387,18 @@ BOM 을 붙인 설정으로 둘 다 **종료 코드 0** 으로 정상 산출물�
   행마다 첫 칸 숫자를 넉넉히 셉니다. 제목(`2024` · `12 mm plate`) · 정수로 쓴 두께(`12`) · 각도(`90`)는 SECID 가 아닙니다(11-07 밤 판은
   모든 행을 세어 그 숫자가 새 SECID 를 부풀렸습니다). 옛 첫 카드 셈(`2.0` 으로 쓴 SECID 를 2 로 읽는다)보다 내려가지 않습니다.
   「그 SECID 가 있나 · 어떤 섹션인가」 는 첫 카드 표 그대로입니다. 새 SECID 를 내는 op —
-  `restack` · `disconnect` · `offset`(다재료 · dual 포함) · `merge` · `cnrb2solid` · IGA — 와 바닥(`id_floor` · `cad_solid_merge_to_deck`
-  · `apply_carryover_plan`)이 이 셈을 씁니다.
+  `restack` · `disconnect` · `offset`(다재료 · dual 포함) · `merge` · `cnrb2solid` · IGA — 와 바닥(`id_floor` · `cad_solid_merge_to_deck`)이
+  이 셈을 쓰고, `apply_carryover_plan` 은 새 섹션의 차례 · 겹침에 씁니다(조각 이동량 바닥은 절점 · 요소 최대값만 본다 — 11-08 정정).
+- 재질 번호(MID)는 **구조 재질만** 셉니다 — 열 재질(`*MAT_THERMAL_*` · 번호 이름 `*MAT_T01`~`*MAT_T18` — TMID)과 `*MAT_ADD_*`(덧붙임 —
+  첫 칸이 MID 또는 PID)는 빼고(§11), **한 키워드 아래 쌓인 재질(Card Sets)도** 셉니다(2026-11-08 · 공용 훑기 `parser/MaterialIds.h`).
+  묶음 한 벌의 줄 수를 Vol II 가 정하는 꼴 — `*MAT_ELASTIC`(001 · Card 1.1 은 E < 0 일 때 · `_FLUID` 면 Card 2) · `*MAT_PLASTIC_KINEMATIC`(003)
+  2 · `*MAT_VISCOELASTIC`(006) 1 · `*MAT_NULL`(009) 1 · `*MAT_RIGID`(020) 3(빈 Card 2 · 3 도 카드) · `*MAT_PIECEWISE_LINEAR_PLASTICITY`(024 ·
+  옵션 없는 꼴) 4 — 은 묶음마다 MID 를 정확히 읽고, 그 밖의 꼴은 행마다 첫 칸 숫자를 넉넉히 셉니다(새 번호 · 겹침 검사만 — 「그 재질이
+  있나」 는 묶음의 Card 1). 예전엔 블록마다 첫 카드만 세어 쌓인 둘째 MID 를 새 재질이 다시 냈고, op 마다 따로 센 훑기는 TMID 로 커서를
+  올렸습니다(TMID 50 → 새 MID 51). 같은 셈을 쓰는 자리 — 공용 커서(assemble 계열 · `id_floor` 의 `pid_start` · `cad_solid_merge_to_deck`) ·
+  `matswap`(단독 · assemble) · `cclip` · `ale` · `cnrb2solid` · `cnrb2spring`(고정 번호대 겹침 — TMID 로 거짓 겹침을 내던 것을 고쳤고 쌓인
+  MID 와의 진짜 겹침을 잡는다) · `matdb` 의 `match_part`. assemble 의 `matswap` · `matdb` 는 같은 실행의 앞 op 이 낸 번호도 피합니다
+  (예전엔 offset 뒤의 matswap 이 MID 2 · SECID 2 를 또 냈다). 회귀 `tools/regress/test_material_id_family.py`.
 - 인클루드를 다 읽었으면 조용합니다. 못 읽은 이름이나 따라가지 않은 `*INCLUDE_*`(`_TRANSFORM` 등)가 있으면
   **한 번** 경고하고 종료 코드는 그대로 0 입니다.
   ```

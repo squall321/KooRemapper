@@ -988,7 +988,8 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, const std::
             continue;
         }
         // 그 PID 의 SECID · MID 를 두 블록 이상이 정의하면 LS-DYNA 는 둘째 정의에서 멈춘다 — StepForge 도 그 줄에서 멈춘다(권고 D-681 ·
-        // 사용자 결정 11-07 밤). `*PART` 가 둘인 것과 같은 갈래(part_duplicate)로 거절한다. 정의는 블록마다 첫 카드다(번호 훑기와 같다)
+        // 사용자 결정 11-07 밤). `*PART` 가 둘인 것과 같은 갈래(part_duplicate)로 거절한다. 정의는 카드 묶음마다다 — 한 키워드 아래 쌓인
+        // 묶음끼리도 센다(번호 훑기와 같은 셈 · SECID 11-08 #2 · MID 11-08 (g)) · 자리는 그 묶음의 Card 1 줄
         {
             const PartLoc& loc = parts.plain.at(pid);
             std::string dup;

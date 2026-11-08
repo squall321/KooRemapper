@@ -1,6 +1,7 @@
 #include "matswap.h"
 #include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 #include "parser/IdAllocator.h"   // 인클루드 닫힘까지 센 최대값 · 못 본 자리 경고
+#include "parser/MaterialIds.h"   // 재질 번호 공용 훑기(열 재질 · 덧붙임 카드 · 쌓인 묶음 — 2026-11-08)
 #include "parser/DeckWriter.h"
 #include "util/YamlComment.h"
 #include "kw_util.h"
@@ -337,7 +338,10 @@ int runMatswap(const std::string& modelFile, const std::string& bundleFile,
     int maxHGID  = scanMax("*HOURGLASS");
     int maxLCID  = scanMax("*DEFINE_CURVE");
     int maxSECID = scanMax("*SECTION");
-    int maxMID   = scanMax("*MAT_");
+    // MID 는 공용 재질 훑기로 센다 — 열 재질의 TMID · `*MAT_ADD_*` 의 첫 칸(MID · PID)은 MID 가 아니고, 쌓인 재질 묶음은 센다(11-08 (d) ·
+    // 예전 `*MAT_` 첫 카드 셈은 TMID 로 커서를 올리고 쌓인 둘째 MID 를 다시 냈다)
+    int maxMID   = KooRemapper::ids::maxOverClosure(modelLines, inclClosure,
+                                                    [](const std::vector<std::string>& L) { return KooRemapper::matids::maxId(L); });
     console.println("[matswap] Model max IDs -> HGID=" + std::to_string(maxHGID) +
                     " LCID=" + std::to_string(maxLCID) +
                     " SECID=" + std::to_string(maxSECID) +
