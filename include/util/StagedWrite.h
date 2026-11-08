@@ -63,6 +63,9 @@ public:
     void discardAll();
     bool has(const std::string& dst) const;
     Mode mode(const std::string& dst) const;   // 잡지 않은 자리는 Rename
+    // 글 안의 임시 경로(그대로 · 절대 경로 · 접미사를 뗀 꼴 · 파일 이름만)를 제 이름으로 — 콘솔 · 보고에 임시 이름이 새지 않게
+    // (쓰기 관문의 long 덱 말은 접미사 없는 접두를, 되읽기 예외는 임시 경로를 실었다). 바꿔 넣거나 지운 뒤에도 고친다
+    std::string unstage(const std::string& s) const;
     // 쌓인 말을 꺼낸다(꺼내면 비운다)
     std::vector<Note> takeNotes();
 
@@ -75,6 +78,7 @@ private:
         int slot = -1;          // 신호 때 지울 경로 표의 자리
     };
     std::vector<Item> items_;
+    std::vector<std::pair<std::string, std::string>> names_;   // 임시 꼴 → 제 이름(긴 것부터 바꾼다)
     std::vector<Note> notes_;
 };
 

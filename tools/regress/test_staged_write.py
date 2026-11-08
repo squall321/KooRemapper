@@ -22,6 +22,8 @@
     보고는 늘 마지막이고 실제로 바꿔 넣은 것을 말한다(뒤가 실패하면 그 상태로 다시 쓴다). 같은 산출을 쓰는 동시 실행은 잠금
     `.kr_tmp_lock_<이름 해시>`(flock)로 바꿔 넣기가 겹치지 않는다 — 이 시험이 그 잠금을 쥐고 실행이 기다리는지 본다(이름 해시는
     FNV-1a 64 의 아래 32 비트 — 도우미의 정의를 여기서 다시 센다).
+  M 말 — 쓰기 관문의 말(long 덱은 `.k` 없는 접두)과 되읽기 예외가 임시 이름을 콘솔 · 보고에 실었다. 멈춘 사이 임시 덱을 못 읽게
+    (chmod 000) 해 그 실패를 일으키고 콘솔 · 보고 어디에도 `.kr_tmp_` 가 없고 제 이름이 있는지 본다.
 
 usage: test_staged_write.py <KooRemapper 바이너리>
 """
@@ -153,7 +155,10 @@ def ep_big_dir(name):
     return d
 
 
-def start(binary, d, *args):
+def start(binary, d, *args, pipe=False):
+    if pipe:   # 말을 모은다(짧은 말뿐이라 파이프가 차지 않는다)
+        return subprocess.Popen([binary, *args], cwd=d, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                encoding="utf-8", errors="replace")
     return subprocess.Popen([binary, *args], cwd=d, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
@@ -428,11 +433,11 @@ def temp_of(d, base):
                                          n.split(".")[1].endswith("_" + h)) or n.startswith("." + base + ".kr_tmp_")]
 
 
-def stop_before_commit(binary, d, args, base, also=(), tries=40):
+def stop_before_commit(binary, d, args, base, also=(), tries=40, pipe=False):
     """그 대상(과 `also` 의 대상)의 임시 파일이 다 보이면 SIGSTOP — 멈춘 뒤에도 있어야 한다(아직 바꿔 넣지 않았다)."""
     staged = lambda: temp_of(d, base) and all(temp_of(d, b) for b in also)  # noqa: E731
     for _ in range(tries):
-        p = start(binary, d, *args)
+        p = start(binary, d, *args, pipe=pipe)
         while p.poll() is None:
             if staged():
                 os.kill(p.pid, signal.SIGSTOP)
@@ -571,6 +576,63 @@ def sec_c(binary):
     check("C-8 쥐는 이 없는 잠금 파일 — rc 0 · 보고 ok · 잠금 파일 지움", rc == 0 and ok_report(rep) and not os.path.exists(lock), (rc, out[-200:]))
 
 
+# ── M 말 ─────────────────────────────────────────────────────────────────────
+def sec_m(binary):
+    print("[M] 말 — 콘솔 · 보고에 임시 이름(.kr_tmp_)이 새지 않는다")
+    if os.geteuid() == 0:
+        check("M — root 는 파일 권한을 넘는다(건너뜀)", True)
+        return
+    # M-1 이월 적용 — 멈춘 사이 임시 덱을 못 읽게 한다(쓰기 관문의 열기 실패 또는 되읽기 예외 — 둘 다 임시 경로를 말한다)
+    got = None
+    for k in range(10):
+        d = co_ready("M1_%d" % k)
+        p = start(binary, d, *CO_ARGS, pipe=True)
+        hit = False
+        while p.poll() is None:
+            t = temp_of(d, "deck_applied.k")
+            if t:
+                os.kill(p.pid, signal.SIGSTOP)
+                t = temp_of(d, "deck_applied.k")
+                if t:
+                    os.chmod(os.path.join(d, t[0]), 0)
+                    hit = True
+                os.kill(p.pid, signal.SIGCONT)
+                break
+        out = p.communicate(timeout=120)[0]
+        if hit and p.returncode == 1:
+            got = (d, out)
+            break
+    if got is None:
+        check("M-1 — 임시 덱을 못 읽게 한 실패를 일으키지 못했다", False)
+    else:
+        d, out = got
+        text = open(os.path.join(d, "deck_applied_carryover.json"), encoding="utf-8").read()
+        rep = json.loads(text)
+        said = " ".join(p["detail"] for p in rep.get("problems", []))
+        check("M-1 apply_carryover_plan 임시 덱을 못 읽는 실패 — 콘솔 · 보고에 .kr_tmp_ 없음 · 제 이름(deck_applied.k)을 말한다",
+              ".kr_tmp_" not in out and ".kr_tmp_" not in text and "deck_applied.k" in said and rep.get("output_written") is False,
+              ([l for l in out.splitlines() if ".kr_tmp_" in l][:2], said[:300]))
+    # M-2 extract-parts — 바꿔 넣기 실패(멈춘 사이 산출 자리를 폴더로) · 앞서 거절(번호 지도 자리를 폴더로)
+    for tag, prep in (("산출 자리가 폴더", lambda d: (os.remove(os.path.join(d, "out.k")), os.mkdir(os.path.join(d, "out.k")))),
+                      ("번호 지도 자리가 폴더", lambda d: (os.remove(os.path.join(d, "out_renumber_map.json")),
+                                                     os.mkdir(os.path.join(d, "out_renumber_map.json"))))):
+        d = ep_big_dir("M2_" + tag.split()[0])
+        run(binary, d, *EP_ARGS)
+        p = stop_before_commit(binary, d, EP_ARGS, "out.k", also=("out_renumber_map.json",), pipe=True)
+        if p is None:
+            check("M-2 — 바꿔 넣기 전에 멈추지 못했다", False)
+            continue
+        prep(d)
+        os.kill(p.pid, signal.SIGCONT)
+        out1 = p.communicate(timeout=120)[0]
+        text1 = open(os.path.join(d, "r.json"), encoding="utf-8").read()
+        rc, out2 = run(binary, d, *EP_ARGS)   # 같은 자리로 한 번 더(쓰기 전에 거절하는 길)
+        text2 = open(os.path.join(d, "r.json"), encoding="utf-8").read()
+        said = out1 + out2 + text1 + text2
+        check("M-2 extract-parts %s — 바꿔 넣기 실패 · 다음 실행 거절 모두 rc 1 · 콘솔 · 보고에 .kr_tmp_ 없음" % tag,
+              p.returncode == 1 and rc == 1 and ".kr_tmp_" not in said, (p.returncode, rc, [l for l in said.splitlines() if ".kr_tmp_" in l][:2]))
+
+
 def main():
     global TMP
     if len(sys.argv) < 2:
@@ -583,6 +645,7 @@ def main():
         sec_k(binary)
         sec_o(binary)
         sec_c(binary)
+        sec_m(binary)
     finally:
         for w, ds, _ in os.walk(TMP):   # 읽기 전용으로 둔 폴더도 지운다
             for x in ds:

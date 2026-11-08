@@ -97,6 +97,24 @@ TEST(StagedWrite_긴_이름도_쓰고_바꿔_넣고_실패면_임시_파일만_�
     ASSERT_EQ(slurp(dst), std::string("new\n"));
 }
 
+TEST(StagedWrite_unstage_는_임시_경로의_꼴마다_제_이름으로_바꾼다) {
+    SwScratch s("unstage");
+    fs::create_directories(s.root / "dir");
+    const std::string dst = s.at("dir/applied.k");
+    staged_write::StagedFiles st;
+    std::string tmp, why;
+    ASSERT_TRUE(st.reserve(dst, ".k", tmp, why));
+    const std::string stem = tmp.substr(0, tmp.size() - 2);
+    const std::string base = fs::path(tmp).filename().string();
+    ASSERT_EQ(st.unstage("Cannot open file: " + tmp), "Cannot open file: " + dst);                         // 되읽기 예외
+    ASSERT_EQ(st.unstage("출력 파일을 쓰지 않았습니다: " + stem + " /"), "출력 파일을 쓰지 않았습니다: " + dst.substr(0, dst.size() - 2) + " /");   // long 덱 — 접두
+    ASSERT_EQ(st.unstage(fs::absolute(tmp).lexically_normal().string()), dst);
+    ASSERT_EQ(st.unstage("[" + base + "]"), std::string("[applied.k]"));
+    st.discardAll();   // 지운 뒤에도 말은 고친다
+    ASSERT_EQ(st.unstage(tmp + " · " + tmp), dst + " · " + dst);
+    ASSERT_EQ(st.unstage("상관없는 글"), std::string("상관없는 글"));
+}
+
 #ifndef _WIN32
 TEST(StagedWrite_SIGTERM_을_받으면_이번_임시_파일을_지우고_그_신호로_끝난다) {
     SwScratch s("sig");

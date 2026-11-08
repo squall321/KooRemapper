@@ -456,7 +456,39 @@ bool StagedFiles::reserve(const std::string& dst, const std::string& suffix, std
     it.slot = arm(tmp);   // 신호 때 지울 경로 — 이 이름은 이 프로세스만 만든다
     items_.push_back(it);
     writePath = tmp;
+    // 말에 실릴 임시 꼴 → 제 이름(긴 것부터 바꾼다 — 접미사를 뗀 꼴은 쓰기 관문의 long 덱 말이 싣는다)
+    auto addName = [&](const std::string& from, const std::string& to) {
+        if (from.empty() || from == to) return;
+        for (const auto& n : names_)
+            if (n.first == from) return;
+        names_.emplace_back(from, to);
+    };
+    const std::string absTmp = absOf(tmp);
+    addName(tmp, dst);
+    addName(absTmp, dst);
+    addName(baseOf(tmp), baseOf(dst));
+    if (!suffix.empty() && dst.size() >= suffix.size() && dst.compare(dst.size() - suffix.size(), suffix.size(), suffix) == 0) {
+        const std::string dstStem = dst.substr(0, dst.size() - suffix.size());
+        addName(tmp.substr(0, tmp.size() - suffix.size()), dstStem);
+        addName(absTmp.substr(0, absTmp.size() - suffix.size()), dstStem);
+        const std::string b = baseOf(tmp);
+        addName(b.substr(0, b.size() - suffix.size()), baseOf(dstStem));
+    }
+    std::stable_sort(names_.begin(), names_.end(),
+                     [](const std::pair<std::string, std::string>& a, const std::pair<std::string, std::string>& b) {
+                         return a.first.size() > b.first.size();
+                     });
     return true;
+}
+
+std::string StagedFiles::unstage(const std::string& s) const {
+    std::string out = s;
+    for (const auto& n : names_) {
+        const std::string& from = n.first;
+        const std::string& to = n.second;
+        for (size_t at = out.find(from); at != std::string::npos; at = out.find(from, at + to.size())) out.replace(at, from.size(), to);
+    }
+    return out;
 }
 
 bool StagedFiles::writeText(const std::string& dst, const std::string& text, std::string& why) {

@@ -13,6 +13,7 @@
 #include "util/StrictJson.h"
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -279,13 +280,16 @@ static std::vector<std::string> writtenOutputs(const ModelAssembler& assembler, 
 // nan 초기응력이 든 dynain 이 디스크에 남고(formstrain·indent 는 그쪽이 주 산출물이다) 사용자는 남은 파일을
 // 멀쩡한 것으로 오해한다. 그래서 이번에 쓴 파일을 모두 보고, 하나라도 나쁘면 모두 지우고 목록을 찍는다.
 static bool writeOutputChecked(ModelAssembler& assembler, const std::string& outputPrefix,
-                               const char* tag, ConsoleOutput& console) {
+                               const char* tag, ConsoleOutput& console,
+                               const std::function<std::string(const std::string&)>& show = {}) {
     // 쓰기 안에서 나온 말(파트별 요소 수 대조·왕복 검증)을 흘리지 않는다 — 부르는 쪽은 쓰기 전에
     // 찍고 비우지 않으므로, 이번 쓰기가 더한 것만 골라 찍는다(전부 찍으면 두 번 나온다).
+    // `show` — 찍기 전에 말을 고친다(임시 파일에 쓰는 op 이 임시 이름을 제 이름으로 — apply_carryover_plan)
+    auto say = [&](const std::string& s) { return show ? show(s) : s; };
     size_t before = assembler.infoMessages.size();
-    if (!assembler.writeOutput(outputPrefix)) { console.error(assembler.getErrorMessage()); return false; }
+    if (!assembler.writeOutput(outputPrefix)) { console.error(say(assembler.getErrorMessage())); return false; }
     for (size_t m = before; m < assembler.infoMessages.size(); ++m)
-        console.println(assembler.infoMessages[m]);
+        console.println(say(assembler.infoMessages[m]));
 
     std::vector<std::string> written = writtenOutputs(assembler, outputPrefix);
     std::string where;
@@ -300,9 +304,9 @@ static bool writeOutputChecked(ModelAssembler& assembler, const std::string& out
             removed += w;
         }
     }
-    console.error(std::string("[") + tag + "] 결과에 유한하지 않은 값(nan/inf)이 있습니다: " + where +
-                  " — 지운 출력 파일: " + removed +
-                  " / non-finite value in the result; removed: " + removed);
+    console.error(say(std::string("[") + tag + "] 결과에 유한하지 않은 값(nan/inf)이 있습니다: " + where +
+                      " — 지운 출력 파일: " + removed +
+                      " / non-finite value in the result; removed: " + removed));
     return false;
 }
 
@@ -1903,8 +1907,16 @@ int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
         for (const auto& n : staged.takeNotes())
             n.warn ? console.warning(std::string("[") + tag + "] " + n.text) : console.println(std::string("[") + tag + "] " + n.text);
     };
+    // 보고 · 콘솔에 실릴 글의 임시 이름을 제 이름으로 — 쓰기 관문의 말(long 덱은 접미사 없는 접두)과 되읽기 예외가 임시 경로를
+    // 실었다(3차 검토 · 판 2 검토). 보고의 글 칸 전부(problems · warnings 의 detail · added 의 why)
+    auto unstageReport = [&]() {
+        for (auto* v : {&rep.problems, &rep.warnings})
+            for (auto& p : *v) p.detail = staged.unstage(p.detail);
+        for (auto& a : rep.added) a.why = staged.unstage(a.why);
+    };
     auto writeReport = [&]() {
         std::string why;
+        unstageReport();
         if (!staged.writeText(reportPath, KooRemapper::carryover::toJson(rep), why) || !staged.commit(reportPath, why)) {
             console.error(std::string("[") + tag + "] 보고를 쓸 수 없다: " + reportPath + " (" + why + ")");
             return false;
@@ -1916,8 +1928,8 @@ int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
     auto printList = [&](const std::vector<KooRemapper::carryover::Problem>& v, bool problems) {
         for (const auto& p : v) {
             const std::string line = (p.pid > 0 ? "[PID " + std::to_string(p.pid) + "] " : std::string()) + p.kind + " — " + p.detail;
-            if (problems) console.error(line);
-            else console.warning(line);
+            if (problems) console.error(staged.unstage(line));
+            else console.warning(staged.unstage(line));
         }
     };
     // 거절 · 실패 — 이번 실행의 임시 파일만 지우고 보고(ok false · output_written false · 걸린 것 전부)를 쓴다. output 자리의 앞 파일은
@@ -1970,11 +1982,10 @@ int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
             return refuse("덱 쓰기가 멈췄다 — 산출이 없다(output 자리의 앞 파일은 그대로다)");
         }
         stagedNotes();
-        if (!writeOutputChecked(assembler, tmpDeck.substr(0, tmpDeck.size() - 2), tag, console)) {
-            std::string msg = assembler.getErrorMessage().empty() ? std::string("쓰기 관문에서 멈췄다") : assembler.getErrorMessage();
-            for (size_t at = msg.find(tmpDeck); at != std::string::npos; at = msg.find(tmpDeck, at + outPath.size()))
-                msg.replace(at, tmpDeck.size(), outPath);
-            rep.problems.push_back({0, "write", msg});
+        const auto unstaged = [&](const std::string& s) { return staged.unstage(s); };
+        if (!writeOutputChecked(assembler, tmpDeck.substr(0, tmpDeck.size() - 2), tag, console, unstaged)) {
+            const std::string msg = assembler.getErrorMessage().empty() ? std::string("쓰기 관문에서 멈췄다") : assembler.getErrorMessage();
+            rep.problems.push_back({0, "write", staged.unstage(msg)});
             unapply();
             return refuse("덱 쓰기가 멈췄다 — 산출이 없다(output 자리의 앞 파일은 그대로다)");
         }
@@ -1988,6 +1999,7 @@ int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
         }
         rep.ok = true;
         rep.outputWritten = true;
+        unstageReport();
         printList(rep.warnings, false);
         // 보고를 먼저 임시로 써 두고 잠금을 쥐고 덱 · 보고 차례로 바꿔 넣는다 — 덱을 바꿔 넣지 못하면 앞 파일 그대로 거절한다.
         // ★보고는 늘 마지막이다. 잠금(.kr_tmp_lock_<이름 해시> · flock)은 같은 output 을 쓰는 동시 실행이 덱과 보고를 섞지 못하게 한다

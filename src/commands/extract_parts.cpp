@@ -1628,8 +1628,12 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
         return jf.str();
     };
     // 거절 — [ERROR] 머리 줄 · 목록(줄마다) · 목록을 담은 [ERROR] 요약 줄 하나 · 힌트. 그리고 실패 보고(쓸 수 있을 때 — 임시 파일로)
-    auto fail = [&](const std::string& kind, const std::string& message, const std::vector<std::string>& lines = {},
+    auto fail = [&](const std::string& kind, const std::string& rawMessage, const std::vector<std::string>& rawLines = {},
                     const std::string& hint = std::string()) {
+        // 말 · 목록의 임시 이름은 제 이름으로(콘솔 · 보고 어디에도 `.kr_tmp_` 가 새지 않게 — 3차 검토)
+        const std::string message = staged.unstage(rawMessage);
+        std::vector<std::string> lines;
+        for (const auto& l : rawLines) lines.push_back(staged.unstage(l));
         console.error(message);
         const size_t cap = 50;
         for (size_t i = 0; i < lines.size() && i < cap; ++i) console.println("  " + lines[i]);
