@@ -7,6 +7,7 @@
 #include <cctype>
 #include <fstream>
 #include <iterator>
+#include <sstream>
 #include <vector>
 
 namespace KooRemapper {
@@ -426,29 +427,6 @@ bool isIntText(const std::string& s) {
     return true;
 }
 
-// 실수 칸 글자 — 부호 · 소수점 · 지수(E · D · 글자 없이 부호 — 「1.0-3」). 정수도 실수다
-bool isRealText(const std::string& s) {
-    size_t i = 0;
-    const size_t n = s.size();
-    if (i < n && (s[i] == '+' || s[i] == '-')) ++i;
-    bool digits = false, dot = false;
-    for (; i < n; ++i) {
-        const char c = s[i];
-        if (std::isdigit(static_cast<unsigned char>(c))) { digits = true; continue; }
-        if (c == '.' && !dot) { dot = true; continue; }
-        break;
-    }
-    if (!digits) return false;
-    if (i == n) return true;
-    const char c = s[i];
-    if (c == 'E' || c == 'e' || c == 'D' || c == 'd') ++i;
-    else if (c != '+' && c != '-') return false;
-    if (i < n && (s[i] == '+' || s[i] == '-')) ++i;
-    const size_t d0 = i;
-    while (i < n && std::isdigit(static_cast<unsigned char>(s[i]))) ++i;
-    return i == n && i > d0;
-}
-
 bool hasInnerBlank(const std::string& s) { return s.find_first_of(" \t") != std::string::npos; }
 
 // 소비자가 쓰는 칸(EID · PID · 절점 칸 — 카드 안) — 이 칸만 깨끗하면 manual 이 깨끗하다(헤더 「읽기들」)
@@ -463,51 +441,48 @@ bool usedFieldsClean(const AuxElementCard& a, const std::vector<std::string>& f)
     return true;
 }
 
-// 정수 폭 카드의 칸마다 글자가 같은 자리에 붙었나 — 글자가 든 칸이 다 같은 왼쪽 여백이거나 다 같은 오른쪽 여백(규칙 (e)).
-// 정수 폭으로 쓰는 쓰개(`%8d` · `%-8d` · `%7d ` …)는 칸마다 같은 꼴로 쓴다. 칸마다 맞춤이 다른 설명서 꼴 줄을 정수 폭으로 자르면
-// 넓은 칸 뒤 칸의 글자가 칸 가운데에 놓인다(i10 의 N4 를 77열부터 왼쪽 맞춤 → 정수 폭 칸 71-80 의 가운데)
-bool plainMarginsUniform(const std::string& body, size_t n, int fw) {
-    const size_t w = static_cast<size_t>(fw);
-    bool any = false, left = true, right = true;
-    size_t lm = 0, rm = 0;
-    for (size_t k = 0; k < n; ++k) {
-        const size_t c0 = k * w;
-        if (c0 >= body.size()) break;
-        const std::string seg = body.substr(c0, w);
-        const size_t s = seg.find_first_not_of(" \t");
-        if (s == std::string::npos) continue;
-        const size_t e = seg.find_last_not_of(" \t");
-        const size_t l = s, r = w - 1 - e;
-        if (!any) { lm = l; rm = r; any = true; continue; }
-        if (l != lm) left = false;
-        if (r != rm) right = false;
+// 설명서 카드 폭 — Card 1 칸 폭의 합(넓은 칸은 실수 폭 — 안전띠 72 · 질량 40열, i10 86 · 46열). LS-DYNA 는 그 뒤 글자를 읽지 않는다
+size_t manualCardWidth(const AuxElementCard& a, int fw) {
+    size_t w = 0;
+    for (int k = 0; k < a.card1Fields; ++k) {
+        const bool wide = std::find(a.wideFields.begin(), a.wideFields.end(), k) != a.wideFields.end();
+        w += static_cast<size_t>(wide ? realFieldWidth(fw) : fw);
     }
-    return left || right;
+    return w;
 }
 
-// 다른 읽기(정수 폭) 가 「그 줄을 그렇게 썼을 수 있는」 읽기인가 — 헤더의 규칙 (a)-(e). `manualDoubtful` 이면(설명서 칸 하나에 빈칸이
-// 낀다 — 설명서 꼴로 쓴 줄이 아닐 수 있다) (c) 는 보지 않는다(정수 폭으로 쓴 N3 만 있는 줄도 그 N3 을 지킨다)
-bool altReadingValid(const AuxElementCard& a, const std::string& body, const std::vector<std::string>& f, size_t contentLen,
-                     int fw, bool manualDoubtful) {
+// 다른 읽기(정수 폭) 가 「그 줄을 그렇게 썼을 수 있는」 읽기인가 — 헤더의 규칙 (a)-(d). `manualDoubtful` 이면(설명서 칸 하나에 빈칸이
+// 낀다 — 설명서 꼴로 쓴 줄이 아닐 수 있다) (c) 는 보지 않는다(정수 폭으로 쓴 N3 만 있는 줄도 그 N3 을 지킨다). `cardEnd` 는 설명서 카드
+// 폭(`manualWidth`) 안 글자의 끝 — 그 뒤 꼬리 글은 설명서 꼴의 증거가 아니다(LS-DYNA 가 읽지 않는다 · 2026-11-08 「지키는 쪽은 잃지 않는다」)
+bool altReadingValid(const AuxElementCard& a, const std::vector<std::string>& f, size_t cardEnd, size_t manualWidth, int fw,
+                     bool manualDoubtful) {
     if (a.card1Fields <= 0 || fw <= 0) return false;
     const size_t n = static_cast<size_t>(a.card1Fields);
-    if (contentLen > n * static_cast<size_t>(fw)) return false;                         // (b)
+    if (cardEnd > n * static_cast<size_t>(fw)) return false;                            // (b)
     for (size_t k = n; k < f.size(); ++k)
-        if (!f[k].empty()) return false;                                                // 카드 칸 밖에 글자
-    for (size_t k = 0; k < n && k < f.size(); ++k) {                                    // (a)
-        const std::string& t = f[k];
-        if (t.empty()) continue;
-        if (hasInnerBlank(t)) return false;
-        const bool real = std::find(a.wideFields.begin(), a.wideFields.end(), static_cast<int>(k)) != a.wideFields.end();
-        if (real ? !isRealText(t) : !isIntText(t)) return false;
-    }
+        if (k * static_cast<size_t>(fw) < manualWidth && !f[k].empty()) return false;   // 설명서 카드 안 · 정수 폭 카드 밖에 글자
+    // (a) — 그 읽기가 쓰는 칸(EID · PID · 절점)이 깨끗한 정수(또는 빈 칸)다. 쓰지 않는 칸(SBRID · SLEN · MASS)의 글자는 보지 않는다 —
+    //   정수 폭으로 쓴 줄의 SLEN 「- 1.5」 · 「1.0 E-3」 · SBRID 「1 2」 가 그 읽기를 버려 safe 가 진짜 N3 을 지웠다(2026-11-08 「지키는
+    //   쪽은 잃지 않는다」). 설명서 꼴 줄은 쓰는 칸이 거른다 — 설명서 SLEN 의 뒤 절반이 정수 폭 N3 자리라 실수(「0.0」 · 「1.5」)면 여기서,
+    //   정수꼴(「10」)이면 (b) · (c) 가 막는다
+    auto usedBad = [&](int k) {
+        if (k < 0 || static_cast<size_t>(k) >= f.size()) return false;
+        const std::string& t = f[static_cast<size_t>(k)];
+        return !t.empty() && (hasInnerBlank(t) || !isIntText(t));
+    };
+    if (a.hasEid && usedBad(0)) return false;
+    if (a.hasPart && usedBad(a.partField)) return false;
+    for (int q = 0; a.nodeSkip >= 0 && q < a.nodeCount; ++q)
+        if (usedBad(a.nodeSkip + q)) return false;
+    for (int q = 0; a.nodeSkip2 >= 0 && q < a.nodeCount2; ++q)
+        if (usedBad(a.nodeSkip2 + q)) return false;
     if (!manualDoubtful && a.family == AuxFamily::SEATBELT && a.nodeSkip2 >= 0 && a.nodeCount2 == 2) {     // (c)
         const int n3 = deckscan::fieldInt(f, static_cast<size_t>(a.nodeSkip2));
         const int n4 = deckscan::fieldInt(f, static_cast<size_t>(a.nodeSkip2 + 1));
         if ((n3 > 0) != (n4 > 0)) return false;
     }
     if (a.family == AuxFamily::MASS && a.hasEid && (f.size() <= 2 || f[2].empty())) return false;   // (d)
-    return plainMarginsUniform(body, n, fw);                                            // (e)
+    return true;
 }
 
 // manual 과 든 다른 읽기 — 차례대로(manual 먼저)
@@ -558,15 +533,45 @@ AuxCardReadings auxCardReadings(const AuxElementCard& a, const std::string& line
         return r;
     }
     cut(false, r.plain);
-    // 다른 읽기 — 정수 폭이 규칙 (a)-(e)를 지킬 때만 든다. 넓은 칸이 없는 족은 plain 이 manual 이라 다른 읽기가 없다
-    const size_t n = static_cast<size_t>(std::max(a.card1Fields, 0));
+    // 다른 읽기 — 정수 폭이 규칙 (a)-(d)를 지킬 때만 든다. 넓은 칸이 없는 족은 plain 이 manual 이라 다른 읽기가 없다
+    // 설명서 꼴이 아닐 수 있다 — 넓은 칸(SLEN · MASS)에 빈칸이 끼었다(정수 폭 두 칸 — 「0.5」 와 N3 — 이 그 자리에 함께 든다). 두 읽기가
+    // 같은 열인 칸(SBRID 「1 2」)의 빈칸은 쓴 꼴을 말하지 않는다 — 그 빈칸으로 (c) 를 끄면 설명서 꼴 두 절점 띠의 정수꼴 SLEN 이 유령 N3 이
+    // 됐다(2026-11-08 퍼즈 — (a) 가 쓰는 칸만 보게 된 뒤)
     bool doubtful = false;
-    for (size_t k = 0; k < n && k < r.manual.f.size(); ++k) doubtful = doubtful || hasInnerBlank(r.manual.f[k]);
-    r.plainAlt = altReadingValid(a, body, r.plain.f, r.contentLen, fw, doubtful);
+    for (int k : a.wideFields)
+        if (k >= 0 && static_cast<size_t>(k) < r.manual.f.size()) doubtful = doubtful || hasInnerBlank(r.manual.f[static_cast<size_t>(k)]);
+    // (b) 는 설명서 카드 폭 안의 글자만 본다 — 정수 폭으로 쓴 줄 뒤 꼬리 글(「        belt left 1」 · 「mass on lid」)이 그 읽기를 버려
+    // safe 가 진짜 N3 을 지우고(rc 0) 고른 PID 의 질량을 버렸다(2026-11-08 — 규칙 (e) 를 뺀 같은 원칙)
+    const size_t mw = manualCardWidth(a, fw);
+    size_t cardEnd = std::min(body.size(), mw);
+    while (cardEnd > 0 && (body[cardEnd - 1] == ' ' || body[cardEnd - 1] == '\t')) --cardEnd;
+    r.plainAlt = altReadingValid(a, r.plain.f, cardEnd, mw, fw, doubtful);
     return r;
 }
 
 const std::vector<std::string>& auxPrimaryFields(const AuxCardReadings& r) { return r.manual.f; }
+
+std::vector<int> auxLineInts(const AuxCardReadings& r, const std::string& line) {
+    std::string body = line;
+    const size_t cm = body.find('$');
+    if (cm != std::string::npos) body.erase(cm);
+    std::vector<int> out;
+    deckscan::harvestInts(body, out);
+    auto inFields = [&](const std::vector<std::string>& f) {
+        for (const auto& s : f) {
+            std::istringstream is(s);
+            std::string t;
+            while (is >> t) {
+                int v = 0;
+                if (!deckscan::looksReal(t) && deckscan::toInt(t, v) && v > 0) out.push_back(v);
+            }
+        }
+    };
+    inFields(r.manual.f);
+    inFields(r.plain.f);
+    deckscan::sortUnique(out);
+    return out;
+}
 
 std::vector<int> auxNodesOf(const AuxElementCard& a, const std::vector<std::string>& f) {
     std::vector<int> out;
@@ -604,6 +609,10 @@ std::vector<int> auxNodesDisputed(const AuxElementCard& a, const AuxCardReadings
 }
 
 std::vector<int> auxNodesSure(const AuxElementCard& a, const AuxCardReadings& r) {
+    // 칸으로 읽지 못한 줄은 확실한 절점이 없다 — 열 자리의 값은 공백으로 가른 번호의 조각일 수 있다(「21634837」 의 「634837」). 다 한 읽기만
+    // 말하는 절점으로 친다(덱에 있으면 남기고 · 되읽기는 입력에 있던 것만 잰다). 예전엔 그 조각을 쓰는 절점으로 세어 되읽기가 「미정의」 로
+    // cleanup-nodes 를 rc 1 로 끝냈다(2026-11-08 여섯째 검토 퍼즈 fz_space — 표준 보 40 줄 가운데 10)
+    if (auxLineUnreadable(r)) return {};
     auto sorted = [&](const std::vector<std::string>& f) {
         std::vector<int> v = auxNodesOf(a, f);
         std::sort(v.begin(), v.end());
@@ -808,6 +817,18 @@ void forEachNonGridElementCard(const std::vector<std::string>& lines,
                 c.pid = (aux.hasPart && aux.partField >= 0) ? deckscan::fieldInt(fs, static_cast<size_t>(aux.partField)) : 0;
                 c.pids = auxPidsOf(aux, rd);
                 c.nodes = auxNodesUnion(aux, rd);
+                // 칸으로 읽지 못한 줄(쓰는 칸에 빈칸 — 공백으로 가른 줄)은 칸으로 EID · PID · 절점을 모른다 — 그 줄의 정수 전부를 절점 · PID
+                // 후보로 넘치게 센다(이월 적용의 나눠 쓴 절점 · aux_in_part) · 바닥은 그 최대까지(`nonGridElementMaxId`). 예전엔 그 칸이 비어
+                // 이월 적용이 지운 절점을 무는 띠를 rc 0 으로 냈고 바닥이 그 EID 를 몰랐다(2026-11-08 여섯째 검토 S1)
+                if (auxLineUnreadable(rd)) {
+                    c.unreadable = true;
+                    c.ints = auxLineInts(rd, l);
+                    c.nodes.insert(c.nodes.end(), c.ints.begin(), c.ints.end());
+                    deckscan::sortUnique(c.nodes);
+                    if (aux.hasPart)   // PID 칸이 없는 족(플롯)은 PID 후보가 없다
+                        for (int v : c.ints)
+                            if (std::find(c.pids.begin(), c.pids.end(), v) == c.pids.end()) c.pids.push_back(v);
+                }
                 if (!aux.optNodes.empty()) { pend = c; pending = true; }   // 옵션 카드의 절점까지 읽고 넘긴다
                 else f(c);
             }
@@ -824,7 +845,10 @@ void forEachNonGridElementCard(const std::vector<std::string>& lines,
 
 int nonGridElementMaxId(const std::vector<std::string>& lines) {
     int m = 0;
-    forEachNonGridElementCard(lines, [&](const NonGridElementCard& c) { m = std::max(m, c.eid); });
+    forEachNonGridElementCard(lines, [&](const NonGridElementCard& c) {
+        m = std::max(m, c.eid);
+        for (int v : c.ints) m = std::max(m, v);   // 칸으로 읽지 못한 줄 — EID 를 모르니 그 줄의 정수 최대까지(바닥은 높아질 뿐이다)
+    });
     return m;
 }
 
