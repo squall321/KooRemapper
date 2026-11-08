@@ -554,8 +554,7 @@ bool StagedFiles::commit(const std::string& dst, std::string& why) {
 #ifndef _WIN32
     if (it->mode == Mode::InPlace) {
         if (!copyInto(it->tmp, it->target, why)) return false;
-        ::unlink(it->tmp.c_str());
-        disarm(it->slot);
+        dropTemp(*it);
         items_.erase(it);
         return true;
     }
@@ -578,9 +577,8 @@ bool StagedFiles::commit(const std::string& dst, std::string& why) {
     // 폴더 권한(끈적 폴더 · 바뀐 권한)이 이름 바꾸기를 막는데 있는 파일에 쓸 수 있으면 제자리로 쓴다 — 원자적이 아니다
     if ((e == EACCES || e == EPERM) && present && S_ISREG(st.st_mode) && ::access(it->target.c_str(), W_OK) == 0) {
         if (!copyInto(it->tmp, it->target, why)) return false;
-        ::unlink(it->tmp.c_str());
-        disarm(it->slot);
         notes_.push_back({true, "「" + dst + "」 를 이름 바꾸기로 바꿔 넣지 못해(" + errText(e) + ") 그 파일에 제자리로 썼다 — 원자적이 아니다"});
+        dropTemp(*it);   // 같은 까닭(폴더 권한)으로 못 지울 수 있다 — 그러면 비우고 그렇다고 말한다
         items_.erase(it);
         return true;
     }
@@ -598,13 +596,28 @@ bool StagedFiles::commit(const std::string& dst, std::string& why) {
 void StagedFiles::discard(const std::string& dst) {
     for (auto it = items_.begin(); it != items_.end();) {
         if (it->dst != dst) { ++it; continue; }
-        if (it->mode != Mode::Direct) {   // Direct 의 대상(장치 · FIFO)은 지우지 않는다
-            std::error_code ec;
-            fs::remove(it->tmp, ec);
-            disarm(it->slot);
-        }
+        if (it->mode != Mode::Direct) dropTemp(*it);   // Direct 의 대상(장치 · FIFO)은 지우지 않는다
         it = items_.erase(it);
     }
+}
+
+// 이번 실행의 임시 파일을 지운다. 폴더에 쓸 수 없어(잡은 뒤 폴더 권한이 바뀌었다) 못 지우면 0 바이트로 비우고(파일 쓰기 권한이면
+// 된다 — 자리를 돌려준다) 그렇다고 말한다 — 예전엔 제자리 쓰기로 넘어간 뒤 꽉 찬 임시 파일이 rc 0 으로 말없이 남았다(여섯째 검토
+// S11). 임시 이름은 말하지 않는다(그 폴더의 숨은 파일이다 · 폴더에 쓸 수 있게 되면 다음 실행이 주인 없는 것을 지운다)
+void StagedFiles::dropTemp(const Item& it) {
+#ifndef _WIN32
+    if (::unlink(it.tmp.c_str()) != 0 && errno != ENOENT) {
+        const int e = errno;
+        const bool emptied = ::truncate(it.tmp.c_str(), 0) == 0;
+        const std::string dir = dirPartOf(it.tmp);
+        notes_.push_back({true, "「" + it.dst + "」 의 임시 파일을 지우지 못했다(" + errText(e) + ") — " + (emptied ? "0 바이트로 비워 " : "") +
+                                "그 폴더(" + (dir.empty() ? std::string(".") : dir) + ")에 숨은 파일로 남겼다. 폴더에 쓸 수 있게 되면 다음 실행이 지운다"});
+    }
+#else
+    std::error_code ec;
+    fs::remove(it.tmp, ec);
+#endif
+    disarm(it.slot);
 }
 
 void StagedFiles::discardAll() {

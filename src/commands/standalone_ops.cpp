@@ -1989,6 +1989,7 @@ int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
         printList(rep.problems, true);
         printList(rep.warnings, false);
         writeReport();
+        stagedNotes();   // 임시 파일을 못 지웠으면 그 말도(여섯째 검토 S11)
         console.error(std::string("[") + tag + "] " + why);
         return 1;
     };

@@ -1663,8 +1663,8 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
             else
                 console.error("Cannot write report: " + o.reportPath + " (" + why + ")");
             staged.discardAll();
-            stagedNotes();
         }
+        stagedNotes();   // 임시 파일을 못 지웠으면 그 말도(여섯째 검토 S11)
         return 1;
     };
 

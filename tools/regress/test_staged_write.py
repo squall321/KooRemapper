@@ -29,6 +29,9 @@
   D 매달린 링크 — 링크 글을 `parent_path()/글` 의 낱말 정규화로 풀어, 폴더 링크를 지난 `S/../deck.k` 가 입력 덱이 되어 rc 0 으로 그것을
     덮었다(여섯째 검토 S3 — 모델 · 주 덱 · 보고 링크로 계획). 커널처럼 물리로 따라가고, 쓸 파일 관문이 그 물리 자리도 본다(두 쓸 파일이
     매달린 링크로 한 파일에 닿으면 거절).
+  F 제자리 쓰기로 넘어간 뒤의 임시 파일 — 잡은 뒤 폴더가 읽기 전용이 되면 이름 바꾸기가 EACCES 라 그 파일에 제자리로 쓰는데, 같은 까닭으로
+    임시 파일을 못 지워 꽉 찬 채 rc 0 · 말없이 남았다(여섯째 검토 S11). 이제 0 바이트로 비우고 [WARN] 로 말하며, 폴더에 쓸 수 있게 된
+    다음 실행이 지운다.
   W 쓰기 오류 — 쓰기 · 닫기 결과를 보지 않아 디스크가 차거나 파일 크기 상한(RLIMIT_FSIZE · SIGXFSZ 무시 — ENOSPC · EDQUOT 의
     대역)에 걸려 잘린 덱을 rc 0 · ok 로 바꿔 넣었다(여섯째 검토 S2 — extract-parts 는 `*NODE` 가운데서 끊긴 덱 · 이월 적용은 마지막
     새 섹션을 잃은 덱). 이제 바꿔 넣지 않고 rc 1 · 보고가 그 오류를 말한다. 바로 쓰는 op(DeckWriter · writeOutput)도 rc 1.
@@ -757,6 +760,60 @@ def sec_d(binary):
           and not tmp_left(d), (rc, sorted(os.listdir(d)), out[-300:]))
 
 
+# ── F 제자리 쓰기로 넘어간 뒤의 임시 파일 ──────────────────────────────────────
+def sec_f(binary):
+    print("[F] 잡은 뒤 폴더가 읽기 전용이 됐다 — 제자리로 쓰고, 못 지운 임시 파일은 비우고 말한다 · 다음 실행이 지운다")
+    if os.geteuid() == 0:
+        check("F — root 는 폴더 권한을 넘는다(건너뜀)", True)
+        return
+    for op in ("extract-parts", "apply_carryover_plan"):
+        if op == "extract-parts":
+            d = os.path.join(TMP, "F_ep")
+            os.makedirs(os.path.join(d, "o"))
+            os.symlink(big_deck(), os.path.join(d, "in.k"))
+            write(os.path.join(d, "f.yaml"), "model: in.k\noutput: o/out.k\nparts: [1]\nreport: o/r.json\n")
+            args, out_name, rep_name = ("extract-parts", "f.yaml"), "out.k", "r.json"
+        else:
+            d = co_dir("F_co")
+            os.makedirs(os.path.join(d, "o"))
+            write(os.path.join(d, "f.yaml"), "model: deck.k\nplan: plan.json\noutput: o/deck_applied\nreport: o/rep.json\n")
+            args, out_name, rep_name = ("apply_carryover_plan", "f.yaml"), "deck_applied.k", "rep.json"
+        o = os.path.join(d, "o")
+        write(os.path.join(o, out_name), "OLD\n")
+        write(os.path.join(o, rep_name), "{}\n")
+        p = None
+        for _ in range(40):   # 산출의 임시 파일이 o/ 에 보이면 멈춘다
+            q = start(binary, d, *args, pipe=True)
+            while q.poll() is None:
+                if temp_of(o, out_name):
+                    os.kill(q.pid, signal.SIGSTOP)
+                    if temp_of(o, out_name):
+                        p = q
+                    else:
+                        os.kill(q.pid, signal.SIGCONT)
+                    break
+            if p:
+                break
+            q.communicate()
+        if p is None:
+            check("F %s — 바꿔 넣기 전에 멈추지 못했다" % op, False)
+            continue
+        os.chmod(o, 0o555)
+        os.kill(p.pid, signal.SIGCONT)
+        said = p.communicate(timeout=300)[0]
+        left = [n for n in os.listdir(o) if ".kr_tmp_" in n]
+        sizes = [os.path.getsize(os.path.join(o, n)) for n in left]
+        os.chmod(o, 0o755)
+        rep = load(os.path.join(o, rep_name))
+        check("F-1 %s 폴더가 읽기 전용이 됐다 — rc 0 · 산출 · 보고가 새것 · 못 지운 임시 파일 %d 개는 0 바이트 · [WARN] 지우지 못했다 · 말에 .kr_tmp_ 없음" %
+              (op, len(left)),
+              p.returncode == 0 and is_new_deck(os.path.join(o, out_name)) and ok_report(rep) and left and all(s == 0 for s in sizes) and
+              "지우지 못했다" in said and ".kr_tmp_" not in said, (p.returncode, left, sizes, said[-400:]))
+        rc2, said2 = run(binary, d, *args)
+        check("F-2 %s 폴더에 쓸 수 있게 된 다음 실행이 남은 임시 파일을 지운다 — rc 0" % op,
+              rc2 == 0 and not [n for n in os.listdir(o) if ".kr_tmp_" in n], (rc2, os.listdir(o), said2[-300:]))
+
+
 # ── W 쓰기 오류 ──────────────────────────────────────────────────────────────
 def run_fsize(binary, d, args, limit):
     """파일 크기 상한(SIGXFSZ 무시 — 넘는 쓰기가 EFBIG 로 짧게 끝난다)으로 돌린다."""
@@ -848,6 +905,7 @@ def main():
         sec_u(binary)
         sec_w(binary)
         sec_d(binary)
+        sec_f(binary)
     finally:
         for w, ds, _ in os.walk(TMP):   # 읽기 전용으로 둔 폴더도 지운다
             for x in ds:

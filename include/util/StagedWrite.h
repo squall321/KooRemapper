@@ -77,6 +77,7 @@ private:
         unsigned perm = 0;
         int slot = -1;          // 신호 때 지울 경로 표의 자리
     };
+    void dropTemp(const Item& it);   // 임시 파일을 지운다 — 못 지우면 비우고 [WARN]
     std::vector<Item> items_;
     std::vector<std::pair<std::string, std::string>> names_;   // 임시 꼴 → 제 이름(긴 것부터 바꾼다)
     std::vector<Note> notes_;
