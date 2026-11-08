@@ -134,11 +134,15 @@ public:
     //   입력과 견준다(2026-11-07). 뒤 처리의 입력(detail_flat · shell_bent · simple_bent · dat_file · dat_top · dat_bottom · bundle ·
     //   database · dynain · battery 설정)을 각 apply* 와 같은 경로 규칙으로 미리 적고, 곁 파일끼리 · 덱 산출(<prefix>.k · .dynain)과도
     //   견준다 — 진단 셋끼리는 같아도 된다(같은 접두사의 warpage 둘은 뒤가 앞을 덮을 뿐이다 · 2026-11-08). 루프 안 쓰기가 있으면
-    //   덱 산출도 이 자리에서 입력과 견준다(writeOutput 과 같은 규칙 · 2026-11-08 — 예전엔 덱 쓰기에서야 보아 battery 덱 · 진단 셋을
-    //   써 둔 뒤 멈췄다). 예전엔 쓰는 자리에서 그때까지 읽은 입력과만 견줘, 앞 처리의 진단 파일이 뒤 처리의 입력을 덮을 수 있었다.
+    //   덱(.k)도 이 자리에서 입력과 견준다(writeOutput 과 같은 규칙 · 2026-11-08 — 예전엔 덱 쓰기에서야 보아 battery 덱 · 진단 셋을
+    //   써 둔 뒤 멈췄다). `.dynain` 은 쓸 때만 — `guardDynainBeforeMidRun`. 예전엔 쓰는 자리에서 그때까지 읽은 입력과만 견줘, 앞 처리의
+    //   진단 파일이 뒤 처리의 입력을 덮을 수 있었다.
     //   loadBaseModel 뒤 · 처리 루프 앞에 부른다(단독 warpage 도 그 한 처리로 부른다 — `who` 는 말머리). false 면 errorMessage_ 에 두 경로가 있다.
     bool planRunWrites(const std::vector<AssemblyOperation>& ops, const std::string& configDir,
                        const std::string& outputPrefix, const std::string& who = "assemble");
+    // ★`.dynain` 은 이 실행이 쓸 때만 견준다(2026-11-08 · 최종 검토 R2) — 루프 안 쓰기(battery 덱 · warpage 진단 셋) 직전마다 그때까지
+    //   응력이 났으면(writeOutput 과 같은 판정) 그 dynain 을 읽은 파일과 견주고, 걸리면 그 곁 파일을 쓰기 전에 false(errorMessage_)
+    bool guardDynainBeforeMidRun(const std::string& who);
     bool writeOutput(const std::string& outputPrefix);
 
     const std::vector<ElementResult>& getAccumulatedResults() const {
@@ -227,6 +231,9 @@ private:
     std::vector<std::vector<std::string>> addedDecks_;
     std::vector<std::vector<std::pair<long long, long long>>> batteryIds_;   // 이 실행이 얹은 battery 덱의 번호(족마다 · 옮긴 뒤 · 구간) — 뒤 battery 의 겹침 판정
     IdMaxima loadMaxima_{};   // loadBaseModel 이 끝났을 때의 커서 — 그 위 ~ 지금 커서가 「이 실행이 커서로 낸 번호」다(battery 의 겹침 판정)
+    std::string runOutputPrefix_;                    // planRunWrites 가 받은 덱 접두사 — 루프 안 쓰기 직전의 `.dynain` 견주기(R2)
+    std::vector<std::string> midRunWritten_;         // 처리 루프가 덱보다 먼저 쓴 곁 파일(battery 덱 · 진단 셋) — 뒤에 멈추면 말에 적는다
+    std::string midRunLeftover() const;              // 「앞서 쓴 곁 파일은 남았다: …」(없으면 빈 글자)
     bool flattenIncludes_ = false;
     std::vector<output_guard::Input> guardInputs_;   // 읽은 파일(모델 · 인클루드 · 다른 입력) — writeOutput 의 쓰기 관문이 본다
     std::vector<std::string> plannedWrites_;         // 덱 말고 부르는 쪽이 이 실행에서 쓸 곁 파일(대응표 · 보고)

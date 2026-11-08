@@ -2023,7 +2023,7 @@ operations:
 | `finite_strain` | von Kármán 대변형(true) / Kirchhoff 소변형(false) | `true` |
 | `outside_behavior` | 격자 범위 밖 노드 처리 (zero/clamp/extrapolate) | `zero` |
 | `data_bbox` | 격자가 덮는 평면 범위 (`x_min`·`x_max`·`y_min`·`y_max`) | 파트 bbox |
-| `debug` / `debug_prefix` | 격자·곡률 VTK 등 디버그 출력 — `<debug_prefix>_raw.dat` · `_curvature.dat` · `_warpage.vtk`. 접두사는 YAML 폴더 기준(2026-11-07 전엔 작업 폴더)이고 **그 폴더가 없으면 만듭니다**. 폴더를 못 만들거나 파일 하나라도 못 쓰면 덱을 쓰기 전에 종료 코드 1 입니다(2026-11-08 전엔 없는 폴더면 아무것도 쓰지 않고 「Exported」 를 찍었습니다). 진단 셋을 쓰기 **전에** 덱 산출도 입력과 견줍니다 — 2026-11-08 전엔 `output == model` 이면 진단 셋 · 그 폴더를 써 둔 뒤 멈췄습니다 | `false` / `debug/warp` |
+| `debug` / `debug_prefix` | 격자·곡률 VTK 등 디버그 출력 — `<debug_prefix>_raw.dat` · `_curvature.dat` · `_warpage.vtk`. 접두사는 YAML 폴더 기준(2026-11-07 전엔 작업 폴더)이고 **그 폴더가 없으면 만듭니다**. 폴더를 못 만들거나 파일 하나라도 못 쓰면 덱을 쓰기 전에 종료 코드 1 입니다(2026-11-08 전엔 없는 폴더면 아무것도 쓰지 않고 「Exported」 를 찍었습니다). 진단 셋을 쓰기 **전에** 덱 산출도 입력과 견줍니다 — 2026-11-08 전엔 `output == model` 이면 진단 셋 · 그 폴더를 써 둔 뒤 멈췄습니다. 진단 셋은 처리(deform · prestress) **뒤**에 씁니다 — prestress 가 응력을 냈으면 이 실행이 쓸 `.dynain` 도 그 앞에 견줍니다(2026-11-08) | `false` / `debug/warp` |
 
 ### dat 파일 형식
 
@@ -3493,8 +3493,12 @@ operations:
   `debug_prefix`(기본 `debug/warp`)의 warpage 둘은 뒤가 앞을 덮을 뿐입니다(한 처리의 `target_pids` 둘도 그렇습니다). 2026-11-08
   전엔 그것도 「같은 파일」 로 종료 코드 1 이었습니다. 루프 안 쓰기가 있으면 덱 산출(`<output>.k` · `.dynain`)도 그 자리에서
   입력과 견줍니다 — 2026-11-08 전엔 덱 쓰기에서야 보아, `output` 이 모델의 인클루드면 battery 덱 · 진단 셋(과 그 폴더)을 써 둔
-  뒤 「출력 파일을 쓰지 않았습니다」 였습니다. `.dynain` 은 쓸지 아직 모르니(처리가 응력을 내야 씁니다) 쓴다고 보고 견줍니다
-  (`dynain_embed: true` 면 따로 쓰지 않아 뺍니다).
+  뒤 「출력 파일을 쓰지 않았습니다」 였습니다. `.dynain` 은 **이 실행이 그것을 쓸 때만** 견줍니다 — 덱 쓰기와 같은 판정(처리가 응력을
+  냈다 · `dynain_embed: true` 가 아니다)이라 처리 전에는 모르니, 루프 안 쓰기(battery 덱 · 진단 셋) 직전마다 그때까지 응력이 났으면
+  견주고 아니면 덱 쓰기의 관문이 봅니다. 그래서 문서의 map + prestress 고리(`m.k` 가 `m.dynain` 을 끌어온다) 위의 in-place
+  `assemble` 은 응력을 내지 않는 처리(battery · warpage `mode: deform` 의 진단 …)면 막지 않습니다(2026-11-08 · 최종 검토 R2 — 앞
+  판은 쓴다고 보고 견줘 종료 코드 1 이었습니다). 응력을 내면 dynain 이 `m.dynain` 을 덮으니 그 뒤의 곁 파일을 쓰기 전에 멈추고,
+  응력이 나기 전에 쓴 곁 파일(그때는 dynain 을 쓸지 몰랐다)은 남으니 멈춘 말에 그 파일을 적습니다.
 
 > **참고**: 아래 각 오퍼레이션은 동일 이름의 독립 명령어(12~22장)와 동일한 알고리즘을 사용합니다.
 > assemble 내에서는 `- type: <이름>` 으로 지정하며, 여러 오퍼레이션을 순차 결합할 수 있습니다.

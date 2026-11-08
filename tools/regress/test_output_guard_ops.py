@@ -23,6 +23,8 @@
   빈 output(boundary · rbe) · 곁 파일(warpage 진단 · cad_solid_merge 대응표 · stackwrap `_neutral.k`)은 따로 본다.
   루프 안 쓰기(2026-11-08): 진단 셋끼리는 같아도 된다 · 덱 산출이 입력이면 battery 덱 · 진단 셋(과 그 폴더)보다 먼저 멈춘다(단독
   warpage 도). 단독 battery 덱(batch 전부) · foldsurface `_curve.csv` 가 설정을 가리키는 링크면 거절.
+  `.dynain` 은 이 실행이 쓸 때만(처리가 응력을 냈을 때) 견준다 — 문서의 map + prestress 고리(m.k 가 m.dynain 을 끌어온다) 위
+  in-place assemble(battery · warpage deform 진단)은 rc 0, 응력을 내면 그 뒤의 곁 파일을 쓰기 전에 rc 1(최종 검토 R2).
 
 usage: test_output_guard_ops.py <KooRemapper 바이너리>
 """
@@ -451,6 +453,59 @@ def special_yaml(st, binary):
     d, argv = st.case("foldsurface", "link")
     os.symlink(argv[1], os.path.join(d, "fold_curve.csv"))
     expect_refused("foldsurface fold_curve.csv → 설정을 가리키는 심볼릭 링크", binary, d, argv)
+    # 문서의 map + prestress 고리(m.k 가 m.dynain 을 *INCLUDE) 위 in-place assemble — `.dynain` 은 이 실행이 쓸 때만(처리가 응력을
+    # 냈을 때) 견준다. 89b4d70 판은 루프 안 쓰기가 있으면 쓴다고 보고 견줘, 응력을 내지 않는 battery · warpage deform 진단만으로도
+    # m.dynain(모델의 인클루드)과 「같은 파일」 rc 1 이었다(2026-11-08 · 최종 검토 R2 · 운영 · 그 앞 판은 rc 0)
+    d, _ = st.case("prestress", "chain")   # generate arc demo — demo_bent.k · demo_flat_fine.k
+    write(os.path.join(d, "m.yaml"), "bent: demo_bent.k\nflat: demo_flat_fine.k\noutput: m.k\n"
+                                     "prestress:\n  enabled: true\n  output: m.dynain\n  E: 210000.0\n  nu: 0.3\n")
+    rc, text = run(binary, d, ["map", "m.yaml"])
+    if check("map + prestress 고리 → m.k 가 m.dynain 을 끌어온다(문서의 쓰임)",
+             rc == 0 and "m.dynain" in read(os.path.join(d, "m.k")) and os.path.isfile(os.path.join(d, "m.dynain")), (rc, text[-300:])):
+        write(os.path.join(d, "bat.yaml"), "output: bt\nmodel_type: stacked\ntier: -1\nphase: 1\nmode: dent\n")
+        write(os.path.join(d, "w.dat"), SPEC["warpage"]["files"]["warp.dat"])
+        mat = "material:\n  E: 210000\n  nu: 0.3\n"
+        wp_op = "  - type: warpage\n    target_pid: 1\n    dat_file: w.dat\n    mode: %s\n    debug: true\n    debug_prefix: dbg/wp\n"
+        bat_op = "  - type: battery\n    config: bat.yaml\n"
+        keep = sha(os.path.join(d, "m.dynain"))
+        m_k = read(os.path.join(d, "m.k"))   # in-place 가 m.k 를 고쳐 쓴다 — 항마다 되돌린다
+
+        def fresh():
+            write(os.path.join(d, "m.k"), m_k)
+            for junk in ("bt_tier-1_phase1.k",):
+                if os.path.exists(os.path.join(d, junk)):
+                    os.remove(os.path.join(d, junk))
+            shutil.rmtree(os.path.join(d, "dbg"), ignore_errors=True)
+
+        for tag, ops in (("battery", bat_op), ("warpage deform · debug", wp_op % "deform")):
+            fresh()
+            write(os.path.join(d, "ip.yaml"), "base_model: m.k\noutput: m\n" + mat + "operations:\n" + ops)
+            rc, text = run(binary, d, ["assemble", "ip.yaml"])
+            check("★in-place assemble(%s) — 응력이 없어 dynain 을 쓰지 않으니 m.dynain(인클루드)과 견주지 않는다 → rc 0 · "
+                  "m.dynain 그대로(89b4d70 판은 rc 1)" % tag,
+                  rc == 0 and "같은 파일" not in text and sha(os.path.join(d, "m.dynain")) == keep, (rc, text[-300:]))
+        # 응력을 내면 dynain 을 쓰니 m.dynain(인클루드)을 덮는다 — 그 곁 파일을 쓰기 **전에** 멈춘다(G4 · 이 실행이 쓸 것이 그때 정해진다)
+        fresh()
+        write(os.path.join(d, "ip2.yaml"), "base_model: m.k\noutput: m\n" + mat + "operations:\n" + wp_op % "prestress")
+        before, dirs0 = snapshot(d), dirs_of(d)
+        rc, text = run(binary, d, ["assemble", "ip2.yaml"])
+        check("★in-place assemble(warpage prestress · debug) — 응력이 나 m.dynain 을 덮으니 진단 셋을 쓰기 전에 rc 1 · 폴더 그대로",
+              rc == 1 and "같은 파일" in text and not diff(before, snapshot(d)) and dirs_of(d) == dirs0, (rc, diff(before, snapshot(d))[:4], text[-300:]))
+        fresh()
+        write(os.path.join(d, "ip3.yaml"), "base_model: m.k\noutput: m\n" + mat + "operations:\n" +
+              (wp_op % "prestress").replace("    debug: true\n    debug_prefix: dbg/wp\n", "") + bat_op)
+        before = snapshot(d)
+        rc, text = run(binary, d, ["assemble", "ip3.yaml"])
+        check("★in-place assemble(warpage prestress → battery) — 응력이 난 뒤라 battery 덱을 쓰기 전에 rc 1 · 폴더 그대로",
+              rc == 1 and "같은 파일" in text and not diff(before, snapshot(d)), (rc, diff(before, snapshot(d))[:4], text[-300:]))
+        # 응력이 나기 전에 쓴 곁 파일은 남는다(그때는 이 실행이 dynain 을 쓸지 몰랐다) — 멈춘 말에 그 파일을 적는다
+        fresh()
+        write(os.path.join(d, "ip4.yaml"), "base_model: m.k\noutput: m\n" + mat + "operations:\n" + bat_op +
+              (wp_op % "prestress").replace("    debug: true\n    debug_prefix: dbg/wp\n", ""))
+        rc, text = run(binary, d, ["assemble", "ip4.yaml"])
+        check("in-place assemble(battery → warpage prestress) — 덱 쓰기에서 rc 1 · 앞서 쓴 battery 덱을 말에 적는다",
+              rc == 1 and "같은 파일" in text and "앞서 쓴 곁 파일은 남았다" in text and "bt_tier-1_phase1.k" in text
+              and sha(os.path.join(d, "m.dynain")) == keep, (rc, text[-400:]))
     # meshfix polish — 임시 파일 `<줄기>.kr_tmp_pol<회차>_<덩어리>.*` 은 gmsh 를 돌려 봐야 정해지니 그 꼴의 입력이 있으면 gmsh 전에 막는다
     d, argv = st.case("meshfix", "polish")
     cfg = read(os.path.join(d, argv[1]))
