@@ -170,7 +170,9 @@ clips:
     overtravel: 0.15
 """},
    cmds=["KooRemapper generate box board.yaml", "KooRemapper cclip cclip.yaml"],
-   outputs=["clip_board_cclip.k"])
+   outputs=["clip_board_cclip.k"],
+   notes=["옛 MID 를 다른 파트가 안 쓰면 그 MID 의 구조 재질 정의만 지운다(2026-11-08) — 같은 번호 TMID 의 열 재질 · PID 꼴 덧붙임 · 쌓인 다른",
+          "  재질은 둔다. 재질이 사라지므로 MID 꼴 덧붙임(*MAT_ADD_EROSION 등)은 지운다. 새 MID 는 공용 재질 훑기 위로(쌓인 재질 묶음까지)"])
 
 # ── 메시 편집 ──
 op("convert", "메시 편집", "1차 요소를 2차 요소로 (TET10·HEX20·QUAD8·TRIA6)", "2차요소 quadratic hex20 tet10",
@@ -227,13 +229,19 @@ operations:
     offset_direction: +z
     connection_mode: tied
     new_pid: 10
+    material_card: |
+      *MAT_ELASTIC
+      $#     mid        ro         e        pr
+           @MID@  7.85E-09  2.10E+05       0.3
 """}),
    cmds=[BOX_CMD, "KooRemapper offset offset.yaml"], outputs=["box_offset.k"],
    invariants={"box_offset.k": {"bbox": [20.0, 10.0, 3.0]}},
    notes=["connection_mode: tied(기본) | czm | contact | none (assemble 경로도 none 허용)",
           "셸 층(`element_type: shell`)은 원본 면과 떨어진 별도 면이다 — tied(기본)는 *CONTACT_TIED_SURFACE_TO_SURFACE_OFFSET 으로 원본 면에 묶는다(2026-10-17) · czm 은 거절(rc 1) · contact·none 은 묶지 않는다",
           "material_card·czm_material_card 의 MID 칸(@MID@·@CZM_MID@·숫자·라벨)은 새 MID 로 바뀐다. 값은 10열 칸 안에 둘 것",
-          "material_cards: 목록으로 층마다 다른 재질 (단독 offset·assemble 모두)"])
+          "material_cards: 목록으로 층마다 다른 재질 (단독 offset·assemble 모두)",
+          "★material_card(또는 material_cards)는 필수다(2026-11-08) — 없으면 rc 1. 예전엔 새 *PART 에 새 MID 를 쓰고 재질 카드는 쓰지 않아",
+          "  정의되지 않은 재질을 가리킨 덱이 rc 0 으로 나갔다. 원 파트와 같은 재질이면 그 카드를 MID 칸만 @MID@ 로 바꿔 적는다"])
 op("wrap", "메시 편집", "원통 파트에 와인딩 인장 초기응력(후프+반경) 부여", "와인딩 인장 hoop 압입",
    "KooRemapper wrap <config.yaml>",
    needs=["examples/wrap/cylinder_2layer.k"],
@@ -327,7 +335,9 @@ operations:
       - target_pid: 1
         element_size: 4.0
 """}),
-   cmds=[BOX_CMD, "KooRemapper iga iga.yaml"], outputs=["box_iga.k"])
+   cmds=[BOX_CMD, "KooRemapper iga iga.yaml"], outputs=["box_iga.k"],
+   notes=["IGA 재질은 원 파트 MID 의 구조 재질을 새 MID 로 베낀다(2026-11-08) — 같은 번호 TMID 의 열 재질 · *MAT_ADD_* 는 고르지 않고 _TITLE",
+          "  재질도 찾으며(주 덱에 없으면 인클루드) MID 칸만 칸 폭 그대로 바꾼다. 예전엔 첫 칸이 그 MID 인 첫 *MAT 블록을 베꼈다"])
 
 # ── 표면·재메시 ──
 op("extract-surface", "표면·재메시", "솔리드 파트의 윗면/아랫면/전체 표면을 셸로 추출", "표면추출 surface shell 면",
@@ -551,7 +561,11 @@ materials:
           "match: 파트/재질 제목 부분일치, \"*\" 는 나머지 전부. mid: 로 MID 직접 지정",
           "damping_preset: smartphone_drop | smartphone_drop_aggressive | quasi_static | off (모르는 값은 rc=1)",
           "덱의 열 재질(*MAT_THERMAL_* · 번호 이름 *MAT_T01~T18)은 재질 블록이 아니다(첫 칸이 TMID · 2026-11-08) — 맞춘 MID 와 같은 번호의",
-          "  열 카드는 둘 다 지운다. 예전엔 번호 이름을 그 MID 의 재질로 바꿔 써 같은 MID 가 둘이 되고 thermal: true 면 열 카드가 두 벌이었다"])
+          "  열 카드는 둘 다 지운다. 예전엔 번호 이름을 그 MID 의 재질로 바꿔 써 같은 MID 가 둘이 되고 thermal: true 면 열 카드가 두 벌이었다",
+          "thermal 이 꺼진 재질은 같은 번호 열 카드를 *PART TMID 가 가리키면 남긴다(2026-11-08 — 예전엔 지워 TMID 가 없는 열 재질을 가리켰다) ·",
+          "  [matdb] kept thermal card TMID=n 으로 알린다(바꾸기 전 재질의 열 물성 — DB 것으로 바꾸려면 thermal: true)",
+          "맞춘 재질은 그 MID 의 구조 재질 정의만 지우고 새 카드를 넣는다(2026-11-08) — 한 키워드 아래 쌓인 다른 재질은 둔다(예전엔 블록째 지워",
+          "  쌓인 둘째 재질이 사라졌다). 매칭은 지금도 블록의 첫 카드 재질만 본다"])
 op("matswap", "재료·어셈블리", "MAT+HOURGLASS+CURVE+SECTION 번들을 파트에 통째로 교체", "재질교체 bundle rubber",
    "KooRemapper matswap <config.yaml>\nKooRemapper matswap <model.k> <bundle.k> <pid> <output.k>",
    needs=["examples/matswap/two_cubes.k", "examples/matswap/rubber.k"],
@@ -563,6 +577,9 @@ swaps:
 """},
    cmds=["KooRemapper matswap swap.yaml"], outputs=["two_cubes_rubber.k"],
    notes=["번들은 *PARAMETER 로 &PID1 &MID1 &SECID1 &HGID1 &LCID1 자리표시를 쓰는 k 파일 (examples/matswap/rubber.k 형식). ID 는 충돌 없게 자동 부여",
+          "  새 MID 는 공용 재질 훑기 위로(2026-11-08) — 열 재질 TMID · *MAT_ADD_* 는 세지 않고 쌓인 재질 묶음은 센다. assemble 안이면 앞 op 이 낸 MID · SECID 도 피한다",
+          "옛 MID 를 다른 파트가 안 쓰면 그 MID 의 구조 재질 정의만 지운다(2026-11-08) — 같은 번호 TMID 의 열 재질 · PID 꼴 덧붙임(*MAT_ADD_THERMAL_EXPANSION 등) ·",
+          "  쌓인 다른 재질은 둔다(예전엔 첫 칸이 그 MID 인 *MAT_ 블록을 다 지웠다). 번들이 그 번호를 다시 받고 MID 꼴 덧붙임(*MAT_ADD_EROSION 등)은 새 재질에 붙는다",
           "pids: [..] / swap_all: true 도 가능. PART 카드가 PID SECID MID 3필드뿐인 모델(generate box 출력 등)도 된다"])
 op("assemble", "재료·어셈블리", "replace·squeeze·restack·update 등 여러 파트 연산을 순차 적용하고 초기응력 누적", "조립 복합 pipeline",
    "KooRemapper assemble <config.yaml>",
@@ -678,6 +695,7 @@ pid_refs: strict
           "k_rot 은 회전 3자유도 강성이다(기본 1.0e7 N*mm/rad). 0 으로 두면 회전을 풀지만 원 CNRB 와 달라진다.",
           "gap·k_engage·k_axial·k_rot 는 실측이 아닌 가정값이다 — 기본값을 쓰면 콘솔에 그 사실을 알린다.",
           "새 ID 는 고정 번호대(노드 9000만·요소 990만·카드 99만)다. 원본과 겹치면 조용히 밀지 않고 rc=1 이다.",
+          "  재질 번호대는 공용 재질 훑기로 견준다(2026-11-08) — 열 재질의 TMID 는 MID 가 아니고(예전 거짓 겹침) 쌓인 재질 묶음의 MID 는 센다",
           "CNRB 가 잇는 두 파트는 요소 연결성으로 판정한다. 세트 안의 '*NODE 에 없는 ID' 는 제외하고 몇 개인지 알린다."])
 op("contact", "하중·경계·접촉", "접촉 정의 분석·생성·자동감지·변환·수정·삭제를 한 YAML 로 순차 실행", "접촉 contact tied detect",
    "KooRemapper contact <config.yaml>",
@@ -1025,7 +1043,8 @@ fragment_map: examples/cad_solid_merge_to_deck/stepforge_fragment.json
           "바닥 = assemble 과 같은 커서(**인클루드 닫힘까지**)의 최대값 + 1. pid_start 는 PID·SECID·MID 셋의 최대값 위다",
           "  (SECID 는 *SECTION_* 블록을 카드 묶음으로 갈라 센다 — SOLID · SHELL · TSHELL 은 쌓인 묶음까지 정확히, 줄 수를 모르는 꼴은",
           "  행마다 첫 칸 숫자를 넉넉히 · 제목 · 두께 · 각도의 숫자는 SECID 가 아니다 · StepForge 591d5b5 와 같은 규칙 · 11-08)",
-          "  (열 재질 *MAT_THERMAL_* · *MAT_T01~T18 의 TMID 는 MID 와 독립된 번호라 세지 않는다 — Vol II 3-1)",
+          "  (열 재질 *MAT_THERMAL_* · *MAT_T01~T18 의 TMID 는 MID 와 독립된 번호라 세지 않는다 — Vol II 3-1 · 한 키워드 아래 쌓인 재질",
+          "  묶음은 센다 — 줄 수를 아는 꼴은 묶음마다, 모르는 꼴은 행마다 첫 칸 숫자 · 2026-11-08)",
           "★요소 바닥은 **모든 요소 족**이다(2026-11-07) — 솔리드 · 셸 · 티쉘에 더해 보 · 이산 · 질량 · 안전띠 · 플롯 요소와",
           "  줄 수를 모르는 변형의 EID 까지 센다(리더는 그 요소를 메시에 담지 않는다). `cad_solid_merge_to_deck` 도 이 바닥으로 옮긴다",
           "  (조각은 셋을 같은 번호로 쓴다 — 삽입도 한 이동량으로 옮긴다)",

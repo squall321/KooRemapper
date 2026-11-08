@@ -1387,6 +1387,7 @@ void compareSectionCards(const std::vector<std::string>& deck, const SectionFile
 }
 
 bool integralField(const std::string& s, long long& v) { return parseIntegral(s, v); }
+bool realField(const std::string& s, double& v) { return parseReal(s, v); }
 
 bool bytesGiveLines(const std::string& bytes, const std::vector<std::string>& lines, bool include) {
     size_t k = 0;

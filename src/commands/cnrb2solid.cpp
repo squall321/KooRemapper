@@ -1,6 +1,7 @@
 #include "parser/DeckWriter.h"
 #include "parser/DeckScan.h"      // insertBeforeFirstEnd — 덧붙이는 자리는 첫 *END
 #include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
+#include "parser/MaterialIds.h"   // 재질 번호 공용 훑기(열 재질 · 덧붙임 카드 · 쌓인 묶음 — 2026-11-08)
 #include <cctype>
 #include "parser/IncludeClosure.h"   // FlatDeck — flatten_includes(2026-10-17)
 #include "parser/ElementCardLayout.h"   // deckFieldWidth — 덱이 선언한 칸 폭을 따른다
@@ -1132,8 +1133,11 @@ int runCnrb2Solid(const std::string& yamlFile, ConsoleOutput& console) {
         // ⚠ PART 는 세지 않는다. `cnrb2solid_convert` 의 `maxPartId` 매개변수는 **쓰이지 않고**
         // (`int& /*maxPartId*/`) 새 `*PART` 는 `cnrb.pid` 를 그대로 재사용한다. 세어 두면 관찰할 수
         // 없는 코드가 되고, 돌연변이 시험이 그것을 잡아냈다 — 그래서 넣지 않는다.
+        // MID 는 공용 재질 훑기로 센다 — 열 재질의 TMID · `*MAT_ADD_*` 의 첫 칸은 MID 가 아니다 · 쌓인 재질 묶음은 행 수를 아는 꼴은
+        // 묶음마다, 모르는 꼴은 행마다 첫 칸 숫자(11-08 (d) — 예전 `*MAT_` 블록의 모든 행 셈은 TMID 와 재질 상수의 정수까지 MID 로 셌다)
+        maxMatId = std::max(maxMatId, KooRemapper::matids::maxId(lines));
         {
-            enum class Ns { None, Sec, Mat, Set };
+            enum class Ns { None, Sec, Set };
             Ns ns = Ns::None;
             bool titleSkipped = true;
             for (const auto& ln : lines) {
@@ -1142,9 +1146,6 @@ int runCnrb2Solid(const std::string& yamlFile, ConsoleOutput& console) {
                 if (tr[0] == '*') {
                     const std::string up = cs_upper(tr);
                     if (up.rfind("*SECTION_", 0) == 0)                      ns = Ns::Sec;
-                    // `*MAT_ADD_*` 는 재질을 새로 만들지 않는다 — 첫 칸이 **PID** 다.
-                    else if (up.rfind("*MAT_ADD_", 0) == 0)                  ns = Ns::None;
-                    else if (up.rfind("*MAT_", 0) == 0)                      ns = Ns::Mat;
                     else if (up.rfind("*SET_", 0) == 0)                      ns = Ns::Set;
                     else                                                     ns = Ns::None;
                     // `_TITLE` 은 데이터 카드 앞에 제목 줄이 한 줄 더 있다.
@@ -1157,7 +1158,6 @@ int runCnrb2Solid(const std::string& yamlFile, ConsoleOutput& console) {
                 if (id <= 0) continue;
                 switch (ns) {
                     case Ns::Sec:  maxSecId  = std::max(maxSecId,  id); break;
-                    case Ns::Mat:  maxMatId  = std::max(maxMatId,  id); break;
                     case Ns::Set:  maxSetId  = std::max(maxSetId,  id); break;
                     default: break;
                 }

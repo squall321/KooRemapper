@@ -61,7 +61,9 @@ def cube_deck(path, first_nid, fw=8):
 _OFFSET_YAML = ("base_model: base.k\noutput: out\noperations:\n  - type: offset\n"
                 "    source_pid: 1\n    element_type: solid\n    thickness: 1.0\n"
                 "    num_layers: 1\n    offset_direction: \"+z\"\n"
-                "    connection_mode: tied\n    new_pid: 10\n")
+                "    connection_mode: tied\n    new_pid: 10\n"
+                # offset 은 새 층의 재질 카드가 있어야 한다(2026-11-08 — 없으면 rc 1)
+                "    material_card: |\n      *MAT_ELASTIC\n           @MID@  7.85E-09  2.10E+05       0.3\n")
 
 
 def line_lengths(path, keyword):

@@ -162,6 +162,9 @@ operations:
     new_pid: 10
     connection_mode: czm
     czm_part_id: 77
+    material_card: |
+      *MAT_ELASTIC
+           @MID@  7.85E-09  2.10E+05       0.3
     czm_mid: 88
     czm_material_card: |
       *MAT_COHESIVE_MIXED_MODE
@@ -188,6 +191,9 @@ operations:
     new_pid: 10
     connection_mode: czm
     czm_part_id: 77
+    material_card: |
+      *MAT_ELASTIC
+           @MID@  7.85E-09  2.10E+05       0.3
     czm_mid: 88
 """
 
@@ -240,6 +246,9 @@ offset_direction: +z
 new_pid: 10
 connection_mode: czm
 czm_part_id: 77
+material_card: |
+  *MAT_ELASTIC
+       @MID@  7.85E-09  2.10E+05       0.3
 operations:
   - type: offset
     element_type: solid
@@ -261,6 +270,9 @@ offset_direction: +z
 new_pid: 10
 connection_mode: czm
 czm_part_id: 77
+material_card: |
+  *MAT_ELASTIC
+       @MID@  7.85E-09  2.10E+05       0.3
 operations:
   - czm_material_card: |
       *MAT_COHESIVE_MIXED_MODE

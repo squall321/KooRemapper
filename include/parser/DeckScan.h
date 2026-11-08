@@ -131,6 +131,19 @@ inline int fieldInt(const std::vector<std::string>& f, size_t i) {
     return v;
 }
 
+// 줄의 첫 칸(고정폭 w · 쉼표 줄은 첫 쉼표 앞)이 숫자만(9자리까지 · 0 보다 크다)이면 그 값 — StepForge 리더의 `raw[:10].strip().isdigit()`.
+// 카드 묶음을 못 가른 자리부터 행마다 첫 칸을 넉넉히 셀 때 쓴다(섹션 SECID · 재질 MID — 그 블록에 쌓인 다른 번호일 수 있다).
+// 실수 · 글자 · 부호 붙은 수는 세지 않는다(제목 `12 mm plate` · 두께 `2.0` 은 번호가 아니다)
+inline bool digitsField(const std::string& l, int w, int& v) {
+    const size_t comma = l.find(',');
+    std::string f = comma != std::string::npos ? l.substr(0, comma) : l.substr(0, std::min(l.size(), static_cast<size_t>(w)));
+    f = trim(f);
+    if (f.empty() || f.size() > 9 || !std::all_of(f.begin(), f.end(), [](char c) { return std::isdigit(static_cast<unsigned char>(c)) != 0; }))
+        return false;
+    v = std::stoi(f);
+    return v > 0;
+}
+
 // 우리가 모델링하지 않은 키워드에서 정수를 **최대한 많이** 긁는다 — 8칸·10칸·공백 토큰의
 // 합집합이고 실수 표기는 버린다. 과포함은 '남기는' 쪽이라 안전한 방향이다.
 //

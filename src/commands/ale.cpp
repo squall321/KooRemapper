@@ -1,6 +1,7 @@
 #include "parser/DeckWriter.h"
 #include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 #include "parser/IdAllocator.h"   // 인클루드 닫힘까지 센 최대값 · 못 본 자리 경고
+#include "parser/MaterialIds.h"   // 재질 번호 공용 훑기(열 재질 · 덧붙임 카드 · 쌓인 묶음 — 2026-11-08)
 #include "parser/IncludeClosure.h" // FlatDeck · partFile — flatten_includes(2026-10-17)
 #include "ale.h"
 #include "kw_util.h"
@@ -73,11 +74,10 @@ static void ale_findMaxIds(const std::vector<std::string>& lines,
     maxMid = 0; maxEosid = 0; maxSecid = 0; maxHgid = 0;
     for (int i = 0; i < (int)lines.size(); ++i) {
         std::string up = kw_upper(kw_trim(lines[i]));
-        bool isMat  = (up.rfind("*MAT_", 0) == 0);
         bool isEos  = (up.rfind("*EOS_", 0) == 0);
         bool isSec  = (up.rfind("*SECTION_", 0) == 0);
         bool isHg   = (up.rfind("*HOURGLASS", 0) == 0);
-        if (!isMat && !isEos && !isSec && !isHg) continue;
+        if (!isEos && !isSec && !isHg) continue;
         bool hasTitle = (up.find("_TITLE") != std::string::npos);
         int j = i + 1;
         while (j < (int)lines.size() && !lines[j].empty() && lines[j][0] == '$') ++j;
@@ -90,12 +90,14 @@ static void ale_findMaxIds(const std::vector<std::string>& lines,
         if (toks.empty()) continue;
         try {
             int id = std::stoi(toks[0]);
-            if (isMat  && id > maxMid)   maxMid   = id;
             if (isEos  && id > maxEosid) maxEosid = id;
             if (isSec  && id > maxSecid) maxSecid = id;
             if (isHg   && id > maxHgid)  maxHgid  = id;
         } catch (...) {}
     }
+    // MID 는 공용 재질 훑기로 센다 — 열 재질의 TMID · `*MAT_ADD_*` 의 첫 칸은 MID 가 아니고, 한 키워드 아래 쌓인 재질 묶음은 센다
+    // (11-08 (d) — 예전엔 `*MAT_` 블록마다 첫 카드를 세어 TMID 로 커서를 올리고 쌓인 둘째 MID 를 다시 냈다)
+    maxMid = KooRemapper::matids::maxId(lines);
 }
 
 static bool ale_isSharedSection(const std::map<int, AlePartInfo>& partMap,

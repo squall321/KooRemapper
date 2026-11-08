@@ -387,8 +387,18 @@ BOM 을 붙인 설정으로 둘 다 **종료 코드 0** 으로 정상 산출물�
   행마다 첫 칸 숫자를 넉넉히 셉니다. 제목(`2024` · `12 mm plate`) · 정수로 쓴 두께(`12`) · 각도(`90`)는 SECID 가 아닙니다(11-07 밤 판은
   모든 행을 세어 그 숫자가 새 SECID 를 부풀렸습니다). 옛 첫 카드 셈(`2.0` 으로 쓴 SECID 를 2 로 읽는다)보다 내려가지 않습니다.
   「그 SECID 가 있나 · 어떤 섹션인가」 는 첫 카드 표 그대로입니다. 새 SECID 를 내는 op —
-  `restack` · `disconnect` · `offset`(다재료 · dual 포함) · `merge` · `cnrb2solid` · IGA — 와 바닥(`id_floor` · `cad_solid_merge_to_deck`
-  · `apply_carryover_plan`)이 이 셈을 씁니다.
+  `restack` · `disconnect` · `offset`(다재료 · dual 포함) · `merge` · `cnrb2solid` · IGA — 와 바닥(`id_floor` · `cad_solid_merge_to_deck`)이
+  이 셈을 쓰고, `apply_carryover_plan` 은 새 섹션의 차례 · 겹침에 씁니다(조각 이동량 바닥은 절점 · 요소 최대값만 본다 — 11-08 정정).
+- 재질 번호(MID)는 **구조 재질만** 셉니다 — 열 재질(`*MAT_THERMAL_*` · 번호 이름 `*MAT_T01`~`*MAT_T18` — TMID)과 `*MAT_ADD_*`(덧붙임 —
+  첫 칸이 MID 또는 PID)는 빼고(§11), **한 키워드 아래 쌓인 재질(Card Sets)도** 셉니다(2026-11-08 · 공용 훑기 `parser/MaterialIds.h`).
+  묶음 한 벌의 줄 수를 Vol II 가 정하는 꼴 — `*MAT_ELASTIC`(001 · Card 1.1 은 E < 0 일 때 · `_FLUID` 면 Card 2) · `*MAT_PLASTIC_KINEMATIC`(003)
+  2 · `*MAT_VISCOELASTIC`(006) 1 · `*MAT_NULL`(009) 1 · `*MAT_RIGID`(020) 3(빈 Card 2 · 3 도 카드) · `*MAT_PIECEWISE_LINEAR_PLASTICITY`(024 ·
+  옵션 없는 꼴) 4 — 은 묶음마다 MID 를 정확히 읽고, 그 밖의 꼴은 행마다 첫 칸 숫자를 넉넉히 셉니다(새 번호 · 겹침 검사만 — 「그 재질이
+  있나」 는 묶음의 Card 1). 예전엔 블록마다 첫 카드만 세어 쌓인 둘째 MID 를 새 재질이 다시 냈고, op 마다 따로 센 훑기는 TMID 로 커서를
+  올렸습니다(TMID 50 → 새 MID 51). 같은 셈을 쓰는 자리 — 공용 커서(assemble 계열 · `id_floor` 의 `pid_start` · `cad_solid_merge_to_deck`) ·
+  `matswap`(단독 · assemble) · `cclip` · `ale` · `cnrb2solid` · `cnrb2spring`(고정 번호대 겹침 — TMID 로 거짓 겹침을 내던 것을 고쳤고 쌓인
+  MID 와의 진짜 겹침을 잡는다) · `matdb` 의 `match_part`. assemble 의 `matswap` · `matdb` 는 같은 실행의 앞 op 이 낸 번호도 피합니다
+  (예전엔 offset 뒤의 matswap 이 MID 2 · SECID 2 를 또 냈다). 회귀 `tools/regress/test_material_id_family.py`.
 - 인클루드를 다 읽었으면 조용합니다. 못 읽은 이름이나 따라가지 않은 `*INCLUDE_*`(`_TRANSFORM` 등)가 있으면
   **한 번** 경고하고 종료 코드는 그대로 0 입니다.
   ```
@@ -1904,6 +1914,12 @@ targets:
 
 > **MID 격리 규칙**: IGA 파트와 일반 FE 파트는 반드시 다른 MID를 사용해야 합니다.
 
+> **IGA 재질 = 원 파트의 구조 재질을 새 MID 로 베낀 것(2026-11-08).** 원 파트 MID 의 **구조 재질** 정의(공용 재질 훑기 — §3.1(h))를
+> 키워드 · 그 묶음 줄 그대로 베끼고 MID 칸만 새 번호로 바꿉니다(칸 폭 그대로). 같은 번호 TMID 의 열 재질(`*MAT_T01` 등)과 `*MAT_ADD_*` 는
+> 고르지 않고, `_TITLE` 재질은 제목 줄을 건너 찾고, 주 덱에 없으면 인클루드 파일에서 찾습니다. 예전엔 첫 칸이 그 MID 인 **첫** `*MAT` 블록을
+> 베껴 열 카드 · 덧붙임 카드가 앞이면 그것을 IGA 재질로 냈고, `_TITLE` 재질은 못 찾아 0 물성의 빈 재질(「Source material not found」)을
+> 냈고, 자리가 늘어난 MID(9 → 10)는 칸을 한 글자 밀어 RO 칸을 깨뜨렸습니다. 회귀 `test_material_id_family.py` C.
+
 ---
 
 ## 21. warpage — 워피지 보정
@@ -2035,6 +2051,13 @@ operations:
 
 > **v1.8.0 정정**: (1) `connection_mode` 값 집합은 `tied | czm | contact | none` 이며 **기본값은 `tied`** 입니다(help·examples. 구버전의 `shared | tied | czm`/기본 `shared` 정정). `contact` 는 인터페이스 노드를 복제해 별도 표면을 만들고 사용자가 이후 `*CONTACT` 를 정의합니다. (2) `element_type` 값은 `solid | tshell | shell` 입니다(구버전의 `hex | tet` 정정). (3) config 는 최상위 `base_model`/`output` + `operations[].type: offset` 구조입니다. 재료는 `material_card` 로 지정하고, 층마다 다르면 `material_cards:` 목록(`- |` 항목)을 씁니다(단독·assemble 모두). (4) 카드 MID 칸의 값(`@MID@`·`@CZM_MID@`·숫자·라벨)은 새 MID 로 바뀌며, 값은 LS-DYNA 고정 폭 10열 칸 안에 두세요. (5) `new_pid`·`new_secid`·`new_mid` 를 지정해도 뒤이어 자동 발급되는 ID 와 겹치지 않습니다. (6) `connection_mode: none` 은 assemble 경로에서도 허용됩니다. 단독 `offset` 도 assemble 과 같은 값 검사를 거칩니다.
 
+> **새 층의 재질 카드는 필수입니다(2026-11-08).** `material_card`(층마다 다르면 `material_cards`)가 없으면 종료 코드 1 로 거절하고 아무것도
+> 쓰지 않습니다 — `[ERROR] offset: material_card(층마다 다르면 material_cards)가 없다 — …`. 예전엔 새 `*PART` 에 새 MID 를 쓰고 재질 카드는
+> 쓰지 않아(「사용자가 나중에 넣거나 matswap 으로」) 정의되지 않은 재질을 가리킨 덱이 종료 코드 0 으로 나갔습니다(`generate box` 에 offset
+> 만 해도 `info --strict` 「재질 n 이 정의되지 않았습니다」 — LS-DYNA 는 키워드 단계에서 멈춘다). 원 파트의 재질을 대신 지어 쓰지 않습니다 —
+> 같은 재질이면 그 카드를 MID 칸만 `@MID@` 로 바꿔 적으세요. 나중에 matswap 으로 바꿀 층도 자리표시 재질 카드를 주세요(회귀
+> `test_material_id_family.py` F).
+
 > **TSHELL 도 `connection_mode` 를 솔리드와 같은 뜻으로 받는다(2026-10-16).** `tied`(기본)·`none` 이면 TSHELL 0층이
 > **원본 면 절점 그대로**다(공유 — 층이 붙는다). `czm` 은 그 절점을 복제해 원본 면과 복제본 사이에 코히시브(ELFORM 20)를
 > 면 수만큼 만들고, `contact` 는 복제해 떼고 접촉 안내를 붙인다. 예전에는 TSHELL 갈래가 이 칸을 **건너뛰어** 0층이 원본 면
@@ -2136,6 +2159,17 @@ Rubber_HG
 | `MID*` | Material ID | 고아 ID 재사용 가능 |
 | `PID*` | Part ID | 무시 |
 
+**옛 재질 지우기(2026-11-08).** 대상 파트의 옛 MID 를 다른 파트가 쓰지 않으면 그 MID 의 **구조 재질 정의만** 지웁니다(공용 재질 훑기
+`parser/MaterialIds.h` — §3.1(h)). 같은 번호 TMID 의 열 재질(`*MAT_T01` · `*MAT_THERMAL_*`) · PID 꼴 덧붙임(`*MAT_ADD_THERMAL_EXPANSION` ·
+`_COHESIVE` · `_CHEM_SHRINKAGE` · `_SOC_EXPANSION` · `_EXTVAR_EXPANSION` — 첫 칸이 PID) · 한 키워드 아래 쌓인 다른 재질은 다른 번호 공간이거나
+다른 재질이라 둡니다 — 예전엔 첫 칸이 그 MID 인 `*MAT_` 블록을 다 지워 그것들이 사라졌습니다(쌓인 재질을 가리키던 파트는 미정의 재질).
+번들 재질은 그 번호를 다시 받고, MID 꼴 덧붙임(`*MAT_ADD_EROSION` · `_DAMAGE_GISSMO` · `_DAMAGE_DIEM` · `_FATIGUE` · `_GENERALIZED_DAMAGE` ·
+`_INELASTICITY` · `_PERMEABILITY` · `_PORE_AIR` · `_PROPERTY_DEPENDENCE` · `_PZELECTRIC` · `_AIRBAG_POROSITY_LEAKAGE` ·
+`_BASIC_INCREMENTAL_FAILURE` — 첫 칸이 MID · Vol II R16)은 그 번호에 남아 새 재질에 붙습니다(matdb 와 같다). 지운 뒤에도 그 번호가
+쓰이면(묶음을 못 가른 재질 블록에 쌓였다 · 인클루드에도 있다) 그 번호를 다시 주지 않고 새 번호를 냅니다(같은 MID 가 둘이 된다 — 경고).
+assemble 에서 여러 파트를 함께 바꿔 옛 재질이 덱에서 사라지면 그 MID 꼴 덧붙임도 지웁니다(남기면 없는 재질을 가리킨다). 회귀
+`test_material_id_family.py` A.
+
 ---
 
 ## 24. matdb — 재료 DB 교체
@@ -2222,6 +2256,9 @@ materials:                # 개별 규칙 (선택)
 - `match`: 파트 title과 DB의 name/tag 부분 문자열 매칭 (대소문자 무시)
 - `mid`: 직접 재료 ID 지정
 - `match: "*"`: 모든 미매칭 재료에 자동 매칭 시도
+- 맞춘 재질은 그 MID 의 **구조 재질 정의만** 지우고 새 카드를 넣습니다(2026-11-08 · 공용 재질 훑기 §3.1(h)) — 한 키워드 아래 쌓인 다른
+  재질은 둡니다. 예전엔 블록의 첫 카드 MID 가 맞으면 블록째 지워 쌓인 둘째 재질이 사라졌습니다(그 재질을 쓰던 파트가 미정의 재질 · 종료
+  코드 0). 매칭은 지금도 블록의 첫 카드 재질만 봅니다 — 쌓인 둘째 재질은 `mid:` 규칙으로 고를 수 없습니다(남은 틈).
 
 ### 열 재료 삽입 (`thermal: true`)
 - `*MAT_THERMAL_ISOTROPIC` + `*MAT_ADD_THERMAL_EXPANSION` 자동 삽입
@@ -2229,6 +2266,10 @@ materials:                # 개별 규칙 (선택)
 - 덱에 이미 있는 열 재질(`*MAT_THERMAL_*` · 번호 이름 `*MAT_T01`~`*MAT_T18`)은 **재질 블록이 아니다** — 첫 칸이 TMID 다(§11 · 2026-11-08).
   맞춘 MID 와 같은 번호의 열 카드는 이름 꼴이든 번호 이름이든 지운다. 예전엔 번호 이름을 그 MID 의 재질로 읽어 구조 재질 카드로 바꿔
   쓰고(같은 MID 가 둘) `thermal: true` 면 열 카드를 두 벌 넣었다
+- `thermal` 이 꺼진 재질은 같은 번호의 열 카드를 **`*PART` TMID 가 가리키면 남긴다**(2026-11-08) — 새 열 카드를 넣지 않으니 지우면 `*PART` TMID 가
+  없는 열 재질을 가리킨다(예전 동작). 남긴 열 물성은 바꾸기 전 재질의 것이라 `[matdb] kept thermal card TMID=n` 으로 알린다 — DB 열 물성으로
+  바꾸려면 `thermal: true`. 아무 파트도 가리키지 않는 열 카드는 예전처럼 지운다. `thermal: true` 면 그 번호의 열 카드를 DB 열 카드(TMID = MID)로
+  바꿔 넣고 그 MID 를 쓰는 파트의 TMID 를 잇는다(회귀 `test_material_id_family.py` E)
 
 ---
 
@@ -3607,6 +3648,10 @@ operations:
   thickness: 2.0
   use_local_normals: true
   element_type: solid
+  material_card: |              # 필수(2026-11-08 — 없으면 종료 코드 1)
+    *MAT_ELASTIC
+    $#     mid        ro         e        pr
+         @MID@  7.85E-09  2.10E+05       0.3
 ```
 
 → 독립 명령 [22. offset](#22-offset--셸-오프셋-솔리드-생성) 참조
@@ -4249,6 +4294,11 @@ KooRemapper cclip <config.yaml>
 | `clips[].overtravel` | free height = installed + overtravel |
 
 **근거**: help(`Usage:`), pyKooCAE `mesh_generate.md`, `examples/cclip/cclip.yaml`(analytic)·`cclip_deck.yaml`(deck). 원본 PID 를 유지해 기존 SET/CONTACT 참조가 살아남으며, 출력 검증은 `tools/cclip_check.py` 로 한다(솔버 불필요).
+
+**옛 재질 지우기(2026-11-08).** 클립 파트는 새 MID 를 받고, 옛 MID 를 다른 파트가 쓰지 않으면 그 MID 의 **구조 재질 정의만** 지운다 — 같은 번호
+TMID 의 열 재질 · PID 꼴 덧붙임(`*MAT_ADD_THERMAL_EXPANSION` 등 — 파트는 남는다) · 한 키워드 아래 쌓인 다른 재질은 둔다(§23 의 matswap 과
+같은 규칙 · 예전엔 첫 칸이 그 MID 인 `*MAT` 블록을 다 지웠다). 재질이 덱에서 사라지므로 그 MID 꼴 덧붙임(`*MAT_ADD_EROSION` 등 — 첫 칸이
+MID)도 지운다 — 남기면 없는 재질을 가리킨다. 새 MID 는 공용 재질 훑기 위로 낸다(§3.1(h)). 회귀 `test_material_id_family.py` B.
 
 ---
 

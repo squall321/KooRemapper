@@ -14,6 +14,7 @@
 #include "assembly/WarpageGrid.h"
 #include "parser/KFileReader.h"
 #include "parser/IdAllocator.h"   // 번호를 한 길로 — 인클루드 닫힘까지 본 최대값 위로
+#include "parser/MaterialIds.h"   // 재질 번호 공용 훑기 — 쌓인 재질 묶음 · 열 재질 · 덧붙임 카드(2026-11-08)
 #include "parser/DeckScan.h"      // keywordToken — `*INCLUDE ±` 를 알아보려고
 #include "parser/CardCut.h"       // isKeywordLine · isCommentLine — 절점 · 요소 번호 겹침 판정(info)
 #include "parser/ElementCardLayout.h"   // 요소 카드 줄 수 판정 — 리더와 쓰기가 같은 표를 쓴다
@@ -134,16 +135,9 @@ int cur_sectionSetRows(const std::string& base, const std::string& card1, int w)
     return (base == "*SECTION_SHELL" ? 2 : 1) + static_cast<int>(angles);
 }
 
-// 줄의 첫 칸(고정폭 w · 콤마 줄은 첫 콤마 앞)이 숫자만이면 그 값 — StepForge 의 `raw[:10].strip().isdigit()`
-bool cur_digitsField(const std::string& l, int w, int& v) {
-    const size_t comma = l.find(',');
-    std::string f = comma != std::string::npos ? l.substr(0, comma) : l.substr(0, std::min(l.size(), static_cast<size_t>(w)));
-    f = deckscan::trim(f);
-    if (f.empty() || f.size() > 9 || !std::all_of(f.begin(), f.end(), [](char c) { return std::isdigit(static_cast<unsigned char>(c)); }))
-        return false;
-    v = std::stoi(f);
-    return v > 0;
-}
+// 줄의 첫 칸(고정폭 w · 콤마 줄은 첫 콤마 앞)이 숫자만이면 그 값 — StepForge 의 `raw[:10].strip().isdigit()`(공용 `deckscan::digitsField` —
+// 재질 MID 훑기 `matids` 가 둘째 소비자다)
+bool cur_digitsField(const std::string& l, int w, int& v) { return deckscan::digitsField(l, w, v); }
 
 CurSectionSets cur_scanSectionSets(const std::vector<std::string>& lines) {
     CurSectionSets out;
@@ -215,55 +209,20 @@ std::set<int> cur_scanSectionIdsInUse(const std::vector<std::string>& lines) {
     return out;
 }
 
-// 줄들에서 `*MAT_*` 의 MID 최대값. 리더(`KFileReader`)는 재질 **다섯 종류**만 읽어 `baseMesh_.materials` 에
-// 담는다 — 그 밖의 재질(`*MAT_PLASTIC_KINEMATIC` 등)도 번호는 차지한다. 그것을 못 세어 새 재질이 그 MID 를
-// **다시** 냈다(재현: `*MAT_PLASTIC_KINEMATIC 2` 가 있는 덱에 czm 이 `*MAT_COHESIVE_MIXED_MODE 2` 를 냈다, rc 0).
-// 빼는 것 — `*MAT_THERMAL_*` 와 그 번호 이름 `*MAT_T01`~`*MAT_T18`(TMID 는 MID 와 **독립된** 번호다, Vol II 159546-159548 ·
-// 2-9 의 번호 표 — 번호 이름은 StepForge 권고 591d5b5 · D-681 · 사용자 결정 11-07 밤에 더했다)와 `*MAT_ADD_*`(새 MID 를
-// 정의하지 않고 있는 재질에 덧붙인다 — 몇몇은 첫 칸이 PID 다).
-// MID 칸은 표준·I10 에서 10칸, long 에서 20칸이다(I10 은 8칸만 넓힌다 — Vol_I 19353). 공백 토큰이 아니라
-// 칸으로 읽는다 — `         17.8500E-09` 처럼 붙은 칸을 17 로 읽지 않게.
-// 줄들에서 `*MAT_*` 가 **정의하는** MID 들 — 열 재질 · `_ADD_` 는 정의가 아니다. 최대값(`cur_scanMaxMaterialId`)과
-// 「그 재질이 인클루드에만 있나」(`materialsReachable` · 2026-10-17)가 같은 규칙을 본다.
+// 줄들에서 `*MAT_*` 가 **정의하는** MID — 공용 재질 번호 훑기(`parser/MaterialIds.h` · 2026-11-08)에 맡긴다. 리더(`KFileReader`)는 재질
+// **다섯 종류**만 읽어 `baseMesh_.materials` 에 담는다 — 그 밖의 재질(`*MAT_PLASTIC_KINEMATIC` 등)도 번호는 차지한다(재현: `*MAT_PLASTIC_KINEMATIC 2`
+// 가 있는 덱에 czm 이 `*MAT_COHESIVE_MIXED_MODE 2` 를 냈다, rc 0). 빼는 것 — 열 재질(`*MAT_THERMAL_*` · 번호 이름 `*MAT_T01`~`*MAT_T18` —
+// TMID 는 MID 와 독립된 번호다, Vol II 159546-159548)과 `*MAT_ADD_*`(있는 재질 · 파트에 덧붙인다). MID 칸은 표준 · I10 에서 10칸, long 에서
+// 20칸이다(Vol_I 19353). ★한 키워드 아래 쌓인 재질(Card Sets)도 센다 — 묶음 한 벌의 행 수를 매뉴얼이 정하는 꼴은 다 읽고, 모르는 꼴은 행마다
+// 첫 칸 숫자를 넉넉히(커서만) 센다. 예전엔 블록마다 첫 카드만 보아 쌓인 둘째 MID 를 새 재질이 다시 냈다(적대적 검토 11-08 (g)).
 bool cur_isThermalMaterial(const std::string& kw) { return cards::isThermalMaterialKeyword(kw); }   // 공용 판정(CardFields.h)
-// MID → 그것을 정의한 `*MAT_*` 키워드 줄들(나온 차례 · 첫 데이터 카드의 MID) — 같은 MID 를 두 카드가 정의하면 둘 다 담는다
-// (이월 적용의 「손대는 PID 의 MID 가 두 번 정의됐나」 — StepForge 권고 D-681). 아래 `cur_scanMaterialIds` 가 이것의 번호들이다.
-std::map<int, std::vector<size_t>> cur_scanMaterialDefs(const std::vector<std::string>& lines) {
-    std::map<int, std::vector<size_t>> defs;
-    const int deckFw = deckFieldWidth(lines);
-    for (size_t i = 0; i < lines.size(); ++i) {
-        if (deckscan::isDataLine(lines[i])) continue;
-        const std::string kw = deckscan::kwBare(deckscan::keywordToken(lines[i]));
-        if (kw.rfind("*MAT_", 0) != 0 || cur_isThermalMaterial(kw) || kw.rfind("*MAT_ADD_", 0) == 0)
-            continue;
-        const int fw = keywordFieldWidth(lines[i], deckFw) == 20 ? 20 : 10;
-        bool needTitle = kw.find("_TITLE") != std::string::npos;
-        for (size_t j = i + 1; j < lines.size(); ++j) {
-            const std::string& d = lines[j];
-            size_t h = d.find_first_not_of(" \t");
-            if (h != std::string::npos && d[h] == '*') break;
-            if (h != std::string::npos && d[h] == '$') continue;
-            if (needTitle) { needTitle = false; continue; }   // 제목 줄은 비어 있을 수 있다
-            const int mid = deckscan::fieldInt(deckscan::cardFields(d, fw), 0);
-            if (mid > 0) defs[mid].push_back(i);
-            break;                                             // 첫 데이터 카드만 본다
-        }
-    }
-    return defs;
-}
-std::set<int> cur_scanMaterialIds(const std::vector<std::string>& lines) {
-    std::set<int> ids;
-    for (const auto& [mid, at] : cur_scanMaterialDefs(lines)) {
-        (void)at;
-        ids.insert(mid);
-    }
-    return ids;
-}
-
-int cur_scanMaxMaterialId(const std::vector<std::string>& lines) {
-    const auto ids = cur_scanMaterialIds(lines);
-    return ids.empty() ? 0 : *ids.rbegin();
-}
+// MID → 정의마다 그 묶음의 Card 1 줄(나온 차례) — 같은 MID 를 두 묶음이 정의하면 둘 다 담는다(이월 적용의 「손대는 PID 의 MID 가 두 번
+// 정의됐나」 — StepForge 권고 D-681 · 쌓인 묶음끼리도 센다).
+std::map<int, std::vector<size_t>> cur_scanMaterialDefs(const std::vector<std::string>& lines) { return matids::definitionLines(lines); }
+// 정의된 MID(쌓인 묶음까지) — 「있나」 · 「그 재질이 인클루드에만 있나」(`materialsReachable` · 2026-10-17)
+std::set<int> cur_scanMaterialIds(const std::vector<std::string>& lines) { return matids::defined(lines); }
+// 번호 커서 — 정의 ∪ 모르는 꼴 블록의 행마다 첫 칸 숫자의 최대(새 MID 가 쌓인 재질과 겹치지 않게)
+int cur_scanMaxMaterialId(const std::vector<std::string>& lines) { return matids::maxId(lines); }
 
 // 줄들에서 `*PART` **변형** 키워드가 정의하는 PID 최대값. 맨 `*PART`(·`_TITLE`)는 리더가 읽어 담는다 —
 // 변형은 리더가 건너뛰는데 번호는 차지한다(재현: `*PART_CONTACT 3` 옆에 czm 이 PID 3 을 냈다, rc 0).
@@ -8835,84 +8794,13 @@ int ModelAssembler::findPartMid(int pid) const {
 }
 
 std::string ModelAssembler::extractMaterialBlock(int origMid, int newMid) const {
-    // Scan rawLines_ for *MAT_* keyword blocks, find the one with origMid, copy with newMid
-    bool inMat = false;
-    bool onFirstData = false;
-    std::string result;
-    std::string header;
-
-    for (const auto& line : rawLines_) {
-        if (!line.empty() && line[0] == '*') {
-            if (inMat && !result.empty()) {
-                // End of material block - return it
-                return result;
-            }
-            inMat = false;
-            onFirstData = false;
-            result.clear();
-            header.clear();
-
-            std::string upper = line;
-            for (auto& c : upper) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-            if (upper.substr(0, 5) == "*MAT_" || upper.substr(0, 4) == "*MAT") {
-                inMat = true;
-                onFirstData = true;
-                header = line;
-                continue;
-            }
-            continue;
-        }
-        if (!inMat) continue;
-        if (!line.empty() && line[0] == '$') {
-            // Comment inside material block - include it
-            if (!result.empty()) result += line + "\n";
-            else header += "\n" + line;  // comment before first data line → append to header
-            continue;
-        }
-        if (onFirstData) {
-            // First data line - check if MID matches
-            // Try to parse first field (MID can be fixed-width or space-sep)
-            int mid = -1;
-            // Try space-sep first
-            std::istringstream iss(line);
-            std::string tok;
-            if (iss >> tok) {
-                try { mid = std::stoi(tok); } catch (...) {}
-            }
-            if (mid != origMid) {
-                inMat = false;
-                result.clear();
-                continue;
-            }
-            // Found our material!
-            result = header + "\n";
-            // Write first data line with newMid substituted
-            // Replace first field in line
-            std::string newLine = line;
-            size_t pos = 0;
-            while (pos < newLine.size() && std::isspace(newLine[pos])) pos++;
-            size_t end = pos;
-            while (end < newLine.size() && std::isdigit(newLine[end])) end++;
-            if (end > pos) {
-                std::string midStr = std::to_string(newMid);
-                // Preserve field width if possible
-                int origWidth = static_cast<int>(end - pos);
-                // Right-align in original width
-                while (static_cast<int>(midStr.size()) < origWidth) midStr = " " + midStr;
-                newLine.replace(pos, end - pos, midStr);
-            }
-            result += newLine + "\n";
-            onFirstData = false;
-            continue;
-        }
-        // Subsequent data lines - copy as-is
-        result += line + "\n";
-    }
-    // End of file with material still open
-    if (inMat && !result.empty()) {
-        return result;
-    }
-    return "";  // Not found
+    // 그 MID 의 **구조 재질** 정의를 newMid 로 베낀다 — 공용 재질 훑기(`matids::copyDefinition` · 11-08 (c)). 같은 번호 TMID 의 열 재질과
+    // `*MAT_ADD_*` 는 고르지 않고, `_TITLE` 재질은 제목 줄을 건너 MID 를 읽고, MID 칸은 칸 폭 그대로 바꾼다. 예전엔 첫 칸이 그 MID 인 **첫**
+    // `*MAT` 블록을 베껴 열 카드 · 덧붙임 카드가 앞이면 그것을 IGA 재질로 냈고, `_TITLE` 재질은 제목을 MID 로 읽어 못 찾아 빈 재질(0 물성)을
+    // 냈고, 자리가 늘어난 MID(9 → 10)는 칸을 한 글자 밀어 RO 칸을 깨뜨렸다. 주 덱에 없으면 인클루드 파일에서 찾는다.
+    std::string out = matids::copyDefinition(rawLines_, origMid, newMid);
+    for (size_t k = 0; out.empty() && k < incl_.files.size(); ++k) out = matids::copyDefinition(incl_.files[k].lines, origMid, newMid);
+    return out;
 }
 
 std::string ModelAssembler::generateIGAContent(
@@ -10078,6 +9966,16 @@ bool ModelAssembler::applyOffset(const OffsetOperation& op, double E, double nu)
     if (op.elementType == "shell" && op.connectionMode == "czm") {
         errorMessage_ = "offset: element_type: shell 에는 connection_mode: czm 을 적용할 수 없다 — 셸 층은 원본 면과 떨어진 "
                         "별도 면이라 코히시브를 만들 자리가 없다. solid · tshell 로 만들거나 연결 모드를 바꿔라";
+        return false;
+    }
+
+    // 새 파트의 재질 — material_card(층마다 다르면 material_cards)가 없으면 거절한다(사용자 결정 11-08 (f)). 예전엔 새 MID 를 `*PART` 에 쓰고
+    // 재질 카드는 쓰지 않아(카탈로그 「no material written — user adds manually or via matswap」) `*PART` 가 정의되지 않은 재질을 가리킨 덱이
+    // rc 0 으로 나갔다 — generate box 에 offset 만 해도 `info --strict` 「재질 n 이 정의되지 않았습니다」. 원 파트의 재질을 지어내 쓰지 않는다
+    // (어떤 재질이 맞는지는 사용자가 안다 — 같은 재질이면 그 카드를 MID 칸만 @MID@ 로 적는다). 다층(material_cards)은 층마다 이 문을 지난다
+    if (op.materialCards.empty() && deckscan::trim(op.materialCard).empty()) {
+        errorMessage_ = "offset: material_card(층마다 다르면 material_cards)가 없다 — 새 파트의 *PART 가 정의되지 않은 MID 를 가리키게 된다. "
+                        "새 층의 *MAT 카드를 material_card 로 주라(원 파트와 같은 재질이면 그 카드를 MID 칸만 @MID@ 로 바꿔 적는다)";
         return false;
     }
 
@@ -12580,16 +12478,41 @@ bool ModelAssembler::applyMatswap(const MatswapOperation& op, const std::string&
     };
     int maxHGID  = scanMax("*HOURGLASS");
     int maxLCID  = scanMax("*DEFINE_CURVE");
-    int maxSECID = scanMax("*SECTION");
-    int maxMID   = scanMax("*MAT_");
+    // SECID · MID 는 공용 커서(`maxSectionId_` · `maxMaterialId_` — 쌓인 섹션 · 재질 묶음까지 센 값 + 같은 assemble 의 앞 op 이 낸 번호)와
+    // 견준다 — 앞 op 이 덧붙인 카드(새 재질 · 섹션)는 아직 rawLines_ 에 없어 이 훑기가 못 본다. 예전엔 offset 이 낸 MID 2 · SECID 2 를 뒤의
+    // matswap 이 또 냈다(망가진 카드 2건 · 11-08 (d)). MID 는 공용 재질 훑기로 센다(열 재질 TMID · `*MAT_ADD_*` 는 MID 가 아니다)
+    int maxSECID = std::max(scanMax("*SECTION"), maxSectionId_);
+    int maxMID   = std::max({matids::maxId(rawLines_), inclMax([](const std::vector<std::string>& L) { return matids::maxId(L); }),
+                             maxMaterialId_});
+
+    // 다른 파트가 쓰지 않는 옛 MID — 그 MID 의 **구조 재질 정의만** 지운다(11-08 (a)). 같은 번호 TMID 의 열 재질 · PID 꼴 덧붙임
+    // (`*MAT_ADD_THERMAL_EXPANSION` 등) · 같은 블록에 쌓인 다른 재질은 둔다 — 예전엔 첫 칸이 그 MID 인 `*MAT_` 블록을 다 지웠다.
+    // 지운 뒤에도 그 번호가 쓰이면(길이를 모르는 블록에 쌓였다 · 인클루드에도 있다) 다시 주지 않는다(같은 MID 가 둘이 된다).
+    std::set<int> freedMids;
+    for (int mid : oldMids) {
+        if (mw_isSharedExcludeSet(rawLines_, 2, mid, targetPidSet)) continue;
+        const auto rm = matids::removeDefinition(rawLines_, mid);
+        const bool inIncl = inclMax([mid](const std::vector<std::string>& L) { return matids::inUse(L).count(mid) ? 1 : 0; }) > 0;
+        if (!rm.stillUsed && !inIncl) freedMids.insert(mid);
+        else
+            infoMessages.push_back("[matswap] WARNING: MID " + std::to_string(mid) + " 이 지운 뒤에도 쓰인다(" +
+                                   (inIncl ? std::string("인클루드") : std::string("묶음을 못 가른 재질 블록")) + ") — 그 번호를 다시 주지 않는다");
+        infoMessages.push_back("[matswap] Removed *MAT_ MID=" + std::to_string(mid) + " (구조 재질 정의 " + std::to_string(rm.sets) +
+                               " — 열 재질 · 덧붙임 카드 · 쌓인 다른 재질은 둔다)");
+    }
 
     // Reuse orphan MID if all target parts share a single MID that is orphaned
     int reuseableMid = -1;
-    if (oldMids.size() == 1) {
-        int onlyMid = *oldMids.begin();
-        if (!mw_isSharedExcludeSet(rawLines_, 2, onlyMid, targetPidSet))
-            reuseableMid = onlyMid;
-    }
+    if (oldMids.size() == 1 && freedMids.count(*oldMids.begin())) reuseableMid = *oldMids.begin();
+    // 다시 쓰지 않는 옛 번호의 재질은 덱에서 사라진다 — 그 MID 에 덧붙인 카드(EROSION · GISSMO … — 첫 칸이 MID)도 지운다(남기면 없는 재질을
+    // 가리킨다). 번호를 다시 쓰면 둔다(새 재질에 붙는다 — matdb 와 같다). PID 꼴 덧붙임 · 열 재질은 건드리지 않는다
+    for (int mid : freedMids)
+        if (mid != reuseableMid) {
+            const int n = matids::removeMidAddOns(rawLines_, mid);
+            if (n > 0)
+                infoMessages.push_back("[matswap] Removed " + std::to_string(n) + " *MAT_ADD_* card(s) of MID=" + std::to_string(mid) +
+                                       " (재질이 덱에서 사라졌다)");
+        }
 
     // 7. Build remap table
     std::map<std::string,int> remap;
@@ -12608,6 +12531,10 @@ bool ModelAssembler::applyMatswap(const MatswapOperation& op, const std::string&
                                std::to_string(p.ivalue) + " -> " + std::to_string(newVal));
     }
 
+    // 낸 번호를 공용 커서에 올린다 — 뒤 op 이 같은 번호를 다시 내지 않게
+    maxSectionId_  = std::max(maxSectionId_, maxSECID);
+    maxMaterialId_ = std::max(maxMaterialId_, maxMID);
+
     // Sorted remap (longer names first to avoid prefix collisions)
     std::vector<std::pair<std::string,int>> sortedRemap(remap.begin(), remap.end());
     std::sort(sortedRemap.begin(), sortedRemap.end(),
@@ -12618,13 +12545,7 @@ bool ModelAssembler::applyMatswap(const MatswapOperation& op, const std::string&
     for (const auto& c : bundle.cards)
         resolvedCards.push_back(mw_resolveLine(c, sortedRemap));
 
-    // 9. Remove orphaned old keyword blocks
-    for (int mid : oldMids) {
-        if (!mw_isSharedExcludeSet(rawLines_, 2, mid, targetPidSet)) {
-            rawLines_ = mw_removeBlock(rawLines_, "*MAT_", mid);
-            infoMessages.push_back("[matswap] Removed *MAT_ MID=" + std::to_string(mid));
-        }
-    }
+    // 9. Remove orphaned old keyword blocks — 재질은 위에서 지웠다(구조 재질 정의만)
     if (!midMode) {
         // SECTION swap only for PID-based targeting
         for (int secid : oldSecids) {
@@ -13103,6 +13024,33 @@ static int md_readIntField(const std::string& line, int startCol, int width) {
     if ((int)line.size() < startCol + width) return 0;
     std::string f = line.substr(startCol, width);
     try { return std::stoi(f); } catch (...) { return 0; }
+}
+
+// `*PART`(· `_TITLE`) 카드가 가리키는 TMID(Card 1 의 여덟째 칸) — matdb 가 열 카드를 지워도 되는지 본다(11-08 (e))
+static std::set<int> md_partTmids(const std::vector<std::string>& lines) {
+    std::set<int> out;
+    bool inPart = false, titleDone = false;
+    for (const auto& ln : lines) {
+        const std::string tr = mw_trim(ln);
+        if (tr.empty()) continue;
+        if (tr[0] == '*') {
+            const std::string up = mw_upper(tr);
+            inPart = (up == "*PART" || up == "*PART_TITLE");
+            titleDone = false;
+            continue;
+        }
+        if (!inPart || tr[0] == '$') continue;
+        if (!titleDone) { titleDone = true; continue; }
+        const auto toks = mw_tok10(ln);
+        if (toks.size() > 7) {
+            try {
+                const int t = std::stoi(toks[7]);
+                if (t > 0) out.insert(t);
+            } catch (...) {}
+        }
+        titleDone = false;   // 같은 *PART 블록의 다음 (제목, 데이터) 짝
+    }
+    return out;
 }
 
 static std::string md_setField(const std::string& line, int startCol, int width, int value) {
@@ -13601,12 +13549,10 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
     {
         int maxMid = 0;
         for (auto& blk : matBlocks) if (blk.mid > maxMid) maxMid = blk.mid;
-        // 인클루드 파일의 재질도 같은 스캐너로 센다 — 이미 있는 MID 를 다시 내지 않게
-        maxMid = std::max(maxMid, inclMax([](const std::vector<std::string>& L) {
-            int m = 0;
-            for (const auto& b : md_scanMatBlocks(L)) m = std::max(m, b.mid);
-            return m;
-        }));
+        // 새 MID 는 공용 커서 위로 — 주 덱 · 인클루드를 공용 재질 훑기로(쌓인 재질 묶음까지 · 열 재질 TMID · 덧붙임 카드는 빼고) 세고, 같은
+        // assemble 의 앞 op 이 낸 번호(`maxMaterialId_`)도 본다(11-08 (d) — 예전엔 블록마다 첫 카드만 세어 쌓인 둘째 MID 를 다시 낼 수 있었다)
+        maxMid = std::max({maxMid, matids::maxId(rawLines_), inclMax([](const std::vector<std::string>& L) { return matids::maxId(L); }),
+                           maxMaterialId_});
         // Also scan all known part data lines for max MID
         for (auto& kv : partDataLineByTitle) {
             size_t j = kv.second;
@@ -13678,6 +13624,7 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
                 break; // first matching rule wins
             }
         }
+        maxMaterialId_ = std::max(maxMaterialId_, maxMid);   // 낸 번호를 공용 커서에 올린다 — 뒤 op 이 다시 내지 않게
     }
 
     // 4. Match each MAT block to DB
@@ -13757,11 +13704,12 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
     // 6. Remove old MAT blocks (mark with sentinel, reverse order)
     // Also remove existing thermal blocks for matched MIDs
     const std::string DEL = "\x01""DEL";
-    for (int bi = (int)matBlocks.size() - 1; bi >= 0; --bi) {
-        auto& blk = matBlocks[bi];
-        if (matchedMids.find(blk.mid) == matchedMids.end()) continue;
-        for (int li = blk.startLine; li < blk.endLine && li < (int)rawLines_.size(); ++li)
-            rawLines_[li] = DEL;
+    // 맞춘 MID 의 구조 재질 정의만 지운다 — 한 키워드 아래 쌓인 다른 재질은 둔다(공용 재질 훑기 `matids` · 11-08 (g)). 예전엔 블록의 첫 카드
+    // MID 가 맞으면 블록째 지워 쌓인 둘째 재질이 사라졌다(그 재질을 쓰던 파트가 미정의 재질 · rc 0). 블록의 묶음이 다 맞으면 블록째다
+    {
+        const auto cut = matids::definitionMask(rawLines_, matchedMids);
+        for (size_t li = 0; li < cut.size(); ++li)
+            if (cut[li]) rawLines_[li] = DEL;
     }
 
     // 6b. Strip pre-existing damping cards when any damping rescale option is
@@ -13810,6 +13758,17 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
     }
 
     // Remove existing *MAT_THERMAL_* and *MAT_ADD_THERMAL_EXPANSION for matched MIDs
+    // 열 카드는 그 번호(TMID = MID — matdb 가 넣는 꼴)의 새 열 카드를 넣는 MID(thermal 켬)면 바꿔 넣고, thermal 이 꺼진 MID 는 `*PART` TMID 가
+    // 가리키면 남긴다(11-08 (e) — 예전엔 thermal: false 여도 같은 번호 열 카드를 지워 `*PART` TMID 가 없는 열 재질을 가리켰다 · 이름 꼴 ·
+    // 번호 이름 둘 다). 아무 파트도 가리키지 않는 것은 예전처럼 지운다
+    std::set<int> thermalOnMids;
+    for (const auto& mi : matches)
+        if (mi.thermal) thermalOnMids.insert(mi.modelMid);
+    std::set<int> partTmids = md_partTmids(rawLines_);
+    for (const auto& f : incl_.files) {
+        const auto t = md_partTmids(f.lines);
+        partTmids.insert(t.begin(), t.end());
+    }
     for (int i = 0; i < (int)rawLines_.size(); ++i) {
         std::string t = mw_trim(rawLines_[i]);
         if (t.empty() || t[0] != '*') continue;
@@ -13836,6 +13795,11 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
                     bool shouldRemove = false;
                     if (isThermal) {
                         shouldRemove = matchedMids.count(id) > 0;
+                        if (shouldRemove && !thermalOnMids.count(id) && partTmids.count(id)) {
+                            shouldRemove = false;
+                            infoMessages.push_back("[matdb] kept thermal card TMID=" + std::to_string(id) +
+                                                   " — *PART TMID 가 가리킨다(thermal 이 꺼져 새 열 카드를 넣지 않는다 · 그 열 물성은 바꾸기 전 재질의 것이다)");
+                        }
                     } else {
                         // expansion: id is PID, find its MID
                         auto info = mw_getPartInfo(rawLines_, id);

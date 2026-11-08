@@ -232,6 +232,9 @@ bool bytesGiveLines(const std::string& bytes, const std::vector<std::string>& li
 // 덱의 정수 칸 하나(앞뒤 공백 뗌) — 빈 칸은 0, 정수 글자, 또는 10진 실수 꼴로 쓴 정수 값(NIP `5.000e+00` → 5 — LS-DYNA · StepForge 가
 // 그렇게 읽는다). 정수가 아닌 값(`2.5`) · 10진이 아닌 꼴(`0x2` · `inf`)은 false. 섹션 카드 묶음의 줄 셈(공용 SECID 훑기)도 이것을 쓴다
 bool integralField(const std::string& s, long long& v);
+// 덱의 실수 칸 하나(앞뒤 공백 뗌) — 10진 꼴만(`0x2` · `inf` 는 false · 빈 칸도 false). 재질 카드 묶음의 줄 셈(`*MAT_ELASTIC` 의 E < 0 이면
+// Card 1.1 — 공용 MID 훑기 `matids`)이 쓴다
+bool realField(const std::string& s, double& v);
 
 // ── 보고(`dynaforge-carryover-apply` v1) ─────────────────────────────────────
 struct PartResult {

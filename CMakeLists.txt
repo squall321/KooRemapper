@@ -59,6 +59,7 @@ set(PARSER_SOURCES
     src/parser/OutputGuard.cpp
     src/parser/NodeRefs.cpp
     src/parser/IdRefs.cpp
+    src/parser/MaterialIds.cpp
     src/parser/KFileReader.cpp
     src/parser/KFileWriter.cpp
     src/parser/DynainWriter.cpp

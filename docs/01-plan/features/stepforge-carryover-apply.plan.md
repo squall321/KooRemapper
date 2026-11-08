@@ -187,7 +187,58 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
 - **조각 바닥은 절점 · 요소만(#6 · 문서)** — 이 문서(아래 「11-07 밤」 의 권고 ③ · 셋째 묶음 커서)와 그 커밋 글이 이월 적용의 조각 이동량
   바닥을 SECID · MID 커서의 소비자로 적었는데, 그 바닥(CarryoverApply ⑨)은 `idMaxima()` 의 절점 · 요소 최대값만 본다 — 줄을 고쳤다(커밋 글은
   그대로 남는다). 이월 적용이 SECID 셈을 쓰는 곳은 새 섹션의 차례 · 겹침, MID 셈은 「조각 MID 가 덱에 있나」 다. 도움말 · 카탈로그의 「조각
-  번호는 덱 바닥 위」 도 절점 · 요소 번호라고 적었다(PID · SECID · MID 는 옮기지 않는다).
+  번호는 덱 바닥 위」 도 절점 · 요소 번호라고 적었다(PID · SECID · MID 는 옮기지 않는다). 설명서 §3.1(h) 의 같은 말도 11-08 둘째에 고쳤다.
+
+## 11-08 둘째 — 재질 번호(MID) 가족 고침(사용자 결정 「이번 판에 다 고친다」) — 정한 것
+- **공용 재질 번호 훑기 하나(`parser/MaterialIds.h` · `matids`)** — 세기 · 있나 · 두 번 정의 · 정의 지우기 · 베끼기 · 고정 번호대 겹침이 같은
+  셈을 쓴다(둘째 소비자 규칙 — op 마다 일곱 벌의 사본이 따로 셌다). 구조 재질 = `*MAT_*` 가운데 열 재질(`cards::isThermalMaterialKeyword` —
+  TMID)과 `*MAT_ADD_*` 를 뺀 것. 섹션 카드 묶음 셈과 같은 꼴 — 빈 줄도 카드 · 끝의 빈 줄은 여백 · `$` 는 건너뜀 · 쉼표 줄은 모르는 꼴.
+- **쌓인 재질 묶음((g))** — 묶음 한 벌의 줄 수를 Vol II R16 카드 요약이 정하는 꼴만 다 읽는다: `*MAT_ELASTIC`(001) 1 + Card 1.1(E < 0 ·
+  StepForge 591d5b5 `card_set_rows` 와 같다) + Card 2(`_FLUID`) · `*MAT_PLASTIC_KINEMATIC`(003) 2 · `*MAT_VISCOELASTIC`(006) 1 · `*MAT_NULL`(009) 1
+  · `*MAT_RIGID`(020) 3 · `*MAT_PIECEWISE_LINEAR_PLASTICITY`(024 · 옵션 없는 꼴) 4. 저장소 덱의 구조 재질 꼴 가운데 이 여섯이 대부분이다(ELASTIC
+  531 · 024 283 · 006 215 · 003 205). E 칸이 수가 아니면(`&E`) 모름 — 지어내지 않는다. 그 밖의 꼴과 못 가른 자리부터는 행마다 첫 칸 숫자
+  (`deckscan::digitsField` — 섹션과 공용)를 넉넉히 센다(커서 · 겹침만 — 「있나」 는 묶음의 Card 1). 커서(`cur_scanMaxMaterialId`)가 그
+  최대 · 있나(`definedMaterialIds` · `materialsReachable`)가 정의 · 두 번 정의(`materialDefinitionLines` — 이월 적용 part_duplicate)가 묶음마다
+  Card 1 줄을 쓴다(쌓인 묶음끼리도 센다 — StepForge `dup_mats` 와 같은 쪽). StepForge 는 `*MAT_ELASTIC` 만 쌓인 묶음을 읽고 다른 재질은 새
+  번호를 매기지 않아 MID 위끝을 세지 않는다 — 우리 커서가 넉넉한 쪽이라 겹침은 없다.
+- **MID 를 내는 op 마다 같은 셈((d))** — matswap(단독 · assemble) · cclip · ale · cnrb2solid · cnrb2spring · matdb match_part 가 각자 센
+  `*MAT_` 첫 카드(또는 모든 행) 셈을 `matids` 로 바꿨다. assemble 의 matswap · matdb 는 공용 커서(`maxMaterialId_` · matswap 은
+  `maxSectionId_` 도)와 견주고 낸 번호를 올린다 — 같은 실행의 앞 op(offset)이 덧붙인 재질 · 섹션은 아직 rawLines_ 에 없어 예전 훑기가
+  못 보고 MID 2 · SECID 2 를 또 냈다(--strict 망가진 카드 2건 · 실측). 회귀 `test_material_id_family.py` G · D 17항(4dfe039 에서 17 실패).
+- **옛 재질 지우기 — 구조 재질 정의만((a) matswap 단독 · assemble · (b) cclip)** — `matids::removeDefinition`: 길이를 아는 묶음은 그 묶음 줄만
+  (블록의 묶음이 다 지워지면 키워드 줄째 — 빈 재질 키워드를 남기지 않는다), 길이를 모르는 첫 묶음은 블록째(예전 그대로 — 뒤에 쌓인 것이
+  있는지 모른다), 길이를 모르는 쌓인 묶음은 그 자리부터 블록 끝까지. 같은 번호 TMID 의 열 재질 · PID 꼴 덧붙임 · 쌓인 다른 재질은 둔다.
+  **MID 꼴 덧붙임(정한 것 · 조정자에게 물음)** — Vol II R16 카드 정의로 가른다: MID 꼴 12(EROSION · DAMAGE_GISSMO · DAMAGE_DIEM · FATIGUE ·
+  GENERALIZED_DAMAGE · INELASTICITY · PERMEABILITY · PORE_AIR · PROPERTY_DEPENDENCE · PZELECTRIC · AIRBAG_POROSITY_LEAKAGE ·
+  BASIC_INCREMENTAL_FAILURE) · PID 꼴 5(THERMAL_EXPANSION · COHESIVE · CHEM_SHRINKAGE · SOC_EXPANSION · EXTVAR_EXPANSION). 문자 그대로 「구조 정의만」
+  지우면 재질이 덱에서 사라지는 경우(cclip — 새 MID · assemble matswap 여러 파트 — 번들은 새 번호) MID 꼴 덧붙임이 없는 재질을 가리킨다(예전엔
+  같이 지워 그 결함이 없었다) — 그때만 `removeMidAddOns` 로 같이 지운다. 번호를 다시 쓰면(matswap 고아 MID) 둔다 — 새 재질에 붙는다(matdb 가
+  같은 MID 에 덧붙임을 두는 것과 같다). 지운 뒤에도 그 번호가 쓰이면(`stillUsed` — 묶음을 못 가른 블록에 쌓였다 · 인클루드에도 있다) 번들에
+  그 번호를 다시 주지 않는다(같은 MID 가 둘이 된다 — 예전엔 줬다). assemble matswap 은 재질 지우기를 번호 매기기 앞으로 옮겼다(다시 줄 수
+  있는지 알아야 해서 — 산출 덱은 같다). 회귀 A · B 8항(4dfe039 에서 B-2 빼고 실패 — B-2 는 예전에도 덧붙임을 같이 지웠다).
+- **IGA 재질 베끼기((c))** — `extractMaterialBlock` 을 `matids::copyDefinition` 으로: 그 MID 의 첫 구조 재질 정의(키워드 줄 · 그 묶음 줄 · 앞의
+  주석)를 베끼고 Card 1 의 MID 칸만 바꾼다 — 고정폭 칸이 정수면 칸 폭 그대로 오른쪽 맞춤, 쉼표 줄이면 첫 값, 칸이 어긋난 줄이면 첫 토큰.
+  예전 결함 셋을 같이 고쳤다 — 열 카드 · 덧붙임 카드가 앞이면 그것을 베꼈고, `_TITLE` 재질은 제목을 MID 로 읽어 못 찾아 0 물성 재질을 냈고,
+  자리가 늘어난 MID(9 → 10)는 숫자 자리에 끼워 넣어 칸이 한 글자 밀렸다. 주 덱에 없으면 인클루드 파일에서 찾는다(새). 길이를 모르는 꼴은
+  예전처럼 블록 끝까지 베낀다(그 뒤에 쌓인 재질이 있으면 같이 베껴진다 — 남은 틈). 회귀 C 4항(4dfe039 에서 4 실패).
+- **matdb `thermal: false` 의 열 카드((e) · 가장 작은 바른 동작)** — 지우는 조건에 하나를 더했다: 그 재질의 thermal 이 꺼져 있고(새 열 카드를
+  넣지 않는다) `*PART`(· `_TITLE`) TMID 가 그 열 카드를 가리키면(주 덱 · 인클루드) 남긴다 + 안내(`[matdb] kept thermal card TMID=n` — 바꾸기 전
+  재질의 열 물성이다). 고른 까닭 — 지우고 TMID 를 0 으로 돌리기는 열 해석 덱을 깨고(LS-DYNA 는 열 · 연성 해석이면 셸 · 솔리드 파트마다 TMID
+  를 요구한다 — Vol I *PART), 새 TMID 로 돌리기는 넣을 열 카드가 없다. 아무 파트도 가리키지 않는 열 카드는 예전처럼 지운다(해가 없다).
+  `thermal: true` 는 그대로 — 그 번호의 열 카드를 DB 열 카드(TMID = MID)로 바꿔 넣고 그 MID 를 쓰는 파트의 TMID 를 잇는다(남은 틈 — 다른
+  MID 의 파트가 같은 TMID 를 가리키면 그 파트도 새 열 물성을 받는다). 회귀 E 4항(4dfe039 에서 E-1 · E-1t 실패 · E-2 · E-3 은 지키는 항).
+- **matdb 의 쌓인 재질(이번에 찾음 · (g) 의 같은 뿌리)** — matdb 는 맞춘 재질 블록을 `[startLine, endLine)` 째 지워, 블록의 첫 카드 MID 가 맞으면
+  같은 키워드 아래 쌓인 둘째 재질까지 지웠다(그 재질을 쓰던 파트가 미정의 재질 · rc 0 · 실측). `matids::definitionMask`(removeDefinition 과
+  같은 규칙 · 줄 차례를 바꾸지 않는 표시 — matdb 의 DEL 표지)로 맞춘 MID 의 묶음만 지운다. 묶음이 하나인 블록은 예전과 같은 줄을 지운다(산출
+  같음). 매칭(`md_scanMatBlocks`)은 지금도 블록의 첫 카드만 본다 — 쌓인 둘째 재질은 `mid:` 규칙으로 고를 수 없다(남은 틈). 회귀 E-4(4dfe039 에서 실패).
+- **offset 의 재질 카드는 필수((f) · 거절)** — 문서와 동작은 어긋나지 않았다: 카탈로그가 `material_card` 를 선택으로 두고 「If material_card is
+  empty/missing, no material written (user adds manually or via matswap)」 라 적었고 그대로 동작했다(설명서는 말이 없고 도움말 예제가 재질
+  카드 없이 돌았다 — `*PART` MID 2 에 재질 없음 · rc 0 · 35a35bb 부터). 조정자에게 셋을 물었다 — ① 거절 ② 원 파트 MID 를 같이 쓰기
+  ③ 원 파트 구조 재질을 새 MID 로 베끼기. ①을 골랐다(답이 없어 알린 기본값) — ②③은 오늘 LS-DYNA 가 키워드 단계에서 멈추는 덱(시끄러운
+  실패)을 「원 파트와 같은 재질」 로 조용히 바꾼다(지어내지 않는다). 대가 — 재질과 무관하게 offset 을 편의로 돌리던 설정이 rc 1 이 된다:
+  도움말 예제(flatten_includes · output_guard_ops · help_truth 가 돌린다) · 회귀 다섯(catalog_binary_parity · element_topology ·
+  id_width_overflow · section_cursor_stacked · standalone_yaml_parsing)에 재질 카드를 붙였다(시험 뜻은 그대로). 다층(material_cards)은 층마다
+  같은 문을 지난다(빈 층 카드도 거절). 회귀 F 3항(4dfe039 에서 F-1 · F-2 실패).
 
 ## 11-07 밤 결정 고침 — 정한 것
 - **출력 규칙(사용자 결정 ①)** — extract-parts(`a33af2f`)와 같은 꼴: 덱 · 보고를 output 폴더의 임시 파일(`.<이름>.kr_tmp_…`)에 쓰고 되읽기 대조 ·

@@ -57,6 +57,9 @@ operations:
     offset_direction: +z
     connection_mode: tied
     new_pid: 10
+    material_card: |
+      *MAT_ELASTIC
+           @MID@  7.85E-09  2.10E+05       0.3
 """
 
 
