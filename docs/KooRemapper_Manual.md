@@ -442,7 +442,10 @@ BOM 을 붙인 설정으로 둘 다 **종료 코드 0** 으로 정상 산출물�
 LS-DYNA 는 주 덱의 **첫** `*END` 에서 읽기를 멈춥니다(그 뒤 줄은 해석에 들지 않습니다). 덱을 고쳐 쓰는 op 이 덧붙이는 카드
 (접촉 · SPC · 구속 · `*DATABASE_*` · 감쇠 · CNRB 를 바꾼 솔리드 · 배터리 `*INCLUDE` · `squeeze` 의 dynain `*INCLUDE` · 열팽창 · DR 카드 ·
 `map` prestress 의 `*INCLUDE` …)는 그 앞에 **한 번** 넣고, `*END` 가 없으면 덱 끝에 붙입니다. 메시를 다시 쓰는 op(`map` · `shellmap` ·
-`squeeze`)은 원본의 첫 `*END` 에서 끝내고 그 뒤 원본 줄은 **그대로** 둡니다.
+`squeeze`)은 원본의 첫 `*END` 에서 끝내고 그 뒤 원본 줄은 **그대로** 둡니다. 그 `*END` 는 **1열이 `*`** 인 키워드 줄만입니다(「키워드 앞
+`*` 는 1열」 · Vol_I 17940 · 리더 `KFileReader` 와 같은 규칙 — 공용 첫 `*END` 찾기 `deckscan::firstEndLine` 을 쓰는 덧붙임(contact ·
+boundary · rbe · battery · database · hfdamp · cnrb2solid · squeeze · map prestress)과 메시 쓰기). 들여쓴 `  *END`(`*COMMENT` 글 속 등)는
+끝이 아니라 앞 블록의 데이터입니다.
 
 - **왜** — 셋째 묶음 전엔 `*END` 마다 넣는 op(assemble 의 contact · boundary · rbe · 단독 database · cnrb2solid)이 `*END` 가 둘인
   덱에 같은 카드를 두 벌 냈고, 마지막 `*END` 앞에 넣는 op(battery · hfdamp · 단독 contact)은 LS-DYNA 가 읽지 않는 자리에 넣었으며,
@@ -450,6 +453,8 @@ LS-DYNA 는 주 덱의 **첫** `*END` 에서 읽기를 멈춥니다(그 뒤 줄�
   끝에 하나만 써, 첫 `*END` 뒤에 있던(읽히지 않던) 카드가 산출에서 살아났습니다. 단독 `squeeze` 의 덧붙임(dynain `*INCLUDE` ·
   `*MAT_ADD_THERMAL_EXPANSION` · `*INITIAL_TEMPERATURE_NODE` · `*CONTROL_*` · `*DATABASE_BINARY_D3DRLF`)과 `map` prestress 훅의
   `*INCLUDE` 는 `*END` 마다 넣어, 메시 쓰기가 첫 `*END` 뒤를 남기게 된 뒤로 `*END` 가 둘인 덱에 두 벌이 나갔습니다(2026-11-08 재검토).
+  첫 `*END` 찾기와 메시 쓰기는 들여쓴 `  *END` 도 끝으로 보아 `*COMMENT` 글 속의 그 줄 앞에 카드를 넣었고(그 줄이 넣은 블록의 데이터가
+  됐다) 메시 쓰기는 거기서 `*END` 를 쓰고 원본 `*END` 를 또 베꼈습니다(같은 재검토).
 - 회귀 `tools/regress/test_end_insert_once.py` — op 마다 `*END` 하나 · 둘 · 없음의 덱으로 카드 수와 자리를 봅니다.
 
 ---

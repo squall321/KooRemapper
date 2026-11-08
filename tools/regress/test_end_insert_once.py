@@ -18,6 +18,9 @@
       `*DATABASE_BINARY_D3DRLF`) · map 의 prestress 훅(`*INCLUDE <dynain>`) — `*END` 마다 넣었다. 메시 쓰기가 첫 `*END` 뒤를 남기게 된 뒤로
       `*END` 가 둘인 덱에 두 벌이 나갔다(2026-11-08 재검토). 이제 공용 `deckscan` 으로 첫 `*END` 앞에 한 번.
     · cnrb2solid — 덱 전체를 읽어 첫 `*END` 뒤의(읽히지 않는) CNRB 를 산 솔리드로 바꿨다(그 PNODE 도 지웠다). 이제 첫 `*END` 앞만 읽는다.
+    · 들여쓴 `  *END` — 키워드의 `*` 는 1열이다(Vol_I 17940 · 리더 `KFileReader::isKeywordLine`). 첫 `*END` 찾기(`deckscan::firstEndLine`)와
+      메시 쓰기(KFileWriter)가 들여쓴 줄도 `*END` 로 보아, `*COMMENT` 글 속의 「  *END」 앞에 카드를 넣고(그 줄이 넣은 블록의 데이터가
+      됐다) 메시 쓰기는 거기서 `*END` 를 쓰고 원본 `*END` 를 또 베꼈다(2026-11-08 재검토).
 
 무엇을 보나.
   `*END` 가 둘인 덱 — 넣은 카드 수가 `*END` 하나인 덱과 같고, 넣은 카드가 다 첫 `*END` 앞에 있다(contact · boundary · rbe) ·
@@ -247,6 +250,32 @@ def main():
         dp = [i for i, l in enumerate(L) if l == "dead part"]
         check("map ★원본의 첫 *END 뒤 카드(죽은 *PART 99)가 산출에서도 첫 *END 뒤다 · *END 둘이 그대로",
               rc == 0 and len(ends) == 2 and len(dp) == 1 and dp[0] > ends[0], (rc, ends, dp, text[-300:]))
+
+        # 들여쓴 「  *END」(*COMMENT 글 속) 는 끝이 아니다 — 1열 규칙(Vol_I 17940 · 리더와 같다). 덧붙임은 그 뒤 1열 *END 앞, 메시 쓰기는 *END 하나
+        print("[들여쓴 *END — *COMMENT 글 속의 「  *END」 는 끝이 아니다]")
+        cmt_end = "*COMMENT\n  *END\n*END\n"
+        write(os.path.join(d, "ind_box.k"), box.replace("*END\n", "") + cmt_end)
+        write(os.path.join(d, "ind_flat.k"), flat.replace("*END\n", "") + cmt_end)
+
+        def ind_rows(L, prefixes):
+            ind = [i for i, l in enumerate(L) if l == "  *END"]
+            ends = [i for i, l in enumerate(L) if l.upper().startswith("*END")]
+            rows = [i for p in prefixes for i in kw_rows(L, p)]
+            return ind, ends, rows
+        write(os.path.join(d, "ind_db.yaml"), "model: ind_box.k\noutput: ind_db_out.k\npreset: drop\ndt: 0.0001\ndt_plot: 0.005\n")
+        rc, text = run(binary, d, "database", "ind_db.yaml")
+        ind, ends, rows = ind_rows(lines_of(os.path.join(d, "ind_db_out.k")), ("*DATABASE_BINARY_D3PLOT",))
+        check("indent-database ★*DATABASE 카드가 「  *END」 뒤 · 1열 *END 앞이다(예전엔 「  *END」 앞 — 그 줄이 넣은 블록의 데이터가 됐다)",
+              rc == 0 and len(ind) == 1 and len(ends) == 1 and rows and all(ind[0] < i < ends[0] for i in rows), (rc, ind, ends, rows, text[-300:]))
+        rc, text = run(binary, d, "map", "g_bent.k", "ind_flat.k", "ind_map_out.k")
+        ind, ends, rows = ind_rows(lines_of(os.path.join(d, "ind_map_out.k")), ("*NODE", "*ELEMENT_SOLID"))
+        check("indent-map ★메시 쓰기 — *END 하나 · 「  *END」 는 *COMMENT 글로 그대로(예전엔 거기서 *END 를 쓰고 원본 *END 를 또 베꼈다)",
+              rc == 0 and len(ind) == 1 and len(ends) == 1 and ind[0] < ends[0] and rows and max(rows) < ind[0], (rc, ind, ends, rows, text[-300:]))
+        rc, text = run(binary, d, "squeeze", "ind_box.k", "squeeze-eps.yaml", "ind_sq_out.k")
+        ind, ends, rows = ind_rows(lines_of(os.path.join(d, "ind_sq_out.k")), ("*INCLUDE", "*CONTROL_DYNAMIC_RELAXATION"))
+        check("indent-squeeze ★덧붙임이 「  *END」 뒤 · 1열 *END 앞 · *END 하나",
+              rc == 0 and len(ind) == 1 and len(ends) == 1 and len(rows) == 2 and all(ind[0] < i < ends[0] for i in rows),
+              (rc, ind, ends, rows, text[-300:]))
 
         # map prestress 훅 — 동반 덱의 *INCLUDE <dynain> 은 첫 *END 앞에 한 번(예전엔 *END 마다 — 2026-11-08 재검토)
         print("[map prestress 훅]")
