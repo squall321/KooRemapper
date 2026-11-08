@@ -205,6 +205,17 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
   `*MAT_` 첫 카드(또는 모든 행) 셈을 `matids` 로 바꿨다. assemble 의 matswap · matdb 는 공용 커서(`maxMaterialId_` · matswap 은
   `maxSectionId_` 도)와 견주고 낸 번호를 올린다 — 같은 실행의 앞 op(offset)이 덧붙인 재질 · 섹션은 아직 rawLines_ 에 없어 예전 훑기가
   못 보고 MID 2 · SECID 2 를 또 냈다(--strict 망가진 카드 2건 · 실측). 회귀 `test_material_id_family.py` G · D 17항(4dfe039 에서 17 실패).
+- **옛 재질 지우기 — 구조 재질 정의만((a) matswap 단독 · assemble · (b) cclip)** — `matids::removeDefinition`: 길이를 아는 묶음은 그 묶음 줄만
+  (블록의 묶음이 다 지워지면 키워드 줄째 — 빈 재질 키워드를 남기지 않는다), 길이를 모르는 첫 묶음은 블록째(예전 그대로 — 뒤에 쌓인 것이
+  있는지 모른다), 길이를 모르는 쌓인 묶음은 그 자리부터 블록 끝까지. 같은 번호 TMID 의 열 재질 · PID 꼴 덧붙임 · 쌓인 다른 재질은 둔다.
+  **MID 꼴 덧붙임(정한 것 · 조정자에게 물음)** — Vol II R16 카드 정의로 가른다: MID 꼴 12(EROSION · DAMAGE_GISSMO · DAMAGE_DIEM · FATIGUE ·
+  GENERALIZED_DAMAGE · INELASTICITY · PERMEABILITY · PORE_AIR · PROPERTY_DEPENDENCE · PZELECTRIC · AIRBAG_POROSITY_LEAKAGE ·
+  BASIC_INCREMENTAL_FAILURE) · PID 꼴 5(THERMAL_EXPANSION · COHESIVE · CHEM_SHRINKAGE · SOC_EXPANSION · EXTVAR_EXPANSION). 문자 그대로 「구조 정의만」
+  지우면 재질이 덱에서 사라지는 경우(cclip — 새 MID · assemble matswap 여러 파트 — 번들은 새 번호) MID 꼴 덧붙임이 없는 재질을 가리킨다(예전엔
+  같이 지워 그 결함이 없었다) — 그때만 `removeMidAddOns` 로 같이 지운다. 번호를 다시 쓰면(matswap 고아 MID) 둔다 — 새 재질에 붙는다(matdb 가
+  같은 MID 에 덧붙임을 두는 것과 같다). 지운 뒤에도 그 번호가 쓰이면(`stillUsed` — 묶음을 못 가른 블록에 쌓였다 · 인클루드에도 있다) 번들에
+  그 번호를 다시 주지 않는다(같은 MID 가 둘이 된다 — 예전엔 줬다). assemble matswap 은 재질 지우기를 번호 매기기 앞으로 옮겼다(다시 줄 수
+  있는지 알아야 해서 — 산출 덱은 같다). 회귀 A · B 8항(4dfe039 에서 B-2 빼고 실패 — B-2 는 예전에도 덧붙임을 같이 지웠다).
 
 ## 11-07 밤 결정 고침 — 정한 것
 - **출력 규칙(사용자 결정 ①)** — extract-parts(`a33af2f`)와 같은 꼴: 덱 · 보고를 output 폴더의 임시 파일(`.<이름>.kr_tmp_…`)에 쓰고 되읽기 대조 ·

@@ -347,6 +347,26 @@ int runMatswap(const std::string& modelFile, const std::string& bundleFile,
                     " SECID=" + std::to_string(maxSECID) +
                     " MID=" + std::to_string(maxMID));
 
+    // 5b. 다른 파트가 쓰지 않는 옛 MID — 그 MID 의 **구조 재질 정의만** 지운다(11-08 (a)). 같은 번호 TMID 의 열 재질 · PID 꼴 덧붙임
+    //     (`*MAT_ADD_THERMAL_EXPANSION` 등) · 같은 블록에 쌓인 다른 재질은 다른 번호 공간이거나 다른 재질이다 — 예전엔 첫 칸이 그 MID 인
+    //     `*MAT_` 블록을 다 지워 그것들이 사라졌다. 번들 재질은 그 번호를 다시 받는다(MID 꼴 덧붙임 — EROSION · GISSMO … — 은 그 번호에
+    //     남아 새 재질에 붙는다 · matdb 와 같다). 지운 뒤에도 그 번호가 쓰이면(길이를 모르는 블록에 쌓였다 · 인클루드에도 있다) 다시 주지
+    //     않고 새 번호를 낸다 — 같은 MID 가 둘이 된다
+    bool reuseMid = false;
+    if (!midShared && tp.mid > 0) {
+        const auto rm = KooRemapper::matids::removeDefinition(modelLines, tp.mid);
+        bool inIncl = false;
+        for (const auto& f : inclClosure.files)
+            if (KooRemapper::matids::inUse(f.lines).count(tp.mid)) inIncl = true;
+        reuseMid = !rm.stillUsed && !inIncl;
+        console.println("[matswap] Removed *MAT_ MID=" + std::to_string(tp.mid) + " (구조 재질 정의 " + std::to_string(rm.sets) +
+                        " — 열 재질 · 덧붙임 카드 · 쌓인 다른 재질은 둔다)");
+        if (!reuseMid)
+            console.warning("[matswap] MID " + std::to_string(tp.mid) + " 이 지운 뒤에도 쓰인다(" +
+                            (inIncl ? std::string("인클루드") : std::string("묶음을 못 가른 재질 블록")) +
+                            ") — 번들 재질에 새 MID 를 준다");
+    }
+
     // 6. Build remap table: &PARAM_NAME -> new integer value
     std::map<std::string,int> remap;
     for (const auto& p : bundle.params) {
@@ -356,7 +376,7 @@ int runMatswap(const std::string& modelFile, const std::string& bundleFile,
         if      (idt=="HGID")  newVal = ++maxHGID;
         else if (idt=="LCID")  newVal = ++maxLCID;
         else if (idt=="SECID") newVal = ++maxSECID;
-        else if (idt=="MID")   newVal = midShared ? ++maxMID : tp.mid;
+        else if (idt=="MID")   newVal = reuseMid ? tp.mid : ++maxMID;
         else if (idt=="PID")   continue;
         else                   newVal = p.ivalue;
         remap[p.name] = newVal;
@@ -382,10 +402,6 @@ int runMatswap(const std::string& modelFile, const std::string& bundleFile,
     if (!secidShared && tp.secid>0) {
         modelLines = msw_removeBlock(modelLines, "*SECTION",   tp.secid);
         console.println("[matswap] Removed *SECTION SECID=" + std::to_string(tp.secid));
-    }
-    if (!midShared   && tp.mid  >0) {
-        modelLines = msw_removeBlock(modelLines, "*MAT_",      tp.mid);
-        console.println("[matswap] Removed *MAT_ MID=" + std::to_string(tp.mid));
     }
 
     // 9. Update target PART data line with new IDs

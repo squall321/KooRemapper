@@ -14,6 +14,9 @@
 무엇을 보나.
   G 공용 커서 — 쌓인 묶음(알려진 꼴은 묶음마다 · 모르는 꼴은 행마다 첫 칸 숫자)을 세어 새 MID 가 겹치지 않는다
   D MID 를 내는 op 마다 같은 셈 — 열 재질 TMID 로 커서를 올리지 않고 쌓인 MID 를 다시 내지 않는다
+  A matswap(단독 · assemble) — 옛 MID 의 구조 재질 정의만 지운다(같은 번호 TMID 의 열 재질 · PID 꼴 덧붙임 · 쌓인 다른 재질은 둔다 ·
+    MID 꼴 덧붙임은 번호를 다시 쓰면 두고 재질이 사라지면 지운다 · 지운 뒤에도 쓰이는 번호는 다시 주지 않는다)
+  B cclip — 같은 규칙(클립은 새 MID 를 받아 옛 재질이 사라진다 — MID 꼴 덧붙임도 지운다)
 
 usage: test_material_id_family.py <KooRemapper 바이너리>
 """
@@ -218,6 +221,120 @@ def part_d(binary, tmp):
           (rc, m.group(0) if m else None, out[-300:]))
 
 
+def first_ids(path, kw):
+    """`kw` 블록(제목 꼴 포함)마다 첫 데이터 줄의 첫 칸 정수."""
+    L = open(path, encoding="utf-8").read().split("\n") if os.path.exists(path) else []
+    out = []
+    for i, l in enumerate(L):
+        u = l.strip().upper().split()[0] if l.strip() else ""
+        if u not in (kw, kw + "_TITLE"):
+            continue
+        j, title = i + 1, u.endswith("_TITLE")
+        while j < len(L) and L[j].startswith("$"):
+            j += 1
+        if title:
+            j += 1
+            while j < len(L) and L[j].startswith("$"):
+                j += 1
+        if j < len(L) and L[j][:10].strip().isdigit():
+            out.append(int(L[j][:10]))
+    return out
+
+
+MAT_STACK9 = (lambda b: re.sub(r"(\*MAT_ELASTIC\n(?:\$.*\n)*)(\s+2\s+\S+.*\n)", lambda m: m.group(1) + m.group(2) + EL % 9, b, count=1))
+ADDONS = ("*PART\nSECOND\n         2         1         9\n" + T01 % 2 +
+          "*MAT_ADD_THERMAL_EXPANSION\n         2         0       1.0\n*MAT_ADD_EROSION\n         2\n")
+
+
+def box_mid2(binary, d, extra, name="box.k", edit=MAT_STACK9):
+    """상자(PID 1 · MID 2) — 재질 블록에 MID 9 를 쌓고(PID 2 가 쓴다) 열 재질 TMID 2 · PID 2 의 열팽창 · MID 2 의 침식을 더한다."""
+    box(binary, d, extra, name=name, yaml=BOX.replace("mid: 1", "mid: 2"))
+    p = os.path.join(d, name)
+    body = open(p, encoding="utf-8").read()
+    open(p, "w", encoding="utf-8").write(edit(body))
+
+
+def kept(path):
+    return {"t01": first_ids(path, "*MAT_T01") == [2], "expansion": first_ids(path, "*MAT_ADD_THERMAL_EXPANSION") == [2],
+            "erosion": first_ids(path, "*MAT_ADD_EROSION"), "mid9": elastic_rows(path).count(9) == 1}
+
+
+def part_a(binary, tmp):
+    print("[A matswap — 옛 MID 의 구조 재질 정의만 지운다(열 재질 · PID 꼴 덧붙임 · 쌓인 다른 재질은 둔다)]")
+    bundle = os.path.join(REPO, "examples", "matswap", "rubber.k")
+    for tag in ("단독", "assemble"):
+        d = fresh(tmp, "a1" + ("s" if tag == "단독" else "a"))
+        box_mid2(binary, d, ADDONS)
+        shutil.copy(bundle, d)
+        if tag == "단독":
+            open(os.path.join(d, "s.yaml"), "w").write("model: box.k\noutput: o.k\nswaps:\n  - bundle: rubber.k\n    pid: 1\n")
+            rc, out = run(binary, d, "matswap", "s.yaml")
+            o = "o.k"
+        else:
+            open(os.path.join(d, "s.yaml"), "w").write("base_model: box.k\noutput: o\noperations:\n  - type: matswap\n    pid: 1\n"
+                                                       "    bundle: rubber.k\n")
+            rc, out = run(binary, d, "assemble", "s.yaml")
+            o = "o.k"
+        k = kept(os.path.join(d, o))
+        rc2, out2 = run(binary, d, "info", "--strict", o) if rc == 0 else (None, "")
+        check("A-1%s matswap(%s) — TMID 2 의 *MAT_T01 · PID 2 의 열팽창 · 쌓인 MID 9 가 남는다 · --strict rc 0" % (tag[0], tag),
+              rc == 0 and k["t01"] and k["expansion"] and k["mid9"] and rc2 == 0, (rc, k, rc2, out2[-200:], out[-300:]))
+        m = re.search(r"&MID1 \(MID\) \d+ -> (\d+)", out)
+        check("A-2%s matswap(%s) — MID 2 를 번들이 다시 받고 MID 꼴 덧붙임(*MAT_ADD_EROSION 2)은 그 번호에 남는다" % (tag[0], tag),
+              rc == 0 and k["erosion"] == [2] and m and int(m.group(1)) == 2, (rc, k, m.group(0) if m else None, out[-300:]))
+
+    # 두 파트(MID 2 · 9)를 함께 바꾼다 — 번들은 새 번호를 받고 두 재질은 덱에서 사라진다 · 그 MID 의 덧붙임(EROSION 2)도 지운다
+    d = fresh(tmp, "a4")
+    box_mid2(binary, d, ADDONS)
+    shutil.copy(bundle, d)
+    open(os.path.join(d, "s.yaml"), "w").write("base_model: box.k\noutput: o\noperations:\n  - type: matswap\n    pids: [1, 2]\n"
+                                               "    bundle: rubber.k\n")
+    rc, out = run(binary, d, "assemble", "s.yaml")
+    k = kept(os.path.join(d, "o.k"))
+    rc2, out2 = run(binary, d, "info", "--strict", "o.k") if rc == 0 else (None, "")
+    check("A-4 assemble matswap 두 파트(MID 2 · 9) — 재질이 사라진 MID 2 의 *MAT_ADD_EROSION 도 지우고 열 재질 · 열팽창은 둔다 · --strict rc 0",
+          rc == 0 and k["t01"] and k["expansion"] and k["erosion"] == [] and rc2 == 0, (rc, k, rc2, out2[-200:], out[-300:]))
+
+    # 지운 뒤에도 그 번호가 쓰인다 — 길이를 모르는 꼴 블록의 둘째 묶음에 MID 2 가 있다 · 번들은 새 번호를 받는다
+    ortho = ("*MAT_ORTHOTROPIC_ELASTIC\n"
+             + "".join("%10d   7.85E-9    1000.0    1000.0    1000.0       0.3       0.3       0.3\n" % m +
+                       "     500.0     500.0     500.0       0.0\n       0.0       0.0       0.0       1.0       0.0       0.0\n"
+                       "       0.0       1.0       0.0       0.0\n" for m in (7, 2)))
+    d = fresh(tmp, "a3")
+    box_mid2(binary, d, "", edit=lambda b: re.sub(r"\*MAT_ELASTIC\n(?:\$.*\n)*\s+2\s+\S+.*\n", lambda m: ortho, b, count=1))
+    shutil.copy(bundle, d)
+    open(os.path.join(d, "s.yaml"), "w").write("model: box.k\noutput: o.k\nswaps:\n  - bundle: rubber.k\n    pid: 1\n")
+    rc, out = run(binary, d, "matswap", "s.yaml")
+    m = re.search(r"&MID1 \(MID\) \d+ -> (\d+)", out)
+    body = open(os.path.join(d, "o.k"), encoding="utf-8").read() if os.path.exists(os.path.join(d, "o.k")) else ""
+    check("A-3 MID 2 가 묶음을 못 가른 블록에 쌓여 있다 — 지울 수 없어 번들에 새 번호를 준다(예전 2 를 다시 줘 같은 MID 가 둘)",
+          rc == 0 and m and int(m.group(1)) != 2 and body.count("*MAT_ORTHOTROPIC_ELASTIC") == 1 and "지운 뒤에도 쓰인다" in out,
+          (rc, m.group(0) if m else None, out[-300:]))
+
+
+def part_b(binary, tmp):
+    print("[B cclip — 옛 MID 의 구조 재질 정의만 지운다 · 재질이 사라지면 MID 꼴 덧붙임도]")
+    board = ("output: clip_board.k\nlx: 3.0\nly: 1.5\nlz: 0.5\nnx: 6\nny: 3\nnz: 1\nrho: 8.36e-9\nE: 131000.0\nnu: 0.3\nmid: 2\nsecid: 2\n"
+             "pid: 2\npart_title: CCLIP_ANT_01\n")
+    cyaml = ("model: clip_board.k\noutput: clip_board_cclip\nmode: analytic\nattach: none\nstress_output: embed\nfree_output: true\n"
+             "calibration:\n  point: {deflection: 0.15, force: 1.2}\n  tolerance: 0.05\nclips:\n  - pid: 2\n    overtravel: 0.15\n")
+    d = fresh(tmp, "b1")
+    box(binary, d, "*PART\nSECOND\n         9         2         9\n" + T01 % 2 + "*MAT_ADD_THERMAL_EXPANSION\n         2         0       1.0\n"
+        "*MAT_ADD_EROSION\n         2\n", name="clip_board.k", yaml=board)
+    p = os.path.join(d, "clip_board.k")
+    body = open(p, encoding="utf-8").read()
+    open(p, "w", encoding="utf-8").write(MAT_STACK9(body))
+    open(os.path.join(d, "c.yaml"), "w").write(cyaml)
+    rc, out = run(binary, d, "cclip", "c.yaml")
+    o = os.path.join(d, "clip_board_cclip.k")
+    k = kept(o)
+    rc2, out2 = run(binary, d, "info", "--strict", "clip_board_cclip.k") if rc == 0 else (None, "")
+    check("B-1 cclip — TMID 2 의 *MAT_T01 · PID 2 의 열팽창 · 쌓인 MID 9 가 남는다 · --strict rc 0",
+          rc == 0 and k["t01"] and k["expansion"] and k["mid9"] and rc2 == 0, (rc, k, rc2, out2[-200:], out[-300:]))
+    check("B-2 cclip — 재질 2 가 사라졌다 · 그 MID 의 *MAT_ADD_EROSION 2 도 지운다(남기면 없는 재질을 가리킨다)",
+          rc == 0 and k["erosion"] == [], (rc, k))
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__.strip().splitlines()[-1])
@@ -227,6 +344,8 @@ def main():
     try:
         part_g(binary, tmp)
         part_d(binary, tmp)
+        part_a(binary, tmp)
+        part_b(binary, tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print()

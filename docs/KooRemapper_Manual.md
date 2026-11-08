@@ -2123,6 +2123,17 @@ Rubber_HG
 | `MID*` | Material ID | 고아 ID 재사용 가능 |
 | `PID*` | Part ID | 무시 |
 
+**옛 재질 지우기(2026-11-08).** 대상 파트의 옛 MID 를 다른 파트가 쓰지 않으면 그 MID 의 **구조 재질 정의만** 지웁니다(공용 재질 훑기
+`parser/MaterialIds.h` — §3.1(h)). 같은 번호 TMID 의 열 재질(`*MAT_T01` · `*MAT_THERMAL_*`) · PID 꼴 덧붙임(`*MAT_ADD_THERMAL_EXPANSION` ·
+`_COHESIVE` · `_CHEM_SHRINKAGE` · `_SOC_EXPANSION` · `_EXTVAR_EXPANSION` — 첫 칸이 PID) · 한 키워드 아래 쌓인 다른 재질은 다른 번호 공간이거나
+다른 재질이라 둡니다 — 예전엔 첫 칸이 그 MID 인 `*MAT_` 블록을 다 지워 그것들이 사라졌습니다(쌓인 재질을 가리키던 파트는 미정의 재질).
+번들 재질은 그 번호를 다시 받고, MID 꼴 덧붙임(`*MAT_ADD_EROSION` · `_DAMAGE_GISSMO` · `_DAMAGE_DIEM` · `_FATIGUE` · `_GENERALIZED_DAMAGE` ·
+`_INELASTICITY` · `_PERMEABILITY` · `_PORE_AIR` · `_PROPERTY_DEPENDENCE` · `_PZELECTRIC` · `_AIRBAG_POROSITY_LEAKAGE` ·
+`_BASIC_INCREMENTAL_FAILURE` — 첫 칸이 MID · Vol II R16)은 그 번호에 남아 새 재질에 붙습니다(matdb 와 같다). 지운 뒤에도 그 번호가
+쓰이면(묶음을 못 가른 재질 블록에 쌓였다 · 인클루드에도 있다) 그 번호를 다시 주지 않고 새 번호를 냅니다(같은 MID 가 둘이 된다 — 경고).
+assemble 에서 여러 파트를 함께 바꿔 옛 재질이 덱에서 사라지면 그 MID 꼴 덧붙임도 지웁니다(남기면 없는 재질을 가리킨다). 회귀
+`test_material_id_family.py` A.
+
 ---
 
 ## 24. matdb — 재료 DB 교체
@@ -4207,6 +4218,11 @@ KooRemapper cclip <config.yaml>
 | `clips[].overtravel` | free height = installed + overtravel |
 
 **근거**: help(`Usage:`), pyKooCAE `mesh_generate.md`, `examples/cclip/cclip.yaml`(analytic)·`cclip_deck.yaml`(deck). 원본 PID 를 유지해 기존 SET/CONTACT 참조가 살아남으며, 출력 검증은 `tools/cclip_check.py` 로 한다(솔버 불필요).
+
+**옛 재질 지우기(2026-11-08).** 클립 파트는 새 MID 를 받고, 옛 MID 를 다른 파트가 쓰지 않으면 그 MID 의 **구조 재질 정의만** 지운다 — 같은 번호
+TMID 의 열 재질 · PID 꼴 덧붙임(`*MAT_ADD_THERMAL_EXPANSION` 등 — 파트는 남는다) · 한 키워드 아래 쌓인 다른 재질은 둔다(§23 의 matswap 과
+같은 규칙 · 예전엔 첫 칸이 그 MID 인 `*MAT` 블록을 다 지웠다). 재질이 덱에서 사라지므로 그 MID 꼴 덧붙임(`*MAT_ADD_EROSION` 등 — 첫 칸이
+MID)도 지운다 — 남기면 없는 재질을 가리킨다. 새 MID 는 공용 재질 훑기 위로 낸다(§3.1(h)). 회귀 `test_material_id_family.py` B.
 
 ---
 

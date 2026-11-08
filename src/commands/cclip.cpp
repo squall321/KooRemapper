@@ -1679,8 +1679,16 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
         lines[pl.lineIdx] = cc_updatePartLine(lines[pl.lineIdx], b.newSecid, b.newMid);
         if (pl.secid > 0 && !cc_idShared(lines, 1, pl.secid, b.pid))
             lines = cc_removeBlockById(lines, "*SECTION", pl.secid);
-        if (pl.mid > 0 && !cc_idShared(lines, 2, pl.mid, b.pid))
-            lines = cc_removeBlockById(lines, "*MAT", pl.mid);
+        if (pl.mid > 0 && !cc_idShared(lines, 2, pl.mid, b.pid)) {
+            // 그 MID 의 **구조 재질 정의만** 지운다(11-08 (b)) — 같은 번호 TMID 의 열 재질 · PID 꼴 덧붙임(`*MAT_ADD_THERMAL_EXPANSION` 등 —
+            // 파트는 남는다) · 같은 블록에 쌓인 다른 재질은 둔다. 예전엔 첫 칸이 그 MID 인 `*MAT` 블록을 다 지웠다. 재질이 덱에서 사라지면
+            // 그 MID 에 덧붙인 카드(EROSION · GISSMO … — 첫 칸이 MID)도 지운다 — 남기면 없는 재질을 가리킨다
+            KooRemapper::matids::removeDefinition(lines, pl.mid);
+            bool inIncl = false;
+            for (const auto& f : inclClosure.files)
+                if (KooRemapper::matids::defined(f.lines).count(pl.mid)) inIncl = true;
+            if (!KooRemapper::matids::defined(lines).count(pl.mid) && !inIncl) KooRemapper::matids::removeMidAddOns(lines, pl.mid);
+        }
     }
 
     std::ostringstream ins;

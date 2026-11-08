@@ -98,7 +98,7 @@ clips:
 )KRH"}},
      {"KooRemapper generate box board.yaml", "KooRemapper cclip cclip.yaml"},
      {},
-     {}},
+     {"옛 MID 를 다른 파트가 안 쓰면 그 MID 의 구조 재질 정의만 지운다(2026-11-08) — 같은 번호 TMID 의 열 재질 · PID 꼴 덧붙임 · 쌓인 다른", "  재질은 둔다. 재질이 사라지므로 MID 꼴 덧붙임(*MAT_ADD_EROSION 등)은 지운다. 새 MID 는 공용 재질 훑기 위로(쌓인 재질 묶음까지)"}},
     {"convert", "메시 편집", "1차 요소를 2차 요소로 (TET10·HEX20·QUAD8·TRIA6)", "2차요소 quadratic hex20 tet10", "KooRemapper convert <config.yaml>",
      {{"box.yaml", R"KRH(output: box.k
 lx: 20.0
@@ -599,7 +599,7 @@ swaps:
 )KRH"}},
      {"KooRemapper matswap swap.yaml"},
      {"examples/matswap/two_cubes.k", "examples/matswap/rubber.k"},
-     {"번들은 *PARAMETER 로 &PID1 &MID1 &SECID1 &HGID1 &LCID1 자리표시를 쓰는 k 파일 (examples/matswap/rubber.k 형식). ID 는 충돌 없게 자동 부여", "  새 MID 는 공용 재질 훑기 위로(2026-11-08) — 열 재질 TMID · *MAT_ADD_* 는 세지 않고 쌓인 재질 묶음은 센다. assemble 안이면 앞 op 이 낸 MID · SECID 도 피한다", "pids: [..] / swap_all: true 도 가능. PART 카드가 PID SECID MID 3필드뿐인 모델(generate box 출력 등)도 된다"}},
+     {"번들은 *PARAMETER 로 &PID1 &MID1 &SECID1 &HGID1 &LCID1 자리표시를 쓰는 k 파일 (examples/matswap/rubber.k 형식). ID 는 충돌 없게 자동 부여", "  새 MID 는 공용 재질 훑기 위로(2026-11-08) — 열 재질 TMID · *MAT_ADD_* 는 세지 않고 쌓인 재질 묶음은 센다. assemble 안이면 앞 op 이 낸 MID · SECID 도 피한다", "옛 MID 를 다른 파트가 안 쓰면 그 MID 의 구조 재질 정의만 지운다(2026-11-08) — 같은 번호 TMID 의 열 재질 · PID 꼴 덧붙임(*MAT_ADD_THERMAL_EXPANSION 등) ·", "  쌓인 다른 재질은 둔다(예전엔 첫 칸이 그 MID 인 *MAT_ 블록을 다 지웠다). 번들이 그 번호를 다시 받고 MID 꼴 덧붙임(*MAT_ADD_EROSION 등)은 새 재질에 붙는다", "pids: [..] / swap_all: true 도 가능. PART 카드가 PID SECID MID 3필드뿐인 모델(generate box 출력 등)도 된다"}},
     {"assemble", "재료·어셈블리", "replace·squeeze·restack·update 등 여러 파트 연산을 순차 적용하고 초기응력 누적", "조립 복합 pipeline", "KooRemapper assemble <config.yaml>",
      {{"box.yaml", R"KRH(output: box.k
 lx: 20.0

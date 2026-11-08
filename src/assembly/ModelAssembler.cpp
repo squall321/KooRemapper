@@ -12507,13 +12507,34 @@ bool ModelAssembler::applyMatswap(const MatswapOperation& op, const std::string&
     int maxMID   = std::max({matids::maxId(rawLines_), inclMax([](const std::vector<std::string>& L) { return matids::maxId(L); }),
                              maxMaterialId_});
 
+    // 다른 파트가 쓰지 않는 옛 MID — 그 MID 의 **구조 재질 정의만** 지운다(11-08 (a)). 같은 번호 TMID 의 열 재질 · PID 꼴 덧붙임
+    // (`*MAT_ADD_THERMAL_EXPANSION` 등) · 같은 블록에 쌓인 다른 재질은 둔다 — 예전엔 첫 칸이 그 MID 인 `*MAT_` 블록을 다 지웠다.
+    // 지운 뒤에도 그 번호가 쓰이면(길이를 모르는 블록에 쌓였다 · 인클루드에도 있다) 다시 주지 않는다(같은 MID 가 둘이 된다).
+    std::set<int> freedMids;
+    for (int mid : oldMids) {
+        if (mw_isSharedExcludeSet(rawLines_, 2, mid, targetPidSet)) continue;
+        const auto rm = matids::removeDefinition(rawLines_, mid);
+        const bool inIncl = inclMax([mid](const std::vector<std::string>& L) { return matids::inUse(L).count(mid) ? 1 : 0; }) > 0;
+        if (!rm.stillUsed && !inIncl) freedMids.insert(mid);
+        else
+            infoMessages.push_back("[matswap] WARNING: MID " + std::to_string(mid) + " 이 지운 뒤에도 쓰인다(" +
+                                   (inIncl ? std::string("인클루드") : std::string("묶음을 못 가른 재질 블록")) + ") — 그 번호를 다시 주지 않는다");
+        infoMessages.push_back("[matswap] Removed *MAT_ MID=" + std::to_string(mid) + " (구조 재질 정의 " + std::to_string(rm.sets) +
+                               " — 열 재질 · 덧붙임 카드 · 쌓인 다른 재질은 둔다)");
+    }
+
     // Reuse orphan MID if all target parts share a single MID that is orphaned
     int reuseableMid = -1;
-    if (oldMids.size() == 1) {
-        int onlyMid = *oldMids.begin();
-        if (!mw_isSharedExcludeSet(rawLines_, 2, onlyMid, targetPidSet))
-            reuseableMid = onlyMid;
-    }
+    if (oldMids.size() == 1 && freedMids.count(*oldMids.begin())) reuseableMid = *oldMids.begin();
+    // 다시 쓰지 않는 옛 번호의 재질은 덱에서 사라진다 — 그 MID 에 덧붙인 카드(EROSION · GISSMO … — 첫 칸이 MID)도 지운다(남기면 없는 재질을
+    // 가리킨다). 번호를 다시 쓰면 둔다(새 재질에 붙는다 — matdb 와 같다). PID 꼴 덧붙임 · 열 재질은 건드리지 않는다
+    for (int mid : freedMids)
+        if (mid != reuseableMid) {
+            const int n = matids::removeMidAddOns(rawLines_, mid);
+            if (n > 0)
+                infoMessages.push_back("[matswap] Removed " + std::to_string(n) + " *MAT_ADD_* card(s) of MID=" + std::to_string(mid) +
+                                       " (재질이 덱에서 사라졌다)");
+        }
 
     // 7. Build remap table
     std::map<std::string,int> remap;
@@ -12546,13 +12567,7 @@ bool ModelAssembler::applyMatswap(const MatswapOperation& op, const std::string&
     for (const auto& c : bundle.cards)
         resolvedCards.push_back(mw_resolveLine(c, sortedRemap));
 
-    // 9. Remove orphaned old keyword blocks
-    for (int mid : oldMids) {
-        if (!mw_isSharedExcludeSet(rawLines_, 2, mid, targetPidSet)) {
-            rawLines_ = mw_removeBlock(rawLines_, "*MAT_", mid);
-            infoMessages.push_back("[matswap] Removed *MAT_ MID=" + std::to_string(mid));
-        }
-    }
+    // 9. Remove orphaned old keyword blocks — 재질은 위에서 지웠다(구조 재질 정의만)
     if (!midMode) {
         // SECTION swap only for PID-based targeting
         for (int secid : oldSecids) {
