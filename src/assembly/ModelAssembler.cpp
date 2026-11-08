@@ -491,6 +491,17 @@ static std::string ma_includeName(const std::string& path, const std::string& de
     return util::relpathOf(realDeck.string(), realDir.string());
 }
 
+// 카드 줄의 첫 칸 번호 — **칸대로**(1~fw열 · 앞에 쉼표가 있으면 그 앞 · LS-DYNA 와 같다) 읽은 것과, 어긋난 줄의 너그러운 읽기
+// (`deckscan::cardFields` — 칸 하나에 공백이 끼면 공백 토큰으로 바뀐다)를 다 센다(넘치게 — 2026-11-08 · 최종 검토 R1). 너그러운 읽기만
+// 쓰면 「번호 + 제목」 카드(접촉 ID 카드 `CID I10 + HEADING A70` · `*DEFINE_FUNCTION` 의 `FID + HEADING`)의 `         3Metal-Metal thermal`
+// 이 토큰 「3Metal-Metal」 이 되어 번호를 놓쳤다 — battery 접촉이 기존 CID 3 과 겹친 채 rc 0
+static void ma_firstIds(const std::string& line, int fw, std::vector<long long>& out) {
+    int strict = 0;
+    if (deckscan::digitsField(line, fw, strict)) out.push_back(strict);
+    const int loose = deckscan::fieldInt(deckscan::cardFields(line, fw), 0);
+    if (loose > 0 && loose != strict) out.push_back(loose);
+}
+
 // 줄들이 정의하는 번호 — battery 덱을 얹을 때 이미 쓰는 번호(`batteryTakenSpans`)를 모으는 몫 가운데 공용 커서가 없는 족(2026-11-08):
 // 열 재질(TMID — `cur_isThermalMaterial`) · 모래시계(HGID) · 곡선 이름공간(`*DEFINE_CURVE*` · `*DEFINE_TABLE*` · `*DEFINE_FUNCTION*` —
 // LS-DYNA 는 곡선 · 표 · 함수가 번호를 나눈다). 첫 데이터 카드(제목 다음)의 첫 칸 — `cur_scanMaterialDefs` 와 같은 칸 읽기
@@ -517,8 +528,7 @@ static void ma_definedIdsIn(const std::vector<std::string>& lines, int fam, std:
             if (h != std::string::npos && d[h] == '$') continue;
             const size_t k = pos++;
             if (titled && k % 2 == 0) continue;   // 제목 줄은 비어 있을 수 있다
-            const int v = deckscan::fieldInt(deckscan::cardFields(d, fw), 0);
-            if (v > 0) out.push_back(v);
+            ma_firstIds(d, fw, out);   // `*DEFINE_FUNCTION` 의 첫 카드는 FID + HEADING — 칸대로 읽는다(R1)
             if (!every) break;
         }
     }
@@ -712,25 +722,49 @@ bool ModelAssembler::planRunWrites(const std::vector<AssemblyOperation>& ops, co
     }
     // ★덱 산출도 루프 **전에** 입력과 견준다(2026-11-08 · 6차 검토 G4) — 예전엔 덱 쓰기(writeOutput)에서야 보아, 걸려도 그 앞에
     //   battery 덱 · 진단 셋을 이미 써 두고 「출력 파일을 쓰지 않았습니다」 였다. 규칙은 writeOutput 의 관문과 같다(in-place 를
-    //   허락한 실행이면 덱만 주 덱 그 자체여도 된다). `.dynain` 은 쓸지 아직 모르니(처리가 응력을 내야 쓴다) 쓴다고 보고 견준다 —
-    //   dynain_embed 면 따로 쓰지 않는다
-    const std::string deckOut = outputPrefix + ".k", dynOut = outputPrefix + ".dynain";
+    //   허락한 실행이면 덱만 주 덱 그 자체여도 된다). 덱(.k)은 늘 쓴다.
+    //   ★`.dynain` 은 이 실행이 그것을 쓸 때만 견준다 — 덱 쓰기와 같은 판정(처리가 응력을 냈다 · dynain_embed 가 아니다)이라 루프
+    //   전에는 모른다. 루프 안 쓰기 직전마다 그때까지 응력이 났으면 견주고(`guardDynainBeforeMidRun`), 아니면 덱 쓰기의 관문이 본다
+    //   (최종 검토 R2 — 89b4d70 판은 쓴다고 보고 견줘, 문서의 map + prestress 고리(m.k 가 m.dynain 을 끌어온다) 위 in-place assemble 이
+    //   battery · warpage deform 진단만 있어도 「같은 파일」 rc 1 이었다. `.dynain` 은 battery 덱(`…_phaseN.k`) · 진단 셋(`_raw.dat` …)과
+    //   이름이 같을 수 없다)
+    const std::string deckOut = outputPrefix + ".k";
     std::vector<output_guard::Input> deckReads;
     for (const auto& in : guardInputs_)
         if (!(inPlaceAllowed_ && in.role == "model" && include_closure::sameFile(in.path, baseModelPath_))) deckReads.push_back(in);
-    if (output_guard::findClash({deckOut}, deckReads, why) || (!dynainEmbed_ && output_guard::findClash({dynOut}, guardInputs_, why))) {
+    if (output_guard::findClash({deckOut}, deckReads, why)) {
         errorMessage_ = why + " — 출력 파일을 쓰지 않았습니다: " + deckOut +
                         " / an output is the same file as an input or another output; nothing written";
         return false;
     }
+    runOutputPrefix_ = outputPrefix;   // 루프 안 쓰기 직전의 `.dynain` 견주기가 쓴다
     std::vector<std::string> withDeck{deckOut};
-    if (!dynainEmbed_) withDeck.push_back(dynOut);
     withDeck.insert(withDeck.end(), midRun.begin(), midRun.end());
     if (output_guard::findClash(withDeck, {}, why)) {
         errorMessage_ = who + ": " + why + " — 출력 파일을 쓰지 않았습니다";
         return false;
     }
     return true;
+}
+
+// ★루프 안 쓰기(battery 덱 · warpage 진단 셋) 직전 — 이 실행이 `.dynain` 을 쓸 것이 그때까지 정해졌으면(앞 처리가 응력을 냈다 ·
+//   writeOutput 과 같은 판정) 그 dynain 을 읽은 파일과 견준다(2026-11-08 · 최종 검토 R2). 걸리면 그 곁 파일을 쓰지 않고 멈춘다 —
+//   응력이 나기 전에 쓴 곁 파일은 남으니 말에 적는다
+bool ModelAssembler::guardDynainBeforeMidRun(const std::string& who) {
+    if (runOutputPrefix_.empty() || dynainEmbed_ || accumulatedResults_.empty()) return true;
+    std::string why;
+    if (!output_guard::findClash({runOutputPrefix_ + ".dynain"}, guardInputs_, why)) return true;
+    errorMessage_ = who + ": " + why + " — 출력 파일을 쓰지 않았습니다: " + runOutputPrefix_ +
+                    ".k / an output is the same file as an input or another output; nothing written" + midRunLeftover();
+    return false;
+}
+
+std::string ModelAssembler::midRunLeftover() const {
+    if (midRunWritten_.empty()) return std::string();
+    std::string list;
+    for (size_t i = 0; i < midRunWritten_.size() && i < 6; ++i) list += (i ? ", " : "") + midRunWritten_[i];
+    if (midRunWritten_.size() > 6) list += " …";
+    return " (처리 루프가 앞서 쓴 곁 파일은 남았다 — 그때는 이 실행이 dynain 을 쓸지 몰랐다: " + list + ")";
 }
 
 // 주 덱의 인클루드 닫힘을 읽는다 — 정본(`include_closure`)으로, 주 덱 폴더 기준.
@@ -5554,7 +5588,7 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
         std::string why;
         if (output_guard::findClash(all, deckReads, why) || output_guard::findClash(side, guardInputs_, why)) {
             errorMessage_ = why + " — 출력 파일을 쓰지 않았습니다: " + outputFile +
-                            " / an output is the same file as an input or another output; nothing written";
+                            " / an output is the same file as an input or another output; nothing written" + midRunLeftover();
             return false;
         }
     }
@@ -9519,25 +9553,6 @@ bool ModelAssembler::applyWarpage(const WarpageOperation& op, double E, double n
     // 8. Compute curvatures
     grid.computeCurvatures();
 
-    // 9. Debug export
-    if (op.debug) {
-        // ★debug_prefix 도 YAML 안의 상대 경로라 YAML 폴더 기준이다(§3.1(a) · 2026-11-07) — 예전엔 작업 폴더 기준이었다
-        const std::string debugPrefix = yamlResolvePath(configDir, op.debugPrefix);
-        // ★진단 파일도 이 실행이 쓰는 파일이다 — 덱보다 먼저 쓰므로 여기서 읽은 파일과 견준다(2026-11-07 · 쓰기 관문)
-        std::string why;
-        if (output_guard::findClash({debugPrefix + "_raw.dat", debugPrefix + "_curvature.dat",
-                                     debugPrefix + "_warpage.vtk"}, guardInputs_, why)) {
-            errorMessage_ = "warpage debug_prefix: " + why + " — 출력 파일을 쓰지 않았습니다";
-            return false;
-        }
-        // ★없는 폴더는 만들고, 진단 셋을 다 쓰지 못하면 덱을 쓰기 전에 멈춘다(2026-11-08) — 예전엔 쓰지 못하고도 rc 0 에 「Exported」
-        std::string exportErr;
-        if (!grid.exportDebugData(debugPrefix, exportErr)) {
-            errorMessage_ = "warpage debug: " + exportErr + " — 덱을 쓰지 않았습니다(debug: false 로 끄거나 debug_prefix 를 고쳐라)";
-            return false;
-        }
-    }
-
     // 10. Mode-specific processing
     if (op.mode == "deform") {
         // Direct deformation: move nodes
@@ -9602,7 +9617,29 @@ bool ModelAssembler::applyWarpage(const WarpageOperation& op, double E, double n
         std::cout << "[INFO] Applied prestress mode - initial stress generated\n";
     }
 
-    // 11. Validation
+    // 11. Debug export — 처리 **뒤**에 쓴다(2026-11-08 · 최종 검토 R2): prestress 가 응력을 냈으면 이 실행이 dynain 을 쓸 것이 그때
+    //   정해진다 — 진단 셋을 쓰기 전에 그 dynain 을 견준다(`guardDynainBeforeMidRun`). 진단 셋은 격자 자료뿐이라 처리와 상관없다
+    if (op.debug) {
+        // ★debug_prefix 도 YAML 안의 상대 경로라 YAML 폴더 기준이다(§3.1(a) · 2026-11-07) — 예전엔 작업 폴더 기준이었다
+        const std::string debugPrefix = yamlResolvePath(configDir, op.debugPrefix);
+        // ★진단 파일도 이 실행이 쓰는 파일이다 — 덱보다 먼저 쓰므로 여기서 읽은 파일과 견준다(2026-11-07 · 쓰기 관문)
+        std::string why;
+        if (output_guard::findClash({debugPrefix + "_raw.dat", debugPrefix + "_curvature.dat",
+                                     debugPrefix + "_warpage.vtk"}, guardInputs_, why)) {
+            errorMessage_ = "warpage debug_prefix: " + why + " — 출력 파일을 쓰지 않았습니다";
+            return false;
+        }
+        if (!guardDynainBeforeMidRun("warpage debug")) return false;
+        // ★없는 폴더는 만들고, 진단 셋을 다 쓰지 못하면 덱을 쓰기 전에 멈춘다(2026-11-08) — 예전엔 쓰지 못하고도 rc 0 에 「Exported」
+        std::string exportErr;
+        if (!grid.exportDebugData(debugPrefix, exportErr)) {
+            errorMessage_ = "warpage debug: " + exportErr + " — 덱을 쓰지 않았습니다(debug: false 로 끄거나 debug_prefix 를 고쳐라)";
+            return false;
+        }
+        for (const char* sfx : {"_raw.dat", "_curvature.dat", "_warpage.vtk"}) midRunWritten_.push_back(debugPrefix + sfx);
+    }
+
+    // 12. Validation
     validateWarpageResults(op, grid);
 
     ++warpageParts_;
@@ -18106,6 +18143,8 @@ static void ma_nodeIdsIn(const std::vector<std::string>& lines, std::vector<long
         if (cm != std::string::npos) body.erase(cm);
         const int fixed = deckscan::fieldInt(deckscan::cardFields(body, fw), 0);
         if (fixed > 0) out.push_back(fixed);
+        const int strict = deckscan::fieldInt(deckscan::fieldsFixed(body, fw), 0);   // 칸대로(LS-DYNA) — 어긋난 줄이면 다를 수 있다(R1)
+        if (strict > 0 && strict != fixed) out.push_back(strict);
         const size_t a = body.find_first_not_of(" \t");
         if (a == std::string::npos) continue;
         const size_t b = body.find_first_of(" \t,", a);
@@ -18136,9 +18175,11 @@ static void ma_partIdsIn(const std::vector<std::string>& lines, std::vector<long
             continue;
         }
         if (!inPart || !deckscan::isDataLine(l)) continue;
-        const auto f = deckscan::cardFields(l, fw);
-        const int pid = deckscan::fieldInt(f, 0);
-        if (pid > 0 && deckscan::fieldInt(f, 1) > 0) out.push_back(pid);
+        // 칸대로(LS-DYNA) · 어긋난 줄의 너그러운 읽기 둘 다(R1 — 넘치게)
+        for (const auto& f : {deckscan::fieldsFixed(l, fw), deckscan::cardFields(l, fw)}) {
+            const int pid = deckscan::fieldInt(f, 0);
+            if (pid > 0 && deckscan::fieldInt(f, 1) > 0) out.push_back(pid);
+        }
     }
     for (const auto& [pid, kw] : cur_scanPartVariantIds(lines)) { (void)kw; out.push_back(pid); }
 }
@@ -18164,23 +18205,13 @@ static void ma_setIdsIn(const std::vector<std::string>& lines, std::vector<long 
     }
 }
 
-// 접촉 — `*CONTACT_…_ID` 의 첫 데이터 줄 첫 칸(`ct_findMaxContactId` 와 같은 규칙 — LS-DYNA 의 OPTION3 은 ID 뿐이다)
+// 접촉 — `*CONTACT_…_ID` 의 ID 카드 CID(1~10열 · 쉼표가 그 안에 있으면 그 앞). contact 정본 리더(`ct_parseContacts` — `contact create` ·
+// 번호 발급 `ct_findMaxContactId` 와 같은 칸)의 값을 그대로 쓴다. ★예전엔 `cardFields` 로 읽어, ID 카드가 `CID I10 + HEADING A70` 인
+// `         3Metal-Metal thermal`(LS-PrePost · 우리 `contact create` 가 쓰는 꼴)을 토큰 「3Metal-Metal」 로 읽고 CID 를 놓쳤다
+// (2026-11-08 · 최종 검토 R1 — battery 접촉이 기존 CID 3 과 겹친 채 rc 0 · LS-DYNA 의 OPTION3 은 ID 뿐이다)
 static void ma_contactIdsIn(const std::vector<std::string>& lines, std::vector<long long>& out) {
-    for (size_t i = 0; i < lines.size(); ++i) {
-        if (!deckscan::isKeywordLine(lines[i])) continue;
-        const std::string kw = deckscan::kwBare(deckscan::keywordToken(lines[i]));
-        if (kw.rfind("*CONTACT_", 0) != 0) continue;
-        const bool hasId = (kw.size() >= 3 && kw.compare(kw.size() - 3, 3, "_ID") == 0) || kw.find("_ID_") != std::string::npos;
-        if (!hasId) continue;
-        for (size_t j = i + 1; j < lines.size(); ++j) {
-            const size_t h = lines[j].find_first_not_of(" \t");
-            if (h == std::string::npos || lines[j][h] == '$') continue;
-            if (lines[j][h] == '*') break;
-            const int cid = deckscan::fieldInt(deckscan::cardFields(lines[j], 10), 0);
-            if (cid > 0) out.push_back(cid);
-            break;
-        }
-    }
+    for (const auto& c : ct_parseContacts(lines))
+        if (c.hasId && c.idCid > 0) out.push_back(c.idCid);
 }
 
 std::vector<std::vector<std::pair<long long, long long>>> ModelAssembler::batteryTakenSpans() const {
@@ -18335,10 +18366,12 @@ bool ModelAssembler::applyBattery(const BatteryOperation& op, const std::string&
 
     std::string kPath;
     if (op.useInclude) {
+        if (!guardDynainBeforeMidRun("[battery]")) return false;   // 앞 처리가 응력을 냈으면 그 dynain 을 먼저(R2)
         if (!writeBatteryKFileText(deckPath, shifted, console)) {
             errorMessage_ = "[battery] Cannot write output: " + deckPath;
             return false;
         }
+        midRunWritten_.push_back(deckPath);
         // ★주 덱의 *INCLUDE 는 주 덱 폴더 기준 이름이다(ma_includeName · 2026-11-07) — 예전엔 작업 폴더 기준 경로를 그대로 적어
         //   주 덱이 다른 폴더에 있으면 솔버가 찾지 못했다
         kPath = ma_includeName(deckPath, deckscan::dirOf(outputPrefix + ".k"), writtenOut);

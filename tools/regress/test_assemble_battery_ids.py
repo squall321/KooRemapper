@@ -30,6 +30,8 @@
   L   battery 뒤의 contact 가 낸 접촉 · 세트 번호도 battery 와 겹치지 않는다(뒤 op 의 번호 발급이 battery 덱을 센다)
   G   battery 앞의 boundary · rbe · load · contact · matswap 이 같은 실행에서 낸 세트 · 섹션 번호와도 겹치지 않는다(2026-11-08 전엔
       제 훑기로 낸 번호가 공용 커서에 없어 SID 1 · SECID 3 이 둘)
+  R   「번호 + 제목」 카드 — 접촉 ID 카드(`         3Metal-Metal thermal` · 예제 15 · 16 · 제목에 공백인 contact create)와
+      `*DEFINE_FUNCTION`(FID + HEADING)의 번호를 칸대로 읽어 battery 가 피한다(2026-11-08 · 최종 검토 R1 — 예전 판은 그 번호를 놓쳐 둘)
 
 usage: test_assemble_battery_ids.py <KooRemapper 바이너리>
 """
@@ -248,6 +250,8 @@ def facts(blocks):
                         r("node" if kind == "set_node" else "part", num(l, 10 * q, 10 * q + 10))
         elif kw.startswith("*DEFINE_CURVE"):
             d("curve", num(ls[t0], 0, 10))
+        elif kw.startswith("*DEFINE_FUNCTION"):   # FID + HEADING(1~10열이 번호 — 곡선 · 표 · 함수가 나누는 이름공간)
+            d("curve", num(ls[0], 0, 10))
         elif kw.startswith("*CONTACT_"):
             c0 = 1 if (kw.endswith("_ID") or kw.endswith("_TITLE")) else 0   # ID 카드가 없는 접촉(offset tied 의 _OFFSET)은 Card 1 부터
             if c0:
@@ -324,6 +328,17 @@ def deck_facts(main):
         refs.extend(rr)
         brefs.extend(rr)
     return defs, refs, bdefs, brefs, incs
+
+
+def contact_ids(main):
+    """주 덱과 그 *INCLUDE 의 `*CONTACT_…_ID` 마다 ID 카드의 CID(1~10열 — 칸대로 · 제목은 11열부터)."""
+    out = []
+    paths = [main] + [os.path.join(os.path.dirname(main), n) for n in blocks_of(main)[1]]
+    for path in paths:
+        for kw, ls in blocks_of(path)[0]:
+            if kw.startswith("*CONTACT_") and (kw.endswith("_ID") or "_ID_" in kw) and ls:
+                out.append(int(ls[0][:10]))
+    return out
 
 
 def integrity(defs, refs):
@@ -624,6 +639,11 @@ def main():
                      "        curve:\n          - [0.0, 0.0]\n          - [0.001, 1.0]\n"),
             ("contact", "  - type: contact\n    contacts:\n      - action: create\n        type: automatic_single_surface\n"
                         "        slave:\n          pid: 1\n        title: BeforeBattery\n"),
+            # 제목에 공백 — ID 카드가 `         1Before battery` 라 너그러운 칸 읽기는 토큰 「1Before」 를 읽고 CID 1 을 놓쳤다
+            # (2026-11-08 · 최종 검토 R1 — battery 접촉 CID 1 이 둘 · rc 0)
+            ("contact(제목에 공백 — 「Before battery」)", "  - type: contact\n    contacts:\n      - action: create\n"
+                                                    "        type: automatic_single_surface\n        slave:\n          pid: 1\n"
+                                                    "        title: Before battery\n"),
             ("matswap(two_cubes + rubber)", None))
         for k, (name, op_text) in enumerate(before_ops):
             if op_text is None:   # matswap — 예제 덱 둘(PID 1 · 2)에 번들을 바꿔 넣는다
@@ -673,6 +693,38 @@ def main():
             dup, dangling = integrity(defs, refs)
             check("★G 커서   └ load 의 SET_SEGMENT 와 offset 이 커서로 낸 SET_SEGMENT 가 겹치지 않는다(예전엔 둘 다 1)",
                   not dup and not dangling and len(defs.get("set_segment", [])) == 3, (dup, dangling, defs.get("set_segment")))
+
+        print("[R — 「번호 + 제목」 카드의 번호(접촉 ID 카드 CID I10 + HEADING · *DEFINE_FUNCTION FID + HEADING)]")
+        # 번호 훑기가 그 카드를 너그럽게(칸에 공백이 끼면 공백 토큰) 읽어 `         3Metal-Metal thermal` 의 CID 3 을 놓쳤다 — battery
+        # 접촉이 +2 만 옮겨 CID 3 이 둘(2026-11-08 · 최종 검토 R1 · 운영 · 예전 판은 칸대로 읽어 맞았다)
+        wound = battery_yaml("wound", {"mode": "dent"})
+        for tag, src in (("R-1 examples/contact/15(CID 3 「Metal-Metal thermal」)", "15_create_thermal_result.k"),
+                         ("R-2 examples/contact/16(CID 3 「Adhesive bond」)", "16_create_tiebreak_result.k")):
+            d = os.path.join(root, tag[:3])
+            os.makedirs(d)
+            shutil.copyfile(os.path.join(REPO, "examples", "contact", src), os.path.join(d, "base.k"))
+            with open(os.path.join(d, "bat.yaml"), "w", encoding="utf-8") as f:
+                f.write(wound)
+            with open(os.path.join(d, "a.yaml"), "w", encoding="utf-8") as f:
+                f.write("base_model: base.k\noutput: ba\noperations:\n  - type: battery\n    config: bat.yaml\n")
+            rc, out = run(binary, d, "assemble", "a.yaml")
+            if not check("★%s + battery(권취 dent) → rc 0" % tag, rc == 0, out[-300:]):
+                continue
+            cids = contact_ids(os.path.join(d, "ba.k"))
+            check("★%s   └ 접촉 CID 가 겹치지 않는다(예전엔 battery CID 3 이 기존 CID 3 과 둘)" % tag,
+                  len(cids) == len(set(cids)) and 3 in cids, cids)
+        # R-3 *DEFINE_FUNCTION FID 9001(제목에 공백) — battery 곡선 9001 과 같은 이름공간이라 battery 곡선을 옮겨야 한다
+        d = setup(root, "r3", binary, text, "", extra_base=False)
+        p = os.path.join(d, "box.k")
+        body = open(p, encoding="utf-8").read()
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(body.replace("*END", "*DEFINE_FUNCTION\n      9001my curve function\nf(a)=a\n*END"))
+        rc, out = run(binary, d, "assemble", "a.yaml")
+        if check("★R-3 상자 + *DEFINE_FUNCTION 9001(제목에 공백) + battery → rc 0", rc == 0, out[-300:]):
+            defs, refs, _, _, _ = deck_facts(os.path.join(d, "ba.k"))
+            dup, dangling = integrity(defs, refs)
+            check("★R-3   └ battery 곡선이 함수 9001 과 겹치지 않는다(곡선 · 표 · 함수의 이름공간) · 끊긴 참조 없음",
+                  not dup and not dangling, (dup, dangling))
 
         print("[L — battery 뒤의 op 이 내는 번호]")
         text = battery_yaml("stacked", {"mode": "dent"})
