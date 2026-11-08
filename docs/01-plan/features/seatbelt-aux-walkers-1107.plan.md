@@ -91,10 +91,11 @@
 - output 이 `*INCLUDE_PATH` 로 찾던 인클루드 이름과 같으면 출력 덱이 자기를 끌어온다(rc 0).
 - battery 기본 stacked 설정의 PART 13 → 없는 MID 8 · side 모드 `*BOUNDARY_SPC_SET` → 없는 세트 3(둘 다 LS-DYNA 가 멈춘다).
 - I10 · LONG 주 덱 + battery `use_include: true` 의 칸 폭 · 뒤 연산이 고른 번호(`extract_surface output_pid` 등)를 battery 인클루드와 견주지 않는다.
-- extract-parts 되읽기가 TMID 를 MID 로 센다 · 섹션 훑기의 들여 쓴 `*` 제목 줄 · `--strict` 의 빈 `_TITLE` 줄 거짓 중복 · 쌓인 카드 중복을 첫 정의만 본다.
+- 섹션 훑기의 들여 쓴 `*` 제목 줄 · `--strict` 의 빈 `_TITLE` 줄 거짓 중복 · 쌓인 카드 중복을 첫 정의만 본다.
 - matswap · cclip 이 쌓인 이웃이 있는 `*SECTION` · `*HOURGLASS` 블록을 통째로 지운다 · 단독 matswap · cclip · ale 의 SECID 최대 셈이 첫 카드만.
-- matdb 가 블록 첫 재질만 고른다(`mid:` 로 쌓인 재질을 못 고름) · `thermal: true` 가 같은 TMID 의 다른 파트 열 물성을 바꾼다 · 목록 밖 `*MAT_ADD_*` 를 안 지운다.
+- matdb 가 블록 첫 재질만 고른다(`mid:` 로 쌓인 재질을 못 고름) · 목록 밖 `*MAT_ADD_*` 를 안 지운다.
 - IGA 가 모르는 꼴 재질을 블록 끝까지 베낀다 · KFileReader 가 첫 `*MAT_ELASTIC` 묶음만 · ale 사용자 재질은 첫 `*MAT_` 블록 · KFileReader:265 2차 솔리드 절점 목록(확인 전).
 - SIGKILL 이 남긴 임시 파일은 같은 output · 같은 호스트 표지의 다음 실행만 치운다(HWAX 실행기 · pid 이름공간) · Windows 만의 것(meshfix `__mf.log.bat` · prestress `pre.K`).
 - battery 탭이 셀 모서리를 걸치면 경고 없이 좁힌다 · 옵션 카드 절점은 아직 토큰 읽기 · '모르는' 절점은 되읽기에서 빠진다 · cnrb2solid 파서의 들여 쓴 `*`.
 - 이상한 열 재질 철자(`*MAT_T1` · `T19` · `T001`) · `--strict` 가 TMID 참조를 안 본다 · extract-parts 가 `*MAT_ADD_THERMAL_EXPANSION` 을 버린다 · 섹션 묶음 셈의 메모리.
+- (11-08 고쳐서 목록에서 뺐다) extract-parts 되읽기의 TMID(`28ef41e`) · matdb `thermal: true` 의 같은 TMID(`89031cc`).
