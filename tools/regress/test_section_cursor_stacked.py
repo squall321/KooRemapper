@@ -22,6 +22,8 @@
     `+3`(적대적 검토 11-08 S8 — 예전엔 숫자만 9 자리까지 읽어 offset 이 같은 SECID 를 다시 냈다)
   E 행 수를 모르는 꼴의 `_TITLE` 블록 — 첫 줄은 꼴을 몰라도 제목이다(`*SECTION_SEATBELT_TITLE` 의 `2024` · 쉼표 제목 `2024,beam` —
     예전엔 그 숫자를 SECID 로 세어 새 섹션이 2025 가 되었다 · 적대적 검토 11-08 S10)
+  F 주석은 1열의 `$` 뿐 — 들여쓴 `$` 로 시작하는 제목(`  $5 tube`)은 제목이다(Vol_I 17862 · 리더와 같다). 예전엔 주석으로 건너 묶음이 밀려
+    둘째 카드의 두께 `1.0` 을 SECID 1 로 읽거나(S8 뒤의 퇴행) 제목 다음의 Card 1 을 제목으로 삼켜 SECID 를 놓쳤다 — 새 섹션이 같은 번호를 냈다
 
 usage: test_section_cursor_stacked.py <KooRemapper 바이너리>
 """
@@ -248,6 +250,20 @@ def main():
             rc, out = run(binary, d, "id_floor", "fl.yaml")
             fl = json.load(open(os.path.join(d, "floor.json"), encoding="utf-8")) if rc == 0 else {}
             check("E-%sb id_floor pid_start 3(예전 2025)" % tag[1:], fl.get("pid_start") == 3, (rc, fl, out[-300:]))
+
+        print("[F 주석은 1열의 $ 뿐 — 들여쓴 $ 제목은 제목이다]")
+        for tag, block, what in (
+                ("f1", ["*SECTION_SHELL_TITLE", "  $5 tube", "         2         2       1.0         2", "       1.0       1.0       1.0       1.0"],
+                 "*SECTION_SHELL_TITLE 제목 「  $5 tube」 · SECID 2(S8 뒤엔 두께 1.0 을 SECID 로 읽어 2 를 다시 냈다)"),
+                ("f2", ["*SECTION_SOLID_TITLE", "  $5 block", "         2         1"],
+                 "*SECTION_SOLID_TITLE 제목 「  $5 block」 · SECID 2(예전엔 Card 1 을 제목으로 삼켜 2 를 다시 냈다)")):
+            d = os.path.join(tmp, tag)
+            os.makedirs(d)
+            box_with(binary, d, lambda L, b=block: L[:-1] + b + L[-1:])
+            open(os.path.join(d, "off.yaml"), "w").write(OFFSET)
+            rc, out = run(binary, d, "offset", "off.yaml")
+            sec = part_secid(os.path.join(d, "out.k"), 10) if rc == 0 else None
+            check("F-%s %s — 새 섹션 3" % (tag[1:], what), sec == 3, (rc, sec, out[-300:]))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print()

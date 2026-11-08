@@ -192,7 +192,8 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
 ## 11-08 둘째 — 재질 번호(MID) 가족 고침(사용자 결정 「이번 판에 다 고친다」) — 정한 것
 - **공용 재질 번호 훑기 하나(`parser/MaterialIds.h` · `matids`)** — 세기 · 있나 · 두 번 정의 · 정의 지우기 · 베끼기 · 고정 번호대 겹침이 같은
   셈을 쓴다(둘째 소비자 규칙 — op 마다 일곱 벌의 사본이 따로 셌다). 구조 재질 = `*MAT_*` 가운데 열 재질(`cards::isThermalMaterialKeyword` —
-  TMID)과 `*MAT_ADD_*` 를 뺀 것. 섹션 카드 묶음 셈과 같은 꼴 — 빈 줄도 카드 · 끝의 빈 줄은 여백 · `$` 는 건너뜀 · 쉼표 줄은 모르는 꼴.
+  TMID)과 `*MAT_ADD_*` 를 뺀 것. 섹션 카드 묶음 셈과 같은 꼴 — 빈 줄도 카드 · 끝의 빈 줄은 여백 · 1열의 `$` 는 건너뜀(11-08 셋째 — 들여쓴 `$`
+  줄은 데이터) · 쉼표 줄은 모르는 꼴.
 - **쌓인 재질 묶음((g))** — 묶음 한 벌의 줄 수를 Vol II R16 카드 요약이 정하는 꼴만 다 읽는다: `*MAT_ELASTIC`(001) 1 + Card 1.1(E < 0 ·
   StepForge 591d5b5 `card_set_rows` 와 같다) + Card 2(`_FLUID`) · `*MAT_PLASTIC_KINEMATIC`(003) 2 · `*MAT_VISCOELASTIC`(006) 1 · `*MAT_NULL`(009) 1
   · `*MAT_RIGID`(020) 3 · `*MAT_PIECEWISE_LINEAR_PLASTICITY`(024 · 옵션 없는 꼴) 4. 저장소 덱의 구조 재질 꼴 가운데 이 여섯이 대부분이다(ELASTIC
@@ -255,6 +256,15 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
   계획을 `secid_order` 로 거절하고 커서가 2025 로 뛰었다. 이제 제목 줄 다음부터 센다(섹션 · 재질 같은 규칙). 그 뒤에 쌓인 묶음의 제목은 자리를
   몰라 그대로 센다(넉넉한 쪽 — 남은 틈 · StepForge 도 보 · 이산의 제목을 센다: 검토 행렬의 `beam_title_2024` bound 2024). 회귀 — 커서 E 4항 ·
   재질 G-9 · 이월 S-3i(4f550b3 에서 6 실패).
+- **주석은 1열의 `$` 뿐(S8 · S10 을 지으며 들인 퇴행을 고침)** — 섹션 묶음 셈과 `matids` 가 첫 비공백 글자가 `$` 인 줄을 주석으로 건넜다. 리더
+  (`KFileReader::isCommentLine`)와 LS-DYNA(Vol_I 17862 「A dollar sign "$" in column one precedes a comment」)는 1열만 주석이다 — 들여쓴 `$`
+  제목(「  $5 tube」)을 건너면 묶음이 한 줄 밀린다. 예전엔 밀린 둘째 카드의 `1.0` 을 SECID 로 못 읽어 넉넉한 셈으로 물러섰는데(우연히 맞았다 —
+  검토 행렬 `shell_indented_dollar_title` 은 4f550b3 에서 2), S8 이 실수 꼴 정수를 받자 그 `1.0` 이 SECID 1 이 되어 진짜 SECID 2 를 놓쳤고(새
+  섹션이 2 를 다시 냈다), S10 의 제목 건너기는 밀린 자리에서 진짜 Card 1 을 건넜다. 이제 둘 다 1열 규칙이다. 카드 한 장 꼴(`*SECTION_SOLID_TITLE`
+  · `*MAT_ELASTIC_TITLE` 에 들여쓴 `$` 제목)은 4f550b3 에서도 Card 1 을 제목으로 삼켜 번호를 놓쳤다 — 같이 고쳐졌다. 들여쓴 `*` 제목 줄(블록이
+  끝난 것으로 본다)은 다음 판 목록 그대로다(검토 행렬 `shell_indented_star_title` — 4f550b3 · 운영 판 모두 1). 옛 첫 카드 셈
+  (`cur_scanSectionDefs` — 있나 · 종류 표)은 아직 첫 비공백 `$` 를 주석으로 본다(그 표만 들여쓴 `$` 제목에서 틀린다 — 남은 틈 · 커서는 두 셈의
+  큰 쪽이라 맞다). 회귀 — 커서 F 2항(F-1 은 e27baed 에서 실패 · F-2 는 4f550b3 에서도) · 재질 G-10(4f550b3 에서도 실패).
 - **열 카드를 가리키는 다른 파트(S5 — matdb `thermal: true`)** — b83b7bf 는 `thermal: false` 만 막았다(검토의 기본 재현은 그때 고쳐졌음을 확인).
   `thermal: true` 는 같은 번호(TMID = MID)의 열 카드를 늘 바꿔 넣어, 그 카드를 **다른 MID 의 파트**가 가리키면 그 파트의 열 물성이 조용히 DB 의
   것으로 바뀌었다(rc 0 · `--strict` 0). 정한 것 — 그때는 옛 카드를 두고 새 카드에 빈 TMID 를 준다(덱 · 인클루드의 열 카드 TMID · `*PART` TMID ·

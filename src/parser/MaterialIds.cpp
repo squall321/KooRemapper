@@ -22,10 +22,10 @@ bool keywordLine(const std::string& l) {
     return g != std::string::npos && l[g] == '*';
 }
 
-bool commentLine(const std::string& l) {
-    const size_t h = l.find_first_not_of(" \t\r");
-    return h != std::string::npos && l[h] == '$';
-}
+// 주석 줄인가 — **1열의 `$`** 뿐이다(Vol_I 17862 · 리더 `KFileReader::isCommentLine` · 섹션 묶음 훑기와 같다). 들여쓴 `$` 줄은 데이터다
+// (제목 「  $5 steel」) — 주석으로 건너면 묶음이 한 줄 밀려 다음 카드의 칸(`40.0`)을 MID 로 읽거나 제목 줄 다음부터 세는 넉넉한 셈이
+// 진짜 Card 1 을 건넜다(11-08 S8 · S10 의 퇴행)
+bool commentLine(const std::string& l) { return !l.empty() && l[0] == '$'; }
 
 // 묶음 한 벌의 데이터 줄 수(`_TITLE` 제목 줄은 뺀다) — 모르면 -1. Vol II R16 의 카드 요약 그대로(MaterialIds.h 머리말)
 int setRows(const std::string& base, const std::string& card1, int w) {

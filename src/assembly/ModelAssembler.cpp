@@ -107,7 +107,7 @@ std::map<int, std::string> cur_scanSectionIds(const std::vector<std::string>& li
 // 한 키워드 아래 묶음 한 벌의 데이터 줄 수(묶음마다 오는 `_TITLE` 제목 줄은 뺀다)를 매뉴얼이 Card 1 칸으로 정하는 꼴만 다 읽는다 —
 //   `*SECTION_SOLID` 1(ELFORM 101~105 는 모름) · `*SECTION_SHELL` 2 + ICOMP 1 이면 각도 카드 ceil(NIP/8)(NIP 0 = 2 점 · ELFORM 101~105 는
 //   모름) · `*SECTION_TSHELL` 1 + 같은 각도 카드. ICOMP 가 0 · 1 밖이거나 칸이 정수가 아니면 모름. 정수 칸은 10진 실수 꼴의 정수도 받는다
-//   (`carryover::integralField` — NIP `5.000e+00`). 빈 줄도 카드다(끝의 빈 줄만 여백) · `$` 주석은 건너뛴다.
+//   (`carryover::integralField` — NIP `5.000e+00`). 빈 줄도 카드다(끝의 빈 줄만 여백) · 1열의 `$` 주석은 건너뛴다(들여쓴 `$` 줄은 데이터 · 11-08).
 // 그 밖의 꼴(보 · 이산 · SPH · EFG · SPG · PERI · IGA …)과 묶음을 못 가른 자리(행 수를 모름 · 묶음의 SECID 칸이 숫자가 아님)부터는 행마다 첫
 // 칸의 숫자를 넉넉히 센다(`loose` — 그 블록의 SECID 는 그 안 어느 행의 첫 칸이다 · StepForge `secid_bound`). 예전엔 모든 블록의 모든 행을
 // 넉넉히 세어 제목(`2024` · `12 mm plate`) · 정수 두께(`12`) · 정수 각도(`90`)가 「가장 큰 SECID」 가 되었다 — 정상 계획의 새 섹션을
@@ -164,7 +164,10 @@ CurSectionSets cur_scanSectionSets(const std::vector<std::string>& lines) {
         for (; j < lines.size(); ++j) {
             const size_t h = lines[j].find_first_not_of(" \t\r");
             if (h != std::string::npos && lines[j][h] == '*') break;
-            if (h != std::string::npos && lines[j][h] == '$') continue;
+            // 주석은 **1열의 `$`** 뿐이다(Vol_I 17862 「A dollar sign "$" in column one precedes a comment」 · 리더 `isCommentLine` 과 같다) —
+            // 들여쓴 `$` 줄은 데이터다(제목 「  $5 tube」). 예전엔 그 줄을 주석으로 건너 묶음이 한 줄 밀렸고, 묶음의 SECID 칸이 실수 꼴 정수도
+            // 받게 되자(S8) 둘째 카드의 두께 `1.0` 을 SECID 1 로 읽어 진짜 SECID 2 를 놓쳤다(새 섹션이 2 를 다시 냈다 · 11-08 S8 의 퇴행)
+            if (!lines[j].empty() && lines[j][0] == '$') continue;
             rows.push_back(j);
         }
         if (kw.rfind("*SECTION_", 0) != 0) { i = j; continue; }
