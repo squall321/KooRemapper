@@ -1,6 +1,7 @@
 // 재질 번호 공용 훑기(matids) — 쌓인 재질 묶음 · 열 재질 · 덧붙임 카드를 세고 · 지우고 · 베끼는 규칙(MaterialIds.h)
 #include "TestFramework.h"
 
+#include "parser/DeckScan.h"
 #include "parser/MaterialIds.h"
 
 #include <sstream>
@@ -103,4 +104,25 @@ TEST(MaterialIds_지울_줄_표시는_묶음이_다_들면_블록째) {
     const auto both = matids::definitionMask(L, {2, 3});
     ASSERT_TRUE(both[1] && both[2] && both[3]);
     ASSERT_FALSE(both[4]);   // *END
+}
+
+// 번호 칸은 정수 칸이 받는 꼴로 읽는다 — 부호 · 앞의 0 · 칸 폭을 다 채운 10 자리 · 묶음의 Card 1 이면 실수 꼴 정수(적대적 검토 11-08 S8)
+TEST(MaterialIds_번호_칸은_정수_칸이_받는_꼴로_읽는다) {
+    int v = 0;
+    ASSERT_TRUE(deckscan::digitsField("        +6         1", 10, v));
+    ASSERT_EQ(v, 6);
+    ASSERT_TRUE(deckscan::digitsField("0000000006         1", 10, v));
+    ASSERT_EQ(v, 6);
+    ASSERT_TRUE(deckscan::digitsField("1000000006         1", 10, v));
+    ASSERT_EQ(v, 1000000006);
+    ASSERT_TRUE(deckscan::digitsField("00000000000000000007", 20, v));   // long 20 칸
+    ASSERT_EQ(v, 7);
+    ASSERT_FALSE(deckscan::digitsField("       6.0         1", 10, v));   // 넉넉한 셈은 실수 꼴을 세지 않는다(두께와 못 가른다)
+    ASSERT_FALSE(deckscan::digitsField("        -6", 10, v));
+    ASSERT_FALSE(deckscan::digitsField("12 mm plate", 10, v));
+    ASSERT_FALSE(deckscan::digitsField("2147483648", 10, v));            // int 밖
+    auto L = matDeckLines(std::string("*KEYWORD\n*MAT_ELASTIC\n") + kMatEl2 + "\n       3.0   7.85E-9    210000       0.3\n*END\n");
+    ASSERT_TRUE(matids::defined(L).count(3) == 1);                        // 묶음의 Card 1 은 실수 꼴 정수도 MID 다(리더처럼)
+    const std::string c = matids::copyDefinition(L, 3, 12);
+    ASSERT_TRUE(c.find("        12   7.85E-9    210000       0.3\n") != std::string::npos);   // 그 칸을 칸 폭 그대로 바꾼다
 }

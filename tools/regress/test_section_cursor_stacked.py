@@ -18,6 +18,8 @@
   A offset(새 솔리드 층 · 새 섹션) — 쌓인 둘째 카드의 SECID 2 를 다시 내지 않는다
   B id_floor — pid_start 가 쌓인 카드의 SECID 위다
   C 커서는 카드 묶음으로 센다 — 숫자 제목은 SECID 가 아니고(예전 2025) · 실수 꼴 SECID(2.0)는 옛 첫 카드 셈처럼 센다(11-08)
+  D 쌓인 묶음의 SECID 를 정수 칸이 받는 꼴 그대로 읽는다 — 부호 `+2` · 앞의 0 `0000000002` · 10 자리 · 실수 꼴 `2.0` · 행 수를 모르는 꼴의
+    `+3`(적대적 검토 11-08 S8 — 예전엔 숫자만 9 자리까지 읽어 offset 이 같은 SECID 를 다시 냈다)
 
 usage: test_section_cursor_stacked.py <KooRemapper 바이너리>
 """
@@ -74,8 +76,8 @@ def run(binary, d, *args):
     return p.returncode, p.stdout + p.stderr
 
 
-def stacked_box(binary, d):
-    """generate box 덱의 `*SECTION_SOLID` 밑에 둘째 카드(SECID 2 · 아무 파트도 안 쓴다)를 쌓는다."""
+def stacked_box(binary, d, secid_text="2"):
+    """generate box 덱의 `*SECTION_SOLID` 밑에 둘째 카드(SECID 2 · 아무 파트도 안 쓴다)를 쌓는다 — SECID 칸 글자는 `secid_text`."""
     open(os.path.join(d, "box.yaml"), "w").write(BOX)
     rc, out = run(binary, d, "generate", "box", "box.yaml")
     assert rc == 0, out[-400:]
@@ -84,7 +86,7 @@ def stacked_box(binary, d):
     i = next(k for k, l in enumerate(L) if l.strip().upper().startswith("*SECTION_SOLID"))
     j = next(k for k in range(i + 1, len(L)) if L[k].strip() and not L[k].lstrip().startswith("$"))
     assert int(L[j][:10]) == 1, L[j]
-    L.insert(j + 1, "%10d%10s" % (2, L[j][10:20].strip() or "1"))
+    L.insert(j + 1, "%10s%10s" % (secid_text, L[j][10:20].strip() or "1"))
     open(p, "w", encoding="utf-8").write("\n".join(L))
 
 
@@ -202,6 +204,31 @@ def main():
         rc, out = run(binary, d, "offset", "off.yaml")
         sec = part_secid(os.path.join(d, "out.k"), 10) if rc == 0 else None
         check("C-2 SECID 2.0 블록 — 새 섹션은 2 를 다시 내지 않는다(SECID 3)", sec == 3, (rc, sec, out[-300:]))
+
+        print("[D 쌓인 묶음의 SECID — 부호 · 앞의 0 · 칸 폭 · 실수 꼴(적대적 검토 11-08 S8)]")
+        for tag, text, want in (("d1", "+2", 3), ("d2", "0000000002", 3), ("d3", "2.0", 3), ("d4", "1000000002", 1000000003)):
+            d = os.path.join(tmp, tag)
+            os.makedirs(d)
+            stacked_box(binary, d, text)
+            open(os.path.join(d, "off.yaml"), "w").write(OFFSET)
+            rc, out = run(binary, d, "offset", "off.yaml")
+            sec = part_secid(os.path.join(d, "out.k"), 10) if rc == 0 else None
+            check("D-%s 쌓인 둘째 묶음 SECID %r — offset 의 새 섹션 %d(그 번호를 다시 내지 않는다)" % (tag[1:], text, want), sec == want,
+                  (rc, sec, out[-300:]))
+        # D-5 행 수를 모르는 꼴(*SECTION_BEAM — 묶음마다 두 줄)의 둘째 묶음 SECID `+3` — 그 자리부터 행마다 넉넉히 세는 셈도 부호를 받는다
+        d = os.path.join(tmp, "d5")
+        os.makedirs(d)
+        beam = ["*SECTION_BEAM", "         2         1       1.0         2", "       1.0       1.0",
+                "        +3         1       1.0         2", "       1.0       1.0"]
+        box_with(binary, d, lambda L: L[:-1] + beam + L[-1:])
+        open(os.path.join(d, "off.yaml"), "w").write(OFFSET)
+        rc, out = run(binary, d, "offset", "off.yaml")
+        sec = part_secid(os.path.join(d, "out.k"), 10) if rc == 0 else None
+        check("D-5 *SECTION_BEAM 둘째 묶음 SECID +3(행 수를 모르는 꼴) — 새 섹션 4", sec == 4, (rc, sec, out[-300:]))
+        open(os.path.join(d, "fl.yaml"), "w").write("model: box.k\noutput: floor.json\n")
+        rc, out = run(binary, d, "id_floor", "fl.yaml")
+        fl = json.load(open(os.path.join(d, "floor.json"), encoding="utf-8")) if rc == 0 else {}
+        check("D-5b id_floor pid_start 4", fl.get("pid_start") == 4, (rc, fl, out[-300:]))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print()

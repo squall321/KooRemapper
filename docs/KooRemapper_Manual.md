@@ -386,6 +386,10 @@ BOM 을 붙인 설정으로 둘 다 **종료 코드 0** 으로 정상 산출물�
   첫 카드만 세어 새 섹션이 2 를 다시 낼 수 있었다), 줄 수를 모르는 꼴(보 · 이산 · SPH · EFG · SPG · PERI · IGA …)과 못 가른 자리부터는
   행마다 첫 칸 숫자를 넉넉히 셉니다. 제목(`2024` · `12 mm plate`) · 정수로 쓴 두께(`12`) · 각도(`90`)는 SECID 가 아닙니다(11-07 밤 판은
   모든 행을 세어 그 숫자가 새 SECID 를 부풀렸습니다). 옛 첫 카드 셈(`2.0` 으로 쓴 SECID 를 2 로 읽는다)보다 내려가지 않습니다.
+  번호 칸은 정수 칸이 받는 꼴 그대로 읽습니다 — 부호(`+6`) · 앞의 0(`0000000006`) · 칸 폭을 다 채운 수(10 칸의 10 자리 · long 20 칸) ·
+  묶음의 SECID 칸이면 실수 꼴 정수(`6.0` · `6.000e+00` — 리더가 6 으로 읽는다)도(2026-11-08 · 적대적 검토 S8 — 예전엔 숫자만 9 자리까지
+  읽어 쌓인 묶음의 그 SECID 를 놓쳤고 offset 이 같은 6 을 다시 냈다). 행마다 넉넉히 세는 자리는 실수 꼴을 세지 않습니다(두께 `2.0` 과 가를
+  수 없다).
   「그 SECID 가 있나 · 어떤 섹션인가」 는 첫 카드 표 그대로입니다. 새 SECID 를 내는 op —
   `restack` · `disconnect` · `offset`(다재료 · dual 포함) · `merge` · `cnrb2solid` · IGA — 와 바닥(`id_floor` · `cad_solid_merge_to_deck`)이
   이 셈을 쓰고, `apply_carryover_plan` 은 새 섹션의 차례 · 겹침에 씁니다(조각 이동량 바닥은 절점 · 요소 최대값만 본다 — 11-08 정정).
@@ -398,7 +402,8 @@ BOM 을 붙인 설정으로 둘 다 **종료 코드 0** 으로 정상 산출물�
   올렸습니다(TMID 50 → 새 MID 51). 같은 셈을 쓰는 자리 — 공용 커서(assemble 계열 · `id_floor` 의 `pid_start` · `cad_solid_merge_to_deck`) ·
   `matswap`(단독 · assemble) · `cclip` · `ale` · `cnrb2solid` · `cnrb2spring`(고정 번호대 겹침 — TMID 로 거짓 겹침을 내던 것을 고쳤고 쌓인
   MID 와의 진짜 겹침을 잡는다) · `matdb` 의 `match_part`. assemble 의 `matswap` · `matdb` 는 같은 실행의 앞 op 이 낸 번호도 피합니다
-  (예전엔 offset 뒤의 matswap 이 MID 2 · SECID 2 를 또 냈다). 회귀 `tools/regress/test_material_id_family.py`.
+  (예전엔 offset 뒤의 matswap 이 MID 2 · SECID 2 를 또 냈다). MID 칸은 SECID 와 같은 꼴로 읽습니다(부호 · 앞의 0 · 10 자리 · 묶음의
+  Card 1 이면 실수 꼴 정수 `3.0` 도 MID 3 — 11-08 S8). 회귀 `tools/regress/test_material_id_family.py`.
 - 인클루드를 다 읽었으면 조용합니다. 못 읽은 이름이나 따라가지 않은 `*INCLUDE_*`(`_TRANSFORM` 등)가 있으면
   **한 번** 경고하고 종료 코드는 그대로 0 입니다.
   ```
@@ -6142,7 +6147,8 @@ null). 칸 하나라도 다르면 손대는 줄은 `deck_range`(칸 · 계획 �
 - 「닫힘에 없다」 · 「가장 큰 SECID 위」 는 공용 번호 커서와 **같은 셈**이다(§3.1(h) — 카드 묶음): SOLID · SHELL · TSHELL 은 쌓인 묶음의
   SECID 까지 정확히, 줄 수를 모르는 꼴은 행마다 첫 칸 숫자를 넉넉히. 제목 · 두께 · 각도의 숫자는 SECID 가 아니다 — 11-07 판은 모든 행을
   세어 정상 계획의 새 섹션을 `secid_order` 로 거절했다(StepForge 는 받는 덱 · 적대적 검토 11-08). 조각의 새 섹션(판 1 · 2)도 같은 셈으로
-  겹침을 본다.
+  겹침을 본다. 쌓인 묶음의 SECID 칸은 부호(`+9`) · 앞의 0(`0000000009`) · 10 자리 · 실수 꼴 정수(`9.0`)도 그 번호다 — 예전엔 그 9 를 못 보고
+  조각의 새 섹션 9 를 옆에 썼다(rc 0 · 같은 SECID 둘 · 11-08 S8).
 - 넣으면 그 카드를 주 덱 첫 `*END` 앞에 두고 그 PID `*PART` 의 SECID 칸**만** 덱 폭(표준 · i10 10칸 · long 20칸)으로 고친다 — 같은 섹션을 쓰는
   다른 파트는 옛 섹션 그대로다. 보고의 그 줄에 `new_section {secid, thickness}`.
 - 거절 — 못 지은 꼴(`secid` · `file` 이 null — 그 줄은 조각 `instead` 로 물러섰다 · 우리는 변위장만 쓴다 — `new_section` · `morph_instead`) ·

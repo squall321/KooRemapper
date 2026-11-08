@@ -12,7 +12,8 @@
   assemble 의 matswap 은 앞 op(offset)이 덧붙인 재질 · 섹션 번호를 못 보고 같은 MID 2 · SECID 2 를 또 냈다.
 
 무엇을 보나.
-  G 공용 커서 — 쌓인 묶음(알려진 꼴은 묶음마다 · 모르는 꼴은 행마다 첫 칸 숫자)을 세어 새 MID 가 겹치지 않는다
+  G 공용 커서 — 쌓인 묶음(알려진 꼴은 묶음마다 · 모르는 꼴은 행마다 첫 칸 숫자)을 세어 새 MID 가 겹치지 않는다 · 묶음의 MID 칸은 실수 꼴
+    정수(`3.0`)도 · 넉넉한 셈은 부호 · 앞의 0 · 10 자리도 받는다(적대적 검토 11-08 S8)
   D MID 를 내는 op 마다 같은 셈 — 열 재질 TMID 로 커서를 올리지 않고 쌓인 MID 를 다시 내지 않는다
   A matswap(단독 · assemble) — 옛 MID 의 구조 재질 정의만 지운다(같은 번호 TMID 의 열 재질 · PID 꼴 덧붙임 · 쌓인 다른 재질은 둔다 ·
     MID 꼴 덧붙임은 번호를 다시 쓰면 두고 재질이 사라지면 지운다 · 지운 뒤에도 쓰이는 번호는 다시 주지 않는다)
@@ -126,6 +127,15 @@ def part_g(binary, tmp):
          + "".join("%10d   7.85E-9    1000.0    1000.0    1000.0       0.3       0.3       0.3\n" % m +
                    "     500.0     500.0     500.0       0.0\n       0.0       0.0       0.0       1.0       0.0       0.0\n"
                    "       0.0       1.0       0.0       0.0\n" for m in (3, 4)), 5),
+        ("G-7 쌓인 둘째 묶음의 MID 를 실수 꼴(3.0)로 — 새 MID 4(예전 3 — 리더는 3 으로 읽는다)",
+         "*MAT_ELASTIC\n" + EL % 2 + "       3.0   7.85E-9    210000       0.3\n", 4),
+    ] + [
+        ("G-8%s 행 수를 모르는 꼴의 둘째 묶음 MID %r — 넉넉한 셈이 받는다 · 새 MID 5(예전 4)" % (tag, text),
+         "*MAT_ORTHOTROPIC_ELASTIC\n"
+         + "".join("%10s   7.85E-9    1000.0    1000.0    1000.0       0.3       0.3       0.3\n" % m +
+                   "     500.0     500.0     500.0       0.0\n       0.0       0.0       0.0       1.0       0.0       0.0\n"
+                   "       0.0       1.0       0.0       0.0\n" for m in ("3", text)), 5)
+        for tag, text in (("a", "+4"), ("b", "0000000004"))
     ]
     for k, (name, extra, want) in enumerate(cases):
         d = fresh(tmp, "g%d" % k)
@@ -135,7 +145,7 @@ def part_g(binary, tmp):
         got = offset_new_mid(out)
         mids = [m for _kw, m in card1_mids(os.path.join(d, "out.k"))]
         check(name, rc == 0 and got == want, (rc, got, mids, out[-300:]))
-    d = fresh(tmp, "g6")
+    d = fresh(tmp, "g_floor")
     box(binary, d, STACK)
     open(os.path.join(d, "fl.yaml"), "w").write("model: box.k\noutput: fl.json\n")
     rc, out = run(binary, d, "id_floor", "fl.yaml")

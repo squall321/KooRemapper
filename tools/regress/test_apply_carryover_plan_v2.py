@@ -1058,7 +1058,12 @@ def part_s(binary):
             ("s3c", mass8, shell8 % (2, 0, "        12        12        12        12"), "정수로 쓴 셸 두께 12", True),
             ("s3d", mass8, shell8 % (4, 1, "       1.0       1.0       1.0       1.0\n$#      b1        b2        b3        b4\n"
                                         "        90         0         0        90"), "ICOMP 1 의 정수 각도 90", True),
-            ("s3e", mass8, mass8 + "stacked\n        12         1\n", "진짜 쌓인 카드 묶음(SECID 12 — 지킴이)", False)):
+            ("s3e", mass8, mass8 + "stacked\n        12         1\n", "진짜 쌓인 카드 묶음(SECID 12 — 지킴이)", False),
+            # 쌓인 묶음의 SECID 를 정수 칸이 받는 꼴 그대로 읽는다 — 예전엔 숫자만 9 자리까지 읽어 그 9 를 못 보고 조각의 새 섹션 9 를 옆에
+            # 썼다(rc 0 · 같은 SECID 둘 — 적대적 검토 11-08 S8)
+            ("s3f", mass8, mass8 + "stacked\n        +9         1\n", "쌓인 묶음의 SECID +9(부호)", False),
+            ("s3g", mass8, mass8 + "stacked\n0000000009         1\n", "쌓인 묶음의 SECID 0000000009(앞의 0 · 칸 폭)", False),
+            ("s3h", mass8, mass8 + "stacked\n       9.0         1\n", "쌓인 묶음의 SECID 9.0(실수 꼴 정수)", False)):
         d = stage(tag)
         deck = os.path.join(d, "deck.k")
         body = read(deck)
@@ -1075,7 +1080,7 @@ def part_s(binary):
             check("S-%s %s → 새 섹션(9 · 10)을 받는다(그 숫자는 SECID 가 아니다)" % (tag[1:], what),
                   rc == 0 and "secid_order" not in kinds(rep), (rc, sorted(kinds(rep)), details(rep, "secid_order")[:200]))
         else:
-            refused("S-%s %s → 새 섹션 10 이 그 아래다 · secid_order" % (tag[1:], what), rc, out, rep, d, "secid_order")
+            refused("S-%s %s → 새 섹션(9 · 10)이 그 번호 위가 아니다 · secid_order" % (tag[1:], what), rc, out, rep, d, "secid_order")
 
 
 if __name__ == "__main__":

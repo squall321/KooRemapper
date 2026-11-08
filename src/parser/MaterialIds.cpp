@@ -50,17 +50,25 @@ int setRows(const std::string& base, const std::string& card1, int w) {
     return it == fixed.end() ? -1 : it->second;
 }
 
-// Card 1 의 MID — 옛 첫 카드 훑기와 같은 칸 읽기(고정폭 · 어긋난 줄이면 공백 토큰 · 정수만)
-int midOf(const std::string& card1, int w) { return deckscan::fieldInt(deckscan::cardFields(card1, w), 0); }
+// Card 1 의 MID — 옛 첫 카드 훑기와 같은 칸 읽기(고정폭 · 어긋난 줄이면 공백 토큰). 정수 글자(부호 · 앞의 0 · 칸 폭)에 더해 실수 꼴의 정수 값
+// (`6.0` · `6.000e+00`)도 그 정수로 읽는다 — 리더(`KFileReader::parseInt`)가 그렇게 읽고 정수 칸의 실수 꼴은 `carryover::integralField` 하나로
+// 읽는다(섹션 묶음의 SECID 와 같은 규칙 · 적대적 검토 11-08 S8). 정수가 아닌 값 · 0 이하 · int 밖은 0
+int midOf(const std::string& card1, int w) {
+    const auto f = deckscan::cardFields(card1, w);
+    long long x = 0;
+    if (f.empty() || !carryover::integralField(f[0], x) || x <= 0 || x > 2147483647LL) return 0;
+    return static_cast<int>(x);
+}
 
-// MID 칸을 newMid 로 — 고정폭 칸이 정수면 그 칸을 오른쪽 맞춤으로, 쉼표 줄이면 첫 값을, 칸이 어긋난 줄이면 첫 토큰을 바꾼다
+// MID 칸을 newMid 로 — 고정폭 칸이 수(정수 · 실수 꼴의 정수 `6.0` — `midOf` 가 읽는 꼴)면 그 칸을 오른쪽 맞춤으로, 쉼표 줄이면 첫 값을, 칸이
+// 어긋난 줄이면 첫 토큰을 바꾼다(토큰 길이가 바뀌면 고정폭 줄의 뒤 칸이 밀린다 — 칸이 맞는 줄은 그 길로 가지 않는다)
 std::string withMid(const std::string& line, int w, int newMid) {
     const std::string val = std::to_string(newMid);
     const size_t comma = line.find(',');
     if (comma != std::string::npos) return val + line.substr(comma);
-    int probe = 0;
-    if (cards::toInt(deckscan::trim(line.substr(0, std::min(line.size(), static_cast<size_t>(w)))), probe) &&
-        val.size() <= static_cast<size_t>(w)) {
+    const std::string head0 = deckscan::trim(line.substr(0, std::min(line.size(), static_cast<size_t>(w))));
+    long long probe = 0;
+    if (!head0.empty() && carryover::integralField(head0, probe) && val.size() <= static_cast<size_t>(w)) {
         std::string head(static_cast<size_t>(w) - val.size(), ' ');
         head += val;
         return line.size() > static_cast<size_t>(w) ? head + line.substr(static_cast<size_t>(w)) : head;

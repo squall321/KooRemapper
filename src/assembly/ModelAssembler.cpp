@@ -135,9 +135,21 @@ int cur_sectionSetRows(const std::string& base, const std::string& card1, int w)
     return (base == "*SECTION_SHELL" ? 2 : 1) + static_cast<int>(angles);
 }
 
-// 줄의 첫 칸(고정폭 w · 콤마 줄은 첫 콤마 앞)이 숫자만이면 그 값 — StepForge 의 `raw[:10].strip().isdigit()`(공용 `deckscan::digitsField` —
-// 재질 MID 훑기 `matids` 가 둘째 소비자다)
+// 줄의 첫 칸(고정폭 w · 콤마 줄은 첫 콤마 앞)이 정수 글자면 그 값 — 부호 `+` · 앞의 0 · 칸 폭을 다 채운 수도 받는다(공용 `deckscan::digitsField` —
+// 재질 MID 훑기 `matids` 가 둘째 소비자다). 못 가른 자리의 넉넉한 셈이 쓴다 — 실수 꼴은 세지 않는다(두께 `2.0` 과 가를 수 없다)
 bool cur_digitsField(const std::string& l, int w, int& v) { return deckscan::digitsField(l, w, v); }
+
+// 묶음의 SECID 칸(자리를 안다 — Card 1 첫 칸) — 정수 글자(`cur_digitsField`)에 더해 실수 꼴의 정수 값(`6.0` · `6.000e+00`)도 그 정수로 읽는다.
+// 옛 첫 카드 셈(`cur_scanSectionDefs` — 공백 토큰)과 리더(`KFileReader::parseInt`)가 `6.0` 을 6 으로 읽고, 정수 칸의 실수 꼴은 이 리포가
+// `carryover::integralField` 하나로 읽는다(NIP `5.000e+00` · D-681). 예전엔 쌓인 묶음의 `7.0` 을 못 읽어 그 자리부터 넉넉히 셌는데 그 셈도
+// 실수를 안 세어 SECID 7 을 놓쳤다 — 이월 적용이 「9.0」 옆에 새 섹션 9 를 썼다(적대적 검토 11-08 S8)
+bool cur_setIdField(const std::string& l, int w, int& v) {
+    if (cur_digitsField(l, w, v)) return true;
+    long long x = 0;
+    if (!carryover::integralField(deckscan::firstField(l, w), x) || x <= 0 || x > std::numeric_limits<int>::max()) return false;
+    v = static_cast<int>(x);
+    return true;
+}
 
 CurSectionSets cur_scanSectionSets(const std::vector<std::string>& lines) {
     CurSectionSets out;
@@ -176,7 +188,7 @@ CurSectionSets cur_scanSectionSets(const std::vector<std::string>& lines) {
         for (size_t a : starts) {
             if (a + t >= rows.size()) break;
             int sid = 0;
-            if (!cur_digitsField(lines[rows[a + t]], w, sid)) { rest = a; known = false; break; }   // 묶음의 SECID 칸이 숫자가 아니다
+            if (!cur_setIdField(lines[rows[a + t]], w, sid)) { rest = a; known = false; break; }   // 묶음의 SECID 칸이 수가 아니다
             out.defs[sid].emplace_back(rows[a + t], kw);
         }
         if (rest != std::string::npos && !known)

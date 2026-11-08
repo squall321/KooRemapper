@@ -240,6 +240,17 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
   id_width_overflow · section_cursor_stacked · standalone_yaml_parsing)에 재질 카드를 붙였다(시험 뜻은 그대로). 다층(material_cards)은 층마다
   같은 문을 지난다(빈 층 카드도 거절). 회귀 F 3항(4dfe039 에서 F-1 · F-2 실패).
 
+## 11-08 셋째 — 여섯째 검토 고침(이월 · 번호 훑기 · matdb · hfdamp · 사용자 결정 「들인 결함 + 물성 바꾸는 기존 넷」) — 정한 것
+- **번호 칸 읽기(S8)** — 카드 묶음 셈의 SECID 칸 · 넉넉한 셈(`deckscan::digitsField` — 섹션 · 재질 공용)이 숫자만 9 자리까지 받아(StepForge
+  `isdigit` 꼴) 쌓인 묶음의 `+6` · `0000000006` · 10 자리를 놓쳤다 — offset 이 같은 SECID 를 다시 냈고 이월 적용이 「+9」 옆에 새 섹션 9 를
+  썼다. 이제 정수 칸이 받는 꼴 그대로 — 부호 `+` · 앞의 0 · 칸 폭을 다 채운 수(int 안 · 0 보다 큼). 자리를 아는 번호 칸(묶음의 Card 1 —
+  섹션 SECID `cur_setIdField` · 재질 MID `matids` 의 `midOf`)은 실수 꼴 정수(`6.0` · `6.000e+00`)도 그 정수로 읽는다 — 리더
+  (`KFileReader::parseInt`)와 옛 첫 카드 셈이 그렇게 읽고, 정수 칸의 실수 꼴은 `carryover::integralField` 하나로 읽는다(D-681). 넉넉한 셈은
+  실수 꼴을 세지 않는다 — 행 수를 모르는 꼴의 두께(`2.0` · `12.0`)와 가를 수 없어 세면 거짓 `secid_order` 가 돌아온다(11-08 #2 의 퇴행 꼴).
+  그래서 행 수를 모르는 꼴(보 · 이산 …)에 쌓인 둘째 묶음의 실수 꼴 SECID 는 여전히 못 본다(남은 틈 · 그 블록의 첫 묶음은 옛 첫 카드 셈이
+  읽는다). `withMid`(재질 베끼기)는 실수 꼴 MID 칸도 칸 폭 그대로 바꾼다(토큰 자리 바꾸기는 뒤 칸을 민다). 회귀 — 커서 D 6항 · 재질 G-7 · G-8
+  3항 · 이월 S-3f~h 3항(4f550b3 에서 12 실패) · 단위 1.
+
 ## 11-07 밤 결정 고침 — 정한 것
 - **출력 규칙(사용자 결정 ①)** — extract-parts(`a33af2f`)와 같은 꼴: 덱 · 보고를 output 폴더의 임시 파일(`.<이름>.kr_tmp_…`)에 쓰고 되읽기 대조 ·
   품질 관문까지 지나면 덱 · 보고 차례로 바꿔 넣는다(11-08 부터 공용 도우미 `staged_write::StagedFiles` — `include/util/StagedWrite.h`, 사본 둘을 모았다).
