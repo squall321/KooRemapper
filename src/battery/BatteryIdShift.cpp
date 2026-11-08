@@ -370,11 +370,8 @@ struct Walker {
     }
 };
 
-}  // namespace
-
-const char* idFamName(int fam) { return (fam >= 0 && fam < FAM_COUNT) ? kFamNames[fam] : "?"; }
-
-bool shiftBatteryIds(const std::string& deck, const IdShift& by, std::string& out, ShiftResult& res, std::string& err) {
+// 줄로 나눠 걷는다 — out 이 없으면(범위만 잴 때) 옮긴 글자를 짓지 않는다
+bool walkBatteryIds(const std::string& deck, const IdShift& by, std::string* out, ShiftResult& res, std::string& err) {
     res = ShiftResult{};
     std::vector<std::string> lines;
     {
@@ -384,12 +381,25 @@ bool shiftBatteryIds(const std::string& deck, const IdShift& by, std::string& ou
     }
     Walker w{lines, by, res, err, std::string()};
     if (!w.run()) return false;
+    if (!out) return true;
     std::string o;
     o.reserve(deck.size() + deck.size() / 16);
     for (const auto& l : lines) { o += l; o += '\n'; }
     if (!deck.empty() && deck.back() != '\n' && !o.empty()) o.pop_back();   // 끝 개행 유무를 그대로
-    out.swap(o);
+    out->swap(o);
     return true;
+}
+
+}  // namespace
+
+const char* idFamName(int fam) { return (fam >= 0 && fam < FAM_COUNT) ? kFamNames[fam] : "?"; }
+
+bool shiftBatteryIds(const std::string& deck, const IdShift& by, std::string& out, ShiftResult& res, std::string& err) {
+    return walkBatteryIds(deck, by, &out, res, err);
+}
+
+bool scanBatteryIds(const std::string& deck, ShiftResult& res, std::string& err) {
+    return walkBatteryIds(deck, IdShift{}, nullptr, res, err);
 }
 
 }  // namespace bat

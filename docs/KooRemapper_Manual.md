@@ -1011,6 +1011,17 @@ KooRemapper.exe info <mesh_file.k>
 ② Card 3 의 SFSA 칸이 정수 `0` · SFSAT 칸이 정수 `2`(2026-10-24) — 10-23 전 optimize 가 `_ID` 접촉의 Card 3 을 Card A 로 알고
 SOFT · SBOPT 를 쓴 흔적이다(SFSA 0 = 기본 1.0 이라 준 배율이 지워지고, SFSAT 2 는 SURFA 셸 접촉 두께를 두 배로 한다).
 
+**절점 · 요소 번호를 두 번 정의했나도 본다(2026-11-08).** 주 덱과 인클루드 닫힘을 통틀어 **같은 종류** 안에서 번호가 겹치면
+SECID · MID 겹침처럼 **망가진 카드**다(`--strict` 면 rc=1) — 종류는 절점(`*NODE` · 스칼라 절점) · 솔리드 · 셸 · 티쉘 · 보 족
+(`*ELEMENT_BEAM` · `_DISCRETE` · `_SEATBELT` · `_PLOTEL` — null beam 때문에 서로 달라야 한다). 겹친 블록과 처음 정의한 블록의 짝마다
+한 건으로, 개수와 번호 범위를 적는다 — `line 300 *NODE: 절점 ID 1 가 line 17(주 덱) 과 겹칩니다 — 이 블록에서 겹친 절점 198개(1~198)`.
+리더는 겹친 번호를 **뒤 정의 하나로** 읽으므로 위 `Nodes` · `Elements` 는 그것을 뺀 수이고, 그렇다고 한 줄 더 적는다.
+족을 건넌 같은 요소 번호(셸 1 · 솔리드 1)는 LS-DYNA 가 족마다 번호를 따로 두어 받으므로 **단정하지 않는 알림**(`알림 line N …` · rc ·
+`--strict` 와 무관)이다 — 이 도구의 리더는 그 둘도 한 표로 합친다. 칸이 어긋나 두 읽기(고정폭 · 토큰)가 다른 번호를 내는 절점 줄은
+겹침이라 말하지 않고 「검사하지 않은 자리」로 센다. 질량 · 관성처럼 매뉴얼이 「권장」만 하는 족과 줄 수를 모르는 카드는 보지 않는다.
+예전엔 리더가 말없이 덮어, 상자(절점 1~198) 위에 번호를 옮기지 않은 battery 덱을 끌어온 덱이 SECID · MID 겹침 둘만 짚혔다.
+회귀 `tools/regress/test_info_id_duplicates.py`. 저장소 예제 · 시험 덱 339장에서 `--strict` 결과가 바뀐 덱 0.
+
 **열 재질의 번호는 따로 센다(2026-11-08).** `*MAT_THERMAL_*` 과 그 번호 이름 `*MAT_T01`~`*MAT_T18` 의 첫 칸은 **TMID**(열 재질
 번호)다 — 구조 재질의 MID 와 독립된 번호라(Vol II *MAT_THERMAL — 같은 수가 있어도 된다) `*MAT_ELASTIC 2` 와 `*MAT_T01 2` 가 함께
 있어도 겹침이 아니고, `*PART` 의 MID 를 정의하지도 않는다(Vol I *PART 비고 7 — MID 는 `*MAT` 의, TMID 는 `*MAT_THERMAL` 의 번호다).
@@ -3720,6 +3731,22 @@ dynain 또는 K 파일의 `*NODE` 블록에서 일치하는 NID만 좌표 갱신
 
 → 독립 명령 [37. database](#37-database--database-출력-제어) 참조
 
+### 39.21 battery — 배터리 셀 덱 얹기
+
+```yaml
+- type: battery
+  config: bat.yaml        # battery 설정(§43.1) — 그 설정 폴더 기준으로 덱을 쓴다
+  # output: bx            # 덱 접두사를 이 YAML 폴더 기준으로 바꾼다
+  # node_id_offset: 0     # 0 = 기존 모델의 최대값 위로 저절로
+  # elem_id_offset: 0
+  # use_include: true     # false 면 덱 파일 없이 주 덱에 펼친다
+```
+
+battery 덱을 지어 번호를 기존 모델 위로 옮기고 주 덱의 첫 `*END` 앞에 `*INCLUDE`(또는 펼침)로 얹습니다. battery 덱은 홀로 도는
+해석 덱이라 그 **제어 · 출력 카드 · 고정구 · 경계조건 · 하중도 함께** 실리고, 주 덱에도 제어 · 출력 카드가 있으면 같은 키워드가 두 번
+실릴 수 있습니다(고르지 않습니다 — 어느 것을 남길지는 뒤에 정할 설계 일 · 2026-11-08 사용자 결정). 번호 규칙 · 함께 실리는 카드
+목록은 [§43.1](#431-battery--배터리-셀-생성) 을 보세요.
+
 ---
 
 
@@ -4149,8 +4176,21 @@ KooRemapper battery <config.yaml>
 > (phase 2 · `use_dynain`) 번호를 옮길 때 거절합니다 — 그 dynain 은 다른 실행의 번호입니다. battery 쓰개가 내지 않는 카드나 뜻을 모르는
 > 0 아닌 번호 칸이 있으면 옮기지 않고 거절합니다. 뒤 처리(contact · load …)가 새로 내는 번호도 battery 덱의 번호 위로 냅니다. 예전에는
 > battery 덱을 번호 그대로 끌어와 기존 모델과 겹쳤고(상자 198 절점이 모두 겹쳐 종료 코드 0), 두 오프셋과 `use_include` 는 읽기만
-> 했습니다. battery 덱의 `*CONTROL_*` · `*DATABASE_*` · 고정구 · 경계조건은 그대로 실립니다(번호 겹침만 다룹니다). 단독 `battery` 는 한 덱이
-> 홀로 서므로 해당이 없습니다(설정 40가지로 지은 덱에 족 안에서 겹친 번호 0).
+> 했습니다. 번호 겹침만 다룹니다 — 함께 실리는 카드는 아래 문단. 단독 `battery` 는 한 덱이 홀로 서므로 해당이 없습니다(설정 40가지로
+> 지은 덱에 족 안에서 겹친 번호 0).
+>
+> **`assemble` 이 battery 덱과 함께 싣는 것(2026-11-08 · 사용자 결정 「지금은 그대로 · 문서에 적는다」)**: battery 덱은 홀로 도는
+> 해석 덱이라 assemble 은 그 카드를 **전부** 주 덱의 카드 옆에 싣습니다(번호만 옮깁니다).
+> - 해석 제어 — `*CONTROL_TERMINATION` · `_TIMESTEP` · `_ENERGY` · `_HOURGLASS` · `_BULK_VISCOSITY` · `_SHELL` · `_SOLID` · `_CONTACT` ·
+>   `_SOLUTION`, DR 모드(`swell` · `bare`)면 `_DYNAMIC_RELAXATION`, phase 2 면 `_THERMAL_SOLVER` · `_THERMAL_TIMESTEP`
+> - 출력 — `*DATABASE_BINARY_D3PLOT` · `_EXTENT_BINARY` · `_GLSTAT` · `_MATSUM` · `_RCFORC`
+> - 고정구 — 압입자 · 바닥판 · PCM · 탭(`mode` · `no_fixture` · `no_pcm` · `no_impactor` 에 따라 — `swell` · `bare` 는 `no_fixture`)
+> - 경계조건 · 하중 — `*BOUNDARY_SPC_NODE` · `_SPC_SET` · `*BOUNDARY_PRESCRIBED_MOTION_SET` · `*LOAD_SEGMENT_SET` ·
+>   `*LOAD_THERMAL_VARIABLE` · `*AIRBAG_LINEAR_FLUID`, 초기 응력 · 변형률(`*INITIAL_STRESS_SHELL` · `*INITIAL_STRAIN_SOLID`), 접촉 · 곡선
+>
+> 주 덱에도 `*CONTROL_*` · `*DATABASE_*` 가 있으면 **같은 키워드가 두 번** 실릴 수 있습니다 — KooRemapper 는 그 겹침을 고르거나 지우지
+> 않고 알리지도 않습니다. battery 의 경계조건 · 하중 · 고정구도 주 덱의 해석 조건과 함께 걸립니다. 어느 것을 남길지(battery 의 제어 ·
+> 출력 · 고정구를 뺄지)는 뒤에 정할 설계 일입니다. 지금 덜 수 있는 것은 고정구뿐입니다(`no_fixture: true` — PCM · 탭 · 압입자 · 바닥판).
 >
 > **배치의 덱 이름(2026-11-07)**: 덱 이름은 `<output><tier>_phase{1|2}.k` 입니다 — tier 는 다섯 칸(`_tier-1` · `_tier0` ·
 > `_tier0_5` · `_tier1` · `_tier2`)으로 묶이고, phase 2 가 아니면 모두 `_phase1` 입니다. `batch.model_types` 에 종류가 **둘 이상**이면

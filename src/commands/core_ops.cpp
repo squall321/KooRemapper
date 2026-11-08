@@ -1583,6 +1583,13 @@ int runInfo(const std::string& meshFile, const ConsoleOutput& console, bool stri
             if (ep.hasUnreadIncludes) ref.hasUnreadIncludes = true;
             if (ref.includeNames.empty()) ref.includeNames = ep.includeNames;
         }
+        // ★절점 · 요소 번호를 두 번 정의했나(2026-11-08 · 사용자 결정) — 같은 종류 안의 겹침은 SECID · MID 겹침처럼 망가진 카드다
+        //   (LS-DYNA 가 키워드 단계에서 멈춘다 · --strict). 리더는 뒤 정의로 덮어 앞 정의를 말없이 잃으므로 위 Nodes · Elements 는
+        //   겹침을 뺀 수다 — 예전엔 그 사실도 겹침도 말하지 않았다(상자 198 절점이 battery 덱의 절점과 다 겹친 덱이 「망가진 카드 2건」
+        //   (SECID · MID)뿐이었다). 판정은 요소 카드 경계 정본 곁(`checkNodeElementDuplicates` · ModelAssembler.cpp)에 있다
+        const auto idDup = checkNodeElementDuplicates(refLines);
+        ref.damaged.insert(ref.damaged.end(), idDup.damaged.begin(), idDup.damaged.end());
+        ref.notChecked += idDup.notChecked;
         // 세트·경계조건·이력이 가리키는 **절점**이 정의돼 있나(2026-10-16). 요소→절점은 검증기가 보지만 이쪽은
         // 아무도 안 봤다 — meshfix 가 다시 짠 파트의 옛 절점을 `*SET_NODE_LIST`·`*BOUNDARY_SPC_NODE`·
         // `*DATABASE_HISTORY_NODE` 가 그대로 가리킨 덱이 「참조 무결성 OK」 · rc 0 으로 지나갔다(실측). LS-DYNA 는
@@ -1690,6 +1697,23 @@ int runInfo(const std::string& meshFile, const ConsoleOutput& console, bool stri
                 console.println("  line " + std::to_string(w.first) + " " + d.keyword + ": " + what +
                                 (w.second.empty() ? "" : " — 인클루드 " + w.second),
                                 ConsoleOutput::Color::RED);
+            }
+        }
+        if (idDup.nodeMerged + idDup.elemMerged > 0)
+            console.println("  (리더는 겹친 번호를 뒤 정의 하나로 읽는다 — 위 Nodes · Elements 는 덮인 절점 " +
+                            std::to_string(idDup.nodeMerged) + "개 · 요소 " + std::to_string(idDup.elemMerged) +
+                            "개(족을 건넌 겹침 포함)를 뺀 수다)");
+        // 족을 건너 같은 요소 번호(셸 1 · 솔리드 1) — LS-DYNA 는 족마다 번호를 따로 두어 받으므로 단정하지 않는다(rc · --strict 와 무관).
+        // 이 도구의 리더는 한 표로 합쳐 뒤 정의만 남긴다 — 위 Elements 가 적고 op 이 앞 요소를 잃을 수 있다. ⚠ 항목 줄은 플랫폼이 미정의
+        // 참조로 집어 가지 않게 `  알림 line N …` 꼴이다(`kfile_inspect._RE_REF_ITEM` 은 `  line` 으로 시작하는 줄을 읽는다)
+        if (!idDup.crossFamily.empty()) {
+            console.warning("요소 번호가 족을 건너 겹친다 " + std::to_string(idDup.crossFamily.size()) +
+                            "건 — LS-DYNA 는 족마다 번호를 따로 두지만 이 도구의 리더는 한 표로 합친다(단정하지 않는다)");
+            for (const auto& d : idDup.crossFamily) {
+                const auto w = inclWhere(d.line);
+                console.println("  알림 line " + std::to_string(w.first) + " " + d.keyword + ": " + d.what +
+                                (w.second.empty() ? "" : " — 인클루드 " + w.second),
+                                ConsoleOutput::Color::YELLOW);
             }
         }
         // 의심(단정하지 않음) — rc·--strict 와 무관하다. ⚠ 항목 줄을 `  line N …` 꼴로 쓰면 플랫폼이 미정의
