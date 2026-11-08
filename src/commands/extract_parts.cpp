@@ -311,7 +311,7 @@ void definedNodesAmong(const std::string& path, const DeckIndex& idx, const std:
     }
 }
 
-// 보 족 Card 1 의 PID 후보 — 하나로 읽은 PID(`auxPrimaryFields` · 0 이면 PID 없음)가 먼저, 다른 읽기(설명서 칸 · 정수 폭 · 토큰)가
+// 보 족 Card 1 의 PID 후보 — 하나로 읽은 PID(`auxPrimaryFields` — 설명서 칸 · 0 이면 PID 없음)가 먼저, 다른 읽기(정수 폭)가
 // 다른 PID 를 말하면 그것이 덱의 파트(`*PART` 표)일 때만 더한다 — 정수꼴 질량값(「1000」)이나 빈 칸을 PID 로 세어 멀쩡한 줄을
 // 모호하다 하지 않는다. 후보가 둘 이상이고 그 하나라도 고른 PID 면 실을지 버릴지 정할 수 없다(2026-11-07 「둘 다 남기고 …」 — 질량 PID).
 // 패스 1(scanElements)과 패스 2(Writer)가 같이 쓴다 — 고르는 판정이 갈리면 싣는 줄과 센 절점이 어긋난다.
@@ -450,9 +450,10 @@ void scanElements(const std::string& path, const std::vector<int>& sel, const De
                     ++pk.auxCards;
                     if (aux.family == KooRemapper::AuxFamily::SEATBELT) ++pk.seatbeltCards;
                     if (aux.family == KooRemapper::AuxFamily::BEAM) pk.beamEids.push_back(fieldInt(auxCard1, 0));
-                    // 절점 — 하나로 읽은 칸은 싣고, 다른 읽기만 말하는 절점은 덱에 있으면 싣는다(둘 다 남긴다)
-                    for (int v : KooRemapper::auxNodesOf(aux, auxCard1)) pk.nodes.push_back(v);
-                    for (int v : KooRemapper::auxNodesAlt(aux, rd, auxCard1)) pk.altNodes.push_back(v);
+                    // 절점 — 든 읽기가 다 말하는 절점은 싣고, 한 읽기만 말하는 절점은 덱에 있으면 싣는다(둘 다 남긴다 — 갈리는 줄의
+                    // 설명서 칸은 덱에 없는 번호를 말할 수 있다 · 11-08)
+                    for (int v : KooRemapper::auxNodesSure(aux, rd)) pk.nodes.push_back(v);
+                    for (int v : KooRemapper::auxNodesUnsure(aux, rd)) pk.altNodes.push_back(v);
                     // 번호 매기기는 설명서 칸(LS-DYNA 가 읽는 칸)에 쓴다. 제자리에 못 쓰거나(콤마 · 절점 칸에 공백) 그 줄을 그렇게
                     // 썼을 수 있는 다른 읽기가 설명서 칸에 없는 절점을 말하면 적어 둔다 — 그 절점이 덱에 있으면 모호하다(runExtractParts 가
                     // 덱에서 잰다). 설명서 꼴 줄(N4 가 65-72열에 있다)은 정수 폭 읽기가 갈림을 말하지 않는다(`auxNodesDisputed`)
@@ -1256,8 +1257,8 @@ Verify verifyOutput(const std::string& path, const std::vector<int>& altExisting
                     const int pid = fieldInt(f, (size_t)vaux.partField);
                     if (pid > 0) elemPids.push_back(pid);
                 }
-                for (int x : KooRemapper::auxNodesOf(vaux, f)) elemNodes.push_back(x);
-                for (int x : KooRemapper::auxNodesAlt(vaux, rd, f))
+                for (int x : KooRemapper::auxNodesSure(vaux, rd)) elemNodes.push_back(x);
+                for (int x : KooRemapper::auxNodesUnsure(vaux, rd))
                     if (inSorted(altExisting, x)) elemNodes.push_back(x);
             } else {
                 for (int x : KooRemapper::auxOptNodesOf(vaux, vAuxLineIdx, line, fw)) elemNodes.push_back(x);   // 보 `_WARPAGE` 의 SN · `_ELBOW` 의 MN
