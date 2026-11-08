@@ -27,10 +27,11 @@
 #include "parser/DeckWriter.h"
 #include "parser/ElementCardLayout.h"
 #include "parser/IncludeClosure.h"   // 쓸 파일이 입력 덱을 덮는지(sameFile · clobberPair)
+#include "util/StagedWrite.h"       // 임시 파일 + 바꿔 넣기(apply_carryover_plan 과 같은 도우미)
+#include "util/Utf8.h"              // 보고 글자를 바른 UTF-8 로(apply_carryover_plan 보고와 같은 함수)
 #include "util/YamlComment.h"
 
 #include <algorithm>
-#include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -1363,7 +1364,11 @@ Verify verifyOutput(const std::string& path, const std::vector<int>& altExisting
 // 리포트
 // ─────────────────────────────────────────────────────────────────────────────
 
-std::string jsonStr(const std::string& s) {
+// 보고에 싣는 글은 늘 바른 UTF-8 이다 — 덱 줄 · 경로(CP949 로 쓴 `*INCLUDE` 이름 등)의 깨진 바이트는 U+FFFD 로 바꾸고(공용
+// `util::validUtf8` — 이월 적용 보고와 같은 규칙) 따옴표 · 역슬래시 · 제어 글자를 이스케이프한다. 예전엔 깨진 바이트를 그대로 실어
+// 보고가 엄격한 UTF-8 리더에서 읽히지 않았다(3차 검토 TJ_euckr)
+std::string jsonStr(const std::string& raw) {
+    const std::string s = KooRemapper::util::validUtf8(raw);
     std::string o = "\"";
     for (char c : s) {
         if (c == '"' || c == '\\') { o += '\\'; o += c; }
@@ -1402,7 +1407,7 @@ std::string kwMap(const std::map<std::string, long long>& m) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 쓸 파일 — 같은 폴더의 임시 파일에 쓰고 성공하면 제 이름으로 바꿔 넣는다(재검토 R3 · R5)
+// 쓸 파일 — 같은 폴더의 임시 파일에 쓰고 성공하면 제 이름으로 바꿔 넣는다(재검토 R3 · R5 — 공용 도우미 `staged_write::StagedFiles`)
 // ─────────────────────────────────────────────────────────────────────────────
 // 실패하면 이번 실행이 만든 임시 파일만 지운다 — 앞 실행이 같은 이름으로 남긴 파일 · 남의 파일 · 폴더는 건드리지 않는다
 // (예전엔 rc≠0 이면 산출 · 번호 지도 · 보고 이름을 지워 설정 YAML · 따라가지 않는 인클루드 · 빈 폴더 · 앞 잡의 산출까지 지웠다).
@@ -1437,63 +1442,6 @@ std::string utf8Cut(const std::string& s, size_t cap) {
     while (n > 0 && ((unsigned char)s[n] & 0xC0) == 0x80) --n;
     return s.substr(0, n) + "…";
 }
-
-class StagedFiles {
-public:
-    StagedFiles() = default;
-    StagedFiles(const StagedFiles&) = delete;
-    StagedFiles& operator=(const StagedFiles&) = delete;
-    ~StagedFiles() { discardAll(); }
-
-    // `dst` 의 임시 경로 — 같은 폴더(바꿔 넣기가 한 파일 시스템 안의 이름 바꾸기다) · 점으로 시작하는 이름
-    bool reserve(const std::string& dst, std::string& tmp) {
-        static unsigned serial = 0;
-        const size_t sep = dst.find_last_of("/\\");
-        const std::string dir = sep == std::string::npos ? std::string() : dst.substr(0, sep + 1);
-        const std::string base = sep == std::string::npos ? dst : dst.substr(sep + 1);
-        const std::string stamp = std::to_string((long long)std::chrono::steady_clock::now().time_since_epoch().count());
-        for (int k = 0; k < 100; ++k) {
-            const std::string t = dir + "." + base + ".kr_tmp_" + stamp + "_" + std::to_string(++serial);
-            if (fileExists(t)) continue;
-            tmp = t;
-            items_.push_back({dst, tmp});
-            return true;
-        }
-        return false;
-    }
-    // 글을 임시 파일에 쓴다(바이너리 — 개행을 그대로 · 덱이 아니다)
-    bool writeText(const std::string& dst, const std::string& text, std::string& tmp) {
-        if (!reserve(dst, tmp)) return false;
-        std::ofstream f(tmp, std::ios::binary);
-        if (!f.is_open()) return false;
-        f << text;
-        f.close();
-        return !f.fail();
-    }
-    // 임시 파일을 `dst` 로 바꿔 넣는다
-    bool commit(const std::string& dst) {
-        for (size_t i = 0; i < items_.size(); ++i) {
-            if (items_[i].first != dst) continue;
-            std::error_code ec;
-            std::filesystem::rename(items_[i].second, dst, ec);
-            if (ec) return false;
-            items_.erase(items_.begin() + (std::ptrdiff_t)i);
-            return true;
-        }
-        return false;
-    }
-    // 바꿔 넣지 않은 임시 파일을 지운다 — 이번 실행이 만든 것뿐이다
-    void discardAll() {
-        for (const auto& it : items_) {
-            std::error_code ec;
-            std::filesystem::remove(it.second, ec);
-        }
-        items_.clear();
-    }
-
-private:
-    std::vector<std::pair<std::string, std::string>> items_;   // 바꿔 넣을 경로 · 임시 경로
-};
 
 }  // namespace
 
@@ -1611,7 +1559,11 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
     // 덮으면 안 되는 파일 — 설정 YAML · 주 덱 · 닫힘의 인클루드(주 덱 폴더 · *INCLUDE_PATH 로 찾은 것) · 따라가지 않는 변형 인클루드의 파일
     std::vector<std::string> reads{yamlFile};
     if (!o.model.empty()) reads.push_back(o.model);
-    StagedFiles staged;
+    KooRemapper::staged_write::StagedFiles staged;
+    // 도우미가 남긴 말(읽기 전용 폴더의 제자리 쓰기 · 이름 바꾸기 대신 제자리로 쓴 것 — 원자적이 아니다)을 찍는다
+    auto stagedNotes = [&]() {
+        for (const auto& n : staged.takeNotes()) n.warn ? console.warning(n.text) : console.info(n.text);
+    };
     auto reportWritable = [&]() {
         if (o.reportPath.empty() || isDirectory(o.reportPath)) return false;
         for (const auto& r : reads)
@@ -1619,12 +1571,13 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
         return !KooRemapper::include_closure::sameFile(o.reportPath, o.output) &&
                !KooRemapper::include_closure::sameFile(o.reportPath, mapWrite);
     };
-    auto reportJson = [&](bool written) {
+    // 보고 — 실제로 바꿔 넣은 것만 댄다(산출 · 번호 지도). ok 는 셋 다 바꿔 넣었을 때만 참이다
+    auto reportJson = [&](bool ok, bool written, bool mapWritten) {
         std::ostringstream jf;
         jf << "{\n  \"op\": \"extract-parts\",\n";
         jf << "  \"model\": " << jsonStr(o.model) << ",\n";
         jf << "  \"output\": " << (written ? jsonStr(o.output) : std::string("null")) << ",\n";   // 쓰지 않은 파일은 대지 않는다
-        jf << "  \"ok\": " << (written ? "true" : "false") << ",\n";
+        jf << "  \"ok\": " << (ok ? "true" : "false") << ",\n";
         jf << "  \"output_written\": " << (written ? "true" : "false") << ",\n";
         jf << "  \"refusals\": [";
         for (size_t i = 0; i < refusals.size(); ++i) {
@@ -1669,7 +1622,7 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
                           "ID 가 보존되므로 ID 로 맞는다")
                << ",\n";
         jf << "  \"renumber\": {\"on\": " << (rm.on ? "true" : "false") << ", \"map\": "
-           << (written && rm.on ? jsonStr(mapWrite) : std::string("null")) << "},\n";
+           << (mapWritten ? jsonStr(mapWrite) : std::string("null")) << "},\n";
         jf << "  \"verify\": "
            << (verified ? "{\"undefined_nodes\": " + std::to_string(vf.undefNodes) +
                           ", \"undefined_parts\": " + std::to_string(vf.undefParts) +
@@ -1681,8 +1634,12 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
         return jf.str();
     };
     // 거절 — [ERROR] 머리 줄 · 목록(줄마다) · 목록을 담은 [ERROR] 요약 줄 하나 · 힌트. 그리고 실패 보고(쓸 수 있을 때 — 임시 파일로)
-    auto fail = [&](const std::string& kind, const std::string& message, const std::vector<std::string>& lines = {},
+    auto fail = [&](const std::string& kind, const std::string& rawMessage, const std::vector<std::string>& rawLines = {},
                     const std::string& hint = std::string()) {
+        // 말 · 목록의 임시 이름은 제 이름으로(콘솔 · 보고 어디에도 `.kr_tmp_` 가 새지 않게 — 3차 검토)
+        const std::string message = staged.unstage(rawMessage);
+        std::vector<std::string> lines;
+        for (const auto& l : rawLines) lines.push_back(staged.unstage(l));
         console.error(message);
         const size_t cap = 50;
         for (size_t i = 0; i < lines.size() && i < cap; ++i) console.println("  " + lines[i]);
@@ -1696,12 +1653,13 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
         refusals.push_back({kind, message, lines});
         staged.discardAll();
         if (reportWritable()) {
-            std::string tmp;
-            if (staged.writeText(o.reportPath, reportJson(false), tmp) && staged.commit(o.reportPath))
+            std::string why;
+            if (staged.writeText(o.reportPath, reportJson(false, false, false), why) && staged.commit(o.reportPath, why))
                 console.info("report: " + o.reportPath);
             else
-                console.error("Cannot write report: " + o.reportPath);
+                console.error("Cannot write report: " + o.reportPath + " (" + why + ")");
             staged.discardAll();
+            stagedNotes();
         }
         return 1;
     };
@@ -1742,6 +1700,12 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
         if (!mapWrite.empty() && fileExists(mapWrite) && !isRenumberMap(mapWrite))
             return fail("clobber", "번호 지도 자리 「" + mapWrite + "」 에 이 op 의 번호 지도가 아닌 파일이 있다 — 덮지 않는다", {},
                         "그 파일을 옮기거나 output 이름을 바꿔라");
+    }
+    // 앞 실행이 끝나지 못하고(SIGKILL · 시간 초과) 남긴 이 산출 · 번호 지도 · 보고의 임시 파일 — 주인 프로세스가 없는 것만 지운다
+    {
+        std::vector<KooRemapper::staged_write::Note> notes;
+        for (const std::string& p : {o.output, mapPathOf, o.reportPath}) KooRemapper::staged_write::sweepStale(p, &notes);
+        for (const auto& n : notes) n.warn ? console.warning(n.text) : console.info(n.text);
     }
 
     console.info("extract-parts: " + o.model);
@@ -1941,8 +1905,11 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
     }
 
     // ── 패스 2 — 쓰기(임시 파일 — 다 되기 전엔 산출 자리를 건드리지 않는다) ─────────────────────────────
-    std::string tmpOut;
-    if (!staged.reserve(o.output, tmpOut)) return fail("write", "Cannot open output: " + o.output);
+    //    링크면 따라간 파일 옆 · 읽기 전용 폴더의 쓸 수 있는 파일이면 시스템 임시 폴더에(바꿔 넣을 때 제자리로) · 장치 · FIFO(`/dev/null`)면
+    //    그 자리에 바로 쓴다(공용 staged_write — 배포 판이 제자리로 쓰던 꼴들)
+    std::string tmpOut, stageWhy;
+    if (!staged.reserve(o.output, "", tmpOut, stageWhy)) return fail("write", "Cannot open output: " + o.output + " (" + stageWhy + ")");
+    stagedNotes();
     {
         KooRemapper::DeckWriter w(tmpOut, KooRemapper::deck_newline::detect(o.model));
         if (!w.ok()) return fail("write", "Cannot open output: " + o.output);
@@ -2012,8 +1979,9 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
         for (size_t i = 0; i < pk.allElems.size(); ++i)
             mf << (i ? "," : "") << "[" << pk.allElems[i] << "," << (i + 1) << "]";
         mf << "]\n}\n";
-        std::string tmpMap;
-        if (!staged.writeText(mapWrite, mf.str(), tmpMap)) return fail("write", "Cannot write renumber map: " + mapWrite);
+        if (!staged.writeText(mapWrite, mf.str(), stageWhy))
+            return fail("write", "Cannot write renumber map: " + mapWrite + " (" + stageWhy + ")");
+        stagedNotes();
         if (pk.nodes.size() > 1000000)
             console.warning("번호 표가 " + std::to_string(pk.nodes.size()) +
                             " 항이다 — 파일이 크다. 되돌리려면 필요하므로 지우지 말라");
@@ -2042,21 +2010,53 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
         }
     }
 
-    // ── 바꿔 넣기 — 보고를 임시로 먼저 쓰고(못 쓰면 아무것도 바꾸지 않는다) 산출 · 번호 지도 · 보고 차례로 ─────────
+    // ── 바꿔 넣기 — 보고를 임시로 먼저 써 두고(못 쓰면 아무것도 바꾸지 않는다) 잠금을 쥐고 산출 · 번호 지도 · 보고 차례로 ─────────
+    //    ★보고는 늘 마지막이고 실제로 바꿔 넣은 것을 말한다 — 산출을 바꿔 넣은 뒤 번호 지도가 실패하면 보고를 그 상태(ok false ·
+    //    output_written true · 번호 지도 null)로 다시 쓴다. 예전엔 rc 1 · 새 산출 · 앞 번호 지도 · 앞 보고(앞 실행을 말한다)가 남았다.
+    //    잠금(.kr_tmp_lock_<이름 해시> · flock)은 같은 산출을 쓰는 동시 실행이 셋을 서로 섞지 못하게 한다(3차 검토 — 한 실행의 산출이
+    //    다른 실행의 번호 지도와 짝을 이뤘다). 바꿔 넣는 사이에 읽는 쪽이 반쯤 바뀐 묶음을 볼 수는 있다(파일마다만 원자적이다)
     const bool writeReport = reportWritable();
     if (writeReport) {
-        std::string tmpRep;
-        if (!staged.writeText(o.reportPath, reportJson(true), tmpRep)) return fail("write", "Cannot write report: " + o.reportPath);
+        if (!staged.writeText(o.reportPath, reportJson(true, true, rm.on), stageWhy))
+            return fail("write", "Cannot write report: " + o.reportPath + " (" + stageWhy + ")");
+        stagedNotes();
     }
-    if (!staged.commit(o.output)) return fail("write", "산출을 제 이름으로 바꿔 넣지 못했다: " + o.output);
+    KooRemapper::staged_write::CommitLock commitLock(o.output);
+    for (const auto& n : commitLock.takeNotes()) n.warn ? console.warning(n.text) : console.info(n.text);
+    if (!staged.commit(o.output, stageWhy))
+        return fail("commit", "산출을 제 이름으로 바꿔 넣지 못했다: " + o.output + " (" + stageWhy + ") — 같은 이름의 앞 파일은 그대로다");
+    stagedNotes();
     console.success("wrote: " + o.output + "  (*NODE " + std::to_string(st.nodeLines) +
                     " · 요소 카드 " + std::to_string(st.elemCards) +
                     " · *PART " + std::to_string(st.partsEmitted) + ")");
-    if (rm.on) {
-        if (!staged.commit(mapWrite)) {
-            console.error("번호 지도를 제 이름으로 바꿔 넣지 못했다: " + mapWrite + " — 산출은 썼는데 되돌릴 표가 없다");
-            return 1;
+    // 산출은 이번 것이다 — 뒤의 것이 실패하면 보고를 이 상태로 다시 쓴다(앞 실행을 말하는 보고를 남기지 않는다)
+    auto afterOutput = [&](const std::string& message) {
+        console.error(message);
+        refusals.push_back({"commit", message, {}});
+        staged.discardAll();
+        if (reportWritable()) {
+            std::string why;
+            if (staged.writeText(o.reportPath, reportJson(false, true, false), why) && staged.commit(o.reportPath, why))
+                console.info("report: " + o.reportPath + " (ok false — 산출은 바꿔 넣었다)");
+            else
+                console.error("Cannot write report: " + o.reportPath + " (" + why + ") — 그 자리의 보고(있으면)는 이번 실행의 것이 아니다");
+            staged.discardAll();
+            stagedNotes();
         }
+        return 1;
+    };
+    if (rm.on) {
+        if (!staged.commit(mapWrite, stageWhy)) {
+            // 앞 실행의 번호 지도가 남으면 새 산출과 짝이 틀린다 — 이 op 의 지도로 알아볼 때만 지운다
+            std::string gone;
+            if (fileExists(mapWrite) && isRenumberMap(mapWrite)) {
+                std::error_code ec;
+                if (std::filesystem::remove(mapWrite, ec)) gone = " · 앞 실행의 번호 지도는 지웠다(새 산출과 짝이 아니다)";
+            }
+            return afterOutput("번호 지도를 제 이름으로 바꿔 넣지 못했다: " + mapWrite + " (" + stageWhy + ") — 산출은 바꿔 넣었는데 "
+                               "되돌릴 표가 없다" + gone);
+        }
+        stagedNotes();
         console.info("  renumber map: " + mapWrite);
     } else if (fileExists(mapPathOf) && !KooRemapper::include_closure::sameFile(mapPathOf, o.reportPath)) {
         // 지난 실행이 남긴 번호 지도는 번호를 매기지 않은 이 산출과 짝이 아니다 — 이 op 의 번호 지도로 알아볼 때만 지운다
@@ -2069,10 +2069,13 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
         }
     }
     if (writeReport) {
-        if (!staged.commit(o.reportPath)) {
-            console.error("Cannot write report: " + o.reportPath + " — 산출은 썼다");
+        // 이름 바꾸기를 폴더 권한이 막으면 도우미가 그 파일에 제자리로 쓴다([WARN]). 그것도 못 하면 그 자리의 보고는 앞 실행의 것이다
+        if (!staged.commit(o.reportPath, stageWhy)) {
+            console.error("Cannot write report: " + o.reportPath + " (" + stageWhy + ") — 산출 · 번호 지도는 바꿔 넣었다 · 그 자리의 "
+                          "보고(있으면)는 이번 실행의 것이 아니다");
             return 1;
         }
+        stagedNotes();
         console.info("report: " + o.reportPath);
     }
     return 0;

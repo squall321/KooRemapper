@@ -191,7 +191,7 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
 
 ## 11-07 밤 결정 고침 — 정한 것
 - **출력 규칙(사용자 결정 ①)** — extract-parts(`a33af2f`)와 같은 꼴: 덱 · 보고를 output 폴더의 임시 파일(`.<이름>.kr_tmp_…`)에 쓰고 되읽기 대조 ·
-  품질 관문까지 지나면 덱 · 보고 차례로 바꿔 넣는다(`CarryStagedFiles` — extract-parts `StagedFiles` 의 사본 · 셋째 소비자가 오면 공용으로).
+  품질 관문까지 지나면 덱 · 보고 차례로 바꿔 넣는다(11-08 부터 공용 도우미 `staged_write::StagedFiles` — `include/util/StagedWrite.h`, 사본 둘을 모았다).
   거절 · 실패면 이번 실행의 임시 파일만 지운다 — 앞 파일 · 폴더 · 남의 파일은 안 건드린다. 보고에 `output_written` 을 더했다(파일 목록은 원래
   싣지 않는다 — 덱 지문 `sha256_out` 은 바꿔 넣은 때만). `stale_output_removed` 는 없앴다. 읽는 파일 대조를 공용 관문 `output_guard::findClash`
   로 옮기며 **설정 YAML** 이 들었다 — 통합 판(`a62d7d2`)에서 실측: `report: a.yaml` 이 설정을 보고로 덮었고(rc 0) · 설정(c.k)과 같은 output 은

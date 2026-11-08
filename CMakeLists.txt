@@ -144,6 +144,8 @@ set(UTIL_SOURCES
     src/util/Sha256.cpp
     src/util/StrictJson.cpp
     src/util/RelPath.cpp
+    src/util/StagedWrite.cpp
+    src/util/Utf8.cpp
 )
 
 # Source files - Validation

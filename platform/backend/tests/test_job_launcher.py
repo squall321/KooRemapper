@@ -9,6 +9,7 @@ HWAX Portal 운영이 prod 의 job 자식을 다른 노드에서 돌리려 한�
     ⚠ 환경에는 예외가 하나 생겼다(10-23 결정 4B) — API 환경에 `OMP_NUM_THREADS` 가 **없으면** 그 한 이름을
     「코어 ÷ 동시 슬롯」 으로 더한다. 운영자가 값을 줬으면 그때는 정말 그대로다(V1 시험이 그 꼴을 고정한다).
   · 실제 노드 기록(답신 ③ 안 A) · `.nfs*` 를 출력에서 뺀다(답신 ② 덧붙임) — 10-23 결정.
+    바이너리의 임시 파일 `*.kr_tmp_*`(죽은 잡이 남긴 반쯤 쓴 덱 · 잠금 파일)도 뺀다 — 11-08(3차 검토 TPLAT).
   · 실행기를 거쳐도 연산 꼴마다 결과가 같다(V2 그 자리 exec · V3 다른 그룹의 자식).
   · 실행기는 **TERM 먼저**다(V7 · K3). 바로 죽이면 원격이 아직 쓰는 파일을 출력으로 등록한다.
   · 재기동은 행을 닫기 **전에** `--reap` 한다(V8).
@@ -377,6 +378,34 @@ async def test_nfs_leftovers_are_not_registered_as_outputs(db, sess, monkeypatch
     assert "model_db.k" in outs, outs
     assert not [n for n in outs if n.rsplit("/", 1)[-1].startswith(".nfs")], outs
     assert (d / ".nfs000000000badc0de00000001").exists(), "판정 때 그 파일이 있었다(시험이 헛돌지 않았다)"
+
+
+# 바이너리가 바꿔 넣기 전에 쓰는 임시 파일(`*.kr_tmp_*` — extract-parts · apply_carryover_plan 의 공용 staged_write) — 취소(SIGTERM →
+# SIGKILL) · 시간 초과(SIGKILL)된 잡이 남길 수 있다. 산출로 올리면 반쯤 쓴 덱이 세션 파일 목록에 뜬다(3차 검토 TPLAT, 11-08).
+_KR_TMP_LEFTOVERS = (".kr_tmp_0a1b2c3d_4242_1f_1_9e8d7c6b.k",      # 지금 꼴 — 덱 임시 파일
+                     ".kr_tmp_0a1b2c3d_4242_1f_2_12345678",        # 지금 꼴 — 보고 · 번호 지도
+                     ".kr_tmp_lock_9e8d7c6b",                       # 바꿔 넣는 동안의 잠금 파일
+                     ".out.k.kr_tmp_2419321781716105_1",            # 옛 꼴(a33af2f · 0895025)
+                     "sub/.kr_tmp_0a1b2c3d_4242_1f_3_9e8d7c6b.k")   # 하위 폴더 산출의 것
+
+
+@_aio
+async def test_kr_tmp_leftovers_are_not_registered_as_outputs(db, sess, monkeypatch, tmp_path):
+    u, s = sess
+    d = storage.session_abs_dir(u.id, s.id)
+    (d / "model.k").write_text(_DECK, encoding="latin-1")
+    fake = tmp_path / "KooRemapper"   # database 만 산출을 쓴다 — 등록 때 부르는 info · modelmeta 는 할 일이 없다
+    fake.write_text("#!/bin/sh\n[ \"$1\" = database ] || exit 0\ncp model.k model_db.k\nmkdir -p sub\n" +
+                    "".join("printf x > '%s'\n" % n for n in _KR_TMP_LEFTOVERS))
+    fake.chmod(0o755)
+    monkeypatch.setattr(settings, "kooremapper_bin", fake)
+    monkeypatch.setattr(settings, "job_launcher", "")
+    job = await _run_job(db, u, s, "database", _DB_ARGS)
+    assert job.status == "succeeded", job.error_summary
+    outs = await _outputs(db, job)
+    assert "model_db.k" in outs, outs
+    assert not [n for n in outs if ".kr_tmp_" in n], outs
+    assert all((d / n).exists() for n in _KR_TMP_LEFTOVERS), "판정 때 그 파일들이 있었다(시험이 헛돌지 않았다)"
 
 
 # ── V2 · V3 · 연산 꼴마다 같은 결과 ────────────────────────────────────────────
