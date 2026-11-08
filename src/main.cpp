@@ -2020,8 +2020,17 @@ static int runMain(int argc, char* argv[]) {
             console.info("Reference (flat): " + refFileForPrestress);
             console.info("Deformed (mapped): " + outputPath);
             console.info("Output: " + pre_output);
+            // dynain 머리줄의 기준 이름 — 임시 사본(끝나면 지운다) 대신 원래 평판 이름과 그 사본이 무엇인지(마지막 검토 — 지운
+            // 임시 이름 `…kr_tmp_…` 을 댔다 · 표지 앞 판도 `…__preproc_flat.k` 를 댔다)
+            std::string refLabel = flatPath;
+            if (refFileForPrestress != flatPath) {
+                std::string how;
+                if (!scaledFlatPath.empty()) how = "pre-processed: bbox_align source / flip_input";
+                if (needFlipRef) how += std::string(how.empty() ? "" : ", ") + "mirrored like the output: flip_x/y/z";
+                refLabel += " (" + how + " - a temporary copy, removed after the run)";
+            }
             int prc = runPrestress(refFileForPrestress, outputPath, pre_output,
-                                    pre_E, pre_nu, strainType, pre_csv, console, &mapReads);
+                                    pre_E, pre_nu, strainType, pre_csv, console, &mapReads, refLabel);
             return prc;   // 임시 파일은 runTemps 가 지운다(성공 · 실패 모두)
         }
         return 0;   // 고리가 없으면 앞처리 평판은 더 쓸 데가 없다 — runTemps 가 지운다

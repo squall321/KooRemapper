@@ -60,7 +60,8 @@ op("map", "메시 매핑", "평면 상세 메시를 굽힌 구조화 HEX8 참조
           "  prestress 의 기준이다 — 2026-11-07 전엔 이 파일을 쓰지 않아 크기를 맞추기 전 평판을 기준으로 썼다. 그 파일을 못 쓰면(디스크 참 ·",
           "  크기 상한) [WARN] 을 내고 고리는 원래 평판을 쓴다 — 산출은 멀쩡해 종료 코드는 그대로다(2026-11-08)",
           "고리의 기준은 뒤집어도(flip_input_* · flip_x/y/z) 평판의 *PART · *SECTION · *MAT 카드를 싣는다 — E · nu 없이도 K-파일",
-          "  재료로 응력(예전엔 뒤집은 기준이 메시만 실어 변형률만 냈다 · 2026-11-07)"])
+          "  재료로 응력(예전엔 뒤집은 기준이 메시만 실어 변형률만 냈다 · 2026-11-07)",
+          "고리 dynain 의 머리줄 $ Reference mesh: 는 임시 사본 대신 원래 평판 이름과 무엇을 한 사본인지 댄다(2026-11-08 — 지운 임시 이름을 댔다)"])
 op("shellmap", "메시 매핑", "굽힌 QUAD4 셸을 참조로 평면 상세 메시를 매핑", "셸매핑 shell 곡면 전개",
    "KooRemapper shellmap [--thickness <t>] <bent_shell> <flat_detail> <output>",
    cmds=["KooRemapper generate --dim-i 20 --dim-j 5 arc demo",

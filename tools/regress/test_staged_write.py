@@ -43,7 +43,8 @@
     잡이 남기면 산출로 올라갔다(여섯째 검토 — runner 의 걸러내기). 이름에 표지를 붙였다 — strace 로 실행이 만들었다 지운 파일을 모아
     모두 `.kr_tmp_` 를 지녔는지 본다(strace 가 없으면 건너뛴다). T-K — 일부러 남기는 파일(meshfix 의 gmsh 실패 때 살펴보라고 남기는
     파일)은 표지가 없어야 플랫폼이 올린다: 보이는 이름 `<줄기>__mf.*` 로 남기고 See log · 남긴 .geo 도 그 이름(마지막 검토 — 표지를
-    붙인 뒤 그 파일이 걸러졌다). 늘 실패하는 gmsh 대역으로 돌리니 진짜 gmsh 가 없어도 돈다.
+    붙인 뒤 그 파일이 걸러졌다). 늘 실패하는 gmsh 대역으로 돌리니 진짜 gmsh 가 없어도 돈다. T-R — map 고리의 dynain 머리줄
+    `$ Reference mesh:` 는 지운 임시 사본 이름 대신 원래 평판 이름(무엇을 한 사본인지)을 댄다.
   W 쓰기 오류 — 쓰기 · 닫기 결과를 보지 않아 디스크가 차거나 파일 크기 상한(RLIMIT_FSIZE · SIGXFSZ 무시 — ENOSPC · EDQUOT 의
     대역)에 걸려 잘린 덱을 rc 0 · ok 로 바꿔 넣었다(여섯째 검토 S2 — extract-parts 는 `*NODE` 가운데서 끊긴 덱 · 이월 적용은 마지막
     새 섹션을 잃은 덱). 이제 바꿔 넣지 않고 rc 1 · 보고가 그 오류를 말한다. 바로 쓰는 op(DeckWriter · writeOutput)도 rc 1.
@@ -904,6 +905,22 @@ def sec_f(binary):
 
 
 # ── T 임시 파일 이름 표지 ────────────────────────────────────────────────────
+def map_dir(binary, name):
+    """map 입력 — generate arc(demo_bent.k · demo_flat_fine.k)와 x 를 0.5% 늘린 평판 flat_s.k(크기를 맞추는 갈래가 돈다 · 재료 카드는 그대로)."""
+    d = os.path.join(TMP, name)
+    os.makedirs(d)
+    run(binary, d, "generate", "--dim-i", "10", "--dim-j", "4", "arc", "demo")
+    sec, out = "", []
+    for ln in open(os.path.join(d, "demo_flat_fine.k"), encoding="utf-8").read().splitlines():
+        if ln.startswith("*"):
+            sec = ln.strip().upper()
+        if sec == "*NODE" and not ln.startswith("*") and not ln.startswith("$") and len(ln) >= 56:
+            ln = ln[:8] + "%16.9e" % (float(ln[8:24]) * 1.005) + ln[24:]
+        out.append(ln)
+    write(os.path.join(d, "flat_s.k"), "\n".join(out) + "\n")
+    return d
+
+
 def traced(binary, d, args, env=None):
     """strace 로 돌려 이 실행이 d 아래에 만들었다가 끝에 없는 파일(임시 파일)을 모은다 — (rc, 말, 임시 파일 이름들)."""
     import re
@@ -955,24 +972,28 @@ def sec_t(binary):
     check("T-K2 남길 이름(mf_out__mf.log)이 설정 YAML — gmsh 전에 rc 1 「같은 파일」 · 설정 바이트 그대로",
           p.returncode == 1 and "같은 파일" in said and "Running Gmsh" not in said and
           open(os.path.join(d, "mf_out__mf.log"), "rb").read() == before, (p.returncode, said[-300:]))
+    # T-R dynain 머리줄의 기준 이름 — 고리가 임시 사본(앞처리 평판 · 뒤집은 기준 — 끝나면 지운다)을 읽어도 원래 평판 이름과 그 사본이
+    # 무엇인지 댄다(마지막 검토 — 지운 임시 이름 …kr_tmp_… 을 댔다)
+    d = map_dir(binary, "T_ref")
+    for tag, extra, flat_name in (("bbox_align: source", "bbox_align: source\nbbox_align_max_drift: 50\n", "flat_s.k"),
+                                  ("flip_x", "flip_x: true\n", "demo_flat_fine.k")):
+        out_name = "r_" + tag.split(":")[0]
+        write(os.path.join(d, out_name + ".yaml"), "bent: demo_bent.k\nflat: %s\noutput: %s.k\n%sprestress:\n  enabled: true\n"
+                                                   "  output: %s.dynain\n  E: 210000.0\n  nu: 0.3\n" % (flat_name, out_name, extra, out_name))
+        rc, said = run(binary, d, "map", out_name + ".yaml")
+        dyn = os.path.join(d, out_name + ".dynain")
+        ref = [ln.rstrip() for ln in open(dyn, encoding="utf-8", errors="replace")] if os.path.exists(dyn) else []
+        ref = [ln for ln in ref if ln.startswith("$ Reference mesh:")]
+        check("T-R map %s 고리 — dynain 의 기준 이름이 원래 평판 %s(임시 사본이라고 말한다) · .kr_tmp_ 없음" % (tag, flat_name),
+              rc == 0 and len(ref) == 1 and ref[0].startswith("$ Reference mesh: " + flat_name + " (") and ".kr_tmp_" not in ref[0],
+              (rc, ref, said[-200:]))
     if not shutil.which("strace"):
         check("T — strace 가 없다(건너뜀)", True)
         return
     gmsh = os.environ.get("KOOREMAPPER_GMSH") or os.environ.get("KOOREMAPPER_TEST_GMSH")
     cases = []
     # map — bbox_align: source(앞처리 평판) · flip_x(뒤집은 기준)이 prestress 고리와
-    d = os.path.join(TMP, "T_map")
-    os.makedirs(d)
-    run(binary, d, "generate", "--dim-i", "10", "--dim-j", "4", "arc", "demo")
-    flat = open(os.path.join(d, "demo_flat_fine.k"), encoding="utf-8").read().splitlines()
-    sec, out = "", []
-    for ln in flat:   # x 를 0.5% 늘린 평판(크기를 맞추는 갈래가 돈다) — 재료 카드는 그대로
-        if ln.startswith("*"):
-            sec = ln.strip().upper()
-        if sec == "*NODE" and not ln.startswith("*") and not ln.startswith("$") and len(ln) >= 56:
-            ln = ln[:8] + "%16.9e" % (float(ln[8:24]) * 1.005) + ln[24:]
-        out.append(ln)
-    write(os.path.join(d, "flat_s.k"), "\n".join(out) + "\n")
+    d = map_dir(binary, "T_map")
     write(os.path.join(d, "src.yaml"), "bent: demo_bent.k\nflat: flat_s.k\noutput: m1.k\nbbox_align: source\nbbox_align_max_drift: 50\n"
                                        "prestress:\n  enabled: true\n  output: m1.dynain\n  E: 210000.0\n  nu: 0.3\n")
     write(os.path.join(d, "flip.yaml"), "bent: demo_bent.k\nflat: demo_flat_fine.k\noutput: m2.k\nflip_x: true\n"
@@ -1082,17 +1103,7 @@ def sec_w(binary):
     # W-6 op 이 견디는 쓰기 실패는 rc 를 바꾸지 않는다 — map 은 앞처리 평판 임시 파일(<output>.kr_tmp_preproc_flat.k)을 못 쓰면 [WARN]
     # 으로 넘기고(고리 prestress 가 원래 평판을 쓴다) 산출은 멀쩡하다. 그 자리를 /dev/full 링크로(마지막 검토 — 공용 쓰기 실패 기록이
     # main 에서 rc 1 · 「그 파일은 잘렸을 수 있다」 로 바꿨다)
-    d = os.path.join(TMP, "W6_map")
-    os.makedirs(d)
-    run(binary, d, "generate", "--dim-i", "10", "--dim-j", "4", "arc", "demo")
-    sec, out = "", []
-    for ln in open(os.path.join(d, "demo_flat_fine.k"), encoding="utf-8").read().splitlines():   # x 를 0.5% 늘린 평판
-        if ln.startswith("*"):
-            sec = ln.strip().upper()
-        if sec == "*NODE" and not ln.startswith("*") and not ln.startswith("$") and len(ln) >= 56:
-            ln = ln[:8] + "%16.9e" % (float(ln[8:24]) * 1.005) + ln[24:]
-        out.append(ln)
-    write(os.path.join(d, "flat_s.k"), "\n".join(out) + "\n")
+    d = map_dir(binary, "W6_map")
     write(os.path.join(d, "m.yaml"), "bent: demo_bent.k\nflat: flat_s.k\noutput: m.k\nbbox_align: source\nbbox_align_max_drift: 50\n"
                                      "prestress:\n  enabled: true\n  output: m.dynain\n  E: 210000.0\n  nu: 0.3\n")
     if os.path.exists("/dev/full"):

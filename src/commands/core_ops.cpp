@@ -1117,7 +1117,8 @@ int runPrestress(const std::string& refFile, const std::string& defFile,
                  StrainType strainType,
                  bool outputCSV,
                  const ConsoleOutput& console,
-                 const std::vector<KooRemapper::output_guard::Input>* chainReads) {
+                 const std::vector<KooRemapper::output_guard::Input>* chainReads,
+                 const std::string& refLabel) {
     Timer timer;
 
     // Load reference mesh
@@ -1322,7 +1323,7 @@ int runPrestress(const std::string& refFile, const std::string& defFile,
         // 이름 규칙은 `prestressOutputs` 하나다(쓰기 관문이 같은 이름으로 견줬다)
         const std::string& dynainFile = names.dynain;
         console.info("Writing dynain file: " + dynainFile);
-        if (!writer.writeFile(dynainFile, results, strainType, refFile, defFile)) {
+        if (!writer.writeFile(dynainFile, results, strainType, refLabel.empty() ? refFile : refLabel, defFile)) {
             console.error("Failed to write dynain: " + writer.getErrorMessage());
             return 1;
         }

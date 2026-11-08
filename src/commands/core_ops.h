@@ -76,7 +76,8 @@ int runPrestress(const std::string& refFile, const std::string& defFile,
                  KooRemapper::StrainType strainType,
                  bool outputCSV,
                  const KooRemapper::ConsoleOutput& console,
-                 const std::vector<KooRemapper::output_guard::Input>* chainReads = nullptr);
+                 const std::vector<KooRemapper::output_guard::Input>* chainReads = nullptr,
+                 const std::string& refLabel = "");   // dynain 머리줄의 기준 이름(비면 refFile — 고리가 임시 사본을 읽을 때 원래 이름)
 
 // `strict=true` 면 **LS-DYNA 가 키워드 단계에서 죽을 것**을 찾으면 rc=1 을 낸다.
 // ⚠ 기본값 false 를 바꾸면 안 된다 — `info` 의 rc=0 은 계약이다(플랫폼의 업로드 검사와

@@ -603,7 +603,9 @@ $$N_i = \frac{1}{8}(1 + \xi_i\xi)(1 + \eta_i\eta)(1 + \zeta_i\zeta)$$
   (2026-11-07 · 사용자 결정 「뒤집어도 재질을 싣는다」 — 예전엔 뒤집은 기준이 메시만 실어 고리가 조용히 변형률만 냈습니다).
 - 이 실행이 만든 임시 파일 — 앞처리 평판(`<output>.kr_tmp_preproc_flat.k` · `flip_input_*` 나 `bbox_align: source` 가 평판을 바꿀 때)과
   뒤집은 기준(`<output>.kr_tmp_flipped_ref.k` · prestress 고리의 `flip_x/y/z`) — 은 성공이든 실패든 끝에 지웁니다(2026-11-07 전에는 앞처리
-  평판을 쓴 뒤 산출 쓰기가 실패하거나 고리가 map 뒤에 멈추면 남았습니다).
+  평판을 쓴 뒤 산출 쓰기가 실패하거나 고리가 map 뒤에 멈추면 남았습니다). 그래서 고리가 쓴 dynain 의 머리줄(`$ Reference mesh:`)은
+  그 임시 사본 대신 원래 평판 이름과 무엇을 한 사본인지를 댑니다(예 `flat.k (pre-processed: bbox_align source / flip_input - a
+  temporary copy, removed after the run)` · 마지막 검토 — 지운 임시 이름을 댔다 · 회귀 `test_staged_write.py` T-R).
 
 ---
 
