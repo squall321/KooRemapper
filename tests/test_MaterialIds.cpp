@@ -126,3 +126,11 @@ TEST(MaterialIds_번호_칸은_정수_칸이_받는_꼴로_읽는다) {
     const std::string c = matids::copyDefinition(L, 3, 12);
     ASSERT_TRUE(c.find("        12   7.85E-9    210000       0.3\n") != std::string::npos);   // 그 칸을 칸 폭 그대로 바꾼다
 }
+
+// 줄 수를 모르는 꼴이라도 `_TITLE` 블록의 묶음 첫 줄은 제목이다 — 넉넉한 셈이 세지 않는다(적대적 검토 11-08 S10)
+TEST(MaterialIds_모르는_꼴의_제목_줄은_세지_않는다) {
+    auto L = matDeckLines("*KEYWORD\n*MAT_ORTHOTROPIC_ELASTIC_TITLE\n2024\n         3   7.85E-9    1000.0\n     500.0\n*END\n");
+    ASSERT_TRUE(matids::defined(L).count(3) == 1);
+    ASSERT_TRUE(matids::inUse(L).count(2024) == 0);
+    ASSERT_EQ(matids::maxId(L), 3);
+}

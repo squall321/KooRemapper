@@ -148,7 +148,8 @@ def read_deck(path):
         elif kw.startswith("*SECTION_"):
             t = 1 if "_TITLE" in kw else 0
             if len(data) > t:
-                secs[int(data[t][0:10])] = (kw, int(data[t][10:20]))
+                f2 = data[t][10:20].strip()   # ELFORM — 둘째 칸이 실수인 꼴(*SECTION_SEATBELT 의 AREA)은 None
+                secs[int(data[t][0:10])] = (kw, int(f2) if f2.lstrip("+-").isdigit() else None)
         elif kw.startswith("*MAT_"):
             t = 1 if "_TITLE" in kw else 0
             if len(data) > t:
@@ -1063,7 +1064,10 @@ def part_s(binary):
             # 썼다(rc 0 · 같은 SECID 둘 — 적대적 검토 11-08 S8)
             ("s3f", mass8, mass8 + "stacked\n        +9         1\n", "쌓인 묶음의 SECID +9(부호)", False),
             ("s3g", mass8, mass8 + "stacked\n0000000009         1\n", "쌓인 묶음의 SECID 0000000009(앞의 0 · 칸 폭)", False),
-            ("s3h", mass8, mass8 + "stacked\n       9.0         1\n", "쌓인 묶음의 SECID 9.0(실수 꼴 정수)", False)):
+            ("s3h", mass8, mass8 + "stacked\n       9.0         1\n", "쌓인 묶음의 SECID 9.0(실수 꼴 정수)", False),
+            # 행 수를 모르는 꼴의 `_TITLE` 블록도 첫 줄은 제목이다 — 예전엔 그 2024 를 SECID 로 세어 정상 계획을 secid_order 로 거절했다(11-08 S10)
+            ("s3i", mass8, "*SECTION_SEATBELT_TITLE\n2024\n         8      10.0       1.0\n", "모르는 꼴의 숫자 제목(*SECTION_SEATBELT_TITLE 2024)",
+             True)):
         d = stage(tag)
         deck = os.path.join(d, "deck.k")
         body = read(deck)

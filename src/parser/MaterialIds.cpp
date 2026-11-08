@@ -137,7 +137,8 @@ Scan scan(const std::vector<std::string>& lines) {
         }
         if (rest != std::string::npos) {
             blk.remainder = true;
-            for (size_t r = rest; r < rows.size(); ++r) {
+            // 묶음의 제목 줄은 세지 않는다 — `rest` 는 묶음의 첫 줄이고 `_TITLE` 이면 꼴을 몰라도 제목이다(섹션 묶음 셈과 같다 · 11-08 S10)
+            for (size_t r = rest + t; r < rows.size(); ++r) {
                 int v = 0;
                 if (deckscan::digitsField(lines[rows[r]], w, v)) out.loose.insert(v);
             }

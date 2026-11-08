@@ -191,8 +191,11 @@ CurSectionSets cur_scanSectionSets(const std::vector<std::string>& lines) {
             if (!cur_setIdField(lines[rows[a + t]], w, sid)) { rest = a; known = false; break; }   // 묶음의 SECID 칸이 수가 아니다
             out.defs[sid].emplace_back(rows[a + t], kw);
         }
+        // 넉넉한 셈은 못 가른 묶음의 **제목 줄 다음**부터 — `rest` 는 늘 묶음의 첫 줄이고 `_TITLE` 이면 그 줄은 꼴을 몰라도 제목이다(LS-DYNA ·
+        // StepForge 리더). 예전엔 그 줄부터 세어 `*SECTION_SEATBELT_TITLE` 의 제목 `2024` 가 가장 큰 SECID 가 되었다 — 이월 적용이 정상 계획을
+        // secid_order 로 거절하고 커서가 2025 로 뛰었다(적대적 검토 11-08 S10). 그 뒤에 쌓인 묶음의 제목은 자리를 몰라 그대로 센다(남은 틈 — 넉넉한 쪽)
         if (rest != std::string::npos && !known)
-            for (size_t r = rest; r < rows.size(); ++r) {
+            for (size_t r = rest + t; r < rows.size(); ++r) {
                 int v = 0;
                 if (cur_digitsField(lines[rows[r]], w, v)) out.loose.insert(v);
             }
