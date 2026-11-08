@@ -464,14 +464,26 @@ bool usedFieldsClean(const AuxElementCard& a, const std::vector<std::string>& f)
     return true;
 }
 
+// 설명서 카드 폭 — Card 1 칸 폭의 합(넓은 칸은 실수 폭 — 안전띠 72 · 질량 40열, i10 86 · 46열). LS-DYNA 는 그 뒤 글자를 읽지 않는다
+size_t manualCardWidth(const AuxElementCard& a, int fw) {
+    size_t w = 0;
+    for (int k = 0; k < a.card1Fields; ++k) {
+        const bool wide = std::find(a.wideFields.begin(), a.wideFields.end(), k) != a.wideFields.end();
+        w += static_cast<size_t>(wide ? realFieldWidth(fw) : fw);
+    }
+    return w;
+}
+
 // 다른 읽기(정수 폭) 가 「그 줄을 그렇게 썼을 수 있는」 읽기인가 — 헤더의 규칙 (a)-(d). `manualDoubtful` 이면(설명서 칸 하나에 빈칸이
-// 낀다 — 설명서 꼴로 쓴 줄이 아닐 수 있다) (c) 는 보지 않는다(정수 폭으로 쓴 N3 만 있는 줄도 그 N3 을 지킨다)
-bool altReadingValid(const AuxElementCard& a, const std::vector<std::string>& f, size_t contentLen, int fw, bool manualDoubtful) {
+// 낀다 — 설명서 꼴로 쓴 줄이 아닐 수 있다) (c) 는 보지 않는다(정수 폭으로 쓴 N3 만 있는 줄도 그 N3 을 지킨다). `cardEnd` 는 설명서 카드
+// 폭(`manualWidth`) 안 글자의 끝 — 그 뒤 꼬리 글은 설명서 꼴의 증거가 아니다(LS-DYNA 가 읽지 않는다 · 2026-11-08 「지키는 쪽은 잃지 않는다」)
+bool altReadingValid(const AuxElementCard& a, const std::vector<std::string>& f, size_t cardEnd, size_t manualWidth, int fw,
+                     bool manualDoubtful) {
     if (a.card1Fields <= 0 || fw <= 0) return false;
     const size_t n = static_cast<size_t>(a.card1Fields);
-    if (contentLen > n * static_cast<size_t>(fw)) return false;                         // (b)
+    if (cardEnd > n * static_cast<size_t>(fw)) return false;                            // (b)
     for (size_t k = n; k < f.size(); ++k)
-        if (!f[k].empty()) return false;                                                // 카드 칸 밖에 글자
+        if (k * static_cast<size_t>(fw) < manualWidth && !f[k].empty()) return false;   // 설명서 카드 안 · 정수 폭 카드 밖에 글자
     for (size_t k = 0; k < n && k < f.size(); ++k) {                                    // (a)
         const std::string& t = f[k];
         if (t.empty()) continue;
@@ -540,7 +552,12 @@ AuxCardReadings auxCardReadings(const AuxElementCard& a, const std::string& line
     const size_t n = static_cast<size_t>(std::max(a.card1Fields, 0));
     bool doubtful = false;
     for (size_t k = 0; k < n && k < r.manual.f.size(); ++k) doubtful = doubtful || hasInnerBlank(r.manual.f[k]);
-    r.plainAlt = altReadingValid(a, r.plain.f, r.contentLen, fw, doubtful);
+    // (b) 는 설명서 카드 폭 안의 글자만 본다 — 정수 폭으로 쓴 줄 뒤 꼬리 글(「        belt left 1」 · 「mass on lid」)이 그 읽기를 버려
+    // safe 가 진짜 N3 을 지우고(rc 0) 고른 PID 의 질량을 버렸다(2026-11-08 — 규칙 (e) 를 뺀 같은 원칙)
+    const size_t mw = manualCardWidth(a, fw);
+    size_t cardEnd = std::min(body.size(), mw);
+    while (cardEnd > 0 && (body[cardEnd - 1] == ' ' || body[cardEnd - 1] == '\t')) --cardEnd;
+    r.plainAlt = altReadingValid(a, r.plain.f, cardEnd, mw, fw, doubtful);
     return r;
 }
 

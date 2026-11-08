@@ -706,6 +706,12 @@ TEST(auxCardReadings_칸마다_맞춤이_달라도_정수_폭_읽기는_든다) 
     ASSERT_TRUE(r.plainAlt);
     ASSERT_TRUE(auxNodesUnion(a, r) == std::vector<int>({101, 102, 1031, 1041}));
     ASSERT_TRUE(auxNodesDisputed(a, r) == std::vector<int>({1031}));
+    // 정수 폭으로 쓴 줄 뒤 꼬리 글(설명서 카드 폭 72열 뒤) — LS-DYNA 가 읽지 않는 글자라 정수 폭 읽기를 버리지 않는다(규칙 (b))
+    std::snprintf(b, sizeof b, "%8d%8d%8d%8d%8d%8s%8d%8d%s", 13, 9, 101, 102, 0, "0.0", 103, 104, "        belt left 1");
+    r = auxCardReadings(a, b, 8);
+    ASSERT_TRUE(r.plainAlt);
+    ASSERT_TRUE(auxNodesUnion(a, r) == std::vector<int>({101, 102, 103, 104}));
+    ASSERT_TRUE(auxNodesDisputed(a, r) == std::vector<int>({103}));
     // 질량 — 정수 폭 줄의 PID 는 맞춤이 칸마다 달라도 후보로 든다(EID 왼쪽 맞춤 질량을 버렸다 — 이제 PID 0 / 7 로 갈린다)
     const auto m = auxElementCard("*ELEMENT_MASS");
     r = auxCardReadings(m, "   95001     105     1.0       7", 8);
@@ -714,6 +720,11 @@ TEST(auxCardReadings_칸마다_맞춤이_달라도_정수_폭_읽기는_든다) 
     r = auxCardReadings(m, "95001        105     1.0       7", 8);
     ASSERT_TRUE(r.plainAlt);
     ASSERT_TRUE(auxPidsOf(m, r) == std::vector<int>({7}));
+    r = auxCardReadings(m, "   95001     105     1.0       7        mass on lid", 8);   // 설명서 카드 폭(40열) 뒤 꼬리 글
+    ASSERT_TRUE(r.plainAlt);
+    ASSERT_TRUE(auxPidsOf(m, r) == std::vector<int>({7}));
+    r = auxCardReadings(m, "   95001     105     1.0       7      12", 8);               // 33-40열(설명서 PID 칸)에 글자 — 설명서 꼴
+    ASSERT_FALSE(r.plainAlt);
 }
 
 TEST(auxManualNodesPlaceable_0_인_칸은_주석과_겹쳐도_된다) {
