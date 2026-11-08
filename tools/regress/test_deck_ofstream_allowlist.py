@@ -47,8 +47,8 @@ DECLARED = {
     "src/util/Validator.cpp": (1, "덱 아님 — 검증 로그(append)"),
     "src/util/Logger.cpp": (1, "덱 아님 — 로그 파일"),
     "include/util/Logger.h": (1, "덱 아님 — 로그 스트림 멤버 선언"),
-    "src/commands/meshfix.cpp": (7, "덱 아님 — gmsh 왕복용 ASCII STL 4곳 · .geo 2곳 · .bat 1곳. "
-                                    "덱 산출물은 DeckWriter 로 쓴다(2e47878)"),
+    "src/commands/meshfix.cpp": (8, "덱 아님 — gmsh 왕복용 ASCII STL 4곳 · .geo 3곳(gmsh 실패 때 남긴 .geo 의 경로 고쳐 쓰기 1 · 11-08) · "
+                                    ".bat 1곳. 덱 산출물은 DeckWriter 로 쓴다(2e47878)"),
     # ── 덱(신규) ────────────────────────────────────────────────────────────
     "src/commands/core_ops.cpp": (1, "덱(신규) — `generate box` 가 덱을 새로 만든다. 입력 덱이 없다"),
     "src/commands/battery.cpp": (1, "덱(신규) — 배터리 덱을 새로 만든다(writeBatteryKFileText 하나 — 단독 battery 와 assemble 의 battery "

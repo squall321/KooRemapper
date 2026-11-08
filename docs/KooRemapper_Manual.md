@@ -521,6 +521,10 @@ S2 · 회귀 `tools/regress/test_staged_write.py` W).
 (`<줄기>.kr_tmp_pol<회차>_<덩어리>.*`). 플랫폼은 그 표지가 든 파일을 잡 산출로 올리지 않습니다 — 취소 · 시간 초과(SIGKILL)된 잡이
 남겨도 세션 파일 목록에 뜨지 않습니다. 예전 이름(`.__preproc_flat.k` · `.__flipped_ref.k` · `.kr_flat_` · `__mf.*` · `__pol…`)은 표지가
 없어 산출로 올라갔습니다(여섯째 검토 · 회귀 `test_staged_write.py` T · `test_job_launcher.py`).
+**일부러 남기는 파일은 표지가 없습니다** — `meshfix` 는 gmsh 나 그 산출 읽기가 실패하면 살펴보라고 gmsh 왕복 파일을 남기는데, 그때
+보이는 이름 `<줄기>__mf.{stl,geo,msh,log}`(있는 것만)로 바꿔 남겨 플랫폼이 산출로 올리고, `[ERROR]` 의 See log · 남긴 목록 · 남긴
+`.geo` 의 Merge · Save 도 그 이름을 댑니다(마지막 검토 — 표지를 붙인 뒤 그 파일이 걸러져 세션에 안 올라갔고 말은 표지 이름을 댔다 ·
+회귀 T-K · `test_job_launcher.py`). 남길 이름도 쓸 파일이라 그 이름의 입력이 있으면 gmsh 전에 거절합니다.
 
 ---
 
@@ -3887,7 +3891,8 @@ KooRemapper.exe meshfix <config.yaml>
 > **그 YAML 파일이 있는 폴더** 기준입니다 — `KooRemapper meshfix cfg/meshfix.yaml` 은 `cfg/` 에서 읽고 `cfg/` 에 씁니다
 > (예전에는 작업 폴더 기준이었습니다). `tetremesh`([§43.8](#438-tetremesh--tet4-로컬-재메시))도 같습니다.
 
-> **쓰기 관문**(2026-11-07): `output` · 임시 파일(`<줄기>.kr_tmp_mf.stl`·`.geo`·`.msh`·`.log`)이 `model` · 그 인클루드 · 설정과 같은
+> **쓰기 관문**(2026-11-07): `output` · 임시 파일(`<줄기>.kr_tmp_mf.stl`·`.geo`·`.msh`·`.log`) · gmsh 가 실패하면 살펴보라고 남기는 이름
+> (`<줄기>__mf.*` — [§3.1(m)](#31-yaml-공통-규칙-모든-op))이 `model` · 그 인클루드 · 설정과 같은
 > 파일이면 gmsh 를 돌리기 전에 **종료 코드 1** 입니다([§3.1(j)](#31-yaml-공통-규칙-모든-op)). 예전에는 `output == model` 이면
 > 쓰기 뒤 재검사가 실패할 때 「산출을 지웠다」며 **모델을 지웠습니다**. `preview: true` 는 아무것도 쓰지 않아 보지 않습니다.
 > `polish: true` 면 polish 의 임시 파일(`<줄기>.kr_tmp_pol<회차>_<덩어리>.stl`·`.geo`·`.msh`·`.log` — 회차 · 덩어리 수는 gmsh 를 돌려 봐야

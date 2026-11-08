@@ -154,12 +154,14 @@ def main():
     os.chmod(stub, 0o755)
     write(mf, "mf.yaml", 'model: tet.k\noutput: "mf # x.k"   # 결과\npid: 1\nlc_target: 0.5\n')
     rc, out = run(binary, mf, "meshfix", "mf.yaml", env={"KOOREMAPPER_GMSH": stub})
-    check("meshfix: 따옴표 안 '#' 을 살린 임시 파일 이름",
-          os.path.exists(os.path.join(mf, "mf # x.kr_tmp_mf.stl")), f"rc={rc} {sorted(os.listdir(mf))}")
+    # gmsh 대역이 실패하므로 meshfix 는 살펴보라고 파일을 남긴다 — 보이는 이름 `<줄기>__mf.*`(쓰는 동안의 임시 이름은
+    # `<줄기>.kr_tmp_mf.*` — gmsh 는 그 이름을 받았다 · 11-08 마지막 검토)
+    check("meshfix: 따옴표 안 '#' 을 살린 이름 (남긴 파일 mf # x__mf.stl)",
+          os.path.exists(os.path.join(mf, "mf # x__mf.stl")), f"rc={rc} {sorted(os.listdir(mf))}")
     argv = open(args_path).read().splitlines() if os.path.exists(args_path) else []
-    check("meshfix: gmsh 인자가 어긋나지 않음 (.geo 하나 + -v 3 -parse_and_exit)",
-          len(argv) == 5 and argv[0] == "4" and argv[1].endswith(".geo")
-          and os.path.exists(os.path.join(mf, argv[1])) and argv[4] == "-parse_and_exit",
+    check("meshfix: gmsh 인자가 어긋나지 않음 (.geo 하나 + -v 3 -parse_and_exit · 그 .geo 를 남겼다)",
+          len(argv) == 5 and argv[0] == "4" and argv[1].endswith("mf # x.kr_tmp_mf.geo")
+          and os.path.exists(os.path.join(mf, "mf # x__mf.geo")) and argv[4] == "-parse_and_exit",
           f"argv={argv}")
     geos = sorted(glob.glob(os.path.join(mf, "*.geo")))
     geo = open(geos[0]).read() if geos else ""

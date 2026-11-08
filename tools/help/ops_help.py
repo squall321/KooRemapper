@@ -378,7 +378,10 @@ warn_min_jac: 0.15
           "  못 풀면(내부 절점 · 인클루드 안 · 자유형식 줄) 덱을 쓰지 않고 rc 1 · 그 줄을 짚는다(`info --strict` 와 같은 칸 표)",
           "`preview: true` — gmsh 없이 그 카드를 미리 짚는다(표면 = gmsh 에 달림 · 내부 = 멈춘다). 덱을 쓰지 않는다",
           "  표면 절점이면 `boundary_nodes: fixed` 가 짝을 찾은 원래 번호를 지킨다",
-          "output · 임시 파일(<줄기>.kr_tmp_mf.stl/.geo/.msh/.log)이 model · 그 인클루드 · 설정과 같은 파일이면 gmsh 를 돌리기 전에 rc 1 —",
+          "gmsh(또는 그 산출 읽기)가 실패하면 살펴보라고 <줄기>__mf.stl/.geo/.msh/.log(있는 것만 · 보이는 이름 — 플랫폼이 올린다)를 남기고",
+          "  See log · 남긴 .geo 의 Merge · Save 도 그 이름이다(쓰는 동안의 임시 이름은 <줄기>.kr_tmp_mf.* — 끝나면 지운다)",
+          "output · 임시 파일(<줄기>.kr_tmp_mf.stl/.geo/.msh/.log) · 남길 이름(<줄기>__mf.*)이 model · 그 인클루드 · 설정과 같은 파일이면",
+          "  gmsh 를 돌리기 전에 rc 1 —",
           "  예전엔 output == model 이면 쓰기 뒤 재검사가 실패할 때 산출을 지우며 모델을 지웠다(2026-11-07)",
           "  polish: true 면 polish 임시 파일(<줄기>.kr_tmp_pol<회차>_<덩어리>.stl/.geo/.msh/.log) 꼴의 입력이 산출 폴더에 있어도 rc 1"])
 op("cnrb2solid", "표면·재메시", "CNRB(절점 강체) 볼트를 HEX8 솔리드 원통 + tied 접촉으로 변환", "볼트 bolt cnrb 원통",

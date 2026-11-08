@@ -2295,11 +2295,15 @@ int runMeshFix(const char* configPath, ConsoleOutput& console) {
     std::string geoPath = tempPath(".geo");
     std::string mshPath = tempPath(".msh");
     std::string logPath = tempPath(".log");
+    // 살펴보라고 남기는 이름(gmsh · 그 산출 읽기가 실패하면) — 표지 없는 `<줄기>__mf.*`(표지 앞 이름). 플랫폼이 산출로 올려 사람이
+    // 받아 본다(마지막 검토 — 표지를 붙인 뒤 남긴 파일이 세션에 안 올라갔고 말은 표지 이름을 댔다)
+    auto keptPath = [&](const std::string& ext) { return (outDir / (stem + "__mf" + ext)).string(); };
     // ★쓰기 관문(2026-11-07 · output_guard) — 산출 · 임시 파일(쓴 뒤 지운다)이 설정 · 모델 · 그 인클루드와 같은 파일이면 gmsh 를
     //   돌리기 전에 거절한다. 예전엔 output == model 이면 쓰기 뒤 재검사가 실패할 때 「산출을 지웠다」며 **모델을 지웠다**.
     //   `preview` 는 아무것도 쓰지 않는다
     if (!cfg.preview &&
-        KooRemapper::output_guard::refuse("meshfix", {cfg.output, stlPath, geoPath, mshPath, logPath},
+        KooRemapper::output_guard::refuse("meshfix", {cfg.output, stlPath, geoPath, mshPath, logPath, keptPath(".stl"), keptPath(".geo"),
+                                                       keptPath(".msh"), keptPath(".log")},
                                           KooRemapper::output_guard::configAndModel(configPath, cfg.model), console))
         return 1;
     // ★polish 의 임시 파일 `<줄기>.kr_tmp_pol<회차>_<덩어리>.{stl,geo,msh,log}`(Windows 는 `.log.bat` 도 — 쓴 뒤 지운다)은 회차 · 덩어리 수가
@@ -2439,22 +2443,62 @@ int runMeshFix(const char* configPath, ConsoleOutput& console) {
     // 6. Geo script
     if (!writeGeoScript(geoPath, stlPath, mshPath, ar, cfg, err)) { console.error(err); return 1; }
 
+    // 실패하면 임시 파일을 지우지 않고 살펴보라고 남긴다 — 있는 것만 보이는 이름(`<줄기>__mf.*`)으로 바꾸고 말(`msg`)의 임시 경로도 그
+    // 이름으로 고친다. 바꾸지 못하면 임시 이름 그대로 남기고 그렇다고 말한다. 남긴 것 [(임시 이름, 남긴 이름)]을 돌려준다
+    auto keepForInspection = [&](std::string& msg) {
+        std::vector<std::pair<std::string, std::string>> kept;
+        for (const char* ext : {".stl", ".geo", ".msh", ".log"}) {
+            const std::string from = tempPath(ext), to = keptPath(ext);
+            std::error_code ec;
+            if (!fs::exists(from, ec)) continue;
+            fs::rename(from, to, ec);
+            if (!ec)
+                for (size_t p = msg.find(from); p != std::string::npos; p = msg.find(from, p + to.size())) msg.replace(p, from.size(), to);
+            kept.emplace_back(from, ec ? from : to);
+        }
+        // 남긴 .geo 가 남긴 이름을 읽고 쓰게 고친다(Merge · Save — 그대로 gmsh 로 다시 돌려 볼 수 있다 · 표지 앞처럼)
+        for (const auto& k : kept) {
+            if (k.first != tempPath(".geo") || k.second == k.first) continue;
+            std::string g;
+            {
+                std::ifstream in(k.second, std::ios::binary);
+                std::ostringstream ss;
+                ss << in.rdbuf();
+                g = ss.str();
+            }
+            for (const char* ext : {".stl", ".msh"}) {
+                const std::string a = fwdSlash(tempPath(ext)), b = fwdSlash(keptPath(ext));
+                for (size_t p = g.find(a); p != std::string::npos; p = g.find(a, p + b.size())) g.replace(p, a.size(), b);
+            }
+            std::ofstream out(k.second, std::ios::binary | std::ios::trunc);
+            out << g;
+            out.flush();
+            if (!out) console.warning("[meshfix] 남긴 " + k.second + " 의 경로를 남긴 이름으로 고쳐 쓰지 못했다 — 그 .geo 는 잘렸을 수 있다");
+        }
+        return kept;
+    };
+    auto printKept = [&](const std::vector<std::pair<std::string, std::string>>& kept) {
+        console.println("  Temp files kept for inspection:");
+        for (const auto& k : kept)
+            console.println("    " + k.second + (k.second == k.first ? "  (보이는 이름으로 바꾸지 못해 임시 이름 그대로다)" : ""));
+    };
+
     // 7. Gmsh
     console.info("Running Gmsh (" + cfg.algorithm + ")...");
     console.println("  geo: " + geoPath);
     console.println("  stl: " + stlPath);
     if (!runGmsh(gmshExe, geoPath, mshPath, logPath, err)) {
+        // Do NOT delete temp files on failure so user can inspect — 보이는 이름으로 남기고 말도 그 이름을 댄다
+        const auto kept = keepForInspection(err);
         console.error(err);
         // Print log (kept for diagnosis)
-        std::ifstream logF(logPath); std::string ln;
+        std::string logAt = logPath;
+        for (const auto& k : kept) if (k.first == logPath) logAt = k.second;
+        std::ifstream logF(logAt); std::string ln;
         int logLines = 0;
         while (std::getline(logF,ln)) { console.println("  "+ln); ++logLines; }
         if (logLines==0) console.println("  (log empty — bat/redirect may have failed)");
-        // Do NOT delete temp files on failure so user can inspect
-        console.println("  Temp files kept for inspection:");
-        console.println("    " + stlPath);
-        console.println("    " + geoPath);
-        console.println("    " + logPath);
+        printKept(kept);
         return 1;
     }
     console.success("Gmsh done");
@@ -2463,12 +2507,10 @@ int runMeshFix(const char* configPath, ConsoleOutput& console) {
     std::vector<MshNode> gmshNodes;
     std::vector<MshElem> gmshElems;
     if (!parseMsh2(mshPath, gmshNodes, gmshElems, err)) {
+        // Keep temp files so user can inspect the STL/geo/msh — 보이는 이름으로 남기고 말도 그 이름을 댄다
+        const auto kept = keepForInspection(err);
         console.error(err);
-        // Keep temp files so user can inspect the STL/geo/msh
-        console.println("  Temp files kept for inspection:");
-        console.println("    " + stlPath);
-        console.println("    " + geoPath);
-        console.println("    " + mshPath);
+        printKept(kept);
         return 1;
     }
     console.keyValue("Gmsh nodes",    std::to_string(gmshNodes.size()));

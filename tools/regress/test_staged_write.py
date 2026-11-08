@@ -40,16 +40,22 @@
   T 임시 파일 이름 표지 — 플랫폼은 `.kr_tmp_` 가 든 파일만 산출로 올리지 않는다. map 의 앞처리 평판(`.__preproc_flat.k`) · 뒤집은 기준
     (`.__flipped_ref.k`) · 펼친 덱(`.kr_flat_`) · meshfix 의 gmsh 왕복(`__mf.*`) · polish(`__pol<회차>_<덩어리>.*`)는 표지가 없어 SIGKILL 된
     잡이 남기면 산출로 올라갔다(여섯째 검토 — runner 의 걸러내기). 이름에 표지를 붙였다 — strace 로 실행이 만들었다 지운 파일을 모아
-    모두 `.kr_tmp_` 를 지녔는지 본다(strace 가 없으면 건너뛴다).
+    모두 `.kr_tmp_` 를 지녔는지 본다(strace 가 없으면 건너뛴다). T-K — 일부러 남기는 파일(meshfix 의 gmsh 실패 때 살펴보라고 남기는
+    파일)은 표지가 없어야 플랫폼이 올린다: 보이는 이름 `<줄기>__mf.*` 로 남기고 See log · 남긴 .geo 도 그 이름(마지막 검토 — 표지를
+    붙인 뒤 그 파일이 걸러졌다). 늘 실패하는 gmsh 대역으로 돌리니 진짜 gmsh 가 없어도 돈다.
   W 쓰기 오류 — 쓰기 · 닫기 결과를 보지 않아 디스크가 차거나 파일 크기 상한(RLIMIT_FSIZE · SIGXFSZ 무시 — ENOSPC · EDQUOT 의
     대역)에 걸려 잘린 덱을 rc 0 · ok 로 바꿔 넣었다(여섯째 검토 S2 — extract-parts 는 `*NODE` 가운데서 끊긴 덱 · 이월 적용은 마지막
     새 섹션을 잃은 덱). 이제 바꿔 넣지 않고 rc 1 · 보고가 그 오류를 말한다. 바로 쓰는 op(DeckWriter · writeOutput)도 rc 1.
+
+바이너리는 늘 주소 공간 8 GB 상한(RLIMIT_AS — prlimit --as 와 같다)으로 돌린다(끝없이 읽히는 장치를 되읽던 판의 탐침이 50 GB 까지 자라
+이 상자의 다른 서비스가 죽었다 · 11-08).
 
 usage: test_staged_write.py <KooRemapper 바이너리>
 """
 import hashlib
 import json
 import os
+import resource
 import shutil
 import signal
 import subprocess
@@ -71,8 +77,18 @@ def check(name, cond, detail=""):
     return cond
 
 
+# 돌리는 바이너리마다 주소 공간 8 GB(prlimit --as 와 같다) — 끝없이 읽히는 장치(/dev/full)를 되읽던 판의 탐침이 50 GB 까지 자라
+# earlyoom 이 이 상자의 다른 서비스를 죽였다(11-08 마지막 검토 · 새 규칙)
+AS_CAP = 8589934592
+
+
+def as_cap():
+    resource.setrlimit(resource.RLIMIT_AS, (AS_CAP, AS_CAP))
+
+
 def run(binary, d, *args, timeout=600):
-    p = subprocess.run([binary, *args], cwd=d, capture_output=True, text=True, timeout=timeout, encoding="utf-8", errors="replace")
+    p = subprocess.run([binary, *args], cwd=d, capture_output=True, text=True, timeout=timeout, encoding="utf-8", errors="replace",
+                       preexec_fn=as_cap)
     return p.returncode, p.stdout + p.stderr
 
 
@@ -178,8 +194,8 @@ def ep_big_dir(name):
 def start(binary, d, *args, pipe=False):
     if pipe:   # 말을 모은다(짧은 말뿐이라 파이프가 차지 않는다)
         return subprocess.Popen([binary, *args], cwd=d, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                                encoding="utf-8", errors="replace")
-    return subprocess.Popen([binary, *args], cwd=d, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                encoding="utf-8", errors="replace", preexec_fn=as_cap)
+    return subprocess.Popen([binary, *args], cwd=d, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, preexec_fn=as_cap)
 
 
 def stop_when_staged(binary, d, args, tries=40):
@@ -440,7 +456,7 @@ def sec_o(binary):
     os.chmod(ro, 0o555)
     write(os.path.join(d, "e.yaml"), "model: in.k\noutput: ro/out.k\nparts: [1]\nreport: ro/r.json\n")
     p = subprocess.Popen([binary, "extract-parts", "e.yaml"], cwd=d, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                         encoding="utf-8", errors="replace")
+                         encoding="utf-8", errors="replace", preexec_fn=as_cap)
     out = p.communicate(timeout=300)[0]
     rep = load(os.path.join(ro, "r.json"))
     check("O-6 extract-parts 읽기 전용 폴더의 쓸 수 있는 산출 · 보고 — rc 0 · 둘 다 새것 · [WARN] 원자적이 아님 · 임시 폴더 깨끗",
@@ -857,7 +873,7 @@ def traced(binary, d, args, env=None):
     import re
     trace = d.rstrip("/") + ".strace"
     p = subprocess.run(["strace", "-f", "-qq", "-o", trace, "-e", "trace=open,openat,creat", binary, *args], cwd=d,
-                       capture_output=True, text=True, timeout=900, encoding="utf-8", errors="replace", env=env)
+                       capture_output=True, text=True, timeout=900, encoding="utf-8", errors="replace", env=env, preexec_fn=as_cap)
     made = set()
     for line in open(trace, encoding="utf-8", errors="replace"):
         m = re.search(r'\b(open|openat|creat)\((?:AT_FDCWD, )?"([^"]+)"(?:, ([A-Z_|]+))?', line)
@@ -873,6 +889,36 @@ def traced(binary, d, args, env=None):
 
 def sec_t(binary):
     print("[T] 임시 파일 이름 표지 — 실행이 만들었다 지운 파일은 모두 .kr_tmp_ 를 지닌다(플랫폼이 산출로 올리지 않는다)")
+    # T-K 살펴보라고 남기는 파일 — meshfix 는 gmsh 가 실패하면 일부러 파일을 남긴다. 보이는 이름 `<줄기>__mf.*`(표지 없음 — 플랫폼이
+    # 산출로 올린다)이고 [ERROR] 의 See log · 남긴 .geo 의 Merge · Save 가 그 이름이다(마지막 검토 — 표지를 붙인 뒤 그 파일이 걸러져
+    # 세션에 안 올라갔고 말은 표지 이름을 댔다). gmsh 는 늘 실패하는 대역이다(진짜 gmsh 가 없어도 돈다)
+    d = os.path.join(TMP, "T_keep")
+    os.makedirs(d)
+    shutil.copy(os.path.join(REPO, "examples", "mesh", "tetramesh.k"), d)
+    write(os.path.join(d, "mf.yaml"), "model: tetramesh.k\noutput: mf_out.k\npid: 1\n")
+    stub = os.path.join(TMP, "failgmsh.sh")
+    write(stub, "#!/bin/sh\necho 'fake gmsh failure' >&2\nexit 3\n")
+    os.chmod(stub, 0o755)
+    p = subprocess.run([binary, "meshfix", "mf.yaml"], cwd=d, capture_output=True, text=True, timeout=600, encoding="utf-8",
+                       errors="replace", env=dict(os.environ, KOOREMAPPER_GMSH=stub), preexec_fn=as_cap)
+    said = p.stdout + p.stderr
+    kept = sorted(n for n in os.listdir(d) if n not in ("tetramesh.k", "mf.yaml"))
+    geo = open(os.path.join(d, "mf_out__mf.geo"), encoding="utf-8").read() if "mf_out__mf.geo" in kept else ""
+    err = [ln for ln in said.splitlines() if "[ERROR]" in ln]
+    check("T-K meshfix gmsh 실패 — rc 1 · 남긴 파일이 보이는 이름 mf_out__mf.{geo,log,stl}(.kr_tmp_ 없음) · See log 와 .geo 의 "
+          "Merge · Save 가 그 이름",
+          p.returncode == 1 and kept == ["mf_out__mf.geo", "mf_out__mf.log", "mf_out__mf.stl"] and
+          any("See log:" in ln and ln.rstrip().endswith("mf_out__mf.log") for ln in err) and ".kr_tmp_" not in geo and
+          "mf_out__mf.stl" in geo and "mf_out__mf.msh" in geo, (p.returncode, kept, err, said[-300:]))
+    # 남길 이름도 쓸 파일이다 — 그 이름의 입력(여기선 설정 YAML 이 mf_out__mf.log)이면 gmsh 전에 거절한다(이름을 바꿔 남길 때 덮지 않게)
+    write(os.path.join(d, "mf_out__mf.log"), "model: tetramesh.k\noutput: mf_out.k\npid: 1\n")
+    before = open(os.path.join(d, "mf_out__mf.log"), "rb").read()
+    p = subprocess.run([binary, "meshfix", "mf_out__mf.log"], cwd=d, capture_output=True, text=True, timeout=600, encoding="utf-8",
+                       errors="replace", env=dict(os.environ, KOOREMAPPER_GMSH=stub), preexec_fn=as_cap)
+    said = p.stdout + p.stderr
+    check("T-K2 남길 이름(mf_out__mf.log)이 설정 YAML — gmsh 전에 rc 1 「같은 파일」 · 설정 바이트 그대로",
+          p.returncode == 1 and "같은 파일" in said and "Running Gmsh" not in said and
+          open(os.path.join(d, "mf_out__mf.log"), "rb").read() == before, (p.returncode, said[-300:]))
     if not shutil.which("strace"):
         check("T — strace 가 없다(건너뜀)", True)
         return
@@ -928,9 +974,8 @@ def sec_t(binary):
 # ── W 쓰기 오류 ──────────────────────────────────────────────────────────────
 def run_fsize(binary, d, args, limit):
     """파일 크기 상한(SIGXFSZ 무시 — 넘는 쓰기가 EFBIG 로 짧게 끝난다)으로 돌린다."""
-    import resource
-
     def pre():
+        as_cap()
         signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
         resource.setrlimit(resource.RLIMIT_FSIZE, (limit, limit))
     p = subprocess.run([binary, *args], cwd=d, capture_output=True, text=True, timeout=600, encoding="utf-8", errors="replace",
@@ -1003,13 +1048,15 @@ def sec_w(binary):
 # ── P 제자리로 옮겨 쓰다 멈춘 산출 ────────────────────────────────────────────
 def start_nofsz(binary, d, *args):
     """SIGXFSZ 무시로 띄운다 — 뒤에 prlimit 로 크기 상한을 걸면 넘는 쓰기가 EFBIG 로 짧게 끝난다(말을 모은다)."""
+    def pre():
+        as_cap()
+        signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
     return subprocess.Popen([binary, *args], cwd=d, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
-                            errors="replace", preexec_fn=lambda: signal.signal(signal.SIGXFSZ, signal.SIG_IGN))
+                            errors="replace", preexec_fn=pre)
 
 
 def sec_p(binary):
     print("[P] 제자리로 옮겨 쓰다 멈췄다 — 그 파일이 잘렸다고 말한다(앞 파일이 그대로라고 하지 않는다 · output_damaged)")
-    import resource
     if os.geteuid() == 0:
         check("P — root 는 폴더 권한을 넘는다(건너뜀)", True)
         return
