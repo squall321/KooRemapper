@@ -1647,8 +1647,9 @@ void WoundMeshGen::flushContacts() {
         out_ << "*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_ID\n"
              << "$#   cid                                                             title\n"
              << "         1  Impactor_to_Cell\n"
-             << "$#  ssid    msid   sstyp   mstyp  sboxid  mboxid     spr     mpr\n";
-        snprintf(buf, sizeof(buf), "%8d%8d%8d%8d%8d%8d%8d%8d\n",
+             << "$#    ssid      msid     sstyp     mstyp    sboxid    mboxid       spr       mpr\n";
+        // ★Card 1 은 10칸 여덟이다(2026-11-08) — 예전엔 8칸이라 10칸으로 읽는 LS-DYNA 에게 MSTYP 칸이 " 2       0" 이었다
+        snprintf(buf, sizeof(buf), "%10d%10d%10d%10d%10d%10d%10d%10d\n",
                  108, SID_PART_CELL, 2, 2, 0, 0, 0, 0);
         out_ << buf;
         out_ << "$#       fs        fd        dc        vc       vdc    penchk        bt        dt\n"
@@ -1668,8 +1669,8 @@ void WoundMeshGen::flushContacts() {
     out_ << "*CONTACT_AUTOMATIC_SINGLE_SURFACE_ID\n"
          << "$#   cid                                                             title\n"
          << "         2  Cell_Self_Contact\n"
-         << "$#  ssid    msid   sstyp   mstyp  sboxid  mboxid     spr     mpr\n";
-    snprintf(buf, sizeof(buf), "%8d%8d%8d%8d%8d%8d%8d%8d\n",
+         << "$#    ssid      msid     sstyp     mstyp    sboxid    mboxid       spr       mpr\n";
+    snprintf(buf, sizeof(buf), "%10d%10d%10d%10d%10d%10d%10d%10d\n",   // Card 1 — 10칸 여덟(위와 같다)
              SID_PART_CELL, 0, 2, 0, 0, 0, 0, 0);
     out_ << buf;
     // Card 2: VDC=20 suppresses contact oscillations during DR
