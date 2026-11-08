@@ -2276,6 +2276,11 @@ materials:                # 개별 규칙 (선택)
   없는 열 재질을 가리킨다(예전 동작). 남긴 열 물성은 바꾸기 전 재질의 것이라 `[matdb] kept thermal card TMID=n` 으로 알린다 — DB 열 물성으로
   바꾸려면 `thermal: true`. 아무 파트도 가리키지 않는 열 카드는 예전처럼 지운다. `thermal: true` 면 그 번호의 열 카드를 DB 열 카드(TMID = MID)로
   바꿔 넣고 그 MID 를 쓰는 파트의 TMID 를 잇는다(회귀 `test_material_id_family.py` E)
+- `*PART` TMID 가 가리키는 열 카드는 지우지 않는다 — `thermal: true` 라도 같은 번호의 열 카드를 **다른 MID 의 파트**(이번에 TMID 를 잇지 않는
+  파트 — 인클루드의 파트도)가 가리키거나 그 카드가 인클루드 파일에 있으면, 옛 카드를 두고 새 DB 열 카드에 빈 TMID(덱의 열 카드 · `*PART`
+  TMID · 맞춘 MID 가운데 가장 큰 것 + 1)를 주고 그 MID 를 쓰는 파트의 TMID 를 그 번호로 잇는다(`[matdb] kept thermal card TMID=n — … 새 열
+  카드는 TMID m`). 예전엔 PID 2 가 가리키는 `*MAT_T01 1` 을 MID 1 의 DB 열 카드로 바꿔 넣어 PID 2 의 열 물성이 조용히 바뀌었다(종료 코드 0 ·
+  `--strict` 0 · 2026-11-08 적대적 검토 S5). 다른 MID 의 파트가 가리키지 않으면 예전 그대로다(TMID = MID)
 
 ---
 

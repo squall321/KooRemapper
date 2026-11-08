@@ -13041,9 +13041,11 @@ static int md_readIntField(const std::string& line, int startCol, int width) {
     try { return std::stoi(f); } catch (...) { return 0; }
 }
 
-// `*PART`(· `_TITLE`) 카드가 가리키는 TMID(Card 1 의 여덟째 칸) — matdb 가 열 카드를 지워도 되는지 본다(11-08 (e))
-static std::set<int> md_partTmids(const std::vector<std::string>& lines) {
-    std::set<int> out;
+// `*PART`(· `_TITLE`) 카드의 (PID, MID, TMID — 첫째 · 셋째 · 여덟째 칸) 가운데 TMID 가 있는 것 — matdb 가 열 카드를 지워도 되는지(11-08 (e)) ·
+// 그 열 카드를 다른 MID 의 파트가 가리키는지(S5) 본다
+struct MdPartThermalRef { int pid = 0, mid = 0, tmid = 0; };
+static std::vector<MdPartThermalRef> md_partThermalRefs(const std::vector<std::string>& lines) {
+    std::vector<MdPartThermalRef> out;
     bool inPart = false, titleDone = false;
     for (const auto& ln : lines) {
         const std::string tr = mw_trim(ln);
@@ -13060,10 +13062,40 @@ static std::set<int> md_partTmids(const std::vector<std::string>& lines) {
         if (toks.size() > 7) {
             try {
                 const int t = std::stoi(toks[7]);
-                if (t > 0) out.insert(t);
+                if (t > 0) {
+                    MdPartThermalRef r;
+                    r.tmid = t;
+                    try { r.pid = std::stoi(toks[0]); } catch (...) {}
+                    try { r.mid = std::stoi(toks[2]); } catch (...) {}
+                    out.push_back(r);
+                }
             } catch (...) {}
         }
         titleDone = false;   // 같은 *PART 블록의 다음 (제목, 데이터) 짝
+    }
+    return out;
+}
+
+// 열 재질 카드(`*MAT_THERMAL_*` · 번호 이름 `*MAT_T01`~`T18`)가 정의하는 TMID(첫 데이터 줄 첫 칸 · `_TITLE` 이면 제목 다음) — 새 열 카드에
+// 빈 TMID 를 고른다(11-08 S5)
+static std::set<int> md_thermalTmids(const std::vector<std::string>& lines) {
+    std::set<int> out;
+    for (size_t i = 0; i < lines.size(); ++i) {
+        const std::string t = mw_trim(lines[i]);
+        if (t.empty() || t[0] != '*' || !cards::isThermalMaterialKeyword(mw_upper(t))) continue;
+        bool title = mw_upper(t).find("_TITLE") != std::string::npos;
+        for (size_t j = i + 1; j < lines.size(); ++j) {
+            const std::string lt = mw_trim(lines[j]);
+            if (lt.empty() || lt[0] == '$') continue;
+            if (lt[0] == '*') break;
+            if (title) { title = false; continue; }
+            const auto toks = mw_tok10(lines[j]);
+            try {
+                const int id = toks.empty() ? 0 : std::stoi(toks[0]);
+                if (id > 0) out.insert(id);
+            } catch (...) {}
+            break;
+        }
     }
     return out;
 }
@@ -13779,10 +13811,48 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
     std::set<int> thermalOnMids;
     for (const auto& mi : matches)
         if (mi.thermal) thermalOnMids.insert(mi.modelMid);
-    std::set<int> partTmids = md_partTmids(rawLines_);
+    const auto mainRefs = md_partThermalRefs(rawLines_);
+    std::vector<MdPartThermalRef> inclRefs;
+    std::set<int> inclThermal;   // 인클루드 파일이 정의한 열 카드 TMID — matdb 는 인클루드를 고치지 않는다
     for (const auto& f : incl_.files) {
-        const auto t = md_partTmids(f.lines);
-        partTmids.insert(t.begin(), t.end());
+        const auto r = md_partThermalRefs(f.lines);
+        inclRefs.insert(inclRefs.end(), r.begin(), r.end());
+        const auto t = md_thermalTmids(f.lines);
+        inclThermal.insert(t.begin(), t.end());
+    }
+    std::set<int> partTmids;
+    for (const auto& r : mainRefs) partTmids.insert(r.tmid);
+    for (const auto& r : inclRefs) partTmids.insert(r.tmid);
+    // 새 열 카드의 TMID — 보통 그 MID(matdb 의 꼴 · TMID = MID)이고 그 번호의 옛 열 카드를 바꿔 넣는다. 그 번호를 **다시 매기지 않는 파트**가
+    // 가리키면(다른 MID 의 *PART — 주 덱에서 이번에 TMID 를 잇는 파트는 빼고 · 인클루드의 파트) 또는 그 번호의 열 카드가 인클루드에 있으면, 옛
+    // 카드를 두고 새 카드에 빈 TMID 를 준다 — `*PART` TMID 가 가리키는 열 카드는 MID 연산이 지우지 않는다(적대적 검토 11-08 S5 — 예전엔 PID 2 가
+    // 가리키는 `*MAT_T01 1` 을 MID 1 의 DB 열 카드로 바꿔 넣어 PID 2 의 열 물성이 조용히 바뀌었다 · rc 0 · --strict rc 0)
+    std::map<int, int> newTmidOf;
+    {
+        std::set<int> taken = md_thermalTmids(rawLines_);
+        taken.insert(inclThermal.begin(), inclThermal.end());
+        taken.insert(partTmids.begin(), partTmids.end());
+        taken.insert(thermalOnMids.begin(), thermalOnMids.end());
+        int next = taken.empty() ? 1 : *taken.rbegin() + 1;
+        for (int m : thermalOnMids) {
+            std::vector<int> others;
+            for (const auto& r : mainRefs)
+                if (r.tmid == m && r.mid != m && !thermalOnMids.count(r.mid)) others.push_back(r.pid);
+            for (const auto& r : inclRefs)
+                if (r.tmid == m && r.mid != m) others.push_back(r.pid);
+            if (others.empty() && !inclThermal.count(m)) {
+                newTmidOf[m] = m;
+                continue;
+            }
+            newTmidOf[m] = next++;
+            std::string who;
+            for (int pid : others) who += (who.empty() ? "" : ", ") + std::to_string(pid);
+            infoMessages.push_back("[matdb] kept thermal card TMID=" + std::to_string(m) + " — " +
+                                   (others.empty() ? std::string("그 열 카드가 인클루드 파일에 있다(인클루드는 고치지 않는다)")
+                                                   : "다른 MID 의 *PART(PID " + who + ")가 가리킨다") +
+                                   " · MID " + std::to_string(m) + " 의 새 열 카드는 TMID " + std::to_string(newTmidOf[m]) +
+                                   "(그 MID 를 쓰는 파트의 TMID 를 잇는다)");
+        }
     }
     for (int i = 0; i < (int)rawLines_.size(); ++i) {
         std::string t = mw_trim(rawLines_[i]);
@@ -13815,6 +13885,7 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
                             infoMessages.push_back("[matdb] kept thermal card TMID=" + std::to_string(id) +
                                                    " — *PART TMID 가 가리킨다(thermal 이 꺼져 새 열 카드를 넣지 않는다 · 그 열 물성은 바꾸기 전 재질의 것이다)");
                         }
+                        if (shouldRemove && thermalOnMids.count(id) && newTmidOf[id] != id) shouldRemove = false;   // 위에서 알렸다(S5)
                     } else {
                         // expansion: id is PID, find its MID
                         auto info = mw_getPartInfo(rawLines_, id);
@@ -13861,7 +13932,7 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
         if (mi.thermal) {
             // *MAT_THERMAL_ISOTROPIC
             if (!dbMat.cardThermal.empty()) {
-                auto thermalLines = md_substituteCardTmid(dbMat.cardThermal, mi.modelMid);
+                auto thermalLines = md_substituteCardTmid(dbMat.cardThermal, newTmidOf[mi.modelMid]);
                 for (auto& tl : thermalLines) insertCards.push_back(tl);
                 ++thermalCount;
             }
@@ -13881,7 +13952,7 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
             for (int pid : pids) {
                 auto info = mw_getPartInfo(rawLines_, pid);
                 if (info.dataLine >= 0)
-                    rawLines_[info.dataLine] = md_updatePartTmid(rawLines_[info.dataLine], mi.modelMid);
+                    rawLines_[info.dataLine] = md_updatePartTmid(rawLines_[info.dataLine], newTmidOf[mi.modelMid]);
             }
         }
 

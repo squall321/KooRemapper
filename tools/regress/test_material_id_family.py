@@ -20,7 +20,8 @@
   B cclip — 같은 규칙(클립은 새 MID 를 받아 옛 재질이 사라진다 — MID 꼴 덧붙임도 지운다)
   C IGA 재질 베끼기 — 그 MID 의 구조 재질(열 카드 · 덧붙임 카드가 앞이어도) · `_TITLE` 재질 · MID 칸 폭 그대로
   E matdb `thermal: false` — `*PART` TMID 가 가리키는 같은 번호 열 카드는 남긴다(가리키지 않는 것은 예전처럼 지운다) ·
-    E-4 쌓인 재질 묶음에서 맞춘 MID 만 바꾸고 같은 블록의 다른 재질은 둔다
+    E-4 쌓인 재질 묶음에서 맞춘 MID 만 바꾸고 같은 블록의 다른 재질은 둔다 ·
+    E-5 `thermal: true` 라도 다른 MID 의 파트가 가리키는 같은 번호 열 카드는 남기고 새 열 카드에 빈 TMID 를 준다(적대적 검토 11-08 S5)
   F offset — material_card(또는 material_cards)가 없으면 거절한다(예전엔 새 *PART 가 정의되지 않은 MID 를 가리킨 덱이 rc 0)
 
 usage: test_material_id_family.py <KooRemapper 바이너리>
@@ -472,6 +473,30 @@ def part_e(binary, tmp):
     rc2, out2 = run(binary, d, "info", "--strict", "o.k") if rc == 0 else (None, "")
     check("E-4 matdb 쌓인 재질 묶음(MID 1 · 9) — MID 1 만 바꾸고 MID 9 는 남긴다 · --strict rc 0(예전 블록째 지워 재질 9 미정의)",
           rc == 0 and elastic_rows(os.path.join(d, "o.k")).count(9) == 1 and rc2 == 0, (rc, elastic_rows(os.path.join(d, "o.k")), rc2, out2[-200:]))
+
+    # E-5 PID 2(MID 2)가 TMID 1 로 *MAT_T01 1 을 가리킨다 — MID 1 을 matdb 로 바꾸어도 그 카드는 PID 2 의 열 물성이다(검토 S5 의 재현).
+    #     thermal: false 는 b83b7bf 부터 남겼고(E-5d), thermal: true 는 그 카드를 MID 1 의 DB 열 카드로 바꿔 넣어 PID 2 의 열 물성이 조용히
+    #     바뀌었다(rc 0 · --strict rc 0) — 이제 옛 카드를 두고 MID 1 의 새 열 카드는 빈 TMID 2 · PID 1 의 TMID 를 2 로 잇는다
+    other = ("*PART\nOTHER\n         2         1         2         0         0         0         0         1\n"
+             "*MAT_ELASTIC\n         2    7.8e-9     2.0e5       0.3\n*MAT_T01\n         1    7.8e-9       0.0       0.0\n       1.0       1.0\n")
+    for tag, extra in (("5", "thermal: true\n"), ("5d", "")):
+        d = fresh(tmp, "e" + tag)
+        box(binary, d, other)
+        os.makedirs(os.path.join(d, "materials"))
+        shutil.copy(os.path.join(REPO, "materials", "material_db.json"), os.path.join(d, "materials"))
+        open(os.path.join(d, "m.yaml"), "w").write("model: box.k\noutput: o.k\nmat_type: MAT_ELASTIC\n" + extra +
+                                                   "materials:\n  - mid: 1\n    match: \"SUS304\"\n")
+        rc, out = run(binary, d, "matdb", "m.yaml")
+        o = os.path.join(d, "o.k")
+        t01, tm = first_ids(o, "*MAT_T01"), part_tmids(o)
+        if tag == "5":
+            iso = first_ids(o, "*MAT_THERMAL_ISOTROPIC")
+            check("E-5 thermal: true — PID 2 가 가리키는 *MAT_T01 1 은 그대로 · MID 1 의 새 열 카드는 TMID 2 · PID 1 TMID 2(예전 T01 1 을 바꿔 넣었다)",
+                  rc == 0 and t01 == [1] and tm.get(2) == 1 and tm.get(1) == 2 and iso == [2] and "kept thermal card TMID=1" in out,
+                  (rc, t01, tm, iso, out[-300:]))
+        else:
+            check("E-5d thermal: false — *MAT_T01 1 그대로 · PID 2 TMID 1 · PID 1 TMID 0", rc == 0 and t01 == [1] and tm.get(2) == 1 and
+                  tm.get(1, 0) == 0, (rc, t01, tm, out[-300:]))
 
 
 def part_f(binary, tmp):
