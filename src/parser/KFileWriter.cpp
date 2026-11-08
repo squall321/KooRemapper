@@ -132,7 +132,6 @@ bool KFileWriter::writeFileWithSource(const std::string& filename, const Mesh& m
     newline_ = deck_newline::detect(sourceFile);
     // 원본 덱이 선언한 칸 폭을 따른다. 원본의 `*KEYWORD I10=Y` 는 그대로 베껴 나가므로
     // 이것을 안 하면 **선언은 10칸인데 본문은 8칸인 덱**이 나간다(그 상태로 rc=0 이었다).
-    idFieldWidth_ = KooRemapper::deckFieldWidth(srcLines);
     DeckWriter writer(filename, newline_);
     if (!writer.ok()) {
         errorMessage_ = "Cannot create file: " + filename;
@@ -140,13 +139,20 @@ bool KFileWriter::writeFileWithSource(const std::string& filename, const Mesh& m
     }
     std::ostream& out = writer.stream();
 
+    // ★원본의 **첫** `*END` 앞만 본다(LS-DYNA · 리더가 거기서 멈춘다). 그 뒤 줄은 아래 걸음이 그대로 베낀다. 예전엔 `*KEYWORD` 찾기 · 폭 ·
+    //   셸 번호 미리 훑기가 덱 끝까지 읽어, 첫 `*END` 뒤의 읽히지 않는 셸 블록에 산 솔리드와 같은 번호가 있으면 그 솔리드를 쓰지 않았다
+    //   (map rc 0 · 2026-11-08 여섯째 검토)
+    const std::vector<std::string> liveLines(srcLines.begin(),
+                                             srcLines.begin() + static_cast<std::ptrdiff_t>(deckscan::firstEndLine(srcLines)));
+    idFieldWidth_ = KooRemapper::deckFieldWidth(liveLines);
+
     try {
         // ★원본에 `*KEYWORD` 가 **없을 때만** 넣는다. 있는 덱 앞에 맨 `*KEYWORD` 를 끼우면
         //   `deckFieldWidth` 가 **첫 번째** 것에서 멈추므로 `*KEYWORD I10=Y` 덱이 8칸으로
         //   읽힌다 — 선언 10칸·본문 8칸이라는 cnrb2 의 그 결함을 쓰는 쪽에서 되살리는 꼴이다.
         //   없는 덱은 지금도 8 이므로(`deckFieldWidth` 의 마지막 `return 8`) 폭은 안 움직인다.
         //   `includeHeader_` 밖에 둔다 — 이건 머리말 장식이 아니라 **있어야 읽히는 카드**다.
-        if (!KooRemapper::hasKeywordCard(srcLines)) out << "*KEYWORD\n";
+        if (!KooRemapper::hasKeywordCard(liveLines)) out << "*KEYWORD\n";
         if (includeHeader_) writeHeader(out);
 
         // Block-skipping state machine. When we enter a NODE or ELEMENT_SOLID
@@ -168,7 +174,7 @@ bool KFileWriter::writeFileWithSource(const std::string& filename, const Mesh& m
         std::set<int> verbatimElemIds;
         {
             bool inVerbatimElem = false;
-            for (const std::string& line : srcLines) {
+            for (const std::string& line : liveLines) {   // 첫 `*END` 앞만(뒤의 죽은 셸 번호가 산 솔리드를 지우지 않게)
                 size_t p = 0;
                 while (p < line.size() &&
                        std::isspace(static_cast<unsigned char>(line[p]))) {
