@@ -35,7 +35,7 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
 - [x] v2 짓기 — 칸은 `src/parser/CarryoverPlan.cpp` 머리의 `kKeys` **한 표**에(줄마다 판 1 칸 · 판 2 가 더한 칸) · 인클루드 대조(주 덱만 고침) ·
       줄마다 덱 자리 대조 · 새 섹션 · refused_transform · summary 대조(아래 「판 2 받기 — 지으며 정한 것」)
 - [x] v2 실물 둘 · 인클루드 꼴 · 셸 두께 모프 꼴로 시험 — `tools/regress/test_apply_carryover_plan_v2.py` 67 항 · 단위 시험 v2 5 · 실물 둘 rc 0(문제 0 · 경고 0)
-- [ ] 적대적 검토 · 배포 · StepForge 에 알림(답신 부록)
+- [x] 적대적 검토 · 배포 · StepForge 에 알림(답신 부록 §6 — 11-08)
 - [x] 읽기 — 계획(엄격) · 변위장(이진) · 조각(덱 SECID · MID 참조 꼴) — `include/parser/CarryoverPlan.h`
 - [x] 사전 검사 — 꼴 · 덱 지문 · 파일 지문 · 변위장 덮음 · 조각 범위 대 바닥 · 참조 · 나눈 절점(전부 아니면 전무) — v1 이라 includes 는 거절
 - [x] 처리 — transform(강체 확인) · morph · remesh(같은 PID 로 바꿔 넣기 · new_section) · delete · add · keep/review(`touches_changed` 보고) —
