@@ -134,3 +134,11 @@ TEST(MaterialIds_모르는_꼴의_제목_줄은_세지_않는다) {
     ASSERT_TRUE(matids::inUse(L).count(2024) == 0);
     ASSERT_EQ(matids::maxId(L), 3);
 }
+
+// 주석은 1열의 `$` 뿐이다 — 들여쓴 `$` 로 시작하는 제목은 제목이다(Vol_I 17862 · 리더 isCommentLine). 예전엔 주석으로 건너 Card 1 을 제목으로 삼켜
+// MID 2 를 몰랐다(11-08)
+TEST(MaterialIds_주석은_1열의_달러_뿐이다) {
+    auto L = matDeckLines(std::string("*KEYWORD\n*MAT_ELASTIC_TITLE\n  $5 steel\n") + kMatEl2 + "\n$ 1열 주석\n*END\n");
+    ASSERT_TRUE(matids::defined(L).count(2) == 1);
+    ASSERT_EQ(matids::maxId(L), 2);
+}

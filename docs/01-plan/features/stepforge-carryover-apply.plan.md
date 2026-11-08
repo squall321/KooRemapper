@@ -264,7 +264,9 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
   · `*MAT_ELASTIC_TITLE` 에 들여쓴 `$` 제목)은 4f550b3 에서도 Card 1 을 제목으로 삼켜 번호를 놓쳤다 — 같이 고쳐졌다. 들여쓴 `*` 제목 줄(블록이
   끝난 것으로 본다)은 다음 판 목록 그대로다(검토 행렬 `shell_indented_star_title` — 4f550b3 · 운영 판 모두 1). 옛 첫 카드 셈
   (`cur_scanSectionDefs` — 있나 · 종류 표)은 아직 첫 비공백 `$` 를 주석으로 본다(그 표만 들여쓴 `$` 제목에서 틀린다 — 남은 틈 · 커서는 두 셈의
-  큰 쪽이라 맞다). 회귀 — 커서 F 2항(F-1 은 e27baed 에서 실패 · F-2 는 4f550b3 에서도) · 재질 G-10(4f550b3 에서도 실패).
+  큰 쪽이라 맞다). 회귀 — 커서 F 2항(F-1 은 e27baed 에서 실패 · F-2 는 4f550b3 에서도) · 재질 G-11(e27baed 에서 새 MID 501 — 밀린 카드의
+  `500.0` 을 MID 로) · G-10(지킴이 — 카드 한 장 `*MAT_ELASTIC_TITLE` 은 리더가 MID 를 읽어 커서가 맞았다) · 단위 1(`matids::defined` — 4f550b3
+  에서는 그 MID 를 몰랐다).
 - **열 카드를 가리키는 다른 파트(S5 — matdb `thermal: true`)** — b83b7bf 는 `thermal: false` 만 막았다(검토의 기본 재현은 그때 고쳐졌음을 확인).
   `thermal: true` 는 같은 번호(TMID = MID)의 열 카드를 늘 바꿔 넣어, 그 카드를 **다른 MID 의 파트**가 가리키면 그 파트의 열 물성이 조용히 DB 의
   것으로 바뀌었다(rc 0 · `--strict` 0). 정한 것 — 그때는 옛 카드를 두고 새 카드에 빈 TMID 를 준다(덱 · 인클루드의 열 카드 TMID · `*PART` TMID ·

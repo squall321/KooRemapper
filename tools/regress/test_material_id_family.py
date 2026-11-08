@@ -146,8 +146,13 @@ def part_g(binary, tmp):
          "         3   7.85E-9    1000.0    1000.0    1000.0       0.3       0.3       0.3\n"
          "     500.0     500.0     500.0       0.0\n       0.0       0.0       0.0       1.0       0.0       0.0\n"
          "       0.0       1.0       0.0       0.0\n", 4),
-        ("G-10 *MAT_ELASTIC_TITLE 의 제목이 들여쓴 「  $5 steel」 — 제목이다(주석은 1열의 $) · MID 2 를 센다 · 새 MID 3(예전 2 — 겹쳤다)",
+        ("G-10 지킴이 — *MAT_ELASTIC_TITLE 의 제목이 들여쓴 「  $5 steel」 · 새 MID 3(리더도 MID 2 를 읽는다)",
          "*MAT_ELASTIC_TITLE\n  $5 steel\n" + EL % 2, 3),
+        ("G-11 행 수를 모르는 꼴의 제목이 들여쓴 「  $5 ortho」 — 제목이다(주석은 1열의 $) · 새 MID 4(e27baed 501 — 밀린 카드의 500.0 을 MID 로)",
+         "*MAT_ORTHOTROPIC_ELASTIC_TITLE\n  $5 ortho\n"
+         "         3   7.85E-9    1000.0    1000.0    1000.0       0.3       0.3       0.3\n"
+         "     500.0     500.0     500.0       0.0\n       0.0       0.0       0.0       1.0       0.0       0.0\n"
+         "       0.0       1.0       0.0       0.0\n", 4),
     ]
     for k, (name, extra, want) in enumerate(cases):
         d = fresh(tmp, "g%d" % k)
