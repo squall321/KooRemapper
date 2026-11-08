@@ -42,10 +42,8 @@ DECLARED = {
     "src/commands/surfview.cpp": (1, "덱 아님 — 자유면 그림 SVG(덱은 읽기만 한다)"),
     "src/commands/stackdiagram.cpp": (1, "덱 아님 — 층 모식도 SVG(덱은 읽기만 한다)"),
     "src/commands/cleanup_nodes.cpp": (1, "덱 아님 — 분류 리포트 JSON. 덱은 KooRemapper::DeckWriter 로 쓴다(rewriteDeck)"),
-    "src/commands/extract_parts.cpp": (1, "덱 아님 — 결과 리포트 JSON · 번호 매핑 표를 임시 파일에 쓴다(StagedFiles::writeText — 다 되면 "
-                                          "바꿔 넣는다). 덱은 KooRemapper::DeckWriter 로 쓴다(Writer)"),
-    "src/commands/standalone_ops.cpp": (3, "덱 아님 — 옮긴 조각 대응표 JSON(cad_solid_merge_to_deck) · 번호 바닥 JSON(id_floor) · "
-                                           "이월 적용 보고 JSON(apply_carryover_plan — 거절해도 쓴다). 덱은 ModelAssembler 가 쓴다"),
+    "src/commands/standalone_ops.cpp": (2, "덱 아님 — 옮긴 조각 대응표 JSON(cad_solid_merge_to_deck) · 번호 바닥 JSON(id_floor). "
+                                           "이월 적용 보고는 공용 staged_write 가 쓰고(ofstream 아님) 덱은 ModelAssembler 가 쓴다"),
     "src/util/Validator.cpp": (1, "덱 아님 — 검증 로그(append)"),
     "src/util/Logger.cpp": (1, "덱 아님 — 로그 파일"),
     "include/util/Logger.h": (1, "덱 아님 — 로그 스트림 멤버 선언"),

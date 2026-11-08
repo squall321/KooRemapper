@@ -9,8 +9,8 @@
 #include "parser/IncludeClosure.h"   // 이월 적용 — 산출 · 보고가 인클루드 파일을 덮지 않게(clobberPair)
 #include "parser/OutputGuard.h"
 #include "util/Sha256.h"
+#include "util/StagedWrite.h"   // 이월 적용 — 임시 파일 + 바꿔 넣기(extract-parts 와 같은 도우미)
 #include "util/StrictJson.h"
-#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -1809,68 +1809,6 @@ static std::vector<std::string> carryoverCompanionNames(const std::string& planP
     return out;
 }
 
-// 같은 폴더의 임시 파일에 쓰고 끝까지 지나면 바꿔 넣는다 — extract-parts `StagedFiles` 와 같은 꼴(이월 적용이 두 번째 소비자다 —
-// 공용 자리로 모을 때 하나로). 지우는 것은 바꿔 넣지 않은 임시 파일뿐이다(이번 실행이 만든 것) — 앞 파일 · 폴더 · 남의 파일은 안 건드린다
-namespace {
-class CarryStagedFiles {
-public:
-    CarryStagedFiles() = default;
-    CarryStagedFiles(const CarryStagedFiles&) = delete;
-    CarryStagedFiles& operator=(const CarryStagedFiles&) = delete;
-    ~CarryStagedFiles() { discardAll(); }
-
-    // `dst` 의 임시 경로 — 같은 폴더(바꿔 넣기가 한 파일 시스템 안의 이름 바꾸기다) · 점으로 시작 · 끝은 `suffix`(덱은 ".k" — 쓰기가 <접두>.k 를 쓴다)
-    bool reserve(const std::string& dst, const std::string& suffix, std::string& tmp) {
-        static unsigned serial = 0;
-        const size_t sep = dst.find_last_of("/\\");
-        const std::string dir = sep == std::string::npos ? std::string() : dst.substr(0, sep + 1);
-        const std::string base = sep == std::string::npos ? dst : dst.substr(sep + 1);
-        const std::string stamp = std::to_string((long long)std::chrono::steady_clock::now().time_since_epoch().count());
-        for (int k = 0; k < 100; ++k) {
-            const std::string t = dir + "." + base + ".kr_tmp_" + stamp + "_" + std::to_string(++serial) + suffix;
-            std::error_code ec;
-            if (std::filesystem::exists(t, ec) || ec) continue;
-            tmp = t;
-            items_.push_back({dst, tmp});
-            return true;
-        }
-        return false;
-    }
-    // 글을 임시 파일에 쓴다(바이너리 — 개행을 그대로)
-    bool writeText(const std::string& dst, const std::string& text, std::string& tmp) {
-        if (!reserve(dst, "", tmp)) return false;
-        std::ofstream f(tmp, std::ios::binary);
-        if (!f.is_open()) return false;
-        f << text;
-        f.close();
-        return !f.fail();
-    }
-    // 임시 파일을 `dst` 로 바꿔 넣는다
-    bool commit(const std::string& dst) {
-        for (size_t i = 0; i < items_.size(); ++i) {
-            if (items_[i].first != dst) continue;
-            std::error_code ec;
-            std::filesystem::rename(items_[i].second, dst, ec);
-            if (ec) return false;
-            items_.erase(items_.begin() + (std::ptrdiff_t)i);
-            return true;
-        }
-        return false;
-    }
-    // 바꿔 넣지 않은 임시 파일을 지운다 — 이번 실행이 만든 것뿐이다
-    void discardAll() {
-        for (const auto& it : items_) {
-            std::error_code ec;
-            std::filesystem::remove(it.second, ec);
-        }
-        items_.clear();
-    }
-
-private:
-    std::vector<std::pair<std::string, std::string>> items_;   // 바꿔 넣을 경로 · 임시 경로
-};
-}  // namespace
-
 // ── Standalone apply_carryover_plan ─────────────────────────────────────────
 // StepForge 이월 계획(plan.json · field_<PID>.bin · fragment_<PID>.k)을 덱에 적용한다 — 규칙과 검사는
 // `ModelAssembler::applyCarryoverPlan` · 쓴 덱 대조와 품질 관문은 `verifyCarryoverOutput`.
@@ -1958,11 +1896,11 @@ int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
     // ★쓰기는 같은 폴더의 임시 파일(`.<이름>.kr_tmp_…`)에 하고 대조 · 품질 관문까지 지나면 바꿔 넣는다(extract-parts 와 같은 규칙 —
     //   사용자 결정 11-07 밤). 거절 · 실패면 이번 실행의 임시 파일만 지운다 — output 자리의 앞 파일 · 폴더 · 남의 파일은 건드리지 않는다
     //   (예전엔 거절하면 앞 실행의 덱을 「옛 산출」로 지웠다 — 플랫폼에서 앞 잡의 출력이 사라졌다 · `stale_output_removed`)
-    CarryStagedFiles staged;
+    KooRemapper::staged_write::StagedFiles staged;
     KooRemapper::carryover::Report rep;
     auto writeReport = [&]() {
-        std::string tmp;
-        if (!staged.writeText(reportPath, KooRemapper::carryover::toJson(rep), tmp) || !staged.commit(reportPath)) {
+        std::string why;
+        if (!staged.writeText(reportPath, KooRemapper::carryover::toJson(rep), why) || !staged.commit(reportPath, why)) {
             console.error(std::string("[") + tag + "] 보고를 쓸 수 없다: " + reportPath);
             return false;
         }
@@ -2011,8 +1949,8 @@ int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
             return refuse("사전 검사에서 " + std::to_string(rep.problems.size()) + " 건이 걸렸다 — 계획 전체를 적용하지 않았고 덱을 쓰지 않았다");
         for (const auto& msg : assembler.infoMessages) console.println(msg);
         // 덱은 output 옆의 임시 파일에 쓴다(쓰기는 <접두>.k 를 쓴다). 쓰기 관문이 남긴 말의 임시 이름은 output 이름으로 바꿔 싣는다
-        std::string tmpDeck;
-        if (!staged.reserve(outPath, ".k", tmpDeck)) {
+        std::string tmpDeck, stageWhy;
+        if (!staged.reserve(outPath, ".k", tmpDeck, stageWhy)) {
             rep.problems.push_back({0, "write", "output 옆에 임시 파일 이름을 잡지 못했다: " + outPath});
             unapply();
             return refuse("덱 쓰기가 멈췄다 — 산출이 없다(output 자리의 앞 파일은 그대로다)");
@@ -2037,18 +1975,17 @@ int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
         rep.outputWritten = true;
         printList(rep.warnings, false);
         // 보고를 먼저 임시로 써 두고 덱 · 보고 차례로 바꿔 넣는다 — 덱을 바꿔 넣지 못하면 앞 파일 그대로 거절한다
-        std::string tmpRep;
-        if (!staged.writeText(reportPath, KooRemapper::carryover::toJson(rep), tmpRep)) {
+        if (!staged.writeText(reportPath, KooRemapper::carryover::toJson(rep), stageWhy)) {
             rep.problems.push_back({0, "write", "보고를 임시 파일에 쓰지 못했다: " + reportPath});
             unapply();
             return refuse("보고를 쓸 수 없다 — 덱을 바꿔 넣지 않았다(output 자리의 앞 파일은 그대로다)");
         }
-        if (!staged.commit(outPath)) {
+        if (!staged.commit(outPath, stageWhy)) {
             rep.problems.push_back({0, "write", "쓴 덱을 output 자리(" + outPath + ")로 바꿔 넣지 못했다"});
             unapply();
             return refuse("덱을 바꿔 넣지 못했다 — output 자리의 앞 파일은 그대로다");
         }
-        if (!staged.commit(reportPath)) {   // 덱은 이미 바꿔 넣었다 — 보고 없이 성공이라 말하지 않는다
+        if (!staged.commit(reportPath, stageWhy)) {   // 덱은 이미 바꿔 넣었다 — 보고 없이 성공이라 말하지 않는다
             console.error(std::string("[") + tag + "] 덱은 바꿔 넣었지만(" + outPath + ") 보고를 바꿔 넣지 못했다: " + reportPath);
             return 1;
         }

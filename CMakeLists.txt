@@ -143,6 +143,7 @@ set(UTIL_SOURCES
     src/util/SpatialHash2D.cpp
     src/util/Sha256.cpp
     src/util/StrictJson.cpp
+    src/util/StagedWrite.cpp
 )
 
 # Source files - Validation
