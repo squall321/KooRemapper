@@ -662,16 +662,38 @@ bool parseLL(const std::string& s, long long& v) {
     return true;
 }
 
+// 10진 수 꼴인가 — [+-]? (숫자+ (. 숫자*)? | . 숫자+) ([eE] [+-]? 숫자+)?. `strtod` 는 16진(`0x2` · `0x1.8p0`) · `inf` · `nan` 도 받아
+// NIP `0x2` 를 2 로 읽었다(적대적 검토 11-08 #5) — 덱 칸은 10진만 받는다(StepForge 리더의 `int()` · `float()` 와 같은 꼴)
+bool isDecimalNumber(const std::string& t) {
+    const size_t n = t.size();
+    size_t i = 0, digits = 0;
+    if (i < n && (t[i] == '+' || t[i] == '-')) ++i;
+    while (i < n && std::isdigit(static_cast<unsigned char>(t[i]))) { ++i; ++digits; }
+    if (i < n && t[i] == '.') {
+        ++i;
+        while (i < n && std::isdigit(static_cast<unsigned char>(t[i]))) { ++i; ++digits; }
+    }
+    if (digits == 0) return false;
+    if (i < n && (t[i] == 'e' || t[i] == 'E')) {
+        ++i;
+        if (i < n && (t[i] == '+' || t[i] == '-')) ++i;
+        size_t ed = 0;
+        while (i < n && std::isdigit(static_cast<unsigned char>(t[i]))) { ++i; ++ed; }
+        if (ed == 0) return false;
+    }
+    return i == n;
+}
+
 bool parseReal(const std::string& s, double& v) {
     const std::string t = deckscan::trim(s);
-    if (t.empty()) return false;
+    if (t.empty() || !isDecimalNumber(t)) return false;
     char* end = nullptr;
     v = std::strtod(t.c_str(), &end);
     return end == t.c_str() + t.size() && std::isfinite(v);
 }
 
 // 정수 칸 — 정수 글자이거나, 실수 꼴로 쓴 **정수 값**(NIP `5.000e+00`)이면 그 정수다. LS-DYNA 실행 기록이 NIP `3.000E+00` 을 3 으로
-// 받는다(StepForge 권고 591d5b5 · D-681 — 그쪽 말뭉치 52 덱 · 사용자 결정 11-07 밤). 정수가 아닌 값(`2.5`)은 그대로 거절한다
+// 받는다(StepForge 권고 591d5b5 · D-681 — 그쪽 말뭉치 52 덱 · 사용자 결정 11-07 밤). 정수가 아닌 값(`2.5`) · 10진이 아닌 꼴(`0x2`)은 거절한다
 bool parseIntegral(const std::string& s, long long& v) {
     if (parseLL(s, v)) return true;
     double d = 0;
@@ -1384,6 +1406,8 @@ void compareSectionCards(const std::vector<std::string>& deck, const SectionFile
                            " (SECID 와 T1~T4 만 바꿀 수 있다)");
     }
 }
+
+bool integralField(const std::string& s, long long& v) { return parseIntegral(s, v); }
 
 bool bytesGiveLines(const std::string& bytes, const std::vector<std::string>& lines, bool include) {
     size_t k = 0;

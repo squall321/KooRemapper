@@ -52,9 +52,9 @@ namespace KooRemapper {
 namespace { static int bc_findMaxSetNodeId(const std::vector<std::string>& rawLines); }
 
 namespace {
-// 줄들에서 `*SECTION_*` 블록마다 첫 데이터 카드의 SECID — SECID → 그 블록들(키워드 줄 · 키워드), 나온 차례. 같은 SECID 를 두 블록이
-// 정의하면 둘 다 담는다(이월 적용의 「손대는 PID 의 SECID 가 두 번 정의됐나」 — StepForge 권고 D-681 · 11-07 밤). 아래
-// `cur_scanSectionIds` 가 이것의 첫 정의다.
+// 줄들에서 `*SECTION_*` 블록마다 첫 데이터 카드의 SECID(공백 토큰 — `2.0` 을 2 로 읽는다) — SECID → 그 블록들(키워드 줄 · 키워드),
+// 나온 차례. 아래 `cur_scanSectionIds`(있나 · 종류) 와 번호 커서의 바닥(옛 첫 카드 셈 — 밑으로 내려가지 않게)이 쓴다. 두 번 정의 판정은
+// 카드 묶음 셈(`cur_scanSectionSets`)이 맡는다(11-08 — 쌓인 묶음까지 · StepForge 와 같은 줄에서 멈춘다).
 std::map<int, std::vector<std::pair<size_t, std::string>>> cur_scanSectionDefs(const std::vector<std::string>& lines) {
     std::map<int, std::vector<std::pair<size_t, std::string>>> defs;
     for (size_t i = 0; i < lines.size(); ++i) {
@@ -69,11 +69,13 @@ std::map<int, std::vector<std::pair<size_t, std::string>>> cur_scanSectionDefs(c
         int skip = (up.find("_TITLE") != std::string::npos) ? 1 : 0;
         for (size_t j = i + 1; j < lines.size(); ++j) {
             const std::string& d = lines[j];
-            size_t h = d.find_first_not_of(" \t");
-            if (h == std::string::npos) continue;
-            if (d[h] == '$') continue;
-            if (d[h] == '*') break;
+            size_t h = d.find_first_not_of(" \t\r");
+            if (h != std::string::npos && d[h] == '$') continue;
+            if (h != std::string::npos && d[h] == '*') break;
+            // `_TITLE` 의 제목 줄은 비어 있어도 그 줄이다(LS-DYNA · StepForge 는 빈 줄도 카드로 읽는다). 예전엔 빈 줄을 먼저 건너뛰어
+            // SECID 카드를 제목으로 버리고 두께 줄(`3.0`)을 SECID 3 으로 읽었다 — 이월 적용이 PID 3 을 part_duplicate 로 거짓 거절했다(11-08 #4)
             if (skip > 0) { --skip; continue; }
+            if (h == std::string::npos) continue;   // 제목 뒤의 빈 줄은 건너뛴다(예전 그대로)
             // 첫 칸의 정수. `rsCardFields` 는 이 파일 뒤쪽에 있어 여기서 못 쓴다 — 첫 칸만
             // 필요하므로 공백 토큰 하나로 충분하다(10칸 덱이든 8칸 덱이든 SECID 는 첫 칸이다).
             std::istringstream iss(d);
@@ -94,34 +96,117 @@ std::map<int, std::string> cur_scanSectionIds(const std::vector<std::string>& li
     return ids;
 }
 
-// ★번호 커서가 볼 「덱이 쓴 SECID」 — `*SECTION_*` 블록의 **모든** 데이터 줄의 첫 칸 정수(넉넉히). 위 첫 카드 표는 한 키워드 아래
-// 쌓인 둘째 카드의 SECID 를 몰라, 새 섹션을 내는 op 이 그 번호를 다시 냈다(rc 0 · 같은 SECID 둘 — 이월 적용의 11-07 적대적 검토 #1 과
-// 같은 틈 · 셋째 묶음 · 사용자 결정 「이번 판」). 쌓인 카드의 줄 수는 섹션 종류 · 옵션 카드마다 달라 정확히 가르지 않고 넉넉히 센다 —
-// 정수로 쓴 두께(`5`) · 각도 · 숫자 제목 줄도 들어 커서가 쓸데없이 오를 수 있다(겹치는 것보다 안전한 쪽). 칸 폭은 블록 키워드의 폭
-// (long `+` 이면 20). 있나 · 종류(`definedSectionIds`)는 위 첫 카드 표가 그대로 본다. 이월 적용의 새 SECID 겹침도 이 집합을 쓴다
-std::set<int> cur_scanSectionIdsAnyCard(const std::vector<std::string>& lines) {
-    std::set<int> out;
+// ★섹션 블록을 **카드 묶음**으로 가른다 — StepForge 리더(591d5b5 `card_sets` · `card_set_rows`)와 같은 규칙(적대적 검토 11-08 #2).
+// 한 키워드 아래 묶음 한 벌의 데이터 줄 수(묶음마다 오는 `_TITLE` 제목 줄은 뺀다)를 매뉴얼이 Card 1 칸으로 정하는 꼴만 다 읽는다 —
+//   `*SECTION_SOLID` 1(ELFORM 101~105 는 모름) · `*SECTION_SHELL` 2 + ICOMP 1 이면 각도 카드 ceil(NIP/8)(NIP 0 = 2 점 · ELFORM 101~105 는
+//   모름) · `*SECTION_TSHELL` 1 + 같은 각도 카드. ICOMP 가 0 · 1 밖이거나 칸이 정수가 아니면 모름. 정수 칸은 10진 실수 꼴의 정수도 받는다
+//   (`carryover::integralField` — NIP `5.000e+00`). 빈 줄도 카드다(끝의 빈 줄만 여백) · `$` 주석은 건너뛴다.
+// 그 밖의 꼴(보 · 이산 · SPH · EFG · SPG · PERI · IGA …)과 묶음을 못 가른 자리(행 수를 모름 · 묶음의 SECID 칸이 숫자가 아님)부터는 행마다 첫
+// 칸의 숫자를 넉넉히 센다(`loose` — 그 블록의 SECID 는 그 안 어느 행의 첫 칸이다 · StepForge `secid_bound`). 예전엔 모든 블록의 모든 행을
+// 넉넉히 세어 제목(`2024` · `12 mm plate`) · 정수 두께(`12`) · 정수 각도(`90`)가 「가장 큰 SECID」 가 되었다 — 정상 계획의 새 섹션을
+// 이월 적용이 `secid_order` 로 거절하고(StepForge 는 받는 덱) 공용 커서가 쓸데없이 올랐다(8f6761a · 9298665 의 퇴행).
+struct CurSectionSets {
+    std::map<int, std::vector<std::pair<size_t, std::string>>> defs;   // SECID → (그 묶음의 Card 1 줄, 키워드) — 나온 차례
+    std::set<int> loose;                                                // 못 가른 자리부터의 행마다 첫 칸 숫자
+};
+
+// 묶음 한 벌의 데이터 줄 수 — 모르면 -1(StepForge `card_set_rows`)
+int cur_sectionSetRows(const std::string& base, const std::string& card1, int w) {
+    if (base != "*SECTION_SOLID" && base != "*SECTION_SHELL" && base != "*SECTION_TSHELL") return -1;
+    if (card1.find(',') != std::string::npos) return -1;   // 자유 형식 — 칸 자리를 모른다
+    auto at = [&](size_t k, long long& v) {
+        const std::string f = card1.size() > k * static_cast<size_t>(w) ? card1.substr(k * static_cast<size_t>(w), static_cast<size_t>(w)) : "";
+        return carryover::integralField(f, v);              // 빈 칸은 0
+    };
+    long long elform = 0, nip = 0, icomp = 0;
+    if (!at(1, elform)) return -1;
+    if (base != "*SECTION_TSHELL" && elform >= 101 && elform <= 105) return -1;   // 사용자 정의 요소 — 딸린 카드 수를 그 카드의 값이 정한다
+    if (base == "*SECTION_SOLID") return 1;
+    if (!at(3, nip) || !at(6, icomp) || (icomp != 0 && icomp != 1)) return -1;
+    const long long angles = icomp == 1 ? ((nip > 0 ? nip : 2) + 7) / 8 : 0;
+    if (angles > 1000000) return -1;
+    return (base == "*SECTION_SHELL" ? 2 : 1) + static_cast<int>(angles);
+}
+
+// 줄의 첫 칸(고정폭 w · 콤마 줄은 첫 콤마 앞)이 숫자만이면 그 값 — StepForge 의 `raw[:10].strip().isdigit()`
+bool cur_digitsField(const std::string& l, int w, int& v) {
+    const size_t comma = l.find(',');
+    std::string f = comma != std::string::npos ? l.substr(0, comma) : l.substr(0, std::min(l.size(), static_cast<size_t>(w)));
+    f = deckscan::trim(f);
+    if (f.empty() || f.size() > 9 || !std::all_of(f.begin(), f.end(), [](char c) { return std::isdigit(static_cast<unsigned char>(c)); }))
+        return false;
+    v = std::stoi(f);
+    return v > 0;
+}
+
+CurSectionSets cur_scanSectionSets(const std::vector<std::string>& lines) {
+    CurSectionSets out;
     const int deckFw = deckFieldWidth(lines);
-    bool in = false;
-    int w = 10;
-    for (const auto& l : lines) {
+    for (size_t i = 0; i < lines.size();) {
+        const std::string& l = lines[i];
         const size_t g = l.find_first_not_of(" \t");
-        if (g != std::string::npos && l[g] == '*') {
-            in = deckscan::kwBare(deckscan::keywordToken(l)).rfind("*SECTION_", 0) == 0;
-            w = keywordFieldWidth(l, deckFw) == 20 ? 20 : 10;
-            continue;
+        if (g == std::string::npos || l[g] != '*') { ++i; continue; }
+        const std::string kw = deckscan::kwBare(deckscan::keywordToken(l));
+        size_t j = i + 1;
+        std::vector<size_t> rows;   // 블록의 데이터 줄(빈 줄 포함 · 주석 뺌)
+        for (; j < lines.size(); ++j) {
+            const size_t h = lines[j].find_first_not_of(" \t\r");
+            if (h != std::string::npos && lines[j][h] == '*') break;
+            if (h != std::string::npos && lines[j][h] == '$') continue;
+            rows.push_back(j);
         }
-        if (!in || !deckscan::isDataLine(l)) continue;
-        const auto f = deckscan::cardFields(l, w);
-        int v = 0;
-        if (!f.empty() && deckscan::toInt(f[0], v) && v > 0) out.insert(v);
+        if (kw.rfind("*SECTION_", 0) != 0) { i = j; continue; }
+        while (!rows.empty() && lines[rows.back()].find_first_not_of(" \t\r") == std::string::npos) rows.pop_back();
+        const int w = keywordFieldWidth(l, deckFw) == 20 ? 20 : 10;
+        const bool title = kw.size() > 6 && kw.compare(kw.size() - 6, 6, "_TITLE") == 0;
+        const std::string base = title ? kw.substr(0, kw.size() - 6) : kw;
+        const size_t t = title ? 1 : 0;
+        std::vector<size_t> starts;
+        size_t rest = std::string::npos;
+        bool known = true;
+        for (size_t a = 0; a < rows.size();) {
+            if (a + t >= rows.size()) { rest = a; break; }                    // 묶음이 제목 줄에서 끝났다
+            const int n = cur_sectionSetRows(base, lines[rows[a + t]], w);
+            if (n < 0) { rest = a; known = false; break; }                    // 행 수를 모르는 꼴 · 못 읽은 칸
+            if (a + t + static_cast<size_t>(n) > rows.size()) { rest = a; break; }   // 마지막 묶음이 모자란다(읽은 만큼)
+            starts.push_back(a);
+            a += t + static_cast<size_t>(n);
+        }
+        if (rest != std::string::npos) starts.push_back(rest);
+        for (size_t a : starts) {
+            if (a + t >= rows.size()) break;
+            int sid = 0;
+            if (!cur_digitsField(lines[rows[a + t]], w, sid)) { rest = a; known = false; break; }   // 묶음의 SECID 칸이 숫자가 아니다
+            out.defs[sid].emplace_back(rows[a + t], kw);
+        }
+        if (rest != std::string::npos && !known)
+            for (size_t r = rest; r < rows.size(); ++r) {
+                int v = 0;
+                if (cur_digitsField(lines[rows[r]], w, v)) out.loose.insert(v);
+            }
+        i = j;
     }
     return out;
 }
 
+// 번호 커서가 볼 가장 큰 SECID — 카드 묶음의 SECID · 못 가른 자리의 행 숫자 · 옛 첫 카드 셈(공백 토큰 — `2.0` 을 2 로 읽는다) 가운데
+// 가장 큰 것. 옛 셈보다 내려가지 않는다(적대적 검토 11-08 #2 — `2.0` 으로 쓴 SECID 를 새 셈이 못 읽어 offset 이 2 를 다시 냈다)
 int cur_scanMaxSectionId(const std::vector<std::string>& lines) {
-    const auto ids = cur_scanSectionIdsAnyCard(lines);
-    return ids.empty() ? 0 : *ids.rbegin();
+    const auto s = cur_scanSectionSets(lines);
+    int m = s.defs.empty() ? 0 : s.defs.rbegin()->first;
+    if (!s.loose.empty()) m = std::max(m, *s.loose.rbegin());
+    const auto first = cur_scanSectionIds(lines);
+    if (!first.empty()) m = std::max(m, first.rbegin()->first);
+    return m;
+}
+
+// 덱이 쓰는 SECID — 위 셋의 합(이월 적용의 새 SECID 겹침). 행 수를 아는 꼴은 묶음의 SECID 만 · 모르는 꼴은 넉넉히
+std::set<int> cur_scanSectionIdsInUse(const std::vector<std::string>& lines) {
+    const auto s = cur_scanSectionSets(lines);
+    std::set<int> out = s.loose;
+    for (const auto& [sid, d] : s.defs) { (void)d; out.insert(sid); }
+    for (const auto& [sid, kw] : cur_scanSectionIds(lines)) { (void)kw; out.insert(sid); }
+    return out;
 }
 
 // 줄들에서 `*MAT_*` 의 MID 최대값. 리더(`KFileReader`)는 재질 **다섯 종류**만 읽어 `baseMesh_.materials` 에
@@ -134,14 +219,7 @@ int cur_scanMaxSectionId(const std::vector<std::string>& lines) {
 // 칸으로 읽는다 — `         17.8500E-09` 처럼 붙은 칸을 17 로 읽지 않게.
 // 줄들에서 `*MAT_*` 가 **정의하는** MID 들 — 열 재질 · `_ADD_` 는 정의가 아니다. 최대값(`cur_scanMaxMaterialId`)과
 // 「그 재질이 인클루드에만 있나」(`materialsReachable` · 2026-10-17)가 같은 규칙을 본다.
-bool cur_isThermalMaterial(const std::string& kw) {
-    if (kw.rfind("*MAT_THERMAL_", 0) == 0) return true;
-    if (kw.size() < 8 || kw.compare(0, 6, "*MAT_T") != 0 || !std::isdigit(static_cast<unsigned char>(kw[6])) ||
-        !std::isdigit(static_cast<unsigned char>(kw[7])))
-        return false;
-    const int n = (kw[6] - '0') * 10 + (kw[7] - '0');
-    return n >= 1 && n <= 18 && (kw.size() == 8 || kw[8] == '_');
-}
+bool cur_isThermalMaterial(const std::string& kw) { return cards::isThermalMaterialKeyword(kw); }   // 공용 판정(CardFields.h)
 // MID → 그것을 정의한 `*MAT_*` 키워드 줄들(나온 차례 · 첫 데이터 카드의 MID) — 같은 MID 를 두 카드가 정의하면 둘 다 담는다
 // (이월 적용의 「손대는 PID 의 MID 가 두 번 정의됐나」 — StepForge 권고 D-681). 아래 `cur_scanMaterialIds` 가 이것의 번호들이다.
 std::map<int, std::vector<size_t>> cur_scanMaterialDefs(const std::vector<std::string>& lines) {
@@ -381,14 +459,17 @@ void ModelAssembler::initMaxSetIdFromRawLines() {
 // 줄을 받는다 — 판 2 의 인클루드 덱은 펼친 닫힘 전체를 본다(2026-11-07)
 std::set<int> ModelAssembler::definedMaterialIds(const std::vector<std::string>& lines) { return cur_scanMaterialIds(lines); }
 std::map<int, std::string> ModelAssembler::definedSectionIds(const std::vector<std::string>& lines) { return cur_scanSectionIds(lines); }
-std::set<int> ModelAssembler::sectionIdsAnyCard(const std::vector<std::string>& lines) { return cur_scanSectionIdsAnyCard(lines); }
+std::set<int> ModelAssembler::sectionIdsInUse(const std::vector<std::string>& lines) { return cur_scanSectionIdsInUse(lines); }
+int ModelAssembler::sectionIdTop(const std::vector<std::string>& lines) { return cur_scanMaxSectionId(lines); }
 std::map<int, std::vector<size_t>> ModelAssembler::materialDefinitionLines(const std::vector<std::string>& lines) {
     return cur_scanMaterialDefs(lines);
 }
+// 두 번 정의 판정(④)은 카드 묶음 셈을 쓴다 — 쌓인 묶음끼리 겹친 SECID 까지 세고 `_TITLE` 의 빈 제목 줄도 제목이다(StepForge 리더의
+// `dup_sections` 와 같은 줄에서 멈춘다 · 11-08 #4). 자리는 그 묶음의 Card 1 줄
 std::map<int, std::vector<size_t>> ModelAssembler::sectionDefinitionLines(const std::vector<std::string>& lines) {
     std::map<int, std::vector<size_t>> out;
-    for (const auto& [sid, d] : cur_scanSectionDefs(lines))
-        for (const auto& kw : d) out[sid].push_back(kw.first);
+    for (const auto& [sid, d] : cur_scanSectionSets(lines).defs)
+        for (const auto& at : d) out[sid].push_back(at.first);
     return out;
 }
 std::map<int, std::string> ModelAssembler::definedPartVariantIds(const std::vector<std::string>& lines) { return cur_scanPartVariantIds(lines); }
@@ -12734,8 +12815,9 @@ static std::vector<MdMatBlock> md_scanMatBlocks(const std::vector<std::string>& 
         if (t.empty() || t[0] != '*') continue;
         std::string u = mw_upper(t);
         if (u.substr(0, 5) != "*MAT_") continue;
-        // Exclude *MAT_THERMAL_*, *MAT_ADD_*
-        if (u.find("*MAT_THERMAL_") == 0 || u.find("*MAT_ADD_") == 0) continue;
+        // 열 재질(*MAT_THERMAL_* · 번호 이름 *MAT_T01~T18 — TMID 는 다른 번호 공간)과 *MAT_ADD_* 는 재질 블록이 아니다(11-08 #3 — 번호 이름은
+        // 빠져 있어 *MAT_T01 의 TMID 를 그 MID 의 재질로 바꿔 쓰고 MID 커서를 올렸다)
+        if (cards::isThermalMaterialKeyword(u) || u.find("*MAT_ADD_") == 0) continue;
 
         bool hasTitle = (u.find("_TITLE") != std::string::npos);
         MdMatBlock blk;
@@ -13666,7 +13748,7 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
         std::string t = mw_trim(rawLines_[i]);
         if (t.empty() || t[0] != '*') continue;
         std::string u = mw_upper(t);
-        bool isThermal = (u.find("*MAT_THERMAL_") == 0);
+        bool isThermal = cards::isThermalMaterialKeyword(u);   // 번호 이름 *MAT_T01~T18 도(11-08 #3 — 남아 같은 TMID 가 둘이 됐다)
         bool isExpansion = (u.find("*MAT_ADD_THERMAL_EXPANSION") == 0);
         if (!isThermal && !isExpansion) continue;
 
@@ -18283,7 +18365,7 @@ static std::map<int, mg_MatInfo> mg_parseMaterials(const std::vector<std::string
                 inMat = true; matType = "RIGID"; matCard = matMid = 0;
                 titleLine = (up.find("TITLE") != std::string::npos);
             } else if (up.find("*MAT_") == 0 && up.find("*MAT_ADD_") != 0 &&
-                       up.find("*MAT_THERMAL_") != 0) {
+                       !cards::isThermalMaterialKeyword(up)) {   // 열 재질(번호 이름 포함)의 Card 1 은 TMID TRO TGRLC … 다(11-08 #3)
                 // Generic fallback: try Card 1 = MID, RO, E, PR
                 inMat = true; matType = "GENERIC"; matCard = matMid = 0;
                 titleLine = (up.find("TITLE") != std::string::npos);
@@ -19055,6 +19137,9 @@ ReferenceReport checkElementPartReferences(const std::vector<std::string>& lines
             // `*MAT_ADD_*` 계열은 **재질을 새로 만들지 않는다** — 기존 MID 를 꾸민다(첫 칸도 PID 다).
             // 정의 집합에 넣으면 없는 재질을 있다고 말하게 된다.
             if (rsStarts(b.kw, "*MAT_ADD_")) { ++rep.notChecked; continue; }
+            // 열 재질(`*MAT_THERMAL_*` · `*MAT_T01`~`T18`)의 첫 칸은 TMID 다 — 구조 MID 가 아니다(Vol II · 11-08 #3). 넣으면 `*MAT_T01 2` 가
+            // 구조 재질이 없는 `*PART` MID 2 를 「정의됨」으로 지나보냈다
+            if (cards::isThermalMaterialKeyword(b.kw)) continue;
             collectFirstFields(b, matIds);
             continue;
         }

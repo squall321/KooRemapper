@@ -19,9 +19,10 @@
 무엇을 보나.
   A 실물 둘(바깥 덱 fc160119a36e · 메시 덱 f8ff42845904) · B 진리값 판을 판 2 로 · C 칸 표(판마다) · D 덱 자리 ·
   E 새 셸 섹션(§10.5) · F 인클루드(주 덱만 고침) · G refused_transform ·
-  R 적대적 검토(11-07 저녁) 고침 — R-1 쌓인 카드 SECID · R-2 인클루드 BOM · R-3 동반 파일 덮기 · R-4 보고 UTF-8 · R-5 링크 덱 폴더 ·
+  R 적대적 검토(11-07 저녁) 고침 — R-1 쌓인 카드 SECID · R-2 인클루드 BOM · R-3 동반 파일 덮기(R-3e~i 읽지 못하는 계획 · 11-08) ·
+  R-4 보고 UTF-8 · R-5 링크 덱 폴더 ·
   R-6 *END 둘 · R-7 수의 끝자리 · R-8 담은 뒤 바뀐 덱(gdb 로 적용 직전에 멈춰 파일을 바꾼다 — 못 멈추면 SKIP) ·
-  S StepForge 권고(그쪽 591d5b5 · D-681) — S-2 정수 칸의 실수 꼴
+  S StepForge 권고(그쪽 591d5b5 · D-681) — S-2 정수 칸의 실수 꼴 · S-3 새 SECID 차례(카드 묶음으로 센다 · 11-08)
 
 usage: test_apply_carryover_plan_v2.py <KooRemapper 바이너리>
 """
@@ -818,6 +819,44 @@ def part_r3(binary):
     check("R-3d output 이 model → 덱 그대로 · 거절 까닭을 보고에 쓴다(output_clobber)",
           rc == 1 and sha(os.path.join(d, "deck.k")) == before and "output_clobber" in kinds(rep), (rc, sorted(kinds(rep)), out[-200:]))
 
+    # R-3e~i 계획을 읽지 못하면(깨진 JSON · BOM) 동반 파일을 모른다 — 계획 폴더의 파일을 다 입력으로 본다(적대적 검토 11-08 #1 · 예전엔
+    # 빈 목록이라 거절 보고가 field_2.bin · fragment_5.k 를 덮었다 — rc 1 plan_json 인데 field_2.bin 이 보고가 됐다). 앞 실행의 보고는
+    # 형식 표지("format": "dynaforge-carryover-apply")로 알아보고 다시 쓴다
+    unknown = "동반 파일을 모른다"
+
+    def broken(name, mut, output="deck_applied.k", report="deck_applied_carryover.json"):
+        d = stage(name)
+        pp = os.path.join(d, "plan.json")
+        raw = open(pp, "rb").read()
+        open(pp, "wb").write(mut(raw))
+        before = {f: sha(os.path.join(d, f)) for f in os.listdir(d)}
+        write(os.path.join(d, "a.yaml"), "model: deck.k\nplan: plan.json\noutput: %s\nreport: %s\n" % (output, report))
+        rc, out = run(binary, d, OP, "a.yaml")
+        changed = sorted(f for f, h in before.items() if not os.path.isfile(os.path.join(d, f)) or sha(os.path.join(d, f)) != h)
+        return d, rc, out, changed
+
+    for tag, how, mut, rp in (("e", "끝 2 바이트 잘림", lambda b: b[:-2], "field_2.bin"),
+                              ("f", "끝에 x", lambda b: b + b"x", "fragment_5.k"),
+                              ("g", "BOM", lambda b: b"\xef\xbb\xbf" + b, "field_2.bin")):
+        d, rc, out, changed = broken("r3" + tag, mut, report=rp)
+        check("R-3%s 읽지 못하는 계획(%s) · report 가 동반 파일(%s) → rc 1 · 폴더 파일 그대로 · 덱 없음(보고 자리가 없어 콘솔로만)" % (tag, how, rp),
+              rc == 1 and not changed and not os.path.exists(os.path.join(d, "deck_applied.k")) and unknown in out and not tmp_left(d),
+              (rc, changed, out[-300:]))
+    d, rc, out, changed = broken("r3h", lambda b: b[:-2], output="fragment_4.k", report="r3h_carryover.json")
+    rep = json.load(open(os.path.join(d, "r3h_carryover.json"), encoding="utf-8")) if os.path.exists(os.path.join(d, "r3h_carryover.json")) else {}
+    check("R-3h 읽지 못하는 계획 · output 이 폴더의 조각(fragment_4.k) → 조각 그대로 · 보고에 output_clobber(까닭에 「동반 파일을 모른다」)",
+          rc == 1 and not changed and "output_clobber" in kinds(rep) and unknown in details(rep, "output_clobber"), (rc, changed, sorted(kinds(rep))))
+    # 앞 실행의 보고는 다시 쓴다 — 같은 report 로 두 번 돌린다(둘째 전에 보고를 「ok true」 로 바꿔 두어 다시 썼는지 본다 · 줄 끝은 CRLF)
+    d, rc, out, changed = broken("r3i", lambda b: b[:-2], report="again.json")
+    rp = os.path.join(d, "again.json")
+    first = json.load(open(rp, encoding="utf-8")) if os.path.exists(rp) else {}
+    write(rp, '{\n  "format": "dynaforge-carryover-apply",\n  "version": 1,\n  "ok": true\n}\n', newline="\r\n")
+    rc2, out2 = run(binary, d, OP, "a.yaml")
+    second = json.load(open(rp, encoding="utf-8")) if os.path.exists(rp) else {}
+    check("R-3i 읽지 못하는 계획 · 앞 실행의 보고(형식 표지 · CRLF)는 다시 쓴다 — 두 번 다 rc 1 · plan_json 보고",
+          rc == 1 and rc2 == 1 and "plan_json" in kinds(first) and "plan_json" in kinds(second) and second.get("ok") is False,
+          (rc, rc2, sorted(kinds(first)), sorted(kinds(second)), out2[-300:]))
+
 
 
 def report_utf8(path):
@@ -983,16 +1022,16 @@ def part_r8(binary):
 def part_s(binary):
     print("[S StepForge 권고(D-681 · 사용자 결정 11-07 밤) — LS-DYNA 가 덱을 읽는 꼴로]")
     # S-2 정수 칸의 실수 꼴 — NIP `5.000e+00` 은 5(LS-DYNA 실행 기록) · 새 셸 섹션 카드의 줄 셈(shellSectionRows)이 받는다
-    for tag, nip, ok in (("s2", "5.000e+00", True), ("s2b", "2.500e+00", False)):
+    for tag, nip, ok in (("s2", "5.000e+00", True), ("s2b", "2.500e+00", False), ("s2c", "0x2", False)):
         d = stage(tag)
         deck = os.path.join(d, "deck.k")
         body = read(deck)
         old1 = "         4         2         1         2\n"
         assert body.count(old1) == 1
-        write(deck, body.replace(old1, "         4         2         1 %s\n" % nip))
+        write(deck, body.replace(old1, "         4         2         1%10s\n" % nip))
         p = to_v2(d)
         write(os.path.join(d, "section_4.k"), SECTION_4.replace("        10         2         1         2\n",
-                                                                "        10         2         1 %s\n" % nip))
+                                                                "        10         2         1%10s\n" % nip))
         can_morph(d, p, {"secid": 10, "thickness": 0.6, "file": "section_4.k", "why": "0.4 → 0.6"})
         put_file(d, p, "section_4.k")
         resummarize(p)
@@ -1003,7 +1042,40 @@ def part_s(binary):
             check("S-2 NIP 가 실수 꼴 정수(5.000e+00) → 그 정수로 읽어 받는다 · 새 카드가 글자 그대로 들어갔다",
                   rc == 0 and "        10         2         1 5.000e+00\n" in body, (rc, sorted(kinds(rep)), out[-300:]))
         else:
-            refused("S-2b NIP 가 정수가 아닌 실수(2.500e+00) → 그대로 거절(new_section)", rc, out, rep, d, "new_section")
+            refused("S-2%s NIP 가 %s → 거절(new_section — 정수가 아닌 실수 · 10진이 아닌 꼴은 정수 칸이 아니다)" % (tag[-1], nip.strip()),
+                    rc, out, rep, d, "new_section")
+            check("S-2%s 까닭은 NIP 칸이다(다른 칸이 어긋나 걸린 것이 아니다)" % tag[-1], "NIP" in details(rep, "new_section"),
+                  details(rep, "new_section")[:300])
+
+    # S-3 새 SECID 의 차례 — 셸 · 솔리드 · 티쉘 섹션은 카드 묶음으로 정확히 센다(StepForge 591d5b5 와 같은 규칙). 제목 · 두께 · 각도의 숫자는
+    #     SECID 가 아니다 — 예전엔 섹션 블록의 모든 행을 넉넉히 세어 정상 계획의 새 섹션(조각 9 · 모프 10)을 secid_order 로 거절했다(11-08 #2)
+    mass8 = "*SECTION_SOLID_TITLE\nMASS_LUMP#8_sec\n$#   secid    elform\n         8         1\n"
+    shell8 = ("*SECTION_SHELL_TITLE\nMASS_LUMP#8_sec\n$#   secid    elform      shrf       nip     propt   qr/irid     icomp\n"
+              "         8         2         1         %d         0         0         %d\n$#      t1        t2        t3        t4\n%s\n")
+    for tag, old, new, what, ok in (
+            ("s3", "BRACKET#3_sec\n", "2024\n", "섹션 제목이 숫자(2024)", True),
+            ("s3b", "BRACKET#3_sec\n", "12 mm plate\n", "섹션 제목이 숫자로 시작(12 mm plate)", True),
+            ("s3c", mass8, shell8 % (2, 0, "        12        12        12        12"), "정수로 쓴 셸 두께 12", True),
+            ("s3d", mass8, shell8 % (4, 1, "       1.0       1.0       1.0       1.0\n$#      b1        b2        b3        b4\n"
+                                        "        90         0         0        90"), "ICOMP 1 의 정수 각도 90", True),
+            ("s3e", mass8, mass8 + "stacked\n        12         1\n", "진짜 쌓인 카드 묶음(SECID 12 — 지킴이)", False)):
+        d = stage(tag)
+        deck = os.path.join(d, "deck.k")
+        body = read(deck)
+        assert body.count(old) == 1, old
+        write(deck, body.replace(old, new))
+        p = to_v2(d)
+        write(os.path.join(d, "section_4.k"), SECTION_4)
+        can_morph(d, p, {"secid": 10, "thickness": 0.6, "file": "section_4.k", "why": "0.4 → 0.6"})
+        put_file(d, p, "section_4.k")
+        resummarize(p)
+        plan_save(d, p)
+        rc, out, rep = apply_case(binary, d)
+        if ok:
+            check("S-%s %s → 새 섹션(9 · 10)을 받는다(그 숫자는 SECID 가 아니다)" % (tag[1:], what),
+                  rc == 0 and "secid_order" not in kinds(rep), (rc, sorted(kinds(rep)), details(rep, "secid_order")[:200]))
+        else:
+            refused("S-%s %s → 새 섹션 10 이 그 아래다 · secid_order" % (tag[1:], what), rc, out, rep, d, "secid_order")
 
 
 if __name__ == "__main__":

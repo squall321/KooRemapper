@@ -2,6 +2,7 @@
 #include "assembly/ModelAssembler.h"
 
 #include "core/Mesh.h"
+#include "parser/CardFields.h"   // 열 재질 판정(isThermalMaterialKeyword)
 #include "parser/DeckScan.h"
 #include "parser/ElementCardLayout.h"
 #include "parser/FragmentMap.h"
@@ -34,7 +35,7 @@ namespace {
 // 계약(§3-3)이 적은 조각 키워드 — 이것 밖은 거절한다.
 bool contractKeyword(const std::string& kw) {
     if (kw.rfind("*MAT_", 0) == 0)
-        return kw.rfind("*MAT_ADD_", 0) != 0 && kw.rfind("*MAT_THERMAL_", 0) != 0;
+        return kw.rfind("*MAT_ADD_", 0) != 0 && !cards::isThermalMaterialKeyword(kw);   // 열 재질은 번호 이름(*MAT_T01~T18)도 계약 밖(11-08 #3)
     return kw == "*KEYWORD" || kw == "*END" || kw == "*NODE" || kw == "*ELEMENT_SOLID" || kw == "*ELEMENT_SHELL" ||
            kw == "*PART" || kw == "*SECTION_SOLID" || kw == "*SECTION_SOLID_TITLE" || kw == "*SECTION_SHELL" ||
            kw == "*SECTION_SHELL_TITLE";

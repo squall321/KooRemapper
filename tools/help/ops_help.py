@@ -393,7 +393,9 @@ merge:
           "*ELEMENT_MASS(_PART 포함)는 merge 에서도 옮기지 않고 manual 로 남긴다 — 변형마다 PID 칸 자리가 달라(EID·노드 ID·MASS·PID / _PART 는 PID·MASS) 잘못 짚으면 노드 ID 를 덮어쓴다. 집중질량은 직접 배분해라",
           "못 옮긴 자리가 하나라도 남으면 rc=1 이고 덱은 쓴다. 전체 목록은 덱 머리(*KEYWORD 바로 뒤)의 '$ KOOREMAPPER-PIDREF' 블록에 moved/left/manual/unknown/maybe 등급과 입력 덱 기준 줄 번호로 들어간다. maybe(화이트리스트 밖)는 rc 에 넣지 않는다",
           "pid_refs: strict(기본) | warn — warn 은 같은 보고를 하고 rc=0 으로 끝낸다. 그 밖의 값은 rc=1 + invalid pid_refs. assemble 은 operations[] 항목 안에, 단독 merge 는 YAML 에 그대로 적는다",
-          "위 사례의 three_layer.k 는 *MAT_ADD_THERMAL_EXPANSION 2 건이 죽은 PID 를 가리켜 '옮김' 으로 보고된다 — 못 옮긴 자리가 없어 rc=0 이다"])
+          "위 사례의 three_layer.k 는 *MAT_ADD_THERMAL_EXPANSION 2 건이 죽은 PID 를 가리켜 '옮김' 으로 보고된다 — 못 옮긴 자리가 없어 rc=0 이다",
+          "assemble 의 merge 는 모르는 *MAT_* 를 Card 1 = MID RO E PR 로 읽어 본다(GENERIC) — 열 재질(*MAT_THERMAL_* · *MAT_T01~T18)은 읽지 않는다",
+          "  (2026-11-08 — 예전엔 *MAT_T01 의 TMID TRO TGRLC 를 읽어 같은 번호 구조 재질의 E 를 TGRLC 로 덮었다)"])
 op("strip", "표면·재메시", "지정 키워드를 k 파일에서 제거 (메시 빼고 카드만 남기기 등)", "제거 키워드 remove",
    "KooRemapper strip <config.yaml>",
    files=boxed({"strip.yaml": """model: box.k
@@ -536,7 +538,9 @@ materials:
    notes=["사례처럼 database 를 생략하는 편이 이식성 있다 — 작업 폴더 materials/material_db.json → 실행 파일 기준 materials/·../materials/ 순으로 번들 DB 를 찾는다 (SIF 도 /opt/kooremapper/bin + /opt/kooremapper/materials 로 이 규칙에 걸린다)",
           "database 를 적으면 폴더가 붙은 값은 작업 폴더 기준, 폴더 없는 홑이름은 YAML 폴더 기준이다 — 번들 이름만 주는 형태는 없으니 절대 경로나 생략을 쓸 것",
           "match: 파트/재질 제목 부분일치, \"*\" 는 나머지 전부. mid: 로 MID 직접 지정",
-          "damping_preset: smartphone_drop | smartphone_drop_aggressive | quasi_static | off (모르는 값은 rc=1)"])
+          "damping_preset: smartphone_drop | smartphone_drop_aggressive | quasi_static | off (모르는 값은 rc=1)",
+          "덱의 열 재질(*MAT_THERMAL_* · 번호 이름 *MAT_T01~T18)은 재질 블록이 아니다(첫 칸이 TMID · 2026-11-08) — 맞춘 MID 와 같은 번호의",
+          "  열 카드는 둘 다 지운다. 예전엔 번호 이름을 그 MID 의 재질로 바꿔 써 같은 MID 가 둘이 되고 thermal: true 면 열 카드가 두 벌이었다"])
 op("matswap", "재료·어셈블리", "MAT+HOURGLASS+CURVE+SECTION 번들을 파트에 통째로 교체", "재질교체 bundle rubber",
    "KooRemapper matswap <config.yaml>\nKooRemapper matswap <model.k> <bundle.k> <pid> <output.k>",
    needs=["examples/matswap/two_cubes.k", "examples/matswap/rubber.k"],
@@ -721,7 +725,9 @@ fhigh_ratio: 100.0
 mode: global
 """}),
    cmds=[BOX_CMD, "KooRemapper hfdamp hf.yaml"], outputs=["box_hfdamp.k"],
-   notes=["mode: global | selective (dt ≤ dt_target 파트만)"])
+   notes=["mode: global | selective (dt ≤ dt_target 파트만)",
+          "selective 의 재료는 *MAT_* Card 1 의 MID RO E PR — 열 재질(*MAT_THERMAL_* · *MAT_T01~T18)은 읽지 않는다(2026-11-08 — 예전엔",
+          "  *MAT_T01 의 TRO · TGRLC 로 같은 번호 재질의 RO · E 를 덮어 dt 를 못 재고 전체 감쇠로 바꿨다)"])
 
 # ── 솔버 설정 ──
 op("implicit", "솔버 설정", "explicit 덱을 implicit(정적·동적) 설정으로 변환", "암시적 static 정적",
@@ -797,6 +803,9 @@ op("info", "정보·메타", "메시 정보(절점·요소·파트 수, bbox 두
           "  `Orphan nodes` 는 **상한**이다. (예전엔 앞 8칸만 담아 TET10 덱에서 거짓 고아 · 거짓 「음수 2」를 냈다)",
           "`--strict` 는 세트·SPC·하중·이력·CNRB PNODE 등이 가리키는 **절점**도 본다 — 없으면 미정의 참조(줄마다 한 건).",
           "  `*NODE` 가 하나도 없는 조각 덱은 단정하지 않는다. 실사용 6,053장에서 거짓 경보 0",
+          "`--strict` 의 열 재질(`*MAT_THERMAL_*` · 번호 이름 `*MAT_T01`~`T18`) 첫 칸은 **TMID** 다(2026-11-08) — 구조 MID 와 같은 수여도",
+          "  겹침이 아니고 `*PART` 의 MID 를 정의하지 않는다(Vol I *PART 비고 7). 예전엔 `*MAT_ELASTIC 2` + `*MAT_T01 2` 를 망가진 카드로,",
+          "  구조 재질 없는 `*PART` MID 2 를 열 재질(이름 꼴도) 덕에 「정의됨」으로 보았다",
           "★메시를 **인클루드 닫힘까지** 읽는다(2026-10-16) — 마스터 덱의 절점·요소·파트·bbox 가 실제 값이다(예전엔 0).",
           "  닫힘을 다 읽었으면 「없는 노드를 가리키는 요소」도 단정한다. `*INCLUDE ±` 면 펼치지 않고 주 덱만"])
 op("modelmeta", "정보·메타", "파트별 기하 메트릭·재질·연결성(접촉 탐지 포함) JSON 추출", "메타 json connectivity 연결성",
@@ -995,7 +1004,8 @@ fragment_map: examples/cad_solid_merge_to_deck/stepforge_fragment.json
           "  StepForge `export_part_fragment` 의 인자(`node_start`·`elem_start`·`pid_start`·`sid_start` — 이름 그대로)로 주면",
           "  조각이 그 번호로 쓰이고 `cad_solid_merge_to_deck` 가 **옮기지 않고** 넣는다(대응표 번호 = 덱 번호)",
           "바닥 = assemble 과 같은 커서(**인클루드 닫힘까지**)의 최대값 + 1. pid_start 는 PID·SECID·MID 셋의 최대값 위다",
-          "  (SECID 는 *SECTION_* 블록의 모든 데이터 줄 첫 칸 정수 — 한 키워드 아래 쌓인 둘째 카드까지 넉넉히 · 11-07 밤)",
+          "  (SECID 는 *SECTION_* 블록을 카드 묶음으로 갈라 센다 — SOLID · SHELL · TSHELL 은 쌓인 묶음까지 정확히, 줄 수를 모르는 꼴은",
+          "  행마다 첫 칸 숫자를 넉넉히 · 제목 · 두께 · 각도의 숫자는 SECID 가 아니다 · StepForge 591d5b5 와 같은 규칙 · 11-08)",
           "  (열 재질 *MAT_THERMAL_* · *MAT_T01~T18 의 TMID 는 MID 와 독립된 번호라 세지 않는다 — Vol II 3-1)",
           "★요소 바닥은 **모든 요소 족**이다(2026-11-07) — 솔리드 · 셸 · 티쉘에 더해 보 · 이산 · 질량 · 안전띠 · 플롯 요소와",
           "  줄 수를 모르는 변형의 EID 까지 센다(리더는 그 요소를 메시에 담지 않는다). `cad_solid_merge_to_deck` 도 이 바닥으로 옮긴다",
@@ -1059,7 +1069,8 @@ fragment_map: examples/cad_solid_merge_to_deck/stepforge_fragment.json
           "좌표 글자는 **바이트 그대로** 두고 번호 칸만 이 덱의 폭(8 · i10 이면 10)으로 쓴다. 넣을 블록을",
           "  **다시 읽어** coord_sha 를 한 번 더 잰다. long 덱은 받지 않는다",
           "unit 은 `deck_unit`(기본 mm-t-s)과 같아야 하고 frame 은 world 여야 한다 — 환산·변환은 하지 않는다",
-          "계약 밖 키워드(`*SET_*`·`*MAT_ADD_*`·`*MAT_THERMAL_*` …)가 든 조각·`ranges.sid` 가 null 이 아닌 조각은 거절",
+          "계약 밖 키워드(`*SET_*`·`*MAT_ADD_*`·열 재질 `*MAT_THERMAL_*` · 번호 이름 `*MAT_T01`~`T18` …)가 든 조각·`ranges.sid` 가 null 이 아닌 조각은 거절",
+          "  (번호 이름은 2026-11-08 전엔 받았다)",
           "저쪽 자리표시 물성(RO = E = 1.0)은 그대로 넣되 MID 마다 **경고**한다 — 해석 전에 바꿀 것",
           "산출 둘 — `<output>.k` · `<output>_fragment_map.json`(같은 칸 집합의 대응표를 **덱 번호**로 옮긴 것)",
           "  둘 중 하나가 model · 그 인클루드 · fragment · fragment_map · 설정과 같은 파일이면 덱을 쓰기 전에 rc 1(2026-11-07)"])
@@ -1097,10 +1108,11 @@ output: deck_applied.k
           "★판 2 셸 두께가 바뀐 모프 — field.new_section 이 지은 카드(section_<PID>.k: *KEYWORD · 셸 섹션 카드 하나 · *END)는 덱의 옛 카드(그 PID",
           "  *PART 의 SECID — 주 덱)를 **그대로 옮겨** SECID(Card 1 앞 10칸) · T1~T4(Card 2 앞 40칸)만 바꾼 것이어야 한다(줄마다 견준다 · 다르면",
           "  new_section). SECID 는 계획 값 · 닫힘에 없음 · deck.max.secid 위 · 조각의 새 섹션 뒤 줄 차례(secid_collision · secid_order).",
-          "  Card 1 의 ELFORM · NIP · ICOMP 는 실수 꼴로 쓴 정수(5.000e+00)도 그 정수로 읽는다(StepForge 권고 D-681 — 정수가 아닌 값은 거절)",
+          "  Card 1 의 ELFORM · NIP · ICOMP 는 실수 꼴로 쓴 정수(5.000e+00)도 그 정수로 읽는다(StepForge 권고 D-681 — 정수가 아닌 값 ·",
+          "  10진이 아닌 꼴(0x2 · inf)은 거절 · 덱 칸은 10진만)",
           "  조각의 MID 는 구조 재질이어야 한다 — 열 재질(*MAT_THERMAL_* · *MAT_T01~T18)의 TMID 는 MID 가 아니다(StepForge 권고 D-681)",
-          "  「닫힘에 없음」 은 한 키워드 아래 쌓인 둘째 카드까지 본다 — `*SECTION_*` 데이터 줄 첫 칸의 정수를 모두 SECID 로 넉넉히 센다(조각의",
-          "  새 섹션도 같다 · 판 1 · 2 — 두께 · 제목의 정수도 들어 거짓 거절이 날 수 있다)",
+          "  「닫힘에 없음」 · 「가장 큰 SECID 위」 는 공용 번호 커서와 같은 셈이다 — 섹션 블록을 카드 묶음으로 갈라 쌓인 묶음까지 정확히",
+          "  (줄 수를 모르는 꼴만 행마다 넉넉히 · 제목 · 두께 · 각도의 숫자는 SECID 가 아니다 · 조각의 새 섹션도 같다 · 11-08)",
           "  넣고 그 PID *PART 의 SECID 만 잇는다(같은 섹션을 쓰는 다른 파트는 그대로). new_section null 이면 섹션 그대로(두께 칸이 있어도) ·",
           "  못 지었으면(secid null · instead) 거절 · 요소마다 두께(*ELEMENT_SHELL_THICKNESS 류 THIC)를 싣는 PID 는 거절(element_thickness)",
           "★판 2 — 강체가 아닌 옮김은 계획이 review 로 돌린다(refused_transform — 옮기지 않고 보고에 그대로 되돌려 준다) · deck_from(raw · mesh)은",
@@ -1118,14 +1130,16 @@ output: deck_applied.k
           "  · `*PART_INERTIA` 같은 `*PART` 변형 · 판 1 의 셸 두께가 바뀐 모프(field.thickness) · morph 줄의 instead · 못 지은 조각(까닭은 보고에)",
           "  · 요소 `_TITLE` 블록(`*ELEMENT_SOLID_TITLE` · `_SHELL_TITLE` · `_TSHELL_TITLE`)에 요소가 있을 수 있는 PID 를 고치는 줄",
           "  (opaque_elements — TITLE 은 설명서 옵션이 아니라 제목 카드를 읽는지 근거가 없다 · keep 은 둔다 · StepForge 권고 D-681)",
-          "  · 손대는 PID 의 SECID · MID 를 닫힘의 두 블록 이상이 정의한 줄(part_duplicate — LS-DYNA 는 둘째 정의에서 멈춘다 · 권고 D-681)",
+          "  · 손대는 PID 의 SECID · MID 를 닫힘에서 두 번 이상 정의한 줄(part_duplicate — LS-DYNA 는 둘째 정의에서 멈춘다 · 권고 D-681 ·",
+          "  SECID 는 쌓인 섹션 묶음끼리도 센다 · _TITLE 의 빈 제목 줄도 제목이다)",
           "★덱을 고치는 줄은 하나도 적용하지 않는다 — 절점 칸을 다 읽지 못하는 요소 블록(리더가 담지 않는 `*ELEMENT_SOLID_ORTHO` · `_H20` ·",
           "  `_TET4TOTET10` · `*ELEMENT_TSHELL_BETA` · 셸 `_DOF` · 칸 자리를 모르는 블록)이나 요소 블록 사이 EID 겹침이 있을 때. 보 `_WARPAGE` 의",
           "  SN1 · SN2 · `_ELBOW` 의 MN 은 공용 걸음이 읽는다(나눠 쓴 절점에 든다 — 11-07 밤부터 그 블록을 거절하지 않는다).",
           "  조각을 넣으려면 덱이 *END 로 끝나야 한다 — 넣는 카드(조각 · 새 셸 섹션)는 주 덱의 **첫** *END 앞에 한 벌만 둔다",
           "  (LS-DYNA 는 거기서 읽기를 멈춘다 — 예전엔 *END 가 둘인 덱에 두 벌 넣었다 · 11-07)",
-          "조각 번호는 덱 바닥(`id_floor` 와 같은 값 — 보 · 이산 · 질량 요소까지) 위여야 한다 — 아래에 걸치면 조각 **전부**를 한 이동량으로",
-          "  옮기고(조각끼리는 그대로 잇는다) 보고의 shift 에 적는다. 조각끼리 번호가 겹치면 거절",
+          "조각의 절점 · 요소 번호는 덱 바닥(`id_floor` 의 node_start · elem_start 와 같은 값 — 보 · 이산 · 질량 요소까지) 위여야 한다 — 아래에",
+          "  걸치면 조각 **전부**를 한 이동량으로 옮기고(조각끼리는 그대로 잇는다) 보고의 shift 에 적는다. 조각끼리 번호가 겹치면 거절.",
+          "  PID · SECID · MID 는 옮기지 않는다(새 섹션 SECID 는 차례 · 겹침을 따로 본다 · 조각 MID 는 덱에 있어야 한다)",
           "쓴 덱을 **다시 읽어** 대조한다 — 옮긴 자리 · 지운 번호 · 넣은 번호와 좌표 · 손대지 않은 절점 · 파트별 요소 수 · `*PART`.",
           "  그리고 품질 관문 — **새로** 뒤집힌 솔리드(야코비안 ≤ 0) · 모프가 법선을 뒤집은 셸이 하나라도 있으면 산출을 **바꿔 넣지 않는다**",
           "보고 JSON(`report`, 기본 `<output 줄기>_carryover.json`)은 **거절해도 · 내부 오류에도** 쓴다 — format dynaforge-carryover-apply · ok ·",
@@ -1137,7 +1151,8 @@ output: deck_applied.k
           "  수는 다시 읽으면 같은 double 이 되는 가장 짧은 꼴(15~17 자리) — refused_transform 은 계획 값과 비트까지 같다",
           "경로는 YAML 폴더 기준 · 모르는 YAML 키는 거절 · output · report 가 읽는 파일(설정 YAML · 주 덱 · 계획 · 인클루드 · 계획의 동반 파일 —",
           "  files 와 줄이 가리킨 변위장 · 조각 · section_<PID>.k)이나 폴더면 거절한다 — output 이 걸리면 보고에 output_clobber 로 적고(아무것도",
-          "  쓰지 않는다), report 가 걸리면 보고 자리가 없어 콘솔로만",
+          "  쓰지 않는다), report 가 걸리면 보고 자리가 없어 콘솔로만. 계획을 읽지 못하면(깨진 JSON · BOM · files 가 없다) 동반 파일을 몰라",
+          "  계획 폴더의 파일을 다 읽는 파일로 본다 — 앞 실행의 이월 보고(형식 표지)만 뺀다(2026-11-08 — 예전엔 report: field_2.bin 이 덮었다)",
           "★쓰기는 임시 파일 + 바꿔 넣기(사용자 결정 11-07 밤 — extract-parts 와 같다) — 같은 폴더의 `.<이름>.kr_tmp_…` 에 쓰고 대조 · 품질 관문까지",
           "  지나면 덱 · 보고 차례로 바꿔 넣는다. 거절 · 실패면 이번 실행의 임시 파일만 지운다 — output 자리의 앞 파일 · 폴더 · 남의 파일은 그대로다",
           "  (예전엔 거절하면 앞 덱을 「옛 산출」로 지웠다 — stale_output_removed 는 없앴다)"])

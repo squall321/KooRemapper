@@ -380,10 +380,13 @@ BOM 을 붙인 설정으로 둘 다 **종료 코드 0** 으로 정상 산출물�
 번호를 다시 낼 수 있었습니다(실사용 인클루드 덱 88장 중 83장에서 주 덱만 센 노드·요소 최대값이
 닫힘의 최대값보다 작았습니다).
 
-- 섹션 번호(SECID)는 `*SECTION_*` 블록의 **모든** 데이터 줄 첫 칸 정수를 넉넉히 셉니다(2026-11-07 밤) — 블록마다 첫 카드만
-  세어, 한 키워드 아래 쌓인 둘째 카드의 SECID(예: `examples/wrap/cylinder_2layer.k` 의 `*SECTION_SOLID` 밑 SECID 1 · 2)를 새 섹션이
-  다시 낼 수 있었습니다(rc 0 · 같은 SECID 둘). 정수로 쓴 두께 · 각도 · 숫자 제목 줄도 들어 새 SECID 가 쓸데없이 커질 수 있습니다
-  (겹치는 것보다 안전한 쪽). 「그 SECID 가 있나 · 어떤 섹션인가」 는 첫 카드 표 그대로입니다. 새 SECID 를 내는 op —
+- 섹션 번호(SECID)는 `*SECTION_*` 블록을 **카드 묶음**으로 갈라 셉니다(2026-11-08 · StepForge 리더 591d5b5 와 같은 규칙) —
+  `*SECTION_SOLID` · `_SHELL` · `_TSHELL` 은 묶음 한 벌의 줄 수를 Card 1 이 정하므로(제목 줄 · SHELL 의 Card 2 · ICOMP 1 의 각도 카드)
+  한 키워드 아래 쌓인 묶음의 SECID 까지 정확히 읽고(예: `examples/wrap/cylinder_2layer.k` 의 `*SECTION_SOLID` 밑 SECID 1 · 2 — 예전엔
+  첫 카드만 세어 새 섹션이 2 를 다시 낼 수 있었다), 줄 수를 모르는 꼴(보 · 이산 · SPH · EFG · SPG · PERI · IGA …)과 못 가른 자리부터는
+  행마다 첫 칸 숫자를 넉넉히 셉니다. 제목(`2024` · `12 mm plate`) · 정수로 쓴 두께(`12`) · 각도(`90`)는 SECID 가 아닙니다(11-07 밤 판은
+  모든 행을 세어 그 숫자가 새 SECID 를 부풀렸습니다). 옛 첫 카드 셈(`2.0` 으로 쓴 SECID 를 2 로 읽는다)보다 내려가지 않습니다.
+  「그 SECID 가 있나 · 어떤 섹션인가」 는 첫 카드 표 그대로입니다. 새 SECID 를 내는 op —
   `restack` · `disconnect` · `offset`(다재료 · dual 포함) · `merge` · `cnrb2solid` · IGA — 와 바닥(`id_floor` · `cad_solid_merge_to_deck`
   · `apply_carryover_plan`)이 이 셈을 씁니다.
 - 인클루드를 다 읽었으면 조용합니다. 못 읽은 이름이나 따라가지 않은 `*INCLUDE_*`(`_TRANSFORM` 등)가 있으면
@@ -987,6 +990,13 @@ KooRemapper.exe info <mesh_file.k>
 접촉 카드에서 두 꼴을 본다. ① Card 3 자리(전부 실수 칸)에 정수만 — 선택 카드 Card A 가 밀려 올라온 손상(옛 `contact modify`).
 ② Card 3 의 SFSA 칸이 정수 `0` · SFSAT 칸이 정수 `2`(2026-10-24) — 10-23 전 optimize 가 `_ID` 접촉의 Card 3 을 Card A 로 알고
 SOFT · SBOPT 를 쓴 흔적이다(SFSA 0 = 기본 1.0 이라 준 배율이 지워지고, SFSAT 2 는 SURFA 셸 접촉 두께를 두 배로 한다).
+
+**열 재질의 번호는 따로 센다(2026-11-08).** `*MAT_THERMAL_*` 과 그 번호 이름 `*MAT_T01`~`*MAT_T18` 의 첫 칸은 **TMID**(열 재질
+번호)다 — 구조 재질의 MID 와 독립된 번호라(Vol II *MAT_THERMAL — 같은 수가 있어도 된다) `*MAT_ELASTIC 2` 와 `*MAT_T01 2` 가 함께
+있어도 겹침이 아니고, `*PART` 의 MID 를 정의하지도 않는다(Vol I *PART 비고 7 — MID 는 `*MAT` 의, TMID 는 `*MAT_THERMAL` 의 번호다).
+예전엔 겹침 쪽이 번호 이름을 구조 재질로 보아 그 둘을 「망가진 카드」로 막았고, 참조 쪽은 열 재질을 다(이름 꼴도) 정의로 보아 구조
+재질이 없는 `*PART` MID 2 를 `*MAT_T01 2` 덕에 지나보냈다. 같은 판정(`cards::isThermalMaterialKeyword`)을 번호 커서(§3.1(h)) ·
+matdb(§24) · merge · hfdamp(§43.4) · `cad_solid_merge_to_deck`(§49)도 쓴다. 회귀 `tools/regress/test_thermal_mat_ids.py` 9항.
 
 **세트·경계조건·이력이 가리키는 절점도 본다(2026-10-16).** 미정의 참조에 「절점」이 들어간다 —
 `line N *SET_NODE_LIST: 절점 4개 — 첫째 379 이 정의되지 않았습니다` 처럼 **줄마다 한 건**(첫 번호와 개수)으로 센다.
@@ -2185,6 +2195,9 @@ materials:                # 개별 규칙 (선택)
 ### 열 재료 삽입 (`thermal: true`)
 - `*MAT_THERMAL_ISOTROPIC` + `*MAT_ADD_THERMAL_EXPANSION` 자동 삽입
 - TMID 링크 자동 연결
+- 덱에 이미 있는 열 재질(`*MAT_THERMAL_*` · 번호 이름 `*MAT_T01`~`*MAT_T18`)은 **재질 블록이 아니다** — 첫 칸이 TMID 다(§11 · 2026-11-08).
+  맞춘 MID 와 같은 번호의 열 카드는 이름 꼴이든 번호 이름이든 지운다. 예전엔 번호 이름을 그 MID 의 재질로 읽어 구조 재질 카드로 바꿔
+  쓰고(같은 MID 가 둘) `thermal: true` 면 열 카드를 두 벌 넣었다
 
 ---
 
@@ -4216,6 +4229,10 @@ KooRemapper hfdamp <config.yaml>
 | `mode` | global | `global`(PSID=0 전 파트) / `selective`(요소 dt ≤ dt_target 파트만, 재료 E·PR·RHO 필요) |
 | `tssfac` | 0.9 | selective 전용. 요소 dt 추정 안전계수 |
 
+selective 의 재료는 `*MAT_*` Card 1 의 MID · RO · E · PR 로 읽는다 — 열 재질(`*MAT_THERMAL_*` · 번호 이름 `*MAT_T01`~`*MAT_T18`)은
+읽지 않는다(그 Card 1 은 TMID · TRO · TGRLC … 다 · 2026-11-08). 예전엔 번호 이름의 Card 1 로 같은 번호 구조 재질의 RO · E 를 덮어 —
+`*MAT_T01 1`(TRO 0 · TGRLC 0)이 든 덱에서 dt 를 못 재고 「대상 파트가 없다」며 전체 감쇠로 바꿨다(회귀 `test_thermal_mat_ids.py` F).
+
 **선택형은 인클루드 닫힘 안의 파트를 본다(2026-10-16).** 예전에는 분석이 주 덱만 봐서, 메시를 `*INCLUDE` 한 마스터 덱에서 「dt 조건을 만족하는 파트가 없다」며 **전체 감쇠(PSID=0)로 조용히 바꿨다**(rc 0 — 독립 op 과 `assemble` 의 `type: hfdamp` 둘 다 실측). 지금은 닫힘을 펼친 줄에서 파트·요소·재질을 읽고, 감쇠 키워드와 세트는 주 덱에 넣는다. 닫힘을 다 못 읽었는데(없는 파일 · `*INCLUDE_TRANSFORM` 등) 대상 파트를 못 찾으면 **전체로 바꾸지 않고 멈춘다**(종료 코드 1 · 산출 없음 — 값 검사 거절도 1 이다. 2026-10-17 전에는 255 였다) — 찾았으면 쓰되 못 본 인클루드가 있다고 말한다. 인클루드가 없는 덱은 예전과 바이트가 같다(회귀 `test_hfdamp_include_closure.py`).
 
 **근거**: pyKooCAE `load_bc_contact.md`, `examples/hfdamp/{basic,selective,hfdamp_full}.yaml`. DEFORM 옵션은 요소 응력/힘을 감쇠하고 강체 운동은 감쇠하지 않으며 동적 강성을 약 CDAMP% 높인다. `--help` 는 인자를 config 경로로 해석해 에러를 내므로 근거는 예제·README.
@@ -4411,6 +4428,11 @@ operations:
     method: vrh
     pid_refs: warn
 ```
+
+`assemble` 의 merge 는 따로 아는 재질(ELASTIC · 024 · 076 · 006 · RIGID) 밖의 `*MAT_*` 를 Card 1 = MID · RO · E · PR 로 읽어 본다
+(GENERIC). 열 재질(`*MAT_THERMAL_*` · 번호 이름 `*MAT_T01`~`*MAT_T18`)과 `*MAT_ADD_*`(열팽창은 CTE 로 따로 읽는다)는 그렇게 읽지 않는다
+(`[merge-mat] SKIP` 줄 · 2026-11-08) — 예전엔 번호 이름의 Card 1(TMID · TRO · TGRLC)을 읽어 같은 번호 구조 재질의 E 를 TGRLC 로
+덮었다(회귀 `test_thermal_mat_ids.py` E).
 
 #### merge 도 원 파트를 비운다 — 그 참조를 다룬다 (2026-09-18)
 
@@ -5643,7 +5665,7 @@ StepForge 와의 경계 합의(저쪽 `docs/BOUNDARY-DYNAFORGE.md` §1·§3-3)�
 | 대응표의 파트와 조각의 `*PART` 가 같은 집합인가 | 거절 |
 | 파트마다 요소 수·요소 구간 · 그 요소가 쓰는 절점 = 절점 구간 · **`coord_sha`** | 거절 |
 | `ranges.sid` 가 `null` 인가(조각에 세트가 없다) | 아니면 거절 |
-| 계약 밖 키워드(`*SET_*`·`*MAT_ADD_*`·`*MAT_THERMAL_*` …)·칸 폭 접미사·자유 형식 줄 | 거절 |
+| 계약 밖 키워드(`*SET_*`·`*MAT_ADD_*`·열 재질 `*MAT_THERMAL_*` · 번호 이름 `*MAT_T01`~`*MAT_T18`(11-08 전엔 받았다) …)·칸 폭 접미사·자유 형식 줄 | 거절 |
 
 `coord_sha` 는 저쪽 `core/remesh_impact.coord_sha` 와 **같은 식**이다 — 절점마다 좌표 셋을 `%16.9e` 로 이어
 한 줄로 만들고, 줄들을 사전순으로 정렬해 `\n` 으로 이은 것의 SHA-256 앞 16자. 번호·순서와 무관하다.
@@ -5884,15 +5906,18 @@ StepForge 권고 넷도 받는다(그쪽 `591d5b5` · D-681 · 사용자 결정 
   머리가 되어 다음 요소 카드를 절점 줄로 삼킨다(EID 10 · PID 20 이 생기고 요소 1 이 사라졌다). 셸은 첫 줄의 첫 토큰이 정수가 아닐 때만
   제목으로 버려 숫자꼴 제목이 요소 하나가 된다.
 - **정수 칸의 실수 꼴** — NIP `5.000e+00` 처럼 실수 꼴로 쓴 정수 값은 그 정수로 읽는다(LS-DYNA 실행 기록이 NIP `3.000E+00` 을 3 으로
-  받는다 · 그쪽 말뭉치 52 덱). 새 셸 섹션 카드의 줄 셈(Card 1 의 ELFORM · NIP · ICOMP — §52.7)이 받는다. 정수가 아닌 값(`2.5`)은
-  그대로 거절한다. ID 칸(SECID)은 정수 글자만 받는다.
+  받는다 · 그쪽 말뭉치 52 덱). 새 셸 섹션 카드의 줄 셈(Card 1 의 ELFORM · NIP · ICOMP — §52.7)이 받는다. 정수가 아닌 값(`2.5`)과
+  10진이 아닌 꼴(`0x2` · `inf` — 덱 칸은 10진만 · 실수 칸 T1~T4 도 같다 · 11-08)은 거절한다. ID 칸(SECID)은 정수 글자만 받는다.
 - **열 재질의 번호 이름**(`*MAT_T01`~`*MAT_T18`)은 MID 를 정의하지 않는다 — TMID 는 MID 와 독립된 번호다(Vol II 2-9 · 3-1).
   `*MAT_THERMAL_*` 과 `*MAT_ADD_*` 처럼 공용 MID 훑기에서 뺀다 — 조각의 MID 가 열 재질의 TMID 로만 있으면 「덱에 없다」(`fragment`)이고,
-  새 MID · 번호 바닥(`id_floor` 의 `pid_start` 등)이 TMID 위로 올라가지 않는다.
+  새 MID · 번호 바닥(`id_floor` 의 `pid_start` 등)이 TMID 위로 올라가지 않는다. 11-08 부터 다른 훑기도 같은 판정
+  (`cards::isThermalMaterialKeyword`)을 쓴다 — `info --strict` 의 겹침 · 참조(§11), matdb, merge, hfdamp, `cad_solid_merge_to_deck`
+  (예전엔 번호 이름을 구조 재질로 보아 `*MAT_ELASTIC 2` + `*MAT_T01 2` 를 strict 가 「망가진 카드」로 막았다).
 - **두 번 정의된 SECID · MID** — 손대는 PID(옮기기 · 모프 · 바꿔 넣기 · 지우기)의 `*PART` 가 가리키는 SECID 나 MID 를 닫힘의 두 블록 이상이
   정의하면 그 줄을 `part_duplicate` 로 거절한다(LS-DYNA 는 같은 번호의 둘째 정의에서 멈춘다 — StepForge 도 그 줄에서 멈춘다). 보고에 정의마다
-  자리(인클루드면 파일 · 줄)를 댄다. 정의는 블록마다 첫 카드다(번호 훑기와 같다 — 한 키워드 아래 쌓인 둘째 카드는 세지 않는다). keep ·
-  review 줄은 손대지 않으니 거절하지 않는다.
+  자리(인클루드면 파일 · 줄)를 댄다. SECID 정의는 카드 묶음마다다(번호 커서와 같은 셈 — 한 키워드 아래 쌓인 묶음끼리도 센다 · `_TITLE` 의
+  빈 제목 줄도 제목이다 · 11-08). MID 정의는 블록마다 첫 카드다. keep · review 줄은 손대지 않으니 거절하지 않는다. 예전엔 빈 제목 줄을
+  건너뛰어 SECID 카드를 제목으로, 두께 `3.0` 을 SECID 3 으로 읽어 SECID 3 을 쓰는 줄을 거짓 거절했다.
 
 ### 52.5 판 2 — 인클루드가 있는 덱(「주 덱만 고침 · 인클루드면 거절」 · 사용자 결정 11-07)
 
@@ -5921,14 +5946,15 @@ null). 칸 하나라도 다르면 손대는 줄은 `deck_range`(칸 · 계획 �
 - 지은 카드(`{secid, thickness, file: "section_<PID>.k", why}`) — 파일은 `files` 의 지문과 같아야 하고, 엄격히 읽어 `*KEYWORD` · 셸 섹션
   카드 **하나**(`*SECTION_SHELL` · `_TITLE` — 제목 · Card 1 · Card 2 · ICOMP 1 이면 각도 카드 · 그 밖의 줄 · 쌓인 둘째 카드 · 사용자 정의 셸
   ELFORM 101~105 는 거절) · `*END` 여야 한다. Card 1 의 ELFORM · NIP · ICOMP 는 실수 꼴로 쓴 정수(`5.000e+00`)도 그 정수로 읽는다
-  (§52.4 StepForge 권고 — 정수가 아닌 값은 거절).
+  (§52.4 StepForge 권고 — 정수가 아닌 값 · 10진이 아닌 꼴(`0x2`)은 거절).
 - 카드는 덱의 옛 카드(그 PID 주 덱 `*PART` 의 SECID — 주 덱에 하나뿐)를 **그대로 옮겨** SECID(Card 1 앞 10칸)와 T1~T4(Card 2 앞 40칸)만
   바꾼 것이어야 한다 — 키워드 줄 · 제목 · 주석 · 그 밖의 칸 · 딸린 카드를 줄마다 견준다(다르면 `new_section` 에 그 줄).
 - SECID 는 `new_section.secid` 와 같고 · 닫힘에 없고(`secid_collision`) · `deck.max.secid` 위이며 · 조각의 새 섹션을 먼저 매긴 뒤 모프 줄
   차례로 잇는다(`secid_order`). T1~T4 는 넷 다 `thickness` 다.
-- 「닫힘에 없다」 · 「가장 큰 SECID 위」 는 한 키워드 아래 **쌓인 둘째 카드**까지 본다 — `*SECTION_*` 블록의 데이터 줄마다 첫 칸의 정수를
-  SECID 로 넉넉히 센다(공용 번호 커서와 같은 셈 — 예전 커서는 첫 카드만 읽어 쌓인 카드의 SECID 를 새 섹션이 다시 냈다 · 11-07). 두께 · 제목 줄의
-  정수도 들어 거짓 거절이 날 수 있다(안전한 쪽). 조각의 새 섹션(판 1 · 2)도 같은 집합으로 겹침을 본다.
+- 「닫힘에 없다」 · 「가장 큰 SECID 위」 는 공용 번호 커서와 **같은 셈**이다(§3.1(h) — 카드 묶음): SOLID · SHELL · TSHELL 은 쌓인 묶음의
+  SECID 까지 정확히, 줄 수를 모르는 꼴은 행마다 첫 칸 숫자를 넉넉히. 제목 · 두께 · 각도의 숫자는 SECID 가 아니다 — 11-07 판은 모든 행을
+  세어 정상 계획의 새 섹션을 `secid_order` 로 거절했다(StepForge 는 받는 덱 · 적대적 검토 11-08). 조각의 새 섹션(판 1 · 2)도 같은 셈으로
+  겹침을 본다.
 - 넣으면 그 카드를 주 덱 첫 `*END` 앞에 두고 그 PID `*PART` 의 SECID 칸**만** 덱 폭(표준 · i10 10칸 · long 20칸)으로 고친다 — 같은 섹션을 쓰는
   다른 파트는 옛 섹션 그대로다. 보고의 그 줄에 `new_section {secid, thickness}`.
 - 거절 — 못 지은 꼴(`secid` · `file` 이 null — 그 줄은 조각 `instead` 로 물러섰다 · 우리는 변위장만 쓴다 — `new_section` · `morph_instead`) ·
@@ -5947,7 +5973,11 @@ null). 칸 하나라도 다르면 손대는 줄은 `deck_range`(칸 · 계획 �
 
 output · report 는 이 op 이 **읽는 파일**(설정 YAML · 주 덱 · 계획 · 인클루드 닫힘 · 계획의 동반 파일 — `files` 와 줄이 가리킨 변위장 ·
 조각 · `section_<PID>.k`) 어느 것과도 같으면 안 되고 폴더여도 안 된다(공용 관문 `output_guard`). output 이 걸리면 보고에 `output_clobber` 로
-적고 아무것도 쓰지 않으며, report 가 걸리면 보고 자리가 없어 콘솔로만 거절한다.
+적고 아무것도 쓰지 않으며, report 가 걸리면 보고 자리가 없어 콘솔로만 거절한다. **계획을 읽지 못하면**(열 수 없다 · 깨진 JSON · 앞의 BOM ·
+객체가 아니다 · `files` 객체가 없다) 동반 파일을 모르므로 **계획 폴더의 파일을 다** 읽는 파일로 본다 — 앞 실행의 이월 보고(첫 칸이
+`"format": "dynaforge-carryover-apply"` — 그 형식 표지로 알아본다)만 빼서 같은 report 로 다시 돌릴 수 있다(적대적 검토 11-08 — 예전엔 빈
+목록이라 `report: field_2.bin` 이 rc 1 `plan_json` 으로 거절하며 field_2.bin 을 보고로 덮었다). 그때 output 이 폴더의 파일이면
+`output_clobber` 의 까닭에 「계획을 읽지 못해 동반 파일을 모른다」 가 붙는다 — 계획부터 고쳐라.
 
 쓰기는 **임시 파일 + 바꿔 넣기**다(사용자 결정 11-07 밤 — extract-parts 와 같은 규칙). 덱과 보고를 같은 폴더의 임시 파일
 (`.<이름>.kr_tmp_…`)에 쓰고, 되읽기 대조 · 품질 관문까지 지나면 덱 · 보고 차례로 바꿔 넣는다. 거절 · 실패면 이번 실행의 임시 파일만
