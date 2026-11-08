@@ -1930,12 +1930,15 @@ int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
         console.error(std::string("[") + tag + "] " + why + " — 보고를 쓸 자리가 없어 아무것도 쓰지 않았다. report 를 다른 이름으로 주라");
         return 1;
     }
-    // 산출 자리가 입력 · 폴더면 보고(안전한 자리)에 적고 거절한다 — 아무것도 쓰거나 지우지 않는다
+    // 산출 자리가 입력 · 폴더면 보고(안전한 자리)에 적고 거절한다 — 아무것도 쓰거나 지우지 않는다. 계획을 읽지 못하면 보지 않는다 — 덱을
+    // 어차피 쓰지 않는다(아래 — 계획의 문제만 적는다)
     std::string outClobber;
-    if (KooRemapper::output_guard::findClash({outPath}, reads, why))
-        outClobber = "output — " + why + "(계획이 지문으로 고정한 입력 · 설정은 덮어쓰지 않는다) · output 을 다른 이름으로 주라";
-    else if (isDir(outPath))
-        outClobber = "output 「" + outPath + "」 자리가 폴더다 — 폴더는 덮거나 지우지 않는다 · output 을 다른 이름으로 주라";
+    if (companionsKnown) {
+        if (KooRemapper::output_guard::findClash({outPath}, reads, why))
+            outClobber = "output — " + why + "(계획이 지문으로 고정한 입력 · 설정은 덮어쓰지 않는다) · output 을 다른 이름으로 주라";
+        else if (isDir(outPath))
+            outClobber = "output 「" + outPath + "」 자리가 폴더다 — 폴더는 덮거나 지우지 않는다 · output 을 다른 이름으로 주라";
+    }
     console.println(std::string("[") + tag + "] Model : " + modelPath);
     console.println(std::string("[") + tag + "] Plan  : " + planPath);
 
@@ -1992,6 +1995,25 @@ int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
         for (auto& ar : rep.added) if (ar.result == "applied") ar.result = "skipped";
     };
 
+    // 계획을 읽지 못하면(열 수 없다 · JSON 이 아니다 · 객체가 아니다 · files 표가 없다) 덱은 쓰지 않는다 — 계획의 문제(plan_read · plan_json ·
+    // plan_schema — 적용 쪽과 같은 읽기)만 보고에 적고 거절한다(보고 자리는 위에서 보았다 · 보고 말고는 아무것도 쓰지 않는다). 예전엔 산출
+    // 자리를 먼저 보아, 앞 실행이 계획 폴더에 남긴 산출이 「동반 파일을 모르는 폴더의 파일」 로 걸려 깨진 계획을 다시 돌리면 output_clobber 만
+    // 말했다(적대적 검토 11-08 S7 — 고칠 것은 계획인데 보고는 output 을 바꾸라고 했다)
+    if (!companionsKnown) {
+        std::ifstream pf(planPath, std::ios::binary);
+        if (!pf.is_open()) {
+            rep.problems.push_back({0, "plan_read", "계획을 열지 못했다: " + planPath});
+        } else {
+            std::ostringstream ps;
+            ps << pf.rdbuf();
+            rep.planRead = true;
+            rep.planSha256 = KooRemapper::util::sha256Hex(ps.str());
+            KooRemapper::carryover::Plan plan;
+            KooRemapper::carryover::parsePlan(ps.str(), plan, rep.problems);
+        }
+        if (rep.problems.empty()) rep.problems.push_back({0, "plan_schema", "계획의 동반 파일 표(files 객체)를 읽지 못했다"});
+        return refuse("계획을 읽지 못했다 — 덱을 쓰지 않았다(보고만 남긴다)");
+    }
     if (!outClobber.empty()) {
         rep.problems.push_back({0, "output_clobber", outClobber});
         return refuse("output 자리에 쓸 수 없다 — 아무것도 쓰지 않았다(보고만 남긴다)");

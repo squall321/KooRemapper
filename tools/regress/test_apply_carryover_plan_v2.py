@@ -843,10 +843,27 @@ def part_r3(binary):
         check("R-3%s 읽지 못하는 계획(%s) · report 가 동반 파일(%s) → rc 1 · 폴더 파일 그대로 · 덱 없음(보고 자리가 없어 콘솔로만)" % (tag, how, rp),
               rc == 1 and not changed and not os.path.exists(os.path.join(d, "deck_applied.k")) and unknown in out and not tmp_left(d),
               (rc, changed, out[-300:]))
+    # 계획을 읽지 못하면 덱은 쓰지 않는다 — 산출 자리는 보지 않고 계획의 문제(plan_json)만 적는다(적대적 검토 11-08 S7 — 예전엔 output_clobber
+    # 「동반 파일을 모른다」 만 말해 고칠 것이 계획인데 output 을 바꾸라고 했다)
     d, rc, out, changed = broken("r3h", lambda b: b[:-2], output="fragment_4.k", report="r3h_carryover.json")
     rep = json.load(open(os.path.join(d, "r3h_carryover.json"), encoding="utf-8")) if os.path.exists(os.path.join(d, "r3h_carryover.json")) else {}
-    check("R-3h 읽지 못하는 계획 · output 이 폴더의 조각(fragment_4.k) → 조각 그대로 · 보고에 output_clobber(까닭에 「동반 파일을 모른다」)",
-          rc == 1 and not changed and "output_clobber" in kinds(rep) and unknown in details(rep, "output_clobber"), (rc, changed, sorted(kinds(rep))))
+    check("R-3h 읽지 못하는 계획 · output 이 폴더의 조각(fragment_4.k) → 조각 그대로 · 보고에 plan_json 만(output_clobber 아님)",
+          rc == 1 and not changed and kinds(rep) == {"plan_json"} and rep.get("output_written") is False, (rc, changed, sorted(kinds(rep))))
+    # 앞 실행이 성공해 계획 폴더에 산출 · 보고를 남긴 뒤 계획이 깨졌다 — 다시 돌리면 plan_json(예전 output_clobber 만) · 앞 산출 그대로
+    d = stage("r3j")
+    write(os.path.join(d, "a.yaml"), "model: deck.k\nplan: plan.json\noutput: deck_applied.k\n")
+    rc0, out0 = run(binary, d, OP, "a.yaml")
+    outk = os.path.join(d, "deck_applied.k")
+    first = sha(outk) if os.path.exists(outk) else None
+    pp = os.path.join(d, "plan.json")
+    raw = open(pp, "rb").read()
+    open(pp, "wb").write(raw[:-2])
+    rc, out = run(binary, d, OP, "a.yaml")
+    rp = os.path.join(d, "deck_applied_carryover.json")
+    rep = json.load(open(rp, encoding="utf-8")) if os.path.exists(rp) else {}
+    check("R-3j 성공한 앞 실행 뒤 계획이 깨졌다 → rc 1 · 보고에 plan_json 만(예전 output_clobber 만) · 앞 산출 그대로",
+          rc0 == 0 and first and rc == 1 and kinds(rep) == {"plan_json"} and rep.get("ok") is False and sha(outk) == first and not tmp_left(d),
+          (rc0, rc, sorted(kinds(rep)), out[-300:]))
     # 앞 실행의 보고는 다시 쓴다 — 같은 report 로 두 번 돌린다(둘째 전에 보고를 「ok true」 로 바꿔 두어 다시 썼는지 본다 · 줄 끝은 CRLF)
     d, rc, out, changed = broken("r3i", lambda b: b[:-2], report="again.json")
     rp = os.path.join(d, "again.json")
