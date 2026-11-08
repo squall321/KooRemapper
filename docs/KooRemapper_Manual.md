@@ -2028,6 +2028,13 @@ operations:
 
 > **v1.8.0 정정**: (1) `connection_mode` 값 집합은 `tied | czm | contact | none` 이며 **기본값은 `tied`** 입니다(help·examples. 구버전의 `shared | tied | czm`/기본 `shared` 정정). `contact` 는 인터페이스 노드를 복제해 별도 표면을 만들고 사용자가 이후 `*CONTACT` 를 정의합니다. (2) `element_type` 값은 `solid | tshell | shell` 입니다(구버전의 `hex | tet` 정정). (3) config 는 최상위 `base_model`/`output` + `operations[].type: offset` 구조입니다. 재료는 `material_card` 로 지정하고, 층마다 다르면 `material_cards:` 목록(`- |` 항목)을 씁니다(단독·assemble 모두). (4) 카드 MID 칸의 값(`@MID@`·`@CZM_MID@`·숫자·라벨)은 새 MID 로 바뀌며, 값은 LS-DYNA 고정 폭 10열 칸 안에 두세요. (5) `new_pid`·`new_secid`·`new_mid` 를 지정해도 뒤이어 자동 발급되는 ID 와 겹치지 않습니다. (6) `connection_mode: none` 은 assemble 경로에서도 허용됩니다. 단독 `offset` 도 assemble 과 같은 값 검사를 거칩니다.
 
+> **새 층의 재질 카드는 필수입니다(2026-11-08).** `material_card`(층마다 다르면 `material_cards`)가 없으면 종료 코드 1 로 거절하고 아무것도
+> 쓰지 않습니다 — `[ERROR] offset: material_card(층마다 다르면 material_cards)가 없다 — …`. 예전엔 새 `*PART` 에 새 MID 를 쓰고 재질 카드는
+> 쓰지 않아(「사용자가 나중에 넣거나 matswap 으로」) 정의되지 않은 재질을 가리킨 덱이 종료 코드 0 으로 나갔습니다(`generate box` 에 offset
+> 만 해도 `info --strict` 「재질 n 이 정의되지 않았습니다」 — LS-DYNA 는 키워드 단계에서 멈춘다). 원 파트의 재질을 대신 지어 쓰지 않습니다 —
+> 같은 재질이면 그 카드를 MID 칸만 `@MID@` 로 바꿔 적으세요. 나중에 matswap 으로 바꿀 층도 자리표시 재질 카드를 주세요(회귀
+> `test_material_id_family.py` F).
+
 > **TSHELL 도 `connection_mode` 를 솔리드와 같은 뜻으로 받는다(2026-10-16).** `tied`(기본)·`none` 이면 TSHELL 0층이
 > **원본 면 절점 그대로**다(공유 — 층이 붙는다). `czm` 은 그 절점을 복제해 원본 면과 복제본 사이에 코히시브(ELFORM 20)를
 > 면 수만큼 만들고, `contact` 는 복제해 떼고 접촉 안내를 붙인다. 예전에는 TSHELL 갈래가 이 칸을 **건너뛰어** 0층이 원본 면
@@ -3618,6 +3625,10 @@ operations:
   thickness: 2.0
   use_local_normals: true
   element_type: solid
+  material_card: |              # 필수(2026-11-08 — 없으면 종료 코드 1)
+    *MAT_ELASTIC
+    $#     mid        ro         e        pr
+         @MID@  7.85E-09  2.10E+05       0.3
 ```
 
 → 독립 명령 [22. offset](#22-offset--셸-오프셋-솔리드-생성) 참조

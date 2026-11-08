@@ -287,7 +287,9 @@ def main():
         write(os.path.join(d, "of.yaml"),
               "base_model: box.k\noutput: of\noperations:\n  - type: offset\n"
               "    source_pid: 1\n    thickness: 0.5\n    direction: +z\n"
-              "    new_pid: 9\n")
+              "    new_pid: 9\n"
+              # offset 은 새 층의 재질 카드가 있어야 한다(2026-11-08 — 없으면 rc 1)
+              "    material_card: |\n      *MAT_ELASTIC\n           @MID@  7.85E-09  2.10E+05       0.3\n")
         rc, out = run(binary, d, "offset", "of.yaml")
         if rc != 0 and "offset" not in out.lower():
             print("  (D 건너뜀 — offset 설정 형태가 달라 압출을 못 돌렸다)")

@@ -20,6 +20,7 @@
   C IGA 재질 베끼기 — 그 MID 의 구조 재질(열 카드 · 덧붙임 카드가 앞이어도) · `_TITLE` 재질 · MID 칸 폭 그대로
   E matdb `thermal: false` — `*PART` TMID 가 가리키는 같은 번호 열 카드는 남긴다(가리키지 않는 것은 예전처럼 지운다) ·
     E-4 쌓인 재질 묶음에서 맞춘 MID 만 바꾸고 같은 블록의 다른 재질은 둔다
+  F offset — material_card(또는 material_cards)가 없으면 거절한다(예전엔 새 *PART 가 정의되지 않은 MID 를 가리킨 덱이 rc 0)
 
 usage: test_material_id_family.py <KooRemapper 바이너리>
 """
@@ -457,6 +458,24 @@ def part_e(binary, tmp):
           rc == 0 and elastic_rows(os.path.join(d, "o.k")).count(9) == 1 and rc2 == 0, (rc, elastic_rows(os.path.join(d, "o.k")), rc2, out2[-200:]))
 
 
+def part_f(binary, tmp):
+    print("[F offset — 새 층의 재질 카드가 없으면 거절한다(*PART 가 정의되지 않은 MID 를 가리키지 않게)]")
+    no_card = OFFSET[:OFFSET.index("    material_card: |")]
+    for tag, cmd in (("1", "offset"), ("2", "assemble")):
+        d = fresh(tmp, "f" + tag)
+        box(binary, d)
+        open(os.path.join(d, "off.yaml"), "w").write(no_card)
+        rc, out = run(binary, d, cmd, "off.yaml")
+        check("F-%s %s material_card 없음 → rc 1 · 까닭에 material_card · 산출 없음(예전 rc 0 · *PART MID 2 에 재질 없음)" % (tag, cmd),
+              rc == 1 and "material_card" in out and not os.path.exists(os.path.join(d, "out.k")), (rc, out[-300:]))
+    d = fresh(tmp, "f3")
+    box(binary, d)
+    open(os.path.join(d, "off.yaml"), "w").write(OFFSET)
+    rc, out = run(binary, d, "offset", "off.yaml")
+    rc2, out2 = run(binary, d, "info", "--strict", "out.k") if rc == 0 else (None, "")
+    check("F-3 material_card 를 주면 그대로 돈다 — 산출 --strict rc 0", rc == 0 and rc2 == 0, (rc, rc2, out2[-200:]))
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__.strip().splitlines()[-1])
@@ -470,6 +489,7 @@ def main():
         part_b(binary, tmp)
         part_c(binary, tmp)
         part_e(binary, tmp)
+        part_f(binary, tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print()

@@ -231,6 +231,14 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
   같은 키워드 아래 쌓인 둘째 재질까지 지웠다(그 재질을 쓰던 파트가 미정의 재질 · rc 0 · 실측). `matids::definitionMask`(removeDefinition 과
   같은 규칙 · 줄 차례를 바꾸지 않는 표시 — matdb 의 DEL 표지)로 맞춘 MID 의 묶음만 지운다. 묶음이 하나인 블록은 예전과 같은 줄을 지운다(산출
   같음). 매칭(`md_scanMatBlocks`)은 지금도 블록의 첫 카드만 본다 — 쌓인 둘째 재질은 `mid:` 규칙으로 고를 수 없다(남은 틈). 회귀 E-4(4dfe039 에서 실패).
+- **offset 의 재질 카드는 필수((f) · 거절)** — 문서와 동작은 어긋나지 않았다: 카탈로그가 `material_card` 를 선택으로 두고 「If material_card is
+  empty/missing, no material written (user adds manually or via matswap)」 라 적었고 그대로 동작했다(설명서는 말이 없고 도움말 예제가 재질
+  카드 없이 돌았다 — `*PART` MID 2 에 재질 없음 · rc 0 · 35a35bb 부터). 조정자에게 셋을 물었다 — ① 거절 ② 원 파트 MID 를 같이 쓰기
+  ③ 원 파트 구조 재질을 새 MID 로 베끼기. ①을 골랐다(답이 없어 알린 기본값) — ②③은 오늘 LS-DYNA 가 키워드 단계에서 멈추는 덱(시끄러운
+  실패)을 「원 파트와 같은 재질」 로 조용히 바꾼다(지어내지 않는다). 대가 — 재질과 무관하게 offset 을 편의로 돌리던 설정이 rc 1 이 된다:
+  도움말 예제(flatten_includes · output_guard_ops · help_truth 가 돌린다) · 회귀 다섯(catalog_binary_parity · element_topology ·
+  id_width_overflow · section_cursor_stacked · standalone_yaml_parsing)에 재질 카드를 붙였다(시험 뜻은 그대로). 다층(material_cards)은 층마다
+  같은 문을 지난다(빈 층 카드도 거절). 회귀 F 3항(4dfe039 에서 F-1 · F-2 실패).
 
 ## 11-07 밤 결정 고침 — 정한 것
 - **출력 규칙(사용자 결정 ①)** — extract-parts(`a33af2f`)와 같은 꼴: 덱 · 보고를 output 폴더의 임시 파일(`.<이름>.kr_tmp_…`)에 쓰고 되읽기 대조 ·

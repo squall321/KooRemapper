@@ -209,10 +209,14 @@ operations:
     offset_direction: +z
     connection_mode: tied
     new_pid: 10
+    material_card: |
+      *MAT_ELASTIC
+      $#     mid        ro         e        pr
+           @MID@  7.85E-09  2.10E+05       0.3
 )KRH"}},
      {"KooRemapper generate box box.yaml", "KooRemapper offset offset.yaml"},
      {},
-     {"connection_mode: tied(기본) | czm | contact | none (assemble 경로도 none 허용)", "셸 층(`element_type: shell`)은 원본 면과 떨어진 별도 면이다 — tied(기본)는 *CONTACT_TIED_SURFACE_TO_SURFACE_OFFSET 으로 원본 면에 묶는다(2026-10-17) · czm 은 거절(rc 1) · contact·none 은 묶지 않는다", "material_card·czm_material_card 의 MID 칸(@MID@·@CZM_MID@·숫자·라벨)은 새 MID 로 바뀐다. 값은 10열 칸 안에 둘 것", "material_cards: 목록으로 층마다 다른 재질 (단독 offset·assemble 모두)"}},
+     {"connection_mode: tied(기본) | czm | contact | none (assemble 경로도 none 허용)", "셸 층(`element_type: shell`)은 원본 면과 떨어진 별도 면이다 — tied(기본)는 *CONTACT_TIED_SURFACE_TO_SURFACE_OFFSET 으로 원본 면에 묶는다(2026-10-17) · czm 은 거절(rc 1) · contact·none 은 묶지 않는다", "material_card·czm_material_card 의 MID 칸(@MID@·@CZM_MID@·숫자·라벨)은 새 MID 로 바뀐다. 값은 10열 칸 안에 둘 것", "material_cards: 목록으로 층마다 다른 재질 (단독 offset·assemble 모두)", "★material_card(또는 material_cards)는 필수다(2026-11-08) — 없으면 rc 1. 예전엔 새 *PART 에 새 MID 를 쓰고 재질 카드는 쓰지 않아", "  정의되지 않은 재질을 가리킨 덱이 rc 0 으로 나갔다. 원 파트와 같은 재질이면 그 카드를 MID 칸만 @MID@ 로 바꿔 적는다"}},
     {"wrap", "메시 편집", "원통 파트에 와인딩 인장 초기응력(후프+반경) 부여", "와인딩 인장 hoop 압입", "KooRemapper wrap <config.yaml>",
      {{"wrap.yaml", R"KRH(model: examples/wrap/cylinder_2layer.k
 output: cylinder_wrapped

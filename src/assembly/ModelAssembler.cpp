@@ -9930,6 +9930,16 @@ bool ModelAssembler::applyOffset(const OffsetOperation& op, double E, double nu)
         return false;
     }
 
+    // 새 파트의 재질 — material_card(층마다 다르면 material_cards)가 없으면 거절한다(사용자 결정 11-08 (f)). 예전엔 새 MID 를 `*PART` 에 쓰고
+    // 재질 카드는 쓰지 않아(카탈로그 「no material written — user adds manually or via matswap」) `*PART` 가 정의되지 않은 재질을 가리킨 덱이
+    // rc 0 으로 나갔다 — generate box 에 offset 만 해도 `info --strict` 「재질 n 이 정의되지 않았습니다」. 원 파트의 재질을 지어내 쓰지 않는다
+    // (어떤 재질이 맞는지는 사용자가 안다 — 같은 재질이면 그 카드를 MID 칸만 @MID@ 로 적는다). 다층(material_cards)은 층마다 이 문을 지난다
+    if (op.materialCards.empty() && deckscan::trim(op.materialCard).empty()) {
+        errorMessage_ = "offset: material_card(층마다 다르면 material_cards)가 없다 — 새 파트의 *PART 가 정의되지 않은 MID 를 가리키게 된다. "
+                        "새 층의 *MAT 카드를 material_card 로 주라(원 파트와 같은 재질이면 그 카드를 MID 칸만 @MID@ 로 바꿔 적는다)";
+        return false;
+    }
+
     // Check for dual offset mode
     bool isDualOffset = (op.prestressMode == "dual_offset");
     if (isDualOffset) {

@@ -40,6 +40,11 @@ BOX = "output: flat.k\nlx: 20.0\nly: 10.0\nlz: 2.0\nnx: 10\nny: 5\nnz: 2\npid: 1
 INDENT_SHAPE = ("    shape:\n      type: polygon\n      points:\n"
                 "        - [1,1]\n        - [5,1]\n        - [5,5]\n")
 
+# offset 은 새 층의 재질 카드가 있어야 한다(2026-11-08 — 없으면 rc 1) — 이 시험은 재질과 무관한 칸을 보므로 카드만 붙인다
+OFFSET_CARD = ("    material_card: |\n      *MAT_ELASTIC\n      $#     mid        ro         e        pr\n"
+               "           @MID@  7.85E-09  2.10E+05       0.3\n")
+OFFSET_CARD_TOP = OFFSET_CARD.replace("\n    ", "\n").replace("    material_card", "material_card", 1)
+
 
 def check(name, cond, detail=""):
     print("  %-72s %s" % (name, "OK" if cond else "FAIL"))
@@ -159,14 +164,14 @@ def main():
           cat_param(ops, "matdb", "database")["required"] is False)
 
     rc, out = asm(binary, d, "of_none",
-                  '  - type: offset\n    source_pid: 1\n    thickness: 1.0\n    connection_mode: none\n')
+                  '  - type: offset\n    source_pid: 1\n    thickness: 1.0\n    connection_mode: none\n' + OFFSET_CARD)
     check("assemble offset connection_mode: none 은 rc=0", rc == 0, out[-200:])
     for op, path in (("offset", "connection_mode"), ("assemble", "operations[].connection_mode")):
         vals = cat_key(ops, op, path)["values"]
         check(f"카탈로그 {op}.{path} 에 none 있음", "none" in vals, str(vals))
 
     rc, out = asm(binary, d, "of_both",
-                  '  - type: offset\n    source_pid: 1\n    thickness: 1.0\n    offset_direction: both\n')
+                  '  - type: offset\n    source_pid: 1\n    thickness: 1.0\n    offset_direction: both\n' + OFFSET_CARD)
     check("assemble offset offset_direction: both 은 rc=0", rc == 0, out[-200:])
     for op, path in (("offset", "offset_direction"), ("assemble", "operations[].offset_direction")):
         vals = cat_key(ops, op, path)["values"]
@@ -174,7 +179,7 @@ def main():
 
     rc, out = yaml_run(binary, d, "offset", "of_formula",
                        "model: flat.k\noutput: of_formula.k\nsource_pid: 1\n"
-                       'thickness_formula: "0.5 + 0.1*x"\n')
+                       'thickness_formula: "0.5 + 0.1*x"\n' + OFFSET_CARD_TOP)
     check("단독 offset: thickness 없이 thickness_formula 만으로 rc=0", rc == 0, out[-200:])
     check("카탈로그 offset.thickness 는 required 아님(thickness_formula 대안)",
           cat_key(ops, "offset", "thickness")["required"] is False)
