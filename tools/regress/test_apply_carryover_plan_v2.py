@@ -398,6 +398,7 @@ def main():
         part_r6(binary)
         part_r7(binary)
         part_r8(binary)
+        part_r9(binary)
         part_s(binary)
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
@@ -1035,6 +1036,54 @@ def part_r8(binary):
           rep.get("ok") is False and "inc/part8.k" in details(rep, "deck_changed") and
           not os.path.exists(os.path.join(d, "deck_applied.k")), (rep.get("ok"), sorted(kinds(rep)), out[-300:]))
 
+
+
+def part_r9(binary):
+    print("[R-9 인클루드 덱(판 2)의 산출 — 다른 폴더를 가리키는 링크 · 읽기 전용 폴더의 쓸 수 있는 산출(적대적 검토 11-08 S6)]")
+    # 쓴 덱의 되읽기 대조가 *INCLUDE 이름을 임시 덱이 놓인 폴더(링크를 따라간 폴더 · 시스템 임시 폴더)에서 풀어 닫힘이 다르다고 거짓 거절했다 —
+    # 덱이 놓일 자리(준 산출 경로의 폴더 · §52.5)에서 푼다
+    def inc_case(name):
+        d = stage(name)
+        split_include(d, "inc/part8.k", 8, move_defs=True)
+        to_v2(d, include_files=["inc/part8.k"])
+        return d
+
+    def applied(path):
+        return os.path.exists(path) and read(path) != "OLD\n" and "*INCLUDE" in read(path)
+
+    d = inc_case("r9a")
+    write(os.path.join(d, "other", "deck_applied.k"), "OLD\n")
+    os.symlink(os.path.join("other", "deck_applied.k"), os.path.join(d, "deck_applied.k"))
+    rc, out, rep = apply_case(binary, d)
+    check("R-9a 산출이 other/ 의 파일을 가리키는 링크 → rc 0 · 링크 그대로 · 그 파일이 산출(예전 verify 「닫힘이 다르다」)",
+          rc == 0 and os.path.islink(os.path.join(d, "deck_applied.k")) and applied(os.path.join(d, "other", "deck_applied.k")) and
+          not kinds(rep) and not tmp_left(d) and not tmp_left(os.path.join(d, "other")), (rc, sorted(kinds(rep)), details(rep, "verify")[:200]))
+    d = inc_case("r9b")
+    os.makedirs(os.path.join(d, "other"))
+    os.symlink(os.path.join("other", "deck_applied.k"), os.path.join(d, "deck_applied.k"))
+    rc, out, rep = apply_case(binary, d)
+    check("R-9b 산출이 아직 없는 other/ 파일을 가리키는 링크 → rc 0 · 링크가 가리키는 자리에 산출",
+          rc == 0 and applied(os.path.join(d, "other", "deck_applied.k")) and not kinds(rep), (rc, sorted(kinds(rep)), details(rep, "verify")[:200]))
+    d = inc_case("r9c")
+    write(os.path.join(d, "deck_applied.k"), "OLD\n")
+    write(os.path.join(d, "deck_applied_carryover.json"), "{}\n")
+    write(os.path.join(d, "a.yaml"), "model: deck.k\nplan: plan.json\noutput: deck_applied.k\n")
+    os.chmod(d, 0o555)
+    try:
+        rc, out = run(binary, d, OP, "a.yaml")
+    finally:
+        os.chmod(d, 0o755)
+    rp = os.path.join(d, "deck_applied_carryover.json")
+    rep = json.load(open(rp, encoding="utf-8")) if os.path.exists(rp) else {}
+    check("R-9c 읽기 전용 덱 폴더 · 쓸 수 있는 산출 → rc 0 · 산출 · 보고를 제자리에(예전 verify 「닫힘이 다르다」)",
+          rc == 0 and applied(os.path.join(d, "deck_applied.k")) and rep.get("ok") is True and not kinds(rep),
+          (rc, sorted(kinds(rep)), details(rep, "verify")[:200], out[-300:]))
+    # 지킴이 — 산출 자리에 같은 이름의 다른 인클루드가 있는 폴더(링크로 다른 폴더에 쓰는 것과 견줄 것): 판 2 는 덱 폴더에만 쓴다(include_output)
+    d = inc_case("r9d")
+    os.makedirs(os.path.join(d, "sub"))
+    rc, out, rep = apply_case(binary, d, output="sub/deck_applied.k", report="sub/deck_applied_carryover.json")
+    check("R-9d 산출을 다른 폴더(sub/)에 → 거절(include_output — 그 폴더에서는 인클루드 이름이 다른 파일을 가리킨다)",
+          rc == 1 and "include_output" in kinds(rep) and not os.path.exists(os.path.join(d, "sub", "deck_applied.k")), (rc, sorted(kinds(rep))))
 
 
 def part_s(binary):

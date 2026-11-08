@@ -271,6 +271,12 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
   위 #1 의 「output 도 같은 목록을 본다 — 적용 쪽 읽기가 나중에 BOM 을 받게 되어도」 는 이 갈래로 바뀌었다: 그 읽기가 BOM 을 받게 되면 계획은
   「읽은」 것이고 동반 파일 표가 생기니 산출 자리는 그 표와 견준다. 회귀 v2 R-3h(기대를 plan_json 으로) · R-3j(성공한 실행 뒤 깨진 계획 —
   4f550b3 에서 둘 다 output_clobber).
+- **인클루드 덱의 되읽기 자리(S6)** — 쓴 덱의 대조(`verifyCarryoverOutput`)가 바꿔 넣기 전 임시 파일의 경로로 닫힘을 풀었다. 임시 파일은 공용
+  `staged_write` 가 정한 자리 — output 이 링크면 따라간 파일 옆, 읽기 전용 폴더의 쓸 수 있는 output 이면 시스템 임시 폴더 — 라 `*INCLUDE` 이름이
+  다른 폴더에서 풀려 「닫힘이 다르다」 로 맞는 산출을 거절했다. 이제 줄은 임시 파일에서 읽고 이름은 output 을 준 그대로의 폴더(§52.5 · 산출 규칙
+  `include_output` 이 덱 폴더와 견주는 그 폴더)에서 푼다 — `verifyCarryoverOutput(tmp, rep, outPath)` · `KFileReader::readFileWithIncludes` 의
+  `resolveAs`(줄은 그 파일 · 이름은 그 경로의 폴더). 쓰기 · 바꿔 넣기(공용 도우미)는 손대지 않았다. 회귀 v2 R-9a~c(4f550b3 에서 셋 다
+  verify) · R-9d(다른 폴더 산출은 그대로 include_output — 지키는 항).
 
 ## 11-07 밤 결정 고침 — 정한 것
 - **출력 규칙(사용자 결정 ①)** — extract-parts(`a33af2f`)와 같은 꼴: 덱 · 보고를 output 폴더의 임시 파일(`.<이름>.kr_tmp_…`)에 쓰고 되읽기 대조 ·

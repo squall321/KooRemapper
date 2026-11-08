@@ -71,7 +71,8 @@ public:
     bool applyCarryoverPlan(const std::string& planPath, const std::string& outputPath, carryover::Report& rep);
     // 쓴 덱을 다시 읽어(인클루드가 있으면 닫힘째) 기대(옮긴 자리 · 지운 번호 · 넣은 번호와 좌표 · 파트별 요소 수 · 섹션)와
     // 대조하고 품질 관문(새로 뒤집힌 솔리드 · 법선이 뒤집힌 셸)을 건다. false 면 `rep.problems` 에 까닭 — 부르는 쪽이 그 산출을 지운다.
-    bool verifyCarryoverOutput(const std::string& deckPath, carryover::Report& rep) const;
+    // `outputPath` 는 덱이 놓일 자리(준 산출 경로) — 임시 파일(`deckPath`)을 되읽을 때 `*INCLUDE` 이름을 그 폴더에서 푼다(11-08 S6)
+    bool verifyCarryoverOutput(const std::string& deckPath, carryover::Report& rep, const std::string& outputPath = std::string()) const;
     bool loadRawOnly(const std::string& filename);
     bool applyReplace(const ReplaceOperation& op, double E, double nu,
                       const std::string& configDir);

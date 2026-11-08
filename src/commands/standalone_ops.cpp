@@ -2053,7 +2053,7 @@ int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
             unapply();
             return refuse("덱 쓰기가 멈췄다 — 산출이 없다(output 자리의 앞 파일은 그대로다)");
         }
-        if (!assembler.verifyCarryoverOutput(tmpDeck, rep))
+        if (!assembler.verifyCarryoverOutput(tmpDeck, rep, outPath))   // 인클루드 이름은 덱이 놓일 자리에서 푼다(11-08 S6)
             return refuse("쓴 덱의 대조 · 품질 관문에서 걸렸다 — 바꿔 넣지 않았다(output 자리의 앞 파일은 그대로다): " + outPath);
         {
             std::ifstream o(tmpDeck, std::ios::binary);

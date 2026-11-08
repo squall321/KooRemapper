@@ -1806,7 +1806,7 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, const std::
     return true;
 }
 
-bool ModelAssembler::verifyCarryoverOutput(const std::string& deckPath, carryover::Report& rep) const {
+bool ModelAssembler::verifyCarryoverOutput(const std::string& deckPath, carryover::Report& rep, const std::string& outputPath) const {
     std::vector<Problem>& P = rep.problems;
     const size_t before = P.size();
     auto problem = [&](long long pid, const char* kind, const std::string& detail) { P.push_back({pid, kind, detail}); };
@@ -1832,7 +1832,10 @@ bool ModelAssembler::verifyCarryoverOutput(const std::string& deckPath, carryove
             out = reader.readFile(deckPath);
         } else {
             // 판 2 인클루드 덱 — 산출은 주 덱 옆에 있고 `*INCLUDE` 줄을 그대로 두었다. 산출의 닫힘이 대조한 닫힘(파일 · 바이트)과 같아야 하고
-            // 그 닫힘째 다시 읽는다(LS-DYNA 가 그 산출을 읽는 꼴)
+            // 그 닫힘째 다시 읽는다(LS-DYNA 가 그 산출을 읽는 꼴). 이름은 **덱이 놓일 자리**(준 산출 경로의 폴더 · §52.5)에서 푼다 — 줄은
+            // 바꿔 넣기 전 임시 파일에서 읽는데 그 파일은 링크를 따라간 폴더 · 시스템 임시 폴더(읽기 전용 폴더)에 있을 수 있다. 예전엔 그 폴더에서
+            // 풀어 「닫힘이 다르다」 로 맞는 산출을 거절했다(적대적 검토 11-08 S6)
+            const std::string& at = outputPath.empty() ? deckPath : outputPath;
             std::vector<std::string> outLines;
             {
                 std::ifstream f(deckPath, std::ios::binary);
@@ -1841,8 +1844,8 @@ bool ModelAssembler::verifyCarryoverOutput(const std::string& deckPath, carryove
                     outLines.push_back(std::move(l));
                 }
             }
-            const auto oc = include_closure::read(deckPath, outLines);
-            const auto got = closureEntries(oc, deckPath);
+            const auto oc = include_closure::read(at, outLines);
+            const auto got = closureEntries(oc, at);
             bool same = oc.complete() && oc.cycles.empty() && got.size() == carry_.includeList.size();
             for (size_t k = 0; same && k < got.size(); ++k)
                 same = got[k].relpath == carry_.includeList[k].relpath && got[k].sha256 == carry_.includeList[k].sha256;
@@ -1852,7 +1855,7 @@ bool ModelAssembler::verifyCarryoverOutput(const std::string& deckPath, carryove
             }
             std::string note;
             bool complete = true;
-            out = reader.readFileWithIncludes(deckPath, &note, &complete);
+            out = reader.readFileWithIncludes(deckPath, &note, &complete, at);
             if (!complete) {
                 problem(0, "verify", "쓴 덱을 인클루드 닫힘째 다시 읽지 못했다 — " + note);
                 return finish();

@@ -48,7 +48,10 @@ public:
     //   · 정수 칸 폭은 주 덱 `*KEYWORD` 가 정한다 — 인클루드 파일 안의 `*KEYWORD` 줄은 뺀다(LS-DYNA 규칙 · 실사용 88장에서
     //     갈린 덱 0). `*INCLUDE +`·`*INCLUDE -`(그 파일의 폭을 바꾼다)가 있으면 펼치지 않고 주 덱만 읽는다.
     // `note` 에는 사람이 읽을 한 줄(무엇을 읽었나 · 왜 주 덱만 읽었나)을, `complete` 에는 닫힘을 다 읽었는지를 돌려준다.
-    Mesh readFileWithIncludes(const std::string& filename, std::string* note = nullptr, bool* complete = nullptr);
+    // `resolveAs` 를 주면 `*INCLUDE` 이름을 그 경로의 폴더에서 푼다 — 줄은 `filename` 에서 읽는다(쓴 덱을 바꿔 넣기 전 임시 파일로 되읽을 때
+    // 덱이 놓일 자리 기준으로 · `apply_carryover_plan` 11-08 S6)
+    Mesh readFileWithIncludes(const std::string& filename, std::string* note = nullptr, bool* complete = nullptr,
+                              const std::string& resolveAs = std::string());
 
     /**
      * Set progress callback

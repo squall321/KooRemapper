@@ -14571,7 +14571,7 @@
           "role": "yaml_field",
           "yaml_path": "output",
           "required": true,
-          "description": "Output deck. Must differ from every file the op reads — the config YAML, model, plan, every file the deck includes and every plan companion (field_<PID>.bin, fragment_<PID>.k, section_<PID>.k) — and must not be a directory; otherwise nothing is written and the report says output_clobber. For a deck with *INCLUDE it must be in the model's folder (the *INCLUDE lines are kept). Written to a temporary file and renamed into place only when every check passed; on refusal or failure a file already at this path is left untouched."
+          "description": "Output deck. Must differ from every file the op reads — the config YAML, model, plan, every file the deck includes and every plan companion (field_<PID>.bin, fragment_<PID>.k, section_<PID>.k) — and must not be a directory; otherwise nothing is written and the report says output_clobber. For a deck with *INCLUDE it must be in the model's folder (the *INCLUDE lines are kept); the written deck is re-read with its *INCLUDE names resolved in that folder as given, even when the temporary file sits behind a symlink or in the system temp folder (read-only model folder) — before 2026-11-08 such outputs were refused as verify. Written to a temporary file and renamed into place only when every check passed; on refusal or failure a file already at this path is left untouched."
         },
         {
           "name": "report",
