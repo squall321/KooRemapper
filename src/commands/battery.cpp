@@ -347,6 +347,13 @@ std::string batteryKFilePath(const BatteryConfig& cfg) {
     return cfg.output + typePart + batteryTierSuffix(cfg.tier) + phaseSuffix + ".k";
 }
 
+std::string batteryDynainSkipWarning(const BatteryConfig& cfg) {
+    if (!cfg.useDynain || !cfg.dynainFile.empty()) return "";
+    return "[battery] use_dynain: true 인데 dynain_file 이 비어 「" + batteryKFilePath(cfg) +
+           "」 에 *INCLUDE_DYNAIN 을 쓰지 않았다 — 앞 단계 실행의 dynain 이름을 dynain_file 에 적어라(이름을 스스로 짓는 것은 "
+           "batch.phases 에 1 과 2 가 다 있을 때 뒤 phase 뿐이다)";
+}
+
 std::string generateBatteryKFile(const BatteryConfig& cfg,
                                   ConsoleOutput& console) {
     // Build output filename
@@ -568,6 +575,7 @@ static int generateBatch(const BatteryConfig& baseCfg,
     const bool typeInName = std::set<std::string>(mts.begin(), mts.end()).size() >= 2;
 
     std::vector<BatteryConfig> combos;
+    std::vector<bool> chainHead;   // 자동 사슬의 첫 phase — dynain 을 받지 않는 것이 맞다(경고하지 않는다)
     for (const auto& mt : mts) {
         for (double tier : tiers) {
             for (size_t pi = 0; pi < phases.size(); ++pi) {
@@ -601,6 +609,7 @@ static int generateBatch(const BatteryConfig& baseCfg,
                 }
 
                 combos.push_back(cur);
+                chainHead.push_back(autoChain && pi == 0);
             }
         }
     }
@@ -630,8 +639,16 @@ static int generateBatch(const BatteryConfig& baseCfg,
     // ★조합 하나라도 못 만들면 rc 1 과 못 만든 조합의 요약(2026-11-07) — 예전엔 실패를 버리고 rc 0 이었다(자동화는 rc 만 본다).
     //   나머지 조합은 끝까지 만든다
     std::vector<std::string> failed;
-    for (const auto& c : combos)
-        if (generateBatteryKFile(c, console).empty()) failed.push_back(label(c) + " → " + batteryKFilePath(c));
+    for (size_t ci = 0; ci < combos.size(); ++ci) {
+        const auto& c = combos[ci];
+        if (generateBatteryKFile(c, console).empty()) {
+            failed.push_back(label(c) + " → " + batteryKFilePath(c));
+            continue;
+        }
+        // ★dynain 을 바란 조합이 그것을 받지 못하면 알린다(2026-11-08) — 예전엔 말없이 *INCLUDE_DYNAIN 이 빠졌다
+        const std::string warn = chainHead[ci] ? std::string() : batteryDynainSkipWarning(c);
+        if (!warn.empty()) console.warning(warn);
+    }
     if (!failed.empty()) {
         console.error("[battery] batch 의 조합 " + std::to_string(combos.size()) + "개 가운데 " + std::to_string(failed.size()) +
                       "개를 만들지 못했다(까닭은 위 [ERROR] 다)");
@@ -683,6 +700,9 @@ int runBattery(const std::string& yamlFile, ConsoleOutput& console) {
     } else {
         std::string out = generateBatteryKFile(cfg, console);
         if (out.empty()) return 1;
+        // ★use_dynain: true 인데 dynain_file 이 비면 *INCLUDE_DYNAIN 이 빠진다 — 알린다(2026-11-08 · 예전엔 말없이)
+        const std::string warn = batteryDynainSkipWarning(cfg);
+        if (!warn.empty()) console.warning(warn);
     }
 
     return 0;

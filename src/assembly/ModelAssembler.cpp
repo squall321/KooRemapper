@@ -17908,6 +17908,9 @@ bool ModelAssembler::applyBattery(const BatteryOperation& op, const std::string&
     char buf[256];
     snprintf(buf, sizeof(buf), "[battery] Included: %s", kPath.c_str());
     infoMessages.push_back(buf);
+    // ★use_dynain: true 인데 dynain_file 이 비면 battery 덱에 *INCLUDE_DYNAIN 이 빠진다 — 알린다(2026-11-08 · 예전엔 말없이)
+    const std::string dynWarn = batteryDynainSkipWarning(cfg);
+    if (!dynWarn.empty()) infoMessages.push_back("[WARN] " + dynWarn);
     return true;
 }
 
