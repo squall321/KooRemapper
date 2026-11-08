@@ -72,7 +72,8 @@
 - [ ] 갈래 넷 고침(11-08) — 걷기 · 이월 · battery(넷째 묶음) · 공용 임시 파일 도우미(+ 러너가 `.kr_tmp_` 를 등록하지 않게)
 - [x] 여섯째 고침 22(`5fba485` — 단위 229 · 회귀 130) · 마지막 검토 둘 — 22 모두 고쳐짐 · 데이터를 잃는 퇴행 0(걷기 · 이월) ·
       퇴행 다섯(관문 · battery · 임시 파일: 제목 붙은 접촉 CID · map+prestress 제자리 체인 · meshfix 남긴 파일 · 잠금 경고 · map 견딘 쓰기 rc)
-- [ ] 퇴행 다섯 고침 → 합치기 · 시험 · 재현 대조 → main · push · 배포
+- [x] 퇴행 다섯 고침(`51cb7d1` · `42d21d7` · `6255622` · `904891f` · `4bb2ed4` · `3ef846f`) · 합치기
+- [ ] 시험 · 재현 대조 → main · push · 배포
 - [ ] 고친 것만 겨냥한 적대적 검토
 - [ ] main 에 합치기 · 단위 · 전체 회귀(gmsh 변수 둘) · push
 - [ ] compat 빌드 · 잡 확인 뒤 API 재기동 · 스모크 · CLI · Drive 게시 · appt313 스테이징 · cae00 점검 · 포털 알림
@@ -107,4 +108,5 @@
 - battery Card A 의 SBOPT 를 정수 칸에 `3.000` 으로 쓴다(LS-PrePost 는 3 — LS-DYNA 확인 못 함, 라이선스 만료) · 카탈로그 `contact.soft` 「늘 1」(자기 접촉은 2).
 - `batteryTakenSpans` 가 큰 덱에서 `ecBuildIndex` 로 잠깐 메모리를 쓴다 · 덱 · 보고가 아닌 쓰기(`writeStrainCSV` · battery · cclip · generate 곁 파일)는 쓰기 오류를 안 본다.
 - `/dev/zero` 출력 되읽기 · 잘린 map · 보고 파일 경로는 회귀가 못 잰다(파일 크기 한도가 큰 출력 뒤에 걸리지 않는다).
+- meshfix 가 gmsh 전 단계(STL · 다듬기 · 쪼개기 · .geo)에서 실패하면 `.kr_tmp_mf.*` 가 숨은 채 남는다(치우는 것이 없다 — 정확성 문제는 아님).
 - (11-08 고쳐서 목록에서 뺐다) extract-parts 되읽기의 TMID(`28ef41e`) · matdb `thermal: true` 의 같은 TMID(`89031cc`).
