@@ -463,32 +463,9 @@ bool usedFieldsClean(const AuxElementCard& a, const std::vector<std::string>& f)
     return true;
 }
 
-// 정수 폭 카드의 칸마다 글자가 같은 자리에 붙었나 — 글자가 든 칸이 다 같은 왼쪽 여백이거나 다 같은 오른쪽 여백(규칙 (e)).
-// 정수 폭으로 쓰는 쓰개(`%8d` · `%-8d` · `%7d ` …)는 칸마다 같은 꼴로 쓴다. 칸마다 맞춤이 다른 설명서 꼴 줄을 정수 폭으로 자르면
-// 넓은 칸 뒤 칸의 글자가 칸 가운데에 놓인다(i10 의 N4 를 77열부터 왼쪽 맞춤 → 정수 폭 칸 71-80 의 가운데)
-bool plainMarginsUniform(const std::string& body, size_t n, int fw) {
-    const size_t w = static_cast<size_t>(fw);
-    bool any = false, left = true, right = true;
-    size_t lm = 0, rm = 0;
-    for (size_t k = 0; k < n; ++k) {
-        const size_t c0 = k * w;
-        if (c0 >= body.size()) break;
-        const std::string seg = body.substr(c0, w);
-        const size_t s = seg.find_first_not_of(" \t");
-        if (s == std::string::npos) continue;
-        const size_t e = seg.find_last_not_of(" \t");
-        const size_t l = s, r = w - 1 - e;
-        if (!any) { lm = l; rm = r; any = true; continue; }
-        if (l != lm) left = false;
-        if (r != rm) right = false;
-    }
-    return left || right;
-}
-
-// 다른 읽기(정수 폭) 가 「그 줄을 그렇게 썼을 수 있는」 읽기인가 — 헤더의 규칙 (a)-(e). `manualDoubtful` 이면(설명서 칸 하나에 빈칸이
+// 다른 읽기(정수 폭) 가 「그 줄을 그렇게 썼을 수 있는」 읽기인가 — 헤더의 규칙 (a)-(d). `manualDoubtful` 이면(설명서 칸 하나에 빈칸이
 // 낀다 — 설명서 꼴로 쓴 줄이 아닐 수 있다) (c) 는 보지 않는다(정수 폭으로 쓴 N3 만 있는 줄도 그 N3 을 지킨다)
-bool altReadingValid(const AuxElementCard& a, const std::string& body, const std::vector<std::string>& f, size_t contentLen,
-                     int fw, bool manualDoubtful) {
+bool altReadingValid(const AuxElementCard& a, const std::vector<std::string>& f, size_t contentLen, int fw, bool manualDoubtful) {
     if (a.card1Fields <= 0 || fw <= 0) return false;
     const size_t n = static_cast<size_t>(a.card1Fields);
     if (contentLen > n * static_cast<size_t>(fw)) return false;                         // (b)
@@ -507,7 +484,7 @@ bool altReadingValid(const AuxElementCard& a, const std::string& body, const std
         if ((n3 > 0) != (n4 > 0)) return false;
     }
     if (a.family == AuxFamily::MASS && a.hasEid && (f.size() <= 2 || f[2].empty())) return false;   // (d)
-    return plainMarginsUniform(body, n, fw);                                            // (e)
+    return true;
 }
 
 // manual 과 든 다른 읽기 — 차례대로(manual 먼저)
@@ -558,11 +535,11 @@ AuxCardReadings auxCardReadings(const AuxElementCard& a, const std::string& line
         return r;
     }
     cut(false, r.plain);
-    // 다른 읽기 — 정수 폭이 규칙 (a)-(e)를 지킬 때만 든다. 넓은 칸이 없는 족은 plain 이 manual 이라 다른 읽기가 없다
+    // 다른 읽기 — 정수 폭이 규칙 (a)-(d)를 지킬 때만 든다. 넓은 칸이 없는 족은 plain 이 manual 이라 다른 읽기가 없다
     const size_t n = static_cast<size_t>(std::max(a.card1Fields, 0));
     bool doubtful = false;
     for (size_t k = 0; k < n && k < r.manual.f.size(); ++k) doubtful = doubtful || hasInnerBlank(r.manual.f[k]);
-    r.plainAlt = altReadingValid(a, body, r.plain.f, r.contentLen, fw, doubtful);
+    r.plainAlt = altReadingValid(a, r.plain.f, r.contentLen, fw, doubtful);
     return r;
 }
 

@@ -619,22 +619,26 @@ TEST(auxCardReadings_고정폭_줄은_늘_설명서_칸이다) {
     ASSERT_TRUE(auxNodesUnion(mass, r) == std::vector<int>({10000005}));
 }
 
-TEST(auxCardReadings_정수_폭_읽기는_칸마다_같은_꼴로_쓴_줄만) {
-    // 규칙 (e) — 정수 폭 쓰개는 칸마다 같은 꼴로 쓴다. 칸마다 맞춤이 다른 설명서 꼴 i10 줄(N3 오른쪽 · N4 왼쪽 맞춤)을 정수 폭으로
-    // 자르면 「10」(SLEN 의 끝)이 칸 61-70 의 가운데 · 「103104」 가 칸 71-80 의 가운데에 놓인다 — 다른 읽기가 아니다. 2026-11-08 전엔
-    // 고아 절점 10 을 남기고 번호 매기기를 거절했다(재검토 퍼즈 i10 1200 줄 가운데 34)
+TEST(auxCardReadings_칸마다_맞춤이_달라도_정수_폭_읽기는_든다) {
+    // 사용자 결정(2026-11-08) 「지키는 쪽은 절대 잃지 않는다」 — 규칙 (e)(칸마다 같은 꼴)를 뺐다. 정수 폭 줄의 칸 하나만 맞춤이 달라도
+    // 그 읽기를 버리면 진짜 절점을 지웠다(EID 왼쪽 맞춤 · 질량 EID 왼쪽 맞춤 — 여섯째 검토 D2). 칸마다 맞춤이 다른 설명서 꼴 i10 줄은 그
+    // 대가로 넘치게 남기고 번호 매기기를 거절한다(갈림)
     const auto a = auxElementCard("*ELEMENT_SEATBELT");
     char b[200];
-    std::snprintf(b, sizeof b, "%10d%10d%10d%10d%10s%16s%10d%-10s", 1, 9, 101, 102, "", "10", 103, "104");
-    auto r = auxCardReadings(a, b, 10);
-    ASSERT_TRUE(r.manualClean);
-    ASSERT_FALSE(r.plainAlt);
+    std::snprintf(b, sizeof b, "%-8d%8d%8d%8d%8d%8s%8d%8d", 13, 9, 101, 102, 0, "0.0", 103, 104);   // EID 만 왼쪽 맞춤 · 정수 폭
+    auto r = auxCardReadings(a, b, 8);
+    ASSERT_TRUE(r.plainAlt);
     ASSERT_TRUE(auxNodesUnion(a, r) == std::vector<int>({101, 102, 103, 104}));
-    ASSERT_TRUE(auxNodesDisputed(a, r).empty());
-    ASSERT_TRUE(auxManualNodesPlaceable(a, r));
-    ASSERT_TRUE(auxNodesSure(a, r) == std::vector<int>({101, 102, 103, 104}));   // 다른 읽기가 없으면 manual 이 다 확실하다
-    ASSERT_TRUE(auxNodesUnsure(a, r).empty());
-    // 정수 폭으로 고르게 쓴 줄은 그대로 든다 — 오른쪽 맞춤(긴 N3 · 짧은 N4) · 왼쪽 맞춤 · 칸마다 뒤 한 칸 비움(`%7d `)
+    ASSERT_TRUE(auxNodesDisputed(a, r) == std::vector<int>({103}));                   // 설명서 칸은 N3 = 104 · 103 은 SLEN 자리
+    ASSERT_TRUE(auxNodesSure(a, r) == std::vector<int>({101, 102, 104}));
+    ASSERT_TRUE(auxNodesUnsure(a, r) == std::vector<int>({103}));
+    std::snprintf(b, sizeof b, "%10d%10d%10d%10d%10s%16s%10d%-10s", 1, 9, 101, 102, "", "10", 103, "104");   // 설명서 꼴 i10 · N4 왼쪽
+    r = auxCardReadings(a, b, 10);
+    ASSERT_TRUE(r.manualClean);
+    ASSERT_TRUE(r.plainAlt);                                                          // 넘치게 남긴다(유령 10 · 103104)
+    ASSERT_TRUE(auxNodesUnion(a, r) == std::vector<int>({10, 101, 102, 103, 104, 103104}));
+    ASSERT_TRUE(auxNodesDisputed(a, r) == std::vector<int>({10, 103104}));            // 덱에 있으면 번호 매기기를 거절한다
+    // 정수 폭으로 고르게 쓴 줄 — 오른쪽 맞춤(긴 N3 · 짧은 N4) · 왼쪽 맞춤 · 칸마다 뒤 한 칸 비움(`%7d `)
     std::snprintf(b, sizeof b, "%10d%10d%10d%10d%10s%10s%10d%10d", 13, 9, 101, 102, "", "", 123456789, 1234);
     r = auxCardReadings(a, b, 10);
     ASSERT_TRUE(r.plainAlt);
@@ -652,14 +656,14 @@ TEST(auxCardReadings_정수_폭_읽기는_칸마다_같은_꼴로_쓴_줄만) {
     ASSERT_TRUE(r.plainAlt);
     ASSERT_TRUE(auxNodesUnion(a, r) == std::vector<int>({101, 102, 1031, 1041}));
     ASSERT_TRUE(auxNodesDisputed(a, r) == std::vector<int>({1031}));
-    // 질량 — 고르게 쓴 정수 폭 줄의 PID 는 후보로 든다 · 칸마다 맞춤이 다른 줄은 아니다
+    // 질량 — 정수 폭 줄의 PID 는 맞춤이 칸마다 달라도 후보로 든다(EID 왼쪽 맞춤 질량을 버렸다 — 이제 PID 0 / 7 로 갈린다)
     const auto m = auxElementCard("*ELEMENT_MASS");
     r = auxCardReadings(m, "   95001     105     1.0       7", 8);
     ASSERT_TRUE(r.plainAlt);
     ASSERT_TRUE(auxPidsOf(m, r) == std::vector<int>({7}));
-    r = auxCardReadings(m, "95001   105        1.0      77", 8);
-    ASSERT_FALSE(r.plainAlt);
-    ASSERT_TRUE(auxPidsOf(m, r).empty());
+    r = auxCardReadings(m, "95001        105     1.0       7", 8);
+    ASSERT_TRUE(r.plainAlt);
+    ASSERT_TRUE(auxPidsOf(m, r) == std::vector<int>({7}));
 }
 
 TEST(auxManualNodesPlaceable_0_인_칸은_주석과_겹쳐도_된다) {
