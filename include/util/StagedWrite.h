@@ -101,9 +101,14 @@ std::string physicalTarget(const std::string& dst);
 // 아닌 대상(Direct)은 잠그지 않는다. 지키는 것 — 같은 산출을 쓰는 실행끼리 바꿔 넣기가 겹치지 않는다(산출 · 곁 파일 · 보고가 한 실행의
 // 것). 지키지 않는 것 — 바꿔 넣는 사이에 읽는 쪽은 반쯤 바뀐 묶음(새 산출 · 앞 보고)을 볼 수 있고 그 사이에 죽으면 그 묶음이 남는다
 // (파일마다의 이름 바꾸기만 원자적이다 · 신호 처리기는 남은 임시 파일만 지운다)
+//
+// `quietIfNoFolder` — 잠금 파일을 둘 폴더가 없거나 쓸 수 없어 잠금 파일을 못 만들면 말없이 잠그지 않는다. 거절 · 실패 보고가 쓴다 —
+// 그 폴더에는 이 실행이 바꿔 넣을 것이 없고 다른 실행도 거기 잠금을 둘 수 없어 [WARN] 이 할 말이 없다(마지막 검토 — `output:
+// nodir/out.k` 거절이 진짜 [ERROR] 옆에 「섞일 수 있다」 를 냈다). 다른 까닭(그 이름이 링크 · flock · 다른 실행이 오래 쥐었다)은
+// 그대로 [WARN]. 바꿔 넣는 차례(산출 · 곁 파일 · 보고)는 늘 말한다 — 읽기 전용 폴더의 제자리 쓰기도 동시 실행과 섞일 수 있다
 class CommitLock {
 public:
-    explicit CommitLock(const std::string& dst, double waitSec = 30.0);
+    explicit CommitLock(const std::string& dst, double waitSec = 30.0, bool quietIfNoFolder = false);
     ~CommitLock();
     CommitLock(const CommitLock&) = delete;
     CommitLock& operator=(const CommitLock&) = delete;

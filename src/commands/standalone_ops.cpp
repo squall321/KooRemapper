@@ -2004,8 +2004,8 @@ int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
         printList(rep.problems, true);
         printList(rep.warnings, false);
         std::unique_ptr<KooRemapper::staged_write::CommitLock> mine;
-        if (!commitHeld) {
-            mine = std::make_unique<KooRemapper::staged_write::CommitLock>(outPath);
+        if (!commitHeld) {   // output 폴더가 없거나 쓸 수 없으면 말없이(거기 바꿔 넣을 것이 없다 · 마지막 검토)
+            mine = std::make_unique<KooRemapper::staged_write::CommitLock>(outPath, 30.0, true);
             for (const auto& n : mine->takeNotes()) console.warning(std::string("[") + tag + "] " + n.text);
         }
         writeReport();

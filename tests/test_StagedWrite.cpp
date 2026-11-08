@@ -310,6 +310,33 @@ TEST(StagedWrite_CommitLock_은_같은_산출을_쥔_다른_프로세스가_풀_
     ASSERT_EQ(countTemps(s.root), 0);   // 잠금 파일(.kr_tmp_lock_…)도 지웠다
 }
 
+TEST(StagedWrite_CommitLock_quietIfNoFolder_는_폴더가_없거나_쓸_수_없을_때만_말없이_잠그지_않는다) {
+    SwScratch s("lockq");
+    const std::string missing = s.at("nodir/out.k");
+    {
+        staged_write::CommitLock loud(missing);
+        ASSERT_FALSE(loud.held());
+        ASSERT_EQ(loud.takeNotes().size(), (size_t)1);   // 바꿔 넣는 차례는 말한다
+    }
+    {
+        staged_write::CommitLock quiet(missing, 30.0, true);
+        ASSERT_FALSE(quiet.held());
+        ASSERT_TRUE(quiet.takeNotes().empty());   // 거절 보고 — 그 폴더에 바꿔 넣을 것이 없다
+    }
+    if (::geteuid() != 0) {   // root 는 폴더 권한을 넘는다
+        fs::create_directories(s.root / "ro");
+        fs::permissions(s.root / "ro", fs::perms::owner_read | fs::perms::owner_exec);
+        staged_write::CommitLock quiet(s.at("ro/out.k"), 30.0, true);
+        const bool silent = !quiet.held() && quiet.takeNotes().empty();
+        fs::permissions(s.root / "ro", fs::perms::owner_all);
+        ASSERT_TRUE(silent);
+    }
+    {   // 쓸 수 있는 폴더면 조용한 쪽도 잠근다
+        staged_write::CommitLock quiet(s.at("out.k"), 30.0, true);
+        ASSERT_TRUE(quiet.held());
+    }
+}
+
 namespace {
 // 그 블록 동안만 파일 크기 상한(SIGXFSZ 무시 — 넘는 쓰기가 EFBIG 로 짧게 끝난다) — 빠져나갈 때(ASSERT 의 return 도) 되돌린다
 struct FsizeCap {

@@ -1691,8 +1691,8 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
         if (reportWritable()) {
             // ★거절 보고도 바꿔 넣기 묶음이다 — 같은 산출을 바꿔 넣는 다른 실행 사이에 끼지 않게 잠근다(여섯째 검토 — 예전엔 잠금 없이 썼다)
             std::unique_ptr<KooRemapper::staged_write::CommitLock> mine;
-            if (!commitHeld) {
-                mine = std::make_unique<KooRemapper::staged_write::CommitLock>(o.output);
+            if (!commitHeld) {   // 산출 폴더가 없거나 쓸 수 없으면 말없이(거기 바꿔 넣을 것이 없다 · 마지막 검토)
+                mine = std::make_unique<KooRemapper::staged_write::CommitLock>(o.output, 30.0, true);
                 for (const auto& n : mine->takeNotes()) n.warn ? console.warning(n.text) : console.info(n.text);
             }
             std::string why;

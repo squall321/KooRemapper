@@ -22,7 +22,8 @@
   C 바꿔 넣기 차례 — 산출을 바꿔 넣은 뒤 번호 지도가 실패하면 rc 1 · 새 산출 · 앞 번호 지도 · 앞 보고(앞 실행을 말한다)가 남았다.
     보고는 늘 마지막이고 실제로 바꿔 넣은 것을 말한다(뒤가 실패하면 그 상태로 다시 쓴다). 같은 산출을 쓰는 동시 실행은 잠금
     `.kr_tmp_lock_<이름 해시>`(flock)로 바꿔 넣기가 겹치지 않는다 — 이 시험이 그 잠금을 쥐고 실행이 기다리는지 본다(이름 해시는
-    FNV-1a 64 의 아래 32 비트 — 도우미의 정의를 여기서 다시 센다).
+    FNV-1a 64 의 아래 32 비트 — 도우미의 정의를 여기서 다시 센다). 거절 보고도 그 잠금을 쥐되, 산출 폴더가 없거나 쓸 수 없으면
+    말없이 잠그지 않는다(C-12 ~ C-15 — 마지막 검토: 진짜 [ERROR] 옆에 「섞일 수 있다」 를 냈다 · C-16 바꿔 넣는 차례는 늘 말한다).
   M 말 — 쓰기 관문의 말(long 덱은 `.k` 없는 접두)과 되읽기 예외가 임시 이름을 콘솔 · 보고에 실었다. 멈춘 사이 임시 덱을 못 읽게
     (chmod 000) 해 그 실패를 일으키고 콘솔 · 보고 어디에도 `.kr_tmp_` 가 없고 제 이름이 있는지 본다.
   U 보고 글자 — extract-parts 보고는 덱 · 경로의 깨진 바이트(CP949 로 쓴 `*INCLUDE` 이름 · 모르는 키워드 · 모델 경로)를 그대로 실어
@@ -40,16 +41,24 @@
   T 임시 파일 이름 표지 — 플랫폼은 `.kr_tmp_` 가 든 파일만 산출로 올리지 않는다. map 의 앞처리 평판(`.__preproc_flat.k`) · 뒤집은 기준
     (`.__flipped_ref.k`) · 펼친 덱(`.kr_flat_`) · meshfix 의 gmsh 왕복(`__mf.*`) · polish(`__pol<회차>_<덩어리>.*`)는 표지가 없어 SIGKILL 된
     잡이 남기면 산출로 올라갔다(여섯째 검토 — runner 의 걸러내기). 이름에 표지를 붙였다 — strace 로 실행이 만들었다 지운 파일을 모아
-    모두 `.kr_tmp_` 를 지녔는지 본다(strace 가 없으면 건너뛴다).
+    모두 `.kr_tmp_` 를 지녔는지 본다(strace 가 없으면 건너뛴다). T-K — 일부러 남기는 파일(meshfix 의 gmsh 실패 때 살펴보라고 남기는
+    파일)은 표지가 없어야 플랫폼이 올린다: 보이는 이름 `<줄기>__mf.*` 로 남기고 See log · 남긴 .geo 도 그 이름(마지막 검토 — 표지를
+    붙인 뒤 그 파일이 걸러졌다). 늘 실패하는 gmsh 대역으로 돌리니 진짜 gmsh 가 없어도 돈다. T-R — map 고리의 dynain 머리줄
+    `$ Reference mesh:` 는 지운 임시 사본 이름 대신 원래 평판 이름(무엇을 한 사본인지)을 댄다.
   W 쓰기 오류 — 쓰기 · 닫기 결과를 보지 않아 디스크가 차거나 파일 크기 상한(RLIMIT_FSIZE · SIGXFSZ 무시 — ENOSPC · EDQUOT 의
     대역)에 걸려 잘린 덱을 rc 0 · ok 로 바꿔 넣었다(여섯째 검토 S2 — extract-parts 는 `*NODE` 가운데서 끊긴 덱 · 이월 적용은 마지막
     새 섹션을 잃은 덱). 이제 바꿔 넣지 않고 rc 1 · 보고가 그 오류를 말한다. 바로 쓰는 op(DeckWriter · writeOutput)도 rc 1.
+    W-6 — op 이 [WARN] 으로 견디는 쓰기(map 의 앞처리 평판 임시 파일)는 rc 를 바꾸지 않는다(마지막 검토 — 공용 기록이 rc 1 로 바꿨다).
+
+바이너리는 늘 주소 공간 8 GB 상한(RLIMIT_AS — prlimit --as 와 같다)으로 돌린다(끝없이 읽히는 장치를 되읽던 판의 탐침이 50 GB 까지 자라
+이 상자의 다른 서비스가 죽었다 · 11-08).
 
 usage: test_staged_write.py <KooRemapper 바이너리>
 """
 import hashlib
 import json
 import os
+import resource
 import shutil
 import signal
 import subprocess
@@ -71,8 +80,18 @@ def check(name, cond, detail=""):
     return cond
 
 
+# 돌리는 바이너리마다 주소 공간 8 GB(prlimit --as 와 같다) — 끝없이 읽히는 장치(/dev/full)를 되읽던 판의 탐침이 50 GB 까지 자라
+# earlyoom 이 이 상자의 다른 서비스를 죽였다(11-08 마지막 검토 · 새 규칙)
+AS_CAP = 8589934592
+
+
+def as_cap():
+    resource.setrlimit(resource.RLIMIT_AS, (AS_CAP, AS_CAP))
+
+
 def run(binary, d, *args, timeout=600):
-    p = subprocess.run([binary, *args], cwd=d, capture_output=True, text=True, timeout=timeout, encoding="utf-8", errors="replace")
+    p = subprocess.run([binary, *args], cwd=d, capture_output=True, text=True, timeout=timeout, encoding="utf-8", errors="replace",
+                       preexec_fn=as_cap)
     return p.returncode, p.stdout + p.stderr
 
 
@@ -178,8 +197,8 @@ def ep_big_dir(name):
 def start(binary, d, *args, pipe=False):
     if pipe:   # 말을 모은다(짧은 말뿐이라 파이프가 차지 않는다)
         return subprocess.Popen([binary, *args], cwd=d, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                                encoding="utf-8", errors="replace")
-    return subprocess.Popen([binary, *args], cwd=d, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                encoding="utf-8", errors="replace", preexec_fn=as_cap)
+    return subprocess.Popen([binary, *args], cwd=d, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, preexec_fn=as_cap)
 
 
 def stop_when_staged(binary, d, args, tries=40):
@@ -440,7 +459,7 @@ def sec_o(binary):
     os.chmod(ro, 0o555)
     write(os.path.join(d, "e.yaml"), "model: in.k\noutput: ro/out.k\nparts: [1]\nreport: ro/r.json\n")
     p = subprocess.Popen([binary, "extract-parts", "e.yaml"], cwd=d, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                         encoding="utf-8", errors="replace")
+                         encoding="utf-8", errors="replace", preexec_fn=as_cap)
     out = p.communicate(timeout=300)[0]
     rep = load(os.path.join(ro, "r.json"))
     check("O-6 extract-parts 읽기 전용 폴더의 쓸 수 있는 산출 · 보고 — rc 0 · 둘 다 새것 · [WARN] 원자적이 아님 · 임시 폴더 깨끗",
@@ -646,6 +665,40 @@ def sec_c(binary):
         rep = load(os.path.join(d, rep_name))
         check("C-%d %s 거절 보고 — 잠금을 쥔 동안 쓰지 않고 기다리고 풀면 rc 1 · 보고 ok false" % (k, op),
               waited and rc == 1 and isinstance(rep, dict) and rep.get("ok") is False and not tmp_left(d), (waited, rc, rep))
+    # C-12 ~ C-15 거절 보고의 잠금 — 산출 폴더가 없거나 쓸 수 없으면 말없이 잠그지 않는다(거기 바꿔 넣을 것이 없다 · 마지막 검토 —
+    # `output: nodir/out.k` 거절이 진짜 [ERROR] 옆에 「잠그지 못했다 … 섞일 수 있다」 를 냈다). C-16 대조 — 바꿔 넣는 차례(읽기 전용
+    # 폴더의 제자리 쓰기)는 잠그지 못하면 늘 말한다
+    k = 11
+    for op, where in (("extract-parts", "nodir"), ("apply_carryover_plan", "nodir"), ("extract-parts", "ro"), ("apply_carryover_plan", "ro")):
+        k += 1
+        if op == "extract-parts":
+            d = ep_dir("C%d" % k)
+            write(os.path.join(d, "x.yaml"), "model: in.k\noutput: %s/out.k\nparts: [1]\nreport: r.json\n" % where)
+            args, rep_name = ("extract-parts", "x.yaml"), "r.json"
+        else:
+            d = co_dir("C%d" % k)
+            write(os.path.join(d, "x.yaml"), "model: deck.k\nplan: plan.json\noutput: %s/deck_applied\nreport: rep.json\n" % where)
+            args, rep_name = ("apply_carryover_plan", "x.yaml"), "rep.json"
+        if where == "ro" and os.geteuid() != 0:
+            os.makedirs(os.path.join(d, "ro"))
+            os.chmod(os.path.join(d, "ro"), 0o555)
+        rc, out = run(binary, d, *args)
+        if where == "ro":
+            os.chmod(os.path.join(d, "ro"), 0o755)
+        rep = load(os.path.join(d, rep_name))
+        check("C-%d %s output 폴더가 %s — rc 1 · 보고 ok false · 잠금 [WARN] 없음" % (k, op, "없다" if where == "nodir" else "읽기 전용"),
+              rc == 1 and isinstance(rep, dict) and rep.get("ok") is False and "[ERROR]" in out and "잠그지 못했다" not in out,
+              (rc, [ln for ln in out.splitlines() if "[ERROR]" in ln or "[WARN]" in ln][:4]))
+    if os.geteuid() != 0:
+        d = ep_dir("C16")
+        os.makedirs(os.path.join(d, "ro"))
+        write(os.path.join(d, "ro", "out.k"), "old\n")
+        os.chmod(os.path.join(d, "ro"), 0o555)
+        write(os.path.join(d, "x.yaml"), "model: in.k\noutput: ro/out.k\nparts: [1]\nreport: r.json\n")
+        rc, out = run(binary, d, "extract-parts", "x.yaml")
+        os.chmod(os.path.join(d, "ro"), 0o755)
+        check("C-16 대조 — 읽기 전용 폴더의 제자리 쓰기(바꿔 넣는다)는 잠그지 못했다고 말한다 · rc 0 · 새 산출",
+              rc == 0 and "잠그지 못했다" in out and is_new_deck(os.path.join(d, "ro", "out.k")), (rc, out[-300:]))
     # C-9 잠금 이름에 심어 둔 심볼릭 링크는 따라가지 않는다(O_NOFOLLOW — 예전엔 링크가 가리키는 자리에 빈 파일을 만들었다)
     d = ep_dir("C9")
     os.symlink("victim.txt", os.path.join(d, ".kr_tmp_lock_" + name_hash("out.k")))
@@ -852,12 +905,28 @@ def sec_f(binary):
 
 
 # ── T 임시 파일 이름 표지 ────────────────────────────────────────────────────
+def map_dir(binary, name):
+    """map 입력 — generate arc(demo_bent.k · demo_flat_fine.k)와 x 를 0.5% 늘린 평판 flat_s.k(크기를 맞추는 갈래가 돈다 · 재료 카드는 그대로)."""
+    d = os.path.join(TMP, name)
+    os.makedirs(d)
+    run(binary, d, "generate", "--dim-i", "10", "--dim-j", "4", "arc", "demo")
+    sec, out = "", []
+    for ln in open(os.path.join(d, "demo_flat_fine.k"), encoding="utf-8").read().splitlines():
+        if ln.startswith("*"):
+            sec = ln.strip().upper()
+        if sec == "*NODE" and not ln.startswith("*") and not ln.startswith("$") and len(ln) >= 56:
+            ln = ln[:8] + "%16.9e" % (float(ln[8:24]) * 1.005) + ln[24:]
+        out.append(ln)
+    write(os.path.join(d, "flat_s.k"), "\n".join(out) + "\n")
+    return d
+
+
 def traced(binary, d, args, env=None):
     """strace 로 돌려 이 실행이 d 아래에 만들었다가 끝에 없는 파일(임시 파일)을 모은다 — (rc, 말, 임시 파일 이름들)."""
     import re
     trace = d.rstrip("/") + ".strace"
     p = subprocess.run(["strace", "-f", "-qq", "-o", trace, "-e", "trace=open,openat,creat", binary, *args], cwd=d,
-                       capture_output=True, text=True, timeout=900, encoding="utf-8", errors="replace", env=env)
+                       capture_output=True, text=True, timeout=900, encoding="utf-8", errors="replace", env=env, preexec_fn=as_cap)
     made = set()
     for line in open(trace, encoding="utf-8", errors="replace"):
         m = re.search(r'\b(open|openat|creat)\((?:AT_FDCWD, )?"([^"]+)"(?:, ([A-Z_|]+))?', line)
@@ -873,24 +942,58 @@ def traced(binary, d, args, env=None):
 
 def sec_t(binary):
     print("[T] 임시 파일 이름 표지 — 실행이 만들었다 지운 파일은 모두 .kr_tmp_ 를 지닌다(플랫폼이 산출로 올리지 않는다)")
+    # T-K 살펴보라고 남기는 파일 — meshfix 는 gmsh 가 실패하면 일부러 파일을 남긴다. 보이는 이름 `<줄기>__mf.*`(표지 없음 — 플랫폼이
+    # 산출로 올린다)이고 [ERROR] 의 See log · 남긴 .geo 의 Merge · Save 가 그 이름이다(마지막 검토 — 표지를 붙인 뒤 그 파일이 걸러져
+    # 세션에 안 올라갔고 말은 표지 이름을 댔다). gmsh 는 늘 실패하는 대역이다(진짜 gmsh 가 없어도 돈다)
+    d = os.path.join(TMP, "T_keep")
+    os.makedirs(d)
+    shutil.copy(os.path.join(REPO, "examples", "mesh", "tetramesh.k"), d)
+    write(os.path.join(d, "mf.yaml"), "model: tetramesh.k\noutput: mf_out.k\npid: 1\n")
+    stub = os.path.join(TMP, "failgmsh.sh")
+    write(stub, "#!/bin/sh\necho 'fake gmsh failure' >&2\nexit 3\n")
+    os.chmod(stub, 0o755)
+    p = subprocess.run([binary, "meshfix", "mf.yaml"], cwd=d, capture_output=True, text=True, timeout=600, encoding="utf-8",
+                       errors="replace", env=dict(os.environ, KOOREMAPPER_GMSH=stub), preexec_fn=as_cap)
+    said = p.stdout + p.stderr
+    kept = sorted(n for n in os.listdir(d) if n not in ("tetramesh.k", "mf.yaml"))
+    geo = open(os.path.join(d, "mf_out__mf.geo"), encoding="utf-8").read() if "mf_out__mf.geo" in kept else ""
+    err = [ln for ln in said.splitlines() if "[ERROR]" in ln]
+    check("T-K meshfix gmsh 실패 — rc 1 · 남긴 파일이 보이는 이름 mf_out__mf.{geo,log,stl}(.kr_tmp_ 없음) · See log 와 .geo 의 "
+          "Merge · Save 가 그 이름",
+          p.returncode == 1 and kept == ["mf_out__mf.geo", "mf_out__mf.log", "mf_out__mf.stl"] and
+          any("See log:" in ln and ln.rstrip().endswith("mf_out__mf.log") for ln in err) and ".kr_tmp_" not in geo and
+          "mf_out__mf.stl" in geo and "mf_out__mf.msh" in geo, (p.returncode, kept, err, said[-300:]))
+    # 남길 이름도 쓸 파일이다 — 그 이름의 입력(여기선 설정 YAML 이 mf_out__mf.log)이면 gmsh 전에 거절한다(이름을 바꿔 남길 때 덮지 않게)
+    write(os.path.join(d, "mf_out__mf.log"), "model: tetramesh.k\noutput: mf_out.k\npid: 1\n")
+    before = open(os.path.join(d, "mf_out__mf.log"), "rb").read()
+    p = subprocess.run([binary, "meshfix", "mf_out__mf.log"], cwd=d, capture_output=True, text=True, timeout=600, encoding="utf-8",
+                       errors="replace", env=dict(os.environ, KOOREMAPPER_GMSH=stub), preexec_fn=as_cap)
+    said = p.stdout + p.stderr
+    check("T-K2 남길 이름(mf_out__mf.log)이 설정 YAML — gmsh 전에 rc 1 「같은 파일」 · 설정 바이트 그대로",
+          p.returncode == 1 and "같은 파일" in said and "Running Gmsh" not in said and
+          open(os.path.join(d, "mf_out__mf.log"), "rb").read() == before, (p.returncode, said[-300:]))
+    # T-R dynain 머리줄의 기준 이름 — 고리가 임시 사본(앞처리 평판 · 뒤집은 기준 — 끝나면 지운다)을 읽어도 원래 평판 이름과 그 사본이
+    # 무엇인지 댄다(마지막 검토 — 지운 임시 이름 …kr_tmp_… 을 댔다)
+    d = map_dir(binary, "T_ref")
+    for tag, extra, flat_name in (("bbox_align: source", "bbox_align: source\nbbox_align_max_drift: 50\n", "flat_s.k"),
+                                  ("flip_x", "flip_x: true\n", "demo_flat_fine.k")):
+        out_name = "r_" + tag.split(":")[0]
+        write(os.path.join(d, out_name + ".yaml"), "bent: demo_bent.k\nflat: %s\noutput: %s.k\n%sprestress:\n  enabled: true\n"
+                                                   "  output: %s.dynain\n  E: 210000.0\n  nu: 0.3\n" % (flat_name, out_name, extra, out_name))
+        rc, said = run(binary, d, "map", out_name + ".yaml")
+        dyn = os.path.join(d, out_name + ".dynain")
+        ref = [ln.rstrip() for ln in open(dyn, encoding="utf-8", errors="replace")] if os.path.exists(dyn) else []
+        ref = [ln for ln in ref if ln.startswith("$ Reference mesh:")]
+        check("T-R map %s 고리 — dynain 의 기준 이름이 원래 평판 %s(임시 사본이라고 말한다) · .kr_tmp_ 없음" % (tag, flat_name),
+              rc == 0 and len(ref) == 1 and ref[0].startswith("$ Reference mesh: " + flat_name + " (") and ".kr_tmp_" not in ref[0],
+              (rc, ref, said[-200:]))
     if not shutil.which("strace"):
         check("T — strace 가 없다(건너뜀)", True)
         return
     gmsh = os.environ.get("KOOREMAPPER_GMSH") or os.environ.get("KOOREMAPPER_TEST_GMSH")
     cases = []
     # map — bbox_align: source(앞처리 평판) · flip_x(뒤집은 기준)이 prestress 고리와
-    d = os.path.join(TMP, "T_map")
-    os.makedirs(d)
-    run(binary, d, "generate", "--dim-i", "10", "--dim-j", "4", "arc", "demo")
-    flat = open(os.path.join(d, "demo_flat_fine.k"), encoding="utf-8").read().splitlines()
-    sec, out = "", []
-    for ln in flat:   # x 를 0.5% 늘린 평판(크기를 맞추는 갈래가 돈다) — 재료 카드는 그대로
-        if ln.startswith("*"):
-            sec = ln.strip().upper()
-        if sec == "*NODE" and not ln.startswith("*") and not ln.startswith("$") and len(ln) >= 56:
-            ln = ln[:8] + "%16.9e" % (float(ln[8:24]) * 1.005) + ln[24:]
-        out.append(ln)
-    write(os.path.join(d, "flat_s.k"), "\n".join(out) + "\n")
+    d = map_dir(binary, "T_map")
     write(os.path.join(d, "src.yaml"), "bent: demo_bent.k\nflat: flat_s.k\noutput: m1.k\nbbox_align: source\nbbox_align_max_drift: 50\n"
                                        "prestress:\n  enabled: true\n  output: m1.dynain\n  E: 210000.0\n  nu: 0.3\n")
     write(os.path.join(d, "flip.yaml"), "bent: demo_bent.k\nflat: demo_flat_fine.k\noutput: m2.k\nflip_x: true\n"
@@ -928,9 +1031,8 @@ def sec_t(binary):
 # ── W 쓰기 오류 ──────────────────────────────────────────────────────────────
 def run_fsize(binary, d, args, limit):
     """파일 크기 상한(SIGXFSZ 무시 — 넘는 쓰기가 EFBIG 로 짧게 끝난다)으로 돌린다."""
-    import resource
-
     def pre():
+        as_cap()
         signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
         resource.setrlimit(resource.RLIMIT_FSIZE, (limit, limit))
     p = subprocess.run([binary, *args], cwd=d, capture_output=True, text=True, timeout=600, encoding="utf-8", errors="replace",
@@ -998,18 +1100,33 @@ def sec_w(binary):
         check("W-%d %s(%s) 산출 반 크기 상한 — rc 1 · [ERROR] 가 쓰다 멈춘 파일과 까닭(File too large)을 말한다" %
               (k, opname, "writeOutput" if k == 4 else "DeckWriter"),
               rc0 == 0 and size > 0 and rc == 1 and "File too large" in out and "[ERROR]" in out, (rc0, size, rc, out[-300:]))
+    # W-6 op 이 견디는 쓰기 실패는 rc 를 바꾸지 않는다 — map 은 앞처리 평판 임시 파일(<output>.kr_tmp_preproc_flat.k)을 못 쓰면 [WARN]
+    # 으로 넘기고(고리 prestress 가 원래 평판을 쓴다) 산출은 멀쩡하다. 그 자리를 /dev/full 링크로(마지막 검토 — 공용 쓰기 실패 기록이
+    # main 에서 rc 1 · 「그 파일은 잘렸을 수 있다」 로 바꿨다)
+    d = map_dir(binary, "W6_map")
+    write(os.path.join(d, "m.yaml"), "bent: demo_bent.k\nflat: flat_s.k\noutput: m.k\nbbox_align: source\nbbox_align_max_drift: 50\n"
+                                     "prestress:\n  enabled: true\n  output: m.dynain\n  E: 210000.0\n  nu: 0.3\n")
+    if os.path.exists("/dev/full"):
+        os.symlink("/dev/full", os.path.join(d, "m.k.kr_tmp_preproc_flat.k"))
+        rc, said = run(binary, d, "map", "m.yaml")
+        deck = open(os.path.join(d, "m.k"), encoding="utf-8", errors="replace").read() if os.path.exists(os.path.join(d, "m.k")) else ""
+        check("W-6 map 이 견디는 앞처리 평판 임시 파일 쓰기 실패(/dev/full) — rc 0 · [WARN] 만 · [ERROR] 없음 · m.k · m.dynain",
+              rc == 0 and "Failed to write pre-processed flat temp" in said and "[ERROR]" not in said and "*END" in deck and
+              os.path.exists(os.path.join(d, "m.dynain")), (rc, [ln for ln in said.splitlines() if "[ERROR]" in ln or "[WARN]" in ln][:4]))
 
 
 # ── P 제자리로 옮겨 쓰다 멈춘 산출 ────────────────────────────────────────────
 def start_nofsz(binary, d, *args):
     """SIGXFSZ 무시로 띄운다 — 뒤에 prlimit 로 크기 상한을 걸면 넘는 쓰기가 EFBIG 로 짧게 끝난다(말을 모은다)."""
+    def pre():
+        as_cap()
+        signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
     return subprocess.Popen([binary, *args], cwd=d, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
-                            errors="replace", preexec_fn=lambda: signal.signal(signal.SIGXFSZ, signal.SIG_IGN))
+                            errors="replace", preexec_fn=pre)
 
 
 def sec_p(binary):
     print("[P] 제자리로 옮겨 쓰다 멈췄다 — 그 파일이 잘렸다고 말한다(앞 파일이 그대로라고 하지 않는다 · output_damaged)")
-    import resource
     if os.geteuid() == 0:
         check("P — root 는 폴더 권한을 넘는다(건너뜀)", True)
         return

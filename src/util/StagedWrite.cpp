@@ -712,10 +712,11 @@ int sweepStale(const std::string& dst, std::vector<Note>* notes) {
 }
 
 // ── 바꿔 넣는 동안의 잠금 ─────────────────────────────────────────────────────
-CommitLock::CommitLock(const std::string& dst, double waitSec) {
+CommitLock::CommitLock(const std::string& dst, double waitSec, bool quietIfNoFolder) {
 #ifdef _WIN32
     (void)dst;
     (void)waitSec;
+    (void)quietIfNoFolder;
 #else
     if (dst.empty()) return;
     const Target t = resolveTarget(dst);
@@ -731,6 +732,10 @@ CommitLock::CommitLock(const std::string& dst, double waitSec) {
         const int fd = ::open(path_.c_str(), O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0666);
         if (fd < 0) {
             const int e = errno;
+            if (e != ELOOP && quietIfNoFolder) {   // 폴더가 없거나 쓸 수 없다 — 거기 바꿔 넣을 것도, 다른 실행의 잠금도 없다
+                const std::string dir = dirPartOf(t.path);
+                if (::access(dir.empty() ? "." : dir.c_str(), W_OK) != 0) return;
+            }
             unlocked(e == ELOOP ? std::string("잠금 파일 자리가 심볼릭 링크다 — 따라가지 않는다") : "잠금 파일을 만들 수 없다: " + errText(e));
             return;
         }

@@ -415,6 +415,27 @@ async def test_kr_tmp_leftovers_are_not_registered_as_outputs(db, sess, monkeypa
     assert all((d / n).exists() for n in _KR_TMP_LEFTOVERS), "판정 때 그 파일들이 있었다(시험이 헛돌지 않았다)"
 
 
+@_needs_bin
+@_aio
+async def test_meshfix_files_kept_for_inspection_are_registered(db, sess, monkeypatch, tmp_path):
+    """gmsh 가 실패하면 meshfix 는 살펴보라고 파일을 남긴다 — 보이는 이름 `<줄기>__mf.*` 라 산출로 올라가고 요약의 See log 도 그
+    이름이다(11-08 마지막 검토 — `.kr_tmp_` 표지를 붙인 뒤 그 파일이 걸러져 세션에 안 올라갔다 · 말은 표지 이름을 댔다)."""
+    u, s = sess
+    d = storage.session_abs_dir(u.id, s.id)
+    shutil.copy(REPO / "examples" / "mesh" / "tetramesh.k", d)
+    stub = tmp_path / "failgmsh.sh"   # 늘 실패하는 gmsh 대역(KOOREMAPPER_GMSH 는 시험 삼아 돌려 보지 않는다)
+    stub.write_text("#!/bin/sh\necho 'fake gmsh failure' >&2\nexit 3\n")
+    stub.chmod(0o755)
+    monkeypatch.setenv("KOOREMAPPER_GMSH", str(stub))
+    monkeypatch.setattr(settings, "job_launcher", "")
+    job = await _run_job(db, u, s, "meshfix", {"model": "tetramesh.k", "output": "mf_out.k", "pid": 1})
+    assert job.status == "failed", (job.status, job.error_summary)
+    outs = await _outputs(db, job)
+    assert {"mf_out__mf.stl", "mf_out__mf.geo", "mf_out__mf.log"} <= set(outs), outs
+    assert not [n for n in outs if ".kr_tmp_" in n], outs
+    assert "mf_out__mf.log" in (job.error_summary or "") and ".kr_tmp_" not in (job.error_summary or ""), job.error_summary
+
+
 # ── V2 · V3 · 연산 꼴마다 같은 결과 ────────────────────────────────────────────
 # 위치 인자 둘(generate → map: OpenMP · 진행률 %) · yaml · matdb(번들 DB) · meshfix(gmsh)
 _SHAPES = [
