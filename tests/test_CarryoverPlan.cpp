@@ -732,6 +732,15 @@ TEST(Carryover_셸_섹션의_정수_칸_실수_꼴은_그_정수) {
     ASSERT_TRUE(why.find("NIP") != std::string::npos);
     ASSERT_FALSE(rows("        10         2         1         2         0         0       1.5", {}, why));
     ASSERT_TRUE(why.find("ICOMP") != std::string::npos);
+    // 10진만 — strtod 가 받는 16진 · inf 는 정수 칸이 아니다(적대적 검토 11-08 #5 — NIP `0x2` 를 2 로 읽었다)
+    ASSERT_FALSE(rows("        10         2         1       0x2", {}, why));
+    ASSERT_TRUE(why.find("NIP") != std::string::npos);
+    long long v = 0;
+    ASSERT_TRUE(carryover::integralField(" 3.000E+00", v) && v == 3);
+    ASSERT_TRUE(carryover::integralField("", v) && v == 0);
+    ASSERT_TRUE(carryover::integralField("+12", v) && v == 12);
+    ASSERT_TRUE(carryover::integralField("4.", v) && v == 4);
+    for (const char* bad : {"0x2", "0X2", "inf", "nan", "1e", ".", "+", "2.5", "1d0", "0x1p3", "1,0"}) ASSERT_FALSE(carryover::integralField(bad, v));
 }
 
 TEST(Carryover_v2_보고에_deck_from_인클루드_refused_transform) {

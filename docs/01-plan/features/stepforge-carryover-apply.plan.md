@@ -138,6 +138,12 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
   회귀 R-8 은 gdb 로 `applyCarryoverPlan` 에서 멈춰 파일을 바꾼다(검은 상자로는 한 프로세스 안의 두 읽기 사이를 못 끼운다 · 단위 시험은
   ModelAssembler 를 링크하지 못한다 — 명령 갈래 심볼). gdb 로 멈추지 못하면 SKIP.
 
+## 11-08 적대적 검토(판 2 · 셋째 묶음 고침) 고침 — 정한 것
+- **10진만(#5)** — `parseIntegral` 이 `strtod` 로 실수 꼴을 읽어 16진(`0x2`) · `0x1.8p0` 을 받았다(NIP `0x2` → 2). `isDecimalNumber`
+  ([+-]? 숫자 [. 숫자] [e[+-]숫자])를 지난 글자만 `strtod` 에 넘긴다 — `parseReal`(T1~T4 같은 실수 칸)도 같은 문을 지난다. StepForge 리더의
+  `int()` · `float()` 가 받는 10진 꼴과 같다(파이썬 `float` 도 16진을 안 받는다). 공용 SECID 훑기의 줄 셈이 쓰는 `carryover::integralField`
+  가 이 규칙의 바깥 문이다.
+
 ## 11-07 밤 결정 고침 — 정한 것
 - **출력 규칙(사용자 결정 ①)** — extract-parts(`a33af2f`)와 같은 꼴: 덱 · 보고를 output 폴더의 임시 파일(`.<이름>.kr_tmp_…`)에 쓰고 되읽기 대조 ·
   품질 관문까지 지나면 덱 · 보고 차례로 바꿔 넣는다(`CarryStagedFiles` — extract-parts `StagedFiles` 의 사본 · 셋째 소비자가 오면 공용으로).

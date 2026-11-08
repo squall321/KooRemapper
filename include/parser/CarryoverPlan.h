@@ -229,6 +229,10 @@ void compareSectionCards(const std::vector<std::string>& deckBlock, const Sectio
 // 첫 `*END` 줄 앞까지 · IncludeClosure.cpp `Walker::card` 규칙의 사본이라 단위 시험이 둘을 묶는다). 줄 사본을 짓지 않는다.
 bool bytesGiveLines(const std::string& bytes, const std::vector<std::string>& lines, bool include);
 
+// 덱의 정수 칸 하나(앞뒤 공백 뗌) — 빈 칸은 0, 정수 글자, 또는 10진 실수 꼴로 쓴 정수 값(NIP `5.000e+00` → 5 — LS-DYNA · StepForge 가
+// 그렇게 읽는다). 정수가 아닌 값(`2.5`) · 10진이 아닌 꼴(`0x2` · `inf`)은 false. 섹션 카드 묶음의 줄 셈(공용 SECID 훑기)도 이것을 쓴다
+bool integralField(const std::string& s, long long& v);
+
 // ── 보고(`dynaforge-carryover-apply` v1) ─────────────────────────────────────
 struct PartResult {
     long long pid = 0;

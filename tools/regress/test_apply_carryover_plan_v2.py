@@ -983,16 +983,16 @@ def part_r8(binary):
 def part_s(binary):
     print("[S StepForge 권고(D-681 · 사용자 결정 11-07 밤) — LS-DYNA 가 덱을 읽는 꼴로]")
     # S-2 정수 칸의 실수 꼴 — NIP `5.000e+00` 은 5(LS-DYNA 실행 기록) · 새 셸 섹션 카드의 줄 셈(shellSectionRows)이 받는다
-    for tag, nip, ok in (("s2", "5.000e+00", True), ("s2b", "2.500e+00", False)):
+    for tag, nip, ok in (("s2", "5.000e+00", True), ("s2b", "2.500e+00", False), ("s2c", "0x2", False)):
         d = stage(tag)
         deck = os.path.join(d, "deck.k")
         body = read(deck)
         old1 = "         4         2         1         2\n"
         assert body.count(old1) == 1
-        write(deck, body.replace(old1, "         4         2         1 %s\n" % nip))
+        write(deck, body.replace(old1, "         4         2         1%10s\n" % nip))
         p = to_v2(d)
         write(os.path.join(d, "section_4.k"), SECTION_4.replace("        10         2         1         2\n",
-                                                                "        10         2         1 %s\n" % nip))
+                                                                "        10         2         1%10s\n" % nip))
         can_morph(d, p, {"secid": 10, "thickness": 0.6, "file": "section_4.k", "why": "0.4 → 0.6"})
         put_file(d, p, "section_4.k")
         resummarize(p)
@@ -1003,7 +1003,10 @@ def part_s(binary):
             check("S-2 NIP 가 실수 꼴 정수(5.000e+00) → 그 정수로 읽어 받는다 · 새 카드가 글자 그대로 들어갔다",
                   rc == 0 and "        10         2         1 5.000e+00\n" in body, (rc, sorted(kinds(rep)), out[-300:]))
         else:
-            refused("S-2b NIP 가 정수가 아닌 실수(2.500e+00) → 그대로 거절(new_section)", rc, out, rep, d, "new_section")
+            refused("S-2%s NIP 가 %s → 거절(new_section — 정수가 아닌 실수 · 10진이 아닌 꼴은 정수 칸이 아니다)" % (tag[-1], nip.strip()),
+                    rc, out, rep, d, "new_section")
+            check("S-2%s 까닭은 NIP 칸이다(다른 칸이 어긋나 걸린 것이 아니다)" % tag[-1], "NIP" in details(rep, "new_section"),
+                  details(rep, "new_section")[:300])
 
 
 if __name__ == "__main__":
