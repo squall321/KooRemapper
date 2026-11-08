@@ -620,6 +620,13 @@ def sec_c(binary):
     write(lock, "")
     rc, out, rep = ep(binary, d)
     check("C-8 쥐는 이 없는 잠금 파일 — rc 0 · 보고 ok · 잠금 파일 지움", rc == 0 and ok_report(rep) and not os.path.exists(lock), (rc, out[-200:]))
+    # C-9 잠금 이름에 심어 둔 심볼릭 링크는 따라가지 않는다(O_NOFOLLOW — 예전엔 링크가 가리키는 자리에 빈 파일을 만들었다)
+    d = ep_dir("C9")
+    os.symlink("victim.txt", os.path.join(d, ".kr_tmp_lock_" + name_hash("out.k")))
+    rc, out, rep = ep(binary, d)
+    check("C-9 잠금 이름이 심볼릭 링크 — 따라가지 않는다(victim.txt 없음) · [WARN] · rc 0 · 보고 ok",
+          rc == 0 and ok_report(rep) and not os.path.exists(os.path.join(d, "victim.txt")) and "심볼릭 링크" in out,
+          (rc, sorted(os.listdir(d)), out[-300:]))
 
 
 # ── M 말 ─────────────────────────────────────────────────────────────────────

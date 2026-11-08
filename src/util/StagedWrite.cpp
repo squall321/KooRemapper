@@ -714,8 +714,13 @@ CommitLock::CommitLock(const std::string& dst, double waitSec) {
                                 "산출 · 곁 파일 · 보고가 서로 다른 실행의 것으로 섞일 수 있다"});
     };
     for (;;) {
-        const int fd = ::open(path_.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0666);
-        if (fd < 0) { unlocked("잠금 파일을 만들 수 없다: " + errText(errno)); return; }
+        // ★링크를 따라가지 않는다(O_NOFOLLOW) — 잠금 이름에 심어 둔 심볼릭 링크가 그것이 가리키는 자리에 파일을 만들게 했다(여섯째 검토)
+        const int fd = ::open(path_.c_str(), O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0666);
+        if (fd < 0) {
+            const int e = errno;
+            unlocked(e == ELOOP ? std::string("잠금 파일 자리가 심볼릭 링크다 — 따라가지 않는다") : "잠금 파일을 만들 수 없다: " + errText(e));
+            return;
+        }
         for (;;) {
             if (::flock(fd, LOCK_EX | LOCK_NB) == 0) break;
             const int e = errno;
@@ -730,7 +735,7 @@ CommitLock::CommitLock(const std::string& dst, double waitSec) {
         }
         // 쥔 파일이 아직 그 이름인가 — 앞 주인이 풀며 지웠으면(그 사이 새 파일이 섰다) 다시 잡는다
         struct stat a, b;
-        if (::fstat(fd, &a) == 0 && ::stat(path_.c_str(), &b) == 0 && a.st_dev == b.st_dev && a.st_ino == b.st_ino) {
+        if (::fstat(fd, &a) == 0 && ::lstat(path_.c_str(), &b) == 0 && S_ISREG(b.st_mode) && a.st_dev == b.st_dev && a.st_ino == b.st_ino) {
             fd_ = fd;
             slot_ = arm(path_);   // 신호 때도 지운다 — 쥔 동안 지우는 것은 푸는 차례와 같다
             return;
