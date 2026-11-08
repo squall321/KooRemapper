@@ -764,7 +764,9 @@ mode: global
    cmds=[BOX_CMD, "KooRemapper hfdamp hf.yaml"], outputs=["box_hfdamp.k"],
    notes=["mode: global | selective (dt ≤ dt_target 파트만)",
           "selective 의 재료는 *MAT_* Card 1 의 MID RO E PR — 열 재질(*MAT_THERMAL_* · *MAT_T01~T18)은 읽지 않는다(2026-11-08 — 예전엔",
-          "  *MAT_T01 의 TRO · TGRLC 로 같은 번호 재질의 RO · E 를 덮어 dt 를 못 재고 전체 감쇠로 바꿨다)"])
+          "  *MAT_T01 의 TRO · TGRLC 로 같은 번호 재질의 RO · E 를 덮어 dt 를 못 재고 전체 감쇠로 바꿨다)",
+          "  구조 재질의 Card 1 만 읽는다(공용 재질 훑기 — *MAT_ADD_* 는 재질이 아니고 _TITLE 은 제목 다음 줄 · 쌓인 묶음도 · 2026-11-08 —",
+          "  예전엔 재질 뒤의 *MAT_ADD_EROSION 이 RO · E 를 덮었고 _TITLE 재질은 제목 줄을 읽어 그 파트가 감쇠에서 빠졌다)"])
 
 # ── 솔버 설정 ──
 op("implicit", "솔버 설정", "explicit 덱을 implicit(정적·동적) 설정으로 변환", "암시적 static 정적",

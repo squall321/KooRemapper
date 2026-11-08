@@ -277,6 +277,12 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
   `include_output` 이 덱 폴더와 견주는 그 폴더)에서 푼다 — `verifyCarryoverOutput(tmp, rep, outPath)` · `KFileReader::readFileWithIncludes` 의
   `resolveAs`(줄은 그 파일 · 이름은 그 경로의 폴더). 쓰기 · 바꿔 넣기(공용 도우미)는 손대지 않았다. 회귀 v2 R-9a~c(4f550b3 에서 셋 다
   verify) · R-9d(다른 폴더 산출은 그대로 include_output — 지키는 항).
+- **hfdamp 의 재질(P1 · 물성을 바꾸는 기존 결함)** — selective 가 `*MAT_` 블록마다 첫 데이터 줄을 Card 1(MID RO E PR)로 읽었다. 재질 뒤의
+  `*MAT_ADD_EROSION`(첫 칸이 같은 MID)이 RO · E 를 EXCL · MXPRES 로 덮었고, 같은 뿌리로 `_TITLE` 재질은 제목 줄을 Card 1 로 읽었다(검토의
+  `elastic_title` — 0 파트). 둘 다 그 파트의 dt 를 못 재 감쇠에서 빠진다. 줄마다 걷는 재질 읽기를 지우고 `matids::scan` 의 구조 재질 묶음마다
+  Card 1 에서 RO · E · PR 를 읽는다(열 재질 · `*MAT_ADD_*` 는 그 훑기가 뺀다 · 쌓인 묶음도 읽는다). Card 1 에 RO · E · PR 가 없는 꼴(NULL · RIGID
+  · SPRING · DAMPER · VACUUM · HE_BURN — 이름 꼴)은 예전처럼 건너뛴다(번호 이름 `*MAT_009` · `*MAT_020` 은 예전에도 읽었다 — 그대로). 칸은
+  예전처럼 10칸 고정폭(long 덱은 예전부터 못 읽는다 — 남은 틈). 회귀 `test_material_id_family.py` H-1 · H-2(4f550b3 에서 실패) · H-0(지킴이).
 
 ## 11-07 밤 결정 고침 — 정한 것
 - **출력 규칙(사용자 결정 ①)** — extract-parts(`a33af2f`)와 같은 꼴: 덱 · 보고를 output 폴더의 임시 파일(`.<이름>.kr_tmp_…`)에 쓰고 되읽기 대조 ·

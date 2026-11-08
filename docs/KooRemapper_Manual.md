@@ -4372,6 +4372,10 @@ KooRemapper hfdamp <config.yaml>
 selective 의 재료는 `*MAT_*` Card 1 의 MID · RO · E · PR 로 읽는다 — 열 재질(`*MAT_THERMAL_*` · 번호 이름 `*MAT_T01`~`*MAT_T18`)은
 읽지 않는다(그 Card 1 은 TMID · TRO · TGRLC … 다 · 2026-11-08). 예전엔 번호 이름의 Card 1 로 같은 번호 구조 재질의 RO · E 를 덮어 —
 `*MAT_T01 1`(TRO 0 · TGRLC 0)이 든 덱에서 dt 를 못 재고 「대상 파트가 없다」며 전체 감쇠로 바꿨다(회귀 `test_thermal_mat_ids.py` F).
+재질은 공용 재질 훑기(§3.1(h) · `parser/MaterialIds.h`)로 **구조 재질의 Card 1** 만 읽는다 — `*MAT_ADD_*`(첫 칸이 같은 MID 인
+`*MAT_ADD_EROSION` 등)는 재질이 아니고, `_TITLE` 재질은 제목 줄 다음이 Card 1 이고, 한 키워드 아래 쌓인 재질은 묶음마다 읽는다(2026-11-08 ·
+적대적 검토 P1 — 예전엔 블록마다 첫 데이터 줄을 Card 1 로 읽어 재질 뒤의 `*MAT_ADD_EROSION` 이 RO · E 를 EXCL · MXPRES 로 덮었고 `_TITLE`
+재질은 제목 줄을 읽어, 그 파트를 고르지 못하고 감쇠가 빠졌다 · 회귀 `test_material_id_family.py` H).
 
 **선택형은 인클루드 닫힘 안의 파트를 본다(2026-10-16).** 예전에는 분석이 주 덱만 봐서, 메시를 `*INCLUDE` 한 마스터 덱에서 「dt 조건을 만족하는 파트가 없다」며 **전체 감쇠(PSID=0)로 조용히 바꿨다**(rc 0 — 독립 op 과 `assemble` 의 `type: hfdamp` 둘 다 실측). 지금은 닫힘을 펼친 줄에서 파트·요소·재질을 읽고, 감쇠 키워드와 세트는 주 덱에 넣는다. 닫힘을 다 못 읽었는데(없는 파일 · `*INCLUDE_TRANSFORM` 등) 대상 파트를 못 찾으면 **전체로 바꾸지 않고 멈춘다**(종료 코드 1 · 산출 없음 — 값 검사 거절도 1 이다. 2026-10-17 전에는 255 였다) — 찾았으면 쓰되 못 본 인클루드가 있다고 말한다. 인클루드가 없는 덱은 예전과 바이트가 같다(회귀 `test_hfdamp_include_closure.py`).
 

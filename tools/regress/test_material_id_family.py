@@ -23,6 +23,8 @@
     E-4 쌓인 재질 묶음에서 맞춘 MID 만 바꾸고 같은 블록의 다른 재질은 둔다 ·
     E-5 `thermal: true` 라도 다른 MID 의 파트가 가리키는 같은 번호 열 카드는 남기고 새 열 카드에 빈 TMID 를 준다(적대적 검토 11-08 S5)
   F offset — material_card(또는 material_cards)가 없으면 거절한다(예전엔 새 *PART 가 정의되지 않은 MID 를 가리킨 덱이 rc 0)
+  H hfdamp — 구조 재질의 Card 1 을 읽는다(`*MAT_ADD_EROSION` 이 RO · E 를 덮지 않는다 · `_TITLE` 재질의 제목 줄은 Card 1 이 아니다 ·
+    적대적 검토 11-08 P1)
 
 usage: test_material_id_family.py <KooRemapper 바이너리>
 """
@@ -517,6 +519,27 @@ def part_f(binary, tmp):
     check("F-3 material_card 를 주면 그대로 돈다 — 산출 --strict rc 0", rc == 0 and rc2 == 0, (rc, rc2, out2[-200:]))
 
 
+def part_h(binary, tmp):
+    print("[H hfdamp — 구조 재질의 Card 1 을 읽는다(덧붙임 카드 · 제목 줄은 재질이 아니다)]")
+    hf = "model: box.k\noutput: o.k\ndt_target: 3.0e-7\ncdamp: 0.99\nfhigh_ratio: 100.0\nmode: selective\n"
+    erosion = "*MAT_ADD_EROSION\n         1       0.0       0.0       0.0\n       0.0       0.0       0.0\n"
+    for tag, extra, edit, why in (
+            ("0", "", None, "지킴이 — 덧붙임 없음"),
+            ("1", erosion, None, "재질 뒤의 *MAT_ADD_EROSION(같은 MID 1 · EXCL 0 · MXPRES 0)이 RO · E 를 덮지 않는다(예전 0 파트)"),
+            ("2", "", lambda b: b.replace("*MAT_ELASTIC\n", "*MAT_ELASTIC_TITLE\nsteel\n", 1),
+             "*MAT_ELASTIC_TITLE — 제목 줄(steel)은 Card 1 이 아니다(예전 0 파트)")):
+        d = fresh(tmp, "h" + tag)
+        box(binary, d, extra)
+        if edit:
+            pth = os.path.join(d, "box.k")
+            body = open(pth, encoding="utf-8").read()
+            assert "*MAT_ELASTIC\n" in body
+            open(pth, "w", encoding="utf-8").write(edit(body))
+        open(os.path.join(d, "hf.yaml"), "w").write(hf)
+        rc, out = run(binary, d, "hfdamp", "hf.yaml")
+        check("H-%s hfdamp selective 강철 파트 1 개 — %s" % (tag, why), rc == 0 and "1 part(s) targeted" in out, (rc, out[-300:]))
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__.strip().splitlines()[-1])
@@ -531,6 +554,7 @@ def main():
         part_c(binary, tmp)
         part_e(binary, tmp)
         part_f(binary, tmp)
+        part_h(binary, tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print()

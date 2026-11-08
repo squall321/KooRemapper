@@ -3,7 +3,7 @@
 #include "parser/IdAllocator.h"   // 인클루드 닫힘까지 센 최대값 · 못 본 자리 경고
 #include "parser/DeckWriter.h"
 #include "parser/DeckScan.h"      // firstEndLine — 덧붙이는 자리는 첫 *END
-#include "parser/CardFields.h"    // 열 재질 판정(isThermalMaterialKeyword — 번호 이름 *MAT_T01~T18)
+#include "parser/MaterialIds.h"   // 구조 재질의 Card 1 — 공용 재질 훑기(열 재질 · *MAT_ADD_* 는 재질이 아니다 · _TITLE · 쌓인 묶음)
 #include "cli/ConsoleOutput.h"
 #include "util/YamlComment.h"
 
@@ -65,9 +65,6 @@ static std::string hf_field10(const std::string& line, int idx) {
 
 static double hf_parseDouble(const std::string& s) {
     try { return std::stod(hf_trim(s)); } catch (...) { return 0.0; }
-}
-static int hf_parseInt(const std::string& s) {
-    try { return std::stoi(hf_trim(s)); } catch (...) { return 0; }
 }
 
 // Format float in 12-char scientific notation
@@ -180,11 +177,7 @@ static HFParseResult hf_parseKFile(const std::vector<std::string>& lines) {
 
     std::string section;
     bool inPartTitle  = false;
-    bool inMatTitle   = false;
     bool inSetTitle   = false;  // true if *SET_*_TITLE: skip one title line before SID
-    int  matLineIdx   = 0;   // which material data line we're on
-    int  curMatId     = 0;
-    MatData curMat;
 
     for (const auto& raw : lines) {
         std::string line = raw;
@@ -195,29 +188,13 @@ static HFParseResult hf_parseKFile(const std::vector<std::string>& lines) {
             std::string kw = hf_upper(hf_trim(line));
             // Strip options to get base keyword
             size_t us = kw.find('_', 1);
-            inPartTitle = false; inMatTitle = false; matLineIdx = 0;
+            inPartTitle = false;
 
             if (kw == "*NODE") { section = "NODE"; }
             else if (kw.substr(0,15) == "*ELEMENT_SOLID") { section = "SOLID"; }
             else if (kw.substr(0,14) == "*ELEMENT_SHELL") { section = "SHELL"; }
             else if (kw.substr(0,5) == "*PART") { section = "PART"; inPartTitle = true; }
-            else if (kw.substr(0,12) == "*MAT_ELASTIC") { section = "MAT"; inMatTitle = false; curMat = MatData(); matLineIdx = 0; }
-            else if (kw.substr(0,5) == "*MAT_") {
-                // Try to catch MAT_024 / MAT_PIECEWISE etc. (same Card1 layout as MAT_ELASTIC)
-                // Filter out ones that definitely don't have E,PR,RHO on card1
-                if (kw.find("MAT_NULL") == std::string::npos &&
-                    kw.find("MAT_RIGID") == std::string::npos &&
-                    kw.find("MAT_SPRING") == std::string::npos &&
-                    kw.find("MAT_DAMPER") == std::string::npos &&
-                    kw.find("MAT_VACUUM") == std::string::npos &&
-                    kw.find("MAT_HE_BURN") == std::string::npos &&
-                    kw.find("MAT_THERMAL") == std::string::npos &&
-                    !KooRemapper::cards::isThermalMaterialKeyword(kw)) {   // 번호 이름 *MAT_T01~T18 도 열 재질(11-08 #3)
-                    section = "MAT"; curMat = MatData(); matLineIdx = 0;
-                } else {
-                    section = "OTHER";
-                }
-            }
+            // *MAT_ 블록은 줄마다 걷지 않는다 — 재질은 아래에서 공용 재질 훑기로 읽는다
             else if (kw.substr(0,9) == "*SET_PART") {
                 section = "SETPART";
                 // _TITLE suffix: first data line is a title string, not SID
@@ -285,19 +262,6 @@ static HFParseResult hf_parseKFile(const std::vector<std::string>& lines) {
                 res.partMid[pid] = mid;
             }
         }
-        // --- MAT (card 1: MID RHO E PR ...) ---
-        else if (section == "MAT") {
-            matLineIdx++;
-            if (matLineIdx == 1) {
-                // Card 1: MID RHO E PR (10-char fields)
-                curMatId = hf_parseInt(hf_field10(line, 0));
-                curMat.RHO = hf_parseDouble(hf_field10(line, 1));
-                curMat.E   = hf_parseDouble(hf_field10(line, 2));
-                curMat.PR  = hf_parseDouble(hf_field10(line, 3));
-                curMat.valid = (curMat.E > 0.0 && curMat.RHO > 0.0);
-                res.mats[curMatId] = curMat;
-            }
-        }
         // --- SET_PART (find max SID) ---
         else if (section == "SETPART") {
             if (inSetTitle) {
@@ -312,6 +276,29 @@ static HFParseResult hf_parseKFile(const std::vector<std::string>& lines) {
                 }
                 section = "OTHER"; // done — only need the SID line
             }
+        }
+    }
+    // --- MAT (Card 1: MID RHO E PR ...) — 구조 재질 정의마다(공용 재질 훑기 `matids` — 카드 묶음 · `_TITLE` 의 제목 줄 · 쌓인 묶음).
+    // 열 재질(`*MAT_THERMAL_*` · `*MAT_T01`~`T18`)과 `*MAT_ADD_*` 는 재질이 아니다. 예전엔 `*MAT_` 블록마다 첫 데이터 줄을 Card 1 로 읽어
+    // `*MAT_ADD_EROSION`(첫 칸이 같은 MID · 그 뒤가 EXCL MXPRES MNEPS)이 그 재질의 RO · E 를 덮었고 `_TITLE` 재질은 제목 줄을 Card 1 로
+    // 읽어 selective 가 그 파트를 고르지 못했다(적대적 검토 11-08 P1 — 시간 간격을 못 잰 파트에 감쇠가 빠졌다). Card 1 에 RO · E · PR 가
+    // 없는 꼴(NULL · RIGID · SPRING · DAMPER · VACUUM · HE_BURN — 이름 꼴)은 예전처럼 건너뛴다. 같은 MID 를 두 번 정의하면 나중 것(예전 그대로)
+    const auto ms = KooRemapper::matids::scan(lines);
+    for (const auto& blk : ms.blocks) {
+        const std::string kw = hf_upper(hf_trim(lines[blk.keyword]));
+        if (kw.find("MAT_NULL") != std::string::npos || kw.find("MAT_RIGID") != std::string::npos ||
+            kw.find("MAT_SPRING") != std::string::npos || kw.find("MAT_DAMPER") != std::string::npos ||
+            kw.find("MAT_VACUUM") != std::string::npos || kw.find("MAT_HE_BURN") != std::string::npos)
+            continue;
+        for (const auto& set : blk.sets) {
+            std::string line = lines[set.card1];
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            MatData m;
+            m.RHO = hf_parseDouble(hf_field10(line, 1));
+            m.E   = hf_parseDouble(hf_field10(line, 2));
+            m.PR  = hf_parseDouble(hf_field10(line, 3));
+            m.valid = (m.E > 0.0 && m.RHO > 0.0);
+            res.mats[set.mid] = m;
         }
     }
     return res;
