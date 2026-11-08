@@ -22,7 +22,8 @@
   C 바꿔 넣기 차례 — 산출을 바꿔 넣은 뒤 번호 지도가 실패하면 rc 1 · 새 산출 · 앞 번호 지도 · 앞 보고(앞 실행을 말한다)가 남았다.
     보고는 늘 마지막이고 실제로 바꿔 넣은 것을 말한다(뒤가 실패하면 그 상태로 다시 쓴다). 같은 산출을 쓰는 동시 실행은 잠금
     `.kr_tmp_lock_<이름 해시>`(flock)로 바꿔 넣기가 겹치지 않는다 — 이 시험이 그 잠금을 쥐고 실행이 기다리는지 본다(이름 해시는
-    FNV-1a 64 의 아래 32 비트 — 도우미의 정의를 여기서 다시 센다).
+    FNV-1a 64 의 아래 32 비트 — 도우미의 정의를 여기서 다시 센다). 거절 보고도 그 잠금을 쥐되, 산출 폴더가 없거나 쓸 수 없으면
+    말없이 잠그지 않는다(C-12 ~ C-15 — 마지막 검토: 진짜 [ERROR] 옆에 「섞일 수 있다」 를 냈다 · C-16 바꿔 넣는 차례는 늘 말한다).
   M 말 — 쓰기 관문의 말(long 덱은 `.k` 없는 접두)과 되읽기 예외가 임시 이름을 콘솔 · 보고에 실었다. 멈춘 사이 임시 덱을 못 읽게
     (chmod 000) 해 그 실패를 일으키고 콘솔 · 보고 어디에도 `.kr_tmp_` 가 없고 제 이름이 있는지 본다.
   U 보고 글자 — extract-parts 보고는 덱 · 경로의 깨진 바이트(CP949 로 쓴 `*INCLUDE` 이름 · 모르는 키워드 · 모델 경로)를 그대로 실어
@@ -662,6 +663,40 @@ def sec_c(binary):
         rep = load(os.path.join(d, rep_name))
         check("C-%d %s 거절 보고 — 잠금을 쥔 동안 쓰지 않고 기다리고 풀면 rc 1 · 보고 ok false" % (k, op),
               waited and rc == 1 and isinstance(rep, dict) and rep.get("ok") is False and not tmp_left(d), (waited, rc, rep))
+    # C-12 ~ C-15 거절 보고의 잠금 — 산출 폴더가 없거나 쓸 수 없으면 말없이 잠그지 않는다(거기 바꿔 넣을 것이 없다 · 마지막 검토 —
+    # `output: nodir/out.k` 거절이 진짜 [ERROR] 옆에 「잠그지 못했다 … 섞일 수 있다」 를 냈다). C-16 대조 — 바꿔 넣는 차례(읽기 전용
+    # 폴더의 제자리 쓰기)는 잠그지 못하면 늘 말한다
+    k = 11
+    for op, where in (("extract-parts", "nodir"), ("apply_carryover_plan", "nodir"), ("extract-parts", "ro"), ("apply_carryover_plan", "ro")):
+        k += 1
+        if op == "extract-parts":
+            d = ep_dir("C%d" % k)
+            write(os.path.join(d, "x.yaml"), "model: in.k\noutput: %s/out.k\nparts: [1]\nreport: r.json\n" % where)
+            args, rep_name = ("extract-parts", "x.yaml"), "r.json"
+        else:
+            d = co_dir("C%d" % k)
+            write(os.path.join(d, "x.yaml"), "model: deck.k\nplan: plan.json\noutput: %s/deck_applied\nreport: rep.json\n" % where)
+            args, rep_name = ("apply_carryover_plan", "x.yaml"), "rep.json"
+        if where == "ro" and os.geteuid() != 0:
+            os.makedirs(os.path.join(d, "ro"))
+            os.chmod(os.path.join(d, "ro"), 0o555)
+        rc, out = run(binary, d, *args)
+        if where == "ro":
+            os.chmod(os.path.join(d, "ro"), 0o755)
+        rep = load(os.path.join(d, rep_name))
+        check("C-%d %s output 폴더가 %s — rc 1 · 보고 ok false · 잠금 [WARN] 없음" % (k, op, "없다" if where == "nodir" else "읽기 전용"),
+              rc == 1 and isinstance(rep, dict) and rep.get("ok") is False and "[ERROR]" in out and "잠그지 못했다" not in out,
+              (rc, [ln for ln in out.splitlines() if "[ERROR]" in ln or "[WARN]" in ln][:4]))
+    if os.geteuid() != 0:
+        d = ep_dir("C16")
+        os.makedirs(os.path.join(d, "ro"))
+        write(os.path.join(d, "ro", "out.k"), "old\n")
+        os.chmod(os.path.join(d, "ro"), 0o555)
+        write(os.path.join(d, "x.yaml"), "model: in.k\noutput: ro/out.k\nparts: [1]\nreport: r.json\n")
+        rc, out = run(binary, d, "extract-parts", "x.yaml")
+        os.chmod(os.path.join(d, "ro"), 0o755)
+        check("C-16 대조 — 읽기 전용 폴더의 제자리 쓰기(바꿔 넣는다)는 잠그지 못했다고 말한다 · rc 0 · 새 산출",
+              rc == 0 and "잠그지 못했다" in out and is_new_deck(os.path.join(d, "ro", "out.k")), (rc, out[-300:]))
     # C-9 잠금 이름에 심어 둔 심볼릭 링크는 따라가지 않는다(O_NOFOLLOW — 예전엔 링크가 가리키는 자리에 빈 파일을 만들었다)
     d = ep_dir("C9")
     os.symlink("victim.txt", os.path.join(d, ".kr_tmp_lock_" + name_hash("out.k")))
