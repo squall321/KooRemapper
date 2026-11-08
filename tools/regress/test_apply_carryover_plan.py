@@ -1025,6 +1025,24 @@ def part_l(binary):
     rc, out, rep = apply_case(binary, d)
     check("L-4c keep PID 1 의 SECID 1 이 두 번이면 그 줄은 손대지 않으니 거절하지 않는다(rc 0)", rc == 0 and "part_duplicate" not in kinds(rep),
           (rc, sorted(kinds(rep)), out[-300:]))
+    # L-4d `_TITLE` 섹션의 빈 제목 줄 — 그 줄이 제목이다(LS-DYNA · StepForge 는 빈 줄도 카드). 예전 첫 카드 훑기는 빈 줄을 건너뛰어 SECID
+    #      카드를 제목으로, 두께 3.0 을 SECID 3 으로 읽어 옮기는 PID 3(BRACKET · SECID 3)을 part_duplicate 로 거짓 거절했다(11-08 #4)
+    can = ("*SECTION_SHELL_TITLE\nCAN#4_sec\n$#   secid    elform      shrf       nip     propt   qr/irid     icomp     setyp\n"
+           "         4         2         1         2\n$#      t1        t2        t3        t4\n       0.4       0.4       0.4       0.4\n")
+    d = stage(EX, "l4d")
+    deck = os.path.join(d, "deck.k")
+    body = open(deck, encoding="utf-8").read()
+    assert body.count(can) == 1
+    write(deck, body.replace(can, can.replace("CAN#4_sec\n", "\n").replace("       0.4       0.4       0.4       0.4", "       3.0       3.0       3.0       3.0")))
+    reseal(d)
+    rc, out, rep = apply_case(binary, d)
+    check("L-4d 셸 섹션의 빈 제목 줄 · 두께 3.0 — SECID 3 이 두 번이 아니다(rc 0 · part_duplicate 없음)",
+          rc == 0 and "part_duplicate" not in kinds(rep), (rc, sorted(kinds(rep)), details(rep, "part_duplicate")[:200]))
+    # L-4e 한 키워드 아래 쌓인 둘째 묶음이 옮기는 PID 3 의 SECID 3 을 또 정의한다 — 카드 묶음 셈은 그것도 센다(예전 첫 카드 셈은 놓쳤다)
+    d = stage(EX, "l4e")
+    add_before_end(d, "*SECTION_SOLID\n         7         1\n         3         2\n")
+    rc, out, rep = apply_case(binary, d)
+    refused("L-4e 쌓인 둘째 묶음의 SECID 3 → part_duplicate(PID 3 — 쌓인 묶음끼리도 센다)", rc, out, rep, d, "part_duplicate", 3)
 
     # L-5 보 _ELBOW(MN · Card 10) · _WARPAGE(SN1 · SN2 · Card 9) — 공용 걸음이 그 절점을 읽어 다른 보처럼 다룬다(92f50fe · 6341aac).
     #     예전엔 그 블록이 있으면 덱을 고치는 줄을 다 거절했다(opaque_elements)

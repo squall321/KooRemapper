@@ -154,6 +154,12 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
   넉넉히). 커서가 옛 첫 카드 셈(공백 토큰 — `2.0` → 2) 밑으로 내려가지 않게 둘의 큰 쪽을 쓴다. 검토자의 21 회귀 산출 모으기(752fa2b 와
   견줌)를 다시 돌렸다 — 아래 결과.
 
+- **빈 `_TITLE` 제목 줄(#4)** — `cur_scanSectionDefs`(첫 카드 · 있나 · 종류 · 커서의 바닥)가 빈 줄을 제목보다 먼저 건너뛰어 SECID 카드를 제목으로
+  버리고 두께 줄(`3.0`)을 SECID 3 으로 읽었다 — CAN 섹션의 제목을 비우면 BRACKET(SECID 3)의 옮기기가 `part_duplicate` 로 거짓 거절됐다.
+  `_TITLE` 이면 키워드 뒤 첫 비주석 줄이 제목이다(비어 있어도 — LS-DYNA · StepForge 는 빈 줄도 카드). 두 번 정의 판정은 카드 묶음 셈
+  (`cur_scanSectionSets` — 이미 빈 줄을 카드로 센다)으로 옮겨 쌓인 묶음끼리의 겹침도 센다(11-07 의 남는 틈을 닫았다). MID 의 두 번 정의는
+  첫 카드 그대로(MID 훑기는 빈 제목 줄을 이미 바로 읽는다).
+
 ## 11-07 밤 결정 고침 — 정한 것
 - **출력 규칙(사용자 결정 ①)** — extract-parts(`a33af2f`)와 같은 꼴: 덱 · 보고를 output 폴더의 임시 파일(`.<이름>.kr_tmp_…`)에 쓰고 되읽기 대조 ·
   품질 관문까지 지나면 덱 · 보고 차례로 바꿔 넣는다(`CarryStagedFiles` — extract-parts `StagedFiles` 의 사본 · 셋째 소비자가 오면 공용으로).
@@ -183,6 +189,8 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
   로 이월 적용에 넘긴다. 손대는 줄의 `*PART` SECID · MID 정의가 둘 이상이면 `part_duplicate`(새 갈래를 만들지 않고 detail 에 「SECID n 의
   정의가 k 개(자리 …)」). 정의는 블록마다 첫 카드 — StepForge 리더도 쌓인 카드를 읽지 않으니 「같은 줄에서 멈춘다」 가 선다. 쌓인 둘째
   카드끼리의 겹침은 세지 않는다(남는 틈 — 새 SECID 의 겹침은 따로 넉넉히 센다).
+  → 11-08: StepForge 591d5b5 리더는 SOLID · SHELL · TSHELL 의 쌓인 묶음을 다 읽고 `dup_sections` 로 센다 — SECID 정의는 카드 묶음 셈으로
+  옮겼다(위 「11-08」 #4).
 - **공용 SECID 커서(셋째 묶음 · 사용자 「이번 판」)** — `cur_scanMaxSectionId` 가 `cur_scanSectionIdsAnyCard`(섹션 블록의 모든 데이터 줄 첫 칸
   정수 · 블록 키워드 폭)로 센다 → `maxSectionId_`(loadBaseModel · 인클루드 위로) · `idMaxima().section`. 이월 적용의 `sectionIdsAnyCard` 를
   옮겨 둘이 하나의 규칙을 쓴다(둘째 소비자). 있나 · 종류(`cur_scanSectionIds` · `definedSectionIds`)는 첫 카드 그대로. **새 SECID 가 바뀔 수

@@ -52,9 +52,9 @@ namespace KooRemapper {
 namespace { static int bc_findMaxSetNodeId(const std::vector<std::string>& rawLines); }
 
 namespace {
-// 줄들에서 `*SECTION_*` 블록마다 첫 데이터 카드의 SECID — SECID → 그 블록들(키워드 줄 · 키워드), 나온 차례. 같은 SECID 를 두 블록이
-// 정의하면 둘 다 담는다(이월 적용의 「손대는 PID 의 SECID 가 두 번 정의됐나」 — StepForge 권고 D-681 · 11-07 밤). 아래
-// `cur_scanSectionIds` 가 이것의 첫 정의다.
+// 줄들에서 `*SECTION_*` 블록마다 첫 데이터 카드의 SECID(공백 토큰 — `2.0` 을 2 로 읽는다) — SECID → 그 블록들(키워드 줄 · 키워드),
+// 나온 차례. 아래 `cur_scanSectionIds`(있나 · 종류) 와 번호 커서의 바닥(옛 첫 카드 셈 — 밑으로 내려가지 않게)이 쓴다. 두 번 정의 판정은
+// 카드 묶음 셈(`cur_scanSectionSets`)이 맡는다(11-08 — 쌓인 묶음까지 · StepForge 와 같은 줄에서 멈춘다).
 std::map<int, std::vector<std::pair<size_t, std::string>>> cur_scanSectionDefs(const std::vector<std::string>& lines) {
     std::map<int, std::vector<std::pair<size_t, std::string>>> defs;
     for (size_t i = 0; i < lines.size(); ++i) {
@@ -69,11 +69,13 @@ std::map<int, std::vector<std::pair<size_t, std::string>>> cur_scanSectionDefs(c
         int skip = (up.find("_TITLE") != std::string::npos) ? 1 : 0;
         for (size_t j = i + 1; j < lines.size(); ++j) {
             const std::string& d = lines[j];
-            size_t h = d.find_first_not_of(" \t");
-            if (h == std::string::npos) continue;
-            if (d[h] == '$') continue;
-            if (d[h] == '*') break;
+            size_t h = d.find_first_not_of(" \t\r");
+            if (h != std::string::npos && d[h] == '$') continue;
+            if (h != std::string::npos && d[h] == '*') break;
+            // `_TITLE` 의 제목 줄은 비어 있어도 그 줄이다(LS-DYNA · StepForge 는 빈 줄도 카드로 읽는다). 예전엔 빈 줄을 먼저 건너뛰어
+            // SECID 카드를 제목으로 버리고 두께 줄(`3.0`)을 SECID 3 으로 읽었다 — 이월 적용이 PID 3 을 part_duplicate 로 거짓 거절했다(11-08 #4)
             if (skip > 0) { --skip; continue; }
+            if (h == std::string::npos) continue;   // 제목 뒤의 빈 줄은 건너뛴다(예전 그대로)
             // 첫 칸의 정수. `rsCardFields` 는 이 파일 뒤쪽에 있어 여기서 못 쓴다 — 첫 칸만
             // 필요하므로 공백 토큰 하나로 충분하다(10칸 덱이든 8칸 덱이든 SECID 는 첫 칸이다).
             std::istringstream iss(d);
@@ -469,10 +471,12 @@ int ModelAssembler::sectionIdTop(const std::vector<std::string>& lines) { return
 std::map<int, std::vector<size_t>> ModelAssembler::materialDefinitionLines(const std::vector<std::string>& lines) {
     return cur_scanMaterialDefs(lines);
 }
+// 두 번 정의 판정(④)은 카드 묶음 셈을 쓴다 — 쌓인 묶음끼리 겹친 SECID 까지 세고 `_TITLE` 의 빈 제목 줄도 제목이다(StepForge 리더의
+// `dup_sections` 와 같은 줄에서 멈춘다 · 11-08 #4). 자리는 그 묶음의 Card 1 줄
 std::map<int, std::vector<size_t>> ModelAssembler::sectionDefinitionLines(const std::vector<std::string>& lines) {
     std::map<int, std::vector<size_t>> out;
-    for (const auto& [sid, d] : cur_scanSectionDefs(lines))
-        for (const auto& kw : d) out[sid].push_back(kw.first);
+    for (const auto& [sid, d] : cur_scanSectionSets(lines).defs)
+        for (const auto& at : d) out[sid].push_back(at.first);
     return out;
 }
 std::map<int, std::string> ModelAssembler::definedPartVariantIds(const std::vector<std::string>& lines) { return cur_scanPartVariantIds(lines); }
