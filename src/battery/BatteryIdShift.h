@@ -3,6 +3,8 @@
 
 #include <array>
 #include <string>
+#include <utility>
+#include <vector>
 
 // Knowledge graph (lat.md):
 //   @lat: [[modules/battery]]
@@ -37,6 +39,7 @@ using IdShift = std::array<long long, FAM_COUNT>;
 
 struct ShiftResult {
     IdRanges defined{};            // 옮기기 **전** 족마다 정의한 번호 범위
+    std::array<std::vector<long long>, FAM_COUNT> ids{};   // 옮기기 전 족마다 정의한 번호(나온 차례 · 겹침 그대로) — 실제로 겹치나를 본다
     bool includesDynain = false;   // `*INCLUDE_DYNAIN` 이 있다
 };
 
@@ -45,5 +48,21 @@ struct ShiftResult {
 bool shiftBatteryIds(const std::string& deck, const IdShift& by, std::string& out, ShiftResult& res, std::string& err);
 // 옮기지 않고 범위 · 거절만 본다(위와 같은 걸음 — 옮긴 글자를 짓지 않아 덱 크기만큼의 사본이 없다 · 2026-11-08)
 bool scanBatteryIds(const std::string& deck, ShiftResult& res, std::string& err);
+
+// ── 어디에 놓나 (2026-11-08 · 6차 검토 G3) ──────────────────────────────────────────────────────────────────────────────
+// 예전엔 족마다 기존 최대값만큼 늘 옮겨, 범위가 겹치지 않아도 8칸 상한을 넘었다(실측: 절점 90000001~ · 요소 99990001 인 덱 →
+// rc 1 · 운영은 rc 0 에 겹침 없음). 준 오프셋도 기존 최대값 아래로 걸치면 겹치지 않아도 거절했다. 이제 **실제로 겹칠 때만** 옮긴다.
+using IdSpans = std::vector<std::pair<long long, long long>>;   // 정렬된 · 겹치지 않는 닫힌 구간 [lo, hi]
+
+// 번호들(차례 · 겹침 상관없음)과 구간들을 하나의 IdSpans 로 — 붙은 번호는 한 구간으로 모은다
+IdSpans spansOf(std::vector<long long> ids, IdSpans extra = {});
+// 족마다 번호 칸 가운데 가장 좁은 칸이 쓸 수 있는 가장 큰 번호 — 절점 · 요소 · 파트는 요소 줄의 8칸(99999999), 나머지는 10칸(int)
+long long famCap(int fam);
+// battery 의 한 족 번호(battery — 정렬 · 중복 없음)를 기존 모델의 그 족이 이미 쓰는 번호(taken) 사이에 놓을 자리(shift)를 정한다.
+//   given > 0  — 그 값만큼 옮긴다. 옮긴 번호 하나라도 taken 에 있거나 칸 상한(famCap)을 넘으면 false 와 까닭(key 를 말한다)
+//   given == 0 — taken 과 겹치는 번호가 없으면 0(옮기지 않는다). 겹치면 기존 최대값만큼(예전 규칙 — 모두 그 위로), 그게 상한을
+//                넘으면 battery 번호 범위(lo~hi)가 통째로 들어가는 가장 낮은 빈자리로(위로만). 어디에도 못 놓으면 false 와 까닭
+bool placeBatteryIds(int fam, const std::vector<long long>& battery, const IdSpans& taken, long long given,
+                     const std::string& key, long long& shift, std::string& why);
 
 }  // namespace bat

@@ -114,6 +114,9 @@ public:
     bool applyHFDamp(const HFDampOperation& op);
     // outputPrefix — 주 덱(<prefix>.k)의 자리. battery 덱의 `*INCLUDE` 이름을 그 폴더 기준으로 적는다(2026-11-07)
     bool applyBattery(const BatteryOperation& op, const std::string& configDir, const std::string& outputPrefix);
+    // battery 덱을 얹기 전 이 실행의 모델이 이미 쓰는 번호(족마다 `bat::IdFam` 차례 · 정렬된 닫힌 구간) — 주 덱 · 인클루드 · 덧붙인 덱의
+    // 머리 · 덱 쓰기 때 넣을 블록 · 리더가 읽은 것 · 더한 절점 · 요소 · 로드 뒤 커서로 낸 번호 · 앞 battery 덱. 넘치게 센다(2026-11-08)
+    std::vector<std::vector<std::pair<long long, long long>>> batteryTakenSpans() const;
     bool applySplit(const SplitOperation& op);
     bool applyMerge(const MergeOperation& op);
     bool applyStrip(const StripOperation& op);
@@ -130,10 +133,12 @@ public:
     // ★assemble 의 루프가 덱보다 **먼저** 쓰는 곁 파일(warpage `debug` 진단 셋 · battery 덱)을 무엇이든 쓰기 전에 이 실행의 **모든**
     //   입력과 견준다(2026-11-07). 뒤 처리의 입력(detail_flat · shell_bent · simple_bent · dat_file · dat_top · dat_bottom · bundle ·
     //   database · dynain · battery 설정)을 각 apply* 와 같은 경로 규칙으로 미리 적고, 곁 파일끼리 · 덱 산출(<prefix>.k · .dynain)과도
-    //   견준다. 예전엔 쓰는 자리에서 그때까지 읽은 입력과만 견줘, 앞 처리의 진단 파일이 뒤 처리의 입력을 덮을 수 있었다.
-    //   loadBaseModel 뒤 · 처리 루프 앞에 부른다. false 면 errorMessage_ 에 두 경로가 있다.
+    //   견준다 — 진단 셋끼리는 같아도 된다(같은 접두사의 warpage 둘은 뒤가 앞을 덮을 뿐이다 · 2026-11-08). 루프 안 쓰기가 있으면
+    //   덱 산출도 이 자리에서 입력과 견준다(writeOutput 과 같은 규칙 · 2026-11-08 — 예전엔 덱 쓰기에서야 보아 battery 덱 · 진단 셋을
+    //   써 둔 뒤 멈췄다). 예전엔 쓰는 자리에서 그때까지 읽은 입력과만 견줘, 앞 처리의 진단 파일이 뒤 처리의 입력을 덮을 수 있었다.
+    //   loadBaseModel 뒤 · 처리 루프 앞에 부른다(단독 warpage 도 그 한 처리로 부른다 — `who` 는 말머리). false 면 errorMessage_ 에 두 경로가 있다.
     bool planRunWrites(const std::vector<AssemblyOperation>& ops, const std::string& configDir,
-                       const std::string& outputPrefix);
+                       const std::string& outputPrefix, const std::string& who = "assemble");
     bool writeOutput(const std::string& outputPrefix);
 
     const std::vector<ElementResult>& getAccumulatedResults() const {
@@ -220,6 +225,8 @@ private:
     // 접촉 · 세트 번호를 다시 내지 않게). 덱 통째(절점 · 요소 · 초기 변형률 줄)는 들고 있지 않는다(11-08 — 실행 내내 덱마다 수십 MB 를
     // 들었다). 절점 · 요소 번호는 커서(maxNodeId_ · maxElementId_)를 올려 지킨다
     std::vector<std::vector<std::string>> addedDecks_;
+    std::vector<std::vector<std::pair<long long, long long>>> batteryIds_;   // 이 실행이 얹은 battery 덱의 번호(족마다 · 옮긴 뒤 · 구간) — 뒤 battery 의 겹침 판정
+    IdMaxima loadMaxima_{};   // loadBaseModel 이 끝났을 때의 커서 — 그 위 ~ 지금 커서가 「이 실행이 커서로 낸 번호」다(battery 의 겹침 판정)
     bool flattenIncludes_ = false;
     std::vector<output_guard::Input> guardInputs_;   // 읽은 파일(모델 · 인클루드 · 다른 입력) — writeOutput 의 쓰기 관문이 본다
     std::vector<std::string> plannedWrites_;         // 덱 말고 부르는 쪽이 이 실행에서 쓸 곁 파일(대응표 · 보고)

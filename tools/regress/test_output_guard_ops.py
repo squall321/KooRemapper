@@ -21,6 +21,8 @@
   문서에 적힌 in-place — assemble 의 output == base_model 은 rc 0(인클루드 · 설정 · 다른 입력은 거절)
   위치 인자 op(map · shellmap · unfold · extract-surface · strain · prestress · squeeze · generate · generate-var · matswap 옛 꼴)과
   빈 output(boundary · rbe) · 곁 파일(warpage 진단 · cad_solid_merge 대응표 · stackwrap `_neutral.k`)은 따로 본다.
+  루프 안 쓰기(2026-11-08): 진단 셋끼리는 같아도 된다 · 덱 산출이 입력이면 battery 덱 · 진단 셋(과 그 폴더)보다 먼저 멈춘다(단독
+  warpage 도). 단독 battery 덱(batch 전부) · foldsurface `_curve.csv` 가 설정을 가리키는 링크면 거절.
 
 usage: test_output_guard_ops.py <KooRemapper 바이너리>
 """
@@ -79,6 +81,11 @@ def snapshot(d):
             rel = os.path.relpath(p, d)
             out[rel] = ("link:" + os.readlink(p)) if os.path.islink(p) else sha(p)
     return out
+
+
+def dirs_of(d):
+    """폴더 안 모든 하위 폴더(빈 폴더까지 — `snapshot` 은 파일만 본다)."""
+    return sorted(os.path.relpath(p, d) for p, _dirs, _files in os.walk(d))
 
 
 def diff(a, b):
@@ -393,6 +400,35 @@ def special_yaml(st, binary):
           "    unit: um\n    mode: deform\n    debug: true\n    debug_prefix: dbg\n"
           "  - type: update\n    dynain: dbg_raw.dat\n")
     expect_refused("assemble warpage 진단(dbg_raw.dat)이 뒤 update 의 dynain — 쓰기 전에", binary, d, ["assemble", "mid.yaml"])
+    # 진단 셋끼리는 같아도 된다 — 같은 접두사(기본 debug/warp)의 warpage 둘은 뒤가 앞을 덮을 뿐이다(op 하나에 target_pids 둘도
+    # 그렇다). 2026-11-08 전엔 둘을 다른 쓸 파일로 견줘 「같은 파일」 rc 1 이었다(6차 검토 G2)
+    d, argv = st.case("warpage", "asm_two_dbg")
+    wp = ("  - type: warpage\n    target_pid: 1\n    dat_file: warp.dat\n    plane: xy\n    deflection_axis: +z\n"
+          "    unit: um\n    mode: deform\n    debug: true\n")
+    write(os.path.join(d, "two.yaml"), "base_model: box.k\noutput: w2\nmaterial:\n  E: 210000\n  nu: 0.3\noperations:\n" + wp + wp)
+    rc, text = run(binary, d, ["assemble", "two.yaml"])
+    made = all(os.path.isfile(os.path.join(d, "debug", "warp" + s)) for s in ("_raw.dat", "_curvature.dat", "_warpage.vtk"))
+    check("★assemble warpage 둘 · debug · 같은 기본 접두사 → rc 0 · 진단 셋 한 벌 · 덱(예전엔 「같은 파일」 rc 1)",
+          rc == 0 and made and os.path.isfile(os.path.join(d, "w2.k")) and "같은 파일" not in text, (rc, made, text[-300:]))
+    # 덱 산출이 입력이면 루프 안 쓰기(battery 덱 · 진단 셋 · 그 폴더)보다 먼저 멈춘다 — 2026-11-08 전엔 덱 쓰기에서야 보아 그것들을
+    # 써 둔 채 「출력 파일을 쓰지 않았습니다」 였다(6차 검토 G4 · 재현 late · late2)
+    dbg = "    debug: true\n    debug_prefix: dbg/wp\n"
+    d, argv = st.case("warpage", "asm_late")
+    add_include(os.path.join(d, "box.k"), "inc.k")
+    write(os.path.join(d, "bat.yaml"), "output: bt\nmodel_type: stacked\ntier: -1\nphase: 1\nmode: dent\n")
+    write(os.path.join(d, "late.yaml"),
+          "base_model: box.k\noutput: inc\nmaterial:\n  E: 210000\n  nu: 0.3\noperations:\n"
+          "  - type: battery\n    config: bat.yaml\n" + wp + dbg)
+    before = dirs_of(d)
+    expect_refused("assemble output == 모델의 인클루드 + battery + warpage 진단 → battery 덱 · 진단 셋보다 먼저", binary, d,
+                   ["assemble", "late.yaml"])
+    check("  └ 진단 셋의 폴더(dbg/)도 만들지 않는다", dirs_of(d) == before, sorted(set(dirs_of(d)) - set(before)))
+    d, argv = st.case("warpage", "late2")
+    cfg = read(os.path.join(d, argv[1]))
+    write(os.path.join(d, argv[1]), yset(cfg, "output", "box").replace("    mode: deform\n", "    mode: deform\n" + dbg))
+    before = dirs_of(d)
+    expect_refused("단독 warpage debug · output == model → 진단 셋보다 먼저", binary, d, argv)
+    check("  └ 진단 셋의 폴더(dbg/)도 만들지 않는다", dirs_of(d) == before, sorted(set(dirs_of(d)) - set(before)))
     d, argv = st.case("assemble", "asm_battery")
     bat = os.path.join(REPO, "examples", "battery", "swell", "stacked", "stacked_swell.yaml")
     shutil.copyfile(bat, os.path.join(d, "bat.yaml"))   # tier 0 · phase 1 → <output>_tier0_phase1.k
@@ -402,6 +438,19 @@ def special_yaml(st, binary):
           "  - type: update\n    dynain: bx_tier0_phase1.k\n")
     expect_refused("assemble battery 덱(bx_tier0_phase1.k)이 뒤 update 의 dynain — 쓰기 전에", binary, d,
                    ["assemble", "bat_asm.yaml"])
+    # 단독 battery 덱 · foldsurface 의 `<output>_curve.csv` — 그 자리가 설정 YAML 을 가리키는 심볼릭 링크면 설정을 덮었다(rc 0 ·
+    # 2026-11-08 전엔 견주지 않았다 · 6차 검토 G6). batch 는 한 조합이라도 걸리면 어느 덱도 쓰지 않는다
+    bat = "output: bt\nmodel_type: stacked\ntier: -1\nphase: 1\nmode: dent\n"
+    for tag, extra, link in (("single", "", "bt_tier-1_phase1.k"),
+                             ("batch", "batch:\n  tiers: [-1, 0]\n", "bt_tier0_phase1.k")):
+        d = os.path.join(st.root, "battery_link_" + tag)
+        os.makedirs(d)
+        write(os.path.join(d, "b.yaml"), bat + extra)
+        os.symlink("b.yaml", os.path.join(d, link))
+        expect_refused("battery(%s) 덱 %s → 설정 b.yaml 을 가리키는 심볼릭 링크" % (tag, link), binary, d, ["battery", "b.yaml"])
+    d, argv = st.case("foldsurface", "link")
+    os.symlink(argv[1], os.path.join(d, "fold_curve.csv"))
+    expect_refused("foldsurface fold_curve.csv → 설정을 가리키는 심볼릭 링크", binary, d, argv)
     # meshfix polish — 임시 파일 `<줄기>.kr_tmp_pol<회차>_<덩어리>.*` 은 gmsh 를 돌려 봐야 정해지니 그 꼴의 입력이 있으면 gmsh 전에 막는다
     d, argv = st.case("meshfix", "polish")
     cfg = read(os.path.join(d, argv[1]))

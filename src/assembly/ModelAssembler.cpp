@@ -427,6 +427,7 @@ bool ModelAssembler::loadBaseModel(const std::string& filename) {
     readIncludeClosure();
     raiseMaxIdsOverIncludes();
     noteModelInputs(filename, flat.active());
+    loadMaxima_ = idMaxima();   // battery 가 「로드 뒤 커서로 낸 번호」(그 위 ~ 그때 커서)를 센다(2026-11-08)
 
     return true;
 }
@@ -470,18 +471,30 @@ static std::string ma_batteryOutput(const std::string& opOutput, const std::stri
 
 // 주 덱에 적을 `*INCLUDE` 이름 — 솔버와 include_closure 는 **주 덱 폴더** 기준으로 읽는다(Vol_I 181591). YAML 에 절대 경로로
 // 적은 값(`written`)이면 적은 그대로 둔다. 상대로 적은 값은 YAML 폴더가 절대 경로여도(플랫폼은 설정을 절대 경로로 준다) 상대 이름이다
+// ★그 이름은 주 덱이 **실제로 놓인** 폴더에서 풀린다 — 커널은 `..` 를 링크가 가리키는 실제 폴더의 부모로 푼다(2026-11-08 · 6차
+//   검토 G8). 글자 셈(relpathOf)은 링크를 풀지 않아, 주 덱 폴더가 링크(`output: link/out` · link → deep/x/real)면 `../cfg/bt.k` 가
+//   deep/x/cfg 의 없는 파일을 가리켰다. 글자 셈이 실제로 그 덱에 닿으면 그대로 두고(링크 아래로 내려가는 이름은 그대로 산다),
+//   아니면 두 쪽을 실제 경로(weakly_canonical)로 펴고 다시 센다
 static std::string ma_includeName(const std::string& path, const std::string& deckDir, const std::string& written) {
     const bool writtenAbs = !written.empty() && (written[0] == '/' || written[0] == '\\' ||
                                                  (written.size() >= 2 && written[1] == ':'));
     if (path.empty() || writtenAbs) return path;
-    return util::relpathOf(path, deckDir);   // 이월 적용의 인클루드 목록과 같은 셈(util/RelPath.h)
+    const std::string lexical = util::relpathOf(path, deckDir);   // 이월 적용의 인클루드 목록과 같은 셈(util/RelPath.h)
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path realDir = fs::weakly_canonical(fs::absolute(deckDir.empty() ? fs::path(".") : fs::path(deckDir), ec), ec);
+    if (ec) return lexical;
+    const fs::path realDeck = fs::weakly_canonical(fs::absolute(path, ec), ec);
+    if (ec) return lexical;
+    const fs::path viaLexical = fs::weakly_canonical(realDir / lexical, ec);
+    if (!ec && viaLexical == realDeck) return lexical;
+    return util::relpathOf(realDeck.string(), realDir.string());
 }
 
-// 줄들이 정의하는 번호의 최대값 — battery 덱을 얹을 때 공용 바닥(`idMaxima`)에 없는 족을 센다(2026-11-08): 열 재질(TMID —
-// `cur_isThermalMaterial`) · 모래시계(HGID) · 곡선 이름공간(`*DEFINE_CURVE*` · `*DEFINE_TABLE*` · `*DEFINE_FUNCTION*` — LS-DYNA 는
-// 곡선 · 표 · 함수가 번호를 나눈다). 첫 데이터 카드(제목 다음)의 첫 칸 — `cur_scanMaterialDefs` 와 같은 칸 읽기
-static int ma_maxDefinedIn(const std::vector<std::string>& lines, int fam) {
-    int mx = 0;
+// 줄들이 정의하는 번호 — battery 덱을 얹을 때 이미 쓰는 번호(`batteryTakenSpans`)를 모으는 몫 가운데 공용 커서가 없는 족(2026-11-08):
+// 열 재질(TMID — `cur_isThermalMaterial`) · 모래시계(HGID) · 곡선 이름공간(`*DEFINE_CURVE*` · `*DEFINE_TABLE*` · `*DEFINE_FUNCTION*` —
+// LS-DYNA 는 곡선 · 표 · 함수가 번호를 나눈다). 첫 데이터 카드(제목 다음)의 첫 칸 — `cur_scanMaterialDefs` 와 같은 칸 읽기
+static void ma_definedIdsIn(const std::vector<std::string>& lines, int fam, std::vector<long long>& out) {
     const int deckFw = deckFieldWidth(lines);
     for (size_t i = 0; i < lines.size(); ++i) {
         if (deckscan::isDataLine(lines[i])) continue;
@@ -504,11 +517,11 @@ static int ma_maxDefinedIn(const std::vector<std::string>& lines, int fam) {
             if (h != std::string::npos && d[h] == '$') continue;
             const size_t k = pos++;
             if (titled && k % 2 == 0) continue;   // 제목 줄은 비어 있을 수 있다
-            mx = std::max(mx, deckscan::fieldInt(deckscan::cardFields(d, fw), 0));
+            const int v = deckscan::fieldInt(deckscan::cardFields(d, fw), 0);
+            if (v > 0) out.push_back(v);
             if (!every) break;
         }
     }
-    return mx;
 }
 
 // 덱 글자에서 번호 발급이 보는 **정의 카드 머리**만 남긴다(2026-11-08 · `addedDecks_`) — 키워드 줄마다 그 블록의 주석 아닌 첫
@@ -627,9 +640,11 @@ void ModelAssembler::planWrite(const std::string& path) {
 }
 
 bool ModelAssembler::planRunWrites(const std::vector<AssemblyOperation>& ops, const std::string& configDir,
-                                   const std::string& outputPrefix) {
+                                   const std::string& outputPrefix, const std::string& who) {
     auto cfgPath = [&](const std::string& p) { return KooRemapper::yamlResolvePath(configDir, p); };
-    std::vector<std::string> midRun;   // 루프 안에서 덱보다 먼저 쓰는 파일
+    // 루프 안에서 덱보다 먼저 쓰는 파일 — battery 덱은 주 덱이 `*INCLUDE` 로 가리키는 산출이고, warpage 진단 셋은 덮여도 되는
+    // 곁 파일이다(op 하나에 target_pids 둘도 같은 셋을 차례로 덮는다)
+    std::vector<std::string> batteryDecks, debugFiles;
     for (const auto& op : ops) {
         switch (op.type) {
         case AssemblyOperation::REPLACE:
@@ -652,7 +667,7 @@ bool ModelAssembler::planRunWrites(const std::vector<AssemblyOperation>& ops, co
             noteInput(dat, "dat_file");
             if (op.warpage.debug)
                 for (const char* sfx : {"_raw.dat", "_curvature.dat", "_warpage.vtk"})
-                    midRun.push_back(cfgPath(op.warpage.debugPrefix) + sfx);   // applyWarpage 와 같이 YAML 폴더 기준
+                    debugFiles.push_back(cfgPath(op.warpage.debugPrefix) + sfx);   // applyWarpage 와 같이 YAML 폴더 기준
             break;
         }
         case AssemblyOperation::MATSWAP:
@@ -671,7 +686,7 @@ bool ModelAssembler::planRunWrites(const std::vector<AssemblyOperation>& ops, co
             try {
                 BatteryConfig cfg = parseBatteryConfig(bc);
                 cfg.output = ma_batteryOutput(op.battery.output, cfg.output, configDir, bc);   // applyBattery 와 같은 규칙
-                if (op.battery.useInclude) midRun.push_back(batteryKFilePath(cfg));   // 펼치면(use_include: false) 쓰는 덱이 없다
+                if (op.battery.useInclude) batteryDecks.push_back(batteryKFilePath(cfg));   // 펼치면(use_include: false) 쓰는 덱이 없다
             } catch (const std::exception&) {
                 // 못 읽으면 applyBattery 가 아무것도 쓰기 전에 같은 까닭으로 멈춘다
             }
@@ -681,16 +696,38 @@ bool ModelAssembler::planRunWrites(const std::vector<AssemblyOperation>& ops, co
             break;
         }
     }
-    if (midRun.empty()) return true;
+    if (batteryDecks.empty() && debugFiles.empty()) return true;   // 루프 안 쓰기가 없다 — 덱 쓰기(writeOutput)의 관문이 본다
+    // ★진단 셋끼리는 같아도 된다(2026-11-08 · 6차 검토 G2) — 같은 접두사의 warpage 둘이면 뒤가 앞을 덮을 뿐이다. 예전엔 둘을
+    //   다른 쓸 파일로 견줘 기본 접두사(debug/warp)의 warpage 둘이 「같은 파일」 rc 1 이었다. 입력 · 덱 산출 · battery 덱과는 계속 견준다
+    std::vector<std::string> midRun = batteryDecks;
+    for (const auto& d : debugFiles) {
+        bool seen = false;
+        for (size_t k = batteryDecks.size(); k < midRun.size() && !seen; ++k) seen = include_closure::sameFile(midRun[k], d);
+        if (!seen) midRun.push_back(d);
+    }
     std::string why;
     if (output_guard::findClash(midRun, guardInputs_, why)) {
-        errorMessage_ = "assemble: " + why + " — 처리 루프가 덱보다 먼저 쓰는 파일이다. 출력 파일을 쓰지 않았습니다";
+        errorMessage_ = who + ": " + why + " — 처리 루프가 덱보다 먼저 쓰는 파일이다. 출력 파일을 쓰지 않았습니다";
         return false;
     }
-    std::vector<std::string> withDeck{outputPrefix + ".k", outputPrefix + ".dynain"};
+    // ★덱 산출도 루프 **전에** 입력과 견준다(2026-11-08 · 6차 검토 G4) — 예전엔 덱 쓰기(writeOutput)에서야 보아, 걸려도 그 앞에
+    //   battery 덱 · 진단 셋을 이미 써 두고 「출력 파일을 쓰지 않았습니다」 였다. 규칙은 writeOutput 의 관문과 같다(in-place 를
+    //   허락한 실행이면 덱만 주 덱 그 자체여도 된다). `.dynain` 은 쓸지 아직 모르니(처리가 응력을 내야 쓴다) 쓴다고 보고 견준다 —
+    //   dynain_embed 면 따로 쓰지 않는다
+    const std::string deckOut = outputPrefix + ".k", dynOut = outputPrefix + ".dynain";
+    std::vector<output_guard::Input> deckReads;
+    for (const auto& in : guardInputs_)
+        if (!(inPlaceAllowed_ && in.role == "model" && include_closure::sameFile(in.path, baseModelPath_))) deckReads.push_back(in);
+    if (output_guard::findClash({deckOut}, deckReads, why) || (!dynainEmbed_ && output_guard::findClash({dynOut}, guardInputs_, why))) {
+        errorMessage_ = why + " — 출력 파일을 쓰지 않았습니다: " + deckOut +
+                        " / an output is the same file as an input or another output; nothing written";
+        return false;
+    }
+    std::vector<std::string> withDeck{deckOut};
+    if (!dynainEmbed_) withDeck.push_back(dynOut);
     withDeck.insert(withDeck.end(), midRun.begin(), midRun.end());
     if (output_guard::findClash(withDeck, {}, why)) {
-        errorMessage_ = "assemble: " + why + " — 출력 파일을 쓰지 않았습니다";
+        errorMessage_ = who + ": " + why + " — 출력 파일을 쓰지 않았습니다";
         return false;
     }
     return true;
@@ -14714,6 +14751,7 @@ bool ModelAssembler::applyLoad(const LoadOperation& op) {
     if (!insertBlocks.empty()) {
         deckscan::insertBeforeFirstEnd(rawLines_, insertBlocks);
     }
+    maxSetId_ = std::max(maxSetId_, nextSetId - 1);   // 공용 세트 커서도 올린다 — 뒤 op(battery …)이 이 세트를 센다(2026-11-08 · G1)
 
     infoMessages.push_back("[load] Applied " + std::to_string(loadCount) + " load case(s)");
     return true;
@@ -15411,6 +15449,7 @@ bool ModelAssembler::applyContact(const ContactOperation& op) {
 
     // 주 덱의 첫 *END 앞에 한 번(없으면 끝에)
     if (!insertBlocks.empty()) deckscan::insertBeforeFirstEnd(rawLines_, insertBlocks);
+    maxSetId_ = std::max(maxSetId_, nextSetId - 1);   // 공용 세트 커서도 올린다 — 뒤 op(battery …)이 이 세트를 센다(2026-11-08 · G1)
 
     infoMessages.push_back("[contact] Applied " + std::to_string(contactCount) + " contact(s)");
     return true;
@@ -15627,6 +15666,7 @@ bool ModelAssembler::applyBoundary(const BoundaryOperation& op) {
 
     // 주 덱의 첫 *END 앞에 한 번(없으면 끝에)
     if (!insertBlocks.empty()) deckscan::insertBeforeFirstEnd(rawLines_, insertBlocks);
+    maxSetId_ = std::max(maxSetId_, nextSetId - 1);   // 공용 세트 커서도 올린다 — 뒤 op(battery …)이 이 세트를 센다(2026-11-08 · G1)
 
     infoMessages.push_back("[boundary] Applied " + std::to_string(bcCount) + " boundary condition(s)");
     return true;
@@ -15915,6 +15955,7 @@ bool ModelAssembler::applyRbe(const RbeOperation& op) {
 
     // 주 덱의 첫 *END 앞에 한 번(없으면 끝에)
     if (!insertBlocks.empty()) deckscan::insertBeforeFirstEnd(rawLines_, insertBlocks);
+    maxSetId_ = std::max(maxSetId_, nextSetId - 1);   // 공용 세트 커서도 올린다 — 뒤 op(battery …)이 이 세트를 센다(2026-11-08 · G1)
 
     infoMessages.push_back("[rbe] Created " + std::to_string(rbeCount)
         + " constraint(s), " + std::to_string(nodesCreated) + " centroid node(s)");
@@ -18045,6 +18086,158 @@ bool ModelAssembler::applyHFDamp(const HFDampOperation& op) {
 // ─────────────────────────────────────────────────────────────────────────────
 // applyBattery — generate battery K-file and *INCLUDE it in the assembly
 // ─────────────────────────────────────────────────────────────────────────────
+// ── battery 가 볼 「이미 쓰는 번호」(2026-11-08 · 6차 검토 G3) ───────────────────────────────────────────────────────────
+// 족마다 battery 번호가 **실제로** 겹치나를 보려고, 이 실행의 모델이 이미 쓰는 번호를 줄에서 모은다. 넘치게 센다(겹친다고
+// 잘못 보면 옮길 뿐이고, 못 보면 번호가 둘이 된다) — 절점 줄은 칸 폭 읽기와 첫 토큰 읽기를 다 센다(리더는 둘 중 하나로 읽는다),
+// 요소는 격자 카드 색인(`ecBuildIndex` — 리더와 같은 너그러운 칸 읽기)과 격자 밖 걸음(줄 수를 모르는 꼴은 줄마다 첫 칸)을 다 센다.
+
+// 절점 — `*NODE`(칸 폭 · 첫 토큰) · 스칼라 절점(`*NODE_SCALAR` · `_VALUE` 칸 0)
+static void ma_nodeIdsIn(const std::vector<std::string>& lines, std::vector<long long>& out) {
+    const int deckFw = deckFieldWidth(lines);
+    int fw = deckFw;
+    bool plain = false, scalar = false;
+    for (const auto& l : lines) {
+        if (deckscan::isKeywordLine(l)) {
+            const std::string kw = deckscan::kwBare(deckscan::keywordToken(l));
+            plain = (kw == "*NODE");
+            scalar = isScalarNodeKeyword(kw);
+            fw = keywordFieldWidth(l, deckFw);
+            continue;
+        }
+        if (!plain && !scalar) continue;
+        const size_t g = l.find_first_not_of(" \t");
+        if (g == std::string::npos || l[g] == '$') continue;
+        std::string body = l;
+        const size_t cm = body.find('$');
+        if (cm != std::string::npos) body.erase(cm);
+        const int fixed = deckscan::fieldInt(deckscan::cardFields(body, fw), 0);
+        if (fixed > 0) out.push_back(fixed);
+        const size_t a = body.find_first_not_of(" \t");
+        if (a == std::string::npos) continue;
+        const size_t b = body.find_first_of(" \t,", a);
+        int tok = 0;
+        if (deckscan::toInt(body.substr(a, b == std::string::npos ? std::string::npos : b - a), tok) && tok > 0 && tok != fixed)
+            out.push_back(tok);
+    }
+}
+
+// 요소 — 모든 요소 족(격자 · 보 · 이산 · 질량 · 안전띠 · 플롯 · 줄 수를 모르는 변형)
+static void ma_elemIdsIn(const std::vector<std::string>& lines, std::vector<long long>& out) {
+    const ElemCardIndex idx = ecBuildIndex(lines);
+    for (size_t i = 0; i < lines.size(); ++i)
+        if (idx.span[i] > 0 && idx.eidOf[i] > 0) out.push_back(idx.eidOf[i]);
+    forEachNonGridElementCard(lines, [&out](const NonGridElementCard& c) { if (c.eid > 0) out.push_back(c.eid); });
+}
+
+// 파트 — 맨 `*PART`(·`_TITLE`)의 PID · SECID 가 모두 양수인 줄(리더의 `prescanPartSections` 와 같은 규칙)과 변형(`cur_scanPartVariantIds`)
+static void ma_partIdsIn(const std::vector<std::string>& lines, std::vector<long long>& out) {
+    const int deckFw = deckFieldWidth(lines);
+    int fw = 10;
+    bool inPart = false;
+    for (const auto& l : lines) {
+        if (deckscan::isKeywordLine(l)) {
+            const std::string kw = deckscan::kwBare(deckscan::keywordToken(l));
+            inPart = (kw == "*PART" || kw == "*PART_TITLE");
+            fw = keywordFieldWidth(l, deckFw) == 20 ? 20 : 10;
+            continue;
+        }
+        if (!inPart || !deckscan::isDataLine(l)) continue;
+        const auto f = deckscan::cardFields(l, fw);
+        const int pid = deckscan::fieldInt(f, 0);
+        if (pid > 0 && deckscan::fieldInt(f, 1) > 0) out.push_back(pid);
+    }
+    for (const auto& [pid, kw] : cur_scanPartVariantIds(lines)) { (void)kw; out.push_back(pid); }
+}
+
+// 세트 — 모든 종류를 한 통으로(`cur_scanMaxSetId` 와 같은 규칙 — 블록의 첫 데이터 줄 · `_TITLE` 이면 제목 다음)
+static void ma_setIdsIn(const std::vector<std::string>& lines, std::vector<long long>& out) {
+    bool inSet = false, needTitle = false;
+    for (const auto& l : lines) {
+        const size_t g = l.find_first_not_of(" \t");
+        if (g != std::string::npos && l[g] == '*') {
+            const std::string kw = deckscan::kwBare(deckscan::keywordToken(l.substr(g)));
+            inSet = kw.rfind("*SET_", 0) == 0;
+            needTitle = inSet && kw.find("_TITLE") != std::string::npos;
+            continue;
+        }
+        if (!inSet || (g != std::string::npos && l[g] == '$')) continue;
+        if (needTitle) { needTitle = false; continue; }
+        try {
+            const int sid = std::stoi(l);
+            if (sid > 0) out.push_back(sid);
+        } catch (...) {}
+        inSet = false;
+    }
+}
+
+// 접촉 — `*CONTACT_…_ID` 의 첫 데이터 줄 첫 칸(`ct_findMaxContactId` 와 같은 규칙 — LS-DYNA 의 OPTION3 은 ID 뿐이다)
+static void ma_contactIdsIn(const std::vector<std::string>& lines, std::vector<long long>& out) {
+    for (size_t i = 0; i < lines.size(); ++i) {
+        if (!deckscan::isKeywordLine(lines[i])) continue;
+        const std::string kw = deckscan::kwBare(deckscan::keywordToken(lines[i]));
+        if (kw.rfind("*CONTACT_", 0) != 0) continue;
+        const bool hasId = (kw.size() >= 3 && kw.compare(kw.size() - 3, 3, "_ID") == 0) || kw.find("_ID_") != std::string::npos;
+        if (!hasId) continue;
+        for (size_t j = i + 1; j < lines.size(); ++j) {
+            const size_t h = lines[j].find_first_not_of(" \t");
+            if (h == std::string::npos || lines[j][h] == '$') continue;
+            if (lines[j][h] == '*') break;
+            const int cid = deckscan::fieldInt(deckscan::cardFields(lines[j], 10), 0);
+            if (cid > 0) out.push_back(cid);
+            break;
+        }
+    }
+}
+
+std::vector<std::vector<std::pair<long long, long long>>> ModelAssembler::batteryTakenSpans() const {
+    std::vector<std::vector<long long>> ids(bat::FAM_COUNT);
+    auto scanLines = [&ids](const std::vector<std::string>& L) {
+        ma_nodeIdsIn(L, ids[bat::FAM_NODE]);
+        ma_elemIdsIn(L, ids[bat::FAM_ELEM]);
+        ma_partIdsIn(L, ids[bat::FAM_PART]);
+        for (int v : cur_scanSectionIdsInUse(L)) ids[bat::FAM_SECTION].push_back(v);
+        for (int v : matids::inUse(L)) ids[bat::FAM_MAT].push_back(v);
+        for (int fam : {bat::FAM_TMAT, bat::FAM_HOURGLASS, bat::FAM_CURVE}) ma_definedIdsIn(L, fam, ids[static_cast<size_t>(fam)]);
+        ma_setIdsIn(L, ids[bat::FAM_SET]);
+        ma_contactIdsIn(L, ids[bat::FAM_CONTACT]);
+    };
+    // 줄 — 주 덱(앞 op 이 넣은 블록까지) · 인클루드 · 이 실행이 덧붙인 battery 덱의 머리 · 덱 쓰기 때 넣을 블록(새 파트 · 섹션 · 재질 …)
+    scanLines(rawLines_);
+    for (const auto& f : incl_.files) scanLines(f.lines);
+    for (const auto& d : addedDecks_) scanLines(d);
+    {
+        std::vector<std::string> pending;
+        for (const auto& blk : addedKeywordBlocks_) {
+            std::istringstream in(blk);
+            for (std::string l; std::getline(in, l);) pending.push_back(l);
+        }
+        scanLines(pending);
+    }
+    // 메모리 — 리더가 읽은 것(주 덱) · 앞 op 이 더한 절점 · 요소
+    for (const auto& [nid, n] : baseMesh_.nodes) { (void)n; ids[bat::FAM_NODE].push_back(nid); }
+    for (const auto& [eid, e] : baseMesh_.elements) { (void)e; ids[bat::FAM_ELEM].push_back(eid); }
+    for (const auto& [pid, p] : baseMesh_.parts) { (void)p; ids[bat::FAM_PART].push_back(pid); }
+    for (const auto& [mid, m] : baseMesh_.materials) { (void)m; ids[bat::FAM_MAT].push_back(mid); }
+    for (const auto& n : addedNodes_) ids[bat::FAM_NODE].push_back(n.id);
+    for (const auto& e : addedElements_) ids[bat::FAM_ELEM].push_back(e.id);
+    for (const auto& e : addedShellElements_) ids[bat::FAM_ELEM].push_back(e.id);
+    // 커서 — 로드 뒤 이 실행이 커서로 낸 번호 전부(그 위 ~ 지금 커서 — 덱 쓰기 때 내보낼 것까지 넘치게)
+    const IdMaxima now = idMaxima();
+    struct Window { int fam, from, to; };
+    const Window windows[] = {{bat::FAM_NODE, loadMaxima_.node, now.node},          {bat::FAM_ELEM, loadMaxima_.elem, now.elem},
+                              {bat::FAM_PART, loadMaxima_.part, now.part},          {bat::FAM_SECTION, loadMaxima_.section, now.section},
+                              {bat::FAM_MAT, loadMaxima_.material, now.material}, {bat::FAM_SET, loadMaxima_.set, now.set}};
+    std::vector<bat::IdSpans> extra(bat::FAM_COUNT);
+    for (const auto& w : windows)
+        if (w.to > w.from) extra[static_cast<size_t>(w.fam)].emplace_back(w.from + 1LL, static_cast<long long>(w.to));
+    // 앞 battery 덱의 번호(옮긴 뒤) — 머리만 둔 `addedDecks_` 에 없는 절점 · 요소까지
+    for (size_t fam = 0; fam < batteryIds_.size() && fam < extra.size(); ++fam)
+        extra[fam].insert(extra[fam].end(), batteryIds_[fam].begin(), batteryIds_[fam].end());
+    std::vector<std::vector<std::pair<long long, long long>>> out(bat::FAM_COUNT);
+    for (size_t fam = 0; fam < out.size(); ++fam) out[fam] = bat::spansOf(std::move(ids[fam]), std::move(extra[fam]));
+    return out;
+}
+
 bool ModelAssembler::applyBattery(const BatteryOperation& op, const std::string& configDir,
                                   const std::string& outputPrefix) {
     if (op.configFile.empty()) {
@@ -18076,7 +18269,7 @@ bool ModelAssembler::applyBattery(const BatteryOperation& op, const std::string&
     noteInput(cfgPath, "battery config");   // 쓰기 관문이 산출과 견준다(2026-11-07)
     const std::string deckPath = batteryKFilePath(cfg);
     if (op.nodeIdOffset < 0 || op.elemIdOffset < 0) {
-        errorMessage_ = "[battery] node_id_offset · elem_id_offset 은 0(기존 모델의 최대값 위로 저절로) 또는 양수다";
+        errorMessage_ = "[battery] node_id_offset · elem_id_offset 은 0(저절로 — 겹칠 때만 옮긴다) 또는 양수다";
         return false;
     }
     // ★펼치기(use_include: false)는 battery 카드(표준 8 · 10칸)를 주 덱에 그대로 넣는다 — 주 덱이 i10 · long 이면 다르게 읽힌다
@@ -18103,46 +18296,32 @@ bool ModelAssembler::applyBattery(const BatteryOperation& op, const std::string&
         return false;
     }
 
-    // ★번호를 기존 모델의 최대값 위로 옮긴다(2026-11-08 · 사용자 결정 「고친다」) — 예전엔 battery 덱의 번호(절점 · 요소 1 ~ ·
-    //   고정 PID · SECID · MID · 세트 · 곡선 · 접촉)를 그대로 끌어와 기존 모델과 겹쳤다(상자 198 절점이 모두 겹쳐 rc 0).
-    //   족마다 「기존 최대값」만큼 옮긴다 — 공용 바닥(`idMaxima` — 모든 요소 족 · 스칼라 절점까지)과, 거기 없는 족(열 재질 · 모래시계 ·
-    //   접촉 · 곡선)은 주 덱 · 인클루드 · 이 실행이 덧붙인 덱을 같은 규칙으로 훑는다. 기존 모델에 없는 족은 옮기지 않는다.
-    //   node_id_offset · elem_id_offset 을 주면 그 값이다 — 기존 최대값 위가 아니면(겹칠 수 있으면) 쓰기 전에 멈춘다.
+    // ★battery 덱의 번호가 기존 모델과 겹치는 족만 옮긴다(2026-11-08) — 예전엔 battery 덱의 번호(절점 · 요소 1 ~ · 고정 PID · SECID ·
+    //   MID · 세트 · 곡선 · 접촉)를 그대로 끌어와 기존 모델과 겹쳤다(상자 198 절점이 모두 겹쳐 rc 0 · 사용자 결정 「고친다」). 그 뒤
+    //   족마다 기존 최대값만큼 **늘** 옮기던 것은 범위가 겹치지 않아도 8칸 상한을 넘겼다(6차 검토 G3 — 절점 90000001~ · 요소
+    //   99990001 인 덱이 rc 1 · 운영은 rc 0 에 겹침 없음). 이제 이 실행의 모델이 이미 쓰는 번호(`batteryTakenSpans` — 주 덱 · 인클루드 ·
+    //   덧붙인 덱 · 넣을 블록 · 메모리 · 로드 뒤 커서로 낸 번호 · 앞 battery)와 **실제로** 겹칠 때만 옮긴다 — 겹치면 기존 최대값 위로,
+    //   그게 칸 상한을 넘으면 battery 범위가 통째로 들어가는 빈자리로(`bat::placeBatteryIds`). node_id_offset · elem_id_offset 을
+    //   주면 그 값이다 — 옮긴 번호가 기존 번호와 하나라도 같거나 상한을 넘을 때만 쓰기 전에 멈춘다(예전엔 기존 최대값 아래로 걸치면).
     bat::ShiftResult sr;
     std::string err;
-    if (!bat::scanBatteryIds(deckText, sr, err)) {   // 범위만 — 옮긴 사본을 짓지 않는다
+    if (!bat::scanBatteryIds(deckText, sr, err)) {   // 번호만 — 옮긴 사본을 짓지 않는다
         errorMessage_ = "[battery] " + err;
         return false;
     }
-    std::array<long long, bat::FAM_COUNT> baseMax{};
-    {
-        const auto mx = idMaxima();
-        baseMax[bat::FAM_NODE] = mx.node;
-        baseMax[bat::FAM_ELEM] = mx.elem;
-        baseMax[bat::FAM_PART] = mx.part;
-        baseMax[bat::FAM_SECTION] = mx.section;
-        baseMax[bat::FAM_MAT] = mx.material;
-        baseMax[bat::FAM_SET] = mx.set;
-        for (int fam : {bat::FAM_TMAT, bat::FAM_HOURGLASS, bat::FAM_CURVE}) {
-            auto scan = [fam](const std::vector<std::string>& L) { return ma_maxDefinedIn(L, fam); };
-            baseMax[static_cast<size_t>(fam)] = std::max(scan(rawLines_), inclMax(scan));
-        }
-        baseMax[bat::FAM_CONTACT] = std::max(ct_findMaxContactId(rawLines_), inclMax(ct_findMaxContactId));
-    }
+    const auto taken = batteryTakenSpans();
     bat::IdShift by{};
-    for (int fam = 0; fam < bat::FAM_COUNT; ++fam)
-        if (sr.defined[static_cast<size_t>(fam)].hi > 0) by[static_cast<size_t>(fam)] = baseMax[static_cast<size_t>(fam)];
-    for (const auto& [fam, given, key] : {std::make_tuple(int(bat::FAM_NODE), op.nodeIdOffset, "node_id_offset"),
-                                          std::make_tuple(int(bat::FAM_ELEM), op.elemIdOffset, "elem_id_offset")}) {
-        if (given <= 0) continue;
-        const bat::IdRange& r = sr.defined[static_cast<size_t>(fam)];
-        by[static_cast<size_t>(fam)] = given;
-        if (r.hi > 0 && r.lo + given <= baseMax[static_cast<size_t>(fam)]) {
-            errorMessage_ = std::string("[battery] ") + key + " " + std::to_string(given) + " — battery " + bat::idFamName(fam) +
-                            " " + std::to_string(r.lo) + "~" + std::to_string(r.hi) + " 이 " + std::to_string(r.lo + given) + "~" +
-                            std::to_string(r.hi + given) + " 가 되어 기존 모델의 " + bat::idFamName(fam) + " 최대값 " +
-                            std::to_string(baseMax[static_cast<size_t>(fam)]) + " 아래로 걸친다(겹칠 수 있다) — " +
-                            std::to_string(baseMax[static_cast<size_t>(fam)]) + " 이상을 주거나 0(저절로)으로 두라. 아무 파일도 쓰지 않았다";
+    std::vector<std::vector<long long>> mine(bat::FAM_COUNT);   // battery 의 족마다 번호(정렬 · 중복 없음)
+    for (int fam = 0; fam < bat::FAM_COUNT; ++fam) {
+        auto& b = mine[static_cast<size_t>(fam)];
+        b = std::move(sr.ids[static_cast<size_t>(fam)]);
+        std::sort(b.begin(), b.end());
+        b.erase(std::unique(b.begin(), b.end()), b.end());
+        const long long given = fam == bat::FAM_NODE ? op.nodeIdOffset : fam == bat::FAM_ELEM ? op.elemIdOffset : 0;
+        std::string why;
+        if (!bat::placeBatteryIds(fam, b, taken[static_cast<size_t>(fam)], given,
+                                  fam == bat::FAM_NODE ? "node_id_offset" : "elem_id_offset", by[static_cast<size_t>(fam)], why)) {
+            errorMessage_ = "[battery] " + why + ". 아무 파일도 쓰지 않았다";
             return false;
         }
     }
@@ -18188,6 +18367,13 @@ bool ModelAssembler::applyBattery(const BatteryOperation& op, const std::string&
         }
         deckscan::insertBeforeFirstEnd(rawLines_, {body});
     }
+    // 뒤 battery 의 겹침 판정이 이 덱의 번호(옮긴 뒤)를 센다 — 머리만 둔 `addedDecks_` 에 절점 · 요소가 없다
+    batteryIds_.resize(bat::FAM_COUNT);
+    for (int fam = 0; fam < bat::FAM_COUNT; ++fam) {
+        std::vector<long long> moved = std::move(mine[static_cast<size_t>(fam)]);
+        for (auto& v : moved) v += by[static_cast<size_t>(fam)];
+        batteryIds_[static_cast<size_t>(fam)] = bat::spansOf(std::move(moved), std::move(batteryIds_[static_cast<size_t>(fam)]));
+    }
     // 뒤 op 이 새 번호를 낼 커서 — battery 의 옮긴 최대값 위로(그러지 않으면 뒤 op 의 새 절점 · 파트 · 세트가 battery 와 겹친다)
     {
         auto top = [&](int fam) {
@@ -18206,7 +18392,8 @@ bool ModelAssembler::applyBattery(const BatteryOperation& op, const std::string&
         for (int fam = 0; fam < bat::FAM_COUNT; ++fam)
             if (by[static_cast<size_t>(fam)] != 0)
                 moved += std::string(moved.empty() ? "" : " · ") + bat::idFamName(fam) + " +" + std::to_string(by[static_cast<size_t>(fam)]);
-        infoMessages.push_back("[battery] 번호를 기존 모델 위로 옮겼다 — " + (moved.empty() ? std::string("옮길 것 없음(기존 모델에 그 족이 없다)") : moved));
+        infoMessages.push_back(moved.empty() ? std::string("[battery] 번호를 옮기지 않았다 — battery 번호가 기존 모델의 번호와 겹치지 않는다")
+                                             : "[battery] 기존 모델과 겹치는 족의 번호를 옮겼다 — " + moved);
     }
 
     char buf[256];

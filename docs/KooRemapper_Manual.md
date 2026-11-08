@@ -355,7 +355,8 @@ BOM 을 붙인 설정으로 둘 다 **종료 코드 0** 으로 정상 산출물�
 단독 op(`wrap`·`update`·`restack`·`bend`·`indent`·`formstrain`·`convert`·`refine`·`elform`·`disconnect`·`iga`·`warpage`·`offset`·
 `boundary`·`rbe`)에서 `output` 이 비어 있으면 입력 모델을 덮어쓰게 되므로 **종료 코드 1** 로 거절합니다. `generate box` 도 `output` 이
 필수입니다. `boundary`·`rbe` 는 2026-11-07 까지 `output` 을 빼면 `model` 자리에 그대로 덮어썼습니다(종료 코드 0 — 플랫폼 카탈로그는 그것을
-「output 선택 · 비우면 model」 로 적고 있었다). 사용자 결정(11-07)으로 거절로 바꾸고 카탈로그 문장도 고쳤습니다.
+「output 선택 · 비우면 model」 로 적고 있었다). 사용자 결정(11-07)으로 거절로 바꾸고 카탈로그 문장도 고쳤습니다(boundary notes 에
+남아 있던 「output 을 빼면 model 이름을 쓴다」 · 「폴더 없는 경로만 YAML 폴더 기준」 두 문장은 2026-11-08 에 고쳤습니다).
 
 #### (g) 열거값은 오타를 거절
 
@@ -408,6 +409,11 @@ BOM 을 붙인 설정으로 둘 다 **종료 코드 0** 으로 정상 산출물�
   MID 와의 진짜 겹침을 잡는다) · `matdb` 의 `match_part`. assemble 의 `matswap` · `matdb` 는 같은 실행의 앞 op 이 낸 번호도 피합니다
   (예전엔 offset 뒤의 matswap 이 MID 2 · SECID 2 를 또 냈다). MID 칸은 SECID 와 같은 꼴로 읽습니다(부호 · 앞의 0 · 10 자리 · 묶음의
   Card 1 이면 실수 꼴 정수 `3.0` 도 MID 3 — 11-08 S8). 회귀 `tools/regress/test_material_id_family.py`.
+- 세트 번호를 제 훑기로 내는 `load` · `boundary` · `rbe` · `contact`(assemble 안)도 낸 번호만큼 공용 세트 커서를 올립니다(2026-11-08) —
+  예전엔 올리지 않아, 커서로 세트를 내는 뒤 처리(`offset` 의 tied 셸 층 등)가 `load` 의 `*SET_SEGMENT 1` 을 다시 냈습니다.
+- assemble 의 `battery` 는 새 번호를 내는 것이 아니라 지은 덱을 **끌어오는** 것이라 규칙이 다릅니다 — 덱의 번호가 기존 모델과 실제로
+  겹치는 족만 옮깁니다(겹치면 최대값 위로, 그게 칸 상한을 넘으면 빈자리로 · 겹치지 않으면 그대로 — [§43.1](#431-battery--배터리-셀-생성) ·
+  2026-11-08).
 - 인클루드를 다 읽었으면 조용합니다. 못 읽은 이름이나 따라가지 않은 `*INCLUDE_*`(`_TRANSFORM` 등)가 있으면
   **한 번** 경고하고 종료 코드는 그대로 0 입니다.
   ```
@@ -456,6 +462,9 @@ BOM 을 붙인 설정으로 둘 다 **종료 코드 0** 으로 정상 산출물�
 - **거절하지 않는 것** — 다른 폴더의 같은 이름, 입력과 상관없는 기존 파일(예전처럼 덮어씁니다), 이름이 고유한 임시 파일
   (`flatten_includes` 의 `.<이름>.kr_tmp_flat_….k` 등).
 - 설정 파일은 명령줄의 `.yaml`·`.yml` 과 op 이 읽는 설정 경로입니다. 산출을 명령줄의 `.yaml` 로 받는 op 은 없습니다.
+- 단독 `battery` 의 덱(batch 면 조합의 덱 전부 — 하나라도 걸리면 어느 덱도 쓰지 않습니다)과 `foldsurface` 의
+  `<output>_curve.csv` 도 견줍니다(2026-11-08 — 그 전엔 견주지 않아, 그 자리가 설정을 가리키는 심볼릭 링크면 설정을 덮고
+  종료 코드 0 이었습니다).
 - 회귀 `tools/regress/test_output_guard_ops.py` — op 마다 모델 · 인클루드 · 설정 · 다른 입력 · 하드/심볼릭 링크 · `../` 철자는
   거절, 대조 · 다른 폴더의 같은 이름 · 상관없는 기존 파일은 그대로 도는지 봅니다.
 
@@ -2011,7 +2020,7 @@ operations:
 | `finite_strain` | von Kármán 대변형(true) / Kirchhoff 소변형(false) | `true` |
 | `outside_behavior` | 격자 범위 밖 노드 처리 (zero/clamp/extrapolate) | `zero` |
 | `data_bbox` | 격자가 덮는 평면 범위 (`x_min`·`x_max`·`y_min`·`y_max`) | 파트 bbox |
-| `debug` / `debug_prefix` | 격자·곡률 VTK 등 디버그 출력 — `<debug_prefix>_raw.dat` · `_curvature.dat` · `_warpage.vtk`. 접두사는 YAML 폴더 기준(2026-11-07 전엔 작업 폴더)이고 **그 폴더가 없으면 만듭니다**. 폴더를 못 만들거나 파일 하나라도 못 쓰면 덱을 쓰기 전에 종료 코드 1 입니다(2026-11-08 전엔 없는 폴더면 아무것도 쓰지 않고 「Exported」 를 찍었습니다) | `false` / `debug/warp` |
+| `debug` / `debug_prefix` | 격자·곡률 VTK 등 디버그 출력 — `<debug_prefix>_raw.dat` · `_curvature.dat` · `_warpage.vtk`. 접두사는 YAML 폴더 기준(2026-11-07 전엔 작업 폴더)이고 **그 폴더가 없으면 만듭니다**. 폴더를 못 만들거나 파일 하나라도 못 쓰면 덱을 쓰기 전에 종료 코드 1 입니다(2026-11-08 전엔 없는 폴더면 아무것도 쓰지 않고 「Exported」 를 찍었습니다). 진단 셋을 쓰기 **전에** 덱 산출도 입력과 견줍니다 — 2026-11-08 전엔 `output == model` 이면 진단 셋 · 그 폴더를 써 둔 뒤 멈췄습니다 | `false` / `debug/warp` |
 
 ### dat 파일 형식
 
@@ -3477,7 +3486,12 @@ operations:
 - **루프 안 쓰기(2026-11-07)**: 처리 루프가 덱보다 먼저 쓰는 곁 파일 — warpage 의 `debug: true` 진단 셋(`<debug_prefix>_raw.dat` ·
   `_curvature.dat` · `_warpage.vtk`)과 battery 덱(`<output><tier>_phase{1|2}.k`) — 은 처리를 **하나도 하기 전에** 이 실행의 모든
   입력(뒤 처리의 입력까지)과 견줍니다. 예전에는 쓰는 자리에서 그때까지 읽은 입력과만 견줘, 앞 처리의 진단 파일이 뒤 update 의
-  `dynain` 을 덮거나 battery 덱이 뒤 처리의 입력을 덮고 종료 코드 0 이었습니다.
+  `dynain` 을 덮거나 battery 덱이 뒤 처리의 입력을 덮고 종료 코드 0 이었습니다. 진단 셋끼리는 같아도 됩니다 — 같은
+  `debug_prefix`(기본 `debug/warp`)의 warpage 둘은 뒤가 앞을 덮을 뿐입니다(한 처리의 `target_pids` 둘도 그렇습니다). 2026-11-08
+  전엔 그것도 「같은 파일」 로 종료 코드 1 이었습니다. 루프 안 쓰기가 있으면 덱 산출(`<output>.k` · `.dynain`)도 그 자리에서
+  입력과 견줍니다 — 2026-11-08 전엔 덱 쓰기에서야 보아, `output` 이 모델의 인클루드면 battery 덱 · 진단 셋(과 그 폴더)을 써 둔
+  뒤 「출력 파일을 쓰지 않았습니다」 였습니다. `.dynain` 은 쓸지 아직 모르니(처리가 응력을 내야 씁니다) 쓴다고 보고 견줍니다
+  (`dynain_embed: true` 면 따로 쓰지 않아 뺍니다).
 
 > **참고**: 아래 각 오퍼레이션은 동일 이름의 독립 명령어(12~22장)와 동일한 알고리즘을 사용합니다.
 > assemble 내에서는 `- type: <이름>` 으로 지정하며, 여러 오퍼레이션을 순차 결합할 수 있습니다.
@@ -3816,12 +3830,12 @@ dynain 또는 K 파일의 `*NODE` 블록에서 일치하는 NID만 좌표 갱신
 - type: battery
   config: bat.yaml        # battery 설정(§43.1) — 그 설정 폴더 기준으로 덱을 쓴다
   # output: bx            # 덱 접두사를 이 YAML 폴더 기준으로 바꾼다
-  # node_id_offset: 0     # 0 = 기존 모델의 최대값 위로 저절로
+  # node_id_offset: 0     # 0 = 저절로(겹칠 때만 기존 최대값 위로)
   # elem_id_offset: 0
   # use_include: true     # false 면 덱 파일 없이 주 덱에 펼친다
 ```
 
-battery 덱을 지어 번호를 기존 모델 위로 옮기고 주 덱의 첫 `*END` 앞에 `*INCLUDE`(또는 펼침)로 얹습니다. battery 덱은 홀로 도는
+battery 덱을 지어 기존 모델과 겹치는 족의 번호를 옮기고 주 덱의 첫 `*END` 앞에 `*INCLUDE`(또는 펼침)로 얹습니다. battery 덱은 홀로 도는
 해석 덱이라 그 **제어 · 출력 카드 · 고정구 · 경계조건 · 하중도 함께** 실리고, 주 덱에도 제어 · 출력 카드가 있으면 같은 키워드가 두 번
 실릴 수 있습니다(고르지 않습니다 — 어느 것을 남길지는 뒤에 정할 설계 일 · 2026-11-08 사용자 결정). 번호 규칙 · 함께 실리는 카드
 목록은 [§43.1](#431-battery--배터리-셀-생성) 을 보세요.
@@ -4238,21 +4252,34 @@ KooRemapper battery <config.yaml>
 > **경로 규칙**(2026-09-18 실행 확인): `output` 의 상대 경로는 [§3.1(a)](#31-yaml-공통-규칙-모든-op) 대로
 > **그 YAML 파일이 있는 폴더** 기준입니다 — `KooRemapper battery cfg/b.yaml` 의 `output: bat_out` 은
 > `cfg/bat_out_tier0_phase1.k` 로 나갑니다(예전에는 작업 폴더에 떨어졌습니다). `output` 이 가리키는 폴더는 미리 있어야 합니다.
+> 쓸 덱(batch 면 전부)은 쓰기 전에 설정 YAML 과 견줍니다 — 같은 파일(링크 · 철자가 달라도)이면 아무 덱도 쓰지 않고 종료 코드 1
+> 입니다([§3.1(j)](#31-yaml-공통-규칙-모든-op) · 2026-11-08 전엔 링크로 설정을 덮고 종료 코드 0).
 >
 > **`assemble` 안의 `- type: battery`(2026-11-07)**: 같은 규칙입니다 — battery 설정의 `output` 은 **그 설정 파일의 폴더**, 항목에 준
 > `output` 은 **assemble YAML 의 폴더** 기준이고, 주 덱이 battery 덱을 끌어오는 `*INCLUDE` 는 **주 덱 폴더 기준 이름**으로 적힙니다
 > (`config: sub/bat.yaml` → `sub/bt_tier0_phase1.k`, `output: out/model` 이면 `../bt_tier0_phase1.k` — 절대 경로로 적은 battery
 > `output` 만 적은 그대로). 예전에는 둘 다 작업 폴더 기준이라 `KooRemapper assemble cfg/a.yaml` 이 battery 덱을 작업 폴더에 쓰고
-> cfg/ 의 주 덱에는 솔버가 찾지 못하는 이름을 적었습니다.
+> cfg/ 의 주 덱에는 솔버가 찾지 못하는 이름을 적었습니다. 그 이름은 솔버처럼 주 덱이 **실제로 놓인** 폴더에서 셉니다 — 주 덱 폴더가
+> 심볼릭 링크(또는 그 아래)라 글자 이름의 `../` 가 다른 곳에 닿으면 두 쪽을 실제 경로로 펴서 다시 셉니다(`output: link/out` · link →
+> deep/x/real 이면 `../../../cfg/bt_….k`). 글자 이름이 실제로 그 덱에 닿으면(링크 아래로 내려가는 이름 등) 그대로 둡니다. 2026-11-08
+> 전엔 글자로만 세어 `../cfg/bt_….k` 가 deep/x/cfg 의 없는 파일을 가리켰습니다.
 >
-> **`assemble` 안의 battery 번호(2026-11-08)**: battery 덱의 번호를 **족마다 기존 모델의 최대값 위로** 옮겨 얹습니다 — 절점 · 요소
+> **`assemble` 안의 battery 번호(2026-11-08)**: battery 덱의 번호가 기존 모델과 **실제로 겹치는 족만** 옮겨 얹습니다 — 절점 · 요소
 > (모든 요소 족 · 스칼라 절점까지 센 공용 바닥) · 파트 · 섹션 · 재질 · 열 재질(TMID) · 모래시계(HGID) · 세트(종류를 한 통으로) ·
-> 접촉(CID) · 곡선(곡선 · 표 · 함수가 나누는 번호). 기존 모델에 없는 족은 옮기지 않습니다. 정의와 그것을 가리키는 칸(요소의 절점 ·
+> 접촉(CID) · 곡선(곡선 · 표 · 함수가 나누는 번호). 족마다 battery 번호 하나라도 기존 번호와 같으면 그 족을 기존 최대값 위로 옮기고,
+> 그게 칸 상한(절점 · 요소 · 파트는 요소 줄의 8칸 99999999)을 넘으면 battery 번호 범위가 통째로 들어가는 가장 낮은 빈자리로
+> 옮깁니다. 같은 번호가 없는 족은 그대로 둡니다(번호가 큰 기존 모델 — 절점 90000001~ — 이면 battery 덱이 단독 덱과 같습니다).
+> 2026-11-08 전엔 족마다 기존 최대값만큼 **늘** 옮겨, 겹치지 않아도 8칸 상한을 넘으면 종료 코드 1 이었습니다. 기존 번호는 이 실행의
+> 모델 전부입니다 — 주 덱(앞 처리가 넣은 블록까지) · 인클루드 · 덧붙인 battery 덱 · 덱 쓰기 때 넣을 블록 · 리더가 읽은 것 · 앞 처리가
+> 더한 절점 · 요소 · 로드 뒤 번호 커서로 낸 번호(넘치게 셉니다 — 절점 줄은 칸 폭 읽기와 첫 토큰 읽기를 다 셉니다). 같은 실행의 앞
+> 처리가 제 훑기로 낸 번호도 들어갑니다(2026-11-08 전엔 boundary · rbe 가 낸 `*SET_NODE` 를 몰라 SID 1 이 둘이었습니다). 정의와 그것을 가리키는 칸(요소의 절점 ·
 > 파트, 파트의 섹션 · 재질, 세트 멤버, 접촉의 SSID · MSID, 경계 · 하중 · 에어백 · 열팽창 · 초기 응력 · 변형률, 재질의 곡선)을 같이 옮기고
-> 나머지 글자는 그대로 둡니다. `node_id_offset` · `elem_id_offset` 을 주면 그 값을 더합니다 — 기존 최대값 위가 아니면(아래로 걸치면)
-> **아무 파일도 쓰지 않고 종료 코드 1** 입니다(번호 사이 빈자리는 보지 않습니다). `use_include: false` 면 battery 덱 파일을 쓰지 않고 그
+> 나머지 글자는 그대로 둡니다. `node_id_offset` · `elem_id_offset` 을 주면 그 값을 더합니다 — 옮긴 번호 하나라도 기존 번호와 같거나
+> 8칸 상한을 넘으면 **아무 파일도 쓰지 않고 종료 코드 1** 입니다(2026-11-08 전엔 기존 최대값 아래로 걸치기만 해도 거절했습니다). 겹치는데
+> 놓을 자리(최대값 위 · 빈자리)가 없어도 종료 코드 1 입니다. `use_include: false` 면 battery 덱 파일을 쓰지 않고 그
 > 카드를 주 덱의 첫 `*END` 앞에 펼칩니다(주 덱이 i10 · long 이면 칸이 다르게 읽혀 거절). battery 덱이 `*INCLUDE_DYNAIN` 을 끌어오면
-> (phase 2 · `use_dynain`) 번호를 옮길 때 거절합니다 — 그 dynain 은 다른 실행의 번호입니다. battery 쓰개가 내지 않는 카드나 뜻을 모르는
+> (phase 2 · `use_dynain`) 절점 · 요소 번호를 옮겨야 할 때 거절합니다 — 그 dynain 은 다른 실행의 번호입니다(겹치지 않아 옮기지 않으면
+> 받습니다). battery 쓰개가 내지 않는 카드나 뜻을 모르는
 > 0 아닌 번호 칸이 있으면 옮기지 않고 거절합니다. 뒤 처리(contact · load …)가 새로 내는 번호도 battery 덱의 번호 위로 냅니다. 예전에는
 > battery 덱을 번호 그대로 끌어와 기존 모델과 겹쳤고(상자 198 절점이 모두 겹쳐 종료 코드 0), 두 오프셋과 `use_include` 는 읽기만
 > 했습니다. 번호 겹침만 다룹니다 — 함께 실리는 카드는 아래 문단. 단독 `battery` 는 한 덱이 홀로 서므로 해당이 없습니다(설정 40가지로
@@ -4291,6 +4318,16 @@ KooRemapper battery <config.yaml>
 > (절대 경로로 주면 그 절대 경로)이 적혀 솔버가 찾지 못했습니다.) 자동 계산은 `batch.phases` 에 1 과 2 가 다 있을 때만입니다 —
 > 홑 실행에서 `dynain_file` 을 비우면 `use_dynain: true` 여도 `*INCLUDE_DYNAIN` 을 쓰지 않고, 그 덱 이름을 적은 **[WARN]** 으로
 > 알립니다(assemble 의 battery · 자동 이름이 없는 batch 조합도 같다 — 2026-11-08 전엔 말이 없었습니다). 이름을 지어내지는 않습니다.
+>
+> **접촉의 선택 카드(2026-11-08 · 물성이 바뀐다)**: 자동 접촉(셀 자기 접촉 `SOFT=2` · 적층 압입자 접촉 `SOFT=1`)은 매뉴얼 차례
+> (Vol_I `*CONTACT` — ID · Card 1~3 · 선택 Card A · B · C)대로 Card A(SOFT SOFSCL … — 그대로) 다음에 **Card B 를 기본값**(PENMAX 0.0 ·
+> 나머지 0)으로, **Card C 의 IGNORE = 1**(처음 겹침을 따라간다 · IGAP 1 · 나머지 0)을 씁니다. 2026-11-08 전엔 MPP Card 1 꼴의 줄
+> (`IGNORE BCKT LCBCKT NS2TRK INITITR …` = `1 0 0 0 0 0 0`)을 Card A 바로 뒤 — Card B 자리 — 에 써서 LS-DYNA 가 그 줄을 **PENMAX = 1** 로
+> 읽고 IGNORE 는 어디에도 없었습니다(LS-PrePost 4.12 로 다시 써 보면 `penmax 1.0` 으로 나옵니다). PENMAX 는 자동 접촉의 최대 관통
+> 깊이 계수라(기본 0.4 — 셸 · 솔리드, SMP) 접촉이 놓아 주는 깊이가 바뀌었습니다. 셀 자기 접촉(`SOFT=2`)은 IGNORE 와 상관없이 처음
+> 겹침을 무시하므로(Vol_I Card C Remark 3) IGNORE 가 새로 먹는 곳은 적층 압입자 접촉입니다. 권취 압입자 접촉은 Card A 만 씁니다(그대로).
+> assemble 이 번호를 옮길 때도 그 줄의 21~30열을 LCBCKT(곡선)로 보아 옮기던 것을 그만둡니다(Card B 의 그 칸은 SHLTHK) — Card C 의
+> DPRFAC 가 번호(|값| ≥ 1)이거나 CID_RCF 가 0 이 아니면 옮기지 않고 거절합니다. 회귀 `tools/regress/test_battery_contact_optional_cards.py`.
 
 **근거**: pyKooCAE `mesh_generate.md`, `examples/battery/swell/{stacked,wound}/*.yaml`, 2026-09-18 실행 확인. 미등장 필드·기본값은 확인 필요.
 
@@ -4804,6 +4841,9 @@ KooRemapper cnrb2spring <config.yaml>
 
 접힘 영역의 중심선을 Euler elastica 로 푼다. 입력은 **호 길이 L · 접선 총회전 α · 목표 최소
 곡률반경 R** 이고 산출은 `<output>_curve.csv` (`s, x, y, theta_deg, curvature, radius`) 다.
+
+`<output>_curve.csv` 가 설정 YAML 과 같은 파일이면(링크 · 철자가 달라도) 풀기 전에 종료 코드 1 이고 아무것도 쓰지 않는다
+([§3.1(j)](#31-yaml-공통-규칙-모든-op) · 2026-11-08 전엔 링크로 설정을 덮고 종료 코드 0).
 
 `fold_angle` 은 **굽힘 영역의 접선 총회전**이다. 두 평판이 이루는 각이 φ 면 회전은 `180 - φ`
 이고, 완전히 접힌 판은 180° 를 돈다.

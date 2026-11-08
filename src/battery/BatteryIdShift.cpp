@@ -1,6 +1,7 @@
 // battery 덱 글자의 번호를 족마다 옮긴다(BatteryIdShift.h) — battery 쓰개가 내는 키워드마다 번호 칸의 자리를 안다
 #include "BatteryIdShift.h"
 
+#include <algorithm>
 #include <cctype>
 #include <climits>
 #include <cstdio>
@@ -77,6 +78,7 @@ struct Walker {
             IdRange& r = res.defined[static_cast<size_t>(fam)];
             if (r.hi == 0) r.lo = r.hi = v;
             else { if (v < r.lo) r.lo = v; if (v > r.hi) r.hi = v; }
+            res.ids[static_cast<size_t>(fam)].push_back(v);
         }
         const long long d = by[static_cast<size_t>(fam)];
         if (d == 0) return true;
@@ -239,7 +241,7 @@ struct Walker {
         }
         if (k == "*CONTACT_AUTOMATIC_SINGLE_SURFACE_ID" || k == "*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_ID" ||
             k == "*CONTACT_TIED_SURFACE_TO_SURFACE_ID") {
-            if (!count(kwLine, c, 4, 6)) return false;   // ID · Card 1 · 2 · 3 (+ A · B)
+            if (!count(kwLine, c, 4, 7)) return false;   // ID · Card 1 · 2 · 3 (+ 선택 Card A · B · C)
             if (!shift(c[0], 0, 10, FAM_CONTACT, true, "CID") || !contactSide(c[1], 0, 20, "SSID") ||
                 !contactSide(c[1], 10, 30, "MSID") || !zero(c[1], 40, 10, "SBOXID") || !zero(c[1], 50, 10, "MBOXID"))
                 return false;
@@ -250,7 +252,19 @@ struct Walker {
                     return false;
                 if (depth < 0 || bsort < 0) return fail(c[4], "DEPTH · BSORT 가 음수(곡선 번호) — 옮기는 규칙을 모른다");
             }
-            if (c.size() > 5 && !shift(c[5], 20, 10, FAM_CURVE, false, "LCBCKT")) return false;   // Card B
+            // Card B(PENMAX THKOPT SHLTHK SNLOG ISYM I2D3D SLDTHK SLDSTF)에는 번호 칸이 없다. ★예전엔 그 21~30열을 LCBCKT(MPP Card 1
+            //   의 칸)로 보고 곡선처럼 옮겼다 — 매뉴얼의 Card B 에서 그 칸은 SHLTHK 다(2026-11-08 · 6차 검토 P2)
+            if (c.size() > 6) {   // Card C — IGAP IGNORE DPRFAC DTSTIF EDGEK (빈 칸) FLANGL CID_RCF
+                const std::string t = trimmed(cell(c[6], 20, 10));
+                if (!t.empty()) {
+                    char* end = nullptr;
+                    const double v = std::strtod(t.c_str(), &end);
+                    if (end == t.c_str() || *end != '\0') return fail(c[6], "DPRFAC 칸 「" + t + "」 을 수로 읽지 못했다");
+                    if (v >= 1.0 || v <= -1.0)
+                        return fail(c[6], "DPRFAC " + t + " 은 세트 · 곡선 번호다(|값| ≥ 1) — 옮기는 규칙을 모른다");
+                }
+                if (!zero(c[6], 70, 10, "CID_RCF(좌표계)")) return false;
+            }
             return true;
         }
         if (k == "*BOUNDARY_SPC_NODE") {
@@ -400,6 +414,90 @@ bool shiftBatteryIds(const std::string& deck, const IdShift& by, std::string& ou
 
 bool scanBatteryIds(const std::string& deck, ShiftResult& res, std::string& err) {
     return walkBatteryIds(deck, IdShift{}, nullptr, res, err);
+}
+
+IdSpans spansOf(std::vector<long long> ids, IdSpans extra) {
+    std::sort(ids.begin(), ids.end());
+    ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+    for (size_t a = 0; a < ids.size();) {
+        size_t b = a;
+        while (b + 1 < ids.size() && ids[b + 1] == ids[b] + 1) ++b;
+        extra.emplace_back(ids[a], ids[b]);
+        a = b + 1;
+    }
+    std::sort(extra.begin(), extra.end());
+    IdSpans out;
+    for (const auto& s : extra) {
+        if (s.second < s.first) continue;
+        if (!out.empty() && s.first <= out.back().second + 1) out.back().second = std::max(out.back().second, s.second);
+        else out.push_back(s);
+    }
+    return out;
+}
+
+long long famCap(int fam) {
+    return (fam == FAM_NODE || fam == FAM_ELEM || fam == FAM_PART) ? 99999999LL : static_cast<long long>(INT_MAX);
+}
+
+namespace {
+// battery 번호를 s 만큼 옮기면 taken 에 드는 첫 번호(옮기기 전 값) — 없으면 0. 둘 다 정렬돼 있어 한 번 훑는다
+long long firstHit(const std::vector<long long>& b, const IdSpans& t, long long s) {
+    size_t i = 0, j = 0;
+    while (i < b.size() && j < t.size()) {
+        const long long v = b[i] + s;
+        if (v < t[j].first) ++i;
+        else if (v > t[j].second) ++j;
+        else return b[i];
+    }
+    return 0;
+}
+std::string spanText(long long lo, long long hi) {
+    return lo == hi ? std::to_string(lo) : std::to_string(lo) + "~" + std::to_string(hi);
+}
+}  // namespace
+
+bool placeBatteryIds(int fam, const std::vector<long long>& battery, const IdSpans& taken, long long given,
+                     const std::string& key, long long& shift, std::string& why) {
+    shift = 0;
+    if (battery.empty()) return true;
+    const long long lo = battery.front(), hi = battery.back(), cap = famCap(fam);
+    const std::string name = idFamName(fam);
+    if (given > 0) {
+        if (hi + given > cap) {
+            why = key + " " + std::to_string(given) + " — battery " + name + " " + spanText(lo, hi) + " 이 " +
+                  spanText(lo + given, hi + given) + " 가 되어 칸 상한(" + std::to_string(cap) + ")을 넘는다";
+            return false;
+        }
+        const long long h = firstHit(battery, taken, given);
+        if (h != 0) {
+            why = key + " " + std::to_string(given) + " — battery " + name + " " + std::to_string(h) + " 이 " +
+                  std::to_string(h + given) + " 가 되어 기존 모델의 " + name + " " + std::to_string(h + given) +
+                  " 과 겹친다 — 겹치지 않는 값을 주거나 0(저절로)으로 두라";
+            return false;
+        }
+        shift = given;
+        return true;
+    }
+    if (firstHit(battery, taken, 0) == 0) return true;   // 겹치지 않는다 — 옮기지 않는다
+    const long long top = taken.back().second;
+    if (hi + top <= cap) {   // 기존 최대값 위로(예전 규칙)
+        shift = top;
+        return true;
+    }
+    // 빈자리 — battery 범위가 통째로 들어가는 가장 낮은 자리(위로만 · 구간 사이와 마지막 구간 뒤)
+    const long long width = hi - lo;
+    for (size_t k = 0; k < taken.size(); ++k) {
+        const long long start = std::max(taken[k].second + 1, lo + 1);
+        const long long room = (k + 1 < taken.size()) ? taken[k + 1].first - 1 : cap;
+        if (start + width <= std::min(room, cap)) {
+            shift = start - lo;
+            return true;
+        }
+    }
+    why = "battery " + name + " " + spanText(lo, hi) + " 이 기존 모델의 " + name + " 번호와 겹치는데 놓을 자리가 없다 — 기존 최대값(" +
+          std::to_string(top) + ") 위로 옮기면 칸 상한(" + std::to_string(cap) + ")을 넘고, 기존 번호 사이에도 " +
+          std::to_string(width + 1) + "칸 너비의 빈자리가 없다";
+    return false;
 }
 
 }  // namespace bat

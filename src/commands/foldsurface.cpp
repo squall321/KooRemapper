@@ -2,6 +2,7 @@
 #include "foldsurface.h"
 
 #include "cli/ConsoleOutput.h"
+#include "parser/OutputGuard.h"   // `<output>_curve.csv` 가 설정 YAML(링크 · 철자가 달라도)을 덮지 않게
 #include "util/YamlComment.h"
 
 #include <algorithm>
@@ -131,6 +132,9 @@ int runFoldSurface(const std::string& yamlFile, ConsoleOutput& console) {
         return 1;
     }
     if (c.points < 3) { console.error("points: 가 3 이상이어야 한다"); return 1; }
+    // ★쓸 파일(`<output>_curve.csv`)을 읽는 파일(명령줄의 설정 YAML)과 견준다 — 풀기 전에(2026-11-08 · 6차 검토 G6). 예전엔 견주지
+    //   않아 그 자리가 설정을 가리키는 심볼릭 링크면 rc 0 으로 설정을 덮었다
+    if (KooRemapper::output_guard::refuse("foldsurface", {c.output + "_curve.csv"}, {}, console)) return 1;
 
     const double L = c.arcLength;
     const double L2 = 0.5 * L;

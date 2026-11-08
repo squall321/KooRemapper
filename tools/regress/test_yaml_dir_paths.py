@@ -20,6 +20,8 @@
   A-1 battery 설정의 output · A-2 assemble 의 output · A-3 설정이 아래 폴더 · A-4 주 덱이 다른 폴더(`../`) · A-5 대조(cfg/ 에서)
   A-6 대조 — 설정을 절대 경로로 주고 그 폴더에서 돈다(플랫폼 꼴) → *INCLUDE 는 예전처럼 상대 이름(절대 경로로 바뀌지 않는다)
   A-7 대조 — battery 설정에 절대 output 을 적으면 *INCLUDE 도 적은 그대로 절대 경로
+  A-8 주 덱 폴더가 링크 → *INCLUDE 가 실제 폴더에서 battery 덱에 닿는다(2026-11-08 전엔 글자 셈 ../ 가 다른 곳)
+  A-9 대조 — battery 설정 폴더가 링크(아래로 내려가는 이름) → 글자 이름 그대로
   W-1 · W-2 debug_prefix(단독 warpage · assemble)
   G-1 · G-2 미리 견주기(planRunWrites)도 같은 자리로 — 뒤 update 의 dynain 이 cfg/ 의 그 이름이면 무엇이든 쓰기 전에 rc 1
 
@@ -114,6 +116,27 @@ def assemble_side_files(binary, root):
             os.path.normpath(os.path.join(os.path.dirname(main_deck), inc[0])) == os.path.normpath(os.path.join(cfg, want))
         check("★%s → battery 덱이 cfg/%s · 주 덱의 *INCLUDE(%s)가 그 파일을 가리킨다" % (name, want, "절대" if abs_inc else "상대"),
               rc == 0 and made == ["cfg/" + want] and ok_inc, (rc, made, inc, out[-300:]))
+    # 링크 — 솔버는 *INCLUDE 이름을 주 덱이 **실제로 놓인** 폴더에서 푼다(커널은 `..` 를 실제 폴더의 부모로 푼다).
+    #   A-8 주 덱 폴더가 링크(output: link/ba · link → deep/x/real) — 2026-11-08 전엔 글자로만 세어 `../bt_tier0_phase1.k` 가
+    #       deep/x/ 의 없는 파일을 가리켰다(6차 검토 G8)
+    #   A-9 대조 — battery 설정 폴더가 링크(sublink → realsub) · 주 덱은 cfg/ → 글자 이름(sublink/…)이 그대로 닿으니 그대로 둔다
+    for name, files, link, out_deck, want_deck, want_inc in (
+            ("A-8 주 덱 폴더가 링크(link → deep/x/real)",
+             {"bat.yaml": bat, "deep/x/real/keep": "", "asm.yaml": asm % ("link/ba", "bat.yaml", "")},
+             ("link", os.path.join("deep", "x", "real")), "link/ba.k", "bt_tier0_phase1.k", None),
+            ("A-9 대조 — battery 설정 폴더가 링크(sublink → realsub)",
+             {"realsub/bat.yaml": bat, "asm.yaml": asm % ("ba", "sublink/bat.yaml", "")},
+             ("sublink", "realsub"), "ba.k", "realsub/bt_tier0_phase1.k", "sublink/bt_tier0_phase1.k")):
+        d, cfg = setup(name[:3], files)
+        os.symlink(link[1], os.path.join(cfg, link[0]))
+        rc, out = run(binary, d, ["assemble", "cfg/asm.yaml"])
+        main_deck = os.path.join(cfg, out_deck)
+        inc = includes(main_deck) if os.path.exists(main_deck) else []
+        hit = os.path.join(os.path.dirname(os.path.realpath(main_deck)), inc[0]) if len(inc) == 1 else ""
+        check("★%s → *INCLUDE(%s)가 실제 폴더에서 battery 덱에 닿는다%s" % (name, inc[0] if inc else "-",
+                                                                   "" if want_inc is None else " · 글자 이름 그대로"),
+              rc == 0 and bool(hit) and os.path.exists(hit) and os.path.samefile(hit, os.path.join(cfg, want_deck))
+              and (want_inc is None or inc[0] == want_inc), (rc, inc, out[-300:]))
     for opname in ("warpage", "assemble"):
         files = dict(w["files"])
         files["warpage.yaml"] = files["warpage.yaml"].replace("    mode: deform\n", debug)
