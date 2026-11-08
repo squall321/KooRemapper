@@ -672,7 +672,7 @@ int sweepStale(const std::string& dst, std::vector<Note>* notes) {
         const fs::path td = fs::temp_directory_path(ec);
         if (!ec && !td.empty() && !fs::equivalent(td, dirs[0], ec)) dirs.push_back(td);
     }
-    std::vector<std::string> gone;
+    int gone = 0;
     for (const auto& d : dirs) {
         std::error_code ie;
         for (fs::directory_iterator itr(d, ie), end; !ie && itr != end; itr.increment(ie)) {
@@ -684,17 +684,15 @@ int sweepStale(const std::string& dst, std::vector<Note>* notes) {
             if (ownerAlive(o.pid, o.start)) continue;                                           // 산 프로세스의 것은 지우지 않는다
             struct stat lst;
             if (::lstat(itr->path().c_str(), &lst) != 0 || !S_ISREG(lst.st_mode)) continue;
-            if (::unlink(itr->path().c_str()) == 0) gone.push_back(n);
+            if (::unlink(itr->path().c_str()) == 0) ++gone;
         }
     }
-    if (!gone.empty() && notes) {
-        std::string list;
-        for (size_t i = 0; i < gone.size() && i < 3; ++i) list += (i ? " · " : "") + gone[i];
-        if (gone.size() > 3) list += " …";
-        notes->push_back({false, "앞 실행이 끝나지 못하고 남긴 「" + dst + "」 의 임시 파일 " + std::to_string(gone.size()) +
-                                     " 개를 지웠다(주인 프로세스가 없다): " + list});
-    }
-    return static_cast<int>(gone.size());
+    // 지운 수만 말한다 — 임시 이름(호스트 · pid · 시작 시각을 담은 숨은 이름)은 찍지 않는다(여섯째 검토 — 예전엔 셋까지 찍었다).
+    // 다른 알림도 임시 이름은 말하지 않는다
+    if (gone > 0 && notes)
+        notes->push_back({false, "앞 실행이 끝나지 못하고 남긴 「" + dst + "」 의 임시 파일 " + std::to_string(gone) +
+                                     " 개를 지웠다(주인 프로세스가 없다)"});
+    return gone;
 #endif
 }
 

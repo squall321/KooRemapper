@@ -172,6 +172,7 @@ TEST(StagedWrite_sweepStale_은_주인_없는_같은_산출의_임시_파일만_
     ASSERT_TRUE(fs::exists(s.root / keepLive));
     ASSERT_EQ(notes.size(), (size_t)1);
     ASSERT_FALSE(notes[0].warn);
+    ASSERT_TRUE(notes[0].text.find(".kr_tmp_") == std::string::npos);   // 수만 — 임시 이름은 찍지 않는다
 }
 
 TEST(StagedWrite_링크는_따라간_파일로_바꿔_넣고_권한_비트를_잇는다) {

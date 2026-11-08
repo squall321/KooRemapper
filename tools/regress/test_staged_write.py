@@ -12,8 +12,9 @@
     없이 rc 1 이었다(배포 판 752fa2b 은 됐다). 임시 이름은 산출 이름 길이와 무관하게 짧다.
   K 죽은 실행 — SIGTERM · SIGINT · SIGHUP 을 받은 실행이 1.7–32 MB 의 임시 파일을 남겼고(플랫폼 취소는 SIGTERM, 시간 초과는 SIGKILL)
     다시 돌려도 아무도 치우지 않았다. 이제 신호를 받으면 이번 실행의 임시 파일을 지우고 그 신호로 끝나며, SIGKILL 이 남긴 것은 다음
-    실행이 주인 프로세스가 없을 때만 지운다(산 프로세스 · 다른 산출의 것은 그대로). 실행 가운데 멈추는 자리는 임시 파일이 보일 때
-    SIGSTOP 으로 잡는다(멈춘 뒤 다시 보고 · 이미 끝났으면 다시 돌린다).
+    실행이 주인 프로세스가 없을 때만 지운다(산 프로세스 · 다른 산출의 것은 그대로 · 지웠다는 [INFO] 는 수만 — 여섯째 검토 때까지 임시
+    이름을 셋까지 찍었다). 실행 가운데 멈추는 자리는 임시 파일이 보일 때 SIGSTOP 으로 잡는다(멈춘 뒤 다시 보고 · 이미 끝났으면 다시
+    돌린다).
   O 산출 자리 꼴 — 배포 판은 산출 자리에 제자리로 썼다. 임시 파일 + 이름 바꾸기가 그 꼴들을 바꿨다: 심볼릭 링크가 일반 파일로 바뀌고 ·
     모드가 0644 로 돌아가고 · `/dev/null`(보고만 보는 마른 실행) · FIFO · 읽기 전용 폴더의 쓸 수 있는 파일을 거절했다. 링크는 따라간
     파일 옆에서 바꿔 넣고(링크 그대로) · 권한 비트를 잇고 · 장치 · FIFO 는 바로 쓰고 · 읽기 전용 폴더면 [WARN] 와 함께 바꿔 넣을 때
@@ -274,8 +275,10 @@ def sec_k(binary):
         finish(p, signal.SIGKILL)
         left = tmp_left(d)
         rc, out = run(binary, d, *args)
-        check("K-3 %s SIGKILL 이 남긴 임시 파일 %d 개를 다음 실행이 지운다(rc 0 · 지웠다는 말)" % (op, len(left)),
-              left and rc == 0 and not tmp_left(d) and "주인 프로세스가 없다" in out, (left, rc, tmp_left(d), out[-300:]))
+        # 지웠다는 말은 수만 — 임시 이름(.kr_tmp_…)은 찍지 않는다(여섯째 검토 — 예전엔 셋까지 찍었다)
+        check("K-3 %s SIGKILL 이 남긴 임시 파일 %d 개를 다음 실행이 지운다(rc 0 · 지웠다는 말 · 임시 이름은 안 찍는다)" % (op, len(left)),
+              left and rc == 0 and not tmp_left(d) and "주인 프로세스가 없다" in out and ".kr_tmp_" not in out,
+              (left, rc, tmp_left(d), out[-300:]))
         # 산 프로세스의 임시 파일 — 멈춰 둔 실행 A 옆에서 B 가 같은 산출로 끝까지 돈다
         d = mk("K4_%s" % op)
         a = stop_when_staged(binary, d, args)
@@ -316,8 +319,9 @@ def sec_k(binary):
             finish(p, signal.SIGKILL)
             left = sys_tmp_of(p.pid)
             rc, out = run(binary, d, "extract-parts", "e6.yaml")
-            check("K-6 읽기 전용 폴더 · SIGKILL 이 시스템 임시 폴더에 남긴 %d 개를 다음 실행이 지운다 — rc 0" % len(left),
-                  left and rc == 0 and not sys_tmp_of(p.pid) and is_new_deck(os.path.join(ro, "out.k")), (left, rc, out[-300:]))
+            check("K-6 읽기 전용 폴더 · SIGKILL 이 시스템 임시 폴더에 남긴 %d 개를 다음 실행이 지운다 — rc 0 · 임시 이름은 안 찍는다" % len(left),
+                  left and rc == 0 and not sys_tmp_of(p.pid) and is_new_deck(os.path.join(ro, "out.k")) and ".kr_tmp_" not in out,
+                  (left, rc, out[-300:]))
         os.chmod(ro, 0o755)
     # 다른 산출의 주인 없는 임시 파일은 그대로 — 그 산출을 다시 돌릴 때 지운다
     d = ep_big_dir("K5")
