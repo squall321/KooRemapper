@@ -393,6 +393,16 @@ def special_yaml(st, binary):
           "    unit: um\n    mode: deform\n    debug: true\n    debug_prefix: dbg\n"
           "  - type: update\n    dynain: dbg_raw.dat\n")
     expect_refused("assemble warpage 진단(dbg_raw.dat)이 뒤 update 의 dynain — 쓰기 전에", binary, d, ["assemble", "mid.yaml"])
+    # 진단 셋끼리는 같아도 된다 — 같은 접두사(기본 debug/warp)의 warpage 둘은 뒤가 앞을 덮을 뿐이다(op 하나에 target_pids 둘도
+    # 그렇다). 2026-11-08 전엔 둘을 다른 쓸 파일로 견줘 「같은 파일」 rc 1 이었다(6차 검토 G2)
+    d, argv = st.case("warpage", "asm_two_dbg")
+    wp = ("  - type: warpage\n    target_pid: 1\n    dat_file: warp.dat\n    plane: xy\n    deflection_axis: +z\n"
+          "    unit: um\n    mode: deform\n    debug: true\n")
+    write(os.path.join(d, "two.yaml"), "base_model: box.k\noutput: w2\nmaterial:\n  E: 210000\n  nu: 0.3\noperations:\n" + wp + wp)
+    rc, text = run(binary, d, ["assemble", "two.yaml"])
+    made = all(os.path.isfile(os.path.join(d, "debug", "warp" + s)) for s in ("_raw.dat", "_curvature.dat", "_warpage.vtk"))
+    check("★assemble warpage 둘 · debug · 같은 기본 접두사 → rc 0 · 진단 셋 한 벌 · 덱(예전엔 「같은 파일」 rc 1)",
+          rc == 0 and made and os.path.isfile(os.path.join(d, "w2.k")) and "같은 파일" not in text, (rc, made, text[-300:]))
     d, argv = st.case("assemble", "asm_battery")
     bat = os.path.join(REPO, "examples", "battery", "swell", "stacked", "stacked_swell.yaml")
     shutil.copyfile(bat, os.path.join(d, "bat.yaml"))   # tier 0 · phase 1 → <output>_tier0_phase1.k

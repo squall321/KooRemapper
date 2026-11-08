@@ -610,7 +610,9 @@ void ModelAssembler::planWrite(const std::string& path) {
 bool ModelAssembler::planRunWrites(const std::vector<AssemblyOperation>& ops, const std::string& configDir,
                                    const std::string& outputPrefix) {
     auto cfgPath = [&](const std::string& p) { return KooRemapper::yamlResolvePath(configDir, p); };
-    std::vector<std::string> midRun;   // 루프 안에서 덱보다 먼저 쓰는 파일
+    // 루프 안에서 덱보다 먼저 쓰는 파일 — battery 덱은 주 덱이 `*INCLUDE` 로 가리키는 산출이고, warpage 진단 셋은 덮여도 되는
+    // 곁 파일이다(op 하나에 target_pids 둘도 같은 셋을 차례로 덮는다)
+    std::vector<std::string> batteryDecks, debugFiles;
     for (const auto& op : ops) {
         switch (op.type) {
         case AssemblyOperation::REPLACE:
@@ -633,7 +635,7 @@ bool ModelAssembler::planRunWrites(const std::vector<AssemblyOperation>& ops, co
             noteInput(dat, "dat_file");
             if (op.warpage.debug)
                 for (const char* sfx : {"_raw.dat", "_curvature.dat", "_warpage.vtk"})
-                    midRun.push_back(cfgPath(op.warpage.debugPrefix) + sfx);   // applyWarpage 와 같이 YAML 폴더 기준
+                    debugFiles.push_back(cfgPath(op.warpage.debugPrefix) + sfx);   // applyWarpage 와 같이 YAML 폴더 기준
             break;
         }
         case AssemblyOperation::MATSWAP:
@@ -652,7 +654,7 @@ bool ModelAssembler::planRunWrites(const std::vector<AssemblyOperation>& ops, co
             try {
                 BatteryConfig cfg = parseBatteryConfig(bc);
                 cfg.output = ma_batteryOutput(op.battery.output, cfg.output, configDir, bc);   // applyBattery 와 같은 규칙
-                if (op.battery.useInclude) midRun.push_back(batteryKFilePath(cfg));   // 펼치면(use_include: false) 쓰는 덱이 없다
+                if (op.battery.useInclude) batteryDecks.push_back(batteryKFilePath(cfg));   // 펼치면(use_include: false) 쓰는 덱이 없다
             } catch (const std::exception&) {
                 // 못 읽으면 applyBattery 가 아무것도 쓰기 전에 같은 까닭으로 멈춘다
             }
@@ -662,7 +664,15 @@ bool ModelAssembler::planRunWrites(const std::vector<AssemblyOperation>& ops, co
             break;
         }
     }
-    if (midRun.empty()) return true;
+    if (batteryDecks.empty() && debugFiles.empty()) return true;   // 루프 안 쓰기가 없다 — 덱 쓰기(writeOutput)의 관문이 본다
+    // ★진단 셋끼리는 같아도 된다(2026-11-08 · 6차 검토 G2) — 같은 접두사의 warpage 둘이면 뒤가 앞을 덮을 뿐이다. 예전엔 둘을
+    //   다른 쓸 파일로 견줘 기본 접두사(debug/warp)의 warpage 둘이 「같은 파일」 rc 1 이었다. 입력 · 덱 산출 · battery 덱과는 계속 견준다
+    std::vector<std::string> midRun = batteryDecks;
+    for (const auto& d : debugFiles) {
+        bool seen = false;
+        for (size_t k = batteryDecks.size(); k < midRun.size() && !seen; ++k) seen = include_closure::sameFile(midRun[k], d);
+        if (!seen) midRun.push_back(d);
+    }
     std::string why;
     if (output_guard::findClash(midRun, guardInputs_, why)) {
         errorMessage_ = "assemble: " + why + " — 처리 루프가 덱보다 먼저 쓰는 파일이다. 출력 파일을 쓰지 않았습니다";
