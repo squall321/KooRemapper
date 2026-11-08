@@ -355,7 +355,8 @@ BOM 을 붙인 설정으로 둘 다 **종료 코드 0** 으로 정상 산출물�
 단독 op(`wrap`·`update`·`restack`·`bend`·`indent`·`formstrain`·`convert`·`refine`·`elform`·`disconnect`·`iga`·`warpage`·`offset`·
 `boundary`·`rbe`)에서 `output` 이 비어 있으면 입력 모델을 덮어쓰게 되므로 **종료 코드 1** 로 거절합니다. `generate box` 도 `output` 이
 필수입니다. `boundary`·`rbe` 는 2026-11-07 까지 `output` 을 빼면 `model` 자리에 그대로 덮어썼습니다(종료 코드 0 — 플랫폼 카탈로그는 그것을
-「output 선택 · 비우면 model」 로 적고 있었다). 사용자 결정(11-07)으로 거절로 바꾸고 카탈로그 문장도 고쳤습니다.
+「output 선택 · 비우면 model」 로 적고 있었다). 사용자 결정(11-07)으로 거절로 바꾸고 카탈로그 문장도 고쳤습니다(boundary notes 에
+남아 있던 「output 을 빼면 model 이름을 쓴다」 · 「폴더 없는 경로만 YAML 폴더 기준」 두 문장은 2026-11-08 에 고쳤습니다).
 
 #### (g) 열거값은 오타를 거절
 

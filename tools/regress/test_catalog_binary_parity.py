@@ -524,6 +524,22 @@ def main():
         else:
             check(f"rbe select: {sel} 는 rc=1 (allowed: direction, all)",
                   rc == 1 and "unsupported select" in out and "direction, all)" in out, out[-200:])
+    # 노트 본문 — output 을 빼면 거절이고(2026-11-07 전엔 model 자리에 덮었다), 폴더가 붙은 상대 경로도 YAML 폴더 기준이다.
+    # boundary notes 에 「output 을 빼면 model 이름」 · 「폴더 없는 경로만 YAML 폴더 기준」 이 남아 있었다(6차 검토 G7)
+    open(os.path.join(bd, "nob.yaml"), "w").write("model: mesh.k\nboundaries:\n  - part: 9\n    dof: all\n    select: all\n")
+    rc, out = run(binary, bd, "boundary", "nob.yaml")
+    bnotes = ops["boundary"]["notes"]
+    check("boundary output 을 빼면 rc 1 — notes 도 「model 이름을 output 으로」 가 아니라 거절을 적는다",
+          rc == 1 and "output 이 비어" in out and "uses model filename" not in bnotes
+          and "an omitted output is refused" in bnotes, (rc, out[-200:]))
+    os.makedirs(os.path.join(bd, "cfg", "m"), exist_ok=True)
+    shutil.copy2(mesh, os.path.join(bd, "cfg", "m"))
+    open(os.path.join(bd, "cfg", "fb.yaml"), "w").write(
+        "model: m/mesh.k\noutput: m/fb_out.k\nboundaries:\n  - part: 9\n    dof: all\n    select: all\n")
+    rc, out = run(binary, bd, "boundary", "cfg/fb.yaml")
+    check("boundary 의 폴더가 붙은 상대 경로(m/mesh.k)도 YAML 폴더 기준 — notes 가 「폴더 없는 경로만」 이라 적지 않는다",
+          rc == 0 and os.path.isfile(os.path.join(bd, "cfg", "m", "fb_out.k"))
+          and "Paths without directory separators" not in bnotes, (rc, out[-200:]))
     for op, path in (("boundary", "boundaries[].select"),
                      ("assemble", "operations[].boundaries[].select")):
         vals = cat_key(ops, op, path)["values"]
