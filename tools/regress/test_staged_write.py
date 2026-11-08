@@ -620,6 +620,24 @@ def sec_c(binary):
     write(lock, "")
     rc, out, rep = ep(binary, d)
     check("C-8 쥐는 이 없는 잠금 파일 — rc 0 · 보고 ok · 잠금 파일 지움", rc == 0 and ok_report(rep) and not os.path.exists(lock), (rc, out[-200:]))
+    # C-10 · C-11 거절 보고도 잠금을 쥐고 쓴다 — 이 시험이 쥔 동안 거절하는 실행은 보고를 쓰지 않고 기다린다
+    for k, op, mk, args, out_name, rep_name in ((10, "extract-parts", ep_dir, ("extract-parts", "x.yaml"), "out.k", "r.json"),
+                                                (11, "apply_carryover_plan", co_dir, ("apply_carryover_plan", "x.yaml"), "deck_applied.k",
+                                                 "deck_applied_carryover.json")):
+        d = mk("C%d" % k)
+        if op == "extract-parts":
+            write(os.path.join(d, "x.yaml"), "model: in.k\noutput: out.k\nparts: [77]\nreport: r.json\n")   # 덱에 없는 PID — 거절
+        else:
+            write(os.path.join(d, "x.yaml"), "model: deck.k\nplan: missing.json\noutput: deck_applied\n")   # 없는 계획 — 거절
+        fd = hold_lock(d, out_name)
+        p = start(binary, d, *args)
+        time.sleep(1.5)
+        waited = p.poll() is None and not os.path.exists(os.path.join(d, rep_name))
+        os.close(fd)
+        rc = p.wait(timeout=120)
+        rep = load(os.path.join(d, rep_name))
+        check("C-%d %s 거절 보고 — 잠금을 쥔 동안 쓰지 않고 기다리고 풀면 rc 1 · 보고 ok false" % (k, op),
+              waited and rc == 1 and isinstance(rep, dict) and rep.get("ok") is False and not tmp_left(d), (waited, rc, rep))
     # C-9 잠금 이름에 심어 둔 심볼릭 링크는 따라가지 않는다(O_NOFOLLOW — 예전엔 링크가 가리키는 자리에 빈 파일을 만들었다)
     d = ep_dir("C9")
     os.symlink("victim.txt", os.path.join(d, ".kr_tmp_lock_" + name_hash("out.k")))

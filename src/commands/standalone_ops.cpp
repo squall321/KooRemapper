@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -1981,6 +1982,8 @@ int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
     };
     // 거절 · 실패 — 이번 실행의 임시 파일만 지우고 보고(ok false · output_written false · 걸린 것 전부)를 쓴다. output 자리의 앞 파일은
     // 그대로다 — 보고의 output_written 이 그것이 이번 산출이 아니라고 말한다
+    // 바꿔 넣는 동안 쥐는 잠금 — 거절 보고를 쓸 때도 쥔다(아직 안 쥐었으면 그때만 · 여섯째 검토 — 예전엔 잠금 없이 썼다)
+    std::unique_ptr<KooRemapper::staged_write::CommitLock> commitHeld;
     auto refuse = [&](const std::string& why) {
         rep.ok = false;
         rep.outputWritten = false;
@@ -1988,6 +1991,11 @@ int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
         staged.discardAll();
         printList(rep.problems, true);
         printList(rep.warnings, false);
+        std::unique_ptr<KooRemapper::staged_write::CommitLock> mine;
+        if (!commitHeld) {
+            mine = std::make_unique<KooRemapper::staged_write::CommitLock>(outPath);
+            for (const auto& n : mine->takeNotes()) console.warning(std::string("[") + tag + "] " + n.text);
+        }
         writeReport();
         stagedNotes();   // 임시 파일을 못 지웠으면 그 말도(여섯째 검토 S11)
         console.error(std::string("[") + tag + "] " + why);
@@ -2057,8 +2065,8 @@ int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
             return refuse("보고를 쓸 수 없다 — 덱을 바꿔 넣지 않았다(output 자리의 앞 파일은 그대로다)");
         }
         stagedNotes();
-        KooRemapper::staged_write::CommitLock commitLock(outPath);
-        for (const auto& n : commitLock.takeNotes()) console.warning(std::string("[") + tag + "] " + n.text);
+        commitHeld = std::make_unique<KooRemapper::staged_write::CommitLock>(outPath);
+        for (const auto& n : commitHeld->takeNotes()) console.warning(std::string("[") + tag + "] " + n.text);
         if (!staged.commit(outPath, stageWhy)) {
             rep.problems.push_back({0, "write", "쓴 덱을 output 자리(" + outPath + ")로 바꿔 넣지 못했다(" + stageWhy + ")"});
             unapply();

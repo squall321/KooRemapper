@@ -36,6 +36,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <set>
 #include <sstream>
 #include <string>
@@ -1565,6 +1566,8 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
     auto stagedNotes = [&]() {
         for (const auto& n : staged.takeNotes()) n.warn ? console.warning(n.text) : console.info(n.text);
     };
+    // 바꿔 넣는 동안 쥐는 잠금(같은 산출의 동시 실행과 겹치지 않게) — 거절 보고를 쓸 때도 쥔다(아직 안 쥐었으면 그때만)
+    std::unique_ptr<KooRemapper::staged_write::CommitLock> commitHeld;
     auto reportWritable = [&]() {
         if (o.reportPath.empty() || isDirectory(o.reportPath)) return false;
         using KooRemapper::include_closure::sameFile;
@@ -1657,6 +1660,12 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
         refusals.push_back({kind, message, lines});
         staged.discardAll();
         if (reportWritable()) {
+            // ★거절 보고도 바꿔 넣기 묶음이다 — 같은 산출을 바꿔 넣는 다른 실행 사이에 끼지 않게 잠근다(여섯째 검토 — 예전엔 잠금 없이 썼다)
+            std::unique_ptr<KooRemapper::staged_write::CommitLock> mine;
+            if (!commitHeld) {
+                mine = std::make_unique<KooRemapper::staged_write::CommitLock>(o.output);
+                for (const auto& n : mine->takeNotes()) n.warn ? console.warning(n.text) : console.info(n.text);
+            }
             std::string why;
             if (staged.writeText(o.reportPath, reportJson(false, false, false), why) && staged.commit(o.reportPath, why))
                 console.info("report: " + o.reportPath);
@@ -2040,8 +2049,8 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
             return fail("write", "Cannot write report: " + o.reportPath + " (" + stageWhy + ")");
         stagedNotes();
     }
-    KooRemapper::staged_write::CommitLock commitLock(o.output);
-    for (const auto& n : commitLock.takeNotes()) n.warn ? console.warning(n.text) : console.info(n.text);
+    commitHeld = std::make_unique<KooRemapper::staged_write::CommitLock>(o.output);
+    for (const auto& n : commitHeld->takeNotes()) n.warn ? console.warning(n.text) : console.info(n.text);
     if (!staged.commit(o.output, stageWhy))
         return fail("commit", "산출을 제 이름으로 바꿔 넣지 못했다: " + o.output + " (" + stageWhy + ") — 같은 이름의 앞 파일은 그대로다");
     stagedNotes();
