@@ -14,13 +14,19 @@
   · 모든 참조(요소 → 절점 · 파트, 파트 → 섹션 · 재질 · 모래시계 · 열 재질, 세트 멤버, 접촉 SSID · MSID(STYP 로 족), 경계 · 하중 ·
     에어백 · 열팽창 · 초기 응력 · 변형률, 재질의 곡선)가 정의된 번호를 가리킨다
   · 얹은 battery 덱 = 단독 battery 덱 + 족마다 오프셋(정의 · 참조 모두 같은 차례) · 줄 수가 같고 바뀐 글자는 숫자 · 공백뿐
-  · 오프셋 = 기존 모델(상자 + 모든 족을 겹치게 덧붙인 정의)의 그 족 최대값 — battery 가 쓰지 않는 족은 0
+  · 오프셋 = battery 번호가 기존 모델의 그 족 번호와 실제로 겹칠 때만 그 족 최대값(상자 + 모든 족을 겹치게 덧붙인 정의 — 파트는 겹치지
+    않아 그대로), 최대값 위가 칸 상한을 넘으면 통째로 들어가는 빈자리 — battery 가 쓰지 않는 족 · 겹치지 않는 족은 0
 
 무엇을 보나.
   A 적층 기본 · dent · bare · phase 2 · pouch 예압(INITIAL_STRESS_SHELL) · TSHELL, 권취 기본 · dent · phase 2 — 위 넷
-  E-1 node_id_offset 1000000 · elem_id_offset 2000000 → 그 값   E-2 node_id_offset 5(최대값 아래) → rc 1 · 아무것도 쓰지 않는다
+  E-1 node_id_offset 1000000 · elem_id_offset 2000000 → 그 값   E-2 node_id_offset 5(상자 절점과 실제로 겹친다) → rc 1 · 아무것도
+      쓰지 않는다
+  B   (2026-11-08 · 6차 검토 G3 — 실제로 겹칠 때만 옮긴다) B-1 큰 번호 덱(절점 90000001~ · 요소 99990001 · 5000) → 옮기지 않고 rc 0 ·
+      battery 덱이 단독 덱과 바이트까지 같다(예전엔 8칸 상한으로 rc 1) · B-2 겹치는데 최대값 위가 8칸을 넘는다 → 빈자리로 ·
+      B-3 node_id_offset 5 · 큰 번호 덱(겹치지 않는다) → rc 0(예전엔 최대값 아래라며 rc 1) · B-4 battery 둘 → 뒤 덱이 앞 덱 위로
   I   use_include: false → battery 덱 파일 없음 · 주 덱에 *INCLUDE 없음 · 한 덱에서 위 판정
-  D   phase 2 · use_dynain · dynain_file → rc 1(옮기면 그 dynain 의 번호와 어긋난다) · 아무것도 쓰지 않는다
+  D   phase 2 · use_dynain · dynain_file → rc 1(옮기면 그 dynain 의 번호와 어긋난다) · 아무것도 쓰지 않는다 · D-2 겹치지 않는 큰 번호
+      덱이면 옮기지 않으니 받는다(2026-11-08)
   L   battery 뒤의 contact 가 낸 접촉 · 세트 번호도 battery 와 겹치지 않는다(뒤 op 의 번호 발급이 battery 덱을 센다)
   G   battery 앞의 boundary · rbe · load · contact · matswap 이 같은 실행에서 낸 세트 · 섹션 번호와도 겹치지 않는다(2026-11-08 전엔
       제 훑기로 낸 번호가 공용 커서에 없어 SID 1 · SECID 3 이 둘)
@@ -42,6 +48,30 @@ from ops_help import OPS  # noqa: E402
 
 FAILS, OKS = [], []
 BOX = {o["name"]: o for o in OPS}["warpage"]["files"]["box.yaml"]
+
+# 번호가 큰 기존 모델(6차 검토 G3 재현 bigid2) — battery 의 어느 족과도 겹치지 않는다(파트 · 섹션 · 재질 5000 · 절점 90000001~08 ·
+# 요소 99990001)
+BIG = """*KEYWORD
+*PART
+box
+      5000      5000      5000
+*SECTION_SOLID
+      5000         1
+*MAT_ELASTIC
+      5000  7.85e-09  210000.0       0.3
+*NODE
+90000001        0.000000        0.000000        0.000000
+90000002        1.000000        0.000000        0.000000
+90000003        0.000000        1.000000        0.000000
+90000004        1.000000        1.000000        0.000000
+90000005        0.000000        0.000000        1.000000
+90000006        1.000000        0.000000        1.000000
+90000007        0.000000        1.000000        1.000000
+90000008        1.000000        1.000000        1.000000
+*ELEMENT_SOLID
+99990001    50009000000190000002900000049000000390000005900000069000000890000007
+*END
+"""
 
 # 기존 모델(상자)에 덧붙여 battery 의 모든 족과 겹치게 하는 정의 — 세트 1 · 2 · 3 · 102 · 504, 곡선 9001~9904, 모래시계 1 · 2,
 # 열 재질 101, 접촉 1. (섹션 · 재질 1 · 절점 1~ · 요소 1~ 은 상자에 이미 있다)
@@ -334,12 +364,43 @@ def bytes_ok(std_path, got_path):
     return ""
 
 
-def base_offsets(defs):
-    off = {}
+CAP8, CAP10 = 99999999, 2 ** 31 - 1   # 절점 · 요소 · 파트는 요소 줄의 8칸, 나머지는 10칸(int)
+
+
+def place(battery, taken, cap):
+    """battery 번호를 taken 위에 놓을 자리 — C++(`bat::placeBatteryIds`)와 따로 쓴 같은 규칙. 겹치지 않으면 0, 겹치면 기존
+    최대값(그 위로), 그게 상한을 넘으면 battery 범위가 통째로 들어가는 가장 낮은 빈자리(위로만). 못 놓으면 None."""
+    b, t = sorted(set(battery)), sorted(set(taken))
+    if not b or not set(b) & set(t):
+        return 0
+    if b[-1] + t[-1] <= cap:
+        return t[-1]
+    spans = []
+    for v in t:
+        if spans and v == spans[-1][1] + 1:
+            spans[-1][1] = v
+        else:
+            spans.append([v, v])
+    width = b[-1] - b[0]
+    for k, (_lo, hi) in enumerate(spans):
+        start = max(hi + 1, b[0] + 1)
+        room = spans[k + 1][0] - 1 if k + 1 < len(spans) else cap
+        if start + width <= min(room, cap):
+            return start - b[0]
+    return None
+
+
+def pooled(defs):
+    out = {}
     for f, v in defs.items():
-        k = POOL.get(f, f)
-        off[k] = max(off.get(k, 0), max(v))
-    return off
+        out.setdefault(POOL.get(f, f), set()).update(v)
+    return out
+
+
+def expected_offsets(base_defs, std_defs):
+    """족마다 battery(단독 덱) 번호가 기존(base) 번호와 **실제로** 겹칠 때만 옮긴다(2026-11-08 · 6차 검토 G3)."""
+    b, s = pooled(base_defs), pooled(std_defs)
+    return {f: place(v, b.get(f, ()), CAP8 if f in ("node", "elem", "part") else CAP10) for f, v in s.items()}
 
 
 VARIANTS = (
@@ -402,7 +463,7 @@ def main():
     root = tempfile.mkdtemp(prefix="abid_")
     try:
         base_defs = None
-        print("[A — 족마다 기존 모델의 최대값 위로]")
+        print("[A — 겹치는 족만 기존 모델의 최대값 위로]")
         for k, (name, model, extra) in enumerate(VARIANTS):
             text = battery_yaml(model, extra)
             std, sout = standalone(root, "v%d" % k, binary, text)
@@ -430,10 +491,10 @@ def main():
             except DeckUnreadable as e:
                 check("%s — 단독 battery 덱의 카드를 칸대로 읽는다" % name, False, e)
                 continue
-            off = base_offsets(base_defs)
-            off = {f: (o if any(POOL.get(g, g) == f for g in sdefs) else 0) for f, o in off.items()}
+            off = expected_offsets(base_defs, sdefs)
             why = shifted_ok(sdefs, srefs, bdefs, brefs, off)
-            check("%s — 얹은 battery = 단독 battery + 족마다 기존 최대값(정의 · 참조)" % name, not why, why)
+            check("%s — 얹은 battery = 단독 battery + 겹치는 족만 기존 최대값(정의 · 참조 · 안 겹치는 파트는 그대로)" % name,
+                  not why, (why, off))
             if len(incs) == 1:
                 why = bytes_ok(std, os.path.join(d, incs[0]))
                 check("%s — 줄 수가 같고 바뀐 글자는 번호 칸의 숫자 · 공백뿐" % name, not why, why)
@@ -451,8 +512,7 @@ def main():
         if check("★E-1 node_id_offset 1000000 · elem_id_offset 2000000 → rc 0", rc == 0, out[-300:]) and std:
             defs, refs, bdefs, brefs, _ = deck_facts(os.path.join(d, "ba.k"))
             sdefs, srefs = facts(blocks_of(std)[0])
-            off = base_offsets(base_defs)
-            off = {f: (o if any(POOL.get(g, g) == f for g in sdefs) else 0) for f, o in off.items()}
+            off = expected_offsets(base_defs, sdefs)
             off["node"], off["elem"] = 1000000, 2000000
             why = shifted_ok(sdefs, srefs, bdefs, brefs, off)
             dup, dangling = integrity(defs, refs)
@@ -460,9 +520,63 @@ def main():
                   not why and not dup and not dangling, (why, dup, dangling))
         d = setup(root, "e2", binary, text, "    node_id_offset: 5\n")
         rc, out = run(binary, d, "assemble", "a.yaml")
-        check("★E-2 node_id_offset 5(상자 최대 절점 아래로 걸친다) → rc 1 · node_id_offset 을 말한다 · 아무것도 쓰지 않는다",
-              rc == 1 and "node_id_offset" in out and not [f for f in os.listdir(d) if f.startswith(("ba.", "bt_"))],
-              (rc, out[-300:]))
+        check("★E-2 node_id_offset 5(battery 절점 6~ 이 상자 절점과 실제로 겹친다) → rc 1 · node_id_offset 을 말한다 · 아무것도 쓰지 않는다",
+              rc == 1 and "node_id_offset" in out and "겹친다" in out
+              and not [f for f in os.listdir(d) if f.startswith(("ba.", "bt_"))], (rc, out[-300:]))
+
+        print("[B — 겹치지 않는 큰 번호 덱 · 빈자리 · 겹치지 않는 준 오프셋]")
+        # 예전엔 족마다 기존 최대값만큼 늘 옮겨, 범위가 겹치지 않아도 8칸 상한을 넘었다(6차 검토 G3 — 절점 90000001~08 · 요소
+        # 99990001 인 덱이 rc 1, 운영은 rc 0 에 겹침 없음). 준 오프셋도 기존 최대값 아래로 걸치면 겹치지 않아도 거절했다
+        text = battery_yaml("stacked", {"mode": "dent"})
+        std, _ = standalone(root, "b1", binary, text)
+        sdefs, srefs = facts(blocks_of(std)[0])
+        for tag, ops, want in (("B-1 큰 번호 덱", "", {}),
+                               ("B-3 node_id_offset 5 · 큰 번호 덱(겹치지 않는다)", "    node_id_offset: 5\n", {"node": 5})):
+            d = setup(root, tag[:3], binary, text, ops, extra_base=False)
+            with open(os.path.join(d, "box.k"), "w", encoding="utf-8") as f:
+                f.write(BIG)
+            rc, out = run(binary, d, "assemble", "a.yaml")
+            if not check("★%s → rc 0(예전엔 8칸 상한 · 최대값 아래로 걸친다며 rc 1)" % tag, rc == 0, out[-300:]):
+                continue
+            defs, refs, bdefs, brefs, incs = deck_facts(os.path.join(d, "ba.k"))
+            dup, dangling = integrity(defs, refs)
+            off = {f: 0 for f in pooled(sdefs)}
+            off.update(want)
+            why = shifted_ok(sdefs, srefs, bdefs, brefs, off)
+            check("★%s   └ 겹치지 않는 족은 옮기지 않는다(%s) · 겹침 · 끊긴 참조 없음" % (tag, want or "전부 그대로"),
+                  not why and not dup and not dangling, (why, dup, dangling))
+            if not want and len(incs) == 1:
+                check("%s   └ 얹은 battery 덱 = 단독 battery 덱(바이트)" % tag,
+                      open(std, "rb").read() == open(os.path.join(d, incs[0]), "rb").read())
+        # B-2 겹치는데 최대값 위가 8칸 상한을 넘는다 — 상자(절점 1~198) + 쓰지 않는 절점 99999990 → 빈자리(199~)로
+        d = setup(root, "b2", binary, text, "", extra_base=False)
+        p = os.path.join(d, "box.k")
+        body = open(p, encoding="utf-8").read()
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(body.replace("*END", "*NODE\n99999990             0.0             0.0             0.0\n*END"))
+        rc, out = run(binary, d, "assemble", "a.yaml")
+        if check("★B-2 상자 + 절점 99999990 → rc 0(최대값 위는 8칸을 넘으니 빈자리로 · 예전엔 rc 1)", rc == 0, out[-300:]):
+            bl, _ = blocks_of(p)
+            bdefs0, _ = facts(bl)
+            defs, refs, bdefs, brefs, _ = deck_facts(os.path.join(d, "ba.k"))
+            dup, dangling = integrity(defs, refs)
+            off = expected_offsets(bdefs0, sdefs)
+            why = shifted_ok(sdefs, srefs, bdefs, brefs, off)
+            check("★B-2   └ battery 절점이 상자 절점 바로 위 빈자리(+198) · 겹침 · 끊긴 참조 없음",
+                  off.get("node") == 198 and not why and not dup and not dangling, (off.get("node"), why, dup, dangling))
+        # B-4 battery 둘(큰 번호 덱) — 앞 battery 를 옮기지 않았으니 뒤 battery 는 그것과 겹친다 → 그 위로
+        d = setup(root, "b4", binary, text, "", extra_base=False)
+        with open(os.path.join(d, "box.k"), "w", encoding="utf-8") as f:
+            f.write(BIG)
+        with open(os.path.join(d, "a.yaml"), "w", encoding="utf-8") as f:
+            f.write("base_model: box.k\noutput: ba\noperations:\n  - type: battery\n    config: bat.yaml\n"
+                    "  - type: battery\n    config: bat.yaml\n    output: bt2\n")
+        rc, out = run(binary, d, "assemble", "a.yaml")
+        if check("★B-4 큰 번호 덱에 battery 둘 → rc 0", rc == 0, out[-300:]):
+            defs, refs, _, _, incs = deck_facts(os.path.join(d, "ba.k"))
+            dup, dangling = integrity(defs, refs)
+            check("★B-4   └ 두 battery 덱이 서로 겹치지 않는다(뒤 덱이 앞 덱 위로) · 끊긴 참조 없음",
+                  len(incs) == 2 and not dup and not dangling, (incs, dup, dangling))
 
         print("[I — use_include: false]")
         text = battery_yaml("stacked", {"mode": "dent"})
@@ -486,6 +600,16 @@ def main():
         check("★D phase 2 · use_dynain · dynain_file → rc 1 · INCLUDE_DYNAIN 을 말한다 · 아무것도 쓰지 않는다(옮기면 어긋난다)",
               rc == 1 and "INCLUDE_DYNAIN" in out and not [f for f in os.listdir(d) if f.startswith(("ba.", "bt_"))],
               (rc, out[-300:]))
+        # D-2 겹치지 않는 큰 번호 덱이면 옮기지 않으니 그 dynain 의 번호가 그대로 맞는다 → 받는다(2026-11-08 · G3 — 예전엔 늘 옮겨 거절)
+        d = setup(root, "d2", binary, text, "", extra_base=False)
+        with open(os.path.join(d, "box.k"), "w", encoding="utf-8") as f:
+            f.write(BIG)
+        rc, out = run(binary, d, "assemble", "a.yaml")
+        incs = blocks_of(os.path.join(d, "ba.k"))[1] if rc == 0 else []
+        dyn = [l for l in open(os.path.join(d, incs[0]), encoding="utf-8")] if len(incs) == 1 else []
+        check("★D-2 같은 battery 를 큰 번호 덱에 → rc 0 · 옮기지 않아 *INCLUDE_DYNAIN p1.dynain 이 그대로 실린다(예전엔 rc 1)",
+              rc == 0 and any(l.upper().startswith("*INCLUDE_DYNAIN") for l in dyn) and any(l.strip() == "p1.dynain" for l in dyn),
+              (rc, incs, out[-300:]))
 
         print("[G — battery 앞의 op 이 같은 실행에서 낸 번호]")
         # 앞 op 이 제 훑기로 낸 번호(boundary · rbe 의 SET_NODE · load 의 SET_SEGMENT · contact 의 세트 · matswap 의 SECID)가 공용

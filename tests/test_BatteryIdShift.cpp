@@ -2,7 +2,8 @@
 //
 // 왜 이 파일이 있나 (2026-11-08).
 //
-//   assemble 의 battery 가 battery 덱 번호를 기존 모델 위로 옮긴다. 옮기는 칸이 하나라도 어긋나면 덱이 그럴듯하게 틀린다 —
+//   assemble 의 battery 가 battery 덱 번호를 기존 모델과 겹치는 족만 옮긴다(어디에 놓나 — `placeBatteryIds` · 2026-11-08 G3).
+//   옮기는 칸이 하나라도 어긋나면 덱이 그럴듯하게 틀린다 —
 //   정의와 참조가 같이 옮겨지는지(요소의 절점 · 파트, 파트의 섹션 · 재질, 접촉의 STYP 별 족), 칸 폭이 그대로인지, 모르는 키워드 ·
 //   붙은 칸 · 상한을 넘는 번호 · 뜻을 모르는 0 아닌 칸을 거절하는지를 여기서 직접 본다. 덱 전체는 회귀
 //   (tools/regress/test_assemble_battery_ids.py)가 본다.
@@ -107,4 +108,68 @@ TEST(BatteryIdShift_INCLUDE_DYNAIN_은_표시만_하고_글자는_그대로다) 
     ASSERT_TRUE(bat::shiftBatteryIds(deck, shiftOf(5, 5, 0, 0, 0, 0, 0, 0), out, res, err));
     ASSERT_TRUE(res.includesDynain);
     ASSERT_EQ(out, deck);
+}
+
+// ── 어디에 놓나(2026-11-08 · 6차 검토 G3) — 실제로 겹칠 때만 옮긴다 ─────────────────────────────────────────────────────────
+TEST(BatteryIdShift_정의한_번호를_나온_차례로_모은다) {
+    const std::string deck = "*KEYWORD\n*NODE\n       3        0.000000        0.000000        0.000000\n"
+                             "       1        1.000000        0.000000        0.000000\n*END\n";
+    std::string err;
+    bat::ShiftResult res;
+    ASSERT_TRUE(bat::scanBatteryIds(deck, res, err));
+    ASSERT_EQ(res.ids[bat::FAM_NODE].size(), 2u);
+    ASSERT_EQ(res.ids[bat::FAM_NODE][0], 3LL);
+    ASSERT_EQ(res.ids[bat::FAM_NODE][1], 1LL);
+}
+
+TEST(BatteryIdShift_spansOf_는_붙은_번호를_한_구간으로_모은다) {
+    const bat::IdSpans s = bat::spansOf({5, 1, 2, 3, 3, 9}, {{10, 12}, {20, 19}});
+    ASSERT_EQ(s.size(), 3u);   // [1,3] [5,5] [9,12] — 거꾸로 된 구간(20~19)은 버린다
+    ASSERT_EQ(s[0].first, 1LL);
+    ASSERT_EQ(s[0].second, 3LL);
+    ASSERT_EQ(s[1].first, 5LL);
+    ASSERT_EQ(s[2].first, 9LL);
+    ASSERT_EQ(s[2].second, 12LL);
+}
+
+TEST(BatteryIdShift_겹치지_않으면_옮기지_않고_겹치면_최대값_위로) {
+    long long by = -1;
+    std::string why;
+    // 절점 90000001~08 인 덱에 battery 절점 1~8282 — 겹치지 않는다(예전엔 늘 최대값만큼 옮겨 8칸 상한을 넘겼다)
+    ASSERT_TRUE(bat::placeBatteryIds(bat::FAM_NODE, {1, 2, 8282}, {{90000001, 90000008}}, 0, "node_id_offset", by, why));
+    ASSERT_EQ(by, 0LL);
+    // 상자 절점 1~198 — 겹친다 → 최대값(198) 위로
+    ASSERT_TRUE(bat::placeBatteryIds(bat::FAM_NODE, {1, 8282}, {{1, 198}}, 0, "node_id_offset", by, why));
+    ASSERT_EQ(by, 198LL);
+    // 띄엄띄엄한 번호(세트 1 · 2 · 504)가 기존 사이(3 · 100)에 끼어도 같은 번호가 없으면 그대로
+    ASSERT_TRUE(bat::placeBatteryIds(bat::FAM_SET, {1, 2, 504}, {{3, 3}, {100, 100}}, 0, "", by, why));
+    ASSERT_EQ(by, 0LL);
+}
+
+TEST(BatteryIdShift_최대값_위가_상한을_넘으면_빈자리로_없으면_거절한다) {
+    long long by = -1;
+    std::string why;
+    // 절점 1~198 + 99999990 — 최대값 위(99999990 + 8282)는 8칸을 넘으니 199~ 빈자리로(+198)
+    ASSERT_TRUE(bat::placeBatteryIds(bat::FAM_NODE, {1, 8282}, {{1, 198}, {99999990, 99999990}}, 0, "", by, why));
+    ASSERT_EQ(by, 198LL);
+    // 빈자리가 모자란다(1~198 · 300~99999999) — 거절 · 까닭을 말한다
+    ASSERT_FALSE(bat::placeBatteryIds(bat::FAM_NODE, {1, 8282}, {{1, 198}, {300, 99999999}}, 0, "", by, why));
+    ASSERT_TRUE(why.find("놓을 자리가 없다") != std::string::npos);
+    // 10칸 족은 int 상한이다 — 같은 꼴이라도 최대값 위로 놓인다
+    ASSERT_TRUE(bat::placeBatteryIds(bat::FAM_SET, {1, 8282}, {{1, 198}, {300, 99999999}}, 0, "", by, why));
+    ASSERT_EQ(by, 99999999LL);
+}
+
+TEST(BatteryIdShift_준_오프셋은_실제로_겹치거나_상한을_넘을_때만_거절한다) {
+    long long by = -1;
+    std::string why;
+    // 기존 최대값(90000008) 아래로 걸쳐도 같은 번호가 없으면 받는다(예전엔 거절)
+    ASSERT_TRUE(bat::placeBatteryIds(bat::FAM_NODE, {1, 8282}, {{90000001, 90000008}}, 5, "node_id_offset", by, why));
+    ASSERT_EQ(by, 5LL);
+    // 옮긴 번호(6~8287)가 상자 절점(1~198)과 겹친다
+    ASSERT_FALSE(bat::placeBatteryIds(bat::FAM_NODE, {1, 8282}, {{1, 198}}, 5, "node_id_offset", by, why));
+    ASSERT_TRUE(why.find("node_id_offset 5") != std::string::npos && why.find("겹친다") != std::string::npos);
+    // 8칸 상한을 넘는다
+    ASSERT_FALSE(bat::placeBatteryIds(bat::FAM_ELEM, {1, 8282}, {}, 99999990, "elem_id_offset", by, why));
+    ASSERT_TRUE(why.find("상한") != std::string::npos);
 }

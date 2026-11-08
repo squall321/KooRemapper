@@ -113,6 +113,9 @@ public:
     bool applyHFDamp(const HFDampOperation& op);
     // outputPrefix — 주 덱(<prefix>.k)의 자리. battery 덱의 `*INCLUDE` 이름을 그 폴더 기준으로 적는다(2026-11-07)
     bool applyBattery(const BatteryOperation& op, const std::string& configDir, const std::string& outputPrefix);
+    // battery 덱을 얹기 전 이 실행의 모델이 이미 쓰는 번호(족마다 `bat::IdFam` 차례 · 정렬된 닫힌 구간) — 주 덱 · 인클루드 · 덧붙인 덱의
+    // 머리 · 덱 쓰기 때 넣을 블록 · 리더가 읽은 것 · 더한 절점 · 요소 · 로드 뒤 커서로 낸 번호 · 앞 battery 덱. 넘치게 센다(2026-11-08)
+    std::vector<std::vector<std::pair<long long, long long>>> batteryTakenSpans() const;
     bool applySplit(const SplitOperation& op);
     bool applyMerge(const MergeOperation& op);
     bool applyStrip(const StripOperation& op);
@@ -221,6 +224,8 @@ private:
     // 접촉 · 세트 번호를 다시 내지 않게). 덱 통째(절점 · 요소 · 초기 변형률 줄)는 들고 있지 않는다(11-08 — 실행 내내 덱마다 수십 MB 를
     // 들었다). 절점 · 요소 번호는 커서(maxNodeId_ · maxElementId_)를 올려 지킨다
     std::vector<std::vector<std::string>> addedDecks_;
+    std::vector<std::vector<std::pair<long long, long long>>> batteryIds_;   // 이 실행이 얹은 battery 덱의 번호(족마다 · 옮긴 뒤 · 구간) — 뒤 battery 의 겹침 판정
+    IdMaxima loadMaxima_{};   // loadBaseModel 이 끝났을 때의 커서 — 그 위 ~ 지금 커서가 「이 실행이 커서로 낸 번호」다(battery 의 겹침 판정)
     bool flattenIncludes_ = false;
     std::vector<output_guard::Input> guardInputs_;   // 읽은 파일(모델 · 인클루드 · 다른 입력) — writeOutput 의 쓰기 관문이 본다
     std::vector<std::string> plannedWrites_;         // 덱 말고 부르는 쪽이 이 실행에서 쓸 곁 파일(대응표 · 보고)
